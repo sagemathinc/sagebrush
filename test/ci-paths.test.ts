@@ -481,7 +481,7 @@ test("the full-tier-only jobs ci-paths promotes for are the jobs ci.yml gates on
 });
 
 test("web_share: the share dialog's shard runs on a pull request that changes sharing or has the full-ci label, and always on master, the schedule and a dispatch", () => {
-  for (const f of ["web/share/files.ts", "web/share/test-share-dialog.mjs", "web/share-client/upload.ts", "web/cloud/share/server.ts", "web/cloud/share/test-share-dialog.mjs"]) assert.equal(classify([f]).web_share, "true", f);
+  for (const f of ["web/share/files.ts", "web/share/test-share-dialog.mjs", "web/share-client/upload.ts", "web/cloud/share/server.ts", "web/cloud/share/test-share-dialog.mjs", "web/workspace/account.ts"]) assert.equal(classify([f]).web_share, "true", f);
   // (the hosted remotes: the full tier, but no share dialog)
   assert.equal(classify(["web/cloud/remote/relay.ts"]).full, "true");
   assert.equal(classify(["web/cloud/remote/relay.ts"]).web_share, "false");

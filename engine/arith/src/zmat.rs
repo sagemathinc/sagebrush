@@ -652,7 +652,8 @@ fn rref_dixon(a: &ZMat, piv: &[usize], m: &Modulus) -> Option<(ZMat, BigInt, Vec
 /// general case, and its fallback).
 ///
 /// Modulo each prime, the rref R_p and d_p = det A[S, P]
-/// for a fixed nonsingular pivot minor (rows S, pivot columns P) give
+/// for a fixed nonsingular pivot minor (rows S, pivot columns P: the rows
+/// the first prime's elimination took, whose pivots give d_p) give
 /// N = d R modulo p, reconstructed by CRT (|N|, |d| are r x r minors, so
 /// below the Hadamard bound B).  The identity A d = A[:, P] N holds
 /// modulo every prime used, and its entries are below (r + 1) |A| B, so
@@ -676,7 +677,8 @@ pub fn rref_multimodular(a: &ZMat) -> (ZMat, BigInt, Vec<usize>) {
     for p in Primes::new() {
         let m = Modulus::new(p);
         let mut r = a.reduce(&m);
-        let piv = r.rref();
+        // the elimination's own pivot rows, and det A[those rows, P]
+        let (piv, prows, pdet) = r.rref_rows();
         let reset = match &best {
             None => true,
             Some(b) => better(&piv, b),
@@ -685,9 +687,9 @@ pub fn rref_multimodular(a: &ZMat) -> (ZMat, BigInt, Vec<usize>) {
             if piv.is_empty() {
                 continue;
             }
-            // rows S: independent rows of A[:, P] modulo p
-            let mut t = a.select(&(0..a.rows).collect::<Vec<_>>(), &piv).transpose().reduce(&m);
-            srows = t.rref();
+            // rows S: the rows the pivots were found in (A[S, P] is
+            // nonsingular modulo p, so over Q)
+            srows = prows.clone();
             let k = piv.len();
             let bound = minor_bound_log2(a, k);
             target = bound + ((k + 1) as f64).log2() + amax + 2.0;
@@ -699,7 +701,9 @@ pub fn rref_multimodular(a: &ZMat) -> (ZMat, BigInt, Vec<usize>) {
             continue;
         }
         let pv = best.as_ref().unwrap();
-        let dp = a.select(&srows, pv).reduce(&m).det();
+        // d_p = det A[S, P] modulo p: from the elimination when it took the
+        // same rows, else computed
+        let dp = if prows == srows { pdet } else { a.select(&srows, pv).reduce(&m).det() };
         if dp == 0 {
             continue;
         }
@@ -1080,6 +1084,26 @@ mod tests {
         assert_eq!(nm.row(0), &[BigInt::zero(), den.clone(), &den * 2, BigInt::zero()]);
         assert_eq!(rank(&ZMat::zero(3, 3)), 0);
     }
+    /// The pivot rows can differ between primes with the same pivots: here
+    /// row 0 is the first prime times (1009, 0, 1), zero modulo that prime,
+    /// so its elimination takes rows {1, 2} and the next prime's takes
+    /// {0, 1}.  The minor's determinant must then be the first rows' modulo
+    /// every prime (computed, not the elimination's own): with different
+    /// minors the primes reconstruct different multiples of the form, which
+    /// denominators as large as 1009 and 1013 do not survive by chance.
+    #[test]
+    fn rref_multimodular_when_primes_take_other_rows() {
+        let p1 = Primes::new().next().unwrap();
+        let z = |v: &[i64]| v.iter().map(|&x| BigInt::from(x)).collect::<Vec<_>>();
+        let r0: Vec<BigInt> = [1009u64, 0, 1].iter().map(|&x| BigInt::from(x) * BigInt::from(p1)).collect();
+        let a = ZMat::from_rows(vec![r0, z(&[0, 1013, 1]), z(&[1009, 1013, 2])]);
+        let (nm, den, piv) = rref_multimodular(&a);
+        assert_eq!(piv, vec![0, 1]);
+        // [[1, 0, 1/1009], [0, 1, 1/1013]]
+        assert_eq!(den, BigInt::from(1009 * 1013));
+        assert_eq!(nm, ZMat::from_rows(vec![z(&[1009 * 1013, 0, 1013]), z(&[0, 1009 * 1013, 1009])]));
+    }
+
 
     /// rref (with its one-prime, [I; 0] and Dixon paths) against the
     /// multimodular elimination alone, on random and rank-deficient matrices.

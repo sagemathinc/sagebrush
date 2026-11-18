@@ -26,8 +26,13 @@ let n = 0; const waiting = new Map(); const errors = [];
 ws.onmessage = (ev) => {
   const m = JSON.parse(ev.data);
   if (m.id && waiting.has(m.id)) { waiting.get(m.id)(m.result ?? m.error); waiting.delete(m.id); }
+  // (the control below: the account's path answered 500, any other path 404)
+  if (m.method === "Fetch.requestPaused") send("Fetch.fulfillRequest", { requestId: m.params.requestId, responseCode: new URL(m.params.request.url).pathname === "/api/share/me" ? 500 : 404 });
   if (m.method === "Runtime.exceptionThrown") errors.push(m.params.exceptionDetails?.exception?.description ?? JSON.stringify(m.params.exceptionDetails));
-  if (m.method === "Log.entryAdded" && m.params.entry.level === "error" && !/favicon/.test(m.params.entry.url ?? "")) errors.push(m.params.entry.text + " " + (m.params.entry.url ?? ""));
+  // (the site's account, /api/share/me: a server without accounts answers 404 and the top bar shows no account;
+  // that 404 only)
+  const noAccounts = (e) => /status of 404\b/.test(e.text) && (() => { try { return new URL(e.url).pathname === "/api/share/me"; } catch { return false; } })();
+  if (m.method === "Log.entryAdded" && m.params.entry.level === "error" && !/favicon/.test(m.params.entry.url ?? "") && !noAccounts(m.params.entry)) errors.push(m.params.entry.text + " " + (m.params.entry.url ?? ""));
 };
 const send = (method, params = {}) => new Promise((r) => { const id = ++n; waiting.set(id, r); ws.send(JSON.stringify({ id, method, params })); });
 const ev = async (expression) => { const r = await send("Runtime.evaluate", { expression, awaitPromise: true, returnByValue: true }); if (r.exceptionDetails) throw new Error(JSON.stringify(r.exceptionDetails).slice(0, 400)); return r.result.value; };
@@ -466,6 +471,16 @@ try {
     check(await until("window.sagebrush.board.outputs().then((os) => os.length === 1 && os[0].output === 'cos(x)\\n')", 60000), "a Sage board runs: " + JSON.stringify(await outputs()));
     await ev(`window.sagebrush.board.load(${JSON.stringify({ title: "MATLAB", mode: "matlab", nodes: [{ id: "m", code: "t = 2*pi", x: 0, y: 0, w: 300 }] })}).then(() => 1)`);
     check(await until("window.sagebrush.board.outputs().then((os) => os.length === 1 && os[0].state === '' && /6\\.2832/.test(os[0].output))", 60000), "then a MATLAB board in the same page: 2*pi is MATLAB's: " + JSON.stringify(await outputs()));
+  }
+  // the allowance is that 404 only: a 500 from the account's path, or a 404 from another path, is still an error
+  {
+    const before = errors.length;
+    await send("Fetch.enable", { patterns: [{ urlPattern: "*/api/share/me*" }] });
+    await ev(`Promise.all(["/api/share/me", "/api/share/me-not"].map((u) => fetch(u).catch(() => 0))).then(() => 1)`);
+    await send("Fetch.disable");
+    for (let i = 0; i < 100 && errors.length < before + 2; i++) await sleep(50);
+    const seen = errors.splice(before);
+    check(seen.length === 2 && seen.some((e) => /status of 500\b/.test(e) && /\/api\/share\/me$/.test(e)) && seen.some((e) => /status of 404\b/.test(e) && /\/api\/share\/me-not$/.test(e)), "control: a 500 from /api/share/me and a 404 from another path are errors: " + JSON.stringify(seen));
   }
   check(!errors.length, "errors: " + errors.join(" | "));
 } catch (e) {
