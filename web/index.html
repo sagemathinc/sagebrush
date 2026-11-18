@@ -808,7 +808,7 @@ import { shareStatus, signInUrl, uploadCollection, AttemptError } from "./share-
 import { createShareDialog } from "./share-client/dialog.ts";
 import { docsHref } from "./docs-link.ts";
 import { createDownloadDialog } from "./share-client/download.ts";
-import { Workspace, migrate, freePath, safeName, splitExt, nameOf, parentOf, LIMITS, askToKeep, startMigrator, showReloadNotice, showLossNotice, showBusyNotice, SyncOwner, registerJournalWriter, DocSync, readJournal, docSyncOrigin, docSyncAllowed, untilAllowed, enableDocSync, docSyncChannel, DOC_SYNC_RELOAD } from "./workspace/index.ts";
+import { Workspace, migrate, freePath, safeName, splitExt, nameOf, parentOf, LIMITS, askToKeep, startMigrator, showReloadNotice, showLossNotice, showBusyNotice, SyncOwner, registerJournalWriter, DocSync, readJournal, docSyncAllowed, untilAllowed, enableDocSync, docSyncChannel, DOC_SYNC_RELOAD } from "./workspace/index.ts";
 import { mountBrowser } from "./workspace/browser.ts";
 import { mountAccount } from "./workspace/account.ts";
 // (the LaTeX editor's entry; a build without it takes this line out before bundling: web/build.ts)
@@ -2723,7 +2723,9 @@ let sharing = { enabled: false };
 const shareDlg = $("#sharedlg");
 // (until the first check has answered, nothing is known: Share opens the dialog, which says it's checking)
 let shareKnown = false;
-const shareReady = (LOCAL ? Promise.resolve(sharing) : shareStatus()).then((s) => {
+// (the first check is the account's too, at the top right: web/workspace/account.ts, not asked twice)
+const shareFirst = LOCAL ? Promise.resolve(sharing) : shareStatus();
+const shareReady = shareFirst.then((s) => {
   sharing = s;
   shareKnown = true;
 });
@@ -4825,9 +4827,9 @@ const wsReady = (async () => {
   }
   finally { wsSettled = true; }
 })();
-// (sync 2c-3, DEV's switch for notebooks' contents (web/workspace/doc-sync-switch.ts): on any origin but DEV's own,
-// nothing at all is asked or started here.  On DEV: this page's sync owner started; then, only if the server lets this
-// account sync and its client runs, evaluated afresh on every load: enableDocSync turns the journal on (lasting for
+// (sync 2c-3, the switch for notebooks' contents (web/workspace/doc-sync-switch.ts): this page's sync owner started;
+// then, only on DEV's or PROD's origin or a self-hosted site whose own server states this origin, and only if the
+// server lets this account sync and its client runs, evaluated afresh on every load: enableDocSync turns the journal on (lasting for
 // this browser; the Sync panel says so), DOC_SYNC on, reopens the open notebook through it, and hands a DocSync to the
 // sync owner.  It ends on, off (a doubt or a failure before anything lasting changed), or reload (the activation began
 // and this page couldn't go on: the notebook read-only, said, until a reload); see doc-sync-switch.ts)
@@ -4837,7 +4839,6 @@ const wsReady = (async () => {
 // reload.  A change on the server alone (an account admitted there) is seen at this page's next sync change or reload;
 // a failed turning on (enableDocSync's off or reload) is as before)
 const docSyncReady = (async () => {
-  if (!docSyncOrigin(location.origin)) return false;
   const w = await wsReady;
   if (!w) return false;
   const owner = SyncOwner.of(w).start();
@@ -5108,7 +5109,7 @@ let wsBrowser = null;
 function wsTrackCurrent() { wsBrowser?.refresh(); }
 // the account, right of Share: Sign in, or your initial and its menu, whose Sync and storage opens the files' Storage
 // panel (web/workspace/account.ts); hidden for any other answer
-mountAccount($("#acctslot"), { storage: () => { if (!ws) return; wsShowFiles(true); wsBrowser?.storage(); } });
+mountAccount($("#acctslot"), { status: shareFirst, storage: () => { if (!ws) return; wsShowFiles(true); wsBrowser?.storage(); } });
 function wsShowFiles(on) {
   wsSidebar.hidden = !on;
   document.body.classList.toggle("wsfiles", on);

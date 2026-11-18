@@ -14,6 +14,7 @@ import { mkdtempSync, readFileSync, rmSync, writeFileSync, mkdirSync } from "nod
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { devtoolsPort } from "./test-port.mjs";
+import { expectedLoadError } from "./board/test-load-errors-lib.mjs";
 
 const doc = process.argv[2] ?? "examples/sagebrush.board.json";
 const base = process.env.SB_URL ?? "http://127.0.0.1:8765/";
@@ -43,8 +44,8 @@ ws.onmessage = (ev) => {
   // board answers with its own engine (page.ts); that 404 only, nothing else
   // about it, astra's TEST-4D0-1); so is the site's account (/api/share/me): a
   // server without accounts answers 404 and the top bar shows no account
-  const optional = (e) => /status of 404\b/.test(e.text) && (() => { try { return ["/version.json", "/api/share/me"].includes(new URL(e.url).pathname); } catch { return false; } })();
-  if (m.method === "Log.entryAdded" && m.params.entry.level === "error" && !/favicon/.test(m.params.entry.url ?? "") && !optional(m.params.entry)) errors.push(m.params.entry.text + " " + (m.params.entry.url ?? ""));
+  const optional = (e) => /status of 404\b/.test(e.text) && (() => { try { return new URL(e.url).pathname === "/version.json"; } catch { return false; } })();
+  if (m.method === "Log.entryAdded" && m.params.entry.level === "error" && !/favicon/.test(m.params.entry.url ?? "") && !optional(m.params.entry) && !expectedLoadError(m.params.entry)) errors.push(m.params.entry.text + " " + (m.params.entry.url ?? ""));
 };
 const send = (method, params = {}, ms = method === "Page.printToPDF" ? 120000 : 60000) => new Promise((ok, fail) => {
   const id = ++n;
@@ -892,6 +893,14 @@ try {
     await ev("localStorage.clear()");
   }
   check(!errors.length, "page errors: " + errors.join(" | "));
+  // (the controls for those allowances, test-load-errors-lib.mjs: only a 404 for exactly the sync status or the
+  // site's account is expected; a 500 there, and a 404 for a sibling, a longer or a shorter path, are still page errors)
+  const loadErr = (path, code) => ({ text: `Failed to load resource: the server responded with a status of ${code} (x)`, url: "http://127.0.0.1:8765" + path });
+  check(expectedLoadError(loadErr("/api/sync/v1/status", 404)) && expectedLoadError(loadErr("/api/sync/v1/status?x=1", 404)), "a 404 for the sync status is the static host's expected answer");
+  check(expectedLoadError(loadErr("/api/share/me", 404)) && !expectedLoadError(loadErr("/api/share/me", 500)) && !["/api/share/me-not", "/api/share/me/x", "/api/share"].some((p) => expectedLoadError(loadErr(p, 404))), "a 404 for the site's account is expected; a 500 there, or a 404 for a sibling or a longer or shorter path, is still a page error");
+  check(!expectedLoadError(loadErr("/api/sync/v1/status", 500)) && !expectedLoadError(loadErr("/api/sync/v1/status", 503)), "a 500 or 503 for the sync status is still a page error");
+  check(!["/api/sync/v1/statuses", "/api/sync/v1/status/x", "/api/sync/v1", "/api/sync/v1/account", "/api/sync/v2/status", "/x/api/sync/v1/status"].some((p) => expectedLoadError(loadErr(p, 404))), "a 404 for any other path (a sibling, a longer or shorter one) is still a page error");
+  check(!expectedLoadError({ text: "status of 404", url: "not a url" }) && !expectedLoadError({}) && !expectedLoadError(null), "an entry without a URL, or with one that doesn't parse, is still a page error");
 } catch (e) {
   fails.push(String(e?.stack ?? e));
   if (errors.length) fails.push("page errors: " + errors.join(" | "));
