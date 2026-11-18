@@ -12,13 +12,17 @@
 //  - File > Open…'s dialog: no account in it;
 //  - the Storage panel: its sync section says it is checking until sync's status is read, then, signed out, "Sign in";
 //  - the board page: the same, signed out, signed in (its menu) and for a 404;
-//  - on a phone: "Sign in" in the bar at the top, in the window, nothing over it.
+//  - on a phone: "Sign in" in the bar at the top, in the window, nothing over it;
+//  - the account from the notebook page's own check (accountFrom, host.status), the module bundled for a blank page:
+//    its state for each answer of the endpoint (signed in, 401, off, an error, no answer in time); mounted with that
+//    check, no second request; and a check that rejects hides the control, with no uncaught rejection.
 // Serve web/dist first (python3 web/serve.py 8765), then
 //   node web/workspace/test-account-item.mjs        (SHOTS=dir: also each state as a PNG, for a look)
-import { spawn } from "node:child_process";
-import { mkdtempSync, rmSync, writeFileSync } from "node:fs";
+import { spawn, spawnSync } from "node:child_process";
+import { mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
+import { fileURLToPath } from "node:url";
 import { devtoolsPort } from "../test-port.mjs";
 
 const base = process.env.SB_URL ?? "http://127.0.0.1:8765/";
@@ -178,6 +182,47 @@ try {
   const pa = await ev(rect(SLOT + " a"));
   const covered = await ev(`(() => { const a = document.querySelector("${SLOT} a"), r = a.getBoundingClientRect(); const at = document.elementFromPoint(r.left + r.width / 2, r.top + r.height / 2); return a.contains(at) ? null : (at?.id || at?.className || at?.tagName); })()`);
   check(!!pa && pa.top >= 0 && pa.top < 120 && pa.right <= 390 && pa.left >= 0 && covered === null, "a phone: \"Sign in\" at the top, in the window, nothing over it", { pa, covered });
+  // ---- the account from the page's own check (accountFrom, mountAccount's host.status): account.ts and the share
+  // client's shareStatus, bundled for this page as the site bundles them, on a blank page with fetch answered here
+  {
+    const dir = mkdtempSync(join(tmpdir(), "sb-account-mod-")), entry = join(dir, "entry.ts"), out = join(dir, "out.js");
+    const here = fileURLToPath(new URL(".", import.meta.url));
+    writeFileSync(entry, `import { mountAccount, accountFrom } from ${J(join(here, "account.ts"))};\nimport { shareStatus } from ${J(join(here, "..", "share-client", "upload.ts"))};\nObject.assign(window, { __acct: { mountAccount, accountFrom, shareStatus } });\n`);
+    const b = spawnSync(process.env.BUN ?? "bun", ["build", entry, "--format", "iife", "--target", "browser", "--outfile", out], { encoding: "utf8" });
+    check(b.status === 0, "the account module bundled for the blank page", (b.stderr || "").slice(0, 300));
+    await load("about:blank");
+    await ev(readFileSync(out, "utf8") + "\n1");
+    rmSync(dir, { recursive: true, force: true });
+    // (fetch answered in the page: each /api/share/me counted; `never` leaves it unanswered until its abort)
+    await ev(`(() => { window.__asked = 0; window.__answer = null; window.fetch = (u, o) => { if (String(u).endsWith("/api/share/me")) window.__asked++;
+      const a = window.__answer; if (a === "never") return new Promise((_, no) => o?.signal?.addEventListener("abort", () => no(o.signal.reason)));
+      return Promise.resolve(new Response(a.body === undefined ? "" : JSON.stringify(a.body), { status: a.code, headers: { "content-type": "application/json" } })); }; return 1; })()`);
+    // the table: each answer of the endpoint, through shareStatus (as the notebook page asks it), then accountFrom
+    for (const [what, answer, ms, want] of [
+      ["signed in (200, an account)", { code: 200, body: ME }, 10000, "in"],
+      ["signed out (401)", { code: 401, body: { error: "sign in first" } }, 10000, "out"],
+      ["off: no sharing on this site (404)", { code: 404, body: { error: "not found" } }, 10000, "none"],
+      ["an error (500)", { code: 500, body: { error: "boom" } }, 10000, "none"],
+      ["no answer in time (the check's own timeout, 300 ms here)", "never", 300, "none"],
+    ]) {
+      const r = await ev(`(async () => { window.__answer = ${J(answer)}; const s = await window.__acct.shareStatus(${ms}); return { s, a: window.__acct.accountFrom(s) }; })()`);
+      check(r?.a?.state === want, `accountFrom, ${what}: ${want}`, r);
+    }
+    check((await ev(`window.__acct.accountFrom({ enabled: true, me: ${J(ME)} }).name`)) === ME.name, "accountFrom, signed in: the account's name");
+    // mounted with the page's check: drawn from it, the endpoint not asked again
+    const m = await ev(`(async () => { window.__asked = 0; const slot = document.createElement("span"); document.body.append(slot);
+      const a = await window.__acct.mountAccount(slot, { status: Promise.resolve({ enabled: true, me: null }) }).ready;
+      await new Promise((r) => setTimeout(r, 300)); const r = { state: a.state, asked: window.__asked, hidden: slot.hidden, link: slot.querySelector("a")?.textContent ?? null }; slot.remove(); return r; })()`);
+    check(m?.state === "out" && m.asked === 0 && m.hidden === false && m.link === "Sign in", "mounted with the page's check: \"Sign in\" from it, and the endpoint never asked again", m);
+    // a check that rejects: ready is "none", the slot hidden, no uncaught rejection
+    const before = errors.length;
+    const rj = await ev(`(async () => { const un = []; const h = (e) => un.push(String(e.reason)); addEventListener("unhandledrejection", h);
+      const slot = document.createElement("span"); document.body.append(slot);
+      const a = await window.__acct.mountAccount(slot, { status: Promise.reject(new Error("the check failed")) }).ready.then((x) => x.state, (e) => "rejected: " + e);
+      await new Promise((r) => setTimeout(r, 300)); removeEventListener("unhandledrejection", h);
+      const r = { state: a, hidden: slot.hidden, children: slot.childElementCount, unhandled: un }; slot.remove(); return r; })()`);
+    check(rj?.state === "none" && rj.hidden === true && rj.children === 0 && rj.unhandled.length === 0 && errors.length === before, "a page check that rejects: ready is \"none\", the slot hidden and empty, no uncaught rejection", { rj, errors: errors.slice(before) });
+  }
   check(errors.length === 0, "no uncaught exceptions", errors.slice(0, 3));
 } catch (e) {
   check(false, "the test ran: " + (e?.stack ?? e));
