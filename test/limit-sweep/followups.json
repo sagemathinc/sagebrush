@@ -12,6 +12,29 @@
    "what": "engine Budget overflow refusals (a cost or length not representable in u64/usize) have no reviewed route: decide a routes.json row for the engine Budget's refusals (daybreak2's lane; budget.rs is in B12), or a reclassification rule. Note wasm32: usize::try_from(k.len) refuses above 2^32, the 4 GiB address space, so that one is a real memory boundary, not unreachable."
   },
   {
+   "id": "FU-B14-2",
+   "keys": [
+    "engine/poly/src/l2.rs :: l2_budgeted :: l2_budgeted_with(b, basis, cap, ProofPath::Default, &mut Report::default()) #0",
+    "engine/poly/src/l2.rs :: l2_budgeted :: pub fn l2_budgeted(b: &crate::budget::Budget, basis: Vec<Vec<BigInt>>, cap: u64) -> crate::budget::FResult<Vec<Vec<BigInt>>> { #0",
+    "engine/poly/src/l2.rs :: l2_budgeted_with :: Err((Stop::Bits { bits }, _)) => Err(b.refuse(\"l2 bits\", bits, cap)), #0",
+    "engine/poly/src/l2.rs :: l2_budgeted_with :: fn l2_budgeted_with(b: &crate::budget::Budget, basis: Vec<Vec<BigInt>>, cap: u64, path: ProofPath, rep: &mut Report) -> crate::budget::FResult<Vec<Vec<BigInt>>> { #0",
+    "engine/poly/src/l2.rs :: l2_budgeted_with :: if bits > cap { #0",
+    "engine/poly/src/l2.rs :: l2_budgeted_with :: let mut m = Meter { left, bits_cap: cap, path }; #0",
+    "engine/poly/src/l2.rs :: l2_budgeted_with :: return Err(b.refuse(\"l2 bits\", bits, cap)); #0",
+    "engine/poly/src/l2.rs :: l2_run :: l2_run_metered(basis, wide, rep, &mut Meter { left: u64::MAX, bits_cap: u64::MAX, path: ProofPath::Default }) #0",
+    "engine/poly/src/l2.rs :: limbs :: pub work_limit: u64, #0",
+    "engine/poly/src/l2.rs :: new :: bits_cap: u64::MAX, #0",
+    "engine/poly/src/l2.rs :: new :: work_limit: u64::MAX, #0",
+    "engine/poly/src/l2.rs :: rung_step :: s.work_limit = m.left; #0",
+    "engine/poly/src/l2.rs :: size_reduce :: if self.work > self.work_limit { #0",
+    "engine/poly/src/l2.rs :: size_reduce :: if self.work > self.work_limit { #1",
+    "engine/poly/src/l2.rs :: size_reduce :: if self.work > self.work_limit { #2"
+   ],
+   "owner": "sage",
+   "status": "open",
+   "what": "l2_budgeted's refusals (the entry cap, checked at admission and around every row operation, and the work limit) and its budget defaults have no reviewed route yet: l2_budgeted has no production caller; route them (a memory route for the cap with the caller's l2_bytes reservation, a host route or lib/_limits.py key for the work) with the callers' switch to L^2."
+  },
+  {
    "id": "FU-B16-1",
    "keys": [
     "lib/_matlab_sparse.py :: _legacy_full_arr :: if S.m * S.n > MAX_FULL: #0",
