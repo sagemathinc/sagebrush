@@ -602,7 +602,7 @@ export class AgentPairing {
     try { this.opts.onCreated?.(this.created, this); } catch (err) { console.warn("agent: the page's open of a created document failed:", err); }
   }
 
-  /** Whether `c` may run once by itself now, asked as the page admits that run (SEC's conditions, Nov 18 2026): it is
+  /** Whether `c` may run once by itself now, asked as the page admits that run (the conditions decided Nov 18 2026): it is
    * the last document this pairing created, under the grant still in force, and that grant has May run code and
    * Everything. Any narrower grant never: the page's interpreter reads the whole workspace, beyond the grant's folders. */
   mayRunCreated(c: Created): boolean {
