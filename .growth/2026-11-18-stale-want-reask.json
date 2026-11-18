@@ -1,7 +1,7 @@
 {
   "v": 1,
-  "reason": "Focus takeover asks a want again before letting the lock go for it, and hands over only for a want that echoes the question's id, so a want heard late from a tab that moved on never moves the lock (web/page/handover.ts: who-wants with a question id, the echoing want, the bye on leaving a document); the CLI's bundle carries the notebook page. cli/pyjs.cjs grows +928 bytes, exact, base master 3c46b533, measured with the pinned node 24.21.0 and bun 1.4.4 on the head before this marker's last edit (the question id added +216 to the first version's +712, whose bound was 776); the bound adds 64 bytes of slack.",
+  "reason": "Focus takeover asks a want again before letting the lock go for it, hands over only for a want that echoes the question's id, and carries that answer to the hand-over's last check (passOn asking the same), so a want heard late from a tab that moved on never moves the lock (web/page/handover.ts; web/journal/store.js's enqueue awaiting passOn); the CLI's bundle carries the notebook page. cli/pyjs.cjs grows +1188 bytes, exact, base master 3c46b533, measured with the pinned node 24.21.0 and bun 1.4.4 on the head before this marker's last edit (+712 the first version, +928 with the question id, +1188 with its answer carried and passOn asking); the bound adds 64 bytes of slack.",
   "bytes": {
-    "cli/pyjs.cjs": 992
+    "cli/pyjs.cjs": 1252
   }
 }
