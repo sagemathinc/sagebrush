@@ -76,8 +76,8 @@ async function sagebrush(lines: string[]): Promise<string> {
 }
 
 // Each example in a fresh session, 8 at once.  The whole set took 596 s on a green master run (42597347825, node-tests
-// (7)), so it is a slow test (test/slow-tests.ts: nightly, a dispatch, the full-ci label, and a pull request changing
-// the examples or this file); every pull request runs a fixed sample of PR_SAMPLE spread over the sorted names.
+// (7)), so it is a slow test (test/slow-tests.ts: CI's long tier, or SAGEBRUSH_SLOW_TESTS=1); every pull request runs a
+// fixed sample of PR_SAMPLE spread over the sorted names.
 const PR_SAMPLE = 12;
 async function checkExamples(names: string[]) {
   const bad: string[] = [];

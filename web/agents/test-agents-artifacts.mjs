@@ -1,5 +1,6 @@
 // ci: web-artifacts.1 order=10 runner=bun chrome
 // ci: web-artifacts.2 order=10 runner=bun chrome env=AGENTS_LATEX=1
+// ci: web-artifacts.3 order=10 runner=bun chrome env=AGENTS_LATEX=0
 // Notebook and LaTeX artifacts in the agents chat (web/agents; the artifacts plan r2 + r2.1), end to end in headless
 // Chromium: the built page (dist/agents, SAGEBRUSH_AGENTS=1), served cross-origin isolated by web/serve.py on a
 // loopback port, paired as a person pairs it (a ?pair= link, Connect, the grant dialog) with a stand-in for
@@ -9,7 +10,8 @@
 // (sagebrush-worker.js) and the workspace in IndexedDB. "Saved" is read back through Workspace.read (the agent's
 // workspace.read) and the store's record; "reopen" is a fresh page load.
 //   SAGEBRUSH_AGENTS=1 bun web/build.ts && CHROME=google-chrome bun web/agents/test-agents-artifacts.mjs
-//   (AGENTS_LATEX=1: the build has the LaTeX editor, SAGEBRUSH_LATEX_PREVIEW=test; ONLY=a,b: those sections)
+//   (AGENTS_LATEX=1: the build has the LaTeX editor, SAGEBRUSH_LATEX_PREVIEW=test; AGENTS_LATEX=0: it hasn't,
+//   SAGEBRUSH_LATEX_PREVIEW=0, and A14's cases run to their end; ONLY=a,b: those sections)
 import { spawn } from "node:child_process";
 import { createHash } from "node:crypto";
 import { appendFileSync, existsSync, mkdtempSync, rmSync } from "node:fs";
@@ -20,9 +22,13 @@ import { runA14 } from "./a14-cases.mjs";
 
 const here = new URL(".", import.meta.url).pathname;
 // (the build's own answer: the LaTeX editor is on by default (web/build.ts), so whether this web/dist has it, not the
-// variable alone, decides which LaTeX checks apply; AGENTS_LATEX=1 then insists that it has it)
+// variable alone, decides which LaTeX checks apply; AGENTS_LATEX=1 then insists that it has it, AGENTS_LATEX=0 that it
+// hasn't)
 const LATEX = existsSync(join(here, "..", "dist", "sagebrush-latex.js"));
 if (process.env.AGENTS_LATEX === "1" && !LATEX) throw new Error("AGENTS_LATEX=1 but this web/dist has no sagebrush-latex.js");
+if (process.env.AGENTS_LATEX === "0" && LATEX) throw new Error("AGENTS_LATEX=0 but this web/dist has sagebrush-latex.js: build it with SAGEBRUSH_LATEX_PREVIEW=0");
+// (A14's cases, in a build without LaTeX: AGENTS_LATEX=0 insists they ran to their end)
+let a14Ran = false;
 const ONLY = process.env.ONLY ? new Set(process.env.ONLY.split(",")) : null;
 const want = (s) => !ONLY || ONLY.has(s);
 let failures = 0;
@@ -1765,6 +1771,8 @@ try {
   if (!LATEX) {
     try {
       await runA14({ site, ok, want });
+      // (runA14 returns at once where its section, reconnect, isn't wanted)
+      a14Ran = want("reconnect");
     } catch (e) {
       ok(false, "A14: the cases ran to their end: " + (e?.stack ?? e));
     }
@@ -1772,5 +1780,6 @@ try {
   server.kill();
 }
 console.log("timing: " + stamps.join(", "));
+if (process.env.AGENTS_LATEX === "0") ok(a14Ran, "A14: its cases ran to their end in this build without LaTeX (AGENTS_LATEX=0)", { a14Ran, only: process.env.ONLY ?? null });
 console.log(failures ? `${failures} FAILED` : "all passed");
 process.exit(failures ? 1 : 0);
