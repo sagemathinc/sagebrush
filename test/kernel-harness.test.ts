@@ -1,5 +1,6 @@
 import test from "node:test";
 import assert from "node:assert/strict";
+import { existsSync } from "node:fs";
 import * as net from "node:net";
 import { startKernel } from "./kernel-harness";
 
@@ -65,3 +66,38 @@ test("a kernel that stops for another reason is not started again", async () => 
     await k.stop();
   }
 });
+
+// (a kernel that never answers on its shell port, here a process that only waits, while something silent holds
+// that port: the attempt fails within its deadline, and leaves no process, socket or folder behind)
+test("an attempt that never reaches the kernel fails within its deadline and leaves nothing behind", { timeout: 15000 }, async () => {
+  const conns = new Set<net.Socket>();
+  // (it reads and drops what comes, so it sees the harness close; it never writes)
+  const silent = net.createServer((c) => (conns.add(c), c.resume(), c.on("close", () => conns.delete(c))));
+  await new Promise<void>((r) => silent.listen(0, "127.0.0.1", r));
+  const ports = await Promise.all([1, 2, 3, 4, 5].map(free));
+  ports[0] = portOf(silent);
+  const t0 = Date.now();
+  let err: any = null;
+  try {
+    err = await startKernel([], {}, undefined, { ports, tries: 1, startupMs: 3000, kernel: () => ["-e", "setInterval(() => {}, 1000)"] }).then(
+      () => assert.fail("it started"),
+      (e) => e,
+    );
+    const took = Date.now() - t0;
+    assert.match(String(err.message), /wasn't reached within 3000 ms/);
+    assert.ok(took >= 3000 && took < 6000, `took ${took} ms`);
+    // (the process killed and reaped, the folder gone, the harness's connection to the port closed)
+    assert.throws(() => process.kill(err.pid, 0), /ESRCH/);
+    assert.equal(existsSync(err.dir), false);
+    await new Promise((r) => setTimeout(r, 100));
+    assert.equal(conns.size, 0);
+  } finally {
+    // (whatever the harness left, ended here, so a harness that leaks fails these checks instead of hanging)
+    try {
+      if (err?.pid) process.kill(err.pid, "SIGKILL");
+    } catch {}
+    for (const c of conns) c.destroy();
+    silent.close();
+  }
+});
+
