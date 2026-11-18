@@ -130,6 +130,12 @@ const fullTier = event === "pull_request" &&
   (labels.includes("full-ci") || matches(fullTierPaths) || fullOnlyJobs.some((job) => suiteJobs.has(job)));
 const full = event === "workflow_dispatch" || event === "schedule" ||
   (event === "push" && ref === "refs/heads/master") || fullTier;
+// The long tier (the test audit's option (a), decided Nov 17 2026): the second, slower passes of suites the full tier
+// already runs once (the engine's full passes off master and engine-building pull requests, mpmath's Python backend,
+// the share dialog's part 2, the Numbl corpus, the agents artifacts' LaTeX-off and LaTeX-test builds, the slow node
+// tests, and the export's and lookalike report's controls).  The nightly schedule, and a dispatch that asks for it (its
+// `long` input, as before a release); never a pull request, a label, a master push or a plain dispatch.
+const long = event === "schedule" || (event === "workflow_dispatch" && process.env.CI_LONG === "true");
 
 // Only these paths are certified as prose-only.  In particular, examples/*.md
 // is executable board input and must not be treated as documentation.
@@ -292,10 +298,14 @@ const unsafeSweepPaths = [
   /^\.github\/workflows\/ci\.yml$/,
 ];
 const unsafeSweep = full || matches(unsafeSweepPaths);
-// The engine's full tier (engine-node, engine-language, engine-modes): master pushes, the nightly schedule and a
-// dispatch, and a pull request that touches the engine's runtime (src/runtime/), whose Magma, MATLAB and engine tests
-// otherwise first ran on master (@sagebrush, Oct 30).  Those jobs need engine-wasm, which engine_smoke selects.
-const engineFull = full || matches([/^src\/runtime\//]);
+// The engine's full passes (engine-node, engine-language, engine-modes: the Node, language and mode suites again, on the
+// engine built in this run): every master push, a pull request whose changes rebuild the engine (wasm_build), and the
+// long tier.  Another pull request's engine is byte-identical to the published pin its ordinary suites already ran on,
+// so the pass would repeat them.  engine-wasm, which they need, still runs where it did (engine_smoke: the engine's
+// changes, the full tier and a pull request touching the engine's runtime, src/runtime/); a pull request's passes only
+// where it runs (the CPython package's own Python sets wasm_build, but builds no engine engine-wasm would test).
+const engineRuntime = full || matches([/^src\/runtime\//]);
+const engineFull = long || (event === "push" && ref === "refs/heads/master") || (event === "pull_request" && wasmBuild && (engineSmoke || engineRuntime));
 
 // The web jobs by area (CI speed plan option 7): a pull request whose web changes are all inside one area's
 // directories runs that area's suites, not every web job.  Anything else under web/ (web/index.html, the build, the
@@ -356,43 +366,12 @@ const webLookalike = webWorkspace || (web && suiteJobs.has("web-lookalike"));
 const webShare = full && (event !== "pull_request" || labels.includes("full-ci") || matches([/^web\/share\//, /^web\/share-client\//, /^web\/cloud\/share\//, /^web\/workspace\/account\.ts$/]));
 
 // The slow node tests (test/slow-tests.ts: skipped in place unless SAGEBRUSH_SLOW_TESTS=1; William, Nov 4, his pick
-// of option B): they run nightly and on a dispatch (test/slow-tests.ts reads the event itself), with the full-ci label,
-// and on a pull request that changes what one of them tests.  Not on a master push, whose CI is to stay within 15
-// minutes: the nightly run is their master check.  (test/ci-paths.test.ts has a case for each path class)
-// tsc 7's parity with the arraybuffer census (test/arraybuffer-sites-parity.test.ts) and the census's train-16
-// (test/arraybuffer-sites.test.ts): a change to the census's scripts and tables runs those two alone (slow_scope
-// "arraybuffer"), not every slow test, since a routine re-binding of the table is common and touches nothing else
-const arraybufferSlowPaths = [/^scripts\/arraybuffer-sites[^/]*\.mjs$/, /^test\/arraybuffer-sites[^/]*\.(?:json|test\.ts)$/];
-const slowTestPaths = [
-  // the same two, for the TypeScript and tsc 7 versions and the compiler options, which reach every slow test too
-  /^tsconfig[^/]*\.json$/, /^package\.json$/, /^pnpm-lock\.yaml$/,
-  // the whole kedlaya grid (test/kedlaya.test.ts, kedlaya_cases.py full)
-  /^lib\/_sage_padic_lseries\.py$/, /^test\/kedlaya[^/]*$/,
-  // the local gateway's 10,000-record cap (test/local-gateway.test.ts L29a)
-  /^src\/local-gateway\.ts$/, /^test\/local-gateway\.test\.ts$/,
-  // the nmod ops' peaks in wasm (test/nmod-fp-wasm.test.ts): the engine artifact and the nmod kernels
-  /^wasm\/sagebrush-engine\.wasm$/, /^engine\/web\/src\/nmod[^/]*\.rs$/, /^engine\/arith\/src\/nmod[^/]*\.rs$/,
-  /^engine\/bigint\/src\/nmod\.rs$/, /^test\/nmod-fp-wasm\.test\.ts$/,
-  // the two zoneinfo sweeps over every zone (test/stdlib-zoneinfo.test.ts)
-  /^lib\/zoneinfo\//, /^lib\/_zoneinfo\.py$/, /^lib\/_tzrules\.py$/, /^lib\/tzdata\//, /^tzdata\//,
-  /^test\/zoneinfo_sweep_cases\.py$/, /^test\/stdlib-zoneinfo\.test\.ts$/,
-  // every Magma index example (test/magma-examples.test.ts; a pull request runs a fixed sample): the examples, their
-  // Magma 2.18 table and the suite
-  /^lib\/_magma_docsearch\.py$/, /^test\/magma-examples\.(?:json|test\.ts)$/,
-  // catalog gate 3 for every Magma example (test/magma-catalog.test.ts; a pull request runs a fixed sample)
-  /^catalog\/magma\//, /^test\/magma-catalog\.test\.ts$/,
-  // the finite-field limits' ceiling and GF(2^18) pair (test/ff-limits.test.ts), and plan-c0's unlimited completion
-  // (test/limits.test.ts): their suites (a pull request runs the rest of each)
-  /^test\/ff-limits\.test\.ts$/, /^test\/limits\.test\.ts$/,
-  // and the list itself
-  /^test\/slow-tests\.ts$/,
-];
-const slowAll = event === "workflow_dispatch" || event === "schedule" ||
-  (event === "pull_request" && (labels.includes("full-ci") || matches(slowTestPaths)));
-const slowArraybuffer = event === "pull_request" && matches(arraybufferSlowPaths);
-const slowTests = slowAll || slowArraybuffer;
-// (the value of SAGEBRUSH_SLOW_TESTS in node-tests: "1" every slow test, a group's name its tests alone; test/slow-tests.ts)
-const slowScope = slowAll ? "1" : slowArraybuffer ? "arraybuffer" : "";
+// of option B), and the GF(p) echelon admission's memory cases (test/ffmat-echelon-admission.test.ts): the long tier
+// only (the test audit's option (a), decided Nov 17 2026).  Neither the full-ci label nor a change to what one of them
+// tests turns them on for a pull request; their fixed pull-request samples run there.
+const slowTests = long;
+// (the value of SAGEBRUSH_SLOW_TESTS in node-tests: "1" every slow test; test/slow-tests.ts)
+const slowScope = long ? "1" : "";
 
 // The examples gallery: the full tier, a dispatch and a schedule run every example; a pull request the ones
 // its changes select (the trigger table in scripts/examples-lib.mjs). (CI_EXAMPLES_ROOT: another corpus, for
@@ -406,8 +385,13 @@ const outputs = {
   node,
   web,
   modes,
-  engine_smoke: engineSmoke || engineFull,
+  engine_smoke: engineSmoke || engineRuntime || engineFull,
   engine_full: engineFull,
+  long,
+  // (mpmath's suite: the core backend always; the Python backend, a rollback path, the long tier's)
+  mpmath_backends: JSON.stringify(long ? ["sagebrush", "python"] : ["sagebrush"]),
+  // (web-sync's shards: the share dialog's part 2, its big listing and upload leaks, the long tier's)
+  web_sync_shards: JSON.stringify(["core", "client", "moves", "pwa", "share-dialog", ...(long ? ["share-dialog-2"] : [])]),
   wasm_build: wasmBuild,
   engine_cpython: engineCpython,
   webkit,
