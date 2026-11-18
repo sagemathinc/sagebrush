@@ -4,7 +4,7 @@
 // before the person's grant, the grant's scope, the frame and call limits, and that revoking (or expiry) cuts
 // the agent off at once and forgets the kept grant.
 //   bun web/workspace/test-agent-pair.mjs
-import { failHint, SAFARI, CHROME_ALLOW, OTHER_FAIL } from "./agent-ui.ts";
+import { failHint, agentSays, SAFARI, CHROME_ALLOW, OTHER_FAIL } from "./agent-ui.ts";
 import { AgentPairing, parseStrict, actorOf, parseReloadRecord, reloadDecision, takeReloadRecord, putReloadRecord, markReloadLeft, RELOAD_KEY, RELOAD_FRESH_MS } from "./agent-pair.ts";
 
 let failures = 0;
@@ -750,6 +750,12 @@ ok(actorOf("Claude Code", "claude-code") === "agent:Claude-Code" && actorOf("", 
   ok(failHint("Mozilla/5.0 (X11; Linux x86_64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/149.0 Safari/537.36") === CHROME_ALLOW, "in Chrome: its permission");
   ok(failHint("Mozilla/5.0 (Windows NT 10.0) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/149.0 Safari/537.36 Edg/149.0") === CHROME_ALLOW, "in Edge: Chrome's permission");
   ok(![SAFARI, CHROME_ALLOW, OTHER_FAIL].some((t) => t.length > 110 || /\n/.test(t)), "each is one short line");
+}
+{
+  // (the grant dialog's name for the agent: its program only when it differs from the name, never the same word twice)
+  ok(agentSays("claude-code", "claude-code") === "claude-code (as it says)", "one name for both: said once", agentSays("claude-code", "claude-code"));
+  ok(agentSays("Claude Code", "claude-code") === "Claude Code (as it says, claude-code)", "a name and a different program: both");
+  ok(agentSays("Codex", "") === "Codex (as it says)", "no program: the name alone");
 }
 console.log(failures ? `${failures} failed` : "all passed");
 process.exit(failures ? 1 : 0);
