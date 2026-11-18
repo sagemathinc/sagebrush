@@ -29,6 +29,7 @@
 //  8e'. wants sent before their tab opened another notebook are void: the writer, going on, keeps the lock;
 //  8e''. two wants queued before the writer asked again, and no answer: it keeps the lock; 8e''': a want answering its
 //     question (the id echoed) gets it; 8e'''': that answer gone (a bye) while the writer saves first: it keeps it;
+//  8e'''''. the lock granted to a tab whose passOn fails: it takes the lock, never left read-only for good;
 //  9. a reload: no "another tab" text at any moment, and the reloaded page writes;
 //  9b. the tab in use while the other is reloading: it writes, its keys kept;
 //  9c. a writer held in its first load (the lock free when it opened), a tab opened and used meanwhile: its want is
@@ -494,6 +495,22 @@ try {
     await F.ev(`(window.__live8?.close(), delete window.__live8, 1)`);
     // (no other tab writes, ever; the writer's own cells read-only for a moment as it saved first)
     check(yields === 0 && ![...who].some((x) => x !== "-" && x !== W0) && who.at(-1) === W0, "8e''''. the want that answered the question gone (its bye) while the writer saved before letting go, a stale want heard meanwhile: the writer never lets the lock go, and keeps it", { writer: W0, yields, who });
+  }
+
+  // ---- 8e'''''. the lock granted to a tab whose passOn fails (it rejects, after 400 ms): that tab, used, takes the lock
+  // it was granted (never left with neither the lock nor a place in the queue), not writing while passOn is pending
+  {
+    const W = (await A.ev(writes(A))) ? A : B, F = W === A ? B : A;
+    await F.ev(`(() => { const st = ${N}.store; window.__realPassOn = st.passOn; window.__po = 0; st.passOn = async () => { window.__po++; await new Promise((r) => setTimeout(r, 400)); window.__poWriter = st.writer; throw new Error("passOn failed (injected)"); }; return 1; })()`);
+    const was = await code(W);
+    await F.clickCell();
+    await F.key("p");
+    const took = await F.until(writes(F), 8000);
+    await sleep(300);
+    const po = await F.ev("window.__po"), poWriter = await F.ev("window.__poWriter"), got = await code(F);
+    await F.ev(`(${N}.store.passOn = window.__realPassOn, delete window.__realPassOn, 1)`);
+    check(took && po >= 1 && poWriter === false && keptAll(got, was, "p"), "8e'''''. a passOn that fails (rejects after 400 ms): the tab granted the lock isn't the writer while it is pending, then takes the lock and writes, its key kept", { took, po, poWriter, got });
+    doc = got;
   }
 
   // (the writer and the follower now; the writer's typing saved and shown in the follower; the writer paused (it can't

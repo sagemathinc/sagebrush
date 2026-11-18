@@ -160,7 +160,11 @@ export const writerLock = (Base) => class extends Base {
     this.lockDone = locks.request(name, { signal: this.waiting.signal }, async (lock) => {
       this.waiting = null;
       if (stale()) return null;
-      if (this.passOn && (await this.passOn())) { queueMicrotask(() => { if (!stale()) this.enqueue(); }); return null; }
+      // (a passOn that fails (throws, or rejects): not passed on; this tab takes the lock it was granted, as without one,
+      // never left with neither the lock nor a place in its queue)
+      let pass = false;
+      try { pass = !!this.passOn && (await this.passOn()); } catch (e) { console.warn(`${this.kind.noun}: the focus takeover's passOn failed; this tab keeps the lock:`, e); }
+      if (pass) { queueMicrotask(() => { if (!stale()) this.enqueue(); }); return null; }
       if (stale()) return null;
       this.writer = true; this.readOnly = null;
       const held = new Promise((done) => { this.unlock = done; });
