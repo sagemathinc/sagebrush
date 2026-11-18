@@ -290,10 +290,55 @@ try {
   await ev("(window.__release(), true)");
   await sleep(3000);
   ok(!(await ev(outOf(OFF))).includes("turned-off ran") && await ev(nOf(OFF)) === null, "running code turned off before its run: it doesn't run");
+  // (a creation announced twice: spent the first time, never armed again. Held before its admission, the person opens
+  //  another notebook, so this first try doesn't run, the notebook as created; announced again, it still doesn't run)
+  const TWICE = "print('announced twice ran')";
+  ok(!!(await make("Announced twice", [TWICE])).ok && await until(`window.__held === "/Announced twice.ipynb" && ${shownIs("Announced twice")}`, 15000), "(another, held before its run)");
+  ok(await fromFiles("Made by the agent.ipynb") && await until(shownIs("Made by the agent"), 15000), "(the person opens another notebook meanwhile)");
+  await ev("(window.__release(), true)");
+  await sleep(1000);
   await ev("(delete window.__agentRunHold, true)");
+  await ev("window.__agentMadeAgain()");
+  await sleep(3000);
+  await ev(`(${barButton("Open Announced twice.ipynb")}.click(), true)`);
+  ok(await until(shownIs("Announced twice"), 15000), "(the person opens it from the bar)");
+  await sleep(2000);
+  ok(!(await ev(outOf(TWICE))).includes("announced twice ran") && await ev(nOf(TWICE)) === null, "…and it doesn't run: a creation's one chance is spent the first time", await ev(outOf(TWICE)));
+  // (bound to the creation's own revision, not its time: written again right after it was created, before the page read
+  //  it back, it no longer qualifies, though its cells read back are what then runs)
+  await ev(`(window.__agentReadHold = () => new Promise((r) => (window.__readGo = r)), true)`);
+  const W1 = "print('as created')", W2 = "print('written after')";
+  const wmk = await make("Written after", [W1]);
+  ok(!!wmk.ok && await until("typeof window.__readGo === 'function'", 10000), "(a new one, held before it is read back)", wmk);
+  const wa = await drive({ op: "req", method: "workspace.read", params: { path: (folder === "/" ? "" : folder) + "/Written after.ipynb" } });
+  const ww = await drive({ op: "req", method: "workspace.write", params: { path: (folder === "/" ? "" : folder) + "/Written after.ipynb", content: { json: { ...wa.ok.content.json, cells: [{ code: W2 }] } }, base: wa.ok.rev } });
+  await ev("(delete window.__agentReadHold, window.__readGo(), true)");
+  ok(!!ww.ok && ww.ok.rev === 2, "(the agent writes it again at once: its revision 2)", ww);
+  ok(await until(`${shownIs("Written after")} && ${sources}.includes(${JSON.stringify(W2)})`, 15000), "(it opens, as written)");
+  await sleep(3000);
+  ok(!(await ev(outOf(W2))).includes("written after") && await ev(nOf(W2)) === null, "written after its creation: it doesn't run by itself (its revision isn't the creation's)");
+  // (and what Run all reads includes the language: changed while held before its run, no run)
+  await ev(`(window.__agentRunHold = (c) => new Promise((r) => { window.__held = c.path; window.__release = r; }), true)`);
+  const MODE = "print('mode changed ran')";
+  ok(!!(await make("Mode changed", [MODE])).ok && await until(`window.__held === "/Mode changed.ipynb" && ${shownIs("Mode changed")}`, 15000), "(another, held before its run)");
+  await ev(`(() => { const was = window.confirm; window.confirm = () => true; const m = document.querySelector("#mode"); m.value = "sage"; m.dispatchEvent(new Event("change", { bubbles: true })); window.confirm = was; return true; })()`);
+  ok(await until(`window.sagebrush.notebook.snapshot().mode === "sage"`, 5000), "(the person switches it to Sage meanwhile)");
+  await ev("(window.__release(), delete window.__agentRunHold, true)");
+  await sleep(3000);
+  ok(!(await ev(outOf(MODE))).includes("mode changed ran") && await ev(nOf(MODE)) === null, "its language changed before its run: it doesn't run by itself");
+  // (nothing is replayed after a reload: held before its run, the page reloads; the notebook stays as it was)
+  await ev(`(window.__agentRunHold = (c) => new Promise((r) => { window.__held = c.path; }), true)`);
+  const RELOAD = "print('reloaded ran')";
+  ok(!!(await make("Reloaded first", [RELOAD])).ok && await until(`window.__held === "/Reloaded first.ipynb"`, 15000), "(another, held before its run, then the page reloads)");
+  const RELOADED = true;
 
   // a grant "until the page closes" ends with the page
   ok(await go(""), "the page again");
+  if (RELOADED) {
+    ok(await fromFiles("Reloaded first.ipynb") && await until(shownIs("Reloaded first"), 15000), "(after the reload, the person opens the one held then)");
+    await sleep(3000);
+    ok(!(await ev(outOf(RELOAD))).includes("reloaded ran") && await ev(nOf(RELOAD)) === null, "nothing replays after a reload: it never ran");
+  }
   const st = await drive({ op: "status" });
   ok(st.ok?.paired === false || st.ok?.granted === false, "the grant ended with the page", st);
 
