@@ -153,7 +153,7 @@ try {
   ok(await until(`!document.querySelector(".sbag-box") && document.activeElement === document.querySelector('#board [data-sbb="menubtn"]')`), "Cancel closes it, and the focus goes back to ⋯");
 
   // a pairing link to the board with nothing else, as sagebrush-mcp prints it: the notebook page, the code handed over
-  // within the tab (sessionStorage), never in a second URL (astra's hold of Nov 18); the person pairs there, where what
+  // within the tab (sessionStorage), never in a second URL (it would reach the server's log and the Referer); the person pairs there, where what
   // the agent makes opens in place. The code isn't used, so it pairs the board below
   const codeIn = (t) => String(t).includes(first.code);
   const navTo = async (url) => { await ev("window.__old = 1").catch(() => {}); sent.length = 0; await send("Page.navigate", { url }); await sleep(300); };
