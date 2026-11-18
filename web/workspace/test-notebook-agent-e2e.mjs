@@ -340,6 +340,8 @@ try {
   // a grant "until the page closes" ends with the page
   ok(await go(""), "the page again");
   if (RELOADED) {
+    // (directly: after the reload, no creation was announced to this page at all, whatever the grant)
+    ok(await ev("window.__agentMadeLast === undefined"), "after the reload no creation is announced again: nothing is replayed");
     ok(await fromFiles("Reloaded first.ipynb") && await until(shownIs("Reloaded first"), 15000), "(after the reload, the person opens the one held then)");
     await sleep(3000);
     ok(!(await ev(outOf(RELOAD))).includes("reloaded ran") && await ev(nOf(RELOAD)) === null, "nothing replays after a reload: it never ran");
