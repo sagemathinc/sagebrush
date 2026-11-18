@@ -30,11 +30,13 @@ if (process.env.SYNC_REQUIRE_CLAIM !== "1") {
 
 const here = dirname(fileURLToPath(import.meta.url));
 const J = JSON.stringify;
-// (each case signs in its own account, so none sees another's log)
-const ACCOUNTS = Array.from({ length: 89 }, (_, i) => `c1c1c1c1-${String(i).padStart(4, "0")}-4c1c-8c1c-c1c1c1c1c1${String(i).padStart(2, "0")}`);
+// (each case signs in its own account, so none sees another's log: 97 of them, then FULL and SMALL, which end the
+// cases' pool; an id's index stays under 100, its last group 12 hex digits)
+const accountId = (i) => `c1c1c1c1-${String(i).padStart(4, "0")}-4c1c-8c1c-c1c1c1c1c1${String(i).padStart(2, "0")}`;
 // (the cloud's fake CoCalc gives FULL a small storage and SMALL small files; the reference server has no plan limits,
 // so the two cases that use them are skipped here, by name)
-const FULL = ACCOUNTS[87], SMALL = ACCOUNTS[88];
+const FULL = accountId(87), SMALL = accountId(88);
+const ACCOUNTS = [...Array.from({ length: 99 }, (_, i) => accountId(i)).filter((a) => a !== FULL && a !== SMALL), FULL, SMALL];
 // (the control pages' accounts: their own, so no case of the main run sees a control's log)
 // (each control page takes its own 3 of them, by its place in CONTROL_PAGES)
 const CTL_ACCOUNTS = Array.from({ length: 30 }, (_, i) => `d0d0d0d0-${String(i).padStart(4, "0")}-4d0d-8d0d-d0d0d0d0d0${String(i).padStart(2, "0")}`);
