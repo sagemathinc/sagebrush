@@ -610,6 +610,40 @@ checks the factorization against FLINT on 400 random products, the
 cyclotomic polynomials x^n - 1 and x^(2^k) + 1, and the Hecke polynomials of
 T_2 and T_3 at about 100 levels up to 2003.
 
+### Merge queue on master
+
+After the queue-aware workflows land, a repository administrator opens **Settings →
+Rules → Rulesets**, creates or edits a branch ruleset targeting `master`, sets it
+**Active**, and enables **Require a pull request**, **Require status checks** and
+**Require merge queue**. Require the GitHub Actions checks `ci` and `app-ci`.
+`ci` aggregates the selected core jobs (including size); `app-ci` requires the page
+and all three desktop platforms. Do not require individual path-selected jobs,
+nightly jobs, mobile builds or release/signing jobs. The app workflow reports its
+checks on every pull request, including prose-only changes, so a required check
+cannot stay pending because of a workflow path filter.
+
+Choose **Squash**, build concurrency **3**, minimum merge group size **1**, maximum
+**3**, status-check timeout **90 minutes**, and **Only merge non-failing pull
+requests**. Build concurrency limits speculative queue builds; merge limits control
+how many passing entries land together, not how many CI builds GitHub creates.
+Every queue run tests its cumulative head with the full tier; labels such as
+`full-ci` cannot be lost. The slower nightly tier stays nightly. Size comparisons
+use that payload's `base_sha` and `head_sha`, not a moving master or `HEAD^1`.
+Queue size-epoch resets alone, as before.
+
+The guarded merge script must retain review, expected-head and required-check
+checks, first verify that master actively requires the queue (refuse if that cannot
+be confirmed), and replace its final direct merge/push with
+`gh pr merge NUMBER --repo sagemathinc/sagebrush --match-head-commit HEAD_SHA`.
+With the ruleset active, this enqueues a passing pull request (or enables auto-merge
+until its required checks pass); it does not bypass the queue. Do not use `--admin`,
+force-push master, or re-merge master just because an earlier queued entry landed.
+Report “enqueued” after admission and “merged” only after GitHub reports it merged.
+This repository change does not enable the ruleset or modify an external merge script.
+
+See [GitHub's queue settings](https://docs.github.com/en/repositories/configuring-branches-and-merges-in-your-repository/configuring-pull-request-merges/managing-a-merge-queue)
+and [the CLI's queue behavior](https://cli.github.com/manual/gh_pr_merge).
+
 ## Performance
 
 Each speed comparison in this README says how to rerun it. Most name a

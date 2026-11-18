@@ -365,8 +365,8 @@ check("docs-only: design/x.md is not a gate input", gateInputs(["design/x.md", "
     const t = testedTransition({ cwd: w, name: "pull_request", ev: { pull_request: { head: { sha: H } } } });
     check("base selection: a pull request's base is HEAD^1", t.mode === "transition" && t.base === B && t.head === H);
     check("base selection: HEAD^2 ≠ the event's head fails", (() => { try { testedTransition({ cwd: w, name: "pull_request", ev: { pull_request: { head: { sha: A0 } } } }); return false; } catch { return true; } })());
-    check("base selection: a merge_group base ≠ HEAD^1 fails", (() => { try { testedTransition({ cwd: w, name: "merge_group", ev: { merge_group: { base_sha: A0 } } }); return false; } catch { return true; } })());
-    check("base selection: a merge_group base = HEAD^1", testedTransition({ cwd: w, name: "merge_group", ev: { merge_group: { base_sha: B } } }).base === B);
+    check("base selection: a merge_group with the wrong tested head fails", (() => { try { testedTransition({ cwd: w, name: "merge_group", ev: { merge_group: { base_sha: A0, head_sha: H } } }); return false; } catch { return true; } })());
+    check("base selection: a merge_group base = HEAD^1", testedTransition({ cwd: w, name: "merge_group", ev: { merge_group: { base_sha: B, head_sha: Mg } } }).base === B);
     check("base selection: a schedule run is absolute", testedTransition({ cwd: w, name: "schedule", ev: {} }).mode === "absolute");
     check("base selection: a first push (zero before) is absolute", testedTransition({ cwd: w, name: "push", ev: { before: "0".repeat(40) } }).mode === "absolute");
     check("base selection: a push of one transition", testedTransition({ cwd: w, name: "push", ev: { before: B } }).mode === "transition");

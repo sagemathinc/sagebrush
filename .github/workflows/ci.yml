@@ -14,6 +14,8 @@ on:
   pull_request:
     # (labeled: adding the full-ci label reruns the pull request on the full tier)
     types: [opened, synchronize, reopened, labeled]
+  merge_group:
+    types: [checks_requested]
   workflow_dispatch:
     inputs:
       long:
@@ -2010,6 +2012,7 @@ jobs:
       - modes
       - mpmath-suite
       - engine-rust
+      - engine-nd-neon
       - wasm-modules
       - wasm-publish
       - engine-wasm
@@ -2028,6 +2031,7 @@ jobs:
     steps:
       - name: require every selected job to pass
         env:
+          CHANGES: ${{ needs.changes.result }}
           RESULTS: >-
             ${{ needs.changes.result }} ${{ needs.census.result }}
             ${{ needs.node-tests.result }}
@@ -2040,7 +2044,7 @@ jobs:
             ${{ needs.web-browser.result }}
             ${{ needs.interrupt-matrix.result }}
             ${{ needs.conformance.result }} ${{ needs.modes.result }} ${{ needs.mpmath-suite.result }}
-            ${{ needs.engine-rust.result }} ${{ needs.wasm-modules.result }} ${{ needs.wasm-publish.result }} ${{ needs.engine-wasm.result }}
+            ${{ needs.engine-rust.result }} ${{ needs.engine-nd-neon.result }} ${{ needs.wasm-modules.result }} ${{ needs.wasm-publish.result }} ${{ needs.engine-wasm.result }}
             ${{ needs.engine-node.result }} ${{ needs.engine-language.result }}
             ${{ needs.engine-modes.result }}
             ${{ needs.engine-cpython.result }}
@@ -2049,6 +2053,7 @@ jobs:
             ${{ needs.webkit.result }}
             ${{ needs.export-controls.result }} ${{ needs.lookalike-controls.result }}
         run: |
+          [ "$CHANGES" = success ] || { echo "changes did not succeed: $CHANGES"; exit 1; }
           echo "$RESULTS"
           case " $RESULTS " in
             *" failure "*|*" cancelled "*) exit 1 ;;

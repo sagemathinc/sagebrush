@@ -12,8 +12,10 @@ on:
     # (a signed and notarized Mac app: mac-release below)
     tags: ["app-v*"]
     paths: ["app/**", "web/**", "src/**", "lib/**", "wasm/pins.json", ".github/workflows/app.yml"]
+  # Required checks must also be reported for prose-only pull requests.
   pull_request:
-    paths: ["app/**", "web/**", "src/**", "lib/**", "wasm/pins.json", ".github/workflows/app.yml"]
+  merge_group:
+    types: [checks_requested]
   workflow_dispatch:
     inputs:
       sign:
@@ -26,12 +28,12 @@ concurrency:
   cancel-in-progress: ${{ github.ref != 'refs/heads/master' }}
 
 jobs:
-  # On a pull request, whether it changes what the four WebAssembly modules are built from or how they're handled
+  # On a pull request or queue run, whether it changes what the four WebAssembly modules are built from or how they're handled
   # (scripts/ci-paths.mjs, wasm_build, the same rule as ci.yml's): if so, the page is built with this run's own build
-  # of them (wasm-modules below), since the modules its wasm/pins.json names aren't published until it merges.  On
-  # every other event the page uses the published modules.
+  # of them (wasm-modules below), since the modules its wasm/pins.json names aren't published until it merges.
+  # Pushes and dispatches use the published modules.
   wasm-changes:
-    if: github.repository == 'sagemathinc/sagebrush' && github.event_name == 'pull_request'
+    if: github.repository == 'sagemathinc/sagebrush' && (github.event_name == 'pull_request' || github.event_name == 'merge_group')
     runs-on: ubuntu-latest
     timeout-minutes: 5
     outputs:
@@ -53,7 +55,7 @@ jobs:
   # for this run's page job, which checks the artifact and the pin policy as it installs it)
   wasm-modules:
     needs: wasm-changes
-    if: github.repository == 'sagemathinc/sagebrush' && github.event_name == 'pull_request' && needs.wasm-changes.outputs.wasm_build == 'true'
+    if: github.repository == 'sagemathinc/sagebrush' && (github.event_name == 'pull_request' || github.event_name == 'merge_group') && needs.wasm-changes.outputs.wasm_build == 'true'
     runs-on: ubuntu-latest
     timeout-minutes: 15
     steps:
@@ -277,6 +279,25 @@ jobs:
             app/src-tauri/target/release/bundle/msi/*.msi
             app/src-tauri/target/release/bundle/nsis/*.exe
           if-no-files-found: warn
+
+  app-ci:
+    if: always() && github.repository == 'sagemathinc/sagebrush'
+    needs: [wasm-changes, wasm-modules, page, app]
+    runs-on: ubuntu-latest
+    steps:
+      - name: require the page and every desktop platform to pass
+        env:
+          PAGE: ${{ needs.page.result }}
+          APP: ${{ needs.app.result }}
+          WASM_CHANGES: ${{ needs.wasm-changes.result }}
+          WASM: ${{ needs.wasm-modules.result }}
+          EVENT: ${{ github.event_name }}
+        run: |
+          [ "$PAGE" = success ] && [ "$APP" = success ] || exit 1
+          case "$WASM" in success|skipped) ;; *) exit 1 ;; esac
+          case "$EVENT" in
+            pull_request|merge_group) [ "$WASM_CHANGES" = success ] || exit 1 ;;
+          esac
 
   mac-release:
     # (only on this repository, and only for a push of a tag app-v* or a dispatch that asks to sign: never on a pull
