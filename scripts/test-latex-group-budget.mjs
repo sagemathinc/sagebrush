@@ -37,11 +37,13 @@ check(LATEX_CAPS.raw === 249795 && LATEX_CAPS.gzip === 83533, "the caps are 249,
 //  grant's "May run code"; 45,952 / 16,000 for the grant's id and hold, 44/15.5 on 2026-11-04, before), tools
 //  16/6, present 16/6, run 19,644 / 7,812 B (Nov 12, a shared talk's Run on the share page, renewed after its review fixes: its measurement + 64; 19,465 / 7,779 B before; 18,672 / 7,574 B, Nov 12, running code while presenting, renewed after its review fixes: its measurement + 64; 17,965 / 7,272 B, Nov 11, Magma in LaTeX: its landing measurement + 64; 17/7 KiB on Nov 8, the session script's @interact capture; 15.5/6.5 for the record of what a Run imported before, 12/5.25 before
 //  that), interact 5/2.5 (the same design, measured), in KiB)
+// (agent 50,581 / 17,299 B: Nov 18 2026, what an agent creates (the created record, the bar's Open), its measurement with
+//  the board page's forward merged + 64; was 49,666 / 16,943)
 // (tools 16,546 / 6,950 B: Nov 11 2026: latex_build's own code moved here out
 //  of the eager group, its landing measurement + 64; was 16/6 KiB)
 // (tools 17,335 / 7,231 B: renewed at the landing merge on master 14279164, 17,271 / 7,167 measured + 64; its +777 / +286
 //  over 16,494 / 6,881 is inherited from a shared check's and the tools' changes)
-const lazyPinned = { COMMENTS: [16384, 6144], COMMENTS_DOC: [40960, 16384], AGENT: [49666, 16943], TOOLS: [17335, 7231], PRESENT: [16384, 6144], DOC: [3584, 1792], EXAMPLES: [13312, 6144], BEAMER: [8192, 3584], PYTHONTEX: [5120, 2304], RUN: [19644, 7812], INTERACT: [9453, 3805], VIEW: [3378, 1672], SHARE: [3853, 2021] };
+const lazyPinned = { COMMENTS: [16384, 6144], COMMENTS_DOC: [40960, 16384], AGENT: [50581, 17299], TOOLS: [17335, 7231], PRESENT: [16384, 6144], DOC: [3584, 1792], EXAMPLES: [13312, 6144], BEAMER: [8192, 3584], PYTHONTEX: [5120, 2304], RUN: [19644, 7812], INTERACT: [9453, 3805], VIEW: [3378, 1672], SHARE: [3853, 2021] };
 check(JSON.stringify(Object.fromEntries(Object.entries(LATEX_LAZY_CAPS).map(([k, c]) => [k, [c.raw, c.gzip]]))) === JSON.stringify(lazyPinned), "each lazy chunk's cap as ruled", LATEX_LAZY_CAPS);
 
 // ---- which build is measured: only the shipped LaTeX build (version.json's latexMode "shipped"); anything else is a

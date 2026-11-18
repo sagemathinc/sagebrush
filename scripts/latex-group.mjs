@@ -85,7 +85,11 @@ export const LATEX_LAZY_CAPS = {
   // (49,666 / 16,943: renewed for Chat here, whose link hooks every page's pairing carries (a socket, agent.ready, the
   //  reply's place and answer, Revoke as the link's drain), the leg itself being the Agents page's own; measured in CI at
   //  97f13a7b (run 43173133995): 49,602 / 16,879, + 64)
-  AGENT: { label: "the LaTeX agent pairing's chunk", raw: 49666, gzip: 16943 },
+  // (50,581 / 17,299: Nov 18 2026, for what an agent creates, which every page's pairing carries: the created record,
+  //  told to the page only from its current pairing, and the bar's Open for it (the notebook page opens it in place); the
+  //  handover of a bare link stays out of this chunk (pair-handoff.ts, the board and notebook pages' only). Measured
+  //  locally on the toolchain CI pins, with the board page's forward merged too: 50,517 / 17,235, + 64)
+  AGENT: { label: "the LaTeX agent pairing's chunk", raw: 50581, gzip: 17299 },
   // (the agent tools' work: web/latex/tools.ts, latex_check's report and latex_render's pictures, on an agent's first call)
   // (16,546 / 6,950: Nov 11 2026: latex_build's own code (build.ts, the
   //  engine driven from a snapshot, and the pages' fit) here, out of the eager group, its shared rules handed in by the
