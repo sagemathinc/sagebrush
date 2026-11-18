@@ -10,7 +10,7 @@ env:
 
 on:
   push:
-    branches: [master]
+    branches: [master, "track/**"]
   pull_request:
     # (labeled: adding the full-ci label reruns the pull request on the full tier)
     types: [opened, synchronize, reopened, labeled]
@@ -23,7 +23,10 @@ on:
   schedule:
     - cron: "17 8 * * *"
 
-# A pull request's new revision cancels its obsolete run.  On master a run in
+permissions:
+  contents: read
+
+# A pull request's new revision cancels its obsolete run.  On master and track/** a run in
 # progress is never cancelled: it finishes, and of the pushes queued behind it
 # only the newest runs next (GitHub replaces an older pending run in the group).
 # So while merges come faster than a full run takes, every cycle still ends in
@@ -34,7 +37,7 @@ on:
 # its commit's, so a dispatch on another commit (a release's, say) doesn't either.
 concurrency:
   group: ci-${{ github.event.pull_request.number || github.ref }}-${{ github.event_name == 'pull_request' && 'pr' || github.event_name }}${{ github.event_name == 'workflow_dispatch' && format('-{0}', github.sha) || '' }}
-  cancel-in-progress: ${{ github.ref != 'refs/heads/master' }}
+  cancel-in-progress: ${{ github.ref != 'refs/heads/master' && !startsWith(github.ref, 'refs/heads/track/') }}
 
 jobs:
   changes:
@@ -385,10 +388,11 @@ jobs:
     needs: changes
     if: (github.repository == 'sagemathinc/sagebrush' || vars.CI_RUNNER != '') && (needs.changes.outputs.node == 'true' || needs.changes.outputs.web == 'true' || needs.changes.outputs.size_inputs == 'true')
     runs-on: ${{ vars.CI_RUNNER || 'ubuntu-24.04' }}
-    # (the worst sequential path, resolve 2 + install 5 + build 8 + the npm
-    # metrics 2 + the old-key base 10 = 27, plus 15 for checkout, setup,
+    # (the worst sequential path, including a source build for an unpublished
+    # base pin: resolve 2 + install 5 + build 16 + the npm metrics 2 + the
+    # old-key base 18 = 43, plus 15 for checkout, setup,
     # records, cleanup and upload: scripts/test-size-measure.mjs checks this sum)
-    timeout-minutes: 42
+    timeout-minutes: 58
     permissions:
       contents: read
       actions: read
@@ -407,6 +411,8 @@ jobs:
       - name: detect CI CPU quota
         run: scripts/ci-cpus.sh
       - uses: dtolnay/rust-toolchain@b725eda525362e7cf34af9a7243cac1e3f01a7ec # branch stable
+        with:
+          targets: wasm32-unknown-unknown
       - uses: pnpm/action-setup@b906affcce14559ad1aafd4ab0e942779e9f58b1 # v4.3.0
         with:
           version: 11
@@ -436,13 +442,14 @@ jobs:
         run: pnpm install --frozen-lockfile
       - name: build (the base)
         if: steps.resolve.outputs.need_new == 'true'
-        timeout-minutes: 8
+        timeout-minutes: 16
         working-directory: ${{ runner.temp }}/size-base
-        # (first the base's own modules, by its own pins: about 8 MB, into the user cache the old-key worktree then
-        # copies from; a base from before the pins has them committed.  Inner timeouts: scripts/test-size-measure.mjs)
+        # (first the base's own modules, by its own pins.  If and only if a pin is absent from the CDN (404), build
+        # the base's source and require every resulting sha256 and byte count to equal its pins.  Inner timeouts:
+        # scripts/test-size-measure.mjs)
         run: |
-          if [ -f wasm/pins.json ]; then timeout 1m node scripts/wasm-fetch.mjs; fi
-          pnpm run build && node scripts/build-cli.mjs && bun web/build.ts && node scripts/build-cli.mjs
+          if [ -f wasm/pins.json ]; then timeout 8m node "$GITHUB_WORKSPACE/scripts/wasm-fetch-or-build.mjs" --root "$RUNNER_TEMP/size-base"; fi
+          timeout 8m sh -c 'pnpm run build && node scripts/build-cli.mjs && bun web/build.ts && node scripts/build-cli.mjs'
       - name: record (the base)
         if: steps.resolve.outputs.need_new == 'true'
         run: |
@@ -475,12 +482,12 @@ jobs:
           node-version: ${{ steps.resolve.outputs.old_node }}
       - name: the base under its own key
         if: steps.resolve.outputs.need_old == 'true'
-        timeout-minutes: 10
+        timeout-minutes: 18
         run: |
           git worktree add --detach "$RUNNER_TEMP/size-old" "${{ steps.resolve.outputs.base }}"
           cd "$RUNNER_TEMP/size-old"
           timeout 4m pnpm install --frozen-lockfile
-          if [ -f wasm/pins.json ]; then timeout 1m node scripts/wasm-fetch.mjs; fi
+          if [ -f wasm/pins.json ]; then timeout 8m node "$GITHUB_WORKSPACE/scripts/wasm-fetch-or-build.mjs" --root "$RUNNER_TEMP/size-old"; fi
           timeout 5m sh -c 'pnpm run build && node scripts/build-cli.mjs && bun web/build.ts && node scripts/build-cli.mjs'
           node scripts/size-measure.mjs --record --out "$RUNNER_TEMP/size-records/old-record.json"
       - name: remove the worktrees
@@ -1502,8 +1509,8 @@ jobs:
 
   # Publishes this run's modules to the release bucket (design/wasm-artifacts.md section 5): only for a push to master
   # and a dispatch on master, in the wasm-publish environment (deployment branches: master; the bucket credentials).
-  # Never cancelled.  Each absent key is written with a conditional write and read back; a present key must match.
-  # Then a cold client checks every pin of this commit is served.
+  # Track refs never reach this job or its bucket-wide credential.  Never cancelled.  Each absent key is written with
+  # a conditional write and read back; a present key must match.  Then a cold client checks every pin is served.
   wasm-publish:
     needs: [changes, wasm-modules]
     if: github.repository == 'sagemathinc/sagebrush' && github.ref == 'refs/heads/master' && (github.event_name == 'push' || github.event_name == 'workflow_dispatch') && needs.wasm-modules.result == 'success'
