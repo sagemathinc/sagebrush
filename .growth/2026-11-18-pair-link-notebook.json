@@ -1,0 +1,7 @@
+{
+  "v": 1,
+  "reason": "An agent's pairing link to the board page with nothing else in its address (as sagebrush-mcp prints it) opens on the notebook page instead, its code with it, where what the agent makes opens in place and the pairing stays (web/board/page.ts); the CLI's bundle carries the board page. cli/pyjs.cjs grows +152 bytes, exact, base master 80fea10c, pinned node 24.21.0 and bun 1.4.4, on the head before this marker; the bound adds 64 bytes of slack.",
+  "bytes": {
+    "cli/pyjs.cjs": 216
+  }
+}
