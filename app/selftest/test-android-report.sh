@@ -13,9 +13,9 @@
 # missing, twice, unknown, without ": ", a prefix of another, empty, or a raw
 # CR in a value fail; an escaped newline, a truncated value and error,
 # timeout or unsupported values pass (they are facts, read by coi-reading.py).
-# --desktop (the desktop app's runner, run-judge.mjs): the LaTeX editor's three checks required too: a desktop
-# report with them passes; without them, with one twice, or with one FAIL, it fails; and the same all-ok desktop
-# report judged as a phone's (no --desktop) fails, its LaTeX lines unknown there.
+# --desktop (the desktop app's runner, run-judge.mjs): the LaTeX editor's three checks and the board page's three
+# required too: a desktop report with them passes; without either three, with one twice, or with one FAIL, it fails;
+# and the same all-ok desktop report judged as a phone's (no --desktop) fails, its desktop lines unknown there.
 #   bash app/selftest/test-android-report.sh
 set -uo pipefail
 here=$(cd "$(dirname "$0")" && pwd)
@@ -37,7 +37,8 @@ for f in good:chromium:0 coi-fail:chromium:0 req-fail:chromium:1 renamed:chromiu
 done
 # (the engine is the caller's, closed: missing or unknown is a usage error, exit 2)
 # (name:engine:expected exit, judged --desktop; desktop-good also as a phone's, below)
-for f in desktop-good:chromium:0 good:chromium:1 desktop-latex-missing:chromium:1 desktop-latex-dup:chromium:1 desktop-latex-fail:chromium:1; do
+for f in desktop-good:chromium:0 good:chromium:1 desktop-latex-missing:chromium:1 desktop-latex-dup:chromium:1 desktop-latex-fail:chromium:1 \
+    desktop-board-missing:chromium:1 desktop-board-dup:chromium:1 desktop-board-fail:chromium:1; do
   IFS=: read -r name engine want <<< "$f"
   python3 -I "$here/android-report.py" --engine "$engine" --desktop "$here/report-fixtures/$name.txt" > /dev/null 2>&1
   got=$?

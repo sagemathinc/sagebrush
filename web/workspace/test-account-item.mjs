@@ -1,25 +1,28 @@
 // ci: web-runner order=484 chrome
-// The account at the foot of the files, bottom left (web/workspace/browser.ts), and the Storage panel's sync section
-// signed out (web/workspace/sync-panel.ts), in headless Chromium against the built site, at a desktop width and a
-// phone width. The site's account answers
-// (/api/share/me, /api/sync/v1/status, /auth/logout) are given by this test (CDP Fetch), as a signed-out, a signed-in or
-// a no-accounts site:
-//  - no accounts (the answer the CLI's page gives: not found): no account row, and nothing kept for it;
-//  - signed out: "Sign in", to the site's sign-in and back to this page;
-//  - signed in: the name (the email as its title), a menu (sync, the Storage panel, Sign out); Sign out signs out and
-//    reloads the page;
-//  - File ▸ Open…'s browser, closed before its account is answered and opened again: it never writes the sidebar's
-//    height (--sb-acct-h), keeps no observer, and the late answer draws nothing into the closed dialog;
-//  - the page's lower-left corner (theme, full screen) never over the account row: it sits in the files' foot row;
-//  - on a phone, the account row above the toolbar at the window's foot, nothing over it;
-//  - the Storage panel: its sync section says it is checking until sync's status is read, then, signed out, "Sign in"
-//    (not the share dialog); its heading not under the Files button in the corner.
+// The account at the top right of the notebook and board pages' bars, beside Share (web/workspace/account.ts), the one
+// place it is, and the Storage panel's sync section signed out (web/workspace/sync-panel.ts), in headless Chromium
+// against the built site, at a desktop width and a phone width. The site's account answers (/api/share/me,
+// /api/sync/v1/status, /auth/logout) are given by this test (CDP Fetch), as a signed-out, a signed-in or a
+// no-accounts site:
+//  - another answer (a 404, as the CLI's page gives): nothing in the bar;
+//  - signed out: "Sign in" in the bar, right of Share, to the site's sign-in and back to this page; the files' foot has
+//    no account;
+//  - signed in: the initial, its title the name and email; its menu (who, Sync and storage…, Sign out); Escape closes
+//    it; Sync and storage… opens the Storage panel; Sign out asks the server to sign out, then reloads;
+//  - File > Open…'s dialog: no account in it;
+//  - the Storage panel: its sync section says it is checking until sync's status is read, then, signed out, "Sign in";
+//  - the board page: the same, signed out, signed in (its menu) and for a 404;
+//  - on a phone: "Sign in" in the bar at the top, in the window, nothing over it;
+//  - the account from the notebook page's own check (accountFrom, host.status), the module bundled for a blank page:
+//    its state for each answer of the endpoint (signed in, 401, off, an error, no answer in time); mounted with that
+//    check, no second request; and a check that rejects hides the control, with no uncaught rejection.
 // Serve web/dist first (python3 web/serve.py 8765), then
-//   node web/workspace/test-account-item.mjs
-import { spawn } from "node:child_process";
-import { mkdtempSync, rmSync } from "node:fs";
+//   node web/workspace/test-account-item.mjs        (SHOTS=dir: also each state as a PNG, for a look)
+import { spawn, spawnSync } from "node:child_process";
+import { mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
+import { fileURLToPath } from "node:url";
 import { devtoolsPort } from "../test-port.mjs";
 
 const base = process.env.SB_URL ?? "http://127.0.0.1:8765/";
@@ -33,7 +36,7 @@ for (let i = 0; i < 300; i++) { try { targets = await (await fetch(`http://127.0
 const ws = new WebSocket(targets.find((t) => t.type === "page").webSocketDebuggerUrl);
 await new Promise((r) => (ws.onopen = r));
 let n = 0; const waiting = new Map(); const errors = [];
-// (the site's account, as this test answers it: "none" (not found, as a site without accounts), "out" (401) or "in";
+// (the site's account, as this test answers it: "none" (404), "out" (401) or "in" (200);
 // `hold`: the sync status asked for is left unanswered until released)
 let mode = "none", hold = false, holdMe = false;
 const held = [], heldMe = [], logouts = [];
@@ -62,14 +65,14 @@ const until = async (expr, ms = 15000) => { const t = Date.now(); while (Date.no
 const fails = [];
 let checks = 0;
 const check = (ok, what, detail) => { checks++; console.log((ok ? "ok   " : "FAIL ") + what + (ok || detail === undefined ? "" : " " + J(detail).slice(0, 400))); if (!ok) fails.push(what); };
-// (the notebook page, loaded with the files shown, its account read)
-const load = async () => {
-  await ev(`localStorage.setItem("sagebrush-files-sidebar", "1")`).catch(() => {});
-  await send("Page.navigate", { url: base }); await sleep(300);
-  const ok = await until(`document.readyState === "complete" && !!document.querySelector("#wssidebar .facct") && !!window.sagebrush?.workspace`, 30000);
-  await sleep(800);
+// (a page loaded, its account read: the request answered, or the page settled without one)
+const load = async (url = base) => {
+  await send("Page.navigate", { url }); await sleep(300);
+  const ok = await until(`document.readyState === "complete"`, 30000);
+  await sleep(1500);
   return ok;
 };
+const shot = async (name) => { if (process.env.SHOTS) writeFileSync(join(process.env.SHOTS, name + ".png"), Buffer.from((await send("Page.captureScreenshot", { format: "png" })).data, "base64")); };
 const rect = (sel) => `(() => { const e = document.querySelector(${J(sel)}); if (!e) return null; const r = e.getBoundingClientRect(); return { left: r.left, top: r.top, right: r.right, bottom: r.bottom }; })()`;
 const disjoint = (a, b) => !!a && !!b && (a.right <= b.left || b.right <= a.left || a.bottom <= b.top || b.bottom <= a.top);
 const storage = async () => {
@@ -84,19 +87,27 @@ try {
   await send("Fetch.enable", { patterns: ["*/api/share/me*", "*/api/sync/v1/status*", "*/auth/logout*"].map((urlPattern) => ({ urlPattern, requestStage: "Request" })) });
   await send("Page.navigate", { url: base }); await sleep(300);
 
-  // ---- a site without accounts: nothing
-  mode = "none";
-  check(await load(), "the notebook page, the files shown");
-  check(await ev(`document.querySelector("#wssidebar .facct").hidden && getComputedStyle(document.querySelector("#wssidebar .facct")).display === "none"`), "no accounts here (not found): no account row");
-  check((await ev(`getComputedStyle(document.documentElement).getPropertyValue("--sb-acct-h").trim()`)) === "0px", "…and no room kept for it");
+  const SLOT = "#acctslot";
+  const signInWant = `"/auth/login?return=" + encodeURIComponent(location.pathname + location.search + location.hash)`;
+  const shown = (sel) => `(() => { const e = document.querySelector(${J(sel)}); return !!e && !e.hidden && getComputedStyle(e).display !== "none" && e.getBoundingClientRect().width > 0; })()`;
 
-  // ---- signed out: Sign in, back to this page
+  // ---- another answer (a 404): nothing
+  mode = "none";
+  check(await load() && await until(`!!window.sagebrush?.workspace`, 30000), "the notebook page");
+  check(await ev(`!(${shown(SLOT)}) && document.querySelector(${J(SLOT)}).childElementCount === 0`), "a 404 from the endpoint: nothing in the bar");
+
+  // ---- signed out: Sign in at the top right, right of Share, back to this page
   mode = "out";
   check(await load(), "signed out: loaded");
-  const signin = await ev(`(() => { const a = document.querySelector("#wssidebar .facct a"); return a && { text: a.textContent, href: a.getAttribute("href"), want: "/auth/login?return=" + encodeURIComponent(location.pathname + location.search + location.hash) }; })()`);
-  check(signin?.text === "Sign in" && signin.href === signin.want, "signed out: \"Sign in\" at the foot of the files, to the sign-in and back to this page", signin);
-  const corner = await ev(rect("#sbcorner")), acct = await ev(rect("#wssidebar .facct")), foot = await ev(rect("#wssidebar .ffoot"));
-  check(disjoint(corner, acct) && corner.top >= foot.top - 1 && corner.bottom <= foot.bottom + 1, "the lower-left corner (theme, full screen) sits in the files' foot row, never over the account", { corner, acct, foot });
+  check(await until(shown(SLOT + " a.sbacct-in"), 8000), "signed out: \"Sign in\" in the bar");
+  const signin = await ev(`(() => { const a = document.querySelector("${SLOT} a"); return { text: a.textContent, href: a.getAttribute("href"), want: ${signInWant} }; })()`);
+  await shot("notebook-signed-out");
+  check(signin.text === "Sign in" && signin.href === signin.want, "…to the site's sign-in and back to this page", signin);
+  const where = await ev(`(() => { const r = document.querySelector("${SLOT}").getBoundingClientRect(), h = document.querySelector("header").getBoundingClientRect(); return { top: r.top, bottom: r.bottom, right: r.right, w: innerWidth, hTop: h.top, hBottom: h.bottom, inHeader: !!document.querySelector("header ${SLOT}"), afterShare: !!(document.querySelector("#sharebtn").compareDocumentPosition(document.querySelector("${SLOT}")) & Node.DOCUMENT_POSITION_FOLLOWING) }; })()`);
+  check(where.inHeader && where.afterShare && where.top >= where.hTop - 1 && where.bottom <= where.hBottom + 1 && where.right > where.w * 0.75, "…at the top right of the page's bar, right of Share", where);
+  await ev(`localStorage.setItem("sagebrush-files-sidebar", "1")`);
+  check(await load() && await until(`!!document.querySelector("#wssidebar .sbfiles")`, 15000), "the files shown");
+  check(await ev(`!document.querySelector("#wssidebar .facct, #wssidebar .sbacct, #wssidebar a[href^='/auth/login']")`), "the files' foot has no account: one place for it, the bar");
 
   // ---- the Storage panel signed out: checking first, then Sign in (not Share)
   hold = true;
@@ -105,76 +116,113 @@ try {
   hold = false;
   for (const id of held.splice(0)) await answer(id, 401, { error: "sign in first" });
   check(await until(`${syncText} === "Sync Sign in to use sync"`, 8000), "…then, signed out: \"Sign in to use sync\"", await ev(syncText).catch(() => null));
-  check(await ev(`(() => { const a = [...document.querySelectorAll(".sbfprev .sync a")].find((x) => x.textContent === "Sign in"); return !!a && a.getAttribute("href") === "/auth/login?return=" + encodeURIComponent(location.pathname + location.search + location.hash); })()`), "…its Sign in is the sign-in itself, back to this page (no share dialog)");
+  check(await ev(`(() => { const a = [...document.querySelectorAll(".sbfprev .sync a")].find((x) => x.textContent === "Sign in"); return !!a && a.getAttribute("href") === ${signInWant}; })()`), "…its Sign in is the sign-in itself, back to this page (no share dialog)");
   await ev(`document.querySelector(".sbfprev .ph .x").click()`);
 
-  // ---- signed in: the name, its menu, Sign out
+  // ---- signed in: the initial, its menu, Sync and storage, Sign out
   mode = "in";
   check(await load(), "signed in: loaded");
-  check(await ev(`(() => { const b = document.querySelector("#wssidebar .facctbtn"); return !!b && b.querySelector(".nm").textContent === "Ada Lovelace" && b.title === "ada@example.org" && b.querySelector(".av").textContent === "A"; })()`), "signed in: the name at the foot of the files, the email its title, its initial");
+  check(await until(shown(SLOT + " .sbacct-btn"), 8000), "signed in: the account's button in the bar");
+  const btn = await ev(`(() => { const b = document.querySelector("${SLOT} .sbacct-btn"); return { text: b.textContent, title: b.title, label: b.getAttribute("aria-label"), popup: b.getAttribute("aria-haspopup") }; })()`);
+  check(btn.text === "A" && btn.title === "Ada Lovelace (ada@example.org)" && btn.label === "Account: Ada Lovelace (ada@example.org)" && btn.popup === "menu", "…its initial, the name and email its title", btn);
+  await ev(`document.querySelector("${SLOT} .sbacct-btn").click()`);
+  const menu = await ev(`(() => { const m = document.querySelector("${SLOT} .sbacct-menu"); return { open: !m.hidden, who: m.querySelector(".sbacct-who").innerText.replace(/\\s+/g, " ").trim(), items: [...m.querySelectorAll("button")].map((b) => b.textContent), expanded: document.querySelector("${SLOT} .sbacct-btn").getAttribute("aria-expanded"), focus: document.activeElement?.textContent }; })()`);
+  await shot("notebook-signed-in-menu");
+  check(menu.open && menu.who === "Ada Lovelace ada@example.org" && J(menu.items) === J(["Sync and storage…", "Sign out"]) && menu.expanded === "true" && menu.focus === "Sync and storage…", "its menu: who is signed in, Sync and storage…, Sign out (its first item focused)", menu);
+  await ev(`(document.dispatchEvent(new KeyboardEvent("keydown", { key: "Escape", bubbles: true })), 1)`);
+  check(await ev(`document.querySelector("${SLOT} .sbacct-menu").hidden && document.activeElement === document.querySelector("${SLOT} .sbacct-btn")`), "Escape closes it, back to its button");
+  await ev(`document.querySelector("${SLOT} .sbacct-btn").click()`);
+  await ev(`[...document.querySelectorAll("${SLOT} .sbacct-menu button")].find((b) => b.textContent === "Sync and storage…").click()`);
+  check(await until(`[...document.querySelectorAll(".sbfprev h4")].some((h) => h.textContent === "Sync")`, 8000), "Sync and storage… opens the Storage panel, with its sync section");
+  await ev(`document.querySelector(".sbfprev .ph .x")?.click()`);
 
-  // ---- File ▸ Open…'s browser: closed before its account is answered, then opened again
-  const sideH = await ev(`getComputedStyle(document.documentElement).getPropertyValue("--sb-acct-h").trim()`);
-  await ev(`(() => {
-    window.__acctWrites = 0;
-    const sp = CSSStyleDeclaration.prototype.setProperty;
-    CSSStyleDeclaration.prototype.setProperty = function (n, ...a) { if (n === "--sb-acct-h") window.__acctWrites++; return sp.call(this, n, ...a); };
-    window.__ro = [];
-    const RO = ResizeObserver;
-    window.ResizeObserver = class extends RO {
-      constructor(cb) { super(cb); this.on = []; this.off = false; window.__ro.push(this); }
-      observe(t, ...a) { this.on.push(t); return super.observe(t, ...a); }
-      disconnect() { this.off = true; return super.disconnect(); }
-    };
-    return 1;
-  })()`);
-  const ctrlO = `(document.dispatchEvent(new KeyboardEvent("keydown", { key: "o", ctrlKey: true, bubbles: true, cancelable: true })), 1)`;
-  const liveDialogObservers = `window.__ro.filter((o) => !o.off && o.on.some((t) => !t.isConnected || t.closest(".sbfopen"))).length`;
-  holdMe = true;
-  await ev(ctrlO);
-  const opened = await until(`!!document.querySelector(".sbfopen .sbfiles")`, 5000);
-  for (let t = Date.now(); !heldMe.length && Date.now() - t < 5000; ) await sleep(50);
-  check(opened && heldMe.length > 0, "File ▸ Open…: its browser, its account asked for", { opened, asked: heldMe.length });
-  await ev(`(window.__dlgAcct = document.querySelector(".sbfopen .facct"), document.dispatchEvent(new KeyboardEvent("keydown", { key: "Escape", bubbles: true })), 1)`);
-  check(await until(`!document.querySelector(".sbfopen")`, 5000), "…closed before the account's answer");
-  for (const id of heldMe.splice(0)) await answer(id, 200, ME);
-  await sleep(600);
-  const late = await ev(`({ writes: window.__acctWrites, live: ${liveDialogObservers}, drawn: window.__dlgAcct ? window.__dlgAcct.childElementCount : -1, h: getComputedStyle(document.documentElement).getPropertyValue("--sb-acct-h").trim() })`);
-  check(late.writes === 0 && late.h === sideH, "…the late answer: the sidebar's height (--sb-acct-h) never written by the dialog's browser", { late, sideH });
-  check(late.live === 0, "…no observer kept for the closed dialog's account", late);
-  check(late.drawn === 0, "…and nothing drawn into the closed dialog", late);
-  holdMe = false;
-  await ev(ctrlO);
-  check(await until(`document.querySelector(".sbfopen .facctbtn .nm")?.textContent === "Ada Lovelace"`, 8000), "Open… again: its account shown");
+  // ---- File > Open…'s dialog: no account in it
+  await ev(`(document.dispatchEvent(new KeyboardEvent("keydown", { key: "o", ctrlKey: true, bubbles: true, cancelable: true })), 1)`);
+  check(await until(`!!document.querySelector(".sbfopen .sbfiles")`, 5000) && await ev(`!document.querySelector(".sbfopen .facct, .sbfopen .sbacct")`), "File > Open…'s dialog: no account in it");
   await ev(`(document.dispatchEvent(new KeyboardEvent("keydown", { key: "Escape", bubbles: true })), 1)`);
   await until(`!document.querySelector(".sbfopen")`, 5000);
-  const after = await ev(`({ writes: window.__acctWrites, live: ${liveDialogObservers}, h: getComputedStyle(document.documentElement).getPropertyValue("--sb-acct-h").trim() })`);
-  check(after.writes === 0 && after.live === 0 && after.h === sideH, "…and closed: still no write of the sidebar's height, no observer kept", { after, sideH });
 
-  await ev(`document.querySelector("#wssidebar .facctbtn").click()`);
-  await until(`!!document.querySelector(".sbfmenu")`, 3000);
-  const items = await ev(`[...document.querySelectorAll(".sbfmenu button")].map((b) => b.textContent)`);
-  check(J(items) === J(["Turn on sync…", "Storage and plan…", "Sign out"]), "its menu: sync (off here: Turn on sync…), Storage and plan…, Sign out", items);
+  // ---- Sign out
   await ev(`window.__before = 1, 1`);
-  await ev(`[...document.querySelectorAll(".sbfmenu button")].find((b) => b.textContent === "Sign out").click()`);
-  check(await until(`!window.__before && document.readyState === "complete"`, 15000), "Sign out reloads the page");
+  await ev(`document.querySelector("${SLOT} .sbacct-btn").click()`);
+  await ev(`[...document.querySelectorAll("${SLOT} .sbacct-menu button")].find((b) => b.textContent === "Sign out").click()`);
+  check(await until(`!window.__before && document.readyState === "complete"`, 15000), "Sign out asks the server to sign out, then reloads the page");
   check(J(logouts) === J(["POST"]), "…after the site's sign-out (POST /auth/logout)", logouts);
-  check(await until(`document.querySelector("#wssidebar .facct a")?.textContent === "Sign in"`, 15000), "…and the page is signed out: \"Sign in\"");
+  check(await until(`document.querySelector("${SLOT} a")?.textContent === "Sign in"`, 15000), "…and the page is signed out: \"Sign in\"");
 
-  // ---- a phone: the account above the toolbar, nothing over it; the Storage panel's heading clear of the Files button
+  // ---- the board page: the same control, right of its Share
+  const B = '#board [data-sbb="acct"]';
+  mode = "out";
+  check(await load(base + "board/"), "the board page, signed out: loaded");
+  await until(`document.querySelector(${J(B + " a")})?.textContent === "Sign in"`, 10000); await shot("board-signed-out");
+  check(await until(`document.querySelector(${J(B + " a")})?.textContent === "Sign in"`, 10000) && await ev(`document.querySelector(${J(B + " a")}).getAttribute("href") === ${signInWant}`), "the board page, signed out: \"Sign in\", back to this board");
+  mode = "in";
+  check(await load(base + "board/"), "the board page, signed in: loaded");
+  check(await until(shown(B + " .sbacct-btn"), 10000), "the board page, signed in: the account's button");
+  await ev(`document.querySelector(${J(B + " .sbacct-btn")}).click()`);
+  const bItems = await ev(`[...document.querySelectorAll(${J(B + " .sbacct-menu button")})].map((b) => b.textContent)`);
+  await shot("board-signed-in-menu");
+  check(J(bItems) === J(["Sync and storage…", "Sign out"]), "…its menu", bItems);
+  mode = "none";
+  check(await load(base + "board/"), "the board page, a 404: loaded");
+  check(await ev(`!(${shown(B)})`), "the board page, a 404: nothing");
+
+  // ---- a phone: Sign in in the bar at the top, in the window, nothing over it
+  await ev(`localStorage.setItem("sagebrush-files-sidebar", "0")`).catch(() => {});
   await send("Emulation.setDeviceMetricsOverride", { width: 390, height: 844, deviceScaleFactor: 2, mobile: true });
   await send("Emulation.setTouchEmulationEnabled", { enabled: true, maxTouchPoints: 5 });
   await send("Network.setUserAgentOverride", { userAgent: "Mozilla/5.0 (Linux; Android 14; Pixel 8) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/131.0.0.0 Mobile Safari/537.36" });
   mode = "out";
   check(await load(), "a phone: loaded");
   check(await ev(`document.documentElement.classList.contains("phone")`), "…in the phone layout");
-  const pa = await ev(rect("#wssidebar .facct")), bar = await ev(rect(".bar[role=toolbar]"));
-  const covered = await ev(`(() => { const r = document.querySelector("#wssidebar .facct").getBoundingClientRect(); const at = document.elementFromPoint(r.left + r.width / 2, r.top + r.height / 2); return !document.querySelector("#wssidebar .facct").contains(at) ? (at?.id || at?.className || at?.tagName) : null; })()`);
-  check(!!pa && !!bar && pa.bottom <= bar.top + 1 && covered === null, "a phone: \"Sign in\" above the toolbar, nothing over it", { pa, bar, covered });
-  await storage();
-  await until(`!!document.querySelector(".sbfprev .ph b")`, 5000);
-  const over = await ev(`(() => { const b = document.querySelector(".sbfprev .ph b"), r = b.getBoundingClientRect(); const at = document.elementFromPoint(r.left + 4, r.top + r.height / 2); return at === b ? null : (at?.className || at?.tagName); })()`);
-  check(over === null, "a phone: the Storage panel's heading, nothing over it (the Files button stays under the dialog)", over);
+  check(await until(shown(SLOT + " a"), 8000), "a phone: \"Sign in\" shown");
+  // (from the top of the page, as it opens: the phone layout scrolls with the page, its bar too)
+  await ev(`(scrollTo(0, 0), document.scrollingElement && (document.scrollingElement.scrollTop = 0), 1)`); await sleep(200);
+  await shot("phone-signed-out");
+  const pa = await ev(rect(SLOT + " a"));
+  const covered = await ev(`(() => { const a = document.querySelector("${SLOT} a"), r = a.getBoundingClientRect(); const at = document.elementFromPoint(r.left + r.width / 2, r.top + r.height / 2); return a.contains(at) ? null : (at?.id || at?.className || at?.tagName); })()`);
+  check(!!pa && pa.top >= 0 && pa.top < 120 && pa.right <= 390 && pa.left >= 0 && covered === null, "a phone: \"Sign in\" at the top, in the window, nothing over it", { pa, covered });
+  // ---- the account from the page's own check (accountFrom, mountAccount's host.status): account.ts and the share
+  // client's shareStatus, bundled for this page as the site bundles them, on a blank page with fetch answered here
+  {
+    const dir = mkdtempSync(join(tmpdir(), "sb-account-mod-")), entry = join(dir, "entry.ts"), out = join(dir, "out.js");
+    const here = fileURLToPath(new URL(".", import.meta.url));
+    writeFileSync(entry, `import { mountAccount, accountFrom } from ${J(join(here, "account.ts"))};\nimport { shareStatus } from ${J(join(here, "..", "share-client", "upload.ts"))};\nObject.assign(window, { __acct: { mountAccount, accountFrom, shareStatus } });\n`);
+    const b = spawnSync(process.env.BUN ?? "bun", ["build", entry, "--format", "iife", "--target", "browser", "--outfile", out], { encoding: "utf8" });
+    check(b.status === 0, "the account module bundled for the blank page", (b.stderr || "").slice(0, 300));
+    await load("about:blank");
+    await ev(readFileSync(out, "utf8") + "\n1");
+    rmSync(dir, { recursive: true, force: true });
+    // (fetch answered in the page: each /api/share/me counted; `never` leaves it unanswered until its abort)
+    await ev(`(() => { window.__asked = 0; window.__answer = null; window.fetch = (u, o) => { if (String(u).endsWith("/api/share/me")) window.__asked++;
+      const a = window.__answer; if (a === "never") return new Promise((_, no) => o?.signal?.addEventListener("abort", () => no(o.signal.reason)));
+      return Promise.resolve(new Response(a.body === undefined ? "" : JSON.stringify(a.body), { status: a.code, headers: { "content-type": "application/json" } })); }; return 1; })()`);
+    // the table: each answer of the endpoint, through shareStatus (as the notebook page asks it), then accountFrom
+    for (const [what, answer, ms, want] of [
+      ["signed in (200, an account)", { code: 200, body: ME }, 10000, "in"],
+      ["signed out (401)", { code: 401, body: { error: "sign in first" } }, 10000, "out"],
+      ["off: no sharing on this site (404)", { code: 404, body: { error: "not found" } }, 10000, "none"],
+      ["an error (500)", { code: 500, body: { error: "boom" } }, 10000, "none"],
+      ["no answer in time (the check's own timeout, 300 ms here)", "never", 300, "none"],
+    ]) {
+      const r = await ev(`(async () => { window.__answer = ${J(answer)}; const s = await window.__acct.shareStatus(${ms}); return { s, a: window.__acct.accountFrom(s) }; })()`);
+      check(r?.a?.state === want, `accountFrom, ${what}: ${want}`, r);
+    }
+    check((await ev(`window.__acct.accountFrom({ enabled: true, me: ${J(ME)} }).name`)) === ME.name, "accountFrom, signed in: the account's name");
+    // mounted with the page's check: drawn from it, the endpoint not asked again
+    const m = await ev(`(async () => { window.__asked = 0; const slot = document.createElement("span"); document.body.append(slot);
+      const a = await window.__acct.mountAccount(slot, { status: Promise.resolve({ enabled: true, me: null }) }).ready;
+      await new Promise((r) => setTimeout(r, 300)); const r = { state: a.state, asked: window.__asked, hidden: slot.hidden, link: slot.querySelector("a")?.textContent ?? null }; slot.remove(); return r; })()`);
+    check(m?.state === "out" && m.asked === 0 && m.hidden === false && m.link === "Sign in", "mounted with the page's check: \"Sign in\" from it, and the endpoint never asked again", m);
+    // a check that rejects: ready is "none", the slot hidden, no uncaught rejection
+    const before = errors.length;
+    const rj = await ev(`(async () => { const un = []; const h = (e) => un.push(String(e.reason)); addEventListener("unhandledrejection", h);
+      const slot = document.createElement("span"); document.body.append(slot);
+      const a = await window.__acct.mountAccount(slot, { status: Promise.reject(new Error("the check failed")) }).ready.then((x) => x.state, (e) => "rejected: " + e);
+      await new Promise((r) => setTimeout(r, 300)); removeEventListener("unhandledrejection", h);
+      const r = { state: a, hidden: slot.hidden, children: slot.childElementCount, unhandled: un }; slot.remove(); return r; })()`);
+    check(rj?.state === "none" && rj.hidden === true && rj.children === 0 && rj.unhandled.length === 0 && errors.length === before, "a page check that rejects: ready is \"none\", the slot hidden and empty, no uncaught rejection", { rj, errors: errors.slice(before) });
+  }
   check(errors.length === 0, "no uncaught exceptions", errors.slice(0, 3));
 } catch (e) {
   check(false, "the test ran: " + (e?.stack ?? e));
@@ -184,5 +232,5 @@ try {
   await exited;
   rmSync(profile, { recursive: true, force: true, maxRetries: 5, retryDelay: 200 });
 }
-console.log(fails.length ? `FAIL: ${fails.length} of ${checks} checks\n  ` + fails.join("\n  ") : `ok: the account at the foot of the files, ${checks} checks`);
+console.log(fails.length ? `FAIL: ${fails.length} of ${checks} checks\n  ` + fails.join("\n  ") : `ok: the account in the page's bar, ${checks} checks`);
 process.exit(fails.length ? 1 : 0);

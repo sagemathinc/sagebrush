@@ -79,13 +79,14 @@ import { langOf } from "../code/langs";
 import { codeUrl } from "../code/url";
 import { openGallery } from "../examples/open";
 import { mountBrowser } from "../workspace/browser";
+import { mountAccount } from "../workspace/account";
 import { mountAgentPairing } from "../workspace/agent-ui";
 import * as gitBranches from "../workspace/git-branch";
 import { openReviewDialog, showWhenBranches } from "../workspace/review/open-dialog";
 import { SyncOwner } from "../workspace/sync-owner";
 import { DocSync } from "../workspace/doc-sync";
 import { answerPresence, TAB } from "../shell/presence";
-import { docSyncOrigin, docSyncAllowed, followDocSync, docSyncChannel } from "../workspace/doc-sync-switch";
+import { docSyncAllowed, followDocSync, docSyncChannel } from "../workspace/doc-sync-switch";
 // (the frame other sites embed and exported boards: built with __SB_NO_SYNC__, so no sync owner, and with it no
 // client, is in that copy of the page: web/build.ts)
 declare const __SB_NO_SYNC__: boolean | undefined;
@@ -227,11 +228,11 @@ if (ws) {
   // (sync, step 5: the page's sync owner; it runs a client only while this browser's sync is on, for the account
   // signed in: nothing at all otherwise)
   if (!NO_SYNC) SyncOwner.of(ws).start();
-  // (DEV's switch for notebooks' contents (workspace/doc-sync-switch.ts): the account connection is whichever tab holds
+  // (the switch for notebooks' contents (workspace/doc-sync-switch.ts): the account connection is whichever tab holds
   // it, this one's too, so this page's carries notebooks once the notebook page turned the switch on (astra's DEVSW-1);
-  // behind the same gate, evaluated here on every load; on any other origin nothing is asked or started.  Boards' own
-  // contents never: DocSync carries only notebooks)
-  if (!NO_SYNC && docSyncOrigin(location.origin)) void docSyncHere(ws).catch((e) => console.warn("sync: notebooks on this page's connection:", e));
+  // behind the same gate, evaluated here on every load (DEV's or PROD's origin, or a self-hosted site whose own server
+  // states this origin).  Boards' own contents never: DocSync carries only notebooks)
+  if (!NO_SYNC) void docSyncHere(ws).catch((e) => console.warn("sync: notebooks on this page's connection:", e));
 }
 async function docSyncHere(w: Workspace) {
   const owner = SyncOwner.of(w);
@@ -1163,6 +1164,8 @@ async function openAsHere(w: Workspace, e: Entry, as: DocKind, mode: string): Pr
 }
 // (Download ▸ Everything (.zip)…: set by the Files sidebar below, which owns the file browser that exports)
 let exportAllHere: (() => void) | null = null;
+// (the Storage panel, from the account's menu: the files' own, opened, where this page has them)
+let storageHere: (() => void) | null = null;
 const host: BoardHost = {
   // (this browser's boards open in View, except one made here or last left in Edit: web/doc-mode.ts)
   mode: local ? { start: modeOf(modeKey("board", source.slice(6))) === "edit", toggled: (on) => rememberMode(modeKey("board", source.slice(6)), on ? "edit" : "view") } : undefined,
@@ -1517,6 +1520,12 @@ if (openAsFailed && host.store) {
   host.store.load = async () => { const r = await load0(); return r ? { ...r, notice: openAsFailed + (r.notice ? "\n\n" + r.notice : "") } : r; };
 }
 const mounted = mountBoard(document.getElementById("board")!, host);
+// the account, right of Share (../workspace/account.ts): Sign in, or your initial and its menu; the site's board page
+// only, not a board saved as a file; hidden for any other answer
+{
+  const slot = document.querySelector<HTMLElement>('#board [data-sbb="acct"]');
+  if (slot && !file) mountAccount(slot, { storage: () => storageHere?.() });
+}
 // (N-2's offer focused once the caption shows it)
 if (offerNotebook) {
   let tries = 0;
@@ -1657,6 +1666,7 @@ if (ws) {
   const boardEl = document.getElementById("board")!;
   let browser: ReturnType<typeof mountBrowser> | null = null;
   exportAllHere = () => { show(true); browser?.exportAll(); };
+  storageHere = () => { show(true); browser?.storage(); };
   const phone = () => matchMedia("(max-width: 640px)").matches;
   const show = (on: boolean) => {
     side.hidden = !on;
