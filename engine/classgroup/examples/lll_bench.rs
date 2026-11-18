@@ -1,6 +1,6 @@
 // LLL benchmark driver (not shipped): reduce one matrix file and print the seconds taken.
 //   cargo run --release -p sagebrush-classgroup --example lll_bench -- MODE IN [OUT]
-// MODE: l2 (sagebrush_poly::l2, first floating-point rung), poly (sagebrush_poly::lll::lll, unlimited budget) or api (sagebrush_classgroup::api::lll, which first
+// MODE: l2 / l2proof (sagebrush_poly::l2 / l2_proof: the five-rung reducer and its proof checks, with a REPORT line), poly (sagebrush_poly::lll::lll, unlimited budget) or api (sagebrush_classgroup::api::lll, which first
 // takes the HNF to handle dependent rows). IN: "rows cols" then one row per line. OUT: the reduced rows.
 use sagebrush_bigint::BigInt;
 use std::io::Write;
@@ -32,7 +32,7 @@ fn main() {
             eprintln!("REPORT rungs {} check {} check_secs {:.4}", rungs.join(","), rep.check, rep.check_secs);
             r.map_err(|e| format!("{:?}", e.0)).unwrap()
         }
-        // the reduction alone, then whether the 53-bit interval check proves it (for the table)
+        // the fast rung alone (no escalation), then which check proves it (proved_by's whole chain)
         "l2stat" => {
             let mut s = sagebrush_poly::l2::L2::<sagebrush_poly::l2::Fe>::new_fast(rows);
             s.run().map_err(|e| format!("{e:?}")).unwrap();

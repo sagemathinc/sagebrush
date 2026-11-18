@@ -6,11 +6,15 @@
 //! with a little slack in the floating-point tests (eta', delta') for their
 //! rounding error.
 //!
-//! This first rung uses `Fe`, a double with a separate exponent (53 bits of
-//! precision, any exponent). When that precision is not enough the size
-//! reduction stops shrinking and the call reports `Precision`; the caller
-//! then takes a stronger method (the exact LLL today, higher floating-point
-//! rungs to come). The result is proved by the caller (see `lll_cert`).
+//! Five rungs of increasing precision, each continuing from the basis the
+//! previous one reached when its precision runs out (the size reduction stops
+//! shrinking): f64 scaled by row exponents and a double with exponent, both
+//! with approximate Gram entries from row copies; a double-double scaled by
+//! row exponents and a double-double with exponent, with 106-bit row copies;
+//! and a double-double on the exact Gram matrix. A rung's result is returned
+//! only once it is proved (0.51, 0.99)-reduced (`proved_by`, the checks of
+//! `l2_verify`): `l2` uses every check, `l2_proof` none that rests on a
+//! published floating-point error bound.
 //!
 //! The state lives in `L2` and nothing is global, so its kernels (one row's
 //! Gram-Schmidt recomputation, one row's size reduction) can be reused by a
@@ -1220,8 +1224,19 @@ impl<F: Flt> L2<F> {
                 if self.work > self.work_limit {
                     return Err(Stop::Work);
                 }
+                // the cap holds for every row at every step: x b_j beyond it
+                // makes b_k - x b_j exceed it too (b_k is within it), so that
+                // is refused before it is computed; the result is checked
+                let pre = x.bits().saturating_add(self.row_bits(j));
+                if pre > self.bits_cap.saturating_add(2) {
+                    return Err(Stop::Bits { bits: pre });
+                }
                 self.mu_sub(k, j, &x);
                 self.sub_row(k, j, &x);
+                let bits = self.row_bits(k);
+                if bits > self.bits_cap {
+                    return Err(Stop::Bits { bits });
+                }
             }
             if !self.exact {
                 self.approx_row(k);
@@ -1301,6 +1316,13 @@ impl<F: Flt> L2<F> {
     /// "dw", "md2".."md4",
     /// "p<bits>", "exact"), or None when it is not reduced.
     pub fn proved_by(&self, wide: bool) -> Option<String> {
+        self.proved_by_with(wide, ProofPath::Default)
+    }
+
+    /// `proved_by`, or (the memory bound's tests) one path of it: the same
+    /// Gram matrix built, then only the multi-double checks, or only the
+    /// exact one.
+    fn proved_by_with(&self, wide: bool, path: ProofPath) -> Option<String> {
         let d = self.basis.len();
         // rows with large entries: the exact Gram matrix in machine words up
         // to 8 limbs an entry (a product costs ~w^2 word multiplications);
@@ -1308,7 +1330,7 @@ impl<F: Flt> L2<F> {
         let g: Vec<Vec<BigInt>> = if self.basis.iter().any(|r| matches!(r, Row::B(_) | Row::W(_))) {
             let rows: Vec<Vec<BigInt>> = self.basis.iter().map(|r| r.to_big()).collect();
             let m = crate::limbs::MagRows::new(&rows);
-            if m.width() > 8 {
+            if m.width() > 8 && path == ProofPath::Default {
                 if !wide && crate::l2_verify::verify_rows_dw(&rows) == crate::l2_verify::Verdict::Proved {
                     return Some("dw-rows".into());
                 }
@@ -1320,8 +1342,18 @@ impl<F: Flt> L2<F> {
         } else {
             (0..d).map(|i| (0..=i).map(|j| self.basis[i].dot(&self.basis[j])).collect()).collect()
         };
-        if let Some(r) = crate::l2_verify::verify_rung(&g, wide) {
-            return Some(r);
+        match path {
+            ProofPath::Default => {
+                if let Some(r) = crate::l2_verify::verify_rung(&g, wide) {
+                    return Some(r);
+                }
+            }
+            ProofPath::MultiDouble => {
+                if let Some(r) = crate::l2_verify::verify_multi_double(&g) {
+                    return Some(r);
+                }
+            }
+            ProofPath::Exact => {}
         }
         #[cfg(test)]
         EXACT_CHECKS.with(|c| c.set(c.get() + 1));
@@ -1482,16 +1514,18 @@ impl<F: Flt> L2<F> {
 
 /// L^2-reduce the independent rows; the result is (0.51, 0.99)-LLL-reduced
 /// and spans the same lattice (only unimodular integer row operations).
-/// Reducedness is proved by the 53-bit interval check, and when that cannot
-/// prove it (typically in dimensions above ~50), decided exactly, which costs
-/// time (O(d^3) big-integer operations). `l2_proof` adds p-bit interval rungs
-/// before the exact check.
+/// Reducedness is proved by the first of: double-word intervals from the rows
+/// (large entries) or multi-double ones; then, on the exact Gram matrix, 53-bit
+/// intervals, double-word intervals, 3- and 4-double expansions; else decided
+/// exactly, which costs time (O(d^3) big-integer operations on values of ~2 d
+/// times the entries' size).
 pub fn l2(basis: Vec<Vec<BigInt>>) -> Result<Vec<Vec<BigInt>>, (Stop, Vec<Vec<BigInt>>)> {
     l2_with(basis, false)
 }
 
-/// `l2` with the full interval chain (53-bit, then p-bit) before the exact
-/// check.
+/// `l2` without the double-word checks (they rest on published error-bound
+/// constants): 53-bit directed intervals and error-free multi-double
+/// expansions (2 to 4 doubles), then p-bit intervals, then the exact check.
 pub fn l2_proof(basis: Vec<Vec<BigInt>>) -> Result<Vec<Vec<BigInt>>, (Stop, Vec<Vec<BigInt>>)> {
     l2_with(basis, true)
 }
@@ -1520,20 +1554,62 @@ fn l2_with(basis: Vec<Vec<BigInt>>, wide: bool) -> Result<Vec<Vec<BigInt>>, (Sto
 struct Meter {
     left: u64,
     bits_cap: u64,
+    /// which proof checks run (all, except in the memory bound's tests)
+    path: ProofPath,
 }
 
 /// `l2` within a budget: the reduction's work (counted by each rung, and the
 /// proof checks' estimated cost) is debited, refusing past what is left;
-/// entries are capped at `cap` bits. The caller reserves the memory of the
-/// basis and of this state (`l2_bytes`) first.
+/// entries are capped at `cap` bits. The work done is debited on every return,
+/// a refusal included, so the budget is a true aggregate quota.
+///
+/// The caller's responsibilities: the rows are linearly independent (a
+/// dependent basis is reported as an internal error) and all of one length;
+/// and the memory of the basis and of this state (`l2_bytes(d, n, cap +
+/// growth)`, growth being a row operation's multiplier, a few bits beyond the
+/// entries) is reserved first. Every input entry is checked against `cap`
+/// before any work; entries are checked again after each size-reduction pass.
 pub fn l2_budgeted(b: &crate::budget::Budget, basis: Vec<Vec<BigInt>>, cap: u64) -> crate::budget::FResult<Vec<Vec<BigInt>>> {
+    l2_budgeted_with(b, basis, cap, ProofPath::Default)
+}
+
+/// Which proof checks run: all of them (`Default`), or, for the memory
+/// bound's tests, which must reach each path, only the multi-double ones
+/// from the exact Gram matrix, or only the exact check (after building the
+/// same Gram matrix).
+#[doc(hidden)]
+#[derive(Clone, Copy, PartialEq, Debug)]
+pub enum ProofPath {
+    Default,
+    MultiDouble,
+    Exact,
+}
+
+/// `l2_budgeted` with the proof forced onto one path: for the memory bound's
+/// tests; not for callers.
+#[doc(hidden)]
+pub fn l2_budgeted_path(b: &crate::budget::Budget, basis: Vec<Vec<BigInt>>, cap: u64, path: ProofPath) -> crate::budget::FResult<Vec<Vec<BigInt>>> {
+    l2_budgeted_with(b, basis, cap, path)
+}
+
+fn l2_budgeted_with(b: &crate::budget::Budget, basis: Vec<Vec<BigInt>>, cap: u64, path: ProofPath) -> crate::budget::FResult<Vec<Vec<BigInt>>> {
+    // every input entry within the cap, before any work (a reduced basis
+    // would otherwise be returned without a row operation checking it)
+    if let Some(bits) = basis.iter().flatten().map(|x| x.bits()).max() {
+        if bits > cap {
+            return Err(b.refuse("l2 bits", bits, cap));
+        }
+    }
     let left = b.work_left();
-    let mut m = Meter { left, bits_cap: cap };
+    let mut m = Meter { left, bits_cap: cap, path };
     let r = l2_run_metered(basis, false, &mut Report::default(), &mut m);
     let used = left - m.left;
+    // the work done is debited whatever the outcome (used <= left, so this
+    // succeeds; on a refusal its result is the refusal's own)
+    let debited = b.debit(Some(used));
     match r {
         Ok(v) => {
-            b.debit(Some(used))?;
+            debited?;
             Ok(v)
         }
         Err((Stop::Work, _)) => Err(b.refuse("l2 work", used.saturating_add(1), left)),
@@ -1543,24 +1619,64 @@ pub fn l2_budgeted(b: &crate::budget::Budget, basis: Vec<Vec<BigInt>>, cap: u64)
     }
 }
 
-/// Bytes for the L^2 state of a d-row basis of length-n rows with entries of
-/// at most `bits` bits: the rows (big integers), their copies and the
-/// Gram-Schmidt data of every rung (doubles and double-doubles), the exact
-/// Gram matrix of the last rung (2 bits + log n bits an entry), and the
-/// proof check's Gram intervals.
+/// Bytes live at the peak of `l2_budgeted` on a d-row basis of length-n rows
+/// with the entry cap `bits`: the reducer's state plus the largest proof
+/// stage, the exact fallback included (a conservative bound: each term is the
+/// most its objects hold, a big integer counted at `big_bytes`).
 pub fn l2_bytes(d: usize, n: usize, bits: u64) -> Option<u64> {
-    use crate::budget::big_bytes;
-    let (d64, n64) = (d as u64, n as u64);
-    let rows = d64.checked_mul(n64)?.checked_mul(big_bytes(bits)?)?;
-    let copies = d64.checked_mul(n64)?.checked_mul(16)?;
-    let tri = d64.checked_mul(d64 + 1)? / 2;
-    let gso = tri.checked_mul(5 * 24)?;
-    let gram = tri.checked_mul(big_bytes(bits.checked_mul(2)?.checked_add(crate::clog2(n64.max(1)) + 1)?)?)?;
-    rows.checked_add(copies)?.checked_add(gso)?.checked_add(gram)
+    use crate::budget::{big_bytes, limbs};
+    // a Vec's header
+    const V: u64 = 24;
+    let (d, n) = (d as u64, n as u64);
+    let tri = d.checked_mul(d + 1)? / 2;
+    let lg = crate::clog2(n.max(1)) + 1;
+    let rowvec = |each: u64| -> Option<u64> { d.checked_mul(V.checked_add(n.checked_mul(each)?)?) };
+    let max = |a: u64, b: u64| a.max(b);
+    // The state, at its largest rung:
+    // - the rows: every entry within the cap at every step (a row operation
+    //   that would pass it is refused first), a result before its check a
+    //   few bits more; limb rows (8 bytes a limb, two of headroom) fit too
+    let entry = big_bytes(bits.checked_add(64)?)?;
+    let rows = rowvec(entry)?;
+    // - the basis the rows were built from, alive while they are, and one
+    //   row converted to big integers inside a row operation
+    let input = rowvec(big_bytes(bits)?)?;
+    let conv = n.checked_mul(entry)?;
+    // - the rows' double-double copies (hi, lo), exponents and norms
+    let copies = rowvec(16)?.checked_add(d.checked_mul(16)?)?;
+    // - the exact rung's Gram matrix, an entry during its update (x^2 G_jj)
+    let ge = big_bytes(bits.checked_mul(4)?.checked_add(2 * lg + 256)?)?;
+    let gram = tri.checked_mul(ge)?.checked_add(d.checked_mul(V)?)?;
+    // - the Gram-Schmidt data: three plain double-double triangles (16
+    //   bytes an entry) and two with exponents (24)
+    let gso = tri.checked_mul(3 * 16 + 2 * 24)?.checked_add(d.checked_mul(5 * V)?)?;
+    let state = rows.checked_add(input)?.checked_add(conv)?.checked_add(copies)?.checked_add(gram)?.checked_add(gso)?;
+    // The proof, with the state alive:
+    // - a clone of the rows and their machine-word copy (MagRows)
+    let clone = rowvec(big_bytes(bits)?)?;
+    let mag = d.checked_mul(2 * V + n.checked_mul(8 * limbs(bits) + 1)?)?;
+    // - row-based intervals (dd-rows: 3-double expansions, 48 bytes, more
+    //   than dw-rows' 24): the entries, the Gram triangle, r and mu
+    let rowiv = d.checked_mul(n)?.checked_add(3 * tri)?.checked_mul(48)?.checked_add(d.checked_mul(3 * V)?)?;
+    let stage_rows = clone.checked_add(mag)?.checked_add(rowiv)?;
+    // - the exact Gram matrix, then the interval Gram-Schmidt on it (r and
+    //   mu as 4-double expansions, 56 bytes an entry, the widest)
+    let g2 = tri.checked_mul(big_bytes(bits.checked_mul(2)?.checked_add(lg + 1)?)?)?.checked_add(d.checked_mul(V)?)?;
+    let iv = tri.checked_mul(2 * 56)?.checked_add(d.checked_mul(2 * V + 8)?)?;
+    let stage_gram = max(clone.checked_add(mag)?.checked_add(g2)?, g2.checked_add(iv)?);
+    // - the exact check: with the Gram matrix still held, a clone of the rows,
+    //   its own full Gram matrix, and the integral Gram-Schmidt data (d + 1
+    //   determinants and the lambda triangle, each at most d (2 bits + lg +
+    //   1) + 64 bits), with a few temporaries twice that
+    let vb = d.checked_mul(bits.checked_mul(2)?.checked_add(lg + 1)?)?.checked_add(64)?;
+    let full = d.checked_mul(d)?.checked_mul(big_bytes(bits.checked_mul(2)?.checked_add(lg + 1)?)?)?.checked_add(d.checked_mul(V)?)?;
+    let integral = (d + 1 + tri).checked_mul(big_bytes(vb)?)?.checked_add(d.checked_mul(V)?)?.checked_add(4u64.checked_mul(big_bytes(vb.checked_mul(2)?)?)?)?;
+    let stage_exact = g2.checked_add(clone)?.checked_add(full)?.checked_add(integral)?;
+    state.checked_add(max(stage_rows, max(stage_gram, stage_exact)))
 }
 
 fn l2_run(basis: Vec<Vec<BigInt>>, wide: bool, rep: &mut Report) -> Result<Vec<Vec<BigInt>>, (Stop, Vec<Vec<BigInt>>)> {
-    l2_run_metered(basis, wide, rep, &mut Meter { left: u64::MAX, bits_cap: u64::MAX })
+    l2_run_metered(basis, wide, rep, &mut Meter { left: u64::MAX, bits_cap: u64::MAX, path: ProofPath::Default })
 }
 
 fn l2_run_metered(basis: Vec<Vec<BigInt>>, wide: bool, rep: &mut Report, m: &mut Meter) -> Result<Vec<Vec<BigInt>>, (Stop, Vec<Vec<BigInt>>)> {
@@ -1614,7 +1730,7 @@ fn rung_step<F: Flt>(mut s: L2<F>, rung: u8, wide: bool, rep: &mut Report, m: &m
                 return Step::Stopped(Stop::Work, s.into_basis());
             }
             let t1 = std::time::Instant::now();
-            let by = s.proved_by(wide);
+            let by = s.proved_by_with(wide, m.path);
             rep.check_secs += t1.elapsed().as_secs_f64();
             let used = match &by {
                 Some(name) => {
@@ -1858,11 +1974,34 @@ mod tests {
         let small = Budget::new(Limits { work: 1000, ..Limits::DEFAULT });
         let e = l2_budgeted(&small, m.clone(), 10_000).unwrap_err();
         assert_eq!(e.what, "l2 work");
+        // a refusal keeps what it did on the budget: a retry has less
+        assert!(small.work_left() < 1000, "refused call debited nothing: {}", small.work_left());
+        // and a bits refusal mid-reduction debits too: entries grow past a
+        // cap set just above the input (a knapsack's first row operations)
+        let mid = Budget::default();
+        let before = mid.work_left();
+        let in_bits = m.iter().flatten().map(|x| x.bits()).max().unwrap();
+        if let Err(e) = l2_budgeted(&mid, m.clone(), in_bits) {
+            if e.what == "l2 bits" {
+                assert!(mid.work_left() < before);
+            }
+        }
         // the knapsack's entries have 100 bits: a 50-bit cap refuses at the
         // first size-reduction pass
         let e = l2_budgeted(&Budget::default(), m.clone(), 50).unwrap_err();
         assert_eq!(e.what, "l2 bits");
         assert!(l2_bytes(30, 31, 100).unwrap() > 30 * 31 * 8);
+        // the cap holds for inputs no row operation touches: one row, an
+        // orthogonal (already reduced) basis; entries at the cap pass
+        let t = BigInt::from(1) << 200usize;
+        let e = l2_budgeted(&Budget::unlimited(), vec![vec![t.clone()]], 50).unwrap_err();
+        assert_eq!(e.what, "l2 bits");
+        let diag = |d: usize, v: &BigInt| -> Vec<Vec<BigInt>> { (0..d).map(|i| (0..d).map(|j| if i == j { v.clone() } else { BigInt::zero() }).collect()).collect() };
+        let e = l2_budgeted(&Budget::unlimited(), diag(4, &t), 50).unwrap_err();
+        assert_eq!(e.what, "l2 bits");
+        let at = (BigInt::from(1) << 50usize) - 1;
+        assert_eq!(l2_budgeted(&Budget::unlimited(), diag(4, &at), 50).unwrap(), diag(4, &at));
+        assert_eq!(l2_budgeted(&Budget::unlimited(), vec![vec![at.clone()]], 50).unwrap(), vec![vec![at]]);
     }
 
     /// The meter covers the work: on inputs whose multipliers x span many
@@ -1923,6 +2062,58 @@ mod tests {
         s.run().unwrap();
         let actual = ACTUAL_LIMB_OPS.with(|c| c.get());
         assert!(actual > 0 && s.work >= actual, "exact rung: work {} < actual {actual}", s.work);
+    }
+
+    /// The memory bound: the peak of live heap bytes during `l2_budgeted`
+    /// (measured by the tests' counting allocator, per thread, so other tests
+    /// don't count) never exceeds `l2_bytes(d, n, cap)`, over shapes whose
+    /// proofs take each path: 53-bit and double-word intervals, double-word
+    /// intervals from the rows (entries over 8 limbs), multi-double
+    /// expansions, and the exact check (the last two forced).
+    #[test]
+    fn l2_memory_stays_within_l2_bytes() {
+        use crate::budget::Budget;
+        let mut seed = 0x6d65_6d6f_7279_6232u64;
+        let mut big = |bits: u64| {
+            let mut x = BigInt::from(1);
+            for _ in 0..bits / 64 {
+                seed ^= seed << 13;
+                seed ^= seed >> 7;
+                seed ^= seed << 17;
+                x = (x << 64usize) + BigInt::from(seed);
+            }
+            x << (bits % 64) as usize
+        };
+        let mut knap = |d: usize, bits: u64| -> Vec<Vec<BigInt>> { (0..d).map(|i| std::iter::once(big(bits)).chain((0..d).map(|j| BigInt::from((i == j) as i64))).collect()).collect() };
+        let k20 = knap(20, 100);
+        let k60 = knap(60, 200);
+        let k30 = knap(30, 150);
+        let k25 = knap(25, 120);
+        let mut tri = |d: usize, bits: u64| -> Vec<Vec<BigInt>> {
+            (0..d).map(|i| (0..d).map(|j| if j < i { big(bits) } else if j == i { big(bits + 8) } else { BigInt::zero() }).collect()).collect()
+        };
+        let t12 = tri(12, 1000);
+        let t10 = tri(10, 600);
+        let t10b = tri(10, 800);
+        let cases = [
+            ("knapsack d20 (53-bit)", k20, ProofPath::Default),
+            ("knapsack d60 (double-word)", k60, ProofPath::Default),
+            ("triangular d12, 1000 bits (from the rows)", t12, ProofPath::Default),
+            ("knapsack d30 (multi-double)", k30, ProofPath::MultiDouble),
+            ("triangular d10, 600 bits (multi-double)", t10, ProofPath::MultiDouble),
+            ("knapsack d25 (exact)", k25, ProofPath::Exact),
+            ("triangular d10, 800 bits (exact)", t10b, ProofPath::Exact),
+        ];
+        for (name, m, path) in cases {
+            let (d, n) = (m.len(), m[0].len());
+            let cap = m.iter().flatten().map(|x| x.bits()).max().unwrap() + 64;
+            let bound = l2_bytes(d, n, cap).unwrap() as i64;
+            let b = Budget::unlimited();
+            let (r, peak) = crate::alloc_spy::peak_during(|| l2_budgeted_path(&b, m, cap, path).map(|v| v.len()));
+            assert_eq!(r.map_err(|e| e.what), Ok(d), "{name}");
+            assert!(peak <= bound, "{name}: peak {peak} bytes > l2_bytes {bound}");
+            eprintln!("{name}: peak {peak} of {bound} bytes ({:.1}%)", 100.0 * peak as f64 / bound as f64);
+        }
     }
 
     #[test]

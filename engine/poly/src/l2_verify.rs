@@ -168,7 +168,11 @@ fn fmul_up(a: Fe, b: Fe) -> Fe {
 /// beyond N after renormalization, neglected high-order products, a
 /// division's remainder) is returned as a bound and goes into the interval's
 /// radius. So the radius alone carries every error, and how well the terms
-/// are renormalized affects only the width, never the rigor.
+/// are renormalized affects only the width, never the rigor. No published
+/// error-bound constant enters: the bounds are elementary (`abs_sum_up`), and
+/// a product of two small terms that underflows (two_prod is error-free only
+/// above 2^-969) loses at most 2^-1074 each, covered by an absolute 2^-1000
+/// (at the expansion's scale) in every product's and quotient's bound.
 #[derive(Clone, Copy, Debug)]
 struct Ex<const N: usize> {
     t: [f64; N],
@@ -378,7 +382,8 @@ impl<const N: usize> Ex<N> {
         }
         let e = self.e + o.e;
         let (r, bnd) = Ex::from_terms(&w, e);
-        (r, fadd_up(bnd, up(Fe::norm_pub(neglected * (1.0 + p2(-40)), e))))
+        // (plus what underflowing products lost, below 2^-1074 each)
+        (r, fadd_up(fadd_up(bnd, up(Fe::norm_pub(neglected * (1.0 + p2(-40)), e))), Fe::norm_pub(1.0, e - 1000)))
     }
 
     /// self / o (o != 0): N quotient digits by exact remainders; the bound
@@ -420,7 +425,11 @@ impl<const N: usize> Ex<N> {
             q.push(0.0);
         }
         let (qx, bnd) = Ex::from_terms(&q, self.e - o.e);
-        Some((qx, fadd_up(bnd, up(Fe::norm_pub(rr, self.e - o.e)))))
+        // (the remainder steps' products may underflow too: at most an
+        // absolute 2^-1000 at the dividend's scale, so 2^-1000 / olo in the
+        // quotient, olo ~ 0.5 as o's leading term is in [0.5, 1))
+        let uf = Fe::norm_pub(p2(-1000) / olo * (1.0 + p2(-40)), self.e - o.e);
+        Some((qx, fadd_up(fadd_up(bnd, up(Fe::norm_pub(rr, self.e - o.e))), up(uf))))
     }
 
     /// lower / upper bounds of the value as doubles with exponent
@@ -1100,8 +1109,25 @@ pub fn verify_gram(g: &[Vec<BigInt>], wide: bool) -> Verdict {
     if verify_rung(g, wide).is_some() { Verdict::Proved } else { Verdict::Inconclusive }
 }
 
-/// Which interval rung proved the rows reduced ("53", "dd", "p<bits>"), or
-/// None when none did.
+/// The multi-double checks alone (2, 3 and 4 doubles), for the memory
+/// bound's tests of that path.
+pub fn verify_multi_double(g: &[Vec<BigInt>]) -> Option<String> {
+    if verify_mn::<2>(g) == Verdict::Proved {
+        return Some("md2".into());
+    }
+    if verify_mn::<3>(g) == Verdict::Proved {
+        return Some("md3".into());
+    }
+    if verify_mn::<4>(g) == Verdict::Proved {
+        return Some("md4".into());
+    }
+    None
+}
+
+/// Which interval rung proved the rows reduced on the exact Gram matrix
+/// ("53", "dw", "md2" to "md4", "p<bits>"), or None when none did. With `wide`
+/// (proof mode) dw is never tried (it rests on published error-bound
+/// constants); md2 to md4 and p-bit are.
 pub fn verify_rung(g: &[Vec<BigInt>], wide: bool) -> Option<String> {
     let d = g.len();
     let z = Iv::around(0.0);
@@ -1207,6 +1233,16 @@ mod tests {
     /// Both interval types prove a reduced basis and refuse one failing size
     /// reduction, one failing Lovasz, a dependent one, and mu = 0.510001 just
     /// above eta; mu = 0.5 exactly and entries near 2^200 are proved.
+    /// The sizes `l2::l2_bytes` counts for the interval types (bytes an
+    /// entry): 3- and 4-double intervals at most 48 and 56, a double-word
+    /// interval at most 24.
+    #[test]
+    fn interval_type_sizes_match_the_memory_bound() {
+        assert!(std::mem::size_of::<Mn<3>>() <= 48 && std::mem::size_of::<Mn<4>>() <= 56);
+        assert!(std::mem::size_of::<Mn<2>>() <= 48 && std::mem::size_of::<Dr>() <= 24);
+        assert!(std::mem::size_of::<Iv>() <= 56);
+    }
+
     #[test]
     fn proves_and_refuses() {
         use Verdict::*;
