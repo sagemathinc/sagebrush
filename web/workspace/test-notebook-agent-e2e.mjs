@@ -219,17 +219,16 @@ try {
   ok(await fromFiles(left) && await until(`!${shownIs("Made by the agent")} && ${sources}.includes("x = 3")`, 15000), "(the person opens their own notebook again, from Files)");
   await ev(`(${barButton("Open Made by the agent.ipynb")}.click(), true)`);
   ok(await until(shownIs("Made by the agent"), 15000) && await ev("performance.timeOrigin") === origin0, "the bar's Open opens the agent's notebook, in place");
-  // (the person's open wins: an agent's notebook created while the person's open is under way never replaces it after)
+  // (the person's open wins: the agent's notebook, its open held before it attaches, never replaces a notebook the person
+  //  opened meanwhile)
   ok(await fromFiles(left) && await until(`!${shownIs("Made by the agent")}`, 15000), "(the person's own notebook again)");
-  await ev(`(() => { window.sagebrush.shareTest.beforeAttach = () => { window.sagebrush.shareTest.beforeAttach = undefined; return new Promise((r) => (window.__attachGo = r)); }; return true; })()`);
-  ok(await fromFiles("Made by the agent.ipynb") && await until("typeof window.__attachGo === 'function'", 10000), "(the person opens the agent's first notebook: held as it attaches)");
+  await ev(`(() => { window.sagebrush.shareTest.beforeLeave = () => { window.sagebrush.shareTest.beforeLeave = undefined; return new Promise((r) => (window.__leaveGo = r)); }; return true; })()`);
   const RACE = "print('created meanwhile')";
-  ok(!!(await make("Created meanwhile", [RACE])).ok, "the agent creates another meanwhile");
-  await sleep(500);
-  await ev("(window.__attachGo(), delete window.__attachGo, true)");
-  ok(await until(shownIs("Made by the agent"), 15000), "(the person's open completes)");
+  ok(!!(await make("Created meanwhile", [RACE])).ok && await until("typeof window.__leaveGo === 'function'", 10000), "the agent creates another: its open held before it attaches");
+  ok(await fromFiles("Made by the agent.ipynb") && await until(shownIs("Made by the agent"), 15000), "(meanwhile the person opens the agent's first notebook)");
+  await ev("(window.__leaveGo(), delete window.__leaveGo, true)");
   await sleep(3000);
-  ok(await ev(shownIs("Made by the agent")) && !(await ev(`${sources}.includes(${JSON.stringify(RACE)})`)), "the person's open wins: the agent's notebook created meanwhile doesn't replace it", { title: await ev("document.title") });
+  ok(await ev(shownIs("Made by the agent")) && !(await ev(`${sources}.includes(${JSON.stringify(RACE)})`)), "the person's open wins: the agent's notebook doesn't replace it after", { title: await ev("document.title") });
   ok(await until(`!!${barButton("Open Created meanwhile.ipynb")}`, 5000), "…it is offered in the bar's Open instead");
   const mf = await drive({ op: "req", method: "workspace.create", params: { path: (folder === "/" ? "" : folder) + "/agent-notes.txt", content: { text: "notes" } } });
   ok(!!mf.ok && await until(`!!${barButton("Open agent-notes.txt")}`, 5000), "a data file it creates: the bar's Open names it", mf);
