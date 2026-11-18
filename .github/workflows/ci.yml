@@ -543,6 +543,13 @@ jobs:
             cp "$RUNNER_TEMP/size-merge/sizes.json" "$RUNNER_TEMP/size-records/merge-record.json"
             node scripts/size-measure.mjs --gate --records "$RUNNER_TEMP/size-records" --out "$RUNNER_TEMP/size-records/size-gate.json"
           fi
+      # Report-only, in the job summary: no pull-request write permission and
+      # no mutation of the contributor's branch. `always()` preserves advice
+      # when the authoritative gate rejects a short or loose marker.
+      - name: suggested growth-marker advice
+        if: always() && github.event_name == 'pull_request'
+        continue-on-error: true
+        run: node scripts/size-advice.mjs --core "$RUNNER_TEMP/size-records/size-gate.json"
       # (report-only: it reads the two npm-pack records and appends a table to
       # the summary; the gate's result stays the gate step's own)
       - name: the npm package metrics
