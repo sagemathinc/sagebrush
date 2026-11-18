@@ -2150,10 +2150,17 @@ class Matrix:
         return [list(r[:n]) for r in rows], [list(r[n:]) for r in rows]
 
     def LLL(self, delta=None, **kwds):
-        """The LLL-reduced basis of the lattice spanned by the rows, with
-        delta = 99/100 (so also reduced for any smaller delta); a delta
-        above 99/100 is NotImplementedError, one outside (1/4, 1] a
-        ValueError (it was ignored: the systematic review's LIN-F3).
+        """An LLL-reduced basis of the lattice spanned by the rows,
+        (eta, delta) = (0.51, 0.99)-reduced and proved so (so also reduced
+        for any smaller delta); a delta above 99/100 is
+        NotImplementedError, one outside (1/4, 1] a ValueError (it was
+        ignored: the systematic review's LIN-F3).
+
+        This diverges from SageMath: Sagebrush reduces with its own
+        floating-point L^2 algorithm (an exact LLL as its fallback), and a
+        lattice has many LLL-reduced bases, so the basis returned can
+        differ from SageMath's for the same matrix. Both are reduced bases
+        of the same lattice.
 
         EXAMPLES::
 

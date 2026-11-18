@@ -324,17 +324,45 @@ pub fn l2_route(d: usize, w: usize, e: u64, held: u64, rows: impl Fn(usize, usiz
     if p2 > p0 {
         return None;
     }
+    forced(L2Route { cap, state, kept }, e)
+}
+
+/// The L^2 route for a caller with no cut (`reduce`), or None for the exact
+/// LLL. The caller's rows stay charged through either route, so their whole
+/// peaks are the rows with L^2's state and the rows with the exact LLL's
+/// state: L^2 is chosen when its state is no larger. The choice is made
+/// before L^2 runs, never by retrying after a refusal. Every term is
+/// checked; one that doesn't fit in u64 gives the exact LLL. (`kept` is 0:
+/// there is no cut.)
+pub fn l2_route_plain(d: usize, w: usize, e: u64) -> Option<L2Route> {
+    #[cfg(test)]
+    if FORCE.with(|f| f.get()) == Force::Exact {
+        return None;
+    }
+    let cap = l2_cap(d, e)?;
+    let state = crate::l2::l2_bytes(d, w, cap)?;
+    let lx = lattice_bytes(d, w, cap_bits(d, e)?)?;
+    if state > lx {
+        return None;
+    }
+    forced(L2Route { cap, state, kept: 0 }, e)
+}
+
+/// The route as chosen, or (tests) made to stop: a cap below the input's
+/// entries, or at the largest of them.
+#[allow(unused_variables)]
+fn forced(r: L2Route, e: u64) -> Option<L2Route> {
     #[cfg(test)]
     if FORCE.with(|f| f.get()) == Force::Bits {
         // below the largest input entry: L^2 stops at its entry check
-        return Some(L2Route { cap: e.checked_sub(1)?, state, kept });
+        return Some(L2Route { cap: e.checked_sub(1)?, ..r });
     }
     #[cfg(test)]
     if FORCE.with(|f| f.get()) == Force::BitsInRun {
         // no entry may grow past the input's largest
-        return Some(L2Route { cap: e, state, kept });
+        return Some(L2Route { cap: e, ..r });
     }
-    Some(L2Route { cap, state, kept })
+    Some(r)
 }
 
 /// The product of `parts`, plus one: a work estimate (None on overflow).
@@ -419,6 +447,51 @@ pub fn cut(b: &Budget, rows: &[Vec<BigInt>], t: &BigInt, c: u64) -> FResult<(usi
         s -= 1;
     }
     Ok((s, exact.map(|x| x.1.bytes())))
+}
+
+/// Bytes for d rows of w big integers of at most `bits` bits (the rows'
+/// own charge in `reduce`).
+pub fn basis_bytes(d: usize, w: usize, bits: u64) -> Option<u64> {
+    (d as u64).checked_mul(w as u64)?.checked_mul(big_bytes(bits)?)?.checked_add((d as u64).checked_mul(48)?)
+}
+
+/// LLL-reduce the rows (independent, of one length) within `b`, for a
+/// caller with no cut: the rows are charged first; on the L^2 route
+/// (`l2_route_plain`), L^2's state is reserved, then L^2 runs on a copy while the
+/// rows stay charged; when it stops on its cap or its proof, its state is
+/// gone and the exact LLL starts over from the rows (its state reserved
+/// before the rows' charge is handed to it). Every other stop ends the call.
+pub fn reduce(b: &Budget, rows: Vec<Vec<BigInt>>) -> FResult<Vec<Vec<BigInt>>> {
+    let d = rows.len();
+    if d < 2 {
+        return Ok(rows);
+    }
+    let w = rows[0].len();
+    let e = rows.iter().map(|x| crate::maxbits(x)).max().unwrap_or(0);
+    let held = b.reserve(basis_bytes(d, w, e))?;
+    if let Some(rt) = l2_route_plain(d, w, e) {
+        let state = b.reserve(Some(rt.state))?;
+        let r = crate::l2::l2_budgeted_typed(b, rows.clone(), rt.cap);
+        drop(state);
+        match r {
+            Ok(basis) => {
+                #[cfg(test)]
+                L2_REDUCED.with(|c| c.set(c.get() + 1));
+                return Ok(basis);
+            }
+            Err(crate::l2::L2Err::Fallback(_)) => {
+                #[cfg(test)]
+                FALLBACKS.with(|c| c.set(c.get() + 1));
+            }
+            Err(crate::l2::L2Err::Refused(e)) => return Err(e),
+        }
+    }
+    let cap = cap_bits(d, e).ok_or_else(|| b.refuse("lll bits (overflow)", u64::MAX, 0))?;
+    let l = b.reserve(lattice_bytes(d, w, cap))?;
+    drop(held);
+    let r = lll(b, rows, cap)?;
+    drop(l);
+    Ok(r.basis)
 }
 
 #[cfg(test)]
@@ -541,6 +614,122 @@ mod tests {
                     .collect()
             })
             .collect()
+    }
+
+    /// `reduce` (callers with no cut, such as `matrix.LLL()`): every route
+    /// gives a certified reduced basis of the input's lattice (the exact
+    /// certificate: the same lattice, (0.51, 0.99)-reduced); a forced stop
+    /// on the cap (at the entry, or after the run) or on the proof falls back
+    /// to the exact LLL from the original rows; nothing stays reserved and
+    /// the thread's live heap is back where it was; a work limit refuses
+    /// without falling back.
+    #[test]
+    fn reduce_certifies_every_route() {
+        let mut seed = 0x0bad_5eed_1234_5678u64;
+        let count = || (FALLBACKS.with(|c| c.get()), L2_REDUCED.with(|c| c.get()));
+        let mut any_routed = false;
+        for &(d, bits) in &[(6usize, 30u32), (16, 120), (30, 400)] {
+            let m = knapsack(d, bits, &mut seed);
+            let (w, e) = (m[0].len(), m.iter().flatten().map(|x| x.bits()).max().unwrap());
+            let routed = l2_route_plain(d, w, e).is_some();
+            any_routed |= routed;
+            for force in [Force::Auto, Force::Exact, Force::Bits, Force::BitsInRun, Force::Precision] {
+                FORCE.with(|f| f.set(force));
+                let (fb0, l20) = count();
+                let b = Budget::unlimited();
+                let before = crate::alloc_spy::live();
+                let out = reduce(&b, m.clone());
+                FORCE.with(|f| f.set(Force::Auto));
+                let out = out.unwrap();
+                assert_eq!(crate::lll_cert::certify(&m, &out, (51, 100), (99, 100)), Ok(()), "d {d}, {force:?}");
+                assert_eq!(b.live(), 0, "d {d}, {force:?}");
+                drop(out);
+                assert_eq!(crate::alloc_spy::live(), before, "d {d}, {force:?}: allocations left live");
+                let (fb, l2) = count();
+                let (fb, l2) = (fb - fb0, l2 - l20);
+                let want = match (force, routed) {
+                    (Force::Exact, _) | (_, false) => (0, 0),
+                    (Force::Auto, true) => (0, 1),
+                    _ => (1, 0),
+                };
+                assert_eq!((fb, l2), want, "d {d}, {force:?}, routed {routed}");
+            }
+        }
+        assert!(any_routed, "no case took the L^2 route");
+        // the work limit ends the call: L^2's own refusal, not a fallback
+        let m = knapsack(16, 120, &mut seed);
+        let e = m.iter().flatten().map(|x| x.bits()).max().unwrap();
+        assert!(l2_route_plain(16, 17, e).is_some(), "the work witness must take the L^2 route");
+        let b = Budget::new(Limits { work: 10, ..Limits::UNLIMITED });
+        let fb0 = FALLBACKS.with(|c| c.get());
+        let e = reduce(&b, m).unwrap_err();
+        assert_eq!(e.what, "l2 work", "{e}");
+        assert_eq!(FALLBACKS.with(|c| c.get()), fb0, "a work refusal fell back");
+        assert_eq!(b.live(), 0);
+    }
+
+    /// `reduce`'s memory admission is never worse than the exact LLL's: for
+    /// each shape, the exact LLL's whole peak (the rows held with its state)
+    /// admits; so does the chosen route's own peak, and exactly that peak is
+    /// the Budget's; one byte less refuses with a memory refusal; nothing
+    /// stays reserved and the live heap is back where it was. One shape is
+    /// rows (identity | 10^60 + i), whose L^2 state is larger than the
+    /// exact LLL's, so the exact LLL runs; one takes the L^2 route.
+    #[test]
+    fn reduce_admits_what_the_exact_lll_admits() {
+        let big = BigInt::from(10u32).pow(60);
+        let wide: Vec<Vec<BigInt>> = (0..5u64)
+            .map(|i| {
+                let mut r: Vec<BigInt> = (0..5u64).map(|j| BigInt::from((i == j) as u8)).collect();
+                r.push(&big + BigInt::from(i));
+                r
+            })
+            .collect();
+        let mut seed = 0x5eed_0f_ad_15_51_0bu64;
+        let mut kinds = vec![];
+        for m in [wide, knapsack(30, 400, &mut seed)] {
+            let (d, w) = (m.len(), m[0].len());
+            let e = m.iter().flatten().map(|x| x.bits()).max().unwrap();
+            let h = basis_bytes(d, w, e).unwrap();
+            let lx = lattice_bytes(d, w, cap_bits(d, e).unwrap()).unwrap();
+            let route = l2_route_plain(d, w, e);
+            kinds.push(route.is_some());
+            let peak = h + route.map_or(lx, |r| r.state);
+            assert!(peak <= h + lx, "d {d}: the chosen route's peak is above the exact LLL's");
+            for (limit, admits) in [(h + lx, true), (peak, true), (peak - 1, false)] {
+                let b = Budget::new(Limits { memory: limit, ..Limits::UNLIMITED });
+                let before = crate::alloc_spy::live();
+                let r = reduce(&b, m.clone());
+                if admits {
+                    let out = r.unwrap_or_else(|e| panic!("d {d}, limit {limit}: {e}"));
+                    assert_eq!(crate::lll_cert::certify(&m, &out, (51, 100), (99, 100)), Ok(()), "d {d}");
+                    assert_eq!(b.peak(), peak, "d {d}: the Budget's peak");
+                } else {
+                    let e = r.unwrap_err();
+                    assert_eq!(e.what, "memory", "d {d}: {e}");
+                    assert_eq!(e.need - e.remaining, 1, "d {d}: {e}");
+                }
+                assert_eq!(b.live(), 0);
+                assert_eq!(crate::alloc_spy::live(), before, "d {d}, limit {limit}: allocations left live");
+            }
+        }
+        assert_eq!(kinds, vec![false, true], "one exact shape, one L^2 shape");
+    }
+
+    /// An LLL reduction's refusals name it: a resource limit starts "LLL:"
+    /// and ends "not reduced", with the memory share as "this reduction's";
+    /// an internal error starts with its own recognized prefix; a
+    /// factorization's wording is unchanged.
+    #[test]
+    fn lll_refusals_name_the_reduction() {
+        let b = Budget::new(Limits { memory: 1000, ..Limits::UNLIMITED });
+        let r = b.refuse("memory", 2000, 1000);
+        let m = r.message(&crate::budget::LLL);
+        assert!(m.starts_with("LLL: resource limit exceeded (memory in ") && m.ends_with("); not reduced"), "{m}");
+        assert_eq!(r.to_string(), r.message(&crate::budget::FACTOR));
+        assert!(r.to_string().starts_with("factor: resource limit exceeded") && r.to_string().ends_with("); not factored"));
+        let i = b.internal("an invariant").message(&crate::budget::LLL);
+        assert!(i.starts_with(crate::budget::LLL_INTERNAL_PREFIX) && i.contains("please report it") && i.ends_with("not reduced"), "{i}");
     }
 
     /// The route's and the cut's sizes fail closed: a shape whose figure
