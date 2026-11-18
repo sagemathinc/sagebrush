@@ -26,7 +26,9 @@ const frame = (body: Buffer, more: boolean, command = false) => {
   return Buffer.concat([h, body]);
 };
 
-/** A DEALER connected to port: send(frames), and the next message's frames. */
+/** A DEALER connected to port: send(frames), and the next message's frames. Connected once the peer has sent
+ * its ZMTP greeting, so something else holding the port (closing the connection, or silent for 2 s) is not
+ * taken for the kernel. */
 function dealer(port: number): Promise<{ send(f: Buffer[]): void; next(): Promise<Buffer[]>; close(): void }> {
   return new Promise((res, rej) => {
     const s = net.connect(port, "127.0.0.1");
@@ -38,23 +40,26 @@ function dealer(port: number): Promise<{ send(f: Buffer[]): void; next(): Promis
     g[10] = 3;
     g[11] = 1;
     g.write("NULL", 12, "ascii");
-    s.on("error", rej);
+    const silent = setTimeout(() => (s.destroy(), rej(new Error("no ZMTP greeting"))), 2000);
+    s.on("error", (e) => (clearTimeout(silent), rej(e)));
+    s.on("close", () => (clearTimeout(silent), rej(new Error("closed before the ZMTP greeting"))));
     s.on("connect", () => {
       const name = Buffer.from("READY"), key = Buffer.from("Socket-Type"), val = Buffer.from("DEALER"), len = Buffer.alloc(4);
       len.writeUInt32BE(val.length);
       s.write(Buffer.concat([g, frame(Buffer.concat([Buffer.from([name.length]), name, Buffer.from([key.length]), key, len, val]), false, true)]));
-      res({
-        send: (f) => s.write(Buffer.concat(f.map((x, i) => frame(x, i < f.length - 1)))),
-        next: () => new Promise((r) => (messages.length ? r(messages.shift()!) : waiting.push(r))),
-        close: () => s.destroy(),
-      });
     });
     s.on("data", (d: Buffer) => {
       buf = Buffer.concat([buf, d]);
       if (!greeted) {
         if (buf.length < 64) return;
         greeted = true;
+        clearTimeout(silent);
         buf = buf.subarray(64);
+        res({
+          send: (f) => s.write(Buffer.concat(f.map((x, i) => frame(x, i < f.length - 1)))),
+          next: () => new Promise((r) => (messages.length ? r(messages.shift()!) : waiting.push(r))),
+          close: () => s.destroy(),
+        });
       }
       for (;;) {
         if (buf.length < 2) return;
