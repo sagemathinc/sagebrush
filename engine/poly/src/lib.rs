@@ -1347,6 +1347,11 @@ pub(crate) mod alloc_spy {
         BYTES.with(|b| b.get())
     }
 
+    /// This thread's live bytes now.
+    pub fn live() -> i64 {
+        LIVE.with(|l| l.get())
+    }
+
     /// Run f; the peak of this thread's live bytes during it, above the
     /// live bytes at its start.
     pub fn peak_during<T>(f: impl FnOnce() -> T) -> (T, i64) {

@@ -618,58 +618,74 @@ fn limbs(bits: u64) -> u64 {
     bits.div_ceil(64).max(1)
 }
 
-/// The L^2 state for one basis (independent rows).
-pub struct L2<F: Flt = Fe> {
-    pub basis: Vec<Row>,
-    /// Gram entries exact (maintained under row operations) or approximate
-    /// (dot products of the rows' floating-point copies, recomputed exactly
-    /// when they cancel)
-    exact: bool,
-    /// exact mode: the Gram matrix, lower triangle g[i][j] (j <= i)
-    g: Vec<Vec<BigInt>>,
-    /// approximate mode: row i ~ ap[i] * 2^ex[i] (doubles of at most 63-bit
-    /// integers), with nrm[i] = sum ap[i][t]^2
-    ap: Vec<Vec<f64>>,
-    /// with double-double rungs (F::WIDE), the copies have 106 bits:
-    /// row i ~ (ap[i] + al[i]) 2^ex[i], both parts exact doubles
-    al: Vec<Vec<f64>>,
-    ex: Vec<i64>,
-    nrm: Vec<f64>,
-    /// the fast rung (approximate mode): the Gram-Schmidt data as plain doubles
-    /// scaled by the row exponents, r64[k][j] = r_kj 2^-(e_k + e_j) and
-    /// mu64[k][j] = mu_kj 2^-(e_k - e_j), s64 likewise 2^-2e_k; the recurrences
-    /// are then the plain ones (every term of row k's carries the same scale)
-    fast: bool,
-    /// the fast rung's scaled Gram entries G_ij 2^-(e_i + e_j), lower
-    /// triangle, cached (NaN = to compute): a swap moves them with the rows,
-    /// a change of row i's integers invalidates row and column i
-    gh: Vec<Vec<F::P>>,
-    r64: Vec<Vec<F::P>>,
-    mu64: Vec<Vec<F::P>>,
-    s64: F::P,
-    r: Vec<Vec<F>>,
-    mu: Vec<Vec<F>>,
-    /// s = G_kk - sum_{i < k-1} mu_ki r_ki for the row last recomputed: the
-    /// squared norm of b_k's projection orthogonal to b_0..b_{k-2}, which the
-    /// Lovasz test needs (one subtraction short of r_kk, whose cancellation
-    /// can be complete before the test passes)
-    s_last: F,
-    /// eta', delta' in the floating-point tests
-    eta: f64,
-    delta: f64,
-    /// work done so far in limb operations (an upper estimate: the
-    /// Gram-Schmidt row and Gram entries of each size-reduction pass, and
-    /// every row operation's limbs), and the limit and entry cap a caller's
-    /// budget sets (no limit by default)
-    pub work: u64,
-    pub work_limit: u64,
-    pub bits_cap: u64,
-    /// exact dot products the approximate Gram entries fell back to (in
-    /// `&self` methods), folded into `work` after each pass
-    side: std::cell::Cell<u64>,
-    /// statistics, for tests and tuning
-    pub swaps: u64,
-    pub reductions: u64,
+/// Declares an item `pub` in tests or with the `bench` feature (the
+/// benchmarks drive the reducer's rungs themselves), `pub(crate)` otherwise:
+/// a build that ships has no way into the reducer but `l2_budgeted`.
+macro_rules! bench_pub {
+    ($(#[$m:meta])* struct $($rest:tt)*) => {
+        $(#[$m])*
+        #[cfg(any(test, feature = "bench"))]
+        pub struct $($rest)*
+        $(#[$m])*
+        #[cfg(not(any(test, feature = "bench")))]
+        pub(crate) struct $($rest)*
+    };
+}
+
+bench_pub! {
+    /// The L^2 state for one basis (independent rows).
+    struct L2<F: Flt = Fe> {
+        pub basis: Vec<Row>,
+        /// Gram entries exact (maintained under row operations) or approximate
+        /// (dot products of the rows' floating-point copies, recomputed exactly
+        /// when they cancel)
+        exact: bool,
+        /// exact mode: the Gram matrix, lower triangle g[i][j] (j <= i)
+        g: Vec<Vec<BigInt>>,
+        /// approximate mode: row i ~ ap[i] * 2^ex[i] (doubles of at most 63-bit
+        /// integers), with nrm[i] = sum ap[i][t]^2
+        ap: Vec<Vec<f64>>,
+        /// with double-double rungs (F::WIDE), the copies have 106 bits:
+        /// row i ~ (ap[i] + al[i]) 2^ex[i], both parts exact doubles
+        al: Vec<Vec<f64>>,
+        ex: Vec<i64>,
+        nrm: Vec<f64>,
+        /// the fast rung (approximate mode): the Gram-Schmidt data as plain doubles
+        /// scaled by the row exponents, r64[k][j] = r_kj 2^-(e_k + e_j) and
+        /// mu64[k][j] = mu_kj 2^-(e_k - e_j), s64 likewise 2^-2e_k; the recurrences
+        /// are then the plain ones (every term of row k's carries the same scale)
+        fast: bool,
+        /// the fast rung's scaled Gram entries G_ij 2^-(e_i + e_j), lower
+        /// triangle, cached (NaN = to compute): a swap moves them with the rows,
+        /// a change of row i's integers invalidates row and column i
+        gh: Vec<Vec<F::P>>,
+        r64: Vec<Vec<F::P>>,
+        mu64: Vec<Vec<F::P>>,
+        s64: F::P,
+        r: Vec<Vec<F>>,
+        mu: Vec<Vec<F>>,
+        /// s = G_kk - sum_{i < k-1} mu_ki r_ki for the row last recomputed: the
+        /// squared norm of b_k's projection orthogonal to b_0..b_{k-2}, which the
+        /// Lovasz test needs (one subtraction short of r_kk, whose cancellation
+        /// can be complete before the test passes)
+        s_last: F,
+        /// eta', delta' in the floating-point tests
+        eta: f64,
+        delta: f64,
+        /// work done so far in limb operations (an upper estimate: the
+        /// Gram-Schmidt row and Gram entries of each size-reduction pass, and
+        /// every row operation's limbs), and the limit and entry cap a caller's
+        /// budget sets (no limit by default)
+        pub work: u64,
+        pub work_limit: u64,
+        pub bits_cap: u64,
+        /// exact dot products the approximate Gram entries fell back to (in
+        /// `&self` methods), folded into `work` after each pass
+        side: std::cell::Cell<u64>,
+        /// statistics, for tests and tuning
+        pub swaps: u64,
+        pub reductions: u64,
+    }
 }
 
 fn dot(x: &[BigInt], y: &[BigInt]) -> BigInt {
@@ -1303,6 +1319,7 @@ impl<F: Flt> L2<F> {
         self.g[b][b] = gaa;
     }
 
+    #[cfg(any(test, feature = "bench"))]
     /// Whether the current basis is (0.51, 0.99)-reduced, by `proved_by`'s
     /// chain: for rows with large entries, intervals from the rows (double-word,
     /// then multi-double); then on the exact Gram matrix 53-bit, double-word
@@ -1313,6 +1330,7 @@ impl<F: Flt> L2<F> {
         self.proved_by(wide).is_some()
     }
 
+    #[cfg(any(test, feature = "bench"))]
     /// The check that proved the basis reduced ("dw-rows", "dd-rows", "53",
     /// "dw", "md2".."md4",
     /// "p<bits>", "exact"), or None when it is not reduced.
@@ -1399,7 +1417,7 @@ impl<F: Flt> L2<F> {
     fn check_stages(&self, wide: bool) -> Vec<(&'static str, u64)> {
         let (d, n) = (self.basis.len() as u64, self.row_len());
         let lb = limbs((0..self.basis.len()).map(|i| self.row_bits(i)).max().unwrap_or(0));
-        let g2 = d.saturating_mul(d.saturating_add(1)) / 2 * n;
+        let g2 = (d.saturating_mul(d.saturating_add(1)) / 2).saturating_mul(n);
         let d3 = d.saturating_mul(d).saturating_mul(d) / 3 + 1;
         let mut v = vec![];
         if lb > 8 {
@@ -1460,11 +1478,13 @@ impl<F: Flt> L2<F> {
         }
     }
 
+    #[cfg(any(test, feature = "bench"))]
     /// The exact dot product of rows i and j.
     pub fn dot_rows(&self, i: usize, j: usize) -> BigInt {
         self.basis[i].dot(&self.basis[j])
     }
 
+    #[cfg(any(test, feature = "bench"))]
     /// Row i as big integers.
     pub fn row_big(&self, i: usize) -> Vec<BigInt> {
         self.basis[i].to_big()
@@ -1525,6 +1545,7 @@ impl<F: Flt> L2<F> {
 /// intervals, double-word intervals, 3- and 4-double expansions; else decided
 /// exactly, which costs time (O(d^3) big-integer operations on values of ~2 d
 /// times the entries' size).
+#[cfg(any(test, feature = "bench"))]
 pub fn l2(basis: Vec<Vec<BigInt>>) -> Result<Vec<Vec<BigInt>>, (Stop, Vec<Vec<BigInt>>)> {
     l2_with(basis, false)
 }
@@ -1532,6 +1553,7 @@ pub fn l2(basis: Vec<Vec<BigInt>>) -> Result<Vec<Vec<BigInt>>, (Stop, Vec<Vec<Bi
 /// `l2` without the double-word checks (they rest on published error-bound
 /// constants): 53-bit directed intervals and error-free multi-double
 /// expansions (2 to 4 doubles), then p-bit intervals, then the exact check.
+#[cfg(any(test, feature = "bench"))]
 pub fn l2_proof(basis: Vec<Vec<BigInt>>) -> Result<Vec<Vec<BigInt>>, (Stop, Vec<Vec<BigInt>>)> {
     l2_with(basis, true)
 }
@@ -1546,12 +1568,14 @@ pub struct Report {
 }
 
 /// `l2` (or `l2_proof` when `wide`) with its report.
+#[cfg(any(test, feature = "bench"))]
 pub fn l2_report(basis: Vec<Vec<BigInt>>, wide: bool) -> (Result<Vec<Vec<BigInt>>, (Stop, Vec<Vec<BigInt>>)>, Report) {
     let mut rep = Report::default();
     let r = l2_run(basis, wide, &mut rep);
     (r, rep)
 }
 
+#[cfg(any(test, feature = "bench"))]
 fn l2_with(basis: Vec<Vec<BigInt>>, wide: bool) -> Result<Vec<Vec<BigInt>>, (Stop, Vec<Vec<BigInt>>)> {
     l2_run(basis, wide, &mut Report::default())
 }
@@ -1576,6 +1600,38 @@ struct Meter {
 /// entries) is reserved first. Every input entry is checked against `cap`
 /// before any work; entries are checked again after each size-reduction pass.
 pub fn l2_budgeted(b: &crate::budget::Budget, basis: Vec<Vec<BigInt>>, cap: u64) -> crate::budget::FResult<Vec<Vec<BigInt>>> {
+    l2_budgeted_with(b, basis, cap, ProofPath::Default, &mut Report::default()).map_err(|e| e.refusal(b, cap))
+}
+
+/// Why `l2_budgeted_typed` returned no basis.
+#[derive(Debug)]
+pub enum L2Err {
+    /// An entry past the cap (`Stop::Bits`), or no rung proved the result
+    /// (`Stop::Precision`): the exact LLL can take over from the caller's
+    /// original rows. Every row and state of the attempt is dropped by then,
+    /// and its work debited.
+    Fallback(Stop),
+    /// Everything else ends the call: the work limit, an interrupt, a
+    /// dependent row, an internal error.
+    Refused(crate::budget::FactorLimit),
+}
+
+impl L2Err {
+    /// `l2_budgeted`'s refusal for this outcome.
+    fn refusal(self, b: &crate::budget::Budget, cap: u64) -> crate::budget::FactorLimit {
+        match self {
+            L2Err::Fallback(Stop::Bits { bits }) => b.refuse("l2 bits", bits, cap),
+            L2Err::Fallback(_) => b.internal("l2: no rung proved the result"),
+            L2Err::Refused(e) => e,
+        }
+    }
+}
+
+/// `l2_budgeted`, telling the stops the exact LLL can take over from (an
+/// entry past the cap, no rung proving the result) apart from the refusals
+/// that end the call. The caller keeps its own copy of the rows, charged,
+/// for that fallback: this consumes `basis`.
+pub fn l2_budgeted_typed(b: &crate::budget::Budget, basis: Vec<Vec<BigInt>>, cap: u64) -> Result<Vec<Vec<BigInt>>, L2Err> {
     l2_budgeted_with(b, basis, cap, ProofPath::Default, &mut Report::default())
 }
 
@@ -1596,16 +1652,16 @@ pub(crate) enum ProofPath {
 #[cfg(test)]
 pub(crate) fn l2_budgeted_path(b: &crate::budget::Budget, basis: Vec<Vec<BigInt>>, cap: u64, path: ProofPath) -> (crate::budget::FResult<Vec<Vec<BigInt>>>, Report) {
     let mut rep = Report::default();
-    let r = l2_budgeted_with(b, basis, cap, path, &mut rep);
+    let r = l2_budgeted_with(b, basis, cap, path, &mut rep).map_err(|e| e.refusal(b, cap));
     (r, rep)
 }
 
-fn l2_budgeted_with(b: &crate::budget::Budget, basis: Vec<Vec<BigInt>>, cap: u64, path: ProofPath, rep: &mut Report) -> crate::budget::FResult<Vec<Vec<BigInt>>> {
+fn l2_budgeted_with(b: &crate::budget::Budget, basis: Vec<Vec<BigInt>>, cap: u64, path: ProofPath, rep: &mut Report) -> Result<Vec<Vec<BigInt>>, L2Err> {
     // every input entry within the cap, before any work (a reduced basis
     // would otherwise be returned without a row operation checking it)
     if let Some(bits) = basis.iter().flatten().map(|x| x.bits()).max() {
         if bits > cap {
-            return Err(b.refuse("l2 bits", bits, cap));
+            return Err(L2Err::Fallback(Stop::Bits { bits }));
         }
     }
     let left = b.work_left();
@@ -1613,19 +1669,34 @@ fn l2_budgeted_with(b: &crate::budget::Budget, basis: Vec<Vec<BigInt>>, cap: u64
     // (the p-bit path is proof mode's: its stages are charged as such)
     let wide = path == ProofPath::PBit;
     let r = l2_run_metered(basis, wide, rep, &mut m);
+    // (tests: a proved result reported unproved, or past the cap, for the
+    // caller's fallback after a full run)
+    #[cfg(test)]
+    let r = match (r, crate::lll::FORCE.with(|f| f.get())) {
+        (Ok(v), crate::lll::Force::Precision) => Err((Stop::Precision { k: 0 }, v)),
+        (Ok(v), crate::lll::Force::BitsInRun) => Err((Stop::Bits { bits: cap.saturating_add(1) }, v)),
+        (r, _) => r,
+    };
     let used = left - m.left;
     // the work done is debited whatever the outcome (used <= left, so this
-    // succeeds; on a refusal its result is the refusal's own)
+    // succeeds; an interrupt unwinds from inside it, past any fallback)
     let debited = b.debit(Some(used));
+    // the stopped attempt's rows go before the caller hears of a fallback
+    let r = r.map_err(|(stop, rows)| {
+        drop(rows);
+        stop
+    });
     match r {
         Ok(v) => {
-            debited?;
+            debited.map_err(L2Err::Refused)?;
             Ok(v)
         }
-        Err((Stop::Work, _)) => Err(b.refuse("l2 work", used.saturating_add(1), left)),
-        Err((Stop::Bits { bits }, _)) => Err(b.refuse("l2 bits", bits, cap)),
-        Err((Stop::Dependent, _)) => Err(b.internal("l2: dependent rows")),
-        Err((Stop::Precision { .. }, _)) => Err(b.internal("l2: no rung proved the result")),
+        Err(Stop::Work) => Err(L2Err::Refused(b.refuse("l2 work", used.saturating_add(1), left))),
+        Err(Stop::Dependent) => Err(L2Err::Refused(b.internal("l2: dependent rows"))),
+        Err(stop @ (Stop::Bits { .. } | Stop::Precision { .. })) => {
+            debited.map_err(L2Err::Refused)?;
+            Err(L2Err::Fallback(stop))
+        }
     }
 }
 
@@ -1652,7 +1723,7 @@ pub fn l2_bytes(d: usize, n: usize, bits: u64) -> Option<u64> {
     let rows = rowvec(entry)?;
     // - the basis the rows were built from, alive while they are, and one
     //   row converted to big integers inside a row operation
-    let input = rowvec(big_bytes(bits)?)?;
+    let input = l2_input_bytes(d, n, bits)?;
     let conv = n.checked_mul(entry)?;
     // - the rows' double-double copies (hi, lo), exponents and norms
     let copies = rowvec(16)?.checked_add(d.checked_mul(16)?)?;
@@ -1694,6 +1765,13 @@ pub fn l2_bytes(d: usize, n: usize, bits: u64) -> Option<u64> {
     state.checked_add(max(stage_rows, max(stage_gram, stage_exact)))
 }
 
+/// `l2_bytes`'s term for the basis given to `l2_budgeted`: d rows of n big
+/// integers of at most `bits` bits (a caller's copy of its rows fits in it).
+pub(crate) fn l2_input_bytes(d: u64, n: u64, bits: u64) -> Option<u64> {
+    d.checked_mul(24u64.checked_add(n.checked_mul(crate::budget::big_bytes(bits)?)?)?)
+}
+
+#[cfg(any(test, feature = "bench"))]
 fn l2_run(basis: Vec<Vec<BigInt>>, wide: bool, rep: &mut Report) -> Result<Vec<Vec<BigInt>>, (Stop, Vec<Vec<BigInt>>)> {
     l2_run_metered(basis, wide, rep, &mut Meter { left: u64::MAX, bits_cap: u64::MAX, path: ProofPath::Default })
 }
@@ -1729,16 +1807,41 @@ enum Step {
     Stopped(Stop, Vec<Vec<BigInt>>),
 }
 
+/// The report's clock: seconds since `start()` in tests and with the bench
+/// feature (the benchmarks' rung and check timings), and 0 in every other
+/// build, which reads no clock: std has none on wasm32-unknown-unknown,
+/// where `Instant::now` panics.
+#[cfg(any(test, feature = "bench"))]
+mod clock {
+    pub struct Start(std::time::Instant);
+    pub fn start() -> Start {
+        Start(std::time::Instant::now())
+    }
+    pub fn secs(s: &Start) -> f64 {
+        s.0.elapsed().as_secs_f64()
+    }
+}
+#[cfg(not(any(test, feature = "bench")))]
+mod clock {
+    pub struct Start;
+    pub fn start() -> Start {
+        Start
+    }
+    pub fn secs(_: &Start) -> f64 {
+        0.0
+    }
+}
+
 /// One rung: run it; its result proved reduced, or the basis it reached for
 /// the next rung (precision ran out, or the proof failed), or a stop.
 fn rung_step<F: Flt>(mut s: L2<F>, rung: u8, wide: bool, rep: &mut Report, m: &mut Meter) -> Step {
-    let t0 = std::time::Instant::now();
+    let t0 = clock::start();
     s.work_limit = m.left;
     s.bits_cap = m.bits_cap;
     let ran = s.run();
     s.work = s.work.saturating_add(s.side.take());
     m.left = m.left.saturating_sub(s.work);
-    rep.rungs.push((rung, t0.elapsed().as_secs_f64()));
+    rep.rungs.push((rung, clock::secs(&t0)));
     match ran {
         Ok(()) => {
             // the proof check: admitted when its whole chain fits; debited up
@@ -1748,9 +1851,9 @@ fn rung_step<F: Flt>(mut s: L2<F>, rung: u8, wide: bool, rep: &mut Report, m: &m
             if all > m.left {
                 return Step::Stopped(Stop::Work, s.into_basis());
             }
-            let t1 = std::time::Instant::now();
+            let t1 = clock::start();
             let by = s.proved_by_with(wide, m.path);
-            rep.check_secs += t1.elapsed().as_secs_f64();
+            rep.check_secs += clock::secs(&t1);
             let used = match &by {
                 Some(name) => {
                     // the stages up to the prover
@@ -1796,6 +1899,108 @@ thread_local! {
 mod tests {
     use super::*;
     use crate::lll_cert::certify;
+
+    /// No clock on the production path: in the lattice code's sources (this
+    /// module, the proof checks, the exact LLL and its certificate, van
+    /// Hoeij), outside test modules, `std::time` appears only in the clock
+    /// compiled for tests and the bench feature. std has no clock on
+    /// wasm32-unknown-unknown (`Instant::now` panics, a trap in the engine),
+    /// and native tests can't see that.
+    #[test]
+    fn no_clock_on_the_production_path() {
+        let dir = std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join("src");
+        for f in ["l2.rs", "l2_verify.rs", "lll.rs", "lll_cert.rs", "limbs.rs", "vanhoeij.rs", "budget.rs"] {
+            let text = std::fs::read_to_string(dir.join(f)).unwrap();
+            // the production part: up to the test module (`mod tests` or
+            // `pub(crate) mod tests`)
+            let cut = ["\n#[cfg(test)]\nmod tests", "\n#[cfg(test)]\npub(crate) mod tests"].iter().filter_map(|m| text.find(m)).min().unwrap_or(text.len());
+            let prod = &text[..cut];
+            // the gated clock module, then the rest
+            let gate = "#[cfg(any(test, feature = \"bench\"))]\nmod clock {";
+            let rest = match prod.find(gate) {
+                Some(i) => {
+                    let end = i + prod[i..].find("\n}\n").unwrap();
+                    format!("{}{}", &prod[..i], &prod[end..])
+                }
+                None => prod.to_string(),
+            };
+            for line in rest.lines().filter(|l| !l.trim_start().starts_with("//")) {
+                assert!(!line.contains("std::time") && !line.contains("Instant::"), "{f}: a clock on the production path: {line}");
+            }
+        }
+    }
+
+    /// The production ways into the reducer (LLL design r2, section 1). In
+    /// the engine's sources, outside test modules, tests, examples and this
+    /// module, `l2` is reached only for `l2_budgeted_typed` (and its
+    /// `L2Err`), `l2_bytes` and the `Fe` number type; here, the unbudgeted
+    /// entries (`l2`, `l2_proof`, `l2_report`, `l2_with`, `l2_run`) and the
+    /// state's own entry points beyond the metered run are compiled only in
+    /// tests or with the `bench` feature, and the state is crate-private
+    /// without it.
+    #[test]
+    fn the_reducer_has_one_production_entry() {
+        use std::path::{Path, PathBuf};
+        fn rs_files(dir: &Path, out: &mut Vec<PathBuf>) {
+            for e in std::fs::read_dir(dir).unwrap() {
+                let p = e.unwrap().path();
+                let name = p.file_name().unwrap().to_string_lossy().to_string();
+                if p.is_dir() {
+                    if !["target", "tests", "examples", "benches"].contains(&name.as_str()) {
+                        rs_files(&p, out);
+                    }
+                } else if name.ends_with(".rs") {
+                    out.push(p);
+                }
+            }
+        }
+        let engine = Path::new(env!("CARGO_MANIFEST_DIR")).parent().unwrap();
+        let mut files = vec![];
+        for e in std::fs::read_dir(engine).unwrap() {
+            let src = e.unwrap().path().join("src");
+            if src.is_dir() {
+                rs_files(&src, &mut files);
+            }
+        }
+        let allowed = ["l2_budgeted_typed", "L2Err", "l2_bytes", "Fe"];
+        let mut seen = std::collections::BTreeSet::new();
+        for f in &files {
+            let rel = f.strip_prefix(engine).unwrap().to_string_lossy().replace('\\', "/");
+            if rel == "poly/src/l2.rs" {
+                continue;
+            }
+            let text = std::fs::read_to_string(f).unwrap();
+            // the production part: up to the file's test module
+            let prod = text.split("\n#[cfg(test)]\nmod tests").next().unwrap();
+            for line in prod.lines().filter(|l| !l.trim_start().starts_with("//")) {
+                let mut rest = line;
+                while let Some(i) = rest.find("l2::") {
+                    let after = &rest[i + 4..];
+                    let names: Vec<&str> = if let Some(inner) = after.strip_prefix('{') {
+                        inner.split('}').next().unwrap().split(',').map(|x| x.trim()).collect()
+                    } else {
+                        vec![after.split(|c: char| !(c.is_alphanumeric() || c == '_')).next().unwrap()]
+                    };
+                    for n in names.into_iter().filter(|n| !n.is_empty()) {
+                        assert!(allowed.contains(&n), "{rel}: a production use of l2::{n}: {line}");
+                        seen.insert((rel.clone(), n.to_string()));
+                    }
+                    rest = after;
+                }
+            }
+        }
+        // (the census found the callers it should)
+        assert!(seen.contains(&("poly/src/vanhoeij.rs".to_string(), "l2_budgeted_typed".to_string())), "{seen:?}");
+        // the unbudgeted entries and the state's extra entry points, gated
+        let me = include_str!("l2.rs");
+        let gate = "#[cfg(any(test, feature = \"bench\"))]";
+        for decl in ["pub fn l2(", "pub fn l2_proof(", "pub fn l2_report(", "fn l2_with(", "fn l2_run(", "pub fn proved(", "pub fn proved_by(", "pub fn dot_rows(", "pub fn row_big("] {
+            let at = me.find(&format!("\n{decl}")).or_else(|| me.find(&format!("\n    {decl}"))).unwrap_or_else(|| panic!("{decl} not found"));
+            let before: Vec<&str> = me[..at].lines().rev().take_while(|l| l.trim_start().starts_with("///") || l.trim_start().starts_with("#[")).collect();
+            assert!(before.iter().any(|l| l.trim() == gate), "{decl} is not gated");
+        }
+        assert!(me.contains("        #[cfg(not(any(test, feature = \"bench\")))]\n        pub(crate) struct $($rest)*"));
+    }
 
     /// Rows (X, Y, 1) and (Y, -X, 1) with X, Y of 200 bits: their 106-bit
     /// copies' dot product cancels to 0, the exact one is 1. The
