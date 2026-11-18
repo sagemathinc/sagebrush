@@ -79,10 +79,25 @@ function dealer(port: number): Promise<{ send(f: Buffer[]): void; next(): Promis
 
 /** A kernel started with args after its connection file: exec(code, silent, storeHistory) sends an execute_request on the shell socket
  * and gives its execute_reply's content; interrupt() sends an interrupt_request on the control socket; exited is
- * its exit status; stop() ends it. */
-export async function startKernel(args: string[], env: Record<string, string> = {}, cwd?: string) {
+ * its exit status; stop() ends it.
+ *
+ * The five ports are free when chosen, but the kernel binds them only later, and a test running beside this one can
+ * take one in between: a kernel that stops on EADDRINUSE before it is reached is started again on fresh ports, up to
+ * `tries` times in all (attempts says how many it took). Any other early stop is the kernel's own, and is returned.
+ * (ports: the first attempt's five, for the test that makes one of them taken.) */
+export async function startKernel(args: string[], env: Record<string, string> = {}, cwd?: string, opts: { tries?: number; ports?: number[] } = {}) {
+  const tries = opts.tries ?? 3;
+  for (let attempt = 1; ; attempt++) {
+    const k = await startOnce(args, env, cwd, attempt === 1 ? opts.ports : undefined);
+    if (!/EADDRINUSE/.test(k.out.stderr) || attempt >= tries) return { ...k, attempts: attempt };
+    k.close();
+    await k.stop();
+  }
+}
+
+async function startOnce(args: string[], env: Record<string, string>, cwd: string | undefined, given?: number[]) {
   const dir = mkdtempSync(join(tmpdir(), "sb-kernel-conn-"));
-  const ports = await Promise.all([1, 2, 3, 4, 5].map(freePort));
+  const ports = given ?? (await Promise.all([1, 2, 3, 4, 5].map(freePort)));
   const conn = join(dir, "kernel.json");
   writeFileSync(conn, JSON.stringify({ transport: "tcp", ip: "127.0.0.1", key: "", signature_scheme: "hmac-sha256",
     shell_port: ports[0], iopub_port: ports[1], stdin_port: ports[2], control_port: ports[3], hb_port: ports[4] }));
@@ -91,6 +106,7 @@ export async function startKernel(args: string[], env: Record<string, string> = 
   const out = { stderr: "" };
   k.stderr!.on("data", (d: Buffer) => (out.stderr += d));
   const exited = new Promise<number | null>((r) => k.on("exit", (c) => r(c)));
+  const closed = new Promise<void>((r) => k.on("close", () => r()));
   const stop = async () => {
     k.kill("SIGKILL");
     await exited;
@@ -111,6 +127,8 @@ export async function startKernel(args: string[], env: Record<string, string> = 
   };
   const shell = await connect(ports[0]);
   const control = shell === null ? null : await connect(ports[3]);
+  // (stopped before it was reached: its stderr whole, for why)
+  if (shell === null || control === null) await closed;
   const exec = async (code: string, silent = false, storeHistory = !silent): Promise<any> => {
     request(shell!, "execute_request", { code, silent, store_history: storeHistory, user_expressions: {}, allow_stdin: false, stop_on_error: true });
     for (;;) {
