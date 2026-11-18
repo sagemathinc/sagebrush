@@ -5,6 +5,7 @@
 // the agent off at once and forgets the kept grant.
 //   bun web/workspace/test-agent-pair.mjs
 import { failHint, SAFARI, CHROME_ALLOW, OTHER_FAIL } from "./agent-ui.ts";
+import { handOver, takeHandoff, HANDOFF_KEY, HANDOFF_MS } from "./pair-link.ts";
 import { AgentPairing, parseStrict, actorOf, parseReloadRecord, reloadDecision, takeReloadRecord, putReloadRecord, markReloadLeft, RELOAD_KEY, RELOAD_FRESH_MS } from "./agent-pair.ts";
 
 let failures = 0;
@@ -750,6 +751,26 @@ ok(actorOf("Claude Code", "claude-code") === "agent:Claude-Code" && actorOf("", 
   ok(failHint("Mozilla/5.0 (X11; Linux x86_64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/149.0 Safari/537.36") === CHROME_ALLOW, "in Chrome: its permission");
   ok(failHint("Mozilla/5.0 (Windows NT 10.0) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/149.0 Safari/537.36 Edg/149.0") === CHROME_ALLOW, "in Edge: Chrome's permission");
   ok(![SAFARI, CHROME_ALLOW, OTHER_FAIL].some((t) => t.length > 110 || /\n/.test(t)), "each is one short line");
+}
+{
+  // the board page's handover of a bare pairing link to the notebook page (pair-link.ts): within the tab, once, fresh
+  const mem = new Map();
+  globalThis.sessionStorage = { getItem: (k) => (mem.has(k) ? mem.get(k) : null), setItem: (k, v) => void mem.set(k, String(v)), removeItem: (k) => void mem.delete(k) };
+  const L = { code: "ABCDEFGHIJKLMNOPQRSTUVWXYZ", port: "49589" };
+  ok(handOver(L, 1000) && mem.has(HANDOFF_KEY), "handed over: stored in the tab");
+  ok(takeHandoff("/board/", 1001) === null && mem.has(HANDOFF_KEY), "a page other than the notebook page neither takes nor deletes it");
+  const got = takeHandoff("/", 1001);
+  ok(got?.code === L.code && got?.port === L.port && !mem.has(HANDOFF_KEY), "the notebook page takes it, deleting it as it reads");
+  ok(takeHandoff("/", 1002) === null, "once only: a second read (a reload) finds nothing");
+  handOver(L, 1000);
+  ok(takeHandoff("/", 1000 + HANDOFF_MS) === null && !mem.has(HANDOFF_KEY), "a stale one is deleted, never used");
+  mem.set(HANDOFF_KEY, JSON.stringify({ code: "<x>", port: "1", at: 1000 }));
+  ok(takeHandoff("/", 1001) === null && !mem.has(HANDOFF_KEY), "a malformed one is deleted, never used");
+  globalThis.sessionStorage = { getItem: () => null, setItem: () => { throw new Error("refused"); }, removeItem: () => {} };
+  ok(handOver(L, 1000) === false, "storage refused: not handed over (the board page keeps the link and pairs there)");
+  globalThis.sessionStorage = { getItem: () => null, setItem: () => {}, removeItem: () => {} };
+  ok(handOver(L, 1000) === false, "storage that doesn't keep it: not handed over either");
+  delete globalThis.sessionStorage;
 }
 console.log(failures ? `${failures} failed` : "all passed");
 process.exit(failures ? 1 : 0);
