@@ -235,10 +235,13 @@ try {
   // ---- 2a. before any reload: each page's notebook sync turns on by itself once sync is on and its client runs (it
   // isn't decided only at the page's load), so a notebook made and typed in A reaches B
   const nbsA = () => A.ev(`${W}.list("/", { recursive: true }).then((l) => l.filter((e) => e.kind === "notebook").map((e) => ({ path: e.path, ref: e.ref })))`);
+  // (the notebook File, New just made: a new one named Untitled, as File, New names it, not just the first new one:
+  // the other browser's own Welcome may reach this list through sync during the wait)
+  const madeNew = (l, before) => l.find((x) => /^\/Untitled( \(\d+\))?\.ipynb$/.test(x.path) && !before.some((y) => y.ref === x.ref))?.ref ?? null;
   const nbPre = await nbsA();
   await A.ev(`document.querySelector('[data-f="new"]').click()`);
   let refPre = null;
-  for (let i = 0; i < 60 && !refPre; i++) { const l = await nbsA(); refPre = l.find((x) => !nbPre.some((y) => y.ref === x.ref))?.ref ?? null; if (!refPre) await sleep(250); }
+  for (let i = 0; i < 60 && !refPre; i++) { const l = await nbsA(); refPre = madeNew(l, nbPre); if (!refPre) await sleep(250); }
   const typedPre = refPre ? await A.type(0, "before_reload = 1") : "no notebook";
   await sleep(1500);
   const pathPre = refPre ? (await nbsA()).find((x) => x.ref === refPre)?.path : null;
@@ -302,7 +305,7 @@ try {
   // (the notebook page's File, New: a new notebook, opened here, typed into, then named SyncTest)
   await A.ev(`document.querySelector('[data-f="new"]').click()`);
   let ref3 = null;
-  for (let i = 0; i < 60 && !ref3; i++) { const l = await notebooks(); ref3 = l.find((x) => !nb1.some((y) => y.ref === x.ref))?.ref ?? null; if (!ref3) await sleep(250); }
+  for (let i = 0; i < 60 && !ref3; i++) { const l = await notebooks(); ref3 = madeNew(l, nb1); if (!ref3) await sleep(250); }
   check(!!ref3, `A: File, New makes a notebook with sync on (${J(await A.ev(`document.querySelector("#saved")?.textContent ?? ""`))})`);
   if (!ref3) throw new Error("no notebook to sync: File, New made none");
   check((await A.type(0, "x = 1")) === "typed", "A types x = 1");
@@ -392,7 +395,7 @@ try {
   const nb7 = await notebooks();
   await A.ev(`document.querySelector('[data-f="new"]').click()`);
   let ref7 = null;
-  for (let i = 0; i < 60 && !ref7; i++) { const l = await notebooks(); ref7 = l.find((x) => !nb7.some((y) => y.ref === x.ref))?.ref ?? null; if (!ref7) await sleep(250); }
+  for (let i = 0; i < 60 && !ref7; i++) { const l = await notebooks(); ref7 = madeNew(l, nb7); if (!ref7) await sleep(250); }
   check(!!ref7 && (await A.type(0, "w = 7")) === "typed", "A: another notebook, made with File, New and typed into");
   await sleep(1500);
   const path7 = (await notebooks()).find((x) => x.ref === ref7)?.path;
@@ -427,7 +430,7 @@ try {
   const nb8 = await notebooks();
   await A2.ev(`document.querySelector('[data-f="new"]').click()`);
   let ref8 = null;
-  for (let i = 0; i < 60 && !ref8; i++) { const l = await notebooks(); ref8 = l.find((x) => !nb8.some((y) => y.ref === x.ref))?.ref ?? null; if (!ref8) await sleep(250); }
+  for (let i = 0; i < 60 && !ref8; i++) { const l = await notebooks(); ref8 = madeNew(l, nb8); if (!ref8) await sleep(250); }
   const typed8 = ref8 ? await A2.type(0, "v = 8") : "no notebook";
   await sleep(1500);
   const path8 = ref8 ? (await notebooks()).find((x) => x.ref === ref8)?.path : null;
