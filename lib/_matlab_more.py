@@ -586,7 +586,8 @@ def mat2cell_(nargout, *args):
     dists = dists + [[D[k]] for k in range(len(dists), nd)]
     for k in range(nd):
         if sum(dists[k]) != D[k]:
-            raise _err("mat2cell: the distribution for dimension %d adds up to %d, not to A's size there, %d." % (k + 1, sum(dists[k]), D[k]))
+            raise _err("mat2cell: the distribution for dimension %d adds up to %d, not to A's size there, %d." % (k + 1, sum(dists[k]), D[k]),
+                       "MATLAB:mat2cell:VectorSumMismatch")
     starts = [np.concatenate([[0], np.cumsum(dk)[:-1]]).astype(int) if dk else [] for dk in dists]
     cdims = [len(dk) for dk in dists]
     out = []

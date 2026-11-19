@@ -1375,7 +1375,7 @@ def _isinstance_num(p):
 def _need_float(x, name):
     """refuse an input whose page lists only single and double"""
     if class_(x) not in ("double", "single"):
-        raise _err("%s: the input must be of class double or single, not %s." % (name, class_(x)))
+        raise _err("%s: the input must be of class double or single, not %s." % (name, class_(x)), "MATLAB:norm:inputType" if name == "norm" else "")
 
 
 def cond(v):
@@ -2247,7 +2247,7 @@ def _ivec(arg, n, pos, grow):
 
 def _oob(pos, n):
     if pos < 0:
-        return _err("Index exceeds the number of array elements. Index must not exceed %d." % n, "MATLAB:index:exceedsdims")
+        return _err("Index exceeds the number of array elements. Index must not exceed %d." % n, "MATLAB:badsubscript")
     return _err("Index in position %d exceeds array bounds. Index must not exceed %d." % (pos + 1, n), "MATLAB:index:exceedsdims")
 
 
@@ -2414,7 +2414,7 @@ def brace(obj, args):
             return obj.a[k - 1]
     vals = brace_cs(obj, args)
     if not vals:
-        raise _err("Index exceeds the number of array elements. Index must not exceed %d." % _numel(obj), "MATLAB:index:exceedsdims")
+        raise _err("Index exceeds the number of array elements. Index must not exceed %d." % _numel(obj), "MATLAB:badsubscript")
     return vals[0]
 
 
@@ -6721,7 +6721,8 @@ def reshape_(x, *args):
         if free >= 0:
             rest = _prod(d)
             if rest == 0 or n % rest:
-                raise _err("Product of known dimensions, %d, not divisible into total number of elements, %d." % (rest, n))
+                raise _err("Product of known dimensions, %d, not divisible into total number of elements, %d." % (rest, n),
+                           "MATLAB:getReshapeDims:notDivisible")
             d[free] = n // rest
     if _prod(d) != n:
         raise _err("Number of elements must not change. Use [] as one of the size inputs to automatically calculate the appropriate size for that dimension.", "MATLAB:getReshapeDims:notSameNumel")
@@ -8380,7 +8381,7 @@ def sprintf_(fmt, *args):
     if type(fmt) is Str:
         return Str(_sprintf(fmt.s, args))
     if not _istext(fmt):
-        raise _err("sprintf: the format must be text.")
+        raise _err("sprintf: the format must be text.", "MATLAB:badformat_mx")
     r = _sprintf(_text(fmt), args)
     # (nothing written: a 1-by-0 character vector, as sprintf gives)
     return Char(r) if r else Char(np.zeros((0, 1)))
@@ -9454,7 +9455,7 @@ def struct_(*args):
         vals.append(v)
         if type(v) is Cell and len(v.a) != 1:
             if n != 1 and len(v.a) != n:
-                raise _err("Array dimensions of input cell arrays must match.")
+                raise _err("Array dimensions of input cell arrays must match.", "MATLAB:StructConversion:DimensionMismatch")
             n = len(v.a)
             shape = v.shape
     items = []
@@ -9478,7 +9479,8 @@ def fieldnames_(s):
     elif type(s) is Struct:
         f = s.fields
     else:
-        raise _err("Invalid input argument of type '%s'. Input must be a structure or a Java or COM object." % class_(s))
+        raise _err("Invalid input argument of type '%s'. Input must be a structure or a Java or COM object." % class_(s),
+                   "MATLAB:fieldnames:InvalidInput")
     return Cell([Char(n) for n in f], (len(f), 1))
 
 
@@ -9629,7 +9631,7 @@ def _uniform_opts(args):
     return arrays, uniform, handler
 
 
-def _apply_each(nargout, f, arrays, uniform, handler, elems, shape):
+def _apply_each(nargout, f, arrays, uniform, handler, elems, shape, nonscalar=""):
     """f on each element (elems(k) -> the arguments), collected"""
     n = _prod(shape)
     nout = max(1, nargout)
@@ -9653,7 +9655,7 @@ def _apply_each(nargout, f, arrays, uniform, handler, elems, shape):
         if uniform:
             for v in vals:
                 if not _isnumlike(v) or _numel(v) != 1:
-                    raise _err("Non-scalar in Uniform output. Set 'UniformOutput' to false.")
+                    raise _err("Non-scalar in Uniform output. Set 'UniformOutput' to false.", nonscalar)
             if not vals:
                 outs.append(np.zeros(_stored(shape)))
                 continue
@@ -9704,7 +9706,8 @@ def cellfun_(nargout, f, *args):
     for a in arrays[1:]:
         if _size_key(a.shape) != _size_key(shape):
             raise _err("All of the input arguments must be of the same size and shape.")
-    return _apply_each(nargout, fh, arrays, uniform, handler, lambda k: [a.a[k] for a in arrays], shape)
+    return _apply_each(nargout, fh, arrays, uniform, handler, lambda k: [a.a[k] for a in arrays], shape,
+                       "MATLAB:cellfun:NotAScalarOutput")
 
 
 def _size_key(d):
@@ -9740,7 +9743,8 @@ def arrayfun_(nargout, f, *args):
     for a in arrays[1:]:
         if _size_key(_dims(a)) != _size_key(shape):
             raise _err("All of the input arguments must be of the same size and shape.")
-    return _apply_each(nargout, fh, arrays, uniform, handler, lambda k: [_element(a, k) for a in arrays], shape)
+    return _apply_each(nargout, fh, arrays, uniform, handler, lambda k: [_element(a, k) for a in arrays], shape,
+                       "MATLAB:arrayfun:NotAScalarOutput")
 
 
 @_bi("structfun")
@@ -9768,6 +9772,8 @@ def func2str_(f):
 
 @_bs("str2func")
 def str2func_(s):
+    if type(s) not in (Char, Str, StrArr):
+        raise _err("Expected a character vector or string argument, not %s." % class_(s), "MATLAB:string:MustBeStringScalarOrCharacterVector")
     t = _text(s).strip()
     if t.startswith("@"):
         host = _sys.modules.get("_matlab_files")
@@ -11938,7 +11944,7 @@ def interp1_n(*args):
             elif t in ("linear", "nearest", "next", "previous", "pchip", "cubic", "spline", "*linear", "*cubic"):
                 methods.append({"*linear": "linear", "cubic": "pchip", "*cubic": "pchip"}.get(t, t))
             else:
-                raise _err("interp1: invalid interpolation method '%s'." % _text(a))
+                raise _err("interp1: invalid interpolation method '%s'." % _text(a), "MATLAB:interp1:InvalidMethod")
         else:
             if _numel(a) != 1 or class_(a) not in ("double", "single") or _arr(a).dtype.kind == "c":
                 # (the page's extrapolation value is a real scalar)
@@ -11972,7 +11978,7 @@ def interp1_n(*args):
         V = V.reshape((-1, 1))
     # (the sample points: one per value, at least two, distinct and not NaN, as the page requires)
     if len(X) != V.shape[0]:
-        raise _err("interp1: the sample points and the values must have the same length.")
+        raise _err("interp1: the sample points and the values must have the same length.", "MATLAB:interp1:YVectorInvalidNumRows")
     if len(X) < 2:
         raise _err("interp1: at least two sample points are required.")
     if any(t != t for t in X):
@@ -11981,7 +11987,7 @@ def interp1_n(*args):
     X = [X[k] for k in order]
     V = V[order]
     if any(X[k] == X[k + 1] for k in range(len(X) - 1)):
-        raise _err("interp1: the grid vectors must contain unique points.")
+        raise _err("interp1: the grid vectors must contain unique points.", "MATLAB:griddedInterpolant:NonUniqueCompVecsPtsErrId")
     Q = _farr(xq)
     if Q.dtype.kind == "c":
         raise _err("interp1 at complex query points is not supported in Sagebrush.")
