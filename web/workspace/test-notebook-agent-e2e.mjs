@@ -309,6 +309,8 @@ try {
   // (at most once: opened again through the bar's Open after the person moved away, it doesn't run again)
   const ONCE = "import time\nprint('ran at', time.time())";
   ok(!!(await make("Runs once", [ONCE])).ok && await until(`${shownIs("Runs once")} && ${outOf(ONCE)}.includes("ran at")`, 30000), "a notebook that says when it ran: opened, run by itself");
+  // (its run's number is drawn a moment after its output: read both once both are there)
+  await until(`${nOf(ONCE)} != null`, 10000);
   const ranAt = await ev(outOf(ONCE)), ranN = await ev(nOf(ONCE));
   ok(await fromFiles("Made by the agent.ipynb") && await until(shownIs("Made by the agent"), 15000), "(the person opens another notebook from Files)");
   await ev(`(${barButton("Open Runs once.ipynb")}.click(), true)`);
