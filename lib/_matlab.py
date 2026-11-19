@@ -12739,6 +12739,10 @@ for _n in ("addpath", "rmpath", "genpath", "path", "pkg", "import"):
 for _n in ("rref", "nextpow2", "cumtrapz", "unwrap", "deg2rad", "rad2deg", "cart2pol", "pol2cart"):
     _B[_n] = _lazy_builtin("_matlab_numeric_more", _n)
 
+# (lib/_matlab_json.py: jsonencode and jsondecode, lazy too)
+for _n in ("jsonencode", "jsondecode"):
+    _B[_n] = _lazy_builtin("_matlab_json", _n)
+
 
 def _keep_single(name, data=(0,), keep=()):
     """a built-in whose results are single when an input is single (as these functions' pages

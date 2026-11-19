@@ -49,7 +49,7 @@ async function checkExamples(examples: Example[]) {
   assert.deepEqual(bad, []);
 }
 
-test("catalog gate 3: every Magma example prints exactly its expected output, in a fresh session (Node)", { skip: slowSkip }, async () => {
+test("catalog gate 3: every Magma example prints exactly its expected output, in a fresh session (Node)", { timeout: 900_000, skip: slowSkip }, async () => {
   const examples = allExamples();
   assert.ok(examples.length >= 40, `${examples.length} examples`);
   await checkExamples(examples);

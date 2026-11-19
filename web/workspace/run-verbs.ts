@@ -91,6 +91,7 @@ export const RUN_TEXT = {
   cut: (n: number) => `[… ${n.toLocaleString("en-US")} bytes]`,
   notKept: `[output not kept: the notebook's outputs are over ${fmtSize(RUN_LIMITS.savedOutputs)}]`,
   changed: (p: string) => `changed: ${p} was changed while the run was starting; try again`,
+  grantChanged: "the grant changed during the run",
 };
 
 /** A refusal: its code (machine-readable) and board's sentence. */
@@ -117,6 +118,26 @@ export type RunHost = {
   /** tests only (a local host): a named hold the test releases ("snapshot", "listed", "start", "started", "save",
    * "deliver"; latex_build's "engine", "phase2" and "render" too) */
   hold?(stage: string): Promise<void>;
+  /** run_notebook in the notebook open on this page (decided Nov 18 2026): the page's run of the notebook `ref` at
+   *  `path` if it is the one shown now and the page may run it, else null, nothing started (today's run instead).
+   *  Asked synchronously as the run is held; `gone` is called when the notebook shown changes */
+  inPage?(ref: string, path: string, gone: () => void): PageRun | null;
+};
+/** The page's run of its open notebook, for one generation of it (the notebook as shown when it was asked): its
+ *  inputs as shown, each code cell run in the page's own interpreter as the person's Run is (outputs shown and saved
+ *  with the notebook), what it says kept within `out`'s bounds before it is handed back. */
+export type PageRun = {
+  /** the notebook as shown, once the page has caught up with the workspace's copy; null: this generation gone */
+  inputs(): Promise<{ mode: string; cells: { id: string; type: string; code: string }[] } | null>;
+  /** still this generation: the same notebook shown, not switched or reloaded since */
+  current(): boolean;
+  cell(id: string, out: Kept): Promise<{ status: "ok" | "error" | "stopped"; images: { count: number; bytes: number } }>;
+  /** the outputs saved as after the person's Run all: true once saved, this generation still shown */
+  save(): Promise<boolean>;
+  /** interrupts the cell running, if any */
+  stop(): void;
+  /** the run is over: `gone` is called no more */
+  close(): void;
 };
 /** latex_build's three chunks (web/latex: page.ts's build, tools.ts, run-core.mjs), as loaded. */
 export type LatexMods = { page: any; tools: any; run: any };
@@ -406,6 +427,12 @@ async function runNow(method: "workspace.run_notebook" | "workspace.run_file" | 
   if (!ctx.live()) refuse("invalid: " + ctx.why());
   if (holder.current && holder.current !== pre) { const c = holder.current; refuse(c.owner === g.id ? RUN_TEXT.busyOwn(c.view) : RUN_TEXT.busyOther); }
   if (pre?.loading?.stopped) return { ok: false, ended: pre.loading.cause ?? "stopped", ms: 0 };
+  // (the notebook open on this page, with Everything and May run code: run there, never also here; null only when the
+  //  page has started nothing, so today's run below is the only one)
+  if (method === "workspace.run_notebook" && !root && host.inPage && target.ref && g.folders.length === 1 && g.folders[0] === "/") {
+    const p = runInPage(params, ctx, host, holder, pre, real!, target.ref);
+    if (p) return await p;
+  }
 
   // ---- the run, held: from here every way out goes through end() and settle()
   const viewPath = view.toView(real!)!;
@@ -889,6 +916,101 @@ async function runNow(method: "workspace.run_notebook" | "workspace.run_file" | 
     if (cause === "revoked") return { ok: false, ended: "revoked", reason };
     return { ok: false, ended: cause, ms: Math.round(performance.now() - t0), inputHash: hash };
   }
+}
+
+/** run_notebook in the notebook open on this page: null if the page has none to give (nothing started), else the run,
+ *  held from this call on as today's is (one per page, its line and Stop, the deadline, the grant, the page hidden), and
+ *  never handed to today's run after, whatever happens to it. Bound to the grant as it is now and to the notebook's
+ *  generation as shown now: any change to either ends it, no later cell starts and nothing it said is returned. */
+function runInPage(params: { timeout_s?: number }, ctx: RunCtx, host: RunHost, holder: RunHolder, pre: RunHolder["current"], real: string, ref: string): Promise<Record<string, unknown>> | null {
+  const g = ctx.grant, g0 = ctx.grantNow();
+  let stopped = false, cause: "done" | "error" | "stopped" | "timeout" | "revoked" = "done", reason = "";
+  let deadline: ReturnType<typeof setTimeout> | undefined, ended!: () => void;
+  const endedP = new Promise<null>((r) => (ended = () => r(null)));
+  // (a page's promise raced with the end: its failure after the end, which no one waits for, isn't left unhandled)
+  const quiet = <T,>(p: Promise<T>) => (p.catch(() => {}), p);
+  const end = (c: typeof cause, why = "") => {
+    if (stopped) return;
+    stopped = true; cause = c; reason = why;
+    ended();
+    clearTimeout(deadline);
+    holder.hide();
+    try { pr?.stop(); } catch {}
+  };
+  // (the grant as it was when the run was asked, the same one, unchanged: a narrowing of its write too ends this run,
+  //  which writes as the notebook's own trees allow)
+  const granted = () => ctx.live() && g0 !== null && ctx.grantNow() === g0;
+  const pr = host.inPage!(ref, real, () => end("stopped"));
+  if (!pr) return null;
+  const alive = () => !stopped && granted() && pr.current();
+  const t0 = performance.now();
+  const me = { owner: g.id, view: real, stop: () => end("stopped") };
+  holder.current = me;
+  holder.show(ctx.agent, real, me.stop);
+  deadline = setTimeout(() => end("timeout"), Math.max(0, (pre?.deadlineAt ?? performance.now() + (params.timeout_s ?? RUN_LIMITS.timeoutDefault) * 1000) - performance.now()));
+  const onHide = () => end("stopped");
+  addEventListener("pagehide", onHide);
+  const unwatch = ctx.onChange(() => { if (!granted()) end("revoked", ctx.live() ? RUN_TEXT.grantChanged : ctx.why()); });
+  // (an end found rather than told: the grant's, or the notebook's)
+  const lapsed = () => { if (!stopped && !granted()) end("revoked", ctx.live() ? RUN_TEXT.grantChanged : ctx.why()); else if (!stopped && !pr.current()) end("stopped"); };
+  return (async () => {
+    try {
+      // (what runs: the notebook as shown now, this generation's, bounded as today's run's; its inputHash from it)
+      const doc = await Promise.race([quiet(pr.inputs()), endedP]);
+      lapsed();
+      if (stopped || !doc) { end("stopped"); return cause === "revoked" ? { ok: false, ended: "revoked", reason } : { ok: false, ended: cause, ms: Math.round(performance.now() - t0) }; }
+      if (doc.cells.length > RUN_LIMITS.cells) refuse(RUN_TEXT.tooManyCells(doc.cells.length));
+      const src = doc.cells.reduce((n, c) => n + enc.encode(c.code).length, 0);
+      if (src > RUN_LIMITS.source) refuse(RUN_TEXT.tooMuchSource(src));
+      const hash = await inputHash([{ view: real, kind: "notebook", sha256: await sha(notebookInputs(doc)) }]);
+      await host.hold?.("page");
+      const cellsOut: any[] = [];
+      doc.cells.forEach((c, i) => { if ((c.type ?? "code") === "code") cellsOut.push({ index: i, status: "skipped", id: c.id }); });
+      let failed = false, resultLeft = RUN_LIMITS.result, resultCut = 0;
+      for (const co of cellsOut) {
+        lapsed();
+        if (stopped || failed) break;
+        const out = new Kept(RUN_LIMITS.cellHead, RUN_LIMITS.cellTail);
+        // (an end doesn't wait for the cell: what it says after is dropped with its bounds)
+        const r = await Promise.race([quiet(pr.cell(co.id, out)), endedP]);
+        lapsed();
+        if (stopped || !r) break;
+        co.status = r.status === "stopped" ? "skipped" : r.status;
+        const o = out.text(), n = enc.encode(JSON.stringify({ index: co.index, status: co.status, out: o, images: r.images })).length;
+        if (n <= resultLeft) { co.out = o; co.images = r.images; resultLeft -= n; } else resultCut++;
+        if (r.status !== "ok") failed = true;
+      }
+      // (saved as the person's Run all is: by the notebook, under its own saves; said "saved" only for this generation)
+      let saved = "conflict";
+      if (!stopped) {
+        cause = failed ? "error" : "done";
+        await host.hold?.("save");
+        // (raced with the run's end, as each cell is: a save that never answers doesn't hold the run)
+        try { if ((await Promise.race([quiet(pr.save()), endedP])) === true && !stopped) saved = "saved"; } catch {}
+      }
+      await host.hold?.("deliver");
+      lapsed();
+      clearTimeout(deadline);
+      holder.hide();
+      if (cause === "revoked") return { ok: false, ended: "revoked", reason };
+      const base: Record<string, unknown> = { ok: cause === "done", ended: cause, ms: Math.round(performance.now() - t0), inputHash: hash, refused: { paths: [] } };
+      // (an end by Stop, the deadline, the page hidden or another notebook shown: its cause, nothing of what ran)
+      if (stopped) return base;
+      const cells = cellsOut.map(({ id: _id, ...x }) => x);
+      resultCut += fitCells({ ...base, saved }, cells);
+      const out = bounded({ ...base, saved }, [["cells", cells]]);
+      if (resultCut && !out.truncated) out.truncated = { omitted: [`the output of ${resultCut} cell${resultCut === 1 ? "" : "s"}`], reason: RUN_TEXT.truncated };
+      return out;
+    } catch (e) {
+      end("error");
+      throw e;
+    } finally {
+      unwatch();
+      removeEventListener("pagehide", onHide);
+      pr.close();
+      if (holder.current === me) holder.current = null;
+    }
+  })();
 }
 
 /** run_stop: the calling grant's own run, if there is one. */

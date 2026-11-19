@@ -2032,7 +2032,7 @@ export function createNotebook(root, opts = {}) {
   // ---------------------------------------------------------- the document
   // A document is {mode, cells: [{id, type?, code, outputs?, n?, attachments?, metadata?}], ...meta}.
   // A cell's metadata (nbformat's: tags, ...) is kept as it is.
-  let loading = false, timer = null, lastJson = null, store = null, unsubscribe = null, saveChain = Promise.resolve(), savesPending = 0, lastSaveError = null;
+  let loading = false, timer = null, lastJson = null, store = null, unsubscribe = null, saveChain = Promise.resolve(), savesPending = 0;
   // The document shown, from when it is loaded until another is (or it is
   // detached): what is known of it, which its saves keep to, even one still
   // waiting its turn when another document is shown (CORR-989-1).
@@ -2062,18 +2062,33 @@ export function createNotebook(root, opts = {}) {
   // before closing while there are any, their saves only here)
   const leftChanged = () => emit("left", leftCount());
   // (one whose save was busy stays outstanding until it is sent again: counted, asked about before closing)
-  const leftSettled = (s) => { if (!s.inflight && !unkept.has(s) && !busy.has(s)) outstanding.delete(s); leftChanged(); };
-  async function keepDetached(key, doc, theirs) {
+  const leftSettled = (s) => { if (!s.inflight && !unkept.has(s) && !busy.has(s) && !failed.has(s)) outstanding.delete(s); leftChanged(); };
+  // (a save that failed, thrown or refused ("not saved: ..."), kept with ITS notebook, shown or left, with what it sent:
+  // only a later save of that same notebook that succeeds clears it, never another notebook's; saved() sends a left one
+  // again, and rejects, naming it, while any is still failed; a left one stays counted (LIMIT-900-2))
+  const failed = new Map();
+  function saveFailed(mine, st, sent, json, seq, error) {
+    if ((failed.get(mine)?.seq ?? 0) > seq) return;
+    failed.set(mine, { st, sent, json, seq, error });
+    outstanding.add(mine);
+  }
+  function saveSucceeded(mine, seq) {
+    if ((failed.get(mine)?.seq ?? Infinity) <= seq) failed.delete(mine);
+  }
+  // (`why`: absent for a conflict (changed elsewhere); for a save refused or failed again when sent once more,
+  // { refused, message }, passed to the page so that what it names and says is what happened)
+  async function keepDetached(key, doc, theirs, why = null) {
+    const what = why ? `couldn't be saved after it was closed here (${why.refused ? "refused" : "failed"}: ${why.message})` : "changed elsewhere after it was closed here";
     try {
-      if (!detachedConflict) throw new Error("changed elsewhere after it was closed here, and not kept");
-      await detachedConflict(doc, theirs, key);
+      if (!detachedConflict) throw new Error(`${what}, and not kept`);
+      await detachedConflict(doc, theirs, key, why);
       unkept.delete(key);
       leftSettled(key);
     } catch (e) {
-      unkept.set(key, { doc, theirs, error: e ?? new Error("not kept") });
+      unkept.set(key, { doc, theirs, why, error: e ?? new Error("not kept") });
       outstanding.add(key);
       leftChanged();
-      emit("saved", `not saved: ${doc.name ?? "a notebook"} changed elsewhere after it was closed here, and your changes to it couldn't be kept (${e?.message ?? e})`);
+      emit("saved", `not saved: ${doc.name ?? "a notebook"} ${what}, and your changes to it couldn't be kept (${e?.message ?? e})`);
     }
   }
   const cellType = (c) => (c.type === "markdown" || c.type === "raw" ? c.type : "code");
@@ -2149,8 +2164,10 @@ export function createNotebook(root, opts = {}) {
       saveChain = p.then((t) => {
         // (an older busy one, superseded by this save: its error no longer stands, and it isn't sent again)
         if ((busy.get(mine)?.seq ?? Infinity) <= seq) busy.delete(mine);
-        if (mine.busyError && mine.busySeq <= seq) { if (lastSaveError === mine.busyError) lastSaveError = null; mine.busyError = null; }
+        if (mine.busyError && mine.busySeq <= seq) mine.busyError = null;
         if (t && typeof t === "object" && t.conflict) {
+          // (answered, not failed: an older failure of this notebook no longer stands; what it had is merged, or kept)
+          saveSucceeded(mine, seq);
           // written elsewhere first: merge that, then save the merge; a
           // document no longer shown has nothing here to merge into: what
           // this save had is kept by the page, beside the other, never over
@@ -2162,6 +2179,23 @@ export function createNotebook(root, opts = {}) {
           applyRemote(t.conflict, true, true);
           return;
         }
+        // (a save the store refused, answered rather than thrown ("not saved: ...", the journal's way): nothing of it was
+        // kept, so nothing here is taken as saved (not its revision, not its cells as the base), it is sent again with the
+        // next save, and saved() rejects with why, as for a thrown one: a page leaving for elsewhere stays, its edit kept)
+        const refused = (t && typeof t === "object" ? t.saved : t);
+        if (typeof refused === "string" && /^not saved\b/.test(refused)) {
+          if (lastJson === json) lastJson = null;
+          // (refused by a journal's store that, still this page's, isn't the writer, or isn't ready again yet: the focus
+          // takeover's moment, while another tab writes; this page follows, and reloads the document when it writes
+          // again, the keys typed meanwhile passed on (web/page/handover.ts): nothing to say or send again, as flush
+          // sends nothing while it follows; a store let go (another notebook opened) is a failed save, as any)
+          if (st.journaled && !st.released && (!st.writer || !st.ready)) return;
+          // (for any notebook, shown or just left, as a thrown one is: saved() names it; said only for the one shown)
+          saveFailed(mine, st, sent, json, seq, Object.assign(new Error(refused.replace(/^not saved:?\s*/, "") || "not saved"), { refused: true }));
+          if (mine !== shown || store !== st) return;
+          emit("saved", refused);
+          return;
+        }
         // (its revision kept for its next save, shown or not; what the store saved, which a journal store merged
         // with changes from elsewhere this page doesn't show yet: shown here at once, typed text kept, and the base
         // from then on (never an older one))
@@ -2171,15 +2205,15 @@ export function createNotebook(root, opts = {}) {
           if (lastJson === json) lastJson = null;
           applyRemote({ ...kept, rev: r }, true, true);
         } else if (newer) mine.synced = syncedOf(r, kept.cells, kept.mode);
+        saveSucceeded(mine, seq);
         if (mine !== shown || store !== st) return;
-        lastSaveError = null;
         emit("saved", (t && typeof t === "object" ? t.saved : t) ?? "saved");
       }, (e) => {
         if (lastJson === json) lastJson = null;
         // (a busy one superseded by a later save of this document, asked for since: that one answers for it)
         if (e?.busy && seq !== mine.saveSeq) return;
         if (e?.busy) { busy.set(mine, { st, sent, json, seq }); mine.busyError = e; mine.busySeq = seq; }
-        lastSaveError = e ?? new Error("not saved");
+        saveFailed(mine, st, sent, json, seq, e ?? new Error("not saved"));
         emit("saved", "not saved: " + (e?.message ?? e));
       }).finally(() => { savesPending--; mine.inflight--; leftSettled(mine); });
     }
@@ -2194,12 +2228,29 @@ export function createNotebook(root, opts = {}) {
       flush();
       // (busy ones sent again, the shown document's by flush already)
       for (const [m, b] of [...busy]) if (busy.get(m) === b && m !== shown) queueSave(m, b.st, b.sent, b.json, m.remoteSeen);
+      // (failed ones of documents left sent again once, as they were, through their own store: a refusal that has
+      // passed recovers here; one that fails again (refused, or a store that can no longer write it) is kept as a
+      // copy beside it, as a conflict's is, never written over it; a copy not kept is unkept, tried again below)
+      const resent = new Map();
+      for (const [m, f] of [...failed]) if (failed.get(m) === f && m !== shown && !busy.has(m)) { resent.set(m, f.seq); queueSave(m, f.st, f.sent, f.json, m.remoteSeen); }
       await saveChain;
-      if (lastSaveError) throw lastSaveError;
+      for (const [m, seq] of resent) {
+        const f = failed.get(m);
+        if (!f || f.seq <= seq || m === shown || busy.has(m)) continue;
+        failed.delete(m);
+        saveChain = saveChain.then(() => keepDetached(m, f.sent, null, { refused: !!f.error?.refused, message: String(f.error?.message ?? f.error ?? "not saved") }));
+      }
+      await saveChain;
+      // (still failed: the shown notebook's, said as it is; else the first notebook left, named)
+      if (failed.has(shown)) throw failed.get(shown).error;
+      if (failed.size) {
+        const [m, f] = [...failed][0];
+        throw Object.assign(new Error(`${f.sent?.name ?? "a notebook"}, a notebook you left: ${f.error?.message ?? f.error}`), { left: m });
+      }
       // (saves of documents no longer shown that couldn't be kept: tried
       // again, in turn with the saves; one kept or replaced meanwhile isn't)
       if (unkept.size) {
-        saveChain = saveChain.then(async () => { for (const [key, u] of [...unkept]) if (unkept.get(key) === u) await keepDetached(key, u.doc, u.theirs); });
+        saveChain = saveChain.then(async () => { for (const [key, u] of [...unkept]) if (unkept.get(key) === u) await keepDetached(key, u.doc, u.theirs, u.why); });
         await saveChain;
       }
       if (unkept.size) throw [...unkept.values()].at(-1).error;
