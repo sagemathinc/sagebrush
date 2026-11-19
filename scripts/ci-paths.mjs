@@ -103,7 +103,7 @@ const fullTierPaths = [
   // pairing's modules (its doc-protocol.ts is above, with sync), the mode registry, which verbs.ts reads, and the view
   // chunk's kept views (view-state.ts, design/view-state.md); and an entry's page address, which the pairing adds to
   // its answers (entry-url.ts, with the code page's languages and address))
-  /^web\/workspace\/(?:agent-ui|agent-pair|agent-made-tex|pair-link|notebook-edit|agent-grant|agent-schema|verbs|verbs-page|branch-rules|git-branch|view-state|entry-url)\.ts$/, /^src\/modes\.ts$/,
+  /^web\/workspace\/(?:agent-ui|agent-pair|agent-made-tex|pair-link|notebook-edit|notebook-form|agent-grant|agent-schema|verbs|verbs-page|branch-rules|git-branch|view-state|entry-url)\.ts$/, /^src\/modes\.ts$/,
   /^web\/code\/(?:langs|url)\.ts$/,
   // (and what makes those bundles from them, which no metafile lists: the build and its helpers and the dependencies;
   // @sagebrush's ruling, Nov 4. Not .github/workflows/ci.yml, which pins bun and node but changes in about one pull

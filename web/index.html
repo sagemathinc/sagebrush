@@ -1514,6 +1514,10 @@ const handover = writerHandover({
   // (the notebook's own cells: what it saves; a cell no longer among them is gone from the document)
   hasKey: (k) => nb.cells().some((c) => c.id === k),
   notApplied: (n) => { inputNotAppliedCount += n; sayWriterBar(journalPage.pageControls(nb.store).bar); },
+  // (a whole write of the notebook asked of this tab while it writes it (an agent's, through any page of this browser):
+  // made as a revert is, a change made here, saved and recorded)
+  shownDoc: () => (nb.store ? nb.snapshot() : null),
+  replaceDoc: (doc) => nb.replace(doc),
 });
 const nb = createNotebook($("#cells"), { kernel: null, staleOnLoad: true, analyzer, reactive: REACTIVE, refuseRun: (cell) => refuseHere(cell), onExplicitRun: () => { if (current.id) kernels.get(current.id)?.rotateIfWidened?.(); }, remoteGate: (k, page) => remoteMod?.gateFor(k, page), mystBook: () => bookAcc.mystBook() });
 // Where this browser's reader was in each notebook (design/view-state.md):
@@ -4834,6 +4838,8 @@ const wsReady = (async () => {
     try { await migrate(w, localStorage); } catch (e) { console.warn("workspace: bringing in what was kept before:", e); }
     ws = w;
     window.sagebrush.workspace = w.forAgent("agent:page");
+    // (tests: the workspace itself, its verbs with a check of the test's own (admit): loopback pages only)
+    if (/^(localhost|127\.0\.0\.1)$/.test(location.hostname)) window.__sbTestWs = w;
     // (a newer page upgraded the workspace: said, with Reload; and its files moved beside the index, a little at a time)
     w.onClosed(() => { docGen++; pageRunGone?.(); showReloadNotice(); });
     if (w.closed) showReloadNotice();
