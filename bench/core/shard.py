@@ -245,6 +245,7 @@ def vm_states(events: list[dict]) -> dict:
                 v["state"], v["end"] = "deleted", ev["t"]
             elif ev["ev"] == "absent":
                 v["state"], v["end"] = "absent", ev["t"]
+                v["was_absent"] = True
     return vms
 
 
@@ -256,18 +257,22 @@ def charged_hours(events: list[dict], now: float) -> float:
     observed (unknown, or absent after its window) counts maxRunDuration +
     T_create, for good: a VM it made may have run and been preempted
     unseen, or may appear late, and either bills at most maxRunDuration
-    from its own creation. Nothing is ever refunded for not being seen."""
+    from its own creation. Nothing is ever refunded for not being seen: one
+    once recorded absent keeps at least that full charge even after its VM
+    is seen late and deleted."""
     total = 0.0
     for v in vm_states(events).values():
+        full = v["max_run_s"] + v["t_create_s"]
         start = min(v["reserved"], v.get("created", v["reserved"]))
         if "created" not in v:
-            total += v["max_run_s"] + v["t_create_s"]
+            total += full
             continue
         expiry = v["created"] + v["max_run_s"]
         if v["state"] == "deleted":
-            total += min(v["end"], expiry) - start
+            seen = min(v["end"], expiry) - start
         else:
-            total += expiry - start
+            seen = expiry - start
+        total += max(seen, full) if v.get("was_absent") else seen
     return total / 3600.0
 
 
@@ -964,9 +969,10 @@ class Driver:
                 raise Fatal(
                     f"reconcile: {name} is not the VM reserved: {'; '.join(probs)}; untouched"
                 )
-            # (an unknown create that did make it, or an absent one whose
-            # create completed late: observed now, then deleted as live)
-            if v["state"] in ("unknown", "absent"):
+            # (an unknown create that did make it: observed now, then
+            # deleted as live; an absent one whose create completed late is
+            # left to late_creates(), which adopts and deletes it at once)
+            if v["state"] == "unknown":
                 self.ledger.append(
                     {"ev": "created", "name": name, "creation": creation_time(inst)}
                 )
@@ -1046,6 +1052,15 @@ class Driver:
                 if e["ev"] == "reserve" and e["type"] == tk
             )
             name = f"{self.prefix}{tk}-{n}"
+            # (one name, one create call, ever: a name already reserved in
+            # this ledger is never created again)
+            if any(
+                e["ev"] == "reserve" and e.get("name") == name
+                for e in self.ledger.events
+            ):
+                raise Fatal(
+                    f"{name} is already reserved in this ledger; not created again"
+                )
             zone = t["zones"][n % len(t["zones"])]
             self.ledger.append(
                 {
@@ -1335,6 +1350,10 @@ class Driver:
             return
         except Fatal as e:
             self.fail(f"cleanup: {e}")
+        try:
+            self.late_creates()
+        except Exception as e:
+            self.fail(f"cleanup: {type(e).__name__}: {e}")
         for name, v in vm_states(self.ledger.events).items():
             if v["state"] in ("live", "unknown", "absent"):
                 try:
@@ -1342,10 +1361,14 @@ class Driver:
                 except Exception as e:
                     self.fail(f"cleanup {name}: {type(e).__name__}: {e}")
 
-    def run(self) -> dict:
+    def run(self, lock: int | None = None) -> dict:
+        """The whole run, under the run's lock: `lock` is one the caller
+        already holds (main takes it before --repair-tail), else taken
+        here."""
         import signal
 
-        lock = take_lock(self.run_dir)
+        if lock is None:
+            lock = take_lock(self.run_dir)
         threads: list[threading.Thread] = []
         old = {}
         if threading.current_thread() is threading.main_thread():
@@ -1363,6 +1386,7 @@ class Driver:
             for name, v in vm_states(self.ledger.events).items():
                 if v["state"] == "live":
                     self.delete(name)
+            self.late_creates()
             done = self.rows.accepted()
             for tk, t in self.plan["types"].items():
                 queue = sorted(
@@ -1516,6 +1540,9 @@ def main(argv: list[str]) -> int:
                 make_plan(a.run_dir, json.loads(a.types.read_text()), a.envelope, pts),
             )
             return 0
+        # (the lock first, held from the repair to the end of the run: a
+        # torn tail may be a live driver's line being written)
+        lock = take_lock(a.run_dir)
         if a.repair_tail:
             print(
                 "moved",
@@ -1531,7 +1558,7 @@ def main(argv: list[str]) -> int:
             a.run_dir / "payload.tar",
             stop=stop,
         )
-        rep = d.run()
+        rep = d.run(lock)
         print(json.dumps(rep, indent=1))
         return 1 if rep.get("fatal") else 0
     except Fatal as e:

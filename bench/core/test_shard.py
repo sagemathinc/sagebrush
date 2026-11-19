@@ -262,6 +262,17 @@ class Accounting(unittest.TestCase):
         self.assertEqual(shard.vm_states(ev)["a"]["state"], "live")
         self.assertAlmostEqual(shard.charged_hours(ev, 1000), (900 + 3 * H) / H)
 
+    def test_an_absent_reservation_is_never_released_early(self):
+        # seen late at 900 and deleted at 1200: still its full charge
+        ev = [
+            reserve("a", 0),
+            {"ev": "absent", "name": "a", "t": 700},
+            {"ev": "created", "name": "a", "creation": 900, "t": 1000},
+            {"ev": "deleted", "name": "a", "t": 1200},
+        ]
+        self.assertAlmostEqual(shard.charged_hours(ev, 1300), 3 + 600 / H)
+        self.assertAlmostEqual(shard.charged_hours(ev, 10 * H), 3 + 600 / H)
+
     def test_the_envelope_is_never_exceeded(self):
         p = plan(envelope_hours=7)
         ev = [reserve("a", 0), {"ev": "created", "name": "a", "creation": 1, "t": 2}]
@@ -799,6 +810,94 @@ class Drivers(unittest.TestCase):
         self.assertEqual([e["name"] for e in self.events("created")].count(first), 1)
         self.assertEqual(rep["fatal"], [])
 
+    def test_one_name_one_create_call(self):
+        # (a lost create, a preemption and a retirement: every reserved name
+        # is created exactly once, and no name is reserved twice)
+        self.prov.create_raises.add("bc-0123456789abcdef-x86-0")
+        self.remote.preempt_on.add("poly_fp_gcd:s")
+        rep = self.driver().run()
+        self.assertEqual(rep["accepted"], 3)
+        creates = [n for c, n in self.prov.calls if c == "create"]
+        names = [e["name"] for e in self.events("reserve")]
+        self.assertEqual(creates, names)
+        self.assertEqual(len(set(creates)), len(creates))
+        self.assertGreaterEqual(len(creates), 3)
+
+    def test_a_name_already_reserved_is_never_created_again(self):
+        dr = self.driver()
+        dr.bootstrap()
+        dr.ledger.append(
+            {
+                "ev": "reserve",
+                "name": "bc-0123456789abcdef-x86-0",
+                "type": "other",
+                "zone": "z",
+                "max_run_s": 10800,
+                "t_create_s": 600,
+            }
+        )
+        dr.ledger.append({"ev": "absent", "name": "bc-0123456789abcdef-x86-0"})
+        rep = self.driver().run()
+        self.assertTrue(any("already reserved" in f for f in rep["fatal"]))
+        self.assertEqual(self.prov.calls, [])
+
+    def test_a_late_vm_is_deleted_before_the_next_reservation(self):
+        first = "bc-0123456789abcdef-x86-0"
+        self.prov.create_raises.add(first)
+        self.remote.preempt_on.add("poly_fp_gcd:s")
+        p = self.plan["types"]["x86"]
+
+        def land(name):
+            if name == "bc-0123456789abcdef-x86-1":
+                self.prov.vms[first] = self.prov.inst(
+                    first, p["machine_type"], p["zones"][0], p["image"], p["hours"]
+                )
+
+        self.prov.on_create = land
+        rep = self.driver().run()
+        self.assertEqual(rep["accepted"], 3)
+        # (x86-1 was preempted: before x86-2's create, the late x86-0 was
+        # adopted and deleted)
+        self.assertLess(
+            self.prov.calls.index(("delete", first)),
+            self.prov.calls.index(("create", "bc-0123456789abcdef-x86-2")),
+        )
+        self.assertEqual(self.prov.vms, {})
+        # (x86-0, never seen in its window, keeps its full charge)
+        led = shard.Ledger(self.d / "ledger.jsonl").events
+        own = [e for e in led if e.get("name") == first]
+        self.assertAlmostEqual(shard.charged_hours(own, self.clock()), 3 + 600 / H)
+        self.assertGreaterEqual(rep["charged_hours"], 3 + 600 / H)
+
+    def test_a_late_vm_is_found_by_cleanup(self):
+        from unittest import mock
+
+        first = "bc-0123456789abcdef-x86-0"
+        self.prov.create_raises.add(first)
+        p = self.plan["types"]["x86"]
+        dr = self.driver()
+        calls = []
+        orig = dr.late_creates
+
+        def spy():
+            calls.append(len(self.remote.log))
+            # (it lands only after the last point, before cleanup)
+            if len([x for x in self.remote.log if x[0] == "run"]) == 3:
+                self.prov.vms.setdefault(
+                    first,
+                    self.prov.inst(
+                        first, p["machine_type"], p["zones"][0], p["image"], p["hours"]
+                    ),
+                )
+            orig()
+
+        with mock.patch.object(dr, "late_creates", spy):
+            rep = dr.run()
+        self.assertEqual(rep["fatal"], [])
+        self.assertIn(("delete", first), self.prov.calls)
+        self.assertEqual(self.prov.vms, {})
+        self.assertGreaterEqual(len(calls), 2)  # (before x86-1, and in cleanup)
+
     def test_a_restart_keeps_every_unobserved_charge(self):
         self.plan["envelope_hours"] = 7
         (self.d / "plan.json").write_bytes(shard.canonical(self.plan))
@@ -1316,6 +1415,34 @@ class Plans2(unittest.TestCase):
 
 
 class Locks(unittest.TestCase):
+    def test_repair_tail_waits_for_the_lock(self):
+        # (a held run: --repair-tail must not touch the ledger, whose torn
+        # tail may be the live driver's reservation being written)
+        d = Path(tempfile.mkdtemp(prefix="shard-lock-"))
+        (d / "plan.json").write_bytes(shard.canonical(plan()))
+        led = d / "ledger.jsonl"
+        led.write_bytes(b'{"ev": "bootstrap"}\n{"ev": "res')
+        fd = shard.take_lock(d)
+        r = subprocess.run(
+            [
+                sys.executable,
+                str(Path(shard.__file__)),
+                "run",
+                str(d),
+                "--sbvm",
+                str(d / "sbvm.py"),
+                "--repair-tail",
+            ],
+            capture_output=True,
+            text=True,
+        )
+        self.assertNotEqual(r.returncode, 0)
+        self.assertIn("another driver", r.stderr)
+        self.assertEqual(led.read_bytes(), b'{"ev": "bootstrap"}\n{"ev": "res')
+        self.assertFalse(Path(str(led) + ".torn").exists())
+        os.close(fd)
+        shutil.rmtree(d)
+
     def test_a_second_driver_is_refused(self):
         d = Path(tempfile.mkdtemp(prefix="shard-lock-"))
         fd = shard.take_lock(d)

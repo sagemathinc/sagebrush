@@ -585,6 +585,8 @@ class Installed(unittest.TestCase):
             "gone.py,sha256=AAAA,1\n",
             "fakepkg.py,,\n",
             "../../../../../../etc/hostname,sha256=AAAA,1\n",
+            # (only fakepkg's own RECORD is exempt, not another dist-info's)
+            "other-1.0.dist-info/RECORD,,\n",
         ):
             with self.subTest(extra=extra):
                 self.record(["fakepkg.py", "fakepkg-1.0.dist-info/METADATA"], extra)

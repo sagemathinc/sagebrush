@@ -560,6 +560,10 @@ import base64, csv, hashlib, os, sys, importlib.metadata as m
 d = m.distribution(sys.argv[1])
 root = os.path.realpath(sys.prefix) + os.sep
 base = d.locate_file("")
+# (only this distribution's own RECORD is exempt from hashing; without its
+# metadata directory nothing is exempt, so the digest fails closed)
+meta = getattr(d, "_path", None)
+own = os.path.realpath(os.path.join(meta, "RECORD")) if meta else None
 lines = []
 # (RECORD read directly: Distribution.files drops entries whose file is gone)
 for row in csv.reader((d.read_text("RECORD") or "").splitlines()):
@@ -569,8 +573,7 @@ for row in csv.reader((d.read_text("RECORD") or "").splitlines()):
     p = os.path.realpath(os.path.join(base, f))
     if not p.startswith(root):
         sys.exit(f"{f}: outside the environment")
-    parts = f.split("/")
-    if len(parts) == 2 and parts[0].endswith(".dist-info") and parts[1] == "RECORD":
+    if own is not None and p == own:
         continue
     if not h.startswith("sha256="):
         sys.exit(f"{f}: no sha256 in RECORD")
