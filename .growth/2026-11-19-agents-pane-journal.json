@@ -1,0 +1,7 @@
+{
+  "v": 1,
+  "reason": "Under notebook sync, the agents chat's notebook pane saves through sync's journal as the notebook page does (its writer lock and focus takeover), and the takeover module gains a use that isn't a key or a click (an agent's edit made for the person): web/page/handover.ts, which the CLI's bundle carries with the notebook page. cli/pyjs.cjs grows +72 bytes, exact, measured with pinned node 24.21.0 and bun 1.4.4 on tested base a9b2b826 (to be bound to CI's governed measurement if it differs); the bound adds 64 bytes of slack.",
+  "bytes": {
+    "cli/pyjs.cjs": 136
+  }
+}
