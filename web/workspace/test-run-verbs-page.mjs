@@ -101,9 +101,16 @@ try {
   const nb1 = await evaluate(`window.__ws.read("/rv/nb.ipynb").then((x) => JSON.stringify(x.content) === window.__nb0)`);
   check(r?.ended === "error" && r.saved === "not saved: main" && r.cells?.[0]?.status === "ok" && r.cells[0].out === "2\n" && r.cells[1]?.index === 2 && r.cells[1].status === "error" && nb1 === true,
     `run_notebook on main: outputs returned, nothing saved, the notebook unchanged (its write refused: no permission): ${JSON.stringify({ r, nb1 })}`);
-  // ---- run_notebook on a Magma notebook: each cell runs as Magma and returns Magma's own text (Magma 2.18 prints
-  // exactly these two lines), and the notebook stays a Magma notebook
-  check(await evaluate(`window.__ws.create("/rv/mg.ipynb", { content: { mode: "magma", cells: [{ id: "m1", code: "print Factorization(2^64 - 1);" }, { id: "m2", code: "K := QuadraticField(-23);\\nprint ClassNumber(K);" }] } }).then(() => true)`) === true, "a Magma notebook made on main");
+  // ---- a notebook in another language: "a MATLAB notebook plotting sin(x^2)", made as workspace_create makes it (its
+  //  cells, the mode beside them), runs in MATLAB, its cell's plot counted, and it is a MATLAB notebook (its mode)
+  check(await evaluate(`window.__ws.create("/rv/sinx2.ipynb", { content: { cells: [{ id: "m1", code: "x = linspace(0, 3, 200);\\nplot(x, sin(x.^2))\\ntitle('sin(x^2)')" }] }, mode: "matlab" }).then(() => true)`) === true, "(a MATLAB notebook made)");
+  r = await evaluate(`window.__run("workspace.run_notebook", { path: "/rv/sinx2.ipynb" })`);
+  const nbm = await evaluate(`window.__ws.read("/rv/sinx2.ipynb").then((x) => x.content.mode)`);
+  check(r?.ended === "done" && r.cells?.[0]?.status === "ok" && r.cells[0].images?.count === 1 && !/rror/.test(r.cells[0].out ?? "") && nbm === "matlab",
+    `a MATLAB notebook plotting sin(x^2): run in MATLAB, its one plot counted, no error, its mode matlab: ${JSON.stringify({ r, nbm })}`);
+  // ---- a Magma notebook, made as workspace_create makes it: each cell runs as Magma and returns Magma's own text
+  //  (Magma 2.18 prints exactly these two lines), and the notebook stays a Magma notebook
+  check(await evaluate(`window.__ws.create("/rv/mg.ipynb", { content: { cells: [{ id: "m1", code: "print Factorization(2^64 - 1);" }, { id: "m2", code: "K := QuadraticField(-23);\\nprint ClassNumber(K);" }] }, mode: "magma" }).then(() => true)`) === true, "a Magma notebook made on main");
   r = await evaluate(`window.__run("workspace.run_notebook", { path: "/rv/mg.ipynb", timeout_s: 120 })`);
   const mg = await evaluate(`window.__ws.read("/rv/mg.ipynb").then((x) => x.content.mode)`);
   check(r?.ok === true && r.ended === "done" && r.cells?.length === 2 && r.cells.every((c) => c.status === "ok" && c.images?.count === 0) &&
