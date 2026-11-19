@@ -14,7 +14,7 @@
 //   SAGEBRUSH_LATEX_PREVIEW=0, and A14's cases run to their end; ONLY=a,b: those sections)
 import { spawn } from "node:child_process";
 import { createHash } from "node:crypto";
-import { appendFileSync, existsSync, mkdtempSync, rmSync } from "node:fs";
+import { appendFileSync, existsSync, mkdtempSync, readFileSync, rmSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { devtoolsPort, startServe } from "../test-port.mjs";
@@ -26,6 +26,13 @@ const here = new URL(".", import.meta.url).pathname;
 // hasn't)
 const LATEX = existsSync(join(here, "..", "dist", "sagebrush-latex.js"));
 if (process.env.AGENTS_LATEX === "1" && !LATEX) throw new Error("AGENTS_LATEX=1 but this web/dist has no sagebrush-latex.js");
+// (and whether this host serves the editor's own page, where the pane frames it (web/agents/page.ts mountTexFrame): a
+// "test" build's, on loopback as here, whose hooks (__sbTexWs) are in its page module; elsewhere the pane has the editor
+// itself, as on the CLI's page)
+const TEXFRAME = LATEX && readFileSync(join(here, "..", "dist", "sagebrush-latex.js"), "utf8").includes("__sbTexWs");
+// (and whether its editor runs a .tex the agent made once by itself, decided Nov 19 2026: its page module asks the
+// pairing over the site's channel, web/workspace/agent-made-tex.ts)
+const TEXSELF = TEXFRAME && readFileSync(join(here, "..", "dist", "sagebrush-latex.js"), "utf8").includes("tex-may-run");
 if (process.env.AGENTS_LATEX === "0" && LATEX) throw new Error("AGENTS_LATEX=0 but this web/dist has sagebrush-latex.js: build it with SAGEBRUSH_LATEX_PREVIEW=0");
 // (A14's cases, in a build without LaTeX: AGENTS_LATEX=0 insists they ran to their end)
 let a14Ran = false;
@@ -791,10 +798,81 @@ try {
     await artifactTurn(path);
     await until(`!!document.querySelector('${PANE} .file-body')`, 10000);
     await sleep(2500);
-    const got = await ev(`({ editor: !!document.querySelector('${PANE} .tex-embed'), text: !!document.querySelector('${PANE} textarea.code-edit'), open: !!document.querySelector('${PANE} a.open-full') })`);
+    const got = await ev(`({ editor: !!document.querySelector('${PANE} .tex-embed') || !!document.querySelector('${PANE} iframe.tex-frame')?.contentDocument?.querySelector('.tex-page'), text: !!document.querySelector('${PANE} textarea.code-edit'), open: !!document.querySelector('${PANE} a.open-full') })`);
     const asked = requested.slice(before).some((u) => u.includes("sagebrush-latex.js"));
-    if (LATEX) ok(got.editor && !got.text && asked, "a .tex artifact opens in the LaTeX editor (this build has it)", { got, asked });
+    if (LATEX) ok(got.editor && !got.text && asked, `a .tex artifact opens in the LaTeX editor (this build has it${TEXFRAME ? ": its own page, framed" : ""})`, { got, asked });
     else ok(!got.editor && got.text && got.open && !asked, "a .tex artifact is its source, with Open in Sagebrush, and no LaTeX module is asked for (this build has none)", { got, asked });
+  }
+
+  // ======================================================================== LaTeX: the editor's own page, framed (embed)
+  // (where this host serves the LaTeX editor's page: a .tex artifact is that page in a frame, /?tex=<fid>&latex=1&embed=1
+  //  (web/latex page.ts's embed), Run and the PDF as there. TF1 no frame until the artifact's tab is shown; then the
+  //  document alone (the PDF), no bar of its own, no pairing of its own (no agent chunk), the composer keeps its focus;
+  //  TF2 a write from outside (the agent's) followed without a reload, and Run then runs the new text: its SageTeX
+  //  result in the PDF; TF3 Close asks the frame's leave guard first: a held write holds the close, and once written it
+  //  closes, the edit in the file; TF4 closed, the frame and the editor's workers are gone)
+  if (want("texframe") && TEXFRAME) {
+    await freshPage();
+    const T = "/notes/framed.tex";
+    const FR = `document.querySelector('${PANE} iframe.tex-frame')`;
+    const FW = `${FR}.contentWindow`;
+    const FD = `${FR}.contentDocument`;
+    await call("workspace.create", { path: T, content: { text: "\\documentclass{article}\n\\usepackage{sagetex}\n\\begin{document}\nTwo and two: $\\sage{2 + 2}$.\n\\end{document}\n" } });
+    const before = await ev(`document.querySelectorAll('iframe').length`);
+    await ev(`(() => { const t = document.querySelector('main textarea'); t?.focus(); window.__fe = document.activeElement; return true; })()`);
+    const n0 = requested.length;
+    await artifactTurn(T);
+    await until(`!!${FD}?.querySelector('.tex-page .tex-preview')?.textContent.includes('Two and two')`, 60000);
+    await sleep(1500);
+    const tf1 = await ev(`(() => { const f = ${FR}, d = f.contentDocument, pg = d.querySelector('.tex-page'), gone = (c) => { const e = d.querySelector(c); return !e || e.hidden || getComputedStyle(e).display === 'none'; };
+      return { src: f.getAttribute('src'), frames: document.querySelectorAll('#artifacts iframe.tex-frame').length, view: pg.dataset.view, back: gone('.tex-back'), home: gone('.tex-home'), file: gone('.tex-filebtn'), agent: gone('.tex-agent'), share: gone('.tex-sharebtn'),
+        focusKept: document.activeElement === window.__fe && document.activeElement !== f, box: Math.round(f.getBoundingClientRect().height),
+        full: document.querySelector('${PANE} a.open-full')?.getAttribute('href') ?? null }; })()`);
+    const agentChunk = requested.slice(n0).filter((u) => /sagebrush-latex-agent/.test(u));
+    ok(before === 0 && /^\/\?tex=[^&]+&latex=1&embed=1$/.test(tf1.src) && tf1.frames === 1 && tf1.view === "pdf" && tf1.back && tf1.home && tf1.file && tf1.agent && tf1.share && tf1.focusKept && tf1.box > 200 && agentChunk.length === 0 && tf1.full === tf1.src.replace("&latex=1&embed=1", ""),
+      "TF1: a .tex artifact is the LaTeX editor's page framed (embed=1), made when its tab is shown: the PDF alone, no bar, Agent or pairing of its own (its chunk never fetched), the composer's focus kept; Open in Sagebrush is the editor's own page", { before, tf1, agentChunk });
+    // (TF2: the agent's write, followed in the frame without a reload; then Run, on the new text)
+    await ev(`(${FR}.contentWindow.__sameDoc = 1, true)`);
+    const r = await call("workspace.read", { path: T });
+    await call("workspace.write", { path: T, content: { text: r.content.text.replace("Two and two: $\\sage{2 + 2}$", "Three and four: $\\sage{3 + 4}$") }, base: r.rev });
+    const followed = await until(`!!${FD}?.querySelector('.tex-preview')?.textContent.includes('Three and four')`, 30000).catch(() => false);
+    const same = await ev(`${FW}?.__sameDoc === 1`);
+    // (a run under way first, as the editor's own run of a .tex the agent created may be: the button is its Stop till then)
+    await until(`${FD}?.querySelector('.tex-run')?.textContent === 'Run'`, 180000).catch(() => {});
+    await ev(`(${FD}.querySelector('.tex-status').textContent = '', ${FD}.querySelector('.tex-run').click(), true)`);
+    const ran = await until(`/Ran 1 SageTeX item/.test(${FD}?.querySelector('.tex-status')?.textContent ?? '')`, 180000).catch(() => false);
+    await sleep(1000);
+    const tf2 = await ev(`({ status: ${FD}.querySelector('.tex-status')?.textContent, pdf: ${FD}.querySelector('.tex-preview')?.textContent.replace(/\\s+/g, ' ').slice(0, 200) })`);
+    ok(followed && same && ran && /Three and four: ?7/.test(tf2.pdf) && !/\?\?/.test(tf2.pdf), "TF2: the agent's write is followed in the frame without a reload, and Run runs the new text: its SageTeX result (7) in the PDF", { followed, same, ran, tf2 });
+    // (TF3: an edit in the frame, its write held; Close waits for the frame's answer, and closes once it is written)
+    const lw = live("sagebrush-latex-worker.js");
+    await ev(`(() => { const w = ${FW}; w.__hold = new Promise((r) => (w.__rel = r)); w.__sbTexSaveWrite = () => w.__hold; w.document.querySelector('.tex-view [data-view="source"]').click(); const t = w.document.querySelector('.tex-src'); t.setRangeText('% typed in the pane\\n', t.value.length, t.value.length, 'end'); t.dispatchEvent(new Event('input', { bubbles: true })); return true; })()`);
+    await sleep(1200);
+    await ev(`document.querySelector('#close').click()`);
+    await sleep(2500);
+    const during = await ev(`({ open: document.body.classList.contains('has-artifact'), frame: !!${FR} })`);
+    await ev(`(${FR}?.contentWindow.__rel?.(), true)`); // (a frame closed already: nothing to let go)
+    const closed = await until(`!document.body.classList.contains('has-artifact')`, 15000).catch(() => false);
+    await sleep(1500);
+    const text = (await call("workspace.read", { path: T })).content.text;
+    ok(during.open && during.frame && closed && /% typed in the pane\n$/.test(text), "TF3: Close asks the frame first: with its write held the pane stays, and once written it closes, the edit in the file", { during, closed, tail: text.slice(-60) });
+    // (TF4: closed, nothing of the frame left)
+    const tf4 = { frames: await ev(`document.querySelectorAll('iframe.tex-frame').length`), workersBefore: lw, workersAfter: live("sagebrush-latex-worker.js") };
+    ok(tf4.frames === 0 && tf4.workersBefore >= 1 && tf4.workersAfter === 0, "TF4: closed, the frame and the editor's workers are gone", tf4);
+    // (TF5: a .tex the agent created runs once by itself in the frame, as a notebook it created does (decided Nov 19
+    //  2026), under this grant (Everything, May run code): its result in the PDF, nothing pressed, saved as the
+    //  editor's own Run saves it)
+    if (TEXSELF) {
+      const M = "/notes/made.tex";
+      await call("workspace.create", { path: M, content: { text: "\\documentclass{article}\n\\usepackage{sagetex}\n\\begin{document}\nMade: $\\sage{6*7}$.\n\\end{document}\n" } });
+      await artifactTurn(M);
+      const ranSelf = await until(`/Made: ?42/.test((${FD}?.querySelector('.tex-preview')?.textContent ?? '').replace(/\\s+/g, ' '))`, 120000).catch(() => false);
+      const st = await ev(`(${FD}?.querySelector('.tex-status')?.textContent ?? null)`).catch(() => null);
+      const res = await call("workspace.read", { path: M + ".results.json" }).then((r) => r.content?.text ?? (r.content?.json ? "json" : "bytes"), () => null);
+      ok(ranSelf && /Ran 1 SageTeX item/.test(st ?? "") && res !== null, "TF5: a .tex the agent created runs once by itself in the frame: its result (42) in the PDF, nothing pressed, its results saved", { ranSelf, st, res: typeof res === "string" ? res.slice(0, 60) : res });
+      await ev(`document.querySelector('#close').click()`);
+      await until(`!document.body.classList.contains('has-artifact')`, 15000).catch(() => {});
+    }
   }
 
   // ======================================================================== LaTeX: the editor fills its pane (A4, A8)
@@ -808,7 +886,7 @@ try {
   // C-e1 the pane's and the chat's widths are what they are without #tex-host-layout (±1 px); C-e2 the chat at least 420 px (1400).
   // C-a..C-d again with the pane forced to 320, 330 and 460 px in a 1400 px window (a test-only style; PR 2's F2: a
   // narrow pane wraps the source to about 37k px, past what a fixed 60 notches reach)
-  if (want("latex") && LATEX) {
+  if (want("latex") && LATEX && !TEXFRAME) {
     const path = "/notes/layout.tex";
     const pre = Array.from({ length: 60 }, (_, i) => `\\newcommand{\\cmd${String.fromCharCode(97 + (i % 26))}${i}}{x_{${i}}}`).join("\n");
     const sec = (k) => `\\section{Part ${k}}\n` + Array.from({ length: 30 }, (_, j) => `% a comment line ${k}.${j}`).join("\n") + `\nSome words of part ${k}, with $a_${k}$.\n\n\\begin{align}\n  (a+b)^2 &= a^2 + 2ab + b^2, \\\\\n  \\int_0^1 x^n \\, dx &= \\frac{1}{n+1}.\n\\end{align}\n\n`;
@@ -1268,15 +1346,15 @@ try {
     };
     const fz = await frozenFile("/notes/frozen.py", false);
     ok(fz.during.inert && fz.during.said === "Closing…" && fz.shown === "f = 1\n# before\n" && fz.copy === "f = 1\n# before\n" && fz.file === "f = 1\n", "while a file's close waits for its copy its editor is frozen (typing changes nothing); it closes with what it showed, kept as a copy", fz);
-    if (LATEX) {
+    if (LATEX && !TEXFRAME) {
       const fl = await frozenFile("/notes/frozen.tex", true);
       ok(fl.during.inert && fl.shown === "f = 1\n# before\n" && fl.copy === "f = 1\n# before\n" && fl.file === "f = 1\n", "a LaTeX file closed within its debounce while the workspace is busy: frozen, it closes with what it showed, kept as a copy", fl);
     }
-    if (LATEX) {
+    if (LATEX && !TEXFRAME) {
       const ql = await queued("/notes/queued.tex", true);
       ok(/couldn't be saved or kept/.test(ql.bar) && ql.file === "q = 1\n" && ql.copy === "q = 1\n# one\n# two\n" && ql.closed, "a LaTeX file closed within its editor's debounce while the workspace is busy: nothing is written after the close, the latest text is kept as a copy", ql);
     }
-    if (LATEX) {
+    if (LATEX && !TEXFRAME) {
       // (no editor until the file and its revision are read: here the LaTeX module is held)
       await freshPage();
       const T = "/notes/g.tex";
