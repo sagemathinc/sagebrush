@@ -59,6 +59,11 @@
   "owner": "engine arith (big-integer wire decoder)",
   "reason": "the decoder's and the gcd check's plumbing (bounds for the caller's reservation and work admission, the workspace, word masks); refuses nothing itself"
  },
+ "engine/arith/src/coprime.rs :: window_cofactors_out_of_bound_are_refused :: let (a0, b0) = (vec![u64::MAX, u64::MAX], vec![u64::MAX, u64::MAX - 1]); #0": {
+  "class": "none",
+  "owner": "engine arith (big-integer wire decoder)",
+  "reason": "test code: the big-integer decoder's correctness, allocation and Stop tests; refuses nothing itself"
+ },
  "engine/arith/src/nmod_poly.rs :: barrett_reduction_edges :: let mut xs: Vec<u64> = vec![0, 1, n - 1, n, n + 1, 2 * n - 1, u64::MAX, u64::MAX - 1, u64::MAX - n]; #0": {
   "class": "none",
   "owner": "exact linear algebra (engine/arith)",
@@ -158,7 +163,12 @@
   "owner": "engine arith (big-integer wire decoder)",
   "reason": "test code: the big-integer decoder's correctness, allocation and Stop tests; refuses nothing itself"
  },
- "engine/arith/src/wire_decode/tests.rs :: mat1_of_rationals_is_two_flat_vectors :: assert_eq!(decode_mat(&m, &need).unwrap(), MatValues::Ints(vec![i64::MIN.into(), i64::MAX.into()])); #0": {
+ "engine/arith/src/wire_decode/tests.rs :: admit :: return Err(WireError { code: Code::Cap, offset: 0, what: \"refused by the caller\" }); #0": {
+  "class": "none",
+  "owner": "engine arith (big-integer wire decoder)",
+  "reason": "test code: the big-integer decoder's correctness, allocation and Stop tests; refuses nothing itself"
+ },
+ "engine/arith/src/wire_decode/tests.rs :: mat1_of_rationals_is_two_flat_vectors :: assert_eq!(decode_mat(&m, &mut Open).unwrap(), MatValues::Ints(vec![i64::MIN.into(), i64::MAX.into()])); #0": {
   "class": "none",
   "owner": "engine arith (big-integer wire decoder)",
   "reason": "test code: the big-integer decoder's correctness, allocation and Stop tests; refuses nothing itself"
@@ -223,17 +233,12 @@
   "owner": "engine arith (big-integer wire decoder)",
   "reason": "test code: the big-integer decoder's correctness, allocation and Stop tests; refuses nothing itself"
  },
- "engine/arith/tests/wire_decode_alloc.rs :: admit_and_decode_qv :: Ok((budget - need.work, peak)) #0": {
+ "engine/arith/tests/wire_decode_alloc.rs :: admit :: return Err(WireError { code: Code::Cap, offset: 0, what: \"over the grant\" }); #0": {
   "class": "none",
   "owner": "engine arith (big-integer wire decoder)",
   "reason": "test code: the big-integer decoder's correctness, allocation and Stop tests; refuses nothing itself"
  },
- "engine/arith/tests/wire_decode_alloc.rs :: admit_and_decode_qv :: fn admit_and_decode_qv(p: &[u8], budget: u64) -> Result<(u64, u64), &'static str> { #0": {
-  "class": "none",
-  "owner": "engine arith (big-integer wire decoder)",
-  "reason": "test code: the big-integer decoder's correctness, allocation and Stop tests; refuses nothing itself"
- },
- "engine/arith/tests/wire_decode_alloc.rs :: admit_and_decode_qv :: if need.work > budget { #0": {
+ "engine/arith/tests/wire_decode_alloc.rs :: admit_and_decode_qv :: let mut g = Grant { work, bytes: u64::MAX }; #0": {
   "class": "none",
   "owner": "engine arith (big-integer wire decoder)",
   "reason": "test code: the big-integer decoder's correctness, allocation and Stop tests; refuses nothing itself"
@@ -244,6 +249,11 @@
   "reason": "test code: the big-integer decoder's correctness, allocation and Stop tests; refuses nothing itself"
  },
  "engine/arith/tests/wire_decode_alloc.rs :: decodes_allocate_within_their_need :: assert_eq!((r.unwrap_err().code, peak), (Code::Cap, 0)); #0": {
+  "class": "none",
+  "owner": "engine arith (big-integer wire decoder)",
+  "reason": "test code: the big-integer decoder's correctness, allocation and Stop tests; refuses nothing itself"
+ },
+ "engine/arith/tests/wire_decode_alloc.rs :: open :: Grant { work: u64::MAX, bytes: u64::MAX } #0": {
   "class": "none",
   "owner": "engine arith (big-integer wire decoder)",
   "reason": "test code: the big-integer decoder's correctness, allocation and Stop tests; refuses nothing itself"

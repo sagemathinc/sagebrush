@@ -333,26 +333,47 @@ pub fn gcd_in_place(x: &mut [u64], nx: usize, y: &mut [u64], ny: usize, m: &mut 
             na = rem_in_place(a, na, b, nb, m)?;
             continue;
         }
-        // (a, b) <- (ca a + cb b, cc a + cd b): the true remainders (each
-        // row has entries of opposite signs, below 2^63 in size)
         m.add(3 * na)?;
-        let (mut c1, mut c2) = (0i128, 0i128);
-        for i in 0..na {
-            let (ai, bi) = (i128::from(a[i]), i128::from(b[i]));
-            let t1 = ca * ai + cb * bi + c1;
-            let t2 = cc * ai + cd * bi + c2;
-            a[i] = t1 as u64;
-            b[i] = t2 as u64;
-            c1 = t1 >> 64;
-            c2 = t2 >> 64;
-        }
-        if c1 != 0 || c2 != 0 {
-            return Err(Fault::Invariant);
-        }
+        apply_window(a, b, na, [ca, cb, cc, cd])?;
         let n = na;
         na = norm(a, n);
         nb = norm(b, n);
     }
+}
+
+/// Algorithm L's bound on a window's cofactors [ca, cb, cc, cd], checked
+/// before they are applied: each below 2^63 in size, and each row's two of
+/// opposite signs (or zero), so that every i128 sum in [`apply_window`]
+/// (two products below 2^127 in size and of opposite signs, plus a carry
+/// below 2^64) is below 2^127 in size.
+fn cofactors_fit(c: [i128; 4]) -> bool {
+    const B: i128 = 1 << 63;
+    c.iter().all(|&x| -B < x && x < B) && c[0].signum() * c[1].signum() <= 0 && c[2].signum() * c[3].signum() <= 0
+}
+
+/// (a, b) <- (ca a + cb b, cc a + cd b) over the first `na` limbs: the true
+/// remainders, which are nonnegative (a final borrow is an invariant
+/// failure).  Cofactors outside Algorithm L's bound are refused before
+/// anything is written.
+fn apply_window(a: &mut [u64], b: &mut [u64], na: usize, c: [i128; 4]) -> Result<(), Fault> {
+    if !cofactors_fit(c) {
+        return Err(Fault::Invariant);
+    }
+    let [ca, cb, cc, cd] = c;
+    let (mut c1, mut c2) = (0i128, 0i128);
+    for i in 0..na {
+        let (ai, bi) = (i128::from(a[i]), i128::from(b[i]));
+        let t1 = ca * ai + cb * bi + c1;
+        let t2 = cc * ai + cd * bi + c2;
+        a[i] = t1 as u64;
+        b[i] = t2 as u64;
+        c1 = t1 >> 64;
+        c2 = t2 >> 64;
+    }
+    if c1 != 0 || c2 != 0 {
+        return Err(Fault::Invariant);
+    }
+    Ok(())
 }
 
 /// Copy a wire integer's magnitude into a zeroed slot.
@@ -454,6 +475,29 @@ mod tests {
         // the quotient loop's and the shifts' units, as gcd_work counts them
         let units = (nx + ny + 2) + (nx - ny + 1) * (2 * ny + 4) + (2 * ny + nx + 1);
         assert_eq!(m.used(), units as u64);
+    }
+
+    /// The cofactor guard: Algorithm L's bound holds at its edges, and a
+    /// cofactor of size 2^63, or a row of equal signs, is refused before
+    /// anything is written; a negative result is refused too.
+    #[test]
+    fn window_cofactors_out_of_bound_are_refused() {
+        let b63 = 1i128 << 63;
+        let (a0, b0) = (vec![u64::MAX, u64::MAX], vec![u64::MAX, u64::MAX - 1]);
+        // at the bound: (2^63 - 1)(a - b) with a - b = 2^64 (little-endian
+        // limbs), and the second row the identity on b
+        let (mut a, mut b) = (a0.clone(), b0.clone());
+        assert_eq!(apply_window(&mut a, &mut b, 2, [b63 - 1, -(b63 - 1), 0, 1]), Ok(()));
+        assert_eq!((a, b), (vec![0, (b63 - 1) as u64], b0.clone()));
+        for c in [[b63, -1, 0, 1], [1, -b63, 0, 1], [1, 0, -b63, 1], [1, 0, 0, b63], [1, 1, 0, 1], [1, 0, -1, -1], [-b63, 0, 0, 1]] {
+            let (mut a, mut b) = (a0.clone(), b0.clone());
+            assert_eq!(apply_window(&mut a, &mut b, 2, c), Err(Fault::Invariant), "{:?}", c);
+            assert_eq!((a, b), (a0.clone(), b0.clone()), "{:?}: written before the refusal", c);
+        }
+        // in the bound, but a negative result (b - a with b < a): not a
+        // remainder, so a final borrow is refused
+        let (mut a, mut b) = (a0.clone(), b0.clone());
+        assert_eq!(apply_window(&mut a, &mut b, 2, [1, 0, -1, 1]), Err(Fault::Invariant));
     }
 
     /// Knuth D's rare corrections: quotient digits estimated one or two

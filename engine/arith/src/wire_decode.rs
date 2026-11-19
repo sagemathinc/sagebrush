@@ -1,15 +1,18 @@
 //! Decoding the wire's big-integer payloads (`ZV_1`, integer vectors,
 //! `QV_1`, `MAT1`, `MQR1`) into engine integers, under one reservation
-//! (S2).  For each payload the caller:
-//! 1. takes its [`Need`] (`need_*`, allocation-free): over-size integers
-//!    where a gcd check runs are refused (Cap, [`LIMB_CAP`]), and the bytes
-//!    of everything decoded plus the workspace, and the work of every gcd
-//!    check, are bounded in checked u64 arithmetic;
-//! 2. admits `need.work` from the call's work budget and reserves
-//!    `need.bytes` in the ledger, before anything here allocates;
-//! 3. decodes (`decode_*`): the gcd = 1 checks first, in the workspace,
-//!    metered against `need.work`; then the values, with exactly the
-//!    allocations `need.bytes` counts.
+//! (S2).  Each `decode_*` takes the caller's [`Admit`], so admission cannot
+//! be skipped:
+//! 1. it computes the payload's [`Need`] (`need_*`, allocation-free):
+//!    over-size integers where a gcd check runs are refused (Cap,
+//!    [`LIMB_CAP`]), and the bytes of everything decoded plus the
+//!    workspace, and the work of every gcd check, are bounded in checked
+//!    u64 arithmetic;
+//! 2. it asks the caller to admit them ([`Admit::admit`]: the work debited
+//!    from the call's budget, the bytes reserved in the ledger), before
+//!    anything here allocates; a refusal ends the decode;
+//! 3. it decodes: the gcd = 1 checks first, in the workspace, metered
+//!    against the admitted work; then the values, with exactly the
+//!    allocations the admitted bytes count.
 //!
 //! **Bytes.**  Each `Vec<BigInt>`: its capacity times the BigInt's size,
 //! plus its header.  Each value: [`sagebrush_wire::bigint_heap_words`] (E1; the
@@ -43,6 +46,20 @@ pub struct Need {
     pub bytes: u64,
     /// The gcd checks' work bound (units of [`coprime::Meter`]).
     pub work: u64,
+}
+
+/// The caller's admission of a payload, before it is decoded: debit
+/// `work` from the call's work budget and reserve `bytes` (held until the
+/// decoded values are dropped), or refuse.  The consumer implements it on
+/// its Budget and ledger reservation (this crate sees neither).
+pub trait Admit {
+    fn admit(&mut self, work: u64, bytes: u64) -> Result<(), WireError>;
+}
+
+fn admitted(need: Result<Need, WireError>, a: &mut impl Admit) -> Result<Need, WireError> {
+    let need = need?;
+    a.admit(need.work, need.bytes)?;
+    Ok(need)
 }
 
 fn fail(code: Code, offset: u64, what: &'static str) -> WireError {
@@ -154,8 +171,10 @@ pub fn need_zv(z: &Zv) -> Result<Need, WireError> {
     Ok(Need { bytes: sum(&[vec_bytes(z.count)?, words_bytes(z.heap_words)?])?, work: 0 })
 }
 
-pub fn decode_zv(z: &Zv) -> Vec<BigInt> {
-    values(z)
+/// Decode a `ZV_1` after admitting its [`need_zv`].
+pub fn decode_zv(z: &Zv, a: &mut impl Admit) -> Result<Vec<BigInt>, WireError> {
+    admitted(need_zv(z), a)?;
+    Ok(values(z))
 }
 
 /// An integer vector (`I641` or `ZV_1`).
@@ -166,7 +185,13 @@ pub fn need_ints(v: &Ints) -> Result<Need, WireError> {
     }
 }
 
-pub fn decode_ints(v: &Ints) -> Vec<BigInt> {
+/// Decode an integer vector after admitting its [`need_ints`].
+pub fn decode_ints(v: &Ints, a: &mut impl Admit) -> Result<Vec<BigInt>, WireError> {
+    admitted(need_ints(v), a)?;
+    Ok(ints_values(v))
+}
+
+fn ints_values(v: &Ints) -> Vec<BigInt> {
     match v {
         Ints::Small(s) => {
             let mut out = Vec::with_capacity(s.count);
@@ -216,9 +241,14 @@ fn check_qv(q: &Qv, work: u64) -> Result<(), WireError> {
     Ok(())
 }
 
-/// Decode a `QV_1` admitted at `need` (its [`need_qv`]): the gcd checks,
-/// then the numerators and denominators.
-pub fn decode_qv(q: &Qv, need: &Need) -> Result<(Vec<BigInt>, Vec<BigInt>), WireError> {
+/// Decode a `QV_1` after admitting its [`need_qv`]: the gcd checks, then
+/// the numerators and denominators.
+pub fn decode_qv(q: &Qv, a: &mut impl Admit) -> Result<(Vec<BigInt>, Vec<BigInt>), WireError> {
+    let need = admitted(need_qv(q), a)?;
+    qv_admitted(q, &need)
+}
+
+fn qv_admitted(q: &Qv, need: &Need) -> Result<(Vec<BigInt>, Vec<BigInt>), WireError> {
     check_qv(q, need.work)?;
     Ok((values(&q.num), values(&q.den)))
 }
@@ -242,11 +272,13 @@ pub fn need_mat(m: &Mat) -> Result<Need, WireError> {
     }
 }
 
-pub fn decode_mat(m: &Mat, need: &Need) -> Result<MatValues, WireError> {
+/// Decode a `MAT1` after admitting its [`need_mat`].
+pub fn decode_mat(m: &Mat, a: &mut impl Admit) -> Result<MatValues, WireError> {
+    let need = admitted(need_mat(m), a)?;
     match &m.elems {
-        Elems::Ints(v) => Ok(MatValues::Ints(decode_ints(v))),
+        Elems::Ints(v) => Ok(MatValues::Ints(ints_values(v))),
         Elems::Rationals(q) => {
-            let (n, d) = decode_qv(q, need)?;
+            let (n, d) = qv_admitted(q, &need)?;
             Ok(MatValues::Rationals(n, d))
         }
         Elems::Words(_) => Err(internal("a word matrix given to the big-integer decoder")),
@@ -302,10 +334,14 @@ fn check_mqr(q: &Mqr, work: u64) -> Result<(), WireError> {
     Ok(())
 }
 
-/// Decode an `MQR1` admitted at `need` (its [`need_mqr`]): the row
-/// checks, then the denominators (one per row) and the numerators
-/// (row-major).
-pub fn decode_mqr(q: &Mqr, need: &Need) -> Result<(Vec<BigInt>, Vec<BigInt>), WireError> {
+/// Decode an `MQR1` after admitting its [`need_mqr`]: the row checks,
+/// then the denominators (one per row) and the numerators (row-major).
+pub fn decode_mqr(q: &Mqr, a: &mut impl Admit) -> Result<(Vec<BigInt>, Vec<BigInt>), WireError> {
+    let need = admitted(need_mqr(q), a)?;
+    mqr_admitted(q, &need)
+}
+
+fn mqr_admitted(q: &Mqr, need: &Need) -> Result<(Vec<BigInt>, Vec<BigInt>), WireError> {
     check_mqr(q, need.work)?;
     let n = q.rows.checked_mul(q.cols).ok_or(internal("rows x cols past usize"))?;
     let mut dens = Vec::with_capacity(q.rows);

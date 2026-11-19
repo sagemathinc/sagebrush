@@ -8,7 +8,8 @@
 
 use dashu_int::UBig;
 use sagebrush_arith::coprime::LIMB_CAP;
-use sagebrush_arith::wire_decode::{decode_qv, need_qv};
+use sagebrush_arith::wire_decode::{decode_qv, Admit};
+use sagebrush_wire::WireError;
 use sagebrush_interrupt::hooks;
 use sagebrush_wire::{qv1, Arg};
 
@@ -22,6 +23,14 @@ fn rnd(words: usize, seed: &mut u64) -> UBig {
         })
         .collect();
     UBig::from_words(&v) | (UBig::ONE << (64 * words - 1))
+}
+
+struct Open;
+
+impl Admit for Open {
+    fn admit(&mut self, _work: u64, _bytes: u64) -> Result<(), WireError> {
+        Ok(())
+    }
 }
 
 fn qv_bytes(n: &UBig, d: &UBig) -> Vec<u8> {
@@ -55,12 +64,11 @@ fn gcd_checks_at_the_cap_poll_stop() {
     for (what, a, b) in [("equal sizes", cap, cap), ("half size", cap, cap / 2)] {
         let p = pair(a, b, &mut seed);
         let q = qv1(Arg { bytes: &p, offset: 0 }).unwrap();
-        let need = need_qv(&q).unwrap();
         hooks::reset();
         hooks::trace();
         sagebrush_interrupt::check_coarse();
         let t = std::time::Instant::now();
-        assert!(decode_qv(&q, &need).is_ok());
+        assert!(decode_qv(&q, &mut Open).is_ok());
         let secs = t.elapsed().as_secs_f64();
         sagebrush_interrupt::check_coarse();
         let (gap, poll, total) = (hooks::max_gap_ns(), hooks::max_poll_gap_ns(), hooks::total());
@@ -73,7 +81,7 @@ fn gcd_checks_at_the_cap_poll_stop() {
         // Stop in the middle: the decode unwinds, and nothing is returned
         hooks::reset();
         hooks::arm_after((total / 2).max(1));
-        let r = sagebrush_interrupt::catch(|| decode_qv(&q, &need));
+        let r = sagebrush_interrupt::catch(|| decode_qv(&q, &mut Open));
         hooks::reset();
         sagebrush_interrupt::clear();
         assert!(r.is_err(), "{}: the decode finished past a Stop", what);

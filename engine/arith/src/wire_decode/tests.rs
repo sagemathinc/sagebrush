@@ -49,6 +49,32 @@ fn mqr_bytes(cols: usize, rows: &[Vec<Int>]) -> Vec<u8> {
 
 const BASE: u64 = 1000;
 
+/// Admits everything (the tests of what is decoded).
+struct Open;
+
+impl Admit for Open {
+    fn admit(&mut self, _work: u64, _bytes: u64) -> Result<(), WireError> {
+        Ok(())
+    }
+}
+
+/// Records what it is asked to admit, and refuses after `left` calls.
+struct Seen {
+    asked: Vec<(u64, u64)>,
+    left: usize,
+}
+
+impl Admit for Seen {
+    fn admit(&mut self, work: u64, bytes: u64) -> Result<(), WireError> {
+        self.asked.push((work, bytes));
+        if self.left == 0 {
+            return Err(WireError { code: Code::Cap, offset: 0, what: "refused by the caller" });
+        }
+        self.left -= 1;
+        Ok(())
+    }
+}
+
 fn arg(b: &[u8]) -> Arg<'_> {
     Arg { bytes: b, offset: BASE }
 }
@@ -217,7 +243,7 @@ fn qv_needs_and_decodes() {
     let l = la.max(lb).max(lc1);
     let bytes = 2 * size_of_vec(5) + 8 * (heap(la) + heap(lb) + heap(1) + heap(lc1) + heap(1) + 2 * heap(1)) + 8 * 2 * (l + 1);
     assert_eq!(need.bytes, bytes);
-    let (n, d) = decode_qv(&q, &need).unwrap();
+    let (n, d) = decode_qv(&q, &mut Open).unwrap();
     let want_n: Vec<BigInt> = [BigInt::from_bytes_le(Sign::Plus, &a.to_le_bytes()), 0.into(), 5.into(), (-1).into(), -BigInt::from_bytes_le(Sign::Plus, &c.to_le_bytes())].into();
     assert_eq!(n, want_n);
     assert_eq!(d[0], BigInt::from_bytes_le(Sign::Plus, &b.to_le_bytes()));
@@ -237,15 +263,14 @@ fn a_rational_not_in_lowest_terms_is_refused_at_its_numerator() {
     let dens = [small(3), pos(&y)];
     let p = qv_bytes(&nums, &dens);
     let q = qv1(arg(&p)).unwrap();
-    let need = need_qv(&q).unwrap();
-    let e = decode_qv(&q, &need).unwrap_err();
+    let e = decode_qv(&q, &mut Open).unwrap_err();
     // tag, count, then the first entry (4 + 8 bytes): the second entry
     let at = BASE + 4 + 4 + 8 + (4 + 8);
     assert_eq!((e.code, e.offset), (Code::Schema, at), "{:?}", e);
     // 6/4 too, at a small size
     let p = qv_bytes(&[small(6)], &[small(4)]);
     let q = qv1(arg(&p)).unwrap();
-    assert_eq!(decode_qv(&q, &need_qv(&q).unwrap()).unwrap_err().code, Code::Schema);
+    assert_eq!(decode_qv(&q, &mut Open).unwrap_err().code, Code::Schema);
 }
 
 #[test]
@@ -274,7 +299,7 @@ fn the_limb_cap_is_exact_and_refused_before_any_work() {
         put_zv(&mut p, &[pos(&big)]);
         let z = zv1(arg(&p)).unwrap();
         assert!(need_zv(&z).is_ok());
-        assert_eq!(decode_zv(&z).len(), 1);
+        assert_eq!(decode_zv(&z, &mut Open).unwrap().len(), 1);
     }
 }
 
@@ -284,10 +309,10 @@ fn an_overrun_of_the_admitted_work_is_internal_and_terminal() {
     let p = qv_bytes(&[pos(&x)], &[pos(&y)]);
     let q = qv1(arg(&p)).unwrap();
     let need = need_qv(&q).unwrap();
-    assert!(decode_qv(&q, &need).is_ok());
+    assert!(decode_qv(&q, &mut Open).is_ok());
     // far less than the bound (the meter, not the bound's slack, refuses)
     let short = Need { work: need.work / 10_000, ..need };
-    let e = decode_qv(&q, &short).unwrap_err();
+    let e = qv_admitted(&q, &short).unwrap_err();
     assert_eq!(e.code, Code::Internal);
     assert!(e.what.contains("admitted work"));
 }
@@ -304,7 +329,7 @@ fn mat1_of_rationals_is_two_flat_vectors() {
     let need = need_mat(&m).unwrap();
     assert_eq!(need.bytes, 2 * size_of_vec(4) + 8 * 2 * 2);
     assert!(need.work > 0);
-    match decode_mat(&m, &need).unwrap() {
+    match decode_mat(&m, &mut Open).unwrap() {
         MatValues::Rationals(n, d) => {
             assert_eq!(n, vec![1.into(), (-2).into(), 0.into(), 9.into()]);
             assert_eq!(d, vec![2.into(), 3.into(), 1.into(), 4.into()]);
@@ -322,7 +347,7 @@ fn mat1_of_rationals_is_two_flat_vectors() {
     let m = sagebrush_wire::mat1(arg(&b), ElemKind::Ints, false).unwrap();
     let need = need_mat(&m).unwrap();
     assert_eq!(need, Need { bytes: size_of_vec(2), work: 0 });
-    assert_eq!(decode_mat(&m, &need).unwrap(), MatValues::Ints(vec![i64::MIN.into(), i64::MAX.into()]));
+    assert_eq!(decode_mat(&m, &mut Open).unwrap(), MatValues::Ints(vec![i64::MIN.into(), i64::MAX.into()]));
 }
 
 // ---------------------------------------------------------------- MQR1
@@ -346,13 +371,13 @@ fn mqr_rows_are_checked_by_their_running_gcd() {
     let lrow = ok_row.iter().map(|x| x.1.len() as u64).max().unwrap();
     let want = row_fixed_work(ld, lrow).unwrap() + ok_row[1..].iter().map(|x| row_entry_work(x.1.len() as u64, ld).unwrap()).sum::<u64>();
     assert_eq!(need.work, want, "only the second row is checked");
-    let (dens, nums) = decode_mqr(&m, &need).unwrap();
+    let (dens, nums) = decode_mqr(&m, &mut Open).unwrap();
     assert_eq!(dens.len(), 3);
     assert_eq!(nums.len(), 9);
     assert_eq!(nums[5], 11.into());
     let b = mqr_bytes(3, &[unit_row, bad_row, zero_row]);
     let m = mqr1(arg(&b)).unwrap();
-    let e = decode_mqr(&m, &need_mqr(&m).unwrap()).unwrap_err();
+    let e = decode_mqr(&m, &mut Open).unwrap_err();
     // the second row's denominator: after MQR1, rows, cols and the first row
     let first = 4 + 8 + 4 * 4 + 8 * (1 + 3 + 1);
     let at = BASE + 4 + 8 + first as u64 + 4 + 8;
@@ -368,7 +393,7 @@ fn hostile_shapes_decode_within_their_need() {
     let m = mqr1(arg(&b)).unwrap();
     let need = need_mqr(&m).unwrap();
     assert_eq!(need, Need { bytes: size_of_vec(2000) + size_of_vec(0), work: 0 });
-    let (d, n) = decode_mqr(&m, &need).unwrap();
+    let (d, n) = decode_mqr(&m, &mut Open).unwrap();
     assert_eq!((d.len(), n.len()), (2000, 0));
     let zeros: Vec<Int> = (0..5000).map(|_| small(0)).collect();
     let ones: Vec<Int> = (0..5000).map(|_| small(1)).collect();
@@ -376,5 +401,45 @@ fn hostile_shapes_decode_within_their_need() {
     let q = qv1(arg(&p)).unwrap();
     let need = need_qv(&q).unwrap();
     assert_eq!(need, Need { bytes: 2 * size_of_vec(5000), work: 0 });
-    assert_eq!(decode_qv(&q, &need).unwrap().0.len(), 5000);
+    assert_eq!(decode_qv(&q, &mut Open).unwrap().0.len(), 5000);
+}
+
+#[test]
+fn every_decode_admits_its_exact_need_first() {
+    let mut seed = 23u64;
+    let (x, y) = (rnd(4, &mut seed), rnd(3, &mut seed));
+    let g = gcd_ref(&x, &y);
+    let (x, y) = (&x / &g, &y / &g);
+    let p = qv_bytes(&[pos(&x), small(2)], &[pos(&y), small(3)]);
+    let q = qv1(arg(&p)).unwrap();
+    let need = need_qv(&q).unwrap();
+    let mut a = Seen { asked: vec![], left: 1 };
+    assert!(decode_qv(&q, &mut a).is_ok());
+    assert_eq!(a.asked, vec![(need.work, need.bytes)]);
+    // a refusal is the decode's answer, and nothing is checked or built
+    let mut a = Seen { asked: vec![], left: 0 };
+    assert_eq!(decode_qv(&q, &mut a).unwrap_err().what, "refused by the caller");
+    // the same for every payload kind
+    let mut zb = Vec::new();
+    put_zv(&mut zb, &[pos(&x)]);
+    let z = zv1(arg(&zb)).unwrap();
+    let mut a = Seen { asked: vec![], left: 0 };
+    assert!(decode_zv(&z, &mut a).is_err());
+    assert_eq!(a.asked, vec![(0, need_zv(&z).unwrap().bytes)]);
+    let ints = sagebrush_wire::ints(arg(&zb)).unwrap();
+    assert!(decode_ints(&ints, &mut Seen { asked: vec![], left: 0 }).is_err());
+    let b = mqr_bytes(1, &[vec![pos(&y), pos(&x)]]);
+    let m = mqr1(arg(&b)).unwrap();
+    let mut a = Seen { asked: vec![], left: 0 };
+    assert!(decode_mqr(&m, &mut a).is_err());
+    let nm = need_mqr(&m).unwrap();
+    assert_eq!(a.asked, vec![(nm.work, nm.bytes)]);
+    let mut mb = b"MAT1".to_vec();
+    mb.extend_from_slice(&1u32.to_le_bytes());
+    mb.extend_from_slice(&2u32.to_le_bytes());
+    mb.extend_from_slice(&p);
+    let m = sagebrush_wire::mat1(arg(&mb), ElemKind::Rationals, false).unwrap();
+    let mut a = Seen { asked: vec![], left: 0 };
+    assert!(decode_mat(&m, &mut a).is_err());
+    assert_eq!(a.asked, vec![(need.work, need.bytes)]);
 }
