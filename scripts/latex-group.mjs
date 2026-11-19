@@ -75,7 +75,9 @@ export const LATEX_LAZY = {
 //  same tree (+1,867 / +466), + 64)
 // (252,558 raw / 84,333 gzip: Nov 19 2026, the LaTeX page's reload record (latex/page.ts) on master abc38965 with the view
 //  toggle: 252,494 / 84,269 measured (bun 1.4.4, node 24.21.0), + 64)
-export const LATEX_CAPS = { raw: 252558, gzip: 84333 };
+// (252,759 raw / 84,398 gzip: Nov 19 2026, a reload record counted only on a reload, dropped unread otherwise (latex/page.ts),
+//  master aadff4d0: 252,695 / 84,334 measured, + 64)
+export const LATEX_CAPS = { raw: 252759, gzip: 84398 };
 export const gz = (b) => gzipSync(b, { level: 9 }).length;
 
 // Each lazy chunk's own cap (raw, gzip), fetched only on its own use, so outside the group:
@@ -130,7 +132,8 @@ export const LATEX_LAZY_CAPS = {
   // (53,797 / 18,488: Nov 19 2026, for the bar's offer of a board an agent made ("<agent> made <name> · Open", Open
   //  in a tab of its own, where its code runs), which every page's pairing carries. Measured locally on the toolchain
   //  CI pins, merged with master 4bcbb434 (whose 53,150 / 18,263 it reproduces): 53,733 / 18,424, + 64)
-  AGENT: { label: "the LaTeX agent pairing's chunk", raw: 53797, gzip: 18488 },
+  // (53,887 / 18,520: Nov 19 2026, the reload record's handling on master aadff4d0: 53,823 / 18,456 measured, + 64)
+  AGENT: { label: "the LaTeX agent pairing's chunk", raw: 53887, gzip: 18520 },
   // (the agent tools' work: web/latex/tools.ts, latex_check's report and latex_render's pictures, on an agent's first call)
   // (16,546 / 6,950: Nov 11 2026: latex_build's own code (build.ts, the
   //  engine driven from a snapshot, and the pages' fit) here, out of the eager group, its shared rules handed in by the
