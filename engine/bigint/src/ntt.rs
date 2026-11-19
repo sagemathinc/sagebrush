@@ -15,7 +15,7 @@
 
 use crate::nmod::Modulus;
 use crate::ntt_core::{self, NttWord, Table};
-pub use crate::ntt_core::table_work;
+pub use crate::ntt_core::{conv_work, table_work};
 use std::sync::atomic::{AtomicUsize, Ordering::Relaxed};
 use std::sync::{Arc, Mutex};
 
@@ -404,9 +404,8 @@ pub fn mul_mod_in(a: &[u64], b: &[u64], m: &Modulus, lt: &LocalTables) -> Vec<u6
 /// The product of two nonnegative integers given as little-endian 64-bit
 /// words; the result has a.len() + b.len() words.
 pub fn mul_words(a: &[u64], b: &[u64]) -> Vec<u64> {
-    let mut out = vec![0u64; a.len() + b.len()];
     if a.is_empty() || b.is_empty() {
-        return out;
+        return vec![0u64; a.len() + b.len()];
     }
     let square = std::ptr::eq(a, b);
     let conv = |i| {
@@ -417,10 +416,94 @@ pub fn mul_words(a: &[u64], b: &[u64]) -> Vec<u64> {
         }
     };
     let (r0, r1, r2) = (conv(0), conv(1), conv(2));
+    garner_words(&r0, &r1, &r2, a.len() + b.len())
+}
+
+/// [`mul_words`] with the op's own tables instead of the shared cache: each
+/// prime's table is built here (from its root in [`PRIMES`], no search) and
+/// dropped before the next one, so the call's memory is its own sizes,
+/// whatever the cache holds, and it never grows the cache.  Its word
+/// operations are at most [`mul_words_local_work`], its live bytes at most
+/// [`mul_words_local_peak`].
+pub fn mul_words_local(a: &[u64], b: &[u64]) -> Vec<u64> {
+    if a.is_empty() || b.is_empty() {
+        return vec![0u64; a.len() + b.len()];
+    }
+    let log = log2_len(a.len() + b.len() - 1);
+    let conv = |i: usize| {
+        let (p, g) = PRIMES[i];
+        let t = {
+            let _phase = sagebrush_interrupt::enter("ntt");
+            Table::new(p, g, (p - 1).trailing_zeros(), log)
+        };
+        conv_table(a, b, &t)
+    };
+    let (r0, r1, r2) = (conv(0), conv(1), conv(2));
+    garner_words(&r0, &r1, &r2, a.len() + b.len())
+}
+
+/// Word operations of [`mul_words_local`] for factors of `la` and `lb`
+/// words: per prime a table build ([`table_work`]) and a convolution
+/// ([`conv_work`]), then Garner's combination and the carry, 16 per output
+/// word.  None on overflow.
+pub const fn mul_words_local_work(la: usize, lb: usize) -> Option<u64> {
+    if la == 0 || lb == 0 {
+        return Some(0);
+    }
+    let len = match la.checked_add(lb) {
+        Some(x) => x - 1,
+        None => return None,
+    };
+    let log = match len.checked_next_power_of_two() {
+        Some(n) => n.trailing_zeros(),
+        None => return None,
+    };
+    let per_prime = match (table_work(log), conv_work(log)) {
+        (Some(t), Some(c)) => match t.checked_add(c) {
+            Some(x) => x,
+            None => return None,
+        },
+        _ => return None,
+    };
+    match (per_prime.checked_mul(3), (len as u64 + 1).checked_mul(16)) {
+        (Some(x), Some(y)) => x.checked_add(y),
+        _ => None,
+    }
+}
+
+/// Live bytes of [`mul_words_local`] beyond its inputs, at its worst point
+/// (the third prime: the first two residue vectors, kept at their capacity
+/// N, the third's two transform buffers and its table of four N-word
+/// vectors), or at the Garner pass (three residue vectors and the output):
+/// 64N bytes bounds both.  N = la + lb - 1 padded to a power of two.
+pub const fn mul_words_local_peak(la: usize, lb: usize) -> Option<u64> {
+    if la == 0 || lb == 0 {
+        return match (la as u64 + lb as u64).checked_mul(8) {
+            Some(x) => Some(x),
+            None => None,
+        };
+    }
+    let len = match la.checked_add(lb) {
+        Some(x) => x - 1,
+        None => return None,
+    };
+    match len.checked_next_power_of_two() {
+        Some(n) => (n as u64).checked_mul(64),
+        None => None,
+    }
+}
+
+/// The three residue vectors combined (Garner) into `words` little-endian
+/// words, with the carry; polled every 2^12 positions.
+fn garner_words(r0: &[u64], r1: &[u64], r2: &[u64], words: usize) -> Vec<u64> {
+    let mut out = vec![0u64; words];
     let c = crt();
     let (plo, phi) = (c.p01 as u64, (c.p01 >> 64) as u64);
     let mut carry: u128 = 0;
     for i in 0..r0.len() {
+        if i & 0xfff == 0 {
+            sagebrush_interrupt::check_coarse();
+        }
         let (v, t2) = c.garner(r0[i], r1[i], r2[i]);
         // x = v + p0 p1 t2 = lo + hi 2^64
         let (s, o) = v.overflowing_add(plo as u128 * t2 as u128);
@@ -441,6 +524,28 @@ pub fn mul_words(a: &[u64], b: &[u64]) -> Vec<u64> {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn mul_words_local_matches_mul_words_within_its_work() {
+        let mut s = 0x5eed_u64;
+        for (la, lb) in [(1usize, 1usize), (2, 3), (50, 50), (1000, 7), (4097, 4096), (1 << 15, 3)] {
+            let a: Vec<u64> = (0..la).map(|_| rng(&mut s)).collect();
+            let b: Vec<u64> = (0..lb).map(|_| rng(&mut s)).collect();
+            crate::ntt_core::WORK.with(|c| c.set(0));
+            let z = mul_words_local(&a, &b);
+            let counted = crate::ntt_core::WORK.with(|c| c.get());
+            assert_eq!(z, mul_words(&a, &b), "{} x {}", la, lb);
+            // (the tables and convolutions are counted at their loops; Garner's
+            // pass is the formula's last term, 16 per output word)
+            let w = mul_words_local_work(la, lb).unwrap();
+            assert!(counted + 16 * (la + lb) as u64 <= w, "{} x {}: counted {} + Garner, bound {}", la, lb, counted, w);
+        }
+        assert_eq!(mul_words_local(&[], &[1, 2]), vec![0, 0]);
+        assert_eq!(mul_words_local_work(0, 5), Some(0));
+        // (the closed forms never wrap: None, not a small number)
+        assert_eq!(mul_words_local_work(usize::MAX, 2), None);
+        assert_eq!(mul_words_local_peak(usize::MAX, 2), None);
+    }
 
     fn rng(seed: &mut u64) -> u64 {
         *seed ^= *seed << 13;
