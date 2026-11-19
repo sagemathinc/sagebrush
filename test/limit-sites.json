@@ -4,6 +4,36 @@
   "owner": "remote-compute",
   "reason": "test-hook timing (longest wall-time gap between interrupt checks / simulated wasm host polls) and its readout in ap Stop pins; measures, refuses nothing"
  },
+ "engine/arith/src/nmod_poly.rs :: work_bounds_refuse_instead_of_panicking :: assert_eq!(divrem_work(usize::MAX, 1), None); #0": {
+  "class": "none",
+  "owner": "exact linear algebra (engine/arith)",
+  "reason": "test code: every work bound at extreme lengths is None (a refusal) or a number, never an overflow; refuses nothing itself"
+ },
+ "engine/arith/src/nmod_poly.rs :: work_bounds_refuse_instead_of_panicking :: assert_eq!(mulmod_work(1000, usize::MAX, 2), None); #0": {
+  "class": "none",
+  "owner": "exact linear algebra (engine/arith)",
+  "reason": "test code: every work bound at extreme lengths is None (a refusal) or a number, never an overflow; refuses nothing itself"
+ },
+ "engine/arith/src/nmod_poly.rs :: work_bounds_refuse_instead_of_panicking :: assert_eq!(mulmod_work(usize::MAX, usize::MAX, 2), None); #0": {
+  "class": "none",
+  "owner": "exact linear algebra (engine/arith)",
+  "reason": "test code: every work bound at extreme lengths is None (a refusal) or a number, never an overflow; refuses nothing itself"
+ },
+ "engine/arith/src/nmod_poly.rs :: work_bounds_refuse_instead_of_panicking :: assert_eq!(reduce_work(1, usize::MAX), None); #0": {
+  "class": "none",
+  "owner": "exact linear algebra (engine/arith)",
+  "reason": "test code: every work bound at extreme lengths is None (a refusal) or a number, never an overflow; refuses nothing itself"
+ },
+ "engine/arith/src/nmod_poly.rs :: work_bounds_refuse_instead_of_panicking :: for e in [0u64, 1, 64, u64::MAX] { #0": {
+  "class": "none",
+  "owner": "exact linear algebra (engine/arith)",
+  "reason": "test code: every work bound at extreme lengths is None (a refusal) or a number, never an overflow; refuses nothing itself"
+ },
+ "engine/arith/src/nmod_poly.rs :: work_bounds_refuse_instead_of_panicking :: let ls = [0usize, 1, 2, 39, 40, 59, 60, 1000, 1 << 32, usize::MAX / 2, usize::MAX / 2 + 1, usize::MAX - 1, usize::MAX]; #0": {
+  "class": "none",
+  "owner": "exact linear algebra (engine/arith)",
+  "reason": "test code: every work bound at extreme lengths is None (a refusal) or a number, never an overflow; refuses nothing itself"
+ },
  "engine/arith/src/zmat.rs :: rref_multimodular :: let amax = a.max_bits() as f64; #0": {
   "class": "none",
   "owner": "exact linear algebra (engine/arith)",
@@ -2758,6 +2788,16 @@
   "owner": "polynomial factorization",
   "reason": "a re-export of the budget's names: refuses nothing"
  },
+ "engine/poly/src/lib.rs :: factor_mod_draws :: fn factor_mod_draws(b: &Budget, f: &[BigInt], p: u64) -> FResult<(Vec<(Vec<u64>, u32)>, u64)> { #0": {
+  "class": "none",
+  "owner": "polynomial factorization",
+  "reason": "the modular phase's budget parameter, imports and work bounds; its reservations and debits refuse through the engine Budget's own sites; refuses nothing itself"
+ },
+ "engine/poly/src/lib.rs :: factor_mod_draws :: let _t = transients(b, 2, maxbits(f))?; #0": {
+  "class": "none",
+  "owner": "polynomial factorization",
+  "reason": "the modular phase's budget parameter, imports and work bounds; its reservations and debits refuse through the engine Budget's own sites; refuses nothing itself"
+ },
  "engine/poly/src/lib.rs :: hensel :: pub(crate) fn hensel<'b>(b: &'b Budget, f: &[BigInt], fs: &[FPoly], p: u64, k: u64) -> FResult<Vec<Held<'b>>> { #0": {
   "class": "none",
   "owner": "polynomial factorization (@sagebrush-sage2)"
@@ -2773,6 +2813,11 @@
  "engine/poly/src/lib.rs :: power :: pub(crate) fn power<'b>(b: &'b Budget, p: u64, k: u64) -> FResult<HeldInt<'b>> { #0": {
   "class": "none",
   "owner": "polynomial factorization (@sagebrush-sage2)"
+ },
+ "engine/poly/src/lib.rs :: try_factor_mod_with :: pub fn try_factor_mod_with(f: &[BigInt], p: u64, b: &Budget) -> Result<Vec<(Vec<u64>, u32)>, FactorLimit> { #0": {
+  "class": "none",
+  "owner": "polynomial factorization",
+  "reason": "the modular phase's budget parameter, imports and work bounds; its reservations and debits refuse through the engine Budget's own sites; refuses nothing itself"
  },
  "engine/poly/src/lib.rs :: zassenhaus :: if max_size == usize::MAX && lifted.len() > vanhoeij::ZASSENHAUS_MAX { #0": {
   "class": "none",
@@ -3639,6 +3684,41 @@
   "owner": "lattice reduction (engine/poly l2)",
   "reason": "the certificate's search bound for X (Cramer's bound, a mathematical limit past which no integral X exists); not a resource cap"
  },
+ "engine/poly/src/modp.rs ::  :: use crate::budget::{big_bytes, limbs, FResult, Reservation}; #0": {
+  "class": "none",
+  "owner": "polynomial factorization",
+  "reason": "the modular phase's budget parameter, imports and work bounds; its reservations and debits refuse through the engine Budget's own sites; refuses nothing itself"
+ },
+ "engine/poly/src/modp.rs ::  :: use crate::{clog2, Budget, FPoly, Rng}; #0": {
+  "class": "none",
+  "owner": "polynomial factorization",
+  "reason": "the modular phase's budget parameter, imports and work bounds; its reservations and debits refuse through the engine Budget's own sites; refuses nothing itself"
+ },
+ "engine/poly/src/modp.rs :: edf :: pub(crate) fn edf(b: &Budget, fp: &Fp, g: &[u64], d: usize, rng: &mut Rng, out: &mut Vec<FPoly>) -> FResult<()> { #0": {
+  "class": "none",
+  "owner": "polynomial factorization",
+  "reason": "the modular phase's budget parameter, imports and work bounds; its reservations and debits refuse through the engine Budget's own sites; refuses nothing itself"
+ },
+ "engine/poly/src/modp.rs :: new :: let tl = table_len(len).ok_or_else(|| b.refuse(\"memory (overflow)\", u64::MAX, 0))?; #0": {
+  "class": "2",
+  "disposition": {
+   "2": {
+    "route": "engine-budget-memory"
+   }
+  },
+  "owner": "polynomial factorization",
+  "reason": "the modular phase's transform-table length overflowing a word: refused as memory through the engine Budget, before any table is built"
+ },
+ "engine/poly/src/modp.rs :: new :: pub fn new(b: &'b Budget, p: u64, len: usize) -> FResult<Fp<'b>> { #0": {
+  "class": "none",
+  "owner": "polynomial factorization",
+  "reason": "the modular phase's budget parameter, imports and work bounds; its reservations and debits refuse through the engine Budget's own sites; refuses nothing itself"
+ },
+ "engine/poly/src/modp.rs :: tables_work :: b: &'b Budget, #0": {
+  "class": "none",
+  "owner": "polynomial factorization",
+  "reason": "the modular phase's budget parameter, imports and work bounds; its reservations and debits refuse through the engine Budget's own sites; refuses nothing itself"
+ },
  "engine/poly/src/tests.rs :: a_huge_exponent_is_refused_by_its_reservation :: for k in [u64::MAX, u64::MAX / 2, u64::MAX / 4, 1 << 61] { #0": {
   "class": "none",
   "owner": "polynomial factorization (@sagebrush-sage2)"
@@ -3662,6 +3742,16 @@
  "engine/poly/src/tests.rs :: calibrated_work :: let b = Budget::new(Limits::CALIBRATED); #0": {
   "class": "none",
   "owner": "polynomial factorization"
+ },
+ "engine/poly/src/tests.rs :: check_factorization :: let b = Budget::unlimited(); #0": {
+  "class": "none",
+  "owner": "polynomial factorization",
+  "reason": "test code: the modular phase's oracle equivalence, memory, work-refusal and Stop tests; refuses nothing itself"
+ },
+ "engine/poly/src/tests.rs :: ddf :: pub fn ddf(b: &Budget, f: &[u64], p: u64) -> FResult<Vec<(FPoly, usize)>> { #0": {
+  "class": "none",
+  "owner": "polynomial factorization",
+  "reason": "test code: the modular phase's oracle equivalence, memory, work-refusal and Stop tests; refuses nothing itself"
  },
  "engine/poly/src/tests.rs :: default_is_unlimited_except_memory :: assert!(crate::with_default_limits(tight, || try_factor(&xn(11, -1))).is_err()); #0": {
   "class": "none",
@@ -3699,9 +3789,169 @@
   "class": "none",
   "owner": "polynomial factorization"
  },
+ "engine/poly/src/tests.rs :: edf :: pub fn edf(b: &Budget, g: &[u64], d: usize, p: u64, rng: &mut Rng, out: &mut Vec<FPoly>) -> FResult<()> { #0": {
+  "class": "none",
+  "owner": "polynomial factorization",
+  "reason": "test code: the modular phase's oracle equivalence, memory, work-refusal and Stop tests; refuses nothing itself"
+ },
+ "engine/poly/src/tests.rs :: factor_mod :: let b = Budget::unlimited(); #0": {
+  "class": "none",
+  "owner": "polynomial factorization",
+  "reason": "test code: the modular phase's oracle equivalence, memory, work-refusal and Stop tests; refuses nothing itself"
+ },
+ "engine/poly/src/tests.rs :: fpowmod :: pub fn fpowmod(b: &Budget, base: &[u64], e: &BigUint, m: &[u64], p: u64) -> FResult<FPoly> { #0": {
+  "class": "none",
+  "owner": "polynomial factorization",
+  "reason": "test code: the modular phase's oracle equivalence, memory, work-refusal and Stop tests; refuses nothing itself"
+ },
+ "engine/poly/src/tests.rs :: modp_edf_is_bounded_by_its_work :: assert!(e.kind == Kind::Resource && e.what == \"work\", \"{e}\"); #0": {
+  "class": "none",
+  "owner": "polynomial factorization",
+  "reason": "test code: the modular phase's oracle equivalence, memory, work-refusal and Stop tests; refuses nothing itself"
+ },
+ "engine/poly/src/tests.rs :: modp_edf_is_bounded_by_its_work :: let b = Budget::new(Limits { work: tables + k, ..Limits::UNLIMITED }); #0": {
+  "class": "none",
+  "owner": "polynomial factorization",
+  "reason": "test code: the modular phase's oracle equivalence, memory, work-refusal and Stop tests; refuses nothing itself"
+ },
+ "engine/poly/src/tests.rs :: modp_edf_is_bounded_by_its_work :: let split = u64::MAX - w.work_left() - tables; #0": {
+  "class": "none",
+  "owner": "polynomial factorization",
+  "reason": "test code: the modular phase's oracle equivalence, memory, work-refusal and Stop tests; refuses nothing itself"
+ },
+ "engine/poly/src/tests.rs :: modp_edf_is_bounded_by_its_work :: let tables = u64::MAX - w.work_left(); #0": {
+  "class": "none",
+  "owner": "polynomial factorization",
+  "reason": "test code: the modular phase's oracle equivalence, memory, work-refusal and Stop tests; refuses nothing itself"
+ },
+ "engine/poly/src/tests.rs :: modp_edf_is_bounded_by_its_work :: let w = Budget::unlimited(); #0": {
+  "class": "none",
+  "owner": "polynomial factorization",
+  "reason": "test code: the modular phase's oracle equivalence, memory, work-refusal and Stop tests; refuses nothing itself"
+ },
+ "engine/poly/src/tests.rs :: modp_every_operation_debits_before_it_allocates :: assert!(e.kind == Kind::Resource && e.what == \"work\", \"{name}: {e}\"); #0": {
+  "class": "none",
+  "owner": "polynomial factorization",
+  "reason": "test code: the modular phase's per-operation debit, exact-reservation boundary and Stop allocation tests; refuses nothing itself"
+ },
+ "engine/poly/src/tests.rs :: modp_every_operation_debits_before_it_allocates :: let b = Budget::new(Limits { work: tables, ..Limits::UNLIMITED }); #0": {
+  "class": "none",
+  "owner": "polynomial factorization",
+  "reason": "test code: the modular phase's per-operation debit, exact-reservation boundary and Stop allocation tests; refuses nothing itself"
+ },
+ "engine/poly/src/tests.rs :: modp_every_operation_debits_before_it_allocates :: let tables = u64::MAX - w.work_left(); #0": {
+  "class": "none",
+  "owner": "polynomial factorization",
+  "reason": "test code: the modular phase's per-operation debit, exact-reservation boundary and Stop allocation tests; refuses nothing itself"
+ },
+ "engine/poly/src/tests.rs :: modp_every_operation_debits_before_it_allocates :: let w = Budget::unlimited(); #0": {
+  "class": "none",
+  "owner": "polynomial factorization",
+  "reason": "test code: the modular phase's per-operation debit, exact-reservation boundary and Stop allocation tests; refuses nothing itself"
+ },
+ "engine/poly/src/tests.rs :: modp_every_operation_debits_before_it_allocates :: let w2 = Budget::unlimited(); #0": {
+  "class": "none",
+  "owner": "polynomial factorization",
+  "reason": "test code: the modular phase's per-operation debit, exact-reservation boundary and Stop allocation tests; refuses nothing itself"
+ },
+ "engine/poly/src/tests.rs :: modp_matches_the_oracle :: let (got, got_rng) = factor_mod_draws(&Budget::unlimited(), &f, p).unwrap(); #0": {
+  "class": "none",
+  "owner": "polynomial factorization",
+  "reason": "test code: the modular phase's oracle equivalence, memory, work-refusal and Stop tests; refuses nothing itself"
+ },
+ "engine/poly/src/tests.rs :: modp_memory_at_its_exact_reservation :: assert!(e.kind == Kind::Resource && e.what == \"memory\", \"{e}\"); #0": {
+  "class": "none",
+  "owner": "polynomial factorization",
+  "reason": "test code: the modular phase's per-operation debit, exact-reservation boundary and Stop allocation tests; refuses nothing itself"
+ },
+ "engine/poly/src/tests.rs :: modp_memory_at_its_exact_reservation :: let b = Budget::new(Limits { memory: need - 1, ..Limits::UNLIMITED }); #0": {
+  "class": "none",
+  "owner": "polynomial factorization",
+  "reason": "test code: the modular phase's per-operation debit, exact-reservation boundary and Stop allocation tests; refuses nothing itself"
+ },
+ "engine/poly/src/tests.rs :: modp_memory_at_its_exact_reservation :: let b = Budget::new(Limits { memory: need, ..Limits::UNLIMITED }); #0": {
+  "class": "none",
+  "owner": "polynomial factorization",
+  "reason": "test code: the modular phase's per-operation debit, exact-reservation boundary and Stop allocation tests; refuses nothing itself"
+ },
+ "engine/poly/src/tests.rs :: modp_memory_at_its_exact_reservation :: let w = Budget::unlimited(); #0": {
+  "class": "none",
+  "owner": "polynomial factorization",
+  "reason": "test code: the modular phase's per-operation debit, exact-reservation boundary and Stop allocation tests; refuses nothing itself"
+ },
+ "engine/poly/src/tests.rs :: modp_memory_within_its_reservation :: let b = Budget::unlimited(); #0": {
+  "class": "none",
+  "owner": "polynomial factorization",
+  "reason": "test code: the modular phase's oracle equivalence, memory, work-refusal and Stop tests; refuses nothing itself"
+ },
+ "engine/poly/src/tests.rs :: modp_refuses_before_its_tables :: assert!(e.kind == Kind::Resource && e.what == \"memory\", \"{e}\"); #0": {
+  "class": "none",
+  "owner": "polynomial factorization",
+  "reason": "test code: the modular phase's oracle equivalence, memory, work-refusal and Stop tests; refuses nothing itself"
+ },
+ "engine/poly/src/tests.rs :: modp_refuses_before_its_tables :: let b = Budget::new(Limits { memory: need - 1, ..Limits::UNLIMITED }); #0": {
+  "class": "none",
+  "owner": "polynomial factorization",
+  "reason": "test code: the modular phase's oracle equivalence, memory, work-refusal and Stop tests; refuses nothing itself"
+ },
+ "engine/poly/src/tests.rs :: modp_refuses_before_its_tables :: let b = Budget::new(Limits { memory: need, ..Limits::UNLIMITED }); #0": {
+  "class": "none",
+  "owner": "polynomial factorization",
+  "reason": "test code: the modular phase's oracle equivalence, memory, work-refusal and Stop tests; refuses nothing itself"
+ },
+ "engine/poly/src/tests.rs :: modp_refuses_before_its_tables :: let b2 = Budget::new(Limits { memory: need, work: tables - 1, ..Limits::UNLIMITED }); #0": {
+  "class": "none",
+  "owner": "polynomial factorization",
+  "reason": "test code: the modular phase's oracle equivalence, memory, work-refusal and Stop tests; refuses nothing itself"
+ },
+ "engine/poly/src/tests.rs :: modp_refuses_before_its_tables :: let tables = u64::MAX - w.work_left(); #0": {
+  "class": "none",
+  "owner": "polynomial factorization",
+  "reason": "test code: the modular phase's oracle equivalence, memory, work-refusal and Stop tests; refuses nothing itself"
+ },
+ "engine/poly/src/tests.rs :: modp_refuses_before_its_tables :: let w = Budget::unlimited(); #0": {
+  "class": "none",
+  "owner": "polynomial factorization",
+  "reason": "test code: the modular phase's oracle equivalence, memory, work-refusal and Stop tests; refuses nothing itself"
+ },
+ "engine/poly/src/tests.rs :: modp_work_refusals :: assert!(e.kind == Kind::Resource && e.what == \"work\", \"{e}\"); #0": {
+  "class": "none",
+  "owner": "polynomial factorization",
+  "reason": "test code: the modular phase's oracle equivalence, memory, work-refusal and Stop tests; refuses nothing itself"
+ },
+ "engine/poly/src/tests.rs :: modp_work_refusals :: let b = Budget::new(Limits { work: k, ..Limits::UNLIMITED }); #0": {
+  "class": "none",
+  "owner": "polynomial factorization",
+  "reason": "test code: the modular phase's oracle equivalence, memory, work-refusal and Stop tests; refuses nothing itself"
+ },
+ "engine/poly/src/tests.rs :: modp_work_refusals :: let b = Budget::new(Limits { work: used, ..Limits::UNLIMITED }); #0": {
+  "class": "none",
+  "owner": "polynomial factorization",
+  "reason": "test code: the modular phase's oracle equivalence, memory, work-refusal and Stop tests; refuses nothing itself"
+ },
+ "engine/poly/src/tests.rs :: modp_work_refusals :: let used = u64::MAX - w.work_left(); #0": {
+  "class": "none",
+  "owner": "polynomial factorization",
+  "reason": "test code: the modular phase's oracle equivalence, memory, work-refusal and Stop tests; refuses nothing itself"
+ },
+ "engine/poly/src/tests.rs :: modp_work_refusals :: let w = Budget::unlimited(); #0": {
+  "class": "none",
+  "owner": "polynomial factorization",
+  "reason": "test code: the modular phase's oracle equivalence, memory, work-refusal and Stop tests; refuses nothing itself"
+ },
  "engine/poly/src/tests.rs :: power_takes_a_u64_exponent :: assert_eq!(power(&Budget::unlimited(), 13, 40).unwrap().v, BigInt::from(13).pow(40)); #0": {
   "class": "none",
   "owner": "polynomial factorization (@sagebrush-sage2)"
+ },
+ "engine/poly/src/tests.rs :: rand_powers :: let b = Budget::unlimited(); #0": {
+  "class": "none",
+  "owner": "polynomial factorization",
+  "reason": "test code: the modular phase's oracle equivalence, memory, work-refusal and Stop tests; refuses nothing itself"
+ },
+ "engine/poly/src/tests.rs :: sqf_mod :: pub fn sqf_mod(b: &Budget, f: &[u64], p: u64) -> FResult<Vec<(FPoly, u32)>> { #0": {
+  "class": "none",
+  "owner": "polynomial factorization",
+  "reason": "test code: the modular phase's oracle equivalence, memory, work-refusal and Stop tests; refuses nothing itself"
  },
  "engine/poly/src/tests.rs :: the_global_ledger_net_holds :: let b = Budget::default(); #0": {
   "class": "none",
@@ -4197,6 +4447,36 @@
   "class": "none",
   "owner": "python (@sagebrush-python)"
  },
+ "engine/poly/tests/modp_stop.rs ::  :: use sagebrush_poly::{try_factor_mod_with, Budget}; #0": {
+  "class": "none",
+  "owner": "polynomial factorization",
+  "reason": "test code: the modular phase's oracle equivalence, memory, work-refusal and Stop tests; refuses nothing itself"
+ },
+ "engine/poly/tests/modp_stop.rs :: stop_in_every_phase :: assert_eq!(try_factor_mod_with(&f, p, &Budget::default()).unwrap(), full, \"p={}: the next call\", p); #0": {
+  "class": "none",
+  "owner": "polynomial factorization",
+  "reason": "test code: the modular phase's oracle equivalence, memory, work-refusal and Stop tests; refuses nothing itself"
+ },
+ "engine/poly/tests/modp_stop.rs :: stop_in_every_phase :: let b = Budget::default(); #0": {
+  "class": "none",
+  "owner": "polynomial factorization",
+  "reason": "test code: the modular phase's oracle equivalence, memory, work-refusal and Stop tests; refuses nothing itself"
+ },
+ "engine/poly/tests/modp_stop.rs :: stop_in_every_phase :: let b = Budget::default(); #1": {
+  "class": "none",
+  "owner": "polynomial factorization",
+  "reason": "test code: the modular phase's per-operation debit, exact-reservation boundary and Stop allocation tests; refuses nothing itself"
+ },
+ "engine/poly/tests/modp_stop.rs :: stop_in_every_phase :: let full = try_factor_mod_with(&f, p, &Budget::default()).expect(\"within the default budget\"); #0": {
+  "class": "none",
+  "owner": "polynomial factorization",
+  "reason": "test code: the modular phase's oracle equivalence, memory, work-refusal and Stop tests; refuses nothing itself"
+ },
+ "engine/poly/tests/modp_stop.rs :: stop_in_every_phase :: let gap = hooks::max_gap_ns(); #0": {
+  "class": "none",
+  "owner": "polynomial factorization",
+  "reason": "test code: the modular phase's oracle equivalence, memory, work-refusal and Stop tests; refuses nothing itself"
+ },
  "engine/primes/src/lib.rs ::  :: pub use prime_pi::{prime_pi, PRIME_PI_MAX}; #0": {
   "class": "none",
   "owner": "the primes engine (li, prime_pi, zeta zeros)",
@@ -4626,6 +4906,21 @@
   "owner": "engine web + finite-field matrices",
   "reason": "nmod_poly_gcd's declared peak, work and transform-length bounds, derived from the GCD_MAX_LEN cap (whose own site refuses); refuses nothing itself"
  },
+ "engine/web/src/nmod_ops.rs :: add :: == 2 * (20 * product * 8 + (1 << 14) * (GCD_MAX_LEN as u64 / 32) + 10 * product) #0": {
+  "class": "none",
+  "owner": "engine web + finite-field matrices",
+  "reason": "nmod_poly_gcd's declared peak, work and transform-length bounds, derived from the GCD_MAX_LEN cap (whose own site refuses); refuses nothing itself"
+ },
+ "engine/web/src/nmod_ops.rs :: add :: const GCD_FRAMES: usize = match nmod_poly::gcd_frame_bytes(GCD_MAX_LEN, GCD_MAX_LEN) { #0": {
+  "class": "none",
+  "owner": "engine web + finite-field matrices",
+  "reason": "nmod_poly_gcd's declared peak, work and transform-length bounds, derived from the GCD_MAX_LEN cap (whose own site refuses); refuses nothing itself"
+ },
+ "engine/web/src/nmod_ops.rs :: add :: const _: () = assert!(GCD_FRAMES == 320 * GCD_MAX_LEN); #0": {
+  "class": "none",
+  "owner": "engine web + finite-field matrices",
+  "reason": "nmod_poly_gcd's declared peak, work and transform-length bounds, derived from the GCD_MAX_LEN cap (whose own site refuses); refuses nothing itself"
+ },
  "engine/web/src/nmod_ops.rs :: add :: pub const DIV_MAX_LEN: usize = 1 << 15; #0": {
   "class": "1+3",
   "owner": "engine web + finite-field matrices",
@@ -4681,12 +4976,12 @@
   "owner": "engine web + finite-field matrices",
   "reason": "nmod_poly_gcd's declared peak, work and transform-length bounds, derived from the GCD_MAX_LEN cap (whose own site refuses); refuses nothing itself"
  },
- "engine/web/src/nmod_ops.rs :: add :: pub const GCD_PEAK: usize = add(add(GCD_MAX_REQUEST, mul(16 + 320, GCD_MAX_LEN)), add(mul(128, GCD_NTT_N), 4096)); #0": {
+ "engine/web/src/nmod_ops.rs :: add :: pub const GCD_PEAK: usize = add(add(GCD_MAX_REQUEST, add(mul(16, GCD_MAX_LEN), GCD_FRAMES)), add(mul(128, GCD_NTT_N), 4096)); #0": {
   "class": "none",
   "owner": "engine web + finite-field matrices",
   "reason": "nmod_poly_gcd's declared peak, work and transform-length bounds, derived from the GCD_MAX_LEN cap (whose own site refuses); refuses nothing itself"
  },
- "engine/web/src/nmod_ops.rs :: add :: pub const GCD_WORK: u64 = 2 * (20 * GCD_PRODUCT * 8 + (1 << 14) * (GCD_MAX_LEN as u64 / 32) + 10 * GCD_PRODUCT) #0": {
+ "engine/web/src/nmod_ops.rs :: add :: pub const GCD_WORK: u64 = match nmod_poly::gcd_work(GCD_MAX_LEN, GCD_MAX_LEN) { #0": {
   "class": "none",
   "owner": "engine web + finite-field matrices",
   "reason": "nmod_poly_gcd's declared peak, work and transform-length bounds, derived from the GCD_MAX_LEN cap (whose own site refuses); refuses nothing itself"

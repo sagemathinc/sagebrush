@@ -38,9 +38,9 @@ impl Poll {
 }
 
 /// Products with a factor shorter than this are schoolbook.
-const MUL_CUTOFF: usize = 40;
+pub const MUL_CUTOFF: usize = 40;
 /// Divisions with divisor and quotient both at least this long use Newton.
-const DIV_CUTOFF: usize = 60;
+pub const DIV_CUTOFF: usize = 60;
 
 pub fn trim(mut v: Poly) -> Poly {
     while v.last() == Some(&0) {
@@ -362,10 +362,6 @@ fn divrem_t(a: &[u64], b: &[u64], m: &Modulus, t: Tabs) -> (Poly, Poly) {
 }
 
 /// Division given binv = 1/rev(b) mod x^k with k >= the quotient length.
-fn divrem_with_inverse(a: &[u64], b: &[u64], binv: &[u64], m: &Modulus) -> (Poly, Poly) {
-    divrem_with_inverse_t(a, b, binv, m, Tabs::Shared)
-}
-
 fn divrem_with_inverse_t(a: &[u64], b: &[u64], binv: &[u64], m: &Modulus, t: Tabs) -> (Poly, Poly) {
     let _phase = sagebrush_interrupt::enter("newton-divide");
     sagebrush_interrupt::check_coarse();
@@ -441,9 +437,9 @@ fn gcd_t(a: Poly, b: Poly, m: &Modulus, t: Tabs) -> Poly {
 }
 
 /// Inputs to the half-gcd shorter than this use Euclid's steps directly.
-const HGCD_CUTOFF: usize = 64;
+pub const HGCD_CUTOFF: usize = 64;
 /// gcds of inputs shorter than this use Euclid's algorithm.
-const GCD_CUTOFF: usize = 1000;
+pub const GCD_CUTOFF: usize = 1000;
 
 /// A 2x2 matrix of polynomials: the product of Euclid steps
 /// (a, b) -> (b, a - q b), acting on column vectors.
@@ -562,20 +558,43 @@ pub fn xgcd(a: &[u64], b: &[u64], m: &Modulus) -> (Poly, Poly, Poly) {
 pub struct PolyModulus {
     pub f: Poly,
     finv: Poly,
+    /// The precision of finv: 1/rev(f) mod x^prec.  finv itself may be
+    /// shorter (its top coefficients zero, as for a sparse f), so the
+    /// branch in reduce reads this, never finv.len(), as reduce_work does.
+    prec: usize,
     pub m: Modulus,
 }
 
 impl PolyModulus {
     pub fn new(f: &[u64], m: &Modulus) -> PolyModulus {
+        PolyModulus::new_t(f, m, Tabs::Shared)
+    }
+
+    /// [`PolyModulus::new`] with the caller's transform tables (for
+    /// products up to 2 f.len()).
+    pub fn new_in(f: &[u64], m: &Modulus, lt: &ntt::LocalTables) -> PolyModulus {
+        PolyModulus::new_t(f, m, Tabs::Local(lt))
+    }
+
+    fn new_t(f: &[u64], m: &Modulus, t: Tabs) -> PolyModulus {
         let f = trim(f.to_vec());
         assert!(!f.is_empty(), "zero modulus");
-        let k = f.len().max(2) - 1;
-        let finv = inv_series(&rev(&f, f.len()), k.max(1), m);
-        PolyModulus { f, finv, m: *m }
+        let prec = f.len().max(2) - 1;
+        let finv = inv_series_t(&rev(&f, f.len()), prec, m, t);
+        PolyModulus { f, finv, prec, m: *m }
     }
 
     /// x mod f, for deg x < 2 deg f.
     pub fn reduce(&self, x: &[u64]) -> Poly {
+        self.reduce_t(x, Tabs::Shared)
+    }
+
+    /// [`PolyModulus::reduce`] with the caller's transform tables.
+    pub fn reduce_in(&self, x: &[u64], lt: &ntt::LocalTables) -> Poly {
+        self.reduce_t(x, Tabs::Local(lt))
+    }
+
+    fn reduce_t(&self, x: &[u64], t: Tabs) -> Poly {
         if x.len() < self.f.len() {
             return trim(x.to_vec());
         }
@@ -583,28 +602,46 @@ impl PolyModulus {
             let linv = self.m.inv(*self.f.last().unwrap()).unwrap();
             return divrem_classical(x, &self.f, linv, &self.m).1;
         }
-        if x.len() - self.f.len() + 1 > self.finv.len() {
-            return rem(x, &self.f, &self.m);
+        if x.len() - self.f.len() + 1 > self.prec {
+            return divrem_t(x, &self.f, &self.m, t).1;
         }
-        divrem_with_inverse(x, &self.f, &self.finv, &self.m).1
+        divrem_with_inverse_t(x, &self.f, &self.finv, &self.m, t).1
     }
 
     pub fn mulmod(&self, a: &[u64], b: &[u64]) -> Poly {
-        self.reduce(&mul(a, b, &self.m))
+        self.mulmod_t(a, b, Tabs::Shared)
+    }
+
+    /// [`PolyModulus::mulmod`] with the caller's transform tables.
+    pub fn mulmod_in(&self, a: &[u64], b: &[u64], lt: &ntt::LocalTables) -> Poly {
+        self.mulmod_t(a, b, Tabs::Local(lt))
+    }
+
+    fn mulmod_t(&self, a: &[u64], b: &[u64], t: Tabs) -> Poly {
+        self.reduce_t(&mul_t(a, b, &self.m, t), t)
     }
 
     /// a^e mod f, e given as little-endian 64-bit words.
     pub fn powmod(&self, a: &[u64], e: &[u64]) -> Poly {
-        let a = self.reduce(a);
-        let mut r = self.reduce(&[1 % self.m.n]);
+        self.powmod_t(a, e, Tabs::Shared)
+    }
+
+    /// [`PolyModulus::powmod`] with the caller's transform tables.
+    pub fn powmod_in(&self, a: &[u64], e: &[u64], lt: &ntt::LocalTables) -> Poly {
+        self.powmod_t(a, e, Tabs::Local(lt))
+    }
+
+    fn powmod_t(&self, a: &[u64], e: &[u64], t: Tabs) -> Poly {
+        let a = self.reduce_t(a, t);
+        let mut r = self.reduce_t(&[1 % self.m.n], t);
         let bits = e.len() * 64;
         let mut started = false;
         for i in (0..bits).rev() {
             if started {
-                r = self.mulmod(&r, &r);
+                r = self.mulmod_t(&r, &r, t);
             }
             if (e[i / 64] >> (i % 64)) & 1 == 1 {
-                r = if started { self.mulmod(&r, &a) } else { a.clone() };
+                r = if started { self.mulmod_t(&r, &a, t) } else { a.clone() };
                 started = true;
             }
             if i % 64 == 0 {
@@ -613,6 +650,230 @@ impl PolyModulus {
         }
         r
     }
+}
+
+// ------------------------------------------------------------------ work bounds
+
+// Closed-form bounds on the work of the operations above, in
+// multiply-adds and butterflies, for callers that charge a budget before
+// each call (the units of the web ops' declared work).  Every bound is
+// computed with checked arithmetic: None when it does not fit in a u64,
+// which a caller treats as a refusal.
+
+/// Checked arithmetic in const fns: the value, or None from the function.
+macro_rules! ck {
+    ($e:expr) => {
+        match $e {
+            Some(x) => x,
+            None => return None,
+        }
+    };
+}
+
+/// The linear allowance per transform point of [`product_work`]: the
+/// residues' combination and the linear passes around a product (sums,
+/// differences, copies); also a bound on a schoolbook product per point
+/// of its length, its shorter factor having fewer than MUL_CUTOFF
+/// coefficients.
+const LINEAR: u64 = 40;
+const _: () = assert!(MUL_CUTOFF as u64 <= LINEAR);
+
+/// One inversion modulo n (an extended Euclid on words) and a step's
+/// bookkeeping.
+const INV_WORK: u64 = 129;
+
+/// ceil(log2(x)) (0 for x <= 1).
+const fn clog2(x: u64) -> u64 {
+    if x <= 1 {
+        0
+    } else {
+        64 - (x - 1).leading_zeros() as u64
+    }
+}
+
+/// A bound on one product of length at most `len` (len >= 1), with N =
+/// len padded to a power of two: at most three primes times three
+/// transforms of (N / 2) log2 N butterflies, plus LINEAR N.  P(N) / N
+/// grows with N, so P(N / 2) <= P(N) / 2.
+pub const fn product_work(len: usize) -> Option<u64> {
+    let n = ck!((if len == 0 { 1 } else { len } as u64).checked_next_power_of_two());
+    let log = n.trailing_zeros() as u64;
+    let butterflies = ck!(ck!((n / 2).checked_mul(9)).checked_mul(log));
+    butterflies.checked_add(ck!(n.checked_mul(LINEAR)))
+}
+
+/// [`mul`] (and [`mul_in`]) of factors with la and lb coefficients: the
+/// schoolbook's la lb multiply-adds and its result below MUL_CUTOFF, else
+/// one product ([`product_work`]).
+pub const fn mul_work(la: usize, lb: usize) -> Option<u64> {
+    if la == 0 || lb == 0 {
+        return Some(0);
+    }
+    let len = ck!(ck!(la.checked_add(lb)).checked_sub(1));
+    if la < MUL_CUTOFF || lb < MUL_CUTOFF {
+        return ck!((la as u64).checked_mul(lb as u64)).checked_add(len as u64);
+    }
+    product_work(len)
+}
+
+/// [`inv_series`] to k terms: per doubling step to `len` terms, two
+/// products of factors of at most len coefficients, the linear passes
+/// and a step's bookkeeping; and the inversion of the constant term.
+pub const fn inv_series_work(k: usize) -> Option<u64> {
+    let mut w = INV_WORK;
+    let mut len = 1;
+    while len < k {
+        len = match len.checked_mul(2) {
+            Some(d) if d < k => d,
+            _ => k,
+        };
+        let step = ck!(ck!(ck!(mul_work(len, len)).checked_mul(2)).checked_add(ck!((len as u64).checked_mul(4))));
+        w = ck!(w.checked_add(step));
+    }
+    Some(w)
+}
+
+/// [`divrem`] (and [`divrem_in`]) of a by b with la >= 0 and lb >= 1
+/// coefficients.  Classical: ql rows of lb multiply-adds, the copy of a
+/// and the inversion of b's leading coefficient.  Newton: the inverse
+/// series to ql terms, then the quotient's product (factors of at most
+/// ql coefficients) and the remainder's (at most ql and lb - 1), the
+/// reversed copy and the difference.
+pub const fn divrem_work(la: usize, lb: usize) -> Option<u64> {
+    if lb == 0 {
+        // (a zero divisor: refused, never charged)
+        return None;
+    }
+    if la < lb {
+        return Some(la as u64);
+    }
+    let ql = ck!(ck!(la.checked_sub(lb)).checked_add(1));
+    if lb < DIV_CUTOFF || ql < DIV_CUTOFF {
+        return ck!(ck!((ql as u64).checked_mul(lb as u64)).checked_add(la as u64)).checked_add(INV_WORK);
+    }
+    let products = ck!(ck!(mul_work(ql, ql)).checked_add(ck!(mul_work(ql, lb - 1))));
+    ck!(ck!(inv_series_work(ql)).checked_add(products)).checked_add(ck!((la as u64).checked_mul(2)))
+}
+
+/// Euclid's algorithm on inputs of hi >= lo coefficients (see [`gcd_work`]).
+const fn euclid_work(hi: u64, lo: u64) -> Option<u64> {
+    ck!(ck!(lo.checked_mul(ck!(hi.checked_add(lo)))).checked_add(ck!(lo.checked_mul(INV_WORK)))).checked_add(128)
+}
+
+/// A bound on a half-gcd base case (inputs shorter than HGCD_CUTOFF).
+const HGCD_BASE_WORK: u64 = 1 << 14;
+const _: () = assert!(HGCD_CUTOFF == 64);
+
+/// [`gcd`] (and [`gcd_in`]) of polynomials with la and lb coefficients,
+/// L = max(la, lb), l = min(la, lb).
+/// - l = 0: the monic associate of the other (an inversion, a scale).
+/// - l <= GCD_CUTOFF: Euclid, l (L + l) + 129 l + 128: the quotient rows
+///   of all steps number at most L + l, each at most l multiply-adds; an
+///   inversion per step and the final normalization.
+/// - Otherwise the half-gcd.  With P = [`product_work`] at N = 2 L padded
+///   ([`gcd_table_len`]): a half-gcd node for inputs of length L' does at
+///   most 20 products' work at its own N' (4 applying its first matrix,
+///   6 in its division, 2 in the Euclid step, 8 in the final matrix
+///   product) and calls itself twice on inputs of at most ceil(L' / 2)
+///   coefficients, whose N is at most half its own; so the 2^j nodes of
+///   level j cost at most 20 P(N) together.  The levels whose inputs are
+///   longer than HGCD_CUTOFF number at most ceil(log2(L / HGCD_CUTOFF))
+///   (level j has inputs of at most ceil(L / 2^j) coefficients), and the
+///   base cases below them at most 2^levels < 2 L / HGCD_CUTOFF, each at
+///   most HGCD_BASE_WORK.  The gcd's loop: each turn's half-gcd, its
+///   application and a division (10 products more), on lengths that at
+///   least halve each turn, so at most twice the first turn's bound; then
+///   Euclid's tail on a shorter input of at most GCD_CUTOFF coefficients.
+pub const fn gcd_work(la: usize, lb: usize) -> Option<u64> {
+    let (big, small) = if la >= lb { (la as u64, lb as u64) } else { (lb as u64, la as u64) };
+    if small == 0 {
+        return big.checked_add(INV_WORK);
+    }
+    if small <= GCD_CUTOFF as u64 {
+        return euclid_work(big, small);
+    }
+    let p = ck!(product_work(ck!((big as usize).checked_mul(2))));
+    let cut = HGCD_CUTOFF as u64;
+    let levels = clog2(big.div_ceil(cut));
+    let bases = ck!(HGCD_BASE_WORK.checked_mul(ck!(big.checked_mul(2)).div_ceil(cut)));
+    let turn = ck!(ck!(ck!(ck!(p.checked_mul(20)).checked_mul(levels)).checked_add(bases)).checked_add(ck!(p.checked_mul(10))));
+    ck!(turn.checked_mul(2)).checked_add(ck!(euclid_work(big, GCD_CUTOFF as u64)))
+}
+
+/// The bytes [`gcd`] (and [`gcd_in`]) allocates beyond its inputs (which
+/// it owns), its transform tables and one product's transform buffers,
+/// each polynomial counted by its capacity.  Euclid works in place and
+/// allocates only the monic result (at most l words).  The half-gcd: a
+/// frame for inputs of length L' holds at most 16.5 L' + 33 words, and
+/// 11 L' + 20 while its second call runs, so the recursion holds at most
+/// max(16.5 L + 33, 11 L + 20 + S(ceil(L / 2))) <= 23 L + 1024 words
+/// (1024: a base case); the gcd's loop adds at most 0.5 L + 2 words (its
+/// later operands' capacities): at most 188 L + 8208 bytes <= 320 L for
+/// L > GCD_CUTOFF.
+pub const fn gcd_frame_bytes(la: usize, lb: usize) -> Option<u64> {
+    let (big, small) = if la >= lb { (la as u64, lb as u64) } else { (lb as u64, la as u64) };
+    if small <= GCD_CUTOFF as u64 {
+        // (l = 0: the monic associate of the other, a new vector)
+        let l = if small == 0 { big } else { small };
+        return l.checked_mul(8);
+    }
+    big.checked_mul(320)
+}
+const _: () = assert!(188 * (GCD_CUTOFF as u64 + 1) + 8208 <= 320 * (GCD_CUTOFF as u64 + 1));
+
+/// [`PolyModulus::new`] (and new_in) for a modulus with lf coefficients:
+/// the inverse series of the reversal to k = max(lf - 1, 1) terms, and
+/// the copies.
+pub const fn polymod_new_work(lf: usize) -> Option<u64> {
+    let k = if lf > 2 { lf - 1 } else { 1 };
+    ck!(inv_series_work(k)).checked_add(ck!((lf as u64).checked_mul(2)))
+}
+
+/// [`PolyModulus::reduce`] (and reduce_in) of lx coefficients modulo one
+/// of lf, branch by branch as it runs: a copy; the classical division;
+/// the general division (a quotient longer than the stored inverse); or
+/// the products with the stored inverse (the quotient's, of factors of at
+/// most ql coefficients, and the remainder's, at most ql and lf - 1),
+/// the reversed copy and the difference.
+pub const fn reduce_work(lf: usize, lx: usize) -> Option<u64> {
+    if lf == 0 {
+        // (a zero modulus: refused, never charged)
+        return None;
+    }
+    if lx < lf {
+        return Some(lx as u64);
+    }
+    let ql = ck!(ck!(lx.checked_sub(lf)).checked_add(1));
+    if lf < DIV_CUTOFF {
+        return ck!(ck!((ql as u64).checked_mul(lf as u64)).checked_add(lx as u64)).checked_add(INV_WORK);
+    }
+    let k = if lf > 2 { lf - 1 } else { 1 };
+    if ql > k {
+        return divrem_work(lx, lf);
+    }
+    let products = ck!(ck!(mul_work(ql, ql)).checked_add(ck!(mul_work(ql, lf - 1))));
+    products.checked_add(ck!((lx as u64).checked_mul(2)))
+}
+
+/// [`PolyModulus::mulmod`] (and mulmod_in) of factors with la and lb
+/// coefficients modulo one of lf.
+pub const fn mulmod_work(lf: usize, la: usize, lb: usize) -> Option<u64> {
+    let lp = if la == 0 || lb == 0 { 0 } else { ck!(ck!(la.checked_add(lb)).checked_sub(1)) };
+    ck!(mul_work(la, lb)).checked_add(ck!(reduce_work(lf, lp)))
+}
+
+/// [`PolyModulus::powmod`] (and powmod_in) of a (la coefficients) to an
+/// exponent of `words` words whose highest set bit is bit ebits - 1 (0:
+/// a zero exponent), modulo f with lf >= 1 coefficients: the reductions
+/// of a and of 1; a check per bit of the words; and from the highest set
+/// bit down, per bit at most a squaring and a multiplication of operands
+/// shorter than f.
+pub const fn powmod_work(lf: usize, la: usize, words: usize, ebits: u64) -> Option<u64> {
+    let first = ck!(ck!(reduce_work(lf, la)).checked_add(ck!(reduce_work(lf, 1))));
+    let l = lf.saturating_sub(1);
+    let step = ck!(ck!(ck!(mulmod_work(lf, l, l)).checked_mul(2)).checked_add(1));
+    let scan = ck!((words as u64).checked_mul(64));
+    ck!(first.checked_add(scan)).checked_add(ck!(ebits.checked_mul(step)))
 }
 
 #[cfg(test)]
@@ -634,6 +895,57 @@ mod tests {
             }
         }
         v
+    }
+
+    #[test]
+    fn work_bounds_refuse_instead_of_panicking() {
+        // every bound is None (a refusal) or a number at any lengths, never
+        // an arithmetic overflow: callers debit them before the work.  A
+        // Some is checked against a lower bound of the work it stands for,
+        // so an intermediate that wrapped (release builds don't panic on
+        // overflow) and gave a small number fails here as well
+        let ls = [0usize, 1, 2, 39, 40, 59, 60, 1000, 1 << 32, usize::MAX / 2, usize::MAX / 2 + 1, usize::MAX - 1, usize::MAX];
+        let at_least = |w: Option<u64>, lo: u128, what: &str| {
+            if let Some(w) = w {
+                assert!(w as u128 >= lo, "{what}: {w} < {lo}");
+            }
+        };
+        for &a in &ls {
+            let _ = product_work(a);
+            at_least(product_work(a), a as u128, "product_work");
+            if a > 1 {
+                at_least(inv_series_work(a), 4 * a as u128, "inv_series_work");
+            }
+            at_least(polymod_new_work(a), 2 * a as u128, "polymod_new_work");
+            for &b in &ls {
+                if a > 0 && b > 0 {
+                    at_least(mul_work(a, b), a.max(b) as u128, "mul_work");
+                }
+                at_least(divrem_work(a, b), a as u128, "divrem_work");
+                at_least(gcd_work(a, b), a.max(b) as u128, "gcd_work");
+                let _ = gcd_frame_bytes(a, b);
+                at_least(reduce_work(a, b), b as u128, "reduce_work");
+                for &c in &ls {
+                    if b > 0 && c > 0 {
+                        at_least(mulmod_work(a, b, c), b as u128 + c as u128 - 1, "mulmod_work");
+                    }
+                    for e in [0u64, 1, 64, u64::MAX] {
+                        at_least(powmod_work(a, b, c, e), b as u128, "powmod_work");
+                    }
+                }
+            }
+        }
+        // zero lengths where a nonzero one is required: refused
+        for &x in &ls {
+            assert_eq!(reduce_work(0, x), None, "reduce_work(0, {x})");
+            assert_eq!(divrem_work(x, 0), None, "divrem_work({x}, 0)");
+        }
+        // the extremes that overflowed before
+        assert_eq!(reduce_work(1, usize::MAX), None);
+        assert_eq!(divrem_work(usize::MAX, 1), None);
+        assert_eq!(mulmod_work(usize::MAX, usize::MAX, 2), None);
+        assert_eq!(mulmod_work(1000, usize::MAX, 2), None);
+        assert!(mulmod_work(1000, 999, 999).is_some());
     }
 
     #[test]

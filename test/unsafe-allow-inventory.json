@@ -503,6 +503,12 @@
    "audit": "Can it produce or alter an Obligations, Operation, Reservation, Growth or Context (directly, generically or through a pointer)? No. sagebrush-poly (deps: bigint, interrupt) does not depend on sagebrush-ledger, so it cannot name those types, and it forwards allocator calls to System/dlmalloc/the inner allocator and updates its own counters. (Premises machine-checked by scripts/unsafe-inventory.mjs: premises.no_ledger_dep against the manifests, no ledger re-export anywhere, and the pinned proc-macro/build-script closure.)"
   },
   {
+   "file": "engine/poly/tests/modp_stop.rs",
+   "item": "impl GlobalAlloc for Counting",
+   "hash": "644ec3433664359dcb0e4bbd1e87f577bc5b1b3189c68dea294cfb75d0f7e70a",
+   "audit": "Can it produce or alter an Obligations, Operation, Reservation, Growth or Context (directly, generically or through a pointer)? No. Test glue: a System-forwarding counting allocator. Token-identical to engine/web/tests/nmod_alloc.rs's audited item (the same hash); here it counts the process's live bytes for the Stop test's no-leak check."
+  },
+  {
    "file": "engine/raster/src/lib.rs",
    "item": "fn rs_alloc",
    "hash": "141546c7e7c5158568365f8f3e6f5e2af4baad9c494ab70cc719379c44c1b1be",

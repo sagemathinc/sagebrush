@@ -104,7 +104,7 @@ fn factoring_mod_p() {
             let mut pr: Vec<u64> = vec![1];
             for (g, e) in &fac {
                 // irreducible: one distinct-degree piece of full degree
-                let dd = ddf(&b, g, p).unwrap();
+                let dd = oracle::ddf(&b, g, p).unwrap();
                 assert!(dd.len() == 1 && dd[0].1 == g.len() - 1, "reducible factor {:?} mod {}", g, p);
                 for _ in 0..*e {
                     pr = fmul(&b, &pr, g, p).unwrap();
@@ -466,4 +466,441 @@ fn a_huge_exponent_is_refused_by_its_reservation() {
         assert!(used < 1024, "k {k}: {used} bytes before refusing");
     }
     assert_eq!(b.live(), 0);
+}
+
+// ------------------------------------------------------------------ the modular phase on arith (modp.rs)
+
+/// x^n - 1
+fn xn1(n: usize) -> Vec<BigInt> {
+    let mut v = vec![BigInt::zero(); n + 1];
+    v[0] = BigInt::from(-1);
+    v[n] = BigInt::one();
+    v
+}
+
+/// A monic polynomial of degree n with random coefficients mod p.
+fn rand_monic(rng: &mut Rng, n: usize, p: u64) -> Vec<BigInt> {
+    let mut v: Vec<BigInt> = (0..n).map(|_| BigInt::from(rng.next() % p)).collect();
+    v.push(BigInt::one());
+    v
+}
+
+/// prod g_i^e_i, the g_i random monic (multiplicities and p-th powers).
+fn rand_powers(rng: &mut Rng, parts: &[(usize, u32)], p: u64) -> Vec<BigInt> {
+    let b = Budget::unlimited();
+    let mut f = z(&[1]);
+    for &(d, e) in parts {
+        let g = rand_monic(rng, d, p);
+        for _ in 0..e {
+            f = zmul(&b, &f, &g).unwrap().into_vec();
+        }
+    }
+    f
+}
+
+const MODP_PRIMES: [u64; 7] = [2, 3, 5, 7, 65537, 2147483647, 4294967291];
+
+/// The inputs of the equivalence test for p: degrees around the product
+/// and division cutoffs (read from arith), x^n - 1, and products with
+/// multiplicities and p-th powers.
+fn modp_cases(p: u64) -> Vec<Vec<BigInt>> {
+    use sagebrush_arith::nmod_poly::{DIV_CUTOFF, MUL_CUTOFF};
+    let mut rng = Rng(p.wrapping_mul(0x9E37_79B9) ^ 0x5DEE_CE66);
+    let mut out = vec![];
+    let top = if p < 1 << 20 { 2 * DIV_CUTOFF } else { DIV_CUTOFF + 2 };
+    let mut degs = vec![1, 2, 3, 7, MUL_CUTOFF - 2, MUL_CUTOFF - 1, MUL_CUTOFF, DIV_CUTOFF - 2, DIV_CUTOFF - 1, DIV_CUTOFF, DIV_CUTOFF + 1, top];
+    degs.dedup();
+    for n in degs {
+        out.push(rand_monic(&mut rng, n, p));
+    }
+    for n in [1, 2, 12, 60, 64, if p < 1 << 20 { 120 } else { 62 }] {
+        out.push(xn1(n));
+    }
+    out.push(rand_powers(&mut rng, &[(1, 3), (2, 2), (5, 1), (3, p.min(7) as u32)], p));
+    out.push(rand_powers(&mut rng, &[(4, p.min(5) as u32), (6, 2), (20, 1)], p));
+    out.push(rand_powers(&mut rng, &[(1, 2 * p.min(3) as u32), (DIV_CUTOFF / 2, 2)], p));
+    out
+}
+
+#[test]
+fn modp_matches_the_oracle() {
+    // the factors, multiplicities and their order, and the generator's
+    // state after the call (the same candidates drawn), bit for bit
+    for p in MODP_PRIMES {
+        for f in modp_cases(p) {
+            let (want, want_rng) = oracle::factor_mod(&f, p);
+            let (got, got_rng) = factor_mod_draws(&Budget::unlimited(), &f, p).unwrap();
+            assert_eq!(got, want, "p={} deg {}", p, f.len() - 1);
+            assert_eq!(got_rng, want_rng, "draws: p={} deg {}", p, f.len() - 1);
+        }
+    }
+}
+
+/// The product of the factors is f mod p, and each factor is irreducible
+/// (one distinct-degree piece of its full degree).
+fn check_factorization(f: &[BigInt], p: u64, fac: &[(Vec<u64>, u32)]) {
+    let b = Budget::unlimited();
+    let mut pr: Vec<u64> = vec![1];
+    for (g, e) in fac {
+        let ar = modp::Fp::new(&b, p, g.len()).unwrap();
+        let dd = modp::ddf(&ar, g).unwrap();
+        assert!(dd.len() == 1 && dd[0].1 == g.len() - 1, "reducible factor of degree {} mod {}", g.len() - 1, p);
+        for _ in 0..*e {
+            pr = fmul(&b, &pr, g, p).unwrap();
+        }
+    }
+    assert_eq!(pr, fmonic(&reduce_p(f, p), p), "product mod {}", p);
+}
+
+#[test]
+fn modp_long_inputs() {
+    // past the gcd cutoff (the half-gcd with the call's tables), degrees at
+    // powers of two and their neighbors: x^1024 - 1 splits into linear
+    // factors mod 65537 (1024 | p - 1), and its derivative has 1024
+    // coefficients
+    use sagebrush_arith::nmod_poly::GCD_CUTOFF;
+    let f = xn1(1024);
+    let fac = factor_mod(&f, 65537);
+    assert_eq!(fac.len(), 1024);
+    check_factorization(&f, 65537, &fac);
+    let mut rng = Rng(77);
+    for n in [1023, 1024, 1025] {
+        let f = rand_monic(&mut rng, n, 2);
+        // (both gcd operands of the square-free step past the cutoff)
+        let fp = reduce_p(&f, 2);
+        assert!(fderivative(&fp, 2).len() > GCD_CUTOFF);
+        check_factorization(&f, 2, &factor_mod(&f, 2));
+    }
+    let f = rand_powers(&mut rng, &[(600, 2), (3, 1)], 3);
+    check_factorization(&f, 3, &factor_mod(&f, 3));
+}
+
+#[test]
+fn modp_memory_within_its_reservation() {
+    // the allocator's peak during a call is at most the budget's peak
+    // reservation; and the ledger audit at every debit and reservation
+    let mut cases: Vec<(u64, Vec<BigInt>)> = vec![];
+    for p in [65537u64, 4294967291] {
+        // (one prime's tables, then two: 4294967291^2 exceeds the first)
+        for f in modp_cases(p) {
+            cases.push((p, f));
+        }
+        for n in [127, 128, 129, 255, 256, 257] {
+            cases.push((p, xn1(n)));
+        }
+    }
+    cases.push((65537, xn1(1024)));
+    cases.push((65537, xn1(500)));
+    let mut rng = Rng(5);
+    cases.push((2, rand_monic(&mut rng, 1024, 2)));
+    cases.push((3, rand_powers(&mut rng, &[(300, 3), (2, 1)], 3)));
+    for (p, f) in cases {
+        let b = Budget::unlimited();
+        let ((r, peak), rep) = alloc_spy::audit(|| alloc_spy::peak_during(|| factor_mod_with(&b, &f, p).map(|v| v.len())));
+        assert!(r.is_ok());
+        assert!(peak as u64 <= b.peak(), "p={} deg {}: allocated peak {} > reserved {}", p, f.len() - 1, peak, b.peak());
+        assert!(rep.excess <= 0, "p={} deg {}: {} bytes over the reservation in {}", p, f.len() - 1, rep.excess, rep.excess_phase);
+        assert_eq!(b.live(), 0);
+    }
+}
+
+#[test]
+fn modp_every_operation_debits_before_it_allocates() {
+    // an Fp whose budget has exactly the tables' work: no work is left, so
+    // each charged operation must refuse as work, allocating nothing (an
+    // operation that skipped its debit would run, allocate, and fail this)
+    let p = 65537u64;
+    let len = 200;
+    let w = Budget::unlimited();
+    drop(modp::Fp::new(&w, p, len).unwrap());
+    let tables = u64::MAX - w.work_left();
+    let b = Budget::new(Limits { work: tables, ..Limits::UNLIMITED });
+    let fp = modp::Fp::new(&b, p, len).unwrap();
+    assert_eq!(b.work_left(), 0);
+    // operands: a modulus built on an unlimited budget, reduced residues
+    let w2 = Budget::unlimited();
+    let wide = modp::Fp::new(&w2, p, len).unwrap();
+    let mut r = Rng(17);
+    let mut f: Vec<u64> = (0..len - 1).map(|_| r.next() % p).collect();
+    f.push(1);
+    let pm = wide.modulus(&f).unwrap();
+    let a: Vec<u64> = (0..len - 1).map(|_| r.next() % p).collect();
+    let x: Vec<u64> = (0..2 * len - 3).map(|_| r.next() % p).collect();
+    let ops: Vec<(&str, Box<dyn Fn() -> FResult<()> + '_>)> = vec![
+        ("divrem", Box::new(|| fp.divrem(&a, &f[..60]).map(|_| ()))),
+        ("quo", Box::new(|| fp.quo(&a, &f[..60]).map(|_| ()))),
+        ("gcd", Box::new(|| fp.gcd(&a, &f).map(|_| ()))),
+        ("modulus", Box::new(|| fp.modulus(&f).map(|_| ()))),
+        ("reduce", Box::new(|| fp.reduce(&pm, &x).map(|_| ()))),
+        ("mulmod", Box::new(|| fp.mulmod(&pm, &a, &a).map(|_| ()))),
+        ("powmod", Box::new(|| fp.powmod(&pm, &a, &[p]).map(|_| ()))),
+        ("linear", Box::new(|| fp.linear(a.len()))),
+    ];
+    for (name, op) in ops {
+        let before = alloc_spy::allocated();
+        let e = match op() {
+            Err(e) => e,
+            Ok(()) => panic!("{name}: ran with no work left (its debit is missing)"),
+        };
+        assert!(e.kind == Kind::Resource && e.what == "work", "{name}: {e}");
+        assert_eq!(alloc_spy::allocated(), before, "{name}: allocated before its refusal");
+    }
+}
+
+#[test]
+fn modp_memory_at_its_exact_reservation() {
+    // the boundary: a call's measured peak reservation as the memory limit
+    // admits it (the allocator's peak within it, the ledger audit clean,
+    // the same factors); one byte less refuses it as memory, with nothing
+    // left reserved and the allocator back where it started
+    let mut rng = Rng(11);
+    let cases: Vec<(u64, Vec<BigInt>)> = vec![
+        (65537, xn1(120)),
+        (65537, xn1(500)),
+        (4294967291, xn1(256)),
+        (2, rand_monic(&mut rng, 300, 2)),
+        (3, rand_powers(&mut rng, &[(40, 3), (2, 1), (7, 2)], 3)),
+    ];
+    for (p, f) in cases {
+        let w = Budget::unlimited();
+        let want = factor_mod_with(&w, &f, p).unwrap();
+        let need = w.peak();
+        let b = Budget::new(Limits { memory: need, ..Limits::UNLIMITED });
+        let ((r, peak), rep) = alloc_spy::audit(|| alloc_spy::peak_during(|| factor_mod_with(&b, &f, p)));
+        assert_eq!(r.unwrap(), want, "p={} deg {}", p, f.len() - 1);
+        assert!(peak as u64 <= need, "p={} deg {}: allocated peak {} > reservation {}", p, f.len() - 1, peak, need);
+        assert!(rep.excess <= 0, "p={} deg {}: {} bytes over the reservation in {}", p, f.len() - 1, rep.excess, rep.excess_phase);
+        assert_eq!(b.live(), 0);
+        let b = Budget::new(Limits { memory: need - 1, ..Limits::UNLIMITED });
+        let before = alloc_spy::live();
+        let e = factor_mod_with(&b, &f, p).unwrap_err();
+        assert!(e.kind == Kind::Resource && e.what == "memory", "{e}");
+        assert_eq!(b.live(), 0);
+        assert_eq!(alloc_spy::live(), before, "p={} deg {}: allocations left after the refusal", p, f.len() - 1);
+    }
+}
+
+#[test]
+fn modp_refuses_before_its_tables() {
+    for (p, len) in [(65537u64, 300usize), (4294967291, 1025)] {
+        let need = modp::fp_bytes(len).unwrap();
+        // memory: one byte short, nothing allocated, nothing left reserved
+        let b = Budget::new(Limits { memory: need - 1, ..Limits::UNLIMITED });
+        let before = alloc_spy::allocated();
+        let r = modp::Fp::new(&b, p, len).map(|_| ());
+        assert_eq!(alloc_spy::allocated(), before, "allocated before the refusal");
+        let e = r.unwrap_err();
+        assert!(e.kind == Kind::Resource && e.what == "memory", "{e}");
+        assert_eq!(b.live(), 0);
+        // work: the tables' work one short, the same
+        let b = Budget::new(Limits { memory: need, ..Limits::UNLIMITED });
+        let w = Budget::unlimited();
+        drop(modp::Fp::new(&w, p, len).unwrap());
+        let tables = u64::MAX - w.work_left();
+        let b2 = Budget::new(Limits { memory: need, work: tables - 1, ..Limits::UNLIMITED });
+        let before = alloc_spy::allocated();
+        let r = modp::Fp::new(&b2, p, len).map(|_| ());
+        assert_eq!(alloc_spy::allocated(), before);
+        assert!(r.unwrap_err().what == "work");
+        assert_eq!(b2.live(), 0);
+        // exactly enough: built
+        let fp = modp::Fp::new(&b, p, len).unwrap();
+        assert_eq!(b.live(), need);
+        drop(fp);
+        assert_eq!(b.live(), 0);
+    }
+}
+
+#[test]
+fn modp_work_refusals() {
+    // sampled work limits below the measured total debit of a call (0, and
+    // fractions of it up to one less) refuse it, leaving nothing reserved;
+    // the measured total admits it; x^120 - 1 mod 65537 splits pieces of
+    // several degrees, with retries (rejected and failed candidates)
+    for (p, f) in [(65537u64, xn1(120)), (3, rand_powers(&mut Rng(9), &[(2, 1), (3, 2), (1, 4), (5, 3)], 3)), (2, xn1(63))] {
+        let w = Budget::unlimited();
+        let want = factor_mod_with(&w, &f, p).unwrap();
+        let used = u64::MAX - w.work_left();
+        for k in [0, used / 97, used / 7, used / 3, used / 2, used - used / 5, used - 1] {
+            let b = Budget::new(Limits { work: k, ..Limits::UNLIMITED });
+            let e = factor_mod_with(&b, &f, p).unwrap_err();
+            assert!(e.kind == Kind::Resource && e.what == "work", "{e}");
+            assert_eq!(b.live(), 0);
+        }
+        let b = Budget::new(Limits { work: used, ..Limits::UNLIMITED });
+        assert_eq!(factor_mod_with(&b, &f, p).unwrap(), want);
+    }
+}
+
+#[test]
+fn modp_edf_is_bounded_by_its_work() {
+    // the equal-degree splitting ends with probability 1, not in a bounded
+    // number of candidates: its debits are what bound it.  x^1024 - 1 mod
+    // 65537 is one piece of 1024 linear factors; a budget with room for the
+    // tables and a hundredth of the splitting refuses as work, leaving
+    // nothing reserved
+    let (p, mut g) = (65537u64, vec![0u64; 1025]);
+    g[0] = p - 1;
+    g[1024] = 1;
+    let w = Budget::unlimited();
+    let fp = modp::Fp::new(&w, p, g.len()).unwrap();
+    let tables = u64::MAX - w.work_left();
+    let mut out = vec![];
+    modp::edf(&w, &fp, &g, 1, &mut Rng(5), &mut out).unwrap();
+    assert_eq!(out.len(), 1024);
+    let split = u64::MAX - w.work_left() - tables;
+    drop(fp);
+    for k in [split / 100, split / 2, split - 1] {
+        let b = Budget::new(Limits { work: tables + k, ..Limits::UNLIMITED });
+        let fp = modp::Fp::new(&b, p, g.len()).unwrap();
+        let e = modp::edf(&b, &fp, &g, 1, &mut Rng(5), &mut vec![]).unwrap_err();
+        assert!(e.kind == Kind::Resource && e.what == "work", "{e}");
+        drop(fp);
+        assert_eq!(b.live(), 0);
+    }
+}
+
+#[test]
+fn modp_never_uses_the_shared_cache() {
+    let before = sagebrush_arith::ntt::cache_stats().0;
+    for (p, f) in [(65537u64, xn1(500)), (4294967291, xn1(256)), (2, rand_monic(&mut Rng(3), 1100, 2))] {
+        factor_mod(&f, p);
+    }
+    assert_eq!(sagebrush_arith::ntt::cache_stats().0, before, "the shared transform cache was used");
+}
+
+/// The schoolbook modular phase that modp.rs replaced, kept as the oracle
+/// its results must match bit for bit.
+mod oracle {
+    use super::*;
+    use crate::{fderivative, fdivrem, fgcd, fmonic, fmul, frem, fsub, FPoly};
+    use sagebrush_bigint::BigUint;
+
+    pub fn fpowmod(b: &Budget, base: &[u64], e: &BigUint, m: &[u64], p: u64) -> FResult<FPoly> {
+        let mut r: FPoly = vec![1];
+        let mut x = frem(b, base, m, p)?;
+        for i in 0..e.bits() {
+            if e.bit(i) {
+                r = frem(b, &fmul(b, &r, &x, p)?, m, p)?;
+            }
+            x = frem(b, &fmul(b, &x, &x, p)?, m, p)?;
+        }
+        Ok(r)
+    }
+
+    /// Distinct-degree factorization of a monic square-free f: (product of the
+    /// irreducible factors of degree d, d).
+    pub fn ddf(b: &Budget, f: &[u64], p: u64) -> FResult<Vec<(FPoly, usize)>> {
+        let mut out = vec![];
+        let mut f = f.to_vec();
+        let x: FPoly = vec![0, 1];
+        let mut h = x.clone();
+        let pb = BigUint::from(p);
+        let mut d = 1;
+        while 2 * d <= f.len() - 1 {
+            h = fpowmod(b, &h, &pb, &f, p)?;
+            let g = fgcd(b, &f, &fsub(&h, &x, p), p)?;
+            if g.len() > 1 {
+                f = fdivrem(b, &f, &g, p)?.0;
+                h = frem(b, &h, &f, p)?;
+                out.push((g, d));
+            }
+            d += 1;
+        }
+        if f.len() > 1 {
+            let n = f.len() - 1;
+            out.push((f, n));
+        }
+        Ok(out)
+    }
+
+    /// Cantor-Zassenhaus: the irreducible factors (of degree d each) of g, with
+    /// the trace map a + a^2 + ... + a^(2^(d-1)) in characteristic 2.  The
+    /// pending pieces are kept on a stack: they partition g, so they hold at
+    /// most deg(g) + (their number) words.
+    pub fn edf(b: &Budget, g: &[u64], d: usize, p: u64, rng: &mut Rng, out: &mut Vec<FPoly>) -> FResult<()> {
+        let mut stack: Vec<FPoly> = vec![g.to_vec()];
+        while let Some(g) = stack.pop() {
+            let n = g.len() - 1;
+            if n == d {
+                out.push(g);
+                continue;
+            }
+            loop {
+                let a: FPoly = ftrim((0..n).map(|_| rng.next() % p).collect());
+                if a.len() < 2 {
+                    b.debit(Some(n as u64))?;
+                    continue;
+                }
+                let s = if p == 2 {
+                    let mut t = a.clone();
+                    let mut s = a.clone();
+                    for _ in 1..d {
+                        t = frem(b, &fmul(b, &t, &t, 2)?, &g, 2)?;
+                        s = fsub(&s, &fsub(&[], &t, 2), 2); // s + t
+                    }
+                    s
+                } else {
+                    // (p^d - 1) / 2: d bitlen(p) bits, reserved with its transients
+                    let _e = b.reserve(big_bytes((d as u64).saturating_mul(64 - p.leading_zeros() as u64)).and_then(|x| x.checked_mul(3)))?;
+                    let e = (BigUint::from(p).pow(d as u32) - 1u32) / 2u32;
+                    fsub(&fpowmod(b, &a, &e, &g, p)?, &[1], p)
+                };
+                let h = fgcd(b, &g, &s, p)?;
+                if h.len() > 1 && h.len() < g.len() {
+                    let q = fdivrem(b, &g, &h, p)?.0;
+                    stack.push(fmonic(&q, p));
+                    stack.push(h);
+                    break;
+                }
+            }
+        }
+        Ok(())
+    }
+
+    /// Square-free decomposition of a monic f over F_p (Musser, with p-th
+    /// roots in characteristic p): (g, e) with f = prod g^e, g square-free.
+    pub fn sqf_mod(b: &Budget, f: &[u64], p: u64) -> FResult<Vec<(FPoly, u32)>> {
+        let mut out = vec![];
+        let c = fgcd(b, f, &fderivative(f, p), p)?;
+        let mut w = fdivrem(b, f, &c, p)?.0;
+        let mut c = c;
+        let mut i = 1;
+        while w.len() > 1 {
+            let y = fgcd(b, &w, &c, p)?;
+            let z = fdivrem(b, &w, &y, p)?.0;
+            if z.len() > 1 {
+                out.push((fmonic(&z, p), i));
+            }
+            i += 1;
+            w = y;
+            c = fdivrem(b, &c, &w, p)?.0;
+        }
+        if c.len() > 1 {
+            // c is a p-th power: c(x) = r(x^p)
+            let r: FPoly = c.iter().step_by(p as usize).copied().collect();
+            for (g, e) in sqf_mod(b, &fmonic(&r, p), p)? {
+                out.push((g, e * p as u32));
+            }
+        }
+        Ok(out)
+    }
+
+    /// factor_mod_with on the oracle's phase, and the generator's state
+    /// after it (the draws made).
+    pub fn factor_mod(f: &[BigInt], p: u64) -> (Vec<(Vec<u64>, u32)>, u64) {
+        let b = Budget::unlimited();
+        let fp = fmonic(&reduce_p(f, p), p);
+        let mut rng = Rng(0x2545_F491_4F6C_DD1D ^ p);
+        let mut out = vec![];
+        for (g, e) in sqf_mod(&b, &fp, p).unwrap() {
+            for (h, d) in ddf(&b, &g, p).unwrap() {
+                let mut fs = vec![];
+                edf(&b, &h, d, p, &mut rng, &mut fs).unwrap();
+                out.extend(fs.into_iter().map(|q| (fmonic(&q, p), e)));
+            }
+        }
+        out.sort_by(|x, y| x.0.len().cmp(&y.0.len()).then(x.0.cmp(&y.0)));
+        (out, rng.0)
+    }
 }

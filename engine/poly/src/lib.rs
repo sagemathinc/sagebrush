@@ -26,11 +26,12 @@
 
 use num_integer::Integer;
 use num_traits::{One, Signed, ToPrimitive, Zero};
-use sagebrush_bigint::{BigInt, BigUint};
+use sagebrush_bigint::BigInt;
 use std::ops::Deref;
 
 mod binomial;
 pub mod budget;
+mod modp;
 pub mod l2;
 pub mod l2_verify;
 pub mod limbs;
@@ -470,18 +471,6 @@ fn fxgcd(b: &Budget, x: &[u64], y: &[u64], p: u64) -> FResult<(FPoly, FPoly)> {
     Ok((s, t))
 }
 
-fn fpowmod(b: &Budget, base: &[u64], e: &BigUint, m: &[u64], p: u64) -> FResult<FPoly> {
-    let mut r: FPoly = vec![1];
-    let mut x = frem(b, base, m, p)?;
-    for i in 0..e.bits() {
-        if e.bit(i) {
-            r = frem(b, &fmul(b, &r, &x, p)?, m, p)?;
-        }
-        x = frem(b, &fmul(b, &x, &x, p)?, m, p)?;
-    }
-    Ok(r)
-}
-
 // unbudgeted forms, for nf.rs (number field arithmetic, outside factor's budget)
 fn fdivrem_u(x: &[u64], y: &[u64], p: u64) -> (FPoly, FPoly) {
     fdivrem(&Budget::unlimited(), x, y, p).expect("no limits")
@@ -497,112 +486,14 @@ fn fderivative(x: &[u64], p: u64) -> FPoly {
     ftrim(x.iter().enumerate().skip(1).map(|(i, &c)| c * (i as u64 % p) % p).collect())
 }
 
-/// Distinct-degree factorization of a monic square-free f: (product of the
-/// irreducible factors of degree d, d).
-fn ddf(b: &Budget, f: &[u64], p: u64) -> FResult<Vec<(FPoly, usize)>> {
-    let mut out = vec![];
-    let mut f = f.to_vec();
-    let x: FPoly = vec![0, 1];
-    let mut h = x.clone();
-    let pb = BigUint::from(p);
-    let mut d = 1;
-    while 2 * d <= f.len() - 1 {
-        h = fpowmod(b, &h, &pb, &f, p)?;
-        let g = fgcd(b, &f, &fsub(&h, &x, p), p)?;
-        if g.len() > 1 {
-            f = fdivrem(b, &f, &g, p)?.0;
-            h = frem(b, &h, &f, p)?;
-            out.push((g, d));
-        }
-        d += 1;
-    }
-    if f.len() > 1 {
-        let n = f.len() - 1;
-        out.push((f, n));
-    }
-    Ok(out)
-}
-
-struct Rng(u64);
+pub(crate) struct Rng(pub(crate) u64);
 impl Rng {
-    fn next(&mut self) -> u64 {
+    pub(crate) fn next(&mut self) -> u64 {
         self.0 ^= self.0 << 13;
         self.0 ^= self.0 >> 7;
         self.0 ^= self.0 << 17;
         self.0
     }
-}
-
-/// Cantor-Zassenhaus: the irreducible factors (of degree d each) of g, with
-/// the trace map a + a^2 + ... + a^(2^(d-1)) in characteristic 2.  The
-/// pending pieces are kept on a stack: they partition g, so they hold at
-/// most deg(g) + (their number) words.
-fn edf(b: &Budget, g: &[u64], d: usize, p: u64, rng: &mut Rng, out: &mut Vec<FPoly>) -> FResult<()> {
-    let mut stack: Vec<FPoly> = vec![g.to_vec()];
-    while let Some(g) = stack.pop() {
-        let n = g.len() - 1;
-        if n == d {
-            out.push(g);
-            continue;
-        }
-        loop {
-            let a: FPoly = ftrim((0..n).map(|_| rng.next() % p).collect());
-            if a.len() < 2 {
-                b.debit(Some(n as u64))?;
-                continue;
-            }
-            let s = if p == 2 {
-                let mut t = a.clone();
-                let mut s = a.clone();
-                for _ in 1..d {
-                    t = frem(b, &fmul(b, &t, &t, 2)?, &g, 2)?;
-                    s = fsub(&s, &fsub(&[], &t, 2), 2); // s + t
-                }
-                s
-            } else {
-                // (p^d - 1) / 2: d bitlen(p) bits, reserved with its transients
-                let _e = b.reserve(big_bytes((d as u64).saturating_mul(64 - p.leading_zeros() as u64)).and_then(|x| x.checked_mul(3)))?;
-                let e = (BigUint::from(p).pow(d as u32) - 1u32) / 2u32;
-                fsub(&fpowmod(b, &a, &e, &g, p)?, &[1], p)
-            };
-            let h = fgcd(b, &g, &s, p)?;
-            if h.len() > 1 && h.len() < g.len() {
-                let q = fdivrem(b, &g, &h, p)?.0;
-                stack.push(fmonic(&q, p));
-                stack.push(h);
-                break;
-            }
-        }
-    }
-    Ok(())
-}
-
-/// Square-free decomposition of a monic f over F_p (Musser, with p-th
-/// roots in characteristic p): (g, e) with f = prod g^e, g square-free.
-fn sqf_mod(b: &Budget, f: &[u64], p: u64) -> FResult<Vec<(FPoly, u32)>> {
-    let mut out = vec![];
-    let c = fgcd(b, f, &fderivative(f, p), p)?;
-    let mut w = fdivrem(b, f, &c, p)?.0;
-    let mut c = c;
-    let mut i = 1;
-    while w.len() > 1 {
-        let y = fgcd(b, &w, &c, p)?;
-        let z = fdivrem(b, &w, &y, p)?.0;
-        if z.len() > 1 {
-            out.push((fmonic(&z, p), i));
-        }
-        i += 1;
-        w = y;
-        c = fdivrem(b, &c, &w, p)?.0;
-    }
-    if c.len() > 1 {
-        // c is a p-th power: c(x) = r(x^p)
-        let r: FPoly = c.iter().step_by(p as usize).copied().collect();
-        for (g, e) in sqf_mod(b, &fmonic(&r, p), p)? {
-            out.push((g, e * p as u32));
-        }
-    }
-    Ok(out)
 }
 
 /// The memory of the modular phase for a polynomial of degree n: the
@@ -620,24 +511,37 @@ pub fn factor_mod(f: &[BigInt], p: u64) -> Vec<(Vec<u64>, u32)> {
     factor_mod_with(&b, f, p).expect("no limits")
 }
 
+/// [`factor_mod`] within the caller's budget: a refusal is an error,
+/// never a partial factorization.
+pub fn try_factor_mod_with(f: &[BigInt], p: u64, b: &Budget) -> Result<Vec<(Vec<u64>, u32)>, FactorLimit> {
+    factor_mod_with(b, f, p)
+}
+
 fn factor_mod_with(b: &Budget, f: &[BigInt], p: u64) -> FResult<Vec<(Vec<u64>, u32)>> {
+    Ok(factor_mod_draws(b, f, p)?.0)
+}
+
+/// [`factor_mod_with`], and the state of its random generator after the
+/// call (the tests' check that the candidates drawn are the oracle's).
+fn factor_mod_draws(b: &Budget, f: &[BigInt], p: u64) -> FResult<(Vec<(Vec<u64>, u32)>, u64)> {
     assert!(p >= 2 && p < 1 << 32);
     let _p = b.enter(Phase::Modular);
     let _m = b.reserve(modular_bytes(f.len()))?;
     // (reducing a coefficient mod p makes a quotient of its size)
     let _t = transients(b, 2, maxbits(f))?;
     let fp = fmonic(&reduce_p(f, p), p);
+    let ar = modp::Fp::new(b, p, fp.len())?;
     let mut rng = Rng(0x2545_F491_4F6C_DD1D ^ p);
     let mut out = vec![];
-    for (g, e) in sqf_mod(b, &fp, p)? {
-        for (h, d) in ddf(b, &g, p)? {
+    for (g, e) in modp::sqf(&ar, &fp)? {
+        for (h, d) in modp::ddf(&ar, &g)? {
             let mut fs = vec![];
-            edf(b, &h, d, p, &mut rng, &mut fs)?;
-            out.extend(fs.into_iter().map(|q| (fmonic(&q, p), e)));
+            modp::edf(b, &ar, &h, d, &mut rng, &mut fs)?;
+            out.extend(fs.into_iter().map(|q| (q, e)));
         }
     }
     out.sort_by(|x, y| x.0.len().cmp(&y.0.len()).then(x.0.cmp(&y.0)));
-    Ok(out)
+    Ok((out, rng.0))
 }
 
 // ------------------------------------------------------------------ (Z/m)[x], Hensel lifting
@@ -824,7 +728,10 @@ fn modular<'b>(b: &'b Budget, f: &[BigInt]) -> FResult<Option<Modular<'b>>> {
         if fp.len() != f.len() || fgcd(b, &fp, &fderivative(&fp, p), p)?.len() > 1 {
             continue;
         }
-        let parts = ddf(b, &fmonic(&fp, p), p)?;
+        let parts = {
+            let ar = modp::Fp::new(b, p, fp.len())?;
+            modp::ddf(&ar, &fmonic(&fp, p))?
+        };
         let count: usize = parts.iter().map(|(g, d)| (g.len() - 1) / d).sum();
         // subset sums of the factor degrees
         b.debit((count as u64).checked_mul(n as u64 + 1))?;
@@ -856,9 +763,11 @@ fn modular<'b>(b: &'b Budget, f: &[BigInt]) -> FResult<Option<Modular<'b>>> {
     let (p, parts, _) = best.expect("a good prime");
     let mut rng = Rng(0x9E3779B97F4A7C15 ^ p);
     let mut modfs: Vec<FPoly> = vec![];
+    let ar = modp::Fp::new(b, p, n + 1)?;
     for (g, d) in &parts {
-        edf(b, g, *d, p, &mut rng, &mut modfs)?;
+        modp::edf(b, &ar, g, *d, &mut rng, &mut modfs)?;
     }
+    drop(ar);
     let k = mignotte_exponent(f, p);
     Ok(Some(Modular { _r: keep, p, modfs, possible, k }))
 }
