@@ -101,6 +101,13 @@ try {
   const nb1 = await evaluate(`window.__ws.read("/rv/nb.ipynb").then((x) => JSON.stringify(x.content) === window.__nb0)`);
   check(r?.ended === "error" && r.saved === "not saved: main" && r.cells?.[0]?.status === "ok" && r.cells[0].out === "2\n" && r.cells[1]?.index === 2 && r.cells[1].status === "error" && nb1 === true,
     `run_notebook on main: outputs returned, nothing saved, the notebook unchanged (its write refused: no permission): ${JSON.stringify({ r, nb1 })}`);
+  // ---- a notebook in another language: "a MATLAB notebook plotting sin(x^2)", made as workspace_create makes it (its
+  //  cells, the mode beside them), runs in MATLAB, its cell's plot counted, and it is a MATLAB notebook (its mode)
+  check(await evaluate(`window.__ws.create("/rv/sinx2.ipynb", { content: { cells: [{ id: "m1", code: "x = linspace(0, 3, 200);\\nplot(x, sin(x.^2))\\ntitle('sin(x^2)')" }] }, mode: "matlab" }).then(() => true)`) === true, "(a MATLAB notebook made)");
+  r = await evaluate(`window.__run("workspace.run_notebook", { path: "/rv/sinx2.ipynb" })`);
+  const nbm = await evaluate(`window.__ws.read("/rv/sinx2.ipynb").then((x) => x.content.mode)`);
+  check(r?.ended === "done" && r.cells?.[0]?.status === "ok" && r.cells[0].images?.count === 1 && !/rror/.test(r.cells[0].out ?? "") && nbm === "matlab",
+    `a MATLAB notebook plotting sin(x^2): run in MATLAB, its one plot counted, no error, its mode matlab: ${JSON.stringify({ r, nbm })}`);
   // ---- a worktree: this grant's branch, seen as "/" (W1)
   const gb = `${url}${gbName}`;
   r = await evaluate(`(async () => {
