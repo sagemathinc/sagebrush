@@ -11,6 +11,7 @@
 import { readdirSync, readFileSync } from "node:fs";
 import { createServer } from "node:net";
 import { join } from "node:path";
+import { deadline } from "./test-deadline.mjs";
 
 /** How much of a Chrome's stderr devtoolsPort keeps (its last bytes), and how many profile entries a timeout names. */
 export const CHROME_STDERR_TAIL = 2048, PROFILE_LIST_MAX = 12;
@@ -39,7 +40,7 @@ export async function devtoolsPort(profile, ms = 60_000, { child } = {}) {
       await Promise.race([watch.closed, new Promise((r) => setTimeout(r, 1000))]);
       throw new Error(`Chrome exited (${child.exitCode ?? child.signalCode}) before saying its DevTools port (${profile})${stderrText(watch)}`);
     }
-    if (Date.now() - t > ms) throw new Error(`Chrome did not say its DevTools port within ${ms / 1000} s (${profile}: ${listProfile(profile)})${stderrText(watch)}`);
+    if (Date.now() - t > ms) throw new Error(`devtoolsPort(Chrome DevTools port) timed out after ${(Date.now() - t) / 1000} s; Chrome did not say its DevTools port within ${ms / 1000} s (${profile}: ${listProfile(profile)})${stderrText(watch)}`);
     await new Promise((r) => setTimeout(r, 50));
   }
 }
@@ -89,12 +90,12 @@ function listProfile(profile) {
 
 /** A port free now (the system's choice), for a server that must be told one. */
 export function freePort() {
-  return new Promise((resolve, reject) => {
-    const s = createServer();
+  const s = createServer();
+  return deadline("freePort", "local TCP listener", () => new Promise((resolve, reject) => {
     s.on("error", reject);
     // (listening on a TCP host, address() is an AddressInfo, never the pipe name string)
     s.listen(0, "127.0.0.1", () => { const { port } = /** @type {import("node:net").AddressInfo} */ (s.address()); s.close(() => resolve(port)); });
-  });
+  })).finally(() => { if (s.listening) s.close(); });
 }
 
 /** How long startServe waits for the port line, and the most it reads before it. */
@@ -105,6 +106,7 @@ export const SERVE_MS = 30_000, SERVE_OUT_MAX = 4096;
  * is killed. Its listeners go once settled, and the rest
  * of its stdout is drained; stderr keeps only a 2,000-character tail (PR #103 review: LIMIT-PWA103-1/LIFE-PWA103-2). */
 export function startServe(spawnChild, ms = SERVE_MS) {
+  const started = Date.now();
   const child = spawnChild();
   let err = "";
   child.stderr?.on("data", (d) => { err = (err + d).slice(-2000); });
@@ -136,7 +138,7 @@ export function startServe(spawnChild, ms = SERVE_MS) {
     };
     const onExit = (code, signal) => fail(`serve.py exited before listening (${code ?? signal})`);
     const onError = (e) => fail(`serve.py couldn't start (${e?.code ?? e})`);
-    const timer = setTimeout(() => fail(`serve.py didn't say its port within ${ms / 1000} s`), ms);
+    const timer = setTimeout(() => fail(`startServe(serve.py port line) timed out after ${(Date.now() - started) / 1000} s; serve.py didn't say its port within ${ms / 1000} s`), ms);
     child.stdout.on("data", onData);
     child.on("exit", onExit);
     child.on("error", onError);
