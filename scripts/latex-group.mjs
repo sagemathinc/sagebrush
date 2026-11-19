@@ -57,6 +57,8 @@ export const LATEX_LAZY = {
 //  math typeset in the same step as its text, ruled Nov 13: 249,253 / 83,316 measured (bun 1.4.4, node 24.21.0), + 64)
 // (249,795 raw / 83,533 gzip: an edit written before the page is left (a notebook, a board or another page opened from
 //  it), Nov 17: 249,731 / 83,469 measured on master 9529624b with it (+478 / +153), + 64)
+// (249,907 raw / 83,533 gzip: Nov 19 2026, the agent's bar in its own row under the LaTeX page's head (latex/page.ts),
+//  never over the source or the preview; measured 249,843 / 83,532, + 64 raw; the gzip cap still holds it)
 // (250,482 raw / 83,764 gzip: a SageTeX code argument read from the file as its own source text (\sage{}, \sageplot{},
 //  \py{}, \magma{}: the engine's reader, in the worker), Nov 19, provisional until the exact-head CI packet: 250,418 /
 //  83,700 measured on the shipped build (bun 1.4.4, node 24.21.0), master 8bf4b126 with it, and the same again on
@@ -65,6 +67,8 @@ export const LATEX_LAZY = {
 //  and the agent module loaded for a tab that has one); measured 249,995 / 83,590 on master 25de21b2 with it, + 64)
 // (250,691 raw / 83,855 gzip: Nov 19 2026, the two above together, a reload of the tab keeping the agent and SageTeX's
 //  code arguments, measured on their merge (master e478921b): 250,627 / 83,791, + 64)
+// (250,539 raw / 83,797 gzip: the two above together, the agent's bar in its own row and the SageTeX code argument,
+//  measured on their merge (master 0c4267c5): 250,475 / 83,733 (bun 1.4.4, node 24.21.0), + 64)
 // (252,349 raw / 84,230 gzip: the editor's Source | Both | PDF toggle, remembered for each file (the page module's code
 //  and styles), Nov 19, provisional until the exact-head CI packet: 252,285 / 84,166 measured on the shipped build (bun
 //  1.4.4, node 24.21.0), master e478921b with it; 250,418 / 83,700 with master's web/latex/page.ts and style.ts in the
@@ -118,7 +122,12 @@ export const LATEX_LAZY_CAPS = {
   //  merge (master 25de21b2): 51,969 / 17,814, + 64)
   // (52,123 / 17,908: the reload record above with Connect's one field, measured on their merge (master 0c4267c5):
   //  52,059 / 17,844, + 64)
-  AGENT: { label: "the LaTeX agent pairing's chunk", raw: 52123, gzip: 17908 },
+  // (53,214 / 18,327: Nov 19 2026, the agent's bar docked in the page's own row for it ([data-sbag-slot]), placed again
+  //  as the page changes what it shows. Measured locally on the toolchain CI pins on master 25de21b2 with the one-link
+  //  change merged: 53,150 / 18,263, + 64)
+  // (53,304 / 18,358: Nov 19 2026, the reload record's handling with the agent's bar docked, master 4bcbb434: 53,240 /
+  //  18,294 measured, + 64)
+  AGENT: { label: "the LaTeX agent pairing's chunk", raw: 53304, gzip: 18358 },
   // (the agent tools' work: web/latex/tools.ts, latex_check's report and latex_render's pictures, on an agent's first call)
   // (16,546 / 6,950: Nov 11 2026: latex_build's own code (build.ts, the
   //  engine driven from a snapshot, and the pages' fit) here, out of the eager group, its shared rules handed in by the

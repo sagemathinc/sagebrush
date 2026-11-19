@@ -58,6 +58,8 @@ const LATEX_FIRST_USE = ["sagebrush-agent-run.js", "sagebrush-latex.js", "sagebr
 // (154,774 / 56,580: Nov 19 2026, a reload record that doesn't prove a reload of its own tab discarded, said as not a
 //  reload, and the LaTeX page loading its agent chunk when a reload record is there (latex/page.ts, agent-ui.ts):
 //  154,710 / 56,516 measured on the shipped build, master 0c4267c5 with it, + 64)
+// (154,622 raw: Nov 19 2026, the agent's bar's row under the LaTeX page's head and strip (latex/page.ts): measured 154,558
+//  with it, + 64; the gzip cap holds it: 56,458)
 // (renewed for the LaTeX editor's Source | Both | PDF toggle, Nov 19, provisional until the exact-head CI packet: 154,501 /
 //  56,425 -> 156,368 / 56,891, +1,867 / +466, the page module's (92,500 / 31,850 -> 94,367 / 32,316), measured on the
 //  shipped build, master 25de21b2; + 64)

@@ -483,7 +483,10 @@ export async function mount(root: HTMLElement, host: Host): Promise<void> {
   const barText = el("span", "tex-conflict-t");
   const useTheirs = el("button", "tex-theirs", "Use theirs (keep mine as a copy)"), keepMine = el("button", "tex-mine", "Keep mine (theirs stays in TimeTravel)");
   bar.append(barText, useTheirs, keepMine);
-  page.append(head, banner, bar, main);
+  // (the agent's bar, when one is connected: its row under the head and its strip, over the notebook page's;
+  //  workspace/agent-ui.ts)
+  const agentRow = el("div", "tex-agent"); agentRow.dataset.sbagSlot = "2";
+  page.append(head, banner, agentRow, bar, main);
   const say = (t: string) => { status.textContent = t; };
   const pref = (k: string, lo: number, hi: number, d: number) => { let v = d; try { v = Number(localStorage.getItem(k) ?? d); } catch {} return Number.isInteger(v) && v >= lo && v <= hi ? v : d; };
   const keep = (k: string, v: number) => { try { localStorage.setItem(k, String(v)); } catch {} };
