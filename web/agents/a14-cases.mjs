@@ -435,8 +435,9 @@ export async function runA14({ site, ok, want = () => true }) {
     ok(st.ariaDisabled === "true" && st.disabled === false && st.describedby === "conn-alert", "A14-2: Send is aria-disabled (never disabled) and described by the bar", st);
   });
 
-  // A14-3: the same browser: (a) a new tab has no record; (b) a copied window makes no silent attempt; (c) its
-  // [Reconnect] gets 409 (the merged copy) and the first tab stays connected
+  // A14-3: the same browser: (a) a new tab has no record; (b) a copied window makes no silent attempt; (c) the copy's
+  // record proves no reload of its own tab, so it isn't kept: it offers Connect (a new Allow), never a Reconnect with
+  // the first tab's grant (decided Nov 19 2026: fail closed), and the first tab stays connected
   await run("A14-3a", async (B, A) => {
     const P = await B.tab();
     await pair(P, A, site, "page");
@@ -468,14 +469,13 @@ export async function runA14({ site, ok, want = () => true }) {
     await Q.until(`document.querySelector('#conn-status').textContent !== ''`);
     const quiet = await A.quiet(3000), bar = await Q.bar();
     ok(pre && pre.keys === RECORD_KEYS.replace("leftAt,", "") && pre.leftAt === null && nav === "navigate", "A14-3b precondition: the opener's record is exact with no leftAt, and the copy's navigation is 'navigate'", { pre: !!pre, leftAt: pre?.leftAt, nav });
-    ok(quiet && A.hellos === h0 && A.upgrades === u0 && bar.status === COPY.kept && bar.act === "Reconnect" && (await P.connected()), "A14-3b: the copy makes no silent attempt (no upgrade, no hello); it offers [Reconnect]; the first tab stays connected", { quiet, bar });
-    const r0 = A.rejected;
+    ok(quiet && A.hellos === h0 && A.upgrades === u0 && bar.status === COPY.kept && bar.act === "Connect" && (await P.connected()), "A14-3b: the copy makes no silent attempt (no upgrade, no hello); it offers Connect, not Reconnect; the first tab stays connected", { quiet, hellos: A.hellos - h0, bar });
+    const r0 = A.rejected, h1 = A.hellos;
     await Q.ev(`document.querySelector('#conn-act').click()`);
-    await Q.until(`document.querySelector('#conn-status').textContent === ${JSON.stringify(COPY.merged)}`);
-    const bar2 = await Q.bar();
+    await Q.until(`[...document.querySelectorAll('.sbag-dlg h2')].some((h) => h.textContent === 'Connect an agent')`);
+    await sleep(500);
     const rt = await A.call("workspace.list", { folder: "/" });
-    ok(A.rejected === r0 + 1 && bar2.status === COPY.merged && bar2.alert === "", "A14-3c: the copy's [Reconnect] is refused once with 409 (counted by the stand-in) and shows the merged copy", { rejected: A.rejected - r0, bar2 });
-    ok(A.live.size === 1 && !!rt.result && (await P.connected()), "A14-3c: the first tab stays connected: a round trip on its socket after the failure", { live: A.live.size, rt: rt.result ? "answered" : rt });
+    ok(A.rejected === r0 && A.hellos === h1 && A.live.size === 1 && !!rt.result && (await P.connected()), "A14-3c: the copy's Connect opens the Connect dialog (a new code and Allow): no attempt with the first tab's grant, which stays connected", { rejected: A.rejected - r0, hellos: A.hellos - h1, live: A.live.size, rt: rt.result ? "answered" : rt });
   });
 
   // A14-4: Revoke, then reload: no bar, nothing reconnects, no record
@@ -662,7 +662,8 @@ export async function runA14({ site, ok, want = () => true }) {
     ok(quiet && A.hellos === h0 && bar.status === COPY.kept && bar.act === "Reconnect", "A14-9: no silent attempt; the not-restored bar offers [Reconnect]", { quiet, bar });
   });
 
-  // A14-11: the navigation gate alone: an exact, fresh record that isn't a reload; one click reconnects, same grant
+  // A14-11: the navigation gate alone: an exact, fresh record that isn't a reload is discarded: no attempt, and the bar
+  // offers Connect (a new Allow), never a Reconnect with the old grant (decided Nov 19 2026: fail closed)
   await run("A14-11", async (B, A) => {
     const P = await B.tab();
     await pair(P, A, site, "page");
@@ -676,12 +677,12 @@ export async function runA14({ site, ok, want = () => true }) {
     ok(seen.present && seen.keys === RECORD_KEYS && seen.now - seen.leftAt >= 0 && seen.now - seen.leftAt <= 30000 && nav === "navigate" && seen.page === new URL(site).origin + "/agents/", "A14-11 precondition: the record present, exact, fresh (leftAt within 30 s), the same scope; the navigation is 'navigate' (only R1-a stands)", { keys: seen.keys, age: seen.now - seen.leftAt, nav });
     await P.until(`document.querySelector('#conn-status').textContent !== ''`);
     const quiet = await A.quiet(3000), bar = await P.bar();
-    ok(quiet && A.hellos === h0 && bar.status === COPY.kept && bar.act === "Reconnect", "A14-11: no silent attempt; the not-restored bar offers [Reconnect]", { quiet, bar });
+    ok(quiet && A.hellos === h0 && bar.status === COPY.kept && bar.act === "Connect", "A14-11: no silent attempt; the not-restored bar offers Connect, not Reconnect", { quiet, bar });
     const n11 = A.grants().length;
     await P.ev(`document.querySelector('#conn-act').click()`);
-    await P.until(`document.querySelector('#connect').textContent === 'Connected'`);
-    const g2 = await A.newGrant(n11);
-    ok(g2 !== null && canon(g1) === canon(g2) && A.hellos === h0 + 1, "A14-11: one click reconnects with the same grant", { g1, g2 });
+    await P.until(`[...document.querySelectorAll('.sbag-dlg h2')].some((h) => h.textContent === 'Connect an agent')`);
+    await sleep(500);
+    ok(A.hellos === h0 && A.grants().length === n11 && !(await P.connected()), "A14-11: its Connect opens the Connect dialog: no hello and no grant from the old record", { hellos: A.hellos - h0, grants: A.grants().length - n11 });
   });
 
   // A14-12: the no-demo marker: a failed restore, then a second reload: Send inert with the hint; nothing reaches the demo
