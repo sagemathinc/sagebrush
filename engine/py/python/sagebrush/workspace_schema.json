@@ -149,7 +149,7 @@
       }
     },
     "workspace.create": {
-      "description": "A new notebook (.ipynb), board (.board.json) or data file, its kind from its name; a taken path is refused.",
+      "description": "A new notebook (.ipynb), board (.board.json) or data file, its kind from its name; a taken path is refused. A notebook runs its cells in its language, mode: Python, Sage, MATLAB or Magma.",
       "params": {
         "$schema": "https://json-schema.org/draft/2020-12/schema",
         "type": "object",
@@ -209,7 +209,8 @@
               "sage",
               "magma",
               "matlab"
-            ]
+            ],
+            "description": "The notebook's or board's language (python if left out): python, print(2**10); sage, factor(2^64 - 1); matlab, x = linspace(0, 3, 200); plot(x, sin(x.^2)); magma, print Factorization(2^64 - 1);. Jupyter content whose metadata.kernelspec names one of them sets it too."
           }
         },
         "required": [
@@ -502,7 +503,7 @@
       }
     },
     "workspace.run_file": {
-      "description": "Run a .py or .sage file in Sagebrush's sandbox, which can't reach the network (beyond loading its own packages), and get its output and exit status. Its code may change files only where you may write: in your own branch, the branch; a person's file, nothing. Needs \"May run code\"; one run at a time in a page.",
+      "description": "Run a .py or .sage file (MATLAB or Magma code: put it in a notebook of that mode, workspace_create with mode, and run_notebook) in Sagebrush's sandbox, which can't reach the network (beyond loading its own packages), and get its output and exit status. Its code may change files only where you may write: in your own branch, the branch; a person's file, nothing. Needs \"May run code\"; one run at a time in a page.",
       "params": {
         "$schema": "https://json-schema.org/draft/2020-12/schema",
         "type": "object",

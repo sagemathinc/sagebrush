@@ -89,7 +89,7 @@ It works: it's a separate program and never uses your Claude Code session, sandb
 
 Needs PyPI `sagebrush-mcp` 0.10.1, [uv](https://docs.astral.sh/uv/), and an agent that loads MCP servers.
 
-An MCP server your agent starts: Sage and Python tools, and, when you pair a Sagebrush page with it, your Sagebrush workspace files.
+An MCP server your agent starts: Sage and Python tools, and, when you pair a Sagebrush page with it, your Sagebrush workspace files, including notebooks in Python, Sage, MATLAB or Magma that it writes and runs.
 
 ### Commands
 
