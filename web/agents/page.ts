@@ -512,18 +512,22 @@ function mountHost(threadId: string, a: Artifact, h: Host) {
     const ws = workspace, path = a.path, name = path.split("/").pop()!;
     h.el.innerHTML = `<div class="board-made"><span class="who">${esc(agentName())} made <b>${esc(name)}</b></span><a class="open-board" target="_blank" rel="noopener" aria-disabled="true">Open</a><button class="view-source" type="button">View source</button></div><pre class="code board-source" hidden></pre>`;
     const open = $<HTMLAnchorElement>(".open-board", h.el), view = $<HTMLButtonElement>(".view-source", h.el), src = $(".board-source", h.el);
-    // (its address is its id, read from the workspace: a board that isn't there (removed since) says so, with no Open)
+    // (its address is its id, read from the workspace: a board it can't find there (removed, or not a board now, or the
+    //  lookup failed) says so, with no Open)
     void ws.stat(path).catch(() => undefined).then((e) => {
       if (e?.kind === "board" && e.ref) {
         open.href = "/board/?doc=local:" + encodeURIComponent(e.ref);
         open.removeAttribute("aria-disabled");
-      } else open.replaceWith(Object.assign(document.createElement("span"), { className: "gone", textContent: "It isn't in your files any more." }));
+      } else open.replaceWith(Object.assign(document.createElement("span"), { className: "gone", textContent: "Couldn't find this board in your files." }));
     });
     view.onclick = () => {
       if (!src.hidden) { src.hidden = true; view.textContent = "View source"; return; }
       void ws.read(path).then((r) => { src.textContent = JSON.stringify(r.content, null, 2); src.hidden = false; view.textContent = "Hide source"; }, (e) => toast(`Couldn't read ${name}: ${String(e?.message ?? e)}`, 6000));
     };
-    h.copy = () => src.textContent ?? "";
+    // (Copy: the board's JSON, read now, as View source shows it; what View source shows if that read failed)
+    let json: string | null = null;
+    void ws.read(path).then((r) => { json = JSON.stringify(r.content, null, 2); }, () => {});
+    h.copy = () => json ?? src.textContent ?? "";
     keepFocus();
     return;
   }

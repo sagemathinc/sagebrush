@@ -1263,6 +1263,10 @@ try {
     ok(await until(`/^\\/board\\/\\?doc=local:[0-9a-f]+$/.test(document.querySelector('${card} .open-board')?.getAttribute('href') ?? '')`, 10000), "…its Open is a link to the board page, by the board's id", await ev(`document.querySelector('${card} .open-board')?.getAttribute('href') ?? null`));
     ok(await ev(`(() => { const a = document.querySelector('${card} .open-board'); return a.tagName === 'A' && a.target === '_blank' && a.rel === 'noopener' && !a.hasAttribute('aria-disabled'); })()`), "…in a tab of its own (a link: the person's click opens it)");
     ok(await ev(`!document.querySelector('${PANE} .nb-root') && !document.querySelector('${PANE} .file-body') && document.querySelector('${PANE} .board-source').hidden`), "…not the board's JSON, which is behind View source");
+    // (the pane's Copy, before View source was ever pressed: the board's JSON, not an empty text)
+    await ev(`(() => { window.__bclip = []; navigator.clipboard.writeText = (t) => (window.__bclip.push(t), Promise.resolve()); return true; })()`);
+    await ev(`document.querySelector('.pane-head #copy').click()`);
+    ok(await until(`window.__bclip.length === 1 && /print\\(6 \\* 7\\)/.test(window.__bclip[0])`, 10000), "…its Copy, before View source, copies the board's JSON", await ev(`window.__bclip`));
     await ev(`document.querySelector('${card} .view-source').click()`);
     ok(await until(`!document.querySelector('${PANE} .board-source').hidden && /print\\(6 \\* 7\\)/.test(document.querySelector('${PANE} .board-source').textContent) && document.querySelector('${card} .view-source').textContent === 'Hide source'`, 5000), "View source shows its JSON, as the workspace has it");
     await ev(`document.querySelector('${card} .view-source').click()`);
@@ -1292,7 +1296,7 @@ try {
     event(gt, { type: "turn_started" });
     event(gt, { type: "artifact", id: "/notes/gone.board.json", kind: "board", title: "gone.board.json", path: "/notes/gone.board.json", body: "" });
     event(gt, { type: "turn_finished", outcome: "completed" });
-    ok(await until(`/made gone\\.board\\.json/.test(document.querySelector('${card} .who')?.textContent ?? '') && /It isn't in your files any more\\./.test(document.querySelector('${card}').textContent) && !document.querySelector('${card} .open-board')`, 15000), "a board removed since: said, with no Open", await ev(`document.querySelector('${card}')?.textContent ?? null`));
+    ok(await until(`/made gone\\.board\\.json/.test(document.querySelector('${card} .who')?.textContent ?? '') && /Couldn't find this board in your files\\./.test(document.querySelector('${card}').textContent) && !document.querySelector('${card} .open-board')`, 15000), "a board removed since: said, with no Open", await ev(`document.querySelector('${card}')?.textContent ?? null`));
   }
 
   if (want("bars")) {
