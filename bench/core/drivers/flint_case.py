@@ -41,6 +41,51 @@ def flatten(A):
     return [x for row in A.tolist() for x in row]
 
 
+# The rank rows beyond the square ones (expected_inputs.py's formulas, which
+# also certify the ranks): wide R(n x 2n); def R(n x n//2) R(n//2 x n); def_p
+# R(n x n) diag(1, ..., 1, p) R(n x n), p = 2^62 - 57.  Over Q, row i is
+# divided by 1 + i mod 7.
+RANK_P = (1 << 62) - 57
+RANK_RANGE = {"z": (1000003, 500001), "q": (101, 50)}
+
+
+def rank_rnd(rows, cols, s, kind):
+    m, off = RANK_RANGE[kind]
+    return [
+        [pow(131 * i + 31 * j + s, 5, m) - off for j in range(cols)]
+        for i in range(rows)
+    ]
+
+
+def rank_factors(shape, kind, size, v):
+    """(B, C), integer rows, with the row's matrix the product B C."""
+    s1, s2 = 10 * v + 1, 10 * v + 2
+    if shape == "wide":
+        return rank_rnd(size, 2 * size, s1, kind), None
+    if shape == "def":
+        r = size // 2
+        return rank_rnd(size, r, s1, kind), rank_rnd(r, size, s2, kind)
+    c = rank_rnd(size, size, s2, kind)
+    c[-1] = [RANK_P * x for x in c[-1]]
+    return rank_rnd(size, size, s1, kind), c
+
+
+def rank_input(case, size, v):
+    """A wide, def or def_p rank row's matrix (fmpz_mat, or fmpq_mat with
+    row i over 1 + i mod 7)."""
+    kind, shape = case.split("_")[1], case.split("_rank_")[1]
+    b, c = rank_factors(shape, kind, size, v)
+    A = flint.fmpz_mat(b) if c is None else flint.fmpz_mat(b) * flint.fmpz_mat(c)
+    if kind == "z":
+        return A
+    return flint.fmpq_mat(
+        [
+            [flint.fmpq(int(x), 1 + i % 7) for x in row]
+            for i, row in enumerate(A.tolist())
+        ]
+    )
+
+
 def zpoly(size, salt):
     return [((i * i * salt + 3 * i + 1) % 1000003) - 500001 for i in range(size)]
 
@@ -130,6 +175,10 @@ def prepare(v):
         f = flint.nmod_poly([-1] + [0] * (n - 1) + [1], P)
         operands([int(c) for c in f])
         return lambda: f.factor()
+    if case_id.startswith("mat_") and "_rank_" in case_id:
+        A = rank_input(case_id, n, v)
+        operands(flatten(A))
+        return lambda: A.rank()
     if case_id.startswith("mat_"):
         kind = (
             "z"
@@ -182,7 +231,7 @@ def signature(answer):
         cs = list(answer)
         return "%d:%d" % (len(cs) - 1, seq_hash(cs))
     if case_id.startswith("mat_"):
-        op = case_id.rsplit("_", 1)[1]
+        op = "rank" if "_rank_" in case_id else case_id.rsplit("_", 1)[1]
         if op in ("det", "rank"):
             return str(answer)
         if op == "charpoly":

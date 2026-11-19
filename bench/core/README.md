@@ -34,6 +34,9 @@ Every driver is invoked as `DRIVER ROW N MODE K` and prints one line (`drivers/c
 $K$ is the number of input variants. No point is timed on one input repeated, which can flatter a path by $3\times$ (warm caches, branch history, one lucky shape):
 - Each variant has the same shape and size, from its own seed: salts $+6v$, matrix nodes $+v$, the factor product's constant terms $+v$, and the big integers $+v \cdot 1000003$ and $+v \cdot 998244353$.
 - Variant 0 is the row's reference input, the old scoreboard's.
+- The rank rows beyond the square ones are built from random dense factors, with every rank proved: `mat_{z,q}_rank_wide` ($n \times 2n$, rank $n$), `mat_{z,q}_rank_def` ($n \times n$, rank $n/2$, a product through an inner dimension of $n/2$) and `mat_{z,q}_rank_def_p` ($n \times n$, full rank over $\mathbb{Q}$ but rank $n - 1$ modulo the engine's word prime $2^{62} - 57$, which exercises the certified rank's fallback).
+  - The upper bound comes from the construction. The lower bound comes from the rank modulo an auxiliary prime, $2^{31} - 1$, which `expected_inputs.py` checks for every variant. A seed whose certificate fails is refused.
+  - Their input hashes stay in `expected_inputs_golden.json`'s `pending` section until a VM run where every backend agrees on them.
 - $K = 8$ by default (`run.py`'s `DEFAULT_VARIANTS`).
 - A row with one named input ($x^n - 1$, Cyclic-$n$, a fixed discriminant, level or curve) has `"variants": 1` in `items.json`, with its reason. So does a size whose single operation takes minutes.
 

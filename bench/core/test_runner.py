@@ -733,7 +733,7 @@ class Files(unittest.TestCase):
         for r in m["rows"]:
             self.assertIn(r["item"], ids)
             self.assertEqual(sorted(r["sizes"]), ["l", "m", "s"])
-        self.assertEqual(len(m["rows"]), 29)
+        self.assertEqual(len(m["rows"]), 35)
 
 
 if __name__ == "__main__":

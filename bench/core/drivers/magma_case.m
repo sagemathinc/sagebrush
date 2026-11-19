@@ -52,6 +52,36 @@ function QMat(k, v)
         [ Rationals()!(PowMod(i+1+v,j+2,101)-50) / (1 + ((i-1)*(j-1) mod 7)) : i,j in [1..k] ]);
 end function;
 
+// The rank rows beyond the square ones (expected_inputs.py's formulas, which
+// also certify the ranks): wide R(n x 2n); def R(n x n div 2) R(n div 2 x n);
+// def_p R(n x n) diag(1, ..., 1, p) R(n x n), p = 2^62 - 57.  Over Q, row i
+// (from 0) is divided by 1 + i mod 7.  Entries row-major: a Magma sequence
+// constructor varies its FIRST variable fastest, so j comes first.
+function RankRnd(rows, cols, s, kind)
+    m := kind eq "z" select 1000003 else 101;
+    off := kind eq "z" select 500001 else 50;
+    return Matrix(Integers(), rows, cols,
+        [ PowMod(131*i + 31*j + s, 5, m) - off : j in [0..cols-1], i in [0..rows-1] ]);
+end function;
+
+function RankMat(case_id, n, v)
+    kind := case_id[5];
+    s1 := 10*v + 1; s2 := 10*v + 2;
+    if case_id in {"mat_z_rank_wide","mat_q_rank_wide"} then
+        A := RankRnd(n, 2*n, s1, kind);
+    elif case_id in {"mat_z_rank_def","mat_q_rank_def"} then
+        r := n div 2;
+        A := RankRnd(n, r, s1, kind) * RankRnd(r, n, s2, kind);
+    else
+        C := RankRnd(n, n, s2, kind);
+        MultiplyRow(~C, 2^62 - 57, n);
+        A := RankRnd(n, n, s1, kind) * C;
+    end if;
+    if kind eq "z" then return A; end if;
+    return Matrix(Rationals(), Nrows(A), Ncols(A),
+        [ A[i,j] / (1 + ((i-1) mod 7)) : j in [1..Ncols(A)], i in [1..Nrows(A)] ]);
+end function;
+
 function ZPoly(k, salt, R)
     return R![ ((i*i*salt + 3*i + 1) mod 1000003)-500001 : i in [0..k-1] ];
 end function;
@@ -132,6 +162,8 @@ function Build(case_id, n, v)
         if case_id eq "mat_fp_solve" then w:=Vector(BaseRing(A),[i:i in [1..n]]); ops := ops cat Eltseq(w); end if;
     elif case_id in {"mat_q_det","mat_q_rank","mat_q_solve","mat_q_charpoly"} then
         A:=QMat(n,v); ops := Eltseq(A);
+    elif case_id in {"mat_z_rank_wide","mat_z_rank_def","mat_z_rank_def_p","mat_q_rank_wide","mat_q_rank_def","mat_q_rank_def_p"} then
+        A:=RankMat(case_id,n,v); ops := Eltseq(A);
         if case_id eq "mat_q_solve" then w:=Vector(Rationals(),[i:i in [1..n]]); ops := ops cat Eltseq(w); end if;
     elif case_id in {"groebner_cyclic","groebner_katsura"} then
         I := case_id eq "groebner_cyclic" select CyclicIdeal(n) else KatsuraIdeal(n);
@@ -159,7 +191,7 @@ function DoOp(case_id, S)
     elif case_id in {"poly_z_gcd","poly_fp_gcd"} then return GCD(pa,pb);
     elif case_id in {"poly_z_factor","poly_z_factor_product","poly_fp_factor"} then return Factorization(pf);
     elif case_id in {"mat_z_det","mat_fp_det","mat_q_det"} then return Determinant(A);
-    elif case_id in {"mat_z_rank","mat_fp_rank","mat_q_rank"} then return Rank(A);
+    elif case_id in {"mat_z_rank","mat_fp_rank","mat_q_rank","mat_z_rank_wide","mat_z_rank_def","mat_z_rank_def_p","mat_q_rank_wide","mat_q_rank_def","mat_q_rank_def_p"} then return Rank(A);
     elif case_id eq "mat_z_hnf" then return HermiteForm(A);
     elif case_id eq "mat_z_smith" then return SmithForm(A);
     elif case_id in {"mat_z_charpoly","mat_fp_charpoly","mat_q_charpoly"} then return CharacteristicPolynomial(A);
@@ -183,7 +215,7 @@ function Sig(case_id, n, answer)
         items := [<Degree(z[1]),z[2],SeqHash(Coefficients(z[1]))>:z in answer]; Sort(~items);
         flat := &cat [[z[1],z[2],z[3]]:z in items];
         return IntegerToString(#items) cat ":" cat IntegerToString(SeqHash(flat));
-    elif case_id in {"mat_z_det","mat_z_rank","mat_fp_det","mat_fp_rank","mat_q_det","mat_q_rank"} then
+    elif case_id in {"mat_z_det","mat_z_rank","mat_fp_det","mat_fp_rank","mat_q_det","mat_q_rank","mat_z_rank_wide","mat_z_rank_def","mat_z_rank_def_p","mat_q_rank_wide","mat_q_rank_def","mat_q_rank_def_p"} then
         return Sprint(answer);
     elif case_id in {"mat_z_charpoly","mat_fp_charpoly","mat_q_charpoly"} then
         return IntegerToString(Degree(answer)) cat ":" cat IntegerToString(SeqHash(Coefficients(answer)));
