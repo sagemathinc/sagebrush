@@ -373,24 +373,5 @@ fn qpoly_mul(req: &str, op: &SeriesOp) -> Result<String, String> {
     let (a, b) = (need(get_str(a, "a", name)?, "a", name)?, need(get_str(b, "b", name)?, "b", name)?);
     let pre = |e: String| format!("{}: {}", name, e);
     let (ca, cb) = (qpoly::scan(a).map_err(pre)?, qpoly::scan(b).map_err(pre)?);
-    let r = req.len() as u64;
-    // (an empty or all-zero factor: the zero polynomial, before any length
-    // arithmetic)
-    let Some(plan_a) = qpoly::admit_a(&ca, &cb, r, &qpoly::CAPS).map_err(pre)? else {
-        return Ok("{\"ok\":\"\"}".to_string());
-    };
-    let lcms = qpoly::lcms(&ca, &cb, &plan_a).map_err(pre)?;
-    let plan = qpoly::admit_b(&ca, &cb, &lcms, &plan_a, r, &qpoly::CAPS).map_err(pre)?;
-    let product = qpoly::product(&ca, &cb, lcms, &plan).map_err(pre)?;
-    // (the reply reserved at its exact bound only after the product: the
-    // transforms and the reply are never live together)
-    sagebrush_interrupt::check_coarse();
-    let mut out = String::with_capacity(plan.reply as usize);
-    out.push_str("{\"ok\":\"");
-    qpoly::emit(product, &plan, &mut out).map_err(pre)?;
-    out.push_str("\"}");
-    if out.len() as u64 > plan.reply {
-        return Err(format!("{}: {}: the reply passed its bound", name, zseries::INTERNAL_PREFIX));
-    }
-    Ok(out)
+    qpoly::reply(&ca, &cb, req.len() as u64, &qpoly::CAPS).map_err(pre)
 }

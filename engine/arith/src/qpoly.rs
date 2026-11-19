@@ -692,5 +692,28 @@ pub fn emit(p: Scaled, plan: &PlanB, out: &mut String) -> Result<u64, String> {
     Ok(meter.used())
 }
 
+/// The whole call on scanned factors: `{"ok":"..."}`, reserved at its exact
+/// bound only after the product (the transforms and the reply are never
+/// live together), or the refusal.  `r` is the request's bytes.
+pub fn reply(a: &Factor, b: &Factor, r: u64, caps: &Caps) -> Result<String, String> {
+    // (an empty or all-zero factor: the zero polynomial, before any length
+    // arithmetic)
+    let Some(plan_a) = admit_a(a, b, r, caps)? else {
+        return Ok("{\"ok\":\"\"}".to_string());
+    };
+    let l = lcms(a, b, &plan_a)?;
+    let plan = admit_b(a, b, &l, &plan_a, r, caps)?;
+    let p = product(a, b, l, &plan)?;
+    sagebrush_interrupt::check_coarse();
+    let mut out = String::with_capacity(plan.reply as usize);
+    out.push_str("{\"ok\":\"");
+    emit(p, &plan, &mut out)?;
+    out.push_str("\"}");
+    if out.len() as u64 > plan.reply {
+        return Err(format!("{}: the reply passed its bound", INTERNAL_PREFIX));
+    }
+    Ok(out)
+}
+
 #[cfg(test)]
 mod tests;

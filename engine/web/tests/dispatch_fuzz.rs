@@ -54,6 +54,7 @@ fn requests() -> Vec<Value> {
         json!({"fn": "mat_kernel", "m": [[1, 2], [2, 4]]}),
         json!({"fn": "mat_mul", "a": [[1, 2], [3, 4]], "b": [[1], [2]]}),
         json!({"fn": "poly_mul", "a": "1,1", "b": "1,-1"}),
+        json!({"fn": "qpoly_mul", "a": "1/2,1", "b": "-1/3,1"}),
         json!({"fn": "poly_gcd", "a": [1, 1], "b": [1, -1]}),
         json!({"fn": "poly_divexact", "a": [-1, 0, 1], "b": [1, 1]}),
         json!({"fn": "newspace", "n": 11, "k": 2}),

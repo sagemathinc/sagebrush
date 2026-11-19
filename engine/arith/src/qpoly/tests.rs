@@ -347,3 +347,79 @@ fn probe_admitted_maxima() {
         eprintln!("{:>40}: n = {} ({} terms), work {}, peak {}; at n + 1: {}", tok, lo, 2 * lo - 1, p.work, p.peak, admitted(lo + 1, tok).err().unwrap_or_default());
     }
 }
+
+/// Many coprime denominators: phase A's meter passes its limit and the
+/// refusal names it; the count at the refusal is at most max_charge(Lambda)
+/// past the limit (the meter checks after every charge).
+#[test]
+fn coprime_denominators_are_refused_by_the_meter() {
+    let a: String = (0..12_000u64).map(|i| format!("1/{:x}", (1u64 << 62) + 2 * i + 1)).collect::<Vec<_>>().join(",");
+    let (fa, fb) = (scan(&a).unwrap(), scan("1/3").unwrap());
+    let r = (a.len() + 30) as u64;
+    let pa = admit_a(&fa, &fb, r, &CAPS).unwrap().unwrap();
+    assert_eq!(pa.limit, zmul::WORK_MAX - r);
+    let mut m = Meter::new(pa.limit);
+    assert_eq!(lcms_metered(&fa, &fb, &pa, &mut m).err(), Some(Fault::Overrun));
+    let over = m.used() - pa.limit;
+    assert!(m.used() > pa.limit && over <= max_charge(pa.lam).unwrap(), "overshoot {} > max_charge({})", over, pa.lam);
+    let e = lcms(&fa, &fb, &pa).err().unwrap();
+    assert!(e.contains("the denominators' lcm needs more than") && e.contains(&pa.limit.to_string()), "{}", e);
+    // (a request of more bytes than the work: refused before the meter)
+    let tiny = Caps { int: zmul::Caps { work: r - 1, ..zmul::CAPS }, ..CAPS };
+    assert!(admit_a(&fa, &fb, r, &tiny).err().unwrap().contains("leave no work"));
+}
+
+/// The general path's exact counts for the common shapes: one gcd,
+/// quotient and product per denominator, 1 included.
+#[test]
+fn counts_of_the_general_path() {
+    let halves = vec!["1/2"; 100].join(",");
+    let ints = vec!["5"; 100].join(",");
+    let h = check(&halves, &halves);
+    let i = check(&ints, &ints);
+    let (hp, ip) = (h.plan.unwrap(), i.plan.unwrap());
+    eprintln!("all halves 100 x 100: phase A {}, total {}, admitted {}", h.used_a, h.total, hp.work);
+    eprintln!("integers 100 x 100: phase A {}, total {}, admitted {}", i.used_a, i.total, ip.work);
+    assert_eq!((h.used_a, h.total, hp.work), (HALVES_COUNTS.0, HALVES_COUNTS.1, HALVES_COUNTS.2));
+    assert_eq!((i.used_a, i.total, ip.work), (INTS_COUNTS.0, INTS_COUNTS.1, INTS_COUNTS.2));
+}
+
+// (phase A: 131 units per token, the same for d = 1 and d = 2; the totals
+// include the test's R)
+const HALVES_COUNTS: (u64, u64, u64) = (26200, 67314, 88282);
+const INTS_COUNTS: (u64, u64, u64) = (26200, 66692, 87654);
+
+/// Phase B sees the true lcm: 4096 x 4096 halves would be refused by the
+/// output's bits with S_d (8192 bits per factor) in the slot, and are
+/// admitted with bits(L) = 2; big numerators are refused by phase B's O,
+/// naming it.
+#[test]
+fn phase_b_admits_on_the_actual_lcm_and_refuses_by_name() {
+    let halves = vec!["-3/2"; 4096].join(",");
+    let r = check(&halves, &halves);
+    assert!(r.plan.unwrap().slot < 40);
+    let fa = scan(&halves).unwrap();
+    assert!(8191 * (2 * fa.sd + 16) > zmul::O_MAX);
+    let big = vec![format!("{}/2", "f".repeat(2000)); 4096].join(",");
+    let e = run(&big, &big, &CAPS).err().unwrap();
+    assert!(e.contains("the product's bits (l_a + l_b - 1) s"), "{}", e);
+}
+
+/// The reply's exact bound: admitted with a reply cap at exactly the bound,
+/// refused at one byte less (at phase B's admission, before the reply or
+/// any of phase B's allocations); every token of these factors reaches
+/// close to its digit bounds and the emitted reply is within it.
+#[test]
+fn the_reply_bound_is_exact() {
+    let n = format!("-{}", "f".repeat(40));
+    let a = (0..30).map(|i| format!("{}/{:x}", n, (1u64 << 63) + 2 * i + 1)).collect::<Vec<_>>().join(",");
+    let b = (0..20).map(|i| format!("{}/{:x}", n, (1u64 << 62) + 6 * i + 5)).collect::<Vec<_>>().join(",");
+    let r = check(&a, &b);
+    let reply = r.plan.unwrap().reply;
+    let at = Caps { reply, ..CAPS };
+    let ok = run(&a, &b, &at).unwrap();
+    assert!(ok.out.len() as u64 + 9 <= reply);
+    let less = Caps { reply: reply - 1, ..CAPS };
+    let e = run(&a, &b, &less).err().unwrap();
+    assert!(e.contains("the reply's bytes") && e.contains(&reply.to_string()), "{}", e);
+}
