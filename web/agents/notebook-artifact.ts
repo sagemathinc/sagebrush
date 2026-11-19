@@ -49,6 +49,10 @@ export type NotebookHost = {
   edit(e: NotebookEdit, may: () => boolean, hold?: () => Promise<() => void>): Promise<EditResult>;
   hidden(on: boolean): void;
   interrupt(): void;
+  /** A notebook the agent created, run once by itself (workspace/agent-made.ts), admitted in one turn: its Run all, as
+   * the person's Run here, if this pane is bound to `ref` and may run it now (attached, saving here, not closing; under
+   * sync's journal, the writer) and `ok` holds for what it shows. True if it ran. */
+  runCreated(ref: string, ok: (doc: any) => boolean): boolean;
   copyText(): string;
 };
 
@@ -245,6 +249,14 @@ export function mountNotebook(ws: Workspace, path: string, box: HTMLElement, ui:
       else nb?.resize();
     },
     interrupt: () => nb?.interrupt(),
+    runCreated(ref, ok) {
+      const comp = nb;
+      if (!alive || !comp || !attached || !bound || frozen || guard !== "open" || docRef !== ref || takingOver) return false;
+      if (jstore && !(jstore.writer && jstore.ready && comp.store === jstore)) return false;
+      if (!ok(comp.snapshot())) return false;
+      comp.runAll();
+      return true;
+    },
     async edit(e, may, hold) {
       // (the agent's authority: the same grant, in force, and the turn the edit came from still the chat's running
       // one; checked once, after the last wait and right before the change, so a loss at any wait reaches it; C1)

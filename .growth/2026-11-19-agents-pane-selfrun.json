@@ -1,0 +1,7 @@
+{
+  "v": 1,
+  "reason": "A notebook the agent creates runs once by itself in the Agents page's pane, under the notebook page's rule: the decision moved from web/index.html's agentMade into workspace/agent-made.ts, which the notebook page now imports; the page is carried into cli/pyjs.cjs. Measured with the shared size-record.sh (bun 1.4.4, node 24.21.0) on the branch's base 0ef3ba03 and a two-parent merge probe of its head: cli/pyjs.cjs +356, + 64.",
+  "bytes": {
+    "cli/pyjs.cjs": 420
+  }
+}

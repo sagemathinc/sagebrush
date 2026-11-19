@@ -16,9 +16,10 @@ import { runningTurn, type Artifact, type Thread, type Turn, type UserEntry } fr
 import { ChatSession } from "../workspace/agent-chat/session";
 import { userNode as viewUserNode, turnNode as viewTurnNode, artifactIcon, diffHtml } from "../workspace/agent-chat/view";
 import { startFakeTurn } from "./fake-agent";
-import { AgentError, RELOAD_KEY, type AgentPairing, type Kept } from "../workspace/agent-pair";
+import { AgentError, RELOAD_KEY, type AgentPairing, type Created, type Kept } from "../workspace/agent-pair";
 import type { NotebookEdit } from "../workspace/notebook-edit";
 import { mountAgentPairing, type RestoreState } from "../workspace/agent-ui";
+import { createdRunner } from "../workspace/agent-made";
 import * as gitBranches from "../workspace/git-branch";
 import { openReviewDialog, showWhenBranches } from "../workspace/review/open-dialog";
 import { Workspace } from "../workspace/api";
@@ -1152,11 +1153,52 @@ const chatHereSection = chatHere({
   onFailed(r, e) { connectingTo = null; waitingFor = false; setConn(runnerBar(r.name, e)); renderHeader(); },
 }, () => agentUi);
 
+// A notebook the agent created (the pairing's onCreated): taken at once, as it is created, into the pane of the chat
+// whose turn made it (its artifact), then run there once by itself under the notebook page's rule
+// (workspace/agent-made.ts): the pairing that created it, its grant still in force with May run code and Everything,
+// still as created, and shown when the run is admitted. The turn may end meanwhile (a create as an agent's last step):
+// what is asked of it is only that it made the notebook, at creation.
+type MadeAt = { thread: string } | null;
+// (the person in another artifact: the one shown is the one they last used in the pane (focused, pointed at, typed in);
+//  an artifact of the agent's own left shown, untouched, is no reason to keep the pane there)
+let personIn: string | null = null;
+for (const t of ["focusin", "pointerdown", "keydown", "input"]) $("#artifacts").addEventListener(t, () => { personIn = openArtifact; }, true);
+const paneShowsOther = (path: string) => document.body.classList.contains("has-artifact") && openArtifact !== null && openArtifact !== path
+  && (personIn === openArtifact || (!!document.activeElement && $("#artifacts").contains(document.activeElement)));
+function madeAt(c: Created, p: { mayRunCreated(c: Created): boolean }): MadeAt {
+  // (only a notebook that may run by itself is taken into the pane here; any other is the agent's own to show)
+  if (!p.mayRunCreated(c)) return null;
+  const thread = current();
+  const turn = runningTurn(thread);
+  // (a chat that isn't the one shown, or no turn running: no pane to open it in, so it isn't run; the person in another
+  //  artifact: the pane stays there (board's BA12-1), so it isn't shown, nor run)
+  if (!turn || !workspace || paneShowsOther(c.path)) return null;
+  if (!thread.artifacts.some((a) => a.id === c.path && a.kind === "notebook")) session.emit(thread, turn.turn_id, { type: "artifact", id: c.path, kind: "notebook", title: c.path.split("/").pop()!, path: c.path, body: "notebook" });
+  // (shown now, at its creation, as the agent's own artifact shows it; nothing later switches the pane to it)
+  openArtifact = c.path;
+  renderArtifacts();
+  return { thread: thread.id };
+}
+const agentMade = createdRunner<MadeAt>({
+  read: (path) => (workspace ? workspace.read(path) : Promise.resolve(null)),
+  async open(c, at) {
+    // (still the chat it was made in, and still the artifact shown: the pane moved since (the person, or the agent's next
+    //  artifact) is never moved back)
+    if (!at || current().id !== at.thread || openArtifact !== c.path) return false;
+    const h = hosts.get(hostKey(at.thread, c.path));
+    if (!h?.nb) return false;
+    await h.nb.ready;
+    return true;
+  },
+  runIfShown: (ref, ok) => !!shownHost()?.nb?.runCreated(ref, ok),
+});
+
 function mountPairing(ws: Workspace) {
   agentUi = mountAgentPairing(ws, {
     program: "sagebrush-agent",
     button: $("#connect"),
     notebookEdit: editNotebook,
+    onCreated: (c, p) => { if (c.kind === "notebook" && c.ref) void agentMade(c, p, madeAt(c, p)); },
     // (an agent's own branch, chat plan PR 3: offered here, where agents work)
     branches: gitBranches,
     reload: {
