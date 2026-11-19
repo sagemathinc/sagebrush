@@ -1,6 +1,6 @@
 {
   "v": 1,
-  "reason": "Under notebook sync, the agents chat's notebook pane answers an agent's whole write of the notebook it writes (its focus takeover given the shown document and the replacement, as the notebook page's is), and the takeover answers such a write \"lost\" while the page can't save the document: web/page/handover.ts, which the CLI's bundle carries with the notebook page. cli/pyjs.cjs grows +116 bytes, exact, measured with pinned node 24.21.0 and bun 1.4.4 on tested base 32b08bda (to be bound to CI's governed measurement if it differs); the bound adds 64 bytes of slack.",
+  "reason": "Under notebook sync, the agents chat's notebook pane answers an agent's whole write of the notebook it writes (its focus takeover given the shown document and the replacement, as the notebook page's is), and the takeover answers such a write \"lost\" while the page can't save the document (web/agents/notebook-artifact.ts, web/page/handover.ts: in web bundles the CLI's bundle carries). cli/pyjs.cjs grows +116 bytes, exact, measured with pinned node 24.21.0 and bun 1.4.4 on tested base 32b08bda (to be bound to CI's governed measurement if it differs); the bound adds 64 bytes of slack.",
   "bytes": {
     "cli/pyjs.cjs": 180
   }
