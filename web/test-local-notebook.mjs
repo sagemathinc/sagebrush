@@ -247,6 +247,15 @@ ok(r.second[0] === "c 30" && /NameError: name 'z' is not defined/.test(r.second[
   ok((await hostIs(`127.0.0.1:${aport}`)) === 403 && (await hostIs("127.0.0.1")) === 403 && (await hostIs(`localhost:${port}`)) === 302, "...and the Host must be its own host and port (fetch() can't send another)");
 }
 
+// (the server gone: a message that can't reach it is said on the page, not dropped with the cell left running)
+await go(`${base}/nb/sub/third.ipynb/`);
+await ready();
+ok((await runCode("print(6 * 7)")).includes("42"), "(a notebook running)");
+server.kill();
+await new Promise((r) => (server.exitCode !== null || server.signalCode !== null ? r() : server.once("exit", r)));
+await put("print(2)");
+ok(await until("document.body.innerText.includes(\"couldn't reach the local server\")", 15000), "a message that can't reach the stopped server is said on the page: " + JSON.stringify(await ev(`${LAST}.querySelector('.out').textContent + ' | ' + document.querySelector('#status').textContent`)));
+
 cleanup();
 console.log(failures ? `${failures} failures` : "all passed");
 process.exit(failures ? 1 : 0);

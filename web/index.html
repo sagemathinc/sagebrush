@@ -932,11 +932,13 @@ class RemoteWorker {
   }
   send(path, body) {
     // in order: each request waits for the one before it; one the server refuses is tried once more (a session it
-    // doesn't have yet: the events stream reconnecting), then said, never dropped silently
+    // doesn't have yet: the events stream reconnecting), then said, never dropped silently; nor one that can't reach
+    // the server at all (it stopped: the events stream only retries, so nothing else would say so)
     const post = () => fetch(`api/session/${this.sid}/${path}`, { method: "POST", body: JSON.stringify(body) });
     this.queue = this.queue.then(async () => {
-      let r = await post();
-      if (r.status === 404) { await new Promise((t) => setTimeout(t, 500)); r = await post(); }
+      let r;
+      try { r = await post(); } catch (e) { this.onerror?.({ message: `couldn't reach the local server (${e?.message ?? e}): is \`sagebrush notebook\` still running?` }); return; }
+      if (r.status === 404) { await new Promise((t) => setTimeout(t, 500)); r = await post().catch(() => r); }
       if (r.ok) return;
       const why = (await r.text().catch(() => "")).trim().slice(0, 200);
       this.onerror?.({ message: `the local server refused a message to Python (${r.status}${why ? ": " + why : ""})` });

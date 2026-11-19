@@ -1,7 +1,7 @@
 {
  "v": 1,
- "reason": "The notebook page under `sagebrush notebook` (web/index.html): the first message to the local server's Python waits for the session its events stream starts, and a message the server refuses is tried once more, then said on the page instead of dropped; and no background preload or sync probe there, whose requests the local server refuses or doesn't have. The CLI's Python bundle carries this page (build/cli/web.gen.js). Measured locally with the pinned toolchain on master abc38965: +480; the marker is the growth + 64.",
+ "reason": "The notebook page under `sagebrush notebook` (web/index.html): the first message to the local server's Python waits for the session its events stream starts, and a message the server refuses is tried once more, then said on the page instead of dropped, as is one that cannot reach the server; and no background preload or sync probe there, whose requests the local server refuses or doesn't have. The CLI's Python bundle carries this page (build/cli/web.gen.js). Measured locally with the pinned toolchain on master abc38965: +688; the marker is the growth + 64.",
  "bytes": {
-  "cli/pyjs.cjs": 544
+  "cli/pyjs.cjs": 752
  }
 }
