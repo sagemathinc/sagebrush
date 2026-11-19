@@ -40,7 +40,7 @@ export default {
 - `gaps: { chat: "why" }`: a known gap on a surface, for the report only. The case still runs and still fails there; the report names the gap, and once the case passes it says to take the gap out.
 - `ms`: the case's budget, 120 s unless it says otherwise.
 
-What makes a notebook run, on every surface: a notebook the agent creates runs once by itself under the grant's "may run code" (decided Nov 19 2026). A case that checks that must not call `workspace_run_notebook` first; the agent may call it to run again after an edit.
+What makes a notebook run, the intended rule on every surface (decided Nov 19 2026): a notebook the agent has just created runs once by itself when the person's grant has both Everything and May run code. With a narrower grant, it waits for the person's Run. The notebook page does this today; the Agents page's pane doesn't yet, a known gap the cases record. A case that checks the self-run must not call `workspace_run_notebook` first; the agent may call it to run again after an edit.
 
 ## The helpers (h)
 
