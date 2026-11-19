@@ -16,6 +16,7 @@ import { checkCall, badValue, AGENT_LIMITS } from "./agent-schema";
 import { editProblem, type NotebookEdit } from "./notebook-edit";
 import { authorize, grantFolders, grantProblem, newGrantId, norm, GRANT_ID, type Grant, type TrashEntry } from "./agent-grant";
 import { BRANCHES, within } from "./paths";
+import { entryUrl } from "./entry-url";
 
 /** What the hello's result says (the agent's own claims, shown as such). Over a runner (`link`), the agent's
  * agent.ready says it, with `child`: this agent process's identity, bound into every permission digest. */
@@ -121,12 +122,17 @@ export function actorOf(name: string, client: string): string {
   return "agent:" + n;
 }
 
-/** An entry as an agent sees it: its path, kind and what a person sees of it, nothing internal (ids, refs). */
-function entryOut(e: any) {
+/** An entry as an agent sees it: its path, kind and what a person sees of it, nothing internal (ids, refs). With
+ * `origin`, and when it has a page of its own (a notebook, a board, a .tex or code file), also `url`: that page on this
+ * site, as the file browser opens it (entry-url.ts), for the agent to give the person a link. It comes from this very
+ * entry, the one the verb returned under the grant: no other read. */
+function entryOut(e: any, origin?: string) {
   if (!e) return null;
   const out: Record<string, unknown> = { path: e.path, kind: e.kind, created: e.created, updated: e.updated };
   for (const k of ["mode", "size", "rev"]) if (e[k] !== undefined) out[k] = e[k];
   if (e.trashed) out.trashed = { from: e.trashed.from, at: e.trashed.at };
+  const u = origin && !e.trashed ? entryUrl(e) : null;
+  if (u) out.url = origin + u;
   return out;
 }
 
@@ -166,17 +172,6 @@ export type Created = { op: string; path: string; kind: "notebook" | "board" | "
 
 export class AgentError extends Error {
   constructor(public code: string, message: string, public extra: Record<string, unknown> = {}) { super(message); }
-}
-
-/** A result's entry with the address of its own page on this site, as the file browser opens it: `url`, for the agent
- * to give the person a link to what it made or read. The agent's view of an entry has none of the ids that address
- * needs: `urlOf(path)` reads them from the page's own workspace (agent-ui.ts, entry-url.ts). An entry with no page of
- * its own (a folder, a data file) gets none, and so do list's entries (stat gives each one's); nothing else changes. */
-export async function withUrl(result: unknown, origin: string, urlOf?: (path: string) => Promise<string | null>): Promise<unknown> {
-  const r = result as any;
-  if (!urlOf || !r || typeof r !== "object" || !r.entry || typeof r.entry !== "object" || typeof r.entry.path !== "string") return result;
-  const u = await urlOf(r.entry.path).catch(() => null);
-  return u ? { ...r, entry: { ...r.entry, url: origin + u } } : result;
 }
 
 /** The pairing.  `verbsFor(actor)` gives the workspace's verbs credited to `actor` (Workspace.forAgent). */
@@ -219,7 +214,7 @@ export class AgentPairing {
   constructor(
     readonly port: number,
     how: { code: string } | { session: string; pairingId: string; agent?: { name: string; client: string } } | { link: AgentLink; computer: string },
-    private opts: { verbsFor: (actor: string, host: { owner: () => string | null }) => AgentVerbs; gitBranch?: GitBranch; gitVerbs?: RunVerbs; store: GrantStore; trashEntry: (p: string) => Promise<TrashEntry | null | undefined>; urlOf?: (path: string) => Promise<string | null>; page: { origin: string; path: string }; now?: () => number; WebSocketImpl?: typeof WebSocket; runVerbs?: RunVerbs; notebookEdit?: (edit: NotebookEdit, may: () => boolean, hold?: () => Promise<() => void>) => Promise<unknown>; onCreated?: (c: Created, p: AgentPairing) => void; reload?: { storage: ReloadStorage | null; scope: ReloadScope; leaving: () => boolean } },
+    private opts: { verbsFor: (actor: string, host: { owner: () => string | null }) => AgentVerbs; gitBranch?: GitBranch; gitVerbs?: RunVerbs; store: GrantStore; trashEntry: (p: string) => Promise<TrashEntry | null | undefined>; page: { origin: string; path: string }; now?: () => number; WebSocketImpl?: typeof WebSocket; runVerbs?: RunVerbs; notebookEdit?: (edit: NotebookEdit, may: () => boolean, hold?: () => Promise<() => void>) => Promise<unknown>; onCreated?: (c: Created, p: AgentPairing) => void; reload?: { storage: ReloadStorage | null; scope: ReloadScope; leaving: () => boolean } },
   ) {
     if ("link" in how) { this.link = how.link; this.computer = how.computer; }
     else if (!Number.isInteger(port) || port < 1 || port > 65535) throw new AgentError("invalid", "a port is 1 to 65535");
@@ -508,8 +503,7 @@ export class AgentPairing {
       if (!this.current(g, verbs)) return this.fail(id, "invalid", grantProblem(this.grant, this.now()) ?? "the grant changed while this was checked");
       if (no) return this.fail(id, "invalid", no);
       let made: any = null;
-      const ran = method === "workspace.git_branch" ? await this.branch(g!, verbs!, (params as any).name) : await this.run(verbs!, method.slice("workspace.".length), params as any, auth.expect, (e) => (made = e));
-      const result = await withUrl(ran, this.opts.page.origin, this.opts.urlOf);
+      const result = method === "workspace.git_branch" ? await this.branch(g!, verbs!, (params as any).name) : await this.run(verbs!, method.slice("workspace.".length), params as any, auth.expect, (e) => (made = e));
       // (after the last wait, before anything is said: the same grant, in force now, or nothing of what it read)
       if (!this.current(g, verbs)) return this.fail(id, "invalid", CHANGED_WHILE_RUNNING);
       g!.lastUsed = this.now();
@@ -625,32 +619,35 @@ export class AgentPairing {
   private async run(v: AgentVerbs, verb: string, p: any, expect?: TrashEntry, made?: (e: unknown) => void): Promise<unknown> {
     const sized = (c: any) => contentIn(c, p.path ?? "contents");
     const changed = <T,>(x: T) => { this.changes++; this.emit(); return x; };
+    // (the address of a single entry's page in its answer (entryOut): stat, read, write, create, rename, duplicate and
+    //  restore; not list's entries, nor a folder's, a removed one's or a data file's, which have no page of their own)
+    const url = this.opts.page.origin;
     switch (verb) {
       case "list": {
         const all = await v.list(p.folder, p.recursive ? { recursive: true } : {});
         const from = p.cursor === undefined ? 0 : /^[0-9]{1,9}$/.test(p.cursor) ? Number(p.cursor) : NaN;
         if (!Number.isFinite(from)) throw new AgentError("invalid", "not a cursor this page gave");
-        const page = all.slice(from, from + AGENT_LIMITS.maxList).map(entryOut);
+        const page = all.slice(from, from + AGENT_LIMITS.maxList).map((e) => entryOut(e));
         return from + page.length < all.length ? { entries: page, more: true, cursor: String(from + page.length) } : { entries: page };
       }
-      case "stat": return { entry: entryOut(await v.stat(p.path)) };
+      case "stat": return { entry: entryOut(await v.stat(p.path), url) };
       case "read": {
         const r = await v.read(p.path);
         if (r.entry.kind === "folder") throw new AgentError("invalid", `${p.path} is a folder: list it`);
         // (a notebook's ref, for an edit by cell: the document read, so an edit never reaches another put at its path)
-        return { entry: entryOut(r.entry), rev: r.rev, content: contentOut(r.entry.kind, r.content, p.path), ...(this.edits() && r.entry.kind === "notebook" && typeof r.entry.ref === "string" ? { ref: r.entry.ref } : {}) };
+        return { entry: entryOut(r.entry, url), rev: r.rev, content: contentOut(r.entry.kind, r.content, p.path), ...(this.edits() && r.entry.kind === "notebook" && typeof r.entry.ref === "string" ? { ref: r.entry.ref } : {}) };
       }
       case "write": {
         // (an agent that edits notebooks by cell never rewrites one whole: that would drop its outputs, A12)
         if (this.edits() && /\.ipynb$/i.test(String(p.path))) throw new AgentError("invalid", `${p.path} is a notebook: change it with workspace_edit_notebook (by cell, its outputs kept), not a whole write`);
-        const r = await v.write(p.path, sized(p.content), p.base !== undefined ? { base: p.base } : {}); return changed({ entry: entryOut(r.entry), rev: r.rev }); }
-      case "create": { const e = await v.create(p.path, { ...(p.content ? { content: sized(p.content) } : {}), ...(p.mode ? { mode: p.mode } : {}) }); made?.(e); return changed({ entry: entryOut(e) }); }
+        const r = await v.write(p.path, sized(p.content), p.base !== undefined ? { base: p.base } : {}); return changed({ entry: entryOut(r.entry, url), rev: r.rev }); }
+      case "create": { const e = await v.create(p.path, { ...(p.content ? { content: sized(p.content) } : {}), ...(p.mode ? { mode: p.mode } : {}) }); made?.(e); return changed({ entry: entryOut(e, url) }); }
       case "mkdir": return changed({ entry: entryOut(await v.mkdir(p.path)) });
-      case "rename": return changed({ entry: entryOut(await v.rename(p.from, p.to)) });
-      case "duplicate": return changed({ entry: entryOut(await v.duplicate(p.path, p.to)) });
+      case "rename": return changed({ entry: entryOut(await v.rename(p.from, p.to), url) });
+      case "duplicate": return changed({ entry: entryOut(await v.duplicate(p.path, p.to), url) });
       case "remove": return changed({ entry: entryOut(await v.remove(p.path)) });
       // (only the very entry authorized: Workspace.restore checks it holding its lock, so one put in its place meanwhile isn't restored)
-      case "restore": if (!expect) throw new AgentError("invalid", "restore without its authorized entry"); return changed({ entry: entryOut(await v.restore(p.path, expect)) });
+      case "restore": if (!expect) throw new AgentError("invalid", "restore without its authorized entry"); return changed({ entry: entryOut(await v.restore(p.path, expect), url) });
       case "history": {
         const all = await v.history(p.path);
         const from = p.cursor === undefined ? 0 : /^[0-9]{1,9}$/.test(p.cursor) ? Number(p.cursor) : NaN;
