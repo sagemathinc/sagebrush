@@ -16,6 +16,7 @@ import { mkdtempSync, readFileSync, rmSync, existsSync, statSync } from "node:fs
 import { tmpdir } from "node:os";
 import { join, normalize } from "node:path";
 import { devtoolsPort } from "../test-port.mjs";
+import { BAR_CLEAR } from "../workspace/agent-bar-check.mjs";
 
 const here = new URL(".", import.meta.url).pathname;
 const dist = join(here, "..", "dist");
@@ -161,6 +162,7 @@ try {
   ok((await text("#connect")) === "Connected", "the button stays Connected");
   ok(leg.data.msgs.some((m) => m.method === "grant.changed" && m.params?.folders) && leg.data.msgs.some((m) => m.method === "page.features" && m.params.features.includes("permission.digest")), "the grant is told to the agent, and permission.digest among the page's features");
   ok(violations.length === 0, "no Content Security Policy refusal: connect-src 'self' covers the page's own wss origin", violations);
+  ok(await until(`${BAR_CLEAR} === true`, 5000), "the Agents page: the agent's bar is in its own row, over nothing the person types in or reads", await ev(BAR_CLEAR).catch((e) => String(e)));
   const title = await ev(`[...document.querySelectorAll('.sbag-bar button')].find((b) => b.textContent === 'Disconnect')?.title ?? null`);
   ok(title === "Disconnect and stop the agent on laptop", "the bar's Disconnect: \"Disconnect and stop the agent on laptop\"", title);
 

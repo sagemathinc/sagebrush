@@ -597,6 +597,8 @@
   </div>
   <div id="filesbar" role="status" hidden><span id="fbtext"></span> <button id="fballow" hidden></button> <button id="fbonce" hidden>Allow once</button> <button id="fbdeny" hidden>Don't allow</button> <button id="fbperms" hidden>File &gt; Permissions…</button></div>
   <div id="runbar" role="status" hidden><span id="rbtext"></span> <button id="rballow" class="primary">Allow file changes and run</button> <span class="note">Remembered for this notebook; change it in File &gt; Permissions…</span></div>
+  <!-- (the agent's bar, when one is connected: a row here, never over a cell or a plot; workspace/agent-ui.ts) -->
+  <div data-sbag-slot="1"></div>
   <section id="files" aria-label="Files" hidden>
     <div class="fhead"><b>Files</b><span>kept in this browser; <code>open("name")</code> in Python reads and writes them; drop files here</span><span class="sp"></span><button id="upload">Upload…</button></div>
     <ul id="filelist"></ul>
