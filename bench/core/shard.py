@@ -48,6 +48,7 @@ RUNID_RE = re.compile(r"^[0-9a-f]{16}$")
 TYPE_RE = re.compile(r"^[a-z][a-z0-9]{0,11}$")
 TOKEN_RE = re.compile(r"^[a-z0-9_]{1,64}$")
 HEX64 = re.compile(r"^[0-9a-f]{64}$")
+HEX64L = re.compile(r"\A[0-9a-f]{64}\Z")
 SIDECAR = re.compile(rb"^[0-9a-fA-F]{64}\n?$")
 # Bounds on what a VM may send: a point's file, and its checksum sidecar
 MAX_ROW = 1 << 20
@@ -375,6 +376,33 @@ def check_row(
     return sha, rec
 
 
+def check_engine_pin(tk: str, rec: dict, policy: str) -> None:
+    """A point's engine claim must be consistent and the plan's: an explicit
+    policy equal to the plan's; sha256 and pinned as 64 lowercase hex; ok a
+    bool equal to (sha256 == pinned); and sha256 the engine-wasm artifact's
+    own hash (the bytes run.py hashed for the point). strict also needs ok;
+    track records the fresh bytes whichever way the comparison went."""
+    pin = rec.get("engine_pin")
+    if not isinstance(pin, dict):
+        raise Fatal(f"{tk}: no engine_pin record")
+    if pin.get("policy") != policy:
+        raise Fatal(
+            f"{tk}: the VM checked its engine under pin policy {pin.get('policy')!r}, not the plan's {policy!r}"
+        )
+    sha, pinned = pin.get("sha256"), pin.get("pinned")
+    for what, v in (("sha256", sha), ("pinned", pinned)):
+        if not (isinstance(v, str) and HEX64L.match(v)):
+            raise Fatal(f"{tk}: engine_pin {what} is not 64 lowercase hex digits")
+    if not isinstance(pin.get("ok"), bool) or pin["ok"] != (sha == pinned):
+        raise Fatal(f"{tk}: engine_pin ok is not (sha256 == pinned)")
+    if (rec.get("artifacts") or {}).get("engine-wasm") != sha:
+        raise Fatal(f"{tk}: engine_pin sha256 is not the engine-wasm artifact's hash")
+    if policy == "strict" and not pin["ok"]:
+        raise Fatal(
+            f"{tk}: the engine wasm is not the pinned one: the run would be unofficial"
+        )
+
+
 IDENTITY_KEYS = (
     "machine",
     "versions",
@@ -430,18 +458,7 @@ class Rows:
         engine: under the plan's "strict" pin policy, the pinned one; under
         "track", a fresh build recorded by its sha256 (in the identity, so
         every point of the type shares it), checked under that policy."""
-        pin = rec.get("engine_pin") or {}
-        policy = self.plan["pin_policy"]
-        if pin.get("policy", "strict") != policy:
-            raise Fatal(
-                f"{tk}: the VM checked its engine under pin policy {pin.get('policy', 'strict')!r}, not the plan's {policy!r}"
-            )
-        if policy == "strict" and not pin.get("ok"):
-            raise Fatal(
-                f"{tk}: the engine wasm is not the pinned one: the run would be unofficial"
-            )
-        if policy == "track" and not HEX64.match(str(pin.get("sha256") or "")):
-            raise Fatal(f"{tk}: no fresh engine wasm sha256 recorded")
+        check_engine_pin(tk, rec, self.plan["pin_policy"])
         path = self.run_dir / "rows" / tk / "identity.json"
         ident = identity_of(rec)
         if path.exists():
