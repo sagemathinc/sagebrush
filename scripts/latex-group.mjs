@@ -61,7 +61,11 @@ export const LATEX_LAZY = {
 //  \py{}, \magma{}: the engine's reader, in the worker), Nov 19, provisional until the exact-head CI packet: 250,418 /
 //  83,700 measured on the shipped build (bun 1.4.4, node 24.21.0), master 8bf4b126 with it, and the same again on
 //  master 6288dbcf; 249,786 / 83,499 with master's web/latex/engine/demo-machine.mjs in the same tree (+632 / +201), + 64)
-export const LATEX_CAPS = { raw: 250482, gzip: 83764 };
+// (252,349 raw / 84,230 gzip: the editor's Source | Both | PDF toggle, remembered for each file (the page module's code
+//  and styles), Nov 19, provisional until the exact-head CI packet: 252,285 / 84,166 measured on the shipped build (bun
+//  1.4.4, node 24.21.0), master e478921b with it; 250,418 / 83,700 with master's web/latex/page.ts and style.ts in the
+//  same tree (+1,867 / +466), + 64)
+export const LATEX_CAPS = { raw: 252349, gzip: 84230 };
 export const gz = (b) => gzipSync(b, { level: 9 }).length;
 
 // Each lazy chunk's own cap (raw, gzip), fetched only on its own use, so outside the group:
