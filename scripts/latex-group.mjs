@@ -57,7 +57,11 @@ export const LATEX_LAZY = {
 //  math typeset in the same step as its text, ruled Nov 13: 249,253 / 83,316 measured (bun 1.4.4, node 24.21.0), + 64)
 // (249,795 raw / 83,533 gzip: an edit written before the page is left (a notebook, a board or another page opened from
 //  it), Nov 17: 249,731 / 83,469 measured on master 9529624b with it (+478 / +153), + 64)
-export const LATEX_CAPS = { raw: 249795, gzip: 83533 };
+// (250,482 raw / 83,764 gzip: a SageTeX code argument read from the file as its own source text (\sage{}, \sageplot{},
+//  \py{}, \magma{}: the engine's reader, in the worker), Nov 19, provisional until the exact-head CI packet: 250,418 /
+//  83,700 measured on the shipped build (bun 1.4.4, node 24.21.0), master 8bf4b126 with it, and the same again on
+//  master 6288dbcf; 249,786 / 83,499 with master's web/latex/engine/demo-machine.mjs in the same tree (+632 / +201), + 64)
+export const LATEX_CAPS = { raw: 250482, gzip: 83764 };
 export const gz = (b) => gzipSync(b, { level: 9 }).length;
 
 // Each lazy chunk's own cap (raw, gzip), fetched only on its own use, so outside the group:
@@ -92,7 +96,10 @@ export const LATEX_LAZY_CAPS = {
   // (50,816 / 17,368: Nov 18 2026, for the one check a page asks before a notebook an agent created runs by itself
   //  (AgentPairing.mayRunCreated: the creation's own grant still in force, with May run code and Everything); the run
   //  itself is the notebook page's. Measured locally with the board page's forward merged: 50,752 / 17,304, + 64)
-  AGENT: { label: "the LaTeX agent pairing's chunk", raw: 50816, gzip: 17368 },
+  // (51,193 / 17,561: Nov 19 2026, for workspace_create's description of a notebook's language, mode (python, sage,
+  //  matlab or magma, an example each), which the pairing's compiled schema carries. Measured in CI at 1055da1d (run
+  //  44462639042): 51,129 / 17,497, + 64)
+  AGENT: { label: "the LaTeX agent pairing's chunk", raw: 51193, gzip: 17561 },
   // (the agent tools' work: web/latex/tools.ts, latex_check's report and latex_render's pictures, on an agent's first call)
   // (16,546 / 6,950: Nov 11 2026: latex_build's own code (build.ts, the
   //  engine driven from a snapshot, and the pages' fit) here, out of the eager group, its shared rules handed in by the

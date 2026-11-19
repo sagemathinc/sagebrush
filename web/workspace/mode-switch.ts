@@ -14,8 +14,8 @@ function svg(parts: [string, Record<string, string>][]): SVGSVGElement {
   }
   return s;
 }
-/** A folder. */
-const filesIcon = () => svg([["path", { d: "M1.8 4.2c0-.7.5-1.2 1.2-1.2h3l1.4 1.6H13c.7 0 1.2.5 1.2 1.2v6.4c0 .7-.5 1.2-1.2 1.2H3c-.7 0-1.2-.5-1.2-1.2z" }]]);
+/** A folder (the agents page's Files… button has it too). */
+export const filesIcon = () => svg([["path", { d: "M1.8 4.2c0-.7.5-1.2 1.2-1.2h3l1.4 1.6H13c.7 0 1.2.5 1.2 1.2v6.4c0 .7-.5 1.2-1.2 1.2H3c-.7 0-1.2-.5-1.2-1.2z" }]]);
 /** A speech bubble with a spark: a chat with an agent. */
 export const agentsIcon = () => svg([["path", { d: "M2.2 4.5c0-1 .8-1.8 1.8-1.8h8c1 0 1.8.8 1.8 1.8v4.6c0 1-.8 1.8-1.8 1.8H7.2L4.4 13.3v-2.4H4c-1 0-1.8-.8-1.8-1.8z" }],
   ["path", { d: "M8 4.6v3M6.5 6.1h3" }]]);
