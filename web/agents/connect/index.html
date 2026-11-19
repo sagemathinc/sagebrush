@@ -91,22 +91,6 @@
   </div>
 </details>
 
-<details class="box" id="artifacts">
-  <summary><span class="icon" aria-hidden="true">✨</span><span><span class="title">Use Sagebrush's math in claude.ai or ChatGPT</span><span class="sub">Nothing to install: an artifact imports it.</span></span><span class="chev" aria-hidden="true">›</span></summary>
-  <div class="inside">
-    <p>Sagebrush's math engines are one JavaScript module that an artifact in the chat app can import. Ask the chat to use it in an artifact:</p>
-    <div class="cmd"><pre>const sb = await import("https://cdn.jsdelivr.net/npm/sagebrush-web@0.10.1/sagebrush-engine.mjs");</pre><button class="copy" type="button" hidden>Copy</button></div>
-    <details class="more">
-      <summary>Details</summary>
-      <ul>
-        <li>The code runs inside the artifact, in your browser; the browser downloads about 3 MB from cdn.jsdelivr.net.</li>
-        <li>It's the engines' functions only: no Sage session, no notebook, no files, and no link to your sagebrush.space work.</li>
-        <li>Last tried in October: Claude's artifacts allowed <code>import()</code> from cdn.jsdelivr.net (not other CDNs); ChatGPT's allowed more.</li>
-      </ul>
-    </details>
-  </div>
-</details>
-
 <p class="foot">To run a notebook's code on your own computer instead: <a href="/remote/connect">Connect a computer</a>. Everything in full, for agents: <a href="/agents/connect.md">connect.md</a>.</p>
 </main>
 <script src="/agents/connect/copy.js" defer></script>

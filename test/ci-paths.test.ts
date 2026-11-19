@@ -9,6 +9,9 @@ import { prSample, SLOW, sampleSkip, slowSkip } from "./slow-tests";
 // scripts/ci-paths.mjs, replayed on file lists (CI_PATHS_FILES): which suites
 // a pull request's changes select.
 const script = join(__dirname, "..", "..", "scripts", "ci-paths.mjs");
+// (the refs of the run these tests are in never reach the script: a pull request into a track/* branch would make
+// every replay build the modules, scripts/pin-policy.mjs)
+for (const name of ["GITHUB_BASE_REF", "GITHUB_HEAD_REF", "GITHUB_REF_NAME"]) delete process.env[name];
 const dir = mkdtempSync(join(tmpdir(), "ci-paths-"));
 
 function classify(files: string[], labels = "", env: Record<string, string> = {}): Record<string, string> {
@@ -538,7 +541,7 @@ test("examples: a change selects its examples; the engines select notebooks, boa
 test("examples: ci-paths finds the corpus beside it in a checkout whose path has a space", () => {
   const top = mkdtempSync(join(tmpdir(), "ci paths "));
   mkdirSync(join(top, "scripts"));
-  for (const f of ["ci-paths.mjs", "examples-lib.mjs", "size-measure.mjs", "build-inputs.mjs", "web-tests.mjs"]) cpSync(join(__dirname, "..", "..", "scripts", f), join(top, "scripts", f));
+  for (const f of ["ci-paths.mjs", "examples-lib.mjs", "size-measure.mjs", "build-inputs.mjs", "web-tests.mjs", "pin-policy.mjs"]) cpSync(join(__dirname, "..", "..", "scripts", f), join(top, "scripts", f));
   cpSync(join(__dirname, "..", "..", "test", "fixtures", "examples"), join(top, "examples"), { recursive: true });
   const list = join(top, "files.txt");
   writeFileSync(list, "examples/latex/article/main.tex\n");
@@ -736,6 +739,14 @@ test("the GF(p) echelon admission's memory cases follow the slow tests (the long
   assert.match(src, /^import \{ SLOW \} from "\.\/slow-tests";$/m);
   assert.match(src, /^const FULL = SLOW \|\| process\.env\.SAGEBRUSH_FULL === "1";$/m);
   assert.doesNotMatch(src, /GITHUB_REF|GITHUB_EVENT_NAME/);
+});
+
+test("wasm_build: a pull request into a track always builds the modules; a track's pull into master builds only for its inputs", () => {
+  // (a track's pin lags its engine until its pull into master, scripts/pin-policy.mjs)
+  for (const files of [["README.md"], ["lib/sagebrush/linalg.py"], ["bench/core/run.py"]])
+    assert.equal(classify(files, "", { GITHUB_BASE_REF: "track/math", GITHUB_HEAD_REF: "r6" }).wasm_build, "true", files.join());
+  assert.equal(classify(["README.md"], "", { GITHUB_BASE_REF: "master", GITHUB_HEAD_REF: "track/math" }).wasm_build, "false");
+  assert.equal(classify(["README.md"], "", { GITHUB_BASE_REF: "trackmath", GITHUB_HEAD_REF: "x" }).wasm_build, "false");
 });
 
 test("wasm_build: what the modules are built from or handled by builds them on a pull request; every other event builds", () => {
