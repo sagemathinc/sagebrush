@@ -11,6 +11,8 @@ modular_forms_sage.json): for 22 spaces (levels 1, 2, 11, 13, 17, 19, 22, 23,
   ambient space (rows the images), and their characteristic polynomials;
 - what Sage prints: the spaces, a basis (print), a form, its q_expansion(8)
   and q_expansion_basis at 1, 3, 6 and 10;
+- forms compare equal across their spaces (f == M(f), the zero form, new
+  forms) and are unhashable, as in Sage;
 - a nontrivial character: refused (NotImplementedError), never a wrong basis.
 
     python engine/py/test_modular_forms.py
@@ -70,6 +72,24 @@ def main():
         checked += 1
     for N, k, s_cusp, s_all in DATA["sturm"]:
         assert (CuspForms(N, k).sturm_bound(), ModularForms(N, k).sturm_bound()) == (s_cusp, s_all), (N, k)
+    # equality across the embeddings (a cusp form, the zero form, a new form, in their
+    # spaces and in the ambient space); forms are unhashable, as Sage's are
+    for N, k in ((11, 2), (37, 2), (22, 2), (25, 4)):
+        M = ModularForms(N, k)
+        S, Nw = M.cuspidal_subspace(), M.new_subspace()
+        forms = [S(0), M(0)] + list(S.basis())[:2] + list(Nw.basis())[:2]
+        for f in forms:
+            g = M(f)
+            assert f == g and g == f and not (f != g), (N, k, f)
+            try:
+                hash(f)
+            except TypeError:
+                pass
+            else:
+                raise AssertionError("modular forms must be unhashable (as in Sage): equal forms of different spaces")
+        assert S(0) == M(0) == Nw(0), (N, k)
+        if S.dimension():
+            assert S.gen(0) != M(0), (N, k)
     try:
         CuspForms(DirichletGroup(13).gen(0) ** 2, 2).basis()
     except NotImplementedError as e:

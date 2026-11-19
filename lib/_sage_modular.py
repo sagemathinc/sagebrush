@@ -1549,6 +1549,12 @@ class ModularFormElement:
         q - 2*q^2 - q^3 + 2*q^4 + q^5 + 2*q^6 - 2*q^7 + O(q^8)
         sage: f[7], f.coefficients(5)
         (-2, [1, -2, -1, 2, 1])
+        sage: M = ModularForms(11, 2); f == M(f), M(f).parent() == M
+        (True, True)
+        sage: hash(f)  # sagebrush only
+        Traceback (most recent call last):
+        ...
+        TypeError: unhashable type: 'ModularFormElement'
     """
 
     def __init__(self, parent, coords):
@@ -1673,8 +1679,10 @@ class ModularFormElement:
             return False
         return a == b
 
-    def __hash__(self):
-        return hash(tuple(self._c))
+    # (unhashable, as Sage's own modular forms are: equality compares forms
+    # across their spaces, f == M(f), so a hash of the coordinates in one
+    # space would differ between equal forms)
+    __hash__ = None
 
     def __repr__(self):
         if not any(self._c):
