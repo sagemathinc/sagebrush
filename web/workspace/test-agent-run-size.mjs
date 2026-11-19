@@ -57,9 +57,12 @@ const LATEX_FIRST_USE = ["sagebrush-agent-run.js", "sagebrush-latex.js", "sagebr
 // (renewed for an edit written before the LaTeX page is left, daybreak2, Nov 17: 153,968 / 56,242 -> 154,446 / 56,395,
 //  +478 / +153, the page module's (91,967 / 31,667 -> 92,445 / 31,820), measured on the shipped build, master 79dccfff;
 //  + 64)
-// (renewed for an agent's run of the notebook open on its page, in this chunk: 154,446 / 56,395 -> 157,197 / 57,212,
-//  measured by CI on the shipped build, the head merged with master 79d8ac8a; + 64)
-const AGG_RAW = 157261, AGG_GZIP = 57276;
+// (renewed for the LaTeX editor's Source | Both | PDF toggle, Nov 19, provisional until the exact-head CI packet: 154,501 /
+//  56,425 -> 156,368 / 56,891, +1,867 / +466, the page module's (92,500 / 31,850 -> 94,367 / 32,316), measured on the
+//  shipped build, master 25de21b2; + 64)
+// (renewed for an agent's run of the notebook open on its page, in this chunk: 156,368 / 56,891 -> 159,064 / 57,678,
+//  +2,696 / +787, this chunk's alone, measured on the shipped build with bun 1.4.4, master abc38965 merged; + 64)
+const AGG_RAW = 159128, AGG_GZIP = 57742;
 // (the reviewed inputs, relative to web/: the entry and what it imports)
 // (the review page's run line: a finished run's note in its branch, canon-doc.ts's canonical bytes and blob id, and branch-wake.ts's
 //  wake, which needs sha256-hex.ts for the branch store's name)
