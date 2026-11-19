@@ -69,7 +69,7 @@
       "id": "files",
       "title": "Data import and export",
       "catalog": { "files": [], "tags": ["files", "images", "web"] },
-      "suites": ["matlab-tests/test_matfile.m", "matlab-tests/test_matfile_sagebrush.m"],
+      "suites": ["matlab-tests/test_matfile.m", "matlab-tests/test_matfile_sagebrush.m", "matlab-tests/test_json.m", "test/matlab-json.test.ts"],
       "search": "readmatrix load save"
     },
     {
