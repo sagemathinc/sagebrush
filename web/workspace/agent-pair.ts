@@ -16,6 +16,7 @@ import { checkCall, badValue, AGENT_LIMITS } from "./agent-schema";
 import { editProblem, type NotebookEdit } from "./notebook-edit";
 import { authorize, grantFolders, grantProblem, newGrantId, norm, GRANT_ID, type Grant, type TrashEntry } from "./agent-grant";
 import { BRANCHES, within } from "./paths";
+import { MADE_CHANNEL, type TexMade, type TexMayRun, type TexMayRunYes } from "./agent-made-tex";
 
 /** What the hello's result says (the agent's own claims, shown as such). Over a runner (`link`), the agent's
  * agent.ready says it, with `child`: this agent process's identity, bound into every permission digest. */
@@ -161,8 +162,10 @@ function contentIn(c: any, what: string): unknown {
 }
 
 /** A document an agent created through its pairing: `op` this creation's own id, `ref` a notebook's or board's document
- * id (its identity wherever it moves), `grant` the grant it was created under. */
-export type Created = { op: string; path: string; kind: "notebook" | "board" | "file"; ref?: string; grant: string; updated?: number };
+ * id (its identity wherever it moves), `grant` the grant it was created under; a file's `fid` and the revision it was
+ * left at, `rev` (a .tex's, for its run once by itself: agent-made-tex.ts). */
+export type Created = { op: string; path: string; kind: "notebook" | "board" | "file"; ref?: string; grant: string; updated?: number; fid?: string; rev?: number };
+const isTex = (c: Created | null): c is Created & { fid: string; rev: number } => !!c && c.kind === "file" && /\.tex$/i.test(c.path) && typeof c.fid === "string" && typeof c.rev === "number";
 
 export class AgentError extends Error {
   constructor(public code: string, message: string, public extra: Record<string, unknown> = {}) { super(message); }
@@ -180,7 +183,13 @@ export class AgentPairing {
   /** What this agent created last through this pairing (workspace.create, answered under the grant in force): the page's
    * Open for it */
   created: Created | null = null;
+  /** The .tex this agent last built (latex_build, done, under the grant in force), at the revision it built, if that
+   * revision is still the file's when the build answered: its run once by itself, as a creation's (agent-made-tex.ts) */
+  built: Created | null = null;
   closeReason = "";
+  // (the editors' channel (agent-made-tex.ts), and the made .tex revisions whose one run has been answered yes)
+  private texChan: BroadcastChannel | null = null;
+  private texSpent = new Set<string>();
   private sock: WebSocket;
   private verbs: AgentVerbs | null = null;
   private inFlight = 0;
@@ -211,6 +220,7 @@ export class AgentPairing {
     private opts: { verbsFor: (actor: string, host: { owner: () => string | null }) => AgentVerbs; gitBranch?: GitBranch; gitVerbs?: RunVerbs; store: GrantStore; trashEntry: (p: string) => Promise<TrashEntry | null | undefined>; page: { origin: string; path: string }; now?: () => number; WebSocketImpl?: typeof WebSocket; runVerbs?: RunVerbs; notebookEdit?: (edit: NotebookEdit, may: () => boolean, hold?: () => Promise<() => void>) => Promise<unknown>; onCreated?: (c: Created, p: AgentPairing) => void; reload?: { storage: ReloadStorage | null; scope: ReloadScope; leaving: () => boolean } },
   ) {
     if ("link" in how) { this.link = how.link; this.computer = how.computer; }
+    if (typeof BroadcastChannel === "function") { this.texChan = new BroadcastChannel(MADE_CHANNEL); this.texChan.onmessage = (e) => this.texAsked(e.data); }
     else if (!Number.isInteger(port) || port < 1 || port > 65535) throw new AgentError("invalid", "a port is 1 to 65535");
     const now = this.now();
     this.tokens = AGENT_LIMITS.burst;
@@ -414,6 +424,8 @@ export class AgentPairing {
   }
   private end(why: string) {
     if (this.state === "closed") return;
+    try { this.texChan?.close(); } catch {}
+    this.texChan = null;
     this.closeReason ||= why;
     // (A14: an involuntary loss, while the page stays: the record leaves storage, so a later reload doesn't try a
     //  session that just failed, and stays in memory for the bar's one [Reconnect]; a revoke dropped it already; the
@@ -571,17 +583,46 @@ export class AgentPairing {
     if (!rv) return this.fail(id, "invalid", `not a verb: ${JSON.stringify(method)}`);
     const h = this.hello!;
     this.inFlight++;
+    // (latex_build: the .tex as it was before, for its run once by itself if the build is done and it is unchanged)
+    const g0 = this.grant, v0 = this.verbs, texPath = method === "workspace.latex_build" && typeof (params as any)?.path === "string" ? (params as any).path as string : null;
+    const before = texPath && v0 ? await v0.stat(texPath).catch(() => null) : null;
     try {
       await rv.serve(method, params, {
         grant: this.grant, agent: h.agent.name, actor: actorOf(h.agent.name, h.agent.client), now: () => this.now(),
         current: (g) => this.current(g, this.verbs),
         live: { state: () => this.state, grant: () => this.grant, closeReason: () => this.closeReason },
         onChange: (cb) => this.onChange(cb),
-        reply: (r) => { if (counted) { this.changes++; this.emit(); } this.reply(id, r); }, fail: (c, m) => this.fail(id, c, m),
+        reply: (r) => { if (counted) { this.changes++; this.emit(); } this.reply(id, r); if (before && (r as any)?.ok === true && (r as any).ended === "done") void this.builtHere(before, g0, v0); }, fail: (c, m) => this.fail(id, c, m),
       });
     } finally {
       this.inFlight--;
     }
+  }
+
+  /** A .tex this agent built: its run once by itself, if it is still the revision it was before the build, under the
+   * same grant, in force now (a write meanwhile, the person's or the agent's: not this build's, nothing). */
+  private async builtHere(e: any, g: Grant | null, v: AgentVerbs | null) {
+    if (!g || !v || e?.kind !== "file" || typeof e.fid !== "string" || typeof e.rev !== "number" || !/\.tex$/i.test(e.path ?? "")) return;
+    const now = await v.stat(e.path).catch(() => null);
+    if (!now || now.fid !== e.fid || now.rev !== e.rev || !this.current(g, v)) return;
+    this.built = Object.freeze({ op: newGrantId(12), path: e.path, kind: "file" as const, grant: g.id ?? "", fid: e.fid, rev: e.rev });
+    this.texTell(this.built);
+  }
+  /** Said to the editors: this agent made this .tex at this revision (one showing it asks). */
+  private texTell(c: Created) {
+    if (isTex(c)) try { this.texChan?.postMessage({ t: "tex-made", fid: c.fid, rev: c.rev } satisfies TexMade); } catch {}
+  }
+  /** An editor's question (agent-made-tex.ts): yes, once, if the file at that revision is the .tex this agent last
+   * created or built, and it may run by itself now (mayRunCreated: the same conditions as a created notebook's). */
+  private texAsked(m: unknown) {
+    const q = m as TexMayRun;
+    if (!q || q.t !== "tex-may-run" || typeof q.id !== "string" || typeof q.fid !== "string" || typeof q.rev !== "number") return;
+    const c = [this.built, this.created].find((x) => isTex(x) && x.fid === q.fid && x.rev === q.rev);
+    // (spent by the file's revision: its creation and a build at the same revision are one chance, not two)
+    const at = q.fid + "@" + q.rev;
+    if (!c || this.texSpent.has(at) || !this.mayRunCreated(c)) return;
+    this.texSpent.add(at);
+    try { this.texChan?.postMessage({ t: "tex-may-run", id: q.id.slice(0, 64), ok: true } satisfies TexMayRunYes); } catch {}
   }
 
   /** git_branch (chat plan PR 3): the page's, for this grant, while it is the one in force. */
@@ -597,17 +638,20 @@ export class AgentPairing {
    * branch's worktree or the Trash: only what the person would open from Files. */
   private madeHere(e: any, g: Grant) {
     if (!e || typeof e.path !== "string" || !/^(notebook|board|file)$/.test(e.kind) || within(norm(e.path) ?? "/", BRANCHES) || /^\/Trash(\/|$)/.test(e.path)) return;
-    this.created = Object.freeze({ op: newGrantId(12), path: e.path, kind: e.kind, ...(typeof e.ref === "string" ? { ref: e.ref } : {}), grant: g.id ?? "", ...(typeof e.updated === "number" ? { updated: e.updated } : {}) });
+    this.created = Object.freeze({ op: newGrantId(12), path: e.path, kind: e.kind, ...(typeof e.ref === "string" ? { ref: e.ref } : {}), grant: g.id ?? "", ...(typeof e.updated === "number" ? { updated: e.updated } : {}),
+      ...(e.kind === "file" && typeof e.fid === "string" && typeof e.rev === "number" ? { fid: e.fid, rev: e.rev } : {}) });
     this.emit();
+    this.texTell(this.created!);
     try { this.opts.onCreated?.(this.created, this); } catch (err) { console.warn("agent: the page's open of a created document failed:", err); }
   }
 
   /** Whether `c` may run once by itself now, asked as the page admits that run (the conditions decided Nov 18 2026): it is
-   * the last document this pairing created, under the grant still in force, and that grant has May run code and
-   * Everything. Any narrower grant never: the page's interpreter reads the whole workspace, beyond the grant's folders. */
+   * the last document this pairing created (or, a .tex, the last it built: Nov 19 2026), under the grant still in force,
+   * and that grant has May run code and Everything. Any narrower grant never: the page's interpreter reads the whole
+   * workspace, beyond the grant's folders. */
   mayRunCreated(c: Created): boolean {
     const g = this.grant;
-    return this.state === "granted" && this.created === c && !!g && g.id === c.grant && g.run === true && g.folders.length === 1 && g.folders[0] === "/" && grantProblem(g, this.now()) === null;
+    return this.state === "granted" && (this.created === c || this.built === c) && !!g && g.id === c.grant && g.run === true && g.folders.length === 1 && g.folders[0] === "/" && grantProblem(g, this.now()) === null;
   }
 
   private async run(v: AgentVerbs, verb: string, p: any, expect?: TrashEntry, made?: (e: unknown) => void): Promise<unknown> {
