@@ -530,6 +530,23 @@ fn factor_mod_draws(b: &Budget, f: &[BigInt], p: u64) -> FResult<(Vec<(Vec<u64>,
     // (reducing a coefficient mod p makes a quotient of its size)
     let _t = transients(b, 2, maxbits(f))?;
     let fp = fmonic(&reduce_p(f, p), p);
+    factor_monic(b, fp, p)
+}
+
+/// [`try_factor_mod_with`] for coefficients already reduced: each below p
+/// (the caller checked it), constant term first, not all zero.
+pub fn try_factor_mod_words(f: &[u64], p: u64, b: &Budget) -> Result<Vec<(Vec<u64>, u32)>, FactorLimit> {
+    if !(2..1 << 32).contains(&p) || f.iter().any(|&c| c >= p) || f.iter().all(|&c| c == 0) {
+        return Err(b.internal("factor_mod_words: a coefficient outside [0, p), or the zero polynomial"));
+    }
+    let _p = b.enter(Phase::Modular);
+    let _m = b.reserve(modular_bytes(f.len()))?;
+    Ok(factor_monic(b, fmonic(f, p), p)?.0)
+}
+
+/// The modular phase of a monic fp: the factors, sorted, and the state of
+/// the random generator.
+fn factor_monic(b: &Budget, fp: FPoly, p: u64) -> FResult<(Vec<(Vec<u64>, u32)>, u64)> {
     let ar = modp::Fp::new(b, p, fp.len())?;
     let mut rng = Rng(0x2545_F491_4F6C_DD1D ^ p);
     let mut out = vec![];

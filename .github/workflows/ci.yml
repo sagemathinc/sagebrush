@@ -1791,6 +1791,7 @@ jobs:
           python3 bench/core/test_runner.py
           python3 bench/core/test_shard.py
           python3 engine/py/test_ffmat_echelon.py
+          python3 test/ff_poly_bin.py
           python3 sage-tests/run_cpython.py -v
 
   # clippy on sagebrush-py (FU-CI-CLIPPY, plan r4e): no workflow ran clippy, so a deny-level lint in Ctrl-C PR B's test
