@@ -140,6 +140,11 @@ try {
   ok(r?.stopped === false, "run_stop with nothing running: not stopped", r);
 
   // ---- a grant without May run code: the runs are refused, nothing run
+  // (the first page left, and the agent told so, before the next pairing: one page is paired with an agent at a time)
+  await send("Page.navigate", { url: "about:blank" });
+  let left = null;
+  for (let i = 0; i < 200; i++) { left = await drive({ op: "status" }); if (left.ok?.paired === false) break; await sleep(100); }
+  ok(left?.ok?.paired === false, "(the first page left: the agent is no longer paired)", left);
   const c2 = await drive({ op: "code" });
   await pair(c2, false);
   ok(!!(await req("workspace.create", { path: "/agent-run2.py", content: { text: "open('/ran.txt', 'w').write('ran')\n" } })).ok, "(the agent creates another Python file)");
