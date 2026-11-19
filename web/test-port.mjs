@@ -8,13 +8,46 @@
 // says (port 0: the system's choice), or on port 0 itself; web/serve.py, on
 // port 0, says the port it took once it is listening, and startServe() waits
 // for that (no port chosen here that something else can take first).
-import { readdirSync, readFileSync } from "node:fs";
+import { readdirSync, readFileSync, rmSync } from "node:fs";
 import { createServer } from "node:net";
 import { join } from "node:path";
 import { deadline } from "./test-deadline.mjs";
 
 /** How much of a Chrome's stderr devtoolsPort keeps (its last bytes), and how many profile entries a timeout names. */
 export const CHROME_STDERR_TAIL = 2048, PROFILE_LIST_MAX = 12;
+export const CHROME_START_MS = 60_000;
+
+/** Launch Chrome with one retry after a failed port announcement. Each attempt
+ * has its own deadline; a failed child must exit before the profile is reused.
+ * The caller owns the successful child and its eventual cleanup.
+ * @param {string} profile
+ * @param {() => import("node:child_process").ChildProcess} launch
+ * @param {number} [ms] */
+export async function startChrome(profile, launch, ms = CHROME_START_MS) {
+  for (let attempt = 1; attempt <= 2; attempt++) {
+    // Never accept an announcement left by a previous process.
+    rmSync(join(profile, "DevToolsActivePort"), { force: true });
+    const child = launch();
+    try {
+      const port = await devtoolsPort(profile, ms, { child });
+      return { child, port };
+    } catch (error) {
+      if (child.pid && child.exitCode === null && child.signalCode === null) {
+        const exited = new Promise((resolve) => child.once("exit", resolve));
+        child.kill("SIGKILL");
+        let timer;
+        try {
+          await Promise.race([exited, new Promise((_, reject) => {
+            timer = setTimeout(() => reject(new Error("Chrome did not exit after failed startup")), 5000);
+          })]);
+        } finally { clearTimeout(timer); }
+      }
+      if (attempt === 2) throw new Error(`Chrome startup failed after 2 attempts: ${/** @type {Error} */ (error).message}`, { cause: error });
+      console.error(`Chrome startup attempt 1 failed; retrying once: ${/** @type {Error} */ (error).message}`);
+    }
+  }
+  throw new Error("Chrome startup attempts exhausted");
+}
 
 /** The DevTools port of a Chrome started with --remote-debugging-port=0 and
  * --user-data-dir=profile, once it is listening (within `ms`).  A timeout lists
@@ -26,7 +59,7 @@ export const CHROME_STDERR_TAIL = 2048, PROFILE_LIST_MAX = 12;
  * @param {string} profile
  * @param {number} [ms]
  * @param {{ child?: import("node:child_process").ChildProcess }} [options] */
-export async function devtoolsPort(profile, ms = 60_000, { child } = {}) {
+export async function devtoolsPort(profile, ms = CHROME_START_MS, { child } = {}) {
   const watch = child ? watchChrome(child) : null;
   const t = Date.now();
   for (;;) {

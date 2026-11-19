@@ -190,6 +190,11 @@ try {
   const rd = await drive({ op: "req", method: "workspace.read", params: { path } });
   const doc = rd.ok?.content?.json;
   ok(Array.isArray(doc?.cells) && doc.cells.some((c) => c.code === "x = 1"), "the agent reads the notebook, the person's cell in it", rd);
+  // (and its address, a link the agent can give the person: this site's notebook page, by the notebook's own id, which
+  //  the agent's view of the entry doesn't carry)
+  const site = await ev("location.origin");
+  const ref = await ev(`window.sagebrush.workspace.stat(${JSON.stringify(path)}).then((e) => e?.ref ?? null)`).catch(() => null);
+  ok(typeof ref === "string" && rd.ok?.entry?.url === site + "/?nb=" + encodeURIComponent(ref) && !("ref" in (rd.ok?.entry ?? {})), "the read's entry has url, the notebook's page on this site (and still no ref of its own)", { entry: rd.ok?.entry, ref });
   const MARK = "print('from the agent', 6 * 7)";
   const wr = await drive({ op: "req", method: "workspace.write", params: { path, content: { json: { ...doc, cells: [...doc.cells, { id: "agentcell1", code: MARK, outputs: [], n: null }] } }, base: rd.ok?.rev } });
   ok(!!wr.ok, "the agent writes it (its base)", wr);
@@ -512,6 +517,14 @@ try {
   ok(typeof pyFid === "string" && await go(`?code=${encodeURIComponent(pyFid)}`) && await until(`!!document.querySelector('.code-filemenu [data-f="c-agent"]')`), "the code page's File menu offers Connect an agent…");
   ok(!requests.slice(beforeC).some(chunk) && await ev(`document.querySelector("#agentbtn").hidden`), "nothing fetched before it's wanted, and the notebook's Agent isn't shown over it");
   ok(await ev(`sessionStorage.getItem("sb-agent-reload-v1") === null`), "a reload record met on a navigation that isn't a reload: dropped, and nothing fetched for it");
+  // (a page in a frame of this tab, as the Agents page's .tex pane is: it shares the tab's sessionStorage, and the record
+  //  is the top page's: left alone)
+  await ev(`(sessionStorage.setItem("sb-agent-reload-v1", "kept"), true)`);
+  await ev(`(() => { const f = document.createElement("iframe"); f.id = "sbframe"; f.src = "?code=" + ${JSON.stringify(encodeURIComponent(pyFid))}; document.body.append(f); return true; })()`);
+  const framed = await until(`document.querySelector("#sbframe")?.contentDocument?.readyState === "complete" && !!document.querySelector("#sbframe").contentWindow.sagebrush?.workspace`, 30000);
+  await sleep(1500);
+  ok(framed && await ev(`sessionStorage.getItem("sb-agent-reload-v1") === "kept"`), "a page in a frame of this tab (as the Agents page's .tex pane): the tab's reload record is left alone", { framed });
+  await ev(`(document.querySelector("#sbframe")?.remove(), sessionStorage.removeItem("sb-agent-reload-v1"), true)`);
   // (a ?pair= link on the code page whose chunk can't load: said in the code page's own status line; board's N1 on #935)
   const cf = await drive({ op: "code" });
   await send("Network.setCacheDisabled", { cacheDisabled: true });
