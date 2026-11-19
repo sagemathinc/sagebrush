@@ -65,7 +65,13 @@ export const LATEX_LAZY = {
 //  and the agent module loaded for a tab that has one); measured 249,995 / 83,590 on master 25de21b2 with it, + 64)
 // (250,691 raw / 83,855 gzip: Nov 19 2026, the two above together, a reload of the tab keeping the agent and SageTeX's
 //  code arguments, measured on their merge (master e478921b): 250,627 / 83,791, + 64)
-export const LATEX_CAPS = { raw: 250691, gzip: 83855 };
+// (252,349 raw / 84,230 gzip: the editor's Source | Both | PDF toggle, remembered for each file (the page module's code
+//  and styles), Nov 19, provisional until the exact-head CI packet: 252,285 / 84,166 measured on the shipped build (bun
+//  1.4.4, node 24.21.0), master e478921b with it; 250,418 / 83,700 with master's web/latex/page.ts and style.ts in the
+//  same tree (+1,867 / +466), + 64)
+// (252,558 raw / 84,333 gzip: Nov 19 2026, the LaTeX page's reload record (latex/page.ts) on master abc38965 with the view
+//  toggle: 252,494 / 84,269 measured (bun 1.4.4, node 24.21.0), + 64)
+export const LATEX_CAPS = { raw: 252558, gzip: 84333 };
 export const gz = (b) => gzipSync(b, { level: 9 }).length;
 
 // Each lazy chunk's own cap (raw, gzip), fetched only on its own use, so outside the group:

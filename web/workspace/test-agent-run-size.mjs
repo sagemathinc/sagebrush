@@ -58,7 +58,12 @@ const LATEX_FIRST_USE = ["sagebrush-agent-run.js", "sagebrush-latex.js", "sagebr
 // (154,774 / 56,580: Nov 19 2026, a reload record that doesn't prove a reload of its own tab discarded, said as not a
 //  reload, and the LaTeX page loading its agent chunk when a reload record is there (latex/page.ts, agent-ui.ts):
 //  154,710 / 56,516 measured on the shipped build, master 0c4267c5 with it, + 64)
-const AGG_RAW = 154774, AGG_GZIP = 56580;
+// (renewed for the LaTeX editor's Source | Both | PDF toggle, Nov 19, provisional until the exact-head CI packet: 154,501 /
+//  56,425 -> 156,368 / 56,891, +1,867 / +466, the page module's (92,500 / 31,850 -> 94,367 / 32,316), measured on the
+//  shipped build, master 25de21b2; + 64)
+// (156,641 / 57,058: Nov 19 2026, the reload record on the LaTeX page (latex/page.ts, agent-ui.ts) with the view toggle,
+//  master abc38965: 156,577 / 56,994 measured on the shipped build, + 64)
+const AGG_RAW = 156641, AGG_GZIP = 57058;
 // (the reviewed inputs, relative to web/: the entry and what it imports)
 // (the review page's run line: a finished run's note in its branch, canon-doc.ts's canonical bytes and blob id, and branch-wake.ts's
 //  wake, which needs sha256-hex.ts for the branch store's name)
