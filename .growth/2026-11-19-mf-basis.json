@@ -1,9 +1,9 @@
 {
  "v": 1,
- "reason": "Sage mode: bases of spaces of modular forms for Gamma0(N) (cusp forms from Hecke translates of trace forms, oldforms, Eisenstein series over Q(zeta_m), Sage's echelon forms), q-expansions to any precision, Hecke matrices, forms and their arithmetic, with doctests (lib/_sage_modular.py, +930 lines, and its engine/py copy). Python only, in Sage mode's own library; the engine wasm is unchanged. Measured locally with CI's build (pinned bun 1.4.4, node 24.21.0) on base 10762660 and the merge: engine/lib/sage.src +31687, engine/lib/sage.pre +167445, cli/lib.gen.js +10296, cli/pyjs.cjs +27624 bytes. The cli bounds are the new measurements + 64; the sage.src and sage.pre markers still cover their measurements and are kept. The sage.src and sage.pre ceilings rise to their measured sizes + 64 (the per-PR ceiling rule).",
+ "reason": "Sage mode: bases of spaces of modular forms for Gamma0(N) (cusp forms from Hecke translates of trace forms, oldforms, Eisenstein series over Q(zeta_m), Sage's echelon forms), q-expansions to any precision, Hecke matrices, forms and their arithmetic, with doctests (lib/_sage_modular.py, +930 lines, and its engine/py copy). Python only, in Sage mode's own library; the engine wasm is unchanged. Measured locally with CI's build (pinned bun 1.4.4, node 24.21.0) on base 10762660 and the merge: engine/lib/sage.src +31687, engine/lib/sage.pre +167445, cli/lib.gen.js +10296, cli/pyjs.cjs +27624 bytes. Each bound is its measurement + 64 (confirmed by CI on base 10762660: cli/pyjs.cjs +27632). The sage.src and sage.pre ceilings rise to their measured sizes + 64 (the per-PR ceiling rule).",
  "bytes": {
   "engine/lib/sage.src": 31751,
-  "engine/lib/sage.pre": 167587,
+  "engine/lib/sage.pre": 167509,
   "cli/lib.gen.js": 10360,
   "cli/pyjs.cjs": 27688
  }
