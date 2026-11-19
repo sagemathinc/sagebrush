@@ -11,6 +11,12 @@ sagebrush-bigint = { path = "../../../engine/bigint" }
 sagebrush-poly = { path = "../../../engine/poly" }
 sagebrush-classgroup = { path = "../../../engine/classgroup" }
 
+# (the engine's parallel paths on natively, as in every shipped native build:
+# the Python wheel, the Node addon and the CLI enable sagebrush-par/parallel;
+# off in the wasm column, as in the product's WebAssembly)
+[target.'cfg(not(target_arch = "wasm32"))'.dependencies]
+sagebrush-par = { path = "../../../engine/par", features = ["parallel"] }
+
 [profile.release]
 opt-level = 3
 lto = true

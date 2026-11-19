@@ -22,7 +22,7 @@ bad = 0
 for row in rows:
     n, k = row["sizes"][args.size]["n"], run.variants(row, args.size)
     hashes = {}
-    for b in ("user", "native", "magma", "flint"):
+    for b in [b for b in run.BACKENDS.split(",") if not b.endswith("-n")]:
         if run.command(b, row, n, "inputs", k):
             r = run.invoke(b, row, n, "inputs", row["sizes"][args.size]["timeout"], k)
             hashes[b] = r.get("input_hash") or r["status"]

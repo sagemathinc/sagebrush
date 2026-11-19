@@ -160,7 +160,18 @@ fn zmat(n: usize, v: usize) -> Vec<BigInt> {
         .collect()
 }
 
+extern "C" {
+    // FLINT's own thread count (its public interface; the static library is
+    // already linked through sagebrush-flint)
+    fn flint_set_num_threads(num_threads: std::os::raw::c_int);
+}
+
 fn main() {
+    // (1, or N for the flint-n backend: run.py sets BENCH_THREADS)
+    let threads: i32 = std::env::var("BENCH_THREADS").ok().and_then(|t| t.parse().ok()).unwrap_or(1);
+    // SAFETY: called once, before any FLINT call, with a positive count, as
+    // FLINT's documentation allows
+    unsafe { flint_set_num_threads(threads.max(1)) };
     let mut args = std::env::args().skip(1);
     let case_id = args.next().expect("case id");
     let n: usize = args.next().expect("n").parse().unwrap();
