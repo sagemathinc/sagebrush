@@ -65,6 +65,9 @@ async function openLeg({ hold = false, frame = F, refuse = null, result = {}, ag
   // (the runner reads its socket in order: each message is checked, then forwarded or refused, after the one before)
   let order = Promise.resolve();
   ws.onsend = (s) => { order = order.then(() => receive(s)).catch((e) => { runner.refused.push({ why: "error: " + e.message }); }); };
+  // (settled: every message the page has written so far is verified and recorded, so a check that nothing more arrived
+  //  runs after the runner has seen all there was, not after a guess at how long that takes)
+  runner.settled = async () => { for (let o; o !== order; ) { o = order; await o; } };
   const receive = async (s) => {
     if (s.startsWith('{"relay":')) return;
     const env = JSON.parse(s);
@@ -391,12 +394,15 @@ const ready = (child = "child-1") => ({ jsonrpc: "2.0", method: "agent.ready", p
   ok(JSON.parse(runner.forwarded.at(-1)).result?.content?.text === "hi", "once granted, a call is answered through the leg");
   ok(p.notifyWhy("chat.message", { conversation: "c", id: "1", author: "person", text: "x".repeat(F) }) === "over", "a chat message over F: \"over\" (the 4 MB line), the pairing kept");
   await p.revoke("revoked by the person");
-  await tick(10);
+  // (the drain's last envelope is signed (WebCrypto) and verified by the runner before it is recorded: wait for it)
+  await until(() => leg.state === "closed" && runner.forwarded.length > 0 && JSON.parse(runner.forwarded.at(-1)).unpair === true, "the drain's unpair", 10000).catch(() => {});
+  await runner.settled();
   ok(p.state === "closed" && leg.state === "closed" && JSON.parse(runner.forwarded.at(-1)).unpair === true, "Revoke: the pairing over at once; the leg's drain ends with {\"unpair\":true}");
   const before = runner.forwarded.length;
   ws.recv(ready("child-2"));
   ws.recv({ jsonrpc: "2.0", id: "s3", method: "workspace.read", params: { path: "/a" } });
   await tick(10);
+  await runner.settled();
   ok(runner.forwarded.length === before && p.hello.child === "child-1", "the old leg's later messages (an agent.ready, a call) reach nothing");
 }
 
@@ -410,11 +416,12 @@ const ready = (child = "child-1") => ({ jsonrpc: "2.0", method: "agent.ready", p
   await until(() => a.runner.forwarded.length >= 2, "grant told");
   a.signer.hold = true;
   pa.notify("chat.permission", { request_id: "perm-1", behavior: "allow", digest: "D".repeat(43) });
-  await tick(5);
+  await until(() => a.signer.held.length === 1, "the Allow's signing, held", 10000);
   const revoked = pa.revoke("revoked by the person");
   // (Chat here again while the old signing is held: the new hello waits for the page's one signing place)
   const opening = openLeg();
-  await tick(20);
+  // (its key made and its socket open, the new hello asks for the page's one signing place: wait until it has asked)
+  await until(() => signGate.queued === 1, "the new hello queued for signing", 10000).catch(() => {});
   ok(signGate.active === 1 && signGate.queued === 1, "the new leg's hello waits for the old signing to settle (one signing in the page)");
   await release(a.signer);
   const b = await opening;
@@ -423,6 +430,7 @@ const ready = (child = "child-1") => ({ jsonrpc: "2.0", method: "agent.ready", p
   await pb.paired();
   await revoked;
   await tick(20);
+  await b.runner.settled();
   ok(!b.runner.forwarded.some((m) => m.includes("perm-1")), "the old pairing's Allow, signed late, never reaches the new leg");
   ok(pb.state === "paired" && b.leg.state === "open", "the new pairing is untouched");
   pb.drop();
@@ -435,13 +443,17 @@ const ready = (child = "child-1") => ({ jsonrpc: "2.0", method: "agent.ready", p
   let waited = 0;
   for (let k = 0; k < 4; k++) {
     const opening = openLeg();
-    await tick(10);
-    // (the previous leg, closed with its signing held: this one's hello waits for that signing to settle)
-    if (legs.length) { if (signGate.active === 1 && signGate.queued === 1) waited++; await release(legs.at(-1).signer); }
+    // (the previous leg, closed with its signing held: this one's hello waits for that signing to settle; wait until it
+    //  has asked for the signing place, however long its key and socket take)
+    if (legs.length) {
+      await until(() => signGate.queued === 1, "the new hello queued behind the held signing", 10000).catch(() => {});
+      if (signGate.active === 1 && signGate.queued === 1) waited++;
+      await release(legs.at(-1).signer);
+    }
     const x = await opening;
     x.signer.hold = true;
     x.leg.send(note(k, "w".repeat(F - 1000)));
-    await tick(5);
+    await until(() => x.signer.held.length === 1, "the message's signing, held", 10000);
     legs.push(x);
     x.leg.close(); // (closed while its signing is held: the charge stays until it settles)
   }
