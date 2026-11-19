@@ -96,7 +96,7 @@ try {
    * asked, until the page closes). */
   const pair = async (c, run) => {
     await send("Page.navigate", { url: `${origin}/agents/?pair=${c.code}&port=${c.port}` });
-    ok(await until(`!!document.querySelector(".sbag-box button.primary")`, 60000), "the Agents page opens the Connect dialog from the ?pair= link", console_.slice(-5));
+    ok(await until(`!!document.querySelector(".sbag-box button.primary")`, 60000), "the Agents page opens the Connect dialog from the ?pair= link", { console: console_.slice(-5), page: await ev(`document.body?.innerText?.slice(0, 300) ?? ""`).catch(() => null) });
     await ev(`(document.querySelector(".sbag-box button.primary").click(), true)`);
     ok(await until(`[...document.querySelectorAll(".sbag-box h2")].some((h) => h.textContent === "Allow this agent?")`), "paired: the grant dialog asks the person", { err: await ev(`document.querySelector(".sbag-box .err")?.textContent ?? ""`).catch(() => "") });
     await ev(`(() => {
@@ -114,6 +114,9 @@ try {
   };
 
   // ---- a grant with May run code: every run verb works here
+  // (the page loaded once first, so the pairing below doesn't race a cold first load: waited for, not checked)
+  await send("Page.navigate", { url: `${origin}/agents/` });
+  await until(`!!document.querySelector("#connect") && !document.querySelector("#connect").hidden`, 90000);
   await pair(first, true);
   const isolated = await ev(`globalThis.crossOriginIsolated === true`);
   ok(isolated, "the Agents page is cross-origin isolated (the site's headers), so the sandboxed runner can be had");
