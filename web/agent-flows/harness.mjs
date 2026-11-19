@@ -199,7 +199,8 @@ async function chatSurface(site, page) {
       if (!error && typeof p === "string" && (name === "workspace_create" || name === "workspace_write")) {
         const json = args.content?.json;
         if (json || p.endsWith(".ipynb")) event({ type: "artifact", id: p, kind: "notebook", title: p.split("/").pop(), path: p, body: `${json?.cells?.length ?? 0} cells (${args.mode ?? json?.mode ?? "python"})` });
-        else event({ type: "artifact", id: p, kind: "file", title: p.split("/").pop(), path: p, body: args.content?.text ?? args.text ?? "" });
+        // (sagebrush-agent's artifactKind: Markdown as markdown, anything else as code in its extension's language)
+        else event({ type: "artifact", id: p, ...(/\.(md|markdown)$/i.test(p) ? { kind: "markdown" } : { kind: "code", lang: /\.([A-Za-z0-9]+)$/.exec(p)?.[1].toLowerCase() }), title: p.split("/").pop(), path: p, body: args.content?.text ?? args.text ?? "" });
       }
     }
     return { text, structured: { result: r.result ?? null, error }, isError: !!error };
