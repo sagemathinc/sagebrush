@@ -43,13 +43,16 @@ check(LATEX_CAPS.raw === 249795 && LATEX_CAPS.gzip === 83533, "the caps are 249,
 //  the board page's forward merged + 64; was 49,666 / 16,943)
 // (agent 50,816 / 17,368 B: Nov 18 2026, the check before a created notebook runs by itself (mayRunCreated), its
 //  measurement with the board page's forward merged + 64)
+// (agent 51,193 / 17,561 B: Nov 19 2026, workspace_create's description of a notebook's language, its measurement in CI
+//  at 1055da1d + 64)
 // (agent 51,671 / 17,686 B: Nov 19 2026, Connect's one field for the agent's link (readConnect), its measurement +
 //  64; was 50,816 / 17,368, measured 50,767 / 17,305 on master 35e6a6d0)
+// (agent 52,033 / 17,878 B: the two above together, measured on their merge (master 25de21b2): 51,969 / 17,814, + 64)
 // (tools 16,546 / 6,950 B: Nov 11 2026: latex_build's own code moved here out
 //  of the eager group, its landing measurement + 64; was 16/6 KiB)
 // (tools 17,335 / 7,231 B: renewed at the landing merge on master 14279164, 17,271 / 7,167 measured + 64; its +777 / +286
 //  over 16,494 / 6,881 is inherited from a shared check's and the tools' changes)
-const lazyPinned = { COMMENTS: [16384, 6144], COMMENTS_DOC: [40960, 16384], AGENT: [51671, 17686], TOOLS: [17335, 7231], PRESENT: [16384, 6144], DOC: [3584, 1792], EXAMPLES: [13312, 6144], BEAMER: [8192, 3584], PYTHONTEX: [5120, 2304], RUN: [19644, 7812], INTERACT: [9453, 3805], VIEW: [3378, 1672], SHARE: [3853, 2021] };
+const lazyPinned = { COMMENTS: [16384, 6144], COMMENTS_DOC: [40960, 16384], AGENT: [52033, 17878], TOOLS: [17335, 7231], PRESENT: [16384, 6144], DOC: [3584, 1792], EXAMPLES: [13312, 6144], BEAMER: [8192, 3584], PYTHONTEX: [5120, 2304], RUN: [19644, 7812], INTERACT: [9453, 3805], VIEW: [3378, 1672], SHARE: [3853, 2021] };
 check(JSON.stringify(Object.fromEntries(Object.entries(LATEX_LAZY_CAPS).map(([k, c]) => [k, [c.raw, c.gzip]]))) === JSON.stringify(lazyPinned), "each lazy chunk's cap as ruled", LATEX_LAZY_CAPS);
 
 // ---- which build is measured: only the shipped LaTeX build (version.json's latexMode "shipped"); anything else is a
