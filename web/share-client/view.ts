@@ -728,7 +728,8 @@ async function main() {
   // (a GitHub folder's README, below its list, when no notebook is asked for: rendered as a notebook's text is, its
   // relative links to this repository's /gh/ pages and its pictures from raw, at the same commit)
   if (gh && gh.at.kind === "tree") {
-    const readme = c.manifest.files.find((f) => /^readme\.md$/i.test(f.path.slice(ghDir(gh).length)));
+    // (its own README only: one of the folder's own files, never another folder's whose path is as long)
+    const readme = ghFilesIn(gh, c.manifest.files).find((f) => /^readme\.md$/i.test(f.path.slice(ghDir(gh).length)));
     if (readme) void fetchChecked(readme).then((b) => ghReadme(gh, new TextDecoder().decode(b), c.manifest.files, fileUrl)).catch(() => {});
   }
   // (?f=<path>: that file, a chapter's own link; else the first notebook)
