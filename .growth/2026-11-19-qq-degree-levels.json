@@ -1,0 +1,10 @@
+{
+ "v": 1,
+ "reason": "Sage mode: RationalField.degree() and absolute_degree() (1, as Sage), and the congruence group constructors refuse a level <= 0 with Sage's ArithmeticError, with their doctests (lib/_sage_poly.py, lib/_sage_modular.py and their engine/py copies). Python only; the engine wasm is unchanged. engine/lib/sage.src grows +1125 (over its epoch: these are new Sage-mode methods and checks in the shipped library, which the epoch doesn't cover; the ceiling rises by the same +1125, as for earlier Sage-mode growth), engine/lib/sage.pre +2568, cli/lib.gen.js +296 and cli/pyjs.cjs +2320 bytes, exact, CI's governed measurement on the tested merge with base ad366a5f, pinned node and bun; each bound adds 64 bytes of slack.",
+ "bytes": {
+  "engine/lib/sage.src": 1189,
+  "engine/lib/sage.pre": 2632,
+  "cli/lib.gen.js": 360,
+  "cli/pyjs.cjs": 2384
+ }
+}
