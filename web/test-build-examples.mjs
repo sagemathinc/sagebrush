@@ -197,7 +197,7 @@ check(/marker names .* not examples\/shared\/katex-preview\.css/.test(refused ??
   check(h.includes(`<meta name="sagebrush-example-main" content="${m.main} sha256:${sha}">`), "the page names the sha256 of the main its preview was built from (A6)");
 }
 
-// ---- plan section 5's caps on what the site serves (the parts budgets.json's site/examples row doesn't bind alone)
+// ---- plan section 5's independent caps on what the site serves
 check(SITE_CAPS.preview === 1048576 && SITE_CAPS.previews === 125829120 && SITE_CAPS.zips === 62914560 && SITE_CAPS.catalog === 204800, "the caps are the plan's: 1 MiB a preview, 120 MiB of previews, 60 MiB of ZIPs, 200 KiB of catalog");
 for (const [cap, re] of [
   [{ ...SITE_CAPS, preview: 10000 }, /latex\/article: its preview is \d+ bytes, more than 10000/],

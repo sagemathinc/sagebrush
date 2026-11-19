@@ -1,8 +1,0 @@
-{
- "v": 1,
- "reason": "The Hermite routes' metering (engine/classgroup: det_mod_p, det_crt, hnf_mod, hnf_mod_until, hermite_modular, zlin::hnf and the cyclic wrapper count their work by family) and cost::Local, the one per-family accumulator in engine/arith: the engine module grows 13189 B (CI's size row at ec57420a). cli/pyjs.cjs embeds the engine module in base64, so it grows by 4/3 of that, 17584 B, with no other change: generated, not new library code. Each marked +64 over the measured growth; the engine module's ceiling is renewed to its measured size + 64.",
- "bytes": {
-  "cli/pyjs.cjs": 17648,
-  "engine/sagebrush-engine.wasm": 13253
- }
-}

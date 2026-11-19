@@ -1,8 +1,0 @@
-{
- "v": 1,
- "reason": "newforms' trace forms to a large bound (what hecke_matrix(p) on a weight-4 space asks for) answer Stop within the 250 ms bound: the CRT bound's divisor counts come from a sieve, O(B log B) and polled, instead of O(B^2) trial division without a check, and the per-prime Heilbronn images take a coarse check each. Engine built from source with CI's path mapping: 7640188 -> 7641008 bytes (+820) over the base's fresh build, marked exactly (PRs into the track do not move wasm/pins.json). The command line: +1096 bytes measured by CI's size gate on the tested merge, marked at its suggested 1160.",
- "bytes": {
-  "engine/sagebrush-engine.wasm": 820,
-  "cli/pyjs.cjs": 1160
- }
-}

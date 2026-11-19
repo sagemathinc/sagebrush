@@ -1,8 +1,0 @@
-{
- "v": 1,
- "reason": "Factoring modulo a word prime (the modular phase of factor_mod: square-free decomposition, distinct-degree and equal-degree factorization) now runs on the engine's word-size polynomial arithmetic (NTT products, Newton division, the half-gcd, powers modulo a fixed polynomial with its inverse precomputed) with the call's own transform tables, instead of its own schoolbook routines; the results are the same, bit for bit. This adds the modular phase's budgeted wrappers and the shared work and memory bounds; the schoolbook routines it replaced remain for Hensel lifting and number-field arithmetic. It also makes reduction modulo a sparse polynomial use its stored inverse (it recomputed it). Engine build with CI's path mapping (the pin in wasm/pins.json): 7625417 -> 7639618 bytes (+14201), marked exactly. The command line: an ESTIMATE, 4/3 of the engine's growth as base64, awaiting this head's CI size table.",
- "bytes": {
-  "engine/sagebrush-engine.wasm": 14201,
-  "cli/pyjs.cjs": 18935
- }
-}
