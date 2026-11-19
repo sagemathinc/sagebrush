@@ -3044,10 +3044,117 @@ try {
       const run = i("tex-run"); return { run, toggle: i("tex-toggle"), file: i("tex-filebtn"), label: h[run]?.textContent ?? null, hidden: h[run]?.hidden ?? null }; })()`);
     check(bar.run >= 0 && bar.label === "Run" && bar.hidden === false && bar.run === bar.toggle + 1 && (bar.file < 0 || bar.file < bar.run),
       "Run: in the toolbar, right after the preview toggle (after File ▾ where there is one), shown for a document with SageTeX code", bar);
+    // the view (William, Nov 18: hide the source, one click): Source | Both | PDF, each a button of the toggle, remembered
+    // for this file in this browser; a file with none kept opens with both on a wide page, the source on a narrow one
+    {
+      const vis = () => ev(`(() => { const s = (c) => getComputedStyle(document.querySelector(c)).display !== "none";
+        const m = document.querySelector(".tex-main").getBoundingClientRect().width, r = document.querySelector(".tex-right").getBoundingClientRect().width;
+        return { view: document.querySelector(".tex-page").dataset.view, src: s(".tex-left"), doc: s(".tex-right"), full: r >= m - 2, both: s('.tex-view [data-view="both"]'),
+          pressed: [...document.querySelectorAll(".tex-view button")].map((b) => b.dataset.view + ":" + b.getAttribute("aria-pressed")).join() }; })()`);
+      const pick = (v) => ev(`(document.querySelector('.tex-view [data-view="${v}"]').click(), true)`);
+      const v0 = await vis();
+      check(v0.view === "both" && v0.src && v0.doc && !v0.full && v0.pressed === "source:false,both:true,pdf:false", "view: a file with none kept opens with both on a wide page, Both pressed", v0);
+      await pick("pdf");
+      const v1 = await vis();
+      check(v1.view === "pdf" && !v1.src && v1.doc && v1.full && v1.pressed === "source:false,both:false,pdf:true", "view: PDF shows the document alone, the page's width", v1);
+      await open(fr);
+      const v2 = await vis();
+      const fo = await mk("/t/view-other.tex", enc("\\documentclass{article}\n\\begin{document}\nOther.\n\\end{document}\n"));
+      await open(fo);
+      const v3 = await vis();
+      await pick("source");
+      const v4 = await vis();
+      check(v2.view === "pdf" && v3.view === "both" && v4.view === "source" && v4.src && !v4.doc, "view: kept for this file (reopened: PDF), another file its own (both, then Source shows the source alone)", { v2, v3, v4 });
+      await send("Emulation.setDeviceMetricsOverride", { width: 390, height: 844, deviceScaleFactor: 2, mobile: true });
+      const fn = await mk("/t/view-new.tex", enc("\\documentclass{article}\n\\begin{document}\nNew.\n\\end{document}\n"));
+      await open(fn);
+      const v5 = await vis();
+      await open(fr);
+      const v6 = await vis();
+      await send("Emulation.clearDeviceMetricsOverride");
+      check(v5.view === "source" && v5.src && !v5.doc && !v5.both && v6.view === "pdf" && !v6.src && v6.doc, "view: on a phone, a file with none kept opens with the source, Both isn't offered, and a kept PDF shows the document", { v5, v6 });
+      await open(fr);
+      await pick("both");
+    }
     // (never on open: no runner frame, no worker script for it, no results file, after the preview has rendered)
     await sleep(1500);
     const onOpen = { runner: requests.slice(n0).filter((u) => /\/runner\/|sagebrush-worker\.js/.test(u)), frames: await ev(`document.querySelectorAll("iframe[sandbox]").length`), results: await resultsOf("/t/run.tex"), chips: await ev(`document.querySelectorAll(".tex-preview .sagechip").length`) };
     check(onOpen.runner.length === 0 && onOpen.frames === 0 && onOpen.results === null && onOpen.chips >= 2, "Run: nothing runs on open (no runner, no worker, no results file; the items show as not run)", onOpen);
+    // embedded (?embed=1: the Agents page's pane frames the editor; the page's frame-ancestors 'self' admits this site's
+    // own frames only): the document alone, no Files, home, title, File menu, Agent or Share, no pairing of its own (the
+    // agent chunk never fetched, though this browser remembers a grant), and the pane's may-close answered by the
+    // frame's leave guard: at once with nothing pending, and only once a held write is written
+    {
+      const hdr = await ev(`fetch("/").then((r) => ({ csp: r.headers.get("content-security-policy") ?? "", xfo: r.headers.get("x-frame-options") }))`);
+      check(/frame-ancestors 'self'/.test(hdr.csp) && hdr.xfo === "SAMEORIGIN", "embed: the editor's page may be framed by this site's own pages only (frame-ancestors 'self', X-Frame-Options SAMEORIGIN)", hdr);
+      const fe = await mk("/t/embed.tex", enc("\\documentclass{article}\n\\begin{document}\nEmbedded.\n\\end{document}\n"));
+      // (a grant this browser remembers: put through the editor page's own workspace, the test build's __sbTexWs)
+      await ev(`window.__sbTexWs.putAgentGrant("embedtest", { id: "embedtest", folders: ["/"], write: true, run: true, expires: null })`);
+      await go(base + "?latex=1"); await until(`!!${W}`, 60000);
+      const n0 = requests.length;
+      await ev(`(() => { const f = document.createElement("iframe"); f.id = "sbembed"; f.style.cssText = "position:fixed;left:0;top:0;width:1000px;height:700px;z-index:99999;border:0;background:#fff"; f.src = "/?tex=${fe}&latex=1&embed=1"; document.body.append(f); return true; })()`);
+      const D = `document.getElementById("sbembed").contentDocument`;
+      await until(`!!${D}?.querySelector(".tex-page .tex-preview")?.textContent.includes("Embedded")`, 30000);
+      await sleep(1500);
+      const st = await ev(`(() => { const d = ${D}; const gone = (c) => { const e = d.querySelector(c); return !e || e.hidden || getComputedStyle(e).display === "none"; };
+        return { view: d.querySelector(".tex-page").dataset.view, back: gone(".tex-back"), home: gone(".tex-home"), title: gone(".tex-title"), file: gone(".tex-filebtn"), agent: gone(".tex-agent"), share: gone(".tex-sharebtn"),
+          left: d.querySelector(".tex-page").getBoundingClientRect().left, focusInside: document.activeElement?.id === "sbembed" }; })()`);
+      const agentFetched = requests.slice(n0).filter((u) => /sagebrush-latex-agent/.test(u));
+      check(st.view === "pdf" && st.back && st.home && st.title && st.file && st.agent && st.share && st.left === 0 && !st.focusInside && agentFetched.length === 0,
+        "embed: the frame shows the document alone, without Files, home, title, File, Agent or Share, takes no focus, and starts no pairing (no agent chunk, a grant remembered)", { st, agentFetched });
+      const ask = (id) => ev(`new Promise((res) => { const f = document.getElementById("sbembed"); const h = (e) => { if (e.source === f.contentWindow && e.data?.t === "may-close" && e.data.id === ${JSON.stringify(id)}) { removeEventListener("message", h); res(e.data); } }; addEventListener("message", h); f.contentWindow.postMessage({ t: "may-close", id: ${JSON.stringify(id)} }, location.origin); setTimeout(() => res(null), 15000); })`);
+      const a1 = await ask("q1");
+      check(a1?.ok === true, "embed: the pane's may-close, nothing pending: answered ok at once", a1);
+      // (a may-close that isn't its parent's: from a frame beside it of this origin (the wrong source), and from a
+      //  sandboxed frame, whose origin is opaque (the wrong origin); each posted by code in that frame (a CDP isolated
+      //  world there), so the message's source is that frame. Neither is answered; the parent's next one still is.
+      //  The parent of another origin can't be made here: frame-ancestors 'self' refuses it, as checked above)
+      {
+        await ev(`(() => { window.__stray = []; addEventListener("message", (e) => { if (e.data?.t === "may-close") window.__stray.push(e.data.id); });
+          for (const [nm, sb] of [["sbsib", null], ["sbnull", "allow-scripts"]]) { const f = document.createElement("iframe"); f.name = nm; if (sb) f.setAttribute("sandbox", sb); f.onload = () => (f.dataset.loaded = "1"); f.src = "/manifest.webmanifest"; document.body.append(f); } return true; })()`);
+        await until(`[...document.querySelectorAll("iframe[name^=sb]")].every((f) => f.dataset.loaded === "1")`, 15000);
+        const inFrame = async (name, expression) => {
+          const t = await send("Page.getFrameTree");
+          const find = (x) => x.frame.name === name ? x.frame : (x.childFrames ?? []).map(find).find(Boolean);
+          const f = find(t.frameTree);
+          if (f) {
+            const w = await send("Page.createIsolatedWorld", { frameId: f.id, worldName: "sbtest" });
+            return (await send("Runtime.evaluate", { expression, contextId: w.executionContextId, returnByValue: true })).result?.value;
+          }
+          // (out of the page's process, as Chrome puts a sandboxed frame: its own target, evaluated in its session)
+          const ti = (await send("Target.getTargets")).targetInfos.find((x) => x.type === "iframe" && /manifest\.webmanifest/.test(x.url));
+          if (!ti) return "no frame target";
+          const { sessionId } = await send("Target.attachToTarget", { targetId: ti.targetId, flatten: true });
+          const r = await new Promise((res) => { const id = ++n; waiting.set(id, res); ws.send(JSON.stringify({ id, sessionId, method: "Runtime.evaluate", params: { expression, returnByValue: true } })); });
+          await send("Target.detachFromTarget", { sessionId });
+          return r?.result?.value ?? JSON.stringify(r).slice(0, 300);
+        };
+        const sib = await inFrame("sbsib", `(parent.document.getElementById("sbembed").contentWindow.postMessage({ t: "may-close", id: "s1" }, location.origin), self.origin)`);
+        const opaque = await inFrame("sbnull", `(() => { for (let i = 0; i < parent.frames.length; i++) parent.frames[i].postMessage({ t: "may-close", id: "o1" }, "*"); return self.origin; })()`);
+        await sleep(2000);
+        const stray = await ev(`window.__stray.slice()`);
+        const a0 = await ask("q0");
+        check(sib === new URL(base).origin && opaque === "null" && !stray.includes("s1") && !stray.includes("o1") && a0?.ok === true,
+          "embed: a may-close from a frame beside it (this origin, not its parent) or from an opaque origin is ignored, unanswered; its parent's is answered", { sib, opaque, stray, a0 });
+        await ev(`(document.querySelectorAll("iframe[name^=sb]").forEach((f) => f.remove()), true)`);
+      }
+      // (a held write: typed in the frame's source, the answer waits for it, then ok)
+      const F = `document.getElementById("sbembed").contentWindow`;
+      await ev(`(() => { const w = ${F}; w.__hold = new Promise((r) => (w.__rel = r)); w.__sbTexSaveWrite = () => w.__hold; w.document.querySelector('.tex-view [data-view="source"]').click(); const t = w.document.querySelector(".tex-src"); t.focus(); t.setRangeText(" Typed.", t.value.length, t.value.length, "end"); t.dispatchEvent(new Event("input", { bubbles: true })); return true; })()`);
+      await sleep(1200);
+      let a2 = null;
+      const p2 = ask("q2").then((r) => (a2 = r));
+      await sleep(2500);
+      const early = a2;
+      await ev(`(${F}.__rel(), delete ${F}.__sbTexSaveWrite, true)`);
+      await p2;
+      const bytes = await ev(`${W}.read("/t/embed.tex").then((r) => new TextDecoder().decode(r.content))`);
+      check(early === null && a2?.ok === true && /Typed\./.test(bytes), "embed: with a write held, the may-close answer waits for it, then ok, the edit in the file", { early, a2, bytes: bytes.slice(-40) });
+      await ev(`(document.getElementById("sbembed").remove(), true)`);
+      await open(fr);
+      await until(`!!window.__sbTexWs`, 20000);
+      await ev(`window.__sbTexWs.putAgentGrant("embedtest", null)`);
+    }
     // (Run's code is a chunk of its own, /sagebrush-latex-run.js (daybreak2, #551's group cap): not fetched by the editor's
     //  load or by any document opened so far, Run shown or not; the first Run fetches it once, later Runs not again)
     const runChunk = () => byId.filter((x) => /\/sagebrush-latex-run\.js(\?|$)/.test(x.url));
