@@ -1,0 +1,10 @@
+{
+ "v": 1,
+ "reason": "Sage mode's matrix and vector checks (shapes, non-integral powers, matrix times a list refused with Sage's message, string and None entries converted as QQ(s) and ZZ(s) do) and QQ(s, base) read as Sage reads it, with their examples in the docstrings. CI's size row for this change: cli/lib.gen.js +3136, cli/pyjs.cjs +6176, engine/lib/sage.pre +31264, engine/lib/sage.src +11035 bytes, each marked +64 over that.",
+ "bytes": {
+  "cli/lib.gen.js": 3200,
+  "cli/pyjs.cjs": 6240,
+  "engine/lib/sage.pre": 31328,
+  "engine/lib/sage.src": 11099
+ }
+}
