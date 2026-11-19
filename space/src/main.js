@@ -7,6 +7,8 @@ import * as THREE from "three";
 import { OrbitControls } from "three/examples/jsm/controls/OrbitControls.js";
 import { marked } from "marked";
 import { layout } from "./layout.js";
+import { highlight, editor } from "./code.js";
+import { run, interrupt, sceneObject, SCENE } from "./run.js";
 
 const $ = (s) => document.querySelector(s);
 const esc = (s) => String(s ?? "").replace(/[&<>"]/g, (c) => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;" })[c]);
@@ -110,6 +112,20 @@ function faceTexture(nd) {
     g.fillText(mono ? line : line.replace(/\*\*|`/g, ""), pad, y, c.width - 2 * pad);
     y += size * 1.35;
   }
+  if (nd.svg) {
+    // (a figure the code made: drawn in the lower part once its image has loaded)
+    const img = new Image(), top = Math.min(y + fs, c.height * 0.45), tex = { ref: null };
+    img.onload = () => {
+      const h = c.height - top - pad, w = Math.min(c.width - 2 * pad, h * img.width / img.height);
+      g.fillStyle = "#ffffff"; g.fillRect(pad, top, w, h);
+      g.drawImage(img, pad, top, w, h);
+      if (tex.ref) tex.ref.needsUpdate = true;
+    };
+    img.src = "data:image/svg+xml;base64," + btoa(unescape(encodeURIComponent(nd.svg)));
+    const t = texture(c);
+    tex.ref = t;
+    return t;
+  }
   if (nd.kind === "code" && nd.output) {
     y = Math.min(y + fs * 0.6, c.height - pad - fs * 1.4);
     g.fillStyle = "#0b3d2a"; g.fillRect(pad * 0.6, y - fs, c.width - 1.2 * pad, fs * 1.7);
@@ -156,15 +172,22 @@ function makeObject(nd) {
   slab.userData.node = nd;
   group.add(slab);
   pickables.push(slab);
-  if (nd.kind === "plot3d" && nd.surface) {
-    const s = surfaceMesh(nd);
-    s.position.z = d / 2;
-    s.userData.node = nd;
-    group.add(s);
-    pickables.push(s);
-  }
-  group.userData = { node: nd, face, level: 0, tex: [] };
+  group.userData = { node: nd, face, level: 0, tex: [], plot: null };
+  if (nd.scene) setPlot(group, sceneObject(nd.scene));
+  else if (nd.kind === "plot3d" && nd.surface) setPlot(group, surfaceMesh(nd));
   return group;
+}
+// an object's 3D content (a surface, or a scene a run made), standing on the front of its slab
+function setPlot(group, obj) {
+  const nd = group.userData.node, [, , d] = sizeOf(nd);
+  if (group.userData.plot) {
+    group.remove(group.userData.plot);
+    group.userData.plot.traverse((m) => { const k = pickables.indexOf(m); if (k >= 0) pickables.splice(k, 1); });
+  }
+  obj.position.z = d / 2;
+  obj.traverse((m) => { if (m.isMesh) { m.userData.node = nd; pickables.push(m); } });
+  group.add(obj);
+  group.userData.plot = obj;
 }
 
 // semantic zoom: 0 far (a block in its group's color), 1 its title, 2 its face; textures made lazily, a few a frame
@@ -311,6 +334,7 @@ async function load(name) {
   if (space.format !== "sagebrush-space") throw new Error(name + " is not a sagebrush-space");
   clear();
   const nodes = space.nodes, index = new Map(nodes.map((n, i) => [n.id, i]));
+  restore(nodes);
   objects = nodes.map(makeObject);
   objects.forEach((o) => scene.add(o));
   const pairs = [];
@@ -381,6 +405,12 @@ function flyTo(i, dist, remember = true) {
   const p = new THREE.Vector3(positions[3 * i], positions[3 * i + 1], positions[3 * i + 2]);
   const d = dist ?? (nd.kind === "file" ? 5 : 9);
   if (remember) pushView();
+  if (nd.kind === "plot3d" || nd.scene) {
+    // (a plot: seen from in front and below its middle, far enough to have it whole, its height in view)
+    const t = p.clone().add(new THREE.Vector3(0, 0, 1.4));
+    flyToView(t.clone().add(new THREE.Vector3(0, -8.5, 7.5)), t);
+    return;
+  }
   // (seen from the front of its face: the slabs face +z)
   flyToView(p.clone().add(new THREE.Vector3(0, 0, d)), p);
 }
@@ -488,14 +518,22 @@ function openOverlay(nd) {
   showOverlay(nd);
   flyTo(space.nodes.indexOf(nd), undefined, false);
 }
+const RUNS = ["python", "sage", "matlab", "magma"];
+const runnable = (nd) => nd.kind === "code" || nd.kind === "plot3d";
 function showOverlay(nd) {
   let body = "";
   if (nd.kind === "note") body = `<div class="md">${marked.parse(nd.text ?? "")}</div>`;
-  else if (nd.kind === "code") body = `<pre class="code">${esc(nd.text)}</pre>` + (nd.output ? `<div class="label">Output</div><pre class="out">${esc(nd.output)}</pre>` : "");
-  else if (nd.kind === "plot3d") body = (nd.text ? `<pre class="code">${esc(nd.text)}</pre>` : "") + `<p class="hint">The surface is a real 3D object: drag to turn around it.</p>`;
-  else body = `<div class="meta">${esc(nd.lang ?? "")}${nd.lines ? " · " + nd.lines + " lines" : ""}</div><pre class="code">${esc(nd.text)}</pre>${nd.lines > 60 ? '<div class="hint">(its first 60 lines)</div>' : ""}`;
+  else if (runnable(nd)) {
+    const mode = RUNS.includes(nd.lang) ? nd.lang : nd.kind === "plot3d" ? "sage" : "python";
+    body = `<div class="runbar"><select class="mode" title="The language">${RUNS.map((m) => `<option${m === mode ? " selected" : ""}>${m}</option>`).join("")}</select>` +
+      `<button class="run" title="Run (Shift+Enter)">▶ Run</button><button class="stop" title="Stop" hidden>■ Stop</button><span class="runstate"></span></div>` +
+      `<div class="code-edit"></div><div class="label">Output</div><div class="output">${outputHtml(nd)}</div>` +
+      (nd.kind === "plot3d" || nd.scene ? `<p class="hint">A 3D plot is a real object in the space: drag to turn around it. Edit its code and run it to change it.</p>` : "");
+  } else body = `<div class="meta">${esc(nd.lang ?? "")}${nd.lines ? " · " + nd.lines + " lines" : ""}</div><pre class="code hljs"><code>${highlight(String(nd.text ?? ""), nd.lang ?? "")}</code></pre>${nd.lines > 60 ? '<div class="hint">(its first 60 lines)</div>' : ""}`;
   const links = (label, list) => list.length ? `<div class="label">${label} (${list.length})</div><ul class="links">${list.map((m) => `<li><a href="#" data-i="${space.nodes.indexOf(m)}">${esc(m.title)}</a></li>`).join("")}</ul>` : "";
-  $("#overlay").innerHTML = `<button class="close" title="Close (Esc)">×</button><h2>${esc(nd.title)}</h2>${body}${links(nd.kind === "file" ? "Imports" : "Links to", nd._out)}${links(nd.kind === "file" ? "Imported by" : "Linked from", nd._in)}`;
+  $("#overlay").innerHTML = `<div class="grip" title="Drag to resize"></div><button class="close" title="Close (Esc)">×</button><h2>${esc(nd.title)}</h2>${body}${links(nd.kind === "file" ? "Imports" : "Links to", nd._out)}${links(nd.kind === "file" ? "Imported by" : "Linked from", nd._in)}`;
+  grip($("#overlay .grip"));
+  if (runnable(nd)) mountRunner(nd);
   $("#overlay").hidden = false;
   $("#overlay").scrollTop = 0;
   viewOffset();
@@ -512,6 +550,104 @@ function viewOffset() {
   camera.updateProjectionMatrix();
 }
 addEventListener("resize", viewOffset);
+
+// ---------------------------------------------------------------- running code: edit, Run, and the space follows
+// (an object's output: its text, its figure (SVG), and, for a 3D plot, a note that the object in the space is it)
+function outputHtml(nd) {
+  let h = "";
+  if (nd.output) h += `<pre class="out${nd.outputError ? " err" : ""}">${esc(nd.output)}</pre>`;
+  if (nd.svg) h += `<img class="fig" alt="the figure" src="data:image/svg+xml;base64,${btoa(unescape(encodeURIComponent(nd.svg)))}">`;
+  if (nd.png) h += `<img class="fig" alt="the figure" src="data:image/png;base64,${nd.png}">`;
+  if (nd.scene) h += `<p class="hint">Its 3D plot is the object in the space.</p>`;
+  return h || `<p class="hint">Not run yet.</p>`;
+}
+function mountRunner(nd) {
+  const box = $("#overlay"), out = box.querySelector(".output"), state = box.querySelector(".runstate");
+  const mode = box.querySelector(".mode"), runB = box.querySelector(".run"), stopB = box.querySelector(".stop");
+  const ed = editor(box.querySelector(".code-edit"), {
+    value: nd.text ?? "", lang: mode.value,
+    onRun: () => go(),
+    onChange: (v) => { nd.text = v; save(nd); },
+  });
+  mode.onchange = () => { nd.lang = mode.value; ed.lang = mode.value; save(nd); };
+  async function go() {
+    runB.disabled = true; stopB.hidden = false; state.textContent = "starting the engine…";
+    const t0 = performance.now();
+    try {
+      const r = await run(ed.value, mode.value, {
+        start: () => (state.textContent = "running…"),
+        update: (r) => { out.innerHTML = liveHtml(r); },
+      });
+      nd.text = ed.value; nd.lang = mode.value;
+      nd.output = r.out.replace(/\s+$/, "") + (r.stopped ? (r.out ? "\n" : "") + r.stopped : "");
+      nd.outputError = r.error;
+      const last = (mime) => [...r.displays].reverse().find((b) => b[mime])?.[mime];
+      nd.svg = last("image/svg+xml") ?? null;
+      nd.png = last("image/png") ?? null;
+      const scene = last(SCENE);
+      // (a 3D plot: the object in the space becomes it; its SVG is only the still picture)
+      if (scene) { nd.scene = JSON.parse(scene); nd.svg = null; }
+      const o = objects[space.nodes.indexOf(nd)];
+      if (scene) setPlot(o, sceneObject(nd.scene));
+      // (its face drawn again, with the new output)
+      o.userData.tex = []; o.userData.level = -1;
+      out.innerHTML = outputHtml(nd);
+      state.textContent = (r.error ? "failed" : "done") + ` in ${Math.round(performance.now() - t0)} ms`;
+      save(nd);
+    } catch (e) {
+      out.innerHTML = `<pre class="out err">${esc("couldn't start Sagebrush's engine: " + (e?.message ?? e))}</pre>`;
+      state.textContent = "";
+    } finally {
+      runB.disabled = false; stopB.hidden = true;
+    }
+  }
+  runB.onclick = go;
+  stopB.onclick = () => interrupt();
+}
+function liveHtml(r) {
+  let h = r.out ? `<pre class="out${r.error ? " err" : ""}">${esc(r.out)}</pre>` : "";
+  for (const b of r.displays) {
+    if (b["image/svg+xml"] && !b[SCENE]) h += `<img class="fig" alt="the figure" src="data:image/svg+xml;base64,${btoa(unescape(encodeURIComponent(b["image/svg+xml"])))}">`;
+    else if (b["image/png"]) h += `<img class="fig" alt="the figure" src="data:image/png;base64,${b["image/png"]}">`;
+    else if (b[SCENE]) h += `<p class="hint">A 3D plot: it appears in the space.</p>`;
+  }
+  return h || `<p class="hint">running…</p>`;
+}
+
+// what was edited and run here, kept in this browser per space and object (an agent edits the file itself)
+const KEEP = ["text", "lang", "output", "outputError", "svg", "png", "scene"];
+const keyOf = (nd) => `whitespace:${$("#space").value}:${nd.id}`;
+function save(nd) {
+  try { localStorage.setItem(keyOf(nd), JSON.stringify(Object.fromEntries(KEEP.map((k) => [k, nd[k] ?? null])))); } catch {}
+}
+function restore(nodes) {
+  for (const nd of nodes) {
+    try {
+      const v = JSON.parse(localStorage.getItem(keyOf(nd)) ?? "null");
+      if (v) for (const k of KEEP) if (v[k] !== null && v[k] !== undefined) nd[k] = v[k];
+    } catch {}
+  }
+}
+
+// the overlay's width: drag its left edge (kept for the next visit)
+function grip(el) {
+  el.onpointerdown = (e) => {
+    e.preventDefault();
+    const move = (ev) => {
+      const w = Math.min(innerWidth - 80, Math.max(320, innerWidth - ev.clientX - 12));
+      $("#overlay").style.width = w + "px";
+      viewOffset();
+    };
+    const up = () => { removeEventListener("pointermove", move); removeEventListener("pointerup", up); try { localStorage.setItem("whitespace:overlay-width", $("#overlay").style.width); } catch {} };
+    addEventListener("pointermove", move);
+    addEventListener("pointerup", up);
+  };
+}
+try { const w = localStorage.getItem("whitespace:overlay-width"); if (w) $("#overlay").style.width = w; } catch {}
+
+// full screen
+$("#fs").onclick = () => (document.fullscreenElement ? document.exitFullscreen() : document.documentElement.requestFullscreen()).catch(() => {});
+document.addEventListener("fullscreenchange", () => { $("#fs").textContent = document.fullscreenElement ? "Exit full screen" : "Full screen"; });
 addEventListener("keydown", (e) => {
   if (document.activeElement === $("#q")) { if (e.key === "Escape") $("#q").blur(); return; }
   if (e.key === "Escape") closeOverlay();

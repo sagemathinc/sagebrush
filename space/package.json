@@ -10,6 +10,7 @@
     "start": "node build.mjs && node serve.mjs"
   },
   "dependencies": {
+    "highlight.js": "11.12.0",
     "marked": "18.2.1",
     "three": "0.187.0"
   },

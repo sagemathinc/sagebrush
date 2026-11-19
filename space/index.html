@@ -31,6 +31,29 @@
   #overlay .meta, #overlay .hint { color: #57606a; font-size: 12px; }
   #overlay ul.links { margin: 4px 0; padding-left: 18px; } #overlay ul.links a { color: #0b5cad; text-decoration: none; word-break: break-all; }
   #overlay .md code { background: #f0f2f5; padding: 1px 4px; border-radius: 4px; }
+  #overlay .grip { position: absolute; left: 0; top: 0; bottom: 0; width: 7px; cursor: ew-resize; }
+  #overlay .grip:hover { background: rgba(11, 92, 173, 0.15); }
+  #overlay .runbar { display: flex; gap: 6px; align-items: center; margin: 4px 0 8px; }
+  #overlay .runbar select, #overlay .runbar button { background: #eef1f5; color: #1f2328; border: 1px solid #c9d1db; padding: 4px 10px; }
+  #overlay .runbar button.run { background: #1f6feb; color: #fff; border-color: #1f6feb; font-weight: 600; }
+  #overlay .runbar button:disabled { opacity: 0.5; }
+  #overlay .runstate { color: #57606a; font-size: 12px; }
+  #overlay .editor { position: relative; border: 1px solid #d0d7de; border-radius: 6px; background: #f6f8fa; }
+  #overlay .editor pre.hl, #overlay .editor textarea { margin: 0; padding: 10px 12px; font: 12.5px/1.45 ui-monospace, Menlo, monospace; white-space: pre-wrap;
+    word-break: break-word; tab-size: 4; border: 0; background: transparent; }
+  #overlay .editor pre.hl { pointer-events: none; }
+  #overlay .editor textarea { position: absolute; inset: 0; width: 100%; box-sizing: border-box; color: transparent; caret-color: #1f2328; resize: none;
+    outline: none; overflow: hidden; }
+  #overlay .editor:focus-within { border-color: #1f6feb; box-shadow: 0 0 0 2px rgba(31, 111, 235, 0.2); }
+  #overlay pre.out.err { background: #ffebe9; color: #82071e; }
+  #overlay img.fig { max-width: 100%; background: #fff; border-radius: 6px; margin: 6px 0; }
+  /* highlight.js, GitHub's light colors */
+  .hljs-keyword, .hljs-meta .hljs-keyword, .hljs-type, .hljs-built_in { color: #cf222e; }
+  .hljs-title, .hljs-title.function_, .hljs-title.class_ { color: #8250df; }
+  .hljs-string, .hljs-regexp, .hljs-meta .hljs-string { color: #0a3069; }
+  .hljs-number, .hljs-literal, .hljs-attr, .hljs-variable.language_, .hljs-symbol { color: #0550ae; }
+  .hljs-comment, .hljs-quote { color: #6e7781; font-style: italic; }
+  .hljs-params { color: #24292f; } .hljs-meta { color: #953800; }
   #help { position: fixed; left: 12px; bottom: 10px; color: #6b788c; font-size: 12px; }
 </style>
 </head>
@@ -44,6 +67,7 @@
     <button id="fwd" title="Forward again (F)" disabled>Forward →</button>
     <button id="home" title="See everything (H)">See all</button>
     <button id="dims" title="The same space laid out on a plane, to compare">Flatten to 2D</button>
+    <button id="fs" title="Full screen">Full screen</button>
   </div>
   <input id="q" type="search" placeholder="Search everything (press /)" autocomplete="off">
   <ul id="results"></ul>
