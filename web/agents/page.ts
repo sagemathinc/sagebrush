@@ -28,7 +28,7 @@ import { mountComposer, renderComposerState, stopLabel } from "../workspace/agen
 import { applyPaneClasses, mountLayout, relayout } from "./layout";
 import { AgentLeg, legKey, listComputers, pageLegUrl, type LegEnd } from "../workspace/agent-relay";
 import { chatHere } from "./chat-here";
-import { modeSwitch } from "../workspace/mode-switch";
+import { filesIcon, modeSwitch } from "../workspace/mode-switch";
 import { icon as panelIcon } from "../workspace/files-toggle";
 
 // (the LaTeX editor, in builds that have it: web/build.ts's define)
@@ -883,6 +883,13 @@ const editor = mountComposer({ submit, stop: () => interrupt(current()), render:
 // (the Files | Agents switch at the right of the chat list's header, Agents pressed: Files opens the notebook page with
 //  its files, as the file panel's switch opens this page; William, Nov 12)
 { const sw = modeSwitch("agents"), brand = document.querySelector<HTMLElement>("nav.side .brand"); sw.style.marginLeft = "auto"; if (brand) { brand.style.whiteSpace = "nowrap"; brand.append(sw); } }
+// (Files…, at the foot of the chat list: the notebook page with its file browser shown, as the switch's Files opens it,
+//  the browser's own choice to show it set first)
+$("#files-big").prepend(filesIcon());
+$("#files-big").onclick = () => {
+  try { localStorage.setItem("sagebrush-files-sidebar", "1"); } catch {}
+  location.assign("/");
+};
 $("#new").onclick = async () => {
   if (!(await mayLeaveThread())) return;
   session.newThread();
