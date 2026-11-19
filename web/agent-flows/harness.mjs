@@ -147,6 +147,9 @@ def one(m):
     try:
         content, structured, is_error = srv.call_tool(m["name"], m["args"])
         r = {"id": m["id"], "text": content[0]["text"] if content else "", "structured": structured, "isError": is_error}
+    except KeyError as e:
+        # (as the server answers a tool it doesn't have: -32602 "unknown tool")
+        r = {"id": m["id"], "text": "unknown tool: %s" % m["name"], "structured": None, "isError": True, "unknown": True}
     except Exception as e:
         r = {"id": m["id"], "text": "the server raised %s: %s" % (type(e).__name__, e), "structured": None, "isError": True, "raised": True}
     with out:
@@ -279,7 +282,22 @@ async function chatSurface(site, page) {
     endTurn(text = "Done.") { if (!A.turn) return; event({ type: "text", text }); event({ type: "turn_finished", outcome: "completed" }); A.turn = null; },
     /** The notebook the person sees: the Agents page's pane, its tab shown. */
     shownPath: `document.querySelector(".pane-head .tab.on")?.dataset.tab ?? null`,
-    liveCells: `null`,
+    /** The pane's notebook as the person sees it: each cell's rendered outputs (a picture, an error, text), read from
+     * the page, so an empty or broken pane fails even when the saved copy has the outputs. */
+    liveCells: `(() => {
+      const body = document.querySelector(".pane-body"), cells = body ? [...body.querySelectorAll(".cell")] : [];
+      if (!cells.length) return null;
+      return cells.map((c) => {
+        const out = [];
+        for (const e of c.querySelectorAll("*")) if (e.sbBundle && Object.keys(e.sbBundle).some((k) => k.startsWith("image/"))) out.push({ output_type: "display_data", data: Object.fromEntries(Object.keys(e.sbBundle).map((k) => [k, "1"])) });
+        for (const p of c.querySelectorAll("pre.txt")) {
+          for (const e of p.querySelectorAll("span.e")) out.push({ output_type: "error", ename: "", evalue: e.textContent.slice(0, 200) });
+          const t = [...p.childNodes].filter((n) => n.nodeType === 3).map((n) => n.textContent).join("");
+          if (t) out.push({ output_type: "stream", text: t });
+        }
+        return out;
+      });
+    })()`,
     close: () => server.stop(true),
   };
 }
@@ -287,7 +305,7 @@ async function chatSurface(site, page) {
 export const SURFACES = { mcp: mcpSurface, chat: chatSurface };
 
 // ---- the helpers a case's expect(h) gets
-function helpers(page, surface, failures, shotDir, caseId, gap) {
+export function helpers(page, surface, failures, shotDir, caseId, gap) {
   const h = {
     surface: surface.name,
     tool: (name, args) => surface.tool(name, args),
@@ -316,11 +334,13 @@ function helpers(page, surface, failures, shotDir, caseId, gap) {
     },
     /** Waits until `path` is what the person sees. */
     async shown(path, ms = 30000) {
-      const seen = await page.until(`Promise.resolve(${surface.shownPath}).then((p) => p === ${JSON.stringify(path)} || (typeof p === "string" && p.endsWith(${JSON.stringify(path.split("/").pop())})))`, ms);
+      // (the full path, exactly: a notebook of the same name in another folder isn't it)
+      const seen = await page.until(`Promise.resolve(${surface.shownPath}).then((p) => p === ${JSON.stringify(path)})`, ms);
       return h.ok(seen, `${path} is shown`, await page.ev(surface.shownPath).catch((e) => String(e)));
     },
-    /** Waits until `path` has run: at least `images` images, exactly `errors` errors, and `text` in some output. The
-     * page's own copy when it has one (the notebook page), and the saved copy the agent reads either way. */
+    /** Waits until `path` has run: at least `images` images, exactly `errors` errors, and `text` in some output, both as
+     * the person sees it (the notebook page's notebook, or the Agents page's pane, showing exactly `path`) and in the
+     * saved copy the agent reads. */
     async ran(path, { images = 0, errors = 0, text = null } = {}, ms = 60000) {
       const judge = (cells) => {
         const outs = (cells ?? []).flat();
@@ -329,18 +349,19 @@ function helpers(page, surface, failures, shotDir, caseId, gap) {
         const all = outs.map((o) => o.text ?? o.data?.["text/plain"] ?? (o.output_type === "error" ? `${o.ename}: ${o.evalue}` : "")).join("\n");
         return { imgs, errs, all, good: imgs >= images && errs === errors && (!text || text.test(all)) && outs.length > 0 };
       };
-      let live = null, saved = null;
+      let live = null, saved = null, shownNow = null;
       const t = Date.now();
       while (Date.now() - t < ms) {
-        const lc = await page.ev(surface.liveCells).catch(() => null);
+        shownNow = await page.ev(surface.shownPath).catch(() => null);
+        const lc = shownNow === path ? await page.ev(surface.liveCells).catch(() => null) : null;
         live = lc ? judge(lc) : null;
         const r = await h.read(path);
         saved = r ? judge(r.cells.map((c) => c.outputs ?? [])) : null;
-        if ((live === null || live.good) && saved?.good) break;
+        if (live?.good && saved?.good) break;
         await sleep(500);
       }
       const brief = (j) => j && { images: j.imgs, errors: j.errs, text: j.all.slice(0, 200) };
-      if (live !== null) h.ok(live.good, `${path} ran on the page: ${images} image(s), ${errors} error(s)${text ? ", " + text : ""}`, brief(live));
+      h.ok(!!live?.good, `${path} ran, as the person sees it: ${images} image(s), ${errors} error(s)${text ? ", " + text : ""}`, live ? brief(live) : { shown: shownNow, outputs: "none shown" });
       return h.ok(!!saved?.good, `${path} ran, its outputs saved: ${images} image(s), ${errors} error(s)${text ? ", " + text : ""}`, brief(saved));
     },
     /** The paths in the workspace (what Files lists). */
