@@ -19,6 +19,9 @@ import { startFakeTurn } from "./fake-agent";
 import { AgentError, RELOAD_KEY, type AgentPairing, type Kept } from "../workspace/agent-pair";
 import type { NotebookEdit } from "../workspace/notebook-edit";
 import { mountAgentPairing, type RestoreState } from "../workspace/agent-ui";
+import { runVerbsFor } from "../workspace/run-holder";
+import { agentRunsFor } from "../workspace/agent-runs";
+import { createPermissions } from "../notebook/permissions.js";
 import * as gitBranches from "../workspace/git-branch";
 import { openReviewDialog, showWhenBranches } from "../workspace/review/open-dialog";
 import { Workspace } from "../workspace/api";
@@ -799,6 +802,8 @@ const NOT_SENT = {
 };
 const RUNNER = {
   connecting: (computer: string) => `Connecting to ${computer}…`,
+  waiting: (computer: string) => `Waiting for ${computer} to connect…`,
+  unreachable: (computer: string) => `Couldn't connect to ${computer}. If its runner isn't running, start sagebrush remote --serve-agents on it, then choose Chat here again.`,
   lost: (computer: string, why: string) => `Not connected to ${computer}${why ? `: ${why}` : ""}. Choose Chat here to connect again.`,
   disconnected: (computer: string) => `Disconnected. The agent on ${computer} may keep running for up to 5 minutes.`,
 };
@@ -807,10 +812,12 @@ const RUNNER = {
 function runnerBar(computer: string, e: LegEnd | { kind: string; why: string }): ConnBar {
   if (e.kind === "disconnected") return { kind: "runner", text: RUNNER.disconnected(computer), alert: false, action: "connect" };
   if ((e.kind === "ended" || e.kind === "refused") && e.why) return { kind: "runner", text: e.why, alert: true, action: "connect" };
+  if (e.kind === "unreachable") return { kind: "runner", text: RUNNER.unreachable(computer), alert: true, action: "connect" };
   return { kind: "runner", text: RUNNER.lost(computer, e.why), alert: true, action: "connect" };
 }
 // (an attempt to one of your computers, between Chat here and its agent.ready: the header's "Connecting to …")
 let connectingTo: string | null = null;
+let waitingFor = false; // (its runner not connected yet: the header says it waits)
 const CONN = {
   lost: "Claude disconnected. Your chats are kept; Claude keeps their context while sagebrush-agent runs.",
   restoring: "Reconnecting to Claude…",
@@ -1143,13 +1150,28 @@ const chatHereSection = chatHere({
     leg.on("notice", (t) => toast(t, 6000));
     return { link: leg, ended };
   },
-  onConnecting(r) { connectingTo = r.name; setConn(null); renderHeader(); },
-  onFailed(r, e) { connectingTo = null; setConn(runnerBar(r.name, e)); renderHeader(); },
+  onConnecting(r) { connectingTo = r.name; waitingFor = false; setConn(null); renderHeader(); },
+  onWaiting(r) { connectingTo = r.name; waitingFor = true; renderHeader(); },
+  onFailed(r, e) { connectingTo = null; waitingFor = false; setConn(runnerBar(r.name, e)); renderHeader(); },
 }, () => agentUi);
+
+// (an agent's runs of code here, as on the notebook page (workspace/agent-runs.ts): latex_build, run_notebook, run_file
+//  and run_stop under the grant, in the sandboxed runner only, which this page has where it is cross-origin isolated;
+//  the interpreter's classes come with the run's chunk, from the notebook's module)
+const runsSite = new URL("../", import.meta.url).href;
+const agentRuns = (ws: Workspace) => agentRunsFor(ws as any, {
+  site: runsSite,
+  kernels: () => import(/* @vite-ignore */ new URL("sagebrush-notebook.js", runsSite).href),
+  sandbox: globalThis.crossOriginIsolated === true && !!globalThis.navigator && !(window as any).__TAURI__ && !(window as any).__SAGEBRUSH_LOCAL__ ? "ok" : "none",
+  perms: createPermissions(),
+  chunks: { run: "sagebrush-agent-run.js", ...(__SB_LATEX__ ? { latex: ["sagebrush-latex.js", "sagebrush-latex-tools.js", "sagebrush-latex-run.js"] as [string, string, string] } : {}) },
+  more: () => (/^(localhost|127\.0\.0\.1)$/.test(location.hostname) && typeof (window as any).__runHold === "function" ? { hold: (st: string) => (window as any).__runHold(st) } : {}),
+});
 
 function mountPairing(ws: Workspace) {
   agentUi = mountAgentPairing(ws, {
     program: "sagebrush-agent",
+    runVerbs: runVerbsFor(agentRuns(ws)),
     button: $("#connect"),
     notebookEdit: editNotebook,
     // (an agent's own branch, chat plan PR 3: offered here, where agents work)
@@ -1258,7 +1280,7 @@ function renderHeader() {
   } else if (live()) {
     who.innerHTML = `<span class="conn on"></span>${esc(agentName())} <small>on your computer</small>`;
   } else if (connectingTo !== null) {
-    whoText(who, "wait", "", RUNNER.connecting(connectingTo));
+    whoText(who, "wait", "", waitingFor ? RUNNER.waiting(connectingTo) : RUNNER.connecting(connectingTo));
   } else if (pairing && pairing.state === "paired") {
     who.innerHTML = `<span class="conn wait"></span>${esc(agentName())} <small>connected: allow it in the dialog</small>`;
   } else if (inert(current())) {
