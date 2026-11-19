@@ -1036,7 +1036,7 @@ export function createNotebook(root, opts = {}) {
     let waited = 0, waitFrom = null;
     const k = kernel;
     const send = viaWave ?? ((c, o, sink) => k.execute(c, o, sink));
-    return cellSeed(cell).then((seed) => new Promise((resolve) => send(code, { mode, cell: cell.id, forget, mangle: reactive(), ...(seed ? { seed } : {}), ...(scoped ? { scoped } : {}), ...(extra ?? {}) }, {
+    return cellSeed(cell).then((seed) => new Promise((resolve) => send(code, { mode, cell: cell.id, forget, mangle: reactive(), figures: figures(), ...(seed ? { seed } : {}), ...(scoped ? { scoped } : {}), ...(extra ?? {}) }, {
       start() {
         clear();
         cell.el.classList.replace("queued", "running");
@@ -2084,6 +2084,25 @@ export function createNotebook(root, opts = {}) {
   const baseOf = (m, list) => ({ mode: m, cells: (list ?? []).map((c) => ({ id: c.id, code: c.code ?? "", ...(c.type === "markdown" || c.type === "raw" ? { type: c.type } : {}), ...(c.type === "markdown" && c.attachments ? { attachments: c.attachments } : {}) })) });
   const syncedOf = (rev, list, m) => ({ rev, cells: new Map((list ?? []).map((c) => [c.id, cellKey(c)])), doc: baseOf(m, list) });
   const setSynced = (rev, list, m) => { shown.synced = syncedOf(rev, list, m); };
+  // How this notebook's figures are shown (the page's Figures choice, in every language): "auto" (an SVG, or a sharp
+  // PNG for one whose SVG would be over 1 MiB), "svg" or "png"; kept in the notebook's metadata, sagebrush.figures,
+  // only when it isn't "auto", and given to the interpreter with each run (lib/_graphics.py figures).
+  const FIGURES = ["auto", "svg", "png"];
+  function figures() {
+    const f = meta.metadata?.sagebrush?.figures;
+    return FIGURES.includes(f) ? f : "auto";
+  }
+  function setFigures(f) {
+    if (!FIGURES.includes(f) || f === figures()) return;
+    const md = { ...(meta.metadata ?? {}) }, sb = { ...(md.sagebrush ?? {}) };
+    if (f === "auto") delete sb.figures;
+    else sb.figures = f;
+    if (Object.keys(sb).length) md.sagebrush = sb;
+    else delete md.sagebrush;
+    meta = { ...meta, metadata: md };
+    if (!Object.keys(md).length) delete meta.metadata;
+    schedule();
+  }
   function snapshot() {
     return {
       ...meta, mode,
@@ -2686,7 +2705,7 @@ export function createNotebook(root, opts = {}) {
     // started starts a new one first (confinement phase 2), whose restart makes every cell stale)
     runCells(ids, { consent: _consent, ...o } = {}) { opts.onExplicitRun?.(); return reactive() ? engine().run(ids, o) : Promise.all(ids.map((id) => cellById(id)).filter(Boolean).map((c) => run(c))); },
     applyEdits, graph, verify, fixRedefinitions,
-    setMode, setType, setInput, renderMd, select, edit,
+    setMode, setType, setInput, renderMd, select, edit, figures, setFigures,
     /** X1: load the language's environment now, for the user's choice of it (index.html's menu). */
     warm,
     /** Measure every editor again now (after the notebook was hidden). */

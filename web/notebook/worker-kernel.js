@@ -409,7 +409,7 @@ export class WorkerKernel {
     // the journal when it is done ("run"))
     this.track(id, run);
     this.claim(id, opts.mode);
-    this.whenStarted(id, sink, () => this.worker.postMessage({ id, code, sage: opts.mode === "sage", magma: opts.mode === "magma", matlab: opts.mode === "matlab", ...(opts.repl ? { repl: true } : {}), ...(opts.clock ? { clock: opts.clock } : {}), ...forget }));
+    this.whenStarted(id, sink, () => this.worker.postMessage({ id, code, sage: opts.mode === "sage", magma: opts.mode === "magma", matlab: opts.mode === "matlab", ...(opts.repl ? { repl: true } : {}), ...(opts.clock ? { clock: opts.clock } : {}), ...(opts.figures ? { figures: opts.figures } : {}), ...forget }));
   }
 
   // after the start, in the order asked, if this is still pending in the same worker

@@ -1,0 +1,9 @@
+{
+ "v": 1,
+ "reason": "The notebook page's Figures choice (in its More menu: Auto, SVG or PNG), kept in the notebook's metadata and given to the interpreter with each run in every language: web/index.html (the menu), web/notebook/notebook.js (figures, setFigures, each run's figures), web/notebook/worker-kernel.js and src/notebook-session.ts (the host's figures). Measured with scripts/size-measure.mjs on the pinned toolchain, against bb8800c8 (the figures setting it builds on); each marker is its bundle's growth + 64.",
+ "bytes": {
+  "cli/pyjs.cjs": 2218,
+  "engine/sagebrush-notebook.js": 524,
+  "engine/sagebrush-worker.js": 224
+ }
+}
