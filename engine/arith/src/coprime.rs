@@ -95,6 +95,18 @@ pub const fn gcd_work(la: u64, lb: u64) -> Option<u64> {
     ck!(iters.checked_add(quot)).checked_add(last)
 }
 
+/// The work bound of [`gcd_in_place`] when one operand has at most one limb
+/// and the other at most `l` (an admission bound only; [`gcd_work`] is
+/// unchanged): `3 l + 95`.  Read off [`gcd_in_place`]'s loop: its first
+/// pass charges the comparison `na + 2` and swaps so that b is the smaller,
+/// so `nb <= 1` and `na <= l`; then `nb = 0` returns at once, and `nb = 1`
+/// charges the single-limb step `2 na + 93` and returns.  No other branch is
+/// reached, so the meter is at most `3 l + 95` (zero limbs included: the
+/// comparison alone).  `None` on overflow.
+pub const fn gcd_work_short(l: u64) -> Option<u64> {
+    ck!(l.checked_mul(3)).checked_add(95)
+}
+
 /// The work bound of [`coprime_pair`] on a numerator of `ln` and a
 /// denominator of `ld` limbs: the two loads (`k + 1` each), the gcd, the
 /// two clears (`max + 2` each).
@@ -137,18 +149,28 @@ pub struct Meter {
     used: u64,
     limit: u64,
     since_poll: u64,
+    largest: u64,
 }
 
 impl Meter {
     pub fn new(limit: u64) -> Meter {
-        Meter { used: 0, limit, since_poll: 0 }
+        Meter { used: 0, limit, since_poll: 0, largest: 0 }
     }
     pub fn used(&self) -> u64 {
         self.used
     }
+    pub fn limit(&self) -> u64 {
+        self.limit
+    }
+    /// The largest single charge so far: the most the count can pass the
+    /// limit by when a charge is refused (the check follows every charge).
+    pub fn largest_charge(&self) -> u64 {
+        self.largest
+    }
     #[inline]
-    fn add(&mut self, n: usize) -> Result<(), Fault> {
+    pub(crate) fn add(&mut self, n: usize) -> Result<(), Fault> {
         let n = u64::try_from(n).map_err(|_| Fault::Overrun)?;
+        self.largest = self.largest.max(n);
         self.used = self.used.checked_add(n).ok_or(Fault::Overrun)?;
         if self.used > self.limit {
             return Err(Fault::Overrun);
@@ -267,6 +289,117 @@ fn rem_in_place(x: &mut [u64], nx: usize, y: &mut [u64], ny: usize, m: &mut Mete
         return Err(Fault::Invariant);
     }
     Ok(r)
+}
+
+/// The quotient-keeping Knuth D's units for an `lx`-limb by an `ly`-limb
+/// division, `1 <= ly <= lx` ([`divexact_in_place`]): `Q(lx, ly) = (lx - ly
+/// + 1)(2 ly + 4) + 3 lx + 8`; `None` on overflow or outside that range.
+pub const fn quot_work(lx: u64, ly: u64) -> Option<u64> {
+    if ly == 0 || ly > lx {
+        return None;
+    }
+    let loop_ = ck!(ck!((lx - ly).checked_add(1)).checked_mul(ck!(ck!(ly.checked_mul(2)).checked_add(4))));
+    ck!(loop_.checked_add(ck!(lx.checked_mul(3)))).checked_add(8)
+}
+
+/// [`quot_work`]`(lx, ly)` for a divisor of unknown size: `Qhat(lx) =
+/// ceil((lx + 3)^2 / 2) + 3 lx + 8 >= Q(lx, ly)` for every `1 <= ly <= lx`
+/// (with u = lx - ly + 1 and v = ly + 2, u + v = lx + 3 and 2 u v <= (u +
+/// v)^2 / 2).
+pub const fn quot_work_any(lx: u64) -> Option<u64> {
+    let t = ck!(lx.checked_add(3));
+    let sq = ck!(t.checked_mul(t));
+    ck!(sq.div_ceil(2).checked_add(ck!(lx.checked_mul(3)))).checked_add(8)
+}
+
+/// x / y exactly (Knuth D, the quotient kept: the sibling of
+/// `rem_in_place`), for `1 <= ny <= nx`, y normalized (`y[ny - 1] != 0`), x
+/// with room for `nx + 1` limbs and q for `nx - ny + 1`.  The quotient goes
+/// to q and its length is returned.  x is left all zero (its remainder,
+/// checked: a nonzero remainder is an invariant failure, never a wrong
+/// answer); y is the caller's copy and is left normalized (shifted), not
+/// restored.  Units: `nx + ny + 2` for the shifts, `2 ny + 4` per quotient
+/// limb (6 for a one-limb divisor), `nx + 2` for the remainder check: at
+/// most [`quot_work`]`(nx, ny)`, since `2 nx + ny + 4 <= 3 nx + 8`.
+pub fn divexact_in_place(x: &mut [u64], nx: usize, y: &mut [u64], ny: usize, q: &mut [u64], m: &mut Meter) -> Result<usize, Fault> {
+    if ny == 0 || nx < ny || x.len() <= nx || y.len() < ny || y[ny - 1] == 0 || q.len() < nx - ny + 1 {
+        return Err(Fault::Invariant);
+    }
+    m.add(nx + ny + 2)?;
+    if ny == 1 {
+        let d = u128::from(y[0]);
+        let mut r = 0u128;
+        for j in (0..nx).rev() {
+            m.add(6)?;
+            let t = (r << 64) | u128::from(x[j]);
+            q[j] = (t / d) as u64;
+            r = t % d;
+            x[j] = 0;
+        }
+        m.add(nx + 2)?;
+        x[nx] = 0;
+        if r != 0 {
+            return Err(Fault::Invariant);
+        }
+        return Ok(norm(q, nx));
+    }
+    let s = y[ny - 1].leading_zeros();
+    if s > 0 {
+        for i in (1..ny).rev() {
+            y[i] = (y[i] << s) | (y[i - 1] >> (64 - s));
+        }
+        y[0] <<= s;
+        x[nx] = x[nx - 1] >> (64 - s);
+        for i in (1..nx).rev() {
+            x[i] = (x[i] << s) | (x[i - 1] >> (64 - s));
+        }
+        x[0] <<= s;
+    } else {
+        x[nx] = 0;
+    }
+    let (y1, y2) = (u128::from(y[ny - 1]), u128::from(y[ny - 2]));
+    for j in (0..=nx - ny).rev() {
+        m.add(2 * ny + 4)?;
+        let top = (u128::from(x[j + ny]) << 64) | u128::from(x[j + ny - 1]);
+        let mut qh = top / y1;
+        let mut rh = top % y1;
+        while qh >> 64 != 0 || qh * y2 > ((rh << 64) | u128::from(x[j + ny - 2])) {
+            qh -= 1;
+            rh += y1;
+            if rh >> 64 != 0 {
+                break;
+            }
+        }
+        let (mut borrow, mut carry) = (0u64, 0u128);
+        for i in 0..ny {
+            let p = qh * u128::from(y[i]) + carry;
+            carry = p >> 64;
+            let (d, b1) = x[j + i].overflowing_sub(p as u64);
+            let (d, b2) = d.overflowing_sub(borrow);
+            x[j + i] = d;
+            borrow = u64::from(b1) + u64::from(b2);
+        }
+        let (d, b1) = x[j + ny].overflowing_sub(carry as u64);
+        let (d, b2) = d.overflowing_sub(borrow);
+        x[j + ny] = d;
+        if b1 || b2 {
+            qh -= 1;
+            let mut c = 0u128;
+            for i in 0..ny {
+                let t = u128::from(x[j + i]) + u128::from(y[i]) + c;
+                x[j + i] = t as u64;
+                c = t >> 64;
+            }
+            x[j + ny] = x[j + ny].wrapping_add(c as u64);
+        }
+        q[j] = qh as u64;
+    }
+    // (the remainder, still shifted, is x[..ny]; above it everything is zero)
+    m.add(nx + 2)?;
+    if x[..=nx].iter().any(|&w| w != 0) {
+        return Err(Fault::Invariant);
+    }
+    Ok(norm(q, nx - ny + 1))
 }
 
 fn gcd_u64(mut a: u64, mut b: u64) -> u64 {

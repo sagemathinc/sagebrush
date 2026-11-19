@@ -1098,14 +1098,13 @@ class Polynomial:
             return NotImplemented if L is None else L * other
         if not self._c or not o._c:
             return self._make([], o)
-        # every product in the engine (sagebrush.poly.mul: one NTT product,
-        # admitted by its size; over QQ through the common denominators)
+        # every product in the engine, by the ring: ZZ[x] by poly_mul (one
+        # integer product), QQ[x] by qpoly_mul (the common denominators, the
+        # product and each coefficient's reduction, all in Rust)
         from sagebrush import poly
-        da, ca = self._integral()
-        db, cb = o._integral()
-        c = poly.mul(ca, cb)
-        d = da * db
-        return self._make(c if d == 1 else [_F(x, d) for x in c], o)
+        if self._ring._base is ZZ and o._ring._base is ZZ:
+            return self._make(poly.mul(self._c, o._c), o)
+        return self._make(poly.qmul(self._c, o._c), o)
 
     def __rmul__(self, other):
         o = self._coerce(other)
