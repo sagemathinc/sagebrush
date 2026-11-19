@@ -415,8 +415,9 @@ call) follow MATLAB's documentation of them and are checked against Octave
   `_`).
 - **Bounds:** the JSON text is untrusted input. Before it is parsed it is
   refused over 2^22 characters, with more than 2^18 values (which bounds what
-  parsing builds), with a number of more than 1,000 digits, or nested more
-  than 512 levels deep. Integers are read as doubles, never as
+  parsing builds), with a run of more than 1,000 consecutive digits, or
+  nested more than 200 levels deep (string and regular-expression scans, then
+  a loop over the brackets once their number is bounded). Integers are read as doubles, never as
   arbitrary-precision integers.
 
 ## Graphics

@@ -5735,21 +5735,29 @@
   "owner": "MATLAB JSON (@sagebrush-matlab)",
   "reason": "parser protection for untrusted JSON text: before parsing, jsondecode refuses over 2^22 characters, 2^18 values, 1000-digit numbers or 512 levels of nesting; integers are read as doubles"
  },
- "lib/_matlab_json.py ::  :: MAX_CHARS characters, with more than MAX_VALUES values, with a number of more #0": {
+ "lib/_matlab_json.py ::  :: MAX_CHARS characters, then a loop over its brackets once their number is #0": {
   "class": "1",
   "disposition": {
    "1": "shared"
   },
   "owner": "MATLAB JSON (@sagebrush-matlab)",
-  "reason": "parser protection for untrusted JSON text: before parsing, jsondecode refuses over 2^22 characters, 2^18 values, 1000-digit numbers or 512 levels of nesting; integers are read as doubles"
+  "reason": "parser protection for untrusted JSON text: before parsing, jsondecode refuses over 2^22 characters, 2^18 values, a 1000-digit run or 200 levels of nesting; integers are read as doubles"
  },
- "lib/_matlab_json.py ::  :: MAX_DEPTH = 512 #0": {
+ "lib/_matlab_json.py ::  :: MAX_CHARS characters, with more than MAX_VALUES values, with a run of more #0": {
   "class": "1",
   "disposition": {
    "1": "shared"
   },
   "owner": "MATLAB JSON (@sagebrush-matlab)",
-  "reason": "parser protection for untrusted JSON text, as lib/_matlab_mat.py's bounds: jsondecode refuses a text over 2^26 characters, or nested more than 512 deep, before it is parsed"
+  "reason": "parser protection for untrusted JSON text: before parsing, jsondecode refuses over 2^22 characters, 2^18 values, a 1000-digit run or 200 levels of nesting; integers are read as doubles"
+ },
+ "lib/_matlab_json.py ::  :: MAX_DEPTH = 200 #0": {
+  "class": "1",
+  "disposition": {
+   "1": "shared"
+  },
+  "owner": "MATLAB JSON (@sagebrush-matlab)",
+  "reason": "parser protection for untrusted JSON text: before parsing, jsondecode refuses over 2^22 characters, 2^18 values, a 1000-digit run or 200 levels of nesting; integers are read as doubles"
  },
  "lib/_matlab_json.py ::  :: MAX_DIGITS = 1000 #0": {
   "class": "1",
@@ -5767,29 +5775,21 @@
   "owner": "MATLAB JSON (@sagebrush-matlab)",
   "reason": "parser protection for untrusted JSON text: before parsing, jsondecode refuses over 2^22 characters, 2^18 values, 1000-digit numbers or 512 levels of nesting; integers are read as doubles"
  },
- "lib/_matlab_json.py ::  :: characters, and MAX_VALUES bounds what parsing builds (each value a Python #0": {
+ "lib/_matlab_json.py ::  :: bounded by MAX_VALUES, which also bounds what parsing builds (each value a #0": {
   "class": "1",
   "disposition": {
    "1": "shared"
   },
   "owner": "MATLAB JSON (@sagebrush-matlab)",
-  "reason": "parser protection for untrusted JSON text: before parsing, jsondecode refuses over 2^22 characters, 2^18 values, 1000-digit numbers or 512 levels of nesting; integers are read as doubles"
+  "reason": "parser protection for untrusted JSON text: before parsing, jsondecode refuses over 2^22 characters, 2^18 values, a 1000-digit run or 200 levels of nesting; integers are read as doubles"
  },
- "lib/_matlab_json.py ::  :: string method or a regular expression over text of at most MAX_CHARS #0": {
+ "lib/_matlab_json.py ::  :: than MAX_DIGITS consecutive digits, or nested more than MAX_DEPTH deep. The #0": {
   "class": "1",
   "disposition": {
    "1": "shared"
   },
   "owner": "MATLAB JSON (@sagebrush-matlab)",
-  "reason": "parser protection for untrusted JSON text: before parsing, jsondecode refuses over 2^22 characters, 2^18 values, 1000-digit numbers or 512 levels of nesting; integers are read as doubles"
- },
- "lib/_matlab_json.py ::  :: than MAX_DIGITS digits, or nested more than MAX_DEPTH deep. Each check is a #0": {
-  "class": "1",
-  "disposition": {
-   "1": "shared"
-  },
-  "owner": "MATLAB JSON (@sagebrush-matlab)",
-  "reason": "parser protection for untrusted JSON text: before parsing, jsondecode refuses over 2^22 characters, 2^18 values, 1000-digit numbers or 512 levels of nesting; integers are read as doubles"
+  "reason": "parser protection for untrusted JSON text: before parsing, jsondecode refuses over 2^22 characters, 2^18 values, a 1000-digit run or 200 levels of nesting; integers are read as doubles"
  },
  "lib/_matlab_json.py :: _admit :: if depth > MAX_DEPTH: #0": {
   "class": "1",
@@ -5815,13 +5815,13 @@
   "owner": "MATLAB JSON (@sagebrush-matlab)",
   "reason": "parser protection for untrusted JSON text: before parsing, jsondecode refuses over 2^22 characters, 2^18 values, 1000-digit numbers or 512 levels of nesting; integers are read as doubles"
  },
- "lib/_matlab_json.py :: _admit :: raise _m._err(\"jsondecode: a number in the JSON text has more than %d digits.\" % MAX_DIGITS, \"MATLAB:jsondecode:TooLarge\") #0": {
+ "lib/_matlab_json.py :: _admit :: raise _m._err(\"jsondecode: the JSON text has a run of more than %d consecutive digits.\" % MAX_DIGITS, \"MATLAB:jsondecode:TooLarge\") #0": {
   "class": "1",
   "disposition": {
    "1": "shared"
   },
   "owner": "MATLAB JSON (@sagebrush-matlab)",
-  "reason": "parser protection for untrusted JSON text: before parsing, jsondecode refuses over 2^22 characters, 2^18 values, 1000-digit numbers or 512 levels of nesting; integers are read as doubles"
+  "reason": "parser protection for untrusted JSON text: before parsing, jsondecode refuses over 2^22 characters, 2^18 values, a 1000-digit run or 200 levels of nesting; integers are read as doubles"
  },
  "lib/_matlab_json.py :: _admit :: raise _m._err(\"jsondecode: the JSON text holds more than %d values.\" % MAX_VALUES, \"MATLAB:jsondecode:TooLarge\") #0": {
   "class": "1",

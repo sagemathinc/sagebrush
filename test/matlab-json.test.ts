@@ -71,7 +71,10 @@ test("jsonencode and jsondecode refuse what they can't do; JSON text is bounded 
   assert.equal(m("jsonencode(1, 'Bogus', true)"), "MATLAB:jsonencode:InvalidParameter|'Bogus' is not a recognized parameter. For a list of valid name-value pair arguments, see the documentation for this function.");
   assert.equal(m("jsondecode('{\"a\": }')"), "MATLAB:jsondecode:ParseError|jsondecode: the text is not valid JSON (line 1, column 7): Expecting value.");
   assert.equal(m("jsondecode(5)"), "MATLAB:jsondecode:InvalidInput|The input must be a character vector or string scalar containing JSON text.");
-  assert.equal(m("jsondecode([repmat('[', 1, 600) repmat(']', 1, 600)])"), "MATLAB:jsondecode:TooDeep|jsondecode: the JSON text is nested more than 512 levels deep.");
+  // (200 levels, arrays or objects, decoded; 201 refused before parsing)
+  assert.equal(m("v = jsondecode([repmat('[', 1, 200) '1' repmat(']', 1, 200)]); disp(class(v))"), "cell\nPASS");
+  assert.equal(m("v = jsondecode([repmat('{\"a\":', 1, 200) '1' repmat('}', 1, 200)]); disp(class(v))"), "struct\nPASS");
+  assert.equal(m("jsondecode([repmat('[', 1, 201) repmat(']', 1, 201)])"), "MATLAB:jsondecode:TooDeep|jsondecode: the JSON text is nested more than 200 levels deep.");
   // (brackets inside strings are not nesting)
   assert.equal(m("x = jsondecode(['\"' repmat('[', 1, 600) '\"']); disp(numel(x))"), "600\nPASS");
   assert.equal(m("jsondecode(['[' repmat('1,', 1, 50) '1]'])", { SAGEBRUSH_JSON_MAX_CHARS: "100" }),
@@ -79,10 +82,10 @@ test("jsonencode and jsondecode refuse what they can't do; JSON text is bounded 
   // (the values a text may hold, which bounds what parsing builds: 262,144; refused before it is parsed)
   assert.equal(m("v = jsondecode(['[' repmat('0,', 1, 262142) '0]']); disp(numel(v))"), "262143\nPASS");
   assert.equal(m("jsondecode(['[' repmat('0,', 1, 262144) '0]'])"), "MATLAB:jsondecode:TooLarge|jsondecode: the JSON text holds more than 262144 values.");
-  // (a number of at most 1,000 digits, read as a double, as MATLAB reads integers: never as an arbitrary-precision one)
+  // (a run of at most 1,000 consecutive digits, read as a double, as MATLAB reads integers: never as an arbitrary-precision one)
   assert.equal(m("disp(jsondecode(['[1' repmat('0', 1, 999) ']']))"), "Inf\nPASS");
-  assert.equal(m("jsondecode(['[1' repmat('0', 1, 1000) ']'])"), "MATLAB:jsondecode:TooLarge|jsondecode: a number in the JSON text has more than 1000 digits.");
-  assert.equal(m("jsondecode(['[1' repmat('0', 1, 199999) ']'])"), "MATLAB:jsondecode:TooLarge|jsondecode: a number in the JSON text has more than 1000 digits.");
+  assert.equal(m("jsondecode(['[1' repmat('0', 1, 1000) ']'])"), "MATLAB:jsondecode:TooLarge|jsondecode: the JSON text has a run of more than 1000 consecutive digits.");
+  assert.equal(m("jsondecode(['[1' repmat('0', 1, 199999) ']'])"), "MATLAB:jsondecode:TooLarge|jsondecode: the JSON text has a run of more than 1000 consecutive digits.");
   assert.equal(m("x = jsondecode('12345678901234567890123'); fprintf('%s %.17g\\n', class(x), x)"), "double 1.2345678901234568e+22\nPASS");
 });
 
