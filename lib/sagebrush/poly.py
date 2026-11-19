@@ -11,7 +11,7 @@ at the end.  Inputs and outputs travel in hex, which both sides convert in
 linear time.
 """
 
-from fractions import Fraction
+from fractions import Fraction as _Fraction
 
 from ._engine import call
 
@@ -60,14 +60,14 @@ def _ints(s):
 
 # (a reduced token "n/d" is already in lowest terms: no second gcd where
 # the interpreter has the coprime constructor)
-_coprime = getattr(Fraction, "_from_coprime_ints", None)
+_coprime = getattr(_Fraction, "_from_coprime_ints", None)
 
 
 def _token(t):
     n, _, d = t.partition("/")
     if not d:
         return int(n, 16)
-    return _coprime(int(n, 16), int(d, 16)) if _coprime else Fraction(int(n, 16), int(d, 16))
+    return _coprime(int(n, 16), int(d, 16)) if _coprime else _Fraction(int(n, 16), int(d, 16))
 
 
 def _series(r, raw):
@@ -77,7 +77,7 @@ def _series(r, raw):
         if raw:
             return num, den
         # (over Z, or a denominator of 1: the integers themselves)
-        return num if den == 1 else [Fraction(x, den) for x in num]
+        return num if den == 1 else [_Fraction(x, den) for x in num]
     if raw:
         raise RuntimeError("series: a reduced reply to a raw request")
     return [_token(t) for t in c.split(",")] if c else []
