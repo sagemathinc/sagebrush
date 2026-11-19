@@ -57,7 +57,9 @@ export const LATEX_LAZY = {
 //  math typeset in the same step as its text, ruled Nov 13: 249,253 / 83,316 measured (bun 1.4.4, node 24.21.0), + 64)
 // (249,795 raw / 83,533 gzip: an edit written before the page is left (a notebook, a board or another page opened from
 //  it), Nov 17: 249,731 / 83,469 measured on master 9529624b with it (+478 / +153), + 64)
-export const LATEX_CAPS = { raw: 249795, gzip: 83533 };
+// (249,907 raw / 83,533 gzip: Nov 19 2026, the agent's bar in its own row under the LaTeX page's head (latex/page.ts),
+//  never over the source or the preview; measured 249,843 / 83,532, + 64 raw; the gzip cap still holds it)
+export const LATEX_CAPS = { raw: 249907, gzip: 83533 };
 export const gz = (b) => gzipSync(b, { level: 9 }).length;
 
 // Each lazy chunk's own cap (raw, gzip), fetched only on its own use, so outside the group:
@@ -95,7 +97,10 @@ export const LATEX_LAZY_CAPS = {
   // (51,671 / 17,686: Nov 19 2026, for Connect's one field: the agent's link pasted, or its code and port, read by
   //  readConnect, and a code alone told to ask for the link (agent-ui.ts). Measured locally on the toolchain CI pins on
   //  master 35e6a6d0 with this change: 51,607 / 17,622, + 64)
-  AGENT: { label: "the LaTeX agent pairing's chunk", raw: 51671, gzip: 17686 },
+  // (52,852 / 18,134: Nov 19 2026, the agent's bar docked in the page's own row for it ([data-sbag-slot]), placed again
+  //  as the page changes what it shows. Measured locally on the toolchain CI pins, with the one-link change merged:
+  //  52,788 / 18,070, + 64)
+  AGENT: { label: "the LaTeX agent pairing's chunk", raw: 52852, gzip: 18134 },
   // (the agent tools' work: web/latex/tools.ts, latex_check's report and latex_render's pictures, on an agent's first call)
   // (16,546 / 6,950: Nov 11 2026: latex_build's own code (build.ts, the
   //  engine driven from a snapshot, and the pages' fit) here, out of the eager group, its shared rules handed in by the
