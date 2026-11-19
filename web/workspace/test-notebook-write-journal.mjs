@@ -410,6 +410,14 @@ try {
     await B.ev(`window.__sbTestWritePause = null`);
     await B.close();
   }
+  // W12 (bounded over time): writes that end leave nothing behind in the page's table of writes under way (each held
+  // its whole document): 100 one after another, then none is kept
+  {
+    const p = "/w12.ipynb";
+    await create(A, p, nbJson(["k = 0"]));
+    const res = await A.ev(`(async () => { const ws = window.__sbTestWs; let ok = 0, peak = 0; for (let i = 1; i <= 100; i++) { const r = await ws.read(${J(p)}); await ws.write(${J(p)}, { cells: [{ cell_type: "code", source: "k = " + i + "  # " + "x".repeat(4096), metadata: {}, outputs: [] }] }, { base: r.rev }).then(() => ok++, () => {}); peak = Math.max(peak, ws.nbWrites.size); } return { ok, peak, left: ws.nbWrites.size }; })()`);
+    check(res?.ok === 100 && res.left === 0 && res.peak === 0, "W12: 100 whole writes of 4 KiB documents one after another: each saved, and none kept in the page's table once it ended", res);
+  }
   const errs = tabs.flatMap((x) => x.errors);
   check(errs.length === 0, "no page errors", errs);
 } catch (e) {

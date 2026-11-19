@@ -540,7 +540,7 @@ function nbDoc(content: unknown): unknown {
 export class Workspace {
   private subs = new Set<(c: Change) => void>();
   /** The whole writes of notebooks under sync's journal under way here, by what they write (writeJournaled). */
-  private nbWrites = new Map<string, { run: Promise<{ entry: Entry; rev: number }>; done: number | null }>();
+  private nbWrites = new Map<string, { run: Promise<{ entry: Entry; rev: number }> }>();
   private channel: BroadcastChannel | null = null;
   private tab = hex(8);
   /** Who makes the changes from here: "person", or "agent:<name>" (§8.3); in the operation log and on versions. */
@@ -1610,22 +1610,18 @@ export class Workspace {
     // cell whole), its language too if it names one)
     const withMode = want.mode !== undefined, key = docValue(want, withMode);
     // (one request per document asked for at once: the same write asked again while it is under way is that one; at
-    // most NB_WRITES_MAX under way, each holding its document; ended ones forgotten after a minute)
-    const now = Date.now();
-    for (const [k, w] of this.nbWrites) if (w.done !== null && now - w.done > 60_000) this.nbWrites.delete(k);
+    // most NB_WRITES_MAX under way, each holding its document; one that ended is forgotten at once, its document with it)
     const one = `${ref}\n${base ?? ""}\n${key}`, running = this.nbWrites.get(one);
-    if (running && running.done === null) return running.run;
+    if (running) return running.run;
     this.nbWriteRoom();
-    const entry = { run: null as unknown as Promise<{ entry: Entry; rev: number }>, done: null as number | null };
+    const entry = { run: null as unknown as Promise<{ entry: Entry; rev: number }> };
     this.nbWrites.set(one, entry);
-    entry.run = this.writeJournaledOnce(p, want, key, withMode, opts, ref).finally(() => { entry.done = Date.now(); });
+    entry.run = this.writeJournaledOnce(p, want, key, withMode, opts, ref).finally(() => { if (this.nbWrites.get(one) === entry) this.nbWrites.delete(one); });
     return entry.run;
   }
   /** Refuses a whole write of a notebook when NB_WRITES_MAX are under way in this page (each holds its document). */
   private nbWriteRoom() {
-    let pending = 0;
-    for (const w of this.nbWrites.values()) if (w.done === null) pending++;
-    if (pending >= NB_WRITES_MAX) throw new WorkspaceError("busy", `too many notebook writes are under way in this page (${NB_WRITES_MAX}): nothing changed (try again shortly)`);
+    if (this.nbWrites.size >= NB_WRITES_MAX) throw new WorkspaceError("busy", `too many notebook writes are under way in this page (${NB_WRITES_MAX}): nothing changed (try again shortly)`);
   }
   private async writeJournaledOnce(p: string, want: any, key: string, withMode: boolean, opts: { base?: number; tag?: string; expect?: Pick<Entry, "kind" | "fid" | "created" | "ref"> } & Collect & Admitted, ref: string): Promise<{ entry: Entry; rev: number }> {
     const collect = sinkOf(opts.collect), admit = admitOf(opts.admit), base = opts.base;
