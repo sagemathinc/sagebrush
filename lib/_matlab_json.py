@@ -30,6 +30,11 @@ import _matlab as _m
 # (the longest JSON text jsondecode reads, and the deepest nesting)
 MAX_CHARS = 1 << 26
 MAX_DEPTH = 512
+try:
+    import os as _os
+    MAX_CHARS = int(_os.environ.get("SAGEBRUSH_JSON_MAX_CHARS", MAX_CHARS))  # (lower for tests)
+except Exception:
+    pass
 
 # ------------------------------------------------------------------ encoding
 
