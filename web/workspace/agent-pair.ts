@@ -220,8 +220,9 @@ export class AgentPairing {
     private opts: { verbsFor: (actor: string, host: { owner: () => string | null }) => AgentVerbs; gitBranch?: GitBranch; gitVerbs?: RunVerbs; store: GrantStore; trashEntry: (p: string) => Promise<TrashEntry | null | undefined>; page: { origin: string; path: string }; now?: () => number; WebSocketImpl?: typeof WebSocket; runVerbs?: RunVerbs; notebookEdit?: (edit: NotebookEdit, may: () => boolean, hold?: () => Promise<() => void>) => Promise<unknown>; onCreated?: (c: Created, p: AgentPairing) => void; reload?: { storage: ReloadStorage | null; scope: ReloadScope; leaving: () => boolean } },
   ) {
     if ("link" in how) { this.link = how.link; this.computer = how.computer; }
-    if (typeof BroadcastChannel === "function") { this.texChan = new BroadcastChannel(MADE_CHANNEL); this.texChan.onmessage = (e) => this.texAsked(e.data); }
     else if (!Number.isInteger(port) || port < 1 || port > 65535) throw new AgentError("invalid", "a port is 1 to 65535");
+    // (the editors' channel, once the pairing is admitted: agent-made-tex.ts)
+    if (typeof BroadcastChannel === "function") { this.texChan = new BroadcastChannel(MADE_CHANNEL); this.texChan.onmessage = (e) => this.texAsked(e.data); }
     const now = this.now();
     this.tokens = AGENT_LIMITS.burst;
     this.refill = now;
@@ -583,11 +584,13 @@ export class AgentPairing {
     if (!rv) return this.fail(id, "invalid", `not a verb: ${JSON.stringify(method)}`);
     const h = this.hello!;
     this.inFlight++;
-    // (latex_build: the .tex as it was before, for its run once by itself if the build is done and it is unchanged; only
-    //  under a grant that could ever let it (Everything and May run code: mayRunCreated), else nothing is read)
-    const g0 = this.grant, v0 = this.verbs, texPath = method === "workspace.latex_build" && typeof (params as any)?.path === "string" && g0?.run === true && g0.folders.length === 1 && g0.folders[0] === "/" ? (params as any).path as string : null;
-    const before = texPath && v0 ? await v0.stat(texPath).catch(() => null) : null;
     try {
+      // (latex_build: the .tex as it was before, for its run once by itself if the build is done and it is unchanged; only
+      //  under the grant in force now (current), and one that could ever let it (Everything and May run code:
+      //  mayRunCreated), else nothing is read. Inside the try: every way out gives the call's slot back)
+      const g0 = this.grant, v0 = this.verbs;
+      const texPath = method === "workspace.latex_build" && typeof (params as any)?.path === "string" && this.current(g0, v0) && g0!.run === true && g0!.folders.length === 1 && g0!.folders[0] === "/" ? (params as any).path as string : null;
+      const before = texPath ? await v0!.stat(texPath).catch(() => null) : null;
       await rv.serve(method, params, {
         grant: this.grant, agent: h.agent.name, actor: actorOf(h.agent.name, h.agent.client), now: () => this.now(),
         current: (g) => this.current(g, this.verbs),

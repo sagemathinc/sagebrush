@@ -6,7 +6,7 @@
 //   bun web/workspace/test-agent-pair.mjs
 import { failHint, agentSays, onlyCurrent, readConnect, ONLY_CODE, SAFARI, CHROME_ALLOW, OTHER_FAIL } from "./agent-ui.ts";
 import { handOver, takeHandoff, HANDOFF_KEY, HANDOFF_MS } from "./pair-handoff.ts";
-import { AgentPairing, parseStrict, actorOf, parseReloadRecord, reloadDecision, takeReloadRecord, putReloadRecord, markReloadLeft, RELOAD_KEY, RELOAD_FRESH_MS } from "./agent-pair.ts";
+import { AgentPairing, AgentError, parseStrict, actorOf, parseReloadRecord, reloadDecision, takeReloadRecord, putReloadRecord, markReloadLeft, RELOAD_KEY, RELOAD_FRESH_MS } from "./agent-pair.ts";
 
 let failures = 0;
 const ok = (c, msg) => { console.log((c ? "ok   " : "FAIL ") + msg); if (!c) failures++; };
@@ -847,6 +847,26 @@ for (const [what, grant] of [["a folder, not Everything", { folders: ["/A"], wri
   await P.revoke();
   S.srv.stop(true);
 }
+// ---- a local pairing's port: 1 to 65535, an integer, refused otherwise before anything is made, whether or not this
+// runtime has BroadcastChannel (the editors' channel is made only after; a regression: it once took the port check's
+// place, so with BroadcastChannel every port was admitted)
+{
+  const W = fakeWs();
+  const make = (port) => { try { new AgentPairing(port, { code: "abcd-efgh ijkl" }, { verbsFor: W.verbsFor, store: W.storeApi, trashEntry: W.trashEntry, page, WebSocketImpl: class { constructor() { throw new Error("no socket for a refused port"); } } }); return "admitted"; } catch (e) { return e instanceof AgentError && e.code === "invalid" && /1 to 65535/.test(e.message) ? "refused" : "other: " + e.message; } };
+  const bad = [0, -1, 65536, 1.5, NaN];
+  const BC = globalThis.BroadcastChannel;
+  ok(typeof BC === "function" && bad.every((p) => make(p) === "refused"), "with BroadcastChannel: ports 0, -1, 65536, 1.5 and NaN are refused", bad.map(make));
+  try {
+    delete globalThis.BroadcastChannel;
+    ok(typeof globalThis.BroadcastChannel === "undefined" && bad.every((p) => make(p) === "refused"), "without BroadcastChannel: the same ports refused", bad.map(make));
+  } finally { globalThis.BroadcastChannel = BC; }
+  // (over a runner's link there is no local port: none is checked, with or without BroadcastChannel)
+  const viaLink = () => { try { const P = new AgentPairing(0, { link: { socket: () => ({ send() {}, close() {}, addEventListener() {}, removeEventListener() {} }), ready: () => undefined, send: () => "ok", owe: () => true, answer() {}, disconnect: async () => {} }, computer: "box" }, { verbsFor: W.verbsFor, store: W.storeApi, trashEntry: W.trashEntry, page }); P.drop?.("test"); return "admitted"; } catch (e) { return "refused: " + e.message; } };
+  const withBc = viaLink();
+  let withoutBc;
+  try { delete globalThis.BroadcastChannel; withoutBc = viaLink(); } finally { globalThis.BroadcastChannel = BC; }
+  ok(withBc === "admitted" && withoutBc === "admitted", "a pairing over a runner's link: no port is checked (port 0 admitted), with or without BroadcastChannel", { withBc, withoutBc });
+}
 // ---- a .tex this agent made runs once by itself in the editor that shows it (decided Nov 19 2026,
 // agent-made-tex.ts): an editor asks over the site's channel whether the file at a revision may; the pairing says
 // yes once, for the .tex it last created or built (done, unchanged since), at that revision, under mayRunCreated's
@@ -887,6 +907,11 @@ for (const [what, grant] of [["a folder, not Everything", { folders: ["/A"], wri
   await until(() => told(5));
   now += 61_000;
   ok(!(await ask("FID", 5)), "the grant expired: no answer");
+  // (expired by the clock, its timer not fired yet: a latex_build reads nothing for a run by itself)
+  const stats = () => W.calls.filter((c) => c === "stat").length;
+  const st0 = stats(), served0 = builds;
+  await S.request("workspace.latex_build", { path: "/A/paper.tex" });
+  ok(stats() === st0, "the grant expired (its timer not fired yet): a latex_build reads nothing for the .tex's run by itself", { stats: stats() - st0, served: builds - served0 });
   now -= 61_000;
   await P.noRun();
   ok(!(await ask("FID", 5)), "May run code turned off: no answer");
