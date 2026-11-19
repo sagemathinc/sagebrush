@@ -162,9 +162,9 @@ function Build(case_id, n, v)
         if case_id eq "mat_fp_solve" then w:=Vector(BaseRing(A),[i:i in [1..n]]); ops := ops cat Eltseq(w); end if;
     elif case_id in {"mat_q_det","mat_q_rank","mat_q_solve","mat_q_charpoly"} then
         A:=QMat(n,v); ops := Eltseq(A);
+        if case_id eq "mat_q_solve" then w:=Vector(Rationals(),[i:i in [1..n]]); ops := ops cat Eltseq(w); end if;
     elif case_id in {"mat_z_rank_wide","mat_z_rank_def","mat_z_rank_def_p","mat_q_rank_wide","mat_q_rank_def","mat_q_rank_def_p"} then
         A:=RankMat(case_id,n,v); ops := Eltseq(A);
-        if case_id eq "mat_q_solve" then w:=Vector(Rationals(),[i:i in [1..n]]); ops := ops cat Eltseq(w); end if;
     elif case_id in {"groebner_cyclic","groebner_katsura"} then
         I := case_id eq "groebner_cyclic" select CyclicIdeal(n) else KatsuraIdeal(n);
         shape := Sort([TotalDegree(f)*100000 + #Terms(f) : f in Basis(I)]);
