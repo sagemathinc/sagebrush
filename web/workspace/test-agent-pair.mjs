@@ -4,7 +4,7 @@
 // before the person's grant, the grant's scope, the frame and call limits, and that revoking (or expiry) cuts
 // the agent off at once and forgets the kept grant.
 //   bun web/workspace/test-agent-pair.mjs
-import { failHint, agentSays, onlyCurrent, SAFARI, CHROME_ALLOW, OTHER_FAIL } from "./agent-ui.ts";
+import { failHint, agentSays, onlyCurrent, readConnect, ONLY_CODE, SAFARI, CHROME_ALLOW, OTHER_FAIL } from "./agent-ui.ts";
 import { handOver, takeHandoff, HANDOFF_KEY, HANDOFF_MS } from "./pair-handoff.ts";
 import { AgentPairing, parseStrict, actorOf, parseReloadRecord, reloadDecision, takeReloadRecord, putReloadRecord, markReloadLeft, RELOAD_KEY, RELOAD_FRESH_MS } from "./agent-pair.ts";
 
@@ -751,6 +751,24 @@ ok(actorOf("Claude Code", "claude-code") === "agent:Claude-Code" && actorOf("", 
   ok(failHint("Mozilla/5.0 (X11; Linux x86_64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/149.0 Safari/537.36") === CHROME_ALLOW, "in Chrome: its permission");
   ok(failHint("Mozilla/5.0 (Windows NT 10.0) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/149.0 Safari/537.36 Edg/149.0") === CHROME_ALLOW, "in Edge: Chrome's permission");
   ok(![SAFARI, CHROME_ALLOW, OTHER_FAIL].some((t) => t.length > 110 || /\n/.test(t)), "each is one short line");
+}
+{
+  // Connect's one field (decided Nov 19 2026): the agent's link as pasted, with or without https://, or "CODE PORT" /
+  // "CODE:PORT"; a code alone only with the port its ?pair link came with, else: ask the agent for its link
+  const C = "ABCDEFGHIJKLMNOPQRSTUVWXYZ";
+  const is = (r, code, port) => !("error" in r) && r.code === code && r.port === port;
+  ok(is(readConnect(`https://sagebrush.space/board/?pair=${C}&port=49589`), C, 49589), "the link, pasted");
+  ok(is(readConnect(`  sagebrush.space/board/?pair=${C}&port=49589 `), C, 49589), "the link without https://, spaces around it");
+  ok(is(readConnect(`https://sagebrush.space/board/?port=7&pair=${C}`), C, 7), "the link, its parameters in either order");
+  ok(is(readConnect(`${C} 49589`), C, 49589) && is(readConnect(`${C}:49589`), C, 49589) && is(readConnect(`${C} : 49589`), C, 49589), "CODE PORT and CODE:PORT");
+  ok(is(readConnect(C, "49589"), C, 49589), "a code alone, with the port its ?pair link came with");
+  ok(readConnect(C).error === ONLY_CODE && /link/.test(ONLY_CODE) && !/port/i.test(ONLY_CODE), "a code alone, no port: ask the agent for its link (no port to find)");
+  ok(/no port/.test(readConnect(`https://sagebrush.space/board/?pair=${C}`).error ?? ""), "a link with no port: ask for it again");
+  ok(/port isn't right/.test(readConnect(`${C} 70000`).error ?? "") && /port isn't right/.test(readConnect(`https://x/board/?pair=${C}&port=0`).error ?? ""), "a port out of range");
+  let threw = null;
+  const bad = ["https://sagebrush.space/board/?pair=%&port=7", "https://sagebrush.space/board/?pair=%E0%A4&port=7"].map((l) => { try { return readConnect(l); } catch (e) { threw = e; return null; } });
+  ok(!threw && bad.every((r) => /isn't right/.test(r?.error ?? "")), "a malformed %-escape in the code: the inline error, nothing thrown", { threw: String(threw), bad });
+  ok(/Paste/.test(readConnect("  ").error ?? "") && /isn't the agent's link/.test(readConnect("https://sagebrush.space/agents/").error ?? ""), "nothing, or another link");
 }
 {
   // (the grant dialog's name for the agent: its program only when it differs from the name, never the same word twice)

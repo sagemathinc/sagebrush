@@ -94,18 +94,18 @@ An MCP server your agent starts: Sage and Python tools, and, when you pair a Sag
 ### Commands
 
 ```
-claude mcp add --scope user sagebrush -- uvx sagebrush-mcp
+claude mcp add --scope user sagebrush -- uvx sagebrush-mcp@latest
 ```
 
-`--scope user` makes it Claude Code's in every folder; without it, it is only in the folder you ran the command in.
+`--scope user` makes it Claude Code's in every folder; without it, it is only in the folder you ran the command in. With `@latest`, uv checks for a newer sagebrush-mcp each time the agent starts it, and runs the newest. Added before 0.10.2? Run once: `claude mcp remove sagebrush`, then `claude mcp add --scope user sagebrush -- uvx sagebrush-mcp@latest`. If it runs a `sagebrush-mcp` you installed with pip, `pip install -U sagebrush` upgrades it.
 
 Other agents take a configuration like:
 
 ```
-{ "mcpServers": { "sagebrush": { "command": "uvx", "args": ["sagebrush-mcp"] } } }
+{ "mcpServers": { "sagebrush": { "command": "uvx", "args": ["sagebrush-mcp@latest"] } } }
 ```
 
-To let it work in your Sagebrush files, ask your agent to connect to Sagebrush. It gives a link that opens the notebook page with its code and port filled in, or the code and the port to type in: enter them with the Agent button on the notebook page or in the LaTeX editor, or with Connect an agent… in a board's ⋯ menu or a code file's File menu. Chrome and Edge ask once whether this site may reach apps on this computer: click Allow. If you blocked it, allow it again in the site's settings.
+To let it work in your Sagebrush files, ask your agent to connect to Sagebrush, or just ask for what you want: until a page is connected, the Sagebrush tools that need your page (the workspace, LaTeX-comment and chat tools) answer with the same link, and once it is connected but before you press Allow, they ask for Allow. Open it in Chrome or Firefox: it opens the notebook page with Connect, the code and port in the link, nothing to type. Press Connect, then Allow. The link works once, for 5 minutes. Chrome and Edge ask once whether this site may reach apps on this computer: click Allow. If you blocked it, allow it again in the site's settings.
 
 ### What it touches
 

@@ -230,8 +230,9 @@ def test_git_branch_through_the_tool():
 
 def test_not_connected():
     for name, args in [("workspace_list", {"folder": "/"}), ("workspace_read", {"path": "/a.txt"})]:
+        # (the bare refusal: the MCP server puts the one link in its place, test_pairing.py's test_one_link_everywhere)
         err = refused(None, name, args, "not_connected")
-        assert "Chrome or Firefox" in err["message"], err
+        assert err["message"] == "no Sagebrush page is paired with this agent", err
 
 
 def test_invalid_never_reaches_the_page():

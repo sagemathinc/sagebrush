@@ -146,7 +146,7 @@ try {
   ok(await until(`[...document.querySelectorAll('.sbag-dlg .runner')].length === 1`), "the Connect dialog lists your computers");
   const d = await dialogText();
   ok(d.includes("Or chat with an agent on one of your computers:") && d.includes("laptop") && d.includes("Chat here"), "…under \"Or chat with an agent on one of your computers:\", a row: laptop, Chat here", d);
-  ok(d.includes("Code") && d.includes("Port"), "…with the code and port still there, for the agent on this computer");
+  ok(d.includes("Link") && !d.includes("Port"), "…with the link field still there, for the agent on this computer (its one field: the link it gives)", d);
   await ev(`[...document.querySelectorAll('.sbag-dlg button')].find((b) => b.textContent === 'Cancel').click()`);
 
   // Chat here: connecting, then the grant dialog (no Remember), then the agent on laptop
