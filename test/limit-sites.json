@@ -3959,6 +3959,11 @@
   "owner": "polynomial factorization",
   "reason": "test code: the modular phase's oracle equivalence, memory, work-refusal and Stop tests; refuses nothing itself"
  },
+ "engine/poly/src/tests.rs :: modp_zero_divisor_is_an_internal_error :: let b = Budget::unlimited(); #0": {
+  "class": "none",
+  "owner": "polynomial factorization",
+  "reason": "test code: a zero divisor or modulus is an internal error, before any debit or allocation; refuses nothing itself"
+ },
  "engine/poly/src/tests.rs :: power_takes_a_u64_exponent :: assert_eq!(power(&Budget::unlimited(), 13, 40).unwrap().v, BigInt::from(13).pow(40)); #0": {
   "class": "none",
   "owner": "polynomial factorization (@sagebrush-sage2)"

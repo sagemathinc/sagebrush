@@ -1,0 +1,8 @@
+{
+ "v": 1,
+ "reason": "Factoring mod p: a division by, or a reduction modulo, a zero or untrimmed polynomial (a zero leading coefficient) inside the modular phase is reported as an internal error (a failed invariant) before any work is debited, instead of surfacing as a resource limit or a panic. Engine built from source with CI's path mapping: 7640188 -> 7640486 bytes (+298) over the base's fresh build, marked exactly (PRs into the track do not move wasm/pins.json). The command line: +396 bytes measured by CI's size gate on the tested merge, marked at 460 (measured + 64).",
+ "bytes": {
+  "engine/sagebrush-engine.wasm": 298,
+  "cli/pyjs.cjs": 460
+ }
+}

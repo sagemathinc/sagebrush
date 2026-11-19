@@ -192,6 +192,12 @@ impl<'b> Fp<'b> {
     }
 
     pub fn divrem(&self, x: &[u64], y: &[u64]) -> FResult<(FPoly, FPoly)> {
+        if y.last().is_none_or(|&c| c == 0) {
+            // (the factoring divides only by trimmed nonzero polynomials,
+            // whose leading coefficient is a unit as p is prime: anything
+            // else is a bug, not a limit)
+            return Err(self.b.internal("modular arithmetic: a division by a zero or untrimmed polynomial"));
+        }
         self.fits(x.len().max(y.len()))?;
         self.b.debit(np::divrem_work(x.len(), y.len()))?;
         let (q, r) = np::divrem_in(x, y, &self.m, &self.lt);
@@ -211,6 +217,11 @@ impl<'b> Fp<'b> {
 
     /// The modulus f (with its inverse series).
     pub fn modulus(&self, f: &[u64]) -> FResult<PolyModulus> {
+        if f.last().is_none_or(|&c| c == 0) {
+            // (the factoring reduces only modulo trimmed nonzero
+            // polynomials: anything else is a bug, not a limit)
+            return Err(self.b.internal("modular arithmetic: a zero or untrimmed polynomial as a modulus"));
+        }
         self.fits(f.len())?;
         self.b.debit(np::polymod_new_work(f.len()))?;
         Ok(PolyModulus::new_in(f, &self.m, &self.lt))

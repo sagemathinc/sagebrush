@@ -648,6 +648,28 @@ fn modp_every_operation_debits_before_it_allocates() {
 }
 
 #[test]
+fn modp_zero_divisor_is_an_internal_error() {
+    // a zero or untrimmed divisor or modulus can only be a bug in the
+    // factoring: it is reported as an internal error, before any debit or
+    // allocation, never as a resource limit (or a panic)
+    let b = Budget::unlimited();
+    let fp = modp::Fp::new(&b, 65537, 8).unwrap();
+    let work = b.work_left();
+    let before = alloc_spy::allocated();
+    // empty, zero, and untrimmed (a zero leading coefficient, not a unit)
+    for y in [&[][..], &[0], &[1, 0], &[3, 0, 0]] {
+        let e = fp.divrem(&[1, 2, 3], y).unwrap_err();
+        assert!(e.kind == Kind::Internal, "{y:?}: {e}");
+        let e = fp.quo(&[1, 2, 3], y).unwrap_err();
+        assert!(e.kind == Kind::Internal, "{y:?}: {e}");
+        let e = fp.modulus(y).map(|_| ()).unwrap_err();
+        assert!(e.kind == Kind::Internal, "{y:?}: {e}");
+    }
+    assert_eq!(b.work_left(), work);
+    assert_eq!(alloc_spy::allocated(), before);
+}
+
+#[test]
 fn modp_memory_at_its_exact_reservation() {
     // the boundary: a call's measured peak reservation as the memory limit
     // admits it (the allocator's peak within it, the ledger audit clean,
