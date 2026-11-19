@@ -1056,6 +1056,16 @@
   "owner": "modular symbols",
   "row": "inv-42"
  },
+ "engine/modsym/tests/newforms_poll_gap.rs :: trace_coefficient_bound_poll_gap :: let (gap, poll) = (hooks::max_gap_ns(), hooks::max_poll_gap_ns()); #0": {
+  "class": "none",
+  "owner": "modular symbols",
+  "reason": "test code: the longest time between Stop checks while newforms computes trace forms; refuses nothing itself"
+ },
+ "engine/modsym/tests/newforms_poll_gap.rs :: trace_forms_poll_gap :: let (gap, poll, total) = (hooks::max_gap_ns(), hooks::max_poll_gap_ns(), hooks::total()); #0": {
+  "class": "none",
+  "owner": "modular symbols",
+  "reason": "test code: the longest time between Stop checks while newforms computes trace forms; refuses nothing itself"
+ },
  "engine/mp/src/abi.rs ::  :: const MAX_FACTORIAL_CACHE: i64 = 1000; #0": {
   "class": "none",
   "owner": "mpmath core (@sagebrush-sage2)",

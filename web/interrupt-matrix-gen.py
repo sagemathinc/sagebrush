@@ -26,6 +26,11 @@ CASES = [
          setup="R = PolynomialRing(GF(32003), 'x', S)\nX = R.gens()\nI = R.ideal([sum(prod(X[(j + t) % S] for t in range(d)) for j in range(S)) for d in range(1, S)] + [prod(X) - 1])",
          target="_r = I.groebner_basis()",
          probe="assert (X[0] + X[1])**2 - X[0]**2 - X[1]**2 == 2 * X[0] * X[1]\nassert len(I.gens()) == len(X) and I.gens()[0] in R\nR2 = PolynomialRing(GF(32003), 'y', 2)\nassert len(R2.ideal([R2.gen(0)**2 - 1, R2.gen(1) - 1]).groebner_basis()) == 2"),
+    # newforms' trace forms to a large bound (what hecke_matrix(p) on a weight-4 space asks for): the
+    # divisor counts and the per-prime Heilbronn images, each polled for Stop
+    dict(id="E9n", transport="engineCall:newforms", owner="modular symbols", mode="sage", s0=6000, smin=1000, smax=200000,
+         grow=dict(kind="scale", p=2), setup="from sagebrush import mf", target="_r = mf.newforms(389, 4, bound=S)",
+         probe="assert len(mf.newforms(11, 2)['newforms']) == 1"),
     # rank-13 PR 1 (plan-matlab-nocliffs r6 section 3): the ordering and the sparse LU, Stop after their PHASE
     dict(id="M1o", transport="pyloop:matlab-colamd", owner="MATLAB sparse linear algebra", mode="python", s0=250, smin=40, smax=600,
          grow=dict(kind="scale", p=2), phase="ordering", leak_measure="heap+external", hosts=["cli"],
