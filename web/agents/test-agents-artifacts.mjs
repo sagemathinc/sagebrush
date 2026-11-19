@@ -467,6 +467,25 @@ try {
   }
 
   // ======================================================================== saved, with its base; reopened
+  // ======================================================================== Open in Sagebrush: the file's own page
+  if (want("openlink")) {
+    // (its address is the one the File menu opens the notebook at, /?nb=<its id>, and following it, in this tab or in
+    // the installed app, opens that notebook in the notebook editor: an address no page answers (/w/<path>) was a 404)
+    const path = "/notes/linked.ipynb";
+    await call("workspace.create", { path, content: docFor(path, [{ code: "print('LINKED-CELL')" }]), mode: "python" });
+    await openNotebook(path);
+    await until(`!!document.querySelector('${PANE} .file-path .open-full:not([hidden])')`);
+    const ref = await refOf(path), href = await ev(`document.querySelector('${PANE} .file-path .open-full').getAttribute('href')`);
+    ok(href === "/?nb=" + encodeURIComponent(ref), "Open in Sagebrush names the notebook's own page, /?nb=<its id>", { href, ref });
+    const status = await ev(`fetch(${JSON.stringify(href)}).then((r) => r.status)`);
+    ok(status === 200, "that address answers 200", status);
+    await send("Page.navigate", { url: site + href });
+    await until(`[...document.querySelectorAll('.sbnb .cell')].some((c) => c.textContent.includes("LINKED-CELL"))`, 30000);
+    ok(await ev(`document.querySelectorAll('.sbnb .cell').length === 1`), "following it opens that notebook, and only its one cell, in the notebook editor");
+    await pair();
+    await converse();
+  }
+
   if (want("save")) {
     const path = "/notes/save.ipynb";
     await call("workspace.create", { path, content: docFor(path, [{ code: "a = 1" }, { code: "print(41 + 1)" }, { code: "b = 2" }]), mode: "python" });
