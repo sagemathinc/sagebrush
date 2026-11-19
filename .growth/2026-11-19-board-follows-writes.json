@@ -1,7 +1,0 @@
-{
- "v": 1,
- "reason": "An open board follows writes made elsewhere: the board page takes in a version written by another tab or by an agent (web/board/page.ts), shows it with its new and changed code paused until the person runs it (web/board/mount.ts), and the bar offers a board an agent made with Open (web/workspace/agent-ui.ts); the CLI's Python bundle carries these pages (build/cli/web.gen.js). Bound from CI's size-gate table at e57f4f25 (run 44476752674): +716; the marker is the growth + 64.",
- "bytes": {
-  "cli/pyjs.cjs": 780
- }
-}

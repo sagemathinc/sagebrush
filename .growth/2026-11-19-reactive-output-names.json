@@ -1,9 +1,0 @@
-{
-  "v": 1,
-  "reason": "The reactive notebook leaves IPython's output names (_, __ and _N) read in a cell that doesn't bind them as the interpreter's, so a Jupyter notebook's cell such as `_ * 2` runs; a cell binding one keeps it as its own (src/dataflow.ts). CI's size gate on the branch head: cli/pyjs.cjs +141, engine/sagebrush-analyze.js +48, engine/sagebrush-worker.js +48; each bound adds 64 bytes of slack.",
-  "bytes": {
-    "cli/pyjs.cjs": 205,
-    "engine/sagebrush-analyze.js": 112,
-    "engine/sagebrush-worker.js": 112
-  }
-}
