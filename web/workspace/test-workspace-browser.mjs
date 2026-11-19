@@ -1653,15 +1653,80 @@ try {
   await until(`!!document.querySelector("#cells .cell textarea")`, 60000);
   const keptText = await ev(`document.querySelector("#cells .cell textarea")?.value ?? ""`);
   check(words.every((w) => keptText.includes(w)), "and every edit typed before leaving is in the notebook: " + JSON.stringify(keptText));
-  // (a refused save of a notebook left at once, another opened before its answer: saved() still rejects, naming it)
+  // (a save of notebook X held, X edited, notebook Y opened, X's save then answered: refused, and later accepted; thrown.
+  //  Each time saved() names X while X's edit isn't saved, whatever Y's saves do; once the store takes X's again, saved()
+  //  sends it and resolves, and X has the edit)
   const rowOf = (p) => `#wssidebar .frow[data-sel][data-path=${JSON.stringify(p)}]`;
-  const other = (await ev(`(async () => (await ${W}.list("/", { recursive: true })).filter((e) => e.kind === "notebook" && e.ref !== sagebrush.notebook.store?.id).map((e) => e.path))()`))[0];
-  await until(`!!document.querySelector(${JSON.stringify(rowOf(other))})`, 10000);
-  await ev(`(sagebrush.notebook.store.save = () => new Promise((ok) => setTimeout(() => ok("not saved: the notebook left"), 800)), 1)`);
-  await typeCell(" # left");
-  await ev(`(document.querySelector(${JSON.stringify(rowOf(other))}).click(), 1)`);
-  const leftWhy = await ev(`new Promise((r) => setTimeout(r, 300)).then(() => sagebrush.notebook.saved()).then(() => "resolved", (e) => String(e?.message ?? e))`);
-  check(/the notebook left/.test(leftWhy), "a refused save of a notebook left at once (another opened): saved() still rejects, naming it: " + leftWhy);
+  const shownPath = () => ev(`(async () => { const id = sagebrush.notebook.store?.id; return id ? ((await ${W}.list("/", { recursive: true })).find((e) => e.ref === id)?.path ?? null) : null; })()`);
+  const leaveX = async (answer, word) => {
+    const X = await shownPath();
+    const Y = (await ev(`(async () => (await ${W}.list("/", { recursive: true })).filter((e) => e.kind === "notebook" && e.ref !== sagebrush.notebook.store?.id).map((e) => e.path))()`))[0];
+    await until(`!!document.querySelector(${JSON.stringify(rowOf(Y))})`, 10000);
+    await ev(`sagebrush.notebook.saved().then(() => 1, () => 1)`);
+    const xName = await ev(`sagebrush.notebook.snapshot().name ?? ""`);
+    // (X's own store: its next save held until answered; every later one answered the same way, until restored)
+    await ev(`(() => { const st = window.__xs = sagebrush.notebook.store; window.__xsave = st.save; let held = null; window.__xanswer = () => held?.(); st.save = () => window.__xheld ? Promise.resolve(window.__xheld()) : new Promise((ok, no) => { held = () => { const a = ${answer}; window.__xheld = () => a(); a().then(ok, no); }; }); window.__xheld = null; return 1; })()`);
+    await typeCell(word);
+    await ev(`(sagebrush.notebook.flush?.(), 1)`);
+    await ev(`(document.querySelector(${JSON.stringify(rowOf(Y))}).click(), 1)`);
+    await until(`!!sagebrush.notebook.store && sagebrush.notebook.store !== window.__xs`, 20000);
+    // (saved() asked while X's save is still held, as leaving the page asks: it meets X's failure, which it didn't send)
+    await ev(`(window.__xp = sagebrush.notebook.saved().then(() => "resolved", (e) => String(e?.message ?? e)), 1)`);
+    await ev(`(window.__xanswer(), 1)`);
+    const why = await ev(`window.__xp`);
+    return { X, Y, xName, why, shown: await shownPath() };
+  };
+  const reopen = async (path, word) => {
+    await until(`!!document.querySelector(${JSON.stringify(rowOf(path))})`, 20000);
+    await ev(`(document.querySelector(${JSON.stringify(rowOf(path))}).click(), 1)`);
+    await until(`(async () => { const id = sagebrush.notebook.store?.id; return !!id && ((await ${W}.list("/", { recursive: true })).find((e) => e.ref === id)?.path === ${JSON.stringify(path)}); })()`, 20000);
+    return ev(`[...document.querySelectorAll("#cells .cell textarea")].some((t) => t.value.includes(${JSON.stringify(word)}))`);
+  };
+  const savedNow = () => ev(`sagebrush.notebook.saved().then(() => "resolved", (e) => String(e?.message ?? e))`);
+  const copies = () => ev(`(async () => (await ${W}.list("/", { recursive: true })).filter((e) => e.kind === "notebook" && /\\(your changes/.test(e.path)).map((e) => e.path))()`);
+  // (A: X's held save refused after Y opened: the saved() that meets the refusal (not one it sent) rejects, naming X,
+  //  nothing copied yet;
+  //  C: X's re-send refused for good (its journal's store, released when Y opened: "not saved: ... another tab"): the
+  //  next saved() keeps X's edit as a copy beside it, resolves, and says the copy's name; X's record is left as it was)
+  {
+    const before = await copies();
+    const r = await leaveX(`() => Promise.resolve("not saved: X REFUSED")`, " # x-refused");
+    check(r.shown === r.Y && /X REFUSED/.test(r.why) && r.why.includes("a notebook you left") && (!r.xName || r.why.includes(r.xName)) && (await copies()).length === before.length, "A: X's held save answered refused after Y opened: saved() rejects, naming X, Y shown, no copy yet: " + JSON.stringify(r));
+    await ev(`(window.__xs.save = window.__xsave, 1)`);
+    const again = await savedNow(), made = (await copies()).filter((c) => !before.includes(c)), said = await ev(`document.querySelector("#status")?.textContent ?? ""`);
+    check(again === "resolved" && made.length === 1 && (!r.xName || made[0].includes(r.xName)) && said.includes(made[0].split("/").pop().replace(/\.ipynb$/, "")), "C: X's re-send refused for good: its edit kept as a copy, saved() resolves, and the page names the copy: " + JSON.stringify({ again, made, said }));
+    check(made.length === 1 && (await reopen(made[0], " # x-refused")), "…the copy, opened, has the edit made before X was left");
+    check(!(await reopen(r.X, " # x-refused")), "…and X, opened again, is as it was: nothing written over it");
+  }
+  // (B: X's re-send accepted by its store: sent once, as it was, and saved() resolves, with no copy)
+  {
+    const before = await copies();
+    const r = await leaveX(`() => Promise.resolve("not saved: X REFUSED")`, " # x-accepted");
+    check(/X REFUSED/.test(r.why), "B: X's save refused after Y opened: saved() rejects first: " + r.why);
+    await ev(`(window.__xgot = [], window.__xs.save = (doc) => (window.__xgot.push(doc), Promise.resolve({ rev: 1e9, saved: "saved" })), 1)`);
+    const again = await savedNow(), got = await ev(`window.__xgot.map((d) => d.cells.some((c) => String(c.code).includes(" # x-accepted")))`);
+    check(again === "resolved" && got.length === 1 && got[0] && (await copies()).length === before.length, "…X's store taking it: sent again once, with the edit, saved() resolves, no copy: " + JSON.stringify({ again, got }));
+  }
+  // (D: the copy can't be kept either: saved() rejects, X's edit held as not kept (counted), until it can be)
+  {
+    const r = await leaveX(`() => Promise.resolve("not saved: X REFUSED")`, " # x-unkept");
+    check(/X REFUSED/.test(r.why), "D: X's save refused after Y opened: saved() rejects first: " + r.why);
+    await ev(`(window.__wasKeep = sagebrush.notebook.onDetachedConflict(async () => { throw new Error("NOT KEPT HERE"); }), 1)`);
+    const again = await savedNow(), unkept = await ev(`sagebrush.notebook.unkeptCount`);
+    check(/NOT KEPT HERE/.test(again) && unkept === 1, "…its re-send refused and its copy not kept: saved() rejects, the edit held as not kept: " + JSON.stringify({ again, unkept }));
+    await ev(`(sagebrush.notebook.onDetachedConflict(window.__wasKeep), 1)`);
+    const later = await savedNow();
+    check(later === "resolved" && (await ev(`sagebrush.notebook.unkeptCount`)) === 0, "…and kept by the next saved() once it can be: " + later);
+  }
+  // (E: thrown, as A: rejects naming X; then kept the same way)
+  {
+    const before = await copies();
+    const r = await leaveX(`() => Promise.reject(new Error("X FAILED"))`, " # x-thrown");
+    check(r.shown === r.Y && /X FAILED/.test(r.why) && r.why.includes("a notebook you left"), "E: X's held save failing (thrown) after Y opened: saved() rejects, naming X: " + JSON.stringify(r));
+    await ev(`(window.__xs.save = window.__xsave, 1)`);
+    const again = await savedNow(), made = (await copies()).filter((c) => !before.includes(c));
+    check(again === "resolved" && made.length === 1 && (await reopen(made[0], " # x-thrown")), "…its re-send refused for good: kept as a copy, saved() resolves, the copy has the edit: " + JSON.stringify({ again, made }));
+  }
   for (const e of errors) fails.push("page error: " + e);
 } catch (e) {
   fails.push("threw: " + (e?.stack ?? e));
