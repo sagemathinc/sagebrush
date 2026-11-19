@@ -2289,7 +2289,7 @@ _NATIVE = {
 # class, or pass it on
 _PASS = set("""size numel length ndims isempty isscalar isvector ismatrix isrow iscolumn issquare class isa
 isnumeric isfloat islogical isinteger ischar iscell isstruct isstring iscellstr isobject is_function_handle
-disp display feval struct cell deal isfield whos exist clear
+disp display feval struct cell deal isfield whos exist clear jsonencode
 plus minus times rdivide ldivide power mtimes mrdivide mldivide mpower eq ne lt le gt ge and or not uminus uplus
 transpose ctranspose cat horzcat vertcat""".split())
 _FULL = {}  # the built-ins as they were, for full arguments

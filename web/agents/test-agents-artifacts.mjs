@@ -526,6 +526,17 @@ try {
     ok(await ev(`document.querySelectorAll('.sbnb .cell').length === 1`), "following it opens that notebook, and only its one cell, in the notebook editor");
     await pair();
     await converse();
+    // (a code file the agent wrote: its link is its own page, /?code=<fid>, and that page shows the file)
+    await call("workspace.create", { path: "/notes/linked.py", content: { text: "print('LINKED-CODE')\n" } });
+    await artifactTurn("/notes/linked.py");
+    await until(`document.querySelector('${PANE} .file-path')?.textContent.startsWith("/notes/linked.py ") && !!document.querySelector('${PANE} .file-path .open-full:not([hidden])')`, 30000);
+    const codeHref = await ev(`document.querySelector('${PANE} .file-path .open-full').getAttribute('href')`);
+    ok(/^\/\?code=[0-9a-f]+$/.test(codeHref), "a code file's Open in Sagebrush names its own page, /?code=<its id>", codeHref);
+    await send("Page.navigate", { url: site + codeHref });
+    await until(`document.body.innerText.includes("LINKED-CODE")`, 30000);
+    ok(true, "following it opens that file on its page");
+    await pair();
+    await converse();
   }
 
   if (want("save")) {

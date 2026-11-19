@@ -14,6 +14,7 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { createInterface } from "node:readline";
 import { devtoolsPort } from "../test-port.mjs";
+import { BAR_CLEAR } from "./agent-bar-check.mjs";
 
 const here = new URL(".", import.meta.url).pathname;
 let failures = 0, checks = 0;
@@ -195,6 +196,7 @@ try {
   ok(await until(`[...document.querySelectorAll(".sbag-box input")].some((i) => i.value === ${JSON.stringify(first.code)})`), "the Connect dialog shows, its code filled in");
   await ev(`(document.querySelector(".sbag-box button.primary").click(), true)`);
   ok(await grant(true), "allowed for 1 hour, remembered: the bar shows");
+  ok(await until(`${BAR_CLEAR} === true`, 5000), "the board: the agent's bar is in its own row, over nothing the person types in or reads", await ev(BAR_CLEAR).catch((e) => String(e)));
   const ls = await drive({ op: "req", method: "workspace.list", params: { folder: "/", recursive: true } });
   ok(JSON.stringify(ls).includes(".board.json"), "the agent lists the workspace, the board in it", JSON.stringify(ls).slice(0, 300));
 

@@ -18,7 +18,7 @@ const G = require(join(ROOT, "scripts/arraybuffer-sites-check.mjs"));
 const S = require(join(ROOT, "scripts/arraybuffer-sites.mjs"));
 
 // (954 s on master: a slow test, test/slow-tests.ts; and not in engine-node, whose fresh engine it never runs)
-test("tsc 7 agrees with every kind on this tree, except the reviewed sites it can't finish", { skip: slowSkipFor("arraybuffer") || (process.env.GITHUB_JOB === "engine-node" && "engine-independent: node-tests runs it") }, async (t) => {
+test("tsc 7 agrees with every kind on this tree, except the reviewed sites it can't finish", { timeout: 900_000, skip: slowSkipFor("arraybuffer") || (process.env.GITHUB_JOB === "engine-node" && "engine-independent: node-tests runs it") }, async (t) => {
   // (the host's memory while the check runs: its total, the least it had available, sampled each second, and the root
   // cgroup's limit and peak, "unavailable" where they can't be read; the passes run at once, so their memory is a CI
   // budget too.  The job's own cgroup is printed by node-tests' memory telemetry step)

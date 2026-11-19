@@ -171,6 +171,9 @@ jobs:
       - run: pnpm install --frozen-lockfile
       - run: pnpm run build
       - name: Node tests, shard ${{ matrix.shard }}/8
+        # CI 44540774555: slowest ordinary test 169 s. Default 300 s per
+        # test; seven long sweeps observed at 205-432 s in 44487308167
+        # explicitly request 900 s in their test definitions.
         env:
           SAGEBRUSH_TIME_SCALE: "2"
           # (the slow tests, test/slow-tests.ts: for the full-ci label and the paths they test, scripts/ci-paths.mjs
@@ -180,7 +183,7 @@ jobs:
           NPY_DISABLE_CPU_FEATURES: "X86_V4 AVX512_ICL AVX512_SPR"
         run: |
           mapfile -d '' files < <(find dist/test target -maxdepth 1 -type f -name '*.test.js' ! -name 'magma.test.js' ! -name 'matlab.test.js' ! -name 'sprig*.test.js' -print0 | sort -z)
-          node --test --test-concurrency="$SAGEBRUSH_CPUS" --test-shard=${{ matrix.shard }}/8 "${files[@]}"
+          node --test --test-timeout=300000 --test-concurrency="$SAGEBRUSH_CPUS" --test-shard=${{ matrix.shard }}/8 "${files[@]}"
       # (read-only memory telemetry: the cgroup this step runs in, which is the whole job so far, its
       # install, build and every test of the shard, not the parity test alone; printed even when a step before failed;
       # a file that is missing or unreadable is printed as unavailable, never as 0)
@@ -234,7 +237,7 @@ jobs:
           mapfile -d '' files < <(find dist/test -maxdepth 1 -type f -name 'sprig*.test.js' -print0 | sort -z)
           # (master has Sprig suites: none found means the build or the pattern broke)
           if [ "${#files[@]}" -eq 0 ]; then echo "no Sprig suites: the build or the pattern is wrong"; exit 1; fi
-          node --test --test-concurrency="$SAGEBRUSH_CPUS" "${files[@]}"
+          node --test --test-timeout=300000 --test-concurrency="$SAGEBRUSH_CPUS" "${files[@]}"
 
   language-node:
     needs: [changes, wasm-modules]
@@ -307,7 +310,7 @@ jobs:
       - run: pnpm run build
       - name: security, bundles, generated files and web assets
         run: |
-          SAGEBRUSH_HARDENED=0 node --test --test-concurrency="$SAGEBRUSH_CPUS" dist/test/security.test.js
+          SAGEBRUSH_HARDENED=0 node --test --test-timeout=300000 --test-concurrency="$SAGEBRUSH_CPUS" dist/test/security.test.js
           node scripts/build-cli.mjs
           node scripts/web-tests.mjs run checks.1
           node scripts/bench-ff-limits.mjs
@@ -714,7 +717,7 @@ jobs:
           trap cleanup_server EXIT
           trap 'exit 130' INT
           trap 'exit 143' TERM
-          sleep 1
+          node scripts/wait-for-port.mjs 8765
           kill -0 "$server_pid"
           node scripts/web-tests.mjs run web-export
 
@@ -762,7 +765,7 @@ jobs:
           trap cleanup_server EXIT
           trap 'exit 130' INT
           trap 'exit 143' TERM
-          sleep 1
+          node scripts/wait-for-port.mjs 8765
           kill -0 "$server_pid"
           # (G-10: the runner's fetch broker on the notebook page, each case's server its own)
           # (`sagebrush notebook DIR` reads, writes and lists only what is really inside DIR: no symbolic link out)
@@ -819,7 +822,7 @@ jobs:
           trap cleanup_server EXIT
           trap 'exit 130' INT
           trap 'exit 143' TERM
-          sleep 1
+          node scripts/wait-for-port.mjs 8765
           kill -0 "$server_pid"
           node scripts/web-tests.mjs run web-lookalike
 
@@ -865,7 +868,7 @@ jobs:
           trap cleanup_server EXIT
           trap 'exit 130' INT
           trap 'exit 143' TERM
-          sleep 1
+          node scripts/wait-for-port.mjs 8765
           kill -0 "$server_pid"
           # (EXACT-ONLY's old-sync detector; OLD8's old builds run locally only, with OLD_TREES)
           node scripts/web-tests.mjs run web-sync-ops
@@ -914,7 +917,7 @@ jobs:
           trap cleanup_server EXIT
           trap 'exit 130' INT
           trap 'exit 143' TERM
-          sleep 1
+          node scripts/wait-for-port.mjs 8765
           kill -0 "$server_pid"
           node scripts/web-tests.mjs run web-runner-sync.1
       # (the Numbl corpus ratchet, its target web-runner-sync.2: the long tier's)
@@ -1019,7 +1022,7 @@ jobs:
           trap cleanup_server EXIT
           trap 'exit 130' INT
           trap 'exit 143' TERM
-          sleep 1
+          node scripts/wait-for-port.mjs 8765
           kill -0 "$server_pid"
           mkdir -p interrupt-out
           node scripts/web-tests.mjs run interrupt-matrix
@@ -1208,7 +1211,7 @@ jobs:
           trap cleanup_server EXIT
           trap 'exit 130' INT
           trap 'exit 143' TERM
-          sleep 1
+          node scripts/wait-for-port.mjs 8765
           kill -0 "$server_pid"
           case "$GROUP" in
             notebook)
@@ -1606,7 +1609,7 @@ jobs:
           node scripts/third-party-notices.mjs --check
           pnpm run build
           node scripts/build-cli.mjs
-          node --test --test-concurrency="$SAGEBRUSH_CPUS" dist/test/groups.test.js dist/test/kernels.test.js dist/test/mpfield-matrix.test.js dist/test/special.test.js dist/test/sage.test.js dist/test/scipy-integrate.test.js
+          node --test --test-timeout=300000 --test-concurrency="$SAGEBRUSH_CPUS" dist/test/groups.test.js dist/test/kernels.test.js dist/test/mpfield-matrix.test.js dist/test/special.test.js dist/test/sage.test.js dist/test/scipy-integrate.test.js
           python3 sage-tests/run_calculus.py
 
   engine-node:
@@ -1652,7 +1655,7 @@ jobs:
           NPY_DISABLE_CPU_FEATURES: "X86_V4 AVX512_ICL AVX512_SPR"
         run: |
           mapfile -d '' files < <(find dist/test -maxdepth 1 -type f -name '*.test.js' ! -name 'magma.test.js' ! -name 'matlab.test.js' ! -name 'sprig*.test.js' -print0 | sort -z)
-          node --test --test-concurrency="$SAGEBRUSH_CPUS" --test-shard=${{ matrix.shard }}/8 "${files[@]}"
+          node --test --test-timeout=300000 --test-concurrency="$SAGEBRUSH_CPUS" --test-shard=${{ matrix.shard }}/8 "${files[@]}"
 
   engine-language:
     needs: [changes, engine-wasm, wasm-modules]
@@ -1954,7 +1957,7 @@ jobs:
           trap cleanup_server EXIT
           trap 'exit 130' INT
           trap 'exit 143' TERM
-          sleep 1
+          node scripts/wait-for-port.mjs 8765
           kill -0 "$server_pid"
           node scripts/web-tests.mjs run export-controls
 
@@ -1997,7 +2000,7 @@ jobs:
           trap cleanup_server EXIT
           trap 'exit 130' INT
           trap 'exit 143' TERM
-          sleep 1
+          node scripts/wait-for-port.mjs 8765
           kill -0 "$server_pid"
           node scripts/web-tests.mjs run lookalike-controls
 
