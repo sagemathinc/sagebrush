@@ -415,7 +415,10 @@ const outputs = {
   slow_scope: slowScope,
   // (the growth gate's own inputs: never docs-only, plan-growth-budget-r5 §1.5)
   // (a dispatch or a schedule has no file list: its gate always runs on the measurement, never docs-only)
-  size_inputs: event === "workflow_dispatch" || event === "schedule" || gateInputs(files).length > 0,
+  // (on a track the engine ships as built, not as pinned (scripts/pin-policy.mjs), so an engine source moves the
+  // measured bytes there and is a gate input too)
+  size_inputs: event === "workflow_dispatch" || event === "schedule" || gateInputs(files).length > 0 ||
+    (onTrack(runRefs(process.env)) && files.some((file) => enginePaths.some((p) => p.test(file)))),
   files: files.length,
   // (the examples job: the ids it runs and its shard matrix, at most 16 examples a shard (SHARD_MAX); plan U7 section 2)
   examples_ids: JSON.stringify(exampleSelection),
