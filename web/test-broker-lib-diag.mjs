@@ -23,7 +23,7 @@ try {
   let t0 = Date.now();
   const err = await fails(b.ev("new Promise(() => {})"));
   let took = Date.now() - t0;
-  ok(err !== null && /^CDP Runtime\.evaluate: no answer within 1\.5 s \[/.test(err), `a call with no answer still fails, naming its method: ${String(err).slice(0, 80)}`);
+  ok(err !== null && /^within\(CDP Runtime\.evaluate.*\) timed out after [\d.]+ s \[/.test(err), `a call with no answer still fails, naming its method: ${String(err).slice(0, 80)}`);
   // (the page among them; a browser may list others too, as Google Chrome lists an extension's background page)
   ok(/targets \(\/json\): \[.*\["page","about:blank"\]/.test(err ?? ""), "…with the target list (the page among them)");
   ok(/the same session, Runtime\.evaluate: answered \(Window\)/.test(err ?? ""), "…whether the same session still answers, and which context did (here the page: Window)");
@@ -44,7 +44,7 @@ try {
   const other = fails(b.ev("new Promise(() => {})"));
   const werr = await wp;
   await other;
-  ok(/^CDP Runtime\.evaluate: no answer within 1\.5 s \[/.test(werr ?? ""), "an attached session's call with no answer fails too");
+  ok(/^within\(CDP Runtime\.evaluate.*\) timed out after [\d.]+ s \[/.test(werr ?? ""), "an attached session's call with no answer fails too");
   ok(/the same session, Runtime\.evaluate: answered \(DedicatedWorkerGlobalScope\)/.test(werr ?? ""), "…and the probe asks that same session: the worker answers, not the page");
   ok(/; sessions: 1 attached, 0 detached; 1 other calls unanswered\]$/.test(werr ?? ""), `…the counts: one session, one other call waiting (${String(werr).slice(-70)})`);
 
@@ -56,10 +56,10 @@ try {
   took = Date.now() - t0;
   process.kill(b.pid, "SIGCONT");
   stopped = false;
-  ok(/^CDP Runtime\.evaluate: no answer within 1\.5 s \[/.test(serr ?? ""), "a stopped browser: the call fails, naming its method");
+  ok(/^within\(CDP Runtime\.evaluate.*\) timed out after [\d.]+ s \[/.test(serr ?? ""), "a stopped browser: the call fails, naming its method");
   ok(/targets \(\/json\): (The operation was aborted due to timeout|.*timeout)/i.test(serr ?? ""), "…the target list's own deadline is said");
-  ok(/the same session, Runtime\.evaluate: its probe: no answer within 5 s/.test(serr ?? ""), "…the same session's probe: its own deadline");
-  ok(/the browser, Browser\.getVersion: its probe: no answer within 5 s/.test(serr ?? ""), "…the browser's probe: its own deadline");
+  ok(/the same session, Runtime\.evaluate: within\(its probe\) timed out after [\d.]+ s/.test(serr ?? ""), "…the same session's probe: its own deadline");
+  ok(/the browser, Browser\.getVersion: within\(its probe\) timed out after [\d.]+ s/.test(serr ?? ""), "…the browser's probe: its own deadline");
   ok(took < CDP_MS + 15000 + 3000, `…all within cdpMs + 15 s + margin (${took} ms)`);
   console.log("  (3: " + String(serr).slice(0, 600) + ")");
   ok((await b.ev("2 + 2")) === 4, "resumed, the harness carries on");
