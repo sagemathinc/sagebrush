@@ -30,6 +30,9 @@ if (process.env.AGENTS_LATEX === "1" && !LATEX) throw new Error("AGENTS_LATEX=1 
 // "test" build's, on loopback as here, whose hooks (__sbTexWs) are in its page module; elsewhere the pane has the editor
 // itself, as on the CLI's page)
 const TEXFRAME = LATEX && readFileSync(join(here, "..", "dist", "sagebrush-latex.js"), "utf8").includes("__sbTexWs");
+// (and whether its editor runs a .tex the agent made once by itself, decided Nov 19 2026: its page module asks the
+// pairing over the site's channel, web/workspace/agent-made-tex.ts)
+const TEXSELF = TEXFRAME && readFileSync(join(here, "..", "dist", "sagebrush-latex.js"), "utf8").includes("tex-may-run");
 if (process.env.AGENTS_LATEX === "0" && LATEX) throw new Error("AGENTS_LATEX=0 but this web/dist has sagebrush-latex.js: build it with SAGEBRUSH_LATEX_PREVIEW=0");
 // (A14's cases, in a build without LaTeX: AGENTS_LATEX=0 insists they ran to their end)
 let a14Ran = false;
@@ -823,6 +826,8 @@ try {
     await call("workspace.write", { path: T, content: { text: r.content.text.replace("Two and two: $\\sage{2 + 2}$", "Three and four: $\\sage{3 + 4}$") }, base: r.rev });
     const followed = await until(`!!${FD}?.querySelector('.tex-preview')?.textContent.includes('Three and four')`, 30000).catch(() => false);
     const same = await ev(`${FW}?.__sameDoc === 1`);
+    // (a run under way first, as the editor's own run of a .tex the agent created may be: the button is its Stop till then)
+    await until(`${FD}?.querySelector('.tex-run')?.textContent === 'Run'`, 180000).catch(() => {});
     await ev(`(${FD}.querySelector('.tex-status').textContent = '', ${FD}.querySelector('.tex-run').click(), true)`);
     const ran = await until(`/Ran 1 SageTeX item/.test(${FD}?.querySelector('.tex-status')?.textContent ?? '')`, 180000).catch(() => false);
     await sleep(1000);
@@ -843,6 +848,20 @@ try {
     // (TF4: closed, nothing of the frame left)
     const tf4 = { frames: await ev(`document.querySelectorAll('iframe.tex-frame').length`), workersBefore: lw, workersAfter: live("sagebrush-latex-worker.js") };
     ok(tf4.frames === 0 && tf4.workersBefore >= 1 && tf4.workersAfter === 0, "TF4: closed, the frame and the editor's workers are gone", tf4);
+    // (TF5: a .tex the agent created runs once by itself in the frame, as a notebook it created does (decided Nov 19
+    //  2026), under this grant (Everything, May run code): its result in the PDF, nothing pressed, saved as the
+    //  editor's own Run saves it)
+    if (TEXSELF) {
+      const M = "/notes/made.tex";
+      await call("workspace.create", { path: M, content: { text: "\\documentclass{article}\n\\usepackage{sagetex}\n\\begin{document}\nMade: $\\sage{6*7}$.\n\\end{document}\n" } });
+      await artifactTurn(M);
+      const ranSelf = await until(`/Made: ?42/.test((${FD}?.querySelector('.tex-preview')?.textContent ?? '').replace(/\\s+/g, ' '))`, 120000).catch(() => false);
+      const st = await ev(`(${FD}?.querySelector('.tex-status')?.textContent ?? null)`).catch(() => null);
+      const res = await call("workspace.read", { path: M + ".results.json" }).then((r) => r.content?.text ?? (r.content?.json ? "json" : "bytes"), () => null);
+      ok(ranSelf && /Ran 1 SageTeX item/.test(st ?? "") && res !== null, "TF5: a .tex the agent created runs once by itself in the frame: its result (42) in the PDF, nothing pressed, its results saved", { ranSelf, st, res: typeof res === "string" ? res.slice(0, 60) : res });
+      await ev(`document.querySelector('#close').click()`);
+      await until(`!document.body.classList.contains('has-artifact')`, 15000).catch(() => {});
+    }
   }
 
   // ======================================================================== LaTeX: the editor fills its pane (A4, A8)
