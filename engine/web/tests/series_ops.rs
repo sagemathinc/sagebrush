@@ -65,6 +65,14 @@ fn the_strict_schema() {
     let deep = format!(r#"{{"fn":"series_mul","x":{}1{},"a":"1","b":"1","n":1}}"#, "[".repeat(100_000), "]".repeat(100_000));
     let e = err(&deep);
     assert!(e.contains("unknown key"), "{}", e);
+    // (multi-byte UTF-8 across the error previews' 40-byte cut: a key and a
+    // token, each refused by its message, never a panic)
+    for (k, ch) in [(39, "é"), (39, "界"), (38, "界"), (37, "😀"), (39, "😀")] {
+        let e = err(&format!(r#"{{"fn":"poly_mul","{}{}":"1","a":"1","b":"1"}}"#, "k".repeat(k), ch));
+        assert!(e.contains("unknown key"), "{}", e);
+    }
+    let e = err(&format!(r#"{{"fn":"poly_mul","a":"{}界","b":"1"}}"#, "a".repeat(39)));
+    assert!(e.contains("is not a hex integer"), "{}", e);
     let e = err(r#"{"fn":"series_mul","a":"1","a":"2","b":"1","n":1}"#);
     assert!(e.contains("twice"), "{}", e);
     let e = err(r#"{"fn":"series_mul","fn":"series_mul","a":"1","b":"1","n":1}"#);
