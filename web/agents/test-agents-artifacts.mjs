@@ -1231,6 +1231,51 @@ try {
   }
 
   // ======================================================================== ART-C5: each notebook's bar is its own
+  // ======================================================================== a board the agent made: a card, Open in its own tab
+  if (want("board")) {
+    const BOARD = { title: "Primes", nodes: [{ id: "c", title: "A product", code: "print(6 * 7)" }], edges: [] };
+    await call("workspace.create", { path: "/notes/primes.board.json", content: { json: BOARD } });
+    const bt = `t${++turnN}`;
+    event(bt, { type: "turn_started" });
+    event(bt, { type: "artifact", id: "/notes/primes.board.json", kind: "board", title: "primes.board.json", path: "/notes/primes.board.json", body: "" });
+    event(bt, { type: "turn_finished", outcome: "completed" });
+    const card = `${PANE} .board-made`;
+    ok(await until(`/ made primes\\.board\\.json$/.test(document.querySelector('${card} .who')?.textContent ?? '')`, 15000), "a board the agent wrote shows as a card: \"<agent> made primes.board.json\"", await ev(`document.querySelector('${card}')?.textContent ?? null`));
+    ok(await until(`/^\\/board\\/\\?doc=local:[0-9a-f]+$/.test(document.querySelector('${card} .open-board')?.getAttribute('href') ?? '')`, 10000), "…its Open is a link to the board page, by the board's id", await ev(`document.querySelector('${card} .open-board')?.getAttribute('href') ?? null`));
+    ok(await ev(`(() => { const a = document.querySelector('${card} .open-board'); return a.tagName === 'A' && a.target === '_blank' && a.rel === 'noopener' && !a.hasAttribute('aria-disabled'); })()`), "…in a tab of its own (a link: the person's click opens it)");
+    ok(await ev(`!document.querySelector('${PANE} .nb-root') && !document.querySelector('${PANE} .file-body') && document.querySelector('${PANE} .board-source').hidden`), "…not the board's JSON, which is behind View source");
+    await ev(`document.querySelector('${card} .view-source').click()`);
+    ok(await until(`!document.querySelector('${PANE} .board-source').hidden && /print\\(6 \\* 7\\)/.test(document.querySelector('${PANE} .board-source').textContent) && document.querySelector('${card} .view-source').textContent === 'Hide source'`, 5000), "View source shows its JSON, as the workspace has it");
+    await ev(`document.querySelector('${card} .view-source').click()`);
+    ok(await ev(`document.querySelector('${PANE} .board-source').hidden && document.querySelector('${card} .view-source').textContent === 'View source'`), "…and Hide source hides it");
+    // (the person's click: the mouse, at Open's centre; a scripted click() isn't a user gesture)
+    const at = await ev(`(() => { const r = document.querySelector('${card} .open-board').getBoundingClientRect(); return { x: r.x + r.width / 2, y: r.y + r.height / 2 }; })()`);
+    for (const type of ["mousePressed", "mouseReleased"]) await send("Input.dispatchMouseEvent", { type, x: at.x, y: at.y, button: "left", clickCount: 1 });
+    let tab = null;
+    for (let i = 0; i < 100 && !tab; i++) { tab = (await (await fetch(`http://127.0.0.1:${cdpPort}/json`)).json()).find((x) => x.type === "page" && /\/board\/\?doc=local:/.test(x.url)) ?? null; if (!tab) await sleep(100); }
+    ok(!!tab, "Open opens the board page in a tab of its own", tab?.url);
+    if (tab) {
+      const s2 = new WebSocket(tab.webSocketDebuggerUrl);
+      await new Promise((r, j) => { s2.onopen = r; s2.onerror = j; });
+      let k = 0; const w2 = new Map();
+      s2.onmessage = (e) => { const m = JSON.parse(e.data); if (m.id && w2.has(m.id)) { w2.get(m.id)(m.result); w2.delete(m.id); } };
+      const ev2 = (expression) => new Promise((r) => { const id = ++k; w2.set(id, r); s2.send(JSON.stringify({ id, method: "Runtime.evaluate", params: { expression, awaitPromise: true, returnByValue: true } })); }).then((r) => r?.result?.value);
+      let shows = false;
+      for (const t = Date.now(); !shows && Date.now() - t < 90000; await sleep(200)) shows = !!(await ev2(`window.sagebrush?.board?.outputs?.().then((os) => os.some((o) => /42/.test(String(o.output)))).catch(() => false) ?? false`));
+      ok(shows && (await ev2("window.sagebrush.board.snapshot().doc.title")) === "Primes", "…the agent's board, its code run there", await ev2("window.sagebrush?.board?.snapshot?.()?.doc?.title ?? null"));
+      s2.close();
+      await send("Target.closeTarget", { targetId: tab.id });
+    }
+    // (a board removed since the agent wrote it: said, with no Open)
+    await call("workspace.create", { path: "/notes/gone.board.json", content: { json: { title: "Gone", nodes: [], edges: [] } } });
+    await call("workspace.remove", { path: "/notes/gone.board.json" });
+    const gt = `t${++turnN}`;
+    event(gt, { type: "turn_started" });
+    event(gt, { type: "artifact", id: "/notes/gone.board.json", kind: "board", title: "gone.board.json", path: "/notes/gone.board.json", body: "" });
+    event(gt, { type: "turn_finished", outcome: "completed" });
+    ok(await until(`/made gone\\.board\\.json/.test(document.querySelector('${card} .who')?.textContent ?? '') && /It isn't in your files any more\\./.test(document.querySelector('${card}').textContent) && !document.querySelector('${card} .open-board')`, 15000), "a board removed since: said, with no Open", await ev(`document.querySelector('${card}')?.textContent ?? null`));
+  }
+
   if (want("bars")) {
     const A = "/notes/bar-a.ipynb", B = "/notes/bar-b.ipynb";
     await call("workspace.create", { path: A, content: docFor(A, [{ code: "who = 'A'" }]), mode: "python" });

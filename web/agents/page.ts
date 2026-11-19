@@ -494,6 +494,27 @@ function mountHost(threadId: string, a: Artifact, h: Host) {
     void nb.ready.then(() => hosts.get(h.key) === h && keepFocus());
     return;
   }
+  // (a board the agent made: said as what the agent did, with Open, a link to the board page in a tab of its own, so
+  //  the person's click opens it as any link (where its code runs), and View source for its JSON)
+  if (a.kind === "board" && a.path && workspace) {
+    const ws = workspace, path = a.path, name = path.split("/").pop()!;
+    h.el.innerHTML = `<div class="board-made"><span class="who">${esc(agentName())} made <b>${esc(name)}</b></span><a class="open-board" target="_blank" rel="noopener" aria-disabled="true">Open</a><button class="view-source" type="button">View source</button></div><pre class="code board-source" hidden></pre>`;
+    const open = $<HTMLAnchorElement>(".open-board", h.el), view = $<HTMLButtonElement>(".view-source", h.el), src = $(".board-source", h.el);
+    // (its address is its id, read from the workspace: a board that isn't there (removed since) says so, with no Open)
+    void ws.stat(path).catch(() => undefined).then((e) => {
+      if (e?.kind === "board" && e.ref) {
+        open.href = "/board/?doc=local:" + encodeURIComponent(e.ref);
+        open.removeAttribute("aria-disabled");
+      } else open.replaceWith(Object.assign(document.createElement("span"), { className: "gone", textContent: "It isn't in your files any more." }));
+    });
+    view.onclick = () => {
+      if (!src.hidden) { src.hidden = true; view.textContent = "View source"; return; }
+      void ws.read(path).then((r) => { src.textContent = JSON.stringify(r.content, null, 2); src.hidden = false; view.textContent = "Hide source"; }, (e) => toast(`Couldn't read ${name}: ${String(e?.message ?? e)}`, 6000));
+    };
+    h.copy = () => src.textContent ?? "";
+    keepFocus();
+    return;
+  }
   if (a.path && workspace) {
     h.el.innerHTML = `<div class="file-path">${esc(a.path)} <span class="saved"></span></div><div class="file-body"></div>`;
     const f = mountFile(a, $(".file-body", h.el), $(".saved", h.el));
