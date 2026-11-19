@@ -4,17 +4,21 @@ check that every backend builds the same input and gets the same answer,
 then time each one, and write one JSON file per (row, size) and a summary.
 
 One subprocess at a time; each in its own process group, killed as a group
-at its timeout and after it exits; its peak resident memory from wait4.
-See README.md for the protocol, the backends and the output.
+at its timeout and after it exits; its peak resident memory from wait4; and,
+under a memory cap (the default), each in its own cgroup with memory.max,
+whose peak is recorded and which is killed whole after the child.  See
+README.md for the protocol, the backends and the output.
 """
 
 from __future__ import annotations
 
 import argparse
+import hashlib
 import json
 import os
 import platform
 import re
+import shutil
 import signal
 import socket
 import subprocess
@@ -25,14 +29,29 @@ from pathlib import Path
 
 HERE = Path(__file__).resolve().parent
 ROOT = HERE.parents[1]
-PROTOCOL = 2
+PROTOCOL = 3
 # Input variants per point (items.json may lower it for a row or a size)
 DEFAULT_VARIANTS = 8
 VENV_PY = ROOT / "engine/.venv/bin/python"
 PYJS = ROOT / "build/cli/pyjs.cjs"
 MAGMA = Path("/usr/local/bin/magma")
 NATIVE = HERE / "native/target/release/bench-core-native"
+# (the same driver built with -C target-cpu=native: headroom only)
+NATIVE_HOST = HERE / "native/target-host/release/bench-core-native"
+# (the same driver built for wasm32-wasip1 with the product's target
+# features, the defaults, run under Node's WASI by drivers/wasi_run.mjs)
+WASM = HERE / "native/target/wasm32-wasip1/release/bench-core-native.wasm"
+WASI_RUN = HERE / "drivers/wasi_run.mjs"
 FLINT_RUST = HERE / "flint-rust/target/release/bench-core-flint"
+# Every backend; a name ending in "-n" is its base run on N threads
+BACKENDS = "user,native,native-host,native-n,wasm,magma,flint,flint-n"
+# The delegated cgroup v2 directory the memory caps live under (README)
+CGROUP_ROOT = Path(os.environ.get("BENCH_CGROUP", "/sys/fs/cgroup/bench-core"))
+# The threads of the "-n" backends (main sets it: --threads, else nproc)
+THREADS = os.cpu_count() or 1
+# The memory cap of every subprocess (main sets it: a Cap, or None for an
+# explicitly uncapped run)
+CAP = None
 # the CPU flags worth recording (SIMD and the arithmetic extensions)
 FLAGS = re.compile(r"^(avx|avx2|avx512\w*|fma|bmi2|adx|sse4_2|asimd|sve\w*|neon)$")
 LINE = re.compile(r"^(RESULT|TIME|INPUTS)\|(.*)$", re.MULTILINE)
@@ -60,8 +79,21 @@ def parse_args() -> argparse.Namespace:
     )
     p.add_argument(
         "--backends",
-        default="user,native,magma,flint",
+        default=BACKENDS,
         help="comma-separated backends to run",
+    )
+    p.add_argument(
+        "--threads",
+        type=int,
+        default=os.cpu_count() or 1,
+        help="the threads of the -n backends (default: the CPU count)",
+    )
+    p.add_argument(
+        "--mem-cap",
+        default="auto",
+        help="each subprocess's memory cap: auto (the machine's memory less a "
+        "reserve, see Cap.auto), a number of bytes, or none (an uncapped run, "
+        "recorded as such)",
     )
     p.add_argument(
         "--out",
@@ -129,41 +161,248 @@ def toolchain() -> str:
 
 def build() -> None:
     # (the engine's pinned toolchain and its default flags: the native column
-    # measures the code we ship)
+    # measures the code we ship; native-host adds -C target-cpu=native, in
+    # its own target directory; the wasm column is the same crate for
+    # wasm32-wasip1 with the default target features, as the product's
+    # wasm32-unknown-unknown build has, and without the parallel feature)
     env = dict(os.environ, RUSTUP_TOOLCHAIN=toolchain())
     env.pop("RUSTFLAGS", None)
-    for crate in ("native", "flint-rust"):
+    host = dict(env, RUSTFLAGS="-C target-cpu=native")
+    steps = [
+        ("native", "native", env, []),
+        ("native-host", "native", host, ["--target-dir", "target-host"]),
+        ("wasm", "native", env, ["--target", "wasm32-wasip1"]),
+        ("flint-rust", "flint-rust", env, []),
+    ]
+    for name, crate, e, extra in steps:
         r = subprocess.run(
-            ["cargo", "build", "--quiet", "--release"], cwd=HERE / crate, env=env
+            ["cargo", "build", "--quiet", "--release", *extra], cwd=HERE / crate, env=e
         )
-        print(f"build {crate}: exit {r.returncode}", flush=True)
+        print(f"build {name}: exit {r.returncode}", flush=True)
 
 
-def run_child(cmd: list[str], timeout: float) -> dict:
-    """Run cmd in its own process group with single-thread settings; its
-    output, exit status, wall time, CPU time and peak RSS (wait4).  At the
-    timeout the group gets TERM, then KILL after GRACE seconds; after the
-    child exits, KILL again for anything it left behind in the group, and
-    on any other way out (an interruption, an error) KILL and a reap of
-    the child before the exception propagates."""
-    env = dict(os.environ, **SINGLE_THREAD)
-    with tempfile.TemporaryFile() as out:
-        t0 = time.monotonic()
-        proc = subprocess.Popen(
-            cmd,
-            cwd=ROOT,
-            env=env,
-            stdin=subprocess.DEVNULL,
-            stdout=out,
-            stderr=subprocess.STDOUT,
-            start_new_session=True,
-        )
-        pgid, status, rusage, timed_out, termed = proc.pid, None, None, False, None
+class TeardownError(RuntimeError):
+    """A subprocess's cgroup could not be confirmed empty and removed, so
+    something it started may still run: the point is not ok, and the runner
+    stops (no next point starts).  args: (message, the teardown report)."""
+
+
+class Cap:
+    """A cgroup v2 memory cap per subprocess.  The root (CGROUP_ROOT) is
+    delegated to this user with the memory controller enabled for its
+    children, and the runner itself runs in root/runner (cgroup-setup.sh does
+    both).  Each child moves itself into a fresh root/p-<pid>-<k> with
+    memory.max = limit, memory.swap.max = 0 and memory.oom.group = 1 before
+    it executes.  After it: the cgroup's memory.peak and OOM kills are read,
+    cgroup.kill ends whatever is left in it (descendants that left the
+    process group included), and the directory is removed.  The removal is
+    the proof of emptiness (cgroup v2 refuses to remove a cgroup with a
+    process in it): if it can't be removed, finish raises TeardownError."""
+
+    # How long teardown waits for cgroup.kill to empty the cgroup
+    KILL_WAIT = 10.0
+
+    def __init__(self, root: Path, limit: int):
+        self.root, self.limit, self.k = root, limit, 0
+
+    # (every file operation in one place each, so the tests can inject faults)
+    def _mkdir(self, d: Path) -> None:
+        d.mkdir()
+
+    def _write(self, p: Path, value: str) -> None:
+        p.write_text(value)
+
+    def _read(self, p: Path) -> str:
+        return p.read_text()
+
+    def _rmdir(self, d: Path) -> None:
+        d.rmdir()
+
+    @staticmethod
+    def auto() -> int:
+        """The machine's memory less a reserve for the runner and the
+        system: max(2 GiB, 10%)."""
+        total = 0
+        for line in Path("/proc/meminfo").read_text().splitlines():
+            if line.startswith("MemTotal:"):
+                total = int(line.split()[1]) * 1024
+        return max(total - max(2 << 30, total // 10), 256 << 20)
+
+    @staticmethod
+    def problems(root: Path) -> list[str]:
+        """Why caps can't be made under root (none: they can)."""
+        out = []
+        if not root.is_dir():
+            return [f"{root} does not exist"]
+        if not os.access(root, os.W_OK):
+            out.append(f"{root} is not writable by this user")
         try:
+            if "memory" not in (root / "cgroup.subtree_control").read_text().split():
+                out.append(
+                    f"the memory controller is not enabled in {root}/cgroup.subtree_control"
+                )
+        except OSError as e:
+            out.append(f"{root}/cgroup.subtree_control: {e}")
+        # (the interfaces teardown needs: cgroup.kill, Linux 5.14; memory.peak, 5.19)
+        for name in ("cgroup.kill", "memory.peak"):
+            if not (root / name).exists():
+                out.append(f"{root}/{name} is missing (a kernel too old for the caps)")
+        mine = ""
+        try:
+            for line in Path("/proc/self/cgroup").read_text().splitlines():
+                if line.startswith("0::"):
+                    mine = line[3:]
+        except OSError:
+            pass
+        here = Path("/sys/fs/cgroup" + mine) if mine else None
+        if here is None or root not in here.parents:
+            out.append(
+                f"this runner's cgroup ({mine or 'unknown'}) is not under {root} (start it with cgroup-setup.sh)"
+            )
+        return out
+
+    def new(self) -> Path:
+        """A fresh capped cgroup; if any step fails, the directory is removed
+        before the error propagates."""
+        self.k += 1
+        d = self.root / f"p-{os.getpid()}-{self.k}"
+        self._mkdir(d)
+        try:
+            self._write(d / "memory.max", str(self.limit))
+            for name, value in (("memory.swap.max", "0"), ("memory.oom.group", "1")):
+                if (d / name).exists():
+                    self._write(d / name, value)
+        except BaseException:
+            try:
+                self._rmdir(d)
+            except OSError:
+                pass
+            raise
+        return d
+
+    def finish(self, d: Path) -> dict:
+        """The cgroup's peak and OOM kills; then everything in it killed and
+        the directory removed.  Raises TeardownError (after every cleanup
+        step has been tried) unless the removal succeeds."""
+        problems = []
+
+        def optional(name):
+            try:
+                return self._read(d / name)
+            except OSError:
+                return ""
+
+        peak = optional("memory.peak").strip()
+        events = dict(
+            line.split()
+            for line in optional("memory.events").splitlines()
+            if line.strip()
+        )
+        try:
+            self._write(d / "cgroup.kill", "1")
+        except OSError as e:
+            problems.append(f"cgroup.kill failed: {e}")
+        left = None
+        deadline = time.monotonic() + self.KILL_WAIT
+        while True:
+            try:
+                left = len(self._read(d / "cgroup.procs").split())
+            except OSError as e:
+                # (an unreadable membership is not an empty one)
+                problems.append(f"cgroup.procs unreadable: {e}")
+                left = None
+                break
+            if not left or time.monotonic() > deadline:
+                break
+            time.sleep(0.01)
+        if left:
+            problems.append(f"{left} process(es) still in the cgroup after cgroup.kill")
+        removed, why = False, None
+        for _ in range(100):
+            try:
+                self._rmdir(d)
+                removed = True
+                break
+            except FileNotFoundError:
+                # (already gone: nothing can run in it)
+                removed = True
+                break
+            except OSError as e:
+                why = e
+                time.sleep(0.01)
+        report = {
+            "limit": self.limit,
+            "peak": int(peak) if peak.isdigit() else None,
+            "oom_kill": int(events.get("oom_kill", 0)),
+            "left": left,
+            "removed": removed,
+            "problems": problems,
+        }
+        if not removed:
+            problems.append(f"the cgroup was not removed: {why}")
+            raise TeardownError(
+                f"{d}: "
+                + "; ".join(problems)
+                + " (the runner stops: nothing more starts)",
+                report,
+            )
+        return report
+
+
+def run_child(
+    cmd: list[str], timeout: float, threads: int = 1, cap: Cap | None = None
+) -> dict:
+    """Run cmd in its own process group with `threads`-thread settings (and,
+    with a cap, in its own capped cgroup); its output, exit status, wall
+    time, CPU time and peak RSS (wait4), and the cgroup's peak.  At the
+    timeout the group gets TERM, then KILL after GRACE seconds; after the
+    child exits, KILL again for anything it left behind in the group (and
+    cgroup.kill for anything in its cgroup), and on any other way out (an
+    interruption, an error) KILL and a reap of the child before the
+    exception propagates."""
+    env = dict(os.environ, **{k: str(threads) for k in SINGLE_THREAD})
+    env["BENCH_THREADS"] = str(threads)
+    memory = None
+    with tempfile.TemporaryFile() as out:
+        # (the output file first, then the cgroup: from here on every way
+        # out goes through the finally below, which tears the cgroup down)
+        cg = cap.new() if cap else None
+        enter = None
+        if cg:
+            procs = str(cg / "cgroup.procs")
+
+            def enter():
+                # (in the child, before it executes: into its own cgroup)
+                with open(procs, "w") as f:
+                    f.write(str(os.getpid()))
+
+        pgid, status, rusage, timed_out, termed, proc = (
+            None,
+            None,
+            None,
+            False,
+            None,
+            None,
+        )
+        t0 = time.monotonic()
+        try:
+            proc = subprocess.Popen(
+                cmd,
+                cwd=ROOT,
+                env=env,
+                stdin=subprocess.DEVNULL,
+                stdout=out,
+                stderr=subprocess.STDOUT,
+                start_new_session=True,
+                preexec_fn=enter,
+            )
+            pgid = proc.pid
             while status is None:
                 pid, st, ru = os.wait4(proc.pid, os.WNOHANG)
                 if pid:
                     status, rusage = st, ru
+                    # (reaped: Popen must not think it still runs)
+                    proc.returncode = os.waitstatus_to_exitcode(st)
                     break
                 now = time.monotonic()
                 if now - t0 > timeout and termed is None:
@@ -174,29 +413,36 @@ def run_child(cmd: list[str], timeout: float) -> dict:
                     termed = float("inf")
                 time.sleep(0.01)
         finally:
-            # on every exit, an interruption or an error in the loop
-            # included: the whole group killed (whatever the child left
-            # behind, after a normal exit); on an abnormal exit the direct
-            # child reaped too, so nothing outlives this call
-            _killpg(pgid, signal.SIGKILL)
-            if status is None:
-                try:
-                    os.waitpid(proc.pid, 0)
-                except ChildProcessError:
-                    pass
-                proc.returncode = -signal.SIGKILL
+            # on every exit, an interruption or an error included: the whole
+            # group killed (whatever the child left behind, after a normal
+            # exit); on an abnormal exit the direct child reaped too; then
+            # the cgroup torn down, which raises TeardownError unless it is
+            # confirmed empty and removed
+            if pgid is not None:
+                _killpg(pgid, signal.SIGKILL)
+                if status is None:
+                    try:
+                        os.waitpid(proc.pid, 0)
+                    except ChildProcessError:
+                        pass
+                    proc.returncode = -signal.SIGKILL
+            if cg:
+                memory = cap.finish(cg)
         proc.returncode = os.waitstatus_to_exitcode(status)
         wall = time.monotonic() - t0
         out.seek(0)
         text = out.read().decode(errors="replace")
+    oom = bool(memory and memory["oom_kill"])
     return {
         "status": "timeout"
         if timed_out
-        else ("ok" if proc.returncode == 0 else "error"),
+        else ("oom" if oom else ("ok" if proc.returncode == 0 else "error")),
         "exit": proc.returncode,
         "wall": round(wall, 3),
         "cpu": round(rusage.ru_utime + rusage.ru_stime, 3),
         "peak_rss_kib": rusage.ru_maxrss,
+        "threads": threads,
+        "cgroup": memory,
         "output": text,
     }
 
@@ -208,6 +454,42 @@ def _killpg(pgid: int, sig: int) -> None:
         pass
 
 
+# The base of each derived backend (its driver, and whether the row has one)
+BASE = {
+    "native-host": "native",
+    "native-n": "native",
+    "wasm": "native",
+    "flint-n": "flint",
+}
+
+
+def versions() -> dict:
+    """The versions a point's times depend on, beyond the commit."""
+
+    def out(cmd):
+        try:
+            r = subprocess.run(cmd, capture_output=True, text=True, timeout=60)
+            return (
+                (r.stdout or r.stderr).strip().splitlines()[0]
+                if r.returncode == 0
+                else None
+            )
+        except (OSError, subprocess.SubprocessError, IndexError):
+            return None
+
+    return {
+        "rust": toolchain(),
+        "node": out(["node", "--version"]),
+        "python": out([str(VENV_PY), "--version"]) if VENV_PY.exists() else None,
+        "python-flint": out(
+            [str(VENV_PY), "-c", "import flint; print(flint.__version__)"]
+        )
+        if VENV_PY.exists()
+        else None,
+        "magma": "V2.18-5" if MAGMA.exists() else None,
+    }
+
+
 def variants(row: dict, key: str) -> int:
     """K, the number of input variants a point cycles through: the size's
     "variants", else the row's, else DEFAULT_VARIANTS (1 for a row with one
@@ -217,8 +499,24 @@ def variants(row: dict, key: str) -> int:
 
 def command(backend: str, row: dict, n: int, mode: str, k: int = 1) -> list[str] | None:
     """The command of one backend for one row, or None when it doesn't apply
-    or isn't on this host."""
+    or isn't on this host.  A "-n" backend is its base's command (run on
+    THREADS threads by invoke)."""
+    if backend.endswith("-n"):
+        return command(backend[:-2], row, n, mode, k)
     cid, kinds = row["id"], row["backends"]
+    if backend == "native-host":
+        return (
+            [str(NATIVE_HOST), cid, str(n), mode, str(k)]
+            if kinds["native"] and NATIVE_HOST.exists()
+            else None
+        )
+    if backend == "wasm":
+        node = shutil.which("node")
+        return (
+            [node, str(WASI_RUN), str(WASM), cid, str(n), mode, str(k)]
+            if kinds["native"] and WASM.exists() and node
+            else None
+        )
     if backend == "user":
         if kinds["user"] == "pyjs":
             return (
@@ -282,6 +580,8 @@ def command(backend: str, row: dict, n: int, mode: str, k: int = 1) -> list[str]
 
 
 def adapter(backend: str, row: dict) -> str:
+    if backend.endswith("-n"):
+        return adapter(backend[:-2], row) + f", {THREADS} threads"
     if backend == "flint":
         return (
             "flint-rust"
@@ -294,14 +594,19 @@ def adapter(backend: str, row: dict) -> str:
             if row["backends"]["user"] == "pyjs"
             else "Sage mode (engine/.venv)"
         )
-    return {"native": "bench-core-native", "magma": "Magma V2.18-5"}[backend]
+    return {
+        "native": "bench-core-native",
+        "native-host": "bench-core-native (target-cpu=native)",
+        "wasm": "bench-core-native (wasm32-wasip1, Node WASI)",
+        "magma": "Magma V2.18-5",
+    }[backend]
 
 
 def invoke(
     backend: str, row: dict, n: int, mode: str, timeout: float, k: int = 1
 ) -> dict:
     cmd = command(backend, row, n, mode, k)
-    r = run_child(cmd, timeout)
+    r = run_child(cmd, timeout, THREADS if backend.endswith("-n") else 1, CAP)
     # (Magma 2.18 wraps long lines with backslash-newline)
     text = r.pop("output").replace("\\\n", "")
     found = LINE.findall(text)
@@ -350,7 +655,8 @@ def point(row: dict, key: str, backends: list[str], ident: dict) -> dict:
         if b not in present:
             rec["backends"][b] = {
                 "status": "not applicable"
-                if b in ("native", "flint") and not (row["backends"][b])
+                if BASE.get(b, b) in ("native", "flint")
+                and not (row["backends"][BASE.get(b, b)])
                 else "not on host"
             }
     # 1. the inputs each backend builds
@@ -389,10 +695,14 @@ def point(row: dict, key: str, backends: list[str], ident: dict) -> dict:
             for t in timed.values():
                 if t["status"] == "ok":
                     t["status"] = "mismatch"
-    refs = {
-        b: rec["backends"][b].get("time", {}).get("seconds") for b in ("magma", "flint")
-    }
-    refs = {b: s for b, s in refs.items() if s}
+
+    def sec(b):
+        return rec["backends"].get(b, {}).get("time", {}).get("seconds")
+
+    # 1-thread ratios against the best 1-thread reference; then our best
+    # against theirs over 1 and N threads (the 2x rule's ratio; native-host
+    # never counts toward it: headroom only)
+    refs = {b: sec(b) for b in ("magma", "flint") if sec(b)}
     if rec["status"] == "ok" and refs:
         best = min(refs, key=refs.get)
         rec["best_ref"] = {
@@ -400,10 +710,20 @@ def point(row: dict, key: str, backends: list[str], ident: dict) -> dict:
             "adapter": rec["backends"][best]["adapter"],
             "seconds": refs[best],
         }
-        for b in ("user", "native"):
-            s = rec["backends"].get(b, {}).get("time", {}).get("seconds")
-            if s:
-                rec["ratio_" + b] = round(s / refs[best], 4)
+        for b in ("user", "native", "native-host", "wasm"):
+            if sec(b):
+                rec["ratio_" + b.replace("-", "_")] = round(sec(b) / refs[best], 4)
+        ours = {b: sec(b) for b in ("native", "native-n") if sec(b)}
+        theirs = {b: sec(b) for b in ("magma", "flint", "flint-n") if sec(b)}
+        if ours and theirs:
+            bo, bt = min(ours, key=ours.get), min(theirs, key=theirs.get)
+            rec["best_ours"] = {"backend": bo, "seconds": ours[bo]}
+            rec["best_theirs"] = {
+                "backend": bt,
+                "adapter": rec["backends"][bt]["adapter"],
+                "seconds": theirs[bt],
+            }
+            rec["ratio_best"] = round(ours[bo] / theirs[bt], 4)
     rec["complete"] = True
     return rec
 
@@ -436,31 +756,39 @@ def summary(out: Path, items: dict) -> None:
         f"# Core-algorithm harness: {m['label']}",
         "",
         f"Commit `{recs[0]['commit']}`; {m['cpu']} ({m['arch']}, {m['nproc']} CPUs; flags {' '.join(m['flags']) or 'none recorded'}). "
-        "One thread everywhere. Times are medians of the samples, seconds per operation. Ratios are against the best reference on this machine.",
+        f"Memory cap per subprocess: {recs[0].get('mem_cap') or 'none (an uncapped run)'} bytes. "
+        f"Times are medians of the samples, seconds per operation, on one thread except the N columns ({recs[0].get('threads')} threads). "
+        "The 1-thread ratios are against the best 1-thread reference on this machine; the best/best ratio (the 2x rule's) is our best of native and native-N against the best of every reference, on 1 or N threads. native-host (target-cpu=native) is headroom only and never counts.",
         "",
-        "## Gaps above 2x (native engine against the best reference)",
+        "## Gaps above 2x (our best against the best reference)",
         "",
     ]
-    gaps = [r for r in recs if (r.get("ratio_native") or 0) > 2]
-    gaps.sort(key=lambda r: -r["ratio_native"])
+    gaps = [r for r in recs if (r.get("ratio_best") or 0) > 2]
+    gaps.sort(key=lambda r: -r["ratio_best"])
     lines += [
-        f"- **{r['row']}** {r['size']} (n={r['n']}): native {r['ratio_native']:.2f}x, user {r.get('ratio_user', 0):.2f}x of {r['best_ref']['adapter']}"
+        f"- **{r['row']}** {r['size']} (n={r['n']}): best/best {r['ratio_best']:.2f}x ({r['best_ours']['backend']} against {r['best_theirs']['adapter']}); native 1-thread {r.get('ratio_native', 0):.2f}x, user {r.get('ratio_user', 0):.2f}x, wasm {r.get('ratio_wasm', 0):.2f}x"
         for r in gaps
     ] or ["None among the rows with a native driver."]
     lines += [
         "",
         "## Every point",
         "",
-        "| item | row | size | n | user | native | Magma | FLINT | best | user ratio | native ratio | status |",
-        "|---|---|---|---:|---:|---:|---:|---:|---|---:|---:|---|",
+        "| item | row | size | n | user | native | native-host | native-N | wasm | Magma | FLINT | FLINT-N | best 1-thread ref | user ratio | native ratio | wasm ratio | best/best | peak MiB | status |",
+        "|---|---|---|---:|---:|---:|---:|---:|---:|---:|---:|---:|---|---:|---:|---:|---:|---:|---|",
     ]
     for r in recs:
 
         def t(b, r=r):
             return secs(r["backends"].get(b, {}).get("time", {}).get("seconds"))
 
+        peaks = [
+            (b.get("time", {}).get("cgroup") or {}).get("peak")
+            for b in r["backends"].values()
+        ]
+        peaks = [x for x in peaks if x]
+        peak = f"{max(peaks) / (1 << 20):.0f}" if peaks else "—"
         lines.append(
-            f"| {r['item']} | {r['row']} | {r['size']} | {r['n']} | {t('user')} | {t('native')} | {t('magma')} | {t('flint')} | {r.get('best_ref', {}).get('adapter', '—')} | {r.get('ratio_user', '—')} | {r.get('ratio_native', '—')} | {r['status']} |"
+            f"| {r['item']} | {r['row']} | {r['size']} | {r['n']} | {t('user')} | {t('native')} | {t('native-host')} | {t('native-n')} | {t('wasm')} | {t('magma')} | {t('flint')} | {t('flint-n')} | {r.get('best_ref', {}).get('adapter', '—')} | {r.get('ratio_user', '—')} | {r.get('ratio_native', '—')} | {r.get('ratio_wasm', '—')} | {r.get('ratio_best', '—')} | {peak} | {r['status']} |"
         )
     uncovered = [i for i in items.values() if i["status"] != "rows"]
     lines += ["", "## Items without rows", ""] + [
@@ -485,15 +813,10 @@ def main() -> int:
         return 0
     if args.build:
         build()
-    ident = {
-        "protocol": PROTOCOL,
-        "commit": git("rev-parse", "HEAD"),
-        "dirty": bool(git("status", "--porcelain", "--", "engine", "bench/core")),
-        "machine": machine(args.host_label),
-        "threads": 1,
-    }
+    global THREADS, CAP
+    THREADS = max(1, args.threads)
     if args.dry_run:
-        print(json.dumps(ident["machine"]))
+        print(json.dumps(machine(args.host_label)))
         for row in rows:
             for key in sizes:
                 found = [
@@ -503,20 +826,65 @@ def main() -> int:
                 ]
                 print(row["id"], key, row["sizes"][key]["n"], " ".join(found))
         return 0
+    if args.mem_cap != "none":
+        problems = Cap.problems(CGROUP_ROOT)
+        if problems:
+            raise SystemExit(
+                "a memory cap needs a delegated cgroup (README, 'Memory caps'):\n- "
+                + "\n- ".join(problems)
+                + "\nStart the runner with bench/core/cgroup-setup.sh, or pass --mem-cap none for an uncapped run."
+            )
+        CAP = Cap(
+            CGROUP_ROOT, Cap.auto() if args.mem_cap == "auto" else int(args.mem_cap)
+        )
+    # (what a complete point must match to be skipped on a rerun: the code,
+    # uncommitted edits included, the machine, the toolchain and reference
+    # versions, the build flags, the threads, the cap and the backends; and
+    # per point its n and K)
+    diff = (
+        git("diff", "HEAD", "--", "engine", "bench/core")
+        + "\n"
+        + git(
+            "ls-files", "--others", "--exclude-standard", "--", "engine", "bench/core"
+        )
+    )
+    ident = {
+        "protocol": PROTOCOL,
+        "commit": git("rev-parse", "HEAD"),
+        "dirty": bool(git("status", "--porcelain", "--", "engine", "bench/core")),
+        "tree_diff": hashlib.sha256(diff.encode()).hexdigest(),
+        "machine": machine(args.host_label),
+        "versions": versions(),
+        "flags": {
+            "native": "default",
+            "native-host": "-C target-cpu=native",
+            "wasm": "wasm32-wasip1, default target features",
+        },
+        "threads": THREADS,
+        "mem_cap": CAP.limit if CAP else None,
+        "backends": backends,
+    }
     for row in rows:
         for key in sizes:
             path = out / "rows" / f"{row['id']}-{key}.json"
             if path.exists():
                 old = json.loads(path.read_text())
-                same = (
-                    all(old.get(k) == ident[k] for k in ("protocol", "commit", "dirty"))
-                    and old["machine"]["label"] == args.host_label
-                )
+                same = all(old.get(k) == ident[k] for k in ident) and (
+                    old.get("n"),
+                    old.get("variants"),
+                ) == (row["sizes"][key]["n"], variants(row, key))
                 if same and old.get("complete"):
                     print(f"skip {row['id']} {key}: done", flush=True)
                     continue
             print(f"{row['id']} {key} n={row['sizes'][key]['n']}", flush=True)
-            rec = point(row, key, backends, ident)
+            try:
+                rec = point(row, key, backends, ident)
+            except TeardownError as e:
+                # (no file for this point, and no next point: something it
+                # started may still run)
+                print(f"STOPPED: {e.args[0]}", file=sys.stderr, flush=True)
+                summary(out, items)
+                return 3
             write_atomic(path, json.dumps(rec, indent=1) + "\n")
             print(
                 f"  {rec['status']} user {rec.get('ratio_user')} native {rec.get('ratio_native')}",

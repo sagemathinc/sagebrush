@@ -4,6 +4,7 @@ is common.py's."""
 from __future__ import annotations
 
 from fractions import Fraction
+import os
 import sys
 
 import flint
@@ -15,7 +16,8 @@ case_id, n = sys.argv[1], int(sys.argv[2])
 MOD = common.MOD
 OPERANDS = []
 P = 65537
-flint.ctx.threads = 1
+# (1, or N for the flint-n backend: run.py sets BENCH_THREADS)
+flint.ctx.threads = int(os.environ.get("BENCH_THREADS", "1"))
 
 
 def scalar_hash(x):
