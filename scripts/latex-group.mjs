@@ -105,7 +105,14 @@ export const LATEX_LAZY_CAPS = {
   //  44462639042): 51,129 / 17,497, + 64)
   // (51,283 / 17,591: Nov 19 2026, a reload record that doesn't prove a reload of its own tab discarded, said as not a
   //  reload (agent-ui.ts). Measured on master 25de21b2 with it: 51,219 / 17,527, + 64)
-  AGENT: { label: "the LaTeX agent pairing's chunk", raw: 51283, gzip: 17591 },
+  // (51,671 / 17,686: Nov 19 2026, for Connect's one field: the agent's link pasted, or its code and port, read by
+  //  readConnect, and a code alone told to ask for the link (agent-ui.ts). Measured locally on the toolchain CI pins on
+  //  master 35e6a6d0 with this change: 51,607 / 17,622, + 64)
+  // (52,033 / 17,878: the two above together, Connect's one field and the languages' description, measured on their
+  //  merge (master 25de21b2): 51,969 / 17,814, + 64)
+  // (52,123 / 17,908: the reload record above with Connect's one field, measured on their merge (master 0c4267c5):
+  //  52,059 / 17,844, + 64)
+  AGENT: { label: "the LaTeX agent pairing's chunk", raw: 52123, gzip: 17908 },
   // (the agent tools' work: web/latex/tools.ts, latex_check's report and latex_render's pictures, on an agent's first call)
   // (16,546 / 6,950: Nov 11 2026: latex_build's own code (build.ts, the
   //  engine driven from a snapshot, and the pages' fit) here, out of the eager group, its shared rules handed in by the

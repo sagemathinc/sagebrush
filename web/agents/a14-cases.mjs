@@ -307,11 +307,11 @@ async function pair(P, A, site, how = "page", remember = false, write = true) {
   await P.ev(`[...document.querySelectorAll('.sbag-dlg button')].find((b) => b.textContent === 'Connect').click()`);
   return allowDialog(P, how, remember, write);
 }
-/** Connect from the header's Connect Claude (the person's own dialog: the code and the port typed in), then allow. */
+/** Connect from the header's Connect Claude (the person's own dialog: the code and the port typed in one field), then allow. */
 async function connectDialog(P, A, how = "page", remember = false, write = true) {
   await P.ev(`document.querySelector('#connect').click()`);
   await timed("connect-dialog", P.until(`[...document.querySelectorAll('.sbag-dlg h2')].some((h) => h.textContent === 'Connect an agent')`, 30000));
-  await P.ev(`(() => { const d = [...document.querySelectorAll('.sbag-dlg')].at(-1), [c, pt] = d.querySelectorAll('input'); c.value = '123-456'; pt.value = '${A.port}'; [...d.querySelectorAll('button')].find((b) => b.textContent === 'Connect').click(); return true; })()`);
+  await P.ev(`(() => { const d = [...document.querySelectorAll('.sbag-dlg')].at(-1), [c] = d.querySelectorAll('input'); c.value = '123-456 ${A.port}'; [...d.querySelectorAll('button')].find((b) => b.textContent === 'Connect').click(); return true; })()`);
   return allowDialog(P, how, remember, write);
 }
 async function allowDialog(P, how, remember, write) {
@@ -624,9 +624,7 @@ export async function runA14({ site, ok, want = () => true }) {
     //  focus when it opens, and on success focus goes to the composer)
     await P.key("Enter");
     await P.until(`document.activeElement?.closest('.sbag-dlg') !== null && document.activeElement?.tagName === 'INPUT'`);
-    await P.send("Input.insertText", { text: "123-456" });
-    await P.key("Tab");
-    await P.send("Input.insertText", { text: String(A.port) });
+    await P.send("Input.insertText", { text: `123-456 ${A.port}` });
     await P.ev(`[...document.querySelectorAll('.sbag-dlg button')].find((b) => b.textContent === 'Connect').focus()`);
     await P.key("Enter");
     await P.until(`[...document.querySelectorAll('.sbag-dlg button')].some((b) => b.textContent === 'Allow')`);
