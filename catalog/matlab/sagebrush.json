@@ -4,7 +4,7 @@
     "kind": "function",
     "signature": "mode = sagebrush_figures(mode)",
     "summary": "How figures are shown: 'auto' (an SVG, or a sharp PNG when the SVG would be over 1 MiB), 'svg', 'png' or 'both'.",
-    "doc": "'auto' (the default): a figure is shown as its SVG, sharp at any zoom, unless that SVG would be over 1 MiB; then as a PNG drawn at twice its size and shown at its size (sharp on a high-density screen), with a line under it saying so. 'svg' and 'png' always show that format, 'both' shows both, and 'reset' goes back to the default (the Jupyter kernel's `--figures`, or `SAGEBRUSH_FIGURES`, else 'auto'). Without an argument, the current setting. It is the same setting in every language: `sagebrush.figures` in Python and Sage.",
+    "doc": "'auto' (the default): a figure is shown as its SVG, sharp at any zoom, unless that SVG would be over 1 MiB; then as a PNG drawn at twice its size and shown at its size (sharp on a high-density screen), with a line under it saying so. 'svg' always shows the SVG and 'png' a PNG (its SVG when the PNG can't be drawn), 'both' shows both, and 'reset' goes back to the default (the Jupyter kernel's `--figures`, or `SAGEBRUSH_FIGURES`, else 'auto'). Without an argument, the current setting. It is the same setting in every language: `sagebrush.figures` in Python and Sage.",
     "examples": [
       {
         "code": "sagebrush_figures('svg')",

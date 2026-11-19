@@ -3,7 +3,7 @@
  "reason": "How figures are shown, in every language: auto (the SVG, or a PNG at twice the size with its size in the display's metadata when the SVG would be over 1 MB, said in a line under it), svg, png or both (lib/_graphics.py figures, InlineFigure; pyplot, Sage and MATLAB figures; sagebrush.figures, MATLAB's and Magma's sagebrush_figures and their catalog entries; the %config alias); display metadata through the runtime's bundle, the kernel and the notebook session (src/runtime/index.ts, src/kernel.ts, src/notebook-session.ts); the kernel's --figures. Measured with scripts/size-measure.mjs on the pinned toolchain, master abc38965 against the change; each marker is its bundle's growth + 64.",
  "bytes": {
   "cli/lib.gen.js": 4588,
-  "cli/pyjs.cjs": 9265,
+  "cli/pyjs.cjs": 9371,
   "engine/lib/core.pre": 19458,
   "engine/lib/core.src": 6042,
   "engine/lib/magma-more.src": 206,
