@@ -69,7 +69,11 @@ export const LATEX_LAZY = {
 //  and styles), Nov 19, provisional until the exact-head CI packet: 252,285 / 84,166 measured on the shipped build (bun
 //  1.4.4, node 24.21.0), master e478921b with it; 250,418 / 83,700 with master's web/latex/page.ts and style.ts in the
 //  same tree (+1,867 / +466), + 64)
-export const LATEX_CAPS = { raw: 252349, gzip: 84230 };
+// (252,759 raw / 84,399 gzip: the editor embedded in the Agents page's pane (?embed=1: no bar of its own, no pairing,
+//  the pane's may-close answered by the leave guard), Nov 19, provisional until the exact-head CI packet: 252,695 / 84,335
+//  measured on the shipped build (bun 1.4.4, node 24.21.0), on the toggle's head; 252,285 / 84,166 without it (+410 /
+//  +169, the page module's), + 64)
+export const LATEX_CAPS = { raw: 252759, gzip: 84399 };
 export const gz = (b) => gzipSync(b, { level: 9 }).length;
 
 // Each lazy chunk's own cap (raw, gzip), fetched only on its own use, so outside the group:

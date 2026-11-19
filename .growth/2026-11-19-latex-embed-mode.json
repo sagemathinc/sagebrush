@@ -1,0 +1,7 @@
+{
+  "v": 1,
+  "reason": "The LaTeX editor's embedded mode for the Agents page's pane (?embed=1): the notebook page's LaTeX entry (web/latex/boot.ts) reads embed and hands it to the editor; the page is carried into cli/pyjs.cjs. Measured by CI's size gate on the merge of the branch head with master abc38965: cli/pyjs.cjs +84, + 64.",
+  "bytes": {
+    "cli/pyjs.cjs": 148
+  }
+}
