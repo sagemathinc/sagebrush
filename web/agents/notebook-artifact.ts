@@ -612,9 +612,10 @@ export function mountNotebook(ws: Workspace, path: string, box: HTMLElement, ui:
     });
     comp.on("remote", () => owned() && ui.saved("Updated from elsewhere"));
     // (a save of this notebook made after it was let go met a change made elsewhere: what it had is kept as a copy)
-    comp.onDetachedConflict(async (doc: any) => {
+    // (or, `why`, a save refused or failed when sent again: said as that, not as a change made elsewhere)
+    comp.onDetachedConflict(async (doc: any, _theirs: unknown, _key: unknown, why?: { refused: boolean; message: string } | null) => {
       const name = await keepCopy!(doc);
-      if (alive) ui.bar({ kind: "conflict", text: `Changed elsewhere (another tab, or Open in Sagebrush): your last changes here were kept as ${name}, not saved over it.` });
+      if (alive) ui.bar({ kind: "conflict", text: why ? `Not saved (the save ${why.refused ? "was refused" : "failed"}: ${why.message}): your last changes here were kept as ${name}.` : `Changed elsewhere (another tab, or Open in Sagebrush): your last changes here were kept as ${name}, not saved over it.` });
     });
 
     // The file moved, went to Trash, was replaced, or the workspace was reset: stop saving here, keep what's shown.

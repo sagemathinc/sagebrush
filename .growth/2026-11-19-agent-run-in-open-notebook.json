@@ -1,7 +1,0 @@
-{
-  "v": 1,
-  "reason": "An agent's run of the notebook open on its paired page runs in that notebook: its outputs shown and saved, the same per-cell result back, ended by Stop, the deadline, the grant or another notebook shown (web/index.html's page run; the CLI's bundle carries the page). CI's size gate on the branch head: cli/pyjs.cjs +2896; the bound adds 64 bytes of slack.",
-  "bytes": {
-    "cli/pyjs.cjs": 2960
-  }
-}

@@ -69,7 +69,15 @@ export const LATEX_LAZY = {
 //  and styles), Nov 19, provisional until the exact-head CI packet: 252,285 / 84,166 measured on the shipped build (bun
 //  1.4.4, node 24.21.0), master e478921b with it; 250,418 / 83,700 with master's web/latex/page.ts and style.ts in the
 //  same tree (+1,867 / +466), + 64)
-export const LATEX_CAPS = { raw: 252349, gzip: 84230 };
+// (252,759 raw / 84,399 gzip: the editor embedded in the Agents page's pane (?embed=1: no bar of its own, no pairing,
+//  the pane's may-close answered by the leave guard), Nov 19, provisional until the exact-head CI packet: 252,695 / 84,335
+//  measured on the shipped build (bun 1.4.4, node 24.21.0), on the toggle's head; 252,285 / 84,166 without it (+410 /
+//  +169, the page module's), + 64)
+// (253,527 raw / 84,713 gzip: a .tex the agent made runs once by itself in the editor that shows it (the page module
+//  asks the pairing over the site's channel), Nov 19, provisional until the exact-head CI packet: 253,463 / 84,649
+//  measured on the shipped build (bun 1.4.4, node 24.21.0), on the embedded mode's head; 252,695 / 84,335 without it
+//  (+768 / +314), + 64)
+export const LATEX_CAPS = { raw: 253527, gzip: 84713 };
 export const gz = (b) => gzipSync(b, { level: 9 }).length;
 
 // Each lazy chunk's own cap (raw, gzip), fetched only on its own use, so outside the group:
@@ -118,7 +126,21 @@ export const LATEX_LAZY_CAPS = {
   // (53,797 / 18,488: Nov 19 2026, for the bar's offer of a board an agent made ("<agent> made <name> · Open", Open
   //  in a tab of its own, where its code runs), which every page's pairing carries. Measured locally on the toolchain
   //  CI pins, merged with master 4bcbb434 (whose 53,150 / 18,263 it reproduces): 53,733 / 18,424, + 64)
-  AGENT: { label: "the LaTeX agent pairing's chunk", raw: 53797, gzip: 18488 },
+  // (54,145 / 18,691: Nov 19 2026, an answer's entry with its page's address (url, entry-url.ts with
+  //  the code page's languages), for the agent to give the person a link. Measured on master 4bcbb434 with it:
+  //  54,081 / 18,627, + 64)
+  // (54,729 / 18,864: the two above together, the bar's offer of a board an agent made and an answer's entry with its
+  //  page's address, measured on their merge (master 3fbaf351): 54,665 / 18,800 (bun 1.4.4, node 24.21.0), + 64)
+  // (54,811 / 18,846: a .tex the agent made runs once by itself in the editor that shows it, the pairing's answer over
+  //  the site's channel (agent-pair.ts, agent-made-tex.ts), Nov 19, provisional until the exact-head CI packet: 54,747 /
+  //  18,782 measured on the shipped build (bun 1.4.4, node 24.21.0) with master 6614eb38 merged (the agent's bar's row
+  //  among it); + 64)
+  // (55,409 / 19,025: the two above together, the bar's offer of a board an agent made and a .tex it made running by
+  //  itself, measured on their merge (with the embedded mode on master f8b9e013): 55,345 / 18,961 (bun 1.4.4, node
+  //  24.21.0), + 64)
+  // (56,341 / 19,371: an answer's entry with its page's address and a .tex the agent made running by itself together,
+  //  measured on their merge (master 3c4319ba): 56,277 / 19,307 (bun 1.4.4, node 24.21.0), + 64)
+  AGENT: { label: "the LaTeX agent pairing's chunk", raw: 56341, gzip: 19371 },
   // (the agent tools' work: web/latex/tools.ts, latex_check's report and latex_render's pictures, on an agent's first call)
   // (16,546 / 6,950: Nov 11 2026: latex_build's own code (build.ts, the
   //  engine driven from a snapshot, and the pages' fit) here, out of the eager group, its shared rules handed in by the

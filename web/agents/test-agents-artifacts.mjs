@@ -1746,19 +1746,34 @@ try {
       ok(!res.ok && agentNone && (w === "W2" ? /# mine/.test(after.cells[0].code) : same(after, before)), `${name}: ${what} while the edit waited at ${w}: refused, nothing of it written${w === "W2" ? " (the person's own text saved, as theirs)" : ", the file byte-identical"}`, { res, rev: [before.rev, after.rev] });
       await regain(how === "c" ? "none" : how);
     }
-    // E22 (C2, final) and E22b (C2, preliminary): a save the store refuses ("not saved: ...") while saved() still
-    // resolves: never answered ok, nothing applied or written
-    const refuseNext = () => ev(`(() => { let n = 0; window.__sbTestStoreSave = () => (n++ === 0 ? "not saved: (test)" : null); return true; })()`);
+    // E22 (C2, final) and E22b (C2, preliminary): a save the store refuses ("not saved: ..."): never answered ok,
+    // nothing applied or written; E22c: refused once, then taken: the notebook sends what it has again (a refused save
+    // is a failed one, sent again with the next), so the edit is answered ok only once the record has it
+    // (refusals counted, so a row that expects one can't pass with none: window.__refused)
+    const refuseNext = () => ev(`(() => { let n = 0; window.__refused = 0; window.__sbTestStoreSave = () => (n++ === 0 ? (window.__refused++, "not saved: (test)") : null); return true; })()`);
+    const refuseAll = () => ev(`(window.__sbTestStoreSave = () => "not saved: (test)", true)`);
     const refuseNone = () => ev(`(delete window.__sbTestStoreSave, true)`);
     {
       const { path, ids } = await mk();
       await open(path);
       const r = await readOf(path);
       const before = await rec(path);
-      await refuseNext();
+      await refuseAll();
       const res = await edit(path, r, { set: [{ id: ids[1], source: "print(22)" }] });
+      const after = await rec(path);
       await refuseNone();
-      ok(!res.ok && /not saved/.test(res.msg) && same(await rec(path), before), "E22: the edit's final save refused by the store: answered not ok, the record unchanged", res);
+      ok(!res.ok && /not saved/.test(res.msg) && same(after, before), "E22: the edit's final save refused by the store: answered not ok, the record unchanged", res);
+    }
+    {
+      const { path, ids } = await mk();
+      await open(path);
+      const r = await readOf(path);
+      await refuseNext();
+      const res = await edit(path, r, { set: [{ id: ids[1], source: "print(220)" }] });
+      const refused = await ev(`window.__refused`);
+      await refuseNone();
+      const after = await rec(path);
+      ok(refused === 1 && res.ok && after.cells.some((c) => c.code === "print(220)"), "E22c: the edit's final save refused once, then taken: sent again, answered ok, and the record has it", { refused, res, cells: after.cells.map((c) => c.code) });
     }
     {
       const { path, ids } = await mk();
@@ -1766,10 +1781,11 @@ try {
       const r = await readOf(path);
       const before = await rec(path);
       await typeInto(0, " # p");
-      await refuseNext();
+      await refuseAll();
       const res = await edit(path, r, { set: [{ id: ids[1], source: "print(23)" }] });
+      const after = await rec(path), seen = await shown();
       await refuseNone();
-      ok(!res.ok && /couldn't be saved first/.test(res.msg) && same(await rec(path), before) && /# p/.test((await shown())[0]) && (await shown())[1] === "print(2)", "E22b: the person's pending change refused by the store: refused before anything is applied, the record unchanged, their text shown", res);
+      ok(!res.ok && /couldn't be saved first/.test(res.msg) && same(after, before) && /# p/.test(seen[0]) && seen[1] === "print(2)", "E22b: the person's pending change refused by the store: refused before anything is applied, the record unchanged, their text shown", res);
     }
     // E23, E23b (C3): the rollback keeps the revision it was saved at, so the person's next save conflicts with another
     // tab's change and merges it: E23 with that change made after the rollback, E23b with it made during the apply

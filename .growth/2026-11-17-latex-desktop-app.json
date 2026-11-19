@@ -1,7 +1,0 @@
-{
-  "v": 1,
-  "reason": "The LaTeX editor in the desktop app: the notebook page's script learns it is the desktop app (web/latex/boot.ts desktopApp, latexHereFor), mounts the editor with the app's Run wording and no Share (mountTex, texSandbox, texShare), and runs the editor's self-test checks; the page is carried into cli/pyjs.cjs. Measured with the shared size-record.sh (bun 1.4.4, node 24.21.0) on master 79dccfff and a two-parent merge probe of the branch head: cli/pyjs.cjs +888, + 64.",
-  "bytes": {
-    "cli/pyjs.cjs": 952
-  }
-}
