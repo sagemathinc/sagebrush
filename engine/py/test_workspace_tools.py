@@ -794,6 +794,17 @@ def test_notebook_languages_are_told():
     assert "workspace_create" in text and "Python, Sage,\nMATLAB or Magma" in text, text
 
 
+def test_entry_url_reaches_the_agent():
+    """The page's url on an entry (its page on the person's Sagebrush site, a link to give them) comes through as is,
+    and stat's and create's text show it."""
+    url = "https://sagebrush.space/?tex=f1"
+    e = {"path": "/p.tex", "kind": "file", "url": url}
+    for verb in ("stat", "create"):
+        got = WS.validate_result(verb, {"entry": e, **({"rev": 1} if verb == "create" else {})})
+        assert got["entry"]["url"] == url, got
+        assert url in WS._summary(verb, {"path": "/p.tex"}, got), WS._summary(verb, {"path": "/p.tex"}, got)
+
+
 if __name__ == "__main__":
     for name, f in list(globals().items()):
         if name.startswith("test_") and callable(f):

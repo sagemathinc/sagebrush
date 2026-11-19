@@ -6,7 +6,7 @@
 //   bun web/workspace/test-agent-pair.mjs
 import { failHint, agentSays, onlyCurrent, readConnect, ONLY_CODE, SAFARI, CHROME_ALLOW, OTHER_FAIL } from "./agent-ui.ts";
 import { handOver, takeHandoff, HANDOFF_KEY, HANDOFF_MS } from "./pair-handoff.ts";
-import { AgentPairing, parseStrict, actorOf, parseReloadRecord, reloadDecision, takeReloadRecord, putReloadRecord, markReloadLeft, RELOAD_KEY, RELOAD_FRESH_MS } from "./agent-pair.ts";
+import { AgentPairing, CHANGED_WHILE_RUNNING, parseStrict, actorOf, parseReloadRecord, reloadDecision, takeReloadRecord, putReloadRecord, markReloadLeft, RELOAD_KEY, RELOAD_FRESH_MS } from "./agent-pair.ts";
 
 let failures = 0;
 const ok = (c, msg) => { console.log((c ? "ok   " : "FAIL ") + msg); if (!c) failures++; };
@@ -845,6 +845,67 @@ for (const [what, grant] of [["a folder, not Everything", { folders: ["/A"], wri
   const r = await S.request("workspace.create", { path: "/A/n.ipynb" });
   ok(r.result && P.created && !P.mayRunCreated(P.created), `${what}: never runs by itself`);
   await P.revoke();
+  S.srv.stop(true);
+}
+// ---- U-9: a single entry's answer has its page's address (url), from that very entry, the one the verb returned under
+// the grant: no other read, and nothing once the grant has changed
+{
+  const S = server(pairOk), W = fakeWs();
+  W.files.set("/A/p.tex", "\\begin{document}\\end{document}");
+  W.files.set("/A/d.csv", "1,2");
+  // (the verb's own entry carries one fid, a stat another: the url must be the verb's)
+  const base = W.verbsFor;
+  W.verbsFor = (actor) => { const v = base(actor); return { ...v, read: async (p) => { const r = await v.read(p); return { ...r, entry: { ...r.entry, fid: "AUTHFID" } }; }, stat: async (p) => { const e = await v.stat(p); return e && { ...e, fid: p === "/A/p.tex" && W.otherFid ? "OTHER" : e.fid }; } }; };
+  const P = mk(S, W);
+  await P.paired();
+  await P.allow({ folders: ["/A"], write: true, expires: null }, false);
+  W.calls.length = 0;
+  W.otherFid = true;
+  const rd = (await S.request("workspace.read", { path: "/A/p.tex" })).result;
+  ok(rd?.entry?.url === page.origin + "/?tex=AUTHFID" && W.calls.join() === "read" && !("fid" in rd.entry) && !("ref" in rd.entry), "U-9a: read's entry has url, from the very entry the read returned (no stat, no other read); still no fid or ref of its own", { entry: rd?.entry, calls: W.calls });
+  W.otherFid = false;
+  const nb = (await S.request("workspace.stat", { path: "/A/doc.ipynb" })).result;
+  const mk1 = (await S.request("workspace.create", { path: "/A/new.ipynb" })).result;
+  const ls = (await S.request("workspace.list", { folder: "/A" })).result;
+  const csv = (await S.request("workspace.stat", { path: "/A/d.csv" })).result;
+  const dir = (await S.request("workspace.mkdir", { path: "/A/sub" })).result;
+  ok(nb?.entry?.url === page.origin + "/?nb=INTERNAL" && mk1?.entry?.url === page.origin + "/?nb=INTERNAL" && ls?.entries?.every((e) => !("url" in e)) && !("url" in (csv?.entry ?? {})) && !("url" in (dir?.entry ?? {})),
+    "U-9b: stat and create have it (a notebook: its page by ref); list's entries, a data file and a folder have none", { nb: nb?.entry, made: mk1?.entry, csv: csv?.entry, dir: dir?.entry });
+  S.srv.stop(true);
+}
+{
+  // (the grant revoked while the read runs: nothing of it is sent, no url either, and nothing more is read for one)
+  const S = server(pairOk), W = fakeWs();
+  W.files.set("/A/p.tex", "x");
+  const P = mk(S, W);
+  await P.paired();
+  await P.allow({ folders: ["/A"], write: true, expires: null }, false);
+  W.calls.length = 0;
+  const go = W.holdReads();
+  const r = S.request("workspace.read", { path: "/A/p.tex" }, { wait: 1500 });
+  await until(() => W.reads === 1);
+  await P.revoke();
+  go();
+  const a = await r;
+  ok(!JSON.stringify(a ?? null).includes("url") && !JSON.stringify(a ?? null).includes("FID") && W.calls.join() === "read", "U-9c: revoked while the read runs: no url and nothing of it sent, and no stat or second read after", { a, calls: W.calls });
+  S.srv.stop(true);
+}
+{
+  // (the grant expired while the read ran: the answer is CHANGED_WHILE_RUNNING, with no url, and no stat)
+  const S = server(pairOk), W = fakeWs();
+  W.files.set("/A/p.tex", "x");
+  let t = 9_000_000;
+  const P = mk(S, W, { code: "x" }, () => t);
+  await P.paired();
+  await P.allow({ folders: ["/A"], write: true, expires: t + 60_000 }, false);
+  W.calls.length = 0;
+  const go = W.holdReads();
+  const r = S.request("workspace.read", { path: "/A/p.tex" }, { wait: 3000 });
+  await until(() => W.reads === 1);
+  t += 120_000;
+  go();
+  const a = await r;
+  ok(a?.error?.data?.code === "invalid" && a.error.data.message === CHANGED_WHILE_RUNNING && !JSON.stringify(a).includes("url") && W.calls.join() === "read", "U-9d: expired once the read resolved: CHANGED_WHILE_RUNNING, no url, no stat", { err: a?.error?.data, calls: W.calls });
   S.srv.stop(true);
 }
 console.log(failures ? `${failures} failed` : "all passed");
