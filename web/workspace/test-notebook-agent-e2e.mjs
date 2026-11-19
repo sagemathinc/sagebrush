@@ -441,8 +441,25 @@ try {
     ok(await until(`!!document.querySelector(".sbag-bar")`, 20000) && !(await ev(`!!document.querySelector(".sbag-box")`)), "after a reload of the tab, the agent is back by itself: its bar, and no Connect or Allow", await ev(`document.querySelector(".sbag-box")?.textContent ?? ""`).catch(() => ""));
     const lr = await drive({ op: "req", method: "workspace.list", params: { folder: "/" } });
     ok(Array.isArray(lr.ok?.entries), "…and the agent's next call works", JSON.stringify(lr).slice(0, 200));
-    await ev(`([...document.querySelectorAll(".sbag-bar button")].find((b) => b.textContent === "Revoke")?.click(), true)`);
-    ok(await until(`!document.querySelector(".sbag-bar")`), "(Revoke)");
+    // (this tab's record of that live pairing, exactly as the page keeps it)
+    const oldRec = await ev(`sessionStorage.getItem("sb-agent-reload-v1")`);
+    ok(typeof oldRec === "string" && oldRec.includes('"session"'), "(the tab holds its reload record)");
+    // a fresh ?pair= link opened in this tab, a navigation, not a reload: the old record is dropped at load, before
+    // anything of the new pairing; then the new Allow cancelled, and the cleaned page reloaded: nothing of the old agent
+    // comes back (no restore, no chunk fetched for it, no bar)
+    const cn = await drive({ op: "code" });
+    ok(await go(`?pair=${cn.code}&port=${cn.port}`) && await until(`!!document.querySelector(".sbag-box button.primary")`), "(another ?pair= link in the same tab: Connect)");
+    ok(await ev(`sessionStorage.getItem("sb-agent-reload-v1") === null`), "a ?pair= link opened over a tab's reload record (a navigation): the old record is dropped at load");
+    await ev(`([...document.querySelectorAll(".sbag-box button")].find((b) => b.textContent === "Cancel").click(), true)`);
+    ok(await until(`!document.querySelector(".sbag-box")`) && !(await ev(`new URLSearchParams(location.search).has("pair")`)), "(Cancel: the dialog closes, and the link is gone from the address)");
+    await ev("window.__old = 1").catch(() => {});
+    const beforeR = requests.length;
+    await send("Page.reload");
+    await sleep(300);
+    ok(await until("!window.__old && !!window.sagebrush?.workspace", 60000), "(the cleaned page reloads)");
+    await sleep(5000);
+    const after = { bar: await ev(`!!document.querySelector(".sbag-bar")`), box: await ev(`!!document.querySelector(".sbag-box")`), rec: await ev(`sessionStorage.getItem("sb-agent-reload-v1")`), chunk: requests.slice(beforeR).some(chunk) };
+    ok(!after.bar && !after.box && after.rec === null && !after.chunk, "…and a reload after the cancelled Allow: the old agent isn't restored (no bar, no dialog, no chunk fetched, no record)", after);
   }
 
   // a remembered grant: the next load of the notebook page fetches the chunk by itself and reconnects

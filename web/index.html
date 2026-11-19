@@ -5222,8 +5222,10 @@ const agentHere = !LOCAL && !window.__TAURI__;
 // (only on a reload of this tab: after any other navigation the record is dropped here, unread, as the pairing module
 //  would discard it (reloadDecision), and nothing is fetched for it)
 const reloadRecorded = () => { try { if (sessionStorage.getItem("sb-agent-reload-v1") === null) return false; if (performance.getEntriesByType("navigation")[0]?.type === "reload") return true; sessionStorage.removeItem("sb-agent-reload-v1"); return false; } catch { return false; } };
+// (decided once, at load, before anything else is looked at: a ?pair= link or another way in never skips the drop)
+const reloadNow = reloadRecorded();
 const restoreAgent = (w, failed) => {
-  if (pairLink() || reloadRecorded()) void pairAgent(w).catch(failed);
+  if (pairLink() || reloadNow) void pairAgent(w).catch(failed);
   else void w.agentGrants().then((k) => { if (Object.keys(k ?? {}).length) void pairAgent(w).catch(failed); }, () => {});
 };
 // (started once the page knows it shows a notebook, not the LaTeX editor, which has its own: one pairing per page; an

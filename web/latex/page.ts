@@ -87,6 +87,8 @@ let runGen = 0;
 // (only on a reload of this tab: after any other navigation the record is dropped here, unread, as the pairing module
 //  would discard it (reloadDecision), and nothing is fetched for it)
 const reloadRecorded = () => { try { if (sessionStorage.getItem("sb-agent-reload-v1") === null) return false; if ((performance.getEntriesByType("navigation")[0] as PerformanceNavigationTiming | undefined)?.type === "reload") return true; sessionStorage.removeItem("sb-agent-reload-v1"); return false; } catch { return false; } };
+// (decided once, at load, before anything else is looked at: a ?pair= link or the desktop app never skips the drop)
+const reloadNow = reloadRecorded();
 let agentPairing: Promise<{ connect(): unknown }> | null = null, agentTries = 0;
 const pairAgent = (ws: Workspace) => (agentPairing ??= (import(agentTries++ ? `${agentUrl}?try=${agentTries}` : agentUrl) as Promise<typeof import("./agent")>).then((m) => m.mountAgentPairing(ws as any, {
   // (a reload of this tab keeps the agent, from the tab's reload record, while the grant lasts (decided Nov 19 2026))
@@ -470,7 +472,7 @@ export async function mount(root: HTMLElement, host: Host): Promise<void> {
   // (the link taken by the hosting page before this loaded: pair-link.ts's key; or still in the URL)
   //  (none in the desktop app: no Agent button there either)
   if (host.app) agentBtn.hidden = true;
-  else if ((globalThis as any)[Symbol.for("sagebrush.pairLink")] || new URLSearchParams(location.search).has("pair") || reloadRecorded()) void pairAgent(host.ws).catch(agentFailed);
+  else if ((globalThis as any)[Symbol.for("sagebrush.pairLink")] || new URLSearchParams(location.search).has("pair") || reloadNow) void pairAgent(host.ws).catch(agentFailed);
   else void host.ws.agentGrants().then((k) => { if (Object.keys(k ?? {}).length) void pairAgent(host.ws).catch(agentFailed); }, () => {});
   const main = el("div", "tex-main");
   const left = el("div", "tex-left"), right = el("div", "tex-right");
