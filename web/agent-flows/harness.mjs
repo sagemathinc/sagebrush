@@ -126,7 +126,9 @@ async function mcpSurface(site, page) {
       if (!link) throw new Error("workspace_connect gave no link: " + r.text);
       const waited = tool("workspace_connect", { wait: 60 });
       await page.navigate(link);
-      if (!(await page.until(`location.pathname === "/" && !!document.querySelector(".sbag-box button.primary")`, 60000))) throw new Error("the link didn't open Connect on the notebook page");
+      if (!(await page.until(`location.pathname === "/" && !!document.querySelector(".sbag-box button.primary")`, 90000))) {
+        throw new Error("the link didn't open Connect on the notebook page: " + (await page.ev(`location.href + " | " + (document.querySelector(".sbag-box")?.textContent ?? "(no dialog)") + " | " + (document.querySelector("#status")?.textContent ?? "")`).catch((e) => String(e))).slice(0, 300));
+      }
       await page.ev(`(document.querySelector(".sbag-box button.primary").click(), true)`);
       await allow(page, grant);
       const w = await waited;
@@ -245,7 +247,7 @@ function helpers(page, surface, failures, shotDir, caseId, gap) {
     ev: (js) => page.ev(js),
     until: (js, ms) => page.until(js, ms),
     ok(cond, msg, detail) {
-      console.log((cond ? "ok   " : gap ? "GAP  " : "FAIL ") + `[${caseId} ${surface.name}] ` + msg + (cond || detail === undefined ? "" : " " + JSON.stringify(detail).slice(0, 400)));
+      console.log((cond ? "ok   " : "FAIL ") + `[${caseId} ${surface.name}] ` + msg + (cond || detail === undefined ? "" : " " + JSON.stringify(detail).slice(0, 400)));
       if (!cond) failures.push(msg);
       return !!cond;
     },
