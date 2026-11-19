@@ -2107,15 +2107,20 @@ export function createNotebook(root, opts = {}) {
     const f = meta.metadata?.sagebrush?.figures;
     return FIGURES.includes(f) ? f : "auto";
   }
-  function setFigures(f) {
-    if (!FIGURES.includes(f) || f === figures()) return;
-    const md = { ...(meta.metadata ?? {}) }, sb = { ...(md.sagebrush ?? {}) };
-    if (f === "auto") delete sb.figures;
+  // m with sagebrush.figures set to f in its metadata (undefined: removed), and no empty metadata left; m itself unchanged
+  function withFigures(m, f) {
+    const { metadata, ...r } = m;
+    const md = { ...(metadata ?? {}) }, sb = { ...(md.sagebrush ?? {}) };
+    if (f === undefined) delete sb.figures;
     else sb.figures = f;
     if (Object.keys(sb).length) md.sagebrush = sb;
     else delete md.sagebrush;
-    meta = { ...meta, metadata: md };
-    if (!Object.keys(md).length) delete meta.metadata;
+    return Object.keys(md).length ? { ...r, metadata: md } : r;
+  }
+  function setFigures(f) {
+    if (!FIGURES.includes(f) || f === figures()) return;
+    meta = withFigures(meta, f === "auto" ? undefined : f);
+    gateCfg = null;
     schedule();
   }
   function snapshot() {
@@ -2378,18 +2383,13 @@ export function createNotebook(root, opts = {}) {
     const base = keepLocal ? shown.synced?.cells ?? null : null;
     let dirty = false;
     meta = { ...meta, ...rest };
+    gateCfg = null;
     // (how its figures are shown is the incoming document's alone: none there is Auto, never the old choice kept)
     const incoming = rest.metadata?.sagebrush?.figures;
     if (meta.metadata?.sagebrush?.figures !== incoming) {
-      const md = { ...(meta.metadata ?? {}) }, sb = { ...(md.sagebrush ?? {}) };
-      if (incoming === undefined) delete sb.figures;
-      else sb.figures = incoming;
-      if (Object.keys(sb).length) md.sagebrush = sb;
-      else delete md.sagebrush;
-      meta = { ...meta, metadata: md };
-      if (!Object.keys(md).length) delete meta.metadata;
+      meta = withFigures(meta, incoming);
+      gateCfg = null;
     }
-    gateCfg = null;
     if (!keepLocal) kernel?.remoteGate?.documentReplaced(); // (a revert replaces the document)
     if (m && m !== mode) setMode(m, false);
     const order = cells().map((c) => c.id);
