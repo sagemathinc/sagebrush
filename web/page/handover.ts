@@ -37,6 +37,11 @@ export type HandoverPage = {
   hasKey?(key: string): boolean;
   /** `n` more input actions couldn't be applied here: said by the page. */
   notApplied?(n: number): void;
+  /** The document shown, and the document `doc` shown in its place as a change made here (saved, recorded): what a
+   * whole write asked of this tab while it writes the document is made with (Workspace.write under sync's journal).
+   * Without them, this tab answers no such write. */
+  shownDoc?(): any;
+  replaceDoc?(doc: any): void;
 };
 
 // (what the person typed before this tab could write: text, a deletion, a cursor move or another key, kept in order,
@@ -47,6 +52,20 @@ type Op = ({ text: string } | { del: -1 | 1 } | { move: -1 | 1 } | { key: Keyboa
 // in, that text's length, the field's own selection when last read (a click or a cursor key moves it), and the edits so
 // far at their places in the field's own text, to place a moved selection among them)
 type Shadow = { s: number; e: number; len: number; real: [number, number]; edits: { o: number; d: number }[] };
+
+/** The bounds of the whole writes a tab answers: requests kept (answered ones for WRITE_KEEP_MS), how long a `ready`
+ * waits for its commit, and a document's cells and size. */
+const WRITE_MAX = 64, WRITE_KEEP_MS = 60_000, READY_MS = 5000, DOC_CELLS = 10_000, DOC_CHARS = 32 * 2 ** 20;
+/** A document as a whole write gives it: {cells: [...]} of cells each {type?, code?, ...}, bounded. */
+function docOk(d: any): boolean {
+  if (!d || typeof d !== "object" || Array.isArray(d) || !Array.isArray(d.cells) || d.cells.length > DOC_CELLS) return false;
+  if (!d.cells.every((c: any) => c && typeof c === "object" && !Array.isArray(c) && (c.code === undefined || typeof c.code === "string") && (c.type === undefined || c.type === "code" || c.type === "markdown" || c.type === "raw"))) return false;
+  if (d.mode !== undefined && typeof d.mode !== "string") return false;
+  try { return JSON.stringify(d).length <= DOC_CHARS; } catch { return false; }
+}
+const cellsKey = (d: any) => JSON.stringify((Array.isArray(d?.cells) ? d.cells : []).map((c: any) => [c?.id ?? null, c?.type ?? "code", c?.code ?? ""]));
+// (a record as a document: the store's own fields left out)
+const plainDoc = (r: any) => { if (!r) return null; const { j: _j, hash: _h, unjournaled: _u, rev: _r, updated: _d, baseRev: _b, at: _a, from: _f, proof: _p, ...doc } = r; return doc; };
 
 export function writerHandover(page: HandoverPage) {
   const tab = Math.random().toString(36).slice(2);
@@ -100,6 +119,7 @@ export function writerHandover(page: HandoverPage) {
     return lost;
   }
   function heard(m: any) {
+    if (m && (m.t === "write" || m.t === "commit")) return void onWrite(m);
     if (!m || typeof m.tab !== "string" && m.t !== "who-wants") return;
     if (m.t === "want" && typeof m.at === "number") { wants.set(m.tab, { at: m.at, heard: Date.now() }); void handOver(); }
     else if (m.t === "writer" || m.t === "bye") wants.delete(m.tab);
@@ -269,6 +289,105 @@ export function writerHandover(page: HandoverPage) {
     }
     said();
   }
+  // A whole write of the document asked by a page of this browser (Workspace.write under sync's journal, design r3),
+  // made here while this tab writes it: one at a time, in two phases.  `write {req, ref, doc, base}`: what was typed
+  // here saved first, then the base checked against the record, and `ready` (nothing changed yet); `commit {req, ref}`
+  // (sent by the asking page once it checked the path and the grant again): the document shown and saved, and `wrote`.
+  // Every message is untrusted input, checked whole (its exact shape, sizes, this document); this tab's own checks as
+  // the writer (the lock held, loaded, no hand-over begun) made after every wait and right before the change; each
+  // request answered by one outcome, kept a while (bounded) and given again to a request asked again.  The asking page
+  // trusts no answer for an ok: it reads the record.
+  type Asked = { at: number; state: "preparing" | "ready" | "committing" | "done"; base: number | null; doc: any; rec?: any; readyAt?: number; outcome?: any };
+  const asked = new Map<string, Asked>();
+  let writing: Promise<unknown> = Promise.resolve();
+  const prune = () => {
+    const now = Date.now();
+    for (const [k, w] of asked) if (w.state === "done" && now - w.at > WRITE_KEEP_MS) asked.delete(k);
+    for (const [k, w] of asked) { if (asked.size <= WRITE_MAX) break; if (w.state === "done") asked.delete(k); }
+  };
+  const reqOk = (r: unknown) => typeof r === "string" && r.length > 0 && r.length <= 64;
+  const shape = (m: any, keys: string) => !!m && typeof m === "object" && !Array.isArray(m) && Object.keys(m).sort().join(",") === keys;
+  const holds = (st: any) => !!st && store === st && writes() && !st.yielding && !st.released && !handing;
+  const sameCells = (a: any, b: any) => cellsKey(a) === cellsKey(b);
+  // (tests: the holder held at `stage`, loopback pages only, test-notebook-write-journal.mjs)
+  const pause = async (stage: string, req: string) => {
+    const f = (globalThis as any).__sbTestWritePause;
+    if (typeof f === "function" && /^(127\.0\.0\.1|localhost)$/.test(location.hostname)) await f(stage, req);
+  };
+  function onWrite(m: any) {
+    const st = store;
+    if (!st || !page.shownDoc || !page.replaceDoc) return;
+    prune();
+    if (m.t === "write") {
+      if (!shape(m, "base,doc,ref,req,t") || !reqOk(m.req) || m.ref !== st.id || !(m.base === null || (Number.isSafeInteger(m.base) && m.base >= 0)) || !docOk(m.doc)) return;
+      const had = asked.get(m.req);
+      if (had) {
+        if (had.state === "done") post(had.outcome);
+        else if (had.state === "ready") post({ t: "ready", req: m.req });
+        return;
+      }
+      // (only the writer answers: a tab that follows leaves it to the one that writes)
+      if (!holds(st) || asked.size >= WRITE_MAX) return;
+      const w: Asked = { at: Date.now(), state: "preparing", base: m.base, doc: m.doc };
+      asked.set(m.req, w);
+      writing = writing.then(() => prepare(m.req, w, st), () => prepare(m.req, w, st));
+    } else {
+      if (!shape(m, "ref,req,t") || !reqOk(m.req) || m.ref !== st.id) return;
+      const w = asked.get(m.req);
+      if (!w) return;
+      if (w.state === "done") return void post(w.outcome);
+      if (w.state !== "ready" || Date.now() - (w.readyAt ?? 0) > READY_MS) return;
+      w.state = "committing";
+      writing = writing.then(() => commit(m.req, w, st), () => commit(m.req, w, st));
+    }
+  }
+  function end(req: string, w: Asked, outcome: any) {
+    w.state = "done"; w.outcome = outcome; w.doc = null; w.rec = null; w.at = Date.now();
+    post(outcome);
+    // ("lost": this tab no longer writes the document and did nothing: not kept, so the request asked again goes to the
+    // tab that writes it now, never answered "lost" again from here)
+    if (outcome.t === "lost") asked.delete(req);
+  }
+  async function prepare(req: string, w: Asked, st: any) {
+    if (!holds(st)) return end(req, w, { t: "lost", req });
+    try {
+      await page.quiesce();
+    } catch (e) {
+      return end(req, w, { t: "failed", req, why: `what was typed there couldn't be saved first (${String((e as Error)?.message ?? e).slice(0, 200)})` });
+    }
+    await pause("prepare", req);
+    if (!holds(st)) return end(req, w, { t: "lost", req });
+    const rec = await st.loadRecord().catch(() => null);
+    if (!holds(st)) return end(req, w, { t: "lost", req });
+    if (!rec) return end(req, w, { t: "failed", req, why: "its record couldn't be read" });
+    // (typed here since that save, or a base that isn't the record's revision: a conflict, with what is there now)
+    const shown = page.shownDoc!();
+    if (!sameCells(shown, rec) || (w.base !== null && rec.rev !== w.base)) return end(req, w, { t: "conflict", req, current: plainDoc(rec) });
+    w.rec = rec; w.state = "ready"; w.readyAt = Date.now();
+    post({ t: "ready", req });
+    // (a commit that never comes: let go after READY_MS, nothing changed)
+    setTimeout(() => { if (w.state === "ready") end(req, w, { t: "lost", req }); }, READY_MS + 100);
+  }
+  async function commit(req: string, w: Asked, st: any) {
+    await pause("commit", req);
+    // (right before the change, with no wait in between: still this tab's to write, and nothing typed since `ready`)
+    if (!holds(st)) return end(req, w, { t: "lost", req });
+    if (!sameCells(page.shownDoc!(), w.rec)) return end(req, w, { t: "conflict", req, current: plainDoc(w.rec) });
+    page.replaceDoc!({ ...w.doc, mode: w.doc.mode ?? w.rec.mode, rev: w.rec.rev });
+    // (the replacement's save, asked for by the notebook once its own loading step is done (two microtasks), then
+    // waited for: a hand-over that begins meanwhile waits for it too (its quiesce))
+    await Promise.resolve();
+    await Promise.resolve();
+    try {
+      await page.quiesce();
+    } catch (e) {
+      return end(req, w, { t: "failed", req, why: `the change couldn't be saved there (${String((e as Error)?.message ?? e).slice(0, 200)})` });
+    }
+    const rec = await st.loadRecord().catch(() => null);
+    await pause("wrote", req);
+    end(req, w, { t: "wrote", req, rev: rec?.rev ?? null });
+  }
+
   return {
     bind,
     /** This tab writes the document now (the takeover's reload done, the focus back where it was): said to the other
