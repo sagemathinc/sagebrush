@@ -414,6 +414,22 @@ class RationalField(_Ring):
         # (one QQ: a pickle or a copy of it is QQ itself, as in Sage)
         return "QQ"
 
+    def degree(self):
+        """The degree over QQ: 1 (QQ as the number field of degree 1, as in
+        Sage: so a newform's hecke_eigenvalue_field().degree() is 1 for every
+        rational newform).
+
+        EXAMPLES::
+
+            sage: QQ.degree(), QQ.absolute_degree()
+            (1, 1)
+            sage: Newforms(11, names='a')[0].hecke_eigenvalue_field().degree()
+            1
+        """
+        return 1
+
+    absolute_degree = degree
+
 
 QQ = RationalField("Rational Field", True)
 
