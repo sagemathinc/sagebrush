@@ -1,0 +1,7 @@
+{
+  "v": 1,
+  "reason": "A notebook a paired agent created runs once by itself on the notebook page, as the person's Run all would, only when the grant it was created under is still in force with May run code and Everything, only at its creation's own revision and with everything Run all reads unchanged (canonical: language, package set, seed, autorun, metadata, each cell's id, kind, source and metadata), at most once (its op spent at its first announcement, in memory only); new notebooks' cells get their ids when made (web/index.html, web/workspace/agent-pair.ts, web/workspace/api.ts); the CLI's bundle carries the notebook page and its agent chunk. cli/pyjs.cjs grows +1716 bytes, exact, base master 101ecceb, pinned node 24.21.0 and bun 1.4.4; the bound adds 64 bytes of slack.",
+  "bytes": {
+    "cli/pyjs.cjs": 1780
+  }
+}

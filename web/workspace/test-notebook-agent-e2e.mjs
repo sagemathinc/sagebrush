@@ -193,7 +193,7 @@ try {
   // offers Open for it. The person's edit typed just before, not yet saved, is kept in the notebook they left
   const typeInto = (from, to) => ev(`(() => { const t = [...document.querySelectorAll(".ed textarea")].find((t) => t.value === ${JSON.stringify(from)}); if (!t) return false; t.value = ${JSON.stringify(to)}; t.dispatchEvent(new Event("input", { bubbles: true })); return true; })()`);
   const barButton = (text) => `[...document.querySelectorAll(".sbag-bar button")].find((b) => b.textContent === ${JSON.stringify(text)})`;
-  const make = (name, cells) => drive({ op: "req", method: "workspace.create", params: { path: (folder === "/" ? "" : folder) + "/" + name + ".ipynb", mode: "python", content: { json: { cells: cells.map((code) => ({ code })) } } } });
+  const make = (name, cells, extra = {}) => drive({ op: "req", method: "workspace.create", params: { path: (folder === "/" ? "" : folder) + "/" + name + ".ipynb", mode: "python", content: { json: { ...extra, cells: cells.map((code) => ({ code })) } } } });
   const shownIs = (name) => `document.title.startsWith(${JSON.stringify(name)})`;
   const fromFiles = async (file) => {
     await ev(`(document.querySelector("#wssidebar")?.hidden && document.querySelector("#wsfilesbtn")?.click(), true)`);
@@ -234,8 +234,151 @@ try {
   ok(!!mf.ok && await until(`!!${barButton("Open agent-notes.txt")}`, 5000), "a data file it creates: the bar's Open names it", mf);
   ok(await ev(shownIs("Made by the agent")), "…and nothing else opens");
 
+  // what an agent creates runs once by itself, as the person's Run all would, when the grant in force has May run code
+  // and Everything, as here (the conditions decided Nov 18 2026)
+  ok(folder === "/", "(the grant here is Everything: the notebook shown is at the top)", folder);
+  const outOf = (code) => `JSON.stringify(window.sagebrush.notebook.snapshot().cells.find((c) => c.code === ${JSON.stringify(code)})?.outputs ?? null)`;
+  const nOf = (code) => `(window.sagebrush.notebook.snapshot().cells.find((c) => c.code === ${JSON.stringify(code)})?.n ?? null)`;
+  ok(await until(`${shownIs("Made by the agent")} && ${outOf(MADE)}.includes("made by the agent")`, 30000), "the agent's first notebook ran once by itself: its output shown", await ev(outOf(MADE)).catch(() => null));
+  // (what such code can't do: change files without the person's OK (its interpreter is the sandboxed runner, and a new
+  //  notebook may change none), nor reach a shell or a subprocess)
+  const TRY = [
+    "import os",
+    "r = []",
+    "for name, f in [('open', lambda: open('/agent-wrote.txt', 'w').write('x')), ('os.system', lambda: os.system('touch /agent-sys.txt')), ('subprocess', lambda: __import__('subprocess').run(['touch', '/agent-sub.txt'])), ('os.remove', lambda: os.remove('/agent-notes.txt')), ('os.rename', lambda: os.rename('/agent-notes.txt', '/agent-moved.txt'))]:",
+    "    try:",
+    "        f()",
+    "        r.append(name + ': done')",
+    "    except BaseException as e:",
+    "        r.append(name + ': ' + type(e).__name__)",
+    "print('tries:', r)",
+  ].join("\n");
+  const BANG = "!touch /agent-bang.txt", BASH = "%%bash\ntouch /agent-bash.txt";
+  ok(!!(await make("Tries to write", [TRY, BANG, BASH])).ok, "the agent creates a notebook whose code tries to change files");
+  ok(await until(`${shownIs("Tries to write")} && ${outOf(TRY)}.includes("tries:")`, 30000), "it opens and runs by itself", await ev(outOf(TRY)).catch(() => null));
+  await until(`${outOf(BASH)} !== "null" && ${outOf(BASH)} !== "[]"`, 15000);
+  await sleep(3000);
+  const tries = await ev(outOf(TRY));
+  console.log("     (what its code was told: " + tries.slice(0, 600) + ")");
+  const files = await ev(`Promise.all(["/agent-wrote.txt", "/agent-sys.txt", "/agent-sub.txt", "/agent-bang.txt", "/agent-bash.txt", "/agent-moved.txt", "/agent-notes.txt"].map((p) => ${W}.stat(p).then((e) => [p, !!e && !e.trashed], () => [p, false])))`);
+  ok(files.filter(([p, there]) => p !== "/agent-notes.txt" && there).length === 0 && files.find(([p]) => p === "/agent-notes.txt")[1], "no file was made, moved or deleted: the workspace is as it was", files);
+  ok(/open: PermissionError/.test(tries) && /os\.remove: PermissionError/.test(tries) && /os\.rename: PermissionError/.test(tries), "writing, deleting and moving a file are refused (PermissionError)", tries);
+  ok(!/os\.system: done/.test(tries) && !/subprocess: done/.test(tries), "no shell: os.system and subprocess fail", tries);
+  ok(/shell commands are not available/.test(await ev(outOf(BANG))) && /shell commands are not available/.test(await ev(outOf(BASH))), "!cmd and %%bash are refused", [await ev(outOf(BANG)), await ev(outOf(BASH))]);
+  // (at most once: opened again through the bar's Open after the person moved away, it doesn't run again)
+  const ONCE = "import time\nprint('ran at', time.time())";
+  ok(!!(await make("Runs once", [ONCE])).ok && await until(`${shownIs("Runs once")} && ${outOf(ONCE)}.includes("ran at")`, 30000), "a notebook that says when it ran: opened, run by itself");
+  const ranAt = await ev(outOf(ONCE)), ranN = await ev(nOf(ONCE));
+  ok(await fromFiles("Made by the agent.ipynb") && await until(shownIs("Made by the agent"), 15000), "(the person opens another notebook from Files)");
+  await ev(`(${barButton("Open Runs once.ipynb")}.click(), true)`);
+  ok(await until(shownIs("Runs once"), 15000), "the bar's Open opens it again");
+  await sleep(3000);
+  ok(await ev(outOf(ONCE)) === ranAt && await ev(nOf(ONCE)) === ranN, "…and it doesn't run again: the same output, the same run", [ranAt, await ev(outOf(ONCE)), ranN, await ev(nOf(ONCE))]);
+  // (admitted only as created: held between the open and the run (a test hold, local hosts only), the person's edit
+  //  meanwhile means no run)
+  await ev(`(window.__agentRunHold = (path) => new Promise((r) => { window.__held = path; window.__heldType = typeof path; window.__release = r; }), true)`);
+  const EDITED = "print('edited-first ran')";
+  ok(!!(await make("Edited first", [EDITED])).ok && await until(`window.__held === "/Edited first.ipynb" && ${shownIs("Edited first")}`, 15000), "(a new one, held before its run)");
+  ok(await typeInto(EDITED, EDITED + "  # the person's"), "(the person edits it meanwhile)");
+  await ev("(window.__release(), delete window.__agentRunHold, true)");
+  await sleep(3000);
+  ok(!(await ev(outOf(EDITED + "  # the person's"))).includes("edited-first ran") && await ev(nOf(EDITED + "  # the person's")) === null, "edited before its run: it doesn't run by itself (Run all is the person's)");
+  // (a creation announced twice: spent the first time, never armed again. Held before its admission, the person opens
+  //  another notebook, so this first try doesn't run; announced again, nothing happens: not opened, not run)
+  await ev(`(window.__agentRunHold = (path) => new Promise((r) => { window.__held = path; window.__heldType = typeof path; window.__release = r; }), true)`);
+  const TWICE = "print('announced twice ran')";
+  ok(!!(await make("Announced twice", [TWICE])).ok && await until(`window.__held === "/Announced twice.ipynb" && ${shownIs("Announced twice")}`, 15000), "(another, held before its run)");
+  ok(await fromFiles("Made by the agent.ipynb") && await until(shownIs("Made by the agent"), 15000), "(the person opens another notebook meanwhile)");
+  await ev("(window.__release(), delete window.__agentRunHold, true)");
+  await sleep(1000);
+  await ev("window.__agentMadeAgain()");
+  await sleep(3000);
+  ok(await ev(shownIs("Made by the agent")), "the same creation announced again does nothing: not even opened again", { title: await ev("document.title") });
+  await ev(`(${barButton("Open Announced twice.ipynb")}.click(), true)`);
+  ok(await until(shownIs("Announced twice"), 15000), "(the person opens it from the bar)");
+  await sleep(2000);
+  ok(!(await ev(outOf(TWICE))).includes("announced twice ran") && await ev(nOf(TWICE)) === null, "…and it doesn't run: a creation's one chance is spent the first time", await ev(outOf(TWICE)));
+  // (the tests' handles carry no authority: a hold gets a string, and a forged record and pairing put on the window,
+  //  then the replay, run nothing: the replay is of the page's own last announcement, spent)
+  ok(await ev("window.__heldType") === "string", "a hold gets the path, a string: never the record or the pairing");
+  const editedRef = await ev(`${W}.stat("/Edited first.ipynb").then((e) => e.ref)`);
+  await ev(`(window.__agentMadeLast = { c: { op: "forged", path: "/Edited first.ipynb", kind: "notebook", ref: ${JSON.stringify(editedRef)}, grant: "forged" }, p: { mayRunCreated: () => true } }, window.__agentAnnounced = 99, true)`);
+  await ev("window.__agentMadeAgain()");
+  await sleep(3000);
+  ok(await ev(shownIs("Announced twice")) && await ev("window.__agentAnnounced") !== 99, "a forged record and pairing on the window, then the replay: nothing opens, and the count can't be set", { title: await ev("document.title") });
+  ok(!(await ev(`${W}.read("/Edited first.ipynb").then((r) => JSON.stringify(r.content.cells.map((c) => c.outputs ?? [])))`)).includes("edited-first ran"), "…nor runs");
+  // (what Run all reads includes each cell's metadata: made "Run only by hand" while held before its run, no run)
+  await ev(`(window.__agentRunHold = (path) => new Promise((r) => { window.__held = path; window.__heldType = typeof path; window.__release = r; }), true)`);
+  const MANUAL = "print('manual ran')";
+  ok(!!(await make("Made manual", [MANUAL])).ok && await until(`window.__held === "/Made manual.ipynb" && ${shownIs("Made manual")}`, 15000), "(another, held before its run)");
+  await ev(`(() => { const nb = window.sagebrush.notebook; const c = nb.cells().find((c) => c.type !== "markdown" && c.type !== "raw"); nb.setManual(c, true); return true; })()`);
+  ok(await until(`!!window.sagebrush.notebook.snapshot().cells[0].metadata?.sagebrush?.manual`, 5000), "(the person makes its cell \"Run only by hand\" meanwhile)");
+  await ev("(window.__release(), delete window.__agentRunHold, true)");
+  await sleep(3000);
+  ok(!(await ev(outOf(MANUAL))).includes("manual ran") && await ev(nOf(MANUAL)) === null, "a cell made manual before its run: it doesn't run by itself");
+  // (the package set's pin left out and a null pin differ (no pin: the current set; null: optional packages off): changed
+  //  either way while held before its run, no run)
+  for (const [name, created, then, what] of [["Pin set null", undefined, null, "no pin, then a null pin"], ["Pin left out", null, undefined, "a null pin, then none"]]) {
+    await ev(`(window.__agentRunHold = (path) => new Promise((r) => { window.__held = path; window.__release = r; }), true)`);
+    const PIN = `print('${name} ran')`;
+    const made = await make(name, [PIN], created === null ? { pkgset: null } : {});
+    ok(!!made.ok && await until(`window.__held === "/${name}.ipynb" && ${shownIs(name)}`, 15000), `(another, held before its run: ${what})`, made);
+    const has = await ev(`${W}.read("/${name}.ipynb").then((r) => "pkgset" in r.content ? r.content.pkgset : "absent")`);
+    if (created === null) ok(has === null, "(created with a null pin)", has); else ok(has === "absent", "(created with no pin)", has);
+    await ev(`(window.sagebrush.notebook.setMeta({ pkgset: ${then === null ? "null" : "undefined"} }), true)`);
+    ok(await ev(`(() => { const s = window.sagebrush.notebook.snapshot(); return ${then === null ? `s.pkgset === null` : `s.pkgset === undefined`}; })()`), `(the person's page changes the pin meanwhile: ${what})`);
+    await ev("(window.__release(), delete window.__agentRunHold, true)");
+    await until(`${outOf(PIN)}.includes("${name} ran")`, 8000);
+    ok(!(await ev(outOf(PIN))).includes(`${name} ran`) && await ev(nOf(PIN)) === null, `the package set's pin changed before its run (${what}): it doesn't run by itself`);
+  }
+  // (bound to the creation's own revision, not its time: written again right after it was created, before the page read
+  //  it back, it no longer qualifies, though its cells read back are what then runs)
+  await ev(`(window.__agentReadHold = () => new Promise((r) => (window.__readGo = r)), true)`);
+  const W1 = "print('as created')", W2 = "print('written after')";
+  const wmk = await make("Written after", [W1]);
+  ok(!!wmk.ok && await until("typeof window.__readGo === 'function'", 10000), "(a new one, held before it is read back)", wmk);
+  const wa = await drive({ op: "req", method: "workspace.read", params: { path: (folder === "/" ? "" : folder) + "/Written after.ipynb" } });
+  const ww = await drive({ op: "req", method: "workspace.write", params: { path: (folder === "/" ? "" : folder) + "/Written after.ipynb", content: { json: { ...wa.ok.content.json, cells: [{ code: W2 }] } }, base: wa.ok.rev } });
+  await ev("(delete window.__agentReadHold, window.__readGo(), true)");
+  ok(!!ww.ok && ww.ok.rev === 2, "(the agent writes it again at once: its revision 2)", ww);
+  ok(await until(`${shownIs("Written after")} && ${sources}.includes(${JSON.stringify(W2)})`, 15000), "(it opens, as written)");
+  await sleep(3000);
+  ok(!(await ev(outOf(W2))).includes("written after") && await ev(nOf(W2)) === null, "written after its creation: it doesn't run by itself (its revision isn't the creation's)");
+  // (what Run all reads includes the language: changed while held before its run, no run)
+  await ev(`(window.__agentRunHold = (path) => new Promise((r) => { window.__held = path; window.__heldType = typeof path; window.__release = r; }), true)`);
+  const MODE = "print('mode changed ran')";
+  ok(!!(await make("Mode changed", [MODE])).ok && await until(`window.__held === "/Mode changed.ipynb" && ${shownIs("Mode changed")}`, 15000), "(another, held before its run)");
+  await ev(`(() => { const was = window.confirm; window.confirm = () => true; const m = document.querySelector("#mode"); m.value = "sage"; m.dispatchEvent(new Event("change", { bubbles: true })); window.confirm = was; return true; })()`);
+  ok(await until(`window.sagebrush.notebook.snapshot().mode === "sage"`, 5000), "(the person switches it to Sage meanwhile)");
+  await ev("(window.__release(), delete window.__agentRunHold, true)");
+  // (long enough for a run to show: the switch to Sage starts its interpreter afresh, which takes some seconds)
+  await until(`${outOf(MODE)}.includes("mode changed ran")`, 20000);
+  ok(!(await ev(outOf(MODE))).includes("mode changed ran") && await ev(nOf(MODE)) === null, "its language changed before its run: it doesn't run by itself");
+  // (running code turned off while held before its run: no run. Last of these: it leaves running code off)
+  await ev(`(window.__agentRunHold = (path) => new Promise((r) => { window.__held = path; window.__heldType = typeof path; window.__release = r; }), true)`);
+  const OFF = "print('turned-off ran')";
+  ok(!!(await make("Run turned off", [OFF])).ok && await until(`window.__held === "/Run turned off.ipynb" && ${shownIs("Run turned off")}`, 15000), "(another, held before its run)");
+  await ev(`(${barButton("Turn off running code")}.click(), true)`);
+  ok(await until(`!${barButton("Turn off running code")}`, 5000), "(the person turns off running code meanwhile)");
+  await ev("(window.__release(), delete window.__agentRunHold, true)");
+  await sleep(3000);
+  ok(!(await ev(outOf(OFF))).includes("turned-off ran") && await ev(nOf(OFF)) === null, "running code turned off before its run: it doesn't run");
+  // (nothing is replayed after a reload: held before its run, the page reloads; the notebook stays as it was. The grant
+  //  ends with the page too, so this guards against a replay, not the grant's check)
+  await ev(`(window.__agentRunHold = (path) => new Promise(() => { window.__held = path; }), true)`);
+  const RELOAD = "print('reloaded ran')";
+  ok(!!(await make("Reloaded first", [RELOAD])).ok && await until(`window.__held === "/Reloaded first.ipynb"`, 15000), "(another, held before its run, then the page reloads)");
+  const RELOADED = true;
+
   // a grant "until the page closes" ends with the page
   ok(await go(""), "the page again");
+  if (RELOADED) {
+    // (directly: after the reload, no creation was announced to this page at all, whatever the grant)
+    ok(await ev("window.__agentAnnounced === 0"), "after the reload no creation is announced again: nothing is replayed");
+    ok(await fromFiles("Reloaded first.ipynb") && await until(shownIs("Reloaded first"), 15000), "(after the reload, the person opens the one held then)");
+    await sleep(3000);
+    ok(!(await ev(outOf(RELOAD))).includes("reloaded ran") && await ev(nOf(RELOAD)) === null, "nothing replays after a reload: it never ran");
+  }
   const st = await drive({ op: "status" });
   ok(st.ok?.paired === false || st.ok?.granted === false, "the grant ended with the page", st);
 
