@@ -1,0 +1,440 @@
+{
+ "note": "Input hashes every backend present agreed on, per point, in the protocol-2 run on n2-standard-16 (commit 0f6931b5cedb plus the K-variant drivers, Nov 18 2026). expected_inputs.py must reproduce every one (test_expected_inputs.py). Change this file only in a reviewed commit.",
+ "points": {
+  "bigint_gcd:l": {
+   "n": 1048576,
+   "variants": 8,
+   "input_hash": "20247876"
+  },
+  "bigint_gcd:m": {
+   "n": 262144,
+   "variants": 8,
+   "input_hash": "888862436"
+  },
+  "bigint_gcd:s": {
+   "n": 65536,
+   "variants": 8,
+   "input_hash": "411834183"
+  },
+  "bigint_mul:l": {
+   "n": 1048576,
+   "variants": 8,
+   "input_hash": "20247876"
+  },
+  "bigint_mul:m": {
+   "n": 262144,
+   "variants": 8,
+   "input_hash": "888862436"
+  },
+  "bigint_mul:s": {
+   "n": 65536,
+   "variants": 8,
+   "input_hash": "411834183"
+  },
+  "class_group:l": {
+   "n": 40,
+   "variants": 1,
+   "input_hash": "9990099"
+  },
+  "class_group:m": {
+   "n": 24,
+   "variants": 1,
+   "input_hash": "985000106"
+  },
+  "class_group:s": {
+   "n": 12,
+   "variants": 1,
+   "input_hash": "34000799"
+  },
+  "ec_aplist:l": {
+   "n": 100000,
+   "variants": 1,
+   "input_hash": "45153"
+  },
+  "ec_aplist:m": {
+   "n": 10000,
+   "variants": 1,
+   "input_hash": "999955160"
+  },
+  "ec_aplist:s": {
+   "n": 1000,
+   "variants": 1,
+   "input_hash": "999946160"
+  },
+  "galois_group:l": {
+   "n": 7,
+   "variants": 1,
+   "input_hash": "890478342"
+  },
+  "galois_group:m": {
+   "n": 5,
+   "variants": 1,
+   "input_hash": "714564815"
+  },
+  "galois_group:s": {
+   "n": 3,
+   "variants": 1,
+   "input_hash": "646655326"
+  },
+  "groebner_cyclic:l": {
+   "n": 7,
+   "variants": 1,
+   "input_hash": "463668801"
+  },
+  "groebner_cyclic:m": {
+   "n": 6,
+   "variants": 1,
+   "input_hash": "726561116"
+  },
+  "groebner_cyclic:s": {
+   "n": 5,
+   "variants": 1,
+   "input_hash": "435617627"
+  },
+  "groebner_katsura:l": {
+   "n": 9,
+   "variants": 1,
+   "input_hash": "234645041"
+  },
+  "groebner_katsura:m": {
+   "n": 7,
+   "variants": 1,
+   "input_hash": "265637047"
+  },
+  "groebner_katsura:s": {
+   "n": 6,
+   "variants": 1,
+   "input_hash": "607891152"
+  },
+  "mat_fp_charpoly:l": {
+   "n": 400,
+   "variants": 8,
+   "input_hash": "349861162"
+  },
+  "mat_fp_charpoly:m": {
+   "n": 160,
+   "variants": 8,
+   "input_hash": "84598709"
+  },
+  "mat_fp_charpoly:s": {
+   "n": 60,
+   "variants": 8,
+   "input_hash": "58847636"
+  },
+  "mat_fp_det:l": {
+   "n": 400,
+   "variants": 8,
+   "input_hash": "349861162"
+  },
+  "mat_fp_det:m": {
+   "n": 160,
+   "variants": 8,
+   "input_hash": "84598709"
+  },
+  "mat_fp_det:s": {
+   "n": 60,
+   "variants": 8,
+   "input_hash": "58847636"
+  },
+  "mat_fp_rank:l": {
+   "n": 400,
+   "variants": 8,
+   "input_hash": "349861162"
+  },
+  "mat_fp_rank:m": {
+   "n": 160,
+   "variants": 8,
+   "input_hash": "84598709"
+  },
+  "mat_fp_rank:s": {
+   "n": 60,
+   "variants": 8,
+   "input_hash": "58847636"
+  },
+  "mat_fp_solve:l": {
+   "n": 400,
+   "variants": 8,
+   "input_hash": "423958805"
+  },
+  "mat_fp_solve:m": {
+   "n": 160,
+   "variants": 8,
+   "input_hash": "66395584"
+  },
+  "mat_fp_solve:s": {
+   "n": 60,
+   "variants": 8,
+   "input_hash": "546907644"
+  },
+  "mat_q_charpoly:l": {
+   "n": 80,
+   "variants": 8,
+   "input_hash": "280144406"
+  },
+  "mat_q_charpoly:m": {
+   "n": 35,
+   "variants": 8,
+   "input_hash": "221415076"
+  },
+  "mat_q_charpoly:s": {
+   "n": 15,
+   "variants": 8,
+   "input_hash": "718349919"
+  },
+  "mat_q_det:l": {
+   "n": 80,
+   "variants": 8,
+   "input_hash": "280144406"
+  },
+  "mat_q_det:m": {
+   "n": 35,
+   "variants": 8,
+   "input_hash": "221415076"
+  },
+  "mat_q_det:s": {
+   "n": 15,
+   "variants": 8,
+   "input_hash": "718349919"
+  },
+  "mat_q_rank:l": {
+   "n": 100,
+   "variants": 8,
+   "input_hash": "398589731"
+  },
+  "mat_q_rank:m": {
+   "n": 50,
+   "variants": 8,
+   "input_hash": "23547719"
+  },
+  "mat_q_rank:s": {
+   "n": 20,
+   "variants": 8,
+   "input_hash": "852039582"
+  },
+  "mat_q_solve:l": {
+   "n": 80,
+   "variants": 8,
+   "input_hash": "876515170"
+  },
+  "mat_q_solve:m": {
+   "n": 35,
+   "variants": 8,
+   "input_hash": "553831845"
+  },
+  "mat_q_solve:s": {
+   "n": 15,
+   "variants": 8,
+   "input_hash": "170330530"
+  },
+  "mat_z_charpoly:l": {
+   "n": 120,
+   "variants": 8,
+   "input_hash": "834240290"
+  },
+  "mat_z_charpoly:m": {
+   "n": 60,
+   "variants": 8,
+   "input_hash": "793009467"
+  },
+  "mat_z_charpoly:s": {
+   "n": 30,
+   "variants": 8,
+   "input_hash": "746474190"
+  },
+  "mat_z_det:l": {
+   "n": 150,
+   "variants": 8,
+   "input_hash": "514950379"
+  },
+  "mat_z_det:m": {
+   "n": 70,
+   "variants": 8,
+   "input_hash": "320841722"
+  },
+  "mat_z_det:s": {
+   "n": 30,
+   "variants": 8,
+   "input_hash": "746474190"
+  },
+  "mat_z_hnf:l": {
+   "n": 100,
+   "variants": 8,
+   "input_hash": "219105387"
+  },
+  "mat_z_hnf:m": {
+   "n": 45,
+   "variants": 8,
+   "input_hash": "671625994"
+  },
+  "mat_z_hnf:s": {
+   "n": 20,
+   "variants": 8,
+   "input_hash": "766086589"
+  },
+  "mat_z_rank:l": {
+   "n": 250,
+   "variants": 8,
+   "input_hash": "186311173"
+  },
+  "mat_z_rank:m": {
+   "n": 100,
+   "variants": 8,
+   "input_hash": "219105387"
+  },
+  "mat_z_rank:s": {
+   "n": 50,
+   "variants": 8,
+   "input_hash": "147711879"
+  },
+  "mat_z_smith:l": {
+   "n": 60,
+   "variants": 1,
+   "input_hash": "548784494"
+  },
+  "mat_z_smith:m": {
+   "n": 24,
+   "variants": 8,
+   "input_hash": "215860605"
+  },
+  "mat_z_smith:s": {
+   "n": 12,
+   "variants": 8,
+   "input_hash": "201144882"
+  },
+  "modsym_charpoly:l": {
+   "n": 5003,
+   "variants": 1,
+   "input_hash": "121896180"
+  },
+  "modsym_charpoly:m": {
+   "n": 1009,
+   "variants": 1,
+   "input_hash": "127884226"
+  },
+  "modsym_charpoly:s": {
+   "n": 389,
+   "variants": 1,
+   "input_hash": "507882373"
+  },
+  "newforms:l": {
+   "n": 997,
+   "variants": 1,
+   "input_hash": "115884190"
+  },
+  "newforms:m": {
+   "n": 389,
+   "variants": 1,
+   "input_hash": "507882373"
+  },
+  "newforms:s": {
+   "n": 37,
+   "variants": 1,
+   "input_hash": "155881317"
+  },
+  "poly_fp_factor:l": {
+   "n": 500,
+   "variants": 1,
+   "input_hash": "845085294"
+  },
+  "poly_fp_factor:m": {
+   "n": 120,
+   "variants": 1,
+   "input_hash": "906650022"
+  },
+  "poly_fp_factor:s": {
+   "n": 60,
+   "variants": 1,
+   "input_hash": "951739260"
+  },
+  "poly_fp_gcd:l": {
+   "n": 5000,
+   "variants": 8,
+   "input_hash": "96037189"
+  },
+  "poly_fp_gcd:m": {
+   "n": 1000,
+   "variants": 8,
+   "input_hash": "650929787"
+  },
+  "poly_fp_gcd:s": {
+   "n": 300,
+   "variants": 8,
+   "input_hash": "889583931"
+  },
+  "poly_fp_mul:l": {
+   "n": 20000,
+   "variants": 8,
+   "input_hash": "503569457"
+  },
+  "poly_fp_mul:m": {
+   "n": 5000,
+   "variants": 8,
+   "input_hash": "289234893"
+  },
+  "poly_fp_mul:s": {
+   "n": 1000,
+   "variants": 8,
+   "input_hash": "308890519"
+  },
+  "poly_z_factor:l": {
+   "n": 240,
+   "variants": 1,
+   "input_hash": "231329942"
+  },
+  "poly_z_factor:m": {
+   "n": 120,
+   "variants": 1,
+   "input_hash": "858013547"
+  },
+  "poly_z_factor:s": {
+   "n": 60,
+   "variants": 1,
+   "input_hash": "27824301"
+  },
+  "poly_z_factor_product:l": {
+   "n": 32,
+   "variants": 8,
+   "input_hash": "854659449"
+  },
+  "poly_z_factor_product:m": {
+   "n": 16,
+   "variants": 8,
+   "input_hash": "989091575"
+  },
+  "poly_z_factor_product:s": {
+   "n": 8,
+   "variants": 8,
+   "input_hash": "200760541"
+  },
+  "poly_z_gcd:l": {
+   "n": 5000,
+   "variants": 8,
+   "input_hash": "593184054"
+  },
+  "poly_z_gcd:m": {
+   "n": 1000,
+   "variants": 8,
+   "input_hash": "594656891"
+  },
+  "poly_z_gcd:s": {
+   "n": 300,
+   "variants": 8,
+   "input_hash": "982904210"
+  },
+  "poly_z_mul:l": {
+   "n": 20000,
+   "variants": 8,
+   "input_hash": "456366206"
+  },
+  "poly_z_mul:m": {
+   "n": 5000,
+   "variants": 8,
+   "input_hash": "582651748"
+  },
+  "poly_z_mul:s": {
+   "n": 1000,
+   "variants": 8,
+   "input_hash": "134140893"
+  }
+ }
+}
