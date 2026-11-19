@@ -13,9 +13,11 @@ import { join, dirname, relative } from "node:path";
 import { randomBytes } from "node:crypto";
 import { fileURLToPath } from "node:url";
 import { latexGroup, latexLazy, LATEX_CAPS, LATEX_LAZY, LATEX_LAZY_CAPS, gz } from "./latex-group.mjs";
+import { latexAdvice, safelyAppendPullRequestSummary } from "./size-advice.mjs";
 
 const fails = [];
 let checks = 0;
+let latexReport = null;
 const check = (ok, what, detail) => { checks++; console.log(`${ok ? "ok  " : "FAIL"} ${what}${detail === undefined ? "" : " " + JSON.stringify(detail)}`); if (!ok) fails.push(what); };
 
 // (a web/ tree's files: "dist/..." to the file on disk, as the site asset budget's inventory gives them)
@@ -125,9 +127,11 @@ check(mode.ok, "this build is the shipped LaTeX build (web/dist/version.json: la
 if (!existsSync(join(web, "dist", "sagebrush-latex.js"))) check(false, "web/dist has the LaTeX editor's bundle (build it first: bun web/build.ts)");
 else if (mode.ok) {
   const g = latexGroup(files(web));
-  for (const c of latexLazy(files(web))) check(c.present && c.ok, `this build's ${c.label} within ${c.cap.raw} B raw and ${c.cap.gzip} B gzip`, c.present ? { raw: c.raw, gzip: c.gzip, room: { raw: c.cap.raw - c.raw, gzip: c.cap.gzip - c.gzip } } : { missing: c.name });
+  const lazyRows = latexLazy(files(web));
+  for (const c of lazyRows) check(c.present && c.ok, `this build's ${c.label} within ${c.cap.raw} B raw and ${c.cap.gzip} B gzip`, c.present ? { raw: c.raw, gzip: c.gzip, room: { raw: c.cap.raw - c.raw, gzip: c.cap.gzip - c.gzip } } : { missing: c.name });
   check(g.ok, `this build's LaTeX group within ${LATEX_CAPS.raw} B raw and ${LATEX_CAPS.gzip} B gzip (scripts/latex-group.mjs)`,
     { files: g.js, raw: g.raw, gzip: g.gzip, room: { raw: LATEX_CAPS.raw - g.raw, gzip: LATEX_CAPS.gzip - g.gzip }, node: process.version, zlib: process.versions.zlib });
+  latexReport = { group: { ...g, cap: LATEX_CAPS }, lazy: lazyRows };
   // (the site serves every one of them: web/build.ts copies the LaTeX editor's files to web/site/public by name, and
   //  one left off that list is a 404 on sagebrush.space only; as web/site-dir.mts decides the site)
   const site = join(web, "site", "public");
@@ -174,5 +178,7 @@ else {
   check(inputs.length > 0 && notFull.length === 0, `each of the LaTeX bundles' ${inputs.length} inputs selects the full tier (scripts/ci-paths.mjs)`, { notFull });
 }
 
+const status = fails.length ? 1 : 0;
+if (latexReport) safelyAppendPullRequestSummary(() => latexAdvice(latexReport.group, latexReport.lazy));
 console.log(fails.length ? `FAIL: the LaTeX group's budget, ${fails.length} of ${checks}:\n  ${fails.join("\n  ")}` : `ok: the LaTeX group's budget, ${checks} checks`);
-process.exit(fails.length ? 1 : 0);
+process.exit(status);
