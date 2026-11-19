@@ -1065,6 +1065,23 @@ check("selftest-latex-names-are-the-judge's", judgeNames.length === 3 && JSON.st
   check("cli-remove-temp-used", !/rmSync\((tmp|profile)\b/.test(src) && (src.match(/removeTemp\((tmp|profile)\)/g) || []).length === 3, src.match(/rmSync\([a-z]+/g));
 }
 
+// ---- SageTeX's code arguments: read from the file, the code is the source between the braces (a backslash, a ~ or a
+// run of spaces in it is Sage's), its line ends joined with one space; from a macro, the inline subset's rules still
+{
+  const sd = (b, pre = "") => "\\documentclass{article}\n\\usepackage{sagetex}\n" + pre + "\\begin{document}\n" + b + "\n\\end{document}\n";
+  const its = (src) => new Engine().update(src).sageItems.map((x) => (x.err ? { mode: x.mode, err: x.err, name: x.name } : { mode: x.mode, code: x.code }));
+  const eq = (a, b) => JSON.stringify(a) === JSON.stringify(b);
+  // (an agent's document, as it wrote it: a label with \sin in a Python string, and the call over three lines)
+  const plot = its(sd("$f'(x) = \\sage{diff(sin(x^2), x)}$.\n\\begin{center}\n\\sageplot[width=0.9\\textwidth]{plot(sin(x^2), (x,\n-2*pi, 2*pi), axes_labels=['$x$', '$\\sin(x^2)$'],\n  gridlines=True)}\n\\end{center}"));
+  check("sagetex-source-args-plot", eq(plot, [{ mode: "sage", code: "diff(sin(x^2), x)" }, { mode: "plot", code: "plot(sin(x^2), (x, -2*pi, 2*pi), axes_labels=['$x$', '$\\sin(x^2)$'], gridlines=True)" }]), plot);
+  const kinds = its(sd("$\\sage{print('a\\nb')}$ $\\sage{'a  b'}$ $\\sage{~5}$ $\\sage{1 +\n   2}$ \\sage{\\left}"));
+  check("sagetex-source-args-escapes-spaces-tilde-lines", eq(kinds.map((x) => x.code), ["print('a\\nb')", "'a  b'", "~5", "1 + 2", "\\left"]), kinds);
+  // (where the text and TeX's reading could differ: a % comment, and an argument a macro made, keep the subset's rules)
+  const pct = its(sd("$\\sage{7 % 3}$\n\n$\\sage{1}$"));
+  const mac = its(sd("$\\x$", "\\newcommand{\\x}{\\sage{1+\\foo}}\n"));
+  check("sagetex-source-args-comment-and-macro-keep-the-subset", pct[0].err === "par" && pct[1].code === "1" && eq(mac, [{ mode: "sage", err: "cs", name: "foo" }]), { pct, mac });
+}
+
 const failed = results.filter(([, ok]) => !ok).map(([n]) => n);
 console.log(failed.length ? `FAIL: ${failed.length} of ${results.length}: ${failed.join(", ")}` : `ok: the LaTeX editor's units, ${results.length} checks`);
 process.exit(failed.length ? 1 : 0);

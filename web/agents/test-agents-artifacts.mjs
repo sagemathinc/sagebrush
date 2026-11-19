@@ -467,6 +467,48 @@ try {
   }
 
   // ======================================================================== saved, with its base; reopened
+  // ======================================================================== the way to the files: Files… and the switch
+  if (want("filesbtn")) {
+    // (a text file's edit typed just now (its 700 ms save still pending), then Files… at once: the page leaves only after
+    //  the edit is saved; read back through the agent once paired again)
+    const quick = async (path, click, word) => {
+      await call("workspace.create", { path, content: { text: "old\n" } });
+      await artifactTurn(path);
+      await until(`document.querySelector('${PANE} .file-path')?.textContent.startsWith(${JSON.stringify(path + " ")}) && !!document.querySelector('${PANE} .file-body textarea')`, 30000);
+      await ev(`(() => { const t = document.querySelector('${PANE} .file-body textarea'); t.focus(); t.setSelectionRange(t.value.length, t.value.length); })()`);
+      await send("Input.insertText", { text: word });
+      await ev(`localStorage.setItem("sagebrush-files-sidebar", "0")`);
+      await ev(click);
+      await until(`location.pathname === "/" && document.readyState === "complete"`, 30000);
+      const pref = await ev(`localStorage.getItem("sagebrush-files-sidebar")`);
+      await pair();
+      await converse();
+      const r = await call("workspace.read", { path });
+      return { pref, text: typeof r.content === "string" ? r.content : r.content?.text ?? JSON.stringify(r.content) };
+    };
+    const big = await quick("/notes/quick.txt", `document.getElementById('files-big').click()`, "NEW-BIG");
+    ok(big.text.includes("NEW-BIG") && big.pref === "1", "an edit typed just before Files… is saved before the page leaves, and the files are set to show", big);
+    const small = await quick("/notes/quick2.txt", `document.querySelector('nav.side .sb-mode [data-mode="files"]').click()`, "NEW-SMALL");
+    ok(small.text.includes("NEW-SMALL") && small.pref === "1", "the switch's Files leaves the same way: the edit saved, the files set to show", small);
+    // (a cell running: Files… asks first, as closing the pane does; Cancel keeps this page, the cell running, nothing set)
+    const path = "/notes/slow-files.ipynb";
+    await call("workspace.create", { path, content: docFor(path, [{ code: "import time\nfor i in range(600):\n    time.sleep(0.05)" }]), mode: "python" });
+    await openNotebook(path);
+    await ev(`${cellJs(0)}.querySelector('.runb').click()`);
+    await until(`/· running/.test([...document.querySelectorAll('#artifacts .tab')].map((t) => t.textContent).join())`, 120000);
+    await ev(`localStorage.setItem("sagebrush-files-sidebar", "0")`);
+    await ev(`document.getElementById('files-big').click()`);
+    await until(`document.querySelector('#close-running').open`);
+    await ev(`document.querySelector('#close-running').close('')`);
+    await sleep(500);
+    const stayed = await ev(`({ path: location.pathname, pane: document.body.classList.contains('has-artifact'), cls: ${cellJs(0)}?.className ?? null, pref: localStorage.getItem("sagebrush-files-sidebar") })`);
+    ok(stayed.path === "/agents/" && stayed.pane && /running|queued/.test(stayed.cls ?? "") && stayed.pref === "0", "with a cell running, Files… asks first; Cancel stays on this page, the cell running, nothing set", stayed);
+    await ev(`document.querySelector('#close').click()`);
+    await until(`document.querySelector('#close-running').open`);
+    await ev(`document.querySelector('#close-running').close('stop')`);
+    await until(`!document.body.classList.contains('has-artifact')`, 10000);
+  }
+
   // ======================================================================== Open in Sagebrush: the file's own page
   if (want("openlink")) {
     // (its address is the one the File menu opens the notebook at, /?nb=<its id>, and following it, in this tab or in
@@ -1250,6 +1292,55 @@ try {
   }
 
   // ======================================================================== ART-C5: each notebook's bar is its own
+  // ======================================================================== a board the agent made: a card, Open in its own tab
+  if (want("board")) {
+    const BOARD = { title: "Primes", nodes: [{ id: "c", title: "A product", code: "print(6 * 7)" }], edges: [] };
+    await call("workspace.create", { path: "/notes/primes.board.json", content: { json: BOARD } });
+    const bt = `t${++turnN}`;
+    event(bt, { type: "turn_started" });
+    event(bt, { type: "artifact", id: "/notes/primes.board.json", kind: "board", title: "primes.board.json", path: "/notes/primes.board.json", body: "" });
+    event(bt, { type: "turn_finished", outcome: "completed" });
+    const card = `${PANE} .board-made`;
+    ok(await until(`/ made primes\\.board\\.json$/.test(document.querySelector('${card} .who')?.textContent ?? '')`, 15000), "a board the agent wrote shows as a card: \"<agent> made primes.board.json\"", await ev(`document.querySelector('${card}')?.textContent ?? null`));
+    ok(await until(`/^\\/board\\/\\?doc=local:[0-9a-f]+$/.test(document.querySelector('${card} .open-board')?.getAttribute('href') ?? '')`, 10000), "…its Open is a link to the board page, by the board's id", await ev(`document.querySelector('${card} .open-board')?.getAttribute('href') ?? null`));
+    ok(await ev(`(() => { const a = document.querySelector('${card} .open-board'); return a.tagName === 'A' && a.target === '_blank' && a.rel === 'noopener' && !a.hasAttribute('aria-disabled'); })()`), "…in a tab of its own (a link: the person's click opens it)");
+    ok(await ev(`!document.querySelector('${PANE} .nb-root') && !document.querySelector('${PANE} .file-body') && document.querySelector('${PANE} .board-source').hidden`), "…not the board's JSON, which is behind View source");
+    // (the pane's Copy, before View source was ever pressed: the board's JSON, not an empty text)
+    await ev(`(() => { window.__bclip = []; navigator.clipboard.writeText = (t) => (window.__bclip.push(t), Promise.resolve()); return true; })()`);
+    await ev(`document.querySelector('.pane-head #copy').click()`);
+    ok(await until(`window.__bclip.length === 1 && /print\\(6 \\* 7\\)/.test(window.__bclip[0])`, 10000), "…its Copy, before View source, copies the board's JSON", await ev(`window.__bclip`));
+    await ev(`document.querySelector('${card} .view-source').click()`);
+    ok(await until(`!document.querySelector('${PANE} .board-source').hidden && /print\\(6 \\* 7\\)/.test(document.querySelector('${PANE} .board-source').textContent) && document.querySelector('${card} .view-source').textContent === 'Hide source'`, 5000), "View source shows its JSON, as the workspace has it");
+    await ev(`document.querySelector('${card} .view-source').click()`);
+    ok(await ev(`document.querySelector('${PANE} .board-source').hidden && document.querySelector('${card} .view-source').textContent === 'View source'`), "…and Hide source hides it");
+    // (the person's click: the mouse, at Open's centre; a scripted click() isn't a user gesture)
+    const at = await ev(`(() => { const r = document.querySelector('${card} .open-board').getBoundingClientRect(); return { x: r.x + r.width / 2, y: r.y + r.height / 2 }; })()`);
+    for (const type of ["mousePressed", "mouseReleased"]) await send("Input.dispatchMouseEvent", { type, x: at.x, y: at.y, button: "left", clickCount: 1 });
+    let tab = null;
+    for (let i = 0; i < 100 && !tab; i++) { tab = (await (await fetch(`http://127.0.0.1:${cdpPort}/json`)).json()).find((x) => x.type === "page" && /\/board\/\?doc=local:/.test(x.url)) ?? null; if (!tab) await sleep(100); }
+    ok(!!tab, "Open opens the board page in a tab of its own", tab?.url);
+    if (tab) {
+      const s2 = new WebSocket(tab.webSocketDebuggerUrl);
+      await new Promise((r, j) => { s2.onopen = r; s2.onerror = j; });
+      let k = 0; const w2 = new Map();
+      s2.onmessage = (e) => { const m = JSON.parse(e.data); if (m.id && w2.has(m.id)) { w2.get(m.id)(m.result); w2.delete(m.id); } };
+      const ev2 = (expression) => new Promise((r) => { const id = ++k; w2.set(id, r); s2.send(JSON.stringify({ id, method: "Runtime.evaluate", params: { expression, awaitPromise: true, returnByValue: true } })); }).then((r) => r?.result?.value);
+      let shows = false;
+      for (const t = Date.now(); !shows && Date.now() - t < 90000; await sleep(200)) shows = !!(await ev2(`window.sagebrush?.board?.outputs?.().then((os) => os.some((o) => /42/.test(String(o.output)))).catch(() => false) ?? false`));
+      ok(shows && (await ev2("window.sagebrush.board.snapshot().doc.title")) === "Primes", "…the agent's board, its code run there", await ev2("window.sagebrush?.board?.snapshot?.()?.doc?.title ?? null"));
+      s2.close();
+      await send("Target.closeTarget", { targetId: tab.id });
+    }
+    // (a board removed since the agent wrote it: said, with no Open)
+    await call("workspace.create", { path: "/notes/gone.board.json", content: { json: { title: "Gone", nodes: [], edges: [] } } });
+    await call("workspace.remove", { path: "/notes/gone.board.json" });
+    const gt = `t${++turnN}`;
+    event(gt, { type: "turn_started" });
+    event(gt, { type: "artifact", id: "/notes/gone.board.json", kind: "board", title: "gone.board.json", path: "/notes/gone.board.json", body: "" });
+    event(gt, { type: "turn_finished", outcome: "completed" });
+    ok(await until(`/made gone\\.board\\.json/.test(document.querySelector('${card} .who')?.textContent ?? '') && /Couldn't find this board in your files\\./.test(document.querySelector('${card}').textContent) && !document.querySelector('${card} .open-board')`, 15000), "a board removed since: said, with no Open", await ev(`document.querySelector('${card}')?.textContent ?? null`));
+  }
+
   if (want("bars")) {
     const A = "/notes/bar-a.ipynb", B = "/notes/bar-b.ipynb";
     await call("workspace.create", { path: A, content: docFor(A, [{ code: "who = 'A'" }]), mode: "python" });

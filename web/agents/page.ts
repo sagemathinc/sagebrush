@@ -28,7 +28,7 @@ import { mountComposer, renderComposerState, stopLabel } from "../workspace/agen
 import { applyPaneClasses, mountLayout, relayout } from "./layout";
 import { AgentLeg, legKey, listComputers, pageLegUrl, type LegEnd } from "../workspace/agent-relay";
 import { chatHere } from "./chat-here";
-import { modeSwitch } from "../workspace/mode-switch";
+import { filesIcon, modeSwitch } from "../workspace/mode-switch";
 import { icon as panelIcon } from "../workspace/files-toggle";
 import { entryUrl } from "../workspace/entry-url";
 
@@ -506,6 +506,39 @@ function mountHost(threadId: string, a: Artifact, h: Host) {
     void nb.ready.then(() => hosts.get(h.key) === h && keepFocus());
     return;
   }
+  // (a board the agent made: said as what the agent did, with Open, a link to the board page in a tab of its own, so
+  //  the person's click opens it as any link (where its code runs), and View source for its JSON)
+  if (a.kind === "board" && a.path && workspace) {
+    const ws = workspace, path = a.path, name = path.split("/").pop()!;
+    // (built as elements, its words as text: nothing of the agent's name or the file's is read as markup)
+    const el = <K extends keyof HTMLElementTagNameMap>(tag: K, cls: string, text = "") => Object.assign(document.createElement(tag), { className: cls, textContent: text });
+    const who = el("span", "who", `${agentName()} made `), b = el("b", "", name);
+    who.append(b);
+    const open = el("a", "open-board", "Open"), view = el("button", "view-source", "View source"), src = el("pre", "code board-source");
+    open.target = "_blank"; open.rel = "noopener"; open.setAttribute("aria-disabled", "true");
+    view.type = "button"; src.hidden = true;
+    const row = el("div", "board-made");
+    row.append(who, open, view);
+    h.el.replaceChildren(row, src);
+    // (its address is its id, read from the workspace: a board it can't find there (removed, or not a board now, or the
+    //  lookup failed) says so, with no Open)
+    void ws.stat(path).catch(() => undefined).then((e) => {
+      if (e?.kind === "board" && e.ref) {
+        open.href = "/board/?doc=local:" + encodeURIComponent(e.ref);
+        open.removeAttribute("aria-disabled");
+      } else open.replaceWith(Object.assign(document.createElement("span"), { className: "gone", textContent: "Couldn't find this board in your files." }));
+    });
+    view.onclick = () => {
+      if (!src.hidden) { src.hidden = true; view.textContent = "View source"; return; }
+      void ws.read(path).then((r) => { src.textContent = JSON.stringify(r.content, null, 2); src.hidden = false; view.textContent = "Hide source"; }, (e) => toast(`Couldn't read ${name}: ${String(e?.message ?? e)}`, 6000));
+    };
+    // (Copy: the board's JSON, read now, as View source shows it; what View source shows if that read failed)
+    let json: string | null = null;
+    void ws.read(path).then((r) => { json = JSON.stringify(r.content, null, 2); }, () => {});
+    h.copy = () => json ?? src.textContent ?? "";
+    keepFocus();
+    return;
+  }
   if (a.path && workspace) {
     h.el.innerHTML = `<div class="file-path">${esc(a.path)} <span class="saved"></span></div><div class="file-body"></div>`;
     const f = mountFile(a, $(".file-body", h.el), $(".saved", h.el));
@@ -894,7 +927,25 @@ function toast(text: string, ms = 1500) {
 const editor = mountComposer({ submit, stop: () => interrupt(current()), render: md, typeset: (el) => typeset(el) });
 // (the Files | Agents switch at the right of the chat list's header, Agents pressed: Files opens the notebook page with
 //  its files, as the file panel's switch opens this page; William, Nov 12)
-{ const sw = modeSwitch("agents"), brand = document.querySelector<HTMLElement>("nav.side .brand"); sw.style.marginLeft = "auto"; if (brand) { brand.style.whiteSpace = "nowrap"; brand.append(sw); } }
+{ const sw = modeSwitch("agents"), brand = document.querySelector<HTMLElement>("nav.side .brand"); sw.style.marginLeft = "auto"; if (brand) { brand.style.whiteSpace = "nowrap"; brand.append(sw); } const f = sw.querySelector<HTMLButtonElement>('[data-mode="files"]'); if (f) f.onclick = () => void toFiles(); }
+// (to the files: the notebook page with its file browser shown.  The thread is left as New chat leaves it
+//  (mayLeaveThread): its files' pending edits saved, a running cell stopped only if the person says so; refused, this
+//  page stays and nothing is changed.  Admitted, the browser's own choice to show the files is set, then the page left)
+let leaving = false;
+async function toFiles() {
+  if (leaving) return;
+  leaving = true;
+  try {
+    if (!(await mayLeaveThread())) return;
+    try { localStorage.setItem("sagebrush-files-sidebar", "1"); } catch {}
+    location.assign("/");
+  } finally {
+    leaving = false;
+  }
+}
+// (Files…, at the foot of the chat list; and the switch's own Files, through the same way out)
+$("#files-big").prepend(filesIcon());
+$("#files-big").onclick = () => void toFiles();
 $("#new").onclick = async () => {
   if (!(await mayLeaveThread())) return;
   session.newThread();

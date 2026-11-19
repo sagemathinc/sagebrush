@@ -28,7 +28,13 @@
   .thread:hover { background: #e8e5db; }
   .thread.on { background: #e2ded2; font-weight: 550; }
   .thread .dot { width: 7px; height: 7px; border-radius: 50%; background: var(--accent); margin-left: auto; flex: none; animation: pulse 1.2s infinite; }
-  nav.side .foot { margin-top: auto; font-size: 12px; color: var(--muted); padding: 6px; }
+  nav.side .foot { font-size: 12px; color: var(--muted); padding: 6px; }
+  /* (the files, one big button at the foot of the chat list: a person who came here from an agent's link finds them
+     without knowing the small switch at the top) */
+  nav.side #files-big { margin-top: auto; display: flex; align-items: center; gap: 10px; width: 100%; padding: 11px 12px; border: 1px solid var(--line); border-radius: 10px; background: var(--card); color: inherit; font: inherit; font-size: 15px; font-weight: 600; text-align: left; cursor: pointer; }
+  nav.side #files-big:hover { border-color: #c9c5b8; }
+  nav.side #files-big:focus-visible { outline: 2px solid #4a6b49; outline-offset: 1px; }
+  nav.side #files-big svg { width: 20px; height: 20px; flex: none; }
 
   /* the chat: primary, full height */
   main { flex: 1; min-width: 0; display: flex; flex-direction: column; }
@@ -217,6 +223,13 @@
   .pane-bar.refused, .pane-bar.gone { background: #fdecea; }
   .pane-bar button { font-size: 12px; }
   .open-full { margin-left: 8px; font-size: 12px; }
+  .board-made { display: flex; align-items: center; gap: 12px; padding: 16px 18px; flex-wrap: wrap; }
+  .board-made .who { min-width: 0; overflow-wrap: anywhere; }
+  .board-made .open-board { background: #3f6b35; color: #fff; font-weight: 600; border-radius: 6px; padding: 5px 18px; text-decoration: none; }
+  .board-made .open-board[aria-disabled] { opacity: .5; pointer-events: none; }
+  .board-made .view-source { font: inherit; font-size: 12px; border: 1px solid var(--line, #cfd5c8); background: transparent; border-radius: 6px; padding: 4px 10px; cursor: pointer; }
+  .board-made .gone { color: var(--muted); }
+  .board-source { margin: 0 18px 16px; }
   .nb-notice { margin: 8px 12px; padding: 6px 10px; font-size: 12.5px; color: var(--muted); border: 1px solid var(--line); border-radius: 6px; }
   /* (the notebook's wrapper, not its root: a container query styles what is inside the container, and .sbnb is the root) */
   .nb-artifact { container-type: inline-size; container-name: sbnb-pane; }
@@ -278,6 +291,7 @@
     <div class="brand"><button id="sidetoggle" class="sb-side-toggle" aria-controls="chats"></button><span class="brand-name">Agents</span></div>
     <button id="new">＋ New chat</button>
     <div id="threads"></div>
+    <button id="files-big" type="button" title="Your files and notebooks, in the file browser">Files…</button>
     <div class="foot">Shift+Enter sends · Alt+Enter queues · Ctrl+Enter posts a note</div>
   </nav>
   <div class="sep" id="sep-side" role="separator" tabindex="0" aria-orientation="vertical" aria-label="Resize the chat list" aria-controls="chats"></div>
