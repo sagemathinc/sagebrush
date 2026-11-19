@@ -128,6 +128,7 @@ TITLES = {
     "remove": "Move to Trash", "restore": "Restore from Trash", "history": "List versions", "version": "Read a version",
     "git_branch": "Make a branch to work in",
     "git_commit": "Commit your branch", "git_status": "See your branch's review", "git_wait": "Wait for the person's decision",
+    "run_notebook": "Run a notebook", "run_file": "Run a file", "run_stop": "Stop your run", "latex_build": "Build a LaTeX document",
 }
 READ_ONLY = {"list", "stat", "read", "history", "version", "git_status", "git_wait"}
 #: verb -> (description, parameter schema), from the schema; only verbs that
@@ -458,19 +459,36 @@ def validate_result(verb, result):
 #: GitBranchResult)
 _STATUS = {"branch": (str, True), "status": (str, True), "head": (str, True), "base": (str, True), "seq": (int, True),
            "mainMoved": (bool, True), "title": (str, False), "note": (str, False), "files": (dict, False), "decidedAt": (str, False)}
+_RUN = {"ok": (bool, True), "ended": (str, True), "ms": (int, False), "inputHash": (str, False), "reason": (str, False),
+        "refused": (dict, False), "truncated": (dict, False)}
 RESULT_SHAPES = {
     "git_branch": {"branch": (str, True), "worktree": (str, True), "files": (int, True), "bytes": (int, True), "next": (str, True)},
     # (web/workspace/git-verbs.ts: CommitResult, StatusResult, and git_wait's)
     "git_commit": {"branch": (str, True), "commit": (str, True), "unchanged": (bool, True), "changes": (list, True), "review": (bool, True), "next": (str, True)},
     "git_status": _STATUS,
     "git_wait": dict(_STATUS, decided=(bool, True), next=(str, False)),
+    # (the run verbs: web/workspace/run-verbs.ts's results; a run that ended by Stop, its deadline or the grant has
+    # only the head, and a revoked one only ok, ended and reason)
+    "run_notebook": dict(_RUN, saved=(str, False), cells=(list, False)),
+    "run_file": dict(_RUN, exit=(int, False), stdout=(str, False), stderr=(str, False)),
+    "latex_build": dict(_RUN, report=((dict, type(None)), False), sagetex=(dict, False), overflow=(list, False), pages=(list, False)),
+    "run_stop": {"stopped": (bool, True)},
 }
+#: the verbs that run code in the page, and how a run can end
+RUN_VERBS = ("run_notebook", "run_file", "latex_build")
+RUN_ENDS = ("done", "error", "stopped", "timeout", "revoked")
+#: a run's own deadline when the call gives none (the schema's 120 s), and the wait for its answer beyond it
+RUN_DEFAULT_S, RUN_WAIT_MARGIN_S = 120, 30
 #: a branch's review statuses (web/workspace/branch-rules.ts ReviewStatus)
 STATUSES = ("open", "review", "accepted", "partly-accepted", "rejected", "changes-requested")
 
 
 #: a key's type, as the protocol errors say it
-_KIND_WORDS = {str: "a string", int: "a whole number", bool: "true or false", list: "a list", dict: "an object"}
+_KIND_WORDS = {str: "a string", int: "a whole number", bool: "true or false", list: "a list", dict: "an object", type(None): "null"}
+
+
+def _kind_words(kind):
+    return " or ".join(_KIND_WORDS[k] for k in kind) if isinstance(kind, tuple) else _KIND_WORDS[kind]
 
 
 def _shaped(verb, result):
@@ -484,8 +502,10 @@ def _shaped(verb, result):
             continue
         v = result[key]
         if not isinstance(v, kind) or (kind is int and isinstance(v, bool)):
-            raise PageError("protocol", "the page returned a %s result whose %s is not %s" % (verb, key, _KIND_WORDS[kind]))
+            raise PageError("protocol", "the page returned a %s result whose %s is not %s" % (verb, key, _kind_words(kind)))
         out[key] = v
+    if verb in RUN_VERBS:
+        _run_parts(verb, out)
     if "status" in out and out["status"] not in STATUSES:
         raise PageError("protocol", "the page's %s result has a status it doesn't define" % verb)
     if verb == "git_commit":
@@ -497,6 +517,38 @@ def _shaped(verb, result):
             raise PageError("protocol", "the page's %s result has a file decision that is not {decision, reason?}" % verb)
         out["files"] = {p: {k: d[k] for k in ("decision", "reason") if k in d} for p, d in out["files"].items()}
     return out
+
+
+def _run_parts(verb, out):
+    """A run's result, its parts checked: how it ended, and each cell's and
+    page's own keys, rebuilt from those only."""
+    if out["ended"] not in RUN_ENDS:
+        raise PageError("protocol", "the page's %s result ended in a way it doesn't define" % verb)
+    if "cells" in out:
+        cells = []
+        for c in out["cells"]:
+            if not (isinstance(c, dict) and isinstance(c.get("index"), int) and not isinstance(c.get("index"), bool) and isinstance(c.get("status"), str)):
+                raise PageError("protocol", "the page's run_notebook result has a cell that is not {index, status, out?, images?}")
+            cell = {"index": c["index"], "status": c["status"]}
+            if isinstance(c.get("out"), str):
+                cell["out"] = c["out"]
+            im = c.get("images")
+            if isinstance(im, dict) and all(isinstance(im.get(k), int) and not isinstance(im.get(k), bool) for k in ("count", "bytes")):
+                cell["images"] = {"count": im["count"], "bytes": im["bytes"]}
+            cells.append(cell)
+        out["cells"] = cells
+    if "pages" in out:
+        if not all(isinstance(p, dict) and all(isinstance(p.get(k), int) and not isinstance(p.get(k), bool) for k in ("n", "w", "h")) and isinstance(p.get("png"), str) for p in out["pages"]):
+            raise PageError("protocol", "the page's latex_build result has a page that is not {n, w, h, png}")
+        out["pages"] = [{k: p[k] for k in ("n", "w", "h", "png")} for p in out["pages"]]
+
+
+def _run_wait(args, timeout):
+    """How long to wait for a run's answer: its own deadline (timeout_s, or
+    the schema's default), and a margin for the page to answer after it."""
+    t = args.get("timeout_s")
+    secs = t if isinstance(t, int) and not isinstance(t, bool) and 1 <= t <= 600 else RUN_DEFAULT_S
+    return max(timeout, secs + RUN_WAIT_MARGIN_S)
 
 
 def _current(current):
@@ -522,6 +574,8 @@ def call(link, name, args, timeout=60.0):
     desc, params_schema = VERBS[verb]
     if args is None:
         args = {}
+    if verb in RUN_VERBS:
+        timeout = _run_wait(args, timeout)
     try:
         _check(args, params_schema, "arguments")
         params = dict(args)
@@ -579,7 +633,7 @@ def _summary(verb, args, result):
 OUTPUT_SCHEMA = {
     "type": "object",
     "properties": {
-        "result": {"description": "the verb's result: {entries, more?, cursor?} for list; {entry} for stat and the changes; {entry, rev, content} for read; {versions, more?, cursor?} for history; {content} for version"},
+        "result": {"description": "the verb's result: {entries, more?, cursor?} for list; {entry} for stat and the changes; {entry, rev, content} for read; {versions, more?, cursor?} for history; {content} for version; for the runs {ok, ended, ms?, inputHash?, reason?, refused?, truncated?} and, for run_notebook, {saved?, cells?: [{index, status, out?, images?: {count, bytes}}]}, for run_file {exit?, stdout?, stderr?}, for latex_build {report?, sagetex?, overflow?, pages?: [{n, w, h, png}]}; {stopped} for run_stop"},
         "error": {
             "description": "null, or {code, message, current?, retryAfterMs?}: code is invalid, exists, missing, conflict (current: the version now there), limit, storage, not_connected or protocol",
         },
