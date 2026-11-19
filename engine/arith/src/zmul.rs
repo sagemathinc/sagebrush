@@ -1,7 +1,9 @@
-//! Products in Z[x] for the `poly_mul` op: Kronecker substitution on one
-//! 3-prime NTT word product with the call's own tables
-//! (`ntt::mul_words_local`), admitted by closed forms before anything the
-//! request sizes is allocated.
+//! Products in Z[x] for the `poly_mul` op: Kronecker substitution, then one
+//! word product by either of two backends, chosen at admission from the
+//! packed sizes alone: the word schoolbook (`mul_words_schoolbook`) when the
+//! shorter packed factor has at most SCHOOLBOOK_WORDS words, else the 3-prime
+//! NTT with the call's own tables (`ntt::mul_words_local`).  Everything is
+//! admitted by closed forms before anything the request sizes is allocated.
 //!
 //! - **Slot.** For factors of l_a and l_b coefficients below 2^B_a and 2^B_b,
 //!   each product coefficient has |c| <= min(l_a, l_b) 2^(B_a + B_b) <
@@ -10,7 +12,8 @@
 //!   positive and its negative coefficients) at bit i s: the slots never
 //!   overlap.  X = pos - neg by one borrow pass; a negative X is negated and
 //!   its sign kept.
-//! - **Multiply.** |X| |Y| by `mul_words_local`.
+//! - **Multiply.** |X| |Y| by the admitted backend: the schoolbook (exactly
+//!   w_a w_b multiply-adds, no tables) or `mul_words_local`.
 //! - **Unpack** (centered digits).  With Z = sum c_k 2^(k s), |c_k| <
 //!   2^(s - 1), sigma Z's sign: from k = 0 with carry 0, t = bits [k s, (k + 1)
 //!   s) of |Z| plus the carry; t >= 2^(s - 1) (2^s included) gives the digit
@@ -20,8 +23,9 @@
 //!   digit is 0 and the bits above L s are zero (asserted: an internal error,
 //!   never a wrong answer).  The slot leaves a factor of 2 to spare.
 //!
-//! The work and the peak are the closed forms of [`admit`] (design: the
-//! poly_mul caps note, r2.1); the tests count the loops against them.
+//! The work and the peak are the closed forms of [`admit`], per backend
+//! (design: the poly_mul caps note, r2.1 and its r2.2 delta); the tests
+//! count the loops against them.
 
 use crate::counted;
 use crate::zseries::{bl, scan_with, Admitted, Csv, INTERNAL_PREFIX};
@@ -79,9 +83,9 @@ const HOW: &str = "a smaller product per call";
 
 /// The shorter packed factor's words at most which the word product is the
 /// schoolbook (`mul_words_schoolbook`), else the NTT.  Measured (examples/
-/// zmul_threshold): at 128 words the schoolbook takes at most 0.45 of the
-/// NTT's time natively and 0.38 in wasm32, and it stops being faster near
-/// 300; 128 keeps a margin on both.
+/// zmul_threshold, short factors of 4 to 128 words): at 128 words the
+/// schoolbook takes at most 0.45 of the NTT's time natively and 0.38 in
+/// wasm32, a margin on both.
 pub const SCHOOLBOOK_WORDS: u64 = 128;
 
 /// [`mul_words_schoolbook`]'s word operations: the output's zero fill and
@@ -89,11 +93,17 @@ pub const SCHOOLBOOK_WORDS: u64 = 128;
 /// multiply-adds, one per word), plus one per row for its final carry.
 pub const fn schoolbook_work(wa: usize, wb: usize) -> Option<u64> {
     let (a, b) = (wa as u64, wb as u64);
-    match a.checked_mul(b) {
-        Some(x) => match x.checked_add(a + b) {
-            Some(y) => y.checked_add(if a < b { a } else { b }),
-            None => None,
-        },
+    let rows = if a < b { a } else { b };
+    let product = match a.checked_mul(b) {
+        Some(x) => x,
+        None => return None,
+    };
+    let fill = match a.checked_add(b) {
+        Some(x) => x,
+        None => return None,
+    };
+    match product.checked_add(fill) {
+        Some(y) => y.checked_add(rows),
         None => None,
     }
 }

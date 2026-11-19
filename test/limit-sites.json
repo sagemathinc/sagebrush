@@ -779,6 +779,11 @@
   "owner": "engine arith (big-integer wire decoder)",
   "reason": "test code: the big-integer decoder's correctness, allocation and Stop tests; refuses nothing itself"
  },
+ "engine/arith/tests/zmul_work_width.rs :: the_schoolbook_closed_form_never_wraps :: let m = usize::MAX; #0": {
+  "class": "none",
+  "owner": "poly_mul",
+  "reason": "poly_mul's derived bounds, a closed form's const assertion, a field mask, a benchmark's output or a test assertion: refuses nothing itself"
+ },
  "engine/ball/src/ball.rs ::  :: pub const EXP_MAX: i64 = 1 << 40; #0": {
   "class": "2+3",
   "owner": "ball arithmetic",
