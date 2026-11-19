@@ -133,11 +133,50 @@ What works today: a cocalc.ai project can be the computer for option 1 (on the t
 
 Nothing to install: npm `sagebrush-web` 0.10.1, from the jsDelivr CDN.
 
-Sagebrush's math engines in one JavaScript module that an artifact in the chat app can import. Ask the chat to use it in an artifact:
+Sagebrush's math engines (modular forms, elliptic curves, factoring, class groups) in one JavaScript module that an artifact in the chat app can import. It computes; it doesn't draw. To use it in an artifact:
 
 ```
-const sb = await import("https://cdn.jsdelivr.net/npm/sagebrush-web@0.10.1/sagebrush-engine.mjs");
+const sb = await import("https://cdn.jsdelivr.net/npm/sagebrush-web@0.10/sagebrush-engine.mjs");
 ```
+
+### Self-check: print it first
+
+An artifact should call the engine and show that it computed, before anything else, so nobody mistakes a made-up result for the engine's:
+
+```
+const ok = JSON.stringify(sb.aplist([0, -1, 1, -10, -20], 7)) === "[[2,-2],[3,-1],[5,1],[7,-2]]";
+document.body.prepend(`Sagebrush engine self-check: ${ok ? "PASS" : "FAIL"}`);
+```
+
+That is the elliptic curve 11a1, y² + y = x³ − x² − 10x − 20, whose a_p for p = 2, 3, 5, 7 are −2, −1, 1, −2.
+
+### Its functions
+
+Everything is synchronous once imported. Big integers go in and come out as strings. A bad argument, or a function the module doesn't have, throws an `Error` with the reason.
+
+- `aplist(a, n)`: the a_p of the elliptic curve with Weierstrass coefficients `a = [a1, a2, a3, a4, a6]`, for the primes p ≤ n, as `[[p, a_p], …]`; a_p is `null` at a prime of bad reduction.
+  `sb.aplist([0, 0, 1, -1, 0], 30)` (37a1) → `[[2,-2],[3,-3],[5,-2],[7,-1],[11,-5],[13,-2],[17,0],[19,0],[23,2],[29,6]]`
+- `charpoly({ n, k, q, sign, chi })`: the characteristic polynomial of the Hecke operator T_q on modular symbols M_k(N, chi)^sign, proven. `coeffs[j][i]` is the coefficient of ζ^i in x^j (ζ a root of unity of the character's order; one entry each when chi is trivial), and `status` is `"proven"`.
+  `sb.charpoly({ n: 1, k: 12, q: 2, sign: 1 })` → `coeffs: [["-49176"], ["-2025"], ["1"]]`, that is x² − 2025x − 49176, whose roots are σ₁₁(2) = 2049 and τ(2) = −24.
+- `weight2({ n, q })`: the same for weight 2 and the trivial character, over Z.
+  `sb.weight2({ n: 11, q: 2 })` → `charpoly: ["-6", "-1", "1"]`, that is x² − x − 6: 3 (Eisenstein) and a_2 = −2.
+- `charpolyMod({ n, k, q, sign, chi })`: that characteristic polynomial modulo a large prime `ell` (returned), fast and not a proof.
+  `sb.charpolyMod({ n: 1, k: 12, q: 2, sign: 1 })` → `{ charpoly: [2147434471, 2147481622, 1], dim: 2, ell: 2147483647, zeta: 1 }`
+- `dims({ n, k, chi })`: dimensions: `cusp`, `new`, `eisenstein`, `modsym`.
+  `sb.dims({ n: 11, k: 2 })` → `{ cusp: 1, new: 1, eisenstein: 1, modsym: 3, conductor: 1, order: 1 }`
+- `characters(n)`: the Dirichlet characters mod n, one per Galois orbit, each with its `chi` (to pass to the functions above), `conductor`, `order` and `even`.
+  `sb.characters(5)` → three characters, of orders 1, 4 and 2.
+- `call(fn, args)`: the engine's other functions by name, among them:
+  - `sb.call("factor_integer", { n: "18446744073709551617" })` → `[["274177", 1], ["67280421310721", 1]]`
+  - `sb.call("is_prime", { n: "1000003" })` → `true`
+  - `sb.call("quadratic_class_group", { d: -23 })` → `{ h: "3", cyc: ["3"], status: "certified (assuming GRH)", … }`
+- `wasmBytes`: the size of the engine's WebAssembly, a number.
+
+### What it doesn't do
+
+- No Python and no Sage: it is the engines' functions above, not an interpreter. There's no Sage session, no notebook, no files, and no link to your sagebrush.space work.
+- No plotting. A plot is the numbers from these functions drawn by the artifact itself (an SVG it writes, or a chart library the chat app allows).
+- Only what this version has: in 0.10.1, `prime_pi` and `primes`, for example, aren't there yet, and `call` throws `unknown fn`.
 
 ### What it touches
 
@@ -151,4 +190,4 @@ Not affected: it's the claude.ai web app, not Claude Code.
 ### Not yet
 
 - It's the engines' functions only: no Sage session, no notebook, no files, and no link to your sagebrush.space work.
-- Last tried in October: Claude's artifacts allowed `import()` from cdn.jsdelivr.net (not other CDNs); ChatGPT's allowed more.
+- Claude's artifacts allow `import()` from cdn.jsdelivr.net's `/npm/` paths (not other CDNs); ChatGPT's allowed more (last tried in October). Checked again on Nov 19 2026 in a sandboxed `srcdoc` frame with a strict policy (scripts only inline and from cdn.jsdelivr.net, no `fetch`): the import, the self-check and the examples above all run.
