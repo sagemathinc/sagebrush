@@ -1,0 +1,19 @@
+{
+  "name": "sagebrush-space-prototype",
+  "private": true,
+  "description": "A quick prototype of a whitespace: a board in 3D (foo.space.json)",
+  "type": "module",
+  "scripts": {
+    "gen": "node gen-web-tree.mjs && node gen-demo.mjs",
+    "build": "node build.mjs",
+    "serve": "node serve.mjs",
+    "start": "node build.mjs && node serve.mjs"
+  },
+  "dependencies": {
+    "marked": "18.2.1",
+    "three": "0.187.0"
+  },
+  "devDependencies": {
+    "esbuild": "0.28.2"
+  }
+}
