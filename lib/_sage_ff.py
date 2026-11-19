@@ -1172,8 +1172,6 @@ _ENGINE_POLY_MUL_MAX = 1 << 15
 _ENGINE_POLY_DIV_MAX = 1 << 15
 _ENGINE_POLY_GCD_MAX = 1 << 14
 _ENGINE_POLY_MIN_WORK = 256
-# (bin_ops.rs FACTOR_MAX_LEN: longer polynomials keep the JSON request)
-_ENGINE_FACTOR_MAX = 1 << 16
 
 
 def _engine_poly(f, p, a, b):
@@ -1202,28 +1200,48 @@ def _sbw1_u641(words):
 
 def _sbw1_reply(r):
     """The U641 results of an SBW1 reply, as arrays('Q'); an error record
-    raises (RuntimeError for a failed engine invariant, else ValueError)."""
+    raises (RuntimeError for a failed engine invariant, else ValueError).
+    Every field is checked against the bytes present, each result must be
+    exactly its declared words, and nothing may follow the last result: a
+    truncated or padded reply is an error, never a value."""
     r = memoryview(r)
-    if bytes(r[:4]) != b"SBW1":
-        raise RuntimeError("Sagebrush engine: not an SBW1 reply")
+    n = len(r)
+
+    def bad(why):
+        return RuntimeError("Sagebrush engine: a malformed SBW1 reply (%s)" % why)
+
+    def u(i, k):
+        if i + k > n:
+            raise bad("truncated")
+        return int.from_bytes(r[i:i + k], "little")
+
+    if n < 6 or bytes(r[:4]) != b"SBW1":
+        raise bad("no SBW1 header")
     kind = bytes(r[4:6])
     if kind == b"er":
-        code = int.from_bytes(r[6:8], "little")
-        tl = int.from_bytes(r[16:18], "little")
+        code, tl = u(6, 2), u(16, 2)
+        if tl > 256 or 18 + tl != n:
+            raise bad("an error record of the wrong length")
         text = bytes(r[18:18 + tl]).decode("ascii", "replace")
         # (code 8: a failed proved invariant, an engine bug)
         raise (RuntimeError if code == 8 else ValueError)(text)
     if kind != b"ok":
-        raise RuntimeError("Sagebrush engine: an unknown SBW1 reply")
+        raise bad("an unknown reply kind")
+    count = u(6, 4)
+    if count > 8:
+        raise bad("more results than any op has")
     out, i = [], 10
-    for _ in range(int.from_bytes(r[6:10], "little")):
-        m = int.from_bytes(r[i:i + 4], "little")
-        if bytes(r[i + 4:i + 8]) != b"U641" or m != 12 + 8 * int.from_bytes(r[i + 8:i + 16], "little"):
-            raise RuntimeError("Sagebrush engine: an unexpected SBW1 result")
+    for _ in range(count):
+        m = u(i, 4)
+        i += 4
+        if m < 12 or i + m > n or bytes(r[i:i + 4]) != b"U641" or m != 12 + 8 * u(i + 4, 8):
+            raise bad("a result that is not exactly its U641 words")
         a = _array.array("Q")
-        a.frombytes(r[i + 16:i + 4 + m])
+        a.frombytes(r[i + 12:i + m])
         out.append(a)
-        i += 4 + m
+        i += m
+    if i != n:
+        raise bad("trailing bytes")
     return out
 
 
@@ -4420,21 +4438,10 @@ class Polynomial_ff:
         if f.degree() == 0:
             items = []  # a nonzero constant: a unit, no irreducible factors
         elif isinstance(B, IntegerModRing_) and B._n < 2 ** 32:
+            from sagebrush._engine import call
             p = B._n
-            r = _engine_bin("factor_mod", p, f) if _flen(f) <= _ENGINE_FACTOR_MAX else None
-            if r is not None:
-                # the factors' words one after another, and (length,
-                # multiplicity) per factor
-                coeffs, shape = r
-                items, at = [], 0
-                for i in range(0, len(shape), 2):
-                    n = shape[i]
-                    items.append((_from_words(self._ring, coeffs[at:at + n]), int(shape[i + 1])))
-                    at += n
-            else:
-                from sagebrush._engine import call
-                res = call("factor_mod", f=[str(int(c)) for c in f._c], p=p)
-                items = [(Polynomial_ff(self._ring, [_elt(B, int(c)) for c in g]), int(e)) for g, e in res]
+            res = call("factor_mod", f=[str(int(c)) for c in f._c], p=p)
+            items = [(Polynomial_ff(self._ring, [_elt(B, int(c)) for c in g]), int(e)) for g, e in res]
         else:
             items = _cz_factor(f)
         # Sage's order: by degree, then exponent, then coefficients from the top

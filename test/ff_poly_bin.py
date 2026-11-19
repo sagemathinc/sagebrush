@@ -1,8 +1,8 @@
 """GF(p)[x] through the engine's binary entry point (SBW1; engine/web
 bin_ops.rs): the same answers as the JSON requests and as the Python
 paths, results that keep their words until a coefficient is asked for, the
-JSON fallback when the engine predates the entry point, and the error
-records.  Shared by the CPython package and pyjs.
+JSON fallback when the engine predates the entry point, the error records,
+and the reply reader's refusal of every truncated or padded reply.  Shared by the CPython package and pyjs.
 
     python3 test/ff_poly_bin.py        (CPython, the package installed)
 """
@@ -67,17 +67,6 @@ for p in [3, 65537, 4294967291, 9223372036854775783]:
         h = fg * g
         assert lazy(h) and h.list()[-1] == h.leading_coefficient() and not lazy(h)
         checked += 1
-    if p < 2 ** 32:
-        x = R.gen()
-        for f in [x ** 60 - 1, (x ** 3 + 2 * x + 1) ** 4 * (x ** 5 - x + 1), rand(R, 40)]:
-            F = f.factor()
-            J = json_only(lambda: f.factor())
-            assert list(F) == list(J), (p, f)
-            back = F.unit()
-            for g, e in F:
-                back *= g ** e
-            assert back == f, (p, f)
-            checked += 1
 
 # error records: the code picks the exception, the text is the engine's
 for code, exc in [(6, ValueError), (7, ValueError), (8, RuntimeError)]:
@@ -88,10 +77,46 @@ for code, exc in [(6, ValueError), (7, ValueError), (8, RuntimeError)]:
         raise AssertionError("no error")
     except exc as e:
         assert str(e) == "a fixed text", e
-for bad in [b"", b"SBW2ok\0\0\0\0", b"SBW1xx"]:
+
+
+def refused(r):
     try:
-        FF._sbw1_reply(bad)
-        raise AssertionError("accepted %r" % bad)
+        FF._sbw1_reply(r)
     except RuntimeError:
-        pass
+        return True
+    except ValueError:
+        return False
+    return False
+
+
+for bad in [b"", b"SBW2ok\0\0\0\0", b"SBW1xx"]:
+    assert refused(bad), bad
+# a real reply (a product's words, and divrem's two results): every
+# truncation and any trailing byte is refused, the whole reply parsed
+R = PolynomialRing(GF(101), "x")
+f, g = rand(R, 40), rand(R, 30)
+for op, polys in [("nmod_poly_mul", (f, g)), ("nmod_poly_divrem", (f, g))]:
+    o = op.encode()
+    parts = [b"SBW1", len(o).to_bytes(4, "little"), o, (3).to_bytes(4, "little"), FF._sbw1_u641(FF._array.array("Q", (101,)))]
+    parts.extend(FF._sbw1_u641(FF._words(h)) for h in polys)
+    rep = EN.call_bin(b"".join(parts))
+    whole = FF._sbw1_reply(rep)
+    assert len(whole) == (1 if op == "nmod_poly_mul" else 2)
+    for cut in range(len(rep)):
+        assert refused(rep[:cut]), (op, cut)
+    for junk in (b"\0", b"JUNK"):
+        assert refused(rep + junk), (op, junk)
+# an ok reply declaring a U641 word with its 8 bytes missing; an empty
+# result followed by junk; a declared length past the bytes present
+one = b"U641" + (1).to_bytes(8, "little")
+assert refused(b"SBW1ok" + (1).to_bytes(4, "little") + (20).to_bytes(4, "little") + one)
+assert refused(b"SBW1ok" + (1).to_bytes(4, "little") + (12).to_bytes(4, "little") + one)
+empty = b"U641" + (0).to_bytes(8, "little")
+assert FF._sbw1_reply(b"SBW1ok" + (1).to_bytes(4, "little") + (12).to_bytes(4, "little") + empty)[0].tolist() == []
+assert refused(b"SBW1ok" + (1).to_bytes(4, "little") + (12).to_bytes(4, "little") + empty + b"JUNK")
+assert refused(b"SBW1ok" + (9).to_bytes(4, "little"))
+# an error record must be exactly its declared text
+er = b"SBW1er" + (6).to_bytes(2, "little") + (0).to_bytes(8, "little") + (3).to_bytes(2, "little") + b"abc"
+assert not refused(er)
+assert refused(er[:-1]) and refused(er + b"x")
 print("ok ff_poly_bin: %d cases" % checked)

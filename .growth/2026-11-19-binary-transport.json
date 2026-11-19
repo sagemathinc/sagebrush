@@ -1,8 +1,8 @@
 {
  "v": 1,
- "reason": "The engine's binary call framing (SBW1, the new sagebrush-wire crate: a parser of untrusted bytes with allocation-free admission and typed error records) and its first ops, GF(p)[x] multiplication, division, gcd and factorization on u64 words (engine/web bin_ops.rs, sb_bin_call; call_bin in CPython), with the library's GF(p)[x] results kept as words until a coefficient is asked for. Engine built from source with CI's path mapping: 7640188 -> 7655261 bytes (+15073) over the base's fresh build, marked exactly (PRs into the track do not move wasm/pins.json). The command line: an ESTIMATE (4/3 of the engine's growth plus the Python and TypeScript text added), awaiting this head's CI size table.",
+ "reason": "The engine's binary call framing (SBW1, the new sagebrush-wire crate: a parser of untrusted bytes with allocation-free admission and typed error records) and its first ops, GF(p)[x] multiplication, division and gcd on u64 words (engine/web bin_ops.rs, sb_bin_call; call_bin in CPython), with the library's GF(p)[x] results kept as words until a coefficient is asked for. Engine built from source with CI's path mapping: 7640188 -> 7652905 bytes (+12717) over the base's fresh build, marked exactly (PRs into the track do not move wasm/pins.json). The command line: an ESTIMATE (4/3 of the engine's growth plus the Python and TypeScript text added), awaiting this head's CI size table.",
  "bytes": {
-  "engine/sagebrush-engine.wasm": 15073,
-  "cli/pyjs.cjs": 26272
+  "engine/sagebrush-engine.wasm": 12717,
+  "cli/pyjs.cjs": 22999
  }
 }

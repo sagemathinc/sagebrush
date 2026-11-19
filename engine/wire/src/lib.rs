@@ -92,8 +92,12 @@ pub fn to_usize(v: u64, max: u64, offset: u64) -> Result<usize, WireError> {
     usize::try_from(v).map_err(|_| err(Code::Count, offset, "a count too large for this platform"))
 }
 
+// (usize is at most 64 bits on every target the engine supports, so a
+// usize always converts to u64)
+const _: () = assert!(usize::BITS <= u64::BITS);
+
 fn usize_bound() -> u64 {
-    // (usize is at most 64 bits on every target the engine supports)
+    // (exact: usize::BITS <= 64, asserted above)
     u64::try_from(usize::MAX).unwrap_or(u64::MAX)
 }
 
@@ -111,16 +115,20 @@ impl<'a> Cursor<'a> {
     fn new(b: &'a [u8], base: u64) -> Self {
         Cursor { b, pos: 0, base }
     }
-    fn at(&self) -> u64 {
-        self.base.saturating_add(u64::try_from(self.pos).unwrap_or(u64::MAX))
+    /// The absolute offset of the next byte: checked (an offset past u64
+    /// is a failed invariant, never a saturated or wrapped value).
+    fn at(&self) -> Result<u64, WireError> {
+        u64::try_from(self.pos).ok().and_then(|pos| self.base.checked_add(pos)).ok_or(err(Code::Internal, self.base, "an offset past u64"))
     }
     fn left(&self) -> usize {
-        self.b.len() - self.pos
+        // (the rest of the slice: pos <= len, take advances only within it)
+        self.b.get(self.pos..).map_or(0, <[u8]>::len)
     }
     fn take(&mut self, n: usize, code: Code, what: &'static str) -> Result<&'a [u8], WireError> {
-        let end = self.pos.checked_add(n).ok_or(err(code, self.at(), what))?;
+        let at = self.at()?;
+        let end = self.pos.checked_add(n).ok_or(err(code, at, what))?;
         if end > self.b.len() {
-            return Err(err(code, self.at(), what));
+            return Err(err(code, at, what));
         }
         let s = &self.b[self.pos..end];
         self.pos = end;
@@ -142,7 +150,7 @@ impl<'a> Cursor<'a> {
     }
     fn done(&self, what: &'static str) -> Result<(), WireError> {
         if self.pos != self.b.len() {
-            return Err(err(Code::Schema, self.at(), what));
+            return Err(err(Code::Schema, self.at()?, what));
         }
         Ok(())
     }
@@ -213,12 +221,12 @@ pub fn admit_with<'a>(req: &'a [u8], lookup: impl Fn(&str) -> Option<OpSpec>, us
     if h[3] != MAGIC[3] {
         return Err(err(Code::Header, 3, "an unsupported frame version"));
     }
-    let at = c.at();
+    let at = c.at()?;
     let n = to_usize(u64::from(c.u32(Code::Frame, "no op name length")?), usize_bound, at)?;
     if n == 0 || n > OP_NAME_MAX {
         return Err(err(Code::Op, at, "an op name length out of range"));
     }
-    let at = c.at();
+    let at = c.at()?;
     let name = c.take(n, Code::Frame, "a truncated op name")?;
     if !name.iter().all(|&b| b.is_ascii_lowercase() || b.is_ascii_digit() || b == b'_') {
         return Err(err(Code::Op, at, "an op name with a character outside [a-z0-9_]"));
@@ -226,21 +234,21 @@ pub fn admit_with<'a>(req: &'a [u8], lookup: impl Fn(&str) -> Option<OpSpec>, us
     // (ASCII checked just above)
     let op = core::str::from_utf8(name).map_err(|_| err(Code::Op, at, "an op name that is not ASCII"))?;
     let spec = lookup(op).ok_or(err(Code::Op, at, "an unknown op"))?;
-    let at = c.at();
+    let at = c.at()?;
     let argc = to_usize(u64::from(c.u32(Code::Frame, "no argument count")?), usize_bound, at)?;
     if argc < spec.min_args || argc > spec.max_args || argc > MAX_ARGS {
         return Err(err(Code::Count, at, "an argument count out of range for the op"));
     }
     let mut args = [Arg { bytes: &[], offset: 0 }; MAX_ARGS];
     for slot in args.iter_mut().take(argc) {
-        let at = c.at();
+        let at = c.at()?;
         let len = to_usize(u64::from(c.u32(Code::Frame, "no argument length")?), usize_bound, at)?;
-        let off = c.at();
+        let off = c.at()?;
         let bytes = c.take(len, Code::Frame, "an argument longer than the bytes present")?;
         *slot = Arg { bytes, offset: off };
     }
     if c.left() != 0 {
-        return Err(err(Code::Frame, c.at(), "trailing bytes after the last argument"));
+        return Err(err(Code::Frame, c.at()?, "trailing bytes after the last argument"));
     }
     if req.len() > spec.request_cap {
         return Err(err(Code::Cap, 0, "the request exceeds the op's cap"));
@@ -251,7 +259,7 @@ pub fn admit_with<'a>(req: &'a [u8], lookup: impl Fn(&str) -> Option<OpSpec>, us
 // ------------------------------------------------- payload views (S2, S4)
 
 fn tag(c: &mut Cursor, want: &[u8; 4], what: &'static str) -> Result<(), WireError> {
-    let at = c.at();
+    let at = c.at()?;
     let t = c.take(4, Code::Schema, what)?;
     if t != want {
         return Err(err(Code::Schema, at, what));
@@ -280,13 +288,13 @@ impl<'a> U64s<'a> {
 }
 
 fn words_body<'a>(c: &mut Cursor<'a>, usize_bound: u64) -> Result<(usize, &'a [u8], u64), WireError> {
-    let at = c.at();
+    let at = c.at()?;
     let n = to_usize(c.u64(Code::Schema, "no element count")?, usize_bound, at)?;
     let bytes = n.checked_mul(8).ok_or(err(Code::Count, at, "an element count too large"))?;
     if bytes > c.left() {
         return Err(err(Code::Count, at, "an element count larger than the bytes present"));
     }
-    let off = c.at();
+    let off = c.at()?;
     let w = c.take(bytes, Code::Schema, "truncated words")?;
     Ok((n, w, off))
 }
@@ -400,10 +408,11 @@ impl<'a> BigRef<'a> {
             1 => {
                 let m = self.limb(0);
                 if self.neg {
-                    if m <= 1u64 << 63 {
-                        Some((m as i128).wrapping_neg() as i64)
+                    // -m for m <= 2^63: i64::MIN at m = 2^63, else -(m as i64)
+                    if m == 1u64 << 63 {
+                        Some(i64::MIN)
                     } else {
-                        None
+                        i64::try_from(m).ok().and_then(i64::checked_neg)
                     }
                 } else {
                     i64::try_from(m).ok()
@@ -433,7 +442,7 @@ impl<'a> Zv<'a> {
 
 fn zv1_in<'a>(c: &mut Cursor<'a>, usize_bound: u64) -> Result<Zv<'a>, WireError> {
     tag(c, b"ZV_1", "expected a ZV_1 payload")?;
-    let at = c.at();
+    let at = c.at()?;
     let n = to_usize(c.u64(Code::Schema, "no element count")?, usize_bound, at)?;
     // each entry takes at least its 4-byte header: a count the bytes can't
     // hold is refused before any per-entry work
@@ -445,7 +454,7 @@ fn zv1_in<'a>(c: &mut Cursor<'a>, usize_bound: u64) -> Result<Zv<'a>, WireError>
     let mut max_limbs: u64 = 0;
     let mut all_fit = true;
     for _ in 0..n {
-        let at = c.at();
+        let at = c.at()?;
         let h = c.u32(Code::Schema, "a truncated integer header")?;
         let k = u64::from(h >> 1);
         let neg = h & 1 == 1;
@@ -459,7 +468,7 @@ fn zv1_in<'a>(c: &mut Cursor<'a>, usize_bound: u64) -> Result<Zv<'a>, WireError>
             if neg {
                 return Err(err(Code::Schema, at, "a negative zero (zero must have neg = 0)"));
             }
-        } else if limbs[bytes - 8..] == [0u8; 8] {
+        } else if limbs.get(bytes.checked_sub(8).ok_or(err(Code::Internal, at, "a limb count without limbs"))?..) == Some(&[0u8; 8][..]) {
             return Err(err(Code::Schema, at, "a leading zero limb (non-canonical integer)"));
         }
         let b = BigRef { neg, limbs };
@@ -498,8 +507,8 @@ pub enum Ints<'a> {
 }
 
 fn ints_in<'a>(c: &mut Cursor<'a>, usize_bound: u64) -> Result<Ints<'a>, WireError> {
-    let at = c.at();
-    let t = c.b.get(c.pos..c.pos.saturating_add(4)).ok_or(err(Code::Schema, at, "no payload tag"))?;
+    let at = c.at()?;
+    let t = c.pos.checked_add(4).and_then(|end| c.b.get(c.pos..end)).ok_or(err(Code::Schema, at, "no payload tag"))?;
     if t == b"I641" {
         Ok(Ints::Small(i641_in(c, usize_bound)?))
     } else if t == b"ZV_1" {
@@ -532,7 +541,7 @@ pub struct Qv<'a> {
 fn qv1_in<'a>(c: &mut Cursor<'a>, usize_bound: u64) -> Result<Qv<'a>, WireError> {
     tag(c, b"QV_1", "expected a QV_1 payload")?;
     let num = zv1_in(c, usize_bound)?;
-    let at = c.at();
+    let at = c.at()?;
     let den = zv1_in(c, usize_bound)?;
     if num.count != den.count {
         return Err(err(Code::Schema, at, "numerator and denominator counts differ"));
@@ -588,14 +597,14 @@ pub fn mat1(a: Arg, kind: ElemKind, empty_ok: bool) -> Result<Mat, WireError> {
 pub fn mat1_with(a: Arg, kind: ElemKind, empty_ok: bool, usize_bound: u64) -> Result<Mat, WireError> {
     let mut c = Cursor::new(a.bytes, a.offset);
     tag(&mut c, b"MAT1", "expected a MAT1 payload")?;
-    let at = c.at();
+    let at = c.at()?;
     let rows = to_usize(u64::from(c.u32(Code::Schema, "no row count")?), usize_bound, at)?;
     let cols = to_usize(u64::from(c.u32(Code::Schema, "no column count")?), usize_bound, at)?;
     if !empty_ok && (rows == 0 || cols == 0) {
         return Err(err(Code::Count, at, "an empty matrix where the op needs entries"));
     }
     let n = rows.checked_mul(cols).ok_or(err(Code::Count, at, "rows x cols too large"))?;
-    let eat = c.at();
+    let eat = c.at()?;
     let elems = match kind {
         ElemKind::Words => {
             let v = u641_in(&mut c, usize_bound)?;
@@ -658,7 +667,7 @@ pub fn mqr1(a: Arg) -> Result<Mqr, WireError> {
 pub fn mqr1_with(a: Arg, usize_bound: u64) -> Result<Mqr, WireError> {
     let mut c = Cursor::new(a.bytes, a.offset);
     tag(&mut c, b"MQR1", "expected an MQR1 payload")?;
-    let at = c.at();
+    let at = c.at()?;
     let rows = to_usize(u64::from(c.u32(Code::Schema, "no row count")?), usize_bound, at)?;
     let cols = to_usize(u64::from(c.u32(Code::Schema, "no column count")?), usize_bound, at)?;
     let per = cols.checked_add(1).ok_or(err(Code::Count, at, "cols + 1 too large"))?;
@@ -669,11 +678,11 @@ pub fn mqr1_with(a: Arg, usize_bound: u64) -> Result<Mqr, WireError> {
         return Err(err(Code::Count, at, "a row count larger than the bytes present"));
     }
     let start = c.pos;
-    let base = c.at();
+    let base = c.at()?;
     let mut heap_words: u64 = 0;
     let mut max_limbs: u64 = 0;
     for _ in 0..rows {
-        let rat = c.at();
+        let rat = c.at()?;
         let z = zv1_in(&mut c, usize_bound)?;
         if z.count != per {
             return Err(err(Code::Count, rat, "a row that does not have cols + 1 integers"));
@@ -732,7 +741,7 @@ pub fn txt1<'a>(a: Arg<'a>, allow: &[&str]) -> Result<Txt<'a>, WireError> {
     let mut c = Cursor::new(a.bytes, a.offset);
     tag(&mut c, b"TXT1", "expected a TXT1 payload")?;
     // the text is the rest of the argument (its length is the frame's)
-    let tat = c.at();
+    let tat = c.at()?;
     if c.left() > TXT_MAX_BYTES {
         return Err(err(Code::Cap, tat, "options text longer than 1 KiB"));
     }
@@ -744,8 +753,9 @@ pub fn txt1<'a>(a: Arg<'a>, allow: &[&str]) -> Result<Txt<'a>, WireError> {
     let mut prev: &[u8] = &[];
     let mut pos = 0usize;
     for line in text.split(|&b| b == b'\n') {
-        let lat = tat.saturating_add(u64::try_from(pos).unwrap_or(u64::MAX));
-        pos += line.len() + 1;
+        let off = err(Code::Internal, tat, "an offset past u64");
+        let lat = u64::try_from(pos).ok().and_then(|x| tat.checked_add(x)).ok_or(off)?;
+        pos = line.len().checked_add(1).and_then(|x| pos.checked_add(x)).ok_or(off)?;
         if line.is_empty() {
             // (only the empty tail after the final LF)
             if pos <= text.len() {
@@ -791,6 +801,7 @@ pub fn u641_len(n: usize) -> Option<usize> {
 /// Append a `U641` payload (the caller reserved and sized the buffer).
 pub fn put_u641(out: &mut Vec<u8>, words: &[u64]) {
     out.extend_from_slice(b"U641");
+    // (exact: usize::BITS <= 64)
     out.extend_from_slice(&u64::try_from(words.len()).unwrap_or(u64::MAX).to_le_bytes());
     for w in words {
         out.extend_from_slice(&w.to_le_bytes());
@@ -824,7 +835,7 @@ pub fn write_ok(out: &mut Vec<u8>, payloads: &[&[u8]]) -> Result<(), WireError> 
         a
     };
     let need = ok_len(&lens[..payloads.len()]).ok_or(err(Code::Internal, 0, "a result too large to frame"))?;
-    if out.capacity().saturating_sub(out.len()) < need {
+    if out.capacity().checked_sub(out.len()).is_none_or(|room| room < need) {
         return Err(err(Code::Internal, 0, "the reply buffer was not sized to its bound"));
     }
     out.extend_from_slice(&MAGIC);
@@ -864,7 +875,7 @@ pub fn write_ok_u641(out: &mut Vec<u8>, results: &[&[u64]]) -> Result<(), WireEr
         *c = r.len();
     }
     let need = ok_u641_len(&counts[..results.len()]).ok_or(err(Code::Internal, 0, "a result too large to frame"))?;
-    if out.capacity().saturating_sub(out.len()) < need {
+    if out.capacity().checked_sub(out.len()).is_none_or(|room| room < need) {
         return Err(err(Code::Internal, 0, "the reply buffer was not sized to its bound"));
     }
     out.extend_from_slice(&MAGIC);
@@ -910,32 +921,32 @@ pub fn parse_reply(r: &[u8]) -> Result<Reply<'_>, WireError> {
     }
     let k = c.take(2, Code::Frame, "no reply kind")?;
     if k == b"ok" {
-        let at = c.at();
+        let at = c.at()?;
         let n = to_usize(u64::from(c.u32(Code::Frame, "no result count")?), usize_bound(), at)?;
         if n > MAX_ARGS {
             return Err(err(Code::Count, at, "too many results"));
         }
         let mut out = Vec::with_capacity(n);
         for _ in 0..n {
-            let at = c.at();
+            let at = c.at()?;
             let l = to_usize(u64::from(c.u32(Code::Frame, "no result length")?), usize_bound(), at)?;
             out.push(c.take(l, Code::Frame, "a truncated result")?);
         }
         if c.left() != 0 {
-            return Err(err(Code::Frame, c.at(), "trailing bytes after the results"));
+            return Err(err(Code::Frame, c.at()?, "trailing bytes after the results"));
         }
         Ok(Ok(out))
     } else if k == b"er" {
         let code = c.u16("no error code")?;
         let off = c.u64(Code::Frame, "no error offset")?;
-        let at = c.at();
+        let at = c.at()?;
         let tl = usize::from(c.u16("no error text length")?);
         if tl > ERROR_TEXT_MAX {
             return Err(err(Code::Count, at, "an error text too long"));
         }
         c.take(tl, Code::Frame, "a truncated error text")?;
         if c.left() != 0 {
-            return Err(err(Code::Frame, c.at(), "trailing bytes after the error"));
+            return Err(err(Code::Frame, c.at()?, "trailing bytes after the error"));
         }
         Ok(Err((code, off)))
     } else {

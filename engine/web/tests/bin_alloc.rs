@@ -6,7 +6,7 @@
 //! call's peak live memory, its reply included, is within its
 //! reservation.  One test (the counters are global).
 
-use sagebrush_web::bin_ops::{call_bin, last_factor_budget_peak, reservation, FACTOR_MAX_LEN};
+use sagebrush_web::bin_ops::{call_bin, reservation};
 use sagebrush_web::nmod_ops::{DIV_MAX_LEN, GCD_MAX_LEN, MUL_MAX_LEN};
 use sagebrush_wire as wire;
 use std::alloc::{GlobalAlloc, Layout, System};
@@ -138,7 +138,7 @@ fn binary_calls_allocate_only_within_their_reservation() {
     bad.push(req("nmod_poly_mul", 101, &[&small, &[1, 0]]));
     bad.push(req("nmod_poly_mul", 101, &[&vec![1; MUL_MAX_LEN + 1], &small]));
     bad.push(req("nmod_poly_mul", 101, &[&vec![1; MUL_MAX_LEN], &vec![1; MUL_MAX_LEN + 3]]));
-    bad.push(req("factor_mod", 4294967311, &[&small]));
+    bad.push(req("factor_mod", 101, &[&small]));
     for (i, r) in bad.iter().enumerate() {
         let (g, first, out) = measured(r);
         assert!(!is_ok(&out), "{i}");
@@ -163,43 +163,18 @@ fn binary_calls_allocate_only_within_their_reservation() {
         ("nmod_poly_gcd", P, 1000, 999),
         ("nmod_poly_gcd", P, GCD_MAX_LEN, GCD_MAX_LEN),
         ("nmod_poly_gcd", NTT_P, GCD_MAX_LEN, GCD_MAX_LEN - 1),
-        ("factor_mod", 65537, 1, 0),
-        ("factor_mod", 4294967291, 200, 0),
     ];
-    // (factor_mod's length cap is admitted; its work is its budget's)
-    const { assert!(FACTOR_MAX_LEN >= 200) };
     for &(op, p, la, lb) in &cases {
         let a = rand_poly(&mut s, la, p);
-        let b = if lb > 0 { Some(rand_poly(&mut s, lb, p)) } else { None };
-        let polys: Vec<&[u64]> = std::iter::once(&a[..]).chain(b.as_deref()).collect();
-        let r = req(op, p, &polys);
-        drop(polys);
+        let b = rand_poly(&mut s, lb, p);
+        let r = req(op, p, &[&a, &b]);
         let (g, first, out) = measured(&r);
-        // (factor_mod's computation is within its own budget's reservations)
-        let budget = if op == "factor_mod" { last_factor_budget_peak() as usize } else { 0 };
-        let bound = reservation(op, la, lb).unwrap() as usize + budget;
-        eprintln!("{op} p={p} {la}/{lb}: growth {g} <= reservation + budget peak {bound}");
+        let bound = reservation(op, la, lb).unwrap() as usize;
+        eprintln!("{op} p={p} {la}/{lb}: growth {g} <= reservation {bound}");
         assert!(is_ok(&out), "{op} {la}/{lb}: {:?}", wire::parse_reply(&out));
         assert_eq!(first, 8 * la, "{op} {la}/{lb}: the first allocation is the decode");
         assert!(g <= bound, "{op} {la}/{lb}: growth {g} > reservation {bound}");
         assert_eq!(sagebrush_web::sb_outstanding_bytes(), held, "{op}: the reservation is released");
-    }
-    // many factors: x^256 - 1 mod 257 (256 linear factors), and a
-    // repeated factor (x + 1)^64 mod 2, at the reply's bound
-    let mut f = vec![0u64; 257];
-    f[0] = 256;
-    f[256] = 1;
-    let mut g2 = vec![0u64; 65];
-    g2[0] = 1;
-    g2[64] = 1;
-    for (p, f) in [(257u64, f), (2, g2)] {
-        let r = req("factor_mod", p, &[&f]);
-        let (g, first, out) = measured(&r);
-        let bound = reservation("factor_mod", f.len(), 0).unwrap() as usize + last_factor_budget_peak() as usize;
-        eprintln!("factor_mod p={p} {}: growth {g} <= reservation {bound}", f.len());
-        assert!(is_ok(&out));
-        assert_eq!(first, 8 * f.len());
-        assert!(g <= bound);
     }
     cases.clear();
 

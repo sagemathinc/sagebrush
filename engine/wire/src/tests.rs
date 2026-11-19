@@ -652,3 +652,26 @@ fn fuzzed_frames_give_typed_errors_and_never_panic() {
     }));
     assert!(r.is_ok());
 }
+
+#[test]
+fn offsets_are_checked_never_saturated_or_wrapped() {
+    // an argument whose absolute offset is near u64::MAX: every offset the
+    // parser computes past u64 is a typed Internal error (S1's checked
+    // arithmetic), never a saturated or wrapped value
+    let p = u641p(&[1, 2, 3]);
+    fn near(b: &[u8]) -> Arg<'_> {
+        Arg { bytes: b, offset: u64::MAX - 5 }
+    }
+    let (z1, t) = (zvp(&[ONE]), txtp(b"a=1\nb=2\n"));
+    assert_eq!(u641(near(&p)).unwrap_err().code, Code::Internal);
+    assert_eq!(zv1(near(&z1)).unwrap_err().code, Code::Internal);
+    assert_eq!(txt1(near(&t), &["a", "b"]).unwrap_err().code, Code::Internal);
+    // at the largest offset that fits, the same payload parses
+    let fits = Arg { bytes: &p, offset: u64::MAX - p.len() as u64 };
+    assert_eq!(u641(fits).unwrap().count, 3);
+    // the negation at the i64 boundary is exact
+    let z = zvp(&[(true, &[1u64 << 63]), (true, &[(1u64 << 63) - 1]), (true, &[(1u64 << 63) + 1])]);
+    let v = zv1(arg(&z)).unwrap();
+    let got: Vec<Option<i64>> = v.iter().map(|b| b.to_i64()).collect();
+    assert_eq!(got, vec![Some(i64::MIN), Some(i64::MIN + 1), None]);
+}

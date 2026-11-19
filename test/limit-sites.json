@@ -2808,11 +2808,6 @@
   "owner": "polynomial factorization",
   "reason": "the modular phase's budget parameter, imports and work bounds; its reservations and debits refuse through the engine Budget's own sites; refuses nothing itself"
  },
- "engine/poly/src/lib.rs :: factor_monic :: fn factor_monic(b: &Budget, fp: FPoly, p: u64) -> FResult<(Vec<(Vec<u64>, u32)>, u64)> { #0": {
-  "class": "none",
-  "owner": "polynomial factorization",
-  "reason": "the modular phase's entry for reduced coefficients: its limits are the caller's Budget's; refuses nothing itself"
- },
  "engine/poly/src/lib.rs :: hensel :: pub(crate) fn hensel<'b>(b: &'b Budget, f: &[BigInt], fs: &[FPoly], p: u64, k: u64) -> FResult<Vec<Held<'b>>> { #0": {
   "class": "none",
   "owner": "polynomial factorization (@sagebrush-sage2)"
@@ -2833,11 +2828,6 @@
   "class": "none",
   "owner": "polynomial factorization",
   "reason": "the modular phase's budget parameter, imports and work bounds; its reservations and debits refuse through the engine Budget's own sites; refuses nothing itself"
- },
- "engine/poly/src/lib.rs :: try_factor_mod_words :: pub fn try_factor_mod_words(f: &[u64], p: u64, b: &Budget) -> Result<Vec<(Vec<u64>, u32)>, FactorLimit> { #0": {
-  "class": "none",
-  "owner": "polynomial factorization",
-  "reason": "the modular phase's entry for reduced coefficients: its limits are the caller's Budget's; refuses nothing itself"
  },
  "engine/poly/src/lib.rs :: zassenhaus :: if max_size == usize::MAX && lifted.len() > vanhoeij::ZASSENHAUS_MAX { #0": {
   "class": "none",
@@ -4763,20 +4753,7 @@
   "class": "none",
   "owner": "wasm heap (shared by raster and the mp core)"
  },
- "engine/web/src/bin_ops.rs ::  :: pub const FACTOR_MAX_LEN: usize = 1 << 16; #0": {
-  "class": "1",
-  "disposition": {
-   "1": "shared"
-  },
-  "owner": "engine web + finite-field polynomials",
-  "reason": "the binary GF(p)[x] ops' admission: the JSON ops' length caps and the modulus range, per op; past them the library keeps its Python path, so no user computation is limited"
- },
  "engine/web/src/bin_ops.rs ::  :: use crate::nmod_ops::{DIV_MAX_LEN, GCD_MAX_LEN, MUL_MAX_LEN}; #0": {
-  "class": "none",
-  "owner": "engine web + finite-field polynomials",
-  "reason": "the binary ops' plumbing (the table's fields, the request-cap arithmetic, mapping a refusal or invariant to its reply code); refuses nothing itself"
- },
- "engine/web/src/bin_ops.rs :: last_factor_budget_peak :: pub fn last_factor_budget_peak() -> u64 { #0": {
   "class": "none",
   "owner": "engine web + finite-field polynomials",
   "reason": "the binary ops' plumbing (the table's fields, the request-cap arithmetic, mapping a refusal or invariant to its reply code); refuses nothing itself"
@@ -4794,7 +4771,7 @@
   "owner": "engine web + finite-field polynomials",
   "reason": "the binary GF(p)[x] ops' admission: the JSON ops' length caps and the modulus range, per op; past them the library keeps its Python path, so no user computation is limited"
  },
- "engine/web/src/bin_ops.rs :: request_cap :: BinOp { name: \"factor_mod\", kind: Kind::Factor, polys: 1, max_len: FACTOR_MAX_LEN, max_p: 1 << 32 }, #0": {
+ "engine/web/src/bin_ops.rs :: request_cap :: BinOp { name: \"nmod_poly_divrem\", kind: Kind::Divrem, polys: 2, max_len: DIV_MAX_LEN }, #0": {
   "class": "1",
   "disposition": {
    "1": "shared"
@@ -4802,7 +4779,7 @@
   "owner": "engine web + finite-field polynomials",
   "reason": "the binary GF(p)[x] ops' admission: the JSON ops' length caps and the modulus range, per op; past them the library keeps its Python path, so no user computation is limited"
  },
- "engine/web/src/bin_ops.rs :: request_cap :: BinOp { name: \"nmod_poly_divrem\", kind: Kind::Divrem, polys: 2, max_len: DIV_MAX_LEN, max_p: 1 << 63 }, #0": {
+ "engine/web/src/bin_ops.rs :: request_cap :: BinOp { name: \"nmod_poly_gcd\", kind: Kind::Gcd, polys: 2, max_len: GCD_MAX_LEN }, #0": {
   "class": "1",
   "disposition": {
    "1": "shared"
@@ -4810,7 +4787,7 @@
   "owner": "engine web + finite-field polynomials",
   "reason": "the binary GF(p)[x] ops' admission: the JSON ops' length caps and the modulus range, per op; past them the library keeps its Python path, so no user computation is limited"
  },
- "engine/web/src/bin_ops.rs :: request_cap :: BinOp { name: \"nmod_poly_gcd\", kind: Kind::Gcd, polys: 2, max_len: GCD_MAX_LEN, max_p: 1 << 63 }, #0": {
+ "engine/web/src/bin_ops.rs :: request_cap :: BinOp { name: \"nmod_poly_mul\", kind: Kind::Mul, polys: 2, max_len: MUL_MAX_LEN }, #0": {
   "class": "1",
   "disposition": {
    "1": "shared"
@@ -4818,20 +4795,20 @@
   "owner": "engine web + finite-field polynomials",
   "reason": "the binary GF(p)[x] ops' admission: the JSON ops' length caps and the modulus range, per op; past them the library keeps its Python path, so no user computation is limited"
  },
- "engine/web/src/bin_ops.rs :: request_cap :: BinOp { name: \"nmod_poly_mul\", kind: Kind::Mul, polys: 2, max_len: MUL_MAX_LEN, max_p: 1 << 63 }, #0": {
-  "class": "1",
-  "disposition": {
-   "1": "shared"
-  },
-  "owner": "engine web + finite-field polynomials",
-  "reason": "the binary GF(p)[x] ops' admission: the JSON ops' length caps and the modulus range, per op; past them the library keeps its Python path, so no user computation is limited"
- },
- "engine/web/src/bin_ops.rs :: request_cap :: assert!(request_cap(BIN_OPS[i].polys, BIN_OPS[i].max_len) <= wire::FRAME_CAP); #0": {
+ "engine/web/src/bin_ops.rs :: request_cap :: assert!(matches!(request_cap(BIN_OPS[i].polys, BIN_OPS[i].max_len), Some(c) if c <= wire::FRAME_CAP)); #0": {
   "class": "none",
   "owner": "engine web + finite-field polynomials",
   "reason": "the binary ops' plumbing (the table's fields, the request-cap arithmetic, mapping a refusal or invariant to its reply code); refuses nothing itself"
  },
- "engine/web/src/bin_ops.rs :: request_cap :: let frame = 4 + 4 + wire::OP_NAME_MAX + 4 + 4 * (polys + 1); #0": {
+ "engine/web/src/bin_ops.rs :: request_cap :: const MAX_P: u64 = 1 << 63; #0": {
+  "class": "1",
+  "disposition": {
+   "1": "shared"
+  },
+  "owner": "engine web + finite-field polynomials",
+  "reason": "the binary GF(p)[x] ops' admission: the JSON ops' length caps and the modulus range, per op; past them the library keeps its Python path, so no user computation is limited"
+ },
+ "engine/web/src/bin_ops.rs :: request_cap :: let Some(frame) = (4 + 4 + wire::OP_NAME_MAX + 4 + 12 + 8).checked_add(lengths) else { return None }; #0": {
   "class": "none",
   "owner": "engine web + finite-field polynomials",
   "reason": "the binary ops' plumbing (the table's fields, the request-cap arithmetic, mapping a refusal or invariant to its reply code); refuses nothing itself"
@@ -4841,27 +4818,7 @@
   "owner": "engine web + finite-field polynomials",
   "reason": "the binary ops' plumbing (the table's fields, the request-cap arithmetic, mapping a refusal or invariant to its reply code); refuses nothing itself"
  },
- "engine/web/src/bin_ops.rs :: request_cap :: max_p: u64, #0": {
-  "class": "none",
-  "owner": "engine web + finite-field polynomials",
-  "reason": "the binary ops' plumbing (the table's fields, the request-cap arithmetic, mapping a refusal or invariant to its reply code); refuses nothing itself"
- },
- "engine/web/src/bin_ops.rs :: run :: FACTOR_PEAK.with(|c| c.set(budget.peak())); #0": {
-  "class": "none",
-  "owner": "engine web + finite-field polynomials",
-  "reason": "the binary ops' plumbing (the table's fields, the request-cap arithmetic, mapping a refusal or invariant to its reply code); refuses nothing itself"
- },
- "engine/web/src/bin_ops.rs :: run :: fail(Code::Cap, 0, \"factor_mod reached a resource limit\") #0": {
-  "class": "none",
-  "owner": "engine web + finite-field polynomials",
-  "reason": "the binary ops' plumbing (the table's fields, the request-cap arithmetic, mapping a refusal or invariant to its reply code); refuses nothing itself"
- },
- "engine/web/src/bin_ops.rs :: run :: if op.max_p == 1 << 32 { \"p must be a prime below 2^32\" } else { \"p must be a prime below 2^63\" }, #0": {
-  "class": "none",
-  "owner": "engine web + finite-field polynomials",
-  "reason": "the binary ops' plumbing (the table's fields, the request-cap arithmetic, mapping a refusal or invariant to its reply code); refuses nothing itself"
- },
- "engine/web/src/bin_ops.rs :: run :: if p >= op.max_p || !is_prime(p) { #0": {
+ "engine/web/src/bin_ops.rs :: run :: if p >= MAX_P || !is_prime(p) { #0": {
   "class": "1",
   "disposition": {
    "1": "shared"
@@ -4874,25 +4831,7 @@
   "owner": "engine web + finite-field polynomials",
   "reason": "the binary ops' plumbing (the table's fields, the request-cap arithmetic, mapping a refusal or invariant to its reply code); refuses nothing itself"
  },
- "engine/web/src/bin_ops.rs :: run :: let b = if op.polys == 2 { Some(poly_view(arg(2)?, op.max_len, p)?) } else { None }; #0": {
-  "class": "none",
-  "owner": "engine web + finite-field polynomials",
-  "reason": "the binary ops' plumbing (the table's fields, the request-cap arithmetic, mapping a refusal or invariant to its reply code); refuses nothing itself"
- },
- "engine/web/src/bin_ops.rs :: run :: let budget = sagebrush_poly::Budget::default(); #0": {
-  "class": "2+3",
-  "disposition": {
-   "2": {
-    "route": "engine-budget-memory"
-   },
-   "3": {
-    "host": "engine-budget-work"
-   }
-  },
-  "owner": "engine web + finite-field polynomials",
-  "reason": "factor_mod's default engine Budget (memory: the host's share; work: unlimited by default)"
- },
- "engine/web/src/bin_ops.rs :: run :: let fs = sagebrush_poly::try_factor_mod_words(&a, p, &budget); #0": {
+ "engine/web/src/bin_ops.rs :: run :: let b = poly_view(arg(2)?, op.max_len, p)?; #0": {
   "class": "none",
   "owner": "engine web + finite-field polynomials",
   "reason": "the binary ops' plumbing (the table's fields, the request-cap arithmetic, mapping a refusal or invariant to its reply code); refuses nothing itself"
@@ -4915,12 +4854,7 @@
   "owner": "engine web + finite-field polynomials",
   "reason": "the binary ops' plumbing (the table's fields, the request-cap arithmetic, mapping a refusal or invariant to its reply code); refuses nothing itself"
  },
- "engine/web/src/bin_ops.rs :: run :: shape.push(u64::try_from(g.len()).unwrap_or(u64::MAX)); #0": {
-  "class": "none",
-  "owner": "engine web + finite-field polynomials",
-  "reason": "the binary ops' plumbing (the table's fields, the request-cap arithmetic, mapping a refusal or invariant to its reply code); refuses nothing itself"
- },
- "engine/web/src/bin_ops.rs :: spec :: find(name).map(|o| OpSpec { min_args: 1 + o.polys, max_args: 1 + o.polys, request_cap: request_cap(o.polys, o.max_len) }) #0": {
+ "engine/web/src/bin_ops.rs :: spec :: Some(OpSpec { min_args: args, max_args: args, request_cap: request_cap(o.polys, o.max_len)? }) #0": {
   "class": "1",
   "disposition": {
    "1": "shared"
@@ -4928,7 +4862,7 @@
   "owner": "engine web + finite-field polynomials",
   "reason": "the binary GF(p)[x] ops' admission: the JSON ops' length caps and the modulus range, per op; past them the library keeps its Python path, so no user computation is limited"
  },
- "engine/web/src/bin_ops/tests.rs :: refusals_have_their_codes_and_offsets :: assert!(n > request_cap(2, MUL_MAX_LEN)); #0": {
+ "engine/web/src/bin_ops/tests.rs :: refusals_have_their_codes_and_offsets :: assert!(n > request_cap(2, MUL_MAX_LEN).unwrap()); #0": {
   "class": "none",
   "owner": "engine binary transport (sagebrush-wire)",
   "reason": "test code: the binary transport's parser, op and allocation tests; refuses nothing itself"
@@ -5211,11 +5145,6 @@
   "owner": "engine web + finite-field matrices",
   "row": "inv-7"
  },
- "engine/web/tests/bin_alloc.rs ::  :: use sagebrush_web::bin_ops::{call_bin, last_factor_budget_peak, reservation, FACTOR_MAX_LEN}; #0": {
-  "class": "none",
-  "owner": "engine binary transport (sagebrush-wire)",
-  "reason": "test code: the binary transport's parser, op and allocation tests; refuses nothing itself"
- },
  "engine/web/tests/bin_alloc.rs ::  :: use sagebrush_web::nmod_ops::{DIV_MAX_LEN, GCD_MAX_LEN, MUL_MAX_LEN}; #0": {
   "class": "none",
   "owner": "engine binary transport (sagebrush-wire)",
@@ -5286,32 +5215,7 @@
   "owner": "engine binary transport (sagebrush-wire)",
   "reason": "test code: the binary transport's parser, op and allocation tests; refuses nothing itself"
  },
- "engine/web/tests/bin_alloc.rs :: binary_calls_allocate_only_within_their_reservation :: const { assert!(FACTOR_MAX_LEN >= 200) }; #0": {
-  "class": "none",
-  "owner": "engine binary transport (sagebrush-wire)",
-  "reason": "test code: the binary transport's parser, op and allocation tests; refuses nothing itself"
- },
- "engine/web/tests/bin_alloc.rs :: binary_calls_allocate_only_within_their_reservation :: eprintln!(\"{op} p={p} {la}/{lb}: growth {g} <= reservation + budget peak {bound}\"); #0": {
-  "class": "none",
-  "owner": "engine binary transport (sagebrush-wire)",
-  "reason": "test code: the binary transport's parser, op and allocation tests; refuses nothing itself"
- },
  "engine/web/tests/bin_alloc.rs :: binary_calls_allocate_only_within_their_reservation :: let (a, b) = (rand_poly(&mut s, MUL_MAX_LEN, P), rand_poly(&mut s, MUL_MAX_LEN, P)); #0": {
-  "class": "none",
-  "owner": "engine binary transport (sagebrush-wire)",
-  "reason": "test code: the binary transport's parser, op and allocation tests; refuses nothing itself"
- },
- "engine/web/tests/bin_alloc.rs :: binary_calls_allocate_only_within_their_reservation :: let bound = reservation(\"factor_mod\", f.len(), 0).unwrap() as usize + last_factor_budget_peak() as usize; #0": {
-  "class": "none",
-  "owner": "engine binary transport (sagebrush-wire)",
-  "reason": "test code: the binary transport's parser, op and allocation tests; refuses nothing itself"
- },
- "engine/web/tests/bin_alloc.rs :: binary_calls_allocate_only_within_their_reservation :: let bound = reservation(op, la, lb).unwrap() as usize + budget; #0": {
-  "class": "none",
-  "owner": "engine binary transport (sagebrush-wire)",
-  "reason": "test code: the binary transport's parser, op and allocation tests; refuses nothing itself"
- },
- "engine/web/tests/bin_alloc.rs :: binary_calls_allocate_only_within_their_reservation :: let budget = if op == \"factor_mod\" { last_factor_budget_peak() as usize } else { 0 }; #0": {
   "class": "none",
   "owner": "engine binary transport (sagebrush-wire)",
   "reason": "test code: the binary transport's parser, op and allocation tests; refuses nothing itself"
@@ -5477,11 +5381,6 @@
   },
   "owner": "engine binary transport (sagebrush-wire)",
   "reason": "the SBW1 parser's admission (the frame and op caps, argument and element counts against the bytes present, name and options-text grammar): a malformed or oversized request gets a typed error reply, before anything is allocated"
- },
- "engine/wire/src/lib.rs :: at :: self.base.saturating_add(u64::try_from(self.pos).unwrap_or(u64::MAX)) #0": {
-  "class": "none",
-  "owner": "engine binary transport (sagebrush-wire)",
-  "reason": "the parser's plumbing (signatures, fields, fixed arrays sized by the argument maximum, figures for the caller's bound); refuses nothing itself"
  },
  "engine/wire/src/lib.rs :: bigint_heap_words :: pub max_limbs: u64, #0": {
   "class": "none",
@@ -5676,11 +5575,6 @@
   "owner": "engine binary transport (sagebrush-wire)",
   "reason": "the SBW1 parser's admission (the frame and op caps, argument and element counts against the bytes present, name and options-text grammar): a malformed or oversized request gets a typed error reply, before anything is allocated"
  },
- "engine/wire/src/lib.rs :: txt1 :: let lat = tat.saturating_add(u64::try_from(pos).unwrap_or(u64::MAX)); #0": {
-  "class": "none",
-  "owner": "engine binary transport (sagebrush-wire)",
-  "reason": "the parser's plumbing (signatures, fields, fixed arrays sized by the argument maximum, figures for the caller's bound); refuses nothing itself"
- },
  "engine/wire/src/lib.rs :: txt1 :: let value_ok = !value.is_empty() && value.len() <= TXT_MAX_VALUE && value.iter().all(|&b| (0x21..=0x7e).contains(&b) && b != b'='); #0": {
   "class": "1",
   "disposition": {
@@ -5862,6 +5756,16 @@
   "reason": "test code: the binary transport's parser, op and allocation tests; refuses nothing itself"
  },
  "engine/wire/src/tests.rs :: heap_bounds_follow_the_closed_form :: assert_eq!(bigint_heap_words(u64::MAX), None); #0": {
+  "class": "none",
+  "owner": "engine binary transport (sagebrush-wire)",
+  "reason": "test code: the binary transport's parser, op and allocation tests; refuses nothing itself"
+ },
+ "engine/wire/src/tests.rs :: near :: Arg { bytes: b, offset: u64::MAX - 5 } #0": {
+  "class": "none",
+  "owner": "engine binary transport (sagebrush-wire)",
+  "reason": "test code: the binary transport's parser, op and allocation tests; refuses nothing itself"
+ },
+ "engine/wire/src/tests.rs :: near :: let fits = Arg { bytes: &p, offset: u64::MAX - p.len() as u64 }; #0": {
   "class": "none",
   "owner": "engine binary transport (sagebrush-wire)",
   "reason": "test code: the binary transport's parser, op and allocation tests; refuses nothing itself"
@@ -8457,26 +8361,10 @@
   "owner": "finite fields + configuration",
   "row": "inv-1"
  },
- "lib/_sage_ff.py ::  :: _ENGINE_FACTOR_MAX = 1 << 16 #0": {
-  "class": "1",
-  "disposition": {
-   "1": "shared"
-  },
-  "owner": "finite-field polynomials (engine route)",
-  "reason": "the library's choice of route for factor_mod: polynomials up to the binary op's length cap go through the binary entry point, longer ones keep the JSON request (no cap); no user computation is limited"
- },
  "lib/_sage_ff.py ::  :: import _limits #0": {
   "class": "3",
   "owner": "finite fields + configuration",
   "row": "inv-1"
- },
- "lib/_sage_ff.py :: Polynomial_ff.factor :: r = _engine_bin(\"factor_mod\", p, f) if _flen(f) <= _ENGINE_FACTOR_MAX else None #0": {
-  "class": "1",
-  "disposition": {
-   "1": "shared"
-  },
-  "owner": "finite-field polynomials (engine route)",
-  "reason": "the library's choice of route for factor_mod: polynomials up to the binary op's length cap go through the binary entry point, longer ones keep the JSON request (no cap); no user computation is limited"
  },
  "lib/_sage_ff.py :: Polynomial_ff.splitting_field :: most EMBED_MAX elements (ff.embed_max, unlimited by default) checked on #0": {
   "class": "none",
