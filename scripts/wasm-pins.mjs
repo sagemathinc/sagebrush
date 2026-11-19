@@ -13,7 +13,7 @@ import { chmodSync, existsSync, mkdirSync, mkdtempSync, readdirSync, readFileSyn
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { fileURLToPath } from "node:url";
-import { MODULES, ROOT, checkModules, committedMismatches, formatPins, loadPins, matches, moduleState, modulePath, parsePins, pinsPath, runMode, sha256, writeSidecar } from "./wasm-modules.mjs";
+import { MODULES, ROOT, checkModules, committedMismatches, formatPins, loadPins, matches, moduleState, modulePath, parsePins, pinsPath, readStamp, runMode, sha256, writeSidecar } from "./wasm-modules.mjs";
 import { DEFAULT_BASE, LIMITS, fetchModules } from "./wasm-fetch.mjs";
 import { MANIFEST, install, pack, policy, readArtifact } from "./wasm-artifact.mjs";
 import { BUCKET, awsPut, keyOf, publish } from "./wasm-publish.mjs";
@@ -311,6 +311,13 @@ async function selfTest() {
       const { d } = artifact("ok"), rt = root("ra-target");
       return install(d, { root: rt, env: run }).mode === "pinned" && checkModules({ root: rt, mode: "pinned" }).length === MODULES.length;
     });
+    await pass("on a track, an artifact that doesn't match the pins installs, fresh, and records nothing as pinned", async () => {
+      const track = { ...run, GITHUB_REF_NAME: "track/math" };
+      const { d } = artifact("track", track), rt = root("ra-track-target");
+      writeFileSync(pinsPath(rt), formatPins({ ...pinsOf(mods), [MODULES[0]]: { sha256: "e".repeat(64), bytes: 9 } }));
+      const r = install(d, { root: rt, env: track });
+      return r.mode === "fresh" && Object.keys(readStamp(rt)).length === 0 && moduleState(MODULES[0], loadPins(rt)[MODULES[0]], rt).state !== "pinned";
+    });
     for (const n of MODULES) {
       await expect(`an artifact missing ${n} is refused`, async () => {
         const { d } = artifact(`miss-${n}`);
@@ -342,6 +349,16 @@ async function selfTest() {
       const r = policy(freshMods, { root: r1, allowFresh: true, env: { GITHUB_EVENT_NAME: "pull_request" } });
       return r.mode === "fresh" && r.lines.some((l) => l.startsWith(`${MODULES[0]}: fresh build (pin mismatch)`));
     });
+    // on a track every reader runs the fresh build, labelled, and records nothing as pinned
+    for (const env of [{ GITHUB_EVENT_NAME: "push", GITHUB_REF_NAME: "track/math" }, { GITHUB_EVENT_NAME: "workflow_dispatch", GITHUB_REF: "refs/heads/track/math" }, { GITHUB_EVENT_NAME: "pull_request", GITHUB_BASE_REF: "track/math", GITHUB_HEAD_REF: "r6" }, { GITHUB_EVENT_NAME: "pull_request_target", GITHUB_BASE_REF: "track/math" }]) {
+      await pass(`a stale pin on a track (${env.GITHUB_EVENT_NAME}): fresh for every reader, labelled`, async () => {
+        const r = policy(freshMods, { root: r1, env });
+        return r.mode === "fresh" && r.lines.some((l) => l.startsWith(`${MODULES[0]}: fresh build (pin mismatch)`)) && r.lines.some((l) => /a track's run/.test(l));
+      });
+    }
+    await expect("a stale pin on a track's pull into master is an error for every other reader", async () => policy(freshMods, { root: r1, env: { GITHUB_EVENT_NAME: "pull_request", GITHUB_BASE_REF: "master", GITHUB_HEAD_REF: "track/math" } }), /the pin is stale/);
+    await expect("a stale pin on a track/math-like branch that isn't a track is an error", async () => policy(freshMods, { root: r1, env: { GITHUB_EVENT_NAME: "push", GITHUB_REF_NAME: "trackmath" } }), /the pin is stale/);
+    await expect("the schedule is never a track's run", async () => policy(freshMods, { root: r1, env: { GITHUB_EVENT_NAME: "schedule", GITHUB_REF_NAME: "track/math" } }), /the pin is stale/);
     // publishing, against this server as the bucket
     {
       const { ra, d } = artifact("publish");
@@ -367,6 +384,8 @@ async function selfTest() {
       const before = requests, putsBefore = puts.length;
       await expect("a build that doesn't match the pins is never published", () => publish(d, { root: rs, base, put, limits: fast, env: run, log: () => {} }), /the pin is stale/);
       results.push(requests === before && puts.length === putsBefore ? "ok   ...with no request and no upload" : `FAIL ...${requests - before} requests, ${puts.length - putsBefore} uploads`);
+      await expect("on a track, a build that doesn't match the pins is never published either", () => publish(d, { root: rs, base, put, limits: fast, env: { ...run, GITHUB_REF_NAME: "track/math" }, log: () => {} }), /refusing to publish a fresh build/);
+      results.push(requests === before && puts.length === putsBefore ? "ok   ...with no request and no upload, on a track too" : `FAIL ...${requests - before} requests, ${puts.length - putsBefore} uploads on a track`);
       for (const [k, v] of stash) served.set(k, v);
     }
     // the upload itself (awsPut), with a stand-in for the aws CLI
