@@ -57,9 +57,15 @@ export const LATEX_LAZY = {
 //  math typeset in the same step as its text, ruled Nov 13: 249,253 / 83,316 measured (bun 1.4.4, node 24.21.0), + 64)
 // (249,795 raw / 83,533 gzip: an edit written before the page is left (a notebook, a board or another page opened from
 //  it), Nov 17: 249,731 / 83,469 measured on master 9529624b with it (+478 / +153), + 64)
+// (250,482 raw / 83,764 gzip: a SageTeX code argument read from the file as its own source text (\sage{}, \sageplot{},
+//  \py{}, \magma{}: the engine's reader, in the worker), Nov 19, provisional until the exact-head CI packet: 250,418 /
+//  83,700 measured on the shipped build (bun 1.4.4, node 24.21.0), master 8bf4b126 with it, and the same again on
+//  master 6288dbcf; 249,786 / 83,499 with master's web/latex/engine/demo-machine.mjs in the same tree (+632 / +201), + 64)
 // (250,059 raw / 83,654 gzip: Nov 19 2026, a reload of the tab keeps the agent (latex/page.ts: the reload record's scope,
 //  and the agent module loaded for a tab that has one); measured 249,995 / 83,590 on master 25de21b2 with it, + 64)
-export const LATEX_CAPS = { raw: 250059, gzip: 83654 };
+// (250,691 raw / 83,855 gzip: Nov 19 2026, the two above together, a reload of the tab keeping the agent and SageTeX's
+//  code arguments, measured on their merge (master e478921b): 250,627 / 83,791, + 64)
+export const LATEX_CAPS = { raw: 250691, gzip: 83855 };
 export const gz = (b) => gzipSync(b, { level: 9 }).length;
 
 // Each lazy chunk's own cap (raw, gzip), fetched only on its own use, so outside the group:

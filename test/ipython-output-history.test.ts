@@ -51,6 +51,22 @@ test("a notebook: a blank left as ___ fails as it does in IPython, on the empty 
   assert.equal(lastLine((await run("y = ___ + 1", { mangle: "c7" })).err), 'TypeError: can only concatenate str (not "int") to str');
 });
 
+test("the reactive notebook: _, __ and ___ are the interpreter's in any cell that doesn't bind them; one that binds _ keeps its own", async () => {
+  const run = await session();
+  await run("1", { mangle: "c1" });
+  await run("2", { mangle: "c2" });
+  // (a Jupyter notebook's cell reading the value shown just before)
+  assert.deepEqual(await run("print(_ * 2, __)", { mangle: "c3" }), { out: "4 1\n", err: "" });
+  assert.deepEqual(await run("def f():\n    return _ + 10\nprint(f())", { mangle: "c4" }), { out: "12\n", err: "" });
+  // (a cell binding _ itself, a throwaway: its own, as before, so cells can each have one; the history is left)
+  assert.deepEqual(await run("for _ in range(5):\n    pass\nprint(_)", { mangle: "c5" }), { out: "4\n", err: "" });
+  assert.deepEqual(await run("_, b = 7, 8\nprint(_, b)", { mangle: "c6" }), { out: "7 8\n", err: "" });
+  assert.deepEqual(await run("print(_)", { mangle: "c7" }), { out: "2\n", err: "" });
+  // (and a cell's own private names still its own: another cell doesn't see them)
+  await run("_x = 'mine'", { mangle: "c8" });
+  assert.equal(lastLine((await run("print(_x)", { mangle: "c9" })).err), "NameError: name '_x' is not defined");
+});
+
 test("the Jupyter kernel: _, __, ___, _N and Out by execution count; a silent request records nothing", async () => {
   const k = await startKernel([]);
   const bound = <T>(p: Promise<T>) => Promise.race([p, new Promise<never>((_, no) => setTimeout(() => no(new Error("no end within 30 s: " + k.out.stderr)), 30000))]);
