@@ -1,0 +1,10 @@
+{
+ "v": 1,
+ "reason": "Sage mode: bases of spaces of modular forms for Gamma0(N) (cusp forms from Hecke translates of trace forms, oldforms, Eisenstein series over Q(zeta_m), Sage's echelon forms), q-expansions to any precision, Hecke matrices, forms and their arithmetic, with doctests (lib/_sage_modular.py, +930 lines, and its engine/py copy). Python only, in Sage mode's own library; the engine wasm is unchanged. engine/lib/sage.src +31687, engine/lib/sage.pre +167523, cli/lib.gen.js +10212 and cli/pyjs.cjs +27492 bytes, measured locally with CI's build (pinned bun 1.4.4, node 24.21.0) on base 6329b217 and the merge eafeba17; each bound adds 64 bytes. The sage.src and sage.pre ceilings rise to their measured sizes + 64 (the per-PR ceiling rule).",
+ "bytes": {
+  "engine/lib/sage.src": 31751,
+  "engine/lib/sage.pre": 167587,
+  "cli/lib.gen.js": 10276,
+  "cli/pyjs.cjs": 27556
+ }
+}
