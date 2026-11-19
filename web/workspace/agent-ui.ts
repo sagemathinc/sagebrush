@@ -43,7 +43,8 @@ export function readConnect(text: string, port = ""): { code: string; port: numb
   let code = "", p = "";
   const q = /[?&]pair=([^&#\s]*)/.exec(t);
   if (q) {
-    code = decodeURIComponent(q[1]);
+    // (a malformed %-escape is a link that isn't the agent's, said as any other)
+    try { code = decodeURIComponent(q[1]); } catch { return { error: "That link isn't right: ask your agent for its link again." }; }
     p = /[?&]port=([^&#\s]*)/.exec(t)?.[1] ?? "";
     if (!code) return { error: "That link has no code: ask your agent for its link again." };
     if (!p) return { error: "That link has no port: ask your agent for its link again." };

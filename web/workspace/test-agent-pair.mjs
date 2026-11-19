@@ -765,6 +765,9 @@ ok(actorOf("Claude Code", "claude-code") === "agent:Claude-Code" && actorOf("", 
   ok(readConnect(C).error === ONLY_CODE && /link/.test(ONLY_CODE) && !/port/i.test(ONLY_CODE), "a code alone, no port: ask the agent for its link (no port to find)");
   ok(/no port/.test(readConnect(`https://sagebrush.space/board/?pair=${C}`).error ?? ""), "a link with no port: ask for it again");
   ok(/port isn't right/.test(readConnect(`${C} 70000`).error ?? "") && /port isn't right/.test(readConnect(`https://x/board/?pair=${C}&port=0`).error ?? ""), "a port out of range");
+  let threw = null;
+  const bad = ["https://sagebrush.space/board/?pair=%&port=7", "https://sagebrush.space/board/?pair=%E0%A4&port=7"].map((l) => { try { return readConnect(l); } catch (e) { threw = e; return null; } });
+  ok(!threw && bad.every((r) => /isn't right/.test(r?.error ?? "")), "a malformed %-escape in the code: the inline error, nothing thrown", { threw: String(threw), bad });
   ok(/Paste/.test(readConnect("  ").error ?? "") && /isn't the agent's link/.test(readConnect("https://sagebrush.space/agents/").error ?? ""), "nothing, or another link");
 }
 {
