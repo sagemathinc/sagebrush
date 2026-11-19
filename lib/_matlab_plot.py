@@ -3941,13 +3941,15 @@ class FigureView(_InlineFigure):
     def _repr_mimebundle_(self, include=None, exclude=None):
         if self.scene is None:
             # (in the formats figures are shown in: _graphics.figure_formats)
-            b = {"text/plain": self.description()}
+            b, md = {"text/plain": self.description()}, {}
             svg, png = self._repr_svg_(), self._repr_png_()
             if svg is not None:
                 b["image/svg+xml"] = svg
+            if isinstance(png, tuple):  # ("retina": the PNG at twice the size, and the size to show it at)
+                png, md["image/png"] = png
             if png is not None:
                 b["image/png"] = png
-            return b
+            return (b, md) if md else b
         import json
         from sage_plot3d import SCENE_MIME, viewer_html, jupyter_bundle, _in_jupyter
         title = self.description()

@@ -1,6 +1,7 @@
 {
  "made_by": "test/jupyter_figures_gen.py",
  "python": "3.14.4",
+ "ipykernel": "7.3.0",
  "matplotlib": "3.11.1",
  "matplotlib_inline": "0.2.2",
  "cases": [
@@ -16,6 +17,7 @@
       "image/png",
       "text/plain"
      ],
+     "metadata": {},
      "png": [
       556,
       413
@@ -35,6 +37,7 @@
       "image/png",
       "text/plain"
      ],
+     "metadata": {},
      "png": [
       361,
       274
@@ -55,6 +58,7 @@
       "image/png",
       "text/plain"
      ],
+     "metadata": {},
      "png": [
       361,
       274
@@ -74,7 +78,8 @@
      "mimes": [
       "image/svg+xml",
       "text/plain"
-     ]
+     ],
+     "metadata": {}
     }
    ]
   },
@@ -92,6 +97,7 @@
       "image/svg+xml",
       "text/plain"
      ],
+     "metadata": {},
      "png": [
       556,
       413
@@ -111,7 +117,8 @@
      "mimes": [
       "image/svg+xml",
       "text/plain"
-     ]
+     ],
+     "metadata": {}
     }
    ]
   },
@@ -128,9 +135,62 @@
       "image/png",
       "text/plain"
      ],
+     "metadata": {
+      "image/png": {
+       "width": 557,
+       "height": 413
+      }
+     },
      "png": [
       1114,
       826
+     ]
+    }
+   ]
+  },
+  {
+   "name": "figure_format retina, a figure of its own size",
+   "cells": [
+    "import matplotlib.pyplot as plt",
+    "%config InlineBackend.figure_format = 'retina'\nfig, ax = plt.subplots(figsize=(4, 3))\nax.plot([1, 2]);"
+   ],
+   "outputs": [
+    {
+     "type": "display_data",
+     "mimes": [
+      "image/png",
+      "text/plain"
+     ],
+     "metadata": {
+      "image/png": {
+       "width": 362,
+       "height": 274
+      }
+     },
+     "png": [
+      724,
+      549
+     ]
+    }
+   ]
+  },
+  {
+   "name": "figure_formats png",
+   "cells": [
+    "import matplotlib.pyplot as plt",
+    "%config InlineBackend.figure_formats = ['png']\nplt.plot([1, 2, 3]);"
+   ],
+   "outputs": [
+    {
+     "type": "display_data",
+     "mimes": [
+      "image/png",
+      "text/plain"
+     ],
+     "metadata": {},
+     "png": [
+      556,
+      413
      ]
     }
    ]
@@ -168,7 +228,8 @@
      "mimes": [
       "image/svg+xml",
       "text/plain"
-     ]
+     ],
+     "metadata": {}
     }
    ]
   },

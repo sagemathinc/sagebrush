@@ -11,6 +11,7 @@ import os
 import struct
 import sys
 
+import ipykernel
 import matplotlib
 import matplotlib_inline
 from jupyter_client.manager import start_new_kernel
@@ -24,6 +25,8 @@ CASES = [
     ("figure_formats png and svg", ["import matplotlib.pyplot as plt", "%config InlineBackend.figure_formats = {'png', 'svg'}\nplt.plot([1, 2, 3]);"]),
     ("figure_format svg (one)", ["import matplotlib.pyplot as plt", "%config InlineBackend.figure_format = 'svg'\nplt.plot([1, 2, 3]);"]),
     ("figure_format retina", ["import matplotlib.pyplot as plt", "%config InlineBackend.figure_format = 'retina'\nplt.plot([1, 2, 3]);"]),
+    ("figure_format retina, a figure of its own size", ["import matplotlib.pyplot as plt", "%config InlineBackend.figure_format = 'retina'\nfig, ax = plt.subplots(figsize=(4, 3))\nax.plot([1, 2]);"]),
+    ("figure_formats png", ["import matplotlib.pyplot as plt", "%config InlineBackend.figure_formats = ['png']\nplt.plot([1, 2, 3]);"]),
     ("a format it can't show", ["%config InlineBackend.figure_formats = ['bmp']"]),
     ("a format it can't show leaves the formats", ["import matplotlib.pyplot as plt", "%config InlineBackend.figure_formats = ['svg']", "%config InlineBackend.figure_formats = ['bmp']", "plt.plot([1, 2, 3]);"]),
     ("figure_formats from a name", ["import matplotlib.pyplot as plt\nwanted = ['svg']", "%config InlineBackend.figure_formats = wanted\nplt.plot([1, 2, 3]);"]),
@@ -42,7 +45,7 @@ def outputs(kc, code):
         elif m["msg_type"] == "error":
             res.append({"error": c["ename"]})
         else:
-            o = {"type": m["msg_type"], "mimes": sorted(c["data"])}
+            o = {"type": m["msg_type"], "mimes": sorted(c["data"]), "metadata": c.get("metadata", {})}
             if "image/png" in c["data"]:
                 b = base64.b64decode(c["data"]["image/png"])
                 o["png"] = list(struct.unpack(">II", b[16:24]))
@@ -61,7 +64,8 @@ for name, cells in CASES:
         kc.stop_channels()
         km.shutdown_kernel(now=True)
 
-out = {"made_by": "test/jupyter_figures_gen.py", "python": sys.version.split()[0], "matplotlib": matplotlib.__version__,
+out = {"made_by": "test/jupyter_figures_gen.py", "python": sys.version.split()[0], "ipykernel": ipykernel.__version__,
+       "matplotlib": matplotlib.__version__,
        "matplotlib_inline": matplotlib_inline.__version__, "cases": cases}
 path = os.path.join(os.path.dirname(os.path.abspath(__file__)), "jupyter-figures.json")
 with open(path, "w") as f:

@@ -8324,6 +8324,15 @@ def StringToInteger(s, b=10):
     return int(m.group(1) + m.group(2), b)
 
 
+def sagebrush_figures(mode=None):
+    """sagebrush_figures(mode): how figures are shown, in every language (Python's sagebrush.figures): "auto" (the
+    default: an SVG, unless it would be over 1 MB, then a PNG drawn at twice the size, said under it), "svg", "png"
+    (drawn at twice the size, sharp on a high-density screen) or "both"; "reset", the default again.  Without an
+    argument, the current one."""
+    import _graphics
+    return _graphics.figures(None if mode is None else str(mode))
+
+
 def Sprint(x):
     return _sprint_str(x)
 

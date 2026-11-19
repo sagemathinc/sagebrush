@@ -4513,6 +4513,18 @@ def randperm_(n, k=None):
     return np.asarray(p, dtype=np.float64).reshape((p.size, 1))
 
 
+@_bs("sagebrush_figures")
+def sagebrush_figures_(mode=None):
+    """sagebrush_figures(mode): how figures are shown, in every language (Python's sagebrush.figures): 'auto' (the
+    default: an SVG, unless it would be over 1 MB, then a PNG drawn at twice the size, said under it), 'svg', 'png'
+    (drawn at twice the size, sharp on a high-density screen) or 'both'; 'reset', the default again.  Without an
+    argument, the current one."""
+    import _graphics
+    # (a char vector 'png' or a string "png")
+    m = _graphics.figures(None if mode is None else mode.text() if isinstance(mode, Char) else mode.s if isinstance(mode, Str) else str(mode))
+    return Char(m)
+
+
 @_bs("linspace")
 def linspace_(a, b, n=100.0):
     """linspace(x1, x2, n) as MATLAB documents it: n points from x1 to x2,

@@ -13,8 +13,11 @@ accepted and ignored).
 """
 
 from . import modsym, ap, mf, poly, nf, linalg
+# (how figures are shown, in every language: "auto", "svg", "png" or "both"; MATLAB's and Magma's sagebrush_figures)
+from _graphics import figures
 
-__all__ = ["modsym", "ap", "mf", "poly", "nf", "linalg", "capabilities", "limit", "stop_points", "progress_snapshot"]
+__all__ = ["modsym", "ap", "mf", "poly", "nf", "linalg", "capabilities", "limit", "stop_points", "progress_snapshot",
+           "figures"]
 
 
 # ---- the agent API (estimates plan r3 §1.1): what this build provides,

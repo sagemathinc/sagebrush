@@ -1776,68 +1776,121 @@ def describe_svg(svg):
 # ------------------------------------------------------------------ output
 
 # ------------------------------------------------------------------ inline figures
-# Jupyter's InlineBackend.figure_formats: the formats a figure is shown in.  %config sets them (lib/_pyjs_magic.py);
-# otherwise the host's: the Jupyter kernel shows PNG, as ipykernel does (src/kernel.ts), and the notebook page and
-# everything else SVG.  A figure's _repr_png_ and _repr_svg_ follow them; its SVG for any other use is
-# _sagebrush_svg_ (svg_of).
-def figure_formats():
-    """The formats figures are shown in: a tuple of "png" and "svg"."""
-    import builtins
-    set_ = getattr(builtins, "__sagebrush_figure_formats__", None)
-    if set_ is not None:
-        return set_
-    host = getattr(builtins, "__pyjs_host__", None)
-    v = host("figure_formats") if host is not None else None
-    return tuple(str(v).split(",")) if v else ("svg",)
+# How a figure is shown, in every language: "auto" (the default: its SVG, unless that would be over AUTO_SVG_MAX bytes,
+# then a PNG, said in a line under it), "svg", "png" or "both".  A PNG is always drawn at twice the figure's dpi, with
+# its size at once in the display's metadata (IPython's "retina"), so it is sharp on a high-density screen.  Set by
+# figures() (sagebrush.figures in Python and Sage, sagebrush_figures in MATLAB and Magma) or %config
+# InlineBackend.figure_format(s) (lib/_pyjs_magic.py); else the host's (the Jupyter kernel's --figures or
+# SAGEBRUSH_FIGURES, src/kernel.ts); else "auto".  A figure's _repr_svg_ and _repr_png_ follow it; its SVG for any
+# other use is _sagebrush_svg_ (svg_of).
+FIGURE_MODES = ("auto", "svg", "png", "both")
+# (1 MB: CoCalc's limit on a cell's output; a figure with a few curves or a few thousand points is far below it)
+AUTO_SVG_MAX = 1 << 20
 
 
-def set_figure_formats(formats):
-    """Show figures in `formats` (%config InlineBackend.figure_formats); None: the host's again."""
+def figure_mode():
+    """How figures are shown now: "auto", "svg", "png" or "both"."""
     import builtins
-    if formats is None:
-        if hasattr(builtins, "__sagebrush_figure_formats__"):
-            delattr(builtins, "__sagebrush_figure_formats__")
-        return
-    builtins.__sagebrush_figure_formats__ = tuple(formats)
+    m = getattr(builtins, "__sagebrush_figures__", None)
+    if m is None:
+        host = getattr(builtins, "__pyjs_host__", None)
+        m = host("figures") if host is not None else None
+    return m if m in FIGURE_MODES else "auto"
+
+
+def figures(mode=None):
+    """How figures are shown: "auto" (an SVG, unless it would be over 1 MB: then a sharp PNG, said under it), "svg",
+    "png" (drawn at twice the size, sharp on a high-density screen) or "both"; "reset": the default again.  Without
+    an argument, the current one."""
+    import builtins
+    if mode is None:
+        return figure_mode()
+    m = str(mode).lower()
+    if m == "reset":
+        if hasattr(builtins, "__sagebrush_figures__"):
+            delattr(builtins, "__sagebrush_figures__")
+        return figure_mode()
+    if m not in FIGURE_MODES:
+        raise ValueError("figures: %r is not a way to show figures: give 'auto', 'svg', 'png' or 'both'" % (mode,))
+    builtins.__sagebrush_figures__ = m
+    return m
 
 
 def svg_of(obj):
-    """obj's SVG, whatever the formats figures are shown in."""
+    """obj's SVG, however figures are shown."""
     f = getattr(obj, "_sagebrush_svg_", None)
     return f() if f is not None else obj._repr_svg_()
+
+
+def svg_size(svg):
+    """An SVG's width and height as written on it (SVG units: pixels at 100 dpi)."""
+    import re
+    m = re.match(r'<svg [^>]*?width="([^"]*)" height="([^"]*)"', svg)
+    if m is None:
+        raise ValueError("save: the picture has no size to draw it at")
+    return m.group(1), m.group(2)
 
 
 def svg_png(svg, dpi=None, transparent=False):
     """An SVG drawn as PNG bytes by Sagebrush's PNG module (lib/_png.py): dpi pixels per inch, 100 SVG units to the
     inch, default 100, on white unless transparent."""
-    import re
     import _png
-    m = re.match(r'<svg [^>]*?width="([^"]*)" height="([^"]*)"', svg)
-    if m is None:
-        raise ValueError("save: the picture has no size to draw it at")
+    sw, sh = svg_size(svg)
     try:
-        w, h = float(m.group(1)) / 100, float(m.group(2)) / 100
+        w, h = float(sw) / 100, float(sh) / 100
     except ValueError:
         w = h = float("nan")
     # (a background rectangle sized in percent, a MATLAB figure's: given the picture's own size, which the PNG
     # module's drawing needs)
-    svg = svg.replace('<rect width="100%" height="100%"', '<rect width="%s" height="%s"' % (m.group(1), m.group(2)), 1)
+    svg = svg.replace('<rect width="100%" height="100%"', '<rect width="%s" height="%s"' % (sw, sh), 1)
     # (_png checks the size and dpi, finite and within its limits, first)
     return _png.figure_png(svg, w, h, 100 if dpi is None else dpi, None if transparent else "white", [])
 
 
+def _mb(n):
+    return "%.1f MB" % (n / 1e6) if n >= 1e5 else "%d kB" % round(n / 1e3)
+
+
+# (the SVG "auto" made for a figure and found too big, kept for its _repr_png_, which the display asks next)
+_auto_svg = [None, None]
+
+
 class InlineFigure:
-    """A figure shown as figure_formats() say: a subclass gives _sagebrush_svg_ (its SVG) and may give
-    _sagebrush_png_ (its PNG; else its SVG drawn)."""
+    """A figure shown as figure_mode() says: a subclass gives _sagebrush_svg_ (its SVG), and may give
+    _sagebrush_png_(scale) -> (PNG bytes, (width, height) to show it at) (else its SVG drawn)."""
 
     def _repr_svg_(self):
-        return self._sagebrush_svg_() if "svg" in figure_formats() else None
+        m = figure_mode()
+        if m in ("svg", "both"):
+            return self._sagebrush_svg_()
+        if m == "auto":
+            svg = self._sagebrush_svg_()
+            if len(svg) <= AUTO_SVG_MAX:
+                return svg
+            _auto_svg[0], _auto_svg[1] = self, svg
+        return None
 
     def _repr_png_(self):
-        if "png" not in figure_formats():
+        m = figure_mode()
+        if m == "svg":
             return None
-        f = getattr(self, "_sagebrush_png_", None)
-        return f() if f is not None else svg_png(self._sagebrush_svg_())
+        if m == "auto":
+            svg = _auto_svg[1] if _auto_svg[0] is self else self._sagebrush_svg_()
+            _auto_svg[0] = _auto_svg[1] = None
+            if len(svg) <= AUTO_SVG_MAX:
+                return None
+            import builtins
+            # (said under the figure: the host writes this line after it, src/runtime/index.ts)
+            builtins.__sagebrush_note__ = ("Shown as a PNG: its SVG would be %s. For an SVG anyway: "
+                                           "sagebrush.figures('svg') (in MATLAB or Magma: sagebrush_figures('svg'))."
+                                           % _mb(len(svg)))
+        png, (w, h) = self._sagebrush_png_(2)
+        return png, {"width": int(round(w)), "height": int(round(h))}
+
+    def _sagebrush_png_(self, scale):
+        svg = self._sagebrush_svg_()
+        w, h = svg_size(svg)
+        return svg_png(svg, 100 * scale), (float(w), float(h))
 
 
 def host_display(obj):

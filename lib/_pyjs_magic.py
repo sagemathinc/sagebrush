@@ -6,8 +6,8 @@ below.
 
 Line magics:
     %matplotlib [inline]      figures are shown inline already
-    %config InlineBackend.figure_formats = {'png', 'svg'}   (or figure_format = 'svg'): the formats figures
-                              are shown in: PNG under the Jupyter kernel, as IPython's, else SVG
+    %config InlineBackend.figure_format = 'svg'   (or 'png', or figure_formats = {'png', 'svg'}): how figures
+                              are shown (sagebrush.figures; the default is "auto")
     %load_ext autoreload, %reload_ext autoreload, %unload_ext autoreload
     %autoreload [0|1|2|off|explicit|all|now], %aimport [mod, -mod]
     %time STATEMENT           the wall time (Sagebrush cannot measure CPU time)
@@ -465,9 +465,10 @@ def _matplotlib(line):
 
 
 
-# (%config: Jupyter's InlineBackend.figure_formats, lib/_graphics.py figure_formats.  As IPython's: the value is
-# evaluated in the notebook's namespace, and a format it can't show or another configurable isn't an error, only
-# said; "retina" is PNG at the figure's own size for now, said too)
+# (%config: Jupyter's InlineBackend.figure_format(s), as the way figures are shown, lib/_graphics.py figures: 'svg'
+# is "svg", 'png' or 'retina' (or 'png2x') is "png", a PNG always being drawn at twice the size, and both are "both".
+# As IPython's: the value is evaluated in the notebook's namespace, and a format it can't show or another
+# configurable isn't an error, only said)
 _FORMAT_NAMES = {"png": "png", "svg": "svg", "retina": "png", "png2x": "png"}
 
 
@@ -476,26 +477,21 @@ def _config(line):
     import _graphics
     m = re.match(r"\s*InlineBackend\.(figure_formats?)\s*=\s*(.+?)\s*$", line, re.S)
     if m is None:
-        print("Sagebrush's %%config sets InlineBackend.figure_formats (or InlineBackend.figure_format) only, the "
-              "formats figures are shown in; %s is not used." % (line.strip() or "(nothing)"), file=sys.stderr)
+        print("Sagebrush's %%config sets InlineBackend.figure_formats (or InlineBackend.figure_format) only, how "
+              "figures are shown; %s is not used." % (line.strip() or "(nothing)"), file=sys.stderr)
         return
     v = eval(m.group(2), _user_ns())
     names = [v] if isinstance(v, str) else list(v) if isinstance(v, (list, tuple, set, frozenset)) else None
     if not names or not all(isinstance(n, str) for n in names):
-        raise UsageError("%%config InlineBackend.%s: give 'png', 'svg' or both, not %r" % (m.group(1), v))
+        raise UsageError("%%config InlineBackend.%s: give 'png', 'retina' or 'svg' (or a set of them), not %r"
+                         % (m.group(1), v))
     bad = [n for n in names if n.lower() not in _FORMAT_NAMES]
     if bad:
-        print("Sagebrush shows figures as 'png' or 'svg', not %s: the formats are unchanged."
+        print("Sagebrush shows figures as 'png', 'retina' or 'svg', not %s: how they are shown is unchanged."
               % ", ".join(repr(n) for n in bad), file=sys.stderr)
         return
-    if any(n.lower() in ("retina", "png2x") for n in names):
-        print("Sagebrush shows 'retina' figures as 'png' at their own size for now.", file=sys.stderr)
-    formats = []
-    for n in names:
-        f = _FORMAT_NAMES[n.lower()]
-        if f not in formats:
-            formats.append(f)
-    _graphics.set_figure_formats(formats)
+    kinds = {_FORMAT_NAMES[n.lower()] for n in names}
+    _graphics.figures("both" if len(kinds) == 2 else kinds.pop())
 
 
 def _no_shell(line):
