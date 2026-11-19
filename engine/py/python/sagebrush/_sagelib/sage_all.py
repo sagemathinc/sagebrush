@@ -1875,13 +1875,49 @@ def _QQ(x, d=None):
     return _QQ_exact(x, d)
 
 
+import re as _re_q
+
+# an integer as Sage's QQ(str) reads it (GMP's base 0): an optional minus,
+# then 0x/0X hexadecimal, 0b/0B binary, a leading 0 octal, else decimal;
+# ASCII digits only, no underscores, no plus sign
+_QQ_INT = _re_q.compile(r"-?(?:0[xX][0-9a-fA-F]+|0[bB][01]+|0[0-7]*|[1-9][0-9]*)\Z")
+
+
+def _qq_from_str(s):
+    """The rational a string denotes, as Sage's QQ(s): 'p' or 'p/q' (space
+    around the parts and the slash allowed), each part an integer as
+    _QQ_INT reads it; else Sage's TypeError (decimals such as '0.5', '1/0',
+    '+3', '1_000' and the empty string are refused, as in Sage)."""
+    parts = s.strip().split("/")
+    if len(parts) <= 2:
+        ps = [p.strip() for p in parts]
+        if all(p.isascii() and _QQ_INT.match(p) for p in ps):
+            num = int(ps[0], 0) if not _re_q.match(r"-?0[0-7]+\Z", ps[0]) else int(ps[0], 8)
+            den = 1
+            if len(ps) == 2:
+                den = int(ps[1], 0) if not _re_q.match(r"-?0[0-7]+\Z", ps[1]) else int(ps[1], 8)
+            if den != 0:
+                return _Fraction(num, den)
+    raise TypeError("unable to convert %r to a rational" % (s,))
+
+
 def _QQ_exact(x, d=None):
-    """The exact rational x (or x/d); a real number's exact binary value."""
+    """The exact rational x (or x/d); a real number's exact binary value
+    (examples of strings in QQ's documentation)."""
     if d is not None and d == 0:
         raise ZeroDivisionError("rational division by zero")
+    if d is None and x is None:
+        # (QQ(None) is 0, as in Sage)
+        x = 0
     if d is None and hasattr(x, "_rational_"):
         x = x._rational_()
-    f = _Fraction(x) if d is None else _Fraction(x, d)
+    if isinstance(x, str):
+        f = _qq_from_str(x)
+        return _q(f if d is None else f / _Fraction(_QQ_exact(d)))
+    try:
+        f = _Fraction(x) if d is None else _Fraction(x, d)
+    except ValueError:
+        raise TypeError("unable to convert %r to a rational" % (x,))
     if type(f) is not _Fraction:
         f = _Fraction(f._numerator, f._denominator)
     return _q(f)
