@@ -2172,6 +2172,11 @@ export function createNotebook(root, opts = {}) {
         const refused = (t && typeof t === "object" ? t.saved : t);
         if (typeof refused === "string" && /^not saved\b/.test(refused)) {
           if (lastJson === json) lastJson = null;
+          // (refused by a journal's store that, still this page's, isn't the writer, or isn't ready again yet: the focus
+          // takeover's moment, while another tab writes; this page follows, and reloads the document when it writes
+          // again, the keys typed meanwhile passed on (web/page/handover.ts): nothing to say or send again, as flush
+          // sends nothing while it follows; a store let go (another notebook opened) is a failed save, as any)
+          if (st.journaled && !st.released && (!st.writer || !st.ready)) return;
           // (for any notebook, shown or just left, as a thrown one is: saved() names it; said only for the one shown)
           saveFailed(mine, st, sent, json, seq, Object.assign(new Error(refused.replace(/^not saved:?\s*/, "") || "not saved"), { refused: true }));
           if (mine !== shown || store !== st) return;

@@ -1739,6 +1739,25 @@ try {
     check(made.length === 1 && made[0] === "/" + notSavedName(r.xName) + ".ipynb" && saidRefused(said, r.xName), "…named \"X (your changes, not saved there)\", and the page says its re-send was refused: " + JSON.stringify({ made, said }));
     check(again === "resolved" && made.length === 1 && (await reopen(made[0], " # x-thrown")), "…its re-send refused for good: kept as a copy, saved() resolves, the copy has the edit: " + JSON.stringify({ again, made }));
   }
+  // (a journal's store that isn't the writer, the focus takeover's moment (another tab writes, this page follows): its
+  //  refusal isn't a failed save of this page's: saved() resolves, so a hand-over's quiesce lets the lock go, nothing is
+  //  said or counted as left; the store writing again, the edit is saved)
+  {
+    const NW = "not saved: this notebook is open for editing in another tab of this browser";
+    const prep = await ev(`(() => { const st = sagebrush.notebook.store; if (!st?.journaled) return false; window.__fst = st; window.__fsave = st.save; window.__fw = st.writer; st.save = () => { st.writer = false; return Promise.resolve(${JSON.stringify(NW)}); }; return true; })()`);
+    check(prep, "the notebook shown is saved through a journal's store (the takeover rows need one)");
+    if (prep) {
+      await typeCell(" # following");
+      const r = await ev(`sagebrush.notebook.saved().then(() => "resolved", (e) => String(e?.message ?? e))`);
+      const st = await ev(`({ said: document.querySelector("#saved")?.textContent ?? "", left: sagebrush.notebook.leftOutstanding })`);
+      await ev(`(window.__fst.save = window.__fsave, window.__fst.writer = window.__fw, 1)`);
+      check(r === "resolved" && !/another tab/.test(st.said) && st.left === 0, "a refusal while the journal's store isn't the writer (a focus takeover): saved() resolves, nothing said, nothing left: " + JSON.stringify({ r, ...st }));
+      const again = await ev(`sagebrush.notebook.saved().then(() => "resolved", (e) => String(e?.message ?? e))`);
+      const path = await shownPath();
+      const kept = await until(`${W}.read(${JSON.stringify(path)}).then((r) => r.content.cells.some((c) => String(c.code).includes(" # following"))).catch(() => false)`, 10000);
+      check(again === "resolved" && kept, "…the store the writer again: the edit is saved in the notebook's record: " + JSON.stringify({ again, path, kept }));
+    }
+  }
   for (const e of errors) fails.push("page error: " + e);
 } catch (e) {
   fails.push("threw: " + (e?.stack ?? e));
