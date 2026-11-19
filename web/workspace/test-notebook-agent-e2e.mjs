@@ -190,6 +190,11 @@ try {
   const rd = await drive({ op: "req", method: "workspace.read", params: { path } });
   const doc = rd.ok?.content?.json;
   ok(Array.isArray(doc?.cells) && doc.cells.some((c) => c.code === "x = 1"), "the agent reads the notebook, the person's cell in it", rd);
+  // (and its address, a link the agent can give the person: this site's notebook page, by the notebook's own id, which
+  //  the agent's view of the entry doesn't carry)
+  const site = await ev("location.origin");
+  const ref = await ev(`window.sagebrush.workspace.stat(${JSON.stringify(path)}).then((e) => e?.ref ?? null)`).catch(() => null);
+  ok(typeof ref === "string" && rd.ok?.entry?.url === site + "/?nb=" + encodeURIComponent(ref) && !("ref" in (rd.ok?.entry ?? {})), "the read's entry has url, the notebook's page on this site (and still no ref of its own)", { entry: rd.ok?.entry, ref });
   const MARK = "print('from the agent', 6 * 7)";
   const wr = await drive({ op: "req", method: "workspace.write", params: { path, content: { json: { ...doc, cells: [...doc.cells, { id: "agentcell1", code: MARK, outputs: [], n: null }] } }, base: rd.ok?.rev } });
   ok(!!wr.ok, "the agent writes it (its base)", wr);
