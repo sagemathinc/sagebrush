@@ -31,7 +31,7 @@ export type TurnEvent = { seq: number; turn_id: string } & (
       diff?: { path: string; before: string; after: string };
     }
   | { type: "attention"; id: string; kind: string; state: "open" | "approved" | "denied"; title: string; summary?: string; detail?: string; instance?: string }
-  | { type: "artifact"; id: string; kind: "markdown" | "code" | "diff" | "notebook"; title: string; lang?: string; body: string; path?: string }
+  | { type: "artifact"; id: string; kind: "markdown" | "code" | "diff" | "notebook" | "board"; title: string; lang?: string; body: string; path?: string }
   | { type: "turn_usage"; usage: { input_tokens: number; output_tokens: number } }
   | { type: "turn_error"; code: string; message: string }
   | { type: "turn_finished"; outcome: TurnOutcome; code?: string }
@@ -73,7 +73,7 @@ export interface Attention {
 
 export interface Artifact {
   id: string;
-  kind: "markdown" | "code" | "diff" | "notebook";
+  kind: "markdown" | "code" | "diff" | "notebook" | "board";
   title: string;
   lang?: string;
   body: string;
@@ -140,7 +140,7 @@ function messagePart(turn: Turn, id: string) {
 // a turn made here (null prototype) and in one kept from before (JSON's, an ordinary object) alike.
 export const TOOL_STATUSES = ["running", "ok", "error", "unknown"] as const;
 export const ATTENTION_STATES = ["open", "approved", "denied"] as const;
-export const ARTIFACT_KINDS = ["markdown", "code", "diff", "notebook"] as const;
+export const ARTIFACT_KINDS = ["markdown", "code", "diff", "notebook", "board"] as const;
 const OUTCOMES: readonly TurnOutcome[] = ["completed", "interrupted", "error"];
 const oneOf = <T extends string>(v: unknown, xs: readonly T[]): v is T => typeof v === "string" && (xs as readonly string[]).includes(v);
 /** An artifact's language as a name the view can show: letters, digits and "+#._-", at most 32; anything else, none. */
