@@ -27,7 +27,16 @@ for (const [base, delta, ok] of [
   [100000, 0, true], [100000, -100000, true],
 ]) assert.equal(compare({ x: base }, { x: base + delta }).ok, ok, base + "/" + delta);
 assert.equal(compare({ a: 1000 }, { a: 1000, added: 50000 }).ok, true);
-assert.equal(compare({ a: 1000 }, { a: 1000, added: 50001 }).ok, false);
+assert.equal(compare({ a: 1000 }, { a: 1000, added: 50001 }).ok, true);
+const split = compare({ "engine/lib/sage.pre": 1_000_000, "engine/lib/sage.src": 500_000 },
+  { "engine/lib/sage.pre": 463_204, "engine/lib/sage.src": 381_687,
+    "engine/lib/mod-sage-ffmat.pre": 538_944, "engine/lib/mod-sage-ffmat.src": 119_962 });
+assert.equal(split.ok, true, "a lazy split reports new chunks without failing them");
+assert.deepEqual(split.rows.find(r => r.bundle === "engine/lib/mod-sage-ffmat.pre"),
+  { bundle: "engine/lib/mod-sage-ffmat.pre", base: 0, merge: 538944, delta: 538944, limit: 50000, note: "new" });
+assert.equal(compare({}, { standalone: 999_999_999 }).ok, true, "all genuinely new bundles are report-only");
+assert.equal(compare({ x: 0 }, { x: 50001 }).ok, false, "present zero-byte bundle is not new");
+assert.equal(compare({ x: 1000 }, { x: 51001, added: 999999 }).ok, false, "new bundle cannot exempt existing growth");
 assert.deepEqual(compare({ gone: 1000 }, {}).rows[0],
   { bundle: "gone", base: 1000, merge: 0, delta: -1000, limit: 50000, note: "removed" });
 assert.equal(compare({ a: 100000, b: 100000 }, { a: 0, b: 150001 }).ok, false, "shrink cannot offset another bundle");
@@ -123,6 +132,9 @@ try {
   assert.match(readFileSync(summary, "utf8"), /\| x \| 1000000 \| 1050000 \| \+50000 \| 50000 \|/);
   put(1_050_001);
   assert.equal(run().status, 1);
+  writeFileSync(join(dir, "merge-record.json"), JSON.stringify(make({ x: 1_000_000, lazy: 538_944 }, merge, "checks")));
+  assert.equal(run().status, 0, "actual gate accepts a new chunk");
+  assert.match(readFileSync(summary, "utf8"), /\| lazy \| 0 \| 538944 \| \+538944 \| 50000 \| new \|/);
   assert.equal(run(["--docs-only"]).status, 0);
   assert.equal(run(["--docs-only"], { SIZE_GATE_NODE: "true" }).status, 1);
   const bad = make({ x: 1 }, merge, "checks"); bad.key.measure_sha256 = "a".repeat(64);
