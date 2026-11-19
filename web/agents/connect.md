@@ -1,6 +1,6 @@
 # Connecting an agent to Sagebrush: the full reference
 
-The page for people is https://sagebrush.space/agents/connect/: three choices, each with one command. This is everything behind them, for agents and for anyone who wants all of it: each way to connect, what it needs, what it touches, how it behaves with a sandboxed Claude Code, and what isn't there yet.
+The page for people is https://sagebrush.space/agents/connect/: two choices, each with one command. This is everything behind them, for agents and for anyone who wants all of it: each way to connect, what it needs, what it touches, how it behaves with a sandboxed Claude Code, and what isn't there yet.
 
 | Way | Where it works today | What you install | With a sandboxed Claude Code |
 |---|---|---|---|
@@ -8,7 +8,6 @@ The page for people is https://sagebrush.space/agents/connect/: three choices, e
 | 2. `sagebrush-agent` | The Agents page, /agents/ on sagebrush.space. Claude here; Codex only on a connected computer | `sagebrush-agent` 0.7.1 (a download, not on npm) | Works: it never uses your Claude Code session |
 | 3. `sagebrush-mcp` | Math tools anywhere; your Sagebrush files from the notebook page, the LaTeX editor and boards | PyPI `sagebrush-mcp` 0.10.1 | Only if your Claude Code can load MCP servers |
 | 4. A cocalc.ai agent | Not yet | — | — |
-| 5. claude.ai or ChatGPT artifacts | In the chat app's artifact; no Sagebrush files | Nothing: npm `sagebrush-web` 0.10.1 from a CDN | Not affected: it runs in the chat app in your browser |
 
 ## 1. `sagebrush remote`: your computer runs a notebook's code
 
@@ -89,7 +88,7 @@ It works: it's a separate program and never uses your Claude Code session, sandb
 
 Needs PyPI `sagebrush-mcp` 0.10.1, [uv](https://docs.astral.sh/uv/), and an agent that loads MCP servers.
 
-An MCP server your agent starts: Sage and Python tools, and, when you pair a Sagebrush page with it, your Sagebrush workspace files.
+An MCP server your agent starts: Sage and Python tools, and, when you pair a Sagebrush page with it, your Sagebrush workspace files, including notebooks in Python, Sage, MATLAB or Magma that it writes and runs.
 
 ### Commands
 
@@ -128,27 +127,3 @@ Not yet. Not built.
 The plan: an agent in a cocalc.ai project works in your Sagebrush workspace, with access you grant on sagebrush.space. It needs Sagebrush's sync, which isn't on yet.
 
 What works today: a cocalc.ai project can be the computer for option 1 (on the testing site), and `sagebrush-mcp`'s math tools work in a project. A page can't pair with a server in a project, because your browser's 127.0.0.1 isn't the project's.
-
-## 5. Sagebrush in claude.ai or ChatGPT artifacts
-
-Nothing to install: npm `sagebrush-web` 0.10.1, from the jsDelivr CDN.
-
-Sagebrush's math engines in one JavaScript module that an artifact in the chat app can import. Ask the chat to use it in an artifact:
-
-```
-const sb = await import("https://cdn.jsdelivr.net/npm/sagebrush-web@0.10.1/sagebrush-engine.mjs");
-```
-
-### What it touches
-
-- The code runs inside the artifact, in your browser. Nothing runs on your computer outside the browser, and it doesn't use sagebrush.space or your Sagebrush files.
-- The browser downloads about 3 MB from cdn.jsdelivr.net.
-
-### With a sandboxed Claude Code
-
-Not affected: it's the claude.ai web app, not Claude Code.
-
-### Not yet
-
-- It's the engines' functions only: no Sage session, no notebook, no files, and no link to your sagebrush.space work.
-- Last tried in October: Claude's artifacts allowed `import()` from cdn.jsdelivr.net (not other CDNs); ChatGPT's allowed more.

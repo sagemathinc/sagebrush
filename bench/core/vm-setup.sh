@@ -22,13 +22,35 @@ uv pip install --python engine/.venv/bin/python engine/py/dist/*.whl >/dev/null
 # the WebAssembly modules, built with CI's path mapping, then the CLI that embeds the engine
 pnpm install --frozen-lockfile >/dev/null
 RUSTFLAGS="--remap-path-prefix=$HOME/.cargo=/home/runner/.cargo" node scripts/build-engine.mjs >/dev/null
-# The fresh engine wasm must equal its pin, strictly (the check alone only warns outside CI's push, dispatch and
-# schedule events): a mismatch prints the fresh and the pinned sha256 of each module and stops this type
-if ! node --input-type=module -e 'import { checkFreshWasm } from "./scripts/check-fresh-wasm.mjs";
-const r = checkFreshWasm({ event: "push" }); console.log(r.message); process.exit(r.status);'; then
-  echo "error: the fresh engine wasm differs from wasm/pins.json (fresh and pinned sha256 above)" >&2
+# The fresh engine wasm against its pin, by the plan's pin policy (.bench-pin-policy, in every approved payload: its
+# absence means the approved provenance was lost, and stops this type). strict (master, a pull into master): it must
+# equal wasm/pins.json, or this type stops, with the fresh and pinned sha256 of each module printed. track (a track
+# tip, whose pin lags its source until the track's pull): a stale pin is printed, never fatal, and run.py records
+# the fresh build's sha256 in every point's identity; a check that couldn't run (status 2: pins.json malformed, a
+# module missing or unreadable) stops this type under either policy
+if [ ! -f .bench-pin-policy ]; then
+  echo "error: no .bench-pin-policy in the payload" >&2
   exit 1
 fi
+POLICY=$(cat .bench-pin-policy)
+case "$POLICY" in
+  strict)
+    if ! node --input-type=module -e 'import { checkFreshWasm } from "./scripts/check-fresh-wasm.mjs";
+const r = checkFreshWasm({ event: "push" }); console.log(r.message); process.exit(r.status);'; then
+      echo "error: the fresh engine wasm differs from wasm/pins.json (fresh and pinned sha256 above)" >&2
+      exit 1
+    fi ;;
+  track)
+    if ! node --input-type=module -e 'import { checkFreshWasm } from "./scripts/check-fresh-wasm.mjs";
+const r = checkFreshWasm({ event: "local" }); console.log(r.message); process.exit(r.status === 2 ? 2 : 0);'; then
+      echo "error: the engine wasm check could not run (above)" >&2
+      exit 1
+    fi
+    echo "pin policy track: the fresh engine wasm is recorded by its sha256 (run.py engine_pin)" ;;
+  *)
+    echo "error: unknown pin policy $POLICY" >&2
+    exit 1 ;;
+esac
 pnpm run build >/dev/null
 node scripts/build-cli.mjs >/dev/null
 # static FLINT for the Rust oracle, from the checked tarball
