@@ -7280,6 +7280,66 @@
   "class": "none",
   "owner": "memory guards' message (item D)"
  },
+ "lib/_sage_matrix.py :: Matrix.__mul__ :: raise TypeError(\"unsupported operand parent(s) for *: '%s' and '%s'\" % (self.parent(), other.parent())) #1": {
+  "class": "none",
+  "owner": "Sage-mode matrices (shape and exponent checks)",
+  "reason": "Sage's TypeError for a sum, difference or product of matrices and vectors of incompatible shapes (Sage's parent wording); it was zipped or truncated, a wrong answer; refuses nothing Sage computes"
+ },
+ "lib/_sage_matrix.py :: Matrix.__mul__ :: raise TypeError(\"unsupported operand parent(s) for *: '%s' and '%s'\" % (self.parent(), other.parent())) #2": {
+  "class": "none",
+  "owner": "Sage-mode matrices (shape and exponent checks)",
+  "reason": "Sage's TypeError for a sum, difference or product of matrices and vectors of incompatible shapes (Sage's parent wording); it was zipped or truncated, a wrong answer; refuses nothing Sage computes"
+ },
+ "lib/_sage_matrix.py :: Matrix._integral_exponent :: raise NotImplementedError(\"non-integral exponents not supported\") #0": {
+  "class": "none",
+  "owner": "Sage-mode matrices (shape and exponent checks)",
+  "reason": "Sage's NotImplementedError for a matrix power with a non-integral exponent (the same message); it was truncated to an integer, a wrong answer; refuses nothing Sage computes"
+ },
+ "lib/_sage_matrix.py :: Matrix._integral_exponent :: raise NotImplementedError(\"the given exponent is not supported\") #0": {
+  "class": "none",
+  "owner": "Sage-mode matrices (shape and exponent checks)",
+  "reason": "Sage's NotImplementedError for a matrix power with a non-integral exponent (the same message); it was truncated to an integer, a wrong answer; refuses nothing Sage computes"
+ },
+ "lib/_sage_matrix.py :: Matrix._same_shape :: raise TypeError(\"unsupported operand parent(s) for %s: '%s' and '%s'\" % (op, self.parent(), other.parent())) #0": {
+  "class": "none",
+  "owner": "Sage-mode matrices (shape and exponent checks)",
+  "reason": "Sage's TypeError for a sum, difference or product of matrices and vectors of incompatible shapes (Sage's parent wording); it was zipped or truncated, a wrong answer; refuses nothing Sage computes"
+ },
+ "lib/_sage_matrix.py :: Vector.__mul__ :: raise TypeError(\"unsupported operand parent(s) for *: '%s' and '%s'\" % (self.parent(), other.parent())) #0": {
+  "class": "none",
+  "owner": "Sage-mode matrices (shape and exponent checks)",
+  "reason": "Sage's TypeError for a sum, difference or product of matrices and vectors of incompatible shapes (Sage's parent wording); it was zipped or truncated, a wrong answer; refuses nothing Sage computes"
+ },
+ "lib/_sage_matrix.py :: Matrix :: NotImplementedError: non-integral exponents not supported #0": {
+  "class": "none",
+  "owner": "Sage-mode matrices (shape and exponent checks)",
+  "reason": "the Matrix class's documentation of Sage's refusals (shapes that don't agree, non-integral powers): examples, not limits"
+ },
+ "lib/_sage_matrix.py :: Matrix :: NotImplementedError: non-integral exponents not supported #1": {
+  "class": "none",
+  "owner": "Sage-mode matrices (shape and exponent checks)",
+  "reason": "the Matrix class's documentation of Sage's refusals (shapes that don't agree, non-integral powers): examples, not limits"
+ },
+ "lib/_sage_matrix.py :: Matrix :: NotImplementedError: the given exponent is not supported #0": {
+  "class": "none",
+  "owner": "Sage-mode matrices (shape and exponent checks)",
+  "reason": "the Matrix class's documentation of Sage's refusals (shapes that don't agree, non-integral powers): examples, not limits"
+ },
+ "lib/_sage_matrix.py :: Matrix :: TypeError: unsupported operand parent(s) for *: 'Full MatrixSpace of 2 by 2 dense matrices over Rational Field' and 'Vector space of dimension 3 over Rational Field' #0": {
+  "class": "none",
+  "owner": "Sage-mode matrices (shape and exponent checks)",
+  "reason": "the Matrix class's documentation of Sage's refusals (shapes that don't agree, non-integral powers): examples, not limits"
+ },
+ "lib/_sage_matrix.py :: Matrix :: TypeError: unsupported operand parent(s) for *: 'Vector space of dimension 3 over Rational Field' and 'Full MatrixSpace of 2 by 2 dense matrices over Rational Field' #0": {
+  "class": "none",
+  "owner": "Sage-mode matrices (shape and exponent checks)",
+  "reason": "the Matrix class's documentation of Sage's refusals (shapes that don't agree, non-integral powers): examples, not limits"
+ },
+ "lib/_sage_matrix.py :: Matrix :: TypeError: unsupported operand parent(s) for +: 'Full MatrixSpace of 2 by 2 dense matrices over Rational Field' and 'Full MatrixSpace of 3 by 3 dense matrices over Rational Field' #0": {
+  "class": "none",
+  "owner": "Sage-mode matrices (shape and exponent checks)",
+  "reason": "the Matrix class's documentation of Sage's refusals (shapes that don't agree, non-integral powers): examples, not limits"
+ },
  "lib/_sage_matrix.py :: Matrix.__mul__ :: raise TypeError(\"unsupported operand parent(s) for *: '%s' and '%s'\" % (self.parent(), other.parent())) #0": {
   "class": "none",
   "owner": "pcimc quick wins 3 (@sagebrush-sage2)",
