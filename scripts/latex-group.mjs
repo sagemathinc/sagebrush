@@ -96,7 +96,10 @@ export const LATEX_LAZY_CAPS = {
   // (50,816 / 17,368: Nov 18 2026, for the one check a page asks before a notebook an agent created runs by itself
   //  (AgentPairing.mayRunCreated: the creation's own grant still in force, with May run code and Everything); the run
   //  itself is the notebook page's. Measured locally with the board page's forward merged: 50,752 / 17,304, + 64)
-  AGENT: { label: "the LaTeX agent pairing's chunk", raw: 50816, gzip: 17368 },
+  // (51,193 / 17,561: Nov 19 2026, for workspace_create's description of a notebook's language, mode (python, sage,
+  //  matlab or magma, an example each), which the pairing's compiled schema carries. Measured in CI at 1055da1d (run
+  //  44462639042): 51,129 / 17,497, + 64)
+  AGENT: { label: "the LaTeX agent pairing's chunk", raw: 51193, gzip: 17561 },
   // (the agent tools' work: web/latex/tools.ts, latex_check's report and latex_render's pictures, on an agent's first call)
   // (16,546 / 6,950: Nov 11 2026: latex_build's own code (build.ts, the
   //  engine driven from a snapshot, and the pages' fit) here, out of the eager group, its shared rules handed in by the
