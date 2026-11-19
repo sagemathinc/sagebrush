@@ -218,6 +218,351 @@
   "owner": "exact linear algebra (engine/arith)",
   "reason": "the multimodular elimination's prime count (the largest entry's size, in a Hadamard-type bound); refuses nothing"
  },
+ "engine/arith/src/zseries.rs ::  :: const _: () = assert!((BETA_MAX + 1).div_ceil(61) as usize <= P_MAX); #0": {
+  "class": "none",
+  "owner": "series ops",
+  "reason": "the series ops' derived bounds, counters, saturating overflow (refused by a cap's own site), a metered gcd's limit, an internal shape assert or a test assertion: refuses nothing itself"
+ },
+ "engine/arith/src/zseries.rs ::  :: const _: () = assert!(NTT_PRIME_ROOTS.len() == 2 * P_MAX); #0": {
+  "class": "none",
+  "owner": "series ops",
+  "reason": "the series ops' derived bounds, counters, saturating overflow (refused by a cap's own site), a metered gcd's limit, an internal shape assert or a test assertion: refuses nothing itself"
+ },
+ "engine/arith/src/zseries.rs ::  :: pub const BETA_MAX: u64 = 1 << 14; #0": {
+  "class": "1+3",
+  "disposition": {
+   "1": "shared",
+   "3": {
+    "followup": "FU-B18-1"
+   }
+  },
+  "owner": "series ops",
+  "reason": "the series ops' fixed caps (series n <= 2^17, sigma and Euler n <= 2^20, input bits <= 2^12, output bits <= 2^14, n beta <= 2^26, work <= 2^34, request bytes), admitted before any allocation; each refusal names the cap and the way around it"
+ },
+ "engine/arith/src/zseries.rs ::  :: pub const B_MAX: u64 = 1 << 12; #0": {
+  "class": "1+3",
+  "disposition": {
+   "1": "shared",
+   "3": {
+    "followup": "FU-B18-1"
+   }
+  },
+  "owner": "series ops",
+  "reason": "the series ops' fixed caps (series n <= 2^17, sigma and Euler n <= 2^20, input bits <= 2^12, output bits <= 2^14, n beta <= 2^26, work <= 2^34, request bytes), admitted before any allocation; each refusal names the cap and the way around it"
+ },
+ "engine/arith/src/zseries.rs ::  :: pub const EULER_N_MAX: usize = 1 << 20; #0": {
+  "class": "1+3",
+  "disposition": {
+   "1": "shared",
+   "3": {
+    "followup": "FU-B18-1"
+   }
+  },
+  "owner": "series ops",
+  "reason": "the series ops' fixed caps (series n <= 2^17, sigma and Euler n <= 2^20, input bits <= 2^12, output bits <= 2^14, n beta <= 2^26, work <= 2^34, request bytes), admitted before any allocation; each refusal names the cap and the way around it"
+ },
+ "engine/arith/src/zseries.rs ::  :: pub const N_BETA_MAX: u64 = 1 << 26; #0": {
+  "class": "1+3",
+  "disposition": {
+   "1": "shared",
+   "3": {
+    "followup": "FU-B18-1"
+   }
+  },
+  "owner": "series ops",
+  "reason": "the series ops' fixed caps (series n <= 2^17, sigma and Euler n <= 2^20, input bits <= 2^12, output bits <= 2^14, n beta <= 2^26, work <= 2^34, request bytes), admitted before any allocation; each refusal names the cap and the way around it"
+ },
+ "engine/arith/src/zseries.rs ::  :: pub const P_MAX: usize = 269; #0": {
+  "class": "none",
+  "owner": "series ops",
+  "reason": "the series ops' derived bounds, counters, saturating overflow (refused by a cap's own site), a metered gcd's limit, an internal shape assert or a test assertion: refuses nothing itself"
+ },
+ "engine/arith/src/zseries.rs ::  :: pub const SERIES_N_MAX: usize = 1 << 17; #0": {
+  "class": "1+3",
+  "disposition": {
+   "1": "shared",
+   "3": {
+    "followup": "FU-B18-1"
+   }
+  },
+  "owner": "series ops",
+  "reason": "the series ops' fixed caps (series n <= 2^17, sigma and Euler n <= 2^20, input bits <= 2^12, output bits <= 2^14, n beta <= 2^26, work <= 2^34, request bytes), admitted before any allocation; each refusal names the cap and the way around it"
+ },
+ "engine/arith/src/zseries.rs ::  :: pub const SIGMA_K_MAX: u64 = 1 << 20; #0": {
+  "class": "1+3",
+  "disposition": {
+   "1": "shared",
+   "3": {
+    "followup": "FU-B18-1"
+   }
+  },
+  "owner": "series ops",
+  "reason": "the series ops' fixed caps (series n <= 2^17, sigma and Euler n <= 2^20, input bits <= 2^12, output bits <= 2^14, n beta <= 2^26, work <= 2^34, request bytes), admitted before any allocation; each refusal names the cap and the way around it"
+ },
+ "engine/arith/src/zseries.rs ::  :: pub const SIGMA_N_MAX: usize = 1 << 20; #0": {
+  "class": "1+3",
+  "disposition": {
+   "1": "shared",
+   "3": {
+    "followup": "FU-B18-1"
+   }
+  },
+  "owner": "series ops",
+  "reason": "the series ops' fixed caps (series n <= 2^17, sigma and Euler n <= 2^20, input bits <= 2^12, output bits <= 2^14, n beta <= 2^26, work <= 2^34, request bytes), admitted before any allocation; each refusal names the cap and the way around it"
+ },
+ "engine/arith/src/zseries.rs ::  :: pub const WORK_MAX: u64 = 1 << 34; #0": {
+  "class": "1+3",
+  "disposition": {
+   "1": "shared",
+   "3": {
+    "followup": "FU-B18-1"
+   }
+  },
+  "owner": "series ops",
+  "reason": "the series ops' fixed caps (series n <= 2^17, sigma and Euler n <= 2^20, input bits <= 2^12, output bits <= 2^14, n beta <= 2^26, work <= 2^34, request bytes), admitted before any allocation; each refusal names the cap and the way around it"
+ },
+ "engine/arith/src/zseries.rs :: admit_common :: cap(\"an output value's bits\", beta, BETA_MAX, \"fewer or smaller coefficients\")?; #0": {
+  "class": "1+3",
+  "disposition": {
+   "1": "shared",
+   "3": {
+    "followup": "FU-B18-1"
+   }
+  },
+  "owner": "series ops",
+  "reason": "the series ops' fixed caps (series n <= 2^17, sigma and Euler n <= 2^20, input bits <= 2^12, output bits <= 2^14, n beta <= 2^26, work <= 2^34, request bytes), admitted before any allocation; each refusal names the cap and the way around it"
+ },
+ "engine/arith/src/zseries.rs :: admit_common :: cap(\"the output's bits n * beta\", nb, N_BETA_MAX, \"fewer coefficients per call\")?; #0": {
+  "class": "1+3",
+  "disposition": {
+   "1": "shared",
+   "3": {
+    "followup": "FU-B18-1"
+   }
+  },
+  "owner": "series ops",
+  "reason": "the series ops' fixed caps (series n <= 2^17, sigma and Euler n <= 2^20, input bits <= 2^12, output bits <= 2^14, n beta <= 2^26, work <= 2^34, request bytes), admitted before any allocation; each refusal names the cap and the way around it"
+ },
+ "engine/arith/src/zseries.rs :: admit_common :: let nb = n.checked_mul(beta).unwrap_or(u64::MAX); #0": {
+  "class": "none",
+  "owner": "series ops",
+  "reason": "the series ops' derived bounds, counters, saturating overflow (refused by a cap's own site), a metered gcd's limit, an internal shape assert or a test assertion: refuses nothing itself"
+ },
+ "engine/arith/src/zseries.rs :: bits :: 4 * self.max_digits as u64 #0": {
+  "class": "none",
+  "owner": "series ops",
+  "reason": "the series ops' derived bounds, counters, saturating overflow (refused by a cap's own site), a metered gcd's limit, an internal shape assert or a test assertion: refuses nothing itself"
+ },
+ "engine/arith/src/zseries.rs :: cap :: fn cap(what: &str, value: u64, max: u64, how: &str) -> Result<(), String> { #0": {
+  "class": "1+3",
+  "disposition": {
+   "1": "shared",
+   "3": {
+    "followup": "FU-B18-1"
+   }
+  },
+  "owner": "series ops",
+  "reason": "the series ops' fixed caps (series n <= 2^17, sigma and Euler n <= 2^20, input bits <= 2^12, output bits <= 2^14, n beta <= 2^26, work <= 2^34, request bytes), admitted before any allocation; each refusal names the cap and the way around it"
+ },
+ "engine/arith/src/zseries.rs :: cap :: if value > max { #0": {
+  "class": "1+3",
+  "disposition": {
+   "1": "shared",
+   "3": {
+    "followup": "FU-B18-1"
+   }
+  },
+  "owner": "series ops",
+  "reason": "the series ops' fixed caps (series n <= 2^17, sigma and Euler n <= 2^20, input bits <= 2^12, output bits <= 2^14, n beta <= 2^26, work <= 2^34, request bytes), admitted before any allocation; each refusal names the cap and the way around it"
+ },
+ "engine/arith/src/zseries.rs :: cap :: return Err(format!(\"{} = {} is more than {} ({})\", what, value, max, how)); #0": {
+  "class": "1+3",
+  "disposition": {
+   "1": "shared",
+   "3": {
+    "followup": "FU-B18-1"
+   }
+  },
+  "owner": "series ops",
+  "reason": "the series ops' fixed caps (series n <= 2^17, sigma and Euler n <= 2^20, input bits <= 2^12, output bits <= 2^14, n beta <= 2^26, work <= 2^34, request bytes), admitted before any allocation; each refusal names the cap and the way around it"
+ },
+ "engine/arith/src/zseries.rs :: finish :: cap(\"the work\", work, WORK_MAX, \"fewer coefficients per call, or raw\")?; #0": {
+  "class": "1+3",
+  "disposition": {
+   "1": "shared",
+   "3": {
+    "followup": "FU-B18-1"
+   }
+  },
+  "owner": "series ops",
+  "reason": "the series ops' fixed caps (series n <= 2^17, sigma and Euler n <= 2^20, input bits <= 2^12, output bits <= 2^14, n beta <= 2^26, work <= 2^34, request bytes), admitted before any allocation; each refusal names the cap and the way around it"
+ },
+ "engine/arith/src/zseries.rs :: pow_admit :: let beta_c = k.checked_mul(a.bits() + bl(g)).unwrap_or(u64::MAX); #0": {
+  "class": "none",
+  "owner": "series ops",
+  "reason": "the series ops' derived bounds, counters, saturating overflow (refused by a cap's own site), a metered gcd's limit, an internal shape assert or a test assertion: refuses nothing itself"
+ },
+ "engine/arith/src/zseries.rs :: pow_admit :: let beta_d = da.map_or(0, |d| d.bits()).checked_mul(k).unwrap_or(u64::MAX); #0": {
+  "class": "none",
+  "owner": "series ops",
+  "reason": "the series ops' derived bounds, counters, saturating overflow (refused by a cap's own site), a metered gcd's limit, an internal shape assert or a test assertion: refuses nothing itself"
+ },
+ "engine/arith/src/zseries.rs :: pow_row :: counted::add(table_cost(m_len, m_len).unwrap_or(u64::MAX)); #0": {
+  "class": "none",
+  "owner": "series ops",
+  "reason": "the series ops' derived bounds, counters, saturating overflow (refused by a cap's own site), a metered gcd's limit, an internal shape assert or a test assertion: refuses nothing itself"
+ },
+ "engine/arith/src/zseries.rs :: product :: counted::add(nmod_poly::mul_work(x.len(), y.len()).unwrap_or(u64::MAX)); #0": {
+  "class": "none",
+  "owner": "series ops",
+  "reason": "the series ops' derived bounds, counters, saturating overflow (refused by a cap's own site), a metered gcd's limit, an internal shape assert or a test assertion: refuses nothing itself"
+ },
+ "engine/arith/src/zseries.rs :: product :: counted::add(table_cost(x.len(), y.len()).unwrap_or(u64::MAX)); #0": {
+  "class": "none",
+  "owner": "series ops",
+  "reason": "the series ops' derived bounds, counters, saturating overflow (refused by a cap's own site), a metered gcd's limit, an internal shape assert or a test assertion: refuses nothing itself"
+ },
+ "engine/arith/src/zseries.rs :: scan :: c.max_digits = c.max_digits.max(digits.len()); #0": {
+  "class": "none",
+  "owner": "series ops",
+  "reason": "the series ops' derived bounds, counters, saturating overflow (refused by a cap's own site), a metered gcd's limit, an internal shape assert or a test assertion: refuses nothing itself"
+ },
+ "engine/arith/src/zseries.rs :: scan :: if digits.len() > max_digits { #0": {
+  "class": "1+3",
+  "disposition": {
+   "1": "shared",
+   "3": {
+    "followup": "FU-B18-1"
+   }
+  },
+  "owner": "series ops",
+  "reason": "the series ops' fixed caps (series n <= 2^17, sigma and Euler n <= 2^20, input bits <= 2^12, output bits <= 2^14, n beta <= 2^26, work <= 2^34, request bytes), admitted before any allocation; each refusal names the cap and the way around it"
+ },
+ "engine/arith/src/zseries.rs :: scan :: if i >= max_tokens { #0": {
+  "class": "1+3",
+  "disposition": {
+   "1": "shared",
+   "3": {
+    "followup": "FU-B18-1"
+   }
+  },
+  "owner": "series ops",
+  "reason": "the series ops' fixed caps (series n <= 2^17, sigma and Euler n <= 2^20, input bits <= 2^12, output bits <= 2^14, n beta <= 2^26, work <= 2^34, request bytes), admitted before any allocation; each refusal names the cap and the way around it"
+ },
+ "engine/arith/src/zseries.rs :: scan :: let max_digits = (B_MAX / 4) as usize; #0": {
+  "class": "1+3",
+  "disposition": {
+   "1": "shared",
+   "3": {
+    "followup": "FU-B18-1"
+   }
+  },
+  "owner": "series ops",
+  "reason": "the series ops' fixed caps (series n <= 2^17, sigma and Euler n <= 2^20, input bits <= 2^12, output bits <= 2^14, n beta <= 2^26, work <= 2^34, request bytes), admitted before any allocation; each refusal names the cap and the way around it"
+ },
+ "engine/arith/src/zseries.rs :: scan :: let mut c = Csv { text, tokens: 0, max_digits: 0, limbs: 0, all_zero: true, valuation: 0 }; #0": {
+  "class": "none",
+  "owner": "series ops",
+  "reason": "the series ops' derived bounds, counters, saturating overflow (refused by a cap's own site), a metered gcd's limit, an internal shape assert or a test assertion: refuses nothing itself"
+ },
+ "engine/arith/src/zseries.rs :: scan :: pub fn scan<'a>(text: &'a str, max_tokens: usize, signed: bool) -> Result<Csv<'a>, String> { #0": {
+  "class": "none",
+  "owner": "series ops",
+  "reason": "the series ops' derived bounds, counters, saturating overflow (refused by a cap's own site), a metered gcd's limit, an internal shape assert or a test assertion: refuses nothing itself"
+ },
+ "engine/arith/src/zseries.rs :: scan :: return Err(format!(\"a coefficient of {} hex digits: at most {} ({} bits)\", digits.len(), max_digits, B_MAX)); #0": {
+  "class": "1+3",
+  "disposition": {
+   "1": "shared",
+   "3": {
+    "followup": "FU-B18-1"
+   }
+  },
+  "owner": "series ops",
+  "reason": "the series ops' fixed caps (series n <= 2^17, sigma and Euler n <= 2^20, input bits <= 2^12, output bits <= 2^14, n beta <= 2^26, work <= 2^34, request bytes), admitted before any allocation; each refusal names the cap and the way around it"
+ },
+ "engine/arith/src/zseries.rs :: scan :: return Err(format!(\"more than {} coefficients\", max_tokens)); #0": {
+  "class": "1+3",
+  "disposition": {
+   "1": "shared",
+   "3": {
+    "followup": "FU-B18-1"
+   }
+  },
+  "owner": "series ops",
+  "reason": "the series ops' fixed caps (series n <= 2^17, sigma and Euler n <= 2^20, input bits <= 2^12, output bits <= 2^14, n beta <= 2^26, work <= 2^34, request bytes), admitted before any allocation; each refusal names the cap and the way around it"
+ },
+ "engine/arith/src/zseries.rs :: sigma_admit :: cap(\"k\", k, SIGMA_K_MAX, \"a smaller k\")?; #0": {
+  "class": "1+3",
+  "disposition": {
+   "1": "shared",
+   "3": {
+    "followup": "FU-B18-1"
+   }
+  },
+  "owner": "series ops",
+  "reason": "the series ops' fixed caps (series n <= 2^17, sigma and Euler n <= 2^20, input bits <= 2^12, output bits <= 2^14, n beta <= 2^26, work <= 2^34, request bytes), admitted before any allocation; each refusal names the cap and the way around it"
+ },
+ "engine/arith/src/zseries.rs :: sigma_admit :: let beta = (k + 1).checked_mul(bl(n64)).unwrap_or(u64::MAX); #0": {
+  "class": "none",
+  "owner": "series ops",
+  "reason": "the series ops' derived bounds, counters, saturating overflow (refused by a cap's own site), a metered gcd's limit, an internal shape assert or a test assertion: refuses nothing itself"
+ },
+ "engine/arith/src/zseries.rs :: table_cost :: pub max_digits: usize, #0": {
+  "class": "none",
+  "owner": "series ops",
+  "reason": "the series ops' derived bounds, counters, saturating overflow (refused by a cap's own site), a metered gcd's limit, an internal shape assert or a test assertion: refuses nothing itself"
+ },
+ "engine/arith/src/zseries.rs :: write_reduced :: let limit = coprime::gcd_work(lx, ld).ok_or_else(|| format!(\"{}: the gcd's bound overflows\", INTERNAL_PREFIX))?; #0": {
+  "class": "none",
+  "owner": "series ops",
+  "reason": "the series ops' derived bounds, counters, saturating overflow (refused by a cap's own site), a metered gcd's limit, an internal shape assert or a test assertion: refuses nothing itself"
+ },
+ "engine/arith/src/zseries.rs :: write_reduced :: let mut meter = Meter::new(limit); #0": {
+  "class": "none",
+  "owner": "series ops",
+  "reason": "the series ops' derived bounds, counters, saturating overflow (refused by a cap's own site), a metered gcd's limit, an internal shape assert or a test assertion: refuses nothing itself"
+ },
+ "engine/arith/src/zseries/tests.rs :: bounds_never_wrap :: assert!(crt_new_work(P_MAX as u64).is_some() && crt_work(P_MAX as u64).is_some()); #0": {
+  "class": "none",
+  "owner": "series ops",
+  "reason": "the series ops' derived bounds, counters, saturating overflow (refused by a cap's own site), a metered gcd's limit, an internal shape assert or a test assertion: refuses nothing itself"
+ },
+ "engine/arith/src/zseries/tests.rs :: bounds_never_wrap :: assert!(crt_new_work(u64::MAX).is_none() && crt_work(u64::MAX).is_none()); #0": {
+  "class": "none",
+  "owner": "series ops",
+  "reason": "the series ops' derived bounds, counters, saturating overflow (refused by a cap's own site), a metered gcd's limit, an internal shape assert or a test assertion: refuses nothing itself"
+ },
+ "engine/arith/src/zseries/tests.rs :: bounds_never_wrap :: assert!(pow_admit(&c, u64::MAX / 2, None, 1 << 17, false, 0).is_err(), \"a huge k was admitted\"); #0": {
+  "class": "none",
+  "owner": "series ops",
+  "reason": "the series ops' derived bounds, counters, saturating overflow (refused by a cap's own site), a metered gcd's limit, an internal shape assert or a test assertion: refuses nothing itself"
+ },
+ "engine/arith/src/zseries/tests.rs :: bounds_never_wrap :: assert!(sigma_admit(SIGMA_K_MAX, SIGMA_N_MAX, 0).is_err(), \"sigma's output bits\"); #0": {
+  "class": "none",
+  "owner": "series ops",
+  "reason": "the series ops' derived bounds, counters, saturating overflow (refused by a cap's own site), a metered gcd's limit, an internal shape assert or a test assertion: refuses nothing itself"
+ },
+ "engine/arith/src/zseries/tests.rs :: caps_refuse_naming_the_limit :: assert!(e.contains(&SIGMA_K_MAX.to_string()), \"{}\", e); #0": {
+  "class": "none",
+  "owner": "series ops",
+  "reason": "the series ops' derived bounds, counters, saturating overflow (refused by a cap's own site), a metered gcd's limit, an internal shape assert or a test assertion: refuses nothing itself"
+ },
+ "engine/arith/src/zseries/tests.rs :: caps_refuse_naming_the_limit :: fn caps_refuse_naming_the_limit() { #0": {
+  "class": "none",
+  "owner": "series ops",
+  "reason": "the series ops' derived bounds, counters, saturating overflow (refused by a cap's own site), a metered gcd's limit, an internal shape assert or a test assertion: refuses nothing itself"
+ },
+ "engine/arith/src/zseries/tests.rs :: caps_refuse_naming_the_limit :: let e = sigma_admit(SIGMA_K_MAX + 1, 10, 0).unwrap_err(); #0": {
+  "class": "none",
+  "owner": "series ops",
+  "reason": "the series ops' derived bounds, counters, saturating overflow (refused by a cap's own site), a metered gcd's limit, an internal shape assert or a test assertion: refuses nothing itself"
+ },
+ "engine/arith/src/zseries/tests.rs :: zero_and_edge_inputs :: assert_eq!((c.tokens, c.all_zero, c.valuation, c.max_digits), (4, false, 2, 1)); #0": {
+  "class": "none",
+  "owner": "series ops",
+  "reason": "the series ops' derived bounds, counters, saturating overflow (refused by a cap's own site), a metered gcd's limit, an internal shape assert or a test assertion: refuses nothing itself"
+ },
  "engine/arith/tests/coprime_stop.rs :: gcd_checks_at_the_cap_poll_stop :: for (what, a, b) in [(\"equal sizes\", cap, cap), (\"half size\", cap, cap / 2)] { #0": {
   "class": "none",
   "owner": "engine arith (big-integer wire decoder)",
@@ -298,6 +643,26 @@
   "owner": "bigint",
   "reason": "NTT implementation metadata, internal invariants, routing thresholds, and test stress values; these sites refuse no user computation"
  },
+ "engine/bigint/src/ntt.rs :: with_root :: let log = log2_len(max_len); #0": {
+  "class": "none",
+  "owner": "series ops",
+  "reason": "the series ops' derived bounds, counters, saturating overflow (refused by a cap's own site), a metered gcd's limit, an internal shape assert or a test assertion: refuses nothing itself"
+ },
+ "engine/bigint/src/ntt.rs :: with_root :: let max_len = max_len.max(1); #0": {
+  "class": "none",
+  "owner": "series ops",
+  "reason": "the series ops' derived bounds, counters, saturating overflow (refused by a cap's own site), a metered gcd's limit, an internal shape assert or a test assertion: refuses nothing itself"
+ },
+ "engine/bigint/src/ntt.rs :: with_root :: m.n > 1 << 32 && m.n < 1 << 62 && (m.n - 1).trailing_zeros() >= max_len.next_power_of_two().trailing_zeros(), #0": {
+  "class": "none",
+  "owner": "series ops",
+  "reason": "the series ops' derived bounds, counters, saturating overflow (refused by a cap's own site), a metered gcd's limit, an internal shape assert or a test assertion: refuses nothing itself"
+ },
+ "engine/bigint/src/ntt.rs :: with_root :: pub fn with_root(m: &Modulus, root: u64, max_len: usize) -> LocalTables { #0": {
+  "class": "none",
+  "owner": "series ops",
+  "reason": "the series ops' derived bounds, counters, saturating overflow (refused by a cap's own site), a metered gcd's limit, an internal shape assert or a test assertion: refuses nothing itself"
+ },
  "engine/bigint/src/ntt32.rs ::  :: const MAX_LOG: u32 = 23; #0": {
   "class": "none",
   "owner": "bigint",
@@ -353,10 +718,10 @@
   "owner": "bigint",
   "reason": "NTT implementation metadata, internal invariants, routing thresholds, and test stress values; these sites refuse no user computation"
  },
- "engine/bigint/src/ntt_core.rs :: table_cached :: let t = Arc::new(Table::new(p, primitive_root, max_root_log, log)); #0": {
+ "engine/bigint/src/ntt_core.rs :: table_cached :: let built = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| Table::new(p, primitive_root, max_root_log, log))); #0": {
   "class": "none",
-  "owner": "bigint",
-  "reason": "NTT implementation metadata, internal invariants, routing thresholds, and test stress values; these sites refuse no user computation"
+  "owner": "series ops",
+  "reason": "the series ops' derived bounds, counters, saturating overflow (refused by a cap's own site), a metered gcd's limit, an internal shape assert or a test assertion: refuses nothing itself"
  },
  "engine/bigint/src/ntt_core.rs :: table_cached :: max_root_log: u32, #0": {
   "class": "none",
@@ -372,6 +737,21 @@
   "class": "none",
   "owner": "bigint",
   "reason": "NTT implementation metadata, internal invariants, routing thresholds, and test stress values; these sites refuse no user computation"
+ },
+ "engine/bigint/tests/ntt_table_poll_gap.rs :: local_table_poll_gap :: let gap = hooks::max_gap_ns(); #0": {
+  "class": "none",
+  "owner": "series ops",
+  "reason": "the series ops' derived bounds, counters, saturating overflow (refused by a cap's own site), a metered gcd's limit, an internal shape assert or a test assertion: refuses nothing itself"
+ },
+ "engine/bigint/tests/ntt_table_poll_gap.rs :: local_table_poll_gap :: let lt = LocalTables::with_root(&Modulus::new(p), g, max_len); #0": {
+  "class": "none",
+  "owner": "series ops",
+  "reason": "the series ops' derived bounds, counters, saturating overflow (refused by a cap's own site), a metered gcd's limit, an internal shape assert or a test assertion: refuses nothing itself"
+ },
+ "engine/bigint/tests/ntt_table_poll_gap.rs :: local_table_poll_gap :: let max_len = (1 << 18) - 1; #0": {
+  "class": "none",
+  "owner": "series ops",
+  "reason": "the series ops' derived bounds, counters, saturating overflow (refused by a cap's own site), a metered gcd's limit, an internal shape assert or a test assertion: refuses nothing itself"
  },
  "engine/classgroup/examples/lll_bench.rs :: main :: let b = sagebrush_poly::budget::Budget::unlimited(); #0": {
   "class": "none",
@@ -5116,6 +5496,28 @@
   "owner": "HMF/web",
   "row": "inv-40"
  },
+ "engine/web/src/lib.rs :: call :: if req.len() > op.max_request { #1": {
+  "class": "1+3",
+  "disposition": {
+   "1": "shared",
+   "3": {
+    "followup": "FU-B18-1"
+   }
+  },
+  "owner": "series ops",
+  "reason": "the series ops' fixed caps (series n <= 2^17, sigma and Euler n <= 2^20, input bits <= 2^12, output bits <= 2^14, n beta <= 2^26, work <= 2^34, request bytes), admitted before any allocation; each refusal names the cap and the way around it"
+ },
+ "engine/web/src/lib.rs :: call :: return json!({ \"error\": format!(\"{}: the request has {} bytes, more than {}\", op.name, req.len(), op.max_request) }).to_string(); #1": {
+  "class": "1+3",
+  "disposition": {
+   "1": "shared",
+   "3": {
+    "followup": "FU-B18-1"
+   }
+  },
+  "owner": "series ops",
+  "reason": "the series ops' fixed caps (series n <= 2^17, sigma and Euler n <= 2^20, input bits <= 2^12, output bits <= 2^14, n beta <= 2^26, work <= 2^34, request bytes), admitted before any allocation; each refusal names the cap and the way around it"
+ },
  "engine/web/src/lib.rs :: dispatch :: Some(w) => sagebrush_poly::try_factor_with(&f, &sagebrush_poly::Budget::new(sagebrush_poly::Limits { work: w, ..sagebrush_poly::Limits::DEFAULT })), #0": {
   "class": "3",
   "owner": "polynomial factorization"
@@ -5364,6 +5766,171 @@
   "owner": "engine web + finite-field matrices",
   "row": "inv-7"
  },
+ "engine/web/src/series_ops.rs ::  :: SeriesOp { name: \"series_euler\", max_request: SMALL_MAX_REQUEST, peak: 8 * MIB, work: zseries::WORK_MAX, run: series_euler }, #0": {
+  "class": "1+3",
+  "disposition": {
+   "1": "shared",
+   "3": {
+    "followup": "FU-B18-1"
+   }
+  },
+  "owner": "series ops",
+  "reason": "the series ops' fixed caps (series n <= 2^17, sigma and Euler n <= 2^20, input bits <= 2^12, output bits <= 2^14, n beta <= 2^26, work <= 2^34, request bytes), admitted before any allocation; each refusal names the cap and the way around it"
+ },
+ "engine/web/src/series_ops.rs ::  :: SeriesOp { name: \"series_mul\", max_request: SERIES_MAX_REQUEST, peak: 64 * MIB, work: zseries::WORK_MAX, run: series_mul }, #0": {
+  "class": "1+3",
+  "disposition": {
+   "1": "shared",
+   "3": {
+    "followup": "FU-B18-1"
+   }
+  },
+  "owner": "series ops",
+  "reason": "the series ops' fixed caps (series n <= 2^17, sigma and Euler n <= 2^20, input bits <= 2^12, output bits <= 2^14, n beta <= 2^26, work <= 2^34, request bytes), admitted before any allocation; each refusal names the cap and the way around it"
+ },
+ "engine/web/src/series_ops.rs ::  :: SeriesOp { name: \"series_pow\", max_request: SERIES_MAX_REQUEST, peak: 64 * MIB, work: zseries::WORK_MAX, run: series_pow }, #0": {
+  "class": "1+3",
+  "disposition": {
+   "1": "shared",
+   "3": {
+    "followup": "FU-B18-1"
+   }
+  },
+  "owner": "series ops",
+  "reason": "the series ops' fixed caps (series n <= 2^17, sigma and Euler n <= 2^20, input bits <= 2^12, output bits <= 2^14, n beta <= 2^26, work <= 2^34, request bytes), admitted before any allocation; each refusal names the cap and the way around it"
+ },
+ "engine/web/src/series_ops.rs ::  :: SeriesOp { name: \"sigma_table\", max_request: SMALL_MAX_REQUEST, peak: 32 * MIB, work: zseries::WORK_MAX, run: sigma_table }, #0": {
+  "class": "1+3",
+  "disposition": {
+   "1": "shared",
+   "3": {
+    "followup": "FU-B18-1"
+   }
+  },
+  "owner": "series ops",
+  "reason": "the series ops' fixed caps (series n <= 2^17, sigma and Euler n <= 2^20, input bits <= 2^12, output bits <= 2^14, n beta <= 2^26, work <= 2^34, request bytes), admitted before any allocation; each refusal names the cap and the way around it"
+ },
+ "engine/web/src/series_ops.rs ::  :: pub const SERIES_MAX_REQUEST: usize = 1 << 24; #0": {
+  "class": "1+3",
+  "disposition": {
+   "1": "shared",
+   "3": {
+    "followup": "FU-B18-1"
+   }
+  },
+  "owner": "series ops",
+  "reason": "the series ops' fixed caps (series n <= 2^17, sigma and Euler n <= 2^20, input bits <= 2^12, output bits <= 2^14, n beta <= 2^26, work <= 2^34, request bytes), admitted before any allocation; each refusal names the cap and the way around it"
+ },
+ "engine/web/src/series_ops.rs ::  :: pub const SMALL_MAX_REQUEST: usize = 256; #0": {
+  "class": "1+3",
+  "disposition": {
+   "1": "shared",
+   "3": {
+    "followup": "FU-B18-1"
+   }
+  },
+  "owner": "series ops",
+  "reason": "the series ops' fixed caps (series n <= 2^17, sigma and Euler n <= 2^20, input bits <= 2^12, output bits <= 2^14, n beta <= 2^26, work <= 2^34, request bytes), admitted before any allocation; each refusal names the cap and the way around it"
+ },
+ "engine/web/src/series_ops.rs ::  :: pub max_request: usize, #0": {
+  "class": "1+3",
+  "disposition": {
+   "1": "shared",
+   "3": {
+    "followup": "FU-B18-1"
+   }
+  },
+  "owner": "series ops",
+  "reason": "the series ops' fixed caps (series n <= 2^17, sigma and Euler n <= 2^20, input bits <= 2^12, output bits <= 2^14, n beta <= 2^26, work <= 2^34, request bytes), admitted before any allocation; each refusal names the cap and the way around it"
+ },
+ "engine/web/src/series_ops.rs :: get_size :: Some(Val::Int(x)) if x > max as i128 => Err(format!(\"{}: {} = {} is more than {} ({})\", op, key, x, max, how)), #0": {
+  "class": "1+3",
+  "disposition": {
+   "1": "shared",
+   "3": {
+    "followup": "FU-B18-1"
+   }
+  },
+  "owner": "series ops",
+  "reason": "the series ops' fixed caps (series n <= 2^17, sigma and Euler n <= 2^20, input bits <= 2^12, output bits <= 2^14, n beta <= 2^26, work <= 2^34, request bytes), admitted before any allocation; each refusal names the cap and the way around it"
+ },
+ "engine/web/src/series_ops.rs :: get_size :: fn get_size(v: Option<Val>, key: &str, max: u64, how: &str, op: &str) -> Result<u64, String> { #0": {
+  "class": "1+3",
+  "disposition": {
+   "1": "shared",
+   "3": {
+    "followup": "FU-B18-1"
+   }
+  },
+  "owner": "series ops",
+  "reason": "the series ops' fixed caps (series n <= 2^17, sigma and Euler n <= 2^20, input bits <= 2^12, output bits <= 2^14, n beta <= 2^26, work <= 2^34, request bytes), admitted before any allocation; each refusal names the cap and the way around it"
+ },
+ "engine/web/src/series_ops.rs :: series_euler :: let n = get_size(n, \"n\", zseries::EULER_N_MAX as u64, \"fewer coefficients per call\", name)? as usize; #0": {
+  "class": "1+3",
+  "disposition": {
+   "1": "shared",
+   "3": {
+    "followup": "FU-B18-1"
+   }
+  },
+  "owner": "series ops",
+  "reason": "the series ops' fixed caps (series n <= 2^17, sigma and Euler n <= 2^20, input bits <= 2^12, output bits <= 2^14, n beta <= 2^26, work <= 2^34, request bytes), admitted before any allocation; each refusal names the cap and the way around it"
+ },
+ "engine/web/src/series_ops.rs :: series_mul :: let n = get_size(n, \"n\", zseries::SERIES_N_MAX as u64, SERIES_HOW, name)? as usize; #0": {
+  "class": "1+3",
+  "disposition": {
+   "1": "shared",
+   "3": {
+    "followup": "FU-B18-1"
+   }
+  },
+  "owner": "series ops",
+  "reason": "the series ops' fixed caps (series n <= 2^17, sigma and Euler n <= 2^20, input bits <= 2^12, output bits <= 2^14, n beta <= 2^26, work <= 2^34, request bytes), admitted before any allocation; each refusal names the cap and the way around it"
+ },
+ "engine/web/src/series_ops.rs :: series_pow :: Some(Val::Int(x)) if x > u64::MAX as i128 => return Err(format!(\"{}: k = {} is too large\", name, x)), #0": {
+  "class": "1+3",
+  "disposition": {
+   "1": "shared",
+   "3": {
+    "followup": "FU-B18-1"
+   }
+  },
+  "owner": "series ops",
+  "reason": "the series ops' fixed caps (series n <= 2^17, sigma and Euler n <= 2^20, input bits <= 2^12, output bits <= 2^14, n beta <= 2^26, work <= 2^34, request bytes), admitted before any allocation; each refusal names the cap and the way around it"
+ },
+ "engine/web/src/series_ops.rs :: series_pow :: let n = get_size(n, \"n\", zseries::SERIES_N_MAX as u64, SERIES_HOW, name)? as usize; #0": {
+  "class": "1+3",
+  "disposition": {
+   "1": "shared",
+   "3": {
+    "followup": "FU-B18-1"
+   }
+  },
+  "owner": "series ops",
+  "reason": "the series ops' fixed caps (series n <= 2^17, sigma and Euler n <= 2^20, input bits <= 2^12, output bits <= 2^14, n beta <= 2^26, work <= 2^34, request bytes), admitted before any allocation; each refusal names the cap and the way around it"
+ },
+ "engine/web/src/series_ops.rs :: sigma_table :: let k = get_size(k, \"k\", zseries::SIGMA_K_MAX, \"a smaller k\", name)?; #0": {
+  "class": "1+3",
+  "disposition": {
+   "1": "shared",
+   "3": {
+    "followup": "FU-B18-1"
+   }
+  },
+  "owner": "series ops",
+  "reason": "the series ops' fixed caps (series n <= 2^17, sigma and Euler n <= 2^20, input bits <= 2^12, output bits <= 2^14, n beta <= 2^26, work <= 2^34, request bytes), admitted before any allocation; each refusal names the cap and the way around it"
+ },
+ "engine/web/src/series_ops.rs :: sigma_table :: let n = get_size(n, \"n\", zseries::SIGMA_N_MAX as u64, \"fewer values per call\", name)? as usize; #0": {
+  "class": "1+3",
+  "disposition": {
+   "1": "shared",
+   "3": {
+    "followup": "FU-B18-1"
+   }
+  },
+  "owner": "series ops",
+  "reason": "the series ops' fixed caps (series n <= 2^17, sigma and Euler n <= 2^20, input bits <= 2^12, output bits <= 2^14, n beta <= 2^26, work <= 2^34, request bytes), admitted before any allocation; each refusal names the cap and the way around it"
+ },
  "engine/web/tests/bin_alloc.rs ::  :: use sagebrush_web::nmod_ops::{DIV_MAX_LEN, GCD_MAX_LEN, MUL_MAX_LEN}; #0": {
   "class": "none",
   "owner": "engine binary transport (sagebrush-wire)",
@@ -5518,6 +6085,36 @@
  "engine/web/tests/nmod_ops.rs :: echelon_envelope_constants :: assert_eq!(ECH_MAX_TEXT, 20 * 1024 * 1024); #0": {
   "class": "none",
   "owner": "engine web + finite-field matrices"
+ },
+ "engine/web/tests/series_ops.rs :: caps_name_the_limit_and_the_way_around :: fn caps_name_the_limit_and_the_way_around() { #0": {
+  "class": "none",
+  "owner": "series ops",
+  "reason": "the series ops' derived bounds, counters, saturating overflow (refused by a cap's own site), a metered gcd's limit, an internal shape assert or a test assertion: refuses nothing itself"
+ },
+ "engine/web/tests/series_ops.rs :: closed_forms_at_the_corners :: assert!(sp <= sigma_op.peak && sw <= zseries::WORK_MAX); #0": {
+  "class": "none",
+  "owner": "series ops",
+  "reason": "the series ops' derived bounds, counters, saturating overflow (refused by a cap's own site), a metered gcd's limit, an internal shape assert or a test assertion: refuses nothing itself"
+ },
+ "engine/web/tests/series_ops.rs :: closed_forms_at_the_corners :: assert!(work <= zseries::WORK_MAX); #0": {
+  "class": "none",
+  "owner": "series ops",
+  "reason": "the series ops' derived bounds, counters, saturating overflow (refused by a cap's own site), a metered gcd's limit, an internal shape assert or a test assertion: refuses nothing itself"
+ },
+ "engine/web/tests/series_ops.rs :: closed_forms_at_the_corners :: if req > mul_op.max_request as u64 { #0": {
+  "class": "none",
+  "owner": "series ops",
+  "reason": "the series ops' derived bounds, counters, saturating overflow (refused by a cap's own site), a metered gcd's limit, an internal shape assert or a test assertion: refuses nothing itself"
+ },
+ "engine/web/tests/series_ops.rs :: closed_forms_at_the_corners :: let csv = |t: usize, d: usize| Csv { text: \"\", tokens: t, max_digits: d, limbs: (t * d.div_ceil(16)) as u64, all_zero: false, valuation: 0 }; #0": {
+  "class": "none",
+  "owner": "series ops",
+  "reason": "the series ops' derived bounds, counters, saturating overflow (refused by a cap's own site), a metered gcd's limit, an internal shape assert or a test assertion: refuses nothing itself"
+ },
+ "engine/web/tests/series_ops.rs :: closed_forms_at_the_corners :: let den = |d: usize| Csv { text: \"\", tokens: 1, max_digits: d, limbs: d.div_ceil(16) as u64, all_zero: false, valuation: 0 }; #0": {
+  "class": "none",
+  "owner": "series ops",
+  "reason": "the series ops' derived bounds, counters, saturating overflow (refused by a cap's own site), a metered gcd's limit, an internal shape assert or a test assertion: refuses nothing itself"
  },
  "engine/wire/src/lib.rs ::  :: Cap = 7, #0": {
   "class": "none",

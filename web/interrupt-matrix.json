@@ -170,6 +170,48 @@
    "status": "case"
   },
   {
+   "id": "E15s",
+   "transport": "engineCall:sigma_table",
+   "owner": "series ops",
+   "mode": "sage",
+   "s0": 131072,
+   "smin": 4096,
+   "smax": 262144,
+   "grow": {
+    "kind": "scale",
+    "p": 1
+   },
+   "setup": "from sagebrush import poly",
+   "target": "_r = poly.sigma_table(11, S)",
+   "probe": "assert poly.sigma_table(1, 6) == [1, 3, 4, 7, 6, 12]",
+   "hosts": [
+    "cli",
+    "prompt"
+   ],
+   "status": "case"
+  },
+  {
+   "id": "E15p",
+   "transport": "engineCall:series_pow",
+   "owner": "series ops",
+   "mode": "sage",
+   "s0": 16384,
+   "smin": 256,
+   "smax": 65536,
+   "grow": {
+    "kind": "scale",
+    "p": 2
+   },
+   "setup": "from sagebrush import poly\nf = [1] * S",
+   "target": "_r = poly.series_pow(f, 24, S)",
+   "probe": "assert poly.series_pow([1, 1], 3, 3) == [1, 3, 3]",
+   "hosts": [
+    "cli",
+    "prompt"
+   ],
+   "status": "case"
+  },
+  {
    "id": "M1o",
    "transport": "pyloop:matlab-colamd",
    "owner": "MATLAB sparse linear algebra",
@@ -882,6 +924,20 @@
    "status": "planned",
    "family": "E9 modular symbols",
    "owner": "modular symbols"
+  },
+  {
+   "id": "engineCall:series_euler",
+   "transport": "engineCall:series_euler",
+   "status": "planned",
+   "family": "E15 series",
+   "owner": "series ops"
+  },
+  {
+   "id": "engineCall:series_mul",
+   "transport": "engineCall:series_mul",
+   "status": "planned",
+   "family": "E15 series",
+   "owner": "series ops"
   },
   {
    "id": "engineCall:stabilizer",

@@ -31,6 +31,14 @@ CASES = [
     dict(id="E9n", transport="engineCall:newforms", owner="modular symbols", mode="sage", s0=6000, smin=1000, smax=200000,
          grow=dict(kind="scale", p=2), setup="from sagebrush import mf", target="_r = mf.newforms(389, 4, bound=S)",
          probe="assert len(mf.newforms(11, 2)['newforms']) == 1"),
+    # the series ops (engine/web/src/series_ops.rs): the sigma_k sieve per prime, and a power's
+    # products per prime, each polled for Stop (smax: the largest sizes the ops admit, n beta <= 2^26)
+    dict(id="E15s", transport="engineCall:sigma_table", owner="series ops", mode="sage", s0=1 << 17, smin=1 << 12, smax=1 << 18,
+         grow=dict(kind="scale", p=1), setup="from sagebrush import poly", target="_r = poly.sigma_table(11, S)",
+         probe="assert poly.sigma_table(1, 6) == [1, 3, 4, 7, 6, 12]"),
+    dict(id="E15p", transport="engineCall:series_pow", owner="series ops", mode="sage", s0=1 << 14, smin=1 << 8, smax=1 << 16,
+         grow=dict(kind="scale", p=2), setup="from sagebrush import poly\nf = [1] * S", target="_r = poly.series_pow(f, 24, S)",
+         probe="assert poly.series_pow([1, 1], 3, 3) == [1, 3, 3]"),
     # rank-13 PR 1 (plan-matlab-nocliffs r6 section 3): the ordering and the sparse LU, Stop after their PHASE
     dict(id="M1o", transport="pyloop:matlab-colamd", owner="MATLAB sparse linear algebra", mode="python", s0=250, smin=40, smax=600,
          grow=dict(kind="scale", p=2), phase="ordering", leak_measure="heap+external", hosts=["cli"],
@@ -75,6 +83,7 @@ FAMILY = [  # (name test, family, owner)
     (lambda n: n in ("hecke_charpoly", "batch_exact", "newforms", "newspace", "rational_newforms", "weight2"), "E9 modular symbols", "modular symbols"),
     (lambda n: n in ("galois_group", "transitive_group"), "E10 Galois", "groups/Galois"),
     (lambda n: n in ("prime_pi", "primes", "zeta_zeros", "siegel"), "E14 primes", "the primes engine"),
+    (lambda n: n.startswith("series_") or n == "sigma_table", "E15 series", "series ops"),
 ]
 entries = list(CASES)
 def add(transport, name):

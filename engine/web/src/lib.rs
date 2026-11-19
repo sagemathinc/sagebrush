@@ -21,6 +21,7 @@ pub mod bin_ops;
 mod hmf;
 mod hmfq;
 pub mod nmod_ops;
+pub mod series_ops;
 
 static mut REPLY: Vec<u8> = Vec::new();
 
@@ -529,6 +530,12 @@ pub fn call(req: &str) -> String {
     // the capped ops' request sizes are admitted before serde copies
     // anything (the last top-level fn name is read by one scan that owns no
     // text: every other value skipped); unknown names go on as before
+    if let Some(op) = series_op(req) {
+        if req.len() > op.max_request {
+            return json!({ "error": format!("{}: the request has {} bytes, more than {}", op.name, req.len(), op.max_request) }).to_string();
+        }
+        return series_ops::run(op, req);
+    }
     if let Some(op) = capped_op(req) {
         if req.len() > op.max_request {
             return json!({ "error": format!("{}: the request has {} bytes, more than {}", op.name, req.len(), op.max_request) }).to_string();
@@ -585,6 +592,13 @@ fn error_json(e: String) -> Value {
     } else {
         json!({ "error": e })
     }
+}
+
+/// The row of [`series_ops::OPS`] named exactly by the request's last
+/// top-level "fn", if any.
+fn series_op(req: &str) -> Option<&'static series_ops::SeriesOp> {
+    static NAMES: [&str; 4] = [series_ops::OPS[0].name, series_ops::OPS[1].name, series_ops::OPS[2].name, series_ops::OPS[3].name];
+    last_fn(req, &NAMES).map(|i| &series_ops::OPS[i])
 }
 
 /// The row of [`nmod_ops::OPS`] named exactly by the request's last

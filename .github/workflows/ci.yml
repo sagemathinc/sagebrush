@@ -331,6 +331,7 @@ jobs:
           node scripts/heap-budget.mjs --check
           node scripts/pypi-import.mjs --check
           node scripts/tzdata-import.mjs --check
+          node dist/src/cli.js engine/py/test_series_ops.py
           scripts/sync-python-package.sh --check
           node scripts/gen-viewer3d.mjs --check
           node cdn/build.mjs --check
@@ -1779,6 +1780,7 @@ jobs:
           python3 engine/py/test_chat.py
           python3 engine/py/test_limits.py
           python3 engine/py/test_engine_errors.py
+          python3 engine/py/test_series_ops.py
           python3 engine/py/test_modular_forms.py
           python3 engine/py/test_memguard.py
           python3 engine/py/test_capacity.py

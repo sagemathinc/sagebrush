@@ -17,10 +17,13 @@
 // products use them); re-exported here
 pub use sagebrush_bigint::{nmod, ntt};
 pub mod coprime;
+mod counted;
 pub mod crt;
 pub mod nmod_poly;
 pub mod nmod_mat;
 pub mod spelim;
+mod series_primes;
 pub mod wire_decode;
 pub mod zmat;
 pub mod zpoly;
+pub mod zseries;

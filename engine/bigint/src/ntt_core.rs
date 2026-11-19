@@ -5,7 +5,39 @@ use std::ops::{Add, Sub};
 use std::sync::{Arc, Mutex};
 
 const BLOCK: usize = 1 << 12;
+
+// (tests only: the word operations Table::new performs, counted where they
+// happen, against table_work's closed form)
+#[cfg(test)]
+thread_local! {
+    pub(crate) static TABLE_WORK: std::cell::Cell<u64> = const { std::cell::Cell::new(0) };
+}
+#[cfg(test)]
+fn count(n: u64) {
+    TABLE_WORK.with(|c| c.set(c.get() + n));
+}
+#[cfg(not(test))]
+#[inline(always)]
+fn count(_: u64) {}
+
+/// A bound on [`Table::new`]'s word operations at `1 << log` points, N =
+/// max(2^log, 2): two zero-filled N-word vectors (2N), the upper-half fill
+/// (N / 2 steps of two products and two writes: 2N), the lower levels'
+/// copies (fewer than N), two Shoup maps of N divisions counted 4 each (8N),
+/// and the root and its inverse (two powers, at most 4 * 64 products).
+pub const fn table_work(log: u32) -> Option<u64> {
+    if log >= 63 {
+        return None;
+    }
+    let n = if log == 0 { 2 } else { 1u64 << log };
+    match n.checked_mul(16) {
+        Some(x) => x.checked_add(512),
+        None => None,
+    }
+}
 const CACHE_BYTES: usize = 1 << 28;
+/// The tables table_cached has started building, over every cache.
+pub(crate) static CACHE_BUILDS: std::sync::atomic::AtomicUsize = std::sync::atomic::AtomicUsize::new(0);
 
 pub(crate) trait NttWord:
     Copy + Default + Ord + Add<Output = Self> + Sub<Output = Self> + Send + Sync + 'static
@@ -40,6 +72,7 @@ impl<W: NttWord> Table<W> {
         let (root, iroot) = W::root(modulus, primitive_root, log);
         let mut tw = vec![W::default(); n.max(2)];
         let mut itw = vec![W::default(); n.max(2)];
+        count(256 + 2 * n.max(2) as u64);
         let half = n / 2;
         let (mut w, mut iw) = (W::from_usize(1), W::from_usize(1));
         for j in 0..half {
@@ -48,19 +81,37 @@ impl<W: NttWord> Table<W> {
             }
             tw[half + j] = w;
             itw[half + j] = iw;
+            count(4);
             w = W::mul_mod(w, root, modulus);
             iw = W::mul_mod(iw, iroot, modulus);
         }
         let mut k = half / 2;
         while k >= 1 {
             for j in 0..k {
+                if j & (BLOCK - 1) == 0 {
+                    sagebrush_interrupt::check_coarse();
+                }
                 tw[k + j] = tw[2 * k + 2 * j];
                 itw[k + j] = itw[2 * k + 2 * j];
+                count(2);
             }
             k /= 2;
         }
-        let twp = tw.iter().map(|&x| W::shoup(x, p)).collect();
-        let itwp = itw.iter().map(|&x| W::shoup(x, p)).collect();
+        // (polled like the loops above: at the largest tables each map is
+        // millions of divisions)
+        let shoup_all = |v: &[W]| -> Vec<W> {
+            let mut out = Vec::with_capacity(v.len());
+            for (j, &x) in v.iter().enumerate() {
+                if j & (BLOCK - 1) == 0 {
+                    sagebrush_interrupt::check_coarse();
+                }
+                out.push(W::shoup(x, p));
+                count(4);
+            }
+            out
+        };
+        let twp = shoup_all(&tw);
+        let itwp = shoup_all(&itw);
         Table {
             p,
             log,
@@ -221,7 +272,22 @@ pub(crate) fn table_cached<W: NttWord>(
         cache.push(t.clone());
         return t;
     }
-    let t = Arc::new(Table::new(p, primitive_root, max_root_log, log));
+    // Built under the lock, so concurrent misses never build the same large
+    // table twice.  Natively a Stop (or any panic) inside Table::new is
+    // caught here: the partial table has dropped, the guard is released
+    // normally (the mutex is not poisoned, nothing was published), and the
+    // same payload continues outside the critical section.  In WebAssembly
+    // a panic traps instead and the host discards the whole engine
+    // instance, this cache with it.
+    CACHE_BUILDS.fetch_add(1, std::sync::atomic::Ordering::Relaxed);
+    let built = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| Table::new(p, primitive_root, max_root_log, log)));
+    let t = match built {
+        Ok(t) => Arc::new(t),
+        Err(payload) => {
+            drop(cache);
+            std::panic::resume_unwind(payload)
+        }
+    };
     cache.retain(|t| t.p != p);
     let mut total = cache.iter().map(|t| table_bytes(t)).sum::<usize>() + table_bytes(&t);
     while !cache.is_empty() && (cache.len() >= max_tables || total > CACHE_BYTES) {
@@ -230,4 +296,24 @@ pub(crate) fn table_cached<W: NttWord>(
     }
     cache.push(t.clone());
     t
+}
+
+#[cfg(test)]
+mod table_work_tests {
+    use super::*;
+
+    #[test]
+    fn table_work_bounds_the_counted_build() {
+        for log in [0u32, 1, 2, 3, 8, 12, 13, 16, 18] {
+            TABLE_WORK.with(|c| c.set(0));
+            let (p, g) = crate::ntt::PRIMES[0];
+            let t = Table::<u64>::new(p, g, (p - 1).trailing_zeros(), log);
+            let counted = TABLE_WORK.with(|c| c.get());
+            let bound = table_work(log).unwrap();
+            assert!(counted <= bound, "log {}: counted {} > bound {}", log, counted, bound);
+            drop(t);
+        }
+        // (16 * 2^59 + 512 fits a u64; 16 * 2^60 does not: None, never a wrapped bound)
+        assert!(table_work(59).is_some() && table_work(60).is_none() && table_work(63).is_none());
+    }
 }

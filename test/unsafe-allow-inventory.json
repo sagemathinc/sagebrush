@@ -741,6 +741,12 @@
    "item": "fn abi_frees_the_old_reply_first",
    "hash": "92a3fc319fb171b67e311df9a6ae801718960cf7741dc3190748f6c7325fadda",
    "audit": "Can it produce or alter an Obligations, Operation, Reservation, Growth or Context (directly, generically or through a pointer)? No. Test glue: it calls the C-ABI exports with pointers to live test-owned bytes; any reservation goes through sb_reserve's safe ledger calls."
+  },
+  {
+   "file": "engine/web/tests/series_alloc.rs",
+   "item": "impl GlobalAlloc for Counting",
+   "hash": "288c6281672cdb8eef99026977a4bfaa0bc9e73cadbbc361e9ab45e2026bb091",
+   "audit": "Can it produce or alter an Obligations, Operation, Reservation, Growth or Context (directly, generically or through a pointer)? No. Test glue: a System-forwarding counting allocator (alloc, dealloc and realloc pass the caller's own pointer and layout to System unchanged; the counting only updates two atomics). It differs from engine/web/tests/nmod_alloc.rs's audited item only in what it counts: live bytes and their peak, with realloc's old and new blocks counted as coexisting while copying. Here it measures the series ops' peak live memory against their admitted peaks."
   }
  ]
 }

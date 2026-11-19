@@ -37,7 +37,11 @@ function fnBody(src, name) {
 }
 
 export function census() {
-  const engineCall = matchKeys(read("engine/web/src/lib.rs"));
+  // (and the ops dispatched from series_ops.rs's table, before lib.rs's match)
+  const engineCall = uniq([
+    ...matchKeys(read("engine/web/src/lib.rs")),
+    ...[...read("engine/web/src/series_ops.rs").matchAll(/SeriesOp \{ name: "([a-z_]+)"/g)].map((m) => m[1]),
+  ]);
   // (symCall dispatches from `call` into helpers in the same file, so the whole file is read)
   const symCall = matchKeys(read("engine/sym/src/api.rs"));
   const mpCall = matchKeys(fnBody(read("engine/mpoly/src/lib.rs"), "call"));

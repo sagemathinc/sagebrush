@@ -44,5 +44,6 @@
   "_sage_ec_ff": 13,
   "_sage_ec_plot": 1,
   "_sage_ec_rr": 6,
-  "_sage_ec_torsion": 10
+  "_sage_ec_torsion": 10,
+  "sagebrush.poly": 4
 }

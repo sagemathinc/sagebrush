@@ -135,6 +135,11 @@ impl MultiCrt {
     pub fn new(primes: &[u64]) -> MultiCrt {
         let mods: Vec<Modulus> = primes.iter().map(|&p| Modulus::new(p)).collect();
         let k = primes.len();
+        // (the tests' count of the loops below: the reductions and
+        // products of pm and c, prod, each q_j's k - 1 small products of at
+        // most k + 1 words and its reduction; new_work bounds it)
+        let k64 = k as u64;
+        crate::counted::add(k64 * k64 + k64 * (k64 + 2) + k64 * (k64 * (k64 + 2) + k64 + 4) + 8);
         let mut pm = vec![vec![]; k];
         let mut c = vec![0u64; k];
         for j in 0..k {
@@ -260,6 +265,9 @@ impl MultiCrt {
     fn reconstruct_with(&self, r: &[u64], q_estimate: Option<u64>) -> BigInt {
         let k = self.mods.len();
         let n = self.q[0].len();
+        // (the tests' count: the k rows of n products, the carry pass, the
+        // subtraction's buffer; the correction steps are counted below)
+        crate::counted::add((k as u64 + 4) * (n as u64 + 2));
         let mut lo = vec![0u128; n + 1];
         let mut hi = vec![0u128; n + 1];
         let mut f = 0.0f64;
@@ -306,6 +314,7 @@ impl MultiCrt {
         while cmp(&x, &t) == std::cmp::Ordering::Less {
             // t > x >= 0 and t is a multiple of P, so t >= P
             sub_in_place(&mut t, &self.prod);
+            crate::counted::add(2 * (n as u64 + 2));
             steps += 1;
             if steps % 1024 == 0 {
                 sagebrush_interrupt::check();
@@ -317,6 +326,7 @@ impl MultiCrt {
         let mut x = d;
         while cmp(&x, &self.prod) != std::cmp::Ordering::Less {
             x = sub(&x, &self.prod);
+            crate::counted::add(2 * (n as u64 + 2));
             steps += 1;
             if steps % 1024 == 0 {
                 sagebrush_interrupt::check();

@@ -15,6 +15,7 @@
 
 use crate::nmod::Modulus;
 use crate::ntt_core::{self, NttWord, Table};
+pub use crate::ntt_core::table_work;
 use std::sync::atomic::{AtomicUsize, Ordering::Relaxed};
 use std::sync::{Arc, Mutex};
 
@@ -67,7 +68,8 @@ impl NttWord for u64 {
 
 /// A generator of (Z/p)^*, for p - 1 = c 2^k with c small enough to
 /// factor by trial division.
-fn primitive_root(p: u64) -> u64 {
+/// (the least such generator)
+pub fn primitive_root(p: u64) -> u64 {
     let m = Modulus::new(p);
     let mut qs = vec![2u64];
     let mut c = (p - 1) >> (p - 1).trailing_zeros();
@@ -114,6 +116,24 @@ static TABLE_FOR_CALLS: AtomicUsize = AtomicUsize::new(0);
 pub fn cache_stats() -> (usize, usize, usize) {
     let (tables, bytes) = ntt_core::cache_stats(&CACHE);
     (TABLE_FOR_CALLS.load(Relaxed), tables, bytes)
+}
+
+/// Whether the shared cache's lock is poisoned: a Stop inside a table's
+/// build must never poison it (the tests check).
+pub fn cache_poisoned() -> bool {
+    CACHE.is_poisoned()
+}
+
+/// The tables the shared cache has built so far (two callers missing on
+/// the same table build it once: the build is serialized under the lock).
+pub fn cache_builds() -> usize {
+    ntt_core::CACHE_BUILDS.load(Relaxed)
+}
+
+/// Empty the shared cache (tests: to make the next product build again).
+#[doc(hidden)]
+pub fn cache_clear() {
+    CACHE.lock().unwrap_or_else(|e| e.into_inner()).clear();
 }
 
 fn table_for(p: u64, log: u32) -> Arc<Table<u64>> {
@@ -321,6 +341,26 @@ impl LocalTables {
             tabs.push(Table::new(p, g, (p - 1).trailing_zeros(), log));
         }
         LocalTables { own: false, tabs }
+    }
+
+    /// m's own table for products of length at most `max_len`, built from
+    /// `root`, a primitive root of the NTT prime m (the caller's verified
+    /// constant: no search for one here, so the build is [`table_work`]).
+    /// Panics unless m has the shape of an NTT prime at max_len (2^32 < m <
+    /// 2^62, 2^log | m - 1); its primality is the caller's (a tested
+    /// constant), not re-proved here.
+    pub fn with_root(m: &Modulus, root: u64, max_len: usize) -> LocalTables {
+        let max_len = max_len.max(1);
+        assert!(
+            m.n > 1 << 32 && m.n < 1 << 62 && (m.n - 1).trailing_zeros() >= max_len.next_power_of_two().trailing_zeros(),
+            "LocalTables::with_root: not an NTT modulus at this length"
+        );
+        let log = log2_len(max_len);
+        let _phase = sagebrush_interrupt::enter("ntt");
+        LocalTables {
+            own: true,
+            tabs: vec![Table::new(m.n, root, (m.n - 1).trailing_zeros(), log)],
+        }
     }
 
     /// The bytes the tables hold.
