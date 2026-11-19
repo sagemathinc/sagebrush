@@ -2,9 +2,10 @@
 of Sage mode's namespace, for loading a domain the first time one of its
 names is used.  Pure data, no imports.
 
-Edit NAMES (and OVERRIDES) by hand; DEPS and ALL are written by
-`python3 scripts/sage_names.py --write`, and CI runs --check (see that
-script for what it verifies).
+NAMES and OVERRIDES are maintained by hand (--write adds to NAMES the names
+sage_all imports from a domain); DEPS, ALIASES, ALL and SHIM_NAMES are
+written from the sources by `python3 scripts/sage_names.py --write`.  CI
+runs --check (see that script for what it verifies).
 """
 
 # public name -> the module that defines it
