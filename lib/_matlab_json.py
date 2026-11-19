@@ -13,8 +13,9 @@ they agree:
   double; a boolean a logical; a string a character vector; an object a
   struct, its names made valid as matlab.lang.makeValidName makes them; an
   array of numbers (and nulls) a column vector, of booleans a logical one,
-  of arrays of equal size an array one dimension more; an array of objects
-  with the same names a struct array; any other array a cell array.
+  of numeric (or of logical) arrays of one size an array one dimension
+  more; an array of objects with the same names in the same order a struct
+  array; any other array a cell array.
 
 The JSON text is untrusted input: it is refused over MAX_CHARS characters or
 nested more than MAX_DEPTH deep, before it is parsed.

@@ -404,10 +404,13 @@ call) follow MATLAB's documentation of them and are checked against Octave
   array is (Octave flattens it); a string array strings. Numbers are written
   as integers where they are, else as the shortest text that reads back as
   the double, as Octave writes them. `ConvertInfAndNaN` and `PrettyPrint`
-  are supported. Complex and sparse values are refused, as MATLAB refuses them.
+  are supported. Complex and sparse values are refused, as MATLAB refuses them;
+  so are object arrays, and MATLAB's tables, datetime, categorical,
+  containers.Map and enumerations, which Sagebrush lacks.
 - **Decoding:** arrays of numbers become column vectors (nulls NaN), arrays of
-  arrays of one size an array of one more dimension, arrays of objects with
-  the same names struct arrays, anything else cell arrays. Names are made
+  numeric (or of logical) arrays of one size an array of one more dimension,
+  arrays of objects with the same names in the same order struct arrays,
+  anything else cell arrays. Names are made
   valid as `matlab.lang.makeValidName` makes them (Octave keeps a leading
   `_`).
 - **Bounds:** the JSON text is untrusted input. It is refused over 2^26
