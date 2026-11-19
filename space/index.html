@@ -5,58 +5,70 @@
 <meta name="viewport" content="width=device-width, initial-scale=1">
 <title>Whitespace · Sagebrush prototype</title>
 <style>
-  html, body { margin: 0; height: 100%; overflow: hidden; background: #0e1116; color: #e8eef7; font: 14px/1.45 system-ui, -apple-system, Segoe UI, sans-serif; }
+  /* light by default (a white space); dark when the system is dark, or when chosen (Theme) */
+  :root { color-scheme: light;
+    --bg: #f5f6f8; --fg: #1f2328; --muted: #5f6b7a; --panel: rgba(255, 255, 255, 0.9); --line: #d5dbe3; --ctl: #ffffff; --ctl-line: #c9d1db; --hover: #eaeef3;
+    --ov: #ffffff; --ov-fg: #1f2328; --ov-muted: #57606a; --ov-shadow: 0 10px 40px rgba(20, 30, 50, 0.18); --pre: #f0f2f5; --edit: #f6f8fa; --edit-line: #d0d7de;
+    --out: #e7f6ec; --err: #ffebe9; --err-fg: #82071e; --link: #0b5cad; --ctl2: #eef1f5;
+    --k: #cf222e; --t: #8250df; --s: #0a3069; --n: #0550ae; --c: #6e7781; --p: #24292f; --m: #953800; }
+  :root[data-theme="dark"] { color-scheme: dark;
+    --bg: #0e1116; --fg: #e8eef7; --muted: #93a1b5; --panel: rgba(20, 24, 32, 0.88); --line: #2c3442; --ctl: #1b2130; --ctl-line: #364055; --hover: #253046;
+    --ov: #161b22; --ov-fg: #e6edf3; --ov-muted: #8d96a0; --ov-shadow: 0 10px 40px rgba(0, 0, 0, 0.5); --pre: #0d1117; --edit: #0d1117; --edit-line: #30363d;
+    --out: #0f2a1b; --err: #3a1418; --err-fg: #ffa198; --link: #58a6ff; --ctl2: #21262d;
+    --k: #ff7b72; --t: #d2a8ff; --s: #a5d6ff; --n: #79c0ff; --c: #8b949e; --p: #e6edf3; --m: #ffa657; }
+  html, body { margin: 0; height: 100%; overflow: hidden; background: var(--bg); color: var(--fg); font: 14px/1.45 system-ui, -apple-system, Segoe UI, sans-serif; }
   #view { position: fixed; inset: 0; }
   #panel { position: fixed; top: 12px; left: 12px; width: 320px; max-height: calc(100% - 60px); display: flex; flex-direction: column; gap: 8px;
-    background: rgba(20, 24, 32, 0.88); border: 1px solid #2c3442; border-radius: 10px; padding: 12px; backdrop-filter: blur(6px); }
+    background: var(--panel); border: 1px solid var(--line); border-radius: 10px; padding: 12px; backdrop-filter: blur(6px); box-shadow: 0 4px 18px rgba(20, 30, 50, 0.08); }
   .embed #panel { width: 260px; top: 8px; left: 8px; }
   .embed #space { display: none; }
   #title { font-weight: 600; font-size: 15px; }
-  #status, #hover { color: #93a1b5; font-size: 12px; min-height: 16px; }
+  #status, #hover { color: var(--muted); font-size: 12px; min-height: 16px; }
   .row { display: flex; gap: 6px; flex-wrap: wrap; }
-  select, input, button { font: inherit; color: inherit; background: #1b2130; border: 1px solid #364055; border-radius: 6px; padding: 6px 8px; }
-  button { cursor: pointer; } button:hover { background: #253046; } button:disabled { opacity: 0.45; cursor: default; }
+  select, input, button { font: inherit; color: inherit; background: var(--ctl); border: 1px solid var(--ctl-line); border-radius: 6px; padding: 6px 8px; }
+  button { cursor: pointer; } button:hover { background: var(--hover); } button:disabled { opacity: 0.45; cursor: default; }
   select { flex: 1; } #q { width: 100%; box-sizing: border-box; }
   #results { list-style: none; margin: 0; padding: 0; overflow: auto; }
   #results li { padding: 6px 8px; border-radius: 6px; cursor: pointer; }
-  #results li:hover { background: #253046; }
+  #results li:hover { background: var(--hover); }
   #results li b { display: block; font-weight: 600; font-size: 13px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
-  #results li span { display: block; color: #93a1b5; font-size: 12px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
-  #results li.none { color: #93a1b5; cursor: default; }
-  #overlay { position: fixed; top: 12px; right: 12px; bottom: 12px; width: min(560px, 46vw); overflow: auto; background: #fbfaf7; color: #1f2328;
-    border-radius: 10px; padding: 18px 22px; box-shadow: 0 10px 40px rgba(0,0,0,0.5); }
+  #results li span { display: block; color: var(--muted); font-size: 12px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+  #results li.none { color: var(--muted); cursor: default; }
+  #overlay { position: fixed; top: 12px; right: 12px; bottom: 12px; width: min(560px, 46vw); overflow: auto; background: var(--ov); color: var(--ov-fg);
+    border: 1px solid var(--line); border-radius: 10px; padding: 18px 22px; box-shadow: var(--ov-shadow); }
   #overlay h2 { margin: 0 32px 10px 0; font-size: 18px; word-break: break-all; }
-  #overlay .close { position: absolute; top: 10px; right: 10px; background: none; border: 0; color: #555; font-size: 22px; padding: 2px 8px; }
-  #overlay pre { background: #f0f2f5; padding: 10px 12px; border-radius: 6px; overflow: auto; font: 12.5px/1.45 ui-monospace, Menlo, monospace; }
-  #overlay pre.out { background: #e7f6ec; }
-  #overlay .label { margin-top: 12px; font-size: 12px; text-transform: uppercase; letter-spacing: 0.04em; color: #57606a; }
-  #overlay .meta, #overlay .hint { color: #57606a; font-size: 12px; }
-  #overlay ul.links { margin: 4px 0; padding-left: 18px; } #overlay ul.links a { color: #0b5cad; text-decoration: none; word-break: break-all; }
-  #overlay .md code { background: #f0f2f5; padding: 1px 4px; border-radius: 4px; }
+  #overlay .close { position: absolute; top: 10px; right: 10px; background: none; border: 0; color: var(--ov-muted); font-size: 22px; padding: 2px 8px; }
+  #overlay pre { background: var(--pre); padding: 10px 12px; border-radius: 6px; overflow: auto; font: 12.5px/1.45 ui-monospace, Menlo, monospace; }
+  #overlay pre.out { background: var(--out); }
+  #overlay .label { margin-top: 12px; font-size: 12px; text-transform: uppercase; letter-spacing: 0.04em; color: var(--ov-muted); }
+  #overlay .meta, #overlay .hint { color: var(--ov-muted); font-size: 12px; }
+  #overlay a { color: var(--link); }
+  #overlay ul.links { margin: 4px 0; padding-left: 18px; } #overlay ul.links a { text-decoration: none; word-break: break-all; }
+  #overlay .md code { background: var(--pre); padding: 1px 4px; border-radius: 4px; }
   #overlay .grip { position: absolute; left: 0; top: 0; bottom: 0; width: 7px; cursor: ew-resize; }
   #overlay .grip:hover { background: rgba(11, 92, 173, 0.15); }
   #overlay .runbar { display: flex; gap: 6px; align-items: center; margin: 4px 0 8px; }
-  #overlay .runbar select, #overlay .runbar button { background: #eef1f5; color: #1f2328; border: 1px solid #c9d1db; padding: 4px 10px; }
+  #overlay .runbar select, #overlay .runbar button { background: var(--ctl2); color: var(--ov-fg); border: 1px solid var(--ctl-line); padding: 4px 10px; }
   #overlay .runbar button.run { background: #1f6feb; color: #fff; border-color: #1f6feb; font-weight: 600; }
   #overlay .runbar button:disabled { opacity: 0.5; }
-  #overlay .runstate { color: #57606a; font-size: 12px; }
-  #overlay .editor { position: relative; border: 1px solid #d0d7de; border-radius: 6px; background: #f6f8fa; }
+  #overlay .runstate { color: var(--ov-muted); font-size: 12px; }
+  #overlay .editor { position: relative; border: 1px solid var(--edit-line); border-radius: 6px; background: var(--edit); }
   #overlay .editor pre.hl, #overlay .editor textarea { margin: 0; padding: 10px 12px; font: 12.5px/1.45 ui-monospace, Menlo, monospace; white-space: pre-wrap;
     word-break: break-word; tab-size: 4; border: 0; background: transparent; }
   #overlay .editor pre.hl { pointer-events: none; }
-  #overlay .editor textarea { position: absolute; inset: 0; width: 100%; box-sizing: border-box; color: transparent; caret-color: #1f2328; resize: none;
+  #overlay .editor textarea { position: absolute; inset: 0; width: 100%; box-sizing: border-box; color: transparent; caret-color: var(--ov-fg); resize: none;
     outline: none; overflow: hidden; }
   #overlay .editor:focus-within { border-color: #1f6feb; box-shadow: 0 0 0 2px rgba(31, 111, 235, 0.2); }
-  #overlay pre.out.err { background: #ffebe9; color: #82071e; }
+  #overlay pre.out.err { background: var(--err); color: var(--err-fg); }
   #overlay img.fig { max-width: 100%; background: #fff; border-radius: 6px; margin: 6px 0; }
-  /* highlight.js, GitHub's light colors */
-  .hljs-keyword, .hljs-meta .hljs-keyword, .hljs-type, .hljs-built_in { color: #cf222e; }
-  .hljs-title, .hljs-title.function_, .hljs-title.class_ { color: #8250df; }
-  .hljs-string, .hljs-regexp, .hljs-meta .hljs-string { color: #0a3069; }
-  .hljs-number, .hljs-literal, .hljs-attr, .hljs-variable.language_, .hljs-symbol { color: #0550ae; }
-  .hljs-comment, .hljs-quote { color: #6e7781; font-style: italic; }
-  .hljs-params { color: #24292f; } .hljs-meta { color: #953800; }
-  #help { position: fixed; left: 12px; bottom: 10px; color: #6b788c; font-size: 12px; }
+  /* highlight.js: GitHub's light and dark colors */
+  .hljs-keyword, .hljs-meta .hljs-keyword, .hljs-type, .hljs-built_in { color: var(--k); }
+  .hljs-title, .hljs-title.function_, .hljs-title.class_ { color: var(--t); }
+  .hljs-string, .hljs-regexp, .hljs-meta .hljs-string { color: var(--s); }
+  .hljs-number, .hljs-literal, .hljs-attr, .hljs-variable.language_, .hljs-symbol { color: var(--n); }
+  .hljs-comment, .hljs-quote { color: var(--c); font-style: italic; }
+  .hljs-params { color: var(--p); } .hljs-meta { color: var(--m); }
+  #help { position: fixed; left: 12px; bottom: 10px; color: var(--muted); font-size: 12px; }
 </style>
 </head>
 <body>
@@ -70,6 +82,7 @@
     <button id="home" title="See everything (H)">See all</button>
     <button id="dims" title="The same space laid out on a plane, to compare">Flatten to 2D</button>
     <button id="fs" title="Full screen">Full screen</button>
+    <button id="theme" title="Light, dark, or as your system is (Auto)">Theme: Auto</button>
   </div>
   <input id="q" type="search" placeholder="Search everything (press /)" autocomplete="off">
   <ul id="results"></ul>

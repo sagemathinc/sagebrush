@@ -19,8 +19,20 @@ renderer.setPixelRatio(Math.min(devicePixelRatio, 2));
 renderer.setSize(innerWidth, innerHeight);
 $("#view").appendChild(renderer.domElement);
 const scene = new THREE.Scene();
-scene.background = new THREE.Color(0x0e1116);
-scene.fog = new THREE.Fog(0x0e1116, 60, 400);
+// the theme: light (a white space), or dark; Auto follows the system (prefers-color-scheme)
+const THEMES = {
+  light: { bg: 0xf5f6f8, edge: 0x51657f, edgeOpacity: 0.3, label: "rgba(255, 255, 255, 0.85)", labelFg: "#1f2328", code: "#f6f8fa", plot: "#eef1f5",
+    fg: "#1f2328", fileL: 0.86, sideL: 0.72, out: "#dff3e6", outFg: "#116329", glow: [0.05, 0.16, 0.45] },
+  dark: { bg: 0x0e1116, edge: 0x7f9cc0, edgeOpacity: 0.22, label: "rgba(14, 17, 22, 0.55)", labelFg: "#f0f4fa", code: "#1d2330", plot: "#20262f",
+    fg: "#e8eef7", fileL: 0.25, sideL: 0.3, out: "#0b3d2a", outFg: "#9ff0c1", glow: [0.55, 0.6, 0.7] },
+};
+const darkQuery = matchMedia("(prefers-color-scheme: dark)");
+let themeSetting = (() => { try { const v = localStorage.getItem("whitespace:theme"); return ["light", "dark"].includes(v) ? v : "auto"; } catch { return "auto"; } })();
+const themeName = () => (themeSetting === "auto" ? (darkQuery.matches ? "dark" : "light") : themeSetting);
+let T = THEMES[themeName()];
+document.documentElement.dataset.theme = themeName();
+scene.background = new THREE.Color(T.bg);
+scene.fog = new THREE.Fog(T.bg, 60, 400);
 const camera = new THREE.PerspectiveCamera(55, innerWidth / innerHeight, 0.1, 5000);
 const controls = new OrbitControls(camera, renderer.domElement);
 controls.enableDamping = true;
@@ -48,8 +60,9 @@ function canvasFor(nd, px) {
   c.width = Math.round(w * px); c.height = Math.round(h * px);
   return c;
 }
-const bgOf = (nd) => nd.kind === "note" ? "#f4ecd8" : nd.kind === "code" ? "#1d2330" : nd.kind === "plot3d" ? "#20262f" : "#" + groupColor(nd).multiplyScalar(0.55).getHexString();
-const fgOf = (nd) => nd.kind === "note" ? "#2b2a26" : "#e8eef7";
+const bgOf = (nd) => nd.kind === "note" ? "#f4ecd8" : nd.kind === "code" ? T.code : nd.kind === "plot3d" ? T.plot : "#" + new THREE.Color().setHSL(hue(nd.group ?? nd.kind), 0.45, T.fileL).getHexString();
+const fgOf = (nd) => nd.kind === "note" ? "#2b2a26" : T.fg;
+const sideColor = (nd) => new THREE.Color().setHSL(hue(nd.group ?? nd.kind), 0.35, nd.kind === "note" ? 0.75 : T.sideL);
 const shortTitle = (nd) => nd.kind === "file" ? nd.title.split("/").pop() : nd.title;
 function texture(c) {
   const tex = new THREE.CanvasTexture(c);
@@ -128,8 +141,8 @@ function faceTexture(nd) {
   }
   if (nd.kind === "code" && nd.output) {
     y = Math.min(y + fs * 0.6, c.height - pad - fs * 1.4);
-    g.fillStyle = "#0b3d2a"; g.fillRect(pad * 0.6, y - fs, c.width - 1.2 * pad, fs * 1.7);
-    g.fillStyle = "#9ff0c1"; g.font = `${fs}px ui-monospace, monospace`;
+    g.fillStyle = T.out; g.fillRect(pad * 0.6, y - fs, c.width - 1.2 * pad, fs * 1.7);
+    g.fillStyle = T.outFg; g.font = `${fs}px ui-monospace, monospace`;
     g.fillText(nd.output.split("\n")[0], pad, y + fs * 0.4, c.width - 2 * pad);
   }
   return texture(c);
@@ -167,12 +180,12 @@ function makeObject(nd) {
   const group = new THREE.Group();
   // (the face starts plain: its textures are made only when the object is near enough to need them)
   const face = new THREE.MeshStandardMaterial({ color: groupColor(nd), roughness: 0.9 });
-  const side = new THREE.MeshStandardMaterial({ color: new THREE.Color().setHSL(hue(nd.group ?? nd.kind), 0.35, nd.kind === "note" ? 0.75 : 0.3), roughness: 0.8 });
+  const side = new THREE.MeshStandardMaterial({ color: sideColor(nd), roughness: 0.8 });
   const slab = new THREE.Mesh(new THREE.BoxGeometry(w, h, d), [side, side, side, side, face, side]);
   slab.userData.node = nd;
   group.add(slab);
   pickables.push(slab);
-  group.userData = { node: nd, face, level: 0, tex: [], plot: null };
+  group.userData = { node: nd, face, side, level: 0, tex: [], plot: null };
   if (nd.scene) setPlot(group, sceneObject(nd.scene));
   else if (nd.kind === "plot3d" && nd.surface) setPlot(group, surfaceMesh(nd));
   return group;
@@ -224,9 +237,9 @@ function landmarkSprite(text) {
   g.font = `600 ${size}px system-ui, sans-serif`;
   c.width = Math.ceil(g.measureText(text).width + size); c.height = Math.ceil(size * 1.6);
   g.font = `600 ${size}px system-ui, sans-serif`;
-  g.fillStyle = "rgba(14, 17, 22, 0.55)";
+  g.fillStyle = T.label;
   g.beginPath(); g.roundRect(0, 0, c.width, c.height, size * 0.4); g.fill();
-  g.fillStyle = "#f0f4fa"; g.textBaseline = "middle";
+  g.fillStyle = T.labelFg; g.textBaseline = "middle";
   g.fillText(text, size / 2, c.height / 2);
   const sprite = new THREE.Sprite(new THREE.SpriteMaterial({ map: texture(c), transparent: true, depthWrite: false, fog: false }));
   sprite.userData.aspect = c.width / c.height;
@@ -347,7 +360,7 @@ async function load(name, data = null, again = false) {
   }
   const geo = new THREE.BufferGeometry();
   geo.setAttribute("position", new THREE.BufferAttribute(new Float32Array(pairs.length * 6), 3));
-  edgeLines = new THREE.LineSegments(geo, new THREE.LineBasicMaterial({ color: 0x7f9cc0, transparent: true, opacity: 0.22 }));
+  edgeLines = new THREE.LineSegments(geo, new THREE.LineBasicMaterial({ color: T.edge, transparent: true, opacity: T.edgeOpacity }));
   edgeLines.userData.pairs = pairs;
   scene.add(edgeLines);
   for (const n of nodes) (n._out = []), (n._in = []);
@@ -502,7 +515,9 @@ function setGlow(nd, v) {
   const o = objects[space.nodes.indexOf(nd)];
   // (the selected object keeps its own glow)
   if (nd.id === selected && v < 0.4) v = 0.4;
-  o?.traverse((m) => { for (const mat of [].concat(m.material ?? [])) if (mat.emissive) mat.emissive.setScalar(v); });
+  // (a white glow on a dark space; on a light one, a faint blue, which keeps the face's text readable)
+  const glow = T.glow;
+  o?.traverse((m) => { for (const mat of [].concat(m.material ?? [])) if (mat.emissive) mat.emissive.setRGB(glow[0] * v, glow[1] * v, glow[2] * v); });
 }
 
 // ---------------------------------------------------------------- selection: what the person is looking at, for agents
@@ -659,6 +674,34 @@ function grip(el) {
   };
 }
 try { const w = localStorage.getItem("whitespace:overlay-width"); if (w) $("#overlay").style.width = w; } catch {}
+
+// the theme: Auto, Light, Dark (kept for the next visit); a change redraws the faces and labels in its colors
+function applyTheme() {
+  const name = themeName();
+  T = THEMES[name];
+  document.documentElement.dataset.theme = name;
+  $("#theme").textContent = "Theme: " + themeSetting[0].toUpperCase() + themeSetting.slice(1);
+  scene.background.set(T.bg);
+  scene.fog.color.set(T.bg);
+  if (edgeLines) { edgeLines.material.color.set(T.edge); edgeLines.material.opacity = T.edgeOpacity; }
+  for (const o of objects) {
+    for (const t of o.userData.tex) t?.dispose();
+    o.userData.tex = [];
+    o.userData.level = -1; // (made again, in these colors, as the zoom asks for them)
+    o.userData.side.color.copy(sideColor(o.userData.node));
+  }
+  if (space) for (const nd of space.nodes) setGlow(nd, 0);
+  if (space) buildLandmarks();
+}
+$("#theme").onclick = () => {
+  // (Auto, then the other theme than the system's, then the system's own, then Auto again: the first click changes it)
+  const other = darkQuery.matches ? "light" : "dark", own = darkQuery.matches ? "dark" : "light";
+  themeSetting = themeSetting === "auto" ? other : themeSetting === other ? own : "auto";
+  try { localStorage.setItem("whitespace:theme", themeSetting); } catch {}
+  applyTheme();
+};
+darkQuery.addEventListener("change", () => themeSetting === "auto" && applyTheme());
+applyTheme();
 
 // full screen
 $("#fs").onclick = () => (document.fullscreenElement ? document.exitFullscreen() : document.documentElement.requestFullscreen()).catch(() => {});
