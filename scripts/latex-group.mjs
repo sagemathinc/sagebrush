@@ -87,7 +87,9 @@ export const LATEX_LAZY = {
 //  asks the pairing over the site's channel), Nov 19, provisional until the exact-head CI packet: 253,463 / 84,649
 //  measured on the shipped build (bun 1.4.4, node 24.21.0), on the embedded mode's head; 252,695 / 84,335 without it
 //  (+768 / +314), + 64)
-export const LATEX_CAPS = { raw: 253527, gzip: 84713 };
+// (253,962 raw / 84,895 gzip: Nov 19 2026, the reload record on the LaTeX page with the run of a .tex the agent made,
+//  master a3f1e30b: 253,898 / 84,831 measured, + 64)
+export const LATEX_CAPS = { raw: 253962, gzip: 84895 };
 export const gz = (b) => gzipSync(b, { level: 9 }).length;
 
 // Each lazy chunk's own cap (raw, gzip), fetched only on its own use, so outside the group:
@@ -158,7 +160,8 @@ export const LATEX_LAZY_CAPS = {
   //  24.21.0), + 64)
   // (56,341 / 19,371: an answer's entry with its page's address and a .tex the agent made running by itself together,
   //  measured on their merge (master 3c4319ba): 56,277 / 19,307 (bun 1.4.4, node 24.21.0), + 64)
-  AGENT: { label: "the LaTeX agent pairing's chunk", raw: 56341, gzip: 19371 },
+  // (56,431 / 19,403: Nov 19 2026, the reload record's handling on master a3f1e30b: 56,367 / 19,339 measured, + 64)
+  AGENT: { label: "the LaTeX agent pairing's chunk", raw: 56431, gzip: 19403 },
   // (the agent tools' work: web/latex/tools.ts, latex_check's report and latex_render's pictures, on an agent's first call)
   // (16,546 / 6,950: Nov 11 2026: latex_build's own code (build.ts, the
   //  engine driven from a snapshot, and the pages' fit) here, out of the eager group, its shared rules handed in by the
