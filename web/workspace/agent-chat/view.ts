@@ -91,10 +91,10 @@ export function toolHtml(t: ToolCall): string {
 }
 
 export function artifactIcon(a: Artifact) {
-  return a.kind === "markdown" ? "📝" : a.kind === "diff" ? "±" : a.kind === "notebook" ? "📓" : "⌨";
+  return a.kind === "markdown" ? "📝" : a.kind === "diff" ? "±" : a.kind === "notebook" ? "📓" : a.kind === "board" ? "▦" : "⌨";
 }
 export function artifactLabel(a: Artifact) {
-  return a.kind === "markdown" ? "Document" : a.kind === "diff" ? "Changes" : a.kind === "notebook" ? "Notebook" : `Code${langOf(a.lang) ? ` · ${esc(langOf(a.lang)!)}` : ""}`;
+  return a.kind === "markdown" ? "Document" : a.kind === "diff" ? "Changes" : a.kind === "notebook" ? "Notebook" : a.kind === "board" ? "Board" : `Code${langOf(a.lang) ? ` · ${esc(langOf(a.lang)!)}` : ""}`;
 }
 
 // A line diff (longest common subsequence): small files only.

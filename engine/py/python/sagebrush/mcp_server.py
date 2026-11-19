@@ -708,6 +708,9 @@ class Server:
         self.threads = []
         self.protocol = PROTOCOL_VERSIONS[0]
         self.link = None  # the pairing with the person's Sagebrush page (sagebrush/pairing.py), once asked for
+        # (tool calls run concurrently: the pairing's creation and the link's reuse-or-start are one critical section,
+        #  so two first calls at once get one listener and one link)
+        self.pair_lock = threading.RLock()
         self.client = {}  # the client's clientInfo, from initialize
         # the chat panel beside the document (sagebrush/chat.py): pushed to
         # Claude Code through its channels, chat_next for any client
@@ -972,13 +975,13 @@ class Server:
             return [_text(s)], {"result": s, "text": s, "status": "unknown", "assumes": [], "error": None}, False
 
         if name in WS.NAMES:
-            return WS.call(self.link, name, args)
+            return self.linked(WS.call(self.link, name, args))
         if name in LT.NAMES:
-            return LT.call(self.link, name, args)
+            return self.linked(LT.call(self.link, name, args))
         if name == "workspace_connect":
-            return self.connect()
+            return self.connect(args)
         if name in ("chat_next", "chat_reply"):
-            return self.chat_tool(name, args)
+            return self.linked(self.chat_tool(name, args))
         if name in ("sage", "python"):
             return self.run_code(args, name, rid)
         if name in ("run_status", "run_result", "run_cancel", "run_list", "run_keep"):
@@ -1069,28 +1072,82 @@ class Server:
             return err("not_connected", str(e))
         return [_text("sent (%s)" % rid)], {"result": {"id": rid}, "error": None}, False
 
-    def connect(self):
-        """workspace_connect: listen for the person's page (127.0.0.1 only),
-        with a fresh one-time code; or, once paired, what it granted."""
-        from sagebrush.pairing import Pairing, CODE_SECONDS
+    def pairing(self):
+        """The listener for the person's page (made at its first use)."""
+        from sagebrush.pairing import Pairing
 
-        if self.link is None:
-            name = str(self.client.get("title") or self.client.get("name") or "an agent")[:80]
-            self.link = Pairing({"name": name, "client": str(self.client.get("name") or "unknown")[:80], "version": str(self.client.get("version") or "")[:40]},
-                                on_notify=self.chat.on_page)
-        st = self.link.status()
+        with self.pair_lock:
+            if self.link is None:
+                name = str(self.client.get("title") or self.client.get("name") or "an agent")[:80]
+                self.link = Pairing({"name": name, "client": str(self.client.get("name") or "unknown")[:80], "version": str(self.client.get("version") or "")[:40]},
+                                    on_notify=self.chat.on_page)
+            return self.link
+
+    def pair_link(self):
+        """(link, code, port): the live one-time link, the same one while it is valid; else a fresh code's. One link at a
+        time, so a person opening the link they were given never finds it replaced by another call."""
+        with self.pair_lock:
+            p = self.pairing()
+            link = p.link()
+            if link is not None:
+                with p.lock:
+                    return link, p.code, p.port
+            port, code = p.start()
+            print("sagebrush-mcp: pairing code %s on 127.0.0.1:%d (5 minutes, once)" % (code, port), file=sys.stderr)
+            return p.link(), code, port
+
+    def linked(self, reply):
+        """A tool's reply, unless it is not_connected: then what workspace_connect would say, its one link (decided
+        Nov 19 2026), whichever tool the agent called first; or, paired but not allowed, to ask the person to Allow."""
+        content, structured, is_error = reply
+        err = structured.get("error") if isinstance(structured, dict) else None
+        if not (is_error and isinstance(err, dict) and err.get("code") == "not_connected"):
+            return reply
+        st = self.link.status() if self.link is not None else None
+        if st is not None and st["paired"]:
+            text = WS.NOT_GRANTED_TEXT
+        else:
+            link, _code, _port = self.pair_link()
+            text = WS.not_connected_text(link)
+            if st is not None and st["last_refused"]:
+                text += " The last page that tried to connect was refused: %s." % st["last_refused"]
+        return [_text(text)], {**structured, "error": {**err, "message": text}}, True
+
+    def connect(self, args=None):
+        """workspace_connect: listen for the person's page (127.0.0.1 only),
+        with a one-time link; or, once paired, what it granted.  With wait, once
+        a link is out, until the page is paired and has allowed access."""
+        from sagebrush.pairing import CODE_SECONDS
+
+        args = args or {}
+        if not isinstance(args, dict) or set(args) - {"wait"}:
+            msg = "Invalid arguments: unknown fields %s" % sorted(set(args or {}) - {"wait"})
+            return [_text(msg)], {"result": None, "error": {"code": "invalid", "message": msg}}, True
+        wait = args.get("wait", 0)
+        if not isinstance(wait, (int, float)) or isinstance(wait, bool) or not 0 <= wait <= WS.CONNECT_WAIT_MAX:
+            msg = "Invalid arguments: wait must be a number of seconds from 0 to %d" % WS.CONNECT_WAIT_MAX
+            return [_text(msg)], {"result": None, "error": {"code": "invalid", "message": msg}}, True
+        p = self.pairing()
+        st = p.status()
+        # (waited for only once the person has something to act on: a link out, or a page paired and asked to Allow;
+        #  a first call with wait returns the link at once rather than leave the person with nothing)
+        if wait and (st["paired"] or p.link() is not None) and not st["granted"]:
+            until = time.monotonic() + wait
+            while time.monotonic() < until:
+                time.sleep(0.2)
+                st = p.status()
+                if st["paired"] and st["granted"]:
+                    break
         if st["paired"]:
             result = dict(code=None, port=st["port"], link=None, expires_in_seconds=None, paired=True, granted=st["granted"], grant=st["grant"], page=st["page"])
-            text = "A Sagebrush page is paired%s." % (" and has granted access" if st["granted"] else "; the person has not granted access yet")
+            text = "A Sagebrush page is paired and has granted access." if st["granted"] else WS.NOT_GRANTED_TEXT
         else:
-            port, code = self.link.start()
-            link = self.link.link()
+            link, code, port = self.pair_link()
             result = dict(code=code, port=port, link=link, expires_in_seconds=CODE_SECONDS, paired=False, granted=False, grant=None,
                           page=None, last_refused=st["last_refused"])
-            text = WS.connect_text(link, code, port)
+            text = WS.connect_text(link)
             if st["last_refused"]:
                 text += " The last page that tried to connect was refused: %s." % st["last_refused"]
-            print("sagebrush-mcp: pairing code %s on 127.0.0.1:%d (5 minutes, once)" % (code, port), file=sys.stderr)
         return [_text(text)], {"result": result, "error": None}, False
 
     def startup_runs(self):
