@@ -128,7 +128,9 @@ export function runProc({ host, flags = [], src, schedule = [], guard_ms = G_MS,
   });
 }
 export function parseMarker(line) {
-  const m = line.replace(/\r/g, "").match(/^(ENTER|KI|RET|CONT|PROBE|END)\b(?: (\d+)(?= |$))? ?(.*)$/);
+  // (a Ctrl-C pressed while an input runs at the prompt is echoed by the terminal, "^C", before the program's
+  // next output, as at CPython's prompt: not part of the marker)
+  const m = line.replace(/\r/g, "").replace(/^(\^C)+/, "").match(/^(ENTER|KI|RET|CONT|PROBE|END)\b(?: (\d+)(?= |$))? ?(.*)$/);
   return m ? { mk: m[1] + (m[2] ? " " + m[2] : ""), rest: m[3].trim() } : null;
 }
 const safeRead = (f) => { try { return readFileSync(f, "utf8"); } catch { return ""; } };
@@ -192,7 +194,8 @@ export const TRIALS = {
         if (r.ki_text_t == null) return malformed("the KeyboardInterrupt text was seen but its line was never stamped");
         const g = pressGate(r, 0, r.ki_text_t, "the KeyboardInterrupt");
         if (g) return g;
-        if (!markT(r, "PROBE")) return { outcome: "FAIL", why: "the prompt did not take the next input", ...lat(r.ki_text_t - r.sends[0].t) };
+        // (the probe prints "PROBE 41": the marker with its number)
+        if (!markT(r, "PROBE 41")) return { outcome: "FAIL", why: "the prompt did not take the next input", ...lat(r.ki_text_t - r.sends[0].t) };
         return { outcome: "PASS", ...lat(r.ki_text_t - r.sends[0].t) };
       }
       if (!/KeyboardInterrupt/.test(r.text)) return { outcome: "FAIL", why: "no KeyboardInterrupt traceback" };
