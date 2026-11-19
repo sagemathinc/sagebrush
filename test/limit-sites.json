@@ -218,6 +218,172 @@
   "owner": "exact linear algebra (engine/arith)",
   "reason": "the multimodular elimination's prime count (the largest entry's size, in a Hadamard-type bound); refuses nothing"
  },
+ "engine/arith/src/zmul.rs ::  :: assert!(w == 205_069_830 && w <= WORK_MAX); #0": {
+  "class": "none",
+  "owner": "poly_mul",
+  "reason": "poly_mul's derived bounds, a closed form's const assertion, a field mask, a benchmark's output or a test assertion: refuses nothing itself"
+ },
+ "engine/arith/src/zmul.rs ::  :: let emit = O_MAX / 8 + 24 * (O_MAX / 11); #0": {
+  "class": "none",
+  "owner": "poly_mul",
+  "reason": "poly_mul's derived bounds, a closed form's const assertion, a field mask, a benchmark's output or a test assertion: refuses nothing itself"
+ },
+ "engine/arith/src/zmul.rs ::  :: let m = N_MAX + 1; #0": {
+  "class": "none",
+  "owner": "poly_mul",
+  "reason": "poly_mul's derived bounds, a closed form's const assertion, a field mask, a benchmark's output or a test assertion: refuses nothing itself"
+ },
+ "engine/arith/src/zmul.rs ::  :: let n = N_MAX; #0": {
+  "class": "none",
+  "owner": "poly_mul",
+  "reason": "poly_mul's derived bounds, a closed form's const assertion, a field mask, a benchmark's output or a test assertion: refuses nothing itself"
+ },
+ "engine/arith/src/zmul.rs ::  :: let r = REQUEST_MAX; #0": {
+  "class": "none",
+  "owner": "poly_mul",
+  "reason": "poly_mul's derived bounds, a closed form's const assertion, a field mask, a benchmark's output or a test assertion: refuses nothing itself"
+ },
+ "engine/arith/src/zmul.rs ::  :: pub const CAPS: Caps = Caps { request: REQUEST_MAX, n: N_MAX, o: O_MAX, peak: PEAK_MAX, work: WORK_MAX }; #0": {
+  "class": "1+3",
+  "disposition": {
+   "1": "shared",
+   "3": {
+    "followup": "FU-B18-2"
+   }
+  },
+  "owner": "poly_mul",
+  "reason": "poly_mul's fixed caps (request bytes <= 2^24, transform points <= 2^19, product bits <= 2^25, peak <= 64 MiB, work <= 2^28 word operations), admitted before any allocation; each refusal names the cap and the way around it"
+ },
+ "engine/arith/src/zmul.rs ::  :: pub const N_MAX: u64 = 1 << 19; #0": {
+  "class": "1+3",
+  "disposition": {
+   "1": "shared",
+   "3": {
+    "followup": "FU-B18-2"
+   }
+  },
+  "owner": "poly_mul",
+  "reason": "poly_mul's fixed caps (request bytes <= 2^24, transform points <= 2^19, product bits <= 2^25, peak <= 64 MiB, work <= 2^28 word operations), admitted before any allocation; each refusal names the cap and the way around it"
+ },
+ "engine/arith/src/zmul.rs ::  :: pub const O_MAX: u64 = 1 << 25; #0": {
+  "class": "1+3",
+  "disposition": {
+   "1": "shared",
+   "3": {
+    "followup": "FU-B18-2"
+   }
+  },
+  "owner": "poly_mul",
+  "reason": "poly_mul's fixed caps (request bytes <= 2^24, transform points <= 2^19, product bits <= 2^25, peak <= 64 MiB, work <= 2^28 word operations), admitted before any allocation; each refusal names the cap and the way around it"
+ },
+ "engine/arith/src/zmul.rs ::  :: pub const PEAK_MAX: u64 = 64 << 20; #0": {
+  "class": "1+3",
+  "disposition": {
+   "1": "shared",
+   "3": {
+    "followup": "FU-B18-2"
+   }
+  },
+  "owner": "poly_mul",
+  "reason": "poly_mul's fixed caps (request bytes <= 2^24, transform points <= 2^19, product bits <= 2^25, peak <= 64 MiB, work <= 2^28 word operations), admitted before any allocation; each refusal names the cap and the way around it"
+ },
+ "engine/arith/src/zmul.rs ::  :: pub const REQUEST_MAX: u64 = 1 << 24; #0": {
+  "class": "1+3",
+  "disposition": {
+   "1": "shared",
+   "3": {
+    "followup": "FU-B18-2"
+   }
+  },
+  "owner": "poly_mul",
+  "reason": "poly_mul's fixed caps (request bytes <= 2^24, transform points <= 2^19, product bits <= 2^25, peak <= 64 MiB, work <= 2^28 word operations), admitted before any allocation; each refusal names the cap and the way around it"
+ },
+ "engine/arith/src/zmul.rs ::  :: pub const TOKEN_DIGITS_MAX: usize = (O_MAX / 4) as usize; #0": {
+  "class": "1+3",
+  "disposition": {
+   "1": "shared",
+   "3": {
+    "followup": "FU-B18-2"
+   }
+  },
+  "owner": "poly_mul",
+  "reason": "poly_mul's fixed caps (request bytes <= 2^24, transform points <= 2^19, product bits <= 2^25, peak <= 64 MiB, work <= 2^28 word operations), admitted before any allocation; each refusal names the cap and the way around it"
+ },
+ "engine/arith/src/zmul.rs ::  :: pub const WORK_MAX: u64 = 1 << 28; #0": {
+  "class": "1+3",
+  "disposition": {
+   "1": "shared",
+   "3": {
+    "followup": "FU-B18-2"
+   }
+  },
+  "owner": "poly_mul",
+  "reason": "poly_mul's fixed caps (request bytes <= 2^24, transform points <= 2^19, product bits <= 2^25, peak <= 64 MiB, work <= 2^28 word operations), admitted before any allocation; each refusal names the cap and the way around it"
+ },
+ "engine/arith/src/zmul.rs :: field :: t[n - 1] &= u64::MAX >> extra; #0": {
+  "class": "none",
+  "owner": "poly_mul",
+  "reason": "poly_mul's derived bounds, a closed form's const assertion, a field mask, a benchmark's output or a test assertion: refuses nothing itself"
+ },
+ "engine/arith/src/zmul.rs :: over :: fn over(what: &str, value: u64, max: u64) -> Result<(), String> { #0": {
+  "class": "1+3",
+  "disposition": {
+   "1": "shared",
+   "3": {
+    "followup": "FU-B18-2"
+   }
+  },
+  "owner": "poly_mul",
+  "reason": "poly_mul's fixed caps (request bytes <= 2^24, transform points <= 2^19, product bits <= 2^25, peak <= 64 MiB, work <= 2^28 word operations), admitted before any allocation; each refusal names the cap and the way around it"
+ },
+ "engine/arith/src/zmul.rs :: over :: if value > max { #0": {
+  "class": "1+3",
+  "disposition": {
+   "1": "shared",
+   "3": {
+    "followup": "FU-B18-2"
+   }
+  },
+  "owner": "poly_mul",
+  "reason": "poly_mul's fixed caps (request bytes <= 2^24, transform points <= 2^19, product bits <= 2^25, peak <= 64 MiB, work <= 2^28 word operations), admitted before any allocation; each refusal names the cap and the way around it"
+ },
+ "engine/arith/src/zmul.rs :: over :: return Err(format!(\"{} = {} is more than {} ({})\", what, value, max, HOW)); #0": {
+  "class": "1+3",
+  "disposition": {
+   "1": "shared",
+   "3": {
+    "followup": "FU-B18-2"
+   }
+  },
+  "owner": "poly_mul",
+  "reason": "poly_mul's fixed caps (request bytes <= 2^24, transform points <= 2^19, product bits <= 2^25, peak <= 64 MiB, work <= 2^28 word operations), admitted before any allocation; each refusal names the cap and the way around it"
+ },
+ "engine/arith/src/zmul.rs :: scan :: scan_with(text, REQUEST_MAX as usize, true, TOKEN_DIGITS_MAX) #0": {
+  "class": "1+3",
+  "disposition": {
+   "1": "shared",
+   "3": {
+    "followup": "FU-B18-2"
+   }
+  },
+  "owner": "poly_mul",
+  "reason": "poly_mul's fixed caps (request bytes <= 2^24, transform points <= 2^19, product bits <= 2^25, peak <= 64 MiB, work <= 2^28 word operations), admitted before any allocation; each refusal names the cap and the way around it"
+ },
+ "engine/arith/src/zmul/tests.rs :: each_cap_admits_exactly_and_refuses_one_over :: assert!(admit(&ca, &cb, r, &exact).unwrap().is_some(), \"{}: admitted at exactly its cap\", what); #0": {
+  "class": "none",
+  "owner": "poly_mul",
+  "reason": "poly_mul's derived bounds, a closed form's const assertion, a field mask, a benchmark's output or a test assertion: refuses nothing itself"
+ },
+ "engine/arith/src/zmul/tests.rs :: each_cap_admits_exactly_and_refuses_one_over :: assert!(e.starts_with(what) && e.contains(\"a smaller product per call\"), \"{}: refused one over its cap, naming it: {}\", what, e); #0": {
+  "class": "none",
+  "owner": "poly_mul",
+  "reason": "poly_mul's derived bounds, a closed form's const assertion, a field mask, a benchmark's output or a test assertion: refuses nothing itself"
+ },
+ "engine/arith/src/zmul/tests.rs :: large_admitted_shapes_fit_the_work_and_memory_caps :: Ok(Some(p)) => assert!(p.admitted.work <= WORK_MAX && p.admitted.peak <= PEAK_MAX), #0": {
+  "class": "none",
+  "owner": "poly_mul",
+  "reason": "poly_mul's derived bounds, a closed form's const assertion, a field mask, a benchmark's output or a test assertion: refuses nothing itself"
+ },
  "engine/arith/src/zseries.rs ::  :: const _: () = assert!((BETA_MAX + 1).div_ceil(61) as usize <= P_MAX); #0": {
   "class": "none",
   "owner": "series ops",
@@ -422,55 +588,12 @@
   "owner": "series ops",
   "reason": "the series ops' derived bounds, counters, saturating overflow (refused by a cap's own site), a metered gcd's limit, an internal shape assert or a test assertion: refuses nothing itself"
  },
- "engine/arith/src/zseries.rs :: scan :: c.max_digits = c.max_digits.max(digits.len()); #0": {
-  "class": "none",
-  "owner": "series ops",
-  "reason": "the series ops' derived bounds, counters, saturating overflow (refused by a cap's own site), a metered gcd's limit, an internal shape assert or a test assertion: refuses nothing itself"
- },
- "engine/arith/src/zseries.rs :: scan :: if digits.len() > max_digits { #0": {
-  "class": "1+3",
-  "disposition": {
-   "1": "shared",
-   "3": {
-    "followup": "FU-B18-1"
-   }
-  },
-  "owner": "series ops",
-  "reason": "the series ops' fixed caps (series n <= 2^17, sigma and Euler n <= 2^20, input bits <= 2^12, output bits <= 2^14, n beta <= 2^26, work <= 2^34, request bytes), admitted before any allocation; each refusal names the cap and the way around it"
- },
- "engine/arith/src/zseries.rs :: scan :: if i >= max_tokens { #0": {
-  "class": "1+3",
-  "disposition": {
-   "1": "shared",
-   "3": {
-    "followup": "FU-B18-1"
-   }
-  },
-  "owner": "series ops",
-  "reason": "the series ops' fixed caps (series n <= 2^17, sigma and Euler n <= 2^20, input bits <= 2^12, output bits <= 2^14, n beta <= 2^26, work <= 2^34, request bytes), admitted before any allocation; each refusal names the cap and the way around it"
- },
- "engine/arith/src/zseries.rs :: scan :: let max_digits = (B_MAX / 4) as usize; #0": {
-  "class": "1+3",
-  "disposition": {
-   "1": "shared",
-   "3": {
-    "followup": "FU-B18-1"
-   }
-  },
-  "owner": "series ops",
-  "reason": "the series ops' fixed caps (series n <= 2^17, sigma and Euler n <= 2^20, input bits <= 2^12, output bits <= 2^14, n beta <= 2^26, work <= 2^34, request bytes), admitted before any allocation; each refusal names the cap and the way around it"
- },
- "engine/arith/src/zseries.rs :: scan :: let mut c = Csv { text, tokens: 0, max_digits: 0, limbs: 0, all_zero: true, valuation: 0 }; #0": {
-  "class": "none",
-  "owner": "series ops",
-  "reason": "the series ops' derived bounds, counters, saturating overflow (refused by a cap's own site), a metered gcd's limit, an internal shape assert or a test assertion: refuses nothing itself"
- },
  "engine/arith/src/zseries.rs :: scan :: pub fn scan<'a>(text: &'a str, max_tokens: usize, signed: bool) -> Result<Csv<'a>, String> { #0": {
   "class": "none",
   "owner": "series ops",
   "reason": "the series ops' derived bounds, counters, saturating overflow (refused by a cap's own site), a metered gcd's limit, an internal shape assert or a test assertion: refuses nothing itself"
  },
- "engine/arith/src/zseries.rs :: scan :: return Err(format!(\"a coefficient of {} hex digits: at most {} ({} bits)\", digits.len(), max_digits, B_MAX)); #0": {
+ "engine/arith/src/zseries.rs :: scan :: scan_with(text, max_tokens, signed, (B_MAX / 4) as usize) #0": {
   "class": "1+3",
   "disposition": {
    "1": "shared",
@@ -481,7 +604,55 @@
   "owner": "series ops",
   "reason": "the series ops' fixed caps (series n <= 2^17, sigma and Euler n <= 2^20, input bits <= 2^12, output bits <= 2^14, n beta <= 2^26, work <= 2^34, request bytes), admitted before any allocation; each refusal names the cap and the way around it"
  },
- "engine/arith/src/zseries.rs :: scan :: return Err(format!(\"more than {} coefficients\", max_tokens)); #0": {
+ "engine/arith/src/zseries.rs :: scan_with :: c.max_digits = c.max_digits.max(digits.len()); #0": {
+  "class": "none",
+  "owner": "series ops",
+  "reason": "the series ops' derived bounds, counters, saturating overflow (refused by a cap's own site), a metered gcd's limit, an internal shape assert or a test assertion: refuses nothing itself"
+ },
+ "engine/arith/src/zseries.rs :: scan_with :: if digits.len() > max_digits { #0": {
+  "class": "1+3",
+  "disposition": {
+   "1": "shared",
+   "3": {
+    "followup": "FU-B18-1"
+   }
+  },
+  "owner": "series ops",
+  "reason": "the series ops' fixed caps (series n <= 2^17, sigma and Euler n <= 2^20, input bits <= 2^12, output bits <= 2^14, n beta <= 2^26, work <= 2^34, request bytes), admitted before any allocation; each refusal names the cap and the way around it"
+ },
+ "engine/arith/src/zseries.rs :: scan_with :: if i >= max_tokens { #0": {
+  "class": "1+3",
+  "disposition": {
+   "1": "shared",
+   "3": {
+    "followup": "FU-B18-1"
+   }
+  },
+  "owner": "series ops",
+  "reason": "the series ops' fixed caps (series n <= 2^17, sigma and Euler n <= 2^20, input bits <= 2^12, output bits <= 2^14, n beta <= 2^26, work <= 2^34, request bytes), admitted before any allocation; each refusal names the cap and the way around it"
+ },
+ "engine/arith/src/zseries.rs :: scan_with :: let mut c = Csv { text, tokens: 0, max_digits: 0, limbs: 0, all_zero: true, valuation: 0 }; #0": {
+  "class": "none",
+  "owner": "series ops",
+  "reason": "the series ops' derived bounds, counters, saturating overflow (refused by a cap's own site), a metered gcd's limit, an internal shape assert or a test assertion: refuses nothing itself"
+ },
+ "engine/arith/src/zseries.rs :: scan_with :: pub fn scan_with<'a>(text: &'a str, max_tokens: usize, signed: bool, max_digits: usize) -> Result<Csv<'a>, String> { #0": {
+  "class": "none",
+  "owner": "series ops",
+  "reason": "the series ops' derived bounds, counters, saturating overflow (refused by a cap's own site), a metered gcd's limit, an internal shape assert or a test assertion: refuses nothing itself"
+ },
+ "engine/arith/src/zseries.rs :: scan_with :: return Err(format!(\"a coefficient of {} hex digits: at most {} ({} bits)\", digits.len(), max_digits, 4 * max_digits as u64)); #0": {
+  "class": "1+3",
+  "disposition": {
+   "1": "shared",
+   "3": {
+    "followup": "FU-B18-1"
+   }
+  },
+  "owner": "series ops",
+  "reason": "the series ops' fixed caps (series n <= 2^17, sigma and Euler n <= 2^20, input bits <= 2^12, output bits <= 2^14, n beta <= 2^26, work <= 2^34, request bytes), admitted before any allocation; each refusal names the cap and the way around it"
+ },
+ "engine/arith/src/zseries.rs :: scan_with :: return Err(format!(\"more than {} coefficients\", max_tokens)); #0": {
   "class": "1+3",
   "disposition": {
    "1": "shared",
@@ -618,6 +789,11 @@
   "owner": "ball arithmetic",
   "row": "inv-45"
  },
+ "engine/bigint/examples/mulwords_bench.rs :: main :: println!(\"mul_words 2^{} points: median {:.2} ms (min {:.2}, max {:.2}, {} runs)\", log, t[runs / 2], t[0], t[runs - 1], runs); #0": {
+  "class": "none",
+  "owner": "poly_mul",
+  "reason": "poly_mul's derived bounds, a closed form's const assertion, a field mask, a benchmark's output or a test assertion: refuses nothing itself"
+ },
  "engine/bigint/src/ntt.rs ::  :: const MAX_LOG: u32 = 50; #0": {
   "class": "2",
   "owner": "bigint",
@@ -627,6 +803,16 @@
   "class": "none",
   "owner": "bigint",
   "reason": "NTT implementation metadata, internal invariants, routing thresholds, and test stress values; these sites refuse no user computation"
+ },
+ "engine/bigint/src/ntt.rs :: mul_words_local_matches_mul_words_within_its_work :: assert_eq!(mul_words_local_peak(usize::MAX, 2), None); #0": {
+  "class": "none",
+  "owner": "poly_mul",
+  "reason": "poly_mul's derived bounds, a closed form's const assertion, a field mask, a benchmark's output or a test assertion: refuses nothing itself"
+ },
+ "engine/bigint/src/ntt.rs :: mul_words_local_matches_mul_words_within_its_work :: assert_eq!(mul_words_local_work(usize::MAX, 2), None); #0": {
+  "class": "none",
+  "owner": "poly_mul",
+  "reason": "poly_mul's derived bounds, a closed form's const assertion, a field mask, a benchmark's output or a test assertion: refuses nothing itself"
  },
  "engine/bigint/src/ntt.rs :: table_for :: let max_root_log = (p - 1).trailing_zeros(); #0": {
   "class": "none",
@@ -737,6 +923,11 @@
   "class": "none",
   "owner": "bigint",
   "reason": "NTT implementation metadata, internal invariants, routing thresholds, and test stress values; these sites refuse no user computation"
+ },
+ "engine/bigint/tests/ntt_layer_poll_gap.rs :: layer_poll_gap_at_two_to_the_19 :: let gap = hooks::max_gap_ns(); #0": {
+  "class": "none",
+  "owner": "poly_mul",
+  "reason": "poly_mul's derived bounds, a closed form's const assertion, a field mask, a benchmark's output or a test assertion: refuses nothing itself"
  },
  "engine/bigint/tests/ntt_table_poll_gap.rs :: local_table_poll_gap :: let gap = hooks::max_gap_ns(); #0": {
   "class": "none",
@@ -5765,6 +5956,17 @@
   "class": "1+3",
   "owner": "engine web + finite-field matrices",
   "row": "inv-7"
+ },
+ "engine/web/src/series_ops.rs ::  :: SeriesOp { name: \"poly_mul\", max_request: zmul::REQUEST_MAX as usize, peak: zmul::PEAK_MAX, work: zmul::WORK_MAX, run: poly_mul }, #0": {
+  "class": "1+3",
+  "disposition": {
+   "1": "shared",
+   "3": {
+    "followup": "FU-B18-2"
+   }
+  },
+  "owner": "poly_mul",
+  "reason": "poly_mul's fixed caps (request bytes <= 2^24, transform points <= 2^19, product bits <= 2^25, peak <= 64 MiB, work <= 2^28 word operations), admitted before any allocation; each refusal names the cap and the way around it"
  },
  "engine/web/src/series_ops.rs ::  :: SeriesOp { name: \"series_euler\", max_request: SMALL_MAX_REQUEST, peak: 8 * MIB, work: zseries::WORK_MAX, run: series_euler }, #0": {
   "class": "1+3",

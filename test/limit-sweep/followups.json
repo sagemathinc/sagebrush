@@ -81,11 +81,11 @@
     "engine/arith/src/zseries.rs :: cap :: if value > max { #0",
     "engine/arith/src/zseries.rs :: cap :: return Err(format!(\"{} = {} is more than {} ({})\", what, value, max, how)); #0",
     "engine/arith/src/zseries.rs :: finish :: cap(\"the work\", work, WORK_MAX, \"fewer coefficients per call, or raw\")?; #0",
-    "engine/arith/src/zseries.rs :: scan :: if digits.len() > max_digits { #0",
-    "engine/arith/src/zseries.rs :: scan :: if i >= max_tokens { #0",
-    "engine/arith/src/zseries.rs :: scan :: let max_digits = (B_MAX / 4) as usize; #0",
-    "engine/arith/src/zseries.rs :: scan :: return Err(format!(\"a coefficient of {} hex digits: at most {} ({} bits)\", digits.len(), max_digits, B_MAX)); #0",
-    "engine/arith/src/zseries.rs :: scan :: return Err(format!(\"more than {} coefficients\", max_tokens)); #0",
+    "engine/arith/src/zseries.rs :: scan :: scan_with(text, max_tokens, signed, (B_MAX / 4) as usize) #0",
+    "engine/arith/src/zseries.rs :: scan_with :: if digits.len() > max_digits { #0",
+    "engine/arith/src/zseries.rs :: scan_with :: if i >= max_tokens { #0",
+    "engine/arith/src/zseries.rs :: scan_with :: return Err(format!(\"a coefficient of {} hex digits: at most {} ({} bits)\", digits.len(), max_digits, 4 * max_digits as u64)); #0",
+    "engine/arith/src/zseries.rs :: scan_with :: return Err(format!(\"more than {} coefficients\", max_tokens)); #0",
     "engine/arith/src/zseries.rs :: sigma_admit :: cap(\"k\", k, SIGMA_K_MAX, \"a smaller k\")?; #0",
     "engine/web/src/lib.rs :: call :: if req.len() > op.max_request { #1",
     "engine/web/src/lib.rs :: call :: return json!({ \"error\": format!(\"{}: the request has {} bytes, more than {}\", op.name, req.len(), op.max_request) }).to_string(); #1",
@@ -108,6 +108,26 @@
    "owner": "series ops",
    "status": "open",
    "what": "The series ops' fixed caps (series n <= 2^17, sigma and Euler n <= 2^20, input bits <= 2^12, output bits <= 2^14, n beta <= 2^26, work <= 2^34): lift them with a truncated product on smaller transform tables and a cheaper bound for the reduced output's gcds, as a later engine op."
+  },
+  {
+   "id": "FU-B18-2",
+   "keys": [
+    "engine/arith/src/zmul.rs ::  :: pub const CAPS: Caps = Caps { request: REQUEST_MAX, n: N_MAX, o: O_MAX, peak: PEAK_MAX, work: WORK_MAX }; #0",
+    "engine/arith/src/zmul.rs ::  :: pub const N_MAX: u64 = 1 << 19; #0",
+    "engine/arith/src/zmul.rs ::  :: pub const O_MAX: u64 = 1 << 25; #0",
+    "engine/arith/src/zmul.rs ::  :: pub const PEAK_MAX: u64 = 64 << 20; #0",
+    "engine/arith/src/zmul.rs ::  :: pub const REQUEST_MAX: u64 = 1 << 24; #0",
+    "engine/arith/src/zmul.rs ::  :: pub const TOKEN_DIGITS_MAX: usize = (O_MAX / 4) as usize; #0",
+    "engine/arith/src/zmul.rs ::  :: pub const WORK_MAX: u64 = 1 << 28; #0",
+    "engine/arith/src/zmul.rs :: over :: fn over(what: &str, value: u64, max: u64) -> Result<(), String> { #0",
+    "engine/arith/src/zmul.rs :: over :: if value > max { #0",
+    "engine/arith/src/zmul.rs :: over :: return Err(format!(\"{} = {} is more than {} ({})\", what, value, max, HOW)); #0",
+    "engine/arith/src/zmul.rs :: scan :: scan_with(text, REQUEST_MAX as usize, true, TOKEN_DIGITS_MAX) #0",
+    "engine/web/src/series_ops.rs ::  :: SeriesOp { name: \"poly_mul\", max_request: zmul::REQUEST_MAX as usize, peak: zmul::PEAK_MAX, work: zmul::WORK_MAX, run: poly_mul }, #0"
+   ],
+   "owner": "poly_mul",
+   "status": "open",
+   "what": "poly_mul's fixed caps (a product of at most 2^25 bits on at most 2^19 transform points, 64 MiB, 2^28 word operations): lift them with a product in blocks (each block's transform within the op's memory), as a later engine op."
   }
  ],
  "note": "The sweep's follow-ups, the source of truth (plan-limit-sites-sweep-r3 section 2): {id FU-<batch>-<n>, status open|fixed|withdrawn, keys, what, owner, withdrawn_because; fixed_by {pr?, commit?} is optional history, checked when given}. A fixed one needs no fixed_by: master's squash merge puts the fix and the status in one commit, its provenance. An open one has at least one active key, and its active keys and the entries pointing to it agree; no active key points to a fixed or withdrawn one.",
