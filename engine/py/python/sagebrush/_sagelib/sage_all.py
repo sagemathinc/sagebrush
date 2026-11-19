@@ -625,7 +625,9 @@ def _str_preview(s, quote=True):
     short."""
     if len(s) <= 100:
         return repr(s) if quote else s
-    head = repr(s[:60]) if quote else s[:60]
+    # (the preview's own text is capped: a byte or an escape is up to 10
+    # characters of repr)
+    head = (repr(s[:60]) if quote else str(s[:60]))[:100]
     return "%s... (a string of %d characters)" % (head, len(s))
 
 
@@ -667,7 +669,7 @@ def _rational_from_str(s, base):
         try:
             t = s.decode()
         except UnicodeDecodeError:
-            raise TypeError("unable to convert %r to a rational" % (s,)) from None
+            raise TypeError("unable to convert %s to a rational" % _str_preview(s)) from None
     # (only C's whitespace is ignored: a no-break space is refused)
     raw = t.split("/")
     parts = t.translate(_C_SPACE).split("/")

@@ -47,6 +47,15 @@ def main():
             assert len(str(e)) < 300 and "4000001 characters" in str(e), (c, str(e)[:300])
         else:
             raise AssertionError(c + " must be refused")
+    # (and bytes that aren't UTF-8: the same short refusal)
+    hb = b"\xff" * 4000001
+    for c in ("QQ(hb)", "Rational(hb)"):
+        try:
+            eval(c, dict(ns, hb=hb))
+        except TypeError as e:
+            assert len(str(e)) < 300 and "4000001 characters" in str(e), (c, str(e)[:300])
+        else:
+            raise AssertionError(c + " must be refused")
     print("matrix checks against Sage: %d cases ok" % len(DATA["cases"]))
 
 
