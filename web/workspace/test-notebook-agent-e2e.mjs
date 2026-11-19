@@ -12,6 +12,9 @@
 //   - the person then edits it: their edit and the agent's cell are both kept;
 //   - the agent writes Jupyter's nbformat cells (as agents do): the page shows them with their text, not empty;
 //   - a grant "until the page closes" ends with the page.
+//   - the person's request first, as Claude Code makes it (sagebrush-mcp's own server, not paired yet): the agent's first
+//     tool call (workspace_create) answers with the one link (code and port in it); the person opens it, Connect, Allow,
+//     while the agent waits in workspace_connect; then the agent makes the notebook and the page shows it.
 //   - in a build with the LaTeX editor (CI's web-browser/latex, EXPECT_LATEX=1: there it must run): one pairing per page.
 //     An early ?pair= link on /?tex= is the LaTeX editor's only (its chunk, not the notebook page's); a remembered
 //     grant reconnects there once, one bar, and the editor's Agent shows that bar, not an empty Connect.
@@ -71,6 +74,30 @@ const drive = (m) => { const r = next(); py.stdin.write(JSON.stringify(m) + "\n"
 py.on("exit", (c) => { for (const w of waiters.splice(0)) w({ exited: c }); });
 const first = await Promise.race([next(), sleep(15000).then(() => ({ exited: "no code in 15 s" }))]);
 if (!first.port) { console.log("FAIL the pairing server didn't start: " + JSON.stringify(first)); try { py.kill(); } catch {} server.kill(); process.exit(1); }
+
+// ---- sagebrush-mcp's own server (mcp_server.py's Server, its tool calls as Claude Code makes them), not paired: one
+// JSON line each way, {id, name, args} -> {id, text, structured, isError}; each call in its own thread, so a
+// workspace_connect that waits doesn't hold the others
+const MCP_DRIVER = `
+import io, json, os, sys, threading, types
+src = os.environ["SB_SRC"]
+pkg = types.ModuleType("sagebrush"); pkg.__path__ = [src]; sys.modules["sagebrush"] = pkg
+from sagebrush import mcp_server as M
+srv = M.Server(io.StringIO())
+srv.client = {"name": "claude-code", "version": "0"}
+out = threading.Lock()
+def one(m):
+    content, structured, is_error = srv.call_tool(m["name"], m["args"])
+    with out:
+        print(json.dumps({"id": m["id"], "text": content[0]["text"], "structured": structured, "isError": is_error}), flush=True)
+for line in sys.stdin:
+    threading.Thread(target=one, args=(json.loads(line),), daemon=True).start()
+`;
+const mcp = spawn("python3", ["-s", "-c", MCP_DRIVER], { env: { ...process.env, SB_SRC: join(here, "../../engine/py/python/sagebrush"), SAGEBRUSH_MCP_DEV_ORIGIN: origin }, stdio: ["pipe", "pipe", "ignore"] });
+const mcpWait = new Map();
+let mcpId = 0;
+createInterface({ input: mcp.stdout }).on("line", (l) => { const m = JSON.parse(l); mcpWait.get(m.id)?.(m); mcpWait.delete(m.id); });
+const tool = (name, args = {}) => new Promise((r) => { const id = ++mcpId; mcpWait.set(id, r); mcp.stdin.write(JSON.stringify({ id, name, args }) + "\n"); });
 
 // ---- Chromium
 let cdp = Number(process.env.CDP_PORT) || 0;
@@ -546,10 +573,45 @@ try {
     ok(await ev(`document.querySelectorAll(".sbag-bar").length`) === 1 && !(await ev(`!!document.querySelector(".sbag-box")`)), "the editor's Agent shows that one bar, not an empty Connect");
     await ev(`([...document.querySelectorAll(".sbag-bar button")].find((b) => b.textContent === "Revoke")?.click(), true)`);
   }
+
+  // the person's request first, as Claude Code makes it ("draw a plot of sin(x^2)" before anything is connected):
+  // the agent's first call isn't workspace_connect, and its answer is the one link (code and port in it, nothing to
+  // find in a menu, decided Nov 19 2026); the person opens it, presses Connect and Allow while the agent waits in
+  // workspace_connect, and the agent's next call makes the notebook, shown on the page
+  {
+    // (a fresh start: nothing remembered from the cases above)
+    await send("Storage.clearDataForOrigin", { origin, storageTypes: "all" });
+    const nb = { path: "/sin x squared.ipynb", mode: "sage", content: { json: { cells: [{ code: "plot(sin(x^2), (x, -3, 3))" }] } } };
+    const r1 = await tool("workspace_create", nb);
+    const links = [...r1.text.matchAll(/https?:\/\/[^\s]+\/board\/\?pair=([A-Z0-9]+)&port=(\d+)/g)];
+    ok(r1.isError && r1.structured?.error?.code === "not_connected" && links.length === 1, "the agent's first call, unpaired: not_connected, with one link in it", r1.text);
+    ok(!/menu|⋯|Agent button|by hand/.test(r1.text) && /Connect, then Allow/.test(r1.text), "...and no menu directions, no code to type: open the link, Connect, Allow", r1.text);
+    const r2 = await tool("workspace_list", { folder: "/" });
+    ok(r2.text.includes(links[0][0]), "the next call before the person acts: the same link", r2.text);
+    const waited = tool("workspace_connect", { wait: 60 });
+    ok(links[0][0].startsWith(origin + "/board/?pair="), "(the link is to this site: SAGEBRUSH_MCP_DEV_ORIGIN)", links[0][0]);
+    // (the person opens the link, as the agent gave it)
+    await ev("window.__old = 1").catch(() => {});
+    await send("Page.navigate", { url: links[0][0] });
+    await sleep(300);
+    ok(await until(`!window.__old && location.pathname === "/" && [...document.querySelectorAll(".sbag-box input")].some((i) => i.value === ${JSON.stringify(links[0][1])})`, 60000), "the link opens Connect on the notebook page, its code filled in, no port to type", await ev(`document.querySelector(".sbag-box")?.textContent ?? location.href`).catch(() => ""));
+    ok(await ev(`document.querySelectorAll(".sbag-box input").length`) === 1, "one field in Connect");
+    await ev(`(document.querySelector(".sbag-box button.primary").click(), true)`);
+    ok(await until(`[...document.querySelectorAll(".sbag-box h2")].some((h) => h.textContent === "Allow this agent?")`), "paired: the grant dialog asks", await ev(`document.querySelector(".sbag-box .err")?.textContent ?? ""`).catch(() => ""));
+    await ev(`([...document.querySelectorAll(".sbag-box button.primary")].pop().click(), true)`);
+    ok(await until(`!!document.querySelector(".sbag-bar")`), "allowed (the dialog's defaults): the bar shows the agent");
+    const r3 = await waited;
+    ok(!r3.isError && r3.structured?.result?.paired && r3.structured?.result?.granted, "workspace_connect with wait returns once the person has allowed", r3.text);
+    const r4 = await tool("workspace_create", nb);
+    ok(!r4.isError && r4.structured?.result?.entry?.path === nb.path, "the agent's request goes on: the notebook is made", r4.text);
+    ok(await until(`${shownPath}.then((p) => p === ${JSON.stringify(nb.path)})`, 20000), "the page shows it", await ev(shownPath).catch(() => ""));
+    await shot("9-first-call-link");
+  }
 } catch (e) {
   ok(false, "threw: " + (e?.stack ?? e));
 } finally {
   try { py.kill(); } catch {}
+  try { mcp.kill(); } catch {}
   try { chrome.kill(); } catch {}
   try { server.kill(); } catch {}
   await sleep(300);
