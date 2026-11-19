@@ -35,6 +35,21 @@ fn hash_big(xs: &[BigInt]) -> u64 {
     xs.iter().fold(17, |h, x| (h * 1_000_003 + residue(x)) % MOD)
 }
 
+/// The smallest positive step Instant shows (seconds): protocol 5's timer
+/// granularity.
+fn timer_granularity() -> f64 {
+    let (mut best, mut last) = (f64::INFINITY, Instant::now());
+    for _ in 0..2000 {
+        let now = Instant::now();
+        let d = now.duration_since(last).as_secs_f64();
+        if d > 0.0 && d < best {
+            best = d;
+        }
+        last = now;
+    }
+    if best.is_finite() { best } else { 1e-9 }
+}
+
 /// One invocation in the protocol of bench/core/drivers/common.py: `build(v)`
 /// makes variant v's operand hash and operation (outside any timing).
 /// `time` runs every variant once untimed (the warm-up, and the answers the
@@ -63,35 +78,71 @@ fn run<T, F: FnMut() -> T>(mode: &str, variants: usize, mut build: impl FnMut(us
         warm += started.elapsed().as_secs_f64();
         sigs.push(sig(&answer));
     }
-    let mut idx = 0usize;
-    let mut reps = |k: usize| {
-        let mut total = 0.0;
-        for _ in 0..k {
-            let op = &mut ops[idx % variants];
-            idx += 1;
-            let started = Instant::now();
-            std::hint::black_box(op());
-            total += started.elapsed().as_secs_f64();
-        }
-        total
-    };
+    // (protocol 5, drivers/common.py: per-op mode at or above
+    // max(1 ms, 1000 g), else batched from seeded offsets; a TIMING record
+    // before the TIME line)
+    let seed: u64 = std::env::var("BENCH_SEED").ok().and_then(|s| s.parse().ok()).unwrap_or(0);
+    let forced = std::env::var("BENCH_TIMING").unwrap_or_else(|_| "auto".to_string());
+    let g = timer_granularity();
+    let threshold = 1e-3f64.max(1000.0 * g);
+    let offset = |j: usize| ((seed as u128 * 1_000_003 + j as u128 * 7919) % variants as u128) as usize;
     let per = warm / variants as f64;
-    let (mut k, mut t) = if per >= TARGET {
-        (1usize, per)
+    let head = format!("\"granularity\":{:e},\"threshold\":{:e},\"seed\":{},\"k\":{}", g, threshold, seed, variants);
+    let (med, lo, hi, k, count) = if forced == "per-op" || (forced == "auto" && per >= threshold) {
+        let rotations = if per <= 2.0 { 5 } else { 3 };
+        let mut samples: Vec<Vec<f64>> = vec![Vec::with_capacity(rotations); variants];
+        for r in 0..rotations {
+            let start = offset(r);
+            for i in 0..variants {
+                let v = (start + i) % variants;
+                let started = Instant::now();
+                std::hint::black_box(ops[v]());
+                samples[v].push(started.elapsed().as_secs_f64());
+            }
+        }
+        let mut means: Vec<f64> = (0..rotations).map(|r| samples.iter().map(|s| s[r]).sum::<f64>() / variants as f64).collect();
+        means.sort_by(|x, y| x.partial_cmp(y).unwrap());
+        let rows: Vec<String> = samples.iter().map(|s| format!("[{}]", s.iter().map(|x| format!("{:e}", x)).collect::<Vec<_>>().join(","))).collect();
+        println!("TIMING|{{{},\"mode\":\"per-op\",\"samples\":[{}]}}", head, rows.join(","));
+        (means[rotations / 2], means[0], means[rotations - 1], variants, rotations)
     } else {
-        let k = if per > 0.0 { ((TARGET * 1.2 / per) as usize + 1).max(1) } else { variants };
-        (k, reps(k))
+        let mut reps = |start: usize, k: usize| {
+            let mut total = 0.0;
+            for i in 0..k {
+                let op = &mut ops[(start + i) % variants];
+                let started = Instant::now();
+                std::hint::black_box(op());
+                total += started.elapsed().as_secs_f64();
+            }
+            total
+        };
+        let (mut k, mut t) = if per >= TARGET {
+            (1usize, per)
+        } else {
+            let k = if per > 0.0 { ((TARGET * 1.2 / per) as usize + 1).max(1) } else { variants };
+            (k, reps(0, k))
+        };
+        while t < TARGET && k < 1 << 24 {
+            k = if t <= 0.0 { 2 * k } else { (2 * k).max((16 * k).min((k as f64 * TARGET * 1.2 / t) as usize + 1)) };
+            t = reps(0, k);
+        }
+        let count = if t / k as f64 <= 2.0 { 5 } else { 3 };
+        let offsets: Vec<usize> = (0..count).map(offset).collect();
+        let batches: Vec<f64> = offsets.iter().map(|&o| reps(o, k) / k as f64).collect();
+        let mut sorted = batches.clone();
+        sorted.sort_by(|x, y| x.partial_cmp(y).unwrap());
+        println!(
+            "TIMING|{{{},\"mode\":\"batched\",\"reps\":{},\"batches\":[{}],\"offsets\":[{}]}}",
+            head,
+            k,
+            batches.iter().map(|x| format!("{:e}", x)).collect::<Vec<_>>().join(","),
+            offsets.iter().map(|x| x.to_string()).collect::<Vec<_>>().join(",")
+        );
+        (sorted[count / 2], sorted[0], sorted[count - 1], k, count)
     };
-    while t < TARGET && k < 1 << 24 {
-        k = if t <= 0.0 { 2 * k } else { (2 * k).max((16 * k).min((k as f64 * TARGET * 1.2 / t) as usize + 1)) };
-        t = reps(k);
-    }
-    let count = if t / k as f64 <= 2.0 { 5 } else { 3 };
-    let mut samples: Vec<f64> = (0..count).map(|_| reps(k) / k as f64).collect();
-    samples.sort_by(|x, y| x.partial_cmp(y).unwrap());
     let joined = sigs.join(";");
     let combined = format!("{}:{}", variants, hash_u64(&joined.bytes().map(u64::from).collect::<Vec<_>>()));
-    println!("TIME|{:.9e}|{}|{:.9e}|{:.9e}|{}|{}", samples[count / 2], combined, samples[0], samples[count - 1], k, count);
+    println!("TIME|{:.9e}|{}|{:.9e}|{:.9e}|{}|{}", med, combined, lo, hi, k, count);
 }
 
 fn fppoly(n: usize, salt: u64) -> Vec<u64> {
