@@ -1,6 +1,6 @@
 # Public CLI friction: exact absorbing Markov-chain report
 
-Date: November 19, 2026, morning PST. Reviewer: daybreak2. Public packages tested: npm and PyPI `sagebrush` 0.10.1; Node 26.13.1. References: CPython 3.14.4, Sage 10.9.post1, and SymPy 1.14.0. These are release observations, not claims about current master.
+Date: November 19, 2026, morning PST. Public packages tested: npm and PyPI `sagebrush` 0.10.1; Node 26.13.1. References: CPython 3.14.4, Sage 10.9.post1, and SymPy 1.14.0. These are release observations, not claims about current master.
 
 Outcome: the real task succeeded, with exact machine-readable answers independently checked. Both fresh agents encountered missing structured CLI execution errors and invalid matrix inputs accepted silently. CLI Ctrl+C did not preempt the tested loops, but the wheel's programmatic `Session.interrupt()` worked and preserved state. No product changes or issues were made during the run; findings below await triage.
 

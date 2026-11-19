@@ -30,7 +30,7 @@
 | 13 | Low | error-type mismatches | `M_{2×3}^2`: TypeError (Sage ArithmeticError "self must be a square matrix"). `QQ('1/0')`: ZeroDivisionError (Sage TypeError; matches CPython `Fraction('1/0')`) | Code that catches Sage's types misses these | Match Sage's exception types |
 | 14 | Low | PyPI CLI | `venv/bin/sagebrush --help` has only bench/remote. Running maths needs `python -m sagebrush FILE.sage`, which only appears in help text | Two different CLIs share one name across npm and PyPI | Say so in both READMEs. Consider `sagebrush run FILE` on PyPI |
 | 15 | Low | version introspection | `sagebrush.__version__` missing (npm and PyPI). npm `sys.version` = `3.14.0 (pyjs-spike)` | Couldn't record the version from inside the script. Took it from `--version` | Add `__version__` and drop the internal codename |
-| 16 | Cosmetic | docs/help | `--help` names source files (`src/magma.ts`, `scripts/optional-packages.mjs`). `Session.__doc__` mentions "daybreak2 PR120-FIX4-1" | Noise | Remove internal references |
+| 16 | Cosmetic | docs/help | `--help` names source files (`src/magma.ts`, `scripts/optional-packages.mjs`). `Session.__doc__` includes an internal reviewer/PR marker | Noise | Remove internal references |
 | 17 | Cosmetic | `linalg.inverse` (PyPI) | Mixed `int` and `Fraction` entries (`[[Fraction(5,2), ...], [1, ...]]`) | Callers must normalise | Return `Fraction` consistently, or document it |
 | 18 | Self-inflicted | `> out/npm_report.raw` before `mkdir out` | bash: No such file or directory | none | n/a |
 
