@@ -64,17 +64,93 @@ def driver_hash(py: str, driver: str, row: dict, key: str) -> str:
 
 class Golden(unittest.TestCase):
     def test_every_golden_point(self):
-        golden = json.loads((HERE / "expected_inputs_golden.json").read_text())[
-            "points"
-        ]
-        self.assertEqual(len(golden), sum(len(r["sizes"]) for r in ROWS))
+        # (points every backend agreed on in a VM run, plus the pending ones
+        # no VM run has confirmed yet: together exactly every point, never
+        # one in both)
+        g = json.loads((HERE / "expected_inputs_golden.json").read_text())
+        golden, pending = g["points"], g.get("pending", {})
+        self.assertFalse(set(golden) & set(pending))
+        self.assertEqual(
+            set(golden) | set(pending),
+            {f"{r['id']}:{k}" for r in ROWS for k in r["sizes"]},
+        )
         got = expected_inputs.expected(["s", "m", "l"], [])
-        for key, want in golden.items():
+        for key, want in {**golden, **pending}.items():
             with self.subTest(point=key):
                 self.assertEqual(
                     (got[key]["n"], got[key]["variants"]), (want["n"], want["variants"])
                 )
                 self.assertEqual(got[key]["input_hash"], want["input_hash"])
+
+
+def bareiss_rank(a):
+    """The exact rank over Q of an integer matrix (fraction-free)."""
+    m = [list(r) for r in a]
+    rank, prev = 0, 1
+    for c in range(len(m[0])):
+        piv = next((i for i in range(rank, len(m)) if m[i][c]), None)
+        if piv is None:
+            continue
+        m[rank], m[piv] = m[piv], m[rank]
+        for i in range(rank + 1, len(m)):
+            m[i] = [
+                (m[rank][c] * m[i][j] - m[i][c] * m[rank][j]) // prev
+                for j in range(len(m[0]))
+            ]
+        prev = m[rank][c]
+        rank += 1
+    return rank
+
+
+class RankRows(unittest.TestCase):
+    """The wide, def and def_p rank rows: each variant at size s has the
+    rank its construction claims, checked exactly (not by the certificate's
+    own prime)."""
+
+    def test_the_ranks_at_size_s(self):
+        for row in [r for r in ROWS if "_rank_" in r["id"]]:
+            kind, shape = row["id"].split("_")[1], row["id"].split("_rank_")[1]
+            n = row["sizes"]["s"]["n"]
+            for v in range(run.variants(row, "s")):
+                with self.subTest(row=row["id"], v=v):
+                    a = expected_inputs.rank_matrix(shape, kind, n, v)
+                    want = {"wide": n, "def": n // 2, "def_p": n}[shape]
+                    self.assertEqual(len(a), n)
+                    self.assertEqual(len(a[0]), 2 * n if shape == "wide" else n)
+                    self.assertEqual(bareiss_rank(a), want)
+                    if shape == "def_p":
+                        self.assertEqual(
+                            expected_inputs.rank_mod(a, expected_inputs.RANK_P), n - 1
+                        )
+
+    def test_a_failed_certificate_refuses_the_seed(self):
+        from unittest import mock
+
+        with mock.patch.object(expected_inputs, "rank_mod", lambda a, q: -1):
+            with self.assertRaisesRegex(ValueError, "refusing the seed"):
+                expected_inputs.rank_matrix("def", "z", 10, 0)
+
+    def test_the_kronecker_product_is_the_plain_one(self):
+        import random
+
+        rng = random.Random(7)
+        for shape in ((3, 4, 5), (1, 1, 1), (6, 2, 9)):
+            a = [
+                [rng.randint(-(10**20), 10**20) for _ in range(shape[1])]
+                for _ in range(shape[0])
+            ]
+            b = [
+                [rng.randint(-(10**20), 10**20) for _ in range(shape[2])]
+                for _ in range(shape[1])
+            ]
+            plain = [
+                [
+                    sum(a[i][k] * b[k][j] for k in range(shape[1]))
+                    for j in range(shape[2])
+                ]
+                for i in range(shape[0])
+            ]
+            self.assertEqual(expected_inputs.matmul(a, b), plain)
 
 
 class Drivers(unittest.TestCase):

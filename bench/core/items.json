@@ -576,6 +576,87 @@
    }
   },
   {
+   "id": "mat_z_rank_wide",
+   "item": "la1",
+   "category": "linear algebra over Z",
+   "label": "rank, n x 2n of full row rank",
+   "sizes": {
+    "s": {
+     "n": 50,
+     "timeout": 240
+    },
+    "m": {
+     "n": 100,
+     "timeout": 600
+    },
+    "l": {
+     "n": 250,
+     "timeout": 1800
+    }
+   },
+   "fresh": false,
+   "backends": {
+    "user": "sage-mode",
+    "native": true,
+    "magma": true,
+    "flint": "rust"
+   }
+  },
+  {
+   "id": "mat_z_rank_def",
+   "item": "la1",
+   "category": "linear algebra over Z",
+   "label": "rank, n x n of rank n/2",
+   "sizes": {
+    "s": {
+     "n": 50,
+     "timeout": 120
+    },
+    "m": {
+     "n": 100,
+     "timeout": 300
+    },
+    "l": {
+     "n": 250,
+     "timeout": 900
+    }
+   },
+   "fresh": false,
+   "backends": {
+    "user": "sage-mode",
+    "native": true,
+    "magma": true,
+    "flint": "rust"
+   }
+  },
+  {
+   "id": "mat_z_rank_def_p",
+   "item": "la1",
+   "category": "linear algebra over Z",
+   "label": "rank, n x n, full rank but rank n-1 modulo 2^62 - 57",
+   "sizes": {
+    "s": {
+     "n": 50,
+     "timeout": 120
+    },
+    "m": {
+     "n": 100,
+     "timeout": 300
+    },
+    "l": {
+     "n": 250,
+     "timeout": 900
+    }
+   },
+   "fresh": false,
+   "backends": {
+    "user": "sage-mode",
+    "native": true,
+    "magma": true,
+    "flint": "rust"
+   }
+  },
+  {
    "id": "mat_z_hnf",
    "item": "la2",
    "category": "linear algebra over Z",
@@ -798,6 +879,87 @@
    "item": "la1",
    "category": "linear algebra over Q",
    "label": "rank",
+   "sizes": {
+    "s": {
+     "n": 20,
+     "timeout": 120
+    },
+    "m": {
+     "n": 50,
+     "timeout": 300
+    },
+    "l": {
+     "n": 100,
+     "timeout": 900
+    }
+   },
+   "fresh": false,
+   "backends": {
+    "user": "sage-mode",
+    "native": false,
+    "magma": true,
+    "flint": "python"
+   }
+  },
+  {
+   "id": "mat_q_rank_wide",
+   "item": "la1",
+   "category": "linear algebra over Q",
+   "label": "rank, n x 2n of full row rank",
+   "sizes": {
+    "s": {
+     "n": 20,
+     "timeout": 240
+    },
+    "m": {
+     "n": 50,
+     "timeout": 600
+    },
+    "l": {
+     "n": 100,
+     "timeout": 1800
+    }
+   },
+   "fresh": false,
+   "backends": {
+    "user": "sage-mode",
+    "native": false,
+    "magma": true,
+    "flint": "python"
+   }
+  },
+  {
+   "id": "mat_q_rank_def",
+   "item": "la1",
+   "category": "linear algebra over Q",
+   "label": "rank, n x n of rank n/2",
+   "sizes": {
+    "s": {
+     "n": 20,
+     "timeout": 120
+    },
+    "m": {
+     "n": 50,
+     "timeout": 300
+    },
+    "l": {
+     "n": 100,
+     "timeout": 900
+    }
+   },
+   "fresh": false,
+   "backends": {
+    "user": "sage-mode",
+    "native": false,
+    "magma": true,
+    "flint": "python"
+   }
+  },
+  {
+   "id": "mat_q_rank_def_p",
+   "item": "la1",
+   "category": "linear algebra over Q",
+   "label": "rank, n x n, full rank but rank n-1 modulo 2^62 - 57",
    "sizes": {
     "s": {
      "n": 20,
