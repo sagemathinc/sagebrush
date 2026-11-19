@@ -26,18 +26,28 @@ import os
 import re
 
 PREFIX = "workspace_"
-#: where the person connects a Sagebrush page to an agent, as every tool that asks them says it
-WHERE_TO_CONNECT = ("the LaTeX editor's Agent button, or Connect an agent on a board opened with ?agents "
-                    "(or in an editor's ⋯ menu, where it has Connect an agent)")
+#: the longest workspace_connect waits for the person (its `wait`, seconds)
+CONNECT_WAIT_MAX = 120
 
 
-def connect_text(link, code, port):
-    """What workspace_connect tells the agent to give the person: the one-click link first, then the code and port
-    by hand, on one line."""
-    return ("Give the person this link to open in Chrome or Firefox; it connects their Sagebrush page to you (one use, "
-            "5 minutes): %s . Or by hand: code %s, port %d, in %s. They then choose what you may do in their workspace. "
-            "If their page can't connect, call workspace_connect again: it says why the last connection was refused."
-            % (link, code, port, WHERE_TO_CONNECT))
+def connect_text(link):
+    """What the agent gives the person to connect their Sagebrush page: the one link, which holds the code and the port,
+    and nothing to find in a menu or to type (decided Nov 19 2026), on one line."""
+    return ("Give the person this link to open in Chrome or Firefox, and ask them to press Connect, then Allow (it works once, "
+            "for 5 minutes): %s . Then call workspace_connect with wait (up to %d seconds) to go on as soon as they allow, "
+            "or call the tool again. If their page can't connect, call workspace_connect: it says why the last connection "
+            "was refused." % (link, CONNECT_WAIT_MAX))
+
+
+def not_connected_text(link):
+    """What the workspace, LaTeX-comment and chat tools that need a paired page say when none is: the same link
+    workspace_connect gives."""
+    return "Not connected to the person's Sagebrush page yet. " + connect_text(link)
+
+
+#: what those tools say when the page is paired but hasn't allowed access (or no longer does)
+NOT_GRANTED_TEXT = ("The person's Sagebrush page is connected but hasn't allowed access: ask them to press Allow there. Then "
+                    "call workspace_connect with wait (up to %d seconds) to go on as soon as they do, or call the tool again." % CONNECT_WAIT_MAX)
 
 
 _SCHEMA_FILE = os.path.join(os.path.dirname(os.path.abspath(__file__)), "workspace_schema.json")
@@ -144,14 +154,14 @@ assert set(VERBS) == set(TITLES), "the schema and this server disagree on the ve
 CONNECT = {
     "name": "workspace_connect",
     "title": "Connect to the person's Sagebrush page",
-    "description": "Pair this agent with the person's Sagebrush page, so the workspace_* tools reach their workspace. Returns a one-time pairing link to give the person (one click opens their Sagebrush page and connects it: valid 5 minutes, used once), and its code and port for entering by hand instead (Chrome or Firefox: " + WHERE_TO_CONNECT + "). The person then chooses what you may do there. Calling it again gives a new code. Also says whether a page is paired and what it granted.",
-    "inputSchema": {"type": "object", "properties": {}, "additionalProperties": False},
+    "description": "Pair this agent with the person's Sagebrush page, so the workspace_* tools reach their workspace. Returns a one-time link to give the person (it opens their Sagebrush page in Chrome or Firefox with the code filled in; they press Connect, then Allow; valid 5 minutes, used once). Called again while that link is still valid, it gives the same link. With wait (seconds, up to 120), once a link has been given, it returns as soon as the page is paired and has allowed access, or when the wait runs out, so you can go on with the person's request. Until a page is paired, the workspace, LaTeX-comment and chat tools that need one answer with the same link; once it is paired but before the person presses Allow, they ask for Allow. Also says whether a page is paired and what it granted.",
+    "inputSchema": {"type": "object", "properties": {"wait": {"type": "number", "minimum": 0, "maximum": CONNECT_WAIT_MAX, "description": "seconds to wait for the person to connect and allow, once a link has been given: it returns when they have, or when the time runs out (default 0, at most 120)"}}, "additionalProperties": False},
     "annotations": {"readOnlyHint": False, "destructiveHint": False, "idempotentHint": False, "openWorldHint": False},
 }
 CONNECT_OUTPUT_SCHEMA = {
     "type": "object",
     "properties": {
-        "result": {"description": "{code, port, link, expires_in_seconds, paired, granted, grant, page, last_refused}: link is the one-click pairing link (<site>/board/?pair=CODE&port=PORT); the code and link are null once a page is paired; last_refused, while none is, says why the last page that tried was refused (null if none was)"},
+        "result": {"description": "{code, port, link, expires_in_seconds, paired, granted, grant, page, last_refused}: link is the one-click pairing link (<site>/board/?pair=CODE&port=PORT), the one thing to give the person (code and port are inside it); the code and link are null once a page is paired; last_refused, while none is, says why the last page that tried was refused (null if none was)"},
         "error": {"description": "null, or {code, message}"},
     },
     "required": ["result", "error"],
@@ -528,7 +538,7 @@ def call(link, name, args, timeout=60.0):
         if "content" in params:
             params["content"] = _content_out(params["content"])
         if link is None:
-            raise NotConnected("no Sagebrush page is paired with this agent: open Sagebrush in Chrome or Firefox and connect it (%s)" % WHERE_TO_CONNECT)
+            raise NotConnected("no Sagebrush page is paired with this agent")
         result = validate_result(verb, link.request("workspace." + verb, params, timeout))
     except Invalid as e:
         return _error("invalid", "Invalid arguments: %s" % e)
