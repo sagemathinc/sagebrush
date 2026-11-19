@@ -7779,41 +7779,6 @@
   "owner": "multivariate polynomials",
   "row": "inv-11"
  },
- "lib/_sage_names.py ::  :: 'ConwayBudgetExceeded': '_sage_ff', #0": {
-  "class": "none",
-  "owner": "Sage-mode name index (generated)",
-  "reason": "the generated name index's data: Sage function names (limit, maxima, find_local_maximum, ConwayBudgetExceeded) and the modules that define them; it refuses nothing"
- },
- "lib/_sage_names.py ::  :: 'find_local_maximum', #0": {
-  "class": "none",
-  "owner": "Sage-mode name index (generated)",
-  "reason": "the generated name index's data: Sage function names (limit, maxima, find_local_maximum, ConwayBudgetExceeded) and the modules that define them; it refuses nothing"
- },
- "lib/_sage_names.py ::  :: 'find_local_maximum': '_sage_expr', #0": {
-  "class": "none",
-  "owner": "Sage-mode name index (generated)",
-  "reason": "the generated name index's data: Sage function names (limit, maxima, find_local_maximum, ConwayBudgetExceeded) and the modules that define them; it refuses nothing"
- },
- "lib/_sage_names.py ::  :: 'limit', #0": {
-  "class": "none",
-  "owner": "Sage-mode name index (generated)",
-  "reason": "the generated name index's data: Sage function names (limit, maxima, find_local_maximum, ConwayBudgetExceeded) and the modules that define them; it refuses nothing"
- },
- "lib/_sage_names.py ::  :: 'limit': '_sage_expr', #0": {
-  "class": "none",
-  "owner": "Sage-mode name index (generated)",
-  "reason": "the generated name index's data: Sage function names (limit, maxima, find_local_maximum, ConwayBudgetExceeded) and the modules that define them; it refuses nothing"
- },
- "lib/_sage_names.py ::  :: 'maxima', #0": {
-  "class": "none",
-  "owner": "Sage-mode name index (generated)",
-  "reason": "the generated name index's data: Sage function names (limit, maxima, find_local_maximum, ConwayBudgetExceeded) and the modules that define them; it refuses nothing"
- },
- "lib/_sage_names.py ::  :: 'maxima_calculus', #0": {
-  "class": "none",
-  "owner": "Sage-mode name index (generated)",
-  "reason": "the generated name index's data: Sage function names (limit, maxima, find_local_maximum, ConwayBudgetExceeded) and the modules that define them; it refuses nothing"
- },
  "lib/_sage_nf.py ::  :: _QUADRATIC_FORMS_CHECK_LIMIT = 10**5 #0": {
   "class": "3",
   "owner": "number fields",
