@@ -233,6 +233,25 @@ fn preq(f: &str, a: &[u64], b: &[u64], p: u64) -> String {
 }
 
 #[test]
+fn classical_division_near_two_to_the_32() {
+    // the classical rows' Barrett path (moduli below 2^32) at its top, and
+    // the Shoup path just above it: divisors or quotients shorter than
+    // the Newton cutoff (60), gcds of at most 1000 coefficients (Euclid)
+    let mut s = 3232u64;
+    for p in [4294967291u64, 4294967279, 2147483647, 4294967311] {
+        for (la, lb) in [(2, 2), (9, 3), (59, 59), (120, 59), (59, 30), (300, 7), (61, 2), (1000, 999)] {
+            let (a, b) = (poly(&mut s, la, p), poly(&mut s, lb, p));
+            let (q, r) = naive_divrem(&a, &b, p);
+            let got = ok(&preq("nmod_poly_divrem", &a, &b, p));
+            assert_eq!((uncsv(got["q"].as_str().unwrap()), uncsv(got["r"].as_str().unwrap())), (q, r), "p={p} {la} {lb}");
+            let g = poly(&mut s, 1 + la.min(lb) / 2, p);
+            let (ga, gb) = (naive_mul(&a, &g, p), naive_mul(&b, &g, p));
+            assert_eq!(uncsv(ok(&preq("nmod_poly_gcd", &ga, &gb, p)).as_str().unwrap()), naive_gcd(&ga, &gb, p), "p={p} {la} {lb}");
+        }
+    }
+}
+
+#[test]
 fn polys_match_schoolbook() {
     let before = stats();
     let mut s = 4242u64;

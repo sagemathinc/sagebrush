@@ -48,6 +48,7 @@ RUNID_RE = re.compile(r"^[0-9a-f]{16}$")
 TYPE_RE = re.compile(r"^[a-z][a-z0-9]{0,11}$")
 TOKEN_RE = re.compile(r"^[a-z0-9_]{1,64}$")
 HEX64 = re.compile(r"^[0-9a-f]{64}$")
+HEX64L = re.compile(r"\A[0-9a-f]{64}\Z")
 SIDECAR = re.compile(rb"^[0-9a-fA-F]{64}\n?$")
 # Bounds on what a VM may send: a point's file, and its checksum sidecar
 MAX_ROW = 1 << 20
@@ -57,6 +58,14 @@ TRANSFER_TRIES = 3
 # The statuses a point's file may end with (terminal records: only "ok"
 # yields timings)
 TERMINAL = {"ok", "mismatch", "input mismatch", "no answer", "timeout", "oom", "error"}
+
+
+# How the user column's engine is checked (the pin moves only with a track's
+# pull into master): "strict", the fresh engine wasm must equal wasm/pins.json
+# (master, a pull into master); "track", on a track tip, where the pin lags the
+# source: the fresh build's sha256 is recorded in the identity instead, and
+# every point of a type must share it
+PIN_POLICIES = ("strict", "track")
 
 
 class Fatal(Exception):
@@ -93,6 +102,10 @@ def validate_plan(plan: dict) -> None:
     need(
         HEX64.match(str(plan.get("archive_sha256", ""))),
         "archive_sha256 must be 64 hex digits",
+    )
+    need(
+        plan.get("pin_policy") in PIN_POLICIES,
+        "pin_policy must be 'strict' or 'track'",
     )
     need(
         isinstance(plan.get("envelope_hours"), (int, float))
@@ -363,6 +376,33 @@ def check_row(
     return sha, rec
 
 
+def check_engine_pin(tk: str, rec: dict, policy: str) -> None:
+    """A point's engine claim must be consistent and the plan's: an explicit
+    policy equal to the plan's; sha256 and pinned as 64 lowercase hex; ok a
+    bool equal to (sha256 == pinned); and sha256 the engine-wasm artifact's
+    own hash (the bytes run.py hashed for the point). strict also needs ok;
+    track records the fresh bytes whichever way the comparison went."""
+    pin = rec.get("engine_pin")
+    if not isinstance(pin, dict):
+        raise Fatal(f"{tk}: no engine_pin record")
+    if pin.get("policy") != policy:
+        raise Fatal(
+            f"{tk}: the VM checked its engine under pin policy {pin.get('policy')!r}, not the plan's {policy!r}"
+        )
+    sha, pinned = pin.get("sha256"), pin.get("pinned")
+    for what, v in (("sha256", sha), ("pinned", pinned)):
+        if not (isinstance(v, str) and HEX64L.match(v)):
+            raise Fatal(f"{tk}: engine_pin {what} is not 64 lowercase hex digits")
+    if not isinstance(pin.get("ok"), bool) or pin["ok"] != (sha == pinned):
+        raise Fatal(f"{tk}: engine_pin ok is not (sha256 == pinned)")
+    if (rec.get("artifacts") or {}).get("engine-wasm") != sha:
+        raise Fatal(f"{tk}: engine_pin sha256 is not the engine-wasm artifact's hash")
+    if policy == "strict" and not pin["ok"]:
+        raise Fatal(
+            f"{tk}: the engine wasm is not the pinned one: the run would be unofficial"
+        )
+
+
 IDENTITY_KEYS = (
     "machine",
     "versions",
@@ -415,11 +455,10 @@ class Rows:
     def check_identity(self, tk: str, rec: dict) -> None:
         """The first accepted point of a type sets its identity; every later
         one, from any VM of the type, must equal it. The user column's
-        engine must be the pinned one."""
-        if not (rec.get("engine_pin") or {}).get("ok"):
-            raise Fatal(
-                f"{tk}: the engine wasm is not the pinned one: the run would be unofficial"
-            )
+        engine: under the plan's "strict" pin policy, the pinned one; under
+        "track", a fresh build recorded by its sha256 (in the identity, so
+        every point of the type shares it), checked under that policy."""
+        check_engine_pin(tk, rec, self.plan["pin_policy"])
         path = self.run_dir / "rows" / tk / "identity.json"
         ident = identity_of(rec)
         if path.exists():
@@ -1445,6 +1484,7 @@ def make_plan(
     envelope: float,
     points: list[str],
     t_create_s: int = 600,
+    pin_policy: str = "strict",
 ) -> str:
     """A run directory ready for approval: plan.json (its sha256 printed),
     and payload.tar (a git archive of the clean HEAD, plus .bench-commit and
@@ -1479,6 +1519,7 @@ def make_plan(
     with tarfile.open(archive, "a") as tar:
         for name, text in (
             (".bench-commit", commit + "\n"),
+            (".bench-pin-policy", pin_policy + "\n"),
             (
                 "expected-inputs.json",
                 json.dumps(expected, sort_keys=True, indent=1) + "\n",
@@ -1494,6 +1535,7 @@ def make_plan(
         "archive_sha256": hashlib.sha256(archive.read_bytes()).hexdigest(),
         "envelope_hours": envelope,
         "t_create_s": t_create_s,
+        "pin_policy": pin_policy,
         "types": types,
         "points": keys,
         "expected_inputs": expected,
@@ -1520,6 +1562,12 @@ def main(argv: list[str]) -> int:
     )
     p.add_argument("--envelope", type=float, default=18.0)
     p.add_argument(
+        "--pin-policy",
+        choices=PIN_POLICIES,
+        required=True,
+        help="strict: the engine must equal wasm/pins.json (master); track: record the fresh build (a track tip)",
+    )
+    p.add_argument(
         "--points", default="all", help="'all', or comma-separated row:size keys"
     )
     r = sub.add_parser("run", help="run an approved plan")
@@ -1537,7 +1585,13 @@ def main(argv: list[str]) -> int:
             )
             print(
                 "plan sha256",
-                make_plan(a.run_dir, json.loads(a.types.read_text()), a.envelope, pts),
+                make_plan(
+                    a.run_dir,
+                    json.loads(a.types.read_text()),
+                    a.envelope,
+                    pts,
+                    pin_policy=a.pin_policy,
+                ),
             )
             return 0
         # (the lock first, held from the repair to the end of the run: a

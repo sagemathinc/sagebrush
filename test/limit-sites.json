@@ -34,6 +34,16 @@
   "owner": "exact linear algebra (engine/arith)",
   "reason": "test code: every work bound at extreme lengths is None (a refusal) or a number, never an overflow; refuses nothing itself"
  },
+ "engine/arith/src/nmod_poly.rs :: barrett_reduction_edges :: let mut xs: Vec<u64> = vec![0, 1, n - 1, n, n + 1, 2 * n - 1, u64::MAX, u64::MAX - 1, u64::MAX - n]; #0": {
+  "class": "none",
+  "owner": "exact linear algebra (engine/arith)",
+  "reason": "test code: the Barrett reduction's edge inputs (u64::MAX and the largest multiples of n); refuses nothing itself"
+ },
+ "engine/arith/src/nmod_poly.rs :: barrett_reduction_edges :: let top = u64::MAX / n * n; #0": {
+  "class": "none",
+  "owner": "exact linear algebra (engine/arith)",
+  "reason": "test code: the Barrett reduction's edge inputs (u64::MAX and the largest multiples of n); refuses nothing itself"
+ },
  "engine/arith/src/zmat.rs :: rref_multimodular :: let amax = a.max_bits() as f64; #0": {
   "class": "none",
   "owner": "exact linear algebra (engine/arith)",

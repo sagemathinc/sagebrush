@@ -1,0 +1,8 @@
+{
+ "v": 1,
+ "reason": "GF(p)[x] classical division (the row loop shared by divrem, the Euclidean gcd and reductions modulo short polynomials) reduces each row update by one Barrett step for moduli below 2^32, instead of Shoup multiplications: no division and no data-dependent branch. Measured on rotating inputs: the row kernel is about 5x faster on AMD Zen 3 and Intel Cascade Lake and 2.3x on ARM Neoverse-N1; factoring x^60-1 and x^120-1 mod p is 1.2x-1.8x faster, division by short divisors 1.5x-3x; no regression. Results identical. Engine built from source with CI's path mapping: 7639618 -> 7640188 bytes (+570) over the base's fresh build, marked exactly (PRs into the track no longer move wasm/pins.json). The command line: an ESTIMATE, 4/3 of the engine's growth, awaiting this head's CI size table.",
+ "bytes": {
+  "engine/sagebrush-engine.wasm": 570,
+  "cli/pyjs.cjs": 760
+ }
+}

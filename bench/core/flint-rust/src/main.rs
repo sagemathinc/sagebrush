@@ -160,6 +160,53 @@ fn zmat(n: usize, v: usize) -> Vec<BigInt> {
         .collect()
 }
 
+
+/// The rank rows beyond the square ones (expected_inputs.py's formulas, which
+/// also certify the ranks): wide R(n x 2n); def R(n x n/2) R(n/2 x n); def_p
+/// R(n x n) diag(1, ..., 1, p) R(n x n), p = 2^62 - 57.  The entries stay
+/// below 2^110 in absolute value (def_p at n = 250), so i128 holds them.
+const RANK_P: i128 = (1i128 << 62) - 57;
+
+fn rank_rnd(rows: usize, cols: usize, s: u64) -> Vec<Vec<i128>> {
+    (0..rows)
+        .map(|i| (0..cols).map(|j| pow_mod(131 * i as u64 + 31 * j as u64 + s, 5, 1_000_003) as i128 - 500_001).collect())
+        .collect()
+}
+
+fn rank_matmul(a: &[Vec<i128>], b: &[Vec<i128>]) -> Vec<Vec<i128>> {
+    let cols = b[0].len();
+    a.iter()
+        .map(|row| {
+            let mut out = vec![0i128; cols];
+            for (x, brow) in row.iter().zip(b) {
+                for (o, y) in out.iter_mut().zip(brow) {
+                    *o += x * y;
+                }
+            }
+            out
+        })
+        .collect()
+}
+
+/// (columns, entries row-major) of a wide, def or def_p row's integer matrix.
+fn rank_matrix(case: &str, n: usize, v: usize) -> (usize, Vec<BigInt>) {
+    let (s1, s2) = (10 * v as u64 + 1, 10 * v as u64 + 2);
+    let a = if case.ends_with("_wide") {
+        rank_rnd(n, 2 * n, s1)
+    } else if case.ends_with("_def") {
+        let r = n / 2;
+        rank_matmul(&rank_rnd(n, r, s1), &rank_rnd(r, n, s2))
+    } else {
+        let mut c = rank_rnd(n, n, s2);
+        for x in c[n - 1].iter_mut() {
+            *x *= RANK_P;
+        }
+        rank_matmul(&rank_rnd(n, n, s1), &c)
+    };
+    let cols = a[0].len();
+    (cols, a.concat().iter().map(|x| x.to_string().parse().expect("an integer")).collect())
+}
+
 extern "C" {
     // FLINT's own thread count (its public interface; the static library is
     // already linked through sagebrush-flint)
@@ -222,6 +269,11 @@ fn main() {
             let a = FMat::new(n, n, &entries);
             (entries, move || a.charpoly_poly().coeffs())
         }, poly_sig),
+        "mat_z_rank_wide" | "mat_z_rank_def" | "mat_z_rank_def_p" => run(&mode, variants, |v| {
+            let (cols, entries) = rank_matrix(&case_id, n, v);
+            let a = FMat::new(n, cols, &entries);
+            (entries, move || a.rank())
+        }, |r: &usize| r.to_string()),
         _ => panic!("unsupported Rust FLINT case {case_id}"),
     }
 }

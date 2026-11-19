@@ -29,6 +29,7 @@ def plan(**over):
         "archive_sha256": "b" * 64,
         "envelope_hours": 18,
         "t_create_s": 600,
+        "pin_policy": "strict",
         "types": {
             "x86": {
                 "machine_type": "n2-standard-16",
@@ -68,9 +69,14 @@ def row(**over):
             "kernel": "6.8",
         },
         "versions": {"node": "v24"},
-        "artifacts": {"native": "c" * 64},
+        "artifacts": {"native": "c" * 64, "engine-wasm": "a" * 64},
         "build": {"rustc": "1.99.1"},
-        "engine_pin": {"ok": True},
+        "engine_pin": {
+            "ok": True,
+            "policy": "strict",
+            "sha256": "a" * 64,
+            "pinned": "a" * 64,
+        },
         "backends": {},
         "threads": 16,
         "mem_cap": 1,
@@ -98,6 +104,8 @@ class Plans(unittest.TestCase):
             {"points": ["poly_fp_mul:x"]},
             {"points": ["../etc:s"]},
             {"expected_inputs": {}},
+            {"pin_policy": "loose"},
+            {"pin_policy": None},
             {"types": {"X86": plan()["types"]["x86"]}},
             {"types": {"x86": dict(plan()["types"]["x86"], zones=["us;rm -rf"])}},
         ):
@@ -352,11 +360,102 @@ class Acceptance(unittest.TestCase):
     def test_identity_must_match_within_a_type(self):
         self.accept()
         with self.assertRaisesRegex(shard.Fatal, "identity"):
-            self.rows.check_identity("x86", row(artifacts={"native": "d" * 64}))
+            self.rows.check_identity(
+                "x86", row(artifacts={"native": "d" * 64, "engine-wasm": "a" * 64})
+            )
 
     def test_an_unpinned_engine_is_refused(self):
-        with self.assertRaisesRegex(shard.Fatal, "pinned"):
-            self.accept(row(engine_pin={"ok": False}))
+        stale = {
+            "ok": False,
+            "policy": "strict",
+            "sha256": "a" * 64,
+            "pinned": "f" * 64,
+        }
+        with self.assertRaisesRegex(shard.Fatal, "pinned one"):
+            self.accept(row(engine_pin=stale))
+
+    def test_inconsistent_engine_claims_are_refused(self):
+        good = {"ok": True, "policy": "strict", "sha256": "a" * 64, "pinned": "a" * 64}
+        for what, pin, arts in (
+            ("missing policy", {"ok": True}, None),
+            (
+                "no policy under strict",
+                {k: v for k, v in good.items() if k != "policy"},
+                None,
+            ),
+            ("truthy non-bool ok", dict(good, ok=1), None),
+            ("forged ok", dict(good, pinned="f" * 64), None),
+            (
+                "uppercase sha",
+                dict(good, sha256="A" * 64, pinned="A" * 64),
+                {"engine-wasm": "A" * 64},
+            ),
+            (
+                "short sha",
+                dict(good, sha256="a" * 63, pinned="a" * 63),
+                {"engine-wasm": "a" * 63},
+            ),
+            (
+                "sha not the artifact's",
+                good,
+                {"native": "c" * 64, "engine-wasm": "d" * 64},
+            ),
+            ("no engine-wasm artifact", good, {"native": "c" * 64}),
+            ("not a dict", "ok", None),
+        ):
+            with self.subTest(what=what), self.assertRaises(shard.Fatal):
+                over = {"engine_pin": pin}
+                if arts is not None:
+                    over["artifacts"] = arts
+                self.accept(row(**over))
+        self.assertFalse((self.d / "rows/x86/poly_fp_mul-s.json").exists())
+
+    def track(self):
+        self.rows.plan = self.plan = plan(pin_policy="track")
+
+    def test_on_a_track_tip_the_fresh_engine_is_recorded(self):
+        # (the pin lags the source there: not ok, but its sha256 is the
+        # identity's, so a second point with another fresh build is refused)
+        self.track()
+        fresh = {"ok": False, "policy": "track", "sha256": "e" * 64, "pinned": "f" * 64}
+        arts = {"native": "c" * 64, "engine-wasm": "e" * 64}
+        self.accept(row(engine_pin=fresh, artifacts=arts))
+        ident = json.loads((self.d / "rows/x86/identity.json").read_text())
+        self.assertEqual(ident["engine_pin"]["sha256"], "e" * 64)
+        with self.assertRaisesRegex(shard.Fatal, "identity"):
+            self.rows.check_identity(
+                "x86",
+                row(
+                    engine_pin=dict(fresh, sha256="d" * 64),
+                    artifacts=dict(arts, **{"engine-wasm": "d" * 64}),
+                ),
+            )
+
+    def test_a_track_plan_needs_a_recorded_fresh_sha(self):
+        self.track()
+        with self.assertRaisesRegex(shard.Fatal, "64 lowercase hex"):
+            self.accept(
+                row(
+                    engine_pin={
+                        "ok": False,
+                        "policy": "track",
+                        "sha256": None,
+                        "pinned": "f" * 64,
+                    }
+                )
+            )
+
+    def test_the_vm_policy_must_be_the_plans(self):
+        # (a VM that checked strictly under a track plan, or the reverse, or
+        # with no policy at all, ran another payload: refused each way)
+        good = {"ok": True, "sha256": "a" * 64, "pinned": "a" * 64}
+        with self.assertRaisesRegex(shard.Fatal, "pin policy"):
+            self.accept(row(engine_pin=dict(good, policy="track")))
+        self.track()
+        with self.assertRaisesRegex(shard.Fatal, "pin policy"):
+            self.accept(row(engine_pin=dict(good, policy="strict")))
+        with self.assertRaisesRegex(shard.Fatal, "pin policy"):
+            self.accept(row(engine_pin=good))
 
     def test_two_types_share_a_point_without_colliding(self):
         self.accept(tk="x86")
@@ -1399,6 +1498,10 @@ class Plans2(unittest.TestCase):
             with tarfile.open(d / "run/payload.tar") as t:
                 self.assertEqual(
                     t.extractfile(".bench-commit").read().decode().strip(), p["commit"]
+                )
+                self.assertEqual(
+                    t.extractfile(".bench-pin-policy").read().decode().strip(),
+                    p["pin_policy"],
                 )
                 self.assertEqual(
                     json.loads(t.extractfile("expected-inputs.json").read()),
