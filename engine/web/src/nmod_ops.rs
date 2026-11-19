@@ -23,7 +23,8 @@
 //! - nmod_echelon: R + 28 E + 33 KiB             <= ECH_PEAK < 49 MiB;
 //! - nmod_poly_mul: R + 8 (la + lb) + 128 N      <= MUL_PEAK = 12 MiB;
 //! - nmod_poly_divrem: R + 16 (la + lb) + 32 ql + 128 N <= DIV_PEAK = 14 MiB;
-//! - nmod_poly_gcd: R + 28 (la + lb)             <= GCD_PEAK = 2 MiB.
+//! - nmod_poly_gcd: R + 8 (la + lb) + 128 N + 320 L + 4 KiB <= GCD_PEAK < 10 MiB
+//!   (L = max(la, lb); N = GCD_NTT_N, the padded transform length bound).
 
 use sagebrush_arith::nmod::{is_prime, Modulus};
 use sagebrush_arith::nmod_mat::Mat;
@@ -99,20 +100,68 @@ pub const DIV_PEAK: usize = add(add(DIV_MAX_REQUEST, mul(8, mul(8, DIV_MAX_LEN))
 /// Newton: 6 products of length 2^16 at most (the classical path: 59 2^15).
 pub const DIV_WORK: u64 = 6 * MUL_WORK;
 
-/// nmod_poly_gcd (Euclid): 1 <= la, lb <= GCD_MAX_LEN.
+/// nmod_poly_gcd: 1 <= la, lb <= GCD_MAX_LEN.  The half-gcd
+/// (nmod_poly::gcd_in) when both have more than 1000 coefficients, else
+/// Euclid's algorithm.  Its tables are built for products of length at
+/// most nmod_poly::gcd_table_len = 2 L, L = max(la, lb), so every
+/// transform, padded to a power of two, has at most
+/// next_power_of_two(2 L) <= GCD_NTT_N = 2 GCD_MAX_LEN points.
 pub const GCD_MAX_LEN: usize = 1 << 14;
 pub const GCD_MAX_REQUEST: usize = add(mul(2 * ENTRY_TEXT, GCD_MAX_LEN), FIELDS);
-/// parse: R + 28 (la + lb); then R + 8 (la + 2 lb) + 20 lb.
-pub const GCD_PEAK: usize = add(GCD_MAX_REQUEST, mul(28, 2 * GCD_MAX_LEN));
-/// lb (la + lb) + 129 lb + 128: the quotient rows of all Euclid steps
-/// number at most la + lb, each at most lb multiply-adds; an inversion
-/// per step and the final normalization.
-pub const GCD_WORK: u64 = (GCD_MAX_LEN as u64) * (2 * GCD_MAX_LEN as u64) + 129 * GCD_MAX_LEN as u64 + 128;
+pub const GCD_NTT_N: usize = 2 * GCD_MAX_LEN;
+/// Admission is by these static caps and closed forms, before any
+/// size-dependent work; there is no runtime reservation (as for the other
+/// ops here).  parse: R + 28 (la + lb).  compute: R + 8 (la + lb) (the
+/// inputs, owned by the gcd) + 96 N (at most three tables) + 32 N (one
+/// product's transform buffers and residues at a time) + 320 L for every
+/// other polynomial, each counted by its CAPACITY where it was allocated
+/// (trim and truncate keep it): a product's is under twice its length (an
+/// NTT prime's transform is truncated in place), a difference's at most
+/// twice its longer operand (resize), sums, copies and clones are exact.
+/// A half-gcd frame for inputs of length L, h = ceil(L / 2) (its calls'
+/// inputs have at most h coefficients, its matrices' entries at most
+/// h / 2 + 1 and their products at most h, a1 and b1 at most 1.25 L + 1,
+/// q at most h, d at most L), holds at most 16.5 L + 33 words (at its
+/// final matrix product) and 11 L + 20 while its second call runs, so the
+/// recursion holds S(L) <= max(16.5 L + 33, 11 L + 20 + S(h)) <= 23 L +
+/// 1024 words (1024: an Euclid base case, inputs shorter than 65); the
+/// gcd's loop adds at most 0.5 L + 2 (its later operands' capacities), so
+/// at most 188 L + 8208 bytes <= 320 L for L > 1000.  The table per object
+/// is in the commit that introduced the half-gcd here.  reply: R + 8 lg +
+/// 20 lg.
+pub const GCD_PEAK: usize = add(add(GCD_MAX_REQUEST, mul(16 + 320, GCD_MAX_LEN)), add(mul(128, GCD_NTT_N), 4096));
+/// A bound on one product of transform length GCD_NTT_N: 3 primes x 3
+/// transforms of (N / 2) log N butterflies, plus 40 N (the residues'
+/// combination and the linear passes around it: sums, differences,
+/// copies; also a bound on a schoolbook product, whose shorter factor has
+/// fewer than 40 coefficients).
+const GCD_PRODUCT: u64 = 9 * (GCD_NTT_N as u64 / 2) * 15 + 40 * GCD_NTT_N as u64;
+/// Declared, not enforced at runtime (as for the other ops here).  With
+/// P(N) = GCD_PRODUCT at N points (P(N) / N grows with N): a half-gcd
+/// node for inputs of length L does at most 20 products' work at N =
+/// next_power_of_two(2 L): 4 applying its first matrix, 6 in its division
+/// (Newton's inverse: two products per doubling step, at most 4 P(N) in
+/// all, then the quotient's and the remainder's; or the classical
+/// division, cheaper), 2 in the Euclid step, 8 in the final matrix
+/// product; and it calls itself twice on inputs of at most ceil(L / 2)
+/// coefficients, whose N is at most half its own.  So W(L) <= 20 P(N) +
+/// 2 W(ceil(L / 2)): level j of the recursion has at most 2^j nodes of
+/// at most N / 2^j points, costing at most 20 P(N) together; at the cap
+/// the levels with L > 64 number at most 8, and the at most 2^8 base cases
+/// cost at most 2^14 each (counted as 2^14 * (GCD_MAX_LEN / 32)).  The
+/// gcd's loop: each turn's half-gcd, its application and a division (10
+/// products more), on lengths that at least halve each turn, so at most
+/// twice the first turn's bound; then Euclid's tail on a shorter input of
+/// at most 1000 coefficients: 1000 (L + 1000) + 129 1000 + 128.
+pub const GCD_WORK: u64 = 2 * (20 * GCD_PRODUCT * 8 + (1 << 14) * (GCD_MAX_LEN as u64 / 32) + 10 * GCD_PRODUCT)
+    + 1000 * (GCD_MAX_LEN as u64 + 1000)
+    + 129 * 1000
+    + 128;
 
 const _: () = assert!(ECH_PEAK <= 49 * MIB);
 const _: () = assert!(MUL_PEAK <= 12 * MIB);
 const _: () = assert!(DIV_PEAK <= 14 * MIB);
-const _: () = assert!(GCD_PEAK <= 2 * MIB);
+const _: () = assert!(GCD_PEAK <= 10 * MIB);
 
 /// The ops whose requests are capped before serde (looked up by the exact
 /// name of the request's last top-level "fn").
@@ -364,11 +413,18 @@ fn poly_divrem(o: Map<String, Value>) -> Result<String, String> {
     Ok(out.done())
 }
 
-/// nmod_poly_gcd: {p, a, b} -> the monic gcd's coefficients, by Euclid's
-/// algorithm (a and b nonzero: the caller answers gcd(f, 0) = monic f).
+/// nmod_poly_gcd: {p, a, b} -> the monic gcd's coefficients, by the
+/// half-gcd (Euclid's algorithm when the shorter input has at most 1000
+/// coefficients) (a and b nonzero: the caller answers gcd(f, 0) = monic f).
 fn poly_gcd(o: Map<String, Value>) -> Result<String, String> {
     let (m, a, b) = two_polys(o, "nmod_poly_gcd", GCD_MAX_LEN)?;
-    let g = nmod_poly::gcd_classical(a, b, &m);
+    let len = nmod_poly::gcd_table_len(a.len(), b.len());
+    let g = if len == 0 {
+        nmod_poly::gcd_classical(a, b, &m)
+    } else {
+        let lt = ntt::LocalTables::new(&m, len);
+        nmod_poly::gcd_in(a, b, &m, &lt)
+    };
     let _phase = sagebrush_interrupt::enter("reply");
     let mut out = Reply::new(ENTRY_TEXT * g.len() + 2);
     out.list(&g);

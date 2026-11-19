@@ -99,10 +99,16 @@ fn stop_in_every_phase() {
     let req = format!(r#"{{"fn":"nmod_poly_divrem","p":"{}","a":"{}","b":"{}"}}"#, P, csv(&a), csv(&b));
     phases("divrem classical", &req, &[("classical-divide", 25)]);
 
-    // nmod_poly_gcd at the cap: about 2^28 multiply-adds
+    // nmod_poly_gcd at the cap: the half-gcd (its products' transforms,
+    // and the rest of its work), then Euclid's tail
     let (a, b) = (rand_poly(&mut s, 1 << 14, P), rand_poly(&mut s, 1 << 14, P));
     let req = format!(r#"{{"fn":"nmod_poly_gcd","p":"{}","a":"{}","b":"{}"}}"#, P, csv(&a), csv(&b));
-    phases("gcd", &req, &[("parse", 2), ("euclid", 3000)]);
+    phases("gcd", &req, &[("parse", 2), ("half-gcd", 1000), ("ntt", 10000), ("euclid", 1)]);
+    // ... and Euclid alone at its cutoff (lb = 1000): about 1000 (2^14 +
+    // 1000) multiply-adds
+    let (a, b) = (rand_poly(&mut s, 1 << 14, P), rand_poly(&mut s, 1000, P));
+    let req = format!(r#"{{"fn":"nmod_poly_gcd","p":"{}","a":"{}","b":"{}"}}"#, P, csv(&a), csv(&b));
+    phases("gcd euclid", &req, &[("parse", 2), ("euclid", 200)]);
 
     // churn: products and divisions modulo 100 distinct NTT primes
     // c 2^20 + 1, between three-prime ones: the shared cache unchanged

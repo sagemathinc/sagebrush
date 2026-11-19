@@ -248,6 +248,12 @@ fn polys_match_schoolbook() {
             let (ga, gb) = (naive_mul(&a, &g, p), naive_mul(&b, &g, p));
             assert_eq!(uncsv(ok(&preq("nmod_poly_gcd", &ga, &gb, p)).as_str().unwrap()), naive_gcd(&ga, &gb, p), "p={p} {la} {lb}");
         }
+        // the half-gcd (both inputs longer than 1000), with a common factor
+        for (la, lb, lc) in [(1001, 1001, 1), (1500, 1200, 400), (2500, 1001, 900)] {
+            let g = poly(&mut s, lc, p);
+            let (ga, gb) = (naive_mul(&poly(&mut s, la - lc + 1, p), &g, p), naive_mul(&poly(&mut s, lb - lc + 1, p), &g, p));
+            assert_eq!(uncsv(ok(&preq("nmod_poly_gcd", &ga, &gb, p)).as_str().unwrap()), naive_gcd(&ga, &gb, p), "p={p} {la} {lb} {lc}");
+        }
         // equal operands, constants, an exact quotient
         let a = poly(&mut s, 100, p);
         assert_eq!(uncsv(ok(&preq("nmod_poly_gcd", &a, &a, p)).as_str().unwrap()), naive_gcd(&a, &a, p));
