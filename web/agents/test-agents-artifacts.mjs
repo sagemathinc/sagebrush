@@ -467,6 +467,67 @@ try {
   }
 
   // ======================================================================== saved, with its base; reopened
+  // ======================================================================== the way to the files: Files… and the switch
+  if (want("filesbtn")) {
+    // (a text file's edit typed just now (its 700 ms save still pending), then Files… at once: the page leaves only after
+    //  the edit is saved; read back through the agent once paired again)
+    const quick = async (path, click, word) => {
+      await call("workspace.create", { path, content: { text: "old\n" } });
+      await artifactTurn(path);
+      await until(`document.querySelector('${PANE} .file-path')?.textContent.startsWith(${JSON.stringify(path + " ")}) && !!document.querySelector('${PANE} .file-body textarea')`, 30000);
+      await ev(`(() => { const t = document.querySelector('${PANE} .file-body textarea'); t.focus(); t.setSelectionRange(t.value.length, t.value.length); })()`);
+      await send("Input.insertText", { text: word });
+      await ev(`localStorage.setItem("sagebrush-files-sidebar", "0")`);
+      await ev(click);
+      await until(`location.pathname === "/" && document.readyState === "complete"`, 30000);
+      const pref = await ev(`localStorage.getItem("sagebrush-files-sidebar")`);
+      await pair();
+      await converse();
+      const r = await call("workspace.read", { path });
+      return { pref, text: typeof r.content === "string" ? r.content : r.content?.text ?? JSON.stringify(r.content) };
+    };
+    const big = await quick("/notes/quick.txt", `document.getElementById('files-big').click()`, "NEW-BIG");
+    ok(big.text.includes("NEW-BIG") && big.pref === "1", "an edit typed just before Files… is saved before the page leaves, and the files are set to show", big);
+    const small = await quick("/notes/quick2.txt", `document.querySelector('nav.side .sb-mode [data-mode="files"]').click()`, "NEW-SMALL");
+    ok(small.text.includes("NEW-SMALL") && small.pref === "1", "the switch's Files leaves the same way: the edit saved, the files set to show", small);
+    // (a cell running: Files… asks first, as closing the pane does; Cancel keeps this page, the cell running, nothing set)
+    const path = "/notes/slow-files.ipynb";
+    await call("workspace.create", { path, content: docFor(path, [{ code: "import time\nfor i in range(600):\n    time.sleep(0.05)" }]), mode: "python" });
+    await openNotebook(path);
+    await ev(`${cellJs(0)}.querySelector('.runb').click()`);
+    await until(`/· running/.test([...document.querySelectorAll('#artifacts .tab')].map((t) => t.textContent).join())`, 120000);
+    await ev(`localStorage.setItem("sagebrush-files-sidebar", "0")`);
+    await ev(`document.getElementById('files-big').click()`);
+    await until(`document.querySelector('#close-running').open`);
+    await ev(`document.querySelector('#close-running').close('')`);
+    await sleep(500);
+    const stayed = await ev(`({ path: location.pathname, pane: document.body.classList.contains('has-artifact'), cls: ${cellJs(0)}?.className ?? null, pref: localStorage.getItem("sagebrush-files-sidebar") })`);
+    ok(stayed.path === "/agents/" && stayed.pane && /running|queued/.test(stayed.cls ?? "") && stayed.pref === "0", "with a cell running, Files… asks first; Cancel stays on this page, the cell running, nothing set", stayed);
+    await ev(`document.querySelector('#close').click()`);
+    await until(`document.querySelector('#close-running').open`);
+    await ev(`document.querySelector('#close-running').close('stop')`);
+    await until(`!document.body.classList.contains('has-artifact')`, 10000);
+  }
+
+  // ======================================================================== Open in Sagebrush: the file's own page
+  if (want("openlink")) {
+    // (its address is the one the File menu opens the notebook at, /?nb=<its id>, and following it, in this tab or in
+    // the installed app, opens that notebook in the notebook editor: an address no page answers (/w/<path>) was a 404)
+    const path = "/notes/linked.ipynb";
+    await call("workspace.create", { path, content: docFor(path, [{ code: "print('LINKED-CELL')" }]), mode: "python" });
+    await openNotebook(path);
+    await until(`!!document.querySelector('${PANE} .file-path .open-full:not([hidden])')`);
+    const ref = await refOf(path), href = await ev(`document.querySelector('${PANE} .file-path .open-full').getAttribute('href')`);
+    ok(href === "/?nb=" + encodeURIComponent(ref), "Open in Sagebrush names the notebook's own page, /?nb=<its id>", { href, ref });
+    const status = await ev(`fetch(${JSON.stringify(href)}).then((r) => r.status)`);
+    ok(status === 200, "that address answers 200", status);
+    await send("Page.navigate", { url: site + href });
+    await until(`[...document.querySelectorAll('.sbnb .cell')].some((c) => c.textContent.includes("LINKED-CELL"))`, 30000);
+    ok(await ev(`document.querySelectorAll('.sbnb .cell').length === 1`), "following it opens that notebook, and only its one cell, in the notebook editor");
+    await pair();
+    await converse();
+  }
+
   if (want("save")) {
     const path = "/notes/save.ipynb";
     await call("workspace.create", { path, content: docFor(path, [{ code: "a = 1" }, { code: "print(41 + 1)" }, { code: "b = 2" }]), mode: "python" });

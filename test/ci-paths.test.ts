@@ -274,8 +274,10 @@ test("track pushes have master integration parity, including after a superseded 
   for (const files of ["engine/poly/src/lib.rs\n", "README.md\n", "src/runtime/ops.ts\n"]) {
     const master = run("refs/heads/master", files);
     const track = run("refs/heads/track/math", files);
-    for (const key of ["full", "engine_full", "size_inputs", "web_runner", "wasm_build", "docs_only", "long"])
+    for (const key of ["full", "engine_full", "web_runner", "wasm_build", "docs_only", "long"])
       assert.equal(track[key], master[key], `${files.trim()}: ${key}`);
+    // (the one difference: on a track an engine source moves the shipped bytes, so it is a size input there)
+    assert.equal(track.size_inputs, files.startsWith("engine/") ? "true" : master.size_inputs, `${files.trim()}: size_inputs`);
     assert.equal(track.full, "true", files.trim());
     assert.equal(track.engine_full, "true", files.trim());
     assert.equal(track.long, "false", files.trim());
@@ -747,6 +749,20 @@ test("wasm_build: a pull request into a track always builds the modules; a track
     assert.equal(classify(files, "", { GITHUB_BASE_REF: "track/math", GITHUB_HEAD_REF: "r6" }).wasm_build, "true", files.join());
   assert.equal(classify(["README.md"], "", { GITHUB_BASE_REF: "master", GITHUB_HEAD_REF: "track/math" }).wasm_build, "false");
   assert.equal(classify(["README.md"], "", { GITHUB_BASE_REF: "trackmath", GITHUB_HEAD_REF: "x" }).wasm_build, "false");
+});
+
+test("size_inputs: on a track an engine source is a gate input (the engine ships as built); elsewhere it is not", () => {
+  // (a track's pull request with only an engine change was once measured as docs-only: no base record, an empty gate)
+  const size = (files: string[], env: Record<string, string>) => classify(files, "", env).size_inputs;
+  const intoTrack = { GITHUB_BASE_REF: "track/math", GITHUB_HEAD_REF: "r6" };
+  for (const f of ["engine/arith/src/zmat.rs", "engine/poly/src/modp.rs", "wasm/pins.json", "Cargo.lock", "scripts/build-engine.mjs"])
+    assert.equal(size([f], intoTrack), "true", f);
+  assert.equal(size(["engine/arith/src/zmat.rs"], { GITHUB_EVENT_NAME: "push", GITHUB_REF: "refs/heads/track/math" }), "true");
+  for (const f of ["README.md", "bench/core/run.py", "lib/sagebrush/linalg.py"]) assert.equal(size([f], intoTrack), "false", f);
+  // (on master, and on a track's pull into master, an engine source moves no shipped bytes until its pin does)
+  assert.equal(size(["engine/arith/src/zmat.rs"], { GITHUB_BASE_REF: "master", GITHUB_HEAD_REF: "x" }), "false");
+  assert.equal(size(["engine/arith/src/zmat.rs"], { GITHUB_BASE_REF: "master", GITHUB_HEAD_REF: "track/math" }), "false");
+  assert.equal(size(["engine/arith/src/zmat.rs"], { GITHUB_BASE_REF: "trackmath", GITHUB_HEAD_REF: "x" }), "false");
 });
 
 test("wasm_build: what the modules are built from or handled by builds them on a pull request; every other event builds", () => {

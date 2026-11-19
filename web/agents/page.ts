@@ -28,14 +28,25 @@ import { mountComposer, renderComposerState, stopLabel } from "../workspace/agen
 import { applyPaneClasses, mountLayout, relayout } from "./layout";
 import { AgentLeg, legKey, listComputers, pageLegUrl, type LegEnd } from "../workspace/agent-relay";
 import { chatHere } from "./chat-here";
-import { modeSwitch } from "../workspace/mode-switch";
+import { filesIcon, modeSwitch } from "../workspace/mode-switch";
 import { icon as panelIcon } from "../workspace/files-toggle";
+import { entryUrl } from "../workspace/entry-url";
 
 // (the LaTeX editor, in builds that have it: web/build.ts's define)
 declare const __SB_LATEX__: boolean | undefined;
 const LATEX_URL = new URL("../sagebrush-latex.js", import.meta.url).href;
 
 const STORE = "sagebrush-agents-preview-v1";
+// (Open in Sagebrush: the file's own page, as the File menu opens it (web/workspace/entry-url.ts), by the entry's id,
+// found when the link is drawn; hidden for a file with no page of its own)
+function openFull(path: string): HTMLAnchorElement {
+  const a = Object.assign(document.createElement("a"), { className: "open-full", target: "_blank", rel: "noopener", textContent: "Open in Sagebrush", hidden: true });
+  void workspace?.stat(path).then((e) => {
+    const url = e && entryUrl(e);
+    if (url) Object.assign(a, { href: url, hidden: false });
+  }, () => {});
+  return a;
+}
 const esc = (s: string) => s.replace(/&/g, "&amp;").replace(/</g, "&lt;").replace(/>/g, "&gt;").replace(/"/g, "&quot;");
 const $ = <T extends HTMLElement = HTMLElement>(sel: string, root: ParentNode = document) => root.querySelector(sel) as T;
 
@@ -464,8 +475,9 @@ function mountHost(threadId: string, a: Artifact, h: Host) {
     if (before && document.activeElement !== before && $("#artifacts").contains(document.activeElement)) before.focus();
   };
   if (a.kind === "notebook" && a.path && workspace) {
-    h.el.innerHTML = `<div class="file-path">${esc(a.path)} <span class="saved"></span> <a class="open-full" href="/w${esc(a.path)}" target="_blank" rel="noopener">Open in Sagebrush</a></div><div class="file-body"></div>`;
+    h.el.innerHTML = `<div class="file-path">${esc(a.path)} <span class="saved"></span> </div><div class="file-body"></div>`;
     const saved = $(".saved", h.el);
+    $(".file-path", h.el).append(openFull(a.path));
     const ui: NotebookUi = {
       saved: (t) => (saved.textContent = t),
       // (kept with this host, shown when it is the host shown: a hidden notebook's warning waits for it)
@@ -583,7 +595,7 @@ function mountFile(a: Artifact, box: HTMLElement, saved: HTMLElement): FileHost 
   const tex = /\.tex$/i.test(path);
   if (tex && !__SB_LATEX__) {
     // (no LaTeX editor in this build: the source here, and the file in Sagebrush)
-    saved.insertAdjacentHTML("afterend", ` <a class="open-full" href="/w${esc(path)}" target="_blank" rel="noopener">Open in Sagebrush</a>`);
+    saved.after(" ", openFull(path));
   }
   type Latex = { mountEditor?: (root: HTMLElement, o: { text: string; onChange?(t: string): void; layout?: "split" | "preview" }) => { getText(): string; destroy(): void } };
   const latexMod: Promise<Latex | null> = tex && __SB_LATEX__ ? import(/* @vite-ignore */ LATEX_URL).catch(() => null) : Promise.resolve(null);
@@ -882,7 +894,25 @@ function toast(text: string, ms = 1500) {
 const editor = mountComposer({ submit, stop: () => interrupt(current()), render: md, typeset: (el) => typeset(el) });
 // (the Files | Agents switch at the right of the chat list's header, Agents pressed: Files opens the notebook page with
 //  its files, as the file panel's switch opens this page; William, Nov 12)
-{ const sw = modeSwitch("agents"), brand = document.querySelector<HTMLElement>("nav.side .brand"); sw.style.marginLeft = "auto"; if (brand) { brand.style.whiteSpace = "nowrap"; brand.append(sw); } }
+{ const sw = modeSwitch("agents"), brand = document.querySelector<HTMLElement>("nav.side .brand"); sw.style.marginLeft = "auto"; if (brand) { brand.style.whiteSpace = "nowrap"; brand.append(sw); } const f = sw.querySelector<HTMLButtonElement>('[data-mode="files"]'); if (f) f.onclick = () => void toFiles(); }
+// (to the files: the notebook page with its file browser shown.  The thread is left as New chat leaves it
+//  (mayLeaveThread): its files' pending edits saved, a running cell stopped only if the person says so; refused, this
+//  page stays and nothing is changed.  Admitted, the browser's own choice to show the files is set, then the page left)
+let leaving = false;
+async function toFiles() {
+  if (leaving) return;
+  leaving = true;
+  try {
+    if (!(await mayLeaveThread())) return;
+    try { localStorage.setItem("sagebrush-files-sidebar", "1"); } catch {}
+    location.assign("/");
+  } finally {
+    leaving = false;
+  }
+}
+// (Files…, at the foot of the chat list; and the switch's own Files, through the same way out)
+$("#files-big").prepend(filesIcon());
+$("#files-big").onclick = () => void toFiles();
 $("#new").onclick = async () => {
   if (!(await mayLeaveThread())) return;
   session.newThread();
