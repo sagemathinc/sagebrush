@@ -120,8 +120,42 @@ python3 bench/core/test_inputs.py            # the input check alone, small size
 python3 bench/core/test_runner.py            # the runner's process handling; needs nothing built (its cgroup tests need the setup above)
 ```
 
+## Runs across VMs: the shard driver
+
+`shard.py` runs one harness run across spot VMs from the project. Its design, reviewed before any code, is binding.
+
+1. **Plan, in the project, before any VM exists:**
+   ```sh
+   python3 bench/core/shard.py plan RUN_DIR --types types.json --envelope 18
+   ```
+   This refuses a dirty tree. It writes `plan.json`: the run id (16 random hex digits), the commit, the machine types, the VM-hour envelope, the points, and every point's expected input hash from `expected_inputs.py`. It also writes `payload.tar`: a `git archive` of the commit plus `.bench-commit` and `expected-inputs.json`, with no `.git`. It prints the plan's sha256.
+2. **Approval:** the run's approver approves that exact sha256. Nothing may change the plan afterwards.
+3. **Run:**
+   ```sh
+   python3 bench/core/shard.py run RUN_DIR --sbvm PATH/sbvm.py
+   ```
+
+What a run does:
+- **Lock:** it holds a lock on the run directory, so only one driver can spend its envelope.
+- **Ledger:** every VM action is announced in `ledger.jsonl` before it happens: reserve, created, delete-requested, deleted, absent, build, accepted. Each line is written whole and fsynced before its action; a write that fails is fatal before the action, and new directories are fsynced into their parents. A torn last line stops the driver until `--repair-tail` moves exactly those bytes aside.
+- **VM tool:** VMs are created, read and deleted only through `sbvm.py`, with argv (`create`, `show`, `names`, `delete`). Each VM gets the single label `bench-run=<run id>` and no service account.
+- **The envelope:** a VM is charged from its reservation: its full `maxRunDuration`, plus the create timeout until its creation is seen. A VM counts until its deletion is confirmed, or its whole lifetime if it expires. Preemptions and retries are charged in full, and a create with an unknown outcome blocks all spending until it is resolved. A create whose VM was never seen (it may have run and been preempted unseen, or may still appear) stays charged its full `maxRunDuration` plus the create timeout: nothing is refunded for not being seen. If such a VM appears later, it is adopted and deleted. No VM is reserved unless the total stays within the envelope.
+- **Restart:** the driver lists the run's VMs by name prefix. It adopts only a VM it reserved, exactly as reserved: labels, type, zone, image, lifetime, no service account, created after its reservation. Anything else is fatal and left untouched. Adopted VMs are deleted before anything new is created. Every acknowledged point must still be its file, with the acknowledged sha256, and pass every acceptance check again, identity included; a missing or changed one stops the run. An unacknowledged file goes through the same checks before it is adopted.
+- **Each VM:** it receives the payload and builds once. The payload's sha256 is checked against the plan just before the copy, and on the VM before anything is extracted. `vm-setup.sh` checks FLINT's tarball against its sha256, and stops when the fresh engine wasm differs from `wasm/pins.json`, printing both hashes. A failed build stops that machine type. Then the VM measures one point at a time: `run.py` under `cgroup-setup.sh`, with the plan's expected inputs.
+- **Copy-back:** each point's file and its checksum sidecar are streamed back. The file is cut at 1 MiB + 1 byte and the sidecar at 66 bytes. The driver checks the bounds, the checksum, the JSON, the schema, the identity and the key, in that order. It writes the file without following links, fsyncs it, renames it into `rows/<type>/`, fsyncs the directory, and writes the ledger line. Only then does that VM get its next point.
+- **Accepted points:** an identical file already accepted is acknowledged again; a different one is quarantined and stops the run. Every point of a machine type must share that type's identity: the machine, toolchain, versions and every executed file's hash. The user column's engine must be the pinned one.
+- **Deletion:** a VM is deleted only after an exact-name read shows it is the one reserved: labels, type, zone, image, scheduling, lifetime, and the recorded creation time. Anything else, or a read that fails, is reported and left alone.
+- **Exit:** a fatal error, SIGINT or SIGTERM stops new reservations and points and cuts the remote commands in flight. The driver joins every worker, lists the run's VMs, deletes each one proven to be its own, and confirms the deletion. Only then does it release the lock. Without a listing, nothing is deleted. Beyond that, each VM deletes itself at its `maxRunDuration`.
+
+`test_shard.py` covers it with a fake VM tool and a fake remote, no VMs and no network:
+- the plan, the ledger and the accounting;
+- acceptance and recovery at every durable boundary;
+- ownership;
+- preemption and retirement;
+- the payload checks, deletion only of proven VMs, stopping on signals, and ledger write failures;
+- the transport's bounds, with stub `ssh` and `sbvm.py`.
+
 Planned, not built yet:
-- the sharded multi-machine runs: a VM-hour envelope, and the copy-back acknowledged before the next point;
 - the new rows for the uncovered items.
 
 `items.json` gives each uncovered item's status.
