@@ -3191,6 +3191,57 @@ try {
     await ev(`(document.querySelector(".tex-status").textContent = "", document.querySelector(".tex-head .tex-run").click(), 1)`);
     const ranAgain = await statusIs(/Ran 5 SageTeX items in [0-9.]+ s$/, 60000);
     check(ranAgain && runChunk().length === 2, "Run's chunk: a second Run on the page uses the one fetched, not fetched again", { ranAgain, fetched: runChunk().length });
+    // (a .tex the paired agent made runs once by itself when it is shown (decided Nov 19 2026, workspace/
+    //  agent-made-tex.ts): shown at a revision with code not run yet, unedited, the editor asks the pairing's page over
+    //  the site's channel, once for that revision; it runs only on the yes to its own question, and only if it still
+    //  shows that revision unedited; asked again when the pairing says its agent made the revision shown. Here this
+    //  page plays the pairing's (its side: test-agent-pair.mjs), the editor in a frame of it, as the Agents page's pane)
+    {
+      const TXT = (x) => `\\documentclass{article}\n\\usepackage{sagetex}\n\\begin{document}\nMade: $\\sage{${x}}$.\n\\end{document}\n`;
+      const fa = await mk("/t/made.tex", enc(TXT("6*7"))), fb = await mk("/t/made-b.tex", enc(TXT("5*5")));
+      await go(base + "?latex=1"); await until(`!!${W}`, 60000);
+      await ev(`(window.__asks = [], window.__bc = new BroadcastChannel("sagebrush-agent-made"), window.__bc.onmessage = (e) => { if (e.data?.t === "tex-may-run" && !("ok" in e.data)) window.__asks.push(e.data); }, true)`);
+      const frame = (fid) => ev(`(() => { document.getElementById("sbmade")?.remove(); const f = document.createElement("iframe"); f.id = "sbmade"; f.style.cssText = "position:fixed;left:0;top:0;width:1000px;height:700px;z-index:99999;border:0;background:#fff"; f.src = "/?tex=${fid}&latex=1&embed=1"; document.body.append(f); return true; })()`);
+      const D = `document.getElementById("sbmade").contentDocument`;
+      const asks = () => ev(`window.__asks.slice()`);
+      const say = (m) => ev(`(window.__bc.postMessage(${JSON.stringify(m)}), true)`);
+      const fstate = () => ev(`({ status: ${D}.querySelector(".tex-status")?.textContent ?? "", pdf: ${D}.querySelector(".tex-preview")?.textContent.replace(/\\s+/g, " ").slice(0, 120) ?? "" })`);
+      await frame(fa);
+      await until(`!!${D}?.querySelector(".tex-page .tex-preview")?.textContent.includes("Made")`, 30000);
+      await sleep(2000);
+      const a1 = await asks();
+      check(a1.length === 1 && a1[0].fid === fa && a1[0].rev === 0 && /^[0-9a-f-]{36}$/.test(a1[0].id), "agent-made: shown with code not run yet, unedited, the editor asks once, for this file at its revision", a1);
+      const s1 = await fstate();
+      check(!/Ran /.test(s1.status) && (await resultsOf("/t/made.tex")) === null, "agent-made: no answer, nothing runs", s1);
+      await say({ t: "tex-may-run", id: "not-its-question", ok: true });
+      await sleep(1500);
+      const s2 = await fstate();
+      check(!/Ran /.test(s2.status) && (await resultsOf("/t/made.tex")) === null, "agent-made: a yes to another question: nothing runs", s2);
+      await say({ t: "tex-made", fid: fa, rev: 0 });
+      await until(`window.__asks.length === 2`, 5000);
+      const a2 = await asks();
+      check(a2.length === 2 && a2[1].fid === fa && a2[1].rev === 0 && a2[1].id !== a2[0].id, "agent-made: the pairing says its agent made this revision: the editor asks again", a2);
+      await say({ t: "tex-may-run", id: a2[1]?.id, ok: true });
+      const ran = await until(`/Ran 1 SageTeX item/.test(${D}.querySelector(".tex-status")?.textContent ?? "")`, 120000);
+      await sleep(800);
+      const s3 = await fstate(), res = await resultsOf("/t/made.tex");
+      check(ran && /Made: ?42/.test(s3.pdf) && typeof res === "string", "agent-made: the yes to its question: its own Run runs it, the result in the PDF, saved as a Run's", { s3, res: res?.slice(0, 80) });
+      await say({ t: "tex-made", fid: fa, rev: 0 });
+      await say({ t: "tex-made", fid: fb, rev: 0 });
+      await sleep(1500);
+      check((await asks()).length === 2, "agent-made: once it has run, or for another file, nothing is asked", await asks());
+      // (an edit after the question: the yes runs nothing)
+      await frame(fb);
+      await until(`!!${D}?.querySelector(".tex-page .tex-preview")?.textContent.includes("Made")`, 30000);
+      await until(`window.__asks.length === 3`, 5000);
+      const qb = (await asks())[2];
+      await ev(`(() => { const d = ${D}; d.querySelector('.tex-view [data-view="source"]').click(); const t = d.querySelector(".tex-src"); t.setRangeText("% mine\\n", t.value.length, t.value.length, "end"); t.dispatchEvent(new Event("input", { bubbles: true })); return true; })()`);
+      await say({ t: "tex-may-run", id: qb?.id, ok: true });
+      await sleep(3000);
+      const s4 = await fstate();
+      check(qb?.fid === fb && !/Ran /.test(s4.status) && (await resultsOf("/t/made-b.tex")) === null, "agent-made: edited after it asked, the yes runs nothing", { qb, s4 });
+      await ev(`(document.getElementById("sbmade").remove(), window.__bc.close(), true)`);
+    }
     // (PythonTeX, step (a): \py and pycode run by the same Run, as Python; their results read back by the worker's
     //  PythonTeX chunk (sagebrush-latex-pythontex.js; when it is fetched, only for a result to read back, is pinned in
     //  test-latex-pythontex.mjs: the page doesn't see the worker's own requests). The Run button says what it runs
