@@ -31,6 +31,7 @@ import { chatHere } from "./chat-here";
 import { filesIcon, modeSwitch } from "../workspace/mode-switch";
 import { icon as panelIcon } from "../workspace/files-toggle";
 import { entryUrl } from "../workspace/entry-url";
+import { threadMarkdown, turnMarkdown, userMarkdown } from "../workspace/agent-chat/transcript";
 
 // (the LaTeX editor, in builds that have it: web/build.ts's define)
 declare const __SB_LATEX__: boolean | undefined;
@@ -199,6 +200,7 @@ function renderThread() {
     renderedThread = thread.id;
   }
   $("#empty").hidden = thread.entries.length > 0;
+  $("#log-tools").hidden = thread.entries.length === 0;
   const nearEnd = log.scrollHeight - log.scrollTop - log.clientHeight < 80;
   const seen = new Set<string>();
   let prev: HTMLElement | null = null;
@@ -228,15 +230,42 @@ function scrollToEnd(force: boolean) {
 }
 
 function userNode(e: UserEntry): HTMLElement {
-  return viewUserNode(e, md);
+  return withCopy(viewUserNode(e, md), () => userMarkdown(e));
 }
 
 function turnNode(thread: Thread, turn: Turn): HTMLElement {
-  return viewTurnNode(thread, turn, {
+  const node = viewTurnNode(thread, turn, {
     answer: (att, approve, turnId, instance) => answer(thread, att, approve, turnId, instance),
     openArtifact: (id) => { openArtifact = id; renderArtifacts(); },
     md,
   });
+  return withCopy(node, async () => turnMarkdown(thread, turn, { agent: agentName(), link: await fileLinks(thread) }));
+}
+
+// Copy, as Markdown (decided Nov 19 2026): one message (its Copy, shown on hover), or the whole chat (the header's Copy
+// chat), the files the agent wrote as links to them on this site
+function withCopy(node: HTMLElement, text: () => string | Promise<string>): HTMLElement {
+  const b = document.createElement("button");
+  b.className = "copy-msg";
+  b.type = "button";
+  b.textContent = "Copy";
+  b.title = "Copy this message as Markdown";
+  b.onclick = () => void copyText(text);
+  node.append(b);
+  return node;
+}
+function copyText(text: () => string | Promise<string>, done = "Copied") {
+  return Promise.resolve().then(text).then((t) => navigator.clipboard.writeText(t)).then(() => toast(done), () => toast("Couldn't copy"));
+}
+/** The files the chat's agent wrote: their addresses on this site, where the workspace has them. */
+async function fileLinks(thread: Thread): Promise<(path: string) => string | null> {
+  const ws = workspace, links = new Map<string, string>();
+  if (ws) for (const a of thread.artifacts) if (a.path && !links.has(a.path)) {
+    const e = await ws.stat(a.path).catch(() => null);
+    const url = e && entryUrl(e);
+    if (url) links.set(a.path, new URL(url, location.href).href);
+  }
+  return (path) => links.get(path) ?? null;
 }
 
 // The pane: a head (tabs and buttons, redrawn when what it shows changes) and one host per artifact, kept while
@@ -504,6 +533,39 @@ function mountHost(threadId: string, a: Artifact, h: Host) {
     h.download = nb.download;
     nb.hidden(shownHost() !== h);
     void nb.ready.then(() => hosts.get(h.key) === h && keepFocus());
+    return;
+  }
+  // (a board the agent made: said as what the agent did, with Open, a link to the board page in a tab of its own, so
+  //  the person's click opens it as any link (where its code runs), and View source for its JSON)
+  if (a.kind === "board" && a.path && workspace) {
+    const ws = workspace, path = a.path, name = path.split("/").pop()!;
+    // (built as elements, its words as text: nothing of the agent's name or the file's is read as markup)
+    const el = <K extends keyof HTMLElementTagNameMap>(tag: K, cls: string, text = "") => Object.assign(document.createElement(tag), { className: cls, textContent: text });
+    const who = el("span", "who", `${agentName()} made `), b = el("b", "", name);
+    who.append(b);
+    const open = el("a", "open-board", "Open"), view = el("button", "view-source", "View source"), src = el("pre", "code board-source");
+    open.target = "_blank"; open.rel = "noopener"; open.setAttribute("aria-disabled", "true");
+    view.type = "button"; src.hidden = true;
+    const row = el("div", "board-made");
+    row.append(who, open, view);
+    h.el.replaceChildren(row, src);
+    // (its address is its id, read from the workspace: a board it can't find there (removed, or not a board now, or the
+    //  lookup failed) says so, with no Open)
+    void ws.stat(path).catch(() => undefined).then((e) => {
+      if (e?.kind === "board" && e.ref) {
+        open.href = "/board/?doc=local:" + encodeURIComponent(e.ref);
+        open.removeAttribute("aria-disabled");
+      } else open.replaceWith(Object.assign(document.createElement("span"), { className: "gone", textContent: "Couldn't find this board in your files." }));
+    });
+    view.onclick = () => {
+      if (!src.hidden) { src.hidden = true; view.textContent = "View source"; return; }
+      void ws.read(path).then((r) => { src.textContent = JSON.stringify(r.content, null, 2); src.hidden = false; view.textContent = "Hide source"; }, (e) => toast(`Couldn't read ${name}: ${String(e?.message ?? e)}`, 6000));
+    };
+    // (Copy: the board's JSON, read now, as View source shows it; what View source shows if that read failed)
+    let json: string | null = null;
+    void ws.read(path).then((r) => { json = JSON.stringify(r.content, null, 2); }, () => {});
+    h.copy = () => json ?? src.textContent ?? "";
+    keepFocus();
     return;
   }
   if (a.path && workspace) {
@@ -1178,6 +1240,7 @@ addEventListener("pagehide", () => {
   if (saveTimer) localStorage.setItem(STORE, JSON.stringify(state));
 });
 $("#howto").onclick = () => ($("#help").hidden = !$("#help").hidden);
+$("#copychat").onclick = () => { const t = current(); void copyText(async () => threadMarkdown(t, { agent: agentName(), link: await fileLinks(t) }), "Copied the chat"); };
 
 /** The header's agent line from text only (an agent's and a computer's names are text, never markup). */
 function whoText(who: HTMLElement, dot: string, name: string, small: string) {

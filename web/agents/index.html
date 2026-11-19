@@ -61,6 +61,15 @@
   .top .spacer { flex: 1; }
   .top button { font: inherit; font-size: 13px; border: 1px solid var(--line); background: var(--card); border-radius: 8px; padding: 4px 10px; cursor: pointer; }
   .top button.link { border: 0; background: none; color: var(--accent2); text-decoration: underline; }
+  /* (Copy chat: the conversation's first row, at its right; the header has no room for it at the chat's narrowest) */
+  #log-tools { display: flex; justify-content: flex-end; margin: -12px 0 6px; }
+  #log-tools[hidden] { display: none; }
+  #copychat { font: 12px system-ui, sans-serif; border: 1px solid var(--line); background: var(--card); color: var(--muted); border-radius: 6px; padding: 2px 8px; cursor: pointer; }
+  #copychat:hover { color: var(--fg, #1f2421); }
+  .user, .turn { position: relative; }
+  .copy-msg { position: absolute; top: 0; right: 0; opacity: 0; font: 12px system-ui, sans-serif; border: 1px solid var(--line); background: var(--card); border-radius: 6px; padding: 2px 8px; cursor: pointer; }
+  .user:hover > .copy-msg, .turn:hover > .copy-msg, .copy-msg:focus-visible { opacity: 1; }
+  @media (hover: none) { .copy-msg { opacity: .8; } }
   .top button:disabled { opacity: .6; cursor: default; }
   #help { flex: none; margin: 8px 16px 0; padding: 10px 14px; border: 1px solid var(--line); background: #fffdf6; border-radius: 10px; font-size: 14px; }
   #help pre { background: var(--code); padding: 8px 10px; border-radius: 6px; overflow-x: auto; user-select: all; }
@@ -223,6 +232,13 @@
   .pane-bar.refused, .pane-bar.gone { background: #fdecea; }
   .pane-bar button { font-size: 12px; }
   .open-full { margin-left: 8px; font-size: 12px; }
+  .board-made { display: flex; align-items: center; gap: 12px; padding: 16px 18px; flex-wrap: wrap; }
+  .board-made .who { min-width: 0; overflow-wrap: anywhere; }
+  .board-made .open-board { background: #3f6b35; color: #fff; font-weight: 600; border-radius: 6px; padding: 5px 18px; text-decoration: none; }
+  .board-made .open-board[aria-disabled] { opacity: .5; pointer-events: none; }
+  .board-made .view-source { font: inherit; font-size: 12px; border: 1px solid var(--line, #cfd5c8); background: transparent; border-radius: 6px; padding: 4px 10px; cursor: pointer; }
+  .board-made .gone { color: var(--muted); }
+  .board-source { margin: 0 18px 16px; }
   .nb-notice { margin: 8px 12px; padding: 6px 10px; font-size: 12.5px; color: var(--muted); border: 1px solid var(--line); border-radius: 6px; }
   /* (the notebook's wrapper, not its root: a container query styles what is inside the container, and .sbnb is the root) */
   .nb-artifact { container-type: inline-size; container-name: sbnb-pane; }
@@ -304,6 +320,7 @@
       <pre>npx -y https://agents.sagebrush.cloud/agents/sagebrush-agent-0.7.1.tgz</pre>
     </div>
     <div id="log">
+      <div id="log-tools" hidden><button id="copychat" type="button" title="This chat as Markdown: what you wrote, the agent's answers, a line for each thing it did, and links to its files">⧉ Copy chat</button></div>
       <div id="empty">
         <h1>What should we work on?</h1>
         <div>Ask anything, or try one of these:</div>
