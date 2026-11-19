@@ -102,6 +102,42 @@ try {
   await until(`!!${C("b")}?.out.querySelector("figure img")`);
   ok(JSON.stringify(await shown("b")) === JSON.stringify({ svg: false, png: true, note: true }), "...the big figure is a PNG, said under it: " + JSON.stringify(await shown("b")));
 
+  // a document from elsewhere (another tab, sync) with no choice: Auto, the old choice not kept
+  ok(await ev(`(() => { const nb = sagebrush.notebook; nb.setFigures("svg"); const d = nb.snapshot(); delete d.metadata; nb.applyRemote(d, false); return nb.figures(); })()`) === "auto",
+    "a document from elsewhere without a choice clears it: Auto");
+  ok(await ev(`(() => { const nb = sagebrush.notebook; const d = nb.snapshot(); d.metadata = { sagebrush: { figures: "png" } }; nb.applyRemote(d, false); return nb.figures(); })()`) === "png",
+    "...and one with a choice brings it");
+
+  // an @interact redrawn after the choice changed: drawn with the choice it has now
+  const INTERACT = "import matplotlib.pyplot as plt\nfrom ipywidgets import interact\n@interact(n=(2, 6))\ndef f(n=2):\n    plt.figure(figsize=(2, 1)); plt.plot(range(n)); plt.show()";
+  await ev(`sagebrush.notebook.load(${JSON.stringify({ mode: "python", cells: [{ id: "i", code: INTERACT, outputs: [] }] })}), 1`);
+  await ev(`(() => { window.__runs = []; sagebrush.kernel.on("execute", (r) => window.__runs.push(JSON.parse(JSON.stringify(r)))); return 1; })()`);
+  await runAll();
+  ok(await until(`!!${C("i")}?.out.querySelector("figure svg")`), "an @interact's figure, Auto: its SVG");
+  await openFigures();
+  await pick("PNG");
+  await ev(`(() => { const r = ${C("i")}.out.querySelector('input[type="range"]'); r.value = "5"; r.dispatchEvent(new Event("input", { bubbles: true })); r.dispatchEvent(new Event("change", { bubbles: true })); return 1; })()`);
+  ok(await until(`!!${C("i")}?.out.querySelector("figure img")`, 30_000), "...moved after PNG was chosen: redrawn as a PNG");
+
+  // the runs as TimeTravel records them, to replay them as they were shown: the choice with each
+  const runs = await ev("JSON.stringify(window.__runs.map((r) => [r.kind, r.figures ?? null]))");
+  ok(JSON.parse(runs).some(([k, f]) => k === "code" && f === "auto") && JSON.parse(runs).some(([k, f]) => k === "interact" && f === "png"),
+    "each run recorded with its choice (the cell's Auto, the redraw's PNG): " + runs);
+  const journaled = await ev(`(() => { const e = [...sagebrush.kernels.values()].find((x) => x.kernel === sagebrush.kernel); const s = e?.journal?.session;
+    return s ? JSON.stringify(s.events.filter((x) => x.rec?.type === "run").map((x) => [x.rec.kind, x.rec.figures ?? null])) : null; })()`);
+  ok(journaled !== null && JSON.parse(journaled).some(([k, f]) => k === "interact" && f === "png"), "...and in the journal's run records, which a replay sends again: " + journaled);
+
+  // on a remote kernel the choice isn't given yet: its rows disabled, saying so
+  await ev(`(() => { document.getElementById("kernelpick").value = "paired"; return 1; })()`);
+  const remote = await ev(`(() => { document.getElementById("morebtn").click(); if (document.getElementById("moremenu").hidden) document.getElementById("morebtn").click();
+    const g = document.querySelector('button[data-group="figures"]'); if (g.getAttribute("aria-expanded") !== "true") g.click();
+    return [...g.nextElementSibling.querySelectorAll('[role="menuitemradio"]')].map((b) => [b.disabled, b.title]); })()`);
+  ok(remote.every(([d, t]) => d && t === "Not available for remote kernels yet"), "on a remote kernel: the rows disabled, saying so: " + JSON.stringify(remote));
+  await pick("SVG");
+  ok(await ev("sagebrush.notebook.figures()") === "png", "...and choosing one does nothing");
+  await ev(`(() => { document.getElementById("kernelpick").value = "local"; return 1; })()`);
+  ok(JSON.stringify((await openFigures()).map(([l]) => l)) === JSON.stringify(["Auto", "SVG", "PNG"]) && await ev(`[...document.querySelectorAll('button[data-group="figures"] + div [role="menuitemradio"]')].every((b) => !b.disabled)`), "this browser again: the rows enabled");
+
   // in MATLAB too: a notebook kept with PNG shows its figure as a PNG
   await ev(`sagebrush.notebook.load(${JSON.stringify({ mode: "matlab", metadata: { sagebrush: { figures: "png" } }, cells: [{ id: "m", code: "plot(1:3)", outputs: [] }] })}), 1`);
   await runAll();

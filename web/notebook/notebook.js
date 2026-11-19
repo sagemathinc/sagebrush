@@ -839,7 +839,7 @@ export function createNotebook(root, opts = {}) {
         finish();
       },
       stopped(message) { end(null); it.buffer = null; it.superseded = false; appendText(it.out, message, true); it.dirty = false; finish(); },
-    });
+    }, { figures: figures() });
   }
 
   // ---------------------------------------------------------- running cells
@@ -2378,6 +2378,17 @@ export function createNotebook(root, opts = {}) {
     const base = keepLocal ? shown.synced?.cells ?? null : null;
     let dirty = false;
     meta = { ...meta, ...rest };
+    // (how its figures are shown is the incoming document's alone: none there is Auto, never the old choice kept)
+    const incoming = rest.metadata?.sagebrush?.figures;
+    if (meta.metadata?.sagebrush?.figures !== incoming) {
+      const md = { ...(meta.metadata ?? {}) }, sb = { ...(md.sagebrush ?? {}) };
+      if (incoming === undefined) delete sb.figures;
+      else sb.figures = incoming;
+      if (Object.keys(sb).length) md.sagebrush = sb;
+      else delete md.sagebrush;
+      meta = { ...meta, metadata: md };
+      if (!Object.keys(md).length) delete meta.metadata;
+    }
     gateCfg = null;
     if (!keepLocal) kernel?.remoteGate?.documentReplaced(); // (a revert replaces the document)
     if (m && m !== mode) setMode(m, false);
