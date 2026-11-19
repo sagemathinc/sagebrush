@@ -1611,6 +1611,16 @@ try {
   await click(".sb-files-toggle");
   check(await until(`${S}.hidden`), "on a phone, the corner toggle hides the file browser");
   await send("Emulation.clearDeviceMetricsOverride");
+  // Agents…, at the foot of the files on the notebook page: big, clear, and it opens the agents page (left as the page
+  // leaves for a board: the notebook saved first)
+  await ev(`localStorage.setItem("sagebrush-files-sidebar", "1")`);
+  await go(base);
+  await until(`!!${W} && !${S}.hidden && !!document.querySelector("#wssidebar .fagents")`, 60000);
+  const ab = await ev(`(() => { const b = document.querySelector("#wssidebar .fagents"), r = b?.getBoundingClientRect(), s = ${S}.getBoundingClientRect(); return b && { text: b.textContent.trim(), w: Math.round(r.width), h: Math.round(r.height), fromBottom: Math.round(s.bottom - r.bottom), font: parseFloat(getComputedStyle(b).fontSize) }; })()`);
+  check(ab && ab.text === "Agents…" && ab.w >= 200 && ab.h >= 36 && ab.font >= 15 && ab.fromBottom < 120, "a big Agents… button at the foot of the files: " + JSON.stringify(ab));
+  await shot("agents-button");
+  await ev(`document.querySelector("#wssidebar .fagents").click()`);
+  check(await until(`location.pathname === "/agents/"`, 20000), "Agents… opens the agents page: " + (await ev(`location.pathname`)));
   for (const e of errors) fails.push("page error: " + e);
 } catch (e) {
   fails.push("threw: " + (e?.stack ?? e));

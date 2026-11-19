@@ -5188,6 +5188,8 @@ function wsShowFiles(on) {
   if (on && !wsBrowser && ws) {
     wsBrowser = mountBrowser(wsSidebar, {
       ws,
+      // (Agents…: the agents page once this notebook is saved, as the board is opened; not saved, it stays, saying why)
+      agents: () => void toBoard("/agents/"),
       current: () => (current.kind === "browser" && current.id ? { kind: "notebook", ref: current.id } : undefined),
       open(e, how) {
         const url = e.kind === "board" ? "/board/?doc=local:" + e.ref : "/?nb=" + encodeURIComponent(e.ref);

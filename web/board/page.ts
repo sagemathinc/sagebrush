@@ -1703,6 +1703,8 @@ if (ws) {
       upload: (files, folder) => uploadToWorkspace(ws, files, mounted.agent.snapshot().doc?.mode ?? "python", folder),
       openAs: (e, as) => openAsHere(ws, e, as, mounted.agent.snapshot().doc?.mode ?? "python").then((err) => (err ? `"${nameOf(e.path)}" couldn't be opened as a ${as}: ${err}` : undefined)),
       close: () => show(false),
+      // (Agents…: the agents page, left as for any other page, this board's saves made first)
+      agents: () => void leaveFor("/agents/", "Agents"),
       // (the Storage panel's export: its lazy chunk at the site's root, beside the notebook page)
       exportUrl: (f) => new URL("/" + f, location.href).href,
       // (and this board's own saves settled first, as settled() waits for them before the page goes elsewhere:
