@@ -73,7 +73,8 @@ if (!first.port) { console.log("FAIL the pairing server didn't start: " + JSON.s
 // ---- Chromium
 let cdp = Number(process.env.CDP_PORT) || 0;
 const profile = mkdtempSync(join(tmpdir(), "sb-agents-runs-"));
-const chrome = spawn(process.env.CHROME ?? "chromium", ["--headless", "--no-sandbox", `--remote-debugging-port=${cdp}`, "--window-size=1400,900", `--user-data-dir=${profile}`, "about:blank"], { stdio: "ignore" });
+// (no back/forward cache: a page navigated away from is gone, its workspace and its socket closed, not kept for Back)
+const chrome = spawn(process.env.CHROME ?? "chromium", ["--headless", "--no-sandbox", "--disable-features=BackForwardCache", `--remote-debugging-port=${cdp}`, "--window-size=1400,900", `--user-data-dir=${profile}`, "about:blank"], { stdio: "ignore" });
 try {
   if (!cdp) cdp = await devtoolsPort(profile);
   let targets;
@@ -96,7 +97,7 @@ try {
    * asked, until the page closes). */
   const pair = async (c, run) => {
     await send("Page.navigate", { url: `${origin}/agents/?pair=${c.code}&port=${c.port}` });
-    ok(await until(`!!document.querySelector(".sbag-box button.primary")`, 60000), "the Agents page opens the Connect dialog from the ?pair= link", { console: console_.slice(-5), page: await ev(`document.body?.innerText?.slice(0, 300) ?? ""`).catch(() => null) });
+    ok(await until(`!!document.querySelector(".sbag-box button.primary")`, 90000), "the Agents page opens the Connect dialog from the ?pair= link", { console: console_.slice(-5), page: await ev(`document.body?.innerText?.slice(0, 300) ?? ""`).catch(() => null) });
     await ev(`(document.querySelector(".sbag-box button.primary").click(), true)`);
     ok(await until(`[...document.querySelectorAll(".sbag-box h2")].some((h) => h.textContent === "Allow this agent?")`), "paired: the grant dialog asks the person", { err: await ev(`document.querySelector(".sbag-box .err")?.textContent ?? ""`).catch(() => "") });
     await ev(`(() => {
@@ -114,9 +115,6 @@ try {
   };
 
   // ---- a grant with May run code: every run verb works here
-  // (the page loaded once first, so the pairing below doesn't race a cold first load: waited for, not checked)
-  await send("Page.navigate", { url: `${origin}/agents/` });
-  await until(`!!document.querySelector("#connect") && !document.querySelector("#connect").hidden`, 90000);
   await pair(first, true);
   const isolated = await ev(`globalThis.crossOriginIsolated === true`);
   ok(isolated, "the Agents page is cross-origin isolated (the site's headers), so the sandboxed runner can be had");
@@ -143,11 +141,13 @@ try {
   ok(r?.stopped === false, "run_stop with nothing running: not stopped", r);
 
   // ---- a grant without May run code: the runs are refused, nothing run
-  // (the first page left, and the agent told so, before the next pairing: one page is paired with an agent at a time)
-  await send("Page.navigate", { url: "about:blank" });
+  // (the first pairing ended by the person, Revoke on its bar, and the agent told so, before the next one: one page is
+  //  paired with an agent at a time. A navigation away isn't relied on: when the browser closes the old page's socket
+  //  is its own business, as a page kept for Back may keep it open)
+  await ev(`([...document.querySelectorAll(".sbag-bar button")].find((b) => b.textContent === "Revoke").click(), true)`);
   let left = null;
   for (let i = 0; i < 200; i++) { left = await drive({ op: "status" }); if (left.ok?.paired === false) break; await sleep(100); }
-  ok(left?.ok?.paired === false, "(the first page left: the agent is no longer paired)", left);
+  ok(left?.ok?.paired === false, "(Revoke on the bar: the agent is no longer paired)", left);
   const c2 = await drive({ op: "code" });
   await pair(c2, false);
   ok(!!(await req("workspace.create", { path: "/agent-run2.py", content: { text: "open('/ran.txt', 'w').write('ran')\n" } })).ok, "(the agent creates another Python file)");
@@ -162,9 +162,11 @@ try {
 } finally {
   try { py.kill(); } catch {}
   server.kill();
+  // (Chromium gone before its profile is removed: a profile it still writes to can't be)
+  const exited = new Promise((r) => chrome.once("exit", r));
   chrome.kill();
-  await sleep(200);
-  rmSync(profile, { recursive: true, force: true });
+  await Promise.race([exited, sleep(5000)]);
+  try { rmSync(profile, { recursive: true, force: true, maxRetries: 5, retryDelay: 200 }); } catch {}
 }
 console.log(failures ? `FAIL: ${failures} of ${checks}` : `ok: the Agents page's run verbs, ${checks} checks`);
 process.exit(failures ? 1 : 0);
