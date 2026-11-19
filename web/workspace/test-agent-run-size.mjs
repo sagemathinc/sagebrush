@@ -29,7 +29,9 @@ const CEILING_RAW = 64 * 1024, CEILING_GZIP = 24 * 1024;
 // (the review page's run note: a finished run in a branch notes its target's blob id (the canonical bytes under the
 //  branch's canon, from the run's own snapshot) and wakes the branch's subscribers: 23,171 / 9,031 -> 25,150 / 9,659
 //  (+1,979 / +628), measured by CI (bun 1.4.4, Node 24.21.0's gzip -9) on the head merged with master 48f0b854; + 64)
-const CAP_RAW = 25214, CAP_GZIP = 9723;
+// (an agent's run of the notebook open on its page, in that notebook (runInPage): 25,150 / 9,659 -> 27,846 / 10,446,
+//  measured by CI on the shipped build, the head merged with master 79d8ac8a; + 64)
+const CAP_RAW = 27910, CAP_GZIP = 10510;
 // (latex_build's first use: this chunk and the three LaTeX chunks it fetches (the page module, its tools, Run's code),
 //  together, so that moving code between them can't hide growth (daybreak2's Q1 aggregate cap: the landing measurement
 //  + 64 each), measured on master 4d4225f9 after the review's fixes: 23,171 + 88,703 + 16,494 + 17,241 = 145,609 raw,
@@ -60,13 +62,19 @@ const LATEX_FIRST_USE = ["sagebrush-agent-run.js", "sagebrush-latex.js", "sagebr
 // (renewed for the LaTeX editor's Source | Both | PDF toggle, Nov 19, provisional until the exact-head CI packet: 154,501 /
 //  56,425 -> 156,368 / 56,891, +1,867 / +466, the page module's (92,500 / 31,850 -> 94,367 / 32,316), measured on the
 //  shipped build, master 25de21b2; + 64)
+// (renewed for an agent's run of the notebook open on its page, in this chunk: 156,368 / 56,891 -> 159,064 / 57,678,
+//  +2,696 / +787, this chunk's alone, measured on the shipped build with bun 1.4.4, master abc38965 merged; + 64)
 // (renewed for the LaTeX editor embedded in the Agents page's pane, Nov 19, provisional until the exact-head CI packet:
 //  156,368 / 56,891 -> 156,778 / 57,060, +410 / +169, the page module's (94,367 / 32,316 -> 94,777 / 32,485), measured on
 //  the shipped build, on the toggle's head; + 64)
+// (the two above together, the agent's run of the open notebook and the LaTeX editor embedded in the pane, measured on
+//  their merge (master f8b9e013): 159,537 / 57,867 on the shipped build (bun 1.4.4, node 24.21.0); + 64)
 // (renewed for a .tex the agent made running once by itself in the editor, Nov 19, provisional until the exact-head CI
 //  packet: 156,778 / 57,060 -> 157,546 / 57,374, +768 / +314, the page module's (94,777 / 32,485 -> 95,545 / 32,799),
 //  measured on the shipped build, on the embedded mode's head; + 64)
-const AGG_RAW = 157610, AGG_GZIP = 57438;
+// (and with a .tex the agent made running by itself, measured on that merge (the embedded mode on master f8b9e013):
+//  160,303 / 58,187 on the shipped build; + 64)
+const AGG_RAW = 160367, AGG_GZIP = 58251;
 // (the reviewed inputs, relative to web/: the entry and what it imports)
 // (the review page's run line: a finished run's note in its branch, canon-doc.ts's canonical bytes and blob id, and branch-wake.ts's
 //  wake, which needs sha256-hex.ts for the branch store's name)
