@@ -101,6 +101,14 @@ try {
   const nb1 = await evaluate(`window.__ws.read("/rv/nb.ipynb").then((x) => JSON.stringify(x.content) === window.__nb0)`);
   check(r?.ended === "error" && r.saved === "not saved: main" && r.cells?.[0]?.status === "ok" && r.cells[0].out === "2\n" && r.cells[1]?.index === 2 && r.cells[1].status === "error" && nb1 === true,
     `run_notebook on main: outputs returned, nothing saved, the notebook unchanged (its write refused: no permission): ${JSON.stringify({ r, nb1 })}`);
+  // ---- run_notebook on a Magma notebook: each cell runs as Magma and returns Magma's own text (Magma 2.18 prints
+  // exactly these two lines), and the notebook stays a Magma notebook
+  check(await evaluate(`window.__ws.create("/rv/mg.ipynb", { content: { mode: "magma", cells: [{ id: "m1", code: "print Factorization(2^64 - 1);" }, { id: "m2", code: "K := QuadraticField(-23);\\nprint ClassNumber(K);" }] } }).then(() => true)`) === true, "a Magma notebook made on main");
+  r = await evaluate(`window.__run("workspace.run_notebook", { path: "/rv/mg.ipynb", timeout_s: 120 })`);
+  const mg = await evaluate(`window.__ws.read("/rv/mg.ipynb").then((x) => x.content.mode)`);
+  check(r?.ok === true && r.ended === "done" && r.cells?.length === 2 && r.cells.every((c) => c.status === "ok" && c.images?.count === 0) &&
+    r.cells[0].out === "[ <3, 1>, <5, 1>, <17, 1>, <257, 1>, <641, 1>, <65537, 1>, <6700417, 1> ]\n" && r.cells[1].out === "3\n" && mg === "magma",
+    `run_notebook on a Magma notebook: Magma's output, no error, still a Magma notebook: ${JSON.stringify({ r, mg })}`);
   // ---- a worktree: this grant's branch, seen as "/" (W1)
   const gb = `${url}${gbName}`;
   r = await evaluate(`(async () => {
