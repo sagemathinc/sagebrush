@@ -170,23 +170,28 @@ function makeObject(nd) {
 // semantic zoom: 0 far (a block in its group's color), 1 its title, 2 its face; textures made lazily, a few a frame
 const LEVEL_DIST = { file: [14, 45], note: [26, 90], code: [26, 90], plot3d: [26, 90] };
 function stepZoom() {
-  let budget = 6;
-  const cam = camera.position;
+  const cam = camera.position, pending = [];
   for (const o of objects) {
     const nd = o.userData.node, [nearD, midD] = LEVEL_DIST[nd.kind] ?? LEVEL_DIST.file;
     const d = cam.distanceTo(o.position);
     const want = d < nearD ? 2 : d < midD ? 1 : 0;
     if (want === o.userData.level) continue;
-    if (want > 0 && !o.userData.tex[want]) {
-      if (budget-- <= 0) continue;
-      o.userData.tex[want] = want === 2 ? faceTexture(nd) : titleTexture(nd);
-    }
-    const f = o.userData.face;
-    f.map = want ? o.userData.tex[want] : null;
-    f.color.set(want ? 0xffffff : groupColor(nd));
-    f.needsUpdate = true;
-    o.userData.level = want;
+    if (want > 0 && !o.userData.tex[want]) pending.push([d, o, want]);
+    else setLevel(o, want);
   }
+  // (the textures still to make, the nearest first: what you are looking at sharpens first)
+  pending.sort((a, b) => a[0] - b[0]);
+  for (const [, o, want] of pending.slice(0, 6)) {
+    o.userData.tex[want] = want === 2 ? faceTexture(o.userData.node) : titleTexture(o.userData.node);
+    setLevel(o, want);
+  }
+}
+function setLevel(o, want) {
+  const f = o.userData.face;
+  f.map = want ? o.userData.tex[want] : null;
+  f.color.set(want ? 0xffffff : groupColor(o.userData.node));
+  f.needsUpdate = true;
+  o.userData.level = want;
 }
 
 // landmarks: a big label above each group (a directory, a topic), seen from afar and hidden from inside it
@@ -208,9 +213,18 @@ function landmarkSprite(text) {
 function buildLandmarks() {
   for (const l of landmarks) scene.remove(l.sprite);
   landmarks = [];
+  // (a group's own label, and one for each top-level directory over all of its subdirectories: from afar the big
+  // ones show, and the finer ones as you come closer, as the screen has room for them)
   const groups = new Map();
-  space.nodes.forEach((n, i) => { const g = n.group ?? ""; if (!groups.has(g)) groups.set(g, []); groups.get(g).push(i); });
-  for (const [g, members] of groups) {
+  const add = (g, i) => { if (!groups.has(g)) groups.set(g, new Set()); groups.get(g).add(i); };
+  space.nodes.forEach((n, i) => {
+    const g = n.group ?? "";
+    add(g, i);
+    const parts = g.split("/");
+    if (parts.length > 2) add(parts.slice(0, 2).join("/"), i);
+  });
+  for (const [g, set] of groups) {
+    const members = [...set];
     if (!g || members.length < 2) continue;
     const sprite = landmarkSprite(g.replace(/^web\//, "") + "  (" + members.length + ")");
     scene.add(sprite);
@@ -230,14 +244,29 @@ function placeLandmarks() {
   }
 }
 function stepLandmarks() {
-  for (const l of landmarks) {
+  // (each label: faded in as the camera leaves its cluster, sized to stay readable; then, the biggest groups first,
+  // a label that would overlap one already placed on the screen is left out)
+  const placed = [], v = new THREE.Vector3(), pxPerUnit = innerHeight / (2 * Math.tan(THREE.MathUtils.degToRad(camera.fov / 2)));
+  const order = [...landmarks].sort((a, b) => b.members.length - a.members.length);
+  for (const l of order) {
     const d = camera.position.distanceTo(l.center);
-    // (fades in as the camera leaves the cluster; its size grows with distance, so it stays readable)
     const a = THREE.MathUtils.clamp((d - l.radius * 1.2) / (l.radius * 1.5), 0, 1);
-    l.sprite.material.opacity = a;
-    l.sprite.visible = a > 0.02;
-    const h = Math.max(1.6, d * 0.035) * Math.min(1.6, 0.8 + Math.sqrt(l.members.length) / 8);
+    const h = Math.max(1.6, d * 0.03) * Math.min(1.5, 0.8 + Math.sqrt(l.members.length) / 10);
     l.sprite.scale.set(h * l.sprite.userData.aspect, h, 1);
+    let show = a > 0.02;
+    if (show) {
+      v.copy(l.sprite.position).project(camera);
+      if (v.z > 1) show = false;
+      else {
+        const x = (v.x + 1) / 2 * innerWidth, y = (1 - v.y) / 2 * innerHeight, dist = camera.position.distanceTo(l.sprite.position);
+        const hh = h * pxPerUnit / dist, ww = hh * l.sprite.userData.aspect;
+        const r = [x - ww / 2, y - hh / 2, x + ww / 2, y + hh / 2];
+        if (placed.some((q) => r[0] < q[2] && r[2] > q[0] && r[1] < q[3] && r[3] > q[1])) show = false;
+        else placed.push(r);
+      }
+    }
+    l.sprite.material.opacity = a;
+    l.sprite.visible = show;
   }
 }
 
@@ -314,10 +343,15 @@ async function load(name) {
 // the camera: everything in view
 function frame(P, remember = false) {
   if (remember) pushView();
-  const box = new THREE.Box3();
-  for (let i = 0; i < P.length; i += 3) box.expandByPoint(new THREE.Vector3(P[i], P[i + 1], P[i + 2]));
-  const c = box.getCenter(new THREE.Vector3()), r = Math.max(box.getSize(new THREE.Vector3()).length() / 2, 6);
-  const to = c.clone().add(new THREE.Vector3(0.35, 0.25, 1).normalize().multiplyScalar(r * 1.9));
+  // (the centre, and the distance within which most of the space is: a few outliers don't shrink the rest)
+  const n = P.length / 3, c = new THREE.Vector3();
+  for (let i = 0; i < n; i++) c.add(new THREE.Vector3(P[3 * i], P[3 * i + 1], P[3 * i + 2]));
+  c.divideScalar(Math.max(n, 1));
+  const ds = [];
+  for (let i = 0; i < n; i++) ds.push(c.distanceTo(new THREE.Vector3(P[3 * i], P[3 * i + 1], P[3 * i + 2])));
+  ds.sort((a, b) => a - b);
+  const r = Math.max(ds[Math.floor(ds.length * 0.8)] ?? 6, 6);
+  const to = c.clone().add(new THREE.Vector3(0.35, 0.25, 1).normalize().multiplyScalar(r * 2.2));
   camera.far = r * 20;
   scene.fog.near = r * 1.2; scene.fog.far = r * 6;
   camera.updateProjectionMatrix();
@@ -423,11 +457,20 @@ function openOverlay(nd) {
   $("#overlay").innerHTML = `<button class="close" title="Close (Esc)">×</button><h2>${esc(nd.title)}</h2>${body}${links(nd.kind === "file" ? "Imports" : "Links to", nd._out)}${links(nd.kind === "file" ? "Imported by" : "Linked from", nd._in)}`;
   $("#overlay").hidden = false;
   $("#overlay").scrollTop = 0;
+  viewOffset();
   $("#overlay .close").onclick = closeOverlay;
   for (const a of $("#overlay").querySelectorAll("a[data-i]")) a.onclick = (e) => { e.preventDefault(); openOverlay(space.nodes[+a.dataset.i]); };
   flyTo(i);
 }
-function closeOverlay() { $("#overlay").hidden = true; }
+function closeOverlay() { $("#overlay").hidden = true; viewOffset(); }
+// (while the overlay covers the right of the screen, the view is shifted so what it is about stays in the free part)
+function viewOffset() {
+  const w = $("#overlay").hidden ? 0 : $("#overlay").getBoundingClientRect().width + 12;
+  if (w) camera.setViewOffset(innerWidth, innerHeight, w / 2, 0, innerWidth, innerHeight);
+  else camera.clearViewOffset();
+  camera.updateProjectionMatrix();
+}
+addEventListener("resize", viewOffset);
 addEventListener("keydown", (e) => {
   if (document.activeElement === $("#q")) { if (e.key === "Escape") $("#q").blur(); return; }
   if (e.key === "Escape") closeOverlay();
@@ -482,4 +525,4 @@ function tick(now) {
 }
 requestAnimationFrame(tick);
 // (for tests and the curious: the loaded space and the camera)
-window.whitespace = { get space() { return space; }, camera, controls, back, frame: () => frame(positions, true), flyTo };
+window.whitespace = { get space() { return space; }, get objects() { return objects; }, camera, controls, back, frame: () => frame(positions, true), flyTo };

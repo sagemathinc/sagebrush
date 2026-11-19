@@ -1,0 +1,52 @@
+# Whitespace: a prototype
+
+A terminal is immutable 1D, a notebook is mutable 1D, a whiteboard is mutable 2D, and a whitespace is mutable 3D: a board in 3D space. This is a quick prototype; it isn't reviewed and doesn't ship.
+
+## Run it
+
+You need Node.js (18 or later) and npm. No bun is needed.
+
+```sh
+git fetch origin space-prototype && git checkout space-prototype   # (or a fresh clone of the branch)
+cd space
+npm install
+npm run build        # bundles three.js and everything else into dist/
+npm run serve        # http://127.0.0.1:8080/
+```
+
+`dist/` is a plain static site (index.html, space.js and the *.space.json files), so it can be deployed as it is. The generated spaces are committed; `npm run gen` makes them again from `../web` and the demo script, and `node layout-cli.mjs public/X.space.json` saves the layout into a space.
+
+## Using it
+
+- **Mouse:** drag to turn, scroll to move closer, right-drag to pan.
+- **Read:** click an object to read it sharply, in the panel on the right. Its links (imports, imported by) are clickable.
+- **Search:** `/` focuses the search box, which searches the full text; click a result to fly there.
+- **Keys:** `B` goes back to where you were, and `H` shows everything.
+- **Flatten to 2D:** the same space on a plane, for comparison.
+- **Semantic zoom:** from afar you see the groups' names (directories) over colored blocks; nearer, each object's title; near, its first lines; and on a click, the sharp text.
+
+## Something to try
+
+In `web-tree.space.json` (Sagebrush's own web/ code: 513 files and 1,009 imports):
+
+1. Find the file that saves a board page's document, and what uses it. Search "board page", or wander into the `board` cluster.
+2. Find the agents chat's code, and then the module it shares with the notebook page.
+3. Press **Flatten to 2D** and do (1) again on the plane. Which was easier, and which was faster?
+
+`demo.space.json` has Markdown notes, code with its output, and two real 3D plots: turn around them.
+
+## The format: foo.space.json
+
+```json
+{ "format": "sagebrush-space", "version": 1, "title": "…",
+  "nodes": [
+    { "id": "a", "kind": "note", "title": "Hello", "text": "# Markdown", "group": "notes" },
+    { "id": "b", "kind": "code", "title": "…", "lang": "python", "text": "print(1)", "output": "1", "near": "a" },
+    { "id": "c", "kind": "plot3d", "title": "…", "surface": { "x": [], "y": [], "z": [[]] } },
+    { "id": "d", "kind": "file", "title": "path/to/file.ts", "text": "its first lines" }
+  ],
+  "edges": [ { "from": "a", "to": "b" } ] }
+```
+
+- **Coordinates are optional**, as on the board: an agent writes structure, not geometry. `group` clusters objects together, edges pull them together, and `near` (another object's id) places one beside another.
+- `position` (and `position2d`, for the plane) is saved by `layout-cli.mjs`, so a space keeps its shape from visit to visit. A new object is placed around what is already there.
