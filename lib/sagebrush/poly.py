@@ -34,8 +34,17 @@ def _dec(s):
 
 
 def mul(a, b):
-    """The product of integer polynomials (constant term first)."""
-    return _dec(call("poly_mul", a=_enc(a), b=_enc(b), wire="csv"))
+    """The product of integer polynomials (constant term first, trailing
+    zeros dropped): Kronecker substitution on one NTT product in the
+    engine, refused past its caps (a product of at most 2^25 bits).
+
+    >>> from sagebrush.poly import mul
+    >>> mul([1, 1], [-1, 1])
+    [-1, 0, 1]
+    >>> mul([0, 0], [1, 2])
+    []
+    """
+    return _ints(call("poly_mul", a=_hex(a), b=_hex(b)))
 
 
 def gcd(a, b):
