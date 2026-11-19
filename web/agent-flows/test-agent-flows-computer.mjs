@@ -1,4 +1,4 @@
-// ci: agent-flows-computer
+// ci: none (the computer surface needs its own job: engine/py built and installed, the site's Miniflare; it is added when the harness merges)
 // The agent-flow cases on the "computer" surface (surface-computer.mjs): the Agents page with the agent on one of the
 // person's own computers, through a real relay (the remotes' Worker in Miniflare), a real `sagebrush remote` runner and
 // the reviewed sagebrush-agent with its model scripted. Its own job: it needs this tree's engine/py built and installed

@@ -1,4 +1,4 @@
-// ci: agent-flows-computer
+// ci: web-runner order=187
 // The computer surface's own lifetime (surface-computer.mjs), with no relay, runner or browser: a stand-in PYTHON whose
 // `remote login` prints a code and waits, as the real one does until the code is approved, and a stand-in site that
 // holds the approval or refuses it.

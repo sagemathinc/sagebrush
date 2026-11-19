@@ -288,9 +288,13 @@ async function chatSurface(site, page) {
       // (the composer is board's block editor in #editor: its textarea is there only while a block is being written, and
       //  only a real click on a block starts that. So: the mouse at the block's middle, its textarea focused, the prompt
       //  typed and seen in it, then Send)
-      if (!(await page.until(`!!document.querySelector("#editor .mb-block")`, 30000))) throw new Error("the composer didn't show");
-      const at = await page.ev(`(() => { const r = document.querySelector("#editor .mb-block").getBoundingClientRect(); return { x: r.left + r.width / 2, y: r.top + r.height / 2 }; })()`);
-      for (const type of ["mousePressed", "mouseReleased"]) await page.send("Input.dispatchMouseEvent", { type, x: at.x, y: at.y, button: "left", clickCount: 1 });
+      if (!(await page.until(`!!document.querySelector("#editor .mb-block, #editor textarea")`, 30000))) throw new Error("the composer didn't show: " + (await page.ev(`(document.querySelector("#editor")?.outerHTML ?? "no #editor").slice(0, 300) + " | " + location.href`).catch((e) => String(e))));
+      // (already being written in, as the page leaves it when it opens: its textarea is there; else a block to click)
+      if (await page.ev(`!!document.querySelector("#editor textarea")`)) await page.ev(`(document.querySelector("#editor textarea").focus(), true)`);
+      else {
+        const at = await page.ev(`(() => { const r = document.querySelector("#editor .mb-block").getBoundingClientRect(); return { x: r.left + r.width / 2, y: r.top + r.height / 2 }; })()`);
+        for (const type of ["mousePressed", "mouseReleased"]) await page.send("Input.dispatchMouseEvent", { type, x: at.x, y: at.y, button: "left", clickCount: 1 });
+      }
       if (!(await page.until(`document.activeElement?.tagName === "TEXTAREA" && !!document.activeElement.closest("#editor")`, 10000))) throw new Error("the composer's click didn't start writing");
       await page.send("Input.insertText", { text: prompt });
       if (!(await page.until(`document.activeElement?.value === ${JSON.stringify(prompt)}`, 5000))) throw new Error("the prompt didn't go into the composer");
