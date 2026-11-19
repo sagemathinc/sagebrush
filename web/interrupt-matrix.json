@@ -898,6 +898,13 @@
    "owner": "groups/Galois"
   },
   {
+   "id": "engineCall:qpoly_mul",
+   "transport": "engineCall:qpoly_mul",
+   "status": "planned",
+   "family": "E5 polynomials",
+   "owner": "polynomial factorization"
+  },
+  {
    "id": "engineCall:quadratic_class_group",
    "transport": "engineCall:quadratic_class_group",
    "status": "planned",

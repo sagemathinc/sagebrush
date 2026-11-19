@@ -1,5 +1,5 @@
 use super::*;
-use crate::coprime::{gcd_work_short, quot_work, quot_work_any};
+use crate::coprime::{quot_work, quot_work_any};
 use dashu_int::ops::{Gcd, UnsignedAbs};
 use dashu_int::{IBig, UBig};
 
@@ -100,7 +100,6 @@ fn qhat_covers_every_divisor_size() {
     assert_eq!(quot_work(u64::MAX, 1), None);
     assert_eq!(quot_work(5, 0), None);
     assert_eq!(quot_work(5, 6), None);
-    assert_eq!(gcd_work_short(u64::MAX / 3 + 1), None);
     // the meter at the worst divisor size l_y ~ (l_x - 1) / 2
     let mut next = rng(77);
     for lx in [9usize, 21, 61] {
@@ -112,51 +111,6 @@ fn qhat_covers_every_divisor_size() {
         let x = words(&(UBig::from_words(&q) * UBig::from_words(&y)));
         div(&x, &y);
     }
-}
-
-/// The gcd's meter when one operand has at most one limb: at most 3 max +
-/// 95 (gcd_work_short), in both operand orders.
-fn short_gcd(x: &[u64], y: &[u64]) {
-    let hi = x.len().max(y.len());
-    for (a, b) in [(x, y), (y, x)] {
-        let mut s0 = vec![0u64; hi + 1];
-        let mut s1 = vec![0u64; hi + 1];
-        s0[..a.len()].copy_from_slice(a);
-        s1[..b.len()].copy_from_slice(b);
-        let mut m = Meter::new(u64::MAX);
-        let (slot, lg) = gcd_in_place(&mut s0, a.len(), &mut s1, b.len(), &mut m).unwrap();
-        let g = if slot { &s1[..lg] } else { &s0[..lg] };
-        let (ua, ub) = (UBig::from_words(a), UBig::from_words(b));
-        if ua == UBig::ZERO && ub == UBig::ZERO {
-            assert_eq!(lg, 0);
-        } else {
-            assert_eq!(UBig::from_words(g), ua.gcd(&ub));
-        }
-        assert!(m.used() <= gcd_work_short(hi as u64).unwrap(), "{} > 3 * {} + 95", m.used(), hi);
-    }
-}
-
-#[test]
-fn one_limb_gcds_are_within_the_short_bound() {
-    let mut next = rng(99);
-    let big: Vec<u64> = (0..40).map(|_| next() | 1).collect();
-    // c = 0; c < D; c > D (the swap); equal; D = 1; D = 4; a multi-limb c
-    short_gcd(&[], &[4]);
-    short_gcd(&[], &[]);
-    short_gcd(&[3], &[10]);
-    short_gcd(&[10], &[3]);
-    short_gcd(&[7], &[7]);
-    short_gcd(&[12345], &[1]);
-    short_gcd(&[12], &[4]);
-    short_gcd(&big, &[4]);
-    short_gcd(&big, &[1]);
-    short_gcd(&big, &[u64::MAX]);
-    short_gcd(&big, &[]);
-    // the largest coefficient the reduction admits: s <= O_MAX, so
-    // ceil(s / 64) + 2 words
-    let n = (zmul::O_MAX / 64 + 2) as usize;
-    let huge: Vec<u64> = (0..n).map(|_| next()).collect();
-    short_gcd(&huge, &[6]);
 }
 
 /// A factor's tokens from (numerator, denominator) pairs.
@@ -229,15 +183,18 @@ pub(super) fn run(a: &str, b: &str, caps: &Caps) -> Result<Run, String> {
     assert!(m.largest_charge() <= max_charge(pa.lam).unwrap());
     let (used_a, largest_a) = (m.used(), m.largest_charge());
     let pb = admit_b(&fa, &fb, &l, &pa, r, caps)?;
-    let p = product(&fa, &fb, l, &pb)?;
+    let mut p = product(&fa, &fb, l, &pb)?;
     let mut out = String::with_capacity(pb.reply as usize);
     out.push_str("{\"ok\":\"");
-    let used_b = emit(p, &pb, &mut out)?;
+    let used_b = emit(&mut p, &pb, &mut out)?;
     out.push_str("\"}");
     assert!(out.len() as u64 <= pb.reply, "the reply {} > {}", out.len(), pb.reply);
+    // (the call's work within the cap; phase B's meter within its limit, its
+    // largest single charge within max_charge(max(l_c, l_D)))
     let total = r + used_a + used_b + counted::take();
-    assert!(total <= pb.work, "work {} > admitted {}", total, pb.work);
-    assert!(used_b <= pb.work_b);
+    assert!(total <= caps.int.work, "work {} > {}", total, caps.int.work);
+    assert!(used_b <= pb.limit_b);
+    assert!(p.meter.largest_charge() <= max_charge(pb.lc.max(pb.ld)).unwrap(), "phase B's largest charge {} > max_charge({})", p.meter.largest_charge(), pb.lc.max(pb.ld));
     let out = out[7..out.len() - 2].to_string();
     Ok(Run { out, plan: Some(pb), used_a, largest_a, total })
 }
@@ -322,16 +279,13 @@ fn every_charge_site_is_within_its_term() {
     }
 }
 
-/// Whether an n x n product of `tok` coefficients is admitted (both phases'
-/// admissions and phase A's run; nothing of phase B allocated), and the
-/// refusal otherwise.
-fn admitted(n: usize, tok: &str) -> Result<PlanB, String> {
+/// Whether an n x n product of `tok` coefficients succeeds (the whole call,
+/// the reduction being metered), and the refusal otherwise.
+fn admitted(n: usize, tok: &str) -> Result<usize, String> {
     let a = vec![tok; n].join(",");
     let r = (2 * a.len() + 20) as u64;
     let f = scan(&a)?;
-    let pa = admit_a(&f, &f, r, &CAPS)?.unwrap();
-    let l = lcms(&f, &f, &pa)?;
-    admit_b(&f, &f, &l, &pa, r, &CAPS)
+    reply(&f, &f, r, &CAPS).map(|x| x.len())
 }
 
 #[test]
@@ -343,9 +297,28 @@ fn probe_admitted_maxima() {
             let mid = (lo + hi).div_ceil(2);
             if admitted(mid, tok).is_ok() { lo = mid } else { hi = mid - 1 }
         }
-        let p = admitted(lo, tok).unwrap();
-        eprintln!("{:>40}: n = {} ({} terms), work {}, peak {}; at n + 1: {}", tok, lo, 2 * lo - 1, p.work, p.peak, admitted(lo + 1, tok).err().unwrap_or_default());
+        eprintln!("{:>40}: n = {} ({} terms); at n + 1: {}", tok, lo, 2 * lo - 1, admitted(lo + 1, tok).err().unwrap_or_default());
     }
+    // the five measured shapes, at the op's caps
+    let mut next = rng(5);
+    let rand = |n: usize, nb: u32, db: u32, next: &mut dyn FnMut() -> u64| (0..n).map(|_| format!("{}{:x}/{:x}", if next() & 1 == 0 { "-" } else { "" }, (next() >> (64 - nb)) | 1, (next() >> (64 - db)) | 1)).collect::<Vec<_>>().join(",");
+    let harmonic = |n: usize| (1..=n).map(|i| format!("1/{:x}", i)).collect::<Vec<_>>().join(",");
+    let rows = [("201 x 201 random 32/32", rand(201, 32, 32, &mut next), rand(201, 32, 32, &mut next)), ("1/i 200", harmonic(200), harmonic(200)), ("1/i 1000", harmonic(1000), harmonic(1000)), ("1/i 3000", harmonic(3000), harmonic(3000)), ("2000 random 16/16", rand(2000, 16, 16, &mut next), rand(2000, 16, 16, &mut next))];
+    for (what, a, b) in &rows {
+        let r = (a.len() + b.len() + 20) as u64;
+        let t = std::time::Instant::now();
+        let x = reply(&scan(a).unwrap(), &scan(b).unwrap(), r, &CAPS);
+        eprintln!("{}: {} in {:.3} s", what, x.map(|s| format!("ok, {} bytes", s.len())).unwrap_or_else(|e| e), t.elapsed().as_secs_f64());
+    }
+    // the largest harmonic square admitted
+    let (mut lo, mut hi) = (1usize, 3000);
+    while lo < hi {
+        let mid = (lo + hi).div_ceil(2);
+        let h = harmonic(mid);
+        if reply(&scan(&h).unwrap(), &scan(&h).unwrap(), (2 * h.len() + 20) as u64, &CAPS).is_ok() { lo = mid } else { hi = mid - 1 }
+    }
+    let h = harmonic(lo + 1);
+    eprintln!("harmonic: n = {}; at n + 1: {}", lo, reply(&scan(&h).unwrap(), &scan(&h).unwrap(), (2 * h.len() + 20) as u64, &CAPS).err().unwrap_or_default());
 }
 
 /// Many coprime denominators: phase A's meter passes its limit and the
@@ -378,16 +351,17 @@ fn counts_of_the_general_path() {
     let h = check(&halves, &halves);
     let i = check(&ints, &ints);
     let (hp, ip) = (h.plan.unwrap(), i.plan.unwrap());
-    eprintln!("all halves 100 x 100: phase A {}, total {}, admitted {}", h.used_a, h.total, hp.work);
+    eprintln!("all halves 100 x 100: phase A {}, total {}, admitted closed forms {}", h.used_a, h.total, hp.work);
     eprintln!("integers 100 x 100: phase A {}, total {}, admitted {}", i.used_a, i.total, ip.work);
     assert_eq!((h.used_a, h.total, hp.work), (HALVES_COUNTS.0, HALVES_COUNTS.1, HALVES_COUNTS.2));
     assert_eq!((i.used_a, i.total, ip.work), (INTS_COUNTS.0, INTS_COUNTS.1, INTS_COUNTS.2));
 }
 
 // (phase A: 131 units per token, the same for d = 1 and d = 2; the totals
-// include the test's R)
-const HALVES_COUNTS: (u64, u64, u64) = (26200, 67314, 88282);
-const INTS_COUNTS: (u64, u64, u64) = (26200, 66692, 87654);
+// include the test's R; admitted: R, phase A's count and phase B's closed
+// forms, the reduction being metered)
+const HALVES_COUNTS: (u64, u64, u64) = (26200, 67314, 39328);
+const INTS_COUNTS: (u64, u64, u64) = (26200, 66692, 38700);
 
 /// Phase B sees the true lcm: 4096 x 4096 halves would be refused by the
 /// output's bits with S_d (8192 bits per factor) in the slot, and are
@@ -422,4 +396,51 @@ fn the_reply_bound_is_exact() {
     let less = Caps { reply: reply - 1, ..CAPS };
     let e = run(&a, &b, &less).err().unwrap();
     assert!(e.contains("the reply's bytes") && e.contains(&reply.to_string()), "{}", e);
+}
+
+/// The actual counts against the admitted bound on shapes the bound refuses
+/// (no caps), for the design discussion.
+#[test]
+#[ignore]
+fn probe_actual_vs_admitted() {
+    let big = Caps { int: zmul::Caps { work: u64::MAX, peak: u64::MAX, o: u64::MAX, n: u64::MAX, request: u64::MAX }, reply: u64::MAX };
+    let mut next = rng(5);
+    let rand = |n: usize, nb: u32, db: u32, next: &mut dyn FnMut() -> u64| (0..n).map(|_| format!("{}{:x}/{:x}", if next() & 1 == 0 { "-" } else { "" }, (next() >> (64 - nb)) | 1, (next() >> (64 - db)) | 1)).collect::<Vec<_>>().join(",");
+    let harmonic = |n: usize| (1..=n).map(|i| format!("1/{:x}", i)).collect::<Vec<_>>().join(",");
+    let cases = [
+        ("201 x 201 random 32/32", rand(201, 32, 32, &mut next), rand(201, 32, 32, &mut next)),
+        ("1/i, 200 x 200", harmonic(200), harmonic(200)),
+        ("1/i, 1000 x 1000", harmonic(1000), harmonic(1000)),
+        ("1/i, 3000 x 3000", harmonic(3000), harmonic(3000)),
+        ("2000 x 2000 random 16/16", rand(2000, 16, 16, &mut next), rand(2000, 16, 16, &mut next)),
+    ];
+    for (what, a, b) in &cases {
+        let r = run(a, b, &big).unwrap();
+        let p = r.plan.unwrap();
+        eprintln!("{}: actual {} (phase A {}), admitted {} ({:.0}x), ld {}, lc {}", what, r.total, r.used_a, p.work, p.work as f64 / r.total as f64, p.ld, p.lc);
+    }
+}
+
+
+/// A reduction whose real work passes the cap: refused by phase B's meter,
+/// by name, at most max_charge(max(l_c, l_D)) past its limit (the refusing
+/// charge counted).
+#[test]
+fn a_long_reduction_is_refused_by_the_meter() {
+    // (600 nearly coprime 22-bit denominators per factor: D of about 400
+    // limbs, 1199 coefficients, within the output's bits)
+    let a = (0..600u64).map(|i| format!("1/{:x}", (1u64 << 21) + 2 * i + 1)).collect::<Vec<_>>().join(",");
+    let b = (0..600u64).map(|i| format!("-3/{:x}", (1u64 << 22) + 2 * i + 1)).collect::<Vec<_>>().join(",");
+    let (fa, fb, r) = (scan(&a).unwrap(), scan(&b).unwrap(), (a.len() + b.len() + 20) as u64);
+    let pa = admit_a(&fa, &fb, r, &CAPS).unwrap().unwrap();
+    let l = lcms(&fa, &fb, &pa).unwrap();
+    let pb = admit_b(&fa, &fb, &l, &pa, r, &CAPS).unwrap();
+    let mut p = product(&fa, &fb, l, &pb).unwrap();
+    let mut out = String::new();
+    let e = emit(&mut p, &pb, &mut out).err().unwrap();
+    assert!(e.contains("the coefficients' reduction needs more than"), "{}", e);
+    let over = p.meter.used() - pb.limit_b;
+    assert!(p.meter.used() > pb.limit_b && over <= max_charge(pb.lc.max(pb.ld)).unwrap(), "overshoot {}", over);
+    assert!(p.meter.largest_charge() <= max_charge(pb.lc.max(pb.ld)).unwrap());
+    assert!(reply(&fa, &fb, r, &CAPS).err().unwrap().contains("the coefficients' reduction needs more than"));
 }

@@ -75,6 +75,13 @@ fn internal(what: &str, f: Fault) -> String {
 /// - loads, copies and clears: `n + 1 <= lam + 2`.
 ///
 /// The gcd's term is the largest: `7 lam + 101`.
+///
+/// Phase B's meter (the scaling, D and the reduction) takes at most
+/// `max_charge(max(l_c, l_D))`, with l_c = ceil(s / 64) + 2 and l_D =
+/// lambda_a + lambda_b: every operand there has at most that many limbs (a
+/// numerator's limbs are at most ceil(s / 64) + 1, since s counts its bits;
+/// d_i, L and D at most l_D), and its sites are the same kinds, with the
+/// fills, packings and hex output at most `2 max + 2`.
 pub const fn max_charge(lam: u64) -> Option<u64> {
     match lam.checked_mul(7) {
         Some(x) => x.checked_add(101),
@@ -404,29 +411,21 @@ pub struct PlanB {
     pub lc: u64,
     pub ld: u64,
     pub beta_d: u64,
-    /// phase B's work (its meter's limit), and the call's: R + phase A's
-    /// count + phase B's
-    pub work_b: u64,
+    /// phase B's closed-form work (the scaling, D, the packing, the
+    /// product's backend and the unpacking), and the call's admitted part: R
+    /// + phase A's count + that
+    pub fixed: u64,
     pub work: u64,
+    /// phase B's meter's limit: WORK_MAX - R - phase A's count - the
+    /// closed-form parts it doesn't count (the packing, the backend, the
+    /// unpacking); it counts the scaling, D and the reduction
+    pub limit_b: u64,
     /// the peak over all rows, phase A's included
     pub peak: u64,
     /// the reply's exact bound, `{"ok":"` and `"}` included
     pub reply: u64,
     /// each row's bytes (scaling, product, reduction), for the tests
     pub rows: [u64; 3],
-}
-
-/// The reduction's units per coefficient: loads, the gcd (the one-limb
-/// bound when D has one limb, else coprime's pair bound), clears, the two
-/// exact quotients (divisor size unknown: Qhat), copies and hex out.
-pub fn reduce_work(lc: u64, ld: u64) -> Option<u64> {
-    let gcd = if ld <= 1 {
-        let hi = lc.max(ld);
-        sum(&[lc.checked_add(ld).and_then(|x| x.checked_add(2)), coprime::gcd_work_short(hi), hi.checked_add(2).and_then(|x| x.checked_mul(2))])?
-    } else {
-        coprime::pair_work(lc, ld)?
-    };
-    sum(&[Some(gcd), coprime::quot_work_any(lc), coprime::quot_work_any(ld), lc.checked_add(ld).and_then(|x| x.checked_mul(16)), Some(8)])
 }
 
 /// A factor's scaling units, its lcm of `lam` limbs: per token the two
@@ -449,6 +448,11 @@ fn scale_work(f: &Factor, lam: u64) -> Option<u64> {
 
 /// Phase B's closed forms, from the actual lcms, before any of its
 /// allocations; against WORK_MAX minus R and phase A's count (checked).
+/// The reduction's work is not among them: it is metered (as phase A's lcm
+/// work is), because the gcd's closed form (coprime's Lame bound) overstates
+/// it 124 to 278 times on the measured shapes (the design's r3.1 table):
+/// as an admission term it refused ordinary products, such as 201 x 201
+/// with 32-bit denominators.
 pub fn admit_b(a: &Factor, b: &Factor, l: &Lcms, plan: &PlanA, r: u64, caps: &Caps) -> Result<PlanB, String> {
     let (la, lb) = (a.tokens, b.tokens);
     let (lam_a, lam_b) = (l.na as u64, l.nb as u64);
@@ -472,22 +476,16 @@ pub fn admit_b(a: &Factor, b: &Factor, l: &Lcms, plan: &PlanA, r: u64, caps: &Ca
     let schoolbook = wa.min(wb) <= SCHOOLBOOK_WORDS;
     let backend = if schoolbook { schoolbook_work(wa as usize, wb as usize) } else { mul_words_local_work(wa as usize, wb as usize) }.ok_or_else(ovf)?;
     let lc = ws + 2;
-    let ld_work = beta_d.div_ceil(64).max(1);
-    let work_b = sum(&[
-        scale_work(a, lam_a),
-        scale_work(b, lam_b),
-        Some(4 * m),
-        schoolbook_work(l.na, l.nb),
-        Some(backend),
-        terms.checked_mul(8 * (ws + 1) + 8),
-        reduce_work(lc, ld_work).and_then(|x| x.checked_mul(terms)),
-    ])
-    .ok_or_else(|| format!("{}: a scaling bound underflows", INTERNAL_PREFIX))?;
+    // (the parts the meter doesn't count, then those it does)
+    let unmetered = sum(&[Some(4 * m), Some(backend), terms.checked_mul(8 * (ws + 1) + 8)]).ok_or_else(ovf)?;
+    let metered = sum(&[scale_work(a, lam_a), scale_work(b, lam_b), schoolbook_work(l.na, l.nb)]).ok_or_else(|| format!("{}: a scaling bound underflows", INTERNAL_PREFIX))?;
+    let fixed = unmetered.checked_add(metered).ok_or_else(ovf)?;
     let used = r.checked_add(l.used).ok_or_else(ovf)?;
     let budget = caps.int.work.checked_sub(used).ok_or_else(|| format!("{}: phase A's count passed its limit", INTERNAL_PREFIX))?;
-    if work_b > budget {
-        over("the work (word operations)", used.saturating_add(work_b), caps.int.work)?;
+    if fixed > budget {
+        over("the work (word operations)", used.saturating_add(fixed), caps.int.work)?;
     }
+    let limit_b = budget - unmetered;
     // (the rows, each with L_a and L_b at capacity and D at lambda_a +
     // lambda_b words)
     let ld = lam_a + lam_b;
@@ -516,8 +514,9 @@ pub fn admit_b(a: &Factor, b: &Factor, l: &Lcms, plan: &PlanA, r: u64, caps: &Ca
         lc,
         ld,
         beta_d,
-        work_b,
-        work: used + work_b,
+        fixed,
+        work: used + fixed,
+        limit_b,
         peak: peak_b.max(plan.peak),
         reply,
         rows: [row_scale, row_product, row_reduce],
@@ -608,7 +607,7 @@ pub struct Scaled {
 /// D, the scaled and packed numerators, and their word product (the
 /// scaling buffers and the packed factors are freed before the reduction).
 pub fn product(a: &Factor, b: &Factor, l: Lcms, plan: &PlanB) -> Result<Scaled, String> {
-    let mut m = Meter::new(plan.work_b);
+    let mut m = Meter::new(plan.limit_b);
     let fault = |f| internal("the scaled product", f);
     let mut d = vec![0u64; plan.ld as usize];
     let nd = mul_into(&l.la[..l.na], &l.lb[..l.nb], &mut d, &mut m).map_err(fault)?;
@@ -666,16 +665,21 @@ fn reduce(c: &[u64], negative: bool, d: &[u64], s: &mut ReduceScratch, out: &mut
 }
 
 /// The product's coefficients, each reduced, written into `out` as tokens
-/// (the zero polynomial is ""); the meter's count is returned.
-pub fn emit(p: Scaled, plan: &PlanB, out: &mut String) -> Result<u64, String> {
-    let Scaled { z, negative, d, nd, mut meter } = p;
+/// (the zero polynomial is ""); phase B's meter's count is returned.  The
+/// reduction is metered: passing the meter's limit is the named refusal
+/// (the caller then publishes nothing of `out`).
+pub fn emit(p: &mut Scaled, plan: &PlanB, out: &mut String) -> Result<u64, String> {
+    let Scaled { z, negative, d, nd, meter } = p;
+    let (z, negative, d, nd): (&[u64], bool, &[u64], usize) = (z, *negative, d, *nd);
     let (lc, ld) = (plan.lc as usize, plan.ld as usize);
     let hi = lc.max(ld);
     let ws = coprime::workspace_words(hi as u64).ok_or_else(ovf)? as usize;
     let mut s = ReduceScratch { ws: vec![0u64; ws], kx: vec![0u64; hi + 1], ky: vec![0u64; hi + 1], q1: vec![0u64; lc + 1], q2: vec![0u64; ld + 1] };
     let start = out.len();
     let mut kept = out.len();
-    unpack_digits(&z, negative, plan.terms, plan.slot, |t, neg| {
+    // (what the meter leaves the reduction: passing it is the named refusal)
+    let left = plan.limit_b.checked_sub(meter.used()).ok_or_else(|| format!("{}: the scaling passed its bound", INTERNAL_PREFIX))?;
+    unpack_digits(z, negative, plan.terms, plan.slot, |t, neg| {
         if out.len() > start {
             out.push(',');
         }
@@ -684,7 +688,10 @@ pub fn emit(p: Scaled, plan: &PlanB, out: &mut String) -> Result<u64, String> {
             out.push('0');
             return Ok(());
         }
-        reduce(&t[..nc], neg, &d[..nd], &mut s, out, &mut meter).map_err(|f| internal("a coefficient's reduction", f))?;
+        reduce(&t[..nc], neg, &d[..nd], &mut s, out, meter).map_err(|f| match f {
+            Fault::Overrun => format!("the coefficients' reduction needs more than {} word operations (fewer or smaller coefficients per call)", left),
+            Fault::Invariant => internal("a coefficient's reduction", f),
+        })?;
         kept = out.len();
         Ok(())
     })?;
@@ -703,11 +710,13 @@ pub fn reply(a: &Factor, b: &Factor, r: u64, caps: &Caps) -> Result<String, Stri
     };
     let l = lcms(a, b, &plan_a)?;
     let plan = admit_b(a, b, &l, &plan_a, r, caps)?;
-    let p = product(a, b, l, &plan)?;
+    let mut p = product(a, b, l, &plan)?;
     sagebrush_interrupt::check_coarse();
     let mut out = String::with_capacity(plan.reply as usize);
     out.push_str("{\"ok\":\"");
-    emit(p, &plan, &mut out)?;
+    // (a refusal or an error returns without the partial reply; the reply,
+    // Z and the scratch are freed on the way out)
+    emit(&mut p, &plan, &mut out)?;
     out.push_str("\"}");
     if out.len() as u64 > plan.reply {
         return Err(format!("{}: the reply passed its bound", INTERNAL_PREFIX));

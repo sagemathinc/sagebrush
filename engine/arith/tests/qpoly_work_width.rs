@@ -18,8 +18,7 @@ fn the_closed_forms_never_wrap() {
         // Qhat(lx) = ceil((lx + 3)^2 / 2) + 3 lx + 8
         let qhat = (x1 + 3).checked_mul(x1 + 3).map(|s| s.div_ceil(2) + 3 * x1 + 8);
         assert_eq!(coprime::quot_work_any(x), if x1 + 3 > m { None } else { fit(qhat) }, "Qhat({})", x);
-        // the one-limb gcd bound, 3 l + 95, and max_charge, 7 l + 101
-        assert_eq!(coprime::gcd_work_short(x), fit(Some(3 * x1 + 95)), "gcd_work_short({})", x);
+        // max_charge, 7 l + 101
         assert_eq!(qpoly::max_charge(x), fit(Some(7 * x1 + 101)), "max_charge({})", x);
         for &y in &lens {
             let y1 = y as u128;
@@ -27,12 +26,6 @@ fn the_closed_forms_never_wrap() {
             let q = if y == 0 || y > x { None } else { (x1 - y1 + 1).checked_mul(2 * y1 + 4).map(|v| v + 3 * x1 + 8) };
             let want = if y == 0 || y > x || 2 * y1 + 4 > m || x1 - y1 + 1 > m || 3 * x1 > m { None } else { fit(q) };
             assert_eq!(coprime::quot_work(x, y), want, "Q({}, {})", x, y);
-            // the reduction's units: None or at least each of its parts
-            if let Some(v) = qpoly::reduce_work(x, y) {
-                assert!(Some(v) >= coprime::quot_work_any(x).max(coprime::quot_work_any(y)));
-            }
         }
     }
-    assert_eq!(qpoly::reduce_work(u64::MAX, 1), None);
-    assert_eq!(qpoly::reduce_work(1, u64::MAX), None);
 }

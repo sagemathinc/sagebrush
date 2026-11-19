@@ -95,18 +95,6 @@ pub const fn gcd_work(la: u64, lb: u64) -> Option<u64> {
     ck!(iters.checked_add(quot)).checked_add(last)
 }
 
-/// The work bound of [`gcd_in_place`] when one operand has at most one limb
-/// and the other at most `l` (an admission bound only; [`gcd_work`] is
-/// unchanged): `3 l + 95`.  Read off [`gcd_in_place`]'s loop: its first
-/// pass charges the comparison `na + 2` and swaps so that b is the smaller,
-/// so `nb <= 1` and `na <= l`; then `nb = 0` returns at once, and `nb = 1`
-/// charges the single-limb step `2 na + 93` and returns.  No other branch is
-/// reached, so the meter is at most `3 l + 95` (zero limbs included: the
-/// comparison alone).  `None` on overflow.
-pub const fn gcd_work_short(l: u64) -> Option<u64> {
-    ck!(l.checked_mul(3)).checked_add(95)
-}
-
 /// The work bound of [`coprime_pair`] on a numerator of `ln` and a
 /// denominator of `ld` limbs: the two loads (`k + 1` each), the gcd, the
 /// two clears (`max + 2` each).

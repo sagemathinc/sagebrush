@@ -132,15 +132,20 @@ fn peaks_caps_and_baselines() {
     }
     // each phase's refusal returns to the baseline (phase A's memory, above,
     // at its exact cap less one): phase A's metered work, phase B's output
-    // bits
+    // bits, the reduction's metered work; each reply only the error
     let coprime = (0..12_000u64).map(|i| format!("1/{:x}", (1u64 << 62) + 2 * i + 1)).collect::<Vec<_>>().join(",");
     let big = list(4096, &format!("{}/2", "f".repeat(2000)));
+    let red_a = (0..600u64).map(|i| format!("1/{:x}", (1u64 << 21) + 2 * i + 1)).collect::<Vec<_>>().join(",");
+    let red_b = (0..600u64).map(|i| format!("-3/{:x}", (1u64 << 22) + 2 * i + 1)).collect::<Vec<_>>().join(",");
     let refusals = [
         ("phase A work", format!(r#"{{"fn":"qpoly_mul","a":"{}","b":"1/3"}}"#, coprime), "the denominators' lcm needs more than"),
         ("phase B bits", format!(r#"{{"fn":"qpoly_mul","a":"{}","b":"{}"}}"#, big, big), "the product's bits"),
+        // (the reduction's meter: after the product, with Z, the reduction's
+        // scratch and the reserved reply live; no partial reply)
+        ("the reduction's work", format!(r#"{{"fn":"qpoly_mul","a":"{}","b":"{}"}}"#, red_a, red_b), "the coefficients' reduction needs more than"),
     ];
     for (what, req, says) in &refusals {
-        let (_, after) = measure(|| sagebrush_web::call(req), |r| assert!(r.contains(says), "{}: {}", what, &r[..r.len().min(300)]));
+        let (_, after) = measure(|| sagebrush_web::call(req), |r| assert!(r.starts_with("{\"error\":") && r.contains(says) && r.len() < 400, "{}: {}", what, &r[..r.len().min(300)]));
         assert_eq!(after, 0, "{}: the heap did not return to its baseline", what);
     }
 }
