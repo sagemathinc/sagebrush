@@ -10,9 +10,12 @@ A person asks an agent for something; the thing gets made, opens, runs and shows
 No model is called: the agent's side is the case's script. The harness does the pairing and the grant, and runs the page in headless Chrome.
 
 ```sh
-bun web/build.ts && CHROME=chromium bun web/agent-flows/test-agent-flows.mjs [--case ID] [--surface mcp|chat]
-SAGEBRUSH_AGENTS=1 bun web/build.ts && CHROME=chromium PYTHON=python3 bun web/agent-flows/test-agent-flows-computer.mjs [--case ID]
+SAGEBRUSH_LATEX_PREVIEW=test bun web/build.ts && CHROME=chromium bun web/agent-flows/test-agent-flows.mjs [--case ID] [--surface mcp|chat]
+SAGEBRUSH_AGENTS=1 SAGEBRUSH_LATEX_PREVIEW=test bun web/build.ts && CHROME=chromium PYTHON=python3 bun web/agent-flows/test-agent-flows-computer.mjs [--case ID]
 ```
+
+`SAGEBRUSH_LATEX_PREVIEW=test` is the LaTeX editor's test build, the only one whose hosts include loopback: without it the
+editor's page doesn't come up on 127.0.0.1, and a case with a `.tex` (sagetex-derivative) can't show its document.
 
 `SHOT_DIR=dir` keeps a screenshot at each `h.shot(name)`.
 

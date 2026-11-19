@@ -3,7 +3,7 @@
 // person's own computers, through a real relay (the remotes' Worker in Miniflare), a real `sagebrush remote` runner and
 // the reviewed sagebrush-agent with its model scripted. Its own job: it needs this tree's engine/py built and installed
 // (the runner signs with the engine's native ES256) besides the site and Chrome.
-//   SAGEBRUSH_AGENTS=1 bun web/build.ts && (cd engine/py && maturin build --release --out dist) && pip install engine/py/dist/*.whl
+//   SAGEBRUSH_AGENTS=1 SAGEBRUSH_LATEX_PREVIEW=test bun web/build.ts && (cd engine/py && maturin build --release --out dist) && pip install engine/py/dist/*.whl
 //   CHROME=chromium node web/agent-flows/test-agent-flows-computer.mjs [--case ID]
 // PYTHON: the interpreter with that package (python3 by default). SITE_ORIGIN and SITE_COOKIE_FILE: a deployed site
 // instead (DEV), its session from a 0600 file. RUNNER_LATE=ms: Chat here is chosen first and the runner started after.

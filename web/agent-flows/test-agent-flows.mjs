@@ -3,7 +3,7 @@
 // surface it names. Every release passes all of them.
 // A case may name a known gap on a surface (gaps: { chat: "why" }): it still runs, and still fails there; the report
 // names the declared gap (it doesn't say which checks it covers), and once the case passes, says to take it out.
-//   bun web/build.ts && CHROME=chromium bun web/agent-flows/test-agent-flows.mjs [--case ID] [--surface mcp|chat]
+//   SAGEBRUSH_LATEX_PREVIEW=test bun web/build.ts && CHROME=chromium bun web/agent-flows/test-agent-flows.mjs [--case ID] [--surface mcp|chat]
 // SHOT_DIR=dir: a screenshot at each h.shot(name).
 import { readdirSync } from "node:fs";
 import { join } from "node:path";
