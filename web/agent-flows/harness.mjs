@@ -401,7 +401,8 @@ export async function runCase(kase, surfaceName, { site, page, shotDir = process
     h.ok(false, "threw: " + String(e?.stack ?? e).slice(0, 400));
   } finally {
     // (a surface's close may check its own end, as the computer surface's Disconnect: what it finds wrong fails the case)
-    for (const f of (await Promise.resolve(surface.close()).catch((e) => ["close threw: " + String(e).slice(0, 200)])) ?? []) h.ok(false, f);
+    const found = await Promise.resolve(surface.close()).catch((e) => ["close threw: " + String(e).slice(0, 200)]);
+    for (const f of Array.isArray(found) ? found : []) h.ok(false, f);
     await page.closeTabs();
   }
   h.ok(page.errors.length === 0, "no errors on the page", page.errors.slice(0, 3));
