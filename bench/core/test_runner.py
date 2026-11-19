@@ -379,7 +379,120 @@ class Setup(unittest.TestCase):
             )
 
 
+ROW = {
+    "id": "poly_fp_mul",
+    "item": "poly0",
+    "category": "c",
+    "label": "l",
+    "sizes": {"s": {"n": 10, "timeout": 30}},
+    "fresh": False,
+    "backends": {"user": "sage", "native": True, "magma": True, "flint": "python"},
+}
+ARTS = {
+    k: "0" * 64
+    for k in (
+        "python",
+        "sagebrush-wheel-record",
+        "native",
+        "magma",
+        "python-flint-record",
+        "node",
+        "native-host",
+        "wasm-module",
+        "flint-rust",
+        "pyjs",
+        "engine-wasm",
+    )
+}
+
+
+class Points(unittest.TestCase):
+    """point() with the drivers replaced (no subprocess): its decisions."""
+
+    def run_point(self, inputs, expected=None, arts=ARTS, steal=0.0):
+        calls = []
+
+        def fake_invoke(b, row, n, mode, timeout, k=1):
+            calls.append((b, mode))
+            if mode == "inputs":
+                return {"status": "ok", "input_hash": inputs[b]}
+            if mode == "once":
+                return {"status": "ok", "signature": "s"}
+            return {"status": "ok", "seconds": 1.0, "signature": "K:1", "steal": steal}
+
+        with (
+            mock.patch.object(run, "invoke", fake_invoke),
+            mock.patch.object(run, "command", lambda b, row, n, mode, k=1: ["x"]),
+            mock.patch.object(run, "EXPECTED", expected),
+        ):
+            rec = run.point(ROW, "s", list(inputs), {"artifacts": arts})
+        return rec, calls
+
+    def test_expected_input_mismatch_times_nothing(self):
+        rec, calls = self.run_point(
+            {"user": "5", "magma": "5"}, expected={"poly_fp_mul:s": {"input_hash": "6"}}
+        )
+        self.assertEqual(rec["status"], "input mismatch")
+        self.assertFalse([c for c in calls if c[1] != "inputs"])
+
+    def test_expected_input_match_is_ok(self):
+        rec, _ = self.run_point(
+            {"user": "5", "magma": "5"}, expected={"poly_fp_mul:s": {"input_hash": "5"}}
+        )
+        self.assertEqual(rec["status"], "ok")
+
+    def test_a_backend_without_its_artifacts_is_refused(self):
+        arts = dict(ARTS, native=None)
+        rec, calls = self.run_point(
+            {"user": "5", "native": "5", "magma": "5"}, arts=arts
+        )
+        self.assertEqual(rec["backends"]["native"]["status"], "refused")
+        self.assertNotIn("native", {c[0] for c in calls})
+
+    def test_steal_flags_a_noisy_point(self):
+        rec, _ = self.run_point({"user": "5", "magma": "5"}, steal=0.05)
+        self.assertTrue(rec["noisy"])
+        rec, _ = self.run_point({"user": "5", "magma": "5"}, steal=0.001)
+        self.assertFalse(rec["noisy"])
+
+
 class Files(unittest.TestCase):
+    def test_row_and_sidecar(self):
+        d = Path(tempfile.mkdtemp(prefix="bench-core-row-"))
+        p = d / "rows" / "x-s.json"
+        run.write_row(p, {"a": 1})
+        side = (d / "rows" / "x-s.json.sha256").read_bytes()
+        self.assertRegex(side.decode(), r"^[0-9a-f]{64}\n$")
+        self.assertEqual(
+            side.decode().strip(), run.hashlib.sha256(p.read_bytes()).hexdigest()
+        )
+        shutil.rmtree(d)
+
+    def test_cpu_times(self):
+        steal, total = run.cpu_times()
+        self.assertGreaterEqual(total, steal)
+        self.assertGreater(total, 0)
+
+    def test_changed_artifacts_stop_the_run(self):
+        seq = iter([dict(ARTS), dict(ARTS, native="1" * 64)])
+        argv = [
+            "run.py",
+            "--only",
+            "poly_fp_mul",
+            "--sizes",
+            "s",
+            "--mem-cap",
+            "none",
+            "--out",
+            tempfile.mkdtemp(prefix="bench-core-art-"),
+        ]
+        with (
+            mock.patch.object(run, "artifacts", lambda: next(seq)),
+            mock.patch.object(run, "point", lambda *a: self.fail("a point ran")),
+            mock.patch.object(sys, "argv", argv),
+        ):
+            self.assertEqual(run.main(), 4)
+
     def test_write_atomic_leaves_no_temporary(self):
         d = Path(os.environ.get("TMPDIR", "/tmp")) / f"bench-core-atomic-{os.getpid()}"
         p = d / "rows" / "x.json"

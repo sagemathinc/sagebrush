@@ -29,7 +29,7 @@ from pathlib import Path
 
 HERE = Path(__file__).resolve().parent
 ROOT = HERE.parents[1]
-PROTOCOL = 3
+PROTOCOL = 4
 # Input variants per point (items.json may lower it for a row or a size)
 DEFAULT_VARIANTS = 8
 VENV_PY = ROOT / "engine/.venv/bin/python"
@@ -52,6 +52,8 @@ THREADS = os.cpu_count() or 1
 # The memory cap of every subprocess (main sets it: a Cap, or None for an
 # explicitly uncapped run)
 CAP = None
+# The expected input hashes ("<row>:<size>" -> {input_hash, ...}), if given
+EXPECTED = None
 # the CPU flags worth recording (SIMD and the arithmetic extensions)
 FLAGS = re.compile(r"^(avx|avx2|avx512\w*|fma|bmi2|adx|sse4_2|asimd|sve\w*|neon)$")
 LINE = re.compile(r"^(RESULT|TIME|INPUTS)\|(.*)$", re.MULTILINE)
@@ -114,6 +116,11 @@ def parse_args() -> argparse.Namespace:
         "--dry-run",
         action="store_true",
         help="list the points and the backends found, run nothing",
+    )
+    p.add_argument(
+        "--expected-inputs",
+        type=Path,
+        help="a JSON file of expected input hashes (expected_inputs.py's output): a backend whose input hash differs is an input mismatch",
     )
     p.add_argument(
         "--summary-only",
@@ -490,6 +497,137 @@ def versions() -> dict:
     }
 
 
+def cpu_times() -> tuple[int, int]:
+    """(steal, total) jiffies over all CPUs, from /proc/stat (0, 0 if absent)."""
+    try:
+        f = Path("/proc/stat").read_text().splitlines()[0].split()
+        v = [int(x) for x in f[1:]]
+        return (v[7] if len(v) > 7 else 0), sum(v)
+    except (OSError, ValueError, IndexError):
+        return 0, 0
+
+
+# A point whose timed runs saw more CPU steal than this (a fraction of the
+# machine's CPU time) is flagged noisy: kept, but left out of medians
+STEAL_LIMIT = 0.02
+
+
+def sha256_file(path: Path) -> str:
+    h = hashlib.sha256()
+    with open(path, "rb") as f:
+        for chunk in iter(lambda: f.read(1 << 20), b""):
+            h.update(chunk)
+    return h.hexdigest()
+
+
+def dist_record(dist: str) -> str | None:
+    """The sha256 of an installed distribution's RECORD in engine/.venv (the
+    per-file hashes of everything it installed), or None."""
+    if not VENV_PY.exists():
+        return None
+    code = (
+        "import hashlib, importlib.metadata as m\n"
+        f"d = m.distribution({dist!r})\n"
+        "print(hashlib.sha256((d.read_text('RECORD') or '').encode()).hexdigest())"
+    )
+    r = subprocess.run(
+        [str(VENV_PY), "-c", code], capture_output=True, text=True, timeout=120
+    )
+    return r.stdout.strip() if r.returncode == 0 and r.stdout.strip() else None
+
+
+# The files each backend executes (or loads), hashed before the first point
+# and again before every point: a backend present without them is refused,
+# and a change stops the run
+def artifacts() -> dict:
+    node = shutil.which("node")
+    files = {
+        "python": os.path.realpath(VENV_PY) if VENV_PY.exists() else None,
+        "node": os.path.realpath(node) if node else None,
+        "pyjs": PYJS,
+        "native": NATIVE,
+        "native-host": NATIVE_HOST,
+        "wasm-module": WASM,
+        "flint-rust": FLINT_RUST,
+        "magma": os.path.realpath(MAGMA) if MAGMA.exists() else None,
+        "engine-wasm": ROOT / "wasm/sagebrush-engine.wasm",
+    }
+    out = {
+        k: (sha256_file(Path(v)) if v and Path(v).exists() else None)
+        for k, v in files.items()
+    }
+    out["sagebrush-wheel-record"] = dist_record("sagebrush")
+    out["python-flint-record"] = dist_record("python-flint")
+    return out
+
+
+# The artifacts each backend needs (by its base)
+NEEDS = {
+    "user": ("python", "sagebrush-wheel-record"),
+    "user-pyjs": ("node", "pyjs", "engine-wasm"),
+    "native": ("native",),
+    "native-host": ("native-host",),
+    "wasm": ("node", "wasm-module"),
+    "magma": ("magma",),
+    "flint-rust": ("flint-rust",),
+    "flint-python": ("python", "python-flint-record"),
+}
+
+
+def needs(backend: str, row: dict) -> tuple:
+    """The artifacts a backend executes for this row."""
+    base = backend[:-2] if backend.endswith("-n") else backend
+    if base == "user":
+        return NEEDS["user-pyjs" if row["backends"]["user"] == "pyjs" else "user"]
+    if base == "flint":
+        return NEEDS[
+            "flint-rust" if adapter("flint", row) == "flint-rust" else "flint-python"
+        ]
+    return NEEDS[base]
+
+
+def engine_pin() -> dict:
+    """Whether wasm/sagebrush-engine.wasm (what the CLI embeds, the user
+    column's engine) is the one wasm/pins.json pins."""
+    try:
+        pins = json.loads((ROOT / "wasm/pins.json").read_text())["modules"][
+            "sagebrush-engine.wasm"
+        ]
+        got = sha256_file(ROOT / "wasm/sagebrush-engine.wasm")
+        return {"sha256": got, "pinned": pins["sha256"], "ok": got == pins["sha256"]}
+    except (OSError, KeyError, ValueError):
+        return {"sha256": None, "pinned": None, "ok": False}
+
+
+def build_env() -> dict:
+    """How the Rust drivers were built (the identity's build half)."""
+    try:
+        rustc = subprocess.run(
+            ["rustc", "-vV"],
+            capture_output=True,
+            text=True,
+            timeout=60,
+            env=dict(os.environ, RUSTUP_TOOLCHAIN=toolchain()),
+        ).stdout.strip()
+    except (OSError, subprocess.SubprocessError):
+        rustc = None
+    return {
+        "rustc": rustc,
+        "rustflags": {
+            "native": "",
+            "native-host": "-C target-cpu=native",
+            "wasm": "",
+            "flint-rust": "",
+        },
+        "profile": "release: opt-level 3, lto, codegen-units 1",
+        "wasm_postprocess": "none",
+    }
+
+
+class ArtifactChanged(RuntimeError):
+    """An executed file changed between points: the run stops."""
+
+
 def variants(row: dict, key: str) -> int:
     """K, the number of input variants a point cycles through: the size's
     "variants", else the row's, else DEFAULT_VARIANTS (1 for a row with one
@@ -606,7 +744,11 @@ def invoke(
     backend: str, row: dict, n: int, mode: str, timeout: float, k: int = 1
 ) -> dict:
     cmd = command(backend, row, n, mode, k)
+    s0 = cpu_times()
     r = run_child(cmd, timeout, THREADS if backend.endswith("-n") else 1, CAP)
+    s1 = cpu_times()
+    total = s1[1] - s0[1]
+    r["steal"] = round((s1[0] - s0[0]) / total, 5) if total > 0 else None
     # (Magma 2.18 wraps long lines with backslash-newline)
     text = r.pop("output").replace("\\\n", "")
     found = LINE.findall(text)
@@ -651,8 +793,18 @@ def point(row: dict, key: str, backends: list[str], ident: dict) -> dict:
         backends={},
     )
     present = [b for b in backends if command(b, row, n, "once")]
+    arts = ident.get("artifacts") or {}
+    for b in list(present):
+        missing = [a for a in needs(b, row) if not arts.get(a)]
+        if missing:
+            # (a backend present without its hashed artifacts is refused)
+            present.remove(b)
+            rec["backends"][b] = {
+                "status": "refused",
+                "detail": "no hash for " + ", ".join(missing),
+            }
     for b in backends:
-        if b not in present:
+        if b not in present and b not in rec["backends"]:
             rec["backends"][b] = {
                 "status": "not applicable"
                 if BASE.get(b, b) in ("native", "flint")
@@ -665,8 +817,11 @@ def point(row: dict, key: str, backends: list[str], ident: dict) -> dict:
         rec["backends"][b] = {"adapter": adapter(b, row), "input": r}
     hashes = {b: rec["backends"][b]["input"].get("input_hash") for b in present}
     known = {h for h in hashes.values() if h}
+    want = (EXPECTED or {}).get(f"{row['id']}:{key}")
+    if want is not None:
+        rec["expected_input_hash"] = want["input_hash"]
     # 2. the answers
-    if len(known) > 1:
+    if len(known) > 1 or (want is not None and known and known != {want["input_hash"]}):
         rec["status"] = "input mismatch"
     else:
         for b in present:
@@ -695,6 +850,14 @@ def point(row: dict, key: str, backends: list[str], ident: dict) -> dict:
             for t in timed.values():
                 if t["status"] == "ok":
                     t["status"] = "mismatch"
+
+    steals = [
+        t["steal"]
+        for t in (rec["backends"].get(b, {}).get("time") for b in present)
+        if t and t.get("steal") is not None
+    ]
+    rec["steal_max"] = max(steals) if steals else None
+    rec["noisy"] = bool(steals) and max(steals) > STEAL_LIMIT
 
     def sec(b):
         return rec["backends"].get(b, {}).get("time", {}).get("seconds")
@@ -736,6 +899,17 @@ def write_atomic(path: Path, text: str) -> None:
         f.flush()
         os.fsync(f.fileno())
     os.replace(tmp, path)
+
+
+def write_row(path: Path, rec: dict) -> None:
+    """The point's file, then its checksum sidecar (exactly one 64-hex digest
+    and a newline): the driver fetches both."""
+    text = json.dumps(rec, indent=1) + "\n"
+    write_atomic(path, text)
+    write_atomic(
+        path.with_name(path.name + ".sha256"),
+        hashlib.sha256(text.encode()).hexdigest() + "\n",
+    )
 
 
 def secs(x) -> str:
@@ -813,8 +987,10 @@ def main() -> int:
         return 0
     if args.build:
         build()
-    global THREADS, CAP
+    global THREADS, CAP, EXPECTED
     THREADS = max(1, args.threads)
+    if args.expected_inputs:
+        EXPECTED = json.loads(args.expected_inputs.read_text())
     if args.dry_run:
         print(json.dumps(machine(args.host_label)))
         for row in rows:
@@ -848,11 +1024,20 @@ def main() -> int:
             "ls-files", "--others", "--exclude-standard", "--", "engine", "bench/core"
         )
     )
+    # (a driver's payload is a git archive of a clean commit, without .git:
+    # it names its commit in .bench-commit)
+    stamp = ROOT / ".bench-commit"
+    commit = git("rev-parse", "HEAD") or (
+        stamp.read_text().strip() if stamp.exists() else ""
+    )
     ident = {
         "protocol": PROTOCOL,
-        "commit": git("rev-parse", "HEAD"),
+        "commit": commit,
         "dirty": bool(git("status", "--porcelain", "--", "engine", "bench/core")),
         "tree_diff": hashlib.sha256(diff.encode()).hexdigest(),
+        "artifacts": artifacts(),
+        "engine_pin": engine_pin(),
+        "build": build_env(),
         "machine": machine(args.host_label),
         "versions": versions(),
         "flags": {
@@ -877,6 +1062,16 @@ def main() -> int:
                     print(f"skip {row['id']} {key}: done", flush=True)
                     continue
             print(f"{row['id']} {key} n={row['sizes'][key]['n']}", flush=True)
+            now = artifacts()
+            if now != ident["artifacts"]:
+                changed = sorted(k for k in now if now[k] != ident["artifacts"].get(k))
+                print(
+                    f"STOPPED: executed files changed since the run started: {', '.join(changed)}",
+                    file=sys.stderr,
+                    flush=True,
+                )
+                summary(out, items)
+                return 4
             try:
                 rec = point(row, key, backends, ident)
             except TeardownError as e:
@@ -885,7 +1080,7 @@ def main() -> int:
                 print(f"STOPPED: {e.args[0]}", file=sys.stderr, flush=True)
                 summary(out, items)
                 return 3
-            write_atomic(path, json.dumps(rec, indent=1) + "\n")
+            write_row(path, rec)
             print(
                 f"  {rec['status']} user {rec.get('ratio_user')} native {rec.get('ratio_native')}",
                 flush=True,
