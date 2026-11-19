@@ -966,7 +966,8 @@ export async function mount(root: HTMLElement, host: Host): Promise<void> {
   // says its agent made the revision shown (a build after this page opened it)
   const made = typeof BroadcastChannel === "function" && host.sandbox && !host.app ? new BroadcastChannel(MADE_CHANNEL) : null;
   let askedAt = "", asking: { id: string; rev: number; text: string } | null = null;
-  const unrun = () => { const c = E.lastCheck(); return hasCode(c) && c.sage.some((x: any) => x.s === "notrun" || x.s === "stale"); };
+  // (an item not run yet, as the check counts them (check.ts): not refused, and not ok, failed or blocked)
+  const unrun = () => { const c = E.lastCheck(); return hasCode(c) && c.sage.some((x: any) => !x.err && x.s !== "ok" && x.s !== "error" && x.s !== "blocked"); };
   const askRun = () => {
     if (!made || !live() || running || !saveable || src.value !== savedText || !unrun()) return;
     if (askedAt === host.fid + "@" + docRev) return;
