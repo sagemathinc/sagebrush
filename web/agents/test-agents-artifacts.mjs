@@ -1754,6 +1754,105 @@ try {
     }
     event(turn, { type: "turn_finished", outcome: "completed" });
   }
+
+  // ======================================================================== the pane under sync's journal, live
+  // (notebook sync on in this browser: the workspace's fence in the journal phase. The pane's notebook is the notebook's
+  // editor through the journal's store, as the notebook page's is: editable and runnable; an agent's edit is applied,
+  // lands in the journal, and a notebook tab of this browser shows it, the person's typing there kept)
+  if (want("journal-live")) {
+    if (!FEATURES) {
+      FEATURES = true;
+      await ev(`document.querySelector('#new')?.click()`);
+      await sleep(700);
+      await pair();
+    }
+    await converse();
+    const turn = `t${++turnN}`;
+    event(turn, { type: "turn_started" });
+    const fence0 = await record(FENCE);
+    // (another tab of this browser, with its own DevTools socket: the notebook page)
+    const tabs = [];
+    const tab = async (url) => {
+      const t = await (await fetch(`http://127.0.0.1:${cdpPort}/json/new?about:blank`, { method: "PUT" })).json();
+      const s = new WebSocket(t.webSocketDebuggerUrl);
+      await new Promise((r) => (s.onopen = r));
+      let k = 0;
+      const w = new Map();
+      s.onmessage = (e) => { const m = JSON.parse(e.data); if (m.id && w.has(m.id)) { w.get(m.id)(m.result ?? m.error); w.delete(m.id); } };
+      const tsend = (method, params = {}) => new Promise((r) => { const id = ++k; w.set(id, r); s.send(JSON.stringify({ id, method, params })); });
+      const tev = async (expression) => (await tsend("Runtime.evaluate", { expression, awaitPromise: true, returnByValue: true }))?.result?.value;
+      const tuntil = async (expr, ms = 20000) => { const t1 = Date.now(); while (Date.now() - t1 < ms) { if (await tev(expr).catch(() => false)) return true; await sleep(100); } return false; };
+      await tsend("Page.enable");
+      await tsend("Runtime.enable");
+      await tsend("Page.navigate", { url });
+      const x = { ev: tev, until: tuntil, close: async () => { try { s.close(); } catch {} await fetch(`http://127.0.0.1:${cdpPort}/json/close/${t.id}`).catch(() => {}); } };
+      tabs.push(x);
+      return x;
+    };
+    const NB = "window.sagebrush?.notebook";
+    const tabCode = (x) => x.ev(`${NB}?.snapshot?.().cells.map((c) => c.code) ?? null`);
+    const tabReady = (x) => x.until(`!!(${NB}?.store?.ready && ${NB}.store.journaled && document.querySelector("#cells .cell textarea"))`, 30000);
+    const codeOf = (c) => c.code ?? (Array.isArray(c.source) ? c.source.join("") : c.source);
+    const readOf = async (path) => {
+      const r = await call("workspace.read", { path });
+      return { ref: r.ref, base: r.rev, cells: r.content.json.cells, was: Object.fromEntries(r.content.json.cells.map((c) => [c.id, cellHash(c)])) };
+    };
+    const edit = (path, r, e) => Promise.race([
+      call("notebook.edit", { conversation: conv, path, ref: r.ref, base: r.base, was: r.was, ...e }).then((x) => ({ ok: true, x }), (err) => ({ ok: false, code: err.code, msg: err.message })),
+      sleep(15000).then(() => ({ ok: false, code: "timeout", msg: "no answer in 15 s" })),
+    ]);
+    try {
+      // J1-J3: the pane, with no notebook tab open
+      {
+        const path = "/notes/live-1.ipynb";
+        await call("workspace.create", { path, content: docFor(path, [{ code: "a = 1" }]), mode: "python" });
+        const ref = await refOf(path);
+        await putRecord({ ...(fence0 ?? { id: FENCE, workspace: "test", generation: 1, step: 1 }), phase: "journal", journal: 1 });
+        await openNotebook(path, { finish: false, turn });
+        await sleep(1000);
+        const bar = await barText();
+        const ro = await ev(`!!document.querySelector('${PANE} .nb-root .cell textarea')?.readOnly`);
+        const runOff = await ev(`[...document.querySelectorAll('${PANE} .runb')].every((b) => b.disabled)`);
+        ok(!/readonly|read only/i.test(bar) && !ro && !runOff, "J1: under sync's journal the pane's notebook is editable and runnable (not read only, Run on)", { bar, ro, runOff });
+        const r = await readOf(path);
+        const res = await edit(path, r, { set: [{ id: r.cells[0].id, source: "a = 2  # agent" }] });
+        ok(res.ok, "J2: under sync's journal an agent's edit of the pane's notebook is applied", res);
+        // (the notebook page in another tab, through the journal's store: what the journal has)
+        const B = await tab(`${site}/?nb=${ref}`);
+        const ready = await tabReady(B);
+        const seen = ready && (await B.until(`(${NB}.snapshot().cells[0]?.code ?? "") === "a = 2  # agent"`, 10000));
+        ok(ready && seen, "J3: the agent's edit is in the journal: the notebook page, opened in another tab, shows it", { ready, code: await tabCode(B) });
+        await B.close();
+        await send("Page.bringToFront");
+      }
+      // J4-J5: the person has the notebook open in a notebook tab and types there; the agent edits it in the pane meanwhile
+      {
+        const path = "/notes/live-2.ipynb";
+        await call("workspace.create", { path, content: docFor(path, [{ code: "b = 1" }, { code: "c = 1" }]), mode: "python" });
+        const ref = await refOf(path);
+        const P = await tab(`${site}/?nb=${ref}`);
+        const ready = await tabReady(P);
+        // (the person's typing in the tab's second cell, as an input event sets it)
+        await P.ev(`(() => { const t = document.querySelectorAll("#cells .cell textarea")[1]; t.focus(); t.value = "c = 1  # person"; t.dispatchEvent(new Event("input", { bubbles: true })); })()`);
+        await sleep(1500);
+        // (the chat's tab in front again, as the person switching back to it: a new tab took the front)
+        await send("Page.bringToFront");
+        await openNotebook(path, { finish: false, turn });
+        const r = await readOf(path);
+        const res = await edit(path, r, { set: [{ id: r.cells[0].id, source: "b = 2  # agent" }] });
+        const both = await P.until(`(() => { const c = ${NB}.snapshot().cells.map((x) => x.code); return c[0] === "b = 2  # agent" && c[1] === "c = 1  # person"; })()`, 10000);
+        ok(ready && res.ok && both, "J4: with the notebook open in a notebook tab, an agent's edit in the pane is applied and the tab shows it within 10 s, the person's typing kept", { ready, res, tab: await tabCode(P) });
+        const r2 = await readOf(path);
+        const codes = r2.cells.map(codeOf);
+        ok(codes[0] === "b = 2  # agent" && codes[1] === "c = 1  # person", "J5: the workspace's copy has both, the agent's edit and the person's", codes);
+        await P.close();
+      }
+    } finally {
+      for (const x of tabs) await x.close().catch(() => {});
+      if (fence0) await putRecord(fence0);
+      event(turn, { type: "turn_finished", outcome: "completed" });
+    }
+  }
 } catch (e) {
   ok(false, "the test ran to its end: " + (e?.stack ?? e));
   console.log("the page said:\n  " + logs.slice(-20).join("\n  "));
