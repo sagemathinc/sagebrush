@@ -247,8 +247,10 @@ fn stats() -> (u64, u64, u64) {
 /// (coefficients of about 2000 bits).
 fn fill_count(s: &mut u64) {
     let c: Vec<String> = (0..16).map(|_| (0..32).map(|_| format!("{:019}", rng(s) % 10_000_000_000_000_000_000)).collect::<String>()).collect();
-    let r = sagebrush_web::call(&format!(r#"{{"fn":"poly_mul","a":"{}","b":"{}"}}"#, c.join(","), c.join(",")));
-    assert!(r.starts_with("{\"ok\""), "{}", &r[..r.len().min(200)]);
+    // (zpoly::mul's multimodular product, through the shared cache: poly_mul
+    // itself builds its own tables)
+    let v: Vec<sagebrush_bigint::BigInt> = c.iter().map(|t| t.parse().unwrap()).collect();
+    assert!(!sagebrush_arith::zpoly::mul(&v, &v).is_empty());
     let st = stats();
     eprintln!("shared cache, count policy: {:?}", st);
     assert_eq!(st.1, 64, "the shared cache at its 64-table policy");
@@ -260,10 +262,9 @@ fn fill_count(s: &mut u64) {
 fn fill_bytes(s: &mut u64) {
     let n = 1 << 19;
     let c: Vec<String> = (0..n).map(|_| (0..4).map(|_| format!("{:019}", rng(s) % 10_000_000_000_000_000_000)).collect::<String>() + "7").collect();
-    let req = format!(r#"{{"fn":"poly_mul","a":"{}","b":"{}"}}"#, c.join(","), c.join(","));
+    let v: Vec<sagebrush_bigint::BigInt> = c.iter().map(|t| t.parse().unwrap()).collect();
     drop(c);
-    let r = sagebrush_web::call(&req);
-    assert!(r.starts_with("{\"ok\""), "{}", &r[..r.len().min(200)]);
+    assert!(!sagebrush_arith::zpoly::mul(&v, &v).is_empty());
     let st = stats();
     eprintln!("shared cache, byte policy: {:?}", st);
     assert_eq!((st.1, st.2), (8, 1 << 28), "the shared cache at its 2^28-byte policy");
@@ -328,8 +329,9 @@ fn abi_frees_the_old_reply_first() {
             (old, base, FIRST_LIVE.load(Relaxed) - FIRST_SIZE.load(Relaxed), peak)
         }
     };
-    let big: Vec<String> = (0..8192).map(|_| (0..5).map(|_| format!("{:019}", rng(&mut s) % 10_000_000_000_000_000_000)).collect::<String>() + "12345").collect();
-    let seed = format!(r#"{{"fn":"poly_mul","a":"{}","b":"{}","wire":"csv"}}"#, big.join(","), big.join(","));
+    // (a large prior reply: a product of hex coefficients, no leading zeros)
+    let big: Vec<String> = (0..8192).map(|_| "1".to_string() + &(0..5).map(|_| format!("{:019}", rng(&mut s) % 10_000_000_000_000_000_000)).collect::<String>() + "12345").collect();
+    let seed = format!(r#"{{"fn":"poly_mul","a":"{}","b":"{}"}}"#, big.join(","), big.join(","));
     drop(big);
     let m: Vec<Vec<u64>> = (0..400).map(|_| (0..401).map(|_| P - 1 - rng(&mut s) % (1 << 40)).collect()).collect();
     let ech = format!(

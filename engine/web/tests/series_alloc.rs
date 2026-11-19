@@ -3,7 +3,7 @@
 //! (zseries's closed forms, the request and reply included).  One test (the
 //! counters are global).
 
-use sagebrush_arith::zseries;
+use sagebrush_arith::{zmul, zseries};
 use std::alloc::{GlobalAlloc, Layout, System};
 use std::sync::atomic::{AtomicUsize, Ordering::Relaxed};
 
@@ -75,6 +75,12 @@ fn peaks_within_the_admitted_bounds() {
         ("sigma k = 11, n = 2^18", r#"{"fn":"sigma_table","k":11,"n":262144}"#.to_string()),
         ("sigma k = 0, n = 2^20", r#"{"fn":"sigma_table","k":0,"n":1048576}"#.to_string()),
         ("euler n = 2^20", r#"{"fn":"series_euler","n":1048576}"#.to_string()),
+        // poly_mul, each near both of its caps (N = 2^19 points, O <= 2^25 bits):
+        // one-digit coefficients at the most terms (slot 30: the largest reply
+        // per output bit), unbalanced, and huge coefficients
+        ("poly_mul 2^19 x 2^19 one-digit", format!(r#"{{"fn":"poly_mul","a":"{}","b":"{}"}}"#, list(1 << 19, "f"), list(1 << 19, "-f"))),
+        ("poly_mul 2^12 x 4, 64 x 4096 bits", format!(r#"{{"fn":"poly_mul","a":"{}","b":"{}"}}"#, list(1 << 12, &"9".repeat(16)), list(4, &big))),
+        ("poly_mul 2^8 x 2^8, 2^14 bits", format!(r#"{{"fn":"poly_mul","a":"{}","b":"{}"}}"#, list(1 << 8, &"d".repeat(1 << 12)), list(1 << 8, &format!("-{}", "e".repeat(1 << 12))))),
     ];
     for (what, req) in &cases {
         let admitted = admitted_peak(req);
@@ -89,7 +95,7 @@ fn peaks_within_the_admitted_bounds() {
 fn admitted_peak(req: &str) -> u64 {
     let v: serde_json::Value = serde_json::from_str(req).unwrap();
     let s = |k: &str| v.get(k).and_then(|x| x.as_str());
-    let n = v["n"].as_u64().unwrap() as usize;
+    let n = v["n"].as_u64().unwrap_or(0) as usize;
     let r = req.len() as u64;
     let adm = match v["fn"].as_str().unwrap() {
         "series_mul" => {
@@ -104,6 +110,10 @@ fn admitted_peak(req: &str) -> u64 {
             zseries::pow_admit(&a, v["k"].as_u64().unwrap(), da.as_ref(), n, false, r)
         }
         "sigma_table" => zseries::sigma_admit(v["k"].as_u64().unwrap(), n, r),
+        "poly_mul" => {
+            let (a, b) = (zmul::scan(s("a").unwrap()).unwrap(), zmul::scan(s("b").unwrap()).unwrap());
+            return zmul::admit(&a, &b, r, &zmul::CAPS).unwrap().unwrap().admitted.peak;
+        }
         _ => zseries::euler_admit(n, r),
     };
     adm.unwrap().peak
