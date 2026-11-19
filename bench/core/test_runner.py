@@ -599,6 +599,138 @@ class FreshWasm(unittest.TestCase):
             shutil.rmtree(d)
 
 
+class EngineLabel(unittest.TestCase):
+    def test_tables_name_their_engine(self):
+        rec = {"commit": "c" * 40}
+        pinned = dict(
+            rec, engine_pin={"ok": True, "policy": "strict", "sha256": "a" * 64}
+        )
+        self.assertEqual(run.engine_label(pinned), "pinned " + "a" * 12)
+        fresh = dict(
+            rec, engine_pin={"ok": False, "policy": "track", "sha256": "b" * 64}
+        )
+        self.assertEqual(run.engine_label(fresh), f"fresh {'b' * 12} @ {'c' * 12}")
+        # (a track run whose build happens to equal the pin is still fresh)
+        same = dict(rec, engine_pin={"ok": True, "policy": "track", "sha256": "a" * 64})
+        self.assertTrue(run.engine_label(same).startswith("fresh "))
+        stale = dict(
+            rec, engine_pin={"ok": False, "policy": "strict", "sha256": "d" * 64}
+        )
+        self.assertTrue(run.engine_label(stale).startswith("UNPINNED"))
+
+    def test_the_summary_header_carries_it(self):
+        d = Path(tempfile.mkdtemp(prefix="bench-core-sum-"))
+        (d / "rows").mkdir()
+        rec = {
+            "item": "poly0",
+            "row": "poly_fp_mul",
+            "size": "s",
+            "n": 10,
+            "commit": "c" * 40,
+            "machine": {
+                "label": "x86",
+                "cpu": "Xeon",
+                "arch": "x86_64",
+                "nproc": 16,
+                "flags": [],
+            },
+            "engine_pin": {"ok": False, "policy": "track", "sha256": "b" * 64},
+            "backends": {},
+            "status": "ok",
+        }
+        (d / "rows/poly_fp_mul-s.json").write_text(json.dumps(rec))
+        try:
+            run.summary(d, {})
+            self.assertIn(
+                f"Engine: fresh {'b' * 12} @ {'c' * 12}.",
+                (d / "summary.md").read_text(),
+            )
+        finally:
+            shutil.rmtree(d)
+
+
+class Protocol5(unittest.TestCase):
+    """drivers/common.py's TIMING record, and run.py's parse of it."""
+
+    def run_driver(self, ms, k=4, env=None):
+        # (a stand-in driver: variant v takes ms milliseconds of sleep)
+        code = (
+            "import sys, time; sys.path.insert(0, %r); import common\n"
+            "def prepare(v):\n"
+            "    return lambda: time.sleep(%r)\n"
+            "common.main(['x', 'case', '1', 'time', '%d'], prepare, lambda a: 's', lambda: 0)\n"
+        ) % (str(run.HERE / "drivers"), ms / 1000.0, k)
+        r = subprocess.run(
+            [sys.executable, "-c", code],
+            capture_output=True,
+            text=True,
+            timeout=120,
+            env=dict(os.environ, **(env or {})),
+        )
+        self.assertEqual(r.returncode, 0, r.stderr)
+        return run.parse_timing(r.stdout), r.stdout
+
+    def test_a_slow_operation_is_timed_per_op(self):
+        t, out = self.run_driver(5)
+        self.assertEqual(t["mode"], "per-op")
+        self.assertEqual(len(t["samples"]), 4)
+        self.assertTrue(all(len(v) == len(t["samples"][0]) for v in t["samples"]))
+        self.assertTrue(all(x >= 0.004 for v in t["samples"] for x in v))
+        self.assertGreaterEqual(t["threshold"], 1e-3)
+        self.assertIn("TIME|", out)
+
+    def test_a_fast_operation_is_batched_from_seeded_offsets(self):
+        t, _ = self.run_driver(0.01, env={"BENCH_SEED": "3"})
+        self.assertEqual(t["mode"], "batched")
+        sys.path.insert(0, str(run.HERE / "drivers"))
+        import common as c
+
+        self.assertEqual(
+            t["offsets"], [c.offset(3, j, 4) for j in range(len(t["batches"]))]
+        )
+        self.assertEqual(t["seed"], 3)
+
+    def test_the_mode_can_be_forced(self):
+        t, _ = self.run_driver(0.01, env={"BENCH_TIMING": "per-op"})
+        self.assertEqual(t["mode"], "per-op")
+
+    def test_malformed_records_are_dropped(self):
+        good = {
+            "granularity": 1e-7,
+            "threshold": 1e-3,
+            "seed": 0,
+            "k": 2,
+            "mode": "per-op",
+            "samples": [[1.0], [2.0]],
+        }
+        line = lambda d: "TIMING|" + json.dumps(d)  # noqa: E731
+        self.assertEqual(run.parse_timing(line(good)), good)
+        for bad in (
+            dict(good, mode="other"),
+            dict(good, samples=[[1.0]]),
+            dict(good, samples=[[1.0], [2.0, 3.0]]),
+            dict(good, samples=[[1.0], ["x"]]),
+            dict(good, k=-1),
+            dict(good, granularity=float("nan")),
+            {
+                "granularity": 1e-7,
+                "threshold": 1e-3,
+                "seed": 0,
+                "k": 2,
+                "mode": "batched",
+                "batches": [1.0],
+                "offsets": [5],
+                "reps": 3,
+            },
+        ):
+            with self.subTest(bad=bad):
+                self.assertIsNone(run.parse_timing(line(bad)))
+        self.assertIsNone(
+            run.parse_timing("TIMING|{" + "x" * (run.TIMING_LIMIT + 1) + "}")
+        )
+        self.assertIsNone(run.parse_timing("TIME|1|s|1|1|1|1"))
+
+
 class Installed(unittest.TestCase):
     """dist_files against a real venv with a hand-installed distribution."""
 

@@ -20,6 +20,19 @@ row's reference input, the old scoreboard's):
   repetition gets a freshly built input outside the timed region, for
   operations whose objects cache answers.  The signature is `K:hash`, the
   hash of the K variants' signatures joined by ";" (combined_signature).
+  Before the TIME line comes `TIMING|json` (protocol 5), the samples a
+  sweep pairs across candidates:
+  - the timer's granularity g, measured, and the per-op threshold
+    max(1 ms, 1000 g);
+  - per-op mode, when one operation (from the untimed first pass) takes at
+    least the threshold: R full rotations, each operation timed alone, in
+    rotation order from a seeded offset, so samples[v] holds variant v's R
+    times, never back to back;
+  - batched mode, below it: the rotation batches above, batch j starting at
+    the seeded offset o_j (the same for every candidate's batch j), with
+    each batch's seconds per operation.
+  The seed is BENCH_SEED (0 when unset).  BENCH_TIMING=per-op|batched
+  forces a mode (tests).
 
 Input construction, signature conversion and process startup are never
 timed.
@@ -73,25 +86,81 @@ class Rotation:
         return total
 
 
-def measure(rot, warm):
-    """(median, minimum, maximum, reps, samples) in seconds per operation;
-    `warm` is the untimed first pass's total over the K variants."""
+def calibrate(rot, warm):
+    """The repetitions per sample: until one sample takes at least TARGET
+    seconds; `warm` is the untimed first pass's total over the K variants."""
     per = warm / rot.k
-    k = (
-        1
-        if per >= TARGET
-        else max(1, min(MAX_REPS, int(TARGET * 1.2 / per) + 1 if per > 0 else rot.k))
-    )
-    elapsed = rot.run(k) if per < TARGET else per
+    if per >= TARGET:
+        return 1, per
+    k = max(1, min(MAX_REPS, int(TARGET * 1.2 / per) + 1 if per > 0 else rot.k))
+    elapsed = rot.run(k)
     while elapsed < TARGET and k < MAX_REPS:
         if elapsed <= 0:
             k *= 2
         else:
             k = max(k * 2, min(k * 16, int(k * TARGET * 1.2 / elapsed) + 1))
         elapsed = rot.run(k)
+    return k, elapsed
+
+
+PER_OP_FLOOR = 1e-3
+TIMING_LIMIT = 1 << 16  # (the TIMING line's JSON, bytes: run.py's bound too)
+
+
+def granularity(tries=2000):
+    """The smallest positive step perf_counter() shows (seconds)."""
+    best, last = None, time.perf_counter()
+    for _ in range(tries):
+        now = time.perf_counter()
+        d = now - last
+        if d > 0 and (best is None or d < best):
+            best = d
+        last = now
+    return best or 1e-9
+
+
+def offset(seed, j, k):
+    """Batch or rotation j's starting variant (the same for every candidate
+    of a sweep: a function of the seed, j and K only)."""
+    return (seed * 1000003 + j * 7919) % k
+
+
+def per_op(prepare, k, fresh, ops, rotations, seed):
+    """samples[v]: variant v's times, each operation timed alone, rotation r
+    starting at offset(seed, r, k)."""
+    samples = [[] for _ in range(k)]
+    for r in range(rotations):
+        start = offset(seed, r, k)
+        for i in range(k):
+            v = (start + i) % k
+            op = prepare(v) if fresh else ops[v]
+            t0 = time.perf_counter()
+            op()
+            samples[v].append(time.perf_counter() - t0)
+    return samples
+
+
+def timing_line(record):
+    import json
+
+    text = json.dumps(record, separators=(",", ":"), sort_keys=True)
+    if len(text) > TIMING_LIMIT:
+        raise SystemExit("TIMING record over its bound")
+    return "TIMING|" + text
+
+
+def measure_batched(rot, warm, seed):
+    """calibrate, then each batch j started at offset(seed, j): (median, min,
+    max, reps, count, the batches' seconds per operation, their offsets)."""
+    k, elapsed = calibrate(rot, warm)
     count = SAMPLES if elapsed / k <= 2.0 else 3
-    samples = sorted(rot.run(k) / k for _ in range(count))
-    return samples[len(samples) // 2], samples[0], samples[-1], k, count
+    batches, offsets = [], []
+    for j in range(count):
+        rot.i = offset(seed, j, rot.k)
+        offsets.append(rot.i)
+        batches.append(rot.run(k) / k)
+    s = sorted(batches)
+    return s[len(s) // 2], s[0], s[-1], k, count, batches, offsets
 
 
 def main(argv, prepare, signature, operands_hash):
@@ -118,6 +187,8 @@ def main(argv, prepare, signature, operands_hash):
         return
     if mode not in ("time", "time-fresh"):
         raise SystemExit("unknown mode " + mode)
+    import os
+
     rot = Rotation(prepare, k, mode == "time-fresh")
     sigs, warm = [], 0.0
     for v in range(k):
@@ -126,7 +197,27 @@ def main(argv, prepare, signature, operands_hash):
         answer = op()
         warm += time.perf_counter() - t0
         sigs.append(signature(answer))
-    med, lo, hi, reps, count = measure(rot, warm)
+    seed = int(os.environ.get("BENCH_SEED", "0"))
+    g = granularity()
+    threshold = max(PER_OP_FLOOR, 1000 * g)
+    forced = os.environ.get("BENCH_TIMING", "auto")
+    record = {"granularity": g, "threshold": threshold, "seed": seed, "k": k}
+    if forced == "per-op" or (forced == "auto" and warm / k >= threshold):
+        rotations = SAMPLES if warm / k <= 2.0 else 3
+        samples = per_op(prepare, k, rot.fresh, rot.ops, rotations, seed)
+        means = sorted(sum(s[r] for s in samples) / k for r in range(rotations))
+        med, lo, hi, reps, count = (
+            means[len(means) // 2],
+            means[0],
+            means[-1],
+            k,
+            rotations,
+        )
+        record.update(mode="per-op", samples=samples)
+    else:
+        med, lo, hi, reps, count, batches, offsets = measure_batched(rot, warm, seed)
+        record.update(mode="batched", reps=reps, batches=batches, offsets=offsets)
+    print(timing_line(record))
     print(
         "TIME|%.9g|%s|%.9g|%.9g|%d|%d"
         % (med, combined_signature(sigs), lo, hi, reps, count)

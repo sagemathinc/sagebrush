@@ -57,6 +57,59 @@ EXPECTED = None
 # the CPU flags worth recording (SIMD and the arithmetic extensions)
 FLAGS = re.compile(r"^(avx|avx2|avx512\w*|fma|bmi2|adx|sse4_2|asimd|sve\w*|neon)$")
 LINE = re.compile(r"^(RESULT|TIME|INPUTS)\|(.*)$", re.MULTILINE)
+# (protocol 5: a time mode's samples, JSON, before its TIME line)
+TIMING_LINE = re.compile(r"^TIMING\|(\{.*\})$", re.MULTILINE)
+TIMING_LIMIT = 1 << 16
+
+
+def parse_timing(text: str) -> dict | None:
+    """A driver's TIMING record, checked (bounded, the fields typed, the
+    sample counts consistent), or None when absent or malformed."""
+    found = TIMING_LINE.findall(text)
+    if not found or len(found[-1]) > TIMING_LIMIT:
+        return None
+    try:
+        t = json.loads(found[-1])
+    except ValueError:
+        return None
+
+    def num(x):
+        return (
+            isinstance(x, (int, float))
+            and not isinstance(x, bool)
+            and x == x
+            and 0 <= x < 1e9
+        )
+
+    if not isinstance(t, dict) or not all(
+        num(t.get(f)) for f in ("granularity", "threshold", "seed", "k")
+    ):
+        return None
+    k = t["k"]
+    if t.get("mode") == "per-op":
+        s = t.get("samples")
+        ok = (
+            isinstance(s, list)
+            and len(s) == k
+            and all(isinstance(v, list) and v and all(num(x) for x in v) for v in s)
+            and len({len(v) for v in s}) == 1
+        )
+    elif t.get("mode") == "batched":
+        b, o = t.get("batches"), t.get("offsets")
+        ok = (
+            isinstance(b, list)
+            and b
+            and all(num(x) for x in b)
+            and isinstance(o, list)
+            and len(o) == len(b)
+            and all(isinstance(x, int) and 0 <= x < k for x in o)
+            and num(t.get("reps"))
+        )
+    else:
+        ok = False
+    return t if ok else None
+
+
 SINGLE_THREAD = {
     "SAGEBRUSH_THREADS": "1",
     "RAYON_NUM_THREADS": "1",
@@ -864,6 +917,10 @@ def invoke(
             samples=int(count),
             signature=sig,
         )
+        # (protocol 5's samples; a driver without them yet has none)
+        timing = parse_timing(text)
+        if timing is not None:
+            r["timing"] = timing
     return r
 
 
@@ -1009,6 +1066,21 @@ def secs(x) -> str:
     return f"{x:.3g}" if x < 1 else f"{x:.3f}"
 
 
+def engine_label(rec: dict) -> str:
+    """How a table names the user column's engine: "pinned <sha>" only when
+    it was checked strictly and is the pinned one; on a track tip (pin
+    policy track) "fresh <sha> @ <commit>", so its numbers are never quoted
+    as the pinned release's."""
+    pin = rec.get("engine_pin") or {}
+    sha = str(pin.get("sha256") or "")[:12] or "unknown"
+    commit = str(rec.get("commit") or "")[:12] or "unknown"
+    if pin.get("policy", "strict") == "strict" and pin.get("ok"):
+        return f"pinned {sha}"
+    if pin.get("policy") == "track":
+        return f"fresh {sha} @ {commit}"
+    return f"UNPINNED {sha} @ {commit} (not an official run)"
+
+
 def summary(out: Path, items: dict) -> None:
     recs = sorted(
         (json.loads(p.read_text()) for p in (out / "rows").glob("*.json")),
@@ -1019,6 +1091,8 @@ def summary(out: Path, items: dict) -> None:
     m = recs[0]["machine"]
     lines = [
         f"# Core-algorithm harness: {m['label']}",
+        "",
+        f"Engine: {engine_label(recs[0])}.",
         "",
         f"Commit `{recs[0]['commit']}`; {m['cpu']} ({m['arch']}, {m['nproc']} CPUs; flags {' '.join(m['flags']) or 'none recorded'}). "
         f"Memory cap per subprocess: {recs[0].get('mem_cap') or 'none (an uncapped run)'} bytes. "
