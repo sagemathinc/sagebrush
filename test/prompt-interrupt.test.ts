@@ -22,10 +22,15 @@ const children = (pid: number) =>
   spawnSync("pgrep", ["-P", String(pid)], { encoding: "utf8" }).stdout.split("\n").filter(Boolean).map(Number);
 
 /** The prompt (sagebrush ARGS) in a pty, the steps played in order; its text and how it ended. */
-async function prompt(args: string[], steps: Step[], env: Record<string, string> = {}) {
-  // (exec: the shell script starts gives way to sagebrush, so the status is sagebrush's own)
-  const cmd = ["exec", process.execPath, CLI, ...args].map((a) => (a === "exec" ? a : `'${a}'`)).join(" ");
-  const p = spawn("script", ["-qfec", cmd, "/dev/null"], { stdio: ["pipe", "pipe", "pipe"], detached: true, env: { ...process.env, ...env } });
+async function prompt(args: string[], steps: Step[], env: Record<string, string> = {}, o: { node?: string[]; then?: string } = {}) {
+  // (exec: the shell script starts gives way to sagebrush, so the status is sagebrush's own; o.then: a command run
+  // in the same terminal after sagebrush ends instead)
+  const quote = (a: string) => `'${a}'`;
+  const run = [process.execPath, ...(o.node ?? []), CLI, ...args].map(quote).join(" ");
+  const cmd = o.then === undefined ? `exec ${run}` : `${run}; ${o.then}`;
+  // (TERM: a terminal that edits lines; with TERM=dumb, as some shells run, Node's readline has no completion, and
+  // redraws no prompt)
+  const p = spawn("script", ["-qfec", cmd, "/dev/null"], { stdio: ["pipe", "pipe", "pipe"], detached: true, env: { ...process.env, TERM: "xterm", ...env } });
   let out = "";
   p.stdout!.on("data", (d) => (out += d));
   p.stderr!.on("data", (d) => (out += d));
@@ -98,18 +103,68 @@ test("a call into the engine (Sage's factor): Ctrl-C stops it, KeyboardInterrupt
   assert.equal(r.ended?.code, 0, r.out);
 });
 
-test("a second Ctrl-C within 2 s, while the first is unseen, ends the process as SIGINT's default", { skip: !hasScript && "no script(1)", timeout: 90000 }, async () => {
+test("a second Ctrl-C 1 to 2 s after the first, while the first is unseen, ends the process as SIGINT's default", { skip: !hasScript && "no script(1)", timeout: 90000 }, async () => {
   const r = await prompt([], [
     { until: />>> $/, ms: 30000 },
     // (a regular expression that backtracks for minutes and does not look at the flag)
     { send: "import re; re.match(r'(a+)+$', 'a' * 40 + 'b')\r" },
     { wait: 1500 },
     { press: true },
-    { wait: 500 },
+    { wait: 1200 },
     { press: true },
   ]);
   // (script reports a child ended by SIGINT as 130)
   assert.ok(r.ended !== null && r.ended.code === 130, JSON.stringify(r.ended) + r.out);
+});
+
+test("a double tap (two Ctrl-C 50 ms apart) is one press: one KeyboardInterrupt, and the session goes on", { skip: !hasScript && "no script(1)", timeout: 90000 }, async () => {
+  const r = await prompt([], [
+    { until: />>> $/, ms: 30000 },
+    { send: "k = 0\r" },
+    { send: "while True: k += 1\r\r" },
+    { wait: 1500 },
+    { press: true },
+    { wait: 50 },
+    { press: true },
+    { until: /KeyboardInterrupt\n>>> $/ },
+    // (and the second press doesn't wait for the next input: it is gone)
+    { send: "import time; time.sleep(1.5); print('k counted', k > 0)\r" },
+    { until: /k counted True\n>>> $/ },
+    { send: "exit()\r" },
+  ]);
+  assert.equal(r.out.match(/KeyboardInterrupt/g)?.length, 1, r.out);
+  assert.match(r.out, /k counted True/, r.out);
+  assert.equal(r.ended?.code, 0, r.out);
+});
+
+test("the terminal leaves raw mode however the prompt's front ends, an uncaught exception included", { skip: !hasScript && "no script(1)", timeout: 90000 }, async () => {
+  // (a preload throws on this process's main thread once the front has put the terminal in raw mode, and reports at
+  // the exit, after the front's own handlers, whether the terminal was put back; stty then reads the terminal itself)
+  const dir = mkdtempSync(join(tmpdir(), "sb-prompt-int-"));
+  try {
+    const pre = join(dir, "throw-after-raw.cjs");
+    writeFileSync(pre, [
+      `const { isMainThread } = require("node:worker_threads");`,
+      `if (isMainThread && process.stdin.isTTY) {`,
+      `  const set = process.stdin.setRawMode.bind(process.stdin);`,
+      `  let raw = false, planted = false;`,
+      `  process.stdin.setRawMode = (on) => { raw = on; set(on);`,
+      `    if (on && !planted) { planted = true; setTimeout(() => {`,
+      `      process.on("exit", () => require("node:fs").writeSync(2, "RAW AT EXIT " + raw + "\\n"));`,
+      `      throw new Error("planted failure in the front");`,
+      `    }, 3000); }`,
+      `    return process.stdin; };`,
+      `}`,
+    ].join("\n"));
+    const r = await prompt([], [{ until: /RAW AT EXIT/, ms: 30000 }, { until: /speed/, ms: 10000 }], {}, { node: ["--require", pre], then: "stty -a" });
+    assert.match(r.out, /planted failure in the front/, r.out);
+    assert.match(r.out, /RAW AT EXIT false\n/, r.out);
+    // (canonical mode and echo back on, as the shell had them)
+    assert.match(r.out, /(^|\s)icanon(\s|$)/m, r.out);
+    assert.match(r.out, /(^|\s)echo(\s|$)/m, r.out);
+  } finally {
+    rmSync(dir, { recursive: true, force: true });
+  }
 });
 
 test("Ctrl-C while the prompt waits clears the line; Tab completes from the session", { skip: !hasScript && "no script(1)", timeout: 90000 }, async () => {

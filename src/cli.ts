@@ -548,11 +548,11 @@ type FrontMsg = { interrupt?: SharedArrayBuffer | null; ready?: { ps1: string; p
 /** This thread's side of the prompt: the terminal, and the worker running main(argv) with the prompt in it. Resolves
  * to the exit status. */
 function promptFront(argv: string[], limits: LimitsText): Promise<number> {
-  const entry = cliEntry()!;
-  // (as the launcher's: the compile cache on before the bundle loads, and stdout and stderr written to fds 1 and 2
-  // by the worker itself, so that its output and this thread's prompts come out in the order written)
-  const boot = `try { require("node:module").enableCompileCache?.(); } catch {}\nrequire(${JSON.stringify(entry)});`;
-  const worker = new Worker(boot, { eval: true, stdout: true, stderr: true, workerData: { sagebrushPrompt: { argv, limits, entry } } });
+  // (this process's own entry, as the kernel's and the notebook's workers: the npm launcher, started in a worker,
+  // loads the bundle, which runs the prompt's side by its workerData; stdout and stderr written to fds 1 and 2 by the
+  // worker itself, so that its output and this thread's prompts come out in the order written)
+  const entry = require.main?.filename ?? process.argv[1];
+  const worker = new Worker(entry, { stdout: true, stderr: true, workerData: { sagebrushPrompt: { argv, limits } } });
   let intr: Int32Array | null = null, last = 0, interrupted = false, busy = true;
   let figures: { dir: string; kept: boolean } | null = null;
   const tty = process.stdin.isTTY === true;
@@ -562,6 +562,8 @@ function promptFront(argv: string[], limits: LimitsText): Promise<number> {
     if (tty) try { process.stdin.setRawMode(on); } catch {}
   };
   raw(true);
+  // (and out of it however this thread ends, an exception's end included)
+  process.on("exit", () => raw(false));
   const removeFiguresHere = () => { if (figures !== null && !figures.kept) try { rmSync(figures.dir, { recursive: true, force: true }); } catch {} };
   const die = (sig: NodeJS.Signals) => {
     removeFiguresHere();
@@ -569,11 +571,17 @@ function promptFront(argv: string[], limits: LimitsText): Promise<number> {
     process.removeAllListeners(sig);
     process.kill(process.pid, sig);
   };
-  // (Ctrl-C while an input runs, the key or a SIGINT: the flag, as the launcher sets it; a second one within 2 s
-  // while the first is unseen, or one before the worker has handed over its flag: SIGINT's default action)
+  // (Ctrl-C while an input runs, the key or a SIGINT: the flag, as the launcher sets it. Another while the first is
+  // still unseen: within GRACE of it, the same press (a double tap lands both before any call could have polled);
+  // from GRACE to 2 s, or one before the worker has handed over its flag: SIGINT's default action)
+  const GRACE = 1000; // (ms: four times the 250 ms in which a polling call honours a press)
   const press = () => {
     const now = Date.now();
-    if (intr === null || ((Atomics.load(intr, 0) & 1) !== 0 && now - last < 2000)) return die("SIGINT");
+    if (intr === null) return die("SIGINT");
+    if ((Atomics.load(intr, 0) & 1) !== 0 && now - last < 2000) {
+      if (now - last < GRACE) return;
+      return die("SIGINT");
+    }
     last = now;
     Atomics.or(intr, 0, 1); // (bit 0, Ctrl-C: the word's other bits left, src/runtime/interrupt.ts)
     Atomics.notify(intr, 0); // (a time.sleep waits on the flag)
@@ -611,8 +619,10 @@ function promptFront(argv: string[], limits: LimitsText): Promise<number> {
   };
   process.stdin.setEncoding("utf8");
   const onData = (d: string) => {
-    if (busy && tty) {
-      if (d.includes("\x03")) press();
+    // (while an input runs, a Ctrl-C is the press; just after one stopped it, within the grace, the rest of a double
+    // tap, not a Ctrl-C at the prompt)
+    if (tty && d.includes("\x03") && (busy || Date.now() - last < GRACE)) {
+      if (busy) press();
       d = d.replace(/\x03/g, "");
     }
     held += d;
@@ -720,9 +730,11 @@ function promptFront(argv: string[], limits: LimitsText): Promise<number> {
         rl!.setPrompt(ps1);
         rl!.prompt();
       };
+      // (the line being taken: at the input's end, readline closes once it has its last line, which runs first)
+      let taking: Promise<void> = Promise.resolve();
       rl.on("line", (line) => {
         sawLine = true;
-        take(line).then(() => {
+        taking = take(line).then(() => {
           lineOut = false;
           if (!done) feed();
         });
@@ -736,9 +748,11 @@ function promptFront(argv: string[], limits: LimitsText): Promise<number> {
         rl!.prompt();
       });
       rl.on("close", () => {
-        if (done) return;
-        if (tty) process.stdout.write("\n");
-        close(0);
+        taking.then(() => {
+          if (done) return;
+          if (tty) process.stdout.write("\n");
+          close(0);
+        });
       });
       rl.setPrompt(ps1);
       rl.prompt();
@@ -1201,7 +1215,7 @@ else if (workerData?.sagebrushBoardRun) import("./board-run").then((m) => m.boar
  * npm launcher loaded in a worker (the launcher says which: a worker's own main module and argv are none of them), or
  * this process's main module, or its script. Null if there is none. */
 function cliEntry(): string | null {
-  try { return realpathSync(workerData?.sagebrushCli?.entry ?? workerData?.sagebrushPrompt?.entry ?? require.main?.filename ?? process.argv[1]); } catch { return null; }
+  try { return realpathSync(workerData?.sagebrushCli?.entry ?? require.main?.filename ?? process.argv[1]); } catch { return null; }
 }
 
 /** `sagebrush latex`'s module, sagebrush-latex.cjs (scripts/build-cli.mjs): beside this bundle in the npm package and in
@@ -1213,7 +1227,7 @@ function cliEntry(): string | null {
 function loadLatex(): { latexCommand: (argv: string[], opts?: { cli?: string }) => Promise<number> } | string {
   // (cliEntry's path, written out here so that the census's pin of this function covers every place it loads from)
   const dirs: string[] = [];
-  try { const at = dirname(realpathSync(workerData?.sagebrushCli?.entry ?? workerData?.sagebrushPrompt?.entry ?? require.main?.filename ?? process.argv[1])); dirs.push(at, join(at, "..", "dist")); } catch {}
+  try { const at = dirname(realpathSync(workerData?.sagebrushCli?.entry ?? require.main?.filename ?? process.argv[1])); dirs.push(at, join(at, "..", "dist")); } catch {}
   const here = typeof __dirname === "string" ? __dirname : ".";
   dirs.push(here, join(here, "..", "build", "cli"), join(here, "..", "..", "build", "cli"));
   for (const d of dirs) {
