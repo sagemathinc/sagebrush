@@ -919,6 +919,39 @@ async function wsConflict(w: Workspace, id: string, d: BoardDoc, header: string,
     wsRefused = e instanceof Error ? e : new Error(String(e));
   }
 }
+/** This board written elsewhere (an agent paired with the notebook page, another tab of this browser): shown here at
+ * once, as a reload would show it, its changed code run as on any document from elsewhere. Read after this page's
+ * own save in flight (the same queue), so this page's own write is known by its revision and passed over; while a
+ * save of this page's waits, nothing: that save meets the write as a conflict, and both are kept (wsConflict). */
+let wsFollowing = false;
+function followWrites(w: Workspace, id: string) {
+  if (wsFollowing) return;
+  wsFollowing = true;
+  let timer: ReturnType<typeof setTimeout> | null = null;
+  w.watch((c) => {
+    if (!c.ops?.some((op) => op.kind === "board" && op.ref === id && op.op === "write")) return;
+    if (timer) clearTimeout(timer);
+    timer = setTimeout(() => {
+      timer = null;
+      wsWriting = wsWriting.then(() => adoptWrite(w, id)).catch((e) => console.warn("board: a write made elsewhere not shown:", e));
+    }, 100);
+  });
+}
+async function adoptWrite(w: Workspace, id: string) {
+  if (wsLatest.size || wsCopy) return;
+  let cur: { content: unknown; rev: number } | null;
+  if (journalOn && jstore) {
+    const rec = await jstore.load();
+    cur = rec ? { content: stripBoard(rec), rev: rec.rev } : null;
+  } else {
+    const path = await w.pathOf("board", id);
+    cur = path ? await w.read(path) : null;
+  }
+  if (!cur || cur.rev === wsRev || !isBoard(cur.content) || wsLatest.size) return;
+  wsEpoch++;
+  wsRev = cur.rev;
+  for (const f of wsSubs) await f(cur.content as BoardDoc);
+}
 /** The pending copy of `id` dropped, only if it still starts with `prefix` (its own). */
 function dropPending(id: string, prefix: string) {
   try {
@@ -1226,6 +1259,8 @@ const host: BoardHost = {
           blockBoard(new Error(`${path}'s content isn't in this browser: boards don't sync yet`), why, "This board was made on another device. Boards don't sync yet.");
           return { doc: { ...blankBoard((entry as { mode?: string }).mode ?? "python"), title: splitExt(nameOf(path))[0] }, original: null, notice: why };
         }
+        // (written elsewhere from now on, an agent's write too: shown here, followWrites)
+        if (path) followWrites(ws, id);
         // (the board journal: its store's load first, then the pending copy ordered against what it settled)
         if (path && journalOn) return journalLoad(id, path, pend, notice);
         if (path) {

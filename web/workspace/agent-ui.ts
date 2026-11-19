@@ -60,6 +60,10 @@ const CSS = `
 .sbag-bar { position: fixed; left: 12px; bottom: calc(12px + var(--sb-alpha-banner, 0px)); z-index: 999; background: #1d241a; color: #fff; border-radius: 18px; padding: 6px 8px 6px 14px; font: 13px system-ui, sans-serif; display: flex; gap: 10px; align-items: center; box-shadow: 0 4px 14px rgba(0,0,0,.2); }
 .sbag-bar button { font: inherit; border: 0; border-radius: 12px; padding: 3px 10px; background: #fff; color: #1d241a; cursor: pointer; }
 .sbag-bar button.open { max-width: 240px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.sbag-bar .made { display: flex; gap: 8px; align-items: center; padding-left: 10px; border-left: 1px solid #4a5546; white-space: nowrap; min-width: 0; max-width: 480px; }
+.sbag-bar .made b { overflow: hidden; text-overflow: ellipsis; min-width: 0; }
+.sbag-bar .made button { flex: none; }
+.sbag-bar button.cta { background: #8fd17a; color: #10200c; font-weight: 600; padding: 4px 16px; }
 `;
 
 let styled = false;
@@ -151,9 +155,13 @@ export function mountAgentPairing(ws: PairingWorkspace, o: { button?: HTMLElemen
     if (noRun) noRun.onclick = () => void p.noRun();
     // (Open: what the agent created last, where the page can open it (its `open`), as Files would)
     const made = o.open && p.created ? p.created : null;
-    const open = made ? h("button", { className: "open", textContent: "Open " + nameOf(made.path), title: `Open ${made.path}, which the agent created` }) : null;
+    // (a board it made opens in a tab of its own, never by itself (a tab only opens on a click, and this page keeps the
+    //  pairing): said as what the agent did, with Open beside it, the bar's one call to action)
+    const board = made?.kind === "board";
+    const open = made ? h("button", { className: board ? "cta" : "open", textContent: board ? "Open" : "Open " + nameOf(made.path), title: board ? `Open ${made.path} in a new tab, where its code runs` : `Open ${made.path}, which the agent created` }) : null;
     if (open && made) open.onclick = () => o.open!(made);
-    bar = h("div", { className: "sbag-bar" }, text, ...(open ? [open] : []), ...(noRun ? [noRun] : []), revoke);
+    const did = board && open ? h("span", { className: "made" }, `${p.hello!.agent.name} made`, h("b", { textContent: nameOf(made!.path) }), open) : open;
+    bar = h("div", { className: "sbag-bar" }, text, ...(did ? [did] : []), ...(noRun ? [noRun] : []), revoke);
     bar.setAttribute("role", "status");
     document.body.append(bar);
   }
