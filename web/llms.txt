@@ -97,7 +97,7 @@ The rule for the libraries Sagebrush rewrites:
 
 ## MCP server (for AI agents)
 
-- Every way a person connects an agent to Sagebrush, in full (what each needs, what it touches, what isn't there yet): [/agents/connect.md](/agents/connect.md). The page for people, /agents/connect/, gives only the three choices and one command each.
+- Every way a person connects an agent to Sagebrush, in full (what each needs, what it touches, what isn't there yet): [/agents/connect.md](/agents/connect.md). The page for people, /agents/connect/, gives only the two choices and one command each.
 - `sagebrush-mcp` is a local Model Context Protocol server over stdio, for any agent that speaks MCP (Claude Code, Codex, Cursor, ...). It needs no account and no login. It comes with the Python package: `pip install sagebrush` (Python 3.10+) installs it, or `uvx sagebrush-mcp@latest` runs it without installing (uv checks for a newer release at each start).
 - The npm `sagebrush` command line has no `mcp` command; the MCP server is the Python package's `sagebrush-mcp`.
 - Claude Code: `claude mcp add sagebrush -- sagebrush-mcp`. Codex: `codex mcp add sagebrush -- sagebrush-mcp`, which writes `[mcp_servers.sagebrush]` with `command = "sagebrush-mcp"` to `~/.codex/config.toml`. Other clients: `{"mcpServers": {"sagebrush": {"command": "sagebrush-mcp"}}}`.
