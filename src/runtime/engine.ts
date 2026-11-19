@@ -26,6 +26,8 @@ interface Engine {
   sb_call(ptr: number, len: number): number;
   sb_sym_call(ptr: number, len: number): number;
   sb_mp_call(ptr: number, len: number): number;
+  // (optional: engines built before the binary entry point lack it)
+  sb_bin_call?(ptr: number, len: number): number;
   sb_last_error(): number;
   sb_reply_len(): number;
   // (optional: engines built before item D0 lack it)
@@ -684,6 +686,32 @@ export function mpCall(req: Uint8Array): Uint8Array {
   return new Uint8Array(e.memory.buffer, r, e.sb_reply_len()).slice();
 }
 
+/** A binary call (SBW1, engine/wire): binary request and reply, errors in
+ *  band ("er" records); null when the engine predates the entry point (the
+ *  caller keeps its JSON path). */
+export function binCall(req: Uint8Array): Uint8Array | null {
+  const e = engine();
+  if (!e.sb_bin_call) return null;
+  pushShare(e);
+  const p = e.sb_alloc(req.length);
+  new Uint8Array(e.memory.buffer, p, req.length).set(req);
+  let r: number;
+  inCall++;
+  try {
+    r = e.sb_bin_call(p, req.length);
+  } catch (err) {
+    // an interrupt (or a bug) trapped: retire the instance
+    inCall--;
+    retire(e);
+    callEnded(true);
+    throw err;
+  }
+  inCall--;
+  callEnded(false);
+  e.sb_free(p, req.length);
+  return new Uint8Array(e.memory.buffer, r, e.sb_reply_len()).slice();
+}
+
 // A Stop traps the engine, the instance is retired, and a new one is created
 // (admitted) on the next call; the old one's memory (tens of MB after an F4
 // matrix) is freed only by V8's next major collection, so a run of Stops
@@ -875,6 +903,16 @@ newBuiltinModule("_sbengine", (m) => {
       return engineError(err);
     }
   }, "mp");
+  // None: the engine predates the binary entry point
+  m.bin = Obj.builtin((req: any) => {
+    try {
+      const a = req instanceof Obj.PyBytes ? req.a.subarray(0, req.n) : new Uint8Array(0);
+      const r = binCall(a);
+      return r === null ? null : new Obj.PyBytes(r);
+    } catch (err: any) {
+      return engineError(err);
+    }
+  }, "bin");
   m.sym = Obj.builtin((req: any) => {
     try {
       return symCall(String(req));

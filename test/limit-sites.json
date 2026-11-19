@@ -4,6 +4,16 @@
   "owner": "remote-compute",
   "reason": "test-hook timing (longest wall-time gap between interrupt checks / simulated wasm host polls) and its readout in ap Stop pins; measures, refuses nothing"
  },
+ "engine/arith/src/nmod_poly.rs :: barrett_reduction_edges :: let mut xs: Vec<u64> = vec![0, 1, n - 1, n, n + 1, 2 * n - 1, u64::MAX, u64::MAX - 1, u64::MAX - n]; #0": {
+  "class": "none",
+  "owner": "exact linear algebra (engine/arith)",
+  "reason": "test code: the Barrett reduction's edge inputs (u64::MAX and the largest multiples of n); refuses nothing itself"
+ },
+ "engine/arith/src/nmod_poly.rs :: barrett_reduction_edges :: let top = u64::MAX / n * n; #0": {
+  "class": "none",
+  "owner": "exact linear algebra (engine/arith)",
+  "reason": "test code: the Barrett reduction's edge inputs (u64::MAX and the largest multiples of n); refuses nothing itself"
+ },
  "engine/arith/src/nmod_poly.rs :: work_bounds_refuse_instead_of_panicking :: assert_eq!(divrem_work(usize::MAX, 1), None); #0": {
   "class": "none",
   "owner": "exact linear algebra (engine/arith)",
@@ -33,16 +43,6 @@
   "class": "none",
   "owner": "exact linear algebra (engine/arith)",
   "reason": "test code: every work bound at extreme lengths is None (a refusal) or a number, never an overflow; refuses nothing itself"
- },
- "engine/arith/src/nmod_poly.rs :: barrett_reduction_edges :: let mut xs: Vec<u64> = vec![0, 1, n - 1, n, n + 1, 2 * n - 1, u64::MAX, u64::MAX - 1, u64::MAX - n]; #0": {
-  "class": "none",
-  "owner": "exact linear algebra (engine/arith)",
-  "reason": "test code: the Barrett reduction's edge inputs (u64::MAX and the largest multiples of n); refuses nothing itself"
- },
- "engine/arith/src/nmod_poly.rs :: barrett_reduction_edges :: let top = u64::MAX / n * n; #0": {
-  "class": "none",
-  "owner": "exact linear algebra (engine/arith)",
-  "reason": "test code: the Barrett reduction's edge inputs (u64::MAX and the largest multiples of n); refuses nothing itself"
  },
  "engine/arith/src/zmat.rs :: rref_multimodular :: let amax = a.max_bits() as f64; #0": {
   "class": "none",
@@ -4758,6 +4758,140 @@
   "class": "none",
   "owner": "wasm heap (shared by raster and the mp core)"
  },
+ "engine/web/src/bin_ops.rs ::  :: use crate::nmod_ops::{DIV_MAX_LEN, GCD_MAX_LEN, MUL_MAX_LEN}; #0": {
+  "class": "none",
+  "owner": "engine web + finite-field polynomials",
+  "reason": "the binary ops' plumbing (the table's fields, the request-cap arithmetic, mapping a refusal or invariant to its reply code); refuses nothing itself"
+ },
+ "engine/web/src/bin_ops.rs :: poly_view :: fn poly_view(a: wire::Arg<'_>, max: usize, p: u64) -> Result<U64s<'_>, WireError> { #0": {
+  "class": "none",
+  "owner": "engine web + finite-field polynomials",
+  "reason": "the binary ops' plumbing (the table's fields, the request-cap arithmetic, mapping a refusal or invariant to its reply code); refuses nothing itself"
+ },
+ "engine/web/src/bin_ops.rs :: poly_view :: if v.count == 0 || v.count > max { #0": {
+  "class": "1",
+  "disposition": {
+   "1": "shared"
+  },
+  "owner": "engine web + finite-field polynomials",
+  "reason": "the binary GF(p)[x] ops' admission: the JSON ops' length caps and the modulus range, per op; past them the library keeps its Python path, so no user computation is limited"
+ },
+ "engine/web/src/bin_ops.rs :: request_cap :: BinOp { name: \"nmod_poly_divrem\", kind: Kind::Divrem, polys: 2, max_len: DIV_MAX_LEN }, #0": {
+  "class": "1",
+  "disposition": {
+   "1": "shared"
+  },
+  "owner": "engine web + finite-field polynomials",
+  "reason": "the binary GF(p)[x] ops' admission: the JSON ops' length caps and the modulus range, per op; past them the library keeps its Python path, so no user computation is limited"
+ },
+ "engine/web/src/bin_ops.rs :: request_cap :: BinOp { name: \"nmod_poly_gcd\", kind: Kind::Gcd, polys: 2, max_len: GCD_MAX_LEN }, #0": {
+  "class": "1",
+  "disposition": {
+   "1": "shared"
+  },
+  "owner": "engine web + finite-field polynomials",
+  "reason": "the binary GF(p)[x] ops' admission: the JSON ops' length caps and the modulus range, per op; past them the library keeps its Python path, so no user computation is limited"
+ },
+ "engine/web/src/bin_ops.rs :: request_cap :: BinOp { name: \"nmod_poly_mul\", kind: Kind::Mul, polys: 2, max_len: MUL_MAX_LEN }, #0": {
+  "class": "1",
+  "disposition": {
+   "1": "shared"
+  },
+  "owner": "engine web + finite-field polynomials",
+  "reason": "the binary GF(p)[x] ops' admission: the JSON ops' length caps and the modulus range, per op; past them the library keeps its Python path, so no user computation is limited"
+ },
+ "engine/web/src/bin_ops.rs :: request_cap :: assert!(matches!(request_cap(BIN_OPS[i].polys, BIN_OPS[i].max_len), Some(c) if c <= wire::FRAME_CAP)); #0": {
+  "class": "none",
+  "owner": "engine web + finite-field polynomials",
+  "reason": "the binary ops' plumbing (the table's fields, the request-cap arithmetic, mapping a refusal or invariant to its reply code); refuses nothing itself"
+ },
+ "engine/web/src/bin_ops.rs :: request_cap :: const MAX_P: u64 = 1 << 63; #0": {
+  "class": "1",
+  "disposition": {
+   "1": "shared"
+  },
+  "owner": "engine web + finite-field polynomials",
+  "reason": "the binary GF(p)[x] ops' admission: the JSON ops' length caps and the modulus range, per op; past them the library keeps its Python path, so no user computation is limited"
+ },
+ "engine/web/src/bin_ops.rs :: request_cap :: let Some(frame) = (4 + 4 + wire::OP_NAME_MAX + 4 + 12 + 8).checked_add(lengths) else { return None }; #0": {
+  "class": "none",
+  "owner": "engine web + finite-field polynomials",
+  "reason": "the binary ops' plumbing (the table's fields, the request-cap arithmetic, mapping a refusal or invariant to its reply code); refuses nothing itself"
+ },
+ "engine/web/src/bin_ops.rs :: request_cap :: max_len: usize, #0": {
+  "class": "none",
+  "owner": "engine web + finite-field polynomials",
+  "reason": "the binary ops' plumbing (the table's fields, the request-cap arithmetic, mapping a refusal or invariant to its reply code); refuses nothing itself"
+ },
+ "engine/web/src/bin_ops.rs :: run :: if p >= MAX_P || !is_prime(p) { #0": {
+  "class": "1",
+  "disposition": {
+   "1": "shared"
+  },
+  "owner": "engine web + finite-field polynomials",
+  "reason": "the binary GF(p)[x] ops' admission: the JSON ops' length caps and the modulus range, per op; past them the library keeps its Python path, so no user computation is limited"
+ },
+ "engine/web/src/bin_ops.rs :: run :: let a = poly_view(arg(1)?, op.max_len, p)?; #0": {
+  "class": "none",
+  "owner": "engine web + finite-field polynomials",
+  "reason": "the binary ops' plumbing (the table's fields, the request-cap arithmetic, mapping a refusal or invariant to its reply code); refuses nothing itself"
+ },
+ "engine/web/src/bin_ops.rs :: run :: let b = poly_view(arg(2)?, op.max_len, p)?; #0": {
+  "class": "none",
+  "owner": "engine web + finite-field polynomials",
+  "reason": "the binary ops' plumbing (the table's fields, the request-cap arithmetic, mapping a refusal or invariant to its reply code); refuses nothing itself"
+ },
+ "engine/web/src/bin_ops.rs :: run :: let len = wire::ok_u641_len(&counts[..n]).ok_or(fail(Code::Internal, 0, \"a result too large to frame\"))?; #0": {
+  "class": "none",
+  "owner": "engine web + finite-field polynomials",
+  "reason": "the binary ops' plumbing (the table's fields, the request-cap arithmetic, mapping a refusal or invariant to its reply code); refuses nothing itself"
+ },
+ "engine/web/src/bin_ops.rs :: run :: let need = bound(op.kind, la, lb).ok_or(fail(Code::Cap, 0, \"a memory bound too large\"))?; #0": {
+  "class": "1",
+  "disposition": {
+   "1": "shared"
+  },
+  "owner": "engine web + finite-field polynomials",
+  "reason": "the binary GF(p)[x] ops' admission: the JSON ops' length caps and the modulus range, per op; past them the library keeps its Python path, so no user computation is limited"
+ },
+ "engine/web/src/bin_ops.rs :: run :: sagebrush_ledger::EngineError::Memory(_) => fail(Code::Cap, 0, \"the call's memory reservation was refused\"), #0": {
+  "class": "none",
+  "owner": "engine web + finite-field polynomials",
+  "reason": "the binary ops' plumbing (the table's fields, the request-cap arithmetic, mapping a refusal or invariant to its reply code); refuses nothing itself"
+ },
+ "engine/web/src/bin_ops.rs :: spec :: Some(OpSpec { min_args: args, max_args: args, request_cap: request_cap(o.polys, o.max_len)? }) #0": {
+  "class": "1",
+  "disposition": {
+   "1": "shared"
+  },
+  "owner": "engine web + finite-field polynomials",
+  "reason": "the binary GF(p)[x] ops' admission: the JSON ops' length caps and the modulus range, per op; past them the library keeps its Python path, so no user computation is limited"
+ },
+ "engine/web/src/bin_ops/tests.rs :: refusals_have_their_codes_and_offsets :: assert!(n > request_cap(2, MUL_MAX_LEN).unwrap()); #0": {
+  "class": "none",
+  "owner": "engine binary transport (sagebrush-wire)",
+  "reason": "test code: the binary transport's parser, op and allocation tests; refuses nothing itself"
+ },
+ "engine/web/src/bin_ops/tests.rs :: refusals_have_their_codes_and_offsets :: check(args, Code::Cap, 0); #0": {
+  "class": "none",
+  "owner": "engine binary transport (sagebrush-wire)",
+  "reason": "test code: the binary transport's parser, op and allocation tests; refuses nothing itself"
+ },
+ "engine/web/src/bin_ops/tests.rs :: refusals_have_their_codes_and_offsets :: for p in [0u64, 1, 4, 1 << 63, u64::MAX] { #0": {
+  "class": "none",
+  "owner": "engine binary transport (sagebrush-wire)",
+  "reason": "test code: the binary transport's parser, op and allocation tests; refuses nothing itself"
+ },
+ "engine/web/src/bin_ops/tests.rs :: refusals_have_their_codes_and_offsets :: let args = vec![u641(&[7]), u641(&vec![1u64; MUL_MAX_LEN]), u641(&vec![1u64; MUL_MAX_LEN + 3])]; #0": {
+  "class": "none",
+  "owner": "engine binary transport (sagebrush-wire)",
+  "reason": "test code: the binary transport's parser, op and allocation tests; refuses nothing itself"
+ },
+ "engine/web/src/bin_ops/tests.rs :: refusals_have_their_codes_and_offsets :: let long = vec![1u64; MUL_MAX_LEN + 1]; #0": {
+  "class": "none",
+  "owner": "engine binary transport (sagebrush-wire)",
+  "reason": "test code: the binary transport's parser, op and allocation tests; refuses nothing itself"
+ },
  "engine/web/src/hmfq.rs ::  :: const MAX_DISC: i64 = 1 << 20; #0": {
   "class": "3",
   "owner": "HMF/web",
@@ -5016,6 +5150,81 @@
   "owner": "engine web + finite-field matrices",
   "row": "inv-7"
  },
+ "engine/web/tests/bin_alloc.rs ::  :: use sagebrush_web::nmod_ops::{DIV_MAX_LEN, GCD_MAX_LEN, MUL_MAX_LEN}; #0": {
+  "class": "none",
+  "owner": "engine binary transport (sagebrush-wire)",
+  "reason": "test code: the binary transport's parser, op and allocation tests; refuses nothing itself"
+ },
+ "engine/web/tests/bin_alloc.rs :: binary_calls_allocate_only_within_their_reservation :: (\"nmod_poly_divrem\", NTT_P, DIV_MAX_LEN, (1 << 14) + 1), #0": {
+  "class": "none",
+  "owner": "engine binary transport (sagebrush-wire)",
+  "reason": "test code: the binary transport's parser, op and allocation tests; refuses nothing itself"
+ },
+ "engine/web/tests/bin_alloc.rs :: binary_calls_allocate_only_within_their_reservation :: (\"nmod_poly_divrem\", P, DIV_MAX_LEN, (1 << 14) + 1), #0": {
+  "class": "none",
+  "owner": "engine binary transport (sagebrush-wire)",
+  "reason": "test code: the binary transport's parser, op and allocation tests; refuses nothing itself"
+ },
+ "engine/web/tests/bin_alloc.rs :: binary_calls_allocate_only_within_their_reservation :: (\"nmod_poly_divrem\", P, DIV_MAX_LEN, 59), #0": {
+  "class": "none",
+  "owner": "engine binary transport (sagebrush-wire)",
+  "reason": "test code: the binary transport's parser, op and allocation tests; refuses nothing itself"
+ },
+ "engine/web/tests/bin_alloc.rs :: binary_calls_allocate_only_within_their_reservation :: (\"nmod_poly_divrem\", P, DIV_MAX_LEN, 60), #0": {
+  "class": "none",
+  "owner": "engine binary transport (sagebrush-wire)",
+  "reason": "test code: the binary transport's parser, op and allocation tests; refuses nothing itself"
+ },
+ "engine/web/tests/bin_alloc.rs :: binary_calls_allocate_only_within_their_reservation :: (\"nmod_poly_gcd\", NTT_P, GCD_MAX_LEN, GCD_MAX_LEN - 1), #0": {
+  "class": "none",
+  "owner": "engine binary transport (sagebrush-wire)",
+  "reason": "test code: the binary transport's parser, op and allocation tests; refuses nothing itself"
+ },
+ "engine/web/tests/bin_alloc.rs :: binary_calls_allocate_only_within_their_reservation :: (\"nmod_poly_gcd\", P, GCD_MAX_LEN, GCD_MAX_LEN), #0": {
+  "class": "none",
+  "owner": "engine binary transport (sagebrush-wire)",
+  "reason": "test code: the binary transport's parser, op and allocation tests; refuses nothing itself"
+ },
+ "engine/web/tests/bin_alloc.rs :: binary_calls_allocate_only_within_their_reservation :: (\"nmod_poly_mul\", NTT_P, MUL_MAX_LEN, MUL_MAX_LEN), #0": {
+  "class": "none",
+  "owner": "engine binary transport (sagebrush-wire)",
+  "reason": "test code: the binary transport's parser, op and allocation tests; refuses nothing itself"
+ },
+ "engine/web/tests/bin_alloc.rs :: binary_calls_allocate_only_within_their_reservation :: (\"nmod_poly_mul\", P, MUL_MAX_LEN, MUL_MAX_LEN), #0": {
+  "class": "none",
+  "owner": "engine binary transport (sagebrush-wire)",
+  "reason": "test code: the binary transport's parser, op and allocation tests; refuses nothing itself"
+ },
+ "engine/web/tests/bin_alloc.rs :: binary_calls_allocate_only_within_their_reservation :: assert_eq!((g, first), (wire::ERROR_REPLY_MAX, \"nmod_poly_mul\".len())); #0": {
+  "class": "none",
+  "owner": "engine binary transport (sagebrush-wire)",
+  "reason": "test code: the binary transport's parser, op and allocation tests; refuses nothing itself"
+ },
+ "engine/web/tests/bin_alloc.rs :: binary_calls_allocate_only_within_their_reservation :: assert_eq!((g, first), (wire::ERROR_REPLY_MAX, wire::ERROR_REPLY_MAX), \"request {i}: only the error reply\"); #0": {
+  "class": "none",
+  "owner": "engine binary transport (sagebrush-wire)",
+  "reason": "test code: the binary transport's parser, op and allocation tests; refuses nothing itself"
+ },
+ "engine/web/tests/bin_alloc.rs :: binary_calls_allocate_only_within_their_reservation :: assert_eq!(wire::parse_reply(&out).unwrap(), Err((wire::Code::Cap as u16, 0))); #0": {
+  "class": "none",
+  "owner": "engine binary transport (sagebrush-wire)",
+  "reason": "test code: the binary transport's parser, op and allocation tests; refuses nothing itself"
+ },
+ "engine/web/tests/bin_alloc.rs :: binary_calls_allocate_only_within_their_reservation :: bad.push(req(\"nmod_poly_mul\", 101, &[&vec![1; MUL_MAX_LEN + 1], &small])); #0": {
+  "class": "none",
+  "owner": "engine binary transport (sagebrush-wire)",
+  "reason": "test code: the binary transport's parser, op and allocation tests; refuses nothing itself"
+ },
+ "engine/web/tests/bin_alloc.rs :: binary_calls_allocate_only_within_their_reservation :: bad.push(req(\"nmod_poly_mul\", 101, &[&vec![1; MUL_MAX_LEN], &vec![1; MUL_MAX_LEN + 3]])); #0": {
+  "class": "none",
+  "owner": "engine binary transport (sagebrush-wire)",
+  "reason": "test code: the binary transport's parser, op and allocation tests; refuses nothing itself"
+ },
+ "engine/web/tests/bin_alloc.rs :: binary_calls_allocate_only_within_their_reservation :: let (a, b) = (rand_poly(&mut s, MUL_MAX_LEN, P), rand_poly(&mut s, MUL_MAX_LEN, P)); #0": {
+  "class": "none",
+  "owner": "engine binary transport (sagebrush-wire)",
+  "reason": "test code: the binary transport's parser, op and allocation tests; refuses nothing itself"
+ },
  "engine/web/tests/nmod_alloc.rs :: peaks_within_bounds :: a[GCD_MAX_LEN - 1] = 1; #0": {
   "class": "none",
   "owner": "engine web + finite-field matrices",
@@ -5095,6 +5304,581 @@
  "engine/web/tests/nmod_ops.rs :: echelon_envelope_constants :: assert_eq!(ECH_MAX_TEXT, 20 * 1024 * 1024); #0": {
   "class": "none",
   "owner": "engine web + finite-field matrices"
+ },
+ "engine/wire/src/lib.rs ::  :: Cap = 7, #0": {
+  "class": "none",
+  "owner": "engine binary transport (sagebrush-wire)",
+  "reason": "the parser's plumbing (signatures, fields, fixed arrays sized by the argument maximum, figures for the caller's bound); refuses nothing itself"
+ },
+ "engine/wire/src/lib.rs ::  :: pub const ERROR_REPLY_MAX: usize = 4 + 2 + 2 + 8 + 2 + ERROR_TEXT_MAX; #0": {
+  "class": "1",
+  "disposition": {
+   "1": "shared"
+  },
+  "owner": "engine binary transport (sagebrush-wire)",
+  "reason": "the SBW1 parser's admission (the frame and op caps, argument and element counts against the bytes present, name and options-text grammar): a malformed or oversized request gets a typed error reply, before anything is allocated"
+ },
+ "engine/wire/src/lib.rs ::  :: pub const ERROR_TEXT_MAX: usize = 256; #0": {
+  "class": "1",
+  "disposition": {
+   "1": "shared"
+  },
+  "owner": "engine binary transport (sagebrush-wire)",
+  "reason": "the SBW1 parser's admission (the frame and op caps, argument and element counts against the bytes present, name and options-text grammar): a malformed or oversized request gets a typed error reply, before anything is allocated"
+ },
+ "engine/wire/src/lib.rs ::  :: pub const MAX_ARGS: usize = 8; #0": {
+  "class": "1",
+  "disposition": {
+   "1": "shared"
+  },
+  "owner": "engine binary transport (sagebrush-wire)",
+  "reason": "the SBW1 parser's admission (the frame and op caps, argument and element counts against the bytes present, name and options-text grammar): a malformed or oversized request gets a typed error reply, before anything is allocated"
+ },
+ "engine/wire/src/lib.rs ::  :: pub const OP_NAME_MAX: usize = 32; #0": {
+  "class": "1",
+  "disposition": {
+   "1": "shared"
+  },
+  "owner": "engine binary transport (sagebrush-wire)",
+  "reason": "the SBW1 parser's admission (the frame and op caps, argument and element counts against the bytes present, name and options-text grammar): a malformed or oversized request gets a typed error reply, before anything is allocated"
+ },
+ "engine/wire/src/lib.rs :: admit_with :: if argc < spec.min_args || argc > spec.max_args || argc > MAX_ARGS { #0": {
+  "class": "1",
+  "disposition": {
+   "1": "shared"
+  },
+  "owner": "engine binary transport (sagebrush-wire)",
+  "reason": "the SBW1 parser's admission (the frame and op caps, argument and element counts against the bytes present, name and options-text grammar): a malformed or oversized request gets a typed error reply, before anything is allocated"
+ },
+ "engine/wire/src/lib.rs :: admit_with :: if n == 0 || n > OP_NAME_MAX { #0": {
+  "class": "1",
+  "disposition": {
+   "1": "shared"
+  },
+  "owner": "engine binary transport (sagebrush-wire)",
+  "reason": "the SBW1 parser's admission (the frame and op caps, argument and element counts against the bytes present, name and options-text grammar): a malformed or oversized request gets a typed error reply, before anything is allocated"
+ },
+ "engine/wire/src/lib.rs :: admit_with :: let mut args = [Arg { bytes: &[], offset: 0 }; MAX_ARGS]; #0": {
+  "class": "none",
+  "owner": "engine binary transport (sagebrush-wire)",
+  "reason": "the parser's plumbing (signatures, fields, fixed arrays sized by the argument maximum, figures for the caller's bound); refuses nothing itself"
+ },
+ "engine/wire/src/lib.rs :: admit_with :: return Err(err(Code::Cap, 0, \"the request exceeds the frame cap\")); #0": {
+  "class": "1",
+  "disposition": {
+   "1": "shared"
+  },
+  "owner": "engine binary transport (sagebrush-wire)",
+  "reason": "the SBW1 parser's admission (the frame and op caps, argument and element counts against the bytes present, name and options-text grammar): a malformed or oversized request gets a typed error reply, before anything is allocated"
+ },
+ "engine/wire/src/lib.rs :: admit_with :: return Err(err(Code::Cap, 0, \"the request exceeds the op's cap\")); #0": {
+  "class": "1",
+  "disposition": {
+   "1": "shared"
+  },
+  "owner": "engine binary transport (sagebrush-wire)",
+  "reason": "the SBW1 parser's admission (the frame and op caps, argument and element counts against the bytes present, name and options-text grammar): a malformed or oversized request gets a typed error reply, before anything is allocated"
+ },
+ "engine/wire/src/lib.rs :: admit_with :: return Err(err(Code::Header, 3, \"an unsupported frame version\")); #0": {
+  "class": "1",
+  "disposition": {
+   "1": "shared"
+  },
+  "owner": "engine binary transport (sagebrush-wire)",
+  "reason": "the SBW1 parser's admission (the frame and op caps, argument and element counts against the bytes present, name and options-text grammar): a malformed or oversized request gets a typed error reply, before anything is allocated"
+ },
+ "engine/wire/src/lib.rs :: bigint_heap_words :: pub max_limbs: u64, #0": {
+  "class": "none",
+  "owner": "engine binary transport (sagebrush-wire)",
+  "reason": "the parser's plumbing (signatures, fields, fixed arrays sized by the argument maximum, figures for the caller's bound); refuses nothing itself"
+ },
+ "engine/wire/src/lib.rs :: done :: args: [Arg<'a>; MAX_ARGS], #0": {
+  "class": "none",
+  "owner": "engine binary transport (sagebrush-wire)",
+  "reason": "the parser's plumbing (signatures, fields, fixed arrays sized by the argument maximum, figures for the caller's bound); refuses nothing itself"
+ },
+ "engine/wire/src/lib.rs :: done :: pub max_args: usize, #0": {
+  "class": "none",
+  "owner": "engine binary transport (sagebrush-wire)",
+  "reason": "the parser's plumbing (signatures, fields, fixed arrays sized by the argument maximum, figures for the caller's bound); refuses nothing itself"
+ },
+ "engine/wire/src/lib.rs :: error_reply :: let mut v = Vec::with_capacity(ERROR_REPLY_MAX); #0": {
+  "class": "none",
+  "owner": "engine binary transport (sagebrush-wire)",
+  "reason": "the parser's plumbing (signatures, fields, fixed arrays sized by the argument maximum, figures for the caller's bound); refuses nothing itself"
+ },
+ "engine/wire/src/lib.rs :: error_reply :: let t = &text[..text.len().min(ERROR_TEXT_MAX)]; #0": {
+  "class": "none",
+  "owner": "engine binary transport (sagebrush-wire)",
+  "reason": "the parser's plumbing (signatures, fields, fixed arrays sized by the argument maximum, figures for the caller's bound); refuses nothing itself"
+ },
+ "engine/wire/src/lib.rs :: mat1_with :: let n = rows.checked_mul(cols).ok_or(err(Code::Count, at, \"rows x cols too large\"))?; #0": {
+  "class": "1",
+  "disposition": {
+   "1": "shared"
+  },
+  "owner": "engine binary transport (sagebrush-wire)",
+  "reason": "the SBW1 parser's admission (the frame and op caps, argument and element counts against the bytes present, name and options-text grammar): a malformed or oversized request gets a typed error reply, before anything is allocated"
+ },
+ "engine/wire/src/lib.rs :: mat1_with :: pub max_limbs: u64, #0": {
+  "class": "none",
+  "owner": "engine binary transport (sagebrush-wire)",
+  "reason": "the parser's plumbing (signatures, fields, fixed arrays sized by the argument maximum, figures for the caller's bound); refuses nothing itself"
+ },
+ "engine/wire/src/lib.rs :: mqr1_with :: Ok(Mqr { rows, cols, body, base, heap_words, max_limbs }) #0": {
+  "class": "none",
+  "owner": "engine binary transport (sagebrush-wire)",
+  "reason": "the parser's plumbing (signatures, fields, fixed arrays sized by the argument maximum, figures for the caller's bound); refuses nothing itself"
+ },
+ "engine/wire/src/lib.rs :: mqr1_with :: let _total = rows.checked_mul(per).ok_or(err(Code::Count, at, \"rows x (cols + 1) too large\"))?; #0": {
+  "class": "1",
+  "disposition": {
+   "1": "shared"
+  },
+  "owner": "engine binary transport (sagebrush-wire)",
+  "reason": "the SBW1 parser's admission (the frame and op caps, argument and element counts against the bytes present, name and options-text grammar): a malformed or oversized request gets a typed error reply, before anything is allocated"
+ },
+ "engine/wire/src/lib.rs :: mqr1_with :: let min_row = per.checked_mul(4).and_then(|x| x.checked_add(12)).ok_or(err(Code::Count, at, \"a row too large\"))?; #0": {
+  "class": "1",
+  "disposition": {
+   "1": "shared"
+  },
+  "owner": "engine binary transport (sagebrush-wire)",
+  "reason": "the SBW1 parser's admission (the frame and op caps, argument and element counts against the bytes present, name and options-text grammar): a malformed or oversized request gets a typed error reply, before anything is allocated"
+ },
+ "engine/wire/src/lib.rs :: mqr1_with :: let mut max_limbs: u64 = 0; #0": {
+  "class": "none",
+  "owner": "engine binary transport (sagebrush-wire)",
+  "reason": "the parser's plumbing (signatures, fields, fixed arrays sized by the argument maximum, figures for the caller's bound); refuses nothing itself"
+ },
+ "engine/wire/src/lib.rs :: mqr1_with :: let per = cols.checked_add(1).ok_or(err(Code::Count, at, \"cols + 1 too large\"))?; #0": {
+  "class": "1",
+  "disposition": {
+   "1": "shared"
+  },
+  "owner": "engine binary transport (sagebrush-wire)",
+  "reason": "the SBW1 parser's admission (the frame and op caps, argument and element counts against the bytes present, name and options-text grammar): a malformed or oversized request gets a typed error reply, before anything is allocated"
+ },
+ "engine/wire/src/lib.rs :: mqr1_with :: max_limbs = max_limbs.max(z.max_limbs); #0": {
+  "class": "none",
+  "owner": "engine binary transport (sagebrush-wire)",
+  "reason": "the parser's plumbing (signatures, fields, fixed arrays sized by the argument maximum, figures for the caller's bound); refuses nothing itself"
+ },
+ "engine/wire/src/lib.rs :: mqr1_with :: pub const TXT_MAX_BYTES: usize = 1024; #0": {
+  "class": "1",
+  "disposition": {
+   "1": "shared"
+  },
+  "owner": "engine binary transport (sagebrush-wire)",
+  "reason": "the SBW1 parser's admission (the frame and op caps, argument and element counts against the bytes present, name and options-text grammar): a malformed or oversized request gets a typed error reply, before anything is allocated"
+ },
+ "engine/wire/src/lib.rs :: mqr1_with :: pub const TXT_MAX_KEY: usize = 32; #0": {
+  "class": "1",
+  "disposition": {
+   "1": "shared"
+  },
+  "owner": "engine binary transport (sagebrush-wire)",
+  "reason": "the SBW1 parser's admission (the frame and op caps, argument and element counts against the bytes present, name and options-text grammar): a malformed or oversized request gets a typed error reply, before anything is allocated"
+ },
+ "engine/wire/src/lib.rs :: mqr1_with :: pub const TXT_MAX_LINES: usize = 16; #0": {
+  "class": "1",
+  "disposition": {
+   "1": "shared"
+  },
+  "owner": "engine binary transport (sagebrush-wire)",
+  "reason": "the SBW1 parser's admission (the frame and op caps, argument and element counts against the bytes present, name and options-text grammar): a malformed or oversized request gets a typed error reply, before anything is allocated"
+ },
+ "engine/wire/src/lib.rs :: mqr1_with :: pub const TXT_MAX_VALUE: usize = 64; #0": {
+  "class": "1",
+  "disposition": {
+   "1": "shared"
+  },
+  "owner": "engine binary transport (sagebrush-wire)",
+  "reason": "the SBW1 parser's admission (the frame and op caps, argument and element counts against the bytes present, name and options-text grammar): a malformed or oversized request gets a typed error reply, before anything is allocated"
+ },
+ "engine/wire/src/lib.rs :: ok_u641_len :: if counts.len() > MAX_ARGS { #0": {
+  "class": "none",
+  "owner": "engine binary transport (sagebrush-wire)",
+  "reason": "a reply writer's invariant (results already bounded by the op): an Internal error if broken, not a limit"
+ },
+ "engine/wire/src/lib.rs :: ok_u641_len :: let mut lens = [0usize; MAX_ARGS]; #0": {
+  "class": "none",
+  "owner": "engine binary transport (sagebrush-wire)",
+  "reason": "the parser's plumbing (signatures, fields, fixed arrays sized by the argument maximum, figures for the caller's bound); refuses nothing itself"
+ },
+ "engine/wire/src/lib.rs :: parse_reply :: if n > MAX_ARGS { #0": {
+  "class": "1",
+  "disposition": {
+   "1": "shared"
+  },
+  "owner": "engine binary transport (sagebrush-wire)",
+  "reason": "the SBW1 parser's admission (the frame and op caps, argument and element counts against the bytes present, name and options-text grammar): a malformed or oversized request gets a typed error reply, before anything is allocated"
+ },
+ "engine/wire/src/lib.rs :: parse_reply :: if tl > ERROR_TEXT_MAX { #0": {
+  "class": "1",
+  "disposition": {
+   "1": "shared"
+  },
+  "owner": "engine binary transport (sagebrush-wire)",
+  "reason": "the SBW1 parser's admission (the frame and op caps, argument and element counts against the bytes present, name and options-text grammar): a malformed or oversized request gets a typed error reply, before anything is allocated"
+ },
+ "engine/wire/src/lib.rs :: put_u641 :: out.extend_from_slice(&u64::try_from(words.len()).unwrap_or(u64::MAX).to_le_bytes()); #0": {
+  "class": "none",
+  "owner": "engine binary transport (sagebrush-wire)",
+  "reason": "the parser's plumbing (signatures, fields, fixed arrays sized by the argument maximum, figures for the caller's bound); refuses nothing itself"
+ },
+ "engine/wire/src/lib.rs :: to_usize :: if v > max { #0": {
+  "class": "1",
+  "disposition": {
+   "1": "shared"
+  },
+  "owner": "engine binary transport (sagebrush-wire)",
+  "reason": "the SBW1 parser's admission (the frame and op caps, argument and element counts against the bytes present, name and options-text grammar): a malformed or oversized request gets a typed error reply, before anything is allocated"
+ },
+ "engine/wire/src/lib.rs :: to_usize :: pub fn to_usize(v: u64, max: u64, offset: u64) -> Result<usize, WireError> { #0": {
+  "class": "none",
+  "owner": "engine binary transport (sagebrush-wire)",
+  "reason": "the parser's plumbing (signatures, fields, fixed arrays sized by the argument maximum, figures for the caller's bound); refuses nothing itself"
+ },
+ "engine/wire/src/lib.rs :: to_usize :: return Err(err(Code::Count, offset, \"a count too large for this platform\")); #0": {
+  "class": "1",
+  "disposition": {
+   "1": "shared"
+  },
+  "owner": "engine binary transport (sagebrush-wire)",
+  "reason": "the SBW1 parser's admission (the frame and op caps, argument and element counts against the bytes present, name and options-text grammar): a malformed or oversized request gets a typed error reply, before anything is allocated"
+ },
+ "engine/wire/src/lib.rs :: to_usize :: usize::try_from(v).map_err(|_| err(Code::Count, offset, \"a count too large for this platform\")) #0": {
+  "class": "1",
+  "disposition": {
+   "1": "shared"
+  },
+  "owner": "engine binary transport (sagebrush-wire)",
+  "reason": "the SBW1 parser's admission (the frame and op caps, argument and element counts against the bytes present, name and options-text grammar): a malformed or oversized request gets a typed error reply, before anything is allocated"
+ },
+ "engine/wire/src/lib.rs :: txt1 :: && key.len() <= TXT_MAX_KEY #0": {
+  "class": "1",
+  "disposition": {
+   "1": "shared"
+  },
+  "owner": "engine binary transport (sagebrush-wire)",
+  "reason": "the SBW1 parser's admission (the frame and op caps, argument and element counts against the bytes present, name and options-text grammar): a malformed or oversized request gets a typed error reply, before anything is allocated"
+ },
+ "engine/wire/src/lib.rs :: txt1 :: if c.left() > TXT_MAX_BYTES { #0": {
+  "class": "1",
+  "disposition": {
+   "1": "shared"
+  },
+  "owner": "engine binary transport (sagebrush-wire)",
+  "reason": "the SBW1 parser's admission (the frame and op caps, argument and element counts against the bytes present, name and options-text grammar): a malformed or oversized request gets a typed error reply, before anything is allocated"
+ },
+ "engine/wire/src/lib.rs :: txt1 :: if lines > TXT_MAX_LINES { #0": {
+  "class": "1",
+  "disposition": {
+   "1": "shared"
+  },
+  "owner": "engine binary transport (sagebrush-wire)",
+  "reason": "the SBW1 parser's admission (the frame and op caps, argument and element counts against the bytes present, name and options-text grammar): a malformed or oversized request gets a typed error reply, before anything is allocated"
+ },
+ "engine/wire/src/lib.rs :: txt1 :: let value_ok = !value.is_empty() && value.len() <= TXT_MAX_VALUE && value.iter().all(|&b| (0x21..=0x7e).contains(&b) && b != b'='); #0": {
+  "class": "1",
+  "disposition": {
+   "1": "shared"
+  },
+  "owner": "engine binary transport (sagebrush-wire)",
+  "reason": "the SBW1 parser's admission (the frame and op caps, argument and element counts against the bytes present, name and options-text grammar): a malformed or oversized request gets a typed error reply, before anything is allocated"
+ },
+ "engine/wire/src/lib.rs :: txt1 :: return Err(err(Code::Cap, tat, \"options text longer than 1 KiB\")); #0": {
+  "class": "1",
+  "disposition": {
+   "1": "shared"
+  },
+  "owner": "engine binary transport (sagebrush-wire)",
+  "reason": "the SBW1 parser's admission (the frame and op caps, argument and element counts against the bytes present, name and options-text grammar): a malformed or oversized request gets a typed error reply, before anything is allocated"
+ },
+ "engine/wire/src/lib.rs :: usize_bound :: u64::try_from(usize::MAX).unwrap_or(u64::MAX) #0": {
+  "class": "none",
+  "owner": "engine binary transport (sagebrush-wire)",
+  "reason": "the parser's plumbing (signatures, fields, fixed arrays sized by the argument maximum, figures for the caller's bound); refuses nothing itself"
+ },
+ "engine/wire/src/lib.rs :: words_body :: let bytes = n.checked_mul(8).ok_or(err(Code::Count, at, \"an element count too large\"))?; #0": {
+  "class": "1",
+  "disposition": {
+   "1": "shared"
+  },
+  "owner": "engine binary transport (sagebrush-wire)",
+  "reason": "the SBW1 parser's admission (the frame and op caps, argument and element counts against the bytes present, name and options-text grammar): a malformed or oversized request gets a typed error reply, before anything is allocated"
+ },
+ "engine/wire/src/lib.rs :: write_ok :: if payloads.len() > MAX_ARGS { #0": {
+  "class": "none",
+  "owner": "engine binary transport (sagebrush-wire)",
+  "reason": "a reply writer's invariant (results already bounded by the op): an Internal error if broken, not a limit"
+ },
+ "engine/wire/src/lib.rs :: write_ok :: let internal = err(Code::Internal, 0, \"a result too large to frame\"); #0": {
+  "class": "none",
+  "owner": "engine binary transport (sagebrush-wire)",
+  "reason": "a reply writer's invariant (results already bounded by the op): an Internal error if broken, not a limit"
+ },
+ "engine/wire/src/lib.rs :: write_ok :: let lens: [usize; MAX_ARGS] = { #0": {
+  "class": "none",
+  "owner": "engine binary transport (sagebrush-wire)",
+  "reason": "the parser's plumbing (signatures, fields, fixed arrays sized by the argument maximum, figures for the caller's bound); refuses nothing itself"
+ },
+ "engine/wire/src/lib.rs :: write_ok :: let mut a = [0usize; MAX_ARGS]; #0": {
+  "class": "none",
+  "owner": "engine binary transport (sagebrush-wire)",
+  "reason": "the parser's plumbing (signatures, fields, fixed arrays sized by the argument maximum, figures for the caller's bound); refuses nothing itself"
+ },
+ "engine/wire/src/lib.rs :: write_ok :: let need = ok_len(&lens[..payloads.len()]).ok_or(err(Code::Internal, 0, \"a result too large to frame\"))?; #0": {
+  "class": "none",
+  "owner": "engine binary transport (sagebrush-wire)",
+  "reason": "a reply writer's invariant (results already bounded by the op): an Internal error if broken, not a limit"
+ },
+ "engine/wire/src/lib.rs :: write_ok_u641 :: if results.len() > MAX_ARGS { #0": {
+  "class": "none",
+  "owner": "engine binary transport (sagebrush-wire)",
+  "reason": "a reply writer's invariant (results already bounded by the op): an Internal error if broken, not a limit"
+ },
+ "engine/wire/src/lib.rs :: write_ok_u641 :: let internal = err(Code::Internal, 0, \"a result too large to frame\"); #0": {
+  "class": "none",
+  "owner": "engine binary transport (sagebrush-wire)",
+  "reason": "a reply writer's invariant (results already bounded by the op): an Internal error if broken, not a limit"
+ },
+ "engine/wire/src/lib.rs :: write_ok_u641 :: let mut counts = [0usize; MAX_ARGS]; #0": {
+  "class": "none",
+  "owner": "engine binary transport (sagebrush-wire)",
+  "reason": "the parser's plumbing (signatures, fields, fixed arrays sized by the argument maximum, figures for the caller's bound); refuses nothing itself"
+ },
+ "engine/wire/src/lib.rs :: write_ok_u641 :: let need = ok_u641_len(&counts[..results.len()]).ok_or(err(Code::Internal, 0, \"a result too large to frame\"))?; #0": {
+  "class": "none",
+  "owner": "engine binary transport (sagebrush-wire)",
+  "reason": "a reply writer's invariant (results already bounded by the op): an Internal error if broken, not a limit"
+ },
+ "engine/wire/src/lib.rs :: zv1_in :: .checked_add(bigint_heap_words(k).ok_or(err(Code::Count, at, \"a limb count too large\"))?) #0": {
+  "class": "1",
+  "disposition": {
+   "1": "shared"
+  },
+  "owner": "engine binary transport (sagebrush-wire)",
+  "reason": "the SBW1 parser's admission (the frame and op caps, argument and element counts against the bytes present, name and options-text grammar): a malformed or oversized request gets a typed error reply, before anything is allocated"
+ },
+ "engine/wire/src/lib.rs :: zv1_in :: Ok(Zv { body, count: n, offset: at, heap_words, max_limbs, all_fit_i64: all_fit }) #0": {
+  "class": "none",
+  "owner": "engine binary transport (sagebrush-wire)",
+  "reason": "the parser's plumbing (signatures, fields, fixed arrays sized by the argument maximum, figures for the caller's bound); refuses nothing itself"
+ },
+ "engine/wire/src/lib.rs :: zv1_in :: let bytes = kk.checked_mul(8).ok_or(err(Code::Count, at, \"a limb count too large\"))?; #0": {
+  "class": "1",
+  "disposition": {
+   "1": "shared"
+  },
+  "owner": "engine binary transport (sagebrush-wire)",
+  "reason": "the SBW1 parser's admission (the frame and op caps, argument and element counts against the bytes present, name and options-text grammar): a malformed or oversized request gets a typed error reply, before anything is allocated"
+ },
+ "engine/wire/src/lib.rs :: zv1_in :: let mut max_limbs: u64 = 0; #0": {
+  "class": "none",
+  "owner": "engine binary transport (sagebrush-wire)",
+  "reason": "the parser's plumbing (signatures, fields, fixed arrays sized by the argument maximum, figures for the caller's bound); refuses nothing itself"
+ },
+ "engine/wire/src/lib.rs :: zv1_in :: max_limbs = max_limbs.max(k); #0": {
+  "class": "none",
+  "owner": "engine binary transport (sagebrush-wire)",
+  "reason": "the parser's plumbing (signatures, fields, fixed arrays sized by the argument maximum, figures for the caller's bound); refuses nothing itself"
+ },
+ "engine/wire/src/tests.rs ::  :: const SPEC: OpSpec = OpSpec { min_args: 1, max_args: 3, request_cap: 1 << 20 }; #0": {
+  "class": "none",
+  "owner": "engine binary transport (sagebrush-wire)",
+  "reason": "test code: the binary transport's parser, op and allocation tests; refuses nothing itself"
+ },
+ "engine/wire/src/tests.rs :: argument_counts_at_the_bounds :: for n in 0..=MAX_ARGS + 1 { #0": {
+  "class": "none",
+  "owner": "engine binary transport (sagebrush-wire)",
+  "reason": "test code: the binary transport's parser, op and allocation tests; refuses nothing itself"
+ },
+ "engine/wire/src/tests.rs :: argument_counts_at_the_bounds :: if (SPEC.min_args..=SPEC.max_args).contains(&n) { #0": {
+  "class": "none",
+  "owner": "engine binary transport (sagebrush-wire)",
+  "reason": "test code: the binary transport's parser, op and allocation tests; refuses nothing itself"
+ },
+ "engine/wire/src/tests.rs :: argument_counts_at_the_bounds :: let args: Vec<&[u8]> = (0..MAX_ARGS + 1).map(|_| &a[..]).collect(); #0": {
+  "class": "none",
+  "owner": "engine binary transport (sagebrush-wire)",
+  "reason": "test code: the binary transport's parser, op and allocation tests; refuses nothing itself"
+ },
+ "engine/wire/src/tests.rs :: argument_counts_at_the_bounds :: let args: Vec<&[u8]> = (0..MAX_ARGS).map(|_| &a[..]).collect(); #0": {
+  "class": "none",
+  "owner": "engine binary transport (sagebrush-wire)",
+  "reason": "test code: the binary transport's parser, op and allocation tests; refuses nothing itself"
+ },
+ "engine/wire/src/tests.rs :: argument_counts_at_the_bounds :: let wide = |_: &str| Some(OpSpec { min_args: 0, max_args: 100, request_cap: 1 << 20 }); #0": {
+  "class": "none",
+  "owner": "engine binary transport (sagebrush-wire)",
+  "reason": "test code: the binary transport's parser, op and allocation tests; refuses nothing itself"
+ },
+ "engine/wire/src/tests.rs :: argument_counts_at_the_bounds :: r[n - 4..].copy_from_slice(&u32::MAX.to_le_bytes()); #0": {
+  "class": "none",
+  "owner": "engine binary transport (sagebrush-wire)",
+  "reason": "test code: the binary transport's parser, op and allocation tests; refuses nothing itself"
+ },
+ "engine/wire/src/tests.rs :: argument_lengths_are_checked_against_the_bytes_present :: r[len_at..len_at + 4].copy_from_slice(&u32::MAX.to_le_bytes()); #0": {
+  "class": "none",
+  "owner": "engine binary transport (sagebrush-wire)",
+  "reason": "test code: the binary transport's parser, op and allocation tests; refuses nothing itself"
+ },
+ "engine/wire/src/tests.rs :: big_integers_are_canonical :: assert_eq!(z.max_limbs, 2); #0": {
+  "class": "none",
+  "owner": "engine binary transport (sagebrush-wire)",
+  "reason": "test code: the binary transport's parser, op and allocation tests; refuses nothing itself"
+ },
+ "engine/wire/src/tests.rs :: big_integers_are_canonical :: q[12..16].copy_from_slice(&u32::MAX.to_le_bytes()); #0": {
+  "class": "none",
+  "owner": "engine binary transport (sagebrush-wire)",
+  "reason": "test code: the binary transport's parser, op and allocation tests; refuses nothing itself"
+ },
+ "engine/wire/src/tests.rs :: cleared_rows_are_canonical :: assert_eq!((v.rows, v.cols, v.max_limbs), (3, 2, 2)); #0": {
+  "class": "none",
+  "owner": "engine binary transport (sagebrush-wire)",
+  "reason": "test code: the binary transport's parser, op and allocation tests; refuses nothing itself"
+ },
+ "engine/wire/src/tests.rs :: cleared_rows_are_canonical :: h[4..8].copy_from_slice(&u32::MAX.to_le_bytes()); #0": {
+  "class": "none",
+  "owner": "engine binary transport (sagebrush-wire)",
+  "reason": "test code: the binary transport's parser, op and allocation tests; refuses nothing itself"
+ },
+ "engine/wire/src/tests.rs :: cleared_rows_are_canonical :: h[8..12].copy_from_slice(&u32::MAX.to_le_bytes()); #0": {
+  "class": "none",
+  "owner": "engine binary transport (sagebrush-wire)",
+  "reason": "test code: the binary transport's parser, op and allocation tests; refuses nothing itself"
+ },
+ "engine/wire/src/tests.rs :: error_replies_are_bounded_and_never_echo_the_request :: assert!(r.len() <= ERROR_REPLY_MAX); #0": {
+  "class": "none",
+  "owner": "engine binary transport (sagebrush-wire)",
+  "reason": "test code: the binary transport's parser, op and allocation tests; refuses nothing itself"
+ },
+ "engine/wire/src/tests.rs :: error_replies_are_bounded_and_never_echo_the_request :: let codes = [Code::Frame, Code::Header, Code::Op, Code::Count, Code::Schema, Code::Domain, Code::Cap, Code::Internal]; #0": {
+  "class": "none",
+  "owner": "engine binary transport (sagebrush-wire)",
+  "reason": "test code: the binary transport's parser, op and allocation tests; refuses nothing itself"
+ },
+ "engine/wire/src/tests.rs :: heap_bounds_follow_the_closed_form :: assert_eq!(bigint_heap_words(u64::MAX), None); #0": {
+  "class": "none",
+  "owner": "engine binary transport (sagebrush-wire)",
+  "reason": "test code: the binary transport's parser, op and allocation tests; refuses nothing itself"
+ },
+ "engine/wire/src/tests.rs :: near :: Arg { bytes: b, offset: u64::MAX - 5 } #0": {
+  "class": "none",
+  "owner": "engine binary transport (sagebrush-wire)",
+  "reason": "test code: the binary transport's parser, op and allocation tests; refuses nothing itself"
+ },
+ "engine/wire/src/tests.rs :: near :: let fits = Arg { bytes: &p, offset: u64::MAX - p.len() as u64 }; #0": {
+  "class": "none",
+  "owner": "engine binary transport (sagebrush-wire)",
+  "reason": "test code: the binary transport's parser, op and allocation tests; refuses nothing itself"
+ },
+ "engine/wire/src/tests.rs :: ok_replies_round_trip_and_every_truncation_is_an_error :: assert_eq!(ok_len(&[u32::MAX as usize + 1]), None); #0": {
+  "class": "none",
+  "owner": "engine binary transport (sagebrush-wire)",
+  "reason": "test code: the binary transport's parser, op and allocation tests; refuses nothing itself"
+ },
+ "engine/wire/src/tests.rs :: ok_replies_round_trip_and_every_truncation_is_an_error :: assert_eq!(ok_len(&[u32::MAX as usize]), Some(10 + 4 + u32::MAX as usize)); #0": {
+  "class": "none",
+  "owner": "engine binary transport (sagebrush-wire)",
+  "reason": "test code: the binary transport's parser, op and allocation tests; refuses nothing itself"
+ },
+ "engine/wire/src/tests.rs :: options_text_follows_the_closed_grammar :: assert_eq!(txt1(arg(&txtp(&kib)), &abr).unwrap_err().code, Code::Cap); #0": {
+  "class": "none",
+  "owner": "engine binary transport (sagebrush-wire)",
+  "reason": "test code: the binary transport's parser, op and allocation tests; refuses nothing itself"
+ },
+ "engine/wire/src/tests.rs :: parse_everything :: if let Ok(f) = admit(req, |_| Some(OpSpec { min_args: 0, max_args: 8, request_cap: 1 << 20 })) { #0": {
+  "class": "none",
+  "owner": "engine binary transport (sagebrush-wire)",
+  "reason": "test code: the binary transport's parser, op and allocation tests; refuses nothing itself"
+ },
+ "engine/wire/src/tests.rs :: the_frame_cap_and_the_op_cap :: assert_eq!((e.code, e.offset, e.what), (Code::Cap, 0, \"the request exceeds the frame cap\")); #0": {
+  "class": "none",
+  "owner": "engine binary transport (sagebrush-wire)",
+  "reason": "test code: the binary transport's parser, op and allocation tests; refuses nothing itself"
+ },
+ "engine/wire/src/tests.rs :: the_frame_cap_and_the_op_cap :: assert_eq!((e.code, e.offset, e.what), (Code::Cap, 0, \"the request exceeds the op's cap\")); #0": {
+  "class": "none",
+  "owner": "engine binary transport (sagebrush-wire)",
+  "reason": "test code: the binary transport's parser, op and allocation tests; refuses nothing itself"
+ },
+ "engine/wire/src/tests.rs :: the_frame_cap_and_the_op_cap :: assert_eq!(e.code, Code::Cap); #0": {
+  "class": "none",
+  "owner": "engine binary transport (sagebrush-wire)",
+  "reason": "test code: the binary transport's parser, op and allocation tests; refuses nothing itself"
+ },
+ "engine/wire/src/tests.rs :: the_frame_cap_and_the_op_cap :: let capped = |c: usize| move |_: &str| Some(OpSpec { min_args: 1, max_args: 1, request_cap: c }); #0": {
+  "class": "none",
+  "owner": "engine binary transport (sagebrush-wire)",
+  "reason": "test code: the binary transport's parser, op and allocation tests; refuses nothing itself"
+ },
+ "engine/wire/src/tests.rs :: the_narrowest_tag_rule_is_per_payload_at_exactly_the_i64_bounds :: Ints::Small(s) => assert_eq!((s.get(0), s.get(1)), (i64::MIN, i64::MAX)), #0": {
+  "class": "none",
+  "owner": "engine binary transport (sagebrush-wire)",
+  "reason": "test code: the binary transport's parser, op and allocation tests; refuses nothing itself"
+ },
+ "engine/wire/src/tests.rs :: the_narrowest_tag_rule_is_per_payload_at_exactly_the_i64_bounds :: for v in [(true, min + 1), (false, max + 1)] { #0": {
+  "class": "none",
+  "owner": "engine binary transport (sagebrush-wire)",
+  "reason": "test code: the binary transport's parser, op and allocation tests; refuses nothing itself"
+ },
+ "engine/wire/src/tests.rs :: the_narrowest_tag_rule_is_per_payload_at_exactly_the_i64_bounds :: for v in [(true, min), (false, max), (false, 0), (true, 1)] { #0": {
+  "class": "none",
+  "owner": "engine binary transport (sagebrush-wire)",
+  "reason": "test code: the binary transport's parser, op and allocation tests; refuses nothing itself"
+ },
+ "engine/wire/src/tests.rs :: the_narrowest_tag_rule_is_per_payload_at_exactly_the_i64_bounds :: let max = i64::MAX as u64; #0": {
+  "class": "none",
+  "owner": "engine binary transport (sagebrush-wire)",
+  "reason": "test code: the binary transport's parser, op and allocation tests; refuses nothing itself"
+ },
+ "engine/wire/src/tests.rs :: the_narrowest_tag_rule_is_per_payload_at_exactly_the_i64_bounds :: match ints(arg(&i641p(&[i64::MIN, i64::MAX]))).unwrap() { #0": {
+  "class": "none",
+  "owner": "engine binary transport (sagebrush-wire)",
+  "reason": "test code: the binary transport's parser, op and allocation tests; refuses nothing itself"
+ },
+ "engine/wire/src/tests.rs :: wasm32_width_conversions_refuse_what_does_not_fit :: assert_eq!((e.code, e.what), (Code::Count, \"a count too large for this platform\")); #0": {
+  "class": "none",
+  "owner": "engine binary transport (sagebrush-wire)",
+  "reason": "test code: the binary transport's parser, op and allocation tests; refuses nothing itself"
+ },
+ "engine/wire/src/tests.rs :: wasm32_width_conversions_refuse_what_does_not_fit :: assert_eq!(to_usize(w32, w32, 7).unwrap(), u32::MAX as usize); #0": {
+  "class": "none",
+  "owner": "engine binary transport (sagebrush-wire)",
+  "reason": "test code: the binary transport's parser, op and allocation tests; refuses nothing itself"
+ },
+ "engine/wire/src/tests.rs :: wasm32_width_conversions_refuse_what_does_not_fit :: assert_eq!(zv1_with(arg(&z), w32).unwrap_err().what, \"a count too large for this platform\"); #0": {
+  "class": "none",
+  "owner": "engine binary transport (sagebrush-wire)",
+  "reason": "test code: the binary transport's parser, op and allocation tests; refuses nothing itself"
+ },
+ "engine/wire/src/tests.rs :: wasm32_width_conversions_refuse_what_does_not_fit :: let w32 = u64::from(u32::MAX); #0": {
+  "class": "none",
+  "owner": "engine binary transport (sagebrush-wire)",
+  "reason": "test code: the binary transport's parser, op and allocation tests; refuses nothing itself"
+ },
+ "engine/wire/src/tests.rs :: wasm32_width_conversions_refuse_what_does_not_fit :: m.extend_from_slice(&u32::MAX.to_le_bytes()); #0": {
+  "class": "none",
+  "owner": "engine binary transport (sagebrush-wire)",
+  "reason": "test code: the binary transport's parser, op and allocation tests; refuses nothing itself"
+ },
+ "engine/wire/src/tests.rs :: wasm32_width_conversions_refuse_what_does_not_fit :: m.extend_from_slice(&u32::MAX.to_le_bytes()); #1": {
+  "class": "none",
+  "owner": "engine binary transport (sagebrush-wire)",
+  "reason": "test code: the binary transport's parser, op and allocation tests; refuses nothing itself"
+ },
+ "engine/wire/src/tests.rs :: word_vectors_at_the_bounds :: assert_eq!(scalar(arg(&u641p(&[u64::MAX]))).unwrap(), u64::MAX); #0": {
+  "class": "none",
+  "owner": "engine binary transport (sagebrush-wire)",
+  "reason": "test code: the binary transport's parser, op and allocation tests; refuses nothing itself"
+ },
+ "engine/wire/src/tests.rs :: word_vectors_at_the_bounds :: q[4..12].copy_from_slice(&u64::MAX.to_le_bytes()); #0": {
+  "class": "none",
+  "owner": "engine binary transport (sagebrush-wire)",
+  "reason": "test code: the binary transport's parser, op and allocation tests; refuses nothing itself"
  },
  "lib/_capacity.py ::  :: (\"includes\") and which its `limit` bounds (\"constrains\"); a domain is in #0": {
   "class": "2",

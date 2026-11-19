@@ -45,6 +45,14 @@ def call(fn, **args):
     return r["ok"]
 
 
+def call_bin(request):
+    """One binary call (SBW1, engine/wire): the reply bytes, an ok or an
+    error record (the caller parses it), or None when the extension
+    predates the binary entry point (the caller keeps its JSON path)."""
+    f = getattr(_native, "call_bin", None)
+    return None if f is None else f(request)
+
+
 def call_text(request):
     """The engine's reply text for one JSON request text, unparsed (for a
     caller that builds the request itself and drops each text as soon as

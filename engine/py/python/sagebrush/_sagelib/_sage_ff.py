@@ -1185,6 +1185,102 @@ def _engine_coeffs(B, text):
     return [_elt(B, int(t)) for t in text.split(",")] if text else []
 
 
+# The engine's binary entry point (SBW1, engine/wire; engine/web bin_ops.rs):
+# coefficients travel as little-endian u64 words, packed and unpacked by
+# array('Q') (C loops), and a result keeps its words, its coefficient
+# objects made only when something asks for them (Polynomial_ff._raw).
+_SBW1_LE = _sys.byteorder == "little"
+
+
+def _sbw1_u641(words):
+    """A U641 payload of an array('Q'), with its u32 length prefix."""
+    n = len(words)
+    return b"".join(((12 + 8 * n).to_bytes(4, "little"), b"U641", n.to_bytes(8, "little"), words.tobytes()))
+
+
+def _sbw1_reply(r):
+    """The U641 results of an SBW1 reply, as arrays('Q'); an error record
+    raises (RuntimeError for a failed engine invariant, else ValueError).
+    Every field is checked against the bytes present, each result must be
+    exactly its declared words, and nothing may follow the last result: a
+    truncated or padded reply is an error, never a value."""
+    r = memoryview(r)
+    n = len(r)
+
+    def bad(why):
+        return RuntimeError("Sagebrush engine: a malformed SBW1 reply (%s)" % why)
+
+    def u(i, k):
+        if i + k > n:
+            raise bad("truncated")
+        return int.from_bytes(r[i:i + k], "little")
+
+    if n < 6 or bytes(r[:4]) != b"SBW1":
+        raise bad("no SBW1 header")
+    kind = bytes(r[4:6])
+    if kind == b"er":
+        code, tl = u(6, 2), u(16, 2)
+        if tl > 256 or 18 + tl != n:
+            raise bad("an error record of the wrong length")
+        text = bytes(r[18:18 + tl]).decode("ascii", "replace")
+        # (code 8: a failed proved invariant, an engine bug)
+        raise (RuntimeError if code == 8 else ValueError)(text)
+    if kind != b"ok":
+        raise bad("an unknown reply kind")
+    count = u(6, 4)
+    if count > 8:
+        raise bad("more results than any op has")
+    out, i = [], 10
+    for _ in range(count):
+        m = u(i, 4)
+        i += 4
+        if m < 12 or i + m > n or bytes(r[i:i + 4]) != b"U641" or m != 12 + 8 * u(i + 4, 8):
+            raise bad("a result that is not exactly its U641 words")
+        a = _array.array("Q")
+        a.frombytes(r[i + 12:i + m])
+        out.append(a)
+        i += m
+    if i != n:
+        raise bad("trailing bytes")
+    return out
+
+
+def _engine_bin(op, p, *polys):
+    """The engine's binary op on polynomials over GF(p) (Polynomial_ff,
+    nonzero): its results as arrays('Q') of words, or None when the engine
+    predates the binary entry point (the caller keeps its JSON path)."""
+    if not _SBW1_LE:
+        return None
+    from sagebrush._engine import call_bin
+    o = op.encode()
+    parts = [b"SBW1", len(o).to_bytes(4, "little"), o, (1 + len(polys)).to_bytes(4, "little"),
+             _sbw1_u641(_array.array("Q", (p,)))]
+    parts.extend(_sbw1_u641(_words(f)) for f in polys)
+    r = call_bin(b"".join(parts))
+    return None if r is None else _sbw1_reply(r)
+
+
+def _words(f):
+    """A Polynomial_ff's coefficients over GF(p) as an array('Q')."""
+    raw = f._raw
+    return raw if raw is not None else _array.array("Q", [int(c._v) for c in f._c])
+
+
+def _flen(f):
+    """A Polynomial_ff's coefficient count, without making its coefficients."""
+    raw = f._raw
+    return len(raw) if raw is not None else len(f._c)
+
+
+def _from_words(ring, words):
+    """A Polynomial_ff over GF(p) holding the engine's words (trimmed): its
+    coefficient objects are made on first use."""
+    f = Polynomial_ff.__new__(Polynomial_ff)
+    f._ring = ring
+    f._raw = words
+    return f
+
+
 def Mod(a, n):
     """a modulo n.
 
@@ -3692,7 +3788,11 @@ class Polynomial_ff:
         ((x + 2)^2 * (x^4 + 3*x^3 + 5*x^2 + 3*x + 3), [(5, 2)])
     """
 
-    __slots__ = ("_ring", "_c")
+    # _raw: the coefficients as an array('Q') of words, when the engine made
+    # the polynomial; _c is then unset until something asks for it
+    # (__getattr__), so a chain of engine operations makes no coefficient
+    # objects
+    __slots__ = ("_ring", "_c", "_raw")
 
     def __init__(self, ring, coeffs):
         c = list(coeffs)
@@ -3700,6 +3800,15 @@ class Polynomial_ff:
             c.pop()
         self._ring = ring
         self._c = c
+        self._raw = None
+
+    def __getattr__(self, name):
+        # (only for a slot not yet set: _c of a polynomial the engine made)
+        if name != "_c":
+            raise AttributeError(name)
+        B = self._ring._base
+        c = self._c = [_elt(B, v) for v in self._raw]
+        return c
 
     # ---- data
     def parent(self):
@@ -3730,7 +3839,7 @@ class Polynomial_ff:
             sage: R.<x> = GF(5)[]; (x^3 + 1).degree()
             3
         """
-        return len(self._c) - 1
+        return _flen(self) - 1
 
     def list(self):
         """Coefficients, constant first.
@@ -3917,14 +4026,17 @@ class Polynomial_ff:
         b = self._coerce(b)
         if b is None:
             return NotImplemented
-        if not self._c or not b._c:
+        la, lb = _flen(self), _flen(b)
+        if not la or not lb:
             return Polynomial_ff(self._ring, [])
         B = self._ring._base
         if isinstance(B, IntegerModRing_):
-            la, lb = len(self._c), len(b._c)
             p = _engine_prime(B)
             if p and la <= _ENGINE_POLY_MUL_MAX and lb <= _ENGINE_POLY_MUL_MAX and la * lb >= _ENGINE_POLY_MIN_WORK:
                 # in Rust (engine/arith nmod_poly: schoolbook or NTT)
+                r = _engine_bin("nmod_poly_mul", p, self, b)
+                if r is not None:
+                    return _from_words(self._ring, r[0])
                 return Polynomial_ff(self._ring, _engine_coeffs(B, _engine_poly("mul", p, self._c, b._c)))
             n = B._n
             prod = [0] * (len(self._c) + len(b._c) - 1)
@@ -3976,13 +4088,16 @@ class Polynomial_ff:
             (x^2 + 5*x + 4, 0)
         """
         b = self._coerce(b)
-        if not b._c:
+        la, lb = _flen(self), _flen(b)
+        if not lb:
             raise ZeroDivisionError("division by zero polynomial")
         B = self._ring._base
-        la, lb = len(self._c), len(b._c)
         p = _engine_prime(B) if isinstance(B, IntegerModRing_) else None
         if p and lb <= la <= _ENGINE_POLY_DIV_MAX and (la - lb + 1) * lb >= _ENGINE_POLY_MIN_WORK:
             # in Rust (engine/arith nmod_poly: classical or Newton division)
+            w = _engine_bin("nmod_poly_divrem", p, self, b)
+            if w is not None:
+                return _from_words(self._ring, w[0]), _from_words(self._ring, w[1])
             r = _engine_poly("divrem", p, self._c, b._c)
             return Polynomial_ff(self._ring, _engine_coeffs(B, r["q"])), Polynomial_ff(self._ring, _engine_coeffs(B, r["r"]))
         inv = 1 / b._c[-1]
@@ -4099,10 +4214,13 @@ class Polynomial_ff:
         a, b = self, self._coerce(b)
         B = self._ring._base
         p = _engine_prime(B) if b is not None and isinstance(B, IntegerModRing_) else None
-        if p and a._c and b._c:
-            la, lb = len(a._c), len(b._c)
+        la, lb = (_flen(a), _flen(b)) if p else (0, 0)
+        if la and lb:
             if la <= _ENGINE_POLY_GCD_MAX and lb <= _ENGINE_POLY_GCD_MAX and la * lb >= _ENGINE_POLY_MIN_WORK:
-                # in Rust (engine/arith nmod_poly: Euclid's algorithm)
+                # in Rust (engine/arith nmod_poly: Euclid's algorithm or the half-gcd)
+                r = _engine_bin("nmod_poly_gcd", p, a, b)
+                if r is not None:
+                    return _from_words(self._ring, r[0])
                 return Polynomial_ff(self._ring, _engine_coeffs(B, _engine_poly("gcd", p, a._c, b._c)))
         while b:
             a, b = b, a % b
