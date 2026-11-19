@@ -19,6 +19,9 @@ import { startFakeTurn } from "./fake-agent";
 import { AgentError, RELOAD_KEY, type AgentPairing, type Kept } from "../workspace/agent-pair";
 import type { NotebookEdit } from "../workspace/notebook-edit";
 import { mountAgentPairing, type RestoreState } from "../workspace/agent-ui";
+import { runVerbsFor } from "../workspace/run-holder";
+import { agentRunsFor } from "../workspace/agent-runs";
+import { createPermissions } from "../notebook/permissions.js";
 import * as gitBranches from "../workspace/git-branch";
 import { openReviewDialog, showWhenBranches } from "../workspace/review/open-dialog";
 import { Workspace } from "../workspace/api";
@@ -655,10 +658,9 @@ function mountFile(a: Artifact, box: HTMLElement, saved: HTMLElement): FileHost 
   };
   say("Loading…");
   const tex = /\.tex$/i.test(path);
-  if (tex && !__SB_LATEX__) {
-    // (no LaTeX editor in this build: the source here, and the file in Sagebrush)
-    saved.after(" ", openFull(path));
-  }
+  // (the file in Sagebrush, on its own page: a code or text file's (/?code=), a .tex file's where this build has no
+  //  LaTeX editor here; a file with no page of its own gets no link, openFull)
+  if (!tex || !__SB_LATEX__) saved.after(" ", openFull(path));
   type Latex = { mountEditor?: (root: HTMLElement, o: { text: string; onChange?(t: string): void; layout?: "split" | "preview" }) => { getText(): string; destroy(): void } };
   const latexMod: Promise<Latex | null> = tex && __SB_LATEX__ ? import(/* @vite-ignore */ LATEX_URL).catch(() => null) : Promise.resolve(null);
   // (the file as it is now: the agent may have written it again since this artifact)
@@ -1152,9 +1154,23 @@ const chatHereSection = chatHere({
   onFailed(r, e) { connectingTo = null; waitingFor = false; setConn(runnerBar(r.name, e)); renderHeader(); },
 }, () => agentUi);
 
+// (an agent's runs of code here, as on the notebook page (workspace/agent-runs.ts): latex_build, run_notebook, run_file
+//  and run_stop under the grant, in the sandboxed runner only, which this page has where it is cross-origin isolated;
+//  the interpreter's classes come with the run's chunk, from the notebook's module)
+const runsSite = new URL("../", import.meta.url).href;
+const agentRuns = (ws: Workspace) => agentRunsFor(ws as any, {
+  site: runsSite,
+  kernels: () => import(/* @vite-ignore */ new URL("sagebrush-notebook.js", runsSite).href),
+  sandbox: globalThis.crossOriginIsolated === true && !!globalThis.navigator && !(window as any).__TAURI__ && !(window as any).__SAGEBRUSH_LOCAL__ ? "ok" : "none",
+  perms: createPermissions(),
+  chunks: { run: "sagebrush-agent-run.js", ...(__SB_LATEX__ ? { latex: ["sagebrush-latex.js", "sagebrush-latex-tools.js", "sagebrush-latex-run.js"] as [string, string, string] } : {}) },
+  more: () => (/^(localhost|127\.0\.0\.1)$/.test(location.hostname) && typeof (window as any).__runHold === "function" ? { hold: (st: string) => (window as any).__runHold(st) } : {}),
+});
+
 function mountPairing(ws: Workspace) {
   agentUi = mountAgentPairing(ws, {
     program: "sagebrush-agent",
+    runVerbs: runVerbsFor(agentRuns(ws)),
     button: $("#connect"),
     notebookEdit: editNotebook,
     // (an agent's own branch, chat plan PR 3: offered here, where agents work)
