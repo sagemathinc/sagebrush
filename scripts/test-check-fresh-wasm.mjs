@@ -1,12 +1,13 @@
 // ci: checks.6 order=30
-// scripts/check-fresh-wasm.mjs: a stale pin fails master pushes, dispatches and the schedule, and only warns on a
-// pull request; a pin that equals the fresh build passes everywhere.
+// scripts/check-fresh-wasm.mjs: a stale pin fails master pushes, dispatches and the schedule, and a track's pull
+// request into master; it only warns on other pull requests and on a track's own pushes, dispatches and pull
+// requests; a pin that equals the fresh build passes everywhere.
 //   node scripts/test-check-fresh-wasm.mjs
 import { execFileSync } from "node:child_process";
 import { chmodSync, mkdirSync, mkdtempSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
-import { checkFreshWasm } from "./check-fresh-wasm.mjs";
+import { checkFreshWasm, isStrict } from "./check-fresh-wasm.mjs";
 import { installWasm } from "./install-engine-wasm.mjs";
 import { MODULES, formatPins, sha256 } from "./wasm-modules.mjs";
 
@@ -60,16 +61,39 @@ try {
   rmSync(pinsPath);
   ok(checkFreshWasm({ cwd: dir, event: "pull_request" }).status === 2, "a missing wasm/pins.json: an error, even on a pull request");
   writeFileSync(pinsPath, formatPins(pinsOf(pinned)));
-  // the script as CI runs it: the exit status follows the event
-  const cli = (event) => {
+  // a track: its own pushes, dispatches and pull requests only warn; its pull into master is an ERROR
+  build(MODULES[0], Buffer.from("\0asm\x01\0\0\0FRESH-BUILD"));
+  for (const event of ["push", "workflow_dispatch"]) {
+    const r = checkFreshWasm({ cwd: dir, event, ref: "track/math" });
+    ok(r.status === 0 && r.message.startsWith("::warning::"), `stale on track/math: a warning on ${event}`);
+  }
+  const intoTrack = checkFreshWasm({ cwd: dir, event: "pull_request", baseRef: "track/math", headRef: "r6-factor" });
+  ok(intoTrack.status === 0 && intoTrack.message.startsWith("::warning::"), "stale: a warning on a pull request into track/math");
+  const pull = checkFreshWasm({ cwd: dir, event: "pull_request", baseRef: "master", headRef: "track/math" });
+  ok(pull.status === 1 && pull.message.startsWith("::error::"), "stale: an ERROR on track/math's pull request into master");
+  const feature = checkFreshWasm({ cwd: dir, event: "pull_request", baseRef: "master", headRef: "some-feature" });
+  ok(feature.status === 0 && feature.message.startsWith("::warning::"), "stale: still a warning on another pull request into master");
+  ok(checkFreshWasm({ cwd: dir, event: "push", ref: "master" }).status === 1, "stale: an ERROR on a master push (ref named)");
+  ok(checkFreshWasm({ cwd: dir, event: "workflow_dispatch", ref: "train-1" }).status === 1, "stale: an ERROR on a train's dispatch");
+  // the rule itself, including names that only look like a track
+  ok(!isStrict({ event: "push", ref: "track/x" }) && isStrict({ event: "push", ref: "trackx" }), "isStrict: only the track/ prefix makes a push lenient");
+  ok(!isStrict({ event: "pull_request", baseRef: "track/math", headRef: "track/math" }), "isStrict: a pull request between tracks is lenient");
+  ok(!isStrict({ event: "local" }), "isStrict: a local run is lenient");
+  build(MODULES[0], pinned[MODULES[0]]);
+  // the script as CI runs it: the exit status follows the event and the refs
+  const cli = (event, refs = {}) => {
     try {
-      execFileSync(process.execPath, [join(import.meta.dirname, "check-fresh-wasm.mjs")], { cwd: dir, env: { ...process.env, GITHUB_EVENT_NAME: event }, stdio: "pipe" });
+      execFileSync(process.execPath, [join(import.meta.dirname, "check-fresh-wasm.mjs")], { cwd: dir, env: { ...process.env, GITHUB_EVENT_NAME: event, ...refs }, stdio: "pipe" });
       return 0;
     } catch (e) {
       return e.status;
     }
   };
-  ok(cli("push") === 1 && cli("pull_request") === 0, "the script's exit status: 1 on push, 0 on a pull request");
+  build(MODULES[0], Buffer.from("\0asm\x01\0\0\0FRESH-BUILD"));
+  const none = { GITHUB_REF_NAME: "", GITHUB_BASE_REF: "", GITHUB_HEAD_REF: "" };
+  ok(cli("push", { ...none, GITHUB_REF_NAME: "master" }) === 1 && cli("pull_request", none) === 0, "the script's exit status: 1 on a master push, 0 on a pull request");
+  ok(cli("push", { ...none, GITHUB_REF_NAME: "track/math" }) === 0, "the script's exit status: 0 on a track/math push");
+  ok(cli("pull_request", { ...none, GITHUB_BASE_REF: "master", GITHUB_HEAD_REF: "track/math" }) === 1, "the script's exit status: 1 on track/math's pull into master");
 } finally {
   rmSync(dir, { recursive: true, force: true });
 }
