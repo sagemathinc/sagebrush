@@ -116,6 +116,38 @@ test("the CPython package's own Python selects engine-cpython, not the engine's 
   assert.equal(classify(["engine/py/python/sagebrush/cli.py"], "full-ci").engine_smoke, "true");
 });
 
+test("Python tests invoked by checks select node, derived from this checkout's workflow", () => {
+  const root = mkdtempSync(join(dir, "python-checks-"));
+  mkdirSync(join(root, ".github", "workflows"), { recursive: true });
+  const workflow = join(root, ".github", "workflows", "ci.yml");
+  writeFileSync(workflow, `jobs:
+  checks:
+    steps:
+      - run: |
+          node dist/src/cli.js engine/py/test_matrix_checks.py
+          python3 engine/py/test_other_checks.py
+          # node dist/src/cli.js engine/py/test_commented.py
+          echo engine/py/test_mentioned.py
+  engine-cpython:
+    steps:
+      - run: python3 engine/py/test_remote_pair.py
+`);
+  const env = { CI_PATHS_ROOT: root };
+  for (const path of ["engine/py/test_matrix_checks.py", "engine/py/test_other_checks.py"]) {
+    const result = classify([path], "", env);
+    assert.equal(result.node, "true", path);
+    assert.equal(result.engine_cpython, "true", path);
+    assert.equal(result.engine_smoke, "false", path);
+    assert.equal(result.web, "false", path);
+  }
+  for (const path of ["engine/py/test_remote_pair.py", "engine/py/test_commented.py", "engine/py/test_mentioned.py", "engine/py/test_matrix_checks.py.bak"])
+    assert.equal(classify([path], "", env).node, "false", path);
+  // A new command needs no matching classifier edit or hard-coded filename.
+  writeFileSync(workflow, `jobs:\n  checks:\n    steps:\n      - run: node dist/src/cli.js engine/py/test_future.py\n  other:\n    steps: []\n`);
+  assert.equal(classify(["engine/py/test_future.py"], "", env).node, "true");
+  assert.equal(classify(["engine/py/test_matrix_checks.py"], "", env).node, "false");
+});
+
 test("engine-cpython runs on pull requests that touch the CPython package's inputs (#113 -> #132)", () => {
   const cp = (files: string[]) => classify(files).engine_cpython;
   for (const f of ["lib/_sage_nf.py", "engine/py/test_audit.py", "engine/classgroup/src/proof.rs", "engine/py/python/sagebrush/nf.py", "sage-tests/test_numberfield.sage", "test/limit-sites.json", "scripts/sync-python-package.sh", "engine/Cargo.lock", ".github/workflows/ci.yml", "somewhere/new.txt"])
