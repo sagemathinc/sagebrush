@@ -326,6 +326,7 @@ jobs:
           node scripts/packages.mjs --check
           node scripts/web-tests.mjs run checks.5
           node scripts/core-api-surface.mjs --check
+          node dist/src/cli.js engine/py/test_matrix_checks.py
           node scripts/size-budget.mjs --check
           node scripts/web-tests.mjs run checks.6
           node scripts/heap-budget.mjs --check

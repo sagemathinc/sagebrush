@@ -7,11 +7,15 @@ silent wrong answer or a different error (a 2 x 2 plus a 3 x 3 matrix was a
 matrix over QQ).
 
     python engine/py/test_matrix_checks.py
+    node dist/src/cli.js engine/py/test_matrix_checks.py   (the same cases in pyjs)
 """
 import json
 import os
 
-import sagebrush.sage as S
+try:
+    import sagebrush.sage as S  # the native wheel
+except ImportError:
+    import sage_all as S  # pyjs, through the CLI: node dist/src/cli.js engine/py/test_matrix_checks.py
 
 HERE = os.path.dirname(os.path.abspath(__file__))
 DATA = json.load(open(os.path.join(HERE, "fixtures", "matrix_checks_sage.json")))

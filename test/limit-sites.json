@@ -7139,16 +7139,6 @@
   "owner": "Sage-mode matrices (shape and exponent checks)",
   "reason": "Sage's TypeError for a sum, difference or product of matrices and vectors of incompatible shapes (Sage's parent wording); it was zipped or truncated, a wrong answer; refuses nothing Sage computes"
  },
- "lib/_sage_matrix.py :: Matrix.__mul__ :: raise TypeError(\"unsupported operand parent(s) for *: '%s' and a sequence of length %d\" % (self.parent(), len(other))) #0": {
-  "class": "none",
-  "owner": "Sage-mode matrices (shape and exponent checks)",
-  "reason": "a matrix times a list (or a list times a matrix) of the wrong length: refused instead of truncated; Sagebrush keeps the list product of the right length, which Sage refuses outright"
- },
- "lib/_sage_matrix.py :: Matrix.__rmul__ :: raise TypeError(\"unsupported operand parent(s) for *: a sequence of length %d and '%s'\" % (len(other), self.parent())) #0": {
-  "class": "none",
-  "owner": "Sage-mode matrices (shape and exponent checks)",
-  "reason": "a matrix times a list (or a list times a matrix) of the wrong length: refused instead of truncated; Sagebrush keeps the list product of the right length, which Sage refuses outright"
- },
  "lib/_sage_matrix.py :: Matrix._integral_exponent :: raise NotImplementedError(\"non-integral exponents not supported\") #0": {
   "class": "none",
   "owner": "Sage-mode matrices (shape and exponent checks)",

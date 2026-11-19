@@ -618,6 +618,33 @@ def _poly_var_name(var):
 _C_SPACE = {9: None, 10: None, 11: None, 12: None, 13: None, 32: None}
 
 
+def _str_preview(s, quote=True):
+    """A string (or bytes) for an error message: s itself (repr'd if quote)
+    up to 100 characters, as Sage prints it; past that its first 60
+    characters and its length, so a refusal of a megabyte string stays
+    short."""
+    if len(s) <= 100:
+        return repr(s) if quote else s
+    head = repr(s[:60]) if quote else s[:60]
+    return "%s... (a string of %d characters)" % (head, len(s))
+
+
+def _gmp_part_ok(part):
+    """Whether a part of a rational's string keeps GMP's shape before its
+    spaces are dropped: no space between the minus and the number, nor
+    inside a 0x or 0b prefix ('- 3' and '-0 x10' are refused, as in Sage)."""
+    p = part.lstrip(" \t\n\v\f\r")
+    if p.startswith("-"):
+        p = p[1:]
+        if not p or p[0] in " \t\n\v\f\r":
+            return False
+    if p[:1] == "0":
+        q = p[1:].lstrip(" \t\n\v\f\r")
+        if q[:1] in ("x", "X", "b", "B") and p[1:2] not in ("x", "X", "b", "B"):
+            return False
+    return True
+
+
 def _rational_from_str(s, base):
     """(numerator, denominator) of a string as Sage reads a rational (GMP's
     rule; s a string or bytes): 'a' or 'a/b', ASCII spaces anywhere ignored,
@@ -642,16 +669,17 @@ def _rational_from_str(s, base):
         except UnicodeDecodeError:
             raise TypeError("unable to convert %r to a rational" % (s,)) from None
     # (only C's whitespace is ignored: a no-break space is refused)
+    raw = t.split("/")
     parts = t.translate(_C_SPACE).split("/")
     vals = []
-    if (b == 0 or 2 <= b <= 62) and len(parts) <= 2:
+    if (b == 0 or 2 <= b <= 62) and len(parts) <= 2 and all(_gmp_part_ok(r) for r in raw):
         for part in parts:
             v = _gmp_int(part, b)
             if v is None:
                 break
             vals.append(v)
     if len(vals) != len(parts) or (len(vals) == 2 and vals[1] == 0):
-        raise TypeError("unable to convert %r to a rational" % s)
+        raise TypeError("unable to convert %s to a rational" % _str_preview(s))
     return vals[0], (vals[1] if len(vals) == 2 else 1)
 
 
@@ -662,17 +690,33 @@ def _gmp_int(t, base):
     neg = t.startswith("-")
     if neg:
         t = t[1:]
+    prefixed = False
     if base == 0:
         if t[:2] in ("0x", "0X"):
-            t, base = t[2:], 16
+            t, base, prefixed = t[2:], 16, True
         elif t[:2] in ("0b", "0B"):
-            t, base = t[2:], 2
+            t, base, prefixed = t[2:], 2, True
         elif t[:1] == "0" and len(t) > 1:
             t, base = t[1:], 8
         else:
             base = 10
     if not t:
-        return None
+        # (a prefix's 0 is a digit: '0x' alone is 0, as GMP reads it)
+        return 0 if prefixed else None
+    if base <= 36:
+        # (int() reads the digits in C: digit by digit, a long string was
+        # quadratic; it takes the same letters and digits, either case)
+        if not (t.isascii() and t.isalnum()):
+            return None
+        if t[:1] == "0" and t[1:2].lower() == {16: "x", 2: "b", 8: "o"}.get(base):
+            # (int() would read Python's prefix in its own base; GMP reads
+            # no prefix in an explicit base: QQ('0x10', 16) is refused)
+            return None
+        try:
+            v = int(t, base)
+        except ValueError:
+            return None
+        return -v if neg else v
     v = 0
     for ch in t:
         o = ord(ch)
@@ -1875,45 +1919,15 @@ def _QQ(x, d=None):
     return _QQ_exact(x, d)
 
 
-import re as _re_q
-
-# an integer as Sage's QQ(str) reads it (GMP's base 0): an optional minus,
-# then 0x/0X hexadecimal, 0b/0B binary, a leading 0 octal, else decimal;
-# ASCII digits only, no underscores, no plus sign
-_QQ_INT = _re_q.compile(r"-?(?:0[xX][0-9a-fA-F]+|0[bB][01]+|0[0-7]*|[1-9][0-9]*)\Z")
-
-
-def _str_preview(s, quote=True):
-    """A string for an error message: s itself (repr'd if quote) up to 100
-    characters, as Sage prints it; past that its first 60 characters and its
-    length, so a refusal of a megabyte string stays short."""
-    if len(s) <= 100:
-        return repr(s) if quote else s
-    head = repr(s[:60]) if quote else s[:60]
-    return "%s... (a string of %d characters)" % (head, len(s))
-
-
-def _qq_from_str(s):
-    """The rational a string denotes, as Sage's QQ(s): 'p' or 'p/q' (space
-    around the parts and the slash allowed), each part an integer as
-    _QQ_INT reads it; else Sage's TypeError (decimals such as '0.5', '1/0',
-    '+3', '1_000' and the empty string are refused, as in Sage)."""
-    parts = s.strip().split("/")
-    if len(parts) <= 2:
-        ps = [p.strip() for p in parts]
-        if all(p.isascii() and _QQ_INT.match(p) for p in ps):
-            num = int(ps[0], 0) if not _re_q.match(r"-?0[0-7]+\Z", ps[0]) else int(ps[0], 8)
-            den = 1
-            if len(ps) == 2:
-                den = int(ps[1], 0) if not _re_q.match(r"-?0[0-7]+\Z", ps[1]) else int(ps[1], 8)
-            if den != 0:
-                return _Fraction(num, den)
-    raise TypeError("unable to convert %s to a rational" % _str_preview(s))
-
-
 def _QQ_exact(x, d=None):
     """The exact rational x (or x/d); a real number's exact binary value
     (examples of strings in QQ's documentation)."""
+    if isinstance(x, (str, bytes)):
+        # (QQ(s) and QQ(s, base) read a string as Rational(s, base) does, as
+        # in Sage: GMP's rule; it was Fraction(s), which took '0.5' and gave
+        # QQ('3', 4) as 3/4)
+        n, dd = _rational_from_str(x, 0 if d is None else d)
+        return _q(_Fraction(n, dd))
     if d is not None and d == 0:
         raise ZeroDivisionError("rational division by zero")
     if d is None and x is None:
@@ -1921,9 +1935,6 @@ def _QQ_exact(x, d=None):
         x = 0
     if d is None and hasattr(x, "_rational_"):
         x = x._rational_()
-    if isinstance(x, str):
-        f = _qq_from_str(x)
-        return _q(f if d is None else f / _Fraction(_QQ_exact(d)))
     try:
         f = _Fraction(x) if d is None else _Fraction(x, d)
     except ValueError:

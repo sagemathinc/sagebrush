@@ -916,6 +916,10 @@ class Matrix:
         Traceback (most recent call last):
         ...
         TypeError: unsupported operand parent(s) for *: 'Vector space of dimension 3 over Rational Field' and 'Full MatrixSpace of 2 by 2 dense matrices over Rational Field'
+        sage: A * [1, 2]
+        Traceback (most recent call last):
+        ...
+        TypeError: can't multiply sequence by non-int of type 'sage.matrix.matrix_rational_dense.Matrix_rational_dense'
         sage: A^(4/2) == A^2
         True
         sage: A^(1/2)
@@ -1583,6 +1587,14 @@ class Matrix:
         I = Matrix(self._base, [[int(i == j) for j in range(n)] for i in range(n)])
         return I * c
 
+    def _sage_class(self):
+        """The class Sage gives this matrix, for its messages."""
+        sa = _sa()
+        kind = {id(sa.ZZ): "integer", id(sa.QQ): "rational", id(sa.SR): "symbolic"}.get(id(self._base))
+        if kind is None:
+            return "sage.matrix.matrix_generic_dense.Matrix_generic_dense"
+        return "sage.matrix.matrix_%s_dense.Matrix_%s_dense" % (kind, kind)
+
     def _same_shape(self, other, op):
         """Sage's TypeError for the sum or difference of matrices of
         different shapes (they were zipped: a 2 x 2 plus a 3 x 3 matrix was
@@ -1685,9 +1697,9 @@ class Matrix:
             v = Vector(_norm(sum((a * b for a, b in zip(r, ov)), 0)) for r in self._rows)
             return _over_qq(v, other) if self._base is not _sa().QQ else self._vector(v)
         if isinstance(other, (list, tuple)):
-            if self.ncols() != len(other):
-                raise TypeError("unsupported operand parent(s) for *: '%s' and a sequence of length %d" % (self.parent(), len(other)))
-            return [sum((a * b for a, b in zip(r, other)), 0) for r in self._rows]
+            # (Sage multiplies no sequence by a matrix; this was a list
+            # product, truncated to the shorter length)
+            raise TypeError("can't multiply sequence by non-int of type '%s'" % self._sage_class())
         base = self._base if isinstance(other, int) else _sa().SR if self._base is _sa().SR or hasattr(other, "_s") else _sa().QQ
         return Matrix(base, [[a * other for a in r] for r in self._rows], self.ncols())
 
@@ -1696,9 +1708,7 @@ class Matrix:
         if L is not None:
             return other * L
         if isinstance(other, (list, tuple)):
-            if self.nrows() != len(other):
-                raise TypeError("unsupported operand parent(s) for *: a sequence of length %d and '%s'" % (len(other), self.parent()))
-            return [sum((other[i] * self._rows[i][j] for i in range(self.nrows())), 0) for j in range(self.ncols())]
+            raise TypeError("can't multiply sequence by non-int of type '%s'" % self._sage_class())
         base = self._base if isinstance(other, int) else _sa().SR if self._base is _sa().SR or hasattr(other, "_s") else _sa().QQ
         return Matrix(base, [[other * a for a in r] for r in self._rows], self.ncols())
 

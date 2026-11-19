@@ -411,6 +411,12 @@ class RationalField(_Ring):
         (1/99999999999999990439, 1/99999999999999997962)
         sage: QQ('3/-4'), QQ(' 3 / 4 '), QQ('0x10'), QQ('010'), QQ(None)
         (-3/4, 3/4, 16, 8, 0)
+        sage: QQ('12', 5), QQ('3', 4), QQ('1/ff', 16)
+        (7, 3, 1/255)
+        sage: QQ('3', '4')
+        Traceback (most recent call last):
+        ...
+        TypeError: an integer is required
         sage: QQ('0.5')
         Traceback (most recent call last):
         ...
