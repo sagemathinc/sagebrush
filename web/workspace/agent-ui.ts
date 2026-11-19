@@ -6,8 +6,8 @@
 //                                       it), and offers to reconnect a remembered agent.
 
 import { pairLink } from "./pair-link";
-import { AgentPairing, AgentError, takeReloadRecord, reloadDecision, markReloadLeft, type AgentLink, type GrantStore, type Kept, type ReloadRecord, type ReloadScope } from "./agent-pair";
-import { TRASH } from "./paths";
+import { AgentPairing, AgentError, takeReloadRecord, reloadDecision, markReloadLeft, type AgentLink, type Created, type GrantStore, type Kept, type ReloadRecord, type ReloadScope } from "./agent-pair";
+import { TRASH, nameOf } from "./paths";
 import type { NotebookEdit } from "./notebook-edit";
 import type { RunVerbs } from "./agent-pair";
 import type { BranchHost, gitBranch, gitBranchParams, gitBranchProblem, watchBranches } from "./git-branch";
@@ -38,6 +38,12 @@ export const isChromium = (ua = navigator.userAgent) => /chrome|chromium|crios|e
 export const isSafari = (ua = navigator.userAgent) => /safari/i.test(ua) && !/chrome|chromium|crios|fxios|android|edg/i.test(ua);
 /** The one line under a failed Connect: Safari's reason only in Safari, Chrome's permission only in Chrome. */
 export const failHint = (ua = navigator.userAgent) => isSafari(ua) ? SAFARI : isChromium(ua) ? CHROME_ALLOW : OTHER_FAIL;
+/** The agent as the grant dialog names it: its own claim, "X (as it says)", and its program as well only when that differs
+ * ("Claude (as it says, claude-code)"); sagebrush-mcp gives one name for both when its client has no title. */
+export const agentSays = (name: string, client: string) => `${name} (as it says${client && client !== name ? ", " + client : ""})`;
+/** `f` for a pairing's creation only while that pairing is the one the page has adopted (`current()`): a creation an
+ * older or superseded pairing completes is never told to the page. */
+export const onlyCurrent = (current: () => AgentPairing | null, f: (c: Created, p: AgentPairing) => void) => (c: Created, p: AgentPairing) => { if (current() === p) f(c, p); };
 
 const CSS = `
 .sbag-dlg { position: fixed; inset: 0; background: rgba(20,25,18,.35); display: grid; place-items: center; z-index: 1000; font: 14px/1.45 system-ui, sans-serif; color: #1d241a; }
@@ -53,6 +59,7 @@ const CSS = `
 .sbag-box .note { color: #5c6657; font-size: 12px; }
 .sbag-bar { position: fixed; left: 12px; bottom: calc(12px + var(--sb-alpha-banner, 0px)); z-index: 999; background: #1d241a; color: #fff; border-radius: 18px; padding: 6px 8px 6px 14px; font: 13px system-ui, sans-serif; display: flex; gap: 10px; align-items: center; box-shadow: 0 4px 14px rgba(0,0,0,.2); }
 .sbag-bar button { font: inherit; border: 0; border-radius: 12px; padding: 3px 10px; background: #fff; color: #1d241a; cursor: pointer; }
+.sbag-bar button.open { max-width: 240px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 `;
 
 let styled = false;
@@ -91,7 +98,7 @@ async function again(deadline: number, mine: () => boolean): Promise<boolean> {
 /** The page's pairing: a dialog to connect, a bar while connected.  Returns the button's handler. `reload` (A14) turns on
  * the reload record: its scope, and a callback for the restore's states; `quietLoss` leaves an involuntary loss to the
  * page's own bar (no dialog). */
-export function mountAgentPairing(ws: PairingWorkspace, o: { button?: HTMLElement | null; onPairing?: (p: AgentPairing) => void; notebookEdit?: (edit: NotebookEdit, may: () => boolean, hold?: () => Promise<() => void>) => Promise<unknown>; branches?: { gitBranch: typeof gitBranch; gitBranchParams: typeof gitBranchParams; gitBranchProblem: typeof gitBranchProblem; watchBranches: typeof watchBranches; gitServe?: typeof gitServe }; reload?: { scope: ReloadScope; storage?: Pick<Storage, "getItem" | "setItem" | "removeItem"> | null; onState?: (s: RestoreState) => void; onRemembered?: (g: Kept["grant"]) => void }; quietLoss?: boolean; program?: string; runVerbs?: RunVerbs; extra?: (close: () => void) => HTMLElement } = {}) {
+export function mountAgentPairing(ws: PairingWorkspace, o: { button?: HTMLElement | null; onPairing?: (p: AgentPairing) => void; notebookEdit?: (edit: NotebookEdit, may: () => boolean, hold?: () => Promise<() => void>) => Promise<unknown>; branches?: { gitBranch: typeof gitBranch; gitBranchParams: typeof gitBranchParams; gitBranchProblem: typeof gitBranchProblem; watchBranches: typeof watchBranches; gitServe?: typeof gitServe }; reload?: { scope: ReloadScope; storage?: Pick<Storage, "getItem" | "setItem" | "removeItem"> | null; onState?: (s: RestoreState) => void; onRemembered?: (g: Kept["grant"]) => void }; quietLoss?: boolean; program?: string; runVerbs?: RunVerbs; extra?: (close: () => void) => HTMLElement; open?: (c: Created) => void; onCreated?: (c: Created, p: AgentPairing) => void } = {}) {
   style();
   // `program`: the page's own program (the Agents page: sagebrush-agent) named in the dialog instead of sagebrush-mcp
   const named = (s: string) => o.program ? s.replace(/(the agent's |your agent's )?sagebrush-mcp/g, o.program) : s;
@@ -110,7 +117,7 @@ export function mountAgentPairing(ws: PairingWorkspace, o: { button?: HTMLElemen
   // (an agent's runs of code (chat plan PR 4a): the page's run-holder.ts, only where the page offers them)
   const runVerbs = o.runVerbs;
   const make = (port: number, how: { code: string } | { session: string; pairingId: string; agent?: { name: string; client: string } } | { link: AgentLink; computer: string }) =>
-    new AgentPairing(port, how, { verbsFor: (actor, host) => ws.forAgent(actor, host), ...(ws.branchHost && o.branches ? { gitBranch: { params: o.branches.gitBranchParams, problem: o.branches.gitBranchProblem, run: (a) => o.branches!.gitBranch(ws.branchHost!(a.actor), a) } } : {}), ...(ws.branchHost && o.branches?.gitServe ? { gitVerbs: o.branches.gitServe(ws as unknown as { branchHost(actor: string): GitHost }) } : {}), store: ws, trashEntry, page, ...(runVerbs ? { runVerbs } : {}), ...(o.notebookEdit ? { notebookEdit: o.notebookEdit } : {}), ...(o.reload ? { reload: { storage, scope: o.reload.scope, leaving: () => leaving } } : {}) });
+    new AgentPairing(port, how, { verbsFor: (actor, host) => ws.forAgent(actor, host), ...(ws.branchHost && o.branches ? { gitBranch: { params: o.branches.gitBranchParams, problem: o.branches.gitBranchProblem, run: (a) => o.branches!.gitBranch(ws.branchHost!(a.actor), a) } } : {}), ...(ws.branchHost && o.branches?.gitServe ? { gitVerbs: o.branches.gitServe(ws as unknown as { branchHost(actor: string): GitHost }) } : {}), store: ws, trashEntry, page, ...(runVerbs ? { runVerbs } : {}), ...(o.notebookEdit ? { notebookEdit: o.notebookEdit } : {}), ...(o.onCreated ? { onCreated: onlyCurrent(() => pairing, o.onCreated) } : {}), ...(o.reload ? { reload: { storage, scope: o.reload.scope, leaving: () => leaving } } : {}) });
   // (the branches' records made right with their folders: now, and whenever the workspace changes; chat plan PR 3)
   // (`branches`: git_branch and its reconcile, on the pages that offer it (they import git-branch.ts), never in a
   //  pairing chunk of a page that doesn't, the LaTeX page's)
@@ -142,7 +149,11 @@ export function mountAgentPairing(ws: PairingWorkspace, o: { button?: HTMLElemen
     // ("May run code" turned off here, mid-session: a run going ends (chat plan PR 4); turned on only by a new grant)
     const noRun = g.run ? h("button", { textContent: "Turn off running code", title: "The agent may no longer run code, and a run going now stops (connect it again to allow it)" }) : null;
     if (noRun) noRun.onclick = () => void p.noRun();
-    bar = h("div", { className: "sbag-bar" }, text, ...(noRun ? [noRun] : []), revoke);
+    // (Open: what the agent created last, where the page can open it (its `open`), as Files would)
+    const made = o.open && p.created ? p.created : null;
+    const open = made ? h("button", { className: "open", textContent: "Open " + nameOf(made.path), title: `Open ${made.path}, which the agent created` }) : null;
+    if (open && made) open.onclick = () => o.open!(made);
+    bar = h("div", { className: "sbag-bar" }, text, ...(open ? [open] : []), ...(noRun ? [noRun] : []), revoke);
     bar.setAttribute("role", "status");
     document.body.append(bar);
   }
@@ -151,7 +162,7 @@ export function mountAgentPairing(ws: PairingWorkspace, o: { button?: HTMLElemen
     const top = (await ws.list("/")).filter((e) => e.kind === "folder" && e.path !== TRASH).map((e) => e.path);
     const hello = p.hello!;
     dialog("Allow this agent?", (box, close) => {
-      box.append(h("div", { textContent: `${hello.agent.name} (as it says${hello.agent.client ? ", " + hello.agent.client : ""}) wants to ${hello.wants.write ? "read and change" : "read"} files in your workspace.` }));
+      box.append(h("div", { textContent: `${agentSays(hello.agent.name, hello.agent.client)} wants to ${hello.wants.write ? "read and change" : "read"} files in your workspace.` }));
       // (Everything ticked when it opens: the default, D; the folders a narrowing, chat plan r4)
       const all = h("input", { type: "checkbox" });
       all.checked = true;

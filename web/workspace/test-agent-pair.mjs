@@ -4,7 +4,8 @@
 // before the person's grant, the grant's scope, the frame and call limits, and that revoking (or expiry) cuts
 // the agent off at once and forgets the kept grant.
 //   bun web/workspace/test-agent-pair.mjs
-import { failHint, SAFARI, CHROME_ALLOW, OTHER_FAIL } from "./agent-ui.ts";
+import { failHint, agentSays, onlyCurrent, SAFARI, CHROME_ALLOW, OTHER_FAIL } from "./agent-ui.ts";
+import { handOver, takeHandoff, HANDOFF_KEY, HANDOFF_MS } from "./pair-handoff.ts";
 import { AgentPairing, parseStrict, actorOf, parseReloadRecord, reloadDecision, takeReloadRecord, putReloadRecord, markReloadLeft, RELOAD_KEY, RELOAD_FRESH_MS } from "./agent-pair.ts";
 
 let failures = 0;
@@ -750,6 +751,45 @@ ok(actorOf("Claude Code", "claude-code") === "agent:Claude-Code" && actorOf("", 
   ok(failHint("Mozilla/5.0 (X11; Linux x86_64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/149.0 Safari/537.36") === CHROME_ALLOW, "in Chrome: its permission");
   ok(failHint("Mozilla/5.0 (Windows NT 10.0) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/149.0 Safari/537.36 Edg/149.0") === CHROME_ALLOW, "in Edge: Chrome's permission");
   ok(![SAFARI, CHROME_ALLOW, OTHER_FAIL].some((t) => t.length > 110 || /\n/.test(t)), "each is one short line");
+}
+{
+  // (the grant dialog's name for the agent: its program only when it differs from the name, never the same word twice)
+  ok(agentSays("claude-code", "claude-code") === "claude-code (as it says)", "one name for both: said once", agentSays("claude-code", "claude-code"));
+  ok(agentSays("Claude Code", "claude-code") === "Claude Code (as it says, claude-code)", "a name and a different program: both");
+  ok(agentSays("Codex", "") === "Codex (as it says)", "no program: the name alone");
+}
+{
+  // the board page's handover of a bare pairing link to the notebook page (pair-handoff.ts): within the tab, once, fresh
+  const mem = new Map();
+  globalThis.sessionStorage = { getItem: (k) => (mem.has(k) ? mem.get(k) : null), setItem: (k, v) => void mem.set(k, String(v)), removeItem: (k) => void mem.delete(k) };
+  const L = { code: "ABCDEFGHIJKLMNOPQRSTUVWXYZ", port: "49589" };
+  ok(handOver(L, 1000) && mem.has(HANDOFF_KEY), "handed over: stored in the tab");
+  ok(takeHandoff("/board/", 1001) === null && mem.has(HANDOFF_KEY), "a page other than the notebook page neither takes nor deletes it");
+  const got = takeHandoff("/", 1001);
+  ok(got?.code === L.code && got?.port === L.port && !mem.has(HANDOFF_KEY), "the notebook page takes it, deleting it as it reads");
+  ok(takeHandoff("/", 1002) === null, "once only: a second read (a reload) finds nothing");
+  handOver(L, 1000);
+  ok(takeHandoff("/", 1000 + HANDOFF_MS) === null && !mem.has(HANDOFF_KEY), "a stale one is deleted, never used");
+  mem.set(HANDOFF_KEY, JSON.stringify({ code: "<x>", port: "1", at: 1000 }));
+  ok(takeHandoff("/", 1001) === null && !mem.has(HANDOFF_KEY), "a malformed one is deleted, never used");
+  globalThis.sessionStorage = { getItem: () => null, setItem: () => { throw new Error("refused"); }, removeItem: () => {} };
+  ok(handOver(L, 1000) === false, "storage refused: not handed over (the board page keeps the link and pairs there)");
+  globalThis.sessionStorage = { getItem: () => null, setItem: () => {}, removeItem: () => {} };
+  ok(handOver(L, 1000) === false, "storage that doesn't keep it: not handed over either");
+  delete globalThis.sessionStorage;
+}
+{
+  // (a creation is told to the page only by the pairing the page has adopted: an older or superseded one's never is)
+  const told = [], P1 = { n: 1 }, P2 = { n: 2 };
+  let cur = P1;
+  const cb = onlyCurrent(() => cur, (c, p) => told.push([c.op, p.n]));
+  cb({ op: "a" }, P1);
+  cur = P2;
+  cb({ op: "b" }, P1);
+  cb({ op: "c" }, P2);
+  cur = null;
+  cb({ op: "d" }, P2);
+  ok(JSON.stringify(told) === JSON.stringify([["a", 1], ["c", 2]]), "a creation reaches the page only from the pairing it has adopted then", told);
 }
 console.log(failures ? `${failures} failed` : "all passed");
 process.exit(failures ? 1 : 0);

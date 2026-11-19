@@ -766,7 +766,11 @@
 // classic script, so the cells exist before the first paint.
 // (a ?pair= link, as an agent on this computer prints it: taken out of the address bar first, before anything reads
 // or reports the URL; the agent chunk, loaded later, is handed it)
-import { pairLink } from "./workspace/pair-link.ts";
+import { pairLink, adoptLink } from "./workspace/pair-link.ts";
+import { takeHandoff } from "./workspace/pair-handoff.ts";
+// (a bare pairing link the board page handed over within this tab (pair-handoff.ts): this page's link, taken once, before
+// anything reads it; only when the address has no query and no hash)
+if (!pairLink() && !location.search && !location.hash) { const h = takeHandoff(location.pathname); if (h) adoptLink(h); }
 import { remoteAvailable } from "./workspace/remote-runners.ts";
 import { termKeep } from "./shell/term-keep.ts";
 import { createNotebook, esc } from "./notebook/notebook.js";
@@ -5067,8 +5071,19 @@ globalThis.__sbTexSplit = texSplit;
 const agentBtn = $("#agentbtn");
 let agentPairing = null, agentTries = 0;
 const pairAgent = (w) => (agentPairing ??= import(new URL("sagebrush-agent.js", location.href).href + (agentTries++ ? `?try=${agentTries}` : ""))
-  .then((m) => m.mountAgentPairing(w, { runVerbs: m.runVerbsFor(agentRuns(w)) })))
+  .then((m) => m.mountAgentPairing(w, { runVerbs: m.runVerbsFor(agentRuns(w)),
+    // (what the agent creates: a notebook opens here at once, in place, so the pairing stays (decided Nov 18 2026), as an
+    //  automatic open (an intent): a notebook the person opens meanwhile wins, and the agent's never replaces it after.
+    //  The bar's Open is the person's own open: the last one, a board in a tab of its own, a file as Files opens it)
+    open: (c) => void (c.ref ? Promise.resolve(c) : wsNow().then((x) => x?.stat(c.path))).then((e) => e && openEntry(e, e.kind === "board" ? "tab" : "here")),
+    onCreated: (c) => { if (c.kind === "notebook" && c.ref) agentOpen(c.ref, { attach: attachSeq }); } })))
   .catch((e) => { agentPairing = null; throw e; });
+// (a notebook an agent created, opened as an automatic open: saved first as any switch, and dropped, unsaid, if the person
+// opened another meanwhile; any other failure said as any open's)
+function agentOpen(ref, intent) {
+  saveNow();
+  return openId(ref, null, intent).then((ok) => { wsTrackCurrent(); return ok; }, (e) => { if (!e?.navWon) sayNotLeft(e); return false; });
+}
 // (an agent's runs of code: the verbs in /sagebrush-agent-run.js, fetched at its first run; the page
 //  gives them its workspace, the interpreter's classes, the sandboxed runner (never a plain worker: there is none here
 //  without it) and each notebook's own write trees. On a local host only, the tests' holds (web/workspace/test-run-verbs-page.mjs))

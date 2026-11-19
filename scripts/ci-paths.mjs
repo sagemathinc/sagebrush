@@ -63,8 +63,8 @@ const every = (patterns) => files.length > 0 && files.every((file) => patterns.s
 
 // The two tiers (CI speed plan option 2, William, Nov 2 2026): a pull request runs the fast tier, unless it has the
 // `full-ci` label or changes a path where a bug loses data or trust: sync, sharing and security (CSP, HTML
-// sanitizing), and data loss (save, Trash, export, purge).  Then it runs the full suite, as every master push, the
-// nightly schedule and a dispatch do.  A save or Trash change inside web/index.html is not seen here: its author adds
+// sanitizing), and data loss (save, Trash, export, purge). Then it runs the full suite, as every master or track/**
+// integration push, the nightly schedule and a dispatch do. A save or Trash change inside web/index.html is not seen here: its author adds
 // the label.  (test/ci-paths.test.ts has a case for each path class)
 const fullTierPaths = [
   // sync and its journals and merges
@@ -128,8 +128,10 @@ const suiteGroups = new Set(suiteTargets.filter((target) => target.startsWith("w
 const labels = (process.env.CI_PR_LABELS ?? "").split(",").map((label) => label.trim());
 const fullTier = event === "pull_request" &&
   (labels.includes("full-ci") || matches(fullTierPaths) || fullOnlyJobs.some((job) => suiteJobs.has(job)));
+const integrationPush = event === "push" &&
+  (ref === "refs/heads/master" || ref.startsWith("refs/heads/track/"));
 const full = event === "workflow_dispatch" || event === "schedule" ||
-  (event === "push" && ref === "refs/heads/master") || fullTier;
+  integrationPush || fullTier;
 // The long tier (the test audit's option (a), decided Nov 17 2026): the second, slower passes of suites the full tier
 // already runs once (the engine's full passes off master and engine-building pull requests, mpmath's Python backend,
 // the share dialog's part 2, the Numbl corpus, the agents artifacts' LaTeX-off and LaTeX-test builds, the slow node
@@ -260,9 +262,10 @@ const node = full || workflowOrBuild || runtime || webChange || fallback;
 const web = full || workflowOrBuild || runtime || webChange || fallback;
 const modes = full || workflowOrBuild || runtime || modeChange || fallback;
 const engineSmoke = full || workflowOrBuild || engineChange || fallback;
-// (every run that isn't a pull request builds: a master push publishes its own build (wasm-publish), and a push whose
-// run GitHub replaced by a newer one never ran, so a later push's own file list can miss an engine change; a dispatch
-// and the schedule have no file list)
+// (every run that isn't a pull request builds: a master push publishes its own build, a track/** push uses its
+// same-run artifact without publishing, and a
+// push whose run GitHub replaced by a newer one never ran, so a later push's own file list can miss an engine change;
+// a dispatch and the schedule have no file list)
 const wasmBuild = event !== "pull_request" || fallback || files.some((file) => wasmBuildPaths.some((p) => p.test(file)));
 const engineCpython = full || workflowOrBuild || matches(cpythonPaths) || fallback;
 const webkit = event === "workflow_dispatch" || event === "schedule" ||
@@ -299,13 +302,13 @@ const unsafeSweepPaths = [
 ];
 const unsafeSweep = full || matches(unsafeSweepPaths);
 // The engine's full passes (engine-node, engine-language, engine-modes: the Node, language and mode suites again, on the
-// engine built in this run): every master push, a pull request whose changes rebuild the engine (wasm_build), and the
+// engine built in this run): every master or track/** integration push, a pull request whose changes rebuild the engine (wasm_build), and the
 // long tier.  Another pull request's engine is byte-identical to the published pin its ordinary suites already ran on,
 // so the pass would repeat them.  engine-wasm, which they need, still runs where it did (engine_smoke: the engine's
 // changes, the full tier and a pull request touching the engine's runtime, src/runtime/); a pull request's passes only
 // where it runs (the CPython package's own Python sets wasm_build, but builds no engine engine-wasm would test).
 const engineRuntime = full || matches([/^src\/runtime\//]);
-const engineFull = long || (event === "push" && ref === "refs/heads/master") || (event === "pull_request" && wasmBuild && (engineSmoke || engineRuntime));
+const engineFull = long || integrationPush || (event === "pull_request" && wasmBuild && (engineSmoke || engineRuntime));
 
 // The web jobs by area (CI speed plan option 7): a pull request whose web changes are all inside one area's
 // directories runs that area's suites, not every web job.  Anything else under web/ (web/index.html, the build, the
