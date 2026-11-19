@@ -919,7 +919,19 @@ fn rows_in_span(a: &ZMat, rows: &[usize], piv: &[usize], n: &[BigInt], den: &Big
     true
 }
 
+/// The rank over Q.  First the rank modulo one word prime (the prime `rref`
+/// starts from), by elimination modulo it: a lower bound for the rank, so
+/// when it is min(rows, cols) it is the rank, proven.  Otherwise the exact
+/// `rref`.  (rref's own one-prime shortcut needs rank = cols: a wide matrix
+/// of full row rank went through the whole rational rref.)
 pub fn rank(a: &ZMat) -> usize {
+    let full = a.rows.min(a.cols);
+    if full > 0 {
+        let p = Primes::new().next().expect("a prime");
+        if a.reduce(&Modulus::new(p)).rank() == full {
+            return full;
+        }
+    }
     rref(a).2.len()
 }
 
@@ -1198,6 +1210,74 @@ pub fn charpoly(a: &ZMat) -> Vec<BigInt> {
 
 #[cfg(test)]
 mod tests {
+    // rank: the rank modulo the first prime when it is min(rows, cols), the
+    // exact rref otherwise; always the exact rank
+    fn zm(r: usize, c: usize, d: Vec<i64>) -> ZMat {
+        ZMat { rows: r, cols: c, d: d.into_iter().map(BigInt::from).collect() }
+    }
+
+    fn rank_shapes() -> Vec<ZMat> {
+        let mut x = 0x9e37_79b9_7f4a_7c15u64;
+        let mut next = move |m: i64| {
+            x ^= x << 13;
+            x ^= x >> 7;
+            x ^= x << 17;
+            (x % (2 * m as u64 + 1)) as i64 - m
+        };
+        let mut out = vec![];
+        for n in [1usize, 2, 3, 5, 8, 13] {
+            out.push(zm(n, n, (0..n * n).map(|_| next(99)).collect())); // square
+            out.push(zm(n, 2 * n, (0..2 * n * n).map(|_| next(99)).collect())); // wide
+            out.push(zm(2 * n, n, (0..2 * n * n).map(|_| next(99)).collect())); // tall
+            // rank-deficient: B C with B n x h, C h x n
+            let h = (n / 2).max(1);
+            let bm: Vec<i64> = (0..n * h).map(|_| next(9)).collect();
+            let cm: Vec<i64> = (0..h * n).map(|_| next(9)).collect();
+            out.push(zm(n, n, (0..n * n).map(|k| (0..h).map(|t| bm[k / n * h + t] * cm[t * n + k % n]).sum()).collect()));
+            // Smith-structured: an upper unitriangular U times diag(s) (last entry 0) times a lower one
+            let s: Vec<i64> = (0..n).map(|i| if i + 1 == n { 0 } else { [1, 2, 6, 12][i % 4] }).collect();
+            let u = |i: usize, j: usize, v: i64| if i == j { 1 } else if i < j { v } else { 0 };
+            let mut d = vec![0i64; n * n];
+            for i in 0..n {
+                for j in 0..n {
+                    d[i * n + j] = (0..n).map(|t| u(i, t, ((i + t) % 3) as i64 - 1) * s[t] * u(j, t, ((j * t) % 3) as i64 - 1)).sum();
+                }
+            }
+            out.push(zm(n, n, d));
+        }
+        out
+    }
+
+    #[test]
+    fn rank_agrees_with_the_rref() {
+        for a in rank_shapes() {
+            assert_eq!(rank(&a), rref(&a).2.len(), "{} x {}", a.rows, a.cols);
+        }
+    }
+
+    #[test]
+    fn rank_falls_through_when_the_prime_divides_the_minors() {
+        // full rank over Q, deficient modulo the prime rank starts from: the exact rank all the same
+        let p = Primes::new().next().unwrap() as i64;
+        assert_eq!(rank(&zm(2, 2, vec![p, 0, 0, 1])), 2);
+        assert_eq!(rank(&zm(3, 3, vec![1, 0, 0, 0, 1, 0, 0, 0, p])), 3);
+        assert_eq!(rank(&zm(2, 4, vec![p, 2 * p, 0, 0, 0, 0, 1, 1])), 2); // wide: a row that is 0 mod p
+        assert_eq!(rank(&zm(3, 2, vec![p, 0, 0, p, 1, 1])), 2); // tall
+        assert_eq!(rank(&zm(2, 2, vec![p, 2 * p, 1, 2])), 1); // and deficient over Q too
+    }
+
+    #[test]
+    fn rank_edges() {
+        assert_eq!(rank(&zm(0, 0, vec![])), 0);
+        assert_eq!(rank(&zm(0, 3, vec![])), 0);
+        assert_eq!(rank(&zm(3, 0, vec![])), 0);
+        assert_eq!(rank(&zm(1, 1, vec![0])), 0);
+        assert_eq!(rank(&zm(1, 1, vec![-7])), 1);
+        assert_eq!(rank(&zm(1, 4, vec![0, 0, 3, 0])), 1);
+        assert_eq!(rank(&zm(4, 1, vec![0, 0, 0, 0])), 0);
+        assert_eq!(rank(&zm(2, 3, vec![0; 6])), 0);
+    }
+
     use super::*;
 
     fn rng(seed: &mut u64) -> u64 {

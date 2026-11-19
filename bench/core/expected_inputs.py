@@ -96,6 +96,124 @@ def det_entries(kind: str, size: int, v: int) -> list[int]:
     return out
 
 
+# The rank rows beyond the square ones: wide (n x 2n, rank n), def (n x n,
+# rank n // 2) and def_p (n x n, rank n over Q but at most n - 1 mod the
+# engine's word prime).  Random dense factors, so elimination sees real
+# coefficient growth; each rank is proved by construction (an upper bound)
+# plus its rank modulo an auxiliary prime (a lower bound): a seed whose
+# certificate fails is refused (it essentially never happens).  Every
+# driver builds the same matrices from these formulas; only this file
+# certifies them.
+RANK_P = (1 << 62) - 57
+CERT_Q = (1 << 31) - 1
+# (the entries' range: as the square rows', +-500001 over Z and +-50 over Q)
+RANK_RANGE = {"z": (1000003, 500001), "q": (101, 50)}
+
+
+def rnd(i: int, j: int, s: int, kind: str) -> int:
+    m, off = RANK_RANGE[kind]
+    return pow(131 * i + 31 * j + s, 5, m) - off
+
+
+def rnd_matrix(rows: int, cols: int, s: int, kind: str) -> list[list[int]]:
+    return [[rnd(i, j, s, kind) for j in range(cols)] for i in range(rows)]
+
+
+def matmul(a: list[list[int]], b: list[list[int]]) -> list[list[int]]:
+    """An integer matrix product, each row of the result a combination of
+    b's rows: b's rows are packed into integers (Kronecker substitution, as
+    mul does for polynomials), so a product of size 250 stays cheap."""
+    if not a or not b:
+        return []
+    width = len(b[0])
+    bound = (
+        max(max(map(abs, r)) for r in a) * max(max(map(abs, r)) for r in b) * len(b) + 1
+    )
+    k = bound.bit_length() + 2
+    k += -k % 8
+    half = 1 << (k - 1)
+
+    def pack(row):
+        x = 0
+        for v in reversed(row):
+            x = (x << k) + v
+        return x
+
+    packed = [pack(r) for r in b]
+    bias = pack([half] * width)
+    step = k // 8
+    out = []
+    for row in a:
+        acc = 0
+        for c, p in zip(row, packed):
+            if c:
+                acc += c * p
+        raw = (acc + bias).to_bytes(width * k // 8 + 1, "little")
+        out.append(
+            [
+                int.from_bytes(raw[i * step : (i + 1) * step], "little") - half
+                for i in range(width)
+            ]
+        )
+    return out
+
+
+def rank_mod(a: list[list[int]], q: int) -> int:
+    """The rank of an integer matrix modulo the prime q."""
+    m = [[x % q for x in r] for r in a]
+    rank, cols = 0, len(m[0]) if m else 0
+    for c in range(cols):
+        piv = next((i for i in range(rank, len(m)) if m[i][c]), None)
+        if piv is None:
+            continue
+        m[rank], m[piv] = m[piv], m[rank]
+        inv = pow(m[rank][c], -1, q)
+        top = [x * inv % q for x in m[rank]]
+        m[rank] = top
+        for i in range(rank + 1, len(m)):
+            f = m[i][c]
+            if f:
+                m[i] = [(x - f * y) % q for x, y in zip(m[i], top)]
+        rank += 1
+    return rank
+
+
+def rank_matrix(shape: str, kind: str, n: int, v: int) -> list[list[int]]:
+    """The integer matrix of a wide, def or def_p rank row (before the
+    rational rows' scaling), certified: its rank is proved, or the seed is
+    refused."""
+    s1, s2 = 10 * v + 1, 10 * v + 2
+    if shape == "wide":
+        a, want = rnd_matrix(n, 2 * n, s1, kind), n
+    elif shape == "def":
+        r = n // 2
+        a, want = matmul(rnd_matrix(n, r, s1, kind), rnd_matrix(r, n, s2, kind)), r
+    elif shape == "def_p":
+        c = rnd_matrix(n, n, s2, kind)
+        c[-1] = [RANK_P * x for x in c[-1]]
+        a, want = matmul(rnd_matrix(n, n, s1, kind), c), n
+    else:
+        raise ValueError(shape)
+    # (rank <= want by construction: n rows, or an inner dimension r; and
+    # the rank mod CERT_Q is a lower bound over Q.  def_p's rank mod RANK_P
+    # is at most n - 1 by construction: a factor's row is a multiple of it)
+    if rank_mod(a, CERT_Q) != want:
+        raise ValueError(
+            f"{shape} {kind} n={n} variant {v}: the rank certificate failed; refusing the seed"
+        )
+    return a
+
+
+def rank_entries(row: str, n: int, v: int) -> list[int]:
+    """A rank row's entries, row-major, as the drivers hash them (rationals
+    as residues: row i of the rational rows divided by 1 + i mod 7)."""
+    kind, shape = row.split("_")[1], row.split("_rank_")[1]
+    a = rank_matrix(shape, kind, n, v)
+    if kind == "z":
+        return [x for r in a for x in r]
+    return [rat(x, 1 + i % 7) for i, r in enumerate(a) for x in r]
+
+
 def cyclic_shape(n: int) -> list[int]:
     """Cyclic-n's generators as sorted (total degree, number of terms)."""
     pairs = [(d, n) for d in range(1, n)] + [(n, 2)]
@@ -157,6 +275,8 @@ def operands(row: str, n: int, v: int) -> list[int]:
         return ga + gb
     if row == "poly_fp_factor":
         return [P - 1] + [0] * (n - 1) + [1]
+    if row.startswith("mat_") and "_rank_" in row:
+        return rank_entries(row, n, v)
     if row.startswith("mat_"):
         kind = row.split("_")[1]
         entries = det_entries(kind, n, v)

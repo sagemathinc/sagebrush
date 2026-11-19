@@ -669,6 +669,25 @@ def test_through_the_server():
     assert all("title" not in t and "outputSchema" not in t for t in rpc(7, "tools/list", {})["result"]["tools"])
 
 
+def test_notebook_languages_are_told():
+    """An agent is told that a notebook runs in its language, each one with an example (the MATLAB notebook an agent
+    once declined to make): workspace_create's mode names every language its enum allows, and sagebrush-mcp's
+    instructions name them too, read from the source so that this needs no installed sagebrush."""
+    import ast
+    examples = {"python": "print(2**10)", "sage": "factor(2^64 - 1)", "matlab": "x = linspace(0, 3, 200); plot(x, sin(x.^2))",
+                "magma": "print Factorization(2^64 - 1);"}
+    mode = {t["name"]: t for t in WS.tools()}["workspace_create"]["inputSchema"]["properties"]["mode"]
+    assert sorted(mode["enum"]) == sorted(examples), mode
+    for m, ex in examples.items():
+        assert "%s, %s" % (m, ex) in mode["description"], (m, mode["description"])
+    src = open(os.path.join(HERE, "python", "sagebrush", "mcp_server.py"), encoding="utf-8").read()
+    node = next(n for n in ast.parse(src).body if isinstance(n, ast.Assign) and getattr(n.targets[0], "id", "") == "INSTRUCTIONS")
+    text = node.value.left.value  # (INSTRUCTIONS = """...""" + CH.INSTRUCTIONS)
+    for m, ex in examples.items():
+        assert "- %s: %s" % (m, ex) in text, (m, text)
+    assert "workspace_create" in text and "Python, Sage,\nMATLAB or Magma" in text, text
+
+
 if __name__ == "__main__":
     for name, f in list(globals().items()):
         if name.startswith("test_") and callable(f):
