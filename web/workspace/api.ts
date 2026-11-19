@@ -24,6 +24,7 @@
 //
 // There is no verb that empties Trash or removes contents for good: only a
 // person does that, from the file browser (§2.4, §8.2).
+import { docValue } from "./notebook-form";
 import { BRANCHES, BRANCH_KEY, BRANCH_HASH_KEY, BRANCH_LIMITS, BRANCH_NAME, branchCopy, branchRefusal, BranchStop, BRANCH_REVIEW_KEY, BRANCH_RUNS_KEY, mergeRun, type BranchAt, type BranchCanon, type BranchRecord, type BranchReview, type BranchRun, type BranchRuns, type BranchSource } from "./branch-rules";
 import { TERM_KEPT_KEY, keepable, termKeptOf, type TermKept } from "./term-kept";
 import { inTx, req, hex, openWorkspaceDb, WS_DB, type JournalState, type OpenInfo } from "./db";
@@ -530,15 +531,16 @@ const withCellIds = (cells: any[]) => cells.map((c) => (c && typeof c === "objec
 export const NB_WRITER_LOCK = "sagebrush-nb-writer:";
 /** How long a whole write waits for the notebook's holder to answer, each phase. */
 export const NB_HOLDER_MS = 5000;
-/** What a whole write of a notebook is checked by (an ok verified: the record holds it): its cells' kinds and texts, in
- * order, and its language if it names one. */
-const notebookValue = (d: any, withMode: boolean) => JSON.stringify([withMode ? d?.mode ?? null : null, (Array.isArray(d?.cells) ? d.cells : []).map((c: any) => [c?.type ?? "code", c?.code ?? ""])]);
+/** The whole writes of notebooks a page may have under way at once (each holds its document until it ends). */
+export const NB_WRITES_MAX = 64;
 function nbDoc(content: unknown): unknown {
   try { return fromNbformat(content); } catch (err) { throw new WorkspaceError("invalid", (err as Error)?.message ?? String(err)); }
 }
 
 export class Workspace {
   private subs = new Set<(c: Change) => void>();
+  /** The whole writes of notebooks under sync's journal under way here, by what they write (writeJournaled). */
+  private nbWrites = new Map<string, { run: Promise<{ entry: Entry; rev: number }>; done: number | null }>();
   private channel: BroadcastChannel | null = null;
   private tab = hex(8);
   /** Who makes the changes from here: "person", or "agent:<name>" (§8.3); in the operation log and on versions. */
@@ -1578,11 +1580,14 @@ export class Workspace {
   /** `opts.expect`: only that entry (its kind, fid, creation and, a document's, ref, as remove's), checked holding the
    * lock: another there now, a WorkspaceError("conflict"), nothing written. */
   async write(p: string, content: unknown, opts: { base?: number; tag?: string; keepEmpty?: boolean; fid?: string; expect?: Pick<Entry, "kind" | "fid" | "created" | "ref"> } & Collect & Admitted = {}): Promise<{ entry: Entry; rev: number }> {
-    const c = owned(content, this.limits.maxFileBytes);
     // (a notebook under sync's journal: written through the journal, writeJournaled; anything else as before.  Read
     // here with no lock: writeJournaled checks the path again under the lock before anything is written)
     const pre = this.main && opts.fid === undefined ? await this.stat(p).catch(() => undefined) : undefined;
     const journaled = pre?.kind === "notebook" && !!pre.ref && !pre.remote && !pre.trashed && (await this.mainTx("notebooks", "readonly", (st) => st.get(FENCE)).catch(() => undefined))?.phase === "journal";
+    // (refused before its document is copied or anything is made for it when NB_WRITES_MAX are already under way;
+    // writeJournaled admits it for good, with no wait between its own count and its entry)
+    if (journaled) this.nbWriteRoom();
+    const c = owned(content, this.limits.maxFileBytes);
     const out = journaled ? await this.writeJournaled(p, c, opts, pre!.ref!) : await this.writeLocked(p, c, opts);
     this.askToKeep();
     return out;
@@ -1594,14 +1599,36 @@ export class Workspace {
    * makes the write, asked on the notebook's handover channel (web/page/handover.ts) in two phases, the commit sent
    * only after the path and the grant are checked again.  The workspace's lock is held only around bounded steps,
    * never across another tab's answer or save; every ok comes from reading the record again (this ref, a revision
-   * not before the base, this document), never from an answer alone. */
+   * past the base, this whole document), never from an answer alone. */
   private async writeJournaled(p: string, content: unknown, opts: { base?: number; tag?: string; expect?: Pick<Entry, "kind" | "fid" | "created" | "ref"> } & Collect & Admitted, ref: string): Promise<{ entry: Entry; rev: number }> {
-    const collect = sinkOf(opts.collect), admit = admitOf(opts.admit), base = opts.base;
+    const base = opts.base;
     const doc = nbDoc(content) as any;
     if (!doc || typeof doc !== "object" || !Array.isArray(doc.cells)) throw new WorkspaceError("invalid", "a notebook is {cells: [...]}");
     const { id: _i, rev: _r, updated: _u, baseRev: _b, ...rest } = doc;
     const want = { ...rest, cells: withCellIds(rest.cells) };
-    const key = notebookValue(want, want.mode !== undefined);
+    // (an ok: the record holds this whole document (notebook-form docValue: every field but the store's envelope, each
+    // cell whole), its language too if it names one)
+    const withMode = want.mode !== undefined, key = docValue(want, withMode);
+    // (one request per document asked for at once: the same write asked again while it is under way is that one; at
+    // most NB_WRITES_MAX under way, each holding its document; ended ones forgotten after a minute)
+    const now = Date.now();
+    for (const [k, w] of this.nbWrites) if (w.done !== null && now - w.done > 60_000) this.nbWrites.delete(k);
+    const one = `${ref}\n${base ?? ""}\n${key}`, running = this.nbWrites.get(one);
+    if (running && running.done === null) return running.run;
+    this.nbWriteRoom();
+    const entry = { run: null as unknown as Promise<{ entry: Entry; rev: number }>, done: null as number | null };
+    this.nbWrites.set(one, entry);
+    entry.run = this.writeJournaledOnce(p, want, key, withMode, opts, ref).finally(() => { entry.done = Date.now(); });
+    return entry.run;
+  }
+  /** Refuses a whole write of a notebook when NB_WRITES_MAX are under way in this page (each holds its document). */
+  private nbWriteRoom() {
+    let pending = 0;
+    for (const w of this.nbWrites.values()) if (w.done === null) pending++;
+    if (pending >= NB_WRITES_MAX) throw new WorkspaceError("busy", `too many notebook writes are under way in this page (${NB_WRITES_MAX}): nothing changed (try again shortly)`);
+  }
+  private async writeJournaledOnce(p: string, want: any, key: string, withMode: boolean, opts: { base?: number; tag?: string; expect?: Pick<Entry, "kind" | "fid" | "created" | "ref"> } & Collect & Admitted, ref: string): Promise<{ entry: Entry; rev: number }> {
+    const collect = sinkOf(opts.collect), admit = admitOf(opts.admit), base = opts.base;
     const lock = NB_WRITER_LOCK + ref, locks = (globalThis as any).navigator?.locks;
     if (!locks?.request) throw new WorkspaceError("storage", "this browser can't take a notebook's writer lock, which sync's journal needs");
     // (the path still this notebook, outside Trash, and the grant in force: under the workspace's lock, right before a
@@ -1619,7 +1646,7 @@ export class Workspace {
     const verified = () => this.lockedFor(p, async () => {
       const e = await target();
       const rec = await this.mainTx("notebooks", "readonly", (st) => st.get(ref));
-      if (!rec || (base !== undefined && !(rec.rev >= base)) || notebookValue(rec, want.mode !== undefined) !== key) return null;
+      if (!rec || (base !== undefined && !(rec.rev > base)) || docValue(rec, withMode) !== key) return null;
       const ops: Op[] = [], t = this.now();
       const entry = await inTx(this.ws, withSync("entries", "ops"), "readwrite", async (tx) => {
         await fenceCheck(tx, [e.path]);
@@ -1673,7 +1700,7 @@ export class Workspace {
       if (rev !== null) {
         const ok = await verified();
         if (ok) return ok;
-        throw new WorkspaceError("busy", `${path(p)} wasn't written: its record doesn't hold this write (read it again)`);
+        throw new WorkspaceError("busy", `couldn't confirm the write of ${path(p)}: its record no longer matches it (read it again)`);
       }
       const m = await ask();
       if (m.t === "conflict") throw new WorkspaceError("conflict", `${path(p)} was changed elsewhere`, m.current ?? null);
@@ -1683,7 +1710,8 @@ export class Workspace {
       const ok = await verified();
       if (ok) return ok;
     }
-    throw new WorkspaceError("busy", `${path(p)} is open in a tab of this browser that didn't answer: nothing changed (try again)`);
+    // (not confirmed: a commit already sent may still be made, so what happened isn't said, only what to do)
+    throw new WorkspaceError("busy", `couldn't confirm the write of ${path(p)}: a tab of this browser has it open and didn't confirm it (read it again before trying again)`);
   }
   private async writeLocked(p: string, content: unknown, opts: { base?: number; tag?: string; keepEmpty?: boolean; fid?: string; expect?: Pick<Entry, "kind" | "fid" | "created" | "ref"> } & Collect & Admitted, guard?: SaveGuard): Promise<{ entry: Entry; rev: number }> {
     const collect = sinkOf(opts.collect), admit = admitOf(opts.admit);

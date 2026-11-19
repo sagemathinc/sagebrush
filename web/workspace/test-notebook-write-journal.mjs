@@ -10,7 +10,8 @@
 //  W4. a write from an old revision: a conflict, nothing changed;
 //  W5-W10, the holder's protocol: a hand-over while the holder prepares (nothing applied there); messages of the wrong
 //      shape (no answer), the grant withdrawn while it prepares (no commit); its answer late (one revision, ok from
-//      the record); two writes from one revision (one wins); a forged answer (no ok); the workspace not held meanwhile.
+//      the record); two writes from one revision (one wins); a forged answer (no ok); the workspace not held meanwhile;
+//      the whole document compared (an output or metadata changed is a change: W5c, W9b, W9c); at most 64 under way (W11).
 // Serve web/dist first (python3 web/serve.py 8765), then
 //   node web/workspace/test-notebook-write-journal.mjs
 import { spawn } from "node:child_process";
@@ -318,6 +319,96 @@ try {
     await B.ev(`window.__sbTestWritePause = null`);
     await B.close();
     void ref;
+  }
+  // W5c (S1, the whole document): the holder held at the commit while the person changes only the notebook's metadata
+  // there and it is saved: the document shown is no longer the one it got ready on, so nothing is applied (its page
+  // never shows the agent's text), the person's document stays whole, and the write is a conflict
+  {
+    const p = "/w5c.ipynb";
+    const { ref, B, writer } = await held(p, ["c = 1"]);
+    await pauseAt(B, "commit");
+    await B.ev(`(() => { window.__sawAgent = false; window.__look = setInterval(() => { if (JSON.stringify(${NB}.snapshot()).includes("# agent")) window.__sawAgent = true; }, 20); return true; })()`);
+    const r = await read(A, p);
+    await startWrite(A, p, nbJson(["c = 2  # agent"]), r.rev, "w5c");
+    const paused = await B.until(`window.__wp.at === "commit"`, 10000);
+    await B.ev(`(async () => { ${NB}.setMeta({ tag: "person" }); ${NB}.flush(); await ${NB}.saved(); return true; })()`);
+    const metaSaved = await B.until(`new Promise((ok) => { const q = indexedDB.open("sagebrush"); q.onsuccess = () => { const g = q.result.transaction("notebooks").objectStore("notebooks").get(${J(ref)}); g.onsuccess = () => { ok(g.result?.tag === "person"); q.result.close(); }; }; })`, 10000);
+    await resume(B);
+    const o = await outcome(A, "w5c");
+    await sleep(800);
+    const saw = await B.ev(`(() => { clearInterval(window.__look); return window.__sawAgent; })()`);
+    const rc = await rec(A, ref), tag = await B.ev(`new Promise((ok) => { const q = indexedDB.open("sagebrush"); q.onsuccess = () => { const g = q.result.transaction("notebooks").objectStore("notebooks").get(${J(ref)}); g.onsuccess = () => { ok(g.result?.tag ?? null); q.result.close(); }; }; })`);
+    check(writer && paused && metaSaved && saw === false && o && !o.ok && o.code === "conflict" && J(rc?.codes) === J(["c = 1"]) && tag === "person", "W5c: the holder held at the commit while the person changes only the notebook's metadata there, saved: nothing applied (its page never shows the agent's text), the person's document whole, and the write a conflict", { writer, paused, metaSaved, saw, o, rc, tag });
+    await B.ev(`window.__sbTestWritePause = null`);
+    await B.close();
+  }
+  // W9b, W9c (the ok is the whole document at a newer revision): forged "wrote" answers for a write under way are no ok
+  // when the record still is at the base (an identical request), or holds the same sources with other outputs
+  {
+    const p = "/w9b.ipynb";
+    const { ref, B, writer } = await held(p, ["e = 1"]);
+    const r = await read(A, p);
+    // (the document exactly as read: the same cells, ids included)
+    const same = r.content?.json ?? r.content;
+    await pauseAt(B, "prepare");
+    await A.ev(`(() => { window.__w ??= {}; window.__w.w9b = null; ${W}.write(${J(p)}, ${J(same)}, { base: ${r.rev} }).then((x) => { window.__w.w9b = { ok: true, rev: x.rev }; }, (e) => { window.__w.w9b = { ok: false, code: e.code ?? null, msg: e.message }; }); return true; })()`);
+    const paused = await B.until(`window.__wp.at === "prepare"`, 10000);
+    const req = await B.ev(`window.__wp.req`);
+    await A.ev(`(() => { const ch = new BroadcastChannel(${J("sagebrush-nb-writer:" + ref)}); ch.postMessage({ t: "wrote", req: ${J(req)}, rev: ${r.rev} }); ch.close(); return true; })()`);
+    await sleep(1500);
+    const early = await A.ev(`window.__w.w9b`);
+    await resume(B);
+    const o = await outcome(A, "w9b", 40000);
+    const rc = await rec(A, ref);
+    check(writer && paused && early === null && (!o?.ok || (o.rev > r.rev && rc?.rev === o.rev)), "W9b: an identical write with a forged \"wrote\" while its record stays at the base: no ok (an ok only from a newer revision holding it)", { paused, early, o, base: r.rev, rc });
+    await B.ev(`window.__sbTestWritePause = null`);
+    await B.close();
+  }
+  {
+    const p = "/w9c.ipynb";
+    const { ref, B, writer } = await held(p, ["u = 1"]);
+    const r = await read(A, p);
+    const cur = r.content?.json ?? r.content;
+    // (the agent's document: the same sources, and the notebook-level field the person is about to save, with an
+    // output on its cell: it differs from what the record will hold only in that output)
+    const doc = { ...cur, tag: "person", cells: cur.cells.map((c) => ({ ...c, outputs: [{ output_type: "stream", name: "stdout", text: "agent-out\n" }] })) };
+    await pauseAt(B, "prepare");
+    await startWrite(A, p, doc, r.rev, "w9c");
+    const paused = await B.until(`window.__wp.at === "prepare"`, 10000);
+    const req = await B.ev(`window.__wp.req`);
+    await B.ev(`(async () => { ${NB}.setMeta({ tag: "person" }); ${NB}.flush(); await ${NB}.saved(); return true; })()`);
+    await sleep(500);
+    const rc0 = await A.ev(`new Promise((ok) => { const q = indexedDB.open("sagebrush"); q.onsuccess = () => { const g = q.result.transaction("notebooks").objectStore("notebooks").get(${J(ref)}); g.onsuccess = () => { ok({ rev: g.result?.rev, tag: g.result?.tag, outs: g.result?.cells?.[0]?.outputs?.length ?? 0 }); q.result.close(); }; }; })`);
+    await A.ev(`(() => { const ch = new BroadcastChannel(${J("sagebrush-nb-writer:" + ref)}); ch.postMessage({ t: "wrote", req: ${J(req)}, rev: ${rc0.rev} }); ch.close(); return true; })()`);
+    await sleep(1500);
+    const early = await A.ev(`window.__w.w9c`);
+    await resume(B);
+    const o = await outcome(A, "w9c", 40000);
+    check(writer && paused && rc0.rev > r.rev && rc0.tag === "person" && rc0.outs === 0 && early === null && o && !o.ok, "W9c: a forged \"wrote\" while the record, at a newer revision, holds the same sources with other outputs: no ok", { paused, rc0, early, o });
+    await B.ev(`window.__sbTestWritePause = null`);
+    await B.close();
+  }
+  // W11 (bounded): at most 64 whole writes under way in a page, each holding its document: the 65th is refused at
+  // once, nothing changed, and the 64 then end
+  {
+    const p = "/w11.ipynb";
+    const { ref, B, writer } = await held(p, ["n = 0"]);
+    const r = await read(A, p);
+    await pauseAt(B, "prepare");
+    // (the writing page's channels for this notebook, counted as they are made and closed: the 65th makes none)
+    await A.ev(`(() => { const name = ${J("sagebrush-nb-writer:" + ref)}, B0 = window.BroadcastChannel; window.__ch = { live: 0, peak: 0, made: 0 }; window.__chB0 = B0; window.BroadcastChannel = class extends B0 { constructor(n) { super(n); this.__mine = n === name; if (this.__mine) { const c = window.__ch; c.made++; c.live++; c.peak = Math.max(c.peak, c.live); } } close() { if (this.__mine && !this.__closed) { this.__closed = true; window.__ch.live--; } return super.close(); } }; return true; })()`);
+    for (let i = 1; i <= 64; i++) await startWrite(A, p, nbJson([`n = ${i}`]), r.rev, `w11-${i}`);
+    await startWrite(A, p, nbJson(["n = 65"]), r.rev, "w11-65");
+    await sleep(500);
+    const st = await A.ev(`(() => { const w = window.__w, out = { ended: 0, refused: null, ch: { ...window.__ch } }; for (let i = 1; i <= 64; i++) if (w["w11-" + i] !== null) out.ended++; out.refused = w["w11-65"]; return out; })()`);
+    await resume(B);
+    const allEnded = await A.until(`(() => { for (let i = 1; i <= 64; i++) if (window.__w["w11-" + i] === null) return false; return true; })()`, 120000);
+    const okCount = await A.ev(`(() => { let n = 0; for (let i = 1; i <= 64; i++) if (window.__w["w11-" + i]?.ok) n++; return n; })()`);
+    const rc = await rec(A, ref);
+    const peak = await A.ev(`(() => { const c = { ...window.__ch }; window.BroadcastChannel = window.__chB0; return c; })()`);
+    check(writer && st.ended === 0 && st.refused && !st.refused.ok && /too many notebook writes/.test(st.refused.msg ?? "") && st.ch.made <= 64 && peak.peak <= 64 && allEnded && okCount <= 1 && (okCount === 0 ? rc.rev === r.rev : rc.rev === r.rev + 1), "W11: 64 whole writes under way at once: the 65th is refused at once, before anything is made for it (the page's channels for the notebook never more than 64), nothing changed by it; the 64 then end, at most one of them saved", { st, peak, allEnded, okCount, rc });
+    await B.ev(`window.__sbTestWritePause = null`);
+    await B.close();
   }
   const errs = tabs.flatMap((x) => x.errors);
   check(errs.length === 0, "no page errors", errs);

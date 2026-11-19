@@ -14,6 +14,7 @@
 // document, another document shown, the takeover failed, no field to type it into, or past the 5000 kept) is counted,
 // and the page says how many input actions weren't applied.
 
+import { docValue, ENVELOPE } from "../workspace/notebook-form";
 /** What the page says of input made while this tab was taking over that wasn't applied (`n` input actions: a key, a
  * paste, a cursor move): not replayed into the document, not a storage failure. */
 export const inputNotApplied = (n: number) => `${n} input action${n === 1 ? "" : "s"} made here while this tab was taking over ${n === 1 ? "wasn't" : "weren't"} applied: enter that input again.`;
@@ -63,7 +64,8 @@ function docOk(d: any): boolean {
   if (d.mode !== undefined && typeof d.mode !== "string") return false;
   try { return JSON.stringify(d).length <= DOC_CHARS; } catch { return false; }
 }
-const cellsKey = (d: any) => JSON.stringify((Array.isArray(d?.cells) ? d.cells : []).map((c: any) => [c?.id ?? null, c?.type ?? "code", c?.code ?? ""]));
+// (two documents equal as whole documents: every field but the store's envelope, each cell whole)
+const sameDoc = (a: any, b: any) => docValue(a) === docValue(b);
 // (a record as a document: the store's own fields left out)
 const plainDoc = (r: any) => { if (!r) return null; const { j: _j, hash: _h, unjournaled: _u, rev: _r, updated: _d, baseRev: _b, at: _a, from: _f, proof: _p, ...doc } = r; return doc; };
 
@@ -308,7 +310,7 @@ export function writerHandover(page: HandoverPage) {
   const reqOk = (r: unknown) => typeof r === "string" && r.length > 0 && r.length <= 64;
   const shape = (m: any, keys: string) => !!m && typeof m === "object" && !Array.isArray(m) && Object.keys(m).sort().join(",") === keys;
   const holds = (st: any) => !!st && store === st && writes() && !st.yielding && !st.released && !handing;
-  const sameCells = (a: any, b: any) => cellsKey(a) === cellsKey(b);
+
   // (tests: the holder held at `stage`, loopback pages only, test-notebook-write-journal.mjs)
   const pause = async (stage: string, req: string) => {
     const f = (globalThis as any).__sbTestWritePause;
@@ -362,7 +364,7 @@ export function writerHandover(page: HandoverPage) {
     if (!rec) return end(req, w, { t: "failed", req, why: "its record couldn't be read" });
     // (typed here since that save, or a base that isn't the record's revision: a conflict, with what is there now)
     const shown = page.shownDoc!();
-    if (!sameCells(shown, rec) || (w.base !== null && rec.rev !== w.base)) return end(req, w, { t: "conflict", req, current: plainDoc(rec) });
+    if (!sameDoc(shown, rec) || (w.base !== null && rec.rev !== w.base)) return end(req, w, { t: "conflict", req, current: plainDoc(rec) });
     w.rec = rec; w.state = "ready"; w.readyAt = Date.now();
     post({ t: "ready", req });
     // (a commit that never comes: let go after READY_MS, nothing changed)
@@ -372,8 +374,12 @@ export function writerHandover(page: HandoverPage) {
     await pause("commit", req);
     // (right before the change, with no wait in between: still this tab's to write, and nothing typed since `ready`)
     if (!holds(st)) return end(req, w, { t: "lost", req });
-    if (!sameCells(page.shownDoc!(), w.rec)) return end(req, w, { t: "conflict", req, current: plainDoc(w.rec) });
-    page.replaceDoc!({ ...w.doc, mode: w.doc.mode ?? w.rec.mode, rev: w.rec.rev });
+    // (the whole document shown still the record it got ready on: an output, a count, metadata changed since is a change)
+    const shown = page.shownDoc!();
+    if (!sameDoc(shown, w.rec)) return end(req, w, { t: "conflict", req, current: plainDoc(w.rec) });
+    // (a whole write: the notebook-level fields it doesn't name go, as a write with no holder leaves the record)
+    const gone = Object.fromEntries(Object.keys(shown).filter((k) => k !== "cells" && k !== "mode" && !ENVELOPE.includes(k) && !(k in w.doc)).map((k) => [k, undefined]));
+    page.replaceDoc!({ ...gone, ...w.doc, mode: w.doc.mode ?? w.rec.mode, rev: w.rec.rev });
     // (the replacement's save, asked for by the notebook once its own loading step is done (two microtasks), then
     // waited for: a hand-over that begins meanwhile waits for it too (its quiesce))
     await Promise.resolve();
