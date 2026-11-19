@@ -583,8 +583,9 @@ export class AgentPairing {
     if (!rv) return this.fail(id, "invalid", `not a verb: ${JSON.stringify(method)}`);
     const h = this.hello!;
     this.inFlight++;
-    // (latex_build: the .tex as it was before, for its run once by itself if the build is done and it is unchanged)
-    const g0 = this.grant, v0 = this.verbs, texPath = method === "workspace.latex_build" && typeof (params as any)?.path === "string" ? (params as any).path as string : null;
+    // (latex_build: the .tex as it was before, for its run once by itself if the build is done and it is unchanged; only
+    //  under a grant that could ever let it (Everything and May run code: mayRunCreated), else nothing is read)
+    const g0 = this.grant, v0 = this.verbs, texPath = method === "workspace.latex_build" && typeof (params as any)?.path === "string" && g0?.run === true && g0.folders.length === 1 && g0.folders[0] === "/" ? (params as any).path as string : null;
     const before = texPath && v0 ? await v0.stat(texPath).catch(() => null) : null;
     try {
       await rv.serve(method, params, {

@@ -847,5 +847,71 @@ for (const [what, grant] of [["a folder, not Everything", { folders: ["/A"], wri
   await P.revoke();
   S.srv.stop(true);
 }
+// ---- a .tex this agent made runs once by itself in the editor that shows it (decided Nov 19 2026,
+// agent-made-tex.ts): an editor asks over the site's channel whether the file at a revision may; the pairing says
+// yes once, for the .tex it last created or built (done, unchanged since), at that revision, under mayRunCreated's
+// conditions; and tells the editors when it made one
+{
+  const S = server(pairOk), W = fakeWs();
+  const revs = new Map(), base = W.verbsFor;
+  W.verbsFor = (actor) => { const v = base(actor); return { ...v, create: async (p, ...a) => ({ ...(await v.create(p, ...a)), rev: revs.get(p) ?? 0 }), stat: async (p) => { const e = await v.stat(p); return e && { ...e, rev: revs.get(p) ?? 0 }; } }; };
+  let builds = 0, during = null;
+  const runVerbs = { serve: async (method, params, ctx) => { builds++; during?.(); ctx.reply({ ok: true, ended: "done" }); } };
+  let now = Date.now();
+  const P = new AgentPairing(S.port, { code: "abcd-efgh ijkl" }, { verbsFor: W.verbsFor, store: W.storeApi, trashEntry: W.trashEntry, page, now: () => now, runVerbs });
+  const ed = new BroadcastChannel("sagebrush-agent-made"), heard = [];
+  ed.onmessage = (e) => heard.push(e.data);
+  let n = 0;
+  const ask = async (fid, rev) => { const id = "q" + ++n; ed.postMessage({ t: "tex-may-run", id, fid, rev }); await sleep(120); return heard.some((m) => m.t === "tex-may-run" && m.id === id && m.ok === true); };
+  const told = (rev) => heard.some((m) => m.t === "tex-made" && m.fid === "FID" && m.rev === rev);
+  await P.paired();
+  await P.allow({ folders: ["/"], write: true, run: true, expires: now + 60_000 }, false);
+  await S.request("workspace.create", { path: "/A/paper.tex" });
+  ok(await until(() => told(0)) && P.created?.fid === "FID" && P.created.rev === 0, "a .tex created: the editors told its fid and revision", heard);
+  ok(!(await ask("FID", 1)) && !(await ask("OTHER", 0)), "another revision, another file: no answer");
+  ok(await ask("FID", 0), "the revision it created, the grant in force with Everything and May run code: yes");
+  ok(!(await ask("FID", 0)), "asked again: no answer, its one run spent");
+  // (built: done, and the file unchanged meanwhile; then a build during which it changed: nothing kept)
+  revs.set("/A/paper.tex", 3);
+  const b = await S.request("workspace.latex_build", { path: "/A/paper.tex" });
+  ok(b.result?.ok === true && builds === 1 && await until(() => told(3)) && P.built?.rev === 3 && P.built.fid === "FID", "a .tex built (done, unchanged since): kept at its revision, the editors told", { built: P.built, heard });
+  ok(await ask("FID", 3) && !(await ask("FID", 3)), "built: yes once, then spent");
+  during = () => revs.set("/A/paper.tex", 4);
+  const kept = P.built;
+  await S.request("workspace.latex_build", { path: "/A/paper.tex" });
+  await sleep(150);
+  ok(builds === 2 && P.built === kept && !told(4) && !(await ask("FID", 4)), "a build during which the file changed: nothing kept, nothing told, no answer");
+  during = null;
+  revs.set("/A/paper.tex", 5);
+  await S.request("workspace.latex_build", { path: "/A/paper.tex" });
+  await until(() => told(5));
+  now += 61_000;
+  ok(!(await ask("FID", 5)), "the grant expired: no answer");
+  now -= 61_000;
+  await P.noRun();
+  ok(!(await ask("FID", 5)), "May run code turned off: no answer");
+  await P.revoke();
+  ok(!(await ask("FID", 5)), "revoked: no answer");
+  ed.close();
+  S.srv.stop(true);
+}
+{
+  // (a folder, not Everything: told nothing to run, and no answer)
+  const S = server(pairOk), W = fakeWs(), base = W.verbsFor;
+  W.verbsFor = (actor) => { const v = base(actor); return { ...v, create: async (p, ...a) => ({ ...(await v.create(p, ...a)), rev: 0 }) }; };
+  const P = mk(S, W);
+  const ed = new BroadcastChannel("sagebrush-agent-made"), heard = [];
+  ed.onmessage = (e) => heard.push(e.data);
+  await P.paired();
+  await P.allow({ folders: ["/A"], write: true, run: true, expires: null }, false);
+  await S.request("workspace.create", { path: "/A/p.tex" });
+  await until(() => heard.length > 0);
+  ed.postMessage({ t: "tex-may-run", id: "qa", fid: "FID", rev: 0 });
+  await sleep(150);
+  ok(P.created?.rev === 0 && !heard.some((m) => m.id === "qa"), "a folder's grant, not Everything: a created .tex never runs by itself (no answer)", heard);
+  await P.revoke();
+  ed.close();
+  S.srv.stop(true);
+}
 console.log(failures ? `${failures} failed` : "all passed");
 process.exit(failures ? 1 : 0);
