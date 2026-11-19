@@ -74,6 +74,48 @@ def det_input(ring, size, v=0):
     return matrix(ring, size, size, lambda i, j: pow(i + 2 + v, j + 3, 65537))
 
 
+# The rank rows beyond the square ones (expected_inputs.py's formulas, which
+# also certify the ranks): wide R(n x 2n); def R(n x n//2) R(n//2 x n); def_p
+# R(n x n) diag(1, ..., 1, p) R(n x n), p = 2^62 - 57.  Over Q, row i is
+# divided by 1 + i mod 7.
+RANK_P = (1 << 62) - 57
+RANK_RANGE = {"z": (1000003, 500001), "q": (101, 50)}
+
+
+def rank_rnd(rows, cols, s, kind):
+    m, off = RANK_RANGE[kind]
+    return [
+        [pow(131 * i + 31 * j + s, 5, m) - off for j in range(cols)]
+        for i in range(rows)
+    ]
+
+
+def rank_factors(shape, kind, size, v):
+    """(B, C), integer rows, with the row's matrix the product B C."""
+    s1, s2 = 10 * v + 1, 10 * v + 2
+    if shape == "wide":
+        return rank_rnd(size, 2 * size, s1, kind), None
+    if shape == "def":
+        r = size // 2
+        return rank_rnd(size, r, s1, kind), rank_rnd(r, size, s2, kind)
+    c = rank_rnd(size, size, s2, kind)
+    c[-1] = [RANK_P * x for x in c[-1]]
+    return rank_rnd(size, size, s1, kind), c
+
+
+def rank_input(case, size, v):
+    """A wide, def or def_p rank row's matrix (ZZ, or QQ with row i over
+    1 + i mod 7)."""
+    kind, shape = case.split("_")[1], case.split("_rank_")[1]
+    b, c = rank_factors(shape, kind, size, v)
+    A = matrix(ZZ, b) if c is None else matrix(ZZ, b) * matrix(ZZ, c)
+    if kind == "z":
+        return A
+    return matrix(
+        QQ, [[QQ(x) / (1 + i % 7) for x in row] for i, row in enumerate(A.rows())]
+    )
+
+
 def zpoly(size, salt):
     return [((i * i * salt + 3 * i + 1) % 1000003) - 500001 for i in range(size)]
 
@@ -166,6 +208,10 @@ def prepare(v):
         f = x**n - 1
         operands(coeffs(f))
         return lambda: f.factor()
+    if case_id.startswith("mat_") and "_rank_" in case_id:
+        A = rank_input(case_id, n, v)
+        operands(A.list())
+        return lambda: A.rank()
     if case_id.startswith("mat_"):
         ring = (
             ZZ
@@ -233,7 +279,7 @@ def signature(answer):
     if case_id.startswith("poly_"):
         return "%d:%d" % (answer.degree(), seq_hash(coeffs(answer)))
     if case_id.startswith("mat_"):
-        op = case_id.rsplit("_", 1)[1]
+        op = "rank" if "_rank_" in case_id else case_id.rsplit("_", 1)[1]
         if op in ("det", "rank"):
             return str(answer)
         if op == "charpoly":
