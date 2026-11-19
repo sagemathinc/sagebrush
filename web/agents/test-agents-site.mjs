@@ -12,7 +12,7 @@ const web = join(fileURLToPath(new URL(".", import.meta.url)), "..");
 const fails = [];
 const ok = (c, what) => (console.log(`${c ? "ok  " : "FAIL"} ${what}`), c || fails.push(what));
 
-const FILES = ["agents.js", "connect/index.html", "index.html"];
+const FILES = ["agents.js", "connect.md", "connect/copy.js", "connect/index.html", "index.html"];
 // (a directory's files, as paths under it, sorted)
 const walk = (dir, rel = "") => existsSync(join(dir, rel)) ? readdirSync(join(dir, rel), { withFileTypes: true }).flatMap((e) => e.isDirectory() ? walk(dir, rel + e.name + "/") : [rel + e.name]).sort() : [];
 const dist = join(web, "dist", "agents");
@@ -73,9 +73,12 @@ if (process.env.SAGEBRUSH_NO_SITE !== "1" && existsSync(site)) {
   const headers = existsSync(join(site, "public", "_headers")) ? readFileSync(join(site, "public", "_headers"), "utf8") : "";
   const rule = /^\/agents\/\*\n((?:[ \t].*\n?)*)/m.exec(headers)?.[1] ?? "";
   ok(/frame-ancestors 'none'/.test(rule) && /connect-src[^;]*ws:\/\/127\.0\.0\.1:\*/.test(rule), "the site's _headers give /agents/* its policy: frame-ancestors 'none', the loopback socket allowed");
-  // ("How to connect your agent": a page without scripts, so it adds no hash to the rule, and its links stay on the site)
+  // ("How to connect your agent": no inline script (only its own copy.js, under 'self'), so it adds no hash to the rule,
+  //  and its links stay on the site)
   const conn = existsSync(join(pub, "connect", "index.html")) ? readFileSync(join(pub, "connect", "index.html"), "utf8") : "";
-  ok(conn.includes("<h1>How to connect your agent to Sagebrush</h1>") && !/<script/i.test(conn), "…with \"How to connect your agent to Sagebrush\", a page without scripts");
+  // (its one script is its own file, connect/copy.js, under 'self': no inline script, so it adds no hash to the rule)
+  const scripts = [...conn.matchAll(/<script\b[^>]*>([\s\S]*?)<\/script>/gi)];
+  ok(conn.includes("<h1>How to connect your agent to Sagebrush</h1>") && scripts.length === 1 && /^<script src="\/agents\/connect\/copy\.js" defer>$/.test(scripts[0][0].replace(/<\/script>$/i, "")) && scripts[0][1] === "", "…with \"How to connect your agent to Sagebrush\", no inline script: only its own copy.js");
 } else console.log("(no site in this checkout: the site's copy isn't checked)");
 
 console.log(fails.length ? `test-agents-site: ${fails.length} failed` : "test-agents-site: all passed");
