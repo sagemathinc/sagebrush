@@ -921,16 +921,26 @@ if (TAURI) TAURI.core.invoke("selftest_file").then((st) => {
 class RemoteWorker {
   constructor() {
     this.sid = newId();
-    this.queue = Promise.resolve();
     this.onmessage = null;
     this.onerror = null;
     this.es = new EventSource(`api/session/${this.sid}/events`);
+    // (the server starts the session when the events stream opens: nothing is sent before, or the first message, the
+    // interpreter's init, could reach a session not started yet and be refused)
+    this.queue = new Promise((resolve) => this.es.addEventListener("open", resolve, { once: true }));
     this.es.onmessage = (ev) => this.onmessage?.({ data: JSON.parse(ev.data) });
     this.es.onerror = () => { if (this.es.readyState === EventSource.CLOSED) this.onerror?.({ message: "lost the connection to the local server" }); };
   }
   send(path, body) {
-    // in order: each request waits for the one before it
-    this.queue = this.queue.then(() => fetch(`api/session/${this.sid}/${path}`, { method: "POST", body: JSON.stringify(body) })).catch(() => {});
+    // in order: each request waits for the one before it; one the server refuses is tried once more (a session it
+    // doesn't have yet: the events stream reconnecting), then said, never dropped silently
+    const post = () => fetch(`api/session/${this.sid}/${path}`, { method: "POST", body: JSON.stringify(body) });
+    this.queue = this.queue.then(async () => {
+      let r = await post();
+      if (r.status === 404) { await new Promise((t) => setTimeout(t, 500)); r = await post(); }
+      if (r.ok) return;
+      const why = (await r.text().catch(() => "")).trim().slice(0, 200);
+      this.onerror?.({ message: `the local server refused a message to Python (${r.status}${why ? ": " + why : ""})` });
+    }).catch(() => {});
   }
   postMessage(m) { this.send("send", m); }
   interrupt(upTo) { this.send("interrupt", { upTo }); }
@@ -4836,7 +4846,8 @@ const wsReady = (async () => {
 // client only while sync is on in this browser and the session's account is the lease's, so a page loaded after sync
 // was turned on goes on syncing files wherever the site is served from; the switch adds notebooks' contents on its own
 // origins)
-void wsReady.then(async (w) => { if (!w) return; await bootDone; SyncOwner.of(w).start(); });
+// (not under `sagebrush notebook`: its server has no sync API, and its notebooks are the computer's own files)
+void wsReady.then(async (w) => { if (!w || LOCAL) return; await bootDone; SyncOwner.of(w).start(); });
 // (sync 2c-3, the switch for notebooks' contents (web/workspace/doc-sync-switch.ts): this page's sync owner started;
 // then, only on DEV's or PROD's origin or a self-hosted site whose own server states this origin, and only if the
 // server lets this account sync and its client runs, evaluated afresh on every load: enableDocSync turns the journal on (lasting for
@@ -4850,7 +4861,7 @@ void wsReady.then(async (w) => { if (!w) return; await bootDone; SyncOwner.of(w)
 // a failed turning on (enableDocSync's off or reload) is as before)
 const docSyncReady = (async () => {
   const w = await wsReady;
-  if (!w) return false;
+  if (!w || LOCAL) return false;
   // (started once the page's first document is open (bootDone, which a page without one reaches too): the owner's first
   // reads of the workspace never run alongside that first load, so they add nothing to its IndexedDB work)
   await bootDone;
@@ -5477,7 +5488,10 @@ const historyDbReady = openHistoryDb({ onVersionChange: () => { nbHistory?.close
   // background loading (web/preload.ts): at the next idle moment, the library files the open notebook's first Run
   // will fetch (its mode's groups, the groups its import lines name), and the LaTeX editor's two files where the
   // workspace has a .tex; bytes only, nothing run, and skipped on Save-Data, a slow connection or little storage
-  preloadSoon({
+  // (not under `sagebrush notebook`: Python runs in the local server, so the page never fetches the library's files;
+  // and its fetches, without credentials, would be refused there: no token cookie)
+  if (LOCAL) preloadState.outcome = "local";
+  else preloadSoon({
     table: __SB_PRELOAD__,
     doc: () => { if (!current.id) return null; const s = nb.snapshot(); return { mode: s.mode ?? nb.mode, codes: s.cells.filter((c) => !c.type).map((c) => c.code ?? "") }; },
     // the LaTeX editor's two files, where the editor is on here and the workspace has a .tex (latexExtra)
