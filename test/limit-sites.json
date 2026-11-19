@@ -9383,6 +9383,46 @@
   "owner": "curves over QQ (@sagebrush-sage2)",
   "reason": "E.plot()'s x range (xmin/xmax, Sage's ranges), now in lib/_sage_ec_plot.py: matched words, no limit"
  },
+ "lib/_sage_modular.py :: ModularFormElement.__mul__ :: raise NotImplementedError(\"products of modular forms: not yet\") #0": {
+  "class": "coverage",
+  "owner": "modular forms (Sage mode)",
+  "reason": "products of modular forms: not available yet (Sage has them); refused, never a wrong answer"
+ },
+ "lib/_sage_modular.py :: ModularFormElement._common :: raise TypeError(\"unsupported operand: a modular form and %r\" % (other,)) #0": {
+  "class": "none",
+  "owner": "modular forms (Sage mode)",
+  "reason": "a TypeError for adding a modular form and a non-form, as Sage; refuses nothing for size"
+ },
+ "lib/_sage_modular.py :: ModularForms._dims :: raise NotImplementedError(\"weight 1 with a character: not yet\") #0": {
+  "class": "coverage",
+  "owner": "modular forms (Sage mode)",
+  "reason": "weight 1 with a nontrivial character: not available yet (the engine's forms start at weight 2); refused"
+ },
+ "lib/_sage_modular.py :: ModularForms._dims :: raise NotImplementedError(\"weight must be at least 1\") #0": {
+  "class": "none",
+  "owner": "modular forms (Sage mode)",
+  "reason": "Sage's own refusal of weight <= 0 (the same message); a definition, not a limit"
+ },
+ "lib/_sage_modular.py :: _QSpace._check_trivial :: raise NotImplementedError(_NONTRIVIAL) #0": {
+  "class": "coverage",
+  "owner": "modular forms (Sage mode)",
+  "reason": "spaces with a nontrivial character: their bases need the engine's forms over Q(chi), not available yet; refused, never a wrong basis"
+ },
+ "lib/_sage_modular.py :: _QSpace.basis :: NotImplementedError: spaces with a nontrivial character need the engine's forms over Q(chi); not yet #0": {
+  "class": "coverage",
+  "owner": "modular forms (Sage mode)",
+  "reason": "spaces with a nontrivial character: their bases need the engine's forms over Q(chi), not available yet; refused, never a wrong basis"
+ },
+ "lib/_sage_modular.py :: _new_cusp_rows :: bound = (prec - 1) * (r_max + r_max // 4 + 8) + 1 #0": {
+  "class": "none",
+  "owner": "modular forms (Sage mode)",
+  "reason": "the trace-form bound for the Hecke translates, from the largest orbit's dimension; it doubles when short, so it refuses nothing"
+ },
+ "lib/_sage_modular.py :: _new_cusp_rows :: r_max = max(int(o[\"dim\"]) for o in orbits) #0": {
+  "class": "none",
+  "owner": "modular forms (Sage mode)",
+  "reason": "the trace-form bound for the Hecke translates, from the largest orbit's dimension; it doubles when short, so it refuses nothing"
+ },
  "lib/_sage_mpoly.py ::  :: _MAX_CONVERT_ENTRIES = 1 << 20 #0": {
   "class": "2",
   "owner": "multivariate polynomials",

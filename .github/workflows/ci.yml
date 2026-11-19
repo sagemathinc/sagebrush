@@ -1779,6 +1779,7 @@ jobs:
           python3 engine/py/test_chat.py
           python3 engine/py/test_limits.py
           python3 engine/py/test_engine_errors.py
+          python3 engine/py/test_modular_forms.py
           python3 engine/py/test_memguard.py
           python3 engine/py/test_capacity.py
           python3 engine/py/test_session_ctrl.py
