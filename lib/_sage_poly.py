@@ -1098,20 +1098,14 @@ class Polynomial:
             return NotImplemented if L is None else L * other
         if not self._c or not o._c:
             return self._make([], o)
-        if len(self._c) * len(o._c) > 2500:
-            # long products in the engine (NTT / Kronecker substitution)
-            from sagebrush import poly
-            da, ca = self._integral()
-            db, cb = o._integral()
-            c = poly.mul(ca, cb)
-            d = da * db
-            return self._make(c if d == 1 else [_F(x, d) for x in c], o)
-        r = [0] * (len(self._c) + len(o._c) - 1)
-        for i, a in enumerate(self._c):
-            if a:
-                for j, b in enumerate(o._c):
-                    r[i + j] += a * b
-        return self._make(r, o)
+        # every product in the engine (sagebrush.poly.mul: one NTT product,
+        # admitted by its size; over QQ through the common denominators)
+        from sagebrush import poly
+        da, ca = self._integral()
+        db, cb = o._integral()
+        c = poly.mul(ca, cb)
+        d = da * db
+        return self._make(c if d == 1 else [_F(x, d) for x in c], o)
 
     def __rmul__(self, other):
         o = self._coerce(other)
