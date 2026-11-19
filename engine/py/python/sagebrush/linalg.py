@@ -41,21 +41,52 @@ def _dec(s):
     return [list(map(int, r.split(","))) if r else [] for r in s.split(";")] if s else []
 
 
+# how _num_den reads each entry type, decided once per type: Fraction's
+# metaclass is ABCMeta, so isinstance against it on a subclass (Sage mode's
+# Rational) takes the slow abstract-class path for every entry
+_KIND = {}
+
+
+def _kind(t):
+    k = _KIND.get(t)
+    if k is None:
+        k = _KIND[t] = 0 if issubclass(t, int) else 1 if issubclass(t, _F) else 2
+    return k
+
+
+def _num_den(x):
+    """(numerator, denominator) of an int, a Fraction (or a subclass such as
+    Sage mode's Rational: its slots, without the properties' overhead), or
+    anything else with numerator and denominator, else of Fraction(x)."""
+    k = _KIND.get(type(x))
+    if k is None:
+        k = _kind(type(x))
+    if k == 1:
+        return x._numerator, x._denominator
+    if k == 0:
+        return int(x), 1
+    if hasattr(x, "denominator"):
+        return int(x.numerator), int(x.denominator)
+    f = _F(x)
+    return f._numerator, f._denominator
+
+
 def _scaled_rows(m):
     """(integer rows "a,b;c,d", row multipliers): row i of m times d[i] is
-    integral."""
+    integral.  Rows with fractions are cleared one row at a time: one lcm
+    per row, and the wire text built in the same pass."""
     if all(isinstance(x, int) for r in m for x in r):
         return _enc(m), [1] * len(m)
-    rows, ds = [], []
+    out, ds = [], []
     for r in m:
-        r = [x if isinstance(x, int) or hasattr(x, "denominator") else _F(x) for x in r]
-        d = 1
-        for x in r:
-            if not isinstance(x, int):
-                d = _lcm(d, int(x.denominator))
-        rows.append([x * d if isinstance(x, int) else int(x.numerator) * (d // int(x.denominator)) for x in r])
+        nd = [_num_den(x) for x in r]
+        d = _lcm(*[q for _, q in nd]) if nd else 1
+        if d == 1:
+            out.append(",".join([str(p) for p, _ in nd]))
+        else:
+            out.append(",".join([str(p * (d // q)) for p, q in nd]))
         ds.append(d)
-    return _enc(rows), ds
+    return ";".join(out), ds
 
 
 def _check(m):

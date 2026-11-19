@@ -1,0 +1,10 @@
+{
+  "v": 1,
+  "reason": "Linear algebra over QQ clears each row's denominators in one pass, with a per-type cache for the numerator/denominator lookup (lib/sagebrush/linalg.py and its engine/py copy). Python only; the engine wasm is unchanged. engine/lib/sage.src grows +1017, engine/lib/sage.pre +3164, cli/lib.gen.js +416 and cli/pyjs.cjs +396 bytes, exact, CI's governed measurement on the tested merge with base 9953f2c6, pinned node and bun; each bound adds 64 bytes of slack.",
+  "bytes": {
+    "engine/lib/sage.src": 1081,
+    "engine/lib/sage.pre": 3228,
+    "cli/lib.gen.js": 480,
+    "cli/pyjs.cjs": 460
+  }
+}
