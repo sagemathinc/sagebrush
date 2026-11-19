@@ -4516,7 +4516,7 @@ def randperm_(n, k=None):
 @_bs("sagebrush_figures")
 def sagebrush_figures_(mode=None):
     """sagebrush_figures(mode): how figures are shown, in every language (Python's sagebrush.figures): 'auto' (the
-    default: an SVG, unless it would be over 1 MB, then a PNG drawn at twice the size, said under it), 'svg', 'png'
+    default: an SVG, unless it would be over 1 MiB, then a PNG drawn at twice the size, said under it), 'svg', 'png'
     (drawn at twice the size, sharp on a high-density screen) or 'both'; 'reset', the default again.  Without an
     argument, the current one."""
     import _graphics

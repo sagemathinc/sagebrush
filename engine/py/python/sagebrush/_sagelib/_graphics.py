@@ -1784,7 +1784,8 @@ def describe_svg(svg):
 # SAGEBRUSH_FIGURES, src/kernel.ts); else "auto".  A figure's _repr_svg_ and _repr_png_ follow it; its SVG for any
 # other use is _sagebrush_svg_ (svg_of).
 FIGURE_MODES = ("auto", "svg", "png", "both")
-# (1 MB: CoCalc's limit on a cell's output; a figure with a few curves or a few thousand points is far below it)
+# (1 MiB of SVG text: about CoCalc's limit on a cell's output; a figure with a few curves or a few thousand points is
+# far below it)
 AUTO_SVG_MAX = 1 << 20
 
 
@@ -1794,12 +1795,15 @@ def figure_mode():
     m = getattr(builtins, "__sagebrush_figures__", None)
     if m is None:
         host = getattr(builtins, "__pyjs_host__", None)
-        m = host("figures") if host is not None else None
+        # (no Sagebrush runtime, CPython with the Python package's copy of this file: its SVG, as before)
+        if host is None:
+            return "svg"
+        m = host("figures")
     return m if m in FIGURE_MODES else "auto"
 
 
 def figures(mode=None):
-    """How figures are shown: "auto" (an SVG, unless it would be over 1 MB: then a sharp PNG, said under it), "svg",
+    """How figures are shown: "auto" (an SVG, unless it would be over 1 MiB: then a sharp PNG, said under it), "svg",
     "png" (drawn at twice the size, sharp on a high-density screen) or "both"; "reset": the default again.  Without
     an argument, the current one."""
     import builtins
@@ -1851,46 +1855,67 @@ def _mb(n):
     return "%.1f MB" % (n / 1e6) if n >= 1e5 else "%d kB" % round(n / 1e3)
 
 
-# (the SVG "auto" made for a figure and found too big, kept for its _repr_png_, which the display asks next)
-_auto_svg = [None, None]
+def _svg_bytes(svg):
+    """An SVG's size as the display carries it: its UTF-8 bytes."""
+    return len(svg.encode("utf-8"))
+
+
+# (the way a figure is shown, decided once per display by _repr_svg_, which the display asks first, and taken by its
+# _repr_png_, which it asks next: (figure, svg or None, (png, metadata) or None, the line to say under it or None))
+_plan = [None, None, None, None]
 
 
 class InlineFigure:
     """A figure shown as figure_mode() says: a subclass gives _sagebrush_svg_ (its SVG), and may give
-    _sagebrush_png_(scale) -> (PNG bytes, (width, height) to show it at) (else its SVG drawn)."""
+    _sagebrush_png_(scale) -> (PNG bytes, (width, height) to show it at) (else its SVG drawn).
+
+    A PNG is drawn before it is chosen: a figure whose PNG can't be drawn (a glyph the rasterizer lacks, say) is
+    shown as its SVG instead, in "png" mode too, so a figure is always shown; and the line under a PNG is said only
+    once that PNG is drawn."""
 
     def _repr_svg_(self):
-        m = figure_mode()
-        if m in ("svg", "both"):
-            return self._sagebrush_svg_()
-        if m == "auto":
-            svg = self._sagebrush_svg_()
-            if len(svg) <= AUTO_SVG_MAX:
-                return svg
-            _auto_svg[0], _auto_svg[1] = self, svg
-        return None
+        svg, png, note = _plan_of(self)
+        _plan[0], _plan[1], _plan[2], _plan[3] = self, svg, png, note
+        return svg
 
     def _repr_png_(self):
-        m = figure_mode()
-        if m == "svg":
+        if _plan[0] is self:
+            png, note = _plan[2], _plan[3]
+        else:
+            _, png, note = _plan_of(self)
+        _plan[0] = _plan[1] = _plan[2] = _plan[3] = None
+        if png is None:
             return None
-        if m == "auto":
-            svg = _auto_svg[1] if _auto_svg[0] is self else self._sagebrush_svg_()
-            _auto_svg[0] = _auto_svg[1] = None
-            if len(svg) <= AUTO_SVG_MAX:
-                return None
+        if note is not None:
             import builtins
-            # (said under the figure: the host writes this line after it, src/runtime/index.ts)
-            builtins.__sagebrush_note__ = ("Shown as a PNG: its SVG would be %s. For an SVG anyway: "
-                                           "sagebrush.figures('svg') (in MATLAB or Magma: sagebrush_figures('svg'))."
-                                           % _mb(len(svg)))
-        png, (w, h) = self._sagebrush_png_(2)
-        return png, {"width": int(round(w)), "height": int(round(h))}
+            # (said under the figure, now that its PNG is drawn: the host writes this line after it,
+            # src/runtime/index.ts sayNote)
+            builtins.__sagebrush_note__ = note
+        return png
 
     def _sagebrush_png_(self, scale):
         svg = self._sagebrush_svg_()
         w, h = svg_size(svg)
         return svg_png(svg, 100 * scale), (float(w), float(h))
+
+
+def _plan_of(self):
+    """How the figure `self` (one with _sagebrush_svg_ and _sagebrush_png_) is shown now: (svg or None,
+    (png, metadata) or None, the line to say under it or None)."""
+    m = figure_mode()
+    svg = self._sagebrush_svg_()
+    if m == "svg" or (m == "auto" and _svg_bytes(svg) <= AUTO_SVG_MAX):
+        return svg, None, None
+    try:
+        png, (w, h) = self._sagebrush_png_(2)
+    except Exception:
+        # (its PNG couldn't be drawn: its SVG, whatever the mode, and nothing said)
+        return svg, None, None
+    note = None
+    if m == "auto":
+        note = ("Shown as a PNG: its SVG would be %s. For an SVG anyway: sagebrush.figures(\"svg\") "
+                "(in MATLAB or Magma: sagebrush_figures(\"svg\"))." % _mb(_svg_bytes(svg)))
+    return (svg if m == "both" else None), (png, {"width": int(round(w)), "height": int(round(h))}), note
 
 
 def host_display(obj):

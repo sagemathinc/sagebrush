@@ -2,21 +2,22 @@
  "v": 1,
  "reason": "How figures are shown, in every language: auto (the SVG, or a PNG at twice the size with its size in the display's metadata when the SVG would be over 1 MB, said in a line under it), svg, png or both (lib/_graphics.py figures, InlineFigure; pyplot, Sage and MATLAB figures; sagebrush.figures, MATLAB's and Magma's sagebrush_figures and their catalog entries; the %config alias); display metadata through the runtime's bundle, the kernel and the notebook session (src/runtime/index.ts, src/kernel.ts, src/notebook-session.ts); the kernel's --figures. Measured with scripts/size-measure.mjs on the pinned toolchain, master abc38965 against the change; each marker is its bundle's growth + 64.",
  "bytes": {
-  "cli/lib.gen.js": 3992,
-  "cli/pyjs.cjs": 7907,
-  "engine/lib/core.pre": 16433,
-  "engine/lib/core.src": 4942,
+  "cli/lib.gen.js": 4588,
+  "cli/pyjs.cjs": 9265,
+  "engine/lib/core.pre": 19458,
+  "engine/lib/core.src": 6042,
   "engine/lib/magma-more.src": 206,
-  "engine/lib/magma.pre": 1413,
-  "engine/lib/magma.src": 590,
+  "engine/lib/magma.pre": 1414,
+  "engine/lib/magma.src": 591,
   "engine/lib/matlab-more.src": 788,
-  "engine/lib/matlab.pre": 2626,
-  "engine/lib/matlab.src": 756,
+  "engine/lib/matlab.pre": 2627,
+  "engine/lib/matlab.src": 757,
   "engine/lib/mod-pyjs-magic.src": 1964,
   "engine/lib/sage.pre": 503,
   "engine/lib/sage.src": 317,
   "engine/lib/sci.pre": 3621,
   "engine/lib/sci.src": 812,
-  "engine/sagebrush-worker.js": 691
+  "engine/sagebrush-notebook.js": 434,
+  "engine/sagebrush-worker.js": 780
  }
 }

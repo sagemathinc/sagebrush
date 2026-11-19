@@ -571,7 +571,7 @@ export function collect(list: any[], m: any, kept: { run: number }) {
     size.cut = true;
     return;
   }
-  const bytes = m.stream ? String(m.text ?? "").length : m.display ? displayCost(m.display) : m.interact ? DISPLAY_ENVELOPE + JSON.stringify(m.interact).length : 0;
+  const bytes = m.stream ? String(m.text ?? "").length : m.display ? displayCost(m.display, m.metadata) : m.interact ? DISPLAY_ENVELOPE + JSON.stringify(m.interact).length : 0;
   if ((m.display || m.interact) && !size.cut && ++size.displays > ITEM_DISPLAYS_MAX) {
     size.cut = true;
     sayCut(list, "displays");

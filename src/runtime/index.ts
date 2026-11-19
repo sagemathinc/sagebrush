@@ -705,6 +705,8 @@ export function sayNote(): void {
 }
 export function mimeBundle(v: any): Record<string, string> | null {
   if (v === null || Obj.isType(v)) return null;
+  // (a line left by a figure whose display didn't happen is dropped: only this bundle's own is said, sayNote)
+  delete B.builtins.__sagebrush_note__;
   const out: Record<string, string> = {};
   const meta: Record<string, unknown> = {};
   const mb = Obj.getattr(v, "_repr_mimebundle_", null);

@@ -107,7 +107,7 @@ test("auto: a figure is its SVG; one whose SVG would be over 1 MB is a sharp PNG
   assert.deepEqual(big.map((o) => o.shown ?? o.stream), [["image/png"], "stdout"], "the PNG, then the line");
   assert.deepEqual(big[0].png, [1280, 960]);
   assert.deepEqual(big[0].metadata, { "image/png": { width: 640, height: 480 } });
-  assert.match(big[1].text!, /^Shown as a PNG: its SVG would be 1\.\d MB\. For an SVG anyway: sagebrush\.figures\('svg'\) \(in MATLAB or Magma: sagebrush_figures\('svg'\)\)\.\n$/);
+  assert.match(big[1].text!, /^Shown as a PNG: its SVG would be 1\.\d MB\. For an SVG anyway: sagebrush\.figures\("svg"\) \(in MATLAB or Magma: sagebrush_figures\("svg"\)\)\.\n$/);
 });
 
 test("the setting forces each way, in Python: sagebrush.figures, and %config as its alias", async () => {
@@ -139,4 +139,64 @@ test("the kernel's --figures sets the default, which the notebook's code can sti
   assert.deepEqual((await run([BIG], "svg")).map((o) => o.shown ?? o.stream), [["image/svg+xml"]]);
   assert.deepEqual((await run(["import sagebrush\nsagebrush.figures('svg')", SMALL], "png")).map((o) => o.shown), [["image/svg+xml"]]);
   assert.deepEqual((await run(["x = 1:3;\nplot(x, x)"], "png", "matlab")).map((o) => o.shown), [["image/png"]]);
+});
+
+// ---- the decision's edges, with a figure whose SVG and PNG the test makes (lib/_graphics.py InlineFigure)
+const STUB = `import _graphics
+class Stub(_graphics.InlineFigure):
+    def __init__(self, svg, fail=False):
+        self.svg, self.fail = svg, fail
+    def _sagebrush_svg_(self):
+        return self.svg
+    def _sagebrush_png_(self, scale):
+        if self.fail:
+            raise NotImplementedError("a glyph the rasterizer lacks")
+        return b"\\x89PNG\\r\\n\\x1a\\n" + b"\\0" * 8 + (20).to_bytes(4, "big") + (10).to_bytes(4, "big"), (10, 5)
+def svg_of(nbytes, ch="a"):
+    # (an SVG of exactly nbytes UTF-8 bytes, its filler ch)
+    head, tail = '<svg width="10" height="5">', "</svg>"
+    k = nbytes - len(head) - len(tail)
+    w = len(ch.encode("utf-8"))
+    return head + ch * (k // w) + "a" * (k % w) + tail
+`;
+const shownOf = (outs: Out[]) => outs.map((o) => o.shown ?? (o.text?.startsWith("Shown as a PNG") ? "note" : o.stream));
+
+test("auto measures an SVG in UTF-8 bytes: exactly 1 MiB is its SVG, one byte more a PNG, and a short SVG of wide characters a PNG", async () => {
+  const MiB = 1 << 20;
+  assert.deepEqual(shownOf(await run([STUB, `Stub(svg_of(${MiB}))`], null)), [["image/svg+xml"]]);
+  assert.deepEqual(shownOf(await run([STUB, `Stub(svg_of(${MiB + 1}))`], null)), [["image/png"], "note"]);
+  // (450,000 characters, 1,350,000 bytes of 界: over 1 MiB as the display carries it)
+  assert.deepEqual(shownOf(await run([STUB, `s = svg_of(1350033, "界")\nassert len(s) < ${MiB} < len(s.encode())\nStub(s)`], null)), [["image/png"], "note"]);
+});
+
+test("a PNG that can't be drawn falls back to the SVG, with nothing said, in auto and in png mode; no line is left for the next figure", async () => {
+  const MiB = 1 << 20;
+  assert.deepEqual(shownOf(await run([STUB, `Stub(svg_of(${MiB + 1}), fail=True)`], null)), [["image/svg+xml"]], "auto: the SVG");
+  assert.deepEqual(shownOf(await run([STUB, "import sagebrush\nsagebrush.figures('png')", "Stub(svg_of(1000), fail=True)"], null)), [["image/svg+xml"]], "png asked for: the SVG all the same");
+  assert.deepEqual(shownOf(await run([STUB, `Stub(svg_of(${MiB + 1}), fail=True)`, "Stub(svg_of(1000))"], null)), [["image/svg+xml"]], "the next figure: no stale line");
+  // (a real one: a scatter of 30,000 points titled 界, a glyph the PNG module lacks: its SVG, and the next figure
+  // says nothing)
+  const big = BIG.replace(/;$/, "\nax.set_title('界');");
+  assert.deepEqual(shownOf(await run([big], null)), [["image/svg+xml"]]);
+  assert.deepEqual(shownOf(await run([big, SMALL], null)), [["image/svg+xml"]]);
+});
+
+test("a display's metadata is charged against the run's output limit with its data: exactly at the limit kept, one over cut", async () => {
+  const msgs: any[] = [];
+  const s = notebookSession((m: any) => msgs.push(m), { captureStreams: true, limit: { item: 1000, run: 100000, displays: 100 } });
+  await s.ready;
+  R.host.figures = undefined;
+  const ENVELOPE = 64, data = "text/plain".length + "ok".length, md0 = JSON.stringify({ "text/plain": { padding: "" } }).length;
+  const at = 1000 - ENVELOPE - data - md0;
+  const cell = (n: number) => `class Big:\n    def _repr_mimebundle_(self, include=None, exclude=None):\n        return ({'text/plain': 'ok'}, {'text/plain': {'padding': 'x' * ${n}}})\nBig()`;
+  await s.handle({ id: 1, code: cell(at) });
+  const kept = msgs.find((m) => m.id === 1 && m.display);
+  assert.equal(kept?.metadata?.["text/plain"]?.padding.length, at, "exactly at the limit: shown, its metadata kept");
+  await s.handle({ id: 2, code: cell(at + 1) });
+  assert.ok(!msgs.some((m) => m.id === 2 && m.display), "one character over: not shown");
+  assert.ok(msgs.some((m) => m.id === 2 && m.cut), "...and the cut is said");
+  // (the case reviewed: a megabyte of metadata, cut, never sent)
+  await s.handle({ id: 3, code: cell(1048576) });
+  assert.ok(!msgs.some((m) => m.id === 3 && m.display) && msgs.some((m) => m.id === 3 && m.cut));
+  assert.ok(JSON.stringify(msgs.filter((m) => m.id === 3)).length < 2000, "nothing of it sent");
 });

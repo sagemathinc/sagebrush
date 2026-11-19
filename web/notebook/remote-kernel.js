@@ -780,7 +780,7 @@ export class RemoteKernel {
               if (ev.name === "stderr") e.sawErrorText = true;
               e.sink.out(String(ev.text ?? ""), ev.name === "stderr");
             } else if (ev.type === "display") {
-              if (ev.data && typeof ev.data === "object" && !Array.isArray(ev.data) && !(ENVELOPE_MIME in ev.data)) e.sink.display(ev.data);
+              if (ev.data && typeof ev.data === "object" && !Array.isArray(ev.data) && !(ENVELOPE_MIME in ev.data)) e.sink.display(ev.data, ev.metadata);
             } else if (ev.type === "clear") e.sink.clear();
             continue;
           }
@@ -791,7 +791,7 @@ export class RemoteKernel {
           }
           else if (ev.type === "display") {
             // (a hidden run's envelope is the gateway's, never output: refused if it appears)
-            if (ev.data && typeof ev.data === "object" && !Array.isArray(ev.data) && !(ENVELOPE_MIME in ev.data)) sink.display(ev.data);
+            if (ev.data && typeof ev.data === "object" && !Array.isArray(ev.data) && !(ENVELOPE_MIME in ev.data)) sink.display(ev.data, ev.metadata);
           } else if (ev.type === "clear") sink.clear();
           else if (ev.type === "terminal") return this.finish(job, ev.outcome);
         }

@@ -80,7 +80,7 @@ const USAGE = `usage: sagebrush [-c cmd | -m mod | file | -] [args]
                            [--figures auto|svg|png|both]
            register Sagebrush as a Jupyter kernel (no Python needed); --figures:
            how its figures are shown (default auto: an SVG, or a sharp PNG
-           when the SVG would be over 1 MB; also SAGEBRUSH_FIGURES)
+           when the SVG would be over 1 MiB; also SAGEBRUSH_FIGURES)
   --uninstall-jupyter-kernel [the same options]
   notebook [DIR] [--port N] [--no-browser]
            the Sagebrush notebook in your browser, running Python here;
