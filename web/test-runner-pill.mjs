@@ -6,15 +6,17 @@ import { mkdtempSync, rmSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { createServer, request } from 'node:http';
-import { devtoolsPort } from './test-port.mjs';
+import { startChrome } from './test-port.mjs';
 const pause = ms => new Promise(resolve => setTimeout(resolve, ms));
 const profile = mkdtempSync(join(tmpdir(), 'runner-pill-'));
 const server = spawn('python3', ['web/serve.py', '0'], { stdio: ['ignore', 'pipe', 'ignore'] });
-const chrome = spawn(process.env.CHROME ?? 'chromium', ['--headless', '--no-sandbox', '--disable-gpu', '--no-first-run', '--disable-background-networking', '--disable-component-update', '--disable-sync', '--host-resolver-rules=MAP * ~NOTFOUND, EXCLUDE localhost, EXCLUDE 127.0.0.1', '--remote-debugging-port=0', `--user-data-dir=${profile}`, 'about:blank'], { stdio: 'ignore' });
+const launchChrome = () => spawn(process.env.CHROME ?? 'chromium', ['--headless', '--no-sandbox', '--disable-gpu', '--no-first-run', '--disable-background-networking', '--disable-component-update', '--disable-sync', '--host-resolver-rules=MAP * ~NOTFOUND, EXCLUDE localhost, EXCLUDE 127.0.0.1', '--remote-debugging-port=0', `--user-data-dir=${profile}`, 'about:blank'], { stdio: ['ignore', 'ignore', 'pipe'] });
+let chrome;
 let ws, seq = 0;
 let front, blockRunner = false;
 const pending = new Map();
-const terminal = setTimeout(() => { console.error('runner pill test deadline'); chrome.kill('SIGKILL'); server.kill('SIGKILL'); process.exitCode = 1; ws?.close(); }, 180000);
+// Two 60-second startup attempts plus the existing three-minute test allowance.
+const terminal = setTimeout(() => { console.error('runner pill test deadline'); chrome?.kill('SIGKILL'); server.kill('SIGKILL'); process.exitCode = 1; ws?.close(); }, 300000);
 function send(method, params = {}, ms = 10000) {
   return new Promise((resolve, reject) => {
     const id = ++seq;
@@ -51,7 +53,9 @@ try {
   });
   await new Promise(resolve => front.listen(0, '127.0.0.1', resolve));
   const port = front.address().port;
-  const debug = await devtoolsPort(profile, 15000);
+  const started = await startChrome(profile, launchChrome);
+  chrome = started.child;
+  const debug = started.port;
   const targets = await (await fetch(`http://127.0.0.1:${debug}/json`)).json();
   ws = new WebSocket(targets.find(t => t.type === 'page').webSocketDebuggerUrl);
   await new Promise((resolve, reject) => { ws.onopen = resolve; ws.onerror = reject; });
@@ -106,9 +110,11 @@ try {
 } finally {
   clearTimeout(terminal);
   for (const p of pending.values()) { clearTimeout(p.timer); p.reject(new Error('test closed')); }
-  pending.clear(); ws?.close(); chrome.kill('SIGTERM'); server.kill('SIGTERM');
+  pending.clear(); ws?.close(); chrome?.kill('SIGTERM'); server.kill('SIGTERM');
   front?.closeAllConnections(); front?.close();
-  await Promise.race([new Promise(resolve => chrome.once('exit', resolve)), pause(1000)]);
-  if (chrome.exitCode === null) { chrome.kill('SIGKILL'); await pause(100); }
+  if (chrome) {
+    await Promise.race([new Promise(resolve => chrome.once('exit', resolve)), pause(1000)]);
+    if (chrome.exitCode === null) { chrome.kill('SIGKILL'); await pause(100); }
+  }
   rmSync(profile, { recursive: true, force: true, maxRetries: 5 });
 }

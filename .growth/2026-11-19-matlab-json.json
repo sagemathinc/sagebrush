@@ -1,0 +1,12 @@
+{
+ "v": 1,
+ "reason": "MATLAB mode's jsonencode and jsondecode (lib/_matlab_json.py, a lazy module in matlab-more, with two stubs in lib/_matlab.py and jsonencode on the sparse pass-through list), in the CLI and the worker. Measured on the merge with master abc38965 (local size record, pinned bun 1.4.4 and node 24.21.0); each marker is its growth + 64. The matlab-more, matlab.pre and matlab.src ceilings are renewed to the measured size + 64.",
+ "bytes": {
+  "cli/lib.gen.js": 5496,
+  "cli/pyjs.cjs": 8333,
+  "engine/lib/matlab-more.src": 13970,
+  "engine/lib/matlab.pre": 724,
+  "engine/lib/matlab.src": 234,
+  "engine/sagebrush-worker.js": 96
+ }
+}
