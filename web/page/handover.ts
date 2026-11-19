@@ -154,8 +154,12 @@ export function writerHandover(page: HandoverPage) {
     if (!mod && !e.shiftKey && (e.key === "ArrowLeft" || e.key === "ArrowRight")) return { move: e.key === "ArrowLeft" ? -1 : 1 };
     return { key: { key: e.key, code: e.code, ctrlKey: e.ctrlKey, shiftKey: e.shiftKey, altKey: e.altKey, metaKey: e.metaKey } };
   };
-  page.view.addEventListener("pointerdown", (ev) => { used(ev); }, true);
-  page.view.addEventListener("keydown", (ev) => {
+  // (every listener this handover adds, kept so dispose removes them all: a page may make one per document it shows
+  // and let it go, the agents chat's panes)
+  const listening: [EventTarget, string, EventListener, boolean][] = [];
+  const listen = (target: EventTarget, type: string, f: (ev: any) => void, capture = false) => { target.addEventListener(type, f, capture); listening.push([target, type, f, capture]); };
+  listen(page.view, "pointerdown", (ev) => { used(ev); }, true);
+  listen(page.view, "keydown", (ev: KeyboardEvent) => {
     if (!used(ev)) return;
     // (a cursor key before anything is typed moves the cursor where it is, read-only as the cell still is)
     const op = opOf(ev);
@@ -163,19 +167,19 @@ export function writerHandover(page: HandoverPage) {
     ev.preventDefault(); ev.stopImmediatePropagation();
     keep(op);
   }, true);
-  page.view.addEventListener("paste", (ev) => {
+  listen(page.view, "paste", (ev: ClipboardEvent) => {
     if (!used(ev)) return;
     ev.preventDefault(); ev.stopImmediatePropagation();
     const text = ev.clipboardData?.getData("text/plain") ?? "";
     if (text) keep({ text });
   }, true);
-  page.view.addEventListener("compositionstart", () => { composing = true; });
-  page.view.addEventListener("compositionend", () => { composing = false; });
+  listen(page.view, "compositionstart", () => { composing = true; });
+  listen(page.view, "compositionend", () => { composing = false; });
   // (back from being frozen, or shown again: a want sent meanwhile may not have arrived)
   const again = () => { if (writes()) post({ t: "who-wants" }); };
-  document.addEventListener("resume", again);
-  document.addEventListener("visibilitychange", () => { if (document.visibilityState === "visible") again(); });
-  addEventListener("pagehide", () => post({ t: "bye", tab }));
+  listen(document, "resume", again);
+  listen(document, "visibilitychange", () => { if (document.visibilityState === "visible") again(); });
+  listen(globalThis, "pagehide", () => post({ t: "bye", tab }));
 
   const fieldIn = (el: Element | null) => (el && page.view.contains(el) && (el.tagName === "TEXTAREA" || el.tagName === "INPUT") ? (el as HTMLTextAreaElement) : null);
   // (a selection in the field's own text, placed among the edits kept so far, and back)
@@ -281,6 +285,21 @@ export function writerHandover(page: HandoverPage) {
       buffer = [];
       if (ops.length) replay(ops);
       void handOver();
+    },
+    /** Let go for good (the document's view closed for good): its channel, timers and every listener removed; the
+     * other tabs told this one is gone. */
+    dispose() {
+      post({ t: "bye", tab });
+      bind(null);
+      for (const [target, type, f, capture] of listening.splice(0)) target.removeEventListener(type, f, capture);
+    },
+    /** A use of this tab that isn't a key or a click here: an agent's edit, made for the person, in the agents chat's
+     * pane.  As a use now: a tab that follows asks for the lock, as when typed in. */
+    use() {
+      lastUse = Date.now();
+      if (!follows()) return;
+      if (!wanting) startWanting();
+      else want();
     },
     /** This tab's takeover failed (it couldn't be opened as the writer): the keys kept for it can never be typed in
      * here; how many, for the page to say. */
