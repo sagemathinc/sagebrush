@@ -260,6 +260,42 @@
    "msg": "unable to find a common ring for all elements"
   },
   {
+   "case": "vector(QQ, [1, None])",
+   "ok": true,
+   "type": "Vector",
+   "str": "(1, 0)"
+  },
+  {
+   "case": "vector(ZZ, [1, None])",
+   "ok": true,
+   "type": "Vector",
+   "str": "(1, 0)"
+  },
+  {
+   "case": "vector(QQ, [None])",
+   "ok": true,
+   "type": "Vector",
+   "str": "(0)"
+  },
+  {
+   "case": "vector([1, None])",
+   "ok": false,
+   "exc": "TypeError",
+   "msg": "unable to find a common ring for all elements"
+  },
+  {
+   "case": "matrix(ZZ, [[1, None]])",
+   "ok": true,
+   "type": "Matrix",
+   "str": "[1 0]"
+  },
+  {
+   "case": "matrix([[1, None]])",
+   "ok": false,
+   "exc": "TypeError",
+   "msg": "NoneType takes no arguments"
+  },
+  {
    "case": "QQ('0.5')",
    "ok": false,
    "exc": "TypeError",

@@ -3205,6 +3205,8 @@ def vector(*args):
 
         sage: vector([1, 2/3]), vector(QQ, [1, 2]), vector(QQ, ["1/2", 3])
         ((1, 2/3), (1, 2), (1/2, 3))
+        sage: vector(QQ, [1, None]), vector(ZZ, [None, 2])
+        ((1, 0), (0, 2))
         sage: vector(QQ, [1, "a"])
         Traceback (most recent call last):
         ...
@@ -3235,14 +3237,14 @@ def vector(*args):
         # a vector of power series (the D_p-valued p-adic L-series): the
         # entries in the ring, the ring kept through arithmetic
         return SeriesVector(ring, entries)
-    if any(isinstance(x, str) for x in entries):
+    if any(isinstance(x, str) or x is None for x in entries):
         if ring is sa.QQ or ring is sa.ZZ:
-            # (converted as QQ(s) and ZZ(s) do, else Sage's TypeError; a
-            # string was kept as an entry)
+            # (converted as QQ(s) and ZZ(s) do, None as 0, else Sage's
+            # TypeError; a string or None was kept as an entry)
             conv = []
             for x in entries:
                 try:
-                    conv.append(_exact_entry(ring, x) if isinstance(x, str) else x)
+                    conv.append(_exact_entry(ring, x) if isinstance(x, str) or x is None else x)
                 except TypeError:
                     raise TypeError("unable to convert %s to an element of %r" % (x, ring))
             entries = conv
@@ -3933,6 +3935,9 @@ def matrix(*args, **kwds):
     if base is None:
         for r in rows:
             for x in r:
+                if x is None:
+                    # (Sage's error: None was kept as an entry, over SR)
+                    raise TypeError("NoneType takes no arguments")
                 if isinstance(x, str):
                     # (Sage finds no common parent; the string was kept, over SR)
                     others = [y for rr in rows for y in rr if not isinstance(y, str)]
