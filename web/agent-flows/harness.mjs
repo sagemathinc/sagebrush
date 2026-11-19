@@ -285,10 +285,15 @@ async function chatSurface(site, page) {
     /** The person sends the prompt from the composer; the stand-in's turn starts. */
     async beginTurn(prompt) {
       const before = A.asked.length;
-      // (the composer is board's block editor in #editor: the person clicks into it, types, and presses Send)
-      await page.ev(`((document.querySelector("#editor textarea") ?? document.querySelector("#editor [tabindex]") ?? document.querySelector("#editor")).click(), (document.querySelector("#editor textarea") ?? document.querySelector("#editor [tabindex]"))?.focus(), true)`);
-      await sleep(100);
+      // (the composer is board's block editor in #editor: its textarea is there only while a block is being written, and
+      //  only a real click on a block starts that. So: the mouse at the block's middle, its textarea focused, the prompt
+      //  typed and seen in it, then Send)
+      if (!(await page.until(`!!document.querySelector("#editor .mb-block")`, 30000))) throw new Error("the composer didn't show");
+      const at = await page.ev(`(() => { const r = document.querySelector("#editor .mb-block").getBoundingClientRect(); return { x: r.left + r.width / 2, y: r.top + r.height / 2 }; })()`);
+      for (const type of ["mousePressed", "mouseReleased"]) await page.send("Input.dispatchMouseEvent", { type, x: at.x, y: at.y, button: "left", clickCount: 1 });
+      if (!(await page.until(`document.activeElement?.tagName === "TEXTAREA" && !!document.activeElement.closest("#editor")`, 10000))) throw new Error("the composer's click didn't start writing");
       await page.send("Input.insertText", { text: prompt });
+      if (!(await page.until(`document.activeElement?.value === ${JSON.stringify(prompt)}`, 5000))) throw new Error("the prompt didn't go into the composer");
       await page.ev(`(document.querySelector("#send").click(), true)`);
       for (let t = Date.now(); A.asked.length === before && Date.now() - t < 10000; ) await sleep(50);
       const m = A.asked.at(-1);

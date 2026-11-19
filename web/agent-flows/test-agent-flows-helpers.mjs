@@ -58,5 +58,16 @@ async function check(name, f) {
   ok(e.fails.length === 1, "...and fails on an error the person sees", e.fails);
 }
 
+// (3) the surfaces on the Agents page read what the pane shows: chat's and the computer's surfaces use the one pane
+//     observer, never a null that only the saved copy could stand in for
+{
+  const { readFileSync } = await import("node:fs");
+  const { PANE_CELLS } = await import("./harness.mjs");
+  const here = new URL(".", import.meta.url).pathname;
+  const h = readFileSync(here + "harness.mjs", "utf8"), c = readFileSync(here + "surface-computer.mjs", "utf8");
+  ok(/\.pane-body/.test(PANE_CELLS) && /\.cell/.test(PANE_CELLS), "the pane observer reads the pane's cells");
+  ok(/liveCells: PANE_CELLS/.test(h) && /liveCells: PANE_CELLS/.test(c) && !/liveCells: `null`/.test(h + c), "chat's and the computer's surfaces both read the pane through it");
+}
+
 console.log(failures ? `FAIL: ${failures} of the harness's self-checks` : "ok: the harness's self-checks");
 process.exit(failures ? 1 : 0);
