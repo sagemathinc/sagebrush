@@ -25,6 +25,7 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { createInterface } from "node:readline";
 import { devtoolsPort } from "../test-port.mjs";
+import { BAR_CLEAR } from "./agent-bar-check.mjs";
 
 const here = new URL(".", import.meta.url).pathname;
 let failures = 0, checks = 0;
@@ -182,6 +183,7 @@ try {
   })()`);
   await ev(`([...document.querySelectorAll(".sbag-box button.primary")].pop().click(), true)`);
   ok(await until(`!!document.querySelector(".sbag-bar")`), "allowed: the bar shows the agent");
+  ok(await until(`${BAR_CLEAR} === true`, 5000), "the notebook page: the agent's bar is in its own row, over nothing the person types in or reads", await ev(BAR_CLEAR).catch((e) => String(e)));
   await until(`window.sagebrush.notebook.snapshot?.().cells?.length > 0`);
 
   // the agent reads the notebook shown and adds a cell: the page shows it at once
@@ -312,6 +314,8 @@ try {
   // (at most once: opened again through the bar's Open after the person moved away, it doesn't run again)
   const ONCE = "import time\nprint('ran at', time.time())";
   ok(!!(await make("Runs once", [ONCE])).ok && await until(`${shownIs("Runs once")} && ${outOf(ONCE)}.includes("ran at")`, 30000), "a notebook that says when it ran: opened, run by itself");
+  // (its run's number is drawn a moment after its output: read both once both are there)
+  await until(`${nOf(ONCE)} != null`, 10000);
   const ranAt = await ev(outOf(ONCE)), ranN = await ev(nOf(ONCE));
   ok(await fromFiles("Made by the agent.ipynb") && await until(shownIs("Made by the agent"), 15000), "(the person opens another notebook from Files)");
   await ev(`(${barButton("Open Runs once.ipynb")}.click(), true)`);
@@ -499,6 +503,7 @@ try {
   })()`);
   await ev(`([...document.querySelectorAll(".sbag-box button.primary")].pop().click(), true)`);
   ok(await until(`!!document.querySelector(".sbag-bar")`), "allowed, remembered: the bar shows on the code page");
+  ok(await until(`${BAR_CLEAR} === true`, 5000), "the code page: the agent's bar is in its own row, over nothing the person types in or reads", await ev(BAR_CLEAR).catch((e) => String(e)));
   ok(await go(`?code=${encodeURIComponent(pyFid)}`) && await until(`!!document.querySelector(".sbag-bar")`, 20000), "the code page again: the remembered agent reconnects by itself");
   ok(await ev(`document.querySelectorAll(".sbag-bar").length`) === 1 && !(await ev(`!!document.querySelector(".sbag-box")`)), "one bar, no dialog");
   await ev(`([...document.querySelectorAll(".sbag-bar button")].find((b) => b.textContent === "Revoke")?.click(), true)`);
@@ -565,6 +570,7 @@ try {
     })()`);
     await ev(`([...document.querySelectorAll(".sbag-box button.primary")].pop().click(), true)`);
     ok(await until(`!!document.querySelector(".sbag-bar")`), "allowed, remembered: the bar shows");
+    ok(await until(`${BAR_CLEAR} === true`, 5000), "the LaTeX editor: the agent's bar is in its own row, over nothing the person types in or reads", await ev(BAR_CLEAR).catch((e) => String(e)));
     // the remembered grant, on the next load of /?tex=: reconnected once, by the LaTeX editor
     const before2 = requests.length;
     ok(await go(`?tex=${encodeURIComponent(fid)}&latex=1`), "the LaTeX editor again (the agent remembered)");

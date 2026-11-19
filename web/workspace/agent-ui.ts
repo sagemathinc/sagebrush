@@ -87,6 +87,12 @@ const CSS = `
 .sbag-box .err { color: #9b2c1f; white-space: pre-wrap; }
 .sbag-box .note { color: #5c6657; font-size: 12px; }
 .sbag-bar { position: fixed; left: 12px; bottom: calc(12px + var(--sb-alpha-banner, 0px)); z-index: 999; background: #1d241a; color: #fff; border-radius: 18px; padding: 6px 8px 6px 14px; font: 13px system-ui, sans-serif; display: flex; gap: 10px; align-items: center; box-shadow: 0 4px 14px rgba(0,0,0,.2); }
+/* (docked: in the page's own row for it, [data-sbag-slot], never over what the person types in or reads; decided Nov 19 2026) */
+.sbag-bar.docked { position: static; margin: 6px 12px; width: fit-content; max-width: calc(100% - 24px); flex-wrap: wrap; box-shadow: none; }
+/* (in a header's row, [data-sbag-inline]: one line, its words cut short, so the header keeps its height) */
+[data-sbag-inline] > .sbag-bar.docked { margin: 0; padding: 3px 6px 3px 12px; flex-wrap: nowrap; min-width: 0; max-width: 100%; }
+[data-sbag-inline] > .sbag-bar.docked > span { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; min-width: 0; }
+[data-sbag-inline] > .sbag-bar.docked > button { flex: none; white-space: nowrap; }
 .sbag-bar button { font: inherit; border: 0; border-radius: 12px; padding: 3px 10px; background: #fff; color: #1d241a; cursor: pointer; }
 .sbag-bar button.open { max-width: 240px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 `;
@@ -184,8 +190,20 @@ export function mountAgentPairing(ws: PairingWorkspace, o: { button?: HTMLElemen
     if (open && made) open.onclick = () => o.open!(made);
     bar = h("div", { className: "sbag-bar" }, text, ...(open ? [open] : []), ...(noRun ? [noRun] : []), revoke);
     bar.setAttribute("role", "status");
-    document.body.append(bar);
+    dock();
   }
+  // (the bar's place: a [data-sbag-slot] the page shows, a row or a header of its layout, the highest-numbered one (an
+  //  editor's page over the notebook page's); an overlay at the bottom left only on a page that has none. Placed again,
+  //  once per frame at most, when the page changes what it shows, as to the LaTeX or code page and back)
+  function dock() {
+    if (!bar) return;
+    let slot: HTMLElement | null = null;
+    for (const e of document.querySelectorAll<HTMLElement>("[data-sbag-slot]")) if (e.offsetParent !== null && (!slot || +e.dataset.sbagSlot! > +slot.dataset.sbagSlot!)) slot = e;
+    bar.classList.toggle("docked", !!slot);
+    if (bar.parentElement !== (slot ?? document.body)) (slot ?? document.body).append(bar);
+  }
+  let docking = false;
+  new MutationObserver(() => { if (bar && !docking) { docking = true; requestAnimationFrame(() => { docking = false; dock(); }); } }).observe(document.documentElement, { attributes: true, attributeFilter: ["class", "hidden"], childList: true, subtree: true });
 
   async function grantDialog(p: AgentPairing) {
     const top = (await ws.list("/")).filter((e) => e.kind === "folder" && e.path !== TRASH).map((e) => e.path);
