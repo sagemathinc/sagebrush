@@ -64,7 +64,53 @@ export async function startChrome() {
   const shot = async (file) => { const r = await send("Page.captureScreenshot", { format: "png" }); writeFileSync(file, Buffer.from(r.result.data, "base64")); };
   const fresh = async (origin) => { await send("Storage.clearDataForOrigin", { origin, storageTypes: "all" }); errors.length = 0; };
   const close = async () => { try { proc.kill(); } catch {} await sleep(300); rmSync(profile, { recursive: true, force: true, maxRetries: 5 }); };
-  return { send, ev, until, navigate, shot, fresh, errors, close };
+  // (a real click, as the person's: the mouse pressed and released at the element's centre. A scripted el.click() isn't
+  //  a user gesture, so the browser blocks a tab it would open; this one isn't)
+  const click = async (selector) => {
+    const at = await ev(`(() => { const e = document.querySelector(${JSON.stringify(selector)}); if (!e) return null; e.scrollIntoView({ block: "center" }); const r = e.getBoundingClientRect(); return { x: r.x + r.width / 2, y: r.y + r.height / 2 }; })()`);
+    if (!at) throw new Error("nothing to click: " + selector);
+    for (const type of ["mousePressed", "mouseReleased"]) await send("Input.dispatchMouseEvent", { type, x: at.x, y: at.y, button: "left", clickCount: 1 });
+    return true;
+  };
+  // (another tab of this Chrome, one the person opened (a link, an Open that opens a tab of its own): the page whose
+  //  address matches, over a DevTools socket of its own; closed with the case, tabs.splice(0))
+  const tabs = [];
+  const tab = async (match, ms = 20000) => {
+    let found = null;
+    for (const t = Date.now(); !found && Date.now() - t < ms; await sleep(100)) {
+      const list = await (await fetch(`http://127.0.0.1:${cdp}/json`)).json().catch(() => []);
+      found = list.find((x) => x.type === "page" && match.test(x.url) && !tabs.some((o) => o.id === x.id)) ?? null;
+    }
+    if (!found) throw new Error("no tab at " + match);
+    const ws = new WebSocket(found.webSocketDebuggerUrl);
+    await new Promise((ok, fail) => { ws.onopen = ok; ws.onerror = () => fail(new Error("no socket to the tab at " + found.url)); });
+    let k = 0;
+    const wait = new Map();
+    ws.onmessage = (e) => {
+      const m = JSON.parse(e.data);
+      if (m.id && wait.has(m.id)) { wait.get(m.id)(m); wait.delete(m.id); }
+      if (m.method === "Runtime.exceptionThrown") errors.push("(tab) " + String(m.params.exceptionDetails?.exception?.description ?? m.params.exceptionDetails?.text).slice(0, 300));
+    };
+    const tsend = (method, params = {}) => new Promise((r) => { const id = ++k; wait.set(id, r); ws.send(JSON.stringify({ id, method, params })); });
+    await tsend("Runtime.enable");
+    const tev = async (expr) => {
+      const r = await tsend("Runtime.evaluate", { expression: expr, awaitPromise: true, returnByValue: true });
+      if (!r.result || r.result.exceptionDetails) throw new Error(JSON.stringify(r.result?.exceptionDetails ?? r.error ?? r).slice(0, 400));
+      return r.result.result?.value;
+    };
+    const t = {
+      id: found.id,
+      url: found.url,
+      ev: tev,
+      until: async (expr, wms = 20000) => { const s = Date.now(); while (Date.now() - s < wms) { if (await tev(expr).catch(() => false)) return true; await sleep(100); } return false; },
+      shot: async (file) => { const r = await tsend("Page.captureScreenshot", { format: "png" }); writeFileSync(file, Buffer.from(r.result.data, "base64")); },
+      close: async () => { try { ws.close(); } catch {} await send("Target.closeTarget", { targetId: found.id }).catch(() => {}); },
+    };
+    tabs.push(t);
+    return t;
+  };
+  const closeTabs = async () => { for (const t of tabs.splice(0)) await t.close(); };
+  return { send, ev, until, navigate, shot, fresh, errors, close, click, tab, closeTabs };
 }
 
 // ---- the grant dialog ("Allow this agent?"), set as the case's grant, then Allow
@@ -246,6 +292,13 @@ function helpers(page, surface, failures, shotDir, caseId, gap) {
     surface: surface.name,
     tool: (name, args) => surface.tool(name, args),
     ev: (js) => page.ev(js),
+    /** A real click (the mouse, at the element's centre): what opens a tab of its own opens. */
+    click: (selector) => page.click(selector),
+    /** The tab the person opened whose address matches `match` (a RegExp): { ev, until, shot, close }; closed with the case. */
+    async tab(match, ms) {
+      const t = await page.tab(match, ms);
+      return { ev: t.ev, until: t.until, close: t.close, shot: async (name) => { if (shotDir) await t.shot(join(shotDir, `${caseId}-${surface.name}-${name}.png`)); } };
+    },
     until: (js, ms) => page.until(js, ms),
     ok(cond, msg, detail) {
       console.log((cond ? "ok   " : "FAIL ") + `[${caseId} ${surface.name}] ` + msg + (cond || detail === undefined ? "" : " " + JSON.stringify(detail).slice(0, 400)));
@@ -327,6 +380,7 @@ export async function runCase(kase, surfaceName, { site, page, shotDir = process
     h.ok(false, "threw: " + String(e?.stack ?? e).slice(0, 400));
   } finally {
     surface.close();
+    await page.closeTabs();
   }
   h.ok(page.errors.length === 0, "no errors on the page", page.errors.slice(0, 3));
   return failures;

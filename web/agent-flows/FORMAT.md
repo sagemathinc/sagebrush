@@ -54,6 +54,8 @@ What makes a notebook run, the intended rule on every surface (decided Nov 19 20
 | `h.open(urlOrPath)` | navigates as the person would (a link, Open in Sagebrush) |
 | `h.agentStillThere()` | the agent's next call works |
 | `h.ev(js)`, `h.until(js, ms?)` | the page, for anything else |
+| `h.click(selector)` | a real click at the element's centre (the mouse, not `el.click()`): a tab it opens opens |
+| `h.tab(match, ms?)` | the tab the person opened whose address matches `match` (a RegExp): `{ ev, until, shot, close }`, closed when the case ends |
 | `h.ok(cond, msg, detail?)`, `h.shot(name)` | a check, and a screenshot |
 
 `h.surface` is `"mcp"` or `"chat"` where they differ. A case fails on an error on the page, on a Connect or Allow that doesn't come, or past its budget.
