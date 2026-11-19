@@ -24,6 +24,7 @@ fn layer_poll_gap_at_two_to_the_19() {
     let z = mul_words_local(&a, &b);
     let polls = hooks::total();
     let gap = hooks::max_gap_ns();
+    let ntt = hooks::traced("ntt");
     hooks::reset();
     assert_eq!(z.len(), 2 * half);
     // per prime and transform, every layer above BLOCK polls once per 2^12
@@ -31,4 +32,20 @@ fn layer_poll_gap_at_two_to_the_19() {
     assert!(polls >= 9 * 64, "{} polls in a product of 2^19 points", polls);
     eprintln!("product of 2^19 points: {} polls, longest gap {:.3} ms", polls, gap as f64 / 1e6);
     assert!(gap <= 20_000_000, "{:.2} ms between two polls in a transform", gap as f64 / 1e6);
+
+    // a Stop at the transforms' first, a middle and their last poll stops the
+    // product (an unwind; the op-local tables simply drop), and the next
+    // product is the same
+    assert!(ntt.len() >= 3, "{} polls in the transforms", ntt.len());
+    for at in [ntt[0], ntt[ntt.len() / 2], ntt[ntt.len() - 1]] {
+        hooks::reset();
+        hooks::arm_at(at);
+        let r = sagebrush_interrupt::catch(|| mul_words_local(&a, &b));
+        let phase = hooks::stopped_in();
+        hooks::reset();
+        sagebrush_interrupt::clear();
+        assert!(r.is_err(), "no Stop at poll {}", at);
+        assert_eq!(phase, "ntt", "stopped at poll {} in {:?}", at, phase);
+    }
+    assert_eq!(mul_words_local(&a, &b), z, "the product after the Stops");
 }
