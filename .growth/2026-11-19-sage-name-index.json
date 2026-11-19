@@ -1,0 +1,11 @@
+{
+ "v": 1,
+ "reason": "The Sage-mode name index (lib/_sage_names.py, in sage-more: loaded on the first sage.* lookup, not at the session's start), the sage.* shim's lookup through it and its lazy __all__. A sage.* module no longer imports every Sage-layer module when it is created, so _sage_ffmat leaves the Sage start: sage.pre -536796 and sage.src -118313, and it becomes its own lazy group, mod-sage-ffmat (new bundles, at their landing sizes in the epoch). The worker and the notebook page list that group. Measured on the merge with master aadff4d0 (local size records, pinned bun 1.4.4 and node 24.21.0); each marker is its growth + 64. The sage-more.src, sagebrush-notebook.js and sagebrush-worker.js ceilings are renewed to the measured size + 64.",
+ "bytes": {
+  "cli/lib.gen.js": 8912,
+  "cli/pyjs.cjs": 9324,
+  "engine/lib/sage-more.src": 26164,
+  "engine/sagebrush-notebook.js": 158,
+  "engine/sagebrush-worker.js": 454
+ }
+}
