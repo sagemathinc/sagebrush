@@ -1,0 +1,8 @@
+{
+  "v": 1,
+  "reason": "The LaTeX editor's Source | Both | PDF toggle: its styles are part of the page's stylesheet, which each LaTeX example's committed preview.html carries, so the twelve examples' previews were rendered again with them. Measured with the shared size-record.sh (bun 1.4.4, node 24.21.0) on master f50ca264 and a two-parent merge probe of the branch head: examples/corpus +11,988 and site/examples +11,988, + 64 each.",
+  "bytes": {
+    "examples/corpus": 12052,
+    "site/examples": 12052
+  }
+}

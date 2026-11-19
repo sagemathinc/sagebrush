@@ -3044,6 +3044,38 @@ try {
       const run = i("tex-run"); return { run, toggle: i("tex-toggle"), file: i("tex-filebtn"), label: h[run]?.textContent ?? null, hidden: h[run]?.hidden ?? null }; })()`);
     check(bar.run >= 0 && bar.label === "Run" && bar.hidden === false && bar.run === bar.toggle + 1 && (bar.file < 0 || bar.file < bar.run),
       "Run: in the toolbar, right after the preview toggle (after File ▾ where there is one), shown for a document with SageTeX code", bar);
+    // the view (William, Nov 18: hide the source, one click): Source | Both | PDF, each a button of the toggle, remembered
+    // for this file in this browser; a file with none kept opens with both on a wide page, the source on a narrow one
+    {
+      const vis = () => ev(`(() => { const s = (c) => getComputedStyle(document.querySelector(c)).display !== "none";
+        const m = document.querySelector(".tex-main").getBoundingClientRect().width, r = document.querySelector(".tex-right").getBoundingClientRect().width;
+        return { view: document.querySelector(".tex-page").dataset.view, src: s(".tex-left"), doc: s(".tex-right"), full: r >= m - 2, both: s('.tex-view [data-view="both"]'),
+          pressed: [...document.querySelectorAll(".tex-view button")].map((b) => b.dataset.view + ":" + b.getAttribute("aria-pressed")).join() }; })()`);
+      const pick = (v) => ev(`(document.querySelector('.tex-view [data-view="${v}"]').click(), true)`);
+      const v0 = await vis();
+      check(v0.view === "both" && v0.src && v0.doc && !v0.full && v0.pressed === "source:false,both:true,pdf:false", "view: a file with none kept opens with both on a wide page, Both pressed", v0);
+      await pick("pdf");
+      const v1 = await vis();
+      check(v1.view === "pdf" && !v1.src && v1.doc && v1.full && v1.pressed === "source:false,both:false,pdf:true", "view: PDF shows the document alone, the page's width", v1);
+      await open(fr);
+      const v2 = await vis();
+      const fo = await mk("/t/view-other.tex", enc("\\documentclass{article}\n\\begin{document}\nOther.\n\\end{document}\n"));
+      await open(fo);
+      const v3 = await vis();
+      await pick("source");
+      const v4 = await vis();
+      check(v2.view === "pdf" && v3.view === "both" && v4.view === "source" && v4.src && !v4.doc, "view: kept for this file (reopened: PDF), another file its own (both, then Source shows the source alone)", { v2, v3, v4 });
+      await send("Emulation.setDeviceMetricsOverride", { width: 390, height: 844, deviceScaleFactor: 2, mobile: true });
+      const fn = await mk("/t/view-new.tex", enc("\\documentclass{article}\n\\begin{document}\nNew.\n\\end{document}\n"));
+      await open(fn);
+      const v5 = await vis();
+      await open(fr);
+      const v6 = await vis();
+      await send("Emulation.clearDeviceMetricsOverride");
+      check(v5.view === "source" && v5.src && !v5.doc && !v5.both && v6.view === "pdf" && !v6.src && v6.doc, "view: on a phone, a file with none kept opens with the source, Both isn't offered, and a kept PDF shows the document", { v5, v6 });
+      await open(fr);
+      await pick("both");
+    }
     // (never on open: no runner frame, no worker script for it, no results file, after the preview has rendered)
     await sleep(1500);
     const onOpen = { runner: requests.slice(n0).filter((u) => /\/runner\/|sagebrush-worker\.js/.test(u)), frames: await ev(`document.querySelectorAll("iframe[sandbox]").length`), results: await resultsOf("/t/run.tex"), chips: await ev(`document.querySelectorAll(".tex-preview .sagechip").length`) };
