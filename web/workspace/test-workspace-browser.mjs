@@ -1637,8 +1637,16 @@ try {
       await typeCell(word);
       await ev(click);
       await until(`location.pathname !== "/" || /agents page was not opened/.test(document.querySelector("#saved")?.textContent ?? "")`, 45000);
-      const st = await ev(`({ path: location.pathname, text: document.querySelector("#cells .cell textarea")?.value ?? "", said: document.querySelector("#saved")?.textContent ?? "" })`);
+      const state = `({ path: location.pathname, text: document.querySelector("#cells .cell textarea")?.value ?? "", said: document.querySelector("#saved")?.textContent ?? "" })`;
+      const st = await ev(state);
       check(st.path === "/" && st.text.includes(word) && /not saved/.test(st.said) && /agents page was not opened/.test(st.said), `${name} with the save ${how}: this page stays, the edit kept, and says so: ` + JSON.stringify(st));
+      // (the edit sent again by the next change, refused or failed again: the save's line says so, and the page still says
+      //  the agents page wasn't opened, on the same line)
+      await ev(`(document.querySelector("#cells .cell textarea").dispatchEvent(new Event("input", { bubbles: true })), 1)`);
+      await until(`/not saved/.test(document.querySelector("#saved")?.textContent ?? "")`, 10000).catch(() => {});
+      await sleep(300);
+      const st2 = await ev(state);
+      check(st2.path === "/" && /not saved: the test (refusal|failure)/.test(st2.said) && /agents page was not opened/.test(st2.said), `…and once it is sent again by a later change, still: ` + JSON.stringify(st2));
     }
   }
   await ev(`(() => { const st = sagebrush.notebook.store; window.__release = null; st.save = (...a) => new Promise((ok, no) => { window.__release = () => window.__save.apply(st, a).then(ok, no); }); return 1; })()`);
@@ -1683,6 +1691,9 @@ try {
     return ev(`[...document.querySelectorAll("#cells .cell textarea")].some((t) => t.value.includes(${JSON.stringify(word)}))`);
   };
   const savedNow = () => ev(`sagebrush.notebook.saved().then(() => "resolved", (e) => String(e?.message ?? e))`);
+  // (a copy of a save refused or failed again: named so, and the line says the save was refused, not a change elsewhere)
+  const notSavedName = (x) => x + " (your changes, not saved there)";
+  const saidRefused = (said, x) => said.includes(`Your changes to "${x}" weren't saved after you left it (the save was refused: `) && said.includes(`they are kept as "${notSavedName(x)}"`) && !/changed elsewhere/.test(said);
   const copies = () => ev(`(async () => (await ${W}.list("/", { recursive: true })).filter((e) => e.kind === "notebook" && /\\(your changes/.test(e.path)).map((e) => e.path))()`);
   // (A: X's held save refused after Y opened: the saved() that meets the refusal (not one it sent) rejects, naming X,
   //  nothing copied yet;
@@ -1694,7 +1705,7 @@ try {
     check(r.shown === r.Y && /X REFUSED/.test(r.why) && r.why.includes("a notebook you left") && (!r.xName || r.why.includes(r.xName)) && (await copies()).length === before.length, "A: X's held save answered refused after Y opened: saved() rejects, naming X, Y shown, no copy yet: " + JSON.stringify(r));
     await ev(`(window.__xs.save = window.__xsave, 1)`);
     const again = await savedNow(), made = (await copies()).filter((c) => !before.includes(c)), said = await ev(`document.querySelector("#status")?.textContent ?? ""`);
-    check(again === "resolved" && made.length === 1 && (!r.xName || made[0].includes(r.xName)) && said.includes(made[0].split("/").pop().replace(/\.ipynb$/, "")), "C: X's re-send refused for good: its edit kept as a copy, saved() resolves, and the page names the copy: " + JSON.stringify({ again, made, said }));
+    check(again === "resolved" && made.length === 1 && made[0] === "/" + notSavedName(r.xName) + ".ipynb" && saidRefused(said, r.xName), "C: X's re-send refused for good: its edit kept as a copy named \"X (your changes, not saved there)\", saved() resolves, and the page says the save was refused, naming the copy: " + JSON.stringify({ again, made, said }));
     check(made.length === 1 && (await reopen(made[0], " # x-refused")), "…the copy, opened, has the edit made before X was left");
     check(!(await reopen(r.X, " # x-refused")), "…and X, opened again, is as it was: nothing written over it");
   }
@@ -1724,7 +1735,8 @@ try {
     const r = await leaveX(`() => Promise.reject(new Error("X FAILED"))`, " # x-thrown");
     check(r.shown === r.Y && /X FAILED/.test(r.why) && r.why.includes("a notebook you left"), "E: X's held save failing (thrown) after Y opened: saved() rejects, naming X: " + JSON.stringify(r));
     await ev(`(window.__xs.save = window.__xsave, 1)`);
-    const again = await savedNow(), made = (await copies()).filter((c) => !before.includes(c));
+    const again = await savedNow(), made = (await copies()).filter((c) => !before.includes(c)), said = await ev(`document.querySelector("#status")?.textContent ?? ""`);
+    check(made.length === 1 && made[0] === "/" + notSavedName(r.xName) + ".ipynb" && saidRefused(said, r.xName), "…named \"X (your changes, not saved there)\", and the page says its re-send was refused: " + JSON.stringify({ made, said }));
     check(again === "resolved" && made.length === 1 && (await reopen(made[0], " # x-thrown")), "…its re-send refused for good: kept as a copy, saved() resolves, the copy has the edit: " + JSON.stringify({ again, made }));
   }
   for (const e of errors) fails.push("page error: " + e);

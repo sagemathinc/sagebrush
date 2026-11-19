@@ -2062,17 +2062,20 @@ export function createNotebook(root, opts = {}) {
   function saveSucceeded(mine, seq) {
     if ((failed.get(mine)?.seq ?? Infinity) <= seq) failed.delete(mine);
   }
-  async function keepDetached(key, doc, theirs) {
+  // (`why`: absent for a conflict (changed elsewhere); for a save refused or failed again when sent once more,
+  // { refused, message }, passed to the page so that what it names and says is what happened)
+  async function keepDetached(key, doc, theirs, why = null) {
+    const what = why ? `couldn't be saved after it was closed here (${why.refused ? "refused" : "failed"}: ${why.message})` : "changed elsewhere after it was closed here";
     try {
-      if (!detachedConflict) throw new Error("changed elsewhere after it was closed here, and not kept");
-      await detachedConflict(doc, theirs, key);
+      if (!detachedConflict) throw new Error(`${what}, and not kept`);
+      await detachedConflict(doc, theirs, key, why);
       unkept.delete(key);
       leftSettled(key);
     } catch (e) {
-      unkept.set(key, { doc, theirs, error: e ?? new Error("not kept") });
+      unkept.set(key, { doc, theirs, why, error: e ?? new Error("not kept") });
       outstanding.add(key);
       leftChanged();
-      emit("saved", `not saved: ${doc.name ?? "a notebook"} changed elsewhere after it was closed here, and your changes to it couldn't be kept (${e?.message ?? e})`);
+      emit("saved", `not saved: ${doc.name ?? "a notebook"} ${what}, and your changes to it couldn't be kept (${e?.message ?? e})`);
     }
   }
   const cellType = (c) => (c.type === "markdown" || c.type === "raw" ? c.type : "code");
@@ -2170,7 +2173,7 @@ export function createNotebook(root, opts = {}) {
         if (typeof refused === "string" && /^not saved\b/.test(refused)) {
           if (lastJson === json) lastJson = null;
           // (for any notebook, shown or just left, as a thrown one is: saved() names it; said only for the one shown)
-          saveFailed(mine, st, sent, json, seq, new Error(refused.replace(/^not saved:?\s*/, "") || "not saved"));
+          saveFailed(mine, st, sent, json, seq, Object.assign(new Error(refused.replace(/^not saved:?\s*/, "") || "not saved"), { refused: true }));
           if (mine !== shown || store !== st) return;
           emit("saved", refused);
           return;
@@ -2217,7 +2220,7 @@ export function createNotebook(root, opts = {}) {
         const f = failed.get(m);
         if (!f || f.seq <= seq || m === shown || busy.has(m)) continue;
         failed.delete(m);
-        saveChain = saveChain.then(() => keepDetached(m, f.sent, null));
+        saveChain = saveChain.then(() => keepDetached(m, f.sent, null, { refused: !!f.error?.refused, message: String(f.error?.message ?? f.error ?? "not saved") }));
       }
       await saveChain;
       // (still failed: the shown notebook's, said as it is; else the first notebook left, named)
@@ -2229,7 +2232,7 @@ export function createNotebook(root, opts = {}) {
       // (saves of documents no longer shown that couldn't be kept: tried
       // again, in turn with the saves; one kept or replaced meanwhile isn't)
       if (unkept.size) {
-        saveChain = saveChain.then(async () => { for (const [key, u] of [...unkept]) if (unkept.get(key) === u) await keepDetached(key, u.doc, u.theirs); });
+        saveChain = saveChain.then(async () => { for (const [key, u] of [...unkept]) if (unkept.get(key) === u) await keepDetached(key, u.doc, u.theirs, u.why); });
         await saveChain;
       }
       if (unkept.size) throw [...unkept.values()].at(-1).error;
