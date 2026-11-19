@@ -312,6 +312,19 @@ try {
     ok("C-copy-turn", /^\*\*Claude:\*\*/.test(t) && !t.includes("plot a Fourier series\n\n**Claude") && t.length > 20, "a turn's Copy: the agent's turn only", t.slice(0, 300));
     ok("C-copy-quiet", exceptions.length === 0, "no page errors", exceptions);
   }
+  // (Files…, at the foot of the chat list: big, visible in the chat view, and it opens the notebook page with its file
+  //  browser shown, even where this browser had hidden it)
+  await fresh(1600);
+  {
+    const b = await ev(`(() => { const b = document.getElementById('files-big'), r = b?.getBoundingClientRect(), nav = document.querySelector('nav.side').getBoundingClientRect(); return b && { text: b.textContent.trim(), w: r.width, h: r.height, fromBottom: nav.bottom - r.bottom, inNav: !!b.closest('nav.side'), shown: r.width > 0 && getComputedStyle(b).visibility === 'visible', font: parseFloat(getComputedStyle(b).fontSize) }; })()`);
+    ok("L2-files-button", b && b.text === "Files…" && b.inNav && b.shown && b.w >= 200 && b.h >= 36 && b.font >= 15 && b.fromBottom < 120, "a big Files… button at the foot of the chat list", b);
+    await ev(`localStorage.setItem("sagebrush-files-sidebar", "0")`);
+    await ev(`document.getElementById('files-big').click()`);
+    await until(`location.pathname === "/" && document.readyState === "complete"`);
+    await until(`!document.getElementById('wssidebar').hidden`, 30000).catch(() => {});
+    const side = await ev(`({ path: location.pathname, shown: !document.getElementById('wssidebar').hidden, pref: localStorage.getItem("sagebrush-files-sidebar") })`);
+    ok("L2-files-button-opens", side.path === "/" && side.shown && side.pref === "1", "Files… opens the notebook page with its file browser shown (though it had been hidden)", side);
+  }
   console.log(`${checks - fails}/${checks} passed${fails ? "" : ", all passed"}`);
   code = fails ? 1 : 0;
 } finally {
