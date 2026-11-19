@@ -1,0 +1,7 @@
+{
+ "v": 1,
+ "reason": "The CLI's prompt inputs and its -i program in a worker, so Ctrl-C at the prompt is handled and a double tap is one press: the prompt's front and back, its stdin reader and the terminal's raw-mode handling, in the CLI's bundle. Measured by the PR's CI size gate on its merge with master (cli/pyjs.cjs +6264 B); the marker is the growth + 64.",
+ "bytes": {
+  "cli/pyjs.cjs": 6328
+ }
+}

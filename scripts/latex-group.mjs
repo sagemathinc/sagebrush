@@ -126,6 +126,11 @@ export const LATEX_LAZY_CAPS = {
   // (53,797 / 18,488: Nov 19 2026, for the bar's offer of a board an agent made ("<agent> made <name> · Open", Open
   //  in a tab of its own, where its code runs), which every page's pairing carries. Measured locally on the toolchain
   //  CI pins, merged with master 4bcbb434 (whose 53,150 / 18,263 it reproduces): 53,733 / 18,424, + 64)
+  // (54,145 / 18,691: Nov 19 2026, an answer's entry with its page's address (url, entry-url.ts with
+  //  the code page's languages), for the agent to give the person a link. Measured on master 4bcbb434 with it:
+  //  54,081 / 18,627, + 64)
+  // (54,729 / 18,864: the two above together, the bar's offer of a board an agent made and an answer's entry with its
+  //  page's address, measured on their merge (master 3fbaf351): 54,665 / 18,800 (bun 1.4.4, node 24.21.0), + 64)
   // (54,811 / 18,846: a .tex the agent made runs once by itself in the editor that shows it, the pairing's answer over
   //  the site's channel (agent-pair.ts, agent-made-tex.ts), Nov 19, provisional until the exact-head CI packet: 54,747 /
   //  18,782 measured on the shipped build (bun 1.4.4, node 24.21.0) with master 6614eb38 merged (the agent's bar's row
@@ -133,7 +138,9 @@ export const LATEX_LAZY_CAPS = {
   // (55,409 / 19,025: the two above together, the bar's offer of a board an agent made and a .tex it made running by
   //  itself, measured on their merge (with the embedded mode on master f8b9e013): 55,345 / 18,961 (bun 1.4.4, node
   //  24.21.0), + 64)
-  AGENT: { label: "the LaTeX agent pairing's chunk", raw: 55409, gzip: 19025 },
+  // (56,341 / 19,371: an answer's entry with its page's address and a .tex the agent made running by itself together,
+  //  measured on their merge (master 3c4319ba): 56,277 / 19,307 (bun 1.4.4, node 24.21.0), + 64)
+  AGENT: { label: "the LaTeX agent pairing's chunk", raw: 56341, gzip: 19371 },
   // (the agent tools' work: web/latex/tools.ts, latex_check's report and latex_render's pictures, on an agent's first call)
   // (16,546 / 6,950: Nov 11 2026: latex_build's own code (build.ts, the
   //  engine driven from a snapshot, and the pages' fit) here, out of the eager group, its shared rules handed in by the
