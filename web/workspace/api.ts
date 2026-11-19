@@ -531,6 +531,8 @@ const withCellIds = (cells: any[]) => cells.map((c) => (c && typeof c === "objec
 export const NB_WRITER_LOCK = "sagebrush-nb-writer:";
 /** How long a whole write waits for the notebook's holder to answer, each phase. */
 export const NB_HOLDER_MS = 5000;
+/** A write that found a notebook under sync's journal: written through the journal (Workspace.writeJournaled). */
+class ToJournal { constructor(readonly ref: string) {} }
 /** The whole writes of notebooks a page may have under way at once (each holds its document until it ends). */
 export const NB_WRITES_MAX = 64;
 function nbDoc(content: unknown): unknown {
@@ -1580,15 +1582,20 @@ export class Workspace {
   /** `opts.expect`: only that entry (its kind, fid, creation and, a document's, ref, as remove's), checked holding the
    * lock: another there now, a WorkspaceError("conflict"), nothing written. */
   async write(p: string, content: unknown, opts: { base?: number; tag?: string; keepEmpty?: boolean; fid?: string; expect?: Pick<Entry, "kind" | "fid" | "created" | "ref"> } & Collect & Admitted = {}): Promise<{ entry: Entry; rev: number }> {
-    // (a notebook under sync's journal: written through the journal, writeJournaled; anything else as before.  Read
-    // here with no lock: writeJournaled checks the path again under the lock before anything is written)
-    const pre = this.main && opts.fid === undefined ? await this.stat(p).catch(() => undefined) : undefined;
-    const journaled = pre?.kind === "notebook" && !!pre.ref && !pre.remote && !pre.trashed && (await this.mainTx("notebooks", "readonly", (st) => st.get(FENCE)).catch(() => undefined))?.phase === "journal";
-    // (refused before its document is copied or anything is made for it when NB_WRITES_MAX are already under way;
-    // writeJournaled admits it for good, with no wait between its own count and its entry)
-    if (journaled) this.nbWriteRoom();
+    // (the bytes as given at the call, copied before any wait: a caller's change to them afterwards is never written)
     const c = owned(content, this.limits.maxFileBytes);
-    const out = journaled ? await this.writeJournaled(p, c, opts, pre!.ref!) : await this.writeLocked(p, c, opts);
+    // (every write takes its turn for the workspace's lock at the call, as before; one that finds a notebook under
+    // sync's journal there is written through the journal instead (writeJournaled), which checks the path again under
+    // the lock before anything is written.  Refused, when NB_WRITES_MAX are already under way, before it is read as a
+    // notebook or anything is made or sent for it (its copy above, taken at the call, is let go with it))
+    let out: { entry: Entry; rev: number };
+    try {
+      out = await this.writeLocked(p, c, opts);
+    } catch (e) {
+      if (!(e instanceof ToJournal)) throw e;
+      this.nbWriteRoom();
+      out = await this.writeJournaled(p, c, opts, e.ref);
+    }
     this.askToKeep();
     return out;
   }
@@ -1725,6 +1732,8 @@ export class Workspace {
       let rev: number;
       if (e.kind === "notebook") {
         if (!this.main) throw new WorkspaceError("storage", "this browser has no storage for notebooks");
+        // (sync's journal writes this browser's notebooks: written through it, outside this hold (write)
+        if (opts.fid === undefined && (await this.mainTx("notebooks", "readonly", (st) => st.get(FENCE)))?.phase === "journal") throw new ToJournal(e.ref!);
         // (written as Jupyter's nbformat, as agents do: its cells made Sagebrush's, or the page shows them empty)
         const doc = nbDoc(content) as any;
         if (!doc || typeof doc !== "object" || !Array.isArray(doc.cells)) throw new WorkspaceError("invalid", "a notebook is {cells: [...]}");
