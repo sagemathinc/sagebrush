@@ -199,6 +199,9 @@ export const PANE_CELLS = `(() => {
       return cells.map((c) => {
         const out = [];
         for (const e of c.querySelectorAll("*")) if (e.sbBundle && Object.keys(e.sbBundle).some((k) => k.startsWith("image/"))) out.push({ output_type: "display_data", data: Object.fromEntries(Object.keys(e.sbBundle).map((k) => [k, "1"])) });
+        // (a plot drawn in the page (matplotlib and the like): the pane's own figure, an SVG; counted here only when no
+        //  bundle in it was counted above)
+        for (const f of c.querySelectorAll(".out figure.plot")) if (f.querySelector("svg") && !f.sbBundle && ![...f.querySelectorAll("*")].some((e) => e.sbBundle)) out.push({ output_type: "display_data", data: { "image/svg+xml": "1" } });
         for (const p of c.querySelectorAll("pre.txt")) {
           for (const e of p.querySelectorAll("span.e")) out.push({ output_type: "error", ename: "", evalue: e.textContent.slice(0, 200) });
           const t = [...p.childNodes].filter((n) => n.nodeType === 3).map((n) => n.textContent).join("");
