@@ -1,8 +1,8 @@
 """The series ops (sagebrush.poly.series_mul, series_pow, series_euler,
 sigma_table) against Sage, used as an oracle: fixtures/series_ops_sage.json
 holds exact polynomial products and powers truncated at q^n over Z and Q,
-the Euler product and sigma(m, k), computed by Sage (the generator is
-recorded in the fixture's "source").  Over Q the coefficients come back in
+the Euler product and sigma(m, k), computed by Sage (its version is the
+fixture's "source").  Over Q the coefficients come back in
 lowest terms, as Sage prints them; raw=True gives the unreduced numerators
 and denominator, checked to be the same values.
 
