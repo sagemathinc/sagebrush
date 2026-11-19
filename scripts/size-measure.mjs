@@ -385,8 +385,8 @@ async function gate() {
     "| bundle | base | merge | delta | limit (B) | notes |", "|---|---:|---:|---:|---:|---|");
   const cell = (s) => String(s ?? "").replaceAll("|", "\\|").replace(/[\r\n]/g, " ");
   for (const r of result.rows) lines.push("| " + [r.bundle, r.base, r.merge, r.delta === undefined ? "" : fmt(r.delta), r.limit, r.note].map(cell).join(" | ") + " |");
-  for (const n of result.notes) lines.push("- " + n);
-  for (const p of result.problems) lines.push("- **" + p + "**");
+  for (const n of result.notes) lines.push("- " + cell(n));
+  for (const p of result.problems) lines.push("- **" + cell(p) + "**");
   if (process.env.GITHUB_STEP_SUMMARY) appendFileSync(process.env.GITHUB_STEP_SUMMARY, lines.join("\n") + "\n");
   console.log(lines.join("\n"));
   if (arg("--out")) writeFileSync(arg("--out"), JSON.stringify(result, null, 1) + "\n");
