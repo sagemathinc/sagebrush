@@ -18,7 +18,7 @@ Jupyter); on the command line show() writes an SVG file and prints its path.
 
 import math
 import os
-from _graphics import (Panel, Line, Points, Polygon, Rects, Text, Arrow, AxLine, Image, render_svg, render_frame,
+from _graphics import (figure_formats as _figure_formats, Panel, Line, Points, Polygon, Rects, Text, Arrow, AxLine, Image, render_svg, render_frame,
                        show as _show, save_svg, TAB10, to_color as _css, colormap, describe_svg, mpl_ticks, DASHES,
                        LEGEND_LOCS as _LEGEND_LOCS)
 from matplotlib.colors import to_rgba as _to_rgba, CSS4_COLORS as _CSS4_COLORS, Colormap as _Colormap
@@ -1463,11 +1463,26 @@ class Figure:
                 svg = _svg_background(svg, css, self._size[0] * 100, self._size[1] * 100)
         return svg
 
-    def _repr_svg_(self):
+    def _sagebrush_svg_(self):
         anim = getattr(self, "_animation", None)
         if anim is not None:  # a figure being animated shows its animation
             return anim._repr_svg_()
         return self._svg()
+
+    # (shown as figure_formats() say, lib/_graphics.py: PNG under the Jupyter kernel, as ipykernel's, else SVG; an
+    # animation always as its animated SVG)
+    def _repr_svg_(self):
+        if getattr(self, "_animation", None) is not None or "svg" in _figure_formats():
+            return self._sagebrush_svg_()
+        return None
+
+    def _repr_png_(self):
+        if getattr(self, "_animation", None) is not None or "png" not in _figure_formats():
+            return None
+        import io
+        b = io.BytesIO()
+        self.savefig(b, format="png")
+        return b.getvalue()
 
     def description(self):
         return describe_svg(self._svg())

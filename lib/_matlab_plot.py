@@ -3312,7 +3312,7 @@ def _tick_values(lo, hi, ticint=5):
     return out
 
 
-from _graphics import Primitive as _Primitive, _fmt as _gfmt, _esc as _gesc
+from _graphics import Primitive as _Primitive, _fmt as _gfmt, _esc as _gesc, InlineFigure as _InlineFigure
 
 
 class _Faces(_Primitive):
@@ -3919,7 +3919,7 @@ def _scene_within(scene):
     return True
 
 
-class FigureView:
+class FigureView(_InlineFigure):
     """a figure as shown: its SVG everywhere, and for one 3-D axes also the
     interactive 3-D view (drag to rotate), as Sage's 3-D graphics show"""
 
@@ -3927,8 +3927,12 @@ class FigureView:
         self.svg = figure_svg(fig, mfig)
         self.scene = figure_scene(fig)
 
-    def _repr_svg_(self):
+    def _sagebrush_svg_(self):
         return self.svg
+
+    def _repr_png_(self):
+        # (a 3-D axes shows its interactive view, with its SVG as the still picture, as before)
+        return None if self.scene is not None else _InlineFigure._repr_png_(self)
 
     def description(self):
         from _graphics import describe_svg
@@ -3936,7 +3940,14 @@ class FigureView:
 
     def _repr_mimebundle_(self, include=None, exclude=None):
         if self.scene is None:
-            return {"image/svg+xml": self.svg, "text/plain": self.description()}
+            # (in the formats figures are shown in: _graphics.figure_formats)
+            b = {"text/plain": self.description()}
+            svg, png = self._repr_svg_(), self._repr_png_()
+            if svg is not None:
+                b["image/svg+xml"] = svg
+            if png is not None:
+                b["image/png"] = png
+            return b
         import json
         from sage_plot3d import SCENE_MIME, viewer_html, jupyter_bundle, _in_jupyter
         title = self.description()

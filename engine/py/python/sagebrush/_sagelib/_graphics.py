@@ -1775,6 +1775,71 @@ def describe_svg(svg):
 
 # ------------------------------------------------------------------ output
 
+# ------------------------------------------------------------------ inline figures
+# Jupyter's InlineBackend.figure_formats: the formats a figure is shown in.  %config sets them (lib/_pyjs_magic.py);
+# otherwise the host's: the Jupyter kernel shows PNG, as ipykernel does (src/kernel.ts), and the notebook page and
+# everything else SVG.  A figure's _repr_png_ and _repr_svg_ follow them; its SVG for any other use is
+# _sagebrush_svg_ (svg_of).
+def figure_formats():
+    """The formats figures are shown in: a tuple of "png" and "svg"."""
+    import builtins
+    set_ = getattr(builtins, "__sagebrush_figure_formats__", None)
+    if set_ is not None:
+        return set_
+    host = getattr(builtins, "__pyjs_host__", None)
+    v = host("figure_formats") if host is not None else None
+    return tuple(str(v).split(",")) if v else ("svg",)
+
+
+def set_figure_formats(formats):
+    """Show figures in `formats` (%config InlineBackend.figure_formats); None: the host's again."""
+    import builtins
+    if formats is None:
+        if hasattr(builtins, "__sagebrush_figure_formats__"):
+            delattr(builtins, "__sagebrush_figure_formats__")
+        return
+    builtins.__sagebrush_figure_formats__ = tuple(formats)
+
+
+def svg_of(obj):
+    """obj's SVG, whatever the formats figures are shown in."""
+    f = getattr(obj, "_sagebrush_svg_", None)
+    return f() if f is not None else obj._repr_svg_()
+
+
+def svg_png(svg, dpi=None, transparent=False):
+    """An SVG drawn as PNG bytes by Sagebrush's PNG module (lib/_png.py): dpi pixels per inch, 100 SVG units to the
+    inch, default 100, on white unless transparent."""
+    import re
+    import _png
+    m = re.match(r'<svg [^>]*?width="([^"]*)" height="([^"]*)"', svg)
+    if m is None:
+        raise ValueError("save: the picture has no size to draw it at")
+    try:
+        w, h = float(m.group(1)) / 100, float(m.group(2)) / 100
+    except ValueError:
+        w = h = float("nan")
+    # (a background rectangle sized in percent, a MATLAB figure's: given the picture's own size, which the PNG
+    # module's drawing needs)
+    svg = svg.replace('<rect width="100%" height="100%"', '<rect width="%s" height="%s"' % (m.group(1), m.group(2)), 1)
+    # (_png checks the size and dpi, finite and within its limits, first)
+    return _png.figure_png(svg, w, h, 100 if dpi is None else dpi, None if transparent else "white", [])
+
+
+class InlineFigure:
+    """A figure shown as figure_formats() say: a subclass gives _sagebrush_svg_ (its SVG) and may give
+    _sagebrush_png_ (its PNG; else its SVG drawn)."""
+
+    def _repr_svg_(self):
+        return self._sagebrush_svg_() if "svg" in figure_formats() else None
+
+    def _repr_png_(self):
+        if "png" not in figure_formats():
+            return None
+        f = getattr(self, "_sagebrush_png_", None)
+        return f() if f is not None else svg_png(self._sagebrush_svg_())
+
+
 def host_display(obj):
     """Display obj richly if the host can: the browser (pyjs), or under
     CPython a Jupyter kernel (obj has _repr_svg_).  True if displayed."""
@@ -1802,14 +1867,14 @@ def show(obj, save_name="plot"):
     count = getattr(builtins, "__sagebrush_catalog__", None)
     if isinstance(count, list):
         count[0] += 1
-        print("[figure %d: %s]" % (count[0], describe_svg(obj._repr_svg_())))
+        print("[figure %d: %s]" % (count[0], describe_svg(svg_of(obj))))
         return None
     if getattr(builtins, "__sagebrush_doctest__", False):
         return None  # doctests show the repr only, as Sage's do
     shown = host_display(obj)
     if shown:
         return None
-    svg = obj._repr_svg_()
+    svg = svg_of(obj)
     try:
         import tempfile, os
         fd, path = tempfile.mkstemp(prefix="sagebrush-" + save_name + "-", suffix=".svg")
@@ -1846,17 +1911,7 @@ def save_figure(svg, filename, dpi=None, transparent=False):
     if ext == "svg":
         return save_svg(svg, filename)
     if ext == "png":
-        import re
-        import _png
-        m = re.match(r'<svg [^>]*?width="([^"]*)" height="([^"]*)"', svg)
-        if m is None:
-            raise ValueError("save: the picture has no size to draw it at")
-        try:
-            w, h = float(m.group(1)) / 100, float(m.group(2)) / 100
-        except ValueError:
-            w = h = float("nan")
-        # (_png checks the size and dpi, finite and within its limits, first)
-        png = _png.figure_png(svg, w, h, 100 if dpi is None else dpi, None if transparent else "white", [])
+        png = svg_png(svg, dpi, transparent)
         with open(name, "wb") as f:
             f.write(png)
         return

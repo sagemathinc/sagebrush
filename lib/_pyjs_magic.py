@@ -6,6 +6,8 @@ below.
 
 Line magics:
     %matplotlib [inline]      figures are shown inline already
+    %config InlineBackend.figure_formats = {'png', 'svg'}   (or figure_format = 'svg'): the formats figures
+                              are shown in: PNG under the Jupyter kernel, as IPython's, else SVG
     %load_ext autoreload, %reload_ext autoreload, %unload_ext autoreload
     %autoreload [0|1|2|off|explicit|all|now], %aimport [mod, -mod]
     %time STATEMENT           the wall time (Sagebrush cannot measure CPU time)
@@ -462,6 +464,40 @@ def _matplotlib(line):
                          % gui)
 
 
+
+# (%config: Jupyter's InlineBackend.figure_formats, lib/_graphics.py figure_formats.  As IPython's: the value is
+# evaluated in the notebook's namespace, and a format it can't show or another configurable isn't an error, only
+# said; "retina" is PNG at the figure's own size for now, said too)
+_FORMAT_NAMES = {"png": "png", "svg": "svg", "retina": "png", "png2x": "png"}
+
+
+def _config(line):
+    import re
+    import _graphics
+    m = re.match(r"\s*InlineBackend\.(figure_formats?)\s*=\s*(.+?)\s*$", line, re.S)
+    if m is None:
+        print("Sagebrush's %%config sets InlineBackend.figure_formats (or InlineBackend.figure_format) only, the "
+              "formats figures are shown in; %s is not used." % (line.strip() or "(nothing)"), file=sys.stderr)
+        return
+    v = eval(m.group(2), _user_ns())
+    names = [v] if isinstance(v, str) else list(v) if isinstance(v, (list, tuple, set, frozenset)) else None
+    if not names or not all(isinstance(n, str) for n in names):
+        raise UsageError("%%config InlineBackend.%s: give 'png', 'svg' or both, not %r" % (m.group(1), v))
+    bad = [n for n in names if n.lower() not in _FORMAT_NAMES]
+    if bad:
+        print("Sagebrush shows figures as 'png' or 'svg', not %s: the formats are unchanged."
+              % ", ".join(repr(n) for n in bad), file=sys.stderr)
+        return
+    if any(n.lower() in ("retina", "png2x") for n in names):
+        print("Sagebrush shows 'retina' figures as 'png' at their own size for now.", file=sys.stderr)
+    formats = []
+    for n in names:
+        f = _FORMAT_NAMES[n.lower()]
+        if f not in formats:
+            formats.append(f)
+    _graphics.set_figure_formats(formats)
+
+
 def _no_shell(line):
     raise UsageError("shell commands are not available in Sagebrush: Python runs in the browser, with no shell")
 
@@ -556,6 +592,7 @@ def _estimate(line):
 _LINE = {
     "estimate": _estimate,
     "matplotlib": _matplotlib,
+    "config": _config,
     "load_ext": _load_ext,
     "reload_ext": lambda line: _load_ext(line, True),
     "unload_ext": _unload_ext,

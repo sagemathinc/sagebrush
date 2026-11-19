@@ -1,6 +1,6 @@
 """End-to-end test of the Sagebrush Jupyter kernel with Jupyter's own client
 (jupyter_client, over pyzmq): signed messages, execution and results,
-streams, SVG display, errors, completion, is_complete, interrupts of Python
+streams, figures (PNG, as ipykernel shows them), errors, completion, is_complete, interrupts of Python
 loops and of the engines, Magma, MATLAB and Python modes, and shutdown.
 
     pip install jupyter_client
@@ -87,7 +87,11 @@ r, m = run(kc, "f.degree()")
 check("state persists", of(m, "execute_result")[0]["data"]["text/plain"] == "4", m)
 r, m = run(kc, "x = var('x'); plot(sin(x), (x, 0, 3))")
 d = of(m, "display_data") + of(m, "execute_result")
-check("SVG display", any("image/svg+xml" in c["data"] for c in d), [list(c["data"]) for c in d])
+check("a figure shows as PNG, as ipykernel's do", any("image/png" in c["data"] and "image/svg+xml" not in c["data"] for c in d), [list(c["data"]) for c in d])
+r, m = run(kc, "%config InlineBackend.figure_formats = ['svg']\nplot(cos(x), (x, 0, 3))")
+d = of(m, "display_data") + of(m, "execute_result")
+check("...and as SVG after %config InlineBackend.figure_formats", any("image/svg+xml" in c["data"] and "image/png" not in c["data"] for c in d), [list(c["data"]) for c in d])
+run(kc, "%config InlineBackend.figure_formats = ['png']")
 # a big 3D scene goes to a page in .sagebrush/, shown in an iframe: the output
 # stays far under the front ends' output limits (CoCalc's is 1 MB per cell)
 big = tempfile.mkdtemp(prefix="sagebrush-k3d-")
@@ -232,7 +236,7 @@ r, m = run(kc, "y = undefined_thing + 1")
 e = of(m, "error")
 check("matlab error", r["status"] == "error" and e and e[0]["traceback"] == ["Unrecognized function or variable 'undefined_thing'."], (r, e))
 r, m = run(kc, "plot(1:3)")
-check("matlab figure", any("image/svg+xml" in c["data"] for c in of(m, "display_data")), [list(c["data"]) for c in of(m, "display_data")])
+check("matlab figure (PNG)", any("image/png" in c["data"] for c in of(m, "display_data")), [list(c["data"]) for c in of(m, "display_data")])
 r, m = run(kc, "x = [1 2")
 e = of(m, "error")
 check("matlab syntax error", r["status"] == "error" and e and e[0]["ename"] == "MATLAB:syntax", (r, e))

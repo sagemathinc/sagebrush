@@ -512,6 +512,9 @@ export function kernelWorker(mode: Mode) {
     // (a Python notebook: a value shown as IPython shows it, src/runtime/index.ts
     // displayText; Sage's, Magma's and MATLAB's keep the repr, as SageMath's shell does)
     ipython: mode === "python",
+    // (figures shown as PNG, as ipykernel's are: an SVG of many points makes a notebook of many megabytes;
+    // %config InlineBackend.figure_formats changes it, lib/_graphics.py figure_formats)
+    figure_formats: () => "png",
     // (MATLAB: a function file, name.m, found on the path, as Python)
     ...matlabHostOps(),
     display(bundle: Record<string, string>) {
