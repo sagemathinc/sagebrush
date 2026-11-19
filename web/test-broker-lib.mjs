@@ -8,14 +8,12 @@ import { mkdtempSync, rmSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { devtoolsPort } from "./test-port.mjs";
+import { deadline, waitFor, WAIT_MS } from "./test-deadline.mjs";
 
 export const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
 // (a promise given a deadline: past it, an error naming what was awaited; nothing here waits unbounded, astra r1)
-export function within(ms, what, p) {
-  let t;
-  return Promise.race([p, new Promise((_, rej) => (t = setTimeout(() => rej(new Error(`${what}: no answer within ${ms / 1000} s`)), ms)))]).finally(() => clearTimeout(t));
-}
-export const CDP_MS = 30000;
+export const within = (ms, what, p) => deadline("within", what, () => p, ms);
+export const CDP_MS = WAIT_MS;
 
 // The cases a file reports, by id (the text of a line before its first colon), and the roster of each page or world:
 // a case a page didn't reach is NOT RUN, printed by name and counted as a failure (grader A2/A3)
@@ -41,15 +39,7 @@ export function tally() {
   };
   return t;
 }
-export async function until(fn, ms) {
-  const end = Date.now() + ms;
-  for (;;) {
-    const v = await fn().catch(() => null);
-    if (v) return v;
-    if (Date.now() > end) return null;
-    await sleep(50);
-  }
-}
+export const until = (fn, ms = WAIT_MS, what = fn.name || String(fn)) => waitFor("broker.until", what, fn, ms);
 
 // The recorder: in the page only (not the frames), before anything of the page runs. MessagePort keeps its semantics:
 // the handler the page sets is the one it reads back, and every message is passed on unchanged; the recorder only
@@ -158,7 +148,7 @@ export async function browser({ cdpMs = CDP_MS } = {}) {
   // let go)
   const send = (method, params = {}, sessionId) => {
     const id = ++n;
-    return within(cdpMs, `CDP ${method}`, new Promise((r) => { waiting.set(id, r); ws.send(JSON.stringify({ id, method, params, ...(sessionId ? { sessionId } : {}) })); }))
+    return within(cdpMs, `CDP ${method}${params.expression ? " " + params.expression : params.url ? " " + params.url : ""}`, new Promise((r) => { waiting.set(id, r); ws.send(JSON.stringify({ id, method, params, ...(sessionId ? { sessionId } : {}) })); }))
       .finally(() => waiting.delete(id))
       .catch(async (e) => { throw new Error(`${e.message} [${await diagnose(sessionId)}]`); });
   };

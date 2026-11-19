@@ -101,8 +101,10 @@ const fullTierPaths = [
   /^web\/examples\/legacy\.ts$/,
   // (and the lazy chunks' inputs outside web/latex, each chunk under its own cap in the same check: the agent
   // pairing's modules (its doc-protocol.ts is above, with sync), the mode registry, which verbs.ts reads, and the view
-  // chunk's kept views (view-state.ts, design/view-state.md))
-  /^web\/workspace\/(?:agent-ui|agent-pair|pair-link|notebook-edit|agent-grant|agent-schema|verbs|verbs-page|branch-rules|git-branch|view-state)\.ts$/, /^src\/modes\.ts$/,
+  // chunk's kept views (view-state.ts, design/view-state.md); and an entry's page address, which the pairing adds to
+  // its answers (entry-url.ts, with the code page's languages and address))
+  /^web\/workspace\/(?:agent-ui|agent-pair|agent-made-tex|pair-link|notebook-edit|agent-grant|agent-schema|verbs|verbs-page|branch-rules|git-branch|view-state|entry-url)\.ts$/, /^src\/modes\.ts$/,
+  /^web\/code\/(?:langs|url)\.ts$/,
   // (and what makes those bundles from them, which no metafile lists: the build and its helpers and the dependencies;
   // @sagebrush's ruling, Nov 4. Not .github/workflows/ci.yml, which pins bun and node but changes in about one pull
   // request in six: a bun or node bump carries the full-ci label instead)
@@ -115,6 +117,21 @@ const fullTierPaths = [
 const fullOnlyJobs = ["web-sync", "web-sync-ops", "web-runner-sync", "web-artifacts"];
 const suitePaths = [/^web\/(?:.*\/)?test-[^/]*\.mjs$/, /^scripts\/test-[^/]*\.mjs$/];
 const suiteRoot = process.env.CI_PATHS_ROOT ?? ".";
+// Some wheel tests also run through the CLI in checks. Derive those inputs
+// from the workflow so a test-only change cannot skip its own checks run.
+const changedPythonTests = files.filter((file) => /^engine\/py\/test_[^/]*\.py$/.test(file));
+let checksPythonTest = false;
+if (changedPythonTests.length) {
+  const workflow = readFileSync(join(suiteRoot, ".github/workflows/ci.yml"), "utf8");
+  const checks = workflow.split("\n  checks:\n")[1]?.split(/\n  [a-z][a-z0-9-]*:\n/)[0];
+  if (checks === undefined) throw new Error("ci-paths: cannot find the checks job");
+  const code = checks.split("\n").map((line) => line.split("#")[0])
+    // Wrappers and continued commands still invoke their test. Prefer an extra
+    // checks run to silently skipping one; exclude only explicit prose output.
+    .filter((line) => !/^\s*(?:-\s+run:\s*)?(?:echo|printf)\b/.test(line)).join("\n");
+  const invoked = new Set([...code.matchAll(/\bengine\/py\/test_[A-Za-z0-9_.-]+\.py\b/g)].map((m) => m[0]));
+  checksPythonTest = changedPythonTests.some((file) => invoked.has(file));
+}
 const suiteTargets = files.filter((file) => suitePaths.some((pattern) => pattern.test(file))).flatMap((file) => {
   let text;
   try {
@@ -243,7 +260,8 @@ const runtime = matches(runtimePaths);
 const webChange = matches(webPaths);
 const modeChange = matches(modePaths);
 // (the CPython package's own Python, its sources under engine/py/python/ and its tests engine/py/test_*.py, is
-// built and run by engine-cpython alone (cpythonPaths): a change to only those compiles nothing the engine's Rust,
+// built and run by engine-cpython (cpythonPaths), plus checks when named there:
+// a change to only those compiles nothing the engine's Rust,
 // wasm, NEON or interrupt jobs build or run, so it doesn't select them.  The files stay known paths (enginePaths),
 // never the fallback; anything else under engine/ (Rust, manifests, build.rs, the pyo3 crate's engine/py/src)
 // still selects them.  #862 changed only those and ran engine-rust for 624 s.)
@@ -259,7 +277,7 @@ const optionalOnly = !full && every(optionalPaths);
 const examplesPaths = [/^examples\//, /^test\/fixtures\/examples\//];
 const knownPaths = [...examplesPaths, ...docsPaths, ...workflowOrBuildPaths, ...runtimePaths, ...webPaths, ...modePaths, ...enginePaths, ...appPaths, ...optionalPaths];
 const fallback = files.some((file) => !knownPaths.some((pattern) => pattern.test(file)));
-const node = full || workflowOrBuild || runtime || webChange || fallback;
+const node = full || workflowOrBuild || runtime || webChange || checksPythonTest || fallback;
 const web = full || workflowOrBuild || runtime || webChange || fallback;
 const modes = full || workflowOrBuild || runtime || modeChange || fallback;
 const engineSmoke = full || workflowOrBuild || engineChange || fallback;
@@ -411,7 +429,7 @@ const outputs = {
   unsafe_sweep: unsafeSweep,
   slow_tests: slowTests,
   slow_scope: slowScope,
-  // (the growth gate's own inputs: never docs-only, plan-growth-budget-r5 §1.5)
+  // (the size comparison's own inputs: never docs-only)
   // (a dispatch or a schedule has no file list: its gate always runs on the measurement, never docs-only)
   // (on a track the engine ships as built, not as pinned (scripts/pin-policy.mjs), so an engine source moves the
   // measured bytes there and is a gate input too)
