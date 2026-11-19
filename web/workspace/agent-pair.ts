@@ -160,6 +160,10 @@ function contentIn(c: any, what: string): unknown {
   return "json" in v ? v.json : "text" in v ? v.text : v.bytes;
 }
 
+/** A document an agent created through its pairing: `op` this creation's own id, `ref` a notebook's or board's document
+ * id (its identity wherever it moves), `grant` the grant it was created under. */
+export type Created = { op: string; path: string; kind: "notebook" | "board" | "file"; ref?: string; grant: string };
+
 export class AgentError extends Error {
   constructor(public code: string, message: string, public extra: Record<string, unknown> = {}) { super(message); }
 }
@@ -173,6 +177,9 @@ export class AgentPairing {
   hello: Hello | null = null;
   grant: Grant | null = null;
   changes = 0;
+  /** What this agent created last through this pairing (workspace.create, answered under the grant in force): the page's
+   * Open for it */
+  created: Created | null = null;
   closeReason = "";
   private sock: WebSocket;
   private verbs: AgentVerbs | null = null;
@@ -201,7 +208,7 @@ export class AgentPairing {
   constructor(
     readonly port: number,
     how: { code: string } | { session: string; pairingId: string; agent?: { name: string; client: string } } | { link: AgentLink; computer: string },
-    private opts: { verbsFor: (actor: string, host: { owner: () => string | null }) => AgentVerbs; gitBranch?: GitBranch; gitVerbs?: RunVerbs; store: GrantStore; trashEntry: (p: string) => Promise<TrashEntry | null | undefined>; page: { origin: string; path: string }; now?: () => number; WebSocketImpl?: typeof WebSocket; runVerbs?: RunVerbs; notebookEdit?: (edit: NotebookEdit, may: () => boolean, hold?: () => Promise<() => void>) => Promise<unknown>; reload?: { storage: ReloadStorage | null; scope: ReloadScope; leaving: () => boolean } },
+    private opts: { verbsFor: (actor: string, host: { owner: () => string | null }) => AgentVerbs; gitBranch?: GitBranch; gitVerbs?: RunVerbs; store: GrantStore; trashEntry: (p: string) => Promise<TrashEntry | null | undefined>; page: { origin: string; path: string }; now?: () => number; WebSocketImpl?: typeof WebSocket; runVerbs?: RunVerbs; notebookEdit?: (edit: NotebookEdit, may: () => boolean, hold?: () => Promise<() => void>) => Promise<unknown>; onCreated?: (c: Created, p: AgentPairing) => void; reload?: { storage: ReloadStorage | null; scope: ReloadScope; leaving: () => boolean } },
   ) {
     if ("link" in how) { this.link = how.link; this.computer = how.computer; }
     else if (!Number.isInteger(port) || port < 1 || port > 65535) throw new AgentError("invalid", "a port is 1 to 65535");
@@ -489,11 +496,14 @@ export class AgentPairing {
       // still in force now, before anything is said, the refusal too, and before the workspace is touched)
       if (!this.current(g, verbs)) return this.fail(id, "invalid", grantProblem(this.grant, this.now()) ?? "the grant changed while this was checked");
       if (no) return this.fail(id, "invalid", no);
-      const result = method === "workspace.git_branch" ? await this.branch(g!, verbs!, (params as any).name) : await this.run(verbs!, method.slice("workspace.".length), params as any, auth.expect);
+      let made: any = null;
+      const result = method === "workspace.git_branch" ? await this.branch(g!, verbs!, (params as any).name) : await this.run(verbs!, method.slice("workspace.".length), params as any, auth.expect, (e) => (made = e));
       // (after the last wait, before anything is said: the same grant, in force now, or nothing of what it read)
       if (!this.current(g, verbs)) return this.fail(id, "invalid", CHANGED_WHILE_RUNNING);
       g!.lastUsed = this.now();
       this.reply(id, result);
+      // (a document this agent created, answered under this very grant: the page's to open, after the answer)
+      if (made) this.madeHere(made, g!);
     } catch (err: any) {
       // (the same check before any error is said: after a change, nothing more is read or said)
       if (!this.current(g, verbs)) return this.fail(id, "invalid", CHANGED_WHILE_RUNNING);
@@ -583,7 +593,16 @@ export class AgentPairing {
     return out;
   }
 
-  private async run(v: AgentVerbs, verb: string, p: any, expect?: TrashEntry): Promise<unknown> {
+  /** A document created by this agent: kept for the bar's Open, and told to the page (onCreated). Never a folder, a
+   * branch's worktree or the Trash: only what the person would open from Files. */
+  private madeHere(e: any, g: Grant) {
+    if (!e || typeof e.path !== "string" || !/^(notebook|board|file)$/.test(e.kind) || within(norm(e.path) ?? "/", BRANCHES) || /^\/Trash(\/|$)/.test(e.path)) return;
+    this.created = { op: newGrantId(12), path: e.path, kind: e.kind, ...(typeof e.ref === "string" ? { ref: e.ref } : {}), grant: g.id ?? "" };
+    this.emit();
+    try { this.opts.onCreated?.(this.created, this); } catch (err) { console.warn("agent: the page's open of a created document failed:", err); }
+  }
+
+  private async run(v: AgentVerbs, verb: string, p: any, expect?: TrashEntry, made?: (e: unknown) => void): Promise<unknown> {
     const sized = (c: any) => contentIn(c, p.path ?? "contents");
     const changed = <T,>(x: T) => { this.changes++; this.emit(); return x; };
     switch (verb) {
@@ -605,7 +624,7 @@ export class AgentPairing {
         // (an agent that edits notebooks by cell never rewrites one whole: that would drop its outputs, A12)
         if (this.edits() && /\.ipynb$/i.test(String(p.path))) throw new AgentError("invalid", `${p.path} is a notebook: change it with workspace_edit_notebook (by cell, its outputs kept), not a whole write`);
         const r = await v.write(p.path, sized(p.content), p.base !== undefined ? { base: p.base } : {}); return changed({ entry: entryOut(r.entry), rev: r.rev }); }
-      case "create": return changed({ entry: entryOut(await v.create(p.path, { ...(p.content ? { content: sized(p.content) } : {}), ...(p.mode ? { mode: p.mode } : {}) })) });
+      case "create": { const e = await v.create(p.path, { ...(p.content ? { content: sized(p.content) } : {}), ...(p.mode ? { mode: p.mode } : {}) }); made?.(e); return changed({ entry: entryOut(e) }); }
       case "mkdir": return changed({ entry: entryOut(await v.mkdir(p.path)) });
       case "rename": return changed({ entry: entryOut(await v.rename(p.from, p.to)) });
       case "duplicate": return changed({ entry: entryOut(await v.duplicate(p.path, p.to)) });

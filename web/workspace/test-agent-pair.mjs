@@ -4,7 +4,7 @@
 // before the person's grant, the grant's scope, the frame and call limits, and that revoking (or expiry) cuts
 // the agent off at once and forgets the kept grant.
 //   bun web/workspace/test-agent-pair.mjs
-import { failHint, agentSays, SAFARI, CHROME_ALLOW, OTHER_FAIL } from "./agent-ui.ts";
+import { failHint, agentSays, onlyCurrent, SAFARI, CHROME_ALLOW, OTHER_FAIL } from "./agent-ui.ts";
 import { handOver, takeHandoff, HANDOFF_KEY, HANDOFF_MS } from "./pair-handoff.ts";
 import { AgentPairing, parseStrict, actorOf, parseReloadRecord, reloadDecision, takeReloadRecord, putReloadRecord, markReloadLeft, RELOAD_KEY, RELOAD_FRESH_MS } from "./agent-pair.ts";
 
@@ -777,6 +777,19 @@ ok(actorOf("Claude Code", "claude-code") === "agent:Claude-Code" && actorOf("", 
   globalThis.sessionStorage = { getItem: () => null, setItem: () => {}, removeItem: () => {} };
   ok(handOver(L, 1000) === false, "storage that doesn't keep it: not handed over either");
   delete globalThis.sessionStorage;
+}
+{
+  // (a creation is told to the page only by the pairing the page has adopted: an older or superseded one's never is)
+  const told = [], P1 = { n: 1 }, P2 = { n: 2 };
+  let cur = P1;
+  const cb = onlyCurrent(() => cur, (c, p) => told.push([c.op, p.n]));
+  cb({ op: "a" }, P1);
+  cur = P2;
+  cb({ op: "b" }, P1);
+  cb({ op: "c" }, P2);
+  cur = null;
+  cb({ op: "d" }, P2);
+  ok(JSON.stringify(told) === JSON.stringify([["a", 1], ["c", 2]]), "a creation reaches the page only from the pairing it has adopted then", told);
 }
 console.log(failures ? `${failures} failed` : "all passed");
 process.exit(failures ? 1 : 0);

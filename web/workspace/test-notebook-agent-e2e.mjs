@@ -189,6 +189,51 @@ try {
   const rd4 = await drive({ op: "req", method: "workspace.read", params: { path } });
   ok((rd4.ok?.content?.json?.cells ?? []).every((c) => typeof c.code === "string" && c.cell_type === undefined), "…kept in Sagebrush's shape: read back, every cell has its code", rd4.ok?.content?.json?.cells);
 
+  // the agent creates a notebook: the page opens it at once, in place, and stays paired (decided Nov 18 2026); the bar
+  // offers Open for it. The person's edit typed just before, not yet saved, is kept in the notebook they left
+  const typeInto = (from, to) => ev(`(() => { const t = [...document.querySelectorAll(".ed textarea")].find((t) => t.value === ${JSON.stringify(from)}); if (!t) return false; t.value = ${JSON.stringify(to)}; t.dispatchEvent(new Event("input", { bubbles: true })); return true; })()`);
+  const barButton = (text) => `[...document.querySelectorAll(".sbag-bar button")].find((b) => b.textContent === ${JSON.stringify(text)})`;
+  const make = (name, cells) => drive({ op: "req", method: "workspace.create", params: { path: (folder === "/" ? "" : folder) + "/" + name + ".ipynb", mode: "python", content: { json: { cells: cells.map((code) => ({ code })) } } } });
+  const shownIs = (name) => `document.title.startsWith(${JSON.stringify(name)})`;
+  const fromFiles = async (file) => {
+    await ev(`(document.querySelector("#wssidebar")?.hidden && document.querySelector("#wsfilesbtn")?.click(), true)`);
+    await until(`!!document.querySelector("#wssidebar") && !document.querySelector("#wssidebar").hidden`, 5000);
+    return ev(`(() => { const e = [...document.querySelectorAll("#wssidebar *")].find((e) => e.children.length === 0 && e.textContent.trim() === ${JSON.stringify(file)}); e?.click(); return !!e; })()`);
+  };
+  const origin0 = await ev("performance.timeOrigin");
+  ok(await typeInto("x = 2", "x = 3"), "(the person types in the notebook shown)");
+  const MADE = "print('made by the agent')";
+  const mk = await make("Made by the agent", [MADE]);
+  ok(!!mk.ok, "the agent creates a notebook", mk);
+  ok(await until(`${shownIs("Made by the agent")} && ${sources}.includes(${JSON.stringify(MADE)})`, 15000), "the page opens it at once, its cell shown", { title: await ev("document.title").catch(() => null) });
+  ok(await ev("performance.timeOrigin") === origin0, "…in place: the same document, never loaded again");
+  const kept = await ev(`${W}.read(${JSON.stringify(path)}).then((r) => (r.content?.cells ?? []).map((c) => c.code))`);
+  ok(Array.isArray(kept) && kept.includes("x = 3"), "the edit typed just before, never flushed by the test, is kept in the notebook left", kept);
+  const st0 = await drive({ op: "status" });
+  ok(st0.ok?.paired === true && st0.ok?.granted === true && await ev(`!!document.querySelector(".sbag-bar")`), "the agent is still connected, its bar shown", st0);
+  ok(await until(`!!${barButton("Open Made by the agent.ipynb")}`, 5000), "the bar offers Open for it");
+  const ls0 = await drive({ op: "req", method: "workspace.list", params: { folder } });
+  ok(JSON.stringify(ls0).includes("Made by the agent.ipynb"), "and the agent goes on working: it lists the folder", JSON.stringify(ls0).slice(0, 300));
+  // (the bar's Open, after the person moved away: it opens the agent's notebook again)
+  const left = path.slice(path.lastIndexOf("/") + 1);
+  ok(await fromFiles(left) && await until(`!${shownIs("Made by the agent")} && ${sources}.includes("x = 3")`, 15000), "(the person opens their own notebook again, from Files)");
+  await ev(`(${barButton("Open Made by the agent.ipynb")}.click(), true)`);
+  ok(await until(shownIs("Made by the agent"), 15000) && await ev("performance.timeOrigin") === origin0, "the bar's Open opens the agent's notebook, in place");
+  // (the person's open wins: the agent's notebook, its open held before it attaches, never replaces a notebook the person
+  //  opened meanwhile)
+  ok(await fromFiles(left) && await until(`!${shownIs("Made by the agent")}`, 15000), "(the person's own notebook again)");
+  await ev(`(() => { window.sagebrush.shareTest.beforeLeave = () => { window.sagebrush.shareTest.beforeLeave = undefined; return new Promise((r) => (window.__leaveGo = r)); }; return true; })()`);
+  const RACE = "print('created meanwhile')";
+  ok(!!(await make("Created meanwhile", [RACE])).ok && await until("typeof window.__leaveGo === 'function'", 10000), "the agent creates another: its open held before it attaches");
+  ok(await fromFiles("Made by the agent.ipynb") && await until(shownIs("Made by the agent"), 15000), "(meanwhile the person opens the agent's first notebook)");
+  await ev("(window.__leaveGo(), delete window.__leaveGo, true)");
+  await sleep(3000);
+  ok(await ev(shownIs("Made by the agent")) && !(await ev(`${sources}.includes(${JSON.stringify(RACE)})`)), "the person's open wins: the agent's notebook doesn't replace it after", { title: await ev("document.title") });
+  ok(await until(`!!${barButton("Open Created meanwhile.ipynb")}`, 5000), "…it is offered in the bar's Open instead");
+  const mf = await drive({ op: "req", method: "workspace.create", params: { path: (folder === "/" ? "" : folder) + "/agent-notes.txt", content: { text: "notes" } } });
+  ok(!!mf.ok && await until(`!!${barButton("Open agent-notes.txt")}`, 5000), "a data file it creates: the bar's Open names it", mf);
+  ok(await ev(shownIs("Made by the agent")), "…and nothing else opens");
+
   // a grant "until the page closes" ends with the page
   ok(await go(""), "the page again");
   const st = await drive({ op: "status" });
