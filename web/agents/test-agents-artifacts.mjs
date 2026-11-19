@@ -2034,6 +2034,35 @@ try {
         await P.close();
         await send("Page.bringToFront");
       }
+      // J10: a notebook the agent creates runs by itself only while this pane still writes it (runCreated's ownership,
+      // the edit's): under the journal it runs; held at its admission while a hand-over has begun (yieldLock's
+      // `yielding`, the lock and the load still this pane's), it is refused, nothing run and nothing in the record
+      {
+        await pair();
+        await converse();
+        const selfRun = async (path, code, yielding) => {
+          const t10 = `t${++turnN}`;
+          event(t10, { type: "turn_started" });
+          await ev(`(() => { window.__runHeld = null; window.__agentRunHold = (p) => new Promise((r) => { window.__runHeld = p; window.__runGo = r; }); return true; })()`);
+          await call("workspace.create", { path, content: docFor(path, [{ code }]), mode: "python" });
+          const held = await until(`window.__runHeld === ${JSON.stringify(path)}`, 20000).catch(() => false);
+          const owner = await ev(`(() => { const j = window.__sbTestPaneJournal?.(); return !!j && !!j.writer && !!j.ready && !j.yielding && !j.released; })()`);
+          if (yielding) await ev(`(window.__sbTestPaneJournal().yielding = true, true)`);
+          await ev(`window.__runGo?.()`);
+          await sleep(3000);
+          const out = await ev(`[...document.querySelectorAll('${PANE} .nb-root .cell .out')].map((o) => o.textContent).join('|')`);
+          if (yielding) await ev(`(window.__sbTestPaneJournal().yielding = false, true)`);
+          await ev(`(delete window.__agentRunHold, true)`);
+          event(t10, { type: "turn_finished", outcome: "completed" });
+          await until(`/^Saved/.test(document.querySelector('${PANE} .saved')?.textContent ?? '')`, 10000).catch(() => {});
+          const rec = await record(await refOf(path));
+          return { held, owner, out, recOut: JSON.stringify(rec?.cells?.[0]?.outputs ?? []) };
+        };
+        const yes = await selfRun("/notes/self-journal.ipynb", "print('JRUN', 7)", false);
+        ok(yes.held && yes.owner && /JRUN 7/.test(yes.out) && yes.recOut.includes("JRUN"), "J10a: under sync's journal a notebook the agent creates runs once by itself in the pane, its output in the journal's record", yes);
+        const no = await selfRun("/notes/self-yield.ipynb", "print('YIELD', 7)", true);
+        ok(no.held && no.owner && !/YIELD 7/.test(no.out) && !no.recOut.includes("YIELD"), "J10b: held at its run's admission while a hand-over has begun (the lock and the load still the pane's): not run, nothing in the record", no);
+      }
       // J9: a notebook pane under the journal opened and closed again and again leaves no listener behind on the
       // document or the window (its focus takeover let go for good with it)
       {

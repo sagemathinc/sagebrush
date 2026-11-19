@@ -1191,6 +1191,8 @@ const agentMade = createdRunner<MadeAt>({
     return true;
   },
   runIfShown: (ref, ok) => !!shownHost()?.nb?.runCreated(ref, ok),
+  // (the tests' hold, loopback pages only: between the open and the admission, test-agents-artifacts.mjs)
+  ...(/^(127\.0\.0\.1|localhost)$/.test(location.hostname) ? { holdRun: (path: string) => (typeof (window as any).__agentRunHold === "function" ? (window as any).__agentRunHold(path) : undefined) } : {}),
 });
 
 function mountPairing(ws: Workspace) {

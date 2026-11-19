@@ -194,6 +194,10 @@ export function mountNotebook(ws: Workspace, path: string, box: HTMLElement, ui:
   let jstore: any = null, handover: ReturnType<typeof writerHandover> | null = null, takingOver = false;
   let controlsOf: (st: any) => { readOnly: boolean; bar: string | null } = () => ({ readOnly: false, bar: null });
   let docRef: string | null = null; // (the document this pane is bound to, once attached and editable: an agent's edit must name it)
+  // (under sync's journal, this pane still the notebook's writer: the lock held, its load done, no hand-over begun
+  // (yieldLock's `yielding`, set as the hand-over starts), not let go, and no takeover's reload under way; without the
+  // journal, always. One test for an agent's edit and for an agent's notebook's run by itself)
+  const owns = (comp: Nb) => !jstore || (!!jstore.writer && !!jstore.ready && !jstore.yielding && !jstore.released && !takingOver && comp.store === jstore);
   // (observed from the start, so a move, Trash or replacement while the mount reads and loads isn't missed: before
   // attach it is caught by the check after it, ART-C2)
   const unwatch = ws.watch(() => void check());
@@ -251,8 +255,7 @@ export function mountNotebook(ws: Workspace, path: string, box: HTMLElement, ui:
     interrupt: () => nb?.interrupt(),
     runCreated(ref, ok) {
       const comp = nb;
-      if (!alive || !comp || !attached || !bound || frozen || guard !== "open" || docRef !== ref || takingOver) return false;
-      if (jstore && !(jstore.writer && jstore.ready && comp.store === jstore)) return false;
+      if (!alive || !comp || !attached || !bound || frozen || guard !== "open" || docRef !== ref || !owns(comp)) return false;
       if (!ok(comp.snapshot())) return false;
       comp.runAll();
       return true;
@@ -271,12 +274,9 @@ export function mountNotebook(ws: Workspace, path: string, box: HTMLElement, ui:
       if (jstore && !(await writable())) {
         return { ok: false, code: "busy", why: "another tab of this browser is changing this notebook and didn't hand it over: nothing changed (try again)" };
       }
-      // (under sync's journal, this pane still the notebook's writer: the lock held, its load done, no hand-over begun
-      // (yieldLock's `yielding`, set as the hand-over starts) and no takeover's reload under way)
-      const owns = () => !jstore || (!!jstore.writer && !!jstore.ready && !jstore.yielding && !jstore.released && !takingOver && comp.store === jstore);
       const lost = { ok: false as const, code: "busy" as const, why: "another tab of this browser took this notebook over while the edit waited: nothing changed (try again)" };
-      const usable = () => alive && nb === comp && attached && bound && !frozen && guard === "open" && docRef === e.ref && owns();
-      const closing = () => (jstore && alive && nb === comp && attached && bound && !frozen && guard === "open" && docRef === e.ref && !owns() ? lost : { ok: false as const, code: "busy" as const, why: "this notebook is closing, or isn't saved here now" });
+      const usable = () => alive && nb === comp && attached && bound && !frozen && guard === "open" && docRef === e.ref && owns(comp);
+      const closing = () => (jstore && alive && nb === comp && attached && bound && !frozen && guard === "open" && docRef === e.ref && !owns(comp) ? lost : { ok: false as const, code: "busy" as const, why: "this notebook is closing, or isn't saved here now" });
       // (tests: a wait held at `stage`, loopback pages only, test-agents-artifacts.mjs)
       const pause = async (stage: string) => {
         const f = (globalThis as any).__sbTestEditPause;
@@ -570,6 +570,8 @@ export function mountNotebook(ws: Workspace, path: string, box: HTMLElement, ui:
     if (journal) {
       jstore = new (hist.journalClasses({ IdbStore: mod.IdbStore, IdbPatchStore: mod.IdbPatchStore }).JournalStore)(guarded, guardOf(hdb!), ref, undefined, hist);
       controlsOf = hist.pageControls;
+      // (tests, loopback pages only: this pane's journal store, to put it in a hand-over's state, test-agents-artifacts.mjs J10)
+      if (/^(127\.0\.0\.1|localhost)$/.test(location.hostname)) (globalThis as any).__sbTestPaneJournal = () => jstore;
     }
     const inner = jstore ?? new mod.IdbStore(guarded, ref);
     stored = () => inner.loadRecord();
