@@ -726,7 +726,7 @@ const NOT_SENT = {
 const RUNNER = {
   connecting: (computer: string) => `Connecting to ${computer}…`,
   waiting: (computer: string) => `Waiting for ${computer} to connect…`,
-  unreachable: (computer: string) => `${computer} isn't connected. On it, start sagebrush remote with --serve-agents, then choose Chat here again.`,
+  unreachable: (computer: string) => `Couldn't connect to ${computer}. If its runner isn't running, start sagebrush remote --serve-agents on it, then choose Chat here again.`,
   lost: (computer: string, why: string) => `Not connected to ${computer}${why ? `: ${why}` : ""}. Choose Chat here to connect again.`,
   disconnected: (computer: string) => `Disconnected. The agent on ${computer} may keep running for up to 5 minutes.`,
 };
