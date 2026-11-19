@@ -447,9 +447,17 @@ class Gamma0:
         Congruence Subgroup Gamma0(11)
         sage: G.level()
         11
+        sage: Gamma0(0)
+        Traceback (most recent call last):
+        ...
+        ArithmeticError: Congruence groups only defined for positive levels.
+        sage: ModularForms(-5, 2)
+        Traceback (most recent call last):
+        ...
+        ArithmeticError: Congruence groups only defined for positive levels.
     """
     def __init__(self, N):
-        self._N = int(N)
+        self._N = _positive_level(N)
 
     def level(self):
         """The level N.
@@ -886,12 +894,21 @@ class DirichletGroup:
 
 # ------------------------------------------------------------------ spaces
 
+def _positive_level(N):
+    """N as a level: Sage's ArithmeticError for N <= 0 (an OverflowError
+    from the engine, or a ValueError, leaked before)."""
+    N = int(N)
+    if N <= 0:
+        raise ArithmeticError("Congruence groups only defined for positive levels.")
+    return N
+
+
 def _group_and_char(group):
     if isinstance(group, DirichletCharacter):
         return group.modulus(), group
     if isinstance(group, Gamma0):
         return group.level(), None
-    return int(group), None
+    return _positive_level(group), None
 
 
 def _char_part(chi):
