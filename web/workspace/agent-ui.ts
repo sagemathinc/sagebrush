@@ -32,6 +32,33 @@ export const CHROME_ALLOW = "This browser needs your OK for this site to reach a
 /** Any other browser (Firefox, …): true whatever the cause. */
 export const OTHER_FAIL = "This browser couldn't reach the agent on this computer: check that it's still running, then Connect again.";
 /** Where the longer explanations are (William, Nov 8: one short line in the app, the rest behind "Learn more"). */
+/** A code without its port: the port is in the link the agent gives, so that's what to ask for. */
+export const ONLY_CODE = "That's only the code: ask your agent for its link (sagebrush.space/board/?pair=…), and open it.";
+
+/** What the person put in the Connect dialog: the agent's link (?pair=CODE&port=N, as pasted, with or without its
+ * https://), or "CODE PORT" / "CODE:PORT"; a code alone only with the port its ?pair link came with (`port`). */
+export function readConnect(text: string, port = ""): { code: string; port: number } | { error: string } {
+  const t = text.trim();
+  if (!t) return { error: "Paste the link your agent gave." };
+  let code = "", p = "";
+  const q = /[?&]pair=([^&#\s]*)/.exec(t);
+  if (q) {
+    code = decodeURIComponent(q[1]);
+    p = /[?&]port=([^&#\s]*)/.exec(t)?.[1] ?? "";
+    if (!code) return { error: "That link has no code: ask your agent for its link again." };
+    if (!p) return { error: "That link has no port: ask your agent for its link again." };
+  } else {
+    const m = /^([^\s:/?&=]+)(?:\s+|\s*:\s*)(\d+)$/.exec(t);
+    if (m) [code, p] = [m[1], m[2]];
+    else if (/^[^\s:/?&=]+$/.test(t) && port) [code, p] = [t, port];
+    else if (/^[^\s:/?&=]+$/.test(t)) return { error: ONLY_CODE };
+    else return { error: "That isn't the agent's link: ask your agent for its link (sagebrush.space/board/?pair=…), and open it." };
+  }
+  const n = Number(p);
+  if (!/^\d+$/.test(p) || !Number.isInteger(n) || n < 1 || n > 65535) return { error: "That link's port isn't right: ask your agent for its link again." };
+  return { code, port: n };
+}
+
 export const CONNECT_DOCS = "/agents/connect/";
 const learnMore = () => { const a = document.createElement("a"); a.href = CONNECT_DOCS; a.target = "_blank"; a.rel = "noopener"; a.textContent = "Learn more"; return a; };
 export const isChromium = (ua = navigator.userAgent) => /chrome|chromium|crios|edg/i.test(ua);
@@ -241,17 +268,19 @@ export function mountAgentPairing(ws: PairingWorkspace, o: { button?: HTMLElemen
     }
     if (pairing && pairing.state !== "closed") { showBar(); return; }
     dialog("Connect an agent", (box, close) => {
-      const c = h("input", { type: "text", placeholder: "the code the agent gave", value: code, autocomplete: "off" });
-      const pt = h("input", { type: "text", placeholder: "its port", value: port, inputMode: "numeric" });
+      // (one field: the link the agent gave, pasted, or its code and port; a ?pair link fills in the code and keeps its
+      //  port (decided Nov 19 2026), so nobody types a port)
+      const c = h("input", { type: "text", placeholder: "the link the agent gave", value: code, autocomplete: "off" });
       const err = h("div", { className: "err" });
+      if (code && !port) err.textContent = ONLY_CODE;
       const go = h("button", { className: "primary", textContent: "Connect" });
       const cancel = h("button", { textContent: "Cancel" });
       cancel.onclick = close;
       go.onclick = async () => {
         err.textContent = "";
-        const n = Number(pt.value.trim());
-        if (!Number.isInteger(n) || n < 1 || n > 65535) { err.textContent = "The port is the number the agent gave with the code."; return; }
-        if (!c.value.trim()) { err.textContent = "Enter the code the agent gave."; return; }
+        const r = readConnect(c.value, c.value.trim() === code ? port : "");
+        if ("error" in r) { err.textContent = r.error; return; }
+        const n = r.port;
         go.disabled = true;
         // (a socket the browser blocks, by the page's security policy or a refused local-network permission,
         // may never say so: the connection gets 8 s, and a policy violation is said at once)
@@ -259,7 +288,7 @@ export function mountAgentPairing(ws: PairingWorkspace, o: { button?: HTMLElemen
         const onViolation = (e: SecurityPolicyViolationEvent) => { if (/^wss?:\/\/(127\.0\.0\.1|localhost)/.test(e.blockedURI)) blocked = "this page's security policy blocked the connection to the agent"; };
         document.addEventListener("securitypolicyviolation", onViolation);
         try {
-          const p = make(n, { code: c.value });
+          const p = make(n, { code: r.code });
           watch(p);
           await Promise.race([
             p.paired(),
@@ -287,8 +316,8 @@ export function mountAgentPairing(ws: PairingWorkspace, o: { button?: HTMLElemen
           if (/failed/.test(String((e as Error).message))) err.append(" ", learnMore());
         }
       };
-      box.append(h("div", { className: "note", textContent: o.program ? `Start ${o.program} in a terminal on this computer: it prints a code and a port (and a link that fills them in).` : "In your agent (Claude Code, Codex, …) with sagebrush-mcp, ask it to connect to Sagebrush: it gives a code and a port." }),
-        h("label", {}, "Code ", c), h("label", {}, "Port ", pt), err, h("div", { className: "row" }, cancel, go), ...(o.extra ? [o.extra(close)] : []));
+      box.append(h("div", { className: "note", textContent: o.program ? `Start ${o.program} in a terminal on this computer: it prints a link. Open it, or paste it here.` : "Ask your agent (Claude Code, Codex, …, with sagebrush-mcp) to connect to Sagebrush: it gives a link. Open it, or paste it here." }),
+        h("label", {}, "Link ", c), err, h("div", { className: "row" }, cancel, go), ...(o.extra ? [o.extra(close)] : []));
       setTimeout(() => c.focus());
     }, () => { if (back?.isConnected && !pairingLive()) back.focus(); });
   }
