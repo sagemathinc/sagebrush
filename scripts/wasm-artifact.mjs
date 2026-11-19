@@ -9,14 +9,17 @@
 //                                                 four, and applies the pin policy (below)
 //   node scripts/wasm-artifact.mjs policy         the pin policy on wasm/ as it is (the producer, after its build)
 //
-// The pin policy: the modules must match wasm/pins.json.  The one exception is a pull request's named engine test
-// jobs (--allow-fresh), which run a mismatching build labelled "fresh", to show the author what the change does.
-// Everything else (the size records, every other reader, and any push, dispatch or schedule) fails with the
+// The pin policy: the modules must match wasm/pins.json.  Two exceptions run a mismatching build labelled "fresh"
+// and never record it as pinned: a pull request's named engine test jobs (--allow-fresh), to show the author what
+// the change does; and every reader on a track (a push or dispatch on track/*, a pull request into track/*), where
+// the pin moves only with the track's pull into master (scripts/pin-policy.mjs).  Everything else (on master and
+// other pull requests: the size records, every other reader, and any push, dispatch or schedule) fails with the
 // pins.json lines to commit.
 import { readdirSync, readFileSync, renameSync, rmSync, writeFileSync, mkdirSync, lstatSync } from "node:fs";
 import { basename, dirname, join } from "node:path";
 import { randomBytes } from "node:crypto";
 import { fileURLToPath } from "node:url";
+import { onTrack, runRefs } from "./pin-policy.mjs";
 import { MODULES, ROOT, formatPins, loadPins, matches, modulePath, recordInstalled, sha256 } from "./wasm-modules.mjs";
 
 export const MANIFEST = "wasm-manifest.json";
@@ -103,6 +106,7 @@ export function policy(modules, { root = ROOT, allowFresh = false, env = process
     ? `${n}: fresh build (pin mismatch): sha256 ${modules[n].sha256}, ${modules[n].bytes} bytes; pinned ${pins[n].sha256}, ${pins[n].bytes} bytes`
     : `${n}: pinned`);
   const fix = `the pin is stale: commit these wasm/pins.json lines (node scripts/wasm-pins.mjs --from-local after the same build):\n${pinsLines(modules)}`;
+  if (onTrack(runRefs(env))) return { mode: "fresh", lines: [...lines, "(a track's run: the pin moves only with the track's pull into master, so every reader here uses this fresh build, labelled, never recorded as pinned and never published)"] };
   if (allowFresh && env.GITHUB_EVENT_NAME === "pull_request") return { mode: "fresh", lines: [...lines, `(a pull request's engine test job runs this fresh build, labelled; every other reader fails until ${fix}`] };
   throw new Error(`${lines.join("\n")}\n${fix}`);
 }
