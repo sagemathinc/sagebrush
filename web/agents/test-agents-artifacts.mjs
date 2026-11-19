@@ -1679,19 +1679,32 @@ try {
       ok(!res.ok && agentNone && (w === "W2" ? /# mine/.test(after.cells[0].code) : same(after, before)), `${name}: ${what} while the edit waited at ${w}: refused, nothing of it written${w === "W2" ? " (the person's own text saved, as theirs)" : ", the file byte-identical"}`, { res, rev: [before.rev, after.rev] });
       await regain(how === "c" ? "none" : how);
     }
-    // E22 (C2, final) and E22b (C2, preliminary): a save the store refuses ("not saved: ...") while saved() still
-    // resolves: never answered ok, nothing applied or written
+    // E22 (C2, final) and E22b (C2, preliminary): a save the store refuses ("not saved: ..."): never answered ok,
+    // nothing applied or written; E22c: refused once, then taken: the notebook sends what it has again (a refused save
+    // is a failed one, sent again with the next), so the edit is answered ok only once the record has it
     const refuseNext = () => ev(`(() => { let n = 0; window.__sbTestStoreSave = () => (n++ === 0 ? "not saved: (test)" : null); return true; })()`);
+    const refuseAll = () => ev(`(window.__sbTestStoreSave = () => "not saved: (test)", true)`);
     const refuseNone = () => ev(`(delete window.__sbTestStoreSave, true)`);
     {
       const { path, ids } = await mk();
       await open(path);
       const r = await readOf(path);
       const before = await rec(path);
-      await refuseNext();
+      await refuseAll();
       const res = await edit(path, r, { set: [{ id: ids[1], source: "print(22)" }] });
+      const after = await rec(path);
       await refuseNone();
-      ok(!res.ok && /not saved/.test(res.msg) && same(await rec(path), before), "E22: the edit's final save refused by the store: answered not ok, the record unchanged", res);
+      ok(!res.ok && /not saved/.test(res.msg) && same(after, before), "E22: the edit's final save refused by the store: answered not ok, the record unchanged", res);
+    }
+    {
+      const { path, ids } = await mk();
+      await open(path);
+      const r = await readOf(path);
+      await refuseNext();
+      const res = await edit(path, r, { set: [{ id: ids[1], source: "print(220)" }] });
+      await refuseNone();
+      const after = await rec(path);
+      ok(res.ok && after.cells.some((c) => c.code === "print(220)"), "E22c: the edit's final save refused once, then taken: sent again, answered ok, and the record has it", { res, cells: after.cells.map((c) => c.code) });
     }
     {
       const { path, ids } = await mk();
