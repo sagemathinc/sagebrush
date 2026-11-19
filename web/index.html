@@ -597,6 +597,8 @@
   </div>
   <div id="filesbar" role="status" hidden><span id="fbtext"></span> <button id="fballow" hidden></button> <button id="fbonce" hidden>Allow once</button> <button id="fbdeny" hidden>Don't allow</button> <button id="fbperms" hidden>File &gt; Permissions…</button></div>
   <div id="runbar" role="status" hidden><span id="rbtext"></span> <button id="rballow" class="primary">Allow file changes and run</button> <span class="note">Remembered for this notebook; change it in File &gt; Permissions…</span></div>
+  <!-- (the agent's bar, when one is connected: a row here, never over a cell or a plot; workspace/agent-ui.ts) -->
+  <div data-sbag-slot="1"></div>
   <section id="files" aria-label="Files" hidden>
     <div class="fhead"><b>Files</b><span>kept in this browser; <code>open("name")</code> in Python reads and writes them; drop files here</span><span class="sp"></span><button id="upload">Upload…</button></div>
     <ul id="filelist"></ul>
@@ -2178,6 +2180,8 @@ let current = { id: null, kind: "browser" };
 // (the document generation: raised whenever the open document changes or the workspace closes; a book capability
 // is bound to the one it was made in: web/workspace/book-cap.ts, plan-myst-notebooks-p2 r2 §11.1)
 let docGen = 0;
+// (an agent's run in the notebook shown (agentPageRun): told when the notebook shown changes, which ends it)
+let pageRunGone = null;
 // (before the notebook changes: the Share dialog's upload ends first, and its open is closed)
 const beforeSwitch = [];
 // (while the notebook is changing, from the first wait to the new one attached, there is no notebook
@@ -2245,6 +2249,7 @@ async function open(store, id, kind = "browser", guard = null, intent = null) {
   const restoreView = viewKey ? viewToRestore(viewKey, document) : null;
   nb.detach();
   docGen++;
+  pageRunGone?.();
   ttShow(false);
   // (another document shown: what the last one's notice counted is said no more; the same one reopened (a takeover's
   // reload) keeps it)
@@ -4805,7 +4810,7 @@ const wsReady = (async () => {
     ws = w;
     window.sagebrush.workspace = w.forAgent("agent:page");
     // (a newer page upgraded the workspace: said, with Reload; and its files moved beside the index, a little at a time)
-    w.onClosed(() => { docGen++; showReloadNotice(); });
+    w.onClosed(() => { docGen++; pageRunGone?.(); showReloadNotice(); });
     if (w.closed) showReloadNotice();
     // (this browser's copy of the workspace lost, or missing changes: said, with the person's choices; nothing
     // written until then, the notebook's own saves included; said again when that changes, another tab's say)
@@ -5135,7 +5140,75 @@ if (testHost) { window.__agentMadeAgain = () => (agentMadeLast ? agentMade(agent
 //  it) and each notebook's own write trees. On a local host only, the tests' holds (web/workspace/test-run-verbs-page.mjs))
 const agentRuns = (m, w) => m.agentRunsFor(w, { site: new URL("./", location.href).href, kernels: () => ({ WorkerKernel, RunnerWorker }), sandbox: RUNNER && !LOCAL ? "ok" : "none", perms,
   chunks: { run: "sagebrush-agent-run.js", ...(typeof __SB_LATEX__ !== "undefined" && __SB_LATEX__ ? { latex: ["sagebrush-latex.js", "sagebrush-latex-tools.js", "sagebrush-latex-run.js"] } : {}) },
-  more: () => (/^(localhost|127\.0\.0\.1)$/.test(location.hostname) && typeof window.__runHold === "function" ? { hold: (s) => window.__runHold(s) } : {}) });
+  // (run_notebook in the notebook shown here: agentPageRun below)
+  more: () => ({ inPage: agentPageRun, ...(/^(localhost|127\.0\.0\.1)$/.test(location.hostname) && typeof window.__runHold === "function" ? { hold: (s) => window.__runHold(s) } : {}) }) });
+// An agent's run_notebook of the notebook shown here (decided Nov 18 2026; the grant's conditions are run-verbs.ts's):
+// in this notebook, cell by cell as the person's Run is, in its own interpreter with its own write trees, outputs shown
+// and saved with it. Only for the notebook shown now, at the generation it is shown in (docGen): another shown, or the
+// workspace closed, and the run is told (gone) and ends; nothing said after counts. Each cell's output handed back
+// already within the run's bounds (out, a Kept): its text and its images' count and bytes, as the notebook saves them.
+function agentPageRun(ref, path, gone) {
+  if (current.kind !== "browser" || current.id !== ref || !nb.store || nb.store.viewOnly || pageRunGone) return null;
+  const gen = docGen, here = () => docGen === gen && current.kind === "browser" && current.id === ref;
+  const tell = () => { if (pageRunGone === tell) pageRunGone = null; gone(); };
+  pageRunGone = tell;
+  const text = (v) => (Array.isArray(v) ? v.join("") : typeof v === "string" ? v : "");
+  return {
+    // (the notebook as shown, caught up first: the person's edits saved, and the workspace's copy, an agent's write just
+    //  made in it, applied here as any change from elsewhere is, so the run is of what both have)
+    inputs: async () => {
+      if (!here()) return null;
+      saveNow();
+      try { await nb.saved(); } catch {}
+      const w = here() ? await wsNow() : null;
+      const r = w ? await w.read(path).catch(() => null) : null;
+      if (!here()) return null;
+      if (r?.entry?.kind === "notebook" && r.entry.ref === ref && runInputs(r.content) !== runInputs(nb.snapshot())) { nb.applyRemote({ ...r.content, rev: r.rev }); await new Promise((go) => setTimeout(go, 0)); }
+      if (!here()) return null;
+      const s = nb.snapshot();
+      return { mode: typeof s.mode === "string" ? s.mode : "python", cells: s.cells.map((c) => ({ id: String(c.id), type: c.type ?? "code", code: String(c.code ?? "") })) };
+    },
+    current: here,
+    cell: async (id, out) => {
+      const images = { count: 0, bytes: 0 };
+      const c = here() ? nb.cells().find((x) => x.id === id && x.type === "code") : null;
+      if (!c) return { status: "stopped", images };
+      // (this cell alone: in a reactive notebook its descendants aren't rerun, as each runs here in its turn)
+      const ran = await nb.runCells([id], { budget: 0 });
+      const r = Array.isArray(ran) ? ran[0] : ran;
+      if (!here() || !r) return { status: "stopped", images };
+      for (const o of nb.snapshot().cells.find((x) => x.id === id)?.outputs ?? []) {
+        if (o.output_type === "stream") out.add(text(o.text));
+        else if (o.output_type === "error") out.add(text(o.traceback?.join?.("\n")) || `${o.ename}: ${o.evalue}\n`);
+        else {
+          for (const [k, v] of Object.entries(o.data ?? {})) if (k.startsWith("image/") && typeof v === "string") { images.count++; images.bytes += v.length; }
+          const t = text(o.data?.["text/plain"]);
+          if (t) out.add(t.endsWith("\n") ? t : t + "\n");
+        }
+      }
+      // (a plain notebook's run says ok or stopped; the reactive scheduler's report, whether it ran, failed or was left
+      //  stale (interrupted); either, the cell's own state)
+      const has = (k) => Array.isArray(r[k]) && r[k].includes(id);
+      const stopped = r.stopped || r.interrupted || has("stale") || has("cancelled") || (Array.isArray(r.ran) && !r.ran.includes(id) && !has("failed"));
+      const failed = r.ok === false || has("failed") || c.el.classList.contains("error");
+      return { status: stopped ? "stopped" : failed ? "error" : "ok", images };
+    },
+    // (saved only if the workspace's copy now has what is shown: the notebook's save can end in a refusal it only says
+    //  (a quarantine, no storage), so its end alone is no proof)
+    save: async () => {
+      if (!here()) return false;
+      saveNow();
+      try { await nb.saved(); } catch { return false; }
+      const w = here() ? await wsNow() : null;
+      const r = w ? await w.read(path).catch(() => null) : null;
+      const outs = (d) => JSON.stringify((d?.cells ?? []).filter((c) => (c.type ?? "code") === "code").map((c) => [c.id, String(c.code ?? ""), c.outputs ?? []]));
+      return here() && r?.entry?.kind === "notebook" && r.entry.ref === ref && outs(r.content) === outs(nb.snapshot());
+    },
+    // (the cell running, in the notebook shown, or in its own interpreter if another is shown now)
+    stop: () => { if (here()) nb.interrupt(); else kernels.get(ref)?.kernel?.interrupt?.(); },
+    close: () => { if (pageRunGone === tell) pageRunGone = null; },
+  };
+}
 // (the tests' handle on a local host only: the runs' host for this page's workspace, test-run-verbs-page.mjs)
 if (/^(localhost|127\.0\.0\.1)$/.test(location.hostname)) window.__agentRunsFor = () => wsReady.then((w) => w && import(new URL("sagebrush-agent.js", location.href).href).then((m) => ({ ...agentRuns(m, w), perms })));
 const agentFailed = () => { statusEl.textContent = "Couldn't load the agent connection. Try Agent or ⋯ ▸ Connect an agent… again, or reload the page."; };
