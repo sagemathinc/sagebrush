@@ -1653,6 +1653,15 @@ try {
   await until(`!!document.querySelector("#cells .cell textarea")`, 60000);
   const keptText = await ev(`document.querySelector("#cells .cell textarea")?.value ?? ""`);
   check(words.every((w) => keptText.includes(w)), "and every edit typed before leaving is in the notebook: " + JSON.stringify(keptText));
+  // (a refused save of a notebook left at once, another opened before its answer: saved() still rejects, naming it)
+  const rowOf = (p) => `#wssidebar .frow[data-sel][data-path=${JSON.stringify(p)}]`;
+  const other = (await ev(`(async () => (await ${W}.list("/", { recursive: true })).filter((e) => e.kind === "notebook" && e.ref !== sagebrush.notebook.store?.id).map((e) => e.path))()`))[0];
+  await until(`!!document.querySelector(${JSON.stringify(rowOf(other))})`, 10000);
+  await ev(`(sagebrush.notebook.store.save = () => new Promise((ok) => setTimeout(() => ok("not saved: the notebook left"), 800)), 1)`);
+  await typeCell(" # left");
+  await ev(`(document.querySelector(${JSON.stringify(rowOf(other))}).click(), 1)`);
+  const leftWhy = await ev(`new Promise((r) => setTimeout(r, 300)).then(() => sagebrush.notebook.saved()).then(() => "resolved", (e) => String(e?.message ?? e))`);
+  check(/the notebook left/.test(leftWhy), "a refused save of a notebook left at once (another opened): saved() still rejects, naming it: " + leftWhy);
   for (const e of errors) fails.push("page error: " + e);
 } catch (e) {
   fails.push("threw: " + (e?.stack ?? e));

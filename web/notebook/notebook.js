@@ -2155,8 +2155,9 @@ export function createNotebook(root, opts = {}) {
         const refused = (t && typeof t === "object" ? t.saved : t);
         if (typeof refused === "string" && /^not saved\b/.test(refused)) {
           if (lastJson === json) lastJson = null;
-          if (mine !== shown || store !== st) return;
+          // (for any notebook, shown or just left, as a thrown one is: saved() names it; said only for the one shown)
           lastSaveError = new Error(refused.replace(/^not saved:?\s*/, "") || "not saved");
+          if (mine !== shown || store !== st) return;
           emit("saved", refused);
           return;
         }
