@@ -1,7 +1,8 @@
 // web/agent-flows/cases/board.mjs (for the agent-flows harness, web/agent-flows/FORMAT.md)
 // "Make me a board about the primes", then "count up to 5000 and add twin primes": the agent makes a board, the bar
 // offers it ("<agent> made <name> · Open"), Open shows it in a tab of its own where its code runs once by itself,
-// and the agent's later edit reaches that open tab at once, its changed and new code run, with no reload.
+// and the agent's later edit reaches that open tab at once, with no reload; its changed and new code waits for the
+// person's Run (write access isn't leave to run code), and then runs.
 const PATH = "/The primes.board.json";
 const isprime = "def isprime(n):\n    return n > 1 and all(n % d for d in range(2, int(n ** 0.5) + 1))\n";
 const board = (n, more = []) => ({
@@ -39,7 +40,9 @@ export default {
     const rev = rd.structured?.result?.rev;
     await h.tool("workspace_write", { path: PATH, base: rev, content: { json: board(5000, [{ id: "twin", title: "Twin primes", code: "print(sum(1 for p in range(3, N) if isprime(p) and isprime(p + 2)), 'twin pairs below', N)" }]) } });
     h.ok(await B.until("window.sagebrush.board.snapshot().items.length === 4", 15000), "the open board shows the edit at once");
-    h.ok(await B.until("window.sagebrush.board.outputs().then((os) => os.some((o) => /669 primes up to 5000/.test(String(o.output))) && os.some((o) => /126 twin pairs below 5000/.test(String(o.output))))", 90000), "…its changed and new code run");
+    h.ok(await B.until("!document.querySelector('[data-sbb=runpaused]').hidden", 5000) && await B.ev("window.sagebrush.board.outputs().then((os) => os.some((o) => /168 primes up to 1000/.test(String(o.output))) && !os.some((o) => /twin pairs/.test(String(o.output))))"), "…its changed and new code not run: Run is offered");
+    await B.ev("(document.querySelector('[data-sbb=runpaused]').click(), 1)");
+    h.ok(await B.until("window.sagebrush.board.outputs().then((os) => os.some((o) => /669 primes up to 5000/.test(String(o.output))) && os.some((o) => /126 twin pairs below 5000/.test(String(o.output))))", 90000), "the person's Run runs them");
     h.ok((await B.ev("performance.timeOrigin")) === origin0, "…without a reload");
     h.ok(!(await h.files()).some((p) => /changed elsewhere/.test(p)), "no \"changed elsewhere\" copy");
     await B.shot("board-after-edit");
