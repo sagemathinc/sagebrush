@@ -417,23 +417,52 @@ pub fn hermite(m: &ZMat) -> ZMat {
     hnf(m)
 }
 
-/// The size from which `hermite` uses `hermite_modular`: where the two meet
-/// in the WebAssembly engine.  Measured with Sage mode's command line (Node
-/// 24.21.0, one core of an AMD EPYC 7B13) on random_matrix(ZZ, n), two
-/// seeds each: the elimination over Z took 0.79 s at n = 100, 1.46 s at
-/// 110 and 2.80 s at 120; the modular form 0.90 s, 1.46 s and 2.40 s.
-/// Below that the elimination is faster; above it the elimination's
-/// entries grow until it doesn't finish (n = 150 ran for over 13 minutes,
-/// the modular form took 8.0 s).
-pub const HERMITE_MODULAR_MIN_N: usize = 110;
+/// The size from which `hermite` uses `hermite_modular`, for the target it
+/// runs on: where the modular form overtakes the elimination over Z
+/// (WebAssembly, [`HERMITE_MODULAR_MIN_N_WASM`]) or the cyclic attempt's
+/// fallback (native, [`HERMITE_MODULAR_MIN_N_NATIVE`]).
+pub const HERMITE_MODULAR_MIN_N: usize = if cfg!(target_arch = "wasm32") { HERMITE_MODULAR_MIN_N_WASM } else { HERMITE_MODULAR_MIN_N_NATIVE };
 
-/// The size from which `hermite` tries `hermite_cyclic` first: below it, the
-/// determinant and solves it costs exceed what it saves.  Measured with Sage
+/// [`HERMITE_MODULAR_MIN_N`] in the WebAssembly engine: where the two meet
+/// there.  Measured with Sage mode's command line (Node 24.21.0, one core of
+/// an AMD EPYC 7B13) on random_matrix(ZZ, n), two seeds each: the
+/// elimination over Z took 0.79 s at n = 100, 1.46 s at 110 and 2.80 s at
+/// 120; the modular form 0.90 s, 1.46 s and 2.40 s.  Below that the
+/// elimination is faster; above it the elimination's entries grow until it
+/// doesn't finish (n = 150 ran for over 13 minutes, the modular form took
+/// 8.0 s).
+pub const HERMITE_MODULAR_MIN_N_WASM: usize = 110;
+
+/// [`HERMITE_MODULAR_MIN_N`] in native builds (x86-64 measured; aarch64 not
+/// yet): where, after a failed cyclic attempt, the modular form overtakes the
+/// elimination over Z.  Measured natively on one pinned core of an idle
+/// Google Cloud n2-standard-8 (Intel Xeon, 2.80 GHz), on Sage mode's
+/// random_matrix(ZZ, n) for seeds 1 to 20 together, the three methods timed
+/// on the same matrices, twice: with the cyclic attempt first, the
+/// elimination fallback took 2.81 s at n = 90 and 5.28 s at 100, the modular
+/// one 3.28 s and 4.84 s.
+pub const HERMITE_MODULAR_MIN_N_NATIVE: usize = 100;
+
+/// The size from which `hermite` tries `hermite_cyclic` first, for the
+/// target it runs on ([`HERMITE_CYCLIC_MIN_N_WASM`],
+/// [`HERMITE_CYCLIC_MIN_N_NATIVE`]): below it, the determinant and solves it
+/// costs exceed what it saves.
+pub const HERMITE_CYCLIC_MIN_N: usize = if cfg!(target_arch = "wasm32") { HERMITE_CYCLIC_MIN_N_WASM } else { HERMITE_CYCLIC_MIN_N_NATIVE };
+
+/// [`HERMITE_CYCLIC_MIN_N`] in the WebAssembly engine.  Measured with Sage
 /// mode's command line (Node 24.21.0, one core of an AMD EPYC 7B13) on
 /// random_matrix(ZZ, n) for seeds 1 to 20 together (7 of them of that form
 /// at n = 50, 10 at 55), twice: without it, 0.54 s at n = 50 and 0.77 s at
 /// 55; with it, 0.55 s and 0.63 s.
-pub const HERMITE_CYCLIC_MIN_N: usize = 55;
+pub const HERMITE_CYCLIC_MIN_N_WASM: usize = 55;
+
+/// [`HERMITE_CYCLIC_MIN_N`] in native builds (x86-64 measured; aarch64 not
+/// yet).  Measured natively on one pinned core of an idle Google Cloud
+/// n2-standard-8 (Intel Xeon, 2.80 GHz), on Sage mode's random_matrix(ZZ, n)
+/// for seeds 1 to 20 together, the methods timed on the same matrices,
+/// twice: without it, 0.089 s at n = 40 and 0.145 s at 45; with it (a failed
+/// attempt then pays the elimination), 0.091 s and 0.113 s.
+pub const HERMITE_CYCLIC_MIN_N_NATIVE: usize = 45;
 
 /// The Hermite normal form of a square nonsingular matrix when it is
 /// [[I, h], [0, d]] (sagebrush_arith::zmat::hermite_cyclic: one Dixon solve
@@ -831,6 +860,16 @@ mod tests {
             &[(h + 1u32) % &d],
             &d
         ));
+    }
+
+    /// Each target's thresholds are the measured ones, and the build picks
+    /// its own: the WebAssembly engine's are kept when native ones change.
+    #[test]
+    fn hermite_thresholds_per_target() {
+        assert_eq!((HERMITE_CYCLIC_MIN_N_WASM, HERMITE_MODULAR_MIN_N_WASM), (55, 110));
+        assert_eq!((HERMITE_CYCLIC_MIN_N_NATIVE, HERMITE_MODULAR_MIN_N_NATIVE), (45, 100));
+        let want = if cfg!(target_arch = "wasm32") { (55, 110) } else { (45, 100) };
+        assert_eq!((HERMITE_CYCLIC_MIN_N, HERMITE_MODULAR_MIN_N), want);
     }
 
     /// hermite on both sides of HERMITE_CYCLIC_MIN_N gives the form of U H,
