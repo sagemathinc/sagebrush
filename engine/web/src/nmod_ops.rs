@@ -129,34 +129,34 @@ pub const GCD_NTT_N: usize = 2 * GCD_MAX_LEN;
 /// at most 188 L + 8208 bytes <= 320 L for L > 1000.  The table per object
 /// is in the commit that introduced the half-gcd here.  reply: R + 8 lg +
 /// 20 lg.
-pub const GCD_PEAK: usize = add(add(GCD_MAX_REQUEST, mul(16 + 320, GCD_MAX_LEN)), add(mul(128, GCD_NTT_N), 4096));
-/// A bound on one product of transform length GCD_NTT_N: 3 primes x 3
-/// transforms of (N / 2) log N butterflies, plus 40 N (the residues'
-/// combination and the linear passes around it: sums, differences,
-/// copies; also a bound on a schoolbook product, whose shorter factor has
-/// fewer than 40 coefficients).
-const GCD_PRODUCT: u64 = 9 * (GCD_NTT_N as u64 / 2) * 15 + 40 * GCD_NTT_N as u64;
-/// Declared, not enforced at runtime (as for the other ops here).  With
-/// P(N) = GCD_PRODUCT at N points (P(N) / N grows with N): a half-gcd
-/// node for inputs of length L does at most 20 products' work at N =
-/// next_power_of_two(2 L): 4 applying its first matrix, 6 in its division
-/// (Newton's inverse: two products per doubling step, at most 4 P(N) in
-/// all, then the quotient's and the remainder's; or the classical
-/// division, cheaper), 2 in the Euclid step, 8 in the final matrix
-/// product; and it calls itself twice on inputs of at most ceil(L / 2)
-/// coefficients, whose N is at most half its own.  So W(L) <= 20 P(N) +
-/// 2 W(ceil(L / 2)): level j of the recursion has at most 2^j nodes of
-/// at most N / 2^j points, costing at most 20 P(N) together; at the cap
-/// the levels with L > 64 number at most 8, and the at most 2^8 base cases
-/// cost at most 2^14 each (counted as 2^14 * (GCD_MAX_LEN / 32)).  The
-/// gcd's loop: each turn's half-gcd, its application and a division (10
-/// products more), on lengths that at least halve each turn, so at most
-/// twice the first turn's bound; then Euclid's tail on a shorter input of
-/// at most 1000 coefficients: 1000 (L + 1000) + 129 1000 + 128.
-pub const GCD_WORK: u64 = 2 * (20 * GCD_PRODUCT * 8 + (1 << 14) * (GCD_MAX_LEN as u64 / 32) + 10 * GCD_PRODUCT)
-    + 1000 * (GCD_MAX_LEN as u64 + 1000)
-    + 129 * 1000
-    + 128;
+pub const GCD_PEAK: usize = add(add(GCD_MAX_REQUEST, add(mul(16, GCD_MAX_LEN), GCD_FRAMES)), add(mul(128, GCD_NTT_N), 4096));
+/// The half-gcd's polynomials at the cap (nmod_poly::gcd_frame_bytes).
+const GCD_FRAMES: usize = match nmod_poly::gcd_frame_bytes(GCD_MAX_LEN, GCD_MAX_LEN) {
+    Some(x) => x as usize,
+    None => panic!("overflow"),
+};
+// (the shared bound is the one this op was admitted with)
+const _: () = assert!(GCD_FRAMES == 320 * GCD_MAX_LEN);
+/// Declared, not enforced at runtime (as for the other ops here): the
+/// bound of nmod_poly::gcd_work at the cap (its derivation is there).
+pub const GCD_WORK: u64 = match nmod_poly::gcd_work(GCD_MAX_LEN, GCD_MAX_LEN) {
+    Some(x) => x,
+    None => panic!("overflow"),
+};
+// the shared bound at the cap is this op's declared work, unchanged: 3
+// primes x 3 transforms of (N / 2) log N butterflies plus 40 N per
+// product of GCD_NTT_N = 2^15 points, 8 levels, 2^8 base cases counted
+// as 2^14 (GCD_MAX_LEN / 32), and Euclid's tail
+const _: () = {
+    let product: u64 = 9 * (GCD_NTT_N as u64 / 2) * 15 + 40 * GCD_NTT_N as u64;
+    assert!(
+        GCD_WORK
+            == 2 * (20 * product * 8 + (1 << 14) * (GCD_MAX_LEN as u64 / 32) + 10 * product)
+                + 1000 * (GCD_MAX_LEN as u64 + 1000)
+                + 129 * 1000
+                + 128
+    );
+};
 
 const _: () = assert!(ECH_PEAK <= 49 * MIB);
 const _: () = assert!(MUL_PEAK <= 12 * MIB);
