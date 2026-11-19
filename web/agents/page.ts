@@ -38,6 +38,7 @@ import { threadMarkdown, turnMarkdown, userMarkdown } from "../workspace/agent-c
 
 // (the LaTeX editor, in builds that have it: web/build.ts's define)
 declare const __SB_LATEX__: boolean | undefined;
+declare const __SB_LATEX_HOSTS__: string[];
 const LATEX_URL = new URL("../sagebrush-latex.js", import.meta.url).href;
 
 const STORE = "sagebrush-agents-preview-v1";
@@ -571,6 +572,24 @@ function mountHost(threadId: string, a: Artifact, h: Host) {
     keepFocus();
     return;
   }
+  // (a .tex, where this host serves the LaTeX editor's page (the build's hosts, as web/latex/boot.ts's latexOn): that
+  //  page in a frame, embedded (web/latex page.ts's embed): Run, the PDF, comments and its leave guard, as on the LaTeX
+  //  page; mountTexFrame. Elsewhere (the CLI's page) the editor itself, in mountFile)
+  if (a.path && workspace && __SB_LATEX__ && __SB_LATEX_HOSTS__.includes(location.hostname) && /\.tex$/i.test(a.path)) {
+    const head = document.createElement("div"), body = document.createElement("div");
+    head.className = "file-path";
+    head.append(a.path + " ", openFull(a.path));
+    body.className = "file-body";
+    h.el.replaceChildren(head, body);
+    const f = mountTexFrame(a.path, body);
+    h.copy = f.text;
+    h.flush = f.flush;
+    h.release = f.release;
+    h.dispose = f.dispose;
+    h.download = f.download;
+    keepFocus();
+    return;
+  }
   if (a.path && workspace) {
     h.el.innerHTML = `<div class="file-path">${esc(a.path)} <span class="saved"></span></div><div class="file-body"></div>`;
     const f = mountFile(a, $(".file-body", h.el), $(".saved", h.el));
@@ -773,6 +792,68 @@ function mountFile(a: Artifact, box: HTMLElement, saved: HTMLElement): FileHost 
     release: () => (releasing ??= doRelease().finally(() => (releasing = null))),
     dispose,
     download: () => (keptText === null ? null : { name: path.split("/").pop()!.replace(/^(.*?)(\.[^.]*)?$/, "$1 (copy)$2"), text: keptText, type: "text/plain;charset=utf-8" }),
+  };
+}
+
+// A .tex in the pane: the LaTeX editor's own page, /?tex=<fid>&latex=1&embed=1, in a frame of this site (its page's
+// frame-ancestors 'self'): no header, Agent or pairing of its own there, the document alone by default. Made only when
+// its tab is opened (mountHost), dropped with it. The pane asks it before closing, {t: "may-close", id}, and the
+// editor's leave guard answers, its edit written or the person asked ({t: "may-close", id, ok}); only from that frame,
+// of this very origin. The file is the editor's to write: nothing here writes it.
+const TEX_CLOSE_MS = 30_000;
+function mountTexFrame(path: string, box: HTMLElement): FileHost {
+  let alive = true;
+  let frame: HTMLIFrameElement | null = null;
+  let text = "";
+  const host = document.createElement("div");
+  host.className = "tex-host";
+  box.append(host);
+  void workspace!.stat(path).then(
+    (e) => {
+      if (!alive) return;
+      if (!e || e.kind !== "file" || !e.fid) return void (host.textContent = "(not in this browser's workspace)");
+      frame = document.createElement("iframe");
+      frame.className = "tex-frame";
+      frame.title = path.split("/").pop()!;
+      frame.style.cssText = "display:block;width:100%;height:100%;border:0;background:#fff";
+      frame.src = "/?tex=" + encodeURIComponent(e.fid) + "&latex=1&embed=1";
+      host.append(frame);
+    },
+    () => alive && (host.textContent = "(not in this browser's workspace)"),
+  );
+  // (Copy: the file as read at open; the editor in the frame has the latest)
+  void workspace!.read(path).then((r) => { if (typeof r.content === "string") text = r.content; else if (r.content instanceof Uint8Array) text = new TextDecoder().decode(r.content); }, () => {});
+  const mayClose = (): Promise<boolean> => new Promise((done) => {
+    const w = frame?.contentWindow;
+    // (no editor in the frame yet: nothing typed there to keep)
+    if (!w || !frame?.contentDocument?.querySelector(".tex-page .tex-main")) return done(true);
+    const id = crypto.randomUUID();
+    const t = setTimeout(() => { removeEventListener("message", on); done(false); }, TEX_CLOSE_MS);
+    const on = (e: MessageEvent) => {
+      if (e.source !== w || e.origin !== location.origin || e.data?.t !== "may-close" || e.data.id !== id) return;
+      clearTimeout(t);
+      removeEventListener("message", on);
+      done(e.data.ok === true);
+    };
+    addEventListener("message", on);
+    w.postMessage({ t: "may-close", id }, location.origin);
+  });
+  const dispose = async () => {
+    alive = false;
+    frame?.remove();
+    frame = null;
+  };
+  let releasing: Promise<Released> | null = null;
+  return {
+    text: () => (frame?.contentDocument?.querySelector<HTMLTextAreaElement>(".tex-src")?.value ?? text),
+    flush: async () => {},
+    release: () => (releasing ??= mayClose().then(async (ok): Promise<Released> => {
+      if (!ok) return { ok: false, why: `${path}: the LaTeX editor didn't confirm it could close (its last edit isn't written yet, you chose to stay, or it didn't answer within 30 seconds).` };
+      await dispose();
+      return { ok: true };
+    }).finally(() => (releasing = null))),
+    dispose,
+    download: () => null,
   };
 }
 

@@ -403,11 +403,28 @@ class RationalField(_Ring):
     the interval around its decimal value rounded to one more bit, so
     QQ(1e-20) differs from QQ(1e-20 + 0.0).  A literal of more than 15
     significant digits has more bits, as in Sage (1.2345678901234567: 57),
-    and converts from its own precision; QQ('1.2345678901234567') is its
-    exact value.
+    and converts from its own precision.  A string is read as Sage reads it:
+    an integer or p/q (hexadecimal 0x, binary 0b, octal with a leading 0),
+    never a decimal: QQ('0.5') is Sage's TypeError.
 
         sage: QQ(1e-20), QQ(1e-20 + 0.0)
         (1/99999999999999990439, 1/99999999999999997962)
+        sage: QQ('3/-4'), QQ(' 3 / 4 '), QQ('0x10'), QQ('010'), QQ(None)
+        (-3/4, 3/4, 16, 8, 0)
+        sage: QQ('12', 5), QQ('3', 4), QQ('1/ff', 16)
+        (7, 3, 1/255)
+        sage: QQ('3', '4')
+        Traceback (most recent call last):
+        ...
+        TypeError: an integer is required
+        sage: QQ('0.5')
+        Traceback (most recent call last):
+        ...
+        TypeError: unable to convert '0.5' to a rational
+        sage: QQ('1/0')
+        Traceback (most recent call last):
+        ...
+        TypeError: unable to convert '1/0' to a rational
     """
 
     def __reduce__(self):
