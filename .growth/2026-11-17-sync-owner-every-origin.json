@@ -1,7 +1,0 @@
-{
-  "v": 1,
-  "reason": "Sync on every origin: the notebook page starts its sync owner wherever the site is served from, not only on the hosted sites' origins, so a page loaded after sync was turned on keeps syncing files on a self-hosted site; and the sync line counts this browser's changes not sent (the outbox and the ops past the scan watermark, 2,000 op records a read at most, each read going on from the last until the end, past 1,000 said as \"or more\") and says them, never \"Synced\" or an empty line meanwhile (web/index.html, web/workspace/sync-owner.ts, web/workspace/sync-panel.ts), which the board frame and the notebook page carry into cli/pyjs.cjs. cli/pyjs.cjs grows +3116 bytes, exact, base master 2efcf950, measured with the pinned node 24.21.0 and bun 1.4.4 on the exact two-parent merge probe of this PR's head; the bound adds 64 bytes of slack.",
-  "bytes": {
-    "cli/pyjs.cjs": 3180
-  }
-}
