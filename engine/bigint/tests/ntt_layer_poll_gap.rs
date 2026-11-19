@@ -35,8 +35,10 @@ fn layer_poll_gap_at_two_to_the_19() {
 
     // a Stop at the transforms' first, a middle and their last poll stops the
     // product (an unwind; the op-local tables simply drop), and the next
-    // product is the same
+    // product is the same (where a panic unwinds: in WebAssembly a Stop traps
+    // and the host discards the instance)
     assert!(ntt.len() >= 3, "{} polls in the transforms", ntt.len());
+    #[cfg(panic = "unwind")]
     for at in [ntt[0], ntt[ntt.len() / 2], ntt[ntt.len() - 1]] {
         hooks::reset();
         hooks::arm_at(at);
@@ -47,5 +49,6 @@ fn layer_poll_gap_at_two_to_the_19() {
         assert!(r.is_err(), "no Stop at poll {}", at);
         assert_eq!(phase, "ntt", "stopped at poll {} in {:?}", at, phase);
     }
+    #[cfg(panic = "unwind")]
     assert_eq!(mul_words_local(&a, &b), z, "the product after the Stops");
 }
