@@ -123,10 +123,11 @@ export const LATEX_LAZY_CAPS = {
   // (53,214 / 18,327: Nov 19 2026, the agent's bar docked in the page's own row for it ([data-sbag-slot]), placed again
   //  as the page changes what it shows. Measured locally on the toolchain CI pins on master 25de21b2 with the one-link
   //  change merged: 53,150 / 18,263, + 64)
-  // (53,630 / 18,392: a .tex the agent made runs once by itself in the editor that shows it, the pairing's answer over
-  //  the site's channel (agent-pair.ts, agent-made-tex.ts), Nov 19, provisional until the exact-head CI packet: 53,566 /
-  //  18,328 measured on the shipped build (bun 1.4.4, node 24.21.0), on the embedded mode's head; + 64)
-  AGENT: { label: "the LaTeX agent pairing's chunk", raw: 53630, gzip: 18392 },
+  // (54,811 / 18,846: a .tex the agent made runs once by itself in the editor that shows it, the pairing's answer over
+  //  the site's channel (agent-pair.ts, agent-made-tex.ts), Nov 19, provisional until the exact-head CI packet: 54,747 /
+  //  18,782 measured on the shipped build (bun 1.4.4, node 24.21.0) with master 6614eb38 merged (the agent's bar's row
+  //  among it); + 64)
+  AGENT: { label: "the LaTeX agent pairing's chunk", raw: 54811, gzip: 18846 },
   // (the agent tools' work: web/latex/tools.ts, latex_check's report and latex_render's pictures, on an agent's first call)
   // (16,546 / 6,950: Nov 11 2026: latex_build's own code (build.ts, the
   //  engine driven from a snapshot, and the pages' fit) here, out of the eager group, its shared rules handed in by the
