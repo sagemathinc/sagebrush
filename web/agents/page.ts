@@ -510,8 +510,16 @@ function mountHost(threadId: string, a: Artifact, h: Host) {
   //  the person's click opens it as any link (where its code runs), and View source for its JSON)
   if (a.kind === "board" && a.path && workspace) {
     const ws = workspace, path = a.path, name = path.split("/").pop()!;
-    h.el.innerHTML = `<div class="board-made"><span class="who">${esc(agentName())} made <b>${esc(name)}</b></span><a class="open-board" target="_blank" rel="noopener" aria-disabled="true">Open</a><button class="view-source" type="button">View source</button></div><pre class="code board-source" hidden></pre>`;
-    const open = $<HTMLAnchorElement>(".open-board", h.el), view = $<HTMLButtonElement>(".view-source", h.el), src = $(".board-source", h.el);
+    // (built as elements, its words as text: nothing of the agent's name or the file's is read as markup)
+    const el = <K extends keyof HTMLElementTagNameMap>(tag: K, cls: string, text = "") => Object.assign(document.createElement(tag), { className: cls, textContent: text });
+    const who = el("span", "who", `${agentName()} made `), b = el("b", "", name);
+    who.append(b);
+    const open = el("a", "open-board", "Open"), view = el("button", "view-source", "View source"), src = el("pre", "code board-source");
+    open.target = "_blank"; open.rel = "noopener"; open.setAttribute("aria-disabled", "true");
+    view.type = "button"; src.hidden = true;
+    const row = el("div", "board-made");
+    row.append(who, open, view);
+    h.el.replaceChildren(row, src);
     // (its address is its id, read from the workspace: a board it can't find there (removed, or not a board now, or the
     //  lookup failed) says so, with no Open)
     void ws.stat(path).catch(() => undefined).then((e) => {
