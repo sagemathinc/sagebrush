@@ -1751,7 +1751,7 @@ try {
       await tsend("Page.enable");
       await tsend("Runtime.enable");
       await tsend("Page.navigate", { url });
-      const x = { ev: tev, until: tuntil, close: async () => { try { s.close(); } catch {} await fetch(`http://127.0.0.1:${cdpPort}/json/close/${t.id}`).catch(() => {}); } };
+      const x = { ev: tev, until: tuntil, send: tsend, close: async () => { try { s.close(); } catch {} await fetch(`http://127.0.0.1:${cdpPort}/json/close/${t.id}`).catch(() => {}); } };
       tabs.push(x);
       return x;
     };
@@ -1818,6 +1818,82 @@ try {
         const codes = r2.cells.map(codeOf);
         ok(codes[0] === "b = 2  # agent" && codes[1] === "c = 1  # person", "J5: the workspace's copy has both, the agent's edit and the person's", codes);
         await P.close();
+      }
+      // J7, J8: the pane the writer when the edit is admitted, then held at one of the edit's waits while the person
+      // takes the notebook over in a notebook tab (a real click and key there): the edit, resumed, is refused, nothing
+      // changed: applyEdits never ran, and the pane, the tab and the journal keep the person's value. J7: resumed once
+      // the tab writes; J8: resumed as soon as the hand-over has begun (the pane read only, its yield under way)
+      const typeIn = async (x, text) => {
+        await x.send("Emulation.setFocusEmulationEnabled", { enabled: true });
+        await x.send("Page.bringToFront");
+        const at = await x.ev(`(() => { const t = document.querySelector("#cells .cell textarea"); t.scrollIntoView({ block: "center" }); const b = t.getBoundingClientRect(); return { x: b.left + b.width - 6, y: b.top + b.height / 2 }; })()`);
+        for (const type of ["mousePressed", "mouseReleased"]) await x.send("Input.dispatchMouseEvent", { type, x: at.x, y: at.y, button: "left", clickCount: 1 });
+        for (const c of text) {
+          await x.send("Input.dispatchKeyEvent", { type: "keyDown", key: c, code: /\d/.test(c) ? "Digit" + c : "", text: c });
+          await x.send("Input.dispatchKeyEvent", { type: "keyUp", key: c, code: /\d/.test(c) ? "Digit" + c : "" });
+        }
+      };
+      for (const [name, stage, early] of [["J7", "saved", false], ["J7", "stored", false], ["J7", "read", false], ["J8", "read", true]]) {
+        const path = `/notes/race-${stage}${early ? "-early" : ""}.ipynb`;
+        await call("workspace.create", { path, content: docFor(path, [{ code: "r = 1" }]), mode: "python" });
+        const ref = await refOf(path);
+        await send("Page.bringToFront");
+        await openNotebook(path, { finish: false, turn });
+        const writes = await until(`document.querySelector('${PANE} .nb-root .cell textarea')?.readOnly === false`, 10000).catch(() => false);
+        const P = await tab(`${site}/?nb=${ref}`);
+        const follows = await P.until(`!!(${NB}?.store?.journaled && ${NB}.store.readOnly === "other")`, 20000);
+        await send("Page.bringToFront");
+        await ev(`(() => { window.__applied = 0; window.__paused = null; window.__sbTestApplyEdits = (c, e) => { window.__applied++; return c.applyEdits(e, { run: false }); }; window.__sbTestEditPause = (s) => s === ${JSON.stringify(stage)} ? new Promise((r) => { window.__paused = s; window.__resume = r; }) : null; })()`);
+        const r = await readOf(path);
+        const pending = edit(path, r, { set: [{ id: r.cells[0].id, source: "r = 2  # agent" }] });
+        const paused = await until(`window.__paused === ${JSON.stringify(stage)}`, 10000).catch(() => false);
+        const key = early ? "8" : "9";
+        await typeIn(P, key);
+        const took = early
+          ? await until(`document.querySelector('${PANE} .nb-root .cell textarea')?.readOnly === true`, 10000).catch(() => false)
+          : await P.until(`!!(${NB}.store.writer && ${NB}.store.ready && ${NB}.snapshot().cells[0]?.code.includes(${JSON.stringify(key)}))`, 15000);
+        await ev(`window.__resume?.()`);
+        const res = await pending;
+        // (the person's key, through the tab, in the journal's record and in the pane, which follows that tab now)
+        const pcodeOk = await P.until(`${NB}.snapshot().cells[0]?.code.includes(${JSON.stringify(key)})`, 15000);
+        const pcode = (await tabCode(P))?.[0];
+        const paneOk = await until(`(document.querySelector('${PANE} .nb-root .cell textarea')?.value ?? "") === ${JSON.stringify(pcode ?? "")}`, 10000).catch(() => false);
+        let recd = null;
+        for (let i = 0; i < 50 && recd !== pcode; i++) { recd = (await record(ref))?.cells?.[0]?.code ?? null; if (recd !== pcode) await sleep(200); }
+        const applied = await ev(`window.__applied`);
+        await ev(`window.__sbTestEditPause = null; window.__sbTestApplyEdits = null; window.__resume = null;`);
+        ok(writes && follows && paused && took && !res.ok && /took this notebook over/.test(res.msg ?? "") && applied === 0 && pcodeOk && paneOk && recd === pcode && !/agent/.test(`${pcode} ${recd}`),
+          `${name}: the edit held at its "${stage}" wait while the person takes the notebook over in a tab${early ? " (resumed once the hand-over began)" : ""}: refused, nothing changed: applyEdits never ran, and the pane, the tab and the journal keep the person's value`,
+          { writes, follows, paused, took, res, applied, pcode, recd, paneOk });
+        await P.close();
+        await send("Page.bringToFront");
+      }
+      // J9: a notebook pane under the journal opened and closed again and again leaves no listener behind on the
+      // document or the window (its focus takeover let go for good with it)
+      {
+        const listeners = async () => {
+          const out = {};
+          for (const k of ["document", "window"]) {
+            const o = await send("Runtime.evaluate", { expression: k });
+            const r = await send("DOMDebugger.getEventListeners", { objectId: o.result.objectId });
+            out[k] = r.listeners?.length ?? -1;
+            await send("Runtime.releaseObject", { objectId: o.result.objectId });
+          }
+          return out;
+        };
+        const path = "/notes/live-again.ipynb";
+        await call("workspace.create", { path, content: docFor(path, [{ code: "q = 1" }]), mode: "python" });
+        const cycle = async () => {
+          await openNotebook(path, { finish: false, turn });
+          await ev(`document.querySelector('#close').click()`);
+          await until(`!document.body.classList.contains('has-artifact')`, 10000).catch(() => {});
+          await sleep(300);
+        };
+        await cycle();
+        const n0 = await listeners();
+        for (let i = 0; i < 5; i++) await cycle();
+        const n1 = await listeners();
+        ok(n0.document >= 0 && n1.document === n0.document && n1.window === n0.window, "J9: a notebook pane under the journal opened and closed 5 more times leaves no listener behind (document, window)", { n0, n1 });
       }
     } finally {
       for (const x of tabs) await x.close().catch(() => {});

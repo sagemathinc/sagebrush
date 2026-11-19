@@ -224,9 +224,11 @@ export function mountNotebook(ws: Workspace, path: string, box: HTMLElement, ui:
         comp.detach();
         comp.destroy();
       }
-      // (the journal's writer lock and its place in the lock's queue let go: another tab can write the notebook)
+      // (the journal's writer lock and its place in the lock's queue let go: another tab can write the notebook; the
+      // takeover's channel, timers and listeners removed)
       void jstore?.release();
-      handover?.bind(null);
+      handover?.dispose();
+      handover = null;
       // (destroy leaves the page's one plot tooltip, shared by every notebook here: hidden, not removed)
       for (const t of document.querySelectorAll<HTMLElement>(".sbnb-tip")) t.hidden = true;
       kernel?.close();
@@ -257,8 +259,17 @@ export function mountNotebook(ws: Workspace, path: string, box: HTMLElement, ui:
       if (jstore && !(await writable())) {
         return { ok: false, code: "busy", why: "another tab of this browser is changing this notebook and didn't hand it over: nothing changed (try again)" };
       }
-      const usable = () => alive && nb === comp && attached && bound && !frozen && guard === "open" && docRef === e.ref;
-      const closing = { ok: false as const, code: "busy" as const, why: "this notebook is closing, or isn't saved here now" };
+      // (under sync's journal, this pane still the notebook's writer: the lock held, its load done, no hand-over begun
+      // (yieldLock's `yielding`, set as the hand-over starts) and no takeover's reload under way)
+      const owns = () => !jstore || (!!jstore.writer && !!jstore.ready && !jstore.yielding && !jstore.released && !takingOver && comp.store === jstore);
+      const lost = { ok: false as const, code: "busy" as const, why: "another tab of this browser took this notebook over while the edit waited: nothing changed (try again)" };
+      const usable = () => alive && nb === comp && attached && bound && !frozen && guard === "open" && docRef === e.ref && owns();
+      const closing = () => (jstore && alive && nb === comp && attached && bound && !frozen && guard === "open" && docRef === e.ref && !owns() ? lost : { ok: false as const, code: "busy" as const, why: "this notebook is closing, or isn't saved here now" });
+      // (tests: a wait held at `stage`, loopback pages only, test-agents-artifacts.mjs)
+      const pause = async (stage: string) => {
+        const f = (globalThis as any).__sbTestEditPause;
+        if (typeof f === "function" && /^(127\.0\.0\.1|localhost)$/.test(location.hostname)) await f(stage);
+      };
       // (the store's record, in the notebook's form, equals what is shown: a save the store refused ("not saved: ...")
       // still resolves saved(), so it is checked here, positively; astra's C2)
       const keptAsShown = (rec: any) => !!rec && Array.isArray(rec.cells) && canonical(rec.cells.map(cellForm)) === canonical(comp.snapshot().cells.map(cellForm));
@@ -270,16 +281,19 @@ export function mountNotebook(ws: Workspace, path: string, box: HTMLElement, ui:
       } catch (err) {
         return { ok: false, code: "busy", why: `not applied: this notebook couldn't be saved first (${(err as Error).message})` };
       }
-      if (!usable()) return closing;
+      await pause("saved");
+      if (!usable()) return closing();
       const rec0 = await stored().catch(() => null);
-      if (!usable()) return closing;
+      await pause("stored");
+      if (!usable()) return closing();
       if (!keptAsShown(rec0)) return { ok: false, code: "busy", why: "not applied: the person's changes here couldn't be saved first (the store refused them); nothing changed" };
       // (the revision this pane's next save is made from: kept for a rollback, so that save still conflicts with another
       // tab's change instead of writing over it; astra's C3)
       const baseRev = rec0.rev;
       const seen = comp.snapshot();
       const read = await ws.read(path).catch(() => null);
-      if (!usable()) return closing;
+      await pause("read");
+      if (!usable()) return closing();
       if (!read || (read.entry as any)?.ref !== docRef) return { ok: false, code: "conflict", why: "another notebook is at this path now (read it again)" };
       const checked = preflight(e, (read.content as any)?.cells ?? [], { hashes: true });
       if (!checked.ok) return { ok: false, code: "conflict", why: checked.why, ...(checked.ids ? { ids: checked.ids } : {}) };
@@ -288,12 +302,16 @@ export function mountNotebook(ws: Workspace, path: string, box: HTMLElement, ui:
       let release: (() => void) | null = null, inserted: string[] = [];
       if (hold) {
         try { release = await hold(); } catch (err) { return { ok: false, code: "invalid", why: String((err as Error)?.message ?? err) }; }
-        if (!usable()) { release(); return closing; }
+        await pause("hold");
+        if (!usable()) { release(); return closing(); }
       }
       try {
         // (2) then, in one synchronous stretch (no await): the authority, nothing shown changed since that save,
         // the edit fits what is shown, and the change is made; what the person does can't come between the check and it
         if (!may()) return no;
+        // (and, in the same synchronous stretch as the change, this pane still the writer: a hand-over begun or the lock
+        // lost since the last wait refuses it here, nothing changed)
+        if (!usable()) return closing();
         const before = comp.snapshot();
         if (canonical(before) !== canonical(seen)) return { ok: false, code: "conflict", why: "the notebook changed while this edit was checked (read it again)" };
         const pre = preflight(e, before.cells, { hashes: false });
@@ -302,6 +320,9 @@ export function mountNotebook(ws: Workspace, path: string, box: HTMLElement, ui:
           const apply = (globalThis as any).__sbTestApplyEdits && /^(127\.0\.0\.1|localhost)$/.test(location.hostname) ? (globalThis as any).__sbTestApplyEdits : null;
           // (run: false: an edit runs nothing; applyEdits mutates synchronously, its promise settles at once)
           const r = apply ? apply(comp, pre.edits) : comp.applyEdits(pre.edits, { run: false });
+          // (its save asked for at once, in the same synchronous stretch as the change: a hand-over that begins after it
+          // waits for this save (its quiesce awaits the notebook's saves), so the change is saved before this pane lets go)
+          comp.flush();
           inserted = (await r)?.ids ?? [];
         } catch (err) {
           // (put back as it was, with the revision it was saved at: loaded, which saves nothing, and the next save is made
