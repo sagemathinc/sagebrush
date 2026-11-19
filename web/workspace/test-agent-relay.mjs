@@ -151,6 +151,30 @@ const note = (n, text = "x") => JSON.stringify({ jsonrpc: "2.0", method: "chat.m
   ok(Object.values(leg.counters()).every((v) => v === 0), `after a failed hello: no timers, listeners or queue (${JSON.stringify(leg.counters())})`);
 }
 
+// ---- a leg the relay never took (it refuses the upgrade while the computer's runner isn't connected, and a browser
+// sees only a close, 1006): unreachable, apart from a leg that opened and then closed in its hello (refused)
+{
+  // (closed, 1006 with no reason, before it ever opens: as Chromium reports a refused upgrade)
+  class Refused503 {
+    constructor(url) { this.url = url; this.readyState = 0; this.l = {}; this.bufferedAmount = 0; queueMicrotask(() => { this.readyState = 3; this.emit("close", { code: 1006, reason: "" }); }); }
+    addEventListener(t, f) { (this.l[t] ??= []).push(f); }
+    emit(t, e) { for (const f of this.l[t] ?? []) f(e); }
+    send() { throw new Error("send on a closed socket"); }
+    close() {}
+  }
+  const key = await legKey();
+  const leg = new AgentLeg({ remoteId: RID, url: "wss://x", key, WebSocket: Refused503 }).start();
+  await until(() => leg.state === "closed", "unreachable");
+  ok(leg.ended.kind === "unreachable" && leg.ended.why === "", "a leg the relay never took (closed 1006 before it opened): unreachable, not refused");
+  ok(Object.values(leg.counters()).every((v) => v === 0), `…and nothing left of it (${JSON.stringify(leg.counters())})`);
+  const leg2 = new AgentLeg({ remoteId: RID, url: "wss://x", key, WebSocket: FakeWS }).start();
+  const ws2 = FakeWS.last;
+  await tick(5);
+  ws2.peerClose(1006, "");
+  await until(() => leg2.state === "closed", "closed in its hello");
+  ok(leg2.ended.kind === "refused" && leg2.ended.why === "the computer refused the connection", "a leg that opened and then closed in its hello: refused, as before");
+}
+
 // ---- the agent's kind: asked by name, the answer naming it and the kinds offered
 {
   const kinds = { agent: "codex", agents: ["claude", "codex"] };

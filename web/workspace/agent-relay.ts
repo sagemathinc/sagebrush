@@ -153,8 +153,10 @@ export type LegResult = { token: string; nonce: string; gen: number; incarnation
 export const AGENT_NAME = /^[a-z][a-z0-9-]{0,15}$/;
 export const AGENTS_MAX = 4;
 /** Why a leg ended: lost (the connection), ended (the runner's agent.ended, in its words), refused (the hello),
- * full (more replies owed than REPLY_SLOTS), disconnected (the person's Disconnect, its drain done or timed out). */
-export type LegEnd = { kind: "lost" | "ended" | "refused" | "full" | "disconnected"; why: string };
+ * unreachable (the leg never opened: the relay refuses it while the computer's runner isn't connected, and a browser
+ * can't see why), full (more replies owed than REPLY_SLOTS), disconnected (the person's Disconnect, its drain done or
+ * timed out). */
+export type LegEnd = { kind: "lost" | "ended" | "refused" | "unreachable" | "full" | "disconnected"; why: string };
 type Kind = "note" | "reply" | "reserve" | "control";
 type Entry = { text: string; bytes: number; kind: Kind; done?: () => void };
 export type SendResult = "ok" | "full" | "over" | "closed";
@@ -178,6 +180,7 @@ export class AgentLeg {
   private helloTimer: ReturnType<typeof setTimeout> | null = null;
   private unpairTimer: ReturnType<typeof setTimeout> | null = null;
   private missed = 0;
+  private opened = false; // (the WebSocket opened: the relay took the leg)
   private receiptUpto = -1;
   private drained: (() => void) | null = null;
   private readonly onMessage = new Set<(text: string) => void>();
@@ -223,6 +226,7 @@ export class AgentLeg {
     const ws = (this.ws = new WS(this.o.url));
     this.helloTimer = this.clock.setTimeout(() => { this.helloTimer = null; if (this.state === "hello") this.end({ kind: "lost", why: "no answer from the computer" }); }, LEG.helloMs);
     ws.addEventListener("open", () => {
+      this.opened = true;
       if (this.state !== "hello") return;
       this.pinger = this.clock.setInterval(() => this.ping(), LEG.pingMs);
       void this.hello();
@@ -520,6 +524,8 @@ export class AgentLeg {
     if (this.state === "draining") return this.end({ kind: "disconnected", why: "" });
     // (the runner's agent.ended came first: its words, as it says them)
     if (this.endedText) return this.end({ kind: "ended", why: this.endedText });
+    // (never opened: the relay didn't take the leg, as while the computer's runner isn't connected)
+    if (this.state === "hello" && !this.opened) return this.end({ kind: "unreachable", why: "" });
     if (this.state === "hello") return this.end({ kind: "refused", why: reason || "the computer refused the connection" });
     this.end({ kind: "lost", why: code === 1006 ? "" : reason.slice(0, 200) });
   }

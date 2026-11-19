@@ -802,6 +802,8 @@ const NOT_SENT = {
 };
 const RUNNER = {
   connecting: (computer: string) => `Connecting to ${computer}…`,
+  waiting: (computer: string) => `Waiting for ${computer} to connect…`,
+  unreachable: (computer: string) => `Couldn't connect to ${computer}. If its runner isn't running, start sagebrush remote --serve-agents on it, then choose Chat here again.`,
   lost: (computer: string, why: string) => `Not connected to ${computer}${why ? `: ${why}` : ""}. Choose Chat here to connect again.`,
   disconnected: (computer: string) => `Disconnected. The agent on ${computer} may keep running for up to 5 minutes.`,
 };
@@ -810,10 +812,12 @@ const RUNNER = {
 function runnerBar(computer: string, e: LegEnd | { kind: string; why: string }): ConnBar {
   if (e.kind === "disconnected") return { kind: "runner", text: RUNNER.disconnected(computer), alert: false, action: "connect" };
   if ((e.kind === "ended" || e.kind === "refused") && e.why) return { kind: "runner", text: e.why, alert: true, action: "connect" };
+  if (e.kind === "unreachable") return { kind: "runner", text: RUNNER.unreachable(computer), alert: true, action: "connect" };
   return { kind: "runner", text: RUNNER.lost(computer, e.why), alert: true, action: "connect" };
 }
 // (an attempt to one of your computers, between Chat here and its agent.ready: the header's "Connecting to …")
 let connectingTo: string | null = null;
+let waitingFor = false; // (its runner not connected yet: the header says it waits)
 const CONN = {
   lost: "Claude disconnected. Your chats are kept; Claude keeps their context while sagebrush-agent runs.",
   restoring: "Reconnecting to Claude…",
@@ -1146,8 +1150,9 @@ const chatHereSection = chatHere({
     leg.on("notice", (t) => toast(t, 6000));
     return { link: leg, ended };
   },
-  onConnecting(r) { connectingTo = r.name; setConn(null); renderHeader(); },
-  onFailed(r, e) { connectingTo = null; setConn(runnerBar(r.name, e)); renderHeader(); },
+  onConnecting(r) { connectingTo = r.name; waitingFor = false; setConn(null); renderHeader(); },
+  onWaiting(r) { connectingTo = r.name; waitingFor = true; renderHeader(); },
+  onFailed(r, e) { connectingTo = null; waitingFor = false; setConn(runnerBar(r.name, e)); renderHeader(); },
 }, () => agentUi);
 
 // (an agent's runs of code here, as on the notebook page (workspace/agent-runs.ts): latex_build, run_notebook, run_file
@@ -1275,7 +1280,7 @@ function renderHeader() {
   } else if (live()) {
     who.innerHTML = `<span class="conn on"></span>${esc(agentName())} <small>on your computer</small>`;
   } else if (connectingTo !== null) {
-    whoText(who, "wait", "", RUNNER.connecting(connectingTo));
+    whoText(who, "wait", "", waitingFor ? RUNNER.waiting(connectingTo) : RUNNER.connecting(connectingTo));
   } else if (pairing && pairing.state === "paired") {
     who.innerHTML = `<span class="conn wait"></span>${esc(agentName())} <small>connected: allow it in the dialog</small>`;
   } else if (inert(current())) {
