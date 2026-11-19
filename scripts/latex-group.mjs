@@ -83,7 +83,11 @@ export const LATEX_LAZY = {
 //  +169, the page module's), + 64)
 // (253,196 raw / 84,582 gzip: Nov 19 2026, the reload record on the LaTeX page with the editor's embedded mode, master
 //  3c4319ba: 253,132 / 84,518 measured, + 64)
-export const LATEX_CAPS = { raw: 253196, gzip: 84582 };
+// (253,527 raw / 84,713 gzip: a .tex the agent made runs once by itself in the editor that shows it (the page module
+//  asks the pairing over the site's channel), Nov 19, provisional until the exact-head CI packet: 253,463 / 84,649
+//  measured on the shipped build (bun 1.4.4, node 24.21.0), on the embedded mode's head; 252,695 / 84,335 without it
+//  (+768 / +314), + 64)
+export const LATEX_CAPS = { raw: 253527, gzip: 84713 };
 export const gz = (b) => gzipSync(b, { level: 9 }).length;
 
 // Each lazy chunk's own cap (raw, gzip), fetched only on its own use, so outside the group:
@@ -145,7 +149,16 @@ export const LATEX_LAZY_CAPS = {
   // (54,729 / 18,864: the two above together, the bar's offer of a board an agent made and an answer's entry with its
   //  page's address, measured on their merge (master 3fbaf351): 54,665 / 18,800 (bun 1.4.4, node 24.21.0), + 64)
   // (54,819 / 18,896: Nov 19 2026, the reload record's handling on master 3c4319ba: 54,755 / 18,832 measured, + 64)
-  AGENT: { label: "the LaTeX agent pairing's chunk", raw: 54819, gzip: 18896 },
+  // (54,811 / 18,846: a .tex the agent made runs once by itself in the editor that shows it, the pairing's answer over
+  //  the site's channel (agent-pair.ts, agent-made-tex.ts), Nov 19, provisional until the exact-head CI packet: 54,747 /
+  //  18,782 measured on the shipped build (bun 1.4.4, node 24.21.0) with master 6614eb38 merged (the agent's bar's row
+  //  among it); + 64)
+  // (55,409 / 19,025: the two above together, the bar's offer of a board an agent made and a .tex it made running by
+  //  itself, measured on their merge (with the embedded mode on master f8b9e013): 55,345 / 18,961 (bun 1.4.4, node
+  //  24.21.0), + 64)
+  // (56,341 / 19,371: an answer's entry with its page's address and a .tex the agent made running by itself together,
+  //  measured on their merge (master 3c4319ba): 56,277 / 19,307 (bun 1.4.4, node 24.21.0), + 64)
+  AGENT: { label: "the LaTeX agent pairing's chunk", raw: 56341, gzip: 19371 },
   // (the agent tools' work: web/latex/tools.ts, latex_check's report and latex_render's pictures, on an agent's first call)
   // (16,546 / 6,950: Nov 11 2026: latex_build's own code (build.ts, the
   //  engine driven from a snapshot, and the pages' fit) here, out of the eager group, its shared rules handed in by the
