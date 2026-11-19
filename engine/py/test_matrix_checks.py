@@ -34,6 +34,15 @@ def main():
     for c, want, got in bad:
         print("MISMATCH", c, "\n  Sage:", want, "\n  here:", got)
     assert not bad, "%d of %d cases differ from Sage" % (len(bad), len(DATA["cases"]))
+    # a refusal of a long malformed string is short: a preview and the length
+    huge = "1" * 4000000 + "x"
+    for c in ("QQ(huge)", "ZZ(huge)", "matrix(QQ, [[huge]])", "matrix(ZZ, [[huge]])", "vector(QQ, [huge])", "vector(ZZ, [huge])"):
+        try:
+            eval(c, dict(ns, huge=huge))
+        except TypeError as e:
+            assert len(str(e)) < 300 and "4000001 characters" in str(e), (c, str(e)[:300])
+        else:
+            raise AssertionError(c + " must be refused")
     print("matrix checks against Sage: %d cases ok" % len(DATA["cases"]))
 
 

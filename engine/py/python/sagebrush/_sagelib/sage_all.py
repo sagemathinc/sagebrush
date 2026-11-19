@@ -1838,7 +1838,7 @@ def _integer_from_str(s, base):
             return int(t, base or 10)
         except ValueError:
             pass
-    raise TypeError("unable to convert %r to an integer" % s)
+    raise TypeError("unable to convert %s to an integer" % _str_preview(s))
 
 
 def _integral_real(x):
@@ -1883,6 +1883,16 @@ import re as _re_q
 _QQ_INT = _re_q.compile(r"-?(?:0[xX][0-9a-fA-F]+|0[bB][01]+|0[0-7]*|[1-9][0-9]*)\Z")
 
 
+def _str_preview(s, quote=True):
+    """A string for an error message: s itself (repr'd if quote) up to 100
+    characters, as Sage prints it; past that its first 60 characters and its
+    length, so a refusal of a megabyte string stays short."""
+    if len(s) <= 100:
+        return repr(s) if quote else s
+    head = repr(s[:60]) if quote else s[:60]
+    return "%s... (a string of %d characters)" % (head, len(s))
+
+
 def _qq_from_str(s):
     """The rational a string denotes, as Sage's QQ(s): 'p' or 'p/q' (space
     around the parts and the slash allowed), each part an integer as
@@ -1898,7 +1908,7 @@ def _qq_from_str(s):
                 den = int(ps[1], 0) if not _re_q.match(r"-?0[0-7]+\Z", ps[1]) else int(ps[1], 8)
             if den != 0:
                 return _Fraction(num, den)
-    raise TypeError("unable to convert %r to a rational" % (s,))
+    raise TypeError("unable to convert %s to a rational" % _str_preview(s))
 
 
 def _QQ_exact(x, d=None):

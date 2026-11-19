@@ -3246,7 +3246,8 @@ def vector(*args):
                 try:
                     conv.append(_exact_entry(ring, x) if isinstance(x, str) or x is None else x)
                 except TypeError:
-                    raise TypeError("unable to convert %s to an element of %r" % (x, ring))
+                    raise TypeError("unable to convert %s to an element of %r"
+                                    % (_sa()._str_preview(x, quote=False) if isinstance(x, str) else x, ring))
             entries = conv
         elif ring is None:
             raise TypeError("unable to find a common ring for all elements")
