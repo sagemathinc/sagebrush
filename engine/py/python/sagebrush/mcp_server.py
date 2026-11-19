@@ -63,7 +63,8 @@ nothing is deleted for good (workspace_remove moves to Trash).
 
 A notebook in the workspace runs its cells in its language: Python, Sage,
 MATLAB or Magma. Make one with workspace_create, a path ending in .ipynb
-and its mode, then run it with workspace_run_notebook (each cell's result
+and its mode: it runs once by itself when the page lets you run code, and
+workspace_run_notebook runs it again after an edit (each cell's result
 counts the images it drew; the person sees the plots in the notebook):
 - python: print(2**10)
 - sage: factor(2^64 - 1)
