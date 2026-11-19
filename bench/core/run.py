@@ -166,6 +166,16 @@ def toolchain() -> str:
     return m.group(1) if m else ""
 
 
+# Each Rust driver's RUSTFLAGS: what build() uses and what the identity
+# records (one constant, so they can't differ)
+RUSTFLAGS = {
+    "native": "",
+    "native-host": "-C target-cpu=native",
+    "wasm": "",
+    "flint-rust": "",
+}
+
+
 def build() -> None:
     # (the engine's pinned toolchain and its default flags: the native column
     # measures the code we ship; native-host adds -C target-cpu=native, in
@@ -174,14 +184,14 @@ def build() -> None:
     # wasm32-unknown-unknown build has, and without the parallel feature)
     env = dict(os.environ, RUSTUP_TOOLCHAIN=toolchain())
     env.pop("RUSTFLAGS", None)
-    host = dict(env, RUSTFLAGS="-C target-cpu=native")
     steps = [
-        ("native", "native", env, []),
-        ("native-host", "native", host, ["--target-dir", "target-host"]),
-        ("wasm", "native", env, ["--target", "wasm32-wasip1"]),
-        ("flint-rust", "flint-rust", env, []),
+        ("native", "native", []),
+        ("native-host", "native", ["--target-dir", "target-host"]),
+        ("wasm", "native", ["--target", "wasm32-wasip1"]),
+        ("flint-rust", "flint-rust", []),
     ]
-    for name, crate, e, extra in steps:
+    for name, crate, extra in steps:
+        e = dict(env, RUSTFLAGS=RUSTFLAGS[name]) if RUSTFLAGS[name] else env
         r = subprocess.run(
             ["cargo", "build", "--quiet", "--release", *extra], cwd=HERE / crate, env=e
         )
@@ -497,14 +507,34 @@ def versions() -> dict:
     }
 
 
-def cpu_times() -> tuple[int, int]:
-    """(steal, total) jiffies over all CPUs, from /proc/stat (0, 0 if absent)."""
+def cpu_times(text: str | None = None) -> dict[str, tuple[int, int]]:
+    """Per CPU (the cpuN lines of /proc/stat): (steal, total) jiffies. Per
+    CPU, not the aggregate line: a 1-thread point's steal on its own vCPU
+    would be diluted by the CPU count there."""
     try:
-        f = Path("/proc/stat").read_text().splitlines()[0].split()
-        v = [int(x) for x in f[1:]]
-        return (v[7] if len(v) > 7 else 0), sum(v)
-    except (OSError, ValueError, IndexError):
-        return 0, 0
+        text = Path("/proc/stat").read_text() if text is None else text
+    except OSError:
+        return {}
+    out = {}
+    for line in text.splitlines():
+        f = line.split()
+        if f and f[0].startswith("cpu") and f[0] != "cpu":
+            try:
+                v = [int(x) for x in f[1:]]
+            except ValueError:
+                continue
+            out[f[0]] = (v[7] if len(v) > 7 else 0, sum(v))
+    return out
+
+
+def max_steal(before: dict, after: dict) -> float | None:
+    """The largest steal fraction any one CPU saw between two snapshots."""
+    fr = [
+        (after[c][0] - before[c][0]) / (after[c][1] - before[c][1])
+        for c in after
+        if c in before and after[c][1] > before[c][1]
+    ]
+    return round(max(fr), 5) if fr else None
 
 
 # A point whose timed runs saw more CPU steal than this (a fraction of the
@@ -520,20 +550,65 @@ def sha256_file(path: Path) -> str:
     return h.hexdigest()
 
 
-def dist_record(dist: str) -> str | None:
-    """The sha256 of an installed distribution's RECORD in engine/.venv (the
-    per-file hashes of everything it installed), or None."""
-    if not VENV_PY.exists():
+# Run by engine/.venv's Python: one installed distribution's files, each
+# hashed as it is on disk now (not as RECORD claims), digested in a
+# canonical order.  Fails (exit 1, the reason on stderr) on an entry that
+# is missing, escapes the environment, has no RECORD hash (RECORD itself
+# excepted), or whose bytes differ from its RECORD hash.
+DIST_FILES = r"""
+import base64, csv, hashlib, os, sys, importlib.metadata as m
+d = m.distribution(sys.argv[1])
+root = os.path.realpath(sys.prefix) + os.sep
+base = d.locate_file("")
+lines = []
+# (RECORD read directly: Distribution.files drops entries whose file is gone)
+for row in csv.reader((d.read_text("RECORD") or "").splitlines()):
+    if not row:
+        continue
+    f, h = row[0], (row[1] if len(row) > 1 else "")
+    p = os.path.realpath(os.path.join(base, f))
+    if not p.startswith(root):
+        sys.exit(f"{f}: outside the environment")
+    parts = f.split("/")
+    if len(parts) == 2 and parts[0].endswith(".dist-info") and parts[1] == "RECORD":
+        continue
+    if not h.startswith("sha256="):
+        sys.exit(f"{f}: no sha256 in RECORD")
+    try:
+        data = open(p, "rb").read()
+    except OSError as e:
+        sys.exit(f"{f}: {e}")
+    got = base64.urlsafe_b64encode(hashlib.sha256(data).digest()).rstrip(b"=").decode()
+    if got != h[len("sha256="):]:
+        sys.exit(f"{f}: its bytes differ from RECORD")
+    lines.append(f"{f}\0{hashlib.sha256(data).hexdigest()}\n")
+if not lines:
+    sys.exit("no files")
+print(hashlib.sha256("".join(sorted(lines)).encode()).hexdigest())
+"""
+
+
+def dist_files(dist: str, python: Path | None = None) -> str | None:
+    """A digest of the bytes of every file an installed distribution in
+    engine/.venv has on disk (DIST_FILES), or None if any is missing,
+    unhashed, outside the environment or changed since installation."""
+    python = python or VENV_PY
+    if not python.exists():
         return None
-    code = (
-        "import hashlib, importlib.metadata as m\n"
-        f"d = m.distribution({dist!r})\n"
-        "print(hashlib.sha256((d.read_text('RECORD') or '').encode()).hexdigest())"
-    )
     r = subprocess.run(
-        [str(VENV_PY), "-c", code], capture_output=True, text=True, timeout=120
+        [str(python), "-I", "-c", DIST_FILES, dist],
+        capture_output=True,
+        text=True,
+        timeout=300,
     )
-    return r.stdout.strip() if r.returncode == 0 and r.stdout.strip() else None
+    out = r.stdout.strip()
+    return out if r.returncode == 0 and re.fullmatch(r"[0-9a-f]{64}", out) else None
+
+
+def wheel_sha() -> str | None:
+    """The sha256 of the Sagebrush wheel vm-setup.sh built (exactly one)."""
+    wheels = sorted((ROOT / "engine/py/dist").glob("*.whl"))
+    return sha256_file(wheels[0]) if len(wheels) == 1 else None
 
 
 # The files each backend executes (or loads), hashed before the first point
@@ -556,21 +631,22 @@ def artifacts() -> dict:
         k: (sha256_file(Path(v)) if v and Path(v).exists() else None)
         for k, v in files.items()
     }
-    out["sagebrush-wheel-record"] = dist_record("sagebrush")
-    out["python-flint-record"] = dist_record("python-flint")
+    out["sagebrush-wheel"] = wheel_sha()
+    out["sagebrush-installed"] = dist_files("sagebrush")
+    out["python-flint-installed"] = dist_files("python-flint")
     return out
 
 
 # The artifacts each backend needs (by its base)
 NEEDS = {
-    "user": ("python", "sagebrush-wheel-record"),
+    "user": ("python", "sagebrush-wheel", "sagebrush-installed"),
     "user-pyjs": ("node", "pyjs", "engine-wasm"),
     "native": ("native",),
     "native-host": ("native-host",),
     "wasm": ("node", "wasm-module"),
     "magma": ("magma",),
     "flint-rust": ("flint-rust",),
-    "flint-python": ("python", "python-flint-record"),
+    "flint-python": ("python", "python-flint-installed"),
 }
 
 
@@ -613,12 +689,7 @@ def build_env() -> dict:
         rustc = None
     return {
         "rustc": rustc,
-        "rustflags": {
-            "native": "",
-            "native-host": "-C target-cpu=native",
-            "wasm": "",
-            "flint-rust": "",
-        },
+        "rustflags": dict(RUSTFLAGS),
         "profile": "release: opt-level 3, lto, codegen-units 1",
         "wasm_postprocess": "none",
     }
@@ -746,9 +817,7 @@ def invoke(
     cmd = command(backend, row, n, mode, k)
     s0 = cpu_times()
     r = run_child(cmd, timeout, THREADS if backend.endswith("-n") else 1, CAP)
-    s1 = cpu_times()
-    total = s1[1] - s0[1]
-    r["steal"] = round((s1[0] - s0[0]) / total, 5) if total > 0 else None
+    r["steal"] = max_steal(s0, cpu_times())
     # (Magma 2.18 wraps long lines with backslash-newline)
     text = r.pop("output").replace("\\\n", "")
     found = LINE.findall(text)

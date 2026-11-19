@@ -150,6 +150,42 @@ class Ledgers(unittest.TestCase):
             [e["ev"] for e in shard.Ledger(self.path).events], ["bootstrap"]
         )
 
+    def test_a_short_write_is_completed(self):
+        from unittest import mock
+
+        led = shard.Ledger(self.path)
+        real, calls = os.write, []
+
+        def short(fd, data):
+            calls.append(len(data))
+            return real(fd, bytes(data)[: max(1, len(data) // 2)])
+
+        with mock.patch.object(shard.os, "write", short):
+            led.append({"ev": "bootstrap", "x": "y" * 100})
+        self.assertGreater(len(calls), 1)
+        self.assertEqual(
+            [e["ev"] for e in shard.Ledger(self.path).events], ["bootstrap"]
+        )
+
+    def test_a_failed_write_is_fatal_and_takes_no_more_lines(self):
+        from unittest import mock
+
+        led = shard.Ledger(self.path)
+        real = os.write
+
+        def enospc(fd, data):
+            real(fd, bytes(data)[:5])
+            raise OSError(28, "No space left on device")
+
+        with mock.patch.object(shard.os, "write", enospc):
+            with self.assertRaisesRegex(shard.Fatal, "No space"):
+                led.append({"ev": "bootstrap"})
+        self.assertEqual(led.events, [])
+        with self.assertRaisesRegex(shard.Fatal, "failed write"):
+            led.append({"ev": "bootstrap"})
+        with self.assertRaisesRegex(shard.Fatal, "torn"):
+            shard.Ledger(self.path)
+
     def test_a_corrupt_middle_line_is_refused(self):
         self.path.write_bytes(b'{"ev": "bootstrap"}\nnot json\n{"ev": "x"}\n')
         with self.assertRaises(shard.Fatal):
@@ -210,10 +246,21 @@ class Accounting(unittest.TestCase):
         ]
         self.assertAlmostEqual(shard.charged_hours(ev, H + 10), 1.0 + (1 + 3 * H) / H)
 
-    def test_a_proven_absent_reservation_charges_nothing(self):
+    def test_an_absent_reservation_stays_charged_in_full(self):
+        # (not seen after its window proves no VM now, not that none ran)
         ev = [reserve("a", 0), {"ev": "absent", "name": "a", "t": 700}]
-        self.assertEqual(shard.charged_hours(ev, 800), 0.0)
+        self.assertAlmostEqual(shard.charged_hours(ev, 800), 3 + 600 / H)
         self.assertTrue(shard.can_reserve(ev, plan(), 3, 800))
+        self.assertFalse(shard.can_reserve(ev, plan(envelope_hours=6), 3, 800))
+
+    def test_a_late_creation_after_absent_is_charged_from_the_reservation(self):
+        ev = [
+            reserve("a", 0),
+            {"ev": "absent", "name": "a", "t": 700},
+            {"ev": "created", "name": "a", "creation": 900, "t": 1000},
+        ]
+        self.assertEqual(shard.vm_states(ev)["a"]["state"], "live")
+        self.assertAlmostEqual(shard.charged_hours(ev, 1000), (900 + 3 * H) / H)
 
     def test_the_envelope_is_never_exceeded(self):
         p = plan(envelope_hours=7)
@@ -337,6 +384,67 @@ class Acceptance(unittest.TestCase):
         self.assertFalse(dest.exists())
         self.assertEqual(len(list((self.d / "rows/x86/.conflict").iterdir())), 1)
 
+    def test_recovery_refuses_a_missing_acknowledged_row(self):
+        self.accept()
+        (self.d / "rows/x86/poly_fp_mul-s.json").unlink()
+        with self.assertRaisesRegex(shard.Fatal, "missing"):
+            self.rows.recover({"poly_fp_mul:s": 1000})
+
+    def test_recovery_refuses_a_changed_acknowledged_row(self):
+        self.accept()
+        data, _ = blob(row(status="timeout"))
+        (self.d / "rows/x86/poly_fp_mul-s.json").write_bytes(data)
+        with self.assertRaisesRegex(shard.Fatal, "changed"):
+            self.rows.recover({"poly_fp_mul:s": 1000})
+
+    def test_recovery_rechecks_an_acknowledged_rows_identity(self):
+        self.accept()
+        (self.d / "rows/x86/identity.json").write_bytes(
+            shard.canonical(
+                shard.identity_of(row(machine=dict(row()["machine"], cpu="Other")))
+            )
+        )
+        with self.assertRaisesRegex(shard.Fatal, "identity"):
+            self.rows.recover({"poly_fp_mul:s": 1000})
+
+    def test_recovery_refuses_an_orphan_of_another_identity(self):
+        self.accept()
+        rec = row(
+            row="mat_fp_det", n=60, machine=dict(row()["machine"], cpu="Other CPU")
+        )
+        data, _ = blob(rec)
+        (self.d / "rows/x86/mat_fp_det-s.json").write_bytes(data)
+        self.rows.plan = plan(
+            points=["poly_fp_mul:s", "mat_fp_det:s"],
+            expected_inputs=dict(
+                plan()["expected_inputs"],
+                **{"mat_fp_det:s": {"n": 60, "variants": 8, "input_hash": "308890519"}},
+            ),
+        )
+        with self.assertRaisesRegex(shard.Fatal, "identity"):
+            self.rows.recover({"poly_fp_mul:s": 1000, "mat_fp_det:s": 60})
+        self.assertFalse((self.d / "rows/x86/mat_fp_det-s.json").exists())
+        self.assertEqual(
+            [e["key"] for e in self.led.events if e["ev"] == "accepted"],
+            ["poly_fp_mul:s"],
+        )
+
+    def test_new_directories_are_fsynced_in_their_parents(self):
+        from unittest import mock
+
+        synced = []
+        real = shard.fsync_dir
+
+        def spy(d):
+            synced.append(Path(d))
+            real(d)
+
+        with mock.patch.object(shard, "fsync_dir", spy):
+            self.accept()
+        for d in ("rows", "rows/x86", "incoming", "incoming/x86"):
+            self.assertIn((self.d / d).parent, synced, d)
+        self.assertIn(self.d / "rows/x86", synced)
+
     def test_a_symlinked_part_is_not_followed(self):
         target = self.d / "outside.txt"
         target.write_text("keep")
@@ -396,11 +504,20 @@ class FakeProvider:
             "ip": f"10.0.0.{self.n}",
         }
 
+    on_create = None
+    vanish = False
+    names_fail = False
+
     def create(self, name, mt, zone, image, hours, timeout):
         self.calls.append(("create", name))
+        if self.on_create:
+            self.on_create(name)
+        if name in self.vms:
+            raise shard.ProviderError("already exists")
         if name in self.create_raises:
             raise shard.ProviderError("timed out")
-        self.vms[name] = self.inst(name, mt, zone, image, hours)
+        if not self.vanish:  # (vanish: made, billed, preempted unseen)
+            self.vms[name] = self.inst(name, mt, zone, image, hours)
         if name in self.create_but_raise:
             raise shard.ProviderError("timed out after creating")
 
@@ -408,6 +525,8 @@ class FakeProvider:
         return self.vms.get(name)
 
     def names(self, prefix):
+        if self.names_fail:
+            raise shard.ProviderError("list failed")
         return [v for k, v in sorted(self.vms.items()) if k.startswith(prefix)]
 
     def delete(self, name):
@@ -430,16 +549,33 @@ class FakeRemote:
     def vm_of(self, ip):
         return next((n for n, v in self.provider.vms.items() if v["ip"] == ip), None)
 
+    on_push = on_setup = on_run = on_fetch = None
+
     def push(self, ip, local, remote, timeout):
         if not self.vm_of(ip):
             raise shard.TransferError("gone")
+        data = Path(local).read_bytes()
+        if self.on_push:
+            data = self.on_push(data)
+        self.fs[(self.vm_of(ip), remote)] = data
 
     def run(self, ip, words, timeout):
         name = self.vm_of(ip)
         if not name:
             return {"status": "error", "output": "ssh: no route"}
+        if words[0] == "sha256sum":
+            data = self.fs.get((name, words[-1]), b"")
+            return {
+                "status": "ok",
+                "output": hashlib.sha256(data).hexdigest() + "  x\n",
+            }
         if "vm-setup.sh" in " ".join(words):
+            self.log.append(("setup", name))
+            if self.on_setup:
+                self.on_setup(name)
             return {"status": "error" if self.build_fails else "ok", "output": "build"}
+        if self.on_run:
+            self.on_run(name)
         key = words[words.index("--only") + 1] + ":" + words[words.index("--sizes") + 1]
         self.provider.clock.t += 1000  # (a point takes time)
         self.log.append(
@@ -470,6 +606,8 @@ class FakeRemote:
         return {"status": "ok", "output": ""}
 
     def fetch(self, ip, path, max_bytes, timeout):
+        if self.on_fetch:
+            self.on_fetch(path)
         if self.fetch_fails:
             self.fetch_fails -= 1
             raise shard.TransferError("reset")
@@ -533,7 +671,7 @@ class Drivers(unittest.TestCase):
         rep = self.driver().run()
         self.assertEqual((rep["accepted"], rep["left"], rep["fatal"]), (3, [], []))
         # (no point started before the previous one was accepted)
-        self.assertEqual([x[3] for x in self.remote.log], [0, 1, 2])
+        self.assertEqual([x[3] for x in self.remote.log if x[0] == "run"], [0, 1, 2])
         self.assertEqual(self.prov.vms, {})
         self.assertEqual(len(self.events("deleted")), 1)
         self.assertLessEqual(rep["charged_hours"], self.plan["envelope_hours"])
@@ -607,7 +745,7 @@ class Drivers(unittest.TestCase):
         rep = self.driver().run()
         self.assertTrue(rep["fatal"])
         self.assertEqual(self.events("accepted"), [])
-        self.assertEqual(len(self.remote.log), 1)
+        self.assertEqual(len([x for x in self.remote.log if x[0] == "run"]), 1)
         self.assertEqual(self.prov.vms, {})
 
     def test_a_failed_build_stops_the_type(self):
@@ -626,6 +764,253 @@ class Drivers(unittest.TestCase):
         (self.d / "plan.json").write_bytes(shard.canonical(self.plan))
         (self.d / "payload.tar").write_bytes(b"other")
         self.assertTrue(self.driver().run()["fatal"])
+
+    # -- unobserved creates (charged in full, never refunded)
+    def test_creates_preempted_before_observation_stay_charged(self):
+        self.plan["envelope_hours"] = 7
+        (self.d / "plan.json").write_bytes(shard.canonical(self.plan))
+        self.prov.vanish = True
+        rep = self.driver().run()
+        # two 3 h VMs fit 7 h with their create allowance, a third doesn't;
+        # each vanished one stays charged its maxRunDuration + T_create
+        self.assertEqual(len(self.events("reserve")), 2)
+        self.assertEqual(len(self.events("absent")), 2)
+        self.assertAlmostEqual(rep["charged_hours"], 2 * (3 + 600 / H), places=3)
+        self.assertLessEqual(rep["charged_hours"], 7)
+        self.assertEqual(rep["accepted"], 0)
+
+    def test_a_late_completing_create_is_adopted_deleted_and_charged(self):
+        first = "bc-0123456789abcdef-x86-0"
+        self.prov.create_raises.add(first)
+        p = self.plan["types"]["x86"]
+
+        def land(name):
+            if name == "bc-0123456789abcdef-x86-1" and first not in self.prov.vms:
+                self.prov.vms[first] = self.prov.inst(
+                    first, p["machine_type"], p["zones"][0], p["image"], p["hours"]
+                )
+                self.prov.create_raises.discard(first)
+
+        self.prov.on_create = land
+        rep = self.driver().run()
+        self.assertEqual(rep["accepted"], 3)
+        self.assertEqual(self.prov.vms, {})
+        self.assertIn(("delete", first), self.prov.calls)
+        self.assertEqual([e["name"] for e in self.events("created")].count(first), 1)
+        self.assertEqual(rep["fatal"], [])
+
+    def test_a_restart_keeps_every_unobserved_charge(self):
+        self.plan["envelope_hours"] = 7
+        (self.d / "plan.json").write_bytes(shard.canonical(self.plan))
+        self.prov.vanish = True
+        before = self.driver().run()["charged_hours"]
+        self.prov.vanish = False
+        dr = self.driver()
+        dr.bootstrap()
+        dr.reconcile()
+        self.assertAlmostEqual(
+            shard.charged_hours(dr.ledger.events, self.clock()), before, places=3
+        )
+        self.assertAlmostEqual(before, 2 * (3 + 600 / H), places=3)
+
+    # -- deletion only of a VM proven ours
+    def swap_after_first_point(self, **change):
+        def swap(name):
+            if len(self.remote.log) == 1:  # (after setup, at the first point)
+                self.prov.vms[name] = dict(self.prov.vms[name], **change)
+
+        self.remote.on_run = swap
+
+    def test_a_relabelled_live_vm_is_never_deleted(self):
+        name = "bc-0123456789abcdef-x86-0"
+        self.swap_after_first_point(
+            labels={
+                "owner": "someone",
+                "purpose": "bench",
+                "bench-run": "0123456789abcdef",
+            }
+        )
+        self.remote.fetch_fails = 99  # (so the worker retires it)
+        rep = self.driver().run()
+        self.assertTrue(any("untouched" in f for f in rep["fatal"]))
+        self.assertIn(name, self.prov.vms)
+        self.assertNotIn(("delete", name), self.prov.calls)
+
+    def test_a_recreated_vm_under_the_name_is_never_deleted(self):
+        name = "bc-0123456789abcdef-x86-0"
+        self.swap_after_first_point(creationTimestamp="2030-01-01T00:00:00+00:00")
+        rep = self.driver().run()
+        self.assertTrue(any("not the recorded" in f for f in rep["fatal"]))
+        self.assertIn(name, self.prov.vms)
+        self.assertNotIn(("delete", name), self.prov.calls)
+
+    def test_a_listing_failure_deletes_nothing(self):
+        # (a restart finds a live VM in its ledger, and can't list)
+        name = "bc-0123456789abcdef-x86-0"
+        dr = self.driver()
+        dr.bootstrap()
+        dr.ledger.append(
+            {
+                "ev": "reserve",
+                "name": name,
+                "type": "x86",
+                "zone": "northamerica-northeast2-a",
+                "max_run_s": 10800,
+                "t_create_s": 600,
+            }
+        )
+        self.prov.create(
+            name,
+            "n2-standard-16",
+            "northamerica-northeast2-a",
+            "sb-base-20261112c",
+            3,
+            30,
+        )
+        dr.ledger.append(
+            {
+                "ev": "created",
+                "name": name,
+                "creation": shard.creation_time(self.prov.vms[name]),
+            }
+        )
+        self.prov.calls.clear()
+        self.prov.names_fail = True
+        rep = self.run_with_stop()
+        self.assertTrue(any("cannot list" in f for f in rep["fatal"]))
+        self.assertIn(name, self.prov.vms)
+        self.assertNotIn(("delete", name), self.prov.calls)
+
+    def test_a_preexisting_vm_with_the_reserved_name_is_untouched(self):
+        name = "bc-0123456789abcdef-x86-0"
+        inst = dict(
+            self.prov.inst(
+                name,
+                "n2-standard-16",
+                "northamerica-northeast2-a",
+                "sb-base-20261112c",
+                3,
+            ),
+            creationTimestamp="2020-01-01T00:00:00+00:00",
+        )
+        # (it appears after this run's start-up listing, just as it creates)
+        self.prov.on_create = lambda n: self.prov.vms.setdefault(name, inst)
+        rep = self.driver().run()
+        self.assertTrue(any("untouched" in f for f in rep["fatal"]))
+        self.assertIn(name, self.prov.vms)
+        self.assertNotIn(("delete", name), self.prov.calls)
+        self.assertEqual(self.remote.log, [])
+
+    # -- the approved payload, and only it
+    def test_a_payload_changed_after_bootstrap_is_never_sent(self):
+        self.prov.on_create = lambda n: (self.d / "payload.tar").write_bytes(b"evil")
+        rep = self.driver().run()
+        self.assertTrue(any("changed after its approval" in f for f in rep["fatal"]))
+        self.assertEqual(self.remote.fs, {})
+        self.assertEqual(self.remote.log, [])
+        self.assertEqual(self.prov.vms, {})
+
+    def test_a_payload_changed_during_the_copy_is_never_extracted(self):
+        self.remote.on_push = lambda data: b"evil"
+        rep = self.driver().run()
+        self.assertTrue(any("uploaded payload" in f for f in rep["fatal"]))
+        self.assertEqual(self.remote.log, [])
+        self.assertEqual(self.prov.vms, {})
+        self.assertEqual(rep["accepted"], 0)
+
+    # -- stopping: signals, and exceptions in workers
+    def run_with_stop(self):
+        import threading
+
+        self.driver_stop = threading.Event()
+        dr = shard.Driver(
+            self.d,
+            self.prov,
+            self.remote,
+            self.d / "payload.tar",
+            clock=self.clock,
+            sleep=self.clock.sleep,
+            poll_s=30,
+            stop=self.driver_stop,
+        )
+        orig = dr.bootstrap
+
+        def boot():
+            orig()
+            self.remote.ledger = dr.ledger
+
+        dr.bootstrap = boot
+        before = set(threading.enumerate())
+        rep = dr.run()
+        # every worker joined before run() returned, the lock released
+        self.assertEqual(set(threading.enumerate()) - before, set())
+        os.close(shard.take_lock(self.d))
+        self.calls_at_return = list(self.prov.calls)
+        return rep
+
+    def assert_stopped_cleanly(self, rep):
+        self.assertTrue(any("signal" in f for f in rep["fatal"]), rep["fatal"])
+        self.assertEqual(self.prov.vms, {})
+        self.assertEqual(self.events("accepted")[1:], [])
+        self.assertEqual(self.prov.calls, self.calls_at_return)
+        # nothing was reserved after the stop
+        self.assertEqual(len(self.events("reserve")), 1)
+
+    def sigterm(self, *_a):
+        import signal
+
+        # (the handler runs in the main thread; this worker waits for it,
+        # as a real one would be in a remote command when it lands)
+        os.kill(os.getpid(), signal.SIGTERM)
+        self.assertTrue(self.driver_stop.wait(5))
+
+    def test_sigterm_during_create(self):
+        self.prov.on_create = self.sigterm
+        self.assert_stopped_cleanly(self.run_with_stop())
+        self.assertEqual(self.remote.log, [])
+
+    def test_sigterm_during_setup(self):
+        self.remote.on_setup = self.sigterm
+        self.assert_stopped_cleanly(self.run_with_stop())
+        self.assertEqual([x[0] for x in self.remote.log], ["setup"])
+
+    def test_sigterm_during_a_point(self):
+        self.remote.on_run = self.sigterm
+        rep = self.run_with_stop()
+        self.assert_stopped_cleanly(rep)
+        self.assertEqual(len([x for x in self.remote.log if x[0] == "run"]), 1)
+
+    def test_sigterm_during_a_transfer(self):
+        self.remote.on_fetch = self.sigterm
+        self.remote.fetch_fails = 99
+        rep = self.run_with_stop()
+        self.assert_stopped_cleanly(rep)
+        self.assertEqual(self.events("retired"), [])
+
+    def test_a_worker_exception_is_fatal_and_cleaned_up(self):
+        def boom(_name):
+            raise RuntimeError("boom")
+
+        self.remote.on_run = boom
+        rep = self.run_with_stop()
+        self.assertTrue(any("RuntimeError: boom" in f for f in rep["fatal"]))
+        self.assertEqual(self.prov.vms, {})
+        self.assertEqual(self.prov.calls, self.calls_at_return)
+
+    def test_a_ledger_write_failure_stops_before_the_create(self):
+        from unittest import mock
+
+        real = os.write
+
+        def fail_reserve(fd, data):
+            if b'"reserve"' in bytes(data):
+                raise OSError(28, "No space left on device")
+            return real(fd, data)
+
+        with mock.patch.object(shard.os, "write", fail_reserve):
+            rep = self.driver().run()
+        self.assertTrue(any("No space" in f for f in rep["fatal"]))
+        self.assertEqual(self.prov.calls, [])
 
     def test_a_restart_adopts_an_unacknowledged_row_and_measures_only_the_rest(self):
         key = "poly_fp_mul:s"
@@ -678,6 +1063,40 @@ class Transport(unittest.TestCase):
         self.stub("ssh", f"echo $$ > {pidfile}; exec sleep 600\n")
         with self.assertRaisesRegex(shard.TransferError, "timed out"):
             shard.Ssh(self.d).fetch("10.0.0.1", "f", 100, 1.0)
+        time.sleep(0.2)
+        pid = int(pidfile.read_text())
+        self.assertFalse(
+            Path(f"/proc/{pid}").exists()
+            and Path(f"/proc/{pid}/stat").read_text().split()[2] != "Z"
+        )
+
+    def test_a_sidecar_read_never_buffers_past_its_bound(self):
+        from unittest import mock
+
+        self.stub("ssh", "exec yes\n")
+        sizes, real = [], os.read
+
+        def spy(fd, n):
+            sizes.append(n)
+            return real(fd, n)
+
+        with mock.patch.object(shard.os, "read", spy):
+            with self.assertRaisesRegex(shard.TransferError, "more than"):
+                shard.Ssh(self.d).fetch("10.0.0.1", "f", shard.MAX_SIDECAR, 10)
+        # (50000: subprocess's own read of its exec-error pipe)
+        self.assertLessEqual(max(n for n in sizes if n != 50000), shard.MAX_SIDECAR + 1)
+
+    def test_a_cancelled_command_is_cut(self):
+        import threading
+
+        pidfile = self.d / "pid"
+        self.stub("ssh", f"echo $$ > {pidfile}; exec sleep 600\n")
+        stop = threading.Event()
+        threading.Timer(0.5, stop.set).start()
+        t0 = time.monotonic()
+        r = shard.Ssh(self.d, stop).run("10.0.0.1", ["true"], 60)
+        self.assertEqual(r["status"], "cancelled")
+        self.assertLess(time.monotonic() - t0, 5)
         time.sleep(0.2)
         pid = int(pidfile.read_text())
         self.assertFalse(

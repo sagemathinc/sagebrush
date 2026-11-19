@@ -22,7 +22,13 @@ uv pip install --python engine/.venv/bin/python engine/py/dist/*.whl >/dev/null
 # the WebAssembly modules, built with CI's path mapping, then the CLI that embeds the engine
 pnpm install --frozen-lockfile >/dev/null
 RUSTFLAGS="--remap-path-prefix=$HOME/.cargo=/home/runner/.cargo" node scripts/build-engine.mjs >/dev/null
-node scripts/check-fresh-wasm.mjs || echo "warning: the fresh engine wasm differs from wasm/pins.json (run.py records engine_pin; the driver refuses an unpinned engine)"
+# The fresh engine wasm must equal its pin, strictly (the check alone only warns outside CI's push, dispatch and
+# schedule events): a mismatch prints the fresh and the pinned sha256 of each module and stops this type
+if ! node --input-type=module -e 'import { checkFreshWasm } from "./scripts/check-fresh-wasm.mjs";
+const r = checkFreshWasm({ event: "push" }); console.log(r.message); process.exit(r.status);'; then
+  echo "error: the fresh engine wasm differs from wasm/pins.json (fresh and pinned sha256 above)" >&2
+  exit 1
+fi
 pnpm run build >/dev/null
 node scripts/build-cli.mjs >/dev/null
 # static FLINT for the Rust oracle, from the checked tarball

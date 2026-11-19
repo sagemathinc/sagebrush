@@ -2,8 +2,8 @@
 """The shard driver: one harness run across spot VMs (design: harness PR 3).
 
 It runs in the project. It reserves, creates, checks and deletes VMs only
-through /scratch/sagebrush-gcp/sbvm.py (argv, never a shell), under a plan
-@sagebrush approved by its sha256, and inside a VM-hour envelope that
+through the project's VM tool, sbvm.py (--sbvm; argv, never a shell), under a plan
+approved by its sha256, and inside a VM-hour envelope that
 counts every VM from its reservation, retries and preemptions included. It
 sends each VM a git archive of the plan's commit, builds there once, then
 has the VM measure one point at a time. It fetches each point's file,
@@ -19,7 +19,12 @@ State lives in a run directory:
   incoming/<type>/ partial transfers (never read as results)
   lock             held (flock) for the driver's whole life
 
-  python3 bench/core/shard.py RUN_DIR [--repair-tail] [--dry-run]
+  python3 bench/core/shard.py plan RUN_DIR --types TYPES.json [--envelope H]
+  python3 bench/core/shard.py run RUN_DIR --sbvm PATH/sbvm.py [--repair-tail]
+
+SIGINT and SIGTERM stop it cleanly: no new reservation or point, the
+remote commands in flight are cut, every worker is joined, then every VM
+proven to be this run's is deleted, and only then is the lock released.
 """
 
 from __future__ import annotations
@@ -38,7 +43,6 @@ from pathlib import Path
 
 HERE = Path(__file__).resolve().parent
 ROOT = HERE.parents[1]
-SBVM = Path("/scratch/sagebrush-gcp/sbvm.py")
 NAME_RE = re.compile(r"^[a-z][a-z0-9-]{0,62}$")
 RUNID_RE = re.compile(r"^[0-9a-f]{16}$")
 TYPE_RE = re.compile(r"^[a-z][a-z0-9]{0,11}$")
@@ -138,13 +142,17 @@ def validate_plan(plan: dict) -> None:
 class Ledger:
     """Append-only JSONL: each line is fsynced before the action it
     announces. A torn last line (no newline, or not JSON) makes the driver
-    refuse to start; --repair-tail moves exactly those bytes aside."""
+    refuse to start; --repair-tail moves exactly those bytes aside. A write
+    or fsync that fails (a short write that can't be completed, ENOSPC)
+    is Fatal before the action, and the ledger takes no more lines."""
 
     def __init__(self, path: Path, clock=time.time):
         self.path, self.clock = path, clock
         self.events: list[dict] = []
         self.lock = threading.Lock()
-        data = path.read_bytes() if path.exists() else b""
+        self.broken = False
+        new = not path.exists()
+        data = b"" if new else path.read_bytes()
         if data and not data.endswith(b"\n"):
             raise Fatal(
                 f"{path}: the last line is torn (no newline); run with --repair-tail"
@@ -161,13 +169,29 @@ class Ledger:
         self.fd = os.open(
             path, os.O_WRONLY | os.O_APPEND | os.O_CREAT | os.O_NOFOLLOW, 0o644
         )
+        if new:
+            os.fsync(self.fd)
+            fsync_dir(path.parent)
 
     def append(self, ev: dict) -> dict:
         ev = dict(ev, t=ev.get("t", self.clock()))
-        line = json.dumps(ev, sort_keys=True).encode() + b"\n"
+        line = memoryview(json.dumps(ev, sort_keys=True).encode() + b"\n")
         with self.lock:
-            os.write(self.fd, line)
-            os.fsync(self.fd)
+            if self.broken:
+                raise Fatal("the ledger had a failed write; nothing more is recorded")
+            try:
+                while line:
+                    n = os.write(self.fd, line)
+                    if n <= 0:
+                        raise OSError("the write made no progress")
+                    line = line[n:]
+                os.fsync(self.fd)
+            except OSError as e:
+                self.broken = True
+                raise Fatal(
+                    f"ledger write failed ({e}): the action it announced is not taken"
+                    " (a torn last line is refused at the next start; --repair-tail)"
+                ) from None
             self.events.append(ev)
         return ev
 
@@ -195,7 +219,10 @@ class Ledger:
 
 def vm_states(events: list[dict]) -> dict:
     """Per reserved VM name: its reservation, creation, end and state
-    ("unknown", "live", "deleted", "absent")."""
+    ("unknown", "live", "deleted", "absent"). "absent" means only that no
+    VM of the name was seen once its create window had passed: the create
+    may have made a VM that was preempted before anyone saw it, or may
+    still complete, so it proves nothing about billing."""
     vms: dict[str, dict] = {}
     for ev in events:
         name = ev.get("name")
@@ -212,7 +239,7 @@ def vm_states(events: list[dict]) -> dict:
             v = vms[name]
             if ev["ev"] == "created":
                 v["created"] = ev["creation"]
-                if v["state"] == "unknown":
+                if v["state"] in ("unknown", "absent"):
                     v["state"] = "live"
             elif ev["ev"] == "deleted":
                 v["state"], v["end"] = "deleted", ev["t"]
@@ -225,13 +252,13 @@ def charged_hours(events: list[dict], now: float) -> float:
     """Consumed plus outstanding VM-hours (draft-3 accounting): a VM counts
     from min(reservation, creation); a deleted one until its confirmed
     deletion (at most its expiry); an expired one its full lifetime; a live
-    one its full remaining reservation; one whose creation is unknown,
-    maxRunDuration + T_create. A reservation proven never to have existed
-    counts nothing."""
+    one its full remaining reservation. One whose creation was never
+    observed (unknown, or absent after its window) counts maxRunDuration +
+    T_create, for good: a VM it made may have run and been preempted
+    unseen, or may appear late, and either bills at most maxRunDuration
+    from its own creation. Nothing is ever refunded for not being seen."""
     total = 0.0
     for v in vm_states(events).values():
-        if v["state"] == "absent":
-            continue
         start = min(v["reserved"], v.get("created", v["reserved"]))
         if "created" not in v:
             total += v["max_run_s"] + v["t_create_s"]
@@ -266,6 +293,22 @@ def fsync_dir(d: Path) -> None:
         os.fsync(fd)
     finally:
         os.close(fd)
+
+
+def make_dirs(d: Path) -> None:
+    """mkdir -p, with each new directory's entry fsynced in its parent (a
+    rename's directory fsync persists entries in that directory, not the
+    directory's own link)."""
+    missing = []
+    while not d.is_dir():
+        missing.append(d)
+        d = d.parent
+    for m in reversed(missing):
+        try:
+            m.mkdir()
+        except FileExistsError:
+            pass
+        fsync_dir(m.parent)
 
 
 def check_row(
@@ -380,7 +423,7 @@ class Rows:
                     f"{tk}: a point's identity differs from the type's (another machine, toolchain or binary)"
                 )
             return
-        path.parent.mkdir(parents=True, exist_ok=True)
+        make_dirs(path.parent)
         tmp = path.with_name(".identity.json.tmp")
         fd = os.open(tmp, os.O_WRONLY | os.O_CREAT | os.O_TRUNC | os.O_NOFOLLOW, 0o644)
         with os.fdopen(fd, "wb") as f:
@@ -419,8 +462,8 @@ class Rows:
                     f"{tk}/{key}: a different file is already accepted; the new one is quarantined"
                 )
             self.check_identity(tk, rec)
-            part.parent.mkdir(parents=True, exist_ok=True)
-            dest.parent.mkdir(parents=True, exist_ok=True)
+            make_dirs(part.parent)
+            make_dirs(dest.parent)
             if part.exists() or part.is_symlink():
                 part.unlink()
             fd = os.open(
@@ -439,7 +482,7 @@ class Rows:
 
     def quarantine(self, tk: str, key: str, data: bytes, sha: str) -> None:
         q = self.run_dir / "rows" / tk / ".conflict"
-        q.mkdir(parents=True, exist_ok=True)
+        make_dirs(q)
         p = q / f"{key.replace(':', '-')}-{sha[:16]}.json"
         if not p.exists():
             fd = os.open(p, os.O_WRONLY | os.O_CREAT | os.O_EXCL | os.O_NOFOLLOW, 0o644)
@@ -449,11 +492,37 @@ class Rows:
                 os.fsync(f.fileno())
 
     def recover(self, sizes: dict) -> int:
-        """After a crash between a rename and its ledger line: every file in
-        rows/<type>/ without an accepted line is checked again and adopted
-        (its key and sha256), never measured again; one that fails the
-        checks is quarantined and fatal. Partial .part files are removed."""
-        done = self.accepted()
+        """At every start, before anything counts as done. Each acknowledged
+        point must still be its file, with the acknowledged sha256, and pass
+        every acceptance check again (schema, engine pin, the type's
+        identity); one that is missing, changed or failing is Fatal (never
+        counted, never silently measured again). Then, after a crash between
+        a rename and its ledger line: every file in rows/<type>/ without an
+        accepted line goes through the same checks and is adopted (its key
+        and sha256), never measured again; one that fails them is
+        quarantined and fatal. Partial .part files are removed."""
+        acks = {}
+        for e in self.ledger.events:
+            if e["ev"] == "accepted":
+                acks[(e["type"], e["key"])] = e["sha256"]
+        for (tk, key), sha in sorted(acks.items()):
+            dest, _ = self.paths(tk, key)
+            if dest.is_symlink() or not dest.is_file():
+                raise Fatal(
+                    f"recovery: {tk}/{key} is acknowledged but its file is missing;"
+                    " refusing to count it or measure it again"
+                )
+            data = dest.read_bytes()
+            if hashlib.sha256(data).hexdigest() != sha:
+                raise Fatal(f"recovery: {tk}/{key} changed after it was acknowledged")
+            try:
+                _, rec = check_row(data, sha.encode(), key, self.plan, sizes[key])
+                self.check_identity(tk, rec)
+            except (Fatal, KeyError) as e:
+                raise Fatal(
+                    f"recovery: acknowledged {tk}/{key} fails its checks ({e})"
+                ) from None
+        done = set(acks)
         adopted = 0
         for tdir in sorted((self.run_dir / "rows").glob("*")):
             if not tdir.is_dir() or not TYPE_RE.match(tdir.name):
@@ -467,13 +536,14 @@ class Rows:
                     continue
                 data = f.read_bytes()
                 try:
-                    sha, _ = check_row(
+                    sha, rec = check_row(
                         data,
                         hashlib.sha256(data).hexdigest().encode(),
                         key,
                         self.plan,
                         sizes[key],
                     )
+                    self.check_identity(tdir.name, rec)
                 except (Fatal, KeyError) as e:
                     self.quarantine(
                         tdir.name, key, data, hashlib.sha256(data).hexdigest()
@@ -515,17 +585,21 @@ def take_lock(run_dir: Path):
 # ------------------------------------------------------------------ the VM tool
 
 
+class ListError(Fatal):
+    """The VMs under the run's prefix could not be listed."""
+
+
 class ProviderError(Exception):
     """A VM-tool call failed or timed out: its outcome is unknown, never a
     proof of anything."""
 
 
 class Sbvm:
-    """/scratch/sagebrush-gcp/sbvm.py, called with argv lists only (no
+    """The project's VM tool (sbvm.py), called with argv lists only (no
     shell). It creates every VM with no service account and the labels
     owner=sagebrush, purpose=bench and bench-run=<run id>."""
 
-    def __init__(self, run_id: str, tool: Path = SBVM, python: str = sys.executable):
+    def __init__(self, run_id: str, tool: Path, python: str = sys.executable):
         if not RUNID_RE.match(run_id):
             raise Fatal("bad run id")
         self.run_id, self.tool, self.python = run_id, tool, python
@@ -611,7 +685,9 @@ def creation_time(inst: dict) -> float:
 
 def ownership_problems(inst: dict, v: dict, plan: dict) -> list[str]:
     """Why a listed VM is not exactly the one this ledger reserved (S7), or
-    has a service account (S6). Empty: it is ours, as reserved."""
+    has a service account (S6). Empty: it is ours, as reserved. Once its
+    creation is recorded, the creation time must be that one (a VM made
+    again under the name is not ours)."""
     t = plan["types"][v["type"]]
     sched = inst.get("scheduling") or {}
     out = []
@@ -639,11 +715,18 @@ def ownership_problems(inst: dict, v: dict, plan: dict) -> list[str]:
     if inst.get("serviceAccounts"):
         out.append(f"service accounts {inst['serviceAccounts']}")
     try:
-        if creation_time(inst) < v["reserved"] - 120:
+        c = creation_time(inst)
+        if c < v["reserved"] - 120:
             out.append("created before its reservation")
+        if "created" in v and c != v["created"]:
+            out.append(f"creation {c}, not the recorded {v['created']}")
     except (KeyError, ValueError, TypeError):
         out.append("no creation time")
     return out
+
+
+def only_service_accounts(probs: list[str]) -> bool:
+    return all(p.startswith("service accounts") for p in probs)
 
 
 # ------------------------------------------------------------------ the remote side
@@ -658,7 +741,8 @@ class Ssh:
     fixed words, each shell-quoted; remote paths come from the requested
     point, never from the VM."""
 
-    def __init__(self, run_dir: Path):
+    def __init__(self, run_dir: Path, cancel: threading.Event | None = None):
+        self.cancel = cancel or threading.Event()
         self.opts = [
             "-o",
             "BatchMode=yes",
@@ -675,28 +759,65 @@ class Ssh:
             raise TransferError(f"bad address {ip!r}")
         return f"user@{ip}"
 
-    def run(self, ip: str, words: list[str], timeout: float) -> dict:
-        sys.path.insert(0, str(HERE))
-        import run as runner  # noqa: E402  (its process-group runner)
+    def _call(self, cmd: list[str], timeout: float) -> dict:
+        """cmd in its own process group: ok, error, timeout or cancelled
+        (the driver stopping), and the last 64 KiB of its output. The group
+        is killed on every way out."""
+        import signal
+        import tempfile
 
+        with tempfile.TemporaryFile() as out:
+            p = subprocess.Popen(
+                cmd,
+                stdin=subprocess.DEVNULL,
+                stdout=out,
+                stderr=subprocess.STDOUT,
+                start_new_session=True,
+            )
+            status, deadline = None, time.monotonic() + timeout
+            try:
+                while True:
+                    try:
+                        p.wait(timeout=0.25)
+                        break
+                    except subprocess.TimeoutExpired:
+                        if self.cancel.is_set():
+                            status = "cancelled"
+                            break
+                        if time.monotonic() > deadline:
+                            status = "timeout"
+                            break
+            finally:
+                try:
+                    os.killpg(p.pid, signal.SIGKILL)
+                except (ProcessLookupError, PermissionError):
+                    pass
+                p.wait()
+            out.seek(0, os.SEEK_END)
+            out.seek(max(0, out.tell() - 65536))
+            text = out.read().decode(errors="replace")
+        if status is None:
+            status = "ok" if p.returncode == 0 else "error"
+        return {"status": status, "exit": p.returncode, "output": text}
+
+    def run(self, ip: str, words: list[str], timeout: float) -> dict:
         cmd = [
             "ssh",
             *self.opts,
             self._target(ip),
             " ".join(shlex.quote(w) for w in words),
         ]
-        return runner.run_child(cmd, timeout)
+        return self._call(cmd, timeout)
 
     def push(self, ip: str, local: Path, remote_name: str, timeout: float) -> None:
         if not TOKEN_RE.match(remote_name.replace(".", "_").replace("-", "_")):
             raise TransferError(f"bad remote name {remote_name!r}")
-        r = subprocess.run(
+        r = self._call(
             ["scp", "-q", *self.opts, str(local), f"{self._target(ip)}:{remote_name}"],
-            capture_output=True,
-            timeout=timeout,
+            timeout,
         )
-        if r.returncode != 0:
-            raise TransferError(f"scp exit {r.returncode}")
+        if r["status"] != "ok":
+            raise TransferError(f"scp {r['status']} (exit {r['exit']})")
 
     def fetch(self, ip: str, path: str, max_bytes: int, timeout: float) -> bytes:
         """At most max_bytes from `cat -- path` on the VM; more is an error,
@@ -715,13 +836,16 @@ class Ssh:
         buf, deadline = bytearray(), time.monotonic() + timeout
         try:
             while True:
+                if self.cancel.is_set():
+                    raise TransferError(f"{path}: cancelled")
                 left = deadline - time.monotonic()
                 if left <= 0:
                     raise TransferError(f"{path}: timed out")
-                ready, _, _ = select.select([p.stdout], [], [], min(left, 1.0))
+                ready, _, _ = select.select([p.stdout], [], [], min(left, 0.25))
                 if not ready:
                     continue
-                chunk = os.read(p.stdout.fileno(), 65536)
+                # (never more than one byte past the bound in memory)
+                chunk = os.read(p.stdout.fileno(), min(65536, max_bytes + 1 - len(buf)))
                 if not chunk:
                     break
                 buf += chunk
@@ -772,6 +896,7 @@ class Driver:
         clock=time.time,
         sleep=time.sleep,
         poll_s: float = 15.0,
+        stop: threading.Event | None = None,
     ):
         self.run_dir, self.provider, self.remote, self.archive = (
             run_dir,
@@ -783,6 +908,13 @@ class Driver:
         self.spend = threading.Lock()
         self.stopped: dict[str, str] = {}
         self.fatal: list[str] = []
+        # (set by anything fatal and by SIGINT/SIGTERM: no new reservation,
+        # setup or point after it; the remote's commands in flight are cut)
+        self.stop = stop or threading.Event()
+
+    def fail(self, msg: str) -> None:
+        self.fatal.append(msg)
+        self.stop.set()
 
     # -- start
     def bootstrap(self) -> None:
@@ -817,13 +949,13 @@ class Driver:
         try:
             listed = {i["name"]: i for i in self.provider.names(self.prefix)}
         except ProviderError as e:
-            raise Fatal(
-                f"reconcile: cannot list VMs ({e}); nothing proven, nothing spent"
+            raise ListError(
+                f"reconcile: cannot list VMs ({e}); nothing proven, nothing spent or deleted"
             ) from None
         states = vm_states(self.ledger.events)
         for name, inst in listed.items():
             v = states.get(name)
-            if v is None or v["state"] in ("deleted", "absent"):
+            if v is None or v["state"] == "deleted":
                 raise Fatal(
                     f"reconcile: {name} carries this run's prefix but is not a live reservation of its ledger; untouched"
                 )
@@ -832,7 +964,9 @@ class Driver:
                 raise Fatal(
                     f"reconcile: {name} is not the VM reserved: {'; '.join(probs)}; untouched"
                 )
-            if v["state"] == "unknown":
+            # (an unknown create that did make it, or an absent one whose
+            # create completed late: observed now, then deleted as live)
+            if v["state"] in ("unknown", "absent"):
                 self.ledger.append(
                     {"ev": "created", "name": name, "creation": creation_time(inst)}
                 )
@@ -851,6 +985,33 @@ class Driver:
             elif now > v["reserved"] + v["t_create_s"]:
                 self.ledger.append({"ev": "absent", "name": name})
 
+    def late_creates(self) -> None:
+        """Adopt any reservation recorded absent whose VM has since
+        appeared (a create that completed late), so it is deleted rather
+        than left to bill until its maxRunDuration."""
+        states = vm_states(self.ledger.events)
+        if not any(v["state"] == "absent" for v in states.values()):
+            return
+        try:
+            listed = self.provider.names(self.prefix)
+        except ProviderError:
+            return
+        for inst in listed:
+            v = states.get(inst.get("name"))
+            if (
+                v
+                and v["state"] == "absent"
+                and not ownership_problems(inst, v, self.plan)
+            ):
+                self.ledger.append(
+                    {
+                        "ev": "created",
+                        "name": inst["name"],
+                        "creation": creation_time(inst),
+                    }
+                )
+                self.delete(inst["name"])
+
     # -- VMs
     def new_vm(self, tk: str) -> dict | None:
         """Reserve, create and verify one VM of type tk, or None when the
@@ -865,11 +1026,14 @@ class Driver:
         t = self.plan["types"][tk]
         with self.spend:
             while unknown_vms(self.ledger.events):
+                if self.stop.is_set():
+                    return None
                 self.reconcile()
                 if unknown_vms(self.ledger.events):
                     self.sleep(self.poll_s)
+            self.late_creates()
             if (
-                self.fatal
+                self.stop.is_set()
                 or tk in self.stopped
                 or not can_reserve(
                     self.ledger.events, self.plan, t["hours"], self.clock()
@@ -908,45 +1072,85 @@ class Driver:
                     {"ev": "create-unknown", "name": name, "detail": str(e)[:300]}
                 )
             # (resolved only by an exact-name read: found, or absent once
-            # the create window has passed)
+            # the create window has passed; absent is still charged in full.
+            # This runs to its end even when stopping: the create is in
+            # flight, and what it made must be recorded to be deleted)
             deadline = self.ledger.events[-1]["t"] + self.plan["t_create_s"]
             while True:
                 try:
                     inst = self.provider.show(name)
-                except ProviderError:
-                    inst = None if self.clock() <= deadline else "error"
+                except ProviderError as e:
+                    if self.clock() > deadline:
+                        raise Fatal(
+                            f"{name}: its create's outcome can't be read ({e});"
+                            " it stays unknown and charged in full"
+                        ) from None
+                    inst = None
                 if isinstance(inst, dict):
                     break
-                if inst is None and self.clock() > deadline:
+                if self.clock() > deadline:
                     self.ledger.append({"ev": "absent", "name": name})
                     return "absent"
                 self.sleep(self.poll_s)
             v = vm_states(self.ledger.events)[name]
+            probs = ownership_problems(inst, v, self.plan)
+            if probs and not only_service_accounts(probs):
+                raise Fatal(
+                    f"{name}: not the VM reserved ({'; '.join(probs)}); untouched,"
+                    " and its reservation stays charged in full"
+                )
             self.ledger.append(
                 {"ev": "created", "name": name, "creation": creation_time(inst)}
             )
-            probs = ownership_problems(inst, v, self.plan)
             if probs:
                 self.delete(name)
                 raise Fatal(f"{name}: created but not as reserved: {'; '.join(probs)}")
             return {"name": name, "type": tk, "ip": inst.get("ip")}
 
     def delete(self, name: str) -> None:
-        """Delete and confirm by an exact-name read; only then is billing
-        closed."""
-        self.ledger.append({"ev": "delete-requested", "name": name})
+        """Delete one VM this ledger reserved, and confirm it by an exact-name
+        read; only then is billing closed. Before every delete request, an
+        exact-name read must show the VM is the one reserved: every
+        ownership field (labels, type, zone, image, scheduling, lifetime,
+        and the recorded creation time once there is one). A service
+        account alone doesn't block it (everything else proves it ours).
+        Anything else, or a read that fails, is never deleted: it is
+        reported, and its maxRunDuration bounds it if it is ours."""
+        asked = False
         for _ in range(20):
+            v = vm_states(self.ledger.events).get(name)
+            if v is None:
+                self.fail(f"{name}: not a reservation of this ledger; untouched")
+                return
+            try:
+                inst = self.provider.show(name)
+            except ProviderError:
+                self.sleep(self.poll_s)
+                continue
+            if inst is None:
+                if v["state"] == "live":
+                    self.ledger.append({"ev": "deleted", "name": name})
+                # (an unknown or absent one stays charged in full)
+                return
+            probs = ownership_problems(inst, v, self.plan)
+            if probs and not only_service_accounts(probs):
+                self.fail(
+                    f"{name}: not deleted: not provably the VM reserved"
+                    f" ({'; '.join(probs)}); untouched"
+                )
+                return
+            if "created" not in v:
+                self.ledger.append(
+                    {"ev": "created", "name": name, "creation": creation_time(inst)}
+                )
+            if not asked:
+                self.ledger.append({"ev": "delete-requested", "name": name})
+                asked = True
             try:
                 self.provider.delete(name)
-                if self.provider.show(name) is None:
-                    self.ledger.append({"ev": "deleted", "name": name})
-                    return
             except ProviderError:
-                pass
-            self.sleep(self.poll_s)
-        self.fatal.append(
-            f"{name}: deletion not confirmed; it ends by its maxRunDuration"
-        )
+                self.sleep(self.poll_s)
+        self.fail(f"{name}: deletion not confirmed; it ends by its maxRunDuration")
 
     def alive(self, vm: dict) -> bool:
         try:
@@ -960,14 +1164,28 @@ class Driver:
         ledger. A failed build stops the type (the same commit fails the
         same way)."""
         t0 = self.clock()
+        want = self.plan["archive_sha256"]
         try:
+            # (the approved bytes: checked here just before the copy, and on
+            # the VM after it, before anything is extracted)
+            if hashlib.sha256(self.archive.read_bytes()).hexdigest() != want:
+                raise Fatal("payload.tar changed after its approval")
             self.remote.push(vm["ip"], self.archive, "payload.tar", 600)
+            r = self.remote.run(vm["ip"], ["sha256sum", "--", "payload.tar"], 300)
+            got = (r.get("output") or "").split()[:1]
+            if r["status"] == "ok" and got != [want]:
+                raise Fatal(
+                    f"{vm['name']}: the uploaded payload's sha256 is {got}, not the plan's {want}"
+                )
+            if r["status"] != "ok":
+                raise TransferError(f"sha256sum {r['status']}")
             r = self.remote.run(
                 vm["ip"],
                 [
                     "bash",
                     "-c",
-                    "mkdir -p sb && tar -xf payload.tar -C sb && bash sb/bench/core/vm-setup.sh",
+                    f"echo '{want}  payload.tar' | sha256sum -c --status -"
+                    " && mkdir -p sb && tar -xf payload.tar -C sb && bash sb/bench/core/vm-setup.sh",
                 ],
                 self.plan["types"][vm["type"]]["expected_build_hours"] * 3600 * 2 + 600,
             )
@@ -982,7 +1200,7 @@ class Driver:
                 "ok": ok,
             }
         )
-        if not ok and self.alive(vm):
+        if not ok and not self.stop.is_set() and self.alive(vm):
             self.stopped[vm["type"]] = (
                 f"the build failed on {vm['name']}: {str(r.get('output', ''))[-300:]}"
             )
@@ -1034,7 +1252,7 @@ class Driver:
     def worker(self, tk: str, queue: list[str]) -> None:
         vm = None
         try:
-            while not self.fatal and tk not in self.stopped:
+            while not self.stop.is_set() and tk not in self.stopped:
                 with self.spend:
                     if not queue:
                         return
@@ -1042,8 +1260,10 @@ class Driver:
                     vm = self.new_vm(tk)
                     if vm is None:
                         return
+                    if self.stop.is_set():
+                        continue
                     if not self.setup(vm):
-                        if tk in self.stopped:
+                        if tk in self.stopped or self.stop.is_set():
                             return
                         # (the VM went away during its build: a new one)
                         self.ledger.append(
@@ -1053,7 +1273,7 @@ class Driver:
                         vm = None
                         continue
                 with self.spend:
-                    if not queue:
+                    if not queue or self.stop.is_set():
                         return
                     key = queue.pop(0)
                 try:
@@ -1061,6 +1281,8 @@ class Driver:
                 except (TransferError, ProviderError) as e:
                     with self.spend:
                         queue.insert(0, key)
+                    if self.stop.is_set():
+                        return
                     if not self.alive(vm):
                         self.ledger.append(
                             {
@@ -1084,17 +1306,53 @@ class Driver:
                         )
                         vm = None
         except Fatal as e:
-            self.fatal.append(str(e))
+            self.fail(str(e))
+        except Exception as e:
+            self.fail(f"{tk} worker: {type(e).__name__}: {e}")
         finally:
-            if vm is not None and vm["name"] in {
-                n
-                for n, v in vm_states(self.ledger.events).items()
-                if v["state"] == "live"
-            }:
-                self.delete(vm["name"])
+            try:
+                if vm is not None and vm["name"] in {
+                    n
+                    for n, v in vm_states(self.ledger.events).items()
+                    if v["state"] == "live"
+                }:
+                    self.delete(vm["name"])
+            except Exception as e:
+                self.fail(f"{tk} worker cleanup: {type(e).__name__}: {e}")
+
+    def cleanup(self) -> None:
+        """After every worker has ended: list again, then delete every VM
+        of this ledger not proven closed (live, unknown, absent), each only
+        after its own exact-name ownership proof. Without a listing nothing
+        is deleted (nothing is proven), and an untrusted plan (bootstrap not
+        finished) deletes nothing either."""
+        if not hasattr(self, "rows"):
+            return
+        try:
+            self.reconcile()
+        except ListError as e:
+            self.fail(f"cleanup: {e}")
+            return
+        except Fatal as e:
+            self.fail(f"cleanup: {e}")
+        for name, v in vm_states(self.ledger.events).items():
+            if v["state"] in ("live", "unknown", "absent"):
+                try:
+                    self.delete(name)
+                except Exception as e:
+                    self.fail(f"cleanup {name}: {type(e).__name__}: {e}")
 
     def run(self) -> dict:
+        import signal
+
         lock = take_lock(self.run_dir)
+        threads: list[threading.Thread] = []
+        old = {}
+        if threading.current_thread() is threading.main_thread():
+            for sig in (signal.SIGINT, signal.SIGTERM):
+                old[sig] = signal.signal(
+                    sig, lambda s, _f: self.fail(f"stopped by signal {s}")
+                )
         try:
             self.bootstrap()
             self.rows.recover(point_sizes(self.plan))
@@ -1106,28 +1364,37 @@ class Driver:
                 if v["state"] == "live":
                     self.delete(name)
             done = self.rows.accepted()
-            threads = []
             for tk, t in self.plan["types"].items():
                 queue = sorted(
                     (k for k in self.plan["points"] if (tk, k) not in done),
                     key=lambda k: -expected_seconds(k),
                 )
                 for _ in range(t["vms"]):
-                    th = threading.Thread(
-                        target=self.worker, args=(tk, queue), daemon=True
-                    )
+                    if self.stop.is_set():
+                        break
+                    th = threading.Thread(target=self.worker, args=(tk, queue))
                     th.start()
                     threads.append(th)
             for th in threads:
-                th.join()
+                while th.is_alive():
+                    th.join(0.25)
         except Fatal as e:
-            self.fatal.append(str(e))
+            self.fail(str(e))
+        except Exception as e:
+            self.fail(f"driver: {type(e).__name__}: {e}")
         finally:
-            if hasattr(self, "ledger"):
-                for name, v in vm_states(self.ledger.events).items():
-                    if v["state"] == "live":
-                        self.delete(name)
-            os.close(lock)
+            # (order: stop, join every worker, clean up, restore the
+            # signal handlers, and only then release the lock)
+            self.stop.set()
+            for th in threads:
+                while th.is_alive():
+                    th.join(0.25)
+            try:
+                self.cleanup()
+            finally:
+                for sig, h in old.items():
+                    signal.signal(sig, h)
+                os.close(lock)
         return self.report()
 
     def report(self) -> dict:
@@ -1233,6 +1500,7 @@ def main(argv: list[str]) -> int:
     )
     r = sub.add_parser("run", help="run an approved plan")
     r.add_argument("run_dir", type=Path)
+    r.add_argument("--sbvm", type=Path, required=True, help="the VM tool, sbvm.py")
     r.add_argument("--repair-tail", action="store_true")
     a = ap.parse_args(argv)
     try:
@@ -1255,8 +1523,13 @@ def main(argv: list[str]) -> int:
                 "torn bytes to ledger.jsonl.torn",
             )
         plan = json.loads((a.run_dir / "plan.json").read_text())
+        stop = threading.Event()
         d = Driver(
-            a.run_dir, Sbvm(plan["run_id"]), Ssh(a.run_dir), a.run_dir / "payload.tar"
+            a.run_dir,
+            Sbvm(plan["run_id"], a.sbvm),
+            Ssh(a.run_dir, stop),
+            a.run_dir / "payload.tar",
+            stop=stop,
         )
         rep = d.run()
         print(json.dumps(rep, indent=1))
