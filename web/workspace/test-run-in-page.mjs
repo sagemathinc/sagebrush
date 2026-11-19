@@ -54,7 +54,7 @@ function setup(o = {}) {
           if (o.hold?.includes(id)) await new Promise((r) => waits.set(id, r));
           return page.answer(id, out);
         },
-        save: async () => { log.saves++; return shown; },
+        save: async () => { log.saves++; if (o.holdSave) await new Promise((r) => waits.set("save", r)); if (o.saveFails) throw new Error("late save failure"); return shown; },
         stop: () => { log.stops++; },
         close: () => { log.closed++; },
       };
@@ -181,6 +181,37 @@ await during("the grant revoked", (s) => s.setGrant(null), "revoked");
   const s = setup({ open: true, inputsGone: true });
   const { r, e } = await call(s);
   check(!e && r?.ended === "stopped" && s.log.started.length === 0 && s.log.fallback === 0, `the generation gone before the inputs: stopped, nothing run, no fallback: ${JSON.stringify(r ?? e?.message)}`);
+}
+
+// ---- ended while the save is held (a storage lock that doesn't answer): answered at once, let go, nothing returned
+const duringSave = async (what, act, want) => {
+  const s = setup({ open: true, holdSave: true, saveFails: what.includes("fails") });
+  const p = call(s, "/labs/n.ipynb", what.includes("timeout") ? { timeout_s: 1 } : {});
+  await until(() => s.waits.has("save"));
+  await act(s);
+  const { r, e } = await Promise.race([p, new Promise((go) => setTimeout(() => go({ e: new Error("waited for the save") }), 1500))]);
+  const free = s.holder.current === null;
+  const again = s.holder.current === null ? await call(setup({ open: true }), "/labs/n.ipynb") : null;
+  s.waits.get("save")();
+  await new Promise((go) => setTimeout(go, 20));
+  check(!e && r.ok === false && r.ended === want && !("cells" in r) && !("saved" in r) && free && again?.r?.ok === true && s.log.fallback === 0,
+    `a held save, then ${what}: ended ${want} at once, the run let go, nothing returned: ${JSON.stringify(r ?? e?.message)}`);
+};
+await duringSave("Stop", (s) => s.holder.current.stop(), "stopped");
+await duringSave("the deadline (timeout)", () => new Promise((go) => setTimeout(go, 1200)), "timeout");
+await duringSave("the grant revoked", (s) => s.setGrant(null), "revoked");
+await duringSave("another notebook shown", (s) => s.show(false), "stopped");
+await duringSave("pagehide", () => dispatchEvent(new Event("pagehide")), "stopped");
+await duringSave("the grant's write narrowed", (s) => s.setGrant({ ...s.ctx.grantNow(), write: false }), "revoked");
+await duringSave("the grant replaced", (s) => s.setGrant({ ...s.ctx.grantNow(), id: "g9" }), "revoked");
+await duringSave("Stop, the save then fails late", (s) => s.holder.current.stop(), "stopped");
+{
+  // (the page's save not proving the outputs kept: not "saved")
+  const s = setup({ open: true });
+  const inPage = s.host.inPage;
+  s.host.inPage = (...a) => { const pr = inPage(...a); return pr && { ...pr, save: async () => false }; };
+  const { r } = await call(s);
+  check(r?.ok === true && r.saved === "conflict" && r.cells?.length === 2, `the save not proved: done, its cells, saved "conflict": ${JSON.stringify(r)}`);
 }
 
 // ---- found rather than told: the generation checked at each cell's end and at delivery

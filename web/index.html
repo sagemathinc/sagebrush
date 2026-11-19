@@ -5206,7 +5206,17 @@ function agentPageRun(ref, path, gone) {
       const failed = r.ok === false || has("failed") || c.el.classList.contains("error");
       return { status: stopped ? "stopped" : failed ? "error" : "ok", images };
     },
-    save: async () => { if (!here()) return false; saveNow(); await nb.saved(); return here(); },
+    // (saved only if the workspace's copy now has what is shown: the notebook's save can end in a refusal it only says
+    //  (a quarantine, no storage), so its end alone is no proof)
+    save: async () => {
+      if (!here()) return false;
+      saveNow();
+      try { await nb.saved(); } catch { return false; }
+      const w = here() ? await wsNow() : null;
+      const r = w ? await w.read(path).catch(() => null) : null;
+      const outs = (d) => JSON.stringify((d?.cells ?? []).filter((c) => (c.type ?? "code") === "code").map((c) => [c.id, String(c.code ?? ""), c.outputs ?? []]));
+      return here() && r?.entry?.kind === "notebook" && r.entry.ref === ref && outs(r.content) === outs(nb.snapshot());
+    },
     // (the cell running, in the notebook shown, or in its own interpreter if another is shown now)
     stop: () => { if (here()) nb.interrupt(); else kernels.get(ref)?.kernel?.interrupt?.(); },
     close: () => { if (pageRunGone === tell) pageRunGone = null; },

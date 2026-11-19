@@ -57,6 +57,7 @@ try {
       a: await mk("/ip/a.ipynb", [{ id: "a1", code: "print(6*7)" }, { id: "am", type: "markdown", code: "text" }, { id: "a2", code: "y = 21\\ny * 2" }]),
       b: await mk("/ip/b.ipynb", [{ id: "b1", code: "print('b')" }]),
       once: await mk("/ip/once.ipynb", [{ id: "o1", code: "n = 1" }, { id: "o2", code: "import builtins\\nbuiltins.k = getattr(builtins, 'k', 0) + 1\\nprint(n, builtins.k)" }]),
+      clock: await mk("/ip/clock.ipynb", [{ id: "t1", code: "import time\\nprint(time.time_ns())" }]),
       slow: await mk("/ip/slow.ipynb", [{ id: "s1", code: "import time\\nprint('started', flush=True)\\ntime.sleep(20)" }, { id: "s2", code: "print('late')" }]),
     };
     return !!window.__M.run && window.__R.host().sandbox; })()`) === "ok", "the run module loads, the sandbox is here, three notebooks made");
@@ -96,6 +97,21 @@ try {
   check((await open("once")) === 2, "once.ipynb shown");
   r = await evaluate(`window.__run("workspace.run_notebook", { path: "/ip/once.ipynb" })`);
   check(r?.ok === true && r.cells?.[1]?.out === "1 1\n" && (await shown(1)) === "1 1\n", `reactive: each cell run once: ${JSON.stringify(r?.cells)}`);
+
+  // (the notebook's save refused, as its store says it (a quarantine, no storage): the result never says saved, and the
+  //  saved copy is unchanged; once saves work again, saved)
+  check((await open("clock")) === 1, "clock.ipynb shown");
+  const before = await stored("/ip/clock.ipynb");
+  r = await evaluate(`(async () => {
+    const st = window.sagebrush.notebook.store;
+    st.save = async () => "not saved: the test's refusal";
+    try { return await window.__run("workspace.run_notebook", { path: "/ip/clock.ipynb" }); } finally { delete st.save; } })()`);
+  const after = await stored("/ip/clock.ipynb");
+  check(r?.ok === true && r.saved !== "saved" && /^\d+\n$/.test(r.cells?.[0]?.out ?? "") && JSON.stringify(after) === JSON.stringify(before),
+    `the save refused: not "saved", the saved copy unchanged: ${JSON.stringify({ saved: r?.saved, out: r?.cells?.[0]?.out, before, after })}`);
+  r = await evaluate(`window.__run("workspace.run_notebook", { path: "/ip/clock.ipynb" })`);
+  const later = await stored("/ip/clock.ipynb");
+  check(r?.saved === "saved" && later?.[0] === r.cells?.[0]?.out, `saves working again: saved, the copy has its output: ${JSON.stringify({ saved: r?.saved, later })}`);
 
   // ---- not shown, or a narrower grant: today's run (nothing saved on main)
   r = await evaluate(`window.__run("workspace.run_notebook", { path: "/ip/b.ipynb" })`);

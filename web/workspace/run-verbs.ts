@@ -927,6 +927,8 @@ function runInPage(params: { timeout_s?: number }, ctx: RunCtx, host: RunHost, h
   let stopped = false, cause: "done" | "error" | "stopped" | "timeout" | "revoked" = "done", reason = "";
   let deadline: ReturnType<typeof setTimeout> | undefined, ended!: () => void;
   const endedP = new Promise<null>((r) => (ended = () => r(null)));
+  // (a page's promise raced with the end: its failure after the end, which no one waits for, isn't left unhandled)
+  const quiet = <T,>(p: Promise<T>) => (p.catch(() => {}), p);
   const end = (c: typeof cause, why = "") => {
     if (stopped) return;
     stopped = true; cause = c; reason = why;
@@ -954,7 +956,7 @@ function runInPage(params: { timeout_s?: number }, ctx: RunCtx, host: RunHost, h
   return (async () => {
     try {
       // (what runs: the notebook as shown now, this generation's, bounded as today's run's; its inputHash from it)
-      const doc = await Promise.race([pr.inputs(), endedP]);
+      const doc = await Promise.race([quiet(pr.inputs()), endedP]);
       lapsed();
       if (stopped || !doc) { end("stopped"); return cause === "revoked" ? { ok: false, ended: "revoked", reason } : { ok: false, ended: cause, ms: Math.round(performance.now() - t0) }; }
       if (doc.cells.length > RUN_LIMITS.cells) refuse(RUN_TEXT.tooManyCells(doc.cells.length));
@@ -970,7 +972,7 @@ function runInPage(params: { timeout_s?: number }, ctx: RunCtx, host: RunHost, h
         if (stopped || failed) break;
         const out = new Kept(RUN_LIMITS.cellHead, RUN_LIMITS.cellTail);
         // (an end doesn't wait for the cell: what it says after is dropped with its bounds)
-        const r = await Promise.race([pr.cell(co.id, out), endedP]);
+        const r = await Promise.race([quiet(pr.cell(co.id, out)), endedP]);
         lapsed();
         if (stopped || !r) break;
         co.status = r.status === "stopped" ? "skipped" : r.status;
@@ -983,7 +985,8 @@ function runInPage(params: { timeout_s?: number }, ctx: RunCtx, host: RunHost, h
       if (!stopped) {
         cause = failed ? "error" : "done";
         await host.hold?.("save");
-        try { if (await pr.save()) saved = "saved"; } catch {}
+        // (raced with the run's end, as each cell is: a save that never answers doesn't hold the run)
+        try { if ((await Promise.race([quiet(pr.save()), endedP])) === true && !stopped) saved = "saved"; } catch {}
       }
       await host.hold?.("deliver");
       lapsed();
