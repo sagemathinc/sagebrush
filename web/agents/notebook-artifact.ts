@@ -2,8 +2,10 @@
 // (/sagebrush-notebook.js, loaded on first use; its kernel worker, /sagebrush-worker.js, only on the first Run).
 // The artifacts plan (r2 + r2.1): only the person's Run runs code (the component is created non-reactive, the host
 // never calls applyEdits); the store is the notebook page's own IdbStore, bound to the document's ref, so a save
-// can never reach another document at the same path; under sync's journal the pane is read-only; remote pictures
-// wait for a click whatever the document says.
+// can never reach another document at the same path; under sync's journal, the page's own journal store, with its
+// writer lock: the pane writes while it holds it, else follows the tab that does, as another tab of the page would
+// (web/page/handover.ts), and an agent's edit asks for it; remote pictures wait for a click whatever the document says.
+import { writerHandover } from "../page/handover";
 import type { Workspace } from "../workspace/api";
 import { canonical, cellForm, preflight, type NotebookEdit } from "../workspace/notebook-edit";
 
@@ -71,10 +73,12 @@ export async function fenceOf(db: IDBDatabase): Promise<Fence> {
   });
 }
 
-/** Whether the fence moved since `seen` in a way the stores refuse (stores.js fenceRefusal, for an "ok" writer). */
+/** Whether the fence moved since `seen` in a way the stores refuse (stores.js fenceRefusal): for a writer that
+ * mounted under "ok", or under sync's "journal", any other phase, or a change of phase. */
 export function fenceMoved(f: Fence, seen: Fence): boolean {
   if (!f) return !!seen;
-  if (f.quarantined || (f.phase ?? "ok") !== "ok") return true;
+  const phase = f.phase ?? "ok";
+  if (f.quarantined || (phase !== "ok" && phase !== "journal") || phase !== (seen?.phase ?? "ok")) return true;
   return !!seen && (f.workspace !== seen.workspace || f.generation !== seen.generation);
 }
 
@@ -130,6 +134,8 @@ export function guardGestures(root: HTMLElement, state: () => Guard) {
 export const CLOSE_SAVE_MS = 3000;
 /** How long closing waits for that copy (the workspace busy) before it gives up and keeps the notebook open. */
 export const CLOSE_COPY_MS = 5000;
+/** How long an agent's edit waits for another tab of this browser to hand the notebook over (sync's journal). */
+export const TAKE_MS = 10_000;
 
 // What the store keeps beside a notebook's content, for itself (ART-C2a r4): left out when "is this what the store
 // has" is asked, and when content is kept as a copy. Everything else is the content: the mode, the document's
@@ -179,7 +185,10 @@ export function mountNotebook(ws: Workspace, path: string, box: HTMLElement, ui:
   // doesn't stop a script's click() in every browser)
   guardGestures(nbRoot, () => guard);
   let stored: (() => Promise<any>) | null = null; // (the record the store has now, read beside the page's writes)
-  let readOnlyHere = false; // (sync's journal writes this workspace: shown read only, never edited here)
+  // (under sync's journal: the journal's store, the focus takeover with the page's other tabs, the page's controls for
+  // the store, and whether the takeover's reload is under way)
+  let jstore: any = null, handover: ReturnType<typeof writerHandover> | null = null, takingOver = false;
+  let controlsOf: (st: any) => { readOnly: boolean; bar: string | null } = () => ({ readOnly: false, bar: null });
   let docRef: string | null = null; // (the document this pane is bound to, once attached and editable: an agent's edit must name it)
   // (observed from the start, so a move, Trash or replacement while the mount reads and loads isn't missed: before
   // attach it is caught by the check after it, ART-C2)
@@ -215,6 +224,11 @@ export function mountNotebook(ws: Workspace, path: string, box: HTMLElement, ui:
         comp.detach();
         comp.destroy();
       }
+      // (the journal's writer lock and its place in the lock's queue let go: another tab can write the notebook; the
+      // takeover's channel, timers and listeners removed)
+      void jstore?.release();
+      handover?.dispose();
+      handover = null;
       // (destroy leaves the page's one plot tooltip, shared by every notebook here: hidden, not removed)
       for (const t of document.querySelectorAll<HTMLElement>(".sbnb-tip")) t.hidden = true;
       kernel?.close();
@@ -237,12 +251,25 @@ export function mountNotebook(ws: Workspace, path: string, box: HTMLElement, ui:
       const no = { ok: false as const, code: "busy" as const, why: "the grant or the turn changed while this edit waited: nothing changed" };
       await host.ready;
       const comp = nb;
-      // (today's guards: only a pane that may save this document takes an edit, never one closing, let go, read only)
-      if (readOnlyHere) return { ok: false, code: "busy", why: "this notebook is read only here (sync saves it: open it in Sagebrush to change it)" };
+      // (today's guards: only a pane that may save this document takes an edit, never one closing or let go)
       if (!alive || !comp || !attached || !bound || frozen || guard !== "open" || docRef === null || !stored) return { ok: false, code: "busy", why: "this notebook is closing, or isn't saved here now" };
       if (e.ref !== docRef) return { ok: false, code: "conflict", why: "another notebook is at this path now (read it again)" };
-      const usable = () => alive && nb === comp && attached && bound && !frozen && guard === "open" && docRef === e.ref;
-      const closing = { ok: false as const, code: "busy" as const, why: "this notebook is closing, or isn't saved here now" };
+      // (under sync's journal, a pane that follows another tab: the edit is a use of the pane, which asks that tab for the
+      // writer lock and waits for it, the takeover's reload included; within TAKE_MS, else refused, nothing changed)
+      if (jstore && !(await writable())) {
+        return { ok: false, code: "busy", why: "another tab of this browser is changing this notebook and didn't hand it over: nothing changed (try again)" };
+      }
+      // (under sync's journal, this pane still the notebook's writer: the lock held, its load done, no hand-over begun
+      // (yieldLock's `yielding`, set as the hand-over starts) and no takeover's reload under way)
+      const owns = () => !jstore || (!!jstore.writer && !!jstore.ready && !jstore.yielding && !jstore.released && !takingOver && comp.store === jstore);
+      const lost = { ok: false as const, code: "busy" as const, why: "another tab of this browser took this notebook over while the edit waited: nothing changed (try again)" };
+      const usable = () => alive && nb === comp && attached && bound && !frozen && guard === "open" && docRef === e.ref && owns();
+      const closing = () => (jstore && alive && nb === comp && attached && bound && !frozen && guard === "open" && docRef === e.ref && !owns() ? lost : { ok: false as const, code: "busy" as const, why: "this notebook is closing, or isn't saved here now" });
+      // (tests: a wait held at `stage`, loopback pages only, test-agents-artifacts.mjs)
+      const pause = async (stage: string) => {
+        const f = (globalThis as any).__sbTestEditPause;
+        if (typeof f === "function" && /^(127\.0\.0\.1|localhost)$/.test(location.hostname)) await f(stage);
+      };
       // (the store's record, in the notebook's form, equals what is shown: a save the store refused ("not saved: ...")
       // still resolves saved(), so it is checked here, positively; astra's C2)
       const keptAsShown = (rec: any) => !!rec && Array.isArray(rec.cells) && canonical(rec.cells.map(cellForm)) === canonical(comp.snapshot().cells.map(cellForm));
@@ -254,16 +281,19 @@ export function mountNotebook(ws: Workspace, path: string, box: HTMLElement, ui:
       } catch (err) {
         return { ok: false, code: "busy", why: `not applied: this notebook couldn't be saved first (${(err as Error).message})` };
       }
-      if (!usable()) return closing;
+      await pause("saved");
+      if (!usable()) return closing();
       const rec0 = await stored().catch(() => null);
-      if (!usable()) return closing;
+      await pause("stored");
+      if (!usable()) return closing();
       if (!keptAsShown(rec0)) return { ok: false, code: "busy", why: "not applied: the person's changes here couldn't be saved first (the store refused them); nothing changed" };
       // (the revision this pane's next save is made from: kept for a rollback, so that save still conflicts with another
       // tab's change instead of writing over it; astra's C3)
       const baseRev = rec0.rev;
       const seen = comp.snapshot();
       const read = await ws.read(path).catch(() => null);
-      if (!usable()) return closing;
+      await pause("read");
+      if (!usable()) return closing();
       if (!read || (read.entry as any)?.ref !== docRef) return { ok: false, code: "conflict", why: "another notebook is at this path now (read it again)" };
       const checked = preflight(e, (read.content as any)?.cells ?? [], { hashes: true });
       if (!checked.ok) return { ok: false, code: "conflict", why: checked.why, ...(checked.ids ? { ids: checked.ids } : {}) };
@@ -272,12 +302,16 @@ export function mountNotebook(ws: Workspace, path: string, box: HTMLElement, ui:
       let release: (() => void) | null = null, inserted: string[] = [];
       if (hold) {
         try { release = await hold(); } catch (err) { return { ok: false, code: "invalid", why: String((err as Error)?.message ?? err) }; }
-        if (!usable()) { release(); return closing; }
+        await pause("hold");
+        if (!usable()) { release(); return closing(); }
       }
       try {
         // (2) then, in one synchronous stretch (no await): the authority, nothing shown changed since that save,
         // the edit fits what is shown, and the change is made; what the person does can't come between the check and it
         if (!may()) return no;
+        // (and, in the same synchronous stretch as the change, this pane still the writer: a hand-over begun or the lock
+        // lost since the last wait refuses it here, nothing changed)
+        if (!usable()) return closing();
         const before = comp.snapshot();
         if (canonical(before) !== canonical(seen)) return { ok: false, code: "conflict", why: "the notebook changed while this edit was checked (read it again)" };
         const pre = preflight(e, before.cells, { hashes: false });
@@ -286,6 +320,9 @@ export function mountNotebook(ws: Workspace, path: string, box: HTMLElement, ui:
           const apply = (globalThis as any).__sbTestApplyEdits && /^(127\.0\.0\.1|localhost)$/.test(location.hostname) ? (globalThis as any).__sbTestApplyEdits : null;
           // (run: false: an edit runs nothing; applyEdits mutates synchronously, its promise settles at once)
           const r = apply ? apply(comp, pre.edits) : comp.applyEdits(pre.edits, { run: false });
+          // (its save asked for at once, in the same synchronous stretch as the change: a hand-over that begins after it
+          // waits for this save (its quiesce awaits the notebook's saves), so the change is saved before this pane lets go)
+          comp.flush();
           inserted = (await r)?.ids ?? [];
         } catch (err) {
           // (put back as it was, with the revision it was saved at: loaded, which saves nothing, and the next save is made
@@ -341,6 +378,61 @@ export function mountNotebook(ws: Workspace, path: string, box: HTMLElement, ui:
     const ranObserver = new MutationObserver(() => c.el.classList.contains("running") && clear());
     ranObserver.observe(c.el, { attributes: true, attributeFilter: ["class"] });
     return clear;
+  }
+
+  // Under sync's journal (as the notebook page's showWriter and takeOver, web/page/session.ts): read only while another
+  // tab writes the notebook (it follows that tab, quietly, showing every change), and the writer once it is granted
+  // the lock, reloaded then (the same component, the same store).
+  function showWriter(comp: Nb) {
+    if (!jstore || !alive || nb !== comp) return;
+    handover ??= writerHandover({
+      view: nbRoot,
+      quiesce: () => comp.saved(),
+      hold: () => comp.setReadOnly(true),
+      follow: () => showWriter(comp),
+      keyOf: (f) => (f.closest(".cell") as any)?.cell?.id ?? null,
+      fieldFor: (k) => comp.cells().find((c: any) => c.id === k)?.ta ?? null,
+      hasKey: (k) => comp.cells().some((c: any) => c.id === k),
+      notApplied: (n) => ui.bar({ kind: "refused", text: `${n} input action${n === 1 ? "" : "s"} made here while it was taking over the notebook from another tab ${n === 1 ? "wasn't" : "weren't"} applied: enter that input again.` }),
+    });
+    handover.bind(jstore);
+    const c = controlsOf(jstore);
+    comp.setReadOnly(c.readOnly || frozen);
+    if (c.bar) ui.bar({ kind: "readonly", text: c.bar });
+    if (c.readOnly && jstore.onTakeover) jstore.onTakeover(() => void takeOver(comp));
+  }
+  async function takeOver(comp: Nb) {
+    if (!jstore || !alive || nb !== comp || comp.store !== jstore) return;
+    takingOver = true;
+    try {
+      await comp.attach(jstore);
+    } catch (e) {
+      // (it couldn't be reopened as the writer here: the lock let go at once, so another tab can take it, and said)
+      console.warn("notebook:", e);
+      takingOver = false;
+      await jstore.release();
+      const lost = handover?.failed() ?? 0;
+      if (alive) ui.bar({ kind: "refused", text: `This notebook couldn't be opened for changes here: ${(e as Error).message}${lost ? ` (${lost} input action${lost === 1 ? "" : "s"} not applied)` : ""}` });
+      return;
+    }
+    takingOver = false;
+    if (!alive || nb !== comp) return;
+    showWriter(comp);
+    handover?.taken(jstore);
+  }
+  // (this pane writes the notebook now: the journal's lock held, its reload done; else asked for, as a use of the pane,
+  // and waited for, TAKE_MS at most)
+  function writable(): Promise<boolean> {
+    const now = () => alive && !!jstore?.writer && !!jstore.ready && !takingOver && nb?.store === jstore;
+    if (now()) return Promise.resolve(true);
+    handover?.use();
+    return new Promise((done) => {
+      const t0 = Date.now();
+      const tick = setInterval(() => {
+        if (now()) { clearInterval(tick); done(true); }
+        else if (!alive || Date.now() - t0 > TAKE_MS) { clearInterval(tick); done(false); }
+      }, 50);
+    });
   }
 
   host.ready = mount().catch((e) => {
@@ -437,27 +529,19 @@ export function mountNotebook(ws: Workspace, path: string, box: HTMLElement, ui:
     const mod: any = await import(new URL("sagebrush-notebook.js", SITE).href);
     if (!alive) return;
     toIpynb = mod.toIpynb;
-    if (journal) {
-      // Sync's journal is this workspace's writer: shown here, never edited or run. No interpreter at all: no gesture
-      // (button, keyboard, command mode) can start one (ART-C1).
-      const comp = (nb = mod.createNotebook(nbRoot, { kernel: null, assetBase: SITE.href, reactive: false, remotePictures: "click", readOnly: true }));
-      const r = await ws.read(path).catch(() => null);
-      if (!alive) return;
-      if (r?.content) comp.load(r.content);
-      comp.setReadOnly(true);
-      readOnlyHere = true;
-      for (const b of nbRoot.querySelectorAll<HTMLButtonElement>("button")) b.disabled = true;
-      ui.saved("Read only here");
-      ui.bar({ kind: "readonly", text: "This workspace saves notebooks through sync: open it in Sagebrush to run and edit it.", actions: [{ label: "Open in Sagebrush", run: () => open(`/w${path}`, "_blank", "noopener") }] });
-      return;
-    }
+    // (sync's journal writes this workspace's notebooks: its module, the notebook page's TimeTravel bundle, and the
+    // history's storage, as the page's storeFor takes them)
+    const hist: any = journal ? await import(new URL("sagebrush-history.js", SITE).href) : null;
+    const hdb: IDBDatabase | null = journal ? await mod.openHistoryDb() : null;
+    if (!alive) return;
+    if (journal && !hdb) return fail("This browser saves notebooks through sync, which needs storage that isn't available here.");
     const k = (kernel = lazyKernel(mod, () => frozen));
     const comp = (nb = mod.createNotebook(nbRoot, { kernel: k, assetBase: SITE.href, reactive: false, remotePictures: "click" }));
 
     // The store, bound to this document while the pane shows it. The database it writes through refuses every write
     // transaction once the pane lets go (gone, dispose), so a save already on its way (past this wrapper, waiting for
     // the workspace's lock) is refused where it would write, not only before it starts (ART-C2).
-    const guarded = new Proxy(db, {
+    const guardOf = (base: IDBDatabase) => new Proxy(base, {
       get(t, p) {
         if (p === "transaction")
           return (names: string | string[], mode?: IDBTransactionMode, o?: IDBTransactionOptions) => {
@@ -468,19 +552,29 @@ export function mountNotebook(ws: Workspace, path: string, box: HTMLElement, ui:
         return typeof v === "function" ? v.bind(t) : v;
       },
     });
-    const inner = new mod.IdbStore(guarded, ref);
+    const guarded = guardOf(db);
+    // (under the journal: the page's JournalStore over this page's own stores (one copy of stores.js, its gate and its
+    // queues: notebook/journal.js journalClasses), attached itself, its save guarded as the plain store's is below)
+    if (journal) {
+      jstore = new (hist.journalClasses({ IdbStore: mod.IdbStore, IdbPatchStore: mod.IdbPatchStore }).JournalStore)(guarded, guardOf(hdb!), ref, undefined, hist);
+      controlsOf = hist.pageControls;
+    }
+    const inner = jstore ?? new mod.IdbStore(guarded, ref);
     stored = () => inner.loadRecord();
-    const store = {
+    const plain = {
       load: () => inner.load(),
       save: (doc: unknown, o?: unknown) => {
         // (a test's refusal of a save, as the store answers one: loopback pages only, test-agents-artifacts.mjs)
         const hook = (globalThis as any).__sbTestStoreSave;
         const refused = typeof hook === "function" && /^(127\.0\.0\.1|localhost)$/.test(location.hostname) ? hook(doc) : null;
         if (typeof refused === "string") return Promise.resolve(refused);
-        return bound && alive ? inner.save(doc, o) : Promise.resolve("not saved: this notebook was let go by the pane");
+        return bound && alive ? save(doc, o) : Promise.resolve("not saved: this notebook was let go by the pane");
       },
       subscribe: (f: (d: unknown) => void) => inner.subscribe(f),
     };
+    const save = jstore ? jstore.save.bind(jstore) : (doc: unknown, o?: unknown) => inner.save(doc, o);
+    if (jstore) jstore.save = plain.save;
+    const store = jstore ?? plain;
     const mine = store; // (callbacks check they still belong to this store)
     bound = true;
     await comp.attach(store);
@@ -493,6 +587,7 @@ export function mountNotebook(ws: Workspace, path: string, box: HTMLElement, ui:
     docRef = ref;
     const owned = () => alive && nb === comp && comp.store === mine;
     ui.saved("Saved");
+    if (jstore) showWriter(comp);
     comp.on("dirty", () => owned() && ui.saved("Editing…"));
     // (a save the store refused: shown as it says; if the workspace's fence moved (a reset, sync), the pane lets go)
     comp.on("saved", (t: unknown) => {
@@ -515,6 +610,8 @@ export function mountNotebook(ws: Workspace, path: string, box: HTMLElement, ui:
       bound = false; // (first: the pending save detach flushes is refused)
       comp.detach();
       comp.setReadOnly(true);
+      void jstore?.release();
+      handover?.bind(null);
       ui.saved("Not saved");
       ui.bar({ kind: "gone", text: `${why} What's shown here isn't saved anymore.`, actions: [{ label: "Save as a copy…", run: () => void saveCopy() }] });
     };

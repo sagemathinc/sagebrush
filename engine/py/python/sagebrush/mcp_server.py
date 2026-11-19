@@ -1030,7 +1030,7 @@ class Server:
             k = integer(args.get("weight", 2), "weight")
             code = "from sagebrush.mcp_server import _newforms_data\n__sagebrush_data__ = _newforms_data(%d, %d)" % (n, k)
             return self.run(code, mode="python", isolated=True, timeout=args.get("timeout", 300), data=True, rid=rid)
-        raise KeyError(name)
+        raise UnknownTool(name)
 
     def chat_tool(self, name, args):
         """chat_next and chat_reply (sagebrush/chat.py), their arguments
@@ -1181,7 +1181,9 @@ class Server:
         args = params.get("arguments") or {}
         try:
             content, structured, is_error = self.call_tool(name, args, rid)
-        except KeyError:
+        except UnknownTool:
+            # (a name this server doesn't offer, a page's verb it doesn't know included: the protocol's answer; a
+            # KeyError inside a tool is that tool's exception, said below, never taken for an unknown name)
             self.error(rid, -32602, "unknown tool: %s" % name)
             return
         except Exception as e:
@@ -1328,6 +1330,10 @@ class _Invalid(ValueError):
 
 class _Cancelled(Exception):
     """A request cancelled before its computation started."""
+
+
+class UnknownTool(Exception):
+    """A tool call by a name this server doesn't offer."""
 
 
 def _version(package="sagebrush"):
