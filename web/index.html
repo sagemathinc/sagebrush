@@ -5087,37 +5087,44 @@ function agentOpen(ref, intent) {
 //   - if this page's own pairing created it, and the grant it was created under is still in force as the run is
 //     admitted, with May run code and Everything (AgentPairing.mayRunCreated);
 //   - if, read back at once, it is still at its creation's own revision (a new notebook's first: one more at each write,
-//     stores.js), and at the admission the notebook shown is that one with what Run all reads the same as read back: its
-//     language, its pinned package set, and each cell's kind and source. Nothing else is compared: an edit undone
-//     meanwhile isn't seen, nor a change to anything Run all doesn't read;
+//     stores.js), and at the admission the notebook shown is that one with what Run all reads the same as read back
+//     (runInputs, canonical: its language, pinned package set, seed, autorun and metadata, and each cell's id, kind,
+//     source and metadata, manual among them). Nothing else is compared: an edit undone meanwhile isn't seen, nor a
+//     change to anything Run all doesn't read;
 //   - in the notebook's own interpreter, the sandboxed runner with its write trees: none for a new notebook, so a write
 //     asks the person (Confinement phase 2), with Run's state, Stop and outputs as ever.
 const agentRunSpent = new Set();
-const runInputs = (doc) => JSON.stringify([doc?.mode ?? null, doc?.pkgset ?? null, (doc?.cells ?? []).map((c) => [c.type === "markdown" || c.type === "raw" ? c.type : "code", String(c.code ?? "")])]);
+// (a value with its object keys sorted, so the same inputs always give the same text)
+const canon = (v) => Array.isArray(v) ? v.map(canon) : v && typeof v === "object" ? Object.fromEntries(Object.keys(v).sort().map((k) => [k, canon(v[k])])) : v ?? null;
+const runInputs = (doc) => JSON.stringify(canon({ mode: doc?.mode, pkgset: doc?.pkgset, seed: doc?.seed, autorun: doc?.autorun, metadata: doc?.metadata,
+  cells: (doc?.cells ?? []).map((c) => ({ id: c.id, kind: c.type === "markdown" || c.type === "raw" ? c.type : "code", code: String(c.code ?? ""), metadata: c.metadata })) }));
 const CREATED_REV = 1;
 const testHost = /^(localhost|127\.0\.0\.1)$/.test(location.hostname);
+// (the tests' view, on a local host only: how many creations were announced to this page, and the last one, kept here,
+//  never handed out; the tests' holds get its path, a string, never the record or the pairing)
+let agentAnnounced = 0, agentMadeLast = null;
 async function agentMade(c, p, intent) {
   // (spent at once: a second announcement of the same creation is no second chance)
   if (agentRunSpent.has(c.op)) return;
   agentRunSpent.add(c.op);
-  // (the tests' handle on a local host only: the last announcement, to announce it again)
-  if (testHost) window.__agentMadeLast = { c, p };
+  if (testHost) { agentAnnounced++; agentMadeLast = { c, p }; }
   let made = null;
   try {
     // (the tests' hold, on a local host only: between the announcement and the read back)
-    if (testHost && typeof window.__agentReadHold === "function") await window.__agentReadHold(c);
+    if (testHost && typeof window.__agentReadHold === "function") await window.__agentReadHold(String(c.path));
     const w = await wsNow();
     const r = w && (await w.read(c.path));
     if (r?.entry?.kind === "notebook" && r.entry.ref === c.ref && r.rev === CREATED_REV) made = runInputs(r.content);
   } catch {}
   const opened = await agentOpen(c.ref, intent);
   // (the tests' hold, on a local host only: between the open and the admission)
-  if (testHost && typeof window.__agentRunHold === "function") await window.__agentRunHold(c);
+  if (testHost && typeof window.__agentRunHold === "function") await window.__agentRunHold(String(c.path));
   // (admitted here, all in one turn: every condition, then the run)
   if (!opened || current.id !== c.ref || made === null || runInputs(nb.snapshot()) !== made || !p.mayRunCreated(c)) return;
   nb.runAll();
 }
-if (testHost) window.__agentMadeAgain = () => { const l = window.__agentMadeLast; return l ? agentMade(l.c, l.p, { attach: attachSeq }) : null; };
+// (the tests' replay of exactly the last announcement, which its spent op refuses; and the count, read only)
+if (testHost) { window.__agentMadeAgain = () => (agentMadeLast ? agentMade(agentMadeLast.c, agentMadeLast.p, { attach: attachSeq }) : null); Object.defineProperty(window, "__agentAnnounced", { get: () => agentAnnounced }); }
 // (an agent's runs of code: the verbs in /sagebrush-agent-run.js, fetched at its first run; the page
 //  gives them its workspace, the interpreter's classes, the sandboxed runner (never a plain worker: there is none here
 //  without it) and each notebook's own write trees. On a local host only, the tests' holds (web/workspace/test-run-verbs-page.mjs))

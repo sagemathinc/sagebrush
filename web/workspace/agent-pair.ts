@@ -597,7 +597,7 @@ export class AgentPairing {
    * branch's worktree or the Trash: only what the person would open from Files. */
   private madeHere(e: any, g: Grant) {
     if (!e || typeof e.path !== "string" || !/^(notebook|board|file)$/.test(e.kind) || within(norm(e.path) ?? "/", BRANCHES) || /^\/Trash(\/|$)/.test(e.path)) return;
-    this.created = { op: newGrantId(12), path: e.path, kind: e.kind, ...(typeof e.ref === "string" ? { ref: e.ref } : {}), grant: g.id ?? "", ...(typeof e.updated === "number" ? { updated: e.updated } : {}) };
+    this.created = Object.freeze({ op: newGrantId(12), path: e.path, kind: e.kind, ...(typeof e.ref === "string" ? { ref: e.ref } : {}), grant: g.id ?? "", ...(typeof e.updated === "number" ? { updated: e.updated } : {}) });
     this.emit();
     try { this.opts.onCreated?.(this.created, this); } catch (err) { console.warn("agent: the page's open of a created document failed:", err); }
   }
