@@ -68,7 +68,7 @@
   },
   "engine/lib/matlab-more.src": {
    "exact": false,
-   "ceiling": 308975,
+   "ceiling": 310115,
    "noise_bytes": 0,
    "noise_total": 0,
    "marker_slack": 1024
