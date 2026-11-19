@@ -48,6 +48,8 @@ check(LATEX_CAPS.raw === 253527 && LATEX_CAPS.gzip === 84713, "the caps are 253,
 // (agent 51,671 / 17,686 B: Nov 19 2026, Connect's one field for the agent's link (readConnect), its measurement +
 //  64; was 50,816 / 17,368, measured 50,767 / 17,305 on master 35e6a6d0)
 // (agent 52,033 / 17,878 B: the two above together, measured on their merge (master 25de21b2): 51,969 / 17,814, + 64)
+// (agent 53,214 / 18,327 B: Nov 19 2026, the agent's bar docked in the page's own row, with the one-link change merged
+//  on master 25de21b2: 53,150 / 18,263 measured + 64)
 // (tools 16,546 / 6,950 B: Nov 11 2026: latex_build's own code moved here out
 //  of the eager group, its landing measurement + 64; was 16/6 KiB)
 // (tools 17,335 / 7,231 B: renewed at the landing merge on master 14279164, 17,271 / 7,167 measured + 64; its +777 / +286

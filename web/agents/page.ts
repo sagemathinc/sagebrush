@@ -658,10 +658,9 @@ function mountFile(a: Artifact, box: HTMLElement, saved: HTMLElement): FileHost 
   };
   say("Loading…");
   const tex = /\.tex$/i.test(path);
-  if (tex && !__SB_LATEX__) {
-    // (no LaTeX editor in this build: the source here, and the file in Sagebrush)
-    saved.after(" ", openFull(path));
-  }
+  // (the file in Sagebrush, on its own page: a code or text file's (/?code=), a .tex file's where this build has no
+  //  LaTeX editor here; a file with no page of its own gets no link, openFull)
+  if (!tex || !__SB_LATEX__) saved.after(" ", openFull(path));
   type Latex = { mountEditor?: (root: HTMLElement, o: { text: string; onChange?(t: string): void; layout?: "split" | "preview" }) => { getText(): string; destroy(): void } };
   const latexMod: Promise<Latex | null> = tex && __SB_LATEX__ ? import(/* @vite-ignore */ LATEX_URL).catch(() => null) : Promise.resolve(null);
   // (the file as it is now: the agent may have written it again since this artifact)
