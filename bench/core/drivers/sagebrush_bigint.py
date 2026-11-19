@@ -43,6 +43,25 @@ OPS = [make(v) for v in range(K)]
 STATE = [0]
 
 
+def granularity(tries=2000):
+    best, last = None, time.perf_counter()
+    for _ in range(tries):
+        now = time.perf_counter()
+        d = now - last
+        if d > 0 and (best is None or d < best):
+            best = d
+        last = now
+    return best or 1e-9
+
+
+def offset(seed, j, k):
+    return (seed * 1000003 + j * 7919) % k
+
+
+def floats(xs):
+    return ",".join(repr(float(x)) for x in xs)
+
+
 def run(k):
     total = 0.0
     for _ in range(k):
@@ -67,17 +86,54 @@ elif mode in ("time", "time-fresh"):
         answer = OPS[v]()
         warm += time.perf_counter() - t0
         sigs.append(signature(answer))
+    # (protocol 5, as common.py: per-op at or above max(1 ms, 1000 g), else
+    # batched from seeded offsets; a TIMING record before the TIME line)
+    import os
+
     per = warm / K
-    if per >= TARGET:
-        k, t = 1, per
+    seed = int(os.environ.get("BENCH_SEED", "0"))
+    forced = os.environ.get("BENCH_TIMING", "auto")
+    g = granularity()
+    threshold = max(1e-3, 1000 * g)
+    head = '"granularity":%r,"threshold":%r,"seed":%d,"k":%d' % (g, threshold, seed, K)
+    if forced == "per-op" or (forced == "auto" and per >= threshold):
+        count = 5 if per <= 2.0 else 3
+        per_variant = [[] for _ in range(K)]
+        for r in range(count):
+            start = offset(seed, r, K)
+            for i in range(K):
+                v = (start + i) % K
+                t0 = time.perf_counter()
+                OPS[v]()
+                per_variant[v].append(time.perf_counter() - t0)
+        samples = sorted(sum(s[r] for s in per_variant) / K for r in range(count))
+        k = K
+        rows = ",".join("[%s]" % floats(s) for s in per_variant)
+        print('TIMING|{%s,"mode":"per-op","samples":[%s]}' % (head, rows))
     else:
-        k = max(1, int(TARGET * 1.2 / per) + 1) if per > 0 else K
-        t = run(k)
-    while t < TARGET and k < 1 << 24:
-        k = k * 2 if t <= 0 else max(k * 2, min(k * 16, int(k * TARGET * 1.2 / t) + 1))
-        t = run(k)
-    count = 5 if t / k <= 2.0 else 3
-    samples = sorted(run(k) / k for _ in range(count))
+        if per >= TARGET:
+            k, t = 1, per
+        else:
+            k = max(1, int(TARGET * 1.2 / per) + 1) if per > 0 else K
+            t = run(k)
+        while t < TARGET and k < 1 << 24:
+            k = (
+                k * 2
+                if t <= 0
+                else max(k * 2, min(k * 16, int(k * TARGET * 1.2 / t) + 1))
+            )
+            t = run(k)
+        count = 5 if t / k <= 2.0 else 3
+        batches, offsets = [], []
+        for j in range(count):
+            STATE[0] = offset(seed, j, K)
+            offsets.append(STATE[0])
+            batches.append(run(k) / k)
+        samples = sorted(batches)
+        print(
+            'TIMING|{%s,"mode":"batched","reps":%d,"batches":[%s],"offsets":[%s]}'
+            % (head, k, floats(batches), ",".join(str(o) for o in offsets))
+        )
     sig = "%d:%d" % (K, ihash(";".join(sigs).encode()))
     print(
         "TIME|%.9g|%s|%.9g|%.9g|%d|%d"

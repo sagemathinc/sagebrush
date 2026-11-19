@@ -258,6 +258,24 @@ procedure RunK(case_id, n, Ss, k, fresh, ~idx, ~el)
     end for;
 end procedure;
 
+// Protocol 5 (common.py): the timer's granularity, and batch j's seeded
+// starting variant.  Magma's Realtime ticks too coarsely for per-op timing
+// (about 10 ms), so this reference is always batched.
+function Granularity()
+    // (the step between two consecutive ticks: wait for one tick, then time
+    // the next; bounded, in case the clock never moves)
+    t0 := Realtime(); i := 0;
+    repeat t1 := Realtime(); i +:= 1; until t1 gt t0 or i ge 10^7;
+    i := 0;
+    repeat t2 := Realtime(); i +:= 1; until t2 gt t1 or i ge 10^7;
+    d := t2 - t1;
+    return d gt 0 select d else 1.0;
+end function;
+
+function Offset(seed, j, k)
+    return (seed*1000003 + j*7919) mod k;
+end function;
+
 if mode eq "inputs" then
     hs := [];
     for v in [0..K-1] do
@@ -295,11 +313,19 @@ elif mode in {"time", "time-fresh"} then
         RunK(case_id, n, Ss, k, fresh, ~idx, ~el);
     end while;
     count := el/k le 2.0 select 5 else 3;
-    samples := [];
-    for i in [1..count] do
+    env := GetEnv("BENCH_SEED");
+    seed := env eq "" select 0 else StringToInteger(env);
+    samples := []; offsets := [];
+    for j in [0..count-1] do
+        idx := Offset(seed, j, K);
+        Append(~offsets, idx);
         RunK(case_id, n, Ss, k, fresh, ~idx, ~el);
         Append(~samples, el/k);
     end for;
+    g := Granularity();
+    printf "TIMING|{\"granularity\":%o,\"threshold\":%o,\"seed\":%o,\"k\":%o,\"mode\":\"batched\",\"reps\":%o,\"batches\":[%o],\"offsets\":[%o]}\n",
+        Sprintf("%.12o", g), Sprintf("%.12o", Max(0.001, 1000*g)), seed, K, k,
+        Join([Sprintf("%.12o", x) : x in samples], ","), Join([IntegerToString(o) : o in offsets], ",");
     Sort(~samples);
     printf "TIME|%.9o|%o|%.9o|%.9o|%o|%o\n", samples[(count div 2)+1], Combined(sigs), samples[1], samples[count], k, count;
 else
