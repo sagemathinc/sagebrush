@@ -29,6 +29,7 @@ def plan(**over):
         "archive_sha256": "b" * 64,
         "envelope_hours": 18,
         "t_create_s": 600,
+        "pin_policy": "strict",
         "types": {
             "x86": {
                 "machine_type": "n2-standard-16",
@@ -98,6 +99,8 @@ class Plans(unittest.TestCase):
             {"points": ["poly_fp_mul:x"]},
             {"points": ["../etc:s"]},
             {"expected_inputs": {}},
+            {"pin_policy": "loose"},
+            {"pin_policy": None},
             {"types": {"X86": plan()["types"]["x86"]}},
             {"types": {"x86": dict(plan()["types"]["x86"], zones=["us;rm -rf"])}},
         ):
@@ -357,6 +360,40 @@ class Acceptance(unittest.TestCase):
     def test_an_unpinned_engine_is_refused(self):
         with self.assertRaisesRegex(shard.Fatal, "pinned"):
             self.accept(row(engine_pin={"ok": False}))
+
+    def track(self):
+        self.rows.plan = self.plan = plan(pin_policy="track")
+
+    def test_on_a_track_tip_the_fresh_engine_is_recorded(self):
+        # (the pin lags the source there: not ok, but its sha256 is the
+        # identity's, so a second point with another fresh build is refused)
+        self.track()
+        fresh = {"ok": False, "policy": "track", "sha256": "e" * 64, "pinned": "f" * 64}
+        self.accept(row(engine_pin=fresh))
+        ident = json.loads((self.d / "rows/x86/identity.json").read_text())
+        self.assertEqual(ident["engine_pin"]["sha256"], "e" * 64)
+        with self.assertRaisesRegex(shard.Fatal, "identity"):
+            self.rows.check_identity(
+                "x86", row(engine_pin=dict(fresh, sha256="d" * 64))
+            )
+
+    def test_a_track_plan_needs_a_recorded_fresh_sha(self):
+        self.track()
+        with self.assertRaisesRegex(shard.Fatal, "fresh engine"):
+            self.accept(
+                row(engine_pin={"ok": False, "policy": "track", "sha256": None})
+            )
+
+    def test_the_vm_policy_must_be_the_plans(self):
+        # (a VM that checked strictly under a track plan, or the reverse,
+        # ran another payload: refused either way)
+        with self.assertRaisesRegex(shard.Fatal, "pin policy"):
+            self.accept(
+                row(engine_pin={"ok": True, "policy": "track", "sha256": "e" * 64})
+            )
+        self.track()
+        with self.assertRaisesRegex(shard.Fatal, "pin policy"):
+            self.accept(row(engine_pin={"ok": True, "sha256": "e" * 64}))
 
     def test_two_types_share_a_point_without_colliding(self):
         self.accept(tk="x86")
@@ -1399,6 +1436,10 @@ class Plans2(unittest.TestCase):
             with tarfile.open(d / "run/payload.tar") as t:
                 self.assertEqual(
                     t.extractfile(".bench-commit").read().decode().strip(), p["commit"]
+                )
+                self.assertEqual(
+                    t.extractfile(".bench-pin-policy").read().decode().strip(),
+                    p["pin_policy"],
                 )
                 self.assertEqual(
                     json.loads(t.extractfile("expected-inputs.json").read()),

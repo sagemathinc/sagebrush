@@ -665,17 +665,36 @@ def needs(backend: str, row: dict) -> tuple:
     return NEEDS[base]
 
 
+def pin_policy() -> str:
+    """The run's pin policy (.bench-pin-policy, written into the shard
+    driver's payload): "strict" (the default, and for local runs) or
+    "track" (a track tip: the fresh build is recorded, not refused)."""
+    try:
+        p = (ROOT / ".bench-pin-policy").read_text().strip()
+    except OSError:
+        return "strict"
+    return p if p in ("strict", "track") else "invalid"
+
+
 def engine_pin() -> dict:
     """Whether wasm/sagebrush-engine.wasm (what the CLI embeds, the user
-    column's engine) is the one wasm/pins.json pins."""
+    column's engine) is the one wasm/pins.json pins, its sha256 either way,
+    and the policy it was checked under (on a track tip the pin lags the
+    source, and the sha256 is the fresh build's)."""
+    policy = pin_policy()
     try:
         pins = json.loads((ROOT / "wasm/pins.json").read_text())["modules"][
             "sagebrush-engine.wasm"
         ]
         got = sha256_file(ROOT / "wasm/sagebrush-engine.wasm")
-        return {"sha256": got, "pinned": pins["sha256"], "ok": got == pins["sha256"]}
+        return {
+            "sha256": got,
+            "pinned": pins["sha256"],
+            "ok": got == pins["sha256"],
+            "policy": policy,
+        }
     except (OSError, KeyError, ValueError):
-        return {"sha256": None, "pinned": None, "ok": False}
+        return {"sha256": None, "pinned": None, "ok": False, "policy": policy}
 
 
 def build_env() -> dict:

@@ -22,13 +22,26 @@ uv pip install --python engine/.venv/bin/python engine/py/dist/*.whl >/dev/null
 # the WebAssembly modules, built with CI's path mapping, then the CLI that embeds the engine
 pnpm install --frozen-lockfile >/dev/null
 RUSTFLAGS="--remap-path-prefix=$HOME/.cargo=/home/runner/.cargo" node scripts/build-engine.mjs >/dev/null
-# The fresh engine wasm must equal its pin, strictly (the check alone only warns outside CI's push, dispatch and
-# schedule events): a mismatch prints the fresh and the pinned sha256 of each module and stops this type
-if ! node --input-type=module -e 'import { checkFreshWasm } from "./scripts/check-fresh-wasm.mjs";
+# The fresh engine wasm against its pin, by the plan's pin policy (.bench-pin-policy, in the payload; strict when
+# absent). strict (master, a pull into master): it must equal wasm/pins.json, or this type stops, with the fresh and
+# pinned sha256 of each module printed. track (a track tip, whose pin lags its source until the track's pull): the
+# comparison is printed, never fatal, and run.py records the fresh build's sha256 in every point's identity
+POLICY=$(cat .bench-pin-policy 2>/dev/null || echo strict)
+case "$POLICY" in
+  strict)
+    if ! node --input-type=module -e 'import { checkFreshWasm } from "./scripts/check-fresh-wasm.mjs";
 const r = checkFreshWasm({ event: "push" }); console.log(r.message); process.exit(r.status);'; then
-  echo "error: the fresh engine wasm differs from wasm/pins.json (fresh and pinned sha256 above)" >&2
-  exit 1
-fi
+      echo "error: the fresh engine wasm differs from wasm/pins.json (fresh and pinned sha256 above)" >&2
+      exit 1
+    fi ;;
+  track)
+    node --input-type=module -e 'import { checkFreshWasm } from "./scripts/check-fresh-wasm.mjs";
+console.log(checkFreshWasm({ event: "local" }).message);'
+    echo "pin policy track: the fresh engine wasm is recorded by its sha256 (run.py engine_pin)" ;;
+  *)
+    echo "error: unknown pin policy $POLICY" >&2
+    exit 1 ;;
+esac
 pnpm run build >/dev/null
 node scripts/build-cli.mjs >/dev/null
 # static FLINT for the Rust oracle, from the checked tarball

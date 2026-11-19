@@ -2,6 +2,8 @@
 """Tests of run.py's process handling that need no engine and no oracle:
 python3 bench/core/test_runner.py"""
 
+import hashlib
+import json
 import os
 import re
 import shutil
@@ -513,12 +515,68 @@ class Rustflags(unittest.TestCase):
 
 
 class FreshWasm(unittest.TestCase):
-    def test_vm_setup_stops_on_a_stale_pin(self):
+    """vm-setup.sh's pin check, run on its own with a stub node whose
+    check reports a stale pin (exit 1 when strict)."""
+
+    def run_check(self, policy):
         text = (run.HERE / "vm-setup.sh").read_text()
-        self.assertIn('checkFreshWasm({ event: "push" })', text)
-        self.assertNotIn("check-fresh-wasm.mjs ||", text)
-        i = text.index("checkFreshWasm({")
-        self.assertIn("exit 1", text[i : i + 400])
+        i, j = text.index("POLICY=$("), text.index("esac", text.index("POLICY=$(")) + 4
+        d = Path(tempfile.mkdtemp(prefix="bench-core-pin-"))
+        (d / "node").write_text(
+            '#!/bin/sh\necho "stale: fresh e.. pinned f.."\n'
+            'case "$*" in *push*) exit 1;; esac\nexit 0\n'
+        )
+        (d / "node").chmod(0o755)
+        if policy is not None:
+            (d / ".bench-pin-policy").write_text(policy + "\n")
+        r = subprocess.run(
+            ["bash", "-c", "set -euo pipefail\n" + text[i:j]],
+            cwd=d,
+            env=dict(os.environ, PATH=f"{d}:{os.environ['PATH']}"),
+            capture_output=True,
+            text=True,
+            timeout=30,
+        )
+        shutil.rmtree(d)
+        return r
+
+    def test_strict_stops_on_a_stale_pin(self):
+        for policy in ("strict", None):
+            with self.subTest(policy=policy):
+                r = self.run_check(policy)
+                self.assertNotEqual(r.returncode, 0)
+                self.assertIn("stale: fresh", r.stdout)
+                self.assertIn("differs from wasm/pins.json", r.stderr)
+
+    def test_a_track_tip_records_and_goes_on(self):
+        r = self.run_check("track")
+        self.assertEqual(r.returncode, 0, r.stderr)
+        self.assertIn("stale: fresh", r.stdout)
+        self.assertIn("recorded by its sha256", r.stdout)
+
+    def test_an_unknown_policy_stops(self):
+        r = self.run_check("loose")
+        self.assertNotEqual(r.returncode, 0)
+
+    def test_engine_pin_reports_its_policy(self):
+        d = Path(tempfile.mkdtemp(prefix="bench-core-pin-"))
+        (d / "wasm").mkdir()
+        (d / "wasm/sagebrush-engine.wasm").write_bytes(b"fresh")
+        (d / "wasm/pins.json").write_text(
+            json.dumps({"modules": {"sagebrush-engine.wasm": {"sha256": "f" * 64}}})
+        )
+        try:
+            with mock.patch.object(run, "ROOT", d):
+                self.assertEqual(run.engine_pin()["policy"], "strict")
+                (d / ".bench-pin-policy").write_text("track\n")
+                pin = run.engine_pin()
+                self.assertEqual(pin["policy"], "track")
+                self.assertFalse(pin["ok"])
+                self.assertEqual(pin["sha256"], hashlib.sha256(b"fresh").hexdigest())
+                (d / ".bench-pin-policy").write_text("loose\n")
+                self.assertEqual(run.engine_pin()["policy"], "invalid")
+        finally:
+            shutil.rmtree(d)
 
 
 class Installed(unittest.TestCase):
