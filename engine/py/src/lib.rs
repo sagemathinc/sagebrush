@@ -457,6 +457,14 @@ fn mpoly_call<'py>(py: Python<'py>, request: Vec<u8>) -> PyResult<Bound<'py, pyo
     Ok(pyo3::types::PyBytes::new(py, &r))
 }
 
+/// A binary call (SBW1, engine/wire), shared with the WebAssembly build
+/// (sb_bin_call): the reply bytes, `ok` or `er` in band.
+#[pyfunction]
+fn call_bin<'py>(py: Python<'py>, request: Vec<u8>) -> PyResult<Bound<'py, pyo3::types::PyBytes>> {
+    let r = guarded(py, move || sagebrush_web::bin_ops::call_bin(&request))?;
+    Ok(pyo3::types::PyBytes::new(py, &r))
+}
+
 /// A PNG call's failure as the browser's _sbraster raises it
 /// (src/runtime/raster.ts): the input refused (a limit, an unsupported
 /// drawing, not a PNG) a ValueError; memory the engine could not allocate a
@@ -895,5 +903,6 @@ fn _native(m: &Bound<'_, PyModule>) -> PyResult<()> {
     }
     m.add_function(wrap_pyfunction!(sym_call, m)?)?;
     m.add_function(wrap_pyfunction!(mpoly_call, m)?)?;
+    m.add_function(wrap_pyfunction!(call_bin, m)?)?;
     m.add_function(wrap_pyfunction!(call, m)?)
 }

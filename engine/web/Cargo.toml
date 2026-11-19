@@ -23,6 +23,7 @@ sagebrush-classgroup = { path = "../classgroup" }
 sagebrush-group = { path = "../group" }
 sagebrush-galois = { path = "../galois" }
 sagebrush-primes = { path = "../primes" }
+sagebrush-wire = { path = "../wire" }
 serde = "1"
 serde_json = "1"
 
