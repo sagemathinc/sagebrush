@@ -69,7 +69,11 @@ export const LATEX_LAZY = {
 //  the pane's may-close answered by the leave guard), Nov 19, provisional until the exact-head CI packet: 252,695 / 84,335
 //  measured on the shipped build (bun 1.4.4, node 24.21.0), on the toggle's head; 252,285 / 84,166 without it (+410 /
 //  +169, the page module's), + 64)
-export const LATEX_CAPS = { raw: 252759, gzip: 84399 };
+// (253,527 raw / 84,713 gzip: a .tex the agent made runs once by itself in the editor that shows it (the page module
+//  asks the pairing over the site's channel), Nov 19, provisional until the exact-head CI packet: 253,463 / 84,649
+//  measured on the shipped build (bun 1.4.4, node 24.21.0), on the embedded mode's head; 252,695 / 84,335 without it
+//  (+768 / +314), + 64)
+export const LATEX_CAPS = { raw: 253527, gzip: 84713 };
 export const gz = (b) => gzipSync(b, { level: 9 }).length;
 
 // Each lazy chunk's own cap (raw, gzip), fetched only on its own use, so outside the group:
@@ -112,7 +116,10 @@ export const LATEX_LAZY_CAPS = {
   //  master 35e6a6d0 with this change: 51,607 / 17,622, + 64)
   // (52,033 / 17,878: the two above together, Connect's one field and the languages' description, measured on their
   //  merge (master 25de21b2): 51,969 / 17,814, + 64)
-  AGENT: { label: "the LaTeX agent pairing's chunk", raw: 52033, gzip: 17878 },
+  // (53,630 / 18,392: a .tex the agent made runs once by itself in the editor that shows it, the pairing's answer over
+  //  the site's channel (agent-pair.ts, agent-made-tex.ts), Nov 19, provisional until the exact-head CI packet: 53,566 /
+  //  18,328 measured on the shipped build (bun 1.4.4, node 24.21.0), on the embedded mode's head; + 64)
+  AGENT: { label: "the LaTeX agent pairing's chunk", raw: 53630, gzip: 18392 },
   // (the agent tools' work: web/latex/tools.ts, latex_check's report and latex_render's pictures, on an agent's first call)
   // (16,546 / 6,950: Nov 11 2026: latex_build's own code (build.ts, the
   //  engine driven from a snapshot, and the pages' fit) here, out of the eager group, its shared rules handed in by the
