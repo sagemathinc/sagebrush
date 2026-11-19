@@ -216,6 +216,9 @@ try {
   ok(!!mk.ok, "the agent creates a notebook", mk);
   ok(await until(`${shownIs("Made by the agent")} && ${sources}.includes(${JSON.stringify(MADE)})`, 15000), "the page opens it at once, its cell shown", { title: await ev("document.title").catch(() => null) });
   ok(await ev("performance.timeOrigin") === origin0, "…in place: the same document, never loaded again");
+  // (its one run by itself, waited for here, before the person moves on: the first run in a page loads the engine, some
+  //  seconds on a slow machine, and a notebook left before its run ends keeps no outputs, as with the person's own Run all)
+  ok(await until(`JSON.stringify(window.sagebrush.notebook.snapshot().cells.find((c) => c.code === ${JSON.stringify(MADE)})?.outputs ?? null).includes("made by the agent")`, 60000), "it runs once by itself, its output shown (before the person opens another)", await ev(`JSON.stringify(window.sagebrush.notebook.snapshot().cells.map((c) => c.outputs ?? null))`).catch(() => null));
   const kept = await ev(`${W}.read(${JSON.stringify(path)}).then((r) => (r.content?.cells ?? []).map((c) => c.code))`);
   ok(Array.isArray(kept) && kept.includes("x = 3"), "the edit typed just before, never flushed by the test, is kept in the notebook left", kept);
   const st0 = await drive({ op: "status" });
@@ -248,7 +251,7 @@ try {
   ok(folder === "/", "(the grant here is Everything: the notebook shown is at the top)", folder);
   const outOf = (code) => `JSON.stringify(window.sagebrush.notebook.snapshot().cells.find((c) => c.code === ${JSON.stringify(code)})?.outputs ?? null)`;
   const nOf = (code) => `(window.sagebrush.notebook.snapshot().cells.find((c) => c.code === ${JSON.stringify(code)})?.n ?? null)`;
-  ok(await until(`${shownIs("Made by the agent")} && ${outOf(MADE)}.includes("made by the agent")`, 30000), "the agent's first notebook ran once by itself: its output shown", await ev(outOf(MADE)).catch(() => null));
+  ok(await until(`${shownIs("Made by the agent")} && ${outOf(MADE)}.includes("made by the agent")`, 30000), "the agent's first notebook keeps the output of its one run, opened again", await ev(outOf(MADE)).catch(() => null));
   // (what such code can't do: change files without the person's OK (its interpreter is the sandboxed runner, and a new
   //  notebook may change none), nor reach a shell or a subprocess)
   const TRY = [
