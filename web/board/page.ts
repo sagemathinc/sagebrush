@@ -890,7 +890,7 @@ function wsSave(id: string, d: BoardDoc, bridge?: string) {
  * read or wrote it: both kept.  This page's version becomes a board of its
  * own; only once that is written is its pending copy dropped; then the
  * board shows the other version, saying so (CORR-AA2-1). */
-const wsSubs = new Set<(d: BoardDoc, notice?: string) => void | Promise<void>>();
+const wsSubs = new Set<(d: BoardDoc, notice?: string, from?: { held?: true; fenced?: true }) => unknown>();
 async function wsConflict(w: Workspace, id: string, d: BoardDoc, header: string, epoch: number) {
   try {
     const title = safeTitle(d.title) + " (your changes, made while it changed elsewhere)";
@@ -914,13 +914,15 @@ async function wsConflict(w: Workspace, id: string, d: BoardDoc, header: string,
     wsRev = cur.rev;
     if (wsLatest.get(epoch) === d) wsLatest.delete(epoch);
     const notice = `**This board was changed elsewhere while you edited it.** Its version is shown; yours is kept as a board of its own, "${title}".`;
-    for (const f of wsSubs) await f(cur.content as BoardDoc, notice);
+    // (the other version's new and changed code waits for the person's Run, as any write made elsewhere)
+    for (const f of wsSubs) await f(cur.content as BoardDoc, notice, { held: true });
   } catch (e: any) {
     wsRefused = e instanceof Error ? e : new Error(String(e));
   }
 }
 /** This board written elsewhere (an agent paired with the notebook page, another tab of this browser): shown here at
- * once, as a reload would show it, its changed code run as on any document from elsewhere. Read after this page's
+ * once, as a reload would show it; its new and changed code waits for the person's Run, whoever wrote it (write
+ * access isn't leave to run code, and a write doesn't say who made it). Read after this page's
  * own save in flight (the same queue), so this page's own write is known by its revision and passed over; while a
  * save of this page's waits, nothing: that save meets the write as a conflict, and both are kept (wsConflict). */
 let wsFollowing = false;
@@ -948,9 +950,14 @@ async function adoptWrite(w: Workspace, id: string) {
     cur = path ? await w.read(path) : null;
   }
   if (!cur || cur.rev === wsRev || !isBoard(cur.content) || wsLatest.size) return;
+  // (shown first, fenced: an edit made here meanwhile (while its pictures were read) wins, and this page then keeps the
+  // revision it had, so that edit's save meets the write as a conflict and both are kept (wsConflict); only a version
+  // shown, with no save of this page's waiting, becomes the one this page writes over)
+  let shown = true;
+  for (const f of wsSubs) if ((await f(cur.content as BoardDoc, undefined, { held: true, fenced: true })) === false) shown = false;
+  if (!shown || wsLatest.size || wsCopy) return;
   wsEpoch++;
   wsRev = cur.rev;
-  for (const f of wsSubs) await f(cur.content as BoardDoc);
 }
 /** The pending copy of `id` dropped, only if it still starts with `prefix` (its own). */
 function dropPending(id: string, prefix: string) {
@@ -1352,7 +1359,7 @@ const host: BoardHost = {
     },
     // (a board of the workspace: its version from elsewhere, when this page's write met it: CORR-AA2-1)
     ...(local && ws ? {
-      subscribe(f: (d: BoardDoc, notice?: string) => void | Promise<void>) { wsSubs.add(f); return () => { wsSubs.delete(f); }; },
+      subscribe(f: (d: BoardDoc, notice?: string, from?: { held?: true; fenced?: true }) => unknown) { wsSubs.add(f); return () => { wsSubs.delete(f); }; },
       // (Edit not offered while the board can't be written here: blockBoard)
       editing(f: (s: { allowed: boolean; why?: string }) => void) { blockedSubs.add(f); f(wsBlocked ? { allowed: false, why: wsBlockedWhy } : { allowed: true }); return () => { blockedSubs.delete(f); }; },
     } : {}),

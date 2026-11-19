@@ -1,9 +1,12 @@
 // ci: web-browser/board-c order=160
 // An open board follows its writes made elsewhere (web/board/page.ts, followWrites), in headless Chromium: another tab
 // of this browser writes the board through the workspace, as an agent paired with the notebook page does, and the
-// board shows the new version at once, without a reload, and runs its changed and new code; the board's own edits
-// are never taken for a write made elsewhere (no "changed elsewhere" copy, nothing shown twice).  Serve web/dist
-// first (python3 web/serve.py 8765), then
+// board shows the new version at once, without a reload.  Its new and changed code doesn't run until the person runs
+// it ("Run this board's code"), whoever wrote it (write access isn't leave to run code); then it runs once, and what
+// didn't change keeps its outputs.  The board's own edits are never taken for a write made elsewhere (no "changed
+// elsewhere" copy).  An edit made here while a version from elsewhere is still being drawn (its pictures read) wins:
+// that version stands down, and the edit's save meets the write as a conflict, so both are kept (the board shows the
+// other version, the person's is a board of its own, said).  Serve web/dist first (python3 web/serve.py 8765), then
 //   node web/board/test-board-follows-writes.mjs
 import { spawn } from "node:child_process";
 import { mkdtempSync, rmSync } from "node:fs";
@@ -88,17 +91,38 @@ try {
   await B.send("Page.navigate", { url: base });
   check(await B.until(`!!${W}`, 60000), "tab B, the notebook page, has the workspace");
   const write = (doc) => B.ev(`${W}.read(${JSON.stringify(path)}).then((r) => ${W}.write(${JSON.stringify(path)}, ${JSON.stringify(doc)}, { base: r.rev })).then((r) => r.rev)`);
-  const rev2 = await write({ title: "Followed", nodes: [{ id: "intro", title: "About", text: "Its square: $x^2$." }, { id: "sq", title: "A square", code: "x = 6\nprint(x * 7)" }], edges: [] });
-  check(typeof rev2 === "number", "tab B writes the board (its base)");
-  check(await A.until(`${items} === 2 && window.sagebrush.board.snapshot().doc.title === "Followed"`, 15000), "the open board shows the write at once", await A.ev(`${items}`).catch(() => null));
-  check(await A.until(`${outOf("sq")}.then((o) => /42/.test(o))`, 60000), "…and runs its new code", await A.ev(outOf("sq")).catch(() => null));
+  const runBtn = `document.querySelector("[data-sbb=runpaused]")`;
+  const runIt = () => A.ev(`(${runBtn}.click(), 1)`);
+  const KEEP = { id: "keep", title: "Unchanged", code: "import time\nprint('at', time.time())" };
+  // (first, a board with one code item, as the person runs it)
+  const rev1 = await write({ title: "Followed", nodes: [KEEP], edges: [] });
+  check(typeof rev1 === "number" && await A.until(`${items} === 1`, 15000), "tab B writes the board (its base): shown at once");
+  check(await A.until(`!${runBtn}.hidden`, 5000), "…its code not run: \"Run this board's code\" is offered", await A.ev(`${runBtn}.title`).catch(() => null));
+  await runIt();
+  check(await A.until(`${outOf("keep")}.then((o) => /^at \\d/.test(o))`, 60000), "the person's Run runs it", await A.ev(outOf("keep")).catch(() => null));
+  const kept = await A.ev(outOf("keep"));
+  // (a note and a new code item, written elsewhere)
+  const rev2 = await write({ title: "Followed", nodes: [KEEP, { id: "intro", title: "About", text: "Its square: $x^2$." }, { id: "sq", title: "A square", code: "x = 6\nprint(x * 7)" }], edges: [] });
+  check(rev2 === rev1 + 1, "tab B writes it again: a note and a new code item", rev2);
+  check(await A.until(`${items} === 3`, 15000), "the open board shows the write at once", await A.ev(`${items}`).catch(() => null));
+  await sleep(3000);
+  check(!/42/.test(await A.ev(outOf("sq"))) && !(await A.ev(`${runBtn}.hidden`)), "…its new code not run, whoever wrote it: Run is offered", { sq: await A.ev(outOf("sq")), title: await A.ev(`${runBtn}.title`) });
+  check(/changed elsewhere/.test(await A.ev(`${runBtn}.title`)), "…Run's title says why", await A.ev(`${runBtn}.title`));
+  check((await A.ev(outOf("keep"))) === kept, "…the unchanged item keeps its output");
   check(await A.ev("performance.timeOrigin") === origin0, "…without a reload");
-
-  // a change to its code and a new item: the changed code runs again, the new one runs
-  const rev3 = await write({ title: "Followed", nodes: [{ id: "intro", title: "About", text: "Its square: $x^2$." }, { id: "sq", title: "A square", code: "x = 6\nprint(x * 8)" }, { id: "more", title: "More", code: "print(x + 100)" }], edges: [] });
-  check(rev3 === rev2 + 1, "tab B writes it again", rev3);
-  check(await A.until(`${items} === 3 && ${outOf("sq")}.then((o) => /48/.test(o))`, 60000), "the changed code runs again", await A.ev(outOf("sq")).catch(() => null));
-  check(await A.until(`${outOf("more")}.then((o) => /106/.test(o))`, 60000), "the new item runs", await A.ev(outOf("more")).catch(() => null));
+  await runIt();
+  check(await A.until(`${outOf("sq")}.then((o) => /42/.test(o))`, 60000) && await A.ev(`${runBtn}.hidden`), "the person's Run runs the new code", await A.ev(outOf("sq")).catch(() => null));
+  await sleep(1500);
+  check((await A.ev(outOf("keep"))) === kept, "…and only it: the unchanged item isn't run again");
+  // (a change to its code and a new item: shown, not run, until the person runs them, once)
+  const rev3 = await write({ title: "Followed", nodes: [KEEP, { id: "intro", title: "About", text: "Its square: $x^2$." }, { id: "sq", title: "A square", code: "x = 6\nprint(x * 8)" }, { id: "more", title: "More", code: "print(x + 100)" }], edges: [] });
+  check(rev3 === rev2 + 1, "tab B writes it again: changed code and a new item", rev3);
+  check(await A.until(`${items} === 4`, 15000), "the changed board is shown at once");
+  await sleep(3000);
+  check(/42/.test(await A.ev(outOf("sq"))) && !/106/.test(await A.ev(outOf("more"))) && !(await A.ev(`${runBtn}.hidden`)), "…its changed and new code not run until the person runs it", { sq: await A.ev(outOf("sq")), more: await A.ev(outOf("more")) });
+  await runIt();
+  check(await A.until(`${outOf("sq")}.then((o) => /48/.test(o))`, 60000) && await A.until(`${outOf("more")}.then((o) => /106/.test(o))`, 60000), "the person's Run runs the changed code and the new item", { sq: await A.ev(outOf("sq")), more: await A.ev(outOf("more")) });
+  check((await A.ev(outOf("keep"))) === kept, "…the unchanged item still not run again");
 
   // the board's own edit, here: saved over the version it shows, never taken for a write made elsewhere
   await A.ev("window.sagebrush.board.editing(true), 1");
@@ -108,6 +132,27 @@ try {
   check(!(await A.ev(`${W}.list("/").then((l) => l.some((e) => /changed elsewhere/.test(e.path)))`)), "…no \"changed elsewhere\" copy is made");
   check((await A.ev("window.sagebrush.board.snapshot().doc.title")) === "Followed, renamed here" && !/changed elsewhere/.test(await A.ev("document.body.innerText")), "…and the board shows its own edit, saying nothing");
   check(await A.ev("performance.timeOrigin") === origin0, "…still without a reload");
+  // an edit here while a version from elsewhere is still being drawn: its picture's bytes held once (their digest waits), the
+  // person edits, then the picture goes on. The edit wins on the page; its save meets the write as a conflict: the
+  // board shows the other version, the person's is kept as a board of its own, and the next edit loses neither
+  await A.ev(`(() => { const orig = crypto.subtle.digest.bind(crypto.subtle); crypto.subtle.digest = async (...a) => { if (!window.__held && new TextDecoder().decode(a[1]).includes("held-picture-marker")) { window.__held = true; await new Promise((r) => (window.__go = r)); } return orig(...a); }; return 1; })()`);
+  const svg = '<svg xmlns="http://www.w3.org/2000/svg" width="1" height="1"><!--held-picture-marker--></svg>';
+  // (its file renamed by the title edited here: found again by its id)
+  const path2 = await B.ev(`${W}.list("/").then((l) => l.find((e) => e.kind === "board" && e.ref === ${JSON.stringify(id)}).path)`);
+  const write2 = (doc) => B.ev(`${W}.read(${JSON.stringify(path2)}).then((r) => ${W}.write(${JSON.stringify(path2)}, ${JSON.stringify(doc)}, { base: r.rev })).then((r) => r.rev)`);
+  const revR = await write2({ title: "REMOTE IMAGE", nodes: [{ id: "remote", text: "remote" }], edges: [], images: { p: { w: 1, h: 1, src: "data:image/svg+xml;base64," + Buffer.from(svg).toString("base64") } } });
+  check(typeof revR === "number" && await A.until("window.__held === true", 15000), "a version from elsewhere, its picture held while it is drawn");
+  await A.ev(`window.sagebrush.board.edit((d) => { d.title = "PERSON WHILE HELD"; }).then(() => 1)`);
+  await A.ev(`window.sagebrush.board.edit((d) => { d.nodes.push({ id: "mine", text: "MINE TOO" }); }).then(() => 1)`);
+  check((await A.ev("window.sagebrush.board.snapshot().doc.title")) === "PERSON WHILE HELD" && await A.ev(`window.sagebrush.board.snapshot().doc.nodes.some((n) => n.id === "mine")`), "…the person's two edits meanwhile are shown");
+  await A.ev("(window.__go(), 1)");
+  const copyPath = "/PERSON WHILE HELD (your changes, made while it changed elsewhere).board.json";
+  check(await B.until(`${W}.list("/").then((l) => l.some((e) => e.path === ${JSON.stringify(copyPath)}))`, 15000), "the person's edit is kept, as a board of its own", await B.ev(`${W}.list("/").then((l) => l.map((e) => e.path))`));
+  check(await A.until(`window.sagebrush.board.snapshot().doc.title === "REMOTE IMAGE" && /changed elsewhere while you edited/.test(document.body.innerText)`, 15000), "…the board shows the other version, and says so");
+  check(await B.ev(`${W}.read(${JSON.stringify(path2)}).then((r) => r.content.title === "REMOTE IMAGE" && r.rev === ${revR})`), "…which the workspace keeps as it was written, not written over");
+  await A.ev(`window.sagebrush.board.edit((d) => { d.nodes.push({ id: "next", text: "NEXT EDIT" }); }).then(() => 1)`);
+  check(await B.until(`${W}.read(${JSON.stringify(path2)}).then((r) => r.content.title === "REMOTE IMAGE" && r.content.nodes.some((n) => n.id === "next"))`, 15000), "the next edit is saved over the version shown");
+  check(await B.ev(`${W}.read(${JSON.stringify(copyPath)}).then((r) => r.content.title.startsWith("PERSON WHILE HELD") && r.content.nodes.some((n) => n.id === "mine"))`), "…and the person's earlier edits, both, are still kept");
   check(!A.errors.length && !B.errors.length, "no exceptions: " + [...A.errors, ...B.errors].join(" | ").slice(0, 400));
 } catch (e) {
   fails.push(String(e?.stack ?? e) + (dead && chromeTail.trim() ? `\n  Chrome's stderr, its end:\n    ${chromeTail.trim().split("\n").slice(-15).join("\n    ")}` : ""));
