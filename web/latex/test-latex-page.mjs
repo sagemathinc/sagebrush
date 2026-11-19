@@ -3205,18 +3205,20 @@ try {
       const D = `document.getElementById("sbmade").contentDocument`;
       const asks = () => ev(`window.__asks.slice()`);
       const say = (m) => ev(`(window.__bc.postMessage(${JSON.stringify(m)}), true)`);
+      // (any sign of a Run within 8 s: its button no longer "Run" (Starting Sage…, Running…) or a "Ran …" said)
+      const runs = () => until(`(() => { const d = ${D}; return d.querySelector(".tex-head .tex-run")?.textContent !== "Run" || /Ran /.test(d.querySelector(".tex-status")?.textContent ?? ""); })()`, 8000);
       const fstate = () => ev(`({ status: ${D}.querySelector(".tex-status")?.textContent ?? "", pdf: ${D}.querySelector(".tex-preview")?.textContent.replace(/\\s+/g, " ").slice(0, 120) ?? "" })`);
       await frame(fa);
       await until(`!!${D}?.querySelector(".tex-page .tex-preview")?.textContent.includes("Made")`, 30000);
-      await sleep(2000);
+      const r1 = await runs();
       const a1 = await asks();
       check(a1.length === 1 && a1[0].fid === fa && a1[0].rev === 0 && /^[0-9a-f-]{36}$/.test(a1[0].id), "agent-made: shown with code not run yet, unedited, the editor asks once, for this file at its revision", a1);
       const s1 = await fstate();
-      check(!/Ran /.test(s1.status) && (await resultsOf("/t/made.tex")) === null, "agent-made: no answer, nothing runs", s1);
+      check(!r1 && (await resultsOf("/t/made.tex")) === null, "agent-made: no answer, nothing runs", s1);
       await say({ t: "tex-may-run", id: "not-its-question", ok: true });
-      await sleep(1500);
+      const r2 = await runs();
       const s2 = await fstate();
-      check(!/Ran /.test(s2.status) && (await resultsOf("/t/made.tex")) === null, "agent-made: a yes to another question: nothing runs", s2);
+      check(!r2 && (await resultsOf("/t/made.tex")) === null, "agent-made: a yes to another question: nothing runs", s2);
       await say({ t: "tex-made", fid: fa, rev: 0 });
       await until(`window.__asks.length === 2`, 5000);
       const a2 = await asks();
@@ -3237,9 +3239,9 @@ try {
       const qb = (await asks())[2];
       await ev(`(() => { const d = ${D}; d.querySelector('.tex-view [data-view="source"]').click(); const t = d.querySelector(".tex-src"); t.setRangeText("% mine\\n", t.value.length, t.value.length, "end"); t.dispatchEvent(new Event("input", { bubbles: true })); return true; })()`);
       await say({ t: "tex-may-run", id: qb?.id, ok: true });
-      await sleep(3000);
+      const r4 = await runs();
       const s4 = await fstate();
-      check(qb?.fid === fb && !/Ran /.test(s4.status) && (await resultsOf("/t/made-b.tex")) === null, "agent-made: edited after it asked, the yes runs nothing", { qb, s4 });
+      check(qb?.fid === fb && !r4 && (await resultsOf("/t/made-b.tex")) === null, "agent-made: edited after it asked, the yes runs nothing", { qb, s4 });
       await ev(`(document.getElementById("sbmade").remove(), window.__bc.close(), true)`);
     }
     // (PythonTeX, step (a): \py and pycode run by the same Run, as Python; their results read back by the worker's
