@@ -2005,6 +2005,47 @@ try {
         const n1 = await listeners();
         ok(n0.document >= 0 && n1.document === n0.document && n1.window === n0.window, "J9: a notebook pane under the journal opened and closed 5 more times leaves no listener behind (document, window)", { n0, n1 });
       }
+      // J10, J11: a whole write of the notebook the pane writes (Workspace.write: an agent's workspace_write through
+      // another page of this browser, here the notebook page's workspace in a tab open on no notebook): the pane is the
+      // writer the write asks. J10: saved, the pane shows it and the journal has it. J11: the person typed in the pane
+      // after the agent read it: a conflict, the person's text kept in the pane and the journal
+      {
+        const path = "/notes/whole.ipynb";
+        await call("workspace.create", { path, content: docFor(path, [{ code: "w = 1" }, { code: "v = 1" }]), mode: "python" });
+        const ref = await refOf(path);
+        await send("Page.bringToFront");
+        await openNotebook(path, { finish: false, turn });
+        const writes = await until(`document.querySelector('${PANE} .nb-root .cell textarea')?.readOnly === false`, 10000).catch(() => false);
+        const rev0 = (await record(ref))?.rev;
+        const A = await tab(`${site}/`);
+        const aReady = await A.until(`!!window.__sbTestWs`, 30000);
+        await send("Page.bringToFront");
+        const nbCells = (cells) => cells.map((c) => ({ cell_type: "code", source: c.code, metadata: {}, outputs: [] }));
+        const whole = (cells, base) => Promise.race([
+          A.ev(`window.__sbTestWs.write(${JSON.stringify(path)}, { cells: ${JSON.stringify(nbCells(cells))} }, { base: ${base} }).then(() => ({ ok: true }), (e) => ({ ok: false, code: e?.code ?? null, msg: String(e?.message ?? e) }))`),
+          sleep(30000).then(() => ({ ok: false, code: "timeout", msg: "no answer in 30 s" })),
+        ]);
+        const r1 = await call("workspace.read", { path });
+        const res = await whole([{ code: "w = 2  # whole" }, { code: "v = 1" }], r1.rev);
+        const shown = await until(`(document.querySelector('${PANE} .nb-root .cell textarea')?.value ?? "") === "w = 2  # whole"`, 10000).catch(() => false);
+        const rec1 = await record(ref);
+        const stillWrites = await ev(`document.querySelector('${PANE} .nb-root .cell textarea')?.readOnly === false`);
+        ok(aReady && writes && res.ok && shown && rec1?.cells?.[0]?.code === "w = 2  # whole" && rec1.rev > rev0 && stillWrites,
+          "J10: an agent's whole write of the notebook the pane writes: saved, the pane shows it (still the writer) and the journal has it",
+          { aReady, writes, res, shown, rev0, rec1: rec1 && { rev: rec1.rev, cells: rec1.cells?.map((c) => c.code) }, stillWrites });
+        // J11: read, then the person types in the pane's second cell, then the agent writes from what it read
+        const r2 = await call("workspace.read", { path });
+        await ev(`(() => { const t = ${cellJs(1)}.querySelector("textarea"); t.focus(); t.value = "v = 1  # person"; t.dispatchEvent(new Event("input", { bubbles: true })); })()`);
+        const res2 = await whole([{ code: "w = 3  # whole" }, { code: "v = 1" }], r2.rev);
+        const pane2 = await ev(`[...document.querySelectorAll('${PANE} .nb-root .cell textarea')].map((t) => t.value)`);
+        let rec2 = null;
+        for (let i = 0; i < 50 && rec2?.cells?.[1]?.code !== "v = 1  # person"; i++) { rec2 = await record(ref); if (rec2?.cells?.[1]?.code !== "v = 1  # person") await sleep(200); }
+        ok(!res2.ok && res2.code === "conflict" && pane2?.[0] === "w = 2  # whole" && pane2?.[1] === "v = 1  # person" && rec2?.cells?.[0]?.code === "w = 2  # whole" && rec2?.cells?.[1]?.code === "v = 1  # person",
+          "J11: the person typed in the pane after the agent read the notebook: the agent's whole write is a conflict, the person's text kept in the pane and the journal",
+          { res2, pane2, rec2: rec2 && { rev: rec2.rev, cells: rec2.cells?.map((c) => c.code) } });
+        await A.close();
+        await send("Page.bringToFront");
+      }
     } finally {
       for (const x of tabs) await x.close().catch(() => {});
       if (fence0) await putRecord(fence0);
