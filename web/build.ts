@@ -772,7 +772,7 @@ if (hasSite) rmSync(join(siteDir, "public", "agents"), { recursive: true, force:
     for (const l of r.logs) console.error(l);
     process.exit(1);
   }
-  // (and "How to connect your agent to Sagebrush", a static page without scripts: /agents/connect/, a directory's
+  // (and "How to connect your agent to Sagebrush", a static page with no inline script: /agents/connect/, a directory's
   // index so that every host serves it without a .html: the site's assets and the preview Worker alike)
   mkdirSync(join(here, "dist", "agents", "connect"), { recursive: true });
   // (its Copy buttons' script, connect/copy.js, a file of the site's own: the page has no inline script; and the full

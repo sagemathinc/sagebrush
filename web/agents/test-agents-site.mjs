@@ -73,7 +73,8 @@ if (process.env.SAGEBRUSH_NO_SITE !== "1" && existsSync(site)) {
   const headers = existsSync(join(site, "public", "_headers")) ? readFileSync(join(site, "public", "_headers"), "utf8") : "";
   const rule = /^\/agents\/\*\n((?:[ \t].*\n?)*)/m.exec(headers)?.[1] ?? "";
   ok(/frame-ancestors 'none'/.test(rule) && /connect-src[^;]*ws:\/\/127\.0\.0\.1:\*/.test(rule), "the site's _headers give /agents/* its policy: frame-ancestors 'none', the loopback socket allowed");
-  // ("How to connect your agent": a page without scripts, so it adds no hash to the rule, and its links stay on the site)
+  // ("How to connect your agent": no inline script (only its own copy.js, under 'self'), so it adds no hash to the rule,
+  //  and its links stay on the site)
   const conn = existsSync(join(pub, "connect", "index.html")) ? readFileSync(join(pub, "connect", "index.html"), "utf8") : "";
   // (its one script is its own file, connect/copy.js, under 'self': no inline script, so it adds no hash to the rule)
   const scripts = [...conn.matchAll(/<script\b[^>]*>([\s\S]*?)<\/script>/gi)];
