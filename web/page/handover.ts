@@ -282,6 +282,14 @@ export function writerHandover(page: HandoverPage) {
       if (ops.length) replay(ops);
       void handOver();
     },
+    /** A use of this tab that isn't a key or a click here: an agent's edit, made for the person, in the agents chat's
+     * pane.  As a use now: a tab that follows asks for the lock, as when typed in. */
+    use() {
+      lastUse = Date.now();
+      if (!follows()) return;
+      if (!wanting) startWanting();
+      else want();
+    },
     /** This tab's takeover failed (it couldn't be opened as the writer): the keys kept for it can never be typed in
      * here; how many, for the page to say. */
     failed(): number {
