@@ -167,7 +167,9 @@ export async function computerSurface(site, page, opts = {}) {
   const home = join(tmp, "home");
   mkdirSync(script, { mode: 0o700 });
   mkdirSync(home, { mode: 0o700 });
-  const S = { runner: null, revoke: null, started: null, turn: false, ending: null, n: 0, failures: [] };
+  const S = { login: null, runner: null, revoke: null, started: null, turn: false, ending: null, n: 0, failures: [], closed: false, abort: new AbortController() };
+  // (once closed, a connect still on its way stops at its next step: nothing it would start outlives the surface)
+  const live = () => { if (S.closed) throw new Error("the computer surface was closed"); };
   const base = site.origin, cookie = site.cookie;
   const python = process.env.PYTHON ?? "python3";
   const env = { ...process.env, HOME: home, XDG_CONFIG_HOME: join(home, ".config"), XDG_STATE_HOME: join(home, ".state"), SAGEBRUSH_REMOTE_ORIGIN: base, NO_PROXY: "localhost,127.0.0.1", no_proxy: "localhost,127.0.0.1" };
@@ -177,10 +179,12 @@ export async function computerSurface(site, page, opts = {}) {
 
   /** The runner, as the person starts it; waits for its own leg to be up. */
   const startRunner = async () => {
+    live();
     S.runner = child(python, ["-m", "sagebrush", "remote", "--serve-agents", "--agent-cmd", agentCmd], { cwd: home, env });
     for (let i = 0; i < 600 && !/^Connected to /m.test(S.runner.out); i++) {
       if (S.runner.exitCode !== null) throw new Error("the runner exited: " + S.runner.out.slice(-800));
       await sleep(100);
+      live();
     }
     if (!/^Connected to /m.test(S.runner.out)) throw new Error("the runner didn't connect: " + S.runner.out.slice(-800));
   };
@@ -200,49 +204,61 @@ export async function computerSurface(site, page, opts = {}) {
     computer,
     /** The person: enrolls the computer, starts its runner, Connect, Chat here on it, the grant, Allow. */
     async connect(grant) {
-      if (!(() => { try { execFileSync(python, ["-c", "import sagebrush._native, sagebrush.remote.relay"], { cwd: home, env, stdio: "pipe" }); return true; } catch { return false; } })())
-        throw new Error(`${python} has no built sagebrush (its native module): build and install engine/py (maturin build, pip install), or set PYTHON`);
-      const login = child(python, ["-m", "sagebrush", "remote", "login", "--name", computer], { cwd: home, env });
-      let code = null;
-      for (let i = 0; i < 300 && !code; i++) { code = /the code ([A-Z]{4}-[A-Z]{4})/.exec(login.out)?.[1] ?? null; if (!code) await sleep(100); }
-      if (!code) throw new Error("sagebrush remote login printed no code: " + login.out.slice(-500));
-      const form = await fetch(base + "/remote/activate", { method: "POST", redirect: "manual", headers: { "content-type": "application/x-www-form-urlencoded", origin: base, cookie }, body: new URLSearchParams({ code, decision: "approve" }).toString() });
-      if (form.status >= 400) throw new Error(`the approval was refused (${form.status}): ${(await form.text()).slice(0, 300)}`);
-      if ((await Promise.race([login.gone, sleep(30000).then(() => "timeout")])) !== 0) throw new Error("sagebrush remote login didn't finish: " + login.out.slice(-500));
-      S.revoke = async () => {
-        // (this run's computer, revoked as the person revokes one: own account, same site)
-        const list = await (await fetch(base + "/api/remote/v1/peers", { headers: { cookie } })).json();
-        for (const p of (list.peers ?? []).filter((x) => x.name === computer)) {
-          const r = await fetch(base + "/api/remote/v1/revoke", { method: "POST", headers: { "content-type": "application/json", origin: base, cookie }, body: JSON.stringify({ remote_id: p.remote_id }) });
-          if (!r.ok) S.failures.push(`${computer} wasn't revoked (${r.status})`);
-        }
-      };
-      log(`     [computer] ${computer} enrolled by the device flow, approved signed in`);
-      if (!opts.runnerLate) await startRunner();
+      try {
+        if (!(() => { try { execFileSync(python, ["-c", "import sagebrush._native, sagebrush.remote.relay"], { cwd: home, env, stdio: "pipe" }); return true; } catch { return false; } })())
+          throw new Error(`${python} has no built sagebrush (its native module): build and install engine/py (maturin build, pip install), or set PYTHON`);
+        live();
+        const login = (S.login = child(python, ["-m", "sagebrush", "remote", "login", "--name", computer], { cwd: home, env }));
+        let code = null;
+        for (let i = 0; i < 300 && !code; i++) { code = /the code ([A-Z]{4}-[A-Z]{4})/.exec(login.out)?.[1] ?? null; if (!code) await sleep(100); live(); }
+        if (!code) throw new Error("sagebrush remote login printed no code: " + login.out.slice(-500));
+        const form = await fetch(base + "/remote/activate", { method: "POST", redirect: "manual", headers: { "content-type": "application/x-www-form-urlencoded", origin: base, cookie }, body: new URLSearchParams({ code, decision: "approve" }).toString(), signal: S.abort.signal });
+        live();
+        if (form.status >= 400) throw new Error(`the approval was refused (${form.status}): ${(await form.text()).slice(0, 300)}`);
+        if ((await Promise.race([login.gone, sleep(30000).then(() => "timeout")])) !== 0) throw new Error("sagebrush remote login didn't finish: " + login.out.slice(-500));
+        live();
+        S.revoke = async () => {
+          // (this run's computer, revoked as the person revokes one: own account, same site)
+          const list = await (await fetch(base + "/api/remote/v1/peers", { headers: { cookie } })).json();
+          for (const p of (list.peers ?? []).filter((x) => x.name === computer)) {
+            const r = await fetch(base + "/api/remote/v1/revoke", { method: "POST", headers: { "content-type": "application/json", origin: base, cookie }, body: JSON.stringify({ remote_id: p.remote_id }) });
+            if (!r.ok) S.failures.push(`${computer} wasn't revoked (${r.status})`);
+          }
+        };
+        log(`     [computer] ${computer} enrolled by the device flow, approved signed in`);
+        if (!opts.runnerLate) await startRunner();
 
-      // (the page, signed in)
-      const [cn, cv] = cookie.split(/=(.*)/s);
-      await page.send("Network.setCookie", { name: cn, value: cv, url: base + "/", path: "/", secure: true, httpOnly: true, sameSite: "Lax" });
-      await page.navigate(base + "/agents/");
-      if (!(await page.until(`!!document.querySelector('#editor .mb') && !document.querySelector('#connect').hidden`, 60000))) throw new Error("the Agents page didn't open");
-      const listed = `[...document.querySelectorAll('.sbag-box .runner')].some((r) => r.textContent.includes(${JSON.stringify(computer)}) && [...r.querySelectorAll('button')].some((b) => b.textContent === 'Chat here'))`;
-      let shown = false;
-      for (let i = 0; i < 10 && !shown; i++) {
-        await page.ev(`(document.querySelector('#connect').click(), true)`);
-        shown = await page.until(listed, 6000);
-        if (!shown) await page.ev(`([...document.querySelectorAll('.sbag-box button')].find((b) => b.textContent === 'Cancel')?.click(), true)`);
+        // (the page, signed in)
+        const [cn, cv] = cookie.split(/=(.*)/s);
+        await page.send("Network.setCookie", { name: cn, value: cv, url: base + "/", path: "/", secure: true, httpOnly: true, sameSite: "Lax" });
+        await page.navigate(base + "/agents/");
+        live();
+        if (!(await page.until(`!!document.querySelector('#editor .mb') && !document.querySelector('#connect').hidden`, 60000))) throw new Error("the Agents page didn't open");
+        const listed = `[...document.querySelectorAll('.sbag-box .runner')].some((r) => r.textContent.includes(${JSON.stringify(computer)}) && [...r.querySelectorAll('button')].some((b) => b.textContent === 'Chat here'))`;
+        let shown = false;
+        for (let i = 0; i < 10 && !shown; i++) {
+          await page.ev(`(document.querySelector('#connect').click(), true)`);
+          shown = await page.until(listed, 6000);
+          live();
+          if (!shown) await page.ev(`([...document.querySelectorAll('.sbag-box button')].find((b) => b.textContent === 'Cancel')?.click(), true)`);
+        }
+        if (!shown) throw new Error(`the Connect dialog doesn't list ${computer} with Chat here: ` + (await page.ev(`[...document.querySelectorAll('.sbag-box')].at(-1)?.textContent ?? ''`)));
+        await page.ev(`(() => { window.__whoSeen = []; new MutationObserver(() => window.__whoSeen.push(document.querySelector('#who').textContent)).observe(document.querySelector('#who'), { childList: true, subtree: true, characterData: true }); return true; })()`);
+        await page.ev(`([...[...document.querySelectorAll('.sbag-box .runner')].find((r) => r.textContent.includes(${JSON.stringify(computer)})).querySelectorAll('button')].find((b) => b.textContent === 'Chat here').click(), true)`);
+        if (opts.runnerLate) { await sleep(opts.runnerLate); await startRunner(); }
+        await allow(page, grant);
+        live();
+        if (!(await page.until(`document.querySelector('#who').textContent.includes(${JSON.stringify("on " + computer)})`, 30000))) throw new Error("not connected after Allow: " + (await page.ev(`document.querySelector('#who').textContent`)));
+        S.started = JSON.parse(readFileSync(join(script, "started.json"), "utf8"));
+        // (the agent runs on the computer: under the runner, the runner's own child)
+        if (!(S.started.ppid === S.runner.pid || ppidOf(S.started.pid) === S.runner.pid)) throw new Error(`the agent (pid ${S.started.pid}) isn't the runner's child (runner ${S.runner.pid})`);
+        surface.agentHost = S.started.host;
+        surface.whoSeen = await page.ev(`window.__whoSeen ?? []`);
+      } catch (e) {
+        // (enrollment refused, or closed meanwhile: the login ends with it, never left polling)
+        await stopChild(S.login);
+        throw e;
       }
-      if (!shown) throw new Error(`the Connect dialog doesn't list ${computer} with Chat here: ` + (await page.ev(`[...document.querySelectorAll('.sbag-box')].at(-1)?.textContent ?? ''`)));
-      await page.ev(`(() => { window.__whoSeen = []; new MutationObserver(() => window.__whoSeen.push(document.querySelector('#who').textContent)).observe(document.querySelector('#who'), { childList: true, subtree: true, characterData: true }); return true; })()`);
-      await page.ev(`([...[...document.querySelectorAll('.sbag-box .runner')].find((r) => r.textContent.includes(${JSON.stringify(computer)})).querySelectorAll('button')].find((b) => b.textContent === 'Chat here').click(), true)`);
-      if (opts.runnerLate) { await sleep(opts.runnerLate); await startRunner(); }
-      await allow(page, grant);
-      if (!(await page.until(`document.querySelector('#who').textContent.includes(${JSON.stringify("on " + computer)})`, 30000))) throw new Error("not connected after Allow: " + (await page.ev(`document.querySelector('#who').textContent`)));
-      S.started = JSON.parse(readFileSync(join(script, "started.json"), "utf8"));
-      // (the agent runs on the computer: under the runner, the runner's own child)
-      if (!(S.started.ppid === S.runner.pid || ppidOf(S.started.pid) === S.runner.pid)) throw new Error(`the agent (pid ${S.started.pid}) isn't the runner's child (runner ${S.runner.pid})`);
-      surface.agentHost = S.started.host;
-      surface.whoSeen = await page.ev(`window.__whoSeen ?? []`);
     },
     /** The person sends the prompt from the composer; the agent's turn starts (it says "Working on <its computer>."). */
     async beginTurn(prompt) {
@@ -281,6 +297,8 @@ export async function computerSurface(site, page, opts = {}) {
     liveCells: PANE_CELLS,
     /** Disconnect: the runner ends the agent (its process gone); the computer revoked; everything removed. */
     async close() {
+      S.closed = true;
+      S.abort.abort();
       try {
         if (S.started) {
           await page.ev(`([...document.querySelectorAll('.sbag-bar button')].find((b) => b.textContent === 'Disconnect')?.click(), true)`).catch(() => {});
@@ -288,6 +306,7 @@ export async function computerSurface(site, page, opts = {}) {
           if (alive(S.started.pid)) S.failures.push("Disconnect: the agent's process on the computer is still there");
         }
       } finally {
+        await stopChild(S.login);
         await stopChild(S.runner);
         if (S.revoke) await S.revoke().catch((e) => S.failures.push(`${computer} wasn't revoked: ${e.message}`));
         rmSync(tmp, { recursive: true, force: true });
