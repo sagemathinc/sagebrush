@@ -329,6 +329,8 @@ jobs:
           node scripts/size-budget.mjs --check
           node scripts/web-tests.mjs run checks.6
           node scripts/heap-budget.mjs --check
+          python3 scripts/sage_names.py --check
+          python3 test/sage_shim_index.py
           node scripts/pypi-import.mjs --check
           node scripts/tzdata-import.mjs --check
           scripts/sync-python-package.sh --check
@@ -1777,6 +1779,7 @@ jobs:
           python3 engine/py/test_latex_comments.py
           python3 engine/py/test_pairing.py
           python3 engine/py/test_chat.py
+          python3 engine/py/test_sage_names.py
           python3 engine/py/test_limits.py
           python3 engine/py/test_engine_errors.py
           python3 engine/py/test_memguard.py
