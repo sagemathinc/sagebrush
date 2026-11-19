@@ -55,6 +55,9 @@ interface RefData {
 
 /** marimo's is_local: `_x` (not `__x`), and `__` itself. */
 export const isLocal = (name: string): boolean => name === "__" || (name.startsWith("_") && !name.startsWith("__"));
+/** IPython's output names: `_`, `__` and `___`, the last three values shown, and `_N`, the one shown at count N. Read in
+ * a cell that doesn't bind them, they are the interpreter's (the history the notebook keeps), never the cell's own. */
+export const isOutputName = (name: string): boolean => /^(_{1,3}|_[0-9]+)$/.test(name);
 
 // (names to show in the message's example, for the modules people star-import most)
 const STAR_EXAMPLES: Record<string, [string, string]> = {
@@ -393,7 +396,7 @@ class Visitor {
       for (let i = this.blocks.length - 1; i >= 0; i--) {
         const b = this.blocks[i];
         if (i === 0) {
-          if (b.defs.has(mangled) || !b.defs.has(node.id)) node.id = mangled;
+          if (b.defs.has(mangled) || (!b.defs.has(node.id) && !isOutputName(node.id))) node.id = mangled;
         } else if (b.defs.has(node.id)) break;
       }
     }
