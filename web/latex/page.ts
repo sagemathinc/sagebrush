@@ -113,6 +113,10 @@ type Host = {
   app?: string;
   /** The site's address before its own paths: "" on the site, sagebrush.space's in the app (docs-link.ts siteHref) */
   site?: string;
+  /** Embedded in the Agents page's pane (boot.ts, ?embed=1, a frame of this site's only): no Files, home, title, File
+   * menu, Agent or Share, never a pairing of its own, the document alone by default, and a may-close question from the
+   * pane answered by this page's own leave guard */
+  embed?: boolean;
 };
 // (true only in a SAGEBRUSH_LATEX_PREVIEW=test build, web/build.ts: the page test's hold on image reads)
 declare const __SB_LATEX_TEST__: boolean | undefined;
@@ -452,7 +456,7 @@ export async function mount(root: HTMLElement, host: Host): Promise<void> {
   shareBtn.append("Share");
   shareBtn.title = "Share this document: a link anyone can open";
   const shareItem = () => fileMenu.querySelector<HTMLButtonElement>('[data-item="share"]');
-  const shareShown = () => { const it = shareItem(); shareBtn.hidden = !it || it.hidden || it.disabled; };
+  const shareShown = () => { const it = shareItem(); shareBtn.hidden = !!host.embed || !it || it.hidden || it.disabled; };
   const shareObs = new MutationObserver(shareShown); shareObs.observe(fileMenu, { subtree: true, childList: true, attributes: true, attributeFilter: ["hidden", "disabled"] }); shareShown();
   life.signal.addEventListener("abort", () => shareObs.disconnect());
   // (its dialog hangs under it, as the notebook page's does: index.html's anchorShare, where the page has it)
@@ -462,7 +466,10 @@ export async function mount(root: HTMLElement, host: Host): Promise<void> {
   // (a ?pair= link, or an agent this browser remembers: the pairing module mounted now, to connect or reconnect)
   // (the link taken by the hosting page before this loaded: pair-link.ts's key; or still in the URL)
   //  (none in the desktop app: no Agent button there either)
-  if (host.app) agentBtn.hidden = true;
+  // (embedded: the pane has its tab, Close and the file's name, and the Agents page's pairing is the only one: none here,
+  //  so the agent chunk isn't fetched at all; the page's left edge is the frame's, whatever the hosting page's files do)
+  if (host.embed) { for (const e of [back, home, title, fileBtn, agentBtn, shareBtn]) e.hidden = true; page.classList.add("tex-embedded"); page.style.left = "0"; }
+  if (host.app || host.embed) agentBtn.hidden = true;
   else if ((globalThis as any)[Symbol.for("sagebrush.pairLink")] || new URLSearchParams(location.search).has("pair")) void pairAgent(host.ws).catch(agentFailed);
   else void host.ws.agentGrants().then((k) => { if (Object.keys(k ?? {}).length) void pairAgent(host.ws).catch(agentFailed); }, () => {});
   const main = el("div", "tex-main");
@@ -478,7 +485,10 @@ export async function mount(root: HTMLElement, host: Host): Promise<void> {
   const barText = el("span", "tex-conflict-t");
   const useTheirs = el("button", "tex-theirs", "Use theirs (keep mine as a copy)"), keepMine = el("button", "tex-mine", "Keep mine (theirs stays in TimeTravel)");
   bar.append(barText, useTheirs, keepMine);
-  page.append(head, banner, bar, main);
+  // (the agent's bar, when one is connected: its row under the head and its strip, over the notebook page's;
+  //  workspace/agent-ui.ts)
+  const agentRow = el("div", "tex-agent"); agentRow.dataset.sbagSlot = "2";
+  page.append(head, banner, agentRow, bar, main);
   const say = (t: string) => { status.textContent = t; };
   const pref = (k: string, lo: number, hi: number, d: number) => { let v = d; try { v = Number(localStorage.getItem(k) ?? d); } catch {} return Number.isInteger(v) && v >= lo && v <= hi ? v : d; };
   const keep = (k: string, v: number) => { try { localStorage.setItem(k, String(v)); } catch {} };
@@ -1029,8 +1039,17 @@ export async function mount(root: HTMLElement, host: Host): Promise<void> {
   // this browser (keptViewOf/keepView). With none kept, both on a wide page, and on a narrow one (700 px or less) the source,
   // as before: there is no room for both there, so Both isn't offered (CSS: a kept "both" shows the document)
   const setView = (v: View) => { page.dataset.view = v; for (const b of viewBtns) b.setAttribute("aria-pressed", String(b.dataset.view === v)); };
-  setView(keptViewOf(host.fid) ?? (matchMedia("(max-width: 700px)").matches ? "source" : "both"));
-  for (const b of viewBtns) b.onclick = () => { const v = b.dataset.view as View; setView(v); keepView(host.fid, v); };
+  // (embedded, the pane's own record for the file, and the document alone until the person chooses: William, Nov 18)
+  const viewKey = host.embed ? "pane:" + host.fid : host.fid;
+  setView(keptViewOf(viewKey) ?? (host.embed ? "pdf" : matchMedia("(max-width: 700px)").matches ? "source" : "both"));
+  for (const b of viewBtns) b.onclick = () => { const v = b.dataset.view as View; setView(v); keepView(viewKey, v); };
+  // (embedded: the pane asks before it closes, {t: "may-close", id}, and this page's leave guard answers, its edit
+  //  written or the person asked, {t: "may-close", id, ok}; only from the frame's own parent, of this very origin)
+  if (host.embed) addEventListener("message", (e: MessageEvent) => {
+    if (e.source !== parent || e.origin !== location.origin || e.data?.t !== "may-close") return;
+    const id = String(e.data.id ?? "").slice(0, 64);
+    void leaveOk().then((ok) => parent.postMessage({ t: "may-close", id, ok }, location.origin));
+  }, on);
   // (the browser's own prompt on leaving only when a write has failed: William, Nov 2, "never" otherwise)
   window.addEventListener("beforeunload", (ev) => { if (saver?.failed) { ev.preventDefault(); ev.returnValue = ""; } }, on);
   window.addEventListener("pagehide", dropImages, on);

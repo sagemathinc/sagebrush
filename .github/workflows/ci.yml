@@ -171,6 +171,9 @@ jobs:
       - run: pnpm install --frozen-lockfile
       - run: pnpm run build
       - name: Node tests, shard ${{ matrix.shard }}/8
+        # CI 44540774555: slowest ordinary test 169 s. Default 300 s per
+        # test; seven long sweeps observed at 205-432 s in 44487308167
+        # explicitly request 900 s in their test definitions.
         env:
           SAGEBRUSH_TIME_SCALE: "2"
           # (the slow tests, test/slow-tests.ts: for the full-ci label and the paths they test, scripts/ci-paths.mjs
@@ -180,7 +183,7 @@ jobs:
           NPY_DISABLE_CPU_FEATURES: "X86_V4 AVX512_ICL AVX512_SPR"
         run: |
           mapfile -d '' files < <(find dist/test target -maxdepth 1 -type f -name '*.test.js' ! -name 'magma.test.js' ! -name 'matlab.test.js' ! -name 'sprig*.test.js' -print0 | sort -z)
-          node --test --test-concurrency="$SAGEBRUSH_CPUS" --test-shard=${{ matrix.shard }}/8 "${files[@]}"
+          node --test --test-timeout=300000 --test-concurrency="$SAGEBRUSH_CPUS" --test-shard=${{ matrix.shard }}/8 "${files[@]}"
       # (read-only memory telemetry: the cgroup this step runs in, which is the whole job so far, its
       # install, build and every test of the shard, not the parity test alone; printed even when a step before failed;
       # a file that is missing or unreadable is printed as unavailable, never as 0)
@@ -234,7 +237,7 @@ jobs:
           mapfile -d '' files < <(find dist/test -maxdepth 1 -type f -name 'sprig*.test.js' -print0 | sort -z)
           # (master has Sprig suites: none found means the build or the pattern broke)
           if [ "${#files[@]}" -eq 0 ]; then echo "no Sprig suites: the build or the pattern is wrong"; exit 1; fi
-          node --test --test-concurrency="$SAGEBRUSH_CPUS" "${files[@]}"
+          node --test --test-timeout=300000 --test-concurrency="$SAGEBRUSH_CPUS" "${files[@]}"
 
   language-node:
     needs: [changes, wasm-modules]
@@ -307,7 +310,7 @@ jobs:
       - run: pnpm run build
       - name: security, bundles, generated files and web assets
         run: |
-          SAGEBRUSH_HARDENED=0 node --test --test-concurrency="$SAGEBRUSH_CPUS" dist/test/security.test.js
+          SAGEBRUSH_HARDENED=0 node --test --test-timeout=300000 --test-concurrency="$SAGEBRUSH_CPUS" dist/test/security.test.js
           node scripts/build-cli.mjs
           node scripts/web-tests.mjs run checks.1
           node scripts/bench-ff-limits.mjs
@@ -342,8 +345,7 @@ jobs:
           # (the architecture article: its links pinned and present at their commit, its pages current, its board on the built site)
           node scripts/architecture-article.mjs --check
           node scripts/web-tests.mjs run checks.7
-      # The merge's size record, for size-gate (plan-growth-budget-r5 §1.1,
-      # §1.5): measured from the build above; it builds nothing
+      # The tested merge's size record, measured from the build above.
       - name: the size record
         run: |
           mkdir -p "$RUNNER_TEMP/size-record"
@@ -389,11 +391,8 @@ jobs:
     needs: changes
     if: (github.repository == 'sagemathinc/sagebrush' || vars.CI_RUNNER != '') && (needs.changes.outputs.node == 'true' || needs.changes.outputs.web == 'true' || needs.changes.outputs.size_inputs == 'true')
     runs-on: ${{ vars.CI_RUNNER || 'ubuntu-24.04' }}
-    # (the worst sequential path, including a source build for an unpublished
-    # base pin: resolve 2 + install 5 + build 16 + the npm metrics 2 + the
-    # old-key base 18 = 43, plus 15 for checkout, setup,
-    # records, cleanup and upload: scripts/test-size-measure.mjs checks this sum)
-    timeout-minutes: 58
+    # Resolve 2 + install 5 + build 16 + npm metrics 2 + setup/cleanup 15.
+    timeout-minutes: 40
     permissions:
       contents: read
       actions: read
@@ -417,7 +416,7 @@ jobs:
       - uses: pnpm/action-setup@b906affcce14559ad1aafd4ab0e942779e9f58b1 # v4.3.0
         with:
           version: 11
-      # (the same pins as the checks job: budgets.json's bun, heap-budget.json's node)
+      # (the same pins as the checks job: size-measure.mjs toolchain)
       # (no pnpm cache here: this job installs only the base's worktree, and only when it needs a new
       # record, so on a cache miss with nothing installed setup-node's post-step failed the job on a
       # missing store path, run 40543703855)
@@ -446,8 +445,7 @@ jobs:
         timeout-minutes: 16
         working-directory: ${{ runner.temp }}/size-base
         # (first the base's own modules, by its own pins.  If and only if a pin is absent from the CDN (404), build
-        # the base's source and require every resulting sha256 and byte count to equal its pins.  Inner timeouts:
-        # scripts/test-size-measure.mjs)
+        # the base's source and require every resulting sha256 and byte count to equal its pins.)
         run: |
           if [ -f wasm/pins.json ]; then timeout 8m node "$GITHUB_WORKSPACE/scripts/wasm-fetch-or-build.mjs" --root "$RUNNER_TEMP/size-base"; fi
           timeout 8m sh -c 'pnpm run build && node scripts/build-cli.mjs && bun web/build.ts && node scripts/build-cli.mjs'
@@ -455,46 +453,16 @@ jobs:
         if: steps.resolve.outputs.need_new == 'true'
         run: |
           node scripts/size-measure.mjs --record --root "$RUNNER_TEMP/size-base" --out "$RUNNER_TEMP/size-records/base-record.json"
-          if [ "${{ steps.resolve.outputs.bootstrap }}" = true ]; then
-            node scripts/size-measure.mjs --legacy --root "$RUNNER_TEMP/size-base" --out "$RUNNER_TEMP/size-records/legacy.json"
-          fi
-      # (the base's npm package metrics, report-only: here, before any old-key
-      # toolchain, so under this run's pinned Node and its bundled npm, as the
-      # merge's are; the rebuilt base when there is one, else the companion of
-      # the fetched push record, bound to it; plan-npm-pack-metrics-r3 §2)
+      # Report-only npm metrics, under the same pinned toolchain.
       - name: the base's npm package metrics
         if: always() && steps.resolve.outputs.mode != 'absolute'
         continue-on-error: true
         timeout-minutes: 2
-        run: |
-          if [ "${{ steps.resolve.outputs.need_new }}" = true ]; then
-            node scripts/npm-pack-metrics.mjs --base --records "$RUNNER_TEMP/size-records" --root "$RUNNER_TEMP/size-base"
-          else
-            node scripts/npm-pack-metrics.mjs --base --records "$RUNNER_TEMP/size-records"
-          fi
-      # (the old-key base, O: the base's own measurement and pins)
-      - uses: oven-sh/setup-bun@0c5077e51419868618aeaa5fe8019c62421857d6 # v2.2.0
-        if: steps.resolve.outputs.need_old == 'true'
-        with:
-          bun-version: ${{ steps.resolve.outputs.old_bun }}
-      - uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020 # v4.4.0
-        if: steps.resolve.outputs.need_old == 'true'
-        with:
-          node-version: ${{ steps.resolve.outputs.old_node }}
-      - name: the base under its own key
-        if: steps.resolve.outputs.need_old == 'true'
-        timeout-minutes: 18
-        run: |
-          git worktree add --detach "$RUNNER_TEMP/size-old" "${{ steps.resolve.outputs.base }}"
-          cd "$RUNNER_TEMP/size-old"
-          timeout 4m pnpm install --frozen-lockfile
-          if [ -f wasm/pins.json ]; then timeout 8m node "$GITHUB_WORKSPACE/scripts/wasm-fetch-or-build.mjs" --root "$RUNNER_TEMP/size-old"; fi
-          timeout 5m sh -c 'pnpm run build && node scripts/build-cli.mjs && bun web/build.ts && node scripts/build-cli.mjs'
-          node scripts/size-measure.mjs --record --out "$RUNNER_TEMP/size-records/old-record.json"
+        run: node scripts/npm-pack-metrics.mjs --base --records "$RUNNER_TEMP/size-records" --root "$RUNNER_TEMP/size-base"
       - name: remove the worktrees
         if: always()
         run: |
-          for w in size-base size-old; do
+          for w in size-base; do
             [ -d "$RUNNER_TEMP/$w" ] && git worktree remove --force "$RUNNER_TEMP/$w" || true
           done
       - uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4.6.2
@@ -504,10 +472,8 @@ jobs:
           retention-days: 7
           if-no-files-found: ignore
 
-  # The growth gate (plan-growth-budget-r5 §1.3, §1.4): the single check that
-  # decides core growth.  It fails closed: a skipped, cancelled or failed
-  # record job fails it, except for a change the classifier certifies as
-  # touching no measured input and no gate input.
+  # Stateless per-change backstop. Missing measurement jobs fail closed,
+  # except when the classifier certifies no measured or gate input changed.
   size-gate:
     needs: [changes, checks, size-base]
     if: always() && (github.repository == 'sagemathinc/sagebrush' || vars.CI_RUNNER != '')
@@ -525,7 +491,7 @@ jobs:
         with:
           name: sizes-${{ github.sha }}
           path: ${{ runner.temp }}/size-merge
-      # (an absolute run, schedule, dispatch or a first push, has no base, so no base records)
+      # Absolute runs have no base records.
       - uses: actions/download-artifact@d3f86a106a0bac45b974a628896c90dbdf5c8093 # v4.3.0
         if: needs.checks.result == 'success' && needs.size-base.result == 'success' && needs.size-base.outputs.mode != 'absolute'
         with:
@@ -551,13 +517,6 @@ jobs:
             cp "$RUNNER_TEMP/size-merge/sizes.json" "$RUNNER_TEMP/size-records/merge-record.json"
             node scripts/size-measure.mjs --gate --records "$RUNNER_TEMP/size-records" --out "$RUNNER_TEMP/size-records/size-gate.json"
           fi
-      # Report-only, in the job summary: no pull-request write permission and
-      # no mutation of the contributor's branch. `always()` preserves advice
-      # when the authoritative gate rejects a short or loose marker.
-      - name: suggested growth-marker advice
-        if: always() && github.event_name == 'pull_request'
-        continue-on-error: true
-        run: node scripts/size-advice.mjs --core "$RUNNER_TEMP/size-records/size-gate.json"
       # (report-only: it reads the two npm-pack records and appends a table to
       # the summary; the gate's result stays the gate step's own)
       - name: the npm package metrics
@@ -715,7 +674,7 @@ jobs:
           trap cleanup_server EXIT
           trap 'exit 130' INT
           trap 'exit 143' TERM
-          sleep 1
+          node scripts/wait-for-port.mjs 8765
           kill -0 "$server_pid"
           node scripts/web-tests.mjs run web-export
 
@@ -763,7 +722,7 @@ jobs:
           trap cleanup_server EXIT
           trap 'exit 130' INT
           trap 'exit 143' TERM
-          sleep 1
+          node scripts/wait-for-port.mjs 8765
           kill -0 "$server_pid"
           # (G-10: the runner's fetch broker on the notebook page, each case's server its own)
           # (`sagebrush notebook DIR` reads, writes and lists only what is really inside DIR: no symbolic link out)
@@ -820,7 +779,7 @@ jobs:
           trap cleanup_server EXIT
           trap 'exit 130' INT
           trap 'exit 143' TERM
-          sleep 1
+          node scripts/wait-for-port.mjs 8765
           kill -0 "$server_pid"
           node scripts/web-tests.mjs run web-lookalike
 
@@ -866,7 +825,7 @@ jobs:
           trap cleanup_server EXIT
           trap 'exit 130' INT
           trap 'exit 143' TERM
-          sleep 1
+          node scripts/wait-for-port.mjs 8765
           kill -0 "$server_pid"
           # (EXACT-ONLY's old-sync detector; OLD8's old builds run locally only, with OLD_TREES)
           node scripts/web-tests.mjs run web-sync-ops
@@ -915,7 +874,7 @@ jobs:
           trap cleanup_server EXIT
           trap 'exit 130' INT
           trap 'exit 143' TERM
-          sleep 1
+          node scripts/wait-for-port.mjs 8765
           kill -0 "$server_pid"
           node scripts/web-tests.mjs run web-runner-sync.1
       # (the Numbl corpus ratchet, its target web-runner-sync.2: the long tier's)
@@ -1020,7 +979,7 @@ jobs:
           trap cleanup_server EXIT
           trap 'exit 130' INT
           trap 'exit 143' TERM
-          sleep 1
+          node scripts/wait-for-port.mjs 8765
           kill -0 "$server_pid"
           mkdir -p interrupt-out
           node scripts/web-tests.mjs run interrupt-matrix
@@ -1209,7 +1168,7 @@ jobs:
           trap cleanup_server EXIT
           trap 'exit 130' INT
           trap 'exit 143' TERM
-          sleep 1
+          node scripts/wait-for-port.mjs 8765
           kill -0 "$server_pid"
           case "$GROUP" in
             notebook)
@@ -1607,7 +1566,7 @@ jobs:
           node scripts/third-party-notices.mjs --check
           pnpm run build
           node scripts/build-cli.mjs
-          node --test --test-concurrency="$SAGEBRUSH_CPUS" dist/test/groups.test.js dist/test/kernels.test.js dist/test/mpfield-matrix.test.js dist/test/special.test.js dist/test/sage.test.js dist/test/scipy-integrate.test.js
+          node --test --test-timeout=300000 --test-concurrency="$SAGEBRUSH_CPUS" dist/test/groups.test.js dist/test/kernels.test.js dist/test/mpfield-matrix.test.js dist/test/special.test.js dist/test/sage.test.js dist/test/scipy-integrate.test.js
           python3 sage-tests/run_calculus.py
 
   engine-node:
@@ -1653,7 +1612,7 @@ jobs:
           NPY_DISABLE_CPU_FEATURES: "X86_V4 AVX512_ICL AVX512_SPR"
         run: |
           mapfile -d '' files < <(find dist/test -maxdepth 1 -type f -name '*.test.js' ! -name 'magma.test.js' ! -name 'matlab.test.js' ! -name 'sprig*.test.js' -print0 | sort -z)
-          node --test --test-concurrency="$SAGEBRUSH_CPUS" --test-shard=${{ matrix.shard }}/8 "${files[@]}"
+          node --test --test-timeout=300000 --test-concurrency="$SAGEBRUSH_CPUS" --test-shard=${{ matrix.shard }}/8 "${files[@]}"
 
   engine-language:
     needs: [changes, engine-wasm, wasm-modules]
@@ -1956,7 +1915,7 @@ jobs:
           trap cleanup_server EXIT
           trap 'exit 130' INT
           trap 'exit 143' TERM
-          sleep 1
+          node scripts/wait-for-port.mjs 8765
           kill -0 "$server_pid"
           node scripts/web-tests.mjs run export-controls
 
@@ -1999,7 +1958,7 @@ jobs:
           trap cleanup_server EXIT
           trap 'exit 130' INT
           trap 'exit 143' TERM
-          sleep 1
+          node scripts/wait-for-port.mjs 8765
           kill -0 "$server_pid"
           node scripts/web-tests.mjs run lookalike-controls
 
