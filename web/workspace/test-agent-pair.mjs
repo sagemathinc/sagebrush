@@ -6,7 +6,7 @@
 //   bun web/workspace/test-agent-pair.mjs
 import { failHint, agentSays, onlyCurrent, readConnect, ONLY_CODE, SAFARI, CHROME_ALLOW, OTHER_FAIL } from "./agent-ui.ts";
 import { handOver, takeHandoff, HANDOFF_KEY, HANDOFF_MS } from "./pair-handoff.ts";
-import { AgentPairing, parseStrict, actorOf, parseReloadRecord, reloadDecision, takeReloadRecord, putReloadRecord, markReloadLeft, RELOAD_KEY, RELOAD_FRESH_MS } from "./agent-pair.ts";
+import { AgentPairing, withUrl, parseStrict, actorOf, parseReloadRecord, reloadDecision, takeReloadRecord, putReloadRecord, markReloadLeft, RELOAD_KEY, RELOAD_FRESH_MS } from "./agent-pair.ts";
 
 let failures = 0;
 const ok = (c, msg) => { console.log((c ? "ok   " : "FAIL ") + msg); if (!c) failures++; };
@@ -846,6 +846,20 @@ for (const [what, grant] of [["a folder, not Everything", { folders: ["/A"], wri
   ok(r.result && P.created && !P.mayRunCreated(P.created), `${what}: never runs by itself`);
   await P.revoke();
   S.srv.stop(true);
+}
+// ---- U-9: an answer's entry has its page's address (url), from the page's own workspace, for the agent to give the
+// person a link
+{
+  const O = "https://sagebrush.example";
+  const urlOf = async (p) => ({ "/p q.tex": "/?tex=f1", "/a.ipynb": "/?nb=r1" })[p] ?? null;
+  const tex = { path: "/p q.tex", kind: "file" };
+  const one = await withUrl({ entry: tex, rev: 3, content: { encoding: "utf-8", text: "x" } }, O, urlOf);
+  ok(one.entry.url === O + "/?tex=f1" && one.rev === 3 && one.content.text === "x" && !("url" in tex), "U-9a: read's entry gets url (a .tex: the LaTeX editor's page); the rest of the answer, and the entry given, unchanged");
+  const dir = { entry: { path: "/d", kind: "folder" } };
+  ok((await withUrl(dir, O, urlOf)) === dir && (await withUrl({ entry: null }, O, urlOf)).entry === null, "U-9b: an entry with no page of its own, and stat's null: unchanged");
+  const ls = { entries: [{ path: "/a.ipynb", kind: "notebook" }], more: false };
+  ok((await withUrl(ls, O, urlOf)) === ls && (await withUrl({ entry: tex }, O, undefined)).entry === tex && (await withUrl({ entry: tex }, O, async () => { throw new Error("x"); })).entry === tex,
+    "U-9c: list's entries, a page with no urlOf, and a lookup that fails: unchanged");
 }
 console.log(failures ? `${failures} failed` : "all passed");
 process.exit(failures ? 1 : 0);

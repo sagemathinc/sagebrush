@@ -108,7 +108,10 @@ export const LATEX_LAZY_CAPS = {
   //  master 35e6a6d0 with this change: 51,607 / 17,622, + 64)
   // (52,033 / 17,878: the two above together, Connect's one field and the languages' description, measured on their
   //  merge (master 25de21b2): 51,969 / 17,814, + 64)
-  AGENT: { label: "the LaTeX agent pairing's chunk", raw: 52033, gzip: 17878 },
+  // (53,215 / 18,321: Nov 19 2026, an answer's entry with its page's address (url, entry-url.ts with
+  //  the code page's languages), for the agent to give the person a link. Measured on master abc38965 with it:
+  //  53,151 / 18,257, + 64)
+  AGENT: { label: "the LaTeX agent pairing's chunk", raw: 53215, gzip: 18321 },
   // (the agent tools' work: web/latex/tools.ts, latex_check's report and latex_render's pictures, on an agent's first call)
   // (16,546 / 6,950: Nov 11 2026: latex_build's own code (build.ts, the
   //  engine driven from a snapshot, and the pages' fit) here, out of the eager group, its shared rules handed in by the

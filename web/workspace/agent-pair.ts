@@ -168,6 +168,17 @@ export class AgentError extends Error {
   constructor(public code: string, message: string, public extra: Record<string, unknown> = {}) { super(message); }
 }
 
+/** A result's entry with the address of its own page on this site, as the file browser opens it: `url`, for the agent
+ * to give the person a link to what it made or read. The agent's view of an entry has none of the ids that address
+ * needs: `urlOf(path)` reads them from the page's own workspace (agent-ui.ts, entry-url.ts). An entry with no page of
+ * its own (a folder, a data file) gets none, and so do list's entries (stat gives each one's); nothing else changes. */
+export async function withUrl(result: unknown, origin: string, urlOf?: (path: string) => Promise<string | null>): Promise<unknown> {
+  const r = result as any;
+  if (!urlOf || !r || typeof r !== "object" || !r.entry || typeof r.entry !== "object" || typeof r.entry.path !== "string") return result;
+  const u = await urlOf(r.entry.path).catch(() => null);
+  return u ? { ...r, entry: { ...r.entry, url: origin + u } } : result;
+}
+
 /** The pairing.  `verbsFor(actor)` gives the workspace's verbs credited to `actor` (Workspace.forAgent). */
 // (what is said when the grant changed under a call: nothing of what it read, and, for a change, no claim either way)
 export const CHANGED_WHILE_RUNNING = "the grant changed or expired while this ran: nothing of it is said (a change may or may not have been made)";
@@ -208,7 +219,7 @@ export class AgentPairing {
   constructor(
     readonly port: number,
     how: { code: string } | { session: string; pairingId: string; agent?: { name: string; client: string } } | { link: AgentLink; computer: string },
-    private opts: { verbsFor: (actor: string, host: { owner: () => string | null }) => AgentVerbs; gitBranch?: GitBranch; gitVerbs?: RunVerbs; store: GrantStore; trashEntry: (p: string) => Promise<TrashEntry | null | undefined>; page: { origin: string; path: string }; now?: () => number; WebSocketImpl?: typeof WebSocket; runVerbs?: RunVerbs; notebookEdit?: (edit: NotebookEdit, may: () => boolean, hold?: () => Promise<() => void>) => Promise<unknown>; onCreated?: (c: Created, p: AgentPairing) => void; reload?: { storage: ReloadStorage | null; scope: ReloadScope; leaving: () => boolean } },
+    private opts: { verbsFor: (actor: string, host: { owner: () => string | null }) => AgentVerbs; gitBranch?: GitBranch; gitVerbs?: RunVerbs; store: GrantStore; trashEntry: (p: string) => Promise<TrashEntry | null | undefined>; urlOf?: (path: string) => Promise<string | null>; page: { origin: string; path: string }; now?: () => number; WebSocketImpl?: typeof WebSocket; runVerbs?: RunVerbs; notebookEdit?: (edit: NotebookEdit, may: () => boolean, hold?: () => Promise<() => void>) => Promise<unknown>; onCreated?: (c: Created, p: AgentPairing) => void; reload?: { storage: ReloadStorage | null; scope: ReloadScope; leaving: () => boolean } },
   ) {
     if ("link" in how) { this.link = how.link; this.computer = how.computer; }
     else if (!Number.isInteger(port) || port < 1 || port > 65535) throw new AgentError("invalid", "a port is 1 to 65535");
@@ -497,7 +508,8 @@ export class AgentPairing {
       if (!this.current(g, verbs)) return this.fail(id, "invalid", grantProblem(this.grant, this.now()) ?? "the grant changed while this was checked");
       if (no) return this.fail(id, "invalid", no);
       let made: any = null;
-      const result = method === "workspace.git_branch" ? await this.branch(g!, verbs!, (params as any).name) : await this.run(verbs!, method.slice("workspace.".length), params as any, auth.expect, (e) => (made = e));
+      const ran = method === "workspace.git_branch" ? await this.branch(g!, verbs!, (params as any).name) : await this.run(verbs!, method.slice("workspace.".length), params as any, auth.expect, (e) => (made = e));
+      const result = await withUrl(ran, this.opts.page.origin, this.opts.urlOf);
       // (after the last wait, before anything is said: the same grant, in force now, or nothing of what it read)
       if (!this.current(g, verbs)) return this.fail(id, "invalid", CHANGED_WHILE_RUNNING);
       g!.lastUsed = this.now();
