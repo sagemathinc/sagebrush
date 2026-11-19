@@ -347,9 +347,19 @@ export function createNotebook(root, opts = {}) {
     }
   }
   // (an output that can't be drawn, however malformed: said, with its text, the rest of the document drawn all the same)
-  function appendDisplay(box, b) {
+  // A picture's size to show it at, from a display's metadata ({mime: {width, height}}): both finite positive numbers
+  // (at most 100,000 each), else none, and the picture is shown at its own size.
+  function pictureShownSize(md, mime) {
+    const m = md && typeof md === "object" ? md[mime] : null;
+    const w = m && typeof m === "object" ? m.width : undefined, ht = m && typeof m === "object" ? m.height : undefined;
+    const ok = (x) => typeof x === "number" && Number.isFinite(x) && x > 0 && x <= 1e5;
+    return ok(w) && ok(ht) ? { width: Math.round(w), height: Math.round(ht) } : null;
+  }
+  // (md: the display's metadata, Jupyter's: a picture's width and height to show it at, a PNG drawn at twice its
+  // size, lib/_graphics.py; taken only as finite positive numbers, pictureShownSize)
+  function appendDisplay(box, b, md) {
     try {
-      drawDisplay(box, b);
+      drawDisplay(box, b, md);
     } catch (e) {
       const el = h("div", "html-out");
       el.sbBundle = { ...b };
@@ -359,7 +369,7 @@ export function createNotebook(root, opts = {}) {
       box.appendChild(el);
     }
   }
-  function drawDisplay(box, b) {
+  function drawDisplay(box, b, md) {
     if (b["text/latex"] && b["application/vnd.sagebrush.typeset"]) return appendLatex(box, b);
     if (typeof b["text/markdown"] === "string" && !b["image/svg+xml"] && !b["image/png"] && !b["image/jpeg"] && !b["image/webp"]) return appendMarkdown(box, b);
     const fig = h("figure", "plot");
@@ -392,7 +402,10 @@ export function createNotebook(root, opts = {}) {
     else if (raster) {
       // (within the bounds its header gives, and this document's pixels in
       // all: image-size.ts; else a placeholder, the picture kept as it was)
-      const show = () => Object.assign(new Image(), { src: `data:${raster[0]};base64,${raster[1]}`, alt: b["text/plain"] || "image" });
+      // (shown at the size its metadata gives, when it gives one: a PNG drawn at twice it is sharp on a dense screen)
+      const size = pictureShownSize(md, raster[0]);
+      if (size) fig.sbMeta = { [raster[0]]: size };
+      const show = () => Object.assign(new Image(), { src: `data:${raster[0]};base64,${raster[1]}`, alt: b["text/plain"] || "image" }, size ?? {});
       const why = pixels.take(imageSize(raster[0], raster[1]), raster[0] + "\n" + pictureKey(raster[1]));
       if (!why) fig.appendChild(show());
       else {
@@ -428,7 +441,7 @@ export function createNotebook(root, opts = {}) {
     if (!box) return null;
     return {
       out: (text, isErr) => appendText(box, text, isErr),
-      display: (b) => appendDisplay(box, b),
+      display: (b, md) => appendDisplay(box, b, md),
       interact: (spec) => renderInteract(box, spec),
       clear: () => box.replaceChildren(),
       input: (prompt, reply) => askInput(box, prompt, reply, waiting),
@@ -498,12 +511,12 @@ export function createNotebook(root, opts = {}) {
         // notebook: its picture is, and running the cell again restores the view
         const b = { ...el.sbBundle };
         if ((b[SCENE3D]?.length ?? 0) > 8e6) delete b[SCENE3D];
-        outs.push({ output_type: "display_data", data: b, metadata: {} });
+        outs.push({ output_type: "display_data", data: b, metadata: el.sbMeta ?? {} });
       } else if (el.tagName === "FIGURE") {
         const svg = el.querySelector("svg"), img = el.querySelector("img"), data = {};
         if (svg) { data["image/svg+xml"] = new XMLSerializer().serializeToString(svg); data["text/plain"] = svg.getAttribute("aria-label") || "picture"; }
         else if (img) { const [head, b64] = img.src.split(","); data[head.slice(5, head.indexOf(";"))] = b64; data["text/plain"] = img.alt; }
-        outs.push({ output_type: "display_data", data, metadata: {} });
+        outs.push({ output_type: "display_data", data, metadata: (img && el.sbMeta) || {} });
       } else if (el.classList.contains("interact")) {
         stream("stdout", "[interactive controls: run the cell to use them]\n");
         outs.push(...saveOutputs(el.querySelector(".iout")));
@@ -524,7 +537,7 @@ export function createNotebook(root, opts = {}) {
         const b = {};
         for (const [key, v] of Object.entries(o.data)) b[key] = joinText(v);
         if (Object.keys(b).every((k) => k === "text/plain")) appendText(box, (b["text/plain"] ?? "") + "\n", false);
-        else appendDisplay(box, b);
+        else appendDisplay(box, b, o.metadata);
       }
     }
   }
@@ -802,7 +815,7 @@ export function createNotebook(root, opts = {}) {
         }, INTERACT_SWAP_MS);
       },
       out: (text, isErr) => appendText(box(), text, isErr),
-      display: (b) => appendDisplay(box(), b),
+      display: (b, md) => appendDisplay(box(), b, md),
       interact: (spec) => renderInteract(box(), spec),
       clear: () => box().replaceChildren(),
       input: (prompt, reply) => askInput(box(), prompt, reply),

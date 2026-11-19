@@ -62,6 +62,7 @@ import { matlabToPython, MatlabSyntaxError, matlabSyntaxMessage, matlabHostOps, 
 import { mangleLocals, localPrefix } from "./dataflow";
 import { restoreDefNames, RENAME_HELPER, takeInitLines } from "./rename";
 import { unbox } from "./runtime/object";
+import { bundleMetadata } from "./runtime/index";
 import { checkParams, type LiveAnswer, type LiveOp, type LiveParams } from "./live-data";
 import { consumeCtrlC, INTR_GRADING } from "./runtime/interrupt";
 import { DISPLAY_ENVELOPE, displayCost } from "./output-cost";
@@ -218,9 +219,10 @@ export function notebookSession(post: (m: any) => void, opts: { captureStreams?:
     display(bundle: Record<string, string>) {
       if (current === null) return false;
       flush();
+      const metadata = bundleMetadata(bundle);
       if (opts.limit) {
         if (used.cut) return true;
-        const n = displayCost(bundle);
+        const n = displayCost(bundle, metadata);
         if (n > room() || used.displays >= opts.limit.displays) {
           cut(n > room() ? undefined : "displays");
           return true;
@@ -229,7 +231,10 @@ export function notebookSession(post: (m: any) => void, opts: { captureStreams?:
         used.run += n;
         used.displays++;
       }
-      post({ id: current, target, display: bundle });
+      // (its metadata too, when it has any: a PNG's size to show it at, src/runtime/index.ts bundleMetadata;
+      // charged with the bundle above)
+      if (metadata) post({ id: current, target, display: bundle, metadata });
+      else post({ id: current, target, display: bundle });
       return true;
     },
     interact(spec: string) {
