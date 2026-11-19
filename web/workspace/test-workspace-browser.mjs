@@ -1619,8 +1619,40 @@ try {
   const ab = await ev(`(() => { const b = document.querySelector("#wssidebar .fagents"), r = b?.getBoundingClientRect(), s = ${S}.getBoundingClientRect(); return b && { text: b.textContent.trim(), w: Math.round(r.width), h: Math.round(r.height), fromBottom: Math.round(s.bottom - r.bottom), font: parseFloat(getComputedStyle(b).fontSize) }; })()`);
   check(ab && ab.text === "Agents…" && ab.w >= 200 && ab.h >= 36 && ab.font >= 15 && ab.fromBottom < 120, "a big Agents… button at the foot of the files: " + JSON.stringify(ab));
   await shot("agents-button");
-  await ev(`document.querySelector("#wssidebar .fagents").click()`);
-  check(await until(`location.pathname === "/agents/"`, 20000), "Agents… opens the agents page: " + (await ev(`location.pathname`)));
+  // (it leaves only once the notebook is saved, the way the page leaves for a board: a save the store refuses (answered
+  //  "not saved: ...", as the journal answers one) or fails keeps this page and the edit, for Agents… and the switch's
+  //  Agents alike; a save held keeps it waiting; the save made, it leaves, every edit kept)
+  const typeCell = (word) => ev(`(() => { const ta = document.querySelector("#cells .cell textarea"); ta.focus(); ta.value += ${JSON.stringify(word)}; ta.dispatchEvent(new Event("input", { bubbles: true })); return 1; })()`);
+  const leaveBy = { "Agents…": `document.querySelector("#wssidebar .fagents").click()`, "the switch's Agents": `document.querySelector('#wssidebar .fh .sb-mode [data-mode="agents"]').click()` };
+  await until(`!!sagebrush.notebook.store && !!document.querySelector("#cells .cell textarea")`, 60000);
+  // (the page's own saves settled first, as it loaded: only the cases' saves are in flight below)
+  await ev(`sagebrush.notebook.saved().then(() => 1, () => 1)`);
+  await ev(`(window.__save = sagebrush.notebook.store.save, 1)`);
+  const words = [];
+  for (const [name, click] of Object.entries(leaveBy)) {
+    for (const how of ["refused", "failed"]) {
+      await ev(`(sagebrush.notebook.store.save = ${how === "refused" ? `() => Promise.resolve("not saved: the test refusal")` : `() => Promise.reject(new Error("the test failure"))`}, 1)`);
+      const word = ` # ${how}-${words.length}`;
+      words.push(word);
+      await typeCell(word);
+      await ev(click);
+      await until(`location.pathname !== "/" || /agents page was not opened/.test(document.querySelector("#saved")?.textContent ?? "")`, 45000);
+      const st = await ev(`({ path: location.pathname, text: document.querySelector("#cells .cell textarea")?.value ?? "", said: document.querySelector("#saved")?.textContent ?? "" })`);
+      check(st.path === "/" && st.text.includes(word) && /not saved/.test(st.said) && /agents page was not opened/.test(st.said), `${name} with the save ${how}: this page stays, the edit kept, and says so: ` + JSON.stringify(st));
+    }
+  }
+  await ev(`(() => { const st = sagebrush.notebook.store; window.__release = null; st.save = (...a) => new Promise((ok, no) => { window.__release = () => window.__save.apply(st, a).then(ok, no); }); return 1; })()`);
+  words.push(" # held");
+  await typeCell(" # held");
+  await ev(leaveBy["Agents…"]);
+  await sleep(1500);
+  check(await ev(`location.pathname === "/" && typeof window.__release === "function"`), "Agents… with the save held: it waits, still on this page");
+  await ev(`(sagebrush.notebook.store.save = window.__save, window.__release(), 1)`);
+  check(await until(`location.pathname === "/agents/"`, 20000), "…the save made, it leaves for the agents page: " + (await ev(`location.pathname`)));
+  await go(base);
+  await until(`!!document.querySelector("#cells .cell textarea")`, 60000);
+  const keptText = await ev(`document.querySelector("#cells .cell textarea")?.value ?? ""`);
+  check(words.every((w) => keptText.includes(w)), "and every edit typed before leaving is in the notebook: " + JSON.stringify(keptText));
   for (const e of errors) fails.push("page error: " + e);
 } catch (e) {
   fails.push("threw: " + (e?.stack ?? e));

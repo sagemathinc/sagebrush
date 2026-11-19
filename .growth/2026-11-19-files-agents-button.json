@@ -1,7 +1,8 @@
 {
   "v": 1,
-  "reason": "A big Agents… button at the foot of the file browser on the notebook and board pages, which leaves for the agents page once the page's own saves are made, the panel switch's Agents through the same way out (web/workspace/browser.ts, web/workspace/mode-switch.ts, web/index.html, web/board/page.ts); the CLI's bundle carries both pages. cli/pyjs.cjs grows +1972 bytes, exact, measured with size-record.sh on base a9b2b826 and on the exact two-parent merge probe of this PR's head (its tree is the head's: the head's parent is that base), pinned node 24.21.0 and bun 1.4.4; the bound adds 64 bytes of slack.",
+  "reason": "A big Agents… button at the foot of the file browser on the notebook and board pages, which leaves for the agents page once the page's own saves are made, the panel switch's Agents through the same way out (web/workspace/browser.ts, web/workspace/mode-switch.ts, web/index.html, web/board/page.ts); and the notebook's saved() rejects a save the store refuses by answering \"not saved: ...\" (web/notebook/notebook.js), so every way out stays with the edit; the CLI's bundle carries both pages and the notebook. cli/pyjs.cjs grows +2300 bytes and engine/sagebrush-notebook.js +205, exact, measured with size-record.sh on base a9b2b826 and on the exact two-parent merge probe of this PR's head, pinned node 24.21.0 and bun 1.4.4; each bound adds 64 bytes of slack.",
   "bytes": {
-    "cli/pyjs.cjs": 2036
+    "cli/pyjs.cjs": 2364,
+    "engine/sagebrush-notebook.js": 269
   }
 }

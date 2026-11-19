@@ -2149,6 +2149,17 @@ export function createNotebook(root, opts = {}) {
           applyRemote(t.conflict, true, true);
           return;
         }
+        // (a save the store refused, answered rather than thrown ("not saved: ...", the journal's way): nothing of it was
+        // kept, so nothing here is taken as saved (not its revision, not its cells as the base), it is sent again with the
+        // next save, and saved() rejects with why, as for a thrown one: a page leaving for elsewhere stays, its edit kept)
+        const refused = (t && typeof t === "object" ? t.saved : t);
+        if (typeof refused === "string" && /^not saved\b/.test(refused)) {
+          if (lastJson === json) lastJson = null;
+          if (mine !== shown || store !== st) return;
+          lastSaveError = new Error(refused.replace(/^not saved:?\s*/, "") || "not saved");
+          emit("saved", refused);
+          return;
+        }
         // (its revision kept for its next save, shown or not; what the store saved, which a journal store merged
         // with changes from elsewhere this page doesn't show yet: shown here at once, typed text kept, and the base
         // from then on (never an older one))

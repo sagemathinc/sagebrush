@@ -3880,13 +3880,13 @@ $("#boardbtn").onclick = () => toBoard("/board/?recent=" + encodeURIComponent(nb
     bottomRoom();
   };
 }
-// (to the board once this notebook is saved, every change of it; not saved:
+// (to the board, or another page (`what` names it), once this notebook is saved, every change of it; not saved:
 // it stays open, and says so, CORR-7F9-1)
-async function toBoard(url) {
+async function toBoard(url, what = "the whiteboard") {
   try {
     await nb.saved();
   } catch (e) {
-    savedEl.textContent = "not saved: " + (e?.message ?? e) + " (the whiteboard was not opened)";
+    savedEl.textContent = "not saved: " + (e?.message ?? e) + ` (${what} was not opened)`;
     return;
   }
   location.assign(url);
@@ -5189,7 +5189,7 @@ function wsShowFiles(on) {
     wsBrowser = mountBrowser(wsSidebar, {
       ws,
       // (Agents…: the agents page once this notebook is saved, as the board is opened; not saved, it stays, saying why)
-      agents: () => void toBoard("/agents/"),
+      agents: () => void toBoard("/agents/", "the agents page"),
       current: () => (current.kind === "browser" && current.id ? { kind: "notebook", ref: current.id } : undefined),
       open(e, how) {
         const url = e.kind === "board" ? "/board/?doc=local:" + e.ref : "/?nb=" + encodeURIComponent(e.ref);
