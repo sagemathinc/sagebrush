@@ -503,6 +503,8 @@ struct Emit<'a> {
     /// d's residues per selected prime (a denominator present)
     d: Option<Vec<u64>>,
     reduce: bool,
+    /// the list alone, as a JSON string (sigma_table), not the object
+    bare: bool,
 }
 
 impl Emit<'_> {
@@ -532,7 +534,7 @@ impl Emit<'_> {
         let d = self.d.as_ref().map(|r| crt.reconstruct(r));
         // (d's limbs, kept for the gcds)
         let dl: Vec<u64> = d.as_ref().map_or_else(Vec::new, |d| d.to_u64_digits().1);
-        out.push_str("{\"c\":\"");
+        out.push_str(if self.bare { "\"" } else { "{\"c\":\"" });
         if last > 0 {
             for i in 0..leading {
                 if i > 0 {
@@ -557,6 +559,9 @@ impl Emit<'_> {
             }
         }
         out.push('"');
+        if self.bare {
+            return Ok(());
+        }
         if !self.reduce {
             out.push_str(",\"d\":\"");
             match &d {
@@ -692,7 +697,7 @@ pub fn mul(a: &Csv, b: &Csv, da: Option<&Csv>, db: Option<&Csv>, n: usize, raw: 
             r.iter().fold(1 % m.n, |acc, &x| m.mul(acc, x))
         }).collect())
     };
-    let e = Emit { primes: moduli(&idx), matrix: &matrix, len: n, d, reduce: !dens.is_empty() && !raw };
+    let e = Emit { primes: moduli(&idx), matrix: &matrix, len: n, d, reduce: !dens.is_empty() && !raw, bare: false };
     e.write(0, out)
 }
 
@@ -756,7 +761,7 @@ pub fn pow(a: &Csv, k: u64, da: Option<&Csv>, n: usize, raw: bool, adm: &Admitte
             md.pow(r[0], k)
         }).collect())
     };
-    let e = Emit { primes: moduli(&idx), matrix: &matrix, len: m_len, d, reduce: !dens.is_empty() && !raw };
+    let e = Emit { primes: moduli(&idx), matrix: &matrix, len: m_len, d, reduce: !dens.is_empty() && !raw, bare: false };
     e.write(k as usize * v, out)
 }
 
@@ -789,17 +794,8 @@ pub fn sigma(k: u64, n: usize, adm: &Admitted, out: &mut String) -> Result<(), S
         counted::add(2 * n as u64);
     }
     // (positive values: no sign, and no denominator)
-    let e = Emit { primes: moduli(&(0..p).collect::<Vec<_>>()), matrix: &matrix, len: n, d: None, reduce: false };
-    let mut obj = String::new();
-    std::mem::swap(&mut obj, out);
-    e.write(0, &mut obj)?;
-    // (the values alone: sigma_table's reply is the list)
-    let start = obj.find("{\"c\":\"").map(|i| i + 6).unwrap_or(0);
-    let end = obj.find("\",\"d\"").unwrap_or(obj.len());
-    out.push('"');
-    out.push_str(&obj[start..end]);
-    out.push('"');
-    Ok(())
+    let e = Emit { primes: moduli(&(0..p).collect::<Vec<_>>()), matrix: &matrix, len: n, d: None, reduce: false, bare: true };
+    e.write(0, out)
 }
 
 /// The generalized pentagonal numbers e(j) = j (3j - 1) / 2 for j = 0, 1,
