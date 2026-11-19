@@ -10968,6 +10968,31 @@
   "class": "none",
   "owner": "configuration"
  },
+ "src/cli.ts :: execModuleAsMain :: else if (workerData?.sagebrushPrompt) promptWorker(workerData.sagebrushPrompt.argv, workerData.sagebrushPrompt.limits); #0": {
+  "class": "none",
+  "owner": "CLI/runtime configuration",
+  "reason": "the session's limits handed to the prompt's worker unchanged (as cliWorker's); it refuses nothing."
+ },
+ "src/cli.ts :: promptFront :: const worker = new Worker(entry, { stdout: true, stderr: true, workerData: { sagebrushPrompt: { argv, limits } } }); #0": {
+  "class": "none",
+  "owner": "CLI/runtime configuration",
+  "reason": "the session's limits handed to the prompt's worker unchanged (as cliWorker's); it refuses nothing."
+ },
+ "src/cli.ts :: promptFront :: function promptFront(argv: string[], limits: LimitsText): Promise<number> { #0": {
+  "class": "none",
+  "owner": "CLI/runtime configuration",
+  "reason": "the session's limits handed to the prompt's worker unchanged (as cliWorker's); it refuses nothing."
+ },
+ "src/cli.ts :: promptWorker :: function promptWorker(argv: string[], limits?: LimitsText) { #0": {
+  "class": "none",
+  "owner": "CLI/runtime configuration",
+  "reason": "the session's limits handed to the prompt's worker unchanged (as cliWorker's); it refuses nothing."
+ },
+ "src/cli.ts :: promptWorker :: return cliWorker(argv, limits); #0": {
+  "class": "none",
+  "owner": "CLI/runtime configuration",
+  "reason": "the session's limits handed to the prompt's worker unchanged (as cliWorker's); it refuses nothing."
+ },
  "src/cli.ts :: readStdin :: if (total + n > STDIN_SOURCE_MAX) { #0": {
   "class": "1",
   "owner": "CLI/runtime configuration",
