@@ -114,7 +114,7 @@ export async function startChrome() {
 }
 
 // ---- the grant dialog ("Allow this agent?"), set as the case's grant, then Allow
-async function allow(page, grant) {
+export async function allow(page, grant) {
   if (!(await page.until(`[...document.querySelectorAll(".sbag-box h2")].some((h) => h.textContent === "Allow this agent?")`, 30000))) {
     throw new Error("no Allow dialog: " + (await page.ev(`document.querySelector(".sbag-box .err")?.textContent ?? document.querySelector(".sbag-box")?.textContent ?? "(no dialog)"`).catch(() => "")));
   }
@@ -400,7 +400,8 @@ export async function runCase(kase, surfaceName, { site, page, shotDir = process
   } catch (e) {
     h.ok(false, "threw: " + String(e?.stack ?? e).slice(0, 400));
   } finally {
-    surface.close();
+    // (a surface's close may check its own end, as the computer surface's Disconnect: what it finds wrong fails the case)
+    for (const f of (await Promise.resolve(surface.close()).catch((e) => ["close threw: " + String(e).slice(0, 200)])) ?? []) h.ok(false, f);
     await page.closeTabs();
   }
   h.ok(page.errors.length === 0, "no errors on the page", page.errors.slice(0, 3));

@@ -1,0 +1,53 @@
+// ci: agent-flows-computer
+// The agent-flow cases on the "computer" surface (surface-computer.mjs): the Agents page with the agent on one of the
+// person's own computers, through a real relay (the remotes' Worker in Miniflare), a real `sagebrush remote` runner and
+// the reviewed sagebrush-agent with its model scripted. Its own job: it needs this tree's engine/py built and installed
+// (the runner signs with the engine's native ES256) besides the site and Chrome.
+//   SAGEBRUSH_AGENTS=1 bun web/build.ts && (cd engine/py && maturin build --release --out dist) && pip install engine/py/dist/*.whl
+//   CHROME=chromium node web/agent-flows/test-agent-flows-computer.mjs [--case ID]
+// PYTHON: the interpreter with that package (python3 by default). SITE_ORIGIN and SITE_COOKIE_FILE: a deployed site
+// instead (DEV), its session from a 0600 file. RUNNER_LATE=ms: Chat here is chosen first and the runner started after.
+// A case's known gap (gaps: { computer: "why" }) is said in the report; the case still fails there.
+import { readdirSync } from "node:fs";
+import { join } from "node:path";
+import { startChrome, runCase, SURFACES } from "./harness.mjs";
+import { startComputerSite, computerSurface } from "./surface-computer.mjs";
+
+const here = new URL(".", import.meta.url).pathname;
+const arg = (name) => { const i = process.argv.indexOf(name); return i > 0 ? process.argv[i + 1] : null; };
+const onlyCase = arg("--case");
+
+const cases = [];
+for (const f of readdirSync(join(here, "cases")).filter((f) => f.endsWith(".mjs")).sort()) {
+  const kase = (await import(join(here, "cases", f))).default;
+  if (!kase?.id || typeof kase.expect !== "function" || !Array.isArray(kase.surfaces)) { console.log(`FAIL cases/${f}: not a case (id, surfaces, expect)`); process.exit(2); }
+  if (kase.surfaces.includes("computer") && (!onlyCase || kase.id === onlyCase)) cases.push(kase);
+}
+if (!cases.length) { console.log(`FAIL no case on the computer surface${onlyCase ? " named " + onlyCase : ""}`); process.exit(2); }
+
+const site = await startComputerSite(process.env.SITE_ORIGIN ? { site: { origin: process.env.SITE_ORIGIN, cookieFile: process.env.SITE_COOKIE_FILE } } : {});
+const page = await startChrome();
+// (the surface's close is asynchronous: Disconnect, the agent's process gone, the computer revoked; runCase awaits it,
+//  and what it finds wrong fails the case)
+SURFACES.computer = (s, p) => computerSurface(s, p, { runnerLate: Number(process.env.RUNNER_LATE) || 0 });
+const results = [];
+try {
+  for (const kase of cases) {
+    const t = Date.now();
+    console.log(`---- ${kase.id} on computer: "${kase.prompt}"`);
+    const failures = await runCase(kase, "computer", { site, page });
+    results.push({ id: kase.id, failures, gap: kase.gaps?.computer ?? null, s: ((Date.now() - t) / 1000).toFixed(1) });
+  }
+} finally {
+  await page.close();
+  await site.close();
+}
+console.log("\n---- agent flows on the computer surface");
+for (const r of results) {
+  if (r.gap && r.failures.length) console.log(`FAIL ${r.id} on computer (${r.s} s): ${r.failures.length} failed check(s), the known gap: ${r.gap}`);
+  else if (r.gap) console.log(`ok   ${r.id} on computer (${r.s} s): it passes now, so take its gap out of the case (${r.gap})`);
+  else console.log(`${r.failures.length ? "FAIL" : "ok  "} ${r.id} on computer (${r.s} s)${r.failures.length ? ": " + r.failures.length + " failed check(s)" : ""}`);
+}
+const failed = results.filter((r) => r.failures.length), gaps = failed.filter((r) => r.gap);
+console.log(failed.length ? `FAIL: ${failed.length} of ${results.length} case runs${gaps.length ? ` (${gaps.length} of them a known gap)` : ""}` : `ok: ${results.length} case runs`);
+process.exit(failed.length ? 1 : 0);
