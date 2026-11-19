@@ -23,10 +23,6 @@ export default {
   id: "sagetex-derivative",
   prompt: "write a SageTeX document with the derivative of sin(x^2) and a plot of it, and build it",
   surfaces: ["mcp", "chat"],
-  gaps: {
-    mcp: "the LaTeX editor doesn't yet run a .tex the agent made by itself: it waits for the person's Run",
-    chat: "the LaTeX editor in the pane doesn't yet run a .tex the agent made by itself: it waits for the person's Run",
-  },
   ms: 300000,
   agent: [
     { tool: "workspace_create", args: { path: PATH, content: { text: TEX } } },
