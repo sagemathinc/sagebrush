@@ -35,6 +35,18 @@ In `web-tree.space.json` (Sagebrush's own web/ code: 513 files and 1,009 imports
 
 `demo.space.json` has Markdown notes, code with its output, and two real 3D plots: turn around them.
 
+`modular-forms.space.json` answers the prompt "lay out in 3D the Rust code related to modular forms in Sagebrush so I can browse it, with sample code I can run". It has:
+- the crates `modsym`, `hmf`, `ap` and `lfun`, file by file, linked by `mod`, `use` and cross-crate paths;
+- the Python layers that call them;
+- a note per crate, from its own docs;
+- Sage samples with their real output, and a 3D plot of $\dim S_k(\Gamma_0(N))$.
+
+Click a sample, change it, and press Shift+Enter. `node gen-modular.mjs` makes this space again.
+
+## Running code
+
+Code and plots edit and run on Sagebrush's own engine (Python, Sage, MATLAB, Magma), in your browser. A Sage 3D plot becomes the object in the space. The engine is fetched from sagebrush.space by `npm run serve` on the first Run (about 37 MB, then cached in `.cache/`). Edits are kept in this browser.
+
 ## The format: foo.space.json
 
 ```json
