@@ -3105,6 +3105,39 @@ try {
       const ask = (id) => ev(`new Promise((res) => { const f = document.getElementById("sbembed"); const h = (e) => { if (e.source === f.contentWindow && e.data?.t === "may-close" && e.data.id === ${JSON.stringify(id)}) { removeEventListener("message", h); res(e.data); } }; addEventListener("message", h); f.contentWindow.postMessage({ t: "may-close", id: ${JSON.stringify(id)} }, location.origin); setTimeout(() => res(null), 15000); })`);
       const a1 = await ask("q1");
       check(a1?.ok === true, "embed: the pane's may-close, nothing pending: answered ok at once", a1);
+      // (a may-close that isn't its parent's: from a frame beside it of this origin (the wrong source), and from a
+      //  sandboxed frame, whose origin is opaque (the wrong origin); each posted by code in that frame (a CDP isolated
+      //  world there), so the message's source is that frame. Neither is answered; the parent's next one still is.
+      //  The parent of another origin can't be made here: frame-ancestors 'self' refuses it, as checked above)
+      {
+        await ev(`(() => { window.__stray = []; addEventListener("message", (e) => { if (e.data?.t === "may-close") window.__stray.push(e.data.id); });
+          for (const [nm, sb] of [["sbsib", null], ["sbnull", "allow-scripts"]]) { const f = document.createElement("iframe"); f.name = nm; if (sb) f.setAttribute("sandbox", sb); f.onload = () => (f.dataset.loaded = "1"); f.src = "/manifest.webmanifest"; document.body.append(f); } return true; })()`);
+        await until(`[...document.querySelectorAll("iframe[name^=sb]")].every((f) => f.dataset.loaded === "1")`, 15000);
+        const inFrame = async (name, expression) => {
+          const t = await send("Page.getFrameTree");
+          const find = (x) => x.frame.name === name ? x.frame : (x.childFrames ?? []).map(find).find(Boolean);
+          const f = find(t.frameTree);
+          if (f) {
+            const w = await send("Page.createIsolatedWorld", { frameId: f.id, worldName: "sbtest" });
+            return (await send("Runtime.evaluate", { expression, contextId: w.executionContextId, returnByValue: true })).result?.value;
+          }
+          // (out of the page's process, as Chrome puts a sandboxed frame: its own target, evaluated in its session)
+          const ti = (await send("Target.getTargets")).targetInfos.find((x) => x.type === "iframe" && /manifest\.webmanifest/.test(x.url));
+          if (!ti) return "no frame target";
+          const { sessionId } = await send("Target.attachToTarget", { targetId: ti.targetId, flatten: true });
+          const r = await new Promise((res) => { const id = ++n; waiting.set(id, res); ws.send(JSON.stringify({ id, sessionId, method: "Runtime.evaluate", params: { expression, returnByValue: true } })); });
+          await send("Target.detachFromTarget", { sessionId });
+          return r?.result?.value ?? JSON.stringify(r).slice(0, 300);
+        };
+        const sib = await inFrame("sbsib", `(parent.document.getElementById("sbembed").contentWindow.postMessage({ t: "may-close", id: "s1" }, location.origin), self.origin)`);
+        const opaque = await inFrame("sbnull", `(() => { for (let i = 0; i < parent.frames.length; i++) parent.frames[i].postMessage({ t: "may-close", id: "o1" }, "*"); return self.origin; })()`);
+        await sleep(2000);
+        const stray = await ev(`window.__stray.slice()`);
+        const a0 = await ask("q0");
+        check(sib === new URL(base).origin && opaque === "null" && !stray.includes("s1") && !stray.includes("o1") && a0?.ok === true,
+          "embed: a may-close from a frame beside it (this origin, not its parent) or from an opaque origin is ignored, unanswered; its parent's is answered", { sib, opaque, stray, a0 });
+        await ev(`(document.querySelectorAll("iframe[name^=sb]").forEach((f) => f.remove()), true)`);
+      }
       // (a held write: typed in the frame's source, the answer waits for it, then ok)
       const F = `document.getElementById("sbembed").contentWindow`;
       await ev(`(() => { const w = ${F}; w.__hold = new Promise((r) => (w.__rel = r)); w.__sbTexSaveWrite = () => w.__hold; w.document.querySelector('.tex-view [data-view="source"]').click(); const t = w.document.querySelector(".tex-src"); t.focus(); t.setRangeText(" Typed.", t.value.length, t.value.length, "end"); t.dispatchEvent(new Event("input", { bubbles: true })); return true; })()`);
