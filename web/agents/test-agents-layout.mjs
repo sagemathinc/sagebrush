@@ -2,7 +2,8 @@
 // The agents page's resizable columns (William A1 + A10; the layout plan r3, PR 2): the chat list and the artifact
 // pane are dragged or moved with the keys, clamped so the chat keeps 420 px and the pane 320, re-clamped on a resize
 // and when the pane opens, kept in localStorage only in a valid shape, and left alone by the narrow overlay and full
-// screen. The scripted agent (no pairing) opens a code artifact ("plot a Fourier series"); notebooks are
+// screen. Copy chat and a message's Copy put Markdown on the clipboard (C-copy-*).
+// The scripted agent (no pairing) opens a code artifact ("plot a Fourier series"); notebooks are
 // test-agents-artifacts.mjs's (A10 there: opening a notebook leaves the pane width as it was).
 //   SAGEBRUSH_AGENTS=1 bun web/build.ts && CHROME=google-chrome bun web/agents/test-agents-layout.mjs
 // Each case prints its id first ("ok   L2-side-179: ..."), so a run's FAIL set is the ids of its FAIL lines.
@@ -289,6 +290,27 @@ try {
     await sleep(200);
     const w1 = await ev(`window.__sbLayout.stats.writes`);
     ok("L2-write-count", w1 - w0 === 1, "one drag of 50 moves writes the stored layout once", { w0, w1 });
+  }
+  {
+    // Copy (decided Nov 19 2026): the header's Copy chat puts the whole chat on the clipboard as Markdown, and a
+    // message's Copy that message; the button is there only once the chat has something in it
+    await fresh(1400);
+    ok("C-copy-empty", await ev(`document.querySelector('#log-tools').hidden`), "an empty chat: no Copy chat");
+    await openPane();
+    await ev(`(() => { window.__clip = []; navigator.clipboard.writeText = (t) => (window.__clip.push(t), Promise.resolve()); return true; })()`);
+    ok("C-copy-shown", await ev(`!document.querySelector('#log-tools').hidden && !!document.querySelector('#copychat').offsetParent`), "with a turn in it: Copy chat is offered");
+    await ev(`(document.querySelector('#copychat').click(), true)`);
+    await until(`window.__clip.length === 1`);
+    const all = await ev(`window.__clip[0]`);
+    ok("C-copy-chat", /^# /.test(all) && all.includes("**You:**\n\nplot a Fourier series") && /\*\*Claude:\*\*/.test(all) && /\n- `[^`]+`/.test(all) && /\n- file: /.test(all), "Copy chat: the title, what the person wrote, the agent's turn with a line per tool call and its file", all.slice(0, 600));
+    await ev(`(document.querySelector('#log .user .copy-msg').click(), true)`);
+    await until(`window.__clip.length === 2`);
+    ok("C-copy-message", (await ev(`window.__clip[1]`)) === "**You:**\n\nplot a Fourier series", "a message's Copy: that message", await ev(`window.__clip[1]`));
+    await ev(`(document.querySelector('#log .turn .copy-msg').click(), true)`);
+    await until(`window.__clip.length === 3`);
+    const t = await ev(`window.__clip[2]`);
+    ok("C-copy-turn", /^\*\*Claude:\*\*/.test(t) && !t.includes("plot a Fourier series\n\n**Claude") && t.length > 20, "a turn's Copy: the agent's turn only", t.slice(0, 300));
+    ok("C-copy-quiet", exceptions.length === 0, "no page errors", exceptions);
   }
   console.log(`${checks - fails}/${checks} passed${fails ? "" : ", all passed"}`);
   code = fails ? 1 : 0;

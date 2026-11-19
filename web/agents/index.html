@@ -55,6 +55,15 @@
   .top .spacer { flex: 1; }
   .top button { font: inherit; font-size: 13px; border: 1px solid var(--line); background: var(--card); border-radius: 8px; padding: 4px 10px; cursor: pointer; }
   .top button.link { border: 0; background: none; color: var(--accent2); text-decoration: underline; }
+  /* (Copy chat: the conversation's first row, at its right; the header has no room for it at the chat's narrowest) */
+  #log-tools { display: flex; justify-content: flex-end; margin: -12px 0 6px; }
+  #log-tools[hidden] { display: none; }
+  #copychat { font: 12px system-ui, sans-serif; border: 1px solid var(--line); background: var(--card); color: var(--muted); border-radius: 6px; padding: 2px 8px; cursor: pointer; }
+  #copychat:hover { color: var(--fg, #1f2421); }
+  .user, .turn { position: relative; }
+  .copy-msg { position: absolute; top: 0; right: 0; opacity: 0; font: 12px system-ui, sans-serif; border: 1px solid var(--line); background: var(--card); border-radius: 6px; padding: 2px 8px; cursor: pointer; }
+  .user:hover > .copy-msg, .turn:hover > .copy-msg, .copy-msg:focus-visible { opacity: 1; }
+  @media (hover: none) { .copy-msg { opacity: .8; } }
   .top button:disabled { opacity: .6; cursor: default; }
   #help { flex: none; margin: 8px 16px 0; padding: 10px 14px; border: 1px solid var(--line); background: #fffdf6; border-radius: 10px; font-size: 14px; }
   #help pre { background: var(--code); padding: 8px 10px; border-radius: 6px; overflow-x: auto; user-select: all; }
@@ -297,6 +306,7 @@
       <pre>npx -y https://agents.sagebrush.cloud/agents/sagebrush-agent-0.7.1.tgz</pre>
     </div>
     <div id="log">
+      <div id="log-tools" hidden><button id="copychat" type="button" title="This chat as Markdown: what you wrote, the agent's answers, a line for each thing it did, and links to its files">⧉ Copy chat</button></div>
       <div id="empty">
         <h1>What should we work on?</h1>
         <div>Ask anything, or try one of these:</div>
