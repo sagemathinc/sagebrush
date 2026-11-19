@@ -89,7 +89,10 @@ export const LATEX_LAZY_CAPS = {
   //  told to the page only from its current pairing, and the bar's Open for it (the notebook page opens it in place); the
   //  handover of a bare link stays out of this chunk (pair-handoff.ts, the board and notebook pages' only). Measured
   //  locally on the toolchain CI pins, with the board page's forward merged too: 50,517 / 17,235, + 64)
-  AGENT: { label: "the LaTeX agent pairing's chunk", raw: 50581, gzip: 17299 },
+  // (50,816 / 17,368: Nov 18 2026, for the one check a page asks before a notebook an agent created runs by itself
+  //  (AgentPairing.mayRunCreated: the creation's own grant still in force, with May run code and Everything); the run
+  //  itself is the notebook page's. Measured locally with the board page's forward merged: 50,752 / 17,304, + 64)
+  AGENT: { label: "the LaTeX agent pairing's chunk", raw: 50816, gzip: 17368 },
   // (the agent tools' work: web/latex/tools.ts, latex_check's report and latex_render's pictures, on an agent's first call)
   // (16,546 / 6,950: Nov 11 2026: latex_build's own code (build.ts, the
   //  engine driven from a snapshot, and the pages' fit) here, out of the eager group, its shared rules handed in by the

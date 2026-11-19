@@ -8,6 +8,7 @@ import { gateInputs } from "./size-measure.mjs";
 import { headers } from "./web-tests.mjs";
 import { BUILD_INPUT_PATHS } from "./build-inputs.mjs";
 import { listExamples, select as selectExamples, shardCount } from "./examples-lib.mjs";
+import { onTrack, runRefs } from "./pin-policy.mjs";
 
 const event = process.env.GITHUB_EVENT_NAME ?? "local";
 const ref = process.env.GITHUB_REF ?? "";
@@ -268,7 +269,9 @@ const engineSmoke = full || workflowOrBuild || engineChange || fallback;
 // same-run artifact without publishing, and a
 // push whose run GitHub replaced by a newer one never ran, so a later push's own file list can miss an engine change;
 // a dispatch and the schedule have no file list)
-const wasmBuild = event !== "pull_request" || fallback || files.some((file) => wasmBuildPaths.some((p) => p.test(file)));
+// (and a pull request into a track always builds: a track's pin lags its engine until the track's pull into master
+// (scripts/pin-policy.mjs), so the published modules its pins name may not be its engine)
+const wasmBuild = event !== "pull_request" || fallback || onTrack(runRefs(process.env)) || files.some((file) => wasmBuildPaths.some((p) => p.test(file)));
 const engineCpython = full || workflowOrBuild || matches(cpythonPaths) || fallback;
 const webkit = event === "workflow_dispatch" || event === "schedule" ||
   (event === "pull_request" && (fullTier || matches(webkitPaths) || fallback));

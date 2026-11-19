@@ -1601,7 +1601,7 @@ jobs:
           (cd engine && cargo build --release -p sagebrush-growth-probe --target wasm32-unknown-unknown)
           node engine/growth-probe/sweep.mjs engine/target/wasm32-unknown-unknown/release/sagebrush_growth_probe.wasm
           node engine/web/tests/wasm_designated.mjs
-          # (a stale pin: an ERROR on master pushes, dispatches and the schedule, a warning on a PR)
+          # (a stale pin: an ERROR on master pushes, dispatches, the schedule and a track's pull into master; a warning on other PRs and on track/*)
           node scripts/check-fresh-wasm.mjs
           node scripts/third-party-notices.mjs --check
           pnpm run build
