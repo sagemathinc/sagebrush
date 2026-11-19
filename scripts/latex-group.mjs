@@ -57,11 +57,15 @@ export const LATEX_LAZY = {
 //  math typeset in the same step as its text, ruled Nov 13: 249,253 / 83,316 measured (bun 1.4.4, node 24.21.0), + 64)
 // (249,795 raw / 83,533 gzip: an edit written before the page is left (a notebook, a board or another page opened from
 //  it), Nov 17: 249,731 / 83,469 measured on master 9529624b with it (+478 / +153), + 64)
-// (251,717 raw / 84,029 gzip: the editor's Source | Both | PDF toggle, remembered for each file (the page module's code
-//  and styles), Nov 19, provisional until the exact-head CI packet: 251,653 / 83,965 measured on the shipped build (bun
-//  1.4.4, node 24.21.0), master 25de21b2 with it; 249,786 / 83,499 with the parent's web/latex/page.ts and style.ts in
-//  the same tree (+1,867 / +466), + 64)
-export const LATEX_CAPS = { raw: 251717, gzip: 84029 };
+// (250,482 raw / 83,764 gzip: a SageTeX code argument read from the file as its own source text (\sage{}, \sageplot{},
+//  \py{}, \magma{}: the engine's reader, in the worker), Nov 19, provisional until the exact-head CI packet: 250,418 /
+//  83,700 measured on the shipped build (bun 1.4.4, node 24.21.0), master 8bf4b126 with it, and the same again on
+//  master 6288dbcf; 249,786 / 83,499 with master's web/latex/engine/demo-machine.mjs in the same tree (+632 / +201), + 64)
+// (252,349 raw / 84,230 gzip: the editor's Source | Both | PDF toggle, remembered for each file (the page module's code
+//  and styles), Nov 19, provisional until the exact-head CI packet: 252,285 / 84,166 measured on the shipped build (bun
+//  1.4.4, node 24.21.0), master e478921b with it; 250,418 / 83,700 with master's web/latex/page.ts and style.ts in the
+//  same tree (+1,867 / +466), + 64)
+export const LATEX_CAPS = { raw: 252349, gzip: 84230 };
 export const gz = (b) => gzipSync(b, { level: 9 }).length;
 
 // Each lazy chunk's own cap (raw, gzip), fetched only on its own use, so outside the group:
