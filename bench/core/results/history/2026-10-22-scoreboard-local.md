@@ -143,4 +143,4 @@ Ratio is Sagebrush time divided by the faster available Magma/FLINT time. Each t
 - Timings exclude input construction, answer-signature conversion, and process startup: each engine reports elapsed time around only the operation loop. Magma 2.18-5 reports hundredths of a second.
 - The large size in every family is deliberately marked `pending VM` in the local profile.
 
-Inputs and exact commands are documented in [README.md](README.md); structured case sizes are in [cases.json](cases.json).
+Made by the earlier `bench/magma-scoreboard` runner (its repeat counts, not the adaptive timing of `bench/core`); the inputs are those of `bench/core/items.json` and `bench/core/drivers/`.

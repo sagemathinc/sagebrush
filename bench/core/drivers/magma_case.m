@@ -1,0 +1,276 @@
+// One Magma V2.18-5 case (a black-box oracle).  Inputs arrive with magma -b:
+// case_id, n, mode and variants (K, default 1); the protocol is common.py's.
+case_id := case_id;
+n := StringToInteger(n);
+mode := mode;
+K := assigned variants select StringToInteger(variants) else 1;
+HMOD := 1000000007;
+
+function ScalarHash(x)
+    if Type(x) eq FldRatElt then
+        num := Integers()!Numerator(x);
+        den := Integers()!Denominator(x);
+        inv := Integers()!((Integers(HMOD)!den)^-1);
+        return ((num mod HMOD) * inv) mod HMOD;
+    end if;
+    return (Integers()!x) mod HMOD;
+end function;
+
+function SeqHash(s)
+    h := 17;
+    for x in s do h := (h*1000003 + ScalarHash(x)) mod HMOD; end for;
+    return h;
+end function;
+
+function MatrixHash(A)
+    return SeqHash(Eltseq(A));
+end function;
+
+function PowMod(a, e, m)
+    value := 1;
+    base := a mod m;
+    while e gt 0 do
+        if IsOdd(e) then value := (value*base) mod m; end if;
+        e div:= 2;
+        base := (base*base) mod m;
+    end while;
+    return value;
+end function;
+
+// Variant v: entry (i, j) from the node i + 1 + v (1-based i, j).
+function ZMat(k, v)
+    return Matrix(Integers(), k, k, [ (PowMod(i+1+v,j+2,1000003)-500001) : i,j in [1..k] ]);
+end function;
+
+function FpMat(k, v)
+    F := GF(65537);
+    return Matrix(F, k, k, [ F!PowMod(i+1+v,j+2,65537) : i,j in [1..k] ]);
+end function;
+
+function QMat(k, v)
+    return Matrix(Rationals(), k, k,
+        [ Rationals()!(PowMod(i+1+v,j+2,101)-50) / (1 + ((i-1)*(j-1) mod 7)) : i,j in [1..k] ]);
+end function;
+
+function ZPoly(k, salt, R)
+    return R![ ((i*i*salt + 3*i + 1) mod 1000003)-500001 : i in [0..k-1] ];
+end function;
+
+function FpPoly(k, salt, R)
+    return R![ ((i*i*salt + 3*i + 1) mod 65537) : i in [0..k-1] ];
+end function;
+
+function ZFactorProduct(k, R, v)
+    x := R.1;
+    f := R!1;
+    for i in [1..k] do
+        f *:= x^2 + (i+1)*x + (i*i+i+1+v);
+    end for;
+    return f;
+end function;
+
+function CyclicIdeal(k)
+    R := PolynomialRing(GF(32003), k, "grevlex");
+    x := [R.i : i in [1..k]];
+    gens := [];
+    for d in [1..k-1] do
+        Append(~gens, &+[ &*[x[((i+j-2) mod k)+1] : j in [1..d]] : i in [1..k] ]);
+    end for;
+    Append(~gens, &*x-1);
+    return ideal<R|gens>;
+end function;
+
+function KatsuraIdeal(k)
+    R := PolynomialRing(GF(32003), k+1, "grevlex");
+    x := [R.i : i in [1..k+1]];
+    gens := [ x[1] + 2*&+[x[i] : i in [2..k+1]] - 1 ];
+    for m in [0..k-1] do
+        f := 0;
+        for j in [-k..k] do
+            a := Abs(j)+1; b := Abs(m-j)+1;
+            if a le k+1 and b le k+1 then f +:= x[a]*x[b]; end if;
+        end for;
+        Append(~gens, f-x[m+1]);
+    end for;
+    return ideal<R|gens>;
+end function;
+
+function ClassDisc(digits)
+    if digits eq 12 then return -100000000003; end if;
+    if digits eq 24 then return -1000000000000000000000003; end if;
+    return -10000000000000000000000000000000000000003;
+end function;
+
+// The inputs of variant v, built outside the timed region: S holds every
+// operand a case may use, ops the operands' integers (residues of
+// rationals) for the drivers' input check.  Variants: the bigints + v 1000003
+// and + v 998244353, salts + 6 v, matrix nodes + v, the factor product's
+// constant terms + v.
+function Build(case_id, n, v)
+    a:=0; b:=0; pa:=0; pb:=0; pf:=0; A:=0; w:=0; I:=0; O:=0; M:=0; E:=0; ps:=[]; ops:=[];
+    if case_id in {"bigint_mul","bigint_gcd"} then
+        a := 2^n - 2^(n div 3) + 123456789 + v*1000003;
+        b := 2^(n-1) + 2^(n div 2) + 987654321 + v*998244353;
+        ops := [a, b];
+    elif case_id in {"poly_z_mul","poly_z_gcd","poly_z_factor","poly_z_factor_product"} then
+        R<x> := PolynomialRing(Integers());
+        if case_id eq "poly_z_mul" then pa:=ZPoly(n,11+6*v,R); pb:=ZPoly(n,17+6*v,R); end if;
+        if case_id eq "poly_z_gcd" then g:=ZPoly(n div 2,5+6*v,R); pa:=g*ZPoly(n,11+6*v,R); pb:=g*ZPoly(n,17+6*v,R); end if;
+        if case_id eq "poly_z_factor" then pf:=x^n-1; end if;
+        if case_id eq "poly_z_factor_product" then pf:=ZFactorProduct(n,R,v); end if;
+        ops := case_id in {"poly_z_mul","poly_z_gcd"} select Coefficients(pa) cat Coefficients(pb) else Coefficients(pf);
+    elif case_id in {"poly_fp_mul","poly_fp_gcd","poly_fp_factor"} then
+        R<x> := PolynomialRing(GF(65537));
+        if case_id eq "poly_fp_mul" then pa:=FpPoly(n,11+6*v,R); pb:=FpPoly(n,17+6*v,R); end if;
+        if case_id eq "poly_fp_gcd" then g:=FpPoly(n div 2,5+6*v,R); pa:=g*FpPoly(n,11+6*v,R); pb:=g*FpPoly(n,17+6*v,R); end if;
+        if case_id eq "poly_fp_factor" then pf:=x^n-1; end if;
+        ops := case_id eq "poly_fp_factor" select Coefficients(pf) else Coefficients(pa) cat Coefficients(pb);
+    elif case_id in {"mat_z_det","mat_z_rank","mat_z_hnf","mat_z_smith","mat_z_charpoly"} then
+        A:=ZMat(n,v); ops := Eltseq(A);
+    elif case_id in {"mat_fp_det","mat_fp_rank","mat_fp_solve","mat_fp_charpoly"} then
+        A:=FpMat(n,v); ops := Eltseq(A);
+        if case_id eq "mat_fp_solve" then w:=Vector(BaseRing(A),[i:i in [1..n]]); ops := ops cat Eltseq(w); end if;
+    elif case_id in {"mat_q_det","mat_q_rank","mat_q_solve","mat_q_charpoly"} then
+        A:=QMat(n,v); ops := Eltseq(A);
+        if case_id eq "mat_q_solve" then w:=Vector(Rationals(),[i:i in [1..n]]); ops := ops cat Eltseq(w); end if;
+    elif case_id in {"groebner_cyclic","groebner_katsura"} then
+        I := case_id eq "groebner_cyclic" select CyclicIdeal(n) else KatsuraIdeal(n);
+        shape := Sort([TotalDegree(f)*100000 + #Terms(f) : f in Basis(I)]);
+        ops := &cat [[z div 100000, z mod 100000] : z in shape];
+    elif case_id eq "class_group" then
+        K:=QuadraticField(ClassDisc(n)); O:=MaximalOrder(K); ops := [ClassDisc(n)];
+    elif case_id eq "galois_group" then
+        R<x>:=PolynomialRing(Rationals()); pf:=x^n-x-1; ops := Coefficients(pf);
+    elif case_id eq "modsym_charpoly" then M:=ModularSymbols(n,2,+1); ops := [n, 2];
+    elif case_id eq "newforms" then M:=NewSubspace(CuspidalSubspace(ModularSymbols(n,2,+1))); ops := [n, 2];
+    elif case_id eq "ec_aplist" then
+        E:=EllipticCurve([0,0,1,-7,6]); conductor:=Conductor(E);
+        ps:=[p:p in PrimesUpTo(n)|conductor mod p ne 0]; ops := [0, 0, 1, -7, 6, n];
+    else error "unknown case"; end if;
+    return [* a, b, pa, pb, pf, A, w, I, O, M, E, ps *], ops;
+end function;
+
+// The named operation, alone.
+function DoOp(case_id, S)
+    a:=S[1]; b:=S[2]; pa:=S[3]; pb:=S[4]; pf:=S[5]; A:=S[6]; v:=S[7]; I:=S[8]; O:=S[9]; M:=S[10]; E:=S[11]; ps:=S[12];
+    if case_id eq "bigint_mul" then return a*b;
+    elif case_id eq "bigint_gcd" then return GCD(a*1000003,b*1000003);
+    elif case_id in {"poly_z_mul","poly_fp_mul"} then return pa*pb;
+    elif case_id in {"poly_z_gcd","poly_fp_gcd"} then return GCD(pa,pb);
+    elif case_id in {"poly_z_factor","poly_z_factor_product","poly_fp_factor"} then return Factorization(pf);
+    elif case_id in {"mat_z_det","mat_fp_det","mat_q_det"} then return Determinant(A);
+    elif case_id in {"mat_z_rank","mat_fp_rank","mat_q_rank"} then return Rank(A);
+    elif case_id eq "mat_z_hnf" then return HermiteForm(A);
+    elif case_id eq "mat_z_smith" then return SmithForm(A);
+    elif case_id in {"mat_z_charpoly","mat_fp_charpoly","mat_q_charpoly"} then return CharacteristicPolynomial(A);
+    elif case_id in {"mat_fp_solve","mat_q_solve"} then return Solution(Transpose(A),v);
+    elif case_id in {"groebner_cyclic","groebner_katsura"} then return GroebnerBasis(I);
+    elif case_id eq "class_group" then return ClassGroup(O);
+    elif case_id eq "galois_group" then return GaloisGroup(pf);
+    elif case_id eq "modsym_charpoly" then return CharacteristicPolynomial(HeckeOperator(M,2));
+    elif case_id eq "newforms" then return NewformDecomposition(M);
+    elif case_id eq "ec_aplist" then return [<p,TraceOfFrobenius(ChangeRing(E,GF(p)))>:p in ps];
+    end if;
+    error "unknown case";
+end function;
+
+function Sig(case_id, n, answer)
+    if case_id in {"bigint_mul","bigint_gcd"} then
+        return IntegerToString(Ilog2(answer)+1) cat ":" cat IntegerToString(answer mod HMOD);
+    elif case_id in {"poly_z_mul","poly_z_gcd","poly_fp_mul","poly_fp_gcd"} then
+        return IntegerToString(Degree(answer)) cat ":" cat IntegerToString(SeqHash(Coefficients(answer)));
+    elif case_id in {"poly_z_factor","poly_z_factor_product","poly_fp_factor"} then
+        items := [<Degree(z[1]),z[2],SeqHash(Coefficients(z[1]))>:z in answer]; Sort(~items);
+        flat := &cat [[z[1],z[2],z[3]]:z in items];
+        return IntegerToString(#items) cat ":" cat IntegerToString(SeqHash(flat));
+    elif case_id in {"mat_z_det","mat_z_rank","mat_fp_det","mat_fp_rank","mat_q_det","mat_q_rank"} then
+        return Sprint(answer);
+    elif case_id in {"mat_z_charpoly","mat_fp_charpoly","mat_q_charpoly"} then
+        return IntegerToString(Degree(answer)) cat ":" cat IntegerToString(SeqHash(Coefficients(answer)));
+    elif case_id eq "mat_z_smith" then
+        return IntegerToString(n) cat ":" cat IntegerToString(SeqHash([Abs(answer[i,i]):i in [1..n]]));
+    elif case_id in {"mat_z_hnf","mat_fp_solve","mat_q_solve"} then
+        return IntegerToString(n) cat ":" cat IntegerToString(SeqHash(Eltseq(answer)));
+    elif case_id in {"groebner_cyclic","groebner_katsura"} then
+        ds:=[TotalDegree(f):f in answer]; Sort(~ds); return IntegerToString(#answer) cat ":" cat IntegerToString(SeqHash(ds));
+    elif case_id eq "class_group" then
+        inv:=[Integers()!z:z in Invariants(answer)]; Sort(~inv); return IntegerToString(#answer) cat ":" cat Join([IntegerToString(z):z in inv],",");
+    elif case_id eq "galois_group" then return IntegerToString(#answer);
+    elif case_id eq "modsym_charpoly" then return IntegerToString(Degree(answer)) cat ":" cat IntegerToString(SeqHash(Coefficients(answer)));
+    elif case_id eq "newforms" then ds:=[Dimension(B):B in answer]; Sort(~ds); return IntegerToString(#ds) cat ":" cat Join([IntegerToString(d):d in ds],",");
+    elif case_id eq "ec_aplist" then return IntegerToString(#answer) cat ":" cat IntegerToString(SeqHash([z[1]*1000+z[2]:z in answer]));
+    end if;
+    error "unknown case";
+end function;
+
+// The combined signature of the K variants' signatures (common.py's
+// combined_signature): K and the hash of their bytes joined by ";".
+function Combined(sigs)
+    c := sigs[1];
+    for i in [2..#sigs] do c := c cat ";" cat sigs[i]; end for;
+    return IntegerToString(#sigs) cat ":" cat IntegerToString(SeqHash([StringToCode(c[i]) : i in [1..#c]]));
+end function;
+
+// k repetitions cycling through the variants (variant idx mod K for the
+// idx-th, idx counting across calls): the total time of the operations
+// alone (fresh: each on a newly built input).
+procedure RunK(case_id, n, Ss, k, fresh, ~idx, ~el)
+    el := 0.0;
+    for r in [1..k] do
+        v := idx mod K;
+        idx +:= 1;
+        T := fresh select Build(case_id, n, v) else Ss[v+1];
+        t := Realtime();
+        answer := DoOp(case_id, T);
+        el +:= Realtime(t);
+    end for;
+end procedure;
+
+if mode eq "inputs" then
+    hs := [];
+    for v in [0..K-1] do
+        S, ops := Build(case_id, n, v);
+        Append(~hs, SeqHash(ops));
+    end for;
+    printf "INPUTS|%o\n", SeqHash(hs);
+elif mode eq "once" then
+    S, ops := Build(case_id, n, 0);
+    t := Realtime();
+    answer := DoOp(case_id, S);
+    seconds := Realtime(t);
+    printf "RESULT|%.9o|%o\n", seconds, Sig(case_id, n, answer);
+elif mode in {"time", "time-fresh"} then
+    fresh := mode eq "time-fresh";
+    Ss := [* *]; sigs := []; warm := 0.0;
+    for v in [0..K-1] do
+        S, ops := Build(case_id, n, v);
+        t := Realtime();
+        answer := DoOp(case_id, S);
+        warm +:= Realtime(t);
+        Append(~sigs, Sig(case_id, n, answer));
+        if not fresh then Append(~Ss, S); end if;
+    end for;
+    idx := 0; el := 0.0;
+    per := warm/K;
+    if per ge 0.2 then
+        k := 1; el := per;
+    else
+        k := per gt 0 select Max(1, Floor(0.24/per)+1) else K;
+        RunK(case_id, n, Ss, k, fresh, ~idx, ~el);
+    end if;
+    while el lt 0.2 and k lt 2^24 do
+        if el le 0 then k := 2*k; else k := Max(2*k, Min(16*k, Floor(k*0.24/el)+1)); end if;
+        RunK(case_id, n, Ss, k, fresh, ~idx, ~el);
+    end while;
+    count := el/k le 2.0 select 5 else 3;
+    samples := [];
+    for i in [1..count] do
+        RunK(case_id, n, Ss, k, fresh, ~idx, ~el);
+        Append(~samples, el/k);
+    end for;
+    Sort(~samples);
+    printf "TIME|%.9o|%o|%.9o|%.9o|%o|%o\n", samples[(count div 2)+1], Combined(sigs), samples[1], samples[count], k, count;
+else
+    error "unknown mode";
+end if;
+quit;

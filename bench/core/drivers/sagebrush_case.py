@@ -1,10 +1,12 @@
-"""One native Sagebrush benchmark case; stdout ends in RESULT|seconds|signature."""
+"""One Sagebrush case through the user-facing Sage mode (engine/.venv's
+native bindings); the protocol is common.py's."""
 # ruff: noqa: F401,F403,F405
 
 from __future__ import annotations
 
 import sys
-import time
+
+import common
 
 import sagebrush.sage  # install the Sage-compatible modules
 import _sage_shim
@@ -14,8 +16,10 @@ from sagebrush import ap, mf, modsym  # noqa: E402
 from sagebrush.sage import *  # noqa: E402,F401,F403
 import sage  # noqa: E402
 
-case_id, n, repeats = sys.argv[1], int(sys.argv[2]), int(sys.argv[3])
-MOD = 1000000007
+case_id, n = sys.argv[1], int(sys.argv[2])
+MOD = common.MOD
+# The operands' integers (residues of rationals), set by prepare()
+OPERANDS = []
 
 
 def intval(x):
@@ -54,17 +58,20 @@ def coeffs(f):
     return list(f.list())
 
 
-def det_input(ring, size):
+def det_input(ring, size, v=0):
+    """Variant v: entry (i, j) from the node i + 2 + v."""
     if ring is QQ:
         return matrix(
             QQ,
             size,
             size,
-            lambda i, j: QQ(pow(i + 2, j + 3, 101) - 50) / (1 + (i * j) % 7),
+            lambda i, j: QQ(pow(i + 2 + v, j + 3, 101) - 50) / (1 + (i * j) % 7),
         )
     if ring is ZZ:
-        return matrix(ZZ, size, size, lambda i, j: pow(i + 2, j + 3, 1000003) - 500001)
-    return matrix(ring, size, size, lambda i, j: pow(i + 2, j + 3, 65537))
+        return matrix(
+            ZZ, size, size, lambda i, j: pow(i + 2 + v, j + 3, 1000003) - 500001
+        )
+    return matrix(ring, size, size, lambda i, j: pow(i + 2 + v, j + 3, 65537))
 
 
 def zpoly(size, salt):
@@ -94,36 +101,70 @@ def class_disc(digits):
     }[digits]
 
 
-def prepare():
+def operands(*parts):
+    OPERANDS.clear()
+    for part in parts:
+        OPERANDS.extend(scalar_hash(x) for x in part)
+
+
+def ideal_shape(ideal):
+    """An ideal's generators as a sorted list of (total degree, number of
+    terms) pairs, flattened."""
+    gens = ideal.gens()
+    return [
+        x
+        for pair in sorted((int(f.total_degree()), len(f.monomials())) for f in gens)
+        for x in pair
+    ]
+
+
+def prepare(v):
+    """Variant v of the row's input: salts + 6 v, matrix nodes + v, the
+    factor product's constant terms + v (rows with one input: v = 0)."""
     if case_id.startswith("poly_z_"):
         R = PolynomialRing(ZZ, "x")
         x = R.gen()
         if case_id == "poly_z_mul":
-            a, b = R(zpoly(n, 11)), R(zpoly(n, 17))
+            a, b = R(zpoly(n, 11 + 6 * v)), R(zpoly(n, 17 + 6 * v))
+            operands(coeffs(a), coeffs(b))
             return lambda: a * b
         if case_id == "poly_z_gcd":
-            g, a, b = R(zpoly(n // 2, 5)), R(zpoly(n, 11)), R(zpoly(n, 17))
+            g, a, b = (
+                R(zpoly(n // 2, 5 + 6 * v)),
+                R(zpoly(n, 11 + 6 * v)),
+                R(zpoly(n, 17 + 6 * v)),
+            )
             ga, gb = g * a, g * b
+            operands(coeffs(ga), coeffs(gb))
             return lambda: ga.gcd(gb)
         if case_id == "poly_z_factor":
             f = x**n - 1
+            operands(coeffs(f))
             return lambda: f.factor()
         f = R(1)
         for i in range(1, n + 1):
-            f *= x**2 + (i + 1) * x + (i * i + i + 1)
+            f *= x**2 + (i + 1) * x + (i * i + i + 1 + v)
+        operands(coeffs(f))
         return lambda: f.factor()
     if case_id.startswith("poly_fp_"):
         F = GF(65537)
         R = PolynomialRing(F, "x")
         x = R.gen()
         if case_id == "poly_fp_mul":
-            a, b = R(fppoly(n, 11)), R(fppoly(n, 17))
+            a, b = R(fppoly(n, 11 + 6 * v)), R(fppoly(n, 17 + 6 * v))
+            operands(coeffs(a), coeffs(b))
             return lambda: a * b
         if case_id == "poly_fp_gcd":
-            g, a, b = R(fppoly(n // 2, 5)), R(fppoly(n, 11)), R(fppoly(n, 17))
+            g, a, b = (
+                R(fppoly(n // 2, 5 + 6 * v)),
+                R(fppoly(n, 11 + 6 * v)),
+                R(fppoly(n, 17 + 6 * v)),
+            )
             ga, gb = g * a, g * b
+            operands(coeffs(ga), coeffs(gb))
             return lambda: ga.gcd(gb)
         f = x**n - 1
+        operands(coeffs(f))
         return lambda: f.factor()
     if case_id.startswith("mat_"):
         ring = (
@@ -133,8 +174,9 @@ def prepare():
             if case_id.startswith("mat_fp_")
             else QQ
         )
-        A = det_input(ring, n)
+        A = det_input(ring, n, v)
         op = case_id.rsplit("_", 1)[1]
+        operands(A.list())
         if op == "det":
             return lambda: A.det()
         if op == "rank":
@@ -147,24 +189,33 @@ def prepare():
             return lambda: A.smith_form()[0]
         if op == "solve":
             b = vector(ring, [i + 1 for i in range(n)])
+            operands(A.list(), list(b))
             return lambda: A.solve_right(b)
     if case_id == "groebner_cyclic":
         proof.polynomial(False)
         ideal = cyclic_ideal(n)
+        operands(ideal_shape(ideal))
         return lambda: ideal.groebner_basis()
     if case_id == "groebner_katsura":
         proof.polynomial(False)
         ideal = katsura_ideal(n)
+        operands(ideal_shape(ideal))
         return lambda: ideal.groebner_basis()
     if case_id == "class_group":
         D = class_disc(n)
+        operands([D])
         K = QuadraticField(D, "a")
         return lambda: K.class_group()
     if case_id == "galois_group":
         R = PolynomialRing(QQ, "x")
         x = R.gen()
         f = x**n - x - 1
+        operands(coeffs(f))
         return lambda: f.galois_group()
+    if case_id in ("modsym_charpoly", "newforms"):
+        operands([n, 2])
+    if case_id == "ec_aplist":
+        operands([0, 0, 1, -7, 6, n])
     if case_id == "modsym_charpoly":
         return lambda: modsym.charpoly_exact(n, 2, threads=1)["charpoly"]
     if case_id == "newforms":
@@ -214,9 +265,4 @@ def signature(answer):
     raise ValueError(case_id)
 
 
-operation = prepare()
-t0 = time.perf_counter()
-for _ in range(repeats):
-    answer = operation()
-seconds = (time.perf_counter() - t0) / repeats
-print("RESULT|%.9f|%s" % (seconds, signature(answer)))
+common.main(sys.argv, prepare, signature, lambda: common.ihash(OPERANDS))

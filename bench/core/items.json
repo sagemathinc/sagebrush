@@ -1,0 +1,1081 @@
+{
+ "version": 1,
+ "note": "Rows of the core-algorithm harness (bench/core/README.md). item: the progress board's page-2 id (int: below the list); unlocks: the items that depend on it (math-track plan; a reading of the algorithms, not a measurement). sizes: n and the wall timeout (s) of each subprocess. fresh: every timed repetition gets a newly built input (the operation's objects cache answers). backends: the user-facing path, whether the native driver has a direct engine entry, and which FLINT adapter (rust preferred where it covers the op).",
+ "items": [
+  {
+   "id": "int",
+   "title": "Big integers (below the list: every item uses them)",
+   "unlocks": [],
+   "status": "rows"
+  },
+  {
+   "id": "la0",
+   "title": "Echelon, rank, solve over F_p",
+   "unlocks": [
+    "la1",
+    "la2",
+    "la4",
+    "ca0",
+    "poly2",
+    "nt0",
+    "nt1",
+    "ag3"
+   ],
+   "status": "rows"
+  },
+  {
+   "id": "la1",
+   "title": "Over Z, Q (multimodular, Dixon)",
+   "unlocks": [
+    "la2",
+    "nt1",
+    "ag3",
+    "poly1"
+   ],
+   "status": "rows"
+  },
+  {
+   "id": "la2",
+   "title": "Normal forms (Hermite, Smith, charpoly)",
+   "unlocks": [],
+   "status": "rows"
+  },
+  {
+   "id": "la3",
+   "title": "Lattices (LLL, BKZ)",
+   "unlocks": [
+    "poly2",
+    "nt1",
+    "nt2",
+    "nt3",
+    "ag1",
+    "num2"
+   ],
+   "status": "no rows yet (harness step 4)"
+  },
+  {
+   "id": "la4",
+   "title": "Sparse linear algebra",
+   "unlocks": [],
+   "status": "no rows yet (harness step 4)"
+  },
+  {
+   "id": "num0",
+   "title": "Dense numerical linear algebra",
+   "unlocks": [],
+   "status": "no rows yet (harness step 4)"
+  },
+  {
+   "id": "num1",
+   "title": "Sparse numerical",
+   "unlocks": [],
+   "status": "no rows yet (harness step 4)"
+  },
+  {
+   "id": "num2",
+   "title": "Arbitrary precision (balls, MPFR-class)",
+   "unlocks": [
+    "ag2",
+    "nt1",
+    "poly3",
+    "ag1"
+   ],
+   "status": "no rows yet (harness step 4)"
+  },
+  {
+   "id": "num3",
+   "title": "Calculus (quadrature, ODEs, roots, FFT)",
+   "unlocks": [],
+   "status": "no rows yet (harness step 4)"
+  },
+  {
+   "id": "num4",
+   "title": "Optimization",
+   "unlocks": [],
+   "status": "no rows yet (harness step 4)"
+  },
+  {
+   "id": "poly0",
+   "title": "Polynomial arithmetic",
+   "unlocks": [
+    "poly1",
+    "poly2",
+    "poly3",
+    "la2",
+    "nt1",
+    "nt2",
+    "ag0",
+    "ag3",
+    "ca0"
+   ],
+   "status": "rows"
+  },
+  {
+   "id": "poly1",
+   "title": "GCD and resultants",
+   "unlocks": [],
+   "status": "rows"
+  },
+  {
+   "id": "poly2",
+   "title": "Factoring (F_q, Q, multivariate)",
+   "unlocks": [
+    "nt1",
+    "nt2",
+    "ag0",
+    "ca1",
+    "ag4"
+   ],
+   "status": "rows"
+  },
+  {
+   "id": "poly3",
+   "title": "Real roots",
+   "unlocks": [],
+   "status": "no rows yet (harness step 4)"
+  },
+  {
+   "id": "ca0",
+   "title": "Groebner bases",
+   "unlocks": [],
+   "status": "rows"
+  },
+  {
+   "id": "ca1",
+   "title": "Ideals",
+   "unlocks": [],
+   "status": "no rows yet (harness step 4)"
+  },
+  {
+   "id": "ca2",
+   "title": "Modules",
+   "unlocks": [],
+   "status": "no rows yet (harness step 4)"
+  },
+  {
+   "id": "nt0",
+   "title": "Integers (primality, factoring, logs)",
+   "unlocks": [],
+   "status": "no rows yet (harness step 4)"
+  },
+  {
+   "id": "nt1",
+   "title": "Number fields, class groups",
+   "unlocks": [],
+   "status": "rows"
+  },
+  {
+   "id": "nt2",
+   "title": "Galois groups",
+   "unlocks": [],
+   "status": "rows"
+  },
+  {
+   "id": "nt3",
+   "title": "Equations (S-units, Thue, norms)",
+   "unlocks": [],
+   "status": "no rows yet (harness step 4)"
+  },
+  {
+   "id": "ag0",
+   "title": "Point counting",
+   "unlocks": [],
+   "status": "rows"
+  },
+  {
+   "id": "ag1",
+   "title": "Descent",
+   "unlocks": [],
+   "status": "no rows yet (harness step 4)"
+  },
+  {
+   "id": "ag2",
+   "title": "L-functions",
+   "unlocks": [],
+   "status": "no rows yet (harness step 4)"
+  },
+  {
+   "id": "ag3",
+   "title": "Modular forms",
+   "unlocks": [],
+   "status": "rows"
+  },
+  {
+   "id": "ag4",
+   "title": "Curves",
+   "unlocks": [],
+   "status": "no rows yet (harness step 4)"
+  },
+  {
+   "id": "grp0",
+   "title": "Permutation groups",
+   "unlocks": [],
+   "status": "no rows yet (harness step 4)"
+  },
+  {
+   "id": "grp1",
+   "title": "Presentations",
+   "unlocks": [],
+   "status": "no rows yet (harness step 4)"
+  },
+  {
+   "id": "grp2",
+   "title": "Group structure",
+   "unlocks": [],
+   "status": "no rows yet (harness step 4)"
+  },
+  {
+   "id": "grp3",
+   "title": "Matrix and polycyclic groups",
+   "unlocks": [],
+   "status": "no rows yet (harness step 4)"
+  },
+  {
+   "id": "comb0",
+   "title": "Graph isomorphism",
+   "unlocks": [],
+   "status": "no rows yet (harness step 4)"
+  },
+  {
+   "id": "comb1",
+   "title": "Hard problems (cliques, coloring, SAT/ILP)",
+   "unlocks": [],
+   "status": "no single reference (v2): correctness only, no ratio"
+  },
+  {
+   "id": "comb2",
+   "title": "Enumeration",
+   "unlocks": [],
+   "status": "no rows yet (harness step 4)"
+  },
+  {
+   "id": "sym0",
+   "title": "Integration",
+   "unlocks": [],
+   "status": "no single reference (v2): correctness only, no ratio"
+  },
+  {
+   "id": "sym1",
+   "title": "Limits and series",
+   "unlocks": [],
+   "status": "no single reference (v2): correctness only, no ratio"
+  },
+  {
+   "id": "sym2",
+   "title": "Summation and ODEs",
+   "unlocks": [],
+   "status": "no single reference (v2): correctness only, no ratio"
+  },
+  {
+   "id": "sym3",
+   "title": "Simplification",
+   "unlocks": [],
+   "status": "no single reference (v2): correctness only, no ratio"
+  }
+ ],
+ "rows": [
+  {
+   "id": "bigint_mul",
+   "item": "int",
+   "category": "big integers",
+   "label": "integer multiply",
+   "sizes": {
+    "s": {
+     "n": 65536,
+     "timeout": 120
+    },
+    "m": {
+     "n": 262144,
+     "timeout": 300
+    },
+    "l": {
+     "n": 1048576,
+     "timeout": 900
+    }
+   },
+   "fresh": false,
+   "backends": {
+    "user": "pyjs",
+    "native": false,
+    "magma": true,
+    "flint": "python"
+   }
+  },
+  {
+   "id": "bigint_gcd",
+   "item": "int",
+   "category": "big integers",
+   "label": "integer gcd",
+   "sizes": {
+    "s": {
+     "n": 65536,
+     "timeout": 120
+    },
+    "m": {
+     "n": 262144,
+     "timeout": 300
+    },
+    "l": {
+     "n": 1048576,
+     "timeout": 900
+    }
+   },
+   "fresh": false,
+   "backends": {
+    "user": "pyjs",
+    "native": false,
+    "magma": true,
+    "flint": "python"
+   }
+  },
+  {
+   "id": "poly_z_mul",
+   "item": "poly0",
+   "category": "polynomials over Z",
+   "label": "multiply",
+   "sizes": {
+    "s": {
+     "n": 1000,
+     "timeout": 120
+    },
+    "m": {
+     "n": 5000,
+     "timeout": 300
+    },
+    "l": {
+     "n": 20000,
+     "timeout": 900
+    }
+   },
+   "fresh": false,
+   "backends": {
+    "user": "sage-mode",
+    "native": true,
+    "magma": true,
+    "flint": "rust"
+   }
+  },
+  {
+   "id": "poly_z_gcd",
+   "item": "poly1",
+   "category": "polynomials over Z",
+   "label": "gcd",
+   "sizes": {
+    "s": {
+     "n": 300,
+     "timeout": 120
+    },
+    "m": {
+     "n": 1000,
+     "timeout": 300
+    },
+    "l": {
+     "n": 5000,
+     "timeout": 900
+    }
+   },
+   "fresh": false,
+   "backends": {
+    "user": "sage-mode",
+    "native": true,
+    "magma": true,
+    "flint": "rust"
+   }
+  },
+  {
+   "id": "poly_z_factor",
+   "item": "poly2",
+   "category": "polynomials over Z",
+   "label": "factor x^n-1",
+   "sizes": {
+    "s": {
+     "n": 60,
+     "timeout": 120
+    },
+    "m": {
+     "n": 120,
+     "timeout": 300
+    },
+    "l": {
+     "n": 240,
+     "timeout": 900
+    }
+   },
+   "fresh": false,
+   "backends": {
+    "user": "sage-mode",
+    "native": true,
+    "magma": true,
+    "flint": "rust"
+   },
+   "variants": 1,
+   "variants_note": "one named input, x^n - 1"
+  },
+  {
+   "id": "poly_z_factor_product",
+   "item": "poly2",
+   "category": "polynomials over Z",
+   "label": "factor product of irreducible quadratics",
+   "sizes": {
+    "s": {
+     "n": 8,
+     "timeout": 120
+    },
+    "m": {
+     "n": 16,
+     "timeout": 300
+    },
+    "l": {
+     "n": 32,
+     "timeout": 900
+    }
+   },
+   "fresh": false,
+   "backends": {
+    "user": "sage-mode",
+    "native": true,
+    "magma": true,
+    "flint": "rust"
+   }
+  },
+  {
+   "id": "poly_fp_mul",
+   "item": "poly0",
+   "category": "polynomials over Fp",
+   "label": "multiply (p=65537)",
+   "sizes": {
+    "s": {
+     "n": 1000,
+     "timeout": 120
+    },
+    "m": {
+     "n": 5000,
+     "timeout": 300
+    },
+    "l": {
+     "n": 20000,
+     "timeout": 900
+    }
+   },
+   "fresh": false,
+   "backends": {
+    "user": "sage-mode",
+    "native": true,
+    "magma": true,
+    "flint": "python"
+   }
+  },
+  {
+   "id": "poly_fp_gcd",
+   "item": "poly1",
+   "category": "polynomials over Fp",
+   "label": "gcd (p=65537)",
+   "sizes": {
+    "s": {
+     "n": 300,
+     "timeout": 120
+    },
+    "m": {
+     "n": 1000,
+     "timeout": 300
+    },
+    "l": {
+     "n": 5000,
+     "timeout": 900
+    }
+   },
+   "fresh": false,
+   "backends": {
+    "user": "sage-mode",
+    "native": true,
+    "magma": true,
+    "flint": "python"
+   }
+  },
+  {
+   "id": "poly_fp_factor",
+   "item": "poly2",
+   "category": "polynomials over Fp",
+   "label": "factor x^n-1 (p=65537)",
+   "sizes": {
+    "s": {
+     "n": 60,
+     "timeout": 120
+    },
+    "m": {
+     "n": 120,
+     "timeout": 300
+    },
+    "l": {
+     "n": 500,
+     "timeout": 900
+    }
+   },
+   "fresh": false,
+   "backends": {
+    "user": "sage-mode",
+    "native": true,
+    "magma": true,
+    "flint": "python"
+   },
+   "variants": 1,
+   "variants_note": "one named input, x^n - 1"
+  },
+  {
+   "id": "mat_z_det",
+   "item": "la1",
+   "category": "linear algebra over Z",
+   "label": "determinant",
+   "sizes": {
+    "s": {
+     "n": 30,
+     "timeout": 120
+    },
+    "m": {
+     "n": 70,
+     "timeout": 300
+    },
+    "l": {
+     "n": 150,
+     "timeout": 900
+    }
+   },
+   "fresh": false,
+   "backends": {
+    "user": "sage-mode",
+    "native": true,
+    "magma": true,
+    "flint": "rust"
+   }
+  },
+  {
+   "id": "mat_z_rank",
+   "item": "la1",
+   "category": "linear algebra over Z",
+   "label": "rank",
+   "sizes": {
+    "s": {
+     "n": 50,
+     "timeout": 120
+    },
+    "m": {
+     "n": 100,
+     "timeout": 300
+    },
+    "l": {
+     "n": 250,
+     "timeout": 900
+    }
+   },
+   "fresh": false,
+   "backends": {
+    "user": "sage-mode",
+    "native": true,
+    "magma": true,
+    "flint": "rust"
+   }
+  },
+  {
+   "id": "mat_z_hnf",
+   "item": "la2",
+   "category": "linear algebra over Z",
+   "label": "Hermite form",
+   "sizes": {
+    "s": {
+     "n": 20,
+     "timeout": 120
+    },
+    "m": {
+     "n": 45,
+     "timeout": 300
+    },
+    "l": {
+     "n": 100,
+     "timeout": 900
+    }
+   },
+   "fresh": false,
+   "backends": {
+    "user": "sage-mode",
+    "native": true,
+    "magma": true,
+    "flint": "python"
+   }
+  },
+  {
+   "id": "mat_z_smith",
+   "item": "la2",
+   "category": "linear algebra over Z",
+   "label": "Smith form",
+   "sizes": {
+    "s": {
+     "n": 12,
+     "timeout": 120
+    },
+    "m": {
+     "n": 24,
+     "timeout": 300
+    },
+    "l": {
+     "n": 60,
+     "timeout": 900,
+     "variants": 1,
+     "variants_note": "one Sage-mode operation takes about 2 minutes here, so repeating it can't warm anything"
+    }
+   },
+   "fresh": false,
+   "backends": {
+    "user": "sage-mode",
+    "native": false,
+    "magma": true,
+    "flint": "python"
+   }
+  },
+  {
+   "id": "mat_z_charpoly",
+   "item": "la2",
+   "category": "linear algebra over Z",
+   "label": "characteristic polynomial",
+   "sizes": {
+    "s": {
+     "n": 30,
+     "timeout": 120
+    },
+    "m": {
+     "n": 60,
+     "timeout": 300
+    },
+    "l": {
+     "n": 120,
+     "timeout": 900
+    }
+   },
+   "fresh": false,
+   "backends": {
+    "user": "sage-mode",
+    "native": true,
+    "magma": true,
+    "flint": "rust"
+   }
+  },
+  {
+   "id": "mat_fp_det",
+   "item": "la0",
+   "category": "linear algebra over Fp",
+   "label": "determinant (p=65537)",
+   "sizes": {
+    "s": {
+     "n": 60,
+     "timeout": 120
+    },
+    "m": {
+     "n": 160,
+     "timeout": 300
+    },
+    "l": {
+     "n": 400,
+     "timeout": 900
+    }
+   },
+   "fresh": false,
+   "backends": {
+    "user": "sage-mode",
+    "native": true,
+    "magma": true,
+    "flint": "python"
+   }
+  },
+  {
+   "id": "mat_fp_rank",
+   "item": "la0",
+   "category": "linear algebra over Fp",
+   "label": "rank (p=65537)",
+   "sizes": {
+    "s": {
+     "n": 60,
+     "timeout": 120
+    },
+    "m": {
+     "n": 160,
+     "timeout": 300
+    },
+    "l": {
+     "n": 400,
+     "timeout": 900
+    }
+   },
+   "fresh": false,
+   "backends": {
+    "user": "sage-mode",
+    "native": true,
+    "magma": true,
+    "flint": "python"
+   }
+  },
+  {
+   "id": "mat_fp_solve",
+   "item": "la0",
+   "category": "linear algebra over Fp",
+   "label": "solve (p=65537)",
+   "sizes": {
+    "s": {
+     "n": 60,
+     "timeout": 120
+    },
+    "m": {
+     "n": 160,
+     "timeout": 300
+    },
+    "l": {
+     "n": 400,
+     "timeout": 900
+    }
+   },
+   "fresh": false,
+   "backends": {
+    "user": "sage-mode",
+    "native": true,
+    "magma": true,
+    "flint": "python"
+   }
+  },
+  {
+   "id": "mat_fp_charpoly",
+   "item": "la2",
+   "category": "linear algebra over Fp",
+   "label": "characteristic polynomial (p=65537)",
+   "sizes": {
+    "s": {
+     "n": 60,
+     "timeout": 120
+    },
+    "m": {
+     "n": 160,
+     "timeout": 300
+    },
+    "l": {
+     "n": 400,
+     "timeout": 900
+    }
+   },
+   "fresh": false,
+   "backends": {
+    "user": "sage-mode",
+    "native": true,
+    "magma": true,
+    "flint": "python"
+   }
+  },
+  {
+   "id": "mat_q_det",
+   "item": "la1",
+   "category": "linear algebra over Q",
+   "label": "determinant",
+   "sizes": {
+    "s": {
+     "n": 15,
+     "timeout": 120
+    },
+    "m": {
+     "n": 35,
+     "timeout": 300
+    },
+    "l": {
+     "n": 80,
+     "timeout": 900
+    }
+   },
+   "fresh": false,
+   "backends": {
+    "user": "sage-mode",
+    "native": false,
+    "magma": true,
+    "flint": "python"
+   }
+  },
+  {
+   "id": "mat_q_rank",
+   "item": "la1",
+   "category": "linear algebra over Q",
+   "label": "rank",
+   "sizes": {
+    "s": {
+     "n": 20,
+     "timeout": 120
+    },
+    "m": {
+     "n": 50,
+     "timeout": 300
+    },
+    "l": {
+     "n": 100,
+     "timeout": 900
+    }
+   },
+   "fresh": false,
+   "backends": {
+    "user": "sage-mode",
+    "native": false,
+    "magma": true,
+    "flint": "python"
+   }
+  },
+  {
+   "id": "mat_q_solve",
+   "item": "la1",
+   "category": "linear algebra over Q",
+   "label": "solve",
+   "sizes": {
+    "s": {
+     "n": 15,
+     "timeout": 120
+    },
+    "m": {
+     "n": 35,
+     "timeout": 300
+    },
+    "l": {
+     "n": 80,
+     "timeout": 900
+    }
+   },
+   "fresh": false,
+   "backends": {
+    "user": "sage-mode",
+    "native": false,
+    "magma": true,
+    "flint": "python"
+   }
+  },
+  {
+   "id": "mat_q_charpoly",
+   "item": "la2",
+   "category": "linear algebra over Q",
+   "label": "characteristic polynomial",
+   "sizes": {
+    "s": {
+     "n": 15,
+     "timeout": 120
+    },
+    "m": {
+     "n": 35,
+     "timeout": 300
+    },
+    "l": {
+     "n": 80,
+     "timeout": 900
+    }
+   },
+   "fresh": false,
+   "backends": {
+    "user": "sage-mode",
+    "native": false,
+    "magma": true,
+    "flint": "python"
+   }
+  },
+  {
+   "id": "groebner_cyclic",
+   "item": "ca0",
+   "category": "Groebner bases",
+   "label": "cyclic over GF(32003)",
+   "sizes": {
+    "s": {
+     "n": 5,
+     "timeout": 120
+    },
+    "m": {
+     "n": 6,
+     "timeout": 300
+    },
+    "l": {
+     "n": 7,
+     "timeout": 900
+    }
+   },
+   "fresh": true,
+   "backends": {
+    "user": "sage-mode",
+    "native": false,
+    "magma": true,
+    "flint": null
+   },
+   "variants": 1,
+   "variants_note": "one named input, the Cyclic-n ideal"
+  },
+  {
+   "id": "groebner_katsura",
+   "item": "ca0",
+   "category": "Groebner bases",
+   "label": "Katsura over GF(32003)",
+   "sizes": {
+    "s": {
+     "n": 6,
+     "timeout": 120
+    },
+    "m": {
+     "n": 7,
+     "timeout": 300
+    },
+    "l": {
+     "n": 9,
+     "timeout": 900
+    }
+   },
+   "fresh": true,
+   "backends": {
+    "user": "sage-mode",
+    "native": false,
+    "magma": true,
+    "flint": null
+   },
+   "variants": 1,
+   "variants_note": "one named input, the Katsura-n ideal"
+  },
+  {
+   "id": "class_group",
+   "item": "nt1",
+   "category": "number fields",
+   "label": "imaginary quadratic class group",
+   "sizes": {
+    "s": {
+     "n": 12,
+     "timeout": 120
+    },
+    "m": {
+     "n": 24,
+     "timeout": 300
+    },
+    "l": {
+     "n": 40,
+     "timeout": 900
+    }
+   },
+   "fresh": true,
+   "backends": {
+    "user": "sage-mode",
+    "native": false,
+    "magma": true,
+    "flint": null
+   },
+   "variants": 1,
+   "variants_note": "one named input per size, a fixed discriminant"
+  },
+  {
+   "id": "galois_group",
+   "item": "nt2",
+   "category": "number fields",
+   "label": "Galois group of x^n-x-1",
+   "sizes": {
+    "s": {
+     "n": 3,
+     "timeout": 120
+    },
+    "m": {
+     "n": 5,
+     "timeout": 300
+    },
+    "l": {
+     "n": 7,
+     "timeout": 900
+    }
+   },
+   "fresh": true,
+   "backends": {
+    "user": "sage-mode",
+    "native": false,
+    "magma": true,
+    "flint": null
+   },
+   "variants": 1,
+   "variants_note": "one named input, x^n - x - 1"
+  },
+  {
+   "id": "modsym_charpoly",
+   "item": "ag3",
+   "category": "modular forms",
+   "label": "exact T2 modular-symbol charpoly",
+   "sizes": {
+    "s": {
+     "n": 389,
+     "timeout": 120
+    },
+    "m": {
+     "n": 1009,
+     "timeout": 300
+    },
+    "l": {
+     "n": 5003,
+     "timeout": 900
+    }
+   },
+   "fresh": true,
+   "backends": {
+    "user": "sage-mode",
+    "native": false,
+    "magma": true,
+    "flint": null
+   },
+   "variants": 1,
+   "variants_note": "one named input per size, a fixed level"
+  },
+  {
+   "id": "newforms",
+   "item": "ag3",
+   "category": "modular forms",
+   "label": "weight-2 newform decomposition",
+   "sizes": {
+    "s": {
+     "n": 37,
+     "timeout": 120
+    },
+    "m": {
+     "n": 389,
+     "timeout": 300
+    },
+    "l": {
+     "n": 997,
+     "timeout": 900
+    }
+   },
+   "fresh": true,
+   "backends": {
+    "user": "sage-mode",
+    "native": false,
+    "magma": true,
+    "flint": null
+   },
+   "variants": 1,
+   "variants_note": "one named input per size, a fixed level"
+  },
+  {
+   "id": "ec_aplist",
+   "item": "ag0",
+   "category": "elliptic curves",
+   "label": "Frobenius traces for 5077a1",
+   "sizes": {
+    "s": {
+     "n": 1000,
+     "timeout": 120
+    },
+    "m": {
+     "n": 10000,
+     "timeout": 300
+    },
+    "l": {
+     "n": 100000,
+     "timeout": 900
+    }
+   },
+   "fresh": false,
+   "backends": {
+    "user": "sage-mode",
+    "native": false,
+    "magma": true,
+    "flint": null
+   },
+   "variants": 1,
+   "variants_note": "one named input, the curve 5077a1"
+  }
+ ]
+}
