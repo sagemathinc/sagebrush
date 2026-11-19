@@ -849,7 +849,7 @@ function mountTexFrame(path: string, box: HTMLElement): FileHost {
     text: () => (frame?.contentDocument?.querySelector<HTMLTextAreaElement>(".tex-src")?.value ?? text),
     flush: async () => {},
     release: () => (releasing ??= mayClose().then(async (ok): Promise<Released> => {
-      if (!ok) return { ok: false, why: `${path}: the LaTeX editor kept it open (its last edit isn't written yet, or you chose to stay).` };
+      if (!ok) return { ok: false, why: `${path}: the LaTeX editor didn't confirm it could close (its last edit isn't written yet, you chose to stay, or it didn't answer within 30 seconds).` };
       await dispose();
       return { ok: true };
     }).finally(() => (releasing = null))),
