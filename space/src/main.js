@@ -331,7 +331,7 @@ async function load(name) {
   $("#dims").textContent = "Flatten to 2D";
   place(P3);
   buildLandmarks();
-  history.length = 0; $("#back").disabled = true;
+  history.length = 0; future.length = 0; selected = null; navButtons();
   frame(P3);
   buildIndex();
   document.title = (space.title ?? name) + " · whitespace";
@@ -358,32 +358,43 @@ function frame(P, remember = false) {
   flight = { from: camera.position.clone(), fromT: controls.target.clone(), to, toT: c, t0: performance.now(), ms: remember ? 900 : 1 };
 }
 
-// ---------------------------------------------------------------- flying, and Back
+// ---------------------------------------------------------------- flying, Back and Forward
+// (a view: where the camera was, and which object was selected; a new flight clears Forward, as a browser's does)
 let flight = null;
-const history = [];
+const history = [], future = [];
+const viewNow = () => ({ pos: camera.position.clone(), target: controls.target.clone(), sel: selected });
 function pushView() {
-  history.push({ pos: camera.position.clone(), target: controls.target.clone() });
-  if (history.length > 50) history.shift();
-  $("#back").disabled = false;
+  history.push(viewNow());
+  if (history.length > 100) history.shift();
+  future.length = 0;
+  navButtons();
+}
+function navButtons() {
+  $("#back").disabled = !history.length;
+  $("#fwd").disabled = !future.length;
 }
 function flyToView(to, toT, ms = 900) {
   flight = { from: camera.position.clone(), fromT: controls.target.clone(), to, toT, t0: performance.now(), ms };
 }
-function flyTo(i, dist) {
+function flyTo(i, dist, remember = true) {
   const nd = space.nodes[i];
   const p = new THREE.Vector3(positions[3 * i], positions[3 * i + 1], positions[3 * i + 2]);
   const d = dist ?? (nd.kind === "file" ? 5 : 9);
-  pushView();
+  if (remember) pushView();
   // (seen from the front of its face: the slabs face +z)
   flyToView(p.clone().add(new THREE.Vector3(0, 0, d)), p);
 }
-function back() {
-  const v = history.pop();
+function go(from, to) {
+  const v = from.pop();
   if (!v) return;
-  $("#back").disabled = !history.length;
-  closeOverlay();
+  to.push(viewNow());
+  navButtons();
+  const i = v.sel === null ? -1 : space.nodes.findIndex((n) => n.id === v.sel);
+  if (i >= 0) showOverlay(space.nodes[i]); else closeOverlay();
   flyToView(v.pos, v.target);
 }
+const back = () => go(history, future);
+const forward = () => go(future, history);
 function stepFlight(now) {
   if (!flight) return;
   const u = Math.min(1, (now - flight.t0) / flight.ms), e = u < 0.5 ? 2 * u * u : 1 - Math.pow(-2 * u + 2, 2) / 2;
@@ -394,6 +405,7 @@ function stepFlight(now) {
   if (u >= 1) flight = null;
 }
 $("#back").onclick = back;
+$("#fwd").onclick = forward;
 $("#home").onclick = () => space && frame(positions, true);
 
 // 2D / 3D: the same space on a plane (its saved position2d, else laid out), animated
@@ -443,11 +455,40 @@ renderer.domElement.addEventListener("pointerup", (ev) => {
 });
 function setGlow(nd, v) {
   const o = objects[space.nodes.indexOf(nd)];
+  // (the selected object keeps its own glow)
+  if (nd.id === selected && v < 0.4) v = 0.4;
   o?.traverse((m) => { for (const mat of [].concat(m.material ?? [])) if (mat.emissive) mat.emissive.setScalar(v); });
 }
 
+// ---------------------------------------------------------------- selection: what the person is looking at, for agents
+// (the selected object's id is in the address (#sel=ID), in window.whitespace.selection, in a "whitespace:select"
+// event, and, when the space is shown in a frame (an agents chat's), in a message to the page around it)
+let selected = null;
+function setSelected(id) {
+  if (id === selected) return;
+  const old = selected;
+  selected = id;
+  for (const x of [old, id]) {
+    const nd = x === null ? null : space.nodes.find((n) => n.id === x);
+    if (nd) setGlow(nd, x === id ? 0.4 : 0);
+  }
+  window.history.replaceState(null, "", location.pathname + location.search + (id === null ? "" : "#sel=" + encodeURIComponent(id)));
+  const detail = selectionOf(id);
+  dispatchEvent(new CustomEvent("whitespace:select", { detail }));
+  if (window.parent !== window) window.parent.postMessage({ sagebrush: "space-select", version: 1, selection: detail }, "*");
+}
+function selectionOf(id) {
+  const nd = id === null ? null : space?.nodes.find((n) => n.id === id);
+  return nd ? { id: nd.id, kind: nd.kind, title: nd.title, group: nd.group ?? null, space: $("#space").value } : null;
+}
+
 function openOverlay(nd) {
-  const i = space.nodes.indexOf(nd);
+  // (the view left behind is remembered before the selection changes: Back returns to it, and to what it had open)
+  pushView();
+  showOverlay(nd);
+  flyTo(space.nodes.indexOf(nd), undefined, false);
+}
+function showOverlay(nd) {
   let body = "";
   if (nd.kind === "note") body = `<div class="md">${marked.parse(nd.text ?? "")}</div>`;
   else if (nd.kind === "code") body = `<pre class="code">${esc(nd.text)}</pre>` + (nd.output ? `<div class="label">Output</div><pre class="out">${esc(nd.output)}</pre>` : "");
@@ -460,9 +501,9 @@ function openOverlay(nd) {
   viewOffset();
   $("#overlay .close").onclick = closeOverlay;
   for (const a of $("#overlay").querySelectorAll("a[data-i]")) a.onclick = (e) => { e.preventDefault(); openOverlay(space.nodes[+a.dataset.i]); };
-  flyTo(i);
+  setSelected(nd.id);
 }
-function closeOverlay() { $("#overlay").hidden = true; viewOffset(); }
+function closeOverlay() { $("#overlay").hidden = true; viewOffset(); if (space) setSelected(null); }
 // (while the overlay covers the right of the screen, the view is shifted so what it is about stays in the free part)
 function viewOffset() {
   const w = $("#overlay").hidden ? 0 : $("#overlay").getBoundingClientRect().width + 12;
@@ -475,7 +516,8 @@ addEventListener("keydown", (e) => {
   if (document.activeElement === $("#q")) { if (e.key === "Escape") $("#q").blur(); return; }
   if (e.key === "Escape") closeOverlay();
   else if (e.key === "/") { e.preventDefault(); $("#q").focus(); }
-  else if (e.key === "b" || e.key === "B" || e.key === "Backspace") back();
+  else if (e.key === "b" || e.key === "B" || e.key === "Backspace" || (e.altKey && e.key === "ArrowLeft")) back();
+  else if (e.key === "f" || e.key === "F" || (e.altKey && e.key === "ArrowRight")) forward();
   else if (e.key === "h" || e.key === "H") space && frame(positions, true);
 });
 
@@ -510,7 +552,10 @@ async function start() {
   const sel = $("#space");
   sel.innerHTML = list.map((f) => `<option${f === want ? " selected" : ""}>${esc(f)}</option>`).join("");
   sel.onchange = () => { window.history.replaceState(null, "", "?space=" + encodeURIComponent(sel.value)); load(sel.value).catch(fail); };
+  // (#sel=ID: that object selected, as an agent or a link left it)
+  const wantSel = /#sel=([^&]+)/.exec(location.hash)?.[1];
   await load(want);
+  if (wantSel) setTimeout(() => window.whitespace.select(decodeURIComponent(wantSel)), 300);
 }
 function fail(e) { $("#status").textContent = "couldn't load: " + (e?.message ?? e); }
 start().catch(fail);
@@ -525,4 +570,11 @@ function tick(now) {
 }
 requestAnimationFrame(tick);
 // (for tests and the curious: the loaded space and the camera)
-window.whitespace = { get space() { return space; }, get objects() { return objects; }, camera, controls, back, frame: () => frame(positions, true), flyTo };
+// (the API for an agent driving the page, and for tests: what is selected, select an object (and fly to it), the
+// space, Back and Forward)
+window.whitespace = {
+  get space() { return space; }, get objects() { return objects; }, camera, controls,
+  get selection() { return selectionOf(selected); },
+  select(id) { const nd = space?.nodes.find((n) => n.id === id); if (!nd) return false; openOverlay(nd); return true; },
+  back, forward, frame: () => frame(positions, true), flyTo,
+};
