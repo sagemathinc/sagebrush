@@ -59,7 +59,8 @@
       <summary>Details</summary>
       <ul>
         <li>Needs <a href="https://docs.astral.sh/uv/">uv</a> (on a Mac: <code>brew install uv</code>) and Chrome or Firefox. Safari can't reach a program on your computer.</li>
-        <li><code>@latest</code>: each time Claude Code starts it, uv checks for a newer sagebrush-mcp and runs the newest. Added it earlier as <code>uvx sagebrush-mcp</code>, without <code>@latest</code>? Nothing to change: in a new Claude Code session uv also runs the newest release, but it may take up to 10 minutes after a release to see it.</li>
+        <li><code>@latest</code>: each time Claude Code starts it, uv checks for a newer sagebrush-mcp and runs the newest.</li>
+        <li>Added before 0.10.2? Run once: <code>claude mcp remove sagebrush</code>, then <code>claude mcp add --scope user sagebrush -- uvx sagebrush-mcp@latest</code>.</li>
         <li>The first time, the browser asks whether sagebrush.space may reach apps on this computer: click Allow.</li>
         <li>You choose what Claude may do in your workspace, which folders and whether it may run code, and you can revoke it at any time.</li>
         <li>Other agents that load MCP servers take <code>{ "mcpServers": { "sagebrush": { "command": "uvx", "args": ["sagebrush-mcp@latest"] } } }</code>. We haven't tried it with Codex yet.</li>

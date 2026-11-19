@@ -40,11 +40,12 @@ def connect_text(link):
 
 
 def not_connected_text(link):
-    """What any workspace tool says when no page is paired: the same link workspace_connect gives."""
+    """What the workspace, LaTeX-comment and chat tools that need a paired page say when none is: the same link
+    workspace_connect gives."""
     return "Not connected to the person's Sagebrush page yet. " + connect_text(link)
 
 
-#: what any workspace tool says when the page is paired but hasn't allowed access (or no longer does)
+#: what those tools say when the page is paired but hasn't allowed access (or no longer does)
 NOT_GRANTED_TEXT = ("The person's Sagebrush page is connected but hasn't allowed access: ask them to press Allow there. Then "
                     "call workspace_connect with wait (up to %d seconds) to go on as soon as they do, or call the tool again." % CONNECT_WAIT_MAX)
 
@@ -153,8 +154,8 @@ assert set(VERBS) == set(TITLES), "the schema and this server disagree on the ve
 CONNECT = {
     "name": "workspace_connect",
     "title": "Connect to the person's Sagebrush page",
-    "description": "Pair this agent with the person's Sagebrush page, so the workspace_* tools reach their workspace. Returns a one-time link to give the person (it opens their Sagebrush page in Chrome or Firefox with the code filled in; they press Connect, then Allow; valid 5 minutes, used once). Called again while that link is still valid, it gives the same link. With wait (seconds, up to 120), once a link has been given, it returns as soon as the page is paired and has allowed access, so you can go on with the person's request. Any workspace tool called before then returns the same link. Also says whether a page is paired and what it granted.",
-    "inputSchema": {"type": "object", "properties": {"wait": {"type": "number", "minimum": 0, "maximum": CONNECT_WAIT_MAX, "description": "seconds to wait for the person to connect and allow, once a link has been given (default 0)"}}, "additionalProperties": False},
+    "description": "Pair this agent with the person's Sagebrush page, so the workspace_* tools reach their workspace. Returns a one-time link to give the person (it opens their Sagebrush page in Chrome or Firefox with the code filled in; they press Connect, then Allow; valid 5 minutes, used once). Called again while that link is still valid, it gives the same link. With wait (seconds, up to 120), once a link has been given, it returns as soon as the page is paired and has allowed access, or when the wait runs out, so you can go on with the person's request. Until a page is paired, the workspace, LaTeX-comment and chat tools that need one answer with the same link; once it is paired but before the person presses Allow, they ask for Allow. Also says whether a page is paired and what it granted.",
+    "inputSchema": {"type": "object", "properties": {"wait": {"type": "number", "minimum": 0, "maximum": CONNECT_WAIT_MAX, "description": "seconds to wait for the person to connect and allow, once a link has been given: it returns when they have, or when the time runs out (default 0, at most 120)"}}, "additionalProperties": False},
     "annotations": {"readOnlyHint": False, "destructiveHint": False, "idempotentHint": False, "openWorldHint": False},
 }
 CONNECT_OUTPUT_SCHEMA = {

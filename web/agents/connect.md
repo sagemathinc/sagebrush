@@ -97,7 +97,7 @@ An MCP server your agent starts: Sage and Python tools, and, when you pair a Sag
 claude mcp add --scope user sagebrush -- uvx sagebrush-mcp@latest
 ```
 
-`--scope user` makes it Claude Code's in every folder; without it, it is only in the folder you ran the command in. With `@latest`, uv checks for a newer sagebrush-mcp each time the agent starts it, and runs the newest. Added it earlier as `uvx sagebrush-mcp`, without `@latest`? Nothing to change: in a new Claude Code session uv also runs the newest release, but it may take up to 10 minutes after a release to see it (uv keeps PyPI's answer that long). If it runs a `sagebrush-mcp` you installed with pip, `pip install -U sagebrush` upgrades it.
+`--scope user` makes it Claude Code's in every folder; without it, it is only in the folder you ran the command in. With `@latest`, uv checks for a newer sagebrush-mcp each time the agent starts it, and runs the newest. Added before 0.10.2? Run once: `claude mcp remove sagebrush`, then `claude mcp add --scope user sagebrush -- uvx sagebrush-mcp@latest`. If it runs a `sagebrush-mcp` you installed with pip, `pip install -U sagebrush` upgrades it.
 
 Other agents take a configuration like:
 
@@ -105,7 +105,7 @@ Other agents take a configuration like:
 { "mcpServers": { "sagebrush": { "command": "uvx", "args": ["sagebrush-mcp@latest"] } } }
 ```
 
-To let it work in your Sagebrush files, ask your agent to connect to Sagebrush, or just ask for what you want: until a page is connected, every Sagebrush tool answers with the same link. Open it in Chrome or Firefox: it opens the notebook page with Connect, the code and port in the link, nothing to type. Press Connect, then Allow. The link works once, for 5 minutes. Chrome and Edge ask once whether this site may reach apps on this computer: click Allow. If you blocked it, allow it again in the site's settings.
+To let it work in your Sagebrush files, ask your agent to connect to Sagebrush, or just ask for what you want: until a page is connected, the Sagebrush tools that need your page (the workspace, LaTeX-comment and chat tools) answer with the same link, and once it is connected but before you press Allow, they ask for Allow. Open it in Chrome or Firefox: it opens the notebook page with Connect, the code and port in the link, nothing to type. Press Connect, then Allow. The link works once, for 5 minutes. Chrome and Edge ask once whether this site may reach apps on this computer: click Allow. If you blocked it, allow it again in the site's settings.
 
 ### What it touches
 

@@ -695,6 +695,9 @@ class Server:
         self.threads = []
         self.protocol = PROTOCOL_VERSIONS[0]
         self.link = None  # the pairing with the person's Sagebrush page (sagebrush/pairing.py), once asked for
+        # (tool calls run concurrently: the pairing's creation and the link's reuse-or-start are one critical section,
+        #  so two first calls at once get one listener and one link)
+        self.pair_lock = threading.RLock()
         self.client = {}  # the client's clientInfo, from initialize
         # the chat panel beside the document (sagebrush/chat.py): pushed to
         # Claude Code through its channels, chat_next for any client
@@ -1060,23 +1063,25 @@ class Server:
         """The listener for the person's page (made at its first use)."""
         from sagebrush.pairing import Pairing
 
-        if self.link is None:
-            name = str(self.client.get("title") or self.client.get("name") or "an agent")[:80]
-            self.link = Pairing({"name": name, "client": str(self.client.get("name") or "unknown")[:80], "version": str(self.client.get("version") or "")[:40]},
-                                on_notify=self.chat.on_page)
-        return self.link
+        with self.pair_lock:
+            if self.link is None:
+                name = str(self.client.get("title") or self.client.get("name") or "an agent")[:80]
+                self.link = Pairing({"name": name, "client": str(self.client.get("name") or "unknown")[:80], "version": str(self.client.get("version") or "")[:40]},
+                                    on_notify=self.chat.on_page)
+            return self.link
 
     def pair_link(self):
         """(link, code, port): the live one-time link, the same one while it is valid; else a fresh code's. One link at a
         time, so a person opening the link they were given never finds it replaced by another call."""
-        p = self.pairing()
-        link = p.link()
-        if link is not None:
-            with p.lock:
-                return link, p.code, p.port
-        port, code = p.start()
-        print("sagebrush-mcp: pairing code %s on 127.0.0.1:%d (5 minutes, once)" % (code, port), file=sys.stderr)
-        return p.link(), code, port
+        with self.pair_lock:
+            p = self.pairing()
+            link = p.link()
+            if link is not None:
+                with p.lock:
+                    return link, p.code, p.port
+            port, code = p.start()
+            print("sagebrush-mcp: pairing code %s on 127.0.0.1:%d (5 minutes, once)" % (code, port), file=sys.stderr)
+            return p.link(), code, port
 
     def linked(self, reply):
         """A tool's reply, unless it is not_connected: then what workspace_connect would say, its one link (decided

@@ -976,6 +976,77 @@ def test_connect_wait_first_gives_the_link():
             srv.link.close()
 
 
+
+def _slow_pairing(M):
+    """sagebrush.pairing.Pairing made slow to construct and to start, counting both: the window two concurrent first
+    calls race in, held open, so the race happens every run without the server's lock."""
+    from sagebrush import pairing as PM
+    real = PM.Pairing
+    n = {"made": 0, "starts": 0}
+
+    class Slow(real):
+        def __init__(self, *a, **k):
+            n["made"] += 1
+            time.sleep(0.3)
+            super().__init__(*a, **k)
+
+        def start(self):
+            n["starts"] += 1
+            time.sleep(0.3)
+            return super().start()
+
+    return real, Slow, n
+
+
+def _at_once(*calls):
+    """Run the calls in threads released together; their results, in order."""
+    go, out = threading.Barrier(len(calls)), [None] * len(calls)
+    def one(i, f):
+        go.wait()
+        out[i] = f()
+    ts = [threading.Thread(target=one, args=(i, f)) for i, f in enumerate(calls)]
+    for t in ts:
+        t.start()
+    for t in ts:
+        t.join(30)
+    return out
+
+
+def test_concurrent_first_calls_one_link():
+    """MCP clients make tool calls concurrently: two first calls at once, or a first call and workspace_connect, make
+    one listener and give the same link; with a listener but no live code, two calls at once start one code."""
+    from sagebrush import mcp_server as M
+    from sagebrush import pairing as PM
+    real, Slow, n = _slow_pairing(M)
+    link_re = re.compile(r"https://sagebrush\.space/board/\?pair=[A-Z0-9]+&port=[0-9]+")
+    PM.Pairing = Slow
+    try:
+        for second in (("workspace_list", {"folder": "/"}), ("workspace_connect", {})):
+            n["made"] = n["starts"] = 0
+            srv = M.Server(io.StringIO())
+            try:
+                with contextlib.redirect_stderr(io.StringIO()):
+                    a, b = _at_once(lambda: srv.call_tool("workspace_read", {"path": "/a.txt"}),
+                                    lambda: srv.call_tool(*second))
+                la, lb = link_re.findall(a[0][0]["text"]), link_re.findall(b[0][0]["text"])
+                assert n["made"] == 1 and n["starts"] == 1 and len(la) == 1 and la == lb, (second[0], n, la, lb)
+            finally:
+                if srv.link is not None:
+                    srv.link.close()
+        # (a listener already there, its code not live: two calls at once, one start)
+        srv = M.Server(io.StringIO())
+        try:
+            srv.pairing()
+            n["made"] = n["starts"] = 0
+            with contextlib.redirect_stderr(io.StringIO()):
+                a, b = _at_once(lambda: srv.pair_link(), lambda: srv.pair_link())
+            assert n["made"] == 0 and n["starts"] == 1 and a == b and a[0], (n, a, b)
+        finally:
+            if srv.link is not None:
+                srv.link.close()
+    finally:
+        PM.Pairing = real
+
 if __name__ == "__main__":
     for name, f in list(globals().items()):
         if name.startswith("test_") and callable(f):
