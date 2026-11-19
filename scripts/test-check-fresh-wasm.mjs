@@ -7,7 +7,8 @@ import { execFileSync } from "node:child_process";
 import { chmodSync, mkdirSync, mkdtempSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
-import { checkFreshWasm, isStrict } from "./check-fresh-wasm.mjs";
+import { checkFreshWasm } from "./check-fresh-wasm.mjs";
+import { isStrict, onTrack, runRefs } from "./pin-policy.mjs";
 import { installWasm } from "./install-engine-wasm.mjs";
 import { MODULES, formatPins, sha256 } from "./wasm-modules.mjs";
 
@@ -79,6 +80,9 @@ try {
   ok(!isStrict({ event: "push", ref: "track/x" }) && isStrict({ event: "push", ref: "trackx" }), "isStrict: only the track/ prefix makes a push lenient");
   ok(!isStrict({ event: "pull_request", baseRef: "track/math", headRef: "track/math" }), "isStrict: a pull request between tracks is lenient");
   ok(!isStrict({ event: "local" }), "isStrict: a local run is lenient");
+  ok(isStrict({ event: "pull_request_target", baseRef: "master", headRef: "track/math" }) && !isStrict({ event: "pull_request_target", baseRef: "track/math", headRef: "x" }), "isStrict: pull_request_target follows pull_request");
+  ok(onTrack({ event: "pull_request_target", baseRef: "track/math" }) && onTrack({ event: "push", ref: "refs/heads/track/math" }) && !onTrack({ event: "schedule", ref: "track/math" }) && !onTrack({ event: "pull_request", baseRef: "master", headRef: "track/math" }), "onTrack: a track's pushes and pull requests into it, never the pull into master or the schedule");
+  ok(runRefs({ GITHUB_EVENT_NAME: "push", GITHUB_REF: "refs/heads/track/math" }).ref === "track/math", "runRefs: the branch from GITHUB_REF when GITHUB_REF_NAME is absent");
   build(MODULES[0], pinned[MODULES[0]]);
   // the script as CI runs it: the exit status follows the event and the refs
   const cli = (event, refs = {}) => {
