@@ -121,6 +121,20 @@ const el = <K extends keyof HTMLElementTagNameMap>(tag: K, cls = "", text = ""):
   const e = document.createElement(tag); if (cls) e.className = cls; if (text) e.textContent = text; return e;
 };
 const enc = new TextEncoder();
+// The page's views (the toggle's buttons, in order) and each file's, kept in this browser: one record, the last
+// VIEWS_KEPT files' (the oldest dropped first), a file's view moved to the end each time it is set
+type View = "source" | "both" | "pdf";
+const VIEWS: [View, string, string][] = [["source", "Source", "Show the source only"], ["both", "Both", "Show the source and the document side by side"], ["pdf", "PDF", "Show the document only"]];
+const VIEW_KEY = "sagebrush-tex-view", VIEWS_KEPT = 200;
+const viewsKept = (): Record<string, View> => { try { const m = JSON.parse(localStorage.getItem(VIEW_KEY) ?? "{}"); return m && typeof m === "object" && !Array.isArray(m) ? m : {}; } catch { return {}; } };
+const keptViewOf = (fid: string): View | null => { const v = viewsKept()[fid]; return VIEWS.some(([x]) => x === v) ? v : null; };
+const keepView = (fid: string, v: View) => {
+  const m = viewsKept();
+  delete m[fid]; m[fid] = v;
+  const ks = Object.keys(m);
+  for (const k of ks.slice(0, Math.max(0, ks.length - VIEWS_KEPT))) delete m[k];
+  try { localStorage.setItem(VIEW_KEY, JSON.stringify(m)); } catch {}
+};
 
 /** "From an example" (boot.ts adds the item and loads this module on its click): a list of the examples
  * (examples.ts), as large buttons that fit a phone; the one chosen is made as a folder of its own,
@@ -385,7 +399,9 @@ export async function mount(root: HTMLElement, host: Host): Promise<void> {
   const home = el("a", "tex-home", "Sagebrush") as HTMLAnchorElement; home.href = "/?home"; home.title = "About Sagebrush, and where to start";
   // (the save state, as Google Docs shows it: Saving…, Saved ✓; a failed write stays shown, with its reason)
   const saveState = el("span", "tex-savestate"); saveState.setAttribute("role", "status"); saveState.setAttribute("aria-live", "polite");
-  const toggle = el("button", "tex-toggle", "Preview");
+  // (what the page shows: the source, both, or the document alone; one click each, see the view below)
+  const toggle = el("span", "tex-toggle tex-view"); toggle.setAttribute("role", "group"); toggle.setAttribute("aria-label", "Show");
+  const viewBtns = VIEWS.map(([v, text, tip]) => { const b = el("button", "", text); b.dataset.view = v; b.title = tip; toggle.append(b); return b; });
   const status = el("span", "tex-status"); status.setAttribute("role", "status"); status.setAttribute("aria-live", "polite");
   // the source's font size and the preview's zoom, each remembered in this browser
   const tools = el("span", "tex-tools");
@@ -462,7 +478,10 @@ export async function mount(root: HTMLElement, host: Host): Promise<void> {
   const barText = el("span", "tex-conflict-t");
   const useTheirs = el("button", "tex-theirs", "Use theirs (keep mine as a copy)"), keepMine = el("button", "tex-mine", "Keep mine (theirs stays in TimeTravel)");
   bar.append(barText, useTheirs, keepMine);
-  page.append(head, banner, bar, main);
+  // (the agent's bar, when one is connected: its row under the head and its strip, over the notebook page's;
+  //  workspace/agent-ui.ts)
+  const agentRow = el("div", "tex-agent"); agentRow.dataset.sbagSlot = "2";
+  page.append(head, banner, agentRow, bar, main);
   const say = (t: string) => { status.textContent = t; };
   const pref = (k: string, lo: number, hi: number, d: number) => { let v = d; try { v = Number(localStorage.getItem(k) ?? d); } catch {} return Number.isInteger(v) && v >= lo && v <= hi ? v : d; };
   const keep = (k: string, v: number) => { try { localStorage.setItem(k, String(v)); } catch {} };
@@ -1009,7 +1028,12 @@ export async function mount(root: HTMLElement, host: Host): Promise<void> {
   const flushKey = (ev: KeyboardEvent) => { if ((ev.ctrlKey || ev.metaKey) && !ev.altKey && ev.key.toLowerCase() === "s") { ev.preventDefault(); if (saveable) void saver?.flush(); else say("This file can't be saved here: " + whyNot + "."); } };
   src.addEventListener("keydown", flushKey);
   document.addEventListener("keydown", (ev) => { if (ev.target !== src) flushKey(ev); }, on);
-  toggle.onclick = () => { const p = page.classList.toggle("show-preview"); toggle.textContent = p ? "Source" : "Preview"; };
+  // The view: the source, both side by side, or the document alone (PDF), one click each, remembered for this file in
+  // this browser (keptViewOf/keepView). With none kept, both on a wide page, and on a narrow one (700 px or less) the source,
+  // as before: there is no room for both there, so Both isn't offered (CSS: a kept "both" shows the document)
+  const setView = (v: View) => { page.dataset.view = v; for (const b of viewBtns) b.setAttribute("aria-pressed", String(b.dataset.view === v)); };
+  setView(keptViewOf(host.fid) ?? (matchMedia("(max-width: 700px)").matches ? "source" : "both"));
+  for (const b of viewBtns) b.onclick = () => { const v = b.dataset.view as View; setView(v); keepView(host.fid, v); };
   // (the browser's own prompt on leaving only when a write has failed: William, Nov 2, "never" otherwise)
   window.addEventListener("beforeunload", (ev) => { if (saver?.failed) { ev.preventDefault(); ev.returnValue = ""; } }, on);
   window.addEventListener("pagehide", dropImages, on);
