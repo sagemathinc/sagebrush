@@ -1,7 +1,7 @@
 {
   "fresh_command": "codex exec --skip-git-repo-check -s danger-full-access --json - < TASK.txt",
   "fresh_cwd": ".",
-  "reviewer": "@sagebrush-astra4",
+  "reviewer": "independent reviewer",
   "context": "Task only; no project history or prior findings supplied. Transcript command review found no REPO_ROOT accesses.",
   "redactions": "Local notebook authentication token removed from copied text/logs; scratch original retained privately. Notebook server verified stopped.",
   "redaction_occurrences": 2,

@@ -8,7 +8,7 @@ I gave a new Codex process only the task in `2026-11-19-matlab-oscillator/fresh-
 
 The fresh run took approximately ten minutes (16:16–16:26 UTC / 8:16–8:26 AM PST), using public npm Sagebrush 0.10.1, existing Octave 11.1.0, and an isolated local Chromium/Playwright notebook. It did not inspect project source or contact other agents. I reviewed the transcript, task script, Stop harness, numerical/error evidence and final audit; reran the exported-result validator; and checked that the final transcript ends in turn.completed. The notebook server's port was closed at the final audit.
 
-The directory `2026-11-19-matlab-oscillator/fresh-agent/` contains the report, chronological friction log, main task script and key JSON/notebook evidence. The adjacent `fresh-agent-evidence.tar.gz` contains the complete text transcript, all reproduction scripts, raw streams, JSON/CSV results and textual UI snapshots. Extract it into `2026-11-19-matlab-oscillator/` to restore that complete `fresh-agent/` layout. PNG screenshots are omitted. Local notebook authentication tokens are redacted; the archive's `packet-sha256.json` hashes its normalized members. Original scratch-byte manifests are omitted because paths/tokens were normalized.
+The directory `2026-11-19-matlab-oscillator/fresh-agent/` contains the report, chronological friction log, main task script and key JSON/notebook evidence. The adjacent `fresh-agent-evidence.tar.gz` contains the complete text transcript, all reproduction scripts, raw streams, JSON/CSV results and textual UI snapshots. Extract it into `2026-11-19-matlab-oscillator/` to restore that complete `fresh-agent/` layout. PNG screenshots are omitted. Local notebook authentication tokens are redacted, internal Node/npm executable paths use `node`/`npm`, and review metadata uses a neutral role; the archive's `packet-sha256.json` hashes its normalized members. Original scratch-byte manifests are omitted because paths/tokens were normalized.
 
 ## Reviewed outcome
 
@@ -81,7 +81,7 @@ Artifacts beside this note:
 
 - `2026-11-19-matlab-oscillator/oscillator.m`: original MATLAB task, including assertions.
 - `2026-11-19-matlab-oscillator/oscillator-portable.m`: completed task with formatted JSON export.
-- `2026-11-19-matlab-oscillator/evidence.json`: exact commands, stdout/stderr, statuses, Stop outcomes and terminal transcripts. Absolute paths in those commands identify this run's isolated installation.
+- `2026-11-19-matlab-oscillator/evidence.json`: exact commands, stdout/stderr, statuses, Stop outcomes and terminal transcripts. Installation paths in those commands are normalized to portable placeholders; they do not identify a live installation.
 
 Runtime: published npm sagebrush **0.10.1**, Node **v26.13.1**, Linux x86_64; Octave **11.1.0**. Bundle `dist/sagebrush.cjs` SHA256 **61a66988e8efa94f8087b07f384e624769368d9493624771737bc6ba9866e21a**; launcher SHA256 **6aec22924be7b858d33922e9efdb7d775cf1c76df3e00ff7927a3318e2e630e3**. PyPI sagebrush **0.10.1** was also installed in an isolated venv during setup, but did not execute the MATLAB task. No locally built runtime was substituted.
 

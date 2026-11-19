@@ -48,7 +48,7 @@ The successful initial test delivered `KeyboardInterrupt` about **110 ms** after
 
 A further probe that read `spin`, which was assigned in the interrupted cell, was **blocked by reactive dependency handling** with `Not run: cell 2, which this cell depends on, was interrupted.` Removing that dependency permits prior-state recovery. This is an important limit: prior state preservation passed; inspection/retention of partial interrupted-cell results was not established. Stop inside a native/WASM numerical kernel and interruption rollback/atomicity were not tested.
 
-Native notebook output, UI snapshots, screenshots, browser logs and the bounded harness are saved. Failed harness attempts are retained and distinguished from valid Stop evidence in `FRICTION.md`. Browser resources also produced auxiliary 404/403 errors, which did not prevent the corrected MATLAB test.
+Native notebook output, textual UI snapshots, browser logs and the bounded harness are included in the git packet. PNG screenshots were retained only in the original run and are omitted from this packet. Failed harness attempts are retained and distinguished from valid Stop evidence in `FRICTION.md`. Browser resources also produced auxiliary 404/403 errors, which did not prevent the corrected MATLAB test.
 
 ## Invalid inputs and error parity
 
@@ -93,9 +93,9 @@ Primary artifacts:
 - `evidence/sagebrush-result.json`, `evidence/octave-result.json`: numeric results.
 - `evidence/sagebrush-trajectory.csv`, `evidence/octave-trajectory.csv`: samples, clean truth, fitted curve, ODE trajectory and residuals.
 - `evidence/validation.json`, `evidence/error-probes.json`, `evidence/coverage.json`: checks and compatibility inventory.
-- `scripts/stop_browser.cjs`, `scripts/stop_*.m`, `evidence/stop-test.ipynb`, `evidence/stop-result.json`, `evidence/stop-*.txt`, `evidence/stop-*.png`: Stop/recovery evidence.
+- `scripts/stop_browser.cjs`, `scripts/stop_*.m`, `evidence/stop-test.ipynb`, `evidence/stop-result.json`, `evidence/stop-*.txt`: Stop/recovery evidence. PNG screenshots are omitted from this packet.
 - `evidence/*stdout`, `evidence/*stderr`, `evidence/*exit`: raw successful and failed attempts; `evidence/npm-metadata.json`, CLI help, version files and documentation searches: release/discovery evidence.
 
 No Sagebrush files were patched. Product friction and harness mistakes are kept separate. All explicitly launched calculations and servers were bounded; cleanup targets only this run's processes.
 
-Final audit: numerical exports and native three-cell Stop notebook verified; final browser harness exited 0; the bounded notebook server exited 124 and its port is closed. Run completed in approximately 10 minutes. See `evidence/final-audit.json` and `evidence/sha256-manifest.json`.
+Final audit: numerical exports and native three-cell Stop notebook verified; final browser harness exited 0; the bounded notebook server exited 124 and its port is closed. Run completed in approximately 10 minutes. See `evidence/final-audit.json` and the archive-root `packet-sha256.json`, which hashes the normalized packet members. The original scratch-byte manifest is omitted.
