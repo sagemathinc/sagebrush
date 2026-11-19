@@ -31,6 +31,13 @@ assert.equal(compare({ a: 1000 }, { a: 1000, added: 50001 }).ok, false);
 assert.deepEqual(compare({ gone: 1000 }, {}).rows[0],
   { bundle: "gone", base: 1000, merge: 0, delta: -1000, limit: 50000, note: "removed" });
 assert.equal(compare({ a: 100000, b: 100000 }, { a: 0, b: 150001 }).ok, false, "shrink cannot offset another bundle");
+const count = compare({ "registry/packages": 300 }, { "registry/packages": 50300 });
+assert.equal(count.ok, true);
+assert.deepEqual(count.rows, [], "package counts are not gated or reported as bytes");
+assert.deepEqual(evaluate({ mode: "absolute", merge: { record: record({ "registry/packages": 50300 }) } }).rows, []);
+assert.equal(compare({ x: 1 }, { "\n| forged |": 1 }).ok, false);
+for (const name of ["x\ry", "x\ty", "x\u001by", "x|y", "x y"])
+  assert(recordProblems(record({ [name]: 1 })).length, name);
 assert.equal(compare({ x: 1 }, { x: 1 }, { ...key, bun: "wrong" }).ok, false);
 assert.equal(compare({ x: 1 }, { x: 1 }, { ...key, node: "wrong" }).ok, false);
 assert.equal(compare({ x: 1 }, { x: 1 }, { ...key, measure_sha256: "b".repeat(64) }).ok, false);
@@ -121,6 +128,11 @@ try {
   const bad = make({ x: 1 }, merge, "checks"); bad.key.measure_sha256 = "a".repeat(64);
   writeFileSync(join(dir, "merge-record.json"), JSON.stringify(bad));
   assert.match(run().stdout, /recipe is not this run/);
+  writeFileSync(join(dir, "merge-record.json"), JSON.stringify(make({ "\n| forged |": 1 }, merge, "checks")));
+  const forged = run();
+  assert.equal(forged.status, 1);
+  assert.match(forged.stdout, /printable path-like/);
+  assert(!forged.stdout.includes("\n| forged |"), "untrusted bundle names cannot inject summary rows");
   writeFileSync(join(dir, "merge-record.json"), " ".repeat(262145));
   assert.match(run().stdout, /refused before parsing/);
   rmSync(join(dir, "base-record.json"));

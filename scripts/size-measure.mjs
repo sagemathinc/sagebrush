@@ -189,8 +189,7 @@ export function measureFiles(files, rootDir, values, extra = {}, expected = EXPE
 
 // The bundles of a build, as size-budget.mjs's measure() names them: the
 // engine's files by group (the hash in the name dropped; the zone data as one),
-// the CLI bundle and its generated library and packages, and the registry's
-// package count.
+// the CLI bundle and its generated library and packages. All rows are bytes.
 // The examples gallery's bundles (plan-examples-gallery §5, daybreak2's ruling): the corpus (every file under
 // examples/), what the site serves of it (every file web/build.ts writes under web/site/public/examples: the pages, the
 // LaTeX previews, files.json, the ZIPs, the catalog) and the catalog on its own. Read after the build, never built
@@ -221,8 +220,7 @@ export function buildFiles(rootDir) {
   }
   for (const f of ["pyjs.cjs", "lib.gen.js", "packages.gen.js"]) files[`cli/${f}`] = [join(rootDir, "build", "cli", f)];
   Object.assign(files, examplesFiles(rootDir));
-  const reg = JSON.parse(readFileSync(join(rootDir, "packages", "registry.json"), "utf8"));
-  return { files, extra: { "registry/packages": Object.keys(reg.packages).length } };
+  return { files, extra: {} };
 }
 
 export async function measure(rootDir) {
@@ -257,6 +255,7 @@ export function recordProblems(rec, commit) {
   if (!rec.key || typeof rec.key.measure_sha256 !== "string" || typeof rec.key.bun !== "string" || typeof rec.key.node !== "string") p.push("no comparability key");
   if (!Array.isArray(rec.bundles) || !rec.sizes || typeof rec.sizes !== "object" || Array.isArray(rec.sizes)) return [...p, "no bundles or sizes"];
   if (rec.bundles.length > LIMITS.entries || rec.bundles.some((s) => typeof s !== "string" || !s || longString(s))) return [...p, `more than ${LIMITS.entries} bundles, or a name over ${LIMITS.string_chars} characters`];
+  if (rec.bundles.some((s) => !/^[A-Za-z0-9][A-Za-z0-9._/-]*$/.test(s))) return [...p, "bundle names must be printable path-like names"];
   const listed = [...rec.bundles].sort(), keys = Object.keys(rec.sizes).sort();
   if (new Set(listed).size !== listed.length) p.push("a bundle is listed twice");
   if (jcs(listed) !== jcs(keys)) p.push("sizes don't have exactly the listed bundles");
@@ -284,10 +283,11 @@ export function evaluate({ mode = "transition", merge, base }) {
   if (mode !== "absolute" && !sameKey(M.key, N.key)) problems.push("base and merge measurement keys differ: rebuild both with this run's recipe and pins");
   if (problems.length) return { ok: false, problems, notes, rows };
   if (mode === "absolute") {
-    for (const bundle of M.bundles) rows.push({ bundle, merge: M.sizes[bundle] });
+    for (const bundle of M.bundles.filter((s) => s !== "registry/packages")) rows.push({ bundle, merge: M.sizes[bundle] });
     notes.push("No base for this event: sizes reported without a growth comparison.");
   } else {
-    const names = [...new Set([...N.bundles, ...M.bundles])].sort();
+    // Old records can contain a package count; it is not a byte measurement.
+    const names = [...new Set([...N.bundles, ...M.bundles])].filter((s) => s !== "registry/packages").sort();
     for (const bundle of names) {
       const before = Object.hasOwn(N.sizes, bundle) ? N.sizes[bundle] : 0;
       const after = Object.hasOwn(M.sizes, bundle) ? M.sizes[bundle] : 0;
@@ -383,7 +383,8 @@ async function gate() {
   lines.push(result.ok ? "**PASS**" : "**FAIL**", "",
     "tested merge " + t.merge + ", base " + (t.base ?? "-") + ", head " + (t.head ?? "-"), "",
     "| bundle | base | merge | delta | limit (B) | notes |", "|---|---:|---:|---:|---:|---|");
-  for (const r of result.rows) lines.push("| " + r.bundle.replaceAll("|", "\\|") + " | " + (r.base ?? "") + " | " + r.merge + " | " + (r.delta === undefined ? "" : fmt(r.delta)) + " | " + (r.limit ?? "") + " | " + (r.note ?? "") + " |");
+  const cell = (s) => String(s ?? "").replaceAll("|", "\\|").replace(/[\r\n]/g, " ");
+  for (const r of result.rows) lines.push("| " + [r.bundle, r.base, r.merge, r.delta === undefined ? "" : fmt(r.delta), r.limit, r.note].map(cell).join(" | ") + " |");
   for (const n of result.notes) lines.push("- " + n);
   for (const p of result.problems) lines.push("- **" + p + "**");
   if (process.env.GITHUB_STEP_SUMMARY) appendFileSync(process.env.GITHUB_STEP_SUMMARY, lines.join("\n") + "\n");
