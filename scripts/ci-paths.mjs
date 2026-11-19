@@ -117,6 +117,21 @@ const fullTierPaths = [
 const fullOnlyJobs = ["web-sync", "web-sync-ops", "web-runner-sync", "web-artifacts"];
 const suitePaths = [/^web\/(?:.*\/)?test-[^/]*\.mjs$/, /^scripts\/test-[^/]*\.mjs$/];
 const suiteRoot = process.env.CI_PATHS_ROOT ?? ".";
+// Some wheel tests also run through the CLI in checks. Derive those inputs
+// from the workflow so a test-only change cannot skip its own checks run.
+const changedPythonTests = files.filter((file) => /^engine\/py\/test_[^/]*\.py$/.test(file));
+let checksPythonTest = false;
+if (changedPythonTests.length) {
+  const workflow = readFileSync(join(suiteRoot, ".github/workflows/ci.yml"), "utf8");
+  const checks = workflow.split("\n  checks:\n")[1]?.split(/\n  [a-z][a-z0-9-]*:\n/)[0];
+  if (checks === undefined) throw new Error("ci-paths: cannot find the checks job");
+  const code = checks.split("\n").map((line) => line.split("#")[0])
+    // Wrappers and continued commands still invoke their test. Prefer an extra
+    // checks run to silently skipping one; exclude only explicit prose output.
+    .filter((line) => !/^\s*(?:-\s+run:\s*)?(?:echo|printf)\b/.test(line)).join("\n");
+  const invoked = new Set([...code.matchAll(/\bengine\/py\/test_[A-Za-z0-9_.-]+\.py\b/g)].map((m) => m[0]));
+  checksPythonTest = changedPythonTests.some((file) => invoked.has(file));
+}
 const suiteTargets = files.filter((file) => suitePaths.some((pattern) => pattern.test(file))).flatMap((file) => {
   let text;
   try {
@@ -245,7 +260,8 @@ const runtime = matches(runtimePaths);
 const webChange = matches(webPaths);
 const modeChange = matches(modePaths);
 // (the CPython package's own Python, its sources under engine/py/python/ and its tests engine/py/test_*.py, is
-// built and run by engine-cpython alone (cpythonPaths): a change to only those compiles nothing the engine's Rust,
+// built and run by engine-cpython (cpythonPaths), plus checks when named there:
+// a change to only those compiles nothing the engine's Rust,
 // wasm, NEON or interrupt jobs build or run, so it doesn't select them.  The files stay known paths (enginePaths),
 // never the fallback; anything else under engine/ (Rust, manifests, build.rs, the pyo3 crate's engine/py/src)
 // still selects them.  #862 changed only those and ran engine-rust for 624 s.)
@@ -261,7 +277,7 @@ const optionalOnly = !full && every(optionalPaths);
 const examplesPaths = [/^examples\//, /^test\/fixtures\/examples\//];
 const knownPaths = [...examplesPaths, ...docsPaths, ...workflowOrBuildPaths, ...runtimePaths, ...webPaths, ...modePaths, ...enginePaths, ...appPaths, ...optionalPaths];
 const fallback = files.some((file) => !knownPaths.some((pattern) => pattern.test(file)));
-const node = full || workflowOrBuild || runtime || webChange || fallback;
+const node = full || workflowOrBuild || runtime || webChange || checksPythonTest || fallback;
 const web = full || workflowOrBuild || runtime || webChange || fallback;
 const modes = full || workflowOrBuild || runtime || modeChange || fallback;
 const engineSmoke = full || workflowOrBuild || engineChange || fallback;
