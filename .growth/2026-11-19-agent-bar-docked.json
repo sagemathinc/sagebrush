@@ -1,7 +1,7 @@
 {
   "v": 1,
-  "reason": "The agent's bar is a row of the page, never over what the person types in or reads: it goes into the page's own row for it ([data-sbag-slot]: above the Agents page's composer, under the notebook page's header, in the board's top bar, under the code and LaTeX pages' heads), placed again when the page changes what it shows (web/workspace/agent-ui.ts and the pages' rows); the CLI's bundle carries the notebook page and its agent chunk. cli/pyjs.cjs grows +956 bytes over the one-link change's +424 (+1380 in all, exact, base master a9b2b826 with the one-link change merged, pinned node 24.21.0 and bun 1.4.4); the bound adds 64 bytes of slack.",
+  "reason": "The agent's bar is a row of the page, never over what the person types in or reads: it goes into the page's own row for it ([data-sbag-slot]: above the Agents page's composer, under the notebook page's header, in the board's top bar, under the code and LaTeX pages' heads), placed again when the page changes what it shows (web/workspace/agent-ui.ts and the pages' rows); the CLI's bundle carries the notebook page and its agent chunk. cli/pyjs.cjs grows +940 bytes (exact, base master 0c4267c5 with the one-link change on it, pinned node 24.21.0 and bun 1.4.4); the bound adds 64 bytes of slack.",
   "bytes": {
-    "cli/pyjs.cjs": 1020
+    "cli/pyjs.cjs": 1004
   }
 }
