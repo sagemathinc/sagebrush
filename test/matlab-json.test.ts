@@ -76,6 +76,26 @@ test("jsonencode and jsondecode refuse what they can't do; JSON text is bounded 
   assert.equal(m("x = jsondecode(['\"' repmat('[', 1, 600) '\"']); disp(numel(x))"), "600\nPASS");
   assert.equal(m("jsondecode(['[' repmat('1,', 1, 50) '1]'])", { SAGEBRUSH_JSON_MAX_CHARS: "100" }),
     "MATLAB:jsondecode:TooLarge|jsondecode: the JSON text is 103 characters, over the limit of 100.");
+  // (the values a text may hold, which bounds what parsing builds: 262,144; refused before it is parsed)
+  assert.equal(m("v = jsondecode(['[' repmat('0,', 1, 262142) '0]']); disp(numel(v))"), "262143\nPASS");
+  assert.equal(m("jsondecode(['[' repmat('0,', 1, 262144) '0]'])"), "MATLAB:jsondecode:TooLarge|jsondecode: the JSON text holds more than 262144 values.");
+  // (a number of at most 1,000 digits, read as a double, as MATLAB reads integers: never as an arbitrary-precision one)
+  assert.equal(m("disp(jsondecode(['[1' repmat('0', 1, 999) ']']))"), "Inf\nPASS");
+  assert.equal(m("jsondecode(['[1' repmat('0', 1, 1000) ']'])"), "MATLAB:jsondecode:TooLarge|jsondecode: a number in the JSON text has more than 1000 digits.");
+  assert.equal(m("jsondecode(['[1' repmat('0', 1, 199999) ']'])"), "MATLAB:jsondecode:TooLarge|jsondecode: a number in the JSON text has more than 1000 digits.");
+  assert.equal(m("x = jsondecode('12345678901234567890123'); fprintf('%s %.17g\\n', class(x), x)"), "double 1.2345678901234568e+22\nPASS");
+});
+
+test("jsondecode's character bound can be lowered for a test, never raised", () => {
+  const max = (env: Record<string, string>) => {
+    const r = spawnSync(process.execPath, [cli, "-c", "import _matlab_json as j; print(j.MAX_CHARS)"], { encoding: "utf8", env: { ...process.env, ...env } });
+    assert.equal(r.status, 0, r.stderr);
+    return r.stdout.trim();
+  };
+  assert.equal(max({}), "4194304");
+  assert.equal(max({ SAGEBRUSH_JSON_MAX_CHARS: "100" }), "100");
+  assert.equal(max({ SAGEBRUSH_JSON_MAX_CHARS: "100000000" }), "4194304");
+  assert.equal(max({ SAGEBRUSH_JSON_MAX_CHARS: "-5" }), "1");
 });
 
 test("a fitted result exported with jsonencode reads back as JSON (an agent's task: fminsearch, then ode45 as a check)", () => {

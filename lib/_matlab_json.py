@@ -17,8 +17,13 @@ they agree:
   more; an array of objects with the same names in the same order a struct
   array; any other array a cell array.
 
-The JSON text is untrusted input: it is refused over MAX_CHARS characters or
-nested more than MAX_DEPTH deep, before it is parsed.
+The JSON text is untrusted input: before it is parsed it is refused over
+MAX_CHARS characters, with more than MAX_VALUES values, with a number of more
+than MAX_DIGITS digits, or nested more than MAX_DEPTH deep.  Each check is a
+string method or a regular expression over text of at most MAX_CHARS
+characters, and MAX_VALUES bounds what parsing builds (each value a Python
+object, then a MATLAB one).  Integers are read as doubles, as MATLAB reads
+them, never as arbitrary-precision integers.
 """
 
 import json
@@ -28,12 +33,15 @@ import numpy as np
 
 import _matlab as _m
 
-# (the longest JSON text jsondecode reads, and the deepest nesting)
-MAX_CHARS = 1 << 26
+# (the longest JSON text jsondecode reads, the most values it holds, the longest number and the deepest nesting)
+MAX_CHARS = 1 << 22
+MAX_VALUES = 1 << 18
+MAX_DIGITS = 1000
 MAX_DEPTH = 512
 try:
     import os as _os
-    MAX_CHARS = int(_os.environ.get("SAGEBRUSH_JSON_MAX_CHARS", MAX_CHARS))  # (lower for tests)
+    # (lower for tests, never higher)
+    MAX_CHARS = min(MAX_CHARS, max(1, int(_os.environ.get("SAGEBRUSH_JSON_MAX_CHARS", MAX_CHARS))))
 except Exception:
     pass
 
@@ -198,9 +206,16 @@ def make_valid_name(s):
     return s[:63]
 
 
-def _check_depth(text):
-    """refuse a text nested more than MAX_DEPTH deep (its strings left out), before it is parsed"""
-    bare = re.sub(r'"(?:[^"\\]|\\.)*"', "", text)
+def _admit(text):
+    """refuse a text with too many values, too long a number or too deep a nesting (its strings left out, as one
+    character each), before it is parsed"""
+    bare = re.sub(r'"(?:[^"\\]|\\.)*"', '""', text)
+    # (every value but the first follows a comma or opens an array or object: an upper bound on their number)
+    values = bare.count(",") + bare.count("[") + bare.count("{") + 1
+    if values > MAX_VALUES:
+        raise _m._err("jsondecode: the JSON text holds more than %d values." % MAX_VALUES, "MATLAB:jsondecode:TooLarge")
+    if re.search(r"[0-9]{%d}" % (MAX_DIGITS + 1), bare):
+        raise _m._err("jsondecode: a number in the JSON text has more than %d digits." % MAX_DIGITS, "MATLAB:jsondecode:TooLarge")
     depth = 0
     for c in re.sub(r"[^\[\]{}]", "", bare):
         if c in "[{":
@@ -299,9 +314,9 @@ def jsondecode_(txt):
     if len(text) > MAX_CHARS:
         raise _m._err("jsondecode: the JSON text is %d characters, over the limit of %d." % (len(text), MAX_CHARS),
                       "MATLAB:jsondecode:TooLarge")
-    _check_depth(text)
+    _admit(text)
     try:
-        tree = json.loads(text, object_pairs_hook=_Obj)
+        tree = json.loads(text, object_pairs_hook=_Obj, parse_int=float)
     except ValueError as e:
         line, col = getattr(e, "lineno", None), getattr(e, "colno", None)
         where = " (line %d, column %d)" % (line, col) if line is not None else ""

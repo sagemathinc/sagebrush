@@ -413,8 +413,11 @@ call) follow MATLAB's documentation of them and are checked against Octave
   anything else cell arrays. Names are made
   valid as `matlab.lang.makeValidName` makes them (Octave keeps a leading
   `_`).
-- **Bounds:** the JSON text is untrusted input. It is refused over 2^26
-  characters or nested more than 512 levels deep, before it is parsed.
+- **Bounds:** the JSON text is untrusted input. Before it is parsed it is
+  refused over 2^22 characters, with more than 2^18 values (which bounds what
+  parsing builds), with a number of more than 1,000 digits, or nested more
+  than 512 levels deep. Integers are read as doubles, never as
+  arbitrary-precision integers.
 
 ## Graphics
 
