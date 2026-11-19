@@ -124,10 +124,14 @@ try {
     check((await open("slow")) === 2, `(slow.ipynb shown: ${what})`);
     // (the last row's outputs cleared and saved, so "started" is this run's)
     await evaluate(`(window.__grantNow = undefined, window.sagebrush.notebook.clearOutputs(), window.sagebrush.notebook.saved().then(() => 1))`);
+    // (this run held, its listener on the grant set, and its own first cell running: an earlier row's interrupted cell can
+    //  still print "started" after the clear, before this run has begun)
+    const lines = await evaluate(`window.__lines.length`);
     await evaluate(`window.__go({ path: "/ip/slow.ipynb" })`);
-    check(!!(await until(`window.sagebrush.notebook.cells()[0]?.out.textContent.includes("started")`)), `${what}: the first cell running on the page`);
+    check(!!(await until(`window.__lines.length > ${lines} && typeof window.__chg === "function" && window.sagebrush.notebook.cells()[0]?.el.classList.contains("running") && window.sagebrush.notebook.cells()[0].out.textContent.includes("started")`)), `${what}: this run's first cell running on the page`);
     const t0 = Date.now();
-    await evaluate(act);
+    const acted = await evaluate(act);
+    check(acted === 1, `${what}: done while the run went on: ${JSON.stringify(acted)}`);
     const res = await until(`window.__res`, 30000);
     const late = await evaluate(`window.__ws.read("/ip/slow.ipynb").then((x) => JSON.stringify(x.content.cells[1].outputs ?? []).includes("late"))`);
     check(res?.ok === false && res.ended === want && Date.now() - t0 < 10000 && !("cells" in res) && !JSON.stringify(res).includes("started") && late === false, `${what}: ended ${want}, nothing returned, the next cell never run: ${JSON.stringify({ res, late })}`);
@@ -135,6 +139,10 @@ try {
   await during("Stop", `(window.__stop(), 1)`, "stopped");
   await during("the grant's write narrowed", `(window.__grantNow = { ...window.__grant, write: false }, window.__chg(), 1)`, "revoked");
   await during("another notebook shown", `window.sagebrush.open(window.__refs.b).then(() => 1)`, "stopped");
+  // (a write narrowed before the run is asked: the run is bound to the grant as it is then, and goes to its end)
+  check((await open("a")) === 3, "(a.ipynb shown again)");
+  r = await evaluate(`(window.__grantNow = { ...window.__grant, write: false }, window.__run("workspace.run_notebook", { path: "/ip/a.ipynb" }, window.__grantNow))`);
+  check(r?.ok === true && r.ended === "done" && r.saved === "saved", `the write narrowed before the run: the run bound to that grant, done: ${JSON.stringify(r)}`);
   await evaluate(`(window.__grantNow = undefined, 1)`);
   check((await evaluate(`window.__holder.current === null`)) === true, "the page's run let go after each");
 } catch (e) {
