@@ -195,10 +195,19 @@ try {
   const barButton = (text) => `[...document.querySelectorAll(".sbag-bar button")].find((b) => b.textContent === ${JSON.stringify(text)})`;
   const make = (name, cells, extra = {}) => drive({ op: "req", method: "workspace.create", params: { path: (folder === "/" ? "" : folder) + "/" + name + ".ipynb", mode: "python", content: { json: { ...extra, cells: cells.map((code) => ({ code })) } } } });
   const shownIs = (name) => `document.title.startsWith(${JSON.stringify(name)})`;
+  // (a notebook opened from Files as the person does. The list fills in after Files opens, and redraws as the agent's
+  //  files arrive: the entry is waited for, and clicked again if a redraw took the click, until the page shows it)
   const fromFiles = async (file) => {
     await ev(`(document.querySelector("#wssidebar")?.hidden && document.querySelector("#wsfilesbtn")?.click(), true)`);
     await until(`!!document.querySelector("#wssidebar") && !document.querySelector("#wssidebar").hidden`, 5000);
-    return ev(`(() => { const e = [...document.querySelectorAll("#wssidebar *")].find((e) => e.children.length === 0 && e.textContent.trim() === ${JSON.stringify(file)}); e?.click(); return !!e; })()`);
+    const entry = `[...document.querySelectorAll("#wssidebar *")].find((e) => e.children.length === 0 && e.textContent.trim() === ${JSON.stringify(file)})`;
+    const shown = `document.title.startsWith(${JSON.stringify(file.replace(/\.ipynb$/, ""))})`;
+    for (let i = 0; i < 3; i++) {
+      if (!(await until(`!!${entry}`, 10000))) return false;
+      await ev(`(${entry}.click(), true)`);
+      if (await until(shown, 5000)) return true;
+    }
+    return false;
   };
   const origin0 = await ev("performance.timeOrigin");
   ok(await typeInto("x = 2", "x = 3"), "(the person types in the notebook shown)");
