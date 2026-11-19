@@ -5719,6 +5719,101 @@
   "owner": "MATLAB numerical methods",
   "row": "inv-23"
  },
+ "lib/_matlab_json.py ::  :: MAX_CHARS = 1 << 26 #0": {
+  "class": "1",
+  "disposition": {
+   "1": "shared"
+  },
+  "owner": "MATLAB JSON (@sagebrush-matlab)",
+  "reason": "parser protection for untrusted JSON text, as lib/_matlab_mat.py's bounds: jsondecode refuses a text over 2^26 characters, or nested more than 512 deep, before it is parsed"
+ },
+ "lib/_matlab_json.py ::  :: MAX_CHARS = int(_os.environ.get(\"SAGEBRUSH_JSON_MAX_CHARS\", MAX_CHARS)) # (lower for tests) #0": {
+  "class": "1",
+  "disposition": {
+   "1": "shared"
+  },
+  "owner": "MATLAB JSON (@sagebrush-matlab)",
+  "reason": "parser protection for untrusted JSON text, as lib/_matlab_mat.py's bounds: jsondecode refuses a text over 2^26 characters, or nested more than 512 deep, before it is parsed"
+ },
+ "lib/_matlab_json.py ::  :: MAX_DEPTH = 512 #0": {
+  "class": "1",
+  "disposition": {
+   "1": "shared"
+  },
+  "owner": "MATLAB JSON (@sagebrush-matlab)",
+  "reason": "parser protection for untrusted JSON text, as lib/_matlab_mat.py's bounds: jsondecode refuses a text over 2^26 characters, or nested more than 512 deep, before it is parsed"
+ },
+ "lib/_matlab_json.py ::  :: The JSON text is untrusted input: it is refused over MAX_CHARS characters or #0": {
+  "class": "1",
+  "disposition": {
+   "1": "shared"
+  },
+  "owner": "MATLAB JSON (@sagebrush-matlab)",
+  "reason": "parser protection for untrusted JSON text, as lib/_matlab_mat.py's bounds: jsondecode refuses a text over 2^26 characters, or nested more than 512 deep, before it is parsed"
+ },
+ "lib/_matlab_json.py ::  :: nested more than MAX_DEPTH deep, before it is parsed. #0": {
+  "class": "1",
+  "disposition": {
+   "1": "shared"
+  },
+  "owner": "MATLAB JSON (@sagebrush-matlab)",
+  "reason": "parser protection for untrusted JSON text, as lib/_matlab_mat.py's bounds: jsondecode refuses a text over 2^26 characters, or nested more than 512 deep, before it is parsed"
+ },
+ "lib/_matlab_json.py :: _check_depth :: \"\"\"refuse a text nested more than MAX_DEPTH deep (its strings left out), before it is parsed\"\"\" #0": {
+  "class": "1",
+  "disposition": {
+   "1": "shared"
+  },
+  "owner": "MATLAB JSON (@sagebrush-matlab)",
+  "reason": "parser protection for untrusted JSON text, as lib/_matlab_mat.py's bounds: jsondecode refuses a text over 2^26 characters, or nested more than 512 deep, before it is parsed"
+ },
+ "lib/_matlab_json.py :: _check_depth :: if depth > MAX_DEPTH: #0": {
+  "class": "1",
+  "disposition": {
+   "1": "shared"
+  },
+  "owner": "MATLAB JSON (@sagebrush-matlab)",
+  "reason": "parser protection for untrusted JSON text, as lib/_matlab_mat.py's bounds: jsondecode refuses a text over 2^26 characters, or nested more than 512 deep, before it is parsed"
+ },
+ "lib/_matlab_json.py :: _check_depth :: raise _m._err(\"jsondecode: the JSON text is nested more than %d levels deep.\" % MAX_DEPTH, #0": {
+  "class": "1",
+  "disposition": {
+   "1": "shared"
+  },
+  "owner": "MATLAB JSON (@sagebrush-matlab)",
+  "reason": "parser protection for untrusted JSON text, as lib/_matlab_mat.py's bounds: jsondecode refuses a text over 2^26 characters, or nested more than 512 deep, before it is parsed"
+ },
+ "lib/_matlab_json.py :: _tree :: raise _m._err(\"jsonencode does not support complex numbers.\", \"MATLAB:jsonencode:UnsupportedComplex\") #0": {
+  "class": "coverage",
+  "owner": "MATLAB JSON (@sagebrush-matlab)",
+  "reason": "jsonencode refuses what MATLAB's jsonencode does not support (complex numbers, sparse arrays, other classes): an unsupported value, not a cap"
+ },
+ "lib/_matlab_json.py :: _tree :: raise _m._err(\"jsonencode does not support sparse arrays.\", \"MATLAB:jsonencode:UnsupportedSparse\") #0": {
+  "class": "coverage",
+  "owner": "MATLAB JSON (@sagebrush-matlab)",
+  "reason": "jsonencode refuses what MATLAB's jsonencode does not support (complex numbers, sparse arrays, other classes): an unsupported value, not a cap"
+ },
+ "lib/_matlab_json.py :: _tree :: raise _m._err(\"jsonencode does not support values of class '%s'.\" % _m.class_(v), \"MATLAB:jsonencode:UnsupportedType\") #0": {
+  "class": "coverage",
+  "owner": "MATLAB JSON (@sagebrush-matlab)",
+  "reason": "jsonencode refuses what MATLAB's jsonencode does not support (complex numbers, sparse arrays, other classes): an unsupported value, not a cap"
+ },
+ "lib/_matlab_json.py :: jsondecode_ :: if len(text) > MAX_CHARS: #0": {
+  "class": "1",
+  "disposition": {
+   "1": "shared"
+  },
+  "owner": "MATLAB JSON (@sagebrush-matlab)",
+  "reason": "parser protection for untrusted JSON text, as lib/_matlab_mat.py's bounds: jsondecode refuses a text over 2^26 characters, or nested more than 512 deep, before it is parsed"
+ },
+ "lib/_matlab_json.py :: jsondecode_ :: raise _m._err(\"jsondecode: the JSON text is %d characters, over the limit of %d.\" % (len(text), MAX_CHARS), #0": {
+  "class": "1",
+  "disposition": {
+   "1": "shared"
+  },
+  "owner": "MATLAB JSON (@sagebrush-matlab)",
+  "reason": "parser protection for untrusted JSON text, as lib/_matlab_mat.py's bounds: jsondecode refuses a text over 2^26 characters, or nested more than 512 deep, before it is parsed"
+ },
  "lib/_matlab_lu.py ::  :: - Work: matlab.lu_work (unlimited by default) is charged before each chunk #0": {
   "class": "none",
   "owner": "MATLAB sparse linear algebra"

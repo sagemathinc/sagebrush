@@ -393,6 +393,26 @@ both directions:
 Not supported: MATLAB 7.3 (HDF5) files and objects (strings are saved as
 char arrays, with a warning). Single sparse matrices are saved as double.
 
+## JSON
+
+`jsonencode` and `jsondecode` (lib/_matlab_json.py, loaded on their first
+call) follow MATLAB's documentation of them and are checked against Octave
+11.1's where the two agree (test_json):
+- **Encoding:** a vector becomes a flat array; a matrix or N-d array nested
+  arrays, its first dimension outermost. A cell array becomes a flat array in
+  column-major order; a struct array an array of objects, nested as a numeric
+  array is (Octave flattens it); a string array strings. Numbers are written
+  as integers where they are, else as the shortest text that reads back as
+  the double, as Octave writes them. `ConvertInfAndNaN` and `PrettyPrint`
+  are supported. Complex and sparse values are refused, as MATLAB refuses them.
+- **Decoding:** arrays of numbers become column vectors (nulls NaN), arrays of
+  arrays of one size an array of one more dimension, arrays of objects with
+  the same names struct arrays, anything else cell arrays. Names are made
+  valid as `matlab.lang.makeValidName` makes them (Octave keeps a leading
+  `_`).
+- **Bounds:** the JSON text is untrusted input. It is refused over 2^26
+  characters or nested more than 512 levels deep, before it is parsed.
+
 ## Graphics
 
 lib/_matlab_plot.py keeps MATLAB's graphics objects and draws them with
