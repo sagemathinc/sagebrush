@@ -1,7 +1,0 @@
-{
-  "v": 1,
-  "reason": "Each workspace answer's entry with a page of its own carries url, its address on the person's Sagebrush site, so an agent can give the person a link to what it made or read: the pairing takes it from the very entry the verb returned, before its ids are dropped (web/workspace/agent-pair.ts entryOut, with entry-url.ts) and stat's description says so (verbs.ts, schema.json); the CLI's bundle carries the notebook page's agent chunk. cli/pyjs.cjs grows +208 bytes (exact, base master 4bcbb434, pinned node 24.21.0 and bun 1.4.4); the bound adds 64 bytes of slack.",
-  "bytes": {
-    "cli/pyjs.cjs": 272
-  }
-}

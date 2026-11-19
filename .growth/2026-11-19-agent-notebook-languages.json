@@ -1,7 +1,0 @@
-{
- "v": 1,
- "reason": "Agents are told a notebook's languages: sagebrush-mcp's instructions (engine/py/python/sagebrush/mcp_server.py) list Python, Sage, MATLAB and Magma with an example each, and workspace_create's mode gets a description (web/workspace/verbs.ts, its schema.json and the Python package's copy, workspace_schema.json), both in the CLI's Python bundle. Measured on the merge with master feb7b49f (local size record, pinned bun 1.4.4 and node 24.21.0); the marker is the growth + 64.",
- "bytes": {
-  "cli/pyjs.cjs": 308
- }
-}

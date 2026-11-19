@@ -103,7 +103,7 @@ const fullTierPaths = [
   // pairing's modules (its doc-protocol.ts is above, with sync), the mode registry, which verbs.ts reads, and the view
   // chunk's kept views (view-state.ts, design/view-state.md); and an entry's page address, which the pairing adds to
   // its answers (entry-url.ts, with the code page's languages and address))
-  /^web\/workspace\/(?:agent-ui|agent-pair|pair-link|notebook-edit|notebook-form|agent-grant|agent-schema|verbs|verbs-page|branch-rules|git-branch|view-state|entry-url)\.ts$/, /^src\/modes\.ts$/,
+  /^web\/workspace\/(?:agent-ui|agent-pair|agent-made-tex|pair-link|notebook-edit|notebook-form|agent-grant|agent-schema|verbs|verbs-page|branch-rules|git-branch|view-state|entry-url)\.ts$/, /^src\/modes\.ts$/,
   /^web\/code\/(?:langs|url)\.ts$/,
   // (and what makes those bundles from them, which no metafile lists: the build and its helpers and the dependencies;
   // @sagebrush's ruling, Nov 4. Not .github/workflows/ci.yml, which pins bun and node but changes in about one pull
@@ -429,7 +429,7 @@ const outputs = {
   unsafe_sweep: unsafeSweep,
   slow_tests: slowTests,
   slow_scope: slowScope,
-  // (the growth gate's own inputs: never docs-only, plan-growth-budget-r5 §1.5)
+  // (the size comparison's own inputs: never docs-only)
   // (a dispatch or a schedule has no file list: its gate always runs on the measurement, never docs-only)
   // (on a track the engine ships as built, not as pinned (scripts/pin-policy.mjs), so an engine source moves the
   // measured bytes there and is a gate input too)

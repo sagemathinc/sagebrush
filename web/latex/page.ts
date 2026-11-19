@@ -30,6 +30,7 @@ import type { Example } from "./examples";
 import type { sessionOf } from "./run-core.mjs";
 import { seenOf, checkedResults } from "./results-check.mjs";
 import { staleWhy } from "./engine/sagetex.mjs";
+import { MADE_CHANNEL } from "../workspace/agent-made-tex";
 // (the embeddable editor, for the questions site: component.ts)
 export { mountEditor, type LatexEditor } from "./component";
 /** latex_build's dependencies (tools.ts latexBuild, build.ts): this module's own styles and input and image rules, so
@@ -960,6 +961,36 @@ export async function mount(root: HTMLElement, host: Host): Promise<void> {
     const n = (Array.isArray(c.sage) ? c.sage : []).filter((x: any) => x.s === "stale").length;
     if (n) say(`${n} ${what()}${n === 1 ? "" : "s"} out of date: Shift+Enter runs ${n === 1 ? "it" : "them"} again`);
   });
+  // A .tex the paired agent made runs once by itself when it is shown here (decided Nov 19 2026, as a notebook it created:
+  // workspace/agent-made-tex.ts). Shown at a revision whose code hasn't run (an item not run, or out of date), unedited,
+  // this page asks the pairing's page whether it may; the yes comes once for that file at that revision, from the
+  // pairing whose agent made it, under the grant it was made under, still in force with May run code and Everything.
+  // Then this page's own Run, as the person's, if it still shows that revision unedited. Asked again when the pairing
+  // says its agent made the revision shown (a build after this page opened it)
+  const made = typeof BroadcastChannel === "function" && host.sandbox && !host.app ? new BroadcastChannel(MADE_CHANNEL) : null;
+  let askedAt = "", asking: { id: string; rev: number; text: string } | null = null;
+  // (an item not run yet, as the check counts them (check.ts): not refused, and not ok, failed or blocked)
+  const unrun = () => { const c = E.lastCheck(); return hasCode(c) && c.sage.some((x: any) => !x.err && x.s !== "ok" && x.s !== "error" && x.s !== "blocked"); };
+  const askRun = () => {
+    if (!made || !live() || running || !saveable || src.value !== savedText || !unrun()) return;
+    if (askedAt === host.fid + "@" + docRev) return;
+    askedAt = host.fid + "@" + docRev;
+    asking = { id: crypto.randomUUID(), rev: docRev, text: src.value };
+    made.postMessage({ t: "tex-may-run", id: asking.id, fid: host.fid, rev: docRev });
+  };
+  if (made) {
+    made.onmessage = (e: MessageEvent) => {
+      const m = e.data;
+      if (m?.t === "tex-made" && m.fid === host.fid && m.rev === docRev) { askedAt = ""; askRun(); }
+      else if (m?.t === "tex-may-run" && m.ok === true && asking && m.id === asking.id) {
+        const q = asking;
+        asking = null;
+        if (live() && !running && docRev === q.rev && src.value === q.text && savedText === q.text && unrun()) runBtn.click();
+      }
+    };
+    life.signal.addEventListener("abort", () => made.close());
+    E.onRendered(askRun);
+  }
   const agentTarget = { file: () => where.path, text: () => src.value, lastCheck: E.lastCheck, current: E.posCurrent, preview, images, css: PAGE_CSS, refresh: loadResults };
   registerLatexTools(); setTarget(agentTarget);
   life.signal.addEventListener("abort", () => clearTarget(agentTarget));

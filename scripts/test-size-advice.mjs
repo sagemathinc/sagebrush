@@ -4,24 +4,12 @@ import assert from "node:assert/strict";
 import { mkdtempSync, readFileSync, rmSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
-import { appendPullRequestSummary, coreAdvice, latexAdvice, markerAdvice, safelyAppendPullRequestSummary } from "./size-advice.mjs";
+import { appendPullRequestSummary, latexAdvice, markerAdvice, safelyAppendPullRequestSummary } from "./size-advice.mjs";
 
 for (const [current, verdict, suggested] of [[99, "RAISE", 164], [100, "KEEP", null], [120, "KEEP", null], [163, "KEEP", null], [164, "KEEP", null], [165, "TIGHTEN", 164]]) {
   assert.deepEqual(markerAdvice(100, current), { measured: 100, current, suggested, verdict });
 }
 assert.throws(() => markerAdvice(Number.MAX_SAFE_INTEGER, 1), /safe-integer range/);
-
-const core = coreAdvice({ rows: [
-  { bundle: "grow", delta: 100, markers: 120 },
-  { bundle: "reset", delta: -20, charge: 80, growth: 144 },
-  { bundle: "shrink", delta: -1, markers: 0 },
-  { bundle: "exact", delta: 50 },
-] }).join("\n");
-assert.match(core, /\| grow \| \+100 \| 120 \| — \| \*\*KEEP\*\* \|/);
-assert.match(core, /\| reset \| \+80 \| 144 \| — \| \*\*KEEP\*\* \|/);
-assert.doesNotMatch(core, /\| (?:shrink|exact) \|/);
-const noise = coreAdvice({ rows: [{ bundle: "jitter", delta: 64, markers: 0 }] }, { bundles: { jitter: { noise_bytes: 64 } } }).join("\n");
-assert.match(noise, /No eligible row has growth needing a marker/);
 
 const latex = latexAdvice(
   { raw: 1000, gzip: 400, cap: { raw: 1064, gzip: 450 } },
@@ -56,7 +44,7 @@ try {
 }
 
 const ci = readFileSync(new URL("../.github/workflows/ci.yml", import.meta.url), "utf8");
-assert.match(ci, /name: suggested growth-marker advice\n        if: always\(\) && github\.event_name == 'pull_request'\n        continue-on-error: true\n        run: node scripts\/size-advice\.mjs --core/);
+assert.ok(!ci.includes("size-advice.mjs --core"));
 assert.doesNotMatch(ci, /pull-requests:\s*write/);
 
 const latexGate = readFileSync(new URL("./test-latex-group-budget.mjs", import.meta.url), "utf8");

@@ -36,8 +36,8 @@ const sizeStart = ci.indexOf("\n  size-base:\n");
 const sizeEnd = ci.indexOf("\n  size-gate:\n", sizeStart);
 check(sizeStart >= 0 && sizeEnd > sizeStart, "cannot isolate the size-base job");
 const size = ci.slice(sizeStart, sizeEnd);
-check((size.match(/"\$GITHUB_WORKSPACE\/scripts\/wasm-fetch-or-build\.mjs" --root/g) ?? []).length === 2,
-  "both base worktrees must fetch or source-build unpublished pins");
+check((size.match(/"\$GITHUB_WORKSPACE\/scripts\/wasm-fetch-or-build\.mjs" --root "\$RUNNER_TEMP\/size-base"/g) ?? []).length === 1,
+  "the base worktree must fetch or source-build unpublished pins");
 check(size.includes("targets: wasm32-unknown-unknown"), "size-base source fallback needs the pinned wasm Rust target");
 
 check(app.includes("cancel-in-progress: ${{ github.ref != 'refs/heads/master' && !startsWith(github.ref, 'refs/heads/track/') }}"),

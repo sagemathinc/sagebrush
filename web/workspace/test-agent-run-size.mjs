@@ -69,7 +69,12 @@ const LATEX_FIRST_USE = ["sagebrush-agent-run.js", "sagebrush-latex.js", "sagebr
 //  the shipped build, on the toggle's head; + 64)
 // (the two above together, the agent's run of the open notebook and the LaTeX editor embedded in the pane, measured on
 //  their merge (master f8b9e013): 159,537 / 57,867 on the shipped build (bun 1.4.4, node 24.21.0); + 64)
-const AGG_RAW = 159601, AGG_GZIP = 57931;
+// (renewed for a .tex the agent made running once by itself in the editor, Nov 19, provisional until the exact-head CI
+//  packet: 156,778 / 57,060 -> 157,546 / 57,374, +768 / +314, the page module's (94,777 / 32,485 -> 95,545 / 32,799),
+//  measured on the shipped build, on the embedded mode's head; + 64)
+// (and with a .tex the agent made running by itself, measured on that merge (the embedded mode on master f8b9e013):
+//  160,303 / 58,187 on the shipped build; + 64)
+const AGG_RAW = 160367, AGG_GZIP = 58251;
 // (the reviewed inputs, relative to web/: the entry and what it imports)
 // (the review page's run line: a finished run's note in its branch, canon-doc.ts's canonical bytes and blob id, and branch-wake.ts's
 //  wake, which needs sha256-hex.ts for the branch store's name)
