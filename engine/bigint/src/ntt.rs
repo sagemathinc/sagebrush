@@ -68,7 +68,8 @@ impl NttWord for u64 {
 
 /// A generator of (Z/p)^*, for p - 1 = c 2^k with c small enough to
 /// factor by trial division.
-fn primitive_root(p: u64) -> u64 {
+/// (the least such generator)
+pub fn primitive_root(p: u64) -> u64 {
     let m = Modulus::new(p);
     let mut qs = vec![2u64];
     let mut c = (p - 1) >> (p - 1).trailing_zeros();
