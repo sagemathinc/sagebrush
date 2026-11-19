@@ -1490,6 +1490,7 @@
   "b6a05640a504439f": {"decl":"src/runtime/builtins.ts :: unpack","class":"allocates","via":"web/lib-lazy.ts :: get"},
   "45b5dc73eda552c5": {"decl":"src/runtime/complex.ts :: M","class":"allocates","via":"src/runtime/types.ts :: method"},
   "b5921701c50c6bab": {"decl":"src/runtime/engine.ts :: CreationRefused.class","class":"no-new-store"},
+  "1a081917c82d41e7": {"decl":"src/runtime/engine.ts :: binCall","class":"allocates","via":"lib:lib.es5.d.ts :: Uint8Array.slice"},
   "6a279034cc8439f6": {"decl":"src/runtime/engine.ts :: createInstance","class":"allocates","via":"src/limits.ts :: plain"},
   "4e3cea1832aa488d": {"decl":"src/runtime/engine.ts :: creationCheck","class":"allocates","via":"src/runtime/engine.ts :: allowanceOf"},
   "f96195190c211759": {"decl":"src/runtime/engine.ts :: creationRefusal","class":"allocates","via":"src/runtime/object.ts :: getattr"},
