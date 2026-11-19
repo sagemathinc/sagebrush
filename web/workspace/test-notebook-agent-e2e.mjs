@@ -488,9 +488,13 @@ try {
   // the code page (/?code=<fid>): no pairing of its own, the page's, from File ▸ Connect an agent…; a remembered agent
   // reconnects there too
   const pyFid = await ev(`${W}.create("/agent-code.py", { content: new TextEncoder().encode("print(1)\\n") }).then((e) => e.fid)`);
+  // (and a reload record left in this tab, as a paired page leaves one when it's left: this navigation is no reload, so
+  //  the record is dropped where it's read, and the chunk isn't fetched for it)
+  await ev(`(sessionStorage.setItem("sb-agent-reload-v1", JSON.stringify({ v: 1, left: Date.now() })), true)`);
   const beforeC = requests.length;
   ok(typeof pyFid === "string" && await go(`?code=${encodeURIComponent(pyFid)}`) && await until(`!!document.querySelector('.code-filemenu [data-f="c-agent"]')`), "the code page's File menu offers Connect an agent…");
   ok(!requests.slice(beforeC).some(chunk) && await ev(`document.querySelector("#agentbtn").hidden`), "nothing fetched before it's wanted, and the notebook's Agent isn't shown over it");
+  ok(await ev(`sessionStorage.getItem("sb-agent-reload-v1") === null`), "a reload record met on a navigation that isn't a reload: dropped, and nothing fetched for it");
   // (a ?pair= link on the code page whose chunk can't load: said in the code page's own status line; board's N1 on #935)
   const cf = await drive({ op: "code" });
   await send("Network.setCacheDisabled", { cacheDisabled: true });

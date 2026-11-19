@@ -84,7 +84,9 @@ let runGen = 0;
 // (a failed fetch is forgotten, so the next try fetches again, by a URL of its own: a browser may keep a failed
 // module's result for its URL; each caller says the failure)
 // (an agent this tab had before its reload: its reload record (agent-pair.ts's RELOAD_KEY), resumed by the pairing module)
-const reloadRecorded = () => { try { return sessionStorage.getItem("sb-agent-reload-v1") !== null; } catch { return false; } };
+// (only on a reload of this tab: after any other navigation the record is dropped here, unread, as the pairing module
+//  would discard it (reloadDecision), and nothing is fetched for it)
+const reloadRecorded = () => { try { if (sessionStorage.getItem("sb-agent-reload-v1") === null) return false; if ((performance.getEntriesByType("navigation")[0] as PerformanceNavigationTiming | undefined)?.type === "reload") return true; sessionStorage.removeItem("sb-agent-reload-v1"); return false; } catch { return false; } };
 let agentPairing: Promise<{ connect(): unknown }> | null = null, agentTries = 0;
 const pairAgent = (ws: Workspace) => (agentPairing ??= (import(agentTries++ ? `${agentUrl}?try=${agentTries}` : agentUrl) as Promise<typeof import("./agent")>).then((m) => m.mountAgentPairing(ws as any, {
   // (a reload of this tab keeps the agent, from the tab's reload record, while the grant lasts (decided Nov 19 2026))
