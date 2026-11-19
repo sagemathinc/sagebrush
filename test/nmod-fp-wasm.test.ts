@@ -13,8 +13,8 @@ import { join } from "node:path";
 //   2 MiB) with a quarter of allocator headroom: the previous reply is
 //   freed at entry; and nmod_echelon at its 1024 x 1024 envelope within
 //   ECH_PEAK = 50,369,536 bytes the same way;
-// - the shared transform cache, filled by other ops to its 64-table policy
-//   and to its 2^28-byte policy, is neither used nor changed by them, and
+// - the shared transform cache, filled by another op (poly_divexact's check
+//   product) to its 64-table policy and to its 2^28-byte policy, is neither used nor changed by them, and
 //   100 NTT primes in a row do not grow memory;
 // - Stop: the host's interrupt flag is asked at least once per 2^16
 //   multiply-adds, and a Stop at the middle of a run traps;
@@ -82,30 +82,42 @@ function stats(e: any): number[] {
 
 const digits = (k: number) => Array.from({ length: k }, () => String(rand(10n ** 19n)).padStart(19, "0")).join("");
 
-// Both fills are integer polynomial products (another op) whose replies
-// are longer than any nmod reply can be (20 bytes for each of the 400 * 401
-// echelon entries, about 3.2 MB), so each leaves the shared cache at a
-// policy limit AND a maximal prior reply in the reply buffer.
+// Both fills are exact divisions in Z[x] (another op, poly_divexact), whose
+// replies are longer than any nmod reply can be (20 bytes for each of the
+// 400 * 401 echelon entries, about 3.2 MB), so each leaves the shared cache
+// at a policy limit AND a maximal prior reply in the reply buffer.  The
+// division is by b = 1 + x + ... + x^32 (so a = b q is sliding sums here),
+// and its modular path checks the quotient by one multimodular product
+// through the shared transform cache, one table per prime.  (poly_mul builds
+// its own tables, so it no longer fills the shared cache.)
 const LONGEST_NMOD_REPLY = 20 * 400 * 401;
+const ONES = Array(33).fill("1").join(",");
 
-// the table-count policy (64 tables): 1400 x 1400 coefficients of 608
-// digits, whose multimodular path needs 67 primes; a reply of about 3.4 MB
-const COUNT_FILL = (() => {
-  const a = Array.from({ length: 1400 }, () => digits(32)).join(",");
-  return `{"fn":"poly_mul","a":"${a}","b":"${a}","wire":"csv"}`;
-})();
+function divexactFill(q: bigint[]): string {
+  const a: bigint[] = [];
+  let w = 0n;
+  for (let i = 0; i < q.length + 32; i++) {
+    if (i < q.length) w += q[i];
+    if (i >= 33) w -= q[i - 33];
+    a.push(w);
+  }
+  return `{"fn":"poly_divexact","a":"${a.join(",")}","b":"${ONES}","wire":"csv"}`;
+}
+
+// the table-count policy (64 tables): a quotient of 1400 coefficients of
+// 2432 digits, whose check product needs about 133 primes; a reply of about
+// 3.4 MB
+const COUNT_FILL = divexactFill(Array.from({ length: 1400 }, () => BigInt("1" + digits(128))));
 function fillCount(e: any) {
   const n = call(e, COUNT_FILL).length;
   assert.ok(n > LONGEST_NMOD_REPLY, `the prior reply has ${n} bytes`);
   assert.equal(stats(e)[1], 64, "the shared cache at its 64-table policy");
 }
 
-// the byte policy (2^28 bytes): a product of length 2^20 (32 MiB tables)
-// needing 9 primes leaves 8 tables; a reply of about 180 MB
-const BYTE_FILL = (() => {
-  const a = Array.from({ length: 1 << 19 }, () => digits(4) + "7").join(",");
-  return `{"fn":"poly_mul","a":"${a}","b":"${a}","wire":"csv"}`;
-})();
+// the byte policy (2^28 bytes): a check product of length 2^19 + 32 (2^20
+// points, 32 MiB tables) needing 9 primes leaves 8 tables; a reply of about
+// 80 MB
+const BYTE_FILL = divexactFill(Array.from({ length: 1 << 19 }, () => BigInt("1" + digits(8))));
 function fillBytes(e: any) {
   const n = call(e, BYTE_FILL).length;
   assert.ok(n > LONGEST_NMOD_REPLY, `the prior reply has ${n} bytes`);

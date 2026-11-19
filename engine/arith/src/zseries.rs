@@ -163,6 +163,16 @@ impl Csv<'_> {
     }
 }
 
+/// The first at most `n` bytes of `s` for an error message, cut at a
+/// character boundary (a request string may hold any UTF-8).
+pub fn preview(s: &str, n: usize) -> &str {
+    let mut end = s.len().min(n);
+    while !s.is_char_boundary(end) {
+        end -= 1;
+    }
+    &s[..end]
+}
+
 /// Scan a comma-separated list of hex integers (`-?(0|[1-9a-f][0-9a-f]*)`,
 /// no sign when `signed` is false), at most `max_tokens` of them and each
 /// at most B_MAX bits, counting what admission needs.  The work is one pass
@@ -195,7 +205,7 @@ pub fn scan_with<'a>(text: &'a str, max_tokens: usize, signed: bool, max_digits:
             && (digits == "0" || !digits.starts_with('0'))
             && !(digits == "0" && digits.len() != tok.len());
         if !ok {
-            return Err(format!("{:?} is not a hex integer (-?(0|[1-9a-f][0-9a-f]*))", &tok[..tok.len().min(40)]));
+            return Err(format!("{:?} is not a hex integer (-?(0|[1-9a-f][0-9a-f]*))", preview(tok, 40)));
         }
         if digits.len() > max_digits {
             return Err(format!("a coefficient of {} hex digits: at most {} ({} bits)", digits.len(), max_digits, 4 * max_digits as u64));

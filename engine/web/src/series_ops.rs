@@ -148,7 +148,7 @@ fn fields<'a, const K: usize>(req: &'a str, keys: [&str; K], op: &str) -> Result
             match keys.iter().position(|&k| k == key) {
                 Some(j) if out[j].is_some() => return Err(format!("{}: the key {:?} appears twice", op, key)),
                 Some(j) => Some(j),
-                None => return Err(format!("{}: unknown key {:?} (accepted: fn, {})", op, &key[..key.len().min(40)], keys.join(", "))),
+                None => return Err(format!("{}: unknown key {:?} (accepted: fn, {})", op, zseries::preview(key, 40), keys.join(", "))),
             }
         };
         ws(&mut i);
