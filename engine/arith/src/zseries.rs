@@ -374,9 +374,14 @@ fn product_peak(la: u64, lb: u64) -> Option<u64> {
     ck!(ck!(ck!(la.checked_add(lb)).checked_mul(8)).checked_add(ck!(len.checked_mul(16)))).checked_add(ck!(nn.checked_mul(64)))
 }
 
+/// Bytes for the small allocations every call makes besides the sized ones
+/// (the reply's `{"ok":` wrapper, scalars' Strings, a message, MultiCrt's
+/// fixed headers), kept apart so the sized terms stay exact.
+const SMALL: u64 = 1 << 16;
+
 fn finish(beta: u64, p: u64, work: Option<u64>, peak: Option<u64>, reply: u64, request: u64) -> Result<Admitted, String> {
     let work = work.and_then(|w| w.checked_add(request)).ok_or("the work bound overflows")?;
-    let peak = peak.and_then(|x| x.checked_add(reply)).and_then(|x| x.checked_add(request)).ok_or("the memory bound overflows")?;
+    let peak = peak.and_then(|x| x.checked_add(reply)).and_then(|x| x.checked_add(request)).and_then(|x| x.checked_add(SMALL)).ok_or("the memory bound overflows")?;
     cap("the work", work, WORK_MAX, "fewer coefficients per call, or raw")?;
     Ok(Admitted { beta, primes: p, work, peak, reply })
 }
