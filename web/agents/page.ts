@@ -28,7 +28,7 @@ import { mountComposer, renderComposerState, stopLabel } from "../workspace/agen
 import { applyPaneClasses, mountLayout, relayout } from "./layout";
 import { AgentLeg, legKey, listComputers, pageLegUrl, type LegEnd } from "../workspace/agent-relay";
 import { chatHere } from "./chat-here";
-import { modeSwitch } from "../workspace/mode-switch";
+import { filesIcon, modeSwitch } from "../workspace/mode-switch";
 import { icon as panelIcon } from "../workspace/files-toggle";
 import { entryUrl } from "../workspace/entry-url";
 
@@ -898,7 +898,25 @@ function toast(text: string, ms = 1500) {
 const editor = mountComposer({ submit, stop: () => interrupt(current()), render: md, typeset: (el) => typeset(el) });
 // (the Files | Agents switch at the right of the chat list's header, Agents pressed: Files opens the notebook page with
 //  its files, as the file panel's switch opens this page; William, Nov 12)
-{ const sw = modeSwitch("agents"), brand = document.querySelector<HTMLElement>("nav.side .brand"); sw.style.marginLeft = "auto"; if (brand) { brand.style.whiteSpace = "nowrap"; brand.append(sw); } }
+{ const sw = modeSwitch("agents"), brand = document.querySelector<HTMLElement>("nav.side .brand"); sw.style.marginLeft = "auto"; if (brand) { brand.style.whiteSpace = "nowrap"; brand.append(sw); } const f = sw.querySelector<HTMLButtonElement>('[data-mode="files"]'); if (f) f.onclick = () => void toFiles(); }
+// (to the files: the notebook page with its file browser shown.  The thread is left as New chat leaves it
+//  (mayLeaveThread): its files' pending edits saved, a running cell stopped only if the person says so; refused, this
+//  page stays and nothing is changed.  Admitted, the browser's own choice to show the files is set, then the page left)
+let leaving = false;
+async function toFiles() {
+  if (leaving) return;
+  leaving = true;
+  try {
+    if (!(await mayLeaveThread())) return;
+    try { localStorage.setItem("sagebrush-files-sidebar", "1"); } catch {}
+    location.assign("/");
+  } finally {
+    leaving = false;
+  }
+}
+// (Files…, at the foot of the chat list; and the switch's own Files, through the same way out)
+$("#files-big").prepend(filesIcon());
+$("#files-big").onclick = () => void toFiles();
 $("#new").onclick = async () => {
   if (!(await mayLeaveThread())) return;
   session.newThread();
