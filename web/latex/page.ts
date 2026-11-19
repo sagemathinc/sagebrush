@@ -83,8 +83,13 @@ const loadRun = () => (runMod ??= (import(runTries++ ? `${runUrl}?try=${runTries
 let runGen = 0;
 // (a failed fetch is forgotten, so the next try fetches again, by a URL of its own: a browser may keep a failed
 // module's result for its URL; each caller says the failure)
+// (an agent this tab had before its reload: its reload record (agent-pair.ts's RELOAD_KEY), resumed by the pairing module)
+const reloadRecorded = () => { try { return sessionStorage.getItem("sb-agent-reload-v1") !== null; } catch { return false; } };
 let agentPairing: Promise<{ connect(): unknown }> | null = null, agentTries = 0;
-const pairAgent = (ws: Workspace) => (agentPairing ??= (import(agentTries++ ? `${agentUrl}?try=${agentTries}` : agentUrl) as Promise<typeof import("./agent")>).then((m) => m.mountAgentPairing(ws as any)))
+const pairAgent = (ws: Workspace) => (agentPairing ??= (import(agentTries++ ? `${agentUrl}?try=${agentTries}` : agentUrl) as Promise<typeof import("./agent")>).then((m) => m.mountAgentPairing(ws as any, {
+  // (a reload of this tab keeps the agent, from the tab's reload record, while the grant lasts (decided Nov 19 2026))
+  reload: { scope: { workspace: `sagebrush-workspace/${(ws as any).identity?.workspace}`, page: location.origin + location.pathname } },
+})))
   .catch((e) => { agentPairing = null; throw e; });
 
 export { PATCH_BUDGET, FOLLOW_KEY } from "./editor";
@@ -447,7 +452,7 @@ export async function mount(root: HTMLElement, host: Host): Promise<void> {
   // (the link taken by the hosting page before this loaded: pair-link.ts's key; or still in the URL)
   //  (none in the desktop app: no Agent button there either)
   if (host.app) agentBtn.hidden = true;
-  else if ((globalThis as any)[Symbol.for("sagebrush.pairLink")] || new URLSearchParams(location.search).has("pair")) void pairAgent(host.ws).catch(agentFailed);
+  else if ((globalThis as any)[Symbol.for("sagebrush.pairLink")] || new URLSearchParams(location.search).has("pair") || reloadRecorded()) void pairAgent(host.ws).catch(agentFailed);
   else void host.ws.agentGrants().then((k) => { if (Object.keys(k ?? {}).length) void pairAgent(host.ws).catch(agentFailed); }, () => {});
   const main = el("div", "tex-main");
   const left = el("div", "tex-left"), right = el("div", "tex-right");

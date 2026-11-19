@@ -394,6 +394,26 @@ try {
   const st = await drive({ op: "status" });
   ok(st.ok?.paired === false || st.ok?.granted === false, "the grant ended with the page", st);
 
+  // a reload of the same tab keeps the agent (decided Nov 19 2026): its reload record resumes the pairing, with no new
+  // Allow, while the grant lasts, and the agent's next call works; a navigation to the page (above) doesn't
+  {
+    const cr = await drive({ op: "code" });
+    ok(await go(`?pair=${cr.code}&port=${cr.port}`) && await until(`!!document.querySelector(".sbag-box button.primary")`), "(a ?pair= link: Connect)");
+    await ev(`(document.querySelector(".sbag-box button.primary").click(), true)`);
+    ok(await until(`[...document.querySelectorAll(".sbag-box h2")].some((h) => h.textContent === "Allow this agent?")`), "(paired: Allow this agent?)");
+    await ev(`([...document.querySelectorAll(".sbag-box button.primary")].pop().click(), true)`);
+    ok(await until(`!!document.querySelector(".sbag-bar")`), "(allowed, with the dialog's defaults: not remembered)");
+    await ev("window.__old = 1").catch(() => {});
+    await send("Page.reload");
+    await sleep(300);
+    ok(await until("!window.__old && !!window.sagebrush?.workspace", 60000), "(the tab reloads)");
+    ok(await until(`!!document.querySelector(".sbag-bar")`, 20000) && !(await ev(`!!document.querySelector(".sbag-box")`)), "after a reload of the tab, the agent is back by itself: its bar, and no Connect or Allow", await ev(`document.querySelector(".sbag-box")?.textContent ?? ""`).catch(() => ""));
+    const lr = await drive({ op: "req", method: "workspace.list", params: { folder: "/" } });
+    ok(Array.isArray(lr.ok?.entries), "…and the agent's next call works", JSON.stringify(lr).slice(0, 200));
+    await ev(`([...document.querySelectorAll(".sbag-bar button")].find((b) => b.textContent === "Revoke")?.click(), true)`);
+    ok(await until(`!document.querySelector(".sbag-bar")`), "(Revoke)");
+  }
+
   // a remembered grant: the next load of the notebook page fetches the chunk by itself and reconnects
   const c1 = await drive({ op: "code" });
   ok(await go(`?pair=${c1.code}&port=${c1.port}`) && await until(`!!document.querySelector(".sbag-box button.primary")`), "another ?pair= link: Connect");
