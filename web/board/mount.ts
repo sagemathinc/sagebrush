@@ -499,8 +499,17 @@ export function mountBoard(root: HTMLElement, host: BoardHost) {
     if (over()) return false;
     await images.ensure(Object.keys(d.images ?? {}));
     if (over()) return false;
+    // (KaTeX: the host's, loaded the first time a board has math; awaited here, with the pictures, before anything
+    //  of this document is committed: nothing awaited follows the checks below)
+    let math: { typeset: (el: Element) => void } | null = null;
+    if (host.math && hasMath(JSON.stringify(d))) {
+      mathModule ??= host.math();
+      math = await mathModule;
+      if (over()) return false;
+    }
     if (!view && !replacing && doc !== again) return false;
-    // (a document from elsewhere, fenced: an edit made here while it awaited its pictures wins; it stands down)
+    // (a document from elsewhere, fenced: an edit made here while it awaited its pictures or KaTeX wins; it stands
+    //  down.  From here to the end, nothing is awaited)
     if (ifStill && doc !== ifStill) return false;
     if (!view) {
       // (each decision, pending or done, kept only while its page's
@@ -529,13 +538,7 @@ export function mountBoard(root: HTMLElement, host: BoardHost) {
     board.askScope = askKey(pageIx + 1, "");
     const v = flipped.size ? flip(pageView(d, pageIx)) : pageView(d, pageIx);
     board.markdown = (s) => markdown(s, { pixels: docPixels, remote: writtenHere ? true : "click" });
-    if (host.math && hasMath(JSON.stringify(d))) {
-      // KaTeX: the host's, loaded the first time a board has math
-      mathModule ??= host.math();
-      const m = await mathModule;
-      if (over()) return false;
-      board.typeset = (el) => m.typeset(el);
-    }
+    if (math) { const m = math; board.typeset = (el) => m.typeset(el); }
     // (edges' routes are found between frames: large boards show at once,
     // their edges straight until routed)
     const laid = premeasure(v);

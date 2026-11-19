@@ -6,7 +6,8 @@
 // didn't change keeps its outputs.  The board's own edits are never taken for a write made elsewhere (no "changed
 // elsewhere" copy).  An edit made here while a version from elsewhere is still being drawn (its pictures read) wins:
 // that version stands down, and the edit's save meets the write as a conflict, so both are kept (the board shows the
-// other version, the person's is a board of its own, said).  Serve web/dist first (python3 web/serve.py 8765), then
+// other version, the person's is a board of its own, said), whether it waited on its pictures or on KaTeX, loaded the
+// first time a board has math.  Serve web/dist first (python3 web/serve.py 8765), then
 //   node web/board/test-board-follows-writes.mjs
 import { spawn } from "node:child_process";
 import { mkdtempSync, rmSync } from "node:fs";
@@ -37,6 +38,7 @@ async function tab(wsUrl) {
   const waiting = new Map(), errors = [];
   const t = {
     errors,
+    held: [],
     dieAll(why) { for (const [, w] of waiting) { clearTimeout(w.timer); w.at.message = why; w.fail(w.at); } waiting.clear(); },
     send(method, params = {}, ms = 120000) {
       return new Promise((ok, fail) => {
@@ -57,6 +59,7 @@ async function tab(wsUrl) {
     if (m.id && waiting.has(m.id)) { const w = waiting.get(m.id); waiting.delete(m.id); clearTimeout(w.timer); w.ok(m.result ?? m.error); }
     if (m.method === "Runtime.exceptionThrown") errors.push(m.params.exceptionDetails?.exception?.description ?? JSON.stringify(m.params.exceptionDetails));
     if (m.method === "Inspector.targetCrashed") die("a page crashed");
+    if (m.method === "Fetch.requestPaused") t.held.push(m.params);
   };
   tabs.push(t);
   for (const m of ["Page.enable", "Runtime.enable", "Inspector.enable"]) await t.send(m);
@@ -153,6 +156,48 @@ try {
   await A.ev(`window.sagebrush.board.edit((d) => { d.nodes.push({ id: "next", text: "NEXT EDIT" }); }).then(() => 1)`);
   check(await B.until(`${W}.read(${JSON.stringify(path2)}).then((r) => r.content.title === "REMOTE IMAGE" && r.content.nodes.some((n) => n.id === "next"))`, 15000), "the next edit is saved over the version shown");
   check(await B.ev(`${W}.read(${JSON.stringify(copyPath)}).then((r) => r.content.title.startsWith("PERSON WHILE HELD") && r.content.nodes.some((n) => n.id === "mine"))`), "…and the person's earlier edits, both, are still kept");
+  // the same while KaTeX loads, the first time a board has math: a fresh tab, C, its board without math, the math
+  // module's request held (Fetch); a version with math from elsewhere waits on it; the person makes two edits; then
+  // it loads. Both kept, as above, and the next edit loses neither
+  const created2 = await A.send("Target.createTarget", { url: "about:blank" });
+  const C = await tab((await (async () => { for (let i = 0; i < 100; i++) { const l = await (await fetch(`http://127.0.0.1:${port}/json`)).json(); const p = l.find((x) => x.id === created2.targetId); if (p) return p; await sleep(100); } throw new Error("tab C not found"); })()).webSocketDebuggerUrl);
+  await C.send("Page.navigate", { url: `${base}board/?new=python` });
+  check(await C.until("/doc=local:/.test(location.search) && !!window.sagebrush?.board?.snapshot?.()?.doc", 60000), "tab C makes a board of its own, no math in it");
+  const id3 = await C.ev("new URLSearchParams(location.search).get('doc').slice('local:'.length)");
+  check(await C.until(`${W}.list("/").then((l) => l.some((e) => e.kind === "board" && e.ref === ${JSON.stringify(id3)}))`, 20000), "…listed in the workspace");
+  const path3 = await C.ev(`${W}.list("/").then((l) => l.find((e) => e.kind === "board" && e.ref === ${JSON.stringify(id3)}).path)`);
+  check(!(await C.ev("[...performance.getEntriesByType('resource')].some((r) => /sagebrush-math\\.js/.test(r.name))")), "…KaTeX not loaded in it yet");
+  // (with this tab's cache and the site's service worker bypassed: tab A has loaded the module, and either would
+  //  serve it to this tab unseen)
+  await C.send("Network.enable");
+  await C.send("Network.setCacheDisabled", { cacheDisabled: true });
+  await C.send("Network.setBypassServiceWorker", { bypass: true });
+  await C.send("Fetch.enable", { patterns: [{ urlPattern: "*sagebrush-math.js*", requestStage: "Request" }] });
+  const write3 = (doc) => B.ev(`${W}.read(${JSON.stringify(path3)}).then((r) => ${W}.write(${JSON.stringify(path3)}, ${JSON.stringify(doc)}, { base: r.rev })).then((r) => r.rev)`);
+  const revM = await write3({ title: "REMOTE MATH", nodes: [{ id: "m", title: "Math", text: "Its square: $x^2$." }], edges: [] });
+  let mathHeld = false;
+  for (const t0 = Date.now(); !mathHeld && Date.now() - t0 < 15000; await sleep(100)) mathHeld = C.held.length > 0;
+  check(typeof revM === "number" && mathHeld, "a version with math from elsewhere, KaTeX's load held while it is drawn", C.held.map((h) => h.request?.url));
+  check(!(await C.ev("window.sagebrush.board.snapshot().doc.nodes.some((n) => n.id === 'm')")) && (await C.ev("window.sagebrush.board.snapshot().doc.title")) !== "REMOTE MATH", "…while it waits, the board is still the one it was: the version from elsewhere isn't taken in before it is drawn", await C.ev("JSON.stringify(window.sagebrush.board.snapshot().doc)"));
+  await C.ev("window.sagebrush.board.editing(true), 1");
+  // (the person's edits, not waited for: one waiting on KaTeX would wait for the release)
+  await C.ev(`(window.sagebrush.board.edit((d) => { d.title = "PERSON WHILE MATH"; }), 1)`);
+  await C.ev(`(window.sagebrush.board.edit((d) => { d.nodes.push({ id: "mine2", text: "MINE TOO" }); }), 1)`);
+  check(await C.until(`window.sagebrush.board.snapshot().doc.title === "PERSON WHILE MATH" && window.sagebrush.board.snapshot().doc.nodes.some((n) => n.id === "mine2")`, 5000), "…the person's two edits meanwhile are shown, on the board as it was (not on the version still being drawn)", await C.ev("JSON.stringify(window.sagebrush.board.snapshot().doc)").catch(() => null));
+  const mine = await C.ev("JSON.stringify({ title: window.sagebrush.board.snapshot().doc.title, nodes: window.sagebrush.board.snapshot().doc.nodes.map((n) => n.id) })");
+  for (const h of C.held.splice(0)) await C.send("Fetch.continueRequest", { requestId: h.requestId });
+  await C.send("Fetch.disable");
+  const copy3 = "/PERSON WHILE MATH (your changes, made while it changed elsewhere).board.json";
+  check(await B.until(`${W}.list("/").then((l) => l.some((e) => e.path === ${JSON.stringify(copy3)}))`, 20000), "KaTeX loaded: the person's edits are kept, as a board of their own", await B.ev(`${W}.list("/").then((l) => l.map((e) => e.path))`));
+  check(await C.until(`window.sagebrush.board.snapshot().doc.title === "REMOTE MATH" && /changed elsewhere while you edited/.test(document.body.innerText)`, 20000), "…the board shows the other version, and says so", await C.ev("window.sagebrush.board.snapshot().doc.title"));
+  const path3b = await B.ev(`${W}.list("/").then((l) => l.find((e) => e.kind === "board" && e.ref === ${JSON.stringify(id3)}).path)`);
+  check(await B.ev(`${W}.read(${JSON.stringify(path3b)}).then((r) => r.content.title === "REMOTE MATH" && r.rev === ${revM})`), "…which the workspace keeps as it was written, not written over");
+  await C.ev(`window.sagebrush.board.edit((d) => { d.nodes.push({ id: "next2", text: "NEXT EDIT" }); }).then(() => 1)`);
+  check(await B.until(`${W}.read(${JSON.stringify(path3b)}).then((r) => r.content.title === "REMOTE MATH" && JSON.stringify(r.content.nodes.map((n) => n.id)) === '["m","next2"]' && r.content.nodes[0].text === "Its square: $x^2$.")`, 15000), "the next edit is saved over the version shown: exactly the other version and the new item", await B.ev(`${W}.read(${JSON.stringify(path3b)}).then((r) => JSON.stringify(r.content))`));
+  const copyNow = await B.ev(`${W}.read(${JSON.stringify(copy3)}).then((r) => JSON.stringify({ title: r.content.title, nodes: r.content.nodes.map((n) => n.id) }))`);
+  const mineDoc = JSON.parse(mine);
+  check(copyNow === JSON.stringify({ title: mineDoc.title + " (your changes, made while it changed elsewhere)", nodes: mineDoc.nodes }), "…and the person's copy is exactly the board they edited, both edits in it", { copyNow, mine });
+  check(!C.errors.length, "no exceptions in tab C: " + C.errors.join(" | ").slice(0, 400));
   check(!A.errors.length && !B.errors.length, "no exceptions: " + [...A.errors, ...B.errors].join(" | ").slice(0, 400));
 } catch (e) {
   fails.push(String(e?.stack ?? e) + (dead && chromeTail.trim() ? `\n  Chrome's stderr, its end:\n    ${chromeTail.trim().split("\n").slice(-15).join("\n    ")}` : ""));
