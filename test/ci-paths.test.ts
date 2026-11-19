@@ -126,21 +126,26 @@ test("Python tests invoked by checks select node, derived from this checkout's w
       - run: |
           node dist/src/cli.js engine/py/test_matrix_checks.py
           python3 engine/py/test_other_checks.py
+          timeout 600 node dist/src/cli.js engine/py/test_a.py
+          uv run python engine/py/test_b.py
+          node dist/src/cli.js \\
+            engine/py/test_continued.py
           # node dist/src/cli.js engine/py/test_commented.py
           echo engine/py/test_mentioned.py
+          printf '%s' engine/py/test_printed.py
   engine-cpython:
     steps:
       - run: python3 engine/py/test_remote_pair.py
 `);
   const env = { CI_PATHS_ROOT: root };
-  for (const path of ["engine/py/test_matrix_checks.py", "engine/py/test_other_checks.py"]) {
+  for (const path of ["engine/py/test_matrix_checks.py", "engine/py/test_other_checks.py", "engine/py/test_a.py", "engine/py/test_b.py", "engine/py/test_continued.py"]) {
     const result = classify([path], "", env);
     assert.equal(result.node, "true", path);
     assert.equal(result.engine_cpython, "true", path);
     assert.equal(result.engine_smoke, "false", path);
     assert.equal(result.web, "false", path);
   }
-  for (const path of ["engine/py/test_remote_pair.py", "engine/py/test_commented.py", "engine/py/test_mentioned.py", "engine/py/test_matrix_checks.py.bak"])
+  for (const path of ["engine/py/test_remote_pair.py", "engine/py/test_commented.py", "engine/py/test_mentioned.py", "engine/py/test_printed.py", "engine/py/test_matrix_checks.py.bak"])
     assert.equal(classify([path], "", env).node, "false", path);
   // A new command needs no matching classifier edit or hard-coded filename.
   writeFileSync(workflow, `jobs:\n  checks:\n    steps:\n      - run: node dist/src/cli.js engine/py/test_future.py\n  other:\n    steps: []\n`);

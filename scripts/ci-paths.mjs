@@ -124,7 +124,9 @@ if (changedPythonTests.length) {
   const checks = workflow.split("\n  checks:\n")[1]?.split(/\n  [a-z][a-z0-9-]*:\n/)[0];
   if (checks === undefined) throw new Error("ci-paths: cannot find the checks job");
   const code = checks.split("\n").map((line) => line.split("#")[0])
-    .filter((line) => /^\s*(?:-\s+run:\s*)?(?:[A-Z_][A-Z0-9_]*=\S+\s+)*(?:node|bun|python3?)\s/.test(line)).join("\n");
+    // Wrappers and continued commands still invoke their test. Prefer an extra
+    // checks run to silently skipping one; exclude only explicit prose output.
+    .filter((line) => !/^\s*(?:-\s+run:\s*)?(?:echo|printf)\b/.test(line)).join("\n");
   const invoked = new Set([...code.matchAll(/\bengine\/py\/test_[A-Za-z0-9_.-]+\.py\b/g)].map((m) => m[0]));
   checksPythonTest = changedPythonTests.some((file) => invoked.has(file));
 }
