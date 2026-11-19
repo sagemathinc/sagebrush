@@ -1,6 +1,7 @@
 // Force-directed placement in 3D (or flattened to a plane, for the board-style comparison): Fruchterman-Reingold
 // with edge springs, all-pairs repulsion (a few hundred nodes: fine without a tree), and a pull of each node towards
-// its group's centroid, so a directory's files cluster.  A node with a position keeps it.
+// its group's centroid, so a directory's files cluster.  A node with a position keeps it; one without, but "near"
+// another (its id), starts beside it and is pulled to it: placement without coordinates, as an agent would say it.
 
 function rng(seed) {
   let s = seed >>> 0 || 1;
