@@ -1,7 +1,0 @@
-{
-  "v": 1,
-  "reason": "A reload of the tab keeps the agent on the notebook, code, board and LaTeX pages: the pairing is mounted with the tab's reload record's scope, so it resumes with no new Allow while the grant lasts, and the notebook page loads its agent chunk for a tab that has a reload record, on a reload only (after any other navigation the page drops the record unread) (web/index.html; the CLI's bundle carries the notebook page). cli/pyjs.cjs grows +560 bytes, exact, base master aadff4d0, pinned node 24.21.0 and bun 1.4.4; the bound adds 64 bytes of slack.",
-  "bytes": {
-    "cli/pyjs.cjs": 624
-  }
-}
