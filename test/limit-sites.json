@@ -4,6 +4,16 @@
   "owner": "remote-compute",
   "reason": "test-hook timing (longest wall-time gap between interrupt checks / simulated wasm host polls) and its readout in ap Stop pins; measures, refuses nothing"
  },
+ "engine/arith/src/nmod_poly.rs :: barrett_reduction_edges :: let mut xs: Vec<u64> = vec![0, 1, n - 1, n, n + 1, 2 * n - 1, u64::MAX, u64::MAX - 1, u64::MAX - n]; #0": {
+  "class": "none",
+  "owner": "exact linear algebra (engine/arith)",
+  "reason": "test code: the Barrett reduction's edge inputs (u64::MAX and the largest multiples of n); refuses nothing itself"
+ },
+ "engine/arith/src/nmod_poly.rs :: barrett_reduction_edges :: let top = u64::MAX / n * n; #0": {
+  "class": "none",
+  "owner": "exact linear algebra (engine/arith)",
+  "reason": "test code: the Barrett reduction's edge inputs (u64::MAX and the largest multiples of n); refuses nothing itself"
+ },
  "engine/arith/src/nmod_poly.rs :: work_bounds_refuse_instead_of_panicking :: assert_eq!(divrem_work(usize::MAX, 1), None); #0": {
   "class": "none",
   "owner": "exact linear algebra (engine/arith)",
@@ -33,16 +43,6 @@
   "class": "none",
   "owner": "exact linear algebra (engine/arith)",
   "reason": "test code: every work bound at extreme lengths is None (a refusal) or a number, never an overflow; refuses nothing itself"
- },
- "engine/arith/src/nmod_poly.rs :: barrett_reduction_edges :: let mut xs: Vec<u64> = vec![0, 1, n - 1, n, n + 1, 2 * n - 1, u64::MAX, u64::MAX - 1, u64::MAX - n]; #0": {
-  "class": "none",
-  "owner": "exact linear algebra (engine/arith)",
-  "reason": "test code: the Barrett reduction's edge inputs (u64::MAX and the largest multiples of n); refuses nothing itself"
- },
- "engine/arith/src/nmod_poly.rs :: barrett_reduction_edges :: let top = u64::MAX / n * n; #0": {
-  "class": "none",
-  "owner": "exact linear algebra (engine/arith)",
-  "reason": "test code: the Barrett reduction's edge inputs (u64::MAX and the largest multiples of n); refuses nothing itself"
  },
  "engine/arith/src/zmat.rs :: rref_multimodular :: let amax = a.max_bits() as f64; #0": {
   "class": "none",
@@ -1055,6 +1055,16 @@
   "class": "3",
   "owner": "modular symbols",
   "row": "inv-42"
+ },
+ "engine/modsym/tests/newforms_poll_gap.rs :: newforms_trace_bound_poll_gap :: let (gap, poll, total) = (hooks::max_gap_ns(), hooks::max_poll_gap_ns(), hooks::total()); #0": {
+  "class": "none",
+  "owner": "modular symbols",
+  "reason": "test code: the longest time between Stop checks while newforms computes trace forms; refuses nothing itself"
+ },
+ "engine/modsym/tests/newforms_poll_gap.rs :: trace_coefficient_bound_poll_gap :: let (gap, poll) = (hooks::max_gap_ns(), hooks::max_poll_gap_ns()); #0": {
+  "class": "none",
+  "owner": "modular symbols",
+  "reason": "test code: the longest time between Stop checks while newforms computes trace forms; refuses nothing itself"
  },
  "engine/mp/src/abi.rs ::  :: const MAX_FACTORIAL_CACHE: i64 = 1000; #0": {
   "class": "none",

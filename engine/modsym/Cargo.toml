@@ -18,6 +18,8 @@ sagebrush-poly = { path = "../poly" }
 [dev-dependencies]
 # (the examples run their own rayon pools)
 rayon = "1.10"
+# (tests only: the longest time between Stop checks, tests/newforms_poll_gap.rs)
+sagebrush-interrupt = { path = "../interrupt", features = ["test-hooks"] }
 sagebrush-ap = { path = "../ap" }
 serde_json = "1"
 

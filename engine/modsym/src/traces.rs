@@ -191,6 +191,9 @@ fn traces_mod(n: u64, k: usize, eps: &Character, res: &NewspaceOrbits, lv: &[Lev
     // Manin symbols x_t only.
     let primes: Vec<u64> = (2..=bound as u64).filter(|&p| is_prime(p)).collect();
     let per_prime = par::map_slice(&primes, |&p| {
+        // (each prime's Heilbronn matrices and images take O(p log p): a
+        // coarse Stop check per prime, not one for all of them)
+        sagebrush_interrupt::check_coarse();
         // generated per prime, not kept: Cremona's are cheap to make, and
         // all of them for p <= 1000 would take tens of megabytes
         let hs = heilbronn_for(p, n);
@@ -268,6 +271,37 @@ pub fn labelled_orbits(n: u64, k: usize, eps: &Character, res: &NewspaceOrbits, 
     }
 }
 
+/// 2 max over n <= bound of (floor(sqrt(n^(k-1))) + 1) sigma0(n) dim: twice
+/// a bound on |tr a_n| for an orbit of dimension at most dim (|tr a_n| <=
+/// dim sigma0(n) n^((k-1)/2)), the modulus the traces' CRT must exceed.
+/// The divisor counts come from a sieve, O(bound log bound) and polled for
+/// Stop: counting each n's divisors by trial took O(bound^2) with no check,
+/// seconds at the bounds hecke_matrix(p) asks for.
+pub fn trace_coefficient_bound(k: usize, dim: usize, bound: usize) -> BigUint {
+    let mut sigma0 = vec![0u32; bound + 1];
+    for dd in 1..=bound {
+        if dd & 0xfff == 0 {
+            sagebrush_interrupt::check_coarse();
+        }
+        for m in (dd..=bound).step_by(dd) {
+            sigma0[m] += 1;
+        }
+    }
+    let mut need = BigUint::from(0u32);
+    for nn in 1..=bound as u64 {
+        if nn & 0xfff == 0 {
+            sagebrush_interrupt::check_coarse();
+        }
+        let s0 = u64::from(sigma0[nn as usize]);
+        let b = (BigUint::from(nn).pow(k as u32 - 1)).sqrt() + 1u32;
+        let x = b * s0 * (dim as u64) * 2u32;
+        if x > need {
+            need = x;
+        }
+    }
+    need
+}
+
 /// tr a_n for n = 1..=bound for each orbit of `res` (same order).
 pub fn orbit_traces(n: u64, k: usize, eps: &Character, res: &NewspaceOrbits, bound: usize) -> Result<Vec<Vec<BigInt>>, String> {
     if bound as u64 >= crate::linalg::MAX_HECKE_PRIME {
@@ -286,15 +320,7 @@ pub fn orbit_traces(n: u64, k: usize, eps: &Character, res: &NewspaceOrbits, bou
     let t0 = crate::now();
     let lv = levels(n, k, &eps, &units, &qs)?;
     // |tr a_n| <= dim sigma0(n) n^((k-1)/2).
-    let mut need = BigUint::from(0u32);
-    for nn in 1..=bound as u64 {
-        let s0 = (1..=nn).filter(|dd| nn % dd == 0).count() as u64;
-        let b = (BigUint::from(nn).pow(k as u32 - 1)).sqrt() + 1u32;
-        let x = b * s0 * (*res.dims.iter().max().unwrap() as u64) * 2u32;
-        if x > need {
-            need = x;
-        }
-    }
+    let need = trace_coefficient_bound(k, *res.dims.iter().max().unwrap(), bound);
     let mut primes = primes_one_mod(e_top, 1 << 31);
     let mut residues: Vec<(u64, Vec<Vec<u64>>)> = vec![];
     let mut modulus = BigUint::from(1u32);
