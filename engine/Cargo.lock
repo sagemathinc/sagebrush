@@ -1031,9 +1031,14 @@ dependencies = [
  "sagebrush-poly",
  "sagebrush-primes",
  "sagebrush-sym",
+ "sagebrush-wire",
  "serde",
  "serde_json",
 ]
+
+[[package]]
+name = "sagebrush-wire"
+version = "0.1.0"
 
 [[package]]
 name = "sec1"

@@ -17,6 +17,7 @@ use sagebrush_modsym::dirichlet::DirichletGroup;
 use sagebrush_modsym::general::{Character, GeneralSpace};
 use serde_json::{json, Value};
 
+pub mod bin_ops;
 mod hmf;
 mod hmfq;
 pub mod nmod_ops;
@@ -107,6 +108,25 @@ pub unsafe extern "C" fn sb_mp_call(ptr: *const u8, len: usize) -> *const u8 {
     let r = &mut *std::ptr::addr_of_mut!(REPLY);
     drop(std::mem::take(r));
     *r = sagebrush_mpoly::call_framed(req);
+    r.as_ptr()
+}
+
+/// A binary call (SBW1, engine/wire: bin_ops.rs): the reply, `ok` or `er`
+/// in band, is in the same buffer as sb_call's.  Never the headerless
+/// mpoly frames: those are sb_mp_call's.
+#[no_mangle]
+// SAFETY: an export of the engine's wasm ABI (no_mangle; the sb_ prefix keeps
+// the symbol unique);
+// the host wrote `len` request bytes at `ptr` (a block from sb_alloc), so the
+// slice is readable; REPLY is replaced on one thread with no other reference
+// to it live (wasm is single-threaded; natively only one-test ABI binaries call
+// this).  That is the supported boundary: any other native caller is unsupported.
+#[allow(unsafe_code)]
+pub unsafe extern "C" fn sb_bin_call(ptr: *const u8, len: usize) -> *const u8 {
+    let req = std::slice::from_raw_parts(ptr, len);
+    let r = &mut *std::ptr::addr_of_mut!(REPLY);
+    drop(std::mem::take(r));
+    *r = bin_ops::call_bin(req);
     r.as_ptr()
 }
 
