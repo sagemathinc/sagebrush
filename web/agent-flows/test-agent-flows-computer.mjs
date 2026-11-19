@@ -7,7 +7,7 @@
 //   CHROME=chromium node web/agent-flows/test-agent-flows-computer.mjs [--case ID]
 // PYTHON: the interpreter with that package (python3 by default). SITE_ORIGIN and SITE_COOKIE_FILE: a deployed site
 // instead (DEV), its session from a 0600 file. RUNNER_LATE=ms: Chat here is chosen first and the runner started after.
-// A case's known gap (gaps: { computer: "why" }) is said in the report; the case still fails there.
+// A case's declared known gap (gaps: { computer: "why" }) is named in the report; the case still fails there.
 import { readdirSync } from "node:fs";
 import { join } from "node:path";
 import { startChrome, runCase, SURFACES } from "./harness.mjs";
@@ -44,10 +44,10 @@ try {
 }
 console.log("\n---- agent flows on the computer surface");
 for (const r of results) {
-  if (r.gap && r.failures.length) console.log(`FAIL ${r.id} on computer (${r.s} s): ${r.failures.length} failed check(s), the known gap: ${r.gap}`);
+  if (r.gap && r.failures.length) console.log(`FAIL ${r.id} on computer (${r.s} s): ${r.failures.length} failed check(s); declared known gap: ${r.gap}`);
   else if (r.gap) console.log(`ok   ${r.id} on computer (${r.s} s): it passes now, so take its gap out of the case (${r.gap})`);
   else console.log(`${r.failures.length ? "FAIL" : "ok  "} ${r.id} on computer (${r.s} s)${r.failures.length ? ": " + r.failures.length + " failed check(s)" : ""}`);
 }
 const failed = results.filter((r) => r.failures.length), gaps = failed.filter((r) => r.gap);
-console.log(failed.length ? `FAIL: ${failed.length} of ${results.length} case runs${gaps.length ? ` (${gaps.length} of them a known gap)` : ""}` : `ok: ${results.length} case runs`);
+console.log(failed.length ? `FAIL: ${failed.length} of ${results.length} case runs${gaps.length ? ` (${gaps.length} of them with a declared known gap)` : ""}` : `ok: ${results.length} case runs`);
 process.exit(failed.length ? 1 : 0);

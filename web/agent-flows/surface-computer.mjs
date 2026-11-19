@@ -24,7 +24,7 @@ import { tmpdir } from "node:os";
 import { dirname, join, normalize } from "node:path";
 import { fileURLToPath } from "node:url";
 import { migrations } from "../cloud/share/migrations.mjs";
-import { allow } from "./harness.mjs";
+import { allow, PANE_CELLS } from "./harness.mjs";
 
 const here = dirname(fileURLToPath(import.meta.url));
 const root = join(here, "..", "..");
@@ -278,7 +278,7 @@ export async function computerSurface(site, page, opts = {}) {
     },
     /** The notebook the person sees: the Agents page's pane, its tab shown. */
     shownPath: `document.querySelector(".pane-head .tab.on")?.dataset.tab ?? null`,
-    liveCells: `null`,
+    liveCells: PANE_CELLS,
     /** Disconnect: the runner ends the agent (its process gone); the computer revoked; everything removed. */
     async close() {
       try {

@@ -191,6 +191,23 @@ async function mcpSurface(site, page) {
   };
 }
 
+/** The Agents page's pane as the person sees it (the chat and computer surfaces): each cell's rendered outputs (a
+ * picture, an error, text), read from the page, so an empty or broken pane fails even when the saved copy has them. */
+export const PANE_CELLS = `(() => {
+      const body = document.querySelector(".pane-body"), cells = body ? [...body.querySelectorAll(".cell")] : [];
+      if (!cells.length) return null;
+      return cells.map((c) => {
+        const out = [];
+        for (const e of c.querySelectorAll("*")) if (e.sbBundle && Object.keys(e.sbBundle).some((k) => k.startsWith("image/"))) out.push({ output_type: "display_data", data: Object.fromEntries(Object.keys(e.sbBundle).map((k) => [k, "1"])) });
+        for (const p of c.querySelectorAll("pre.txt")) {
+          for (const e of p.querySelectorAll("span.e")) out.push({ output_type: "error", ename: "", evalue: e.textContent.slice(0, 200) });
+          const t = [...p.childNodes].filter((n) => n.nodeType === 3).map((n) => n.textContent).join("");
+          if (t) out.push({ output_type: "stream", text: t });
+        }
+        return out;
+      });
+    })()`;
+
 // ---- surface chat: the Agents page and a stand-in for sagebrush-agent (as web/agents/a14-cases.mjs's fakeAgent: the
 // runner protocol on a loopback socket; the agent's tool calls become the page verbs sagebrush-agent makes)
 async function chatSurface(site, page) {
@@ -282,22 +299,7 @@ async function chatSurface(site, page) {
     endTurn(text = "Done.") { if (!A.turn) return; event({ type: "text", text }); event({ type: "turn_finished", outcome: "completed" }); A.turn = null; },
     /** The notebook the person sees: the Agents page's pane, its tab shown. */
     shownPath: `document.querySelector(".pane-head .tab.on")?.dataset.tab ?? null`,
-    /** The pane's notebook as the person sees it: each cell's rendered outputs (a picture, an error, text), read from
-     * the page, so an empty or broken pane fails even when the saved copy has the outputs. */
-    liveCells: `(() => {
-      const body = document.querySelector(".pane-body"), cells = body ? [...body.querySelectorAll(".cell")] : [];
-      if (!cells.length) return null;
-      return cells.map((c) => {
-        const out = [];
-        for (const e of c.querySelectorAll("*")) if (e.sbBundle && Object.keys(e.sbBundle).some((k) => k.startsWith("image/"))) out.push({ output_type: "display_data", data: Object.fromEntries(Object.keys(e.sbBundle).map((k) => [k, "1"])) });
-        for (const p of c.querySelectorAll("pre.txt")) {
-          for (const e of p.querySelectorAll("span.e")) out.push({ output_type: "error", ename: "", evalue: e.textContent.slice(0, 200) });
-          const t = [...p.childNodes].filter((n) => n.nodeType === 3).map((n) => n.textContent).join("");
-          if (t) out.push({ output_type: "stream", text: t });
-        }
-        return out;
-      });
-    })()`,
+    liveCells: PANE_CELLS,
     close: () => server.stop(true),
   };
 }
