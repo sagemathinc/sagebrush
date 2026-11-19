@@ -69,9 +69,60 @@ const _: () = {
     let emit = O_MAX / 8 + 24 * (O_MAX / 11);
     let w = r + pack + 3 * (tab + conv) + 16 * m + emit;
     assert!(w == 205_069_830 && w <= WORK_MAX);
+    // (the schoolbook's work, at most SCHOOLBOOK_WORDS rows of at most M
+    // words, is below the NTT term the table counts)
+    let sb = SCHOOLBOOK_WORDS * m + m + SCHOOLBOOK_WORDS;
+    assert!(sb <= 3 * (tab + conv) + 16 * m);
 };
 
 const HOW: &str = "a smaller product per call";
+
+/// The shorter packed factor's words at most which the word product is the
+/// schoolbook (`mul_words_schoolbook`), else the NTT.  Measured (examples/
+/// zmul_threshold): at 128 words the schoolbook takes at most 0.45 of the
+/// NTT's time natively and 0.38 in wasm32, and it stops being faster near
+/// 300; 128 keeps a margin on both.
+pub const SCHOOLBOOK_WORDS: u64 = 128;
+
+/// [`mul_words_schoolbook`]'s word operations: the output's zero fill and
+/// exactly w_a w_b multiply-adds (each row's carry pass included in its
+/// multiply-adds, one per word), plus one per row for its final carry.
+pub const fn schoolbook_work(wa: usize, wb: usize) -> Option<u64> {
+    let (a, b) = (wa as u64, wb as u64);
+    match a.checked_mul(b) {
+        Some(x) => match x.checked_add(a + b) {
+            Some(y) => y.checked_add(if a < b { a } else { b }),
+            None => None,
+        },
+        None => None,
+    }
+}
+
+/// |x| |y| by rows of the shorter factor, each row's multiply-adds with a
+/// running carry in u128, polled every BLOCK columns.  The result has
+/// x.len() + y.len() words.
+pub fn mul_words_schoolbook(x: &[u64], y: &[u64]) -> Vec<u64> {
+    const BLOCK: usize = 1 << 12;
+    let (long, short) = if x.len() >= y.len() { (x, y) } else { (y, x) };
+    let mut out = vec![0u64; x.len() + y.len()];
+    counted::add((x.len() + y.len()) as u64);
+    for (j, &w) in short.iter().enumerate() {
+        let mut carry: u128 = 0;
+        for (c, chunk) in long.chunks(BLOCK).enumerate() {
+            sagebrush_interrupt::check_coarse();
+            let base = j + c * BLOCK;
+            for (i, &v) in chunk.iter().enumerate() {
+                let t = out[base + i] as u128 + v as u128 * w as u128 + carry;
+                out[base + i] = t as u64;
+                carry = t >> 64;
+            }
+            counted::add(chunk.len() as u64);
+        }
+        out[j + long.len()] = carry as u64;
+        counted::add(1);
+    }
+    out
+}
 
 /// The admitted bounds of a product, or None for the zero polynomial (an
 /// empty or all-zero factor), decided by the scans alone.
@@ -79,6 +130,9 @@ pub struct Plan {
     pub slot: u64,
     pub wa: usize,
     pub wb: usize,
+    /// The word product's backend: schoolbook (the shorter packed factor at
+    /// most SCHOOLBOOK_WORDS words) or the NTT.
+    pub schoolbook: bool,
     pub terms: usize,
     pub admitted: Admitted,
 }
@@ -118,7 +172,15 @@ pub fn admit(a: &Csv, b: &Csv, r: u64, caps: &Caps) -> Result<Option<Plan>, Stri
     // (the reply: per coefficient at most ceil((s - 2) / 4) hex digits, a sign
     // and a comma, and the JSON around them)
     let reply = terms.checked_mul((slot - 2).div_ceil(4) + 2).and_then(|x| x.checked_add(32)).ok_or_else(ovf)?;
-    let ntt_work = mul_words_local_work(wa as usize, wb as usize).ok_or_else(ovf)?;
+    // (the backend, from the packed sizes alone: a short factor's product by
+    // rows of word multiply-adds, exactly w_a w_b of them, no tables; else
+    // the NTT)
+    let schoolbook = wa.min(wb) <= SCHOOLBOOK_WORDS;
+    let ntt_work = if schoolbook {
+        schoolbook_work(wa as usize, wb as usize).ok_or_else(ovf)?
+    } else {
+        mul_words_local_work(wa as usize, wb as usize).ok_or_else(ovf)?
+    };
     let pack = 6 * m + r;
     let emit = terms.checked_mul(8 * (ws + 1) + 8).ok_or_else(ovf)?;
     let work = [r, pack, ntt_work, emit].iter().try_fold(0u64, |s, &x| s.checked_add(x)).ok_or_else(ovf)?;
@@ -126,7 +188,7 @@ pub fn admit(a: &Csv, b: &Csv, r: u64, caps: &Caps) -> Result<Option<Plan>, Stri
     // (live bytes: the request and the packed factors, then the larger of the
     // product's transforms and the reply with one field and its complement;
     // the packing's pos and neg arrays, 16 (w_a + w_b), are below both)
-    let ntt_peak = mul_words_local_peak(wa as usize, wb as usize).ok_or_else(ovf)?;
+    let ntt_peak = if schoolbook { 8 * m } else { mul_words_local_peak(wa as usize, wb as usize).ok_or_else(ovf)? };
     let emit_peak = reply.checked_add(32 * ws + 64).ok_or_else(ovf)?;
     let sized = (8 * m).checked_add(ntt_peak.max(emit_peak)).ok_or_else(ovf)?;
     let peak = r.checked_add(sized).and_then(|x| x.checked_add((1u64 << 20).max(sized / 16))).ok_or_else(ovf)?;
@@ -135,6 +197,7 @@ pub fn admit(a: &Csv, b: &Csv, r: u64, caps: &Caps) -> Result<Option<Plan>, Stri
         slot,
         wa: wa as usize,
         wb: wb as usize,
+        schoolbook,
         terms: terms as usize,
         admitted: Admitted { beta: slot, primes: 0, work, peak, reply },
     }))
@@ -333,7 +396,7 @@ pub struct Product {
 pub fn product(a: &Csv, b: &Csv, plan: &Plan) -> Product {
     let (x, nx) = pack(a, plan.slot, plan.wa);
     let (y, ny) = pack(b, plan.slot, plan.wb);
-    let z = mul_words_local(&x, &y);
+    let z = if plan.schoolbook { mul_words_schoolbook(&x, &y) } else { mul_words_local(&x, &y) };
     Product { z, negative: nx != ny }
 }
 

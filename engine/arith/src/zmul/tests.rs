@@ -1,4 +1,5 @@
 use super::*;
+use sagebrush_bigint::ntt::mul_words_local;
 use crate::zpoly;
 use num_traits::{One, Signed, Zero};
 use sagebrush_bigint::BigInt;
@@ -88,7 +89,8 @@ fn products_match_zpoly_mul_within_their_work() {
         let p = plan.unwrap();
         // the counted loops (packing, unpacking) plus the word product's
         // proven bound (bigint's own tests count it) are within the admitted work
-        let ntt = mul_words_local_work(p.wa, p.wb).unwrap();
+        // (the schoolbook is counted with the rest; the NTT by bigint's own tests)
+        let ntt = if p.schoolbook { 0 } else { mul_words_local_work(p.wa, p.wb).unwrap() };
         assert!(counted + ntt <= p.admitted.work, "{}x{}: {} + {} > {}", la, lb, counted, ntt, p.admitted.work);
     }
 }
@@ -215,6 +217,56 @@ fn large_admitted_shapes_fit_the_work_and_memory_caps() {
             Ok(Some(p)) => assert!(p.admitted.work <= WORK_MAX && p.admitted.peak <= PEAK_MAX),
             Ok(None) => panic!("not a zero product"),
             Err(e) => assert!(e.contains("a smaller product per call"), "{}", e),
+        }
+    }
+}
+
+#[test]
+fn the_schoolbook_and_the_ntt_agree_around_the_threshold() {
+    let mut s = 0xabcdu64;
+    let t = SCHOOLBOOK_WORDS as usize;
+    let long: Vec<BigInt> = (0..3000).map(|_| coef(&mut s, 64)).collect();
+    for target in [t - 1, t, t + 1] {
+        // (the slot depends on the shorter length; find the short factor whose
+        // packed size is the target exactly)
+        let long_text = hexs(&long);
+        let mut found = None;
+        // (the slot moves with the short factor's coefficient size: search
+        // lengths and sizes for the target exactly)
+        'search: for bits in (1..=16u64).rev().map(|d| 4 * d) {
+          for l in 1..400usize {
+            // (each coefficient exactly `bits` bits: the top bit set)
+            let short: Vec<BigInt> = (0..l).map(|_| (BigInt::one() << (bits - 1) as usize) + coef(&mut s, bits - 1).abs()).collect();
+            let short_text = hexs(&short);
+            let (ca, cb) = (scan(&long_text).unwrap(), scan(&short_text).unwrap());
+            let p = admit(&ca, &cb, (long_text.len() + short_text.len() + 32) as u64, &CAPS).unwrap().unwrap();
+            if p.wb == target {
+                found = Some((short, short_text, p));
+                break 'search;
+            }
+            if p.wb > target {
+                break;
+            }
+          }
+        }
+        let (short, short_text, p) = found.unwrap_or_else(|| panic!("no short factor packs to {} words", target));
+        assert_eq!(p.schoolbook, target <= t, "{} words: schoolbook {}", target, p.schoolbook);
+        let (ca, cb) = (scan(&long_text).unwrap(), scan(&short_text).unwrap());
+        counted::take();
+        let mut out = String::new();
+        mul(&ca, &cb, &p, &mut out).unwrap();
+        let counted = counted::take();
+        assert_eq!(parse(&out), zpoly::mul(&long, &short), "{} words", target);
+        // both backends give the same words
+        let (x, _) = pack(&ca, p.slot, p.wa);
+        let (y, _) = pack(&cb, p.slot, p.wb);
+        assert_eq!(mul_words_schoolbook(&x, &y), mul_words_local(&x, &y), "{} words", target);
+        // the schoolbook's count is exactly its closed form's
+        if p.schoolbook {
+            assert!(counted <= p.admitted.work, "{} words: {} > {}", target, counted, p.admitted.work);
+            counted::take();
+            let _ = mul_words_schoolbook(&x, &y);
+            assert_eq!(counted::take(), schoolbook_work(x.len(), y.len()).unwrap());
         }
     }
 }

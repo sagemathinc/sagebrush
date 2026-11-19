@@ -80,6 +80,9 @@ fn peaks_within_the_admitted_bounds() {
         // per output bit), unbalanced, and huge coefficients
         ("poly_mul 2^19 x 2^19 one-digit", format!(r#"{{"fn":"poly_mul","a":"{}","b":"{}"}}"#, list(1 << 19, "f"), list(1 << 19, "-f"))),
         ("poly_mul 2^12 x 4, 64 x 4096 bits", format!(r#"{{"fn":"poly_mul","a":"{}","b":"{}"}}"#, list(1 << 12, &"9".repeat(16)), list(4, &big))),
+        // the word schoolbook at its threshold: the longest factor times a short
+        // one of exactly 128 packed words (no tables: operands, output and the reply)
+        ("poly_mul schoolbook 2^18 x 105, one-digit x 64 bits (128 words)", format!(r#"{{"fn":"poly_mul","a":"{}","b":"{}"}}"#, list(1 << 18, "7"), list(105, &"9".repeat(16)))),
         ("poly_mul 2^8 x 2^8, 2^14 bits", format!(r#"{{"fn":"poly_mul","a":"{}","b":"{}"}}"#, list(1 << 8, &"d".repeat(1 << 12)), list(1 << 8, &format!("-{}", "e".repeat(1 << 12))))),
     ];
     for (what, req) in &cases {
