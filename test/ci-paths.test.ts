@@ -216,7 +216,7 @@ test("the WebKit job: its inputs on pull requests, never master pushes, always n
   assert.equal(run("workflow_dispatch", "refs/heads/master", ""), "true");
 });
 
-test("the engine's full passes: master pushes, a pull request that rebuilds the engine, and the long tier; not another pull request, a label or a plain dispatch", () => {
+test("the engine's full passes: master and track pushes, a pull request that rebuilds the engine, and the long tier; not another pull request, a label or a plain dispatch", () => {
   // (a pull request whose changes rebuild the engine (wasm_build): its fresh engine may differ from the published pin)
   for (const f of ["engine/poly/src/lib.rs", "wasm/pins.json", "Cargo.lock", "scripts/build-mp.mjs", ".github/actions/wasm-modules/action.yml", ".github/workflows/ci.yml"]) {
     const o = classify([f]);
@@ -246,13 +246,47 @@ test("the engine's full passes: master pushes, a pull request that rebuilds the 
     writeFileSync(list, files);
     const r = spawnSync(process.execPath, [script], { encoding: "utf8", env: { ...process.env, CI_PATHS_FILES: list, GITHUB_EVENT_NAME: event, GITHUB_REF: ref, CI_LONG: "", ...env } });
     assert.equal(r.status, 0, r.stderr);
-    return /^engine_full=(\w+)$/m.exec(r.stdout)?.[1];
+    return Object.fromEntries(r.stdout.trim().split("\n").map((line) => line.split("=") as [string, string]));
   };
-  assert.equal(run("push", "refs/heads/master", "README.md\n"), "true");
-  assert.equal(run("schedule", "refs/heads/master", ""), "true");
-  assert.equal(run("workflow_dispatch", "refs/heads/master", "", { CI_LONG: "true" }), "true");
-  assert.equal(run("workflow_dispatch", "refs/heads/master", ""), "false");
-  assert.equal(run("workflow_dispatch", "refs/heads/master", "", { CI_LONG: "false" }), "false");
+  assert.equal(run("push", "refs/heads/master", "README.md\n").engine_full, "true");
+  const trackEngine = run("push", "refs/heads/track/math", "engine/poly/src/lib.rs\n");
+  assert.equal(trackEngine.full, "true");
+  assert.equal(trackEngine.engine_full, "true");
+  assert.equal(run("schedule", "refs/heads/master", "").engine_full, "true");
+  assert.equal(run("workflow_dispatch", "refs/heads/master", "", { CI_LONG: "true" }).engine_full, "true");
+  assert.equal(run("workflow_dispatch", "refs/heads/master", "").engine_full, "false");
+  assert.equal(run("workflow_dispatch", "refs/heads/master", "", { CI_LONG: "false" }).engine_full, "false");
+});
+
+test("track pushes have master integration parity, including after a superseded engine push", () => {
+  const run = (ref: string, files: string) => {
+    const list = join(dir, "files.txt");
+    writeFileSync(list, files);
+    const r = spawnSync(process.execPath, [script], { encoding: "utf8", env: {
+      ...process.env, CI_PATHS_FILES: list, GITHUB_EVENT_NAME: "push", GITHUB_REF: ref, CI_LONG: "",
+    } });
+    assert.equal(r.status, 0, r.stderr);
+    return Object.fromEntries(r.stdout.trim().split("\n").map((line) => line.split("=") as [string, string]));
+  };
+  for (const files of ["engine/poly/src/lib.rs\n", "README.md\n", "src/runtime/ops.ts\n"]) {
+    const master = run("refs/heads/master", files);
+    const track = run("refs/heads/track/math", files);
+    for (const key of ["full", "engine_full", "size_inputs", "web_runner", "wasm_build", "docs_only", "long"])
+      assert.equal(track[key], master[key], `${files.trim()}: ${key}`);
+    assert.equal(track.full, "true", files.trim());
+    assert.equal(track.engine_full, "true", files.trim());
+    assert.equal(track.long, "false", files.trim());
+  }
+  // Replay only the current, docs-only follow-up after an engine push whose queued run was superseded. It must not
+  // need the earlier path list: all non-PR runs build wasm, and track integration remains master-like and full.
+  const followup = run("refs/heads/track/math", "design/tracks.md\n");
+  assert.equal(followup.full, "true");
+  assert.equal(followup.engine_full, "true");
+  assert.equal(followup.size_inputs, "false");
+  assert.equal(followup.web_runner, "true");
+  assert.equal(followup.wasm_build, "true");
+  assert.equal(followup.docs_only, "false");
+  assert.equal(followup.long, "false");
 });
 
 test("the long tier: the nightly schedule and a dispatch with long set; never a pull request (any label or path), a master push or a plain dispatch", () => {
@@ -712,8 +746,10 @@ test("wasm_build: what the modules are built from or handled by builds them on a
     assert.equal(build([f]), "true", f);
   }
   for (const f of ["lib/_sage_ffmat.py", "web/notebook/index.ts", "design/notes.md", "src/runtime/engine.ts"]) assert.equal(build([f]), "false", f);
-  // (a master push publishes its own build, and a push whose run was replaced can hide an engine change from the next)
+  // (a master or track push publishes its own build, and a push whose run was replaced can hide an engine change
+  // from the next)
   assert.equal(build(["lib/_sage_ffmat.py"], { GITHUB_EVENT_NAME: "push", GITHUB_REF: "refs/heads/master" }), "true");
+  assert.equal(build(["lib/_sage_ffmat.py"], { GITHUB_EVENT_NAME: "push", GITHUB_REF: "refs/heads/track/math" }), "true");
   assert.equal(build([], { GITHUB_EVENT_NAME: "workflow_dispatch", GITHUB_REF: "refs/heads/master" }), "true");
   assert.equal(build([], { GITHUB_EVENT_NAME: "schedule", GITHUB_REF: "refs/heads/master" }), "true");
 });
