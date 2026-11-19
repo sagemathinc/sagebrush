@@ -411,7 +411,7 @@ const outputs = {
   unsafe_sweep: unsafeSweep,
   slow_tests: slowTests,
   slow_scope: slowScope,
-  // (the growth gate's own inputs: never docs-only, plan-growth-budget-r5 §1.5)
+  // (the size comparison's own inputs: never docs-only)
   // (a dispatch or a schedule has no file list: its gate always runs on the measurement, never docs-only)
   // (on a track the engine ships as built, not as pinned (scripts/pin-policy.mjs), so an engine source moves the
   // measured bytes there and is a gate input too)
