@@ -1,5 +1,5 @@
 [package]
-name = "magma-scoreboard-flint"
+name = "bench-core-flint"
 version = "0.1.0"
 edition = "2021"
 publish = false
@@ -7,3 +7,6 @@ publish = false
 [dependencies]
 sagebrush-bigint = { path = "../../../engine/bigint" }
 sagebrush-flint = { path = "../../../engine/flint" }
+
+# (its own workspace: never a member of engine/'s, so never in a shipped build)
+[workspace]

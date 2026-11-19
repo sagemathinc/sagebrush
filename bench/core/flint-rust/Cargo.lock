@@ -9,6 +9,14 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "f2032f911046de80f0a198e0901378627c33f59ea0ac00e363d481118bd70a53"
 
 [[package]]
+name = "bench-core-flint"
+version = "0.1.0"
+dependencies = [
+ "sagebrush-bigint",
+ "sagebrush-flint",
+]
+
+[[package]]
 name = "cfg-if"
 version = "1.0.5"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -17,8 +25,7 @@ checksum = "4e7648175b45a9a48536d676f68d918270699102aa8dab5496df06904c914600"
 [[package]]
 name = "dashu-base"
 version = "0.6.1"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "861a614e79388a4c72aa66b0bdabc91e3a4f30d53e0c8d962953e207d75884d0"
+source = "git+https://github.com/sagemathinc/dashu?rev=2ebb9357c86b14e6d0a7a8e6d4d3c5f162ed164f#2ebb9357c86b14e6d0a7a8e6d4d3c5f162ed164f"
 dependencies = [
  "num-modular",
 ]
@@ -26,8 +33,7 @@ dependencies = [
 [[package]]
 name = "dashu-int"
 version = "0.6.2"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "64a0490b40a6a3f6427970035f17f76fd59c01d3cd9f9140809672863a0d64c8"
+source = "git+https://github.com/sagemathinc/dashu?rev=2ebb9357c86b14e6d0a7a8e6d4d3c5f162ed164f#2ebb9357c86b14e6d0a7a8e6d4d3c5f162ed164f"
 dependencies = [
  "cfg-if",
  "dashu-base",
@@ -41,14 +47,6 @@ name = "libc"
 version = "0.2.191"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "65cd87c9a6d60536580b316ad985726104730a5151c99845f2490428ef91240a"
-
-[[package]]
-name = "magma-scoreboard-flint"
-version = "0.1.0"
-dependencies = [
- "sagebrush-bigint",
- "sagebrush-flint",
-]
 
 [[package]]
 name = "num-bigint"
