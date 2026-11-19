@@ -3080,6 +3080,48 @@ try {
     await sleep(1500);
     const onOpen = { runner: requests.slice(n0).filter((u) => /\/runner\/|sagebrush-worker\.js/.test(u)), frames: await ev(`document.querySelectorAll("iframe[sandbox]").length`), results: await resultsOf("/t/run.tex"), chips: await ev(`document.querySelectorAll(".tex-preview .sagechip").length`) };
     check(onOpen.runner.length === 0 && onOpen.frames === 0 && onOpen.results === null && onOpen.chips >= 2, "Run: nothing runs on open (no runner, no worker, no results file; the items show as not run)", onOpen);
+    // embedded (?embed=1: the Agents page's pane frames the editor; the page's frame-ancestors 'self' admits this site's
+    // own frames only): the document alone, no Files, home, title, File menu, Agent or Share, no pairing of its own (the
+    // agent chunk never fetched, though this browser remembers a grant), and the pane's may-close answered by the
+    // frame's leave guard: at once with nothing pending, and only once a held write is written
+    {
+      const hdr = await ev(`fetch("/").then((r) => ({ csp: r.headers.get("content-security-policy") ?? "", xfo: r.headers.get("x-frame-options") }))`);
+      check(/frame-ancestors 'self'/.test(hdr.csp) && hdr.xfo === "SAMEORIGIN", "embed: the editor's page may be framed by this site's own pages only (frame-ancestors 'self', X-Frame-Options SAMEORIGIN)", hdr);
+      const fe = await mk("/t/embed.tex", enc("\\documentclass{article}\n\\begin{document}\nEmbedded.\n\\end{document}\n"));
+      // (a grant this browser remembers: put through the editor page's own workspace, the test build's __sbTexWs)
+      await ev(`window.__sbTexWs.putAgentGrant("embedtest", { id: "embedtest", folders: ["/"], write: true, run: true, expires: null })`);
+      await go(base + "?latex=1"); await until(`!!${W}`, 60000);
+      const n0 = requests.length;
+      await ev(`(() => { const f = document.createElement("iframe"); f.id = "sbembed"; f.style.cssText = "position:fixed;left:0;top:0;width:1000px;height:700px;z-index:99999;border:0;background:#fff"; f.src = "/?tex=${fe}&latex=1&embed=1"; document.body.append(f); return true; })()`);
+      const D = `document.getElementById("sbembed").contentDocument`;
+      await until(`!!${D}?.querySelector(".tex-page .tex-preview")?.textContent.includes("Embedded")`, 30000);
+      await sleep(1500);
+      const st = await ev(`(() => { const d = ${D}; const gone = (c) => { const e = d.querySelector(c); return !e || e.hidden || getComputedStyle(e).display === "none"; };
+        return { view: d.querySelector(".tex-page").dataset.view, back: gone(".tex-back"), home: gone(".tex-home"), title: gone(".tex-title"), file: gone(".tex-filebtn"), agent: gone(".tex-agent"), share: gone(".tex-sharebtn"),
+          left: d.querySelector(".tex-page").getBoundingClientRect().left, focusInside: document.activeElement?.id === "sbembed" }; })()`);
+      const agentFetched = requests.slice(n0).filter((u) => /sagebrush-latex-agent/.test(u));
+      check(st.view === "pdf" && st.back && st.home && st.title && st.file && st.agent && st.share && st.left === 0 && !st.focusInside && agentFetched.length === 0,
+        "embed: the frame shows the document alone, without Files, home, title, File, Agent or Share, takes no focus, and starts no pairing (no agent chunk, a grant remembered)", { st, agentFetched });
+      const ask = (id) => ev(`new Promise((res) => { const f = document.getElementById("sbembed"); const h = (e) => { if (e.source === f.contentWindow && e.data?.t === "may-close" && e.data.id === ${JSON.stringify(id)}) { removeEventListener("message", h); res(e.data); } }; addEventListener("message", h); f.contentWindow.postMessage({ t: "may-close", id: ${JSON.stringify(id)} }, location.origin); setTimeout(() => res(null), 15000); })`);
+      const a1 = await ask("q1");
+      check(a1?.ok === true, "embed: the pane's may-close, nothing pending: answered ok at once", a1);
+      // (a held write: typed in the frame's source, the answer waits for it, then ok)
+      const F = `document.getElementById("sbembed").contentWindow`;
+      await ev(`(() => { const w = ${F}; w.__hold = new Promise((r) => (w.__rel = r)); w.__sbTexSaveWrite = () => w.__hold; w.document.querySelector('.tex-view [data-view="source"]').click(); const t = w.document.querySelector(".tex-src"); t.focus(); t.setRangeText(" Typed.", t.value.length, t.value.length, "end"); t.dispatchEvent(new Event("input", { bubbles: true })); return true; })()`);
+      await sleep(1200);
+      let a2 = null;
+      const p2 = ask("q2").then((r) => (a2 = r));
+      await sleep(2500);
+      const early = a2;
+      await ev(`(${F}.__rel(), delete ${F}.__sbTexSaveWrite, true)`);
+      await p2;
+      const bytes = await ev(`${W}.read("/t/embed.tex").then((r) => new TextDecoder().decode(r.content))`);
+      check(early === null && a2?.ok === true && /Typed\./.test(bytes), "embed: with a write held, the may-close answer waits for it, then ok, the edit in the file", { early, a2, bytes: bytes.slice(-40) });
+      await ev(`(document.getElementById("sbembed").remove(), true)`);
+      await open(fr);
+      await until(`!!window.__sbTexWs`, 20000);
+      await ev(`window.__sbTexWs.putAgentGrant("embedtest", null)`);
+    }
     // (Run's code is a chunk of its own, /sagebrush-latex-run.js (daybreak2, #551's group cap): not fetched by the editor's
     //  load or by any document opened so far, Run shown or not; the first Run fetches it once, later Runs not again)
     const runChunk = () => byId.filter((x) => /\/sagebrush-latex-run\.js(\?|$)/.test(x.url));
