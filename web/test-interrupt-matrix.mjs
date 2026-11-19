@@ -350,12 +350,18 @@ async function calibrate(host, c) {
   return { s, T: null, attempts, error: "uncalibrated" + (lo != null && hi != null ? ` (the band lies between s = ${lo} and s = ${hi})` : "") };
 }
 
+// the CI set (r5 §8) per host: everything else is VM-only
+const CI_SET = {
+  prompt: ["P1", "E2", "E9n"],
+  cli: ["P1", "P2a", "E2", "E3a", "E6a", "M1o", "M1l", "L1c", "M2b", "E9n"],
+};
+const inCi = (host, c) => (CI_SET[host] ?? []).includes(c.id) && (!c.hosts || c.hosts.includes(host));
+
 async function runHost(host) {
   const rows = [];
   for (const c of CASES) {
     if (c.hosts && !c.hosts.includes(host)) continue; // (a case's own hosts, e.g. E13g: the CLI)
-    // the CI set (r5 §8): the CLI's five rows, the prompt's two; everything else is VM-only
-    if (MODE === "ci" && !(host === "prompt" ? ["P1", "E2"] : ["P1", "P2a", "E2", "E3a", "E6a", "M1o", "M1l", "L1c", "M2b"]).includes(c.id)) continue;
+    if (MODE === "ci" && !inCi(host, c)) continue;
     if (overBudget()) {
       rows.push({ case: c.id, host, mode: c.mode, outcome: "INVALID", why: "run budget spent" });
       record(rows.at(-1));
@@ -471,6 +477,27 @@ if (MODE === "ci" && HOSTS.includes("cli") && (!ROWS || ROWS.split(",").includes
   out.hosts.cli.push({ case: "L1c", host: "cli", outcome: "FAIL", why: "leak control: its row is missing from the CI run" });
   record(out.hosts.cli.at(-1));
 }
+// every case selected for a host in --ci must have produced a row there (no empty success), and a
+// row asked for with --rows must be in the CI set of a selected host
+if (MODE === "ci") {
+  const ran = HOSTS.filter((h) => h !== "browser" && Array.isArray(out.hosts[h]));
+  for (const h of ran) {
+    for (const c of CASES.filter((x) => inCi(h, x))) {
+      if (!out.hosts[h].some((r) => r.case === c.id)) {
+        out.hosts[h].push({ case: c.id, host: h, outcome: "FAIL", why: "selected for the CI run on this host, but it produced no row" });
+        record(out.hosts[h].at(-1));
+      }
+    }
+  }
+  for (const id of ROWS ? ROWS.split(",") : []) {
+    const c = CASES.find((x) => x.id === id);
+    if (!c || !ran.some((h) => inCi(h, c))) {
+      const row = { case: id, host: "*", outcome: "FAIL", why: c ? "asked for with --rows, but in the CI set of no selected host" : "asked for with --rows, but no such case" };
+      (out.selection_rows ??= []).push(row);
+      record(row);
+    }
+  }
+}
 // the waiver registry: a malformed record fails the run; a record no row of this run matched, or whose row
 // now passes, is reported (a stale waiver never hides)
 out.waiver_rows = waiverErrors(WAIVERS).map((e) => ({ case: "*", host: "*", outcome: "FAIL", why: "waiver registry: " + e }));
@@ -493,7 +520,7 @@ console.log("wrote", OUT, "in", out.wall_ms, "ms");
 // row (INCOMPLETE; INVALID: uncalibrated or out of budget), or a FIXED baseline row (remove its
 // entry from web/interrupt-baseline.json in the same change)
 const rowsOf = (h, v) => (Array.isArray(v) ? v : v?.rows?.length ? v.rows : [{ case: "*", host: h, outcome: "INVALID", why: v?.skipped ?? v?.error ?? "no rows" }]);
-const all = [...Object.entries(out.hosts).flatMap(([h, v]) => rowsOf(h, v)), ...(out.signals ?? []), ...out.waiver_rows];
+const all = [...Object.entries(out.hosts).flatMap(([h, v]) => rowsOf(h, v)), ...(out.signals ?? []), ...out.waiver_rows, ...(out.selection_rows ?? [])];
 // (WAIVED is not a pass: listed on its own, with its record)
 for (const r of all.filter((x) => x.outcome === "WAIVED")) console.log("WAIVED", r.case ?? r.trial, r.host ?? "", r.waiver, r.why ?? "");
 const bad = ciFailing(all);

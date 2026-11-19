@@ -3,8 +3,9 @@
 //! about p times the Sturm bound): the longest wall time between two Stop
 //! checks, and between two polls of the WebAssembly host as the interrupt
 //! crate's test hooks simulate them (every check_coarse, every 1024th
-//! check), on one thread as in WebAssembly.  One test: the hooks are
-//! global.
+//! check), on one thread as in WebAssembly.  One test, its parts run one
+//! after another: the hooks are global, so two tests would measure each
+//! other.
 
 use sagebrush_interrupt::hooks;
 use sagebrush_modsym::general::Character;
@@ -12,7 +13,13 @@ use sagebrush_modsym::newspace::newspace_orbits;
 use sagebrush_modsym::traces::{labelled_orbits, trace_coefficient_bound};
 
 #[test]
-fn newforms_trace_bound_poll_gap() {
+fn newforms_poll_gaps() {
+    trace_forms_poll_gap();
+    trace_coefficient_bound_poll_gap();
+}
+
+/// labelled_orbits(389.4) to bound 6000: every gap within the Stop bound.
+fn trace_forms_poll_gap() {
     // WebAssembly runs on one thread
     std::env::set_var("SAGEBRUSH_THREADS", "1");
     let factor = |f: &[sagebrush_bigint::BigInt]| sagebrush_poly::factor(f).1;
@@ -39,7 +46,7 @@ fn newforms_trace_bound_poll_gap() {
     assert!(poll <= 250_000_000, "{:.2} ms between two host polls, past the 250 ms Stop bound", poll as f64 / 1e6);
 }
 
-#[test]
+/// The CRT bound's own loops at bound 100000, and its value.
 fn trace_coefficient_bound_poll_gap() {
     // the CRT modulus's bound alone, at a bound hecke_matrix(p) reaches
     // (before its sieve this was O(bound^2) without a Stop check); and
