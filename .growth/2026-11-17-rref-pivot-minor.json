@@ -1,8 +1,0 @@
-{
- "v": 1,
- "reason": "The multimodular reduced echelon form (engine/arith zmat::rref_multimodular) takes the pivot minor's determinant modulo each prime from that prime's own elimination (nmod_mat::rref_rows: the pivot rows and the product of the pivots), instead of a second elimination per prime. The engine module is lazy, loaded only by Sage mode. Its build with CI's path mapping (the pin in wasm/pins.json): 7346128 -> 7347137 bytes (+1009), marked +64 over that. The command line embeds the engine as base64: built locally, cli/pyjs.cjs grows by 1344 B, and CI's rows have measured 8 to 36 B less than the local build for the previous engine changes; marked 1372, pending CI's size row.",
- "bytes": {
-  "engine/sagebrush-engine.wasm": 1073,
-  "cli/pyjs.cjs": 1372
- }
-}
