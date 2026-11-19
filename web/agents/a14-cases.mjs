@@ -11,6 +11,7 @@ import { mkdtempSync, rmSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { devtoolsPort } from "../test-port.mjs";
+import { deadline, waitFor, WAIT_MS } from "../test-deadline.mjs";
 
 const KEY = "sb-agent-reload-v1";
 const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
@@ -197,28 +198,41 @@ const SLOW_WS_OPEN = (ms, n = 1) => `(() => {
 const RECORD_KEYS = "agent,grant,leftAt,page,pairingId,port,session,v,workspace";
 
 // ---- a browser: one Chrome, its CDP over the browser socket, pages attached in flat sessions
-async function browser() {
+export async function browser() {
   const profile = mkdtempSync(join(tmpdir(), "sb-a14-"));
   const chrome = spawn(process.env.CHROME ?? "chromium", ["--headless", "--no-sandbox", "--disable-gpu", "--password-store=basic", "--remote-debugging-port=0", `--user-data-dir=${profile}`, "--window-size=1280,900", "about:blank"], { stdio: ["ignore", "ignore", "pipe"] });
-  const port = await devtoolsPort(profile, undefined, { child: chrome });
-  let ver;
-  for (let i = 0; i < 200 && !ver; i++) ver = await fetch(`http://127.0.0.1:${port}/json/version`).then((r) => r.json(), () => null) ?? (await sleep(100), null);
-  const ws = new WebSocket(ver.webSocketDebuggerUrl);
-  await new Promise((r) => (ws.onopen = r));
-  let n = 0;
-  const waiting = new Map(), handlers = new Set();
-  ws.onmessage = (e) => {
-    const m = JSON.parse(e.data);
-    if (m.id && waiting.has(m.id)) { waiting.get(m.id)(m.result ?? m.error); waiting.delete(m.id); }
-    else for (const h of handlers) h(m);
-  };
-  const B = { inputs: 0, handlers };
-  B.send = (method, params = {}, sessionId) => new Promise((r) => { const id = ++n; waiting.set(id, r); ws.send(JSON.stringify({ id, method, params, ...(sessionId ? { sessionId } : {}) })); });
-  B.attach = (targetId, o) => attach(B, targetId, o);
-  /** A new tab (about:blank), attached, with its scripts, ready to navigate. */
-  B.tab = async (o = {}) => B.attach((await B.send("Target.createTarget", { url: "about:blank" })).targetId, o);
-  B.close = async () => { try { ws.close(); } catch {} chrome.kill("SIGKILL"); await sleep(200); rmSync(profile, { recursive: true, force: true }); };
-  return B;
+  let ws;
+  try {
+    const port = await devtoolsPort(profile, undefined, { child: chrome });
+    const ver = await waitFor("A14.browser", "DevTools version", (_, signal) => fetch(`http://127.0.0.1:${port}/json/version`, { signal }).then((r) => r.json()));
+    ws = new WebSocket(ver.webSocketDebuggerUrl);
+    await deadline("A14.browser", "DevTools WebSocket open", () => new Promise((r, reject) => { ws.onopen = r; ws.onerror = () => reject(new Error("DevTools WebSocket failed")); }));
+    let n = 0;
+    const waiting = new Map(), handlers = new Set();
+    ws.onmessage = (e) => {
+      const m = JSON.parse(e.data);
+      if (m.id && waiting.has(m.id)) { waiting.get(m.id)(m.result ?? m.error); waiting.delete(m.id); }
+      else for (const h of handlers) h(m);
+    };
+    const B = { inputs: 0, handlers };
+    B.send = (method, params = {}, sessionId, ms = WAIT_MS) => {
+      const id = ++n;
+      return deadline("A14.send", `${method} ${params.expression ?? params.url ?? ""}`, () => new Promise((r) => {
+        waiting.set(id, r); ws.send(JSON.stringify({ id, method, params, ...(sessionId ? { sessionId } : {}) }));
+      }), ms).finally(() => waiting.delete(id));
+    };
+    B.attach = (targetId, o) => attach(B, targetId, o);
+    /** A new tab (about:blank), attached, with its scripts, ready to navigate. */
+    B.tab = async (o = {}) => B.attach((await B.send("Target.createTarget", { url: "about:blank" })).targetId, o);
+    B.close = async () => { try { ws.close(); } catch {} chrome.kill("SIGKILL"); await sleep(200); rmSync(profile, { recursive: true, force: true }); };
+    return B;
+  } catch (error) {
+    try { ws?.close(); } catch {}
+    chrome.kill("SIGKILL");
+    await sleep(200);
+    rmSync(profile, { recursive: true, force: true });
+    throw error;
+  }
 }
 
 async function attach(B, targetId, { clock = false } = {}) {
@@ -230,7 +244,7 @@ async function attach(B, targetId, { clock = false } = {}) {
     else if (m.method === "Runtime.consoleAPICalled") P.console.push(m.params.args.map((a) => a.value ?? a.description ?? "").join(" "));
     else if (m.method === "Runtime.exceptionThrown") P.errors.push((m.params.exceptionDetails.exception?.description ?? m.params.exceptionDetails.text).slice(0, 300));
   });
-  P.send = (method, params = {}) => { if (/^Input\./.test(method)) B.inputs++; return B.send(method, params, sessionId); };
+  P.send = (method, params = {}, ms) => { if (/^Input\./.test(method)) B.inputs++; return B.send(method, params, sessionId, ms); };
   await P.send("Page.enable");
   await P.send("Runtime.enable");
   await P.send("Emulation.setDeviceMetricsOverride", { width: 1280, height: 900, deviceScaleFactor: 1, mobile: false });
@@ -238,23 +252,21 @@ async function attach(B, targetId, { clock = false } = {}) {
   await P.send("Page.addScriptToEvaluateOnNewDocument", { source: WITNESS });
   // (the stage log only on request (A14_STAGES=1): it wraps the very calls it watches, so the default runs are unwrapped)
   if (process.env.A14_STAGES === "1") await P.send("Page.addScriptToEvaluateOnNewDocument", { source: STAGES });
-  P.ev = async (expression, o = {}) => {
-    const r = await P.send("Runtime.evaluate", { expression, awaitPromise: true, returnByValue: true, ...o });
+  P.ev = async (expression, o = {}, ms = WAIT_MS) => {
+    const r = await P.send("Runtime.evaluate", { expression, awaitPromise: true, returnByValue: true, ...o }, ms);
     if (r?.exceptionDetails) throw new Error(JSON.stringify(r.exceptionDetails).slice(0, 400));
     return r?.result?.value;
   };
   P.state = () => P.ev(`(async () => ({ href: location.href, readyState: document.readyState, bar: [document.querySelector('#conn-alert')?.textContent, document.querySelector('#conn-status')?.textContent, document.querySelector('#conn-act')?.hidden ? '' : document.querySelector('#conn-act')?.textContent].join(' | '), record: (() => { try { return sessionStorage.getItem(${JSON.stringify(KEY)}) !== null; } catch { return 'unreadable'; } })(), connect: document.querySelector('#connect')?.textContent ?? null, connectHidden: document.querySelector('#connect')?.hidden ?? null, wsError: document.querySelector('#ws-error')?.hidden === false ? document.querySelector('#ws-error-text')?.textContent : null, dialogs: [...document.querySelectorAll('.sbag-dlg h2')].map((h) => h.textContent), sinceLoad: Math.round(performance.now()), locks: await navigator.locks?.query?.().then((q) => ({ held: (q.held ?? []).map((l) => l.name + ':' + l.mode), pending: (q.pending ?? []).map((l) => l.name + ':' + l.mode) })).catch((e) => String(e)), dbs: await indexedDB.databases?.().then((d) => d.map((x) => x.name)).catch((e) => String(e)), stages: (window.__a14stages || []).slice(-40), idbProbe: await Promise.race([new Promise((res) => { try { const r = indexedDB.open('__a14probe_' + Date.now()); r.onsuccess = () => { r.result.close(); res('ok'); }; r.onerror = () => res('error: ' + (r.error?.name ?? '') + ' ' + (r.error?.message ?? '')); r.onblocked = () => res('blocked'); } catch (e) { res('threw: ' + e); } }), new Promise((res) => setTimeout(() => res('no answer in 5 s'), 5000))]), errors: undefined }))()`).then((s) => ({ ...s, errors: P.errors.slice(-3) }), (e) => ({ unreadable: String(e).slice(0, 200) }));
-  P.until = async (expr, ms = 15000) => {
+  P.until = async (expr, ms = WAIT_MS) => {
     const t = Date.now();
-    while (Date.now() - t < ms) { if (await P.ev(expr).catch(() => false)) return Date.now() - t; await sleep(50); }
-    throw new Error(`timeout (${ms / 1000} s): ${expr.slice(0, 160)}\n  the page then: ${JSON.stringify(await P.state())}`);
+    await waitFor("A14.until", expr, (remaining) => P.ev(expr, {}, remaining), ms);
+    return Date.now() - t;
   };
   P.load = async (go) => {
     const before = P.loads;
     await go();
-    const t = Date.now();
-    while (P.loads === before && Date.now() - t < 20000) await sleep(50);
-    if (P.loads === before) throw new Error("timeout (20 s): the load event\n  the page then: " + JSON.stringify(await P.state()));
+    await waitFor("A14.load", "page load event", () => P.loads !== before);
     await P.until(`document.readyState === 'complete' && !!document.querySelector('#editor .mb')`, 20000);
   };
   P.navigate = (url) => P.load(() => P.send("Page.navigate", { url }));

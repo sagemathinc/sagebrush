@@ -127,7 +127,10 @@ export const LATEX_LAZY_CAPS = {
   //  change merged: 53,150 / 18,263, + 64)
   // (53,304 / 18,358: Nov 19 2026, the reload record's handling with the agent's bar docked, master 4bcbb434: 53,240 /
   //  18,294 measured, + 64)
-  AGENT: { label: "the LaTeX agent pairing's chunk", raw: 53304, gzip: 18358 },
+  // (53,797 / 18,488: Nov 19 2026, for the bar's offer of a board an agent made ("<agent> made <name> · Open", Open
+  //  in a tab of its own, where its code runs), which every page's pairing carries. Measured locally on the toolchain
+  //  CI pins, merged with master 4bcbb434 (whose 53,150 / 18,263 it reproduces): 53,733 / 18,424, + 64)
+  AGENT: { label: "the LaTeX agent pairing's chunk", raw: 53797, gzip: 18488 },
   // (the agent tools' work: web/latex/tools.ts, latex_check's report and latex_render's pictures, on an agent's first call)
   // (16,546 / 6,950: Nov 11 2026: latex_build's own code (build.ts, the
   //  engine driven from a snapshot, and the pages' fit) here, out of the eager group, its shared rules handed in by the
