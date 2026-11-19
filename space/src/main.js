@@ -327,11 +327,14 @@ function positionsOf(nodes, edges, d) {
   return { P: layout(nodes.map((n) => ({ ...n, position: n[key] })), edges, { dims: d, spacing }), laid: true };
 }
 
-async function load(name) {
+// (`data`: the space itself, as the page around an embedded one sends it; `again`: the same space written again (by
+//  an agent), so the camera, the selection and Back stay as they are)
+async function load(name, data = null, again = false) {
   $("#status").textContent = "loading " + name + "…";
-  const r = await fetch(name);
-  space = await r.json();
-  if (space.format !== "sagebrush-space") throw new Error(name + " is not a sagebrush-space");
+  const next = data ?? (await (await fetch(name)).json());
+  if (next?.format !== "sagebrush-space" || !Array.isArray(next.nodes)) throw new Error(name + " is not a sagebrush-space");
+  const view = again && space ? { pos: camera.position.clone(), target: controls.target.clone(), sel: selected } : null;
+  space = next;
   clear();
   const nodes = space.nodes, index = new Map(nodes.map((n, i) => [n.id, i]));
   restore(nodes);
@@ -355,13 +358,25 @@ async function load(name) {
   $("#dims").textContent = "Flatten to 2D";
   place(P3);
   buildLandmarks();
-  history.length = 0; future.length = 0; selected = null; navButtons();
-  frame(P3);
+  selected = null;
+  if (view) {
+    frame(P3);
+    flight = null;
+    camera.position.copy(view.pos);
+    controls.target.copy(view.target);
+    const nd = view.sel === null ? null : nodes.find((n) => n.id === view.sel);
+    if (nd) { selected = nd.id; setGlow(nd, 0.4); }
+  } else {
+    history.length = 0; future.length = 0;
+    frame(P3);
+  }
+  navButtons();
   buildIndex();
   document.title = (space.title ?? name) + " · whitespace";
   $("#title").textContent = space.title ?? name;
   $("#status").textContent = `${nodes.length} objects, ${pairs.length} links · ${r3.laid ? "laid out in " + Math.round(performance.now() - t0) + " ms" : "at their saved places"}`;
-  closeOverlay();
+  if (!view || selected === null) closeOverlay();
+  else if (!$("#overlay").hidden) showOverlay(nodes.find((n) => n.id === selected));
 }
 
 // the camera: everything in view
@@ -505,7 +520,7 @@ function setSelected(id) {
   window.history.replaceState(null, "", location.pathname + location.search + (id === null ? "" : "#sel=" + encodeURIComponent(id)));
   const detail = selectionOf(id);
   dispatchEvent(new CustomEvent("whitespace:select", { detail }));
-  if (window.parent !== window) window.parent.postMessage({ sagebrush: "space-select", version: 1, selection: detail }, "*");
+  if (window.parent !== window) window.parent.postMessage({ sagebrush: "space-select", version: 1, selection: detail }, embedded ? location.origin : "*");
 }
 function selectionOf(id) {
   const nd = id === null ? null : space?.nodes.find((n) => n.id === id);
@@ -714,7 +729,28 @@ function search() {
 $("#q").addEventListener("input", search);
 
 // ---------------------------------------------------------------- which space
+// (?embed=1: shown in a frame by a page of this site (the agents chat's artifact pane), which sends the space, and
+//  again each time its file is written: {sagebrush: "space-load", version: 1, name, space}; the selection goes back
+//  to it as "space-select")
+const embedded = new URLSearchParams(location.search).has("embed") && window.parent !== window;
+function embed() {
+  document.body.classList.add("embed");
+  let current = null;
+  addEventListener("message", (e) => {
+    const m = e.data;
+    if (e.source !== window.parent || e.origin !== location.origin || m?.sagebrush !== "space-load" || m.version !== 1) return;
+    const name = String(m.name ?? "space");
+    const again = name === current;
+    if (!again) $("#space").innerHTML = `<option selected>${esc(name)}</option>`;
+    current = name;
+    load(name, m.space, again).then(() => {
+      if (!again && typeof m.selected === "string") setTimeout(() => window.whitespace.select(m.selected), 300);
+    }, fail);
+  });
+  window.parent.postMessage({ sagebrush: "space-ready", version: 1 }, location.origin);
+}
 async function start() {
+  if (embedded) return embed();
   const list = await (await fetch("spaces.json")).json().catch(() => []);
   const want = new URLSearchParams(location.search).get("space") ?? (list.includes("demo.space.json") ? "demo.space.json" : list[0]);
   const sel = $("#space");

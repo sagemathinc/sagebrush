@@ -289,6 +289,9 @@
   #artifacts .pane-body:has(> .pane-host:not([hidden]) .tex-host) { display: flex; flex-direction: column; }
   #artifacts .pane-body > .pane-host:not([hidden]):has(.tex-host) { flex: 1; min-height: 0; display: flex; flex-direction: column; }
   #artifacts .file-body:has(> .tex-host) { flex: 1; min-height: 0; }
+  #artifacts .pane-body:has(> .space-host:not([hidden])) { display: flex; flex-direction: column; overflow: hidden; }
+  #artifacts .pane-body > .space-host:not([hidden]) { flex: 1; min-height: 0; display: flex; flex-direction: column; overflow: hidden; }
+  .space-frame { flex: 1; min-height: 0; width: 100%; border: 0; display: block; background: #0e1116; }
   #artifacts .tex-host { height: 100%; }
 </style>
 </head>

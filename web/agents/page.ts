@@ -571,6 +571,12 @@ function mountHost(threadId: string, a: Artifact, h: Host) {
     keepFocus();
     return;
   }
+  // (a 3D space the agent wrote, a .space.json: shown in the whitespace viewer, which follows its file)
+  if (a.path && /\.space\.json$/i.test(a.path) && workspace) {
+    mountSpace(a.path, h);
+    keepFocus();
+    return;
+  }
   if (a.path && workspace) {
     h.el.innerHTML = `<div class="file-path">${esc(a.path)} <span class="saved"></span></div><div class="file-body"></div>`;
     const f = mountFile(a, $(".file-body", h.el), $(".saved", h.el));
@@ -589,6 +595,90 @@ function mountHost(threadId: string, a: Artifact, h: Host) {
     h.copy = () => d.after;
   } else h.el.innerHTML = `<pre class="code">${esc(a.body)}</pre>`;
   typeset(h.el);
+}
+
+// A space (space/README.md, the whitespace prototype): the viewer at /space/ in a frame, sent the file now and again
+// each time it is written (by the agent, or in another tab). What the person selects there is written to the file as
+// "selected" (an object's id, or null), so the agent reads it with the file; that write alone never redraws the space.
+function mountSpace(path: string, h: Host) {
+  const ws = workspace!;
+  const el = <K extends keyof HTMLElementTagNameMap>(tag: K, cls: string, text = "") => Object.assign(document.createElement(tag), { className: cls, textContent: text });
+  const head = el("div", "file-path", path + " "), saved = el("span", "saved");
+  head.append(saved);
+  const frame = el("iframe", "space-frame");
+  frame.src = "/space/?embed=1";
+  frame.title = "The space " + path;
+  frame.allow = "fullscreen";
+  h.el.replaceChildren(head, frame);
+  h.el.classList.add("space-host");
+  let alive = true, ready = false, rev = -1, fid: string | undefined, text = "", space: Record<string, unknown> | null = null, shown = "";
+  const say = (s: string) => alive && (saved.textContent = s);
+  const decode = (c: unknown) => (typeof c === "string" ? c : c instanceof Uint8Array ? new TextDecoder().decode(c) : JSON.stringify(c));
+  // (the space without its selection: what the viewer is sent again only when it changes)
+  const body = (s: Record<string, unknown>) => JSON.stringify({ ...s, selected: undefined });
+  const send = () => {
+    if (!alive || !ready || !space || body(space) === shown) return;
+    shown = body(space);
+    frame.contentWindow?.postMessage({ sagebrush: "space-load", version: 1, name: path, space, selected: space.selected ?? null }, location.origin);
+  };
+  const reread = async () => {
+    const r = await ws.read(path);
+    if (!alive || r.rev === rev) return;
+    rev = r.rev;
+    fid = (r.entry as { fid?: string }).fid;
+    text = decode(r.content);
+    try {
+      space = JSON.parse(text);
+      say("");
+    } catch (e) {
+      return say(`Not a space yet: ${(e as Error).message}`);
+    }
+    send();
+  };
+  void reread().catch((e) => say(`Couldn't read it: ${String((e as Error)?.message ?? e)}`));
+  const unwatch = ws.watch((c) => {
+    if (c.ops.some((o) => o.path === path || o.to === path)) void reread().catch(() => {});
+  });
+  // (the selection, written a moment after the last click, on the revision read: a conflict rereads and tries again)
+  let timer = 0, want: string | null = null;
+  const writeSelection = async (tries = 2): Promise<void> => {
+    if (!alive || !space || (space.selected ?? null) === want) return;
+    const next = { ...space, selected: want };
+    const value = JSON.stringify(next, null, 1);
+    try {
+      const r = await ws.write(path, value, { base: rev, ...(fid ? { fid } : {}) });
+      rev = r.rev;
+      text = value;
+      space = next;
+    } catch (e) {
+      if ((e as { code?: string }).code === "conflict" && tries > 1) {
+        await reread();
+        return writeSelection(tries - 1);
+      }
+      say(`Selection not saved: ${(e as Error).message}`);
+    }
+  };
+  const onMessage = (e: MessageEvent) => {
+    const m = e.data;
+    if (e.source !== frame.contentWindow || e.origin !== location.origin || m?.version !== 1) return;
+    if (m.sagebrush === "space-ready") {
+      ready = true;
+      shown = "";
+      send();
+    } else if (m.sagebrush === "space-select") {
+      want = typeof m.selection?.id === "string" ? m.selection.id : null;
+      clearTimeout(timer);
+      timer = window.setTimeout(() => void writeSelection(), 500);
+    }
+  };
+  addEventListener("message", onMessage);
+  h.copy = () => text;
+  h.dispose = async () => {
+    alive = false;
+    clearTimeout(timer);
+    unwatch();
+    removeEventListener("message", onMessage);
+  };
 }
 
 // An artifact that is a workspace file: the file itself, editable here (saved as the person, with its revision as

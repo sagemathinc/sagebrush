@@ -43,6 +43,35 @@ In `web-tree.space.json` (Sagebrush's own web/ code: 513 files and 1,009 imports
 
 Click a sample, change it, and press Shift+Enter. `node gen-modular.mjs` makes this space again.
 
+## In the agents chat
+
+The chat on the left, the space on the right: a file the agent writes whose name ends in `.space.json` opens beside the chat as a space. When the agent writes it again, the space changes in place (your camera and selection stay). When you click an object, its id is written into the file as `"selected"`, so the agent knows what you mean by "this". The format, written for agents, is [public/format.md](public/format.md) (on a built site, `/space/format.md`).
+
+Run the whole thing on your own computer (the agent pairs with a page on 127.0.0.1 through `--origin`):
+
+```sh
+git checkout space-prototype
+pnpm install --frozen-lockfile && node scripts/wasm-fetch.mjs   # the site's dependencies and its pinned WebAssembly
+bun web/build.ts                                                # the site, into web/dist (bun 1.4.4)
+(cd space && npm install && node build.mjs --site ../web/dist)  # the space viewer, into web/dist/space
+bun web/csp.ts                                                  # web/dist/_headers, now covering /space/
+python3 web/serve.py 8765                                       # http://127.0.0.1:8765/agents/
+```
+
+and in another terminal:
+
+```sh
+SAGEBRUSH_AGENT_PAGE=http://127.0.0.1:8765/agents/ npx -y https://agents.sagebrush.cloud/agents/sagebrush-agent-0.7.1.tgz --origin http://127.0.0.1:8765
+```
+
+Open the link it prints, press Connect, and Allow. Then ask, for example:
+
+> Read the space format at https://raw.githubusercontent.com/sagemathinc/sagebrush/space-prototype/space/public/format.md (all of it, verbatim). Then lay out in 3D the Rust code related to modular forms in Sagebrush (github.com/sagemathinc/sagebrush: engine/modsym, engine/hmf, engine/ap, engine/lfun) as /modular.space.json so I can browse it. Include some sample Sage code I can run illustrating what is implemented.
+
+Over this connection Claude has the web and your Sagebrush files, not your disk, so it reads the code from GitHub. A built site deployed anywhere works the same way: give that origin to `--origin` and its `/agents/` to `SAGEBRUSH_AGENT_PAGE`.
+
+`bun space/test-agents-space.mjs` (from the repository's root, after the build above) checks this end to end in headless Chromium, with a stand-in for the agent.
+
 ## Running code
 
 Code and plots edit and run on Sagebrush's own engine (Python, Sage, MATLAB, Magma), in your browser. A Sage 3D plot becomes the object in the space. The engine is fetched from sagebrush.space by `npm run serve` on the first Run (about 37 MB, then cached in `.cache/`). Edits are kept in this browser.
