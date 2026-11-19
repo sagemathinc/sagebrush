@@ -770,7 +770,7 @@
 // or reports the URL; the agent chunk, loaded later, is handed it)
 import { pairLink, adoptLink } from "./workspace/pair-link.ts";
 import { takeHandoff } from "./workspace/pair-handoff.ts";
-import { createdRunner } from "./workspace/agent-made.ts";
+import { createdRunner, runInputs } from "./workspace/agent-made.ts";
 // (a bare pairing link the board page handed over within this tab (pair-handoff.ts): this page's link, taken once, before
 // anything reads it; only when the address has no query and no hash)
 if (!pairLink() && !location.search && !location.hash) { const h = takeHandoff(location.pathname); if (h) adoptLink(h); }
