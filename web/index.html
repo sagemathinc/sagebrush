@@ -5098,8 +5098,9 @@ function agentOpen(ref, intent) {
 //   - in the notebook's own interpreter, the sandboxed runner with its write trees: none for a new notebook, so a write
 //     asks the person (Confinement phase 2), with Run's state, Stop and outputs as ever.
 const agentRunSpent = new Set();
-// (a value with its object keys sorted, so the same inputs always give the same text)
-const canon = (v) => Array.isArray(v) ? v.map(canon) : v && typeof v === "object" ? Object.fromEntries(Object.keys(v).sort().map((k) => [k, canon(v[k])])) : v ?? null;
+// (a value with its object keys sorted, so the same inputs always give the same text; a value left out stays left out
+//  and null stays null, as they differ: no pin is the current package set, a null pin turns optional packages off)
+const canon = (v) => Array.isArray(v) ? v.map(canon) : v && typeof v === "object" ? Object.fromEntries(Object.keys(v).sort().map((k) => [k, canon(v[k])])) : v;
 const runInputs = (doc) => JSON.stringify(canon({ mode: doc?.mode, pkgset: doc?.pkgset, seed: doc?.seed, autorun: doc?.autorun, metadata: doc?.metadata,
   cells: (doc?.cells ?? []).map((c) => ({ id: c.id, kind: c.type === "markdown" || c.type === "raw" ? c.type : "code", code: String(c.code ?? ""), metadata: c.metadata })) }));
 const CREATED_REV = 1;

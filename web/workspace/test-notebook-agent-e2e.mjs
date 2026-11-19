@@ -193,7 +193,7 @@ try {
   // offers Open for it. The person's edit typed just before, not yet saved, is kept in the notebook they left
   const typeInto = (from, to) => ev(`(() => { const t = [...document.querySelectorAll(".ed textarea")].find((t) => t.value === ${JSON.stringify(from)}); if (!t) return false; t.value = ${JSON.stringify(to)}; t.dispatchEvent(new Event("input", { bubbles: true })); return true; })()`);
   const barButton = (text) => `[...document.querySelectorAll(".sbag-bar button")].find((b) => b.textContent === ${JSON.stringify(text)})`;
-  const make = (name, cells) => drive({ op: "req", method: "workspace.create", params: { path: (folder === "/" ? "" : folder) + "/" + name + ".ipynb", mode: "python", content: { json: { cells: cells.map((code) => ({ code })) } } } });
+  const make = (name, cells, extra = {}) => drive({ op: "req", method: "workspace.create", params: { path: (folder === "/" ? "" : folder) + "/" + name + ".ipynb", mode: "python", content: { json: { ...extra, cells: cells.map((code) => ({ code })) } } } });
   const shownIs = (name) => `document.title.startsWith(${JSON.stringify(name)})`;
   const fromFiles = async (file) => {
     await ev(`(document.querySelector("#wssidebar")?.hidden && document.querySelector("#wsfilesbtn")?.click(), true)`);
@@ -316,6 +316,21 @@ try {
   await ev("(window.__release(), delete window.__agentRunHold, true)");
   await sleep(3000);
   ok(!(await ev(outOf(MANUAL))).includes("manual ran") && await ev(nOf(MANUAL)) === null, "a cell made manual before its run: it doesn't run by itself");
+  // (the package set's pin left out and a null pin differ (no pin: the current set; null: optional packages off): changed
+  //  either way while held before its run, no run)
+  for (const [name, created, then, what] of [["Pin set null", undefined, null, "no pin, then a null pin"], ["Pin left out", null, undefined, "a null pin, then none"]]) {
+    await ev(`(window.__agentRunHold = (path) => new Promise((r) => { window.__held = path; window.__release = r; }), true)`);
+    const PIN = `print('${name} ran')`;
+    const made = await make(name, [PIN], created === null ? { pkgset: null } : {});
+    ok(!!made.ok && await until(`window.__held === "/${name}.ipynb" && ${shownIs(name)}`, 15000), `(another, held before its run: ${what})`, made);
+    const has = await ev(`${W}.read("/${name}.ipynb").then((r) => "pkgset" in r.content ? r.content.pkgset : "absent")`);
+    if (created === null) ok(has === null, "(created with a null pin)", has); else ok(has === "absent", "(created with no pin)", has);
+    await ev(`(window.sagebrush.notebook.setMeta({ pkgset: ${then === null ? "null" : "undefined"} }), true)`);
+    ok(await ev(`(() => { const s = window.sagebrush.notebook.snapshot(); return ${then === null ? `s.pkgset === null` : `s.pkgset === undefined`}; })()`), `(the person's page changes the pin meanwhile: ${what})`);
+    await ev("(window.__release(), delete window.__agentRunHold, true)");
+    await until(`${outOf(PIN)}.includes("${name} ran")`, 8000);
+    ok(!(await ev(outOf(PIN))).includes(`${name} ran`) && await ev(nOf(PIN)) === null, `the package set's pin changed before its run (${what}): it doesn't run by itself`);
+  }
   // (bound to the creation's own revision, not its time: written again right after it was created, before the page read
   //  it back, it no longer qualifies, though its cells read back are what then runs)
   await ev(`(window.__agentReadHold = () => new Promise((r) => (window.__readGo = r)), true)`);
