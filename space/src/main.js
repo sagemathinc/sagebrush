@@ -648,8 +648,40 @@ try { const w = localStorage.getItem("whitespace:overlay-width"); if (w) $("#ove
 // full screen
 $("#fs").onclick = () => (document.fullscreenElement ? document.exitFullscreen() : document.documentElement.requestFullscreen()).catch(() => {});
 document.addEventListener("fullscreenchange", () => { $("#fs").textContent = document.fullscreenElement ? "Exit full screen" : "Full screen"; });
+// flying with the keyboard: W/S or Up/Down forward and back, A/D or Left/Right sideways, E/Q up and down (Shift:
+// faster), while held; the camera and what it looks at move together, so the view keeps its direction
+const held = new Set();
+const FLY = { w: [0, 0, 1], arrowup: [0, 0, 1], s: [0, 0, -1], arrowdown: [0, 0, -1], a: [-1, 0, 0], arrowleft: [-1, 0, 0],
+  d: [1, 0, 0], arrowright: [1, 0, 0], e: [0, 1, 0], q: [0, -1, 0] };
+const typing = () => /^(INPUT|TEXTAREA|SELECT)$/.test(document.activeElement?.tagName ?? "");
+addEventListener("keyup", (e) => held.delete(e.key.toLowerCase()));
+addEventListener("blur", () => held.clear());
+let lastFly = performance.now();
+function stepFly(now) {
+  const dt = Math.min(0.1, (now - lastFly) / 1000);
+  lastFly = now;
+  if (!held.size || typing()) return;
+  const fwd = new THREE.Vector3().subVectors(controls.target, camera.position);
+  const dist = Math.max(fwd.length(), 1e-6);
+  fwd.normalize();
+  const right = new THREE.Vector3().crossVectors(fwd, camera.up).normalize(), up = camera.up.clone().normalize();
+  const move = new THREE.Vector3();
+  for (const k of held) {
+    const v = FLY[k];
+    if (v) move.addScaledVector(right, v[0]).addScaledVector(up, v[1]).addScaledVector(fwd, v[2]);
+  }
+  if (!move.lengthSq()) return;
+  // (speed with the size of what is in view: slow up close, fast across the space)
+  const speed = Math.max(4, dist * 1.2) * (held.has("shift") ? 4 : 1);
+  move.normalize().multiplyScalar(speed * dt);
+  camera.position.add(move);
+  controls.target.add(move);
+  flight = null;
+}
 addEventListener("keydown", (e) => {
-  if (document.activeElement === $("#q")) { if (e.key === "Escape") $("#q").blur(); return; }
+  if (typing()) { if (e.key === "Escape") document.activeElement.blur(); return; }
+  const k = e.key.toLowerCase();
+  if (!e.altKey && !e.ctrlKey && !e.metaKey && (FLY[k] || k === "shift")) { held.add(k); if (FLY[k]) e.preventDefault(); return; }
   if (e.key === "Escape") closeOverlay();
   else if (e.key === "/") { e.preventDefault(); $("#q").focus(); }
   else if (e.key === "b" || e.key === "B" || e.key === "Backspace" || (e.altKey && e.key === "ArrowLeft")) back();
@@ -698,6 +730,7 @@ start().catch(fail);
 
 function tick(now) {
   stepFlight(now);
+  stepFly(now);
   stepMorph(now);
   controls.update();
   if (space) { stepZoom(); stepLandmarks(); }
