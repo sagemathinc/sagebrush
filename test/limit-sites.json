@@ -5719,6 +5719,157 @@
   "owner": "MATLAB numerical methods",
   "row": "inv-23"
  },
+ "lib/_matlab_json.py ::  :: MAX_CHARS = 1 << 22 #0": {
+  "class": "1",
+  "disposition": {
+   "1": "shared"
+  },
+  "owner": "MATLAB JSON (@sagebrush-matlab)",
+  "reason": "parser protection for untrusted JSON text: before parsing, jsondecode refuses over 2^22 characters, 2^18 values, 1000-digit numbers or 512 levels of nesting; integers are read as doubles"
+ },
+ "lib/_matlab_json.py ::  :: MAX_CHARS = min(MAX_CHARS, max(1, int(_os.environ.get(\"SAGEBRUSH_JSON_MAX_CHARS\", MAX_CHARS)))) #0": {
+  "class": "1",
+  "disposition": {
+   "1": "shared"
+  },
+  "owner": "MATLAB JSON (@sagebrush-matlab)",
+  "reason": "parser protection for untrusted JSON text: before parsing, jsondecode refuses over 2^22 characters, 2^18 values, 1000-digit numbers or 512 levels of nesting; integers are read as doubles"
+ },
+ "lib/_matlab_json.py ::  :: MAX_CHARS characters, then a loop over its brackets once their number is #0": {
+  "class": "1",
+  "disposition": {
+   "1": "shared"
+  },
+  "owner": "MATLAB JSON (@sagebrush-matlab)",
+  "reason": "parser protection for untrusted JSON text: before parsing, jsondecode refuses over 2^22 characters, 2^18 values, a 1000-digit run or 200 levels of nesting; integers are read as doubles"
+ },
+ "lib/_matlab_json.py ::  :: MAX_CHARS characters, with more than MAX_VALUES values, with a run of more #0": {
+  "class": "1",
+  "disposition": {
+   "1": "shared"
+  },
+  "owner": "MATLAB JSON (@sagebrush-matlab)",
+  "reason": "parser protection for untrusted JSON text: before parsing, jsondecode refuses over 2^22 characters, 2^18 values, a 1000-digit run or 200 levels of nesting; integers are read as doubles"
+ },
+ "lib/_matlab_json.py ::  :: MAX_DEPTH = 200 #0": {
+  "class": "1",
+  "disposition": {
+   "1": "shared"
+  },
+  "owner": "MATLAB JSON (@sagebrush-matlab)",
+  "reason": "parser protection for untrusted JSON text: before parsing, jsondecode refuses over 2^22 characters, 2^18 values, a 1000-digit run or 200 levels of nesting; integers are read as doubles"
+ },
+ "lib/_matlab_json.py ::  :: MAX_DIGITS = 1000 #0": {
+  "class": "1",
+  "disposition": {
+   "1": "shared"
+  },
+  "owner": "MATLAB JSON (@sagebrush-matlab)",
+  "reason": "parser protection for untrusted JSON text: before parsing, jsondecode refuses over 2^22 characters, 2^18 values, 1000-digit numbers or 512 levels of nesting; integers are read as doubles"
+ },
+ "lib/_matlab_json.py ::  :: MAX_VALUES = 1 << 18 #0": {
+  "class": "1",
+  "disposition": {
+   "1": "shared"
+  },
+  "owner": "MATLAB JSON (@sagebrush-matlab)",
+  "reason": "parser protection for untrusted JSON text: before parsing, jsondecode refuses over 2^22 characters, 2^18 values, 1000-digit numbers or 512 levels of nesting; integers are read as doubles"
+ },
+ "lib/_matlab_json.py ::  :: bounded by MAX_VALUES, which also bounds what parsing builds (each value a #0": {
+  "class": "1",
+  "disposition": {
+   "1": "shared"
+  },
+  "owner": "MATLAB JSON (@sagebrush-matlab)",
+  "reason": "parser protection for untrusted JSON text: before parsing, jsondecode refuses over 2^22 characters, 2^18 values, a 1000-digit run or 200 levels of nesting; integers are read as doubles"
+ },
+ "lib/_matlab_json.py ::  :: than MAX_DIGITS consecutive digits, or nested more than MAX_DEPTH deep. The #0": {
+  "class": "1",
+  "disposition": {
+   "1": "shared"
+  },
+  "owner": "MATLAB JSON (@sagebrush-matlab)",
+  "reason": "parser protection for untrusted JSON text: before parsing, jsondecode refuses over 2^22 characters, 2^18 values, a 1000-digit run or 200 levels of nesting; integers are read as doubles"
+ },
+ "lib/_matlab_json.py :: _admit :: if depth > MAX_DEPTH: #0": {
+  "class": "1",
+  "disposition": {
+   "1": "shared"
+  },
+  "owner": "MATLAB JSON (@sagebrush-matlab)",
+  "reason": "parser protection for untrusted JSON text: before parsing, jsondecode refuses over 2^22 characters, 2^18 values, 1000-digit numbers or 512 levels of nesting; integers are read as doubles"
+ },
+ "lib/_matlab_json.py :: _admit :: if re.search(r\"[0-9]{%d}\" % (MAX_DIGITS + 1), bare): #0": {
+  "class": "1",
+  "disposition": {
+   "1": "shared"
+  },
+  "owner": "MATLAB JSON (@sagebrush-matlab)",
+  "reason": "parser protection for untrusted JSON text: before parsing, jsondecode refuses over 2^22 characters, 2^18 values, 1000-digit numbers or 512 levels of nesting; integers are read as doubles"
+ },
+ "lib/_matlab_json.py :: _admit :: if values > MAX_VALUES: #0": {
+  "class": "1",
+  "disposition": {
+   "1": "shared"
+  },
+  "owner": "MATLAB JSON (@sagebrush-matlab)",
+  "reason": "parser protection for untrusted JSON text: before parsing, jsondecode refuses over 2^22 characters, 2^18 values, 1000-digit numbers or 512 levels of nesting; integers are read as doubles"
+ },
+ "lib/_matlab_json.py :: _admit :: raise _m._err(\"jsondecode: the JSON text has a run of more than %d consecutive digits.\" % MAX_DIGITS, \"MATLAB:jsondecode:TooLarge\") #0": {
+  "class": "1",
+  "disposition": {
+   "1": "shared"
+  },
+  "owner": "MATLAB JSON (@sagebrush-matlab)",
+  "reason": "parser protection for untrusted JSON text: before parsing, jsondecode refuses over 2^22 characters, 2^18 values, a 1000-digit run or 200 levels of nesting; integers are read as doubles"
+ },
+ "lib/_matlab_json.py :: _admit :: raise _m._err(\"jsondecode: the JSON text holds more than %d values.\" % MAX_VALUES, \"MATLAB:jsondecode:TooLarge\") #0": {
+  "class": "1",
+  "disposition": {
+   "1": "shared"
+  },
+  "owner": "MATLAB JSON (@sagebrush-matlab)",
+  "reason": "parser protection for untrusted JSON text: before parsing, jsondecode refuses over 2^22 characters, 2^18 values, 1000-digit numbers or 512 levels of nesting; integers are read as doubles"
+ },
+ "lib/_matlab_json.py :: _admit :: raise _m._err(\"jsondecode: the JSON text is nested more than %d levels deep.\" % MAX_DEPTH, #0": {
+  "class": "1",
+  "disposition": {
+   "1": "shared"
+  },
+  "owner": "MATLAB JSON (@sagebrush-matlab)",
+  "reason": "parser protection for untrusted JSON text: before parsing, jsondecode refuses over 2^22 characters, 2^18 values, 1000-digit numbers or 512 levels of nesting; integers are read as doubles"
+ },
+ "lib/_matlab_json.py :: _tree :: raise _m._err(\"jsonencode does not support complex numbers.\", \"MATLAB:jsonencode:UnsupportedComplex\") #0": {
+  "class": "coverage",
+  "owner": "MATLAB JSON (@sagebrush-matlab)",
+  "reason": "jsonencode refuses what MATLAB's jsonencode does not support (complex numbers, sparse arrays, other classes): an unsupported value, not a cap"
+ },
+ "lib/_matlab_json.py :: _tree :: raise _m._err(\"jsonencode does not support sparse arrays.\", \"MATLAB:jsonencode:UnsupportedSparse\") #0": {
+  "class": "coverage",
+  "owner": "MATLAB JSON (@sagebrush-matlab)",
+  "reason": "jsonencode refuses what MATLAB's jsonencode does not support (complex numbers, sparse arrays, other classes): an unsupported value, not a cap"
+ },
+ "lib/_matlab_json.py :: _tree :: raise _m._err(\"jsonencode does not support values of class '%s'.\" % _m.class_(v), \"MATLAB:jsonencode:UnsupportedType\") #0": {
+  "class": "coverage",
+  "owner": "MATLAB JSON (@sagebrush-matlab)",
+  "reason": "jsonencode refuses what MATLAB's jsonencode does not support (complex numbers, sparse arrays, other classes): an unsupported value, not a cap"
+ },
+ "lib/_matlab_json.py :: jsondecode_ :: if len(text) > MAX_CHARS: #0": {
+  "class": "1",
+  "disposition": {
+   "1": "shared"
+  },
+  "owner": "MATLAB JSON (@sagebrush-matlab)",
+  "reason": "parser protection for untrusted JSON text, as lib/_matlab_mat.py's bounds: jsondecode refuses a text over 2^26 characters, or nested more than 512 deep, before it is parsed"
+ },
+ "lib/_matlab_json.py :: jsondecode_ :: raise _m._err(\"jsondecode: the JSON text is %d characters, over the limit of %d.\" % (len(text), MAX_CHARS), #0": {
+  "class": "1",
+  "disposition": {
+   "1": "shared"
+  },
+  "owner": "MATLAB JSON (@sagebrush-matlab)",
+  "reason": "parser protection for untrusted JSON text, as lib/_matlab_mat.py's bounds: jsondecode refuses a text over 2^26 characters, or nested more than 512 deep, before it is parsed"
+ },
  "lib/_matlab_lu.py ::  :: - Work: matlab.lu_work (unlimited by default) is charged before each chunk #0": {
   "class": "none",
   "owner": "MATLAB sparse linear algebra"
@@ -7128,6 +7279,66 @@
  "lib/_sage_matrix.py :: Matrix.__getitem__ :: A 100000 x 100000 matrix needs about 80 GB, but Sagebrush has a fixed limit of about 33 MB for one matrix. #0": {
   "class": "none",
   "owner": "memory guards' message (item D)"
+ },
+ "lib/_sage_matrix.py :: Matrix.__mul__ :: raise TypeError(\"unsupported operand parent(s) for *: '%s' and '%s'\" % (self.parent(), other.parent())) #1": {
+  "class": "none",
+  "owner": "Sage-mode matrices (shape and exponent checks)",
+  "reason": "Sage's TypeError for a sum, difference or product of matrices and vectors of incompatible shapes (Sage's parent wording); it was zipped or truncated, a wrong answer; refuses nothing Sage computes"
+ },
+ "lib/_sage_matrix.py :: Matrix.__mul__ :: raise TypeError(\"unsupported operand parent(s) for *: '%s' and '%s'\" % (self.parent(), other.parent())) #2": {
+  "class": "none",
+  "owner": "Sage-mode matrices (shape and exponent checks)",
+  "reason": "Sage's TypeError for a sum, difference or product of matrices and vectors of incompatible shapes (Sage's parent wording); it was zipped or truncated, a wrong answer; refuses nothing Sage computes"
+ },
+ "lib/_sage_matrix.py :: Matrix._integral_exponent :: raise NotImplementedError(\"non-integral exponents not supported\") #0": {
+  "class": "none",
+  "owner": "Sage-mode matrices (shape and exponent checks)",
+  "reason": "Sage's NotImplementedError for a matrix power with a non-integral exponent (the same message); it was truncated to an integer, a wrong answer; refuses nothing Sage computes"
+ },
+ "lib/_sage_matrix.py :: Matrix._integral_exponent :: raise NotImplementedError(\"the given exponent is not supported\") #0": {
+  "class": "none",
+  "owner": "Sage-mode matrices (shape and exponent checks)",
+  "reason": "Sage's NotImplementedError for a matrix power with a non-integral exponent (the same message); it was truncated to an integer, a wrong answer; refuses nothing Sage computes"
+ },
+ "lib/_sage_matrix.py :: Matrix._same_shape :: raise TypeError(\"unsupported operand parent(s) for %s: '%s' and '%s'\" % (op, self.parent(), other.parent())) #0": {
+  "class": "none",
+  "owner": "Sage-mode matrices (shape and exponent checks)",
+  "reason": "Sage's TypeError for a sum, difference or product of matrices and vectors of incompatible shapes (Sage's parent wording); it was zipped or truncated, a wrong answer; refuses nothing Sage computes"
+ },
+ "lib/_sage_matrix.py :: Vector.__mul__ :: raise TypeError(\"unsupported operand parent(s) for *: '%s' and '%s'\" % (self.parent(), other.parent())) #0": {
+  "class": "none",
+  "owner": "Sage-mode matrices (shape and exponent checks)",
+  "reason": "Sage's TypeError for a sum, difference or product of matrices and vectors of incompatible shapes (Sage's parent wording); it was zipped or truncated, a wrong answer; refuses nothing Sage computes"
+ },
+ "lib/_sage_matrix.py :: Matrix :: NotImplementedError: non-integral exponents not supported #0": {
+  "class": "none",
+  "owner": "Sage-mode matrices (shape and exponent checks)",
+  "reason": "the Matrix class's documentation of Sage's refusals (shapes that don't agree, non-integral powers): examples, not limits"
+ },
+ "lib/_sage_matrix.py :: Matrix :: NotImplementedError: non-integral exponents not supported #1": {
+  "class": "none",
+  "owner": "Sage-mode matrices (shape and exponent checks)",
+  "reason": "the Matrix class's documentation of Sage's refusals (shapes that don't agree, non-integral powers): examples, not limits"
+ },
+ "lib/_sage_matrix.py :: Matrix :: NotImplementedError: the given exponent is not supported #0": {
+  "class": "none",
+  "owner": "Sage-mode matrices (shape and exponent checks)",
+  "reason": "the Matrix class's documentation of Sage's refusals (shapes that don't agree, non-integral powers): examples, not limits"
+ },
+ "lib/_sage_matrix.py :: Matrix :: TypeError: unsupported operand parent(s) for *: 'Full MatrixSpace of 2 by 2 dense matrices over Rational Field' and 'Vector space of dimension 3 over Rational Field' #0": {
+  "class": "none",
+  "owner": "Sage-mode matrices (shape and exponent checks)",
+  "reason": "the Matrix class's documentation of Sage's refusals (shapes that don't agree, non-integral powers): examples, not limits"
+ },
+ "lib/_sage_matrix.py :: Matrix :: TypeError: unsupported operand parent(s) for *: 'Vector space of dimension 3 over Rational Field' and 'Full MatrixSpace of 2 by 2 dense matrices over Rational Field' #0": {
+  "class": "none",
+  "owner": "Sage-mode matrices (shape and exponent checks)",
+  "reason": "the Matrix class's documentation of Sage's refusals (shapes that don't agree, non-integral powers): examples, not limits"
+ },
+ "lib/_sage_matrix.py :: Matrix :: TypeError: unsupported operand parent(s) for +: 'Full MatrixSpace of 2 by 2 dense matrices over Rational Field' and 'Full MatrixSpace of 3 by 3 dense matrices over Rational Field' #0": {
+  "class": "none",
+  "owner": "Sage-mode matrices (shape and exponent checks)",
+  "reason": "the Matrix class's documentation of Sage's refusals (shapes that don't agree, non-integral powers): examples, not limits"
  },
  "lib/_sage_matrix.py :: Matrix.__mul__ :: raise TypeError(\"unsupported operand parent(s) for *: '%s' and '%s'\" % (self.parent(), other.parent())) #0": {
   "class": "none",
@@ -10806,6 +11017,31 @@
  "src/cli.ts ::  :: poly.work, nf.relation_rounds, nf.certify_norm_max, #0": {
   "class": "none",
   "owner": "configuration"
+ },
+ "src/cli.ts :: execModuleAsMain :: else if (workerData?.sagebrushPrompt) promptWorker(workerData.sagebrushPrompt.argv, workerData.sagebrushPrompt.limits); #0": {
+  "class": "none",
+  "owner": "CLI/runtime configuration",
+  "reason": "the session's limits handed to the prompt's worker unchanged (as cliWorker's); it refuses nothing."
+ },
+ "src/cli.ts :: promptFront :: const worker = new Worker(entry, { stdout: true, stderr: true, workerData: { sagebrushPrompt: { argv, limits } } }); #0": {
+  "class": "none",
+  "owner": "CLI/runtime configuration",
+  "reason": "the session's limits handed to the prompt's worker unchanged (as cliWorker's); it refuses nothing."
+ },
+ "src/cli.ts :: promptFront :: function promptFront(argv: string[], limits: LimitsText): Promise<number> { #0": {
+  "class": "none",
+  "owner": "CLI/runtime configuration",
+  "reason": "the session's limits handed to the prompt's worker unchanged (as cliWorker's); it refuses nothing."
+ },
+ "src/cli.ts :: promptWorker :: function promptWorker(argv: string[], limits?: LimitsText) { #0": {
+  "class": "none",
+  "owner": "CLI/runtime configuration",
+  "reason": "the session's limits handed to the prompt's worker unchanged (as cliWorker's); it refuses nothing."
+ },
+ "src/cli.ts :: promptWorker :: return cliWorker(argv, limits); #0": {
+  "class": "none",
+  "owner": "CLI/runtime configuration",
+  "reason": "the session's limits handed to the prompt's worker unchanged (as cliWorker's); it refuses nothing."
  },
  "src/cli.ts :: readStdin :: if (total + n > STDIN_SOURCE_MAX) { #0": {
   "class": "1",

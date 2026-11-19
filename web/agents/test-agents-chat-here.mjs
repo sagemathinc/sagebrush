@@ -16,6 +16,7 @@ import { mkdtempSync, readFileSync, rmSync, existsSync, statSync } from "node:fs
 import { tmpdir } from "node:os";
 import { join, normalize } from "node:path";
 import { devtoolsPort } from "../test-port.mjs";
+import { BAR_CLEAR } from "../workspace/agent-bar-check.mjs";
 
 const here = new URL(".", import.meta.url).pathname;
 const dist = join(here, "..", "dist");
@@ -59,6 +60,9 @@ const server = Bun.serve({
     }
     if (url.pathname === "/api/remote/v1/page") {
       if (url.searchParams.get("chan") !== "agent" || url.searchParams.get("remote") !== "rid-laptop-01") return new Response("no", { status: 400 });
+      R.upgrades = (R.upgrades ?? 0) + 1;
+      // (the relay's answer while the computer's runner isn't connected: relay.ts's 503, before any WebSocket)
+      if (R.offline > 0) { R.offline--; return new Response("the remote isn't connected", { status: 503 }); }
       return srv.upgrade(req, { data: { helloed: false, msgs: [] } }) ? undefined : new Response("no", { status: 400 });
     }
     let p = normalize(decodeURIComponent(url.pathname));
@@ -161,6 +165,7 @@ try {
   ok((await text("#connect")) === "Connected", "the button stays Connected");
   ok(leg.data.msgs.some((m) => m.method === "grant.changed" && m.params?.folders) && leg.data.msgs.some((m) => m.method === "page.features" && m.params.features.includes("permission.digest")), "the grant is told to the agent, and permission.digest among the page's features");
   ok(violations.length === 0, "no Content Security Policy refusal: connect-src 'self' covers the page's own wss origin", violations);
+  ok(await until(`${BAR_CLEAR} === true`, 5000), "the Agents page: the agent's bar is in its own row, over nothing the person types in or reads", await ev(BAR_CLEAR).catch((e) => String(e)));
   const title = await ev(`[...document.querySelectorAll('.sbag-bar button')].find((b) => b.textContent === 'Disconnect')?.title ?? null`);
   ok(title === "Disconnect and stop the agent on laptop", "the bar's Disconnect: \"Disconnect and stop the agent on laptop\"", title);
 
@@ -214,6 +219,22 @@ try {
   R.refusal = "The agent is already open in another page or tab. Close it there, then connect again here.";
   ok(await chatHere(), "Chat here, while another tab holds the agent");
   ok(await until(`document.querySelector('#conn-alert').textContent === ${JSON.stringify(R.refusal)}`), "the runner's refusal, in its own words", await bar());
+
+  // the computer's runner not connected yet (the relay refuses the leg's upgrade, 503, as it does until the runner's
+  // own leg is up; the browser sees only a close): Chat here waits for it, tries again, and connects once it's up
+  R.mode = "ok";
+  R.offline = 2;
+  R.upgrades = 0;
+  await ev(`(() => { window.__whoSeen = []; new MutationObserver(() => window.__whoSeen.push(document.querySelector('#who').textContent)).observe(document.querySelector('#who'), { childList: true, subtree: true, characterData: true }); return true; })()`);
+  ok(await chatHere(), "Chat here while the computer's runner isn't connected yet");
+  ok(await until(`window.__whoSeen.some((t) => t.includes('Waiting for laptop to connect…'))`, 15000), "…the header says \"Waiting for laptop to connect…\"", await ev(`window.__whoSeen`));
+  ok(await until(`[...document.querySelectorAll('.sbag-dlg button')].some((b) => b.textContent === 'Allow')`, 20000), "…and once its runner is up, the grant dialog");
+  ok(R.offline === 0 && R.upgrades === 3, `…after two refused upgrades and a third taken (${R.upgrades})`);
+  ok(!(await ev(`document.querySelector('#conn-alert').textContent`)), "…with no alert while it waited");
+  await ev(`[...document.querySelectorAll('.sbag-dlg button')].find((b) => b.textContent === 'Allow').click()`);
+  ok(await until(`document.querySelector('#who').textContent.includes('on laptop')`), "allowed: the agent on laptop");
+  await ev(`[...document.querySelectorAll('.sbag-bar button')].find((b) => b.textContent === 'Disconnect').click()`);
+  await until(`document.querySelector('#conn-status').textContent.length > 0`);
 
   // none set up; the listing failed
   R.mode = "ok";

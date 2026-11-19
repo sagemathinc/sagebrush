@@ -87,8 +87,8 @@ test("optional packages alone select no default suite; with a core change they d
   assert.equal(suites(classify(["optional/hello/sagebrush.json", "src/pkgset.ts"])).node, "true");
 });
 
-test("the growth gate's own inputs are never docs-only (plan-growth-budget-r5 §1.5)", () => {
-  for (const f of ["budgets.json", ".growth/2026-10-24-x.json", ".github/workflows/optional.yml", "scripts/size-measure.mjs", "heap-budget.json", "core-api-surface.json", "pnpm-lock.yaml"]) {
+test("the size comparison's own inputs are never docs-only", () => {
+  for (const f of [".github/workflows/optional.yml", "scripts/size-measure.mjs", "heap-budget.json", "core-api-surface.json", "pnpm-lock.yaml"]) {
     assert.equal(classify([f]).size_inputs, "true", f);
   }
   assert.equal(classify(["design/board.md", "README.md"]).size_inputs, "false");
@@ -114,6 +114,43 @@ test("the CPython package's own Python selects engine-cpython, not the engine's 
   assert.equal(classify(["engine/modsym/examples/gen.py"]).engine_smoke, "true");
   // (and the full tier still runs everything)
   assert.equal(classify(["engine/py/python/sagebrush/cli.py"], "full-ci").engine_smoke, "true");
+});
+
+test("Python tests invoked by checks select node, derived from this checkout's workflow", () => {
+  const root = mkdtempSync(join(dir, "python-checks-"));
+  mkdirSync(join(root, ".github", "workflows"), { recursive: true });
+  const workflow = join(root, ".github", "workflows", "ci.yml");
+  writeFileSync(workflow, `jobs:
+  checks:
+    steps:
+      - run: |
+          node dist/src/cli.js engine/py/test_matrix_checks.py
+          python3 engine/py/test_other_checks.py
+          timeout 600 node dist/src/cli.js engine/py/test_a.py
+          uv run python engine/py/test_b.py
+          node dist/src/cli.js \\
+            engine/py/test_continued.py
+          # node dist/src/cli.js engine/py/test_commented.py
+          echo engine/py/test_mentioned.py
+          printf '%s' engine/py/test_printed.py
+  engine-cpython:
+    steps:
+      - run: python3 engine/py/test_remote_pair.py
+`);
+  const env = { CI_PATHS_ROOT: root };
+  for (const path of ["engine/py/test_matrix_checks.py", "engine/py/test_other_checks.py", "engine/py/test_a.py", "engine/py/test_b.py", "engine/py/test_continued.py"]) {
+    const result = classify([path], "", env);
+    assert.equal(result.node, "true", path);
+    assert.equal(result.engine_cpython, "true", path);
+    assert.equal(result.engine_smoke, "false", path);
+    assert.equal(result.web, "false", path);
+  }
+  for (const path of ["engine/py/test_remote_pair.py", "engine/py/test_commented.py", "engine/py/test_mentioned.py", "engine/py/test_printed.py", "engine/py/test_matrix_checks.py.bak"])
+    assert.equal(classify([path], "", env).node, "false", path);
+  // A new command needs no matching classifier edit or hard-coded filename.
+  writeFileSync(workflow, `jobs:\n  checks:\n    steps:\n      - run: node dist/src/cli.js engine/py/test_future.py\n  other:\n    steps: []\n`);
+  assert.equal(classify(["engine/py/test_future.py"], "", env).node, "true");
+  assert.equal(classify(["engine/py/test_matrix_checks.py"], "", env).node, "false");
 });
 
 test("engine-cpython runs on pull requests that touch the CPython package's inputs (#113 -> #132)", () => {
@@ -274,8 +311,10 @@ test("track pushes have master integration parity, including after a superseded 
   for (const files of ["engine/poly/src/lib.rs\n", "README.md\n", "src/runtime/ops.ts\n"]) {
     const master = run("refs/heads/master", files);
     const track = run("refs/heads/track/math", files);
-    for (const key of ["full", "engine_full", "size_inputs", "web_runner", "wasm_build", "docs_only", "long"])
+    for (const key of ["full", "engine_full", "web_runner", "wasm_build", "docs_only", "long"])
       assert.equal(track[key], master[key], `${files.trim()}: ${key}`);
+    // (the one difference: on a track an engine source moves the shipped bytes, so it is a size input there)
+    assert.equal(track.size_inputs, files.startsWith("engine/") ? "true" : master.size_inputs, `${files.trim()}: size_inputs`);
     assert.equal(track.full, "true", files.trim());
     assert.equal(track.engine_full, "true", files.trim());
     assert.equal(track.long, "false", files.trim());
@@ -747,6 +786,20 @@ test("wasm_build: a pull request into a track always builds the modules; a track
     assert.equal(classify(files, "", { GITHUB_BASE_REF: "track/math", GITHUB_HEAD_REF: "r6" }).wasm_build, "true", files.join());
   assert.equal(classify(["README.md"], "", { GITHUB_BASE_REF: "master", GITHUB_HEAD_REF: "track/math" }).wasm_build, "false");
   assert.equal(classify(["README.md"], "", { GITHUB_BASE_REF: "trackmath", GITHUB_HEAD_REF: "x" }).wasm_build, "false");
+});
+
+test("size_inputs: on a track an engine source is a gate input (the engine ships as built); elsewhere it is not", () => {
+  // (a track's pull request with only an engine change was once measured as docs-only: no base record, an empty gate)
+  const size = (files: string[], env: Record<string, string>) => classify(files, "", env).size_inputs;
+  const intoTrack = { GITHUB_BASE_REF: "track/math", GITHUB_HEAD_REF: "r6" };
+  for (const f of ["engine/arith/src/zmat.rs", "engine/poly/src/modp.rs", "wasm/pins.json", "Cargo.lock", "scripts/build-engine.mjs"])
+    assert.equal(size([f], intoTrack), "true", f);
+  assert.equal(size(["engine/arith/src/zmat.rs"], { GITHUB_EVENT_NAME: "push", GITHUB_REF: "refs/heads/track/math" }), "true");
+  for (const f of ["README.md", "bench/core/run.py", "lib/sagebrush/linalg.py"]) assert.equal(size([f], intoTrack), "false", f);
+  // (on master, and on a track's pull into master, an engine source moves no shipped bytes until its pin does)
+  assert.equal(size(["engine/arith/src/zmat.rs"], { GITHUB_BASE_REF: "master", GITHUB_HEAD_REF: "x" }), "false");
+  assert.equal(size(["engine/arith/src/zmat.rs"], { GITHUB_BASE_REF: "master", GITHUB_HEAD_REF: "track/math" }), "false");
+  assert.equal(size(["engine/arith/src/zmat.rs"], { GITHUB_BASE_REF: "trackmath", GITHUB_HEAD_REF: "x" }), "false");
 });
 
 test("wasm_build: what the modules are built from or handled by builds them on a pull request; every other event builds", () => {

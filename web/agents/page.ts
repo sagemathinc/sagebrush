@@ -19,6 +19,9 @@ import { startFakeTurn } from "./fake-agent";
 import { AgentError, RELOAD_KEY, type AgentPairing, type Kept } from "../workspace/agent-pair";
 import type { NotebookEdit } from "../workspace/notebook-edit";
 import { mountAgentPairing, type RestoreState } from "../workspace/agent-ui";
+import { runVerbsFor } from "../workspace/run-holder";
+import { agentRunsFor } from "../workspace/agent-runs";
+import { createPermissions } from "../notebook/permissions.js";
 import * as gitBranches from "../workspace/git-branch";
 import { openReviewDialog, showWhenBranches } from "../workspace/review/open-dialog";
 import { Workspace } from "../workspace/api";
@@ -28,12 +31,14 @@ import { mountComposer, renderComposerState, stopLabel } from "../workspace/agen
 import { applyPaneClasses, mountLayout, relayout } from "./layout";
 import { AgentLeg, legKey, listComputers, pageLegUrl, type LegEnd } from "../workspace/agent-relay";
 import { chatHere } from "./chat-here";
-import { modeSwitch } from "../workspace/mode-switch";
+import { filesIcon, modeSwitch } from "../workspace/mode-switch";
 import { icon as panelIcon } from "../workspace/files-toggle";
 import { entryUrl } from "../workspace/entry-url";
+import { threadMarkdown, turnMarkdown, userMarkdown } from "../workspace/agent-chat/transcript";
 
 // (the LaTeX editor, in builds that have it: web/build.ts's define)
 declare const __SB_LATEX__: boolean | undefined;
+declare const __SB_LATEX_HOSTS__: string[];
 const LATEX_URL = new URL("../sagebrush-latex.js", import.meta.url).href;
 
 const STORE = "sagebrush-agents-preview-v1";
@@ -199,6 +204,7 @@ function renderThread() {
     renderedThread = thread.id;
   }
   $("#empty").hidden = thread.entries.length > 0;
+  $("#log-tools").hidden = thread.entries.length === 0;
   const nearEnd = log.scrollHeight - log.scrollTop - log.clientHeight < 80;
   const seen = new Set<string>();
   let prev: HTMLElement | null = null;
@@ -228,15 +234,42 @@ function scrollToEnd(force: boolean) {
 }
 
 function userNode(e: UserEntry): HTMLElement {
-  return viewUserNode(e, md);
+  return withCopy(viewUserNode(e, md), () => userMarkdown(e));
 }
 
 function turnNode(thread: Thread, turn: Turn): HTMLElement {
-  return viewTurnNode(thread, turn, {
+  const node = viewTurnNode(thread, turn, {
     answer: (att, approve, turnId, instance) => answer(thread, att, approve, turnId, instance),
     openArtifact: (id) => { openArtifact = id; renderArtifacts(); },
     md,
   });
+  return withCopy(node, async () => turnMarkdown(thread, turn, { agent: agentName(), link: await fileLinks(thread) }));
+}
+
+// Copy, as Markdown (decided Nov 19 2026): one message (its Copy, shown on hover), or the whole chat (the header's Copy
+// chat), the files the agent wrote as links to them on this site
+function withCopy(node: HTMLElement, text: () => string | Promise<string>): HTMLElement {
+  const b = document.createElement("button");
+  b.className = "copy-msg";
+  b.type = "button";
+  b.textContent = "Copy";
+  b.title = "Copy this message as Markdown";
+  b.onclick = () => void copyText(text);
+  node.append(b);
+  return node;
+}
+function copyText(text: () => string | Promise<string>, done = "Copied") {
+  return Promise.resolve().then(text).then((t) => navigator.clipboard.writeText(t)).then(() => toast(done), () => toast("Couldn't copy"));
+}
+/** The files the chat's agent wrote: their addresses on this site, where the workspace has them. */
+async function fileLinks(thread: Thread): Promise<(path: string) => string | null> {
+  const ws = workspace, links = new Map<string, string>();
+  if (ws) for (const a of thread.artifacts) if (a.path && !links.has(a.path)) {
+    const e = await ws.stat(a.path).catch(() => null);
+    const url = e && entryUrl(e);
+    if (url) links.set(a.path, new URL(url, location.href).href);
+  }
+  return (path) => links.get(path) ?? null;
 }
 
 // The pane: a head (tabs and buttons, redrawn when what it shows changes) and one host per artifact, kept while
@@ -506,6 +539,57 @@ function mountHost(threadId: string, a: Artifact, h: Host) {
     void nb.ready.then(() => hosts.get(h.key) === h && keepFocus());
     return;
   }
+  // (a board the agent made: said as what the agent did, with Open, a link to the board page in a tab of its own, so
+  //  the person's click opens it as any link (where its code runs), and View source for its JSON)
+  if (a.kind === "board" && a.path && workspace) {
+    const ws = workspace, path = a.path, name = path.split("/").pop()!;
+    // (built as elements, its words as text: nothing of the agent's name or the file's is read as markup)
+    const el = <K extends keyof HTMLElementTagNameMap>(tag: K, cls: string, text = "") => Object.assign(document.createElement(tag), { className: cls, textContent: text });
+    const who = el("span", "who", `${agentName()} made `), b = el("b", "", name);
+    who.append(b);
+    const open = el("a", "open-board", "Open"), view = el("button", "view-source", "View source"), src = el("pre", "code board-source");
+    open.target = "_blank"; open.rel = "noopener"; open.setAttribute("aria-disabled", "true");
+    view.type = "button"; src.hidden = true;
+    const row = el("div", "board-made");
+    row.append(who, open, view);
+    h.el.replaceChildren(row, src);
+    // (its address is its id, read from the workspace: a board it can't find there (removed, or not a board now, or the
+    //  lookup failed) says so, with no Open)
+    void ws.stat(path).catch(() => undefined).then((e) => {
+      if (e?.kind === "board" && e.ref) {
+        open.href = "/board/?doc=local:" + encodeURIComponent(e.ref);
+        open.removeAttribute("aria-disabled");
+      } else open.replaceWith(Object.assign(document.createElement("span"), { className: "gone", textContent: "Couldn't find this board in your files." }));
+    });
+    view.onclick = () => {
+      if (!src.hidden) { src.hidden = true; view.textContent = "View source"; return; }
+      void ws.read(path).then((r) => { src.textContent = JSON.stringify(r.content, null, 2); src.hidden = false; view.textContent = "Hide source"; }, (e) => toast(`Couldn't read ${name}: ${String(e?.message ?? e)}`, 6000));
+    };
+    // (Copy: the board's JSON, read now, as View source shows it; what View source shows if that read failed)
+    let json: string | null = null;
+    void ws.read(path).then((r) => { json = JSON.stringify(r.content, null, 2); }, () => {});
+    h.copy = () => json ?? src.textContent ?? "";
+    keepFocus();
+    return;
+  }
+  // (a .tex, where this host serves the LaTeX editor's page (the build's hosts, as web/latex/boot.ts's latexOn): that
+  //  page in a frame, embedded (web/latex page.ts's embed): Run, the PDF, comments and its leave guard, as on the LaTeX
+  //  page; mountTexFrame. Elsewhere (the CLI's page) the editor itself, in mountFile)
+  if (a.path && workspace && __SB_LATEX__ && __SB_LATEX_HOSTS__.includes(location.hostname) && /\.tex$/i.test(a.path)) {
+    const head = document.createElement("div"), body = document.createElement("div");
+    head.className = "file-path";
+    head.append(a.path + " ", openFull(a.path));
+    body.className = "file-body";
+    h.el.replaceChildren(head, body);
+    const f = mountTexFrame(a.path, body);
+    h.copy = f.text;
+    h.flush = f.flush;
+    h.release = f.release;
+    h.dispose = f.dispose;
+    h.download = f.download;
+    keepFocus();
+    return;
+  }
   if (a.path && workspace) {
     h.el.innerHTML = `<div class="file-path">${esc(a.path)} <span class="saved"></span></div><div class="file-body"></div>`;
     const f = mountFile(a, $(".file-body", h.el), $(".saved", h.el));
@@ -593,10 +677,9 @@ function mountFile(a: Artifact, box: HTMLElement, saved: HTMLElement): FileHost 
   };
   say("Loading…");
   const tex = /\.tex$/i.test(path);
-  if (tex && !__SB_LATEX__) {
-    // (no LaTeX editor in this build: the source here, and the file in Sagebrush)
-    saved.after(" ", openFull(path));
-  }
+  // (the file in Sagebrush, on its own page: a code or text file's (/?code=), a .tex file's where this build has no
+  //  LaTeX editor here; a file with no page of its own gets no link, openFull)
+  if (!tex || !__SB_LATEX__) saved.after(" ", openFull(path));
   type Latex = { mountEditor?: (root: HTMLElement, o: { text: string; onChange?(t: string): void; layout?: "split" | "preview" }) => { getText(): string; destroy(): void } };
   const latexMod: Promise<Latex | null> = tex && __SB_LATEX__ ? import(/* @vite-ignore */ LATEX_URL).catch(() => null) : Promise.resolve(null);
   // (the file as it is now: the agent may have written it again since this artifact)
@@ -712,6 +795,68 @@ function mountFile(a: Artifact, box: HTMLElement, saved: HTMLElement): FileHost 
   };
 }
 
+// A .tex in the pane: the LaTeX editor's own page, /?tex=<fid>&latex=1&embed=1, in a frame of this site (its page's
+// frame-ancestors 'self'): no header, Agent or pairing of its own there, the document alone by default. Made only when
+// its tab is opened (mountHost), dropped with it. The pane asks it before closing, {t: "may-close", id}, and the
+// editor's leave guard answers, its edit written or the person asked ({t: "may-close", id, ok}); only from that frame,
+// of this very origin. The file is the editor's to write: nothing here writes it.
+const TEX_CLOSE_MS = 30_000;
+function mountTexFrame(path: string, box: HTMLElement): FileHost {
+  let alive = true;
+  let frame: HTMLIFrameElement | null = null;
+  let text = "";
+  const host = document.createElement("div");
+  host.className = "tex-host";
+  box.append(host);
+  void workspace!.stat(path).then(
+    (e) => {
+      if (!alive) return;
+      if (!e || e.kind !== "file" || !e.fid) return void (host.textContent = "(not in this browser's workspace)");
+      frame = document.createElement("iframe");
+      frame.className = "tex-frame";
+      frame.title = path.split("/").pop()!;
+      frame.style.cssText = "display:block;width:100%;height:100%;border:0;background:#fff";
+      frame.src = "/?tex=" + encodeURIComponent(e.fid) + "&latex=1&embed=1";
+      host.append(frame);
+    },
+    () => alive && (host.textContent = "(not in this browser's workspace)"),
+  );
+  // (Copy: the file as read at open; the editor in the frame has the latest)
+  void workspace!.read(path).then((r) => { if (typeof r.content === "string") text = r.content; else if (r.content instanceof Uint8Array) text = new TextDecoder().decode(r.content); }, () => {});
+  const mayClose = (): Promise<boolean> => new Promise((done) => {
+    const w = frame?.contentWindow;
+    // (no editor in the frame yet: nothing typed there to keep)
+    if (!w || !frame?.contentDocument?.querySelector(".tex-page .tex-main")) return done(true);
+    const id = crypto.randomUUID();
+    const t = setTimeout(() => { removeEventListener("message", on); done(false); }, TEX_CLOSE_MS);
+    const on = (e: MessageEvent) => {
+      if (e.source !== w || e.origin !== location.origin || e.data?.t !== "may-close" || e.data.id !== id) return;
+      clearTimeout(t);
+      removeEventListener("message", on);
+      done(e.data.ok === true);
+    };
+    addEventListener("message", on);
+    w.postMessage({ t: "may-close", id }, location.origin);
+  });
+  const dispose = async () => {
+    alive = false;
+    frame?.remove();
+    frame = null;
+  };
+  let releasing: Promise<Released> | null = null;
+  return {
+    text: () => (frame?.contentDocument?.querySelector<HTMLTextAreaElement>(".tex-src")?.value ?? text),
+    flush: async () => {},
+    release: () => (releasing ??= mayClose().then(async (ok): Promise<Released> => {
+      if (!ok) return { ok: false, why: `${path}: the LaTeX editor didn't confirm it could close (its last edit isn't written yet, you chose to stay, or it didn't answer within 30 seconds).` };
+      await dispose();
+      return { ok: true };
+    }).finally(() => (releasing = null))),
+    dispose,
+    download: () => null,
+  };
+}
+
 function renderComposer() {
   renderComposerState(isRunning(current()), queues.get(current().id)?.length ?? 0);
   renderConn();
@@ -737,6 +882,8 @@ const NOT_SENT = {
 };
 const RUNNER = {
   connecting: (computer: string) => `Connecting to ${computer}…`,
+  waiting: (computer: string) => `Waiting for ${computer} to connect…`,
+  unreachable: (computer: string) => `Couldn't connect to ${computer}. If its runner isn't running, start sagebrush remote --serve-agents on it, then choose Chat here again.`,
   lost: (computer: string, why: string) => `Not connected to ${computer}${why ? `: ${why}` : ""}. Choose Chat here to connect again.`,
   disconnected: (computer: string) => `Disconnected. The agent on ${computer} may keep running for up to 5 minutes.`,
 };
@@ -745,10 +892,12 @@ const RUNNER = {
 function runnerBar(computer: string, e: LegEnd | { kind: string; why: string }): ConnBar {
   if (e.kind === "disconnected") return { kind: "runner", text: RUNNER.disconnected(computer), alert: false, action: "connect" };
   if ((e.kind === "ended" || e.kind === "refused") && e.why) return { kind: "runner", text: e.why, alert: true, action: "connect" };
+  if (e.kind === "unreachable") return { kind: "runner", text: RUNNER.unreachable(computer), alert: true, action: "connect" };
   return { kind: "runner", text: RUNNER.lost(computer, e.why), alert: true, action: "connect" };
 }
 // (an attempt to one of your computers, between Chat here and its agent.ready: the header's "Connecting to …")
 let connectingTo: string | null = null;
+let waitingFor = false; // (its runner not connected yet: the header says it waits)
 const CONN = {
   lost: "Claude disconnected. Your chats are kept; Claude keeps their context while sagebrush-agent runs.",
   restoring: "Reconnecting to Claude…",
@@ -894,7 +1043,25 @@ function toast(text: string, ms = 1500) {
 const editor = mountComposer({ submit, stop: () => interrupt(current()), render: md, typeset: (el) => typeset(el) });
 // (the Files | Agents switch at the right of the chat list's header, Agents pressed: Files opens the notebook page with
 //  its files, as the file panel's switch opens this page; William, Nov 12)
-{ const sw = modeSwitch("agents"), brand = document.querySelector<HTMLElement>("nav.side .brand"); sw.style.marginLeft = "auto"; if (brand) { brand.style.whiteSpace = "nowrap"; brand.append(sw); } }
+{ const sw = modeSwitch("agents"), brand = document.querySelector<HTMLElement>("nav.side .brand"); sw.style.marginLeft = "auto"; if (brand) { brand.style.whiteSpace = "nowrap"; brand.append(sw); } const f = sw.querySelector<HTMLButtonElement>('[data-mode="files"]'); if (f) f.onclick = () => void toFiles(); }
+// (to the files: the notebook page with its file browser shown.  The thread is left as New chat leaves it
+//  (mayLeaveThread): its files' pending edits saved, a running cell stopped only if the person says so; refused, this
+//  page stays and nothing is changed.  Admitted, the browser's own choice to show the files is set, then the page left)
+let leaving = false;
+async function toFiles() {
+  if (leaving) return;
+  leaving = true;
+  try {
+    if (!(await mayLeaveThread())) return;
+    try { localStorage.setItem("sagebrush-files-sidebar", "1"); } catch {}
+    location.assign("/");
+  } finally {
+    leaving = false;
+  }
+}
+// (Files…, at the foot of the chat list; and the switch's own Files, through the same way out)
+$("#files-big").prepend(filesIcon());
+$("#files-big").onclick = () => void toFiles();
 $("#new").onclick = async () => {
   if (!(await mayLeaveThread())) return;
   session.newThread();
@@ -1063,13 +1230,28 @@ const chatHereSection = chatHere({
     leg.on("notice", (t) => toast(t, 6000));
     return { link: leg, ended };
   },
-  onConnecting(r) { connectingTo = r.name; setConn(null); renderHeader(); },
-  onFailed(r, e) { connectingTo = null; setConn(runnerBar(r.name, e)); renderHeader(); },
+  onConnecting(r) { connectingTo = r.name; waitingFor = false; setConn(null); renderHeader(); },
+  onWaiting(r) { connectingTo = r.name; waitingFor = true; renderHeader(); },
+  onFailed(r, e) { connectingTo = null; waitingFor = false; setConn(runnerBar(r.name, e)); renderHeader(); },
 }, () => agentUi);
+
+// (an agent's runs of code here, as on the notebook page (workspace/agent-runs.ts): latex_build, run_notebook, run_file
+//  and run_stop under the grant, in the sandboxed runner only, which this page has where it is cross-origin isolated;
+//  the interpreter's classes come with the run's chunk, from the notebook's module)
+const runsSite = new URL("../", import.meta.url).href;
+const agentRuns = (ws: Workspace) => agentRunsFor(ws as any, {
+  site: runsSite,
+  kernels: () => import(/* @vite-ignore */ new URL("sagebrush-notebook.js", runsSite).href),
+  sandbox: globalThis.crossOriginIsolated === true && !!globalThis.navigator && !(window as any).__TAURI__ && !(window as any).__SAGEBRUSH_LOCAL__ ? "ok" : "none",
+  perms: createPermissions(),
+  chunks: { run: "sagebrush-agent-run.js", ...(__SB_LATEX__ ? { latex: ["sagebrush-latex.js", "sagebrush-latex-tools.js", "sagebrush-latex-run.js"] as [string, string, string] } : {}) },
+  more: () => (/^(localhost|127\.0\.0\.1)$/.test(location.hostname) && typeof (window as any).__runHold === "function" ? { hold: (st: string) => (window as any).__runHold(st) } : {}),
+});
 
 function mountPairing(ws: Workspace) {
   agentUi = mountAgentPairing(ws, {
     program: "sagebrush-agent",
+    runVerbs: runVerbsFor(agentRuns(ws)),
     button: $("#connect"),
     notebookEdit: editNotebook,
     // (an agent's own branch, chat plan PR 3: offered here, where agents work)
@@ -1160,6 +1342,7 @@ addEventListener("pagehide", () => {
   if (saveTimer) localStorage.setItem(STORE, JSON.stringify(state));
 });
 $("#howto").onclick = () => ($("#help").hidden = !$("#help").hidden);
+$("#copychat").onclick = () => { const t = current(); void copyText(async () => threadMarkdown(t, { agent: agentName(), link: await fileLinks(t) }), "Copied the chat"); };
 
 /** The header's agent line from text only (an agent's and a computer's names are text, never markup). */
 function whoText(who: HTMLElement, dot: string, name: string, small: string) {
@@ -1177,7 +1360,7 @@ function renderHeader() {
   } else if (live()) {
     who.innerHTML = `<span class="conn on"></span>${esc(agentName())} <small>on your computer</small>`;
   } else if (connectingTo !== null) {
-    whoText(who, "wait", "", RUNNER.connecting(connectingTo));
+    whoText(who, "wait", "", waitingFor ? RUNNER.waiting(connectingTo) : RUNNER.connecting(connectingTo));
   } else if (pairing && pairing.state === "paired") {
     who.innerHTML = `<span class="conn wait"></span>${esc(agentName())} <small>connected: allow it in the dialog</small>`;
   } else if (inert(current())) {

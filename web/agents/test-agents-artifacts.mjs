@@ -14,7 +14,7 @@
 //   SAGEBRUSH_LATEX_PREVIEW=0, and A14's cases run to their end; ONLY=a,b: those sections)
 import { spawn } from "node:child_process";
 import { createHash } from "node:crypto";
-import { appendFileSync, existsSync, mkdtempSync, rmSync } from "node:fs";
+import { appendFileSync, existsSync, mkdtempSync, readFileSync, rmSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { devtoolsPort, startServe } from "../test-port.mjs";
@@ -26,6 +26,13 @@ const here = new URL(".", import.meta.url).pathname;
 // hasn't)
 const LATEX = existsSync(join(here, "..", "dist", "sagebrush-latex.js"));
 if (process.env.AGENTS_LATEX === "1" && !LATEX) throw new Error("AGENTS_LATEX=1 but this web/dist has no sagebrush-latex.js");
+// (and whether this host serves the editor's own page, where the pane frames it (web/agents/page.ts mountTexFrame): a
+// "test" build's, on loopback as here, whose hooks (__sbTexWs) are in its page module; elsewhere the pane has the editor
+// itself, as on the CLI's page)
+const TEXFRAME = LATEX && readFileSync(join(here, "..", "dist", "sagebrush-latex.js"), "utf8").includes("__sbTexWs");
+// (and whether its editor runs a .tex the agent made once by itself, decided Nov 19 2026: its page module asks the
+// pairing over the site's channel, web/workspace/agent-made-tex.ts)
+const TEXSELF = TEXFRAME && readFileSync(join(here, "..", "dist", "sagebrush-latex.js"), "utf8").includes("tex-may-run");
 if (process.env.AGENTS_LATEX === "0" && LATEX) throw new Error("AGENTS_LATEX=0 but this web/dist has sagebrush-latex.js: build it with SAGEBRUSH_LATEX_PREVIEW=0");
 // (A14's cases, in a build without LaTeX: AGENTS_LATEX=0 insists they ran to their end)
 let a14Ran = false;
@@ -467,6 +474,48 @@ try {
   }
 
   // ======================================================================== saved, with its base; reopened
+  // ======================================================================== the way to the files: Files… and the switch
+  if (want("filesbtn")) {
+    // (a text file's edit typed just now (its 700 ms save still pending), then Files… at once: the page leaves only after
+    //  the edit is saved; read back through the agent once paired again)
+    const quick = async (path, click, word) => {
+      await call("workspace.create", { path, content: { text: "old\n" } });
+      await artifactTurn(path);
+      await until(`document.querySelector('${PANE} .file-path')?.textContent.startsWith(${JSON.stringify(path + " ")}) && !!document.querySelector('${PANE} .file-body textarea')`, 30000);
+      await ev(`(() => { const t = document.querySelector('${PANE} .file-body textarea'); t.focus(); t.setSelectionRange(t.value.length, t.value.length); })()`);
+      await send("Input.insertText", { text: word });
+      await ev(`localStorage.setItem("sagebrush-files-sidebar", "0")`);
+      await ev(click);
+      await until(`location.pathname === "/" && document.readyState === "complete"`, 30000);
+      const pref = await ev(`localStorage.getItem("sagebrush-files-sidebar")`);
+      await pair();
+      await converse();
+      const r = await call("workspace.read", { path });
+      return { pref, text: typeof r.content === "string" ? r.content : r.content?.text ?? JSON.stringify(r.content) };
+    };
+    const big = await quick("/notes/quick.txt", `document.getElementById('files-big').click()`, "NEW-BIG");
+    ok(big.text.includes("NEW-BIG") && big.pref === "1", "an edit typed just before Files… is saved before the page leaves, and the files are set to show", big);
+    const small = await quick("/notes/quick2.txt", `document.querySelector('nav.side .sb-mode [data-mode="files"]').click()`, "NEW-SMALL");
+    ok(small.text.includes("NEW-SMALL") && small.pref === "1", "the switch's Files leaves the same way: the edit saved, the files set to show", small);
+    // (a cell running: Files… asks first, as closing the pane does; Cancel keeps this page, the cell running, nothing set)
+    const path = "/notes/slow-files.ipynb";
+    await call("workspace.create", { path, content: docFor(path, [{ code: "import time\nfor i in range(600):\n    time.sleep(0.05)" }]), mode: "python" });
+    await openNotebook(path);
+    await ev(`${cellJs(0)}.querySelector('.runb').click()`);
+    await until(`/· running/.test([...document.querySelectorAll('#artifacts .tab')].map((t) => t.textContent).join())`, 120000);
+    await ev(`localStorage.setItem("sagebrush-files-sidebar", "0")`);
+    await ev(`document.getElementById('files-big').click()`);
+    await until(`document.querySelector('#close-running').open`);
+    await ev(`document.querySelector('#close-running').close('')`);
+    await sleep(500);
+    const stayed = await ev(`({ path: location.pathname, pane: document.body.classList.contains('has-artifact'), cls: ${cellJs(0)}?.className ?? null, pref: localStorage.getItem("sagebrush-files-sidebar") })`);
+    ok(stayed.path === "/agents/" && stayed.pane && /running|queued/.test(stayed.cls ?? "") && stayed.pref === "0", "with a cell running, Files… asks first; Cancel stays on this page, the cell running, nothing set", stayed);
+    await ev(`document.querySelector('#close').click()`);
+    await until(`document.querySelector('#close-running').open`);
+    await ev(`document.querySelector('#close-running').close('stop')`);
+    await until(`!document.body.classList.contains('has-artifact')`, 10000);
+  }
+
   // ======================================================================== Open in Sagebrush: the file's own page
   if (want("openlink")) {
     // (its address is the one the File menu opens the notebook at, /?nb=<its id>, and following it, in this tab or in
@@ -482,6 +531,17 @@ try {
     await send("Page.navigate", { url: site + href });
     await until(`[...document.querySelectorAll('.sbnb .cell')].some((c) => c.textContent.includes("LINKED-CELL"))`, 30000);
     ok(await ev(`document.querySelectorAll('.sbnb .cell').length === 1`), "following it opens that notebook, and only its one cell, in the notebook editor");
+    await pair();
+    await converse();
+    // (a code file the agent wrote: its link is its own page, /?code=<fid>, and that page shows the file)
+    await call("workspace.create", { path: "/notes/linked.py", content: { text: "print('LINKED-CODE')\n" } });
+    await artifactTurn("/notes/linked.py");
+    await until(`document.querySelector('${PANE} .file-path')?.textContent.startsWith("/notes/linked.py ") && !!document.querySelector('${PANE} .file-path .open-full:not([hidden])')`, 30000);
+    const codeHref = await ev(`document.querySelector('${PANE} .file-path .open-full').getAttribute('href')`);
+    ok(/^\/\?code=[0-9a-f]+$/.test(codeHref), "a code file's Open in Sagebrush names its own page, /?code=<its id>", codeHref);
+    await send("Page.navigate", { url: site + codeHref });
+    await until(`document.body.innerText.includes("LINKED-CODE")`, 30000);
+    ok(true, "following it opens that file on its page");
     await pair();
     await converse();
   }
@@ -738,10 +798,81 @@ try {
     await artifactTurn(path);
     await until(`!!document.querySelector('${PANE} .file-body')`, 10000);
     await sleep(2500);
-    const got = await ev(`({ editor: !!document.querySelector('${PANE} .tex-embed'), text: !!document.querySelector('${PANE} textarea.code-edit'), open: !!document.querySelector('${PANE} a.open-full') })`);
+    const got = await ev(`({ editor: !!document.querySelector('${PANE} .tex-embed') || !!document.querySelector('${PANE} iframe.tex-frame')?.contentDocument?.querySelector('.tex-page'), text: !!document.querySelector('${PANE} textarea.code-edit'), open: !!document.querySelector('${PANE} a.open-full') })`);
     const asked = requested.slice(before).some((u) => u.includes("sagebrush-latex.js"));
-    if (LATEX) ok(got.editor && !got.text && asked, "a .tex artifact opens in the LaTeX editor (this build has it)", { got, asked });
+    if (LATEX) ok(got.editor && !got.text && asked, `a .tex artifact opens in the LaTeX editor (this build has it${TEXFRAME ? ": its own page, framed" : ""})`, { got, asked });
     else ok(!got.editor && got.text && got.open && !asked, "a .tex artifact is its source, with Open in Sagebrush, and no LaTeX module is asked for (this build has none)", { got, asked });
+  }
+
+  // ======================================================================== LaTeX: the editor's own page, framed (embed)
+  // (where this host serves the LaTeX editor's page: a .tex artifact is that page in a frame, /?tex=<fid>&latex=1&embed=1
+  //  (web/latex page.ts's embed), Run and the PDF as there. TF1 no frame until the artifact's tab is shown; then the
+  //  document alone (the PDF), no bar of its own, no pairing of its own (no agent chunk), the composer keeps its focus;
+  //  TF2 a write from outside (the agent's) followed without a reload, and Run then runs the new text: its SageTeX
+  //  result in the PDF; TF3 Close asks the frame's leave guard first: a held write holds the close, and once written it
+  //  closes, the edit in the file; TF4 closed, the frame and the editor's workers are gone)
+  if (want("texframe") && TEXFRAME) {
+    await freshPage();
+    const T = "/notes/framed.tex";
+    const FR = `document.querySelector('${PANE} iframe.tex-frame')`;
+    const FW = `${FR}.contentWindow`;
+    const FD = `${FR}.contentDocument`;
+    await call("workspace.create", { path: T, content: { text: "\\documentclass{article}\n\\usepackage{sagetex}\n\\begin{document}\nTwo and two: $\\sage{2 + 2}$.\n\\end{document}\n" } });
+    const before = await ev(`document.querySelectorAll('iframe').length`);
+    await ev(`(() => { const t = document.querySelector('main textarea'); t?.focus(); window.__fe = document.activeElement; return true; })()`);
+    const n0 = requested.length;
+    await artifactTurn(T);
+    await until(`!!${FD}?.querySelector('.tex-page .tex-preview')?.textContent.includes('Two and two')`, 60000);
+    await sleep(1500);
+    const tf1 = await ev(`(() => { const f = ${FR}, d = f.contentDocument, pg = d.querySelector('.tex-page'), gone = (c) => { const e = d.querySelector(c); return !e || e.hidden || getComputedStyle(e).display === 'none'; };
+      return { src: f.getAttribute('src'), frames: document.querySelectorAll('#artifacts iframe.tex-frame').length, view: pg.dataset.view, back: gone('.tex-back'), home: gone('.tex-home'), file: gone('.tex-filebtn'), agent: gone('.tex-agent'), share: gone('.tex-sharebtn'),
+        focusKept: document.activeElement === window.__fe && document.activeElement !== f, box: Math.round(f.getBoundingClientRect().height),
+        full: document.querySelector('${PANE} a.open-full')?.getAttribute('href') ?? null }; })()`);
+    const agentChunk = requested.slice(n0).filter((u) => /sagebrush-latex-agent/.test(u));
+    ok(before === 0 && /^\/\?tex=[^&]+&latex=1&embed=1$/.test(tf1.src) && tf1.frames === 1 && tf1.view === "pdf" && tf1.back && tf1.home && tf1.file && tf1.agent && tf1.share && tf1.focusKept && tf1.box > 200 && agentChunk.length === 0 && tf1.full === tf1.src.replace("&latex=1&embed=1", ""),
+      "TF1: a .tex artifact is the LaTeX editor's page framed (embed=1), made when its tab is shown: the PDF alone, no bar, Agent or pairing of its own (its chunk never fetched), the composer's focus kept; Open in Sagebrush is the editor's own page", { before, tf1, agentChunk });
+    // (TF2: the agent's write, followed in the frame without a reload; then Run, on the new text)
+    await ev(`(${FR}.contentWindow.__sameDoc = 1, true)`);
+    const r = await call("workspace.read", { path: T });
+    await call("workspace.write", { path: T, content: { text: r.content.text.replace("Two and two: $\\sage{2 + 2}$", "Three and four: $\\sage{3 + 4}$") }, base: r.rev });
+    const followed = await until(`!!${FD}?.querySelector('.tex-preview')?.textContent.includes('Three and four')`, 30000).catch(() => false);
+    const same = await ev(`${FW}?.__sameDoc === 1`);
+    // (a run under way first, as the editor's own run of a .tex the agent created may be: the button is its Stop till then)
+    await until(`${FD}?.querySelector('.tex-run')?.textContent === 'Run'`, 180000).catch(() => {});
+    await ev(`(${FD}.querySelector('.tex-status').textContent = '', ${FD}.querySelector('.tex-run').click(), true)`);
+    const ran = await until(`/Ran 1 SageTeX item/.test(${FD}?.querySelector('.tex-status')?.textContent ?? '')`, 180000).catch(() => false);
+    await sleep(1000);
+    const tf2 = await ev(`({ status: ${FD}.querySelector('.tex-status')?.textContent, pdf: ${FD}.querySelector('.tex-preview')?.textContent.replace(/\\s+/g, ' ').slice(0, 200) })`);
+    ok(followed && same && ran && /Three and four: ?7/.test(tf2.pdf) && !/\?\?/.test(tf2.pdf), "TF2: the agent's write is followed in the frame without a reload, and Run runs the new text: its SageTeX result (7) in the PDF", { followed, same, ran, tf2 });
+    // (TF3: an edit in the frame, its write held; Close waits for the frame's answer, and closes once it is written)
+    const lw = live("sagebrush-latex-worker.js");
+    await ev(`(() => { const w = ${FW}; w.__hold = new Promise((r) => (w.__rel = r)); w.__sbTexSaveWrite = () => w.__hold; w.document.querySelector('.tex-view [data-view="source"]').click(); const t = w.document.querySelector('.tex-src'); t.setRangeText('% typed in the pane\\n', t.value.length, t.value.length, 'end'); t.dispatchEvent(new Event('input', { bubbles: true })); return true; })()`);
+    await sleep(1200);
+    await ev(`document.querySelector('#close').click()`);
+    await sleep(2500);
+    const during = await ev(`({ open: document.body.classList.contains('has-artifact'), frame: !!${FR} })`);
+    await ev(`(${FR}?.contentWindow.__rel?.(), true)`); // (a frame closed already: nothing to let go)
+    const closed = await until(`!document.body.classList.contains('has-artifact')`, 15000).catch(() => false);
+    await sleep(1500);
+    const text = (await call("workspace.read", { path: T })).content.text;
+    ok(during.open && during.frame && closed && /% typed in the pane\n$/.test(text), "TF3: Close asks the frame first: with its write held the pane stays, and once written it closes, the edit in the file", { during, closed, tail: text.slice(-60) });
+    // (TF4: closed, nothing of the frame left)
+    const tf4 = { frames: await ev(`document.querySelectorAll('iframe.tex-frame').length`), workersBefore: lw, workersAfter: live("sagebrush-latex-worker.js") };
+    ok(tf4.frames === 0 && tf4.workersBefore >= 1 && tf4.workersAfter === 0, "TF4: closed, the frame and the editor's workers are gone", tf4);
+    // (TF5: a .tex the agent created runs once by itself in the frame, as a notebook it created does (decided Nov 19
+    //  2026), under this grant (Everything, May run code): its result in the PDF, nothing pressed, saved as the
+    //  editor's own Run saves it)
+    if (TEXSELF) {
+      const M = "/notes/made.tex";
+      await call("workspace.create", { path: M, content: { text: "\\documentclass{article}\n\\usepackage{sagetex}\n\\begin{document}\nMade: $\\sage{6*7}$.\n\\end{document}\n" } });
+      await artifactTurn(M);
+      const ranSelf = await until(`/Made: ?42/.test((${FD}?.querySelector('.tex-preview')?.textContent ?? '').replace(/\\s+/g, ' '))`, 120000).catch(() => false);
+      const st = await ev(`(${FD}?.querySelector('.tex-status')?.textContent ?? null)`).catch(() => null);
+      const res = await call("workspace.read", { path: M + ".results.json" }).then((r) => r.content?.text ?? (r.content?.json ? "json" : "bytes"), () => null);
+      ok(ranSelf && /Ran 1 SageTeX item/.test(st ?? "") && res !== null, "TF5: a .tex the agent created runs once by itself in the frame: its result (42) in the PDF, nothing pressed, its results saved", { ranSelf, st, res: typeof res === "string" ? res.slice(0, 60) : res });
+      await ev(`document.querySelector('#close').click()`);
+      await until(`!document.body.classList.contains('has-artifact')`, 15000).catch(() => {});
+    }
   }
 
   // ======================================================================== LaTeX: the editor fills its pane (A4, A8)
@@ -755,7 +886,7 @@ try {
   // C-e1 the pane's and the chat's widths are what they are without #tex-host-layout (±1 px); C-e2 the chat at least 420 px (1400).
   // C-a..C-d again with the pane forced to 320, 330 and 460 px in a 1400 px window (a test-only style; PR 2's F2: a
   // narrow pane wraps the source to about 37k px, past what a fixed 60 notches reach)
-  if (want("latex") && LATEX) {
+  if (want("latex") && LATEX && !TEXFRAME) {
     const path = "/notes/layout.tex";
     const pre = Array.from({ length: 60 }, (_, i) => `\\newcommand{\\cmd${String.fromCharCode(97 + (i % 26))}${i}}{x_{${i}}}`).join("\n");
     const sec = (k) => `\\section{Part ${k}}\n` + Array.from({ length: 30 }, (_, j) => `% a comment line ${k}.${j}`).join("\n") + `\nSome words of part ${k}, with $a_${k}$.\n\n\\begin{align}\n  (a+b)^2 &= a^2 + 2ab + b^2, \\\\\n  \\int_0^1 x^n \\, dx &= \\frac{1}{n+1}.\n\\end{align}\n\n`;
@@ -1215,15 +1346,15 @@ try {
     };
     const fz = await frozenFile("/notes/frozen.py", false);
     ok(fz.during.inert && fz.during.said === "Closing…" && fz.shown === "f = 1\n# before\n" && fz.copy === "f = 1\n# before\n" && fz.file === "f = 1\n", "while a file's close waits for its copy its editor is frozen (typing changes nothing); it closes with what it showed, kept as a copy", fz);
-    if (LATEX) {
+    if (LATEX && !TEXFRAME) {
       const fl = await frozenFile("/notes/frozen.tex", true);
       ok(fl.during.inert && fl.shown === "f = 1\n# before\n" && fl.copy === "f = 1\n# before\n" && fl.file === "f = 1\n", "a LaTeX file closed within its debounce while the workspace is busy: frozen, it closes with what it showed, kept as a copy", fl);
     }
-    if (LATEX) {
+    if (LATEX && !TEXFRAME) {
       const ql = await queued("/notes/queued.tex", true);
       ok(/couldn't be saved or kept/.test(ql.bar) && ql.file === "q = 1\n" && ql.copy === "q = 1\n# one\n# two\n" && ql.closed, "a LaTeX file closed within its editor's debounce while the workspace is busy: nothing is written after the close, the latest text is kept as a copy", ql);
     }
-    if (LATEX) {
+    if (LATEX && !TEXFRAME) {
       // (no editor until the file and its revision are read: here the LaTeX module is held)
       await freshPage();
       const T = "/notes/g.tex";
@@ -1250,6 +1381,55 @@ try {
   }
 
   // ======================================================================== ART-C5: each notebook's bar is its own
+  // ======================================================================== a board the agent made: a card, Open in its own tab
+  if (want("board")) {
+    const BOARD = { title: "Primes", nodes: [{ id: "c", title: "A product", code: "print(6 * 7)" }], edges: [] };
+    await call("workspace.create", { path: "/notes/primes.board.json", content: { json: BOARD } });
+    const bt = `t${++turnN}`;
+    event(bt, { type: "turn_started" });
+    event(bt, { type: "artifact", id: "/notes/primes.board.json", kind: "board", title: "primes.board.json", path: "/notes/primes.board.json", body: "" });
+    event(bt, { type: "turn_finished", outcome: "completed" });
+    const card = `${PANE} .board-made`;
+    ok(await until(`/ made primes\\.board\\.json$/.test(document.querySelector('${card} .who')?.textContent ?? '')`, 15000), "a board the agent wrote shows as a card: \"<agent> made primes.board.json\"", await ev(`document.querySelector('${card}')?.textContent ?? null`));
+    ok(await until(`/^\\/board\\/\\?doc=local:[0-9a-f]+$/.test(document.querySelector('${card} .open-board')?.getAttribute('href') ?? '')`, 10000), "…its Open is a link to the board page, by the board's id", await ev(`document.querySelector('${card} .open-board')?.getAttribute('href') ?? null`));
+    ok(await ev(`(() => { const a = document.querySelector('${card} .open-board'); return a.tagName === 'A' && a.target === '_blank' && a.rel === 'noopener' && !a.hasAttribute('aria-disabled'); })()`), "…in a tab of its own (a link: the person's click opens it)");
+    ok(await ev(`!document.querySelector('${PANE} .nb-root') && !document.querySelector('${PANE} .file-body') && document.querySelector('${PANE} .board-source').hidden`), "…not the board's JSON, which is behind View source");
+    // (the pane's Copy, before View source was ever pressed: the board's JSON, not an empty text)
+    await ev(`(() => { window.__bclip = []; navigator.clipboard.writeText = (t) => (window.__bclip.push(t), Promise.resolve()); return true; })()`);
+    await ev(`document.querySelector('.pane-head #copy').click()`);
+    ok(await until(`window.__bclip.length === 1 && /print\\(6 \\* 7\\)/.test(window.__bclip[0])`, 10000), "…its Copy, before View source, copies the board's JSON", await ev(`window.__bclip`));
+    await ev(`document.querySelector('${card} .view-source').click()`);
+    ok(await until(`!document.querySelector('${PANE} .board-source').hidden && /print\\(6 \\* 7\\)/.test(document.querySelector('${PANE} .board-source').textContent) && document.querySelector('${card} .view-source').textContent === 'Hide source'`, 5000), "View source shows its JSON, as the workspace has it");
+    await ev(`document.querySelector('${card} .view-source').click()`);
+    ok(await ev(`document.querySelector('${PANE} .board-source').hidden && document.querySelector('${card} .view-source').textContent === 'View source'`), "…and Hide source hides it");
+    // (the person's click: the mouse, at Open's centre; a scripted click() isn't a user gesture)
+    const at = await ev(`(() => { const r = document.querySelector('${card} .open-board').getBoundingClientRect(); return { x: r.x + r.width / 2, y: r.y + r.height / 2 }; })()`);
+    for (const type of ["mousePressed", "mouseReleased"]) await send("Input.dispatchMouseEvent", { type, x: at.x, y: at.y, button: "left", clickCount: 1 });
+    let tab = null;
+    for (let i = 0; i < 100 && !tab; i++) { tab = (await (await fetch(`http://127.0.0.1:${cdpPort}/json`)).json()).find((x) => x.type === "page" && /\/board\/\?doc=local:/.test(x.url)) ?? null; if (!tab) await sleep(100); }
+    ok(!!tab, "Open opens the board page in a tab of its own", tab?.url);
+    if (tab) {
+      const s2 = new WebSocket(tab.webSocketDebuggerUrl);
+      await new Promise((r, j) => { s2.onopen = r; s2.onerror = j; });
+      let k = 0; const w2 = new Map();
+      s2.onmessage = (e) => { const m = JSON.parse(e.data); if (m.id && w2.has(m.id)) { w2.get(m.id)(m.result); w2.delete(m.id); } };
+      const ev2 = (expression) => new Promise((r) => { const id = ++k; w2.set(id, r); s2.send(JSON.stringify({ id, method: "Runtime.evaluate", params: { expression, awaitPromise: true, returnByValue: true } })); }).then((r) => r?.result?.value);
+      let shows = false;
+      for (const t = Date.now(); !shows && Date.now() - t < 90000; await sleep(200)) shows = !!(await ev2(`window.sagebrush?.board?.outputs?.().then((os) => os.some((o) => /42/.test(String(o.output)))).catch(() => false) ?? false`));
+      ok(shows && (await ev2("window.sagebrush.board.snapshot().doc.title")) === "Primes", "…the agent's board, its code run there", await ev2("window.sagebrush?.board?.snapshot?.()?.doc?.title ?? null"));
+      s2.close();
+      await send("Target.closeTarget", { targetId: tab.id });
+    }
+    // (a board removed since the agent wrote it: said, with no Open)
+    await call("workspace.create", { path: "/notes/gone.board.json", content: { json: { title: "Gone", nodes: [], edges: [] } } });
+    await call("workspace.remove", { path: "/notes/gone.board.json" });
+    const gt = `t${++turnN}`;
+    event(gt, { type: "turn_started" });
+    event(gt, { type: "artifact", id: "/notes/gone.board.json", kind: "board", title: "gone.board.json", path: "/notes/gone.board.json", body: "" });
+    event(gt, { type: "turn_finished", outcome: "completed" });
+    ok(await until(`/made gone\\.board\\.json/.test(document.querySelector('${card} .who')?.textContent ?? '') && /Couldn't find this board in your files\\./.test(document.querySelector('${card}').textContent) && !document.querySelector('${card} .open-board')`, 15000), "a board removed since: said, with no Open", await ev(`document.querySelector('${card}')?.textContent ?? null`));
+  }
+
   if (want("bars")) {
     const A = "/notes/bar-a.ipynb", B = "/notes/bar-b.ipynb";
     await call("workspace.create", { path: A, content: docFor(A, [{ code: "who = 'A'" }]), mode: "python" });
@@ -1300,38 +1480,6 @@ try {
     const after = await ev(`({ roots: document.querySelectorAll('.nb-root').length, empty: !!document.querySelector('[data-try]')?.offsetParent })`);
     ok(newAsks && keptNew && otherAsks && keptOther && stopAsks && after.roots === 0 && after.empty, "New chat and another thread ask first while a cell runs: Cancel keeps it running, Stop and close leaves", { newAsks, keptNew, otherAsks, keptOther, stopAsks, after });
     await converse();
-  }
-
-  // ======================================================================== the journal: read only in the pane
-  if (want("journal")) {
-    const path = "/notes/journal.ipynb";
-    await call("workspace.create", { path, content: docFor(path, [{ code: "print('J-RAN')" }]), mode: "python" });
-    const ref = await refOf(path);
-    const fence0 = await record(FENCE);
-    await putRecord({ ...(fence0 ?? { id: FENCE, workspace: "test", generation: 1, step: 1 }), phase: "journal", journal: 1 });
-    try {
-      await openNotebook(path);
-      await typeInto(0, "  # typed");
-      await sleep(1500);
-      const v = (await shown())[0];
-      const rec = await record(ref);
-      const bar = await barText();
-      const runs = await ev(`[...document.querySelectorAll('${PANE} .runb')].every((b) => b.disabled)`);
-      const open = await ev(`[...document.querySelectorAll('#artifacts .pane-bar button')].some((b) => b.textContent === 'Open in Sagebrush')`);
-      ok(v === "print('J-RAN')" && rec.cells[0].code === "print('J-RAN')" && runs && open && /readonly/.test(bar), "under sync's journal the pane is read only: an edit changes nothing, Run is off, Open in Sagebrush is offered", { v, saved: rec.cells[0].code, runs, open, bar });
-      // (ART-C1) the keyboard's Run gestures, in the cell and in command mode: nothing runs, no interpreter starts
-      const w0 = workerCount();
-      await ev(`${cellJs(0)}.querySelector('textarea').focus()`);
-      for (const modifiers of [8, 2, 1]) await key("Enter", { modifiers, windowsVirtualKeyCode: 13 });
-      await key("Escape");
-      await key("Enter", { modifiers: 8, windowsVirtualKeyCode: 13 });
-      await sleep(2500);
-      const o = await outs();
-      const rec2 = await record(ref);
-      ok(workerCount() === w0 && !/J-RAN/.test(o) && rec2.rev === rec.rev, "under the journal, Shift/Ctrl/Alt+Enter (in the cell and in command mode) run nothing: no interpreter, no output, no write", { workers: workerCount() - w0, o, rev: [rec.rev, rec2.rev] });
-    } finally {
-      if (fence0) await putRecord(fence0);
-    }
   }
 
   // ======================================================================== A12 step 1: an agent's edit by cell
@@ -1537,7 +1685,7 @@ try {
       const later = await rec(path);
       ok(!res.ok && /nothing changed/.test(res.msg) && same(now, before) && same(later, before) && (await shown())[0] === "x = 1", "E18: an apply that throws midway is put back: nothing saved, no version, during or after", { res, rev: [before.rev, now.rev, later.rev] });
     }
-    // E16a (read only under sync's journal), E16b (closing): refused, nothing changed
+    // E16b (closing): refused, nothing changed (under sync's journal an edit is applied: the "journal-live" section)
     {
       const { path, ids } = await mk();
       await open(path);
@@ -1550,20 +1698,6 @@ try {
       await ev(`window.__release()`);
       await sleep(500);
       ok(!res.ok && /closing|isn't saved here/.test(res.msg) && same(await rec(path), before), "E16b: an edit of a notebook while its pane closes is refused, nothing changed", res);
-    }
-    {
-      const fence0 = await record(FENCE);
-      try {
-        const { path, ids } = await mk();
-        const r = await readOf(path);
-        const before = await rec(path);
-        await putRecord({ ...(fence0 ?? { id: FENCE, workspace: "test", generation: 1, step: 1 }), phase: "journal", journal: 1 });
-        await open(path);
-        const res = await edit(path, r, { set: [{ id: ids[0], source: "x = 10" }] });
-        ok(!res.ok && /read only/.test(res.msg) && same(await rec(path), before), "E16a: under sync's journal the pane is read only: an edit is refused, nothing changed", res);
-      } finally {
-        if (fence0) await putRecord(fence0);
-      }
     }
     // E30, E31 (#957 r2, E2 / P3-SEC-3): a notebook in the agent's own branch. The branches' check is taken after the
     // pane's waits and its lock held through the apply (seen held there), then let go for the save; outside /Branches no
@@ -1634,19 +1768,34 @@ try {
       ok(!res.ok && agentNone && (w === "W2" ? /# mine/.test(after.cells[0].code) : same(after, before)), `${name}: ${what} while the edit waited at ${w}: refused, nothing of it written${w === "W2" ? " (the person's own text saved, as theirs)" : ", the file byte-identical"}`, { res, rev: [before.rev, after.rev] });
       await regain(how === "c" ? "none" : how);
     }
-    // E22 (C2, final) and E22b (C2, preliminary): a save the store refuses ("not saved: ...") while saved() still
-    // resolves: never answered ok, nothing applied or written
-    const refuseNext = () => ev(`(() => { let n = 0; window.__sbTestStoreSave = () => (n++ === 0 ? "not saved: (test)" : null); return true; })()`);
+    // E22 (C2, final) and E22b (C2, preliminary): a save the store refuses ("not saved: ..."): never answered ok,
+    // nothing applied or written; E22c: refused once, then taken: the notebook sends what it has again (a refused save
+    // is a failed one, sent again with the next), so the edit is answered ok only once the record has it
+    // (refusals counted, so a row that expects one can't pass with none: window.__refused)
+    const refuseNext = () => ev(`(() => { let n = 0; window.__refused = 0; window.__sbTestStoreSave = () => (n++ === 0 ? (window.__refused++, "not saved: (test)") : null); return true; })()`);
+    const refuseAll = () => ev(`(window.__sbTestStoreSave = () => "not saved: (test)", true)`);
     const refuseNone = () => ev(`(delete window.__sbTestStoreSave, true)`);
     {
       const { path, ids } = await mk();
       await open(path);
       const r = await readOf(path);
       const before = await rec(path);
-      await refuseNext();
+      await refuseAll();
       const res = await edit(path, r, { set: [{ id: ids[1], source: "print(22)" }] });
+      const after = await rec(path);
       await refuseNone();
-      ok(!res.ok && /not saved/.test(res.msg) && same(await rec(path), before), "E22: the edit's final save refused by the store: answered not ok, the record unchanged", res);
+      ok(!res.ok && /not saved/.test(res.msg) && same(after, before), "E22: the edit's final save refused by the store: answered not ok, the record unchanged", res);
+    }
+    {
+      const { path, ids } = await mk();
+      await open(path);
+      const r = await readOf(path);
+      await refuseNext();
+      const res = await edit(path, r, { set: [{ id: ids[1], source: "print(220)" }] });
+      const refused = await ev(`window.__refused`);
+      await refuseNone();
+      const after = await rec(path);
+      ok(refused === 1 && res.ok && after.cells.some((c) => c.code === "print(220)"), "E22c: the edit's final save refused once, then taken: sent again, answered ok, and the record has it", { refused, res, cells: after.cells.map((c) => c.code) });
     }
     {
       const { path, ids } = await mk();
@@ -1654,10 +1803,11 @@ try {
       const r = await readOf(path);
       const before = await rec(path);
       await typeInto(0, " # p");
-      await refuseNext();
+      await refuseAll();
       const res = await edit(path, r, { set: [{ id: ids[1], source: "print(23)" }] });
+      const after = await rec(path), seen = await shown();
       await refuseNone();
-      ok(!res.ok && /couldn't be saved first/.test(res.msg) && same(await rec(path), before) && /# p/.test((await shown())[0]) && (await shown())[1] === "print(2)", "E22b: the person's pending change refused by the store: refused before anything is applied, the record unchanged, their text shown", res);
+      ok(!res.ok && /couldn't be saved first/.test(res.msg) && same(after, before) && /# p/.test(seen[0]) && seen[1] === "print(2)", "E22b: the person's pending change refused by the store: refused before anything is applied, the record unchanged, their text shown", res);
     }
     // E23, E23b (C3): the rollback keeps the revision it was saved at, so the person's next save conflicts with another
     // tab's change and merges it: E23 with that change made after the rollback, E23b with it made during the apply
@@ -1772,6 +1922,200 @@ try {
       await ev(`(document.getElementById('sbtest-b')?.remove(), true)`);
     }
     event(turn, { type: "turn_finished", outcome: "completed" });
+  }
+
+  // ======================================================================== the pane under sync's journal, live
+  // (notebook sync on in this browser: the workspace's fence in the journal phase. The pane's notebook is the notebook's
+  // editor through the journal's store, as the notebook page's is: editable and runnable; an agent's edit is applied,
+  // lands in the journal, and a notebook tab of this browser shows it, the person's typing there kept)
+  if (want("journal-live")) {
+    if (!FEATURES) {
+      FEATURES = true;
+      await ev(`document.querySelector('#new')?.click()`);
+      await sleep(700);
+      await pair();
+    }
+    await converse();
+    const turn = `t${++turnN}`;
+    event(turn, { type: "turn_started" });
+    const fence0 = await record(FENCE);
+    // (sync's journal switched on as Workspace.activateJournal leaves it: the same fence, in phase "journal", in the
+    // notebooks' store and in both histories' (their [FENCE, ""] rows); and back as they were)
+    const HIST = ["sagebrush-history", "sagebrush-board-history"];
+    const histFence = (name, v) => ev(`indexedDB.databases().then((dbs) => dbs.some((x) => x.name === ${JSON.stringify(name)}) && new Promise((ok, no) => { const r = indexedDB.open(${JSON.stringify(name)}); r.onerror = () => no(String(r.error)); r.onsuccess = () => { const d = r.result; if (!d.objectStoreNames.contains("history")) { d.close(); return ok(null); } const t = d.transaction("history", "readwrite"), st = t.objectStore("history"), k = [${JSON.stringify(FENCE)}, ""]; let was; const g = st.get(k); g.onsuccess = () => { was = g.result; const v = ${v === undefined ? "undefined" : "JSON.parse(" + JSON.stringify(JSON.stringify(v ?? null)) + ")"}; if (v === undefined) return; if (v === null) st.delete(k); else st.put({ ...(was ?? {}), nb: ${JSON.stringify(FENCE)}, time: "", fence: v.fence }); }; t.oncomplete = () => { d.close(); ok(was ?? null); }; t.onerror = () => no(String(t.error)); }; })).then((x) => x || null)`);
+    const hist0 = [];
+    for (const name of HIST) hist0.push(await histFence(name, undefined));
+    const journalOn = async () => {
+      const f = { ...(fence0 ?? { id: FENCE, workspace: "test", generation: 1, step: 1 }), phase: "journal", journal: 1 };
+      await putRecord(f);
+      const { id: _id, ...fence } = f;
+      for (const name of HIST) await histFence(name, { fence });
+    };
+    // (another tab of this browser, with its own DevTools socket: the notebook page)
+    const tabs = [];
+    const tab = async (url) => {
+      const t = await (await fetch(`http://127.0.0.1:${cdpPort}/json/new?about:blank`, { method: "PUT" })).json();
+      const s = new WebSocket(t.webSocketDebuggerUrl);
+      await new Promise((r) => (s.onopen = r));
+      let k = 0;
+      const w = new Map();
+      s.onmessage = (e) => { const m = JSON.parse(e.data); if (m.id && w.has(m.id)) { w.get(m.id)(m.result ?? m.error); w.delete(m.id); } };
+      const tsend = (method, params = {}) => new Promise((r) => { const id = ++k; w.set(id, r); s.send(JSON.stringify({ id, method, params })); });
+      const tev = async (expression) => (await tsend("Runtime.evaluate", { expression, awaitPromise: true, returnByValue: true }))?.result?.value;
+      const tuntil = async (expr, ms = 20000) => { const t1 = Date.now(); while (Date.now() - t1 < ms) { if (await tev(expr).catch(() => false)) return true; await sleep(100); } return false; };
+      await tsend("Page.enable");
+      await tsend("Runtime.enable");
+      await tsend("Page.navigate", { url });
+      const x = { ev: tev, until: tuntil, send: tsend, close: async () => { try { s.close(); } catch {} await fetch(`http://127.0.0.1:${cdpPort}/json/close/${t.id}`).catch(() => {}); } };
+      tabs.push(x);
+      return x;
+    };
+    const NB = "window.sagebrush?.notebook";
+    const tabCode = (x) => x.ev(`${NB}?.snapshot?.().cells.map((c) => c.code) ?? null`);
+    // (the notebook shown through the journal's store: as its writer, loaded, or following the tab that writes it)
+    const tabReady = (x) => x.until(`!!(${NB}?.store?.journaled && (${NB}.store.ready || ${NB}.store.readOnly === "other") && document.querySelector("#cells .cell textarea"))`, 30000);
+    const codeOf = (c) => c.code ?? (Array.isArray(c.source) ? c.source.join("") : c.source);
+    const readOf = async (path) => {
+      const r = await call("workspace.read", { path });
+      return { ref: r.ref, base: r.rev, cells: r.content.json.cells, was: Object.fromEntries(r.content.json.cells.map((c) => [c.id, cellHash(c)])) };
+    };
+    const edit = (path, r, e) => Promise.race([
+      call("notebook.edit", { conversation: conv, path, ref: r.ref, base: r.base, was: r.was, ...e }).then((x) => ({ ok: true, x }), (err) => ({ ok: false, code: err.code, msg: err.message })),
+      sleep(15000).then(() => ({ ok: false, code: "timeout", msg: "no answer in 15 s" })),
+    ]);
+    try {
+      // J1-J3: the pane, with no notebook tab open
+      {
+        const path = "/notes/live-1.ipynb";
+        await call("workspace.create", { path, content: docFor(path, [{ code: "a = 1" }, { code: "print('J-RAN')" }]), mode: "python" });
+        const ref = await refOf(path);
+        await journalOn();
+        await openNotebook(path, { finish: false, turn });
+        await sleep(1000);
+        const bar = await barText();
+        const ro = await ev(`!!document.querySelector('${PANE} .nb-root .cell textarea')?.readOnly`);
+        const runOff = await ev(`[...document.querySelectorAll('${PANE} .runb')].every((b) => b.disabled)`);
+        ok(!/readonly|read only/i.test(bar) && !ro && !runOff, "J1: under sync's journal the pane's notebook is editable and runnable (not read only, Run on)", { bar, ro, runOff });
+        const r = await readOf(path);
+        const res = await edit(path, r, { set: [{ id: r.cells[0].id, source: "a = 2  # agent" }] });
+        const rec = await record(ref);
+        ok(res.ok, "J2: under sync's journal an agent's edit of the pane's notebook is applied", { res, saved: await ev(`document.querySelector('${PANE} .saved')?.textContent`), rec: rec && { rev: rec.rev, j: rec.j, hash: !!rec.hash, unjournaled: rec.unjournaled, cells: rec.cells?.map((c) => c.code) }, logs: logs.slice(-5) });
+        // (the notebook page in another tab, through the journal's store: what the journal has)
+        const B = await tab(`${site}/?nb=${ref}`);
+        const ready = await tabReady(B);
+        const seen = ready && (await B.until(`(${NB}.snapshot().cells[0]?.code ?? "") === "a = 2  # agent"`, 10000));
+        ok(ready && seen, "J3: the agent's edit is in the journal: the notebook page, opened in another tab, shows it", { ready, code: await tabCode(B) });
+        await B.close();
+        await send("Page.bringToFront");
+        // J6: the person's Run, in the pane: it runs here (no longer refused under the journal), its output shown
+        await ev(`${cellJs(1)}.querySelector('.runb').click()`);
+        const ran = await until(`/J-RAN/.test([...document.querySelectorAll('${PANE} .cell .out')].map((o) => o.textContent).join())`, 120000).catch(() => false);
+        ok(ran, "J6: under sync's journal the pane's Run runs the cell and shows its output", await outs());
+      }
+      // J4-J5: the person has the notebook open in a notebook tab and types there; the agent edits it in the pane meanwhile
+      {
+        const path = "/notes/live-2.ipynb";
+        await call("workspace.create", { path, content: docFor(path, [{ code: "b = 1" }, { code: "c = 1" }]), mode: "python" });
+        const ref = await refOf(path);
+        const P = await tab(`${site}/?nb=${ref}`);
+        const ready = await tabReady(P);
+        // (the person's typing in the tab's second cell, as an input event sets it)
+        await P.ev(`(() => { const t = document.querySelectorAll("#cells .cell textarea")[1]; t.focus(); t.value = "c = 1  # person"; t.dispatchEvent(new Event("input", { bubbles: true })); })()`);
+        await sleep(1500);
+        // (the chat's tab in front again, as the person switching back to it: a new tab took the front)
+        await send("Page.bringToFront");
+        await openNotebook(path, { finish: false, turn });
+        const r = await readOf(path);
+        const res = await edit(path, r, { set: [{ id: r.cells[0].id, source: "b = 2  # agent" }] });
+        const both = await P.until(`(() => { const c = ${NB}.snapshot().cells.map((x) => x.code); return c[0] === "b = 2  # agent" && c[1] === "c = 1  # person"; })()`, 10000);
+        ok(ready && res.ok && both, "J4: with the notebook open in a notebook tab, an agent's edit in the pane is applied and the tab shows it within 10 s, the person's typing kept", { ready, res, tab: await tabCode(P) });
+        const r2 = await readOf(path);
+        const codes = r2.cells.map(codeOf);
+        ok(codes[0] === "b = 2  # agent" && codes[1] === "c = 1  # person", "J5: the workspace's copy has both, the agent's edit and the person's", codes);
+        await P.close();
+      }
+      // J7, J8: the pane the writer when the edit is admitted, then held at one of the edit's waits while the person
+      // takes the notebook over in a notebook tab (a real click and key there): the edit, resumed, is refused, nothing
+      // changed: applyEdits never ran, and the pane, the tab and the journal keep the person's value. J7: resumed once
+      // the tab writes; J8: resumed as soon as the hand-over has begun (the pane read only, its yield under way)
+      const typeIn = async (x, text) => {
+        await x.send("Emulation.setFocusEmulationEnabled", { enabled: true });
+        await x.send("Page.bringToFront");
+        const at = await x.ev(`(() => { const t = document.querySelector("#cells .cell textarea"); t.scrollIntoView({ block: "center" }); const b = t.getBoundingClientRect(); return { x: b.left + b.width - 6, y: b.top + b.height / 2 }; })()`);
+        for (const type of ["mousePressed", "mouseReleased"]) await x.send("Input.dispatchMouseEvent", { type, x: at.x, y: at.y, button: "left", clickCount: 1 });
+        for (const c of text) {
+          await x.send("Input.dispatchKeyEvent", { type: "keyDown", key: c, code: /\d/.test(c) ? "Digit" + c : "", text: c });
+          await x.send("Input.dispatchKeyEvent", { type: "keyUp", key: c, code: /\d/.test(c) ? "Digit" + c : "" });
+        }
+      };
+      for (const [name, stage, early] of [["J7", "saved", false], ["J7", "stored", false], ["J7", "read", false], ["J8", "read", true]]) {
+        const path = `/notes/race-${stage}${early ? "-early" : ""}.ipynb`;
+        await call("workspace.create", { path, content: docFor(path, [{ code: "r = 1" }]), mode: "python" });
+        const ref = await refOf(path);
+        await send("Page.bringToFront");
+        await openNotebook(path, { finish: false, turn });
+        const writes = await until(`document.querySelector('${PANE} .nb-root .cell textarea')?.readOnly === false`, 10000).catch(() => false);
+        const P = await tab(`${site}/?nb=${ref}`);
+        const follows = await P.until(`!!(${NB}?.store?.journaled && ${NB}.store.readOnly === "other")`, 20000);
+        await send("Page.bringToFront");
+        await ev(`(() => { window.__applied = 0; window.__paused = null; window.__sbTestApplyEdits = (c, e) => { window.__applied++; return c.applyEdits(e, { run: false }); }; window.__sbTestEditPause = (s) => s === ${JSON.stringify(stage)} ? new Promise((r) => { window.__paused = s; window.__resume = r; }) : null; })()`);
+        const r = await readOf(path);
+        const pending = edit(path, r, { set: [{ id: r.cells[0].id, source: "r = 2  # agent" }] });
+        const paused = await until(`window.__paused === ${JSON.stringify(stage)}`, 10000).catch(() => false);
+        const key = early ? "8" : "9";
+        await typeIn(P, key);
+        const took = early
+          ? await until(`document.querySelector('${PANE} .nb-root .cell textarea')?.readOnly === true`, 10000).catch(() => false)
+          : await P.until(`!!(${NB}.store.writer && ${NB}.store.ready && ${NB}.snapshot().cells[0]?.code.includes(${JSON.stringify(key)}))`, 15000);
+        await ev(`window.__resume?.()`);
+        const res = await pending;
+        // (the person's key, through the tab, in the journal's record and in the pane, which follows that tab now)
+        const pcodeOk = await P.until(`${NB}.snapshot().cells[0]?.code.includes(${JSON.stringify(key)})`, 15000);
+        const pcode = (await tabCode(P))?.[0];
+        const paneOk = await until(`(document.querySelector('${PANE} .nb-root .cell textarea')?.value ?? "") === ${JSON.stringify(pcode ?? "")}`, 10000).catch(() => false);
+        let recd = null;
+        for (let i = 0; i < 50 && recd !== pcode; i++) { recd = (await record(ref))?.cells?.[0]?.code ?? null; if (recd !== pcode) await sleep(200); }
+        const applied = await ev(`window.__applied`);
+        await ev(`window.__sbTestEditPause = null; window.__sbTestApplyEdits = null; window.__resume = null;`);
+        ok(writes && follows && paused && took && !res.ok && /took this notebook over/.test(res.msg ?? "") && applied === 0 && pcodeOk && paneOk && recd === pcode && !/agent/.test(`${pcode} ${recd}`),
+          `${name}: the edit held at its "${stage}" wait while the person takes the notebook over in a tab${early ? " (resumed once the hand-over began)" : ""}: refused, nothing changed: applyEdits never ran, and the pane, the tab and the journal keep the person's value`,
+          { writes, follows, paused, took, res, applied, pcode, recd, paneOk });
+        await P.close();
+        await send("Page.bringToFront");
+      }
+      // J9: a notebook pane under the journal opened and closed again and again leaves no listener behind on the
+      // document or the window (its focus takeover let go for good with it)
+      {
+        const listeners = async () => {
+          const out = {};
+          for (const k of ["document", "window"]) {
+            const o = await send("Runtime.evaluate", { expression: k });
+            const r = await send("DOMDebugger.getEventListeners", { objectId: o.result.objectId });
+            out[k] = r.listeners?.length ?? -1;
+            await send("Runtime.releaseObject", { objectId: o.result.objectId });
+          }
+          return out;
+        };
+        const path = "/notes/live-again.ipynb";
+        await call("workspace.create", { path, content: docFor(path, [{ code: "q = 1" }]), mode: "python" });
+        const cycle = async () => {
+          await openNotebook(path, { finish: false, turn });
+          await ev(`document.querySelector('#close').click()`);
+          await until(`!document.body.classList.contains('has-artifact')`, 10000).catch(() => {});
+          await sleep(300);
+        };
+        await cycle();
+        const n0 = await listeners();
+        for (let i = 0; i < 5; i++) await cycle();
+        const n1 = await listeners();
+        ok(n0.document >= 0 && n1.document === n0.document && n1.window === n0.window, "J9: a notebook pane under the journal opened and closed 5 more times leaves no listener behind (document, window)", { n0, n1 });
+      }
+    } finally {
+      for (const x of tabs) await x.close().catch(() => {});
+      if (fence0) await putRecord(fence0);
+      for (const [i, name] of HIST.entries()) await histFence(name, hist0[i]).catch(() => {});
+      event(turn, { type: "turn_finished", outcome: "completed" });
+    }
   }
 } catch (e) {
   ok(false, "the test ran to its end: " + (e?.stack ?? e));

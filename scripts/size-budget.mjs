@@ -8,11 +8,9 @@
 //   - the CLI bundle (build/cli/pyjs.cjs) and its generated library and
 //     packages (build/cli/lib.gen.js, packages.gen.js);
 //   - how many packages the core's registry has.
-// Since plan-growth-budget-r5's PR A, the exact-total comparison is a report
-// only: the growth gate (scripts/size-measure.mjs, ci.yml's size-gate job)
-// enforces growth instead, against budgets.json and .growth/ markers.  What
-// still fails here: no optional package appears in any of these artifacts,
-// and the build must be the CI build (below).  (PR B deletes the totals.)
+// Exact-total comparisons are report-only. The stateless size-gate job
+// checks per-change growth. This script still rejects optional package leaks
+// and stale or incorrectly built artifacts.
 //
 //   node scripts/size-budget.mjs --check     (the default tier, after bun web/build.ts and build-cli)
 //   node scripts/size-budget.mjs --update    record the current sizes

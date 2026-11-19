@@ -134,7 +134,7 @@ def refused(page, name, args, code):
 def test_tools():
     tools = WS.tools()
     names = [t["name"] for t in tools]
-    assert names == ["workspace_" + v for v in ("list", "stat", "read", "write", "create", "mkdir", "rename", "duplicate", "remove", "restore", "history", "version", "git_branch", "git_commit", "git_status", "git_wait")] + ["workspace_connect"], names
+    assert names == ["workspace_" + v for v in ("list", "stat", "read", "write", "create", "mkdir", "rename", "duplicate", "remove", "restore", "history", "version", "git_branch", "git_commit", "git_status", "git_wait", "run_notebook", "run_file", "run_stop", "latex_build")] + ["workspace_connect"], names
     for t in tools[:-1]:
         # (Anthropic's API refuses tool names with other characters, dots included)
         assert re.fullmatch(r"[a-zA-Z0-9_-]{1,64}", t["name"]), t["name"]
@@ -170,6 +170,13 @@ RESULT_SAMPLES = {
     "git_status": {"branch": "agent/x", "status": "partly-accepted", "head": "a" * 40, "base": "b" * 40, "seq": 4, "mainMoved": False,
                    "title": "Clearer introduction", "note": "shorter", "files": {"/a.txt": {"decision": "changes", "reason": "one paragraph"}}, "decidedAt": "2026-11-12T01:00:00.000Z"},
     "git_wait": {"branch": "agent/x", "status": "review", "head": "a" * 40, "base": "b" * 40, "seq": 3, "mainMoved": False, "decided": False, "next": "Still waiting"},
+    # (the run verbs: web/workspace/run-verbs.ts)
+    "run_notebook": {"ok": True, "ended": "done", "ms": 812, "inputHash": "c" * 64, "refused": {"paths": []}, "saved": "not saved: main",
+                     "cells": [{"index": 0, "status": "ok", "out": "", "images": {"count": 1, "bytes": 2048}}, {"index": 1, "status": "ok", "out": "0.5\n"}]},
+    "run_file": {"ok": False, "ended": "error", "ms": 40, "inputHash": "d" * 64, "refused": {"paths": []}, "exit": 1, "stdout": "", "stderr": "ZeroDivisionError"},
+    "run_stop": {"stopped": True},
+    "latex_build": {"ok": True, "ended": "done", "ms": 2100, "inputHash": "e" * 64, "report": {"problems": []}, "sagetex": {}, "refused": {"paths": []},
+                    "overflow": [], "pages": [{"n": 1, "w": 800, "h": 1035, "png": "iVBORw0KGgo="}]},
 }
 #: the keys each sample's verb can't do without (stat's null entry is checked in test_stat_null_is_absence)
 REQUIRED = {"list": ["entries"], "read": ["entry", "rev", "content"], "write": ["entry", "rev"], "create": ["entry"], "mkdir": ["entry"],
@@ -177,7 +184,8 @@ REQUIRED = {"list": ["entries"], "read": ["entry", "rev", "content"], "write": [
             "version": ["content"], "git_branch": ["branch", "worktree", "files", "bytes", "next"],
             "git_commit": ["branch", "commit", "unchanged", "changes", "review", "next"],
             "git_status": ["branch", "status", "head", "base", "seq", "mainMoved"],
-            "git_wait": ["branch", "status", "head", "base", "seq", "mainMoved", "decided"]}
+            "git_wait": ["branch", "status", "head", "base", "seq", "mainMoved", "decided"],
+            "run_notebook": ["ok", "ended"], "run_file": ["ok", "ended"], "latex_build": ["ok", "ended"], "run_stop": ["stopped"]}
 
 
 def test_every_verbs_result_is_accepted_and_checked():
@@ -649,15 +657,15 @@ def test_through_the_server():
     assert r["result"]["isError"] and r["result"]["structuredContent"]["error"]["code"] == "invalid", r
     r = rpc(3, "tools/call", {"name": "workspace_list", "arguments": {"folder": "/"}})
     assert r["result"]["isError"] and r["result"]["structuredContent"]["error"]["code"] == "not_connected", r
-    # workspace_connect: a code and a port on 127.0.0.1; until a page pairs, the verbs say so
+    # workspace_connect: a link (a code and a port on 127.0.0.1); until a page pairs, the verbs give it too
     r = rpc(31, "tools/call", {"name": "workspace_connect", "arguments": {}})["result"]
     got = r["structuredContent"]["result"]
     assert not r["isError"] and len(got["code"]) == 26 and got["port"] > 0 and got["paired"] is False, r
     assert got["code"] in r["content"][0]["text"] and srv.link.sock.getsockname()[0] == "127.0.0.1"
-    # (the one-click link: this listener's port and the one-time code, given first in the text)
+    # (the one link: this listener's port and the one-time code inside it, and nothing to type by hand, on one line)
     assert got["link"] == "https://sagebrush.space/board/?pair=%s&port=%d" % (got["code"], srv.link.sock.getsockname()[1]), got
     text = r["content"][0]["text"]
-    assert text.index(got["link"]) < text.index("Or by hand: code " + got["code"]) and "\n" not in text, text
+    assert got["link"] in text and "by hand" not in text and "\n" not in text, text
     r = rpc(32, "tools/call", {"name": "workspace_list", "arguments": {"folder": "/"}})["result"]
     assert r["isError"] and r["structuredContent"]["error"]["code"] == "not_connected"
     srv.link.close()
@@ -668,6 +676,133 @@ def test_through_the_server():
     # an older client gets no title (it is in the protocol from 2025-06-18)
     rpc(6, "initialize", {"protocolVersion": "2025-03-26", "capabilities": {}, "clientInfo": {"name": "t", "version": "0"}})
     assert all("title" not in t and "outputSchema" not in t for t in rpc(7, "tools/list", {})["result"]["tools"])
+
+
+def test_run_verbs():
+    # the page's run verbs are tools: none read-only, each with the page schema's description and parameters
+    tools = {t["name"]: t for t in WS.tools()}
+    for verb in ("run_notebook", "run_file", "run_stop", "latex_build"):
+        t = tools["workspace_" + verb]
+        assert t["annotations"]["readOnlyHint"] is False and t["title"] == WS.TITLES[verb], t
+        assert t["description"].startswith(WS.SCHEMA["verbs"]["workspace." + verb]["description"]), t["description"]
+    assert set(tools["workspace_run_notebook"]["inputSchema"]["properties"]) == {"path", "timeout_s"}
+    assert tools["workspace_run_stop"]["inputSchema"]["properties"] == {}
+
+    class Runs(FakePage):
+        """A page whose runs answer with a set result, recording the wait it was given."""
+        def __init__(self, result):
+            super().__init__()
+            self.result, self.waits = result, []
+
+        def request(self, method, params, timeout):
+            self.requests.append((method, params))
+            self.waits.append(timeout)
+            return self.result
+
+    # a run's result, rebuilt from its checked keys: what the page adds beyond them doesn't reach the agent
+    page = Runs(dict(RESULT_SAMPLES["run_notebook"], extra="not ours", cells=[dict(RESULT_SAMPLES["run_notebook"]["cells"][0], code="x"), RESULT_SAMPLES["run_notebook"]["cells"][1]]))
+    got = ok(page, "workspace_run_notebook", {"path": "/n.ipynb"})
+    assert "extra" not in got and got["cells"][0] == {"index": 0, "status": "ok", "out": "", "images": {"count": 1, "bytes": 2048}}, got
+    assert page.requests[-1] == ("workspace.run_notebook", {"path": "/n.ipynb"})
+    # the wait for its answer: its own deadline (120 s when not given) and a margin, never the 60 s of the other verbs
+    assert page.waits[-1] == WS.RUN_DEFAULT_S + WS.RUN_WAIT_MARGIN_S
+    ok(page, "workspace_run_notebook", {"path": "/n.ipynb", "timeout_s": 600})
+    assert page.waits[-1] == 600 + WS.RUN_WAIT_MARGIN_S
+    refused(page, "workspace_run_notebook", {"path": "/n.ipynb", "timeout_s": "soon"}, "invalid")  # (checked before the page)
+    # the other verbs keep theirs
+    page = Runs({"entries": []})
+    ok(page, "workspace_list", {"folder": "/"})
+    assert page.waits[-1] == 60.0
+    # run_file, run_stop and latex_build, each its own shape; a page's PNG kept as sent
+    assert ok(Runs(RESULT_SAMPLES["run_file"]), "workspace_run_file", {"path": "/a.py"})["stderr"] == "ZeroDivisionError"
+    assert ok(Runs({"stopped": False}), "workspace_run_stop", {}) == {"stopped": False}
+    assert ok(Runs(RESULT_SAMPLES["latex_build"]), "workspace_latex_build", {"path": "/p.tex", "pages": [1]})["pages"][0]["png"] == "iVBORw0KGgo="
+    # a stopped run's head only; a revoked one's ok, ended and reason
+    assert ok(Runs({"ok": False, "ended": "stopped", "ms": 3, "inputHash": "c" * 64, "refused": {"paths": []}}), "workspace_run_notebook", {"path": "/n.ipynb"})["ended"] == "stopped"
+    assert ok(Runs({"ok": False, "ended": "revoked", "reason": "the grant ended"}), "workspace_run_file", {"path": "/a.py"})["reason"] == "the grant ended"
+    # what isn't a run's result is a protocol error, never a success
+    for verb, bad in [
+        ("run_notebook", {"ended": "done"}),                                            # no ok
+        ("run_notebook", {"ok": True, "ended": "finished"}),                             # an end it doesn't define
+        ("run_notebook", {"ok": True, "ended": "done", "cells": [{"status": "ok"}]}),     # a cell without its index
+        ("run_notebook", {"ok": True, "ended": "done", "cells": [{"index": True, "status": "ok"}]}),
+        ("run_file", {"ok": True, "ended": "done", "exit": "0"}),
+        ("latex_build", {"ok": True, "ended": "done", "pages": [{"n": 1, "w": 1, "h": 1}]}),  # a page without its PNG
+        ("latex_build", {"ok": True, "ended": "done", "report": "fine"}),
+        ("run_stop", {}),
+    ]:
+        refused(Runs(bad), "workspace_" + verb, {"path": "/x"} if verb != "run_stop" else {}, "protocol")
+
+
+def test_unknown_tools_through_the_server():
+    # (the installed package, as test_through_the_server)
+    try:
+        from sagebrush import mcp_server
+    except Exception as e:
+        if os.environ.get("CI"):
+            raise
+        print("  (the server part skipped: %s: %s)" % (type(e).__name__, e))
+        return
+    out = io.StringIO()
+    srv = mcp_server.Server(out)
+
+    def rpc(rid, method, params):
+        out.seek(0)
+        out.truncate()
+        srv.handle({"jsonrpc": "2.0", "id": rid, "method": method, "params": params})
+        for t in srv.threads:
+            t.join()
+        return json.loads(out.getvalue().strip().splitlines()[-1])
+
+    rpc(1, "initialize", {"protocolVersion": "2025-06-18", "capabilities": {}, "clientInfo": {"name": "t", "version": "0"}})
+    tools = {t["name"] for t in rpc(2, "tools/list", {})["result"]["tools"]}
+    assert {"workspace_run_notebook", "workspace_run_file", "workspace_run_stop", "workspace_latex_build"} <= tools
+    # a name it doesn't offer (a page verb it doesn't know, too): the protocol's answer, the server still there
+    for name in ("workspace_run_everything", "nope"):
+        r = rpc(3, "tools/call", {"name": name, "arguments": {}})
+        assert r.get("error", {}).get("code") == -32602 and r["error"]["message"] == "unknown tool: " + name, r
+    # a KeyError inside a tool is that tool's exception, never "unknown tool"
+
+    class Broken(FakePage):
+        def request(self, method, params, timeout):
+            raise KeyError("cells")
+
+    srv.link = Broken()
+    r = rpc(4, "tools/call", {"name": "workspace_run_notebook", "arguments": {"path": "/n.ipynb"}})
+    assert "error" not in r and r["result"]["isError"] and r["result"]["structuredContent"]["error"]["exception"] == "KeyError", r
+    srv.link = FakePage()
+    r = rpc(5, "tools/call", {"name": "workspace_create", "arguments": {"path": "/x.txt", "content": {"text": "hi"}}})
+    assert not r["result"]["isError"], r
+
+
+def test_notebook_languages_are_told():
+    """An agent is told that a notebook runs in its language, each one with an example (the MATLAB notebook an agent
+    once declined to make): workspace_create's mode names every language its enum allows, and sagebrush-mcp's
+    instructions name them too, read from the source so that this needs no installed sagebrush."""
+    import ast
+    examples = {"python": "print(2**10)", "sage": "factor(2^64 - 1)", "matlab": "x = linspace(0, 3, 200); plot(x, sin(x.^2))",
+                "magma": "print Factorization(2^64 - 1);"}
+    mode = {t["name"]: t for t in WS.tools()}["workspace_create"]["inputSchema"]["properties"]["mode"]
+    assert sorted(mode["enum"]) == sorted(examples), mode
+    for m, ex in examples.items():
+        assert "%s, %s" % (m, ex) in mode["description"], (m, mode["description"])
+    src = open(os.path.join(HERE, "python", "sagebrush", "mcp_server.py"), encoding="utf-8").read()
+    node = next(n for n in ast.parse(src).body if isinstance(n, ast.Assign) and getattr(n.targets[0], "id", "") == "INSTRUCTIONS")
+    text = node.value.left.value  # (INSTRUCTIONS = """...""" + CH.INSTRUCTIONS)
+    for m, ex in examples.items():
+        assert "- %s: %s" % (m, ex) in text, (m, text)
+    assert "workspace_create" in text and "Python, Sage,\nMATLAB or Magma" in text, text
+
+
+def test_entry_url_reaches_the_agent():
+    """The page's url on an entry (its page on the person's Sagebrush site, a link to give them) comes through as is,
+    and stat's and create's text show it."""
+    url = "https://sagebrush.space/?tex=f1"
+    e = {"path": "/p.tex", "kind": "file", "url": url}
+    for verb in ("stat", "create"):
+        got = WS.validate_result(verb, {"entry": e, **({"rev": 1} if verb == "create" else {})})
+        assert got["entry"]["url"] == url, got
+        assert url in WS._summary(verb, {"path": "/p.tex"}, got), WS._summary(verb, {"path": "/p.tex"}, got)
 
 
 if __name__ == "__main__":
