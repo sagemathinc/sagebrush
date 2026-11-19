@@ -1,0 +1,10 @@
+{
+  "fresh_command": "codex exec --skip-git-repo-check -s danger-full-access --json - < TASK.txt",
+  "fresh_cwd": ".",
+  "reviewer": "@sagebrush-astra4",
+  "context": "Task only; no project history or prior findings supplied. Transcript command review found no REPO_ROOT accesses.",
+  "redactions": "Local notebook authentication token removed from copied text/logs; scratch original retained privately. Notebook server verified stopped.",
+  "redaction_occurrences": 2,
+  "independent_review": "Read task, transcript, MATLAB fit and Stop browser harness; reran host validate_results.py successfully; inspected final audit, saved notebook recovery stdout and error probes.",
+  "scope": "One fresh Codex sample, plus separately labeled original self-run baseline. No fresh Claude sample."
+}
