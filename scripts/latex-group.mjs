@@ -115,10 +115,10 @@ export const LATEX_LAZY_CAPS = {
   // (53,214 / 18,327: Nov 19 2026, the agent's bar docked in the page's own row for it ([data-sbag-slot]), placed again
   //  as the page changes what it shows. Measured locally on the toolchain CI pins on master 25de21b2 with the one-link
   //  change merged: 53,150 / 18,263, + 64)
-  // (54,396 / 18,781: Nov 19 2026, an answer's entry with its page's address (url, entry-url.ts with
+  // (54,145 / 18,691: Nov 19 2026, an answer's entry with its page's address (url, entry-url.ts with
   //  the code page's languages), for the agent to give the person a link. Measured on master 4bcbb434 with it:
-  //  54,332 / 18,717, + 64)
-  AGENT: { label: "the LaTeX agent pairing's chunk", raw: 54396, gzip: 18781 },
+  //  54,081 / 18,627, + 64)
+  AGENT: { label: "the LaTeX agent pairing's chunk", raw: 54145, gzip: 18691 },
   // (the agent tools' work: web/latex/tools.ts, latex_check's report and latex_render's pictures, on an agent's first call)
   // (16,546 / 6,950: Nov 11 2026: latex_build's own code (build.ts, the
   //  engine driven from a snapshot, and the pages' fit) here, out of the eager group, its shared rules handed in by the
