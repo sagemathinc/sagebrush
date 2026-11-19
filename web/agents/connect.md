@@ -146,7 +146,10 @@ An artifact should call the engine and show that it computed, before anything el
 ```
 const ok = JSON.stringify(sb.aplist([0, -1, 1, -10, -20], 7)) === "[[2,-2],[3,-1],[5,1],[7,-2]]";
 document.body.prepend(`Sagebrush engine self-check: ${ok ? "PASS" : "FAIL"}`);
+if (!ok) throw new Error("Sagebrush engine self-check failed: nothing below is the engine's");
 ```
+
+On FAIL it stops there, so the artifact never goes on to show results that aren't the engine's.
 
 That is the elliptic curve 11a1, y² + y = x³ − x² − 10x − 20, whose a_p for p = 2, 3, 5, 7 are −2, −1, 1, −2.
 
@@ -190,4 +193,5 @@ Not affected: it's the claude.ai web app, not Claude Code.
 ### Not yet
 
 - It's the engines' functions only: no Sage session, no notebook, no files, and no link to your sagebrush.space work.
-- Claude's artifacts allow `import()` from cdn.jsdelivr.net's `/npm/` paths (not other CDNs); ChatGPT's allowed more (last tried in October). Checked again on Nov 19 2026 in a sandboxed `srcdoc` frame with a strict policy (scripts only inline and from cdn.jsdelivr.net, no `fetch`): the import, the self-check and the examples above all run.
+- Last tried in the chat apps themselves in October: Claude's artifacts allowed `import()` from cdn.jsdelivr.net's `/npm/` paths (not other CDNs); ChatGPT's allowed more.
+- On Nov 19 2026, in a standalone Chromium sandbox (a `srcdoc` frame with `sandbox="allow-scripts"` and the policy `default-src 'none'; script-src 'unsafe-inline' 'wasm-unsafe-eval' https://cdn.jsdelivr.net; connect-src 'none'`), the import, the self-check, `aplist` and `charpoly` ran. Every example above was checked separately, in Node, against the published module. Neither check re-tests either chat app's current policy.

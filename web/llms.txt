@@ -99,7 +99,7 @@ The rule for the libraries Sagebrush rewrites:
 
 - An artifact can import Sagebrush's engines from jsDelivr: `const sb = await import("https://cdn.jsdelivr.net/npm/sagebrush-web@0.10/sagebrush-engine.mjs");` (npm `sagebrush-web`). It computes; it doesn't draw, and it runs no Python or Sage.
 - Its functions: `aplist(a, n)` (an elliptic curve's a_p, `a = [a1, a2, a3, a4, a6]`, p ≤ n), `charpoly({n, k, q, sign, chi})` (a Hecke characteristic polynomial, proven), `weight2({n, q})`, `charpolyMod({n, k, q, sign, chi})`, `dims({n, k, chi})`, `characters(n)`, and `call(fn, args)` for the rest (`factor_integer`, `is_prime`, `quadratic_class_group`, …).
-- Print a self-check first, so the artifact shows the engine computed: `sb.aplist([0, -1, 1, -10, -20], 7)` must be `[[2,-2],[3,-1],[5,1],[7,-2]]` (the curve 11a1).
+- Print a self-check first, so the artifact shows the engine computed, and stop on a failure: `sb.aplist([0, -1, 1, -10, -20], 7)` must be `[[2,-2],[3,-1],[5,1],[7,-2]]` (the curve 11a1).
 - A plot is the artifact's own drawing of these numbers (SVG, or a chart library the chat app allows).
 - Each function with an example and its output, and what isn't there: [/agents/connect.md](/agents/connect.md), section 5.
 
