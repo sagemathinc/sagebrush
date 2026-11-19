@@ -356,11 +356,17 @@ pub fn i641(a: Arg) -> Result<I64s, WireError> {
     Ok(v)
 }
 
+/// The limbs a big integer of the engine's BigInt keeps inline (dashu: two
+/// machine words, so two u64 limbs on 64-bit targets and one on 32-bit
+/// ones, where a word is 32 bits).
+pub const INLINE_LIMBS: u64 = if usize::BITS == 64 { 2 } else { 1 };
+
 /// The words of heap storage the engine's BigInt may take for an integer
-/// of `k` limbs (E1: the dashu bound, at most 2 words inline, else at most
-/// k + floor(k/4) + 4 words; pinned by the consumer's peak tests).
+/// of `k` limbs (E1: the dashu bound, inline up to [`INLINE_LIMBS`], else
+/// at most k + floor(k/4) + 4 u64 words, which also bounds the 32-bit
+/// layout of 2k words of 32 bits; pinned by the consumer's peak tests).
 pub fn bigint_heap_words(k: u64) -> Option<u64> {
-    if k <= 2 {
+    if k <= INLINE_LIMBS {
         Some(0)
     } else {
         k.checked_add(k / 4)?.checked_add(4)
@@ -400,6 +406,11 @@ impl<'a> BigRef<'a> {
     }
     pub fn is_zero(&self) -> bool {
         self.limbs.is_empty()
+    }
+    /// The magnitude's little-endian bytes (8 per limb, the last limb
+    /// nonzero).
+    pub fn le_bytes(&self) -> &'a [u8] {
+        self.limbs
     }
     /// The value as i64 when it fits.
     pub fn to_i64(&self) -> Option<i64> {

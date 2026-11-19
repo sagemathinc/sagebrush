@@ -749,6 +749,7 @@ dependencies = [
  "sagebrush-bigint",
  "sagebrush-interrupt",
  "sagebrush-par",
+ "sagebrush-wire",
 ]
 
 [[package]]
