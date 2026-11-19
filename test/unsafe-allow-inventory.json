@@ -624,6 +624,12 @@
   },
   {
    "file": "engine/web/src/lib.rs",
+   "item": "fn sb_bin_call",
+   "hash": "875a1e8f74725bfa2df991dee7d4b83e49d3cb780c373e34bc70ece51f092926",
+   "audit": "Can it produce or alter an Obligations, Operation, Reservation, Growth or Context (directly, generically or through a pointer)? No. Its unsafe operations only read host-written request bytes and replace or read the REPLY byte buffer, as sb_mp_call's; the call's reservation is taken inside the safe bin_ops::call_bin through the safe ledger API. Supported boundary for the REPLY argument: wasm's single thread; natively only the one-test ABI binaries call these exports, and any other native caller is unsupported (a restricted boundary, not a general safe-Rust API guarantee)."
+  },
+  {
+   "file": "engine/web/src/lib.rs",
    "item": "fn sb_set_memory_share",
    "hash": "7aa10b15156d20b9093083331de651c15609ed1aeca4fc585fccc060135d007d",
    "audit": "Can it produce or alter an Obligations, Operation, Reservation, Growth or Context (directly, generically or through a pointer)? No. It has no unsafe operation: the allow is for no_mangle."
@@ -699,6 +705,12 @@
    "item": "fn sb_progress_ptr",
    "hash": "d7c5f39cbf11bd8b2057c8919513c0939b0d369ef103778a386f2ded0e3071d8",
    "audit": "Can it produce or alter an Obligations, Operation, Reservation, Growth or Context (directly, generically or through a pointer)? No. It has no unsafe operation: the allow is for no_mangle."
+  },
+  {
+   "file": "engine/web/tests/bin_alloc.rs",
+   "item": "impl GlobalAlloc for Counting",
+   "hash": "644ec3433664359dcb0e4bbd1e87f577bc5b1b3189c68dea294cfb75d0f7e70a",
+   "audit": "Can it produce or alter an Obligations, Operation, Reservation, Growth or Context (directly, generically or through a pointer)? No. Test glue: a System-forwarding counting allocator. Token-identical to engine/web/tests/nmod_alloc.rs's audited item (the same hash); here it measures the binary entry point's allocations against its reservations."
   },
   {
    "file": "engine/web/tests/host_handles.rs",
