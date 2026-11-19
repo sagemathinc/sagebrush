@@ -4,6 +4,7 @@ cores where they use threads), Sage syntax through the preparser.
     python -m sagebrush FILE.sage [ARGS...]   # a Sage file (sys.argv = [FILE, ARGS...])
     python -m sagebrush -c "CODE"             # Sage code from the command line
     python -m sagebrush FILE.py               # plain Python with sagebrush.sage's names
+    npx sagebrush --matlab FILE.m             # MATLAB or Magma (--magma): the npm package's command
 
 Module paths of code written for Sage resolve to Sagebrush's names
 (sage.rings.ideal.Katsura, from sage.all import *, ...), so a real Sage
@@ -24,6 +25,11 @@ def main(argv=None):
     if not argv or argv[0] in ("-h", "--help"):
         print(__doc__.strip())
         return 0
+    if argv[0] in ("--matlab", "--magma"):
+        # (not a file to open: MATLAB and Magma run in the npm package's command, not in this one)
+        print(f"sagebrush: {argv[0]} is the npm package's: npx sagebrush {argv[0]} FILE.m "
+              "(python -m sagebrush runs Sage and Python code)", file=sys.stderr)
+        return 2
     from sagebrush import sage as S  # sets up the library's import paths
     from sagebrush.preparse import preparse
     import _sage_shim
