@@ -132,13 +132,13 @@
   {
    "id": "FU-B18-3",
    "keys": [
+    "engine/arith/src/ledger.rs :: reserve :: if l > self.limit.get() { #0",
     "engine/arith/src/pdivrem.rs ::  :: pub const DIVREM_Q_CAPS: qpoly::Caps = qpoly::Caps { int: crate::zmul::Caps { work: DIVREM_Q_WORK_MAX, ..crate::zmul::CAPS }, reply: qpoly::REPLY_MAX }; #0",
     "engine/arith/src/pdivrem.rs ::  :: pub const DIVREM_Q_WORK_MAX: u64 = 1 << 29; #0",
     "engine/arith/src/pdivrem.rs :: admit_z :: if fixed > cap { #0",
     "engine/arith/src/pdivrem.rs :: fault_text :: DivFault::Memory => format!(\"the division's memory needs more than {} bytes ({})\", (plan.fixed + plan.limit).saturating_mul(8), HOW), #0",
     "engine/arith/src/pdivrem.rs :: reply_q :: Fault::Overrun => format!(\"the denominators' lcm needs more than {} word operations (fewer or simpler denominators per call)\", pa.limit), #0",
     "engine/arith/src/pdivrem.rs :: reply_q :: if fixed > cap { #0",
-    "engine/arith/src/pdivrem.rs :: reserve :: if l > self.limit.get() { #0",
     "engine/arith/src/qpoly.rs ::  :: pub const CAPS: Caps = Caps { int: zmul::CAPS, reply: REPLY_MAX }; #0",
     "engine/arith/src/qpoly.rs ::  :: pub const REPLY_MAX: u64 = zmul::PEAK_MAX; #0",
     "engine/arith/src/qpoly.rs :: admit_a :: let limit = caps.int.work.checked_sub(r).ok_or_else(|| format!(\"the request's bytes = {} leave no work within {} ({})\", r, caps.int.work, HOW))?; #0",

@@ -79,6 +79,132 @@
   "owner": "engine arith (big-integer wire decoder)",
   "reason": "test code: the big-integer decoder's correctness, allocation and Stop tests; refuses nothing itself"
  },
+ "engine/arith/src/ledger.rs :: alloc :: if v.try_reserve_exact(cap).is_err() { #0": {
+  "class": "none",
+  "owner": "zpoly_divrem",
+  "reason": "zpoly_divrem's derived sizes, plumbing (the ledger's and meter's limits, the plan's sizes) or a test assertion: refuses nothing itself"
+ },
+ "engine/arith/src/ledger.rs :: alloc :: led.release(cap as u64); #0": {
+  "class": "none",
+  "owner": "zpoly_divrem",
+  "reason": "zpoly_divrem's derived sizes, plumbing (the ledger's and meter's limits, the plan's sizes) or a test assertion: refuses nothing itself"
+ },
+ "engine/arith/src/ledger.rs :: alloc :: pub(crate) fn alloc(led: &Words, cap: usize) -> Result<Vec<u64>, DivFault> { #0": {
+  "class": "none",
+  "owner": "zpoly_divrem",
+  "reason": "zpoly_divrem's derived sizes, plumbing (the ledger's and meter's limits, the plan's sizes) or a test assertion: refuses nothing itself"
+ },
+ "engine/arith/src/ledger.rs :: alloc :: v.resize(cap, 0); #0": {
+  "class": "none",
+  "owner": "zpoly_divrem",
+  "reason": "zpoly_divrem's derived sizes, plumbing (the ledger's and meter's limits, the plan's sizes) or a test assertion: refuses nothing itself"
+ },
+ "engine/arith/src/ledger.rs :: cap :: pub(crate) fn cap(&self) -> usize { #0": {
+  "class": "none",
+  "owner": "zpoly_divrem",
+  "reason": "zpoly_divrem's derived sizes, plumbing (the ledger's and meter's limits, the plan's sizes) or a test assertion: refuses nothing itself"
+ },
+ "engine/arith/src/ledger.rs :: credit :: self.limit.set(self.limit.get().checked_add(n).ok_or(DivFault::Memory)?); #0": {
+  "class": "none",
+  "owner": "qpoly_divrem",
+  "reason": "qpoly_divrem's derived sizes, plumbing (the ledger's and meter's limits, the plan's sizes) or a test assertion: refuses nothing itself"
+ },
+ "engine/arith/src/ledger.rs :: drop :: pub(crate) static MAX_BITS: Cell<u64> = const { Cell::new(0) }; #0": {
+  "class": "none",
+  "owner": "zpoly_divrem",
+  "reason": "zpoly_divrem's derived sizes, plumbing (the ledger's and meter's limits, the plan's sizes) or a test assertion: refuses nothing itself"
+ },
+ "engine/arith/src/ledger.rs :: from :: pub(crate) limit: Cell<u64>, #0": {
+  "class": "none",
+  "owner": "zpoly_divrem",
+  "reason": "zpoly_divrem's derived sizes, plumbing (the ledger's and meter's limits, the plan's sizes) or a test assertion: refuses nothing itself"
+ },
+ "engine/arith/src/ledger.rs :: limit :: pub fn limit(&self) -> u64 { #0": {
+  "class": "none",
+  "owner": "zpoly_divrem",
+  "reason": "zpoly_divrem's derived sizes, plumbing (the ledger's and meter's limits, the plan's sizes) or a test assertion: refuses nothing itself"
+ },
+ "engine/arith/src/ledger.rs :: limit :: self.limit.get() #0": {
+  "class": "none",
+  "owner": "zpoly_divrem",
+  "reason": "zpoly_divrem's derived sizes, plumbing (the ledger's and meter's limits, the plan's sizes) or a test assertion: refuses nothing itself"
+ },
+ "engine/arith/src/ledger.rs :: new :: Coef::tagged(led, cap, \"window\", m) #0": {
+  "class": "none",
+  "owner": "qpoly_divrem",
+  "reason": "qpoly_divrem's derived sizes, plumbing (the ledger's and meter's limits, the plan's sizes) or a test assertion: refuses nothing itself"
+ },
+ "engine/arith/src/ledger.rs :: new :: led.note(tag, cap as u64); #0": {
+  "class": "none",
+  "owner": "zpoly_divrem",
+  "reason": "zpoly_divrem's derived sizes, plumbing (the ledger's and meter's limits, the plan's sizes) or a test assertion: refuses nothing itself"
+ },
+ "engine/arith/src/ledger.rs :: new :: led.reserve(cap as u64)?; #0": {
+  "class": "none",
+  "owner": "zpoly_divrem",
+  "reason": "zpoly_divrem's derived sizes, plumbing (the ledger's and meter's limits, the plan's sizes) or a test assertion: refuses nothing itself"
+ },
+ "engine/arith/src/ledger.rs :: new :: let b = Buf { v: alloc(led, cap)?, led, tag }; #0": {
+  "class": "none",
+  "owner": "zpoly_divrem",
+  "reason": "zpoly_divrem's derived sizes, plumbing (the ledger's and meter's limits, the plan's sizes) or a test assertion: refuses nothing itself"
+ },
+ "engine/arith/src/ledger.rs :: new :: limit: Cell::new(limit), #0": {
+  "class": "none",
+  "owner": "zpoly_divrem",
+  "reason": "zpoly_divrem's derived sizes, plumbing (the ledger's and meter's limits, the plan's sizes) or a test assertion: refuses nothing itself"
+ },
+ "engine/arith/src/ledger.rs :: new :: m.add(cap + 1)?; #0": {
+  "class": "none",
+  "owner": "zpoly_divrem",
+  "reason": "zpoly_divrem's derived sizes, plumbing (the ledger's and meter's limits, the plan's sizes) or a test assertion: refuses nothing itself"
+ },
+ "engine/arith/src/ledger.rs :: new :: pub fn new(limit: u64) -> Words { #0": {
+  "class": "none",
+  "owner": "zpoly_divrem",
+  "reason": "zpoly_divrem's derived sizes, plumbing (the ledger's and meter's limits, the plan's sizes) or a test assertion: refuses nothing itself"
+ },
+ "engine/arith/src/ledger.rs :: new :: pub(crate) fn new(led: &'l Words, cap: usize, m: &mut Meter) -> Result<Coef<'l>, DivFault> { #0": {
+  "class": "none",
+  "owner": "zpoly_divrem",
+  "reason": "zpoly_divrem's derived sizes, plumbing (the ledger's and meter's limits, the plan's sizes) or a test assertion: refuses nothing itself"
+ },
+ "engine/arith/src/ledger.rs :: new :: pub(crate) fn new(led: &'l Words, cap: usize, tag: &'static str, m: &mut Meter) -> Result<Buf<'l>, DivFault> { #0": {
+  "class": "none",
+  "owner": "zpoly_divrem",
+  "reason": "zpoly_divrem's derived sizes, plumbing (the ledger's and meter's limits, the plan's sizes) or a test assertion: refuses nothing itself"
+ },
+ "engine/arith/src/ledger.rs :: reserve :: if l > self.limit.get() { #0": {
+  "class": "1+3",
+  "disposition": {
+   "1": "shared",
+   "3": {
+    "followup": "FU-B18-3"
+   }
+  },
+  "owner": "zpoly_divrem",
+  "reason": "zpoly_divrem's fixed caps (zmul's request, work and peak) with its work metered and its memory on a live word ledger within them; the fixed rows are refused before any work, the ledger's limit at each reservation; each refusal names the cap and the way around it"
+ },
+ "engine/arith/src/ledger.rs :: tagged :: Ok(Coef { buf: Buf::new(led, cap, tag, m)?, len: 0, neg: false }) #0": {
+  "class": "none",
+  "owner": "qpoly_divrem",
+  "reason": "qpoly_divrem's derived sizes, plumbing (the ledger's and meter's limits, the plan's sizes) or a test assertion: refuses nothing itself"
+ },
+ "engine/arith/src/ledger.rs :: tagged :: pub(crate) fn tagged(led: &'l Words, cap: usize, tag: &'static str, m: &mut Meter) -> Result<Coef<'l>, DivFault> { #0": {
+  "class": "none",
+  "owner": "qpoly_divrem",
+  "reason": "qpoly_divrem's derived sizes, plumbing (the ledger's and meter's limits, the plan's sizes) or a test assertion: refuses nothing itself"
+ },
+ "engine/arith/src/ledger.rs :: track :: MAX_BITS.with(|c| c.set(c.get().max(bits(_x)))); #0": {
+  "class": "none",
+  "owner": "zpoly_divrem",
+  "reason": "zpoly_divrem's derived sizes, plumbing (the ledger's and meter's limits, the plan's sizes) or a test assertion: refuses nothing itself"
+ },
+ "engine/arith/src/ledger.rs :: words :: (self.words.cap() + self.meta.cap()) as u64 #0": {
+  "class": "none",
+  "owner": "zpoly_divrem",
+  "reason": "zpoly_divrem's derived sizes, plumbing (the ledger's and meter's limits, the plan's sizes) or a test assertion: refuses nothing itself"
+ },
  "engine/arith/src/nmod_poly.rs :: barrett_reduction_edges :: let mut xs: Vec<u64> = vec![0, 1, n - 1, n, n + 1, 2 * n - 1, u64::MAX, u64::MAX - 1, u64::MAX - n]; #0": {
   "class": "none",
   "owner": "exact linear algebra (engine/arith)",
@@ -141,6 +267,11 @@
   "owner": "qpoly_divrem",
   "reason": "qpoly_divrem's fixed caps (zmul's request and peak; its own work cap DIVREM_Q_WORK_MAX = 2^29, calibrated in time) with its lcms and division metered and its memory on the live word ledger; each refusal names the cap and the way around it"
  },
+ "engine/arith/src/pdivrem.rs ::  :: pub(crate) use crate::ledger::{EXACT, MAX_BITS}; #0": {
+  "class": "none",
+  "owner": "zpoly_divrem",
+  "reason": "zpoly_divrem's derived sizes, plumbing (the ledger's and meter's limits, the plan's sizes) or a test assertion: refuses nothing itself"
+ },
  "engine/arith/src/pdivrem.rs :: admit_z :: Ok(Ok(Plan { n, m, k, fixed, limit: cap - fixed, work })) #0": {
   "class": "none",
   "owner": "zpoly_divrem",
@@ -158,41 +289,6 @@
   "reason": "zpoly_divrem's fixed caps (zmul's request, work and peak) with its work metered and its memory on a live word ledger within them; the fixed rows are refused before any work, the ledger's limit at each reservation; each refusal names the cap and the way around it"
  },
  "engine/arith/src/pdivrem.rs :: admit_z :: let cap = caps.int.peak / 8; #0": {
-  "class": "none",
-  "owner": "zpoly_divrem",
-  "reason": "zpoly_divrem's derived sizes, plumbing (the ledger's and meter's limits, the plan's sizes) or a test assertion: refuses nothing itself"
- },
- "engine/arith/src/pdivrem.rs :: alloc :: fn alloc(led: &Words, cap: usize) -> Result<Vec<u64>, DivFault> { #0": {
-  "class": "none",
-  "owner": "zpoly_divrem",
-  "reason": "zpoly_divrem's derived sizes, plumbing (the ledger's and meter's limits, the plan's sizes) or a test assertion: refuses nothing itself"
- },
- "engine/arith/src/pdivrem.rs :: alloc :: if v.try_reserve_exact(cap).is_err() { #0": {
-  "class": "none",
-  "owner": "zpoly_divrem",
-  "reason": "zpoly_divrem's derived sizes, plumbing (the ledger's and meter's limits, the plan's sizes) or a test assertion: refuses nothing itself"
- },
- "engine/arith/src/pdivrem.rs :: alloc :: led.release(cap as u64); #0": {
-  "class": "none",
-  "owner": "zpoly_divrem",
-  "reason": "zpoly_divrem's derived sizes, plumbing (the ledger's and meter's limits, the plan's sizes) or a test assertion: refuses nothing itself"
- },
- "engine/arith/src/pdivrem.rs :: alloc :: v.resize(cap, 0); #0": {
-  "class": "none",
-  "owner": "zpoly_divrem",
-  "reason": "zpoly_divrem's derived sizes, plumbing (the ledger's and meter's limits, the plan's sizes) or a test assertion: refuses nothing itself"
- },
- "engine/arith/src/pdivrem.rs :: cap :: fn cap(&self) -> usize { #0": {
-  "class": "none",
-  "owner": "zpoly_divrem",
-  "reason": "zpoly_divrem's derived sizes, plumbing (the ledger's and meter's limits, the plan's sizes) or a test assertion: refuses nothing itself"
- },
- "engine/arith/src/pdivrem.rs :: credit :: self.limit.set(self.limit.get().checked_add(n).ok_or(DivFault::Memory)?); #0": {
-  "class": "none",
-  "owner": "qpoly_divrem",
-  "reason": "qpoly_divrem's derived sizes, plumbing (the ledger's and meter's limits, the plan's sizes) or a test assertion: refuses nothing itself"
- },
- "engine/arith/src/pdivrem.rs :: drop :: pub(crate) static MAX_BITS: Cell<u64> = const { Cell::new(0) }; #0": {
   "class": "none",
   "owner": "zpoly_divrem",
   "reason": "zpoly_divrem's derived sizes, plumbing (the ledger's and meter's limits, the plan's sizes) or a test assertion: refuses nothing itself"
@@ -217,66 +313,6 @@
   },
   "owner": "zpoly_divrem",
   "reason": "zpoly_divrem's fixed caps (zmul's request, work and peak) with its work metered and its memory on a live word ledger within them; the fixed rows are refused before any work, the ledger's limit at each reservation; each refusal names the cap and the way around it"
- },
- "engine/arith/src/pdivrem.rs :: from :: limit: Cell<u64>, #0": {
-  "class": "none",
-  "owner": "zpoly_divrem",
-  "reason": "zpoly_divrem's derived sizes, plumbing (the ledger's and meter's limits, the plan's sizes) or a test assertion: refuses nothing itself"
- },
- "engine/arith/src/pdivrem.rs :: limit :: pub fn limit(&self) -> u64 { #0": {
-  "class": "none",
-  "owner": "zpoly_divrem",
-  "reason": "zpoly_divrem's derived sizes, plumbing (the ledger's and meter's limits, the plan's sizes) or a test assertion: refuses nothing itself"
- },
- "engine/arith/src/pdivrem.rs :: limit :: self.limit.get() #0": {
-  "class": "none",
-  "owner": "zpoly_divrem",
-  "reason": "zpoly_divrem's derived sizes, plumbing (the ledger's and meter's limits, the plan's sizes) or a test assertion: refuses nothing itself"
- },
- "engine/arith/src/pdivrem.rs :: new :: Coef::tagged(led, cap, \"window\", m) #0": {
-  "class": "none",
-  "owner": "qpoly_divrem",
-  "reason": "qpoly_divrem's derived sizes, plumbing (the ledger's and meter's limits, the plan's sizes) or a test assertion: refuses nothing itself"
- },
- "engine/arith/src/pdivrem.rs :: new :: fn new(led: &'l Words, cap: usize, m: &mut Meter) -> Result<Coef<'l>, DivFault> { #0": {
-  "class": "none",
-  "owner": "zpoly_divrem",
-  "reason": "zpoly_divrem's derived sizes, plumbing (the ledger's and meter's limits, the plan's sizes) or a test assertion: refuses nothing itself"
- },
- "engine/arith/src/pdivrem.rs :: new :: led.note(tag, cap as u64); #0": {
-  "class": "none",
-  "owner": "zpoly_divrem",
-  "reason": "zpoly_divrem's derived sizes, plumbing (the ledger's and meter's limits, the plan's sizes) or a test assertion: refuses nothing itself"
- },
- "engine/arith/src/pdivrem.rs :: new :: led.reserve(cap as u64)?; #0": {
-  "class": "none",
-  "owner": "zpoly_divrem",
-  "reason": "zpoly_divrem's derived sizes, plumbing (the ledger's and meter's limits, the plan's sizes) or a test assertion: refuses nothing itself"
- },
- "engine/arith/src/pdivrem.rs :: new :: let b = Buf { v: alloc(led, cap)?, led, tag }; #0": {
-  "class": "none",
-  "owner": "zpoly_divrem",
-  "reason": "zpoly_divrem's derived sizes, plumbing (the ledger's and meter's limits, the plan's sizes) or a test assertion: refuses nothing itself"
- },
- "engine/arith/src/pdivrem.rs :: new :: limit: Cell::new(limit), #0": {
-  "class": "none",
-  "owner": "zpoly_divrem",
-  "reason": "zpoly_divrem's derived sizes, plumbing (the ledger's and meter's limits, the plan's sizes) or a test assertion: refuses nothing itself"
- },
- "engine/arith/src/pdivrem.rs :: new :: m.add(cap + 1)?; #0": {
-  "class": "none",
-  "owner": "zpoly_divrem",
-  "reason": "zpoly_divrem's derived sizes, plumbing (the ledger's and meter's limits, the plan's sizes) or a test assertion: refuses nothing itself"
- },
- "engine/arith/src/pdivrem.rs :: new :: pub fn new(limit: u64) -> Words { #0": {
-  "class": "none",
-  "owner": "zpoly_divrem",
-  "reason": "zpoly_divrem's derived sizes, plumbing (the ledger's and meter's limits, the plan's sizes) or a test assertion: refuses nothing itself"
- },
- "engine/arith/src/pdivrem.rs :: new :: pub(crate) fn new(led: &'l Words, cap: usize, tag: &'static str, m: &mut Meter) -> Result<Buf<'l>, DivFault> { #0": {
-  "class": "none",
-  "owner": "zpoly_divrem",
-  "reason": "zpoly_divrem's derived sizes, plumbing (the ledger's and meter's limits, the plan's sizes) or a test assertion: refuses nothing itself"
  },
  "engine/arith/src/pdivrem.rs :: norm_len :: pub limit: u64, #0": {
   "class": "none",
@@ -326,37 +362,6 @@
   "reason": "qpoly_divrem's derived sizes, plumbing (the ledger's and meter's limits, the plan's sizes) or a test assertion: refuses nothing itself"
  },
  "engine/arith/src/pdivrem.rs :: reply_z :: let led = Words::new(plan.limit); #0": {
-  "class": "none",
-  "owner": "zpoly_divrem",
-  "reason": "zpoly_divrem's derived sizes, plumbing (the ledger's and meter's limits, the plan's sizes) or a test assertion: refuses nothing itself"
- },
- "engine/arith/src/pdivrem.rs :: reserve :: if l > self.limit.get() { #0": {
-  "class": "1+3",
-  "disposition": {
-   "1": "shared",
-   "3": {
-    "followup": "FU-B18-3"
-   }
-  },
-  "owner": "zpoly_divrem",
-  "reason": "zpoly_divrem's fixed caps (zmul's request, work and peak) with its work metered and its memory on a live word ledger within them; the fixed rows are refused before any work, the ledger's limit at each reservation; each refusal names the cap and the way around it"
- },
- "engine/arith/src/pdivrem.rs :: tagged :: Ok(Coef { buf: Buf::new(led, cap, tag, m)?, len: 0, neg: false }) #0": {
-  "class": "none",
-  "owner": "qpoly_divrem",
-  "reason": "qpoly_divrem's derived sizes, plumbing (the ledger's and meter's limits, the plan's sizes) or a test assertion: refuses nothing itself"
- },
- "engine/arith/src/pdivrem.rs :: tagged :: fn tagged(led: &'l Words, cap: usize, tag: &'static str, m: &mut Meter) -> Result<Coef<'l>, DivFault> { #0": {
-  "class": "none",
-  "owner": "qpoly_divrem",
-  "reason": "qpoly_divrem's derived sizes, plumbing (the ledger's and meter's limits, the plan's sizes) or a test assertion: refuses nothing itself"
- },
- "engine/arith/src/pdivrem.rs :: track :: MAX_BITS.with(|c| c.set(c.get().max(bits(_x)))); #0": {
-  "class": "none",
-  "owner": "zpoly_divrem",
-  "reason": "zpoly_divrem's derived sizes, plumbing (the ledger's and meter's limits, the plan's sizes) or a test assertion: refuses nothing itself"
- },
- "engine/arith/src/pdivrem.rs :: words :: (self.words.cap() + self.meta.cap()) as u64 #0": {
   "class": "none",
   "owner": "zpoly_divrem",
   "reason": "zpoly_divrem's derived sizes, plumbing (the ledger's and meter's limits, the plan's sizes) or a test assertion: refuses nothing itself"
