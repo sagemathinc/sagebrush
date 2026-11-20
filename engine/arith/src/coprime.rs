@@ -95,6 +95,60 @@ pub const fn gcd_work(la: u64, lb: u64) -> Option<u64> {
     ck!(iters.checked_add(quot)).checked_add(last)
 }
 
+/// The units of `rem_in_place` (x mod y, the quotient discarded) for an
+/// `lx`-limb by an `ly`-limb operand, `2 <= ly <= lx`: the loads and
+/// shifts `lx + ly + 2`, the quotient loop `(lx - ly + 1)(2 ly + 4)`, the
+/// unshift `2 ly + lx + 1`, exactly; `None` on overflow or outside that range.
+pub const fn rem_work(lx: u64, ly: u64) -> Option<u64> {
+    if ly < 2 || ly > lx {
+        return None;
+    }
+    let loop_ = ck!(ck!((lx - ly).checked_add(1)).checked_mul(ck!(ck!(ly.checked_mul(2)).checked_add(4))));
+    let ends = ck!(ck!(ck!(lx.checked_mul(2)).checked_add(ck!(ly.checked_mul(3)))).checked_add(3));
+    loop_.checked_add(ends)
+}
+
+/// Whether [`gcd_unbalanced`] takes one remainder step before Lehmer on
+/// sorted sizes `la >= lb`: when `lb >= 2`, `la > lb` and the step plus a
+/// gcd of two `lb`-limb operands is bounded below [`gcd_work`]`(la, lb)`.
+/// Decided from the sizes alone, before any work.
+pub const fn rem_first(la: u64, lb: u64) -> bool {
+    if lb < 2 || la <= lb {
+        return false;
+    }
+    match (rem_work(la, lb), gcd_work(lb, lb), gcd_work(la, lb)) {
+        (Some(r), Some(g), Some(w)) => match r.checked_add(g) {
+            Some(t) => t < w,
+            None => false,
+        },
+        _ => false,
+    }
+}
+
+/// The work bound of [`gcd_unbalanced`] on operands of `la` and `lb` limbs,
+/// in either order; `None` on overflow.  Never above [`gcd_work`]:
+/// - `lb = 0`: [`gcd_work`]`(la, 0)`;
+/// - `lb = 1`: `3 la + 95`, [`gcd_in_place`]'s single-limb step (one
+///   comparison `la + 2`, the remainder and the u64 gcd `2 la + 93`; when
+///   `la = 1` and a < b, the swap's comparison is the one counted);
+/// - [`rem_first`]: [`rem_work`]`(la, lb) + `[`gcd_work`]`(lb, lb)` (after
+///   the step both operands have at most `lb` limbs, and gcd_work is
+///   nondecreasing in each size);
+/// - otherwise [`gcd_work`]`(la, lb)`.
+pub const fn gcd_unbalanced_work(la: u64, lb: u64) -> Option<u64> {
+    let (la, lb) = if la >= lb { (la, lb) } else { (lb, la) };
+    if lb == 0 {
+        return gcd_work(la, 0);
+    }
+    if lb == 1 {
+        return ck!(la.checked_mul(3)).checked_add(95);
+    }
+    if rem_first(la, lb) {
+        return ck!(rem_work(la, lb)).checked_add(ck!(gcd_work(lb, lb)));
+    }
+    gcd_work(la, lb)
+}
+
 /// The work bound of [`coprime_pair`] on a numerator of `ln` and a
 /// denominator of `ld` limbs: the two loads (`k + 1` each), the gcd, the
 /// two clears (`max + 2` each).
@@ -570,6 +624,32 @@ pub fn gcd_in_place(x: &mut [u64], nx: usize, y: &mut [u64], ny: usize, m: &mut 
     }
 }
 
+/// gcd(x, y) as [`gcd_in_place`] (the same slices, the same result: the
+/// gcd's slot, false: x, true: y, and length; the other slot 0), its work
+/// at most [`gcd_unbalanced_work`]`(nx, ny)`.  On operands of very
+/// different sizes ([`rem_first`]), one remainder step first: x mod y in
+/// place (y, the smaller, normalized there and restored; a zero remainder
+/// makes y the gcd), then [`gcd_in_place`] on two operands of at most `ny`
+/// limbs.  Otherwise [`gcd_in_place`] itself.
+pub fn gcd_unbalanced(x: &mut [u64], nx: usize, y: &mut [u64], ny: usize, m: &mut Meter) -> Result<(bool, usize), Fault> {
+    if nx < ny {
+        let (slot, len) = gcd_unbalanced(y, ny, x, nx, m)?;
+        return Ok((!slot, len));
+    }
+    if rem_first(nx as u64, ny as u64) {
+        if x[nx - 1] == 0 || y[ny - 1] == 0 || x.len() <= nx {
+            return Err(Fault::Invariant);
+        }
+        let nr = rem_in_place(x, nx, y, ny, m)?;
+        if nr == 0 {
+            return Ok((true, ny));
+        }
+        let (slot, len) = gcd_in_place(y, ny, x, nr, m)?;
+        return Ok((!slot, len));
+    }
+    gcd_in_place(x, nx, y, ny, m)
+}
+
 /// Algorithm L's bound on a window's cofactors [ca, cb, cc, cd], checked
 /// before they are applied: each below 2^63 in size, and each row's two of
 /// opposite signs (or zero), so that every i128 sum in [`apply_window`]
@@ -768,5 +848,119 @@ mod tests {
                 rem(&x, &y);
             }
         }
+    }
+
+    /// gcd_unbalanced on (x, y) against gcd_in_place and dashu: the same
+    /// slot, length and value, the other slot zero; its meter within
+    /// gcd_unbalanced_work, which is never above gcd_work; and the count
+    /// exact (a limit at the count admits, one below refuses).
+    fn unbalanced(x: &[u64], y: &[u64]) -> u64 {
+        let (nx, ny) = (x.len(), y.len());
+        let room = nx.max(ny) + 1;
+        let slots = |v: &[u64]| {
+            let mut s = v.to_vec();
+            s.resize(room, 0);
+            s
+        };
+        let (mut a, mut b) = (slots(x), slots(y));
+        let mut m = Meter::new(u64::MAX);
+        let (slot, len) = gcd_unbalanced(&mut a, nx, &mut b, ny, &mut m).unwrap();
+        let (g, other) = if slot { (&b, &a) } else { (&a, &b) };
+        let (mut p, mut q) = (UBig::from_words(x), UBig::from_words(y));
+        while q != UBig::ZERO {
+            let r = &p % &q;
+            (p, q) = (q, r);
+        }
+        let want = p;
+        assert_eq!(UBig::from_words(&g[..len]), want, "gcd({:x?}, {:x?})", x, y);
+        assert!(g[len..].iter().all(|&w| w == 0) && other.iter().all(|&w| w == 0), "the slots are clean");
+        let (mut c, mut d) = (slots(x), slots(y));
+        let mut m2 = Meter::new(u64::MAX);
+        let (slot2, len2) = gcd_in_place(&mut c, nx, &mut d, ny, &mut m2).unwrap();
+        assert_eq!((slot, len), (slot2, len2), "the same slot as gcd_in_place");
+        let bound = gcd_unbalanced_work(nx as u64, ny as u64).unwrap();
+        assert!(m.used() <= bound, "{} > {} ({}, {})", m.used(), bound, nx, ny);
+        assert!(bound <= gcd_work(nx as u64, ny as u64).unwrap());
+        for (limit, ok) in [(m.used(), true), (m.used() - 1, false)] {
+            let (mut c, mut d) = (slots(x), slots(y));
+            let r = gcd_unbalanced(&mut c, nx, &mut d, ny, &mut Meter::new(limit));
+            assert_eq!(r.is_ok(), ok, "limit {} of {}", limit, m.used());
+        }
+        m.used()
+    }
+
+    /// gcd_unbalanced: random unbalanced pairs (la up to 64, lb 1 to 4, both
+    /// orders), and the edges: b = 0, la < lb, a mod b = 0, lb = 1 (its
+    /// bound 3 la + 95 reached), balanced pairs (gcd_in_place's own path).
+    #[test]
+    fn unbalanced_gcd_matches_gcd_in_place_within_its_bound() {
+        let mut seed = 0x5eed_u64;
+        let mut next = || {
+            seed ^= seed << 13;
+            seed ^= seed >> 7;
+            seed ^= seed << 17;
+            seed
+        };
+        let mut took_rem = false;
+        for _ in 0..3000 {
+            let la = 1 + (next() % 64) as usize;
+            let lb = 1 + (next() % 4) as usize;
+            // (the top limb nonzero: normalized lengths)
+            let mut x: Vec<u64> = (0..la).map(|_| next()).collect();
+            let mut y: Vec<u64> = (0..lb).map(|_| next()).collect();
+            x[la - 1] |= 1;
+            y[lb - 1] |= 1;
+            took_rem |= rem_first(la.max(lb) as u64, la.min(lb) as u64);
+            unbalanced(&x, &y);
+            unbalanced(&y, &x);
+            // a common factor, and a multiple (a mod b = 0)
+            let g = UBig::from_words(&y);
+            let xm = (UBig::from_words(&x) * &g).to_le_bytes();
+            let xm: Vec<u64> = xm.chunks(8).map(|c| c.iter().rev().fold(0u64, |a, &b| (a << 8) | u64::from(b))).collect();
+            let mut xm = xm;
+            while xm.last() == Some(&0) {
+                xm.pop();
+            }
+            unbalanced(&xm, &y);
+            unbalanced(&y, &xm);
+        }
+        assert!(took_rem, "the remainder-first path ran");
+        // b = 0, either side; zero and zero
+        unbalanced(&[5, 7], &[]);
+        unbalanced(&[], &[5, 7]);
+        unbalanced(&[], &[]);
+        // lb = 1: the bound 3 la + 95 is reached when la = 1 and a < b
+        assert_eq!(unbalanced(&[3], &[7]), gcd_unbalanced_work(1, 1).unwrap());
+        assert_eq!(gcd_unbalanced_work(1, 1), Some(98));
+        unbalanced(&[u64::MAX; 40], &[3]);
+        // balanced pairs: gcd_in_place's path, its bound
+        for (la, lb) in [(2u64, 2u64), (4, 4), (9, 9)] {
+            assert!(!rem_first(la, lb));
+            assert_eq!(gcd_unbalanced_work(la, lb), gcd_work(la, lb));
+        }
+    }
+
+    /// The bounds' arithmetic: gcd_unbalanced_work never above gcd_work on
+    /// a grid; rem_work as the remainder's pinned count (`rem` above); and
+    /// None, never a wrap, at the u64 limits.
+    #[test]
+    fn unbalanced_gcd_bounds() {
+        for la in 0..300u64 {
+            for lb in 0..=la.min(40) {
+                let u = gcd_unbalanced_work(la, lb).unwrap();
+                assert!(u <= gcd_work(la, lb).unwrap(), "({}, {})", la, lb);
+                assert_eq!(gcd_unbalanced_work(lb, la), Some(u), "either order");
+            }
+        }
+        assert_eq!(rem_work(5, 2), Some((5 + 2 + 2) + 4 * 8 + (4 + 5 + 1)));
+        assert_eq!(rem_work(5, 1), None);
+        assert_eq!(rem_work(2, 3), None);
+        assert_eq!(rem_work(u64::MAX, 2), None);
+        assert_eq!(gcd_unbalanced_work(u64::MAX, 1), None);
+        assert_eq!(gcd_unbalanced_work(u64::MAX, 0), None);
+        assert_eq!(gcd_unbalanced_work(u64::MAX, u64::MAX), None);
+        assert!(!rem_first(u64::MAX, 2));
+        // a 1000-limb operand by a 2-limb one: linear, not quadratic
+        assert!(gcd_unbalanced_work(1000, 2).unwrap() < 20 * 1000 + gcd_work(2, 2).unwrap());
     }
 }
