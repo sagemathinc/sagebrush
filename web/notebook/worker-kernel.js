@@ -403,13 +403,13 @@ export class WorkerKernel {
     const id = this.nextId++;
     this.pending.set(id, sink);
     const forget = { ...(opts.forget?.length ? { forget: [...opts.forget] } : {}), ...(opts.mangle && opts.cell ? { mangle: String(opts.cell).replace(/[^A-Za-z0-9]/g, "") } : {}), ...(opts.seed ? { seed: opts.seed } : {}), ...(opts.scoped && Object.keys(opts.scoped).length ? { scoped: { ...opts.scoped } } : {}) };
-    const run = { kind: "code", code, mode: opts.mode, ...(opts.repl ? { repl: true } : {}), ...(opts.cell ? { cell: opts.cell } : {}), ...forget };
+    const run = { kind: "code", code, mode: opts.mode, ...(opts.repl ? { repl: true } : {}), ...(opts.cell ? { cell: opts.cell } : {}), ...(opts.figures ? { figures: opts.figures } : {}), ...forget };
     // (what the run is, and the document version its code is from, are taken
     // now ("execute"); it goes to the worker once the start is done, and into
     // the journal when it is done ("run"))
     this.track(id, run);
     this.claim(id, opts.mode);
-    this.whenStarted(id, sink, () => this.worker.postMessage({ id, code, sage: opts.mode === "sage", magma: opts.mode === "magma", matlab: opts.mode === "matlab", ...(opts.repl ? { repl: true } : {}), ...(opts.clock ? { clock: opts.clock } : {}), ...forget }));
+    this.whenStarted(id, sink, () => this.worker.postMessage({ id, code, sage: opts.mode === "sage", magma: opts.mode === "magma", matlab: opts.mode === "matlab", ...(opts.repl ? { repl: true } : {}), ...(opts.clock ? { clock: opts.clock } : {}), ...(opts.figures ? { figures: opts.figures } : {}), ...forget }));
   }
 
   // after the start, in the order asked, if this is still pending in the same worker
@@ -511,8 +511,8 @@ export class WorkerKernel {
     this.pending.set(id, sink);
     // (a copy: the journal's document freezes what it is given, and the
     // notebook keeps changing its own values object)
-    this.track(id, { kind: "interact", iid, values: JSON.parse(JSON.stringify(values)) });
-    this.whenStarted(id, sink, () => this.worker.postMessage({ id, interact: iid, values, ...(opts.clock ? { clock: opts.clock } : {}) }));
+    this.track(id, { kind: "interact", iid, values: JSON.parse(JSON.stringify(values)), ...(opts.figures ? { figures: opts.figures } : {}) });
+    this.whenStarted(id, sink, () => this.worker.postMessage({ id, interact: iid, values, ...(opts.clock ? { clock: opts.clock } : {}), ...(opts.figures ? { figures: opts.figures } : {}) }));
   }
 
   /**

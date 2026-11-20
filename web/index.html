@@ -200,7 +200,7 @@
   .menu .danger { color: var(--err); }
   .menu[hidden], .menu [hidden] { display: none; }
   /* an open panel: checked */
-  .menu button[aria-pressed="true"]::after { content: "✓"; color: var(--accent); }
+  .menu button[aria-pressed="true"]::after, .menu button[aria-checked="true"]::after { content: "✓"; color: var(--accent); }
   .menu kbd { font-size: 11px; color: var(--muted); }
   .pick { border: 1px solid var(--line); border-radius: 10px; background: var(--cell); color: var(--fg); padding: 14px 16px; width: min(560px, 92vw); }
   .pick::backdrop { background: rgba(0,0,0,.35); }
@@ -3738,6 +3738,47 @@ document.addEventListener("keydown", (e) => {
 });
 // (the ⋯ menu's items have their own handlers; a pick closes it)
 const moreMenu = $("#moremenu"), toggleMoreMenu = menuOf($("#morebtn"), moreMenu);
+// Figures: how this notebook's figures are shown, in every language (web/notebook/notebook.js figures, kept in the
+// notebook and given to the interpreter with each run; lib/_graphics.py figures): an in-place group, as Help's.
+const figuresGroup = menuGroup(moreMenu, "Figures", "figures", () => syncFigures(), false, $("#restart").nextElementSibling);
+figuresGroup.button.title = "How this notebook's figures are shown, in every language (kept in the notebook), unless its code chooses otherwise";
+const figureItems = [
+  ["auto", "Auto", "An SVG, sharp at any zoom; for a figure whose SVG would be over 1 MiB, a sharp PNG"],
+  ["svg", "SVG", "Always the SVG, however many points a figure has"],
+  ["png", "PNG", "A PNG drawn at twice the size; SVG if PNG can't be drawn"],
+].map(([f, label, title]) => {
+  const b = document.createElement("button");
+  b.setAttribute("role", "menuitemradio");
+  b.dataset.figures = f;
+  b.textContent = label;
+  b.title = b.dataset.title = title;
+  b.onclick = () => { if (!b.disabled) { nb.setFigures(f); syncFigures(); } };
+  return b;
+});
+figuresGroup.box.append(...figureItems);
+function syncFigures() {
+  const f = nb.figures?.() ?? "auto";
+  // (a remote kernel (remote compute, a paired computer) isn't given the choice yet: its rows disabled, saying so,
+  // so the menu never seems to do what it doesn't)
+  const remote = kernelPick.value !== "local";
+  for (const b of figureItems) {
+    b.setAttribute("aria-checked", String(b.dataset.figures === f));
+    b.disabled = remote;
+    b.setAttribute("aria-disabled", String(remote));
+    b.title = remote ? "Not available for remote kernels yet" : b.dataset.title;
+  }
+}
+// (its closed rows hidden in their own right, as Help's)
+const openFigures = async (on = figuresGroup.box.hidden) => {
+  for (const b of figureItems) b.hidden = !on;
+  if (on) syncFigures();
+  await figuresGroup.open(on);
+};
+figuresGroup.button.onclick = (ev) => { ev.stopPropagation(); void openFigures(); };
+void openFigures(false);
+syncFigures();
+// (and whenever ⋯ is opened: the notebook open may have changed since, with its own choice)
+$("#morebtn").addEventListener("click", syncFigures);
 // The long tail of help links is one in-place group, using File's New ▸ / Recent ▸ pattern.  H still opens the
 // shortcuts directly; this only changes where their menu row lives.
 const helpGroup = menuGroup(moreMenu, "Help", "help", () => {}, false, $("#keysbtn"));
