@@ -33,20 +33,31 @@ pub(super) fn rem_in_place(x: &mut [u64], nx: usize, y: &mut [u64], ny: usize, m
         let mut qh = top / y1;
         let mut rh = top % y1;
         // at most two corrections (Knuth D3)
-        let mut over = 0;
+        let (mut big, mut by_y2, mut brk) = (0, 0, false);
         while qh >> 64 != 0 || qh * y2 > ((rh << 64) | u128::from(x[j + ny - 2])) {
-            over += 1;
+            if qh >> 64 != 0 {
+                big += 1;
+            } else {
+                by_y2 += 1;
+            }
             qh -= 1;
             rh += y1;
             if rh >> 64 != 0 {
+                brk = true;
                 break;
             }
         }
-        if over >= 1 {
-            super::hits::hit(super::hits::D3_OVER1);
+        if big > 0 {
+            super::hits::hit(super::hits::D3_QBIG);
         }
-        if over >= 2 {
-            super::hits::hit(super::hits::D3_OVER2);
+        if by_y2 >= 1 {
+            super::hits::hit(super::hits::D3_Y2_ONCE);
+        }
+        if by_y2 >= 2 {
+            super::hits::hit(super::hits::D3_Y2_TWICE);
+        }
+        if brk {
+            super::hits::hit(super::hits::D3_RH_BREAK);
         }
         // x[j .. j + ny + 1] -= qh y
         let (mut borrow, mut carry) = (0u64, 0u128);
@@ -144,20 +155,31 @@ pub(super) fn divexact_in_place(x: &mut [u64], nx: usize, y: &mut [u64], ny: usi
         let top = (u128::from(x[j + ny]) << 64) | u128::from(x[j + ny - 1]);
         let mut qh = top / y1;
         let mut rh = top % y1;
-        let mut over = 0;
+        let (mut big, mut by_y2, mut brk) = (0, 0, false);
         while qh >> 64 != 0 || qh * y2 > ((rh << 64) | u128::from(x[j + ny - 2])) {
-            over += 1;
+            if qh >> 64 != 0 {
+                big += 1;
+            } else {
+                by_y2 += 1;
+            }
             qh -= 1;
             rh += y1;
             if rh >> 64 != 0 {
+                brk = true;
                 break;
             }
         }
-        if over >= 1 {
-            super::hits::hit(super::hits::D3_OVER1);
+        if big > 0 {
+            super::hits::hit(super::hits::D3_QBIG);
         }
-        if over >= 2 {
-            super::hits::hit(super::hits::D3_OVER2);
+        if by_y2 >= 1 {
+            super::hits::hit(super::hits::D3_Y2_ONCE);
+        }
+        if by_y2 >= 2 {
+            super::hits::hit(super::hits::D3_Y2_TWICE);
+        }
+        if brk {
+            super::hits::hit(super::hits::D3_RH_BREAK);
         }
         let (mut borrow, mut carry) = (0u64, 0u128);
         for i in 0..ny {
@@ -237,20 +259,31 @@ pub(super) fn divrem_in_place(x: &mut [u64], nx: usize, y: &mut [u64], ny: usize
         let top = (u128::from(x[j + ny]) << 64) | u128::from(x[j + ny - 1]);
         let mut qh = top / y1;
         let mut rh = top % y1;
-        let mut over = 0;
+        let (mut big, mut by_y2, mut brk) = (0, 0, false);
         while qh >> 64 != 0 || qh * y2 > ((rh << 64) | u128::from(x[j + ny - 2])) {
-            over += 1;
+            if qh >> 64 != 0 {
+                big += 1;
+            } else {
+                by_y2 += 1;
+            }
             qh -= 1;
             rh += y1;
             if rh >> 64 != 0 {
+                brk = true;
                 break;
             }
         }
-        if over >= 1 {
-            super::hits::hit(super::hits::D3_OVER1);
+        if big > 0 {
+            super::hits::hit(super::hits::D3_QBIG);
         }
-        if over >= 2 {
-            super::hits::hit(super::hits::D3_OVER2);
+        if by_y2 >= 1 {
+            super::hits::hit(super::hits::D3_Y2_ONCE);
+        }
+        if by_y2 >= 2 {
+            super::hits::hit(super::hits::D3_Y2_TWICE);
+        }
+        if brk {
+            super::hits::hit(super::hits::D3_RH_BREAK);
         }
         let (mut borrow, mut carry) = (0u64, 0u128);
         for i in 0..ny {

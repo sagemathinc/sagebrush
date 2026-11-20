@@ -6,8 +6,9 @@
 //! the outputs, the work units and the Overrun points are unchanged.
 //! Random inputs (sizes 1..40, skewed limbs) and the hard cases, each with
 //! a coverage counter that must move: normalization shifts 0 and 63, ny = 1,
-//! 2, 3, nx = ny, the boundary digit (u2, u1) = (y1, y2), today's D3 loop
-//! over by 1 and by 2, the add-back, divisors of all ones, 2^63 and 2^63 + 1.
+//! 2, 3, nx = ny, the boundary digit (u2, u1) = (y1, y2), today's D3 loop's
+//! corrections (qhat >= b; once and twice by the second-limb test; the rh
+//! overflow break), the add-back, divisors of all ones, 2^63 and 2^63 + 1.
 
 use super::{hits, old, Fault, Meter};
 use dashu_int::UBig;
@@ -93,11 +94,11 @@ fn same<T: PartialEq + std::fmt::Debug>(name: &str, old: Routine<T>, new: Routin
     assert_eq!(bn, bo, "{name}: buffers");
     assert_eq!((un, ln), (uo, lo), "{name}: units and largest charge");
     for l in limits(uo) {
-        let (ro, bo, uo2, _) = run(old, b, l);
-        let (rn, bn, un2, _) = run(new, b, l);
+        let (ro, bo, uo2, lo2) = run(old, b, l);
+        let (rn, bn, un2, ln2) = run(new, b, l);
         assert_eq!(rn, ro, "{name}: result at limit {l}");
         assert_eq!(bn, bo, "{name}: buffers at limit {l}");
-        assert_eq!(un2, uo2, "{name}: units at limit {l}");
+        assert_eq!((un2, ln2), (uo2, lo2), "{name}: units and largest charge at limit {l}");
     }
     rn
 }
@@ -170,7 +171,8 @@ fn random_against_today() {
 fn hard_cases_against_today() {
     let mut rng = Rng(77);
     let h = 1u64 << 63;
-    let (b0, a0, o1, o2) = (hits::get(hits::BOUNDARY), hits::get(hits::ADD_BACK), hits::get(hits::D3_OVER1), hits::get(hits::D3_OVER2));
+    let rows = [hits::BOUNDARY, hits::ADD_BACK, hits::D3_QBIG, hits::D3_Y2_ONCE, hits::D3_Y2_TWICE, hits::D3_RH_BREAK];
+    let before = rows.map(hits::get);
     let mut shift0 = 0;
     let mut shift63 = 0;
     let mut divisors: Vec<Vec<u64>> = vec![
@@ -192,8 +194,6 @@ fn hard_cases_against_today() {
     for y in &divisors {
         let ny = y.len();
         let top = y[ny - 1];
-        shift0 += usize::from(top >> 63 == 1);
-        shift63 += usize::from(top == 1);
         for extra in [0usize, 1, 2, 3, 7] {
             let nx = ny + extra;
             // x = y b^k - 1 (the boundary digit when ny >= 3), x = y (nx =
@@ -212,6 +212,9 @@ fn hard_cases_against_today() {
                 if nxx < ny {
                     continue;
                 }
+                // (the shifts counted on divisions actually run)
+                shift0 += usize::from(top >> 63 == 1);
+                shift63 += usize::from(top == 1);
                 all_three(&x[..nxx], y, &mut rng);
                 gcds(&x[..nxx], y);
             }
@@ -231,7 +234,7 @@ fn hard_cases_against_today() {
             all_three(&x[..nxx], &y, &mut rng);
         }
     }
-    let got = [hits::get(hits::BOUNDARY) - b0, hits::get(hits::ADD_BACK) - a0, hits::get(hits::D3_OVER1) - o1, hits::get(hits::D3_OVER2) - o2];
-    eprintln!("hard-case coverage: boundary {}, add-back {}, D3 over by 1 {}, over by 2 {}; shift 0 {shift0}, shift 63 {shift63}", got[0], got[1], got[2], got[3]);
+    let got: Vec<u64> = rows.iter().zip(before).map(|(&r, b)| hits::get(r) - b).collect();
+    eprintln!("hard-case coverage: boundary {}, add-back {}, D3 q >= b {}, D3 second-limb once {}, twice {}, rh break {}; shift 0 {shift0}, shift 63 {shift63} (divisions run)", got[0], got[1], got[2], got[3], got[4], got[5]);
     assert!(got.iter().all(|&g| g > 0) && shift0 > 0 && shift63 > 0, "a hard-case row was never reached: {got:?}");
 }

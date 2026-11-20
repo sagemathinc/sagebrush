@@ -262,12 +262,16 @@ fn window(x: &[u64], n: usize, shift: usize) -> u64 {
 pub(crate) mod hits {
     use std::cell::Cell;
     thread_local! {
-        static N: [Cell<u64>; 4] = const { [const { Cell::new(0) }; 4] };
+        static N: [Cell<u64>; 6] = const { [const { Cell::new(0) }; 6] };
     }
     pub(crate) const BOUNDARY: usize = 0;
     pub(crate) const ADD_BACK: usize = 1;
-    pub(crate) const D3_OVER1: usize = 2;
-    pub(crate) const D3_OVER2: usize = 3;
+    // (today's D3 loop: a correction because qhat >= b, one and two because
+    // of the second-limb test, and the rh overflow break)
+    pub(crate) const D3_QBIG: usize = 2;
+    pub(crate) const D3_Y2_ONCE: usize = 3;
+    pub(crate) const D3_Y2_TWICE: usize = 4;
+    pub(crate) const D3_RH_BREAK: usize = 5;
     pub(crate) fn hit(i: usize) {
         N.with(|n| n[i].set(n[i].get() + 1));
     }

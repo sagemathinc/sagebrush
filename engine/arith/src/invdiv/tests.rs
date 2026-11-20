@@ -38,7 +38,7 @@ fn recip_is_the_definition() {
 }
 
 /// Every normalized d, every u1 < d, every u0: the 2-by-1 is the division,
-/// and step 1 wraps exactly where ENGINE's search found (10,480 triples on
+/// and step 1 wraps exactly where an exhaustive search finds it (10,480 triples on
 /// 102 divisors, each with u1 = d - 1).
 #[test]
 fn div2by1_exhaustive_8() {
@@ -172,7 +172,12 @@ fn div3by2_64() {
         let d1 = rng.next() | 1 << 63;
         let d0 = rng.next();
         let v3 = w64::recip3(d1, d0, w64::recip(d1));
-        let (u2, u1) = if i % 4 == 0 { (d1 - 1, u64::MAX - (rng.next() >> 40)) } else { (rng.next() % d1, rng.next()) };
+        // (the top edges: u2 = d1 - 1 with u1 high, and u2 = d1 with u1 < d0)
+        let (u2, u1) = match i % 4 {
+            0 => (d1 - 1, u64::MAX - (rng.next() >> 40)),
+            1 if d0 > 0 => (d1, rng.next() % d0),
+            _ => (rng.next() % d1, rng.next()),
+        };
         let u0 = rng.next();
         let (q, r1, r0) = w64::div3by2(u2, u1, u0, d1, d0, v3);
         // q (d1, d0) + (r1, r0) == (u2, u1, u0), three limbs
