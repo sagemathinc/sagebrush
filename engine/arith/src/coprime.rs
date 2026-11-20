@@ -297,7 +297,8 @@ fn qdigit(u2: u64, u1: u64, u0: u64, y1: u64, y2: u64, v3: u64) -> Result<u128, 
     }
 }
 
-/// x / d for a one-limb d != 0, x of nx >= 1 limbs: the quotient to q[..nx]
+/// x / d for a one-limb d != 0, x of nx >= 1 limbs (one limb: a u64
+/// division): the quotient to q[..nx]
 /// and x[..nx] zeroed, limb by limb from the top (each limb charged 6
 /// units before it is divided); the remainder.  The 2-by-1 divides x 2^s by
 /// the normalized d 2^s, the shifted limbs read on the fly (nothing
@@ -305,6 +306,15 @@ fn qdigit(u2: u64, u1: u64, u0: u64, y1: u64, y2: u64, v3: u64) -> Result<u128, 
 /// shifted back at the end.  The reciprocal is made right after the first
 /// limb's charge.
 fn div_limb(x: &mut [u64], nx: usize, d: u64, q: &mut [u64], m: &mut Meter) -> Result<u64, Fault> {
+    if nx == 1 {
+        // (one limb by one limb: the machine's own u64 division, no
+        // reciprocal; the same charge)
+        m.add(6)?;
+        let (qj, r) = (x[0] / d, x[0] % d);
+        q[0] = qj;
+        x[0] = 0;
+        return Ok(r);
+    }
     let s = d.leading_zeros();
     let dn = d << s;
     // (the top limb's spill: below 2^s <= dn)
@@ -327,6 +337,9 @@ fn div_limb(x: &mut [u64], nx: usize, d: u64, q: &mut [u64], m: &mut Meter) -> R
 /// 2-by-1 on a 2^s by d 2^s as in [`div_limb`], the quotient discarded.
 /// Its caller has charged the units already.
 fn rem_limb(a: &[u64], na: usize, d: u64) -> u64 {
+    if na == 1 {
+        return a[0] % d;
+    }
     let s = d.leading_zeros();
     let dn = d << s;
     let v = invdiv::recip(dn);
