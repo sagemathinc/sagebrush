@@ -4,23 +4,25 @@
 // says it connected; and a stand-in site that holds the approval, refuses it or approves it (enrolling the computer),
 // and lists and revokes the account's computers as the relay does.
 //   - the surface reads what the Agents page's pane shows through the harness's one pane observer (PANE_CELLS);
-//   - closed while the approval is pending: the login's process ends (reaped), the approval request is cancelled, the
+//   - closed while the approval is pending: the login's process ends (no longer running), the approval request is cancelled, the
 //     connect stops there (no runner started, the page never touched), close reports nothing wrong;
 //   - an enrollment refused: the connect fails saying so, and the login's process ends with it (never left polling);
 //   - approved, then closed before the login has ended: the computer, enrolled by then, is revoked by the close;
 //   - another computer of the account with the same name, from before: never revoked, only this run's; and one
 //     still listed after its revocation is reported;
-//   - a runner, and its child, that ignore TERM: the close kills them, checks them reaped, within CLOSE_MS;
+//   - a runner, and its child, that ignore TERM: the close kills them, with none left running within CLOSE_MS;
+//   - the agent's group with its leader already gone: a member left behind is killed all the same;
 //   - the runner's environment: this process's PATH and locale only, its own home, the site; nothing else;
 //   - a deployed site: refused unless https and a regular 0600 cookie file holding one name=value;
 //   - the site's end: upgraded sockets destroyed, a failing or hung Miniflare end reported, never swallowed.
 //   node web/cloud/agent-flows/test-surface-computer-lifetime.mjs
 import { chmodSync, existsSync, mkdtempSync, readFileSync, rmSync, symlinkSync, writeFileSync } from "node:fs";
+import { spawn } from "node:child_process";
 import { createServer } from "node:http";
 import { connect } from "node:net";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
-import { computerSurface, closeSite, deployedSite, CLOSE_MS } from "./surface-computer.mjs";
+import { computerSurface, closeSite, deployedSite, endAgent, CLOSE_MS } from "./surface-computer.mjs";
 import { DEFAULT_GRANT, PANE_CELLS, CLEANUP_MS, sleep } from "../../agent-flows/harness.mjs";
 
 let failures = 0;
@@ -111,7 +113,7 @@ try {
     const [login] = pidsOf("login");
     ok(running(login), "…its process is running while the approval is pending");
     const problems = await s.close();
-    ok(!running(login), "closed during the pending approval: the login's process is gone (ended and reaped)", { login });
+    ok(!running(login), "closed during the pending approval: the login's process is gone (no longer running)", { login });
     const said = await Promise.race([connecting, sleep(5000).then(() => "still waiting")]);
     ok(said !== "connected" && said !== "still waiting", `…the connect stopped there (${said})`);
     ok(pidsOf("runner").length === 0 && used.length === 0, "…no runner started and the page never touched", { runner: pidsOf("runner"), used });
@@ -178,7 +180,7 @@ try {
     site.sticky = false;
     site.peers = [];
   }
-  // ---- a runner, and its child, that ignore TERM: killed and reaped within CLOSE_MS
+  // ---- a runner, and its child, that ignore TERM: killed, with none left running within CLOSE_MS
   {
     site.mode = "approve";
     site.name = null;
@@ -193,9 +195,23 @@ try {
     const t0 = Date.now();
     const problems = await s.close();
     const took = Date.now() - t0;
-    ok(!running(runner) && !running(kid) && took < CLOSE_MS + 500 && CLOSE_MS < CLEANUP_MS, `…the close killed both and checked them reaped, in ${took} ms (within CLOSE_MS ${CLOSE_MS}, under the harness's CLEANUP_MS)`, { runner: running(runner), kid: running(kid), took });
+    ok(!running(runner) && !running(kid) && took < CLOSE_MS + 500 && CLOSE_MS < CLEANUP_MS, `…the close killed both, none left running, in ${took} ms (within CLOSE_MS ${CLOSE_MS}, under the harness's CLEANUP_MS)`, { runner: running(runner), kid: running(kid), took });
     ok(problems.length === 0 && site.revoked.length === 1, "…reporting nothing wrong, the computer revoked", { problems, revoked: site.revoked });
     site.peers = [];
+  }
+  // ---- the agent's group, its leader already gone: a member that ignores TERM is still killed, and the close says so
+  //      if one can't be
+  {
+    const kids = join(tmp, "agent-kids.txt");
+    // (the agent as the runner starts it, in a session of its own: it starts a child in its group, then exits)
+    const leader = spawn("sh", ["-c", `sh -c 'trap "" TERM; echo $$ > "${kids}"; while :; do sleep 1; done' & sleep 0.3; exit 0`], { detached: true, stdio: "ignore" });
+    await new Promise((r) => leader.once("exit", r));
+    await until(() => existsSync(kids) && readFileSync(kids, "utf8").trim() !== "", 3000);
+    const kid = Number(readFileSync(kids, "utf8").trim());
+    ok(!running(leader.pid) && running(kid), "the agent's leader has exited, a child of its group (ignoring TERM) still runs", { leader: leader.pid, kid });
+    const t0 = Date.now();
+    const f = await endAgent(leader.pid, () => Math.max(0, t0 + CLOSE_MS - Date.now()));
+    ok(f === null && !running(kid), `…the close kills the agent's whole group all the same, none left running (${Date.now() - t0} ms)`, { f, kid: running(kid) });
   }
   // ---- a deployed site: https and a regular 0600 file holding one name=value, or refused
   {

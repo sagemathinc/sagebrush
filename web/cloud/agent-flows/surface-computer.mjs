@@ -43,7 +43,7 @@ const STUB_DEPS = join(py, "remote_agent_stub_deps.mjs");
 const A = "11111111-1111-4111-8111-111111111111";
 /** The relay's start in Miniflare (the Worker built, workerd up), at most. */
 export const START_MS = 60_000;
-/** The surface's whole close (Disconnect, every process it started killed and reaped, the computer revoked), at most:
+/** The surface's whole close (Disconnect, every process it started killed and none left running, the computer revoked), at most:
  *  within the harness's own bound on a surface's close (runCase's CLEANUP_MS). */
 export const CLOSE_MS = CLEANUP_MS - 500;
 /** The variables the runner (and through it the agent) gets from this process's environment: nothing else of it. */
@@ -217,6 +217,16 @@ async function endGroup(p, what, left) {
   return still.length || (p.exitCode === null && p.signalCode === null) ? `${what}: still running after the close (pids ${[p.pid, ...still].join(", ")})` : null;
 }
 const alive = running;
+/** The agent's end: the runner starts it in a session (and process group) of its own, so its group is SIGKILLed
+ *  whatever its leader's state (a leader that already exited can leave members behind), then waited for until no
+ *  member of it runs, within `left()` ms; what still runs, as one problem. */
+export async function endAgent(pid, left) {
+  try { process.kill(-pid, "SIGKILL"); } catch {}
+  try { process.kill(pid, "SIGKILL"); } catch {}
+  for (; left() > 0 && (alive(pid) || inGroup(pid).length); ) await sleep(25);
+  const still = [...(alive(pid) ? [pid] : []), ...inGroup(pid).filter((x) => x !== pid)];
+  return still.length ? `the agent's process group (${pid}): still running after the close (pids ${still.join(", ")})` : null;
+}
 const ppidOf = (pid) => { try { return Number(readFileSync(`/proc/${pid}/stat`, "utf8").replace(/^.*\) /s, "").split(" ")[1]); } catch { return null; } };
 
 /** The harness's surface (harness.mjs's mcp and chat have the same shape), on the site from startComputerSite. */
@@ -374,8 +384,8 @@ export async function computerSurface(site, page, opts = {}) {
     /** The notebook the person sees: the Agents page's pane, its tab shown. */
     shownPath: `document.querySelector(".pane-head .tab.on")?.dataset.tab ?? null`,
     liveCells: PANE_CELLS,
-    /** Disconnect: the runner ends the agent (its process gone); every process this surface started killed and
-     *  reaped; the computer revoked and checked gone; everything removed. All within CLOSE_MS: what isn't done by
+    /** Disconnect: the runner ends the agent (its process gone); every process this surface started killed,
+     *  with none left running; the computer revoked and checked gone; everything removed. All within CLOSE_MS: what isn't done by
      *  then is a failure of the case. */
     async close() {
       const end = Date.now() + CLOSE_MS, left = () => Math.max(0, end - Date.now());
@@ -390,10 +400,9 @@ export async function computerSurface(site, page, opts = {}) {
           if (alive(S.started.pid)) S.failures.push("Disconnect: the agent's process on the computer is still there");
         }
       } finally {
-        // (the login, the runner and the agent, each with its group, ended outright and checked reaped)
-        if (S.started && alive(S.started.pid)) { try { process.kill(-S.started.pid, "SIGKILL"); } catch {} try { process.kill(S.started.pid, "SIGKILL"); } catch {} }
+        // (the agent's group, the login's and the runner's, each ended outright and checked no longer running)
+        if (S.started) { const f = await endAgent(S.started.pid, left); if (f) S.failures.push(f); }
         for (const [p, what] of [[S.login, "sagebrush remote login"], [S.runner, "the runner"]]) { const f = await endGroup(p, what, left); if (f) S.failures.push(f); }
-        if (S.started) { for (; left() > 0 && alive(S.started.pid); ) await sleep(25); if (alive(S.started.pid)) S.failures.push(`the agent (pid ${S.started.pid}): still running after the close`); }
         if (S.revoke) await S.revoke(left).catch((e) => S.failures.push(`${computer} wasn't revoked: ${e.message}`));
         rmSync(tmp, { recursive: true, force: true });
       }
