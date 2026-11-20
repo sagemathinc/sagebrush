@@ -839,7 +839,7 @@ export function createNotebook(root, opts = {}) {
         finish();
       },
       stopped(message) { end(null); it.buffer = null; it.superseded = false; appendText(it.out, message, true); it.dirty = false; finish(); },
-    });
+    }, { figures: figures() });
   }
 
   // ---------------------------------------------------------- running cells
@@ -1036,7 +1036,7 @@ export function createNotebook(root, opts = {}) {
     let waited = 0, waitFrom = null;
     const k = kernel;
     const send = viaWave ?? ((c, o, sink) => k.execute(c, o, sink));
-    return cellSeed(cell).then((seed) => new Promise((resolve) => send(code, { mode, cell: cell.id, forget, mangle: reactive(), ...(seed ? { seed } : {}), ...(scoped ? { scoped } : {}), ...(extra ?? {}) }, {
+    return cellSeed(cell).then((seed) => new Promise((resolve) => send(code, { mode, cell: cell.id, forget, mangle: reactive(), figures: figures(), ...(seed ? { seed } : {}), ...(scoped ? { scoped } : {}), ...(extra ?? {}) }, {
       start() {
         clear();
         cell.el.classList.replace("queued", "running");
@@ -2099,6 +2099,30 @@ export function createNotebook(root, opts = {}) {
   const baseOf = (m, list) => ({ mode: m, cells: (list ?? []).map((c) => ({ id: c.id, code: c.code ?? "", ...(c.type === "markdown" || c.type === "raw" ? { type: c.type } : {}), ...(c.type === "markdown" && c.attachments ? { attachments: c.attachments } : {}) })) });
   const syncedOf = (rev, list, m) => ({ rev, cells: new Map((list ?? []).map((c) => [c.id, cellKey(c)])), doc: baseOf(m, list) });
   const setSynced = (rev, list, m) => { shown.synced = syncedOf(rev, list, m); };
+  // How this notebook's figures are shown (the page's Figures choice, in every language): "auto" (an SVG, or a sharp
+  // PNG for one whose SVG would be over 1 MiB), "svg" or "png"; kept in the notebook's metadata, sagebrush.figures,
+  // only when it isn't "auto", and given to the interpreter with each run (lib/_graphics.py figures).
+  const FIGURES = ["auto", "svg", "png"];
+  function figures() {
+    const f = meta.metadata?.sagebrush?.figures;
+    return FIGURES.includes(f) ? f : "auto";
+  }
+  // m with sagebrush.figures set to f in its metadata (undefined: removed), and no empty metadata left; m itself unchanged
+  function withFigures(m, f) {
+    const { metadata, ...r } = m;
+    const md = { ...(metadata ?? {}) }, sb = { ...(md.sagebrush ?? {}) };
+    if (f === undefined) delete sb.figures;
+    else sb.figures = f;
+    if (Object.keys(sb).length) md.sagebrush = sb;
+    else delete md.sagebrush;
+    return Object.keys(md).length ? { ...r, metadata: md } : r;
+  }
+  function setFigures(f) {
+    if (!FIGURES.includes(f) || f === figures()) return;
+    meta = withFigures(meta, f === "auto" ? undefined : f);
+    gateCfg = null;
+    schedule();
+  }
   function snapshot() {
     return {
       ...meta, mode,
@@ -2360,6 +2384,12 @@ export function createNotebook(root, opts = {}) {
     let dirty = false;
     meta = { ...meta, ...rest };
     gateCfg = null;
+    // (how its figures are shown is the incoming document's alone: none there is Auto, never the old choice kept)
+    const incoming = rest.metadata?.sagebrush?.figures;
+    if (meta.metadata?.sagebrush?.figures !== incoming) {
+      meta = withFigures(meta, incoming);
+      gateCfg = null;
+    }
     if (!keepLocal) kernel?.remoteGate?.documentReplaced(); // (a revert replaces the document)
     if (m && m !== mode) setMode(m, false);
     const order = cells().map((c) => c.id);
@@ -2737,7 +2767,7 @@ export function createNotebook(root, opts = {}) {
     // started starts a new one first (confinement phase 2), whose restart makes every cell stale)
     runCells(ids, { consent: _consent, ...o } = {}) { opts.onExplicitRun?.(); return reactive() ? engine().run(ids, o) : Promise.all(ids.map((id) => cellById(id)).filter(Boolean).map((c) => run(c))); },
     applyEdits, graph, verify, fixRedefinitions,
-    setMode, setType, setInput, renderMd, select, edit,
+    setMode, setType, setInput, renderMd, select, edit, figures, setFigures,
     /** X1: load the language's environment now, for the user's choice of it (index.html's menu). */
     warm,
     /** Measure every editor again now (after the notebook was hidden). */

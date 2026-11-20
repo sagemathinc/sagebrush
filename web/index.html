@@ -200,7 +200,7 @@
   .menu .danger { color: var(--err); }
   .menu[hidden], .menu [hidden] { display: none; }
   /* an open panel: checked */
-  .menu button[aria-pressed="true"]::after { content: "✓"; color: var(--accent); }
+  .menu button[aria-pressed="true"]::after, .menu button[aria-checked="true"]::after { content: "✓"; color: var(--accent); }
   .menu kbd { font-size: 11px; color: var(--muted); }
   .pick { border: 1px solid var(--line); border-radius: 10px; background: var(--cell); color: var(--fg); padding: 14px 16px; width: min(560px, 92vw); }
   .pick::backdrop { background: rgba(0,0,0,.35); }
@@ -3738,6 +3738,47 @@ document.addEventListener("keydown", (e) => {
 });
 // (the ⋯ menu's items have their own handlers; a pick closes it)
 const moreMenu = $("#moremenu"), toggleMoreMenu = menuOf($("#morebtn"), moreMenu);
+// Figures: how this notebook's figures are shown, in every language (web/notebook/notebook.js figures, kept in the
+// notebook and given to the interpreter with each run; lib/_graphics.py figures): an in-place group, as Help's.
+const figuresGroup = menuGroup(moreMenu, "Figures", "figures", () => syncFigures(), false, $("#restart").nextElementSibling);
+figuresGroup.button.title = "How this notebook's figures are shown, in every language (kept in the notebook), unless its code chooses otherwise";
+const figureItems = [
+  ["auto", "Auto", "An SVG, sharp at any zoom; for a figure whose SVG would be over 1 MiB, a sharp PNG"],
+  ["svg", "SVG", "Always the SVG, however many points a figure has"],
+  ["png", "PNG", "A PNG drawn at twice the size; SVG if PNG can't be drawn"],
+].map(([f, label, title]) => {
+  const b = document.createElement("button");
+  b.setAttribute("role", "menuitemradio");
+  b.dataset.figures = f;
+  b.textContent = label;
+  b.title = b.dataset.title = title;
+  b.onclick = () => { if (!b.disabled) { nb.setFigures(f); syncFigures(); } };
+  return b;
+});
+figuresGroup.box.append(...figureItems);
+function syncFigures() {
+  const f = nb.figures?.() ?? "auto";
+  // (a remote kernel (remote compute, a paired computer) isn't given the choice yet: its rows disabled, saying so,
+  // so the menu never seems to do what it doesn't)
+  const remote = kernelPick.value !== "local";
+  for (const b of figureItems) {
+    b.setAttribute("aria-checked", String(b.dataset.figures === f));
+    b.disabled = remote;
+    b.setAttribute("aria-disabled", String(remote));
+    b.title = remote ? "Not available for remote kernels yet" : b.dataset.title;
+  }
+}
+// (its closed rows hidden in their own right, as Help's)
+const openFigures = async (on = figuresGroup.box.hidden) => {
+  for (const b of figureItems) b.hidden = !on;
+  if (on) syncFigures();
+  await figuresGroup.open(on);
+};
+figuresGroup.button.onclick = (ev) => { ev.stopPropagation(); void openFigures(); };
+void openFigures(false);
+syncFigures();
+// (and whenever ⋯ is opened: the notebook open may have changed since, with its own choice)
+$("#morebtn").addEventListener("click", syncFigures);
 // The long tail of help links is one in-place group, using File's New ▸ / Recent ▸ pattern.  H still opens the
 // shortcuts directly; this only changes where their menu row lives.
 const helpGroup = menuGroup(moreMenu, "Help", "help", () => {}, false, $("#keysbtn"));
@@ -5109,6 +5150,9 @@ const agentBtn = $("#agentbtn");
 let agentPairing = null, agentTries = 0;
 const pairAgent = (w) => (agentPairing ??= import(new URL("sagebrush-agent.js", location.href).href + (agentTries++ ? `?try=${agentTries}` : ""))
   .then((m) => m.mountAgentPairing(w, { runVerbs: m.runVerbsFor(agentRuns(m, w)),
+    // (a reload of this tab keeps the agent: the tab's reload record, resumed with no new Allow while the grant lasts;
+    //  a new tab doesn't, unless the grant was remembered (decided Nov 19 2026))
+    reload: { scope: { workspace: `sagebrush-workspace/${w.identity.workspace}`, page: location.origin + location.pathname } },
     // (what the agent creates: a notebook opens here at once, in place, so the pairing stays (decided Nov 18 2026), as an
     //  automatic open (an intent): a notebook the person opens meanwhile wins, and the agent's never replaces it after.
     //  The bar's Open is the person's own open: the last one, a board in a tab of its own, a file as Files opens it)
@@ -5246,9 +5290,16 @@ if (/^(localhost|127\.0\.0\.1)$/.test(location.hostname)) window.__agentRunsFor 
 const agentFailed = () => { statusEl.textContent = "Couldn't load the agent connection. Try Agent or ⋯ ▸ Connect an agent… again, or reload the page."; };
 // (where Agent is offered: not in the desktop app or the CLI's page, pages on this computer the agent's program doesn't accept)
 const agentHere = !LOCAL && !window.__TAURI__;
-// (a ?pair= link, or an agent this browser remembers: the chunk mounted now, to connect or reconnect)
+// (a ?pair= link, an agent this tab had before its reload (its reload record, agent-pair.ts's RELOAD_KEY), or an agent this
+// browser remembers: the chunk mounted now, to connect or reconnect)
+// (only on a reload of this tab: after any other navigation the record is dropped here, unread, as the pairing module
+//  would discard it (reloadDecision), and nothing is fetched for it; a page in a frame (the Agents page's .tex pane) leaves
+//  the record alone: it shares the tab's sessionStorage, and the record is the top page's)
+const reloadRecorded = () => { try { if (window.top !== window || sessionStorage.getItem("sb-agent-reload-v1") === null) return false; if (performance.getEntriesByType("navigation")[0]?.type === "reload") return true; sessionStorage.removeItem("sb-agent-reload-v1"); return false; } catch { return false; } };
+// (decided once, at load, before anything else is looked at: a ?pair= link or another way in never skips the drop)
+const reloadNow = reloadRecorded();
 const restoreAgent = (w, failed) => {
-  if (pairLink()) void pairAgent(w).catch(failed);
+  if (pairLink() || reloadNow) void pairAgent(w).catch(failed);
   else void w.agentGrants().then((k) => { if (Object.keys(k ?? {}).length) void pairAgent(w).catch(failed); }, () => {});
 };
 // (started once the page knows it shows a notebook, not the LaTeX editor, which has its own: one pairing per page; an

@@ -207,7 +207,11 @@ export function notebookSession(post: (m: any) => void, opts: { captureStreams?:
     R.stderr.flush();
   };
   let ipythonDisplay = true;
+  // (how the notebook's figures are shown, its page's choice (Figures in its ⋯ menu, kept in the notebook): given
+  // with each run; the notebook's code may still say otherwise, lib/_graphics.py figures)
+  let pageFigures: string | null = null;
   R.host = {
+    figures: () => pageFigures,
     // (a Python cell's value shown as IPython shows it, src/runtime/index.ts
     // displayText; a Sage, Magma or MATLAB cell's keeps the repr, as
     // SageMath's shell shows <class 'int'>; set by each run)
@@ -543,6 +547,7 @@ export function notebookSession(post: (m: any) => void, opts: { captureStreams?:
     // are imported already or in the cell (lib/random.py, lib/numpy/random.py
     // read builtins.__pyjs_seed__ when they are), so the numbers do not depend
     // on what ran before.  os.urandom and secrets stay truly random.
+    if ("figures" in m) pageFigures = typeof m.figures === "string" && ["auto", "svg", "png", "both"].includes(m.figures) ? m.figures : null;
     const seed = typeof m.seed === "string" && /^[0-9a-f]{64}$/i.test(m.seed) ? m.seed : null;
     if (seed || seededBefore) {
       const words = seed ? Array.from({ length: 8 }, (_, i) => parseInt(seed.slice(8 * i, 8 * i + 8), 16)) : [];
