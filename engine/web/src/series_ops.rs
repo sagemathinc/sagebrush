@@ -38,12 +38,13 @@
 //! qpoly_integral one polynomial times a rational, its k-th derivative and
 //! its integral with a given constant term, and qpoly_add and qpoly_sub two
 //! polynomials' sum and difference, each coefficient in lowest terms (one
-//! path, sagebrush_arith::pscale).  qpoly_mul's admission has
+//! path, sagebrush_arith::pscale); qpoly_eval a polynomial at a rational
+//! point, one token in lowest terms (sagebrush_arith::peval).  qpoly_mul's admission has
 //! two phases: the lcms' memory from the scans, their work metered (a named
 //! refusal at its limit); then the product's closed forms from the actual
 //! lcms, before any of its allocations.
 
-use sagebrush_arith::{pdivrem, pscale, qpoly, zmul, zseries};
+use sagebrush_arith::{pdivrem, peval, pscale, qpoly, zmul, zseries};
 use serde_json::json;
 
 /// One row of the series ops' table: the op's caps and its path.
@@ -70,7 +71,7 @@ pub const SMALL_MAX_REQUEST: usize = 256;
 // (the peaks: the largest of the closed forms over the admitted corners, 53.3
 // MiB for the series ops and 29.0 MiB for sigma_table, with room; the
 // corner test in tests/series_ops.rs checks them)
-pub static OPS: [SeriesOp; 14] = [
+pub static OPS: [SeriesOp; 15] = [
     SeriesOp { name: "series_mul", max_request: SERIES_MAX_REQUEST, peak: 64 * MIB, work: zseries::WORK_MAX, run: series_mul },
     SeriesOp { name: "series_pow", max_request: SERIES_MAX_REQUEST, peak: 64 * MIB, work: zseries::WORK_MAX, run: series_pow },
     SeriesOp { name: "series_euler", max_request: SMALL_MAX_REQUEST, peak: 8 * MIB, work: zseries::WORK_MAX, run: series_euler },
@@ -94,6 +95,9 @@ pub static OPS: [SeriesOp; 14] = [
     SeriesOp { name: "qpoly_integral", max_request: zmul::REQUEST_MAX as usize, peak: zmul::PEAK_MAX, work: zmul::WORK_MAX, run: qpoly_integral },
     SeriesOp { name: "qpoly_add", max_request: zmul::REQUEST_MAX as usize, peak: zmul::PEAK_MAX, work: zmul::WORK_MAX, run: qpoly_add },
     SeriesOp { name: "qpoly_sub", max_request: zmul::REQUEST_MAX as usize, peak: zmul::PEAK_MAX, work: zmul::WORK_MAX, run: qpoly_sub },
+    // (a polynomial at a rational point: qpoly_clear's metered lcm, then
+    // Horner on integers, on one meter and the word ledger)
+    SeriesOp { name: "qpoly_eval", max_request: zmul::REQUEST_MAX as usize, peak: zmul::PEAK_MAX, work: zmul::WORK_MAX, run: qpoly_eval },
 ];
 
 /// The admitted request's path: run, then the reply text (an error reply
@@ -470,4 +474,15 @@ fn qpoly_add(req: &str, op: &SeriesOp) -> Result<String, String> {
 /// qpoly_sub: {a, b} -> a - b.
 fn qpoly_sub(req: &str, op: &SeriesOp) -> Result<String, String> {
     pscale_op(req, op, pscale::Kind::Sub)
+}
+
+/// qpoly_eval: {a, b} -> a(b), one token in lowest terms (b one rational
+/// token).
+fn qpoly_eval(req: &str, op: &SeriesOp) -> Result<String, String> {
+    let name = op.name;
+    let [a, b] = fields(req, ["a", "b"], name)?;
+    let (a, b) = (need(get_str(a, "a", name)?, "a", name)?, need(get_str(b, "b", name)?, "b", name)?);
+    let pre = |e: String| format!("{}: {}", name, e);
+    let (ca, cb) = (qpoly::scan(a).map_err(pre)?, qpoly::scan(b).map_err(pre)?);
+    peval::reply(&ca, &cb, req.len() as u64, &qpoly::CAPS).map_err(pre)
 }

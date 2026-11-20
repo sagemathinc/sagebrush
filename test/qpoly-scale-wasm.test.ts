@@ -1,4 +1,4 @@
-// qpoly_scale, qpoly_derivative, qpoly_add and qpoly_sub on the
+// qpoly_scale, qpoly_derivative, qpoly_add, qpoly_sub and qpoly_eval on the
 // production engine module (wasm/sagebrush-engine.wasm): a Stop's wall-clock
 // latency on the calibration's slowest shapes.  The engine asks the host
 // every 2^20 work units; units differ in cost, so the latency is measured:
@@ -65,6 +65,9 @@ const shapes: [string, string, string, string][] = [
   ["gcd-heavy: 44,000 rationals by a 500/1600-bit rational", "qpoly_scale", range(44000, (i) => `${hx(i * 7 + 1)}${"d".repeat(150)}/${hx((i % 97) + 3)}${"b".repeat(100)}`), `-${"e7".repeat(62)}/${"9".repeat(400)}`],
   ["sum-heavy: 2500 pairs over denominators sharing a 4096-bit factor", "qpoly_add", rpairs(2500, ""), rpairs(2500, "-")],
   ["difference-heavy: 2500 pairs over denominators sharing a 4096-bit factor", "qpoly_sub", rpairs(2500, ""), rpairs(2500, "")],
+  // (an evaluation's whole cap is about 1.2 s here: two shapes near it)
+  ["product-heavy: a_i = 1/(i+1), 9000 terms, at -7/3", "qpoly_eval", range(9000, (i) => `1/${hx(i + 1)}`), "-7/3"],
+  ["q = 1: 700 400-bit integers at a 2000-bit integer", "qpoly_eval", range(700, (i) => `${hx(i + 1)}${"5".repeat(100)}`), "d".repeat(500)],
 ];
 
 for (const [name, fn, a, b] of shapes) {
