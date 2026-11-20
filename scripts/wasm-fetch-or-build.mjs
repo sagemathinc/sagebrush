@@ -2,11 +2,16 @@
 // size-base's fail-closed acquisition of a base commit's WebAssembly modules.  Published pins are fetched normally.
 // Only when every fetch failure is an HTTP 404 is the base commit built from its own source; all four resulting
 // modules must then match that base's pins exactly.  Network errors, corrupt objects and build/pin mismatches fail.
+// On a track (scripts/pin-policy.mjs: a pull request into track/*, a push or dispatch on it) the base's pin can lag
+// its engine (the pin moves only with the track's pull into master), so its published modules may not be its
+// engine at all: the base is always built from its own source, and the result is labelled pinned or fresh.
 import { execFileSync } from "node:child_process";
 import { join } from "node:path";
 import { fileURLToPath } from "node:url";
 import { fetchModules } from "./wasm-fetch.mjs";
-import { checkModules, MODULES, ROOT } from "./wasm-modules.mjs";
+import { existsSync } from "node:fs";
+import { checkModules, MODULES, ROOT, modulePath, writeSidecar } from "./wasm-modules.mjs";
+import { onTrack, runRefs } from "./pin-policy.mjs";
 
 const escaped = MODULES.map((name) => name.replace(/[.*+?^${}()|[\]\\]/g, "\\$&")).join("|");
 const NOT_FOUND = new RegExp(`^(${escaped}): \\S+: 404(?:\\s|$)`);
@@ -34,8 +39,25 @@ export async function fetchOrBuild({
   fetch = fetchModules,
   build = buildBase,
   check = checkModules,
+  mark = (root) => { for (const name of MODULES) if (existsSync(modulePath(name, root))) writeSidecar(name, root); },
   log = (line) => console.log(line),
+  env = process.env,
 } = {}) {
+  if (onTrack(runRefs(env))) {
+    log("a track's base: building it from its own source (its pin may lag its engine)");
+    build(root);
+    // (each module this build wrote gets its sidecar; then a module built here or a pinned one passes, and a
+    // missing or unidentified one fails)
+    mark(root);
+    const lines = check({ root, mode: "local" });
+    for (const line of lines) log(line);
+    if (lines.every((line) => line.endsWith(": pinned"))) {
+      log("base WebAssembly source build matches every pin");
+      return "built";
+    }
+    log("::warning::the track base's fresh build differs from its pins (expected on a track): measured as built");
+    return "built-fresh";
+  }
   try {
     await fetch({ root, log });
     return "fetched";

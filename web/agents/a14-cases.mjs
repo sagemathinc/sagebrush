@@ -11,6 +11,7 @@ import { mkdtempSync, rmSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { devtoolsPort } from "../test-port.mjs";
+import { deadline, waitFor, WAIT_MS } from "../test-deadline.mjs";
 
 const KEY = "sb-agent-reload-v1";
 const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
@@ -197,28 +198,41 @@ const SLOW_WS_OPEN = (ms, n = 1) => `(() => {
 const RECORD_KEYS = "agent,grant,leftAt,page,pairingId,port,session,v,workspace";
 
 // ---- a browser: one Chrome, its CDP over the browser socket, pages attached in flat sessions
-async function browser() {
+export async function browser() {
   const profile = mkdtempSync(join(tmpdir(), "sb-a14-"));
   const chrome = spawn(process.env.CHROME ?? "chromium", ["--headless", "--no-sandbox", "--disable-gpu", "--password-store=basic", "--remote-debugging-port=0", `--user-data-dir=${profile}`, "--window-size=1280,900", "about:blank"], { stdio: ["ignore", "ignore", "pipe"] });
-  const port = await devtoolsPort(profile, undefined, { child: chrome });
-  let ver;
-  for (let i = 0; i < 200 && !ver; i++) ver = await fetch(`http://127.0.0.1:${port}/json/version`).then((r) => r.json(), () => null) ?? (await sleep(100), null);
-  const ws = new WebSocket(ver.webSocketDebuggerUrl);
-  await new Promise((r) => (ws.onopen = r));
-  let n = 0;
-  const waiting = new Map(), handlers = new Set();
-  ws.onmessage = (e) => {
-    const m = JSON.parse(e.data);
-    if (m.id && waiting.has(m.id)) { waiting.get(m.id)(m.result ?? m.error); waiting.delete(m.id); }
-    else for (const h of handlers) h(m);
-  };
-  const B = { inputs: 0, handlers };
-  B.send = (method, params = {}, sessionId) => new Promise((r) => { const id = ++n; waiting.set(id, r); ws.send(JSON.stringify({ id, method, params, ...(sessionId ? { sessionId } : {}) })); });
-  B.attach = (targetId, o) => attach(B, targetId, o);
-  /** A new tab (about:blank), attached, with its scripts, ready to navigate. */
-  B.tab = async (o = {}) => B.attach((await B.send("Target.createTarget", { url: "about:blank" })).targetId, o);
-  B.close = async () => { try { ws.close(); } catch {} chrome.kill("SIGKILL"); await sleep(200); rmSync(profile, { recursive: true, force: true }); };
-  return B;
+  let ws;
+  try {
+    const port = await devtoolsPort(profile, undefined, { child: chrome });
+    const ver = await waitFor("A14.browser", "DevTools version", (_, signal) => fetch(`http://127.0.0.1:${port}/json/version`, { signal }).then((r) => r.json()));
+    ws = new WebSocket(ver.webSocketDebuggerUrl);
+    await deadline("A14.browser", "DevTools WebSocket open", () => new Promise((r, reject) => { ws.onopen = r; ws.onerror = () => reject(new Error("DevTools WebSocket failed")); }));
+    let n = 0;
+    const waiting = new Map(), handlers = new Set();
+    ws.onmessage = (e) => {
+      const m = JSON.parse(e.data);
+      if (m.id && waiting.has(m.id)) { waiting.get(m.id)(m.result ?? m.error); waiting.delete(m.id); }
+      else for (const h of handlers) h(m);
+    };
+    const B = { inputs: 0, handlers };
+    B.send = (method, params = {}, sessionId, ms = WAIT_MS) => {
+      const id = ++n;
+      return deadline("A14.send", `${method} ${params.expression ?? params.url ?? ""}`, () => new Promise((r) => {
+        waiting.set(id, r); ws.send(JSON.stringify({ id, method, params, ...(sessionId ? { sessionId } : {}) }));
+      }), ms).finally(() => waiting.delete(id));
+    };
+    B.attach = (targetId, o) => attach(B, targetId, o);
+    /** A new tab (about:blank), attached, with its scripts, ready to navigate. */
+    B.tab = async (o = {}) => B.attach((await B.send("Target.createTarget", { url: "about:blank" })).targetId, o);
+    B.close = async () => { try { ws.close(); } catch {} chrome.kill("SIGKILL"); await sleep(200); rmSync(profile, { recursive: true, force: true }); };
+    return B;
+  } catch (error) {
+    try { ws?.close(); } catch {}
+    chrome.kill("SIGKILL");
+    await sleep(200);
+    rmSync(profile, { recursive: true, force: true });
+    throw error;
+  }
 }
 
 async function attach(B, targetId, { clock = false } = {}) {
@@ -230,7 +244,7 @@ async function attach(B, targetId, { clock = false } = {}) {
     else if (m.method === "Runtime.consoleAPICalled") P.console.push(m.params.args.map((a) => a.value ?? a.description ?? "").join(" "));
     else if (m.method === "Runtime.exceptionThrown") P.errors.push((m.params.exceptionDetails.exception?.description ?? m.params.exceptionDetails.text).slice(0, 300));
   });
-  P.send = (method, params = {}) => { if (/^Input\./.test(method)) B.inputs++; return B.send(method, params, sessionId); };
+  P.send = (method, params = {}, ms) => { if (/^Input\./.test(method)) B.inputs++; return B.send(method, params, sessionId, ms); };
   await P.send("Page.enable");
   await P.send("Runtime.enable");
   await P.send("Emulation.setDeviceMetricsOverride", { width: 1280, height: 900, deviceScaleFactor: 1, mobile: false });
@@ -238,23 +252,21 @@ async function attach(B, targetId, { clock = false } = {}) {
   await P.send("Page.addScriptToEvaluateOnNewDocument", { source: WITNESS });
   // (the stage log only on request (A14_STAGES=1): it wraps the very calls it watches, so the default runs are unwrapped)
   if (process.env.A14_STAGES === "1") await P.send("Page.addScriptToEvaluateOnNewDocument", { source: STAGES });
-  P.ev = async (expression, o = {}) => {
-    const r = await P.send("Runtime.evaluate", { expression, awaitPromise: true, returnByValue: true, ...o });
+  P.ev = async (expression, o = {}, ms = WAIT_MS) => {
+    const r = await P.send("Runtime.evaluate", { expression, awaitPromise: true, returnByValue: true, ...o }, ms);
     if (r?.exceptionDetails) throw new Error(JSON.stringify(r.exceptionDetails).slice(0, 400));
     return r?.result?.value;
   };
   P.state = () => P.ev(`(async () => ({ href: location.href, readyState: document.readyState, bar: [document.querySelector('#conn-alert')?.textContent, document.querySelector('#conn-status')?.textContent, document.querySelector('#conn-act')?.hidden ? '' : document.querySelector('#conn-act')?.textContent].join(' | '), record: (() => { try { return sessionStorage.getItem(${JSON.stringify(KEY)}) !== null; } catch { return 'unreadable'; } })(), connect: document.querySelector('#connect')?.textContent ?? null, connectHidden: document.querySelector('#connect')?.hidden ?? null, wsError: document.querySelector('#ws-error')?.hidden === false ? document.querySelector('#ws-error-text')?.textContent : null, dialogs: [...document.querySelectorAll('.sbag-dlg h2')].map((h) => h.textContent), sinceLoad: Math.round(performance.now()), locks: await navigator.locks?.query?.().then((q) => ({ held: (q.held ?? []).map((l) => l.name + ':' + l.mode), pending: (q.pending ?? []).map((l) => l.name + ':' + l.mode) })).catch((e) => String(e)), dbs: await indexedDB.databases?.().then((d) => d.map((x) => x.name)).catch((e) => String(e)), stages: (window.__a14stages || []).slice(-40), idbProbe: await Promise.race([new Promise((res) => { try { const r = indexedDB.open('__a14probe_' + Date.now()); r.onsuccess = () => { r.result.close(); res('ok'); }; r.onerror = () => res('error: ' + (r.error?.name ?? '') + ' ' + (r.error?.message ?? '')); r.onblocked = () => res('blocked'); } catch (e) { res('threw: ' + e); } }), new Promise((res) => setTimeout(() => res('no answer in 5 s'), 5000))]), errors: undefined }))()`).then((s) => ({ ...s, errors: P.errors.slice(-3) }), (e) => ({ unreadable: String(e).slice(0, 200) }));
-  P.until = async (expr, ms = 15000) => {
+  P.until = async (expr, ms = WAIT_MS) => {
     const t = Date.now();
-    while (Date.now() - t < ms) { if (await P.ev(expr).catch(() => false)) return Date.now() - t; await sleep(50); }
-    throw new Error(`timeout (${ms / 1000} s): ${expr.slice(0, 160)}\n  the page then: ${JSON.stringify(await P.state())}`);
+    await waitFor("A14.until", expr, (remaining) => P.ev(expr, {}, remaining), ms);
+    return Date.now() - t;
   };
   P.load = async (go) => {
     const before = P.loads;
     await go();
-    const t = Date.now();
-    while (P.loads === before && Date.now() - t < 20000) await sleep(50);
-    if (P.loads === before) throw new Error("timeout (20 s): the load event\n  the page then: " + JSON.stringify(await P.state()));
+    await waitFor("A14.load", "page load event", () => P.loads !== before);
     await P.until(`document.readyState === 'complete' && !!document.querySelector('#editor .mb')`, 20000);
   };
   P.navigate = (url) => P.load(() => P.send("Page.navigate", { url }));
@@ -307,11 +319,11 @@ async function pair(P, A, site, how = "page", remember = false, write = true) {
   await P.ev(`[...document.querySelectorAll('.sbag-dlg button')].find((b) => b.textContent === 'Connect').click()`);
   return allowDialog(P, how, remember, write);
 }
-/** Connect from the header's Connect Claude (the person's own dialog: the code and the port typed in), then allow. */
+/** Connect from the header's Connect Claude (the person's own dialog: the code and the port typed in one field), then allow. */
 async function connectDialog(P, A, how = "page", remember = false, write = true) {
   await P.ev(`document.querySelector('#connect').click()`);
   await timed("connect-dialog", P.until(`[...document.querySelectorAll('.sbag-dlg h2')].some((h) => h.textContent === 'Connect an agent')`, 30000));
-  await P.ev(`(() => { const d = [...document.querySelectorAll('.sbag-dlg')].at(-1), [c, pt] = d.querySelectorAll('input'); c.value = '123-456'; pt.value = '${A.port}'; [...d.querySelectorAll('button')].find((b) => b.textContent === 'Connect').click(); return true; })()`);
+  await P.ev(`(() => { const d = [...document.querySelectorAll('.sbag-dlg')].at(-1), [c] = d.querySelectorAll('input'); c.value = '123-456 ${A.port}'; [...d.querySelectorAll('button')].find((b) => b.textContent === 'Connect').click(); return true; })()`);
   return allowDialog(P, how, remember, write);
 }
 async function allowDialog(P, how, remember, write) {
@@ -435,8 +447,9 @@ export async function runA14({ site, ok, want = () => true }) {
     ok(st.ariaDisabled === "true" && st.disabled === false && st.describedby === "conn-alert", "A14-2: Send is aria-disabled (never disabled) and described by the bar", st);
   });
 
-  // A14-3: the same browser: (a) a new tab has no record; (b) a copied window makes no silent attempt; (c) its
-  // [Reconnect] gets 409 (the merged copy) and the first tab stays connected
+  // A14-3: the same browser: (a) a new tab has no record; (b) a copied window makes no silent attempt; (c) the copy's
+  // record proves no reload of its own tab, so it isn't kept: it offers Connect (a new Allow), never a Reconnect with
+  // the first tab's grant (decided Nov 19 2026: fail closed), and the first tab stays connected
   await run("A14-3a", async (B, A) => {
     const P = await B.tab();
     await pair(P, A, site, "page");
@@ -468,14 +481,13 @@ export async function runA14({ site, ok, want = () => true }) {
     await Q.until(`document.querySelector('#conn-status').textContent !== ''`);
     const quiet = await A.quiet(3000), bar = await Q.bar();
     ok(pre && pre.keys === RECORD_KEYS.replace("leftAt,", "") && pre.leftAt === null && nav === "navigate", "A14-3b precondition: the opener's record is exact with no leftAt, and the copy's navigation is 'navigate'", { pre: !!pre, leftAt: pre?.leftAt, nav });
-    ok(quiet && A.hellos === h0 && A.upgrades === u0 && bar.status === COPY.kept && bar.act === "Reconnect" && (await P.connected()), "A14-3b: the copy makes no silent attempt (no upgrade, no hello); it offers [Reconnect]; the first tab stays connected", { quiet, bar });
-    const r0 = A.rejected;
+    ok(quiet && A.hellos === h0 && A.upgrades === u0 && bar.status === COPY.kept && bar.act === "Connect" && (await P.connected()), "A14-3b: the copy makes no silent attempt (no upgrade, no hello); it offers Connect, not Reconnect; the first tab stays connected", { quiet, hellos: A.hellos - h0, bar });
+    const r0 = A.rejected, h1 = A.hellos;
     await Q.ev(`document.querySelector('#conn-act').click()`);
-    await Q.until(`document.querySelector('#conn-status').textContent === ${JSON.stringify(COPY.merged)}`);
-    const bar2 = await Q.bar();
+    await Q.until(`[...document.querySelectorAll('.sbag-dlg h2')].some((h) => h.textContent === 'Connect an agent')`);
+    await sleep(500);
     const rt = await A.call("workspace.list", { folder: "/" });
-    ok(A.rejected === r0 + 1 && bar2.status === COPY.merged && bar2.alert === "", "A14-3c: the copy's [Reconnect] is refused once with 409 (counted by the stand-in) and shows the merged copy", { rejected: A.rejected - r0, bar2 });
-    ok(A.live.size === 1 && !!rt.result && (await P.connected()), "A14-3c: the first tab stays connected: a round trip on its socket after the failure", { live: A.live.size, rt: rt.result ? "answered" : rt });
+    ok(A.rejected === r0 && A.hellos === h1 && A.live.size === 1 && !!rt.result && (await P.connected()), "A14-3c: the copy's Connect opens the Connect dialog (a new code and Allow): no attempt with the first tab's grant, which stays connected", { rejected: A.rejected - r0, hellos: A.hellos - h1, live: A.live.size, rt: rt.result ? "answered" : rt });
   });
 
   // A14-4: Revoke, then reload: no bar, nothing reconnects, no record
@@ -624,9 +636,7 @@ export async function runA14({ site, ok, want = () => true }) {
     //  focus when it opens, and on success focus goes to the composer)
     await P.key("Enter");
     await P.until(`document.activeElement?.closest('.sbag-dlg') !== null && document.activeElement?.tagName === 'INPUT'`);
-    await P.send("Input.insertText", { text: "123-456" });
-    await P.key("Tab");
-    await P.send("Input.insertText", { text: String(A.port) });
+    await P.send("Input.insertText", { text: `123-456 ${A.port}` });
     await P.ev(`[...document.querySelectorAll('.sbag-dlg button')].find((b) => b.textContent === 'Connect').focus()`);
     await P.key("Enter");
     await P.until(`[...document.querySelectorAll('.sbag-dlg button')].some((b) => b.textContent === 'Allow')`);
@@ -662,7 +672,8 @@ export async function runA14({ site, ok, want = () => true }) {
     ok(quiet && A.hellos === h0 && bar.status === COPY.kept && bar.act === "Reconnect", "A14-9: no silent attempt; the not-restored bar offers [Reconnect]", { quiet, bar });
   });
 
-  // A14-11: the navigation gate alone: an exact, fresh record that isn't a reload; one click reconnects, same grant
+  // A14-11: the navigation gate alone: an exact, fresh record that isn't a reload is discarded: no attempt, and the bar
+  // offers Connect (a new Allow), never a Reconnect with the old grant (decided Nov 19 2026: fail closed)
   await run("A14-11", async (B, A) => {
     const P = await B.tab();
     await pair(P, A, site, "page");
@@ -676,12 +687,12 @@ export async function runA14({ site, ok, want = () => true }) {
     ok(seen.present && seen.keys === RECORD_KEYS && seen.now - seen.leftAt >= 0 && seen.now - seen.leftAt <= 30000 && nav === "navigate" && seen.page === new URL(site).origin + "/agents/", "A14-11 precondition: the record present, exact, fresh (leftAt within 30 s), the same scope; the navigation is 'navigate' (only R1-a stands)", { keys: seen.keys, age: seen.now - seen.leftAt, nav });
     await P.until(`document.querySelector('#conn-status').textContent !== ''`);
     const quiet = await A.quiet(3000), bar = await P.bar();
-    ok(quiet && A.hellos === h0 && bar.status === COPY.kept && bar.act === "Reconnect", "A14-11: no silent attempt; the not-restored bar offers [Reconnect]", { quiet, bar });
+    ok(quiet && A.hellos === h0 && bar.status === COPY.kept && bar.act === "Connect", "A14-11: no silent attempt; the not-restored bar offers Connect, not Reconnect", { quiet, bar });
     const n11 = A.grants().length;
     await P.ev(`document.querySelector('#conn-act').click()`);
-    await P.until(`document.querySelector('#connect').textContent === 'Connected'`);
-    const g2 = await A.newGrant(n11);
-    ok(g2 !== null && canon(g1) === canon(g2) && A.hellos === h0 + 1, "A14-11: one click reconnects with the same grant", { g1, g2 });
+    await P.until(`[...document.querySelectorAll('.sbag-dlg h2')].some((h) => h.textContent === 'Connect an agent')`);
+    await sleep(500);
+    ok(A.hellos === h0 && A.grants().length === n11 && !(await P.connected()), "A14-11: its Connect opens the Connect dialog: no hello and no grant from the old record", { hellos: A.hellos - h0, grants: A.grants().length - n11 });
   });
 
   // A14-12: the no-demo marker: a failed restore, then a second reload: Send inert with the hint; nothing reaches the demo

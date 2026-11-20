@@ -52,16 +52,18 @@
   <summary><span class="icon" aria-hidden="true">⌨️</span><span><span class="title">Use Claude Code on your computer with sagebrush.space</span><span class="sub">Type in Claude Code; what it makes appears in your notebook.</span></span><span class="chev" aria-hidden="true">›</span></summary>
   <div class="inside">
     <p>Add Sagebrush to Claude Code once. Then ask Claude to connect: it gives you a link, you allow it on the page, and the notebooks it makes open there.</p>
-    <div class="cmd"><pre>claude mcp add --scope user sagebrush -- uvx sagebrush-mcp</pre><button class="copy" type="button" hidden>Copy</button></div>
+    <div class="cmd"><pre>claude mcp add --scope user sagebrush -- uvx sagebrush-mcp@latest</pre><button class="copy" type="button" hidden>Copy</button></div>
     <p class="then">Then start <code>claude</code> and type: <b>Connect to my Sagebrush workspace.</b></p>
     <!-- (the short video of this, when there is one: <div class="video"><video src="…" controls preload="none"></video></div>) -->
     <details class="more">
       <summary>Details</summary>
       <ul>
         <li>Needs <a href="https://docs.astral.sh/uv/">uv</a> (on a Mac: <code>brew install uv</code>) and Chrome or Firefox. Safari can't reach a program on your computer.</li>
+        <li><code>@latest</code>: each time Claude Code starts it, uv checks for a newer sagebrush-mcp and runs the newest.</li>
+        <li>Added before 0.10.2? Run once: <code>claude mcp remove sagebrush</code>, then <code>claude mcp add --scope user sagebrush -- uvx sagebrush-mcp@latest</code>.</li>
         <li>The first time, the browser asks whether sagebrush.space may reach apps on this computer: click Allow.</li>
         <li>You choose what Claude may do in your workspace, which folders and whether it may run code, and you can revoke it at any time.</li>
-        <li>Other agents that load MCP servers take <code>{ "mcpServers": { "sagebrush": { "command": "uvx", "args": ["sagebrush-mcp"] } } }</code>. We haven't tried it with Codex yet.</li>
+        <li>Other agents that load MCP servers take <code>{ "mcpServers": { "sagebrush": { "command": "uvx", "args": ["sagebrush-mcp@latest"] } } }</code>. We haven't tried it with Codex yet.</li>
         <li>It works only if your Claude Code can load MCP servers.</li>
       </ul>
     </details>
@@ -72,35 +74,19 @@
   <summary><span class="icon" aria-hidden="true">💬</span><span><span class="title">Chat with Claude inside sagebrush.space</span><span class="sub">The chat in your browser, Claude running on your computer.</span></span><span class="chev" aria-hidden="true">›</span></summary>
   <div class="inside">
     <p>A small program on your computer runs Claude with your own Claude login, and you chat with it on the <a href="/agents/">Agents page</a>. It works only in the folders of your workspace that you allow.</p>
-    <div class="cmd"><pre><code>npx -y https://agents.sagebrush.cloud/agents/sagebrush-agent-0.7.1.tgz</code></pre><button class="copy" type="button" hidden>Copy</button></div>
+    <div class="cmd"><pre><code>npx -y https://agents.sagebrush.cloud/agents/sagebrush-agent-0.7.6.tgz</code></pre><button class="copy" type="button" hidden>Copy</button></div>
     <p class="then">It prints a link: open it, click Connect, and choose the folders.</p>
     <details class="more">
       <summary>Details</summary>
       <ul>
-        <li>Needs <code>sagebrush-agent</code> 0.7.1 (the download above), Node 20 or later, and Claude Code logged in once with your Claude account. It doesn't use your Claude Code settings, so it works even if your Claude Code is sandboxed.</li>
-        <li>The sha256 of that file is <code>2a131b9381de4b5d011bebc482dda7d2e13402f68a58b60dfba740fa18e0931c</code>.</li>
+        <li>Needs <code>sagebrush-agent</code> 0.7.6 (the download above), Node 20 or later, and Claude Code logged in once with your Claude account. It doesn't use your Claude Code settings, so it works even if your Claude Code is sandboxed.</li>
+        <li>The sha256 of that file is <code>f6a2cdea609ddec69d5da534b6a12434abc203dac5ee4603a17e8f51723a9eb8</code>.</li>
         <li>Open the link in Chrome or Firefox; the browser asks once whether this site may reach apps on this computer: click Allow.</li>
         <li>Claude has no shell and none of your computer's files: only the workspace folders you allowed. Your conversation goes to Anthropic.</li>
         <li>Codex: not here, only on a <a href="/remote/connect">connected computer</a>.</li>
       </ul>
       <p>On dev.sagebrush.space, the testing site:</p>
-      <pre><code>SAGEBRUSH_AGENT_PAGE=https://dev.sagebrush.space/agents/ npx -y https://agents.sagebrush.cloud/agents/sagebrush-agent-0.7.1.tgz --origin https://dev.sagebrush.space</code></pre>
-    </details>
-  </div>
-</details>
-
-<details class="box" id="artifacts">
-  <summary><span class="icon" aria-hidden="true">✨</span><span><span class="title">Use Sagebrush's math in claude.ai or ChatGPT</span><span class="sub">Nothing to install: an artifact imports it.</span></span><span class="chev" aria-hidden="true">›</span></summary>
-  <div class="inside">
-    <p>Sagebrush's math engines are one JavaScript module that an artifact in the chat app can import. Ask the chat to use it in an artifact:</p>
-    <div class="cmd"><pre>const sb = await import("https://cdn.jsdelivr.net/npm/sagebrush-web@0.10.1/sagebrush-engine.mjs");</pre><button class="copy" type="button" hidden>Copy</button></div>
-    <details class="more">
-      <summary>Details</summary>
-      <ul>
-        <li>The code runs inside the artifact, in your browser; the browser downloads about 3 MB from cdn.jsdelivr.net.</li>
-        <li>It's the engines' functions only: no Sage session, no notebook, no files, and no link to your sagebrush.space work.</li>
-        <li>Last tried in October: Claude's artifacts allowed <code>import()</code> from cdn.jsdelivr.net (not other CDNs); ChatGPT's allowed more.</li>
-      </ul>
+      <pre><code>SAGEBRUSH_AGENT_PAGE=https://dev.sagebrush.space/agents/ npx -y https://agents.sagebrush.cloud/agents/sagebrush-agent-0.7.6.tgz --origin https://dev.sagebrush.space</code></pre>
     </details>
   </div>
 </details>

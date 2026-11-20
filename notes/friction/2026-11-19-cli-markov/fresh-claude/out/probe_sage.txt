@@ -1,0 +1,39 @@
+A^(1/2) -> NotImplementedError: non-integral exponents not supported
+A^(0.5) -> NotImplementedError: non-integral exponents not supported
+2x2+3x3 -> TypeError: unsupported operand parent(s) for +: 'Full MatrixSpace of 2 by 2 dense matrices over Rational Field' and 'Full MatrixSpace of 3 by 3 dense matrices over Rational Field'
+3x3+2x2 -> TypeError: unsupported operand parent(s) for +: 'Full MatrixSpace of 3 by 3 dense matrices over Rational Field' and 'Full MatrixSpace of 2 by 2 dense matrices over Rational Field'
+2x2-3x3 -> TypeError: unsupported operand parent(s) for -: 'Full MatrixSpace of 2 by 2 dense matrices over Rational Field' and 'Full MatrixSpace of 3 by 3 dense matrices over Rational Field'
+Traceback (most recent call last):
+  File "/usr/local/bin/sage", line 3, in <module>
+    from sage.cli.__main__ import main
+  File "/opt/cocalc-webdev-python/lib/python3.14/site-packages/sage/cli/__main__.py", line 9, in <module>
+    sys.exit(main())
+             ~~~~^^
+  File "/opt/cocalc-webdev-python/lib/python3.14/site-packages/sage/cli/__init__.py", line 56, in main
+    return RunFileCmd(options).run()
+           ~~~~~~~~~~~~~~~~~~~~~~~^^
+  File "/opt/cocalc-webdev-python/lib/python3.14/site-packages/sage/cli/run_file_cmd.py", line 50, in run
+    eval(compile(open(input_file, 'rb').read(), input_file, 'exec'), sage_globals())
+    ~~~~^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "/tmp/sage_64y99j_c/probeovg6ce0x.sage.py", line 15, in <module>
+    M = matrix(QQ, [['a', _sage_const_1 ], [_sage_const_0 , _sage_const_1 ]])
+  File "sage/matrix/constructor.pyx", line 673, in sage.matrix.constructor.matrix
+  File "sage/matrix/args.pyx", line 809, in sage.matrix.args.MatrixArgs.element
+  File "sage/matrix/args.pyx", line 758, in sage.matrix.args.MatrixArgs.matrix
+  File "sage/structure/parent.pyx", line 901, in sage.structure.parent.Parent.__call__
+  File "sage/structure/coerce_maps.pyx", line 120, in sage.structure.coerce_maps.DefaultConvertMap_unique._call_with_args
+  File "sage/structure/coerce_maps.pyx", line 110, in sage.structure.coerce_maps.DefaultConvertMap_unique._call_with_args
+  File "/opt/cocalc-webdev-python/lib/python3.14/site-packages/sage/matrix/matrix_space.py", line 1155, in _element_constructor_
+    return self.element_class(self, entries, **kwds)
+           ~~~~~~~~~~~~~~~~~~^^^^^^^^^^^^^^^^^^^^^^^
+  File "sage/matrix/matrix_rational_dense.pyx", line 190, in sage.matrix.matrix_rational_dense.Matrix_rational_dense.__init__
+  File "sage/matrix/args.pyx", line 611, in iter
+  File "sage/structure/parent.pyx", line 899, in sage.structure.parent.Parent.__call__
+  File "sage/structure/coerce_maps.pyx", line 92, in sage.structure.coerce_maps.DefaultConvertMap_unique._call_
+  File "sage/structure/coerce_maps.pyx", line 87, in sage.structure.coerce_maps.DefaultConvertMap_unique._call_
+  File "sage/rings/rational.pyx", line 532, in sage.rings.rational.Rational.__init__
+  File "sage/rings/rational.pyx", line 613, in sage.rings.rational.Rational._Rational__set_value
+TypeError: unable to convert 'a' to a rational
+vector len mismatch N*v -> TypeError: unsupported operand parent(s) for *: 'Full MatrixSpace of 2 by 2 dense matrices over Rational Field' and 'Vect
+matrix(QQ,[[1/3,x]]) -> TypeError: unable to convert 'x' to a rational
+matrix(QQ, 2, 2, [1,2,3]) -> ValueError: sequence too short (expected length 4, got 3)

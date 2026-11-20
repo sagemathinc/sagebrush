@@ -32,6 +32,34 @@ export const CHROME_ALLOW = "This browser needs your OK for this site to reach a
 /** Any other browser (Firefox, …): true whatever the cause. */
 export const OTHER_FAIL = "This browser couldn't reach the agent on this computer: check that it's still running, then Connect again.";
 /** Where the longer explanations are (William, Nov 8: one short line in the app, the rest behind "Learn more"). */
+/** A code without its port: the port is in the link the agent gives, so that's what to ask for. */
+export const ONLY_CODE = "That's only the code: ask your agent for its link (sagebrush.space/board/?pair=…), and open it.";
+
+/** What the person put in the Connect dialog: the agent's link (?pair=CODE&port=N, as pasted, with or without its
+ * https://), or "CODE PORT" / "CODE:PORT"; a code alone only with the port its ?pair link came with (`port`). */
+export function readConnect(text: string, port = ""): { code: string; port: number } | { error: string } {
+  const t = text.trim();
+  if (!t) return { error: "Paste the link your agent gave." };
+  let code = "", p = "";
+  const q = /[?&]pair=([^&#\s]*)/.exec(t);
+  if (q) {
+    // (a malformed %-escape is a link that isn't the agent's, said as any other)
+    try { code = decodeURIComponent(q[1]); } catch { return { error: "That link isn't right: ask your agent for its link again." }; }
+    p = /[?&]port=([^&#\s]*)/.exec(t)?.[1] ?? "";
+    if (!code) return { error: "That link has no code: ask your agent for its link again." };
+    if (!p) return { error: "That link has no port: ask your agent for its link again." };
+  } else {
+    const m = /^([^\s:/?&=]+)(?:\s+|\s*:\s*)(\d+)$/.exec(t);
+    if (m) [code, p] = [m[1], m[2]];
+    else if (/^[^\s:/?&=]+$/.test(t) && port) [code, p] = [t, port];
+    else if (/^[^\s:/?&=]+$/.test(t)) return { error: ONLY_CODE };
+    else return { error: "That isn't the agent's link: ask your agent for its link (sagebrush.space/board/?pair=…), and open it." };
+  }
+  const n = Number(p);
+  if (!/^\d+$/.test(p) || !Number.isInteger(n) || n < 1 || n > 65535) return { error: "That link's port isn't right: ask your agent for its link again." };
+  return { code, port: n };
+}
+
 export const CONNECT_DOCS = "/agents/connect/";
 const learnMore = () => { const a = document.createElement("a"); a.href = CONNECT_DOCS; a.target = "_blank"; a.rel = "noopener"; a.textContent = "Learn more"; return a; };
 export const isChromium = (ua = navigator.userAgent) => /chrome|chromium|crios|edg/i.test(ua);
@@ -58,8 +86,18 @@ const CSS = `
 .sbag-box .err { color: #9b2c1f; white-space: pre-wrap; }
 .sbag-box .note { color: #5c6657; font-size: 12px; }
 .sbag-bar { position: fixed; left: 12px; bottom: calc(12px + var(--sb-alpha-banner, 0px)); z-index: 999; background: #1d241a; color: #fff; border-radius: 18px; padding: 6px 8px 6px 14px; font: 13px system-ui, sans-serif; display: flex; gap: 10px; align-items: center; box-shadow: 0 4px 14px rgba(0,0,0,.2); }
+/* (docked: in the page's own row for it, [data-sbag-slot], never over what the person types in or reads; decided Nov 19 2026) */
+.sbag-bar.docked { position: static; margin: 6px 12px; width: fit-content; max-width: calc(100% - 24px); flex-wrap: wrap; box-shadow: none; }
+/* (in a header's row, [data-sbag-inline]: one line, its words cut short, so the header keeps its height) */
+[data-sbag-inline] > .sbag-bar.docked { margin: 0; padding: 3px 6px 3px 12px; flex-wrap: nowrap; min-width: 0; max-width: 100%; }
+[data-sbag-inline] > .sbag-bar.docked > span { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; min-width: 0; }
+[data-sbag-inline] > .sbag-bar.docked > button { flex: none; white-space: nowrap; }
 .sbag-bar button { font: inherit; border: 0; border-radius: 12px; padding: 3px 10px; background: #fff; color: #1d241a; cursor: pointer; }
 .sbag-bar button.open { max-width: 240px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.sbag-bar .made { display: flex; gap: 8px; align-items: center; padding-left: 10px; border-left: 1px solid #4a5546; white-space: nowrap; min-width: 0; max-width: 480px; }
+.sbag-bar .made b { overflow: hidden; text-overflow: ellipsis; min-width: 0; }
+.sbag-bar .made button { flex: none; }
+.sbag-bar button.cta { background: #8fd17a; color: #10200c; font-weight: 600; padding: 4px 16px; }
 `;
 
 let styled = false;
@@ -98,7 +136,7 @@ async function again(deadline: number, mine: () => boolean): Promise<boolean> {
 /** The page's pairing: a dialog to connect, a bar while connected.  Returns the button's handler. `reload` (A14) turns on
  * the reload record: its scope, and a callback for the restore's states; `quietLoss` leaves an involuntary loss to the
  * page's own bar (no dialog). */
-export function mountAgentPairing(ws: PairingWorkspace, o: { button?: HTMLElement | null; onPairing?: (p: AgentPairing) => void; notebookEdit?: (edit: NotebookEdit, may: () => boolean, hold?: () => Promise<() => void>) => Promise<unknown>; branches?: { gitBranch: typeof gitBranch; gitBranchParams: typeof gitBranchParams; gitBranchProblem: typeof gitBranchProblem; watchBranches: typeof watchBranches; gitServe?: typeof gitServe }; reload?: { scope: ReloadScope; storage?: Pick<Storage, "getItem" | "setItem" | "removeItem"> | null; onState?: (s: RestoreState) => void; onRemembered?: (g: Kept["grant"]) => void }; quietLoss?: boolean; program?: string; runVerbs?: RunVerbs; extra?: (close: () => void) => HTMLElement; open?: (c: Created) => void; onCreated?: (c: Created, p: AgentPairing) => void } = {}) {
+export function mountAgentPairing(ws: PairingWorkspace, o: { button?: HTMLElement | null; onPairing?: (p: AgentPairing) => void; egressTurn?: boolean; notebookEdit?: (edit: NotebookEdit, may: () => boolean, hold?: () => Promise<() => void>, turnId?: string) => Promise<unknown>; branches?: { gitBranch: typeof gitBranch; gitBranchParams: typeof gitBranchParams; gitBranchProblem: typeof gitBranchProblem; watchBranches: typeof watchBranches; gitServe?: typeof gitServe }; reload?: { scope: ReloadScope; storage?: Pick<Storage, "getItem" | "setItem" | "removeItem"> | null; onState?: (s: RestoreState) => void; onRemembered?: (g: Kept["grant"]) => void }; quietLoss?: boolean; program?: string; runVerbs?: RunVerbs; extra?: (close: () => void) => HTMLElement; open?: (c: Created) => void; onCreated?: (c: Created, p: AgentPairing) => void } = {}) {
   style();
   // `program`: the page's own program (the Agents page: sagebrush-agent) named in the dialog instead of sagebrush-mcp
   const named = (s: string) => o.program ? s.replace(/(the agent's |your agent's )?sagebrush-mcp/g, o.program) : s;
@@ -106,6 +144,11 @@ export function mountAgentPairing(ws: PairingWorkspace, o: { button?: HTMLElemen
   let bar: HTMLElement | null = null;
   const trashEntry = async (p: string) => (await ws.stat(p)) as any;
   const page = { origin: location.origin, path: location.pathname };
+  // (a page in a frame of this tab (the Agents page's .tex pane): the tab's reload record is the top page's, so this
+  //  page's pairing neither takes it, writes it, nor marks it left; it pairs as any page without a record does)
+  let framed = true;
+  try { framed = window.top !== window; } catch { framed = true; }
+  if (framed && o.reload) o = { ...o, reload: undefined };
   // (the reload record's storage: this tab's sessionStorage, or none if it can't be reached)
   let storage: Pick<Storage, "getItem" | "setItem" | "removeItem"> | null = null;
   if (o.reload) { try { storage = o.reload.storage === undefined ? sessionStorage : o.reload.storage; } catch { storage = null; } }
@@ -117,7 +160,7 @@ export function mountAgentPairing(ws: PairingWorkspace, o: { button?: HTMLElemen
   // (an agent's runs of code (chat plan PR 4a): the page's run-holder.ts, only where the page offers them)
   const runVerbs = o.runVerbs;
   const make = (port: number, how: { code: string } | { session: string; pairingId: string; agent?: { name: string; client: string } } | { link: AgentLink; computer: string }) =>
-    new AgentPairing(port, how, { verbsFor: (actor, host) => ws.forAgent(actor, host), ...(ws.branchHost && o.branches ? { gitBranch: { params: o.branches.gitBranchParams, problem: o.branches.gitBranchProblem, run: (a) => o.branches!.gitBranch(ws.branchHost!(a.actor), a) } } : {}), ...(ws.branchHost && o.branches?.gitServe ? { gitVerbs: o.branches.gitServe(ws as unknown as { branchHost(actor: string): GitHost }) } : {}), store: ws, trashEntry, page, ...(runVerbs ? { runVerbs } : {}), ...(o.notebookEdit ? { notebookEdit: o.notebookEdit } : {}), ...(o.onCreated ? { onCreated: onlyCurrent(() => pairing, o.onCreated) } : {}), ...(o.reload ? { reload: { storage, scope: o.reload.scope, leaving: () => leaving } } : {}) });
+    new AgentPairing(port, how, { verbsFor: (actor, host) => ws.forAgent(actor, host), ...(ws.branchHost && o.branches ? { gitBranch: { params: o.branches.gitBranchParams, problem: o.branches.gitBranchProblem, run: (a) => o.branches!.gitBranch(ws.branchHost!(a.actor), a) } } : {}), ...(ws.branchHost && o.branches?.gitServe ? { gitVerbs: o.branches.gitServe(ws as unknown as { branchHost(actor: string): GitHost }) } : {}), store: ws, trashEntry, page, ...(runVerbs ? { runVerbs } : {}), ...(o.notebookEdit ? { notebookEdit: o.notebookEdit } : {}), ...(o.egressTurn ? { egressTurn: true } : {}), ...(o.onCreated ? { onCreated: onlyCurrent(() => pairing, o.onCreated) } : {}), ...(o.reload ? { reload: { storage, scope: o.reload.scope, leaving: () => leaving } } : {}) });
   // (the branches' records made right with their folders: now, and whenever the workspace changes; chat plan PR 3)
   // (`branches`: git_branch and its reconcile, on the pages that offer it (they import git-branch.ts), never in a
   //  pairing chunk of a page that doesn't, the LaTeX page's)
@@ -151,12 +194,28 @@ export function mountAgentPairing(ws: PairingWorkspace, o: { button?: HTMLElemen
     if (noRun) noRun.onclick = () => void p.noRun();
     // (Open: what the agent created last, where the page can open it (its `open`), as Files would)
     const made = o.open && p.created ? p.created : null;
-    const open = made ? h("button", { className: "open", textContent: "Open " + nameOf(made.path), title: `Open ${made.path}, which the agent created` }) : null;
+    // (a board it made opens in a tab of its own, never by itself (a tab only opens on a click, and this page keeps the
+    //  pairing): said as what the agent did, with Open beside it, the bar's one call to action)
+    const board = made?.kind === "board";
+    const open = made ? h("button", { className: board ? "cta" : "open", textContent: board ? "Open" : "Open " + nameOf(made.path), title: board ? `Open ${made.path} in a new tab, where its code runs` : `Open ${made.path}, which the agent created` }) : null;
     if (open && made) open.onclick = () => o.open!(made);
-    bar = h("div", { className: "sbag-bar" }, text, ...(open ? [open] : []), ...(noRun ? [noRun] : []), revoke);
+    const did = board && open ? h("span", { className: "made" }, `${p.hello!.agent.name} made`, h("b", { textContent: nameOf(made!.path) }), open) : open;
+    bar = h("div", { className: "sbag-bar" }, text, ...(did ? [did] : []), ...(noRun ? [noRun] : []), revoke);
     bar.setAttribute("role", "status");
-    document.body.append(bar);
+    dock();
   }
+  // (the bar's place: a [data-sbag-slot] the page shows, a row or a header of its layout, the highest-numbered one (an
+  //  editor's page over the notebook page's); an overlay at the bottom left only on a page that has none. Placed again,
+  //  once per frame at most, when the page changes what it shows, as to the LaTeX or code page and back)
+  function dock() {
+    if (!bar) return;
+    let slot: HTMLElement | null = null;
+    for (const e of document.querySelectorAll<HTMLElement>("[data-sbag-slot]")) if (e.offsetParent !== null && (!slot || +e.dataset.sbagSlot! > +slot.dataset.sbagSlot!)) slot = e;
+    bar.classList.toggle("docked", !!slot);
+    if (bar.parentElement !== (slot ?? document.body)) (slot ?? document.body).append(bar);
+  }
+  let docking = false;
+  new MutationObserver(() => { if (bar && !docking) { docking = true; requestAnimationFrame(() => { docking = false; dock(); }); } }).observe(document.documentElement, { attributes: true, attributeFilter: ["class", "hidden"], childList: true, subtree: true });
 
   async function grantDialog(p: AgentPairing) {
     const top = (await ws.list("/")).filter((e) => e.kind === "folder" && e.path !== TRASH).map((e) => e.path);
@@ -241,17 +300,19 @@ export function mountAgentPairing(ws: PairingWorkspace, o: { button?: HTMLElemen
     }
     if (pairing && pairing.state !== "closed") { showBar(); return; }
     dialog("Connect an agent", (box, close) => {
-      const c = h("input", { type: "text", placeholder: "the code the agent gave", value: code, autocomplete: "off" });
-      const pt = h("input", { type: "text", placeholder: "its port", value: port, inputMode: "numeric" });
+      // (one field: the link the agent gave, pasted, or its code and port; a ?pair link fills in the code and keeps its
+      //  port (decided Nov 19 2026), so nobody types a port)
+      const c = h("input", { type: "text", placeholder: "the link the agent gave", value: code, autocomplete: "off" });
       const err = h("div", { className: "err" });
+      if (code && !port) err.textContent = ONLY_CODE;
       const go = h("button", { className: "primary", textContent: "Connect" });
       const cancel = h("button", { textContent: "Cancel" });
       cancel.onclick = close;
       go.onclick = async () => {
         err.textContent = "";
-        const n = Number(pt.value.trim());
-        if (!Number.isInteger(n) || n < 1 || n > 65535) { err.textContent = "The port is the number the agent gave with the code."; return; }
-        if (!c.value.trim()) { err.textContent = "Enter the code the agent gave."; return; }
+        const r = readConnect(c.value, c.value.trim() === code ? port : "");
+        if ("error" in r) { err.textContent = r.error; return; }
+        const n = r.port;
         go.disabled = true;
         // (a socket the browser blocks, by the page's security policy or a refused local-network permission,
         // may never say so: the connection gets 8 s, and a policy violation is said at once)
@@ -259,7 +320,7 @@ export function mountAgentPairing(ws: PairingWorkspace, o: { button?: HTMLElemen
         const onViolation = (e: SecurityPolicyViolationEvent) => { if (/^wss?:\/\/(127\.0\.0\.1|localhost)/.test(e.blockedURI)) blocked = "this page's security policy blocked the connection to the agent"; };
         document.addEventListener("securitypolicyviolation", onViolation);
         try {
-          const p = make(n, { code: c.value });
+          const p = make(n, { code: r.code });
           watch(p);
           await Promise.race([
             p.paired(),
@@ -287,8 +348,8 @@ export function mountAgentPairing(ws: PairingWorkspace, o: { button?: HTMLElemen
           if (/failed/.test(String((e as Error).message))) err.append(" ", learnMore());
         }
       };
-      box.append(h("div", { className: "note", textContent: o.program ? `Start ${o.program} in a terminal on this computer: it prints a code and a port (and a link that fills them in).` : "In your agent (Claude Code, Codex, …) with sagebrush-mcp, ask it to connect to Sagebrush: it gives a code and a port." }),
-        h("label", {}, "Code ", c), h("label", {}, "Port ", pt), err, h("div", { className: "row" }, cancel, go), ...(o.extra ? [o.extra(close)] : []));
+      box.append(h("div", { className: "note", textContent: o.program ? `Start ${o.program} in a terminal on this computer: it prints a link. Open it, or paste it here.` : "Ask your agent (Claude Code, Codex, …, with sagebrush-mcp) to connect to Sagebrush: it gives a link. Open it, or paste it here." }),
+        h("label", {}, "Link ", c), err, h("div", { className: "row" }, cancel, go), ...(o.extra ? [o.extra(close)] : []));
       setTimeout(() => c.focus());
     }, () => { if (back?.isConnected && !pairingLive()) back.focus(); });
   }
@@ -398,7 +459,9 @@ export function mountAgentPairing(ws: PairingWorkspace, o: { button?: HTMLElemen
     const r = t.record;
     const nav = (performance.getEntriesByType?.("navigation")[0] as PerformanceNavigationTiming | undefined)?.type ?? "navigate";
     const d = reloadDecision(r, { scope: o.reload!.scope, navType: nav, now: Date.now() });
-    if (d === "discard") return say({ kind: "not-restored", why: r.grant.expires !== null && !(Date.now() < r.grant.expires) ? "expired" : "discarded", canReconnect: false });
+    // (discarded: its grant over, another workspace or page, or not a reload of this tab: the last needs a new Allow)
+    const sameScope = r.workspace === o.reload!.scope.workspace && r.page === o.reload!.scope.page;
+    if (d === "discard") return say({ kind: "not-restored", why: r.grant.expires !== null && !(Date.now() < r.grant.expires) ? "expired" : sameScope ? "not-a-reload" : "discarded", canReconnect: false });
     if (d === "click") { kept = r; return say({ kind: "not-restored", why: "not-a-reload", canReconnect: true }); }
     say({ kind: "restoring" });
     const { res, p } = await restoreWith(r);
