@@ -232,7 +232,8 @@ ok(run1.sent.every(([m, q]) => m === "chat.resume" && /^mirror[a-z]{10}$/.test(q
     readOnly: "This is the copy in your account, and it's read-only. To continue this conversation, connect the agent that has it.",
     badge: "mirror",
     viewCopy: "View the mirrored copy",
-    mirroringOn: "Mirroring to your Sagebrush account is on for supported agents while this page is connected.",
+    keptMirrored: "Chats are kept in this browser and mirrored to your Sagebrush account.",
+    keptHere: "Chats are kept in this browser only.",
     untitled: "Mirrored conversation",
   };
   const off = Object.entries(exact).filter(([k, v]) => C[k] !== v);

@@ -160,6 +160,25 @@ const expected = (a, conv) => {
   check(a.sent.every(([mm]) => mm === "chat.resume"), "the uploader only ever reads the agent's log (S6e)", a.sent.map(([mm]) => mm));
 }
 
+// ---- the banner's line: "mirrored" only while uploads are actually under way (ruling: no third wording)
+{
+  const { a, m, setPairing } = setup();
+  await m.refresh();
+  check(m.uploading() && m.keptLine() === "Chats are kept in this browser and mirrored to your Sagebrush account.", "on, with a connected agent that gives the tag back: mirrored");
+  setPairing(agent({ features: ["chat.resume"] }));
+  check(!m.uploading() && m.keptLine() === "Chats are kept in this browser only.", "an older agent (no chat.resume.tag): this browser only");
+  setPairing(null);
+  check(m.keptLine() === "Chats are kept in this browser only.", "no agent connected (the scripted demo): this browser only");
+  const b = agent();
+  b.state = "paired";
+  setPairing(b);
+  check(m.keptLine() === "Chats are kept in this browser only.", "an agent paired but not yet allowed: this browser only");
+  setPairing(a);
+  const o = setup({ site: { on: false } });
+  await o.m.refresh();
+  check(o.m.keptLine() === "Chats are kept in this browser only.", "the mirror off: this browser only");
+}
+
 // ---- only with the feature, only when on
 {
   const { a, m } = setup({ agent: { features: ["chat.resume"] } });

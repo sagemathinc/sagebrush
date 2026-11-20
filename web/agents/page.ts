@@ -1650,10 +1650,9 @@ function whoText(who: HTMLElement, dot: string, name: string, small: string) {
   who.replaceChildren(d, ...(name ? [document.createTextNode(name + " ")] : []), s);
 }
 
-/** Where the chats are kept, for the banner: with the log mirror on, never "this browser only", and only as far as it
- *  goes (a supported agent, this page connected). */
+/** Where the chats are kept, for the banner: "mirrored" only while uploads are actually under way (mirror.ts). */
 function keptWhere() {
-  return mirror.on() ? "Chats are kept in this browser. " + MIRROR_COPY.mirroringOn : "Chats are kept in this browser only.";
+  return mirror.keptLine();
 }
 
 function renderHeader() {
@@ -1676,7 +1675,7 @@ function renderHeader() {
   $("#stop").textContent = stopLabel(agentName());
   $("#connect").toggleAttribute("disabled", live());
   $("#banner").innerHTML = live()
-    ? `Connected to ${esc(agentName())} on your computer (your own login). Its files are in this browser's workspace; chats are kept in this browser.${mirror.on() ? " " + MIRROR_COPY.mirroringOn : ""}`
+    ? `Connected to ${esc(agentName())} on your computer (your own login). Its files are in this browser's workspace; ${mirror.uploading() ? "chats are kept in this browser and mirrored to your Sagebrush account" : "chats are kept in this browser"}.`
     : connBar?.kind === "restoring"
     ? "Reconnecting to Claude on your computer…"
     : pairing && pairing.state === "paired" && connectingTo === null

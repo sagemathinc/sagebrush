@@ -175,6 +175,15 @@ export class Mirror {
   agentCan(): boolean {
     return !!this.source();
   }
+  /** Whether uploads are actually under way: the mirror on, and a connected agent that gives the tag back. */
+  uploading(): boolean {
+    return this.on() && this.agentCan();
+  }
+  /** The banner's word on where chats are kept: "mirrored" only while uploads are actually under way, else "this
+   *  browser only" (ruling, Nov 20 2026: no third wording). */
+  keptLine(): string {
+    return this.uploading() ? MIRROR_COPY.keptMirrored : MIRROR_COPY.keptHere;
+  }
 
   // ---- the site
 
@@ -730,7 +739,8 @@ export const MIRROR_COPY = {
   readOnly: "This is the copy in your account, and it's read-only. To continue this conversation, connect the agent that has it.",
   badge: "mirror",
   viewCopy: "View the mirrored copy",
-  mirroringOn: "Mirroring to your Sagebrush account is on for supported agents while this page is connected.",
+  keptMirrored: "Chats are kept in this browser and mirrored to your Sagebrush account.",
+  keptHere: "Chats are kept in this browser only.",
   untitled: "Mirrored conversation",
   reasons: {
     differs: "it differs from your agent's history",
