@@ -4424,7 +4424,8 @@ async function uploadHere(list, folder) {
     const e = r.made[0];
     // (a board brought in from a file: its code waits for the person; what was said carried to its page)
     if (e.kind === "board") { pauseBoard(e.ref); carryNotice(refused); return openEntry(e); }
-    if (codePageUp) return openEntry(e);
+    // (from the code page: opened on its own page, what was said carried there, as for a board)
+    if (codePageUp) { carryNotice(refused); return openEntry(e); }
     saveNow();
     return openId(e.ref).then(() => { wsTrackCurrent(); if (refused) statusEl.textContent = refused; }, sayNotLeft);
   }
@@ -4446,7 +4447,9 @@ async function openAs(e, as) {
     const made = await convertCopy(ws, e, "notebook", { maxBytes: LIMITS.maxBoardBytes, mode: nb.mode, myst: fromMyst, said: (m) => { said = m; } });
     wsBrowser?.refresh();
     // (what was said, after the notebook opened: its own status lines come first)
-    if (!said || codePageUp) return openEntry(made);
+    if (!said) return openEntry(made);
+    // (from the code page: opened on its own page, what was said carried there)
+    if (codePageUp) { carryNotice(said); return openEntry(made); }
     saveNow();
     await openId(made.ref).then(() => { wsTrackCurrent(); statusEl.textContent = said; }, sayNotLeft);
   } catch (err) { statusEl.textContent = `could not open ${nameOf(e.path)} as a notebook: ${err?.message ?? err}`; }
@@ -5171,7 +5174,7 @@ const pairAgent = (w) => (agentPairing ??= import(new URL("sagebrush-agent.js", 
 function agentOpen(ref, intent) {
   // (under the code page a notebook would open hidden, and leaving would interrupt the person's editing: it stays in
   // Files, not opened)
-  if (codePageUp) return Promise.resolve(false);
+  if (codePageUp) { window.sagebrush?.code?.say?.("An agent made a notebook: it's in Files, not opened or run here."); return Promise.resolve(false); }
   saveNow();
   return openId(ref, null, intent).then((ok) => { wsTrackCurrent(); return ok; }, (e) => { if (!e?.navWon) sayNotLeft(e); return false; });
 }
