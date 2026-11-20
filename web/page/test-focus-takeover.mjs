@@ -26,6 +26,11 @@
 //     cells, the second later: 8f; a field not there yet: 8h), else counted in the bar as input actions not applied
 //     (another notebook opened first: 8e; its cell deleted: 8g, what is typed next not held behind it; no field: 8k;
 //     past 5000: 8j; the takeover failed, with a control: 8i);
+//  8e'. wants sent before their tab opened another notebook are void: the writer, going on, keeps the lock;
+//  8e''. two wants queued before the writer asked again, and no answer: it keeps the lock; 8e''': a want answering its
+//     question (the id echoed) gets it; 8e'''': that answer gone (a bye) while the writer saves first: it keeps it;
+//  8e''''''. the tab that answered keeps wanting (no id) while the writer saves: it still gets the lock;
+//  8e'''''. the lock granted to a tab whose passOn fails: it takes the lock, never left read-only for good;
 //  9. a reload: no "another tab" text at any moment, and the reloaded page writes;
 //  9b. the tab in use while the other is reloading: it writes, its keys kept;
 //  9c. a writer held in its first load (the lock free when it opened), a tab opened and used meanwhile: its want is
@@ -413,15 +418,22 @@ try {
 
   // ---- 8e. keys kept, then another notebook shown in that tab before they could be typed in (the writer paused): said in
   // the bar, never dropped without a word; the bar's words gone once another notebook is opened
+  let w8e = null;
+  // (the writer's hand-overs, counted where they happen (its store's yieldLock let go), not sampled: a lock let go and
+  // taken back between two samples is still one)
+  const countYields = `(() => { const st = ${N}.store; if (!st.__counted) { const y = st.yieldLock.bind(st); st.yieldLock = async (...a) => { const r = await y(...a); if (r) window.__yields = (window.__yields ?? 0) + 1; return r; }; st.__counted = true; } window.__yields = 0; return 1; })()`;
   {
     const W = (await A.ev(writes(A))) ? A : B, F = W === A ? B : A;
+    w8e = W;
     const other = await F.ev(`window.sagebrush.workspace.create("/Other.ipynb", { content: { name: "Other", mode: "python", cells: [{ id: "o1", code: "other" }] } }).then((e) => e.ref)`);
     await W.ev(`${N}.saved().then(() => 1)`);
+    await W.ev(countYields);
     await W.send("Debugger.enable");
     await W.send("Debugger.pause");
     await F.clickCell();
     await F.type("lo");
-    await sleep(300);
+    // (past one re-ask interval (1 s): two or more of its wants queued in the paused writer before it leaves)
+    await sleep(1500);
     await F.ev(`window.sagebrush.open(${J(other)}).then(() => 1)`);
     const said8e = await F.ev(`(() => { const b = document.querySelector("#writerbar"); return b && !b.hidden ? b.textContent : null; })()`);
     await W.send("Debugger.resume");
@@ -432,12 +444,96 @@ try {
     const cleared = await F.ev(`(() => { const b = document.querySelector("#writerbar"); return !b || b.hidden || !/input actions? made here/.test(b.textContent); })()`);
     check(cleared, "8e. …and once the notebook is opened again there, the bar says it no more");
   }
+  // ---- 8e'. the want that tab sent while the writer was paused, before it opened another notebook, is void: once the
+  // writer goes on, the lock stays with it (the tab came back, only following, and isn't used again)
+  {
+    const who = [];
+    for (const t0 = Date.now(); Date.now() - t0 < 4000; await sleep(100)) who.push((await A.ev(writes(A))) ? "A" : (await B.ev(writes(B))) ? "B" : "-");
+    const W0 = w8e === A ? "A" : "B", yields = await w8e.ev("window.__yields ?? 0");
+    check(yields === 0 && !who.some((x) => x !== "-" && x !== W0) && who.at(-1) === W0, "8e'. wants sent before their tab opened another notebook (the writer paused past one re-ask meanwhile) are void: the writer never lets the lock go, and keeps it, every 100 ms for 4 s", { writer: W0, yields, who: who.join("") });
+  }
+  // (who writes, every 100 ms for `ms`)
+  const writers = async (ms) => { const who = []; for (const t0 = Date.now(); Date.now() - t0 < ms; await sleep(100)) who.push((await A.ev(writes(A))) ? "A" : (await B.ev(writes(B))) ? "B" : "-"); return who.join(""); };
+  // (the document's channel from the follower's page, as another tab would post on it: web/page/handover.ts)
+  const lockName = `${N}.store.kind.lockPrefix + ${N}.store.id`;
+  // ---- 8e''. two wants queued in the writer while it was busy, sent before it could ask again, and no answer to its
+  // question (no tab is there to answer, and no bye): when it goes on, the first starts its question, the second
+  // arrives after it and answers nothing, and the lock stays.  (busy, not paused in the debugger: a page paused there
+  // was seen to take only the first of a sender's queued messages; a page busy running takes them all, in order)
+  {
+    const W = w8e, F = W === A ? B : A, W0 = W === A ? "A" : "B";
+    await W.ev(countYields);
+    const busy = W.send("Runtime.evaluate", { expression: "(() => { const t = Date.now(); while (Date.now() - t < 2000); return 1; })()", returnByValue: true });
+    await sleep(300);
+    await F.ev(`(() => { const c = new BroadcastChannel(${lockName}); const at = Date.now() + 60000; c.postMessage({ t: "want", tab: "gone", at }); c.postMessage({ t: "want", tab: "gone", at }); setTimeout(() => c.close(), 10000); return 1; })()`);
+    await busy;
+    const who = await writers(3000), yields = await W.ev("window.__yields ?? 0");
+    check(yields === 0 && /^[^-]/.test(who) && [...who].every((x) => x === W0), "8e''. two wants queued before the writer asked again, and no answer to its question: the writer never lets the lock go, and keeps it, every 100 ms for 3 s", { writer: W0, yields, who });
+  }
+  // ---- 8e'''. a want that answers the writer's question (who-wants, its id echoed): the lock is let go for it
+  {
+    const W = w8e, F = W === A ? B : A, W0 = W === A ? "A" : "B", F0 = W0 === "A" ? "B" : "A";
+    await F.ev(`(() => { const c = new BroadcastChannel(${lockName}); let once = false; c.onmessage = (ev) => { if (!once && ev.data?.t === "who-wants" && typeof ev.data.q === "string") { once = true; c.postMessage({ t: "want", tab: "answers", at: Date.now() + 60000, q: ev.data.q }); } }; c.postMessage({ t: "want", tab: "answers", at: Date.now() + 60000 }); window.__answering = c; return 1; })()`);
+    const who = await writers(3000);
+    await F.ev(`(window.__answering?.close(), delete window.__answering, 1)`);
+    // (answered once: the lock let go, and the tab next in the lock's queue, the follower, takes it)
+    check(who.at(-1) === F0, "8e'''. a want that answers the writer's question (its id echoed): the writer lets the lock go, and the follower writes", { writer: W0, who });
+  }
+  // ---- 8e''''. the want that answered the writer's question gone while the writer saves before letting go (its tab's bye),
+  // and a stale want (no id) heard meanwhile: the lock is let go only for a want still answering that question, so the
+  // writer keeps it
+  {
+    const W = (await A.ev(writes(A))) ? A : B, F = W === A ? B : A, W0 = W === A ? "A" : "B";
+    await W.ev(countYields);
+    await W.ev(`(() => { window.__hold8 = new Promise((r) => { window.__release8 = r; }); ${N}.store.t2Hold = window.__hold8; return 1; })()`);
+    await W.key("q");
+    await W.ev(`(${N}.flush(), 1)`);
+    await sleep(150);
+    await F.ev(`(() => { const c = new BroadcastChannel(${lockName}); let once = false; c.onmessage = (ev) => { if (once || ev.data?.t !== "who-wants" || typeof ev.data.q !== "string") return; once = true; c.postMessage({ t: "want", tab: "live", at: Date.now() + 60000, q: ev.data.q }); setTimeout(() => { c.postMessage({ t: "want", tab: "stale", at: Date.now() + 60000 }); c.postMessage({ t: "bye", tab: "live" }); }, 300); }; c.postMessage({ t: "want", tab: "stale", at: Date.now() + 60000 }); window.__live8 = c; return 1; })()`);
+    await sleep(1000);
+    await W.ev(`(window.__release8(), ${N}.store.t2Hold = undefined, 1)`);
+    const who = await writers(2000), yields = await W.ev("window.__yields ?? 0");
+    await F.ev(`(window.__live8?.close(), delete window.__live8, 1)`);
+    // (no other tab writes, ever; the writer's own cells read-only for a moment as it saved first)
+    check(yields === 0 && ![...who].some((x) => x !== "-" && x !== W0) && who.at(-1) === W0, "8e''''. the want that answered the question gone (its bye) while the writer saved before letting go, a stale want heard meanwhile: the writer never lets the lock go, and keeps it", { writer: W0, yields, who });
+  }
+
+  // ---- 8e''''''. the tab that answered keeps wanting while the writer saves first (typed in again: wants with no id, as
+  // a tab still waiting sends them): its answer stands, and the lock is let go once the save is done
+  {
+    const W = (await A.ev(writes(A))) ? A : B, F = W === A ? B : A, W0 = W === A ? "A" : "B", F0 = W0 === "A" ? "B" : "A";
+    await W.ev(`(() => { window.__hold9 = new Promise((r) => { window.__release9 = r; }); ${N}.store.t2Hold = window.__hold9; return 1; })()`);
+    await W.key("t");
+    await W.ev(`(${N}.flush(), 1)`);
+    await sleep(150);
+    await F.ev(`(() => { const c = new BroadcastChannel(${lockName}); let once = false; c.onmessage = (ev) => { if (once || ev.data?.t !== "who-wants" || typeof ev.data.q !== "string") return; once = true; c.postMessage({ t: "want", tab: "typing", at: Date.now() + 60000, q: ev.data.q }); window.__typing9 = setInterval(() => c.postMessage({ t: "want", tab: "typing", at: Date.now() + 60000 }), 200); }; c.postMessage({ t: "want", tab: "typing", at: Date.now() + 60000 }); window.__c9 = c; return 1; })()`);
+    await sleep(1000);
+    await W.ev(`(window.__release9(), ${N}.store.t2Hold = undefined, 1)`);
+    const who = await writers(3000);
+    await F.ev(`(clearInterval(window.__typing9), window.__c9?.close(), delete window.__c9, 1)`);
+    check(who.at(-1) === F0, "8e''''''. the tab that answered keeps wanting (wants with no id) while the writer saves first: the writer still lets the lock go, and the follower writes", { writer: W0, who });
+  }
+
+  // ---- 8e'''''. the lock granted to a tab whose passOn fails (it rejects, after 400 ms): that tab, used, takes the lock
+  // it was granted (never left with neither the lock nor a place in the queue), not writing while passOn is pending
+  {
+    const W = (await A.ev(writes(A))) ? A : B, F = W === A ? B : A;
+    await F.ev(`(() => { const st = ${N}.store; window.__realPassOn = st.passOn; window.__po = 0; st.passOn = async () => { window.__po++; await new Promise((r) => setTimeout(r, 400)); window.__poWriter = st.writer; throw new Error("passOn failed (injected)"); }; return 1; })()`);
+    const was = await code(W);
+    await F.clickCell();
+    await F.key("p");
+    const took = await F.until(writes(F), 8000);
+    await sleep(300);
+    const po = await F.ev("window.__po"), poWriter = await F.ev("window.__poWriter"), got = await code(F);
+    await F.ev(`(${N}.store.passOn = window.__realPassOn, delete window.__realPassOn, 1)`);
+    check(took && po >= 1 && poWriter === false && keptAll(got, was, "p"), "8e'''''. a passOn that fails (rejects after 400 ms): the tab granted the lock isn't the writer while it is pending, then takes the lock and writes, its key kept", { took, po, poWriter, got });
+    doc = got;
+  }
 
   // (the writer and the follower now; the writer's typing saved and shown in the follower; the writer paused (it can't
   // answer: what the follower is used for is kept) and going on again; the count of input actions the bar says weren't
   // applied)
-  // (roles settled first: one tab writes and the other follows (a lock handed on late, by a want answered after its tab
-  // moved on, can still be on its way))
+  // (roles settled first: one tab writes and the other follows)
   const wf = async () => {
     for (const t0 = Date.now(); Date.now() - t0 < 10000; await sleep(100)) {
       const a = await A.ev(writes(A)), b = await B.ev(writes(B));
