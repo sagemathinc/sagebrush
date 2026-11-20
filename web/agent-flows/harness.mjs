@@ -204,7 +204,7 @@ async function mcpSurface(site, page) {
   };
 }
 
-/** The Agents page's pane as the person sees it (the chat and computer surfaces): each cell's rendered outputs (a
+/** The Agents page's pane as the person sees it (the chat surface): each cell's rendered outputs (a
  * picture, an error, text), read from the page, so an empty or broken pane fails even when the saved copy has them. */
 export const PANE_CELLS = `(() => {
       const body = document.querySelector(".pane-body"), cells = body ? [...body.querySelectorAll(".cell")] : [];
@@ -451,7 +451,7 @@ export async function runCase(kase, surfaceName, { site, page, shotDir = process
   } catch (e) {
     h.ok(false, "threw: " + String(e?.stack ?? e).slice(0, 400));
   } finally {
-    // (a surface's close may check its own end, as the computer surface's Disconnect: what it finds wrong fails the case)
+    // (a surface's close may check its own end: what it finds wrong fails the case)
     const found = await Promise.resolve(surface.close()).catch((e) => ["close threw: " + String(e).slice(0, 200)]);
     for (const f of Array.isArray(found) ? found : []) h.ok(false, f);
     await page.closeTabs();

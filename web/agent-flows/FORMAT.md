@@ -5,13 +5,10 @@ A person asks an agent for something; the thing gets made, opens, runs and shows
 - **mcp**: sagebrush-mcp's own server (engine/py/python/sagebrush/mcp_server.py), its tool calls as Claude Code makes them, paired with the notebook page through the one link it gives.
 - **chat**: the Agents page (/agents/), paired with a scripted stand-in for sagebrush-agent. The person sends the prompt; the stand-in plays the case's tool calls in that turn as the page verbs sagebrush-agent makes, and shows them as sagebrush-agent does: a tool call started and finished, and a file it wrote as an artifact beside the chat. It speaks for the published sagebrush-agent 0.7.2: its hello offers notebook.edit and run.context, so an existing notebook is changed by cell (`workspace_edit_notebook`, from a `workspace_read` of it), never written whole, and a run says its chat and turn. A case that changes a notebook on chat does it that way.
 
-- **computer**: the Agents page with the agent on the person's own computer: a real relay (the remotes' Worker in Miniflare), a real `sagebrush remote` runner, enrolled through the device flow, and the reviewed sagebrush-agent with only its model scripted (`surface-computer.mjs`, `computer-agent.mjs`). It needs more than the others (engine/py built and installed, the site's Miniflare), so it has its own runner, `test-agent-flows-computer.mjs`; `test-agent-flows.mjs` skips it.
-
 No model is called: the agent's side is the case's script. The harness does the pairing and the grant, and runs the page in headless Chrome.
 
 ```sh
 SAGEBRUSH_LATEX_PREVIEW=test bun web/build.ts && CHROME=chromium bun web/agent-flows/test-agent-flows.mjs [--case ID] [--surface mcp|chat]
-SAGEBRUSH_AGENTS=1 SAGEBRUSH_LATEX_PREVIEW=test bun web/build.ts && CHROME=chromium PYTHON=python3 bun web/agent-flows/test-agent-flows-computer.mjs [--case ID]
 ```
 
 `SAGEBRUSH_LATEX_PREVIEW=test` is the LaTeX editor's test build, the only one whose hosts include loopback: without it the
@@ -53,7 +50,7 @@ What makes a notebook run, the intended rule on every surface (decided Nov 19 20
 | helper | what it does |
 |---|---|
 | `h.tool(name, args)` | one more agent tool call on this surface: `{ text, structured, isError }` |
-| `h.shown(path, ms?)` | waits until exactly `path` is what the person sees (the notebook page's notebook; the Agents page's pane tab, on chat and computer) |
+| `h.shown(path, ms?)` | waits until exactly `path` is what the person sees (the notebook page's notebook; the Agents page's pane tab, on chat) |
 | `h.ran(path, { images, errors, text }, ms?)` | waits until it has run: at least `images` images, exactly `errors` errors, and `text` (a RegExp) in some output. Checked as the person sees it (the notebook page's notebook, or the pane's rendered cells, while exactly `path` is shown) and on the saved copy; both must have it |
 | `h.read(path)` | the saved copy, as the agent reads it: `{ mode, cells, text }`, or null |
 | `h.files()` | the workspace's paths |
@@ -64,6 +61,6 @@ What makes a notebook run, the intended rule on every surface (decided Nov 19 20
 | `h.tab(match, ms?)` | the tab the person opened whose address matches `match` (a RegExp): `{ ev, until, shot, close }`, closed when the case ends |
 | `h.ok(cond, msg, detail?)`, `h.shot(name)` | a check, and a screenshot |
 
-`h.surface` is `"mcp"`, `"chat"` or `"computer"` where they differ. A case fails on an error on the page, on a Connect or Allow that doesn't come, or past its budget.
+`h.surface` is `"mcp"` or `"chat"` where they differ. A case fails on an error on the page, on a Connect or Allow that doesn't come, or past its budget.
 
 A helper a case needs that isn't here: write it in the case first, then move it into `harness.mjs`.
