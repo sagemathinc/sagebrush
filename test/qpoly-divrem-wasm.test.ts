@@ -9,6 +9,9 @@ import { readFileSync } from "node:fs";
 import { join } from "node:path";
 
 const DEADLINE_MS = 50;
+// (each calibration call at least this long, 4x the deadline: a shorter
+// one could end within the deadline of T whether or not Stop works)
+const MIN_CALL_MS = 200;
 
 let flag: () => number = () => 0;
 const mod = new WebAssembly.Module(readFileSync(join(__dirname, "..", "..", "wasm", "sagebrush-engine.wasm")));
@@ -34,11 +37,12 @@ function call(e: any, request: string): { out: string; returned: number } {
 const tok = (n: number, d: number) => (n < 0 ? "-" : "") + (d === 1 ? Math.abs(n).toString(16) : Math.abs(n).toString(16) + "/" + d.toString(16));
 const range = (n: number, f: (i: number) => string) => Array.from({ length: n }, (_, i) => f(i)).join(",");
 
-// (the calibration's longest shape, cancel-heavy, and its slowest per unit,
-// reduce-heavy)
+// (the calibration's longest shape, cancel-heavy, and a longer update-heavy:
+// each call long enough, at least MIN_CALL_MS, that a Stop at a quarter or
+// half of it is tested, not outrun by the call's own end)
 const shapes: [string, string, string][] = [
   ["cancel-heavy: dense 1000 / non-monic 500", range(1001, (i) => tok(3 * i + 1, (i % 12) + 1)), range(501, (i) => tok(3 * i + 6, (i % 12) + 1))],
-  ["reduce-heavy: x^6000 / (3x - 1)", range(6001, (i) => (i === 6000 ? "1" : "0")), "-1,3"],
+  ["update-heavy: 2400 / non-monic 1200", range(2401, (i) => tok(((i * 7919) % 201) - 100, 1)), range(1201, (i) => (i === 1200 ? "3" : tok(((i * 104729) % 19) - 9, 1)))],
 ];
 
 for (const [name, a, b] of shapes) {
@@ -52,6 +56,7 @@ for (const [name, a, b] of shapes) {
     const ms = returned - t0;
     if (full.includes("unknown fn")) return;
     assert.ok(full.startsWith('{"ok"'), full.slice(0, 200));
+    assert.ok(ms >= MIN_CALL_MS, `${name}: the call took ${ms.toFixed(1)} ms, under ${MIN_CALL_MS}: too short to test a Stop`);
     for (const frac of [0.25, 0.5]) {
       // (the instance made before T: its instantiation isn't the Stop's)
       const e = instance();
