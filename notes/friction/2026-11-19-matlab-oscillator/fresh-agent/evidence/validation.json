@@ -1,0 +1,51 @@
+{
+  "passed": true,
+  "truth": {
+    "amplitude": 2.4,
+    "decay_rate": 0.18,
+    "angular_frequency": 4.7,
+    "phase": 0.65
+  },
+  "checks": {
+    "sagebrush": {
+      "json_parsed": true,
+      "csv_rows": 401,
+      "finite": true,
+      "sse_recomputed": 0.22331502678757523,
+      "ode_max_error_recomputed": 2.210122418411231e-09,
+      "parameter_errors_vs_truth": {
+        "amplitude": 0.004309827719590764,
+        "decay_rate": 0.0004888025040971078,
+        "angular_frequency": 0.0002533786994325382,
+        "phase": -0.0009167615851622957
+      }
+    },
+    "octave": {
+      "json_parsed": true,
+      "csv_rows": 401,
+      "finite": true,
+      "sse_recomputed": 0.22331502678757428,
+      "ode_max_error_recomputed": 1.4096129818952363e-09,
+      "parameter_errors_vs_truth": {
+        "amplitude": 0.004309825321648475,
+        "decay_rate": 0.0004888024423340409,
+        "angular_frequency": 0.00025337872456621113,
+        "phase": -0.0009167612553732107
+      }
+    }
+  },
+  "parameter_absolute_differences_between_engines": {
+    "amplitude": 2.3979422891784452e-09,
+    "decay_rate": 6.176306688310262e-11,
+    "angular_frequency": 2.5133672920674144e-11,
+    "phase": 3.2978908492964365e-10
+  },
+  "trajectory_max_absolute_differences": {
+    "t": 1.7763568394002505e-15,
+    "observed": 7.105427357601002e-15,
+    "clean": 5.898059818321144e-15,
+    "fitted": 2.38957520437566e-09,
+    "ode": 2.38957520437566e-09,
+    "residual": 2.38957520437566e-09
+  }
+}

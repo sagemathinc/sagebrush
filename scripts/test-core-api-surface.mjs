@@ -3,7 +3,12 @@
 // is compatible exactly when every recorded call stays valid with the same binding.
 //   node scripts/test-core-api-surface.mjs
 
-import { merge, widenParams } from "./core-api-surface.mjs";
+import { execFileSync, spawnSync } from "node:child_process";
+import { mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs";
+import { tmpdir } from "node:os";
+import { dirname, join } from "node:path";
+import { fileURLToPath } from "node:url";
+import { baseErrors, merge, widenParams } from "./core-api-surface.mjs";
 
 let failures = 0;
 let passed = 0;
@@ -131,6 +136,102 @@ lifecycle("keyword-only default", ["a", "*r", "k:"], ["a", "*r", "k:="], ["a", "
   const rp = sig(["obj", "**options"], 1).map((p, i) => ({ ...p, since: i + 1 }));
   const w = widenParams("m.show", rp, strip(sig(["obj", "*more", "**options"])), 5);
   check("since: kept for recorded parameters, newLevel for new ones", w.params.map((p) => `${p.name}@${p.since}`).join(",") === "obj@1,more@5,options@2", w.params.map((p) => `${p.name}@${p.since}`).join(","));
+}
+
+// the base branch's surface (baseErrors): nothing recorded at a level the base has reported unless the base has it
+{
+  const api = (level, names) => ({ api: 1, level, modules: { m: { since: 1, names } } });
+  const f = (params) => ({ kind: "function", since: 1, params });
+  const base = api(61, { f: f(sig(["a"], 1)), g: { kind: "class", since: 61, members: { h: f(sig(["x"], 61)) } } });
+  check("the base's own surface passes", baseErrors(base, base).length === 0, baseErrors(base, base).join("; "));
+  // a branch's parameter recorded at the base's level, kept by a clean text merge
+  const merged = api(61, { f: f([...sig(["a"], 1), ...sig(["grow="], 61)]), g: base.modules.m.names.g });
+  const e1 = baseErrors(merged, base);
+  check("an entry at the base's level the base lacks fails", e1.length === 1 && e1[0].startsWith("m:f(grow) is recorded at level 61"), e1.join("; "));
+  // the same addition moved to the next level passes
+  const moved = api(62, { f: f([...sig(["a"], 1), ...sig(["grow="], 62)]), g: base.modules.m.names.g });
+  check("the same addition at the next level passes", baseErrors(moved, base).length === 0, baseErrors(moved, base).join("; "));
+  // a new module and a new member at the base's level
+  const mod = { ...moved, modules: { ...moved.modules, n: { since: 61, names: {} } } };
+  check("a module at the base's level the base lacks fails", baseErrors(mod, base).some((e) => e.startsWith("module n is recorded at level 61")), baseErrors(mod, base).join("; "));
+  const mem = api(62, { f: base.modules.m.names.f, g: { ...base.modules.m.names.g, members: { ...base.modules.m.names.g.members, k: { ...f([]), since: 60 } } } });
+  check("a member at a level below the base's the base lacks fails", baseErrors(mem, base).some((e) => e.startsWith("m:g.k is recorded at level 60")), baseErrors(mem, base).join("; "));
+  // an entry whose level differs from the base's
+  const relevel = api(61, { f: { ...base.modules.m.names.f, since: 2 }, g: base.modules.m.names.g });
+  check("an entry re-leveled from the base's fails", baseErrors(relevel, base).some((e) => e.includes("the base branch's surface has it at level 1")), baseErrors(relevel, base).join("; "));
+  // a default given at the base's level the base lacks
+  const dflt = api(61, { f: f([{ ...sig(["a"], 1)[0], default: true, default_since: 61 }]), g: base.modules.m.names.g });
+  check("a default_since at the base's level the base lacks fails", baseErrors(dflt, base).some((e) => e.startsWith("m:f(a)= is recorded at level 61")), baseErrors(dflt, base).join("; "));
+  // a reviewed removal recorded at the base's level, which the base doesn't record
+  const gone = { ...base, removed: { "m.old": { kind: "function", level: 61 } } };
+  check("a removal at the base's level the base lacks fails", baseErrors(gone, base).some((e) => e.startsWith("removed m.old (function) is recorded at level 61")), baseErrors(gone, base).join("; "));
+  check("a removal the base records at the same level passes", baseErrors(gone, gone).length === 0, baseErrors(gone, gone).join("; "));
+  // a dotted module and a module's name of the same dotted spelling are two entries
+  const dotted = { api: 1, level: 61, modules: { a: { since: 1, names: { b: { kind: "function", since: 61, params: "opaque" } } } } };
+  const both = { ...dotted, modules: { ...dotted.modules, "a.b": { since: 61, names: {} } } };
+  check("module a.b at the base's level fails beside name b of module a", baseErrors(both, dotted).some((e) => e.startsWith("module a.b is recorded at level 61")), baseErrors(both, dotted).join("; "));
+  // *args and **kwargs renamed (a compatible change: widenParams keeps their levels) are the same entries
+  const star = api(61, { f: f(sig(["*args", "**kw"], 1)) });
+  const renamed = api(61, { f: f(sig(["*rest", "**kwds"], 1)) });
+  check("*args and **kwargs renamed at their levels pass", baseErrors(renamed, star).length === 0, baseErrors(renamed, star).join("; "));
+  check("**kwargs added at the base's level the base lacks fails", baseErrors(api(61, { f: f([...sig(["*args"], 1), ...sig(["**kw"], 61)]) }), api(61, { f: f(sig(["*args"], 1)) })).some((e) => e.startsWith("m:f(**) is recorded at level 61")));
+  // the level can't fall below the base's
+  check("a level below the base's fails", baseErrors(api(60, base.modules.m.names), base).some((e) => e.includes("below the base branch's 61")));
+}
+
+// The command line, end to end, on a fixture repository (CORE_API_ROOT, and CORE_API_GENERATED in place of the built
+// CLI): a clean text merge that records a branch's parameter at the base's level passes --check alone, fails
+// --check --base with the base's ref and the restoring command, and the command the message gives fixes it.
+{
+  const dir = mkdtempSync(join(tmpdir(), "sb-core-api-base-"));
+  const script = join(dirname(fileURLToPath(import.meta.url)), "core-api-surface.mjs");
+  const env = { ...process.env, CORE_API_ROOT: dir, CORE_API_GENERATED: join(dir, "generated.json") };
+  const run = (...args) => spawnSync(process.execPath, [script, ...args], { cwd: dir, env, encoding: "utf8" });
+  const git = (...args) => execFileSync("git", ["-c", "user.name=t", "-c", "user.email=t@t", ...args], { cwd: dir, encoding: "utf8", stdio: ["ignore", "pipe", "pipe"] });
+  const write = (level, params) => {
+    writeFileSync(join(dir, "core-api-surface.json"), JSON.stringify({ format: "sagebrush-core-api", api: 1, level, prefixes: [], modules: { m: { since: 1, names: { f: { kind: "function", since: 1, params } } } }, removed: {} }));
+    writeFileSync(join(dir, "src", "pkgset.ts"), `export const CORE_API = 1;\nexport const CORE_API_LEVEL = ${level};\n`);
+  };
+  try {
+    mkdirSync(join(dir, "src"));
+    // the base: level 61, f(a)
+    write(61, sig(["a"], 1));
+    git("init", "-q");
+    git("add", "core-api-surface.json", "src/pkgset.ts");
+    git("commit", "-q", "-m", "base");
+    // the merge: level 61, f(a, grow=) with grow at 61, and the generated surface agreeing
+    write(61, [...sig(["a"], 1), ...sig(["grow="], 61)]);
+    writeFileSync(env.CORE_API_GENERATED, JSON.stringify({ ...generated(["a", "grow="]), failed: {} }));
+    const plain = run("--check");
+    check("CLI: the merged surface passes --check alone", plain.status === 0, plain.stderr);
+    const guarded = run("--check", "--base", "HEAD");
+    check("CLI: --check --base fails on it", guarded.status === 1, `status ${guarded.status}`);
+    check("CLI: the message names the entry and the base's level", guarded.stderr.includes("m:f(grow) is recorded at level 61, but the base branch's level 61 surface doesn't have it"), guarded.stderr);
+    // --base=REF is the same guard; a misspelled or extra argument, or a ref like an option, is a usage error (never
+    // a silent pass); a ref this checkout lacks fails and says so
+    const eq = run("--check", "--base=HEAD");
+    check("CLI: --check --base=HEAD fails on it too", eq.status === 1 && eq.stderr.includes("m:f(grow) is recorded at level 61"), `status ${eq.status} ${eq.stderr}`);
+    for (const bad of [["--check", "--bases", "HEAD"], ["--check", "--base"], ["--check", "--base="], ["--check", "--base", "--output=x"], ["--check", "--base", "HEAD", "x"], ["--update", "--base", "HEAD"], ["--update", "x"], ["--check", "--base=-x"], ["--chek"]]) {
+      check(`CLI: ${bad.join(" ")} is a usage error`, run(...bad).status === 2, bad.join(" "));
+    }
+    const missing = run("--check", "--base", "no-such-ref");
+    check("CLI: a ref this checkout lacks fails with a message", missing.status === 1 && missing.stderr.includes("the base branch's core-api-surface.json at no-such-ref can't be read (fatal: ") && !missing.stderr.includes("    at "), missing.stderr);
+    check("CLI: the message gives the restoring command with the ref", guarded.stderr.includes("git checkout HEAD -- core-api-surface.json && node scripts/core-api-surface.mjs --update"), guarded.stderr);
+    // --update on the merged file moves nothing (why the message restores the base's file first)
+    const stuck = run("--update");
+    check("CLI: --update on the merged file records nothing", stuck.status === 0 && stuck.stdout.includes("is current (level 61)"), stuck.stdout + stuck.stderr);
+    // the message's command: the base's file, then --update, then CORE_API_LEVEL
+    git("checkout", "HEAD", "--", "core-api-surface.json");
+    const up = run("--update");
+    check("CLI: --update on the base's file records the parameter at 62", up.status === 0 && up.stdout.includes("level 62"), up.stdout + up.stderr);
+    writeFileSync(join(dir, "src", "pkgset.ts"), "export const CORE_API = 1;\nexport const CORE_API_LEVEL = 62;\n");
+    const fixed = run("--check", "--base", "HEAD");
+    check("CLI: after the fix --check --base passes", fixed.status === 0, fixed.stderr);
+    const rec = JSON.parse(readFileSync(join(dir, "core-api-surface.json"), "utf8"));
+    check("CLI: grow is recorded at 62", rec.modules.m.names.f.params.find((p) => p.name === "grow")?.since === 62, JSON.stringify(rec.modules.m.names.f.params));
+  } finally {
+    rmSync(dir, { recursive: true, force: true });
+  }
 }
 
 console.log(`test-core-api-surface: ${passed} passed, ${failures} failed`);

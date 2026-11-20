@@ -775,10 +775,12 @@ if (hasSite) rmSync(join(siteDir, "public", "agents"), { recursive: true, force:
     for (const l of r.logs) console.error(l);
     process.exit(1);
   }
-  // (and "How to connect your agent to Sagebrush", a static page without scripts: /agents/connect/, a directory's
+  // (and "How to connect your agent to Sagebrush", a static page with no inline script: /agents/connect/, a directory's
   // index so that every host serves it without a .html: the site's assets and the preview Worker alike)
   mkdirSync(join(here, "dist", "agents", "connect"), { recursive: true });
-  for (const f of ["index.html", "connect/index.html"]) copyFileSync(join(here, "agents", f), join(here, "dist", "agents", f));
+  // (its Copy buttons' script, connect/copy.js, a file of the site's own: the page has no inline script; and the full
+  //  reference for agents, connect.md, the long text the page's boxes stand on)
+  for (const f of ["index.html", "connect/index.html", "connect/copy.js", "connect.md"]) copyFileSync(join(here, "agents", f), join(here, "dist", "agents", f));
   // (the reviewed sagebrush-agent tarball the help box points to: not committed; placed in web/agents by the publisher)
   for (const f of readdirSync(join(here, "agents"))) if (/^sagebrush-agent-\d+\.\d+\.\d+\.tgz$/.test(f)) copyFileSync(join(here, "agents", f), join(here, "dist", "agents", f));
   // (the site's copy: the pages and the script; the help box points at the reviewed tarball's own immutable URL, so
@@ -786,7 +788,7 @@ if (hasSite) rmSync(join(siteDir, "public", "agents"), { recursive: true, force:
   if (hasSite) {
     mkdirSync(join(siteDir, "public", "agents"), { recursive: true });
     mkdirSync(join(siteDir, "public", "agents", "connect"), { recursive: true });
-    for (const f of ["index.html", "agents.js", "connect/index.html"]) copyFileSync(join(here, "dist", "agents", f), join(siteDir, "public", "agents", f));
+    for (const f of ["index.html", "agents.js", "connect/index.html", "connect/copy.js", "connect.md"]) copyFileSync(join(here, "dist", "agents", f), join(siteDir, "public", "agents", f));
   }
 }
 // the numerics core's browser-threads demo (web/threads, numerics-core r4.2 milestone M0): a dense product on 1 and N

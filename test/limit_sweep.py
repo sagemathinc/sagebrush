@@ -18,8 +18,13 @@ Its files, in test/limit-sweep/:
                   (kind "memory") or a trusted host capability (kind "host",
                   with its unarmed default), each where = "path::name",
                   resolved in the current source
-  followups.json  the follow-ups, the source of truth: open, fixed (by a PR
-                  and its merge commit) or withdrawn (with the reason)
+  followups.json  the follow-ups, the source of truth: open, fixed or
+                  withdrawn (with the reason). A fixed item needs no commit:
+                  master's squash merges put the fix and the status change
+                  in one commit, which is its provenance (the history of the
+                  entry); an optional fixed_by, kept by older entries, is
+                  checked when present (pr a positive integer, commit a
+                  full sha)
   batches.json    the batches done, and the active-baseline count the tree
                   must have (recomputed by apply, recount and merge)
 
@@ -465,8 +470,11 @@ def followup_problems(reg, now, ctx):
             continue
         if st == "fixed":
             fb = f.get("fixed_by")
-            if not (isinstance(fb, dict) and isinstance(fb.get("pr"), int) and fb["pr"] > 0 and SHA.fullmatch(str(fb.get("commit", "")))):
-                errs.append("%s: fixed needs fixed_by: {pr, commit (the merge commit's full sha)}" % fid)
+            if fb is not None:
+                pr_ok = "pr" not in fb or (isinstance(fb["pr"], int) and not isinstance(fb["pr"], bool) and fb["pr"] > 0) if isinstance(fb, dict) else False
+                commit_ok = "commit" not in fb or SHA.fullmatch(str(fb["commit"])) is not None if isinstance(fb, dict) else False
+                if not (isinstance(fb, dict) and set(fb) <= {"pr", "commit"} and pr_ok and commit_ok):
+                    errs.append("%s: fixed_by, when given, is {pr?: a positive integer, commit?: a full sha}" % fid)
         elif st == "withdrawn":
             if not isinstance(f.get("withdrawn_because"), str) or not f["withdrawn_because"].strip():
                 errs.append("%s: withdrawn needs withdrawn_because" % fid)

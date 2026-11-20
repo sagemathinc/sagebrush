@@ -26,8 +26,11 @@ const frame = (body: Buffer, more: boolean, command = false) => {
   return Buffer.concat([h, body]);
 };
 
-/** A DEALER connected to port: send(frames), and the next message's frames. */
-function dealer(port: number): Promise<{ send(f: Buffer[]): void; next(): Promise<Buffer[]>; close(): void }> {
+type Dealer = { send(f: Buffer[]): void; next(): Promise<Buffer[]>; close(): void };
+/** A DEALER connected to port: send(frames), and the next message's frames. Connected once the first 64 bytes
+ * have arrived (the ZMTP greeting's length; not otherwise checked), so something else holding the port that
+ * closes the connection, or sends nothing within `wait` ms, is not taken for the kernel. */
+function dealer(port: number, wait: number): Promise<Dealer> {
   return new Promise((res, rej) => {
     const s = net.connect(port, "127.0.0.1");
     let buf = Buffer.alloc(0), greeted = false, frames: Buffer[] = [];
@@ -38,23 +41,26 @@ function dealer(port: number): Promise<{ send(f: Buffer[]): void; next(): Promis
     g[10] = 3;
     g[11] = 1;
     g.write("NULL", 12, "ascii");
-    s.on("error", rej);
+    const silent = setTimeout(() => (s.destroy(), rej(new Error("fewer than 64 bytes received"))), wait);
+    s.on("error", (e) => (clearTimeout(silent), rej(e)));
+    s.on("close", () => (clearTimeout(silent), rej(new Error("closed before 64 bytes were received"))));
     s.on("connect", () => {
       const name = Buffer.from("READY"), key = Buffer.from("Socket-Type"), val = Buffer.from("DEALER"), len = Buffer.alloc(4);
       len.writeUInt32BE(val.length);
       s.write(Buffer.concat([g, frame(Buffer.concat([Buffer.from([name.length]), name, Buffer.from([key.length]), key, len, val]), false, true)]));
-      res({
-        send: (f) => s.write(Buffer.concat(f.map((x, i) => frame(x, i < f.length - 1)))),
-        next: () => new Promise((r) => (messages.length ? r(messages.shift()!) : waiting.push(r))),
-        close: () => s.destroy(),
-      });
     });
     s.on("data", (d: Buffer) => {
       buf = Buffer.concat([buf, d]);
       if (!greeted) {
         if (buf.length < 64) return;
         greeted = true;
+        clearTimeout(silent);
         buf = buf.subarray(64);
+        res({
+          send: (f) => s.write(Buffer.concat(f.map((x, i) => frame(x, i < f.length - 1)))),
+          next: () => new Promise((r) => (messages.length ? r(messages.shift()!) : waiting.push(r))),
+          close: () => s.destroy(),
+        });
       }
       for (;;) {
         if (buf.length < 2) return;
@@ -79,38 +85,78 @@ function dealer(port: number): Promise<{ send(f: Buffer[]): void; next(): Promis
 
 /** A kernel started with args after its connection file: exec(code, silent, storeHistory) sends an execute_request on the shell socket
  * and gives its execute_reply's content; interrupt() sends an interrupt_request on the control socket; exited is
- * its exit status; stop() ends it. */
-export async function startKernel(args: string[], env: Record<string, string> = {}, cwd?: string) {
+ * its exit status; stop() ends it.
+ *
+ * The five ports are free when chosen, but the kernel binds them only later, and a test running beside this one can
+ * take one in between: a kernel that stops on EADDRINUSE before it is reached is started again on fresh ports, up to
+ * `tries` times in all (attempts says how many it took). Any other early stop is the kernel's own, and is returned.
+ * An attempt has `startupMs` (30 s) to reach the kernel's shell and control sockets; one that doesn't throws,
+ * having closed its sockets, killed and reaped the kernel and removed its connection file's folder. (For the
+ * tests of the harness itself: ports, the first attempt's five; kernel, the command run instead of the kernel,
+ * given the connection file.) */
+export async function startKernel(args: string[], env: Record<string, string> = {}, cwd?: string, opts: StartOptions = {}) {
+  const tries = opts.tries ?? 3;
+  for (let attempt = 1; ; attempt++) {
+    const k = await startOnce(args, env, cwd, { ...opts, ports: attempt === 1 ? opts.ports : undefined });
+    if (!/EADDRINUSE/.test(k.out.stderr) || attempt >= tries) return { ...k, attempts: attempt };
+    k.close();
+    await k.stop();
+  }
+}
+
+interface StartOptions {
+  tries?: number;
+  startupMs?: number;
+  ports?: number[];
+  kernel?: (conn: string) => string[];
+}
+
+async function startOnce(args: string[], env: Record<string, string>, cwd: string | undefined, opts: StartOptions) {
   const dir = mkdtempSync(join(tmpdir(), "sb-kernel-conn-"));
-  const ports = await Promise.all([1, 2, 3, 4, 5].map(freePort));
+  const ports = opts.ports ?? (await Promise.all([1, 2, 3, 4, 5].map(freePort)));
   const conn = join(dir, "kernel.json");
   writeFileSync(conn, JSON.stringify({ transport: "tcp", ip: "127.0.0.1", key: "", signature_scheme: "hmac-sha256",
     shell_port: ports[0], iopub_port: ports[1], stdin_port: ports[2], control_port: ports[3], hb_port: ports[4] }));
-  const k = spawn(process.execPath, [join(DIST, "src", "cli.js"), "--jupyter-kernel", conn, "--mode", "python", ...args],
+  const argv = opts.kernel?.(conn) ?? [join(DIST, "src", "cli.js"), "--jupyter-kernel", conn, "--mode", "python", ...args];
+  const k = spawn(process.execPath, argv,
     { env: { ...process.env, SAGEBRUSH_NO_COMPILE_CACHE: "1", ...env }, stdio: ["ignore", "ignore", "pipe"], cwd });
   const out = { stderr: "" };
   k.stderr!.on("data", (d: Buffer) => (out.stderr += d));
   const exited = new Promise<number | null>((r) => k.on("exit", (c) => r(c)));
+  const closed = new Promise<void>((r) => k.on("close", () => r()));
   const stop = async () => {
     k.kill("SIGKILL");
     await exited;
     rmSync(dir, { recursive: true, force: true });
   };
+  // (one deadline for the attempt: the shell and control sockets and their first 64 bytes together)
+  const deadline = Date.now() + (opts.startupMs ?? 30000);
   const connect = async (port: number) => {
-    for (let i = 0; i < 200; i++) {
+    for (;;) {
       if (k.exitCode !== null) return null;
-      const s = await dealer(port).catch(() => null);
+      const left = deadline - Date.now();
+      if (left <= 0) throw new Error(`the kernel wasn't reached within ${opts.startupMs ?? 30000} ms: ` + out.stderr);
+      const s = await dealer(port, Math.min(2000, left)).catch(() => null);
       if (s !== null) return s;
-      await new Promise((r) => setTimeout(r, 50));
+      await new Promise((r) => setTimeout(r, Math.min(50, Math.max(0, deadline - Date.now()))));
     }
-    throw new Error("the kernel never listened: " + out.stderr);
   };
-  const request = (sock: Awaited<ReturnType<typeof dealer>>, type: string, content: any) => {
+  const request = (sock: Dealer, type: string, content: any) => {
     const header = { msg_id: randomUUID(), session: randomUUID(), username: "test", date: new Date().toISOString(), msg_type: type, version: "5.3" };
     sock.send([Buffer.from("<IDS|MSG>"), Buffer.from(""), ...[header, {}, {}, content].map((x) => Buffer.from(JSON.stringify(x)))]);
   };
-  const shell = await connect(ports[0]);
-  const control = shell === null ? null : await connect(ports[3]);
+  let shell: Dealer | null = null, control: Dealer | null = null;
+  try {
+    shell = await connect(ports[0]);
+    control = shell === null ? null : await connect(ports[3]);
+  } catch (e: any) {
+    // (a failed start leaves nothing behind: its sockets, its process, its folder)
+    shell?.close();
+    await stop();
+    throw Object.assign(e, { pid: k.pid, dir });
+  }
+  // (stopped before it was reached: its stderr whole, for why)
+  if (shell === null || control === null) await closed;
   const exec = async (code: string, silent = false, storeHistory = !silent): Promise<any> => {
     request(shell!, "execute_request", { code, silent, store_history: storeHistory, user_expressions: {}, allow_stdin: false, stop_on_error: true });
     for (;;) {

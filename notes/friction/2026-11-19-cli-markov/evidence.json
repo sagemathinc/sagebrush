@@ -1,0 +1,292 @@
+{
+  "date": "2026-11-19",
+  "scope": "Published npm CLI only; no product code changed.",
+  "runtime": {
+    "package": "sagebrush@0.10.1",
+    "npm_integrity": "sha512-RNgkTfxE/0CsXZUXzcaiikh2KoKR6etEI1CDtnvmbQrbOCzgPQ111p0R8mjIpu8IACkQ1HOvf0kqazUvwUtDSg==",
+    "node": "v26.13.1",
+    "python": "3.14.4",
+    "sage_oracle": "10.9.post1",
+    "notes_checkout": "abc38965a41665654befc718a6c65af25ec6b792"
+  },
+  "report": {
+    "absorption": [
+      [
+        "3/4",
+        "1/4"
+      ],
+      [
+        "1/2",
+        "1/2"
+      ]
+    ],
+    "checks_passed": true,
+    "expected_steps": [
+      "15/4",
+      "7/2"
+    ],
+    "fundamental": [
+      [
+        "5/2",
+        "5/4"
+      ],
+      [
+        "1",
+        "5/2"
+      ]
+    ],
+    "states": [
+      "new",
+      "engaged",
+      "converted",
+      "abandoned"
+    ],
+    "step_variance": [
+      "155/16",
+      "37/4"
+    ],
+    "transition_after_five_steps": [
+      [
+        "1/10",
+        "11/100",
+        "31/50",
+        "17/100"
+      ],
+      [
+        "11/125",
+        "1/10",
+        "48/125",
+        "107/250"
+      ],
+      [
+        "0",
+        "0",
+        "1",
+        "0"
+      ],
+      [
+        "0",
+        "0",
+        "0",
+        "1"
+      ]
+    ]
+  },
+  "report_equal_to_sage": true,
+  "error_type_parity": [
+    {
+      "case": "zero_division",
+      "actual": "ZeroDivisionError",
+      "expected": "ZeroDivisionError",
+      "match": true
+    },
+    {
+      "case": "wrong_argument_type",
+      "actual": "TypeError",
+      "expected": "TypeError",
+      "match": true
+    },
+    {
+      "case": "missing_name",
+      "actual": "NameError",
+      "expected": "NameError",
+      "match": true
+    },
+    {
+      "case": "bad_integer",
+      "actual": "ValueError",
+      "expected": "ValueError",
+      "match": true
+    },
+    {
+      "case": "singular_inverse",
+      "actual": "ZeroDivisionError",
+      "expected": "ZeroDivisionError",
+      "match": true
+    },
+    {
+      "case": "ragged_matrix",
+      "actual": "ValueError",
+      "expected": "ValueError",
+      "match": true
+    },
+    {
+      "case": "dimension_mismatch",
+      "actual": null,
+      "expected": "TypeError",
+      "match": false
+    }
+  ],
+  "automated_runs": [
+    {
+      "name": "report",
+      "command": "npm",
+      "args": [
+        "exec",
+        "--yes",
+        "--package=sagebrush@0.10.1",
+        "--",
+        "sagebrush",
+        "--sage",
+        "notes/friction/2026-11-19-cli-markov/report.sage"
+      ],
+      "exit_code": 0,
+      "signal": null,
+      "elapsed_ms": 1798,
+      "stdout": "{\"absorption\": [[\"3/4\", \"1/4\"], [\"1/2\", \"1/2\"]], \"checks_passed\": true, \"expected_steps\": [\"15/4\", \"7/2\"], \"fundamental\": [[\"5/2\", \"5/4\"], [\"1\", \"5/2\"]], \"states\": [\"new\", \"engaged\", \"converted\", \"abandoned\"], \"step_variance\": [\"155/16\", \"37/4\"], \"transition_after_five_steps\": [[\"1/10\", \"11/100\", \"31/50\", \"17/100\"], [\"11/125\", \"1/10\", \"48/125\", \"107/250\"], [\"0\", \"0\", \"1\", \"0\"], [\"0\", \"0\", \"0\", \"1\"]]}\n",
+      "stderr": ""
+    },
+    {
+      "name": "sage_oracle",
+      "command": "sage",
+      "args": [
+        "-c",
+        "[source in reproduction fixture]"
+      ],
+      "exit_code": 0,
+      "signal": null,
+      "elapsed_ms": 2800,
+      "stdout": "{\"absorption\": [[\"3/4\", \"1/4\"], [\"1/2\", \"1/2\"]], \"checks_passed\": true, \"expected_steps\": [\"15/4\", \"7/2\"], \"fundamental\": [[\"5/2\", \"5/4\"], [\"1\", \"5/2\"]], \"states\": [\"new\", \"engaged\", \"converted\", \"abandoned\"], \"step_variance\": [\"155/16\", \"37/4\"], \"transition_after_five_steps\": [[\"1/10\", \"11/100\", \"31/50\", \"17/100\"], [\"11/125\", \"1/10\", \"48/125\", \"107/250\"], [\"0\", \"0\", \"1\", \"0\"], [\"0\", \"0\", \"0\", \"1\"]]}\n",
+      "stderr": ""
+    },
+    {
+      "name": "python_errors",
+      "command": "npm",
+      "args": [
+        "exec",
+        "--yes",
+        "--package=sagebrush@0.10.1",
+        "--",
+        "sagebrush",
+        "notes/friction/2026-11-19-cli-markov/python-errors.py"
+      ],
+      "exit_code": 0,
+      "signal": null,
+      "elapsed_ms": 1120,
+      "stdout": "[{\"case\": \"zero_division\", \"message\": \"division by zero\", \"type\": \"ZeroDivisionError\"}, {\"case\": \"wrong_argument_type\", \"message\": \"object of type 'int' has no len()\", \"type\": \"TypeError\"}, {\"case\": \"missing_name\", \"message\": \"name 'not_a_defined_name' is not defined\", \"type\": \"NameError\"}, {\"case\": \"bad_integer\", \"message\": \"invalid literal for int() with base 10: 'not-an-integer'\", \"type\": \"ValueError\"}]\n",
+      "stderr": ""
+    },
+    {
+      "name": "cpython_oracle",
+      "command": "python",
+      "args": [
+        "notes/friction/2026-11-19-cli-markov/python-errors.py"
+      ],
+      "exit_code": 0,
+      "signal": null,
+      "elapsed_ms": 48,
+      "stdout": "[{\"case\": \"zero_division\", \"message\": \"division by zero\", \"type\": \"ZeroDivisionError\"}, {\"case\": \"wrong_argument_type\", \"message\": \"object of type 'int' has no len()\", \"type\": \"TypeError\"}, {\"case\": \"missing_name\", \"message\": \"name 'not_a_defined_name' is not defined\", \"type\": \"NameError\"}, {\"case\": \"bad_integer\", \"message\": \"invalid literal for int() with base 10: 'not-an-integer'\", \"type\": \"ValueError\"}]\n",
+      "stderr": ""
+    },
+    {
+      "name": "sage_errors",
+      "command": "npm",
+      "args": [
+        "exec",
+        "--yes",
+        "--package=sagebrush@0.10.1",
+        "--",
+        "sagebrush",
+        "--sage",
+        "notes/friction/2026-11-19-cli-markov/sage-errors.sage"
+      ],
+      "exit_code": 0,
+      "signal": null,
+      "elapsed_ms": 1746,
+      "stdout": "[{\"case\": \"singular_inverse\", \"message\": \"input matrix must be nonsingular\", \"type\": \"ZeroDivisionError\"}, {\"case\": \"ragged_matrix\", \"message\": \"the rows of a matrix must have the same length\", \"type\": \"ValueError\"}, {\"case\": \"dimension_mismatch\", \"type\": null}]\n",
+      "stderr": ""
+    },
+    {
+      "name": "sage_error_oracle",
+      "command": "sage",
+      "args": [
+        "-c",
+        "[source in reproduction fixture]"
+      ],
+      "exit_code": 0,
+      "signal": null,
+      "elapsed_ms": 2706,
+      "stdout": "[{\"case\": \"singular_inverse\", \"message\": \"input matrix must be nonsingular\", \"type\": \"ZeroDivisionError\"}, {\"case\": \"ragged_matrix\", \"message\": \"inconsistent number of columns: should be 2 but got 1\", \"type\": \"ValueError\"}, {\"case\": \"dimension_mismatch\", \"message\": \"unsupported operand parent(s) for *: 'Full MatrixSpace of 1 by 2 dense matrices over Rational Field' and 'Vector space of dimension 3 over Rational Field'\", \"type\": \"TypeError\"}]\n",
+      "stderr": ""
+    },
+    {
+      "name": "json_rational",
+      "command": "npm",
+      "args": [
+        "exec",
+        "--yes",
+        "--package=sagebrush@0.10.1",
+        "--",
+        "sagebrush",
+        "--sage",
+        "-c",
+        "import json; print(json.dumps({\"x\": 2/3}))"
+      ],
+      "exit_code": 1,
+      "signal": null,
+      "elapsed_ms": 1757,
+      "stdout": "",
+      "stderr": "Traceback (most recent call last):\n  File \"<string>\", line 1, in <module>\n    import json; print(json.dumps({\"x\": 2/3}))\n  File \"/$pyjs/lib/json/__init__.py\", line 236, in dumps\n    return _default_encoder.encode(obj)\n  File \"/$pyjs/lib/json/encoder.py\", line 203, in encode\n    chunks = self.iterencode(o, _one_shot=True)\n  File \"/$pyjs/lib/json/encoder.py\", line 264, in iterencode\n    return _iterencode(o, 0)\n  File \"/$pyjs/lib/json/encoder.py\", line 183, in default\n    raise TypeError(f'Object of type {o.__class__.__name__} '\nTypeError: Object of type Rational is not JSON serializable\n"
+    },
+    {
+      "name": "execution_json_flag",
+      "command": "npm",
+      "args": [
+        "exec",
+        "--yes",
+        "--package=sagebrush@0.10.1",
+        "--",
+        "sagebrush",
+        "--sage",
+        "--json",
+        "-c",
+        "print(2/3)"
+      ],
+      "exit_code": 2,
+      "signal": null,
+      "elapsed_ms": 950,
+      "stdout": "",
+      "stderr": "unknown option --json\nusage: sagebrush [-c cmd | -m mod | file | -] [args]\n  -c cmd   run the program passed as a string\n  -m mod   run a library module as a script\n  -i       inspect interactively after running a program\n  --sage   Sage syntax (2^3 == 8, 2/3 is a Rational) with sage_all imported;\n           implied for .sage files\n  --magma  Magma: the program is Magma, translated to Python (src/magma.ts)\n           and run on lib/_magma.py; implied for .mag files, and for .m files\n           that assign with :=\n  --matlab MATLAB: the program is MATLAB, translated to Python (src/matlab.ts)\n           and run on lib/_matlab.py; implied for other .m files\n  -q       no banner on the interactive prompt\n  --limits FILE\n           this run's engine limits (also SAGEBRUSH_LIMITS=FILE): a JSON\n           object of at most 4096 bytes, such as {\"ff.work\": 100000000};\n           every key (ff.work, ff.conway_work, ff.embed_max, ff.root_bits,\n           poly.work, nf.relation_rounds, nf.certify_norm_max,\n           nf.certify_index_max, padic.kedlaya_work, matlab.lu_work,\n           pandas.decoded_bytes) is\n           \"unlimited\" by default: set finite values to opt in to work\n           limits (grading, shared compute); memory guards always apply;\n           invalid limits end the run with status 2 before it starts\n  --pkgset ID|FILE\n           an optional package set for this run (also SAGEBRUSH_PKGSET): its\n           id, fetched and verified into ~/.cache/sagebrush/pkg, or a local\n           pkgset/<id>.json (scripts/optional-packages.mjs build)\n  --figures DIR\n           keep the figures shown (plt.show(), a plot's display) as SVG files\n           in DIR; without it, they are in a directory removed at exit\n  --data-root DIR\n           the folder whose .sagebrush-data snapshots urllib.request may\n           replay (default: the starting directory); nothing above it is used\n  --emit   print the JavaScript compiled from file (with --magma or --matlab: the Python)\n  -V       print the version\n  --licenses  the licenses of Sagebrush and of what it contains\n  --search QUERY [--mode sage|python|magma|matlab] [--limit N] [--json]\n           search the documentation of every function (name, signature,\n           docstring): what Sagebrush can do; obj? in a session shows one.\n           --mode: that language's functions (default: Sage's library,\n           which Python mode imports too)\n  --install-jupyter-kernel [--user | --sys-prefix | --prefix DIR] [--mode sage|python|magma|matlab|all]\n           register Sagebrush as a Jupyter kernel (no Python needed)\n  --uninstall-jupyter-kernel [the same options]\n  notebook [DIR] [--port N] [--no-browser]\n           the Sagebrush notebook in your browser, running Python here;\n           notebooks are the .ipynb files in DIR\n  board open FILE [--port N] [--no-browser]\n           a board in your browser, shown again each time FILE changes\n           (sagebrush board --help: every board command)\n  latex check|run|render FILE.tex [--png DIR]\n           check a .tex file as Sagebrush's LaTeX editor shows it, run its\n           SageTeX code, and see it: an HTML file, and a PNG per beamer frame\n           (sagebrush latex --help)\n\nExamples: https://sagebrush.space/examples/ (in the page: File > Examples…)\n"
+    }
+  ],
+  "manual_observations": {
+    "install": {
+      "requested": "sagebrush@0.10.2",
+      "at": "2026-11-19T16:09Z",
+      "exit_code": 1,
+      "error": "npm ETARGET: No matching version found for sagebrush@0.10.2.",
+      "npm_latest": "0.10.1"
+    },
+    "search": {
+      "query": "matrix inverse",
+      "machine_readable": true,
+      "first_match": "Matrix.inverse",
+      "markov_query_matches": [
+        "Sandpile.markov_chain"
+      ]
+    },
+    "stop": {
+      "surface": "npm exec --yes --package=sagebrush@0.10.1 -- sagebrush --sage -q, PTY",
+      "sentinel_before": 8675309,
+      "code": "while True:\\n    pass",
+      "ctrl_c": "No prompt or output after Ctrl-C and queued print(sentinel).",
+      "direct_sigint": "No prompt/output; process remained running after an explicit additional five-second wait.",
+      "cleanup": "SIGTERM to the verified test Node PID ended the session with exit 143.",
+      "sentinel_after_stop": "Not recovered; forced termination was required.",
+      "normal_error_recovery": "A new REPL retained sentinel=8675309 after ZeroDivisionError; printing it as JSON succeeded."
+    },
+    "dimension_mismatch": {
+      "matrix_shape": [
+        1,
+        2
+      ],
+      "vector_length": 3,
+      "actual": "(5)",
+      "expected": "TypeError (Sage 10.9.post1)"
+    },
+    "quit": {
+      "exit_call": "exit() raised NameError",
+      "workaround": "Ctrl-D ended the healthy REPL with exit 0"
+    }
+  }
+}
