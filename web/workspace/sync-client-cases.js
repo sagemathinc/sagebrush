@@ -1712,7 +1712,10 @@ async function conflictFresh() {
     check((await W.confirmedEntry(b, nsOf(cb), fid))?.sha256 === (await a.stat("/w.bin")).sha256 && sameBytes(await b.contents(await b.stat("/w.bin")), mineB), "conflict, fresh: A's write in B's confirmed index while B's own is undecided: B still shows its own");
     await ctl("release");
     check(await until(() => settled(b, cb)), "conflict, fresh: B's write decided");
-    const copy = (await b.list("/")).find((e) => e.path.startsWith("/w (conflict, "));
+    // (the copy comes down as the server's own op, after B's write is decided: waited for, as the rows below wait for
+    // theirs; read once at once, it was missing in about one CI run in many)
+    let copy;
+    await until(async () => !!(copy = (await b.list("/")).find((e) => e.path.startsWith("/w (conflict, "))));
     check(!!copy, "conflict, fresh: B has the conflict copy: " + J((await b.list("/")).map((e) => e.path)));
     check(await until(async () => { const x = await b.stat("/w.bin"); return x && !x.remote && x.sha256 === (await a.stat("/w.bin")).sha256; }), "conflict, fresh: B shows the server's version under the name: " + J(await b.stat("/w.bin")));
     check(sameBytes(await b.contents(await b.stat("/w.bin")), mineA), "conflict, fresh: …A's bytes");
@@ -2636,6 +2639,261 @@ async function s5Docs() {
   check(!el.textContent.includes("Notebooks sync between your devices"), "docs: the Sync panel's notebooks note isn't shown on this test origin (DEV's only)");
   s.dispose();
   owner.destroy();
+}
+
+async function s5Retry() {
+  // (a session that couldn't be asked: /api/share/me unreachable (offline, a 5xx, a 429) is neither yes nor no; with no
+  // client running the owner tries again, the wait doubling to its bound, and at once when the browser is back online;
+  // a client starting resets the wait.  401, 403 and another account are a final no: no try again.  pagehide clears
+  // the waiting try; nothing waits while sync is off here)
+  await account();
+  const w = await fresh();
+  // (sync turned on here first, through the panel, with the real session: the durable lease is on)
+  const o0 = W.SyncOwner.of(w, { origin: location.origin });
+  o0.start();
+  const el = document.createElement("div");
+  const s = W.syncSection(w, el, hostOf(w));
+  await until(() => /Turn on sync/.test(buttons(el).join()), 5000);
+  [...el.querySelectorAll("button")].find((b) => /Turn on sync/.test(b.textContent)).click();
+  check(await until(() => o0.view().s.state === "synced", 15_000), "retry: sync on, a client synced");
+  s.dispose();
+  o0.destroy();
+  // (a page loaded afresh, its /api/share/me answered as `me` says; every other request real)
+  const real = window.fetch.bind(window);
+  let me = "throw", asked = 0;
+  const fetchMe = async (url, init) => {
+    if (!String(url).endsWith("/api/share/me")) return real(url, init);
+    asked++;
+    if (me === "throw") throw new TypeError("Failed to fetch");
+    // (a request that hangs: it answers only by being aborted)
+    if (me === "hang") return new Promise((_, no) => init?.signal?.addEventListener("abort", () => no(new DOMException("aborted", "AbortError"))));
+    if (me === "real") return real(url, init);
+    if (me === "other") return new Response(JSON.stringify({ account_id: "00000000-0000-4000-8000-0000000000ff" }), { status: 200, headers: { "content-type": "application/json" } });
+    return new Response("{}", { status: me, headers: { "content-type": "application/json" } });
+  };
+  const saved = { ...W.OWNER };
+  Object.assign(W.OWNER, { retryMs: 100, retryMaxMs: 400 });
+  try {
+    for (const transient of ["throw", 503, 429]) {
+      me = transient;
+      asked = 0;
+      const o = W.SyncOwner.of(w, { origin: location.origin, fetch: fetchMe });
+      o.start();
+      // (each try asks once: 1 at load, then after 100, 200, 400, 400 ms…)
+      const t0 = Date.now();
+      check(await until(() => asked >= 4, 5000), `retry (${transient}): asked again on its own: ${asked}`);
+      const took = Date.now() - t0;
+      check(o.client === null && took >= 650, `retry (${transient}): no client while it can't ask, the waits doubling (4 asks after ${took} ms)`);
+      const n = asked;
+      await new Promise((r) => setTimeout(r, 900));
+      check(asked - n >= 1 && asked - n <= 3, `retry (${transient}): the wait bounded at its maximum: ${asked - n} asks in 900 ms`);
+      // (the session answers again: a client starts, and nothing waits any more)
+      me = "real";
+      check(await until(() => o.view().s.state === "synced", 15_000), `retry (${transient}): the session answers: a client starts and syncs`);
+      const settled = asked;
+      await new Promise((r) => setTimeout(r, 900));
+      check(asked === settled && o.stats.retries >= 3, `retry (${transient}): once running, no more tries: ${asked - settled}`);
+      o.destroy();
+    }
+    // (a request that hangs is given up after its bound, and tried again: the owner never waits on it for good)
+    Object.assign(W.OWNER, { askMs: 200 });
+    me = "hang";
+    asked = 0;
+    const oh = W.SyncOwner.of(w, { origin: location.origin, fetch: fetchMe });
+    oh.start();
+    check(await until(() => asked >= 3 && oh.stats.retries >= 2, 5000), "retry: a hung /api/share/me is given up after its bound and tried again: " + J({ asked, retries: oh.stats.retries }));
+    me = "real";
+    check(await until(() => oh.view().s.state === "synced", 15_000), "retry: …and once it answers, a client starts");
+    oh.destroy();
+    Object.assign(W.OWNER, { askMs: saved.askMs });
+    // (final answers: no try again)
+    for (const final of [401, 403, "other"]) {
+      me = final;
+      asked = 0;
+      const o = W.SyncOwner.of(w, { origin: location.origin, fetch: fetchMe });
+      o.start();
+      await until(() => asked >= 1, 5000);
+      await new Promise((r) => setTimeout(r, 900));
+      check(asked === 1 && o.client === null && o.stats.retries === 0, `retry: ${final} is a final no: asked once, no client, no try again (${asked})`);
+      o.destroy();
+    }
+    // (back online: a waiting try goes at once, the wait being long)
+    Object.assign(W.OWNER, { retryMs: 60_000, retryMaxMs: 60_000 });
+    me = "throw";
+    asked = 0;
+    const o1 = W.SyncOwner.of(w, { origin: location.origin, fetch: fetchMe });
+    o1.start();
+    await until(() => asked >= 1, 5000);
+    me = "real";
+    const tOn = Date.now();
+    window.dispatchEvent(new Event("online"));
+    // (synced long before the 60 s wait, its timer never having fired; the client itself asks /api/share/me too)
+    check(await until(() => o1.view().s.state === "synced", 15_000) && Date.now() - tOn < 15_000 && o1.stats.retries === 0, "retry: an online event sends the waiting try at once (not its timer): " + J({ ms: Date.now() - tOn, retries: o1.stats.retries }));
+    // (a client starting reset the wait: unreachable again after it stops, the first wait is the shortest again)
+    o1.destroy();
+    Object.assign(W.OWNER, { retryMs: 100, retryMaxMs: 400 });
+    // (pagehide: the waiting try cleared, nothing more asked)
+    me = "throw";
+    asked = 0;
+    const o2 = W.SyncOwner.of(w, { origin: location.origin, fetch: fetchMe });
+    o2.start();
+    await until(() => asked >= 1, 5000);
+    o2.suspend();
+    await new Promise((r) => setTimeout(r, 700));
+    check(asked === 1 && o2.stats.retries === 0, "retry: pagehide clears the waiting try: " + asked);
+    o2.destroy();
+    // (sync off here: the session isn't asked, and nothing waits)
+    await new Promise((ok, no) => { const tx = w.ws.transaction("meta", "readwrite"); const m = tx.objectStore("meta"); const r = m.get("sync:current"); r.onsuccess = () => m.put({ ...r.result, off: true }, "sync:current"); tx.oncomplete = ok; tx.onerror = () => no(tx.error); });
+    asked = 0;
+    const o3 = W.SyncOwner.of(w, { origin: location.origin, fetch: fetchMe });
+    o3.start();
+    await new Promise((r) => setTimeout(r, 700));
+    check(asked === 0 && o3.stats.retries === 0 && o3.client === null, "retry: sync off here: nothing asked, nothing waits: " + asked);
+    o3.destroy();
+  } finally {
+    Object.assign(W.OWNER, saved);
+  }
+}
+
+async function s5Unsent() {
+  // (changes not sent: while sync is on here, the line says how many of this browser's changes haven't gone up, the
+  // outbox's records and the ops past the scan watermark, whatever the client's state; never "Synced", nor nothing)
+  const f = (s) => W.foot(s, 0), line = (s) => W.sidebarLine(s, 0);
+  check(f({ state: "synced" }) === "Synced" && f({ state: "synced", unsent: 3 }) === "3 changes not sent", "unsent: synced with changes not sent says them, never Synced: " + J(f({ state: "synced", unsent: 3 })));
+  check(f({ state: "connecting", unsent: 1 }) === "Connecting… · 1 change not sent" && f({ state: "paused", reason: "x", unsent: 2 }) === "Paused: x · 2 changes not sent", "unsent: connecting and paused add them");
+  check(f({ state: "syncing", waiting: 1, unsent: 4 }) === "Syncing 4 changes…" && f({ state: "offline", waiting: 5, unsent: 2 }) === "Offline: 5 changes wait", "unsent: syncing and offline count the larger of the two");
+  check(line({ state: "off", unsent: 2 }) === "2 changes not sent" && line({ state: "off" }) === "" && line({ state: "off", unsent: 1000, unsentMore: true }) === "1,000 or more changes not sent", "unsent: sync on here but not running: said, not an empty line");
+  await account();
+  const w = await fresh();
+  const o0 = W.SyncOwner.of(w, { origin: location.origin });
+  o0.start();
+  const el = document.createElement("div");
+  const s = W.syncSection(w, el, hostOf(w));
+  await until(() => /Turn on sync/.test(buttons(el).join()), 5000);
+  [...el.querySelectorAll("button")].find((b) => /Turn on sync/.test(b.textContent)).click();
+  check(await until(() => o0.view().s.state === "synced", 15_000), "unsent: sync on, a client synced");
+  check(await until(() => line(o0.view().s) === "Synced · just now", 5000), "unsent: nothing waiting: Synced: " + line(o0.view().s));
+  s.dispose();
+  o0.destroy();
+  // (a page loaded later whose session can't be asked: sync on here, no client running)
+  const real = window.fetch.bind(window);
+  const offMe = async (url, init) => { if (String(url).endsWith("/api/share/me")) throw new TypeError("Failed to fetch"); return real(url, init); };
+  const o1 = W.SyncOwner.of(w, { origin: location.origin, fetch: offMe });
+  o1.start();
+  await until(() => o1.stats.reconciles >= 1, 5000);
+  check(o1.client === null && line(o1.view().s) === "", "unsent: no client, nothing changed yet: nothing to say: " + J(o1.view().s));
+  await w.create("/u1.txt", { content: "one" });
+  await w.write("/u1.txt", "one two");
+  check(await until(() => o1.view().s.unsent === 2, 5000), "unsent: two changes made here while no client runs: counted, past the scan watermark: " + J(o1.view().s));
+  check(line(o1.view().s) === "2 changes not sent", "unsent: …and said on the line, not an empty one: " + J(line(o1.view().s)));
+  o1.destroy();
+  // (a page that can ask: the client sends them, and the line is Synced again)
+  const o2 = W.SyncOwner.of(w, { origin: location.origin });
+  o2.start();
+  check(await until(() => o2.view().s.state === "synced" && !o2.view().s.unsent, 15_000), "unsent: once sent, none left: " + J(o2.view().s));
+  check(line(o2.view().s) === "Synced · just now", "unsent: …and Synced again: " + line(o2.view().s));
+  o2.destroy();
+}
+
+async function s5UnsentTail() {
+  // (the count's cost: a long tail of the server's own ops past the watermark (a client stopped mid-download) is read
+  // UNSENT.visit records a time, each read going on from the last, so a burst of nudges doesn't read it again; until its
+  // end the line says "some changes not sent", never "Synced" nor nothing; then one late change of this browser's is
+  // counted exactly)
+  const line = (s) => W.sidebarLine(s, 0);
+  check(line({ state: "off", unsentMore: true }) === "some changes not sent" && W.foot({ state: "synced", unsentMore: true }, 0) === "some changes not sent" && line({ state: "off", unsent: 3, unsentMore: true }) === "3 or more changes not sent", "tail: not all read yet: said, never Synced");
+  await account();
+  const w = await fresh();
+  const o0 = W.SyncOwner.of(w, { origin: location.origin });
+  o0.start();
+  const el = document.createElement("div");
+  const sec = W.syncSection(w, el, hostOf(w));
+  await until(() => /Turn on sync/.test(buttons(el).join()), 5000);
+  [...el.querySelectorAll("button")].find((b) => /Turn on sync/.test(b.textContent)).click();
+  check(await until(() => o0.view().s.state === "synced", 15_000), "tail: sync on, a client synced");
+  sec.dispose();
+  o0.destroy();
+  // (the watermark, once the stopped client has left it still: what the tail is counted from)
+  const scannedMark = () => new Promise((ok, no) => {
+    const st = w.ws.transaction("meta").objectStore("meta"), k = st.getAllKeys();
+    k.onsuccess = () => { const key = k.result.find((x) => /^sync:.*:scanned$/.test(String(x))); if (key === undefined) return ok(null); const g = st.get(key); g.onsuccess = () => ok(g.result ?? null); g.onerror = () => no(g.error); };
+    k.onerror = () => no(k.error);
+  });
+  let mark = await scannedMark();
+  for (let i = 0; i < 40; i++) { await new Promise((r) => setTimeout(r, 250)); const m = await scannedMark(); if (m === mark && i >= 3) break; mark = m; }
+  // (the tail: TAIL ops applied from the server, logged past the watermark, as a stopped client leaves them)
+  const TAIL = 5000;
+  await new Promise((ok, no) => { const tx = w.ws.transaction("ops", "readwrite"); const ops = tx.objectStore("ops"); for (let i = 0; i < TAIL; i++) ops.add({ op: "noop", origin: "server", t: 0 }); tx.oncomplete = ok; tx.onerror = () => no(tx.error); });
+  const real = window.fetch.bind(window);
+  const offMe = async (url, init) => { if (String(url).endsWith("/api/share/me")) throw new TypeError("Failed to fetch"); return real(url, init); };
+  const o1 = W.SyncOwner.of(w, { origin: location.origin, fetch: offMe });
+  // (no nudge from here: the reads go on by themselves to the end, each line it says recorded)
+  const seen = [];
+  o1.onChange(() => { const l = line(o1.view().s); if (seen.at(-1) !== l) seen.push(l); });
+  o1.start();
+  const ended = await until(() => o1.stats.unsentMostRead > 0 && !o1.view().s.unsentMore && !o1.countingNow(), 10_000);
+  const most = o1.stats.unsentMostRead;
+  check(most <= 2000 && seen.includes("some changes not sent") && seen.every((l) => l === "some changes not sent" || l === ""), "tail: each read visits UNSENT.visit records at most; until the end, \"some changes not sent\": " + J({ most, seen }));
+  check(ended && line(o1.view().s) === "", "tail: with no nudge, read on to its end by itself, the server's own ops: nothing not sent: " + J({ s: o1.view().s, reads: o1.stats.unsentReads }));
+  const visited = o1.stats.unsentVisited;
+  const past = await new Promise((ok, no) => { const c = w.ws.transaction("ops").objectStore("ops").count(IDBKeyRange.lowerBound(mark, true)); c.onsuccess = () => ok(c.result); c.onerror = () => no(c.error); });
+  check(typeof mark === "number" && (await scannedMark()) === mark && past >= TAIL && visited <= past, "tail: the whole tail read once, not once a read: " + J({ visited, past, reads: o1.stats.unsentReads, TAIL }));
+  // (one late change of this browser's: counted exactly, and a burst of nudges reads only what's new)
+  await w.create("/late.txt", { content: "late" });
+  check(await until(() => o1.view().s.unsent === 1 && !o1.view().s.unsentMore, 5000), "tail: one late change: 1 not sent: " + J(o1.view().s));
+  check(line(o1.view().s) === "1 change not sent", "tail: …said: " + J(line(o1.view().s)));
+  const v1 = o1.stats.unsentVisited, r1 = o1.stats.unsentReads, t1 = performance.now();
+  await Promise.all(Array.from({ length: 50 }, () => o1.recount()));
+  const burst = { visited: o1.stats.unsentVisited - v1, reads: o1.stats.unsentReads - r1, ms: Math.round(performance.now() - t1) };
+  check(burst.reads <= 2 && burst.visited <= 2 && o1.view().s.unsent === 1, "tail: 50 nudges at once: at most two reads, nothing read again: " + J(burst));
+  console.log("  tail: " + J({ TAIL, past, visitedTail: visited, reads: o1.stats.unsentReads, mostRead: o1.stats.unsentMostRead, burst }));
+  o1.destroy();
+}
+
+async function s5UnsentCap() {
+  // (the count's cap: past UNSENT.max (1,000), from the outbox or from the ops, it is "1,000 or more", even when the read
+  // ends there; exactly 1,000 is 1,000)
+  await account();
+  const w = await fresh();
+  const o0 = W.SyncOwner.of(w, { origin: location.origin });
+  o0.start();
+  const el = document.createElement("div");
+  const sec = W.syncSection(w, el, hostOf(w));
+  await until(() => /Turn on sync/.test(buttons(el).join()), 5000);
+  [...el.querySelectorAll("button")].find((b) => /Turn on sync/.test(b.textContent)).click();
+  check(await until(() => o0.view().s.state === "synced", 15_000), "cap: sync on, a client synced");
+  sec.dispose();
+  o0.destroy();
+  await sleep(1000);
+  // (the namespace's watermark moved to the last op: nothing past it; then the outbox and the ops set as each control asks)
+  const tx = (mode, f) => new Promise((ok, no) => { const t = w.ws.transaction(["meta", "ops"], mode); let out; Promise.resolve(f(t)).then((x) => (out = x)); t.oncomplete = () => ok(out); t.onerror = () => no(t.error); });
+  const ns = await tx("readonly", (t) => new Promise((ok) => { const k = t.objectStore("meta").getAllKeys(); k.onsuccess = () => ok(String(k.result.find((x) => /^sync:.*:scanned$/.test(String(x)))).slice(5, -8)); }));
+  const last = await tx("readonly", (t) => new Promise((ok) => { const c = t.objectStore("ops").openKeyCursor(null, "prev"); c.onsuccess = () => ok(c.result?.key ?? 0); }));
+  const outboxOf = await tx("readonly", (t) => new Promise((ok) => { const g = t.objectStore("meta").get(`sync:${ns}:outbox`); g.onsuccess = () => ok(g.result ?? {}); }));
+  const setOutbox = (count) => tx("readwrite", (t) => { t.objectStore("meta").put({ ...outboxOf, count }, `sync:${ns}:outbox`); });
+  await tx("readwrite", (t) => { t.objectStore("meta").put(last, `sync:${ns}:scanned`); });
+  const real = window.fetch.bind(window);
+  const offMe = async (url, init) => { if (String(url).endsWith("/api/share/me")) throw new TypeError("Failed to fetch"); return real(url, init); };
+  const o1 = W.SyncOwner.of(w, { origin: location.origin, fetch: offMe });
+  o1.start();
+  await until(() => o1.stats.reconciles >= 1, 5000);
+  const now = async () => { await o1.recount(); const s = o1.view().s; return { unsent: s.unsent, more: !!s.unsentMore, line: W.sidebarLine(s, 0) }; };
+  await setOutbox(1001);
+  let v = await now();
+  check(v.unsent === 1000 && v.more && v.line === "1,000 or more changes not sent", "cap: an outbox of 1,001, nothing past the watermark: \"1,000 or more\": " + J(v));
+  await setOutbox(1000);
+  v = await now();
+  check(v.unsent === 1000 && !v.more && v.line === "1,000 changes not sent", "cap: an outbox of exactly 1,000: 1,000, not \"or more\": " + J(v));
+  // (this browser's own ops past the watermark, the read ending where the cap is passed: 1,000, then 1,001)
+  await setOutbox(0);
+  await tx("readwrite", (t) => { const ops = t.objectStore("ops"); for (let i = 0; i < 1000; i++) ops.add({ op: "noop", t: 0 }); });
+  v = await now();
+  check(v.unsent === 1000 && !v.more && v.line === "1,000 changes not sent", "cap: exactly 1,000 ops of this browser's past the watermark: 1,000: " + J(v));
+  await tx("readwrite", (t) => { t.objectStore("ops").add({ op: "noop", t: 0 }); });
+  v = await now();
+  check(v.unsent === 1000 && v.more && v.line === "1,000 or more changes not sent", "cap: 1,001, the read ending at the cap: \"1,000 or more\": " + J(v));
+  o1.destroy();
+  await setOutbox(outboxOf.count ?? 0);
 }
 
 async function s5Tabs() {
@@ -4573,7 +4831,7 @@ async function closedDuringNamespace() {
   await c.stop();
 }
 
-const CASES = { readyClient, readyWrapper, readyOwner, basics, scanAtomic, lostAckReconnect, lostAckReload, refusal, rateProlonged, reloadHonorsTimer, invalidRebuild, busyOrder, storm, netWake, twoTabs, generation, diverged, storageFull, tooLarge, reservation, pace, wakesBounded, byteMismatch, replayPaced, replayCapped, echoAcrossReload, accountSwitch, restoredCheckTimer, restoredPause, indexThrottled, corruptConcurrent, manyMismatches, lateAnswer, cutRead, restUnderAcks, refusalAtomic, echoNoCopy, liveNotice, noticeFlood, idleDiscovery, idleMidPage, indexRetryMidPage, liveSlowPage, liveCheck, downloadBasic, downloadChecks, downloadStale, downloadStale2, conflictFresh, downloadBudget, rebuildAfterRefusal, rebuildRate, rebuildCrashAfterAnnounce, rebuildAckWindow, rebuildAckThrows, rebuildExclusive, rebuildInvalidCrash, rebuildCounter, rebuildFailedPass, rebuildBehind, rebuildCapUnsupported, rebuildKickAfterHalt, rebuildRefusalCoreServer, firstSync, firstSyncRace, firstSyncCollision, resetRejoin, sameNameRenamed, t14Collect, t14Typed, t14Ladder, t14Refused, t14Rebuild, t14Lifecycle, t14Fencing, t14Seed, t14Cap, t14Skips, t14TwoTabs, t14Obsolete, t14Held, t14Large, t14Figures, t14Review, t14Review2, t14Review3, s5Poll, s5Section, s5Reasons, s5Delete, s5Lifecycle, s5Tabs, s5Rows, s5Races, s5Takeover, s5Details, s5Flood, s5DetailsGap, s5Refused, s5Notebooks, s5ConfirmFetched, s5SidebarLine, s5SidebarStale, s5Wire, s5Account, s5Echo, s5Verified, docWire, s5Docs, closedByUpgrade, closedUnderClient, closedDuringRetry, closedDuringNamespace };
+const CASES = { readyClient, readyWrapper, readyOwner, basics, scanAtomic, lostAckReconnect, lostAckReload, refusal, rateProlonged, reloadHonorsTimer, invalidRebuild, busyOrder, storm, netWake, twoTabs, generation, diverged, storageFull, tooLarge, reservation, pace, wakesBounded, byteMismatch, replayPaced, replayCapped, echoAcrossReload, accountSwitch, restoredCheckTimer, restoredPause, indexThrottled, corruptConcurrent, manyMismatches, lateAnswer, cutRead, restUnderAcks, refusalAtomic, echoNoCopy, liveNotice, noticeFlood, idleDiscovery, idleMidPage, indexRetryMidPage, liveSlowPage, liveCheck, downloadBasic, downloadChecks, downloadStale, downloadStale2, conflictFresh, downloadBudget, rebuildAfterRefusal, rebuildRate, rebuildCrashAfterAnnounce, rebuildAckWindow, rebuildAckThrows, rebuildExclusive, rebuildInvalidCrash, rebuildCounter, rebuildFailedPass, rebuildBehind, rebuildCapUnsupported, rebuildKickAfterHalt, rebuildRefusalCoreServer, firstSync, firstSyncRace, firstSyncCollision, resetRejoin, sameNameRenamed, t14Collect, t14Typed, t14Ladder, t14Refused, t14Rebuild, t14Lifecycle, t14Fencing, t14Seed, t14Cap, t14Skips, t14TwoTabs, t14Obsolete, t14Held, t14Large, t14Figures, t14Review, t14Review2, t14Review3, s5Poll, s5Section, s5Reasons, s5Delete, s5Lifecycle, s5Tabs, s5Rows, s5Races, s5Takeover, s5Details, s5Flood, s5DetailsGap, s5Refused, s5Notebooks, s5ConfirmFetched, s5SidebarLine, s5SidebarStale, s5Wire, s5Account, s5Echo, s5Verified, docWire, s5Docs, s5Retry, s5Unsent, s5UnsentTail, s5UnsentCap, closedByUpgrade, closedUnderClient, closedDuringRetry, closedDuringNamespace };
 
 // ---- step 4: the rebuild at its maxima (D6 r6: the timed fixture), run only when named (minutes)
 

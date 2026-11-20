@@ -1,0 +1,30 @@
+singular_inverse         sagebrush=ZeroDivisionError    sage=ZeroDivisionError    MATCH
+singular_I_minus_Q       sagebrush=ZeroDivisionError    sage=ZeroDivisionError    MATCH
+nonsquare_inverse        sagebrush=ArithmeticError      sage=ArithmeticError      MATCH
+dim_mismatch_mul         sagebrush=TypeError            sage=TypeError            MATCH
+   sb  : unsupported operand parent(s) for *: matrices of incompatible sizes
+   sage: unsupported operand parent(s) for *: 'Full MatrixSpace of 2 by 3 dense matrices over Rational Field' and 'Full MatrixSpa
+ragged_rows              sagebrush=ValueError           sage=ValueError           MATCH
+   sb  : the rows of a matrix must have the same length
+   sage: inconsistent number of columns: should be 2 but got 1
+non_numeric_entry        sagebrush=OK                   sage=TypeError            DIFF
+   sb  : ['a'   1]
+[  0   1]
+   sage: unable to convert 'a' to a rational
+rational_div_zero        sagebrush=ZeroDivisionError    sage=ZeroDivisionError    MATCH
+QQ_parse_1_over_0        sagebrush=ZeroDivisionError    sage=TypeError            DIFF
+   sb  : Fraction(1, 0)
+   sage: unable to convert '1/0' to a rational
+negative_power_singular  sagebrush=ZeroDivisionError    sage=ZeroDivisionError    MATCH
+fractional_power         sagebrush=OK                   sage=NotImplementedError  DIFF
+   sb  : [1 0]
+[0 1]
+   sage: non-integral exponents not supported
+nonsquare_power          sagebrush=TypeError            sage=ArithmeticError      DIFF
+   sb  : unsupported operand parent(s) for *: matrices of incompatible sizes
+   sage: self must be a square matrix
+index_out_of_range       sagebrush=IndexError           sage=IndexError           MATCH
+add_mismatch             sagebrush=OK                   sage=TypeError            DIFF
+   sb  : [0 2]
+[5 7]
+   sage: unsupported operand parent(s) for +: 'Full MatrixSpace of 2 by 2 dense matrices over Rational Field' and 'Full MatrixSpa

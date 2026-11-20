@@ -1,0 +1,55 @@
+{
+ "setup": {
+  "id": 1,
+  "stdout": "1/10\n",
+  "stdout_chars": 5,
+  "output_bytes": {
+   "stdout": 5,
+   "stderr": 0
+  },
+  "result": null,
+  "error": null,
+  "error_info": null,
+  "data": null,
+  "displays": [],
+  "seconds": 0.004148299980442971,
+  "restarted": false
+ },
+ "interrupt_latency_s": 0.05,
+ "interrupt_msgs": [
+  "{'id': 2, 'stdout': '', 'stdout_chars': 0, 'output_bytes': {'stdout': 0, 'stderr': 0}, 'result': None, 'error': 'KeyboardInterrupt: the computation was interrupted', 'error_info': {'type': 'interrupted', 'exception': 'KeyboardInterrupt', 'message': 'the computation was interrupted', 'traceback': 'KeyboardInterrupt: the computation was interrupted', 'at': 1795105512.7100048}, 'data': None, 'display"
+ ],
+ "after": {
+  "id": 3,
+  "stdout": "1/10 4 i= 3048724 elapsed= 2.0\n",
+  "stdout_chars": 31,
+  "output_bytes": {
+   "stdout": 31,
+   "stderr": 0
+  },
+  "result": null,
+  "error": null,
+  "error_info": null,
+  "data": null,
+  "displays": [],
+  "seconds": 0.0005692600389011204,
+  "restarted": false
+ },
+ "newcalc": {
+  "id": 4,
+  "stdout": "[5/2 5/4]\n[  1 5/2]\n",
+  "stdout_chars": 20,
+  "output_bytes": {
+   "stdout": 20,
+   "stderr": 0
+  },
+  "result": null,
+  "error": null,
+  "error_info": null,
+  "data": null,
+  "displays": [],
+  "seconds": 0.0009769700118340552,
+  "restarted": false
+ },
+ "alive": true
+}

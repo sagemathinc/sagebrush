@@ -43,7 +43,9 @@ export function awsPut(key, bytes, env = process.env, spawn = spawnSync) {
 
 export async function publish(dir, { root = ROOT, base = DEFAULT_BASE, put = awsPut, limits = LIMITS, env = process.env, log = (s) => console.log(s) } = {}) {
   const { manifest, bytes } = readArtifact(dir, { env });
-  policy(manifest.modules, { root, env }); // all four must equal the pins: no fresh build is ever published
+  // all four must equal the pins: no fresh build is ever published (a track's run gets "fresh" from the policy)
+  const verdict = policy(manifest.modules, { root, env });
+  if (verdict.mode !== "pinned") throw new Error(`refusing to publish a fresh build:\n${verdict.lines.join("\n")}`);
   const pins = loadPins(root);
   const never = new AbortController().signal;
   const results = [];

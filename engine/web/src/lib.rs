@@ -560,7 +560,7 @@ fn keeping_internal<T>(
 /// inside an op's own message), so the callers raise it as an internal
 /// error, never as a resource limit or a user error.
 fn error_json(e: String) -> Value {
-    if e.contains(sagebrush_poly::INTERNAL_PREFIX) {
+    if e.contains(sagebrush_poly::INTERNAL_PREFIX) || e.contains(sagebrush_poly::LLL_INTERNAL_PREFIX) {
         json!({ "error": e, "internal": true })
     } else {
         json!({ "error": e })
@@ -1471,7 +1471,7 @@ fn dispatch(v: &Value) -> Result<Value, String> {
         }
         "hermite_form" => Ok(json!(sagebrush_classgroup::api::hermite(&rect(v.get("m"))?).iter().map(|r| big(r)).collect::<Vec<_>>())),
         "elementary_divisors" => Ok(json!(big(&sagebrush_classgroup::api::elementary_divisors(&rect(v.get("m"))?)))),
-        "lll" => Ok(json!(sagebrush_classgroup::api::lll(&rect(v.get("m"))?).iter().map(|r| big(r)).collect::<Vec<_>>())),
+        "lll" => Ok(json!(sagebrush_classgroup::api::lll(&rect(v.get("m"))?)?.iter().map(|r| big(r)).collect::<Vec<_>>())),
         "complex_roots" => {
             let digits = size(v, "digits", Some(15), 100_000)?;
             let r = sagebrush_classgroup::api::complex_roots(&bigs(v.get("f"))?, digits)?;

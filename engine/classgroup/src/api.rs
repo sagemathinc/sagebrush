@@ -557,101 +557,36 @@ pub fn elementary_divisors(m: &ZMat) -> Vec<BigInt> {
     nz
 }
 
-/// LLL-reduced basis (delta 0.99, exact integral version of de Weger /
-/// Cohen 2.6.7) of the lattice spanned by the rows; dependent rows give zero
-/// rows, which come first (as in Sage).
-pub fn lll(m: &ZMat) -> ZMat {
-    let rows = m.len();
-    // the rows themselves when independent (the result then matches Sage's
-    // reduction of the same rows), else a basis of their lattice
-    let h = hnf(m);
-    let mut b = if h.len() == rows { m.clone() } else { h };
-    let k = b.len();
-    if k > 1 {
-        integral_lll(&mut b);
+#[cfg(test)]
+thread_local! {
+    /// Tests: every LLL refused (a memory refusal), and how many were.
+    static REFUSE_LLL: std::cell::Cell<bool> = const { std::cell::Cell::new(false) };
+    static LLL_REFUSED: std::cell::Cell<u64> = const { std::cell::Cell::new(0) };
+}
+
+/// An LLL-reduced basis ((0.51, 0.99)-reduced, proved) of the lattice
+/// spanned by the rows; dependent rows give zero rows, which come first.
+/// The rows themselves are reduced when independent, else a basis of their
+/// lattice (their Hermite form). The reduction (`sagebrush_poly::lll::reduce`)
+/// is L^2's, with the exact LLL as its fallback, within the default budget; a
+/// refusal is an error starting "LLL:".
+pub fn lll(m: &ZMat) -> Result<ZMat, String> {
+    #[cfg(test)]
+    if REFUSE_LLL.with(|r| r.get()) {
+        LLL_REFUSED.with(|c| c.set(c.get() + 1));
+        let b = sagebrush_poly::Budget::default();
+        return Err(b.refuse("memory", 2, 1).message(&sagebrush_poly::budget::LLL));
     }
+    let rows = m.len();
+    let h = hnf(m);
+    let b = if h.len() == rows { m.clone() } else { h };
+    let k = b.len();
+    let budget = sagebrush_poly::Budget::default();
+    let b = sagebrush_poly::lll::reduce(&budget, b).map_err(|e| e.message(&sagebrush_poly::budget::LLL))?;
     let cols = m.first().map_or(0, |r| r.len());
     let mut out: ZMat = (0..rows - k).map(|_| vec![BigInt::zero(); cols]).collect();
     out.extend(b);
-    out
-}
-
-fn dot(a: &[BigInt], b: &[BigInt]) -> BigInt {
-    a.iter().zip(b).map(|(x, y)| x * y).sum()
-}
-
-/// Integral LLL with delta = 0.99 on independent rows (Cohen, Algorithm
-/// 2.6.7): d_i and lambda_ij stay integers.
-fn integral_lll(b: &mut ZMat) {
-    let n = b.len();
-    let mut d = vec![BigInt::zero(); n + 1];
-    let mut lam = vec![vec![BigInt::zero(); n]; n];
-    d[0] = BigInt::one();
-    let gs = |b: &ZMat, k: usize, d: &mut Vec<BigInt>, lam: &mut Vec<Vec<BigInt>>| {
-        for j in 0..=k {
-            let mut u = dot(&b[k], &b[j]);
-            for i in 0..j {
-                u = (&d[i + 1] * &u - &lam[k][i] * &lam[j][i]) / &d[i];
-            }
-            if j < k {
-                lam[k][j] = u;
-            } else {
-                d[k + 1] = u;
-            }
-        }
-    };
-    gs(b, 0, &mut d, &mut lam);
-    let mut k = 1;
-    let mut kmax = 0;
-    let red = |b: &mut ZMat, lam: &mut Vec<Vec<BigInt>>, d: &Vec<BigInt>, k: usize, l: usize| {
-        if (&lam[k][l] * BigInt::from(2)).abs() > d[l + 1] {
-            let q = (&lam[k][l] * BigInt::from(2) + &d[l + 1]).div_floor(&(&d[l + 1] * BigInt::from(2))); // nearest integer
-            let bl = b[l].clone();
-            for (x, y) in b[k].iter_mut().zip(&bl) {
-                *x -= &q * y;
-            }
-            lam[k][l] -= &q * &d[l + 1];
-            for i in 0..l {
-                let v = &q * &lam[l][i];
-                lam[k][i] -= v;
-            }
-        }
-    };
-    while k < n {
-        sagebrush_interrupt::check();
-        if k > kmax {
-            kmax = k;
-            gs(b, k, &mut d, &mut lam);
-        }
-        red(b, &mut lam, &d, k, k - 1);
-        // Lovasz with delta 99/100 (as fplll, so as Sage):
-        // 100 d_{k+1} d_{k-1} < 99 d_k^2 - 100 lam^2
-        if BigInt::from(100) * &d[k + 1] * &d[k - 1] < BigInt::from(99) * &d[k] * &d[k] - BigInt::from(100) * &lam[k][k - 1] * &lam[k][k - 1] {
-            // swap b_k, b_{k-1}
-            b.swap(k, k - 1);
-            for j in 0..k - 1 {
-                let t = lam[k][j].clone();
-                lam[k][j] = lam[k - 1][j].clone();
-                lam[k - 1][j] = t;
-            }
-            let l = lam[k][k - 1].clone();
-            let bb = (&d[k - 1] * &d[k + 1] + &l * &l) / &d[k];
-            for i in k + 1..=kmax {
-                let t = lam[i][k].clone();
-                lam[i][k] = (&d[k + 1] * &lam[i][k - 1] - &l * &t) / &d[k];
-                lam[i][k - 1] = (&bb * &t + &l * &lam[i][k]) / &d[k + 1];
-            }
-            d[k] = bb;
-            if k > 1 {
-                k -= 1;
-            }
-        } else {
-            for l in (0..k - 1).rev() {
-                red(b, &mut lam, &d, k, l);
-            }
-            k += 1;
-        }
-    }
+    Ok(out)
 }
 
 /// The complex roots of f (integer coefficients) with multiplicities, to
@@ -911,13 +846,37 @@ mod tests {
         v.iter().map(|r| r.iter().map(|&x| BigInt::from(x)).collect()).collect()
     }
 
+    /// The order reduction is optional: with every LLL refused, the number
+    /// field's data and its class group are the same (the order's basis is
+    /// kept as it is); the refusals did happen.
+    #[test]
+    fn a_refused_order_reduction_changes_no_result() {
+        let f = [BigInt::from(-11), BigInt::zero(), BigInt::zero(), BigInt::one()];
+        let key = |d: &NfData| (d.degree, d.r1, d.r2, d.disc.clone(), d.w, d.basis.clone(), d.den.clone());
+        let bkey = |d: &BnfData| (d.degree, d.r1, d.r2, d.disc.clone(), d.h.clone(), d.cyc.clone(), d.w);
+        let (n0, b0) = (nf_data(&f).unwrap(), bnf(&f).unwrap());
+        REFUSE_LLL.with(|r| r.set(true));
+        let c0 = LLL_REFUSED.with(|c| c.get());
+        let got = (nf_data(&f), bnf(&f));
+        REFUSE_LLL.with(|r| r.set(false));
+        assert!(LLL_REFUSED.with(|c| c.get()) > c0, "no LLL was refused");
+        let (n1, b1) = (got.0.unwrap(), got.1.unwrap());
+        assert_eq!(key(&n0), key(&n1));
+        assert_eq!(bkey(&b0), bkey(&b1));
+        // a refusal reaches matrix.LLL() as an error, worded for the reduction
+        REFUSE_LLL.with(|r| r.set(true));
+        let e = lll(&z(&[&[1, 2], &[3, 4]])).unwrap_err();
+        REFUSE_LLL.with(|r| r.set(false));
+        assert!(e.starts_with("LLL: resource limit exceeded"), "{e}");
+    }
+
     #[test]
     fn against_sage() {
         // M = matrix(ZZ, [[4,6,2],[3,9,12],[1,1,1]]): Sage's outputs
         let m = z(&[&[4, 6, 2], &[3, 9, 12], &[1, 1, 1]]);
         assert_eq!(hermite(&m), z(&[&[1, 1, 1], &[0, 2, 13], &[0, 0, 15]]));
         assert_eq!(elementary_divisors(&m), vec![BigInt::from(1), BigInt::from(1), BigInt::from(30)]);
-        assert_eq!(lll(&z(&[&[1, 2, 3], &[4, 5, 6], &[7, 8, 10]])), z(&[&[0, 0, 1], &[-1, 1, 0], &[2, 1, 0]]));
+        assert_eq!(lll(&z(&[&[1, 2, 3], &[4, 5, 6], &[7, 8, 10]])).unwrap(), z(&[&[0, 0, 1], &[-1, 1, 0], &[2, 1, 0]]));
         let r = complex_roots(&[BigInt::from(-2), BigInt::zero(), BigInt::zero(), BigInt::one()], 15).unwrap();
         assert_eq!(r[0].0, "1.25992104989487");
         assert_eq!(r[0].1, "0");
