@@ -770,12 +770,15 @@ export function parseReloadRecord(raw: string | null): ReloadRecord | null {
 
 /** What a page may do with a parsed record:
  *  - "silent": reconnect now, with no gesture (a reload, fresh, same scope, not expired: R1-a..e);
- *  - "click": keep it in memory for one [Reconnect] (the same scope, not expired; only the reload or freshness failed);
- *  - "discard": never usable (another workspace or page, or the grant is over). */
+ *  - "click": keep it in memory for one [Reconnect] (a reload of this tab, the same scope, not expired; only its
+ *    freshness failed);
+ *  - "discard": never usable: another workspace or page, the grant over, or no proof of a reload of this tab (a
+ *    navigation, or a record with no leftAt, as a copy in a new tab has): those need a new Allow unless the grant
+ *    was remembered (decided Nov 19 2026: fail closed). */
 export function reloadDecision(r: ReloadRecord, o: { scope: ReloadScope; navType: string; now: number }): "silent" | "click" | "discard" {
   if (r.workspace !== o.scope.workspace || r.page !== o.scope.page) return "discard";
   if (r.grant.expires !== null && !(o.now < r.grant.expires)) return "discard";
-  if (o.navType !== "reload" || r.leftAt === undefined) return "click";
+  if (o.navType !== "reload" || r.leftAt === undefined) return "discard";
   const age = o.now - r.leftAt;
   return age >= 0 && age <= RELOAD_FRESH_MS ? "silent" : "click";
 }
