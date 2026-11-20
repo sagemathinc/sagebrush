@@ -25,11 +25,12 @@ const MIRROR_TYPE = "application/vnd.sagebrush.mirror+json";
 const API = "/api/mirror/v1";
 /** a tagged replay's wait for its next part (each part restarts it) */
 const REPLAY_MS = 20_000;
-/** after a part that says more is to come (done: false), how long nothing else may arrive before the answer is taken
- *  to have stopped there and the page asks again from its highest number (the agent sends an answer's parts at once) */
-const QUIET_MS = 1000;
-/** a request whose wait ran out is kept, its late parts discarded, until it ends or this long passes without one: no
- *  second request is made for that conversation meanwhile, so a late part is never read as another request's */
+/** after a part that says more is to come (done: false), how long nothing else may arrive before the caller takes what
+ *  came as a partial answer (the agent stopped early, or its next part is slow); the request then drains */
+const QUIET_MS = 3000;
+/** a request whose caller has its answer or gave up is kept, its later parts discarded, until it ends (done) or this
+ *  long passes without a part: no second request is made for that conversation meanwhile, so no part is ever read as
+ *  another request's (a reply names only the tag, never the request) */
 const DRAIN_MS = 60_000;
 /** the most segments one stream is read in (each at most MIRROR_CAPS.entries entries) */
 const READ_MAX = 5000;
@@ -96,6 +97,8 @@ export interface MirrorHost {
 interface Answer {
   events: LogEntry[];
   reset: boolean;
+  /** the agent said this is all (done, or its highest number reached): not a part cut short */
+  complete: boolean;
 }
 /** The one tagged request in flight for a conversation: its caller (null once its wait ran out: draining), the parts
  *  so far, and its timer. */
@@ -104,6 +107,7 @@ type Waiter = { pairing: AgentPairing; instance: string; after: number; events: 
 const seqOk = (v: unknown): v is number => Number.isSafeInteger(v) && (v as number) > 0;
 const natOk = (v: unknown): v is number => Number.isSafeInteger(v) && (v as number) >= 0;
 const conversationOk = (v: unknown): v is string => typeof v === "string" && v.length > 0 && v.length <= 256;
+const BUSY = "a request is still in flight";
 
 export class Mirror {
   status: MirrorStatus = { available: false };
@@ -116,6 +120,8 @@ export class Mirror {
   private readonly chains = new Map<string, Promise<unknown>>();
   private readonly again = new Set<string>();
   private readonly running = new Set<string>();
+  /** conversations whose upload was refused while a request drained: kicked again once it has */
+  private readonly refused = new Set<string>();
 
   constructor(private readonly host: MirrorHost) {
     const kept = host.loadCursors();
@@ -228,7 +234,7 @@ export class Mirror {
     if (r.status === 200) {
       for (const [k, c] of Object.entries(this.cursors)) if (c.locator === locator) delete this.cursors[k];
       this.host.storeCursors(this.cursors);
-      await this.remote(true);
+      await this.remote(true).catch(() => []);
     }
     return r.status === 200;
   }
@@ -263,9 +269,9 @@ export class Mirror {
     if (!p.events.every(ok)) return true;
     clearTimeout(w.timer);
     if (!w.caller) {
-      // (a part of a request whose wait ran out: discarded; the request ends with its last part, or with quiet)
-      if (p.done === true) this.waiting.delete(conv);
-      else w.timer = setTimeout(() => this.waiting.get(conv) === w && this.waiting.delete(conv), this.host.drainMs ?? DRAIN_MS);
+      // (a part of a request already answered or given up on: discarded; it ends with its last part, or with quiet)
+      if (p.done === true) this.ended(conv, w);
+      else this.drain(conv, w);
       return true;
     }
     // (an answer's first part says whether entries it would hold are gone)
@@ -277,24 +283,41 @@ export class Mirror {
       w.events.push(e);
       high = e.seq;
     }
-    if (p.done === true || high >= p.last) return this.settle(conv, w), true;
-    // (more to come: the rest of this answer, or, if nothing more arrives, the agent stopped early: asked again from the
-    //  highest number read, as a new request, only once this one has stopped)
+    if (p.done === true || high >= p.last) return this.settle(conv, w, true), true;
+    // (more to come, or the agent stopped early: if nothing more arrives for a moment, the caller takes what came as a
+    //  partial answer, and the request drains. Never a second request meanwhile: its parts couldn't be told from this
+    //  one's. The next trigger asks again from where the caller got to)
     w.timer = setTimeout(() => {
       if (this.waiting.get(conv) !== w || !w.caller) return;
       if (this.host.pairing() !== w.pairing) return this.fail(conv, w, "the pairing changed");
-      w.after = high;
-      w.parts = 0;
-      w.timer = setTimeout(() => this.expire(conv, w), this.host.replayMs ?? REPLAY_MS);
-      w.pairing.notify("chat.resume", { conversation: conv, after: high, instance: w.instance, tag: MIRROR_TAG });
+      const c = w.caller;
+      w.caller = null;
+      this.drain(conv, w);
+      c.resolve({ events: w.events, reset: w.reset, complete: false });
     }, this.host.quietMs ?? QUIET_MS);
     return true;
   }
 
-  private settle(conv: string, w: Waiter) {
+  private settle(conv: string, w: Waiter, complete: boolean) {
     clearTimeout(w.timer);
     this.waiting.delete(conv);
-    w.caller?.resolve({ events: w.events, reset: w.reset });
+    w.caller?.resolve({ events: w.events, reset: w.reset, complete });
+    this.retry(conv);
+  }
+  /** A request no one waits for any more: kept until its parts end or stop. */
+  private drain(conv: string, w: Waiter) {
+    clearTimeout(w.timer);
+    w.timer = setTimeout(() => this.ended(conv, w), this.host.drainMs ?? DRAIN_MS);
+  }
+  private ended(conv: string, w: Waiter) {
+    clearTimeout(w.timer);
+    if (this.waiting.get(conv) !== w) return;
+    this.waiting.delete(conv);
+    this.retry(conv);
+  }
+  /** An upload refused while that request was in flight: run now. */
+  private retry(conv: string) {
+    if (this.refused.delete(conv)) void this.kick(conv);
   }
   private fail(conv: string, w: Waiter, why: string) {
     clearTimeout(w.timer);
@@ -306,7 +329,7 @@ export class Mirror {
     if (this.waiting.get(conv) !== w) return;
     const c = w.caller;
     w.caller = null;
-    w.timer = setTimeout(() => this.waiting.get(conv) === w && this.waiting.delete(conv), this.host.drainMs ?? DRAIN_MS);
+    this.drain(conv, w);
     c?.reject(new Error("no replay"));
   }
 
@@ -315,7 +338,7 @@ export class Mirror {
   private ask(conversation: string, after: number, src: { pairing: AgentPairing; instance: string }): Promise<Answer> {
     return new Promise((resolve, reject) => {
       const old = this.waiting.get(conversation);
-      if (old && old.pairing === src.pairing) return reject(new Error("a request is still in flight"));
+      if (old && old.pairing === src.pairing) return reject(new Error(BUSY));
       if (old) this.fail(conversation, old, "the pairing changed");
       const w: Waiter = { pairing: src.pairing, instance: src.instance, after, events: [], reset: false, parts: 0, caller: { resolve, reject }, timer: undefined };
       w.timer = setTimeout(() => this.expire(conversation, w), this.host.replayMs ?? REPLAY_MS);
@@ -360,7 +383,10 @@ export class Mirror {
       try {
         do {
           this.again.delete(conversation);
-          await this.upload(conversation).catch(() => {});
+          await this.upload(conversation).catch((e) => {
+            // (refused because a request for it is still in flight or draining: run again once it has ended)
+            if ((e as Error)?.message === BUSY) this.refused.add(conversation);
+          });
         } while (this.again.has(conversation) && this.on() && this.source());
       } finally {
         this.running.delete(conversation);
@@ -538,8 +564,9 @@ export class Mirror {
     const mine = new Map<string, Section>();
     for (const st of streams) if (st.log_instance === src.instance) mine.set(st.log_instance, await this.readStream(c.locator, st.log_instance));
     const ans = await this.ask(c.conversation, 0, src);
-    // (a conversation this runner doesn't hold: nothing to compare with, nothing marked)
-    if (!ans.events.length || this.host.pairing() !== src.pairing) return false;
+    // (a conversation this runner doesn't hold: nothing to compare with, nothing marked; nor from a partial answer: what
+    //  it lacks can't be told from what the runner lacks)
+    if (!ans.events.length || !ans.complete || this.host.pairing() !== src.pairing) return false;
     // (by the agent's number, not by position: each uploaded entry against the runner's entry of that number, after the
     //  same normalization. Where the agent's log has dropped its oldest entries (reset), numbers before what it still
     //  holds can't be confirmed or refuted, and are left as they are)

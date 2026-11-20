@@ -14,7 +14,7 @@ const settle = async () => { for (let i = 0; i < 20; i++) await tick(); };
 /** A fake agent: a log per conversation, in one run; it answers chat.resume as the agent does (the tag given back). */
 function agent({ instance = "aaaaaaaa11", features = ["chat.resume", "chat.resume.tag"], chunk = 0 } = {}) {
   const a = {
-    state: "granted", hello: { agent: { name: "Claude" }, features, log: { instance } }, sent: [], logs: new Map(), seq: 0, mirror: null, quiet: false, dropped: new Map(),
+    state: "granted", hello: { agent: { name: "Claude" }, features, log: { instance } }, sent: [], logs: new Map(), seq: 0, mirror: null, quiet: false, dropped: new Map(), chunk,
     log(conversation, method, params) { a.seq++; const l = a.logs.get(conversation) ?? []; l.push({ seq: a.seq, method, params: { conversation, ...params } }); a.logs.set(conversation, l); return a.seq; },
     notify(m, params) {
       a.sent.push([m, params]);
@@ -24,7 +24,7 @@ function agent({ instance = "aaaaaaaa11", features = ["chat.resume", "chat.resum
       const all = (a.logs.get(params.conversation) ?? []).filter((e) => e.seq > params.after && e.seq > drop);
       const last = (a.logs.get(params.conversation) ?? []).at(-1)?.seq ?? 0;
       const reset = params.after < drop;
-      const events = chunk ? all.slice(0, chunk) : all;
+      const events = a.chunk ? all.slice(0, a.chunk) : all;
       const done = events.length === all.length;
       setTimeout(() => a.mirror?.onReplay({ conversation: params.conversation, instance: a.hello.log.instance, last, running: [], events, done, ...(reset ? { reset: true } : {}), ...(params.tag !== undefined ? { tag: params.tag } : {}) }, a), 0);
       return true;
@@ -211,16 +211,48 @@ const expected = (a, conv) => {
   check(!s.stream("c2", "aaaaaaaa11"), "an answer through a replaced pairing changes nothing");
 }
 
-// ---- a replay in parts
+// ---- an agent that stops early (done: false, nothing more): the part is uploaded, and only once that request has
+//      ended (drained) is the next asked, from where the upload got to
 {
   const { a, s, m } = setup({ agent: { chunk: 3 } });
   await m.refresh();
   turn(a, "c1", "long", 4);
   await m.kick("c1");
   await settle();
+  check(a.sent.filter(([mm]) => mm === "chat.resume").length === 1 && s.entries("c1", "aaaaaaaa11").length > 0, "a part cut short: what came is uploaded, and no second request goes while the first may still send", a.sent.length);
+  for (let i = 0; i < 10 && canonical(s.entries("c1", "aaaaaaaa11")) !== canonical(expected(a, "c1")); i++) { await tick(450); await m.kick("c1"); await settle(); }
   const asks = a.sent.filter(([mm]) => mm === "chat.resume");
-  check(asks.length >= 3 && asks.every(([, p]) => p.tag === "mirror") && asks[1][1].after === 3, "a replay that stops early: asked again from the last number read, tagged", asks.map(([, p]) => p.after));
+  check(asks.length >= 3 && asks.every(([, p]) => p.tag === "mirror") && asks[1][1].after === 3, "after it drained, asked again from the last number read, tagged", asks.map(([, p]) => p.after));
   check(canonical(s.entries("c1", "aaaaaaaa11")) === canonical(expected(a, "c1")), "all of it uploaded, once");
+}
+
+// ---- a slow part: the rest of an answer arriving after the caller took it as partial is that request's, discarded;
+//      it is never read as another request's answer (round 2's sequence), and a kick refused meanwhile runs after
+{
+  const { a, s, m } = setup();
+  await m.refresh();
+  turn(a, "c1", "slow", 3);
+  const log = a.logs.get("c1");
+  a.quiet = true;
+  void m.kick("c1");
+  await settle();
+  // (part 1 of the answer, then nothing for longer than the quiet period)
+  m.onReplay({ conversation: "c1", instance: "aaaaaaaa11", last: a.seq, done: false, running: [], tag: "mirror", events: log.slice(0, 3) }, a);
+  await tick(60);
+  await settle();
+  const after1 = s.entries("c1", "aaaaaaaa11").length;
+  // (a turn ends meanwhile: its kick is refused, as the request still drains)
+  await m.kick("c1");
+  await settle();
+  const asked = a.sent.filter(([mm]) => mm === "chat.resume").length;
+  // (part 2 of the same answer, late, with done: true: discarded, and the request ends)
+  m.onReplay({ conversation: "c1", instance: "aaaaaaaa11", last: a.seq, done: true, running: [], tag: "mirror", events: log.slice(3) }, a);
+  check(asked === 1 && after1 > 0 && s.entries("c1", "aaaaaaaa11").length === after1, "the late rest of the first answer is discarded; nothing else was asked while it could arrive", { asked, after1 });
+  a.quiet = false;
+  await settle();
+  await tick(50);
+  await settle();
+  check(canonical(s.entries("c1", "aaaaaaaa11")) === canonical(expected(a, "c1")) && a.sent.filter(([mm]) => mm === "chat.resume").length === 2, "once it ended, the refused kick ran: asked again from the cursor, everything uploaded, once", a.sent.map(([, p]) => p.after));
 }
 
 // ---- another page moved the stream: reload its state, all of it, then go on
@@ -353,14 +385,14 @@ const expected = (a, conv) => {
   await m.kick("c1"); // (the first request is draining: no second request is made)
   await settle();
   check(a.sent.filter(([mm]) => mm === "chat.resume").length === asked, "while a request whose wait ran out drains, no second request goes", a.sent.length);
-  // (its late answer arrives: discarded, nothing uploaded from it)
-  m.onReplay({ conversation: "c1", instance: "aaaaaaaa11", last: a.seq, done: true, running: [], tag: "mirror", events: a.logs.get("c1").slice(3) }, a);
-  await settle();
-  check(!s.stream("c1", "aaaaaaaa11"), "the late answer is discarded, not taken for a later request's");
+  // (its late answer arrives: discarded, nothing uploaded from it; the request ends, and the refused kick runs)
   a.quiet = false;
-  await m.kick("c1");
+  m.onReplay({ conversation: "c1", instance: "aaaaaaaa11", last: a.seq, done: true, running: [], tag: "mirror", events: a.logs.get("c1").slice(3) }, a);
+  check(!s.stream("c1", "aaaaaaaa11"), "the late answer is discarded, not taken for a later request's");
   await settle();
-  check(canonical(s.entries("c1", "aaaaaaaa11")) === canonical(expected(a, "c1")), "once it has ended, the next request reads all of it from the cursor, nothing skipped");
+  await tick(50);
+  await settle();
+  check(canonical(s.entries("c1", "aaaaaaaa11")) === canonical(expected(a, "c1")), "once it has ended, the refused kick runs: the next request reads all of it from the cursor, nothing skipped", s.entries("c1", "aaaaaaaa11").length);
 }
 
 // ---- a conflict stops this run's uploads for good; a deleted copy is made again; a log that dropped entries stops
@@ -457,6 +489,26 @@ const expected = (a, conv) => {
   await m.reconcile();
   await settle();
   check(st.stale_from === 3 && st.stale_reason === "differs", "an entry of the runner's the stream skipped, between two it has: stale from the next one (differs)", { from: st.stale_from, reason: st.stale_reason });
+}
+
+// ---- the reconcile marks nothing from a partial answer
+{
+  const { a, s, m } = setup();
+  await m.refresh();
+  turn(a, "c1", "x", 3);
+  await m.kick("c1");
+  await settle();
+  // (the runner's log differs late in it; its answer stops early, before that point)
+  a.logs.get("c1").at(-2).params.event = { type: "turn_error", code: "changed" };
+  a.chunk = 2;
+  await m.reconcile();
+  await settle();
+  check(s.stream("c1", "aaaaaaaa11").stale_from === null, "a partial answer (the agent stopped early): nothing marked, what it lacks can't be told from what the runner lacks", s.stream("c1", "aaaaaaaa11"));
+  a.chunk = 0;
+  await tick(450);
+  await m.reconcile();
+  await settle();
+  check(s.stream("c1", "aaaaaaaa11").stale_from !== null, "the whole answer, once the cut one has drained: marked");
 }
 
 // ---- a list that can't be read is not an empty one
