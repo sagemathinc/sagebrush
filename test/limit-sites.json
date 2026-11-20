@@ -12406,6 +12406,11 @@
   "owner": "polynomial coercion",
   "row": "inv-14"
  },
+ "lib/_sage_poly.py :: Polynomial.gcd :: raise TypeError(\"unsupported operand for gcd\") #0": {
+  "class": "none",
+  "owner": "univariate polynomials (Sage mode)",
+  "reason": "a TypeError for gcd with an operand that is neither a polynomial nor an exact number (no common parent, as Sage's coercion refuses); refuses nothing for size"
+ },
  "lib/_sage_poly.py :: PolynomialRing_.__call__ :: (max(cs) + 1) * 8, _MAX_DENSE_COEFFS * 8, \"this conversion\", fixed=True) #0": {
   "class": "2",
   "explained": true,
