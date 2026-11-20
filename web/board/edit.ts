@@ -101,6 +101,10 @@ export class Editor {
   images: ImageStore | null = null;
   /** choose pictures to add (mount.ts): "Picture…" in the sticker picker, a note that is only a picture */
   onPickPicture: (() => void) | null = null;
+  /** the selection changed (mount.ts: an open drawer follows one note selected) */
+  onSelect: ((ids: readonly string[]) => void) | null = null;
+  /** open a note's drawer (mount.ts): O with one note selected, and the in-place toolbar's button; null: none */
+  onOpenDrawer: ((id: string, keyboard: boolean) => void) | null = null;
 
   // (edits are to the page shown: pg(d) is it, within the whole document d)
   constructor(private board: Board, private doc: () => BoardDoc | null, private change: (d: BoardDoc) => Promise<void>,
@@ -292,6 +296,7 @@ export class Editor {
   private select(ids: string | string[] | null) {
     this.selected = ids === null ? [] : typeof ids === "string" ? [ids] : [...new Set(ids)];
     this.board.select(this.selected);
+    this.onSelect?.(this.selected);
     // (one note or sticker selected, in Edit: its corner resizes it)
     this.board.handle = this.on && !this.inplace && this.selected.length === 1 && sized(this.board.item(this.selected[0])) ? this.selected[0] : null;
     // (and its grip, at its top left, which drags it: also while it is being written, William's B2)
@@ -1195,6 +1200,8 @@ export class Editor {
       complete: (mode, before) => this.complete?.(mode, before) ?? Promise.resolve(null),
       docs: this.docs ? (lang) => this.docs!(lang) : null,
       addSame: (id) => this.addSame(id),
+      // (from its toolbar: the focus stays in what is being written)
+      openDrawer: this.onOpenDrawer ? (id) => this.onOpenDrawer?.(id, false) : null,
       get images() { return ed.images; },
     };
   }
@@ -1315,6 +1322,8 @@ export class Editor {
     // (a key held down adds one: its repeats are not more, INPUT-AS-2)
     else if (this.selected.length === 1 && ((e.key === "Enter" && e.altKey && !mod && !e.shiftKey) || (e.key.toLowerCase() === "b" && !mod && !e.altKey && !e.shiftKey))) { if (!e.repeat) void this.addSame(this.selected[0]); }
     else if (e.key === "Enter" && this.selected.length === 1) this.open(this.selected[0]);
+    // (O: the selected note's drawer, its whole content beside the board)
+    else if (e.key.toLowerCase() === "o" && !mod && !e.altKey && !e.shiftKey && this.selected.length === 1 && this.onOpenDrawer) this.onOpenDrawer(this.selected[0], true);
     else if (mod && e.key.toLowerCase() === "d" && this.selected.length) { const t = this.copied(); if (t) this.insert(t); }
     else if (mod && e.key.toLowerCase() === "a") this.select(this.board.itemsIn(-1e9, -1e9, 1e9, 1e9).filter((it) => !it.parent).map((it) => it.id));
     else if (e.key.startsWith("Arrow") && this.selected.length) { const k = e.shiftKey ? 10 : 1; this.nudge(e.key === "ArrowLeft" ? -k : e.key === "ArrowRight" ? k : 0, e.key === "ArrowUp" ? -k : e.key === "ArrowDown" ? k : 0); }

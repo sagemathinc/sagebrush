@@ -124,6 +124,7 @@ const BUDGET = 4; // ms of building notes' elements per frame; the rest wait, dr
 const PER_FRAME = 30; // and at most this many elements added (each costs the browser's layout too)
 const MARGIN = 0.5; // mounted: the viewport plus this fraction around it
 const CLOSE = 1.1; // from this zoom: notes' details
+const DOUBLE_CLICK_MS = 250; // a click on an item is told this long after it, when no second click has come
 
 // A uniform grid: each item is in the cells its box overlaps.
 class Grid {
@@ -254,6 +255,11 @@ export class Board {
   private titleRects = new Map<string, { x0: number; y0: number; x1: number; y1: number }>(); // (far out, where groups' titles were drawn)
   /** A click on a group's title band (or elsewhere: null), for the host to reveal it, or not, in reading. */
   onTitleClick: ((id: string | null) => void) | null = null;
+  /** A click (or tap) on an item: not a drag, not on a link or a control, not one that selected text, not in what
+   * is being written, and not the first of a double-click (told once that one can't come: mount.ts, a note's drawer) */
+  onItemClick: ((it: Item) => void) | null = null;
+  // (a click waiting to be told, until a double-click can no longer follow it)
+  private clickSoon = 0;
   private boxes = new Grid(); // notes and shapes
   private strokes = new Grid(); // ink
   private paths = new Map<string, Path2D>();
@@ -302,6 +308,7 @@ export class Board {
   private sizes = new ResizeObserver(() => this.resize());
   /** Take the board away: its element, and nothing left waiting (frames, the observer). */
   destroy() {
+    clearTimeout(this.clickSoon);
     this.sizes.disconnect();
     cancelAnimationFrame(this.frame);
     cancelAnimationFrame(this.flight);
@@ -1922,8 +1929,17 @@ export class Board {
     let pressed: { x: number; y: number } | null = null;
     this.el.addEventListener("pointerdown", (e) => { pressed = { x: e.clientX, y: e.clientY }; }, true);
     this.el.addEventListener("click", (e) => {
+      if (e.detail > 1) clearTimeout(this.clickSoon);
       if (e.detail > 1 || (pressed && Math.hypot(e.clientX - pressed.x, e.clientY - pressed.y) > 6)) return;
       this.onTitleClick?.(this.titleAt(e.clientX, e.clientY)?.id ?? null);
+      if (!this.onItemClick || atControl(e) || editingAt(e) || (e.target as Element | null)?.closest?.("a, .board-code-out canvas")) return;
+      // (text selected by the press, to copy it: not a click on the item)
+      const sel = getSelection();
+      if (sel && !sel.isCollapsed && this.el.contains(sel.anchorNode)) return;
+      const r = this.el.getBoundingClientRect(), it = this.itemAt(e.clientX - r.left, e.clientY - r.top);
+      clearTimeout(this.clickSoon);
+      // (the item as it is then: laid out again meanwhile, the same id)
+      if (it) this.clickSoon = window.setTimeout(() => { const now = this.byId.get(it.id); if (now) this.onItemClick?.(now); }, DOUBLE_CLICK_MS);
     });
     // (a double tap: touch screens' double-click, which not every browser
     // makes into a dblclick; one it does make is then ignored)
@@ -1952,6 +1968,7 @@ export class Board {
 
   // a double-click (or double tap) at a point on the page
   private doubleAt(cx: number, cy: number) {
+    clearTimeout(this.clickSoon);
     {
       const e = { clientX: cx, clientY: cy };
       const r = this.el.getBoundingClientRect(), it = this.itemAt(e.clientX - r.left, e.clientY - r.top);
@@ -2021,7 +2038,7 @@ export function glueMath(root: HTMLElement) {
   }
 }
 
-function titleEl(title: string): HTMLElement {
+export function titleEl(title: string): HTMLElement {
   const b = document.createElement("b");
   let last = 0;
   for (const m of title.matchAll(TITLE_MATH)) {

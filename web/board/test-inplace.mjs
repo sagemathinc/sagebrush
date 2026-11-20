@@ -85,7 +85,7 @@ try {
   check(await ev("(() => { const t = document.querySelector('.board-editing .be-title'); return t.selectionStart > 0 && t.selectionStart < t.value.length; })()"), "...where it was clicked: " + await ev("document.activeElement.selectionStart"));
   check(await ev("getComputedStyle(document.querySelector('.board-editing .be-title')).fontWeight >= 600"), "the title is written as a title");
   // the toolbar: over it, with a plain note's tools
-  check((await bar()) === "ip-image ip-code ip-detail ip-link ip-color ip-delete", "a note's toolbar: " + await bar());
+  check((await bar()) === "ip-image ip-code ip-detail ip-link ip-drawer ip-color ip-delete", "a note's toolbar: " + await bar());
   const b0 = await elRect(".ip-bar");
   check(b0 && b0.bottom <= e0.top + 1 && b0.left >= e0.left - 1, "the toolbar floats above the item: " + JSON.stringify([b0, e0]));
   // keys in a field are the field's: arrows do not move the item, Delete does not delete it
@@ -127,7 +127,7 @@ try {
   const src = await elRect("[data-code=c] .board-code-src");
   await dblclick(src.left + 8 + 4.3 * 7.5, src.top + 10); // (on line 1, after "x = ")
   check(await until("window.board.editing === 'c'", 3000), "a double-click edits a code item");
-  check((await bar()) === "ip-run ip-hide ip-image ip-detail ip-link ip-color ip-delete", "a code item's toolbar: run and { } instead of + code: " + await bar());
+  check((await bar()) === "ip-run ip-hide ip-image ip-detail ip-link ip-drawer ip-color ip-delete", "a code item's toolbar: run and { } instead of + code: " + await bar());
   check(await ev("document.activeElement === document.querySelector('.board-editing .be-code')"), "the code, double-clicked, has the caret");
   check(await ev("Math.abs(document.activeElement.selectionStart - 4) <= 1"), "...where it was clicked: " + await ev("document.activeElement.selectionStart"));
   check(await ev("(() => { const e = document.querySelector('.board-editing .be-codebox pre'), s = getComputedStyle(e); return !!e.querySelector('span') && s.fontFamily.includes('monospace'); })()"), "the code is highlighted, in its box");
