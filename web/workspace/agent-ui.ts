@@ -95,7 +95,7 @@ const CSS = `
 .sbag-bar button.chip > span:not(.dot) { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; min-width: 0; }
 .sbag-bar button.chip:hover, .sbag-bar button.chip[aria-expanded=true] { background: #e9e7de; }
 .sbag-bar .dot { width: 7px; height: 7px; border-radius: 50%; background: #4f8a3c; flex: none; }
-.sbag-bar .menu { display: none; position: fixed; z-index: 10000; min-width: 260px; max-width: min(420px, calc(100vw - 16px)); background: #fff; color: #24231f; border: 1px solid #e0ddd2; border-radius: 10px; box-shadow: 0 6px 20px rgba(0,0,0,.15); padding: 8px; gap: 6px; }
+.sbag-bar .menu { display: none; position: fixed; z-index: 10000; max-height: calc(100vh - 16px); overflow: auto; min-width: 260px; max-width: min(420px, calc(100vw - 16px)); background: #fff; color: #24231f; border: 1px solid #e0ddd2; border-radius: 10px; box-shadow: 0 6px 20px rgba(0,0,0,.15); padding: 8px; gap: 6px; }
 .sbag-bar.open .menu { display: grid; }
 .sbag-bar .menu .items { display: grid; gap: 6px; }
 .sbag-bar .sr { position: absolute; width: 1px; height: 1px; overflow: hidden; clip: rect(0 0 0 0); white-space: nowrap; }
@@ -108,9 +108,10 @@ const CSS = `
 /* (in a header's row, [data-sbag-inline]: one line, its words cut short, so the header keeps its height) */
 [data-sbag-inline] > .sbag-bar.docked { margin: 0; padding: 3px 6px 3px 12px; flex-wrap: nowrap; min-width: 0; max-width: 100%; }
 [data-sbag-inline] > .sbag-bar.docked > button.chip { min-width: 0; flex: 0 1 auto; }
-[data-sbag-inline] > .sbag-bar.docked > button:not(.chip) { flex: none; white-space: nowrap; }
+[data-sbag-inline] > .sbag-bar.docked > button:not(.chip), [data-sbag-inline] > .sbag-bar.docked .made-slot > button { flex: none; white-space: nowrap; }
 .sbag-bar button { font: inherit; border: 0; border-radius: 12px; padding: 3px 10px; background: #fff; color: #24231f; cursor: pointer; }
 .sbag-bar button.open { max-width: 240px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.sbag-bar .made-slot { display: contents; }
 .sbag-bar .made { display: flex; gap: 8px; align-items: center; padding-left: 10px; border-left: 1px solid #e0ddd2; white-space: nowrap; min-width: 0; max-width: 480px; }
 .sbag-bar .made b { overflow: hidden; text-overflow: ellipsis; min-width: 0; }
 .sbag-bar .made button { flex: none; }
@@ -202,13 +203,15 @@ export function mountAgentPairing(ws: PairingWorkspace, o: { button?: HTMLElemen
   //  under way are kept; else it is drawn again)
   let barKey = "";
   let barText: ((short: string, full: string) => void) | null = null;
+  // (what the agent made last, Open beside it: replaced on its own, never redrawing the chip)
+  let barMade: ((made: Created | null) => void) | null = null;
   document.addEventListener("pointerdown", (e) => { if (bar && closeMenu && !bar.contains(e.target as Node)) closeMenu(); }, true);
   addEventListener("resize", () => closeMenu?.());
   addEventListener("scroll", (e) => { if (bar && !bar.contains(e.target as Node)) closeMenu?.(); }, true);
 
   function showBar() {
     const p = pairing;
-    if (!p || p.state !== "granted" || !p.grant) { bar?.remove(); bar = null; barKey = ""; barText = null; closeMenu = null; return; }
+    if (!p || p.state !== "granted" || !p.grant) { bar?.remove(); bar = null; barKey = ""; barText = null; barMade = null; closeMenu = null; return; }
     const g = p.grant;
     const where = g.folders.includes("/") ? "everywhere" : "in " + g.folders.join(", ");
     const changes = `${p.changes} change${p.changes === 1 ? "" : "s"}`;
@@ -216,26 +219,38 @@ export function mountAgentPairing(ws: PairingWorkspace, o: { button?: HTMLElemen
     const full = `${p.hello!.agent.name} (as it says): ${g.write ? "read and write" : "read only"} ${where}${g.run ? " · may run code" : ""} · ${changes}`;
     const short = `${p.hello!.agent.name} · ${g.write ? "can edit" : "read only"}${g.folders.includes("/") ? "" : " · some folders"}${g.run ? " · runs code" : ""} · ${changes}`;
     const made = o.open && p.created ? p.created : null;
-    const key = JSON.stringify([p.hello!.agent.name, !!p.link, p.computer ?? "", g.run, made?.path ?? "", made?.kind ?? ""]);
-    if (bar && key === barKey && barText) { barText(short, full); return; }
-    // (drawn again: an open menu stays open, and the control that had the focus gets it back)
+    // (the controls the chip holds: the same, it is updated in place (its words, and Open), never redrawn)
+    const key = JSON.stringify([p.hello!.agent.name, !!p.link, p.computer ?? "", g.run]);
+    if (bar && key === barKey && barText && barMade) { barText(short, full); barMade(made); return; }
+    // (drawn again: an open menu stays open, and the focus goes back to the same kind of control: the chip, the same
+    //  place in the menu (or its first, where that control is gone), or Open)
     const wasOpen = !!bar?.classList.contains("open");
-    const had = bar && bar.contains(document.activeElement) ? (document.activeElement as HTMLElement).textContent : null;
+    const act = bar && bar.contains(document.activeElement) ? (document.activeElement as HTMLElement) : null;
+    const had = !act ? null : act.classList.contains("chip") ? { kind: "chip" } : act.getAttribute("role") === "menuitem" ? { kind: "item", i: [...act.parentElement!.children].indexOf(act) } : { kind: "open" };
     bar?.remove();
     // (over a runner, Revoke is a Disconnect that also stops the agent there: the runner ends its process group)
     const revoke = p.link ? h("button", { textContent: "Disconnect", title: `Disconnect and stop the agent on ${p.computer}` }) : h("button", { textContent: "Revoke" });
     revoke.className = "danger";
-    revoke.onclick = () => void p.revoke("revoked by the person");
+    revoke.onclick = () => void pairing?.revoke("revoked by the person"); // (the pairing of the moment the person presses it)
     // ("May run code" turned off here, mid-session: a run going ends (chat plan PR 4); turned on only by a new grant)
     const noRun = g.run ? h("button", { textContent: "Turn off running code", title: "The agent may no longer run code, and a run going now stops (connect it again to allow it)" }) : null;
-    if (noRun) noRun.onclick = () => void p.noRun();
+    if (noRun) noRun.onclick = () => void pairing?.noRun();
     // (Open: what the agent created last, where the page can open it (its `open`), as Files would)
     // (a board it made opens in a tab of its own, never by itself (a tab only opens on a click, and this page keeps the
     //  pairing): said as what the agent did, with Open beside it, the bar's one call to action)
-    const board = made?.kind === "board";
-    const open = made ? h("button", { className: board ? "cta" : "open", textContent: board ? "Open" : "Open " + nameOf(made.path), title: board ? `Open ${made.path} in a new tab, where its code runs` : `Open ${made.path}` }) : null;
-    if (open && made) open.onclick = () => o.open!(made);
-    const did = board && open ? h("span", { className: "made" }, `${p.hello!.agent.name} made`, h("b", { textContent: nameOf(made!.path) }), open) : open;
+    const madeSlot = h("span", { className: "made-slot" });
+    let openBtn: HTMLButtonElement | null = null;
+    barMade = (m) => {
+      const board = m?.kind === "board";
+      const open = m ? h("button", { className: board ? "cta" : "open", textContent: board ? "Open" : "Open " + nameOf(m.path), title: board ? `Open ${m.path} in a new tab, where its code runs` : `Open ${m.path}` }) : null;
+      if (open && m) open.onclick = () => o.open!(m);
+      const did = board && open ? h("span", { className: "made" }, `${p.hello!.agent.name} made`, h("b", { textContent: nameOf(m!.path) }), open) : open;
+      const focused = !!openBtn && document.activeElement === openBtn;
+      madeSlot.replaceChildren(...(did ? [did] : []));
+      openBtn = open;
+      if (focused) openBtn?.focus();
+    };
+    barMade(made);
     // (the chip, and its menu: what the agent may do, Turn off running code, and Revoke one click away; by keyboard too:
     //  Enter, Space or ↓ opens it on its first control, ↑ ↓ Home End move, Escape closes it back on the chip, Tab closes it)
     const n = ++menuSeq;
@@ -263,7 +278,8 @@ export function mountAgentPairing(ws: PairingWorkspace, o: { button?: HTMLElemen
       //  within the window's width)
       const r = chip.getBoundingClientRect(), w = menu.offsetWidth, ht = menu.offsetHeight;
       menu.style.left = `${Math.max(8, Math.min(r.left, innerWidth - w - 8))}px`;
-      menu.style.top = `${r.top - ht - 6 >= 8 ? r.top - ht - 6 : Math.min(r.bottom + 6, innerHeight - ht - 8)}px`;
+      const top = r.top - ht - 6 >= 8 ? r.top - ht - 6 : r.bottom + 6;
+      menu.style.top = `${Math.max(8, Math.min(top, innerHeight - ht - 8))}px`;
     };
     const show = (on: boolean, focus = on) => {
       if (!bar) return;
@@ -277,7 +293,7 @@ export function mountAgentPairing(ws: PairingWorkspace, o: { button?: HTMLElemen
     chip.onkeydown = (e) => { if (e.key === "ArrowDown") { e.preventDefault(); show(true); } };
     list.onkeydown = (e) => {
       // (a key held down from the chip's Enter never repeats onto a control: Revoke may be the first)
-      if (e.repeat) { e.preventDefault(); return; }
+      if (e.repeat && (e.key === "Enter" || e.key === " ")) { e.preventDefault(); return; }
       const i = items.indexOf(document.activeElement as HTMLButtonElement);
       if (e.key === "Escape") { e.preventDefault(); show(false, true); }
       else if (e.key === "Tab") show(false, false);
@@ -285,11 +301,13 @@ export function mountAgentPairing(ws: PairingWorkspace, o: { button?: HTMLElemen
       else if (e.key === "Home" || e.key === "End") { e.preventDefault(); items[e.key === "Home" ? 0 : items.length - 1].focus(); }
     };
     closeMenu = () => show(false, false);
-    bar = h("div", { className: "sbag-bar" }, chip, menu, said, ...(did ? [did] : []));
+    bar = h("div", { className: "sbag-bar" }, chip, menu, said, madeSlot);
     barKey = key;
     dock();
     if (wasOpen) show(true, false);
-    if (had !== null) [chip, ...items].find((b) => b.textContent === had)?.focus();
+    if (had?.kind === "chip") chip.focus();
+    else if (had?.kind === "item") (items[had.i] ?? items[0]).focus();
+    else if (had?.kind === "open") (openBtn ?? chip).focus();
   }
   // (the bar's place: a [data-sbag-slot] the page shows, a row or a header of its layout, the highest-numbered one (an
   //  editor's page over the notebook page's); an overlay at the bottom left only on a page that has none. Placed again,

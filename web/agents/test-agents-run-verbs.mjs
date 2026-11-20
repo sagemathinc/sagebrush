@@ -135,18 +135,19 @@ try {
     // (the menu open, focus in it, and the agent changes a file: the counts change in place, the menu stays open, the
     //  focus where it was; a held Enter never repeats onto a control; Home, End; the menu within the window; the live
     //  region says the summary only)
-    await ev(`(() => { const c = document.querySelector(".sbag-bar button.chip"); c.focus(); c.click(); const k = (key) => document.activeElement.dispatchEvent(new KeyboardEvent("keydown", { key, bubbles: true })); k("End"); return true; })()`);
+    await ev(`(() => { const c = document.querySelector(".sbag-bar button.chip"); c.focus(); c.click(); const k = (key) => document.activeElement.dispatchEvent(new KeyboardEvent("keydown", { key, bubbles: true })); k("End"); window.__w4item = document.activeElement; return true; })()`);
     const before = await ev(`document.querySelector(".sbag-bar button.chip").textContent`);
     ok(!!(await req("workspace.create", { path: `/w4-count-${run ? "run" : "norun"}.txt`, content: { text: "x" } })).ok, "(the agent writes a file while the menu is open)");
     ok(await until(`document.querySelector(".sbag-bar button.chip").textContent !== ${JSON.stringify(before)}`), "W4: the chip's count moves");
-    const kept = await ev(`(() => { const c = document.querySelector(".sbag-bar button.chip"), m = document.querySelector(".sbag-bar .menu"), r = m.getBoundingClientRect();
+    const kept = await ev(`(() => { const same = document.activeElement === window.__w4item && window.__w4item.isConnected;
+      const c = document.querySelector(".sbag-bar button.chip"), m = document.querySelector(".sbag-bar .menu"), r = m.getBoundingClientRect();
       const rep = new KeyboardEvent("keydown", { key: "Enter", repeat: true, bubbles: true, cancelable: true }); document.activeElement.dispatchEvent(rep);
       const home = (document.activeElement.dispatchEvent(new KeyboardEvent("keydown", { key: "Home", bubbles: true })), document.activeElement?.textContent);
-      return { open: c.getAttribute("aria-expanded") === "true", focus: document.activeElement?.getAttribute("role"), repeatStopped: rep.defaultPrevented, home,
+      return { same, open: c.getAttribute("aria-expanded") === "true", focus: document.activeElement?.getAttribute("role"), repeatStopped: rep.defaultPrevented, home,
         inWindow: r.left >= 0 && r.top >= 0 && r.right <= innerWidth && r.bottom <= innerHeight,
         live: [...document.querySelectorAll(".sbag-bar [role=status]")].map((e) => e.textContent), statusWrapsMenu: !!document.querySelector(".sbag-bar[role=status], [role=status] [role=menu]") }; })()`);
-    ok(kept.open && kept.focus === "menuitem" && kept.repeatStopped && kept.home === (run ? "Turn off running code" : "Revoke") && kept.inWindow && kept.live.length === 1 && kept.live[0].includes("change") && !kept.statusWrapsMenu,
-      "W4: counts change in place (menu open, focus kept); a repeated Enter is stopped; Home; the menu within the window; the live region is the summary only", kept);
+    ok(kept.same && kept.open && kept.focus === "menuitem" && kept.repeatStopped && kept.home === (run ? "Turn off running code" : "Revoke") && kept.inWindow && kept.live.length === 1 && kept.live[0].includes("change") && !kept.statusWrapsMenu,
+      "W4: counts change in place (the same focused control, the menu open); a repeated Enter is stopped; Home; the menu within the window; the live region is the summary only", kept);
     await ev(`(document.activeElement.dispatchEvent(new KeyboardEvent("keydown", { key: "Escape", bubbles: true })), true)`);
   };
 
@@ -180,6 +181,15 @@ try {
   // (the first pairing ended by the person, Revoke on its bar, and the agent told so, before the next one: one page is
   //  paired with an agent at a time. A navigation away isn't relied on: when the browser closes the old page's socket
   //  is its own business, as a page kept for Back may keep it open)
+  // (W4: Turn off running code from the open menu, by keyboard: the chip is drawn again without it, the menu stays open,
+  //  the focus on the control that is left)
+  const off = await ev(`(async () => { const c = document.querySelector(".sbag-bar button.chip"); c.focus(); c.click();
+    document.activeElement.click(); // (its first control, Turn off running code)
+    for (let i = 0; i < 50 && [...document.querySelectorAll(".sbag-bar [role=menuitem]")].some((b) => b.textContent === "Turn off running code"); i++) await new Promise((r) => setTimeout(r, 100));
+    const items = [...document.querySelectorAll(".sbag-bar [role=menuitem]")].map((b) => b.textContent);
+    const r = { items, open: document.querySelector(".sbag-bar button.chip").getAttribute("aria-expanded"), focus: document.activeElement?.textContent };
+    document.activeElement.dispatchEvent(new KeyboardEvent("keydown", { key: "Escape", bubbles: true })); return r; })()`);
+  ok(JSON.stringify(off.items) === JSON.stringify(["Revoke"]) && off.open === "true" && off.focus === "Revoke", "W4: after Turn off running code the menu stays open, the focus on the control left", off);
   await ev(`([...document.querySelectorAll(".sbag-bar button")].find((b) => b.textContent === "Revoke").click(), true)`);
   let left = null;
   for (let i = 0; i < 200; i++) { left = await drive({ op: "status" }); if (left.ok?.paired === false) break; await sleep(100); }
