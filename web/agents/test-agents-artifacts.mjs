@@ -620,9 +620,9 @@ try {
     const draft = "/notes/selfrun-draft.txt";
     await call("workspace.create", { path: draft, content: { text: "mine" } });
     await artifactTurn(draft, { finish: false, turn: t3 });
-    await until(`!!document.querySelector('${PANE} textarea')`);
-    // (the person in it: they type in its text)
-    await ev(`(document.querySelector('${PANE} textarea').focus(), true)`);
+    // (the person in it: they type in its text; found and focused in one step, retried, as the pane may render it
+    //  again between a look and a focus)
+    await until(`(() => { const t = document.querySelector('${PANE} textarea'); t?.focus(); return !!t && document.activeElement === t; })()`);
     await send("Input.insertText", { text: " typed" });
     const path3 = "/notes/selfrun3.ipynb";
     await call("workspace.create", { path: path3, content: docFor(path3, [{ code: "print('AWAY', 3)" }]), mode: "python" });
