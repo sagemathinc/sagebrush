@@ -487,6 +487,20 @@ try {
   ok(await go(""), "the notebook page again, nothing pressed");
   ok(await until(`!!document.querySelector(".sbag-bar")`, 20000) && requests.slice(beforeR).some(chunk), "the remembered agent: the chunk loads by itself and it reconnects", requests.slice(beforeR).filter((u) => /agent/.test(u)));
   ok(await ev(`document.querySelectorAll(".sbag-bar").length`) === 1 && !(await ev(`!!document.querySelector(".sbag-box")`)), "one bar, no dialog");
+  // (a page in a frame of this tab while an agent is remembered, as the Agents page's .tex pane can be: it mounts a
+  //  pairing of its own (the chunk fetched there), and still leaves the tab's reload record alone, the top page's)
+  {
+    await ev(`(sessionStorage.setItem("sb-agent-reload-v1", "kept"), true)`);
+    const beforeF = requests.length;
+    await ev(`(() => { const f = document.createElement("iframe"); f.id = "sbframe2"; f.src = location.pathname; document.body.append(f); return true; })()`);
+    const mounted = await until(`document.querySelector("#sbframe2")?.contentDocument?.readyState === "complete"`, 30000);
+    const fetched = await (async () => { for (let t = Date.now(); Date.now() - t < 20000; await sleep(200)) if (requests.slice(beforeF).some(chunk)) return true; return false; })();
+    await sleep(1500);
+    ok(mounted && fetched && await ev(`sessionStorage.getItem("sb-agent-reload-v1") === "kept"`), "a page in a frame of this tab with an agent remembered: it mounts its own pairing, and the tab's reload record is left alone", { mounted, fetched, record: await ev(`sessionStorage.getItem("sb-agent-reload-v1")`) });
+    await ev(`(document.querySelector("#sbframe2")?.remove(), sessionStorage.removeItem("sb-agent-reload-v1"), true)`);
+    // (the top page paired again, as before the frame: the frame's own pairing may have taken the agent's one socket)
+    ok(await go("") && await until(`!!document.querySelector(".sbag-bar")`, 20000), "(the notebook page again, the remembered agent reconnected)");
+  }
   await ev(`([...document.querySelectorAll(".sbag-bar button")].find((b) => b.textContent === "Revoke")?.click(), true)`);
   ok(await until(`!document.querySelector(".sbag-bar")`), "Revoke: the bar goes (and the remembered grant with it)");
 
