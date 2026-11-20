@@ -1080,8 +1080,10 @@ class Polynomial:
         if o is None:
             L = self._inexact(other)
             return NotImplemented if L is None else L + other
-        n = max(len(self._c), len(o._c))
-        return self._make([self[i] + o[i] for i in range(n)], o)
+        # (in the engine: sagebrush.poly.qadd, refused past its caps)
+        from sagebrush import poly
+        ring = o._ring if o._ring._base is QQ else self._ring
+        return _from_tokens(ring, poly.qadd(self._c, o._c, raw=True))
 
     def __radd__(self, other):
         o = self._coerce(other)
@@ -1103,14 +1105,19 @@ class Polynomial:
         if o is None:
             L = self._inexact(other)
             return NotImplemented if L is None else L - other
-        return self + (-o)
+        # (in the engine: sagebrush.poly.qsub, one call)
+        from sagebrush import poly
+        ring = o._ring if o._ring._base is QQ else self._ring
+        return _from_tokens(ring, poly.qsub(self._c, o._c, raw=True))
 
     def __rsub__(self, other):
         o = self._coerce(other)
         if o is None:
             L = self._inexact(other)
             return NotImplemented if L is None else other - L
-        return o + (-self)
+        from sagebrush import poly
+        ring = self._ring if self._ring._base is QQ else o._ring
+        return _from_tokens(ring, poly.qsub(o._c, self._c, raw=True))
 
     def __mul__(self, other):
         o = self._coerce(other)

@@ -1,0 +1,11 @@
+{
+ "v": 1,
+ "reason": "Sums and differences in Q[x] in the engine (qpoly_add, qpoly_sub): their path in arith::pscale and two op rows, in the engine module and the CLI that embeds it; sagebrush.poly.qadd and qsub and Sage mode's + and - through them in the Sage chunk. CI's size row for this change on its merge with the track (531eb0e9, at its first commit): engine/sagebrush-engine.wasm +9727, cli/pyjs.cjs +13232, engine/lib/sage.pre +4604, engine/lib/sage.src +1496, cli/lib.gen.js +244; the trim fix that follows adds +97 (engine) and +132 (pyjs), measured locally; each marked +64 over that. The sage.pre, sage.src and engine module ceilings are renewed to the measured size + 64.",
+ "bytes": {
+  "cli/lib.gen.js": 308,
+  "cli/pyjs.cjs": 13428,
+  "engine/lib/sage.pre": 4668,
+  "engine/lib/sage.src": 1560,
+  "engine/sagebrush-engine.wasm": 9888
+ }
+}

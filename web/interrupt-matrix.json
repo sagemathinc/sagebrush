@@ -898,6 +898,13 @@
    "owner": "groups/Galois"
   },
   {
+   "id": "engineCall:qpoly_add",
+   "transport": "engineCall:qpoly_add",
+   "status": "planned",
+   "family": "E5 polynomials",
+   "owner": "polynomial factorization"
+  },
+  {
    "id": "engineCall:qpoly_clear",
    "transport": "engineCall:qpoly_clear",
    "status": "planned",
@@ -935,6 +942,13 @@
   {
    "id": "engineCall:qpoly_scale",
    "transport": "engineCall:qpoly_scale",
+   "status": "planned",
+   "family": "E5 polynomials",
+   "owner": "polynomial factorization"
+  },
+  {
+   "id": "engineCall:qpoly_sub",
+   "transport": "engineCall:qpoly_sub",
    "status": "planned",
    "family": "E5 polynomials",
    "owner": "polynomial factorization"

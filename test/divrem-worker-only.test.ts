@@ -5,10 +5,10 @@
 // module's sb_call in the runtime) must be a worker bundle.  So a long
 // qpoly_divrem call (its work cap is 2^29 units, about 2.15 s on the
 // production wasm engine at the worst measured rate) never runs on the UI
-// thread (nor a qpoly_scale, qpoly_derivative or qpoly_integral call, 2^28
-// units, about 2.11 s there): Sage mode's Python (sagebrush.poly.qdivrem,
-// zdivrem, qscale, qderivative and qintegral) runs in the kernel's worker
-// (web/worker.ts).
+// thread (nor a qpoly_scale, qpoly_derivative, qpoly_integral, qpoly_add or
+// qpoly_sub call, 2^28 units, about 2.16 s there): Sage mode's Python
+// (sagebrush.poly.qdivrem, zdivrem, qscale, qderivative, qintegral, qadd and
+// qsub) runs in the kernel's worker (web/worker.ts).
 import test from "node:test";
 import assert from "node:assert/strict";
 import { existsSync, readFileSync, statSync } from "node:fs";

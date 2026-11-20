@@ -1,6 +1,6 @@
-//! qpoly_scale's, qpoly_derivative's and qpoly_integral's live memory,
-//! measured by a counting allocator (one test: the counters are global;
-//! natively and under wasm32-wasip1):
+//! qpoly_scale's, qpoly_derivative's, qpoly_integral's, qpoly_add's and
+//! qpoly_sub's live memory, measured by a counting allocator (one test: the
+//! counters are global; natively and under wasm32-wasip1):
 //! - the heap's peak during a call is within the ledger's prediction, 8
 //!   (fixed rows + the ledger's high-water) bytes;
 //! - the ledger's requirement admits and one word below refuses, the same on
@@ -134,13 +134,17 @@ fn scale_peaks_caps_and_baselines() {
     let big_s = format!("-{}/{}", "7".repeat(100), "b".repeat(90));
     let x399 = (0..400).map(|i| if i == 399 { "1" } else { "0" }).collect::<Vec<_>>().join(",");
     // (kind, input, b, the ledger's requirement: the same on both targets)
-    let cases: [(&str, Kind, &str, &str, u64); 6] = [
+    let rat2 = (0..280).map(|i| format!("{:x}{}/{:x}", (i * 104_729) % 997 + 1, "5".repeat(50), (i % 11) * 1291 + 3)).collect::<Vec<_>>().join(",");
+    let cases: [(&str, Kind, &str, &str, u64); 9] = [
         ("rational coefficients by a large rational", Kind::Scale, &rat, &big_s, 16_671),
         ("wide integers by 7/3", Kind::Scale, &wide, "7/3", 10_596),
         ("a 64th derivative", Kind::Derivative, &rat, "40", 9_612),
         ("a first derivative of 3000 coefficients", Kind::Derivative, &small, "1", 17_046),
         ("x^399, its 200th derivative: the largest F_j last", Kind::Derivative, &x399, "c8", 804),
         ("an integral of 3000 coefficients", Kind::Integral, &small, "-5/7", 17_111),
+        ("a sum of two rational polynomials of unequal length", Kind::Add, &rat, &rat2, 5_433),
+        ("a difference of 3000-term rational polynomials", Kind::Sub, &small, &rat2, 19_728),
+        ("f - f: everything cancels", Kind::Sub, &rat, &rat, 1_191),
     ];
     // (a warm-up call: the interrupt hooks' phase names are a one-time global
     // allocation)
@@ -176,6 +180,22 @@ fn scale_peaks_caps_and_baselines() {
         assert_eq!(out, "{\"ok\":\"5/2,0,-2/3,28/3\"}");
         assert_eq!((out.len(), out.capacity()), (bytes, bytes), "the reply fills its reservation exactly");
     }
+    // a trimmed reply (the top coefficients cancel) is written without
+    // allocating too, filling its exact reservation
+    {
+        let (fa, fb) = scans(Kind::Sub, "1,0,3,4,5,6", "0,0,2,4,5,6");
+        let Ok(Ok(plan)) = pscale::admit(Kind::Sub, &fa, &fb, 64, &qpoly::CAPS) else { panic!() };
+        let led = Words::new(plan.limit);
+        let mut m = Meter::new(plan.work);
+        let mp = pscale::compute(&fa, &fb, &plan, &led, &mut m).unwrap();
+        let bytes = pscale::reply_bytes(&mp).unwrap() as usize;
+        let mut out = String::with_capacity(bytes);
+        let before = ALLOCS.load(Relaxed);
+        pscale::emit(&mp, &mut out, &mut m).unwrap();
+        assert_eq!(ALLOCS.load(Relaxed), before, "a trimmed emit allocated");
+        assert_eq!(out, "{\"ok\":\"1,0,1\"}");
+        assert_eq!((out.len(), out.capacity()), (bytes, bytes), "the trimmed reply fills its reservation exactly");
+    }
     // a copied reply (s = -1): one allocation, its exact reservation
     {
         let (fa, fb) = scans(Kind::Scale, "3,0,-4/5,10", "-1");
@@ -188,7 +208,7 @@ fn scale_peaks_caps_and_baselines() {
 
     // every allocation of a call, failed in turn, is the memory refusal
     // (never an abort), and the heap is back at its baseline
-    for (kind, a, b) in [(Kind::Scale, "1/2,3,-5/7,1,0,2/9,1", "-6/35"), (Kind::Derivative, "1/2,3,-5/7,1,0,2/9,1", "3"), (Kind::Integral, "1/2,3,-5/7,1,0,2/9,1", "4/3")] {
+    for (kind, a, b) in [(Kind::Scale, "1/2,3,-5/7,1,0,2/9,1", "-6/35"), (Kind::Derivative, "1/2,3,-5/7,1,0,2/9,1", "3"), (Kind::Integral, "1/2,3,-5/7,1,0,2/9,1", "4/3"), (Kind::Add, "1/2,3,-5/7,1,0,2/9,1", "1/6,-3,5/14,2/3"), (Kind::Sub, "1/2,3,-5/7", "1/2,3,-5/7,0,1/9")] {
         let k_total = {
             let (o, n) = call_failing(kind, a, b, 0);
             o.unwrap();
@@ -209,11 +229,12 @@ fn scale_peaks_caps_and_baselines() {
         use sagebrush_interrupt::hooks;
         let long = (0..100_000).map(|i| format!("{:x}/{:x}", i * 7 + 1, i % 97 + 2)).collect::<Vec<_>>().join(",");
         let mut first = true;
-        for (kind, b) in [(Kind::Scale, "-15/22"), (Kind::Derivative, "3"), (Kind::Integral, "1/2")] {
+        let long_b = (0..100_000).map(|i| format!("{:x}/{:x}", i * 5 + 3, i % 89 + 3)).collect::<Vec<_>>().join(",");
+        for (kind, b) in [(Kind::Scale, "-15/22"), (Kind::Derivative, "3"), (Kind::Integral, "1/2"), (Kind::Add, long_b.as_str()), (Kind::Sub, long_b.as_str())] {
             hooks::reset();
             hooks::trace();
             let _ = call(kind, &long, b, None, None);
-            let phases: Vec<(&str, Vec<u64>)> = ["scale compute", "scale emit"].iter().map(|p| (*p, hooks::traced(p))).collect();
+            let phases: Vec<(&str, Vec<u64>)> = ["scale compute", "scale trim", "scale emit"].iter().map(|p| (*p, hooks::traced(p))).collect();
             hooks::reset();
             for (phase, idx) in &phases {
                 assert!(!idx.is_empty(), "no poll in {}", phase);

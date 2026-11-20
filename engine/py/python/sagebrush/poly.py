@@ -253,6 +253,34 @@ def qintegral(a, c=0, raw=False):
     return r if raw else _qlist(r)
 
 
+def qadd(a, b, raw=False):
+    """a + b for polynomials a and b over Q (int and Fraction coefficients,
+    constant term first; results in lowest terms, trailing zeros dropped):
+    the engine's qpoly_add, refused past its caps (raw=True: the reply's
+    tokens).
+
+    >>> from fractions import Fraction
+    >>> from sagebrush.poly import qadd
+    >>> qadd([Fraction(1, 6), 1], [Fraction(1, 3), -1])
+    [Fraction(1, 2)]
+    """
+    r = call_hex("qpoly_add", _qtokens(a, "qadd"), _qtokens(b, "qadd"))
+    return r if raw else _qlist(r)
+
+
+def qsub(a, b, raw=False):
+    """a - b for polynomials a and b over Q (as qadd): the engine's
+    qpoly_sub, refused past its caps.
+
+    >>> from fractions import Fraction
+    >>> from sagebrush.poly import qsub
+    >>> qsub([1, Fraction(1, 2)], [1, Fraction(1, 2)]), qsub([7], [1, 0, -1])
+    ([], [6, 0, 1])
+    """
+    r = call_hex("qpoly_sub", _qtokens(a, "qsub"), _qtokens(b, "qsub"))
+    return r if raw else _qlist(r)
+
+
 def gcd(a, b):
     """The gcd in Z[x] of integer polynomials, with positive leading
     coefficient (constant term first; [] if both are zero)."""

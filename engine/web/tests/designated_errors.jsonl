@@ -100,3 +100,9 @@
 {"fn":"qpoly_integral","a":"1,2,3","b":"1,2"}
 {"fn":"qpoly_integral","a":"1,,2","b":"0"}
 {"fn":"qpoly_integral","b":"0"}
+{"fn":"qpoly_add","a":"1,2","b":"1/0"}
+{"fn":"qpoly_add","a":"1,,2","b":"1"}
+{"fn":"qpoly_add","a":"1"}
+{"fn":"qpoly_sub","b":"1"}
+{"fn":"qpoly_sub","a":"1","b":"-0"}
+{"fn":"qpoly_sub","a":"1","b":["1"]}
