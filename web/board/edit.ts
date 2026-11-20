@@ -107,6 +107,8 @@ export class Editor {
   onOpenDrawer: ((id: string, keyboard: boolean) => void) | null = null;
   /** whether this item has a drawer (a note: not a group, a question, a shape...) */
   canOpenDrawer: ((id: string) => boolean) | null = null;
+  /** whether the focus, or the text selected, is in the drawer (its keys and clipboard aren't the board's) */
+  inDrawer: () => boolean = () => false;
 
   // (edits are to the page shown: pg(d) is it, within the whole document d)
   constructor(private board: Board, private doc: () => BoardDoc | null, private change: (d: BoardDoc) => Promise<void>,
@@ -754,7 +756,7 @@ export class Editor {
     return JSON.stringify({ "sagebrush-board": 1, nodes, edges, at, ...(pics.size ? { images } : {}) });
   }
   private clip(e: ClipboardEvent, cut: boolean) {
-    if (!this.isActive()) return;
+    if (!this.isActive() || this.inDrawer()) return;
     if (!this.on || this.panel || this.typing()) return;
     const text = this.copied();
     if (!text) return;
@@ -1310,7 +1312,7 @@ export class Editor {
   }
 
   private key(e: KeyboardEvent) {
-    if (!this.isActive()) return;
+    if (!this.isActive() || this.inDrawer()) return;
     if (this.panel || e.target instanceof HTMLInputElement || e.target instanceof HTMLTextAreaElement) return;
     // (undo and redo: in Edit only, as undo() and redo() say: View writes nothing, web/doc-mode.ts)
     const mod = e.metaKey || e.ctrlKey;

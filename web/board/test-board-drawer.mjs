@@ -83,6 +83,7 @@ const DOC = (o = {}) => ({
         { id: "q", kind: "ask", input: "text", text: "Name a prime", x: 400, y: 420, w: 300 },
       ].filter((n) => !(o.without ?? []).includes(n.id)),
       edges: [],
+      steps: [{ focus: "code", say: "The code" }, { focus: "linked", say: "The link" }],
     },
     // (a note with the same id as the first page's: an id is its page's own)
     { nodes: [{ id: "long", title: "Second page", text: "Another page" }], edges: [] },
@@ -120,7 +121,7 @@ try {
   const mouse = (type, x, y, extra = {}) => A.send("Input.dispatchMouseEvent", { type, x, y, button: "left", buttons: type === "mouseReleased" ? 0 : 1, clickCount: 1, ...extra });
   // (a click on a note is told 250 ms after it, when no second click has come: the first of a double-click opens nothing)
   const click = async (x, y) => { await mouse("mousePressed", x, y); await mouse("mouseReleased", x, y); await sleep(400); };
-  const key = (k, extra = {}) => A.send("Input.dispatchKeyEvent", { type: "keyDown", key: k, code: extra.code ?? k, windowsVirtualKeyCode: { Enter: 13, Escape: 27, ArrowLeft: 37, ArrowRight: 39, ArrowUp: 38, ArrowDown: 40, Home: 36, End: 35, o: 79 }[k] ?? 0, ...extra });
+  const key = (k, extra = {}) => A.send("Input.dispatchKeyEvent", { type: "keyDown", key: k, code: extra.code ?? k, windowsVirtualKeyCode: { Enter: 13, Escape: 27, ArrowLeft: 37, ArrowRight: 39, ArrowUp: 38, ArrowDown: 40, Home: 36, End: 35, PageDown: 34, " ": 32, Delete: 46, Backspace: 8, a: 65, o: 79, z: 90 }[k] ?? 0, ...extra });
   const rect = (nid) => A.ev(`window.board.clientRect(${JSON.stringify(nid)})`);
   const look = (nid, sx = 200, sy = 200, z = 1) => A.ev(`(() => { const it = window.board.item(${JSON.stringify(nid)}); window.board.setCamera({ x: it.x - ${sx} / ${z}, y: it.y - ${sy} / ${z}, z: ${z} }); window.board.render(); return 1; })()`).then(() => sleep(200));
   const D = `document.querySelector("[data-sbb=drawer]")`;
@@ -149,6 +150,12 @@ try {
   check(await A.ev(`!${D}.contains(document.activeElement)`), "opened by a click: the focus stays where it was");
   check((await A.ev(`document.querySelector(".sbb .sbb-sr").textContent`)) === "Opened: Long note", "…and the opening is said to a screen reader", await A.ev(`document.querySelector(".sbb .sbb-sr").textContent`));
   check(Math.round(await width()) === 480, "its usual width: 480 px on a 1280 px board", await width());
+  // a click in its text, then the tour's and the pages' keys: the drawer's, not the board's
+  const tv = await A.ev(`(() => { const r = ${D}.querySelector(".sbb-drawer-body").getBoundingClientRect(); return { x: r.left + 40, y: r.top + 40 }; })()`);
+  await click(tv.x, tv.y);
+  for (const k of ["PageDown", " ", "ArrowRight"]) await key(k, k === " " ? { code: "Space", text: " " } : {});
+  await sleep(300);
+  check((await A.ev("window.sagebrush.board.snapshot().page")) === 0 && (await open()), "PageDown, Space and → in the drawer neither turn the page nor move the tour", await A.ev("window.sagebrush.board.snapshot().page"));
 
   // another note, clicked: shown in its place; its whole output, which its card cuts off
   await look("code", 200, 150);
@@ -186,10 +193,17 @@ try {
   check(!(await open()), "a click followed at once by another page: nothing opens on that page");
   await A.ev("window.sagebrush.board.page(0).then(() => 1)");
   await A.until("window.board.item('long')?.h === 140", 10000);
-  await look("linked", 200, 200);
+  // (the tour at its second step, which shows the linked note: a link on the page shown goes to its note, the tour
+  // where it was)
+  await A.ev("window.sagebrush.board.step(1), 1");
+  await sleep(700);
+  const step0 = await A.ev("window.sagebrush.board.snapshot().step");
   const link = await A.ev(`(() => { const a = window.board.element("linked")?.querySelector("a.board-ref"); if (!a) return null; const r = a.getBoundingClientRect(); return { x: r.left + 8, y: r.top + r.height / 2 }; })()`);
   if (link) await click(link.x, link.y);
   check(link && !(await open()), "a click on a note's link follows the link: no drawer");
+  await sleep(600);
+  const inView = await A.ev(`(() => { const r = window.board.clientRect("long"); return r.left >= 0 && r.top >= 0 && r.left + r.width <= innerWidth && r.top + r.height <= innerHeight; })()`);
+  check(step0 === 1 && inView && (await A.ev("window.sagebrush.board.snapshot().step")) === step0, "…to its note on this page, in view, the tour's step left as it was", { inView, step0, step: await A.ev("window.sagebrush.board.snapshot().step") });
   await look("q", 200, 200);
   const field = await A.ev(`(() => { const f = window.board.element("q")?.querySelector("input, textarea"); if (!f) return null; const r = f.getBoundingClientRect(); return { x: r.left + 8, y: r.top + r.height / 2 }; })()`);
   if (field) await click(field.x, field.y);
@@ -315,6 +329,14 @@ try {
   const after = JSON.stringify(await A.ev("(() => { const n = window.sagebrush.board.snapshot().doc.pages[0].nodes.find((x) => x.id === 'long'); return n ? [n.x, n.y] : null; })()"));
   check(after !== "null" && after === before, "arrows, Delete, Backspace and Ctrl+A in the drawer neither move nor delete the note", [before, after]);
   check(await open() && (await heading()) === "Long note", "…and the drawer stays on it");
+  // ...and after a click in its text (the focus in the drawer, not on the page)
+  const tb = await A.ev(`(() => { const r = ${D}.querySelector(".sbb-drawer-body").getBoundingClientRect(); return { x: r.left + 40, y: r.top + 40 }; })()`);
+  await click(tb.x, tb.y);
+  check(await A.ev(`${D}.contains(document.activeElement)`), "a click in the drawer's text puts the focus in the drawer", await A.ev("document.activeElement?.className"));
+  for (const k of ["ArrowDown", "Delete"]) await key(k);
+  await sleep(300);
+  const after2 = JSON.stringify(await A.ev("(() => { const n = window.sagebrush.board.snapshot().doc.pages[0].nodes.find((x) => x.id === 'long'); return n ? [n.x, n.y] : null; })()"));
+  check(after2 === before, "…then ↓ and Delete neither move nor delete the note", [before, after2]);
   const rs = await rect("code");
   await click(rs.left + 30, rs.top + 12);
   check(await A.until(`${D}.querySelector("h2").textContent === "Many lines"`, 3000), "another note selected: the drawer follows it", await heading());

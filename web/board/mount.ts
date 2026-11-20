@@ -377,6 +377,11 @@ export function mountBoard(root: HTMLElement, host: BoardHost) {
   let doc: BoardDoc | null = null;
   // (a note's drawer, its whole content beside the board (drawer.ts), and the room it takes from the camera)
   let drawer: Drawer | null = null;
+  // (the focus, or the text selected, in the drawer: the board's keys and clipboard aren't for it)
+  const inDrawer = () => {
+    const el = drawer?.el, sel = getSelection();
+    return !!el && (el.contains(document.activeElement) || (!!sel && !sel.isCollapsed && el.contains(sel.anchorNode)));
+  };
   // (the items that have one: notes, a template's not, questions not)
   const drawable = (it: Item | undefined): it is Item => !!it && it.kind === "note" && !it.inert && !it.ask;
   let drawerRoom = { right: 0, bottom: 0 };
@@ -1179,9 +1184,11 @@ export function mountBoard(root: HTMLElement, host: BoardHost) {
         // asked for meanwhile: nothing of it is done to what is shown now, UI-07E-2)
         if (destroyed || g !== loadGen || mine !== pageGen || pageIx !== l.page) return;
       }
-      if (l.item) board.focus([l.item]);
-      // (a link in the drawer to a note: the drawer shows that note)
-      if (l.item && fromDrawer && drawable(board.item(l.item))) drawer?.open(l.item);
+      if (l.item) {
+        board.focus([l.item]);
+        // (a link in the drawer to a note: the drawer shows that note)
+        if (fromDrawer && drawable(board.item(l.item))) drawer?.open(l.item);
+      }
       // (a page's start on the page shown too: its intro, the tour from the
       // top, as from another page, UI-07E-1; page() has shown it otherwise)
       else if (l.step >= 0 || !other) step(l.step);
@@ -1278,6 +1285,8 @@ export function mountBoard(root: HTMLElement, host: BoardHost) {
   board.onTitleClick = (id) => { if (!editor.on) board.reveal(id && id !== board.revealedId ? id : null); else if (board.revealedId) board.reveal(null); };
   on(window, "keydown", (e: KeyboardEvent) => {
     if (!mine() || e.target instanceof HTMLInputElement || e.target instanceof HTMLTextAreaElement || e.metaKey || e.ctrlKey || e.altKey) return;
+    // (the drawer's keys are its own: drawer.ts stops them; and with the focus in it, never the tour's, say)
+    if (inDrawer()) return;
     // (items selected in Edit: the arrow keys move them; in Edit, Space held pans)
     if (editor.hasSelection && e.key.startsWith("Arrow")) return;
     if (editor.on && e.key === " ") return;
@@ -1481,9 +1490,13 @@ export function mountBoard(root: HTMLElement, host: BoardHost) {
     key: (id) => {
       const it = board.item(id);
       if (!drawable(it)) return null;
+      // (its output by its run, its text and its size: not serialized whole, a picture's data and all, at each change)
       const out = it.code !== undefined ? code?.output(cell(id), false) : null;
       return JSON.stringify([it.title, it.text, it.detail, it.ref, it.code, it.hideCode, it.lang, it.order, it.image, it.shape,
-        it.code !== undefined ? code?.state(cell(id)) ?? null : null, out ? out.innerHTML : null]);
+        // (a link's label is its target's title; code is highlighted once its language's interpreter is ready)
+        it.ref ? board.linkLabel?.(it.ref) ?? null : null, !!board.code,
+        it.code !== undefined ? [code?.state(cell(id)) ?? null, code?.generation(cell(id)) ?? null] : null,
+        out ? [out.textContent, out.innerHTML.length, out.childElementCount] : null]);
     },
     exists: (id) => !!board.item(id),
     content: (id) => {
@@ -1510,6 +1523,7 @@ export function mountBoard(root: HTMLElement, host: BoardHost) {
   board.onItemClick = (it) => { if (!editor.on && canDraw() && drawable(it)) dr.open(it.id); };
   editor.onOpenDrawer = (id, keyboard) => { const it = board.item(id); if (canDraw() && drawable(it)) dr.open(id, keyboard); };
   editor.canOpenDrawer = (id) => drawable(board.item(id));
+  editor.inDrawer = inDrawer;
   // (following the selection: the camera stays, as a drag of the note may be starting)
   editor.onSelect = (ids) => { if (dr.isOpen && ids.length === 1 && ids[0] !== dr.id && drawable(board.item(ids[0]))) dr.open(ids[0], false, true); };
   offs.push(effect(() => dr.setEditing(editor.editing.value)));

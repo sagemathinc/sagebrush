@@ -100,16 +100,20 @@ export class Drawer {
     close.onclick = () => this.close();
     this.head.append(this.heading, this.editBtn, close);
     this.body.className = "sbb-drawer-body";
+    // (focusable, so that a click in it puts the focus there: its keys (the arrows, Space, PageDown scroll it) and
+    // copying from it are then its own)
+    this.body.tabIndex = -1;
     el.append(this.grip, this.head, this.body);
     // (said to a screen reader when a click opened it: outside the drawer, which is hidden when closed)
     this.say.className = "sbb-sr";
     this.say.setAttribute("aria-live", "polite");
     host.root.append(el, this.say);
     // (its keys and its clipboard are its own: the board's shortcuts, on the window and the document, never see them;
-    // but Esc, mount.ts's, seen on the window before this, and the page's Ctrl+S, Ctrl+P and Ctrl+F)
+    // but Esc (an open panel's or menu's, else mount.ts's, which closes the drawer), the page's Ctrl+S, Ctrl+P and
+    // Ctrl+F, and undo and redo (Ctrl+Z, Ctrl+Shift+Z, Ctrl+Y))
     for (const t of ["keydown", "keyup", "copy", "cut", "paste"]) el.addEventListener(t, (e) => {
       const k = e as KeyboardEvent;
-      if (t === "keydown" && (k.metaKey || k.ctrlKey) && !k.altKey && ["s", "p", "f"].includes(k.key.toLowerCase())) return;
+      if (t === "keydown" && (k.key === "Escape" || ((k.metaKey || k.ctrlKey) && !k.altKey && ["s", "p", "f", "z", "y"].includes(k.key.toLowerCase())))) return;
       e.stopPropagation();
     });
     this.resizing();
