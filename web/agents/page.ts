@@ -1406,7 +1406,7 @@ function renderHeader() {
   } else if (connectingTo !== null) {
     whoText(who, "wait", "", waitingFor ? RUNNER.waiting(connectingTo) : RUNNER.connecting(connectingTo));
   } else if (pairing && pairing.state === "paired") {
-    who.innerHTML = `<span class="conn wait"></span>${esc(agentName())} <small>waiting: allow it in the dialog</small>`;
+    whoText(who, "wait", agentName(), "waiting: allow it in the dialog");
   } else if (inert(current())) {
     who.innerHTML = `<span class="conn"></span>Claude <small>not connected</small>`;
   } else {
