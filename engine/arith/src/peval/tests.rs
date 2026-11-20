@@ -156,11 +156,17 @@ fn hand_rows() {
     assert!(call("1,2", "1,2").unwrap_err().contains("one token"));
     // a point not in lowest terms is refused (the output stays canonical),
     // the zero polynomial and v = 0 included; 1/3 is admitted
-    for v in ["2/6", "-2/6", "0/5", "a/f"] {
+    let refused = "b is not a canonical token in lowest terms (zero as 0, an integer without /1)";
+    for v in ["2/6", "-2/6", "0/5", "a/f", "0/1", "3/1", "-3/1", "11/1"] {
         for a in ["1,0,1", "", "1/2,3"] {
-            assert_eq!(call(a, v).unwrap_err(), "b is not in lowest terms", "a={} v={}", a, v);
+            assert_eq!(call(a, v).unwrap_err(), refused, "a={} v={}", a, v);
         }
     }
+    // (the canonical forms: zero as 0, an integer bare; a denominator ending
+    // in 1 that isn't 1 is no explicit /1)
+    assert_eq!(call("1,0,1", "0").unwrap(), "{\"ok\":\"1\"}");
+    assert_eq!(call("1,0,1", "3").unwrap(), "{\"ok\":\"a\"}");
+    assert_eq!(call("1,0,1", "1/11").unwrap(), want("1,0,1", "1/11"));
     assert_eq!(call("1,0,1", "1/3").unwrap(), "{\"ok\":\"a/9\"}");
     // unreduced coefficients are admitted: the value is exact and the reply
     // in lowest terms (2/4 + (3/6) t at 1/3, as 1/2 + (1/2) t)

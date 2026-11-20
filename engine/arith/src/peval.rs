@@ -114,12 +114,17 @@ pub fn admit_b(a: &Factor, b: &Factor, d: &[u64], plan: &Plan, r: u64, caps: &qp
     Ok((bound, fixed, cap - fixed))
 }
 
-/// The `eval point` phase, the call's first, on its meter: whether b is in
-/// lowest terms (gcd(p, q) = 1; zero only as `0`).  The reduction's c = 1
-/// branch rests on it, so a point not in lowest terms is refused.
+/// The `eval point` phase, the call's first, on its meter: whether b is the
+/// canonical token (gcd(p, q) = 1, no explicit `/1`, so zero only as `0`).
+/// The reduction's c = 1 branch rests on it, so any other point is refused.
 pub fn point_reduced(b: &Factor, led: &Words, m: &mut Meter) -> Result<bool, DivFault> {
     let _p = sagebrush_interrupt::enter("eval point");
     sagebrush_interrupt::check_coarse();
+    // (an explicit denominator 1, `0/1` or `3/1`: the scan refuses a leading
+    // zero, so the suffix `/1` is exactly that, read in O(1))
+    if b.text.ends_with("/1") {
+        return Ok(false);
+    }
     let mut s = Ints::new(led, m)?;
     let t = |m: &mut Meter| Coef::tagged(led, 0, "scratch", m);
     let (mut p, mut q, mut g) = (t(m)?, t(m)?, t(m)?);
@@ -346,7 +351,7 @@ pub fn reply(a: &Factor, b: &Factor, r: u64, caps: &qpoly::Caps) -> Result<Strin
         let led = Words::new((caps.int.peak / 8).saturating_sub(fixed));
         match point_reduced(b, &led, &mut m) {
             Ok(true) => {}
-            Ok(false) => return Err("b is not in lowest terms".to_string()),
+            Ok(false) => return Err("b is not a canonical token in lowest terms (zero as 0, an integer without /1)".to_string()),
             Err(f) => return Err(fault_text(f, work, fixed, led.limit())),
         }
         match admitted {

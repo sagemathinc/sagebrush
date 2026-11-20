@@ -723,8 +723,9 @@ def qeval_checks(r):
         pass
     assert f(I(3)) == 10 and hooks == [], hooks
     n += 1
-    # (the engine refuses a point not in lowest terms; v = 0 reduces a_0)
-    for bad in ("2/6", "-2/6", "0/5"):
+    # (the engine refuses a point that is not the canonical token in lowest
+    # terms, an explicit /1 included; v = 0 reduces a_0)
+    for bad in ("2/6", "-2/6", "0/5", "0/1", "3/1"):
         try:
             E.call("qpoly_eval", a="1,0,1", b=bad)
         except ValueError as e:
