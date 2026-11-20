@@ -11,7 +11,7 @@ const check = (ok, what, detail) => { results.push([!!ok, what]); if (!ok) conso
 /** A host with a scripted turn that waits until it's finished by hand, and a pairing the test sets. */
 function host(over = {}) {
   const h = {
-    stored: null, emitted: [], changed: [], notSent: [], demos: [], pairing: null, mayDemo: () => true, kept: null,
+    stored: null, emitted: [], replayed: [], changed: [], notSent: [], demos: [], pairing: null, mayDemo: () => true, kept: null,
     load: () => h.kept,
     store: (s) => { h.stored = JSON.parse(JSON.stringify(s)); },
     demo: (prompt, emit) => {
@@ -25,7 +25,7 @@ function host(over = {}) {
   };
   return {
     h,
-    host: { load: () => h.load(), store: (s) => h.store(s), pairing: () => h.pairing, demo: h.demo && ((p, e) => h.demo(p, e)), mayDemo: (t) => h.mayDemo(t), emitted: (t, d) => h.emitted.push([t.id, d.type]), changed: (all) => h.changed.push(all), notSent: (why) => h.notSent.push(why) },
+    host: { load: () => h.load(), store: (s) => h.store(s), pairing: () => h.pairing, demo: h.demo && ((p, e) => h.demo(p, e)), mayDemo: (t) => h.mayDemo(t), emitted: (t, d, r) => { h.emitted.push([t.id, d.type]); if (r) h.replayed.push([t.id, d.type]); }, changed: (all) => h.changed.push(all), notSent: (why) => h.notSent.push(why) },
   };
 }
 const tick = () => new Promise((r) => setTimeout(r, 0));
@@ -209,6 +209,126 @@ const pairing = (answer = "ok", link = null) => {
     check(answers.length === 1 && answers[0][1].request_id === "q1" && answers[0][1].behavior === (approve ? "allow" : "deny"), "exactly one answer sent, the person's", answers);
     check(s.answer(t, "q1", !approve, "T1", instance) === false && sent.slice(before).filter(([m]) => m === "chat.permission").length === 1, "a second click answers nothing and sends nothing");
   }
+}
+
+// step 1, chat.resume: an agent that keeps each conversation's log (its hello says chat.resume and names its run)
+const resumable = (instance = "aaaaaaaaaaaaaaaa", sent = []) => ({ state: "granted", link: null, hello: { agent: { name: "Claude" }, features: ["chat.resume"], log: { instance } }, sent, notifyWhy(m, p) { sent.push([m, p]); return "ok"; }, notify(m, p) { sent.push([m, p]); return true; } });
+const ev = (t, seq, turn_id, event) => ["turn.event", { conversation: t.id, turn_id, seq, event }];
+const turnOf = (t, id) => t.entries.find((e) => e.kind === "turn" && e.turn_id === id);
+
+// live: numbered events applied once; a finished turn is never reopened
+{
+  const { h, host: hs } = host();
+  const s = new ChatSession(hs);
+  h.pairing = resumable();
+  const t = s.current();
+  s.submit("hi", "sent");
+  s.onAgent(...ev(t, 2, "T1", { type: "turn_started" }));
+  s.onAgent(...ev(t, 3, "T1", { type: "turn_finished", outcome: "completed" }));
+  check(t.agent_seq === 3 && t.agent_instance === "aaaaaaaaaaaaaaaa", "live events: the agent's number and run are kept", [t.agent_seq, t.agent_instance]);
+  const n = t.entries.length, applied = t.applied_seq;
+  s.onAgent(...ev(t, 3, "T1", { type: "turn_finished", outcome: "error" }));
+  s.onAgent(...ev(t, 9, "T1", { type: "turn_started" }));
+  check(turnOf(t, "T1").outcome === "completed" && t.entries.length === n && t.applied_seq === applied, "a repeated number, or a finished turn's later event, changes nothing", turnOf(t, "T1"));
+}
+
+// the pairing ends with a resumable agent: the running turn is away (not finished, not running, no Stop), and a
+// message waits for its end; the replay then finishes it with the agent's own events, and the message goes
+{
+  const { h, host: hs } = host();
+  const s = new ChatSession(hs);
+  h.pairing = resumable();
+  const t = s.current();
+  s.submit("long job", "sent");
+  s.onAgent(...ev(t, 2, "T1", { type: "turn_started" }));
+  s.onAgent(...ev(t, 3, "T1", { type: "message_revised", message: "m1", revision: 1 }));
+  s.endLive(true);
+  const turn = turnOf(t, "T1");
+  check(turn.away === true && !turn.outcome && !s.isRunning(t) && s.isAway(t), "after the pairing ends: away, not finished, not running", turn);
+  h.pairing = null;
+  s.submit("and then this", "sent");
+  const waiting = t.entries.at(-1);
+  check(waiting.mode === "queued", "a message sent while away waits (no one to interrupt)", waiting.mode);
+  const sent = [];
+  h.pairing = resumable("aaaaaaaaaaaaaaaa", sent);
+  s.resume();
+  check(sent.length === 1 && sent[0][0] === "chat.resume" && sent[0][1].after === 3 && sent[0][1].instance === "aaaaaaaaaaaaaaaa", "granted again: chat.resume from the last number, with the run", sent);
+  s.onAgent("chat.replay", { conversation: t.id, instance: "aaaaaaaaaaaaaaaa", last: 6, done: true, events: [
+    { seq: 3, method: "turn.event", params: { conversation: t.id, turn_id: "T1", event: { type: "turn_error", code: "x", message: "already had" } } },
+    { seq: 4, method: "turn.event", params: { conversation: t.id, turn_id: "T1", event: { type: "text_delta", message: "m1", revision: 1, text: "done!" } } },
+    { seq: 5, method: "turn.event", params: { conversation: t.id, turn_id: "T1", event: { type: "artifact", id: "a1", kind: "markdown", title: "Notes", body: "x" } } },
+    { seq: 6, method: "turn.event", params: { conversation: t.id, turn_id: "T1", event: { type: "turn_finished", outcome: "interrupted" } } },
+  ] });
+  check(!turn.error && turn.parts.some((p) => p.kind === "message" && p.text === "done!"), "the replay applies only what came after the page's number", turn);
+  check(turn.outcome === "interrupted" && !turn.away, "the agent's own end finishes the away turn", turn);
+  check(h.replayed.some(([, type]) => type === "artifact"), "a replayed artifact is marked replayed (the page doesn't move its pane for it)", h.replayed);
+  check(waiting.mode === "sent" && sent.some(([m, p]) => m === "chat.message" && p.text === "and then this"), "the waiting message goes once the turn has ended", sent);
+}
+
+// the page reloaded: a running agent turn of a resumable agent's thread is away; a scripted turn still ends interrupted
+{
+  const { h, host: hs } = host();
+  h.kept = { threads: [
+    { id: "a", title: "A", entries: [{ kind: "turn", turn_id: "T1", state: "running", parts: [], tools: {}, attention: {}, started: 1, agent: "Claude" }], artifacts: [], applied_seq: 1, agent_seq: 7, agent_instance: "aaaaaaaaaaaaaaaa" },
+    { id: "b", title: "B", entries: [{ kind: "turn", turn_id: "T2", state: "running", parts: [], tools: {}, attention: {}, started: 1 }], artifacts: [], applied_seq: 1 },
+  ], current: "a" };
+  const s = new ChatSession(hs);
+  s.endInterrupted();
+  check(s.state.threads[0].entries[0].away === true && !s.state.threads[0].entries[0].outcome, "reload: the agent's turn is away", s.state.threads[0].entries[0]);
+  check(s.state.threads[1].entries[0].outcome === "interrupted", "reload: a scripted turn ends interrupted, as before", s.state.threads[1].entries[0]);
+}
+
+// another run of the agent, or an agent without a log: the away turn ends interrupted; a replay that stops early asks again
+{
+  for (const kind of ["another run", "no log"]) {
+    const { h, host: hs } = host();
+    const s = new ChatSession(hs);
+    h.pairing = resumable();
+    const t = s.current();
+    s.submit("x", "sent");
+    s.onAgent(...ev(t, 2, "T1", { type: "turn_started" }));
+    s.endLive(true);
+    const sent = [];
+    if (kind === "no log") {
+      h.pairing = { ...resumable("bbbbbbbbbbbbbbbb", sent), hello: { agent: { name: "Claude" }, features: [] } };
+      s.resume();
+    } else {
+      h.pairing = resumable("bbbbbbbbbbbbbbbb", sent);
+      s.resume();
+      s.onAgent("chat.replay", { conversation: t.id, instance: "bbbbbbbbbbbbbbbb", last: 0, reset: true, done: true, events: [] });
+    }
+    check(turnOf(t, "T1").outcome === "interrupted" && !turnOf(t, "T1").away, `${kind}: the away turn ends interrupted`, turnOf(t, "T1"));
+  }
+  const { h, host: hs } = host();
+  const s = new ChatSession(hs);
+  const sent = [];
+  h.pairing = resumable("aaaaaaaaaaaaaaaa", sent);
+  const t = s.current();
+  s.submit("x", "sent");
+  s.onAgent("chat.replay", { conversation: t.id, instance: "aaaaaaaaaaaaaaaa", last: 9, done: false, events: [{ seq: 4, method: "turn.event", params: { conversation: t.id, turn_id: "T1", event: { type: "turn_started" } } }] });
+  check(sent.some(([m, p]) => m === "chat.resume" && p.after === 4), "a replay that stopped early: asked again from the last number", sent);
+}
+
+// another tab's message comes in the replay: shown as sent, once, never queued or sent again
+{
+  const { h, host: hs } = host();
+  const s = new ChatSession(hs);
+  const sent = [];
+  h.pairing = resumable("aaaaaaaaaaaaaaaa", sent);
+  const t = s.current();
+  s.submit("from here", "sent");
+  const mine = t.entries.at(-1);
+  const replay = { conversation: t.id, instance: "aaaaaaaaaaaaaaaa", last: 3, done: true, events: [
+    { seq: 1, method: "chat.message", params: { conversation: t.id, id: mine.id, text: "from here", author: "person" } },
+    { seq: 2, method: "chat.message", params: { conversation: t.id, id: "other-tab", text: "from there", author: "person" } },
+    { seq: 3, method: "chat.rejected", params: { conversation: t.id, id: "x", reason: { code: "busy" } } },
+  ] };
+  const before = sent.length;
+  s.onAgent("chat.replay", replay);
+  s.onAgent("chat.replay", replay);
+  const users = t.entries.filter((e) => e.kind === "user");
+  check(users.length === 2 && users[1].text === "from there" && users[1].mode === "sent", "the other tab's message is shown once, as sent", users);
+  check(!sent.slice(before).some(([m]) => m === "chat.message") && !(s.queues.get(t.id) ?? []).length, "and nothing is sent or queued for it", sent.slice(before));
 }
 
 // kept threads: an empty list, and a current one that names no thread

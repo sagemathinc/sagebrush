@@ -42,7 +42,7 @@ export function turnNode(thread: Thread, turn: Turn, h: TurnHooks): HTMLElement 
     } else if (p.kind === "attention") {
       const a = own(turn.attention, p.id);
       if (!a) continue;
-      const open = a.state === "open" && !turn.outcome;
+      const open = a.state === "open" && !turn.outcome && !turn.away;
       parts.push(
         `<div class="attention ${cls(a.state, ATTENTION_STATES)}" data-attention="${esc(a.id)}" data-instance="${esc(a.instance ?? "")}"><div class="att-title">⚠ ${esc(a.title)}</div>` +
           (a.summary ? `<div class="att-summary">${esc(a.summary)}</div>` : "") +
@@ -61,6 +61,8 @@ export function turnNode(thread: Thread, turn: Turn, h: TurnHooks): HTMLElement 
   const status =
     turn.outcome === "interrupted"
       ? `<div class="status">Interrupted</div>`
+      : !turn.outcome && turn.away
+        ? `<div class="status">The connection to the agent was lost while this ran. Connect again to see how it went.</div>`
       : !turn.outcome
         ? `<div class="status working"><span class="spinner"></span>Working…</div>`
         : turn.usage

@@ -85,9 +85,10 @@ const session = new ChatSession({
   pairing: () => pairing,
   demo: (prompt, emit) => startFakeTurn(prompt, emit, speed()),
   mayDemo: (t) => mayDemo(t),
-  emitted(thread, d) {
+  emitted(thread, d, replayed) {
     if (d.type === "artifact") {
-      openArtifact = (d as { id: string }).id;
+      // (one replayed from the agent's log after a reconnect is recorded, but never moves the pane)
+      if (!replayed) openArtifact = (d as { id: string }).id;
       // (a notebook the agent wrote: which cells, as it wrote them, for the written-by label)
       const art = d as { kind?: string; path?: string };
       if (art.kind === "notebook" && art.path && workspace) {
@@ -1368,6 +1369,8 @@ function mountPairing(ws: Workspace) {
         if (p.state === "paired" || p.state === "granted") connectedHere = true;
         if (p.state === "granted" && !granted) {
           granted = true;
+          // (what this page missed while it was away, from the agent's log; an agent without one: away turns end)
+          session.resume();
           if (connBar) setConn(null);
           if (connectFrom) {
             connectFrom = null;
@@ -1386,8 +1389,9 @@ function mountPairing(ws: Workspace) {
           else setConn({ kind: "lost", alert: true, action: agentUi?.canReconnect ? "reconnect" : "connect" });
         }
         if (p.state === "closed" && pairing === p) {
-          // (turns the agent can no longer finish end here, as interrupted)
-          session.endLive();
+          // (with an agent that keeps a log, its running turns are away until the page is paired again; else they end
+          //  here, as interrupted)
+          session.endLive(!!p.hello?.features?.includes("chat.resume"));
         }
         renderHeader();
         renderComposer();

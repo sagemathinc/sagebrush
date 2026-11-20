@@ -104,6 +104,9 @@ export interface Turn {
   finished?: number;
   // set for a turn of an agent on the person's computer (else the scripted demo's)
   agent?: string;
+  // the connection to its agent was lost while it ran (a reload, a navigation, a dropped pairing); the agent's log
+  // says how it went once the page is paired again (chat.resume), and its turn_finished clears this
+  away?: true;
 }
 
 export interface Thread {
@@ -112,6 +115,10 @@ export interface Thread {
   entries: (UserEntry | Turn)[];
   artifacts: Artifact[];
   applied_seq: number;
+  // the agent's own numbering (its log's, chat.resume): the last number applied here, and the run of the agent it
+  // came from; the page's applied_seq above is its own, separate from these
+  agent_seq?: number;
+  agent_instance?: string;
 }
 
 export function newThread(id: string, title: string): Thread {
@@ -238,16 +245,28 @@ export function apply(thread: Thread, e: TurnEvent, time = Date.now()): boolean 
       turn.outcome = OUTCOMES.includes(e.outcome) ? e.outcome : "error";
       turn.state = turn.outcome;
       turn.finished = time;
+      delete turn.away;
       for (const tool of Object.values(turn.tools)) if (tool.status === "running") tool.status = "unknown";
       break;
   }
   return true;
 }
 
+// The thread's turn that is running here: never one that is away (its agent isn't connected, so nothing on the page
+// may bind to it).
 export function runningTurn(thread: Thread): Turn | undefined {
   for (let i = thread.entries.length - 1; i >= 0; i--) {
     const e = thread.entries[i];
-    if (e.kind === "turn") return e.outcome ? undefined : e;
+    if (e.kind === "turn") return e.outcome || e.away ? undefined : e;
+  }
+  return undefined;
+}
+
+/** The thread's last turn, if it is away. */
+export function awayTurn(thread: Thread): Turn | undefined {
+  for (let i = thread.entries.length - 1; i >= 0; i--) {
+    const e = thread.entries[i];
+    if (e.kind === "turn") return !e.outcome && e.away ? e : undefined;
   }
   return undefined;
 }

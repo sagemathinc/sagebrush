@@ -1,7 +1,7 @@
 // The agents chat's conversation, apart from any page that draws it (the Agents page, and the chat panel to come): the
 // threads, the person's messages and their queue, the paired agent's turns and permission cards, and a scripted turn
 // where the page offers one. Drawing, persistence and the page's words are the host's, passed in.
-import { apply, newThread, runningTurn, type Draft, type Thread, type Turn, type TurnEvent, type UserEntry } from "./events";
+import { apply, awayTurn, newThread, runningTurn, type Draft, type Thread, type Turn, type TurnEvent, type UserEntry } from "./events";
 import type { AgentPairing } from "../agent-pair";
 import { PermissionCards } from "../agent-cards";
 import { digestGate, DIGEST_CHARGE } from "../agent-relay";
@@ -29,8 +29,9 @@ export interface SessionHost {
   demo?(prompt: string, emit: (d: Draft) => void): LocalTurn;
   /** whether a thread may still be answered by the scripted turn (never once a real agent was in it) */
   mayDemo(t: Thread): boolean;
-  /** an event was applied to a thread (the page draws it, opens an artifact, ...) */
-  emitted(thread: Thread, d: Draft): void;
+  /** an event was applied to a thread (the page draws it, opens an artifact, ...); `replayed`: it came from the agent's
+   *  log after a reconnect, not live (the page records it but doesn't move the pane for it) */
+  emitted(thread: Thread, d: Draft, replayed?: boolean): void;
   /** what the composer shows changed (running, queued); `all`: the thread and its list too */
   changed(all: boolean): void;
   /** a message didn't go to the agent: its queue is full, it's over the connection's limit, or the agent is gone */
@@ -58,12 +59,43 @@ export class ChatSession {
     this.cards = new PermissionCards({ current: () => host.pairing(), gate: digestGate, charge: DIGEST_CHARGE });
   }
 
-  /** A turn that was running when the page closed can't go on: it ends interrupted (the host calls this once it can
-   *  draw). */
+  /** A turn that was running when the page closed (the host calls this once it can draw): an agent's turn in a thread
+   *  whose agent keeps a log (chat.resume) is away until the page is paired again and the log says how it went; any
+   *  other ends interrupted, as it can't go on. */
   endInterrupted() {
     for (const t of this.state.threads) {
       const r = runningTurn(t);
-      if (r) this.emit(t, r.turn_id, { type: "turn_finished", outcome: "interrupted" });
+      if (!r) continue;
+      if (r.agent && t.agent_instance) this.setAway(t, r);
+      else this.emit(t, r.turn_id, { type: "turn_finished", outcome: "interrupted" });
+    }
+  }
+
+  private setAway(t: Thread, r: Turn) {
+    r.away = true;
+    this.save();
+    this.host.changed(true);
+  }
+
+  /** The thread's away turn, if its agent can't say how it went (another run of the agent, or one without a log):
+   *  it ends interrupted here, and the thread's queue goes on. */
+  endAway(t: Thread) {
+    const r = awayTurn(t);
+    if (!r) return;
+    this.emit(t, r.turn_id, { type: "turn_finished", outcome: "interrupted" });
+    this.next(t);
+  }
+
+  /** The pairing is granted: ask the agent for what each of its threads missed, from the last number the page has (an
+   *  agent without a log: the away turns end interrupted). */
+  resume() {
+    const pairing = this.host.pairing();
+    if (!pairing || !this.live()) return;
+    const instance = pairing.hello?.log?.instance;
+    for (const t of this.state.threads) {
+      if (!this.marked(t)) continue;
+      if (!pairing.hello?.features?.includes("chat.resume") || !instance) { this.endAway(t); continue; }
+      pairing.notify("chat.resume", { conversation: t.id, after: t.agent_seq ?? 0, ...(t.agent_instance ? { instance: t.agent_instance } : {}) });
     }
   }
 
@@ -92,6 +124,10 @@ export class ChatSession {
   isRunning(t: Thread): boolean {
     return this.local.has(t.id) || this.liveRunning.has(t.id);
   }
+  /** Whether the thread's last turn is away: its agent isn't connected; there is no one to stop. */
+  isAway(t: Thread): boolean {
+    return !!awayTurn(t);
+  }
   /** the no-demo marker: a real agent was in this chat. It holds no credential; it is kept with the chats */
   marked(t: Thread): boolean {
     return !!(t as Thread & { agent?: boolean }).agent;
@@ -107,10 +143,10 @@ export class ChatSession {
   }
 
   /** An event, applied to its thread and kept. */
-  emit(thread: Thread, turn_id: string, d: Draft) {
+  emit(thread: Thread, turn_id: string, d: Draft, replayed = false) {
     const e = { ...d, seq: thread.applied_seq + 1, turn_id } as TurnEvent;
     apply(thread, e);
-    this.host.emitted(thread, d);
+    this.host.emitted(thread, d, replayed);
     this.save();
   }
 
@@ -121,7 +157,10 @@ export class ChatSession {
     const thread = this.current();
     if (mode !== "note" && this.inert(thread)) return false;
     const busy = this.isRunning(thread);
-    if (mode === "queued" && !busy) mode = "sent";
+    // (a turn away: no one to interrupt, so a message waits for its end, which the agent's log says once connected)
+    const away = !busy && this.isAway(thread);
+    if (away && mode === "sent") mode = "queued";
+    if (mode === "queued" && !busy && !away) mode = "sent";
     const entry: UserEntry = { kind: "user", id: id(), text, mode, time: Date.now() };
     thread.entries.push(entry);
     if (thread.title === "New chat") thread.title = text.split("\n")[0].slice(0, 48);
@@ -203,31 +242,93 @@ export class ChatSession {
     return true;
   }
 
-  /** What the paired agent says: turn events for one of these threads. */
+  /** What the paired agent says: turn events for one of these threads, live or (chat.replay) from its log. */
   onAgent(method: string, params: unknown) {
+    if (method === "chat.replay") return this.onReplay(params);
     if (method !== "turn.event") return;
-    const p = params as { conversation?: unknown; turn_id?: unknown; event?: { type?: unknown } } | null;
+    const p = params as { conversation?: unknown } | null;
     const thread = this.state.threads.find((t) => t.id === p?.conversation);
-    if (!thread || typeof p?.turn_id !== "string" || !p.event || typeof p.event.type !== "string") return;
+    if (!thread) return;
+    // (live: numbered by this run of the agent, which its hello names; a thread last in another run starts again)
+    const instance = this.host.pairing()?.hello?.log?.instance;
+    if (instance && thread.agent_instance !== instance) this.newRun(thread, instance);
+    this.agentEvent(thread, params, false);
+  }
+
+  /** The thread now follows another run of the agent: what was away from the earlier one ends interrupted. */
+  private newRun(thread: Thread, instance: string) {
+    if (thread.agent_instance) this.endAway(thread);
+    thread.agent_instance = instance;
+    thread.agent_seq = 0;
+  }
+
+  /** One turn event of the agent's, live or replayed: once (by the agent's number), never reopening a finished turn. */
+  private agentEvent(thread: Thread, params: unknown, replayed: boolean) {
+    const p = params as { seq?: unknown; turn_id?: unknown; event?: { type?: unknown } } | null;
+    if (typeof p?.turn_id !== "string" || !p.event || typeof p.event.type !== "string") return;
+    if (typeof p.seq === "number") {
+      if (p.seq <= (thread.agent_seq ?? 0)) return;
+      thread.agent_seq = p.seq;
+    }
+    const known = thread.entries.find((e): e is Turn => e.kind === "turn" && e.turn_id === p.turn_id);
+    if (known?.outcome) return this.save(); // (a turn the page has as finished is never reopened)
     // (a permission card: shown as the cards make it from its admitted action, or not at all)
     const ev = p.event.type === "attention" ? this.cards.view(thread.id, p.turn_id, p.event) : p.event;
-    if (!ev) return;
+    if (!ev) return this.save();
     this.mark(thread);
-    this.emit(thread, p.turn_id, ev as Draft);
+    this.emit(thread, p.turn_id, ev as Draft, replayed);
     const turn = thread.entries.find((e): e is Turn => e.kind === "turn" && e.turn_id === p.turn_id);
     if (turn && !turn.agent) turn.agent = this.host.pairing()?.hello?.agent.name ?? "agent";
     if (p.event.type === "turn_finished") {
       this.liveRunning.delete(thread.id);
       this.next(thread);
+    } else if (!replayed && turn && !turn.outcome) {
+      // (a live event of a turn the page didn't start here, or had as away: it is running)
+      if (turn.away) delete turn.away;
+      this.liveRunning.add(thread.id);
     }
   }
 
-  /** The pairing ended: turns the agent can no longer finish end here, as interrupted. */
-  endLive() {
+  /** A chat.replay: what the thread missed while the page was away, in the agent's order. */
+  private onReplay(params: unknown) {
+    const p = params as { conversation?: unknown; instance?: unknown; last?: unknown; events?: unknown; done?: unknown } | null;
+    const thread = this.state.threads.find((t) => t.id === p?.conversation);
+    if (!thread || typeof p?.instance !== "string" || !Array.isArray(p.events)) return;
+    if (thread.agent_instance !== p.instance) this.newRun(thread, p.instance);
+    for (const e of p.events as { seq?: unknown; method?: unknown; params?: unknown }[]) {
+      if (typeof e?.seq !== "number" || e.seq <= (thread.agent_seq ?? 0)) continue;
+      if (e.method === "turn.event") this.agentEvent(thread, { ...(e.params as object), seq: e.seq }, true);
+      else {
+        thread.agent_seq = e.seq;
+        const m = e.params as { id?: unknown; text?: unknown } | null;
+        // (a message the person sent from another tab: shown as sent; never queued again, never sent again)
+        if (e.method === "chat.message" && typeof m?.id === "string" && typeof m.text === "string" && !thread.entries.some((x) => x.kind === "user" && x.id === m.id)) {
+          thread.entries.push({ kind: "user", id: m.id, text: m.text, mode: "sent", time: Date.now() });
+        }
+      }
+    }
+    const last = typeof p.last === "number" ? p.last : 0;
+    if (p.done === true || (thread.agent_seq ?? 0) >= last) {
+      // (the log has nothing more: an away turn it didn't finish can't go on, as the agent ends a turn whose page
+      //  went away; it ends interrupted here)
+      this.endAway(thread);
+    } else if (p.done === false) {
+      // (stopped early: ask again from the last number this page has)
+      this.host.pairing()?.notify("chat.resume", { conversation: thread.id, after: thread.agent_seq ?? 0, instance: p.instance });
+    }
+    this.save();
+    this.host.changed(true);
+  }
+
+  /** The pairing ended. With an agent that keeps a log (`resumable`), its running turns are away until the page is
+   *  paired again; otherwise they end here, as interrupted. */
+  endLive(resumable = false) {
     for (const tid of [...this.liveRunning]) {
       const thread = this.state.threads.find((t) => t.id === tid);
       const r = thread && runningTurn(thread);
-      if (thread && r) this.emit(thread, r.turn_id, { type: "turn_finished", outcome: "interrupted" });
+      if (!thread || !r) continue;
+      if (resumable && thread.agent_instance) this.setAway(thread, r);
+      else this.emit(thread, r.turn_id, { type: "turn_finished", outcome: "interrupted" });
     }
     this.liveRunning.clear();
   }
