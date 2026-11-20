@@ -1,0 +1,10 @@
+{
+ "v": 1,
+ "reason": "The lean text lane for tiny polynomial products: sagebrush._engine.call_hex and reply (the lib copy in the Sage chunk and the CLI), sagebrush.poly.mul and qmul through it, Sage mode's ZZ[x] product built directly, and the Core API entry. CI's size row for this change on its merge with the track (150184ef on 52739adf): engine/lib/sage.pre +6354, engine/lib/sage.src +2109, cli/lib.gen.js +1040, cli/pyjs.cjs +1072; each marked +64 over that. The sage.pre and sage.src ceilings are renewed to the measured size + 64.",
+ "bytes": {
+  "cli/lib.gen.js": 1104,
+  "cli/pyjs.cjs": 1136,
+  "engine/lib/sage.pre": 6418,
+  "engine/lib/sage.src": 2173
+ }
+}
