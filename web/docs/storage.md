@@ -20,7 +20,7 @@ By default your notebook code runs in this browser: Sagebrush doesn't upload its
   - When you're not signed in, this browser tells Sagebrush's server, at most once a day (by the server's UTC day), that it was used that day, week and month. If the server doesn't answer, or refuses, a later page load tries again. The count carries none of your code or files, and is added to a daily total and a daily total by country. It's on by default; your browser's Global Privacy Control turns it off.
   - The desktop app and the command line don't send these counts.
 
-A quick link sends nothing to a server: the cells' code and text are in the link itself, after the `#`, so whoever gets the link can read them. One exception today: while the page's address holds a quick link (after you open one, or copy one with **Copy link**), clicking **Sign in** carries the whole address, cells included, to Sagebrush's sign-in. **Download** and **Export** save to this device only.
+A quick link sends nothing to a server: the cells' code and text are in the link itself, after the `#`, so whoever gets the link can read them. Signing in while the address holds a quick link leaves the cells out of what goes to the server. **Download** and **Export** save to this device only.
 
 ## What the panel shows {#panel}
 
