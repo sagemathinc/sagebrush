@@ -762,7 +762,7 @@ def qscale_checks(r):
     # (** by an integer of any kind, a Rational with denominator 1 or an
     # element of Z/nZ (its lift), as Sage; a float, a real number, a string,
     # a Python Fraction or a polynomial is a TypeError, as Sage; a
-    # fractional Rational is Sage's n-th root, refused, not floored)
+    # fractional Rational is Sage's n-th root, refused, not truncated)
     sx = S.var("sx")
     for e, want in ((2, [25, 30, 9]), (S.ZZ(2), [25, 30, 9]), (QQ(2), [25, 30, 9]), (True, [5, 3]), (0, [1]), (IntSub2(2), [25, 30, 9]),
                     (S.Zmod(7)(2), [25, 30, 9]), (S.GF(5)(2), [25, 30, 9]), (S.SR(2), [25, 30, 9]), (S.SR(2.0), [25, 30, 9]), (sx / sx, [5, 3]),

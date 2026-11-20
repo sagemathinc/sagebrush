@@ -12409,7 +12409,7 @@
  "lib/_sage_poly.py :: Polynomial._root_power :: raise NotImplementedError(\"a polynomial to a fractional power (an n-th root) is not implemented in Sagebrush\") #0": {
   "class": "coverage",
   "owner": "univariate polynomials (Sage mode)",
-  "reason": "an unsupported feature, not a cap: Sage's f^(p/q) is the q-th root of f to the p (a ValueError when f is not a q-th power); made here for the constants 0, 1 and -1, refused for any other polynomial (before, the exponent's floor, a wrong value)"
+  "reason": "an unsupported feature, not a cap: Sage's f^(p/q) is the q-th root of f to the p (a ValueError when f is not a q-th power); made here for the constants 0, 1 and -1, refused for any other polynomial (before, the exponent truncated toward zero, a wrong value)"
  },
  "lib/_sage_poly.py :: Polynomial.gcd :: raise TypeError(\"unsupported operand for gcd\") #0": {
   "class": "none",

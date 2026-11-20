@@ -1245,8 +1245,8 @@ class Polynomial:
         # symbolic expression whose value is an integer (SR(2), x/x,
         # SR(2.0)) by the identity of its class, read through that class's
         # own methods: no hook of n runs.  Anything else is refused, a
-        # Python Fraction too, as Sage refuses it; the old int(n) took the
-        # floor of a fractional exponent, a wrong value)
+        # Python Fraction too, as Sage refuses it; the old int(n) truncated
+        # a fractional exponent toward zero, a wrong value)
         k = _int_value(n)
         if k is not None:
             return k
