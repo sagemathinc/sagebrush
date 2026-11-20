@@ -171,6 +171,33 @@ check(u.className === "user other", "a kept message with a hostile mode: class o
   check(!/-0\.0 s|-5\.0 s|Infinity|NaN/.test(gh) && !bad(gh), "…and none of them is drawn (no -0.0 s, no Infinity s)", gh.slice(0, 300));
 }
 
+// ---- W3: turn_info, the model and thinking level under the agent's name: only as reported, each field as last said,
+// nothing before the first, nothing from another turn, every value checked again and escaped
+{
+  const th = newThread("ti", "T");
+  let n = 0;
+  const te = (turn_id, e) => apply(th, { seq: ++n, turn_id, ...e }, 1000);
+  te("i1", { type: "turn_started" });
+  const info = (id) => { const d = turnNode(th, th.entries.find((e) => e.kind === "turn" && e.turn_id === id), hooks).innerHTML; return /<div class="who-info">([^<]*)<\/div>/.exec(d)?.[1] ?? null; };
+  check(info("i1") === null, "W3: nothing shown before the first turn_info");
+  te("i1", { type: "turn_info", model: "claude-opus-5-5" });
+  check(info("i1") === "claude-opus-5-5", "W3: the model, as the agent gave it (no name mapping)", info("i1"));
+  te("i1", { type: "turn_info", effort: "high" });
+  check(info("i1") === "claude-opus-5-5 · thinking: high", "W3: an effort later in the turn joins the model", info("i1"));
+  te("i1", { type: "turn_info", effort: "low" });
+  check(info("i1") === "claude-opus-5-5 · thinking: low", "W3: a changed effort replaces it", info("i1"));
+  te("i1", { type: "turn_info", model: HOSTILE, effort: "Very High" });
+  check(info("i1") === "claude-opus-5-5 · thinking: low", "W3: malformed fields change nothing", info("i1"));
+  te("i2", { type: "turn_started" });
+  check(info("i2") === null, "W3: a new turn shows nothing until its own turn_info (nothing carried over)");
+  te("i2", { type: "turn_info", effort: "medium" });
+  check(info("i2") === "thinking: medium", "W3: an effort alone, without a model", info("i2"));
+  // (a thread kept from before, with a hostile info in storage: escaped where drawn)
+  const kept = th.entries.find((e) => e.kind === "turn" && e.turn_id === "i2");
+  kept.info = { model: HOSTILE };
+  check(!bad(turnNode(th, kept, hooks).innerHTML) && info("i2") === null, "W3: a malformed stored info is checked again and not drawn");
+}
+
 const failed = results.filter(([ok]) => !ok);
 if (failed.length) { console.log(`FAIL: ${failed.length} of ${results.length}`); process.exit(1); }
 console.log(`ok: the agents chat's view and its checks, ${results.length} checks`);
