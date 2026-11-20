@@ -12,14 +12,23 @@ const BLOCK: usize = 1 << 12;
 #[cfg(test)]
 thread_local! {
     pub(crate) static WORK: std::cell::Cell<u64> = const { std::cell::Cell::new(0) };
+    // (the butterflies among them, for the 32-bit product's stage test)
+    pub(crate) static BUTTERFLIES: std::cell::Cell<u64> = const { std::cell::Cell::new(0) };
 }
 #[cfg(test)]
-fn count(n: u64) {
+fn count_butterflies(n: u64) {
+    BUTTERFLIES.with(|c| c.set(c.get() + n));
+}
+#[cfg(not(test))]
+#[inline(always)]
+fn count_butterflies(_: u64) {}
+#[cfg(test)]
+pub(crate) fn count(n: u64) {
     WORK.with(|c| c.set(c.get() + n));
 }
 #[cfg(not(test))]
 #[inline(always)]
-fn count(_: u64) {}
+pub(crate) fn count(_: u64) {}
 
 /// A bound on [`Table::new`]'s word operations at `1 << log` points, N =
 /// max(2^log, 2): two zero-filled N-word vectors (2N), the upper-half fill
@@ -155,6 +164,7 @@ impl<W: NttWord> Table<W> {
 #[inline(always)]
 fn dif_layer<W: NttWord>(lo: &mut [W], hi: &mut [W], w: &[W], wp: &[W], p: W) {
     count(lo.len() as u64);
+    count_butterflies(lo.len() as u64);
     let p2 = p + p;
     for j in 0..lo.len() {
         let (x, y) = (lo[j], hi[j]);
@@ -167,6 +177,7 @@ fn dif_layer<W: NttWord>(lo: &mut [W], hi: &mut [W], w: &[W], wp: &[W], p: W) {
 #[inline(always)]
 fn dit_layer<W: NttWord>(lo: &mut [W], hi: &mut [W], w: &[W], wp: &[W], p: W) {
     count(lo.len() as u64);
+    count_butterflies(lo.len() as u64);
     let p2 = p + p;
     for j in 0..lo.len() {
         let mut x = lo[j];
@@ -284,6 +295,65 @@ pub(crate) fn conv_table<W: NttWord>(a: &[W], b: &[W], t: &Table<W>) -> Vec<W> {
         if *x >= p {
             *x = *x - p;
         }
+    }
+    fa
+}
+
+/// The convolution of a and b at exactly the table's 2^log points, for a
+/// product of at most 2^log + 1 coefficients: when it has 2^log + 1, the
+/// last, a_last b_last, wraps onto index 0 and is taken off there (modulo
+/// p), and the caller adds it back exactly.  The first min(len, 2^log)
+/// coefficients, each in [0, p).  Counted as conv_table at 2^log points
+/// (one more for the fold).
+#[cfg_attr(not(any(test, target_pointer_width = "32")), allow(dead_code))]
+pub(crate) fn conv_table_cyclic<W: NttWord>(a: &[W], b: &[W], t: &Table<W>) -> Vec<W> {
+    let len = a.len() + b.len() - 1;
+    let n = 1usize << t.log;
+    assert!(len <= n + 1);
+    let p = t.p;
+    let load = |x: &[W]| {
+        count((n + x.len()) as u64);
+        let mut f = vec![W::default(); n];
+        for (d, &s) in f.iter_mut().zip(x) {
+            *d = W::reduce(s, t.modulus);
+        }
+        f
+    };
+    sagebrush_interrupt::check_coarse();
+    let mut fa = load(a);
+    sagebrush_interrupt::check_coarse();
+    dif(&mut fa, t);
+    let mut fb = load(b);
+    sagebrush_interrupt::check_coarse();
+    dif(&mut fb, t);
+    let ninv = W::inv_mod(W::from_usize(n), t.modulus);
+    let ninvp = W::shoup(ninv, p);
+    count(n as u64);
+    for i in 0..n {
+        let x = if fa[i] >= p { fa[i] - p } else { fa[i] };
+        let y = if fb[i] >= p { fb[i] - p } else { fb[i] };
+        fa[i] = W::pointwise(x, y, ninv, ninvp, p, t.modulus);
+    }
+    drop(fb);
+    sagebrush_interrupt::check_coarse();
+    dit(&mut fa, t);
+    sagebrush_interrupt::check_coarse();
+    let kept = len.min(n);
+    fa.truncate(kept);
+    count(kept as u64 + 1);
+    let p2 = p + p;
+    for x in &mut fa {
+        if *x >= p2 {
+            *x = *x - p2;
+        }
+        if *x >= p {
+            *x = *x - p;
+        }
+    }
+    if len == n + 1 {
+        // (index 0 holds c_0 + c_n, c_n = a_last b_last: take it off)
+        let top = W::mul_mod(W::reduce(a[a.len() - 1], t.modulus), W::reduce(b[b.len() - 1], t.modulus), t.modulus);
+        fa[0] = if fa[0] >= top { fa[0] - top } else { fa[0] + p - top };
     }
     fa
 }

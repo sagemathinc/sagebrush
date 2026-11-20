@@ -107,6 +107,18 @@
    "audit": "Can it produce or alter an Obligations, Operation, Reservation, Growth or Context (directly, generically or through a pointer)? No. Test glue: a System-forwarding counting allocator. Token-identical to engine/web/tests/bin_alloc.rs's audited item (same hash)."
   },
   {
+   "file": "engine/arith/tests/zmul_admission_targets.rs",
+   "item": "impl GlobalAlloc for Counting",
+   "hash": "d3a1238bcc351b761cda2a67e1bdf806619dbc4260378b0f0cd60c5549c30c30",
+   "audit": "Can it produce or alter an Obligations, Operation, Reservation, Growth or Context (directly, generically or through a pointer)? No. Test glue: a System-forwarding counting allocator (alloc, dealloc and realloc pass the caller's own pointer and layout to System unchanged; the counting only updates one atomic), the audited series_alloc item without its peak. Here it checks that poly_mul's admission refusals leave the heap at its baseline."
+  },
+  {
+   "file": "engine/bigint/tests/ntt_local_peak.rs",
+   "item": "impl GlobalAlloc for Counting",
+   "hash": "288c6281672cdb8eef99026977a4bfaa0bc9e73cadbbc361e9ab45e2026bb091",
+   "audit": "Can it produce or alter an Obligations, Operation, Reservation, Growth or Context (directly, generically or through a pointer)? No. Test glue: a System-forwarding counting allocator (alloc, dealloc and realloc pass the caller's own pointer and layout to System unchanged; the counting only updates two atomics), as engine/web/tests/series_alloc.rs's audited item. Here it measures ntt::mul_words_local's live bytes against mul_words_local_peak, natively and under wasm32-wasip1."
+  },
+  {
    "file": "engine/flint/src/lib.rs",
    "item": "fn fmpz_big",
    "hash": "b43c2696269aeaccbec6f410ef31de0cdcbcdc5e2a483744ac2d56617356c11b",

@@ -26,6 +26,28 @@ pub const PRIMES: [(u64, u64); 3] = [
     (4522739925786820609, 37),
 ];
 const MAX_LOG: u32 = 50;
+
+/// The 32-bit primes of wasm32's op-local product (`ntt32`): (p, primitive
+/// root, the 2-adic order of p - 1).
+pub const PRIMES32: [(u32, u32, u32); 3] = [(469_762_049, 3, 26), (998_244_353, 3, 23), (754_974_721, 11, 24)];
+/// The longest 32-bit transform: 2^23 points.
+pub const LOCAL32_MAX_LOG: u32 = 23;
+
+// The 32-bit product's Chinese remaindering is exact and its roots exist at
+// every transform length up to 2^LOCAL32_MAX_LOG: a convolution of that many
+// 32-bit digits has coefficients below 2^23 (2^32 - 1)^2 < p1 p2 p3, and
+// 2^LOCAL32_MAX_LOG divides each p - 1 (the stated 2-adic orders exact).
+const _: () = {
+    let (p0, p1, p2) = (PRIMES32[0].0 as u128, PRIMES32[1].0 as u128, PRIMES32[2].0 as u128);
+    let digit = (1u128 << 32) - 1;
+    assert!((1u128 << LOCAL32_MAX_LOG) * digit * digit < p0 * p1 * p2);
+    let mut i = 0;
+    while i < 3 {
+        let (p, _, order) = PRIMES32[i];
+        assert!((p - 1).trailing_zeros() == order && order >= LOCAL32_MAX_LOG);
+        i += 1;
+    }
+};
 impl NttWord for u64 {
     type Modulus = Modulus;
     #[inline(always)]
@@ -420,15 +442,32 @@ pub fn mul_words(a: &[u64], b: &[u64]) -> Vec<u64> {
 }
 
 /// [`mul_words`] with the op's own tables instead of the shared cache: each
-/// prime's table is built here (from its root in [`PRIMES`], no search) and
-/// dropped before the next one, so the call's memory is its own sizes,
-/// whatever the cache holds, and it never grows the cache.  Its word
-/// operations are at most [`mul_words_local_work`], its live bytes at most
-/// [`mul_words_local_peak`].
+/// prime's table is built here (from its root, no search) and dropped before
+/// the next one, so the call's memory is its own sizes, whatever the cache
+/// holds, and it never grows the cache.  Its word operations are at most
+/// [`mul_words_local_work`], its live bytes at most [`mul_words_local_peak`].
+///
+/// On wasm32 the product runs on 32-bit digits instead (`ntt32`: three
+/// primes below 2^30, whose products wasm32 has natively, where the 64-bit
+/// primes' need u128): chosen at compile time, after the same admission;
+/// native builds run the 64-bit path unchanged.
 pub fn mul_words_local(a: &[u64], b: &[u64]) -> Vec<u64> {
     if a.is_empty() || b.is_empty() {
         return vec![0u64; a.len() + b.len()];
     }
+    #[cfg(target_arch = "wasm32")]
+    {
+        crate::ntt32::mul_words_local(a, b)
+    }
+    #[cfg(not(target_arch = "wasm32"))]
+    {
+        mul_words_local64(a, b)
+    }
+}
+
+/// The 64-bit path of [`mul_words_local`].
+#[cfg_attr(target_arch = "wasm32", allow(dead_code))]
+pub(crate) fn mul_words_local64(a: &[u64], b: &[u64]) -> Vec<u64> {
     let log = log2_len(a.len() + b.len() - 1);
     let conv = |i: usize| {
         let (p, g) = PRIMES[i];
@@ -443,53 +482,79 @@ pub fn mul_words_local(a: &[u64], b: &[u64]) -> Vec<u64> {
 }
 
 /// Word operations of [`mul_words_local`] for factors of `la` and `lb`
-/// words: per prime a table build ([`table_work`]) and a convolution
-/// ([`conv_work`]), then Garner's combination and the carry, 16 per output
-/// word.  None on overflow.
+/// words, on every target (one form, so a request is admitted or refused
+/// the same everywhere).  A word operation is one 64-bit operation of the
+/// native path, or two counted 32-bit operations of wasm32's 32-bit path
+/// (rounded up: a u32 operation weighs 1/2, the 32-bit path's time per
+/// operation measured at well under half; the counters prove the bound).
+/// With m = la + lb and N = m - 1 padded to a power of two:
+/// - per prime, a table ([`table_work`] at N points: the 32-bit table at 2N
+///   points weighs half of table_work at 2N, less) and a convolution
+///   ([`conv_work`] at N points, plus one more butterfly stage, ceil(3N /
+///   2): the 32-bit transform has twice the points, one more stage);
+/// - Garner's combination and the carry, 16 per output word (the 32-bit
+///   path's 16 per digit, two digits a word, at half weight);
+/// - the 32-bit path's split of the inputs into digits and the repacking of
+///   its result, 1 each per word (two counted per word, at half weight).
+///
+/// So per prime table_work + conv_work + ceil(3N / 2), three times, plus 18 m.
+/// None on overflow.
 pub const fn mul_words_local_work(la: usize, lb: usize) -> Option<u64> {
     if la == 0 || lb == 0 {
         return Some(0);
     }
-    let len = match la.checked_add(lb) {
-        Some(x) => x - 1,
+    let m = match la.checked_add(lb) {
+        Some(x) => x,
         None => return None,
     };
-    let log = match len.checked_next_power_of_two() {
+    let log = match (m - 1).checked_next_power_of_two() {
         Some(n) => n.trailing_zeros(),
+        None => return None,
+    };
+    let stage = match (1u64 << log).checked_mul(3) {
+        Some(x) => x.div_ceil(2),
         None => return None,
     };
     let per_prime = match (table_work(log), conv_work(log)) {
         (Some(t), Some(c)) => match t.checked_add(c) {
-            Some(x) => x,
+            Some(x) => match x.checked_add(stage) {
+                Some(y) => y,
+                None => return None,
+            },
             None => return None,
         },
         _ => return None,
     };
-    match (per_prime.checked_mul(3), (len as u64 + 1).checked_mul(16)) {
+    match (per_prime.checked_mul(3), (m as u64).checked_mul(18)) {
         (Some(x), Some(y)) => x.checked_add(y),
         _ => None,
     }
 }
 
-/// Live bytes of [`mul_words_local`] beyond its inputs, at its worst point
-/// (the third prime: the first two residue vectors, kept at their capacity
-/// N, the third's two transform buffers and its table of four N-word
-/// vectors), or at the Garner pass (three residue vectors and the output):
-/// 64N bytes bounds both.  N = la + lb - 1 padded to a power of two.
+/// Live bytes of [`mul_words_local`] beyond its inputs, on every target: 64N
+/// + 8m, with m = la + lb and N = m - 1 padded to a power of two.  The 64-bit
+/// path's worst point (the third prime: the first two residue vectors at
+/// their capacity N, the third's two transform buffers and its table of four
+/// N-word vectors), or its Garner pass (three residue vectors and the
+/// output), is within 64N; the 32-bit path has the same bytes at 2N points of
+/// 4 bytes, plus its digit copies of the inputs, 8m, live through the third
+/// convolution (then dropped: its Garner pass holds the residues and m words
+/// of digits, its repacking 16m).  None on overflow.
 pub const fn mul_words_local_peak(la: usize, lb: usize) -> Option<u64> {
-    if la == 0 || lb == 0 {
-        return match (la as u64 + lb as u64).checked_mul(8) {
-            Some(x) => Some(x),
-            None => None,
-        };
-    }
-    let len = match la.checked_add(lb) {
-        Some(x) => x - 1,
+    let m = match la.checked_add(lb) {
+        Some(x) => x,
         None => return None,
     };
-    match len.checked_next_power_of_two() {
-        Some(n) => (n as u64).checked_mul(64),
-        None => None,
+    if la == 0 || lb == 0 {
+        return (m as u64).checked_mul(8);
+    }
+    let n = match (m - 1).checked_next_power_of_two() {
+        Some(n) => n as u64,
+        None => return None,
+    };
+    match (n.checked_mul(64), (m as u64).checked_mul(8)) {
+        (Some(x), Some(y)) => x.checked_add(y),
+        _ => None,
     }
 }
 

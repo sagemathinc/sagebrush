@@ -26,6 +26,19 @@
 //! The work and the peak are the closed forms of [`admit`], per backend
 //! (design: the poly_mul caps note, r2.1 and its r2.2 delta); the tests
 //! count the loops against them.
+//!
+//! **Targets.**  The closed forms are the same on every target, so a request
+//! is admitted or refused the same natively and in the browser.  On wasm32
+//! the NTT backend runs on 32-bit digits (`ntt::mul_words_local`: twice the
+//! points, one more butterfly stage, three primes below 2^30), chosen at
+//! compile time after admission.  Its work is in the same unit: a word
+//! operation is one 64-bit operation, or two counted 32-bit operations
+//! (rounded up).  That weight is a definition, justified by measurement: the
+//! 32-bit product takes 0.54 to 0.58 of the 64-bit one's time at every size
+//! from 130 to 2^18 words (wasm32-wasip1, release, under node 26, on this
+//! change's commit: `ntt32::local_tests::time_against_the_64_bit_path`), and
+//! the counters prove the bound term by term
+//! (`ntt32::local_tests::counted_work_fits_the_form_term_by_term`).
 
 use crate::counted;
 use crate::zseries::{bl, scan_with, Admitted, Csv, INTERNAL_PREFIX};
@@ -41,7 +54,8 @@ pub const O_MAX: u64 = 1 << 25;
 /// Bytes live at the call's peak (the op's row).
 pub const PEAK_MAX: u64 = 64 << 20;
 /// Word operations: every shape within the caps above needs at most
-/// 205,069,830 (the design note's table; checked below).
+/// 208,477,704 (the design note's table, with the 32-bit backend's extra
+/// butterfly stage and its split and repacking; checked below).
 pub const WORK_MAX: u64 = 1 << 28;
 
 /// The caps one admission checks (the op passes [`CAPS`]; tests pass
@@ -68,15 +82,50 @@ const _: () = {
     let m = N_MAX + 1;
     let r = REQUEST_MAX;
     let tab = 16 * n + 512;
-    let conv = 3 * (n / 2) * 19 + 8 * n + 64;
+    // (the butterflies at log N + 1 = 20 stages: the 32-bit backend's)
+    let conv = 3 * (n / 2) * 20 + 8 * n + 64;
     let pack = 6 * m + r;
     let emit = O_MAX / 8 + 24 * (O_MAX / 11);
-    let w = r + pack + 3 * (tab + conv) + 16 * m + emit;
-    assert!(w == 205_069_830 && w <= WORK_MAX);
+    let w = r + pack + 3 * (tab + conv) + 18 * m + emit;
+    assert!(w == 208_477_704 && w <= WORK_MAX);
     // (the schoolbook's work, at most SCHOOLBOOK_WORDS rows of at most M
     // words, is below the NTT term the table counts)
     let sb = SCHOOLBOOK_WORDS * m + m + SCHOOLBOOK_WORDS;
-    assert!(sb <= 3 * (tab + conv) + 16 * m);
+    assert!(sb <= 3 * (tab + conv) + 18 * m);
+};
+
+// The largest call's peak is within PEAK_MAX: the request, the packed
+// factors (8m words-bytes, m <= N_MAX + 1), the backend at its closed bound
+// over the caps 72N + 8 (it is 64N + 8m with m <= N + 1; admission uses that
+// exact form), and the allocator allowance; the reply's phase (at most the
+// largest reply, O_MAX / 4 + 3 (O_MAX / 11) + 32 bytes, plus one field and
+// its complement, 32 (O_MAX / 64 + 1) + 64) is below the backend's.
+const _: () = {
+    let n = N_MAX;
+    let m = N_MAX + 1;
+    let backend = 72 * n + 8;
+    let emit = O_MAX / 4 + 3 * (O_MAX / 11) + 32 + 32 * (O_MAX / 64 + 1) + 64;
+    assert!(emit <= backend);
+    let sized = 8 * m + backend;
+    let allowance = if sized / 16 > 1 << 20 { sized / 16 } else { 1 << 20 };
+    assert!(REQUEST_MAX + sized + allowance <= PEAK_MAX);
+};
+
+// The 32-bit backend at the largest transform, 2 N_MAX points of 32-bit
+// digits: within its transform length, its Chinese remaindering exact
+// (2 N_MAX (2^32 - 1)^2 below the primes' product) and its roots existing
+// (2 N_MAX divides each p - 1).
+const _: () = {
+    let points = 2 * N_MAX;
+    assert!(points <= 1 << sagebrush_bigint::ntt::LOCAL32_MAX_LOG);
+    let p = sagebrush_bigint::ntt::PRIMES32;
+    let digit = (1u128 << 32) - 1;
+    assert!(points as u128 * digit * digit < p[0].0 as u128 * p[1].0 as u128 * p[2].0 as u128);
+    let mut i = 0;
+    while i < 3 {
+        assert!((p[i].0 as u64 - 1) % points == 0);
+        i += 1;
+    }
 };
 
 const HOW: &str = "a smaller product per call";
