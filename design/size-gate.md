@@ -8,7 +8,7 @@ Resolve actual overlapping changes or conflicts normally.
 
 ## Rule
 
-For each bundle, CI compares base and tested-merge bytes. It fails when growth
+For each existing bundle, CI compares base and tested-merge bytes. It fails when growth
 exceeds **both 2% of that bundle's base and 50,000 bytes**:
 
 ```js
@@ -20,7 +20,10 @@ avoids noisy percentage failures on small bundles; the percentage allowance
 scales with large bundles. This deliberately permissive check catches big
 regressions while the merger's row-by-row checklist catches smaller ones.
 Bundles are checked individually: a shrink never offsets another bundle's
-growth. New bundles use base zero; removed bundles use merge zero.
+growth. Bundles absent from the base are listed as `new`, with base zero, but
+do not fail the backstop: extracting a lazy chunk must not count its entire
+size as growth. New bundles still require review in the merger's checklist.
+An existing bundle with zero bytes is still gated. Removed bundles use merge zero.
 
 There are no stored budgets, growth markers, tightness rules, epochs, or
 old-toolchain migration builds. No allowance is carried forward or refilled.
