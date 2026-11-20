@@ -956,8 +956,12 @@ for (const [what, grant] of [["a folder, not Everything", { folders: ["/A"], wri
   const b1 = await send(edit({ turn_id: "t1" }));
   ok(b1.got?.turnId === "t1" && !("turn_id" in b1.got.e) && b1.r.result?.ok === true, "both said it: the turn taken out of the edit and handed beside it", b1.got);
   const b2 = await send(edit());
-  ok(b2.got && b2.got.turnId === undefined, "an edit without turn_id: as before, no turn handed", b2.got);
-  for (const bad of [5, "", "x".repeat(129)]) {
+  ok(b2.got === null && b2.r.error?.data?.code === "invalid", "both said it: an edit without turn_id is refused, nothing applied (it can't pass the turn's check by leaving it out)", b2.r);
+  P.hello.features = ["notebook.edit"];
+  const b3 = await send(edit());
+  ok(b3.got && b3.got.turnId === undefined, "an agent that didn't say edit.turn: an edit without turn_id as before, no turn handed", b3.got);
+  P.hello.features = ["notebook.edit", "edit.turn"];
+  for (const bad of [5, "", "x".repeat(129), null]) {
     const b = await send(edit({ turn_id: bad }));
     ok(b.got === null && b.r.error?.data?.code === "invalid", `a turn_id that isn't an id (${JSON.stringify(bad).slice(0, 20)}): refused, nothing applied`, b.r);
   }

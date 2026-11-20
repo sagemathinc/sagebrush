@@ -558,10 +558,10 @@ export class AgentPairing {
    * page's own apply (the open notebook's host); the same grant checked after every wait, as for the verbs. */
   private async edit(id: string, params: unknown) {
     if (!this.edits()) return this.fail(id, "invalid", "not a verb: \"notebook.edit\"");
-    // (edit.turn, when both ends said it: the turn taken out of the edit before its grammar is checked, a short id or
-    //  the edit is refused; without it, the edit is as before)
+    // (edit.turn, when both ends said it: every edit says its turn, a short id, taken out before the edit's grammar is
+    //  checked; one without it, or with another value, is refused, nothing applied; an agent that didn't say it: as before)
     let turnId: string | undefined;
-    if (this.hello?.features?.includes("edit.turn") && params && typeof params === "object" && !Array.isArray(params) && "turn_id" in params) {
+    if (this.hello?.features?.includes("edit.turn") && params && typeof params === "object" && !Array.isArray(params)) {
       const { turn_id, ...rest } = params as Record<string, unknown>;
       if (typeof turn_id !== "string" || !turn_id || turn_id.length > RUN_CONTEXT_LENGTH) return this.fail(id, "invalid", "edit: turn_id is the turn's id");
       turnId = turn_id;
