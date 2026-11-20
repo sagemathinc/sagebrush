@@ -654,6 +654,31 @@ def qscale_checks(r):
         pass
     assert inst == [], inst
     n += 1
+    # (a number over a polynomial and gcd read the classified constant,
+    # never the operand: an int subclass's own __int__ or numerator never
+    # runs; gcd(5t, 5) is 5 in ZZ[t], as Sage; gcd with a float refuses)
+    log = []
+
+    class Liar(int):
+        def __int__(self):
+            log.append("__int__")
+            return 99
+
+        numerator = property(lambda self: (log.append("numerator"), 1)[1])
+        denominator = property(lambda self: (log.append("denominator"), 2)[1])
+    q = Liar(5) / t
+    assert str(q.parent()) == "Fraction Field of Univariate Polynomial Ring in t over Integer Ring" and str(q) == "5/t", q
+    g = (5 * t).gcd(Liar(5))
+    assert g.list() == [5] and str(g.parent()) == str(Z), g
+    assert log == [], log
+    assert (5 * t).gcd(5).list() == [5] and (5 * t).gcd(QQ(5)).list() == [1]
+    try:
+        (5 * t).gcd(1.5)
+    except TypeError:
+        pass
+    else:
+        raise AssertionError("gcd accepted a float")
+    n += 1
     # (a metaclass mro() naming int for a class without int's layout: CPython
     # refuses to create the class; where a runtime creates it, its real MRO
     # (type's slot) has no int, so it is refused, its value never read)

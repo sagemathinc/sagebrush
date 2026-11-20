@@ -1351,14 +1351,16 @@ class Polynomial:
         # a number over a polynomial: 2/x in Frac(ZZ[x]), QQ(2)/x and 1/2/x
         # in Frac(QQ[x]) (by the number's parent, not its value), 2/R(4) is
         # 1/2 in Frac(R), as Sage
-        if self._coerce(other) is None:
+        # (from the classified constant, never the operand itself: an int
+        # subclass's own __int__ or numerator is not read)
+        o = self._coerce(other)
+        if o is None:
             return NotImplemented
         if not self._c:
             raise ZeroDivisionError("fraction field element division by zero")
         import _sage_frac
-        qq = type(other) is _sa().Rational or _F(other).denominator != 1
-        R = self._qq_ring() if qq else self._ring
-        return _sage_frac.FractionFieldElement(R(other), Polynomial(R, self._c))
+        R = self._qq_ring() if o._ring._base is QQ else self._ring
+        return _sage_frac.FractionFieldElement(Polynomial(R, o._c), Polynomial(R, self._c))
 
     # ---- evaluation and calculus
     def __call__(self, *args, **kwds):
@@ -1549,7 +1551,11 @@ class Polynomial:
             sage: (x^2 - 1).gcd(x^2 + 2*x + 1)
             x + 1
         """
-        o = other if _is_polynomial(other) else Polynomial(self._qq_ring(), [other])
+        # (a number as the constant of its parent's ring, classified without
+        # running any of its hooks: gcd(5t, 5) is 5 in ZZ[t], as Sage)
+        o = self._coerce(other)
+        if o is None:
+            raise TypeError("unsupported operand for gcd")
         over_zz = self._ring._base is ZZ and o._ring._base is ZZ
         if not self._c or not o._c:
             # Sage returns the other one unchanged (monic over QQ)
