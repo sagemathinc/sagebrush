@@ -398,3 +398,35 @@ pub(crate) fn walk_charge(i: usize, total: usize, m: &mut Meter) -> Result<(), D
     }
     Ok(())
 }
+
+/// `it` advanced past its first `n` items, Stop polled every 4096 of them.
+/// For walks over the request's own text, not charged: the meter's limit
+/// (WORK_MAX - R) already pays for every pass over the request's R bytes.
+pub(crate) fn skip_polled<I: Iterator>(mut it: I, n: usize) -> I {
+    for i in 0..n {
+        if i & 0xfff == 0 {
+            sagebrush_interrupt::check_coarse();
+        }
+        if it.next().is_none() {
+            break;
+        }
+    }
+    it
+}
+
+/// The byte offset of `text`'s comma ending its first `n` tokens (`n >= 1`;
+/// the text's length when it has no more), Stop polled every 4096 commas;
+/// not charged, as [`skip_polled`].
+pub(crate) fn token_end_polled(text: &str, n: usize) -> usize {
+    let mut commas = text.match_indices(',');
+    for i in 0..n - 1 {
+        if i & 0xfff == 0 {
+            sagebrush_interrupt::check_coarse();
+        }
+        if commas.next().is_none() {
+            return text.len();
+        }
+    }
+    commas.next().map_or(text.len(), |(i, _)| i)
+}
+

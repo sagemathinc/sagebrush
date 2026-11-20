@@ -27,7 +27,7 @@ use std::cell::Cell;
 use std::cmp::Ordering;
 
 pub use crate::ledger::{DivFault, Words};
-pub(crate) use crate::ledger::{cmp_mag, fixed_vec, fixed_words, track, walk_charge, Arena, Buf, Coef};
+pub(crate) use crate::ledger::{cmp_mag, fixed_vec, fixed_words, skip_polled, token_end_polled, track, walk_charge, Arena, Buf, Coef};
 #[cfg(test)]
 pub(crate) use crate::ledger::{EXACT, MAX_BITS};
 
@@ -121,7 +121,7 @@ pub fn admit_z<'a>(a: &Factor<'a>, b: &Factor, r: u64, caps: &qpoly::Caps) -> Re
     }
     let (n, m) = (na - 1, nb - 1);
     if n < m {
-        let end = a.text.match_indices(',').nth(na as usize - 1).map_or(a.text.len(), |(i, _)| i);
+        let end = token_end_polled(a.text, na as usize);
         return Ok(Err(Short::Lower(&a.text[..end])));
     }
     let k = n - m + 1;
@@ -195,7 +195,7 @@ pub fn divide_z<'l>(a: &Factor, b: &Factor, plan: &Plan, led: &'l Words, m: &mut
     let lc = c.len();
     // (the dividend's tokens from its top degree down, trailing zeros skipped)
     let skip = (a.tokens - plan.n - 1) as usize;
-    let mut toks = a.text.rsplit(',').skip(skip);
+    let mut toks = skip_polled(a.text.rsplit(','), skip);
     // the window: slot(l) = ring[(h + l) % w] holds degree (top - m + l)
     let mut ring: Vec<Coef<'l>> = fixed_vec(w)?;
     for _ in 0..w {
@@ -723,7 +723,7 @@ pub fn divide_q<'l>(a: &Factor, b: &Factor, plan: &Plan, pa: &qpoly::PlanA, l: q
         let _p = sagebrush_interrupt::enter("divrem divide");
         sagebrush_interrupt::check_coarse();
         let skip = (a.tokens - plan.n - 1) as usize;
-        for tok in a.text.rsplit(',').skip(skip) {
+        for tok in skip_polled(a.text.rsplit(','), skip) {
             let (neg, num, den) = parts(tok);
             t.n.set_hex(neg, num, m)?;
             t.d.set_hex(false, den, m)?;
@@ -830,7 +830,7 @@ pub fn divide_q<'l>(a: &Factor, b: &Factor, plan: &Plan, pa: &qpoly::PlanA, l: q
     let mut den = Coef::tagged(led, 0, "scratch", m)?;
     // the window, slot(l) = ring[(h + l) % w], from the dividend's top
     let skip = (a.tokens - plan.n - 1) as usize;
-    let mut toks = a.text.rsplit(',').skip(skip);
+    let mut toks = skip_polled(a.text.rsplit(','), skip);
     let mut ring: Vec<Coef<'l>> = fixed_vec(w)?;
     for _ in 0..w {
         ring.push(Coef::new(led, 0, m)?);

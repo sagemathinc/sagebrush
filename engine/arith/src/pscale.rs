@@ -34,7 +34,7 @@
 //! the arenas are held, and written without allocating.
 
 use crate::coprime::{gcd_unbalanced, Meter};
-use crate::ledger::{walk_charge, Arena, Buf, Coef, DivFault, Words};
+use crate::ledger::{skip_polled, token_end_polled, walk_charge, Arena, Buf, Coef, DivFault, Words};
 use crate::pdivrem::{norm_len, token_bytes, OVERHEAD_WORDS};
 use crate::qpoly::{self, mul_into, parts, Factor};
 use crate::zmul::hex;
@@ -92,7 +92,7 @@ fn prefix_end(text: &str, n: u64) -> usize {
     if n == 0 {
         return 0;
     }
-    text.match_indices(',').nth(n as usize - 1).map_or(text.len(), |(i, _)| i)
+    token_end_polled(text, n as usize)
 }
 
 /// The reply's closed-form bound in bytes, from the tokens' text alone,
@@ -395,6 +395,8 @@ fn derivative<'l>(a: &Factor, na: u64, k: u64, led: &'l Words, m: &mut Meter) ->
     if k == 0 || k >= na || na > zmulmax() {
         return Err(DivFault::Invariant);
     }
+    // (the first k tokens stepped over first, polled: their derivative is 0)
+    let toks = skip_polled(a.text.split(',').take(na as usize), k as usize);
     let mut s = Ints::new(led, m)?;
     let mut t = Tmp::new(led, m)?;
     let mut f = Coef::tagged(led, 1, "falling", m)?;
@@ -404,7 +406,7 @@ fn derivative<'l>(a: &Factor, na: u64, k: u64, led: &'l Words, m: &mut Meter) ->
     }
     let mut out = Mapped { num: Arena::new(led, "num arena", m)?, den: Arena::new(led, "den arena", m)?, kept: 0 };
     let outs = na - k;
-    for (j, tok) in a.text.split(',').take(na as usize).skip(k as usize).enumerate() {
+    for (j, tok) in toks.enumerate() {
         let j = j as u64;
         load(tok, &mut t.an, &mut t.ad, m)?;
         if t.an.len == 0 {
