@@ -1,0 +1,216 @@
+{
+ "summaries": {
+  "f0": "Cusps of $\\Gamma_0(N)$ and the boundary map on weight-2 Manin symbols. `Cusps` sorts cusps into classes by Cremona's equivalence criterion (identifying $x$ with $-x$ when `sign_plus`), and `lift_to_sl2` lifts $(c:d)$ to a matrix in $SL_2(\\mathbb{Z})$. `boundary` gives the boundary $[a/c]-[b/d]$ of each free generator as a sparse vector over the cusp classes.",
+  "f1": "`cycle_content` computes the non-negative generator of $X(H_1(X_0(N),\\mathbb{Z}))$ for a functional $X$ on Manin symbols. Each symbol is an edge $\\{b/d,a/c\\}$ between cusp classes; a union-find spanning forest (`Forest`) tracks potentials, and the answer is the gcd of $X$ over the fundamental cycles (Manin 1972, Thm 1.9).",
+  "f2": "Dimension formulas that use no modular symbols: `dim_cusp_forms` gives $\\dim S_k(\\Gamma_0(N),\\varepsilon)$ by Cohen–Oesterle, `dim_eisenstein` counts $\\varepsilon$-regular cusps for $\\dim E_k$, and `dim_modsym` gives $2\\dim S_k+\\dim E_k$ for the sign-0 space. These numbers certify the dimensions found mod $\\ell$, which can only come out too large.",
+  "f3": "The group of Dirichlet characters mod $N$. `DirichletGroup` builds generators of $(\\mathbb{Z}/N)^*$, discrete logs, an enumeration of characters (`vector`/`index`), values, conductors (`conductor_of`) and conversion to `Character`. `Character::from_generators` reads LMFDB's description by values on generators, and `Character::restrict` gives the inducing character mod $m$.",
+  "f4": "The modular symbol map of an elliptic curve over $\\mathbb{Q}$ (sign $+1$). `ec_map` finds the primitive integral functional $X$ on $\\mathbb{P}^1(\\mathbb{Z}/N)$ with $T_qX=a_qX$ from the kernel of stacked $T_q-a_q$ mod 31-bit primes (`x_mod`), lifted by CRT and rational reconstruction and checked exactly (`verify`, `all_eigenvalues_match` up to the Sturm bound). `EcMap::eval` returns $\\{0,a/b\\}$ via continued-fraction denominators.",
+  "f5": "Cost predictions made before running anything. `estimate` returns an `Estimate` (dimension, number of CRT primes, bytes, seconds) for one $T_q$ characteristic polynomial, and `newforms` returns a `NewformsEstimate` for the `newspace_orbits` + `orbit_traces` pipeline from a fitted linear model over `NEWFORMS_TERMS`.",
+  "f6": "Exact characteristic polynomials of $T_q$ over $\\mathbb{Z}$ on the weight-2 plus space for $\\Gamma_0(N)$. `exact_charpoly` runs CRT over primes near $2^{31}$ (`charpolys_mod`, `crt`), rejecting any prime where the dimension is wrong, with a coefficient bound from Deligne (`bound_bits`, tightened by `bound_bits_from_squares`), and returns `Exact` with status `\"proven\"` or `\"inconsistent\"`. It also has `exact_charpoly_combo` (for $\\sum r_iT_{q_i}$), `batch_exact` and `level_data` (genus, cusps, Eisenstein dimension).",
+  "f7": "Modular symbols of any weight $k\\ge2$ with character $\\varepsilon$ and sign $\\pm1$ or $0$, over $\\mathbb{F}_\\ell$ with $\\ell\\equiv1\\bmod\\operatorname{ord}\\varepsilon$; symbols are $[P,(c,d)]$ with $P=X^iY^{k-2-i}$. `GeneralSpace::new`/`new_mod` solve the 2-term and character relations by a weighted union-find and the 3-term relations by `sparse_echelon`. `hecke_matrix`/`hecke_charpoly` (and the `combo` versions) use `heilbronn_for`: Cremona's matrices when $q\\nmid N$, Merel's (`heilbronn_merel`, giving $U_q$) when $q\\mid N$.",
+  "f8": "Exact characteristic polynomials of $T_q$ on $M_k(\\Gamma_0(N),\\varepsilon)^{\\pm}$ with coefficients in $\\mathbb{Z}[\\zeta_m]$. `exact_charpoly` computes a `GeneralSpace` charpoly mod $\\ell$ for every embedding $\\zeta_m\\mapsto z^j$, inverts the Vandermonde matrix (`invert_mod`) and lifts with a Garner CRT (`crt`) to a proven bound, certifying the dimension with `dim_modsym`; it returns `ExactGeneral`.",
+  "f9": "Integral Hecke data for weight-2 newform orbits. `integral_orbits` takes the orbits from `newform_orbits`, reconstructs primitive integer dual functionals $w_r$ (`duals_mod`, `rational_reconstruction`, checked by `dual_exact`), and computes $c_{p,r}=w_r(T_px)\\in\\mathbb{Z}$ with $a_p=\\sum_r\\beta_rc_{p,r}$; `check_traces` compares with the orbit traces.",
+  "f10": "Crate root of `modsym`: it declares the modules and holds the weight-2 entry points `hecke_charpoly` (characteristic polynomial of $T_q$ over $\\mathbb{F}_p$, returned as `ModP` with timings), `hecke_commute` (checks $T_qT_r=T_rT_q$ mod $p$) and `ec_modsym_values` (cached `EcMap`s). It also has the argument checks `validate`, `check_level` and `check_weight`.",
+  "f11": "Linear algebra over $\\mathbb{F}_p$ ($p<2^{31}$) for modular symbols. `sparse_echelon` does sparse elimination with a pivot heap, `heilbronn` builds Cremona's Heilbronn matrices for $T_q$, and `charpoly` uses Hessenberg reduction (with Shoup multiplication and AVX2 dispatch); also `rref_mod`, `matmul` and `check_hecke_prime`.",
+  "f12": "Rational (integer-$a_p$) newforms of weight 2 on $\\Gamma_0(N)$. `newforms_mod` splits the dual of the plus space into joint eigenspaces using integer eigenvalues in the Hasse range, drops those explained by memoized lower-level forms (`cached_forms`, `old_systems`), and reads $a_p=\\psi(T_px)/\\psi(x)$ through `heilbronn_pairing`. `rational_newforms` reruns mod a second prime, so its status is `\"checked\"`, not a proof; `newform_aps` is the memoized sweep API.",
+  "f13": "Galois orbits of newforms in $S_k^{new}(N,[\\varepsilon])$, matching LMFDB. For each level $M\\mid N$ and each conjugate character, `new_poly_mod` takes the plus-space charpoly of $T=\\sum r_iT_{q_i}$, removes Eisenstein roots and divides out old factors $g_{new}(M')^{\\sigma_0(M/M')}$. `newspace_orbits` certifies the dimension, picks $T$ until the new polynomial is squarefree, lifts it by CRT and factors it (`checked_factor`), returning `NewspaceOrbits`.",
+  "f14": "Galois orbits of weight-2 newforms on $\\Gamma_0(N)$. `newform_orbits` tries combinations $T=\\sum r_iT_{q_i}$, factors the exact charpoly (`exact_charpoly_combo`, `checked_factor`) and keeps simple factors not dividing `eisenstein_charpoly`, accepting when the degrees sum to `new_dimension`. `build_orbits` uses `krylov_dual` to get traces $\\operatorname{tr}(T_p|A)$ for each `Orbit`.",
+  "f15": "$\\mathbb{P}^1(\\mathbb{Z}/N\\mathbb{Z})$ with Sage's normalization, the index set of weight-2 Manin symbols. `normalize` gives the canonical $(u:v)$ and `normalize_with_scalar` also returns the unit $\\lambda$ that character spaces need. `P1List::new` builds lookup tables, with `len` $=\\psi(N)$, `index` and `index_scalar`.",
+  "f16": "A thin wrapper re-exporting `map_range`, `map_slice`, `for_each_mut` and `for_each_chunk_mut` from `sagebrush_par`; they run in parallel only when the crate's `parallel` feature is on.",
+  "f17": "The prime-independent presentation of weight-2, sign $+1$ modular symbols. `Presentation::new(n)` builds the `P1List`, solves the 2-term relations $x+xS=0$ and $x=x\\eta$ with a signed union-find (`rep_of`, `sym_of_gen`, generator count `m`), and writes the 3-term relations $x+xT+xT^2=0$ as integer `rows` over the free generators.",
+  "f18": "The weight-2 modular symbols space over $\\mathbb{F}_p$. `Space::new` echelonizes the 3-term rows with `sparse_echelon` to get `basis_gen` and `pivots`, `extend` lifts a functional on the quotient to every generator, `hecke_image` gives $T_q$ of one generator via Heilbronn matrices, and `hecke_matrix` builds $T_q$ 64 columns at a time.",
+  "f19": "Trace forms $\\operatorname{tr}a_n$ ($n\\le B$) of newform Galois orbits. `traces_mod` gets $T_p$ as a polynomial in the separating operator modulo the orbit's factor, extends to all $a_n$ by the Hecke recurrences, and takes traces from Newton power sums; `orbit_traces` lifts by CRT to a Deligne bound. `labelled_orbits` sorts orbits in LMFDB order (dimension, then trace form), computing more traces up to the Sturm bound to break ties.",
+  "f20": "The right ideal classes of a maximal order $\\mathcal{O}$ in a totally definite quaternion algebra over a real quadratic field $F$ (Kirschmer–Voight). `ClassSet::coprime_to` adds $\\mathfrak{p}$-neighbours (`neighbours`), keeps non-isomorphic ones (`isomorphism`), and stops when the mass $\\sum 1/[\\mathcal{O}_L(I)^\\times:\\mathcal{O}_F^\\times]$ reaches $2^{1-n}\\zeta_F(-1)h_F$ (`zeta_minus_one`). Each `IdealClass` stores its left order and unit groups; short vectors come from `lll_exact` and a budgeted Fincke–Pohst `short_vectors`.",
+  "f21": "Parallel weight 2 over any real quadratic $F$ by the definite method: $M_2^B(\\mathfrak{N})=\\bigoplus_i \\mathbb{C}[\\Gamma_i\\backslash\\mathbb{P}^1(\\mathcal{O}_F/\\mathfrak{N})]$, built by `DefiniteSpace::new`/`with_classes` from `LocalP1`s and unit-group `orbits`. `neighbour_elements` finds the elements $a$ with $J=aI_j$ by short-vector search and `hecke_matrix` turns them into $T_\\mathfrak{p}$ (or $U_\\mathfrak{p}$ when $\\mathfrak{p}\\mid\\mathfrak{N}$). `charpoly`, `cusp_charpoly` (Eisenstein factor removed) and `new_charpoly` (old forms divided out) give characteristic polynomials.",
+  "f22": "Newspaces, Galois orbits of newforms and Hecke eigenvalues in parallel weight 2 over any real quadratic field. `Newspaces::new` builds a `DefiniteSpace` for every divisor of $\\mathfrak{N}$ from one shared `ClassSet`; `new_charpoly` works mod word-size primes and lifts by CRT, `separating_operator` finds an `Op` $=\\sum c_iT_{\\mathfrak{p}_i}$ with squarefree new charpoly, and `newform_orbits` factors it over $\\mathbb{Q}$. `orbit_eigenspace`/`eigenvalue` give $a_\\mathfrak{p}$ in $K=\\mathbb{Q}[x]/(g)$ through eigen.rs.",
+  "f23": "Hilbert modular forms of weight $(k_1,k_2)\\neq(2,2)$ over any real quadratic $F$, with coefficients in $L_k=\\mathrm{Sym}^{m_2}\\otimes\\mathrm{Sym}^{m_1}$ (twisted by powers of det), on top of the weight-2 `DefiniteSpace`. `WeightSpace::new` builds the unit groups, stabilizers (Schreier's lemma) and exact invariant dimensions from characters; `hecke_terms` and `hecke_mod` form the Brandt-type matrix of $T_\\mathfrak{p}$ modulo a degree-one prime `WPlace`.",
+  "f24": "Newspaces, newform orbits and eigenvalues in weight $k\\neq(2,2)$ over any real quadratic $F$, where characteristic polynomials lie in $\\mathcal{O}_F[x]$. `WeightNewspaces` computes them modulo pairs of conjugate degree-one primes and recovers them with `PairCrt` under the bound `hecke_bound`; `newform_orbits` factors over $F$ (`gpoly::factor_squarefree`) and `orbit_data` returns $a_\\mathfrak{p}=h(\\theta)/g'(\\theta)$.",
+  "f25": "PSAGE's degeneracy map from level $\\mathfrak{N}$ to $\\mathfrak{N}/\\mathfrak{p}$ for the $\\mathbb{Q}(\\sqrt5)$ `Space`: `Space::degeneracy` sends each orbit to the orbit containing its reduction, as a 0/1 `matrix` in `Degeneracy`. The file notes its kernel is not the $\\mathfrak{p}$-new subspace in general, so newspaces are computed in newspace.rs instead.",
+  "f26": "Proven Hecke eigenvalues of each Galois orbit of newforms in its coefficient field $K=\\mathbb{Q}(\\theta)$. `orbit_eigenspace_core` finds a vector $v\\in\\ker g(T)$ for the separating operator $T$ modulo many primes (Krylov sequences), recovers it by CRT and rational reconstruction, and checks $g(T)v=0$ exactly. `OrbitEigenspace::eigenvalue` solves $T_\\mathfrak{p}v=\\sum c_jT^jv$ to give $a_\\mathfrak{p}=c(\\theta)$, and `charpoly_of` its characteristic polynomial over $\\mathbb{Q}$.",
+  "f27": "Arithmetic of $\\mathcal{O}_F=\\mathbb{Z}[w]$, $w=(1+\\sqrt5)/2$: elements `Elt` (norm, trace, signs, `totally_positive_associate`), ideals in Hermite normal form `Hnf`, prime ideals `Prime` (from `primes_above`) and `Ideal` with factorization. It also has integer helpers (`is_prime`, `sqrt_mod_p`, `factor_u64`) and `primes_of_bounded_norm`, `ideals_of_bounded_norm`.",
+  "f28": "Polynomials over $\\mathcal{O}_F$ for $F=\\mathbb{Q}(\\sqrt5)$ with big-integer coefficients (`FInt`, `FPoly`). Elements are recovered from reductions at pairs of conjugate degree-one primes (`PairCrt::reconstruct`), and squarefree polynomials are factored over $F$ by Trager's norm method (`factor_squarefree`).",
+  "f29": "The general-$F$ version of fpoly.rs, for any real quadratic $F$ with $\\mathcal{O}_F=\\mathbb{Z}[w]$, $w^2=tw+n$: degree-one places `GPlace` (`place_pairs` above primes near $2^{62}$), `QPoly` arithmetic, `PairCrt` reconstruction and Trager factorization over $F$ (`factor_squarefree`).",
+  "f30": "Crate root for Hilbert modular forms: parallel weight 2 over $\\mathbb{Q}(\\sqrt5)$ by the definite method, as functions on $R^\\times\\backslash\\mathbb{P}^1(\\mathcal{O}_F/\\mathfrak{N})$ with $R$ the icosian ring (ported from PSAGE), plus modules for any real quadratic field. It defines `Space` (`from_ideal`, `dimension`, `cusp_dimension`, `hecke_matrix`, `hecke_rows`), which builds $T_\\mathfrak{p}$/$U_\\mathfrak{p}$ from the elements $\\Theta(\\mathfrak{p})$ acting on orbits (`hecke_action`), and the sparse `HeckeMatrix`.",
+  "f31": "New subspaces, Galois orbits of newforms and rational newforms in weight 2 over $\\mathbb{Q}(\\sqrt5)$, from $S_2(N)=\\bigoplus_{M\\mid N} S_2^{new}(M)^{d(N/M)}$. `Newspaces` holds a `Space` per divisor: `new_dimensions` subtracts, `new_charpolys` divides out Eisenstein and old factors and lifts by CRT, `separating_operator` finds a `HeckeOp`, and `newform_orbits` factors over $\\mathbb{Q}$. `rational_newforms_of` gives each `RationalNewform`, whose `ap` reads $a_p$ from a single row of $T_p$.",
+  "f32": "`Orbits::new` finds the orbits of the icosian group on $\\mathbb{P}^1(O_F/N)$, the basis of $M_2^B(N)=\\mathbb{C}[R^\\times\\backslash \\mathbb{P}^1(O_F/N)]$. It applies permutation tables from `local_permutations` for a few generators, recording `orbit`, `reps` and `sizes`, and errs if an orbit size does not divide $60$.",
+  "f33": "The projective line $\\mathbb{P}^1(O_F/N)=\\prod_{P^e\\| N}\\mathbb{P}^1(O_F/P^e)$. `LocalP1` stores points by normalized representatives $(a:1)$ or $(1:b)$ and lets a 2x2 `Mat` act (`act`, None when degenerate); `P1` combines local indices into one mixed-radix index (`digits`, `combine`), capped at `MAX_P1` $=2^{32}$.",
+  "f34": "A crate-private wrapper re-exporting `map_range` from `sagebrush_par`, parallel when the crate's `parallel` feature is on.",
+  "f35": "`QLocalRing` implements $O_F/P^e$ for a prime $P$ of any real quadratic field from `rqf`, each residue written uniquely as $x+yw$ via the Hermite normal form of $P^e$. It provides `reduce`, `lift`, arithmetic, `inv`, `distinct_roots` of a quadratic and Tonelli–Shanks `sqrt`.",
+  "f36": "The Hamilton quaternions $B=(-1,-1)_F$ over $F=\\mathbb{Q}(\\sqrt5)$ and the icosian ring $R$, a maximal order of class number one. `Quat` stores $2\\alpha$ in the basis $1,i,j,k$ with `mul`, `nrd`, `trd`, `conj` and `to_e`/`from_e` for the $O_F$-basis `E` of $R$; `icosians()` builds the 120 units of reduced norm 1.",
+  "f37": "For any real quadratic $F$: a totally definite quaternion algebra unramified at every finite place (`QuatAlg::unramified`) and a certified maximal order in it. `MaximalOrder::new` enlarges $O_F\\langle 1,i,j,k\\rangle$ at odd primes and at 2 (`ring_closure`) and `certify` checks closure and discriminant $d_F^4$; `norm_one_units` enumerates units and `local_splitting` gives `OrderSplitting` $O/P^eO\\cong M_2(O_F/P^e)$.",
+  "f38": "`LocalRing` implements $O_F/P^e$ for $F=\\mathbb{Q}(\\sqrt5)$ in one Hermite-normal-form representation $x+yw$ (`Res`), replacing PSAGE's four. Besides arithmetic, `inv`, `distinct_roots` and `sqrt`, it enumerates the ring and the maximal ideal $P/P^e$ (`index_in_p`, `element_in_p`) for `p1`.",
+  "f39": "Exact arithmetic for any real quadratic field $F=\\mathbb{Q}(\\sqrt d)$: `QuadField` with elements `QElt`, ideals `QIdeal` in Hermite normal form (`ideal_mul`, `factor`), primes `QPrime` (`primes_above`, `primes_of_bounded_norm`) and `fundamental_unit` by continued fractions. `ClassGroup` gives wide and narrow class groups with representatives, `generator` for principal ideals and `totally_positive_generator`.",
+  "f40": "Local splittings $R/P^eR\\cong M_2(O_F/P^e)$ of the icosian ring. `LocalSplitting::new` finds an element whose reduced characteristic polynomial has distinct roots mod $P$, forms a rank-one idempotent, lifts it by $\\varepsilon\\mapsto 3\\varepsilon^2-2\\varepsilon^3$, and takes the left-regular action on $A\\varepsilon$; `image` maps an element of $R$ to a 2x2 matrix.",
+  "f41": "The Hecke elements $\\Theta(p)$: one $\\alpha_z\\in R$ with $\\mathrm{nrd}(\\alpha_z)=\\pi$ for each $z\\in\\mathbb{P}^1(O_F/p)$. `theta` memoizes `compute_theta`, which runs one lattice `search` per icosian orbit (kernel lattice, `lll`, Fincke–Pohst `enumerate` with `gram_r`) and fills the other points as $u\\alpha_z$.",
+  "f42": "Weights $k=(k_1,k_2)\\ne(2,2)$ over $\\mathbb{Q}(\\sqrt5)$ by the definite method with coefficients in $L_k$. `Weight` holds $k$, `place_pairs` gives degree-one primes where all computation happens, `rep_matrix` gives the action of a quaternion on $L_k$ and `invariant_dimension` the exact $\\dim L_k^\\Gamma$. `WeightSpace::new` reuses the weight-2 `Space`, and `hecke_mod` assembles $T_p$ modulo a place as Brandt-type blocks summed over $\\Theta(p)$.",
+  "f43": "The higher-weight counterpart of `newspace` over $\\mathbb{Q}(\\sqrt5)$. `WeightNewspaces` holds a `WeightSpace` per divisor; `new_charpolys` and `hecke_charpoly` work modulo pairs of conjugate places and recover polynomials in $O_F[x]$ with `fpoly::PairCrt` under `hecke_bound`, and `newform_orbits` and `orbit_data` give orbits over $F$ and $a_p=h(\\theta)/g'(\\theta)$.",
+  "f44": "The group law and order search for points on $y^2 = x^3 + Ax + B$ over $\\mathbb{F}_p$. `Curve` provides `double`, `add_aff` and `mul` on Jacobian points `Jac`; `traces` uses baby-step giant-step to find every $t$ with $|t|\\le w$ and $(p+1-t)P = O$, switching to `small_order` when $P$ has small order.",
+  "f45": "`Fp`: arithmetic modulo an odd prime $p < 2^{62}$ in Montgomery form, with `mul`/`sqr` via REDC, branchless `add`/`sub`, `pow`, `inv` (as $a^{p-2}$) and `batch_inv` (Montgomery's trick). The free function `jacobi(a, n)` computes the Jacobi symbol.",
+  "f46": "Certified ball enclosures of the real period and canonical height of a rational point on $E/\\mathbb{Q}$. It isolates the real roots of the 2-division cubic by exact bisection, gets periods from the AGM (`agm`, `lattice`) and the elliptic logarithm from Carlson's $R_F$. Public functions: `real_period` ($\\Omega_E$), `canonical_height` (with the local terms passed in from Python) and `log_rational`.",
+  "f47": "Decides with ball arithmetic whether the analytic rank of $E/\\mathbb{Q}$ is 0 or 1, using $f(t)=\\sum a_n/n\\,e^{-2\\pi tn/\\sqrt N}$ with a bounded tail (`f_ball`) to decide the root number. `l_value` returns $L(E,1)$ or $L'(E,1)$, and `low_rank` returns a `LowRank {w, rank, value}` when that value is certainly nonzero.",
+  "f48": "Crate root for traces of Frobenius $a_p = p + 1 - \\#E(\\mathbb{F}_p)$. `EllipticCurve` holds $[a_1,a_2,a_3,a_4,a_6]$ and checked $c_4$, $c_6$, $\\Delta$, with `ap` (direct count `ap_naive` for $p<1000$, baby-step giant-step `ap_bsgs` above), and the crate exports `aplist`, `aplist_many` (parallel) and `moments` (Sato–Tate moments).",
+  "f49": "Finds integral binary quartics with given invariants $I, J$, for 2-descent, using the seminvariants $H, R$, the syzygy $27R^2 = 48a^2IH - H^3 - 64a^3J$ and bounds from the Stoll–Cremona covariant. `search(i, j, max_cost)` returns a `Search` listing the $SL_2(\\mathbb{Z})$ classes, with candidates sieved by residue tables; it also exports `is_square` and `invariants`.",
+  "f50": "Searches for $x$-coordinates $x=r/s^2$ of rational points of small height. `x_coordinates(b2, b4, b6, rmax, smax, limit)` returns pairs $(r,s)$ for which $4r^3 + b_2r^2s^2 + 2b_4rs^4 + b_6s^6$ is a square, filtering with a wheel and square tables before the exact `is_square` test.",
+  "f51": "`anlist(a, local, n)` returns $[0, a_1, \\dots, a_n]$ for $L(E,s)$ from `aplist`, using multiplicativity, $a_{p^{k+1}} = a_pa_{p^k} - pa_{p^{k-1}}$ at good primes and $a_{p^k} = a_p^k$ at bad primes. `Local {p, ap, good}` supplies $a_p$ at primes dividing the discriminant.",
+  "f52": "`C64`, a minimal complex double for the Gamma functions and the L-series: `abs`, `arg`, `conj`, `exp`, principal `ln`, an overflow-safe `recip` and arithmetic operators.",
+  "f53": "The complex Gamma function and the upper incomplete Gamma function in double precision. `ln_gamma(z)` uses a shift and Stirling's series; `gamma_inc(a, z)` returns $\\Gamma(a,z)$ as a `Scaled {ln, m}`, choosing between a series, a closed form near poles (`near_pole`) and Legendre's continued fraction (`continued_fraction`).",
+  "f54": "Crate root for double-precision L-functions of elliptic curves over $\\mathbb{Q}$: declares `an`, `complex`, `gamma`, `lseries` and re-exports `anlist`, `Local`, `C64`, `gamma_inc`, `ln_gamma`, `Scaled`, `root_number`, `terms_needed` and `LSeries`.",
+  "f55": "Evaluates $L(E,s)$ by the smoothed approximate functional equation (Rubinstein) for $\\operatorname{Re} s \\in [-10, 12]$, $|\\operatorname{Im} s| \\le 1000$, summing $a_n$ against incomplete Gamma values with $Q = \\sqrt N/(2\\pi)$. `LSeries::new(an, conductor, eps)` and `LSeries::value(s)` do the work; `terms_needed` bounds how many coefficients are needed, and `root_number` infers $\\varepsilon$ as a consistency check, not a proof.",
+  "f56": "Sage mode for modular forms and elliptic curves over $\\mathbb{Q}$: Sage's names and printing, with all computation in the engine via `sagebrush.mf`, `sagebrush.ap` and `_engine.call`. Key pieces: `Gamma0` and the `dimension_*` functions, `DirichletGroup`, `ModularSymbols` (exact, proven `hecke_polynomial`), `ModularForms`/`CuspForms`, `EllipticCurve` (`ap`, `aplist`, `anlist`, `modular_symbol`, ...), and `newform_orbits`/`NewformOrbit`/`Newforms` returning LMFDB-labelled Galois orbits with trace forms.",
+  "f57": "Sage mode for Hilbert modular forms over $F=\\mathbb{Q}(\\sqrt5)$, a port of PSAGE's sqrt5 package: `SqrtFiveIdeal`, `primes_of_bounded_norm`, and `HilbertModularForms` (weight $(2,2)$, basis of icosian orbits on $\\mathbb{P}^1(O_F/N)$) with `dimension`, `new_dimension`, `hecke_matrix`, `new_decomposition` and `elliptic_curve_factors`. Other weights go to `HilbertCuspFormsWeight` and other real quadratic fields to `QuadraticHilbertModularForms`, through the engine's `hmf_*` and `hmfq_*` calls.",
+  "f58": "The engine's Python API for modular forms of weight $k\\ge2$ on $\\Gamma_0(N)$ with a Dirichlet character: `characters`, `dims` (dimensions of $S_k$, $E_k$, the modular-symbols space and $S_k^{new}$), `charpoly` (exact characteristic polynomial of $T_q$ over $\\mathbb{Z}[\\zeta_m]$ with status), `charpoly_mod`, `newspace`, `newforms` (Galois orbits with LMFDB-ordered trace forms) and `estimate`. Each is one `_engine.call`.",
+  "f59": "The engine's Python API for weight-2, sign $+1$ modular symbols on $\\Gamma_0(N)$: `hecke_charpoly` (mod a prime), `charpoly_exact` (over $\\mathbb{Z}$, proven by CRT), `batch_exact`, `level_data`, `commute`, `estimate` and `rational_newforms` (checked, not proven).",
+  "f60": "The engine's Python API for elliptic curves: `ap(a, p)` (None at bad primes), `aplist`, `aplist_many`, `moments` (Sato–Tate), `low_rank` (certified analytic rank 0 or 1 with an enclosure of $L^{(r)}(E,1)$) and `height` (ball enclosure of the canonical height).",
+  "f61": "The single gateway from Python to the engine: `call(fn, **args)` sends `{\"fn\": fn, ...}` as JSON to `_sbengine.call` and returns the `ok` part of the reply, or raises `ValueError`/`RuntimeError`. Also `call_text`, `chi_arg` (a character as [order, gens, vals]) and opt-in session limits in `_with_limits`.",
+  "note-modsym": "The `modsym` crate's own description: modular symbols for $\\Gamma_0(N)$, Hecke operators via Heilbronn matrices, characteristic polynomials over $\\mathbb{F}_p$ and exactly over $\\mathbb{Z}$ by CRT with a proven bound, plus any weight $k\\ge2$ with character in `general`. Invalid input is an `Err`, never a panic.",
+  "note-hmf": "The `hmf` crate's own description: Hilbert modular forms over $\\mathbb{Q}(\\sqrt5)$ by the definite method, $M_2(N)$ as functions on $R^\\times\\backslash\\mathbb{P}^1(O_F/N)$ with $R$ the icosian ring, ported from Stein's PSAGE, with a module-by-module map and the extension to any real quadratic field and other weights.",
+  "note-ap": "The `ap` crate's own description: $a_p = p+1-\\#E(\\mathbb{F}_p)$ for all primes up to a bound by smalljac's genus-1 strategy (baby-step giant-step over the Hasse interval on $E$ or its twist, with enough points that only one $a_p$ is consistent), so every answer is unique, not probabilistic.",
+  "note-lfun": "The `lfun` crate's own description: L-functions of elliptic curves over $\\mathbb{Q}$ in double precision, from the $a_p$ (`an`) through the Gamma functions (`gamma`) to $L(E,s)$ and the root number (`lseries`).",
+  "overview": "The map of the space: three layers, Sage mode (`lib/_sage_modular.py`, `lib/_sage_hmf.py`), the engine's Python API (`lib/sagebrush/mf.py`, `modsym.py`, `ap.py`, all through `_engine.call`), and the Rust engine (`engine/modsym`, `engine/hmf`, `engine/ap`, `engine/lfun`). The code samples are runnable.",
+  "s-hecke23": "Factors the characteristic polynomial of $T_2$ on the modular symbols of level 23: $(x-3)(x^2+x-1)^2$, the Eisenstein eigenvalue $3$ and the newform with coefficients in $\\mathbb{Q}(\\sqrt5)$, twice. It runs through `ModularSymbols.hecke_polynomial` into `general_exact::exact_charpoly`.",
+  "s-hecke389": "The same computation at level 389: $T_2$'s characteristic polynomial factors into the Eisenstein factor $x-3$ and squared factors of degrees 1, 2, 3, 6 and 20, one per Galois orbit of newforms.",
+  "s-orbits37": "`newform_orbits(37, 2)` lists the two rational newforms of level 37, labelled 37.2.a.a and 37.2.a.b as in LMFDB, with their $q$-expansions; the engine's `\"newforms\"` call does the work.",
+  "s-dims": "$\\dim S_2(\\Gamma_0(N))$ for $N=1,\\dots,30$ via `Gamma0(N).dimension_cusp_forms(2)`, which the engine answers by the Cohen–Oesterle formula in `dims.rs`.",
+  "s-ap11": "The traces of Frobenius $a_p$ of the curve 11a1 for $p<50$ via `EllipticCurve('11a1').ap(p)`, computed by the `ap` crate.",
+  "s-hmf31": "`HilbertModularForms(31)` over $\\mathbb{Q}(\\sqrt5)$: a space of dimension 20 at the level of norm $961=31^2$, i.e. 20 icosian orbits on $\\mathbb{P}^1(O_F/31)$.",
+  "p-dims": "A 3D point plot of $\\dim S_k(\\Gamma_0(N))$ for $N=1,\\dots,40$ and even $k$ from 2 to 24 (heights scaled by $1/3$), showing roughly linear growth in $k$ for each level."
+ },
+ "tours": [
+  {
+   "id": "sage-to-rust",
+   "title": "From a Sage call to the Rust that computes it",
+   "steps": [
+    {
+     "node": "s-hecke23",
+     "text": "Start with one line of Sage: `ModularSymbols(23).hecke_polynomial(2).factor()`. The answer $(x-3)(x^2+x-1)^2$ is the Eisenstein eigenvalue 3 and a newform with coefficients in $\\mathbb{Q}(\\sqrt5)$, appearing twice because this is the full (sign 0) space. Next we follow the call down."
+    },
+    {
+     "node": "f56",
+     "text": "In Sage mode, `ModularSymbols.hecke_polynomial` checks that $n$ is prime and calls `_hecke`, which calls `sagebrush.mf.charpoly(23, 2, 2, None, 0)`. Notice that `_hecke` refuses any answer whose status is not `\"proven\"`: the Sage layer never prints a guess."
+    },
+    {
+     "node": "f58",
+     "text": "`sagebrush.mf.charpoly` is a thin function: it packs level, weight, $q$, character and sign into one `_engine.call(\"charpoly\", ...)`. This layer holds no mathematics, only names and arguments."
+    },
+    {
+     "node": "f61",
+     "text": "`_engine.call` turns the request into JSON `{\"fn\": \"charpoly\", ...}`, hands it to the compiled engine and unpacks `ok` or raises on `error`. The string `\"charpoly\"` is the name to look for in the engine's dispatcher, which calls `general_exact::exact_charpoly`."
+    },
+    {
+     "node": "f8",
+     "text": "`general_exact::exact_charpoly` computes the polynomial mod many primes $\\ell$, one per embedding of $\\zeta_m$, then lifts with a Garner CRT up to a proven coefficient bound. It certifies the dimension with `dim_modsym`, since a mod-$\\ell$ computation can only find too large a space. Each mod-$\\ell$ polynomial comes from the next file."
+    },
+    {
+     "node": "f7",
+     "text": "`GeneralSpace::new_mod` builds the modular symbols $[P,(c,d)]$ modulo the 2-term, character and 3-term relations, and `hecke_charpoly` applies Heilbronn matrices chosen by `heilbronn_for` (Cremona's for $q\\nmid N$, Merel's for $q\\mid N$). The matrix of $T_q$ then goes to linear algebra."
+    },
+    {
+     "node": "f11",
+     "text": "At the bottom, `charpoly` reduces the matrix to Hessenberg form over $\\mathbb{F}_p$, and `sparse_echelon` is what solved the relations a step earlier. Everything above this point was bookkeeping; this is where the loops over numbers run."
+    }
+   ]
+  },
+  {
+   "id": "modsym-hecke",
+   "title": "How modular symbols give Hecke operators",
+   "steps": [
+    {
+     "node": "s-hecke389",
+     "text": "At level 389 the characteristic polynomial of $T_2$ splits into the Eisenstein factor $x-3$ and squared factors of degrees 1, 2, 3, 6 and 20. Each factor is a Galois orbit of newforms. This tour follows the engine's specialised weight-2 path, from $\\mathbb{P}^1(\\mathbb{Z}/N)$ to orbits."
+    },
+    {
+     "node": "f15",
+     "text": "Weight-2 Manin symbols are indexed by $\\mathbb{P}^1(\\mathbb{Z}/N\\mathbb{Z})$, which has $\\psi(N)$ points. `P1List::new` builds lookup tables so that `index` turns any $(c:d)$, normalized by `normalize`, into a symbol number."
+    },
+    {
+     "node": "f17",
+     "text": "`Presentation::new` imposes the relations: the 2-term relations $x+xS=0$ and $x=x\\eta$ by a signed union-find (giving `rep_of` and the generator count `m`), and the 3-term relations $x+xT+xT^2=0$ as integer `rows`. None of this depends on the prime, so it is built once."
+    },
+    {
+     "node": "f18",
+     "text": "`Space::new` reduces the 3-term rows mod $p$ with `sparse_echelon`, giving a basis of the quotient. `hecke_image` sends one generator through the Heilbronn matrices, and `hecke_matrix` assembles $T_q$ from these images, 64 columns at a time."
+    },
+    {
+     "node": "f11",
+     "text": "Here are the two tools the last step used: `heilbronn` produces Cremona's Heilbronn matrices for $T_q$, and `charpoly` gives the characteristic polynomial of the resulting matrix over $\\mathbb{F}_p$."
+    },
+    {
+     "node": "f6",
+     "text": "`exact_charpoly` repeats that computation mod many primes near $2^{31}$ and combines them by `crt`, with a coefficient bound from Deligne (`bound_bits`). A prime whose dimension disagrees with `level_data` is rejected, so the result's status is `\"proven\"`."
+    },
+    {
+     "node": "f14",
+     "text": "Finally `newform_orbits` uses `exact_charpoly_combo` on combinations $\\sum r_iT_{q_i}$, factors, removes the Eisenstein part (`eisenstein_charpoly`), and accepts when the degrees add up to `new_dimension`. Each factor is an `Orbit`, like the degree-20 factor at level 389."
+    }
+   ]
+  },
+  {
+   "id": "dimensions",
+   "title": "Counting dimensions",
+   "steps": [
+    {
+     "node": "s-dims",
+     "text": "`Gamma0(N).dimension_cusp_forms(2)` for $N\\le 30$ gives the genus of $X_0(N)$: 0 until $N=11$, then small numbers. Where does this number come from? Not from modular symbols."
+    },
+    {
+     "node": "f56",
+     "text": "`Gamma0.dimension_cusp_forms` calls `_dims`, which calls `sagebrush.mf.dims(N, k, chi)`, one `_engine.call(\"dims\", ...)`. The reply carries several fields, `cusp`, `eisenstein`, `new`, and `CuspForms(...).dimension()` reads the same `cusp` field."
+    },
+    {
+     "node": "f2",
+     "text": "The engine answers with closed formulas: `dim_cusp_forms` is the Cohen–Oesterle formula for $\\dim S_k(\\Gamma_0(N),\\varepsilon)$, `dim_eisenstein` counts regular cusps, and `dim_modsym` gives $2\\dim S_k+\\dim E_k$. Notice their second job: they certify spaces computed mod $\\ell$."
+    },
+    {
+     "node": "p-dims",
+     "text": "The same formula over a grid, $N\\le 40$ and even $k\\le 24$: for fixed $N$ the dimension grows roughly linearly in $k$, faster for levels with large index $\\psi(N)$. Next: what the new part of these spaces looks like."
+    },
+    {
+     "node": "f13",
+     "text": "`newspace_orbits` uses the dimensions to know when it is done: it certifies $\\dim M^+$, then for each $M\\mid N$ divides out old factors with multiplicity $\\sigma_0(M/M')$ in `new_poly_mod`. What remains has degree $\\dim S_k^{new}$ and factors into Galois orbits."
+    },
+    {
+     "node": "f19",
+     "text": "`labelled_orbits` puts the orbits in LMFDB order, by dimension and then by trace form $\\operatorname{tr}a_n$ computed in `traces_mod`, computing more traces up to the Sturm bound to break ties."
+    },
+    {
+     "node": "s-orbits37",
+     "text": "The result for level 37: $\\dim S_2(\\Gamma_0(37))=2$, split into two rational newforms 37.2.a.a and 37.2.a.b, with the labels and $q$-expansions that the last two files produced."
+    }
+   ]
+  },
+  {
+   "id": "hilbert",
+   "title": "Hilbert modular forms over Q(sqrt 5)",
+   "steps": [
+    {
+     "node": "s-hmf31",
+     "text": "`HilbertModularForms(31)` reports a space of dimension 20 at level 31 over $\\mathbb{Q}(\\sqrt5)$. By Jacquet–Langlands that is 20 functions on a finite set; the tour shows which set."
+    },
+    {
+     "node": "f57",
+     "text": "`HilbertModularForms.__init__` builds the level with `_ideal` (engine call `\"hmf_ideal\"`) and asks for `\"hmf_dimension\"`; `hecke_matrix` asks for `\"hmf_hecke_matrix\"` and `new_decomposition` for `\"hmf_newform_orbits\"`. Each lands in the `hmf` crate."
+    },
+    {
+     "node": "f30",
+     "text": "`Space::from_ideal` builds, for each $P^e\\| N$, a residue ring, a local splitting and the local $\\mathbb{P}^1$, then the orbits of the icosian units; `dimension` is the number of orbits. `hecke_matrix` comes from `hecke_action`, which uses $\\Theta(\\mathfrak{p})$."
+    },
+    {
+     "node": "f36",
+     "text": "The quaternion side: the icosian ring $R$ in $(-1,-1)_F$, a maximal order of class number one, so a single $\\mathbb{P}^1$ suffices. `icosians()` builds its 120 units, which act on $\\mathbb{P}^1(O_F/N)$ through the splittings in `split.rs`."
+    },
+    {
+     "node": "f32",
+     "text": "`Orbits::new` computes the orbits of the icosians on $\\mathbb{P}^1(O_F/N)$; these are the basis of $M_2^B(N)$. At level 31 there are 20 of them, which is the dimension printed in the sample."
+    },
+    {
+     "node": "f41",
+     "text": "For a prime $\\mathfrak{p}$, `theta` finds for each point of $\\mathbb{P}^1(O_F/\\mathfrak{p})$ an element of $R$ of reduced norm a totally positive generator of $\\mathfrak{p}$, by `lll` and Fincke–Pohst `enumerate`. `hecke_action` applies these elements to the orbits to get the rows of $T_\\mathfrak{p}$."
+    },
+    {
+     "node": "f31",
+     "text": "`Newspaces` puts a `Space` at every divisor of $N$, removes the Eisenstein and old parts in `new_charpolys`, finds a `separating_operator`, and `newform_orbits` factors its polynomial over $\\mathbb{Q}$. Rational orbits become `RationalNewform`s whose `ap` reads $a_\\mathfrak{p}$ from one row."
+    }
+   ]
+  }
+ ]
+}

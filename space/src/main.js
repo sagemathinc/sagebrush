@@ -104,7 +104,7 @@ function titleTexture(nd) {
   g.font = `600 ${size}px system-ui, sans-serif`;
   const lines = wrap(g, shortTitle(nd), c.width * 0.9).slice(0, nd.summary ? 2 : 3);
   // (with a summary: the title above, the summary's first lines below it, readable from the middle distance)
-  const ss = size * 0.48, sum = nd.summary ? (g.font = `italic ${ss}px system-ui, sans-serif`, wrap(g, texToText(nd.summary).replace(/\s+/g, " "), c.width * 0.9).slice(0, 3)) : [];
+  const ss = size * 0.48, sum = nd.summary ? (g.font = `italic ${ss}px system-ui, sans-serif`, wrap(g, texToText(nd.summary).replace(/\*\*|`/g, "").replace(/\s+/g, " "), c.width * 0.9).slice(0, 3)) : [];
   const total = lines.length * size * 1.2 + (sum.length ? size * 0.4 + sum.length * ss * 1.3 : 0);
   const y0 = (c.height - total) / 2 + size;
   g.font = `600 ${size}px system-ui, sans-serif`;
@@ -137,7 +137,7 @@ function faceTexture(nd) {
   if (nd.summary) {
     const ss = c.height * (nd.kind === "file" ? 0.062 : 0.05);
     g.font = `italic ${ss}px system-ui, sans-serif`;
-    const rows = wrap(g, texToText(nd.summary).replace(/\s+/g, " "), c.width - 2.4 * pad).slice(0, nd.kind === "file" ? 4 : 5);
+    const rows = wrap(g, texToText(nd.summary).replace(/\*\*|`/g, "").replace(/\s+/g, " "), c.width - 2.4 * pad).slice(0, nd.kind === "file" ? 4 : 5);
     g.fillStyle = summaryBand(); g.fillRect(pad * 0.6, y - ss * 0.9, c.width - 1.2 * pad, rows.length * ss * 1.3 + ss * 0.5);
     g.fillStyle = fg;
     for (const r of rows) { g.fillText(r, pad, y + ss * 0.15); y += ss * 1.3; }

@@ -77,6 +77,14 @@ Over this connection Claude has the web and your Sagebrush files, not your disk.
 
 `bun space/test-agents-space.mjs` (from the repository's root, after the build above) checks this end to end in headless Chromium, with a stand-in for the agent.
 
+## For understanding code: summaries, shapes, tours
+
+- Each object can carry a `summary` (what it is *for*), drawn on its face and readable from a distance, and at the top of the drawer.
+- A file's slab grows with its length (`lines`), and every object has its own small shape above its slab, chosen by its id: the same file always looks the same.
+- `tours` are guided paths through a space: pick one in the panel and go **Next** / **Back** (or **N** / **P**); in a headset, **Tour** / **Next stop** on the wrist menu.
+- `whitespace-code.space.json` is this code itself (`node gen-self.mjs`), with four tours. `modular-forms.space.json` has a summary for every object and four tours, written by reading the code.
+- `node annotate.mjs public/X.space.json notes/X.json` merges a notes file (`{ summaries, tours }`) into a space: an agent writes the notes, the tool checks every id.
+
 ## The rough alpha (a static site)
 
 `space/build-alpha.sh` builds the whole site with the space into `web/dist` (from clean, with checks) and copies it to `space/site/public`, the assets of the Worker that serves https://space.sagebrush.cloud (`space/site/cloudflare.config.ts`: static assets only, as sagebrush.space is served; deploy with `cd space/site && npm ci && npx cf deploy`). Cloudflare applies `_headers`: every page gets COOP/COEP, which the engine's interrupt needs, and its CSP. The engine, its worker and the space are all in `web/dist`; nothing is fetched from elsewhere. The space says "rough alpha" in its corner, and the site isn't indexed (`robots.txt`).
