@@ -8,7 +8,8 @@
 // interpreter, Restart, and back to "This browser".  It serves web/dist
 // itself (web/serve.py on a port of the system's choice):
 //   bun web/build.ts && node web/test-remote-preview.mjs      (CHROME=... for another browser binary;
-//   SHOTS=dir saves screenshots of the Connect sheet and of a cell run on the GPU kernel there)
+//   SHOTS=dir saves screenshots of the Connect sheet and of a cell run on the GPU kernel there;
+//   REMOTE_PREVIEW_PART=1 runs scenarios 1-9 only, =2 scenarios 10-16 only, as CI's two shards do)
 import { spawn } from "node:child_process";
 import { mkdtempSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
