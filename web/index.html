@@ -200,7 +200,7 @@
   .menu .danger { color: var(--err); }
   .menu[hidden], .menu [hidden] { display: none; }
   /* an open panel: checked */
-  .menu button[aria-pressed="true"]::after { content: "✓"; color: var(--accent); }
+  .menu button[aria-pressed="true"]::after, .menu button[aria-checked="true"]::after { content: "✓"; color: var(--accent); }
   .menu kbd { font-size: 11px; color: var(--muted); }
   .pick { border: 1px solid var(--line); border-radius: 10px; background: var(--cell); color: var(--fg); padding: 14px 16px; width: min(560px, 92vw); }
   .pick::backdrop { background: rgba(0,0,0,.35); }
@@ -770,6 +770,7 @@
 // or reports the URL; the agent chunk, loaded later, is handed it)
 import { pairLink, adoptLink } from "./workspace/pair-link.ts";
 import { takeHandoff } from "./workspace/pair-handoff.ts";
+import { createdRunner, runInputs } from "./workspace/agent-made.ts";
 // (a bare pairing link the board page handed over within this tab (pair-handoff.ts): this page's link, taken once, before
 // anything reads it; only when the address has no query and no hash)
 if (!pairLink() && !location.search && !location.hash) { const h = takeHandoff(location.pathname); if (h) adoptLink(h); }
@@ -1514,6 +1515,10 @@ const handover = writerHandover({
   // (the notebook's own cells: what it saves; a cell no longer among them is gone from the document)
   hasKey: (k) => nb.cells().some((c) => c.id === k),
   notApplied: (n) => { inputNotAppliedCount += n; sayWriterBar(journalPage.pageControls(nb.store).bar); },
+  // (a whole write of the notebook asked of this tab while it writes it (an agent's, through any page of this browser):
+  // made as a revert is, a change made here, saved and recorded)
+  shownDoc: () => (nb.store ? nb.snapshot() : null),
+  replaceDoc: (doc) => nb.replace(doc),
 });
 const nb = createNotebook($("#cells"), { kernel: null, staleOnLoad: true, analyzer, reactive: REACTIVE, refuseRun: (cell) => refuseHere(cell), onExplicitRun: () => { if (current.id) kernels.get(current.id)?.rotateIfWidened?.(); }, remoteGate: (k, page) => remoteMod?.gateFor(k, page), mystBook: () => bookAcc.mystBook() });
 // Where this browser's reader was in each notebook (design/view-state.md):
@@ -3734,6 +3739,47 @@ document.addEventListener("keydown", (e) => {
 });
 // (the ⋯ menu's items have their own handlers; a pick closes it)
 const moreMenu = $("#moremenu"), toggleMoreMenu = menuOf($("#morebtn"), moreMenu);
+// Figures: how this notebook's figures are shown, in every language (web/notebook/notebook.js figures, kept in the
+// notebook and given to the interpreter with each run; lib/_graphics.py figures): an in-place group, as Help's.
+const figuresGroup = menuGroup(moreMenu, "Figures", "figures", () => syncFigures(), false, $("#restart").nextElementSibling);
+figuresGroup.button.title = "How this notebook's figures are shown, in every language (kept in the notebook), unless its code chooses otherwise";
+const figureItems = [
+  ["auto", "Auto", "An SVG, sharp at any zoom; for a figure whose SVG would be over 1 MiB, a sharp PNG"],
+  ["svg", "SVG", "Always the SVG, however many points a figure has"],
+  ["png", "PNG", "A PNG drawn at twice the size; SVG if PNG can't be drawn"],
+].map(([f, label, title]) => {
+  const b = document.createElement("button");
+  b.setAttribute("role", "menuitemradio");
+  b.dataset.figures = f;
+  b.textContent = label;
+  b.title = b.dataset.title = title;
+  b.onclick = () => { if (!b.disabled) { nb.setFigures(f); syncFigures(); } };
+  return b;
+});
+figuresGroup.box.append(...figureItems);
+function syncFigures() {
+  const f = nb.figures?.() ?? "auto";
+  // (a remote kernel (remote compute, a paired computer) isn't given the choice yet: its rows disabled, saying so,
+  // so the menu never seems to do what it doesn't)
+  const remote = kernelPick.value !== "local";
+  for (const b of figureItems) {
+    b.setAttribute("aria-checked", String(b.dataset.figures === f));
+    b.disabled = remote;
+    b.setAttribute("aria-disabled", String(remote));
+    b.title = remote ? "Not available for remote kernels yet" : b.dataset.title;
+  }
+}
+// (its closed rows hidden in their own right, as Help's)
+const openFigures = async (on = figuresGroup.box.hidden) => {
+  for (const b of figureItems) b.hidden = !on;
+  if (on) syncFigures();
+  await figuresGroup.open(on);
+};
+figuresGroup.button.onclick = (ev) => { ev.stopPropagation(); void openFigures(); };
+void openFigures(false);
+syncFigures();
+// (and whenever ⋯ is opened: the notebook open may have changed since, with its own choice)
+$("#morebtn").addEventListener("click", syncFigures);
 // The long tail of help links is one in-place group, using File's New ▸ / Recent ▸ pattern.  H still opens the
 // shortcuts directly; this only changes where their menu row lives.
 const helpGroup = menuGroup(moreMenu, "Help", "help", () => {}, false, $("#keysbtn"));
@@ -4834,6 +4880,8 @@ const wsReady = (async () => {
     try { await migrate(w, localStorage); } catch (e) { console.warn("workspace: bringing in what was kept before:", e); }
     ws = w;
     window.sagebrush.workspace = w.forAgent("agent:page");
+    // (tests: the workspace itself, its verbs with a check of the test's own (admit): loopback pages only)
+    if (/^(localhost|127\.0\.0\.1)$/.test(location.hostname)) window.__sbTestWs = w;
     // (a newer page upgraded the workspace: said, with Reload; and its files moved beside the index, a little at a time)
     w.onClosed(() => { docGen++; pageRunGone?.(); showReloadNotice(); });
     if (w.closed) showReloadNotice();
@@ -5103,6 +5151,9 @@ const agentBtn = $("#agentbtn");
 let agentPairing = null, agentTries = 0;
 const pairAgent = (w) => (agentPairing ??= import(new URL("sagebrush-agent.js", location.href).href + (agentTries++ ? `?try=${agentTries}` : ""))
   .then((m) => m.mountAgentPairing(w, { runVerbs: m.runVerbsFor(agentRuns(m, w)),
+    // (a reload of this tab keeps the agent: the tab's reload record, resumed with no new Allow while the grant lasts;
+    //  a new tab doesn't, unless the grant was remembered (decided Nov 19 2026))
+    reload: { scope: { workspace: `sagebrush-workspace/${w.identity.workspace}`, page: location.origin + location.pathname } },
     // (what the agent creates: a notebook opens here at once, in place, so the pairing stays (decided Nov 18 2026), as an
     //  automatic open (an intent): a notebook the person opens meanwhile wins, and the agent's never replaces it after.
     //  The bar's Open is the person's own open: the last one, a board in a tab of its own, a file as Files opens it)
@@ -5116,49 +5167,24 @@ function agentOpen(ref, intent) {
   return openId(ref, null, intent).then((ok) => { wsTrackCurrent(); return ok; }, (e) => { if (!e?.navWon) sayNotLeft(e); return false; });
 }
 // A notebook a paired agent created: opened here at once, then run once by itself, as the person's Run all would, when
-// the conditions decided Nov 18 2026 hold. Its creation's op is spent the first time it is announced, before anything
-// is read or checked, and never armed again (in memory only: a reload starts with none, so nothing runs after one): a
-// second announcement, a reconnect, a second open, a failure or a refusal never runs it. It runs only
-//   - if this page's own pairing created it, and the grant it was created under is still in force as the run is
-//     admitted, with May run code and Everything (AgentPairing.mayRunCreated);
-//   - if, read back at once, it is still at its creation's own revision (a new notebook's first: one more at each write,
-//     stores.js), and at the admission the notebook shown is that one with what Run all reads the same as read back
-//     (runInputs, canonical: its language, pinned package set, seed, autorun and metadata, and each cell's id, kind,
-//     source and metadata, manual among them). Nothing else is compared: an edit undone meanwhile isn't seen, nor a
-//     change to anything Run all doesn't read;
-//   - in the notebook's own interpreter, the sandboxed runner with its write trees: none for a new notebook, so a write
-//     asks the person (Confinement phase 2), with Run's state, Stop and outputs as ever.
-const agentRunSpent = new Set();
-// (a value with its object keys sorted, so the same inputs always give the same text; a value left out stays left out
-//  and null stays null, as they differ: no pin is the current package set, a null pin turns optional packages off)
-const canon = (v) => Array.isArray(v) ? v.map(canon) : v && typeof v === "object" ? Object.fromEntries(Object.keys(v).sort().map((k) => [k, canon(v[k])])) : v;
-const runInputs = (doc) => JSON.stringify(canon({ mode: doc?.mode, pkgset: doc?.pkgset, seed: doc?.seed, autorun: doc?.autorun, metadata: doc?.metadata,
-  cells: (doc?.cells ?? []).map((c) => ({ id: c.id, kind: c.type === "markdown" || c.type === "raw" ? c.type : "code", code: String(c.code ?? ""), metadata: c.metadata })) }));
-const CREATED_REV = 1;
+// the conditions decided Nov 18 2026 hold (workspace/agent-made.ts, the one decision, the Agents page's pane's too):
+// here, the notebook shown is current, and it runs in its own interpreter, the sandboxed runner with its write trees:
+// none for a new notebook, so a write asks the person (Confinement phase 2), with Run's state, Stop and outputs as ever.
 const testHost = /^(localhost|127\.0\.0\.1)$/.test(location.hostname);
 // (the tests' view, on a local host only: how many creations were announced to this page, and the last one, kept here,
 //  never handed out; the tests' holds get its path, a string, never the record or the pairing)
 let agentAnnounced = 0, agentMadeLast = null;
-async function agentMade(c, p, intent) {
-  // (spent at once: a second announcement of the same creation is no second chance)
-  if (agentRunSpent.has(c.op)) return;
-  agentRunSpent.add(c.op);
-  if (testHost) { agentAnnounced++; agentMadeLast = { c, p }; }
-  let made = null;
-  try {
-    // (the tests' hold, on a local host only: between the announcement and the read back)
-    if (testHost && typeof window.__agentReadHold === "function") await window.__agentReadHold(String(c.path));
-    const w = await wsNow();
-    const r = w && (await w.read(c.path));
-    if (r?.entry?.kind === "notebook" && r.entry.ref === c.ref && r.rev === CREATED_REV) made = runInputs(r.content);
-  } catch {}
-  const opened = await agentOpen(c.ref, intent);
-  // (the tests' hold, on a local host only: between the open and the admission)
-  if (testHost && typeof window.__agentRunHold === "function") await window.__agentRunHold(String(c.path));
-  // (admitted here, all in one turn: every condition, then the run)
-  if (!opened || current.id !== c.ref || made === null || runInputs(nb.snapshot()) !== made || !p.mayRunCreated(c)) return;
-  nb.runAll();
-}
+const agentMade = createdRunner({
+  read: async (path) => { const w = await wsNow(); return w && (await w.read(path)); },
+  open: (c, intent) => agentOpen(c.ref, intent),
+  runIfShown: (ref, ok) => { if (current.id !== ref || !ok(nb.snapshot())) return false; nb.runAll(); return true; },
+  ...(testHost ? {
+    // (the tests' holds, on a local host only: between the announcement and the read back, and between the open and the admission)
+    holdRead: (path) => (typeof window.__agentReadHold === "function" ? window.__agentReadHold(path) : undefined),
+    holdRun: (path) => (typeof window.__agentRunHold === "function" ? window.__agentRunHold(path) : undefined),
+    announced: (c, p) => { agentAnnounced++; agentMadeLast = { c, p }; },
+  } : {}),
+});
 // (the tests' replay of exactly the last announcement, which its spent op refuses; and the count, read only)
 if (testHost) { window.__agentMadeAgain = () => (agentMadeLast ? agentMade(agentMadeLast.c, agentMadeLast.p, { attach: attachSeq }) : null); Object.defineProperty(window, "__agentAnnounced", { get: () => agentAnnounced }); }
 // (an agent's runs of code: workspace/agent-runs.ts, in the agent's chunk, shared with the Agents page; this page gives
@@ -5240,9 +5266,16 @@ if (/^(localhost|127\.0\.0\.1)$/.test(location.hostname)) window.__agentRunsFor 
 const agentFailed = () => { statusEl.textContent = "Couldn't load the agent connection. Try Agent or ⋯ ▸ Connect an agent… again, or reload the page."; };
 // (where Agent is offered: not in the desktop app or the CLI's page, pages on this computer the agent's program doesn't accept)
 const agentHere = !LOCAL && !window.__TAURI__;
-// (a ?pair= link, or an agent this browser remembers: the chunk mounted now, to connect or reconnect)
+// (a ?pair= link, an agent this tab had before its reload (its reload record, agent-pair.ts's RELOAD_KEY), or an agent this
+// browser remembers: the chunk mounted now, to connect or reconnect)
+// (only on a reload of this tab: after any other navigation the record is dropped here, unread, as the pairing module
+//  would discard it (reloadDecision), and nothing is fetched for it; a page in a frame (the Agents page's .tex pane) leaves
+//  the record alone: it shares the tab's sessionStorage, and the record is the top page's)
+const reloadRecorded = () => { try { if (window.top !== window || sessionStorage.getItem("sb-agent-reload-v1") === null) return false; if (performance.getEntriesByType("navigation")[0]?.type === "reload") return true; sessionStorage.removeItem("sb-agent-reload-v1"); return false; } catch { return false; } };
+// (decided once, at load, before anything else is looked at: a ?pair= link or another way in never skips the drop)
+const reloadNow = reloadRecorded();
 const restoreAgent = (w, failed) => {
-  if (pairLink()) void pairAgent(w).catch(failed);
+  if (pairLink() || reloadNow) void pairAgent(w).catch(failed);
   else void w.agentGrants().then((k) => { if (Object.keys(k ?? {}).length) void pairAgent(w).catch(failed); }, () => {});
 };
 // (started once the page knows it shows a notebook, not the LaTeX editor, which has its own: one pairing per page; an

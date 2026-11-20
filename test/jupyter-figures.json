@@ -1,0 +1,244 @@
+{
+ "made_by": "test/jupyter_figures_gen.py",
+ "python": "3.14.4",
+ "ipykernel": "7.3.0",
+ "matplotlib": "3.11.1",
+ "matplotlib_inline": "0.2.2",
+ "cases": [
+  {
+   "name": "a figure shown at the cell's end",
+   "cells": [
+    "import matplotlib.pyplot as plt\nplt.plot([1, 2, 3]);"
+   ],
+   "outputs": [
+    {
+     "type": "display_data",
+     "mimes": [
+      "image/png",
+      "text/plain"
+     ],
+     "metadata": {},
+     "png": [
+      556,
+      413
+     ]
+    }
+   ]
+  },
+  {
+   "name": "a figure of its own size",
+   "cells": [
+    "import matplotlib.pyplot as plt\nfig, ax = plt.subplots(figsize=(4, 3))\nax.plot([1, 2]);"
+   ],
+   "outputs": [
+    {
+     "type": "display_data",
+     "mimes": [
+      "image/png",
+      "text/plain"
+     ],
+     "metadata": {},
+     "png": [
+      361,
+      274
+     ]
+    }
+   ]
+  },
+  {
+   "name": "a figure as the cell's value",
+   "cells": [
+    "import matplotlib.pyplot as plt\nfig, ax = plt.subplots(figsize=(4, 3))\nax.plot([1, 2])\nplt.close(fig)",
+    "fig"
+   ],
+   "outputs": [
+    {
+     "type": "execute_result",
+     "mimes": [
+      "image/png",
+      "text/plain"
+     ],
+     "metadata": {},
+     "png": [
+      361,
+      274
+     ]
+    }
+   ]
+  },
+  {
+   "name": "figure_formats svg",
+   "cells": [
+    "import matplotlib.pyplot as plt",
+    "%config InlineBackend.figure_formats = ['svg']\nplt.plot([1, 2, 3]);"
+   ],
+   "outputs": [
+    {
+     "type": "display_data",
+     "mimes": [
+      "image/svg+xml",
+      "text/plain"
+     ],
+     "metadata": {}
+    }
+   ]
+  },
+  {
+   "name": "figure_formats png and svg",
+   "cells": [
+    "import matplotlib.pyplot as plt",
+    "%config InlineBackend.figure_formats = {'png', 'svg'}\nplt.plot([1, 2, 3]);"
+   ],
+   "outputs": [
+    {
+     "type": "display_data",
+     "mimes": [
+      "image/png",
+      "image/svg+xml",
+      "text/plain"
+     ],
+     "metadata": {},
+     "png": [
+      556,
+      413
+     ]
+    }
+   ]
+  },
+  {
+   "name": "figure_format svg (one)",
+   "cells": [
+    "import matplotlib.pyplot as plt",
+    "%config InlineBackend.figure_format = 'svg'\nplt.plot([1, 2, 3]);"
+   ],
+   "outputs": [
+    {
+     "type": "display_data",
+     "mimes": [
+      "image/svg+xml",
+      "text/plain"
+     ],
+     "metadata": {}
+    }
+   ]
+  },
+  {
+   "name": "figure_format retina",
+   "cells": [
+    "import matplotlib.pyplot as plt",
+    "%config InlineBackend.figure_format = 'retina'\nplt.plot([1, 2, 3]);"
+   ],
+   "outputs": [
+    {
+     "type": "display_data",
+     "mimes": [
+      "image/png",
+      "text/plain"
+     ],
+     "metadata": {
+      "image/png": {
+       "width": 557,
+       "height": 413
+      }
+     },
+     "png": [
+      1114,
+      826
+     ]
+    }
+   ]
+  },
+  {
+   "name": "figure_format retina, a figure of its own size",
+   "cells": [
+    "import matplotlib.pyplot as plt",
+    "%config InlineBackend.figure_format = 'retina'\nfig, ax = plt.subplots(figsize=(4, 3))\nax.plot([1, 2]);"
+   ],
+   "outputs": [
+    {
+     "type": "display_data",
+     "mimes": [
+      "image/png",
+      "text/plain"
+     ],
+     "metadata": {
+      "image/png": {
+       "width": 362,
+       "height": 274
+      }
+     },
+     "png": [
+      724,
+      549
+     ]
+    }
+   ]
+  },
+  {
+   "name": "figure_formats png",
+   "cells": [
+    "import matplotlib.pyplot as plt",
+    "%config InlineBackend.figure_formats = ['png']\nplt.plot([1, 2, 3]);"
+   ],
+   "outputs": [
+    {
+     "type": "display_data",
+     "mimes": [
+      "image/png",
+      "text/plain"
+     ],
+     "metadata": {},
+     "png": [
+      556,
+      413
+     ]
+    }
+   ]
+  },
+  {
+   "name": "a format it can't show",
+   "cells": [
+    "%config InlineBackend.figure_formats = ['bmp']"
+   ],
+   "outputs": []
+  },
+  {
+   "name": "a format it can't show leaves the formats",
+   "cells": [
+    "import matplotlib.pyplot as plt",
+    "%config InlineBackend.figure_formats = ['svg']",
+    "%config InlineBackend.figure_formats = ['bmp']",
+    "plt.plot([1, 2, 3]);"
+   ],
+   "outputs": [
+    {
+     "error": "ValueError"
+    }
+   ]
+  },
+  {
+   "name": "figure_formats from a name",
+   "cells": [
+    "import matplotlib.pyplot as plt\nwanted = ['svg']",
+    "%config InlineBackend.figure_formats = wanted\nplt.plot([1, 2, 3]);"
+   ],
+   "outputs": [
+    {
+     "type": "display_data",
+     "mimes": [
+      "image/svg+xml",
+      "text/plain"
+     ],
+     "metadata": {}
+    }
+   ]
+  },
+  {
+   "name": "another configurable",
+   "cells": [
+    "%config Foo.bar = 1"
+   ],
+   "outputs": []
+  }
+ ]
+}

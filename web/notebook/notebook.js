@@ -347,9 +347,19 @@ export function createNotebook(root, opts = {}) {
     }
   }
   // (an output that can't be drawn, however malformed: said, with its text, the rest of the document drawn all the same)
-  function appendDisplay(box, b) {
+  // A picture's size to show it at, from a display's metadata ({mime: {width, height}}): both finite positive numbers
+  // (at most 100,000 each), else none, and the picture is shown at its own size.
+  function pictureShownSize(md, mime) {
+    const m = md && typeof md === "object" ? md[mime] : null;
+    const w = m && typeof m === "object" ? m.width : undefined, ht = m && typeof m === "object" ? m.height : undefined;
+    const ok = (x) => typeof x === "number" && Number.isFinite(x) && x > 0 && x <= 1e5;
+    return ok(w) && ok(ht) ? { width: Math.round(w), height: Math.round(ht) } : null;
+  }
+  // (md: the display's metadata, Jupyter's: a picture's width and height to show it at, a PNG drawn at twice its
+  // size, lib/_graphics.py; taken only as finite positive numbers, pictureShownSize)
+  function appendDisplay(box, b, md) {
     try {
-      drawDisplay(box, b);
+      drawDisplay(box, b, md);
     } catch (e) {
       const el = h("div", "html-out");
       el.sbBundle = { ...b };
@@ -359,7 +369,7 @@ export function createNotebook(root, opts = {}) {
       box.appendChild(el);
     }
   }
-  function drawDisplay(box, b) {
+  function drawDisplay(box, b, md) {
     if (b["text/latex"] && b["application/vnd.sagebrush.typeset"]) return appendLatex(box, b);
     if (typeof b["text/markdown"] === "string" && !b["image/svg+xml"] && !b["image/png"] && !b["image/jpeg"] && !b["image/webp"]) return appendMarkdown(box, b);
     const fig = h("figure", "plot");
@@ -392,7 +402,10 @@ export function createNotebook(root, opts = {}) {
     else if (raster) {
       // (within the bounds its header gives, and this document's pixels in
       // all: image-size.ts; else a placeholder, the picture kept as it was)
-      const show = () => Object.assign(new Image(), { src: `data:${raster[0]};base64,${raster[1]}`, alt: b["text/plain"] || "image" });
+      // (shown at the size its metadata gives, when it gives one: a PNG drawn at twice it is sharp on a dense screen)
+      const size = pictureShownSize(md, raster[0]);
+      if (size) fig.sbMeta = { [raster[0]]: size };
+      const show = () => Object.assign(new Image(), { src: `data:${raster[0]};base64,${raster[1]}`, alt: b["text/plain"] || "image" }, size ?? {});
       const why = pixels.take(imageSize(raster[0], raster[1]), raster[0] + "\n" + pictureKey(raster[1]));
       if (!why) fig.appendChild(show());
       else {
@@ -428,7 +441,7 @@ export function createNotebook(root, opts = {}) {
     if (!box) return null;
     return {
       out: (text, isErr) => appendText(box, text, isErr),
-      display: (b) => appendDisplay(box, b),
+      display: (b, md) => appendDisplay(box, b, md),
       interact: (spec) => renderInteract(box, spec),
       clear: () => box.replaceChildren(),
       input: (prompt, reply) => askInput(box, prompt, reply, waiting),
@@ -498,12 +511,12 @@ export function createNotebook(root, opts = {}) {
         // notebook: its picture is, and running the cell again restores the view
         const b = { ...el.sbBundle };
         if ((b[SCENE3D]?.length ?? 0) > 8e6) delete b[SCENE3D];
-        outs.push({ output_type: "display_data", data: b, metadata: {} });
+        outs.push({ output_type: "display_data", data: b, metadata: el.sbMeta ?? {} });
       } else if (el.tagName === "FIGURE") {
         const svg = el.querySelector("svg"), img = el.querySelector("img"), data = {};
         if (svg) { data["image/svg+xml"] = new XMLSerializer().serializeToString(svg); data["text/plain"] = svg.getAttribute("aria-label") || "picture"; }
         else if (img) { const [head, b64] = img.src.split(","); data[head.slice(5, head.indexOf(";"))] = b64; data["text/plain"] = img.alt; }
-        outs.push({ output_type: "display_data", data, metadata: {} });
+        outs.push({ output_type: "display_data", data, metadata: (img && el.sbMeta) || {} });
       } else if (el.classList.contains("interact")) {
         stream("stdout", "[interactive controls: run the cell to use them]\n");
         outs.push(...saveOutputs(el.querySelector(".iout")));
@@ -524,7 +537,7 @@ export function createNotebook(root, opts = {}) {
         const b = {};
         for (const [key, v] of Object.entries(o.data)) b[key] = joinText(v);
         if (Object.keys(b).every((k) => k === "text/plain")) appendText(box, (b["text/plain"] ?? "") + "\n", false);
-        else appendDisplay(box, b);
+        else appendDisplay(box, b, o.metadata);
       }
     }
   }
@@ -802,7 +815,7 @@ export function createNotebook(root, opts = {}) {
         }, INTERACT_SWAP_MS);
       },
       out: (text, isErr) => appendText(box(), text, isErr),
-      display: (b) => appendDisplay(box(), b),
+      display: (b, md) => appendDisplay(box(), b, md),
       interact: (spec) => renderInteract(box(), spec),
       clear: () => box().replaceChildren(),
       input: (prompt, reply) => askInput(box(), prompt, reply),
@@ -826,7 +839,7 @@ export function createNotebook(root, opts = {}) {
         finish();
       },
       stopped(message) { end(null); it.buffer = null; it.superseded = false; appendText(it.out, message, true); it.dirty = false; finish(); },
-    });
+    }, { figures: figures() });
   }
 
   // ---------------------------------------------------------- running cells
@@ -1023,7 +1036,7 @@ export function createNotebook(root, opts = {}) {
     let waited = 0, waitFrom = null;
     const k = kernel;
     const send = viaWave ?? ((c, o, sink) => k.execute(c, o, sink));
-    return cellSeed(cell).then((seed) => new Promise((resolve) => send(code, { mode, cell: cell.id, forget, mangle: reactive(), ...(seed ? { seed } : {}), ...(scoped ? { scoped } : {}), ...(extra ?? {}) }, {
+    return cellSeed(cell).then((seed) => new Promise((resolve) => send(code, { mode, cell: cell.id, forget, mangle: reactive(), figures: figures(), ...(seed ? { seed } : {}), ...(scoped ? { scoped } : {}), ...(extra ?? {}) }, {
       start() {
         clear();
         cell.el.classList.replace("queued", "running");
@@ -2086,6 +2099,30 @@ export function createNotebook(root, opts = {}) {
   const baseOf = (m, list) => ({ mode: m, cells: (list ?? []).map((c) => ({ id: c.id, code: c.code ?? "", ...(c.type === "markdown" || c.type === "raw" ? { type: c.type } : {}), ...(c.type === "markdown" && c.attachments ? { attachments: c.attachments } : {}) })) });
   const syncedOf = (rev, list, m) => ({ rev, cells: new Map((list ?? []).map((c) => [c.id, cellKey(c)])), doc: baseOf(m, list) });
   const setSynced = (rev, list, m) => { shown.synced = syncedOf(rev, list, m); };
+  // How this notebook's figures are shown (the page's Figures choice, in every language): "auto" (an SVG, or a sharp
+  // PNG for one whose SVG would be over 1 MiB), "svg" or "png"; kept in the notebook's metadata, sagebrush.figures,
+  // only when it isn't "auto", and given to the interpreter with each run (lib/_graphics.py figures).
+  const FIGURES = ["auto", "svg", "png"];
+  function figures() {
+    const f = meta.metadata?.sagebrush?.figures;
+    return FIGURES.includes(f) ? f : "auto";
+  }
+  // m with sagebrush.figures set to f in its metadata (undefined: removed), and no empty metadata left; m itself unchanged
+  function withFigures(m, f) {
+    const { metadata, ...r } = m;
+    const md = { ...(metadata ?? {}) }, sb = { ...(md.sagebrush ?? {}) };
+    if (f === undefined) delete sb.figures;
+    else sb.figures = f;
+    if (Object.keys(sb).length) md.sagebrush = sb;
+    else delete md.sagebrush;
+    return Object.keys(md).length ? { ...r, metadata: md } : r;
+  }
+  function setFigures(f) {
+    if (!FIGURES.includes(f) || f === figures()) return;
+    meta = withFigures(meta, f === "auto" ? undefined : f);
+    gateCfg = null;
+    schedule();
+  }
   function snapshot() {
     return {
       ...meta, mode,
@@ -2347,6 +2384,12 @@ export function createNotebook(root, opts = {}) {
     let dirty = false;
     meta = { ...meta, ...rest };
     gateCfg = null;
+    // (how its figures are shown is the incoming document's alone: none there is Auto, never the old choice kept)
+    const incoming = rest.metadata?.sagebrush?.figures;
+    if (meta.metadata?.sagebrush?.figures !== incoming) {
+      meta = withFigures(meta, incoming);
+      gateCfg = null;
+    }
     if (!keepLocal) kernel?.remoteGate?.documentReplaced(); // (a revert replaces the document)
     if (m && m !== mode) setMode(m, false);
     const order = cells().map((c) => c.id);
@@ -2724,7 +2767,7 @@ export function createNotebook(root, opts = {}) {
     // started starts a new one first (confinement phase 2), whose restart makes every cell stale)
     runCells(ids, { consent: _consent, ...o } = {}) { opts.onExplicitRun?.(); return reactive() ? engine().run(ids, o) : Promise.all(ids.map((id) => cellById(id)).filter(Boolean).map((c) => run(c))); },
     applyEdits, graph, verify, fixRedefinitions,
-    setMode, setType, setInput, renderMd, select, edit,
+    setMode, setType, setInput, renderMd, select, edit, figures, setFigures,
     /** X1: load the language's environment now, for the user's choice of it (index.html's menu). */
     warm,
     /** Measure every editor again now (after the notebook was hidden). */

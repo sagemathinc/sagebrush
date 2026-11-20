@@ -138,7 +138,7 @@
     {
       "id": "graphics",
       "title": "Plots and figures",
-      "catalog": { "files": [], "tags": [] },
+      "catalog": { "files": ["sagebrush.json"], "tags": [] },
       "suites": ["matlab-tests/test_plot.m", "matlab-tests/test_plot_handles.m", "matlab-tests/test_plot_limits.m"],
       "search": "plot figure"
     },

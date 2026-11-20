@@ -123,13 +123,17 @@ def show(obj, *more, **options):
         1 2/3
     """
     if not more:
-        if isinstance(obj, Graphics3d):
+        # (a picture is an instance of a plot module's class only once that
+        # module is loaded: show(1) doesn't load them)
+        p3, p2 = _sys0.modules.get("sage_plot3d"), _sys0.modules.get("sage_plot")
+        if p3 is not None and isinstance(obj, p3.Graphics3d):
             return obj.show(**options)
-        if isinstance(obj, (_Graphics2d, _GraphicsArray, _Animation)):
-            return _show2d(obj, **options)
+        if p2 is not None and isinstance(obj, (p2.Graphics, p2.GraphicsArray, p2.Animation)):
+            return p2.show(obj, **options)
         # (a picture-like object without a LaTeX form, a graph or a
         # polyhedron: its own rich display)
         if not hasattr(obj, "_latex_") and any(hasattr(obj, m) for m in _RICH_DISPLAY):
+            from sage_plot import show as _show2d
             return _show2d(obj, **options)
     from _sage_expr import show_typeset
     return show_typeset(obj, *more)
@@ -4095,6 +4099,7 @@ class _ContinuedFractionReal:
         if not hasattr(self, "_aa"):
             if len(self._x._s) > _CF_MAX_EXPR_CHARS:
                 raise NotImplementedError("the continued fraction of an expression of more than %d characters" % _CF_MAX_EXPR_CHARS)
+            from _sage_qqbar import AA
             try:
                 a = AA(self._x)
                 self._aa = (a, [_Fraction(c) for c in a.minpoly().list()])
@@ -4178,6 +4183,7 @@ def _cf_quadratic(a, m):
         raise NotImplementedError("a quadratic irrational whose discriminant has more than %d bits" % _CF_MAX_DISC_BITS)
     # which root: a is above the midpoint -B/(2A) exactly when it is the
     # (-B + sqrt(D))/(2A) root with A > 0, or the other one with A < 0
+    from _sage_qqbar import AA
     above = a > AA(_q(_Fraction(-B, 2 * A)))
     P, Q = (-B, 2 * A) if above == (A > 0) else (B, -2 * A)
     r = _math.isqrt(D)

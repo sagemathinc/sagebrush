@@ -454,7 +454,9 @@ export function mountAgentPairing(ws: PairingWorkspace, o: { button?: HTMLElemen
     const r = t.record;
     const nav = (performance.getEntriesByType?.("navigation")[0] as PerformanceNavigationTiming | undefined)?.type ?? "navigate";
     const d = reloadDecision(r, { scope: o.reload!.scope, navType: nav, now: Date.now() });
-    if (d === "discard") return say({ kind: "not-restored", why: r.grant.expires !== null && !(Date.now() < r.grant.expires) ? "expired" : "discarded", canReconnect: false });
+    // (discarded: its grant over, another workspace or page, or not a reload of this tab: the last needs a new Allow)
+    const sameScope = r.workspace === o.reload!.scope.workspace && r.page === o.reload!.scope.page;
+    if (d === "discard") return say({ kind: "not-restored", why: r.grant.expires !== null && !(Date.now() < r.grant.expires) ? "expired" : sameScope ? "not-a-reload" : "discarded", canReconnect: false });
     if (d === "click") { kept = r; return say({ kind: "not-restored", why: "not-a-reload", canReconnect: true }); }
     say({ kind: "restoring" });
     const { res, p } = await restoreWith(r);

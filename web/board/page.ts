@@ -1592,7 +1592,8 @@ if (offerNotebook) {
 // (an agent on this computer, paired with this page (workspace/agent-ui.ts): ⋯ ▸ Connect an agent…, a ?pair= link, or an
 // agent this browser remembers. Not in the desktop app or a board saved as a file: pages the agent's program doesn't accept)
 if (ws && !file && !(window as any).__TAURI__) {
-  const agent = mountAgentPairing(ws, { branches: gitBranches });
+  // (a reload of this tab keeps the agent, from the tab's reload record, while the grant lasts (decided Nov 19 2026))
+  const agent = mountAgentPairing(ws, { branches: gitBranches, reload: { scope: { workspace: `sagebrush-workspace/${ws.identity.workspace}`, page: location.origin + location.pathname } } });
   const item = document.querySelector<HTMLButtonElement>('#board [data-sbb="agent"]');
   if (item) {
     item.hidden = false;

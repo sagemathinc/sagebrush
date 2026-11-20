@@ -304,8 +304,9 @@ const tabJs = (path) => `document.querySelector('#artifacts .tab[data-tab="${pat
 const workerCount = () => workers.filter((u) => u.includes("sagebrush-worker.js")).length;
 const loaded = (name) => requested.some((u) => new URL(u).pathname.endsWith("/" + name));
 
-/** Open the page with a pairing link, connect, and allow everything (the person's grant dialog). */
-async function pair() {
+/** Open the page with a pairing link, connect, and allow everything (the person's grant dialog); `run: false`: with
+ * May run code unticked, so a notebook the agent creates isn't run by itself (workspace/agent-made.ts). */
+async function pair({ run = true } = {}) {
   const before = loads;
   stamp("pair: navigate");
   if (!firstLoadLogged) timing.clear();
@@ -335,7 +336,7 @@ async function pair() {
   dialogNote ??= await ev(`[...document.querySelectorAll('.sbag-dlg')].at(-1)?.querySelector('.note')?.textContent ?? ''`);
   await ev(`[...document.querySelectorAll('.sbag-dlg button')].find((b) => b.textContent === 'Connect' && b.offsetParent).click()`);
   await until(`[...document.querySelectorAll('button')].some((b) => b.textContent === 'Allow' && b.offsetParent)`);
-  await ev(`(() => { const all = [...document.querySelectorAll('label')].find((l) => l.textContent.startsWith('Everything')).querySelector('input'); all.checked = true; all.dispatchEvent(new Event('change')); [...document.querySelectorAll('button')].find((b) => b.textContent === 'Allow').click(); })()`);
+  await ev(`(() => { const all = [...document.querySelectorAll('label')].find((l) => l.textContent.startsWith('Everything')).querySelector('input'); all.checked = true; all.dispatchEvent(new Event('change')); ${run ? "" : "const mr = [...document.querySelectorAll('label')].find((l) => l.textContent.includes('May run code'))?.querySelector('input'); if (mr?.checked) mr.click(); "}[...document.querySelectorAll('button')].find((b) => b.textContent === 'Allow').click(); })()`);
   const t = Date.now();
   while (!notes.some((m) => m.method === "grant.changed") && Date.now() - t < 10000) await sleep(50);
   await until(`document.querySelector('#connect').textContent === 'Connected'`);
@@ -574,6 +575,60 @@ try {
     ok(again[0] === "a = 1  # edited again" && again[2] === "b = 2  # theirs" && /42/.test(await outs()), "a fresh load reopens the notebook as saved, its output too", { again, o: await outs() });
     await pair();
     await converse();
+  }
+
+  // ======================================================================== an agent's new notebook runs once by itself
+  // (the notebook page's rule, workspace/agent-made.ts: created by this pairing in the chat's running turn, the grant
+  //  with May run code and Everything, as here; opened in the pane and run there, its outputs shown and saved)
+  if (want("selfrun")) {
+    const path = "/notes/selfrun.ipynb";
+    const t = `t${++turnN}`;
+    event(t, { type: "turn_started" });
+    await sleep(300);
+    await call("workspace.create", { path, content: docFor(path, [{ code: "print('SELF', 6 * 7)" }]), mode: "python" });
+    const ran = await until(`/SELF 42/.test(document.querySelector('${PANE} .nb-root .cell .out')?.textContent ?? '')`, 120000);
+    ok(ran, "a notebook the agent creates in its turn opens in the pane and runs once by itself", await outs().catch(() => null));
+    await until(`document.querySelector('${PANE} .saved')?.textContent === 'Saved'`, 10000).catch(() => {});
+    await sleep(1500);
+    const r = await call("workspace.read", { path });
+    ok(JSON.stringify(r.content.json.cells[0].outputs ?? []).includes("SELF 42"), "its output is saved, as after the person's Run all", r.content.json.cells[0]);
+    event(t, { type: "turn_finished", outcome: "completed" });
+    // (created as the turn's last step: the turn finished at once after the create, and it still runs once by itself)
+    const pathE = "/notes/selfrun-end.ipynb";
+    const tE = `t${++turnN}`;
+    event(tE, { type: "turn_started" });
+    await sleep(300);
+    await call("workspace.create", { path: pathE, content: docFor(pathE, [{ code: "print('LAST', 6 * 8)" }]), mode: "python" });
+    event(tE, { type: "turn_finished", outcome: "completed" });
+    const ranE = await until(`/LAST 48/.test(document.querySelector('${PANE} .nb-root .cell .out')?.textContent ?? '')`, 120000).catch(() => false);
+    await until(`document.querySelector('${PANE} .saved')?.textContent === 'Saved'`, 10000).catch(() => {});
+    await sleep(1500);
+    const rE = await call("workspace.read", { path: pathE });
+    const runsE = (await ev(`document.querySelector('${PANE} .nb-root .cell .out')?.textContent ?? ''`)).match(/LAST 48/g)?.length ?? 0;
+    ok(ranE && runsE === 1 && JSON.stringify(rE.content.json.cells[0].outputs ?? []).includes("LAST 48"), "a notebook created as the turn's last step (the turn finished at once): it still runs once by itself, and its output is saved", { runsE, cell: rE.content.json.cells[0] });
+    // (created with no turn running: no pane opens it, so nothing runs it)
+    const path2 = "/notes/selfrun2.ipynb";
+    await call("workspace.create", { path: path2, content: docFor(path2, [{ code: "print('NOT', 1)" }]), mode: "python" });
+    await sleep(3000);
+    const r2 = await call("workspace.read", { path: path2 });
+    ok(!JSON.stringify(r2.content.json.cells[0].outputs ?? []).includes("NOT 1"), "a notebook created with no turn running isn't run", r2.content.json.cells[0]);
+    // (created while the person is in another artifact: the pane stays there (BA12-1), so it isn't shown, nor run)
+    const t3 = `t${++turnN}`;
+    event(t3, { type: "turn_started" });
+    const draft = "/notes/selfrun-draft.txt";
+    await call("workspace.create", { path: draft, content: { text: "mine" } });
+    await artifactTurn(draft, { finish: false, turn: t3 });
+    await until(`!!document.querySelector('${PANE} textarea')`);
+    // (the person in it: they type in its text)
+    await ev(`(document.querySelector('${PANE} textarea').focus(), true)`);
+    await send("Input.insertText", { text: " typed" });
+    const path3 = "/notes/selfrun3.ipynb";
+    await call("workspace.create", { path: path3, content: docFor(path3, [{ code: "print('AWAY', 3)" }]), mode: "python" });
+    await sleep(3000);
+    const r3 = await call("workspace.read", { path: path3 });
+    const stays = await ev(`document.querySelector('#artifacts .tab.on')?.dataset.tab ?? null`);
+    ok(stays === draft && !JSON.stringify(r3.content.json.cells[0].outputs ?? []).includes("AWAY 3"), "a notebook created while the person is in another artifact (they typed in it): the pane stays there, and it isn't run", { stays, cell: r3.content.json.cells[0] });
+    event(t3, { type: "turn_finished", outcome: "completed" });
   }
 
   // ======================================================================== a forged `here`: remote pictures wait for a click
@@ -1498,7 +1553,8 @@ try {
     FEATURES = true;
     await ev(`document.querySelector('#new')?.click()`);
     await sleep(700);
-    await pair();
+    // (May run code off: these notebooks are made for their edits, never run by themselves)
+    await pair({ run: false });
     ok(notes.some((m) => m.method === "page.features" && m.params?.features?.includes("notebook.edit")), "with a helper that says notebook.edit, the page offers it once granted (page.features)");
     await converse();
     let turn = `t${++turnN}`;
@@ -1743,7 +1799,7 @@ try {
     };
     // (after a revoke: paired again, a new chat and turn, as before this section's first case)
     const regain = async (how) => {
-      if (how === "b") { await ev(`document.querySelector('#new')?.click()`); await sleep(700); await pair(); await converse(); turn = `t${++turnN}`; event(turn, { type: "turn_started" }); }
+      if (how === "b") { await ev(`document.querySelector('#new')?.click()`); await sleep(700); await pair({ run: false }); await converse(); turn = `t${++turnN}`; event(turn, { type: "turn_started" }); }
       else if (how === "a") newTurn();
     };
     for (const w of ["W1", "W2", "W3", "W4"]) for (const how of w === "W3" ? ["a", "b", "c"] : ["a", "b"]) {
@@ -2082,6 +2138,35 @@ try {
           { writes, follows, paused, took, res, applied, pcode, recd, paneOk });
         await P.close();
         await send("Page.bringToFront");
+      }
+      // J10: a notebook the agent creates runs by itself only while this pane still writes it (runCreated's ownership,
+      // the edit's): under the journal it runs; held at its admission while a hand-over has begun (yieldLock's
+      // `yielding`, the lock and the load still this pane's), it is refused, nothing run and nothing in the record
+      {
+        await pair();
+        await converse();
+        const selfRun = async (path, code, yielding) => {
+          const t10 = `t${++turnN}`;
+          event(t10, { type: "turn_started" });
+          await ev(`(() => { window.__runHeld = null; window.__agentRunHold = (p) => new Promise((r) => { window.__runHeld = p; window.__runGo = r; }); return true; })()`);
+          await call("workspace.create", { path, content: docFor(path, [{ code }]), mode: "python" });
+          const held = await until(`window.__runHeld === ${JSON.stringify(path)}`, 20000).catch(() => false);
+          const owner = await ev(`(() => { const j = window.__sbTestPaneJournal?.(); return !!j && !!j.writer && !!j.ready && !j.yielding && !j.released; })()`);
+          if (yielding) await ev(`(window.__sbTestPaneJournal().yielding = true, true)`);
+          await ev(`window.__runGo?.()`);
+          await sleep(3000);
+          const out = await ev(`[...document.querySelectorAll('${PANE} .nb-root .cell .out')].map((o) => o.textContent).join('|')`);
+          if (yielding) await ev(`(window.__sbTestPaneJournal().yielding = false, true)`);
+          await ev(`(delete window.__agentRunHold, true)`);
+          event(t10, { type: "turn_finished", outcome: "completed" });
+          await until(`/^Saved/.test(document.querySelector('${PANE} .saved')?.textContent ?? '')`, 10000).catch(() => {});
+          const rec = await record(await refOf(path));
+          return { held, owner, out, recOut: JSON.stringify(rec?.cells?.[0]?.outputs ?? []) };
+        };
+        const yes = await selfRun("/notes/self-journal.ipynb", "print('JRUN', 7)", false);
+        ok(yes.held && yes.owner && /JRUN 7/.test(yes.out) && yes.recOut.includes("JRUN"), "J10a: under sync's journal a notebook the agent creates runs once by itself in the pane, its output in the journal's record", yes);
+        const no = await selfRun("/notes/self-yield.ipynb", "print('YIELD', 7)", true);
+        ok(no.held && no.owner && !/YIELD 7/.test(no.out) && !no.recOut.includes("YIELD"), "J10b: held at its run's admission while a hand-over has begun (the lock and the load still the pane's): not run, nothing in the record", no);
       }
       // J9: a notebook pane under the journal opened and closed again and again leaves no listener behind on the
       // document or the window (its focus takeover let go for good with it)

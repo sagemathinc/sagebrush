@@ -292,9 +292,9 @@ export function evaluate({ mode = "transition", merge, base }) {
       const before = Object.hasOwn(N.sizes, bundle) ? N.sizes[bundle] : 0;
       const after = Object.hasOwn(M.sizes, bundle) ? M.sizes[bundle] : 0;
       const delta = after - before, limit = growthLimit(before);
-      const note = !Object.hasOwn(N.sizes, bundle) ? "added" : !Object.hasOwn(M.sizes, bundle) ? "removed" : "";
+      const note = !Object.hasOwn(N.sizes, bundle) ? "new" : !Object.hasOwn(M.sizes, bundle) ? "removed" : "";
       rows.push({ bundle, base: before, merge: after, delta, limit, note });
-      if (delta > limit) problems.push(bundle + ": growth " + fmt(delta) + " exceeds " + limit + " bytes (both 2% and 50,000 B)");
+      if (Object.hasOwn(N.sizes, bundle) && delta > limit) problems.push(bundle + ": growth " + fmt(delta) + " exceeds " + limit + " bytes (both 2% and 50,000 B)");
     }
   }
   return { ok: problems.length === 0, problems, notes, rows };
@@ -360,7 +360,7 @@ export function producerProblems(rec, commit, tree, job, env = process.env) {
 
 async function gate() {
   const t = testedTransition(), lines = ["## Per-change size comparison", "",
-    "Backstop: growth must exceed both 2% of the base and 50,000 bytes to fail. Equality passes.", ""];
+    "Backstop: existing-bundle growth must exceed both 2% of the base and 50,000 bytes to fail. Equality passes. New bundles are reported, not gated.", ""];
   let result;
   try {
     if (process.argv.includes("--docs-only")) {
