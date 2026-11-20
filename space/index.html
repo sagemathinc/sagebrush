@@ -64,6 +64,14 @@
     outline: none; overflow: hidden; }
   #overlay .editor:focus-within { border-color: #1f6feb; box-shadow: 0 0 0 2px rgba(31, 111, 235, 0.2); }
   #overlay pre.out.err { background: var(--err); color: var(--err-fg); }
+  #overlay .summary { font-size: 14px; background: color-mix(in srgb, #1f6feb 9%, transparent); border-left: 3px solid #1f6feb; padding: 6px 10px; border-radius: 6px; margin: 4px 0 10px; }
+  #overlay .summary p { margin: 0.2em 0; }
+  #overlay .tourcard { border: 1px solid var(--line); border-radius: 8px; padding: 8px 12px; margin: 0 0 12px; background: color-mix(in srgb, #e3a008 10%, transparent); }
+  #overlay .tourhead { font-size: 12px; font-weight: 600; text-transform: uppercase; letter-spacing: 0.04em; color: var(--ov-muted); }
+  #overlay .tourbar { display: flex; gap: 6px; margin-top: 6px; }
+  #overlay .tourbar button { background: var(--ctl2); color: var(--ov-fg); border: 1px solid var(--ctl-line); padding: 4px 10px; }
+  #overlay .tourbar button.next { background: #1f6feb; color: #fff; border-color: #1f6feb; font-weight: 600; }
+  #tour { width: 100%; }
   #overlay img.fig { max-width: 100%; background: #fff; border-radius: 6px; margin: 6px 0; }
   /* highlight.js: GitHub's light and dark colors */
   .hljs-keyword, .hljs-meta .hljs-keyword, .hljs-type, .hljs-built_in { color: var(--k); }
@@ -97,6 +105,7 @@
     <button id="runall" title="Run every object's code, one after another">Run all</button>
     <button id="theme" title="Light, dark, or as your system is (Auto)">Theme: Auto</button>
   </div>
+  <select id="tour" hidden title="Guided tours through this space: each stop says what to look at"></select>
   <input id="q" type="search" placeholder="Search everything (press /)" autocomplete="off">
   <ul id="results"></ul>
   <div id="hover"></div>

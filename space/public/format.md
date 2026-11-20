@@ -37,6 +37,19 @@ Sage 3D graphics that run in the space (checked Nov 20 2026; each becomes the ob
 
 Notes are Markdown with math (`$...$`, `$$...$$`) typeset by KaTeX; raw HTML is limited to formatting, and pictures from other sites aren't shown.
 
+## What each object is for: `summary`
+
+Give every object a `summary`: one to three sentences on what it is *for* (a file's purpose and its key functions, named as in the code), not a restatement of its text. It is drawn on the object's face, readable from a distance, and at the top of the drawer, so a person learns the shape of the whole before reading any code. Math in `$...$`. For a file, also give `lines` (its length): its slab grows with it.
+
+## Guided tours: `tours`
+
+```json
+"tours": [ { "id": "click", "title": "How a click becomes a flight",
+  "steps": [ { "node": "picking", "text": "It starts with the mouse: …" }, { "node": "flying", "text": "…" } ] } ]
+```
+
+A tour is a path through objects in an order that teaches, each stop with a few sentences of narration: what to notice there, and how it leads to the next. The person picks a tour and goes Next / Back (in a headset too). Three or four tours of four to seven stops are a good start for a codebase. Use real function names.
+
 ## Links (`edges`)
 
 `{ "from": id, "to": id }`: imports, calls, "illustrates", "explains". Linked objects are pulled together, and an object's links are listed and clickable when the person reads it.
@@ -48,4 +61,4 @@ When the person clicks an object, its `id` is written into the file as `"selecte
 ## Tips
 
 - Write the whole space in one `workspace_write` (a few hundred objects are fine). To change it, read it, change the JSON, and write it back: the person's camera and selection stay where they are.
-- For a codebase: one `file` object per file (its text, or its first 200 lines), `group` = its directory or crate, an edge per import or `use`, a `note` per directory or crate explaining it, and a few runnable `code` samples `near` what they illustrate.
+- For a codebase: one `file` object per file (its text, or its first 200 lines) with its `summary` and `lines`, `group` = its directory or crate, an edge per import or `use`, a `note` per directory or crate explaining it, a few runnable `code` samples `near` what they illustrate, and a few `tours`. A long file can be several objects, one per part.

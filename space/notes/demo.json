@@ -1,0 +1,25 @@
+{
+  "summaries": {
+    "intro": "What a whitespace is: a board in 3D, where notes, code with its output, and 3D plots are objects you fly between.",
+    "format": "The file behind a space: objects, links and groups, with no coordinates needed; the layout is computed.",
+    "logistic": "Python with NumPy: where the logistic map $x \\mapsto r x (1 - x)$ turns chaotic, from its Lyapunov exponent over $r \\in [2.5, 4]$.",
+    "zeta": "Sage's symbolic sum: $\\sum_{n \\ge 1} 1/n^2 = \\pi^2/6$.",
+    "sinc": "A Sage 3D plot of $\\sin(r)/r$, the ripple: run it and the object in the space becomes the plot.",
+    "saddle": "A Sage 3D plot of the saddle $z = x^2 - y^2$; edit it and run it to change the object.",
+    "figure": "A matplotlib figure (a damped wave) drawn as SVG, on the object's face and in the drawer.",
+    "matlab": "MATLAB in the browser: solve $Ax = b$ for a 4×4 system and check the residual.",
+    "why3d": "Why lay things out in 3D: more room, groups you can see from afar, and plots that are real objects."
+  },
+  "tours": [
+    {
+      "id": "first",
+      "title": "A first look",
+      "steps": [
+        { "node": "intro", "text": "Start here: a whitespace is a board in 3D. Everything you see is an object you can fly to, read and run." },
+        { "node": "logistic", "text": "Code with its output. Press **Run** (or **Run all** in the panel) to run it in your browser on Sagebrush's engine." },
+        { "node": "saddle", "text": "A 3D plot is a real object: turn around it. Edit its Sage code and run it, and the object changes." },
+        { "node": "why3d", "text": "Why 3D at all: more room, and groups you can see from afar. Press **H** to see everything." }
+      ]
+    }
+  ]
+}

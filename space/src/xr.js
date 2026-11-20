@@ -79,11 +79,17 @@ export function setupXR(api) {
   panel.renderOrder = 20;
   panel.visible = false;
   scene.add(panel);
-  let shown = null, scroll = 0, state = "", buttons = [];
+  let shown = null, scroll = 0, state = "", buttons = [], stop = null; // (stop: the tour's, when the panel shows one)
 
   function lines(nd) {
     const out = [];
     const add = (text, style) => { for (const l of String(text ?? "").split("\n")) out.push({ text: l, style }); };
+    if (stop) {
+      out.push({ text: `${String(stop.title).toUpperCase()} · STOP ${stop.i + 1} OF ${stop.n}`, style: "label" });
+      add(texToText(stop.text).replace(/\*\*|`/g, ""), "tour");
+      out.push({ text: "", style: "prose" });
+    }
+    if (nd.summary) { add(texToText(nd.summary).replace(/\*\*|`/g, ""), "summary"); out.push({ text: "", style: "prose" }); }
     if (nd.kind === "note") add(texToText(nd.text).replace(/^#+\s*/gm, "").replace(/\*\*|`/g, ""), "prose");
     else add(nd.text, "code");
     if (nd.output) { out.push({ text: "", style: "prose" }); out.push({ text: "OUTPUT", style: "label" }); add(nd.output, nd.outputError ? "error" : "output"); }
@@ -103,8 +109,8 @@ export function setupXR(api) {
   function draw() {
     const nd = shown, g = canvas.getContext("2d"), T = api.theme();
     const dark = T.fg !== "#1f2328";
-    const C = dark ? { bg: "#161b22", fg: "#e6edf3", muted: "#8d96a0", code: "#0d1117", out: "#0f2a1b", err: "#3a1418", btn: "#21262d", line: "#30363d" }
-      : { bg: "#ffffff", fg: "#1f2328", muted: "#57606a", code: "#f6f8fa", out: "#e7f6ec", err: "#ffebe9", btn: "#eef1f5", line: "#d0d7de" };
+    const C = dark ? { bg: "#161b22", fg: "#e6edf3", muted: "#8d96a0", code: "#0d1117", out: "#0f2a1b", err: "#3a1418", btn: "#21262d", line: "#30363d", sum: "#14233a", tour: "#33290d" }
+      : { bg: "#ffffff", fg: "#1f2328", muted: "#57606a", code: "#f6f8fa", out: "#e7f6ec", err: "#ffebe9", btn: "#eef1f5", line: "#d0d7de", sum: "#e8f0fd", tour: "#fdf3d8" };
     g.fillStyle = C.bg; g.beginPath(); g.roundRect(0, 0, PW, PH, 36); g.fill();
     g.strokeStyle = C.line; g.lineWidth = 4; g.stroke();
     const pad = 48;
@@ -117,7 +123,7 @@ export function setupXR(api) {
     const rows = [];
     for (const l of lines(nd)) {
       const mono = l.style === "code" || l.style === "output" || l.style === "error";
-      g.font = mono ? "30px ui-monospace, Menlo, monospace" : l.style === "label" ? "600 24px system-ui, sans-serif" : "34px Georgia, serif";
+      g.font = mono ? "30px ui-monospace, Menlo, monospace" : l.style === "label" ? "600 24px system-ui, sans-serif" : l.style === "summary" || l.style === "tour" ? "italic 32px system-ui, sans-serif" : "34px Georgia, serif";
       for (const r of wrap(g, l.text, PW - 2 * pad - 24)) rows.push({ ...l, text: r, mono });
     }
     const top = y + 20, bottom = PH - 150, rowH = 42, fit = Math.floor((bottom - top) / rowH);
@@ -125,10 +131,10 @@ export function setupXR(api) {
     y = top;
     for (const r of rows.slice(scroll, scroll + fit)) {
       if (r.style !== "prose" && r.style !== "label" && r.style !== "hint") {
-        g.fillStyle = r.style === "code" ? C.code : r.style === "output" ? C.out : C.err;
+        g.fillStyle = r.style === "code" ? C.code : r.style === "output" ? C.out : r.style === "summary" ? C.sum : r.style === "tour" ? C.tour : C.err;
         g.fillRect(pad - 8, y - 8, PW - 2 * pad + 16, rowH);
       }
-      g.font = r.mono ? "30px ui-monospace, Menlo, monospace" : r.style === "label" ? "600 24px system-ui, sans-serif" : r.style === "hint" ? "italic 30px system-ui, sans-serif" : "34px Georgia, serif";
+      g.font = r.mono ? "30px ui-monospace, Menlo, monospace" : r.style === "label" ? "600 24px system-ui, sans-serif" : r.style === "hint" || r.style === "summary" || r.style === "tour" ? "italic 32px system-ui, sans-serif" : "34px Georgia, serif";
       g.fillStyle = r.style === "label" || r.style === "hint" ? C.muted : C.fg;
       g.fillText(r.text, pad + (r.mono ? 4 : 0), y + 26);
       y += rowH;
@@ -144,14 +150,15 @@ export function setupXR(api) {
       buttons.push({ x: bx, y: by, w, h: bh, act });
       x += w + 18;
     };
-    if (api.runnable(nd)) button(state === "running" ? "Running…" : "▶ Run", "run", true);
+    if (stop) { button("◀", "tourprev"); button(stop.i + 1 < stop.n ? "Next stop ▶" : "Finish", "tournext", true); }
+    if (api.runnable(nd)) button(state === "running" ? "Running…" : "▶ Run", "run", !stop);
     if (rows.length > fit) { button("▲", "up"); button("▼", "down"); }
     button("✕ Close", "close");
     if (state && state !== "running") { g.fillStyle = C.muted; g.font = "26px system-ui, sans-serif"; g.fillText(state, x + 8, PH - 70); }
     tex.needsUpdate = true;
   }
-  function open(nd, fly = true) {
-    shown = nd; scroll = 0; state = "";
+  function open(nd, fly = true, tourStop = null) {
+    shown = nd; scroll = 0; state = ""; stop = tourStop;
     draw();
     api.select(nd);
     if (fly) {
@@ -174,9 +181,18 @@ export function setupXR(api) {
     }
     panel.visible = true;
   }
-  function close() { panel.visible = false; shown = null; api.select(null); }
+  function close() { panel.visible = false; shown = null; stop = null; api.select(null); }
+  // (a tour: the next or previous stop, flown to with its narration; past the last, the tour ends)
+  function tour(delta) {
+    const r = api.tourNow() ? api.tourStep(delta) : api.startTour(0);
+    if (r && r.nd) open(r.nd, true, r);
+    else if (!api.tourNow()) close();
+    drawMenu();
+  }
   async function press(act) {
-    if (act === "close") return close();
+    if (act === "close") { if (stop) api.endTour(); drawMenu(); return close(); }
+    if (act === "tournext") return tour(1);
+    if (act === "tourprev") return tour(-1);
     if (act === "up") { scroll -= 8; return draw(); }
     if (act === "down") { scroll += 8; return draw(); }
     if (act === "run" && shown && state !== "running") {
@@ -191,11 +207,11 @@ export function setupXR(api) {
   }
 
   // ---------------------------------------------------------------- the wrist menu (left controller)
-  const MW = 512, MH = 400;
+  const MW = 512, MH = 368;
   const mcanvas = Object.assign(document.createElement("canvas"), { width: MW, height: MH });
   const mtex = new THREE.CanvasTexture(mcanvas);
   mtex.colorSpace = THREE.SRGBColorSpace;
-  const menu = new THREE.Mesh(new THREE.PlaneGeometry(0.2, 0.156), new THREE.MeshBasicMaterial({ map: mtex, side: THREE.DoubleSide, transparent: true }));
+  const menu = new THREE.Mesh(new THREE.PlaneGeometry(0.2, 0.144), new THREE.MeshBasicMaterial({ map: mtex, side: THREE.DoubleSide, transparent: true }));
   menu.position.set(0, 0.07, -0.02);
   menu.rotation.x = -Math.PI / 4;
   menu.renderOrder = 21;
@@ -206,10 +222,12 @@ export function setupXR(api) {
     g.clearRect(0, 0, MW, MH);
     g.fillStyle = C.bg; g.beginPath(); g.roundRect(0, 0, MW, MH, 28); g.fill();
     menuButtons = [];
-    const items = [["← Back", "back", backStack.length > 0], ["Forward →", "forward", fwdStack.length > 0], ["See all", "home", true], ["Run all", "runall", true], ["Exit VR", "exit", true]];
+    const tours = api.tours().length, now = api.tourNow();
+    const items = [["← Back", "back", backStack.length > 0], ["Forward →", "forward", fwdStack.length > 0], ["See all", "home", true], ["Run all", "runall", true],
+      [now ? "Next stop ▶" : "Tour", "tour", tours > 0], ["Exit VR", "exit", true]];
     const bw = (MW - 3 * 20) / 2, bh = 96;
     items.forEach(([label, act, on], k) => {
-      const x = k === 4 ? 20 : 20 + (k % 2) * (bw + 20), y = 20 + Math.floor(k / 2) * (bh + 20), w = k === 4 ? MW - 40 : bw;
+      const x = 20 + (k % 2) * (bw + 20), y = 20 + Math.floor(k / 2) * (bh + 20), w = bw;
       g.fillStyle = act === "exit" ? "#b42318" : C.btn; g.beginPath(); g.roundRect(x, y, w, bh, 18); g.fill();
       g.fillStyle = act === "exit" ? "#ffffff" : on ? C.fg : C.off; g.font = "600 38px system-ui, sans-serif"; g.textAlign = "center";
       g.fillText(label, x + w / 2, y + 62);
@@ -223,6 +241,7 @@ export function setupXR(api) {
     else if (act === "forward") goForward();
     else if (act === "home") seeAll();
     else if (act === "runall") api.runAll();
+    else if (act === "tour" && api.tours().length) tour(1);
     else if (act === "exit") session?.end();
   }
 
@@ -336,7 +355,7 @@ export function setupXR(api) {
     get presenting() { return !!session; },
     get mode() { return mode; },
     get panel() { return shown ? { id: shown.id, state, buttons: buttons.map((b) => b.act) } : null; },
-    press, open: (nd) => open(nd), rig, menuPress,
+    press, open: (nd) => open(nd), rig, menuPress, tour,
     get history() { return { back: backStack.length, forward: fwdStack.length, flying: !!flight }; },
   };
 }

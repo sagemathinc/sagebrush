@@ -57,7 +57,13 @@ addEventListener("resize", () => {
 const hue = (s) => { let h = 0; for (const c of String(s)) h = (h * 31 + c.charCodeAt(0)) >>> 0; return (h % 360) / 360; };
 const groupColor = (nd) => new THREE.Color().setHSL(hue(nd.group ?? nd.kind), 0.5, 0.45);
 const SIZE = { file: [2.6, 1.6, 0.12], note: [5, 3.8, 0.45], code: [5, 3.8, 0.2], plot3d: [5, 5, 0.15] };
-const sizeOf = (nd) => SIZE[nd.kind] ?? SIZE.file;
+// (a file's slab grows with its length, `lines`: a long file looks long from afar)
+const sizeOf = (nd) => {
+  const s = SIZE[nd.kind] ?? SIZE.file;
+  if (nd.kind !== "file" || !(Number(nd.lines) > 0)) return s;
+  const k = Math.min(2.4, Math.max(0.7, Math.sqrt(Number(nd.lines) / 120)));
+  return [s[0] * Math.sqrt(k), s[1] * k, s[2]];
+};
 
 function canvasFor(nd, px) {
   const [w, h] = sizeOf(nd);
@@ -67,6 +73,7 @@ function canvasFor(nd, px) {
 }
 const bgOf = (nd) => nd.kind === "note" ? "#f4ecd8" : nd.kind === "code" ? T.code : nd.kind === "plot3d" ? T.plot : "#" + new THREE.Color().setHSL(hue(nd.group ?? nd.kind), 0.45, T.fileL).getHexString();
 const fgOf = (nd) => nd.kind === "note" ? "#2b2a26" : T.fg;
+const summaryBand = () => (T.fg === "#1f2328" ? "rgba(31, 111, 235, 0.10)" : "rgba(88, 166, 255, 0.16)");
 const sideColor = (nd) => new THREE.Color().setHSL(hue(nd.group ?? nd.kind), 0.35, nd.kind === "note" ? 0.75 : T.sideL);
 // (a title as drawn on a face: its math as text, texToText; the drawer typesets it)
 const shortTitle = (nd) => (nd.kind === "file" ? nd.title.split("/").pop() : texToText(nd.title));
@@ -95,9 +102,15 @@ function titleTexture(nd) {
   g.fillStyle = fgOf(nd);
   let size = c.height * (nd.kind === "file" ? 0.26 : 0.17);
   g.font = `600 ${size}px system-ui, sans-serif`;
-  const lines = wrap(g, shortTitle(nd), c.width * 0.9).slice(0, 3);
-  const y0 = (c.height - lines.length * size * 1.2) / 2 + size;
+  const lines = wrap(g, shortTitle(nd), c.width * 0.9).slice(0, nd.summary ? 2 : 3);
+  // (with a summary: the title above, the summary's first lines below it, readable from the middle distance)
+  const ss = size * 0.48, sum = nd.summary ? (g.font = `italic ${ss}px system-ui, sans-serif`, wrap(g, texToText(nd.summary).replace(/\s+/g, " "), c.width * 0.9).slice(0, 3)) : [];
+  const total = lines.length * size * 1.2 + (sum.length ? size * 0.4 + sum.length * ss * 1.3 : 0);
+  const y0 = (c.height - total) / 2 + size;
+  g.font = `600 ${size}px system-ui, sans-serif`;
   lines.forEach((l, i) => g.fillText(l, c.width * 0.05, y0 + i * size * 1.2, c.width * 0.9));
+  g.font = `italic ${ss}px system-ui, sans-serif`;
+  sum.forEach((l, i) => g.fillText(l, c.width * 0.05, y0 + lines.length * size * 1.2 + size * 0.2 + i * ss * 1.3, c.width * 0.9));
   return texture(c);
 }
 
@@ -116,9 +129,19 @@ function faceTexture(nd) {
   if (nd.kind === "file") {
     g.font = `${c.height * 0.07}px system-ui, sans-serif`;
     g.globalAlpha = 0.75;
-    g.fillText(nd.title.includes("/") ? nd.title.slice(0, nd.title.lastIndexOf("/")) : "web", pad, y, c.width - 2 * pad);
+    g.fillText(nd.title.includes("/") ? nd.title.slice(0, nd.title.lastIndexOf("/")) : String(nd.group ?? ""), pad, y, c.width - 2 * pad);
     g.globalAlpha = 1;
     y += c.height * 0.1;
+  }
+  // (what it is for, before what it says: the summary, in a band of its own)
+  if (nd.summary) {
+    const ss = c.height * (nd.kind === "file" ? 0.062 : 0.05);
+    g.font = `italic ${ss}px system-ui, sans-serif`;
+    const rows = wrap(g, texToText(nd.summary).replace(/\s+/g, " "), c.width - 2.4 * pad).slice(0, nd.kind === "file" ? 4 : 5);
+    g.fillStyle = summaryBand(); g.fillRect(pad * 0.6, y - ss * 0.9, c.width - 1.2 * pad, rows.length * ss * 1.3 + ss * 0.5);
+    g.fillStyle = fg;
+    for (const r of rows) { g.fillText(r, pad, y + ss * 0.15); y += ss * 1.3; }
+    y += ss * 0.9;
   }
   const mono = nd.kind !== "note";
   const fs = mono ? c.height * (nd.kind === "file" ? 0.05 : 0.04) : c.height * 0.045;
@@ -197,9 +220,44 @@ function makeObject(nd) {
   group.add(slab);
   pickables.push(slab);
   group.userData = { node: nd, face, side, level: 0, tex: [], plot: null };
+  const gl = glyph(nd);
+  gl.position.set(0, h / 2 + 0.9, 0);
+  group.add(gl);
+  group.userData.glyph = gl;
   if (nd.scene) setPlot(group, sceneObject(nd.scene));
   else if (nd.kind === "plot3d" && nd.surface) setPlot(group, surfaceMesh(nd));
   return group;
+}
+// Each object's own shape, above its slab: chosen by its id, so the same file has the same shape every time, in its
+// group's colour; something to hold on to while learning where things are (and pointed at, it selects the object)
+const GLYPHS = [
+  () => new THREE.TetrahedronGeometry(0.55), () => new THREE.OctahedronGeometry(0.55), () => new THREE.IcosahedronGeometry(0.55),
+  () => new THREE.DodecahedronGeometry(0.55), () => new THREE.TorusGeometry(0.4, 0.14, 10, 24), () => new THREE.ConeGeometry(0.42, 0.85, 6),
+  () => new THREE.CylinderGeometry(0.36, 0.36, 0.7, 6), () => new THREE.BoxGeometry(0.6, 0.6, 0.6), () => new THREE.CapsuleGeometry(0.25, 0.45, 4, 10),
+  (r) => new THREE.TorusKnotGeometry(0.33, 0.1, 64, 8, 2 + (r % 3), 3 + (r % 2)), () => new THREE.SphereGeometry(0.45, 6, 4),
+  () => new THREE.TorusGeometry(0.42, 0.07, 6, 5),
+];
+const glyphGeo = new Map();
+function glyph(nd) {
+  let h = 2166136261;
+  for (const ch of String(nd.id)) h = Math.imul(h ^ ch.charCodeAt(0), 16777619) >>> 0;
+  const kind = h % GLYPHS.length, r = (h >>> 8) % 6, key = kind + ":" + (kind === 9 ? r : 0);
+  if (!glyphGeo.has(key)) glyphGeo.set(key, GLYPHS[kind](r));
+  const c = new THREE.Color().setHSL(hue(nd.group ?? nd.kind), 0.55, 0.42 + ((h >>> 16) % 5) * 0.05);
+  const m = new THREE.Mesh(glyphGeo.get(key), new THREE.MeshStandardMaterial({ color: c, roughness: 0.45, metalness: 0.1, flatShading: true }));
+  m.rotation.set(((h >>> 4) % 7) * 0.4, 0, ((h >>> 12) % 5) * 0.3);
+  m.userData.node = nd;
+  m.userData.spin = 0.25 + ((h >>> 20) % 5) * 0.08;
+  pickables.push(m);
+  return m;
+}
+// (the shapes turn slowly: the near ones only, which are the ones you'd see turning)
+function stepGlyphs(dt) {
+  const e = eye();
+  for (const o of objects) {
+    const g = o.userData.glyph;
+    if (g && o.position.distanceToSquared(e) < 3600) g.rotation.y += g.userData.spin * dt;
+  }
 }
 // an object's 3D content (a surface, or a scene a run made), standing on the front of its slab
 function setPlot(group, obj) {
@@ -400,6 +458,8 @@ async function load(name, data = null, again = false) {
   }
   navButtons();
   buildIndex();
+  if (!view) tour = null;
+  renderTours();
   document.title = (space.title ?? name) + " · whitespace";
   $("#title").textContent = space.title ?? name;
   $("#status").textContent = `${nodes.length} objects, ${pairs.length} links · ${r3.laid ? "laid out in " + Math.round(performance.now() - t0) + " ms" : "at their saved places"}`;
@@ -575,14 +635,21 @@ const RUNS = ["python", "sage", "matlab", "magma"];
 const runnable = (nd) => nd.kind === "code" || nd.kind === "plot3d";
 function showOverlay(nd) {
   let body = "";
-  if (nd.kind === "note") body = `<div class="md">${markdown(String(nd.text ?? ""), { remote: false })}</div>`;
+  // (a guided tour's stop: its narration first, with Back, Next and End)
+  const stop = tourStop(nd);
+  if (stop) body += `<div class="tourcard"><div class="tourhead">${esc(stop.title)} · stop ${stop.i + 1} of ${stop.n}</div>` +
+    `<div class="md">${markdown(String(stop.text ?? ""), { remote: false })}</div>` +
+    `<div class="tourbar"><button data-tour="-1"${stop.i === 0 ? " disabled" : ""}>◀ Back</button><button data-tour="1" class="next">${stop.i + 1 < stop.n ? "Next ▶" : "Finish"}</button><button data-tour="end">End tour</button></div></div>`;
+  // (what it is for, before what it says)
+  if (nd.summary) body += `<div class="summary md">${markdown(String(nd.summary), { remote: false })}</div>`;
+  if (nd.kind === "note") body += `<div class="md">${markdown(String(nd.text ?? ""), { remote: false })}</div>`;
   else if (runnable(nd)) {
     const mode = RUNS.includes(nd.lang) ? nd.lang : nd.kind === "plot3d" ? "sage" : "python";
-    body = `<div class="runbar"><select class="mode" title="The language">${RUNS.map((m) => `<option${m === mode ? " selected" : ""}>${m}</option>`).join("")}</select>` +
+    body += `<div class="runbar"><select class="mode" title="The language">${RUNS.map((m) => `<option${m === mode ? " selected" : ""}>${m}</option>`).join("")}</select>` +
       `<button class="run" title="Run (Shift+Enter)">▶ Run</button><button class="stop" title="Stop" hidden>■ Stop</button><span class="runstate"></span></div>` +
       `<div class="code-edit"></div><div class="label">Output</div><div class="output">${outputHtml(nd)}</div>` +
       (nd.kind === "plot3d" || nd.scene ? `<p class="hint">A 3D plot is a real object in the space: drag to turn around it. Edit its code and run it to change it.</p>` : "");
-  } else body = `<div class="meta">${esc(nd.lang ?? "")}${Number(nd.lines) > 0 ? " · " + Number(nd.lines) + " lines" : ""}</div><pre class="code hljs"><code>${highlight(String(nd.text ?? ""), nd.lang ?? "")}</code></pre>${Number(nd.lines) > 60 ? '<div class="hint">(its first 60 lines)</div>' : ""}`;
+  } else body += `<div class="meta">${esc(nd.lang ?? "")}${Number(nd.lines) > 0 ? " · " + Number(nd.lines) + " lines" : ""}</div><pre class="code hljs"><code>${highlight(String(nd.text ?? ""), nd.lang ?? "")}</code></pre>${shownLines(nd) < Number(nd.lines) ? `<div class="hint">(its first ${shownLines(nd)} lines of ${Number(nd.lines)})</div>` : ""}`;
   const links = (label, list) => list.length ? `<div class="label">${label} (${list.length})</div><ul class="links">${list.map((m) => `<li><a href="#" data-i="${space.nodes.indexOf(m)}">${esc(m.title)}</a></li>`).join("")}</ul>` : "";
   $("#overlay").innerHTML = `<div class="grip" title="Drag to resize"></div><button class="close" title="Close (Esc)">×</button><h2>${esc(nd.title)}</h2>${body}${links(nd.kind === "file" ? "Imports" : "Links to", nd._out)}${links(nd.kind === "file" ? "Imported by" : "Linked from", nd._in)}`;
   grip($("#overlay .grip"));
@@ -594,9 +661,56 @@ function showOverlay(nd) {
   viewOffset();
   $("#overlay .close").onclick = closeOverlay;
   for (const a of $("#overlay").querySelectorAll("a[data-i]")) a.onclick = (e) => { e.preventDefault(); openOverlay(space.nodes[+a.dataset.i]); };
+  for (const b of $("#overlay").querySelectorAll("button[data-tour]")) b.onclick = () => (b.dataset.tour === "end" ? endTour() : tourStep(+b.dataset.tour));
   setSelected(nd.id);
   if (runningNode === nd) runState(nd, "running…", true);
 }
+// ---------------------------------------------------------------- guided tours (the space's `tours`): a path through
+// objects, each stop with its narration; the drawer shows the stop, Next flies on (N and P too)
+let tour = null; // ({ t: the tour, i: the stop shown })
+const toursOf = () => (Array.isArray(space?.tours) ? space.tours.filter((t) => t && Array.isArray(t.steps) && t.steps.length) : []);
+function tourStop(nd) {
+  if (!tour) return null;
+  const st = tour.t.steps[tour.i];
+  return st && st.node === nd.id ? { title: tour.t.title ?? "Tour", i: tour.i, n: tour.t.steps.length, text: st.text ?? "" } : null;
+}
+function startTour(t) {
+  tour = { t, i: -1 };
+  tourStep(1);
+}
+function tourStep(delta) {
+  if (!tour) return null;
+  const steps = tour.t.steps;
+  let i = tour.i + delta;
+  // (stops whose object isn't in the space are passed over)
+  while (i >= 0 && i < steps.length && !space.nodes.some((n) => n.id === steps[i].node)) i += Math.sign(delta) || 1;
+  if (i >= steps.length) { endTour(); return null; }
+  if (i < 0) return null;
+  tour.i = i;
+  const nd = space.nodes.find((n) => n.id === steps[i].node);
+  if (!xr.presenting) openOverlay(nd);
+  renderTours();
+  return { nd, ...tourStop(nd) };
+}
+function endTour() {
+  tour = null;
+  renderTours();
+  if (selected !== null && !$("#overlay").hidden) showOverlay(space.nodes.find((n) => n.id === selected));
+}
+function renderTours() {
+  const sel = $("#tour"), ts = toursOf();
+  sel.hidden = !ts.length;
+  sel.innerHTML = `<option value="">${tour ? "On a tour: " + esc(tour.t.title ?? "") : "Guided tours…"}</option>` +
+    ts.map((t, k) => `<option value="${k}">${esc(t.title ?? "Tour " + (k + 1))} (${t.steps.length} stops)</option>`).join("") +
+    (tour ? `<option value="end">End the tour</option>` : "");
+}
+$("#tour").onchange = () => {
+  const v = $("#tour").value;
+  if (v === "end") endTour();
+  else if (v !== "") startTour(toursOf()[+v]);
+  else renderTours();
+};
+
 // (math: KaTeX, the site's /sagebrush-math.js, loaded the first time a note has some)
 let mathModule = null;
 function typeset(el) {
@@ -605,6 +719,7 @@ function typeset(el) {
   mathModule ??= import(url);
   mathModule.then((m) => m.typeset(el)).catch(() => {});
 }
+const shownLines = (nd) => String(nd.text ?? "").split("\n").length;
 const isBase64 = (s) => typeof s === "string" && /^[A-Za-z0-9+/]*={0,2}$/.test(s);
 function closeOverlay() { $("#overlay").hidden = true; document.body.classList.remove("reading"); viewOffset(); if (space) setSelected(null); }
 // (while the overlay covers the right of the screen, the view is shifted so what it is about stays in the free part)
@@ -840,12 +955,14 @@ addEventListener("keydown", (e) => {
   else if (e.key === "b" || e.key === "B" || e.key === "Backspace" || (e.altKey && e.key === "ArrowLeft")) back();
   else if (e.key === "f" || e.key === "F" || (e.altKey && e.key === "ArrowRight")) forward();
   else if (e.key === "h" || e.key === "H") space && frame(positions, true);
+  else if ((e.key === "n" || e.key === "N") && tour) tourStep(1);
+  else if ((e.key === "p" || e.key === "P") && tour) tourStep(-1);
 });
 
 // ---------------------------------------------------------------- search: full text, click to fly there
 let docs = [];
 function buildIndex() {
-  docs = space.nodes.map((n, i) => ({ i, title: (n.title ?? "").toLowerCase(), all: [n.title, n.text, n.output, n.group].join("\n").toLowerCase() }));
+  docs = space.nodes.map((n, i) => ({ i, title: (n.title ?? "").toLowerCase(), all: [n.title, n.summary, n.text, n.output, n.group].join("\n").toLowerCase() }));
   search();
 }
 function search() {
@@ -911,6 +1028,12 @@ const xr = setupXR({
   viewOf: (nd) => viewOf(space.nodes.indexOf(nd)),
   home: () => space && homeView(positions),
   runAll: () => $("#runall").click(),
+  // (tours in a headset: the stop to show, and its narration)
+  tours: () => toursOf(),
+  tourNow: () => (tour ? { title: tour.t.title ?? "Tour", i: tour.i, n: tour.t.steps.length } : null),
+  startTour: (k) => { const t = toursOf()[k]; if (!t) return null; tour = { t, i: -1 }; return tourStep(1); },
+  tourStep: (d) => tourStep(d),
+  endTour: () => endTour(),
   run: (nd) => runNode(nd),
   glow: (nd, v) => setGlow(nd, v),
   theme: () => T,
@@ -936,7 +1059,7 @@ function tick(now) {
     controls.update();
   }
   stepMorph(now);
-  if (space) { stepZoom(); stepLandmarks(); }
+  if (space) { stepZoom(); stepLandmarks(); stepGlyphs(dt); }
   renderer.render(scene, camera);
 }
 // (the renderer's loop: the browser's frames, or the headset's while in VR)

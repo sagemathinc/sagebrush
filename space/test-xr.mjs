@@ -142,7 +142,20 @@ await ev(`whitespace.xr.menuPress('home'), true`);
 await until(`whitespace.xr.history.flying === false`, 3000);
 ok((await ev(`whitespace.xr.history.back`)) >= 1, "See all flies out (and can be undone)", await ev(`whitespace.xr.history`));
 
+// ---- a guided tour, from the wrist menu: the first stop flies you there with its narration on the panel; Next stop goes on
+await ev(`whitespace.xr.menuPress('tour'), true`);
+ok(await until(`whitespace.xr.panel?.id === 'intro' && whitespace.xr.panel.buttons.includes('tournext')`, 5000), "Tour (wrist menu) opens the first stop, with Next stop", await ev(`whitespace.xr.panel`));
+await ev(`whitespace.xr.press('tournext'), true`);
+ok(await until(`whitespace.xr.panel?.id === 'logistic'`, 5000), "Next stop goes on to the second", await ev(`whitespace.xr.panel`));
+await ev(`whitespace.xr.press('close'), true`);
+ok(await until(`whitespace.xr.panel === null`, 3000), "Close ends the tour's panel");
+
 // ---- A closes the panel; Exit VR puts the camera back
+await ev(aim("logistic"));
+await ev(`window.__xrDevice.controllers.right.updateButtonValue('trigger', 1), true`);
+await sleep(200);
+await ev(`window.__xrDevice.controllers.right.updateButtonValue('trigger', 0), true`);
+await until(`whitespace.xr.panel?.id === 'logistic'`, 5000);
 await ev(`window.__xrDevice.controllers.right.updateButtonValue('a-button', 1), true`);
 await sleep(300);
 await ev(`window.__xrDevice.controllers.right.updateButtonValue('a-button', 0), true`);
