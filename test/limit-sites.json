@@ -713,7 +713,7 @@
   "owner": "qpoly_eval",
   "reason": "qpoly_eval's derived sizes, plumbing (the ledger's and meter's limits, the plan's sizes, the reply's reservation) or a test assertion: refuses nothing itself"
  },
- "engine/arith/src/pscale.rs :: admit :: Ok(Ok(Plan { kind, na, nb, k, bound, fixed, limit: cap - fixed, work })) #0": {
+ "engine/arith/src/pscale.rs :: admit :: Ok(Ok(Plan { kind, na, nb, k, bound, fixed, limit: cap - fixed, work, pre, div })) #0": {
   "class": "none",
   "owner": "qpoly_scale",
   "reason": "qpoly_scale's derived sizes, plumbing (the ledger's and meter's limits, the plan's sizes, the reply's reservation) or a test assertion: refuses nothing itself"
@@ -791,7 +791,7 @@
   "owner": "qpoly_scale",
   "reason": "qpoly_scale's, qpoly_derivative's and qpoly_integral's fixed caps (zmul's request, work and peak, and the reply's closed-form bound within qpoly's REPLY_MAX) with their work metered and their memory on the live word ledger; each refusal names the cap and the way around it"
  },
- "engine/arith/src/pscale.rs :: reply :: let plan = Plan { kind, na: 0, nb: 0, k: 0, bound: 0, fixed, limit, work }; #0": {
+ "engine/arith/src/pscale.rs :: reply :: let plan = Plan { kind, na: 0, nb: 0, k: 0, bound: 0, fixed, limit, work, pre: 0, div: 0 }; #0": {
   "class": "none",
   "owner": "qpoly_scale",
   "reason": "qpoly_scale's derived sizes, plumbing (the ledger's and meter's limits, the plan's sizes, the reply's reservation) or a test assertion: refuses nothing itself"
@@ -7488,6 +7488,17 @@
   },
   "owner": "zpoly_divrem",
   "reason": "zpoly_divrem's fixed caps (zmul's request, work and peak) with its work metered and its memory on a live word ledger within them; the fixed rows are refused before any work, the ledger's limit at each reservation; each refusal names the cap and the way around it"
+ },
+ "engine/web/src/series_ops.rs ::  :: SeriesOp { name: \"zpoly_fdiv\", max_request: zmul::REQUEST_MAX as usize, peak: zmul::PEAK_MAX, work: zmul::WORK_MAX, run: zpoly_fdiv }, #0": {
+  "class": "1+3",
+  "disposition": {
+   "1": "shared",
+   "3": {
+    "followup": "FU-B18-3"
+   }
+  },
+  "owner": "zpoly_fdiv",
+  "reason": "zpoly_fdiv's fixed caps (zmul's request, work and peak, and the reply's per-token bound within qpoly's REPLY_MAX) with its divisions prepaid on the meter and its memory on the live word ledger; each refusal names the cap and the way around it"
  },
  "engine/web/src/series_ops.rs ::  :: pub const SERIES_MAX_REQUEST: usize = 1 << 24; #0": {
   "class": "1+3",

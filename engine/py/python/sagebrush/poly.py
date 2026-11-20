@@ -281,6 +281,20 @@ def qsub(a, b, raw=False):
     return r if raw else _qlist(r)
 
 
+def zfdiv(a, b, raw=False):
+    """floor(a_i / b) for each coefficient of an integer polynomial a
+    (exact ints, constant term first; trailing zeros dropped) and a nonzero
+    integer b: the engine's zpoly_fdiv, refused past its caps (raw=True: the
+    reply's tokens).
+
+    >>> from sagebrush.poly import zfdiv
+    >>> zfdiv([5, -7, 0, 2], 3), zfdiv([1, 1], 3)
+    ([1, -3], [])
+    """
+    r = call_hex("zpoly_fdiv", _zhex(a), _zhex((b,)))
+    return r if raw else _ints(r)
+
+
 def qeval(a, v, raw=False):
     """a(v) for a polynomial a over Q and a rational v (int and Fraction
     coefficients, constant term first), in lowest terms: the engine's

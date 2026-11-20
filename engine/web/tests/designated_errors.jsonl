@@ -116,3 +116,10 @@
 {"fn":"qpoly_eval","a":"","b":"0/5"}
 {"fn":"qpoly_eval","a":"1,0,1","b":"0/1"}
 {"fn":"qpoly_eval","a":"1,0,1","b":"3/1"}
+{"fn":"zpoly_fdiv","a":"1,2","b":"0"}
+{"fn":"zpoly_fdiv","a":"1,2","b":"3/1"}
+{"fn":"zpoly_fdiv","a":"1,2","b":"0/1"}
+{"fn":"zpoly_fdiv","a":"1,2","b":"1/2"}
+{"fn":"zpoly_fdiv","a":"1,2","b":"2,3"}
+{"fn":"zpoly_fdiv","a":"1/2,2","b":"3"}
+{"fn":"zpoly_fdiv","a":"1","b":""}

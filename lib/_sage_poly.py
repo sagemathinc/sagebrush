@@ -22,6 +22,22 @@ def _norm(c):
     return _sa().Rational._from_coprime_ints(f.numerator, f.denominator)
 
 
+# (a class's own MRO, read through type's slot: no attribute hook of an
+# untrusted class or metaclass runs)
+_type_mro = type.__dict__["__mro__"].__get__
+
+
+def _int_value(x):
+    """x's value when its class is int or derives from it (bool, Sage's
+    integers, numpy's, IntEnum), found by identity along the class's MRO
+    and read through int's own __index__; else None.  No hook of x's class
+    or metaclass runs."""
+    for k in _type_mro(type(x)):
+        if k is int:
+            return int.__index__(x)
+    return None
+
+
 def _from_tokens(ring, r):
     """The polynomial of ring whose coefficients are an engine reply's tokens
     (hex, `[-]num[/den]` in lowest terms, constant first, trailing zeros
@@ -1064,16 +1080,16 @@ class Polynomial:
             # so the result is, as Sage's coercion takes the parents, not
             # the values)
             return Polynomial(self._qq_ring(), [other])
-        # (the other exact numbers by the identity of their class against
-        # the registered ones, and bool: no hash, equality or subclass hook
-        # of an untrusted class runs, as Fraction's ABC isinstance would)
+        # (an integer, its class int or derived from it, by identity along
+        # its MRO, its value read through int's own method; a fraction by
+        # the identity of its class against the registered ones: no hash,
+        # equality or subclass hook of an untrusted class runs, as
+        # Fraction's ABC isinstance would)
+        n = _int_value(other)
+        if n is not None:
+            return Polynomial(self._ring, [n])
         t = type(other)
-        if t is bool:
-            return Polynomial(self._ring, [other])
         from sagebrush import poly
-        for k in poly._QCLEAR_INTS:
-            if t is k:
-                return Polynomial(self._ring, [other])
         for k in poly._QCLEAR_FRACTIONS:
             if t is k:
                 return Polynomial(self._ring, [other])
@@ -1214,11 +1230,7 @@ class Polynomial:
             sage: t.quo_rem(2*t + 1), (3*t^2 + 1).quo_rem(2*t + 1), (-3*t^2).quo_rem(2*t + 1)
             ((0, t), (t, t^2 - t + 1), (-2*t + 1, t^2 - 1))
         """
-        # (a Rational divisor keeps its value-based ring here, as before:
-        # Sage takes // by an integral one in ZZ ((t + 2)//QQ(2) is 1 in
-        # ZZ[t]) but % and divmod in QQ, so parity for //, % and divmod is a
-        # later change of its own)
-        o = Polynomial(self._ring, [other]) if type(other) is _sa().Rational else self._coerce(other)
+        o = self._coerce(other)
         if o is None or not o._c:
             raise ZeroDivisionError("division by zero polynomial")
         if self._ring._base is ZZ and o._ring._base is ZZ:
@@ -1231,18 +1243,71 @@ class Polynomial:
         q, r = poly.qdivrem(self._c, o._c)
         return Polynomial(self._qq_ring(), q), Polynomial(self._qq_ring(), r)
 
+    def _floor_divisor(self, other):
+        """other as an int when it is an integer (its class int or derived
+        from it, by identity: bool, Sage's, numpy's, IntEnum) or a Rational
+        with denominator 1, else None: Sage's // of a ZZ polynomial by a number
+        is the floor of each coefficient."""
+        from sagebrush import poly
+        n = _int_value(other)
+        if n is not None:
+            return n
+        if type(other) is _sa().Rational:
+            if int.__index__(poly._denominator(other)) == 1:
+                return int.__index__(poly._numerator(other))
+            raise TypeError("no conversion of this rational to integer")
+        return None
+
     def __floordiv__(self, other):
-        if isinstance(other, int) and self._ring._base is ZZ:
-            return Polynomial(self._ring, [a // other for a in self._c])
+        """Over ZZ by a number: the floor of each coefficient (in the
+        engine, sagebrush.poly.zfdiv); otherwise quo_rem's quotient, as Sage.
+
+        EXAMPLES::
+
+            sage: R.<t> = ZZ[]
+            sage: (3*t + 5)//2, (-t - 1)//3, divmod(-t - 1, 3)
+            (t + 2, -t - 1, (0, -t - 1))
+        """
+        if self._ring._base is ZZ:
+            n = self._floor_divisor(other)
+            if n is not None:
+                if n == 0:
+                    raise ZeroDivisionError("division by zero")
+                from sagebrush import poly
+                return _from_tokens(self._ring, poly.zfdiv(self._c, n, raw=True))
         return self.quo_rem(other)[0]
 
     def __mod__(self, other):
-        if isinstance(other, int) and self._ring._base is ZZ:
-            return Polynomial(self._ring, [a % other for a in self._c])
+        """quo_rem's remainder, as Sage (over ZZ by a number too: (-t-1) % 3
+        is -t - 1, not the floor remainder)."""
         return self.quo_rem(other)[1]
 
     def __divmod__(self, other):
         return self.quo_rem(other)
+
+    def __rfloordiv__(self, other):
+        o = self._coerce(other)
+        return NotImplemented if o is None else o.quo_rem(self)[0]
+
+    def __rmod__(self, other):
+        # (a Rational % a polynomial is a TypeError in Sage, though // is
+        # defined, and a ZeroDivisionError by zero; an integer's is
+        # quo_rem's remainder)
+        o = self._rational_left(other, "Rational modulo by zero")
+        return NotImplemented if o is None else o.quo_rem(self)[1]
+
+    def __rdivmod__(self, other):
+        o = self._rational_left(other, "rational division by zero")
+        return NotImplemented if o is None else o.quo_rem(self)
+
+    def _rational_left(self, other, by_zero):
+        # (a Rational on the left of % or divmod: Sage's ZeroDivisionError
+        # by zero, else declined, so a TypeError)
+        if type(other) is _sa().Rational:
+            if not self._c:
+                raise ZeroDivisionError(by_zero)
+            return None
+        return self._coerce(other)
 
     def __truediv__(self, other):
         o = self._coerce(other)

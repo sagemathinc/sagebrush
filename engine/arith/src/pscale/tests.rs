@@ -101,6 +101,11 @@ fn want(kind: Kind, a: &str, b: &str) -> String {
                 .collect();
             ok(&list(&out))
         }
+        Kind::FloorDiv => {
+            let d = Q::parse(b).0;
+            let out: Vec<Q> = c.iter().map(|x| Q::new(floor_div(&x.0, &d), UBig::ONE)).collect();
+            ok(&list(&out))
+        }
         Kind::Integral => {
             let mut out = vec![Q::parse(b)];
             for (i, x) in c.iter().enumerate() {
@@ -111,13 +116,23 @@ fn want(kind: Kind, a: &str, b: &str) -> String {
     }
 }
 
+/// floor(a / d), d != 0, by the test's own arithmetic.
+fn floor_div(a: &IBig, d: &IBig) -> IBig {
+    let q = a / d;
+    if &q * d != *a && ((*a < IBig::ZERO) != (*d < IBig::ZERO)) {
+        q - IBig::ONE
+    } else {
+        q
+    }
+}
+
 fn r_of(a: &str, b: &str) -> u64 {
     (a.len() + b.len() + 40) as u64
 }
 
 fn call(kind: Kind, a: &str, b: &str) -> Result<String, String> {
     let fa = scan(a)?;
-    let fb = if kind == Kind::Derivative { scan_ints(b)? } else { scan(b)? };
+    let fb = if matches!(kind, Kind::Derivative | Kind::FloorDiv) { scan_ints(b)? } else { scan(b)? };
     reply(kind, &fa, &fb, r_of(a, b), &CAPS)
 }
 
@@ -187,6 +202,79 @@ fn scale_derivative_integral_match_the_reference() {
 /// The hand rows: zero, constants, s = 0, 1 and -1, trailing zeros in the
 /// input, k = 0, k = deg, k > deg, a huge k, the integral of zero, results
 /// that stay integral, and tokens not in lowest terms (the right value).
+/// floor(a_i / b) against the reference: signs, one and several limbs,
+/// zeros, divisors wider than some coefficients, b of one and several limbs.
+#[test]
+fn floor_division_matches_the_reference() {
+    let mut g = Rng(0x2026_f10d);
+    for case in 0..500 {
+        let len = g.below(30);
+        let nb = 1 + g.below(if case % 4 == 0 { 600 } else { 140 });
+        let a = g.poly(len, nb, 0);
+        let bb = 1 + g.below(if case % 3 == 0 { 300 } else { 70 });
+        let b = g.token(bb, 0, false);
+        check(Kind::FloorDiv, &a, &b);
+    }
+}
+
+/// The floor division's edge rows: the bound's (a negative quotient's
+/// ceiling reaching the next power of 16, at hex and limb boundaries), the
+/// correction's carry adding a limb, the trim of a zero top, b = +-1, |a_i|
+/// below |b|, and the refusals before anything is allocated.
+#[test]
+fn floor_division_edge_rows() {
+    let two64 = format!("1{}", "0".repeat(16));
+    let rows = [
+        ("-fff", "10", "-100"),
+        (&*format!("-{}", "f".repeat(32)), &*two64, &*format!("-1{}", "0".repeat(16))),
+        (&*format!("-{}", "f".repeat(48)), &*two64, &*format!("-1{}", "0".repeat(32))),
+        // (|q| = 2^64 - 1 before the correction: 2^64 after, a second limb)
+        (&*format!("-{}1", "f".repeat(16)), "10", &*format!("-1{}", "0".repeat(16))),
+        ("1,1", "3", ""),
+        ("5,0,7", "8", ""),
+        ("-1,1", "3", "-1"),
+        ("5,-7,0,2", "1", "5,-7,0,2"),
+        ("5,-7,0,2", "-1", "-5,7,0,-2"),
+        ("7,-7,1", "-2", "-4,3,-1"),
+        ("2,3", &*two64, ""),
+        ("-2,3", &*two64, "-1"),
+    ];
+    for (a, b, want_body) in rows {
+        assert_eq!(call(Kind::FloorDiv, a, b).unwrap(), ok(want_body), "a={} b={}", a, b);
+        assert_eq!(call(Kind::FloorDiv, a, b).unwrap(), want(Kind::FloorDiv, a, b), "a={} b={}", a, b);
+    }
+    // (b zero, b = 0/1 or 3/1, a rational b or a_i: refused)
+    let refuse = |a: &str, b: &str| {
+        let (fa, fb) = (scan(a).unwrap(), scan(b).unwrap());
+        reply(Kind::FloorDiv, &fa, &fb, r_of(a, b), &CAPS).unwrap_err()
+    };
+    assert_eq!(refuse("1,2", "0"), "b is a nonzero integer");
+    assert_eq!(refuse("1,2", "3/1"), "b is a nonzero integer");
+    assert_eq!(refuse("1,2", "0/1"), "b is a nonzero integer");
+    assert_eq!(refuse("1,2", "1/2"), "b is a nonzero integer");
+    assert_eq!(refuse("1/2,2", "3"), "a has integer coefficients");
+    assert_eq!(refuse("1,2", "2,3"), "b is exactly one token");
+}
+
+/// The bound, exhaustively on small values: |a| <= 5000 against divisors
+/// around hex-digit boundaries, each reply within its token's bound (the
+/// reply is also checked against the bound inside the call).
+#[test]
+fn floor_division_bound_is_never_exceeded() {
+    for d in [1i64, -1, 2, 3, 0xf, 0x10, -0x10, 0x11, -0x11, 0xff, 0x100, -0x100, 0x101] {
+        let b = if d < 0 { format!("-{:x}", -d) } else { format!("{:x}", d) };
+        for a in -5000i64..=5000 {
+            let at = if a < 0 { format!("-{:x}", -a) } else { format!("{:x}", a) };
+            let got = call(Kind::FloorDiv, &at, &b).unwrap();
+            let (bound, _, _) = fdiv_bound(&at, 1, &b).unwrap();
+            assert!(got.len() as u64 <= bound, "a={} b={}: {} > {}", at, b, got.len(), bound);
+            let q = if a % d != 0 && ((a < 0) != (d < 0)) { a / d - 1 } else { a / d };
+            let body = if q == 0 { String::new() } else if q < 0 { format!("-{:x}", -q) } else { format!("{:x}", q) };
+            assert_eq!(got, ok(&body), "a={} b={}", at, b);
+        }
+    }
+}
+
 #[test]
 fn hand_rows() {
     for (a, s) in [("", "5"), ("0,0", "5"), ("1,2,3", "0"), ("1,-2,0,3/4", "1"), ("1,-2,0,3/4", "-1"), ("0,-1/3,5,0,0", "-1"), ("4,2", "1/2"), ("3,2", "1/2"), ("6/5,-10/3", "-15/4"), ("7", "-7/9"), ("1,0,0", "3"), ("-1,1", "-1/2")] {
@@ -345,7 +433,7 @@ fn reply_bounds() {
 /// and requirement, the units used.
 fn run(kind: Kind, a: &str, b: &str, limit: Option<u64>, work: Option<u64>) -> (Result<u64, DivFault>, Plan, u64, u64, u64) {
     let fa = scan(a).unwrap();
-    let fb = if kind == Kind::Derivative { scan_ints(b).unwrap() } else { scan(b).unwrap() };
+    let fb = if matches!(kind, Kind::Derivative | Kind::FloorDiv) { scan_ints(b).unwrap() } else { scan(b).unwrap() };
     let Ok(Ok(plan)) = admit(kind, &fa, &fb, r_of(a, b), &CAPS) else { panic!("not computed") };
     let led = Words::new(limit.unwrap_or(plan.limit));
     let mut m = Meter::new(work.unwrap_or(plan.work));
@@ -365,6 +453,8 @@ fn shapes() -> Vec<(Kind, String, String)> {
         (Kind::Integral, big(&mut g, 300, 300, 300), "-5/7".to_string()),
         (Kind::Add, big(&mut g, 300, 300, 200), big(&mut g, 250, 300, 200)),
         (Kind::Sub, big(&mut g, 200, 200, 0), big(&mut g, 300, 100, 100)),
+        (Kind::FloorDiv, big(&mut g, 200, 900, 0), g.token(300, 0, false)),
+        (Kind::FloorDiv, big(&mut g, 400, 120, 0), "-7".to_string()),
     ]
 }
 

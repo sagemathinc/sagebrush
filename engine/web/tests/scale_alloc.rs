@@ -1,5 +1,5 @@
-//! qpoly_scale's, qpoly_derivative's, qpoly_integral's, qpoly_add's and
-//! qpoly_sub's live memory, measured by a counting allocator (one test: the
+//! qpoly_scale's, qpoly_derivative's, qpoly_integral's, qpoly_add's,
+//! qpoly_sub's and zpoly_fdiv's live memory, measured by a counting allocator (one test: the
 //! counters are global; natively and under wasm32-wasip1):
 //! - the heap's peak during a call is within the ledger's prediction, 8
 //!   (fixed rows + the ledger's high-water) bytes;
@@ -79,7 +79,7 @@ unsafe impl GlobalAlloc for Counting {
 static A: Counting = Counting;
 
 fn scans<'a>(kind: Kind, a: &'a str, b: &'a str) -> (qpoly::Factor<'a>, qpoly::Factor<'a>) {
-    let fb = if kind == Kind::Derivative { qpoly::scan_ints(b) } else { qpoly::scan(b) };
+    let fb = if matches!(kind, Kind::Derivative | Kind::FloorDiv) { qpoly::scan_ints(b) } else { qpoly::scan(b) };
     (qpoly::scan(a).unwrap(), fb.unwrap())
 }
 
@@ -135,7 +135,10 @@ fn scale_peaks_caps_and_baselines() {
     let x399 = (0..400).map(|i| if i == 399 { "1" } else { "0" }).collect::<Vec<_>>().join(",");
     // (kind, input, b, the ledger's requirement: the same on both targets)
     let rat2 = (0..280).map(|i| format!("{:x}{}/{:x}", (i * 104_729) % 997 + 1, "5".repeat(50), (i % 11) * 1291 + 3)).collect::<Vec<_>>().join(",");
-    let cases: [(&str, Kind, &str, &str, u64); 9] = [
+    let ints = (0..3000).map(|i| format!("{}{:x}", if i % 3 == 0 { "-" } else { "" }, (i * 7919) % 100_003 + 1)).collect::<Vec<_>>().join(",");
+    let wide_neg = (0..300).map(|i| format!("{}{:x}{}", if i % 2 == 0 { "-" } else { "" }, i + 1, "f".repeat(150))).collect::<Vec<_>>().join(",");
+    let big_d = format!("-{}", "9".repeat(40));
+    let cases: [(&str, Kind, &str, &str, u64); 11] = [
         ("rational coefficients by a large rational", Kind::Scale, &rat, &big_s, 16_671),
         ("wide integers by 7/3", Kind::Scale, &wide, "7/3", 10_596),
         ("a 64th derivative", Kind::Derivative, &rat, "40", 9_612),
@@ -145,6 +148,8 @@ fn scale_peaks_caps_and_baselines() {
         ("a sum of two rational polynomials of unequal length", Kind::Add, &rat, &rat2, 5_433),
         ("a difference of 3000-term rational polynomials", Kind::Sub, &small, &rat2, 19_728),
         ("f - f: everything cancels", Kind::Sub, &rat, &rat, 1_191),
+        ("a floor division of 3000 integers by -7", Kind::FloorDiv, &ints, "-7", 16_795),
+        ("wide integers by a multi-limb divisor", Kind::FloorDiv, &wide_neg, &big_d, 7_848),
     ];
     // (a warm-up call: the interrupt hooks' phase names are a one-time global
     // allocation)
@@ -208,7 +213,7 @@ fn scale_peaks_caps_and_baselines() {
 
     // every allocation of a call, failed in turn, is the memory refusal
     // (never an abort), and the heap is back at its baseline
-    for (kind, a, b) in [(Kind::Scale, "1/2,3,-5/7,1,0,2/9,1", "-6/35"), (Kind::Derivative, "1/2,3,-5/7,1,0,2/9,1", "3"), (Kind::Integral, "1/2,3,-5/7,1,0,2/9,1", "4/3"), (Kind::Add, "1/2,3,-5/7,1,0,2/9,1", "1/6,-3,5/14,2/3"), (Kind::Sub, "1/2,3,-5/7", "1/2,3,-5/7,0,1/9")] {
+    for (kind, a, b) in [(Kind::FloorDiv, "-7,2,0,-1f,9", "-3"), (Kind::Scale, "1/2,3,-5/7,1,0,2/9,1", "-6/35"), (Kind::Derivative, "1/2,3,-5/7,1,0,2/9,1", "3"), (Kind::Integral, "1/2,3,-5/7,1,0,2/9,1", "4/3"), (Kind::Add, "1/2,3,-5/7,1,0,2/9,1", "1/6,-3,5/14,2/3"), (Kind::Sub, "1/2,3,-5/7", "1/2,3,-5/7,0,1/9")] {
         let k_total = {
             let (o, n) = call_failing(kind, a, b, 0);
             o.unwrap();
@@ -230,7 +235,9 @@ fn scale_peaks_caps_and_baselines() {
         let long = (0..100_000).map(|i| format!("{:x}/{:x}", i * 7 + 1, i % 97 + 2)).collect::<Vec<_>>().join(",");
         let mut first = true;
         let long_b = (0..100_000).map(|i| format!("{:x}/{:x}", i * 5 + 3, i % 89 + 3)).collect::<Vec<_>>().join(",");
-        for (kind, b) in [(Kind::Scale, "-15/22"), (Kind::Derivative, "3"), (Kind::Integral, "1/2"), (Kind::Add, long_b.as_str()), (Kind::Sub, long_b.as_str())] {
+        let long_ints = (0..100_000).map(|i| format!("{}{:x}", if i % 3 == 0 { "-" } else { "" }, i * 7 + 1)).collect::<Vec<_>>().join(",");
+        for (kind, b) in [(Kind::Scale, "-15/22"), (Kind::Derivative, "3"), (Kind::Integral, "1/2"), (Kind::Add, long_b.as_str()), (Kind::Sub, long_b.as_str()), (Kind::FloorDiv, "-7")] {
+            let long = if kind == Kind::FloorDiv { long_ints.clone() } else { long.clone() };
             hooks::reset();
             hooks::trace();
             let _ = call(kind, &long, b, None, None);

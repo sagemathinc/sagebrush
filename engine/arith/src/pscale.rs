@@ -53,6 +53,8 @@ pub enum Kind {
     Integral,
     Add,
     Sub,
+    /// zpoly_fdiv: floor(a_i / b) per coefficient, b a nonzero integer
+    FloorDiv,
 }
 
 impl Kind {
@@ -63,6 +65,7 @@ impl Kind {
             Kind::Integral => "integral",
             Kind::Add => "sum",
             Kind::Sub => "difference",
+            Kind::FloorDiv => "floor division",
         }
     }
 }
@@ -123,6 +126,8 @@ pub fn reply_bound(kind: Kind, prefix: u64, na: u64, b: &str, k: u64) -> Option<
         }
         // (their bound is [`pair_bound`]'s, from both operands' tokens)
         Kind::Add | Kind::Sub => return None,
+        // (its bound is [`fdiv_bound`]'s, per token)
+        Kind::FloorDiv => return None,
     };
     FIXED_BYTES.checked_add(body)
 }
@@ -157,6 +162,47 @@ pub fn pair_bound(a: &str, na: u64, b: &str, nb: u64) -> Option<u64> {
         i += 1;
     }
     total.checked_add(i.saturating_sub(1))
+}
+
+/// The floor division's reply bound in bytes, its prepaid units and the
+/// divisions' share of them, from the tokens' digits in one pass (polled,
+/// uncharged: a walk over the request's own text), checked; None on
+/// overflow.
+/// - Bytes: per nonzero a_i of d hex digits against b's e, at most
+///   max(1, d - e + 2) digits and a sign: |a_i| < 16^d and |b| >= 16^(e-1),
+///   so ceil(|a_i| / |b|) <= 16^(d-e+1), which has d - e + 2 digits (the
+///   floor of a negative quotient is -ceil(|a_i| / |b|)).  A zero is `0`.
+/// - Units, prepaid at the phase's start: for every coefficient the
+///   division's [`crate::coprime::divrem_work`]`(la, lb)` (none when a_i has
+///   fewer limbs than b) and the floor correction's la - lb + 2 (its carry
+///   can run the quotient's whole length and add a limb).
+pub fn fdiv_bound(a: &str, na: u64, b: &str) -> Option<(u64, u64, u64)> {
+    let (_, bn, _) = parts(b);
+    let e = bn.len() as u64;
+    let lb = e.div_ceil(16);
+    let (mut bytes, mut div, mut corr) = (FIXED_BYTES, 0u64, 0u64);
+    for (i, tok) in a.split(',').take(na as usize).enumerate() {
+        if i & 0xfff == 0 {
+            sagebrush_interrupt::check_coarse();
+        }
+        if i > 0 {
+            bytes = bytes.checked_add(1)?;
+        }
+        let (_, n, _) = parts(tok);
+        let d = n.len() as u64;
+        let la = d.div_ceil(16);
+        corr = corr.checked_add(la.saturating_sub(lb).checked_add(2)?)?;
+        if n == "0" {
+            bytes = bytes.checked_add(1)?;
+            continue;
+        }
+        let digits = if d + 2 > e { d + 2 - e } else { 1 };
+        bytes = bytes.checked_add(digits.checked_add(1)?)?;
+        if la >= lb {
+            div = div.checked_add(crate::coprime::divrem_work(la, lb)?)?;
+        }
+    }
+    Some((bytes, div.checked_add(corr)?, div))
 }
 
 /// The fixed rows, in words: the request (ceil(R / 8)) and the call's owners
@@ -398,6 +444,69 @@ fn scale<'l>(a: &Factor, na: u64, b: &str, led: &'l Words, m: &mut Meter) -> Res
         out.num.push(&s.p.v[..nn], t.an.neg != p.neg, m)?;
         let nd = s.mul(w.mag(), z.mag(), m)?;
         out.den.push(&s.p.v[..nd], false, m)?;
+    }
+    Ok(out)
+}
+
+/// floor(a_i / b) per coefficient (b a nonzero integer).  The divisions'
+/// units (`div`) are prepaid with the corrections' at the phase's start
+/// ([`fdiv_bound`]): each division runs on a meter of that limit, which
+/// still polls Stop, and past it is an Invariant.  A coefficient with fewer
+/// limbs than b is 0, or -1 with the opposite sign; otherwise the truncated
+/// quotient, and for a negative one with a nonzero remainder |q| + 1, whose
+/// carry may take the spare limb.
+fn fdiv<'l>(a: &Factor, na: u64, b: &str, div: u64, led: &'l Words, m: &mut Meter) -> Result<Mapped<'l>, DivFault> {
+    let mut s = Ints::new(led, m)?;
+    let t = |m: &mut Meter| Coef::tagged(led, 0, "scratch", m);
+    let (mut bn, mut bd, mut an, mut ad) = (t(m)?, t(m)?, t(m)?, t(m)?);
+    load(b, &mut bn, &mut bd, m)?;
+    if bn.len == 0 || !bd.is_one() {
+        return Err(DivFault::Invariant);
+    }
+    let mut prepaid = Meter::new(div);
+    let mut out = Mapped { num: Arena::new(led, "num arena", m)?, den: Arena::new(led, "den arena", m)?, kept: 0 };
+    for tok in a.text.split(',').take(na as usize) {
+        load(tok, &mut an, &mut ad, m)?;
+        if an.len == 0 {
+            push(&mut out, &[], false, &[], m)?;
+            continue;
+        }
+        let neg = an.neg != bn.neg;
+        let (nx, ny) = (an.len, bn.len);
+        if nx < ny {
+            if neg {
+                push(&mut out, &[1], true, &[1], m)?;
+            } else {
+                push(&mut out, &[], false, &[], m)?;
+            }
+            continue;
+        }
+        s.x.grow(nx + 1, 0, m)?;
+        s.y.grow(ny, 0, m)?;
+        s.q.grow(nx - ny + 2, 0, m)?;
+        m.add(nx + ny + 2)?;
+        s.x.v[..nx].copy_from_slice(an.mag());
+        s.x.v[nx] = 0;
+        s.y.v[..ny].copy_from_slice(bn.mag());
+        s.q.v[nx - ny + 1] = 0;
+        let (mut nq, nr) = crate::coprime::divrem_in_place(&mut s.x.v, nx, &mut s.y.v, ny, &mut s.q.v, &mut prepaid).map_err(|_| DivFault::Invariant)?;
+        if neg && nr != 0 {
+            // (the floor: |q| + 1, its carry prepaid as la - lb + 2)
+            let mut i = 0;
+            loop {
+                if i > nx - ny + 1 {
+                    return Err(DivFault::Invariant);
+                }
+                let (w, c) = s.q.v[i].overflowing_add(1);
+                s.q.v[i] = w;
+                if !c {
+                    break;
+                }
+                i += 1;
+            }
+            nq = nq.max(i + 1);
+        }
+        push(&mut out, &s.q.v[..nq], neg && nq > 0, &[1], m)?;
     }
     Ok(out)
 }
@@ -727,6 +836,10 @@ pub struct Plan {
     pub limit: u64,
     /// the work meter's limit: WORK_MAX - R
     pub work: u64,
+    /// (the floor division) the units prepaid at the compute's start, and
+    /// the divisions' share of them; 0 otherwise
+    pub pre: u64,
+    pub div: u64,
 }
 
 /// What a call answers without computing: the zero polynomial, a copy of
@@ -763,6 +876,17 @@ pub fn admit<'a>(kind: Kind, a: &Factor, b: &Factor<'a>, r: u64, caps: &qpoly::C
     if !pair && b.tokens != 1 {
         return Err("b is exactly one token".to_string());
     }
+    if kind == Kind::FloorDiv {
+        // (a canonical nonzero integer b: no zero, no explicit /1, no
+        // denominator; integer a_i; all from the scan's counts and an O(1)
+        // suffix, before anything is allocated)
+        if b.all_zero || b.text.ends_with("/1") || b.sd != b.tokens {
+            return Err("b is a nonzero integer".to_string());
+        }
+        if a.sd != a.tokens {
+            return Err("a has integer coefficients".to_string());
+        }
+    }
     let na = norm_len(a);
     let nb = if pair { norm_len(b) } else { 0 };
     let mut k = 0;
@@ -797,9 +921,22 @@ pub fn admit<'a>(kind: Kind, a: &Factor, b: &Factor<'a>, r: u64, caps: &qpoly::C
                 return Ok(Err(if b.all_zero { Short::Zero } else { Short::Token(b.text) }));
             }
         }
+        Kind::FloorDiv => {
+            if na == 0 {
+                return Ok(Err(Short::Zero));
+            }
+            if b.text == "1" || b.text == "-1" {
+                return Ok(Err(Short::Copy { na, flip: b.text == "-1" }));
+            }
+        }
     }
-    let bound = if pair { pair_bound(a.text, na, b.text, nb) } else { reply_bound(kind, prefix_end(a.text, na) as u64, na, b.text, k) };
-    let bound = bound.ok_or_else(|| format!("the {}'s size overflows", kind.name()))?;
+    let ovf = || format!("the {}'s size overflows", kind.name());
+    let (bound, pre, div) = if kind == Kind::FloorDiv {
+        fdiv_bound(a.text, na, b.text).ok_or_else(ovf)?
+    } else {
+        let bound = if pair { pair_bound(a.text, na, b.text, nb) } else { reply_bound(kind, prefix_end(a.text, na) as u64, na, b.text, k) };
+        (bound.ok_or_else(ovf)?, 0, 0)
+    };
     if bound > caps.reply {
         return Err(format!("the reply's bytes (at most {}) is more than {} ({})", bound, caps.reply, HOW));
     }
@@ -809,7 +946,7 @@ pub fn admit<'a>(kind: Kind, a: &Factor, b: &Factor<'a>, r: u64, caps: &qpoly::C
         return Err(format!("the memory (bytes) = {} is more than {} ({})", fixed.saturating_mul(8), caps.int.peak, HOW));
     }
     let work = caps.int.work.checked_sub(r).ok_or_else(|| format!("the request's bytes = {} leave no work within {} ({})", r, caps.int.work, HOW))?;
-    Ok(Ok(Plan { kind, na, nb, k, bound, fixed, limit: cap - fixed, work }))
+    Ok(Ok(Plan { kind, na, nb, k, bound, fixed, limit: cap - fixed, work, pre, div }))
 }
 
 /// The refusal or internal error for a fault.
@@ -832,6 +969,10 @@ pub fn compute<'l>(a: &Factor, b: &Factor, plan: &Plan, led: &'l Words, m: &mut 
             Kind::Derivative => derivative(a, plan.na, plan.k, led, m)?,
             Kind::Integral => integral(a, plan.na, b.text, led, m)?,
             Kind::Add | Kind::Sub => add_sub(a, plan.na, b, plan.nb, plan.kind == Kind::Sub, led, m)?,
+            Kind::FloorDiv => {
+                m.add(usize::try_from(plan.pre).map_err(|_| DivFault::Work)?)?;
+                fdiv(a, plan.na, b.text, plan.div, led, m)?
+            }
         }
     };
     mp.kept = trim(&mp, m)?;
@@ -881,7 +1022,7 @@ pub fn reply(kind: Kind, a: &Factor, b: &Factor, r: u64, caps: &qpoly::Caps) -> 
             let work = caps.int.work.checked_sub(r).ok_or_else(|| format!("the request's bytes = {} leave no work within {} ({})", r, caps.int.work, HOW))?;
             let led = Words::new(limit);
             let mut m = Meter::new(work);
-            let plan = Plan { kind, na: 0, nb: 0, k: 0, bound: 0, fixed, limit, work };
+            let plan = Plan { kind, na: 0, nb: 0, k: 0, bound: 0, fixed, limit, work, pre: 0, div: 0 };
             short_on(short, a, b, &led, &mut m).map_err(|f| fault_text(f, &plan))
         }
     }
