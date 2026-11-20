@@ -32,8 +32,13 @@ const QUIET_MS = 3000;
  *  long passes without a part: no second request is made for that conversation meanwhile, so no part is ever read as
  *  another request's (a reply names only the tag, never the request) */
 const DRAIN_MS = 60_000;
+/** the reconcile wants the whole log: it waits longer for a next part before taking what came as partial (fewer
+ *  requests, and less of the log sent twice, over a slow link) */
+const WHOLE_QUIET_MS = 15_000;
+/** an agent that gives no answer this many times running is asked again only on the next real trigger */
+const MAX_MISSES = 3;
 /** the most requests one reconcile reads a conversation's log in */
-const RECONCILE_PAGES = 100;
+const RECONCILE_PAGES = 50;
 /** the most segments one stream is read in (each at most MIRROR_CAPS.entries entries) */
 const READ_MAX = 5000;
 
@@ -92,6 +97,7 @@ export interface MirrorHost {
   replayMs?: number;
   quietMs?: number;
   drainMs?: number;
+  wholeQuietMs?: number;
 }
 
 /** What a tagged request got back: the log's entries after `after`, in order, and whether the agent said some it would
@@ -104,7 +110,7 @@ interface Answer {
 }
 /** The one tagged request in flight for a conversation: its caller (null once its wait ran out: draining), the parts
  *  so far, and its timer. */
-type Waiter = { pairing: AgentPairing; instance: string; after: number; events: LogEntry[]; reset: boolean; parts: number; caller: { resolve: (a: Answer) => void; reject: (e: Error) => void } | null; timer: ReturnType<typeof setTimeout> | undefined };
+type Waiter = { pairing: AgentPairing; instance: string; after: number; quiet: number; events: LogEntry[]; reset: boolean; parts: number; caller: { resolve: (a: Answer) => void; reject: (e: Error) => void } | null; timer: ReturnType<typeof setTimeout> | undefined };
 
 const seqOk = (v: unknown): v is number => Number.isSafeInteger(v) && (v as number) > 0;
 const natOk = (v: unknown): v is number => Number.isSafeInteger(v) && (v as number) >= 0;
@@ -128,6 +134,8 @@ export class Mirror {
   private readonly refused = new Set<string>();
   /** who waits for a conversation's request to end (the reconcile, between its pages) */
   private readonly idle = new Map<string, (() => void)[]>();
+  /** answers missed in a row, by conversation (an agent that never answers isn't asked forever by itself) */
+  private readonly misses = new Map<string, number>();
 
   constructor(private readonly host: MirrorHost) {
     const kept = host.loadCursors();
@@ -309,7 +317,7 @@ export class Mirror {
       w.caller = null;
       this.drain(conv, w);
       c.resolve({ events: w.events, reset: w.reset, complete: false });
-    }, this.host.quietMs ?? QUIET_MS);
+    }, w.quiet);
     return true;
   }
 
@@ -346,6 +354,11 @@ export class Mirror {
   private retry(conv: string) {
     if (this.refused.delete(conv)) void this.kick(conv);
   }
+  /** Run the upload again: once its request ends, or, if it already has, as soon as this run is over. */
+  private later(conv: string) {
+    if (this.waiting.has(conv)) this.refused.add(conv);
+    else this.again.add(conv);
+  }
   private fail(conv: string, w: Waiter, why: string) {
     clearTimeout(w.timer);
     this.waiting.delete(conv);
@@ -363,12 +376,12 @@ export class Mirror {
 
   /** The agent's log of a conversation after `after`, in its run `instance`, through a tagged replay. One request per
    *  conversation at a time: while one is in flight or draining, another is refused (the next trigger tries again). */
-  private ask(conversation: string, after: number, src: { pairing: AgentPairing; instance: string }): Promise<Answer> {
+  private ask(conversation: string, after: number, src: { pairing: AgentPairing; instance: string }, quiet = this.host.quietMs ?? QUIET_MS): Promise<Answer> {
     return new Promise((resolve, reject) => {
       const old = this.waiting.get(conversation);
       if (old && old.pairing === src.pairing) return reject(new Error(BUSY));
       if (old) this.fail(conversation, old, "the pairing changed");
-      const w: Waiter = { pairing: src.pairing, instance: src.instance, after, events: [], reset: false, parts: 0, caller: { resolve, reject }, timer: undefined };
+      const w: Waiter = { pairing: src.pairing, instance: src.instance, after, quiet, events: [], reset: false, parts: 0, caller: { resolve, reject }, timer: undefined };
       w.timer = setTimeout(() => this.expire(conversation, w), this.host.replayMs ?? REPLAY_MS);
       this.waiting.set(conversation, w);
       src.pairing.notify("chat.resume", { conversation, after, instance: src.instance, tag: MIRROR_TAG });
@@ -411,11 +424,16 @@ export class Mirror {
       try {
         do {
           this.again.delete(conversation);
-          await this.upload(conversation).catch((e) => {
-            // (refused because a request for it is still in flight or draining, or no answer came in time: run again once
-            //  that request has ended)
-            if ((e as Error)?.message === BUSY || (e as Error)?.message === NO_REPLY) this.refused.add(conversation);
-          });
+          await this.upload(conversation).then(
+            () => this.misses.delete(conversation),
+            (e) => {
+              // (refused because a request for it is still in flight or draining, or no answer came in time: run again
+              //  once that request has ended; an agent that keeps not answering, only on the next real trigger)
+              const why = (e as Error)?.message;
+              if (why === NO_REPLY) this.misses.set(conversation, (this.misses.get(conversation) ?? 0) + 1);
+              if (why === BUSY || (why === NO_REPLY && (this.misses.get(conversation) ?? 0) < MAX_MISSES)) this.later(conversation);
+            },
+          );
         } while (this.again.has(conversation) && this.on() && this.source());
       } finally {
         this.running.delete(conversation);
@@ -487,8 +505,8 @@ export class Mirror {
       // (everything read is uploaded, or left out by the allowlist: the cursor moves past it all; not past an entry
       //  too big for a segment, which stops the stream here)
       if (!stuck) this.saveCursor(conversation, { ...cur, seq: Math.max(cur.seq, high) });
-      // (a partial answer: the rest is asked for once this request has ended)
-      if (!ans.complete && !stuck) this.refused.add(conversation);
+      // (a partial answer: the rest is asked for once this request has ended, or now, if it already has)
+      if (!ans.complete && !stuck) this.later(conversation);
       return;
     }
   }
@@ -600,9 +618,9 @@ export class Mirror {
     const ans: Answer = { events: [], reset: false, complete: false };
     for (let page = 0; page < RECONCILE_PAGES && !ans.complete; page++) {
       await this.whenIdle(c.conversation);
-      if (this.host.pairing() !== src.pairing) return false;
+      if (this.host.pairing() !== src.pairing || !this.on()) return false;
       const after = ans.events.length ? ans.events[ans.events.length - 1].seq : 0;
-      const got = await this.ask(c.conversation, after, src);
+      const got = await this.ask(c.conversation, after, src, this.host.wholeQuietMs ?? WHOLE_QUIET_MS);
       // (entries gone between two pages: the runner's log can't be read whole now)
       if (page > 0 && got.reset) return false;
       if (page === 0) ans.reset = got.reset;

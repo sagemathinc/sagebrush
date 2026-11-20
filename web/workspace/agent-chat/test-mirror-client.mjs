@@ -58,6 +58,8 @@ function site({ quota = 1e9, on = true } = {}) {
     let x;
     if ((x = path.match(/^\/api\/mirror\/v1\/conversations\/([0-9a-f]{32})$/)) && m === "DELETE") { const c = conv(x[1]); if (c) s.convs.delete(c.conversation); return res(200, {}); }
     if ((x = path.match(/^\/api\/mirror\/v1\/append\/([0-9a-f]{32})$/))) {
+      s.onAppend?.();
+      if (s.appendDelay) await new Promise((r) => setTimeout(r, s.appendDelay));
       const c = conv(x[1]);
       if (!c) return res(404, { error: "missing" });
       const [inst, fn, ln, fs, ls] = init.headers["x-sb-mirror-range"].split(" ");
@@ -109,7 +111,7 @@ function setup(o = {}) {
   const s = site(o.site);
   const kept = { cursors: o.cursors ?? null, changed: 0 };
   let current = a;
-  const m = new Mirror({ fetch: s.fetch, pairing: () => current, loadCursors: () => kept.cursors, storeCursors: (c) => { kept.cursors = JSON.parse(JSON.stringify(c)); }, changed: () => kept.changed++, replayMs: 300, quietMs: 20, drainMs: 400 });
+  const m = new Mirror({ fetch: s.fetch, pairing: () => current, loadCursors: () => kept.cursors, storeCursors: (c) => { kept.cursors = JSON.parse(JSON.stringify(c)); }, changed: () => kept.changed++, replayMs: 300, quietMs: 20, drainMs: 400, wholeQuietMs: 60 });
   a.mirror = m;
   return { a, s, m, kept, setPairing: (p) => { current = p; if (p) p.mirror = m; } };
 }
@@ -406,6 +408,41 @@ const expected = (a, conv) => {
   await tick(500); // (the drain ends: nothing late came)
   await settle();
   check(canonical(s.entries("c1", "aaaaaaaa11")) === canonical(expected(a, "c1")), "the drain over, with no other trigger: asked again and uploaded", a.sent.map(([, q]) => q.after));
+}
+
+// ---- the request ends while the partial answer is still being uploaded: the rest is still asked for, by itself
+{
+  const { a, s, m } = setup();
+  await m.refresh();
+  turn(a, "c1", "race", 3);
+  const log = a.logs.get("c1");
+  a.quiet = true;
+  void m.kick("c1");
+  await settle();
+  // (part 1, then quiet: a partial answer, uploaded slowly; the rest of the answer, with done, arrives during that)
+  s.appendDelay = 80;
+  let once = false;
+  s.onAppend = () => { if (once) return; once = true; setTimeout(() => m.onReplay({ conversation: "c1", instance: "aaaaaaaa11", last: a.seq, done: true, running: [], tag: "mirror", events: log.slice(3) }, a), 10); };
+  m.onReplay({ conversation: "c1", instance: "aaaaaaaa11", last: a.seq, done: false, running: [], tag: "mirror", events: log.slice(0, 3) }, a);
+  a.quiet = false;
+  for (let i = 0; i < 20 && canonical(s.entries("c1", "aaaaaaaa11")) !== canonical(expected(a, "c1")); i++) await tick(50);
+  s.appendDelay = 0;
+  s.onAppend = null;
+  check(canonical(s.entries("c1", "aaaaaaaa11")) === canonical(expected(a, "c1")), "the request ended during the partial upload: the rest is asked for and uploaded with no other trigger", a.sent.map(([, q]) => q.after));
+}
+
+// ---- an agent that never answers: asked again by itself at most a few times, then only on a real trigger
+{
+  const { a, m } = setup();
+  await m.refresh();
+  turn(a, "c1", "never");
+  a.quiet = true;
+  void m.kick("c1");
+  await tick(3200); // (three misses: each 300 ms waiting and 400 ms draining)
+  const n = a.sent.filter(([mm]) => mm === "chat.resume").length;
+  await tick(1500);
+  check(n >= 3 && n <= 4 && a.sent.filter(([mm]) => mm === "chat.resume").length === n, "no answer, again and again: asked by itself a few times, then no more until a real trigger", n);
+  a.quiet = false;
 }
 
 // ---- a conflict stops this run's uploads for good; a deleted copy is made again; a log that dropped entries stops
