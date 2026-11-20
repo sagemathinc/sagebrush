@@ -86,6 +86,27 @@ pub enum Kind {
 /// (engine/web) and the Python callers recognize one in a string.
 pub const INTERNAL_PREFIX: &str = "factor: internal error";
 
+/// How a refusal names the operation it refused: the message's prefix, the
+/// owner of a memory share, and the outcome (a factorization's by default,
+/// through `Display`; others through [`FactorLimit::message`]).
+pub struct Op {
+    /// The start of an internal error's message (recognized as such).
+    pub internal: &'static str,
+    /// The start of a resource refusal's message.
+    pub name: &'static str,
+    pub share: &'static str,
+    pub outcome: &'static str,
+}
+
+/// A factorization's refusals.
+pub const FACTOR: Op = Op { internal: INTERNAL_PREFIX, name: "factor", share: "this factorization's", outcome: "not factored" };
+
+/// The start of every internal error's message from an LLL reduction.
+pub const LLL_INTERNAL_PREFIX: &str = "LLL: internal error";
+
+/// An LLL reduction's refusals.
+pub const LLL: Op = Op { internal: LLL_INTERNAL_PREFIX, name: "LLL", share: "this reduction's", outcome: "not reduced" };
+
 /// A refusal: a resource limit was reached, or (kind Internal) a proved
 /// invariant failed; nothing was factored.
 #[derive(Clone, Debug, PartialEq, Eq)]
@@ -101,27 +122,29 @@ pub struct FactorLimit {
     pub memory_source: MemorySource,
 }
 
+impl FactorLimit {
+    /// The refusal's message, naming the operation `op` refused.
+    pub fn message(&self, op: &Op) -> String {
+        use std::fmt::Write;
+        if self.kind == Kind::Internal {
+            return format!("{} ({} in {}); please report it; {}", op.internal, self.what, self.phase.name(), op.outcome);
+        }
+        let mut m = format!("{}: resource limit exceeded ({} in {}: {} > {}", op.name, self.what, self.phase.name(), self.need, self.remaining);
+        if self.what.starts_with("memory") {
+            // (writing to a String can't fail)
+            let _ = match self.memory_source {
+                MemorySource::Policy => Ok(()),
+                MemorySource::HostShare => write!(m, "; the limit, {} bytes, is {} share of the memory observed free", self.memory_limit, op.share),
+                MemorySource::NoHostFigure => write!(m, "; the limit, {} bytes, is the default: no memory figure from the host", self.memory_limit),
+            };
+        }
+        m + "); " + op.outcome
+    }
+}
+
 impl fmt::Display for FactorLimit {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-        if self.kind == Kind::Internal {
-            return write!(f, "{} ({} in {}); please report it; not factored", INTERNAL_PREFIX, self.what, self.phase.name());
-        }
-        write!(
-            f,
-            "factor: resource limit exceeded ({} in {}: {} > {}",
-            self.what,
-            self.phase.name(),
-            self.need,
-            self.remaining
-        )?;
-        if self.what.starts_with("memory") {
-            match self.memory_source {
-                MemorySource::Policy => {}
-                MemorySource::HostShare => write!(f, "; the limit, {} bytes, is this factorization's share of the memory observed free", self.memory_limit)?,
-                MemorySource::NoHostFigure => write!(f, "; the limit, {} bytes, is the default: no memory figure from the host", self.memory_limit)?,
-            }
-        }
-        write!(f, "); not factored")
+        f.write_str(&self.message(&FACTOR))
     }
 }
 

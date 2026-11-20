@@ -149,7 +149,7 @@ const mf = new Miniflare(convertV4MiniflareOptions({
       durableObjects: { SYNC_ACCOUNT: { className: "SyncAccount", useSQLite: true }, SYNC_DOC: { className: "SyncDoc", useSQLite: true } },
       routes: ["sagebrush.test/*", "files.test/*"],
       outboundService: cocalc,
-      ratelimits: { SYNC_PREAUTH: { namespace_id: "1001", simple: { limit: 100000, period: 60 } }, SYNC_FILES_LIMIT: { namespace_id: "1003", simple: { limit: 100000, period: 60 } }, SYNC_ADMIN_LIMIT: { namespace_id: "1005", simple: { limit: 100000, period: 60 } } },
+      ratelimits: { SYNC_PREAUTH: { namespace_id: "1001", simple: { limit: 100000, period: 60 } }, SYNC_INGRESS_IP: { namespace_id: "81001", simple: { limit: 1000000, period: 60 } }, SYNC_ACCOUNT_INGRESS: { namespace_id: "91001", simple: { limit: 1000000, period: 60 } }, SYNC_FILES_LIMIT: { namespace_id: "1003", simple: { limit: 100000, period: 60 } }, SYNC_ADMIN_LIMIT: { namespace_id: "1005", simple: { limit: 100000, period: 60 } } },
     },
     // the user-content Worker's signed reads with a tight per-IP limit, 2 a minute; and one with none
     {
@@ -169,7 +169,7 @@ const mf = new Miniflare(convertV4MiniflareOptions({
       durableObjects: { SYNC_ACCOUNT: { className: "SyncAccount", useSQLite: true }, SYNC_DOC: { className: "SyncDoc", useSQLite: true } },
       routes: ["plain.test/*"],
       outboundService: cocalc,
-      ratelimits: { SYNC_PREAUTH: { namespace_id: "1007", simple: { limit: 100000, period: 60 } } },
+      ratelimits: { SYNC_PREAUTH: { namespace_id: "1007", simple: { limit: 100000, period: 60 } }, SYNC_INGRESS_IP: { namespace_id: "81007", simple: { limit: 1000000, period: 60 } }, SYNC_ACCOUNT_INGRESS: { namespace_id: "91007", simple: { limit: 1000000, period: 60 } } },
     },
     // sync's bindings, but no pre-authentication limit: off (LIMIT-321-1)
     {
@@ -186,7 +186,7 @@ const mf = new Miniflare(convertV4MiniflareOptions({
       bindings: { ...shareBindings, SYNC_ACCOUNTS: A },
       durableObjects: { SYNC_ACCOUNT: { className: "SyncAccount", useSQLite: true }, SYNC_DOC: { className: "SyncDoc", useSQLite: true } },
       routes: ["tight.test/*"],
-      ratelimits: { SYNC_PREAUTH: { namespace_id: "1002", simple: { limit: 3, period: 60 } }, SYNC_ADMIN_LIMIT: { namespace_id: "1006", simple: { limit: 2, period: 60 } } },
+      ratelimits: { SYNC_PREAUTH: { namespace_id: "1002", simple: { limit: 3, period: 60 } }, SYNC_INGRESS_IP: { namespace_id: "81002", simple: { limit: 1000000, period: 60 } }, SYNC_ACCOUNT_INGRESS: { namespace_id: "91002", simple: { limit: 1000000, period: 60 } }, SYNC_ADMIN_LIMIT: { namespace_id: "1006", simple: { limit: 2, period: 60 } } },
     },
     // the DEV test list (SYNC_TEST_ACCOUNTS), beside the secret list; and the test list alone
     {
@@ -196,7 +196,7 @@ const mf = new Miniflare(convertV4MiniflareOptions({
       durableObjects: { SYNC_ACCOUNT: { className: "SyncAccount", useSQLite: true }, SYNC_DOC: { className: "SyncDoc", useSQLite: true } },
       routes: ["testlist.test/*"],
       outboundService: cocalc,
-      ratelimits: { SYNC_PREAUTH: { namespace_id: "1011", simple: { limit: 100000, period: 60 } } },
+      ratelimits: { SYNC_PREAUTH: { namespace_id: "1011", simple: { limit: 100000, period: 60 } }, SYNC_INGRESS_IP: { namespace_id: "81011", simple: { limit: 1000000, period: 60 } }, SYNC_ACCOUNT_INGRESS: { namespace_id: "91011", simple: { limit: 1000000, period: 60 } } },
     },
     {
       ...base,
@@ -205,7 +205,7 @@ const mf = new Miniflare(convertV4MiniflareOptions({
       durableObjects: { SYNC_ACCOUNT: { className: "SyncAccount", useSQLite: true }, SYNC_DOC: { className: "SyncDoc", useSQLite: true } },
       routes: ["testonly.test/*"],
       outboundService: cocalc,
-      ratelimits: { SYNC_PREAUTH: { namespace_id: "1012", simple: { limit: 100000, period: 60 } } },
+      ratelimits: { SYNC_PREAUTH: { namespace_id: "1012", simple: { limit: 100000, period: 60 } }, SYNC_INGRESS_IP: { namespace_id: "81012", simple: { limit: 1000000, period: 60 } }, SYNC_ACCOUNT_INGRESS: { namespace_id: "91012", simple: { limit: 1000000, period: 60 } } },
     },
     // the same code with no sync bindings, as production is today
     { ...base, name: "prod", bindings: shareBindings, routes: ["prod.test/*"] },
@@ -302,14 +302,14 @@ const payloads = (item) => {
   ok(ej.status === 200 && bj.state === "active" && bj.held === undefined, "a Worker without the test entry ignores the seams' bindings: the hold-enable seam bound for this account does nothing");
   const sn = await signIn(A, "https://nolimit.test");
   r = await fetchAt("https://nolimit.test", "/api/sync/v1/enable", { method: "POST", headers: { cookie: sn, origin: "https://nolimit.test", "content-type": "application/json" }, body: "{}" });
-  ok(r.status === 404, "with the objects bound but no pre-authentication limit, sync is off too");
-  // the limit comes before any session is read: requests with no session get 429, not 401, once it is used up
+  ok(r.status === 404, "with the objects bound but none of the three limits, sync is off too");
+  // requests with no session count against the failure limit: past it they get 429, not 401
   await clearOfMinuteEdge();
   const codes = [];
   for (let i = 0; i < 5; i++) codes.push((await fetchAt("https://tight.test", "/api/sync/v1/enable", { method: "POST", headers: { origin: "https://tight.test", "content-type": "application/json", "cf-connecting-ip": "203.0.113.9" }, body: "{}" })).status);
-  ok(codes.join() === "401,401,401,429,429", "the pre-authentication limit is per IP and before the session check: " + codes.join());
+  ok(codes.join() === "401,401,401,429,429", "failures (no session) count against a limit per IP, and past it get 429: " + codes.join());
   const r429 = await (await fetchAt("https://tight.test", "/api/sync/v1/enable", { method: "POST", headers: { origin: "https://tight.test", "content-type": "application/json", "cf-connecting-ip": "203.0.113.9" }, body: "{}" })).json();
-  ok(r429.error === "too many requests" && r429.retry_after === 60_000, "and the 429 says how long to wait: the limit's minute (LIMIT-SYNC-STATUS-1): " + JSON.stringify(r429));
+  ok(r429.error === "rate" && r429.limit === "failed_sync_per_ip" && r429.retry_after === 60_000, "and the 429 names the failure limit and says how long to wait: the limit's minute (LIMIT-SYNC-STATUS-1): " + JSON.stringify(r429));
   r = await fetchAt("https://tight.test", "/api/sync/v1/enable", { method: "POST", headers: { origin: "https://tight.test", "content-type": "application/json", "cf-connecting-ip": "203.0.113.10" }, body: "{}" });
   ok(r.status === 401, "another IP has its own limit");
   const sa = await signIn(A);

@@ -1,0 +1,174 @@
+{
+  "cases": [
+    {
+      "case": "division_by_zero",
+      "sagebrush_status": "error",
+      "sagebrush_type": "ZeroDivisionError",
+      "sage_status": "error",
+      "sage_type": "ZeroDivisionError",
+      "sage_type_parity": true,
+      "cpython_type": "ZeroDivisionError",
+      "cpython_comparable": true,
+      "cpython_type_parity": true
+    },
+    {
+      "case": "zero_rational_denominator",
+      "sagebrush_status": "error",
+      "sagebrush_type": "ZeroDivisionError",
+      "sage_status": "error",
+      "sage_type": "ZeroDivisionError",
+      "sage_type_parity": true,
+      "cpython_type": "ZeroDivisionError",
+      "cpython_comparable": true,
+      "cpython_type_parity": true
+    },
+    {
+      "case": "invalid_rational_text",
+      "sagebrush_status": "error",
+      "sagebrush_type": "ValueError",
+      "sage_status": "error",
+      "sage_type": "ValueError",
+      "sage_type_parity": true,
+      "cpython_type": "ValueError",
+      "cpython_comparable": true,
+      "cpython_type_parity": true
+    },
+    {
+      "case": "malformed_syntax",
+      "sagebrush_status": "error",
+      "sagebrush_type": "SyntaxError",
+      "sage_status": "error",
+      "sage_type": "SyntaxError",
+      "sage_type_parity": true,
+      "cpython_type": "SyntaxError",
+      "cpython_comparable": true,
+      "cpython_type_parity": true
+    },
+    {
+      "case": "list_index",
+      "sagebrush_status": "error",
+      "sagebrush_type": "IndexError",
+      "sage_status": "error",
+      "sage_type": "IndexError",
+      "sage_type_parity": true,
+      "cpython_type": "IndexError",
+      "cpython_comparable": true,
+      "cpython_type_parity": true
+    },
+    {
+      "case": "ragged_matrix",
+      "sagebrush_status": "error",
+      "sagebrush_type": "ValueError",
+      "sage_status": "error",
+      "sage_type": "ValueError",
+      "sage_type_parity": true,
+      "cpython_type": null,
+      "cpython_comparable": false,
+      "cpython_type_parity": null
+    },
+    {
+      "case": "wrong_entry_count",
+      "sagebrush_status": "error",
+      "sagebrush_type": "ValueError",
+      "sage_status": "error",
+      "sage_type": "ValueError",
+      "sage_type_parity": true,
+      "cpython_type": null,
+      "cpython_comparable": false,
+      "cpython_type_parity": null
+    },
+    {
+      "case": "negative_dimensions",
+      "sagebrush_status": "error",
+      "sagebrush_type": "ArithmeticError",
+      "sage_status": "error",
+      "sage_type": "ArithmeticError",
+      "sage_type_parity": true,
+      "cpython_type": null,
+      "cpython_comparable": false,
+      "cpython_type_parity": null
+    },
+    {
+      "case": "invalid_matrix_entry",
+      "sagebrush_status": "accepted",
+      "sagebrush_type": null,
+      "sage_status": "error",
+      "sage_type": "TypeError",
+      "sage_type_parity": false,
+      "cpython_type": null,
+      "cpython_comparable": false,
+      "cpython_type_parity": null
+    },
+    {
+      "case": "singular_inverse",
+      "sagebrush_status": "error",
+      "sagebrush_type": "ZeroDivisionError",
+      "sage_status": "error",
+      "sage_type": "ZeroDivisionError",
+      "sage_type_parity": true,
+      "cpython_type": null,
+      "cpython_comparable": false,
+      "cpython_type_parity": null
+    },
+    {
+      "case": "nonsquare_inverse",
+      "sagebrush_status": "error",
+      "sagebrush_type": "ArithmeticError",
+      "sage_status": "error",
+      "sage_type": "ArithmeticError",
+      "sage_type_parity": true,
+      "cpython_type": null,
+      "cpython_comparable": false,
+      "cpython_type_parity": null
+    },
+    {
+      "case": "incompatible_multiply",
+      "sagebrush_status": "error",
+      "sagebrush_type": "TypeError",
+      "sage_status": "error",
+      "sage_type": "TypeError",
+      "sage_type_parity": true,
+      "cpython_type": null,
+      "cpython_comparable": false,
+      "cpython_type_parity": null
+    },
+    {
+      "case": "matrix_index",
+      "sagebrush_status": "error",
+      "sagebrush_type": "IndexError",
+      "sage_status": "error",
+      "sage_type": "IndexError",
+      "sage_type_parity": true,
+      "cpython_type": null,
+      "cpython_comparable": false,
+      "cpython_type_parity": null
+    },
+    {
+      "case": "invalid_matrix_power",
+      "sagebrush_status": "error",
+      "sagebrush_type": "ValueError",
+      "sage_status": "error",
+      "sage_type": "NotImplementedError",
+      "sage_type_parity": false,
+      "cpython_type": null,
+      "cpython_comparable": false,
+      "cpython_type_parity": null
+    },
+    {
+      "case": "direct_rational_json",
+      "sagebrush_status": "error",
+      "sagebrush_type": "TypeError",
+      "sage_status": "error",
+      "sage_type": "TypeError",
+      "sage_type_parity": true,
+      "cpython_type": "TypeError",
+      "cpython_comparable": true,
+      "cpython_type_parity": true
+    }
+  ],
+  "sage_matching": 13,
+  "sage_total": 15,
+  "cpython_matching": 6,
+  "cpython_total": 6,
+  "note": "Type/status comparison; messages can differ. eval strings run as plain Python even under --sage; a separate direct 1/0 Sage-preparsed CLI test is in commands.jsonl."
+}

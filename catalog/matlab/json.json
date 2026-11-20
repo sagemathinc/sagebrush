@@ -1,0 +1,57 @@
+[
+  {
+    "name": "jsonencode",
+    "kind": "function",
+    "signature": "txt = jsonencode(data)\ntxt = jsonencode(data, Name=Value)",
+    "summary": "Encodes MATLAB values as JSON text.",
+    "doc": "- A scalar becomes a JSON number, boolean or string; a vector a flat array; a matrix or N-d array nested arrays, its first dimension outermost (`eye(2)` is `[[1,0],[0,1]]`).\n- A character vector becomes a string; a character matrix an array of its rows; a string array strings, nested as a numeric array is.\n- A cell array becomes a flat array of its elements in column-major order.\n- A struct becomes an object; a struct array an array of objects, nested as a numeric array is.\n- An integer is written as an integer; any other number as the shortest text that reads back as the same double.\n\nOptions:\n- `ConvertInfAndNaN` (true): Inf and NaN become `null`; false writes `Infinity`, `-Infinity` and `NaN`.\n- `PrettyPrint` (false): true indents by two spaces, one value per line.\n\nComplex numbers and sparse arrays are refused, as MATLAB refuses them.",
+    "examples": [
+      {
+        "code": "s = struct('a', 1, 'b', [1 2 3], 'c', 'hi', 'd', {{1, 'x'}}, 'e', true);\ndisp(jsonencode(s))",
+        "expected": "{\"a\":1,\"b\":[1,2,3],\"c\":\"hi\",\"d\":[1,\"x\"],\"e\":true}\n"
+      },
+      {
+        "code": "disp(jsonencode(struct('x', [1 NaN]), 'PrettyPrint', true))",
+        "expected": "{\n  \"x\": [\n    1,\n    null\n  ]\n}\n"
+      }
+    ],
+    "differs": [
+      "Without MATLAB's own documentation of the number format, numbers are written as Octave 11.1 writes them: 1.5e-7, 0.1, 123456789012.",
+      "MATLAB's tables, datetime, categorical, containers.Map, enumerations and object arrays are not encoded: Sagebrush lacks those types, or (object arrays) refuses them."
+    ],
+    "status": "partial",
+    "see_also": [
+      "jsondecode",
+      "struct",
+      "sprintf"
+    ],
+    "tags": [
+      "files"
+    ]
+  },
+  {
+    "name": "jsondecode",
+    "kind": "function",
+    "signature": "value = jsondecode(txt)",
+    "summary": "Parses JSON text into MATLAB values.",
+    "doc": "- `null` becomes `[]`, and NaN inside an array of numbers.\n- A number becomes a double, a boolean a logical, a string a character vector.\n- An object becomes a struct, its names made valid as `matlab.lang.makeValidName` makes them.\n- An array of numbers (and nulls) becomes a column vector; an array of booleans a logical one; an array of numeric (or of logical) arrays of one size an array of one more dimension, the first; other nested arrays stay cell arrays.\n- An array of objects with the same names in the same order becomes a struct array; any other array a cell array.\n\nIntegers are read as doubles. The text is refused, before it is parsed, when it is over 4,194,304 characters, holds more than 262,144 values, has a run of more than 1,000 consecutive digits, or is nested more than 200 levels deep.",
+    "examples": [
+      {
+        "code": "v = jsondecode('{\"a\":[1,2,3],\"b\":{\"c\":true},\"d\":[\"x\",\"y\"]}')",
+        "expected": "\nv = \n\n  struct with fields:\n\n    a: [3×1 double]\n    b: [1×1 struct]\n    d: {2×1 cell}\n\n"
+      }
+    ],
+    "differs": [
+      "Objects whose names are the same but in another order give a cell array of structs, as Octave 11.1 gives (MATLAB's documentation says only \"same field names\")."
+    ],
+    "status": "partial",
+    "see_also": [
+      "jsonencode",
+      "struct",
+      "fieldnames"
+    ],
+    "tags": [
+      "files"
+    ]
+  }
+]

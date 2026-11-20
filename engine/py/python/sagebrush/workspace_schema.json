@@ -41,7 +41,7 @@
       }
     },
     "workspace.stat": {
-      "description": "One entry, or null.",
+      "description": "One entry, or null. An entry with a page of its own (a notebook, a board, a .tex or code file) has url: its address on the person's Sagebrush site, a link to give them.",
       "params": {
         "$schema": "https://json-schema.org/draft/2020-12/schema",
         "type": "object",
@@ -149,7 +149,7 @@
       }
     },
     "workspace.create": {
-      "description": "A new notebook (.ipynb), board (.board.json) or data file, its kind from its name; a taken path is refused.",
+      "description": "A new notebook (.ipynb), board (.board.json) or data file, its kind from its name; a taken path is refused. A notebook runs its cells in its language, mode: Python, Sage, MATLAB or Magma.",
       "params": {
         "$schema": "https://json-schema.org/draft/2020-12/schema",
         "type": "object",
@@ -209,7 +209,8 @@
               "sage",
               "magma",
               "matlab"
-            ]
+            ],
+            "description": "The notebook's or board's language (python if left out): python, print(2**10); sage, factor(2^64 - 1); matlab, x = linspace(0, 3, 200); plot(x, sin(x.^2)); magma, print Factorization(2^64 - 1);. Jupyter content whose metadata.kernelspec names one of them sets it too."
           }
         },
         "required": [

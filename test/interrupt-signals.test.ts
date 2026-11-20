@@ -24,10 +24,10 @@ test("S1: the traceback then SIGINT's default action (signal or 130) passes; a c
   assert.match(judge("S1", { ...base, exit: { code: null, signal: "SIGINT", t: 1030 } }).why, /no KeyboardInterrupt/);
   // the prompt: it survives and takes the next input
   // (gated at its KeyboardInterrupt line, stamped by runProc as ki_text_t: 250 ms passes, 251 is late, unstamped fails)
-  assert.equal(judge("S1", { ...base, text: "KeyboardInterrupt", ki_text_t: 1250, marks: [m("PROBE", 3000)] }, "prompt").outcome, "PASS");
-  const pl = judge("S1", { ...base, text: "KeyboardInterrupt", ki_text_t: 1251, marks: [m("PROBE", 3000)] }, "prompt");
+  assert.equal(judge("S1", { ...base, text: "KeyboardInterrupt", ki_text_t: 1250, marks: [m("PROBE 41", 3000)] }, "prompt").outcome, "PASS");
+  const pl = judge("S1", { ...base, text: "KeyboardInterrupt", ki_text_t: 1251, marks: [m("PROBE 41", 3000)] }, "prompt");
   assert.deepEqual([pl.outcome, pl.late], ["FAIL", true]);
-  assert.match(judge("S1", { ...base, text: "KeyboardInterrupt", marks: [m("PROBE", 3000)] }, "prompt").why, /^invalid evidence: the KeyboardInterrupt text was seen but its line was never stamped/);
+  assert.match(judge("S1", { ...base, text: "KeyboardInterrupt", marks: [m("PROBE 41", 3000)] }, "prompt").why, /^invalid evidence: the KeyboardInterrupt text was seen but its line was never stamped/);
   assert.match(judge("S1", { ...base, marks: [] }, "prompt").why, /no KeyboardInterrupt/);
 });
 
@@ -41,7 +41,7 @@ test("S2: two caught KIs and exit 0; a second press that ends the program fails"
 test("S3: a second press while pending escalates (130, nothing left); a completed regex is a failure to recognize", () => {
   const two = { ...base, sends: [{ t: 1000 }, { t: 1500 }] };
   // (on the CLI an escalation now also says the first Stop was not honoured: the cell FAILs with that
-  // signature, which S3 cli's baseline entry pins; on the prompt too, since press 2 comes 500 ms after press 1)
+  // signature, which S3 cli's baseline entry pins; on the prompt too, whose press 2 comes 1.1 s after press 1)
   const esc = judge("S3", { ...two, exit: { code: null, signal: "SIGINT", t: 1520 } });
   assert.deepEqual([esc.outcome, esc.escalation, esc.first_stop, esc.escalated], ["FAIL", "PASS", "not honoured", true]);
   assert.match(esc.why, /^first Stop not honoured/);
@@ -208,7 +208,7 @@ test("r3 S1: S1 and S2 validate the presses before their functional failures", (
       assert.deepEqual(chain("S1", { ...base, sends, marks: [ENTER], text: "", exit: { code: 0, signal: null, t: 3000 } }, host), ["INVALID", host === "prompt" ? "INCOMPLETE" : "INCOMPLETE", true], host + JSON.stringify(sends));
     }
   }
-  assert.equal(chain("S1", { ...base, marks: [ENTER], text: "", exit: { code: 0, signal: null, t: 3000 } }, "prompt")[1], "KNOWN"); // (control: the prompt's F3 pin)
+  assert.equal(chain("S1", { ...base, marks: [ENTER], text: "", exit: { code: 0, signal: null, t: 3000 } }, "prompt")[1], "FAIL"); // (control: the prompt has no pin for S1 now)
   // S2: no first KI with a bad press 1; no second KI with press 2 missing after CONT
   assert.deepEqual(chain("S2", { ...base, sends: [{ t: "1000" }], marks: [ENTER], exit: { code: 0, signal: null, t: 9000 } }), ["INVALID", "INCOMPLETE", true]);
   assert.deepEqual(chain("S2", { ...base, sends: [{ t: 1000 }], marks: [ENTER, m("KI 1", 1010), m("CONT", 1011), m("RET 2", 9000), m("END", 9001)], exit: { code: 0, signal: null, t: 9100 } }), ["INVALID", "INCOMPLETE", true]);
@@ -313,9 +313,9 @@ console.log(JSON.stringify({ sends: r.sends, exit: r.exit, end: r.end, j }));`;
 
 test("r4 N2: the prompt's S1 gates its KeyboardInterrupt endpoint before the probe failure, through the ACTUAL prompt baseline", () => {
   const eps = 2 ** -42;
-  const pr = (ki: number | null, probe: boolean) => ({ ...base, sends: [{ act: "press", t: 1000 }], marks: [m("ENTER 1", 500), ...(probe ? [m("PROBE", 3000)] : [])], text: "Traceback\nKeyboardInterrupt", ...(ki == null ? {} : { ki_text_t: ki }) });
-  assert.deepEqual(chain("S1", pr(1249, true), "prompt"), ["PASS", "FIXED", true]); // (in bound with the probe: the F3 pin is stale)
-  assert.deepEqual(chain("S1", pr(1250, false), "prompt"), ["FAIL", "KNOWN", false]); // in bound, no probe: the pinned functional failure
+  const pr = (ki: number | null, probe: boolean) => ({ ...base, sends: [{ act: "press", t: 1000 }], marks: [m("ENTER 1", 500), ...(probe ? [m("PROBE 41", 3000)] : [])], text: "Traceback\nKeyboardInterrupt", ...(ki == null ? {} : { ki_text_t: ki }) });
+  assert.deepEqual(chain("S1", pr(1249, true), "prompt"), ["PASS", "PASS", false]); // (in bound with the probe)
+  assert.deepEqual(chain("S1", pr(1250, false), "prompt"), ["FAIL", "FAIL", true]); // in bound, no probe: a failure, no pin for it now
   assert.deepEqual(chain("S1", pr(1251, false), "prompt"), ["FAIL", "FAIL", true]); // late, no probe: never hidden under KNOWN
   assert.deepEqual(chain("S1", pr(1250 + eps, false), "prompt"), ["FAIL", "FAIL", true]);
   assert.deepEqual(chain("S1", pr(1251, true), "prompt"), ["FAIL", "FAIL", true]);

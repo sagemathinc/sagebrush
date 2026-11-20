@@ -2,7 +2,8 @@
 // The agents page's resizable columns (William A1 + A10; the layout plan r3, PR 2): the chat list and the artifact
 // pane are dragged or moved with the keys, clamped so the chat keeps 420 px and the pane 320, re-clamped on a resize
 // and when the pane opens, kept in localStorage only in a valid shape, and left alone by the narrow overlay and full
-// screen. The scripted agent (no pairing) opens a code artifact ("plot a Fourier series"); notebooks are
+// screen. Copy chat and a message's Copy put Markdown on the clipboard (C-copy-*).
+// The scripted agent (no pairing) opens a code artifact ("plot a Fourier series"); notebooks are
 // test-agents-artifacts.mjs's (A10 there: opening a notebook leaves the pane width as it was).
 //   SAGEBRUSH_AGENTS=1 bun web/build.ts && CHROME=google-chrome bun web/agents/test-agents-layout.mjs
 // Each case prints its id first ("ok   L2-side-179: ..."), so a run's FAIL set is the ids of its FAIL lines.
@@ -289,6 +290,80 @@ try {
     await sleep(200);
     const w1 = await ev(`window.__sbLayout.stats.writes`);
     ok("L2-write-count", w1 - w0 === 1, "one drag of 50 moves writes the stored layout once", { w0, w1 });
+  }
+  {
+    // Copy (decided Nov 19 2026): the header's Copy chat puts the whole chat on the clipboard as Markdown, and a
+    // message's Copy that message; the button is there only once the chat has something in it
+    await fresh(1400);
+    ok("C-copy-empty", await ev(`document.querySelector('#log-tools').hidden`), "an empty chat: no Copy chat");
+    await openPane();
+    await ev(`(() => { window.__clip = []; navigator.clipboard.writeText = (t) => (window.__clip.push(t), Promise.resolve()); return true; })()`);
+    ok("C-copy-shown", await ev(`!document.querySelector('#log-tools').hidden && !!document.querySelector('#copychat').offsetParent`), "with a turn in it: Copy chat is offered");
+    await ev(`(document.querySelector('#copychat').click(), true)`);
+    await until(`window.__clip.length === 1`);
+    const all = await ev(`window.__clip[0]`);
+    ok("C-copy-chat", /^# /.test(all) && all.includes("**You:**\n\nplot a Fourier series") && /\*\*Claude:\*\*/.test(all) && /\n- `[^`]+`/.test(all) && /\n- file: /.test(all), "Copy chat: the title, what the person wrote, the agent's turn with a line per tool call and its file", all.slice(0, 600));
+    await ev(`(document.querySelector('#log .user .copy-msg').click(), true)`);
+    await until(`window.__clip.length === 2`);
+    ok("C-copy-message", (await ev(`window.__clip[1]`)) === "**You:**\n\nplot a Fourier series", "a message's Copy: that message", await ev(`window.__clip[1]`));
+    await ev(`(document.querySelector('#log .turn .copy-msg').click(), true)`);
+    await until(`window.__clip.length === 3`);
+    const t = await ev(`window.__clip[2]`);
+    ok("C-copy-turn", /^\*\*Claude:\*\*/.test(t) && !t.includes("plot a Fourier series\n\n**Claude") && t.length > 20, "a turn's Copy: the agent's turn only", t.slice(0, 300));
+    ok("C-copy-quiet", exceptions.length === 0, "no page errors", exceptions);
+  }
+  // (Files…, at the foot of the chat list: big, visible in the chat view, and it opens the notebook page with its file
+  //  browser shown, even where this browser had hidden it)
+  await fresh(1600);
+  {
+    const b = await ev(`(() => { const b = document.getElementById('files-big'), r = b?.getBoundingClientRect(), nav = document.querySelector('nav.side').getBoundingClientRect(); return b && { text: b.textContent.trim(), w: r.width, h: r.height, fromBottom: nav.bottom - r.bottom, inNav: !!b.closest('nav.side'), shown: r.width > 0 && getComputedStyle(b).visibility === 'visible', font: parseFloat(getComputedStyle(b).fontSize) }; })()`);
+    ok("L2-files-button", b && b.text === "Files…" && b.inNav && b.shown && b.w >= 200 && b.h >= 36 && b.font >= 15 && b.fromBottom < 120, "a big Files… button at the foot of the chat list", b);
+    await ev(`localStorage.setItem("sagebrush-files-sidebar", "0")`);
+    await ev(`document.getElementById('files-big').click()`);
+    await until(`location.pathname === "/" && document.readyState === "complete"`);
+    await until(`!document.getElementById('wssidebar').hidden`, 30000).catch(() => {});
+    const side = await ev(`({ path: location.pathname, shown: !document.getElementById('wssidebar').hidden, pref: localStorage.getItem("sagebrush-files-sidebar") })`);
+    ok("L2-files-button-opens", side.path === "/" && side.shown && side.pref === "1", "Files… opens the notebook page with its file browser shown (though it had been hidden)", side);
+  }
+  // ---- while a turn runs, the composer's primary action queues: Shift+Enter and the primary button never interrupt the
+  //  agent; only Send now (and Stop) do. The scripted agent slowed down, so its turn is still running meanwhile
+  {
+    await fresh(1600);
+    await send("Page.navigate", { url: `${origin}/agents/?speed=0.05` });
+    await until(`document.readyState === 'complete' && !!document.querySelector('#editor .mb')`);
+    await sleep(300);
+    const type = async (text) => {
+      if (!(await ev(`!!document.querySelector('#editor textarea')`))) {
+        const [x, y] = await ev(`(() => { const r = document.querySelector('#editor .mb-block').getBoundingClientRect(); return [r.x + r.width / 2, r.y + r.height / 2]; })()`);
+        for (const type of ["mousePressed", "mouseReleased"]) await send("Input.dispatchMouseEvent", { type, x, y, button: "left", clickCount: 1 });
+      }
+      await until(`!!document.querySelector('#editor textarea')`);
+      await ev(`document.querySelector('#editor textarea').focus()`);
+      await send("Input.insertText", { text });
+    };
+    const shiftEnter = async () => { for (const type of ["keyDown", "keyUp"]) await send("Input.dispatchKeyEvent", { type, key: "Enter", code: "Enter", modifiers: 8, windowsVirtualKeyCode: 13 }); };
+    const state = () => ev(`(() => { const q = (s) => document.querySelector(s); return { running: !q('#stop').hidden, primary: q('#send').textContent, keys: q('#keys').textContent, now: !q('#send-now').hidden && q('#send-now').textContent, queued: q('#queued').textContent, interrupted: [...document.querySelectorAll('.status')].filter((x) => x.textContent === 'Interrupted').length, users: [...document.querySelectorAll('.user')].map((u) => u.className) }; })()`);
+    const idle = await state();
+    ok("Q1-idle", idle.primary === "Send" && idle.keys === "send" && idle.now === false && !idle.running, "with no turn running: Send, Shift+Enter sends, no Send now", idle);
+    await type("plot a Fourier series");
+    await shiftEnter();
+    await until(`!document.querySelector('#stop').hidden`, 10000);
+    const run0 = await state();
+    ok("Q2-running", run0.primary === "Queue" && run0.keys === "queue" && run0.now === "Send now", "while a turn runs: the primary button is Queue, Shift+Enter queues, Send now beside it", run0);
+    await type("and a square wave too");
+    await shiftEnter();
+    await sleep(300);
+    const run1 = await state();
+    ok("Q3-shift-enter", run1.running && run1.interrupted === 0 && run1.queued === "1 queued" && /queued/.test(run1.users.at(-1) ?? ""), "Shift+Enter during a turn queues the message: the turn goes on, 1 queued", run1);
+    await type("label the axes");
+    await ev(`document.querySelector('#send').click()`);
+    await sleep(300);
+    const run2 = await state();
+    ok("Q4-primary", run2.running && run2.interrupted === 0 && run2.queued === "2 queued", "the primary button during a turn queues too: the turn goes on, 2 queued", run2);
+    await type("stop and do this instead");
+    await ev(`document.querySelector('#send-now').click()`);
+    const stopped = await until(`[...document.querySelectorAll('.status')].some((x) => x.textContent === 'Interrupted')`, 10000).then(() => true, () => false);
+    ok("Q5-send-now", stopped, "Send now interrupts the turn and sends", await state());
   }
   console.log(`${checks - fails}/${checks} passed${fails ? "" : ", all passed"}`);
   code = fails ? 1 : 0;

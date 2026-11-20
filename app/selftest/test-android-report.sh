@@ -13,6 +13,9 @@
 # missing, twice, unknown, without ": ", a prefix of another, empty, or a raw
 # CR in a value fail; an escaped newline, a truncated value and error,
 # timeout or unsupported values pass (they are facts, read by coi-reading.py).
+# --desktop (the desktop app's runner, run-judge.mjs): the LaTeX editor's three checks and the board page's three
+# required too: a desktop report with them passes; without either three, with one twice, or with one FAIL, it fails;
+# and the same all-ok desktop report judged as a phone's (no --desktop) fails, its desktop lines unknown there.
 #   bash app/selftest/test-android-report.sh
 set -uo pipefail
 here=$(cd "$(dirname "$0")" && pwd)
@@ -33,6 +36,17 @@ for f in good:chromium:0 coi-fail:chromium:0 req-fail:chromium:1 renamed:chromiu
   if [ "$got" = "$want" ]; then echo "ok   $name --engine $engine (exit $got)"; else echo "FAIL $name --engine $engine: exit $got, expected $want"; bad=1; fi
 done
 # (the engine is the caller's, closed: missing or unknown is a usage error, exit 2)
+# (name:engine:expected exit, judged --desktop; desktop-good also as a phone's, below)
+for f in desktop-good:chromium:0 good:chromium:1 desktop-latex-missing:chromium:1 desktop-latex-dup:chromium:1 desktop-latex-fail:chromium:1 \
+    desktop-board-missing:chromium:1 desktop-board-dup:chromium:1 desktop-board-fail:chromium:1; do
+  IFS=: read -r name engine want <<< "$f"
+  python3 -I "$here/android-report.py" --engine "$engine" --desktop "$here/report-fixtures/$name.txt" > /dev/null 2>&1
+  got=$?
+  if [ "$got" = "$want" ]; then echo "ok   $name --engine $engine --desktop (exit $got)"; else echo "FAIL $name --engine $engine --desktop: exit $got, expected $want"; bad=1; fi
+done
+python3 -I "$here/android-report.py" --engine chromium "$here/report-fixtures/desktop-good.txt" > /dev/null 2>&1
+got=$?
+if [ "$got" = 1 ]; then echo "ok   desktop-good as a phone's (no --desktop): its LaTeX lines unknown (exit 1)"; else echo "FAIL desktop-good as a phone's: exit $got, expected 1"; bad=1; fi
 for args in "" "--engine firefox" "--engine"; do
   python3 -I "$here/android-report.py" $args "$here/report-fixtures/good.txt" > /dev/null 2>&1
   got=$?
