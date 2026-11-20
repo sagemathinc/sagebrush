@@ -334,8 +334,8 @@ export class ChatSession {
     };
     if (!p.events.every(ok)) return;
     // (`running`, step 2: the conversation's turn the agent is still running, at most one id; absent from an agent
-    //  without it, as none. Anything else: the replay changes nothing)
-    const running = (p as { running?: unknown }).running ?? [];
+    //  without it (the field absent), as none. Anything else, null included: the replay changes nothing)
+    const running = "running" in p ? (p as { running?: unknown }).running : [];
     if (!Array.isArray(running) || running.length > 1 || !running.every((r) => typeof r === "string")) return;
     if (thread.agent_instance !== p.instance) this.newRun(thread, p.instance);
     for (const e of p.events as Entry[]) {
