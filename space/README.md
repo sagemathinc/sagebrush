@@ -67,9 +67,11 @@ SAGEBRUSH_AGENT_PAGE=http://127.0.0.1:8765/agents/ npx -y https://agents.sagebru
 
 Open the link it prints, press Connect, and Allow. Then ask, for example:
 
-> Read the space format at https://raw.githubusercontent.com/sagemathinc/sagebrush/space-prototype/space/public/format.md (all of it, verbatim). Then lay out in 3D the Rust code related to modular forms in Sagebrush (github.com/sagemathinc/sagebrush: engine/modsym, engine/hmf, engine/ap, engine/lfun) as /modular.space.json so I can browse it. Include some sample Sage code I can run illustrating what is implemented.
+> Read the space format at https://raw.githubusercontent.com/sagemathinc/sagebrush/space-prototype/space/public/format.md (all of it, verbatim). Then make a space, /polytopes.space.json, with notes on the regular polytopes and Sage code I can run that plots the icosahedron, dodecahedron and the others in 3D.
 
-Over this connection Claude has the web and your Sagebrush files, not your disk, so it reads the code from GitHub. A built site deployed anywhere works the same way: give that origin to `--origin` and its `/agents/` to `SAGEBRUSH_AGENT_PAGE`.
+That is one web fetch (one approval). The file opens beside the chat as a space; if it shows as JSON text instead, the page was built without the space: `grep -c space-frame web/dist/agents/agents.js` says 0. Build again (the four commands above, from `bun web/build.ts` on), then reload the page and click the file's card.
+
+Over this connection Claude has the web and your Sagebrush files, not your disk, and each web fetch asks you first. So a space of a codebase on GitHub (such as "lay out the Rust code for modular forms") costs one approval per file it reads. `modular-forms.space.json` (above) is that space, already made by `gen-modular.mjs` from a checkout.
 
 `bun space/test-agents-space.mjs` (from the repository's root, after the build above) checks this end to end in headless Chromium, with a stand-in for the agent.
 
