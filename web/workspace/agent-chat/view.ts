@@ -92,7 +92,8 @@ function attButtons(a: Attention): string {
   const deny = `<button class="att-deny" data-approve="0">Deny</button>`;
   if (a.buttons === "deny") return deny;
   const allow = `<button class="primary" data-approve="1">${esc(a.allow || "Allow")}</button>`;
-  if (a.buttons === "three" && a.turn_label) return `<button class="primary" data-approve="turn">${esc(a.turn_label)}</button><button data-approve="1">${esc(a.allow || "Allow")}</button>${deny}`;
+  // (the primary style on Allow this request: the narrowest grant is the default-looking answer)
+  if (a.buttons === "three" && a.turn_label) return `<button data-approve="turn">${esc(a.turn_label)}</button>${allow}${deny}`;
   return allow + deny;
 }
 

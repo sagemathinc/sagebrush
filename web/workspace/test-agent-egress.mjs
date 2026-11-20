@@ -144,6 +144,8 @@ const D = (tool, input, id) => permissionDigest({ child: "ch", conversation: "co
   finally { globalThis.document = shown; }
   const buttons = [...html.matchAll(/<button[^>]*data-approve="([^"]*)"[^>]*>([^<]*)<\/button>/g)].map((m) => `${m[1]}:${m[2]}`);
   ok(JSON.stringify(buttons) === JSON.stringify(["turn:Allow github.com for this turn", "1:Allow this request", "0:Deny"]), "three buttons, in order, Deny last", buttons);
+  const primary = [...html.matchAll(/<button class="primary" data-approve="([^"]*)"/g)].map((m) => m[1]);
+  ok(JSON.stringify(primary) === '["1"]', "the primary style is on Allow this request only, the narrowest grant", primary);
   const reason = /<div class="att-reason">([^<]*)<\/div>/.exec(html)?.[1];
   ok(!/<img|<a /.test(html) && reason === "Reason: fetch \\u{202e}&lt;img src=x&gt;", "the reason is plain text, its bidi character written out; nothing is a link", reason);
 }
