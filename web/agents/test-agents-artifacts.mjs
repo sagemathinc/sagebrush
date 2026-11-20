@@ -771,6 +771,20 @@ try {
     const r9 = await p9;
     const f9 = await call("workspace.read", { path: P9 });
     ok(held9 && left9 && r9?.ended === "stopped" && !JSON.stringify(f9.content.json.cells[0].outputs ?? []).includes("SW 9"), "PR9: the person switches chats while the run waits: the run ends, stopped, nothing saved", { held9, left9, r9 });
+    // (PR11: a notebook that asks to autorun (a reactive notebook's setting): the pane's isn't reactive, so the run is
+    //  plain, each code cell once, in order, its own result; an error ends it, the cells after it not run, nothing rerun)
+    await converse();
+    const P11 = "/notes/pr-reactive.ipynb";
+    await call("workspace.create", { path: P11, content: docFor(P11, [{ code: "x = 1\nprint('X', x)" }, { code: "raise ValueError('R11')" }, { code: "print('AFTER', x)" }], { autorun: "always" }), mode: "python" });
+    const t11 = `t${++turnN}`;
+    event(t11, { type: "turn_started" });
+    await sleep(300);
+    const r11 = await runIn(P11, t11);
+    const f11 = await call("workspace.read", { path: P11 });
+    const st11 = (r11?.cells ?? []).map((c) => c.status), n11 = f11.content.json.cells.map((c) => c.n ?? null);
+    ok(r11?.ended === "error" && st11.join() === "ok,error,skipped" && r11.cells[0].out === "X 1\n" && /R11/.test(r11.cells[1].out ?? "") && !JSON.stringify(f11.content.json.cells[2].outputs ?? []).includes("AFTER") && String(n11[0]) === "1",
+      "PR11: a notebook that asks to autorun runs plain in the pane: each cell once, in order, the error ends it, nothing after it run or rerun", { r11, n11 });
+    event(t11, { type: "turn_finished", outcome: "completed" });
     event(t9, { type: "turn_finished", outcome: "completed" }, front);
     event(tb, { type: "turn_finished", outcome: "completed" }, back);
   }
@@ -2338,6 +2352,33 @@ try {
         for (let i = 0; i < 5; i++) await cycle();
         const n1 = await listeners();
         ok(n0.document >= 0 && n1.document === n0.document && n1.window === n0.window, "J9: a notebook pane under the journal opened and closed 5 more times leaves no listener behind (document, window)", { n0, n1 });
+      }
+      // J11: the notebook open in a notebook tab, the journal's writer; the agent's run_notebook from the chat: the pane
+      // follows the tab, so it can't run it there: today's run, its result returned, not "stopped". (Paired again first,
+      // with May run code, the journal already on: an earlier section may have left a grant without it)
+      {
+        await pair();
+        await converse();
+        // (made before the turn: a notebook the agent creates in its turn runs once by itself)
+        const path = "/notes/live-run.ipynb";
+        await call("workspace.create", { path, content: docFor(path, [{ code: "print('J11', 11)" }]), mode: "python" });
+        const ref = await refOf(path);
+        const tj = `t${++turnN}`;
+        event(tj, { type: "turn_started" });
+        const P = await tab(`${site}/?nb=${ref}`);
+        // (the person takes it over in the tab, a real click and a key there: the tab the journal's writer)
+        const ready = await tabReady(P);
+        await typeIn(P, " ");
+        const writer0 = await P.until(`!!(${NB}.store.ready && !${NB}.store.readOnly)`, 20000);
+        await send("Page.bringToFront");
+        const r = await call("workspace.run_notebook", { path, timeout_s: 120, conversation: conv, turn_id: tj });
+        const follows = await until(`document.querySelector('#artifacts .tab.on')?.dataset.tab === ${JSON.stringify(path)} && document.querySelector('${PANE} .nb-root .cell textarea')?.readOnly === true`, 10000).catch(() => false);
+        const bar = await barText();
+        const f = await call("workspace.read", { path });
+        ok(ready && writer0 && follows && !/gone/.test(bar) && r?.ended === "done" && r.saved === "not saved: main" && r.cells?.[0]?.out === "J11 11\n" && !JSON.stringify(f.content.json.cells[0].outputs ?? []).includes("J11 11"),
+          "J11: with a notebook tab the journal's writer, the pane follows it, and the agent's run from the chat is today's run: its result, not stopped", { ready, follows, bar, r, writer0, pane: await ev(`[document.querySelector('#artifacts .tab.on')?.dataset.tab ?? null, document.querySelector('${PANE} .nb-root .cell textarea')?.readOnly ?? null, document.querySelector('${PANE} .nb-root .cell .out')?.textContent ?? null]`), tab: await P.ev(`[${NB}.store.readOnly ?? null, !!${NB}.store.ready, document.querySelector("#cells .cell .out")?.textContent ?? null]`) });
+        event(tj, { type: "turn_finished", outcome: "completed" });
+        await P.close();
       }
     } finally {
       for (const x of tabs) await x.close().catch(() => {});

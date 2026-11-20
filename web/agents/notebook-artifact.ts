@@ -397,19 +397,23 @@ export function mountNotebook(ws: Workspace, path: string, box: HTMLElement, ui:
         // (the notebook as shown, caught up first: the person's edits saved, and the workspace's copy (an agent's write
         //  just made in it) applied here as any change from elsewhere is, so the run is of what both have)
         inputs: async () => {
+          // (not here: ended (this pane's notebook gone, or the call's chat or turn no longer the page's), null, stopped;
+          //  else this pane can't run it (its mount refused, read only, another tab the journal's writer), "fallback":
+          //  nothing has started, today's run instead)
+          const lost = () => (told || !may() ? null : "fallback" as const);
           await host.ready;
           comp = nb;
-          if (!here()) return null;
+          if (!here()) return lost();
           comp.flush();
           try { await comp.saved(); } catch {}
           const r = here() ? await ws.read(path).catch(() => null) : null;
-          if (!here()) return null;
+          if (!here()) return lost();
           const e = r?.entry as any;
           if (r && e?.kind === "notebook" && e.ref === ref && inputsOf(r.content) !== inputsOf(comp.snapshot())) {
             comp.applyRemote({ ...(r.content as any), rev: r.rev });
             await new Promise((go) => setTimeout(go, 0));
           }
-          if (!here()) return null;
+          if (!here()) return lost();
           const s = comp.snapshot();
           return { mode: typeof s.mode === "string" ? s.mode : "python", cells: s.cells.map((c: any) => ({ id: String(c.id), type: c.type ?? "code", code: String(c.code ?? "") })) };
         },
