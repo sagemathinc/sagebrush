@@ -161,8 +161,9 @@ junctions, so it cannot set up such a swap itself;
 where the engine runs (not yet Windows), and checks every tested route to one.
 
 The app's own page is the remaining reach. On the desktop it has no
-file-system plugin: the plugin is neither registered nor linked, so there is
-no `window.__TAURI__.fs`, and the page's capability
+file-system plugin: the plugin is not registered or directly linked (only
+tauri-plugin-dialog links it, for its own use, which puts no API on the page),
+so there is no `window.__TAURI__.fs`, and the page's capability
 (`capabilities/default.json`, checked by `nav.rs`'s tests) grants no `fs:` or
 `dialog:` permission. The desktop self-test checks that the API is absent and
 that two of the plugin's commands are refused by Tauri's access control. The
@@ -172,9 +173,10 @@ commands. With them it reaches the whole workspace folder, the files the
 person has granted and those beside them (below), and the app's settings file
 (only its listed keys, size-capped). It can learn the workspace's and each
 granted file's absolute path, and the engine reads the app's own files. It
-reaches no other file of the person's. Notebook output renders in that page
-today (see G2 under Status today), so saved output that got past the
-sanitizers would reach all of those.
+reaches no other file of the person's, except through a hard link already
+among those files (below). Notebook output renders in that page today (see G2
+under Status today), so saved output that got past the sanitizers would reach
+all of those.
 
 Files from the rest of the computer come only from the person:
 - **How a file is granted.** The app's own Open and Save dialogs (drawn by the
@@ -182,24 +184,28 @@ Files from the rest of the computer come only from the person:
   command line), or the self-test's notebook. Each becomes a grant: an
   unguessable 128-bit id for that file (`app/src-tauri/src/folder_fs.rs`,
   `disk.rs`). Only the newest 8 grants are kept. The page names grants, never
-  a path outside the workspace. A picked link grants the file it points at, so
-  "its folder" below is that file's real folder.
+  a path outside the workspace. A picked symbolic link grants the file it
+  points at, so "its folder" below is that file's real folder.
 - **What a grant reaches.** The granted file, and the files beside it in its
   folder by name only: top-level, not hidden (no leading `.`, no Windows short
   name such as `REPORT~1.CSV`, no invisible format characters), and never a
-  link or anything but a plain file. A write goes to a temporary file in the
-  same folder, keeps the file's permission bits, and replaces it by a rename,
-  so it never writes through a link.
+  symbolic link or anything but a plain file. A write goes to a temporary file
+  in the same folder, keeps the file's ordinary read, write and execute bits
+  on Unix (setuid, setgid and sticky are dropped), and replaces it by a
+  rename, so it never writes through a symbolic link.
 - **The risk this accepts.** Any other top-level file in that folder that
   isn't hidden can be read, written or created, as the notebook's Python can:
   a `conftest.py`, a `Makefile`, or `_netrc` in a home folder. In a notebook
   inside a hidden folder (such as `~/.ssh`), the names beside it aren't
   hidden. A file with Windows' Hidden attribute or macOS's hidden flag isn't
-  covered by the dot rule. Script in the page can open the Save dialog with a
-  name it proposes, so one Save click in a sensitive folder grants that
-  folder's plain files. The names are checked and then used, so a link swapped
-  in between would be followed by a read; that needs a local program, out of
-  scope above.
+  covered by the dot rule. A hard link that already exists, as the picked file
+  or one beside it, is a plain file to these checks: it is read through to the
+  file it shares, wherever that is, and a write replaces only this name,
+  leaving the other name's file as it was. Script in the page can open the
+  Save dialog with a name it proposes, so one Save click in a sensitive folder
+  grants that folder's plain files. The names are checked and then used, so a
+  symbolic link swapped in between would be followed by a read; that needs a
+  local program, out of scope above.
 
 These grants are meant to be the "Files on" mode under Weaker modes, with G1a
 and G1d dropped for exactly the granted file and the files beside it. One gap
