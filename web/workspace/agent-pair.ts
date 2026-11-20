@@ -347,7 +347,7 @@ export class AgentPairing {
     this.grant = grant;
     this.remember = remember;
     this.verbs = this.opts.verbsFor(actorOf(h.agent.name, h.agent.client), { owner: () => grant.id });
-    this.send({ jsonrpc: "2.0", method: "grant.changed", params: { agent: grant.agent, client: grant.client, folders: grant.folders, write: grant.write, run: grant.run, expires: grant.expires } });
+    this.send({ jsonrpc: "2.0", method: "grant.changed", params: { id: grant.id, agent: grant.agent, client: grant.client, folders: grant.folders, write: grant.write, run: grant.run, expires: grant.expires } });
     // (what this page offers beyond the verbs: a notification, which a server that doesn't know it ignores, §1 rule 4)
     // (permission.digest: every Allow carries the digest of the action shown, from any page that pairs)
     this.send({ jsonrpc: "2.0", method: "page.features", params: { features: [...(this.opts.notebookEdit ? ["notebook.edit"] : []), "permission.digest", ...(this.opts.runVerbs ? ["run.context"] : [])] } });
@@ -394,7 +394,7 @@ export class AgentPairing {
     const next: Grant = { ...g, run: false };
     this.grant = next;
     this.verbs = this.opts.verbsFor(actorOf(this.hello!.agent.name, this.hello!.agent.client), { owner: () => next.id });
-    this.send({ jsonrpc: "2.0", method: "grant.changed", params: { agent: next.agent, client: next.client, folders: next.folders, write: next.write, run: false, expires: next.expires } });
+    this.send({ jsonrpc: "2.0", method: "grant.changed", params: { id: next.id, agent: next.agent, client: next.client, folders: next.folders, write: next.write, run: false, expires: next.expires } });
     this.emit();
     await this.keep();
     if (this.grant === next) this.keepForReload();

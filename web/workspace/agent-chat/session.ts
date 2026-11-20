@@ -333,6 +333,10 @@ export class ChatSession {
       return true;
     };
     if (!p.events.every(ok)) return;
+    // (`running`, step 2: the conversation's turn the agent is still running, at most one id; absent from an agent
+    //  without it, as none. Anything else: the replay changes nothing)
+    const running = (p as { running?: unknown }).running ?? [];
+    if (!Array.isArray(running) || running.length > 1 || !running.every((r) => typeof r === "string")) return;
     if (thread.agent_instance !== p.instance) this.newRun(thread, p.instance);
     for (const e of p.events as Entry[]) {
       if (e.seq <= (thread.agent_seq ?? 0)) continue;
@@ -348,10 +352,16 @@ export class ChatSession {
     }
     const last = p.last as number;
     if (p.done === true || (thread.agent_seq ?? 0) >= last) {
-      // (the log has nothing more: an away turn it didn't finish can't go on, as the agent ends a turn whose page
-      //  went away, and logs that end, which the replay applied above; this is the safety net. Step 2, where a turn
-      //  outlives its page, changes this deliberately: a turn the agent says is still running goes back to running.)
-      this.endAway(thread);
+      // (the log has nothing more. An away turn the agent says it is still running goes back to running here (only
+      //  that exact turn, already in this thread: `running` never makes or binds another, D8); any other away turn
+      //  can't go on, and ends interrupted, the safety net for an agent that ended it without the page seeing)
+      const away = awayTurn(thread);
+      if (away && running[0] === away.turn_id) {
+        delete away.away;
+        this.liveRunning.add(thread.id);
+        // (as an event of its own, so the page draws the turn as running again)
+        this.emit(thread, away.turn_id, { type: "turn_state", state: "running" }, true);
+      } else this.endAway(thread);
     } else if (p.done === false) {
       // (stopped early: ask again from the last number this page has)
       this.host.pairing()?.notify("chat.resume", { conversation: thread.id, after: thread.agent_seq ?? 0, instance: p.instance });
