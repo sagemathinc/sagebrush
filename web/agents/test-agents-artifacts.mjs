@@ -1796,7 +1796,8 @@ try {
     };
     // (each answered within 15 s: a control that leaves an edit waiting doesn't hold the run)
     const edit = (path, r, e) => Promise.race([
-      call("notebook.edit", { conversation: conv, path, ref: r.ref, base: r.base, was: r.was, ...e }).then((x) => ({ ok: true, x }), (err) => ({ ok: false, code: err.code, msg: err.message })),
+      // (as the agent's server sends it on a page with edit.turn: the turn it came from, the running one unless a case says)
+      call("notebook.edit", { conversation: conv, path, ref: r.ref, base: r.base, was: r.was, turn_id: turn, ...e }).then((x) => ({ ok: true, x }), (err) => ({ ok: false, code: err.code, msg: err.message })),
       sleep(15000).then(() => ({ ok: false, code: "timeout", msg: "no answer in 15 s" })),
     ]);
     // (E-turn, edit.turn: an edit says the turn it came from; a late edit of a turn that has ended, landing after the
@@ -2260,7 +2261,8 @@ try {
       return { ref: r.ref, base: r.rev, cells: r.content.json.cells, was: Object.fromEntries(r.content.json.cells.map((c) => [c.id, cellHash(c)])) };
     };
     const edit = (path, r, e) => Promise.race([
-      call("notebook.edit", { conversation: conv, path, ref: r.ref, base: r.base, was: r.was, ...e }).then((x) => ({ ok: true, x }), (err) => ({ ok: false, code: err.code, msg: err.message })),
+      // (as the agent's server sends it on a page with edit.turn: the turn it came from, the running one unless a case says)
+      call("notebook.edit", { conversation: conv, path, ref: r.ref, base: r.base, was: r.was, turn_id: turn, ...e }).then((x) => ({ ok: true, x }), (err) => ({ ok: false, code: err.code, msg: err.message })),
       sleep(15000).then(() => ({ ok: false, code: "timeout", msg: "no answer in 15 s" })),
     ]);
     try {
