@@ -9,7 +9,7 @@
 // qpoly_sub or qpoly_eval call, 2^28 units, about 2.16 s there; nor a
 // zpoly_fdiv call, about 0.82 s at its work cap, measured on the slowest
 // admitted shape, 999 coefficients of 1025 limbs by a 128-limb divisor, as
-// the first call in a fresh process, engine module sha256 3b86bfb0..., on
+// the first call in a fresh process, engine module sha256 4ac9d990..., on
 // an AMD EPYC 7B13 host): Sage mode's Python
 // (sagebrush.poly.qdivrem, zdivrem, qscale, qderivative, qintegral, qadd,
 // qsub, qeval and zfdiv) runs in the kernel's worker (web/worker.ts).
