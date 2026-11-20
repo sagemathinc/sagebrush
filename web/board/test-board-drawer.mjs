@@ -121,7 +121,7 @@ try {
   const mouse = (type, x, y, extra = {}) => A.send("Input.dispatchMouseEvent", { type, x, y, button: "left", buttons: type === "mouseReleased" ? 0 : 1, clickCount: 1, ...extra });
   // (a click on a note is told 250 ms after it, when no second click has come: the first of a double-click opens nothing)
   const click = async (x, y) => { await mouse("mousePressed", x, y); await mouse("mouseReleased", x, y); await sleep(400); };
-  const key = (k, extra = {}) => A.send("Input.dispatchKeyEvent", { type: "keyDown", key: k, code: extra.code ?? k, windowsVirtualKeyCode: { Enter: 13, Escape: 27, ArrowLeft: 37, ArrowRight: 39, ArrowUp: 38, ArrowDown: 40, Home: 36, End: 35, PageDown: 34, " ": 32, Delete: 46, Backspace: 8, a: 65, o: 79, z: 90 }[k] ?? 0, ...extra });
+  const key = (k, extra = {}) => A.send("Input.dispatchKeyEvent", { type: "keyDown", key: k, code: extra.code ?? k, windowsVirtualKeyCode: { Enter: 13, Escape: 27, ArrowLeft: 37, ArrowRight: 39, ArrowUp: 38, ArrowDown: 40, Home: 36, End: 35, PageDown: 34, " ": 32, Delete: 46, Backspace: 8, a: 65, o: 79, y: 89, z: 90 }[k] ?? 0, ...extra });
   const rect = (nid) => A.ev(`window.board.clientRect(${JSON.stringify(nid)})`);
   const look = (nid, sx = 200, sy = 200, z = 1) => A.ev(`(() => { const it = window.board.item(${JSON.stringify(nid)}); window.board.setCamera({ x: it.x - ${sx} / ${z}, y: it.y - ${sy} / ${z}, z: ${z} }); window.board.render(); return 1; })()`).then(() => sleep(200));
   const D = `document.querySelector("[data-sbb=drawer]")`;
@@ -329,6 +329,26 @@ try {
   const after = JSON.stringify(await A.ev("(() => { const n = window.sagebrush.board.snapshot().doc.pages[0].nodes.find((x) => x.id === 'long'); return n ? [n.x, n.y] : null; })()"));
   check(after !== "null" && after === before, "arrows, Delete, Backspace and Ctrl+A in the drawer neither move nor delete the note", [before, after]);
   check(await open() && (await heading()) === "Long note", "…and the drawer stays on it");
+  // ...nor copy, cut and paste with its text selected, the focus elsewhere (the top bar's File button): no item copied,
+  // cut or pasted
+  const nodes0 = await A.ev("window.sagebrush.board.snapshot().doc.pages[0].nodes.length");
+  const clip = await A.ev(`(() => {
+    const body = ${D}.querySelector(".sbb-drawer-body"), range = document.createRange(); range.selectNodeContents(body);
+    const sel = getSelection(); sel.removeAllRanges(); sel.addRange(range);
+    const target = document.querySelector("[data-sbb=filebtn]"); target.focus();
+    const dt = new DataTransfer(); dt.setData("text/plain", "words copied elsewhere");
+    target.dispatchEvent(new ClipboardEvent("copy", { bubbles: true, cancelable: true, clipboardData: dt }));
+    const copied = dt.getData("text/plain");
+    target.dispatchEvent(new ClipboardEvent("cut", { bubbles: true, cancelable: true, clipboardData: dt }));
+    const cut = dt.getData("text/plain");
+    target.dispatchEvent(new ClipboardEvent("paste", { bubbles: true, cancelable: true, clipboardData: dt }));
+    return { copied, cut, selected: body.contains(sel.anchorNode), focus: document.activeElement === target };
+  })()`);
+  await sleep(500);
+  const nodes1 = await A.ev("window.sagebrush.board.snapshot().doc.pages[0].nodes.length");
+  check(clip.selected && clip.focus && clip.copied === "words copied elsewhere" && clip.cut === "words copied elsewhere" && nodes1 === nodes0 && await A.ev("!!window.board.item('long')"),
+    "the drawer's text selected, the focus elsewhere: copy, cut and paste neither copy, cut nor paste items", { clip, nodes0, nodes1 });
+  await A.ev("(getSelection().removeAllRanges(), 1)");
   // ...and after a click in its text (the focus in the drawer, not on the page)
   const tb = await A.ev(`(() => { const r = ${D}.querySelector(".sbb-drawer-body").getBoundingClientRect(); return { x: r.left + 40, y: r.top + 40 }; })()`);
   await click(tb.x, tb.y);
@@ -358,8 +378,19 @@ try {
   await A.ev("document.querySelector('.sbb .board').focus(), 1");
   await key("Delete");
   check(await A.until(`/This note was deleted/.test(${D}.querySelector(".sbb-drawer-body").textContent)`, 5000), "the note deleted here: the drawer says so", await drawerText());
+  // (undo and redo with the focus in the drawer: the board's, as everywhere)
+  await A.ev(`${D}.querySelector("h2").focus(), 1`);
   await key("z", { modifiers: 2, code: "KeyZ" });
-  check(await A.until(`/Below, a link/.test(${D}.querySelector(".sbb-drawer-body").textContent)`, 5000), "…undone: the drawer shows it again", await drawerText());
+  check(await A.until(`/Below, a link/.test(${D}.querySelector(".sbb-drawer-body").textContent)`, 5000), "…Ctrl+Z with the focus in the drawer undoes it: the drawer shows it again", await drawerText());
+  await A.ev(`${D}.querySelector("h2").focus(), 1`);
+  await key("z", { modifiers: 2 | 8, code: "KeyZ" });
+  check(await A.until(`/This note was deleted/.test(${D}.querySelector(".sbb-drawer-body").textContent)`, 5000), "…Ctrl+Shift+Z there redoes it", await drawerText());
+  await A.ev(`${D}.querySelector("h2").focus(), 1`);
+  await key("y", { modifiers: 2, code: "KeyY" });
+  await sleep(300);
+  check(/This note was deleted/.test(await drawerText()), "…(Ctrl+Y with nothing to redo leaves it)", await drawerText());
+  await key("z", { modifiers: 2, code: "KeyZ" });
+  check(await A.until(`/Below, a link/.test(${D}.querySelector(".sbb-drawer-body").textContent)`, 5000), "…and Ctrl+Z again brings it back", await drawerText());
   // a note that is no longer one the drawer shows (made a question): closed, not said to be deleted
   await A.ev(`window.sagebrush.board.edit((d) => { const n = d.pages[0].nodes.find((x) => x.id === "linked"); n.kind = "ask"; n.input = "text"; delete n.ref; }).then(() => 1)`);
   check(await A.until(`${D}.hidden`, 5000), "the note made a question: the drawer closes (it isn't deleted)", await drawerText());

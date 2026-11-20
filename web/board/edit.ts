@@ -765,7 +765,8 @@ export class Editor {
     if (cut) this.deleteSelected();
   }
   private paste(e: ClipboardEvent) {
-    if (!this.isActive()) return;
+    // (as copy and cut: not with the focus, or the text selected, in the drawer)
+    if (!this.isActive() || this.inDrawer()) return;
     if (!this.on || this.panel || this.typing()) return;
     // a picture (a screenshot, say): a note that is it, in the middle of the view
     const pics = [...(e.clipboardData?.files ?? [])].filter((f) => f.type.startsWith("image/"));
@@ -1312,13 +1313,15 @@ export class Editor {
   }
 
   private key(e: KeyboardEvent) {
-    if (!this.isActive() || this.inDrawer()) return;
+    if (!this.isActive()) return;
     if (this.panel || e.target instanceof HTMLInputElement || e.target instanceof HTMLTextAreaElement) return;
     // (undo and redo: in Edit only, as undo() and redo() say: View writes nothing, web/doc-mode.ts)
     const mod = e.metaKey || e.ctrlKey;
     if (mod && e.key.toLowerCase() === "z") { e.shiftKey ? this.redo() : this.undo(); }
     else if (mod && e.key.toLowerCase() === "y") this.redo();
-    else if (!this.on) return;
+    // (the rest are the selection's: not with the focus, or the text selected, in the drawer, whose keys they aren't;
+    // undo and redo, above, are the board's wherever the focus is)
+    else if (!this.on || this.inDrawer()) return;
     else if ((e.key === "Delete" || e.key === "Backspace") && this.edgeSel !== null) this.deleteEdge(this.edgeSel);
     else if (e.key === "Enter" && this.edgeSel !== null) this.openEdge(this.edgeSel);
     else if (e.key === "Escape" && this.edgeSel !== null) this.selectEdge(null);
