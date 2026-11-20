@@ -50,12 +50,9 @@
 //! meter polls Stop every [`POLL_UNITS`] units, inside the quotient loop too.
 
 use sagebrush_wire::BigRef;
+use std::sync::atomic::{AtomicU64, Ordering::Relaxed};
 
 use crate::invdiv;
-
-/// The most limbs an integer may have where a gcd check runs (`QV_1`,
-/// `MQR1`): 2^20 bits, about 315,000 decimal digits.
-pub const LIMB_CAP: u64 = 1 << 14;
 
 /// At most this many cosequence steps per Lehmer window (Lamé on 63 bits
 /// allows 91).
@@ -188,17 +185,45 @@ pub enum Fault {
     Invariant,
 }
 
-/// The work meter: units used against the admitted total, and Stop polls.
+/// The work meter: units used against a limit, and Stop polls.
 pub struct Meter {
     used: u64,
     limit: u64,
     since_poll: u64,
     largest: u64,
+    /// The limit is a proven upper bound (U), not a budget: passing it is an
+    /// accounting bug, recorded, never a refusal.
+    accounting: bool,
+    overran: bool,
+}
+
+/// Meters that passed their proven upper bound since the start (the engine
+/// cost policy: an accounting bug, never a refusal).  A release-build signal
+/// for the harness; debug builds fail at the overrun instead.
+static ACCOUNTING_OVERRUNS: AtomicU64 = AtomicU64::new(0);
+
+/// How many [`Meter::accounting`] meters have passed their proven upper
+/// bound since the start.
+pub fn accounting_overruns() -> u64 {
+    ACCOUNTING_OVERRUNS.load(Relaxed)
 }
 
 impl Meter {
+    /// A meter that refuses past `limit` (Fault::Overrun).  The pre-r2 form,
+    /// kept for the ops still to migrate: new code uses
+    /// [`Meter::accounting`] (the engine cost policy: an upper bound never
+    /// refuses).
     pub fn new(limit: u64) -> Meter {
-        Meter { used: 0, limit, since_poll: 0, largest: 0 }
+        Meter { used: 0, limit, since_poll: 0, largest: 0, accounting: false, overran: false }
+    }
+    /// A meter whose limit is a proven upper bound on the work (a cost's
+    /// `work_upper`, or u64::MAX where there is none).  Passing it is an
+    /// accounting bug, never a refusal: a debug build fails (so tests catch
+    /// a wrong bound); a release build counts it once per meter
+    /// ([`accounting_overruns`]) and the work goes on, metered and polling
+    /// Stop.
+    pub fn accounting(upper: u64) -> Meter {
+        Meter { accounting: true, ..Meter::new(upper) }
     }
     pub fn used(&self) -> u64 {
         self.used
@@ -215,9 +240,20 @@ impl Meter {
     pub(crate) fn add(&mut self, n: usize) -> Result<(), Fault> {
         let n = u64::try_from(n).map_err(|_| Fault::Overrun)?;
         self.largest = self.largest.max(n);
-        self.used = self.used.checked_add(n).ok_or(Fault::Overrun)?;
+        match self.used.checked_add(n) {
+            Some(u) => self.used = u,
+            None if self.accounting => self.used = u64::MAX,
+            None => return Err(Fault::Overrun),
+        }
         if self.used > self.limit {
-            return Err(Fault::Overrun);
+            if !self.accounting {
+                return Err(Fault::Overrun);
+            }
+            if !self.overran {
+                self.overran = true;
+                ACCOUNTING_OVERRUNS.fetch_add(1, Relaxed);
+                debug_assert!(false, "a meter passed its proven upper bound: {} units of at most {}", self.used, self.limit);
+            }
         }
         self.since_poll = self.since_poll.saturating_add(n);
         if self.since_poll >= POLL_UNITS {

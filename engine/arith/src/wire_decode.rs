@@ -2,17 +2,28 @@
 //! `QV_1`, `MAT1`, `MQR1`) into engine integers, under one reservation
 //! (S2).  Each `decode_*` takes the caller's [`Admit`], so admission cannot
 //! be skipped:
-//! 1. it computes the payload's [`Need`] (`need_*`, allocation-free):
-//!    over-size integers where a gcd check runs are refused (Cap,
-//!    [`LIMB_CAP`]), and the bytes of everything decoded plus the
-//!    workspace, and the work of every gcd check, are bounded in checked
-//!    u64 arithmetic;
-//! 2. it asks the caller to admit them ([`Admit::admit`]: the work debited
-//!    from the call's budget, the bytes reserved in the ledger), before
-//!    anything here allocates; a refusal ends the decode;
-//! 3. it decodes: the gcd = 1 checks first, in the workspace, metered
-//!    against the admitted work; then the values, with exactly the
-//!    allocations the admitted bytes count.
+//! 1. it computes the payload's [`Need`] (`need_*`, allocation-free): the
+//!    bytes of everything decoded plus the workspace, and the work of every
+//!    gcd check, in checked u64 arithmetic.  There is no size cap: a large
+//!    integer only costs its owner time (the engine cost policy), and the
+//!    check is metered and polls Stop;
+//! 2. it asks the caller to admit them ([`Admit::admit`]: the bytes
+//!    reserved in the ledger, with the payload's [`Cost`]), before anything
+//!    here allocates; a refusal ends the decode;
+//! 3. it decodes: the gcd = 1 checks first, in the workspace, on an
+//!    accounting meter whose limit is the proven work bound (passing it is
+//!    an accounting bug, never a refusal); then the values, with exactly
+//!    the allocations the reserved bytes count.
+//!
+//! **Cost** (the engine cost policy): $L_{\mathrm{mem}}$ is the larger of the
+//! two phases' exact allocations (the workspace during the checks; the
+//! vectors' elements and the values' heap after, dashu's allocation for a
+//! value of more than [`sagebrush_wire::INLINE_LIMBS`] limbs being
+//! $n + \lfloor n/8 \rfloor + 2$ words of $n$ words' magnitude);
+//! $L_{\mathrm{work}}$ is the slots' loads and clears of every check (one
+//! pass over the limbs); $U$ is the proven bound of [`coprime`]; there is
+//! no estimate yet (the candidate is about $4.4\, l_a l_b$ units per pair
+//! plus the loads, to be fitted on the harness).
 //!
 //! **Bytes.**  Each `Vec<BigInt>`: its capacity times the BigInt's size,
 //! plus its header.  Each value: [`sagebrush_wire::bigint_heap_words`] (E1; the
@@ -30,7 +41,8 @@
 //! numerator: the worst running-gcd sequence the headers allow (stopping at
 //! gcd 1 only spends less).
 
-use crate::coprime::{self, Fault, Meter, LIMB_CAP, workspace_words};
+use crate::coprime::{self, Fault, workspace_words};
+use crate::cost::{Cost, Meter};
 use sagebrush_bigint::{BigInt, Sign};
 use sagebrush_wire::{BigRef, Code, Elems, Ints, Mat, Mqr, Qv, WireError, Zv};
 
@@ -42,24 +54,106 @@ const _: () = assert!(sagebrush_wire::INLINE_LIMBS * 64 == 2 * dashu_int::Word::
 /// What a payload needs, admitted before it is decoded.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub struct Need {
-    /// The bytes of every allocation of the decode.
+    /// The bytes of every allocation of the decode: the reservation (its
+    /// observed peak is at most this, and at least `cost.mem_lower`).
     pub bytes: u64,
-    /// The gcd checks' work bound (units of [`coprime::Meter`]).
-    pub work: u64,
+    /// The payload's cost: $L$ and $U$ of the gcd checks' work, and
+    /// $L_{\mathrm{mem}} \le$ `bytes`.
+    pub cost: Cost,
 }
 
-/// The caller's admission of a payload, before it is decoded: debit
-/// `work` from the call's work budget and reserve `bytes` (held until the
-/// decoded values are dropped), or refuse.  The consumer implements it on
-/// its Budget and ledger reservation (this crate sees neither).
+/// The caller's admission of a payload, before it is decoded: reserve
+/// `bytes` (held until the decoded values are dropped), or refuse.  The
+/// consumer implements it on its ledger reservation; it may refuse only on
+/// memory (`bytes`, or `cost.mem_lower`, against what is available) or on
+/// an estimate against the user's time budget, never on `cost.work_upper`
+/// (the engine cost policy).
 pub trait Admit {
-    fn admit(&mut self, work: u64, bytes: u64) -> Result<(), WireError>;
+    fn admit(&mut self, bytes: u64, cost: Cost) -> Result<(), WireError>;
 }
 
 fn admitted(need: Result<Need, WireError>, a: &mut impl Admit) -> Result<Need, WireError> {
     let need = need?;
-    a.admit(need.work, need.bytes)?;
+    debug_assert!(need.cost.mem_lower <= need.bytes, "a memory lower bound above the reservation");
+    a.admit(need.bytes, need.cost)?;
     Ok(need)
+}
+
+/// A payload's figures as they are summed: the reservation (checked: an
+/// overflow means it cannot fit), the two phases' exact allocations and
+/// the work bounds (a lower bound that overflows falls back to 0, an upper
+/// bound to none).
+struct Sum {
+    bytes: Result<u64, WireError>,
+    values: Option<u64>,
+    workspace: u64,
+    work_lower: Option<u64>,
+    work_upper: Option<u64>,
+}
+
+impl Sum {
+    fn new() -> Sum {
+        Sum { bytes: Ok(0), values: Some(0), workspace: 0, work_lower: Some(0), work_upper: Some(0) }
+    }
+    fn bytes(&mut self, b: Result<u64, WireError>) {
+        self.bytes = match (self.bytes, b) {
+            (Ok(t), Ok(b)) => ck(t.checked_add(b)),
+            (Err(e), _) | (_, Err(e)) => Err(e),
+        };
+    }
+    /// A vector of n BigInts: its reservation (elements and header) and its
+    /// exact allocation (the elements).
+    fn vector(&mut self, n: usize) {
+        self.bytes(vec_bytes(n));
+        self.values = self.values.and_then(|v| v.checked_add(as_u64(n).checked_mul(as_u64(size_of::<BigInt>()))?));
+    }
+    /// The values of a ZV_1: their reservation (E1's bound) and their exact
+    /// heap.
+    fn values(&mut self, z: &Zv) {
+        self.bytes(words_bytes(z.heap_words));
+        for b in z.iter() {
+            self.values = self.values.and_then(|v| v.checked_add(value_heap(limbs(&b))?));
+        }
+    }
+    fn workspace(&mut self, l: u64) {
+        let b = ck(workspace_words(l)).and_then(words_bytes);
+        if let Ok(w) = b {
+            self.workspace = w;
+        }
+        self.bytes(b);
+    }
+    fn work(&mut self, lower: Option<u64>, upper: Option<u64>) {
+        self.work_lower = self.work_lower.and_then(|w| w.checked_add(lower?));
+        self.work_upper = self.work_upper.and_then(|w| w.checked_add(upper?));
+    }
+    fn need(self) -> Result<Need, WireError> {
+        let mem_lower = self.values.unwrap_or(0).max(self.workspace);
+        Ok(Need { bytes: self.bytes?, cost: Cost { mem_lower, work_lower: self.work_lower.unwrap_or(0), work_estimate: None, work_upper: self.work_upper } })
+    }
+}
+
+/// The exact heap bytes dashu allocates for a value of k u64 limbs built
+/// from its bytes: none inline, else one buffer of n + floor(n/8) + 2 words
+/// for its n words (a rigorous lower bound: the tests observe it).
+fn value_heap(k: u64) -> Option<u64> {
+    if k <= sagebrush_wire::INLINE_LIMBS {
+        return Some(0);
+    }
+    let word = u64::from(dashu_int::Word::BITS / 8);
+    let n = k.checked_mul(8 / word)?;
+    n.checked_add(n / 8)?.checked_add(2)?.checked_mul(word)
+}
+
+/// The slots' loads and clears of a checked pair: the work every check
+/// does whatever its gcd ([`coprime::coprime_pair`]).
+fn pair_floor(ln: u64, ld: u64) -> Option<u64> {
+    ln.checked_add(ld)?.checked_add(2)?.checked_add(ln.max(ld).checked_add(2)?.checked_mul(2)?)
+}
+
+/// The denominator's load and the final clear of a checked row
+/// ([`coprime::coprime_row`]).
+fn row_floor(ld: u64) -> Option<u64> {
+    ld.checked_mul(2)?.checked_add(3)
 }
 
 fn fail(code: Code, offset: u64, what: &'static str) -> WireError {
@@ -71,7 +165,7 @@ fn internal(what: &'static str) -> WireError {
 }
 
 fn ck(v: Option<u64>) -> Result<u64, WireError> {
-    v.ok_or(fail(Code::Cap, 0, "a decode bound too large"))
+    v.ok_or(fail(Code::Cap, 0, "the decode cannot fit in memory (its size overflows u64)"))
 }
 
 const fn as_u64(n: usize) -> u64 {
@@ -89,14 +183,6 @@ fn words_bytes(w: u64) -> Result<u64, WireError> {
     ck(w.checked_mul(8))
 }
 
-fn sum(parts: &[u64]) -> Result<u64, WireError> {
-    let mut t: u64 = 0;
-    for &p in parts {
-        t = ck(t.checked_add(p))?;
-    }
-    Ok(t)
-}
-
 /// The entries of a `ZV_1` with their request offsets.
 fn entries<'a>(z: &Zv<'a>) -> impl Iterator<Item = (Option<u64>, BigRef<'a>)> + 'a {
     let mut at = z.offset.checked_add(8);
@@ -105,19 +191,6 @@ fn entries<'a>(z: &Zv<'a>) -> impl Iterator<Item = (Option<u64>, BigRef<'a>)> + 
         at = at.and_then(|a| a.checked_add(4)).and_then(|a| a.checked_add(8 * as_u64(b.limb_count())));
         (here, b)
     })
-}
-
-/// Refuse an integer over [`LIMB_CAP`] (only where gcd checks run).
-fn capped(z: &Zv) -> Result<(), WireError> {
-    if z.max_limbs <= LIMB_CAP {
-        return Ok(());
-    }
-    for (at, b) in entries(z) {
-        if as_u64(b.limb_count()) > LIMB_CAP {
-            return Err(fail(Code::Cap, at.ok_or(internal("an offset past u64"))?, "an integer of a rational above 2^20 bits (about 315,000 decimal digits)"));
-        }
-    }
-    Err(internal("a limb maximum without its integer"))
 }
 
 fn is_unit(b: &BigRef) -> bool {
@@ -168,7 +241,10 @@ fn workspace(l: u64) -> Result<Vec<u64>, WireError> {
 
 /// A `ZV_1` (no gcd checks, no cap: linear).
 pub fn need_zv(z: &Zv) -> Result<Need, WireError> {
-    Ok(Need { bytes: sum(&[vec_bytes(z.count)?, words_bytes(z.heap_words)?])?, work: 0 })
+    let mut s = Sum::new();
+    s.vector(z.count);
+    s.values(z);
+    s.need()
 }
 
 /// Decode a `ZV_1` after admitting its [`need_zv`].
@@ -180,7 +256,11 @@ pub fn decode_zv(z: &Zv, a: &mut impl Admit) -> Result<Vec<BigInt>, WireError> {
 /// An integer vector (`I641` or `ZV_1`).
 pub fn need_ints(v: &Ints) -> Result<Need, WireError> {
     match v {
-        Ints::Small(s) => Ok(Need { bytes: vec_bytes(s.count)?, work: 0 }),
+        Ints::Small(v) => {
+            let mut s = Sum::new();
+            s.vector(v.count);
+            s.need()
+        }
         Ints::Big(z) => need_zv(z),
     }
 }
@@ -204,28 +284,31 @@ fn ints_values(v: &Ints) -> Vec<BigInt> {
 
 // ---------------------------------------------------------------- QV_1
 
-/// A `QV_1`: the cap, both vectors, the values, and the workspace and
-/// work of the pairs that need a gcd check.
+/// A `QV_1`: both vectors, the values, and the workspace and work of the
+/// pairs that need a gcd check.
 pub fn need_qv(q: &Qv) -> Result<Need, WireError> {
-    capped(&q.num)?;
-    capped(&q.den)?;
-    let mut work: u64 = 0;
+    let mut s = Sum::new();
     let mut any = false;
     for (n, d) in q.num.iter().zip(q.den.iter()) {
         if pair_checked(&n, &d) {
             any = true;
-            work = ck(work.checked_add(ck(coprime::pair_work(limbs(&n), limbs(&d)))?))?;
+            s.work(pair_floor(limbs(&n), limbs(&d)), coprime::pair_work(limbs(&n), limbs(&d)));
         }
     }
-    let ws = if any { words_bytes(ck(workspace_words(q.num.max_limbs.max(q.den.max_limbs)))?)? } else { 0 };
-    let bytes = sum(&[vec_bytes(q.num.count)?, vec_bytes(q.den.count)?, words_bytes(q.num.heap_words)?, words_bytes(q.den.heap_words)?, ws])?;
-    Ok(Need { bytes, work })
+    s.vector(q.num.count);
+    s.vector(q.den.count);
+    s.values(&q.num);
+    s.values(&q.den);
+    if any {
+        s.workspace(q.num.max_limbs.max(q.den.max_limbs));
+    }
+    s.need()
 }
 
 /// Check every pair of a `QV_1` against the admitted work.
-fn check_qv(q: &Qv, work: u64) -> Result<(), WireError> {
+fn check_qv(q: &Qv, upper: Option<u64>) -> Result<(), WireError> {
     let mut ws: Option<Vec<u64>> = None;
-    let mut m = Meter::new(work);
+    let mut m = Meter::accounting(upper.unwrap_or(u64::MAX));
     for ((at, n), d) in entries(&q.num).zip(q.den.iter()) {
         if !pair_checked(&n, &d) {
             continue;
@@ -249,7 +332,7 @@ pub fn decode_qv(q: &Qv, a: &mut impl Admit) -> Result<(Vec<BigInt>, Vec<BigInt>
 }
 
 fn qv_admitted(q: &Qv, need: &Need) -> Result<(Vec<BigInt>, Vec<BigInt>), WireError> {
-    check_qv(q, need.work)?;
+    check_qv(q, need.cost.work_upper)?;
     Ok((values(&q.num), values(&q.den)))
 }
 
@@ -287,14 +370,14 @@ pub fn decode_mat(m: &Mat, a: &mut impl Admit) -> Result<MatValues, WireError> {
 
 // ---------------------------------------------------------------- MQR1
 
-/// An `MQR1`: the cap, the numerator and denominator vectors, the values,
-/// and the workspace and work of the rows that need a check (the worst
-/// running-gcd sequence their headers allow).
+/// An `MQR1`: the numerator and denominator vectors, the values, and the
+/// workspace and work of the rows that need a check (the worst running-gcd
+/// sequence their headers allow).
 pub fn need_mqr(q: &Mqr) -> Result<Need, WireError> {
-    let mut work: u64 = 0;
+    let mut s = Sum::new();
     let mut any = false;
     for row in q.rows_iter() {
-        capped(&row)?;
+        s.values(&row);
         let mut it = row.iter();
         let d = it.next().ok_or(internal("an empty row"))?;
         if is_unit(&d) {
@@ -302,20 +385,23 @@ pub fn need_mqr(q: &Mqr) -> Result<Need, WireError> {
         }
         any = true;
         let ld = limbs(&d);
-        work = ck(work.checked_add(ck(coprime::row_fixed_work(ld, row.max_limbs))?))?;
+        s.work(row_floor(ld), coprime::row_fixed_work(ld, row.max_limbs));
         for n in it {
-            work = ck(work.checked_add(ck(coprime::row_entry_work(limbs(&n), ld))?))?;
+            s.work(Some(0), coprime::row_entry_work(limbs(&n), ld));
         }
     }
     let n = q.rows.checked_mul(q.cols).ok_or(internal("rows x cols past usize"))?;
-    let ws = if any { words_bytes(ck(workspace_words(q.max_limbs))?)? } else { 0 };
-    let bytes = sum(&[vec_bytes(q.rows)?, vec_bytes(n)?, words_bytes(q.heap_words)?, ws])?;
-    Ok(Need { bytes, work })
+    s.vector(q.rows);
+    s.vector(n);
+    if any {
+        s.workspace(q.max_limbs);
+    }
+    s.need()
 }
 
-fn check_mqr(q: &Mqr, work: u64) -> Result<(), WireError> {
+fn check_mqr(q: &Mqr, upper: Option<u64>) -> Result<(), WireError> {
     let mut ws: Option<Vec<u64>> = None;
-    let mut m = Meter::new(work);
+    let mut m = Meter::accounting(upper.unwrap_or(u64::MAX));
     for row in q.rows_iter() {
         let Some((at, d)) = entries(&row).next() else {
             return Err(internal("an empty row"));
@@ -342,7 +428,7 @@ pub fn decode_mqr(q: &Mqr, a: &mut impl Admit) -> Result<(Vec<BigInt>, Vec<BigIn
 }
 
 fn mqr_admitted(q: &Mqr, need: &Need) -> Result<(Vec<BigInt>, Vec<BigInt>), WireError> {
-    check_mqr(q, need.work)?;
+    check_mqr(q, need.cost.work_upper)?;
     let n = q.rows.checked_mul(q.cols).ok_or(internal("rows x cols past usize"))?;
     let mut dens = Vec::with_capacity(q.rows);
     let mut nums = Vec::with_capacity(n);

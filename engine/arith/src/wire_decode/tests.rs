@@ -1,5 +1,6 @@
 use super::*;
 use crate::coprime::{gcd_in_place, gcd_work, pair_work, row_entry_work, row_fixed_work, Fault, Meter};
+use crate::cost::accounting_overruns;
 use dashu_int::UBig;
 use sagebrush_wire::{mqr1, qv1, zv1, Arg, ElemKind};
 
@@ -53,20 +54,20 @@ const BASE: u64 = 1000;
 struct Open;
 
 impl Admit for Open {
-    fn admit(&mut self, _work: u64, _bytes: u64) -> Result<(), WireError> {
+    fn admit(&mut self, _bytes: u64, _cost: Cost) -> Result<(), WireError> {
         Ok(())
     }
 }
 
 /// Records what it is asked to admit, and refuses after `left` calls.
 struct Seen {
-    asked: Vec<(u64, u64)>,
+    asked: Vec<(u64, Cost)>,
     left: usize,
 }
 
 impl Admit for Seen {
-    fn admit(&mut self, work: u64, bytes: u64) -> Result<(), WireError> {
-        self.asked.push((work, bytes));
+    fn admit(&mut self, bytes: u64, cost: Cost) -> Result<(), WireError> {
+        self.asked.push((bytes, cost));
         if self.left == 0 {
             return Err(WireError { code: Code::Cap, offset: 0, what: "refused by the caller" });
         }
@@ -219,6 +220,14 @@ fn a_workspace_one_word_short_is_an_invariant_failure() {
 
 // ---------------------------------------------------------------- QV_1
 
+const BI: u64 = size_of::<BigInt>() as u64;
+
+/// The need of a payload with no gcd check: its reservation and its exact
+/// allocation, no work.
+fn free(bytes: u64, mem_lower: u64) -> Need {
+    Need { bytes, cost: Cost { mem_lower, work_lower: 0, work_estimate: None, work_upper: Some(0) } }
+}
+
 fn size_of_vec(n: usize) -> u64 {
     (n * size_of::<BigInt>() + size_of::<Vec<BigInt>>()) as u64
 }
@@ -238,11 +247,20 @@ fn qv_needs_and_decodes() {
     let la = a.as_words().len() as u64;
     let lb = b.as_words().len() as u64;
     let lc1 = (&c + UBig::ONE).as_words().len() as u64;
-    assert_eq!(need.work, pair_work(la, lb).unwrap() + pair_work(1, lc1).unwrap());
+    assert_eq!(need.cost.work_upper, Some(pair_work(la, lb).unwrap() + pair_work(1, lc1).unwrap()));
+    // L: the slots' loads and clears of the two checked pairs
+    let floor = |x: u64, y: u64| x + y + 2 + 2 * (x.max(y) + 2);
+    assert_eq!(need.cost.work_lower, floor(la, lb) + floor(1, lc1));
+    assert_eq!(need.cost.work_estimate, None);
     let heap = |k: u64| sagebrush_wire::bigint_heap_words(k).unwrap();
     let l = la.max(lb).max(lc1);
     let bytes = 2 * size_of_vec(5) + 8 * (heap(la) + heap(lb) + heap(1) + heap(lc1) + heap(1) + 2 * heap(1)) + 8 * 2 * (l + 1);
     assert_eq!(need.bytes, bytes);
+    // L_mem: the larger phase, the workspace or the vectors' elements and
+    // the values' exact heap (dashu's k + k/8 + 2 words past two limbs)
+    let exact = |k: u64| if k <= 2 { 0 } else { 8 * (k + k / 8 + 2) };
+    let values = 10 * BI + exact(la) + exact(lb) + exact(lc1);
+    assert_eq!(need.cost.mem_lower, values.max(8 * 2 * (l + 1)));
     let (n, d) = decode_qv(&q, &mut Open).unwrap();
     let want_n: Vec<BigInt> = [BigInt::from_bytes_le(Sign::Plus, &a.to_le_bytes()), 0.into(), 5.into(), (-1).into(), -BigInt::from_bytes_le(Sign::Plus, &c.to_le_bytes())].into();
     assert_eq!(n, want_n);
@@ -251,7 +269,7 @@ fn qv_needs_and_decodes() {
     // all evident: no work, no workspace
     let p = qv_bytes(&[small(0), small(3)], &[small(1), small(1)]);
     let need = need_qv(&qv1(arg(&p)).unwrap()).unwrap();
-    assert_eq!(need, Need { bytes: 2 * size_of_vec(2), work: 0 });
+    assert_eq!(need, free(2 * size_of_vec(2), 4 * BI));
 }
 
 #[test]
@@ -274,47 +292,101 @@ fn a_rational_not_in_lowest_terms_is_refused_at_its_numerator() {
 }
 
 #[test]
-fn the_limb_cap_is_exact_and_refused_before_any_work() {
-    let cap = LIMB_CAP as usize;
+fn integers_far_above_the_old_cap_are_admitted() {
+    // no size cap (the engine cost policy): a large integer costs its owner
+    // time only; a checked pair is costed (its gcd is quadratic: the
+    // Stop test runs one), an evident one decoded
     let mut seed = 5u64;
-    for (k, ok) in [(cap - 1, true), (cap, true), (cap + 1, false)] {
+    for k in [16385usize, 50_000] {
         let big = rnd(k, &mut seed) | (UBig::ONE << (64 * k - 1));
-        // in a numerator (after a small entry), then in a denominator
-        for in_den in [false, true] {
-            let (nums, dens) = if in_den { (vec![small(1), small(1)], vec![small(1), pos(&big)]) } else { (vec![small(1), pos(&big)], vec![small(1), small(1)]) };
-            let p = qv_bytes(&nums, &dens);
-            let q = qv1(arg(&p)).unwrap();
-            let r = need_qv(&q);
-            if ok {
-                assert!(r.is_ok(), "{} limbs", k);
-            } else {
-                let e = r.unwrap_err();
-                let zv_at = if in_den { BASE + 4 + (4 + 8 + 2 * (4 + 8)) } else { BASE + 4 };
-                assert_eq!((e.code, e.offset), (Code::Cap, zv_at + 4 + 8 + (4 + 8)), "{:?}", e);
-                assert!(e.what.contains("2^20 bits"));
-            }
-        }
-        // the same integer in a ZV_1 is not capped (no gcd: a linear decode)
+        let p = qv_bytes(&[pos(&big), pos(&big)], &[pos(&(&big - UBig::ONE)), small(1)]);
+        let q = qv1(arg(&p)).unwrap();
+        let need = need_qv(&q).unwrap();
+        assert_eq!(need.cost.work_upper, pair_work(k as u64, k as u64), "{} limbs: the first pair only", k);
+        assert!(need.cost.mem_lower <= need.bytes);
+        let p = qv_bytes(&[pos(&big)], &[small(1)]);
+        let q = qv1(arg(&p)).unwrap();
+        assert_eq!(decode_qv(&q, &mut Open).unwrap().0.len(), 1);
+        // and in a ZV_1, as before
         let mut p = Vec::new();
         put_zv(&mut p, &[pos(&big)]);
-        let z = zv1(arg(&p)).unwrap();
-        assert!(need_zv(&z).is_ok());
-        assert_eq!(decode_zv(&z, &mut Open).unwrap().len(), 1);
+        assert_eq!(decode_zv(&zv1(arg(&p)).unwrap(), &mut Open).unwrap().len(), 1);
     }
 }
 
 #[test]
-fn an_overrun_of_the_admitted_work_is_internal_and_terminal() {
+fn overflowing_figures_drop_the_promise_or_refuse_the_memory() {
+    let big = 1u64 << 40;
+    assert_eq!(pair_work(big, big), None);
+    assert_eq!(row_entry_work(big, big), None);
+    // an upper bound that overflows is no promise, never a refusal; the
+    // lower bound still holds
+    let mut s = Sum::new();
+    s.work(pair_floor(big, big), pair_work(big, big));
+    s.work(pair_floor(3, 2), pair_work(3, 2));
+    let need = s.need().unwrap();
+    assert_eq!(need.cost.work_upper, None);
+    assert_eq!(need.cost.work_lower, pair_floor(big, big).unwrap() + pair_floor(3, 2).unwrap());
+    // a lower bound that overflows falls back to 0 (still a lower bound)
+    let mut s = Sum::new();
+    s.work(Some(u64::MAX), Some(1));
+    s.work(Some(1), Some(1));
+    assert_eq!(s.need().unwrap().cost.work_lower, 0);
+    // a reservation that overflows cannot fit: a memory refusal
+    for l in [u64::MAX, 1 << 61] {
+        let mut s = Sum::new();
+        s.workspace(l);
+        let e = s.need().unwrap_err();
+        assert_eq!(e.code, Code::Cap);
+        assert!(e.what.contains("cannot fit"), "{}", e.what);
+    }
+    // and a sum of reservations that overflows, each term fitting
+    let mut s = Sum::new();
+    s.bytes(Ok(u64::MAX - 1));
+    s.bytes(Ok(2));
+    assert!(s.need().unwrap_err().what.contains("cannot fit"));
+    assert_eq!(value_heap(u64::MAX), None);
+    assert_eq!(value_heap(1 << 61), None);
+}
+
+#[test]
+fn the_memory_lower_bound_is_the_larger_phase() {
+    // a 100-limb numerator over a 1-limb denominator: the checks' workspace
+    // (2 (100 + 1) words) outweighs the values (two BigInts and one buffer
+    // of 100 + 12 + 2 words), so it is L_mem
+    let mut seed = 31u64;
+    let big = rnd(100, &mut seed) | (UBig::ONE << 6399);
+    let p = qv_bytes(&[pos(&big)], &[small(3)]);
+    let q = qv1(arg(&p)).unwrap();
+    let need = need_qv(&q).unwrap();
+    let values = 2 * BI + 8 * (100 + 12 + 2);
+    let workspace = 8 * 2 * 101;
+    assert!(workspace > values);
+    assert_eq!(need.cost.mem_lower, workspace);
+    // and an evident pair has no workspace: the values are L_mem
+    let p = qv_bytes(&[pos(&big)], &[small(1)]);
+    let need = need_qv(&qv1(arg(&p)).unwrap()).unwrap();
+    assert_eq!(need.cost.mem_lower, values);
+}
+
+#[test]
+fn an_overrun_of_the_proven_bound_is_an_accounting_event_never_a_refusal() {
     let (x, y) = fib(3000);
     let p = qv_bytes(&[pos(&x)], &[pos(&y)]);
     let q = qv1(arg(&p)).unwrap();
     let need = need_qv(&q).unwrap();
     assert!(decode_qv(&q, &mut Open).is_ok());
-    // far less than the bound (the meter, not the bound's slack, refuses)
-    let short = Need { work: need.work / 10_000, ..need };
-    let e = qv_admitted(&q, &short).unwrap_err();
-    assert_eq!(e.code, Code::Internal);
-    assert!(e.what.contains("admitted work"));
+    // a wrong upper bound (far below the work): a debug build fails at the
+    // overrun, so tests catch it; a release build counts it and finishes
+    let short = Need { cost: Cost { work_upper: need.cost.work_upper.map(|u| u / 10_000), ..need.cost }, ..need };
+    let before = accounting_overruns();
+    let r = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| qv_admitted(&q, &short)));
+    assert!(accounting_overruns() > before, "the overrun is counted");
+    if cfg!(debug_assertions) {
+        assert!(r.is_err(), "a debug build fails at the overrun");
+    } else {
+        assert!(r.unwrap().is_ok(), "a release build finishes");
+    }
 }
 
 // ---------------------------------------------------------------- MAT1
@@ -328,7 +400,7 @@ fn mat1_of_rationals_is_two_flat_vectors() {
     let m = sagebrush_wire::mat1(arg(&b), ElemKind::Rationals, false).unwrap();
     let need = need_mat(&m).unwrap();
     assert_eq!(need.bytes, 2 * size_of_vec(4) + 8 * 2 * 2);
-    assert!(need.work > 0);
+    assert!(need.cost.work_upper > Some(0));
     match decode_mat(&m, &mut Open).unwrap() {
         MatValues::Rationals(n, d) => {
             assert_eq!(n, vec![1.into(), (-2).into(), 0.into(), 9.into()]);
@@ -346,7 +418,7 @@ fn mat1_of_rationals_is_two_flat_vectors() {
     }
     let m = sagebrush_wire::mat1(arg(&b), ElemKind::Ints, false).unwrap();
     let need = need_mat(&m).unwrap();
-    assert_eq!(need, Need { bytes: size_of_vec(2), work: 0 });
+    assert_eq!(need, free(size_of_vec(2), 2 * BI));
     assert_eq!(decode_mat(&m, &mut Open).unwrap(), MatValues::Ints(vec![i64::MIN.into(), i64::MAX.into()]));
 }
 
@@ -370,7 +442,7 @@ fn mqr_rows_are_checked_by_their_running_gcd() {
     let ld = d.as_words().len() as u64;
     let lrow = ok_row.iter().map(|x| x.1.len() as u64).max().unwrap();
     let want = row_fixed_work(ld, lrow).unwrap() + ok_row[1..].iter().map(|x| row_entry_work(x.1.len() as u64, ld).unwrap()).sum::<u64>();
-    assert_eq!(need.work, want, "only the second row is checked");
+    assert_eq!(need.cost.work_upper, Some(want), "only the second row is checked");
     let (dens, nums) = decode_mqr(&m, &mut Open).unwrap();
     assert_eq!(dens.len(), 3);
     assert_eq!(nums.len(), 9);
@@ -392,7 +464,7 @@ fn hostile_shapes_decode_within_their_need() {
     let b = mqr_bytes(0, &rows);
     let m = mqr1(arg(&b)).unwrap();
     let need = need_mqr(&m).unwrap();
-    assert_eq!(need, Need { bytes: size_of_vec(2000) + size_of_vec(0), work: 0 });
+    assert_eq!(need, free(size_of_vec(2000) + size_of_vec(0), 2000 * BI));
     let (d, n) = decode_mqr(&m, &mut Open).unwrap();
     assert_eq!((d.len(), n.len()), (2000, 0));
     let zeros: Vec<Int> = (0..5000).map(|_| small(0)).collect();
@@ -400,7 +472,7 @@ fn hostile_shapes_decode_within_their_need() {
     let p = qv_bytes(&zeros, &ones);
     let q = qv1(arg(&p)).unwrap();
     let need = need_qv(&q).unwrap();
-    assert_eq!(need, Need { bytes: 2 * size_of_vec(5000), work: 0 });
+    assert_eq!(need, free(2 * size_of_vec(5000), 10000 * BI));
     assert_eq!(decode_qv(&q, &mut Open).unwrap().0.len(), 5000);
 }
 
@@ -415,7 +487,7 @@ fn every_decode_admits_its_exact_need_first() {
     let need = need_qv(&q).unwrap();
     let mut a = Seen { asked: vec![], left: 1 };
     assert!(decode_qv(&q, &mut a).is_ok());
-    assert_eq!(a.asked, vec![(need.work, need.bytes)]);
+    assert_eq!(a.asked, vec![(need.bytes, need.cost)]);
     // a refusal is the decode's answer, and nothing is checked or built
     let mut a = Seen { asked: vec![], left: 0 };
     assert_eq!(decode_qv(&q, &mut a).unwrap_err().what, "refused by the caller");
@@ -425,7 +497,8 @@ fn every_decode_admits_its_exact_need_first() {
     let z = zv1(arg(&zb)).unwrap();
     let mut a = Seen { asked: vec![], left: 0 };
     assert!(decode_zv(&z, &mut a).is_err());
-    assert_eq!(a.asked, vec![(0, need_zv(&z).unwrap().bytes)]);
+    let nz = need_zv(&z).unwrap();
+    assert_eq!(a.asked, vec![(nz.bytes, nz.cost)]);
     let ints = sagebrush_wire::ints(arg(&zb)).unwrap();
     assert!(decode_ints(&ints, &mut Seen { asked: vec![], left: 0 }).is_err());
     let b = mqr_bytes(1, &[vec![pos(&y), pos(&x)]]);
@@ -433,7 +506,7 @@ fn every_decode_admits_its_exact_need_first() {
     let mut a = Seen { asked: vec![], left: 0 };
     assert!(decode_mqr(&m, &mut a).is_err());
     let nm = need_mqr(&m).unwrap();
-    assert_eq!(a.asked, vec![(nm.work, nm.bytes)]);
+    assert_eq!(a.asked, vec![(nm.bytes, nm.cost)]);
     let mut mb = b"MAT1".to_vec();
     mb.extend_from_slice(&1u32.to_le_bytes());
     mb.extend_from_slice(&2u32.to_le_bytes());
@@ -441,5 +514,5 @@ fn every_decode_admits_its_exact_need_first() {
     let m = sagebrush_wire::mat1(arg(&mb), ElemKind::Rationals, false).unwrap();
     let mut a = Seen { asked: vec![], left: 0 };
     assert!(decode_mat(&m, &mut a).is_err());
-    assert_eq!(a.asked, vec![(need.work, need.bytes)]);
+    assert_eq!(a.asked, vec![(need.bytes, need.cost)]);
 }

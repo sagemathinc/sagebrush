@@ -5,7 +5,8 @@
 //! allocate nothing.  One test (the counters are global).
 
 use dashu_int::UBig;
-use sagebrush_arith::coprime::{pair_work, LIMB_CAP};
+use sagebrush_arith::coprime::pair_work;
+use sagebrush_arith::cost::Cost;
 use sagebrush_arith::wire_decode::*;
 use sagebrush_wire::{mat1, mqr1, qv1, zv1, Arg, Code, ElemKind, WireError};
 use std::alloc::{GlobalAlloc, Layout, System};
@@ -157,42 +158,59 @@ fn coprime_pair(a: usize, b: usize, seed: &mut u64) -> (UBig, UBig) {
     }
 }
 
-/// A consumer's admission, as a stand-in for its Budget and ledger: the
-/// work and bytes left; a payload over either is refused.
+/// A consumer's admission, as a stand-in for its ledger reservation: the
+/// bytes left (the engine cost policy: memory may refuse, the work's upper
+/// bound never does); it records what it admitted.
 struct Grant {
-    work: u64,
     bytes: u64,
+    seen: Option<(u64, Cost)>,
 }
 
 impl Admit for Grant {
-    fn admit(&mut self, work: u64, bytes: u64) -> Result<(), WireError> {
-        if work > self.work || bytes > self.bytes {
+    fn admit(&mut self, bytes: u64, cost: Cost) -> Result<(), WireError> {
+        if bytes > self.bytes {
             return Err(WireError { code: Code::Cap, offset: 0, what: "over the grant" });
         }
-        self.work -= work;
         self.bytes -= bytes;
+        self.seen = Some((bytes, cost));
         Ok(())
     }
 }
 
 fn open() -> Grant {
-    Grant { work: u64::MAX, bytes: u64::MAX }
+    Grant { bytes: u64::MAX, seen: None }
 }
 
-/// Decode a QV_1 through its enforced entry point with `work` granted: the
-/// work left after, or the refusal; the peak is within the need, and a
+/// Decode through an enforced entry point: the result, dropped, and the
+/// peak; an admitted decode's peak is within its reservation and at least
+/// its memory lower bound (the TESTS lane's observed >= L).
+fn checked<T>(f: impl FnOnce(&mut Grant) -> Result<T, WireError>) -> (Result<(), WireError>, u64) {
+    let mut g = open();
+    let (r, peak) = measured(|| f(&mut g).map(drop));
+    if r.is_ok() {
+        let (bytes, cost) = g.seen.expect("an admitted decode");
+        assert!(cost.mem_lower <= bytes, "L_mem {} above the reservation {}", cost.mem_lower, bytes);
+        assert!(peak <= bytes, "peak {} over the reservation {}", peak, bytes);
+        assert!(peak >= cost.mem_lower, "peak {} below L_mem {}", peak, cost.mem_lower);
+    }
+    (r, peak)
+}
+
+/// Decode a QV_1 through its enforced entry point with `bytes` granted: the
+/// bytes left after, or the refusal; the peak is within the need, and a
 /// refusal allocates nothing.
-fn admit_and_decode_qv(p: &[u8], work: u64) -> Result<u64, &'static str> {
+fn admit_and_decode_qv(p: &[u8], bytes: u64) -> Result<u64, &'static str> {
     let q = qv1(arg(p)).map_err(|e| e.what)?;
     let (need, peak) = measured(|| need_qv(&q));
     assert_eq!(peak, 0, "need_qv allocated");
     let need = need.map_err(|e| e.what)?;
-    let mut g = Grant { work, bytes: u64::MAX };
+    let mut g = Grant { bytes, seen: None };
     let (r, peak) = measured(|| decode_qv(&q, &mut g).map(drop));
     match r {
         Ok(()) => {
             assert!(peak <= need.bytes, "QV_1 peak {} over its need {}", peak, need.bytes);
-            Ok(g.work)
+            assert!(peak >= need.cost.mem_lower, "QV_1 peak {} below L_mem {}", peak, need.cost.mem_lower);
+            Ok(g.bytes)
         }
         Err(e) => {
             assert_eq!(peak, 0, "a refused admission allocated");
@@ -214,7 +232,7 @@ fn decodes_allocate_within_their_need() {
         let z = zv1(arg(&p)).unwrap();
         let (need, peak) = measured(|| need_zv(&z).unwrap());
         assert_eq!(peak, 0);
-        let (_, peak) = measured(|| drop(decode_zv(&z, &mut open()).unwrap()));
+        let (_, peak) = checked(|g| decode_zv(&z, g));
         assert!(peak <= need.bytes, "ZV_1 {} limbs: peak {} over {}", k, peak, need.bytes);
 
         let pairs: Vec<(UBig, UBig)> = (0..3).map(|i| coprime_pair(k + i, (k / 2).max(1), &mut seed)).collect();
@@ -226,14 +244,14 @@ fn decodes_allocate_within_their_need() {
         let m = mat_bytes(1, 3, &qv_bytes(&nums, &dens));
         let m = mat1(arg(&m), ElemKind::Rationals, false).unwrap();
         let need = need_mat(&m).unwrap();
-        let (_, peak) = measured(|| drop(decode_mat(&m, &mut open()).unwrap()));
+        let (_, peak) = checked(|g| decode_mat(&m, g));
         assert!(peak <= need.bytes, "MAT1 rationals {} limbs: {} over {}", k, peak, need.bytes);
         let mut zb = Vec::new();
         put_zv(&mut zb, &nums);
         let m = mat_bytes(3, 1, &zb);
         let m = mat1(arg(&m), ElemKind::Ints, false).unwrap();
         let need = need_mat(&m).unwrap();
-        let (_, peak) = measured(|| drop(decode_mat(&m, &mut open()).unwrap()));
+        let (_, peak) = checked(|g| decode_mat(&m, g));
         assert!(peak <= need.bytes, "MAT1 integers {} limbs: {} over {}", k, peak, need.bytes);
 
         // MQR1: a checked row and a row with denominator 1
@@ -244,7 +262,7 @@ fn decodes_allocate_within_their_need() {
         let m = mqr1(arg(&b)).unwrap();
         let (need, peak) = measured(|| need_mqr(&m).unwrap());
         assert_eq!(peak, 0);
-        let (r, peak) = measured(|| decode_mqr(&m, &mut open()).map(drop));
+        let (r, peak) = checked(|g| decode_mqr(&m, g));
         assert!(r.is_ok(), "MQR1 {} limbs: {:?}", k, r);
         assert!(peak <= need.bytes, "MQR1 {} limbs: {} over {}", k, peak, need.bytes);
     }
@@ -257,7 +275,7 @@ fn decodes_allocate_within_their_need() {
         put_zv(&mut p, &xs);
         let z = zv1(arg(&p)).unwrap();
         let need = need_zv(&z).unwrap();
-        let (_, peak) = measured(|| drop(decode_zv(&z, &mut open()).unwrap()));
+        let (_, peak) = checked(|g| decode_zv(&z, g));
         assert!(peak <= need.bytes, "1000 integers of {} limbs: peak {} over {}", k, peak, need.bytes);
     }
 
@@ -267,31 +285,29 @@ fn decodes_allocate_within_their_need() {
         let (x, y) = (&rnd(k, &mut seed) * &g, &rnd(k, &mut seed) * &g);
         let p = qv_bytes(&[pos(&x)], &[pos(&y)]);
         let q = qv1(arg(&p)).unwrap();
-            let (r, peak) = measured(|| decode_qv(&q, &mut open()).map(drop));
+        let (r, peak) = checked(|g| decode_qv(&q, g));
         assert_eq!(r.unwrap_err().code, Code::Schema);
         let l = limbs(&x).len().max(limbs(&y).len()) as u64;
         assert_eq!(peak, 8 * 2 * (l + 1), "{} limbs", k);
     }
 
-    // an integer over the cap is refused before anything is allocated
-    let big = rnd(LIMB_CAP as usize + 1, &mut seed);
+    // an integer far above the old cap decodes within its need (no cap:
+    // the engine cost policy); its pair with 3 is checked in one-limb steps
+    let big = &rnd(16385, &mut seed) * UBig::from(3u8) + UBig::ONE;
     let p = qv_bytes(&[pos(&big)], &[small(3)]);
     let q = qv1(arg(&p)).unwrap();
-    let (r, peak) = measured(|| need_qv(&q));
-    assert_eq!((r.unwrap_err().code, peak), (Code::Cap, 0));
+    let (r, _) = checked(|g| decode_qv(&q, g));
+    assert!(r.is_ok());
 
-    // the aggregate work: admitted exactly, refused one unit short, and
-    // many pairs each within the budget refused together before any
-    // allocation
+    // the aggregate memory: admitted exactly, refused one byte short with
+    // nothing allocated; the work's upper bound is reported, never refused
     let pairs: Vec<(UBig, UBig)> = (0..40).map(|_| coprime_pair(20, 19, &mut seed)).collect();
     let nums: Vec<Int> = pairs.iter().map(|p| pos(&p.0)).collect();
     let dens: Vec<Int> = pairs.iter().map(|p| pos(&p.1)).collect();
     let p = qv_bytes(&nums, &dens);
     let need = need_qv(&qv1(arg(&p)).unwrap()).unwrap();
-    assert_eq!(need.work, 40 * pair_work(20, 19).unwrap());
-    assert_eq!(admit_and_decode_qv(&p, need.work), Ok(0));
-    let (r, peak) = measured(|| admit_and_decode_qv(&p, need.work - 1));
-    assert_eq!((r, peak), (Err("over the grant"), 0));
-    let (r, peak) = measured(|| admit_and_decode_qv(&p, 2 * pair_work(20, 19).unwrap()));
+    assert_eq!(need.cost.work_upper, Some(40 * pair_work(20, 19).unwrap()));
+    assert_eq!(admit_and_decode_qv(&p, need.bytes), Ok(0));
+    let (r, peak) = measured(|| admit_and_decode_qv(&p, need.bytes - 1));
     assert_eq!((r, peak), (Err("over the grant"), 0));
 }

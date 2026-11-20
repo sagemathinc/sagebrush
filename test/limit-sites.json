@@ -9,6 +9,16 @@
   "owner": "poly_mul",
   "reason": "poly_mul's derived bounds, a closed form's const assertion, a field mask, a benchmark's output or a test assertion: refuses nothing itself"
  },
+ "engine/arith/src/coprime.rs :: add :: None if self.accounting => self.used = u64::MAX, #0": {
+  "class": "none",
+  "owner": "engine arith (big-integer wire decoder)",
+  "reason": "the work meter's accounting mode: passing a proven upper bound is an accounting bug, counted (and a debug assertion), never a refusal"
+ },
+ "engine/arith/src/coprime.rs :: add :: debug_assert!(false, \"a meter passed its proven upper bound: {} units of at most {}\", self.used, self.limit); #0": {
+  "class": "none",
+  "owner": "engine arith (big-integer wire decoder)",
+  "reason": "the work meter's accounting mode: passing a proven upper bound is an accounting bug, counted (and a debug assertion), never a refusal"
+ },
  "engine/arith/src/coprime.rs :: add :: if self.used > self.limit { #0": {
   "class": "none",
   "owner": "engine arith (big-integer wire decoder)",
@@ -24,10 +34,10 @@
   "owner": "engine arith (big-integer wire decoder)",
   "reason": "the decoder's and the gcd check's plumbing (bounds for the caller's reservation and work admission, the workspace, word masks); refuses nothing itself"
  },
- "engine/arith/src/coprime.rs :: new :: Meter { used: 0, limit, since_poll: 0, largest: 0 } #0": {
+ "engine/arith/src/coprime.rs :: new :: Meter { used: 0, limit, since_poll: 0, largest: 0, accounting: false, overran: false } #0": {
   "class": "none",
   "owner": "engine arith (big-integer wire decoder)",
-  "reason": "the decoder's and the gcd check's plumbing (bounds for the caller's reservation and work admission, the workspace, word masks); refuses nothing itself"
+  "reason": "the work meter's accounting mode: passing a proven upper bound is an accounting bug, counted (and a debug assertion), never a refusal"
  },
  "engine/arith/src/coprime.rs :: new :: pub fn new(limit: u64) -> Meter { #0": {
   "class": "none",
@@ -1526,59 +1536,48 @@
   "owner": "qpoly_mul",
   "reason": "qpoly_mul's derived bounds, plumbing (the meter's limit, the plan's sizes) or a test assertion: refuses nothing itself"
  },
- "engine/arith/src/wire_decode.rs :: capped :: Err(internal(\"a limb maximum without its integer\")) #0": {
-  "class": "none",
-  "owner": "engine arith (big-integer wire decoder)",
-  "reason": "the decoder's and the gcd check's plumbing (bounds for the caller's reservation and work admission, the workspace, word masks); refuses nothing itself"
- },
- "engine/arith/src/wire_decode.rs :: capped :: if z.max_limbs <= LIMB_CAP { #0": {
-  "class": "1",
-  "disposition": {
-   "1": "shared"
-  },
-  "owner": "engine arith (big-integer wire decoder)",
-  "reason": "the big-integer decoder's admission: the 2^20-bit cap on integers that take a gcd check (QV_1, MQR1) and the checked decode bound; past them the consumer keeps its JSON path, so no user computation is limited"
- },
- "engine/arith/src/wire_decode.rs :: capped :: return Err(fail(Code::Cap, at.ok_or(internal(\"an offset past u64\"))?, \"an integer of a rational above 2^20 bits (about 315,000 decimal digits)\")); #0": {
-  "class": "1",
-  "disposition": {
-   "1": "shared"
-  },
-  "owner": "engine arith (big-integer wire decoder)",
-  "reason": "the big-integer decoder's admission: the 2^20-bit cap on integers that take a gcd check (QV_1, MQR1) and the checked decode bound; past them the consumer keeps its JSON path, so no user computation is limited"
- },
  "engine/arith/src/wire_decode.rs :: check_mqr :: None => ws.insert(workspace(q.max_limbs)?), #0": {
   "class": "none",
   "owner": "engine arith (big-integer wire decoder)",
   "reason": "the decoder's and the gcd check's plumbing (bounds for the caller's reservation and work admission, the workspace, word masks); refuses nothing itself"
+ },
+ "engine/arith/src/wire_decode.rs :: check_mqr :: let mut m = Meter::accounting(upper.unwrap_or(u64::MAX)); #0": {
+  "class": "none",
+  "owner": "engine arith (big-integer wire decoder)",
+  "reason": "the decoder's cost figures (lower bounds, the upper bound, the reservation) and its accounting meter; refuses nothing itself"
  },
  "engine/arith/src/wire_decode.rs :: check_qv :: None => ws.insert(workspace(q.num.max_limbs.max(q.den.max_limbs))?), #0": {
   "class": "none",
   "owner": "engine arith (big-integer wire decoder)",
   "reason": "the decoder's and the gcd check's plumbing (bounds for the caller's reservation and work admission, the workspace, word masks); refuses nothing itself"
  },
- "engine/arith/src/wire_decode.rs :: ck :: v.ok_or(fail(Code::Cap, 0, \"a decode bound too large\")) #0": {
+ "engine/arith/src/wire_decode.rs :: check_qv :: let mut m = Meter::accounting(upper.unwrap_or(u64::MAX)); #0": {
+  "class": "none",
+  "owner": "engine arith (big-integer wire decoder)",
+  "reason": "the decoder's cost figures (lower bounds, the upper bound, the reservation) and its accounting meter; refuses nothing itself"
+ },
+ "engine/arith/src/wire_decode.rs :: ck :: v.ok_or(fail(Code::Cap, 0, \"the decode cannot fit in memory (its size overflows u64)\")) #0": {
   "class": "1",
   "disposition": {
    "1": "shared"
   },
   "owner": "engine arith (big-integer wire decoder)",
-  "reason": "the big-integer decoder's admission: the 2^20-bit cap on integers that take a gcd check (QV_1, MQR1) and the checked decode bound; past them the consumer keeps its JSON path, so no user computation is limited"
+  "reason": "the decoder's admission: a reservation whose size overflows u64 cannot fit in memory (there is no size cap otherwise; engine cost policy r2)"
  },
- "engine/arith/src/wire_decode.rs :: need_mqr :: let ws = if any { words_bytes(ck(workspace_words(q.max_limbs))?)? } else { 0 }; #0": {
+ "engine/arith/src/wire_decode.rs :: need_mqr :: s.work(row_floor(ld), coprime::row_fixed_work(ld, row.max_limbs)); #0": {
   "class": "none",
   "owner": "engine arith (big-integer wire decoder)",
-  "reason": "the decoder's and the gcd check's plumbing (bounds for the caller's reservation and work admission, the workspace, word masks); refuses nothing itself"
+  "reason": "the decoder's cost figures (lower bounds, the upper bound, the reservation) and its accounting meter; refuses nothing itself"
  },
- "engine/arith/src/wire_decode.rs :: need_mqr :: work = ck(work.checked_add(ck(coprime::row_fixed_work(ld, row.max_limbs))?))?; #0": {
+ "engine/arith/src/wire_decode.rs :: need_mqr :: s.workspace(q.max_limbs); #0": {
   "class": "none",
   "owner": "engine arith (big-integer wire decoder)",
-  "reason": "the decoder's and the gcd check's plumbing (bounds for the caller's reservation and work admission, the workspace, word masks); refuses nothing itself"
+  "reason": "the decoder's cost figures (lower bounds, the upper bound, the reservation) and its accounting meter; refuses nothing itself"
  },
- "engine/arith/src/wire_decode.rs :: need_qv :: let ws = if any { words_bytes(ck(workspace_words(q.num.max_limbs.max(q.den.max_limbs)))?)? } else { 0 }; #0": {
+ "engine/arith/src/wire_decode.rs :: need_qv :: s.workspace(q.num.max_limbs.max(q.den.max_limbs)); #0": {
   "class": "none",
   "owner": "engine arith (big-integer wire decoder)",
-  "reason": "the decoder's and the gcd check's plumbing (bounds for the caller's reservation and work admission, the workspace, word masks); refuses nothing itself"
+  "reason": "the decoder's cost figures (lower bounds, the upper bound, the reservation) and its accounting meter; refuses nothing itself"
  },
  "engine/arith/src/wire_decode/tests.rs :: a_workspace_one_word_short_is_an_invariant_failure :: let mut m = Meter::new(u64::MAX); #0": {
   "class": "none",
@@ -1600,17 +1599,27 @@
   "owner": "engine arith (big-integer wire decoder)",
   "reason": "test code: the big-integer decoder's correctness, allocation and Stop tests; refuses nothing itself"
  },
- "engine/arith/src/wire_decode/tests.rs :: the_limb_cap_is_exact_and_refused_before_any_work :: assert_eq!((e.code, e.offset), (Code::Cap, zv_at + 4 + 8 + (4 + 8)), \"{:?}\", e); #0": {
+ "engine/arith/src/wire_decode/tests.rs :: overflowing_figures_drop_the_promise_or_refuse_the_memory :: assert_eq!(e.code, Code::Cap); #0": {
   "class": "none",
   "owner": "engine arith (big-integer wire decoder)",
   "reason": "test code: the big-integer decoder's correctness, allocation and Stop tests; refuses nothing itself"
  },
- "engine/arith/src/wire_decode/tests.rs :: the_limb_cap_is_exact_and_refused_before_any_work :: for (k, ok) in [(cap - 1, true), (cap, true), (cap + 1, false)] { #0": {
+ "engine/arith/src/wire_decode/tests.rs :: overflowing_figures_drop_the_promise_or_refuse_the_memory :: assert_eq!(value_heap(u64::MAX), None); #0": {
   "class": "none",
   "owner": "engine arith (big-integer wire decoder)",
   "reason": "test code: the big-integer decoder's correctness, allocation and Stop tests; refuses nothing itself"
  },
- "engine/arith/src/wire_decode/tests.rs :: the_limb_cap_is_exact_and_refused_before_any_work :: let cap = LIMB_CAP as usize; #0": {
+ "engine/arith/src/wire_decode/tests.rs :: overflowing_figures_drop_the_promise_or_refuse_the_memory :: for l in [u64::MAX, 1 << 61] { #0": {
+  "class": "none",
+  "owner": "engine arith (big-integer wire decoder)",
+  "reason": "test code: the big-integer decoder's correctness, allocation and Stop tests; refuses nothing itself"
+ },
+ "engine/arith/src/wire_decode/tests.rs :: overflowing_figures_drop_the_promise_or_refuse_the_memory :: s.bytes(Ok(u64::MAX - 1)); #0": {
+  "class": "none",
+  "owner": "engine arith (big-integer wire decoder)",
+  "reason": "test code: the big-integer decoder's correctness, allocation and Stop tests; refuses nothing itself"
+ },
+ "engine/arith/src/wire_decode/tests.rs :: overflowing_figures_drop_the_promise_or_refuse_the_memory :: s.work(Some(u64::MAX), Some(1)); #0": {
   "class": "none",
   "owner": "engine arith (big-integer wire decoder)",
   "reason": "test code: the big-integer decoder's correctness, allocation and Stop tests; refuses nothing itself"
@@ -2186,17 +2195,7 @@
   "owner": "series ops",
   "reason": "the series ops' derived bounds, counters, saturating overflow (refused by a cap's own site), a metered gcd's limit, an internal shape assert or a test assertion: refuses nothing itself"
  },
- "engine/arith/tests/coprime_stop.rs :: gcd_checks_at_the_cap_poll_stop :: for (what, a, b) in [(\"equal sizes\", cap, cap), (\"half size\", cap, cap / 2)] { #0": {
-  "class": "none",
-  "owner": "engine arith (big-integer wire decoder)",
-  "reason": "test code: the big-integer decoder's correctness, allocation and Stop tests; refuses nothing itself"
- },
- "engine/arith/tests/coprime_stop.rs :: gcd_checks_at_the_cap_poll_stop :: let (gap, poll, total) = (hooks::max_gap_ns(), hooks::max_poll_gap_ns(), hooks::total()); #0": {
-  "class": "none",
-  "owner": "engine arith (big-integer wire decoder)",
-  "reason": "test code: the big-integer decoder's correctness, allocation and Stop tests; refuses nothing itself"
- },
- "engine/arith/tests/coprime_stop.rs :: gcd_checks_at_the_cap_poll_stop :: let cap = LIMB_CAP as usize; #0": {
+ "engine/arith/tests/coprime_stop.rs :: gcd_checks_above_the_old_cap_poll_stop :: let (gap, poll, total) = (hooks::max_gap_ns(), hooks::max_poll_gap_ns(), hooks::total()); #0": {
   "class": "none",
   "owner": "engine arith (big-integer wire decoder)",
   "reason": "test code: the big-integer decoder's correctness, allocation and Stop tests; refuses nothing itself"
@@ -2226,22 +2225,12 @@
   "owner": "engine arith (big-integer wire decoder)",
   "reason": "test code: the big-integer decoder's correctness, allocation and Stop tests; refuses nothing itself"
  },
- "engine/arith/tests/wire_decode_alloc.rs :: admit_and_decode_qv :: let mut g = Grant { work, bytes: u64::MAX }; #0": {
-  "class": "none",
-  "owner": "engine arith (big-integer wire decoder)",
-  "reason": "test code: the big-integer decoder's correctness, allocation and Stop tests; refuses nothing itself"
- },
  "engine/arith/tests/wire_decode_alloc.rs :: decodes_allocate_within_their_need :: assert!(admit_and_decode_qv(&qv_bytes(&nums, &dens), u64::MAX).is_ok(), \"{} limbs\", k); #0": {
   "class": "none",
   "owner": "engine arith (big-integer wire decoder)",
   "reason": "test code: the big-integer decoder's correctness, allocation and Stop tests; refuses nothing itself"
  },
- "engine/arith/tests/wire_decode_alloc.rs :: decodes_allocate_within_their_need :: assert_eq!((r.unwrap_err().code, peak), (Code::Cap, 0)); #0": {
-  "class": "none",
-  "owner": "engine arith (big-integer wire decoder)",
-  "reason": "test code: the big-integer decoder's correctness, allocation and Stop tests; refuses nothing itself"
- },
- "engine/arith/tests/wire_decode_alloc.rs :: open :: Grant { work: u64::MAX, bytes: u64::MAX } #0": {
+ "engine/arith/tests/wire_decode_alloc.rs :: open :: Grant { bytes: u64::MAX, seen: None } #0": {
   "class": "none",
   "owner": "engine arith (big-integer wire decoder)",
   "reason": "test code: the big-integer decoder's correctness, allocation and Stop tests; refuses nothing itself"
