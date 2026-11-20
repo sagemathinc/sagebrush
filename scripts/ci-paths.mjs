@@ -75,8 +75,9 @@ const fullTierPaths = [
   /^web\/share\//, /^web\/share-client\//, /^web\/csp(?:-policy)?\.m?ts$/, /^web\/safe-html\.ts$/,
   // (the account at the top right, which reads the share dialog's first check: the share dialog's suite, below)
   /^web\/workspace\/account\.ts$/,
-  // (the hosted service's sharing and remotes, MS-RSL: their suites run only in web-sync's full-tier shards)
-  /^web\/cloud\/share\//, /^web\/cloud\/remote\//,
+  // (the hosted service's sharing, remotes and log mirror, MS-RSL: their suites run only in web-sync's full-tier shards;
+  // and the mirror's format, which its Worker validates uploads with)
+  /^web\/cloud\/share\//, /^web\/cloud\/remote\//, /^web\/cloud\/mirror\//, /^web\/workspace\/agent-chat\/mirror-format\.ts$/,
   // data loss: save, Trash, export, purge, and the workspace's store and its migrations
   /^web\/workspace\/[^/]*(?:trash|export|purge|save)[^/]*$/, /^web\/workspace\/export\//,
   /^web\/workspace\/(?:db|migrate|migrator|file-bytes)\.ts$/,
