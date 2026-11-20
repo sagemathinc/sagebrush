@@ -195,6 +195,11 @@ export class Mirror {
     return this.remoteList;
   }
 
+  /** The list as last read (none before the first read, or while off). */
+  cached(): RemoteConversation[] {
+    return this.on() ? (this.remoteList ?? []) : [];
+  }
+
   /** Delete one conversation's mirrored copy. */
   async deleteConversation(locator: string): Promise<boolean> {
     if (!/^[0-9a-f]{32}$/.test(locator)) return false;
@@ -495,4 +500,124 @@ export class Mirror {
     }
     return marked;
   }
+}
+
+// ---- the words (design §5; pinned in a test for COPY)
+
+export const MIRROR_COPY = {
+  switch: "Keep your agent conversations in your Sagebrush account",
+  off: "Your conversations live on the computer that runs your agent. With this on, they're also uploaded to your account while this page is open and connected to your agent, so you can read them on your other devices. It counts toward your account's storage.",
+  on: "Uploaded by your pages: your messages, the agent's replies, and a short record of each turn and tool. Tool output, files and command output aren't uploaded. Sagebrush and Cloudflare can read your mirrored history. Anything you paste into a message is uploaded as written.",
+  confirmOff: "Turn off and delete your mirrored history? This stops uploads and starts deleting your mirrored copy. Your conversations stay on your agent's computer.",
+  confirmOffButton: "Turn off and delete",
+  deleting: "Deleting mirrored history…",
+  deleted: "Mirrored history deleted",
+  deleteOne: "Delete this conversation's mirrored copy",
+  storage: (size: string, quota: string | null) => (quota ? `Mirror: ${size} of your ${quota}` : `Mirror: ${size}`),
+  full: "There isn't enough free storage to mirror new messages. Mirroring will resume when there's room.",
+  updateAgent: "Update the agent to mirror this conversation",
+  section: "Uploaded by your page",
+  otherRun: "Uploaded by your page; not confirmed by your agent",
+  unconfirmed: "Not confirmed by your agent",
+  gap: "Part of this conversation couldn't be read",
+  readOnly: "This is the copy in your account, and it's read-only. To continue this conversation, connect the agent that has it.",
+  badge: "mirror",
+  viewCopy: "View the mirrored copy",
+  untitled: "Mirrored conversation",
+  reasons: {
+    differs: "it differs from your agent's history",
+    missing_on_runner: "your agent doesn't have it",
+    other_run: "it's from another run of your agent",
+    conflict: "another page uploaded something different here",
+  } as Record<StaleReason, string>,
+} as const;
+
+/** The reason's words, or none for one this page doesn't know. */
+export const reasonText = (r: string | null): string | null => (r !== null && Object.hasOwn(MIRROR_COPY.reasons, r) ? MIRROR_COPY.reasons[r as StaleReason] : null);
+
+// ---- what a section shows: inert records (§6: no cards, no artifact actions, no queue; text only)
+
+export type InertPart =
+  | { k: "text"; text: string; truncated: boolean }
+  | { k: "tool"; tool: string; summary?: string; status: string; duration_ms?: number }
+  | { k: "approval"; kind: string; title?: string; state: "open" | "approved" | "denied" }
+  | { k: "artifact"; kind: string; title?: string }
+  | { k: "error"; code: string };
+export type InertBlock = { n: number; last_n: number; unconfirmed: boolean } & (
+  | { k: "user"; text: string; steer: boolean }
+  | { k: "turn"; parts: InertPart[]; outcome?: "completed" | "interrupted" | "error" }
+  | { k: "gap"; first_n: number }
+);
+
+/**
+ * A section's entries as blocks to draw, in position order: the person's messages, the agent's turns (their text,
+ * tools, approvals and artifacts as plain records), and the gaps. From the stream's stale_from on, every block is
+ * unconfirmed. Nothing here can be answered, opened or sent.
+ */
+export function present(sec: Section): InertBlock[] {
+  const out: InertBlock[] = [];
+  const turns = new Map<string, Extract<InertBlock, { k: "turn" }>>();
+  const messages = new Map<string, { part: Extract<InertPart, { k: "text" }>; revision: number }>();
+  const tools = new Map<string, Extract<InertPart, { k: "tool" }>>();
+  const stale = (n: number) => sec.stale_from !== null && n >= sec.stale_from;
+  const turnOf = (id: string, n: number) => {
+    let t = turns.get(id);
+    if (!t) {
+      t = { k: "turn", n, last_n: n, unconfirmed: stale(n), parts: [] };
+      turns.set(id, t);
+      out.push(t);
+    }
+    t.last_n = n;
+    if (stale(n)) t.unconfirmed = true;
+    return t;
+  };
+  for (const g of sec.gaps) out.push({ k: "gap", n: g.first_n, first_n: g.first_n, last_n: g.last_n, unconfirmed: stale(g.first_n) });
+  for (const e of sec.entries) {
+    if (e.k === "user") out.push({ k: "user", n: e.n, last_n: e.n, unconfirmed: stale(e.n), text: e.text, steer: e.steer === true });
+    else if (e.k === "receipt") continue;
+    else {
+      const t = turnOf(e.turn, e.n);
+      const key = e.turn + "\u0000" + ("message" in e ? e.message : "call" in e ? e.call : "");
+      if (e.k === "message_revised") {
+        const m = messages.get(key);
+        if (m) {
+          m.revision = e.revision;
+          m.part.text = "";
+          m.part.truncated = false;
+        } else {
+          const part = { k: "text" as const, text: "", truncated: false };
+          messages.set(key, { part, revision: e.revision });
+          t.parts.push(part);
+        }
+      } else if (e.k === "text") {
+        let m = messages.get(key);
+        if (!m) {
+          m = { part: { k: "text", text: "", truncated: false }, revision: e.revision };
+          messages.set(key, m);
+          t.parts.push(m.part);
+        }
+        if (m.revision === e.revision) m.part.text += e.text;
+      } else if (e.k === "message_truncated") {
+        const m = messages.get(key);
+        if (m) m.part.truncated = true;
+      } else if (e.k === "tool_started") {
+        const p = { k: "tool" as const, tool: e.tool, status: "running", ...(e.summary ? { summary: e.summary } : {}) };
+        tools.set(key, p);
+        t.parts.push(p);
+      } else if (e.k === "tool_finished") {
+        const p = tools.get(key);
+        if (p) Object.assign(p, { status: e.status, duration_ms: e.duration_ms }, e.summary ? { summary: e.summary } : {});
+      } else if (e.k === "approval") t.parts.push({ k: "approval", kind: e.kind, state: e.state, ...(e.title ? { title: e.title } : {}) });
+      else if (e.k === "artifact") t.parts.push({ k: "artifact", kind: e.kind, ...(e.title ? { title: e.title } : {}) });
+      else if (e.k === "turn_error") t.parts.push({ k: "error", code: e.code });
+      else if (e.k === "turn_finished") t.outcome = e.outcome;
+    }
+  }
+  return out.sort((a, b) => a.n - b.n);
+}
+
+/** A title for a mirrored conversation: its first message's first line, or a general one. */
+export function mirrorTitle(sections: Section[]): string {
+  for (const s of sections) for (const e of s.entries) if (e.k === "user" && e.text.trim()) return e.text.trim().split("\n")[0].slice(0, 48);
+  return MIRROR_COPY.untitled;
 }

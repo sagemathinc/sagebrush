@@ -23,6 +23,25 @@
   nav.side .brand .sb-mark { flex: none; }
   nav.side #new { border: 1px solid var(--line); background: var(--card); border-radius: 8px; padding: 7px 10px; text-align: left; cursor: pointer; }
   nav.side #new:hover { border-color: #c9c5b8; }
+  .thread.mirror .badge { margin-left: 6px; padding: 0 5px; border-radius: 6px; background: #e8e4d8; color: #6b6a63; font-size: 11px; font-weight: 500; }
+  nav.side #mirror-btn { margin-top: 6px; width: 100%; padding: 8px 12px; border: 1px solid var(--line); border-radius: 10px; background: var(--card); text-align: left; }
+  #mirror-log { flex: 1; overflow: auto; padding: 16px 24px; }
+  .mirror-section { margin: 0 auto 24px; max-width: 760px; }
+  .mirror-label { font-size: 12px; color: #6b6a63; margin: 0 0 10px; border-bottom: 1px solid var(--line); padding-bottom: 4px; }
+  .mirror-text { white-space: pre-wrap; overflow-wrap: anywhere; }
+  .mirror-tool, .mirror-approval, .mirror-artifact { font-size: 13px; color: #55544e; margin: 4px 0; }
+  .mirror-gap { font-size: 13px; color: #8a5a00; background: #fbf3df; border-radius: 6px; padding: 6px 10px; margin: 8px 0; }
+  .mirror-unconfirmed { font-size: 12px; color: #8a5a00; margin: 10px 0 6px; }
+  .mirror-section .unconfirmed { opacity: .72; border-left: 3px solid #e3c36a; padding-left: 8px; }
+  #mirror-readonly { padding: 10px 24px 16px; color: #55544e; font-size: 13px; text-align: center; }
+  #mirror-readonly button { margin-left: 8px; }
+  #mirror-dlg { max-width: 520px; border: 1px solid var(--line); border-radius: 12px; padding: 18px 20px; }
+  #mirror-dlg .mirror-switch { display: flex; gap: 8px; align-items: center; font-weight: 550; }
+  #mirror-dlg p { color: #55544e; font-size: 14px; line-height: 1.45; }
+  #mirror-lines div { font-size: 13px; margin: 4px 0; }
+  #mirror-dlg .row { display: flex; justify-content: flex-end; margin-top: 12px; }
+  #mirror-dlg button.danger { color: #a3261a; }
+  #log[hidden], .composer-wrap[hidden], #mirror-log[hidden], #mirror-readonly[hidden] { display: none !important; }
   #threads { overflow: auto; display: flex; flex-direction: column; gap: 2px; }
   .thread { border: 0; background: none; text-align: left; padding: 7px 9px; border-radius: 7px; cursor: pointer; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; display: flex; align-items: center; gap: 6px; }
   .thread:hover { background: #e8e5db; }
@@ -307,6 +326,7 @@
     <button id="new">＋ New chat</button>
     <div id="threads"></div>
     <button id="files-big" type="button" title="Your files and notebooks, in the file browser">Files…</button>
+    <button id="mirror-btn" type="button" hidden>Mirror…</button>
     <div class="foot">Shift+Enter sends (queues while the agent works) · Alt+Enter queues · Ctrl+Enter posts a note</div>
   </nav>
   <div class="sep" id="sep-side" role="separator" tabindex="0" aria-orientation="vertical" aria-label="Resize the chat list" aria-controls="chats"></div>
@@ -326,7 +346,7 @@
       <pre>npx -y https://agents.sagebrush.cloud/agents/sagebrush-agent-0.7.6.tgz</pre>
     </div>
     <div id="log">
-      <div id="log-tools" hidden><button id="copychat" type="button" title="This chat as Markdown: what you wrote, the agent's answers, a line for each thing it did, and links to its files">⧉ Copy chat</button></div>
+      <div id="log-tools" hidden><button id="mirror-copy" type="button" hidden></button><button id="copychat" type="button" title="This chat as Markdown: what you wrote, the agent's answers, a line for each thing it did, and links to its files">⧉ Copy chat</button></div>
       <div id="empty">
         <h1>What should we work on?</h1>
         <div>Ask anything, or try one of these:</div>
@@ -338,6 +358,8 @@
         </div>
       </div>
     </div>
+    <div id="mirror-log" hidden></div>
+    <div id="mirror-readonly" hidden><span id="mirror-readonly-text"></span> <button id="mirror-delete-one" type="button"></button></div>
     <div class="composer-wrap">
       <!-- (the agent's bar: a row above the composer, never over it; workspace/agent-ui.ts) -->
       <div data-sbag-slot="1"></div>
@@ -367,6 +389,15 @@
   <aside id="artifacts" aria-label="Artifacts"></aside>
 </div>
 <div id="toast" hidden></div>
+<dialog id="mirror-dlg" aria-labelledby="mirror-switch-label">
+  <div id="mirror-settings">
+    <label class="mirror-switch"><input type="checkbox" id="mirror-switch"> <span id="mirror-switch-label"></span></label>
+    <p id="mirror-about"></p>
+    <div id="mirror-lines" role="status"></div>
+    <div id="mirror-confirm" hidden><p id="mirror-confirm-text"></p><button id="mirror-confirm-yes" type="button" class="danger"></button> <button id="mirror-confirm-no" type="button">Cancel</button></div>
+    <div class="row"><button id="mirror-close" type="button">Close</button></div>
+  </div>
+</dialog>
 <dialog id="close-running" aria-labelledby="close-running-t">
   <form method="dialog">
     <p id="close-running-t">A notebook cell is running here. Stop it and close?</p>
