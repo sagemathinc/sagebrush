@@ -750,6 +750,22 @@ try {
     const f5 = await call("workspace.read", { path: P5 });
     ok(held && closed5 && r5?.ended === "stopped" && !JSON.stringify(f5.content.json.cells[0].outputs ?? []).includes("CLOSED 5"), "PR5: the pane closed while the run waits: the run ends, stopped, nothing saved", { held, closed5, r5 });
     event(t5, { type: "turn_finished", outcome: "completed" });
+    // (PR-SELF: a notebook the agent creates in its turn runs once by itself in the pane; the agent's own run of it,
+    //  asked at once while that run still holds the cell, runs it and answers with what it ran: done, its output,
+    //  saved; never "stopped", which the agent reads as its run not allowed)
+    {
+      const PS = "/notes/pr-self.ipynb";
+      const tS = `t${++turnN}`;
+      event(tS, { type: "turn_started" });
+      await sleep(300);
+      await call("workspace.create", { path: PS, content: docFor(PS, [{ code: "import time\ntime.sleep(1.5)\nprint('SELF', 7)" }]), mode: "python" });
+      const rS = await runIn(PS, tS);
+      await until(`document.querySelector('${PANE} .saved')?.textContent === 'Saved'`, 10000).catch(() => {});
+      const fS = await call("workspace.read", { path: PS });
+      ok(rS?.ended === "done" && rS.cells?.[0]?.status === "ok" && rS.cells?.[0]?.out === "SELF 7\n" && JSON.stringify(fS.content.json.cells[0].outputs ?? []).includes("SELF 7"),
+        "PR-SELF: the agent's run of a notebook it just created, while its run once by itself still holds the cell: done, its output, saved (not stopped)", { rS });
+      event(tS, { type: "turn_finished", outcome: "completed" });
+    }
     // (the call's chat and turn (run.context): the pane runs only for the shown chat's running turn that made the call;
     //  anything else is today's run, nothing opened, nothing saved)
     const today = (r, f, out) => r?.ended === "done" && r.saved === "not saved: main" && r.cells?.[0]?.out === out && !JSON.stringify(f.content.json.cells[0].outputs ?? []).includes(out.trim());

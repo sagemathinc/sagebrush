@@ -432,7 +432,14 @@ export function mountNotebook(ws: Workspace, path: string, box: HTMLElement, ui:
         current: here,
         cell: async (id: string, out: Kept) => {
           const images = { count: 0, bytes: 0 };
-          const c = here() ? comp.cells().find((x: any) => x.id === id && (x.type ?? "code") === "code") : null;
+          const find = () => (here() ? comp.cells().find((x: any) => x.id === id && (x.type ?? "code") === "code") : null);
+          // (the cell already queued or running in another run (its run once by itself when the agent created it, or
+          //  the person's Run): a Run of it now would do nothing (notebook.js run), said "stopped" for a run nobody
+          //  stopped, so it runs once that one is over; the wait ends with the pane letting go, and the run's own
+          //  deadline ends the call)
+          const busy = (x: any) => x.el.classList.contains("queued") || x.el.classList.contains("running");
+          for (let x = find(); x && !told && busy(x); x = find()) await new Promise((go) => setTimeout(go, 50));
+          const c = find();
           if (!c) return { status: "stopped" as const, images };
           const ran = await comp.runCells([id], { budget: 0 });
           const r = Array.isArray(ran) ? ran[0] : ran;
