@@ -1,7 +1,0 @@
-{
-  "v": 1,
-  "reason": "The code page's way out: a notebook opened from it goes to its own page, a Close button, and one leave path that saves first and asks while edits are still unsaved, for every way out in the tab (Files, a code file, the Sagebrush link, the File menu, Move to Trash), no typing while a step before leaving finishes, plus a request for the browser's leave prompt on a reload or closed tab while edits are unsaved (web/code/page.ts, web/code/boot.ts, web/index.html), which the board frame carries into cli/pyjs.cjs. cli/pyjs.cjs grows +1612 bytes, exact, base master cfde5ad4, measured with the pinned node 24.21.0 and bun 1.4.4 on the head before this marker; the bound adds 64 bytes of slack.",
-  "bytes": {
-    "cli/pyjs.cjs": 1676
-  }
-}

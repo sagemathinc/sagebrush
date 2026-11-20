@@ -4908,6 +4908,8 @@ async function leaveTo(url, notebook = true) {
   location.assign(url);
   return true;
 }
+// (tests, loopback pages only: a stand-in for the desktop app's disk mirror, so the page's ways out meet its drain)
+if (/^(localhost|127\.0\.0\.1)$/.test(location.hostname)) window.__sbTestDiskMirror = (m) => { diskMirror = m; };
 const wsReady = (async () => {
   try {
     const w = await Workspace.open();
@@ -5498,7 +5500,7 @@ const historyDbReady = openHistoryDb({ onVersionChange: () => { nbHistory?.close
   // (either editor's page up: its Terminal button's pressed state set at once, as the Terminal's changes set it after)
   if (typeof __SB_LATEX__ !== "undefined" && __SB_LATEX__ && (await latexBoot(ws, texSandbox(), { share: texShare }))) return void dispatchEvent(new Event("sb-term-place"));
   // (a code or text file's own page, /?code=<fid> (1a): web/code/boot.ts; its hooks for the file browser and the preview either way)
-  if (await codeBoot(ws, (e, how) => openEntry(e, how), agentHere && ws ? codeAgent(ws) : null, (url) => leaveTo(url, !codePageUp))) {
+  if (await codeBoot(ws, (e, how) => openEntry(e, how), agentHere && ws ? codeAgent(ws) : null, (url, fromCodePage) => leaveTo(url, !fromCodePage))) {
     codePageUp = true;
     dispatchEvent(new Event("sb-term-place"));
     // (a ?pair= link or a remembered agent whose chunk didn't load: said in the code page's own status line)

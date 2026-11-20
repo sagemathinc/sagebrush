@@ -107,7 +107,7 @@ export async function mount(root: HTMLElement, host: Host): Promise<void> {
   // (leaving the page, to `to`: by the ✕, or by the notebook page for a notebook, board or code file opened here
   // (index.html and boot.ts, __sbCodeLeave), so every way out saves first)
   let mayLeave = async () => true;
-  let leave = async (to = "/") => { await host.navigate(to); };
+  let leave = async (to = "/") => { await host.navigate(to).catch((err) => say("Couldn't leave this page: " + (err?.message ?? err))); };
   close.onclick = () => void leave();
   (globalThis as any).__sbCodeLeave = (to: string) => leave(to);
   head.append(files, home, name, lang, status, toggle, menuWrap, close);
@@ -234,17 +234,19 @@ export async function mount(root: HTMLElement, host: Host): Promise<void> {
   // (closing: the edits saved first; anything still unsaved (saving stopped, or a save refused or failed) is dropped by
   // leaving, so it asks, and stays if the person says no)
   // (mayLeave only decides; `leaving` is set as the navigation is asked for, and put back if the host refuses it or
-  //  asking fails; no typing while the host decides (the desktop app's disk written first), as what's typed then would
-  //  be left behind; typing again if the page stays)
-  let leaving = false;
+  //  asking fails, said; no typing while the host decides (the desktop app's disk written first), as what's typed then
+  //  would be left behind; typing again if the page stays. One way out at a time: another asked for meanwhile (a second
+  //  ✕) is the same one, never a second drain, nor its state put back over the first's)
+  let leaving = false, navigating: Promise<boolean> | null = null;
   mayLeave = async () => { await flush(); return !dirty() || confirm("Close this file? Your unsaved edits here are dropped."); };
-  const go = async (to: string) => {
+  const go = (to: string): Promise<boolean> => (navigating ??= (async () => {
     const was = leaving, ro = ta.readOnly; leaving = true; ta.readOnly = true;
     let went = false;
-    try { went = await host.navigate(to); } finally { if (!went) { leaving = was; ta.readOnly = ro; } }
+    try { went = await host.navigate(to); } catch (err: any) { say("Couldn't leave this page: " + (err?.message ?? err)); }
+    if (!went) { leaving = was; ta.readOnly = ro; navigating = null; }
     return went;
-  };
-  leave = async (to = "/") => { if (await mayLeave()) await go(to); };
+  })());
+  leave = async (to = "/") => { if (navigating) return void (await navigating); if (await mayLeave()) await go(to); };
   // (decided to leave, with a step still to take first (a notebook made, this file moved to Trash): no typing until the
   //  navigation, as what's typed then would be dropped; typing again if the step fails)
   // (the copy just saved holds the edits: opened straight away, never asking whether to drop them)
