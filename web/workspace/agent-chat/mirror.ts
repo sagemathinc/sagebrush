@@ -319,8 +319,8 @@ export class Mirror {
     }
     if (p.done === true) return this.settle(conv, w, true), true;
     if (high >= p.last) {
-      // (all the request asked for, but not said done: the caller has it whole; the request drains until it ends, so
-      //  a trailing part of it is never read as the next one's)
+      // (all the request asked for, but not said done: the caller has it whole; the request drains briefly, sparing the
+      //  agent an overlapping request (a trailing part of it carries its own tag, and goes nowhere in any case))
       const c = w.caller;
       w.caller = null;
       this.drain(conv, w);
@@ -328,8 +328,8 @@ export class Mirror {
       return true;
     }
     // (more to come, or the agent stopped early: if nothing more arrives for a moment, the caller takes what came as a
-    //  partial answer, and the request drains. Never a second request meanwhile: its parts couldn't be told from this
-    //  one's. The next trigger asks again from where the caller got to)
+    //  partial answer, and the request drains briefly before the next. Its later parts carry its tag, and go nowhere.
+    //  The rest is asked for again from where the caller got to)
     w.timer = setTimeout(() => {
       if (this.waiting.get(conv) !== w || !w.caller) return;
       if (this.host.pairing() !== w.pairing) return this.fail(conv, w, "the pairing changed");
@@ -498,9 +498,11 @@ export class Mirror {
       let reload = false;
       for (const body of bodies) {
         const r = await this.append(cur.locator!, body);
-        if (r === "ok") {
+        if (typeof r === "object") {
           const last = body.entries[body.entries.length - 1];
-          cur = { ...cur, n: last.n + 1, seq: last.seq };
+          // (n, seq and the chain digest move together; a digest the answer didn't give isn't kept stale)
+          const { digest: _was, ...rest } = cur;
+          cur = { ...rest, n: last.n + 1, seq: last.seq, ...(r.ok ? { digest: r.ok } : {}) };
           this.saveCursor(conversation, cur);
           continue;
         }
@@ -536,7 +538,7 @@ export class Mirror {
     }
   }
 
-  private async append(locator: string, body: MirrorBody): Promise<"ok" | "reload" | "conflict" | "missing" | "stop"> {
+  private async append(locator: string, body: MirrorBody): Promise<{ ok: string | null } | "reload" | "conflict" | "missing" | "stop"> {
     const first = body.entries[0], last = body.entries[body.entries.length - 1];
     const init: RequestInit = {
       method: "POST",
@@ -555,7 +557,8 @@ export class Mirror {
         this.full = false;
         this.host.changed();
       }
-      return "ok";
+      // (the appended segment's digest: the stream's chain digest now)
+      return { ok: typeof (j as { digest?: unknown }).digest === "string" && /^[0-9a-f]{64}$/.test((j as { digest: string }).digest) ? (j as { digest: string }).digest : null };
     }
     if (r.status === 507) {
       // (no room: the cursor stays, and the next trigger tries again; each append checks the quota as it is then)

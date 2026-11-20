@@ -80,7 +80,7 @@ function site({ quota = 1e9, on = true } = {}) {
       st.last_seq = range.last_seq;
       st.digest = (s.made * 1000 + st.segs.length).toString(16).padStart(64, "0");
       c.streams.set(inst, st);
-      return res(200, { segment: st.segs.length - 1, digest: "d", first_n: range.first_n, last_n: range.last_n });
+      return res(200, { segment: st.segs.length - 1, digest: st.digest, first_n: range.first_n, last_n: range.last_n });
     }
     if ((x = path.match(/^\/api\/mirror\/v1\/read\/([0-9a-f]{32})\/([A-Za-z0-9_-]+)\?after=(\d+)$/))) {
       const st = conv(x[1])?.streams.get(x[2]);
@@ -151,6 +151,7 @@ const expected = (a, conv) => {
   const asks = a.sent.filter(([mm]) => mm === "chat.resume");
   check(asks.length === 1 && TAG.test(asks[0][1].tag) && asks[0][1].after === 0 && asks[0][1].instance === "aaaaaaaa11" && Object.keys(asks[0][1]).sort().join() === "after,conversation,instance,tag", "it asks with a tagged chat.resume, from its cursor, in the hello's run", asks);
   check(kept.cursors?.c1?.seq === a.seq && kept.cursors.c1.n === want.length + 1 && kept.cursors.c1.instance === "aaaaaaaa11", "the cursor moves past everything read, the excluded usage entry included", kept.cursors);
+  check(kept.cursors.c1.digest === s.stream("c1", "aaaaaaaa11").digest, "after an append, the cursor's chain digest is the stream's, with n and seq", { cursor: kept.cursors.c1.digest, site: s.stream("c1", "aaaaaaaa11").digest });
   turn(a, "c1", "again");
   await m.kick("c1");
   await settle();

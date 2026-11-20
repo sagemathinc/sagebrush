@@ -192,7 +192,7 @@ try {
   await ev(`(document.querySelector("[data-try]").click(), true)`);
   ok(await until(`!!document.querySelector("#threads .thread.on .dot")`), "(a chat of this browser's with a turn running: the scripted demo, slowed)");
   await ev(`(document.querySelector("#threads .thread.mirror").click(), true)`);
-  await until(`!document.querySelector("#mirror-log").hidden`);
+  ok(await until(`!document.querySelector("#mirror-log").hidden && !!document.querySelector("#threads .thread:not(.mirror) .dot")`), "(the mirrored conversation shown over it, the chat's turn still running)");
   await send("Input.dispatchKeyEvent", { type: "keyDown", key: "Escape", code: "Escape", windowsVirtualKeyCode: 27 });
   await send("Input.dispatchKeyEvent", { type: "keyUp", key: "Escape", code: "Escape", windowsVirtualKeyCode: 27 });
   await sleep(500);
