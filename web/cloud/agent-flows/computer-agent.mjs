@@ -56,7 +56,9 @@ const sleep = (ms, signal) => new Promise((res, rej) => {
 
 function scriptedQuery({ options }) {
   const signal = options.abortController?.signal;
-  const tools = options.mcpServers.sagebrush.handlers;
+  // (the agent's own MCP server: "sagebrush_page" from 0.7.5, "sagebrush" before; its tools are named after it)
+  const server = options.mcpServers.sagebrush_page ? "sagebrush_page" : "sagebrush";
+  const tools = options.mcpServers[server].handlers;
   const session = options.resume ?? `scripted-${process.pid}`;
   let index = 0;
   function* text(t) {
@@ -84,7 +86,7 @@ function scriptedQuery({ options }) {
       const [name, input] = t;
       const i = index++;
       const id = `toolu_${n}`;
-      yield { type: "stream_event", parent_tool_use_id: null, event: { type: "content_block_start", index: i, content_block: { type: "tool_use", id, name: `mcp__sagebrush__${name}`, input: {} } } };
+      yield { type: "stream_event", parent_tool_use_id: null, event: { type: "content_block_start", index: i, content_block: { type: "tool_use", id, name: `mcp__${server}__${name}`, input: {} } } };
       yield { type: "stream_event", parent_tool_use_id: null, event: { type: "content_block_delta", index: i, delta: { type: "input_json_delta", partial_json: JSON.stringify(input) } } };
       yield { type: "stream_event", parent_tool_use_id: null, event: { type: "content_block_stop", index: i } };
       const r = await tools[name](input);

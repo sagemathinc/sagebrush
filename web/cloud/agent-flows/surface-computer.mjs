@@ -84,7 +84,8 @@ export async function closeSite({ server = null, upgraded = new Set(), mf = null
   if (server?.listening) {
     server.closeAllConnections?.();
     const e = await bounded(new Promise((r) => server.close((err) => r(err ?? null))), CLEANUP_MS, "the site's server close").catch((x) => x);
-    if (e) problems.push(String(e.message ?? e));
+    // (a server closeAllConnections has already closed, as some runtimes do (bun 1.3), is closed: not a problem)
+    if (e && e.code !== "ERR_SERVER_NOT_RUNNING") problems.push(String(e.message ?? e));
   }
   if (mf) {
     const e = await bounded(Promise.resolve().then(() => mf.dispose()), CLEANUP_MS, "Miniflare's end").then(() => null, (x) => x);
