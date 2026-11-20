@@ -471,7 +471,7 @@ ok(actorOf("Claude Code", "claude-code") === "agent:Claude-Code" && actorOf("", 
   const pair43 = (agent = { name: "Claude Code", client: "claude-code" }) => (ws, m) => ws.send(JSON.stringify({ jsonrpc: "2.0", id: m.id, result: { protocol: 1, agent: { ...agent, version: "2.0" }, wants: { write: true, run: false }, ...("code" in m.params ? { session: SESSION } : {}) } }));
   const memStore = () => { const m = new Map(); return { m, getItem: (k) => (m.has(k) ? m.get(k) : null), setItem: (k, v) => void m.set(k, String(v)), removeItem: (k) => void m.delete(k) }; };
   const scope = { workspace: "sagebrush-workspace/0123456789abcdef", page: "http://127.0.0.1:1/agents/" };
-  const mkR = (S, W, store, o = {}) => new AgentPairing(S.port, o.how ?? { code: "abcd" }, { verbsFor: W.verbsFor, store: W.storeApi, trashEntry: W.trashEntry, page, ...(o.now ? { now: o.now } : {}), reload: { storage: store, scope, leaving: o.leaving ?? (() => false) } });
+  const mkR = (S, W, store, o = {}) => new AgentPairing(S.port, o.how ?? { code: "abcd" }, { verbsFor: W.verbsFor, store: W.storeApi, trashEntry: W.trashEntry, page, ...(o.now ? { now: o.now } : {}), ...(o.WebSocketImpl ? { WebSocketImpl: o.WebSocketImpl } : {}), reload: { storage: store, scope, leaving: o.leaving ?? (() => false) } });
   const held = (store) => parseReloadRecord(store.getItem(RELOAD_KEY));
   const NOW = 1_800_000_000_000;
 
@@ -564,6 +564,23 @@ ok(actorOf("Claude Code", "claude-code") === "agent:Claude-Code" && actorOf("", 
     const r = await P.paired().then(() => "paired", (e) => e.code);
     await until(() => S.closed !== null, 3000);
     ok(r === "identity" && P.state === "closed" && S.closed !== null && P.grant === null && st.m.size === 0, `${id}: a hello from another agent's ${id.split(".")[1]} on this page's session is discarded closed`, { r, state: P.state });
+    S.srv.stop(true);
+  }
+  // (U-6.order: the same, with a socket whose close is heard at once, as Bun 1.3's is (a browser's comes later): the
+  //  answer is still why it was closed, said before the close; and an agent's refusal of the hello keeps its own code)
+  class HeardAtOnce extends WebSocket { close(code, reason) { super.close(code, reason); this.onclose?.({ code: code ?? 1005, reason: reason ?? "" }); } }
+  {
+    const S = server(pair43({ name: "Other Agent", client: "claude-code" })), W = fakeWs(), st = memStore();
+    const P = mkR(S, W, st, { WebSocketImpl: HeardAtOnce, how: { session: SESSION, pairingId: "0123456789abcdef01234567", agent: { name: "Claude Code", client: "claude-code" } } });
+    const r = await P.paired().then(() => "paired", (e) => e.code);
+    ok(r === "identity" && P.state === "closed", "U-6.order: with a close heard at once, another agent's answer is still refused as identity, not as a plain close", { r, state: P.state });
+    S.srv.stop(true);
+  }
+  {
+    const S = server((ws, m) => ws.send(JSON.stringify({ jsonrpc: "2.0", id: m.id, error: { code: -32001, message: "no", data: { code: "expired", message: "this session expired" } } }))), W = fakeWs(), st = memStore();
+    const P = mkR(S, W, st, { WebSocketImpl: HeardAtOnce, how: { session: SESSION, pairingId: "0123456789abcdef01234567", agent: { name: "Claude Code", client: "claude-code" } } });
+    const r = await P.paired().then(() => "paired", (e) => e.code);
+    ok(r === "expired" && P.state === "closed", "U-6.order: with a close heard at once, the agent's refusal of the hello keeps its own code", { r, state: P.state });
     S.srv.stop(true);
   }
   {
