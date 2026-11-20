@@ -41,7 +41,7 @@ def _option_name(name, fname="optimset"):
     if len(hits) == 1 and low:
         return hits[0]
     if not hits:
-        raise _err("%s: unrecognized parameter name '%s'." % (fname, name))
+        raise _err("%s: unrecognized parameter name '%s'." % (fname, name), "MATLAB:optimset:InvalidParamNameWithLink" if fname == "optimset" else "")
     raise _err("%s: ambiguous parameter name '%s' (%s)." % (fname, name, ", ".join(hits)))
 
 
@@ -487,7 +487,7 @@ def fzero_(nargout, *args):
             if type(fv) is complex or not _math.isfinite(fv):
                 raise _err("fzero: the function value at the interval end x = %g must be real and finite." % v)
         if not _changes_sign(fa, fb):
-            raise _err("fzero: the function values at the interval endpoints must differ in sign.")
+            raise _err("fzero: the function values at the interval endpoints must differ in sign.", "MATLAB:fzero:ValuesAtEndPtsSameSign")
         if show:
             _m._write(" Func-count    x          f(x)             Procedure\n")
     else:
@@ -563,15 +563,19 @@ def _real_value(f, x, solver, check):
     FunValCheck is on; a complex value is always an error)"""
     r = _m._call(f, [x])
     if not _m._isnumlike(r) or type(r) is _m.Char or _m._numel(r) != 1:
-        raise _err("%s: the objective function must return a numeric scalar." % solver)
+        # (MATLAB's fminsearch, given a vector, fails where it stores the value: MATLAB:subsassigndimmismatch)
+        ident = "MATLAB:subsassigndimmismatch" if solver == "fminsearch" and _m._isnumlike(r) and type(r) is not _m.Char and _m._numel(r) > 1 else ""
+        raise _err("%s: the objective function must return a numeric scalar." % solver, ident)
     a = _m._arr(r).reshape(-1)[0]
     if np.iscomplexobj(a):
         if a.imag != 0:
-            raise _err("%s: the objective function returned a complex value; only real values can be minimized." % solver)
+            raise _err("%s: the objective function returned a complex value; only real values can be minimized." % solver,
+                       "MATLAB:fminsearch:checkfun:ComplexFval" if solver == "fminsearch" else "")
         a = a.real
     v = float(a)
     if check and v != v:
-        raise _err("%s: the objective function returned NaN (FunValCheck is on)." % solver)
+        raise _err("%s: the objective function returned NaN (FunValCheck is on)." % solver,
+                   "MATLAB:fminsearch:checkfun:NaNFval" if solver == "fminsearch" else "")
     return v
 
 
@@ -1347,7 +1351,8 @@ def _integrate(nargout, solver, fun, a, b, opts):
     o = {}
     for k in range(0, len(opts), 2):
         if not _istext(opts[k]) or _text(opts[k]).lower() not in names:
-            raise _err("%s: unknown option%s." % (solver, " '%s'" % _text(opts[k]) if _istext(opts[k]) else ""))
+            raise _err("%s: unknown option%s." % (solver, " '%s'" % _text(opts[k]) if _istext(opts[k]) else ""),
+                       "MATLAB:TooManyInputs" if solver == "integral" else "")
         o[names[_text(opts[k]).lower()]] = opts[k + 1]
 
     def num(name, default):
@@ -1411,7 +1416,7 @@ def _integrate(nargout, solver, fun, a, b, opts):
             r = _m._call(f, [xin])
             if not _m._isnumlike(r) or type(r) is _m.Char or _m._numel(r) != len(x):
                 raise _err("%s: the integrand must return an array the size of its input; use array operators "
-                           "(.*, ./, .^) or set ArrayValued." % solver)
+                           "(.*, ./, .^) or set ArrayValued." % solver, "MATLAB:integral:FxNotSameSizeAsX" if solver == "integral" else "")
             y = np.array(_m._arr(r)).reshape(-1)
         nonlocal single
         if (arrayvalued or not vectorized) is False and _m.class_(r) == "single":

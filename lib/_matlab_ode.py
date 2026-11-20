@@ -54,7 +54,7 @@ def _is_empty(v):
 
 def _field(name):
     if not _istext(name) or _text(name).lower() not in _BY_LOWER:
-        raise _err("odeset: unrecognized property name%s." % (" '%s'" % _text(name) if _istext(name) else ""))
+        raise _err("odeset: unrecognized property name%s." % (" '%s'" % _text(name) if _istext(name) else ""), "MATLAB:odeset:InvalidPropName")
     return _BY_LOWER[_text(name).lower()]
 
 
@@ -71,10 +71,10 @@ def _check(name, v):
         v = _m.Char(_text(v))
     if name == "RelTol" or name in ("InitialStep", "MaxStep", "MinStep"):
         if not _real_vector(v) or _m._numel(v) != 1 or not _m._scalar(v) > 0:
-            raise _err("odeset: %s must be a positive scalar." % name)
+            raise _err("odeset: %s must be a positive scalar." % name, "MATLAB:odearguments:RelTolNotPosScalar" if name == "RelTol" else "")
     elif name == "AbsTol":
         if not _real_vector(v) or not np.all(np.array(_m._arr(v), dtype=float) > 0):
-            raise _err("odeset: AbsTol must be a positive scalar or vector.")
+            raise _err("odeset: AbsTol must be a positive scalar or vector.", "MATLAB:odearguments:AbsTolNotPos")
     elif name == "Refine":
         if not _real_vector(v) or _m._numel(v) != 1 or not _m._scalar(v) >= 1 or _m._scalar(v) != _math.floor(_m._scalar(v)):
             raise _err("odeset: Refine must be a positive integer.")
@@ -228,9 +228,12 @@ def _solve(solver, nargout, args):
         raise _err("%s: tspan must be a vector of at least two real times." % solver)
     if not np.all(np.isfinite(tspan)):
         raise _err("%s: tspan must be finite." % solver)
+    if tspan[0] == tspan[-1]:
+        raise _err("%s: the last entry of tspan must differ from the first." % solver, "MATLAB:odearguments:TspanEndpointsNotDistinct")
     d = np.diff(tspan)
     if not (np.all(d > 0) or np.all(d < 0)):
-        raise _err("%s: the entries of tspan must be strictly increasing or strictly decreasing." % solver)
+        raise _err("%s: the entries of tspan must be strictly increasing or strictly decreasing." % solver,
+                   "MATLAB:odearguments:TspanNotMonotonic")
     if not _m._isnumlike(args[2]) or type(args[2]) is _m.Char or np.iscomplexobj(_m._arr(args[2])):
         raise _err("%s: y0 must be a real vector." % solver)
     single = _m.class_(args[1]) == "single" or _m.class_(args[2]) == "single"
@@ -274,7 +277,7 @@ def _solve(solver, nargout, args):
         r = _m._call(f, [float(t), _m._unmat(y.reshape((-1, 1)))])
         nfev[0] += 1
         if not _m._isnumlike(r) or type(r) is _m.Char or _m._numel(r) != n:
-            raise _err("%s: the ODE function must return a vector of length %d (as y0)." % (solver, n))
+            raise _err("%s: the ODE function must return a vector of length %d (as y0)." % (solver, n), "MATLAB:odearguments:SizeIC")
         v = np.array(_m._arr(r)).reshape(-1)
         if np.iscomplexobj(v):
             if np.any(v.imag != 0):

@@ -5640,6 +5640,16 @@
   "owner": "Magma compatibility",
   "row": "inv-25"
  },
+ "lib/_matlab.py :: _oob :: return _err(\"Index exceeds the number of array elements. Index must not exceed %d.\" % n, \"MATLAB:badsubscript\") #0": {
+  "class": "none",
+  "owner": "matlab (@sagebrush-matlab)",
+  "reason": "refuses nothing beyond MATLAB: the census matches 'exceeds' in MATLAB's own out-of-range index message; the line raises MATLAB's error (identifier MATLAB:badsubscript, as MATLAB Online printed it) for an index past the end, not a limit on a computation"
+ },
+ "lib/_matlab.py :: brace :: raise _err(\"Index exceeds the number of array elements. Index must not exceed %d.\" % _numel(obj), \"MATLAB:badsubscript\") #0": {
+  "class": "none",
+  "owner": "matlab (@sagebrush-matlab)",
+  "reason": "refuses nothing beyond MATLAB: the census matches 'exceeds' in MATLAB's own out-of-range index message; the line raises MATLAB's error (identifier MATLAB:badsubscript, as MATLAB Online printed it) for an index past the end, not a limit on a computation"
+ },
  "lib/_matlab.py :: ws_call :: raise _err(\"Too many output arguments.\", \"MATLAB:TooManyOutputs\" if name == \"clearvars\" else \"MATLAB:maxlhs\") #0": {
   "class": "none",
   "owner": "matlab (@sagebrush-matlab)",
