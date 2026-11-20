@@ -576,7 +576,7 @@ try {
       watch: (cb) => { subs.add(cb); return () => subs.delete(cb); },
       list: async () => [],
     };
-    const host = (fid) => ({ ws, fid, open() {}, openFiles() {}, examples: async () => false, renderFileMenu() {} });
+    const host = (fid) => ({ ws, fid, open() {}, openFiles() {}, examples: async () => false, renderFileMenu() {}, navigate: async () => false });
     const root = document.createElement("div"); document.body.append(root);
     await m.mount(root, host("a"));
     await m.mount(root, host("b"));

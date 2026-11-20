@@ -4900,10 +4900,13 @@ function diskBlocked(why) {
   shade.append(box);
   document.body.append(shade);
 }
-// (the desktop app: this page is left only once its changes are on disk, the notebook's own save first)
-async function leaveTo(url) {
-  if (diskMirror && !(await (await desktopModule()).beforeLeave(diskMirror, () => nb.saved()))) return;
+// (the desktop app: this page is left only once its changes are on disk, the notebook's own save first; true once it
+// navigates, false if it stays (said on the disk banner); the code page's every way out too, web/code/boot.ts, whose
+// own edits are saved before it asks: no notebook to save there (`notebook` false))
+async function leaveTo(url, notebook = true) {
+  if (diskMirror && !(await (await desktopModule()).beforeLeave(diskMirror, notebook ? () => nb.saved() : undefined))) return false;
   location.assign(url);
+  return true;
 }
 const wsReady = (async () => {
   try {
@@ -5495,7 +5498,7 @@ const historyDbReady = openHistoryDb({ onVersionChange: () => { nbHistory?.close
   // (either editor's page up: its Terminal button's pressed state set at once, as the Terminal's changes set it after)
   if (typeof __SB_LATEX__ !== "undefined" && __SB_LATEX__ && (await latexBoot(ws, texSandbox(), { share: texShare }))) return void dispatchEvent(new Event("sb-term-place"));
   // (a code or text file's own page, /?code=<fid> (1a): web/code/boot.ts; its hooks for the file browser and the preview either way)
-  if (await codeBoot(ws, (e, how) => openEntry(e, how), agentHere && ws ? codeAgent(ws) : null)) {
+  if (await codeBoot(ws, (e, how) => openEntry(e, how), agentHere && ws ? codeAgent(ws) : null, (url) => leaveTo(url, !codePageUp))) {
     codePageUp = true;
     dispatchEvent(new Event("sb-term-place"));
     // (a ?pair= link or a remembered agent whose chunk didn't load: said in the code page's own status line)

@@ -32,6 +32,9 @@ export type Host = {
   renderFileMenu: typeof renderFileMenu;
   /** File ▸ Connect an agent…: the hosting page's pairing (null where it isn't offered: the app, the CLI's page) */
   agent?: ((back: HTMLElement) => Promise<unknown>) | null;
+  /** To another page, every way out of this one: true once it navigates; false if the host refused, saying why (the
+   * desktop app: until what was saved here is on disk, src: index.html leaveTo), and the page stays */
+  navigate(to: string): Promise<boolean>;
 };
 const LANG_LABEL: Record<Lang, string> = { python: "Python", sage: "Sage", matlab: "MATLAB", magma: "Magma", js: "JavaScript", json: "JSON", text: "Text" };
 
@@ -104,7 +107,7 @@ export async function mount(root: HTMLElement, host: Host): Promise<void> {
   // (leaving the page, to `to`: by the ✕, or by the notebook page for a notebook, board or code file opened here
   // (index.html and boot.ts, __sbCodeLeave), so every way out saves first)
   let mayLeave = async () => true;
-  let leave = async (to = "/") => { location.assign(to); };
+  let leave = async (to = "/") => { await host.navigate(to); };
   close.onclick = () => void leave();
   (globalThis as any).__sbCodeLeave = (to: string) => leave(to);
   head.append(files, home, name, lang, status, toggle, menuWrap, close);
@@ -230,22 +233,29 @@ export async function mount(root: HTMLElement, host: Host): Promise<void> {
   };
   // (closing: the edits saved first; anything still unsaved (saving stopped, or a save refused or failed) is dropped by
   // leaving, so it asks, and stays if the person says no)
-  // (mayLeave only decides; `leaving` is set as the navigation is issued, and put back if issuing it fails)
+  // (mayLeave only decides; `leaving` is set as the navigation is asked for, and put back if the host refuses it or
+  //  asking fails; no typing while the host decides (the desktop app's disk written first), as what's typed then would
+  //  be left behind; typing again if the page stays)
   let leaving = false;
   mayLeave = async () => { await flush(); return !dirty() || confirm("Close this file? Your unsaved edits here are dropped."); };
-  const go = (to: string) => { const was = leaving; leaving = true; try { location.assign(to); } catch (err) { leaving = was; throw err; } };
-  leave = async (to = "/") => { if (await mayLeave()) go(to); };
+  const go = async (to: string) => {
+    const was = leaving, ro = ta.readOnly; leaving = true; ta.readOnly = true;
+    let went = false;
+    try { went = await host.navigate(to); } finally { if (!went) { leaving = was; ta.readOnly = ro; } }
+    return went;
+  };
+  leave = async (to = "/") => { if (await mayLeave()) await go(to); };
   // (decided to leave, with a step still to take first (a notebook made, this file moved to Trash): no typing until the
   //  navigation, as what's typed then would be dropped; typing again if the step fails)
   // (the copy just saved holds the edits: opened straight away, never asking whether to drop them)
-  // (whether it navigated: a copy with no fid can't be opened here, and stays only said)
-  const openCopy = (e: Entry) => { if (!e.fid) return false; go(codeUrl(e.fid)); return true; };
+  // (whether it navigated: a copy with no fid can't be opened here, and stays only said; nor one the host refused)
+  const openCopy = async (e: Entry) => (e.fid ? go(codeUrl(e.fid)) : false);
   const thenGo = async (step: () => Promise<string>) => {
     const was = ta.readOnly; ta.readOnly = true;
     try {
       // (a test's seam: the page test holds the step here to type during it; nothing sets it otherwise)
       await (globalThis as any).__sbCodeBeforeLeaveStep?.();
-      go(await step());
+      if (!(await go(await step()))) ta.readOnly = was;
     } catch (err) { ta.readOnly = was; throw err; }
   };
   // (saving stopped: the bar asks; nothing is written until the person chooses)
@@ -316,7 +326,7 @@ export async function mount(root: HTMLElement, host: Host): Promise<void> {
     let went = false;
     try {
       const e = await saveCopy(mode === "edit" ? ta.value : text);
-      if (e) went = openCopy(e);
+      if (e) went = await openCopy(e);
     } finally { if (!went) { ta.readOnly = was; copying = false; } }
   }
   async function saveCopy(t: string): Promise<Entry | null> {

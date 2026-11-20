@@ -12,15 +12,16 @@ import { renderFileMenu } from "../workspace/filemenu";
 const isCode = (e: Entry) => e.kind === "file" && langOf(e.path) !== null;
 
 /** Called once by the notebook page; true if the code page took the page over. `open`: the page's own way to open a
- * notebook, a board or a file chosen from the code page (Open…, a copy). */
-export async function codeBoot(ws: Workspace | null, open: (e: Entry, how: "here" | "tab") => void, agent: ((back: HTMLElement) => Promise<unknown>) | null = null): Promise<boolean> {
+ * notebook, a board or a file chosen from the code page (Open…, a copy). `navigate`: the page's own way to another
+ * page, true once it navigates, false if it refused and stays (the desktop app: until its changes are on disk). */
+export async function codeBoot(ws: Workspace | null, open: (e: Entry, how: "here" | "tab") => void, agent: ((back: HTMLElement) => Promise<unknown>) | null, navigate: (to: string) => Promise<boolean>): Promise<boolean> {
   const g: any = globalThis;
   g.__sbCode = (e: Entry, tab?: boolean) => {
     if (!isCode(e) || !e.fid) return false;
     // (from the code page, in this tab: through its leave path, which saves first; a new tab leaves nothing)
     if (tab) window.open(codeUrl(e.fid), "_blank", "noopener");
     else if (g.__sbCodeLeave) void g.__sbCodeLeave(codeUrl(e.fid));
-    else location.assign(codeUrl(e.fid));
+    else void navigate(codeUrl(e.fid));
     return true;
   };
   g.__sbCodeP = (e: Entry, box: HTMLElement) => {
@@ -46,6 +47,6 @@ export async function codeBoot(ws: Workspace | null, open: (e: Entry, how: "here
   const page = new URL("/sagebrush-code.js", location.href).href;
   // (a file opened from the page (a copy) is the code page's, the rest (a notebook, a board) the notebook page's)
   const go = (e: Entry, how: "here" | "tab") => { if (e.kind !== "file") open(e, how); else g.__sbCode(e, how === "tab"); };
-  await (await import(page)).mount(root, { ws, fid, open: go, openFiles: () => openFilesDialog(ws, go), examples: () => openGallery(ws, (e) => go(e, "here")), renderFileMenu, agent });
+  await (await import(page)).mount(root, { ws, fid, open: go, openFiles: () => openFilesDialog(ws, go), examples: () => openGallery(ws, (e) => go(e, "here")), renderFileMenu, agent, navigate });
   return true;
 }
