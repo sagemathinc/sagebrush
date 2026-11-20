@@ -36,6 +36,11 @@ export const CHROME_ALLOW = "This browser needs your OK for this site to reach a
 export const OTHER_FAIL = "This browser couldn't reach the agent on this computer: check that it's still running, then Connect again.";
 /** Where the longer explanations are (William, Nov 8: one short line in the app, the rest behind "Learn more"). */
 /** A code without its port: the port is in the link the agent gives, so that's what to ask for. */
+/** A code the agent refused (already used, or past its 5 minutes): never the local-network advice, which is for a
+ *  connection that got no answer at all. */
+export const SPENT_CODE = (program?: string) => program === "sagebrush-agent"
+  ? "This code was already used or has expired. Use the newest link sagebrush-agent printed: it prints a new one when the page goes away, or when you press Enter in its terminal."
+  : "This code was already used or has expired: ask your agent for a new link.";
 export const ONLY_CODE = "That's only the code: ask your agent for its link (sagebrush.space/board/?pair=…), and open it.";
 
 /** What the person put in the Connect dialog: the agent's link (?pair=CODE&port=N, as pasted, with or without its
@@ -433,6 +438,7 @@ export function mountAgentPairing(ws: PairingWorkspace, o: { button?: HTMLElemen
         if ("error" in r) { err.textContent = r.error; return; }
         const n = r.port;
         go.disabled = true;
+        go.textContent = "Connecting…"; // (a second try shows it is trying: never a button that seems to do nothing)
         // (a socket the browser blocks, by the page's security policy or a refused local-network permission,
         // may never say so: the connection gets 8 s, and a policy violation is said at once)
         let blocked = "";
@@ -461,13 +467,38 @@ export function mountAgentPairing(ws: PairingWorkspace, o: { button?: HTMLElemen
         } catch (e) {
           document.removeEventListener("securitypolicyviolation", onViolation);
           go.disabled = false;
+          go.textContent = "Connect";
           const m = String((e as Error).message ?? e);
           const failed = /^the connection failed/.test(m); // (nothing answered: not a refusal by the agent)
+          // (the agent answered, and refused the code: it was spent or expired; nothing about this browser's permissions)
+          if (!failed && (e as any)?.code === "refused" && /wrong or expired code|code has expired/i.test(m)) {
+            err.textContent = SPENT_CODE(o.program);
+            c.value = "";
+            return;
+          }
           err.textContent = (/^refused|^protocol/.test(String((e as any)?.code)) && !failed && !/^the agent refused/i.test(m) ? "The agent refused: " : "") + named(m) + (/failed/.test(String((e as Error).message)) ? "\n\n" + failHint() : "");
           if (/failed/.test(String((e as Error).message))) err.append(" ", learnMore());
         }
       };
-      box.append(h("div", { className: "note", textContent: o.program ? `Start ${o.program} in a terminal on this computer: it prints a link. Open it, or paste it here.` : "Ask your agent (Claude Code, Codex, …, with sagebrush-mcp) to connect to Sagebrush: it gives a link. Open it, or paste it here." }),
+      // (this page was connected earlier: its own way back first, with no code: Reconnect, or a remembered grant)
+      const earlier = h("div", { className: "row earlier" });
+      earlier.hidden = true;
+      const back1 = kept ?? pairing?.lostRecord ?? null;
+      if (back1) {
+        const rb = h("button", { className: "primary", textContent: "Reconnect" });
+        rb.onclick = () => { close(); void reconnectKept(); };
+        earlier.append(h("span", { textContent: "Claude was connected to this page earlier." }), rb);
+        earlier.hidden = false;
+      } else {
+        void remembered().then((g) => {
+          if (!g || !box.isConnected || pairingLive()) return;
+          const ub = h("button", { className: "primary", textContent: "Use remembered access" });
+          ub.onclick = () => { close(); void reconnect(); };
+          earlier.append(h("span", { textContent: "This page remembers an agent." }), ub);
+          earlier.hidden = false;
+        });
+      }
+      box.append(earlier, h("div", { className: "note", textContent: o.program ? `Start ${o.program} in a terminal on this computer: it prints a link. Open it, or paste it here.` : "Ask your agent (Claude Code, Codex, …, with sagebrush-mcp) to connect to Sagebrush: it gives a link. Open it, or paste it here." }),
         h("label", {}, "Link ", c), err, h("div", { className: "row" }, cancel, go), ...(o.extra ? [o.extra(close)] : []));
       setTimeout(() => c.focus());
     }, () => { if (back?.isConnected && !pairingLive()) back.focus(); });

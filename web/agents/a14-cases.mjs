@@ -605,6 +605,26 @@ export async function runA14({ site, ok, want = () => true }) {
     ok(bar.status === COPY.merged && ms >= 9500 && ms < 15000 && A.hellos >= 2, "A14-7.timeout: an agent that never answers the hello: after the 10 s bound, the merged copy", { ms, bar });
   });
 
+  // A5 item 4: a connection lost, then "Connect Claude" (the header's button): the dialog offers Reconnect, with no
+  // code, first; it reconnects
+  await run("A5.connect-reconnect", async (B, A) => {
+    const P = await B.tab();
+    await pair(P, A, site, "page");
+    await chat(P, A);
+    A.silent = true; // (the page's own retry gets no answer: the connection stays lost)
+    await A.kick();
+    await P.until(`document.querySelector('#conn-alert').textContent === ${JSON.stringify(COPY.lost)}`);
+    A.silent = false;
+    await P.ev(`(document.querySelector('#connect').click(), true)`);
+    await P.until(`!!document.querySelector('.sbag-box .earlier:not([hidden]) button')`);
+    const d = await P.ev(`(() => { const e = document.querySelector('.sbag-box .earlier'); return { text: e.querySelector('span')?.textContent, btn: e.querySelector('button')?.textContent, first: document.querySelector('.sbag-box').children[1] === e }; })()`);
+    ok(d.text === "Claude was connected to this page earlier." && d.btn === "Reconnect" && d.first, "A5.connect-reconnect: the Connect dialog, after a lost connection, offers Reconnect first, with no code", d);
+    const h0 = A.hellos;
+    await P.ev(`(document.querySelector('.sbag-box .earlier button').click(), true)`);
+    await P.until(`document.querySelector('#connect').textContent === 'Connected'`);
+    ok(A.hellos > h0 && (await P.ev(`document.querySelectorAll('.sbag-dlg').length`)) === 0, "A5.connect-reconnect: Reconnect from the dialog reconnects, with no new Allow", { hellos: A.hellos - h0 });
+  });
+
   // A14-8: focus after a successful Reconnect goes to the composer; a Connect dialog closed without connecting gives
   // it back to the bar's button
   await run("A14-8", async (B, A) => {
