@@ -18,21 +18,44 @@ import { devtoolsPort } from "../test-port.mjs";
 const base = process.env.SB_URL ?? "http://127.0.0.1:8765/";
 let port = Number(process.env.CDP_PORT) || 0, sleep = (ms) => new Promise((r) => setTimeout(r, ms));
 const profile = mkdtempSync(join(tmpdir(), "sb-outputs-prof-"));
-const chrome = spawn(process.env.CHROME ?? "chromium", ["--headless", "--no-sandbox", `--remote-debugging-port=${port}`, "--window-size=1280,800", `--user-data-dir=${profile}`, "about:blank"], { stdio: "ignore" });
-if (!port) port = await devtoolsPort(profile);
+const chrome = spawn(process.env.CHROME ?? "chromium", ["--headless", "--no-sandbox", `--remote-debugging-port=${port}`, "--window-size=1280,800", `--user-data-dir=${profile}`, "about:blank"], { stdio: ["ignore", "ignore", "pipe"] });
+// (a browser that goes away is a failure that says so, with Chrome's last stderr lines: never a wait on an answer
+// that can't come, which ends the run with exit 13 and no message)
+let chromeTail = "", dead = "";
+chrome.stderr.on("data", (d) => { chromeTail = (chromeTail + d).slice(-2048); });
+const waiting = new Map();
+const die = (why) => {
+  if (dead) return;
+  dead = why;
+  for (const [, w] of waiting) { clearTimeout(w.timer); w.at.message = why; w.fail(w.at); }
+  waiting.clear();
+};
+chrome.on("exit", (code, signal) => die(`Chrome exited (code ${code}, signal ${signal})`));
+if (!port) port = await devtoolsPort(profile, 60_000, { child: chrome });
 let targets;
 for (let i = 0; i < 300; i++) { try { targets = await (await fetch(`http://127.0.0.1:${port}/json`)).json(); break; } catch { await sleep(100); } }
 const ws = new WebSocket(targets.find((t) => t.type === "page").webSocketDebuggerUrl);
-await new Promise((r) => (ws.onopen = r));
-let n = 0; const waiting = new Map(); const errors = [];
+await new Promise((ok, fail) => { ws.onopen = ok; ws.onclose = () => fail(new Error(`the DevTools socket closed before it opened; Chrome's stderr: ${chromeTail}`)); });
+ws.onclose = () => die("the DevTools socket closed");
+let n = 0; const errors = [];
 ws.onmessage = (ev) => {
   const m = JSON.parse(ev.data);
-  if (m.id && waiting.has(m.id)) { waiting.get(m.id)(m.result ?? m.error); waiting.delete(m.id); }
+  if (m.id && waiting.has(m.id)) { const w = waiting.get(m.id); waiting.delete(m.id); clearTimeout(w.timer); w.ok(m.result ?? m.error); }
   if (m.method === "Runtime.exceptionThrown") errors.push(m.params.exceptionDetails?.exception?.description ?? JSON.stringify(m.params.exceptionDetails));
+  if (m.method === "Inspector.targetCrashed") die("the page crashed");
 };
-const send = (method, params = {}) => new Promise((r) => { const id = ++n; waiting.set(id, r); ws.send(JSON.stringify({ id, method, params })); });
+// (the error is made here, so its stack is the step that was waiting, not the socket's handler)
+const send = (method, params = {}, ms = 120000) => new Promise((ok, fail) => {
+  const at = new Error(dead);
+  if (dead) return fail(at);
+  const id = ++n;
+  const timer = setTimeout(() => { waiting.delete(id); at.message = `${method}: no answer in ${ms / 1000} s`; fail(at); }, ms);
+  waiting.set(id, { ok, fail, timer, at });
+  ws.send(JSON.stringify({ id, method, params }));
+});
 const ev = async (expression) => { const r = await send("Runtime.evaluate", { expression, awaitPromise: true, returnByValue: true }); if (r.exceptionDetails) throw new Error(JSON.stringify(r.exceptionDetails).slice(0, 400)); return r.result?.value; };
-const until = async (expr, ms = 30000) => { const t = Date.now(); while (Date.now() - t < ms) { if (await ev(expr).catch(() => false)) return true; await sleep(50); } return false; };
+// (an expression that throws is "not yet"; a browser that is gone ends the wait at once)
+const until = async (expr, ms = 30000) => { const t = Date.now(); while (Date.now() - t < ms) { if (await ev(expr).catch((e) => { if (dead) throw e; return false; })) return true; await sleep(50); } return false; };
 const fails = [];
 let checks = 0;
 const check = (ok, what) => { checks++; if (!ok) fails.push(what); };
@@ -61,7 +84,7 @@ const open = async (doc) => {
 const keys = () => ev("window.sagebrush.board.outputKeys()");
 
 try {
-  for (const m of ["Page.enable", "Runtime.enable"]) await send(m);
+  for (const m of ["Page.enable", "Runtime.enable", "Inspector.enable"]) await send(m);
   // the same seed: the same numbers, at every load; another seed: others
   const a1 = await open(board(SEED_A));
   const k1 = await keys();
@@ -101,7 +124,9 @@ try {
   // a new board gets a seed of its own (a board of its own, at its own address: once it is there)
   await ev("document.querySelector('[data-sbb=newboard]').click(), 1");
   await until("/^\\?doc=local:/.test(location.search) && !!window.sagebrush?.board?.snapshot()?.doc", 30000);
-  check(await until("window.sagebrush.board.json().then((t) => /\"seed\": \"[0-9a-f]{64}\"/.test(t) && !t.includes('aaaa'))", 10000), "a new board has a seed of its own");
+  // (not the seed of the board loaded before it; the seed is printed when this fails)
+  const seedOf = "window.sagebrush.board.json().then((t) => (/\"seed\": \"([0-9a-f]{64})\"/.exec(t) ?? [])[1] ?? '')";
+  check(await until(`${seedOf}.then((s) => s !== '' && s !== '${SEED_A}')`, 10000), "a new board has a seed of its own: " + JSON.stringify(await ev(seedOf).catch(() => null)));
   // (back to the board the steps below load their documents into)
   await send("Page.navigate", { url: `${base}board/?doc=${encodeURIComponent("examples/live.board.json")}` });
   await until("window.sagebrush?.board?.snapshot().items.length > 0", 60000);
@@ -406,7 +431,7 @@ try {
   check(stays, "the newer run's entry stays");
   check(!errors.length, "no exceptions: " + errors.join(" | ").slice(0, 400));
 } catch (e) {
-  fails.push(String(e?.stack ?? e));
+  fails.push(String(e?.stack ?? e) + (dead && chromeTail.trim() ? `\n  Chrome's stderr, its end:\n    ${chromeTail.trim().split("\n").slice(-15).join("\n    ")}` : ""));
 } finally {
   chrome.kill();
   await sleep(200);

@@ -4,3 +4,4 @@
 export { mountAgentPairing } from "./agent-ui";
 // (and the run verbs' holder and line: the notebook page offers an agent's runs of code, chat plan PR 4a)
 export { runVerbsFor } from "./run-holder";
+export { agentRunsFor } from "./agent-runs";

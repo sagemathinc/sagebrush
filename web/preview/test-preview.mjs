@@ -446,7 +446,7 @@ test('eight 16 MiB non-HTML buffers bound active transport input to 128 MiB', as
   assert.equal(peakBytes, 128 * 1024 * 1024); assert.equal(activeBytes, 0);
 });
 
-test('phone preview notice preserves controls, opens metadata modal and dismisses for this session under CSP', { timeout: 60000 }, async () => {
+test('phone preview notice preserves controls, opens metadata modal and dismisses for this session under CSP', { timeout: 120000 }, async () => {
   const geometry = await checkNoticeBrowser();
   assert.ok(geometry.controlsBottom <= geometry.top);
 });

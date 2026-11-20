@@ -830,3 +830,8 @@ Those about grants and agents are answered in full in design/agent-endpoint.md �
 - `meta.blob` for large patches;
 - who sends snapshots, and when;
 - the 64 KiB limit on a keepalive request when a page is hidden.
+
+**Deferred: a notebook a device stopped syncing (the merge rule's "two copies").** Two devices' edits of a notebook merge from their common ancestor in the patch graph (§4.4), so a device rejoins by sending its patches. Only a device that can't join that graph has no canonical ancestor. Today that is a notebook a device stopped on a final refusal: `limit` (one patch over 1 MiB, such as a large image pasted into a Markdown cell), `chain`, or `invalid`. A client never sends a clear (§4.6) or a snapshot (§4.7) yet. Such a notebook keeps its edits on that device and the Sync panel lists the stop, but that device's copy then goes its own way. Planned:
+- when a notebook stops with unsent edits, its current value is kept as a notebook of its own, `<name> (conflict, <device's first 8>).ipynb`, as §4.6 does for a clear;
+- the original then follows the server again: this device's synced history of it is dropped and pulled again.
+- For `limit`, the copy's first patch would meet the same limit: blobs in patches (`meta.blob`, above) come first.
