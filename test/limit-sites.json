@@ -34,6 +34,11 @@
   "owner": "engine arith (big-integer wire decoder)",
   "reason": "the decoder's and the gcd check's plumbing (bounds for the caller's reservation and work admission, the workspace, word masks); refuses nothing itself"
  },
+ "engine/arith/src/coprime.rs :: qdigit :: Ok(u128::from(u64::MAX)) #0": {
+  "class": "none",
+  "owner": "engine arithmetic (division)",
+  "reason": "Knuth D's quotient digit at the boundary (u2, u1) = (y1, y2): the digit b - 1 (u64::MAX), a value, not a cap; refuses nothing"
+ },
  "engine/arith/src/coprime.rs :: rem :: let mut m = Meter::new(u64::MAX); #0": {
   "class": "none",
   "owner": "engine arith (big-integer wire decoder)",
@@ -133,6 +138,151 @@
   "class": "none",
   "owner": "engine arith (big-integer wire decoder)",
   "reason": "test code: the big-integer decoder's correctness, allocation and Stop tests; refuses nothing itself"
+ },
+ "engine/arith/src/coprime/diff_tests.rs :: all_three :: let (_, (xa, _, qa), _, _) = run(&|x, y, q, m| super::divrem_in_place(x, nx, y, ny, q, m), &b, u64::MAX); #0": {
+  "class": "none",
+  "owner": "engine arithmetic (division) tests",
+  "reason": "test code (the invariant-division and differential tests): u64::MAX as a limb value, the meter limits probed by the Overrun sweep; no cap, refuses nothing"
+ },
+ "engine/arith/src/coprime/diff_tests.rs :: hard_cases_against_today :: let pick = [0u64, 1, h - 1, h, u64::MAX]; #0": {
+  "class": "none",
+  "owner": "engine arithmetic (division) tests",
+  "reason": "test code (the invariant-division and differential tests): u64::MAX as a limb value, the meter limits probed by the Overrun sweep; no cap, refuses nothing"
+ },
+ "engine/arith/src/coprime/diff_tests.rs :: hard_cases_against_today :: vec![u64::MAX, 0, 1], #0": {
+  "class": "none",
+  "owner": "engine arithmetic (division) tests",
+  "reason": "test code (the invariant-division and differential tests): u64::MAX as a limb value, the meter limits probed by the Overrun sweep; no cap, refuses nothing"
+ },
+ "engine/arith/src/coprime/diff_tests.rs :: hard_cases_against_today :: vec![u64::MAX, h], #0": {
+  "class": "none",
+  "owner": "engine arithmetic (division) tests",
+  "reason": "test code (the invariant-division and differential tests): u64::MAX as a limb value, the meter limits probed by the Overrun sweep; no cap, refuses nothing"
+ },
+ "engine/arith/src/coprime/diff_tests.rs :: hard_cases_against_today :: vec![u64::MAX; 13], #0": {
+  "class": "none",
+  "owner": "engine arithmetic (division) tests",
+  "reason": "test code (the invariant-division and differential tests): u64::MAX as a limb value, the meter limits probed by the Overrun sweep; no cap, refuses nothing"
+ },
+ "engine/arith/src/coprime/diff_tests.rs :: hard_cases_against_today :: vec![u64::MAX; 2], #0": {
+  "class": "none",
+  "owner": "engine arithmetic (division) tests",
+  "reason": "test code (the invariant-division and differential tests): u64::MAX as a limb value, the meter limits probed by the Overrun sweep; no cap, refuses nothing"
+ },
+ "engine/arith/src/coprime/diff_tests.rs :: hard_cases_against_today :: vec![u64::MAX; 3], #0": {
+  "class": "none",
+  "owner": "engine arithmetic (division) tests",
+  "reason": "test code (the invariant-division and differential tests): u64::MAX as a limb value, the meter limits probed by the Overrun sweep; no cap, refuses nothing"
+ },
+ "engine/arith/src/coprime/diff_tests.rs :: hard_cases_against_today :: vec![u64::MAX; nx], #0": {
+  "class": "none",
+  "owner": "engine arithmetic (division) tests",
+  "reason": "test code (the invariant-division and differential tests): u64::MAX as a limb value, the meter limits probed by the Overrun sweep; no cap, refuses nothing"
+ },
+ "engine/arith/src/coprime/diff_tests.rs :: hard_cases_against_today :: vec![u64::MAX], #0": {
+  "class": "none",
+  "owner": "engine arithmetic (division) tests",
+  "reason": "test code (the invariant-division and differential tests): u64::MAX as a limb value, the meter limits probed by the Overrun sweep; no cap, refuses nothing"
+ },
+ "engine/arith/src/coprime/diff_tests.rs :: limb :: 3 => u64::MAX, #0": {
+  "class": "none",
+  "owner": "engine arithmetic (division) tests",
+  "reason": "test code (the invariant-division and differential tests): u64::MAX as a limb value, the meter limits probed by the Overrun sweep; no cap, refuses nothing"
+ },
+ "engine/arith/src/coprime/diff_tests.rs :: limb :: _ => u64::MAX - (self.next() % 3), #0": {
+  "class": "none",
+  "owner": "engine arithmetic (division) tests",
+  "reason": "test code (the invariant-division and differential tests): u64::MAX as a limb value, the meter limits probed by the Overrun sweep; no cap, refuses nothing"
+ },
+ "engine/arith/src/coprime/diff_tests.rs :: limits :: fn limits(used: u64) -> Vec<u64> { #0": {
+  "class": "none",
+  "owner": "engine arithmetic (division) tests",
+  "reason": "test code (the invariant-division and differential tests): u64::MAX as a limb value, the meter limits probed by the Overrun sweep; no cap, refuses nothing"
+ },
+ "engine/arith/src/coprime/diff_tests.rs :: run :: fn run<T>(f: Routine<T>, b: &Bufs, limit: u64) -> (Result<T, Fault>, Bufs, u64, u64) { #0": {
+  "class": "none",
+  "owner": "engine arithmetic (division) tests",
+  "reason": "test code (the invariant-division and differential tests): u64::MAX as a limb value, the meter limits probed by the Overrun sweep; no cap, refuses nothing"
+ },
+ "engine/arith/src/coprime/diff_tests.rs :: run :: let mut m = Meter::new(limit); #0": {
+  "class": "none",
+  "owner": "engine arithmetic (division) tests",
+  "reason": "test code (the invariant-division and differential tests): u64::MAX as a limb value, the meter limits probed by the Overrun sweep; no cap, refuses nothing"
+ },
+ "engine/arith/src/coprime/diff_tests.rs :: same :: assert_eq!(bn, bo, \"{name}: buffers at limit {l}\"); #0": {
+  "class": "none",
+  "owner": "engine arithmetic (division) tests",
+  "reason": "test code (the invariant-division and differential tests): u64::MAX as a limb value, the meter limits probed by the Overrun sweep; no cap, refuses nothing"
+ },
+ "engine/arith/src/coprime/diff_tests.rs :: same :: assert_eq!(rn, ro, \"{name}: result at limit {l}\"); #0": {
+  "class": "none",
+  "owner": "engine arithmetic (division) tests",
+  "reason": "test code (the invariant-division and differential tests): u64::MAX as a limb value, the meter limits probed by the Overrun sweep; no cap, refuses nothing"
+ },
+ "engine/arith/src/coprime/diff_tests.rs :: same :: assert_eq!(un2, uo2, \"{name}: units at limit {l}\"); #0": {
+  "class": "none",
+  "owner": "engine arithmetic (division) tests",
+  "reason": "test code (the invariant-division and differential tests): u64::MAX as a limb value, the meter limits probed by the Overrun sweep; no cap, refuses nothing"
+ },
+ "engine/arith/src/coprime/diff_tests.rs :: same :: for l in limits(uo) { #0": {
+  "class": "none",
+  "owner": "engine arithmetic (division) tests",
+  "reason": "test code (the invariant-division and differential tests): u64::MAX as a limb value, the meter limits probed by the Overrun sweep; no cap, refuses nothing"
+ },
+ "engine/arith/src/coprime/diff_tests.rs :: same :: let (rn, bn, un, ln) = run(new, b, u64::MAX); #0": {
+  "class": "none",
+  "owner": "engine arithmetic (division) tests",
+  "reason": "test code (the invariant-division and differential tests): u64::MAX as a limb value, the meter limits probed by the Overrun sweep; no cap, refuses nothing"
+ },
+ "engine/arith/src/coprime/diff_tests.rs :: same :: let (ro, bo, uo, lo) = run(old, b, u64::MAX); #0": {
+  "class": "none",
+  "owner": "engine arithmetic (division) tests",
+  "reason": "test code (the invariant-division and differential tests): u64::MAX as a limb value, the meter limits probed by the Overrun sweep; no cap, refuses nothing"
+ },
+ "engine/arith/src/invdiv.rs :: recip :: let num = (((!d) as $W) << BITS) | (<$L>::MAX as $W); #0": {
+  "class": "none",
+  "owner": "engine arithmetic (division)",
+  "reason": "the reciprocal's numerator b^2 - 1 - d b (the limb type's MAX as its low word): arithmetic, not a cap; refuses nothing"
+ },
+ "engine/arith/src/invdiv/tests.rs :: div2by1_64 :: let (u1, u0) = (d - 1, u64::MAX); #0": {
+  "class": "none",
+  "owner": "engine arithmetic (division) tests",
+  "reason": "test code (the invariant-division and differential tests): u64::MAX as a limb value, the meter limits probed by the Overrun sweep; no cap, refuses nothing"
+ },
+ "engine/arith/src/invdiv/tests.rs :: div2by1_64 :: let mut ds = vec![u64::MAX, u64::MAX - 1, 3 << 62, 9 << 60, (1 << 63) + 1, 1 << 63]; #0": {
+  "class": "none",
+  "owner": "engine arithmetic (division) tests",
+  "reason": "test code (the invariant-division and differential tests): u64::MAX as a limb value, the meter limits probed by the Overrun sweep; no cap, refuses nothing"
+ },
+ "engine/arith/src/invdiv/tests.rs :: div3by2_64 :: if v3 < u64::MAX { #0": {
+  "class": "none",
+  "owner": "engine arithmetic (division) tests",
+  "reason": "test code (the invariant-division and differential tests): u64::MAX as a limb value, the meter limits probed by the Overrun sweep; no cap, refuses nothing"
+ },
+ "engine/arith/src/invdiv/tests.rs :: div3by2_64 :: let (u2, u1) = if i % 4 == 0 { (d1 - 1, u64::MAX - (rng.next() >> 40)) } else { (rng.next() % d1, rng.next()) }; #0": {
+  "class": "none",
+  "owner": "engine arithmetic (division) tests",
+  "reason": "test code (the invariant-division and differential tests): u64::MAX as a limb value, the meter limits probed by the Overrun sweep; no cap, refuses nothing"
+ },
+ "engine/arith/src/invdiv/tests.rs :: div3by2_64 :: step4_wraps += u32::from(s1 == u128::from(u64::MAX)); #0": {
+  "class": "none",
+  "owner": "engine arithmetic (division) tests",
+  "reason": "test code (the invariant-division and differential tests): u64::MAX as a limb value, the meter limits probed by the Overrun sweep; no cap, refuses nothing"
+ },
+ "engine/arith/src/invdiv/tests.rs :: mul_wide32_is_the_product :: let edges = [0u64, 1, 0xffff_ffff, 1 << 32, u64::MAX, u64::MAX - 1, 1 << 63, (1 << 63) - 1]; #0": {
+  "class": "none",
+  "owner": "engine arithmetic (division) tests",
+  "reason": "test code (the invariant-division and differential tests): u64::MAX as a limb value, the meter limits probed by the Overrun sweep; no cap, refuses nothing"
+ },
+ "engine/arith/src/invdiv/tests.rs :: recip_is_the_definition :: assert_eq!(u128::from(w64::recip(d)), (u128::MAX / u128::from(d)) - (1u128 << 64), \"{d:x}\"); #0": {
+  "class": "none",
+  "owner": "engine arithmetic (division) tests",
+  "reason": "test code (the invariant-division and differential tests): u64::MAX as a limb value, the meter limits probed by the Overrun sweep; no cap, refuses nothing"
+ },
+ "engine/arith/src/invdiv/tests.rs :: recip_is_the_definition :: for d in [1u64 << 63, (1 << 63) + 1, u64::MAX, u64::MAX - 1, 3 << 62] { #0": {
+  "class": "none",
+  "owner": "engine arithmetic (division) tests",
+  "reason": "test code (the invariant-division and differential tests): u64::MAX as a limb value, the meter limits probed by the Overrun sweep; no cap, refuses nothing"
  },
  "engine/arith/src/ledger.rs :: alloc :: if v.try_reserve_exact(cap).is_err() { #0": {
   "class": "none",
