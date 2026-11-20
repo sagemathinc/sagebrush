@@ -13,7 +13,7 @@ linear time.
 
 from fractions import Fraction as _Fraction
 
-from ._engine import call
+from ._engine import call, call_hex
 
 
 def factor(f):
@@ -44,7 +44,7 @@ def mul(a, b):
     >>> mul([0, 0], [1, 2])
     []
     """
-    return _ints(call("poly_mul", a=_hex(a), b=_hex(b)))
+    return _ints(call_hex("poly_mul", _hex(a), _hex(b)))
 
 
 def qmul(a, b):
@@ -60,7 +60,7 @@ def qmul(a, b):
     >>> qmul([0, 0], [Fraction(1, 2)])
     []
     """
-    r = call("qpoly_mul", a=_qhex(a), b=_qhex(b))
+    r = call_hex("qpoly_mul", _qhex(a), _qhex(b))
     return [_token(t) for t in r.split(",")] if r else []
 
 

@@ -3,7 +3,8 @@ NTT product, admitted before any allocation) against Python's exact integer
 arithmetic, on many shapes: tiny, square, unbalanced, huge and negative
 coefficients, cancellation, zero factors; and sagebrush.poly.qmul (qpoly_mul,
 over QQ: the common denominators, the product and each coefficient's
-reduction in the engine) against Fraction arithmetic.  Past the caps the engine refuses,
+reduction in the engine) against Fraction arithmetic.  Both call through
+sagebrush._engine.call_hex, checked against call().  Past the caps the engine refuses,
 naming the cap: the quadratic shape (many one-digit coefficients times one
 huge one) is refused before any allocation.  Runs on CPython and in pyjs:
 
@@ -37,6 +38,82 @@ def qcoef(r, nbits, dbits):
 def coef(r, bits):
     x = r.getrandbits(bits) if bits else 0
     return -x if r.random() < 0.5 else x
+
+
+def call_hex_checks(r):
+    """sagebrush._engine.call_hex, the lean text lane poly.mul and qmul use:
+    the same values as call() for ok replies (the empty one included) and
+    the same exceptions for every error class; a reply that isn't exactly
+    an ok envelope of hex tokens goes through json; fields are validated."""
+    from sagebrush import _engine as E
+    n = 0
+    # (ok replies: parity with call(), the empty product included)
+    for la, lb in [(1, 1), (3, 3), (16, 16), (40, 7), (0, 3)]:
+        a, b = P._hex([coef(r, 70) for _ in range(la)]), P._hex([coef(r, 70) for _ in range(lb)])
+        assert E.call_hex("poly_mul", a, b) == E.call("poly_mul", a=a, b=b), (la, lb)
+        n += 1
+    assert E.call_hex("poly_mul", "0", "5") == "" == E.call("poly_mul", a="0", b="5")
+    qa, qb = "1/2,-3,5/7", "-2/3,4"
+    assert E.call_hex("qpoly_mul", qa, qb) == E.call("qpoly_mul", a=qa, b=qb)
+    # (errors: the same class and text as call(): a refusal, a malformed
+    # token, an unknown op)
+    def raised(f):
+        try:
+            f()
+        except Exception as e:
+            return type(e), str(e)
+        raise AssertionError("no error")
+    big = ",".join(["1"] * (1 << 16))
+    huge = "f" * 150000
+    for fn, a, b in [("poly_mul", big, huge), ("poly_mul", "01", "1"), ("qpoly_mul", "1/0", "1"), ("poly_mul_x", "1", "1")]:
+        assert raised(lambda: E.call_hex(fn, a, b)) == raised(lambda: E.call(fn, a=a, b=b)), (fn, a[:20], b[:20])
+        n += 1
+    # (the bridge's replies replaced, through the same bridge entry: an
+    # internal error, a Stop, and envelopes the strict slice must refuse)
+    name = "_sbengine" if hasattr(E, "_sbengine") else "_native"
+    real = getattr(E, name)
+
+    class Stub:
+        def __init__(self, reply):
+            self.reply = reply
+
+        def call(self, text):
+            if isinstance(self.reply, BaseException):
+                raise self.reply
+            return self.reply
+    try:
+        for text in ['{"error":"x: internal error","internal":true}', '{"error":"a refusal"}']:
+            setattr(E, name, Stub(text))
+            assert raised(lambda: E.call_hex("poly_mul", "1", "1")) == raised(lambda: E.reply(text)), text
+        setattr(E, name, Stub(KeyboardInterrupt()))
+        try:
+            E.call_hex("poly_mul", "1", "1")
+        except KeyboardInterrupt:
+            pass
+        else:
+            raise AssertionError("a Stop was swallowed")
+        # (not exactly {"ok":"<hex>"}: decoded by json, same value as reply())
+        for text in ['{"ok":"1,2","x":1}', '{"ok":"1,\\u0032"}', '{"ok":"1,2"} ', '{"ok":"A"}', '{"ok": "1,2"}']:
+            setattr(E, name, Stub(text))
+            assert E.call_hex("poly_mul", "1", "1") == E.reply(text), text
+            n += 1
+        for text in ['{"ok":"}', '{"ok":"1,2"}x', '{"ok":"1,2"']:
+            setattr(E, name, Stub(text))
+            assert raised(lambda: E.call_hex("poly_mul", "1", "1")) == raised(lambda: E.reply(text)), text
+            n += 1
+    finally:
+        setattr(E, name, real)
+    # (the fields and the op name validated before anything is sent)
+    for fn, a, b in [("poly_mul", "1", '1"'), ("poly_mul", "1", "1;2"), ("poly_mul", "1", "A"), ("poly_mul", 1, "1"),
+                     ("poly_mul", "1", b"1"), ('poly_mul","x', "1", "1"), ("", "1", "1"), ("factor", "1", "1")]:
+        try:
+            E.call_hex(fn, a, b)
+        except ValueError as e:
+            assert "call_hex" in str(e), e
+        else:
+            raise AssertionError("accepted %r %r %r" % (fn, a, b))
+        n += 1
+    return n
 
 
 def main():
@@ -99,6 +176,7 @@ def main():
     x = R.gen()
     f = (x + Fraction(1, 2)) * (x - Fraction(1, 3)) * (3 * x + 1)
     assert list(f) == [Fraction(-1, 6), Fraction(-1, 3), Fraction(3, 2), 3], list(f)
+    n += call_hex_checks(r)
     print("poly_mul against exact products: %d cases ok" % n)
 
 
