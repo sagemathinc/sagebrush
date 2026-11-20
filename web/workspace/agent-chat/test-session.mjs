@@ -520,6 +520,24 @@ const turnOf = (t, id) => t.entries.find((e) => e.kind === "turn" && e.turn_id =
   check(!s.canSend(u) && s.submit("nope", "sent") === false, "disconnected, nothing away, no demo: Send is inert, as before");
 }
 
+// SEC H1 (live): an event is read only against the pairing it came through; one from a replaced pairing changes nothing
+{
+  const { h, host: hs } = host();
+  const s = new ChatSession(hs);
+  const A = resumable("aaaaaaaaaaaaaaaa");
+  h.pairing = A;
+  const t = s.current();
+  s.submit("x", "sent");
+  s.onAgent(...ev(t, 2, "T1", { type: "turn_started" }), A);
+  const B = resumable("bbbbbbbbbbbbbbbb");
+  h.pairing = B;
+  const before = JSON.stringify(t);
+  s.onAgent(...ev(t, 3, "T1", { type: "turn_finished", outcome: "completed" }), A);
+  check(JSON.stringify(t) === before && t.agent_instance === "aaaaaaaaaaaaaaaa", "a numbered event through the replaced pairing A changes nothing (no new run, no finish)", t);
+  s.onAgent(...ev(t, 3, "T2", { type: "turn_started" }), B);
+  check(t.agent_instance === "bbbbbbbbbbbbbbbb" && !!turnOf(t, "T2"), "the same through the current pairing B applies, in B's run", t.agent_instance);
+}
+
 // kept threads: an empty list, and a current one that names no thread
 {
   const { h, host: hs } = host();

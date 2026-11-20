@@ -1333,6 +1333,8 @@ const agentRuns = (ws: Workspace) => agentRunsFor(ws as any, {
   more: () => ({ inPage: paneRun, ...(/^(localhost|127\.0\.0\.1)$/.test(location.hostname) && typeof (window as any).__runHold === "function" ? { hold: (st: string) => (window as any).__runHold(st) } : {}) }),
 });
 
+// (the current pairing's listener for the agent's messages, removed when another pairing replaces it)
+let offAgent: (() => void) | null = null;
 function mountPairing(ws: Workspace) {
   agentUi = mountAgentPairing(ws, {
     program: "sagebrush-agent",
@@ -1355,7 +1357,10 @@ function mountPairing(ws: Workspace) {
     onPairing(p) {
       pairing = p;
       cards.clear();
-      p.onNotification((m, params) => session.onAgent(m, params));
+      // (only while this pairing is the page's: a late message from one it replaced changes nothing; the replaced
+      //  one's listener goes too)
+      offAgent?.();
+      offAgent = p.onNotification((m, params) => { if (pairing === p) session.onAgent(m, params, p); });
       let granted = false;
       p.onChange(() => {
         cards.refresh(); // (a pairing that closed or changed child: Allows waiting for a digest for it go)

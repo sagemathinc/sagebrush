@@ -251,8 +251,11 @@ export class ChatSession {
     return true;
   }
 
-  /** What the paired agent says: turn events for one of these threads, live or (chat.replay) from its log. */
-  onAgent(method: string, params: unknown) {
+  /** What the paired agent says: turn events for one of these threads, live or (chat.replay) from its log. `from`: the
+   *  pairing it came through; one that isn't the current pairing changes nothing (a late message from a replaced
+   *  one must never be read against the new one's run). */
+  onAgent(method: string, params: unknown, from?: AgentPairing) {
+    if (from !== undefined && from !== this.host.pairing()) return;
     if (method === "chat.replay") return this.onReplay(params);
     if (method !== "turn.event") return;
     const p = params as { conversation?: unknown } | null;
