@@ -156,6 +156,12 @@
   .att-detail > summary { cursor: pointer; color: var(--muted); }
   .att-detail pre { max-height: 240px; overflow: auto; white-space: pre-wrap; overflow-wrap: anywhere; margin: 4px 0 0; padding: 6px 8px; background: var(--code-bg, rgba(127,127,127,.08)); border-radius: 6px; }
   .att-actions { display: flex; gap: 8px; margin-top: 8px; }
+  .att-body { font-size: 14px; margin-top: 4px; }
+  .att-reason { font-size: 14px; color: var(--muted); margin-top: 4px; overflow-wrap: anywhere; }
+  /* (a web card's three answers: Deny set apart; on a phone, one per row, Deny last after a gap) */
+  .att-actions.three { flex-wrap: wrap; }
+  .att-actions.three .att-deny { margin-left: auto; }
+  @media (max-width: 480px) { .att-actions.three { flex-direction: column; align-items: stretch; } .att-actions.three .att-deny { margin: 8px 0 0; } }
   .att-actions button, .composer button { border: 1px solid var(--line); background: var(--card); border-radius: 8px; padding: 5px 12px; cursor: pointer; }
   button.primary { background: var(--ink); color: #fff; border-color: var(--ink); }
   .att-state { font-size: 13px; color: var(--muted); margin-top: 6px; }
@@ -304,7 +310,7 @@
     <button id="new">＋ New chat</button>
     <div id="threads"></div>
     <button id="files-big" type="button" title="Your files and notebooks, in the file browser">Files…</button>
-    <div class="foot">Shift+Enter sends · Alt+Enter queues · Ctrl+Enter posts a note</div>
+    <div class="foot">Shift+Enter sends (queues while the agent works) · Alt+Enter queues · Ctrl+Enter posts a note</div>
   </nav>
   <div class="sep" id="sep-side" role="separator" tabindex="0" aria-orientation="vertical" aria-label="Resize the chat list" aria-controls="chats"></div>
   <main>
@@ -320,7 +326,7 @@
     </div>
     <div id="help" hidden>
       <b>Run this on your computer</b>, then open the link it prints. <a href="/agents/connect/">Learn more</a>
-      <pre>npx -y https://agents.sagebrush.cloud/agents/sagebrush-agent-0.7.1.tgz</pre>
+      <pre>npx -y https://agents.sagebrush.cloud/agents/sagebrush-agent-0.7.6.tgz</pre>
     </div>
     <div id="log">
       <div id="log-tools" hidden><button id="copychat" type="button" title="This chat as Markdown: what you wrote, the agent's answers, a line for each thing it did, and links to its files">⧉ Copy chat</button></div>
@@ -341,10 +347,10 @@
       <div class="composer">
         <div id="editor"></div>
         <div class="row">
-          <span class="hint"><kbd>Shift</kbd>+<kbd>Enter</kbd> send · <kbd>Alt</kbd>+<kbd>Enter</kbd> queue · <kbd>Ctrl</kbd>+<kbd>Enter</kbd> note</span>
+          <span class="hint"><kbd>Shift</kbd>+<kbd>Enter</kbd> <span id="keys">send</span> · <kbd>Alt</kbd>+<kbd>Enter</kbd> queue · <kbd>Ctrl</kbd>+<kbd>Enter</kbd> note</span>
           <span id="queued"></span>
           <button id="note" title="Post a note, not sent to the agent (Ctrl+Enter)">Note</button>
-          <button id="queue" title="Send after the current turn (Alt+Enter)" hidden>Queue</button>
+          <button id="send-now" title="Interrupt the agent and send this now" hidden>Send now</button>
           <button id="stop" title="Stop the agent (Esc)" hidden>Stop</button>
           <span id="send-hint" hidden><span id="send-hint-text">Not connected: Connect Claude to send</span> <button id="send-hint-act">Connect</button></span>
           <button id="send" title="Send (Shift+Enter)">Send</button>

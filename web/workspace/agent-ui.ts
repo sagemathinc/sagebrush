@@ -94,6 +94,10 @@ const CSS = `
 [data-sbag-inline] > .sbag-bar.docked > button { flex: none; white-space: nowrap; }
 .sbag-bar button { font: inherit; border: 0; border-radius: 12px; padding: 3px 10px; background: #fff; color: #1d241a; cursor: pointer; }
 .sbag-bar button.open { max-width: 240px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.sbag-bar .made { display: flex; gap: 8px; align-items: center; padding-left: 10px; border-left: 1px solid #4a5546; white-space: nowrap; min-width: 0; max-width: 480px; }
+.sbag-bar .made b { overflow: hidden; text-overflow: ellipsis; min-width: 0; }
+.sbag-bar .made button { flex: none; }
+.sbag-bar button.cta { background: #8fd17a; color: #10200c; font-weight: 600; padding: 4px 16px; }
 `;
 
 let styled = false;
@@ -132,7 +136,7 @@ async function again(deadline: number, mine: () => boolean): Promise<boolean> {
 /** The page's pairing: a dialog to connect, a bar while connected.  Returns the button's handler. `reload` (A14) turns on
  * the reload record: its scope, and a callback for the restore's states; `quietLoss` leaves an involuntary loss to the
  * page's own bar (no dialog). */
-export function mountAgentPairing(ws: PairingWorkspace, o: { button?: HTMLElement | null; onPairing?: (p: AgentPairing) => void; notebookEdit?: (edit: NotebookEdit, may: () => boolean, hold?: () => Promise<() => void>) => Promise<unknown>; branches?: { gitBranch: typeof gitBranch; gitBranchParams: typeof gitBranchParams; gitBranchProblem: typeof gitBranchProblem; watchBranches: typeof watchBranches; gitServe?: typeof gitServe }; reload?: { scope: ReloadScope; storage?: Pick<Storage, "getItem" | "setItem" | "removeItem"> | null; onState?: (s: RestoreState) => void; onRemembered?: (g: Kept["grant"]) => void }; quietLoss?: boolean; program?: string; runVerbs?: RunVerbs; extra?: (close: () => void) => HTMLElement; open?: (c: Created) => void; onCreated?: (c: Created, p: AgentPairing) => void } = {}) {
+export function mountAgentPairing(ws: PairingWorkspace, o: { button?: HTMLElement | null; onPairing?: (p: AgentPairing) => void; egressTurn?: boolean; notebookEdit?: (edit: NotebookEdit, may: () => boolean, hold?: () => Promise<() => void>, turnId?: string) => Promise<unknown>; branches?: { gitBranch: typeof gitBranch; gitBranchParams: typeof gitBranchParams; gitBranchProblem: typeof gitBranchProblem; watchBranches: typeof watchBranches; gitServe?: typeof gitServe }; reload?: { scope: ReloadScope; storage?: Pick<Storage, "getItem" | "setItem" | "removeItem"> | null; onState?: (s: RestoreState) => void; onRemembered?: (g: Kept["grant"]) => void }; quietLoss?: boolean; program?: string; runVerbs?: RunVerbs; extra?: (close: () => void) => HTMLElement; open?: (c: Created) => void; onCreated?: (c: Created, p: AgentPairing) => void } = {}) {
   style();
   // `program`: the page's own program (the Agents page: sagebrush-agent) named in the dialog instead of sagebrush-mcp
   const named = (s: string) => o.program ? s.replace(/(the agent's |your agent's )?sagebrush-mcp/g, o.program) : s;
@@ -140,6 +144,11 @@ export function mountAgentPairing(ws: PairingWorkspace, o: { button?: HTMLElemen
   let bar: HTMLElement | null = null;
   const trashEntry = async (p: string) => (await ws.stat(p)) as any;
   const page = { origin: location.origin, path: location.pathname };
+  // (a page in a frame of this tab (the Agents page's .tex pane): the tab's reload record is the top page's, so this
+  //  page's pairing neither takes it, writes it, nor marks it left; it pairs as any page without a record does)
+  let framed = true;
+  try { framed = window.top !== window; } catch { framed = true; }
+  if (framed && o.reload) o = { ...o, reload: undefined };
   // (the reload record's storage: this tab's sessionStorage, or none if it can't be reached)
   let storage: Pick<Storage, "getItem" | "setItem" | "removeItem"> | null = null;
   if (o.reload) { try { storage = o.reload.storage === undefined ? sessionStorage : o.reload.storage; } catch { storage = null; } }
@@ -151,7 +160,7 @@ export function mountAgentPairing(ws: PairingWorkspace, o: { button?: HTMLElemen
   // (an agent's runs of code (chat plan PR 4a): the page's run-holder.ts, only where the page offers them)
   const runVerbs = o.runVerbs;
   const make = (port: number, how: { code: string } | { session: string; pairingId: string; agent?: { name: string; client: string } } | { link: AgentLink; computer: string }) =>
-    new AgentPairing(port, how, { verbsFor: (actor, host) => ws.forAgent(actor, host), ...(ws.branchHost && o.branches ? { gitBranch: { params: o.branches.gitBranchParams, problem: o.branches.gitBranchProblem, run: (a) => o.branches!.gitBranch(ws.branchHost!(a.actor), a) } } : {}), ...(ws.branchHost && o.branches?.gitServe ? { gitVerbs: o.branches.gitServe(ws as unknown as { branchHost(actor: string): GitHost }) } : {}), store: ws, trashEntry, page, ...(runVerbs ? { runVerbs } : {}), ...(o.notebookEdit ? { notebookEdit: o.notebookEdit } : {}), ...(o.onCreated ? { onCreated: onlyCurrent(() => pairing, o.onCreated) } : {}), ...(o.reload ? { reload: { storage, scope: o.reload.scope, leaving: () => leaving } } : {}) });
+    new AgentPairing(port, how, { verbsFor: (actor, host) => ws.forAgent(actor, host), ...(ws.branchHost && o.branches ? { gitBranch: { params: o.branches.gitBranchParams, problem: o.branches.gitBranchProblem, run: (a) => o.branches!.gitBranch(ws.branchHost!(a.actor), a) } } : {}), ...(ws.branchHost && o.branches?.gitServe ? { gitVerbs: o.branches.gitServe(ws as unknown as { branchHost(actor: string): GitHost }) } : {}), store: ws, trashEntry, page, ...(runVerbs ? { runVerbs } : {}), ...(o.notebookEdit ? { notebookEdit: o.notebookEdit } : {}), ...(o.egressTurn ? { egressTurn: true } : {}), ...(o.onCreated ? { onCreated: onlyCurrent(() => pairing, o.onCreated) } : {}), ...(o.reload ? { reload: { storage, scope: o.reload.scope, leaving: () => leaving } } : {}) });
   // (the branches' records made right with their folders: now, and whenever the workspace changes; chat plan PR 3)
   // (`branches`: git_branch and its reconcile, on the pages that offer it (they import git-branch.ts), never in a
   //  pairing chunk of a page that doesn't, the LaTeX page's)
@@ -185,9 +194,13 @@ export function mountAgentPairing(ws: PairingWorkspace, o: { button?: HTMLElemen
     if (noRun) noRun.onclick = () => void p.noRun();
     // (Open: what the agent created last, where the page can open it (its `open`), as Files would)
     const made = o.open && p.created ? p.created : null;
-    const open = made ? h("button", { className: "open", textContent: "Open " + nameOf(made.path), title: `Open ${made.path}, which the agent created` }) : null;
+    // (a board it made opens in a tab of its own, never by itself (a tab only opens on a click, and this page keeps the
+    //  pairing): said as what the agent did, with Open beside it, the bar's one call to action)
+    const board = made?.kind === "board";
+    const open = made ? h("button", { className: board ? "cta" : "open", textContent: board ? "Open" : "Open " + nameOf(made.path), title: board ? `Open ${made.path} in a new tab, where its code runs` : `Open ${made.path}, which the agent created` }) : null;
     if (open && made) open.onclick = () => o.open!(made);
-    bar = h("div", { className: "sbag-bar" }, text, ...(open ? [open] : []), ...(noRun ? [noRun] : []), revoke);
+    const did = board && open ? h("span", { className: "made" }, `${p.hello!.agent.name} made`, h("b", { textContent: nameOf(made!.path) }), open) : open;
+    bar = h("div", { className: "sbag-bar" }, text, ...(did ? [did] : []), ...(noRun ? [noRun] : []), revoke);
     bar.setAttribute("role", "status");
     dock();
   }
@@ -446,7 +459,9 @@ export function mountAgentPairing(ws: PairingWorkspace, o: { button?: HTMLElemen
     const r = t.record;
     const nav = (performance.getEntriesByType?.("navigation")[0] as PerformanceNavigationTiming | undefined)?.type ?? "navigate";
     const d = reloadDecision(r, { scope: o.reload!.scope, navType: nav, now: Date.now() });
-    if (d === "discard") return say({ kind: "not-restored", why: r.grant.expires !== null && !(Date.now() < r.grant.expires) ? "expired" : "discarded", canReconnect: false });
+    // (discarded: its grant over, another workspace or page, or not a reload of this tab: the last needs a new Allow)
+    const sameScope = r.workspace === o.reload!.scope.workspace && r.page === o.reload!.scope.page;
+    if (d === "discard") return say({ kind: "not-restored", why: r.grant.expires !== null && !(Date.now() < r.grant.expires) ? "expired" : sameScope ? "not-a-reload" : "discarded", canReconnect: false });
     if (d === "click") { kept = r; return say({ kind: "not-restored", why: "not-a-reload", canReconnect: true }); }
     say({ kind: "restoring" });
     const { res, p } = await restoreWith(r);

@@ -87,8 +87,8 @@ test("optional packages alone select no default suite; with a core change they d
   assert.equal(suites(classify(["optional/hello/sagebrush.json", "src/pkgset.ts"])).node, "true");
 });
 
-test("the growth gate's own inputs are never docs-only (plan-growth-budget-r5 §1.5)", () => {
-  for (const f of ["budgets.json", ".growth/2026-10-24-x.json", ".github/workflows/optional.yml", "scripts/size-measure.mjs", "heap-budget.json", "core-api-surface.json", "pnpm-lock.yaml"]) {
+test("the size comparison's own inputs are never docs-only", () => {
+  for (const f of [".github/workflows/optional.yml", "scripts/size-measure.mjs", "heap-budget.json", "core-api-surface.json", "pnpm-lock.yaml"]) {
     assert.equal(classify([f]).size_inputs, "true", f);
   }
   assert.equal(classify(["design/board.md", "README.md"]).size_inputs, "false");
@@ -114,6 +114,43 @@ test("the CPython package's own Python selects engine-cpython, not the engine's 
   assert.equal(classify(["engine/modsym/examples/gen.py"]).engine_smoke, "true");
   // (and the full tier still runs everything)
   assert.equal(classify(["engine/py/python/sagebrush/cli.py"], "full-ci").engine_smoke, "true");
+});
+
+test("Python tests invoked by checks select node, derived from this checkout's workflow", () => {
+  const root = mkdtempSync(join(dir, "python-checks-"));
+  mkdirSync(join(root, ".github", "workflows"), { recursive: true });
+  const workflow = join(root, ".github", "workflows", "ci.yml");
+  writeFileSync(workflow, `jobs:
+  checks:
+    steps:
+      - run: |
+          node dist/src/cli.js engine/py/test_matrix_checks.py
+          python3 engine/py/test_other_checks.py
+          timeout 600 node dist/src/cli.js engine/py/test_a.py
+          uv run python engine/py/test_b.py
+          node dist/src/cli.js \\
+            engine/py/test_continued.py
+          # node dist/src/cli.js engine/py/test_commented.py
+          echo engine/py/test_mentioned.py
+          printf '%s' engine/py/test_printed.py
+  engine-cpython:
+    steps:
+      - run: python3 engine/py/test_remote_pair.py
+`);
+  const env = { CI_PATHS_ROOT: root };
+  for (const path of ["engine/py/test_matrix_checks.py", "engine/py/test_other_checks.py", "engine/py/test_a.py", "engine/py/test_b.py", "engine/py/test_continued.py"]) {
+    const result = classify([path], "", env);
+    assert.equal(result.node, "true", path);
+    assert.equal(result.engine_cpython, "true", path);
+    assert.equal(result.engine_smoke, "false", path);
+    assert.equal(result.web, "false", path);
+  }
+  for (const path of ["engine/py/test_remote_pair.py", "engine/py/test_commented.py", "engine/py/test_mentioned.py", "engine/py/test_printed.py", "engine/py/test_matrix_checks.py.bak"])
+    assert.equal(classify([path], "", env).node, "false", path);
+  // A new command needs no matching classifier edit or hard-coded filename.
+  writeFileSync(workflow, `jobs:\n  checks:\n    steps:\n      - run: node dist/src/cli.js engine/py/test_future.py\n  other:\n    steps: []\n`);
+  assert.equal(classify(["engine/py/test_future.py"], "", env).node, "true");
+  assert.equal(classify(["engine/py/test_matrix_checks.py"], "", env).node, "false");
 });
 
 test("engine-cpython runs on pull requests that touch the CPython package's inputs (#113 -> #132)", () => {
@@ -450,6 +487,7 @@ test("the full tier on a pull request: the full-ci label, or a sync, sharing, se
     "web/workspace/doc-sync.ts", "web/notebook/sync-rows.js", "web/notebook/db-merge3.ts", "web/board/syncdb.ts",
     "web/share/files.ts", "web/share-client/upload.ts", "web/csp.ts", "web/csp-policy.mts", "web/safe-html.ts",
     "web/cloud/share/server.ts", "web/cloud/share/migrations/0009_remotes.sql", "web/cloud/remote/relay.ts",
+    "web/cloud/mirror/account.ts", "web/workspace/agent-chat/mirror-format.ts",
     "web/workspace/export/run.ts", "web/workspace/db.ts", "web/workspace/api.ts", "web/workspace/migrate.ts", "web/board/export.ts",
     "web/latex/save.ts", "scripts/check-export-size.mjs",
     // (the LaTeX group's inputs: its ceiling is checked only in the full tier's web-artifacts)
@@ -594,7 +632,13 @@ test("a changed suite runs on its own pull request: its `// ci:` job, and the fu
   assert.deepEqual(JSON.parse(classify(["web/board/frame.ts"]).web_groups), ["board-a", "board-b", "board-c", "board-unit"]);
   const matrix = JSON.parse(classify(["web/index.html"]).web_matrix);
   assert.deepEqual(matrix.filter((x: { group: string }) => x.group === "notebook").map((x: { shard: number }) => x.shard), [1, 2, 3]);
-  assert.deepEqual(matrix.filter((x: { group: string }) => x.group === "remote-preview").map((x: { shard: number }) => x.shard), [1, 2]);
+  assert.deepEqual(matrix.filter((x: { group: string }) => x.group === "remote-preview").map((x: { shard: number }) => x.shard), [1, 2, 3]);
+  // (one remote-preview run a shard: each run takes minutes, so a new `// ci:` run there needs a new shard, not a
+  // doubled one near the job's timeout)
+  const repo = join(__dirname, "..", "..");
+  const preview = spawnSync(process.execPath, [join(repo, "scripts", "web-tests.mjs"), "plan", "web-browser/remote-preview"], { cwd: repo, encoding: "utf8" });
+  assert.equal(preview.status, 0, preview.stderr);
+  assert.equal(preview.stdout.split("\n").filter(Boolean).length, matrix.filter((x: { group: string }) => x.group === "remote-preview").length, preview.stdout);
   assert.equal(matrix.filter((x: { group: string }) => !["notebook", "remote-preview"].includes(x.group)).length, 7);
   // a deleted suite (not in the checkout) runs nowhere
   assert.equal(classify(["web/gone/test-gone.mjs"], "", at).full, "false");

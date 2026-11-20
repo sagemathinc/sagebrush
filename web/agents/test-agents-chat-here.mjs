@@ -156,6 +156,9 @@ try {
   await ev(`(() => { window.__whoSeen = []; new MutationObserver(() => window.__whoSeen.push(document.querySelector('#who').textContent)).observe(document.querySelector('#who'), { childList: true, subtree: true, characterData: true }); return true; })()`);
   ok(await chatHere(), "Chat here");
   ok(await until(`[...document.querySelectorAll('.sbag-dlg button')].some((b) => b.textContent === 'Allow')`), "…then the grant dialog");
+  // (while it waits for Allow: the header and the banner say the same, waiting for the dialog, never "isn't connected")
+  const askAllow = { who: await text("#who"), banner: await text("#banner") };
+  ok(/waiting: allow it in the dialog/.test(askAllow.who) && /is waiting for you to allow it in the dialog/.test(askAllow.banner) && !/isn't connected/.test(askAllow.banner), "…while it's open, the header and the banner both say it waits for Allow in the dialog", askAllow);
   ok(await ev(`window.__whoSeen.some((t) => t.includes('Connecting to laptop…'))`), "the header said \"Connecting to laptop…\" meanwhile", await ev(`window.__whoSeen`));
   const leg = R.legs.at(-1);
   ok(leg.data.hello?.fresh === true && leg.data.hello?.purpose === "agent" && !("remember" in leg.data.hello) && !("resume" in leg.data.hello), "the hello asks a fresh agent and remembers nothing", leg.data.hello);
@@ -272,6 +275,14 @@ try {
     ok(back.includes("?from=") && signIn?.text === "Sign in" && signIn?.href === "/auth/login?return=" + encodeURIComponent(back), `${status}: a "Sign in" link to the site's sign-in, back to this page and its query`, { signIn, back });
     await ev(`[...document.querySelectorAll('.sbag-dlg button')].find((b) => b.textContent === 'Cancel').click()`);
   }
+  // (a site without computers at all, a local one (404): no section, nothing about computers; the link field still there)
+  R.peersStatus = 404;
+  await ev(`document.querySelector('#connect').click()`);
+  await until(`[...document.querySelectorAll('.sbag-dlg button')].some((b) => b.textContent === 'Connect' && b.offsetParent)`);
+  await sleep(500);
+  const d404 = await ev(`[...document.querySelectorAll('.sbag-dlg')].at(-1)?.textContent ?? ''`);
+  ok(!/computers/i.test(d404) && /Link/.test(d404), "404 (a site without computers): no \"Your computers\" section at all, the link field still there", d404);
+  await ev(`[...document.querySelectorAll('.sbag-dlg button')].find((b) => b.textContent === 'Cancel').click()`);
   R.peersStatus = 500;
   await ev(`document.querySelector('#connect').click()`);
   ok(await until(`([...document.querySelectorAll('.sbag-dlg')].at(-1)?.textContent ?? '').includes("Your computers: this site can't list your computers (HTTP 500)")`), "another failure: its reason");

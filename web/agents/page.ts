@@ -16,11 +16,13 @@ import { runningTurn, type Artifact, type Thread, type Turn, type UserEntry } fr
 import { ChatSession } from "../workspace/agent-chat/session";
 import { userNode as viewUserNode, turnNode as viewTurnNode, artifactIcon, diffHtml } from "../workspace/agent-chat/view";
 import { startFakeTurn } from "./fake-agent";
-import { AgentError, RELOAD_KEY, type AgentPairing, type Kept } from "../workspace/agent-pair";
+import { AgentError, RELOAD_KEY, type AgentPairing, type Created, type Kept } from "../workspace/agent-pair";
 import type { NotebookEdit } from "../workspace/notebook-edit";
 import { mountAgentPairing, type RestoreState } from "../workspace/agent-ui";
+import { createdRunner } from "../workspace/agent-made";
 import { runVerbsFor } from "../workspace/run-holder";
 import { agentRunsFor } from "../workspace/agent-runs";
+import type { PageRun } from "../workspace/run-verbs";
 import { createPermissions } from "../notebook/permissions.js";
 import * as gitBranches from "../workspace/git-branch";
 import { openReviewDialog, showWhenBranches } from "../workspace/review/open-dialog";
@@ -38,6 +40,7 @@ import { threadMarkdown, turnMarkdown, userMarkdown } from "../workspace/agent-c
 
 // (the LaTeX editor, in builds that have it: web/build.ts's define)
 declare const __SB_LATEX__: boolean | undefined;
+declare const __SB_LATEX_HOSTS__: string[];
 const LATEX_URL = new URL("../sagebrush-latex.js", import.meta.url).href;
 
 const STORE = "sagebrush-agents-preview-v1";
@@ -82,9 +85,10 @@ const session = new ChatSession({
   pairing: () => pairing,
   demo: (prompt, emit) => startFakeTurn(prompt, emit, speed()),
   mayDemo: (t) => mayDemo(t),
-  emitted(thread, d) {
+  emitted(thread, d, replayed) {
     if (d.type === "artifact") {
-      openArtifact = (d as { id: string }).id;
+      // (one replayed from the agent's log after a reconnect is recorded, but never moves the pane)
+      if (!replayed) openArtifact = (d as { id: string }).id;
       // (a notebook the agent wrote: which cells, as it wrote them, for the written-by label)
       const art = d as { kind?: string; path?: string };
       if (art.kind === "notebook" && art.path && workspace) {
@@ -131,7 +135,7 @@ function submit(mode: UserEntry["mode"]) {
   scrollToEnd(true);
 }
 
-function answer(thread: Thread, attention: string, approve: boolean, turnId: string, instance: string) {
+function answer(thread: Thread, attention: string, approve: boolean | "turn", turnId: string, instance: string) {
   if (session.answer(thread, attention, approve, turnId, instance)) renderThread();
 }
 
@@ -210,7 +214,7 @@ function renderThread() {
   for (const entry of thread.entries) {
     const eid = entry.kind === "user" ? entry.id : entry.turn_id;
     seen.add(eid);
-    const key = entry.kind === "user" ? `${entry.mode}` : JSON.stringify([entry.parts, entry.tools, entry.attention, entry.state, entry.error]);
+    const key = entry.kind === "user" ? `${entry.mode}|${entry.receipt ?? ""}|${!!entry.settled}` : JSON.stringify([entry.parts, entry.tools, entry.attention, entry.state, entry.error, !!entry.away]);
     let r = rendered.get(eid);
     if (!r || r.key !== key) {
       const node = entry.kind === "user" ? userNode(entry) : turnNode(thread, entry);
@@ -402,9 +406,17 @@ const shownHost = () => hosts.get(hostKey(current().id, openArtifact ?? ""));
 async function mayLeaveThread(): Promise<boolean> {
   const from = current().id;
   if (!(await mayClosePane(from)) || current().id !== from) return false;
-  // (its hosts close first: one that can't keep its content keeps the thread)
-  return (await releaseHosts(from)) && current().id === from;
+  // (its hosts close first: one that can't keep its content keeps the thread; meanwhile the thread is being left, so
+  //  an agent's run its pane let go knows it was a switch, not a close (paneRun's `left`))
+  leavingThread = from;
+  try {
+    return (await releaseHosts(from)) && current().id === from;
+  } finally {
+    leavingThread = null;
+  }
 }
+/** The thread being left while its hosts are let go (mayLeaveThread), else null. */
+let leavingThread: string | null = null;
 
 /** Before a pane or thread closes: a running cell is stopped only if the person says so. */
 async function mayClosePane(threadId: string | null): Promise<boolean> {
@@ -574,6 +586,24 @@ function mountHost(threadId: string, a: Artifact, h: Host) {
   // (a 3D space the agent wrote, a .space.json: shown in the whitespace viewer, which follows its file)
   if (a.path && /\.space\.json$/i.test(a.path) && workspace) {
     mountSpace(a.path, h);
+    keepFocus();
+    return;
+  }
+  // (a .tex, where this host serves the LaTeX editor's page (the build's hosts, as web/latex/boot.ts's latexOn): that
+  //  page in a frame, embedded (web/latex page.ts's embed): Run, the PDF, comments and its leave guard, as on the LaTeX
+  //  page; mountTexFrame. Elsewhere (the CLI's page) the editor itself, in mountFile)
+  if (a.path && workspace && __SB_LATEX__ && __SB_LATEX_HOSTS__.includes(location.hostname) && /\.tex$/i.test(a.path)) {
+    const head = document.createElement("div"), body = document.createElement("div");
+    head.className = "file-path";
+    head.append(a.path + " ", openFull(a.path));
+    body.className = "file-body";
+    h.el.replaceChildren(head, body);
+    const f = mountTexFrame(a.path, body);
+    h.copy = f.text;
+    h.flush = f.flush;
+    h.release = f.release;
+    h.dispose = f.dispose;
+    h.download = f.download;
     keepFocus();
     return;
   }
@@ -866,8 +896,70 @@ function mountFile(a: Artifact, box: HTMLElement, saved: HTMLElement): FileHost 
   };
 }
 
+// A .tex in the pane: the LaTeX editor's own page, /?tex=<fid>&latex=1&embed=1, in a frame of this site (its page's
+// frame-ancestors 'self'): no header, Agent or pairing of its own there, the document alone by default. Made only when
+// its tab is opened (mountHost), dropped with it. The pane asks it before closing, {t: "may-close", id}, and the
+// editor's leave guard answers, its edit written or the person asked ({t: "may-close", id, ok}); only from that frame,
+// of this very origin. The file is the editor's to write: nothing here writes it.
+const TEX_CLOSE_MS = 30_000;
+function mountTexFrame(path: string, box: HTMLElement): FileHost {
+  let alive = true;
+  let frame: HTMLIFrameElement | null = null;
+  let text = "";
+  const host = document.createElement("div");
+  host.className = "tex-host";
+  box.append(host);
+  void workspace!.stat(path).then(
+    (e) => {
+      if (!alive) return;
+      if (!e || e.kind !== "file" || !e.fid) return void (host.textContent = "(not in this browser's workspace)");
+      frame = document.createElement("iframe");
+      frame.className = "tex-frame";
+      frame.title = path.split("/").pop()!;
+      frame.style.cssText = "display:block;width:100%;height:100%;border:0;background:#fff";
+      frame.src = "/?tex=" + encodeURIComponent(e.fid) + "&latex=1&embed=1";
+      host.append(frame);
+    },
+    () => alive && (host.textContent = "(not in this browser's workspace)"),
+  );
+  // (Copy: the file as read at open; the editor in the frame has the latest)
+  void workspace!.read(path).then((r) => { if (typeof r.content === "string") text = r.content; else if (r.content instanceof Uint8Array) text = new TextDecoder().decode(r.content); }, () => {});
+  const mayClose = (): Promise<boolean> => new Promise((done) => {
+    const w = frame?.contentWindow;
+    // (no editor in the frame yet: nothing typed there to keep)
+    if (!w || !frame?.contentDocument?.querySelector(".tex-page .tex-main")) return done(true);
+    const id = crypto.randomUUID();
+    const t = setTimeout(() => { removeEventListener("message", on); done(false); }, TEX_CLOSE_MS);
+    const on = (e: MessageEvent) => {
+      if (e.source !== w || e.origin !== location.origin || e.data?.t !== "may-close" || e.data.id !== id) return;
+      clearTimeout(t);
+      removeEventListener("message", on);
+      done(e.data.ok === true);
+    };
+    addEventListener("message", on);
+    w.postMessage({ t: "may-close", id }, location.origin);
+  });
+  const dispose = async () => {
+    alive = false;
+    frame?.remove();
+    frame = null;
+  };
+  let releasing: Promise<Released> | null = null;
+  return {
+    text: () => (frame?.contentDocument?.querySelector<HTMLTextAreaElement>(".tex-src")?.value ?? text),
+    flush: async () => {},
+    release: () => (releasing ??= mayClose().then(async (ok): Promise<Released> => {
+      if (!ok) return { ok: false, why: `${path}: the LaTeX editor didn't confirm it could close (its last edit isn't written yet, you chose to stay, or it didn't answer within 30 seconds).` };
+      await dispose();
+      return { ok: true };
+    }).finally(() => (releasing = null))),
+    dispose,
+    download: () => null,
+  };
+}
+
 function renderComposer() {
-  renderComposerState(isRunning(current()), queues.get(current().id)?.length ?? 0);
+  renderComposerState(isRunning(current()), queues.get(current().id)?.length ?? 0, session.isAway(current()), session.canSteer(current()));
   renderConn();
 }
 
@@ -966,7 +1058,7 @@ function renderConn() {
   for (const k of ["aria-busy", "aria-disabled"]) rememberBusy ? rb.setAttribute(k, "true") : rb.removeAttribute(k);
   $("#conn-x").hidden = !b || b.kind === "restoring";
   // Send: inert while not connected in a chat the demo may not answer, never `disabled` (C1), described by what says why
-  const send = $("#send"), off = inert(current());
+  const send = $("#send"), off = !session.canSend(current());
   hint.hidden = !(off && !b);
   if (off) {
     send.setAttribute("aria-disabled", "true");
@@ -1159,11 +1251,14 @@ async function openWorkspace(again = false): Promise<boolean> {
 await openWorkspace();
 // An agent's edit of a notebook by cell (A12 step 1): in its chat's pane, the notebook opened there first (as a write
 // opens it), then the open notebook's own edit (notebook-artifact.ts): checked whole, applied, saved once.
-async function editNotebook(e: NotebookEdit, may: () => boolean, hold?: () => Promise<() => void>): Promise<unknown> {
+async function editNotebook(e: NotebookEdit, may: () => boolean, hold?: () => Promise<() => void>, from?: string): Promise<unknown> {
   const thread = state.threads.find((t) => t.id === e.conversation);
   if (!thread) throw new AgentError("invalid", "no such chat on this page");
   const turn = runningTurn(thread);
   if (!turn) throw new AgentError("busy", "this chat has no turn running: an edit comes from a turn");
+  // (edit.turn: the turn the edit says it came from must be the running one, else nothing changes: a late edit of a
+  //  turn that ended never lands in the next turn's notebook)
+  if (from !== undefined && from !== turn.turn_id) throw new AgentError("busy", "the turn this edit came from is no longer running in this chat: nothing changed");
   // (a chat that isn't the one shown has no pane here: its notebook isn't opened over the person's view)
   if (thread.id !== current().id) throw new AgentError("busy", "the person is looking at another chat: this one's notebook isn't open, so it isn't changed (ask them to open this chat)");
   // (the authority the host checks right before the change: the pairing's grant, and THIS turn still the running one)
@@ -1215,6 +1310,50 @@ async function editNotebook(e: NotebookEdit, may: () => boolean, hold?: () => Pr
   }
   return { ok: true, inserted: r.inserted };
 }
+// An agent's run_notebook here (run-verbs.ts's inPage, as the notebook page's agentPageRun, decided Nov 18 2026): in its
+// chat's pane, the notebook opened there first as an edit opens it (shown, or mounted behind the artifact the person
+// is in), then run in that notebook cell by cell, its outputs shown and saved with it. Only for the chat shown with a
+// turn running (an agent's call comes from a turn); else null and nothing started: today's run instead.
+function paneRun(ref: string, path: string, gone: () => void, from?: { conversation: string; turnId: string }): PageRun | null {
+  // (bound as an edit is: the chat the call came from, shown, and its turn still the running one, here and at every
+  //  check of the run after (its cells, its save); a call that doesn't say them (an agent without run.context), any
+  //  other chat's call or a turn's that has ended: today's run)
+  if (!from) return null;
+  const thread = state.threads.find((t) => t.id === from.conversation);
+  if (!workspace || !thread || thread.id !== current().id || runningTurn(thread)?.turn_id !== from.turnId) return null;
+  const turnId = from.turnId;
+  const mine = () => current().id === thread.id && runningTurn(thread)?.turn_id === turnId;
+  // (the person went to another chat, the call's turn still running: before any cell, today's run, not a stop)
+  const left = () => (current().id !== thread.id || leavingThread === thread.id) && runningTurn(thread)?.turn_id === turnId;
+  // (a pane that can't run it, known now: today's run, and nothing added or shown)
+  if (hosts.get(hostKey(thread.id, path))?.nb?.canRun(ref) === false) return null;
+  const shownOther = document.body.classList.contains("has-artifact") && openArtifact !== null && openArtifact !== path;
+  const keep = openArtifact;
+  if (!thread.artifacts.some((a) => a.id === path && a.kind === "notebook")) session.emit(thread, turnId, { type: "artifact", id: path, kind: "notebook", title: path.split("/").pop()!, path, body: "run by the agent" });
+  const art = thread.artifacts.find((a) => a.id === path && a.kind === "notebook");
+  if (!art) return null;
+  // (the artifact just added doesn't take the pane from the one the person is in: it stays, this one behind it)
+  if (shownOther) {
+    openArtifact = keep;
+    hiddenHost(thread.id, art);
+  }
+  else {
+    openArtifact = path;
+    renderArtifacts();
+  }
+  const h = hosts.get(hostKey(thread.id, path));
+  if (!h?.nb) return null;
+  // (behind another tab: its tab says it changed, until it is shown)
+  if (shownHost() !== h) {
+    h.changed = true;
+    headKey = "";
+    renderArtifacts();
+  }
+  const pr = h.nb.pageRun(ref, path, gone, mine, left);
+  // (tests only, on a loopback page: the run held at "mount", before the pane's notebook is read)
+  const hold = /^(localhost|127\.0\.0\.1)$/.test(location.hostname) && typeof (window as any).__runHold === "function" ? (window as any).__runHold : null;
+  return hold ? { ...pr, inputs: async () => { await hold("mount"); return pr.inputs(); } } : pr;
+}
 /** An artifact's host made without showing it (its notebook live, hidden): for an agent's edit behind another tab. */
 function hiddenHost(threadId: string, a: Artifact) {
   const key = hostKey(threadId, a.id);
@@ -1244,6 +1383,48 @@ const chatHereSection = chatHere({
   onFailed(r, e) { connectingTo = null; waitingFor = false; setConn(runnerBar(r.name, e)); renderHeader(); },
 }, () => agentUi);
 
+// A notebook the agent created (the pairing's onCreated): taken at once, as it is created, into the pane of the chat
+// whose turn made it (its artifact), then run there once by itself under the notebook page's rule
+// (workspace/agent-made.ts): the pairing that created it, its grant still in force with May run code and Everything,
+// still as created, and shown when the run is admitted. The turn may end meanwhile (a create as an agent's last step):
+// what is asked of it is only that it made the notebook, at creation.
+type MadeAt = { thread: string } | null;
+// (the person in another artifact: the one shown is the one they last used in the pane (focused, pointed at, typed in);
+//  an artifact of the agent's own left shown, untouched, is no reason to keep the pane there)
+let personIn: string | null = null;
+for (const t of ["focusin", "pointerdown", "keydown", "input"]) $("#artifacts").addEventListener(t, () => { personIn = openArtifact; }, true);
+const paneShowsOther = (path: string) => document.body.classList.contains("has-artifact") && openArtifact !== null && openArtifact !== path
+  && (personIn === openArtifact || (!!document.activeElement && $("#artifacts").contains(document.activeElement)));
+function madeAt(c: Created, p: { mayRunCreated(c: Created): boolean }): MadeAt {
+  // (only a notebook that may run by itself is taken into the pane here; any other is the agent's own to show)
+  if (!p.mayRunCreated(c)) return null;
+  const thread = current();
+  const turn = runningTurn(thread);
+  // (a chat that isn't the one shown, or no turn running: no pane to open it in, so it isn't run; the person in another
+  //  artifact: the pane stays there (board's BA12-1), so it isn't shown, nor run)
+  if (!turn || !workspace || paneShowsOther(c.path)) return null;
+  if (!thread.artifacts.some((a) => a.id === c.path && a.kind === "notebook")) session.emit(thread, turn.turn_id, { type: "artifact", id: c.path, kind: "notebook", title: c.path.split("/").pop()!, path: c.path, body: "notebook" });
+  // (shown now, at its creation, as the agent's own artifact shows it; nothing later switches the pane to it)
+  openArtifact = c.path;
+  renderArtifacts();
+  return { thread: thread.id };
+}
+const agentMade = createdRunner<MadeAt>({
+  read: (path) => (workspace ? workspace.read(path) : Promise.resolve(null)),
+  async open(c, at) {
+    // (still the chat it was made in, and still the artifact shown: the pane moved since (the person, or the agent's next
+    //  artifact) is never moved back)
+    if (!at || current().id !== at.thread || openArtifact !== c.path) return false;
+    const h = hosts.get(hostKey(at.thread, c.path));
+    if (!h?.nb) return false;
+    await h.nb.ready;
+    return true;
+  },
+  runIfShown: (ref, ok) => !!shownHost()?.nb?.runCreated(ref, ok),
+  // (the tests' hold, loopback pages only: between the open and the admission, test-agents-artifacts.mjs)
+  ...(/^(127\.0\.0\.1|localhost)$/.test(location.hostname) ? { holdRun: (path: string) => (typeof (window as any).__agentRunHold === "function" ? (window as any).__agentRunHold(path) : undefined) } : {}),
+});
+
 // (an agent's runs of code here, as on the notebook page (workspace/agent-runs.ts): latex_build, run_notebook, run_file
 //  and run_stop under the grant, in the sandboxed runner only, which this page has where it is cross-origin isolated;
 //  the interpreter's classes come with the run's chunk, from the notebook's module)
@@ -1254,15 +1435,21 @@ const agentRuns = (ws: Workspace) => agentRunsFor(ws as any, {
   sandbox: globalThis.crossOriginIsolated === true && !!globalThis.navigator && !(window as any).__TAURI__ && !(window as any).__SAGEBRUSH_LOCAL__ ? "ok" : "none",
   perms: createPermissions(),
   chunks: { run: "sagebrush-agent-run.js", ...(__SB_LATEX__ ? { latex: ["sagebrush-latex.js", "sagebrush-latex-tools.js", "sagebrush-latex-run.js"] as [string, string, string] } : {}) },
-  more: () => (/^(localhost|127\.0\.0\.1)$/.test(location.hostname) && typeof (window as any).__runHold === "function" ? { hold: (st: string) => (window as any).__runHold(st) } : {}),
+  // (run_notebook in the pane's notebook: paneRun)
+  more: () => ({ inPage: paneRun, ...(/^(localhost|127\.0\.0\.1)$/.test(location.hostname) && typeof (window as any).__runHold === "function" ? { hold: (st: string) => (window as any).__runHold(st) } : {}) }),
 });
 
+// (the current pairing's listener for the agent's messages, removed when another pairing replaces it)
+let offAgent: (() => void) | null = null;
 function mountPairing(ws: Workspace) {
   agentUi = mountAgentPairing(ws, {
     program: "sagebrush-agent",
     runVerbs: runVerbsFor(agentRuns(ws)),
     button: $("#connect"),
     notebookEdit: editNotebook,
+    // (the chat's web cards offer "for this turn" here, where they're drawn: egress.turn)
+    egressTurn: true,
+    onCreated: (c, p) => { if (c.kind === "notebook" && c.ref) void agentMade(c, p, madeAt(c, p)); },
     // (an agent's own branch, chat plan PR 3: offered here, where agents work)
     branches: gitBranches,
     reload: {
@@ -1278,7 +1465,10 @@ function mountPairing(ws: Workspace) {
     onPairing(p) {
       pairing = p;
       cards.clear();
-      p.onNotification((m, params) => session.onAgent(m, params));
+      // (only while this pairing is the page's: a late message from one it replaced changes nothing; the replaced
+      //  one's listener goes too)
+      offAgent?.();
+      offAgent = p.onNotification((m, params) => { if (pairing === p) session.onAgent(m, params, p); });
       let granted = false;
       p.onChange(() => {
         cards.refresh(); // (a pairing that closed or changed child: Allows waiting for a digest for it go)
@@ -1292,6 +1482,8 @@ function mountPairing(ws: Workspace) {
         if (p.state === "paired" || p.state === "granted") connectedHere = true;
         if (p.state === "granted" && !granted) {
           granted = true;
+          // (what this page missed while it was away, from the agent's log; an agent without one: away turns end)
+          session.resume();
           if (connBar) setConn(null);
           if (connectFrom) {
             connectFrom = null;
@@ -1310,8 +1502,9 @@ function mountPairing(ws: Workspace) {
           else setConn({ kind: "lost", alert: true, action: agentUi?.canReconnect ? "reconnect" : "connect" });
         }
         if (p.state === "closed" && pairing === p) {
-          // (turns the agent can no longer finish end here, as interrupted)
-          session.endLive();
+          // (with an agent that keeps a log, its running turns are away until the page is paired again; else they end
+          //  here, as interrupted)
+          session.endLive(!!p.hello?.features?.includes("chat.resume"));
         }
         renderHeader();
         renderComposer();
@@ -1371,7 +1564,7 @@ function renderHeader() {
   } else if (connectingTo !== null) {
     whoText(who, "wait", "", waitingFor ? RUNNER.waiting(connectingTo) : RUNNER.connecting(connectingTo));
   } else if (pairing && pairing.state === "paired") {
-    who.innerHTML = `<span class="conn wait"></span>${esc(agentName())} <small>connected: allow it in the dialog</small>`;
+    whoText(who, "wait", agentName(), "waiting: allow it in the dialog");
   } else if (inert(current())) {
     who.innerHTML = `<span class="conn"></span>Claude <small>not connected</small>`;
   } else {
@@ -1385,6 +1578,8 @@ function renderHeader() {
     ? `Connected to ${esc(agentName())} on your computer (your own login). Its files are in this browser's workspace; chats are kept in this browser.`
     : connBar?.kind === "restoring"
     ? "Reconnecting to Claude on your computer…"
+    : pairing && pairing.state === "paired" && connectingTo === null
+    ? `${esc(agentName())} is waiting for you to allow it in the dialog. Chats are kept in this browser only.`
     : inert(current())
     ? "Claude isn't connected to this page. Chats are kept in this browser only."
     : "Preview: the chat is driven by a <b>scripted</b> stand-in for Claude until you connect your own (\"Use your own Claude\"). Chats are kept in this browser only.";
