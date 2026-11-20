@@ -568,6 +568,7 @@ function showOverlay(nd) {
   if (runnable(nd)) mountRunner(nd);
   typeset($("#overlay"));
   $("#overlay").hidden = false;
+  document.body.classList.add("reading");
   $("#overlay").scrollTop = 0;
   viewOffset();
   $("#overlay .close").onclick = closeOverlay;
@@ -584,7 +585,7 @@ function typeset(el) {
   mathModule.then((m) => m.typeset(el)).catch(() => {});
 }
 const isBase64 = (s) => typeof s === "string" && /^[A-Za-z0-9+/]*={0,2}$/.test(s);
-function closeOverlay() { $("#overlay").hidden = true; viewOffset(); if (space) setSelected(null); }
+function closeOverlay() { $("#overlay").hidden = true; document.body.classList.remove("reading"); viewOffset(); if (space) setSelected(null); }
 // (while the overlay covers the right of the screen, the view is shifted so what it is about stays in the free part)
 function viewOffset() {
   const w = $("#overlay").hidden ? 0 : $("#overlay").getBoundingClientRect().width + 12;
@@ -707,17 +708,27 @@ function liveHtml(r) {
   return h || `<p class="hint">running…</p>`;
 }
 
-// what was edited and run here, kept in this browser per space and object (an agent edits the file itself)
-const KEEP = ["text", "lang", "output", "outputError", "svg", "png", "scene"];
+// what was edited and run here, kept in this browser per space and object (an agent edits the file itself). Each copy
+// names the file's text it was made from (`base`): once the file says something else (the agent wrote it again),
+// the file wins and the copy is dropped. The code itself is kept only if it was really edited here.
+const KEEP = ["lang", "output", "outputError", "svg", "png", "scene"];
 const keyOf = (nd) => `whitespace:${$("#space").value}:${nd.id}`;
+const fileText = (nd) => (nd._file ? nd._file.text : String(nd.text ?? ""));
 function save(nd) {
-  try { localStorage.setItem(keyOf(nd), JSON.stringify(Object.fromEntries(KEEP.map((k) => [k, nd[k] ?? null])))); } catch {}
+  const edited = String(nd.text ?? "") !== fileText(nd);
+  const v = { base: fileText(nd), text: edited ? nd.text : null, ...Object.fromEntries(KEEP.map((k) => [k, nd[k] ?? null])) };
+  try { localStorage.setItem(keyOf(nd), JSON.stringify(v)); } catch {}
 }
 function restore(nodes) {
   for (const nd of nodes) {
+    nd._file = { text: String(nd.text ?? "") };
     try {
-      const v = JSON.parse(localStorage.getItem(keyOf(nd)) ?? "null");
-      if (v) for (const k of KEEP) if (v[k] !== null && v[k] !== undefined) nd[k] = v[k];
+      const key = keyOf(nd), v = JSON.parse(localStorage.getItem(key) ?? "null");
+      if (!v) continue;
+      // (a copy from before `base` was kept: its text stands in for it, so an old copy of other code is dropped too)
+      if ((v.base ?? v.text) !== nd._file.text) { localStorage.removeItem(key); continue; }
+      if (typeof v.text === "string" && v.text !== nd._file.text) nd.text = v.text;
+      for (const k of KEEP) if (v[k] !== null && v[k] !== undefined) nd[k] = v[k];
     } catch {}
   }
 }

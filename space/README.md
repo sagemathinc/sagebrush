@@ -9,7 +9,7 @@ You need Node.js (18 or later) and npm. No bun is needed.
 ```sh
 git fetch origin space-prototype && git checkout space-prototype   # (or a fresh clone of the branch)
 cd space
-npm install
+npm ci
 npm run build        # bundles three.js and everything else into dist/
 npm run serve        # http://127.0.0.1:8080/
 ```
@@ -54,8 +54,9 @@ Run the whole thing on your own computer (the agent pairs with a page on 127.0.0
 ```sh
 git checkout space-prototype
 pnpm install --frozen-lockfile && node scripts/wasm-fetch.mjs   # the site's dependencies and its pinned WebAssembly
-bun web/build.ts                                                # the site, into web/dist (bun 1.4.4)
-(cd space && npm install && node build.mjs --site ../web/dist)  # the space viewer, into web/dist/space
+pnpm run build && node scripts/build-cli.mjs                    # the TypeScript (dist/) and the CLI's bundle, which the site's build needs
+bun web/build.ts                                                # the site, into web/dist (bun 1.3 or later)
+(cd space && npm ci && node build.mjs --site ../web/dist)       # the space viewer, into web/dist/space
 bun web/csp.ts                                                  # web/dist/_headers, now covering /space/
 python3 web/serve.py 8765                                       # http://127.0.0.1:8765/agents/
 ```
@@ -70,7 +71,7 @@ Open the link it prints, press Connect, and Allow. Then ask, for example:
 
 > Read the space format at https://raw.githubusercontent.com/sagemathinc/sagebrush/space-prototype/space/public/format.md (all of it, verbatim). Then make a space, /polytopes.space.json, with notes on the regular polytopes and Sage code I can run that plots the icosahedron, dodecahedron and the others in 3D.
 
-That is one web fetch (one approval). The file opens beside the chat as a space; if it shows as JSON text instead, the page was built without the space: `grep -c space-frame web/dist/agents/agents.js` says 0. Build again (the four commands above, from `bun web/build.ts` on), then reload the page and click the file's card.
+Expect two or three web-fetch approvals, all for the format: the fetch tool gives Claude a summary of the page rather than the page itself, so it often asks again. The file opens beside the chat as a space; if it shows as JSON text instead, the page was built without the space: `grep -c space-frame web/dist/agents/agents.js` says 0. Build again (the four commands above, from `bun web/build.ts` on), then reload the page and click the file's card.
 
 Over this connection Claude has the web and your Sagebrush files, not your disk, and each web fetch asks you first. So a space of a codebase on GitHub (such as "lay out the Rust code for modular forms") costs one approval per file it reads. `modular-forms.space.json` (above) is that space, already made by `gen-modular.mjs` from a checkout.
 

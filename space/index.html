@@ -68,6 +68,11 @@
   .hljs-number, .hljs-literal, .hljs-attr, .hljs-variable.language_, .hljs-symbol { color: var(--n); }
   .hljs-comment, .hljs-quote { color: var(--c); font-style: italic; }
   .hljs-params { color: var(--p); } .hljs-meta { color: var(--m); }
+  /* narrow (the agents chat's pane): an open object hides the panel and the help, so the space stays in view */
+  @media (max-width: 1000px) {
+    body.reading #panel, #help { display: none; }
+    #overlay { width: min(560px, 55vw); }
+  }
   #help { position: fixed; left: 12px; bottom: 10px; color: var(--muted); font-size: 12px; }
 </style>
 </head>

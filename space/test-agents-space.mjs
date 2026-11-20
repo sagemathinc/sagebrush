@@ -170,6 +170,24 @@ try {
   ok(false, "Run in the embedded space", String(e).slice(0, 300));
 }
 
+// ---- a Run without an edit keeps no copy of the code: the agent's next version of it is what shows (and runs)
+const kept = await ev(`(() => { const f = document.querySelector('.space-frame').contentWindow; const k = Object.keys(f.localStorage).find((k) => k.endsWith(':' + ${JSON.stringify(pick.id)})); return k ? JSON.parse(f.localStorage.getItem(k)) : null; })()`);
+ok(kept && kept.text === null && typeof kept.base === "string", "a Run without an edit keeps the output, not the code", kept && { text: kept.text, base: kept.base?.slice(0, 30) });
+// (and an edit made here, to another object, is kept through the agent's rewrite of something else)
+const other = space.nodes.find((x) => x.kind === "code" && x.id !== pick.id);
+await ev(`(() => { const W = ${W}; W.select(${JSON.stringify(other.id)}); return true; })()`);
+await until(`!!${DOC}.querySelector('#overlay:not([hidden]) textarea')`);
+await ev(`(() => { const ta = ${DOC}.querySelector('#overlay textarea'); ta.value = 'print("edited here")'; ta.dispatchEvent(new Event('input')); return true; })()`);
+const read3 = await call("workspace.read", { path });
+const text3 = typeof read3.content === "string" ? read3.content : read3.content?.text ?? JSON.stringify(read3.content);
+const third = JSON.parse(text3);
+third.nodes = third.nodes.map((x) => (x.id === pick.id ? { ...x, text: 'print("the agent\'s fix")' } : x));
+await call("workspace.write", { path, content: { text: JSON.stringify(third, null, 1) }, base: read3.rev });
+await until(`(${W}).space.nodes.find((x) => x.id === ${JSON.stringify(pick.id)}).text === 'print("the agent\\'s fix")'`, 10000).then(() => ok(true, "the agent's rewrite of an object that was run here is what the space has"), (e) => ok(false, "the agent's rewrite of an object that was run here is what the space has", String(e).slice(0, 200)));
+ok((await ev(`(${W}).space.nodes.find((x) => x.id === ${JSON.stringify(other.id)}).text`)) === 'print("edited here")', "an edit made here to another object is kept");
+await ev(`(${W}).select(${JSON.stringify(pick.id)})`);
+await until(`${DOC}.querySelector('#overlay textarea')?.value === 'print("the agent\\'s fix")'`, 5000).then(() => ok(true, "its panel shows the agent's version"), (e) => ok(false, "its panel shows the agent's version", String(e).slice(0, 200)));
+
 if (process.argv[2]) {
   await sleep(1500);
   const shot = await send("Page.captureScreenshot", { format: "png" });
