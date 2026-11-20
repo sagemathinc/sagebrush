@@ -14,6 +14,7 @@ import { mkdtempSync, rmSync, truncateSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { devtoolsPort } from "../test-port.mjs";
+import { expectedLoadError } from "./test-load-errors-lib.mjs";
 
 const docs = process.argv.slice(2).length ? process.argv.slice(2) : ["examples/primes.board.json", "examples/sagebrush.board.json", "examples/mermaid.board.json", "examples/live.board.json"];
 const base = process.env.SB_URL ?? "http://127.0.0.1:8765/";
@@ -38,10 +39,8 @@ ws.onmessage = (ev) => {
   const m = JSON.parse(ev.data);
   if (m.id && waiting.has(m.id)) { waiting.get(m.id)(m.result ?? m.error); waiting.delete(m.id); }
   if (m.method === "Runtime.exceptionThrown") errors.push(m.params.exceptionDetails?.exception?.description ?? JSON.stringify(m.params.exceptionDetails));
-  // (the site's account, /api/share/me: a server without accounts answers 404 and the top bar shows no account;
-  // that 404 only)
-  const noAccounts = (e) => /status of 404\b/.test(e.text) && (() => { try { return new URL(e.url).pathname === "/api/share/me"; } catch { return false; } })();
-  if (m.method === "Log.entryAdded" && m.params.entry.level === "error" && !/favicon/.test(m.params.entry.url ?? "") && !noAccounts(m.params.entry)) errors.push(m.params.entry.text + " " + (m.params.entry.url ?? ""));
+  // (a static host's 404 for the sync status or the site's account is expected: test-load-errors-lib.mjs)
+  if (m.method === "Log.entryAdded" && m.params.entry.level === "error" && !/favicon/.test(m.params.entry.url ?? "") && !expectedLoadError(m.params.entry)) errors.push(m.params.entry.text + " " + (m.params.entry.url ?? ""));
   if (m.method === "Network.requestWillBeSent" && !/^(data|blob|file):/.test(m.params.request.url)) requests.push(m.params.request.url);
 };
 // (a command Chrome does not answer within `ms` fails, as does an
@@ -59,6 +58,9 @@ const fails = [];
 // (each board's document as shown, and the file it was downloaded as)
 const shown = new Map(), files = new Map();
 const check = (ok, what) => { if (!ok) fails.push(what); };
+// (a file and its export again are compared without the day of export its generator line names: a run that crosses
+// midnight UTC exports them on two days, and nothing else may differ)
+const undated = (html) => html.replace(/(<meta name="generator" content="[^"]*, exported )\d{4}-\d{2}-\d{2}"/, '$1(day)"');
 try {
   for (const m of ["Page.enable", "Runtime.enable", "Log.enable", "Network.enable"]) await send(m);
   for (const doc of docs) {
@@ -128,7 +130,8 @@ try {
     await ev("document.getElementById('board-print')?.remove()");
     // exported again, from the file: the same file
     const again = await ev("window.sagebrush.board.exportHtml()");
-    check(again === html, `${doc}: exported again from the file, ${again.length} bytes, not the same ${html.length}`);
+    check(undated(html) !== html, `${doc}: the file names the day it was exported`);
+    check(undated(again) === undated(html), `${doc}: exported again from the file, ${again.length} bytes, not the same ${html.length}`);
     // (but for its engine, with code: offline, those fail)
     const engine = /\/engine\/[0-9a-f]{20}\//;
     check(!requests.filter((u) => !(s0.code && engine.test(u))).length, `${doc}: the file asked the network for ${requests.slice(0, 3).join(", ")}`);

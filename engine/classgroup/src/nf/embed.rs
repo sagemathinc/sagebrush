@@ -360,7 +360,14 @@ pub fn reduce_order(o: &Order) -> Result<Order, String> {
         row.extend((0..n).map(|k| BigInt::from((k == i) as i32)));
         row
     }).collect();
-    let red = crate::api::lll(&rows);
+    // the reduction is optional: when the LLL is refused (a resource limit),
+    // the order is kept as it is, as for a transformation that isn't
+    // unimodular; an internal error is a bug and is returned
+    let red = match crate::api::lll(&rows) {
+        Ok(red) => red,
+        Err(e) if e.starts_with(sagebrush_poly::LLL_INTERNAL_PREFIX) => return Err(e),
+        Err(_) => return Ok(o.clone()),
+    };
     let u: ZMat = red.iter().map(|r| r[n..].to_vec()).collect();
     if u.len() != n || !crate::linalg::det(&u).abs().is_one() {
         return Ok(o.clone());

@@ -38,7 +38,7 @@ done
 # (the engine is the caller's, closed: missing or unknown is a usage error, exit 2)
 # (name:engine:expected exit, judged --desktop; desktop-good also as a phone's, below)
 for f in desktop-good:chromium:0 good:chromium:1 desktop-latex-missing:chromium:1 desktop-latex-dup:chromium:1 desktop-latex-fail:chromium:1 \
-    desktop-board-missing:chromium:1 desktop-board-dup:chromium:1 desktop-board-fail:chromium:1; do
+    desktop-board-missing:chromium:1 desktop-board-dup:chromium:1 desktop-board-fail:chromium:1 desktop-files-missing:chromium:1 desktop-files-fail:chromium:1; do
   IFS=: read -r name engine want <<< "$f"
   python3 -I "$here/android-report.py" --engine "$engine" --desktop "$here/report-fixtures/$name.txt" > /dev/null 2>&1
   got=$?

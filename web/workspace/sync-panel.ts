@@ -25,6 +25,7 @@ import { listedSummary } from "./sync-view";
 import { OLD_SYNC_REASON, UNREADABLE_MESSAGE, UNREADABLE_REASON, OldSyncError } from "./sync-old";
 import { learnMore } from "../docs-link";
 import { signInUrl } from "../share-client/upload";
+import { syncConfirmDocs } from "./doc-sync-switch";
 
 export const PANEL = {
   /** the server's delay, clamped to this range */
@@ -296,7 +297,7 @@ export function syncSection(w: Workspace, into: HTMLElement, host: SectionHost, 
     const on = st.state !== "off";
     const here = owner.client !== null || v.s.state !== "off";
     if (!on || !here) {
-      sec.append(btn("Turn on sync…", () => void enable()));
+      sec.append(btn("Turn on sync…", () => void enableOnce()));
       line(on ? "Sync is on for your account, not in this browser." : "Sync your notebooks between your own devices.", "storage#sync");
     } else {
       // (the foot: its count of refused changes not yet looked at is added by the details' read, below; what sync does
@@ -385,6 +386,13 @@ export function syncSection(w: Workspace, into: HTMLElement, host: SectionHost, 
     return applied;
   }
 
+  // (one Turn on at a time: a click while one is asking (its status request, its confirm) does nothing)
+  let enabling = false;
+  async function enableOnce() {
+    if (enabling) return;
+    enabling = true;
+    try { await enable(); } finally { enabling = false; }
+  }
   async function enable() {
     const st = last?.status, bound = last?.account ?? null;
     if (!st) return;
@@ -400,7 +408,8 @@ export function syncSection(w: Workspace, into: HTMLElement, host: SectionHost, 
     // are uploaded again as they are (sync-docs' ruling (5)); said, not counted: @sagebrush's ruling (b); not beside
     // "0 data files")
     const fetched = owner.view().s.used && use.files.count > 0 ? " (files fetched from your other devices included)" : "";
-    if (!confirmFn(`Turn on sync?\n${use.files.count} data file${use.files.count === 1 ? "" : "s"} (${fmt(use.files.bytes)}) will be uploaded${fetched}. Your notebooks and boards are listed; their contents sync in a later step.${lim}${warn}`)) return;
+    const docs = await syncConfirmDocs(location.origin, f);
+    if (!confirmFn(`Turn on sync?\n${use.files.count} data file${use.files.count === 1 ? "" : "s"} (${fmt(use.files.bytes)}) will be uploaded${fetched}. ${docs}${lim}${warn}`)) return;
     // (without the server's precondition: the account read again just before, and the enable not sent if it moved)
     if (!supported) {
       const again = await askStatus(f, new AbortController().signal);
@@ -541,8 +550,10 @@ export function syncSection(w: Workspace, into: HTMLElement, host: SectionHost, 
 
 /** The Files sidebar's sync line ("" hides it): the foot's words while sync is on (with the notebooks', `nb`: readNotebooks); once sync was used here and is
  * off, "Sync off" (and why: "Sync off: your synced data was deleted"); never used here, nothing. */
-export function sidebarLine(s: { state: string; waiting?: number; reason?: string; message?: string; used?: boolean; lastSynced?: number; full?: boolean }, now = Date.now(), nb?: Notebooks): string {
+export function sidebarLine(s: { state: string; waiting?: number; unsent?: number; unsentMore?: boolean; reason?: string; message?: string; used?: boolean; lastSynced?: number; full?: boolean }, now = Date.now(), nb?: Notebooks): string {
   if (s.state !== "off") return foot(s, now, 0, nb);
+  // (sync on here but not running now: what hasn't gone up is said, never nothing)
+  if (hasUnsent(s)) return unsentWords(s);
   // (the server's own sentence when it gave one, else the reason in the table's words)
   if (s.message) return s.message;
   return s.reason ? `Sync off: ${reasonWords(s.reason).text}` : s.used ? "Sync off" : "";
@@ -558,7 +569,7 @@ export type Notebooks = { waiting: number; stopped: number; unknown?: boolean };
 /** The foot's words for a snapshot (r2 §2.3); while sync is on, the notebooks' (`nb`: edits waiting, said while
  * offline or syncing, and those that can't sync), and how many changes the server refused that nobody has looked at
  * yet, pointing to their list (the panel's "changes the server refused", below the foot). */
-export function foot(s: { state: string; waiting?: number; reason?: string; lastSynced?: number; full?: boolean }, now = Date.now(), refused = 0, nb?: Notebooks): string {
+export function foot(s: { state: string; waiting?: number; unsent?: number; unsentMore?: boolean; reason?: string; lastSynced?: number; full?: boolean }, now = Date.now(), refused = 0, nb?: Notebooks): string {
   let base = footOf(s, now, nb);
   if (s.state === "off" || base === "Sync off") return base;
   const k = nb?.stopped ?? 0;
@@ -574,15 +585,26 @@ function waitingWords(n: number, nb?: Notebooks): string {
   else if ((nb?.waiting ?? 0) > 0) parts.push(`edits in ${nb!.waiting} notebook${nb!.waiting === 1 ? "" : "s"}`);
   return parts.join(" and ");
 }
-function footOf(s: { state: string; waiting?: number; reason?: string; lastSynced?: number; full?: boolean }, now: number, nb?: Notebooks): string {
-  const n = s.waiting ?? 0;
+const hasUnsent = (s: { unsent?: number; unsentMore?: boolean }) => (s.unsent ?? 0) > 0 || !!s.unsentMore;
+/** This browser's changes not sent, in words ("3 changes not sent"; "1,000 or more changes not sent"; not all read
+ * yet, none found so far: "some changes not sent"). */
+export function unsentWords(s: { unsent?: number; unsentMore?: boolean }): string {
+  const u = s.unsent ?? 0;
+  if (s.unsentMore && u === 0) return "some changes not sent";
+  return s.unsentMore ? `${u.toLocaleString("en-US")} or more changes not sent` : `${u.toLocaleString("en-US")} change${u === 1 ? "" : "s"} not sent`;
+}
+function footOf(s: { state: string; waiting?: number; unsent?: number; unsentMore?: boolean; reason?: string; lastSynced?: number; full?: boolean }, now: number, nb?: Notebooks): string {
+  // (what hasn't gone up: the client's waiting records, or this browser's count of changes not sent, the larger)
+  const u = s.unsent ?? 0, n = Math.max(s.waiting ?? 0, u);
+  const notSent = hasUnsent(s) ? ` · ${unsentWords(s)}` : "";
   if (s.full) return "too many changes waiting to sync";
   switch (s.state) {
-    case "synced": return s.lastSynced ? `Synced · ${ago(now - s.lastSynced)}` : "Synced";
+    // (never "Synced" while a change of this browser hasn't gone up)
+    case "synced": return hasUnsent(s) ? unsentWords(s) : s.lastSynced ? `Synced · ${ago(now - s.lastSynced)}` : "Synced";
     case "syncing": return `Syncing ${waitingWords(n, nb) || `${n} changes`}…`;
     case "offline": return `Offline: ${waitingWords(n, nb) || `${n} changes`} wait`;
-    case "paused": return `Paused: ${s.reason ?? "waiting"}`;
-    case "connecting": case "waiting": return "Connecting…";
+    case "paused": return `Paused: ${s.reason ?? "waiting"}${notSent}`;
+    case "connecting": case "waiting": return `Connecting…${notSent}`;
     default: return "Sync off";
   }
 }

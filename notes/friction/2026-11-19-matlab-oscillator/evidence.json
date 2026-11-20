@@ -1,0 +1,109 @@
+{
+  "sagebrush-initial": {
+    "command": [
+      "BASELINE_RUNTIME/npm/node_modules/.bin/sagebrush",
+      "--matlab",
+      "2026-11-19-matlab-oscillator/oscillator.m"
+    ],
+    "returncode": 1,
+    "stdout": "",
+    "stderr": "Unrecognized function or variable 'jsonencode'. jsonencode is not in Sagebrush; instead: Python mode's json.dumps.\n\nError in oscillator (line 18)\ndisp(jsonencode(result));\n",
+    "seconds": 3.356861381966155
+  },
+  "octave-initial": {
+    "command": [
+      "octave",
+      "--quiet",
+      "--no-gui",
+      "2026-11-19-matlab-oscillator/oscillator.m"
+    ],
+    "returncode": 0,
+    "stdout": "{\"parameters\":[1.7005224061751754,0.18007675071455837,2.300015511644691,0.39993276814286596],\"sse\":0.00024030690410417567,\"exitflag\":1,\"ode_error\":5.168821037848659e-9,\"samples\":121}\n",
+    "stderr": "",
+    "seconds": 0.6363423849688843
+  },
+  "sagebrush-portable": {
+    "command": [
+      "BASELINE_RUNTIME/npm/node_modules/.bin/sagebrush",
+      "--matlab",
+      "2026-11-19-matlab-oscillator/oscillator-portable.m"
+    ],
+    "returncode": 0,
+    "stdout": "{\"parameters\":[1.700522407263162,0.180076750994714,2.300015511880242,0.3999327681793247],\"sse\":0.0002403069041041797,\"exitflag\":1,\"ode_error\":8.238834170448683e-09,\"samples\":121}\n",
+    "stderr": ""
+  },
+  "octave-portable": {
+    "command": [
+      "octave",
+      "--quiet",
+      "--no-gui",
+      "2026-11-19-matlab-oscillator/oscillator-portable.m"
+    ],
+    "returncode": 0,
+    "stdout": "{\"parameters\":[1.700522406175175,0.1800767507145584,2.300015511644691,0.3999327681428659],\"sse\":0.0002403069041041757,\"exitflag\":1,\"ode_error\":5.168821037848659e-09,\"samples\":121}\n",
+    "stderr": ""
+  },
+  "error-dimension-sagebrush": {
+    "code": "A=[1 2;3 4]; b=[1;2;3]; x=A\\b;",
+    "returncode": 1,
+    "stdout": "",
+    "stderr": "Matrix dimensions must agree.\n\nError in <string> (line 1)\nA=[1 2;3 4]; b=[1;2;3]; x=A\\b;\n"
+  },
+  "error-dimension-octave": {
+    "code": "A=[1 2;3 4]; b=[1;2;3]; x=A\\b;",
+    "returncode": 1,
+    "stdout": "",
+    "stderr": "error: operator \\: nonconformant arguments (op1 is 2x2, op2 is 3x1)\n"
+  },
+  "error-ode-shape-sagebrush": {
+    "code": "[t,z]=ode45(@(t,z) [z(1);z(2)], [0 1], 1);",
+    "returncode": 1,
+    "stdout": "",
+    "stderr": "Index exceeds the number of array elements. Index must not exceed 1.\n\nError in <string> (line 1)\n[t,z]=ode45(@(t,z) [z(1);z(2)], [0 1], 1);\n"
+  },
+  "error-ode-shape-octave": {
+    "code": "[t,z]=ode45(@(t,z) [z(1);z(2)], [0 1], 1);",
+    "returncode": 1,
+    "stdout": "",
+    "stderr": "error: z(2): out of bound 1 (dimensions are 1x1)\nerror: called from\n    @<anonymous>\n    starting_stepsize at line 53 column 3\n    ode45 at line 199 column 5\n"
+  },
+  "error-undefined-sagebrush": {
+    "code": "unknown_numerics_function(3);",
+    "returncode": 1,
+    "stdout": "",
+    "stderr": "Unrecognized function or variable 'unknown_numerics_function'.\n\nError in <string> (line 1)\nunknown_numerics_function(3);\n"
+  },
+  "error-undefined-octave": {
+    "code": "unknown_numerics_function(3);",
+    "returncode": 1,
+    "stdout": "",
+    "stderr": "error: 'unknown_numerics_function' undefined near line 1, column 1\n"
+  },
+  "caught-error-sagebrush": {
+    "code": "try; A=[1 2;3 4]; b=[1;2;3]; x=A\\b; catch ME; disp(class(ME)); disp(ME.identifier); disp(ME.message); end",
+    "returncode": 0,
+    "stdout": "MException\nMATLAB:dimagree\nMatrix dimensions must agree.\n",
+    "stderr": ""
+  },
+  "caught-error-octave": {
+    "code": "try; A=[1 2;3 4]; b=[1;2;3]; x=A\\b; catch ME; disp(class(ME)); disp(ME.identifier); disp(ME.message); end",
+    "returncode": 0,
+    "stdout": "struct\nOctave:nonconformant-args\noperator \\: nonconformant arguments (op1 is 2x2, op2 is 3x1)\n",
+    "stderr": ""
+  },
+  "stop-result-corrected": {
+    "loaded": true,
+    "error": "Timeout exceeded.\n<pexpect.pty_spawn.spawn object at 0x741e1bb85940>\ncommand: BASELINE_RUNTIME/npm/node_modules/.bin/sagebrush\nargs: [b'BASELINE_RUNTIME/npm/node_modules/.bin/sagebrush', b'--matlab', b'-q', b'-i', b'2026-11-19-matlab-oscillator/oscillator-portable.m']\nbuffer (last 100 chars): '\\x1b[4Gwhile true; spin = 1; end\\r\\r\\n'\nbefore (last 100 chars): '\\x1b[4Gwhile true; spin = 1; end\\r\\r\\n'\nafter: <class 'pexpect.exceptions.TIMEOUT'>\nmatch: None\nmatch_index: None\nexitstatus: None\nflag_eof: False\npid: 1500653\nchild_fd: 6\nclosed: False\ntimeout: 12\ndelimiter: <class 'pexpect.exceptions.EOF'>\nlogfile: <_io.TextIOWrapper name='BASELINE_RUNTIME/stop-transcript-corrected.txt' mode='w' encoding='UTF-8'>\nlogfile_read: None\nlogfile_send: None\nmaxread: 2000\nignorecase: False\nsearchwindowsize: None\ndelaybeforesend: 0.05\ndelayafterclose: 0.1\ndelayafterterminate: 0.1\nsearcher: searcher_re:\n    0: re.compile('>> ')"
+  },
+  "stop-final-result": {
+    "batch_alive_before_signal": true,
+    "batch_seconds": 0.06441403500502929,
+    "batch_exit": -2,
+    "batch_stdout": "STARTED\n",
+    "batch_stderr": "Traceback (most recent call last):\n  File \"<string>\", line 15, in <module>\n    _m.report(_e, _L)\n  File \"/$pyjs/lib/_matlab.py\", line 193, in report\n    raise e\nKeyboardInterrupt\n",
+    "repl_alive_before_signal": true,
+    "repl_signal_error": "Timeout exceeded.\n<pexpect.pty_spawn.spawn object at 0x7120853ba7b0>\ncommand: BASELINE_RUNTIME/npm/node_modules/.bin/sagebrush\nargs: [b'BASELINE_RUNTIME/npm/node_modules/.bin/sagebrush', b'--matlab', b'-q']\nbuffer (last 100 chars): '\\x1b[4Gwhile true; spin=1; end\\r\\r\\n'\nbefore (last 100 chars): '\\x1b[4Gwhile true; spin=1; end\\r\\r\\n'\nafter: <class 'pexpect.exceptions.TIMEOUT'>\nmatch: None\nmatch_index: None\nexitstatus: None\nflag_eof: False\npid: 1506283\nchild_fd: 6\nclosed: False\ntimeout: 8\ndelimiter: <class 'pexpect.exceptions.EOF'>\nlogfile: <_io.TextIOWrapper name='BASELINE_RUNTIME/stop-direct-transcript.txt' mode='w' encoding='UTF-8'>\nlogfile_read: None\nlogfile_send: None\nmaxread: 2000\nignorecase: False\nsearchwindowsize: None\ndelaybeforesend: 0.05\ndelayafterclose: 0.1\ndelayafterterminate: 0.1\nsearcher: searcher_re:\n    0: re.compile('>> ')"
+  },
+  "stop_keyboard_transcript": "{\"parameters\":[1.700522407263162,0.180076750994714,2.300015511880242,0.3999327681793247],\"sse\":0.0002403069041041797,\"exitflag\":1,\"ode_error\":8.238834170448683e-09,\"samples\":121}\n\u001b[1G\u001b[0J>> \u001b[4Gsentinel = 4242;\nsentinel = 4242;\n\n\u001b[1G\u001b[0J>> while true; spin = 1; end\n\u0003\u001b[4Gwhile true; spin = 1; end\n\n",
+  "stop_signal_transcript": "\u001b[1G\u001b[0J>> \u001b[4Gsentinel=4242;\nsentinel=4242;\n\n\u001b[1G\u001b[0J>> while true; spin=1; end\n\u001b[4Gwhile true; spin=1; end\n\n"
+}
