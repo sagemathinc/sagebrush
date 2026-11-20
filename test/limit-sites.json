@@ -84,6 +84,56 @@
   "owner": "engine arith (big-integer wire decoder)",
   "reason": "the decoder's and the gcd check's plumbing (bounds for the caller's reservation and work admission, the workspace, word masks); refuses nothing itself"
  },
+ "engine/arith/src/coprime.rs :: saturated_totals_keep_the_families_aligned :: assert_eq!((u.get(Family::Div), u.get(Family::Move), u.get(Family::Gcd)), (usize::MAX as u64, u64::MAX - usize::MAX as u64, 0)); #0": {
+  "class": "none",
+  "owner": "engine arith (big-integer wire decoder)",
+  "reason": "test code: the work meter's per-family accounting at saturation and overrun; refuses nothing itself"
+ },
+ "engine/arith/src/coprime.rs :: saturated_totals_keep_the_families_aligned :: assert_eq!((u.get(Family::Div), u.get(Family::Move), u.total()), (u64::MAX - 5, 5, Some(u64::MAX))); #0": {
+  "class": "none",
+  "owner": "engine arith (big-integer wire decoder)",
+  "reason": "test code: the work meter's per-family accounting at saturation and overrun; refuses nothing itself"
+ },
+ "engine/arith/src/coprime.rs :: saturated_totals_keep_the_families_aligned :: assert_eq!(m.used(), u64::MAX); #0": {
+  "class": "none",
+  "owner": "engine arith (big-integer wire decoder)",
+  "reason": "test code: the work meter's per-family accounting at saturation and overrun; refuses nothing itself"
+ },
+ "engine/arith/src/coprime.rs :: saturated_totals_keep_the_families_aligned :: assert_eq!(u.total(), Some(u64::MAX)); #0": {
+  "class": "none",
+  "owner": "engine arith (big-integer wire decoder)",
+  "reason": "test code: the work meter's per-family accounting at saturation and overrun; refuses nothing itself"
+ },
+ "engine/arith/src/coprime.rs :: saturated_totals_keep_the_families_aligned :: let mut m = Meter::accounting(u64::MAX); #0": {
+  "class": "none",
+  "owner": "engine arith (big-integer wire decoder)",
+  "reason": "test code: the work meter's per-family accounting at saturation and overrun; refuses nothing itself"
+ },
+ "engine/arith/src/coprime.rs :: saturated_totals_keep_the_families_aligned :: let mut m = Meter::accounting(u64::MAX); #1": {
+  "class": "none",
+  "owner": "engine arith (big-integer wire decoder)",
+  "reason": "test code: the work meter's per-family accounting at saturation and overrun; refuses nothing itself"
+ },
+ "engine/arith/src/coprime.rs :: saturated_totals_keep_the_families_aligned :: let mut m = Meter::new(u64::MAX); #0": {
+  "class": "none",
+  "owner": "engine arith (big-integer wire decoder)",
+  "reason": "test code: the work meter's per-family accounting at saturation and overrun; refuses nothing itself"
+ },
+ "engine/arith/src/coprime.rs :: saturated_totals_keep_the_families_aligned :: m.add_in(Family::Div, (u64::MAX - 5) as usize).unwrap(); #0": {
+  "class": "none",
+  "owner": "engine arith (big-integer wire decoder)",
+  "reason": "test code: the work meter's per-family accounting at saturation and overrun; refuses nothing itself"
+ },
+ "engine/arith/src/coprime.rs :: saturated_totals_keep_the_families_aligned :: m.add_in(Family::Div, usize::MAX).unwrap(); #0": {
+  "class": "none",
+  "owner": "engine arith (big-integer wire decoder)",
+  "reason": "test code: the work meter's per-family accounting at saturation and overrun; refuses nothing itself"
+ },
+ "engine/arith/src/coprime.rs :: saturated_totals_keep_the_families_aligned :: m.add_in(Family::Div, usize::MAX).unwrap(); #1": {
+  "class": "none",
+  "owner": "engine arith (big-integer wire decoder)",
+  "reason": "test code: the work meter's per-family accounting at saturation and overrun; refuses nothing itself"
+ },
  "engine/arith/src/coprime.rs :: unbalanced :: assert_eq!(r.is_ok(), ok, \"limit {} of {}\", limit, m.used()); #0": {
   "class": "none",
   "owner": "qpoly_scale",

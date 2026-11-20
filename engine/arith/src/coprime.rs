@@ -257,15 +257,18 @@ impl Meter {
     pub(crate) fn add_in(&mut self, f: Family, n: usize) -> Result<(), Fault> {
         let n = u64::try_from(n).map_err(|_| Fault::Overrun)?;
         self.largest = self.largest.max(n);
+        let before = self.used;
         match self.used.checked_add(n) {
             Some(u) => self.used = u,
             None if self.accounting => self.used = u64::MAX,
             None => return Err(Fault::Overrun),
         }
-        // (a family's count is at most the total, so it fits where the
-        // total did; it saturates with the total in accounting mode)
-        let fu = &mut self.units[f as usize];
-        *fu = fu.saturating_add(n);
+        // The family is charged what the total took: all of n, or, where an
+        // accounting meter's total saturates at u64::MAX, the part that
+        // fitted.  So the families always sum to the total exactly, and this
+        // sum cannot overflow (the families sum to `before` <= u64::MAX -
+        // (used - before)).
+        self.units[f as usize] += self.used - before;
         if self.used > self.limit {
             if !self.accounting {
                 return Err(Fault::Overrun);
@@ -924,6 +927,58 @@ mod tests {
         assert_eq!(m.used(), units as u64);
         assert_eq!(m.units().total(), Some(m.used()));
         assert_eq!(m.units().get(Family::Other), 0, "a remainder's work is tagged");
+    }
+
+    /// An accounting meter whose total saturates at u64::MAX charges each
+    /// family only what the total took: the families still sum to the
+    /// total, and no family saturates on its own.  (A total at u64::MAX
+    /// equals this meter's limit, so no overrun fires: debug and release
+    /// alike.  The charges are usize: 64-bit targets.)
+    #[test]
+    #[cfg(target_pointer_width = "64")]
+    fn saturated_totals_keep_the_families_aligned() {
+        let mut m = Meter::accounting(u64::MAX);
+        m.add_in(Family::Div, usize::MAX).unwrap();
+        m.add_in(Family::Move, 1).unwrap();
+        m.add_in(Family::Gcd, 7).unwrap();
+        assert_eq!(m.used(), u64::MAX);
+        let u = m.units();
+        assert_eq!(u.total(), Some(u64::MAX));
+        assert_eq!((u.get(Family::Div), u.get(Family::Move), u.get(Family::Gcd)), (usize::MAX as u64, u64::MAX - usize::MAX as u64, 0));
+        // part of a charge fits
+        let mut m = Meter::accounting(u64::MAX);
+        m.add_in(Family::Div, (u64::MAX - 5) as usize).unwrap();
+        m.add_in(Family::Move, 9).unwrap();
+        let u = m.units();
+        assert_eq!((u.get(Family::Div), u.get(Family::Move), u.total()), (u64::MAX - 5, 5, Some(u64::MAX)));
+        // a refusing meter leaves both unchanged on overflow
+        let mut m = Meter::new(u64::MAX);
+        m.add_in(Family::Div, usize::MAX).unwrap();
+        assert_eq!(m.add_in(Family::Move, 1), Err(Fault::Overrun));
+        assert_eq!(m.units().total(), Some(m.used()));
+    }
+
+    /// Passing an accounting meter's upper bound below u64::MAX: a debug
+    /// build fails at the overrun; a release build goes on, every unit
+    /// charged to its family and counted in the total.
+    #[test]
+    fn an_accounting_overrun_keeps_the_families_aligned() {
+        let before = accounting_overruns();
+        let r = std::panic::catch_unwind(|| {
+            let mut m = Meter::accounting(10);
+            m.add_in(Family::Div, 7).unwrap();
+            m.add_in(Family::Move, 5).unwrap();
+            m.add_in(Family::Gcd, 3).unwrap();
+            (m.used(), m.units())
+        });
+        assert!(accounting_overruns() > before, "the overrun is counted");
+        if cfg!(debug_assertions) {
+            assert!(r.is_err(), "a debug build fails at the overrun");
+        } else {
+            let (used, u) = r.unwrap();
+            assert_eq!((used, u.total()), (15, Some(15)));
+            assert_eq!((u.get(Family::Div), u.get(Family::Move), u.get(Family::Gcd)), (7, 5, 3));
+        }
     }
 
     /// The cofactor guard: Algorithm L's bound holds at its edges, and a
