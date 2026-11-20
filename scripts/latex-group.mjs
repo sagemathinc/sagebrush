@@ -90,7 +90,11 @@ export const LATEX_LAZY = {
 //  (+768 / +314), + 64)
 // (253,962 raw / 84,895 gzip: Nov 19 2026, the reload record on the LaTeX page with the run of a .tex the agent made,
 //  master a3f1e30b: 253,898 / 84,831 measured, + 64)
-export const LATEX_CAPS = { raw: 253962, gzip: 84895 };
+// (254,227 raw / 84,985 gzip: Nov 20 2026, a sageblock's code coloured in the preview (the page's hook for the lazy
+//  highlighting chunk, and a Magma block's marker), provisional until its SIZE ruling: 254,163 / 84,921 measured on the
+//  shipped build (bun 1.4.4, node 24.22.3) on its merge with master a9ee2bab; 253,898 / 84,831 without it, as master's
+//  CI measures (+265 / +90), + 64)
+export const LATEX_CAPS = { raw: 254227, gzip: 84985 };
 export const gz = (b) => gzipSync(b, { level: 9 }).length;
 
 // Each lazy chunk's own cap (raw, gzip), fetched only on its own use, so outside the group:
