@@ -1212,10 +1212,17 @@ async function editNotebook(e: NotebookEdit, may: () => boolean, hold?: () => Pr
 // chat's pane, the notebook opened there first as an edit opens it (shown, or mounted behind the artifact the person
 // is in), then run in that notebook cell by cell, its outputs shown and saved with it. Only for the chat shown with a
 // turn running (an agent's call comes from a turn); else null and nothing started: today's run instead.
-function paneRun(ref: string, path: string, gone: () => void): PageRun | null {
-  const thread = current();
-  if (!workspace || !runningTurn(thread)) return null;
-  const turnId = runningTurn(thread)!.turn_id;
+function paneRun(ref: string, path: string, gone: () => void, from?: { conversation: string; turnId: string }): PageRun | null {
+  // (bound as an edit is: the chat the call came from, shown, and its turn still the running one, here and at every
+  //  check of the run after (its cells, its save); a call that doesn't say them (an agent without run.context), any
+  //  other chat's call or a turn's that has ended: today's run)
+  if (!from) return null;
+  const thread = state.threads.find((t) => t.id === from.conversation);
+  if (!workspace || !thread || thread.id !== current().id || runningTurn(thread)?.turn_id !== from.turnId) return null;
+  const turnId = from.turnId;
+  const mine = () => current().id === thread.id && runningTurn(thread)?.turn_id === turnId;
+  // (a pane that can't run it, known now: today's run, and nothing added or shown)
+  if (hosts.get(hostKey(thread.id, path))?.nb?.canRun(ref) === false) return null;
   const shownOther = document.body.classList.contains("has-artifact") && openArtifact !== null && openArtifact !== path;
   const keep = openArtifact;
   if (!thread.artifacts.some((a) => a.id === path && a.kind === "notebook")) session.emit(thread, turnId, { type: "artifact", id: path, kind: "notebook", title: path.split("/").pop()!, path, body: "run by the agent" });
@@ -1238,7 +1245,7 @@ function paneRun(ref: string, path: string, gone: () => void): PageRun | null {
     headKey = "";
     renderArtifacts();
   }
-  return h.nb.pageRun(ref, path, gone);
+  return h.nb.pageRun(ref, path, gone, mine);
 }
 /** An artifact's host made without showing it (its notebook live, hidden): for an agent's edit behind another tab. */
 function hiddenHost(threadId: string, a: Artifact) {

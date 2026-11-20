@@ -58,7 +58,10 @@ export type NotebookHost = {
    * run here cell by cell as the person's Run is, their outputs shown and saved with it, while this pane is bound to
    * `ref` and may save it (attached, not closing, the writer under sync's journal). Its inputs wait for the mount;
    * `gone` is called if the pane lets the notebook go (closed, disposed) while the run holds it. */
-  pageRun(ref: string, path: string, gone: () => void): PageRun;
+  pageRun(ref: string, path: string, gone: () => void, may: () => boolean): PageRun;
+  /** Whether an agent's run of `ref` could run here now (pageRun's own condition), decided synchronously: null while the
+   * notebook is still being mounted (not known yet). */
+  canRun(ref: string): boolean | null;
   copyText(): string;
 };
 
@@ -209,6 +212,7 @@ export function mountNotebook(ws: Workspace, path: string, box: HTMLElement, ui:
   const unwatch = ws.watch(() => void check());
   // (an agent's runs in this notebook (pageRun), told when the pane lets it go)
   const pageRuns = new Set<() => void>();
+  const endRuns = () => { for (const g of [...pageRuns]) g(); pageRuns.clear(); };
   const watchRunning = new MutationObserver(() => {
     const n = nbRoot.querySelectorAll(".cell.running, .cell.queued").length;
     if ((n > 0) !== (running > 0)) ui.running(n > 0);
@@ -232,8 +236,7 @@ export function mountNotebook(ws: Workspace, path: string, box: HTMLElement, ui:
     async dispose() {
       if (!alive) return;
       unwatch();
-      for (const g of [...pageRuns]) g();
-      pageRuns.clear();
+      endRuns();
       watchRunning.disconnect();
       const comp = nb;
       alive = false;
@@ -375,10 +378,16 @@ export function mountNotebook(ws: Workspace, path: string, box: HTMLElement, ui:
       if (!keptAsShown(rec1) || !(rec1.rev > baseRev)) return { ok: false, code: "busy", why: "applied here but not saved: the store refused it" };
       return { ok: true, inserted };
     },
-    pageRun(ref, path, gone) {
+    canRun(ref) {
+      if (!alive) return false;
+      if (!nb || !attached) return docRef === null && guard === "open" && !frozen ? null : false;
+      return bound && !frozen && guard === "open" && docRef === ref && owns(nb);
+    },
+    pageRun(ref, path, gone, may) {
       let comp: Nb = null;
-      // (this pane's notebook, the one the run started in, still bound to `ref` and saving here)
-      const here = () => alive && !!comp && nb === comp && attached && bound && !frozen && guard === "open" && docRef === ref && owns(comp);
+      // (this pane's notebook, the one the run started in, still bound to `ref` and saving here; and the call's chat
+      //  and turn still the page's (`may`))
+      const here = () => may() && alive && !!comp && nb === comp && attached && bound && !frozen && guard === "open" && docRef === ref && owns(comp);
       let told = false;
       const tell = () => { if (!told) { told = true; pageRuns.delete(tell); gone(); } };
       pageRuns.add(tell);
@@ -421,11 +430,15 @@ export function mountNotebook(ws: Workspace, path: string, box: HTMLElement, ui:
               if (t) out.add(t.endsWith("\n") ? t : t + "\n");
             }
           }
-          const stopped = r.stopped || r.interrupted;
-          const failed = r.ok === false || c.el.classList.contains("error");
+          // (a plain notebook's run says ok or stopped; the reactive scheduler's report, whether it ran, failed or was left
+          //  stale (interrupted); either, the cell's own state, as the notebook page reads it)
+          const has = (k: string) => Array.isArray(r[k]) && r[k].includes(id);
+          const stopped = r.stopped || r.interrupted || has("stale") || has("cancelled") || (Array.isArray(r.ran) && !r.ran.includes(id) && !has("failed"));
+          const failed = r.ok === false || has("failed") || c.el.classList.contains("error");
           return { status: stopped ? ("stopped" as const) : failed ? ("error" as const) : ("ok" as const), images };
         },
-        // (saved only if the workspace's copy now has what is shown: a save can end in a refusal it only says)
+        // (saved only if the workspace's copy has the shown code cells and their outputs: a save can end in a refusal it
+        //  only says)
         save: async () => {
           if (!here()) return false;
           comp.flush();
@@ -537,6 +550,7 @@ export function mountNotebook(ws: Workspace, path: string, box: HTMLElement, ui:
     // (0) frozen first, before anything is awaited: no edit and no Run from here (ART-C2b r4), so the content kept
     // below is the content shown; if it can't be kept, it stays frozen, with Try again / Close without keeping
     freeze(comp);
+    endRuns(); // (an agent's run in it ends now: closing runs nothing more)
     // (1) what was edited is saved, while this pane may still save: CLOSE_SAVE_MS at most
     if (bound) {
       comp.flush();
@@ -696,6 +710,7 @@ export function mountNotebook(ws: Workspace, path: string, box: HTMLElement, ui:
     const gone = (why: string) => {
       if (!owned()) return;
       bound = false; // (first: the pending save detach flushes is refused)
+      endRuns(); // (an agent's run in it ends now, not when its cell does)
       comp.detach();
       comp.setReadOnly(true);
       void jstore?.release();
