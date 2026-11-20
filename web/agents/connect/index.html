@@ -74,19 +74,19 @@
   <summary><span class="icon" aria-hidden="true">💬</span><span><span class="title">Chat with Claude inside sagebrush.space</span><span class="sub">The chat in your browser, Claude running on your computer.</span></span><span class="chev" aria-hidden="true">›</span></summary>
   <div class="inside">
     <p>A small program on your computer runs Claude with your own Claude login, and you chat with it on the <a href="/agents/">Agents page</a>. It works only in the folders of your workspace that you allow.</p>
-    <div class="cmd"><pre><code>npx -y https://agents.sagebrush.cloud/agents/sagebrush-agent-0.7.5.tgz</code></pre><button class="copy" type="button" hidden>Copy</button></div>
+    <div class="cmd"><pre><code>npx -y https://agents.sagebrush.cloud/agents/sagebrush-agent-0.7.6.tgz</code></pre><button class="copy" type="button" hidden>Copy</button></div>
     <p class="then">It prints a link: open it, click Connect, and choose the folders.</p>
     <details class="more">
       <summary>Details</summary>
       <ul>
-        <li>Needs <code>sagebrush-agent</code> 0.7.5 (the download above), Node 20 or later, and Claude Code logged in once with your Claude account. It doesn't use your Claude Code settings, so it works even if your Claude Code is sandboxed.</li>
-        <li>The sha256 of that file is <code>8fb25135ad02c52cb1aacdb83e6b731164ab90e18213121eb1cda51446b2101b</code>.</li>
+        <li>Needs <code>sagebrush-agent</code> 0.7.6 (the download above), Node 20 or later, and Claude Code logged in once with your Claude account. It doesn't use your Claude Code settings, so it works even if your Claude Code is sandboxed.</li>
+        <li>The sha256 of that file is <code>f6a2cdea609ddec69d5da534b6a12434abc203dac5ee4603a17e8f51723a9eb8</code>.</li>
         <li>Open the link in Chrome or Firefox; the browser asks once whether this site may reach apps on this computer: click Allow.</li>
         <li>Claude has no shell and none of your computer's files: only the workspace folders you allowed. Your conversation goes to Anthropic.</li>
         <li>Codex: not here, only on a <a href="/remote/connect">connected computer</a>.</li>
       </ul>
       <p>On dev.sagebrush.space, the testing site:</p>
-      <pre><code>SAGEBRUSH_AGENT_PAGE=https://dev.sagebrush.space/agents/ npx -y https://agents.sagebrush.cloud/agents/sagebrush-agent-0.7.5.tgz --origin https://dev.sagebrush.space</code></pre>
+      <pre><code>SAGEBRUSH_AGENT_PAGE=https://dev.sagebrush.space/agents/ npx -y https://agents.sagebrush.cloud/agents/sagebrush-agent-0.7.6.tgz --origin https://dev.sagebrush.space</code></pre>
     </details>
   </div>
 </details>
