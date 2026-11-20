@@ -230,13 +230,26 @@ pub(crate) fn mul_word(c: &mut Coef, w: u64, m: &mut Meter) -> Result<(), DivFau
     let n = c.len;
     c.buf.grow(n + 1, n, m)?;
     m.add(n + 1)?;
-    let mut carry = 0u128;
-    for x in &mut c.buf.v[..n] {
-        let t = u128::from(*x) * u128::from(w) + carry;
-        *x = t as u64;
-        carry = t >> 64;
+    if w < SMALL {
+        // (a word below 2^32: each limb as two 32-bit halves, native u64
+        // products, never a u128 one, a library call on wasm32)
+        let mut carry = 0u64;
+        for x in &mut c.buf.v[..n] {
+            let lo = (*x & (SMALL - 1)) * w + carry;
+            let hi = (*x >> 32) * w + (lo >> 32);
+            *x = (lo & (SMALL - 1)) | (hi << 32);
+            carry = hi >> 32;
+        }
+        c.buf.v[n] = carry;
+    } else {
+        let mut carry = 0u128;
+        for x in &mut c.buf.v[..n] {
+            let t = u128::from(*x) * u128::from(w) + carry;
+            *x = t as u64;
+            carry = t >> 64;
+        }
+        c.buf.v[n] = carry as u64;
     }
-    c.buf.v[n] = carry as u64;
     c.len = crate::qpoly::norm(&c.buf.v, n + 1);
     if c.len == 0 {
         c.neg = false;
