@@ -405,9 +405,17 @@ const shownHost = () => hosts.get(hostKey(current().id, openArtifact ?? ""));
 async function mayLeaveThread(): Promise<boolean> {
   const from = current().id;
   if (!(await mayClosePane(from)) || current().id !== from) return false;
-  // (its hosts close first: one that can't keep its content keeps the thread)
-  return (await releaseHosts(from)) && current().id === from;
+  // (its hosts close first: one that can't keep its content keeps the thread; meanwhile the thread is being left, so
+  //  an agent's run its pane let go knows it was a switch, not a close (paneRun's `left`))
+  leavingThread = from;
+  try {
+    return (await releaseHosts(from)) && current().id === from;
+  } finally {
+    leavingThread = null;
+  }
 }
+/** The thread being left while its hosts are let go (mayLeaveThread), else null. */
+let leavingThread: string | null = null;
 
 /** Before a pane or thread closes: a running cell is stopped only if the person says so. */
 async function mayClosePane(threadId: string | null): Promise<boolean> {
@@ -1222,7 +1230,7 @@ function paneRun(ref: string, path: string, gone: () => void, from?: { conversat
   const turnId = from.turnId;
   const mine = () => current().id === thread.id && runningTurn(thread)?.turn_id === turnId;
   // (the person went to another chat, the call's turn still running: before any cell, today's run, not a stop)
-  const left = () => current().id !== thread.id && runningTurn(thread)?.turn_id === turnId;
+  const left = () => (current().id !== thread.id || leavingThread === thread.id) && runningTurn(thread)?.turn_id === turnId;
   // (a pane that can't run it, known now: today's run, and nothing added or shown)
   if (hosts.get(hostKey(thread.id, path))?.nb?.canRun(ref) === false) return null;
   const shownOther = document.body.classList.contains("has-artifact") && openArtifact !== null && openArtifact !== path;

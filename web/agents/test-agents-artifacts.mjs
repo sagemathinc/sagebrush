@@ -738,6 +738,9 @@ try {
     const P9b = "/notes/pr-switched-late.ipynb", P12 = "/notes/pr-turnended-mount.ipynb";
     await call("workspace.create", { path: P9b, content: docFor(P9b, [{ code: "print('SB', 9)" }]), mode: "python" });
     await call("workspace.create", { path: P12, content: docFor(P12, [{ code: "print('TM', 12)" }]), mode: "python" });
+    const P14 = "/notes/pr-held-close.ipynb", P15 = "/notes/pr-held-switch.ipynb";
+    await call("workspace.create", { path: P14, content: docFor(P14, [{ code: "print('HS', 14)" }]), mode: "python" });
+    await call("workspace.create", { path: P15, content: docFor(P15, [{ code: "print('HS', 15)" }]), mode: "python" });
     const P13 = "/notes/pr-closed-mount.ipynb";
     await call("workspace.create", { path: P13, content: docFor(P13, [{ code: "print('CM', 13)" }]), mode: "python" });
     const P10 = "/notes/pr-turnended.ipynb";
@@ -797,6 +800,35 @@ try {
     const r13 = await p13;
     const f13 = await call("workspace.read", { path: P13 });
     ok(held13 && closed13 && r13?.ended === "stopped" && unsaved(f13, "CM 13"), "PR13: the pane closed while it mounts the notebook, the chat still shown: the run ends, stopped, nothing run or saved", { held13, closed13, r13 });
+    // (PR14, PR15: held while the pane mounts; the person types in it and another tab holds the workspace, so the pane's
+    //  save waits; then they close the pane (PR14: stopped) or switch chats (PR15: today's run). Either answers at once,
+    //  not when the other tab lets go (4 s after the click here))
+    const heldSave = async (P, turn, act) => {
+      await holdAt("mount");
+      const pr = runIn(P, turn);
+      const held = await until(`window.__held === true`, 30000).catch(() => false);
+      const shown = await until(`document.querySelector('#artifacts .tab.on')?.dataset.tab === ${JSON.stringify(P)} && !!document.querySelector('${PANE} .nb-root .cell textarea')`, 30000).catch(() => false);
+      await until(`(() => { const t = document.querySelector('${PANE} .nb-root .cell textarea'); t?.focus(); return !!t && document.activeElement === t; })()`, 10000).catch(() => false);
+      await send("Input.insertText", { text: "  # mine" });
+      await lockWorkspace();
+      await release();
+      // (today's run's stages, timed: when it began (its snapshot), apart from how long it then waits on the hold)
+      await ev(`(window.__stages = [], window.__runHold = (st) => void window.__stages.push([st, Date.now()]), 1)`);
+      await sleep(800);
+      const t0 = Date.now();
+      await ev(`(window.__clickAt = Date.now(), 1)`);
+      await ev(act);
+      await ev(`(setTimeout(() => window.__release?.(), 4000), 1)`);
+      const r = await pr;
+      const ms = Date.now() - t0;
+      const began = await ev(`(() => { const s = window.__stages.find(([st]) => st === "snapshot"); return s ? s[1] - window.__clickAt : null; })()`);
+      await ev(`(window.__runHold = () => undefined, 1)`);
+      await sleep(4500);
+      return { held, shown, r, ms, began };
+    };
+    const r14 = await heldSave(P14, t9b, `document.querySelector('#close').click()`);
+    await until(`!document.body.classList.contains('has-artifact')`, 15000).catch(() => false);
+    ok(r14.held && r14.shown && r14.r?.ended === "stopped" && r14.ms < 3500 && r14.began === null, "PR14: the pane closed while its save waits on another tab's hold, the run still mounting: stopped at once, not when the hold ends", r14);
     await holdAt("mount");
     const p9 = runIn(P9, t9b);
     const held9 = await until(`window.__held === true`, 30000).catch(() => false);
@@ -822,6 +854,15 @@ try {
     const f9b = await call("workspace.read", { path: P9b });
     ok(held9b && left9b && r9b?.ended === "stopped" && unsaved(f9b, "SB 9"), "PR9b: the person switches chats after the pane read the notebook, before any cell: the run ends, stopped, nothing saved", { held9b, left9b, r9b });
     const c9 = conv;
+    // (PR15: in a chat of its own, with its own turn)
+    await converse();
+    const t15 = `t${++turnN}`;
+    event(t15, { type: "turn_started" });
+    await sleep(300);
+    const r15 = await heldSave(P15, t15, `document.querySelector('#new').click()`);
+    const f15 = await call("workspace.read", { path: P15 });
+    ok(r15.held && r15.shown && r15.r?.ended === "done" && r15.r.saved === "not saved: main" && r15.r.cells?.[0]?.out === "HS 15\n" && r15.began !== null && r15.began < 3500 && unsaved(f15, "HS 15"), "PR15: the person switches chats while the pane's save waits on another tab's hold, the run still mounting: today's run begins at once, not when the hold ends", { ...r15, f15: f15.content.json.cells[0] });
+    event(t15, { type: "turn_finished", outcome: "completed" }, conv);
     // (PR11: a notebook that asks to autorun (a reactive notebook's setting): the pane's isn't reactive, so the run is
     //  plain, each code cell once, in order, its own result; an error ends it, the cells after it not run, nothing rerun)
     await converse();
