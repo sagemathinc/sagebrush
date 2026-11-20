@@ -1191,11 +1191,49 @@ def _square(a):
     return PolynomialInexact(a._ring, r)
 
 
+# (the classes of the inexact numbers an exact polynomial lifts to, and of
+# their fields, by module and name: a module not loaded has no instances)
+_LIFT_NUMBERS = (("_sage_lang", ("RealNumber", "_RealLiteral", "_RealDigits", "_RealBig")),
+                 ("_sage_real", ("RealNumberMP", "_RealLiteralMP", "ComplexNumberMP")),
+                 ("_sage_rdf", ("RealDoubleElement", "ComplexDoubleElement")),
+                 ("_sage_matrix", ("ComplexNumber",)))
+_LIFT_FIELDS = (("_sage_lang", ("_RealField",)), ("_sage_real", ("RealField_", "ComplexField_")),
+                ("_sage_rdf", ("RealDoubleField_", "ComplexDoubleField_")), ("_sage_matrix", ("ComplexField_",)))
+
+
+def _known(t, table):
+    """Whether the class t is one of table's, by identity (no hook of t or
+    of its metaclass runs)."""
+    for mod, names in table:
+        m = _sys.modules.get(mod)
+        if m is not None:
+            d = m.__dict__
+            for name in names:
+                if d.get(name) is t:
+                    return True
+    return False
+
+
 def lift(p, other):
     """An exact polynomial p (ZZ[t], QQ[t]) as one over the field of an inexact scalar
-    other, as Sage's coercion (QQ[t] times RR(1.5) is over RR), else None."""
-    s = _scalar(other)
-    if s is None or s == "exact" or s == "I":
+    other, as Sage's coercion (QQ[t] times RR(1.5) is over RR), else None.
+
+    other is classified by the identity of its class (a Python float or
+    complex, or one of Sagebrush's real and complex number classes, its
+    parent read through that class's own method): no hook of an untrusted
+    operand runs, and a subclass is declined."""
+    t = type(other)
+    if t is float:
+        # (a Python float meets as RDF, a Python complex as CDF)
+        s = (True, False, 53)
+    elif t is complex:
+        s = (True, True, 53)
+    elif _known(t, _LIFT_NUMBERS):
+        P = t.parent(other)
+        if not _known(type(P), _LIFT_FIELDS):
+            return None
+        s = _info(P)
+    else:
         return None
     d, c, prec = s
     B = _field(d, c, prec)

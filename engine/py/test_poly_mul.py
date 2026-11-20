@@ -622,7 +622,7 @@ def qscale_checks(r):
         assert t.__rtruediv__(v) is NotImplemented
         try:
             t.quo_rem(v)
-        except ZeroDivisionError:
+        except TypeError:
             pass
         else:
             raise AssertionError("quo_rem accepted an unregistered class")
@@ -650,8 +650,10 @@ def qscale_checks(r):
     assert (gi // (t + 2)).list() == [] and ((3 * t + 5) / gi).list() == [Fraction(5, 3), 1] and t.__rfloordiv__(go) is NotImplemented
     try:
         (3 * t + 5) % go
-    except ZeroDivisionError:
+    except TypeError:
         pass
+    else:
+        raise AssertionError("% accepted an unclassified operand")
     assert inst == [], inst
     n += 1
     # (a number over a polynomial and gcd read the classified constant,
@@ -693,6 +695,105 @@ def qscale_checks(r):
     if forged is not None:
         assert t._coerce(forged) is None
     n += 1
+    # (the inexact lift (+, -, *, / by a number _coerce declines), ** and
+    # the floor operators classify the operand by the identity of its
+    # class: no hook of an unclassified operand runs.  A float subclass, a
+    # subclass of RR's number class whose parent() names RR, an instance
+    # __getattribute__ and a hostile metaclass are all declined, never
+    # read; the numbers of Sagebrush's own classes still lift)
+    seen = []
+
+    class HF(float):
+        def __getattribute__(self, name):
+            seen.append(name)
+            raise RuntimeError("instance attribute read: " + name)
+
+    class FakeRR(type(S.RR(1))):
+        def parent(self):
+            seen.append("parent")
+            return S.RR
+    for v in (HF(1.5), FakeRR(1.5), go, ho, hr):
+        for op in ("__add__", "__radd__", "__sub__", "__rsub__", "__mul__", "__rmul__", "__truediv__",
+                   "__floordiv__", "__mod__", "__divmod__", "__rfloordiv__", "__rmod__", "__rdivmod__"):
+            assert getattr(3 * t + 5, op)(v) is NotImplemented, (op, type(v))
+        for g in (lambda: (3 * t + 5) ** v, lambda: (3 * t + 5).quo_rem(v), lambda: (3 * t + 5).gcd(v)):
+            try:
+                g()
+            except TypeError:
+                pass
+            else:
+                raise AssertionError("accepted an unclassified operand")
+        n += 1
+    assert seen == [] and hooks == [] and inst == [], (seen, hooks, inst)
+    for v, field in ((1.5, "Real Double Field"), (1j, "Complex Double Field"), (S.RR(1.5), "Real Field with 53 bits of precision"),
+                     (S.CC(1, 2), "Complex Field with 53 bits of precision"), (S.RDF(1.5), "Real Double Field"),
+                     (S.RealField(100)(1.5), "Real Field with 100 bits of precision"), (S.CDF(1, 2), "Complex Double Field")):
+        for g in ((3 * t + 5) * v, v * (3 * t + 5), (3 * t + 5) + v, v - (3 * t + 5), (3 * t + 5) / v):
+            assert str(g.parent()) == "Univariate Polynomial Ring in t over " + field, (v, g.parent())
+        n += 1
+    # (a Polynomial subclass is declined as an argument, its fields never
+    # read through its own hooks; through Python's reflected methods, its
+    # own, it still divides)
+    PS = type("PS", (type(t),), {})
+    ps = PS.__new__(PS)
+    ps._ring, ps._c = Z, [1, 1]
+    assert t._coerce(ps) is None and (3 * t + 5).__floordiv__(ps) is NotImplemented
+    assert ((3 * t + 5) // ps).list() == [3] and ((3 * t + 5) % ps).list() == [2] and divmod(3 * t + 5, ps)[1].list() == [2]
+    seen2 = []
+
+    class PH(type(t)):
+        def __getattribute__(self, name):
+            seen2.append(name)
+            raise RuntimeError("instance attribute read: " + name)
+    ph = PH.__new__(PH)
+    for op in ("__add__", "__sub__", "__mul__", "__truediv__", "__floordiv__", "__mod__", "__divmod__", "__eq__"):
+        assert getattr(3 * t + 5, op)(ph) is NotImplemented, op
+    for g in (lambda: (3 * t + 5).gcd(ph), lambda: (3 * t + 5).quo_rem(ph), lambda: (3 * t + 5) ** ph):
+        try:
+            g()
+        except TypeError:
+            pass
+        else:
+            raise AssertionError("accepted a Polynomial subclass")
+    assert seen2 == [], seen2
+    n += 1
+    class IntSub2(int):
+        pass
+    # (** by an integer of any kind, a Rational with denominator 1 or an
+    # element of Z/nZ (its lift), as Sage; a float, a real number, a string,
+    # a Python Fraction or a polynomial is a TypeError, as Sage; a
+    # fractional Rational is Sage's n-th root, refused, not truncated)
+    sx = S.var("sx")
+    for e, want in ((2, [25, 30, 9]), (S.ZZ(2), [25, 30, 9]), (QQ(2), [25, 30, 9]), (True, [5, 3]), (0, [1]), (IntSub2(2), [25, 30, 9]),
+                    (S.Zmod(7)(2), [25, 30, 9]), (S.GF(5)(2), [25, 30, 9]), (S.SR(2), [25, 30, 9]), (S.SR(2.0), [25, 30, 9]), (sx / sx, [5, 3]),
+                    (S.SR(4) / S.SR(2), [25, 30, 9])):
+        assert ((3 * t + 5) ** e).list() == want, (e, want)
+        n += 1
+    for e, err in ((1.5, TypeError), (2.0, TypeError), (S.RR(2), TypeError), ("2", TypeError), (Fraction(4, 2), TypeError), (t, TypeError),
+                   (S.SR(h), TypeError), (S.SR(1.5), TypeError), (sx, TypeError), (S.pi, TypeError), (h, NotImplementedError), (QQ(3) / 2, NotImplementedError)):
+        try:
+            (3 * t + 5) ** e
+        except err:
+            pass
+        else:
+            raise AssertionError("** accepted %r" % (e,))
+        n += 1
+    # (a fractional power of the constants 0, 1 and -1, as Sage: the q-th
+    # root to the p; 0 to a negative power and an even root of -1 are
+    # Sage's errors)
+    for base, e, want in ((Z(1), h, [1]), (Z(1), -h, [1]), (Z(0), QQ(3) / 2, []), (Z(-1), QQ(1) / 3, [-1]), (Z(-1), QQ(-1) / 3, [-1]),
+                          (Z(-1), QQ(2) / 3, [1]), (T(1), QQ(5) / 3, [1])):
+        g = base ** e
+        assert g.list() == want and str(g.parent()) == str(base.parent()), (base, e, g)
+        n += 1
+    for base, e, err, text in ((Z(0), -h, ZeroDivisionError, "negative exponent in power of zero"), (Z(-1), h, ValueError, "cannot take even root of negative number")):
+        try:
+            base ** e
+        except err as ex:
+            assert str(ex) == text, ex
+        else:
+            raise AssertionError("accepted")
+        n += 1
     # (other int subclasses: IntEnum; a Rational % or divmod by zero is
     # Sage's ZeroDivisionError, by a nonzero polynomial a TypeError)
     import enum
