@@ -39,8 +39,9 @@ const checked = (src, vals = []) => {
 }
 // ---- \magma's argument: the \py form of refusals; an unterminated block's text names its own environment
 {
-  const cs = S(doc("A \\magma{\\foo + 1}."))[0], par = S(doc("A \\magma{1 +\n\n2}."))[0], un = S(doc("\\begin{magmablock}\nx := 1;"))[0];
-  check("refusal: a TeX command inside \\magma{}", whyRejected(cs) === "this preview supports only plain Magma expressions inside \\magma{}: \\foo is a TeX command: not run", whyRejected(cs));
+  const cs = S(doc("A \\m.", "\\newcommand{\\m}{\\magma{\\foo + 1}}\n"))[0], own = S(doc("A \\magma{A \\ B}."))[0], par = S(doc("A \\magma{1 +\n\n2}."))[0], un = S(doc("\\begin{magmablock}\nx := 1;"))[0];
+  check("refusal: a TeX command inside \\magma{} that a macro made", whyRejected(cs) === "this preview supports only plain Magma expressions inside \\magma{}: \\foo is a TeX command: not run", whyRejected(cs));
+  check("\\magma{} read from the file: its source, a backslash (Magma's set difference) and all", own.code === "A \\ B" && !own.err, own);
   check("refusal: a blank line inside \\magma{} (the % is TeX's, so \\py's words)", whyRejected(par) === "the argument runs past a blank line (a % starts a comment in TeX): not run", whyRejected(par));
   check("refusal: an unterminated magmablock says no \\end{magmablock}", whyRejected(un) === "no \\end{magmablock}: not run", whyRejected(un));
 }

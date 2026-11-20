@@ -15,9 +15,12 @@ attackers:
     python engine/py/test_pairing.py
 """
 import base64
+import contextlib
+import io
 import importlib.util
 import json
 import os
+import re
 import socket
 import struct
 import sys
@@ -897,25 +900,152 @@ def test_pair_link():
             p.close()
         finally:
             del os.environ[P.DEV_ORIGIN_ENV]
-    # (the tool text: the link first, the code and port by hand after it, one line)
-    text = WS.connect_text("https://sagebrush.space/board/?pair=ABC&port=7", "ABC", 7)
-    assert text.index("https://sagebrush.space/board/?pair=ABC&port=7") < text.index("Or by hand: code ABC, port 7") and "\n" not in text
+    # (the tool text: the one link, on one line, and nothing to type or find by hand)
+    text = WS.connect_text("https://sagebrush.space/board/?pair=ABC&port=7")
+    assert "https://sagebrush.space/board/?pair=ABC&port=7" in text and "\n" not in text and "by hand" not in text, text
 
 
-def test_where_to_connect_text():
-    """What the agent tells the person names the real places to connect,
-    never the "Chat, Connect an agent" that no page has."""
-    where = WS.WHERE_TO_CONNECT
-    assert "LaTeX editor's Agent button" in where and "?agents" in where, where
+def test_one_link_everywhere():
+    """Whatever the agent calls first, it gets the one link to give the person (the code and port inside it), never
+    menu directions or a code without its port (decided Nov 19 2026); workspace_connect with wait returns once the page
+    has paired and allowed, and the person's request goes on (a notebook made)."""
+    from sagebrush import mcp_server as M
     here = os.path.dirname(os.path.abspath(__file__))
-    for name in ("workspace_tools.py", "mcp_server.py", "latex_comments_tools.py"):
+    for name in ("workspace_tools.py", "mcp_server.py", "latex_comments_tools.py", "pairing.py"):
         with open(os.path.join(here, "python", "sagebrush", name), encoding="utf8") as f:
             src = f.read()
-        assert "Chat, Connect an agent" not in src and "(Connect an agent)" not in src, name
-        assert "WHERE_TO_CONNECT" in src or "connect_text" in src, name  # (mcp_server says it through WS.connect_text)
-    connect = [t for t in WS.tools() if t["name"] == "workspace_connect"][0]
-    assert where in connect["description"], connect["description"]
+        assert "WHERE_TO_CONNECT" not in src and "by hand" not in src and "⋯ menu" not in src and "Agent button" not in src, name
+    srv = M.Server(io.StringIO())
+    srv.client = {"name": "claude-code", "version": "2"}
+    link_re = re.compile(r"https://sagebrush\.space/board/\?pair=([A-Z0-9]{26})&port=([0-9]+)")
+    try:
+        with contextlib.redirect_stderr(io.StringIO()):
+            # (the person's request first, not "connect": a notebook to make)
+            content, s1, err = srv.call_tool("workspace_create", {"path": "/sin.ipynb", "content": {"json": {"cells": [{"code": "plot(sin(x^2))"}]}}})
+        text = content[0]["text"]
+        links = link_re.findall(text)
+        assert err and s1["error"]["code"] == "not_connected" and len(links) == 1 and s1["error"]["message"] == text, text
+        assert "Connect, then Allow" in text and "workspace_connect with wait" in text, text
+        code, port = links[0][0], int(links[0][1])
+        assert not re.search(r"\b%s\b" % code, link_re.sub("", text)), "the code appears only inside the link"
+        # (another tool before the person acts: the same link, not a new code)
+        with contextlib.redirect_stderr(io.StringIO()):
+            assert link_re.findall(srv.call_tool("workspace_list", {"folder": "/"})[0][0]["text"]) == links
+            c0, s0, e0 = srv.call_tool("workspace_connect", {})
+        assert not e0 and s0["result"]["link"] == "https://sagebrush.space/board/?pair=%s&port=%d" % (code, port) and link_re.findall(c0[0]["text"]) == links
+        # (a wait out of range is refused)
+        assert srv.call_tool("workspace_connect", {"wait": 121})[2] and srv.call_tool("workspace_connect", {"nope": 1})[2]
+        # (the person opens the link: their page pairs, then allows, while the agent waits in workspace_connect)
+        page, stop = FakePage(), threading.Event()
+        def person():
+            time.sleep(0.5)
+            c = Client(port)
+            assert c.hello(code)["result"]["protocol"] == 1
+            time.sleep(0.5)
+            c.send({"jsonrpc": "2.0", "method": "grant.changed", "params": {"folders": ["/"], "write": True, "run": True}})
+            serve_verbs(c, page, stop)
+        t = threading.Thread(target=person, daemon=True)
+        t.start()
+        t0 = time.monotonic()
+        cw, sw, ew = srv.call_tool("workspace_connect", {"wait": 30})
+        assert not ew and sw["result"]["paired"] and sw["result"]["granted"] and time.monotonic() - t0 < 10, (cw, sw)
+        # (and the request goes on: the notebook is made)
+        cc, sc, ec = srv.call_tool("workspace_create", {"path": "/sin.ipynb", "content": {"json": {"cells": [{"code": "plot(sin(x^2))"}]}}})
+        assert not ec and sc["result"]["entry"]["path"] == "/sin.ipynb", sc
+        stop.set()
+    finally:
+        if srv.link is not None:
+            srv.link.close()
 
+
+def test_connect_wait_first_gives_the_link():
+    """A first workspace_connect with wait doesn't wait with nothing for the person to act on: it gives the link at once."""
+    from sagebrush import mcp_server as M
+    srv = M.Server(io.StringIO())
+    try:
+        t0 = time.monotonic()
+        with contextlib.redirect_stderr(io.StringIO()):
+            c, s, e = srv.call_tool("workspace_connect", {"wait": 30})
+        assert not e and s["result"]["link"] and time.monotonic() - t0 < 2, s
+        # (with the link out, a wait does wait, and returns with it still valid when nobody came)
+        t0 = time.monotonic()
+        c2, s2, e2 = srv.call_tool("workspace_connect", {"wait": 1})
+        assert not e2 and s2["result"]["link"] == s["result"]["link"] and time.monotonic() - t0 >= 0.9, s2
+    finally:
+        if srv.link is not None:
+            srv.link.close()
+
+
+
+def _slow_pairing(M):
+    """sagebrush.pairing.Pairing made slow to construct and to start, counting both: the window two concurrent first
+    calls race in, held open, so the race happens every run without the server's lock."""
+    from sagebrush import pairing as PM
+    real = PM.Pairing
+    n = {"made": 0, "starts": 0}
+
+    class Slow(real):
+        def __init__(self, *a, **k):
+            n["made"] += 1
+            time.sleep(0.3)
+            super().__init__(*a, **k)
+
+        def start(self):
+            n["starts"] += 1
+            time.sleep(0.3)
+            return super().start()
+
+    return real, Slow, n
+
+
+def _at_once(*calls):
+    """Run the calls in threads released together; their results, in order."""
+    go, out = threading.Barrier(len(calls)), [None] * len(calls)
+    def one(i, f):
+        go.wait()
+        out[i] = f()
+    ts = [threading.Thread(target=one, args=(i, f)) for i, f in enumerate(calls)]
+    for t in ts:
+        t.start()
+    for t in ts:
+        t.join(30)
+    return out
+
+
+def test_concurrent_first_calls_one_link():
+    """MCP clients make tool calls concurrently: two first calls at once, or a first call and workspace_connect, make
+    one listener and give the same link; with a listener but no live code, two calls at once start one code."""
+    from sagebrush import mcp_server as M
+    from sagebrush import pairing as PM
+    real, Slow, n = _slow_pairing(M)
+    link_re = re.compile(r"https://sagebrush\.space/board/\?pair=[A-Z0-9]+&port=[0-9]+")
+    PM.Pairing = Slow
+    try:
+        for second in (("workspace_list", {"folder": "/"}), ("workspace_connect", {})):
+            n["made"] = n["starts"] = 0
+            srv = M.Server(io.StringIO())
+            try:
+                with contextlib.redirect_stderr(io.StringIO()):
+                    a, b = _at_once(lambda: srv.call_tool("workspace_read", {"path": "/a.txt"}),
+                                    lambda: srv.call_tool(*second))
+                la, lb = link_re.findall(a[0][0]["text"]), link_re.findall(b[0][0]["text"])
+                assert n["made"] == 1 and n["starts"] == 1 and len(la) == 1 and la == lb, (second[0], n, la, lb)
+            finally:
+                if srv.link is not None:
+                    srv.link.close()
+        # (a listener already there, its code not live: two calls at once, one start)
+        srv = M.Server(io.StringIO())
+        try:
+            srv.pairing()
+            n["made"] = n["starts"] = 0
+            with contextlib.redirect_stderr(io.StringIO()):
+                a, b = _at_once(lambda: srv.pair_link(), lambda: srv.pair_link())
+            assert n["made"] == 0 and n["starts"] == 1 and a == b and a[0], (n, a, b)
+        finally:
+            if srv.link is not None:
+                srv.link.close()
+    finally:
+        PM.Pairing = real
 
 if __name__ == "__main__":
     for name, f in list(globals().items()):

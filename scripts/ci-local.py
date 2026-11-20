@@ -40,6 +40,10 @@ Jobs only CI can run are skipped, and named in the report:
     release bucket's credentials (every job here reads wasm/ as it is);
   - webkit: it installs Playwright's WebKit with `sudo apt`. Run it with
     --webkit on a machine where that's fine.
+The long tier's own jobs (export-controls, lookalike-controls) run only with
+--long, which also gives the matrices their long-tier values (mpmath's Python
+backend, the share dialog's part 2). The long tier's steps inside other jobs
+are conditions on needs.*, so they are skipped here, as any such step is.
 
 The engine jobs come last: engine-wasm rebuilds wasm/sagebrush-engine.wasm, and
 the engine-* jobs that follow test that fresh engine, as CI's do (with
@@ -53,6 +57,7 @@ isn't its pin (a local build) refuses to start.
     python3 scripts/ci-local.py --only checks,engine-rust
     python3 scripts/ci-local.py --dry-run       # print the commands, run nothing
     python3 scripts/ci-local.py --keep-going    # don't stop at the first failing job
+    python3 scripts/ci-local.py --long          # with the long tier's jobs and matrix values
 
 It needs PyYAML (scripts/test-all.sh makes a venv with it).
 """
@@ -85,6 +90,12 @@ CI_ONLY = {
     "wasm-publish": "publishing to the release bucket: its environment's credentials",
 }
 NEEDS_SUDO = {"webkit": "installs Playwright's WebKit with sudo apt (run with --webkit)"}
+LONG_ONLY = {
+    "export-controls": "the long tier's: the export's controls, scale test and campaign check (run with --long)",
+    "lookalike-controls": "the long tier's: the lookalike report's controls (run with --long)",
+}
+# (--long: the matrices' long-tier values, scripts/ci-paths.mjs as a dispatch asking for the long tier)
+LONG = False
 # (what a fresh checkout doesn't have and the jobs build: removed before each job, as on CI)
 GENERATED = ["build/cli", "web/dist", "engine/py/dist"]
 # (GitHub-only contexts: empty in an env value here, as on a run with no such event)
@@ -120,7 +131,7 @@ def values_of(v):
     t = re.fullmatch(r"\$\{\{\s*fromJSON\(needs\.changes\.outputs\.([A-Za-z0-9_]+)\)\s*\}\}", str(v).strip())
     if not t:
         raise Unsupported(f"a matrix value that isn't a list or the changes job's output: {v}")
-    env = {**os.environ, "GITHUB_EVENT_NAME": "workflow_dispatch"}
+    env = {**os.environ, "GITHUB_EVENT_NAME": "workflow_dispatch", "CI_LONG": "true" if LONG else ""}
     out = subprocess.run(["node", os.path.join(ROOT, "scripts", "ci-paths.mjs")], env=env, cwd=ROOT,
                          capture_output=True, text=True, check=True).stdout
     for line in out.splitlines():
@@ -548,10 +559,13 @@ def main():
     ap.add_argument("--only", help="comma-separated job names")
     ap.add_argument("--skip", help="comma-separated job names")
     ap.add_argument("--webkit", action="store_true", help="also run the webkit job (sudo apt)")
+    ap.add_argument("--long", action="store_true", help="also the long tier's jobs, and its matrix values")
     ap.add_argument("--list", action="store_true")
     ap.add_argument("--dry-run", action="store_true")
     ap.add_argument("--keep-going", action="store_true")
     args = ap.parse_args()
+    global LONG
+    LONG = args.long
     wf = load()
     jobs = wf["jobs"]
     only = set(args.only.split(",")) if args.only else None
@@ -566,6 +580,8 @@ def main():
             skipped.append((n, CI_ONLY[n]))
         elif n in NEEDS_SUDO and not args.webkit:
             skipped.append((n, NEEDS_SUDO[n]))
+        elif n in LONG_ONLY and not args.long:
+            skipped.append((n, LONG_ONLY[n]))
         elif (only and n not in only) or n in skip:
             continue
         else:

@@ -11,7 +11,7 @@
 //   content stays its own until its record is decided (the server's conflict copy then comes down as any entry).
 // - Nothing is deleted that the view doesn't name gone: an entry the view no longer has is kept and listed, as a
 //   conflict copy if its path is taken.
-import type { Entry, Op, OpAfter, Workspace } from "./api";
+import type { Entry, Op, OpAfter, SyncRenamed, Workspace } from "./api";
 import { req } from "./db";
 import { TRASH, freePath, join, nameOf, parentOf, splitExt, within } from "./paths";
 import { PartialIndex, entryIn, runOp, Halt, type Store } from "./sync-overlay";
@@ -290,7 +290,7 @@ export type ViewOf = Awaited<ReturnType<Viewer["viewOf"]>>;
  * tell after the transaction), the entries forgotten (their contents dropped after it: dropContents), and the
  * paths listed.
  */
-export async function applyView(c: ViewContext, ids: Iterable<string>): Promise<{ ops: Op[]; gone: Entry[]; listed: [string, ListedWhy][] }> {
+export async function applyView(c: ViewContext, ids: Iterable<string>): Promise<{ ops: Op[]; gone: Entry[]; listed: [string, ListedWhy][]; renamed: SyncRenamed[] }> {
   const { w, tx, ns, st, meta, ev, guard, breathe, now, ops, gone, listed, entryOf, folders, folderAt, viewOf } = await viewer(c);
   // ---- the views, computed before anything changes
   type Item = { id: string; e?: Entry; v: View; intent: boolean };
@@ -367,6 +367,8 @@ export async function applyView(c: ViewContext, ids: Iterable<string>): Promise<
   queue.sort((a, b) => depth(a.to) - depth(b.to));
 
   const list = (p: string, why: ListedWhy) => listed.push([p, why]);
+  // (this device's own entries renamed by the reducer: the page told, a document retitled, after the transaction)
+  const renamed: SyncRenamed[] = [];
   let total: number | undefined;
   const inFolder = new Map<string, number>();
   const freeIn = async (p: string) => {
@@ -466,6 +468,7 @@ export async function applyView(c: ViewContext, ids: Iterable<string>): Promise<
     if (to !== old && parentOf(to) === parentOf(old) && (c.ownPlaced?.get(item.id) === old || (suffixed && !n.remote))) {
       n.renamed = { from: old, to };
       list(to, "renamed");
+      renamed.push({ kind: n.kind, ref: n.ref, ...(n.fid ? { fid: n.fid } : {}), from: old, to });
     }
     st.put(n);
     if (n.kind === "folder") folders.set(to, n);
@@ -529,7 +532,7 @@ export async function applyView(c: ViewContext, ids: Iterable<string>): Promise<
   }
 
   await noteListed(meta, ns, listed);
-  return { ops, gone, listed };
+  return { ops, gone, listed, renamed };
 }
 
 /** A data file's confirmed content on `n` (no local intent): its new SHA-256 listed, `remote` until fetched, the
