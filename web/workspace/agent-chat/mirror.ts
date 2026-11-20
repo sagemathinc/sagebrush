@@ -571,8 +571,18 @@ export function present(sec: Section): InertBlock[] {
     if (stale(n)) t.unconfirmed = true;
     return t;
   };
-  for (const g of sec.gaps) out.push({ k: "gap", n: g.first_n, first_n: g.first_n, last_n: g.last_n, unconfirmed: stale(g.first_n) });
-  for (const e of sec.entries) {
+  // (entries and gaps in position order; a gap ends the blocks it falls in, so what follows it starts afresh, drawn
+  //  after the gap line, never joined to what came before it)
+  const items: ({ gap: Section["gaps"][number]; n: number } | { e: MirrorEntry; n: number })[] = [...sec.gaps.map((gap) => ({ gap, n: gap.first_n })), ...sec.entries.map((e) => ({ e, n: e.n }))].sort((a, b) => a.n - b.n);
+  for (const it of items) {
+    if ("gap" in it) {
+      out.push({ k: "gap", n: it.gap.first_n, first_n: it.gap.first_n, last_n: it.gap.last_n, unconfirmed: stale(it.gap.first_n) });
+      turns.clear();
+      messages.clear();
+      tools.clear();
+      continue;
+    }
+    const e = it.e;
     if (e.k === "user") out.push({ k: "user", n: e.n, last_n: e.n, unconfirmed: stale(e.n), text: e.text, steer: e.steer === true });
     else if (e.k === "receipt") continue;
     else {
@@ -613,7 +623,7 @@ export function present(sec: Section): InertBlock[] {
       else if (e.k === "turn_finished") t.outcome = e.outcome;
     }
   }
-  return out.sort((a, b) => a.n - b.n);
+  return out;
 }
 
 /** A title for a mirrored conversation: its first message's first line, or a general one. */
