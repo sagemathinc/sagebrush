@@ -1,10 +1,12 @@
-// ci: web-runner order=187 runner=bun chrome
+// ci: web-browser/latex order=90 runner=bun chrome
 // The agent-flow scenarios (web/agent-flows/cases/*.mjs; the format in web/agent-flows/FORMAT.md): each case on each
 // surface it names. Every release passes all of them.
 // A case may name a known gap on a surface (gaps: { chat: "why" }): it still runs, and still fails there; the report
 // names the declared gap (it doesn't say which checks it covers), and once the case passes, says to take it out.
 //   SAGEBRUSH_LATEX_PREVIEW=test bun web/build.ts && CHROME=chromium bun web/agent-flows/test-agent-flows.mjs [--case ID] [--surface mcp|chat]
 // SHOT_DIR=dir: a screenshot at each h.shot(name).
+// (in CI with the LaTeX editor's page tests, web-browser/latex: their build is the editor's test build, which the cases with
+//  a .tex need, as above)
 import { readdirSync } from "node:fs";
 import { join } from "node:path";
 import { startSite, startChrome, runCase, SURFACES } from "./harness.mjs";
