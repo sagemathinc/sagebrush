@@ -382,7 +382,8 @@ fn rem_in_place(x: &mut [u64], nx: usize, y: &mut [u64], ny: usize, m: &mut Mete
         // x[j .. j + ny + 1] -= qh y
         let (mut borrow, mut carry) = (0u64, 0u128);
         for i in 0..ny {
-            let p = qh * u128::from(y[i]) + carry;
+            let (ph, pl) = invdiv::mul_wide(qh as u64, y[i]);
+            let p = ((u128::from(ph) << 64) | u128::from(pl)) + carry;
             carry = p >> 64;
             let (d, b1) = x[j + i].overflowing_sub(p as u64);
             let (d, b2) = d.overflowing_sub(borrow);
@@ -494,7 +495,8 @@ pub fn divexact_in_place(x: &mut [u64], nx: usize, y: &mut [u64], ny: usize, q: 
         let mut qh = qdigit(x[j + ny], x[j + ny - 1], x[j + ny - 2], y1, y2, v3)?;
         let (mut borrow, mut carry) = (0u64, 0u128);
         for i in 0..ny {
-            let p = qh * u128::from(y[i]) + carry;
+            let (ph, pl) = invdiv::mul_wide(qh as u64, y[i]);
+            let p = ((u128::from(ph) << 64) | u128::from(pl)) + carry;
             carry = p >> 64;
             let (d, b1) = x[j + i].overflowing_sub(p as u64);
             let (d, b2) = d.overflowing_sub(borrow);
@@ -577,7 +579,8 @@ pub fn divrem_in_place(x: &mut [u64], nx: usize, y: &mut [u64], ny: usize, q: &m
         let mut qh = qdigit(x[j + ny], x[j + ny - 1], x[j + ny - 2], y1, y2, v3)?;
         let (mut borrow, mut carry) = (0u64, 0u128);
         for i in 0..ny {
-            let p = qh * u128::from(y[i]) + carry;
+            let (ph, pl) = invdiv::mul_wide(qh as u64, y[i]);
+            let p = ((u128::from(ph) << 64) | u128::from(pl)) + carry;
             carry = p >> 64;
             let (d, b1) = x[j + i].overflowing_sub(p as u64);
             let (d, b2) = d.overflowing_sub(borrow);

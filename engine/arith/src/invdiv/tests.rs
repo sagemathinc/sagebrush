@@ -6,7 +6,7 @@
 //! proof allows to wrap are written wrapping, and the tests count those
 //! wraps and require them to happen.
 
-use super::{w16, w64, w8};
+use super::{mul_wide, mul_wide32, w16, w64, w8};
 
 /// A small deterministic generator (xorshift64*).
 struct Rng(u64);
@@ -204,5 +204,26 @@ fn div3by2_64() {
         if v3 < u64::MAX {
             assert!(!below(t(v3 + 1)), "(v3 + b + 1) D > b^3 - 1");
         }
+    }
+}
+
+/// The 32-bit-halves product against u128, at random and at the edges (it
+/// is the wasm32 product; native tests check it here).
+#[test]
+fn mul_wide32_is_the_product() {
+    let mut rng = Rng(99);
+    let edges = [0u64, 1, 0xffff_ffff, 1 << 32, u64::MAX, u64::MAX - 1, 1 << 63, (1 << 63) - 1];
+    let mut check = |a: u64, b: u64| {
+        let p = u128::from(a) * u128::from(b);
+        assert_eq!(mul_wide32(a, b), ((p >> 64) as u64, p as u64), "{a:x} {b:x}");
+        assert_eq!(mul_wide(a, b), ((p >> 64) as u64, p as u64));
+    };
+    for &a in &edges {
+        for &b in &edges {
+            check(a, b);
+        }
+    }
+    for _ in 0..1_000_000 {
+        check(rng.next(), rng.next());
     }
 }

@@ -24,14 +24,22 @@
 
 macro_rules! invdiv {
     ($name:ident, $L:ty, $W:ty) => {
+        invdiv!($name, $L, $W, |a: $L, b: $L| {
+            let p = (a as $W) * (b as $W);
+            ((p >> <$L>::BITS) as $L, p as $L)
+        });
+    };
+    ($name:ident, $L:ty, $W:ty, $mul:expr) => {
         pub(crate) mod $name {
+            #[allow(unused_imports)]
+            use super::*;
+
             const BITS: u32 = <$L>::BITS;
 
             /// a b as (high, low).
             #[inline]
             pub(crate) fn mul(a: $L, b: $L) -> ($L, $L) {
-                let p = (a as $W) * (b as $W);
-                ((p >> BITS) as $L, p as $L)
+                ($mul)(a, b)
             }
 
             /// v = floor((b^2 - 1) / d) - b for a normalized d: the
@@ -134,9 +142,39 @@ macro_rules! invdiv {
     };
 }
 
+/// a b as (high, low), 64 x 64 -> 128 bits.  On wasm32 a u128 product is
+/// a call to the general 128 x 128 routine (`__multi3`); there it is four
+/// 32 x 32 -> 64 products (native i64.mul) instead.  Elsewhere the u128
+/// product, which is the machine's own wide multiply.
+#[inline]
+pub(crate) fn mul_wide(a: u64, b: u64) -> (u64, u64) {
+    #[cfg(target_arch = "wasm32")]
+    {
+        mul_wide32(a, b)
+    }
+    #[cfg(not(target_arch = "wasm32"))]
+    {
+        let p = u128::from(a) * u128::from(b);
+        ((p >> 64) as u64, p as u64)
+    }
+}
+
+/// a b from four 32 x 32 -> 64 products: the middle sum is below 2^34, and
+/// the high word can't overflow (a b < 2^128).  Compiled on every target,
+/// so native tests check it against the u128 product.
+#[inline]
+#[cfg_attr(not(target_arch = "wasm32"), allow(dead_code))]
+pub(crate) fn mul_wide32(a: u64, b: u64) -> (u64, u64) {
+    const M: u64 = 0xffff_ffff;
+    let (a0, a1, b0, b1) = (a & M, a >> 32, b & M, b >> 32);
+    let (p00, p01, p10, p11) = (a0 * b0, a0 * b1, a1 * b0, a1 * b1);
+    let mid = (p00 >> 32) + (p01 & M) + (p10 & M);
+    (p11 + (p01 >> 32) + (p10 >> 32) + (mid >> 32), (p00 & M) | (mid << 32))
+}
+
 invdiv!(w8, u8, u16);
 invdiv!(w16, u16, u32);
-invdiv!(w64, u64, u128);
+invdiv!(w64, u64, u128, mul_wide);
 
 pub(crate) use w64::{div2by1, div3by2, recip, recip3};
 
