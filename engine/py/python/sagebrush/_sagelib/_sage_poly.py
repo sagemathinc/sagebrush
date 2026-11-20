@@ -1381,17 +1381,13 @@ class Polynomial:
         return g if self._ring._base is ZZ else _F(1)
 
     def _integral(self):
-        """(d, the integer coefficients of d * self)."""
-        # (a Python loop over the coefficients for gcd, content and factor:
-        # a follow-up moves it onto the engine's lcm, as products moved to
-        # qpoly_mul)
-        if all(isinstance(a, int) for a in self._c):
+        """(d, the integer coefficients of d * self): over ZZ the coefficients
+        themselves; over QQ the engine's (sagebrush.poly.qclear: d the lcm
+        of the nonzero coefficients' denominators)."""
+        if self._ring._base is ZZ:
             return 1, list(self._c)
-        from math import lcm
-        d = 1
-        for a in self._c:
-            d = lcm(d, _F(a).denominator)
-        return d, [int(_F(a) * d) for a in self._c]
+        from sagebrush import poly
+        return poly.qclear(self._c)
 
     def gcd(self, other):
         """The gcd: monic over QQ; over ZZ with positive leading coefficient

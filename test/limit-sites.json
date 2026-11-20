@@ -193,10 +193,83 @@
   "owner": "qpoly_mul",
   "reason": "qpoly_mul's derived bounds, plumbing (the meter's limit, the plan's sizes) or a test assertion: refuses nothing itself"
  },
+ "engine/arith/src/qpoly.rs :: admit_clear :: Ok(Some(PlanClear { lam, d_max: d, row, peak, limit })) #0": {
+  "class": "none",
+  "owner": "qpoly_clear",
+  "reason": "qpoly_clear's derived bounds, plumbing (the meter's limit, the plan's sizes), an internal invariant or a test assertion: refuses nothing itself"
+ },
+ "engine/arith/src/qpoly.rs :: admit_clear :: let d = f.d_max; #0": {
+  "class": "none",
+  "owner": "qpoly_clear",
+  "reason": "qpoly_clear's derived bounds, plumbing (the meter's limit, the plan's sizes), an internal invariant or a test assertion: refuses nothing itself"
+ },
+ "engine/arith/src/qpoly.rs :: admit_clear :: let limit = caps.int.work.checked_sub(r).ok_or_else(|| format!(\"the request's bytes = {} leave no work within {} ({})\", r, caps.int.work, HOW))?; #0": {
+  "class": "1+3",
+  "disposition": {
+   "1": "shared",
+   "3": {
+    "followup": "FU-B18-3"
+   }
+  },
+  "owner": "qpoly_clear",
+  "reason": "qpoly_clear's fixed caps (zmul's five, and the reply's bytes <= 64 MiB, those of qpoly_mul) and its metered lcm work within them, admitted before what they size; each refusal names the cap and the way around it"
+ },
+ "engine/arith/src/qpoly.rs :: admit_clear_b :: if work > budget { #0": {
+  "class": "1+3",
+  "disposition": {
+   "1": "shared",
+   "3": {
+    "followup": "FU-B18-3"
+   }
+  },
+  "owner": "qpoly_clear",
+  "reason": "qpoly_clear's fixed caps (zmul's five, and the reply's bytes <= 64 MiB, those of qpoly_mul) and its metered lcm work within them, admitted before what they size; each refusal names the cap and the way around it"
+ },
+ "engine/arith/src/qpoly.rs :: admit_clear_b :: let budget = caps.int.work.checked_sub(spent).ok_or_else(|| format!(\"{}: phase A's count passed its limit\", INTERNAL_PREFIX))?; #0": {
+  "class": "none",
+  "owner": "qpoly_clear",
+  "reason": "qpoly_clear's derived bounds, plumbing (the meter's limit, the plan's sizes), an internal invariant or a test assertion: refuses nothing itself"
+ },
+ "engine/arith/src/qpoly.rs :: admit_clear_b :: let scratch = sum(&[nl.checked_mul(3), f.n_max.checked_mul(2), Some(f.d_max), Some(3)]).and_then(|x| x.checked_mul(8)).ok_or_else(ovf)?; #0": {
+  "class": "none",
+  "owner": "qpoly_clear",
+  "reason": "qpoly_clear's derived bounds, plumbing (the meter's limit, the plan's sizes), an internal invariant or a test assertion: refuses nothing itself"
+ },
  "engine/arith/src/qpoly.rs :: bits :: pub limit_b: u64, #0": {
   "class": "none",
   "owner": "qpoly_mul",
   "reason": "qpoly_mul's derived bounds, plumbing (the meter's limit, the plan's sizes) or a test assertion: refuses nothing itself"
+ },
+ "engine/arith/src/qpoly.rs :: clear_lcm :: let (lam, d) = (plan.lam as usize, plan.d_max as usize); #0": {
+  "class": "none",
+  "owner": "qpoly_clear",
+  "reason": "qpoly_clear's derived bounds, plumbing (the meter's limit, the plan's sizes), an internal invariant or a test assertion: refuses nothing itself"
+ },
+ "engine/arith/src/qpoly.rs :: clear_metered :: let (lam, d) = (plan.lam as usize, plan.d_max as usize); #0": {
+  "class": "none",
+  "owner": "qpoly_clear",
+  "reason": "qpoly_clear's derived bounds, plumbing (the meter's limit, the plan's sizes), an internal invariant or a test assertion: refuses nothing itself"
+ },
+ "engine/arith/src/qpoly.rs :: clear_reply :: ClearError::Fault(Fault::Overrun, true) => format!(\"the denominators' lcm needs more than {} word operations (fewer or simpler denominators per call)\", plan.limit), #0": {
+  "class": "1+3",
+  "disposition": {
+   "1": "shared",
+   "3": {
+    "followup": "FU-B18-3"
+   }
+  },
+  "owner": "qpoly_clear",
+  "reason": "qpoly_clear's fixed caps (zmul's five, and the reply's bytes <= 64 MiB, those of qpoly_mul) and its metered lcm work within them, admitted before what they size; each refusal names the cap and the way around it"
+ },
+ "engine/arith/src/qpoly.rs :: clear_reply :: let mut m = Meter::new(plan.limit); #0": {
+  "class": "none",
+  "owner": "qpoly_clear",
+  "reason": "qpoly_clear's derived bounds, plumbing (the meter's limit, the plan's sizes), an internal invariant or a test assertion: refuses nothing itself"
+ },
+ "engine/arith/src/qpoly.rs :: clear_scratch :: let (ns, ds) = (f.n_max as usize, f.d_max as usize); #0": {
+  "class": "none",
+  "owner": "qpoly_clear",
+  "reason": "qpoly_clear's derived bounds, plumbing (the meter's limit, the plan's sizes), an internal invariant or a test assertion: refuses nothing itself"
  },
  "engine/arith/src/qpoly.rs :: emit :: let left = plan.limit_b.checked_sub(meter.used()).ok_or_else(|| format!(\"{}: the scaling passed its bound\", INTERNAL_PREFIX))?; #0": {
   "class": "none",
@@ -282,6 +355,16 @@
   "owner": "qpoly_mul",
   "reason": "qpoly_mul's derived bounds, plumbing (the meter's limit, the plan's sizes) or a test assertion: refuses nothing itself"
  },
+ "engine/arith/src/qpoly.rs :: reply :: pub d_max: u64, #0": {
+  "class": "none",
+  "owner": "qpoly_clear",
+  "reason": "qpoly_clear's derived bounds, plumbing (the meter's limit, the plan's sizes), an internal invariant or a test assertion: refuses nothing itself"
+ },
+ "engine/arith/src/qpoly.rs :: reply :: pub limit: u64, #0": {
+  "class": "none",
+  "owner": "qpoly_clear",
+  "reason": "qpoly_clear's derived bounds, plumbing (the meter's limit, the plan's sizes), an internal invariant or a test assertion: refuses nothing itself"
+ },
  "engine/arith/src/qpoly.rs :: scan :: f.d_max = f.d_max.max(ld); #0": {
   "class": "none",
   "owner": "qpoly_mul",
@@ -314,7 +397,7 @@
   "owner": "qpoly_mul",
   "reason": "qpoly_mul's fixed caps (zmul's five, and the reply's bytes <= 64 MiB) and phase A's metered lcm work within them, admitted before what they size; each refusal names the cap and the way around it"
  },
- "engine/arith/src/qpoly.rs :: scan :: let mut f = Factor { text, tokens: 0, all_zero: true, num_bits: 0, n_max: 0, d_max: 0, sd: 0, n_sum: 0, d_sum: 0, a1: 0, a2: 0 }; #0": {
+ "engine/arith/src/qpoly.rs :: scan :: let mut f = Factor { text, tokens: 0, all_zero: true, num_bits: 0, n_max: 0, d_max: 0, sd: 0, n_sum: 0, d_sum: 0, a1: 0, a2: 0, nz_tokens: 0, nz_d_sum: 0, nz_a1: 0, nz_a2: 0 }; #0": {
   "class": "none",
   "owner": "qpoly_mul",
   "reason": "qpoly_mul's derived bounds, plumbing (the meter's limit, the plan's sizes) or a test assertion: refuses nothing itself"
@@ -370,6 +453,56 @@
   "class": "none",
   "owner": "qpoly_mul",
   "reason": "qpoly_mul's derived bounds, plumbing (the meter's limit, the plan's sizes) or a test assertion: refuses nothing itself"
+ },
+ "engine/arith/src/qpoly/tests.rs :: clear_counts_within_its_forms :: assert!(m2.largest_charge() <= max_charge(plan.lam.max(nl as u64 + f.n_max + 1)).unwrap()); #0": {
+  "class": "none",
+  "owner": "qpoly_clear",
+  "reason": "qpoly_clear's derived bounds, plumbing (the meter's limit, the plan's sizes), an internal invariant or a test assertion: refuses nothing itself"
+ },
+ "engine/arith/src/qpoly/tests.rs :: clear_counts_within_its_forms :: let d = plan.d_max as usize; #0": {
+  "class": "none",
+  "owner": "qpoly_clear",
+  "reason": "qpoly_clear's derived bounds, plumbing (the meter's limit, the plan's sizes), an internal invariant or a test assertion: refuses nothing itself"
+ },
+ "engine/arith/src/qpoly/tests.rs :: clear_counts_within_its_forms :: let mut m = Meter::new(plan.limit); #0": {
+  "class": "none",
+  "owner": "qpoly_clear",
+  "reason": "qpoly_clear's derived bounds, plumbing (the meter's limit, the plan's sizes), an internal invariant or a test assertion: refuses nothing itself"
+ },
+ "engine/arith/src/qpoly/tests.rs :: clear_counts_within_its_forms :: let mut m = Meter::new(plan.limit); #1": {
+  "class": "none",
+  "owner": "qpoly_clear",
+  "reason": "qpoly_clear's derived bounds, plumbing (the meter's limit, the plan's sizes), an internal invariant or a test assertion: refuses nothing itself"
+ },
+ "engine/arith/src/qpoly/tests.rs :: clear_counts_within_its_forms :: let mut m2 = Meter::new(plan.limit); #0": {
+  "class": "none",
+  "owner": "qpoly_clear",
+  "reason": "qpoly_clear's derived bounds, plumbing (the meter's limit, the plan's sizes), an internal invariant or a test assertion: refuses nothing itself"
+ },
+ "engine/arith/src/qpoly/tests.rs :: clear_refused_by_the_lcm_meter :: assert!(m.used() > plan.limit && m.used() - plan.limit <= max_charge(plan.lam).unwrap()); #0": {
+  "class": "none",
+  "owner": "qpoly_clear",
+  "reason": "qpoly_clear's derived bounds, plumbing (the meter's limit, the plan's sizes), an internal invariant or a test assertion: refuses nothing itself"
+ },
+ "engine/arith/src/qpoly/tests.rs :: clear_refused_by_the_lcm_meter :: let mut m = Meter::new(plan.limit); #0": {
+  "class": "none",
+  "owner": "qpoly_clear",
+  "reason": "qpoly_clear's derived bounds, plumbing (the meter's limit, the plan's sizes), an internal invariant or a test assertion: refuses nothing itself"
+ },
+ "engine/arith/src/qpoly/tests.rs :: clear_reply_bound_is_exact :: let d = plan.d_max as usize; #0": {
+  "class": "none",
+  "owner": "qpoly_clear",
+  "reason": "qpoly_clear's derived bounds, plumbing (the meter's limit, the plan's sizes), an internal invariant or a test assertion: refuses nothing itself"
+ },
+ "engine/arith/src/qpoly/tests.rs :: clear_reply_bound_is_exact :: let mut m = Meter::new(plan.limit); #0": {
+  "class": "none",
+  "owner": "qpoly_clear",
+  "reason": "qpoly_clear's derived bounds, plumbing (the meter's limit, the plan's sizes), an internal invariant or a test assertion: refuses nothing itself"
+ },
+ "engine/arith/src/qpoly/tests.rs :: clear_run :: let mut m = Meter::new(plan.limit); #0": {
+  "class": "none",
+  "owner": "qpoly_clear",
+  "reason": "qpoly_clear's derived bounds, plumbing (the meter's limit, the plan's sizes), an internal invariant or a test assertion: refuses nothing itself"
  },
  "engine/arith/src/qpoly/tests.rs :: coprime_denominators_are_refused_by_the_meter :: assert!(e.contains(\"the denominators' lcm needs more than\") && e.contains(&pa.limit.to_string()), \"{}\", e); #0": {
   "class": "none",
@@ -6380,6 +6513,17 @@
   "owner": "poly_mul",
   "reason": "poly_mul's fixed caps (request bytes <= 2^24, transform points <= 2^19, product bits <= 2^25, peak <= 64 MiB, work <= 2^28 word operations), admitted before any allocation; each refusal names the cap and the way around it"
  },
+ "engine/web/src/series_ops.rs ::  :: SeriesOp { name: \"qpoly_clear\", max_request: zmul::REQUEST_MAX as usize, peak: zmul::PEAK_MAX, work: zmul::WORK_MAX, run: qpoly_clear }, #0": {
+  "class": "1+3",
+  "disposition": {
+   "1": "shared",
+   "3": {
+    "followup": "FU-B18-3"
+   }
+  },
+  "owner": "qpoly_clear",
+  "reason": "qpoly_clear's fixed caps (zmul's five, and the reply's bytes <= 64 MiB, those of qpoly_mul) and its metered lcm work within them, admitted before what they size; each refusal names the cap and the way around it"
+ },
  "engine/web/src/series_ops.rs ::  :: SeriesOp { name: \"qpoly_mul\", max_request: zmul::REQUEST_MAX as usize, peak: zmul::PEAK_MAX, work: zmul::WORK_MAX, run: qpoly_mul }, #0": {
   "class": "1+3",
   "disposition": {
@@ -6710,6 +6854,11 @@
  "engine/web/tests/nmod_ops.rs :: echelon_envelope_constants :: assert_eq!(ECH_MAX_TEXT, 20 * 1024 * 1024); #0": {
   "class": "none",
   "owner": "engine web + finite-field matrices"
+ },
+ "engine/web/tests/qpoly_alloc.rs :: admitted_clear_peak :: let mut m = sagebrush_arith::coprime::Meter::new(plan.limit); #0": {
+  "class": "none",
+  "owner": "qpoly_clear",
+  "reason": "qpoly_clear's derived bounds, plumbing (the meter's limit, the plan's sizes), an internal invariant or a test assertion: refuses nothing itself"
  },
  "engine/web/tests/series_ops.rs :: caps_name_the_limit_and_the_way_around :: fn caps_name_the_limit_and_the_way_around() { #0": {
   "class": "none",

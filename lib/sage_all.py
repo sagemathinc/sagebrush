@@ -4181,6 +4181,14 @@ _Integer = _install_int_methods(_sys.modules[__name__])
 if _Integer is not None:
     Integer = _Integer
 
+# (sagebrush.poly.qclear accepts Sage's own Integer and Rational by exact type,
+# and the int a Rational's numerator() or denominator() returns)
+import sagebrush.poly as _sb_poly
+_sb_poly._QCLEAR_FRACTIONS.add(Rational)
+_sb_poly._QCLEAR_INTS.add(_CallableInt)
+if isinstance(Integer, type):
+    _sb_poly._QCLEAR_INTS.add(Integer)
+
 
 # Sage shows a tuple or list of objects printed on several lines (matrices)
 # side by side, each bottom-aligned, the brackets on lines of their own:
