@@ -223,7 +223,7 @@ export function mountAgentPairing(ws: PairingWorkspace, o: { button?: HTMLElemen
     const made = o.open && p.created ? p.created : null;
     // (the controls the chip holds: the same, it is updated in place (its words, and Open), never redrawn)
     const key = JSON.stringify([p.hello!.agent.name, !!p.link, p.computer ?? "", g.run]);
-    if (bar && key === barKey && barText && barMade) { shownP = p; barText(short, full); barMade(made); return; }
+    if (bar && key === barKey && barText && barMade && p === shownP) { barText(short, full); barMade(made); return; }
     // (drawn again: an open menu stays open, and the focus goes back to the same kind of control: the chip, the same
     //  place in the menu (or its first, where that control is gone), or Open)
     const wasOpen = !!bar?.classList.contains("open");
@@ -233,8 +233,10 @@ export function mountAgentPairing(ws: PairingWorkspace, o: { button?: HTMLElemen
     // (over a runner, Revoke is a Disconnect that also stops the agent there: the runner ends its process group)
     const revoke = p.link ? h("button", { textContent: "Disconnect", title: `Disconnect and stop the agent on ${p.computer}` }) : h("button", { textContent: "Revoke" });
     revoke.className = "danger";
-    // (only the pairing the chip shows, while it is still the page's and granted: a chip left from another acts on nothing)
-    const shown = () => (shownP && shownP === pairing && shownP.state === "granted" ? shownP : null);
+    // (only the pairing this chip was drawn for, while the chip still shows it and it is still the page's and granted: a
+    //  chip left from another, even one pressed after a newer pairing is granted, acts on nothing)
+    const drawn = p;
+    const shown = () => (drawn === shownP && drawn === pairing && drawn.state === "granted" ? drawn : null);
     revoke.onclick = () => { const q = shown(); if (q) void q.revoke("revoked by the person"); else showBar(); };
     // ("May run code" turned off here, mid-session: a run going ends (chat plan PR 4); turned on only by a new grant)
     const noRun = g.run ? h("button", { textContent: "Turn off running code", title: "The agent may no longer run code, and a run going now stops (connect it again to allow it)" }) : null;

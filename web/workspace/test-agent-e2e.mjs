@@ -392,6 +392,17 @@ try {
     await until(`T.ui.pairing !== window.__w4b || T.ui.pairing.state !== "connecting"`, 8000);
     await drive({ op: "helloslow", s: 0 });
     await sleep(2500); // (the reconnect's tries over: BUSY_FOR_MS)
+    // (and pressed again after a newer pairing is granted and shown: the old agent's connection let go, the remembered
+    //  grant reconnects, its chip drawn; the old chip's controls still act on nothing)
+    await ev(`(window.__w4a.drop(), 1)`);
+    await sleep(500);
+    await ev(`(void T.ui.useRemembered(), 1)`);
+    ok(await until(`T.ui.pairing !== window.__w4a && T.ui.pairing !== window.__w4b && T.ui.pairing?.state === "granted" && !!document.querySelector(".sbag-bar")`, 15000) && await grantedAtServer(),
+      "W4 stale chip: a newer pairing, granted, its chip shown");
+    const late = await ev(`(async () => { const c = T.ui.pairing; window.__w4rev.click(); window.__w4off.click(); await new Promise((r) => setTimeout(r, 300));
+      return { same: T.ui.pairing === c, state: c.state, run: !!c.grant?.run, why: c.closeReason ?? "", turnOff: [...document.querySelectorAll(".sbag-bar [role=menuitem]")].some((b) => b.textContent === "Turn off running code") }; })()`);
+    ok(late.same && late.state === "granted" && late.run && late.turnOff && (await drive({ op: "grant" })).ok?.run === true,
+      "W4 stale chip: the old chip's Revoke and Turn off, pressed after the newer pairing is granted, touch it neither " + JSON.stringify(late));
     ok(await open(""), "W4 stale chip: reload");
     ok(await until(`!!document.querySelector(".sbag-bar")`, 15000) && await grantedAtServer(), "W4 stale chip: after a reload the remembered agent reconnects, the bar shows it, its server has the grant");
   }
