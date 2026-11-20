@@ -4985,24 +4985,63 @@ const docSyncReady = (async () => {
 // on); said in the Files sidebar while it runs, and, kept until closed, what it couldn't start)
 let startAllLeaving = false;
 addEventListener("pagehide", () => { startAllLeaving = true; });
+// (and, while the page is open, each notebook made here since (Duplicate, an upload, an agent's create): only those, by
+// the ids their creates name (a rename or a move meanwhile followed), walked on a timer debounced by one second from the
+// last create (other changes don't move it); one walk at a time, a create meanwhile waiting for the same timer's next
+// turn; none once the page is leaving.  Made, not opened, its history would otherwise start
+// only at the next load)
 docSyncReady.then(async (on) => {
   if (!on) return;
   const w = await wsReady, hdb = await historyDbReady, mod = await loadHistory();
   if (!w || w.closed || !hdb || !db) return;
-  const r = await startAll({
-    list: async () => (await w.list("/", { recursive: true })).filter((e) => e.kind === "notebook" && e.ref && !e.remote && !e.missing && !e.trashed).map((e) => ({ ref: e.ref, path: e.path })),
-    startOf: journalStartOf((ref) => readJournal(hdb, ref)),
-    syncOn: () => !!mod.DOC_SYNC?.on,
-    storeFor: (ref) => storeFor(ref),
-    current: () => (current.kind === "browser" ? current.id : null),
-    idle: () => new Promise((ok) => (typeof requestIdleCallback === "function" ? requestIdleCallback(() => ok(), { timeout: 1000 }) : setTimeout(ok, 50))),
-    stopped: () => startAllLeaving || w.closed,
-    progress: (done, total) => { if (total > 0 && done < total) wsBrowser?.say(`Starting sync: ${done} of ${total} notebooks`); },
+  const walkOnce = async (list) => {
+    const r = await startAll({
+      list,
+      startOf: journalStartOf((ref) => readJournal(hdb, ref)),
+      syncOn: () => !!mod.DOC_SYNC?.on,
+      storeFor: (ref) => storeFor(ref),
+      current: () => (current.kind === "browser" ? current.id : null),
+      idle: () => new Promise((ok) => (typeof requestIdleCallback === "function" ? requestIdleCallback(() => ok(), { timeout: 1000 }) : setTimeout(ok, 50))),
+      stopped: () => startAllLeaving || w.closed,
+      progress: (done, total) => { if (total > 0 && done < total) wsBrowser?.say(`Starting sync: ${done} of ${total} notebooks`); },
+    });
+    const said = startAllSummary(r);
+    if (said) { console.warn("sync:", said, r); wsBrowser?.say(said, true); }
+    else if (r.started) wsBrowser?.say(`Sync started for ${r.started} notebook${r.started === 1 ? "" : "s"}`);
+    (window.sagebrush ??= {}).startAll = r;
+  };
+  const listed = (e) => e?.kind === "notebook" && e.ref && !e.remote && !e.missing && !e.trashed;
+  const made = new Set();
+  let walking = true, madeTimer = null;
+  const walkMade = async () => {
+    madeTimer = null;
+    if (startAllLeaving || w.closed) { made.clear(); return; }
+    if (walking) { madeTimer = setTimeout(walkMade, 1000); return; }
+    const refs = [...made];
+    made.clear();
+    walking = true;
+    try {
+      await walkOnce(async () => (await Promise.all(refs.map(async (ref) => { const p = await w.pathOf("notebook", ref).catch(() => undefined); return p ? w.stat(p).catch(() => null) : null; }))).filter(listed).map((e) => ({ ref: e.ref, path: e.path })));
+    } catch (e) {
+      console.warn("sync: starting notebooks' synced histories:", e);
+    } finally {
+      walking = false;
+    }
+  };
+  w.watch((c) => {
+    let added = false;
+    // (made here, or in another tab of this browser; never one the server told of (another device's: its create carries
+    // its ref, but it isn't this device's to start, and a first pull of a large library is thousands of them))
+    for (const o of c?.ops ?? []) if (o?.op === "create" && o.kind === "notebook" && o.origin !== "server" && typeof o.ref === "string" && !made.has(o.ref)) { made.add(o.ref); added = true; }
+    if (!added) return;
+    clearTimeout(madeTimer);
+    madeTimer = setTimeout(walkMade, 1000);
   });
-  const said = startAllSummary(r);
-  if (said) { console.warn("sync:", said, r); wsBrowser?.say(said, true); }
-  else if (r.started) wsBrowser?.say(`Sync started for ${r.started} notebook${r.started === 1 ? "" : "s"}`);
-  (window.sagebrush ??= {}).startAll = r;
+  try {
+    await walkOnce(async () => (await w.list("/", { recursive: true })).filter(listed).map((e) => ({ ref: e.ref, path: e.path })));
+  } finally {
+    walking = false;
+  }
 }).catch((e) => console.warn("sync: starting notebooks' synced histories:", e));
 // (once this device's journal is activated (plan-sync-slice2-client r4 §1a, web/workspace/api.ts activateJournal), every
 // notebook is written through it: T1 in its history, then T2 (notebook/journal.js); before, as before.  Told by the
