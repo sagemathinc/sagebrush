@@ -538,6 +538,54 @@ const turnOf = (t, id) => t.entries.find((e) => e.kind === "turn" && e.turn_id =
   check(t.agent_instance === "bbbbbbbbbbbbbbbb" && !!turnOf(t, "T2"), "the same through the current pairing B applies, in B's run", t.agent_instance);
 }
 
+// step 2: a replay whose `running` names the away turn brings it back to running (Stop shown, its card answerable);
+// one naming another id, or several, never makes or binds a turn
+{
+  const mk = () => {
+    const { h, host: hs } = host();
+    const s = new ChatSession(hs);
+    h.pairing = resumable();
+    const t = s.current();
+    s.submit("long job", "sent");
+    s.onAgent(...ev(t, 2, "T1", { type: "turn_started" }));
+    s.endLive(true);
+    h.pairing = resumable();
+    return { h, s, t };
+  };
+  {
+    const { s, t } = mk();
+    s.onAgent("chat.replay", { conversation: t.id, instance: "aaaaaaaaaaaaaaaa", last: 2, done: true, running: ["T1"], events: [] });
+    check(!turnOf(t, "T1").away && !turnOf(t, "T1").outcome && s.isRunning(t) && !s.isAway(t), "running names the away turn: it is running again", turnOf(t, "T1"));
+    s.onAgent(...ev(t, 3, "T1", { type: "turn_finished", outcome: "completed" }));
+    check(turnOf(t, "T1").outcome === "completed" && !s.isRunning(t), "and its later live events finish it", turnOf(t, "T1"));
+  }
+  {
+    const { s, t } = mk();
+    s.onAgent("chat.replay", { conversation: t.id, instance: "aaaaaaaaaaaaaaaa", last: 2, done: true, running: ["T-other"], events: [] });
+    check(turnOf(t, "T1").outcome === "interrupted" && !t.entries.some((e) => e.kind === "turn" && e.turn_id === "T-other"), "running names another turn: no turn made; the away one ends interrupted", t.entries);
+  }
+  for (const [what, running] of [["two ids", ["T1", "T2"]], ["not a list", "T1"], ["not strings", [7]], ["null", null], ["an object", { 0: "T1" }]]) {
+    const { s, t } = mk();
+    const before = JSON.stringify(t);
+    s.onAgent("chat.replay", { conversation: t.id, instance: "aaaaaaaaaaaaaaaa", last: 2, done: true, running, events: [] });
+    check(JSON.stringify(t) === before, `running as ${what}: the replay changes nothing`, t);
+  }
+}
+
+// an agent without `running` (the field absent): none; the away turn ends interrupted as in step 1
+{
+  const { h, host: hs } = host();
+  const s = new ChatSession(hs);
+  h.pairing = resumable();
+  const t = s.current();
+  s.submit("x", "sent");
+  s.onAgent(...ev(t, 2, "T1", { type: "turn_started" }));
+  s.endLive(true);
+  h.pairing = resumable();
+  s.onAgent("chat.replay", { conversation: t.id, instance: "aaaaaaaaaaaaaaaa", last: 2, done: true, events: [] });
+  check(turnOf(t, "T1").outcome === "interrupted", "running absent: as none, the away turn ends interrupted", turnOf(t, "T1"));
+}
+
 // kept threads: an empty list, and a current one that names no thread
 {
   const { h, host: hs } = host();

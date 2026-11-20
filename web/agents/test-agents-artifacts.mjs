@@ -118,10 +118,11 @@ const event = (turn_id, e, conversation = conv) => {
 // (an event the stand-in logs while no page is there to get it: a turn it ended when its page went away)
 const logOnly = (turn_id, e, conversation = conv) => agentLog.push({ seq: ++logSeq, method: "turn.event", params: { conversation, turn_id, event: e } });
 // (the held chat.resume requests answered from the stand-in's log)
-const answerResumes = () => {
+// (`running`: the turn the stand-in still runs in that conversation, as an agent that kept it going does, step 2)
+const answerResumes = (running = []) => {
   for (const r of resumes.splice(0)) {
     const events = agentLog.filter((e) => e.params.conversation === r.conversation && e.seq > (r.instance === LOG_INSTANCE ? r.after : 0));
-    sock.send(JSON.stringify({ jsonrpc: "2.0", method: "chat.replay", params: { conversation: r.conversation, instance: LOG_INSTANCE, last: logSeq, events, done: true } }));
+    sock.send(JSON.stringify({ jsonrpc: "2.0", method: "chat.replay", params: { conversation: r.conversation, instance: LOG_INSTANCE, last: logSeq, running, events, done: true } }));
   }
 };
 // (a run as the agent's server sends it with run.context: the chat and the turn it came from, after the model's args)
@@ -1152,9 +1153,12 @@ try {
     const st = await ev(`({ connected: document.querySelector('#connect').textContent === 'Connected', send: document.querySelector('#send').textContent, stop: document.querySelector('#stop').hidden, sendNow: document.querySelector('#send-now').hidden, keys: document.querySelector('#keys').textContent, aria: document.querySelector('#send').getAttribute('aria-disabled') })`);
     ok(!st.connected && st.send === "Queue" && st.stop && st.sendNow && st.keys === "queue" && st.aria === null, "resume: after a reload mid-turn, not connected yet: the turn is away; the composer's one button says Queue (no Stop, no Send now) and is enabled", st);
     // (typed into the real composer while not connected, Shift+Enter)
-    if (!(await ev(`!!document.querySelector('#editor textarea')`))) {
-      const [x, y] = await ev(`(() => { const r = document.querySelector('#editor .mb-block').getBoundingClientRect(); return [r.x + r.width / 2, r.y + r.height / 2]; })()`);
-      for (const type of ["mousePressed", "mouseReleased"]) await send("Input.dispatchMouseEvent", { type, x, y, button: "left", clickCount: 1 });
+    // (a click into the composer's block brings its textarea; under load the block may not be laid out yet at the first
+    //  click, so click again until the textarea is there)
+    for (let k = 0; k < 20 && !(await ev(`!!document.querySelector('#editor textarea')`)); k++) {
+      const at = await ev(`(() => { const b = document.querySelector('#editor .mb-block'); if (!b) return null; const r = b.getBoundingClientRect(); return r.width && r.height ? [r.x + r.width / 2, r.y + r.height / 2] : null; })()`);
+      if (at) for (const type of ["mousePressed", "mouseReleased"]) await send("Input.dispatchMouseEvent", { type, x: at[0], y: at[1], button: "left", clickCount: 1 });
+      await sleep(150);
     }
     await until(`!!document.querySelector('#editor textarea')`);
     await ev(`document.querySelector('#editor textarea').focus()`);
@@ -1179,6 +1183,57 @@ try {
     const tQ = `t${++turnN}`;
     event(tQ, { type: "turn_started" });
     event(tQ, { type: "turn_finished", outcome: "completed" });
+    // (step 2: the grant the page sends names its id, which an agent carries a turn on under)
+    const gch = notes.filter((m) => m.method === "grant.changed").at(-1)?.params;
+    ok(typeof gch?.id === "string" && /^[0-9a-f]{32}$/.test(gch.id), "resume: the page's grant names its id", gch);
+    // (step 2: a turn the agent kept running while the page was away: after the reload and the replay it is running
+    //  again, Stop shown, and the agent's later events finish it)
+    const tS = `t${++turnN}`;
+    event(tS, { type: "turn_started" });
+    event(tS, { type: "message_revised", message: "m2", revision: 1 });
+    event(tS, { type: "text_delta", message: "m2", revision: 1, text: "still at it" });
+    await until(`/still at it/.test(document.body.innerText)`);
+    resumes.length = 0;
+    holdHello = true;
+    const before2 = loads;
+    await send("Page.reload", {});
+    for (const t1 = Date.now(); loads === before2 && Date.now() - t1 < 20000; ) await sleep(50);
+    await until(`/The connection to the agent was lost while this ran/.test(document.body.innerText)`);
+    for (const t3 = Date.now(); !heldHello && Date.now() - t3 < 20000; ) await sleep(50);
+    heldHello?.();
+    await until(`document.querySelector('#connect').textContent === 'Connected'`, 20000);
+    for (const t3 = Date.now(); !resumes.length && Date.now() - t3 < 10000; ) await sleep(50);
+    answerResumes([tS]);
+    // (that turn's own view: its status line, no longer the lost connection's)
+    const turnJs = `[...document.querySelectorAll('.turn')].find((d) => /still at it/.test(d.textContent))`;
+    await until(`!!${turnJs} && !/The connection to the agent was lost/.test(${turnJs}.textContent)`);
+    const back = await ev(`({ stop: !document.querySelector('#stop').hidden, send: document.querySelector('#send').textContent, working: /Working/.test(${turnJs}.querySelector('.status')?.textContent ?? '') })`);
+    ok(back.stop && back.send === "Queue" && back.working, "resume (step 2): the agent says the turn still runs: it is running again, Stop shown", back);
+    event(tS, { type: "text_delta", message: "m2", revision: 1, text: " and done" });
+    event(tS, { type: "turn_finished", outcome: "completed" });
+    await until(`/still at it and done/.test(document.body.innerText) && document.querySelector('#stop').hidden`);
+    ok(true, "resume (step 2): its later live events finish it");
+    // (the connection lost with no reload (the agent's socket closes): the running turn shows away at once, no Stop;
+    //  the person's Reconnect brings it back, running, from the agent's replay)
+    const tL = `t${++turnN}`;
+    event(tL, { type: "turn_started" });
+    event(tL, { type: "message_revised", message: "m3", revision: 1 });
+    event(tL, { type: "text_delta", message: "m3", revision: 1, text: "long haul" });
+    const lostJs = `[...document.querySelectorAll('.turn')].find((d) => /long haul/.test(d.textContent))`;
+    await until(`!!${lostJs}`);
+    resumes.length = 0;
+    sock.close();
+    await until(`/The connection to the agent was lost while this ran/.test(${lostJs}?.textContent ?? '') && document.querySelector('#stop').hidden`, 15000);
+    ok(true, "resume (step 2): the connection lost without a reload: the turn shows away at once, no Stop");
+    await until(`[...document.querySelectorAll('button')].some((b) => b.checkVisibility() && /^Reconnect$/.test(b.textContent))`, 15000);
+    await ev(`[...document.querySelectorAll('button')].find((b) => b.checkVisibility() && /^Reconnect$/.test(b.textContent)).click()`);
+    await until(`document.querySelector('#connect').textContent === 'Connected'`, 20000);
+    for (const t3 = Date.now(); !resumes.length && Date.now() - t3 < 10000; ) await sleep(50);
+    answerResumes([tL]);
+    await until(`!/The connection to the agent was lost/.test(${lostJs}.textContent) && !document.querySelector('#stop').hidden`);
+    ok(true, "resume (step 2): Reconnect: the agent says it still runs: running again, Stop shown");
+    event(tL, { type: "turn_finished", outcome: "completed" });
+    await until(`document.querySelector('#stop').hidden`);
     // (the sections after this pair with a stand-in without a log, as before: its events unnumbered)
     RESUME = false;
     await pair();
