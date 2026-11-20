@@ -14,7 +14,17 @@
   "owner": "engine arith (big-integer wire decoder)",
   "reason": "the gcd check's work meter: the admitted work is a proven bound, so going over it is an Internal error (a bug), not a limit"
  },
- "engine/arith/src/coprime.rs :: new :: Meter { used: 0, limit, since_poll: 0 } #0": {
+ "engine/arith/src/coprime.rs :: limit :: pub fn limit(&self) -> u64 { #0": {
+  "class": "none",
+  "owner": "engine arith (big-integer wire decoder)",
+  "reason": "the decoder's and the gcd check's plumbing (bounds for the caller's reservation and work admission, the workspace, word masks); refuses nothing itself"
+ },
+ "engine/arith/src/coprime.rs :: limit :: self.limit #0": {
+  "class": "none",
+  "owner": "engine arith (big-integer wire decoder)",
+  "reason": "the decoder's and the gcd check's plumbing (bounds for the caller's reservation and work admission, the workspace, word masks); refuses nothing itself"
+ },
+ "engine/arith/src/coprime.rs :: new :: Meter { used: 0, limit, since_poll: 0, largest: 0 } #0": {
   "class": "none",
   "owner": "engine arith (big-integer wire decoder)",
   "reason": "the decoder's and the gcd check's plumbing (bounds for the caller's reservation and work admission, the workspace, word masks); refuses nothing itself"
@@ -108,6 +118,378 @@
   "class": "none",
   "owner": "exact linear algebra (engine/arith)",
   "reason": "test code: every work bound at extreme lengths is None (a refusal) or a number, never an overflow; refuses nothing itself"
+ },
+ "engine/arith/src/qpoly.rs ::  :: pub const CAPS: Caps = Caps { int: zmul::CAPS, reply: REPLY_MAX }; #0": {
+  "class": "1+3",
+  "disposition": {
+   "1": "shared",
+   "3": {
+    "followup": "FU-B18-3"
+   }
+  },
+  "owner": "qpoly_mul",
+  "reason": "qpoly_mul's fixed caps (zmul's five, and the reply's bytes <= 64 MiB) and phase A's metered lcm work within them, admitted before what they size; each refusal names the cap and the way around it"
+ },
+ "engine/arith/src/qpoly.rs ::  :: pub const REPLY_MAX: u64 = zmul::PEAK_MAX; #0": {
+  "class": "1+3",
+  "disposition": {
+   "1": "shared",
+   "3": {
+    "followup": "FU-B18-3"
+   }
+  },
+  "owner": "qpoly_mul",
+  "reason": "qpoly_mul's fixed caps (zmul's five, and the reply's bytes <= 64 MiB) and phase A's metered lcm work within them, admitted before what they size; each refusal names the cap and the way around it"
+ },
+ "engine/arith/src/qpoly.rs :: admit_a :: Ok(Some(PlanA { lam_a, lam_b, lam, d_max: d, row, peak, limit })) #0": {
+  "class": "none",
+  "owner": "qpoly_mul",
+  "reason": "qpoly_mul's derived bounds, plumbing (the meter's limit, the plan's sizes) or a test assertion: refuses nothing itself"
+ },
+ "engine/arith/src/qpoly.rs :: admit_a :: let d = a.d_max.max(b.d_max); #0": {
+  "class": "none",
+  "owner": "qpoly_mul",
+  "reason": "qpoly_mul's derived bounds, plumbing (the meter's limit, the plan's sizes) or a test assertion: refuses nothing itself"
+ },
+ "engine/arith/src/qpoly.rs :: admit_a :: let limit = caps.int.work.checked_sub(r).ok_or_else(|| format!(\"the request's bytes = {} leave no work within {} ({})\", r, caps.int.work, HOW))?; #0": {
+  "class": "1+3",
+  "disposition": {
+   "1": "shared",
+   "3": {
+    "followup": "FU-B18-3"
+   }
+  },
+  "owner": "qpoly_mul",
+  "reason": "qpoly_mul's fixed caps (zmul's five, and the reply's bytes <= 64 MiB) and phase A's metered lcm work within them, admitted before what they size; each refusal names the cap and the way around it"
+ },
+ "engine/arith/src/qpoly.rs :: admit_b :: if fixed > budget { #0": {
+  "class": "1+3",
+  "disposition": {
+   "1": "shared",
+   "3": {
+    "followup": "FU-B18-3"
+   }
+  },
+  "owner": "qpoly_mul",
+  "reason": "qpoly_mul's fixed caps (zmul's five, and the reply's bytes <= 64 MiB) and phase A's metered lcm work within them, admitted before what they size; each refusal names the cap and the way around it"
+ },
+ "engine/arith/src/qpoly.rs :: admit_b :: let (lam, ns, ds) = (lam_a.max(lam_b), a.n_max.max(b.n_max), a.d_max.max(b.d_max)); #0": {
+  "class": "none",
+  "owner": "qpoly_mul",
+  "reason": "qpoly_mul's derived bounds, plumbing (the meter's limit, the plan's sizes) or a test assertion: refuses nothing itself"
+ },
+ "engine/arith/src/qpoly.rs :: admit_b :: let budget = caps.int.work.checked_sub(used).ok_or_else(|| format!(\"{}: phase A's count passed its limit\", INTERNAL_PREFIX))?; #0": {
+  "class": "none",
+  "owner": "qpoly_mul",
+  "reason": "an invariant (phase A's meter never passes WORK_MAX - R): an internal error, not a limit"
+ },
+ "engine/arith/src/qpoly.rs :: admit_b :: let limit_b = budget - unmetered; #0": {
+  "class": "none",
+  "owner": "qpoly_mul",
+  "reason": "qpoly_mul's derived bounds, plumbing (the meter's limit, the plan's sizes) or a test assertion: refuses nothing itself"
+ },
+ "engine/arith/src/qpoly.rs :: admit_b :: limit_b, #0": {
+  "class": "none",
+  "owner": "qpoly_mul",
+  "reason": "qpoly_mul's derived bounds, plumbing (the meter's limit, the plan's sizes) or a test assertion: refuses nothing itself"
+ },
+ "engine/arith/src/qpoly.rs :: bits :: pub limit_b: u64, #0": {
+  "class": "none",
+  "owner": "qpoly_mul",
+  "reason": "qpoly_mul's derived bounds, plumbing (the meter's limit, the plan's sizes) or a test assertion: refuses nothing itself"
+ },
+ "engine/arith/src/qpoly.rs :: emit :: let left = plan.limit_b.checked_sub(meter.used()).ok_or_else(|| format!(\"{}: the scaling passed its bound\", INTERNAL_PREFIX))?; #0": {
+  "class": "none",
+  "owner": "qpoly_mul",
+  "reason": "qpoly_mul's derived bounds, plumbing (the meter's limit, the plan's sizes) or a test assertion: refuses nothing itself"
+ },
+ "engine/arith/src/qpoly.rs :: lcms :: Fault::Overrun => format!(\"the denominators' lcm needs more than {} word operations (fewer or simpler denominators per call)\", plan.limit), #0": {
+  "class": "1+3",
+  "disposition": {
+   "1": "shared",
+   "3": {
+    "followup": "FU-B18-3"
+   }
+  },
+  "owner": "qpoly_mul",
+  "reason": "qpoly_mul's fixed caps (zmul's five, and the reply's bytes <= 64 MiB) and phase A's metered lcm work within them, admitted before what they size; each refusal names the cap and the way around it"
+ },
+ "engine/arith/src/qpoly.rs :: lcms :: let mut m = Meter::new(plan.limit); #0": {
+  "class": "none",
+  "owner": "qpoly_mul",
+  "reason": "qpoly_mul's derived bounds, plumbing (the meter's limit, the plan's sizes) or a test assertion: refuses nothing itself"
+ },
+ "engine/arith/src/qpoly.rs :: lcms_metered :: let (lam, d) = (plan.lam as usize, plan.d_max as usize); #0": {
+  "class": "none",
+  "owner": "qpoly_mul",
+  "reason": "qpoly_mul's derived bounds, plumbing (the meter's limit, the plan's sizes) or a test assertion: refuses nothing itself"
+ },
+ "engine/arith/src/qpoly.rs :: max_charge :: pub const fn max_charge(lam: u64) -> Option<u64> { #0": {
+  "class": "none",
+  "owner": "qpoly_mul",
+  "reason": "qpoly_mul's derived bounds, plumbing (the meter's limit, the plan's sizes) or a test assertion: refuses nothing itself"
+ },
+ "engine/arith/src/qpoly.rs :: max_charge :: pub d_max: u64, #0": {
+  "class": "none",
+  "owner": "qpoly_mul",
+  "reason": "qpoly_mul's derived bounds, plumbing (the meter's limit, the plan's sizes) or a test assertion: refuses nothing itself"
+ },
+ "engine/arith/src/qpoly.rs :: max_charge :: pub n_max: u64, #0": {
+  "class": "none",
+  "owner": "qpoly_mul",
+  "reason": "qpoly_mul's derived bounds, plumbing (the meter's limit, the plan's sizes) or a test assertion: refuses nothing itself"
+ },
+ "engine/arith/src/qpoly.rs :: over :: fn over(what: &str, value: u64, max: u64) -> Result<(), String> { #0": {
+  "class": "1+3",
+  "disposition": {
+   "1": "shared",
+   "3": {
+    "followup": "FU-B18-3"
+   }
+  },
+  "owner": "qpoly_mul",
+  "reason": "qpoly_mul's fixed caps (zmul's five, and the reply's bytes <= 64 MiB) and phase A's metered lcm work within them, admitted before what they size; each refusal names the cap and the way around it"
+ },
+ "engine/arith/src/qpoly.rs :: over :: if value > max { #0": {
+  "class": "1+3",
+  "disposition": {
+   "1": "shared",
+   "3": {
+    "followup": "FU-B18-3"
+   }
+  },
+  "owner": "qpoly_mul",
+  "reason": "qpoly_mul's fixed caps (zmul's five, and the reply's bytes <= 64 MiB) and phase A's metered lcm work within them, admitted before what they size; each refusal names the cap and the way around it"
+ },
+ "engine/arith/src/qpoly.rs :: over :: return Err(format!(\"{} = {} is more than {} ({})\", what, value, max, HOW)); #0": {
+  "class": "1+3",
+  "disposition": {
+   "1": "shared",
+   "3": {
+    "followup": "FU-B18-3"
+   }
+  },
+  "owner": "qpoly_mul",
+  "reason": "qpoly_mul's fixed caps (zmul's five, and the reply's bytes <= 64 MiB) and phase A's metered lcm work within them, admitted before what they size; each refusal names the cap and the way around it"
+ },
+ "engine/arith/src/qpoly.rs :: product :: let (lam, ns, ds) = (l.na.max(l.nb), a.n_max.max(b.n_max) as usize, a.d_max.max(b.d_max) as usize); #0": {
+  "class": "none",
+  "owner": "qpoly_mul",
+  "reason": "qpoly_mul's derived bounds, plumbing (the meter's limit, the plan's sizes) or a test assertion: refuses nothing itself"
+ },
+ "engine/arith/src/qpoly.rs :: product :: let mut m = Meter::new(plan.limit_b); #0": {
+  "class": "none",
+  "owner": "qpoly_mul",
+  "reason": "qpoly_mul's derived bounds, plumbing (the meter's limit, the plan's sizes) or a test assertion: refuses nothing itself"
+ },
+ "engine/arith/src/qpoly.rs :: scan :: f.d_max = f.d_max.max(ld); #0": {
+  "class": "none",
+  "owner": "qpoly_mul",
+  "reason": "qpoly_mul's derived bounds, plumbing (the meter's limit, the plan's sizes) or a test assertion: refuses nothing itself"
+ },
+ "engine/arith/src/qpoly.rs :: scan :: f.n_max = f.n_max.max(ln); #0": {
+  "class": "none",
+  "owner": "qpoly_mul",
+  "reason": "qpoly_mul's derived bounds, plumbing (the meter's limit, the plan's sizes) or a test assertion: refuses nothing itself"
+ },
+ "engine/arith/src/qpoly.rs :: scan :: if i as u64 >= zmul::REQUEST_MAX { #0": {
+  "class": "1+3",
+  "disposition": {
+   "1": "shared",
+   "3": {
+    "followup": "FU-B18-3"
+   }
+  },
+  "owner": "qpoly_mul",
+  "reason": "qpoly_mul's fixed caps (zmul's five, and the reply's bytes <= 64 MiB) and phase A's metered lcm work within them, admitted before what they size; each refusal names the cap and the way around it"
+ },
+ "engine/arith/src/qpoly.rs :: scan :: if n.len() > zmul::TOKEN_DIGITS_MAX || d.len() > zmul::TOKEN_DIGITS_MAX { #0": {
+  "class": "1+3",
+  "disposition": {
+   "1": "shared",
+   "3": {
+    "followup": "FU-B18-3"
+   }
+  },
+  "owner": "qpoly_mul",
+  "reason": "qpoly_mul's fixed caps (zmul's five, and the reply's bytes <= 64 MiB) and phase A's metered lcm work within them, admitted before what they size; each refusal names the cap and the way around it"
+ },
+ "engine/arith/src/qpoly.rs :: scan :: let mut f = Factor { text, tokens: 0, all_zero: true, num_bits: 0, n_max: 0, d_max: 0, sd: 0, n_sum: 0, d_sum: 0, a1: 0, a2: 0 }; #0": {
+  "class": "none",
+  "owner": "qpoly_mul",
+  "reason": "qpoly_mul's derived bounds, plumbing (the meter's limit, the plan's sizes) or a test assertion: refuses nothing itself"
+ },
+ "engine/arith/src/qpoly.rs :: scan :: pub d_max: u64, #0": {
+  "class": "none",
+  "owner": "qpoly_mul",
+  "reason": "qpoly_mul's derived bounds, plumbing (the meter's limit, the plan's sizes) or a test assertion: refuses nothing itself"
+ },
+ "engine/arith/src/qpoly.rs :: scan :: pub limit: u64, #0": {
+  "class": "none",
+  "owner": "qpoly_mul",
+  "reason": "qpoly_mul's derived bounds, plumbing (the meter's limit, the plan's sizes) or a test assertion: refuses nothing itself"
+ },
+ "engine/arith/src/qpoly.rs :: scan :: return Err(format!(\"a coefficient of more than {} hex digits\", zmul::TOKEN_DIGITS_MAX)); #0": {
+  "class": "1+3",
+  "disposition": {
+   "1": "shared",
+   "3": {
+    "followup": "FU-B18-3"
+   }
+  },
+  "owner": "qpoly_mul",
+  "reason": "qpoly_mul's fixed caps (zmul's five, and the reply's bytes <= 64 MiB) and phase A's metered lcm work within them, admitted before what they size; each refusal names the cap and the way around it"
+ },
+ "engine/arith/src/qpoly.rs :: scan :: return Err(format!(\"more than {} coefficients\", zmul::REQUEST_MAX)); #0": {
+  "class": "1+3",
+  "disposition": {
+   "1": "shared",
+   "3": {
+    "followup": "FU-B18-3"
+   }
+  },
+  "owner": "qpoly_mul",
+  "reason": "qpoly_mul's fixed caps (zmul's five, and the reply's bytes <= 64 MiB) and phase A's metered lcm work within them, admitted before what they size; each refusal names the cap and the way around it"
+ },
+ "engine/arith/src/qpoly/tests.rs :: a_long_reduction_is_refused_by_the_meter :: assert!(p.meter.largest_charge() <= max_charge(pb.lc.max(pb.ld)).unwrap()); #0": {
+  "class": "none",
+  "owner": "qpoly_mul",
+  "reason": "qpoly_mul's derived bounds, plumbing (the meter's limit, the plan's sizes) or a test assertion: refuses nothing itself"
+ },
+ "engine/arith/src/qpoly/tests.rs :: a_long_reduction_is_refused_by_the_meter :: assert!(p.meter.used() > pb.limit_b && over <= max_charge(pb.lc.max(pb.ld)).unwrap(), \"overshoot {}\", over); #0": {
+  "class": "none",
+  "owner": "qpoly_mul",
+  "reason": "qpoly_mul's derived bounds, plumbing (the meter's limit, the plan's sizes) or a test assertion: refuses nothing itself"
+ },
+ "engine/arith/src/qpoly/tests.rs :: a_long_reduction_is_refused_by_the_meter :: let over = p.meter.used() - pb.limit_b; #0": {
+  "class": "none",
+  "owner": "qpoly_mul",
+  "reason": "qpoly_mul's derived bounds, plumbing (the meter's limit, the plan's sizes) or a test assertion: refuses nothing itself"
+ },
+ "engine/arith/src/qpoly/tests.rs :: a_remainder_is_an_invariant_failure :: let mut m = Meter::new(u64::MAX); #0": {
+  "class": "none",
+  "owner": "qpoly_mul",
+  "reason": "qpoly_mul's derived bounds, plumbing (the meter's limit, the plan's sizes) or a test assertion: refuses nothing itself"
+ },
+ "engine/arith/src/qpoly/tests.rs :: coprime_denominators_are_refused_by_the_meter :: assert!(e.contains(\"the denominators' lcm needs more than\") && e.contains(&pa.limit.to_string()), \"{}\", e); #0": {
+  "class": "none",
+  "owner": "qpoly_mul",
+  "reason": "qpoly_mul's derived bounds, plumbing (the meter's limit, the plan's sizes) or a test assertion: refuses nothing itself"
+ },
+ "engine/arith/src/qpoly/tests.rs :: coprime_denominators_are_refused_by_the_meter :: assert!(m.used() > pa.limit && over <= max_charge(pa.lam).unwrap(), \"overshoot {} > max_charge({})\", over, pa.lam); #0": {
+  "class": "none",
+  "owner": "qpoly_mul",
+  "reason": "qpoly_mul's derived bounds, plumbing (the meter's limit, the plan's sizes) or a test assertion: refuses nothing itself"
+ },
+ "engine/arith/src/qpoly/tests.rs :: coprime_denominators_are_refused_by_the_meter :: assert_eq!(pa.limit, zmul::WORK_MAX - r); #0": {
+  "class": "none",
+  "owner": "qpoly_mul",
+  "reason": "qpoly_mul's derived bounds, plumbing (the meter's limit, the plan's sizes) or a test assertion: refuses nothing itself"
+ },
+ "engine/arith/src/qpoly/tests.rs :: coprime_denominators_are_refused_by_the_meter :: let mut m = Meter::new(pa.limit); #0": {
+  "class": "none",
+  "owner": "qpoly_mul",
+  "reason": "qpoly_mul's derived bounds, plumbing (the meter's limit, the plan's sizes) or a test assertion: refuses nothing itself"
+ },
+ "engine/arith/src/qpoly/tests.rs :: coprime_denominators_are_refused_by_the_meter :: let over = m.used() - pa.limit; #0": {
+  "class": "none",
+  "owner": "qpoly_mul",
+  "reason": "qpoly_mul's derived bounds, plumbing (the meter's limit, the plan's sizes) or a test assertion: refuses nothing itself"
+ },
+ "engine/arith/src/qpoly/tests.rs :: div :: let mut m = Meter::new(u64::MAX); #0": {
+  "class": "none",
+  "owner": "qpoly_mul",
+  "reason": "qpoly_mul's derived bounds, plumbing (the meter's limit, the plan's sizes) or a test assertion: refuses nothing itself"
+ },
+ "engine/arith/src/qpoly/tests.rs :: every_charge_site_is_within_its_term :: assert!(m.largest_charge() <= max_charge(lam as u64).unwrap()); #0": {
+  "class": "none",
+  "owner": "qpoly_mul",
+  "reason": "qpoly_mul's derived bounds, plumbing (the meter's limit, the plan's sizes) or a test assertion: refuses nothing itself"
+ },
+ "engine/arith/src/qpoly/tests.rs :: every_charge_site_is_within_its_term :: assert!(m.largest_charge() <= max_charge(pa.lam).unwrap(), \"{} > max_charge({})\", m.largest_charge(), pa.lam); #0": {
+  "class": "none",
+  "owner": "qpoly_mul",
+  "reason": "qpoly_mul's derived bounds, plumbing (the meter's limit, the plan's sizes) or a test assertion: refuses nothing itself"
+ },
+ "engine/arith/src/qpoly/tests.rs :: every_charge_site_is_within_its_term :: let mut m = Meter::new(pa.limit); #0": {
+  "class": "none",
+  "owner": "qpoly_mul",
+  "reason": "qpoly_mul's derived bounds, plumbing (the meter's limit, the plan's sizes) or a test assertion: refuses nothing itself"
+ },
+ "engine/arith/src/qpoly/tests.rs :: every_charge_site_is_within_its_term :: let mut m = Meter::new(u64::MAX); #0": {
+  "class": "none",
+  "owner": "qpoly_mul",
+  "reason": "qpoly_mul's derived bounds, plumbing (the meter's limit, the plan's sizes) or a test assertion: refuses nothing itself"
+ },
+ "engine/arith/src/qpoly/tests.rs :: every_charge_site_is_within_its_term :: let mut m = Meter::new(u64::MAX); #1": {
+  "class": "none",
+  "owner": "qpoly_mul",
+  "reason": "qpoly_mul's derived bounds, plumbing (the meter's limit, the plan's sizes) or a test assertion: refuses nothing itself"
+ },
+ "engine/arith/src/qpoly/tests.rs :: exact_quotients_match_dashu_and_their_bounds :: let picks = [0, 1, h - 1, h, h + 1, u64::MAX - 1, u64::MAX]; #0": {
+  "class": "none",
+  "owner": "qpoly_mul",
+  "reason": "qpoly_mul's derived bounds, plumbing (the meter's limit, the plan's sizes) or a test assertion: refuses nothing itself"
+ },
+ "engine/arith/src/qpoly/tests.rs :: exact_quotients_match_dashu_and_their_bounds :: let ys: Vec<Vec<u64>> = vec![vec![1], vec![u64::MAX], vec![3], vec![1, 0, h], vec![1, 0, h >> 2], vec![u64::MAX, 0, h], vec![u64::MAX, u64::MAX], vec![1, 1], vec![3, h], vec![u64::MAX, h - 1, 2]]; #0": {
+  "class": "none",
+  "owner": "qpoly_mul",
+  "reason": "qpoly_mul's derived bounds, plumbing (the meter's limit, the plan's sizes) or a test assertion: refuses nothing itself"
+ },
+ "engine/arith/src/qpoly/tests.rs :: phase_b_admits_on_the_actual_lcm_and_refuses_by_name :: assert!(8191 * (2 * fa.sd + 16) > zmul::O_MAX); #0": {
+  "class": "none",
+  "owner": "qpoly_mul",
+  "reason": "qpoly_mul's derived bounds, plumbing (the meter's limit, the plan's sizes) or a test assertion: refuses nothing itself"
+ },
+ "engine/arith/src/qpoly/tests.rs :: probe_actual_vs_admitted :: let big = Caps { int: zmul::Caps { work: u64::MAX, peak: u64::MAX, o: u64::MAX, n: u64::MAX, request: u64::MAX }, reply: u64::MAX }; #0": {
+  "class": "none",
+  "owner": "qpoly_mul",
+  "reason": "qpoly_mul's derived bounds, plumbing (the meter's limit, the plan's sizes) or a test assertion: refuses nothing itself"
+ },
+ "engine/arith/src/qpoly/tests.rs :: probe_admitted_maxima :: fn probe_admitted_maxima() { #0": {
+  "class": "none",
+  "owner": "qpoly_mul",
+  "reason": "qpoly_mul's derived bounds, plumbing (the meter's limit, the plan's sizes) or a test assertion: refuses nothing itself"
+ },
+ "engine/arith/src/qpoly/tests.rs :: qhat_covers_every_divisor_size :: assert_eq!(quot_work(u64::MAX, 1), None); #0": {
+  "class": "none",
+  "owner": "qpoly_mul",
+  "reason": "qpoly_mul's derived bounds, plumbing (the meter's limit, the plan's sizes) or a test assertion: refuses nothing itself"
+ },
+ "engine/arith/src/qpoly/tests.rs :: qhat_covers_every_divisor_size :: assert_eq!(quot_work_any(u64::MAX), None); #0": {
+  "class": "none",
+  "owner": "qpoly_mul",
+  "reason": "qpoly_mul's derived bounds, plumbing (the meter's limit, the plan's sizes) or a test assertion: refuses nothing itself"
+ },
+ "engine/arith/src/qpoly/tests.rs :: qhat_covers_every_divisor_size :: q[lx - ly - 1] = u64::MAX; #0": {
+  "class": "none",
+  "owner": "qpoly_mul",
+  "reason": "qpoly_mul's derived bounds, plumbing (the meter's limit, the plan's sizes) or a test assertion: refuses nothing itself"
+ },
+ "engine/arith/src/qpoly/tests.rs :: run :: assert!(m.largest_charge() <= max_charge(pa.lam).unwrap()); #0": {
+  "class": "none",
+  "owner": "qpoly_mul",
+  "reason": "qpoly_mul's derived bounds, plumbing (the meter's limit, the plan's sizes) or a test assertion: refuses nothing itself"
+ },
+ "engine/arith/src/qpoly/tests.rs :: run :: assert!(p.meter.largest_charge() <= max_charge(pb.lc.max(pb.ld)).unwrap(), \"phase B's largest charge {} > max_charge({})\", p.meter.largest_charge(), pb.lc.max(pb.ld)); #0": {
+  "class": "none",
+  "owner": "qpoly_mul",
+  "reason": "qpoly_mul's derived bounds, plumbing (the meter's limit, the plan's sizes) or a test assertion: refuses nothing itself"
+ },
+ "engine/arith/src/qpoly/tests.rs :: run :: assert!(used_b <= pb.limit_b); #0": {
+  "class": "none",
+  "owner": "qpoly_mul",
+  "reason": "qpoly_mul's derived bounds, plumbing (the meter's limit, the plan's sizes) or a test assertion: refuses nothing itself"
+ },
+ "engine/arith/src/qpoly/tests.rs :: run :: let l = lcms_metered(&fa, &fb, &pa, &mut m).map_err(|f| format!(\"{:?} at {} (limit {})\", f, m.used(), pa.limit))?; #0": {
+  "class": "none",
+  "owner": "qpoly_mul",
+  "reason": "qpoly_mul's derived bounds, plumbing (the meter's limit, the plan's sizes) or a test assertion: refuses nothing itself"
+ },
+ "engine/arith/src/qpoly/tests.rs :: run :: let mut m = Meter::new(pa.limit); #0": {
+  "class": "none",
+  "owner": "qpoly_mul",
+  "reason": "qpoly_mul's derived bounds, plumbing (the meter's limit, the plan's sizes) or a test assertion: refuses nothing itself"
  },
  "engine/arith/src/wire_decode.rs :: capped :: Err(internal(\"a limb maximum without its integer\")) #0": {
   "class": "none",
@@ -753,6 +1135,26 @@
   "class": "none",
   "owner": "engine arith (big-integer wire decoder)",
   "reason": "test code: the big-integer decoder's correctness, allocation and Stop tests; refuses nothing itself"
+ },
+ "engine/arith/tests/qpoly_admitted_max.rs :: the_admitted_maxima :: fn the_admitted_maxima() { #0": {
+  "class": "none",
+  "owner": "qpoly_mul",
+  "reason": "qpoly_mul's derived bounds, plumbing (the meter's limit, the plan's sizes) or a test assertion: refuses nothing itself"
+ },
+ "engine/arith/tests/qpoly_work_width.rs :: the_closed_forms_never_wrap :: assert_eq!(qpoly::max_charge(x), fit(Some(7 * x1 + 101)), \"max_charge({})\", x); #0": {
+  "class": "none",
+  "owner": "qpoly_mul",
+  "reason": "qpoly_mul's derived bounds, plumbing (the meter's limit, the plan's sizes) or a test assertion: refuses nothing itself"
+ },
+ "engine/arith/tests/qpoly_work_width.rs :: the_closed_forms_never_wrap :: let lens = [0u64, 1, 2, 3, 1 << 20, u64::MAX / 7, u64::MAX / 3, u64::MAX / 2, u64::MAX - 3, u64::MAX]; #0": {
+  "class": "none",
+  "owner": "qpoly_mul",
+  "reason": "qpoly_mul's derived bounds, plumbing (the meter's limit, the plan's sizes) or a test assertion: refuses nothing itself"
+ },
+ "engine/arith/tests/qpoly_work_width.rs :: the_closed_forms_never_wrap :: let m = u64::MAX as u128; #0": {
+  "class": "none",
+  "owner": "qpoly_mul",
+  "reason": "qpoly_mul's derived bounds, plumbing (the meter's limit, the plan's sizes) or a test assertion: refuses nothing itself"
  },
  "engine/arith/tests/wire_decode_alloc.rs :: admit :: return Err(WireError { code: Code::Cap, offset: 0, what: \"over the grant\" }); #0": {
   "class": "none",
@@ -5977,6 +6379,17 @@
   },
   "owner": "poly_mul",
   "reason": "poly_mul's fixed caps (request bytes <= 2^24, transform points <= 2^19, product bits <= 2^25, peak <= 64 MiB, work <= 2^28 word operations), admitted before any allocation; each refusal names the cap and the way around it"
+ },
+ "engine/web/src/series_ops.rs ::  :: SeriesOp { name: \"qpoly_mul\", max_request: zmul::REQUEST_MAX as usize, peak: zmul::PEAK_MAX, work: zmul::WORK_MAX, run: qpoly_mul }, #0": {
+  "class": "1+3",
+  "disposition": {
+   "1": "shared",
+   "3": {
+    "followup": "FU-B18-3"
+   }
+  },
+  "owner": "qpoly_mul",
+  "reason": "qpoly_mul's fixed caps (zmul's five, and the reply's bytes <= 64 MiB) and phase A's metered lcm work within them, admitted before what they size; each refusal names the cap and the way around it"
  },
  "engine/web/src/series_ops.rs ::  :: SeriesOp { name: \"series_euler\", max_request: SMALL_MAX_REQUEST, peak: 8 * MIB, work: zseries::WORK_MAX, run: series_euler }, #0": {
   "class": "1+3",

@@ -47,6 +47,23 @@ def mul(a, b):
     return _ints(call("poly_mul", a=_hex(a), b=_hex(b)))
 
 
+def qmul(a, b):
+    """The product of rational polynomials (int or Fraction coefficients,
+    constant term first), in lowest terms with trailing zeros dropped: the
+    engine's qpoly_mul (the common denominators, one integer product, each
+    coefficient reduced), refused past its caps.
+
+    >>> from fractions import Fraction
+    >>> from sagebrush.poly import qmul
+    >>> qmul([Fraction(1, 2), 1], [Fraction(-1, 3), 1])
+    [Fraction(-1, 6), Fraction(1, 6), 1]
+    >>> qmul([0, 0], [Fraction(1, 2)])
+    []
+    """
+    r = call("qpoly_mul", a=_qhex(a), b=_qhex(b))
+    return [_token(t) for t in r.split(",")] if r else []
+
+
 def gcd(a, b):
     """The gcd in Z[x] of integer polynomials, with positive leading
     coefficient (constant term first; [] if both are zero)."""
@@ -61,6 +78,13 @@ def divexact(a, b):
 
 def _hex(f):
     return ",".join([format(int(c), "x") for c in f])
+
+
+def _qhex(f):
+    # (a token per coefficient: "num" for an integer, "num/den" otherwise)
+    return ",".join([format(c, "x") if type(c) is int else
+                     format(c.numerator, "x") + ("/" + format(c.denominator, "x") if c.denominator != 1 else "")
+                     for c in f])
 
 
 def _ints(s):

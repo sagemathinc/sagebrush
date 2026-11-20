@@ -298,7 +298,7 @@ fn field(z: &[u64], start: u64, len: u64, t: &mut [u64]) {
 }
 
 /// Append a magnitude's hex (no leading zeros; "0" for zero).
-fn hex(out: &mut String, t: &[u64]) {
+pub(crate) fn hex(out: &mut String, t: &[u64]) {
     match t.iter().rposition(|&w| w != 0) {
         None => out.push('0'),
         Some(top) => {
@@ -314,12 +314,35 @@ fn hex(out: &mut String, t: &[u64]) {
 /// as hex tokens, trailing zero coefficients dropped.  Checks that the carry
 /// past the last digit is 0 and nothing is above them.
 pub(crate) fn unpack(z: &[u64], negative: bool, terms: usize, slot: u64, out: &mut String) -> Result<(), String> {
+    let start = out.len();
+    let mut kept = out.len();
+    unpack_digits(z, negative, terms, slot, |t, neg| {
+        if out.len() > start {
+            out.push(',');
+        }
+        let zero = t.iter().all(|&w| w == 0);
+        if !zero && neg {
+            out.push('-');
+        }
+        hex(out, t);
+        if !zero {
+            kept = out.len();
+        }
+        Ok(())
+    })?;
+    out.truncate(kept);
+    Ok(())
+}
+
+/// The `terms` centered digits of |Z| (slot `slot`) in order, each given to
+/// `f` as its magnitude (ceil(s / 64) words, zero above the digit) and
+/// whether it is negative (the digit's sign times Z's).  Checks that the
+/// carry past the last digit is 0 and nothing is above them.
+pub(crate) fn unpack_digits(z: &[u64], negative: bool, terms: usize, slot: u64, mut f: impl FnMut(&[u64], bool) -> Result<(), String>) -> Result<(), String> {
     let ws = slot.div_ceil(64) as usize;
     let mut t = vec![0u64; ws + 1];
     let top = slot as u32 % 64;
     let (hw, hb) = (((slot - 1) / 64) as usize, ((slot - 1) % 64) as u32);
-    let start = out.len();
-    let mut kept = out.len();
     let mut carry = 0u64;
     for k in 0..terms {
         if k & 0xfff == 0 {
@@ -362,17 +385,7 @@ pub(crate) fn unpack(z: &[u64], negative: bool, terms: usize, slot: u64, out: &m
             carry = 0;
         }
         counted::add(8 * (ws as u64 + 1) + 8);
-        if out.len() > start {
-            out.push(',');
-        }
-        let zero = t[..ws].iter().all(|&w| w == 0);
-        if !zero && (digit_negative != negative) {
-            out.push('-');
-        }
-        hex(out, &t[..ws]);
-        if !zero {
-            kept = out.len();
-        }
+        f(&t[..ws], digit_negative != negative)?;
     }
     // (the bits above the last digit, with the carry, must be zero)
     let used = terms as u64 * slot;
@@ -389,7 +402,6 @@ pub(crate) fn unpack(z: &[u64], negative: bool, terms: usize, slot: u64, out: &m
     if carry != 0 || !high_zero {
         return Err(format!("{}: a Kronecker product left bits above its last coefficient", INTERNAL_PREFIX));
     }
-    out.truncate(kept);
     Ok(())
 }
 

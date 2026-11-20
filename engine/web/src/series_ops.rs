@@ -3,7 +3,9 @@
 //! (`series_mul`, `series_pow`, `series_euler`, `sigma_table`), on
 //! sagebrush_arith::zseries's one residue backend; and products in Z[x]
 //! (`poly_mul`, sagebrush_arith::zmul: Kronecker substitution on one NTT
-//! product with the call's own tables), admitted the same way.
+//! product with the call's own tables) and Q[x] (`qpoly_mul`,
+//! sagebrush_arith::qpoly: the common denominators, zmul's product, then
+//! each coefficient reduced), admitted the same way.
 //!
 //! **Admission, before anything sized by the request is allocated:**
 //! 1. the request's bytes, at most the op's `max_request`, by
@@ -27,9 +29,13 @@
 //! coefficient in lowest terms), in hex, trailing zeros dropped (the zero
 //! series is "").  series_euler gives "1,-1,-1,0,0,1,..."; sigma_table its n
 //! values in hex.  poly_mul gives the product's coefficients in hex, trailing
-//! zeros dropped (the zero polynomial is "").
+//! zeros dropped (the zero polynomial is ""); qpoly_mul the same, each
+//! coefficient `[-]num[/den]` in lowest terms.  qpoly_mul's admission has
+//! two phases: the lcms' memory from the scans, their work metered (a named
+//! refusal at its limit); then the product's closed forms from the actual
+//! lcms, before any of its allocations.
 
-use sagebrush_arith::{zmul, zseries};
+use sagebrush_arith::{qpoly, zmul, zseries};
 use serde_json::json;
 
 /// One row of the series ops' table: the op's caps and its path.
@@ -56,13 +62,15 @@ pub const SMALL_MAX_REQUEST: usize = 256;
 // (the peaks: the largest of the closed forms over the admitted corners, 53.3
 // MiB for the series ops and 29.0 MiB for sigma_table, with room; the
 // corner test in tests/series_ops.rs checks them)
-pub static OPS: [SeriesOp; 5] = [
+pub static OPS: [SeriesOp; 6] = [
     SeriesOp { name: "series_mul", max_request: SERIES_MAX_REQUEST, peak: 64 * MIB, work: zseries::WORK_MAX, run: series_mul },
     SeriesOp { name: "series_pow", max_request: SERIES_MAX_REQUEST, peak: 64 * MIB, work: zseries::WORK_MAX, run: series_pow },
     SeriesOp { name: "series_euler", max_request: SMALL_MAX_REQUEST, peak: 8 * MIB, work: zseries::WORK_MAX, run: series_euler },
     SeriesOp { name: "sigma_table", max_request: SMALL_MAX_REQUEST, peak: 32 * MIB, work: zseries::WORK_MAX, run: sigma_table },
     // (each request is admitted on its own closed-form peak and work, zmul::admit)
     SeriesOp { name: "poly_mul", max_request: zmul::REQUEST_MAX as usize, peak: zmul::PEAK_MAX, work: zmul::WORK_MAX, run: poly_mul },
+    // (each request admitted in two phases, qpoly::admit_a and admit_b)
+    SeriesOp { name: "qpoly_mul", max_request: zmul::REQUEST_MAX as usize, peak: zmul::PEAK_MAX, work: zmul::WORK_MAX, run: qpoly_mul },
 ];
 
 /// The admitted request's path: run, then the reply text (an error reply
@@ -355,4 +363,15 @@ fn poly_mul(req: &str, op: &SeriesOp) -> Result<String, String> {
             })
         }
     }
+}
+
+/// qpoly_mul: {a, b} -> a b in Q[x] (tokens `[-]num[/den]` in hex, constant
+/// first; the reply's coefficients in lowest terms).
+fn qpoly_mul(req: &str, op: &SeriesOp) -> Result<String, String> {
+    let name = op.name;
+    let [a, b] = fields(req, ["a", "b"], name)?;
+    let (a, b) = (need(get_str(a, "a", name)?, "a", name)?, need(get_str(b, "b", name)?, "b", name)?);
+    let pre = |e: String| format!("{}: {}", name, e);
+    let (ca, cb) = (qpoly::scan(a).map_err(pre)?, qpoly::scan(b).map_err(pre)?);
+    qpoly::reply(&ca, &cb, req.len() as u64, &qpoly::CAPS).map_err(pre)
 }

@@ -1,7 +1,9 @@
 """sagebrush.poly.mul (the engine's poly_mul: Kronecker substitution on one
 NTT product, admitted before any allocation) against Python's exact integer
 arithmetic, on many shapes: tiny, square, unbalanced, huge and negative
-coefficients, cancellation, zero factors.  Past the caps the engine refuses,
+coefficients, cancellation, zero factors; and sagebrush.poly.qmul (qpoly_mul,
+over QQ: the common denominators, the product and each coefficient's
+reduction in the engine) against Fraction arithmetic.  Past the caps the engine refuses,
 naming the cap: the quadratic shape (many one-digit coefficients times one
 huge one) is refused before any allocation.  Runs on CPython and in pyjs:
 
@@ -24,6 +26,12 @@ def reference(a, b):
     while c and c[-1] == 0:
         c.pop()
     return c
+
+
+def qcoef(r, nbits, dbits):
+    from fractions import Fraction
+    d = r.getrandbits(dbits) + 1 if dbits else 1
+    return Fraction(coef(r, nbits), d)
 
 
 def coef(r, bits):
@@ -54,8 +62,35 @@ def main():
         assert "the product's bits" in str(e) and "a smaller product per call" in str(e), e
     else:
         raise AssertionError("a 2^25-bit-plus product was admitted")
-    # Sage mode's products go through it (over QQ by the common denominators)
+    # over QQ: qmul against Fraction arithmetic, lowest terms and int for an
+    # integral coefficient (as Fraction's own arithmetic normalizes)
     from fractions import Fraction
+
+    def qnorm(c):
+        return [int(x) if x.denominator == 1 else x for x in map(Fraction, c)]
+    qshapes = [(1, 1, 1, 1, 1, 1), (3, 8, 2, 5, 8, 3), (20, 64, 70, 30, 40, 1), (7, 200, 100, 9, 1, 130),
+               (60, 1, 2, 60, 1, 2), (5, 300, 300, 5, 300, 300)]
+    for la, na, da, lb, nb, db in qshapes:
+        for _ in range(3):
+            a = [qcoef(r, na, da) for _ in range(la)]
+            b = [qcoef(r, nb, db) for _ in range(lb)]
+            got = P.qmul(a, b)
+            assert got == qnorm(reference(a, b)), (la, na, da, lb, nb, db)
+            assert all(type(x) is int or x.denominator > 1 for x in got)
+            n += 1
+    for a, b in [([], [Fraction(1, 2)]), ([0, 0], [Fraction(1, 3)]), ([Fraction(1, 2)] * 40, [Fraction(-1, 2)] * 30),
+                 ([Fraction(1, 3), Fraction(2, 3)], [3, -3]), ([Fraction(-7, 2 ** 70)], [2 ** 70]), ([1, 2, 3], [4, 5])]:
+        assert P.qmul(a, b) == qnorm(reference(a, b)), (a, b)
+        n += 1
+    # many distinct coprime denominators: refused by the lcm's metered work,
+    # naming it
+    try:
+        P.qmul([Fraction(1, (1 << 62) + 2 * i + 1) for i in range(20000)], [Fraction(1, 3)])
+    except ValueError as e:
+        assert "the denominators' lcm needs more than" in str(e), e
+    else:
+        raise AssertionError("20000 coprime denominators were admitted")
+    # Sage mode's products go through it (ZZ[x] by poly_mul, QQ[x] by qpoly_mul)
     try:
         import sagebrush.sage as S
     except ImportError:

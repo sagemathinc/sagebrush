@@ -10,6 +10,7 @@
 //! - [`nmod_mat`]: dense matrices over Z/p;
 //! - [`zmat`]: dense matrices over Z and Q (multimodular, certified);
 //! - [`zpoly`]: polynomials over Z (Kronecker products, modular gcd);
+//! - [`qpoly`]: products in Q[x], reduced (the `qpoly_mul` op);
 //! - [`wire_decode`]: the wire's big-integer payloads, decoded under one
 //!   reservation, with the gcd = 1 checks of [`coprime`].
 
@@ -27,4 +28,5 @@ pub mod wire_decode;
 pub mod zmat;
 pub mod zpoly;
 pub mod zmul;
+pub mod qpoly;
 pub mod zseries;

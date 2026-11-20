@@ -73,6 +73,8 @@ fn the_strict_schema() {
     }
     let e = err(&format!(r#"{{"fn":"poly_mul","a":"{}界","b":"1"}}"#, "a".repeat(39)));
     assert!(e.contains("is not a hex integer"), "{}", e);
+    let e = err(&format!(r#"{{"fn":"qpoly_mul","a":"1/{}界","b":"1"}}"#, "a".repeat(37)));
+    assert!(e.contains("is not a hex rational"), "{}", e);
     let e = err(r#"{"fn":"series_mul","a":"1","a":"2","b":"1","n":1}"#);
     assert!(e.contains("twice"), "{}", e);
     let e = err(r#"{"fn":"series_mul","fn":"series_mul","a":"1","b":"1","n":1}"#);
