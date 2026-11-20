@@ -1064,8 +1064,19 @@ class Polynomial:
             # so the result is, as Sage's coercion takes the parents, not
             # the values)
             return Polynomial(self._qq_ring(), [other])
-        if isinstance(other, (int, _F)):
+        # (the other exact numbers by the identity of their class against
+        # the registered ones, and bool: no hash, equality or subclass hook
+        # of an untrusted class runs, as Fraction's ABC isinstance would)
+        t = type(other)
+        if t is bool:
             return Polynomial(self._ring, [other])
+        from sagebrush import poly
+        for k in poly._QCLEAR_INTS:
+            if t is k:
+                return Polynomial(self._ring, [other])
+        for k in poly._QCLEAR_FRACTIONS:
+            if t is k:
+                return Polynomial(self._ring, [other])
         return None
 
     def _make(self, coeffs, other=None):

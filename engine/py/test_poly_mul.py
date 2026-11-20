@@ -534,6 +534,48 @@ def qscale_checks(r):
     for got, want, ring in (((t + 2) // QQ(2), [1], Z), ((t + 2) % QQ(2), [0, 1], Z), (divmod(3 * t + 5, QQ(2))[1], [1, 1], Z), ((t + 2) // h, [4, 2], T)):
         assert str(got.parent()) == str(ring) and [Fraction(c) for c in got.list()] == [Fraction(c) for c in want], (got, want, ring)
         n += 1
+    # (an operand's class is matched by identity only: a class whose
+    # metaclass hash, equality, instance or subclass checks would run is
+    # never hashed, compared or checked by _coerce, a reflected / or quo_rem)
+    hooks = []
+
+    class Hostile(type):
+        def __hash__(cls):
+            hooks.append("hash")
+            raise RuntimeError("untrusted class hash invoked")
+
+        def __eq__(cls, other):
+            hooks.append("eq")
+            raise RuntimeError("untrusted class equality invoked")
+
+        def __instancecheck__(cls, obj):
+            hooks.append("instancecheck")
+            raise RuntimeError("untrusted instance check invoked")
+
+        def __subclasscheck__(cls, sub):
+            hooks.append("subclasscheck")
+            raise RuntimeError("untrusted subclass check invoked")
+
+    class HI(int, metaclass=Hostile):
+        pass
+
+    class HO(metaclass=Hostile):
+        pass
+    # (and an unrelated class named Rational: its name is never read)
+    HR = Hostile("Rational", (), {})
+    for v in (HI(3), HO(), HR()):
+        assert t._coerce(v) is None and (t + 2)._coerce(v) is None
+        assert t.__rtruediv__(v) is NotImplemented
+        try:
+            t.quo_rem(v)
+        except ZeroDivisionError:
+            pass
+        else:
+            raise AssertionError("quo_rem accepted an unregistered class")
+        n += 1
+    assert hooks == [], hooks
+    # (the registered classes and bool keep coercing)
+    assert (t + True).list() == [1, 1] and (t + Fraction(1, 2)).list() == [Fraction(1, 2), 1] and (t + ZZ(3)).list() == [3, 1]
     # (the zero polynomial has no monic multiple: ZeroDivisionError, as Sage)
     for z in (R(0), Z(0)):
         try:
