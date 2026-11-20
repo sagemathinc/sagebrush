@@ -117,6 +117,12 @@ const event = (turn_id, e, conversation = conv) => {
 };
 // (an event the stand-in logs while no page is there to get it: a turn it ended when its page went away)
 const logOnly = (turn_id, e, conversation = conv) => agentLog.push({ seq: ++logSeq, method: "turn.event", params: { conversation, turn_id, event: e } });
+/** The page's chat.resume, once it is connected again: waited for as long as the rows' other waits (until's budget), and
+ *  a failure that says so if it never comes, never a row that goes on answering nothing. */
+const untilResume = async (ms = 20000) => {
+  for (const t = Date.now(); !resumes.length && Date.now() - t < ms; ) await sleep(50);
+  if (!resumes.length) throw new Error(`the page never asked to resume (no chat.resume in ${ms / 1000} s)\n  the page then: ` + JSON.stringify(await pageState()));
+};
 // (the held chat.resume requests answered from the stand-in's log)
 // (`running`: the turn the stand-in still runs in that conversation, as an agent that kept it going does, step 2)
 const answerResumes = (running = []) => {
@@ -140,9 +146,19 @@ async function artifactTurn(path, { finish = true, turn = null } = {}) {
 const tagOf = (s) => "k" + [...s].reduce((h, c) => (h * 31 + c.charCodeAt(0)) >>> 0, 7).toString(16);
 const nbDoc = (cells, extra = {}, tag = "c") => ({ json: { mode: "python", ...extra, cells: cells.map((c, i) => ({ id: `${tag}${i}`, type: c.type ?? "code", code: c.code })) } });
 const docFor = (path, cells, extra, salt = "") => nbDoc(cells, extra, tagOf(path + salt));
-const write = async (path, cells, extra) => {
-  const r = await call("workspace.read", { path });
-  return call("workspace.write", { path, content: docFor(path, cells, extra), base: r.rev });
+// (as an agent does: on a conflict it reads again and writes again. The page saves an open notebook half a second after
+//  its last change, new output included (web/notebook/notebook.js schedule), so on a slow runner that save can land
+//  between the read and the write; a conflict that stays is still thrown)
+const write = async (path, cells, extra, tries = 5) => {
+  for (let i = 1; ; i++) {
+    const r = await call("workspace.read", { path });
+    try {
+      return await call("workspace.write", { path, content: docFor(path, cells, extra), base: r.rev });
+    } catch (e) {
+      if (e.code !== "conflict" || i >= tries) throw e;
+      await sleep(300);
+    }
+  }
 };
 const readCells = async (path) => (await call("workspace.read", { path })).content.json.cells;
 // (the hash an edit by cell names a cell by, as the helper computes it: web/workspace/notebook-edit.ts cellHash)
@@ -1172,7 +1188,7 @@ try {
     for (const t3 = Date.now(); !heldHello && Date.now() - t3 < 20000; ) await sleep(50);
     heldHello?.();
     await until(`document.querySelector('#connect').textContent === 'Connected'`, 20000);
-    for (const t3 = Date.now(); !resumes.length && Date.now() - t3 < 10000; ) await sleep(50);
+    await untilResume();
     ok(resumes.some((r) => r.conversation === conv && r.instance === LOG_INSTANCE && r.after > 0), "resume: connected again, the page asks for what it missed, from its last number, with the run", resumes);
     answerResumes();
     const t2 = Date.now();
@@ -1202,7 +1218,7 @@ try {
     for (const t3 = Date.now(); !heldHello && Date.now() - t3 < 20000; ) await sleep(50);
     heldHello?.();
     await until(`document.querySelector('#connect').textContent === 'Connected'`, 20000);
-    for (const t3 = Date.now(); !resumes.length && Date.now() - t3 < 10000; ) await sleep(50);
+    await untilResume();
     answerResumes([tS]);
     // (that turn's own view: its status line, no longer the lost connection's)
     const turnJs = `[...document.querySelectorAll('.turn')].find((d) => /still at it/.test(d.textContent))`;
@@ -1229,7 +1245,7 @@ try {
     await until(`[...document.querySelectorAll('button')].some((b) => b.checkVisibility() && /^Reconnect$/.test(b.textContent))`, 15000);
     await ev(`[...document.querySelectorAll('button')].find((b) => b.checkVisibility() && /^Reconnect$/.test(b.textContent)).click()`);
     await until(`document.querySelector('#connect').textContent === 'Connected'`, 20000);
-    for (const t3 = Date.now(); !resumes.length && Date.now() - t3 < 10000; ) await sleep(50);
+    await untilResume();
     answerResumes([tL]);
     await until(`!/The connection to the agent was lost/.test(${lostJs}.textContent) && !document.querySelector('#stop').hidden`);
     ok(true, "resume (step 2): Reconnect: the agent says it still runs: running again, Stop shown");
