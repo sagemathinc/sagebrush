@@ -25,17 +25,18 @@ export default {
   id: "existing-ipynb",
   prompt: "Open this Jupyter notebook and run it. Then change the damping to 0.5 and run it again.",
   surfaces: ["mcp", "chat"],
-  gaps: {
-    chat: "the pane shows only files the agent wrote, not a notebook it was pointed at, and the agent's own run there isn't shown or saved with the notebook",
-  },
   given: { [PATH]: { json: NOTEBOOK } },
   // (the agent reads the notebook it was pointed at; its runs and its edit are in expect, where their answers are checked)
   agent: [{ tool: "workspace_read", args: { path: PATH } }],
   async expect(h) {
     // (the notebook page's own checks: the outputs it shows, its Run all and its slider; the pane has none of these)
     const onPage = h.surface === "mcp";
-    await h.shown(PATH);
-    await h.ran(PATH, { images: 1, errors: 0, text: /x\(10\) = -0\.2143 for c = 0\.3/ });
+    // (on the notebook page it is open, and run, before the agent's run; in the Agents page's pane the agent's run is
+    //  what opens it, below)
+    if (onPage) {
+      await h.shown(PATH);
+      await h.ran(PATH, { images: 1, errors: 0, text: /x\(10\) = -0\.2143 for c = 0\.3/ });
+    }
     // (its outputs cleared and saved, so what the page shows next is the agent's run)
     if (onPage) await h.ev("(async () => { sagebrush.notebook.clearOutputs(); await sagebrush.notebook.saved(); return true; })()");
     const outs = () => h.ev(`(() => {
@@ -49,6 +50,11 @@ export default {
     h.ok(!run.isError && res.ended === "done" && res.saved === "saved", "the agent's run: done, its outputs saved with the notebook", run.isError ? run.text : res);
     h.ok(/-0\.2143/.test(res.cells?.[1]?.out ?? "") && /-0\.4286/.test(res.cells?.[2]?.out ?? "") && res.cells?.[3]?.images?.count === 1,
       "its answer: the ODE's value, `_` doubled, the plot", res.cells);
+    if (!onPage) {
+      // (the pane: the notebook the agent ran, opened there, its run's outputs shown and saved)
+      await h.shown(PATH);
+      await h.ran(PATH, { images: 1, errors: 0, text: /-0\.2143/ });
+    }
     if (onPage) {
       let page = await outs();
       h.ok(/-0\.2143/.test(page.solved) && /-0\.4286/.test(page.doubled) && page.sliders >= 1, "the page shows the agent's run, with no Run all pressed: the values and the slider", page);

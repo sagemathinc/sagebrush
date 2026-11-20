@@ -406,8 +406,9 @@ export async function runCase(kase, surfaceName, { site, page, shotDir = process
       const r = await surface.tool(step.tool, step.args ?? {});
       h.ok(!r.isError || step.expectError, `the agent: ${step.tool} ${step.args?.path ?? ""}`.trim(), r.text);
     }
-    surface.endTurn?.();
-    await kase.expect(h);
+    // (the turn stays open while the case checks: an agent's later calls (its read-back, its edit, its run) come within
+    //  its turn, as sagebrush-agent's do; ended after)
+    try { await kase.expect(h); } finally { surface.endTurn?.(); }
   };
   try {
     await Promise.race([body(), sleep(kase.ms ?? CASE_MS).then(() => { throw new Error(`over ${(kase.ms ?? CASE_MS) / 1000} s`); })]);
