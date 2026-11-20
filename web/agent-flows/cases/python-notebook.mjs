@@ -39,7 +39,11 @@ export default {
     const rd = await h.tool("workspace_read", { path: PATH });
     const doc = rd.structured?.result?.content?.json;
     h.ok(!rd.isError && Array.isArray(doc?.cells) && doc.cells.length === 2, "the agent reads its notebook back", rd.text);
-    const wr = await h.tool("workspace_write", { path: PATH, content: { json: { ...doc, cells: [...doc.cells, { code: HIST }] } }, base: rd.structured?.result?.rev });
+    // (on the Agents page, as sagebrush-agent 0.7.2 does where the page edits notebooks by cell: the cell inserted after
+    //  the last, from the read, the others and their outputs kept; with sagebrush-mcp, the whole notebook written)
+    const wr = h.surface === "chat"
+      ? await h.tool("workspace_edit_notebook", { path: PATH, base: rd.structured?.result?.rev, insert: [{ source: HIST, after: doc.cells.at(-1)?.id ?? null }] })
+      : await h.tool("workspace_write", { path: PATH, content: { json: { ...doc, cells: [...doc.cells, { code: HIST }] } }, base: rd.structured?.result?.rev });
     h.ok(!wr.isError, "the agent adds the histogram cell", wr.text);
     const run = await h.tool("workspace_run_notebook", { path: PATH });
     const cells = run.structured?.result?.cells ?? [];

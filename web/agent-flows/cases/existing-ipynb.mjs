@@ -89,8 +89,13 @@ export default {
       const edited = src(c).replace("args=(0.3,)", "args=(0.5,)");
       return "source" in c ? { ...c, source: lines(edited) } : { ...c, code: edited };
     });
-    const wrote = await h.tool("workspace_write", { path: PATH, base: r.rev, content: { json: { ...json, cells } } });
-    h.ok(!wrote.isError, "the agent's edit is written on the revision it read", wrote.text);
+    // (on the Agents page, as sagebrush-agent 0.7.2 does where the page edits notebooks by cell: that one cell set, from
+    //  the read, its outputs and every other cell kept; with sagebrush-mcp, the whole notebook written on the revision)
+    const id = json.cells?.[SOLVE]?.id;
+    const wrote = onPage
+      ? await h.tool("workspace_write", { path: PATH, base: r.rev, content: { json: { ...json, cells } } })
+      : await h.tool("workspace_edit_notebook", { path: PATH, base: r.rev, set: [{ id, source: src(cells[SOLVE]) }] });
+    h.ok(!wrote.isError, onPage ? "the agent's edit is written on the revision it read" : "the agent's edit of that one cell is applied, from the revision it read", wrote.text);
     const rerun = await h.tool("workspace_run_notebook", { path: PATH });
     const rr = rerun.structured?.result ?? {};
     h.ok(!rerun.isError && /-0\.0845/.test(rr.cells?.[1]?.out ?? "") && /-0\.169/.test(rr.cells?.[2]?.out ?? ""), "the rerun: the new damping's values", rerun.isError ? rerun.text : rr.cells);

@@ -14,6 +14,7 @@ import { join } from "node:path";
 import { createInterface } from "node:readline";
 import { randomBytes } from "node:crypto";
 import { devtoolsPort } from "../test-port.mjs";
+import { cellHash } from "../workspace/notebook-edit.ts";
 
 const here = new URL(".", import.meta.url).pathname;
 const SB_SRC = join(here, "../../engine/py/python/sagebrush");
@@ -214,7 +215,7 @@ export const PANE_CELLS = `(() => {
 // ---- surface chat: the Agents page and a stand-in for sagebrush-agent (as web/agents/a14-cases.mjs's fakeAgent: the
 // runner protocol on a loopback socket; the agent's tool calls become the page verbs sagebrush-agent makes)
 async function chatSurface(site, page) {
-  const A = { live: null, pending: new Map(), n: 0, secret: randomBytes(32).toString("base64url"), grants: [], turn: null, asked: [] };
+  const A = { live: null, pending: new Map(), n: 0, secret: randomBytes(32).toString("base64url"), grants: [], turn: null, asked: [], reads: new Map() };
   const server = Bun.serve({
     port: 0,
     hostname: "127.0.0.1",
@@ -233,7 +234,7 @@ async function chatSurface(site, page) {
             return void ws.close(1008, "refused");
           }
           A.live = ws;
-          ws.send(JSON.stringify({ jsonrpc: "2.0", id: m.id, result: { protocol: 1, agent: { name: "Claude", client: "claude-agent-sdk", version: "0.7.2" }, wants: { folders: ["/"], write: true, run: true }, features: ["run.context"], ...(typeof p.code === "string" ? { session: A.secret } : {}) } }));
+          ws.send(JSON.stringify({ jsonrpc: "2.0", id: m.id, result: { protocol: 1, agent: { name: "Claude", client: "claude-agent-sdk", version: "0.7.2" }, wants: { folders: ["/"], write: true, run: true }, features: ["notebook.edit", "run.context"], ...(typeof p.code === "string" ? { session: A.secret } : {}) } }));
         } else if (m.id && A.pending.has(m.id)) {
           A.pending.get(m.id)(m);
           A.pending.delete(m.id);
@@ -264,7 +265,23 @@ async function chatSurface(site, page) {
     //  model's arguments)
     const runs = ["workspace_run_notebook", "workspace_run_file", "workspace_latex_build"].includes(name);
     const ctx = runs && A.turn && A.features?.includes("run.context") ? { conversation: A.turn.conversation, turn_id: A.turn.id } : {};
-    const r = await call("workspace." + name.slice("workspace_".length), { ...args, ...ctx });
+    // (workspace_edit_notebook, as sagebrush-agent 0.7.2 makes it where the page offers notebook.edit: from a read held
+    //  here, by its revision, with the read's ref and the hash of each cell it names; refused without such a read)
+    let method = "workspace." + name.slice("workspace_".length), params = { ...args, ...ctx };
+    if (name === "workspace_edit_notebook") {
+      const read = A.reads.get(args.path)?.get(args.base);
+      if (!read) return { text: `refused: no read of ${args.path} at revision ${args.base} here`, structured: { result: null, error: { code: "invalid", message: "no read" } }, isError: true };
+      const ids = [...(args.set ?? []).map((x) => x.id), ...(args.remove ?? []), ...(args.insert ?? []).map((x) => x.after).filter((x) => x !== null)];
+      const was = Object.fromEntries(ids.filter((id) => read.hashes.has(id)).map((id) => [id, read.hashes.get(id)]));
+      method = "notebook.edit";
+      params = { conversation: A.turn?.conversation, path: args.path, ref: read.ref, base: args.base, ...(args.set ? { set: args.set } : {}), ...(args.insert ? { insert: args.insert } : {}), ...(args.remove ? { remove: args.remove } : {}), was };
+    }
+    const r = await call(method, params);
+    // (a notebook read: kept by its path and revision, its ref and each cell's hash, for an edit from it)
+    if (name === "workspace_read" && !r.error && typeof r.result?.ref === "string" && Number.isInteger(r.result?.rev) && Array.isArray(r.result?.content?.json?.cells)) {
+      if (!A.reads.has(args.path)) A.reads.set(args.path, new Map());
+      A.reads.get(args.path).set(r.result.rev, { ref: r.result.ref, hashes: new Map(r.result.content.json.cells.filter((c) => typeof c?.id === "string").map((c) => [c.id, cellHash(c)])) });
+    }
     const error = r.error ? { code: r.error.data?.code ?? r.error.code, message: r.error.data?.message ?? r.error.message } : null;
     const text = JSON.stringify(error ?? r.result).slice(0, 4000);
     if (A.turn) {

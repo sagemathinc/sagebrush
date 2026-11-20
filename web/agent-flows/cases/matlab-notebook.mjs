@@ -16,7 +16,12 @@ export default {
     // (the person asks for more: the agent adds a cell and runs the notebook again, in MATLAB)
     const r = await h.tool("workspace_read", { path: "/sin_x_squared.ipynb" });
     const cells = [...(nb?.cells ?? []).map((c) => ({ code: c.code })), { code: "fprintf('%.4f\\n', max(sin(x.^2)))" }];
-    const w = await h.tool("workspace_write", { path: "/sin_x_squared.ipynb", base: r.structured?.result?.rev, content: { json: { mode: "matlab", cells } } });
+    // (on the Agents page, as sagebrush-agent 0.7.2 does where the page edits notebooks by cell: one cell inserted after
+    //  the last, from the read; with sagebrush-mcp, the whole notebook written on the revision)
+    const last = r.structured?.result?.content?.json?.cells?.at(-1)?.id ?? null;
+    const w = h.surface === "chat"
+      ? await h.tool("workspace_edit_notebook", { path: "/sin_x_squared.ipynb", base: r.structured?.result?.rev, insert: [{ source: cells.at(-1).code, after: last }] })
+      : await h.tool("workspace_write", { path: "/sin_x_squared.ipynb", base: r.structured?.result?.rev, content: { json: { mode: "matlab", cells } } });
     h.ok(!w.isError, "the agent's edit is written", w.text);
     const run = await h.tool("workspace_run_notebook", { path: "/sin_x_squared.ipynb" });
     const res = run.structured?.result ?? {};
