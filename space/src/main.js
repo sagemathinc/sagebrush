@@ -408,9 +408,8 @@ async function load(name, data = null, again = false) {
 }
 
 // the camera: everything in view
-function frame(P, remember = false) {
-  if (remember) pushView();
-  // (the centre, and the distance within which most of the space is: a few outliers don't shrink the rest)
+// (the view of everything: the centre, and a place to see most of the space from; a few outliers don't shrink the rest)
+function homeView(P) {
   const n = P.length / 3, c = new THREE.Vector3();
   for (let i = 0; i < n; i++) c.add(new THREE.Vector3(P[3 * i], P[3 * i + 1], P[3 * i + 2]));
   c.divideScalar(Math.max(n, 1));
@@ -418,7 +417,11 @@ function frame(P, remember = false) {
   for (let i = 0; i < n; i++) ds.push(c.distanceTo(new THREE.Vector3(P[3 * i], P[3 * i + 1], P[3 * i + 2])));
   ds.sort((a, b) => a - b);
   const r = Math.max(ds[Math.floor(ds.length * 0.8)] ?? 6, 6);
-  const to = c.clone().add(new THREE.Vector3(0.35, 0.25, 1).normalize().multiplyScalar(r * 2.2));
+  return { to: c.clone().add(new THREE.Vector3(0.35, 0.25, 1).normalize().multiplyScalar(r * 2.2)), toT: c, r };
+}
+function frame(P, remember = false) {
+  if (remember) pushView();
+  const { to, toT: c, r } = homeView(P);
   camera.far = r * 20;
   scene.fog.near = r * 1.2; scene.fog.far = r * 6;
   camera.updateProjectionMatrix();
@@ -443,19 +446,22 @@ function navButtons() {
 function flyToView(to, toT, ms = 900) {
   flight = { from: camera.position.clone(), fromT: controls.target.clone(), to, toT, t0: performance.now(), ms };
 }
-function flyTo(i, dist, remember = true) {
+// (where to see object i from: in front of its face (the slabs face +z), or a plot from in front and below its middle,
+//  far enough to have it whole)
+function viewOf(i, dist) {
   const nd = space.nodes[i];
   const p = new THREE.Vector3(positions[3 * i], positions[3 * i + 1], positions[3 * i + 2]);
   const d = dist ?? (nd.kind === "file" ? 5 : 9);
-  if (remember) pushView();
   if (nd.kind === "plot3d" || nd.scene) {
-    // (a plot: seen from in front and below its middle, far enough to have it whole, its height in view)
     const t = p.clone().add(new THREE.Vector3(0, 0, 1.4));
-    flyToView(t.clone().add(new THREE.Vector3(0, -8.5, 7.5)), t);
-    return;
+    return { to: t.clone().add(new THREE.Vector3(0, -8.5, 7.5)), toT: t };
   }
-  // (seen from the front of its face: the slabs face +z)
-  flyToView(p.clone().add(new THREE.Vector3(0, 0, d)), p);
+  return { to: p.clone().add(new THREE.Vector3(0, 0, d)), toT: p };
+}
+function flyTo(i, dist, remember = true) {
+  if (remember) pushView();
+  const { to, toT } = viewOf(i, dist);
+  flyToView(to, toT);
 }
 function go(from, to) {
   const v = from.pop();
@@ -901,6 +907,10 @@ const xr = setupXR({
   renderer, scene, camera, controls, runnable,
   pickables: () => pickables,
   select: (nd) => setSelected(nd ? nd.id : null),
+  // (the views the desktop flies to: an object's, and everything's)
+  viewOf: (nd) => viewOf(space.nodes.indexOf(nd)),
+  home: () => space && homeView(positions),
+  runAll: () => $("#runall").click(),
   run: (nd) => runNode(nd),
   glow: (nd, v) => setGlow(nd, v),
   theme: () => T,

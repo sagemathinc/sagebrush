@@ -91,8 +91,9 @@ SAGEBRUSH_AGENT_PAGE=https://space.sagebrush.cloud/agents/ npx -y https://agents
 
 **Enter VR** (in the panel, where the browser has WebXR) puts you in the space, where a slab is about a metre wide; **Enter AR** puts the space in your room through the headset's passthrough.
 
-- Point a controller at an object and pull the **trigger**: its reading panel opens in front of you (its text, code and output), with **Run**, scrolling and **Close**. The object is selected, as a click selects it, so the agent sees it.
-- **Left thumbstick**: move where you look. **Right thumbstick**: up and down, and turn in 30° steps. Hold the **grip** to go 4× faster. **A** or **X** closes the panel.
+- Point a controller at an object and pull the **trigger**: you fly to it (as the desktop does) and its reading panel opens beside it (its text, code and output), with **Run**, scrolling and **Close**. The object is selected, as a click selects it, so the agent sees it.
+- **Left thumbstick**: move where you look. **Right thumbstick**: up and down, and turn in 30° steps. Hold the **grip** to go 4× faster. **A** or **X** closes the panel; **B** or **Y** goes back.
+- **The menu on your left wrist**: Back, Forward, See all, Run all, Exit VR.
 - WebXR needs a secure page: the https alpha, or your laptop's server over USB (`adb reverse tcp:8765 tcp:8765`, then http://localhost:8765/ in the headset's browser).
 - `node space/test-xr.mjs` checks it without a headset, on Meta's emulated Quest 3 (IWER).
 

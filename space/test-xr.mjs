@@ -89,6 +89,13 @@ await sleep(200);
 await ev(`window.__xrDevice.controllers.right.updateButtonValue('trigger', 0), true`);
 ok(await until(`whitespace.xr.panel?.id === 'logistic'`, 5000), "the trigger on an object opens its reading panel", await ev(`whitespace.xr.panel`));
 ok((await ev(`whitespace.selection?.id`)) === "logistic", "and selects it (as a click does: the agent sees it)");
+// (and flies you to it: your head where the desktop's camera would go, about 9 units in front of its face)
+const headTo = (target) => `(() => { const W = whitespace, V = W.camera.position.constructor;
+  const o = W.objects[W.space.nodes.findIndex((n) => n.id === ${JSON.stringify(target)})];
+  return +W.camera.getWorldPosition(new V()).distanceTo(o.getWorldPosition(new V())).toFixed(2); })()`;
+ok(await until(`whitespace.xr.history.flying === false && whitespace.xr.history.back === 1`, 5000), "and you fly there (one step to go back)", await ev(`whitespace.xr.history`));
+const near = await ev(headTo("logistic"));
+ok(near > 7 && near < 11, "you end up in front of it, as on the desktop", { distance: near });
 await sleep(500);
 await shot("vr-panel");
 
@@ -113,13 +120,35 @@ await sleep(200);
 const turned = (await ev(`whitespace.xr.rig.rotation.y`)) - rigBefore[3];
 ok(Math.abs(Math.abs(turned) - Math.PI / 6) < 1e-3, "the right thumbstick turns you 30°", { turned: +turned.toFixed(3) });
 
+// ---- the wrist menu: Back flies back to where you were; Forward returns; See all; B is Back too
+const far = async () => ev(headTo("logistic"));
+const beforeBack = await far(); // (where the thumbsticks left you: what Forward returns to)
+await ev(`whitespace.xr.menuPress('back'), true`);
+await until(`whitespace.xr.history.flying === false`, 3000);
+await sleep(100);
+const afterBack = await far();
+ok(afterBack > beforeBack + 5, "Back (wrist menu) flies back to where you were before flying to it", { distance: afterBack });
+await ev(`whitespace.xr.menuPress('forward'), true`);
+await until(`whitespace.xr.history.flying === false`, 3000);
+await sleep(100);
+ok(Math.abs((await far()) - beforeBack) < 0.5, "Forward returns to where you were at the object", { distance: await far(), beforeBack });
+await ev(`window.__xrDevice.controllers.left.updateButtonValue('y-button', 1), true`);
+await sleep(300);
+await ev(`window.__xrDevice.controllers.left.updateButtonValue('y-button', 0), true`);
+await until(`whitespace.xr.history.flying === false`, 3000);
+await sleep(100);
+ok((await far()) > beforeBack + 5, "Y is Back too", { distance: await far(), history: await ev(`whitespace.xr.history`) });
+await ev(`whitespace.xr.menuPress('home'), true`);
+await until(`whitespace.xr.history.flying === false`, 3000);
+ok((await ev(`whitespace.xr.history.back`)) >= 1, "See all flies out (and can be undone)", await ev(`whitespace.xr.history`));
+
 // ---- A closes the panel; Exit VR puts the camera back
 await ev(`window.__xrDevice.controllers.right.updateButtonValue('a-button', 1), true`);
 await sleep(300);
 await ev(`window.__xrDevice.controllers.right.updateButtonValue('a-button', 0), true`);
 ok(await until(`whitespace.xr.panel === null`, 3000), "A closes the panel");
-await ev(`document.querySelector('#vr').click(), true`);
-ok(await until(`!whitespace.xr.presenting`), "Exit VR leaves");
+await ev(`whitespace.xr.menuPress('exit'), true`);
+ok(await until(`!whitespace.xr.presenting`), "Exit VR (wrist menu) leaves");
 const camAfter = await ev(`whitespace.camera.position.toArray().map((x) => +x.toFixed(3))`);
 ok(JSON.stringify(camAfter) === JSON.stringify(camBefore), "the camera is back where it was", [camBefore, camAfter]);
 // ---- AR: the space in the room (no background, so passthrough shows), and the background back afterwards

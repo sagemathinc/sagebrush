@@ -1,8 +1,9 @@
 // The space in a headset (WebXR: Meta Quest's browser, and others): Enter VR (or AR, the space in your room through
 // passthrough). You stand in the space at a scale where a slab is about a metre wide. Each controller casts a ray:
-// the trigger selects what it points at, and a reading panel opens in front of you (the drawer's text, its output, Run;
-// the page's own HTML isn't drawn inside a headset). Left thumbstick: move where you look; right thumbstick: up and
-// down, and turn in steps. Hold the grip to go faster. A or X closes the panel.
+// the trigger selects what it points at: you fly to it (as the desktop does) and its reading panel opens beside it (the
+// drawer's text, its output, Run; the page's own HTML isn't drawn inside a headset). Left thumbstick: move where you
+// look; right thumbstick: up and down, and turn in steps. Hold the grip to go faster. A or X closes the panel; B or Y
+// goes back. The menu on your left wrist: Back, Forward, See all, Run all, Exit VR.
 import * as THREE from "three";
 import { texToText } from "./tex.js";
 
@@ -26,13 +27,48 @@ export function setupXR(api) {
     line.scale.z = 30; // (in the rig's units, metres: the rig is scaled by SCALE)
     c.add(line);
     c.userData = { line, source: null, hovered: null };
-    c.addEventListener("connected", (e) => (c.userData.source = e.data));
+    c.addEventListener("connected", (e) => {
+      c.userData.source = e.data;
+      if (e.data?.handedness === "left") { c.add(menu); drawMenu(); }
+    });
     c.addEventListener("disconnected", () => (c.userData.source = null));
     c.addEventListener("select", () => onSelect(c));
     rig.add(c);
     return c;
   });
   const ray = new THREE.Raycaster();
+
+  // ---------------------------------------------------------------- flying: to an object's view, Back and Forward
+  // (your head at `to`, facing `toT` (turned about the vertical only), in `ms`; where you were is remembered for Back)
+  let flight = null;
+  const backStack = [], fwdStack = [];
+  const pose = () => ({ pos: rig.position.clone(), yaw: rig.rotation.y });
+  function flyRig(to, toT, ms = 450, remember = true) {
+    if (remember) { backStack.push(pose()); fwdStack.length = 0; drawMenu(); }
+    const d = new THREE.Vector3().subVectors(toT, to);
+    const yaw = Math.atan2(-d.x, -d.z);
+    // (the rig's place that puts the head, where it is in the rig now, at `to`)
+    const head = camera.position.clone().applyAxisAngle(new THREE.Vector3(0, 1, 0), yaw).multiplyScalar(SCALE);
+    flyPose({ pos: to.clone().sub(head), yaw }, ms);
+  }
+  function flyPose(target, ms = 450) {
+    let dy = target.yaw - rig.rotation.y;
+    dy = Math.atan2(Math.sin(dy), Math.cos(dy)); // (the short way round)
+    flight = { from: pose(), to: { pos: target.pos, yaw: rig.rotation.y + dy }, t0: performance.now(), ms };
+  }
+  function stepFlight() {
+    if (!flight) return;
+    const u = Math.max(0, Math.min(1, (performance.now() - flight.t0) / flight.ms)), e = u * u * (3 - 2 * u);
+    rig.position.lerpVectors(flight.from.pos, flight.to.pos, e);
+    rig.rotation.y = flight.from.yaw + (flight.to.yaw - flight.from.yaw) * e;
+    if (u >= 1) flight = null;
+  }
+  const goBack = () => { const v = backStack.pop(); if (v) { fwdStack.push(pose()); flyPose(v); } drawMenu(); };
+  const goForward = () => { const v = fwdStack.pop(); if (v) { backStack.push(pose()); flyPose(v); } drawMenu(); };
+  function seeAll() {
+    const h = api.home();
+    if (h) flyRig(h.to, h.toT, 700);
+  }
 
   // ---------------------------------------------------------------- the reading panel
   const PW = 1024, PH = 1280;
@@ -114,18 +150,29 @@ export function setupXR(api) {
     if (state && state !== "running") { g.fillStyle = C.muted; g.font = "26px system-ui, sans-serif"; g.fillText(state, x + 8, PH - 70); }
     tex.needsUpdate = true;
   }
-  function open(nd) {
+  function open(nd, fly = true) {
     shown = nd; scroll = 0; state = "";
     draw();
-    // (in front of you, at eye height, turned to face you)
-    const head = camera.getWorldPosition(new THREE.Vector3());
-    const dir = camera.getWorldDirection(new THREE.Vector3()).setY(0);
-    if (dir.lengthSq() < 1e-6) dir.set(0, 0, -1);
-    dir.normalize();
-    panel.position.copy(head).addScaledVector(dir, 1.2 * SCALE).add(new THREE.Vector3(0, -0.15 * SCALE, 0));
-    panel.lookAt(head.x, panel.position.y, head.z);
-    panel.visible = true;
     api.select(nd);
+    if (fly) {
+      // (to the object, as the desktop flies to it; the panel then opens to its right, facing where you'll be)
+      const v = api.viewOf(nd);
+      flyRig(v.to, v.toT);
+      const d = new THREE.Vector3().subVectors(v.toT, v.to).setY(0).normalize();
+      const right = new THREE.Vector3().crossVectors(d, new THREE.Vector3(0, 1, 0));
+      const eyeTo = v.to.clone();
+      panel.position.copy(eyeTo).addScaledVector(d, 1.1 * SCALE).addScaledVector(right, 0.75 * SCALE).add(new THREE.Vector3(0, -0.1 * SCALE, 0));
+      panel.lookAt(eyeTo.x, panel.position.y, eyeTo.z);
+    } else {
+      // (in front of you, at eye height, turned to face you)
+      const head = camera.getWorldPosition(new THREE.Vector3());
+      const dir = camera.getWorldDirection(new THREE.Vector3()).setY(0);
+      if (dir.lengthSq() < 1e-6) dir.set(0, 0, -1);
+      dir.normalize();
+      panel.position.copy(head).addScaledVector(dir, 1.2 * SCALE).add(new THREE.Vector3(0, -0.15 * SCALE, 0));
+      panel.lookAt(head.x, panel.position.y, head.z);
+    }
+    panel.visible = true;
   }
   function close() { panel.visible = false; shown = null; api.select(null); }
   async function press(act) {
@@ -143,15 +190,57 @@ export function setupXR(api) {
     }
   }
 
+  // ---------------------------------------------------------------- the wrist menu (left controller)
+  const MW = 512, MH = 400;
+  const mcanvas = Object.assign(document.createElement("canvas"), { width: MW, height: MH });
+  const mtex = new THREE.CanvasTexture(mcanvas);
+  mtex.colorSpace = THREE.SRGBColorSpace;
+  const menu = new THREE.Mesh(new THREE.PlaneGeometry(0.2, 0.156), new THREE.MeshBasicMaterial({ map: mtex, side: THREE.DoubleSide, transparent: true }));
+  menu.position.set(0, 0.07, -0.02);
+  menu.rotation.x = -Math.PI / 4;
+  menu.renderOrder = 21;
+  let menuButtons = [];
+  function drawMenu() {
+    const g = mcanvas.getContext("2d"), T = api.theme(), dark = T.fg !== "#1f2328";
+    const C = dark ? { bg: "#161b22", fg: "#e6edf3", btn: "#21262d", off: "#555d66" } : { bg: "#ffffff", fg: "#1f2328", btn: "#eef1f5", off: "#a0a8b2" };
+    g.clearRect(0, 0, MW, MH);
+    g.fillStyle = C.bg; g.beginPath(); g.roundRect(0, 0, MW, MH, 28); g.fill();
+    menuButtons = [];
+    const items = [["← Back", "back", backStack.length > 0], ["Forward →", "forward", fwdStack.length > 0], ["See all", "home", true], ["Run all", "runall", true], ["Exit VR", "exit", true]];
+    const bw = (MW - 3 * 20) / 2, bh = 96;
+    items.forEach(([label, act, on], k) => {
+      const x = k === 4 ? 20 : 20 + (k % 2) * (bw + 20), y = 20 + Math.floor(k / 2) * (bh + 20), w = k === 4 ? MW - 40 : bw;
+      g.fillStyle = act === "exit" ? "#b42318" : C.btn; g.beginPath(); g.roundRect(x, y, w, bh, 18); g.fill();
+      g.fillStyle = act === "exit" ? "#ffffff" : on ? C.fg : C.off; g.font = "600 38px system-ui, sans-serif"; g.textAlign = "center";
+      g.fillText(label, x + w / 2, y + 62);
+      menuButtons.push({ x, y, w, h: bh, act, on });
+    });
+    g.textAlign = "left";
+    mtex.needsUpdate = true;
+  }
+  function menuPress(act) {
+    if (act === "back") goBack();
+    else if (act === "forward") goForward();
+    else if (act === "home") seeAll();
+    else if (act === "runall") api.runAll();
+    else if (act === "exit") session?.end();
+  }
+
   // ---------------------------------------------------------------- pointing and selecting
   function hit(c) {
     ray.setFromXRController(c);
-    const targets = panel.visible ? [panel, ...api.pickables()] : api.pickables();
+    const targets = [...(panel.visible ? [panel] : []), ...(menu.parent && menu.parent !== c ? [menu] : []), ...api.pickables()];
     return ray.intersectObjects(targets, false)[0] ?? null;
   }
   function onSelect(c) {
     const h = hit(c);
     if (!h) return;
+    if (h.object === menu) {
+      const px = h.uv.x * MW, py = (1 - h.uv.y) * MH;
+      const b = menuButtons.find((b) => px >= b.x && px <= b.x + b.w && py >= b.y && py <= b.y + b.h);
+      if (b) menuPress(b.act);
+      return;
+    }
     if (h.object === panel) {
       const px = h.uv.x * PW, py = (1 - h.uv.y) * PH;
       const b = buttons.find((b) => px >= b.x && px <= b.x + b.w && py >= b.y && py <= b.y + b.h);
@@ -163,9 +252,11 @@ export function setupXR(api) {
   }
 
   // ---------------------------------------------------------------- each frame: rays, and the thumbsticks
-  let turnArmed = true;
+  let turnArmed = true, backArmed = true, backHeld = false;
   function step(dt) {
     if (!session) return;
+    stepFlight();
+    backHeld = false;
     for (const c of controllers) {
       const h = c.userData.source ? hit(c) : null;
       c.userData.line.scale.z = h ? h.distance / SCALE : 30;
@@ -186,6 +277,7 @@ export function setupXR(api) {
       if (!gp || gp.axes.length < 4) continue;
       const ax = Math.abs(gp.axes[2]) > 0.15 ? gp.axes[2] : 0, ay = Math.abs(gp.axes[3]) > 0.15 ? gp.axes[3] : 0;
       const fast = gp.buttons[1]?.pressed ? 4 : 1, speed = 2.5 * SCALE * fast * dt;
+      if ((ax || ay) && flight) flight = null; // (your own move wins over a flight)
       if (src.handedness === "left") {
         rig.position.addScaledVector(fwd, -ay * speed).addScaledVector(right, ax * speed);
       } else if (src.handedness === "right") {
@@ -199,7 +291,11 @@ export function setupXR(api) {
         } else if (Math.abs(gp.axes[2]) < 0.3) turnArmed = true;
       }
       if (gp.buttons[4]?.pressed && panel.visible) close();
+      if (gp.buttons[5]?.pressed) backHeld = true;
     }
+    // (B or Y: back, once per press)
+    if (backHeld && backArmed) goBack();
+    backArmed = !backHeld;
   }
 
   // ---------------------------------------------------------------- entering and leaving
@@ -224,7 +320,7 @@ export function setupXR(api) {
     api.changed(true, m);
   }
   function leave() {
-    session = null; mode = null;
+    session = null; mode = null; flight = null; backStack.length = 0; fwdStack.length = 0;
     close();
     for (const c of controllers) { if (c.userData.hovered) api.glow(c.userData.hovered, 0); c.userData.hovered = null; }
     rig.position.set(0, 0, 0); rig.rotation.set(0, 0, 0); rig.scale.setScalar(1);
@@ -240,6 +336,7 @@ export function setupXR(api) {
     get presenting() { return !!session; },
     get mode() { return mode; },
     get panel() { return shown ? { id: shown.id, state, buttons: buttons.map((b) => b.act) } : null; },
-    press, open: (nd) => open(nd), rig,
+    press, open: (nd) => open(nd), rig, menuPress,
+    get history() { return { back: backStack.length, forward: fwdStack.length, flying: !!flight }; },
   };
 }
