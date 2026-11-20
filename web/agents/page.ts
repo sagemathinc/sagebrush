@@ -154,6 +154,7 @@ const mirror = new Mirror({
   changed: () => {
     renderSidebar();
     renderMirrorSettings();
+    renderHeader(); // (the banner says where the chats are kept)
   },
 });
 /** The mirrored conversation shown instead of a thread of this browser's, or null. */
@@ -1207,7 +1208,8 @@ addEventListener("keydown", (e) => {
   if (e.key === "Escape" && fullscreen) {
     fullscreen = false;
     renderArtifacts();
-  } else if (e.key === "Escape" && isRunning(current()) && !editor.field) {
+  } else if (e.key === "Escape" && !mirrorOpen && isRunning(current()) && !editor.field) {
+    // (never while a mirrored conversation is shown over the chat: Escape there stops nothing of the hidden chat's)
     interrupt(current());
   }
 });
@@ -1648,6 +1650,11 @@ function whoText(who: HTMLElement, dot: string, name: string, small: string) {
   who.replaceChildren(d, ...(name ? [document.createTextNode(name + " ")] : []), s);
 }
 
+/** Where the chats are kept, for the banner: with the log mirror on, the account too (never "this browser only"). */
+function keptWhere() {
+  return mirror.on() ? MIRROR_COPY.keptMirrored : "Chats are kept in this browser only.";
+}
+
 function renderHeader() {
   const who = $("#who");
   if (live() && pairing?.link) {
@@ -1668,14 +1675,14 @@ function renderHeader() {
   $("#stop").textContent = stopLabel(agentName());
   $("#connect").toggleAttribute("disabled", live());
   $("#banner").innerHTML = live()
-    ? `Connected to ${esc(agentName())} on your computer (your own login). Its files are in this browser's workspace; chats are kept in this browser.`
+    ? `Connected to ${esc(agentName())} on your computer (your own login). Its files are in this browser's workspace; ${mirror.on() ? "chats are kept in this browser and mirrored to your Sagebrush account" : "chats are kept in this browser"}.`
     : connBar?.kind === "restoring"
     ? "Reconnecting to Claude on your computer…"
     : pairing && pairing.state === "paired" && connectingTo === null
-    ? `${esc(agentName())} is waiting for you to allow it in the dialog. Chats are kept in this browser only.`
+    ? `${esc(agentName())} is waiting for you to allow it in the dialog. ${keptWhere()}`
     : inert(current())
-    ? "Claude isn't connected to this page. Chats are kept in this browser only."
-    : "Preview: the chat is driven by a <b>scripted</b> stand-in for Claude until you connect your own (\"Use your own Claude\"). Chats are kept in this browser only.";
+    ? `Claude isn't connected to this page. ${keptWhere()}`
+    : `Preview: the chat is driven by a <b>scripted</b> stand-in for Claude until you connect your own ("Use your own Claude"). ${keptWhere()}`;
 }
 
 renderHeader();

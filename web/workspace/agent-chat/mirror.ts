@@ -17,7 +17,20 @@
 import type { AgentPairing } from "../agent-pair";
 import { LOG_INSTANCE, canonical, normalize, segments, type LogEntry, type MirrorBody, type MirrorDraft, type MirrorEntry } from "./mirror-format";
 
+/** Every mirror request's tag starts with this; the rest is 10 random lowercase letters, one tag per request, so a
+ *  replay is matched to the exact request it answers (agent 0.7.6+ gives a tag back as it came: 1 to 16 of a-z). */
 export const MIRROR_TAG = "mirror";
+const TAG_RE = /^mirror[a-z]{10}$/;
+/** A fresh request tag: "mirror" and 10 letters from the CSPRNG (rejection sampling, so each letter is uniform). */
+export function requestTag(): string {
+  let t = MIRROR_TAG;
+  const b = new Uint8Array(1);
+  while (t.length < 16) {
+    crypto.getRandomValues(b);
+    if (b[0] < 234) t += String.fromCharCode(97 + (b[0] % 26)); // (234 = 9 * 26: no modulo bias)
+  }
+  return t;
+}
 export const MIRROR_FEATURE = "chat.resume.tag";
 export const STALE_REASONS = ["differs", "missing_on_runner", "other_run", "conflict"] as const;
 export type StaleReason = (typeof STALE_REASONS)[number];
@@ -29,9 +42,9 @@ const REPLAY_MS = 20_000;
  *  came as a partial answer (the agent stopped early, or its next part is slow); the request then drains */
 const QUIET_MS = 3000;
 /** a request whose caller has its answer or gave up is kept, its later parts discarded, until it ends (done) or this
- *  long passes without a part: no second request is made for that conversation meanwhile, so no part is ever read as
- *  another request's (a reply names only the tag, never the request) */
-const DRAIN_MS = 60_000;
+ *  long passes without a part. Each request has its own tag, so a part of an older one is never read as a newer one's
+ *  whatever its timing; the drain only spares the agent overlapping requests */
+const DRAIN_MS = 10_000;
 /** the reconcile wants the whole log: it waits longer for a next part before taking what came as partial (fewer
  *  requests, and less of the log sent twice, over a slow link) */
 const WHOLE_QUIET_MS = 15_000;
@@ -49,6 +62,8 @@ export interface Cursor {
   instance?: string;
   seq: number;
   n: number;
+  /** the stream's chain digest at the site, as last taken with next_n and last_seq (a reload takes all three) */
+  digest?: string;
   /** uploads of this run stopped: another history holds the range (conflict), or the agent's log no longer has what
    *  comes after the cursor (reset), so going on would leave a hole the reader couldn't show */
   blocked?: "conflict" | "reset";
@@ -67,6 +82,7 @@ export interface RemoteStream {
   log_instance: string;
   next_n: number;
   last_seq: number;
+  last_digest: string;
   stale_from: number | null;
   stale_reason: string | null;
 }
@@ -110,7 +126,7 @@ interface Answer {
 }
 /** The one tagged request in flight for a conversation: its caller (null once its wait ran out: draining), the parts
  *  so far, and its timer. */
-type Waiter = { pairing: AgentPairing; instance: string; after: number; quiet: number; events: LogEntry[]; reset: boolean; parts: number; caller: { resolve: (a: Answer) => void; reject: (e: Error) => void } | null; timer: ReturnType<typeof setTimeout> | undefined };
+type Waiter = { pairing: AgentPairing; instance: string; tag: string; after: number; quiet: number; events: LogEntry[]; reset: boolean; parts: number; caller: { resolve: (a: Answer) => void; reject: (e: Error) => void } | null; timer: ReturnType<typeof setTimeout> | undefined };
 
 const seqOk = (v: unknown): v is number => Number.isSafeInteger(v) && (v as number) > 0;
 const natOk = (v: unknown): v is number => Number.isSafeInteger(v) && (v as number) >= 0;
@@ -228,8 +244,9 @@ export class Mirror {
       if (!x || !conversationOk(x.conversation) || typeof x.locator !== "string" || !/^[0-9a-f]{32}$/.test(x.locator) || !Array.isArray(x.streams)) return [];
       const streams = x.streams.flatMap((s: unknown): RemoteStream[] => {
         const y = s as Record<string, unknown> | null;
-        if (!y || typeof y.log_instance !== "string" || !LOG_INSTANCE.test(y.log_instance) || !seqOk(y.next_n) || !natOk(y.last_seq)) return [];
-        return [{ log_instance: y.log_instance, next_n: y.next_n, last_seq: y.last_seq, stale_from: seqOk(y.stale_from) ? y.stale_from : null, stale_reason: typeof y.stale_reason === "string" ? y.stale_reason : null }];
+        // (a stream's state is taken whole or not at all: its next position, last agent number and chain digest)
+        if (!y || typeof y.log_instance !== "string" || !LOG_INSTANCE.test(y.log_instance) || !seqOk(y.next_n) || !natOk(y.last_seq) || typeof y.last_digest !== "string" || !/^[0-9a-f]{64}$/.test(y.last_digest)) return [];
+        return [{ log_instance: y.log_instance, next_n: y.next_n, last_seq: y.last_seq, last_digest: y.last_digest, stale_from: seqOk(y.stale_from) ? y.stale_from : null, stale_reason: typeof y.stale_reason === "string" ? y.stale_reason : null }];
       });
       return [{ conversation: x.conversation, locator: x.locator, streams }];
     });
@@ -272,9 +289,11 @@ export class Mirror {
     const p = params as Record<string, unknown> | null;
     if (!p || typeof p !== "object" || !("tag" in p)) return false;
     const src = this.source();
-    if (!src || (from !== undefined && from !== src.pairing) || p.tag !== MIRROR_TAG || !conversationOk(p.conversation)) return true;
+    if (!src || (from !== undefined && from !== src.pairing) || typeof p.tag !== "string" || !TAG_RE.test(p.tag) || !conversationOk(p.conversation)) return true;
     const w = this.waiting.get(p.conversation);
-    if (!w || w.pairing !== src.pairing || p.instance !== src.instance || w.instance !== src.instance) return true;
+    // (the exact tag of this page's request in flight for that conversation: a part of any other request, however late,
+    //  goes nowhere)
+    if (!w || p.tag !== w.tag || w.pairing !== src.pairing || p.instance !== src.instance || w.instance !== src.instance) return true;
     if (!natOk(p.last) || typeof p.done !== "boolean" || !Array.isArray(p.events) || ("reset" in p && typeof p.reset !== "boolean")) return true;
     const conv = p.conversation;
     const ok = (e: unknown): e is LogEntry => {
@@ -382,10 +401,10 @@ export class Mirror {
       const old = this.waiting.get(conversation);
       if (old && old.pairing === src.pairing) return reject(new Error(BUSY));
       if (old) this.fail(conversation, old, "the pairing changed");
-      const w: Waiter = { pairing: src.pairing, instance: src.instance, after, quiet, events: [], reset: false, parts: 0, caller: { resolve, reject }, timer: undefined };
+      const w: Waiter = { pairing: src.pairing, instance: src.instance, tag: requestTag(), after, quiet, events: [], reset: false, parts: 0, caller: { resolve, reject }, timer: undefined };
       w.timer = setTimeout(() => this.expire(conversation, w), this.host.replayMs ?? REPLAY_MS);
       this.waiting.set(conversation, w);
-      src.pairing.notify("chat.resume", { conversation, after, instance: src.instance, tag: MIRROR_TAG });
+      src.pairing.notify("chat.resume", { conversation, after, instance: src.instance, tag: w.tag });
     });
   }
 
@@ -460,7 +479,7 @@ export class Mirror {
       if (cur.instance !== src.instance) {
         // (another run of the agent: from what the site already holds of that run's stream, if anything)
         const st = await this.streamState(cur.locator, src.instance);
-        cur = { locator: cur.locator, instance: src.instance, seq: st?.last_seq ?? 0, n: st?.next_n ?? 1 };
+        cur = { locator: cur.locator, instance: src.instance, seq: st?.last_seq ?? 0, n: st?.next_n ?? 1, ...(st ? { digest: st.last_digest } : {}) };
       }
       this.saveCursor(conversation, cur);
       const ans = await this.ask(conversation, cur.seq, src);
@@ -488,7 +507,8 @@ export class Mirror {
         if (r === "reload") {
           // (another page moved the stream: its state from the site, all of it together, never n alone)
           const st = await this.streamState(cur.locator!, src.instance);
-          cur = { ...cur, n: st?.next_n ?? 1, seq: st?.last_seq ?? 0 };
+          const { digest: _old, ...rest } = cur;
+          cur = { ...rest, n: st?.next_n ?? 1, seq: st?.last_seq ?? 0, ...(st ? { digest: st.last_digest } : {}) };
           this.saveCursor(conversation, cur);
           reload = true;
           break;
@@ -707,6 +727,7 @@ export const MIRROR_COPY = {
   readOnly: "This is the copy in your account, and it's read-only. To continue this conversation, connect the agent that has it.",
   badge: "mirror",
   viewCopy: "View the mirrored copy",
+  keptMirrored: "Chats are kept in this browser and mirrored to your Sagebrush account.",
   untitled: "Mirrored conversation",
   reasons: {
     differs: "it differs from your agent's history",

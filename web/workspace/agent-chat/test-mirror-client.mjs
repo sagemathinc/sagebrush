@@ -49,7 +49,7 @@ function site({ quota = 1e9, on = true } = {}) {
     if (path === "/api/mirror/v1/disable") { s.on = false; s.convs.clear(); return res(200, { state: "off" }); }
     if (!s.on) return res(409, { error: "off" });
     if (path === "/api/mirror/v1/conversations" && m === "GET")
-      return res(200, { conversations: [...s.convs.values()].map((c) => ({ conversation: c.conversation, locator: c.locator, mode: "B", streams: [...c.streams.entries()].map(([log_instance, st]) => ({ log_instance, next_n: st.next_n, last_seq: st.last_seq, last_digest: "x", stale_from: st.stale_from, stale_reason: st.stale_reason })) })) });
+      return res(200, { conversations: [...s.convs.values()].map((c) => ({ conversation: c.conversation, locator: c.locator, mode: "B", streams: [...c.streams.entries()].map(([log_instance, st]) => ({ log_instance, next_n: st.next_n, last_seq: st.last_seq, last_digest: st.digest ?? "0".repeat(64), stale_from: st.stale_from, stale_reason: st.stale_reason })) })) });
     if (path === "/api/mirror/v1/conversations" && m === "POST") {
       const { conversation } = JSON.parse(init.body);
       if (!s.convs.has(conversation)) s.convs.set(conversation, { conversation, locator: (++s.made).toString(16).padStart(32, "0"), streams: new Map() });
@@ -78,6 +78,7 @@ function site({ quota = 1e9, on = true } = {}) {
       st.segs.push({ ...range, text: canonical(body), entries: body.entries });
       st.next_n = range.last_n + 1;
       st.last_seq = range.last_seq;
+      st.digest = (s.made * 1000 + st.segs.length).toString(16).padStart(64, "0");
       c.streams.set(inst, st);
       return res(200, { segment: st.segs.length - 1, digest: "d", first_n: range.first_n, last_n: range.last_n });
     }
@@ -126,6 +127,9 @@ function turn(a, conv, text, n = 1) {
   a.log(conv, "turn.event", { turn_id: t, event: { type: "usage", input_tokens: 10 } });
   a.log(conv, "turn.event", { turn_id: t, event: { type: "turn_finished", outcome: "completed" } });
 }
+const TAG = /^mirror[a-z]{10}$/;
+/** the tag of the agent's last tagged request for a conversation (each request has its own) */
+const tagOf = (a, conv) => [...a.sent].reverse().find(([mm, q]) => mm === "chat.resume" && q.conversation === conv)?.[1].tag;
 const expected = (a, conv) => {
   let n = 0;
   return (a.logs.get(conv) ?? []).map(normalize).filter(Boolean).map((d) => ({ ...d, n: ++n }));
@@ -145,7 +149,7 @@ const expected = (a, conv) => {
   check(!JSON.stringify(got).includes("id_rsa") && !JSON.stringify(got).includes("input_tokens"), "tool arguments and usage are left out (allowlist a)");
   check(got.some((e) => e.k === "user" && e.text === "hello, my key is sk-live-0123456789abcdef"), "a secret pasted into a message is uploaded as written (allowlist d: not redaction)");
   const asks = a.sent.filter(([mm]) => mm === "chat.resume");
-  check(asks.length === 1 && asks[0][1].tag === MIRROR_TAG && asks[0][1].after === 0 && asks[0][1].instance === "aaaaaaaa11" && Object.keys(asks[0][1]).sort().join() === "after,conversation,instance,tag", "it asks with a tagged chat.resume, from its cursor, in the hello's run", asks);
+  check(asks.length === 1 && TAG.test(asks[0][1].tag) && asks[0][1].after === 0 && asks[0][1].instance === "aaaaaaaa11" && Object.keys(asks[0][1]).sort().join() === "after,conversation,instance,tag", "it asks with a tagged chat.resume, from its cursor, in the hello's run", asks);
   check(kept.cursors?.c1?.seq === a.seq && kept.cursors.c1.n === want.length + 1 && kept.cursors.c1.instance === "aaaaaaaa11", "the cursor moves past everything read, the excluded usage entry included", kept.cursors);
   turn(a, "c1", "again");
   await m.kick("c1");
@@ -181,11 +185,11 @@ const expected = (a, conv) => {
   await m.refresh();
   turn(a, "c1", "x");
   check(m.onReplay({ conversation: "c1", instance: "aaaaaaaa11", last: 1, events: [], done: true }, a) === false, "an untagged replay is the display's: the mirror doesn't take it");
-  check(m.onReplay({ conversation: "c1", instance: "aaaaaaaa11", last: 1, events: [], done: true, tag: "mirror" }, a) === true, "a tagged replay with no request in flight: dropped (it goes to neither reader)");
+  check(m.onReplay({ conversation: "c1", instance: "aaaaaaaa11", last: 1, events: [], done: true, tag: "mirrorabcdefghij" }, a) === true, "a tagged replay with no request in flight: dropped (it goes to neither reader)");
   a.quiet = true;
   const p = m.kick("c1");
   await settle();
-  const good = { conversation: "c1", instance: "aaaaaaaa11", last: a.seq, done: true, tag: "mirror", events: a.logs.get("c1") };
+  const good = { conversation: "c1", instance: "aaaaaaaa11", last: a.seq, done: true, tag: tagOf(a, "c1"), events: a.logs.get("c1") };
   m.onReplay({ ...good, tag: "other" }, a);
   m.onReplay({ ...good, instance: "bbbbbbbb22" }, a);
   m.onReplay({ ...good, events: [...good.events, { seq: a.seq + 1, method: "turn.event", params: { conversation: "c2", turn_id: "t", event: { type: "turn_started" } } }] }, a);
@@ -207,7 +211,7 @@ const expected = (a, conv) => {
   const q = m.kick("c2");
   await settle();
   setPairing(b);
-  m.onReplay({ conversation: "c2", instance: "aaaaaaaa11", last: a.seq, done: true, tag: "mirror", events: a.logs.get("c2") }, a);
+  m.onReplay({ conversation: "c2", instance: "aaaaaaaa11", last: a.seq, done: true, tag: tagOf(a, "c2"), events: a.logs.get("c2") }, a);
   await q;
   await tick(350);
   check(!s.stream("c2", "aaaaaaaa11"), "an answer through a replaced pairing changes nothing");
@@ -225,7 +229,7 @@ const expected = (a, conv) => {
   // (no other trigger: the rest is asked for by itself, once each cut request has drained)
   for (let i = 0; i < 12 && canonical(s.entries("c1", "aaaaaaaa11")) !== canonical(expected(a, "c1")); i++) { await tick(450); await settle(); }
   const asks = a.sent.filter(([mm]) => mm === "chat.resume");
-  check(asks.length >= 3 && asks.every(([, p]) => p.tag === "mirror") && asks[1][1].after === 3, "after it drained, asked again from the last number read, tagged", asks.map(([, p]) => p.after));
+  check(asks.length >= 3 && asks.every(([, p]) => TAG.test(p.tag)) && asks[1][1].after === 3, "after it drained, asked again from the last number read, tagged", asks.map(([, p]) => p.after));
   check(canonical(s.entries("c1", "aaaaaaaa11")) === canonical(expected(a, "c1")), "all of it uploaded, once");
 }
 
@@ -240,13 +244,13 @@ const expected = (a, conv) => {
   void m.kick("c1");
   await settle();
   // (part 1 of the answer, then nothing for longer than the quiet period)
-  m.onReplay({ conversation: "c1", instance: "aaaaaaaa11", last: a.seq, done: false, running: [], tag: "mirror", events: log.slice(0, 3) }, a);
+  m.onReplay({ conversation: "c1", instance: "aaaaaaaa11", last: a.seq, done: false, running: [], tag: tagOf(a, "c1"), events: log.slice(0, 3) }, a);
   await tick(60);
   await settle();
   const after1 = s.entries("c1", "aaaaaaaa11").length;
   const asked = a.sent.filter(([mm]) => mm === "chat.resume").length;
   // (part 2 of the same answer, late, with done: true: discarded, and the request ends)
-  m.onReplay({ conversation: "c1", instance: "aaaaaaaa11", last: a.seq, done: true, running: [], tag: "mirror", events: log.slice(3) }, a);
+  m.onReplay({ conversation: "c1", instance: "aaaaaaaa11", last: a.seq, done: true, running: [], tag: tagOf(a, "c1"), events: log.slice(3) }, a);
   check(asked === 1 && after1 > 0 && s.entries("c1", "aaaaaaaa11").length === after1, "the late rest of the first answer is discarded; nothing else was asked while it could arrive", { asked, after1 });
   a.quiet = false;
   await settle();
@@ -277,6 +281,13 @@ const expected = (a, conv) => {
   await settle();
   const got = s.entries("c1", "aaaaaaaa11");
   check(canonical(got) === canonical(expected(a, "c1")), "after another page's upload: an overlap, the stream's state reloaded (next_n with last_seq), no entry twice", got.map((e) => [e.n, e.seq]));
+  check(/^[0-9a-f]{64}$/.test(kept.cursors.c1.digest ?? "") && kept.cursors.c1.digest !== "0".repeat(64), "the reload took the chain digest with them, all three together", kept.cursors.c1);
+  // (a stream whose digest isn't 64 hex: its state isn't taken at all)
+  const bad = async (path, init) => { const r = await s.fetch(path, init); if (path !== "/api/mirror/v1/conversations" || (init?.method ?? "GET") !== "GET") return r; const j = await r.json(); for (const c of j.conversations) for (const x of c.streams) x.last_digest = "nothex"; return new Response(JSON.stringify(j), { status: 200 }); };
+  const mb = new Mirror({ fetch: bad, pairing: () => a, loadCursors: () => null, storeCursors: () => {}, changed: () => {} });
+  await mb.refresh();
+  const lb = await mb.remote(true);
+  check(lb.length > 0 && lb.every((c) => c.streams.length === 0), "a stream state with a malformed digest is refused whole", lb);
 }
 
 // ---- a conflict: the same range, other entries
@@ -358,7 +369,7 @@ const expected = (a, conv) => {
   const dn = expected(a, "diff").find((e) => e.k === "user").n;
   check(by("diff").stale_from === dn && by("diff").stale_reason === "differs", "the same run, a different entry: stale from that position (differs)", by("diff"));
   check(by("beyond").stale_from === 4 && by("beyond").stale_reason === "missing_on_runner", "a position the runner doesn't have: stale from there (missing_on_runner)", by("beyond"));
-  check(a.sent.every(([mm, p]) => mm === "chat.resume" && p.tag === "mirror" && p.after === 0), "the reconcile only reads the runner's log (S6e): tagged chat.resume, nothing else sent", a.sent);
+  check(a.sent.every(([mm, p]) => mm === "chat.resume" && TAG.test(p.tag) && p.after === 0), "the reconcile only reads the runner's log (S6e): tagged chat.resume, nothing else sent", a.sent);
   // ... then the new run
   setPairing(runner);
   s.staleCalls.length = 0;
@@ -370,7 +381,7 @@ const expected = (a, conv) => {
   await m.reconcile();
   await settle();
   check(!s.staleCalls.some((c) => c.locator === s.convs.get("elsewhere").locator), "a stream already stale from that position: not marked again");
-  check(runner.sent.every(([mm, p]) => mm === "chat.resume" && p.tag === "mirror"), "the new runner too: only read", runner.sent);
+  check(runner.sent.every(([mm, p]) => mm === "chat.resume" && TAG.test(p.tag)), "the new runner too: only read", runner.sent);
 }
 
 // ---- one request at a time: a late part of a request whose wait ran out is never another request's answer
@@ -387,7 +398,7 @@ const expected = (a, conv) => {
   check(a.sent.filter(([mm]) => mm === "chat.resume").length === asked, "while a request whose wait ran out drains, no second request goes", a.sent.length);
   // (its late answer arrives: discarded, nothing uploaded from it; the request ends, and the refused kick runs)
   a.quiet = false;
-  m.onReplay({ conversation: "c1", instance: "aaaaaaaa11", last: a.seq, done: true, running: [], tag: "mirror", events: a.logs.get("c1").slice(3) }, a);
+  m.onReplay({ conversation: "c1", instance: "aaaaaaaa11", last: a.seq, done: true, running: [], tag: tagOf(a, "c1"), events: a.logs.get("c1").slice(3) }, a);
   check(!s.stream("c1", "aaaaaaaa11"), "the late answer is discarded, not taken for a later request's");
   await settle();
   await tick(50);
@@ -422,8 +433,8 @@ const expected = (a, conv) => {
   // (part 1, then quiet: a partial answer, uploaded slowly; the rest of the answer, with done, arrives during that)
   s.appendDelay = 80;
   let once = false;
-  s.onAppend = () => { if (once) return; once = true; setTimeout(() => m.onReplay({ conversation: "c1", instance: "aaaaaaaa11", last: a.seq, done: true, running: [], tag: "mirror", events: log.slice(3) }, a), 10); };
-  m.onReplay({ conversation: "c1", instance: "aaaaaaaa11", last: a.seq, done: false, running: [], tag: "mirror", events: log.slice(0, 3) }, a);
+  s.onAppend = () => { if (once) return; once = true; setTimeout(() => m.onReplay({ conversation: "c1", instance: "aaaaaaaa11", last: a.seq, done: true, running: [], tag: tagOf(a, "c1"), events: log.slice(3) }, a), 10); };
+  m.onReplay({ conversation: "c1", instance: "aaaaaaaa11", last: a.seq, done: false, running: [], tag: tagOf(a, "c1"), events: log.slice(0, 3) }, a);
   a.quiet = false;
   for (let i = 0; i < 20 && canonical(s.entries("c1", "aaaaaaaa11")) !== canonical(expected(a, "c1")); i++) await tick(50);
   s.appendDelay = 0;
@@ -450,6 +461,71 @@ const expected = (a, conv) => {
   void m.kick("c1");
   await tick(1600);
   check(b.sent.filter(([mm]) => mm === "chat.resume").length >= 2, "another pairing: a miss is asked again by itself (the count starts again)", b.sent.length);
+  a.quiet = false;
+}
+
+// ---- one tag per request: a part of an older request is never read as a newer one's, however late it comes
+{
+  const { a, s, m } = setup();
+  await m.refresh();
+  turn(a, "c1", "tags");
+  const tags = new Set();
+  for (let i = 0; i < 20; i++) tags.add((await import("./mirror.ts")).requestTag());
+  check([...tags].every((t) => TAG.test(t) && t.length === 16) && tags.size === 20, "each request tag is mirror and 10 random letters (16 characters, as the agent takes), never repeated", [...tags].slice(0, 3));
+  a.quiet = true;
+  void m.kick("c1");
+  await settle();
+  const old = tagOf(a, "c1");
+  await tick(350); // (its wait runs out)
+  await tick(450); // (and its drain: nothing came)
+  await settle();
+  const fresh = tagOf(a, "c1");
+  check(fresh !== old && TAG.test(fresh) && a.sent.filter(([mm]) => mm === "chat.resume").length === 2, "after the wait and the drain, the next request has a new tag", { old, fresh });
+  // (the old request's complete answer arrives now, exact in every field but its tag: the new request is untouched)
+  const env = { conversation: "c1", instance: "aaaaaaaa11", last: a.seq, done: true, running: [], events: a.logs.get("c1").slice(0, 2) };
+  check(m.onReplay({ ...env, tag: old }, a) === true && !s.stream("c1", "aaaaaaaa11"), "the old tag's complete answer, after the drain: dropped, nothing uploaded from it");
+  // (the right tag, but from another pairing, or of another run: dropped too)
+  m.onReplay({ ...env, tag: fresh, events: a.logs.get("c1") }, agent());
+  m.onReplay({ ...env, tag: fresh, instance: "bbbbbbbb22", events: a.logs.get("c1") }, a);
+  m.onReplay({ ...env, tag: fresh, conversation: "c2", events: [] }, a);
+  await settle();
+  check(!s.stream("c1", "aaaaaaaa11"), "the new tag from another pairing, of another run, or for another conversation: dropped");
+  // (the new request's own answer: taken whole)
+  m.onReplay({ ...env, tag: fresh, events: a.logs.get("c1") }, a);
+  await settle();
+  check(canonical(s.entries("c1", "aaaaaaaa11")) === canonical(expected(a, "c1")), "its own tag's answer: taken, all of it uploaded once");
+  a.quiet = false;
+}
+
+// ---- astra2's case: a reconcile's old answer, cut short, arriving after its wait and drain, during a newer reconcile
+{
+  const { a, s, m } = setup();
+  await m.refresh();
+  turn(a, "c1", "first");
+  await m.kick("c1");
+  await settle();
+  turn(a, "c1", "second");
+  await m.kick("c1");
+  await settle();
+  const all = a.logs.get("c1");
+  a.quiet = true;
+  const r1 = m.reconcile();
+  await settle();
+  const oldTag = tagOf(a, "c1");
+  // (the old answer as it was when asked: only the first turn, said done)
+  const oldAnswer = { conversation: "c1", instance: "aaaaaaaa11", last: all[5].seq, done: true, running: [], tag: oldTag, events: all.slice(0, 6) };
+  await tick(350);
+  await tick(450);
+  await r1;
+  const r2 = m.reconcile();
+  await settle();
+  const newTag = tagOf(a, "c1");
+  m.onReplay(oldAnswer, a); // (late, after the drain, during the newer reconcile)
+  await settle();
+  m.onReplay({ conversation: "c1", instance: "aaaaaaaa11", last: a.seq, done: true, running: [], tag: newTag, events: all }, a);
+  await r2;
+  await settle();
+  check(newTag !== oldTag && s.stream("c1", "aaaaaaaa11").stale_from === null, "the old, cut answer coming late is ignored: no false stale mark, the runner's whole log confirms both turns", s.stream("c1", "aaaaaaaa11"));
   a.quiet = false;
 }
 
@@ -618,7 +694,7 @@ const expected = (a, conv) => {
   a.quiet = true;
   void m.kick("c1");
   await settle();
-  m.onReplay({ conversation: "c1", instance: "aaaaaaaa11", last: a.seq, done: false, running: [], tag: "mirror", events: log }, a);
+  m.onReplay({ conversation: "c1", instance: "aaaaaaaa11", last: a.seq, done: false, running: [], tag: tagOf(a, "c1"), events: log }, a);
   await settle();
   check(canonical(s.entries("c1", "aaaaaaaa11")) === canonical(expected(a, "c1")), "everything up to last, without done: taken whole");
   turn(a, "c1", "more");
@@ -626,7 +702,7 @@ const expected = (a, conv) => {
   await settle();
   const asked = a.sent.filter(([mm]) => mm === "chat.resume").length;
   // (its trailing part: never read as the next request's answer)
-  m.onReplay({ conversation: "c1", instance: "aaaaaaaa11", last: a.seq, done: true, running: [], tag: "mirror", events: a.logs.get("c1").slice(log.length) }, a);
+  m.onReplay({ conversation: "c1", instance: "aaaaaaaa11", last: a.seq, done: true, running: [], tag: tagOf(a, "c1"), events: a.logs.get("c1").slice(log.length) }, a);
   check(asked === 1, "no second request while it still drained", asked);
   a.quiet = false;
   await settle();

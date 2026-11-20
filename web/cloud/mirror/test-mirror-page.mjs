@@ -133,7 +133,7 @@ const stored = JSON.stringify(entries);
 ok(DROPPED.every((s) => !stored.includes(s)), "nothing excluded reaches the account: arguments, output, thinking, card detail and token, artifact body and path, usage, error text, unknown kinds", DROPPED.filter((s) => stored.includes(s)));
 ok(!stored.includes("an agent-authored message"), "a message not the person's is left out");
 ok(entries.some((e) => e.k === "user" && e.text.includes(SECRET)), "a secret pasted into a message is uploaded as written (allowlist d: not redaction)");
-ok(run1.sent.every(([m, q]) => m === "chat.resume" && q.tag === "mirror"), "uploading sent the agent nothing but tagged chat.resume (S6e)", run1.sent.map(([m]) => m));
+ok(run1.sent.every(([m, q]) => m === "chat.resume" && /^mirror[a-z]{10}$/.test(q.tag)), "uploading sent the agent nothing but tagged chat.resume (S6e)", run1.sent.map(([m]) => m));
 
 // ---- S7b: labels; S7c: a mirrored conversation is inert and read-only
 {
@@ -182,7 +182,7 @@ ok(run1.sent.every(([m, q]) => m === "chat.resume" && q.tag === "mirror"), "uplo
   ok(st("same").stale_from === null, "S6d: the runner's log equal to the stream: nothing marked", st("same"));
   ok(st("differs").stale_from === 4 && st("differs").stale_reason === "differs", "S6d: an entry the runner has differently: stale from that position (differs), in the account's object", st("differs"));
   ok(st("short").stale_from === 3 && st("short").stale_reason === "missing_on_runner", "S6d: positions the runner doesn't have: stale from the first (missing_on_runner)", st("short"));
-  ok(run.sent.every(([m, q]) => m === "chat.resume" && q.tag === "mirror" && q.after === 0 && Object.keys(q).sort().join() === "after,conversation,instance,tag"), "S6e: the reconcile only read the runner: tagged chat.resume, nothing else, no mirror data in it", run.sent);
+  ok(run.sent.every(([m, q]) => m === "chat.resume" && /^mirror[a-z]{10}$/.test(q.tag) && q.after === 0 && Object.keys(q).sort().join() === "after,conversation,instance,tag"), "S6e: the reconcile only read the runner: tagged chat.resume, nothing else, no mirror data in it", run.sent);
   // (a third device, not paired: it sees the mark, and draws from there on as not confirmed)
   const pc = await page(B);
   const r = await pc.mirror.readConversation("differs");
@@ -198,7 +198,7 @@ ok(run1.sent.every(([m, q]) => m === "chat.resume" && q.tag === "mirror"), "uplo
   const l2 = await pb.mirror.remote(true);
   const same = l2.find((x) => x.conversation === "same").streams.find((x) => x.log_instance === "bbbbbbbb00000002");
   ok(same.stale_from === 1 && same.stale_reason === "other_run", "S6d: a conversation the live runner holds, a stream of another run: stale from 1 (other_run)", same);
-  ok(run2.sent.every(([m, q]) => m === "chat.resume" && q.tag === "mirror"), "S6e: only read, again", run2.sent);
+  ok(run2.sent.every(([m, q]) => m === "chat.resume" && /^mirror[a-z]{10}$/.test(q.tag)), "S6e: only read, again", run2.sent);
   // (the mark only widens: a page can't clear it, nor move it later)
   const loc = l2.find((x) => x.conversation === "differs").locator;
   ok(await pb.mirror.markStale(loc, "bbbbbbbb00000002", 5, "conflict"), "a later mark is answered...");
@@ -232,6 +232,7 @@ ok(run1.sent.every(([m, q]) => m === "chat.resume" && q.tag === "mirror"), "uplo
     readOnly: "This is the copy in your account, and it's read-only. To continue this conversation, connect the agent that has it.",
     badge: "mirror",
     viewCopy: "View the mirrored copy",
+    keptMirrored: "Chats are kept in this browser and mirrored to your Sagebrush account.",
     untitled: "Mirrored conversation",
   };
   const off = Object.entries(exact).filter(([k, v]) => C[k] !== v);

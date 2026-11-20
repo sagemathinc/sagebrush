@@ -43,7 +43,7 @@ function answer(method, path, body) {
   if (path === "/api/mirror/v1/disable") { fake.on = false; fake.pending = 2; setTimeout(() => (fake.pending = 0), 1500); return [200, { state: "off" }]; }
   if (path === "/api/mirror/v1/enable") { fake.on = true; return [200, { state: "on" }]; }
   if (path === "/api/mirror/v1/conversations" && method === "GET")
-    return [200, { conversations: fake.on && !fake.deleted ? [{ conversation: "remote-1", locator: LOC, mode: "B", streams: [{ log_instance: INST, next_n: 8, last_seq: 7, last_digest: "x", stale_from: fake.staleFrom, stale_reason: "differs" }] }] : [] }];
+    return [200, { conversations: fake.on && !fake.deleted ? [{ conversation: "remote-1", locator: LOC, mode: "B", streams: [{ log_instance: INST, next_n: 8, last_seq: 7, last_digest: "ab".repeat(32), stale_from: fake.staleFrom, stale_reason: "differs" }] }] : [] }];
   if (path === `/api/mirror/v1/conversations/${LOC}` && method === "DELETE") { fake.deleted = true; return [200, {}]; }
   const m = path.match(/^\/api\/mirror\/v1\/read\/[0-9a-f]{32}\/[A-Za-z0-9_-]+\?after=(\d+)$/);
   if (m) {
@@ -90,6 +90,7 @@ try {
   await until(`window.performance.getEntriesByType("resource").some((e) => e.name.includes("/api/mirror/v1/status"))`, 10000);
   await sleep(300);
   ok(await ev(`document.querySelector("#mirror-btn").hidden && !document.querySelector("#threads .thread.mirror")`), "the mirror unavailable (the site answers 404): no Mirror button, no mirrored conversations");
+  ok(await ev(`document.querySelector("#banner").textContent.endsWith("Chats are kept in this browser only.")`), "unavailable: the banner as before");
 
   // ---- available and on
   fake.available = true;
@@ -98,6 +99,8 @@ try {
   ok(await until(`!!document.querySelector("#threads .thread.mirror")`), "the account's conversation this browser doesn't have is listed");
   const item = await ev(`(() => { const b = document.querySelector("#threads .thread.mirror"); return { text: b.textContent, badge: b.querySelector(".badge")?.textContent }; })()`);
   ok(item.badge === "mirror" && item.text.startsWith("Mirrored conversation"), "with a small mirror badge, in the same list (Q2)", item);
+  const banner = await ev(`document.querySelector("#banner").textContent`);
+  ok(banner.endsWith("Chats are kept in this browser and mirrored to your Sagebrush account.") && !banner.includes("this browser only"), "with the mirror on, the banner says the chats are mirrored to the account, never \"this browser only\"", banner);
   await ev(`(document.querySelector("#threads .thread.mirror").click(), true)`);
   ok(await until(`!document.querySelector("#mirror-log").hidden && !!document.querySelector("#mirror-log .mirror-section")`), "opening it shows its sections");
   const v = await ev(`(() => {
@@ -177,11 +180,26 @@ try {
   ok(await ev(`!document.querySelector("#mirror-switch").checked && document.querySelector("#mirror-about").textContent.startsWith("Your conversations live on the computer")`), "off: the switch off, and the words for off");
   await ev(`(document.querySelector("#mirror-close").click(), true)`);
   ok(await until(`!document.querySelector("#threads .thread.mirror")`), "off: no mirrored conversations listed");
+  ok(await until(`document.querySelector("#banner").textContent.endsWith("Chats are kept in this browser only.")`), "off: the banner says this browser only again", await ev(`document.querySelector("#banner").textContent`));
 
-  // ---- deleting one conversation's copy
+  // ---- Escape while a mirrored conversation is shown over a running chat: nothing of that chat stops (SEC)
   fake.on = true;
-  await send("Page.reload");
+  await send("Page.navigate", { url: `${origin}/agents/?speed=0.05` });
   ok(await until(`!!document.querySelector("#threads .thread.mirror")`), "on again: listed");
+  await ev(`(document.querySelector("#threads .thread:not(.mirror)").click(), true)`);
+  await ev(`(document.querySelector("#new").click(), true)`);
+  await until(`!!document.querySelector("[data-try]") && !document.querySelector(".composer-wrap").hidden`);
+  await ev(`(document.querySelector("[data-try]").click(), true)`);
+  ok(await until(`!!document.querySelector("#threads .thread.on .dot")`), "(a chat of this browser's with a turn running: the scripted demo, slowed)");
+  await ev(`(document.querySelector("#threads .thread.mirror").click(), true)`);
+  await until(`!document.querySelector("#mirror-log").hidden`);
+  await send("Input.dispatchKeyEvent", { type: "keyDown", key: "Escape", code: "Escape", windowsVirtualKeyCode: 27 });
+  await send("Input.dispatchKeyEvent", { type: "keyUp", key: "Escape", code: "Escape", windowsVirtualKeyCode: 27 });
+  await sleep(500);
+  ok(await ev(`!!document.querySelector("#threads .thread:not(.mirror) .dot")`), "Escape over the mirrored conversation: the hidden chat's turn is still running");
+  await ev(`(document.querySelector("#threads .thread:not(.mirror) .dot").parentElement.click(), true)`);
+  ok(await until(`document.querySelector("#mirror-log").hidden`) && !(await ev(`[...document.querySelectorAll("#log .turn .status")].some((e) => e.textContent === "Interrupted")`)), "back on that chat: its turn was never interrupted");
+  // ---- deleting one conversation's copy
   await ev(`(document.querySelector("#threads .thread.mirror").click(), true)`);
   await until(`!document.querySelector("#mirror-readonly").hidden`);
   await ev(`(document.querySelector("#mirror-delete-one").click(), true)`);
