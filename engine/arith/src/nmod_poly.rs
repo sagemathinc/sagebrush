@@ -909,7 +909,8 @@ pub const fn powmod_work(lf: usize, la: usize, words: usize, ebits: u64) -> Opti
     ck!(first.checked_add(scan)).checked_add(ck!(ebits.checked_mul(step)))
 }
 
-#[cfg(test)]
+// (its helpers use dashu's u64-word API: native targets only)
+#[cfg(all(test, not(target_arch = "wasm32")))]
 mod tests {
     use super::*;
 

@@ -51,6 +51,8 @@
 
 use sagebrush_wire::BigRef;
 
+use crate::invdiv;
+
 /// The most limbs an integer may have where a gcd check runs (`QV_1`,
 /// `MQR1`): 2^20 bits, about 315,000 decimal digits.
 pub const LIMB_CAP: u64 = 1 << 14;
@@ -254,6 +256,89 @@ fn window(x: &[u64], n: usize, shift: usize) -> u64 {
     (lo | hi) & (u64::MAX >> 1)
 }
 
+/// Knuth D's quotient digit at one step: floor((u2 b^2 + u1 b + u0) / (y1 b
+/// + y2)) by the 3-by-2 ([`invdiv::div3by2`], v3 its reciprocal), or b - 1
+/// when (u2, u1) = (y1, y2), where the true digit is b - 1 (the running
+/// remainder R >= (y1 b + y2) b^(ny-1) and R < Y b give R / Y > b - 1).
+/// This is the value the D3 correction loop reached (min(floor(U/D), b -
+/// 1)), so every digit, multiply-subtract and add-back is the same as with
+/// it.  (u2, u1) above (y1, y2) can't happen (the running remainder is below
+/// y b): an invariant failure.
+/// Test-only coverage counters for the differential test's hard-case rows
+/// (indices in `diff_tests`): which branches the inputs actually reached.
+#[cfg(test)]
+pub(crate) mod hits {
+    use std::cell::Cell;
+    thread_local! {
+        static N: [Cell<u64>; 4] = const { [const { Cell::new(0) }; 4] };
+    }
+    pub(crate) const BOUNDARY: usize = 0;
+    pub(crate) const ADD_BACK: usize = 1;
+    pub(crate) const D3_OVER1: usize = 2;
+    pub(crate) const D3_OVER2: usize = 3;
+    pub(crate) fn hit(i: usize) {
+        N.with(|n| n[i].set(n[i].get() + 1));
+    }
+    pub(crate) fn get(i: usize) -> u64 {
+        N.with(|n| n[i].get())
+    }
+}
+
+#[inline]
+fn qdigit(u2: u64, u1: u64, u0: u64, y1: u64, y2: u64, v3: u64) -> Result<u128, Fault> {
+    if (u2, u1) < (y1, y2) {
+        Ok(u128::from(invdiv::div3by2(u2, u1, u0, y1, y2, v3).0))
+    } else if (u2, u1) == (y1, y2) {
+        #[cfg(test)]
+        hits::hit(hits::BOUNDARY);
+        Ok(u128::from(u64::MAX))
+    } else {
+        Err(Fault::Invariant)
+    }
+}
+
+/// x / d for a one-limb d != 0, x of nx >= 1 limbs: the quotient to q[..nx]
+/// and x[..nx] zeroed, limb by limb from the top (each limb charged 6
+/// units before it is divided); the remainder.  The 2-by-1 divides x 2^s by
+/// the normalized d 2^s, the shifted limbs read on the fly (nothing
+/// written but q and the zeros): the same quotient limbs, the remainder
+/// shifted back at the end.  The reciprocal is made right after the first
+/// limb's charge.
+fn div_limb(x: &mut [u64], nx: usize, d: u64, q: &mut [u64], m: &mut Meter) -> Result<u64, Fault> {
+    let s = d.leading_zeros();
+    let dn = d << s;
+    // (the top limb's spill: below 2^s <= dn)
+    let mut r = if s > 0 { x[nx - 1] >> (64 - s) } else { 0 };
+    let mut inv = None;
+    for j in (0..nx).rev() {
+        m.add(6)?;
+        let v = *inv.get_or_insert_with(|| invdiv::recip(dn));
+        let low = if s > 0 && j > 0 { x[j - 1] >> (64 - s) } else { 0 };
+        let u0 = if s > 0 { (x[j] << s) | low } else { x[j] };
+        let (qj, rj) = invdiv::div2by1(r, u0, dn, v);
+        q[j] = qj;
+        r = rj;
+        x[j] = 0;
+    }
+    Ok(r >> s)
+}
+
+/// a mod d for a one-limb d != 0, a of na >= 1 limbs, a unchanged: the
+/// 2-by-1 on a 2^s by d 2^s as in [`div_limb`], the quotient discarded.
+/// Its caller has charged the units already.
+fn rem_limb(a: &[u64], na: usize, d: u64) -> u64 {
+    let s = d.leading_zeros();
+    let dn = d << s;
+    let v = invdiv::recip(dn);
+    let mut r = if s > 0 { a[na - 1] >> (64 - s) } else { 0 };
+    for i in (0..na).rev() {
+        let low = if s > 0 && i > 0 { a[i - 1] >> (64 - s) } else { 0 };
+        let u0 = if s > 0 { (a[i] << s) | low } else { a[i] };
+        r = invdiv::div2by1(r, u0, dn, v).1;
+    }
+    r >> s
+}
+
 /// x mod y in place (Knuth D, the quotient discarded), for ny >= 2, x >= y
 /// (nx >= ny), x with room for nx + 1 limbs.  y is normalized in place and
 /// restored.  The remainder's length.
@@ -273,21 +358,14 @@ fn rem_in_place(x: &mut [u64], nx: usize, y: &mut [u64], ny: usize, m: &mut Mete
     } else {
         x[nx] = 0;
     }
-    let (y1, y2) = (u128::from(y[ny - 1]), u128::from(y[ny - 2]));
+    let (y1, y2) = (y[ny - 1], y[ny - 2]);
+    // (the 3-by-2 reciprocal: made once, right after the first digit's
+    // charge, which pays for more than it costs)
+    let mut inv = None;
     for j in (0..=nx - ny).rev() {
         m.add(2 * ny + 4)?;
-        let top = (u128::from(x[j + ny]) << 64) | u128::from(x[j + ny - 1]);
-        // top < y1 2^64 (the running remainder is below y): qh < 2^64 + 2
-        let mut qh = top / y1;
-        let mut rh = top % y1;
-        // at most two corrections (Knuth D3)
-        while qh >> 64 != 0 || qh * y2 > ((rh << 64) | u128::from(x[j + ny - 2])) {
-            qh -= 1;
-            rh += y1;
-            if rh >> 64 != 0 {
-                break;
-            }
-        }
+        let v3 = *inv.get_or_insert_with(|| invdiv::recip3(y1, y2, invdiv::recip(y1)));
+        let qh = qdigit(x[j + ny], x[j + ny - 1], x[j + ny - 2], y1, y2, v3)?;
         // x[j .. j + ny + 1] -= qh y
         let (mut borrow, mut carry) = (0u64, 0u128);
         for i in 0..ny {
@@ -302,6 +380,8 @@ fn rem_in_place(x: &mut [u64], nx: usize, y: &mut [u64], ny: usize, m: &mut Mete
         let (d, b2) = d.overflowing_sub(borrow);
         x[j + ny] = d;
         if b1 || b2 {
+            #[cfg(test)]
+            hits::hit(hits::ADD_BACK);
             // qh was one too large (Knuth D6): add y back once
             let mut c = 0u128;
             for i in 0..ny {
@@ -369,15 +449,7 @@ pub fn divexact_in_place(x: &mut [u64], nx: usize, y: &mut [u64], ny: usize, q: 
     }
     m.add(nx + ny + 2)?;
     if ny == 1 {
-        let d = u128::from(y[0]);
-        let mut r = 0u128;
-        for j in (0..nx).rev() {
-            m.add(6)?;
-            let t = (r << 64) | u128::from(x[j]);
-            q[j] = (t / d) as u64;
-            r = t % d;
-            x[j] = 0;
-        }
+        let r = div_limb(x, nx, y[0], q, m)?;
         m.add(nx + 2)?;
         x[nx] = 0;
         if r != 0 {
@@ -399,19 +471,14 @@ pub fn divexact_in_place(x: &mut [u64], nx: usize, y: &mut [u64], ny: usize, q: 
     } else {
         x[nx] = 0;
     }
-    let (y1, y2) = (u128::from(y[ny - 1]), u128::from(y[ny - 2]));
+    let (y1, y2) = (y[ny - 1], y[ny - 2]);
+    // (the 3-by-2 reciprocal: made once, right after the first digit's
+    // charge, which pays for more than it costs)
+    let mut inv = None;
     for j in (0..=nx - ny).rev() {
         m.add(2 * ny + 4)?;
-        let top = (u128::from(x[j + ny]) << 64) | u128::from(x[j + ny - 1]);
-        let mut qh = top / y1;
-        let mut rh = top % y1;
-        while qh >> 64 != 0 || qh * y2 > ((rh << 64) | u128::from(x[j + ny - 2])) {
-            qh -= 1;
-            rh += y1;
-            if rh >> 64 != 0 {
-                break;
-            }
-        }
+        let v3 = *inv.get_or_insert_with(|| invdiv::recip3(y1, y2, invdiv::recip(y1)));
+        let mut qh = qdigit(x[j + ny], x[j + ny - 1], x[j + ny - 2], y1, y2, v3)?;
         let (mut borrow, mut carry) = (0u64, 0u128);
         for i in 0..ny {
             let p = qh * u128::from(y[i]) + carry;
@@ -425,6 +492,8 @@ pub fn divexact_in_place(x: &mut [u64], nx: usize, y: &mut [u64], ny: usize, q: 
         let (d, b2) = d.overflowing_sub(borrow);
         x[j + ny] = d;
         if b1 || b2 {
+            #[cfg(test)]
+            hits::hit(hits::ADD_BACK);
             qh -= 1;
             let mut c = 0u128;
             for i in 0..ny {
@@ -465,18 +534,10 @@ pub fn divrem_in_place(x: &mut [u64], nx: usize, y: &mut [u64], ny: usize, q: &m
     }
     m.add(nx + ny + 2)?;
     if ny == 1 {
-        let d = u128::from(y[0]);
-        let mut r = 0u128;
-        for j in (0..nx).rev() {
-            m.add(6)?;
-            let t = (r << 64) | u128::from(x[j]);
-            q[j] = (t / d) as u64;
-            r = t % d;
-            x[j] = 0;
-        }
+        let r = div_limb(x, nx, y[0], q, m)?;
         m.add(nx + 2)?;
         x[nx] = 0;
-        x[0] = r as u64;
+        x[0] = r;
         return Ok((norm(q, nx), usize::from(r != 0)));
     }
     let s = y[ny - 1].leading_zeros();
@@ -493,19 +554,14 @@ pub fn divrem_in_place(x: &mut [u64], nx: usize, y: &mut [u64], ny: usize, q: &m
     } else {
         x[nx] = 0;
     }
-    let (y1, y2) = (u128::from(y[ny - 1]), u128::from(y[ny - 2]));
+    let (y1, y2) = (y[ny - 1], y[ny - 2]);
+    // (the 3-by-2 reciprocal: made once, right after the first digit's
+    // charge, which pays for more than it costs)
+    let mut inv = None;
     for j in (0..=nx - ny).rev() {
         m.add(2 * ny + 4)?;
-        let top = (u128::from(x[j + ny]) << 64) | u128::from(x[j + ny - 1]);
-        let mut qh = top / y1;
-        let mut rh = top % y1;
-        while qh >> 64 != 0 || qh * y2 > ((rh << 64) | u128::from(x[j + ny - 2])) {
-            qh -= 1;
-            rh += y1;
-            if rh >> 64 != 0 {
-                break;
-            }
-        }
+        let v3 = *inv.get_or_insert_with(|| invdiv::recip3(y1, y2, invdiv::recip(y1)));
+        let mut qh = qdigit(x[j + ny], x[j + ny - 1], x[j + ny - 2], y1, y2, v3)?;
         let (mut borrow, mut carry) = (0u64, 0u128);
         for i in 0..ny {
             let p = qh * u128::from(y[i]) + carry;
@@ -519,6 +575,8 @@ pub fn divrem_in_place(x: &mut [u64], nx: usize, y: &mut [u64], ny: usize, q: &m
         let (d, b2) = d.overflowing_sub(borrow);
         x[j + ny] = d;
         if b1 || b2 {
+            #[cfg(test)]
+            hits::hit(hits::ADD_BACK);
             qh -= 1;
             let mut c = 0u128;
             for i in 0..ny {
@@ -579,11 +637,7 @@ pub fn gcd_in_place(x: &mut [u64], nx: usize, y: &mut [u64], ny: usize, m: &mut 
         if nb == 1 {
             m.add(2 * na + 93)?;
             let d = b[0];
-            let mut r = 0u128;
-            for i in (0..na).rev() {
-                r = ((r << 64) | u128::from(a[i])) % u128::from(d);
-            }
-            let g = gcd_u64(d, r as u64);
+            let g = gcd_u64(d, rem_limb(a, na, d));
             for v in &mut a[..na] {
                 *v = 0;
             }
@@ -763,6 +817,13 @@ pub fn coprime_row<'a>(ws: &mut [u64], row: impl Iterator<Item = BigRef<'a>>, m:
 }
 
 #[cfg(test)]
+mod old;
+
+#[cfg(test)]
+mod diff_tests;
+
+// (its helpers use dashu's u64-word API: native targets only)
+#[cfg(all(test, not(target_arch = "wasm32")))]
 mod tests {
     use super::*;
     use dashu_int::UBig;

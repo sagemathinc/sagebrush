@@ -357,5 +357,6 @@ fn mqr_admitted(q: &Mqr, need: &Need) -> Result<(Vec<BigInt>, Vec<BigInt>), Wire
     Ok((dens, nums))
 }
 
-#[cfg(test)]
+// (its helpers use dashu's u64-word API: native targets only)
+#[cfg(all(test, not(target_arch = "wasm32")))]
 mod tests;
