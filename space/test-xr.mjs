@@ -172,6 +172,46 @@ ok((await ev(`whitespace.camera.parent.parent.background === null`)) === true, "
 await ev(`document.querySelector('#ar').click(), true`);
 ok(await until(`!whitespace.xr.presenting`), "Exit AR leaves");
 ok((await ev(`whitespace.camera.parent.parent.background !== null`)) === true, "and the background is back");
+
+// ---- rooms in a headset: the repository's space; a directory's panel offers Enter, and you are in its room; a Python
+//      file in it is entered too (its text put in by the test, as fetching it from GitHub would); Back brings you out
+//      room by room, to the top
+await send("Page.navigate", { url: `http://127.0.0.1:${port}/space/?space=sagebrush.space.json` });
+ok(await until(`/objects/.test(document.querySelector('#status')?.textContent ?? '') && !document.querySelector('#vr').hidden`, 30000), "the repository's space loads");
+await ev(`document.querySelector('#vr').click(), true`);
+ok(await until(`whitespace.xr.presenting`), "in VR again");
+await ev(aim("d:lib"));
+await sleep(300);
+await ev(`window.__xrDevice.controllers.right.updateButtonValue('trigger', 1), true`);
+await sleep(200);
+await ev(`window.__xrDevice.controllers.right.updateButtonValue('trigger', 0), true`);
+ok(await until(`whitespace.xr.panel?.id === 'd:lib' && whitespace.xr.panel.buttons.includes('enter')`, 5000), "a directory's panel offers Enter", await ev(`whitespace.xr.panel`));
+await until(`whitespace.xr.history.flying === false`, 3000);
+await ev(`whitespace.xr.press('enter'), true`);
+ok(await until(`whitespace.room === 'sagebrush › lib/' && whitespace.xr.panel === null`, 5000), "Enter puts you in its room", { room: await ev(`whitespace.room`) });
+await until(`whitespace.xr.history.flying === false`, 3000);
+await shot("vr-room-dir");
+const pyFile = "lib/sagebrush/nf.py";
+const pyText = readFileSync(join(here, "..", pyFile), "utf8");
+ok(await ev(`(() => { const W = whitespace; W.enter('d:lib/sagebrush'); return true; })()`) && await until(`whitespace.room === 'sagebrush › lib/ › sagebrush/'`, 5000), "a directory in it is entered too (from the desktop's API)");
+await ev(`(() => { const nd = whitespace.space.nodes.find((n) => n.id === 'p:${pyFile}'); nd.text = ${JSON.stringify(pyText)}; nd._full = true; whitespace.xr.open(nd); return true; })()`);
+await until(`whitespace.xr.history.flying === false`, 3000);
+ok((await ev(`whitespace.xr.panel?.buttons ?? []`)).includes("enter"), "a Python file's panel offers Enter", await ev(`whitespace.xr.panel`));
+await ev(`whitespace.xr.press('enter'), true`);
+ok(await until(`whitespace.room === 'sagebrush › lib/ › sagebrush/ › nf.py'`, 10000), "Enter parses the file into its room", { room: await ev(`whitespace.room`), status: await ev(`document.querySelector('#status').textContent`) });
+const kinds = await ev(`[...new Set(whitespace.space.nodes.map((n) => n.kind))].sort()`);
+ok(kinds.includes("fn") && kinds.includes("import"), "its objects: functions and imports", kinds);
+ok((await ev(`whitespace.space.edges.length`)) > 5 && (await ev(`whitespace.space.directed`)) === true, "and the calls between them, with a direction", await ev(`whitespace.space.edges.length`));
+await until(`whitespace.xr.history.flying === false`, 3000);
+await sleep(400);
+await shot("vr-room-file");
+for (let i = 0; i < 8 && (await ev(`whitespace.room`)) !== null; i++) {
+  await ev(`whitespace.xr.menuPress('back'), true`);
+  await until(`whitespace.xr.history.flying === false`, 3000);
+}
+ok((await ev(`whitespace.room`)) === null && (await ev(`whitespace.space.nodes.some((n) => n.id === 'd:lib')`)), "Back (wrist menu) brings you out room by room, to the top", { room: await ev(`whitespace.room`) });
+await ev(`whitespace.xr.menuPress('exit'), true`);
+ok(await until(`!whitespace.xr.presenting`), "and Exit VR leaves");
 ok(errors.length === 0, "no page errors", errors.slice(0, 3));
 console.log(failures ? `${failures} FAILED` : "all passed");
 process.exit(failures ? 1 : 0);

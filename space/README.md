@@ -85,9 +85,17 @@ Over this connection Claude has the web and your Sagebrush files, not your disk.
 - `whitespace-code.space.json` is this code itself (`node gen-self.mjs`), with four tours. `modular-forms.space.json` has a summary for every object and four tours, written by reading the code.
 - `node annotate.mjs public/X.space.json notes/X.json` merges a notes file (`{ summaries, tours }`) into a space: an agent writes the notes, the tool checks every id.
 
+## Rooms: reading code by entering it
+
+- `sagebrush.space.json` is Sagebrush's whole repository at one commit (`node gen-repo.mjs`: paths, lengths and imports only). Each directory is a room: its folders and files, with an arrow for each import between them. **Enter** (the drawer's button, the Enter key, or the panel's button in a headset) goes into a directory, a Python or Sage file, a class, or a `.space.json`.
+- A file's room comes from a real parse (CPython's own grammar, in `pyparse/`; Sage's preparser first): its functions, classes, top-level code and imports, with an arrow for each call or use. What nothing calls stands at the top, and the arrows run down to the helpers. Imports hang on the left wall; anything unlinked sits on a shelf below. A docstring's first paragraph is the summary until someone writes a better one.
+- Select a function: its links light up (what it calls in orange, what calls it in blue), and the drawer shows its highlighted code with each name linked to what it names.
+- **Back** past where you entered brings you out again. The title lists the rooms you are in, and each one is a link back out. A file's text is fetched from GitHub when it is opened.
+- On a phone the controls fold to a bar (▾ unfolds them), and the drawer is a sheet along the bottom.
+
 ## The rough alpha (a static site)
 
-`space/build-alpha.sh` builds the whole site with the space into `web/dist` (from clean, with checks) and copies it to `space/site/public`, the assets of the Worker that serves https://space.sagebrush.cloud (`space/site/cloudflare.config.ts`: static assets only, as sagebrush.space is served; deploy with `cd space/site && npm ci && npx cf deploy`). Cloudflare applies `_headers`: every page gets COOP/COEP, which the engine's interrupt needs, and its CSP. The engine, its worker and the space are all in `web/dist`; nothing is fetched from elsewhere. The space says "rough alpha" in its corner, and the site isn't indexed (`robots.txt`).
+`space/build-alpha.sh` builds the whole site with the space into `web/dist` (from clean, with checks) and copies it to `space/site/public`, the assets of the Worker that serves https://space.sagebrush.cloud (`space/site/cloudflare.config.ts`: static assets only, as sagebrush.space is served; deploy with `cd space/site && npm ci && npx cf deploy`). Cloudflare applies `_headers`: every page gets COOP/COEP, which the engine's interrupt needs, and its CSP. The engine, its worker and the space are all in `web/dist`; the only thing fetched from elsewhere is a repository file's text, from GitHub, when the repository space opens it. The space says "rough alpha" in its corner, and the site isn't indexed (`robots.txt`).
 
 To use the Agents page there, start the agent with that site's origin, e.g. for https://space.sagebrush.cloud:
 
@@ -102,6 +110,7 @@ SAGEBRUSH_AGENT_PAGE=https://space.sagebrush.cloud/agents/ npx -y https://agents
 - Point a controller at an object and pull the **trigger**: you fly to it (as the desktop does) and its reading panel opens beside it (its text, code and output), with **Run**, scrolling and **Close**. The object is selected, as a click selects it, so the agent sees it.
 - **Left thumbstick**: move where you look. **Right thumbstick**: up and down, and turn in 30° steps. Hold the **grip** to go 4× faster. **A** or **X** closes the panel; **B** or **Y** goes back.
 - **The menu on your left wrist**: Back, Forward, See all, Run all, Exit VR.
+- A directory's or a file's panel has **Enter**: its room replaces the space around you. **Back** (or B/Y) past where you entered brings you out.
 - WebXR needs a secure page: the https alpha, or your laptop's server over USB (`adb reverse tcp:8765 tcp:8765`, then http://localhost:8765/ in the headset's browser).
 - `node space/test-xr.mjs` checks it without a headset, on Meta's emulated Quest 3 (IWER).
 

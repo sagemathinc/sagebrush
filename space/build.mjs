@@ -20,7 +20,11 @@ await build({
   minify: true,
   format: "esm",
   target: "es2022",
-  outfile: join(dist, "space.js"),
+  // (the parser, src/pyroom.js and pyparse, is a chunk of its own: fetched the first time a file is entered)
+  splitting: true,
+  outdir: dist,
+  entryNames: "space",
+  chunkNames: "chunks/[name]-[hash]",
   logLevel: "warning",
   // (src/main.js takes the site's Markdown, ../web/markdown.ts, whose "marked" comes from here when the repository's
   //  own packages aren't installed)

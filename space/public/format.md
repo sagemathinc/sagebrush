@@ -29,6 +29,7 @@ A space is a board in 3D: notes, code with its output, files and 3D plots, place
   - `file`: a source file; `text` is its code, highlighted by `lang` (`rust`, `python`, `typescript`, `javascript`, `json`, `matlab`); `lines` is its length.
   - `code`: code the person can edit and run in the browser; `lang` is the language it runs in: `python`, `sage`, `matlab` or `magma`. Give `output` (text) if you know it; otherwise the person presses Run.
   - `plot3d`: a 3D plot shown as a real object. Give `text` (Sage code making a 3D plot, which runs and replaces the object) and, so something shows before it runs, an optional `surface`: `x` and `y` are the grid's values, and `z[j][i]` is the height over `x[i]`, `y[j]`.
+- `src`: for a `file`, where its whole text is (an https URL, such as raw.githubusercontent.com at a commit). Then `text` can be just its first lines: the whole file is fetched when it is opened, and a Python or Sage file can be entered (its functions, classes and calls).
 - `group`: objects of a group cluster together, in one color, with the group's name above them from afar. Use groups for directories, crates, modules or topics.
 - `near`: another object's id; this one is placed beside it (a sample beside the code it illustrates).
 - Don't give `position`: the layout is computed and is the same each time for the same file.

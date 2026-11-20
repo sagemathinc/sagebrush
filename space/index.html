@@ -23,7 +23,13 @@
     background: var(--panel); border: 1px solid var(--line); border-radius: 10px; padding: 12px; backdrop-filter: blur(6px); box-shadow: 0 4px 18px rgba(20, 30, 50, 0.08); }
   .embed #panel { width: 260px; top: 8px; left: 8px; }
   .embed #space { display: none; }
-  #title { font-weight: 600; font-size: 15px; }
+  #title { font-weight: 600; font-size: 15px; flex: 1; min-width: 0; overflow-wrap: anywhere; }
+  #title a { color: var(--link); text-decoration: none; } #title a:hover { text-decoration: underline; }
+  .head { display: flex; align-items: center; gap: 6px; }
+  #fold { padding: 2px 9px; font-size: 13px; }
+  /* folded (a phone's default): only the title, Back and the button that unfolds it */
+  body.folded #panel > :not(.head) { display: none; }
+  body.folded #panel { width: auto; max-width: calc(100% - 24px); padding: 6px 8px; }
   #alpha { position: fixed; left: 12px; bottom: 32px; z-index: 5; font-size: 11px; font-weight: 600; letter-spacing: 0.02em; padding: 2px 8px; border-radius: 999px;
     background: #fff4d6; color: #6b4e00; border: 1px solid #e8d49a; cursor: help; }
   :root[data-theme="dark"] #alpha { background: #3a2f12; color: #f2d58a; border-color: #6b5520; }
@@ -72,6 +78,10 @@
   #overlay .tourbar button { background: var(--ctl2); color: var(--ov-fg); border: 1px solid var(--ctl-line); padding: 4px 10px; }
   #overlay .tourbar button.next { background: #1f6feb; color: #fff; border-color: #1f6feb; font-weight: 600; }
   #tour { width: 100%; }
+  #overlay .enterbar { display: flex; gap: 10px; align-items: center; margin: 2px 0 10px; }
+  #overlay .enterbar button { background: #1f6feb; color: #fff; border-color: #1f6feb; font-weight: 600; padding: 5px 14px; }
+  #overlay a.ref { color: inherit; text-decoration: underline dotted color-mix(in srgb, var(--link) 70%, transparent); text-underline-offset: 3px; }
+  #overlay a.ref:hover { color: var(--link); text-decoration-style: solid; }
   #overlay img.fig { max-width: 100%; background: #fff; border-radius: 6px; margin: 6px 0; }
   /* highlight.js: GitHub's light and dark colors */
   .hljs-keyword, .hljs-meta .hljs-keyword, .hljs-type, .hljs-built_in { color: var(--k); }
@@ -87,15 +97,26 @@
     #overlay { width: min(560px, 55vw); }
   }
   #help { position: fixed; left: 12px; bottom: 10px; color: var(--muted); font-size: 12px; }
+  /* a phone: the drawer is a sheet over the lower part of the screen, the space in view above it */
+  @media (max-width: 700px) {
+    #overlay { top: auto; left: 8px; right: 8px; bottom: 8px; width: auto !important; height: 52vh; padding: 14px 16px; }
+    #overlay .grip { display: none; }
+    body.reading #panel { display: flex; width: auto; padding: 6px 8px; }
+    body.reading #panel > :not(.head) { display: none; } /* (while reading, folded: the title and Back stay) */
+    #alpha { display: none; }
+  }
 </style>
 </head>
 <body>
 <div id="view"></div>
 <div id="panel">
-  <div id="title">Whitespace</div>
+  <div class="head">
+    <button id="back" title="Back to where you were (B); out of a room, past where you entered it" disabled>←</button>
+    <div id="title">Whitespace</div>
+    <button id="fold" title="Hide the controls (show them again with this button)" aria-expanded="true">▴</button>
+  </div>
   <div class="row"><select id="space" title="The space shown"></select></div>
   <div class="row">
-    <button id="back" title="Back to where you were (B)" disabled>← Back</button>
     <button id="fwd" title="Forward again (F)" disabled>Forward →</button>
     <button id="home" title="See everything (H)">See all</button>
     <button id="dims" title="The same space laid out on a plane, to compare">Flatten to 2D</button>
@@ -113,7 +134,7 @@
 </div>
 <div id="overlay" hidden></div>
 <div id="alpha" title="A quick prototype: not reviewed, and it will change. Spaces you make may not open in a later version.">Whitespace · rough alpha</div>
-<div id="help">Drag to turn · scroll to move closer · right-drag to pan · W A S D / arrows, E Q: fly (Shift: faster) · click an object to read it · B / F: back, forward · H: see all · /: search</div>
+<div id="help">Drag to turn · scroll to move closer · right-drag to pan · W A S D / arrows, E Q: fly (Shift: faster) · click an object to read it · Enter: into a directory, file or class · B / F: back, forward · H: see all · /: search</div>
 <script type="module" src="space.js"></script>
 </body>
 </html>

@@ -24,6 +24,7 @@ const PARTS = {
     ["picking", "picking", /^\/\/ -+ picking/],
     ["selection", "selection (for agents)", /^\/\/ -+ selection/],
     ["tours", "guided tours", /^\/\/ -+ guided tours/],
+    ["rooms", "rooms: entering an object", /^\/\/ -+ rooms/],
     ["running", "running code", /^\/\/ -+ running code/],
     ["keeping", "what this browser keeps", /^\/\/ what was edited/],
     ["controls", "panel, theme, keys", /^\/\/ the overlay's width/],
@@ -54,6 +55,7 @@ const SUMMARY = {
   "src/main.js#picking": "Turns the mouse into objects: a ray from the camera through the pointer finds what is under it. Hovering lights it up; a click (not a drag) opens it in the drawer.",
   "src/main.js#selection": "What the person is looking at, for agents: the selected object goes into the address (#sel=), window.whitespace.selection, an event, and a message to the page around it, which writes it into the file as \"selected\".",
   "src/main.js#tours": "Guided tours: a list of stops, each an object and some narration. A tour flies from stop to stop; the drawer shows the stop with Back, Next and End (keys N and P), and the headset shows it on the panel.",
+  "src/main.js#rooms": "Rooms. Enter on a directory, a Python or Sage file, a class or a space in a file opens it as a space of its own; Back past where you entered leaves it, and the title lists the rooms you are in, each a way back out. A file's text is fetched from its `src` when needed, and the drawer's code links each name to the object it names.",
   "src/main.js#running": "Runs an object's code on Sagebrush's engine in the browser (run.js). The output, figures and 3D plots are kept on the object and drawn on its face; a Sage 3D plot replaces the object's shape. Run all runs every object in order.",
   "src/main.js#keeping": "Keeps what you edited and ran in this browser (localStorage), each copy tagged with the file text it came from, so the agent's next version of an object always wins over an old copy.",
   "src/main.js#controls": "The drawer's width (drag its edge), the light/dark theme switch, full screen, and flying with the keyboard (W A S D or arrows, E and Q up and down, Shift for speed).",
@@ -68,6 +70,10 @@ const SUMMARY = {
   "src/xr.js#pointing": "Pointing and pulling the trigger: a hit on the panel or the menu presses its button; a hit on an object flies there and opens it.",
   "src/xr.js#frame": "Each frame: the rays and what they hover, the thumbsticks (move, rise and fall, turn in steps; the grip for speed), and B or Y for Back.",
   "src/xr.js#enter": "Entering VR or AR (in AR the background goes, so the room shows) and leaving: the camera goes back where it was.",
+  "src/pyroom.js": "A Python or Sage file as a room, from a real parse (pyparse, CPython's own grammar; Sage's preparser first): its functions, classes, top-level code and imports, linked by the references read from the parse (calls, uses, a class's bases). A class's room holds its methods, linked by self calls.",
+  "src/treeroom.js": "A directory as a room: its subdirectories (sized by how many files they hold) and files (by length), linked by the imports between them, a subdirectory standing for everything inside it. The whole tree comes from a space's `tree` (gen-repo.mjs).",
+  "src/roomlayout.js": "A room's layout: height is depth in its links, so what nothing calls stands at the top and arrows run downhill; circles share a level; each level ordered under its callers (barycenters) so fewer arrows cross; imports on the left wall, unlinked objects on a shelf below.",
+  "src/sizes.js": "Each kind's slab size, grown with its length (lines, or a directory's file count), shared by the drawing and the room layout.",
   "src/run.js": "Runs code on Sagebrush's engine in a Web Worker, one engine per language (so MATLAB can't see Sage's names), and turns a Sage 3D scene into three.js objects.",
   "src/code.js": "Syntax highlighting (highlight.js) and the small code editor in the drawer: a textarea over a highlighted copy; Shift+Enter runs.",
   "src/layout.js": "The force layout: links pull objects together, everything pushes everything else apart, and groups gather around their centre. Fixed positions stay put; `near` puts an object beside another.",
@@ -80,6 +86,7 @@ const SUMMARY = {
   "site/src/index.ts": "The Worker's code: anything that isn't a file gets the assets' own answer (their 404 page).",
   "gen-modular.mjs": "Makes the modular-forms space from a Sagebrush checkout: the Rust crates file by file, the Python layers that call them, a note per crate, runnable Sage samples and a 3D plot of the dimensions of spaces of cusp forms.",
   "gen-web-tree.mjs": "Makes the web-tree space: every file under web/ with its first lines, linked by its imports.",
+  "gen-repo.mjs": "Makes the repository space: every text file of Sagebrush at one commit, its length and its imports (Python and JS/TS, resolved to files), entered directory by directory; each file's text is fetched from GitHub at that commit.",
   "gen-demo.mjs": "Makes the demo space: notes, Python, Sage, MATLAB and matplotlib code, and two 3D plots.",
   "gen-self.mjs": "Makes this space: the whitespace's own code, its long files in parts, with summaries and tours.",
   "layout-cli.mjs": "Lays out a space once and saves the positions into it, so it opens the same way every time.",
@@ -122,7 +129,8 @@ const link = (from, to) => { if (has.has(from) && has.has(to)) edges.push({ from
 // imports
 for (const [f, deps] of Object.entries({
   "src/main.js#scene": ["src/layout.js", "src/tex.js", "src/xr.js#setup", "src/code.js", "src/run.js"],
-  "src/xr.js#setup": ["src/tex.js"], "layout-cli.mjs": ["src/layout.js"], "build.mjs": ["src/main.js#scene", "index.html"],
+  "src/xr.js#setup": ["src/tex.js"], "src/main.js#rooms": ["src/treeroom.js", "src/pyroom.js"], "src/pyroom.js": ["src/roomlayout.js"],
+  "src/treeroom.js": ["src/roomlayout.js"], "src/roomlayout.js": ["src/sizes.js"], "src/main.js#objects": ["src/sizes.js"], "gen-repo.mjs": ["src/treeroom.js"], "layout-cli.mjs": ["src/layout.js"], "build.mjs": ["src/main.js#scene", "index.html"],
   "build-alpha.sh": ["build.mjs", "site/cloudflare.config.ts"], "site/cloudflare.config.ts": ["site/src/index.ts"],
   "../web/agents/page.ts": ["index.html", "src/main.js#start", "src/main.js#selection"],
   "test-agents-space.mjs": ["../web/agents/page.ts"], "test-xr.mjs": ["src/xr.js#enter"],
@@ -136,7 +144,8 @@ for (const [f, ts] of Object.entries({
   "src/main.js#running": ["src/run.js", "src/main.js#keeping"], "src/main.js#tours": ["src/main.js#selection", "src/main.js#flying"],
   "src/main.js#start": ["src/main.js#load"], "src/main.js#headset": ["src/xr.js#setup", "src/main.js#zoom", "src/main.js#landmarks"],
   "src/xr.js#pointing": ["src/xr.js#panel", "src/xr.js#flying", "src/xr.js#menu"], "src/xr.js#frame": ["src/xr.js#pointing", "src/xr.js#flying"],
-  "src/xr.js#menu": ["src/main.js#tours", "src/main.js#running"], "src/xr.js#panel": ["src/main.js#running"],
+  "src/xr.js#menu": ["src/main.js#tours", "src/main.js#running", "src/main.js#rooms"], "src/xr.js#panel": ["src/main.js#rooms"],
+  "src/main.js#rooms": ["src/main.js#load", "src/main.js#flying"], "src/xr.js#panel": ["src/main.js#running"],
 })) for (const t of ts) link(f, t);
 
 const tours = [
@@ -159,6 +168,13 @@ const tours = [
     { node: "src/run.js", text: "**run** gets an engine for that language (started on first use, one per language) and executes the code in a Web Worker, collecting output, figures and 3D scenes as they arrive." },
     { node: "src/main.js#faces", text: "Back in main.js, the output is kept on the object and its face is redrawn with it. A Sage 3D plot is turned into three.js objects by **sceneObject** and stands on the slab's face." },
     { node: "src/main.js#keeping", text: "The result is saved in this browser, so it's still there after a reload, unless the agent has since changed the object." },
+  ] },
+  { id: "rooms", title: "How a file becomes a room", steps: [
+    { node: "gen-repo.mjs", text: "It starts with the repository space: **gen-repo.mjs** lists every text file at one commit with its length and the imports between files. No file's text is in the space; each is fetched from GitHub at that commit when it's opened." },
+    { node: "src/treeroom.js", text: "A directory is a room: **treeRoom** turns the tree into objects for the subdirectories and files directly inside it, with an arrow for each import between them." },
+    { node: "src/main.js#rooms", text: "Enter on a file calls **enterRoom**: it fetches the file's whole text (**fullText**), builds its room, remembers the space you were in and where you stood (for Back), and loads the room in its place." },
+    { node: "src/pyroom.js", text: "**pythonRoom** parses the file with CPython's own grammar and makes an object for each function, class, run of top-level code and imported module. The links are what each one really refers to: a call, a use of a constant, a base class." },
+    { node: "src/roomlayout.js", text: "**layered** places them: what nothing calls at the top, what it calls below, so you read the file from its entry points down to its helpers. Back past the place you entered calls **leaveRoom**, and the space around comes back as it was." },
   ] },
   { id: "vr", title: "VR: from Enter VR to the panel", steps: [
     { node: "src/main.js#headset", text: "The Enter VR button appears only if the browser has immersive VR. main.js hands xr.js what it needs: selecting, running, the desktop's views of objects, tours." },

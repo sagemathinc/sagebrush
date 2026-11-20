@@ -13,6 +13,8 @@ import { texToText } from "./tex.js";
 import { setupXR } from "./xr.js";
 import { highlight, editor } from "./code.js";
 import { run, interrupt, sceneObject, SCENE } from "./run.js";
+import { sizeOf } from "./sizes.js";
+import { treeRoom } from "./treeroom.js";
 
 const $ = (s) => document.querySelector(s);
 const esc = (s) => String(s ?? "").replace(/[&<>"]/g, (c) => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;" })[c]);
@@ -56,14 +58,6 @@ addEventListener("resize", () => {
 // ---------------------------------------------------------------- objects
 const hue = (s) => { let h = 0; for (const c of String(s)) h = (h * 31 + c.charCodeAt(0)) >>> 0; return (h % 360) / 360; };
 const groupColor = (nd) => new THREE.Color().setHSL(hue(nd.group ?? nd.kind), 0.5, 0.45);
-const SIZE = { file: [2.6, 1.6, 0.12], note: [5, 3.8, 0.45], code: [5, 3.8, 0.2], plot3d: [5, 5, 0.15] };
-// (a file's slab grows with its length, `lines`: a long file looks long from afar)
-const sizeOf = (nd) => {
-  const s = SIZE[nd.kind] ?? SIZE.file;
-  if (nd.kind !== "file" || !(Number(nd.lines) > 0)) return s;
-  const k = Math.min(2.4, Math.max(0.7, Math.sqrt(Number(nd.lines) / 120)));
-  return [s[0] * Math.sqrt(k), s[1] * k, s[2]];
-};
 
 function canvasFor(nd, px) {
   const [w, h] = sizeOf(nd);
@@ -76,7 +70,9 @@ const fgOf = (nd) => nd.kind === "note" ? "#2b2a26" : T.fg;
 const summaryBand = () => (T.fg === "#1f2328" ? "rgba(31, 111, 235, 0.10)" : "rgba(88, 166, 255, 0.16)");
 const sideColor = (nd) => new THREE.Color().setHSL(hue(nd.group ?? nd.kind), 0.35, nd.kind === "note" ? 0.75 : T.sideL);
 // (a title as drawn on a face: its math as text, texToText; the drawer typesets it)
-const shortTitle = (nd) => (nd.kind === "file" ? nd.title.split("/").pop() : texToText(nd.title));
+const shortTitle = (nd) => (nd.kind === "file" ? nd.title.split("/").pop() : nd.kind === "dir" || ROOM_KINDS.has(nd.kind) ? String(nd.title) : texToText(nd.title));
+// (the objects of a room, read from a parse: their titles are code, never math)
+const ROOM_KINDS = new Set(["fn", "class", "block", "import"]);
 function texture(c) {
   const tex = new THREE.CanvasTexture(c);
   tex.colorSpace = THREE.SRGBColorSpace;
@@ -221,7 +217,9 @@ function makeObject(nd) {
   pickables.push(slab);
   group.userData = { node: nd, face, side, level: 0, tex: [], plot: null };
   const gl = glyph(nd);
-  gl.position.set(0, h / 2 + 0.9, 0);
+  // (in a room, small and at the top left corner: the arrows arrive at the top's middle)
+  if (space?.directed) { gl.scale.setScalar(0.5); gl.position.set(-w / 2 + 0.35, h / 2 + 0.45, 0); }
+  else gl.position.set(0, h / 2 + 0.9, 0);
   group.add(gl);
   group.userData.glyph = gl;
   if (nd.scene) setPlot(group, sceneObject(nd.scene));
@@ -273,7 +271,7 @@ function setPlot(group, obj) {
 }
 
 // semantic zoom: 0 far (a block in its group's color), 1 its title, 2 its face; textures made lazily, a few a frame
-const LEVEL_DIST = { file: [14, 45], note: [26, 90], code: [26, 90], plot3d: [26, 90] };
+const LEVEL_DIST = { file: [14, 45], note: [26, 90], code: [26, 90], plot3d: [26, 90], fn: [16, 50], class: [18, 60], block: [16, 50], import: [10, 32], dir: [16, 55] };
 // (where you see from: the camera's place in the world, which in a headset is your head's)
 const eyeV = new THREE.Vector3();
 const eye = () => camera.getWorldPosition(eyeV);
@@ -319,7 +317,7 @@ function landmarkSprite(text) {
   return sprite;
 }
 function buildLandmarks() {
-  for (const l of landmarks) scene.remove(l.sprite);
+  for (const l of landmarks) { scene.remove(l.sprite); dispose(l.sprite); }
   landmarks = [];
   // (a group's own label, and one for each top-level directory over all of its subdirectories: from afar the big
   // ones show, and the finer ones as you come closer, as the screen has room for them)
@@ -331,9 +329,12 @@ function buildLandmarks() {
     const parts = g.split("/");
     if (parts.length > 2) add(parts.slice(0, 2).join("/"), i);
   });
+  // (a room labels only the groups it names: its levels are its order, and a label over all its functions would float
+  //  in the middle of them)
+  const only = space.room ? new Set(space.room.labels ?? []) : null;
   for (const [g, set] of groups) {
     const members = [...set];
-    if (!g || members.length < 2) continue;
+    if (!g || members.length < 2 || (only && !only.has(g))) continue;
     const sprite = landmarkSprite(g.replace(/^web\//, "") + "  (" + members.length + ")");
     scene.add(sprite);
     landmarks.push({ g, members, sprite, center: new THREE.Vector3(), radius: 1 });
@@ -379,24 +380,85 @@ function stepLandmarks() {
   }
 }
 
+// (everything a space made on the GPU is freed with it: rooms come and go with every Enter and Back. The glyphs'
+//  shared shapes and the arrows' head stay)
+function dispose(obj) {
+  const shared = new Set(glyphGeo.values()).add(HEAD);
+  obj.traverse((m) => {
+    if (m.geometry && !shared.has(m.geometry) && !m.isSprite) m.geometry.dispose(); // (sprites share three's one quad)
+    for (const mat of [].concat(m.material ?? [])) { mat.map?.dispose(); mat.dispose(); }
+  });
+  for (const t of obj.userData?.tex ?? []) t?.dispose();
+}
 function clear() {
-  for (const o of objects) scene.remove(o);
-  for (const l of landmarks) scene.remove(l.sprite);
-  if (edgeLines) scene.remove(edgeLines);
-  objects = []; pickables = []; edgeLines = null; landmarks = [];
+  for (const o of objects) { scene.remove(o); dispose(o); }
+  for (const l of landmarks) { scene.remove(l.sprite); dispose(l.sprite); }
+  if (edgeLines) { scene.remove(edgeLines); dispose(edgeLines); }
+  if (arrowHeads) { scene.remove(arrowHeads); arrowHeads.material.dispose(); arrowHeads.dispose(); }
+  objects = []; pickables = []; edgeLines = null; landmarks = []; arrowHeads = null;
+}
+
+// Arrows, in a space whose links have a direction (`directed`: a room's calls and imports): each link runs from the
+// edge of one slab to the edge of the other, with a head where it arrives.  The selected object's links stand out:
+// what it calls in orange, what calls it in blue.
+let arrowHeads = null;
+const HEAD = new THREE.ConeGeometry(0.15, 0.5, 10).translate(0, -0.25, 0); // (its tip at the origin, pointing up +y)
+function buildArrows(pairs) {
+  arrowHeads = new THREE.InstancedMesh(HEAD, new THREE.MeshBasicMaterial({ color: 0xffffff, transparent: true, opacity: 0.9, fog: true }), Math.max(1, pairs.length));
+  arrowHeads.count = pairs.length;
+  arrowHeads.frustumCulled = false;
+  scene.add(arrowHeads);
+}
+// (where the segment from a slab's centre towards `dir` leaves it: the slab's face rectangle, as seen from in front)
+function exitDist(i, dx, dy) {
+  const [w, h] = sizeOf(space.nodes[i]);
+  const tx = Math.abs(dx) > 1e-6 ? (w / 2) / Math.abs(dx) : Infinity, ty = Math.abs(dy) > 1e-6 ? (h / 2) / Math.abs(dy) : Infinity;
+  return Math.min(tx, ty, 50);
+}
+const EDGE_COLOR = { out: new THREE.Color(0xe8590c), in: new THREE.Color(0x1c7ed6) };
+function edgeColors() {
+  if (!edgeLines) return;
+  const pairs = edgeLines.userData.pairs, kinds = edgeLines.userData.kinds, col = edgeLines.geometry.attributes.color;
+  const base = new THREE.Color(T.edge), bg = new THREE.Color(T.bg), c = new THREE.Color();
+  const sel = selected === null ? -1 : space.nodes.findIndex((n) => n.id === selected);
+  pairs.forEach(([i, j], e) => {
+    c.copy(i === sel ? EDGE_COLOR.out : j === sel ? EDGE_COLOR.in : base);
+    // (a use, not a call: fainter, when nothing selected marks it)
+    if (i !== sel && j !== sel && kinds[e] === "uses") c.lerp(bg, 0.45);
+    col.setXYZ(2 * e, c.r, c.g, c.b); col.setXYZ(2 * e + 1, c.r, c.g, c.b);
+    if (arrowHeads) arrowHeads.setColorAt(e, c);
+  });
+  col.needsUpdate = true;
+  if (arrowHeads?.instanceColor) arrowHeads.instanceColor.needsUpdate = true;
+  edgeLines.material.opacity = sel >= 0 || space.directed ? Math.max(T.edgeOpacity, 0.55) : T.edgeOpacity;
 }
 
 function place(P) {
   positions = P;
   objects.forEach((o, i) => o.position.set(P[3 * i], P[3 * i + 1], P[3 * i + 2]));
   if (edgeLines) {
-    const a = edgeLines.geometry.attributes.position;
+    const a = edgeLines.geometry.attributes.position, m = new THREE.Matrix4(), q = new THREE.Quaternion(), up = new THREE.Vector3(0, 1, 0);
+    const A = new THREE.Vector3(), B = new THREE.Vector3(), d = new THREE.Vector3(), one = new THREE.Vector3(1, 1, 1);
     edgeLines.userData.pairs.forEach(([i, j], e) => {
-      a.setXYZ(2 * e, P[3 * i], P[3 * i + 1], P[3 * i + 2]);
-      a.setXYZ(2 * e + 1, P[3 * j], P[3 * j + 1], P[3 * j + 2]);
+      A.set(P[3 * i], P[3 * i + 1], P[3 * i + 2]); B.set(P[3 * j], P[3 * j + 1], P[3 * j + 2]);
+      if (arrowHeads) {
+        // (from slab edge to slab edge, the head's tip on the edge it arrives at)
+        d.subVectors(B, A);
+        const len = d.length();
+        if (len > 1e-6) {
+          d.divideScalar(len);
+          const s = exitDist(i, d.x, d.y), t = exitDist(j, d.x, d.y);
+          if (s + t < len) { A.addScaledVector(d, s); B.addScaledVector(d, -t); }
+        }
+        q.setFromUnitVectors(up, d.lengthSq() ? d : up);
+        arrowHeads.setMatrixAt(e, m.compose(B, q, one));
+      }
+      a.setXYZ(2 * e, A.x, A.y, A.z);
+      a.setXYZ(2 * e + 1, B.x, B.y, B.z);
     });
     a.needsUpdate = true;
     edgeLines.geometry.computeBoundingSphere();
+    if (arrowHeads) arrowHeads.instanceMatrix.needsUpdate = true;
   }
   if (landmarks.length) placeLandmarks();
 }
@@ -415,53 +477,68 @@ function positionsOf(nodes, edges, d) {
 
 // (`data`: the space itself, as the page around an embedded one sends it; `again`: the same space written again (by
 //  an agent), so the camera, the selection and Back stay as they are)
-async function load(name, data = null, again = false) {
+// (`opts.room`: a room being entered or left (rooms.js below): Back's history is kept, and `opts.P` gives the places
+//  the space had, so a room left is as it was)
+async function load(name, data = null, again = false, opts = {}) {
   $("#status").textContent = "loading " + name + "…";
-  const next = data ?? (await (await fetch(name)).json());
+  let next = data ?? (await (await fetch(name)).json());
+  // (a space carrying a whole tree instead of objects: its top directory's room)
+  if (next?.format === "sagebrush-space" && next.tree && !next.nodes?.length) next = { ...treeRoom(next.tree, ""), title: next.title ?? next.tree.name, summary: next.summary };
   if (next?.format !== "sagebrush-space" || !Array.isArray(next.nodes)) throw new Error(name + " is not a sagebrush-space");
+  // (the file written again while you are inside one of its rooms: it is what you'll come back out to)
+  if (again && scopes.length && !opts.room) {
+    scopes[0].space = next; scopes[0].P = null;
+    $("#status").textContent = "the space was written again: Back out of the rooms to see it";
+    return;
+  }
   const view = again && space ? { pos: camera.position.clone(), target: controls.target.clone(), sel: selected } : null;
+  if (!opts.room) { scopes.length = 0; spaceName = name; }
   space = next;
   clear();
   const nodes = space.nodes, index = new Map(nodes.map((n, i) => [n.id, i]));
   restore(nodes);
   objects = nodes.map(makeObject);
   objects.forEach((o) => scene.add(o));
-  const pairs = [];
+  const pairs = [], kinds = [];
   for (const e of space.edges ?? []) {
     const i = index.get(e.from), j = index.get(e.to);
-    if (i !== undefined && j !== undefined) pairs.push([i, j]);
+    if (i !== undefined && j !== undefined) { pairs.push([i, j]); kinds.push(e.kind ?? ""); }
   }
   const geo = new THREE.BufferGeometry();
   geo.setAttribute("position", new THREE.BufferAttribute(new Float32Array(pairs.length * 6), 3));
-  edgeLines = new THREE.LineSegments(geo, new THREE.LineBasicMaterial({ color: T.edge, transparent: true, opacity: T.edgeOpacity }));
+  geo.setAttribute("color", new THREE.BufferAttribute(new Float32Array(pairs.length * 6), 3));
+  edgeLines = new THREE.LineSegments(geo, new THREE.LineBasicMaterial({ vertexColors: true, transparent: true, opacity: T.edgeOpacity }));
   edgeLines.userData.pairs = pairs;
+  edgeLines.userData.kinds = kinds;
   scene.add(edgeLines);
+  if (space.directed) buildArrows(pairs);
   for (const n of nodes) (n._out = []), (n._in = []);
   for (const [i, j] of pairs) (nodes[i]._out.push(nodes[j]), nodes[j]._in.push(nodes[i]));
   const t0 = performance.now();
-  const r3 = positionsOf(nodes, space.edges ?? [], 3);
+  const r3 = opts.P && opts.P.length === nodes.length * 3 ? { P: opts.P, laid: false } : positionsOf(nodes, space.edges ?? [], 3);
   P3 = r3.P; P2 = null; dims = 3;
   $("#dims").textContent = "Flatten to 2D";
   place(P3);
   buildLandmarks();
   selected = null;
+  edgeColors();
   if (view) {
     frame(P3);
     flight = null;
     camera.position.copy(view.pos);
     controls.target.copy(view.target);
     const nd = view.sel === null ? null : nodes.find((n) => n.id === view.sel);
-    if (nd) { selected = nd.id; setGlow(nd, 0.4); }
+    if (nd) { selected = nd.id; setGlow(nd, 0.4); edgeColors(); }
   } else {
-    history.length = 0; future.length = 0;
-    frame(P3);
+    if (!opts.room) { history.length = 0; future.length = 0; }
+    frame(P3, false, opts.room ? 900 : 1);
   }
   navButtons();
   buildIndex();
   if (!view) tour = null;
   renderTours();
   document.title = (space.title ?? name) + " · whitespace";
-  $("#title").textContent = space.title ?? name;
+  crumbs();
   $("#status").textContent = `${nodes.length} objects, ${pairs.length} links · ${r3.laid ? "laid out in " + Math.round(performance.now() - t0) + " ms" : "at their saved places"}`;
   if (!view || selected === null) closeOverlay();
   else if (!$("#overlay").hidden) showOverlay(nodes.find((n) => n.id === selected));
@@ -476,16 +553,20 @@ function homeView(P) {
   const ds = [];
   for (let i = 0; i < n; i++) ds.push(c.distanceTo(new THREE.Vector3(P[3 * i], P[3 * i + 1], P[3 * i + 2])));
   ds.sort((a, b) => a - b);
-  const r = Math.max(ds[Math.floor(ds.length * 0.8)] ?? 6, 6);
-  return { to: c.clone().add(new THREE.Vector3(0.35, 0.25, 1).normalize().multiplyScalar(r * 2.2)), toT: c, r };
+  // (a room is seen whole: it is laid out to be)
+  const r = Math.max(ds[space?.room ? ds.length - 1 : Math.floor(ds.length * 0.8)] ?? 6, 6) * (space?.room ? 0.75 : 1);
+  // (a tall, narrow screen (a phone held upright) sees less across: further back, so the width fits too)
+  const fit = camera.aspect < 1 ? Math.min(2.2, 1 / camera.aspect) : 1;
+  return { to: c.clone().add(new THREE.Vector3(0.35, 0.25, 1).normalize().multiplyScalar(r * 2.2 * fit)), toT: c, r };
 }
-function frame(P, remember = false) {
+function frame(P, remember = false, ms = remember ? 900 : 1) {
   if (remember) pushView();
   const { to, toT: c, r } = homeView(P);
-  camera.far = r * 20;
-  scene.fog.near = r * 1.2; scene.fog.far = r * 6;
+  camera.far = Math.max(r * 20, 400);
+  // (no fog: AR clears it; and a headset's view is far less deep than a room is wide)
+  if (scene.fog) { scene.fog.near = r * 1.2; scene.fog.far = r * 6; }
   camera.updateProjectionMatrix();
-  flight = { from: camera.position.clone(), fromT: controls.target.clone(), to, toT: c, t0: performance.now(), ms: remember ? 900 : 1 };
+  flight = { from: camera.position.clone(), fromT: controls.target.clone(), to, toT: c, t0: performance.now(), ms };
 }
 
 // ---------------------------------------------------------------- flying, Back and Forward
@@ -495,7 +576,8 @@ const history = [], future = [];
 const viewNow = () => ({ pos: camera.position.clone(), target: controls.target.clone(), sel: selected });
 function pushView() {
   history.push(viewNow());
-  if (history.length > 100) history.shift();
+  // (the oldest view goes, never the place a room was entered from: leaving the room needs it)
+  if (history.length > 100) { const k = history.findIndex((v) => !v.leave); if (k >= 0) history.splice(k, 1); }
   future.length = 0;
   navButtons();
 }
@@ -524,6 +606,15 @@ function flyTo(i, dist, remember = true) {
   flyToView(to, toT);
 }
 function go(from, to) {
+  // (Back past the place a room was entered from: out of the room, to that place)
+  if (from === history && history.at(-1)?.leave) {
+    const v = leaveRoom();
+    if (!v) return;
+    const i = v.sel === null ? -1 : space.nodes.findIndex((n) => n.id === v.sel);
+    if (i >= 0) showOverlay(space.nodes[i]); else closeOverlay();
+    flyToView(v.pos, v.target);
+    return;
+  }
   const v = from.pop();
   if (!v) return;
   to.push(viewNow());
@@ -615,6 +706,7 @@ function setSelected(id) {
     const nd = x === null ? null : space.nodes.find((n) => n.id === x);
     if (nd) setGlow(nd, x === id ? 0.4 : 0);
   }
+  edgeColors();
   window.history.replaceState(null, "", location.pathname + location.search + (id === null ? "" : "#sel=" + encodeURIComponent(id)));
   const detail = selectionOf(id);
   dispatchEvent(new CustomEvent("whitespace:select", { detail }));
@@ -622,7 +714,8 @@ function setSelected(id) {
 }
 function selectionOf(id) {
   const nd = id === null ? null : space?.nodes.find((n) => n.id === id);
-  return nd ? { id: nd.id, kind: nd.kind, title: nd.title, group: nd.group ?? null, space: $("#space").value } : null;
+  return nd ? { id: nd.id, kind: nd.kind, title: nd.title, group: nd.group ?? null, space: $("#space").value,
+    ...(scopes.length ? { room: roomPath() } : {}), ...(nd.path ? { path: nd.path } : {}), ...(nd.start ? { lines: [nd.start, nd.end] } : {}) } : null;
 }
 
 function openOverlay(nd) {
@@ -631,6 +724,7 @@ function openOverlay(nd) {
   showOverlay(nd);
   flyTo(space.nodes.indexOf(nd), undefined, false);
 }
+const linkLabels = (nd) => (space.room && ROOM_KINDS.has(nd.kind) ? ["Calls and uses", "Called or used by"] : nd.kind === "file" || nd.kind === "dir" ? ["Imports", "Imported by"] : ["Links to", "Linked from"]);
 const RUNS = ["python", "sage", "matlab", "magma"];
 const runnable = (nd) => nd.kind === "code" || nd.kind === "plot3d";
 function showOverlay(nd) {
@@ -640,18 +734,44 @@ function showOverlay(nd) {
   if (stop) body += `<div class="tourcard"><div class="tourhead">${esc(stop.title)} · stop ${stop.i + 1} of ${stop.n}</div>` +
     `<div class="md">${markdown(String(stop.text ?? ""), { remote: false })}</div>` +
     `<div class="tourbar"><button data-tour="-1"${stop.i === 0 ? " disabled" : ""}>◀ Back</button><button data-tour="1" class="next">${stop.i + 1 < stop.n ? "Next ▶" : "Finish"}</button><button data-tour="end">End tour</button></div></div>`;
+  // (a room to enter: a directory, a Python or Sage file, a class, a space)
+  const ek = enterKind(nd);
+  if (ek) body += `<div class="enterbar"><button class="enter" title="Enter it (Enter)">Enter ▶</button><span class="hint">${esc(ENTER_HINT[ek])}</span></div>`;
   // (what it is for, before what it says)
   if (nd.summary) body += `<div class="summary md">${markdown(String(nd.summary), { remote: false })}</div>`;
-  if (nd.kind === "note") body += `<div class="md">${markdown(String(nd.text ?? ""), { remote: false })}</div>`;
+  if (nd.kind === "dir") body += `<div class="label">Inside</div><pre class="code">${esc(nd.text ?? "")}</pre>`;
+  else if (ROOM_KINDS.has(nd.kind)) {
+    body += `<div class="meta">${esc([nd.lang, nd.start ? `lines ${nd.start}–${nd.end}` : "", space.room?.path].filter(Boolean).join(" · "))}</div>` +
+      `<pre class="code hljs"><code>${highlight(String(nd.text ?? ""), nd.lang ?? "")}</code></pre>` +
+      (nd.kind === "import" && nd.names?.length ? `<div class="hint">Names it brings in: ${esc(nd.names.join(", "))}</div>` : "");
+  } else if (nd.kind === "note") body += `<div class="md">${markdown(String(nd.text ?? ""), { remote: false })}</div>`;
   else if (runnable(nd)) {
     const mode = RUNS.includes(nd.lang) ? nd.lang : nd.kind === "plot3d" ? "sage" : "python";
     body += `<div class="runbar"><select class="mode" title="The language">${RUNS.map((m) => `<option${m === mode ? " selected" : ""}>${m}</option>`).join("")}</select>` +
       `<button class="run" title="Run (Shift+Enter)">▶ Run</button><button class="stop" title="Stop" hidden>■ Stop</button><span class="runstate"></span></div>` +
       `<div class="code-edit"></div><div class="label">Output</div><div class="output">${outputHtml(nd)}</div>` +
       (nd.kind === "plot3d" || nd.scene ? `<p class="hint">A 3D plot is a real object in the space: drag to turn around it. Edit its code and run it to change it.</p>` : "");
-  } else body += `<div class="meta">${esc(nd.lang ?? "")}${Number(nd.lines) > 0 ? " · " + Number(nd.lines) + " lines" : ""}</div><pre class="code hljs"><code>${highlight(String(nd.text ?? ""), nd.lang ?? "")}</code></pre>${shownLines(nd) < Number(nd.lines) ? `<div class="hint">(its first ${shownLines(nd)} lines of ${Number(nd.lines)})</div>` : ""}`;
+  } else {
+    // (a file whose text is elsewhere (`src`): fetched now, and the drawer drawn again when it comes)
+    const pending = nd.src && !nd._full;
+    // (only if it is still this object, in this space: ids repeat from room to room)
+    const still = () => selected === nd.id && space.nodes.includes(nd) && !$("#overlay").hidden;
+    if (pending) fullText(nd).then(() => { if (still()) showOverlay(nd); }, (e) => {
+      const h = $("#overlay .fetching");
+      if (h && still()) h.textContent = "couldn't fetch its text: " + (e?.message ?? e);
+    });
+    const shown = String(nd.text ?? "").split("\n"), cut = shown.length > MAX_SHOWN;
+    body += `<div class="meta">${esc(nd.lang ?? "")}${Number(nd.lines) > 0 ? " · " + Number(nd.lines) + " lines" : ""}</div>` +
+      (pending && !nd.text ? `<div class="hint fetching">fetching its text…</div>` :
+        `<pre class="code hljs"><code>${highlight(cut ? shown.slice(0, MAX_SHOWN).join("\n") : String(nd.text ?? ""), nd.lang ?? "")}</code></pre>`) +
+      (cut ? `<div class="hint">(its first ${MAX_SHOWN} lines of ${shown.length})</div>` : !pending && shownLines(nd) < Number(nd.lines) ? `<div class="hint">(its first ${shownLines(nd)} lines of ${Number(nd.lines)})</div>` : "");
+  }
   const links = (label, list) => list.length ? `<div class="label">${label} (${list.length})</div><ul class="links">${list.map((m) => `<li><a href="#" data-i="${space.nodes.indexOf(m)}">${esc(m.title)}</a></li>`).join("")}</ul>` : "";
-  $("#overlay").innerHTML = `<div class="grip" title="Drag to resize"></div><button class="close" title="Close (Esc)">×</button><h2>${esc(nd.title)}</h2>${body}${links(nd.kind === "file" ? "Imports" : "Links to", nd._out)}${links(nd.kind === "file" ? "Imported by" : "Linked from", nd._in)}`;
+  const [outL, inL] = linkLabels(nd);
+  $("#overlay").innerHTML = `<div class="grip" title="Drag to resize"></div><button class="close" title="Close (Esc)">×</button><h2>${esc(nd.title)}</h2>${body}${links(outL, nd._out)}${links(inL, nd._in)}`;
+  if (space.room) linkNames($("#overlay pre.code code"), nd);
+  const eb = $("#overlay .enter");
+  if (eb) eb.onclick = () => enterRoom(nd);
   grip($("#overlay .grip"));
   if (runnable(nd)) mountRunner(nd);
   typeset($("#overlay"));
@@ -723,13 +843,173 @@ const shownLines = (nd) => String(nd.text ?? "").split("\n").length;
 const isBase64 = (s) => typeof s === "string" && /^[A-Za-z0-9+/]*={0,2}$/.test(s);
 function closeOverlay() { $("#overlay").hidden = true; document.body.classList.remove("reading"); viewOffset(); if (space) setSelected(null); }
 // (while the overlay covers the right of the screen, the view is shifted so what it is about stays in the free part)
+// (on a phone the overlay is a sheet along the bottom: the view is shifted up instead)
+const phone = matchMedia("(max-width: 700px)");
 function viewOffset() {
-  const w = $("#overlay").hidden ? 0 : $("#overlay").getBoundingClientRect().width + 12;
-  if (w) camera.setViewOffset(innerWidth, innerHeight, w / 2, 0, innerWidth, innerHeight);
+  const r = $("#overlay").hidden ? null : $("#overlay").getBoundingClientRect();
+  if (r && phone.matches) camera.setViewOffset(innerWidth, innerHeight, 0, (r.height + 8) / 2, innerWidth, innerHeight);
+  else if (r) camera.setViewOffset(innerWidth, innerHeight, (r.width + 12) / 2, 0, innerWidth, innerHeight);
   else camera.clearViewOffset();
   camera.updateProjectionMatrix();
 }
 addEventListener("resize", viewOffset);
+
+// ---------------------------------------------------------------- rooms: entering an object
+// A directory, a Python or Sage file, a class, or a space in a file is entered: it opens as a space of its own (a
+// room: treeroom.js, pyroom.js), Back past where you entered leaves it, and the title shows the rooms you are in, each
+// a way back out.  `scopes`: the spaces left on the way in, outermost first, with their places.
+const scopes = [];
+let spaceName = "", entering = false;
+const MAX_SHOWN = 4000; // (lines of a file the drawer highlights)
+const ENTER_HINT = { dir: "Its folders and files, and what imports what", python: "Its functions and classes, and what calls what",
+  class: "Its methods, and which calls which", space: "The space it holds" };
+function enterKind(nd) {
+  if (!nd) return null;
+  if (nd.enter?.kind === "dir" && space?.tree) return "dir";
+  if (nd.enter?.kind === "class" && typeof space?._text === "string") return "class";
+  if (nd.kind !== "file") return null;
+  const p = String(nd.path ?? nd.title ?? "");
+  // (a file is parsed whole: its text fetched from `src`, or all of it in the space)
+  const whole = !!nd.src || !(Number(nd.lines) > shownLines(nd));
+  // (by its name; by its language only when its title isn't a file name: a .pyx is Cython, which Python's grammar refuses)
+  if ((/\.(py|sage)$/.test(p) || (!/\.\w+$/.test(p) && (nd.lang === "python" || nd.lang === "sage"))) && whole) return "python";
+  if (/\.space\.json$/.test(p) && whole) return "space";
+  return null;
+}
+// (a file's whole text: from its `src` (https, or this site), once; the faces drawn again with it)
+const fetched = new Map();
+async function fullText(nd) {
+  if (!nd.src || nd._full) return String(nd.text ?? "");
+  const url = new URL(nd.src, location.href);
+  if (url.protocol !== "https:" && url.origin !== location.origin) throw new Error("only https sources are fetched");
+  if (!fetched.has(url.href)) fetched.set(url.href, fetch(url.href).then((r) => { if (!r.ok) throw new Error(`${r.status} ${r.statusText}`); return r.text(); }));
+  let text;
+  try { text = await fetched.get(url.href); } catch (e) { fetched.delete(url.href); throw e; }
+  nd.text = text; nd._full = true;
+  const o = objects[space.nodes.indexOf(nd)];
+  if (o) { for (const t of o.userData.tex) t?.dispose(); o.userData.tex = []; o.userData.level = -1; }
+  return text;
+}
+async function roomFor(nd, k) {
+  if (k === "dir") return treeRoom(space.tree, nd.enter.path);
+  if (k === "space") {
+    const s = JSON.parse(await fullText(nd));
+    if (s?.format !== "sagebrush-space" || !(Array.isArray(s.nodes) || s.tree)) throw new Error("it isn't a sagebrush-space");
+    return s;
+  }
+  // (the parser, loaded the first time a file is entered)
+  const { pythonRoom } = await import("./pyroom.js");
+  const text = k === "class" ? space._text : await fullText(nd);
+  const path = k === "class" ? space.room.path : String(nd.path ?? nd.title);
+  const r = pythonRoom(text, { path, sage: /\.sage$/.test(path) || nd.lang === "sage", scope: k === "class" ? nd.enter.name : null });
+  r._text = text;
+  return r;
+}
+async function enterRoom(nd) {
+  const k = enterKind(nd);
+  if (!k || entering) return false;
+  entering = true;
+  $("#status").textContent = "entering " + shortTitle(nd) + "…";
+  const from = space, P = P3 ? Float64Array.from(P3) : null;
+  let pushed = false;
+  try {
+    const room = await roomFor(nd, k);
+    // (the space changed while the file was fetched or parsed (an agent wrote it, another space was picked): not entered)
+    if (space !== from) return false;
+    // (where Back will bring you out: here; in a headset, where the camera is isn't a place in the space, so the outer
+    //  space's view of everything)
+    const here = xr.presenting ? (() => { const h = homeView(positions); return { pos: h.to.clone(), target: h.toT.clone(), sel: null }; })() : viewNow();
+    scopes.push({ space: from, P });
+    history.push({ ...here, leave: true });
+    future.length = 0;
+    pushed = true;
+    await load(spaceName, room, false, { room: true });
+    xr.roomChanged();
+    return true;
+  } catch (e) {
+    if (pushed) {
+      // (half in: back out to where you were)
+      scopes.pop();
+      const k2 = history.findLastIndex((v) => v.leave);
+      if (k2 >= 0) history.length = k2;
+      try { await load(spaceName, from, false, { room: true, P }); } catch {}
+    }
+    $("#status").textContent = "couldn't enter " + shortTitle(nd) + ": " + (e?.message ?? e);
+    return false;
+  } finally {
+    entering = false;
+  }
+}
+// (out of the room you are in, to the space around it, as it was; returns where you were in it when you entered)
+function leaveRoom() {
+  if (entering) return null;
+  const s = scopes.pop();
+  if (!s) return null;
+  const k = history.findLastIndex((v) => v.leave);
+  const v = k >= 0 ? history[k] : null;
+  if (k >= 0) history.length = k;
+  future.length = 0;
+  // (given the space itself, load runs to its end at once)
+  load(spaceName, s.space, false, { room: true, P: s.P }).catch(fail);
+  xr.roomChanged();
+  return v ?? { pos: camera.position.clone(), target: controls.target.clone(), sel: null };
+}
+function leaveTo(k) {
+  if (entering) return;
+  let v = null;
+  while (scopes.length > k) v = leaveRoom() ?? v;
+  if (v) flyToView(v.pos, v.target);
+}
+function labelOf(s) {
+  const r = s.room;
+  if (!r) return s.title ?? spaceName;
+  if (r.kind === "dir") return r.path ? r.path.split("/").pop() + "/" : s.tree?.name ?? s.title ?? "the top";
+  if (r.kind === "file") return String(r.path).split("/").pop();
+  if (r.kind === "class") return "class " + r.name;
+  return s.title ?? "";
+}
+const roomPath = () => [...scopes.map((s) => labelOf(s.space)), labelOf(space)].join(" › ");
+// (the title: the rooms you are in, each a link back out to it)
+function crumbs() {
+  const all = [...scopes.map((s) => s.space), space];
+  $("#title").innerHTML = all.map((s, k) => (k < all.length - 1 ? `<a href="#" data-k="${k}">${esc(labelOf(s))}</a>` : `<span>${esc(labelOf(s))}</span>`)).join(" › ");
+  $("#title").title = space.summary ? texToText(space.summary) : "";
+  for (const a of $("#title").querySelectorAll("a[data-k]")) a.onclick = (e) => { e.preventDefault(); leaveTo(+a.dataset.k); };
+}
+// (in a room's code: each name of another object in it a link there; not inside strings and comments)
+function linkNames(code, nd) {
+  if (!code) return;
+  const names = new Map();
+  space.nodes.forEach((m, i) => {
+    if (m !== nd && m.name && !names.has(m.name)) names.set(m.name, i);
+    if (m.kind === "import" || m.kind === "block") for (const n of m.names ?? []) if (n !== "*" && !names.has(n)) names.set(n, i);
+  });
+  if (!names.size) return;
+  const plain = [...names.keys()].filter((n) => /^\w+$/.test(n));
+  // (and in a class's room, a method named through self or cls)
+  const own = space.room?.kind === "class" ? "|(?<=\\b(?:self|cls)\\.)(\\w+)(?!\\w)" : "";
+  const re = new RegExp(`(?<![\\w.])(${plain.length ? plain.join("|") : "(?!)"})(?!\\w)${own}`, "g");
+  const walker = document.createTreeWalker(code, NodeFilter.SHOW_TEXT), texts = [];
+  while (walker.nextNode()) texts.push(walker.currentNode);
+  for (const t of texts) {
+    if (t.parentElement.closest(".hljs-string, .hljs-comment")) continue;
+    const s = t.nodeValue, frag = document.createDocumentFragment();
+    let at = 0, any = false;
+    for (const m of s.matchAll(re)) {
+      const name = m[1] ?? m[2], i = names.get(name);
+      if (i === undefined) continue;
+      any = true;
+      frag.append(s.slice(at, m.index));
+      const a = Object.assign(document.createElement("a"), { href: "#", className: "ref", textContent: name, title: "Go to " + space.nodes[i].title });
+      a.dataset.i = i;
+      frag.append(a);
+      at = m.index + name.length;
+    }
+    if (!any) continue;
+    frag.append(s.slice(at));
+    t.replaceWith(frag);
+  }
+}
 
 // ---------------------------------------------------------------- running code: edit, Run, and the space follows
 // (an object's output: its text, its figure (SVG), and, for a 3D plot, a note that the object in the space is it)
@@ -893,7 +1173,7 @@ function applyTheme() {
   $("#theme").textContent = "Theme: " + themeSetting[0].toUpperCase() + themeSetting.slice(1);
   scene.background.set(T.bg);
   scene.fog.color.set(T.bg);
-  if (edgeLines) { edgeLines.material.color.set(T.edge); edgeLines.material.opacity = T.edgeOpacity; }
+  edgeColors();
   for (const o of objects) {
     for (const t of o.userData.tex) t?.dispose();
     o.userData.tex = [];
@@ -913,6 +1193,23 @@ $("#theme").onclick = () => {
 darkQuery.addEventListener("change", () => themeSetting === "auto" && applyTheme());
 applyTheme();
 
+// the controls folded away to the title and Back (a phone starts so; kept for the next visit)
+function setFold(on) {
+  document.body.classList.toggle("folded", on);
+  $("#fold").textContent = on ? "▾" : "▴";
+  $("#fold").title = on ? "Show the controls" : "Hide the controls";
+  $("#fold").setAttribute("aria-expanded", String(!on));
+}
+{
+  let pref = null;
+  try { pref = localStorage.getItem("whitespace:folded"); } catch {}
+  setFold(pref === null ? phone.matches : pref === "1");
+}
+$("#fold").onclick = () => {
+  const on = !document.body.classList.contains("folded");
+  setFold(on);
+  try { localStorage.setItem("whitespace:folded", on ? "1" : "0"); } catch {}
+};
 // full screen
 $("#fs").onclick = () => (document.fullscreenElement ? document.exitFullscreen() : document.documentElement.requestFullscreen()).catch(() => {});
 document.addEventListener("fullscreenchange", () => { $("#fs").textContent = document.fullscreenElement ? "Exit full screen" : "Full screen"; });
@@ -951,6 +1248,7 @@ addEventListener("keydown", (e) => {
   const k = e.key.toLowerCase();
   if (!e.altKey && !e.ctrlKey && !e.metaKey && (FLY[k] || k === "shift")) { held.add(k); if (FLY[k]) e.preventDefault(); return; }
   if (e.key === "Escape") closeOverlay();
+  else if (e.key === "Enter" && selected !== null && !$("#overlay").hidden && !/^(A|BUTTON)$/.test(document.activeElement?.tagName ?? "")) { const nd = space.nodes.find((n) => n.id === selected); if (enterKind(nd)) enterRoom(nd); }
   else if (e.key === "/") { e.preventDefault(); $("#q").focus(); }
   else if (e.key === "b" || e.key === "B" || e.key === "Backspace" || (e.altKey && e.key === "ArrowLeft")) back();
   else if (e.key === "f" || e.key === "F" || (e.altKey && e.key === "ArrowRight")) forward();
@@ -1026,7 +1324,9 @@ const xr = setupXR({
   select: (nd) => setSelected(nd ? nd.id : null),
   // (the views the desktop flies to: an object's, and everything's)
   viewOf: (nd) => viewOf(space.nodes.indexOf(nd)),
-  home: () => space && homeView(positions),
+  // (a room's view of everything level with its middle: a headset turns you about the vertical only, so from above
+  //  the room would sit low in your view)
+  home: () => { if (!space) return null; const h = homeView(positions); return space.room ? { ...h, to: h.to.clone().setY(h.toT.y) } : h; },
   runAll: () => $("#runall").click(),
   // (tours in a headset: the stop to show, and its narration)
   tours: () => toursOf(),
@@ -1035,6 +1335,15 @@ const xr = setupXR({
   tourStep: (d) => tourStep(d),
   endTour: () => endTour(),
   run: (nd) => runNode(nd),
+  // (rooms in a headset: what can be entered, entering, and leaving)
+  canEnter: (nd) => !!enterKind(nd),
+  fullText: (nd) => fullText(nd),
+  linkLabels: (nd) => linkLabels(nd),
+  enter: (nd) => enterRoom(nd),
+  inRoom: () => scopes.length > 0,
+  depth: () => scopes.length,
+  has: (nd) => !!space?.nodes.includes(nd),
+  leave: () => leaveRoom(),
   glow: (nd, v) => setGlow(nd, v),
   theme: () => T,
   changed(on, mode) {
@@ -1072,5 +1381,9 @@ window.whitespace = {
   get selection() { return selectionOf(selected); },
   select(id) { const nd = space?.nodes.find((n) => n.id === id); if (!nd) return false; openOverlay(nd); return true; },
   back, forward, frame: () => frame(positions, true), flyTo,
+  // (rooms: enter the object with this id; leave the room you are in; where you are)
+  enter(id) { const nd = space?.nodes.find((n) => n.id === id); return nd ? enterRoom(nd) : Promise.resolve(false); },
+  leave() { const v = leaveRoom(); if (v) flyToView(v.pos, v.target); return !!v; },
+  get room() { return scopes.length ? roomPath() : null; },
   xr,
 };

@@ -3,7 +3,8 @@
 // the trigger selects what it points at: you fly to it (as the desktop does) and its reading panel opens beside it (the
 // drawer's text, its output, Run; the page's own HTML isn't drawn inside a headset). Left thumbstick: move where you
 // look; right thumbstick: up and down, and turn in steps. Hold the grip to go faster. A or X closes the panel; B or Y
-// goes back. The menu on your left wrist: Back, Forward, See all, Run all, Exit VR.
+// goes back. The menu on your left wrist: Back, Forward, See all, Run all, Exit VR. A directory, a file or a class is
+// entered from its panel (Enter): its room replaces the space around you, and Back past it brings you out again.
 import * as THREE from "three";
 import { texToText } from "./tex.js";
 
@@ -42,7 +43,8 @@ export function setupXR(api) {
   // (your head at `to`, facing `toT` (turned about the vertical only), in `ms`; where you were is remembered for Back)
   let flight = null;
   const backStack = [], fwdStack = [];
-  const pose = () => ({ pos: rig.position.clone(), yaw: rig.rotation.y });
+  // (each place remembered with how many rooms deep it was: a place in a room that has since been left is passed over)
+  const pose = () => ({ pos: rig.position.clone(), yaw: rig.rotation.y, depth: api.depth() });
   function flyRig(to, toT, ms = 450, remember = true) {
     if (remember) { backStack.push(pose()); fwdStack.length = 0; drawMenu(); }
     const d = new THREE.Vector3().subVectors(toT, to);
@@ -63,15 +65,36 @@ export function setupXR(api) {
     rig.rotation.y = flight.from.yaw + (flight.to.yaw - flight.from.yaw) * e;
     if (u >= 1) flight = null;
   }
-  const goBack = () => { const v = backStack.pop(); if (v) { fwdStack.push(pose()); flyPose(v); } drawMenu(); };
-  const goForward = () => { const v = fwdStack.pop(); if (v) { backStack.push(pose()); flyPose(v); } drawMenu(); };
+  // (Back past where a room was entered: out of the room, to where you stood; with nothing to go back to inside a room
+  //  entered before the headset, out of it to the view of everything)
+  function goBack() {
+    const cur = api.depth();
+    while (backStack.length && backStack.at(-1).depth > cur) backStack.pop();
+    const v = backStack.at(-1)?.depth === cur ? backStack.pop() : null;
+    if (v?.leave) { close(); api.leave(); fwdStack.length = 0; flyPose(v); }
+    else if (v) { fwdStack.push(pose()); flyPose(v); }
+    else if (api.inRoom()) { close(); api.leave(); fwdStack.length = 0; const h = api.home(); if (h) flyRig(h.to, h.toT, 450, false); }
+    drawMenu();
+  }
+  const goForward = () => {
+    const v = fwdStack.pop();
+    if (v && v.depth === api.depth()) { backStack.push(pose()); flyPose(v); } else fwdStack.length = 0;
+    drawMenu();
+  };
+  // (the space around you changed rooms (here, on the desktop, or by an agent): the panel shows an object of the room
+  //  left, and Forward's places are in it)
+  function roomChanged() {
+    if (shown && !api.has(shown)) close();
+    fwdStack.length = 0;
+    if (session) drawMenu();
+  }
   function seeAll() {
     const h = api.home();
     if (h) flyRig(h.to, h.toT, 700);
   }
 
   // ---------------------------------------------------------------- the reading panel
-  const PW = 1024, PH = 1280;
+  const PW = 1024, PH = 1280, PANEL_LINES = 400;
   const canvas = Object.assign(document.createElement("canvas"), { width: PW, height: PH });
   const tex = new THREE.CanvasTexture(canvas);
   tex.colorSpace = THREE.SRGBColorSpace;
@@ -90,8 +113,22 @@ export function setupXR(api) {
       out.push({ text: "", style: "prose" });
     }
     if (nd.summary) { add(texToText(nd.summary).replace(/\*\*|`/g, ""), "summary"); out.push({ text: "", style: "prose" }); }
+    // (its links, by name: what it calls and what calls it, in a room)
+    const [outL, inL] = api.linkLabels(nd);
+    for (const [label, list] of [[outL, nd._out ?? []], [inL, nd._in ?? []]]) {
+      if (!list.length) continue;
+      out.push({ text: `${label.toUpperCase()} (${list.length})`, style: "label" });
+      add(list.slice(0, 12).map((m) => m.title).join(" · ") + (list.length > 12 ? ` · and ${list.length - 12} more` : ""), "prose");
+      out.push({ text: "", style: "prose" });
+    }
+    if (nd.src && !nd._full && !nd.text) add("fetching its text…", "hint");
     if (nd.kind === "note") add(texToText(nd.text).replace(/^#+\s*/gm, "").replace(/\*\*|`/g, ""), "prose");
-    else add(nd.text, "code");
+    else {
+      // (a long file: its first lines here; the drawer on a screen has more)
+      const ls = String(nd.text ?? "").split("\n");
+      add(ls.slice(0, PANEL_LINES).join("\n"), "code");
+      if (ls.length > PANEL_LINES) add(`(its first ${PANEL_LINES} lines of ${ls.length})`, "hint");
+    }
     if (nd.output) { out.push({ text: "", style: "prose" }); out.push({ text: "OUTPUT", style: "label" }); add(nd.output, nd.outputError ? "error" : "output"); }
     if (nd.kind === "plot3d" || nd.scene) { out.push({ text: "", style: "prose" }); out.push({ text: "Its 3D plot is the object in the space.", style: "hint" }); }
     return out;
@@ -151,7 +188,8 @@ export function setupXR(api) {
       x += w + 18;
     };
     if (stop) { button("◀", "tourprev"); button(stop.i + 1 < stop.n ? "Next stop ▶" : "Finish", "tournext", true); }
-    if (api.runnable(nd)) button(state === "running" ? "Running…" : "▶ Run", "run", !stop);
+    if (api.canEnter(nd)) button("Enter ▶", "enter", !stop);
+    if (api.runnable(nd)) button(state === "running" ? "Running…" : "▶ Run", "run", !stop && !api.canEnter(nd));
     if (rows.length > fit) { button("▲", "up"); button("▼", "down"); }
     button("✕ Close", "close");
     if (state && state !== "running") { g.fillStyle = C.muted; g.font = "26px system-ui, sans-serif"; g.fillText(state, x + 8, PH - 70); }
@@ -160,6 +198,8 @@ export function setupXR(api) {
   function open(nd, fly = true, tourStop = null) {
     shown = nd; scroll = 0; state = ""; stop = tourStop;
     draw();
+    // (a file whose text is elsewhere: drawn again when it has come)
+    if (nd.src && !nd._full) api.fullText(nd).then(() => shown === nd && api.has(nd) && draw(), () => { if (shown === nd) { state = "couldn't fetch its text"; draw(); } });
     api.select(nd);
     if (fly) {
       // (to the object, as the desktop flies to it; the panel then opens to its right, facing where you'll be)
@@ -194,6 +234,19 @@ export function setupXR(api) {
     if (act === "tournext") return tour(1);
     if (act === "tourprev") return tour(-1);
     if (act === "up") { scroll -= 8; return draw(); }
+    if (act === "enter" && shown && state !== "entering…") {
+      // (into the room: the panel closes, Back will bring you out to where you stand now)
+      const nd = shown, from = pose();
+      state = "entering…"; draw();
+      const ok = await api.enter(nd);
+      if (!ok) { if (shown === nd) { state = "couldn't enter it"; draw(); } return; }
+      close();
+      backStack.push({ ...from, leave: true }); fwdStack.length = 0;
+      const h = api.home();
+      if (h) flyRig(h.to, h.toT, 700, false);
+      drawMenu();
+      return;
+    }
     if (act === "down") { scroll += 8; return draw(); }
     if (act === "run" && shown && state !== "running") {
       const nd = shown;
@@ -223,7 +276,7 @@ export function setupXR(api) {
     g.fillStyle = C.bg; g.beginPath(); g.roundRect(0, 0, MW, MH, 28); g.fill();
     menuButtons = [];
     const tours = api.tours().length, now = api.tourNow();
-    const items = [["← Back", "back", backStack.length > 0], ["Forward →", "forward", fwdStack.length > 0], ["See all", "home", true], ["Run all", "runall", true],
+    const items = [["← Back", "back", backStack.length > 0 || api.inRoom()], ["Forward →", "forward", fwdStack.length > 0], ["See all", "home", true], ["Run all", "runall", true],
       [now ? "Next stop ▶" : "Tour", "tour", tours > 0], ["Exit VR", "exit", true]];
     const bw = (MW - 3 * 20) / 2, bh = 96;
     items.forEach(([label, act, on], k) => {
@@ -355,7 +408,7 @@ export function setupXR(api) {
     get presenting() { return !!session; },
     get mode() { return mode; },
     get panel() { return shown ? { id: shown.id, state, buttons: buttons.map((b) => b.act) } : null; },
-    press, open: (nd) => open(nd), rig, menuPress, tour,
+    press, open: (nd) => open(nd), rig, menuPress, tour, roomChanged,
     get history() { return { back: backStack.length, forward: fwdStack.length, flying: !!flight }; },
   };
 }
