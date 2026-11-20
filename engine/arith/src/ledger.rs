@@ -415,18 +415,37 @@ pub(crate) fn skip_polled<I: Iterator>(mut it: I, n: usize) -> I {
 }
 
 /// The byte offset of `text`'s comma ending its first `n` tokens (`n >= 1`;
-/// the text's length when it has no more), Stop polled every 4096 commas;
-/// not charged, as [`skip_polled`].
+/// the text's length when it has no more), Stop polled before each 4096th
+/// comma (the first included); not charged, as [`skip_polled`].
 pub(crate) fn token_end_polled(text: &str, n: usize) -> usize {
     let mut commas = text.match_indices(',');
-    for i in 0..n - 1 {
+    for i in 0..n {
         if i & 0xfff == 0 {
             sagebrush_interrupt::check_coarse();
         }
-        if commas.next().is_none() {
-            return text.len();
+        match commas.next() {
+            None => return text.len(),
+            Some((at, _)) if i + 1 == n => return at,
+            Some(_) => {}
         }
     }
-    commas.next().map_or(text.len(), |(i, _)| i)
+    text.len()
 }
 
+#[cfg(test)]
+mod tests {
+    use super::token_end_polled;
+
+    /// token_end_polled is match_indices(',').nth(n - 1), or the text's
+    /// length past its commas, at and around the 4096-comma polls.
+    #[test]
+    fn token_end_at_the_poll_boundaries() {
+        let text = format!("{}7", "7,".repeat(4999));
+        let want = |n: usize| text.match_indices(',').nth(n - 1).map_or(text.len(), |(i, _)| i);
+        for n in [1, 2, 4095, 4096, 4097, 4999, 5000, 5001] {
+            assert_eq!(token_end_polled(&text, n), want(n), "n = {}", n);
+        }
+        assert_eq!(token_end_polled("", 1), 0);
+        assert_eq!(token_end_polled("ab", 1), 2);
+    }
+}
