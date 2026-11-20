@@ -649,6 +649,7 @@ class FakeRemote:
 
     def __init__(self, provider, plan):
         self.provider, self.plan, self.fs, self.log = provider, plan, {}, []
+        self.unready = {}
         self.build_fails, self.preempt_on, self.fetch_fails, self.corrupt = (
             False,
             set(),
@@ -664,6 +665,9 @@ class FakeRemote:
     def push(self, ip, local, remote, timeout):
         if not self.vm_of(ip):
             raise shard.TransferError("gone")
+        if self.unready.get(self.vm_of(ip), 0) > 0:
+            self.unready[self.vm_of(ip)] -= 1
+            raise shard.TransferError("scp exit 255")
         data = Path(local).read_bytes()
         if self.on_push:
             data = self.on_push(data)
@@ -673,6 +677,13 @@ class FakeRemote:
         name = self.vm_of(ip)
         if not name:
             return {"status": "error", "output": "ssh: no route"}
+        # (a VM just booted refuses ssh: every ssh or scp attempt counts
+        # down its unready answers, as a real one's sshd comes up)
+        if self.unready.get(name, 0) > 0:
+            self.unready[name] -= 1
+            return {"status": "error", "output": "ssh: connection refused"}
+        if words == ["true"]:
+            return {"status": "ok", "output": ""}
         if words[0] == "sha256sum":
             data = self.fs.get((name, words[-1]), b"")
             return {
@@ -857,6 +868,54 @@ class Drivers(unittest.TestCase):
         self.assertEqual(self.events("accepted"), [])
         self.assertEqual(len([x for x in self.remote.log if x[0] == "run"]), 1)
         self.assertEqual(self.prov.vms, {})
+
+    def test_setup_waits_for_ssh(self):
+        # (each new VM refuses ssh 3 times, as one just booted does)
+        orig = self.prov.inst
+
+        def inst(name, *a):
+            self.remote.unready[name] = 3
+            return orig(name, *a)
+
+        self.prov.inst = inst
+        rep = self.driver().run()
+        self.assertEqual(
+            (rep["accepted"], rep["stopped_types"], rep["fatal"]), (3, {}, [])
+        )
+        self.assertEqual(len(self.events("reserve")), 1)
+
+    def test_an_unreachable_vm_is_retired_not_the_type(self):
+        # (the first VM never answers ssh; the second does)
+        first = "bc-0123456789abcdef-x86-0"
+        orig = self.prov.inst
+
+        def inst(name, *a):
+            if name == first:
+                self.remote.unready[name] = 10**6
+            return orig(name, *a)
+
+        self.prov.inst = inst
+        rep = self.driver().run()
+        self.assertEqual((rep["accepted"], rep["stopped_types"]), (3, {}))
+        self.assertEqual(
+            [(e["name"], e["detail"]) for e in self.events("retired")],
+            [(first, "unreachable")],
+        )
+        self.assertNotIn(first, self.prov.vms)
+
+    def test_three_unreachable_vms_stop_the_type(self):
+        orig = self.prov.inst
+
+        def inst(name, *a):
+            self.remote.unready[name] = 10**6
+            return orig(name, *a)
+
+        self.prov.inst = inst
+        rep = self.driver().run()
+        self.assertIn("could not be set up", rep["stopped_types"]["x86"])
+        self.assertEqual(len(self.events("reserve")), shard.SETUP_TRIES)
+        self.assertEqual(self.prov.vms, {})
+        self.assertEqual(rep["accepted"], 0)
 
     def test_a_failed_build_stops_the_type(self):
         self.remote.build_fails = True

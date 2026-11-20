@@ -55,6 +55,12 @@ MAX_ROW = 1 << 20
 MAX_SIDECAR = 66
 TRANSFER_TIMEOUT = 60.0
 TRANSFER_TRIES = 3
+# A new VM's ssh comes up some seconds after the provider reports it: setup
+# waits for it this long (polling every poll_s); and after SETUP_TRIES VMs of
+# a type in a row could not be set up (unreachable, or a copy failed), that
+# type stops
+SSH_READY_S = 600.0
+SETUP_TRIES = 3
 # The statuses a point's file may end with (terminal records: only "ok"
 # yields timings)
 TERMINAL = {"ok", "mismatch", "input mismatch", "no answer", "timeout", "oom", "error"}
@@ -951,6 +957,7 @@ class Driver:
         self.clock, self.sleep, self.poll_s = clock, sleep, poll_s
         self.spend = threading.Lock()
         self.stopped: dict[str, str] = {}
+        self.setup_failures: dict[str, int] = {}
         self.fatal: list[str] = []
         # (set by anything fatal and by SIGINT/SIGTERM: no new reservation,
         # setup or point after it; the remote's commands in flight are cut)
@@ -1213,12 +1220,40 @@ class Driver:
             return True
 
     # -- per VM
-    def setup(self, vm: dict) -> bool:
+    def wait_ssh(self, vm: dict) -> bool:
+        """Whether the VM answers ssh (`true`) within SSH_READY_S."""
+        deadline = self.clock() + SSH_READY_S
+        while not self.stop.is_set():
+            try:
+                if self.remote.run(vm["ip"], ["true"], 30)["status"] == "ok":
+                    return True
+            except TransferError:
+                pass
+            if self.clock() > deadline:
+                return False
+            self.sleep(self.poll_s)
+        return False
+
+    def setup(self, vm: dict) -> str:
         """The payload and the build, once per VM; its wall time goes in the
-        ledger. A failed build stops the type (the same commit fails the
-        same way)."""
+        ledger. "ok"; "failed" when vm-setup.sh ran and failed, which stops
+        the type (the same commit fails the same way); "unreachable" or
+        "transfer" when ssh never answered or a copy failed, which only
+        retires that VM."""
         t0 = self.clock()
         want = self.plan["archive_sha256"]
+        if not self.wait_ssh(vm):
+            self.ledger.append(
+                {
+                    "ev": "build",
+                    "name": vm["name"],
+                    "seconds": round(self.clock() - t0, 1),
+                    "ok": False,
+                    "why": "unreachable",
+                }
+            )
+            return "unreachable"
+        ran = False
         try:
             # (the approved bytes: checked here just before the copy, and on
             # the VM after it, before anything is extracted)
@@ -1243,7 +1278,7 @@ class Driver:
                 ],
                 self.plan["types"][vm["type"]]["expected_build_hours"] * 3600 * 2 + 600,
             )
-            ok = r["status"] == "ok"
+            ok, ran = r["status"] == "ok", True
         except TransferError as e:
             ok, r = False, {"output": str(e)}
         self.ledger.append(
@@ -1254,11 +1289,15 @@ class Driver:
                 "ok": ok,
             }
         )
-        if not ok and not self.stop.is_set() and self.alive(vm):
+        if ok:
+            return "ok"
+        if not ran:
+            return "transfer"
+        if not self.stop.is_set() and self.alive(vm):
             self.stopped[vm["type"]] = (
                 f"the build failed on {vm['name']}: {str(r.get('output', ''))[-300:]}"
             )
-        return ok
+        return "failed"
 
     def measure(self, vm: dict, key: str) -> None:
         """One point on one VM, then its file fetched (bounded), checked and
@@ -1316,16 +1355,40 @@ class Driver:
                         return
                     if self.stop.is_set():
                         continue
-                    if not self.setup(vm):
+                    state = self.setup(vm)
+                    if state != "ok":
                         if tk in self.stopped or self.stop.is_set():
                             return
-                        # (the VM went away during its build: a new one)
-                        self.ledger.append(
-                            {"ev": "lost", "name": vm["name"], "point": None}
-                        )
-                        self.reconcile()
+                        if self.alive(vm):
+                            # (unreachable, or a copy failed: this VM is
+                            # retired, and the type tries another, up to
+                            # SETUP_TRIES in a row)
+                            self.delete(vm["name"])
+                            self.ledger.append(
+                                {
+                                    "ev": "retired",
+                                    "name": vm["name"],
+                                    "point": None,
+                                    "detail": state,
+                                }
+                            )
+                            n = self.setup_failures.get(tk, 0) + 1
+                            self.setup_failures[tk] = n
+                            if n >= SETUP_TRIES:
+                                self.stopped[tk] = (
+                                    f"{n} VMs in a row could not be set up (last: {state})"
+                                )
+                                vm = None
+                                return
+                        else:
+                            # (the VM went away during its build: a new one)
+                            self.ledger.append(
+                                {"ev": "lost", "name": vm["name"], "point": None}
+                            )
+                            self.reconcile()
                         vm = None
                         continue
+                    self.setup_failures[tk] = 0
                 with self.spend:
                     if not queue or self.stop.is_set():
                         return
