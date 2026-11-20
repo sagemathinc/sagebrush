@@ -733,8 +733,8 @@
   {
    "file": "engine/web/tests/divrem_alloc.rs",
    "item": "impl GlobalAlloc for Counting",
-   "hash": "6143d022fd87de6160b764282e42003d015305b863cab244dc000d1ba617d4e4",
-   "audit": "Can it produce or alter an Obligations, Operation, Reservation, Growth or Context (directly, generically or through a pointer)? No. Test glue: series_alloc.rs's audited System-forwarding counting allocator (alloc, dealloc and realloc pass the caller's own pointer and layout to System unchanged; the counting only updates atomics), with two test-only additions: it counts allocations (an atomic), and it can refuse one allocation of at least a set size by returning null, which GlobalAlloc's contract allows (the caller's try_reserve_exact sees the failure). Here it measures zpoly_divrem's live memory against its word ledger's prediction, checks that writing the reply allocates nothing, and checks the heap's baseline after each refusal, an allocation failure and a Stop."
+   "hash": "3f019520e6ba19c22c010e6d78590c43f0cba957a3e8a8d0a0102e1dd8872e7a",
+   "audit": "Can it produce or alter an Obligations, Operation, Reservation, Growth or Context (directly, generically or through a pointer)? No. Test glue: series_alloc.rs's audited System-forwarding counting allocator (alloc, dealloc and realloc pass the caller's own pointer and layout to System unchanged; the counting only updates atomics), with test-only additions: it counts allocations (an atomic), and it can refuse one allocation, the first of at least a set size or the one at a set count, by returning null, which GlobalAlloc's contract allows (the caller's try_reserve_exact sees the failure). Here it measures the division ops' live memory against their word ledger's prediction, checks that writing the reply allocates nothing, fails each of a division's allocations in turn, and checks the heap's baseline after each refusal, an allocation failure and a Stop."
   },
   {
    "file": "engine/web/tests/host_handles.rs",

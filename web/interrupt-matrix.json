@@ -905,6 +905,13 @@
    "owner": "polynomial factorization"
   },
   {
+   "id": "engineCall:qpoly_divrem",
+   "transport": "engineCall:qpoly_divrem",
+   "status": "planned",
+   "family": "E5 polynomials",
+   "owner": "polynomial factorization"
+  },
+  {
    "id": "engineCall:qpoly_mul",
    "transport": "engineCall:qpoly_mul",
    "status": "planned",

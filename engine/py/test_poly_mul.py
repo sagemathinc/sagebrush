@@ -291,6 +291,134 @@ def zdivrem_checks(r):
     return n
 
 
+def qdivrem_checks(r):
+    """sagebrush.poly.qdivrem (the engine's qpoly_divrem): exact division in
+    Q[x] against a Fraction schoolbook (here only), results in lowest terms;
+    a zero divisor in any spelling refused; and qclear's exact-type pins at
+    this entry (bool, int and Fraction subclasses spoofing their accessors,
+    __format__ or __class__, and metaclasses hooking __hash__, __eq__ or
+    __getattribute__ or claiming to be int), refused before any hook runs or
+    the engine's bridge is reached."""
+    from fractions import Fraction
+    from sagebrush import _engine as E
+
+    def school(a, b):
+        a, b = [Fraction(x) for x in a], [Fraction(x) for x in b]
+        while a and a[-1] == 0:
+            a.pop()
+        while b and b[-1] == 0:
+            b.pop()
+        rr = list(a)
+        q = [Fraction(0)] * max(len(rr) - len(b) + 1, 0)
+        for i in range(len(q) - 1, -1, -1):
+            c = rr[i + len(b) - 1] / b[-1]
+            q[i] = c
+            for j, x in enumerate(b):
+                rr[i + j] -= c * x
+        rr = rr[:len(b) - 1] if len(rr) >= len(b) else rr
+        while q and q[-1] == 0:
+            q.pop()
+        while rr and rr[-1] == 0:
+            rr.pop()
+        return q, rr
+    n = 0
+    for _ in range(90):
+        a = [Fraction(r.randint(-99, 99), r.randint(1, 9)) for _ in range(r.randint(0, 9))]
+        b = [Fraction(r.randint(-99, 99), r.randint(1, 9)) for _ in range(r.randint(1, 5))]
+        if b[-1] == 0:
+            b[-1] = Fraction(3, 2)
+        assert P.qdivrem(a, b) == school(a, b), (a, b)
+        n += 1
+    assert P.qdivrem([1, 0, 0, 1], [1, 2]) == ([Fraction(1, 8), Fraction(-1, 4), Fraction(1, 2)], [Fraction(7, 8)])
+    for b in ([0], [Fraction(0, 5), 0], []):
+        try:
+            P.qdivrem([1, 2], b)
+        except Exception as e:
+            assert "division by zero polynomial" in str(e), e
+        else:
+            raise AssertionError("a zero divisor was accepted: %r" % (b,))
+        n += 1
+    touched = []
+
+    class I1(int):
+        def __index__(self):
+            touched.append("index")
+            return 0
+
+    class F1(Fraction):
+        @property
+        def numerator(self):
+            touched.append("numerator")
+            return 1
+
+    class F2(Fraction):
+        def __format__(self, spec):
+            touched.append("format")
+            return "0"
+
+    class F3(Fraction):
+        __class__ = property(lambda self: Fraction)
+
+    def meta(base):
+        class Meta(base):
+            def __hash__(cls):
+                touched.append("hash")
+                return base.__hash__(cls)
+
+            def __eq__(cls, other):
+                touched.append("eq")
+                return base.__eq__(cls, other)
+
+            def __getattribute__(cls, attr):
+                touched.append("get:" + attr)
+                return base.__getattribute__(cls, attr)
+        return Meta
+
+    class Claims(type):
+        def __hash__(cls):
+            return hash(int)
+
+        def __eq__(cls, other):
+            return other is int or type.__eq__(cls, other)
+
+    M1 = meta(type)("M1", (int,), {})
+    M2 = meta(type(Fraction))("M2", (Fraction,), {})
+    M3 = Claims("M3", (int,), {})
+    bads = [I1(3), F1(1, 2), F2(1, 2), F3(1, 2), M1(3), M2(1, 2), M3(7), True, 1.5, "1", None]
+    del touched[:]
+    name = "_sbengine" if hasattr(E, "_sbengine") else "_native"
+    real = getattr(E, name)
+    calls = []
+
+    class Spy:
+        def call(self, text):
+            calls.append(text)
+            return '{"ok":{"q":"","r":""}}'
+    setattr(E, name, Spy())
+    try:
+        for bad in bads:
+            for args in (([1, bad], [1, 1]), ([1, 1], [bad, 1])):
+                try:
+                    P.qdivrem(*args)
+                except TypeError as e:
+                    assert "qdivrem" in str(e), e
+                else:
+                    raise AssertionError("accepted %r" % (bad,))
+                n += 1
+    finally:
+        setattr(E, name, real)
+    assert calls == [] and touched == [], (calls, touched)
+    # (Sage's own Integer and Rational, and the int numerator() returns, are
+    # accepted)
+    try:
+        import sagebrush.sage as S
+    except ImportError:
+        import sage_all as S
+    q = S.QQ(5) / 7
+    assert P.qdivrem([S.Integer(3), q, q.numerator()], [q]) == ([Fraction(21, 5), 1, 7], [])
+    return n
+
+
 def call_hex_checks(r):
     """sagebrush._engine.call_hex, the lean text lane poly.mul and qmul use:
     the same values as call() for ok replies (the empty one included) and
@@ -492,6 +620,7 @@ def main():
     n += qclear_checks(r)
     n += call_hex_checks(r)
     n += zdivrem_checks(r)
+    n += qdivrem_checks(r)
     print("poly_mul against exact products: %d cases ok" % n)
 
 
