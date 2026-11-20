@@ -137,32 +137,64 @@ Independent local programs already running with that person's authority are
 outside this product boundary: they could read or change the person's files
 directly. In particular, such a program swapping a workspace folder for a
 link while the app works on it is out of scope. Code that Sagebrush executes
-or renders (notebooks, packages it launches, agents, saved output) and
-Sagebrush's own build and update path remain the threats above, even though
-they run as the same operating system user.
+or renders (notebooks, packages it launches, saved output) and Sagebrush's own
+build and update path remain the threats above, even though they run as the
+same operating system user. An agent is both: what it does through
+Sagebrush's own brokers (the workspace agent protocol, its grants and
+approvals) remains threat 2 and G4; what an agent process does directly on the
+file system is a local program's, as under "Native mode without an OS sandbox"
+below.
 
-For files, the native workspace bridge confines every workspace path it
-receives to the app's workspace folder. It checks each path component: no
-parent components, no host-absolute paths (workspace paths such as `/a/b` are
-rooted at the workspace folder, not the host's root), and no links followed
-while resolving. Notebook code cannot create symbolic links, hard links, or
-junctions, so it cannot set up a path swap itself; this has an acceptance
-regression against the shipped engine. User-mediated open and save dialogs,
-and separately granted paths, are governed by G1 as written.
+For files, the app's workspace commands (`app/src-tauri/src/disk_fs.rs`)
+confine every workspace path they receive to the app's workspace folder. Each
+path component is checked: no parent, empty, or `.` components, no
+separators, drive letters, or characters below U+0020 (workspace paths such as
+`/a/b` are rooted at the workspace folder, not the host's root), and no
+symbolic link or Windows reparse point at any component, the last one
+included. A hard link already in the workspace is read through; a write
+replaces it rather than writing through it. The check is
+on path names, then the operation uses the same names, so a link swapped in
+between would be followed; that race needs a local program, which is out of
+scope above. Notebook code cannot create symbolic links, hard links, or
+junctions, so it cannot set up such a swap itself;
+`web/test-app-engine-links.mjs` runs Python in the app's engine subprocess,
+where the engine runs (not yet Windows), and checks every tested route to one.
 
-This subsection scopes G1a, G1d, and G3 on the desktop. It does not relax G4's
-package and update authority, or the disclosure and isolation requirements of
-G8 and G9 for servers.
+These commands are not yet a boundary against script running in the app's own
+page. The app grants that page (its exact origin only) Tauri's file-system
+plugin with a scope of every path (`capabilities/default.json`), so script in
+the page can read and write anywhere the person can. Notebook output renders
+in that page today (see G2 under Status today), so saved output that got past
+the sanitizers would reach the whole grant. Narrowing the grant to the
+workspace folder is not yet done.
 
-A privileged service that traverses a host filesystem concurrently writable by
-an untrusted tenant is different. It must operate relative to opened
-directory handles with no-follow semantics, not on path names checked
-beforehand.
+Files the person opens or saves through the app's file dialogs, and paths
+granted outside the workspace, are meant to be the "Files on" mode under
+Weaker modes, with G1a and G1d dropped for exactly those handles or paths. Two
+gaps remain: a notebook opened from a folder on the computer writes its files
+back there by path name, following links, so a link in that folder can send a
+write elsewhere; and the dialogs don't yet name the dropped goals, as Weaker
+modes requires.
+
+This subsection scopes which local actors G1a and G1d defend against on the
+desktop. It drops nothing else: G3, G4's package and update authority, and
+G8's disclosure rules for sync and publication (symlinks included) apply to
+the desktop as written.
+
+A privileged Sagebrush service that walks a file system another, untrusted
+account can write at the same time is different. No Sagebrush service does
+today; one that does must, before it ships, resolve each path relative to
+directory handles it holds, never checking a path name and then using it: on
+Linux, `openat2` with `RESOLVE_BENEATH`, `RESOLVE_NO_SYMLINKS`, and
+`RESOLVE_NO_XDEV` (no mount crossings), and a link-count check before using a
+file (no hard links into another account's files).
 
 Losing a person's work on the desktop (a failed or unfinished save, an
-external edit written over) is a correctness failure, not a security one. It
-is still a defect, and it must be visible to the person, never silent. A
-notebook writing beyond its G1d grant remains a security failure.
+external edit written over) is a correctness failure, not a security one,
+unless a threat above caused it (saved output included), or a write from a
+stale execution generation (G3). It is still a defect, and
+it must be visible to the person, never silent. A notebook writing beyond its
+G1d grant remains a security failure.
 
 ## Testable goals
 
@@ -329,8 +361,8 @@ means useful controls exist but the whole goal is not a supported guarantee.
 
 | Goal | Status | Evidence and gap |
 |---|---|---|
-| G1 | **Not yet** | The hosted restricted runner has an opaque origin, restrictive CSP, brokered fetches, and guarded writes. However, it supplies all workspace data files to the interpreter instead of confining reads to the notebook's non-root directory, and native mode refuses this profile because it has no OS sandbox. |
-| G2 | **Partial** | HTML, Markdown, SVG, math, and image sanitizers plus hosted CSP block known script and remote-load paths. Notebook output still renders in the privileged page; the separate output realm is not wired into production, and the desktop page lacks the hosted CSP. |
+| G1 | **Not yet** | The hosted restricted runner has an opaque origin, restrictive CSP, brokered fetches, and guarded writes. However, it supplies all workspace data files to the interpreter instead of confining reads to the notebook's non-root directory, and native mode refuses this profile because it has no OS sandbox. On the desktop (as of November 20, 2026), a notebook opened from a folder on the computer writes back there by path name, following links, and the file dialogs don't name the goals they drop. |
+| G2 | **Partial** | HTML, Markdown, SVG, math, and image sanitizers plus hosted CSP block known script and remote-load paths. Notebook output still renders in the privileged page; the separate output realm is not wired into production, and the desktop page lacks the hosted CSP. The desktop page (as of November 20, 2026) also holds a file-system grant for every path, so an output that got past the sanitizers could read and write anywhere the person can. |
 | G3 | **Partial** | Write policy epochs, host-side path checks, worker generations, and non-replaying fallback close important races. Read and network settings are not yet one universal broker policy, and every restart, native, connected-computer, agent, and package path has not passed the same revocation suite. |
 | G4 | **Partial** | Optional package sets are content-addressed and cannot replace core modules. Agent and proposal flows have scoped approval mechanisms. There is no accepted containment boundary for arbitrary external compiled code, and the full approval/replay matrix is not yet a release gate. |
 | G5 | **Partial** | Compiled loops poll an interrupt word and the browser host restarts a still-pending interpreter after a delay. Coverage has waivers, interruption can be caught, native calls may not poll, and the 1/3-second contract is not enforced across shipped hosts. |
@@ -394,7 +426,7 @@ builds and signed native artifacts that ship.
 
 | Goal | Existing evidence | Required acceptance gate |
 |---|---|---|
-| G1 | `test/security.test.ts`, `web/test-runner.mjs`, `web/test-runner-broker.mjs`, `web/test-runner-files.mjs`, `web/notebook/test-confine.mjs`, `web/test-confine-writes.mjs`, `web/notebook/test-runner-fallback.mjs` | Run hostile Python and injected JavaScript in each shipped execution realm. Prove reads stay within the notebook's own source, private scratch space, immutable runtime inputs, and—only when its containing directory is not the workspace root—that directory recursively; prove no fetch, XHR, WebSocket, import, DNS, image, CSS, SVG, storage, DOM, credential, or native-bridge access; no persistent write; and fail-closed behavior when CSP, isolation, or the runner is missing. |
+| G1 | `test/security.test.ts`, `web/test-app-engine-links.mjs`, `web/test-runner.mjs`, `web/test-runner-broker.mjs`, `web/test-runner-files.mjs`, `web/notebook/test-confine.mjs`, `web/test-confine-writes.mjs`, `web/notebook/test-runner-fallback.mjs` | Run hostile Python and injected JavaScript in each shipped execution realm. Prove reads stay within the notebook's own source, private scratch space, immutable runtime inputs, and—only when its containing directory is not the workspace root—that directory recursively; prove no fetch, XHR, WebSocket, import, DNS, image, CSS, SVG, storage, DOM, credential, or native-bridge access; no persistent write; and fail-closed behavior when CSP, isolation, or the runner is missing. |
 | G2 | `test/safe-html.test.ts`, `web/board/test-xss.mjs`, `web/notebook/test-render-contain.mjs` | Open hostile saved outputs and stream hostile live outputs through every renderer in hosted and native builds. Record all requests and effects; prove the output realm has no account storage, authenticated fetch, parent DOM, application IPC, script execution, or automatic remote loads. |
 | G3 | `web/notebook/test-confine.mjs`, `web/test-confine-writes.mjs`, `web/notebook/test-runner-fallback.mjs` | For every broker, race grant, revoke, restart, fallback, reload, duplicate, reorder, stale generation, stale snapshot, and host switch. Assert no effect after revocation and no widening or replay. |
 | G4 | `test/pkgset.test.ts`, `web/test-pkgset.mjs`, `web/test-pkgset-pin.mjs`, `web/workspace/test-agent-pair.mjs`, `web/workspace/test-agent-e2e.mjs` | Mutate package indexes, chunks, approvals, proposal bodies, parameters, actors, generations, and timestamps. Inject arbitrary compiled/native code and prove it has only the declared sandbox authority, or label and refuse the stronger claim. |
