@@ -3,7 +3,7 @@
 // Into a built site instead, at /space/ (where the agents chat shows a .space.json in it):
 //   node build.mjs --site ../web/dist      (then `bun web/csp.ts`, so the site's _headers cover the page)
 import { build } from "esbuild";
-import { cpSync, existsSync, mkdirSync, readdirSync, rmSync, writeFileSync } from "node:fs";
+import { cpSync, existsSync, mkdirSync, readFileSync, readdirSync, rmSync, writeFileSync } from "node:fs";
 import { dirname, join, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
 
@@ -29,6 +29,9 @@ await build({
 cpSync(join(here, "index.html"), join(dist, "index.html"));
 const spaces = [];
 for (const f of readdirSync(join(here, "public"))) {
+  // (the site's build refuses any file in web/dist with the service worker's test hook in it, web/sw-hook.mts: refused
+  //  here first, with the file named, rather than on the next site build)
+  if (site && readFileSync(join(here, "public", f), "utf8").includes("// <offline-test>")) throw new Error(`public/${f} carries "// <offline-test>", which the site's build refuses`);
   cpSync(join(here, "public", f), join(dist, f));
   if (f.endsWith(".space.json")) spaces.push(f);
 }

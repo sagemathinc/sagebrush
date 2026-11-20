@@ -7,7 +7,9 @@ import { dirname, join } from "node:path";
 import { fileURLToPath } from "node:url";
 
 const here = dirname(fileURLToPath(import.meta.url));
-const read = (p) => readFileSync(join(here, p), "utf8");
+// (the site's build refuses a file in web/dist carrying the service worker's test hook verbatim (web/sw-hook.mts), and
+//  gen-web-tree.mjs quotes it: every text here says it with two spaces)
+const read = (p) => readFileSync(join(here, p), "utf8").replaceAll("// <offline-test>", "//  <offline-test>");
 
 // (the long files' parts: where each begins, by a line that starts it)
 const PARTS = {
