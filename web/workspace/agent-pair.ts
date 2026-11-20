@@ -26,8 +26,10 @@ export type Hello = { protocol: 1; agent: { name: string; client: string; versio
  * agent's edit of an open notebook by cell (web/workspace/notebook-edit.ts, A12 step 1); "permission.digest", an Allow
  * that carries the digest of the action shown (agent-canon.ts); "run.context", a run verb's call that carries the chat and
  * the turn it came from (`conversation`, `turn_id`), added by the agent's server after the model's arguments, never the
- * model's own (run_notebook in the notebook open on the page runs there only for that chat's running turn). */
-export const FEATURES = ["notebook.edit", "permission.digest", "run.context"] as const;
+ * model's own (run_notebook in the notebook open on the page runs there only for that chat's running turn); "edit.turn",
+ * a notebook.edit that carries the turn it came from (`turn_id`, the agent's server's), applied only while that turn
+ * is the chat's running one. */
+export const FEATURES = ["notebook.edit", "permission.digest", "run.context", "edit.turn"] as const;
 /** The pairing's other end on one of the person's computers (agent-relay.ts's AgentLeg), in place of the loopback
  * socket, with its own frame bound, queue and reply slots: what the pairing asks of it. */
 export type AgentLink = {
@@ -229,7 +231,7 @@ export class AgentPairing {
   constructor(
     readonly port: number,
     how: { code: string } | { session: string; pairingId: string; agent?: { name: string; client: string } } | { link: AgentLink; computer: string },
-    private opts: { verbsFor: (actor: string, host: { owner: () => string | null }) => AgentVerbs; gitBranch?: GitBranch; gitVerbs?: RunVerbs; store: GrantStore; trashEntry: (p: string) => Promise<TrashEntry | null | undefined>; page: { origin: string; path: string }; now?: () => number; WebSocketImpl?: typeof WebSocket; runVerbs?: RunVerbs; notebookEdit?: (edit: NotebookEdit, may: () => boolean, hold?: () => Promise<() => void>) => Promise<unknown>; onCreated?: (c: Created, p: AgentPairing) => void; reload?: { storage: ReloadStorage | null; scope: ReloadScope; leaving: () => boolean } },
+    private opts: { verbsFor: (actor: string, host: { owner: () => string | null }) => AgentVerbs; gitBranch?: GitBranch; gitVerbs?: RunVerbs; store: GrantStore; trashEntry: (p: string) => Promise<TrashEntry | null | undefined>; page: { origin: string; path: string }; now?: () => number; WebSocketImpl?: typeof WebSocket; runVerbs?: RunVerbs; notebookEdit?: (edit: NotebookEdit, may: () => boolean, hold?: () => Promise<() => void>, turnId?: string) => Promise<unknown>; onCreated?: (c: Created, p: AgentPairing) => void; reload?: { storage: ReloadStorage | null; scope: ReloadScope; leaving: () => boolean } },
   ) {
     if ("link" in how) { this.link = how.link; this.computer = how.computer; }
     else if (!Number.isInteger(port) || port < 1 || port > 65535) throw new AgentError("invalid", "a port is 1 to 65535");
@@ -344,7 +346,7 @@ export class AgentPairing {
     this.send({ jsonrpc: "2.0", method: "grant.changed", params: { agent: grant.agent, client: grant.client, folders: grant.folders, write: grant.write, run: grant.run, expires: grant.expires } });
     // (what this page offers beyond the verbs: a notification, which a server that doesn't know it ignores, §1 rule 4)
     // (permission.digest: every Allow carries the digest of the action shown, from any page that pairs)
-    this.send({ jsonrpc: "2.0", method: "page.features", params: { features: [...(this.opts.notebookEdit ? ["notebook.edit"] : []), "permission.digest", ...(this.opts.runVerbs ? ["run.context"] : [])] } });
+    this.send({ jsonrpc: "2.0", method: "page.features", params: { features: [...(this.opts.notebookEdit ? ["notebook.edit", "edit.turn"] : []), "permission.digest", ...(this.opts.runVerbs ? ["run.context"] : [])] } });
     await this.keep();
     // (S4: while it waited, the grant may have been revoked, the pairing closed or the grant replaced: then nothing
     //  of this allow() goes on, no record, no timer, no "granted")
@@ -556,6 +558,15 @@ export class AgentPairing {
    * page's own apply (the open notebook's host); the same grant checked after every wait, as for the verbs. */
   private async edit(id: string, params: unknown) {
     if (!this.edits()) return this.fail(id, "invalid", "not a verb: \"notebook.edit\"");
+    // (edit.turn, when both ends said it: the turn taken out of the edit before its grammar is checked, a short id or
+    //  the edit is refused; without it, the edit is as before)
+    let turnId: string | undefined;
+    if (this.hello?.features?.includes("edit.turn") && params && typeof params === "object" && !Array.isArray(params) && "turn_id" in params) {
+      const { turn_id, ...rest } = params as Record<string, unknown>;
+      if (typeof turn_id !== "string" || !turn_id || turn_id.length > RUN_CONTEXT_LENGTH) return this.fail(id, "invalid", "edit: turn_id is the turn's id");
+      turnId = turn_id;
+      params = rest;
+    }
     const bad = badValue(params) ?? editProblem(params);
     if (bad) return this.fail(id, "invalid", bad);
     const e = params as NotebookEdit;
@@ -575,7 +586,7 @@ export class AgentPairing {
         hold = () => verbs.holdChange!(np);
       }
       // (with the check of this very grant, for the page to make right before it changes anything: astra's C1)
-      const result = await this.opts.notebookEdit!(e, () => this.current(g, verbs), hold);
+      const result = await this.opts.notebookEdit!(e, () => this.current(g, verbs), hold, turnId);
       if (!this.current(g, verbs)) return this.fail(id, "invalid", CHANGED_WHILE_RUNNING);
       g!.lastUsed = this.now();
       this.changes++;

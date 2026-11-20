@@ -75,7 +75,7 @@ const daemon = Bun.serve({
       if (m.method === "hello") {
         sock = ws;
         // (it asks for run too: the page's grant must say run false whatever it asks)
-        ws.send(JSON.stringify({ jsonrpc: "2.0", id: m.id, result: { protocol: 1, agent: { name: "Claude", client: "claude-agent-sdk", version: "0.3.0" }, wants: { folders: ["/"], write: true, run: true }, features: [...(FEATURES ? ["notebook.edit"] : []), "run.context"] } }));
+        ws.send(JSON.stringify({ jsonrpc: "2.0", id: m.id, result: { protocol: 1, agent: { name: "Claude", client: "claude-agent-sdk", version: "0.3.0" }, wants: { folders: ["/"], write: true, run: true }, features: [...(FEATURES ? ["notebook.edit", "edit.turn"] : []), "run.context"] } }));
       } else if (m.id && pending.has(m.id)) {
         const p = pending.get(m.id);
         pending.delete(m.id);
@@ -1799,6 +1799,21 @@ try {
       call("notebook.edit", { conversation: conv, path, ref: r.ref, base: r.base, was: r.was, ...e }).then((x) => ({ ok: true, x }), (err) => ({ ok: false, code: err.code, msg: err.message })),
       sleep(15000).then(() => ({ ok: false, code: "timeout", msg: "no answer in 15 s" })),
     ]);
+    // (E-turn, edit.turn: an edit says the turn it came from; a late edit of a turn that has ended, landing after the
+    //  chat's next turn began, changes nothing, and the one of the running turn is applied)
+    {
+      const n = await mk();
+      await open(n.path);
+      const code0 = (c) => c.code ?? (Array.isArray(c.source) ? c.source.join("") : c.source);
+      const a = await edit(n.path, await readOf(n.path), { turn_id: turn, set: [{ id: n.ids[0], source: "x = 7" }] });
+      const old = turn;
+      event(old, { type: "turn_finished", outcome: "completed" });
+      newTurn();
+      await sleep(300);
+      const b = await edit(n.path, await readOf(n.path), { turn_id: old, set: [{ id: n.ids[0], source: "x = 8" }] });
+      const after = code0((await readOf(n.path)).cells[0]);
+      ok(a.ok && !b.ok && b.code === "busy" && after === "x = 7", "E-turn: an edit with its running turn is applied; a late edit of the turn that ended, after the next began, changes nothing (busy)", { a, b, after });
+    }
     const rec = (path) => record(refs.get(path));
     const same = (a, b) => canonical(a) === canonical(b);
     const byId = (cs) => Object.fromEntries(cs.map((c) => [c.id, c]));
