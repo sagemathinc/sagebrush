@@ -85,16 +85,29 @@ const CSS = `
 .sbag-box button.primary { background: #3f6b35; color: #fff; border-color: #3f6b35; }
 .sbag-box .err { color: #9b2c1f; white-space: pre-wrap; }
 .sbag-box .note { color: #5c6657; font-size: 12px; }
-.sbag-bar { position: fixed; left: 12px; bottom: calc(12px + var(--sb-alpha-banner, 0px)); z-index: 999; background: #1d241a; color: #fff; border-radius: 18px; padding: 6px 8px 6px 14px; font: 13px system-ui, sans-serif; display: flex; gap: 10px; align-items: center; box-shadow: 0 4px 14px rgba(0,0,0,.2); }
+/* (a compact chip, light and quiet, with the agent's controls in its menu: W4, William Nov 20 2026, "the big black box
+   about approval is so ugly and annoying") */
+.sbag-bar { position: fixed; left: 12px; bottom: calc(12px + var(--sb-alpha-banner, 0px)); z-index: 999; background: #f4f3ee; color: #24231f; border: 1px solid #e0ddd2; border-radius: 16px; padding: 2px 4px; font: 12px system-ui, sans-serif; display: flex; gap: 6px; align-items: center; box-shadow: 0 2px 8px rgba(0,0,0,.08); }
+.sbag-bar button.chip { background: transparent; color: inherit; border: 0; border-radius: 12px; padding: 2px 8px; display: flex; gap: 6px; align-items: center; min-width: 0; max-width: 420px; }
+.sbag-bar button.chip > span:not(.dot) { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; min-width: 0; }
+.sbag-bar button.chip:hover, .sbag-bar button.chip[aria-expanded=true] { background: #e9e7de; }
+.sbag-bar .dot { width: 7px; height: 7px; border-radius: 50%; background: #4f8a3c; flex: none; }
+.sbag-bar .menu { display: none; position: absolute; left: 0; bottom: calc(100% + 6px); z-index: 1000; min-width: 260px; max-width: min(420px, 90vw); background: #fff; color: #24231f; border: 1px solid #e0ddd2; border-radius: 10px; box-shadow: 0 6px 20px rgba(0,0,0,.15); padding: 8px; gap: 6px; }
+.sbag-bar.open .menu { display: grid; }
+.sbag-bar.down .menu { bottom: auto; top: calc(100% + 6px); }
+.sbag-bar .menu .full { color: #6b6a63; line-height: 1.4; }
+.sbag-bar .menu button { text-align: left; border: 1px solid #e0ddd2; background: #fff; color: #24231f; border-radius: 6px; padding: 5px 10px; }
+.sbag-bar .menu button:hover, .sbag-bar .menu button:focus-visible { background: #f4f3ee; }
+.sbag-bar .menu button.danger { color: #9b2c1f; border-color: #e8c4bd; }
 /* (docked: in the page's own row for it, [data-sbag-slot], never over what the person types in or reads; decided Nov 19 2026) */
-.sbag-bar.docked { position: static; margin: 6px 12px; width: fit-content; max-width: calc(100% - 24px); flex-wrap: wrap; box-shadow: none; }
+.sbag-bar.docked { position: relative; left: auto; bottom: auto; margin: 6px 12px; width: fit-content; max-width: calc(100% - 24px); flex-wrap: wrap; box-shadow: none; }
 /* (in a header's row, [data-sbag-inline]: one line, its words cut short, so the header keeps its height) */
 [data-sbag-inline] > .sbag-bar.docked { margin: 0; padding: 3px 6px 3px 12px; flex-wrap: nowrap; min-width: 0; max-width: 100%; }
-[data-sbag-inline] > .sbag-bar.docked > span { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; min-width: 0; }
-[data-sbag-inline] > .sbag-bar.docked > button { flex: none; white-space: nowrap; }
-.sbag-bar button { font: inherit; border: 0; border-radius: 12px; padding: 3px 10px; background: #fff; color: #1d241a; cursor: pointer; }
+[data-sbag-inline] > .sbag-bar.docked > button.chip { min-width: 0; flex: 0 1 auto; }
+[data-sbag-inline] > .sbag-bar.docked > button:not(.chip) { flex: none; white-space: nowrap; }
+.sbag-bar button { font: inherit; border: 0; border-radius: 12px; padding: 3px 10px; background: #fff; color: #24231f; cursor: pointer; }
 .sbag-bar button.open { max-width: 240px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
-.sbag-bar .made { display: flex; gap: 8px; align-items: center; padding-left: 10px; border-left: 1px solid #4a5546; white-space: nowrap; min-width: 0; max-width: 480px; }
+.sbag-bar .made { display: flex; gap: 8px; align-items: center; padding-left: 10px; border-left: 1px solid #e0ddd2; white-space: nowrap; min-width: 0; max-width: 480px; }
 .sbag-bar .made b { overflow: hidden; text-overflow: ellipsis; min-width: 0; }
 .sbag-bar .made button { flex: none; }
 .sbag-bar button.cta { background: #8fd17a; color: #10200c; font-weight: 600; padding: 4px 16px; }
@@ -179,15 +192,26 @@ export function mountAgentPairing(ws: PairingWorkspace, o: { button?: HTMLElemen
     return close;
   }
 
+  // (the chip's menu closes on a press anywhere else on the page)
+  let menuSeq = 0;
+  let closeMenu: (() => void) | null = null;
+  document.addEventListener("pointerdown", (e) => { if (bar && closeMenu && !bar.contains(e.target as Node)) closeMenu(); }, true);
+
   function showBar() {
+    // (drawn again as its counts change: a menu the person has open stays open, without taking the focus)
+    const wasOpen = !!bar?.classList.contains("open");
     bar?.remove();
     const p = pairing;
     if (!p || p.state !== "granted" || !p.grant) { bar = null; return; }
     const g = p.grant;
     const where = g.folders.includes("/") ? "everywhere" : "in " + g.folders.join(", ");
-    const text = h("span", { textContent: `${p.hello!.agent.name} (as it says): ${g.write ? "read and write" : "read only"} ${where}${g.run ? " · may run code" : ""} · ${p.changes} change${p.changes === 1 ? "" : "s"}` });
+    const changes = `${p.changes} change${p.changes === 1 ? "" : "s"}`;
+    // (the whole of it, in the chip's menu and its title; the chip says it short: W4)
+    const full = `${p.hello!.agent.name} (as it says): ${g.write ? "read and write" : "read only"} ${where}${g.run ? " · may run code" : ""} · ${changes}`;
+    const short = `${p.hello!.agent.name} · ${g.write ? "can edit" : "read only"}${g.folders.includes("/") ? "" : " · some folders"}${g.run ? " · runs code" : ""} · ${changes}`;
     // (over a runner, Revoke is a Disconnect that also stops the agent there: the runner ends its process group)
     const revoke = p.link ? h("button", { textContent: "Disconnect", title: `Disconnect and stop the agent on ${p.computer}` }) : h("button", { textContent: "Revoke" });
+    revoke.className = "danger";
     revoke.onclick = () => void p.revoke("revoked by the person");
     // ("May run code" turned off here, mid-session: a run going ends (chat plan PR 4); turned on only by a new grant)
     const noRun = g.run ? h("button", { textContent: "Turn off running code", title: "The agent may no longer run code, and a run going now stops (connect it again to allow it)" }) : null;
@@ -197,12 +221,42 @@ export function mountAgentPairing(ws: PairingWorkspace, o: { button?: HTMLElemen
     // (a board it made opens in a tab of its own, never by itself (a tab only opens on a click, and this page keeps the
     //  pairing): said as what the agent did, with Open beside it, the bar's one call to action)
     const board = made?.kind === "board";
-    const open = made ? h("button", { className: board ? "cta" : "open", textContent: board ? "Open" : "Open " + nameOf(made.path), title: board ? `Open ${made.path} in a new tab, where its code runs` : `Open ${made.path}, which the agent created` }) : null;
+    const open = made ? h("button", { className: board ? "cta" : "open", textContent: board ? "Open" : "Open " + nameOf(made.path), title: board ? `Open ${made.path} in a new tab, where its code runs` : `Open ${made.path}` }) : null;
     if (open && made) open.onclick = () => o.open!(made);
     const did = board && open ? h("span", { className: "made" }, `${p.hello!.agent.name} made`, h("b", { textContent: nameOf(made!.path) }), open) : open;
-    bar = h("div", { className: "sbag-bar" }, text, ...(did ? [did] : []), ...(noRun ? [noRun] : []), revoke);
+    // (the chip, and its menu: what the agent may do, Turn off running code, and Revoke one click away; by keyboard too:
+    //  Enter, Space or ↓ opens it on its first control, ↑ ↓ move, Escape and Tab close it, focus back on the chip)
+    const chip = h("button", { className: "chip", title: full }, h("span", { className: "dot" }), h("span", { textContent: short }), h("span", { textContent: "▾" }));
+    const items = [...(noRun ? [noRun] : []), revoke];
+    const menu = h("div", { className: "menu", id: `sbag-menu-${++menuSeq}` }, h("div", { className: "full", textContent: full }), ...items);
+    menu.setAttribute("role", "menu");
+    menu.setAttribute("aria-label", `${p.hello!.agent.name}: access`);
+    for (const b of items) { b.setAttribute("role", "menuitem"); b.tabIndex = -1; }
+    chip.setAttribute("aria-haspopup", "menu");
+    chip.setAttribute("aria-expanded", "false");
+    chip.setAttribute("aria-controls", menu.id);
+    const show = (on: boolean, focus = on) => {
+      if (!bar) return;
+      // (below the chip where there's no room above it, as in a page's header)
+      if (on) bar.classList.toggle("down", bar.getBoundingClientRect().top < 260);
+      bar.classList.toggle("open", on);
+      chip.setAttribute("aria-expanded", String(on));
+      if (on && focus) items[0].focus();
+      else if (!on && focus) chip.focus();
+    };
+    chip.onclick = () => show(!bar?.classList.contains("open"));
+    chip.onkeydown = (e) => { if (e.key === "ArrowDown") { e.preventDefault(); show(true); } };
+    menu.onkeydown = (e) => {
+      const i = items.indexOf(document.activeElement as HTMLButtonElement);
+      if (e.key === "Escape") { e.preventDefault(); show(false, true); }
+      else if (e.key === "Tab") show(false, false);
+      else if (e.key === "ArrowDown" || e.key === "ArrowUp") { e.preventDefault(); items[(i + (e.key === "ArrowDown" ? 1 : items.length - 1)) % items.length].focus(); }
+    };
+    closeMenu = () => show(false, false);
+    bar = h("div", { className: "sbag-bar" }, chip, menu, ...(did ? [did] : []));
     bar.setAttribute("role", "status");
     dock();
+    if (wasOpen) show(true, false);
   }
   // (the bar's place: a [data-sbag-slot] the page shows, a row or a header of its layout, the highest-numbered one (an
   //  editor's page over the notebook page's); an overlay at the bottom left only on a page that has none. Placed again,

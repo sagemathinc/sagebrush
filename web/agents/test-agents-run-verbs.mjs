@@ -112,6 +112,26 @@ try {
     await ev(`([...document.querySelectorAll(".sbag-box button.primary")].pop().click(), true)`);
     ok(await until(`!!document.querySelector(".sbag-bar")`), "allowed: the bar shows the agent" + (run ? ", may run code" : ", not running code"));
     ok(await ev(`document.querySelector(".sbag-bar").textContent.includes("may run code")`) === !!run, "the bar says what the grant allows", await ev(`document.querySelector(".sbag-bar").textContent`));
+    // (W4: a compact chip; its menu holds the controls: opened by click or keyboard on its first control, ↓ ↑ move,
+    //  Escape closes it back on the chip; Revoke in it, one click away)
+    const chip = await ev(`(() => { const c = document.querySelector(".sbag-bar button.chip"), m = document.querySelector(".sbag-bar .menu");
+      return c && m ? { popup: c.getAttribute("aria-haspopup"), exp: c.getAttribute("aria-expanded"), text: c.textContent, menuShown: getComputedStyle(m).display !== "none",
+        items: [...m.querySelectorAll("[role=menuitem]")].map((b) => b.textContent) } : null; })()`);
+    ok(chip?.popup === "menu" && chip.exp === "false" && !chip.menuShown && chip.text.includes(run ? "runs code" : "can edit") && JSON.stringify(chip.items) === JSON.stringify(run ? ["Turn off running code", "Revoke"] : ["Revoke"]),
+      "W4: the bar is a compact chip, its menu closed, holding the controls (Revoke last)", chip);
+    const opened = await ev(`(() => { const c = document.querySelector(".sbag-bar button.chip"); c.focus(); c.click();
+      const m = document.querySelector(".sbag-bar .menu");
+      return { exp: c.getAttribute("aria-expanded"), shown: getComputedStyle(m).display !== "none", focus: document.activeElement?.textContent }; })()`);
+    ok(opened.exp === "true" && opened.shown && opened.focus === (run ? "Turn off running code" : "Revoke"), "W4: opening the chip shows its menu, focus on its first control", opened);
+    const moved = await ev(`(() => { const k = (key) => document.activeElement.dispatchEvent(new KeyboardEvent("keydown", { key, bubbles: true }));
+      k("ArrowDown"); const a = document.activeElement?.textContent; k("ArrowUp"); const b = document.activeElement?.textContent; k("Escape");
+      const c = document.querySelector(".sbag-bar button.chip");
+      return { a, b, closed: c.getAttribute("aria-expanded") === "false" && getComputedStyle(document.querySelector(".sbag-bar .menu")).display === "none", back: document.activeElement === c }; })()`);
+    ok(moved.a === "Revoke" && moved.b === (run ? "Turn off running code" : "Revoke") && moved.closed && moved.back, "W4: ↓ and ↑ move in the menu; Escape closes it, focus back on the chip", moved);
+    const keyOpen = await ev(`(() => { const c = document.querySelector(".sbag-bar button.chip"); c.focus(); c.dispatchEvent(new KeyboardEvent("keydown", { key: "ArrowDown", bubbles: true }));
+      const r = { exp: c.getAttribute("aria-expanded"), focus: document.activeElement?.textContent };
+      document.activeElement.dispatchEvent(new KeyboardEvent("keydown", { key: "Escape", bubbles: true })); return r; })()`);
+    ok(keyOpen.exp === "true" && keyOpen.focus === (run ? "Turn off running code" : "Revoke"), "W4: ↓ on the chip opens its menu too", keyOpen);
   };
 
   // ---- a grant with May run code: every run verb works here
