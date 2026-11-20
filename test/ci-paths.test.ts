@@ -9,6 +9,9 @@ import { prSample, SLOW, sampleSkip, slowSkip } from "./slow-tests";
 // scripts/ci-paths.mjs, replayed on file lists (CI_PATHS_FILES): which suites
 // a pull request's changes select.
 const script = join(__dirname, "..", "..", "scripts", "ci-paths.mjs");
+// (the refs of the run these tests are in never reach the script: a pull request into a track/* branch would make
+// every replay build the modules, scripts/pin-policy.mjs)
+for (const name of ["GITHUB_BASE_REF", "GITHUB_HEAD_REF", "GITHUB_REF_NAME"]) delete process.env[name];
 const dir = mkdtempSync(join(tmpdir(), "ci-paths-"));
 
 function classify(files: string[], labels = "", env: Record<string, string> = {}): Record<string, string> {
@@ -84,8 +87,8 @@ test("optional packages alone select no default suite; with a core change they d
   assert.equal(suites(classify(["optional/hello/sagebrush.json", "src/pkgset.ts"])).node, "true");
 });
 
-test("the growth gate's own inputs are never docs-only (plan-growth-budget-r5 §1.5)", () => {
-  for (const f of ["budgets.json", ".growth/2026-10-24-x.json", ".github/workflows/optional.yml", "scripts/size-measure.mjs", "heap-budget.json", "core-api-surface.json", "pnpm-lock.yaml"]) {
+test("the size comparison's own inputs are never docs-only", () => {
+  for (const f of [".github/workflows/optional.yml", "scripts/size-measure.mjs", "heap-budget.json", "core-api-surface.json", "pnpm-lock.yaml"]) {
     assert.equal(classify([f]).size_inputs, "true", f);
   }
   assert.equal(classify(["design/board.md", "README.md"]).size_inputs, "false");
@@ -111,6 +114,43 @@ test("the CPython package's own Python selects engine-cpython, not the engine's 
   assert.equal(classify(["engine/modsym/examples/gen.py"]).engine_smoke, "true");
   // (and the full tier still runs everything)
   assert.equal(classify(["engine/py/python/sagebrush/cli.py"], "full-ci").engine_smoke, "true");
+});
+
+test("Python tests invoked by checks select node, derived from this checkout's workflow", () => {
+  const root = mkdtempSync(join(dir, "python-checks-"));
+  mkdirSync(join(root, ".github", "workflows"), { recursive: true });
+  const workflow = join(root, ".github", "workflows", "ci.yml");
+  writeFileSync(workflow, `jobs:
+  checks:
+    steps:
+      - run: |
+          node dist/src/cli.js engine/py/test_matrix_checks.py
+          python3 engine/py/test_other_checks.py
+          timeout 600 node dist/src/cli.js engine/py/test_a.py
+          uv run python engine/py/test_b.py
+          node dist/src/cli.js \\
+            engine/py/test_continued.py
+          # node dist/src/cli.js engine/py/test_commented.py
+          echo engine/py/test_mentioned.py
+          printf '%s' engine/py/test_printed.py
+  engine-cpython:
+    steps:
+      - run: python3 engine/py/test_remote_pair.py
+`);
+  const env = { CI_PATHS_ROOT: root };
+  for (const path of ["engine/py/test_matrix_checks.py", "engine/py/test_other_checks.py", "engine/py/test_a.py", "engine/py/test_b.py", "engine/py/test_continued.py"]) {
+    const result = classify([path], "", env);
+    assert.equal(result.node, "true", path);
+    assert.equal(result.engine_cpython, "true", path);
+    assert.equal(result.engine_smoke, "false", path);
+    assert.equal(result.web, "false", path);
+  }
+  for (const path of ["engine/py/test_remote_pair.py", "engine/py/test_commented.py", "engine/py/test_mentioned.py", "engine/py/test_printed.py", "engine/py/test_matrix_checks.py.bak"])
+    assert.equal(classify([path], "", env).node, "false", path);
+  // A new command needs no matching classifier edit or hard-coded filename.
+  writeFileSync(workflow, `jobs:\n  checks:\n    steps:\n      - run: node dist/src/cli.js engine/py/test_future.py\n  other:\n    steps: []\n`);
+  assert.equal(classify(["engine/py/test_future.py"], "", env).node, "true");
+  assert.equal(classify(["engine/py/test_matrix_checks.py"], "", env).node, "false");
 });
 
 test("engine-cpython runs on pull requests that touch the CPython package's inputs (#113 -> #132)", () => {
@@ -216,7 +256,7 @@ test("the WebKit job: its inputs on pull requests, never master pushes, always n
   assert.equal(run("workflow_dispatch", "refs/heads/master", ""), "true");
 });
 
-test("the engine's full passes: master pushes, a pull request that rebuilds the engine, and the long tier; not another pull request, a label or a plain dispatch", () => {
+test("the engine's full passes: master and track pushes, a pull request that rebuilds the engine, and the long tier; not another pull request, a label or a plain dispatch", () => {
   // (a pull request whose changes rebuild the engine (wasm_build): its fresh engine may differ from the published pin)
   for (const f of ["engine/poly/src/lib.rs", "wasm/pins.json", "Cargo.lock", "scripts/build-mp.mjs", ".github/actions/wasm-modules/action.yml", ".github/workflows/ci.yml"]) {
     const o = classify([f]);
@@ -246,13 +286,49 @@ test("the engine's full passes: master pushes, a pull request that rebuilds the 
     writeFileSync(list, files);
     const r = spawnSync(process.execPath, [script], { encoding: "utf8", env: { ...process.env, CI_PATHS_FILES: list, GITHUB_EVENT_NAME: event, GITHUB_REF: ref, CI_LONG: "", ...env } });
     assert.equal(r.status, 0, r.stderr);
-    return /^engine_full=(\w+)$/m.exec(r.stdout)?.[1];
+    return Object.fromEntries(r.stdout.trim().split("\n").map((line) => line.split("=") as [string, string]));
   };
-  assert.equal(run("push", "refs/heads/master", "README.md\n"), "true");
-  assert.equal(run("schedule", "refs/heads/master", ""), "true");
-  assert.equal(run("workflow_dispatch", "refs/heads/master", "", { CI_LONG: "true" }), "true");
-  assert.equal(run("workflow_dispatch", "refs/heads/master", ""), "false");
-  assert.equal(run("workflow_dispatch", "refs/heads/master", "", { CI_LONG: "false" }), "false");
+  assert.equal(run("push", "refs/heads/master", "README.md\n").engine_full, "true");
+  const trackEngine = run("push", "refs/heads/track/math", "engine/poly/src/lib.rs\n");
+  assert.equal(trackEngine.full, "true");
+  assert.equal(trackEngine.engine_full, "true");
+  assert.equal(run("schedule", "refs/heads/master", "").engine_full, "true");
+  assert.equal(run("workflow_dispatch", "refs/heads/master", "", { CI_LONG: "true" }).engine_full, "true");
+  assert.equal(run("workflow_dispatch", "refs/heads/master", "").engine_full, "false");
+  assert.equal(run("workflow_dispatch", "refs/heads/master", "", { CI_LONG: "false" }).engine_full, "false");
+});
+
+test("track pushes have master integration parity, including after a superseded engine push", () => {
+  const run = (ref: string, files: string) => {
+    const list = join(dir, "files.txt");
+    writeFileSync(list, files);
+    const r = spawnSync(process.execPath, [script], { encoding: "utf8", env: {
+      ...process.env, CI_PATHS_FILES: list, GITHUB_EVENT_NAME: "push", GITHUB_REF: ref, CI_LONG: "",
+    } });
+    assert.equal(r.status, 0, r.stderr);
+    return Object.fromEntries(r.stdout.trim().split("\n").map((line) => line.split("=") as [string, string]));
+  };
+  for (const files of ["engine/poly/src/lib.rs\n", "README.md\n", "src/runtime/ops.ts\n"]) {
+    const master = run("refs/heads/master", files);
+    const track = run("refs/heads/track/math", files);
+    for (const key of ["full", "engine_full", "web_runner", "wasm_build", "docs_only", "long"])
+      assert.equal(track[key], master[key], `${files.trim()}: ${key}`);
+    // (the one difference: on a track an engine source moves the shipped bytes, so it is a size input there)
+    assert.equal(track.size_inputs, files.startsWith("engine/") ? "true" : master.size_inputs, `${files.trim()}: size_inputs`);
+    assert.equal(track.full, "true", files.trim());
+    assert.equal(track.engine_full, "true", files.trim());
+    assert.equal(track.long, "false", files.trim());
+  }
+  // Replay only the current, docs-only follow-up after an engine push whose queued run was superseded. It must not
+  // need the earlier path list: all non-PR runs build wasm, and track integration remains master-like and full.
+  const followup = run("refs/heads/track/math", "design/tracks.md\n");
+  assert.equal(followup.full, "true");
+  assert.equal(followup.engine_full, "true");
+  assert.equal(followup.size_inputs, "false");
+  assert.equal(followup.web_runner, "true");
+  assert.equal(followup.wasm_build, "true");
+  assert.equal(followup.docs_only, "false");
+  assert.equal(followup.long, "false");
 });
 
 test("the long tier: the nightly schedule and a dispatch with long set; never a pull request (any label or path), a master push or a plain dispatch", () => {
@@ -411,6 +487,7 @@ test("the full tier on a pull request: the full-ci label, or a sync, sharing, se
     "web/workspace/doc-sync.ts", "web/notebook/sync-rows.js", "web/notebook/db-merge3.ts", "web/board/syncdb.ts",
     "web/share/files.ts", "web/share-client/upload.ts", "web/csp.ts", "web/csp-policy.mts", "web/safe-html.ts",
     "web/cloud/share/server.ts", "web/cloud/share/migrations/0009_remotes.sql", "web/cloud/remote/relay.ts",
+    "web/cloud/mirror/account.ts", "web/workspace/agent-chat/mirror-format.ts",
     "web/workspace/export/run.ts", "web/workspace/db.ts", "web/workspace/api.ts", "web/workspace/migrate.ts", "web/board/export.ts",
     "web/latex/save.ts", "scripts/check-export-size.mjs",
     // (the LaTeX group's inputs: its ceiling is checked only in the full tier's web-artifacts)
@@ -504,7 +581,7 @@ test("examples: a change selects its examples; the engines select notebooks, boa
 test("examples: ci-paths finds the corpus beside it in a checkout whose path has a space", () => {
   const top = mkdtempSync(join(tmpdir(), "ci paths "));
   mkdirSync(join(top, "scripts"));
-  for (const f of ["ci-paths.mjs", "examples-lib.mjs", "size-measure.mjs", "build-inputs.mjs", "web-tests.mjs"]) cpSync(join(__dirname, "..", "..", "scripts", f), join(top, "scripts", f));
+  for (const f of ["ci-paths.mjs", "examples-lib.mjs", "size-measure.mjs", "build-inputs.mjs", "web-tests.mjs", "pin-policy.mjs"]) cpSync(join(__dirname, "..", "..", "scripts", f), join(top, "scripts", f));
   cpSync(join(__dirname, "..", "..", "test", "fixtures", "examples"), join(top, "examples"), { recursive: true });
   const list = join(top, "files.txt");
   writeFileSync(list, "examples/latex/article/main.tex\n");
@@ -555,7 +632,13 @@ test("a changed suite runs on its own pull request: its `// ci:` job, and the fu
   assert.deepEqual(JSON.parse(classify(["web/board/frame.ts"]).web_groups), ["board-a", "board-b", "board-c", "board-unit"]);
   const matrix = JSON.parse(classify(["web/index.html"]).web_matrix);
   assert.deepEqual(matrix.filter((x: { group: string }) => x.group === "notebook").map((x: { shard: number }) => x.shard), [1, 2, 3]);
-  assert.deepEqual(matrix.filter((x: { group: string }) => x.group === "remote-preview").map((x: { shard: number }) => x.shard), [1, 2]);
+  assert.deepEqual(matrix.filter((x: { group: string }) => x.group === "remote-preview").map((x: { shard: number }) => x.shard), [1, 2, 3]);
+  // (one remote-preview run a shard: each run takes minutes, so a new `// ci:` run there needs a new shard, not a
+  // doubled one near the job's timeout)
+  const repo = join(__dirname, "..", "..");
+  const preview = spawnSync(process.execPath, [join(repo, "scripts", "web-tests.mjs"), "plan", "web-browser/remote-preview"], { cwd: repo, encoding: "utf8" });
+  assert.equal(preview.status, 0, preview.stderr);
+  assert.equal(preview.stdout.split("\n").filter(Boolean).length, matrix.filter((x: { group: string }) => x.group === "remote-preview").length, preview.stdout);
   assert.equal(matrix.filter((x: { group: string }) => !["notebook", "remote-preview"].includes(x.group)).length, 7);
   // a deleted suite (not in the checkout) runs nowhere
   assert.equal(classify(["web/gone/test-gone.mjs"], "", at).full, "false");
@@ -704,6 +787,28 @@ test("the GF(p) echelon admission's memory cases follow the slow tests (the long
   assert.doesNotMatch(src, /GITHUB_REF|GITHUB_EVENT_NAME/);
 });
 
+test("wasm_build: a pull request into a track always builds the modules; a track's pull into master builds only for its inputs", () => {
+  // (a track's pin lags its engine until its pull into master, scripts/pin-policy.mjs)
+  for (const files of [["README.md"], ["lib/sagebrush/linalg.py"], ["bench/core/run.py"]])
+    assert.equal(classify(files, "", { GITHUB_BASE_REF: "track/math", GITHUB_HEAD_REF: "r6" }).wasm_build, "true", files.join());
+  assert.equal(classify(["README.md"], "", { GITHUB_BASE_REF: "master", GITHUB_HEAD_REF: "track/math" }).wasm_build, "false");
+  assert.equal(classify(["README.md"], "", { GITHUB_BASE_REF: "trackmath", GITHUB_HEAD_REF: "x" }).wasm_build, "false");
+});
+
+test("size_inputs: on a track an engine source is a gate input (the engine ships as built); elsewhere it is not", () => {
+  // (a track's pull request with only an engine change was once measured as docs-only: no base record, an empty gate)
+  const size = (files: string[], env: Record<string, string>) => classify(files, "", env).size_inputs;
+  const intoTrack = { GITHUB_BASE_REF: "track/math", GITHUB_HEAD_REF: "r6" };
+  for (const f of ["engine/arith/src/zmat.rs", "engine/poly/src/modp.rs", "wasm/pins.json", "Cargo.lock", "scripts/build-engine.mjs"])
+    assert.equal(size([f], intoTrack), "true", f);
+  assert.equal(size(["engine/arith/src/zmat.rs"], { GITHUB_EVENT_NAME: "push", GITHUB_REF: "refs/heads/track/math" }), "true");
+  for (const f of ["README.md", "bench/core/run.py", "lib/sagebrush/linalg.py"]) assert.equal(size([f], intoTrack), "false", f);
+  // (on master, and on a track's pull into master, an engine source moves no shipped bytes until its pin does)
+  assert.equal(size(["engine/arith/src/zmat.rs"], { GITHUB_BASE_REF: "master", GITHUB_HEAD_REF: "x" }), "false");
+  assert.equal(size(["engine/arith/src/zmat.rs"], { GITHUB_BASE_REF: "master", GITHUB_HEAD_REF: "track/math" }), "false");
+  assert.equal(size(["engine/arith/src/zmat.rs"], { GITHUB_BASE_REF: "trackmath", GITHUB_HEAD_REF: "x" }), "false");
+});
+
 test("wasm_build: what the modules are built from or handled by builds them on a pull request; every other event builds", () => {
   const build = (files: string[], env: Record<string, string> = {}) => classify(files, "", env).wasm_build;
   for (const f of ["engine/poly/src/lib.rs", "wasm/pins.json", "Cargo.lock", "scripts/build-mp.mjs", "scripts/build-raster.mjs",
@@ -712,8 +817,10 @@ test("wasm_build: what the modules are built from or handled by builds them on a
     assert.equal(build([f]), "true", f);
   }
   for (const f of ["lib/_sage_ffmat.py", "web/notebook/index.ts", "design/notes.md", "src/runtime/engine.ts"]) assert.equal(build([f]), "false", f);
-  // (a master push publishes its own build, and a push whose run was replaced can hide an engine change from the next)
+  // (a master or track push publishes its own build, and a push whose run was replaced can hide an engine change
+  // from the next)
   assert.equal(build(["lib/_sage_ffmat.py"], { GITHUB_EVENT_NAME: "push", GITHUB_REF: "refs/heads/master" }), "true");
+  assert.equal(build(["lib/_sage_ffmat.py"], { GITHUB_EVENT_NAME: "push", GITHUB_REF: "refs/heads/track/math" }), "true");
   assert.equal(build([], { GITHUB_EVENT_NAME: "workflow_dispatch", GITHUB_REF: "refs/heads/master" }), "true");
   assert.equal(build([], { GITHUB_EVENT_NAME: "schedule", GITHUB_REF: "refs/heads/master" }), "true");
 });

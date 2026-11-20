@@ -23,9 +23,15 @@ function take(): PairLink | null {
 // gets the link the page took first, by this key, as the URL no longer has it)
 const KEY = Symbol.for("sagebrush.pairLink");
 const g = globalThis as any;
-const link: PairLink | null = KEY in g ? g[KEY] : (g[KEY] = take());
+let link: PairLink | null = KEY in g ? g[KEY] : (g[KEY] = take());
 
 /** The pairing link this page was opened with, if any (the URL no longer shows it). */
 export function pairLink(): PairLink | null {
   return link;
+}
+
+/** A link this page was given another way (the board page's handover, pair-handoff.ts): the page's link from now on,
+ * for its chunks too, if it had none. */
+export function adoptLink(l: PairLink) {
+  if (!link) g[KEY] = link = l;
 }

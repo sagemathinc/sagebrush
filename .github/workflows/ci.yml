@@ -1,9 +1,6 @@
 # Fast pull-request CI and the full master/nightly audit.
 name: ci
 
-permissions:
-  contents: read
-
 env:
   SAGEBRUSH_CPUS_OVERRIDE: ${{ vars.CI_CPUS }}
   # (a stalled cache download (setup-* and actions/cache restores, @actions/cache's segment timeout) gives up as a
@@ -13,7 +10,7 @@ env:
 
 on:
   push:
-    branches: [master]
+    branches: [master, "track/**"]
   pull_request:
     # (labeled: adding the full-ci label reruns the pull request on the full tier)
     types: [opened, synchronize, reopened, labeled]
@@ -28,7 +25,10 @@ on:
   schedule:
     - cron: "17 8 * * *"
 
-# A pull request's new revision cancels its obsolete run.  On master a run in
+permissions:
+  contents: read
+
+# A pull request's new revision cancels its obsolete run.  On master and track/** a run in
 # progress is never cancelled: it finishes, and of the pushes queued behind it
 # only the newest runs next (GitHub replaces an older pending run in the group).
 # So while merges come faster than a full run takes, every cycle still ends in
@@ -39,7 +39,7 @@ on:
 # its commit's, so a dispatch on another commit (a release's, say) doesn't either.
 concurrency:
   group: ci-${{ github.event.pull_request.number || github.ref }}-${{ github.event_name == 'pull_request' && 'pr' || github.event_name }}${{ github.event_name == 'workflow_dispatch' && format('-{0}', github.sha) || '' }}
-  cancel-in-progress: ${{ github.ref != 'refs/heads/master' }}
+  cancel-in-progress: ${{ github.ref != 'refs/heads/master' && !startsWith(github.ref, 'refs/heads/track/') }}
 
 jobs:
   changes:
@@ -173,6 +173,9 @@ jobs:
       - run: pnpm install --frozen-lockfile
       - run: pnpm run build
       - name: Node tests, shard ${{ matrix.shard }}/8
+        # CI 44540774555: slowest ordinary test 169 s. Default 300 s per
+        # test; seven long sweeps observed at 205-432 s in 44487308167
+        # explicitly request 900 s in their test definitions.
         env:
           SAGEBRUSH_TIME_SCALE: "2"
           # (the slow tests, test/slow-tests.ts: for the full-ci label and the paths they test, scripts/ci-paths.mjs
@@ -182,7 +185,7 @@ jobs:
           NPY_DISABLE_CPU_FEATURES: "X86_V4 AVX512_ICL AVX512_SPR"
         run: |
           mapfile -d '' files < <(find dist/test target -maxdepth 1 -type f -name '*.test.js' ! -name 'magma.test.js' ! -name 'matlab.test.js' ! -name 'sprig*.test.js' -print0 | sort -z)
-          node --test --test-concurrency="$SAGEBRUSH_CPUS" --test-shard=${{ matrix.shard }}/8 "${files[@]}"
+          node --test --test-timeout=300000 --test-concurrency="$SAGEBRUSH_CPUS" --test-shard=${{ matrix.shard }}/8 "${files[@]}"
       # (read-only memory telemetry: the cgroup this step runs in, which is the whole job so far, its
       # install, build and every test of the shard, not the parity test alone; printed even when a step before failed;
       # a file that is missing or unreadable is printed as unavailable, never as 0)
@@ -236,7 +239,7 @@ jobs:
           mapfile -d '' files < <(find dist/test -maxdepth 1 -type f -name 'sprig*.test.js' -print0 | sort -z)
           # (master has Sprig suites: none found means the build or the pattern broke)
           if [ "${#files[@]}" -eq 0 ]; then echo "no Sprig suites: the build or the pattern is wrong"; exit 1; fi
-          node --test --test-concurrency="$SAGEBRUSH_CPUS" "${files[@]}"
+          node --test --test-timeout=300000 --test-concurrency="$SAGEBRUSH_CPUS" "${files[@]}"
 
   language-node:
     needs: [changes, wasm-modules]
@@ -309,7 +312,7 @@ jobs:
       - run: pnpm run build
       - name: security, bundles, generated files and web assets
         run: |
-          SAGEBRUSH_HARDENED=0 node --test --test-concurrency="$SAGEBRUSH_CPUS" dist/test/security.test.js
+          SAGEBRUSH_HARDENED=0 node --test --test-timeout=300000 --test-concurrency="$SAGEBRUSH_CPUS" dist/test/security.test.js
           node scripts/build-cli.mjs
           node scripts/web-tests.mjs run checks.1
           node scripts/bench-ff-limits.mjs
@@ -328,9 +331,13 @@ jobs:
           node scripts/packages.mjs --check
           node scripts/web-tests.mjs run checks.5
           node scripts/core-api-surface.mjs --check
+          node dist/src/cli.js engine/py/test_matrix_checks.py
+          node dist/src/cli.js engine/py/test_sage_colors.py
           node scripts/size-budget.mjs --check
           node scripts/web-tests.mjs run checks.6
           node scripts/heap-budget.mjs --check
+          python3 scripts/sage_names.py --check
+          python3 test/sage_shim_index.py
           node scripts/pypi-import.mjs --check
           node scripts/tzdata-import.mjs --check
           scripts/sync-python-package.sh --check
@@ -343,8 +350,7 @@ jobs:
           # (the architecture article: its links pinned and present at their commit, its pages current, its board on the built site)
           node scripts/architecture-article.mjs --check
           node scripts/web-tests.mjs run checks.7
-      # The merge's size record, for size-gate (plan-growth-budget-r5 §1.1,
-      # §1.5): measured from the build above; it builds nothing
+      # The tested merge's size record, measured from the build above.
       - name: the size record
         run: |
           mkdir -p "$RUNNER_TEMP/size-record"
@@ -390,10 +396,8 @@ jobs:
     needs: changes
     if: (github.repository == 'sagemathinc/sagebrush' || vars.CI_RUNNER != '') && (needs.changes.outputs.node == 'true' || needs.changes.outputs.web == 'true' || needs.changes.outputs.size_inputs == 'true')
     runs-on: ${{ vars.CI_RUNNER || 'ubuntu-24.04' }}
-    # (the worst sequential path, resolve 2 + install 5 + build 8 + the npm
-    # metrics 2 + the old-key base 10 = 27, plus 15 for checkout, setup,
-    # records, cleanup and upload: scripts/test-size-measure.mjs checks this sum)
-    timeout-minutes: 42
+    # Resolve 2 + install 5 + build 16 + npm metrics 2 + setup/cleanup 15.
+    timeout-minutes: 40
     permissions:
       contents: read
       actions: read
@@ -412,10 +416,12 @@ jobs:
       - name: detect CI CPU quota
         run: scripts/ci-cpus.sh
       - uses: dtolnay/rust-toolchain@b725eda525362e7cf34af9a7243cac1e3f01a7ec # branch stable
+        with:
+          targets: wasm32-unknown-unknown
       - uses: pnpm/action-setup@b906affcce14559ad1aafd4ab0e942779e9f58b1 # v4.3.0
         with:
           version: 11
-      # (the same pins as the checks job: budgets.json's bun, heap-budget.json's node)
+      # (the same pins as the checks job: size-measure.mjs toolchain)
       # (no pnpm cache here: this job installs only the base's worktree, and only when it needs a new
       # record, so on a cache miss with nothing installed setup-node's post-step failed the job on a
       # missing store path, run 40543703855)
@@ -441,57 +447,27 @@ jobs:
         run: pnpm install --frozen-lockfile
       - name: build (the base)
         if: steps.resolve.outputs.need_new == 'true'
-        timeout-minutes: 8
+        timeout-minutes: 16
         working-directory: ${{ runner.temp }}/size-base
-        # (first the base's own modules, by its own pins: about 8 MB, into the user cache the old-key worktree then
-        # copies from; a base from before the pins has them committed.  Inner timeouts: scripts/test-size-measure.mjs)
+        # (first the base's own modules, by its own pins.  If and only if a pin is absent from the CDN (404), build
+        # the base's source and require every resulting sha256 and byte count to equal its pins.)
         run: |
-          if [ -f wasm/pins.json ]; then timeout 1m node scripts/wasm-fetch.mjs; fi
-          pnpm run build && node scripts/build-cli.mjs && bun web/build.ts && node scripts/build-cli.mjs
+          if [ -f wasm/pins.json ]; then timeout 8m node "$GITHUB_WORKSPACE/scripts/wasm-fetch-or-build.mjs" --root "$RUNNER_TEMP/size-base"; fi
+          timeout 8m sh -c 'pnpm run build && node scripts/build-cli.mjs && bun web/build.ts && node scripts/build-cli.mjs'
       - name: record (the base)
         if: steps.resolve.outputs.need_new == 'true'
         run: |
           node scripts/size-measure.mjs --record --root "$RUNNER_TEMP/size-base" --out "$RUNNER_TEMP/size-records/base-record.json"
-          if [ "${{ steps.resolve.outputs.bootstrap }}" = true ]; then
-            node scripts/size-measure.mjs --legacy --root "$RUNNER_TEMP/size-base" --out "$RUNNER_TEMP/size-records/legacy.json"
-          fi
-      # (the base's npm package metrics, report-only: here, before any old-key
-      # toolchain, so under this run's pinned Node and its bundled npm, as the
-      # merge's are; the rebuilt base when there is one, else the companion of
-      # the fetched push record, bound to it; plan-npm-pack-metrics-r3 §2)
+      # Report-only npm metrics, under the same pinned toolchain.
       - name: the base's npm package metrics
         if: always() && steps.resolve.outputs.mode != 'absolute'
         continue-on-error: true
         timeout-minutes: 2
-        run: |
-          if [ "${{ steps.resolve.outputs.need_new }}" = true ]; then
-            node scripts/npm-pack-metrics.mjs --base --records "$RUNNER_TEMP/size-records" --root "$RUNNER_TEMP/size-base"
-          else
-            node scripts/npm-pack-metrics.mjs --base --records "$RUNNER_TEMP/size-records"
-          fi
-      # (the old-key base, O: the base's own measurement and pins)
-      - uses: oven-sh/setup-bun@0c5077e51419868618aeaa5fe8019c62421857d6 # v2.2.0
-        if: steps.resolve.outputs.need_old == 'true'
-        with:
-          bun-version: ${{ steps.resolve.outputs.old_bun }}
-      - uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020 # v4.4.0
-        if: steps.resolve.outputs.need_old == 'true'
-        with:
-          node-version: ${{ steps.resolve.outputs.old_node }}
-      - name: the base under its own key
-        if: steps.resolve.outputs.need_old == 'true'
-        timeout-minutes: 10
-        run: |
-          git worktree add --detach "$RUNNER_TEMP/size-old" "${{ steps.resolve.outputs.base }}"
-          cd "$RUNNER_TEMP/size-old"
-          timeout 4m pnpm install --frozen-lockfile
-          if [ -f wasm/pins.json ]; then timeout 1m node scripts/wasm-fetch.mjs; fi
-          timeout 5m sh -c 'pnpm run build && node scripts/build-cli.mjs && bun web/build.ts && node scripts/build-cli.mjs'
-          node scripts/size-measure.mjs --record --out "$RUNNER_TEMP/size-records/old-record.json"
+        run: node scripts/npm-pack-metrics.mjs --base --records "$RUNNER_TEMP/size-records" --root "$RUNNER_TEMP/size-base"
       - name: remove the worktrees
         if: always()
         run: |
-          for w in size-base size-old; do
+          for w in size-base; do
             [ -d "$RUNNER_TEMP/$w" ] && git worktree remove --force "$RUNNER_TEMP/$w" || true
           done
       - uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4.6.2
@@ -501,10 +477,8 @@ jobs:
           retention-days: 7
           if-no-files-found: ignore
 
-  # The growth gate (plan-growth-budget-r5 §1.3, §1.4): the single check that
-  # decides core growth.  It fails closed: a skipped, cancelled or failed
-  # record job fails it, except for a change the classifier certifies as
-  # touching no measured input and no gate input.
+  # Stateless per-change backstop. Missing measurement jobs fail closed,
+  # except when the classifier certifies no measured or gate input changed.
   size-gate:
     needs: [changes, checks, size-base]
     if: always() && (github.repository == 'sagemathinc/sagebrush' || vars.CI_RUNNER != '')
@@ -522,7 +496,7 @@ jobs:
         with:
           name: sizes-${{ github.sha }}
           path: ${{ runner.temp }}/size-merge
-      # (an absolute run, schedule, dispatch or a first push, has no base, so no base records)
+      # Absolute runs have no base records.
       - uses: actions/download-artifact@d3f86a106a0bac45b974a628896c90dbdf5c8093 # v4.3.0
         if: needs.checks.result == 'success' && needs.size-base.result == 'success' && needs.size-base.outputs.mode != 'absolute'
         with:
@@ -705,7 +679,7 @@ jobs:
           trap cleanup_server EXIT
           trap 'exit 130' INT
           trap 'exit 143' TERM
-          sleep 1
+          node scripts/wait-for-port.mjs 8765
           kill -0 "$server_pid"
           node scripts/web-tests.mjs run web-export
 
@@ -753,7 +727,7 @@ jobs:
           trap cleanup_server EXIT
           trap 'exit 130' INT
           trap 'exit 143' TERM
-          sleep 1
+          node scripts/wait-for-port.mjs 8765
           kill -0 "$server_pid"
           # (G-10: the runner's fetch broker on the notebook page, each case's server its own)
           # (`sagebrush notebook DIR` reads, writes and lists only what is really inside DIR: no symbolic link out)
@@ -810,7 +784,7 @@ jobs:
           trap cleanup_server EXIT
           trap 'exit 130' INT
           trap 'exit 143' TERM
-          sleep 1
+          node scripts/wait-for-port.mjs 8765
           kill -0 "$server_pid"
           node scripts/web-tests.mjs run web-lookalike
 
@@ -856,7 +830,7 @@ jobs:
           trap cleanup_server EXIT
           trap 'exit 130' INT
           trap 'exit 143' TERM
-          sleep 1
+          node scripts/wait-for-port.mjs 8765
           kill -0 "$server_pid"
           # (EXACT-ONLY's old-sync detector; OLD8's old builds run locally only, with OLD_TREES)
           node scripts/web-tests.mjs run web-sync-ops
@@ -905,7 +879,7 @@ jobs:
           trap cleanup_server EXIT
           trap 'exit 130' INT
           trap 'exit 143' TERM
-          sleep 1
+          node scripts/wait-for-port.mjs 8765
           kill -0 "$server_pid"
           node scripts/web-tests.mjs run web-runner-sync.1
       # (the Numbl corpus ratchet, its target web-runner-sync.2: the long tier's)
@@ -1010,7 +984,7 @@ jobs:
           trap cleanup_server EXIT
           trap 'exit 130' INT
           trap 'exit 143' TERM
-          sleep 1
+          node scripts/wait-for-port.mjs 8765
           kill -0 "$server_pid"
           mkdir -p interrupt-out
           node scripts/web-tests.mjs run interrupt-matrix
@@ -1199,7 +1173,7 @@ jobs:
           trap cleanup_server EXIT
           trap 'exit 130' INT
           trap 'exit 143' TERM
-          sleep 1
+          node scripts/wait-for-port.mjs 8765
           kill -0 "$server_pid"
           case "$GROUP" in
             notebook)
@@ -1507,8 +1481,8 @@ jobs:
 
   # Publishes this run's modules to the release bucket (design/wasm-artifacts.md section 5): only for a push to master
   # and a dispatch on master, in the wasm-publish environment (deployment branches: master; the bucket credentials).
-  # Never cancelled.  Each absent key is written with a conditional write and read back; a present key must match.
-  # Then a cold client checks every pin of this commit is served.
+  # Track refs never reach this job or its bucket-wide credential.  Never cancelled.  Each absent key is written with
+  # a conditional write and read back; a present key must match.  Then a cold client checks every pin is served.
   wasm-publish:
     needs: [changes, wasm-modules]
     if: github.repository == 'sagemathinc/sagebrush' && github.ref == 'refs/heads/master' && (github.event_name == 'push' || github.event_name == 'workflow_dispatch') && needs.wasm-modules.result == 'success'
@@ -1592,12 +1566,12 @@ jobs:
           (cd engine && cargo build --release -p sagebrush-growth-probe --target wasm32-unknown-unknown)
           node engine/growth-probe/sweep.mjs engine/target/wasm32-unknown-unknown/release/sagebrush_growth_probe.wasm
           node engine/web/tests/wasm_designated.mjs
-          # (a stale pin: an ERROR on master pushes, dispatches and the schedule, a warning on a PR)
+          # (a stale pin: an ERROR on master pushes, dispatches, the schedule and a track's pull into master; a warning on other PRs and on track/*)
           node scripts/check-fresh-wasm.mjs
           node scripts/third-party-notices.mjs --check
           pnpm run build
           node scripts/build-cli.mjs
-          node --test --test-concurrency="$SAGEBRUSH_CPUS" dist/test/groups.test.js dist/test/kernels.test.js dist/test/mpfield-matrix.test.js dist/test/special.test.js dist/test/sage.test.js dist/test/scipy-integrate.test.js
+          node --test --test-timeout=300000 --test-concurrency="$SAGEBRUSH_CPUS" dist/test/groups.test.js dist/test/kernels.test.js dist/test/mpfield-matrix.test.js dist/test/special.test.js dist/test/sage.test.js dist/test/scipy-integrate.test.js
           python3 sage-tests/run_calculus.py
 
   engine-node:
@@ -1643,7 +1617,7 @@ jobs:
           NPY_DISABLE_CPU_FEATURES: "X86_V4 AVX512_ICL AVX512_SPR"
         run: |
           mapfile -d '' files < <(find dist/test -maxdepth 1 -type f -name '*.test.js' ! -name 'magma.test.js' ! -name 'matlab.test.js' ! -name 'sprig*.test.js' -print0 | sort -z)
-          node --test --test-concurrency="$SAGEBRUSH_CPUS" --test-shard=${{ matrix.shard }}/8 "${files[@]}"
+          node --test --test-timeout=300000 --test-concurrency="$SAGEBRUSH_CPUS" --test-shard=${{ matrix.shard }}/8 "${files[@]}"
 
   engine-language:
     needs: [changes, engine-wasm, wasm-modules]
@@ -1766,8 +1740,11 @@ jobs:
           python3 engine/py/test_runs_sweep.py
           python3 engine/py/test_workspace_tools.py
           python3 engine/py/test_latex_comments.py
+          python3 engine/py/test_matrix_checks.py
+          python3 engine/py/test_sage_colors.py
           python3 engine/py/test_pairing.py
           python3 engine/py/test_chat.py
+          python3 engine/py/test_sage_names.py
           python3 engine/py/test_limits.py
           python3 engine/py/test_engine_errors.py
           python3 engine/py/test_memguard.py
@@ -1945,7 +1922,7 @@ jobs:
           trap cleanup_server EXIT
           trap 'exit 130' INT
           trap 'exit 143' TERM
-          sleep 1
+          node scripts/wait-for-port.mjs 8765
           kill -0 "$server_pid"
           node scripts/web-tests.mjs run export-controls
 
@@ -1988,7 +1965,7 @@ jobs:
           trap cleanup_server EXIT
           trap 'exit 130' INT
           trap 'exit 143' TERM
-          sleep 1
+          node scripts/wait-for-port.mjs 8765
           kill -0 "$server_pid"
           node scripts/web-tests.mjs run lookalike-controls
 

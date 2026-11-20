@@ -58,6 +58,9 @@ const fails = [];
 // (each board's document as shown, and the file it was downloaded as)
 const shown = new Map(), files = new Map();
 const check = (ok, what) => { if (!ok) fails.push(what); };
+// (a file and its export again are compared without the day of export its generator line names: a run that crosses
+// midnight UTC exports them on two days, and nothing else may differ)
+const undated = (html) => html.replace(/(<meta name="generator" content="[^"]*, exported )\d{4}-\d{2}-\d{2}"/, '$1(day)"');
 try {
   for (const m of ["Page.enable", "Runtime.enable", "Log.enable", "Network.enable"]) await send(m);
   for (const doc of docs) {
@@ -127,7 +130,8 @@ try {
     await ev("document.getElementById('board-print')?.remove()");
     // exported again, from the file: the same file
     const again = await ev("window.sagebrush.board.exportHtml()");
-    check(again === html, `${doc}: exported again from the file, ${again.length} bytes, not the same ${html.length}`);
+    check(undated(html) !== html, `${doc}: the file names the day it was exported`);
+    check(undated(again) === undated(html), `${doc}: exported again from the file, ${again.length} bytes, not the same ${html.length}`);
     // (but for its engine, with code: offline, those fail)
     const engine = /\/engine\/[0-9a-f]{20}\//;
     check(!requests.filter((u) => !(s0.code && engine.test(u))).length, `${doc}: the file asked the network for ${requests.slice(0, 3).join(", ")}`);
