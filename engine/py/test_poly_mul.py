@@ -529,6 +529,11 @@ def qscale_checks(r):
         q = num / (t + 2)
         assert str(q.parent()) == "Fraction Field of Univariate Polynomial Ring in t over " + base, (num, q.parent())
         n += 1
+    # (//, % and divmod by a Rational keep their ring from the value, as
+    # before; their parity with Sage is a later change)
+    for got, want, ring in (((t + 2) // QQ(2), [1], Z), ((t + 2) % QQ(2), [0, 1], Z), (divmod(3 * t + 5, QQ(2))[1], [1, 1], Z), ((t + 2) // h, [4, 2], T)):
+        assert str(got.parent()) == str(ring) and [Fraction(c) for c in got.list()] == [Fraction(c) for c in want], (got, want, ring)
+        n += 1
     # (the zero polynomial has no monic multiple: ZeroDivisionError, as Sage)
     for z in (R(0), Z(0)):
         try:

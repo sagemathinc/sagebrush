@@ -1203,7 +1203,11 @@ class Polynomial:
             sage: t.quo_rem(2*t + 1), (3*t^2 + 1).quo_rem(2*t + 1), (-3*t^2).quo_rem(2*t + 1)
             ((0, t), (t, t^2 - t + 1), (-2*t + 1, t^2 - 1))
         """
-        o = self._coerce(other)
+        # (a Rational divisor keeps its value-based ring here, as before:
+        # Sage takes // by an integral one in ZZ ((t + 2)//QQ(2) is 1 in
+        # ZZ[t]) but % and divmod in QQ, so parity for //, % and divmod is a
+        # later change of its own)
+        o = Polynomial(self._ring, [other]) if type(other) is _sa().Rational else self._coerce(other)
         if o is None or not o._c:
             raise ZeroDivisionError("division by zero polynomial")
         if self._ring._base is ZZ and o._ring._base is ZZ:
