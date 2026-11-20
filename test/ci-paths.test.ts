@@ -632,7 +632,13 @@ test("a changed suite runs on its own pull request: its `// ci:` job, and the fu
   assert.deepEqual(JSON.parse(classify(["web/board/frame.ts"]).web_groups), ["board-a", "board-b", "board-c", "board-unit"]);
   const matrix = JSON.parse(classify(["web/index.html"]).web_matrix);
   assert.deepEqual(matrix.filter((x: { group: string }) => x.group === "notebook").map((x: { shard: number }) => x.shard), [1, 2, 3]);
-  assert.deepEqual(matrix.filter((x: { group: string }) => x.group === "remote-preview").map((x: { shard: number }) => x.shard), [1, 2]);
+  assert.deepEqual(matrix.filter((x: { group: string }) => x.group === "remote-preview").map((x: { shard: number }) => x.shard), [1, 2, 3]);
+  // (one remote-preview run a shard: each run takes minutes, so a new `// ci:` run there needs a new shard, not a
+  // doubled one near the job's timeout)
+  const repo = join(__dirname, "..", "..");
+  const preview = spawnSync(process.execPath, [join(repo, "scripts", "web-tests.mjs"), "plan", "web-browser/remote-preview"], { cwd: repo, encoding: "utf8" });
+  assert.equal(preview.status, 0, preview.stderr);
+  assert.equal(preview.stdout.split("\n").filter(Boolean).length, matrix.filter((x: { group: string }) => x.group === "remote-preview").length, preview.stdout);
   assert.equal(matrix.filter((x: { group: string }) => !["notebook", "remote-preview"].includes(x.group)).length, 7);
   // a deleted suite (not in the checkout) runs nowhere
   assert.equal(classify(["web/gone/test-gone.mjs"], "", at).full, "false");
