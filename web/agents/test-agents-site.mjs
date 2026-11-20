@@ -38,6 +38,23 @@ const RELEASE_SHA256 = {
 const tgzVersions = [...new Set([...(html + conn0).matchAll(/sagebrush-agent-([^/"<\s]*)\.tgz/g)].map((m) => m[1]))];
 ok(tgzVersions.length === 1 && JSON.stringify(tgzVersions) === JSON.stringify(rc.v), `every .tgz link on both pages names the same one version, the one the pages name: ${JSON.stringify(tgzVersions)}`);
 ok(RELEASE_SHA256[rc.v[0]] !== undefined && JSON.stringify(rc.sha) === JSON.stringify([RELEASE_SHA256[rc.v[0]]]), `the connect page's sha256 is the reviewed one for sagebrush-agent ${rc.v[0]}: ${JSON.stringify(rc.sha)}`);
+// (the docs the vendored agent's sagebrush_docs verb may fetch, its lib/docs-paths.json: each one this site serves, as a
+//  file in web/dist of at most 512 KiB, on sagebrush.space; so the agent's list and the site can't drift apart. The
+//  agent is the reviewed one engine/py/test_remote_agent.py names, its SHA-256 checked before anything is read.)
+{
+  const { createHash } = await import("node:crypto");
+  const { execFileSync } = await import("node:child_process");
+  const py = join(web, "..", "engine", "py");
+  const pins = readFileSync(join(py, "test_remote_agent.py"), "utf8");
+  const tgz = join(py, "fixtures", /^VENDORED = os\.path\.join\(HERE, "fixtures", "(sagebrush-agent-[0-9.]+\.tgz)"\)$/m.exec(pins)?.[1] ?? "(not named)");
+  const sha = /^VENDORED_SHA256 = "([0-9a-f]{64})"$/m.exec(pins)?.[1];
+  const reviewed = existsSync(tgz) && createHash("sha256").update(readFileSync(tgz)).digest("hex") === sha;
+  let list = null;
+  if (reviewed) { try { list = JSON.parse(execFileSync("tar", ["-xzOf", tgz, "package/lib/docs-paths.json"], { encoding: "utf8", timeout: 30000 })); } catch { list = null; } }
+  const paths = Array.isArray(list?.paths) ? list.paths : [];
+  const bad = paths.filter((p) => typeof p !== "string" || !p.startsWith("/") || p.includes("..") || !existsSync(join(web, "dist", p)) || statSync(join(web, "dist", p)).size > 512 * 1024);
+  ok(reviewed && list?.host === "sagebrush.space" && paths.length > 0 && bad.length === 0, `the vendored agent's docs (lib/docs-paths.json, ${paths.length} paths on ${list?.host}) are each served here, at most 512 KiB: ${JSON.stringify(bad)}`);
+}
 // (William, Nov 8: no wall of text in the app: the help box is one short line, its command, and Learn more)
 const helpText = (/<div id="help"[^>]*>([\s\S]*?)<\/div>/.exec(html)?.[1] ?? "").replace(/<pre>[\s\S]*?<\/pre>/g, "").replace(/<[^>]+>/g, "").replace(/\s+/g, " ").trim();
 ok(helpText.length > 0 && helpText.length <= 100 && /Learn more/.test(helpText), `the help box is one short line with Learn more (${helpText.length} characters): ${helpText}`);
