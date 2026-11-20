@@ -23,6 +23,12 @@ const searchIn = (o = {}) => ({ provider: "Anthropic", reason: "", ...o });
   const good = egressOf(WEB_FETCH, fetchIn());
   ok(good !== "bad" && good?.kind === "fetch" && good.host === "github.com", "a fetch in the agent's form: its origin, host and path", good);
   ok(egressOf("WebFetch", { url: "https://x/" }) === null && egressOf("mcp__sagebrush_page__workspace_write", {}) === null, "other tools aren't web cards");
+  // (a released agent's search (0.7.3 and earlier) has the built-in tool's input and no provider: the two-button card it
+  //  had before egress.turn, so released agents keep working; a card that names a provider must be the contract's)
+  ok(egressOf(WEB_SEARCH, { query: "search cats" }) === null && egressOf(WEB_SEARCH, { query: "q", allowed_domains: ["a.com"], blocked_domains: [] }) === null, "a released agent's search card (the built-in tool's input: its query, its domain lists) is the card it always was, not a web card");
+  const odd = { "no query": {}, "a query not a string": { query: 1 }, "another key": { query: "q", reason: "r" }, "a domain list not of strings": { query: "q", allowed_domains: [1] }, "a provider and a query": { provider: "Anthropic", reason: "", query: "secret" }, "another provider": { provider: "Evil Corp", reason: "" } };
+  const took = Object.entries(odd).filter(([, i]) => egressOf(WEB_SEARCH, i) !== "bad").map(([k]) => k);
+  ok(took.length === 0, "…and nothing else: any other search form, with a provider or without, is refused (Deny only)", took);
   const bad = {
     "an extra key": fetchIn({ url: "https://github.com/?q=secret" }),
     "a missing reason": (({ reason, ...r }) => r)(fetchIn()),
@@ -141,6 +147,18 @@ const D = (tool, input, id) => permissionDigest({ child: "ch", conversation: "co
   cards.answer("e5", "turn", "conv", "t1", cards.instanceOf("e5"));
   await cards.pending;
   ok(p.sent[0]?.behavior === "allow_turn" && p.sent[0].digest === (await D("egress.turn", { provider: "Anthropic" }, "e5")), "…For this turn: the digest of the search's own turn action", p.sent);
+}
+
+// ---- (3b) a released agent's search card: two buttons, and never a turn-wide grant, even with a turn action beside it
+{
+  const p = mk();
+  const cards = new PermissionCards({ current: () => p, gate: digestGate, charge: DIGEST_CHARGE, egressTurn: true });
+  const v = cards.view("conv", "t1", card("legacy", { tool: WEB_SEARCH, input: { query: "search cats" } }, { tool: "egress.turn", input: { provider: "Anthropic" } }));
+  const turned = cards.answer("legacy", "turn", "conv", "t1", cards.instanceOf("legacy"));
+  ok(v?.buttons === "two" && !v.turn_label && turned === false && p.sent.length === 0, "a released agent's search card: two buttons, and For this turn can't be sent even with a turn action beside it", { v, sent: p.sent });
+  ok(cards.answer("legacy", true, "conv", "t1", cards.instanceOf("legacy")) === true, "…its Allow answers the request");
+  await cards.pending;
+  ok(p.sent.length === 1 && p.sent[0].behavior === "allow" && p.sent[0].digest === (await D(WEB_SEARCH, { query: "search cats" }, "legacy")), "…allow, with the digest of its own action", p.sent);
 }
 
 // ---- (4) the card as drawn, and the model's text shown visibly

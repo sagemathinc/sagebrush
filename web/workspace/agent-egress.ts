@@ -22,6 +22,10 @@ export type Egress = { kind: "fetch"; origin: string; host: string; path: string
 export function egressOf(tool: string, input: unknown): Egress | "bad" | null {
   if (tool !== WEB_FETCH && tool !== WEB_SEARCH) return null;
   if (!input || typeof input !== "object" || Array.isArray(input)) return "bad";
+  // (a released agent's search card, from before egress.turn: sagebrush-agent 0.7.3 and earlier send the built-in
+  //  tool's own input, exactly its query and, optionally, its domain lists, with no provider. It is the two-button card it
+  //  always was, with no turn-wide grant; any other form without a provider is refused)
+  if (tool === WEB_SEARCH && legacySearch(input as Record<string, unknown>)) return null;
   const i = input as Record<string, unknown>, keys = Object.keys(i).sort().join(",");
   const reason = typeof i.reason === "string" && [...i.reason].length <= REASON_MAX ? i.reason : null;
   if (reason === null) return "bad";
@@ -48,6 +52,12 @@ function canonicalHost(origin: unknown, path: unknown): string | null {
   try { u = new URL(origin + base); } catch { return null; }
   if (u.origin !== origin || u.pathname !== base || u.search || u.hash || u.username || u.password || u.port) return null;
   return m[1];
+}
+/** The built-in WebSearch's own input, as released agents (0.7.3 and earlier) send it: a string query, and only the
+ *  tool's two optional lists of domains (strings), nothing else. */
+function legacySearch(i: Record<string, unknown>): boolean {
+  const list = (v: unknown) => v === undefined || (Array.isArray(v) && v.every((x) => typeof x === "string"));
+  return typeof i.query === "string" && Object.keys(i).every((k) => k === "query" || k === "allowed_domains" || k === "blocked_domains") && list(i.allowed_domains) && list(i.blocked_domains);
 }
 /** A turn_action that matches its request exactly: {tool: "egress.turn", input} with the one key of the request's
  *  scope, equal byte for byte (its origin, or its provider); anything else gets no "for this turn" button. */
