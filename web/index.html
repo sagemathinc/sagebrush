@@ -2698,7 +2698,9 @@ const splitPath = (p) => { const i = Math.max(p.lastIndexOf("/"), p.lastIndexOf(
 // commands, by a grant it made for a file the person picked in its Open or Save dialog (or the system handed it), the
 // files beside it by name only (app/src-tauri/src/folder_fs.rs): this page names no path there.  A phone: through the
 // fs plugin, by path.
-const asDiskFile = (o) => (typeof o === "string" ? { path: o, ...splitPath(o) } : { grant: String(o.grant), path: String(o.path), name: String(o.name) });
+// (a path (a phone's), a grant the app made (the desktop's), or either of these already made: never a path taken for a
+// grant, as String(undefined) is no grant but reads as one)
+const asDiskFile = (o) => (typeof o === "string" ? { path: o, ...splitPath(o) } : o.grant ? { grant: String(o.grant), path: String(o.path), name: String(o.name) } : asDiskFile(String(o.path)));
 const hostFile = (f) => (f.grant ? {
   readText: () => TAURI.core.invoke("file_read_text", { grant: f.grant }),
   writeText: (text) => TAURI.core.invoke("file_write_text", { grant: f.grant, text }),
