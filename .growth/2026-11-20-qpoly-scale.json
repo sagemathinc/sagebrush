@@ -1,0 +1,11 @@
+{
+ "v": 1,
+ "reason": "Per-coefficient maps of Q[x] in the engine (qpoly_scale, qpoly_derivative, qpoly_integral): arith::pscale, the word ledger's module and coprime's unbalanced gcd, with the three op rows, in the engine module and the CLI that embeds it; sagebrush.poly.qscale, qderivative and qintegral and Sage mode's routes through them in the Sage chunk. CI's size row for this change on its merge with the track (0934f280): engine/sagebrush-engine.wasm +31027, cli/pyjs.cjs +43144, engine/lib/sage.pre +9102, engine/lib/sage.src +4662, cli/lib.gen.js +1384; each marked +64 over that. The sage.pre, sage.src and engine module ceilings are renewed to the measured size + 64.",
+ "bytes": {
+  "cli/lib.gen.js": 1448,
+  "cli/pyjs.cjs": 43208,
+  "engine/lib/sage.pre": 9166,
+  "engine/lib/sage.src": 4726,
+  "engine/sagebrush-engine.wasm": 31091
+ }
+}
