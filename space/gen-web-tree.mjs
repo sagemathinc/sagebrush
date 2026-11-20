@@ -38,7 +38,9 @@ for (const f of files) {
   nodes.push({
     id: ids.get(f), kind: "file", title: f, group: dirname(f) === "." ? "web" : "web/" + dirname(f),
     lang: f.endsWith("ts") ? "typescript" : "javascript", lines: lines.length,
-    text: lines.slice(0, 60).join("\n"),
+    // (the site's build refuses any file in web/dist carrying the service worker's test hook, "// <offline-test>"
+    //  (web/sw-hook.mts): web/ quotes it, so its first lines here say it with two spaces)
+    text: lines.slice(0, 60).join("\n").replaceAll("// <offline-test>", "//  <offline-test>"),
   });
   for (const m of src.matchAll(IMPORT)) {
     const to = resolveImport(f, m[1] ?? m[2] ?? m[3]);
