@@ -260,6 +260,8 @@ export class Board {
   onItemClick: ((it: Item) => void) | null = null;
   // (a click waiting to be told, until a double-click can no longer follow it)
   private clickSoon = 0;
+  /** Forget a click waiting to be told (another page or document shown: its item's id would be another's). */
+  cancelClick() { clearTimeout(this.clickSoon); }
   private boxes = new Grid(); // notes and shapes
   private strokes = new Grid(); // ink
   private paths = new Map<string, Path2D>();
@@ -1933,6 +1935,8 @@ export class Board {
       if (e.detail > 1 || (pressed && Math.hypot(e.clientX - pressed.x, e.clientY - pressed.y) > 6)) return;
       this.onTitleClick?.(this.titleAt(e.clientX, e.clientY)?.id ?? null);
       if (!this.onItemClick || atControl(e) || editingAt(e) || (e.target as Element | null)?.closest?.("a, .board-code-out canvas")) return;
+      // (the second tap of a double tap, which a browser that doesn't count taps tells as a click of its own)
+      if (doubled && e.timeStamp - doubled < 600) return;
       // (text selected by the press, to copy it: not a click on the item)
       const sel = getSelection();
       if (sel && !sel.isCollapsed && this.el.contains(sel.anchorNode)) return;

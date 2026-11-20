@@ -105,6 +105,8 @@ export class Editor {
   onSelect: ((ids: readonly string[]) => void) | null = null;
   /** open a note's drawer (mount.ts): O with one note selected, and the in-place toolbar's button; null: none */
   onOpenDrawer: ((id: string, keyboard: boolean) => void) | null = null;
+  /** whether this item has a drawer (a note: not a group, a question, a shape...) */
+  canOpenDrawer: ((id: string) => boolean) | null = null;
 
   // (edits are to the page shown: pg(d) is it, within the whole document d)
   constructor(private board: Board, private doc: () => BoardDoc | null, private change: (d: BoardDoc) => Promise<void>,
@@ -1202,6 +1204,7 @@ export class Editor {
       addSame: (id) => this.addSame(id),
       // (from its toolbar: the focus stays in what is being written)
       openDrawer: this.onOpenDrawer ? (id) => this.onOpenDrawer?.(id, false) : null,
+      canOpenDrawer: (id) => !!this.onOpenDrawer && (this.canOpenDrawer?.(id) ?? false),
       get images() { return ed.images; },
     };
   }

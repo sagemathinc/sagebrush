@@ -9,14 +9,20 @@
 //   as a fraction of the board's width, never in the document.
 // - On a board under 600 px wide it is a sheet at the bottom instead: a
 //   grip on its top edge, two heights to settle at, and a drag down closes it.
-// - Esc closes it (what is open inside it first); the focus goes back to
-//   where it was.
+// - Esc closes it (mount.ts: what is being written, a panel or a menu
+//   first); the focus goes back to where it was, else to the board.
+// - Keys pressed in it, and copying from it, are its own: never the board's
+//   shortcuts (Delete, the arrows, Ctrl+A/C/X...).
 
 export interface DrawerHost {
   /** the board's root (.sbb): the drawer is drawn in it, so a page embedding the board holds it */
   root: HTMLElement;
   /** what the drawer shows for this note: its content as its card draws it, all of it (null: none now) */
   content(id: string): HTMLElement | null;
+  /** what that content is drawn from now (its fields, its output, its run state): the same key, nothing to draw again */
+  key(id: string): string | null;
+  /** whether the page shown has an item with this id (null content and none: deleted; else not a note any more) */
+  exists(id: string): boolean;
   /** its title, as its card's (null: none) */
   title(id: string): HTMLElement | null;
   /** its title as plain text, to say it opened */
@@ -61,19 +67,22 @@ export class Drawer {
   private frame = 0;
   private back: HTMLElement | null = null;
   private sized = 0; // the width (or the sheet's height) drawn, in pixels
+  private drawn: string | null = null; // the key of what is drawn
 
   constructor(private host: DrawerHost) {
     const el = this.el;
     el.className = "sbb-drawer";
     el.dataset.sbb = "drawer";
     el.hidden = true;
-    const headingId = "sbb-drawer-h" + Math.random().toString(36).slice(2, 10);
+    const uid = Math.random().toString(36).slice(2, 10), headingId = "sbb-drawer-h" + uid;
+    el.id = "sbb-drawer-" + uid;
     this.heading.id = headingId;
     this.heading.tabIndex = -1;
     el.setAttribute("aria-labelledby", headingId);
     this.grip.className = "sbb-drawer-grip";
     this.grip.tabIndex = 0;
     this.grip.setAttribute("role", "separator");
+    this.grip.setAttribute("aria-controls", el.id);
     this.grip.title = "Drag to resize (double-click: the usual size)";
     this.head.className = "sbb-drawer-head";
     this.editBtn.className = "sbb-drawer-edit";
@@ -96,11 +105,12 @@ export class Drawer {
     this.say.className = "sbb-sr";
     this.say.setAttribute("aria-live", "polite");
     host.root.append(el, this.say);
-    el.addEventListener("keydown", (e) => {
-      if (e.key !== "Escape" || e.defaultPrevented || typing(e.target)) return;
-      e.preventDefault();
+    // (its keys and its clipboard are its own: the board's shortcuts, on the window and the document, never see them;
+    // but Esc, mount.ts's, seen on the window before this, and the page's Ctrl+S, Ctrl+P and Ctrl+F)
+    for (const t of ["keydown", "keyup", "copy", "cut", "paste"]) el.addEventListener(t, (e) => {
+      const k = e as KeyboardEvent;
+      if (t === "keydown" && (k.metaKey || k.ctrlKey) && !k.altKey && ["s", "p", "f"].includes(k.key.toLowerCase())) return;
       e.stopPropagation();
-      this.close();
     });
     this.resizing();
   }
@@ -110,9 +120,11 @@ export class Drawer {
   get isOpen(): boolean { return this.shownId !== null; }
   private get sheet(): boolean { return this.host.root.clientWidth < NARROW; }
 
-  /** Show note `id` (`keyboard`: the focus goes to the drawer; else it stays where it is, and the opening is said). */
-  open(id: string, keyboard = false) {
+  /** Show note `id` (`keyboard`: the focus goes to the drawer; else it stays where it is, and the opening is said;
+   * `follow`: following the selection, the camera left where it is). */
+  open(id: string, keyboard = false, follow = false) {
     const was = this.shownId;
+    if (was !== id) this.drawn = null;
     if (!this.render(id)) return;
     if (was === null) {
       const a = document.activeElement;
@@ -123,8 +135,13 @@ export class Drawer {
     this.layout();
     if (was !== id) this.body.scrollTop = 0;
     if (keyboard) this.heading.focus();
-    else this.say.textContent = `Opened: ${this.host.label(id) || "the note"}`;
-    this.host.shown(id);
+    else {
+      // (emptied first: the same words said again are said)
+      this.say.textContent = "";
+      const words = `Opened: ${this.host.label(id) || "the note"}`;
+      requestAnimationFrame(() => { if (this.shownId === id) this.say.textContent = words; });
+    }
+    if (!follow) this.host.shown(id);
   }
 
   /** Close it; the focus goes back to where it was if it was in the drawer. */
@@ -132,6 +149,7 @@ export class Drawer {
     if (this.shownId === null) return;
     const had = this.el.contains(document.activeElement);
     this.shownId = null;
+    this.drawn = null;
     cancelAnimationFrame(this.frame);
     this.frame = 0;
     this.el.hidden = true;
@@ -142,7 +160,12 @@ export class Drawer {
     if (had) {
       const b = this.back;
       if (b?.isConnected) b.focus();
-      else this.host.root.querySelector<HTMLElement>(".board")?.focus();
+      else {
+        // (else the board itself, focusable for this, its keys then the reader's)
+        const board = this.host.root.querySelector<HTMLElement>(".board");
+        if (board && !board.hasAttribute("tabindex")) board.tabIndex = -1;
+        board?.focus({ preventScroll: true });
+      }
     }
     this.back = null;
   }
@@ -161,8 +184,9 @@ export class Drawer {
       const id = this.shownId;
       if (id === null) return;
       const top = this.body.scrollTop;
-      if (!this.render(id)) this.gone();
-      this.body.scrollTop = top;
+      if (this.render(id)) this.body.scrollTop = top;
+      else if (this.host.exists(id)) this.close(); // (no longer a note the drawer shows: a question, say)
+      else this.gone();
     });
   }
 
@@ -184,7 +208,10 @@ export class Drawer {
   }
 
   destroy() {
-    cancelAnimationFrame(this.frame);
+    this.close();
+    const root = this.host.root;
+    root.style.removeProperty("--sbb-drawer-w");
+    root.style.removeProperty("--sbb-sheet-h");
     this.el.remove();
     this.say.remove();
   }
@@ -192,9 +219,14 @@ export class Drawer {
   // ------------------------------------------------------------------ drawing
 
   private render(id: string): boolean {
+    // (drawn again only when what it is drawn from changed: another cell's output, an edit elsewhere, leave it as it is,
+    // its text selection and the pictures shown in it with it)
+    const key = this.host.key(id);
+    if (key !== null && key === this.drawn && this.shownId === id) return true;
     const content = this.host.content(id);
     if (!content) return false;
     this.shownId = id;
+    this.drawn = key;
     const t = this.host.title(id);
     this.heading.replaceChildren(...(t ? [t] : []));
     if (!t) this.heading.textContent = "Note";
@@ -205,6 +237,8 @@ export class Drawer {
 
   // (the note was deleted, here or by someone else: said, rather than the drawer vanishing)
   private gone() {
+    this.drawn = null;
+    if (this.el.contains(document.activeElement) && document.activeElement !== this.heading) this.heading.focus();
     const p = document.createElement("p");
     p.className = "sbb-drawer-gone";
     p.textContent = "This note was deleted.";
@@ -214,6 +248,8 @@ export class Drawer {
 
   // ------------------------------------------------------------------ size
 
+  // (the least width is never more than the most: a board under NARROW wide has the sheet instead, and 0.8 of NARROW
+  // is more than MIN_W)
   private bounds(): [number, number] {
     const root = this.host.root;
     if (this.sheet) { const H = root.clientHeight; return [Math.round(SHEET_MIN * H), Math.round(SHEET_HEIGHTS[1] * H)]; }
@@ -290,7 +326,3 @@ export class Drawer {
   }
 }
 
-// (keys typed into a field, or into what is being written: theirs, not the drawer's)
-function typing(t: EventTarget | null): boolean {
-  return t instanceof HTMLInputElement || t instanceof HTMLTextAreaElement || t instanceof HTMLSelectElement || (t instanceof HTMLElement && t.isContentEditable);
-}

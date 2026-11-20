@@ -377,6 +377,8 @@ export function mountBoard(root: HTMLElement, host: BoardHost) {
   let doc: BoardDoc | null = null;
   // (a note's drawer, its whole content beside the board (drawer.ts), and the room it takes from the camera)
   let drawer: Drawer | null = null;
+  // (the items that have one: notes, a template's not, questions not)
+  const drawable = (it: Item | undefined): it is Item => !!it && it.kind === "note" && !it.inert && !it.ask;
   let drawerRoom = { right: 0, bottom: 0 };
   // (the tour's caption, at the bottom: the camera keeps clear of it too)
   const tourRoom = () => ($("tour").hidden ? 0 : $("tour").offsetHeight + 18);
@@ -1038,6 +1040,7 @@ export function mountBoard(root: HTMLElement, host: BoardHost) {
 
   /** Show a document from the start: the whole board, or the page and step in the address (#N, #pP, #pP-N). */
   async function load(d: BoardDoc, stored = false) {
+    board.cancelClick();
     drawer?.close();
     loads++;
     dirty.clear();
@@ -1112,7 +1115,8 @@ export function mountBoard(root: HTMLElement, host: BoardHost) {
   /** Show page i (0-based), from its start (`end`: at its tour's last step). */
   async function page(i: number, end = false) {
     if (!doc) return;
-    // (an item's id is its page's own: the drawer is closed on another page)
+    // (an item's id is its page's own: the drawer is closed on another page, and a click waiting forgotten)
+    board.cancelClick();
     drawer?.close();
     // (first: what is being written is kept on its own page)
     editor.clear();
@@ -1165,6 +1169,7 @@ export function mountBoard(root: HTMLElement, host: BoardHost) {
     e.preventDefault();
     const l = doc && boardLink(doc, pageIx, a.getAttribute("href") ?? "");
     if (!l) return;
+    const fromDrawer = !!a.closest(".sbb-drawer");
     go(async () => {
       const g = loadGen, other = l.page !== pageIx;
       if (other) {
@@ -1175,6 +1180,8 @@ export function mountBoard(root: HTMLElement, host: BoardHost) {
         if (destroyed || g !== loadGen || mine !== pageGen || pageIx !== l.page) return;
       }
       if (l.item) board.focus([l.item]);
+      // (a link in the drawer to a note: the drawer shows that note)
+      if (l.item && fromDrawer && drawable(board.item(l.item))) drawer?.open(l.item);
       // (a page's start on the page shown too: its intro, the tour from the
       // top, as from another page, UI-07E-1; page() has shown it otherwise)
       else if (l.step >= 0 || !other) step(l.step);
@@ -1469,9 +1476,16 @@ export function mountBoard(root: HTMLElement, host: BoardHost) {
   // The drawer (drawer.ts): a note's whole content beside the board, its card keeping its size.  In View a click on
   // a note opens it; in Edit, O or the in-place toolbar's button, and an open drawer follows the one note selected.
   // Not in Present or TimeTravel.  It holds the note's id only, and is drawn again from what the card is drawn from.
-  const drawable = (it: Item | undefined): it is Item => !!it && it.kind === "note" && !it.inert && !it.ask;
   const dr = (drawer = new Drawer({
     root,
+    key: (id) => {
+      const it = board.item(id);
+      if (!drawable(it)) return null;
+      const out = it.code !== undefined ? code?.output(cell(id), false) : null;
+      return JSON.stringify([it.title, it.text, it.detail, it.ref, it.code, it.hideCode, it.lang, it.order, it.image, it.shape,
+        it.code !== undefined ? code?.state(cell(id)) ?? null : null, out ? out.innerHTML : null]);
+    },
+    exists: (id) => !!board.item(id),
     content: (id) => {
       const it = board.item(id);
       // (its title is the drawer's heading)
@@ -1495,11 +1509,15 @@ export function mountBoard(root: HTMLElement, host: BoardHost) {
   const canDraw = () => !presenting && !viewing;
   board.onItemClick = (it) => { if (!editor.on && canDraw() && drawable(it)) dr.open(it.id); };
   editor.onOpenDrawer = (id, keyboard) => { const it = board.item(id); if (canDraw() && drawable(it)) dr.open(id, keyboard); };
-  editor.onSelect = (ids) => { if (dr.isOpen && ids.length === 1 && ids[0] !== dr.id && drawable(board.item(ids[0]))) dr.open(ids[0]); };
+  editor.canOpenDrawer = (id) => drawable(board.item(id));
+  // (following the selection: the camera stays, as a drag of the note may be starting)
+  editor.onSelect = (ids) => { if (dr.isOpen && ids.length === 1 && ids[0] !== dr.id && drawable(board.item(ids[0]))) dr.open(ids[0], false, true); };
   offs.push(effect(() => dr.setEditing(editor.editing.value)));
   // (Esc closes it first, before the board's own Esc, but not what is being written or typed into, nor a dialog's)
   on(window, "keydown", (e: KeyboardEvent) => {
     if (e.key !== "Escape" || !dr.isOpen || !mine() || e.defaultPrevented || editor.writing) return;
+    // (an edge's panel, the toolbar's, an open menu or Find: theirs first)
+    if (document.querySelector(".board-editor, .board-toolbar-panel:not([hidden])") || root.querySelector(".menu:not([hidden]), [data-sbb=find]:not([hidden])")) return;
     const t = e.target;
     if (t instanceof HTMLInputElement || t instanceof HTMLTextAreaElement || t instanceof HTMLSelectElement || (t instanceof HTMLElement && (t.isContentEditable || t.closest(".board-editing, .ip-bar")))) return;
     e.preventDefault();
@@ -2492,6 +2510,8 @@ export function mountBoard(root: HTMLElement, host: BoardHost) {
       // what is being written is still kept, saved though not drawn; Find's
       // mark still coming dropped, F33)
       destroyed = true;
+      board.onItemClick = null;
+      board.cancelClick();
       findGen++;
       presenting = null;
       presentGen++;

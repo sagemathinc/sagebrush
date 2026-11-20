@@ -84,7 +84,8 @@ const DOC = (o = {}) => ({
       ].filter((n) => !(o.without ?? []).includes(n.id)),
       edges: [],
     },
-    { nodes: [{ id: "p2", title: "Second page", text: "Another page" }], edges: [] },
+    // (a note with the same id as the first page's: an id is its page's own)
+    { nodes: [{ id: "long", title: "Second page", text: "Another page" }], edges: [] },
   ],
 });
 
@@ -174,8 +175,17 @@ try {
   await mouse("mousePressed", rd.left + 40, rd.top + 50);
   for (let k = 1; k <= 5; k++) await mouse("mouseMoved", rd.left + 40 + 30 * k, rd.top + 50 + 10 * k);
   await mouse("mouseReleased", rd.left + 190, rd.top + 100);
-  await sleep(150);
+  await sleep(400);
   check(!(await open()), "a drag on a note pans the board: no drawer");
+  // a click, then another page before it is told: nothing opens there (the same id is another note)
+  const rpc = await rect("long");
+  await mouse("mousePressed", rpc.left + 40, rpc.top + 60);
+  await mouse("mouseReleased", rpc.left + 40, rpc.top + 60);
+  await A.ev("window.sagebrush.board.page(1).then(() => 1)");
+  await sleep(500);
+  check(!(await open()), "a click followed at once by another page: nothing opens on that page");
+  await A.ev("window.sagebrush.board.page(0).then(() => 1)");
+  await A.until("window.board.item('long')?.h === 140", 10000);
   await look("linked", 200, 200);
   const link = await A.ev(`(() => { const a = window.board.element("linked")?.querySelector("a.board-ref"); if (!a) return null; const r = a.getBoundingClientRect(); return { x: r.left + 8, y: r.top + r.height / 2 }; })()`);
   if (link) await click(link.x, link.y);
@@ -215,6 +225,13 @@ try {
   check(await A.until(`Math.round(${D}.getBoundingClientRect().width) === 720`, 5000), "the board narrowed to 900 px: the drawer within 80% of it", await width());
   await A.send("Emulation.setDeviceMetricsOverride", { width: 1280, height: 800, deviceScaleFactor: 1, mobile: false });
   await sleep(300);
+  await A.ev(`${D}.querySelector(".sbb-drawer-grip").focus(), 1`);
+  await key("Home");
+  await A.send("Emulation.setDeviceMetricsOverride", { width: 650, height: 800, deviceScaleFactor: 1, mobile: false });
+  await sleep(300);
+  check(Math.round(await width()) === 280, "at its least width, the board narrowed to 650 px: still 280 px (its fraction would be 142)", await width());
+  await A.send("Emulation.setDeviceMetricsOverride", { width: 1280, height: 800, deviceScaleFactor: 1, mobile: false });
+  await sleep(300);
   // (a reload: the width kept)
   await A.ev(`${D}.querySelector(".sbb-drawer-grip").dispatchEvent(new MouseEvent("dblclick", { bubbles: true })), 1`);
   check(Math.round(await width()) === 480, "a double-click on the grip puts the usual width back", await width());
@@ -228,6 +245,14 @@ try {
   const rr = await rect("long");
   await click(rr.left + 40, rr.top + 60);
   check((await open()) && Math.round(await width()) === 544, "after a reload, the drawer opens at the width kept", await width());
+
+  // ---- a link in the drawer to a note of the board: the drawer shows that note
+  await look("linked", 200, 200);
+  const rl = await rect("linked");
+  await click(rl.left + 30, rl.top + 12);
+  check((await heading()) === "A link", "(the linked note's drawer)", await heading());
+  await A.ev(`${D}.querySelector("a.board-ref").click(), 1`);
+  check(await A.until(`${D}.querySelector("h2").textContent === "Long note"`, 3000), "a link in the drawer to a note shows that note in the drawer", await heading());
 
   // ---- it follows the document: a write made elsewhere, then the note deleted
   await write(DOC({ longText: "Rewritten elsewhere: one short paragraph." }));
@@ -259,6 +284,18 @@ try {
   check(await A.until(`${D}.hidden`, 5000), "Present closes it");
   await A.ev("window.sagebrush.board.present(false).then(() => 1)");
   await sleep(300);
+  await look("long", 200, 200);
+  const rt = await rect("long");
+  await click(rt.left + 40, rt.top + 60);
+  check(await open(), "(open again)");
+  await A.ev(`document.querySelector("[data-sbb=timetravel]").click(), 1`);
+  check(await A.until(`${D}.hidden && !document.querySelector("[data-sbb=tt]").hidden`, 10000), "TimeTravel closes it");
+  await look("long", 200, 200);
+  const rt2 = await rect("long");
+  await click(rt2.left + 40, rt2.top + 60);
+  check(!(await open()), "…and a click in TimeTravel opens nothing");
+  await A.ev(`document.querySelector("[data-sbb=ttclose]")?.click(), 1`);
+  await A.until(`document.querySelector("[data-sbb=tt]").hidden`, 5000);
 
   // ---- in Edit: O opens it (the focus goes to it), it follows the selection, its Edit button writes the note in place
   await A.ev("window.sagebrush.board.editing(true), 1");
@@ -270,6 +307,14 @@ try {
   check(await A.until(`!${D}.hidden`, 3000), "O, one note selected: its drawer");
   check(await A.ev(`document.activeElement === ${D}.querySelector("h2")`), "…opened from the keyboard, the focus is on its heading");
   check(await A.ev(`!${D}.querySelector(".sbb-drawer-edit").hidden`), "…and in Edit it has an Edit button");
+  // keys pressed in the drawer are its own: never the board's shortcuts on the note selected
+  const before = JSON.stringify(await A.ev("(() => { const n = window.sagebrush.board.snapshot().doc.pages[0].nodes.find((x) => x.id === 'long'); return n ? [n.x, n.y] : null; })()"));
+  for (const k of ["ArrowDown", "ArrowRight", "Delete", "Backspace"]) await key(k);
+  await key("a", { modifiers: 2, code: "KeyA" });
+  await sleep(300);
+  const after = JSON.stringify(await A.ev("(() => { const n = window.sagebrush.board.snapshot().doc.pages[0].nodes.find((x) => x.id === 'long'); return n ? [n.x, n.y] : null; })()"));
+  check(after !== "null" && after === before, "arrows, Delete, Backspace and Ctrl+A in the drawer neither move nor delete the note", [before, after]);
+  check(await open() && (await heading()) === "Long note", "…and the drawer stays on it");
   const rs = await rect("code");
   await click(rs.left + 30, rs.top + 12);
   check(await A.until(`${D}.querySelector("h2").textContent === "Many lines"`, 3000), "another note selected: the drawer follows it", await heading());
@@ -281,7 +326,22 @@ try {
   check(await A.until(`/written in place/.test(${D}.querySelector(".sbb-drawer-body").textContent)`, 5000), "what was written in place, kept, shows in the drawer", await drawerText());
   await A.ev(`${D}.querySelector("h2").focus(), 1`);
   await esc();
-  check(!(await open()) && await A.ev(`!document.querySelector("[data-sbb=drawer]").contains(document.activeElement)`), "Esc in the drawer closes it, and the focus leaves it");
+  check(!(await open()) && await A.ev(`document.activeElement === document.querySelector(".sbb .board")`), "Esc in the drawer closes it, the focus back on the board", await A.ev("document.activeElement?.className"));
+  // the note deleted here (Delete, on the board), then undone: said, then shown again
+  await look("linked", 200, 200);
+  const rx = await rect("linked");
+  await click(rx.left + 30, rx.top + 12);
+  await key("o", { code: "KeyO", text: "o" });
+  check(await A.until(`!${D}.hidden && ${D}.querySelector("h2").textContent === "A link"`, 3000), "(its drawer, by O)");
+  await A.ev("document.querySelector('.sbb .board').focus(), 1");
+  await key("Delete");
+  check(await A.until(`/This note was deleted/.test(${D}.querySelector(".sbb-drawer-body").textContent)`, 5000), "the note deleted here: the drawer says so", await drawerText());
+  await key("z", { modifiers: 2, code: "KeyZ" });
+  check(await A.until(`/Below, a link/.test(${D}.querySelector(".sbb-drawer-body").textContent)`, 5000), "…undone: the drawer shows it again", await drawerText());
+  // a note that is no longer one the drawer shows (made a question): closed, not said to be deleted
+  await A.ev(`window.sagebrush.board.edit((d) => { const n = d.pages[0].nodes.find((x) => x.id === "linked"); n.kind = "ask"; n.input = "text"; delete n.ref; }).then(() => 1)`);
+  check(await A.until(`${D}.hidden`, 5000), "the note made a question: the drawer closes (it isn't deleted)", await drawerText());
+  await A.ev(`window.sagebrush.board.edit((d) => { const n = d.pages[0].nodes.find((x) => x.id === "linked"); delete n.kind; delete n.input; n.ref = "#long"; }).then(() => 1)`);
   await A.ev("window.sagebrush.board.editing(false), 1");
 
   // ---- on a phone: a sheet at the bottom; dragged down, closed
@@ -294,6 +354,10 @@ try {
   const sheet = await A.ev(`(() => { const r = ${D}.getBoundingClientRect(), b = document.querySelector(".sbb").getBoundingClientRect(); return { cls: ${D}.classList.contains("sbb-sheet"), left: r.left, width: r.width, bottom: r.bottom, height: r.height, boardBottom: b.bottom, boardHeight: b.height }; })()`);
   check(sheet.cls && sheet.left === 0 && Math.round(sheet.width) === 390 && Math.abs(sheet.bottom - sheet.boardBottom) <= 1 && Math.abs(sheet.height - 0.45 * sheet.boardHeight) <= 2, "…as a sheet at the bottom of the board, its whole width, 45% of its height", sheet);
   check((await A.ev("window.board.insets.bottom")) >= sheet.height && (await A.ev("window.board.insets.right")) === 0, "…the camera keeping clear of it below", await A.ev("window.board.insets"));
+  await A.ev(`${D}.querySelector(".sbb-drawer-grip").focus(), 1`);
+  const h0 = Math.round(sheet.height);
+  await key("ArrowUp");
+  check(Math.round(await A.ev(`${D}.getBoundingClientRect().height`)) === h0 + 16 && (await A.ev(`${D}.querySelector(".sbb-drawer-grip").getAttribute("aria-orientation")`)) === "horizontal", "its grip, a horizontal separator: ↑ makes it 16 px taller", await A.ev(`${D}.getBoundingClientRect().height`));
   const sg = await A.ev(`(() => { const r = ${D}.querySelector(".sbb-drawer-grip").getBoundingClientRect(); return { x: r.left + r.width / 2, y: r.top + r.height / 2 }; })()`);
   await mouse("mousePressed", sg.x, sg.y);
   for (let k = 1; k <= 6; k++) await mouse("mouseMoved", sg.x, sg.y + 50 * k);
@@ -301,6 +365,20 @@ try {
   await sleep(150);
   check(!(await open()), "dragged down, the sheet closes");
   check((await A.ev("window.board.insets.bottom")) < 100, "…and the camera has the board again", await A.ev("window.board.insets"));
+  // a finger: a tap opens it; a double tap is the board's (it flies there), and opens nothing
+  await A.send("Emulation.setTouchEmulationEnabled", { enabled: true, maxTouchPoints: 2 });
+  const tap = async (x, y) => { await A.send("Input.dispatchTouchEvent", { type: "touchStart", touchPoints: [{ x, y }] }); await A.send("Input.dispatchTouchEvent", { type: "touchEnd", touchPoints: [] }); };
+  await look("long", 60, 120);
+  const rt3 = await rect("long");
+  await tap(rt3.left + 30, rt3.top + 50);
+  await sleep(150);
+  await tap(rt3.left + 30, rt3.top + 50);
+  await sleep(600);
+  check(!(await open()), "a double tap on a note opens nothing");
+  await look("long", 60, 120);
+  const rt4 = await rect("long");
+  await tap(rt4.left + 30, rt4.top + 50);
+  check(await A.until(`!${D}.hidden`, 3000), "a tap opens it");
 
   check(!A.errors.length && !B.errors.length, "no errors", [...A.errors, ...B.errors]);
 } catch (e) {

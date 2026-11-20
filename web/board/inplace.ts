@@ -41,6 +41,8 @@ export interface InPlaceHost {
   addSame(id: string): Promise<void>;
   /** the item's drawer (its whole content beside the board): the toolbar's button; null: none */
   openDrawer: ((id: string) => void) | null;
+  /** whether this item has one (a note) */
+  canOpenDrawer(id: string): boolean;
   images: ImageStore | null;
 }
 
@@ -401,7 +403,7 @@ export class InPlace {
         tool("ip-link", "Add a link", "link", () => this.addPart("ref"), true),
       );
     }
-    if (!this.group && this.host.openDrawer) { const open = this.host.openDrawer; b.append(tool("ip-drawer", "Open in the panel on the right: all of it, at full size", "drawer", () => open(this.id))); }
+    if (!this.group && this.host.openDrawer && this.host.canOpenDrawer(this.id)) { const open = this.host.openDrawer; b.append(tool("ip-drawer", "Open in the panel on the right: all of it, at full size", "drawer", () => open(this.id))); }
     b.append(sw, tool("ip-delete", "Delete", "trash", () => this.del()));
     if (!this.group && this.host.docs) b.append(this.docSearch(this.host.docs));
     // (a press on the toolbar leaves the focus, and the keyboard, where they are)
