@@ -144,16 +144,19 @@ try {
   //  (each folder is a page of its own, so nothing of the folder before it carries over)
   ok(await go("/gh/o/math-notebooks/tree/main/examples/noreadme1") && await until(`[...document.querySelectorAll("#files li")].some((l) => l.textContent.includes("a.txt"))`), "a folder with no README: its list");
   await sleep(1500);
-  ok(await ev(`document.querySelector("#readme").hidden && document.querySelector("#readme").textContent === ""`), "…and no README shown, not another folder's", await text("#readme"));
+  // (and none asked for: no README fetched for this page, so none can be drawn late either)
+  const readmeAsked = () => asked.filter((a) => /^raw\.githubusercontent\.com\/.*\/readme\.md$/i.test(a));
+  ok(await ev(`document.querySelector("#readme").hidden && document.querySelector("#readme").textContent === ""`) && readmeAsked().length === 0, "…and no README shown, not another folder's, nor fetched", { shown: await text("#readme"), asked: readmeAsked() });
   ok(await go("/gh/o/math-notebooks/tree/main/examples/zeta-only") && await until(`!document.querySelector("#readme").hidden`), "a folder with its own README, after another as long");
   ok((await text("#readme")).includes("Zeta's own README") && !(await text("#readme")).includes("companion-notebook"), "…shows its own", await text("#readme"));
   ok(await go("/gh/o/math-notebooks/tree/main/examples/notebooks") && await until(`!document.querySelector("#readme").hidden`) && (await text("#readme")).includes("companion-notebook"), "(examples/notebooks still shows its own)");
   await ev(`[...document.querySelectorAll("#files a")].find((a) => a.textContent === "../").click(), 1`);
   ok(await until(`location.pathname === "/gh/o/math-notebooks/tree/main/examples" && document.querySelectorAll("#files li").length > 0`), "(its ../ link: up to examples)");
+  asked.length = 0;
   await ev(`[...document.querySelectorAll("#files a")].find((a) => a.textContent === "noreadme1/").click(), 1`);
   ok(await until(`location.pathname.endsWith("/examples/noreadme1") && [...document.querySelectorAll("#files li")].some((l) => l.textContent.includes("a.txt"))`), "(then into noreadme1/, by its link)");
   await sleep(1500);
-  ok(await ev(`document.querySelector("#readme").hidden && document.querySelector("#readme").textContent === ""`), "from a folder with a README to one without, by its links: no README shown", await text("#readme"));
+  ok(await ev(`document.querySelector("#readme").hidden && document.querySelector("#readme").textContent === ""`) && readmeAsked().length === 0, "from a folder with a README to one without, by its links: no README shown, nor fetched", { shown: await text("#readme"), asked: readmeAsked() });
 
   // ---- a notebook opened from the folder's list: brought into view (its bar at the window's top), focus on its name;
   // in a short window, where it opens below the list and the README
