@@ -85,9 +85,10 @@ const session = new ChatSession({
   pairing: () => pairing,
   demo: (prompt, emit) => startFakeTurn(prompt, emit, speed()),
   mayDemo: (t) => mayDemo(t),
-  emitted(thread, d) {
+  emitted(thread, d, replayed) {
     if (d.type === "artifact") {
-      openArtifact = (d as { id: string }).id;
+      // (one replayed from the agent's log after a reconnect is recorded, but never moves the pane)
+      if (!replayed) openArtifact = (d as { id: string }).id;
       // (a notebook the agent wrote: which cells, as it wrote them, for the written-by label)
       const art = d as { kind?: string; path?: string };
       if (art.kind === "notebook" && art.path && workspace) {
@@ -405,9 +406,17 @@ const shownHost = () => hosts.get(hostKey(current().id, openArtifact ?? ""));
 async function mayLeaveThread(): Promise<boolean> {
   const from = current().id;
   if (!(await mayClosePane(from)) || current().id !== from) return false;
-  // (its hosts close first: one that can't keep its content keeps the thread)
-  return (await releaseHosts(from)) && current().id === from;
+  // (its hosts close first: one that can't keep its content keeps the thread; meanwhile the thread is being left, so
+  //  an agent's run its pane let go knows it was a switch, not a close (paneRun's `left`))
+  leavingThread = from;
+  try {
+    return (await releaseHosts(from)) && current().id === from;
+  } finally {
+    leavingThread = null;
+  }
 }
+/** The thread being left while its hosts are let go (mayLeaveThread), else null. */
+let leavingThread: string | null = null;
 
 /** Before a pane or thread closes: a running cell is stopped only if the person says so. */
 async function mayClosePane(threadId: string | null): Promise<boolean> {
@@ -860,7 +869,7 @@ function mountTexFrame(path: string, box: HTMLElement): FileHost {
 }
 
 function renderComposer() {
-  renderComposerState(isRunning(current()), queues.get(current().id)?.length ?? 0);
+  renderComposerState(isRunning(current()), queues.get(current().id)?.length ?? 0, session.isAway(current()));
   renderConn();
 }
 
@@ -959,7 +968,7 @@ function renderConn() {
   for (const k of ["aria-busy", "aria-disabled"]) rememberBusy ? rb.setAttribute(k, "true") : rb.removeAttribute(k);
   $("#conn-x").hidden = !b || b.kind === "restoring";
   // Send: inert while not connected in a chat the demo may not answer, never `disabled` (C1), described by what says why
-  const send = $("#send"), off = inert(current());
+  const send = $("#send"), off = !session.canSend(current());
   hint.hidden = !(off && !b);
   if (off) {
     send.setAttribute("aria-disabled", "true");
@@ -1225,7 +1234,7 @@ function paneRun(ref: string, path: string, gone: () => void, from?: { conversat
   const turnId = from.turnId;
   const mine = () => current().id === thread.id && runningTurn(thread)?.turn_id === turnId;
   // (the person went to another chat, the call's turn still running: before any cell, today's run, not a stop)
-  const left = () => current().id !== thread.id && runningTurn(thread)?.turn_id === turnId;
+  const left = () => (current().id !== thread.id || leavingThread === thread.id) && runningTurn(thread)?.turn_id === turnId;
   // (a pane that can't run it, known now: today's run, and nothing added or shown)
   if (hosts.get(hostKey(thread.id, path))?.nb?.canRun(ref) === false) return null;
   const shownOther = document.body.classList.contains("has-artifact") && openArtifact !== null && openArtifact !== path;
@@ -1340,6 +1349,8 @@ const agentRuns = (ws: Workspace) => agentRunsFor(ws as any, {
   more: () => ({ inPage: paneRun, ...(/^(localhost|127\.0\.0\.1)$/.test(location.hostname) && typeof (window as any).__runHold === "function" ? { hold: (st: string) => (window as any).__runHold(st) } : {}) }),
 });
 
+// (the current pairing's listener for the agent's messages, removed when another pairing replaces it)
+let offAgent: (() => void) | null = null;
 function mountPairing(ws: Workspace) {
   agentUi = mountAgentPairing(ws, {
     program: "sagebrush-agent",
@@ -1362,7 +1373,10 @@ function mountPairing(ws: Workspace) {
     onPairing(p) {
       pairing = p;
       cards.clear();
-      p.onNotification((m, params) => session.onAgent(m, params));
+      // (only while this pairing is the page's: a late message from one it replaced changes nothing; the replaced
+      //  one's listener goes too)
+      offAgent?.();
+      offAgent = p.onNotification((m, params) => { if (pairing === p) session.onAgent(m, params, p); });
       let granted = false;
       p.onChange(() => {
         cards.refresh(); // (a pairing that closed or changed child: Allows waiting for a digest for it go)
@@ -1376,6 +1390,8 @@ function mountPairing(ws: Workspace) {
         if (p.state === "paired" || p.state === "granted") connectedHere = true;
         if (p.state === "granted" && !granted) {
           granted = true;
+          // (what this page missed while it was away, from the agent's log; an agent without one: away turns end)
+          session.resume();
           if (connBar) setConn(null);
           if (connectFrom) {
             connectFrom = null;
@@ -1394,8 +1410,9 @@ function mountPairing(ws: Workspace) {
           else setConn({ kind: "lost", alert: true, action: agentUi?.canReconnect ? "reconnect" : "connect" });
         }
         if (p.state === "closed" && pairing === p) {
-          // (turns the agent can no longer finish end here, as interrupted)
-          session.endLive();
+          // (with an agent that keeps a log, its running turns are away until the page is paired again; else they end
+          //  here, as interrupted)
+          session.endLive(!!p.hello?.features?.includes("chat.resume"));
         }
         renderHeader();
         renderComposer();
