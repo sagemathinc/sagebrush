@@ -115,9 +115,10 @@ def call_hex_checks(r):
         n += 1
 
     # (exact types only: a str subclass whose translate hides JSON syntax, one
-    # that spoofs __eq__/__hash__ to match a cached op name, and str-subclass
-    # fields, are refused before the bridge is called; an unhashable op name
-    # is a ValueError too)
+    # that spoofs __eq__/__hash__ to match a cached op name, one that also
+    # claims str through a __class__ property (as fn, a and b), and
+    # str-subclass fields, are refused before the bridge is called; an
+    # unhashable op name is a ValueError too)
     class Evil(str):
         def translate(self, table):
             return ""
@@ -129,6 +130,14 @@ def call_hex_checks(r):
 
         def __hash__(self):
             return hash("poly_mul")
+    class Masked(str):
+        # (claims to be str through __class__, and hides its contents from
+        # translate: only type() sees through it)
+        __class__ = property(lambda self: str)
+
+        def translate(self, table):
+            return ""
+
     # (the real name cached first; on CPython the spoof is then "in" the cache)
     E.call_hex("poly_mul", "1", "1")
     assert "poly_mul" in E._HEX_OPS
@@ -140,7 +149,8 @@ def call_hex_checks(r):
             return '{"ok":""}'
     setattr(E, name, Spy())
     try:
-        for fn, a, b in [(Evil('poly_mul","x'), "1", "1"), (Evil("poly_mul"), "1", "1"), (Spoof('poly_mul","x'), "1", "1"), ("poly_mul", Evil('1","x":"'), "1"),
+        for fn, a, b in [(Evil('poly_mul","x'), "1", "1"), (Evil("poly_mul"), "1", "1"), (Spoof('poly_mul","x'), "1", "1"), (Masked('poly_mul","x'), "1", "1"),
+                         ("poly_mul", Masked('1","x":"'), "1"), ("poly_mul", "1", Masked('1","x":"')), ("poly_mul", Evil('1","x":"'), "1"),
                          ("poly_mul", "1", Evil("1")), (["poly_mul"], "1", "1"), ({}, "1", "1"), (None, "1", "1")]:
             try:
                 E.call_hex(fn, a, b)

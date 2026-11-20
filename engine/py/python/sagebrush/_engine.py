@@ -67,15 +67,16 @@ def call_hex(fn, a, b):
     concatenation.  An ok reply is sliced only when it is exactly
     `{"ok":"..."}` with a value of the same characters; any other reply goes
     through reply(), so errors raise exactly as call()'s."""
-    # (exact types: a str subclass could override translate; checked before
-    # the cache, so any other fn is a ValueError)
-    if fn.__class__ is not str:
+    # (exact types, read by type(), which a subclass can't override, unlike
+    # __class__: a str subclass could override translate, __eq__ or __hash__;
+    # checked before the cache, so any other fn is a ValueError)
+    if type(fn) is not str:
         raise ValueError("call_hex: the op name is not a str")
     if fn not in _HEX_OPS:
         if not fn or fn.translate(_NAME) or fn in _LIMITED:
             raise ValueError("call_hex: %r is not an op it can call" % (fn,))
         _HEX_OPS.add(fn)
-    if a.__class__ is not str or b.__class__ is not str or a.translate(_HEX) or b.translate(_HEX):
+    if type(a) is not str or type(b) is not str or a.translate(_HEX) or b.translate(_HEX):
         raise ValueError("call_hex: a field is not a hex token list")
     text = _native.call('{"fn":"' + fn + '","a":"' + a + '","b":"' + b + '"}')
     # (9 bytes at least: `{"ok":"}` alone must not pass as an empty value)
