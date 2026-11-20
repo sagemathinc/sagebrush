@@ -131,7 +131,7 @@ fn canonical(d: &str, zero_ok: bool) -> bool {
 }
 
 /// A token's parts: (negative, numerator digits, denominator digits).
-fn parts(tok: &str) -> (bool, &str, &str) {
+pub(crate) fn parts(tok: &str) -> (bool, &str, &str) {
     let (n, d) = match tok.split_once('/') {
         Some((n, d)) => (n, d),
         None => (tok, "1"),
@@ -161,11 +161,27 @@ fn nibble(c: u8) -> u64 {
 /// ("-0" refused), at most 2^24 of them (the request bounds them), each part
 /// at most zmul's TOKEN_DIGITS_MAX digits.  One pass; nothing allocated.
 pub fn scan(text: &str) -> Result<Factor<'_>, String> {
+    scan_with(text, false)
+}
+
+/// [`scan`] for integer tokens only, `-?(0|[1-9a-f][0-9a-f]*)` (zpoly_divrem's
+/// grammar, poly_mul's).
+pub fn scan_ints(text: &str) -> Result<Factor<'_>, String> {
+    scan_with(text, true)
+}
+
+fn scan_with(text: &str, ints: bool) -> Result<Factor<'_>, String> {
     let mut f = Factor { text, tokens: 0, all_zero: true, num_bits: 0, n_max: 0, d_max: 0, sd: 0, n_sum: 0, d_sum: 0, a1: 0, a2: 0, nz_tokens: 0, nz_d_sum: 0, nz_a1: 0, nz_a2: 0 };
     if text.is_empty() {
         return Ok(f);
     }
-    let bad = |tok: &str| format!("{:?} is not a hex rational (-?(0|[1-9a-f][0-9a-f]*)(/[1-9a-f][0-9a-f]*)?)", preview(tok, 40));
+    let bad = |tok: &str| {
+        if ints {
+            format!("{:?} is not a hex integer (-?(0|[1-9a-f][0-9a-f]*))", preview(tok, 40))
+        } else {
+            format!("{:?} is not a hex rational (-?(0|[1-9a-f][0-9a-f]*)(/[1-9a-f][0-9a-f]*)?)", preview(tok, 40))
+        }
+    };
     for (i, tok) in text.split(',').enumerate() {
         if i & 0xfff == 0 {
             sagebrush_interrupt::check_coarse();
@@ -174,7 +190,7 @@ pub fn scan(text: &str) -> Result<Factor<'_>, String> {
             return Err(format!("more than {} coefficients", zmul::REQUEST_MAX));
         }
         let (neg, n, d) = parts(tok);
-        if !canonical(n, true) || (neg && n == "0") || !canonical(d, false) {
+        if (ints && tok.contains('/')) || !canonical(n, true) || (neg && n == "0") || !canonical(d, false) {
             return Err(bad(tok));
         }
         if n.len() > zmul::TOKEN_DIGITS_MAX || d.len() > zmul::TOKEN_DIGITS_MAX {
@@ -259,7 +275,7 @@ pub fn admit_a(a: &Factor, b: &Factor, r: u64, caps: &Caps) -> Result<Option<Pla
 }
 
 /// Normalized length of x[..n].
-fn norm(x: &[u64], n: usize) -> usize {
+pub(crate) fn norm(x: &[u64], n: usize) -> usize {
     let mut n = n;
     while n > 0 && x[n - 1] == 0 {
         n -= 1;
@@ -269,7 +285,7 @@ fn norm(x: &[u64], n: usize) -> usize {
 
 /// A canonical hex magnitude into dst's first limbs (little-endian): its
 /// normalized length.  Charges limbs + 1.
-fn parse_hex(digits: &str, dst: &mut [u64], m: &mut Meter) -> Result<usize, Fault> {
+pub(crate) fn parse_hex(digits: &str, dst: &mut [u64], m: &mut Meter) -> Result<usize, Fault> {
     let b = digits.as_bytes();
     let n = b.len().div_ceil(16);
     if n > dst.len() {
@@ -285,7 +301,7 @@ fn parse_hex(digits: &str, dst: &mut [u64], m: &mut Meter) -> Result<usize, Faul
 }
 
 /// dst[..src.len()] = src.  Charges len + 1.
-fn copy(dst: &mut [u64], src: &[u64], m: &mut Meter) -> Result<(), Fault> {
+pub(crate) fn copy(dst: &mut [u64], src: &[u64], m: &mut Meter) -> Result<(), Fault> {
     if src.len() > dst.len() {
         return Err(Fault::Invariant);
     }
@@ -305,7 +321,7 @@ fn clear(x: &mut [u64], n: usize, m: &mut Meter) -> Result<(), Fault> {
 /// of the shorter factor, each row's columns in blocks of 2^12): the
 /// product's normalized length.  Charges the fill, then each block's
 /// columns and one per row: exactly `schoolbook_work(x.len(), y.len())`.
-fn mul_into(x: &[u64], y: &[u64], out: &mut [u64], m: &mut Meter) -> Result<usize, Fault> {
+pub(crate) fn mul_into(x: &[u64], y: &[u64], out: &mut [u64], m: &mut Meter) -> Result<usize, Fault> {
     const BLOCK: usize = 1 << 12;
     let n = x.len() + y.len();
     if n > out.len() {
@@ -408,7 +424,7 @@ pub fn lcms(a: &Factor, b: &Factor, plan: &PlanA) -> Result<Lcms, String> {
     })
 }
 
-fn bits(x: &[u64]) -> u64 {
+pub(crate) fn bits(x: &[u64]) -> u64 {
     match x.last() {
         None => 0,
         Some(&t) => 64 * x.len() as u64 - t.leading_zeros() as u64,

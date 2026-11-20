@@ -597,7 +597,7 @@ fn error_json(e: String) -> Value {
 /// The row of [`series_ops::OPS`] named exactly by the request's last
 /// top-level "fn", if any.
 fn series_op(req: &str) -> Option<&'static series_ops::SeriesOp> {
-    static NAMES: [&str; 7] = [series_ops::OPS[0].name, series_ops::OPS[1].name, series_ops::OPS[2].name, series_ops::OPS[3].name, series_ops::OPS[4].name, series_ops::OPS[5].name, series_ops::OPS[6].name];
+    static NAMES: [&str; 8] = [series_ops::OPS[0].name, series_ops::OPS[1].name, series_ops::OPS[2].name, series_ops::OPS[3].name, series_ops::OPS[4].name, series_ops::OPS[5].name, series_ops::OPS[6].name, series_ops::OPS[7].name];
     last_fn(req, &NAMES).map(|i| &series_ops::OPS[i])
 }
 

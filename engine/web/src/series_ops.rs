@@ -31,12 +31,14 @@
 //! values in hex.  poly_mul gives the product's coefficients in hex, trailing
 //! zeros dropped (the zero polynomial is ""); qpoly_mul the same, each
 //! coefficient `[-]num[/den]` in lowest terms; qpoly_clear one factor's
-//! denominators cleared, `{"d": d, "c": "c0,c1,..."}`.  qpoly_mul's admission has
+//! denominators cleared, `{"d": d, "c": "c0,c1,..."}`; zpoly_divrem the
+//! quotient and remainder in Z[x] by Sage's rule, `{"q": ..., "r": ...}`
+//! (its work metered, its memory on a word ledger).  qpoly_mul's admission has
 //! two phases: the lcms' memory from the scans, their work metered (a named
 //! refusal at its limit); then the product's closed forms from the actual
 //! lcms, before any of its allocations.
 
-use sagebrush_arith::{qpoly, zmul, zseries};
+use sagebrush_arith::{pdivrem, qpoly, zmul, zseries};
 use serde_json::json;
 
 /// One row of the series ops' table: the op's caps and its path.
@@ -63,7 +65,7 @@ pub const SMALL_MAX_REQUEST: usize = 256;
 // (the peaks: the largest of the closed forms over the admitted corners, 53.3
 // MiB for the series ops and 29.0 MiB for sigma_table, with room; the
 // corner test in tests/series_ops.rs checks them)
-pub static OPS: [SeriesOp; 7] = [
+pub static OPS: [SeriesOp; 8] = [
     SeriesOp { name: "series_mul", max_request: SERIES_MAX_REQUEST, peak: 64 * MIB, work: zseries::WORK_MAX, run: series_mul },
     SeriesOp { name: "series_pow", max_request: SERIES_MAX_REQUEST, peak: 64 * MIB, work: zseries::WORK_MAX, run: series_pow },
     SeriesOp { name: "series_euler", max_request: SMALL_MAX_REQUEST, peak: 8 * MIB, work: zseries::WORK_MAX, run: series_euler },
@@ -74,6 +76,9 @@ pub static OPS: [SeriesOp; 7] = [
     SeriesOp { name: "qpoly_mul", max_request: zmul::REQUEST_MAX as usize, peak: zmul::PEAK_MAX, work: zmul::WORK_MAX, run: qpoly_mul },
     // (one factor's denominators cleared: qpoly's phase A and scaling)
     SeriesOp { name: "qpoly_clear", max_request: zmul::REQUEST_MAX as usize, peak: zmul::PEAK_MAX, work: zmul::WORK_MAX, run: qpoly_clear },
+    // (division with remainder in Z[x], Sage's rule: the work metered and the
+    // memory on a word ledger, both within these caps)
+    SeriesOp { name: "zpoly_divrem", max_request: zmul::REQUEST_MAX as usize, peak: zmul::PEAK_MAX, work: zmul::WORK_MAX, run: zpoly_divrem },
 ];
 
 /// The admitted request's path: run, then the reply text (an error reply
@@ -389,4 +394,15 @@ fn qpoly_clear(req: &str, op: &SeriesOp) -> Result<String, String> {
     let pre = |e: String| format!("{}: {}", name, e);
     let ca = qpoly::scan(a).map_err(pre)?;
     qpoly::clear_reply(&ca, req.len() as u64, &qpoly::CAPS).map_err(pre)
+}
+
+/// zpoly_divrem: {a, b} -> {"q": q, "r": r} with a = q b + r in Z[x] by
+/// Sage's rule (hex integers, constant first; trailing zeros dropped).
+fn zpoly_divrem(req: &str, op: &SeriesOp) -> Result<String, String> {
+    let name = op.name;
+    let [a, b] = fields(req, ["a", "b"], name)?;
+    let (a, b) = (need(get_str(a, "a", name)?, "a", name)?, need(get_str(b, "b", name)?, "b", name)?);
+    let pre = |e: String| format!("{}: {}", name, e);
+    let (ca, cb) = (qpoly::scan_ints(a).map_err(pre)?, qpoly::scan_ints(b).map_err(pre)?);
+    pdivrem::reply_z(&ca, &cb, req.len() as u64, &qpoly::CAPS).map_err(pre)
 }

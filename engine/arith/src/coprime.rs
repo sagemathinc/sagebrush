@@ -390,6 +390,114 @@ pub fn divexact_in_place(x: &mut [u64], nx: usize, y: &mut [u64], ny: usize, q: 
     Ok(norm(q, nx - ny + 1))
 }
 
+/// The units of [`divrem_in_place`] for an `lx`-limb by an `ly`-limb
+/// division, `1 <= ly <= lx`: [`quot_work`]`(lx, ly)` plus the remainder's
+/// unshift and restore, `2 ly + lx + 1` (the sibling of `rem_in_place`'s);
+/// `None` on overflow or outside that range.
+pub const fn divrem_work(lx: u64, ly: u64) -> Option<u64> {
+    let q = ck!(quot_work(lx, ly));
+    ck!(q.checked_add(ck!(ly.checked_mul(2)))).checked_add(ck!(lx.checked_add(1)))
+}
+
+/// x = q y + r with 0 <= r < y (Knuth D keeping both, magnitudes), for `1
+/// <= ny <= nx`, y normalized, x with room for `nx + 1` limbs and q for `nx
+/// - ny + 1`.  The quotient goes to q; the remainder is left in x's first
+/// limbs (everything above it zero); y is restored.  Returns (the
+/// quotient's length, the remainder's).  Every unit is charged before the
+/// work it counts: at most [`divrem_work`]`(nx, ny)`.
+pub fn divrem_in_place(x: &mut [u64], nx: usize, y: &mut [u64], ny: usize, q: &mut [u64], m: &mut Meter) -> Result<(usize, usize), Fault> {
+    if ny == 0 || nx < ny || x.len() <= nx || y.len() < ny || y[ny - 1] == 0 || q.len() < nx - ny + 1 {
+        return Err(Fault::Invariant);
+    }
+    m.add(nx + ny + 2)?;
+    if ny == 1 {
+        let d = u128::from(y[0]);
+        let mut r = 0u128;
+        for j in (0..nx).rev() {
+            m.add(6)?;
+            let t = (r << 64) | u128::from(x[j]);
+            q[j] = (t / d) as u64;
+            r = t % d;
+            x[j] = 0;
+        }
+        m.add(nx + 2)?;
+        x[nx] = 0;
+        x[0] = r as u64;
+        return Ok((norm(q, nx), usize::from(r != 0)));
+    }
+    let s = y[ny - 1].leading_zeros();
+    if s > 0 {
+        for i in (1..ny).rev() {
+            y[i] = (y[i] << s) | (y[i - 1] >> (64 - s));
+        }
+        y[0] <<= s;
+        x[nx] = x[nx - 1] >> (64 - s);
+        for i in (1..nx).rev() {
+            x[i] = (x[i] << s) | (x[i - 1] >> (64 - s));
+        }
+        x[0] <<= s;
+    } else {
+        x[nx] = 0;
+    }
+    let (y1, y2) = (u128::from(y[ny - 1]), u128::from(y[ny - 2]));
+    for j in (0..=nx - ny).rev() {
+        m.add(2 * ny + 4)?;
+        let top = (u128::from(x[j + ny]) << 64) | u128::from(x[j + ny - 1]);
+        let mut qh = top / y1;
+        let mut rh = top % y1;
+        while qh >> 64 != 0 || qh * y2 > ((rh << 64) | u128::from(x[j + ny - 2])) {
+            qh -= 1;
+            rh += y1;
+            if rh >> 64 != 0 {
+                break;
+            }
+        }
+        let (mut borrow, mut carry) = (0u64, 0u128);
+        for i in 0..ny {
+            let p = qh * u128::from(y[i]) + carry;
+            carry = p >> 64;
+            let (d, b1) = x[j + i].overflowing_sub(p as u64);
+            let (d, b2) = d.overflowing_sub(borrow);
+            x[j + i] = d;
+            borrow = u64::from(b1) + u64::from(b2);
+        }
+        let (d, b1) = x[j + ny].overflowing_sub(carry as u64);
+        let (d, b2) = d.overflowing_sub(borrow);
+        x[j + ny] = d;
+        if b1 || b2 {
+            qh -= 1;
+            let mut c = 0u128;
+            for i in 0..ny {
+                let t = u128::from(x[j + i]) + u128::from(y[i]) + c;
+                x[j + i] = t as u64;
+                c = t >> 64;
+            }
+            x[j + ny] = x[j + ny].wrapping_add(c as u64);
+        }
+        q[j] = qh as u64;
+    }
+    // (the remainder, shifted, is x[..ny]; unshift it and y, zero the rest)
+    m.add(2 * ny + nx + 1)?;
+    if s > 0 {
+        for i in 0..ny - 1 {
+            x[i] = (x[i] >> s) | (x[i + 1] << (64 - s));
+        }
+        x[ny - 1] >>= s;
+        for i in 0..ny - 1 {
+            y[i] = (y[i] >> s) | (y[i + 1] << (64 - s));
+        }
+        y[ny - 1] >>= s;
+    }
+    for v in &mut x[ny..=nx] {
+        *v = 0;
+    }
+    let r = norm(x, ny);
+    if !less(x, r, y, ny) {
+        return Err(Fault::Invariant);
+    }
+    Ok((norm(q, nx - ny + 1), r))
+}
+
 fn gcd_u64(mut a: u64, mut b: u64) -> u64 {
     while b != 0 {
         (a, b) = (b, a % b);

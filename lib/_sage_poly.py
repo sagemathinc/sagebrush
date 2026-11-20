@@ -1166,6 +1166,11 @@ class Polynomial:
         o = self._coerce(other)
         if o is None or not o._c:
             raise ZeroDivisionError("division by zero polynomial")
+        if self._ring._base is ZZ and o._ring._base is ZZ:
+            # (Sage's rule in ZZ[x], in the engine: sagebrush.poly.zdivrem)
+            from sagebrush import poly
+            q, r = poly.zdivrem(self._c, o._c)
+            return Polynomial(self._ring, q), Polynomial(self._ring, r)
         r = [_F(a) for a in self._c]
         d = [_F(a) for a in o._c]
         q = [_F(0)] * max(len(r) - len(d) + 1, 0)
@@ -1176,26 +1181,6 @@ class Polynomial:
                 for j, b in enumerate(d):
                     r[i + j] -= c * b
         qq, rr = Polynomial(self._qq_ring(), q), Polynomial(self._qq_ring(), r[: len(d) - 1])
-        if self._ring._base is ZZ and o._ring._base is ZZ:
-            if all(isinstance(a, int) for a in qq._c + rr._c):
-                qq, rr = Polynomial(self._ring, qq._c), Polynomial(self._ring, rr._c)
-            else:
-                # Sage's division in ZZ[x] by a non-monic divisor: from the
-                # top down to the divisor's degree, a coefficient at least
-                # the leading coefficient in size gives the floor of their
-                # quotient, a smaller one none, and the remainder keeps what
-                # is left (x.quo_rem(2*x + 1) is (0, x))
-                r = list(self._c)
-                b = list(o._c)
-                lb, db = b[-1], len(b) - 1
-                q = [0] * max(len(r) - db, 0)
-                for i in range(len(r) - 1, db - 1, -1):
-                    if abs(r[i]) >= abs(lb):
-                        c = r[i] // lb
-                        q[i - db] = c
-                        for j, bj in enumerate(b):
-                            r[i - db + j] -= c * bj
-                qq, rr = Polynomial(self._ring, q), Polynomial(self._ring, r)
         return qq, rr
 
     def __floordiv__(self, other):

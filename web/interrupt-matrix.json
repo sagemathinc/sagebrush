@@ -996,6 +996,13 @@
    "owner": "modular symbols"
   },
   {
+   "id": "engineCall:zpoly_divrem",
+   "transport": "engineCall:zpoly_divrem",
+   "status": "planned",
+   "family": "E5 polynomials",
+   "owner": "polynomial factorization"
+  },
+  {
    "id": "symCall:add",
    "transport": "symCall:add",
    "status": "cheap-candidate",

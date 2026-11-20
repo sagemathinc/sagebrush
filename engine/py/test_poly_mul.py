@@ -172,6 +172,125 @@ def qclear_checks(r):
     return n
 
 
+def zdivrem_checks(r):
+    """sagebrush.poly.zdivrem (the engine's zpoly_divrem): Sage's rule in
+    Z[x], against ZZ[t].quo_rem in real Sage (the 26 hand-picked cases of the
+    engine's oracle, recorded); and the exact-type pins of qclear at this
+    entry: bool, int subclasses spoofing __index__, __int__, __format__ or
+    __class__, and classes whose metaclass hooks __hash__, __eq__ or
+    __getattribute__ (or claims to be int) are refused before any hook runs
+    or the engine's bridge is reached."""
+    from fractions import Fraction
+    from sagebrush import _engine as E
+    n = 0
+    oracle = [
+        ([0, 1], [1, 2], [], [0, 1]),
+        ([1, 0, 3], [1, 2], [0, 1], [1, -1, 1]),
+        ([0, 0, -3], [1, 2], [1, -2], [-1, 0, 1]),
+        ([5, 7, 9], [1, 2], [1, 4], [4, 1, 1]),
+        ([5, -7, 9], [-1, -2], [6, -5], [11, 0, -1]),
+        ([5, 7, -9], [3, -2], [2, 4], [-1, -1, -1]),
+        ([1, 1, 1, 1], [1, 3], [], [1, 1, 1, 1]),
+        ([2, 4, 6, 8], [2, 4], [1, 0, 2], [0, 0, 2]),
+        ([1, 2, 3, 4, 5], [1, 0, 3], [0, 1, 1], [1, 1, 2, 1, 2]),
+        ([-1, -2, -3, -4, -5], [1, 0, 3], [0, -2, -2], [-1, 0, -1, 2, 1]),
+        ([7, 0, 0, 0, 2], [0, 0, 5], [], [7, 0, 0, 0, 2]),
+        ([7, 0, 0, 0, 6], [0, 0, 5], [0, 0, 1], [7, 0, 0, 0, 1]),
+        ([7, 0, 0, 0, -6], [0, 0, 5], [0, 0, -2], [7, 0, 0, 0, 4]),
+        ([7, 0, 0, 0, -5], [0, 0, 5], [0, 0, -1], [7]),
+        ([7, 0, 0, 0, -4], [0, 0, 5], [], [7, 0, 0, 0, -4]),
+        ([3, 4], [5], [], [3, 4]),
+        ([3, -4, 10], [-5], [0, 0, -2], [3, -4]),
+        ([3, -4, 10], [-3], [-1, 1, -4], [0, -1, -2]),
+        ([1, 2], [1, 2, 3], [], [1, 2]),
+        ([0], [1, 2], [], []),
+        ([4, 5, 6, 7], [1, 1], [6, -1, 7], [-2]),
+        ([4, 5, 6, 7], [1, -1], [-18, -13, -7], [22]),
+        ([10, -20, 30, -40, 50], [7, -3, 4], [-15, -1, 12], [115, -58, 3, 0, 2]),
+        ([1, 0, 0, 0, 0, 0, 1], [1, 1, 2], [], [1, 0, 0, 0, 0, 0, 1]),
+        ([-9, 8, -7, 6, -5, 4], [2, -3], [-2, 1, -2, 0, -2], [-5, 0, 0, 0, -1, -2]),
+        ([6, 0, 0, 4], [0, 3], [0, 0, 1], [6, 0, 0, 1]),
+    ]
+    for a, b, q, rr in oracle:
+        assert P.zdivrem(a, b) == (q, rr), (a, b, P.zdivrem(a, b), q, rr)
+        n += 1
+    try:
+        P.zdivrem([1, 2], [0, 0])
+    except Exception as e:
+        assert "division by zero polynomial" in str(e), e
+    else:
+        raise AssertionError("a zero divisor was accepted")
+    touched = []
+
+    class I1(int):
+        def __index__(self):
+            touched.append("index")
+            return 0
+
+    class I2(int):
+        def __int__(self):
+            touched.append("int")
+            return 0
+
+    class I3(int):
+        def __format__(self, spec):
+            touched.append("format")
+            return "0"
+
+    class I4(int):
+        __class__ = property(lambda self: int)
+
+    def meta(base):
+        class Meta(base):
+            def __hash__(cls):
+                touched.append("hash")
+                return base.__hash__(cls)
+
+            def __eq__(cls, other):
+                touched.append("eq")
+                return base.__eq__(cls, other)
+
+            def __getattribute__(cls, attr):
+                touched.append("get:" + attr)
+                return base.__getattribute__(cls, attr)
+        return Meta
+
+    class Claims(type):
+        def __hash__(cls):
+            return hash(int)
+
+        def __eq__(cls, other):
+            return other is int or type.__eq__(cls, other)
+
+    M1 = meta(type)("M1", (int,), {})
+    M2 = Claims("M2", (int,), {})
+    bads = [I1(3), I2(3), I3(3), I4(3), M1(3), M2(7), True, Fraction(1, 2), 1.5, "1", None]
+    del touched[:]
+    name = "_sbengine" if hasattr(E, "_sbengine") else "_native"
+    real = getattr(E, name)
+    calls = []
+
+    class Spy:
+        def call(self, text):
+            calls.append(text)
+            return '{"ok":{"q":"","r":""}}'
+    setattr(E, name, Spy())
+    try:
+        for bad in bads:
+            for args in (([1, bad], [1, 1]), ([1, 1], [bad, 1])):
+                try:
+                    P.zdivrem(*args)
+                except TypeError as e:
+                    assert "zdivrem" in str(e), e
+                else:
+                    raise AssertionError("accepted %r" % (bad,))
+                n += 1
+    finally:
+        setattr(E, name, real)
+    assert calls == [] and touched == [], (calls, touched)
+    return n
+
+
 def call_hex_checks(r):
     """sagebrush._engine.call_hex, the lean text lane poly.mul and qmul use:
     the same values as call() for ok replies (the empty one included) and
@@ -372,6 +491,7 @@ def main():
     assert list(f) == [Fraction(-1, 6), Fraction(-1, 3), Fraction(3, 2), 3], list(f)
     n += qclear_checks(r)
     n += call_hex_checks(r)
+    n += zdivrem_checks(r)
     print("poly_mul against exact products: %d cases ok" % n)
 
 
