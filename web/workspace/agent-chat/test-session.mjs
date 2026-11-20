@@ -331,6 +331,195 @@ const turnOf = (t, id) => t.entries.find((e) => e.kind === "turn" && e.turn_id =
   check(!sent.slice(before).some(([m]) => m === "chat.message") && !(s.queues.get(t.id) ?? []).length, "and nothing is sent or queued for it", sent.slice(before));
 }
 
+// a thread from before chat.resume (no agent_seq): resumed from 0, the whole log replays, and nothing is doubled
+{
+  const { h, host: hs } = host();
+  const s = new ChatSession(hs);
+  const sent = [];
+  h.pairing = pairing(); // (an agent from before chat.resume: its events unnumbered)
+  const t = s.current();
+  s.submit("old question", "sent");
+  const mine = t.entries.at(-1);
+  s.onAgent("turn.event", { conversation: t.id, turn_id: "T0", event: { type: "turn_started" } });
+  s.onAgent("turn.event", { conversation: t.id, turn_id: "T0", event: { type: "message_revised", message: "m", revision: 1 } });
+  s.onAgent("turn.event", { conversation: t.id, turn_id: "T0", event: { type: "text_delta", message: "m", revision: 1, text: "answer" } });
+  s.onAgent("turn.event", { conversation: t.id, turn_id: "T0", event: { type: "turn_finished", outcome: "completed" } });
+  check(t.agent_seq === undefined && t.agent_instance === undefined, "an agent without a log: no numbers kept", t);
+  h.pairing = resumable("aaaaaaaaaaaaaaaa", sent);
+  const before = JSON.stringify(t.entries);
+  s.resume();
+  check(sent.some(([m, p]) => m === "chat.resume" && p.after === 0 && p.instance === undefined), "an old thread asks from 0", sent);
+  s.onAgent("chat.replay", { conversation: t.id, instance: "aaaaaaaaaaaaaaaa", last: 5, done: true, events: [
+    { seq: 1, method: "chat.message", params: { conversation: t.id, id: mine.id, text: "old question", author: "person" } },
+    { seq: 2, method: "turn.event", params: { conversation: t.id, turn_id: "T0", event: { type: "turn_started" } } },
+    { seq: 3, method: "turn.event", params: { conversation: t.id, turn_id: "T0", event: { type: "message_revised", message: "m", revision: 1 } } },
+    { seq: 4, method: "turn.event", params: { conversation: t.id, turn_id: "T0", event: { type: "text_delta", message: "m", revision: 1, text: "answer" } } },
+    { seq: 5, method: "turn.event", params: { conversation: t.id, turn_id: "T0", event: { type: "turn_finished", outcome: "completed" } } },
+  ] });
+  check(JSON.stringify(t.entries) === before && t.agent_seq === 5, "the whole log replayed onto it: no message or turn doubled", t.entries);
+}
+
+// the real end the agent logged wins over the safety net: an away turn whose replay carries turn_finished(error) ends
+// with error, not interrupted
+{
+  const { h, host: hs } = host();
+  const s = new ChatSession(hs);
+  h.pairing = resumable();
+  const t = s.current();
+  s.submit("x", "sent");
+  s.onAgent(...ev(t, 2, "T1", { type: "turn_started" }));
+  s.endLive(true);
+  h.pairing = resumable();
+  s.onAgent("chat.replay", { conversation: t.id, instance: "aaaaaaaaaaaaaaaa", last: 4, done: true, events: [
+    { seq: 3, method: "turn.event", params: { conversation: t.id, turn_id: "T1", event: { type: "turn_error", code: "agent_error", message: "the page disconnected" } } },
+    { seq: 4, method: "turn.event", params: { conversation: t.id, turn_id: "T1", event: { type: "turn_finished", outcome: "error", code: "agent_error" } } },
+  ] });
+  check(turnOf(t, "T1").outcome === "error" && turnOf(t, "T1").error?.message === "the page disconnected", "the replayed real end wins", turnOf(t, "T1"));
+}
+
+// a replay is applied only from the live pairing that said chat.resume, for the run its hello named: a wrong, missing
+// or malformed instance, a closed pairing, or an agent that didn't say chat.resume, changes nothing
+{
+  const cases = [
+    ["another run's instance", (h) => resumable("aaaaaaaaaaaaaaaa"), "bbbbbbbbbbbbbbbb"],
+    ["no instance", (h) => resumable("aaaaaaaaaaaaaaaa"), undefined],
+    ["a malformed instance", (h) => resumable("aaaaaaaaaaaaaaaa"), 42],
+    ["a closed pairing", (h) => ({ ...resumable("aaaaaaaaaaaaaaaa"), state: "closed" }), "aaaaaaaaaaaaaaaa"],
+    ["no pairing", (h) => null, "aaaaaaaaaaaaaaaa"],
+    ["an agent that didn't say chat.resume", (h) => ({ ...resumable("aaaaaaaaaaaaaaaa"), hello: { agent: { name: "Claude" }, features: [], log: { instance: "aaaaaaaaaaaaaaaa" } } }), "aaaaaaaaaaaaaaaa"],
+  ];
+  for (const [what, pairingOf, instance] of cases) {
+    const { h, host: hs } = host();
+    const s = new ChatSession(hs);
+    h.pairing = resumable("aaaaaaaaaaaaaaaa");
+    const t = s.current();
+    s.submit("x", "sent");
+    s.onAgent(...ev(t, 2, "T1", { type: "turn_started" }));
+    s.endLive(true);
+    h.pairing = pairingOf(h);
+    const before = JSON.stringify(t);
+    s.onAgent("chat.replay", { conversation: t.id, instance, last: 99, done: true, events: [
+      { seq: 3, method: "chat.message", params: { conversation: t.id, id: "intruder", text: "not from this run", author: "person" } },
+      { seq: 4, method: "turn.event", params: { conversation: t.id, turn_id: "T1", event: { type: "turn_finished", outcome: "completed" } } },
+    ] });
+    check(JSON.stringify(t) === before && turnOf(t, "T1").away === true && t.agent_instance === "aaaaaaaaaaaaaaaa", `a replay with ${what} changes nothing`, t);
+  }
+}
+
+// SEC H2: with an agent that keeps a log, a live event needs a positive safe-integer number; a replay's last, done
+// and every number are checked whole before anything is applied
+{
+  const bad = [NaN, Infinity, 1.5, -1, 0, 2 ** 53, "3", undefined];
+  for (const seq of bad) {
+    const { h, host: hs } = host();
+    const s = new ChatSession(hs);
+    h.pairing = resumable();
+    const t = s.current();
+    s.submit("x", "sent");
+    s.onAgent(...ev(t, 2, "T1", { type: "turn_started" }));
+    const before = JSON.stringify(t);
+    s.onAgent("turn.event", { conversation: t.id, turn_id: "T1", seq, event: { type: "turn_finished", outcome: "completed" } });
+    check(JSON.stringify(t) === before, `a live event numbered ${String(seq)} is dropped`, t);
+  }
+  const replayCases = [
+    ...bad.map((seq) => [`an entry numbered ${String(seq)}`, { last: 9, done: true, seq }]),
+    ...[NaN, Infinity, 1.5, -1, 2 ** 53, "9", undefined].map((last) => [`last ${String(last)}`, { last, done: true, seq: 3 }]),
+    ["done not a boolean", { last: 9, done: "yes", seq: 3 }],
+  ];
+  for (const [what, r] of replayCases) {
+    const { h, host: hs } = host();
+    const s = new ChatSession(hs);
+    h.pairing = resumable();
+    const t = s.current();
+    s.submit("x", "sent");
+    s.onAgent(...ev(t, 2, "T1", { type: "turn_started" }));
+    s.endLive(true);
+    h.pairing = resumable();
+    const before = JSON.stringify(t);
+    s.onAgent("chat.replay", { conversation: t.id, instance: "aaaaaaaaaaaaaaaa", last: r.last, done: r.done, events: [
+      { seq: 3, method: "chat.message", params: { conversation: t.id, id: "fine", text: "fine", author: "person" } },
+      { seq: r.seq, method: "turn.event", params: { conversation: t.id, turn_id: "T1", event: { type: "turn_finished", outcome: "completed" } } },
+    ] });
+    check(JSON.stringify(t) === before, `a replay with ${what} changes nothing, not even its good entries`, t);
+  }
+}
+
+// SEC H3: every replayed entry must be about this thread, and a message the person's, or the replay changes nothing
+{
+  const entries = [
+    ["a message about another conversation", { seq: 3, method: "chat.message", params: { conversation: "elsewhere", id: "m", text: "x", author: "person" } }],
+    ["a message by the agent", { seq: 3, method: "chat.message", params: { conversation: "SELF", id: "m", text: "x", author: "agent" } }],
+    ["a message with no author", { seq: 3, method: "chat.message", params: { conversation: "SELF", id: "m", text: "x" } }],
+    ["a turn event about another conversation", { seq: 3, method: "turn.event", params: { conversation: "elsewhere", turn_id: "T1", event: { type: "turn_finished", outcome: "completed" } } }],
+    ["a turn event with no conversation", { seq: 3, method: "turn.event", params: { turn_id: "T1", event: { type: "turn_finished", outcome: "completed" } } }],
+  ];
+  for (const [what, e] of entries) {
+    const { h, host: hs } = host();
+    const s = new ChatSession(hs);
+    const sent = [];
+    h.pairing = resumable("aaaaaaaaaaaaaaaa", sent);
+    const t = s.current();
+    s.submit("x", "sent");
+    s.onAgent(...ev(t, 2, "T1", { type: "turn_started" }));
+    s.endLive(true);
+    h.pairing = resumable("aaaaaaaaaaaaaaaa", sent);
+    const entry = JSON.parse(JSON.stringify(e).replace('"SELF"', JSON.stringify(t.id)));
+    const before = JSON.stringify(t), n = sent.length;
+    s.onAgent("chat.replay", { conversation: t.id, instance: "aaaaaaaaaaaaaaaa", last: 3, done: true, events: [entry] });
+    check(JSON.stringify(t) === before && sent.length === n && !(s.queues.get(t.id) ?? []).some((q) => q.id === "m"), `${what}: not shown, queued or sent; the thread unchanged`, t);
+  }
+}
+
+// SEC H4: a click on an away turn's card claims nothing and sends nothing; once the turn is back, it can be answered
+{
+  const { h, host: hs } = host();
+  const s = new ChatSession(hs);
+  const sent = [];
+  h.pairing = resumable("aaaaaaaaaaaaaaaa", sent);
+  const t = s.current();
+  s.submit("x", "sent");
+  s.onAgent(...ev(t, 2, "T1", { type: "turn_started" }));
+  s.onAgent(...ev(t, 3, "T1", { type: "attention", id: "q1", kind: "approval", state: "open", title: "Allow WebFetch?", summary: "https://example.com", detail: "{}" }));
+  const instance = s.cards.instanceOf("q1");
+  s.endLive(true);
+  const n = sent.length;
+  check(s.answer(t, "q1", true, "T1", instance) === false && sent.length === n && turnOf(t, "T1").attention.q1.state === "open", "a stale click on an away turn's card: false, nothing sent, the card still open", turnOf(t, "T1").attention.q1);
+  // (back, under a new pairing: a card is admitted per pairing, its digest bound to that agent process, so the old
+  //  card's token answers nothing; once the agent shows the card again, from the same run, it is answered)
+  h.pairing = resumable("aaaaaaaaaaaaaaaa", sent);
+  s.cards.clear(); // (as the page does for every new pairing)
+  s.onAgent(...ev(t, 4, "T1", { type: "attention", id: "q1", kind: "approval", state: "open", title: "Allow WebFetch?", summary: "https://example.com", detail: "{}" }));
+  const again = s.cards.instanceOf("q1");
+  check(!turnOf(t, "T1").away && s.answer(t, "q1", true, "T1", again) === true && sent.slice(n).some(([m, p]) => m === "chat.permission" && p.request_id === "q1"), "once the turn is back and its card shown again, it is answered and the answer sent", sent.slice(n));
+}
+
+// the real page's rule (no demo once a real agent was in a chat): a message sent while the chat's turn is away waits in
+// the queue, whether or not the page is connected yet, and goes once the replay says how the turn went
+{
+  const { h, host: hs } = host({ mayDemo: () => false });
+  const s = new ChatSession(hs);
+  const sent = [];
+  h.pairing = resumable("aaaaaaaaaaaaaaaa", sent);
+  const t = s.current();
+  s.submit("job", "sent");
+  s.onAgent(...ev(t, 2, "T1", { type: "turn_started" }));
+  s.endLive(true);
+  h.pairing = null;
+  const n = t.entries.length;
+  check(s.inert(t) && s.canSend(t), "disconnected with the turn away: not connected (the header says so), but a message can be taken");
+  check(s.submit("while disconnected", "sent") === true && t.entries.at(-1).mode === "queued" && t.entries.length === n + 1, "disconnected, away: the message waits in the queue", t.entries.at(-1));
+  h.pairing = resumable("aaaaaaaaaaaaaaaa", sent);
+  const m = sent.length;
+  check(s.submit("while away, connected", "sent") === true && t.entries.at(-1).mode === "queued" && !sent.slice(m).some(([x]) => x === "chat.message" || x === "chat.interrupt"), "connected, the turn still away: the message waits; nothing interrupted or sent", sent.slice(m));
+  s.onAgent("chat.replay", { conversation: t.id, instance: "aaaaaaaaaaaaaaaa", last: 3, done: true, events: [{ seq: 3, method: "turn.event", params: { conversation: t.id, turn_id: "T1", event: { type: "turn_finished", outcome: "interrupted" } } }] });
+  check(sent.slice(m).some(([x, p]) => x === "chat.message" && p.text === "while disconnected"), "the turn's end known: the first waiting message goes", sent.slice(m));
+  // (a chat with no away turn, disconnected: inert as before)
+  const u = s.newThread();
+  s.mark(u);
+  h.pairing = null;
+  check(!s.canSend(u) && s.submit("nope", "sent") === false, "disconnected, nothing away, no demo: Send is inert, as before");
+}
+
 // kept threads: an empty list, and a current one that names no thread
 {
   const { h, host: hs } = host();

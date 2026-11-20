@@ -35,9 +35,11 @@ export function mountComposer(h: ComposerHooks): BlockEditor {
 }
 
 /** The buttons for the thread shown: Send or Send now, Queue and Stop while a turn runs, and how many are queued. */
-export function renderComposerState(running: boolean, queued: number) {
-  $("#send").textContent = running ? "Send now" : "Send";
-  $("#send").title = running ? "Interrupt the agent and send (Shift+Enter)" : "Send (Shift+Enter)";
+// `away`: the chat's last turn lost its agent's connection; a message waits for that turn's end (no one to interrupt or
+// stop), so the one button queues
+export function renderComposerState(running: boolean, queued: number, away = false) {
+  $("#send").textContent = running ? "Send now" : away ? "Queue" : "Send";
+  $("#send").title = running ? "Interrupt the agent and send (Shift+Enter)" : away ? "Send once the agent says how its last turn went (Shift+Enter)" : "Send (Shift+Enter)";
   $("#queue").hidden = !running;
   $("#stop").hidden = !running;
   $("#queued").textContent = queued ? `${queued} queued` : "";

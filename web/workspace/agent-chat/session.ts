@@ -39,6 +39,8 @@ export interface SessionHost {
 }
 
 const id = () => Math.random().toString(36).slice(2, 10);
+/** One of the agent's log numbers: a positive safe integer. */
+const seqOk = (v: unknown): v is number => Number.isSafeInteger(v) && (v as number) > 0;
 
 export class ChatSession {
   readonly state: Saved;
@@ -141,6 +143,11 @@ export class ChatSession {
   inert(t: Thread): boolean {
     return !this.live() && !this.host.mayDemo(t);
   }
+  /** whether a message may be taken now: connected (or a demo chat), or the chat's last turn is away, when the message
+   *  waits in the queue for that turn's end, which the agent's log says once the page is connected again */
+  canSend(t: Thread): boolean {
+    return !this.inert(t) || this.isAway(t);
+  }
 
   /** An event, applied to its thread and kept. */
   emit(thread: Thread, turn_id: string, d: Draft, replayed = false) {
@@ -155,7 +162,7 @@ export class ChatSession {
     text = text.trim();
     if (!text) return false;
     const thread = this.current();
-    if (mode !== "note" && this.inert(thread)) return false;
+    if (mode !== "note" && !this.canSend(thread)) return false;
     const busy = this.isRunning(thread);
     // (a turn away: no one to interrupt, so a message waits for its end, which the agent's log says once connected)
     const away = !busy && this.isAway(thread);
@@ -234,10 +241,12 @@ export class ChatSession {
       scripted.turn.answer(attention, approve);
       return false;
     }
+    // (a card of a turn that's away, or of no turn here, answers nothing: nothing claimed, nothing sent; once the turn
+    //  is back, its card can be answered)
+    const turn = thread.entries.find((e): e is Turn => e.kind === "turn" && e.turn_id === turnId && !!e.attention[attention]);
+    if (!turn || turn.away) return false;
     // (claimed: the card shows the person's answer at once, both buttons gone; a second click finds it claimed)
     if (!this.cards.answer(attention, approve, thread.id, turnId, instance)) return false;
-    const turn = thread.entries.find((e): e is Turn => e.kind === "turn" && e.turn_id === turnId && !!e.attention[attention]);
-    if (!turn) return false;
     turn.attention[attention].state = approve ? "approved" : "denied";
     return true;
   }
@@ -249,10 +258,24 @@ export class ChatSession {
     const p = params as { conversation?: unknown } | null;
     const thread = this.state.threads.find((t) => t.id === p?.conversation);
     if (!thread) return;
-    // (live: numbered by this run of the agent, which its hello names; a thread last in another run starts again)
-    const instance = this.host.pairing()?.hello?.log?.instance;
-    if (instance && thread.agent_instance !== instance) this.newRun(thread, instance);
-    this.agentEvent(thread, params, false);
+    // (an agent that keeps a log numbers every event, in the run its hello names: an event without a valid number is
+    //  dropped; a thread last in another run starts again. An agent without a log: events as they come, unnumbered)
+    const instance = this.resumable();
+    if (instance) {
+      if (!seqOk((params as { seq?: unknown }).seq)) return;
+      if (thread.agent_instance !== instance) this.newRun(thread, instance);
+      this.agentEvent(thread, params, false);
+    } else {
+      const { seq: _drop, ...rest } = params as Record<string, unknown>;
+      this.agentEvent(thread, rest, false);
+    }
+  }
+
+  /** The run named by the live pairing's hello, if that agent said it keeps a log (chat.resume); else undefined. */
+  private resumable(): string | undefined {
+    const pairing = this.host.pairing();
+    if (!this.live() || !pairing?.hello?.features?.includes("chat.resume")) return undefined;
+    return pairing.hello.log?.instance;
   }
 
   /** The thread now follows another run of the agent: what was away from the earlier one ends interrupted. */
@@ -266,7 +289,7 @@ export class ChatSession {
   private agentEvent(thread: Thread, params: unknown, replayed: boolean) {
     const p = params as { seq?: unknown; turn_id?: unknown; event?: { type?: unknown } } | null;
     if (typeof p?.turn_id !== "string" || !p.event || typeof p.event.type !== "string") return;
-    if (typeof p.seq === "number") {
+    if (seqOk(p.seq)) {
       if (p.seq <= (thread.agent_seq ?? 0)) return;
       thread.agent_seq = p.seq;
     }
@@ -289,28 +312,42 @@ export class ChatSession {
     }
   }
 
-  /** A chat.replay: what the thread missed while the page was away, in the agent's order. */
+  /** A chat.replay: what the thread missed while the page was away, in the agent's order. Checked whole before
+   *  anything is applied: from the live pairing that said chat.resume, for the run its hello named; numbers positive
+   *  safe integers; every entry about this thread; a message the person's. Anything else, the replay changes nothing. */
   private onReplay(params: unknown) {
     const p = params as { conversation?: unknown; instance?: unknown; last?: unknown; events?: unknown; done?: unknown } | null;
     const thread = this.state.threads.find((t) => t.id === p?.conversation);
-    if (!thread || typeof p?.instance !== "string" || !Array.isArray(p.events)) return;
+    if (!thread || !p || typeof p.instance !== "string" || p.instance !== this.resumable()) return;
+    if (!Number.isSafeInteger(p.last) || (p.last as number) < 0 || typeof p.done !== "boolean" || !Array.isArray(p.events)) return;
+    type Entry = { seq: number; method: string; params: Record<string, unknown> };
+    const ok = (e: unknown): e is Entry => {
+      const x = e as { seq?: unknown; method?: unknown; params?: unknown } | null;
+      if (!x || !seqOk(x.seq) || typeof x.method !== "string" || !x.params || typeof x.params !== "object" || Array.isArray(x.params)) return false;
+      const q = x.params as Record<string, unknown>;
+      if (q.conversation !== thread.id) return false;
+      if (x.method === "chat.message") return q.author === "person" && typeof q.id === "string" && typeof q.text === "string";
+      return true;
+    };
+    if (!p.events.every(ok)) return;
     if (thread.agent_instance !== p.instance) this.newRun(thread, p.instance);
-    for (const e of p.events as { seq?: unknown; method?: unknown; params?: unknown }[]) {
-      if (typeof e?.seq !== "number" || e.seq <= (thread.agent_seq ?? 0)) continue;
-      if (e.method === "turn.event") this.agentEvent(thread, { ...(e.params as object), seq: e.seq }, true);
+    for (const e of p.events as Entry[]) {
+      if (e.seq <= (thread.agent_seq ?? 0)) continue;
+      if (e.method === "turn.event") this.agentEvent(thread, { ...e.params, seq: e.seq }, true);
       else {
         thread.agent_seq = e.seq;
-        const m = e.params as { id?: unknown; text?: unknown } | null;
+        const m = e.params as { id: string; text: string };
         // (a message the person sent from another tab: shown as sent; never queued again, never sent again)
-        if (e.method === "chat.message" && typeof m?.id === "string" && typeof m.text === "string" && !thread.entries.some((x) => x.kind === "user" && x.id === m.id)) {
+        if (e.method === "chat.message" && !thread.entries.some((x) => x.kind === "user" && x.id === m.id)) {
           thread.entries.push({ kind: "user", id: m.id, text: m.text, mode: "sent", time: Date.now() });
         }
       }
     }
-    const last = typeof p.last === "number" ? p.last : 0;
+    const last = p.last as number;
     if (p.done === true || (thread.agent_seq ?? 0) >= last) {
       // (the log has nothing more: an away turn it didn't finish can't go on, as the agent ends a turn whose page
-      //  went away; it ends interrupted here)
+      //  went away, and logs that end, which the replay applied above; this is the safety net. Step 2, where a turn
+      //  outlives its page, changes this deliberately: a turn the agent says is still running goes back to running.)
       this.endAway(thread);
     } else if (p.done === false) {
       // (stopped early: ask again from the last number this page has)

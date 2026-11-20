@@ -861,7 +861,7 @@ function mountTexFrame(path: string, box: HTMLElement): FileHost {
 }
 
 function renderComposer() {
-  renderComposerState(isRunning(current()), queues.get(current().id)?.length ?? 0);
+  renderComposerState(isRunning(current()), queues.get(current().id)?.length ?? 0, session.isAway(current()));
   renderConn();
 }
 
@@ -960,7 +960,7 @@ function renderConn() {
   for (const k of ["aria-busy", "aria-disabled"]) rememberBusy ? rb.setAttribute(k, "true") : rb.removeAttribute(k);
   $("#conn-x").hidden = !b || b.kind === "restoring";
   // Send: inert while not connected in a chat the demo may not answer, never `disabled` (C1), described by what says why
-  const send = $("#send"), off = inert(current());
+  const send = $("#send"), off = !session.canSend(current());
   hint.hidden = !(off && !b);
   if (off) {
     send.setAttribute("aria-disabled", "true");
