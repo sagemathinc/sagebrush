@@ -571,7 +571,7 @@ export function collect(list: any[], m: any, kept: { run: number }) {
     size.cut = true;
     return;
   }
-  const bytes = m.stream ? String(m.text ?? "").length : m.display ? displayCost(m.display) : m.interact ? DISPLAY_ENVELOPE + JSON.stringify(m.interact).length : 0;
+  const bytes = m.stream ? String(m.text ?? "").length : m.display ? displayCost(m.display, m.metadata) : m.interact ? DISPLAY_ENVELOPE + JSON.stringify(m.interact).length : 0;
   if ((m.display || m.interact) && !size.cut && ++size.displays > ITEM_DISPLAYS_MAX) {
     size.cut = true;
     sayCut(list, "displays");
@@ -591,7 +591,8 @@ export function collect(list: any[], m: any, kept: { run: number }) {
     // (joined only with the same area's: the cell's own, or the same interact's)
     if (last?.output_type === "stream" && last.name === m.stream && interactTarget.has(last) === mine && (!mine || interactTarget.get(last) === m.target)) { last.text += m.text; if (mine) interactBytes.set(last, (interactBytes.get(last) ?? 0) + bytes); }
     else keep({ output_type: "stream", name: m.stream, text: m.text });
-  } else if (m.display) { const o = { output_type: "display_data", data: m.display, metadata: {} }; keep(o); if (mine) interactDisplays.add(o); }
+  // (its metadata kept as charged above, a plain object only: a PNG's size to show it at, saved and exported with it)
+  } else if (m.display) { const md = m.metadata && typeof m.metadata === "object" && !Array.isArray(m.metadata) ? m.metadata : {}; const o = { output_type: "display_data", data: m.display, metadata: md }; keep(o); if (mine) interactDisplays.add(o); }
   else if (m.interact) list.push({ output_type: "display_data", data: { "text/plain": "[interactive controls]" }, metadata: {} });
 }
 
