@@ -18,7 +18,9 @@ export interface TurnHooks {
 /** A steer's line under the person's message: what the agent said happened to it. */
 export function steerTag(e: UserEntry): string {
   if (e.receipt === "delivered") return "Delivered to the running turn";
+  if (e.receipt === "rejected") return e.receipt_reason === "busy" ? "Not delivered: the agent had too many messages waiting" : "Not delivered: the agent dropped it when the turn ended";
   if (e.receipt === "queued") return e.receipt_reason === "codex" ? "Queued, runs next: this agent takes it after the turn" : e.receipt_reason === "ended" ? "Queued, runs next: the turn ended first" : "Queued, runs next";
+  if (e.settled && (!e.receipt || e.receipt === "steering")) return "Sent during the turn";
   return "Steering: Claude reads it at its next step";
 }
 

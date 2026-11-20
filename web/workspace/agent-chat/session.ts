@@ -41,6 +41,12 @@ export interface SessionHost {
 const id = () => Math.random().toString(36).slice(2, 10);
 /** One of the agent's log numbers: a positive safe integer. */
 const seqOk = (v: unknown): v is number => Number.isSafeInteger(v) && (v as number) > 0;
+/** A chat.rejected as a receipt: "rejected", with why as one of the agent's codes this page words (busy: too many
+ *  messages waiting; anything else: the turn ended), never its message text. */
+const rejection = (params: unknown) => {
+  const q = (params && typeof params === "object" ? params : {}) as { reason?: { code?: unknown } };
+  return { ...q, state: "rejected", reason: q.reason?.code === "busy" ? "busy" : "cancelled" };
+};
 const receiptOk = (v: unknown): v is NonNullable<UserEntry["receipt"]> => v === "steering" || v === "delivered" || v === "queued";
 
 export class ChatSession {
@@ -154,6 +160,8 @@ export class ChatSession {
   emit(thread: Thread, turn_id: string, d: Draft, replayed = false) {
     const e = { ...d, seq: thread.applied_seq + 1, turn_id } as TurnEvent;
     apply(thread, e);
+    // (a turn ended: a steer still waiting for its receipt is no longer said to be on its way)
+    if (d.type === "turn_finished") for (const x of thread.entries) if (x.kind === "user" && x.mode === "steer" && x.receipt !== "delivered" && x.receipt !== "rejected" && x.receipt !== "queued") x.settled = true;
     this.host.emitted(thread, d, replayed);
     this.save();
   }
@@ -275,6 +283,7 @@ export class ChatSession {
     if (from !== undefined && from !== this.host.pairing()) return;
     if (method === "chat.replay") return this.onReplay(params);
     if (method === "chat.receipt") return this.onReceipt(params, false);
+    if (method === "chat.rejected") return this.onReceipt(rejection(params), false);
     if (method !== "turn.event") return;
     const p = params as { conversation?: unknown } | null;
     const thread = this.state.threads.find((t) => t.id === p?.conversation);
@@ -298,10 +307,11 @@ export class ChatSession {
   private onReceipt(params: unknown, replayed: boolean) {
     const p = params as { conversation?: unknown; id?: unknown; state?: unknown; reason?: unknown; seq?: unknown } | null;
     const thread = this.state.threads.find((t) => t.id === p?.conversation);
-    if (!thread || !p || typeof p.id !== "string" || !receiptOk(p.state)) return;
+    if (!thread || !p || typeof p.id !== "string" || !(receiptOk(p.state) || p.state === "rejected")) return;
     if (!replayed) {
       const instance = this.resumable();
-      if (instance) {
+      // (numbered where the agent keeps a log; a refusal it never logged, "busy", comes unnumbered)
+      if (instance && !(p.state === "rejected" && p.seq === undefined)) {
         if (!seqOk(p.seq)) return;
         if (thread.agent_instance !== instance) this.newRun(thread, instance);
       }
@@ -311,7 +321,8 @@ export class ChatSession {
       thread.agent_seq = p.seq;
     }
     const entry = thread.entries.find((e): e is UserEntry => e.kind === "user" && e.id === p.id && e.mode === "steer");
-    if (entry && entry.receipt !== "delivered") {
+    // ("delivered" and "rejected" are final: no late or repeated receipt brings a steer back)
+    if (entry && entry.receipt !== "delivered" && entry.receipt !== "rejected") {
       entry.receipt = p.state;
       if (typeof p.reason === "string") entry.receipt_reason = p.reason.slice(0, 16);
     }
@@ -376,6 +387,7 @@ export class ChatSession {
       if (q.conversation !== thread.id) return false;
       if (x.method === "chat.message") return q.author === "person" && typeof q.id === "string" && typeof q.text === "string";
       if (x.method === "chat.receipt") return typeof q.id === "string" && receiptOk(q.state);
+      if (x.method === "chat.rejected") return typeof q.id === "string";
       return true;
     };
     if (!p.events.every(ok)) return;
@@ -388,6 +400,7 @@ export class ChatSession {
       if (e.seq <= (thread.agent_seq ?? 0)) continue;
       if (e.method === "turn.event") this.agentEvent(thread, { ...e.params, seq: e.seq }, true);
       else if (e.method === "chat.receipt") this.onReceipt({ ...e.params, seq: e.seq }, true);
+      else if (e.method === "chat.rejected") this.onReceipt({ ...rejection(e.params), seq: e.seq }, true);
       else {
         thread.agent_seq = e.seq;
         const m = e.params as { id: string; text: string };

@@ -59,6 +59,10 @@ check(u.className === "user other", "a kept message with a hostile mode: class o
   check(tag({ receipt: "queued", receipt_reason: "codex" }) === "Queued, runs next: this agent takes it after the turn", "queued, Codex");
   check(tag({ receipt: "queued", receipt_reason: HOSTILE }) === "Queued, runs next" && tag({ receipt: HOSTILE }) === "Steering: Claude reads it at its next step", "a hostile receipt or reason: fixed words only");
   check(userNode({ kind: "user", id: "s", mode: "steer", text: "go" }, hooks.md).className === "user steer", "class steer");
+  check(tag({ receipt: "rejected" }) === "Not delivered: the agent dropped it when the turn ended", "rejected: fixed words", tag({ receipt: "rejected" }));
+  check(tag({ receipt: "rejected", receipt_reason: "busy" }) === "Not delivered: the agent had too many messages waiting" && tag({ receipt: "rejected", receipt_reason: HOSTILE }) === "Not delivered: the agent dropped it when the turn ended", "rejected (busy), and a hostile reason: fixed words only");
+  check(tag({ settled: true }) === "Sent during the turn" && tag({ receipt: "steering", settled: true }) === "Sent during the turn", "settled without a final receipt: Sent during the turn");
+  check(tag({ receipt: "delivered", settled: true }) === "Delivered to the running turn" && tag({ receipt: "queued", settled: true }).startsWith("Queued"), "settled never hides a receipt that says what became of it");
 }
 
 // ---- an agent's ids are keys, never a prototype's (daybreak3's E932-1): "__proto__" and "constructor" as a tool's call
