@@ -23,7 +23,7 @@ import { needsMore, completeIn, helpSyntax, ipythonSyntax } from "./interactive"
 import { MAGIC_PRE, MAGIC_POST, GET_IPYTHON, magicTransform } from "./magic-syntax";
 import { getattr, unbox } from "./runtime/object";
 import { isMainThread, workerData, parentPort, Worker } from "worker_threads";
-import { installKernel, runKernel, kernelWorker, Mode } from "./kernel";
+import { installKernel, runKernel, kernelWorker, Mode, FIGURE_MODES } from "./kernel";
 import { runNotebookServer, notebookWorker } from "./notebook";
 import { takeLimitsOption, launcherLimits, startLimits, setSessionLimits, type LimitsText } from "./limits";
 import { selectLimits } from "./limits-file";
@@ -78,7 +78,10 @@ const USAGE = `usage: sagebrush [-c cmd | -m mod | file | -] [args]
            --mode: that language's functions (default: Sage's library,
            which Python mode imports too)
   --install-jupyter-kernel [--user | --sys-prefix | --prefix DIR] [--mode sage|python|magma|matlab|all]
-           register Sagebrush as a Jupyter kernel (no Python needed)
+                           [--figures auto|svg|png|both]
+           register Sagebrush as a Jupyter kernel (no Python needed); --figures:
+           how its figures are shown (default auto: an SVG, or a sharp PNG
+           when the SVG would be over 1 MiB; also SAGEBRUSH_FIGURES)
   --uninstall-jupyter-kernel [the same options]
   notebook [DIR] [--port N] [--no-browser]
            the Sagebrush notebook in your browser, running Python here;
@@ -909,8 +912,16 @@ async function main(argv = process.argv.slice(2), preset?: LimitsText) {
       process.exitCode = 2;
       return;
     }
+    // (how its figures are shown, unless a notebook's code says: --figures, or SAGEBRUSH_FIGURES; else "auto")
+    const k = argv.indexOf("--figures");
+    const figures = k >= 0 ? argv[k + 1] : process.env.SAGEBRUSH_FIGURES || null;
+    if (figures !== null && !FIGURE_MODES.includes(figures)) {
+      process.stderr.write(`--figures (or SAGEBRUSH_FIGURES) takes ${FIGURE_MODES.join(", ")}, not ${JSON.stringify(figures)}\n`);
+      process.exitCode = 2;
+      return;
+    }
     if (!(await serverLimits(lim))) return;
-    await runKernel(argv[1], (i >= 0 ? argv[i + 1] : "sage") as Mode, j >= 0 ? argv[j + 1] : process.env.SAGEBRUSH_PKGSET || null);
+    await runKernel(argv[1], (i >= 0 ? argv[i + 1] : "sage") as Mode, j >= 0 ? argv[j + 1] : process.env.SAGEBRUSH_PKGSET || null, figures);
     return;
   }
   // sagebrush --search QUERY [--json]: search the documentation (lib/_pyjs_docsearch.py)

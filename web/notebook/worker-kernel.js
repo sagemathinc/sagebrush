@@ -169,7 +169,7 @@ export class WorkerKernel {
     this.started = Promise.resolve();
     this.startError = null;
     this.interruptFlag = null;
-    // id -> a sink {start(), out(text, isErr), display(bundle), interact(spec),
+    // id -> a sink {start(), out(text, isErr), display(bundle, metadata), interact(spec),
     // clear(), done(ms), stopped(message), skipped()} for running code, or
     // {reply(message)} for a question
     this.pending = new Map();
@@ -354,7 +354,7 @@ export class WorkerKernel {
       }
       if (dest) {
         if (m.stream) dest.out(m.text, m.stream === "stderr");
-        if (m.display) dest.display(m.display);
+        if (m.display) dest.display(m.display, m.metadata);
         if (m.interact) dest.interact(m.interact);
         if (m.clear) dest.clear();
       }

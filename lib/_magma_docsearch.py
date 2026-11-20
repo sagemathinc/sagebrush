@@ -1108,7 +1108,8 @@ SIGNATURES = {
 
 # names lib/_magma.py exports that are not Magma intrinsics (its classes
 # and internal aliases)
-INTERNAL = {"MagmaError", "Multi", "Ref1", "RefK", "MSeq", "MRange", "MSet", "MTuple", "MRecFormat", "MRec",
+# (sagebrush_figures: Sagebrush's own, not a Magma intrinsic: in the catalog, catalog/magma/sagebrush.json, not here)
+INTERNAL = {"sagebrush_figures", "MagmaError", "Multi", "Ref1", "RefK", "MSeq", "MRange", "MSet", "MTuple", "MRecFormat", "MRec",
             "MReal", "RealField_", "Perm", "MGamma0", "MModSym", "MModForms", "MNewform", "MList", "IntegerRing_", "MMap"}
 
 # Magma's syntax that Sagebrush's Magma mode runs, by area (Sagebrush's words)

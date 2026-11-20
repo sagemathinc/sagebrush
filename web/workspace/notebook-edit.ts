@@ -82,27 +82,10 @@ export function editProblem(p: unknown): string | null {
   return null;
 }
 
-/** JSON with every object's keys in order, so the helper and the page hash a cell alike. */
-export function canonical(v: unknown): string {
-  if (Array.isArray(v)) return `[${v.map(canonical).join(",")}]`;
-  if (v && typeof v === "object") return `{${Object.keys(v).sort().filter((k) => (v as any)[k] !== undefined).map((k) => `${JSON.stringify(k)}:${canonical((v as any)[k])}`).join(",")}}`;
-  return JSON.stringify(v) ?? "null";
-}
-/** A cell in the form the notebook keeps it (web/notebook/notebook.js snapshot): what a save of it writes, whatever
- * form it was stored in (a code cell's type implicit, its count as text, empty fields left out).  Hashed in this form,
- * so a save that only re-forms a cell (the pane's first save of a document written elsewhere) isn't a change. */
-export function cellForm(c: any): Record<string, unknown> {
-  const type = c?.type ?? "code";
-  const out: Record<string, unknown> = { id: c?.id, ...(type === "code" ? {} : { type }), code: c?.code ?? "" };
-  if (type === "code") {
-    out.outputs = Array.isArray(c?.outputs) ? c.outputs : [];
-    out.n = c?.n === null || c?.n === undefined ? null : String(c.n);
-    if (c?.ms !== null && c?.ms !== undefined) out.ms = c.ms;
-  }
-  if (type === "markdown" && c?.attachments) out.attachments = c.attachments;
-  if (c?.metadata) out.metadata = c.metadata;
-  return out;
-}
+// (JSON with keys in order, and a cell in the notebook's own form: web/workspace/notebook-form.ts, shared with the
+// workspace's whole writes)
+import { canonical, cellForm } from "./notebook-form";
+export { canonical, cellForm };
 /** A cell's hash: its whole JSON in the notebook's own form (cellForm: id, type, code, outputs, count, time,
  * attachments, metadata), canonical. */
 export const cellHash = (cell: unknown) => sha256Hex(canonical(cellForm(cell)));
