@@ -506,10 +506,14 @@ def qscale_checks(r):
         (R(h) * f, [Fraction(-1, 2), 0, Fraction(1, 3)], R), (f * R(h), [Fraction(-1, 2), 0, Fraction(1, 3)], R),
         (0 * f, [], R), (f * R(0), [], R), (Z(3) * (t + 1), [3, 3], Z), ((t + 1) * 5, [5, 5], Z),
         ((t + 1) * h, [Fraction(1, 2), Fraction(1, 2)], T), (h * (t + 1), [Fraction(1, 2), Fraction(1, 2)], T),
-        ((2 * t + 4) / 2, [2, 1], Z), ((2 * t + 3) / 2, [Fraction(3, 2), 1], T), ((2 * t + 4) / -2, [-2, -1], Z),
-        ((t + 1) / h, [2, 2], T), (f / h, [-2, 0, Fraction(4, 3)], R), (Z(0) / 3, [], Z), (R(0) / -3, [], R),
+        # (ZZ[t] by a number is over QQ whatever the values, as Sage)
+        ((2 * t + 4) / 2, [2, 1], T), ((2 * t + 3) / 2, [Fraction(3, 2), 1], T), ((2 * t + 4) / -2, [-2, -1], T),
+        ((t + 1) / h, [2, 2], T), (f / h, [-2, 0, Fraction(4, 3)], R), (Z(0) / 3, [], T), (R(0) / -3, [], R),
+        # (an element of QQ makes the result over QQ, integral or not)
+        (t + QQ(2), [2, 1], T), (QQ(2) + t, [2, 1], T), (t - QQ(2), [-2, 1], T), (QQ(1) - t, [1, -1], T),
+        (t * QQ(5), [0, 5], T), (QQ(5) * t, [0, 5], T), (t * QQ(0), [], T), (t + 2, [2, 1], Z), (t * 5, [0, 5], Z),
         ((2 * x ** 2 + 3).monic(), [Fraction(3, 2), 0, 1], R), ((2 * t ** 2 + 4).monic(), [2, 0, 1], T),
-        ((t + 1).monic(), [1, 1], Z), (R(0).monic(), [], R), (Z(0).monic(), [], T),
+        ((t + 1).monic(), [1, 1], Z),
         (f.derivative(), [0, Fraction(4, 3)], R), (f.derivative(0), [-1, 0, Fraction(2, 3)], R), (f.derivative(3), [], R),
         ((t ** 3).derivative(2), [0, 6], Z), (Z(0).derivative(), [], Z),
         ((3 * x ** 2 + 1).integral(), [0, 1, 0, 1], R), (R(0).integral(), [], R), ((t ** 2).integral(), [0, 0, 0, Fraction(1, 3)], T),
@@ -518,6 +522,21 @@ def qscale_checks(r):
     for got, want, ring in pins:
         assert str(got.parent()) == str(ring), (got, ring)
         assert [Fraction(c) for c in got.list()] == [Fraction(c) for c in want], (got, want)
+        n += 1
+    # (a number over a ZZ polynomial: the fraction field over QQ when the
+    # number is an element of QQ, integral or not, as Sage)
+    for num, base in ((2, "Integer Ring"), (QQ(2), "Rational Field"), (h, "Rational Field"), (QQ(0), "Rational Field")):
+        q = num / (t + 2)
+        assert str(q.parent()) == "Fraction Field of Univariate Polynomial Ring in t over " + base, (num, q.parent())
+        n += 1
+    # (the zero polynomial has no monic multiple: ZeroDivisionError, as Sage)
+    for z in (R(0), Z(0)):
+        try:
+            z.monic()
+        except ZeroDivisionError as e:
+            assert str(e) == "rational division by zero", e
+        else:
+            raise AssertionError("monic of zero returned")
         n += 1
     F = (6 * x ** 2 - h).factor()
     assert F.unit() == 6 and [(list(g), e) for g, e in F] == [([Fraction(-1, 12), 0, 1], 1)], F
