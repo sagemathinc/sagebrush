@@ -285,6 +285,10 @@ impl<'l> Coef<'l> {
         if len == 0 || self.neg == term_neg {
             let mut carry = 0u64;
             for i in 0..top {
+                // (past p with no carry, self's own limbs stay as they are)
+                if i >= lp && carry == 0 {
+                    break;
+                }
                 let a = if i < len { v[i] } else { 0 };
                 let b = if i < lp { p[i] } else { 0 };
                 let (s, c1) = a.overflowing_add(b);
@@ -302,6 +306,10 @@ impl<'l> Coef<'l> {
         if cmp_mag(&v[..len], p) != Ordering::Less {
             let mut borrow = 0u64;
             for i in 0..len {
+                // (past p with no borrow, self's own limbs stay as they are)
+                if i >= lp && borrow == 0 {
+                    break;
+                }
                 let b = if i < lp { p[i] } else { 0 };
                 let (d, b1) = v[i].overflowing_sub(b);
                 let (d, b2) = d.overflowing_sub(borrow);

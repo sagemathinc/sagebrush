@@ -737,6 +737,12 @@
    "audit": "Can it produce or alter an Obligations, Operation, Reservation, Growth or Context (directly, generically or through a pointer)? No. Test glue: series_alloc.rs's audited System-forwarding counting allocator (alloc, dealloc and realloc pass the caller's own pointer and layout to System unchanged; the counting only updates atomics), with test-only additions: it counts allocations (an atomic), and it can refuse one allocation, the first of at least a set size or the one at a set count, by returning null, which GlobalAlloc's contract allows (the caller's try_reserve_exact sees the failure). Here it measures the division ops' live memory against their word ledger's prediction, checks that writing the reply allocates nothing, fails each of a division's allocations in turn, and checks the heap's baseline after each refusal, an allocation failure and a Stop."
   },
   {
+   "file": "engine/web/tests/eval_alloc.rs",
+   "item": "impl GlobalAlloc for Counting",
+   "hash": "3f019520e6ba19c22c010e6d78590c43f0cba957a3e8a8d0a0102e1dd8872e7a",
+   "audit": "Can it produce or alter an Obligations, Operation, Reservation, Growth or Context (directly, generically or through a pointer)? No. Test glue: token-identical to engine/web/tests/scale_alloc.rs's audited item (the same hash): a System-forwarding counting allocator whose accounting is conservative and only updates atomics. Here it measures qpoly_eval's live memory after the lcm against its word ledger's prediction, checks that the reply fills its exact reservation, fails each of a call's allocations in turn, and checks the heap's baseline after each refusal and a Stop."
+  },
+  {
    "file": "engine/web/tests/host_handles.rs",
    "item": "fn reply",
    "hash": "c288fcf5fe0a8e6c439d4c45d20a512b7addf5a5c415e1920342adb5f347131b",

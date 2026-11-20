@@ -166,21 +166,21 @@ pub fn fixed_rows(r: u64) -> Option<u64> {
 }
 
 /// The integer scratch, ledger-owned and grown on demand.
-struct Ints<'l> {
-    x: Buf<'l>,
-    y: Buf<'l>,
-    q: Buf<'l>,
-    p: Buf<'l>,
-    ws: Buf<'l>,
+pub(crate) struct Ints<'l> {
+    pub(crate) x: Buf<'l>,
+    pub(crate) y: Buf<'l>,
+    pub(crate) q: Buf<'l>,
+    pub(crate) p: Buf<'l>,
+    pub(crate) ws: Buf<'l>,
 }
 
 impl<'l> Ints<'l> {
-    fn new(led: &'l Words, m: &mut Meter) -> Result<Ints<'l>, DivFault> {
+    pub(crate) fn new(led: &'l Words, m: &mut Meter) -> Result<Ints<'l>, DivFault> {
         let tag = "scratch";
         Ok(Ints { x: Buf::new(led, 0, tag, m)?, y: Buf::new(led, 0, tag, m)?, q: Buf::new(led, 0, tag, m)?, p: Buf::new(led, 0, tag, m)?, ws: Buf::new(led, 0, tag, m)? })
     }
     /// The product x y into p: its normalized length.
-    fn mul(&mut self, x: &[u64], y: &[u64], m: &mut Meter) -> Result<usize, DivFault> {
+    pub(crate) fn mul(&mut self, x: &[u64], y: &[u64], m: &mut Meter) -> Result<usize, DivFault> {
         if x.is_empty() || y.is_empty() {
             return Ok(0);
         }
@@ -189,7 +189,7 @@ impl<'l> Ints<'l> {
     }
     /// x / y exactly (y normalized, nonzero; x a multiple of y) into q: its
     /// normalized length.
-    fn divexact(&mut self, x: &[u64], y: &[u64], m: &mut Meter) -> Result<usize, DivFault> {
+    pub(crate) fn divexact(&mut self, x: &[u64], y: &[u64], m: &mut Meter) -> Result<usize, DivFault> {
         if x.is_empty() {
             return Ok(0);
         }
@@ -209,7 +209,7 @@ impl<'l> Ints<'l> {
     /// gcd(x, y) of two magnitudes (not both zero) into g, by
     /// [`gcd_unbalanced`] on copies (the remainder step normalizes its
     /// divisor in place).
-    fn gcd(&mut self, x: &[u64], y: &[u64], g: &mut Coef, m: &mut Meter) -> Result<(), DivFault> {
+    pub(crate) fn gcd(&mut self, x: &[u64], y: &[u64], g: &mut Coef, m: &mut Meter) -> Result<(), DivFault> {
         let room = x.len().max(y.len()) + 1;
         self.ws.grow(2 * room, 0, m)?;
         m.add(2 * room + 1)?;
@@ -226,17 +226,30 @@ impl<'l> Ints<'l> {
 }
 
 /// c *= w (a word), in place.  Charges the growth and len + 1.
-fn mul_word(c: &mut Coef, w: u64, m: &mut Meter) -> Result<(), DivFault> {
+pub(crate) fn mul_word(c: &mut Coef, w: u64, m: &mut Meter) -> Result<(), DivFault> {
     let n = c.len;
     c.buf.grow(n + 1, n, m)?;
     m.add(n + 1)?;
-    let mut carry = 0u128;
-    for x in &mut c.buf.v[..n] {
-        let t = u128::from(*x) * u128::from(w) + carry;
-        *x = t as u64;
-        carry = t >> 64;
+    if w < SMALL {
+        // (a word below 2^32: each limb as two 32-bit halves, native u64
+        // products, never a u128 one, a library call on wasm32)
+        let mut carry = 0u64;
+        for x in &mut c.buf.v[..n] {
+            let lo = (*x & (SMALL - 1)) * w + carry;
+            let hi = (*x >> 32) * w + (lo >> 32);
+            *x = (lo & (SMALL - 1)) | (hi << 32);
+            carry = hi >> 32;
+        }
+        c.buf.v[n] = carry;
+    } else {
+        let mut carry = 0u128;
+        for x in &mut c.buf.v[..n] {
+            let t = u128::from(*x) * u128::from(w) + carry;
+            *x = t as u64;
+            carry = t >> 64;
+        }
+        c.buf.v[n] = carry as u64;
     }
-    c.buf.v[n] = carry as u64;
     c.len = crate::qpoly::norm(&c.buf.v, n + 1);
     if c.len == 0 {
         c.neg = false;
@@ -297,7 +310,7 @@ fn gcd_word(mut a: u64, mut b: u64, m: &mut Meter) -> Result<u64, DivFault> {
 }
 
 /// A token's numerator and denominator into two Coefs.
-fn load(tok: &str, n: &mut Coef, d: &mut Coef, m: &mut Meter) -> Result<(), DivFault> {
+pub(crate) fn load(tok: &str, n: &mut Coef, d: &mut Coef, m: &mut Meter) -> Result<(), DivFault> {
     let (neg, nd, dd) = parts(tok);
     n.set_hex(neg, nd, m)?;
     d.set_hex(false, dd, m)?;
@@ -344,7 +357,7 @@ fn push(out: &mut Mapped, num: &[u64], neg: bool, den: &[u64], m: &mut Meter) ->
 }
 
 /// x / g into dst (g = 1: a copy).
-fn quotient(x: &[u64], g: &Coef, dst: &mut Coef, s: &mut Ints, m: &mut Meter) -> Result<(), DivFault> {
+pub(crate) fn quotient(x: &[u64], g: &Coef, dst: &mut Coef, s: &mut Ints, m: &mut Meter) -> Result<(), DivFault> {
     if g.is_one() {
         return dst.set(x, false, m);
     }
@@ -622,7 +635,7 @@ pub fn emit(mp: &Mapped, out: &mut String, m: &mut Meter) -> Result<(), DivFault
 }
 
 /// The reserved reply's guard: its words held by the ledger until dropped.
-struct Reserved<'l>(u64, &'l Words);
+pub(crate) struct Reserved<'l>(u64, &'l Words);
 
 impl Drop for Reserved<'_> {
     fn drop(&mut self) {
@@ -632,7 +645,7 @@ impl Drop for Reserved<'_> {
 
 /// An empty String with room for exactly `bytes`, its words reserved on the
 /// ledger first (and held by the returned guard).
-fn reserve_reply(bytes: u64, led: &Words) -> Result<(String, Reserved<'_>), DivFault> {
+pub(crate) fn reserve_reply(bytes: u64, led: &Words) -> Result<(String, Reserved<'_>), DivFault> {
     let words = bytes.div_ceil(8);
     led.note("reply", words);
     led.reserve(words)?;
@@ -690,7 +703,7 @@ fn copy_reply(a: &Factor, na: u64, flip: bool, led: &Words, m: &mut Meter) -> Re
 }
 
 /// A reply of one given token (or of none: the zero polynomial).
-fn token_reply(tok: &str, led: &Words) -> Result<String, DivFault> {
+pub(crate) fn token_reply(tok: &str, led: &Words) -> Result<String, DivFault> {
     let (mut out, _held) = reserve_reply(FIXED_BYTES + tok.len() as u64, led)?;
     out.push_str("{\"ok\":\"");
     out.push_str(tok);

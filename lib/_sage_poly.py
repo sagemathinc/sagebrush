@@ -1284,6 +1284,23 @@ class Polynomial:
             v = kwds[self._ring._name]
         else:
             (v,) = args
+        from sagebrush import poly
+        # (an exact type, compared by identity only: no hash or equality of
+        # the point's class runs while classifying it)
+        t, Q = type(v), _sa().Rational
+        routed = t is Q
+        for k in poly._QCLEAR_INTS:
+            if routed:
+                break
+            routed = t is k
+        if routed:
+            # an exact integer or rational point: in the engine (qpoly_eval,
+            # one token in lowest terms), in QQ when the ring or the point
+            # is, else in ZZ, as Sage
+            n, _, d = poly.qeval(self._c, v, raw=True).partition("/")
+            if self._ring._base is QQ or t is Q:
+                return Q._from_coprime_ints(int(n, 16), int(d, 16) if d else 1)
+            return int(n, 16)
         r = 0
         for a in reversed(self._c):
             r = r * v + a

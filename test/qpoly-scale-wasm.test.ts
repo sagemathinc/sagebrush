@@ -58,8 +58,9 @@ const rpairs = (n: number, sign: string) => range(n, () => `${sign}${rnd(4).toSt
 // (shapes long enough, at least MIN_CALL_MS, that a Stop at a quarter or
 // half of the call is tested, not outrun by the call's own end, within the
 // request's 16 MiB and the reply's and memory's caps; the integral's work is
-// too little per request byte to reach it, and its Stop is pinned by the
-// native tests)
+// too little per request byte to reach it, and an evaluation's whole cap is
+// about 1.2 s here, too near the floor: their Stops are pinned by the native
+// tests)
 const shapes: [string, string, string, string][] = [
   ["product-heavy: the 1500th derivative of 6000 10,000-bit integers", "qpoly_derivative", range(6000, (i) => `${hx(i + 1)}${"a".repeat(2560)}`), "5dc"],
   ["gcd-heavy: 44,000 rationals by a 500/1600-bit rational", "qpoly_scale", range(44000, (i) => `${hx(i * 7 + 1)}${"d".repeat(150)}/${hx((i % 97) + 3)}${"b".repeat(100)}`), `-${"e7".repeat(62)}/${"9".repeat(400)}`],

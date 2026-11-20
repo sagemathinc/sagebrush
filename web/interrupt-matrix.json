@@ -926,6 +926,13 @@
    "owner": "polynomial factorization"
   },
   {
+   "id": "engineCall:qpoly_eval",
+   "transport": "engineCall:qpoly_eval",
+   "status": "planned",
+   "family": "E5 polynomials",
+   "owner": "polynomial factorization"
+  },
+  {
    "id": "engineCall:qpoly_integral",
    "transport": "engineCall:qpoly_integral",
    "status": "planned",

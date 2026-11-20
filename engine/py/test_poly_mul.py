@@ -641,6 +641,113 @@ def qadd_checks(r):
     return n
 
 
+def qeval_checks(r):
+    """sagebrush.poly.qeval (the engine's qpoly_eval) against Fraction
+    arithmetic (here only), one value in lowest terms; its exact-type pins
+    (refused before the bridge); Sage mode's f(v) through it for an exact
+    integer or rational v, in QQ when the ring or v is, as Sage; other
+    points on the old path; and one past the reply cap a typed refusal."""
+    from fractions import Fraction
+    from sagebrush import _engine as E
+    n = 0
+    for _ in range(200):
+        a = [Fraction(coef(r, r.randint(0, 120)), r.randint(1, 1 << r.randint(1, 60))) for _ in range(r.randint(0, 14))]
+        v = Fraction(coef(r, r.randint(0, 90)), r.randint(1, 1 << r.randint(1, 70))) if r.random() < 0.8 else coef(r, r.randint(0, 90))
+        want = sum((c * Fraction(v) ** i for i, c in enumerate(a)), Fraction(0))
+        assert P.qeval(a, v) == want, (a, v)
+        n += 1
+    assert P.qeval([1, 0, 1], Fraction(1, 3)) == Fraction(10, 9) and P.qeval([1, 2, 3], Fraction(1, 3)) == 2
+    assert P.qeval([], 5) == 0 and P.qeval([Fraction(1, 2), 3], 0) == Fraction(1, 2)
+    assert P.qeval([1, 0, 1], Fraction(-1, 3), raw=True) == "a/9"
+    name = "_sbengine" if hasattr(E, "_sbengine") else "_native"
+    real = getattr(E, name)
+    calls = []
+
+    class Spy:
+        def call(self, text):
+            calls.append(text)
+            return '{"ok":"0"}'
+
+    class I1(int):
+        def __index__(self):
+            return 0
+    setattr(E, name, Spy())
+    try:
+        for bad in [I1(3), True, 1.5, "1", None]:
+            for f in (lambda: P.qeval([1, bad], 2), lambda: P.qeval([1], bad)):
+                try:
+                    f()
+                except TypeError:
+                    pass
+                else:
+                    raise AssertionError("accepted %r" % (bad,))
+                n += 1
+    finally:
+        setattr(E, name, real)
+    assert calls == [], calls
+    try:
+        import sagebrush.sage as S
+    except ImportError:
+        import sage_all as S
+    QQ, ZZ = S.QQ, S.ZZ
+    Z, R = S.PolynomialRing(ZZ, "t"), S.PolynomialRing(QQ, "x")
+    t, x = Z.gen(), R.gen()
+    f, g = t ** 2 + 1, x ** 2 / 3 + x - QQ(1) / 2
+    pins = [
+        (f(3), 10, ZZ), (f(QQ(3)), 10, QQ), (f(QQ(1) / 3), Fraction(10, 9), QQ), (Z(0)(QQ(1) / 3), 0, QQ),
+        (Z(5)(QQ(1) / 3), 5, QQ), (Z(0)(3), 0, ZZ), (g(3), Fraction(11, 2), QQ), (g(QQ(-1) / 2), Fraction(-11, 12), QQ),
+        (R(0)(7), 0, QQ), (f(t=-2), 5, ZZ),
+    ]
+    for got, want, ring in pins:
+        # (an element of QQ is a Rational; of ZZ an int)
+        assert (type(got) is type(QQ(1)) if ring is QQ else isinstance(got, int)) and Fraction(got) == want, (got, want, ring)
+        n += 1
+    # (other points keep the old path: a polynomial, True)
+    assert f(t + 1) == t ** 2 + 2 * t + 2 and f(True) == 2
+    n += 1
+    # (the selector compares the point's class by identity only: a class
+    # whose metaclass hash or equality raises is never hashed or compared,
+    # and an int subclass keeps the old path)
+    hooks = []
+
+    class Hostile(type):
+        def __hash__(cls):
+            hooks.append("hash")
+            raise RuntimeError("untrusted class hash invoked")
+
+        def __eq__(cls, other):
+            hooks.append("eq")
+            raise RuntimeError("untrusted class equality invoked")
+
+    class I(int, metaclass=Hostile):
+        pass
+    assert f(I(3)) == 10 and hooks == [], hooks
+    n += 1
+    # (the engine refuses a point that is not the canonical token in lowest
+    # terms, an explicit /1 included; v = 0 reduces a_0)
+    for bad in ("2/6", "-2/6", "0/5", "0/1", "3/1"):
+        try:
+            E.call("qpoly_eval", a="1,0,1", b=bad)
+        except ValueError as e:
+            assert "lowest terms" in str(e), e
+        else:
+            raise AssertionError("an unreduced point was admitted: %s" % bad)
+        n += 1
+    assert E.call("qpoly_eval", a="1,0,1", b="1/3") == "a/9"
+    assert E.call("qpoly_eval", a="2/4,1", b="0") == "1/2" and E.call("qpoly_eval", a="0/2,1", b="0") == "0"
+    n += 1
+    # one past the reply cap: a typed refusal before any work
+    # (1000 terms at a 1,200,000-bit point: a value of about 2^30 bits)
+    try:
+        f.parent()([1] * 1000)(ZZ(1) << 1200000)
+    except ValueError as e:
+        assert "reply" in str(e), e
+    else:
+        raise AssertionError("past the reply cap: accepted")
+    n += 1
+    return n
+
+
 def call_hex_checks(r):
     """sagebrush._engine.call_hex, the lean text lane poly.mul and qmul use:
     the same values as call() for ok replies (the empty one included) and
@@ -845,6 +952,7 @@ def main():
     n += qdivrem_checks(r)
     n += qscale_checks(r)
     n += qadd_checks(r)
+    n += qeval_checks(r)
     print("poly_mul against exact products: %d cases ok" % n)
 
 

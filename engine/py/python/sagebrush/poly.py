@@ -281,6 +281,23 @@ def qsub(a, b, raw=False):
     return r if raw else _qlist(r)
 
 
+def qeval(a, v, raw=False):
+    """a(v) for a polynomial a over Q and a rational v (int and Fraction
+    coefficients, constant term first), in lowest terms: the engine's
+    qpoly_eval (the common denominator, then Horner on integers), refused
+    past its caps (raw=True: the reply's token).
+
+    >>> from fractions import Fraction
+    >>> from sagebrush.poly import qeval
+    >>> qeval([1, 0, 1], Fraction(1, 3)), qeval([1, 2, 3], Fraction(1, 3))
+    (Fraction(10, 9), 2)
+    >>> qeval([], 5)
+    0
+    """
+    r = call_hex("qpoly_eval", _qtokens(a, "qeval"), _qtokens((v,), "qeval"))
+    return r if raw else _token(r)
+
+
 def gcd(a, b):
     """The gcd in Z[x] of integer polynomials, with positive leading
     coefficient (constant term first; [] if both are zero)."""
