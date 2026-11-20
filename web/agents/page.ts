@@ -135,7 +135,7 @@ function submit(mode: UserEntry["mode"]) {
   scrollToEnd(true);
 }
 
-function answer(thread: Thread, attention: string, approve: boolean, turnId: string, instance: string) {
+function answer(thread: Thread, attention: string, approve: boolean | "turn", turnId: string, instance: string) {
   if (session.answer(thread, attention, approve, turnId, instance)) renderThread();
 }
 
@@ -1357,6 +1357,8 @@ function mountPairing(ws: Workspace) {
     runVerbs: runVerbsFor(agentRuns(ws)),
     button: $("#connect"),
     notebookEdit: editNotebook,
+    // (the chat's web cards offer "for this turn" here, where they're drawn: egress.turn)
+    egressTurn: true,
     onCreated: (c, p) => { if (c.kind === "notebook" && c.ref) void agentMade(c, p, madeAt(c, p)); },
     // (an agent's own branch, chat plan PR 3: offered here, where agents work)
     branches: gitBranches,
