@@ -386,7 +386,9 @@ const ready = (child = "child-1") => ({ jsonrpc: "2.0", method: "agent.ready", p
   await until(() => runner.forwarded.length === 1, "the refusal");
   ok(/not granted|grant/.test(JSON.parse(runner.forwarded[0]).error?.message ?? ""), "before the person's grant, a call is refused (nothing of the workspace read)");
   await p.allow({ folders: ["/"], write: false, expires: null }, false);
-  await until(() => runner.forwarded.some((m) => JSON.parse(m).method === "page.features"), "the grant told");
+  // (both sent by allow(), the page's features first since the grant's order changed: waited for together, not one then
+  //  a look at what the other has reached by then)
+  await until(() => runner.forwarded.some((m) => JSON.parse(m).method === "page.features") && runner.forwarded.some((m) => JSON.parse(m).method === "grant.changed"), "the grant told");
   const n = runner.forwarded.length;
   ok(runner.forwarded.slice(1, n).some((m) => JSON.parse(m).method === "grant.changed") && runner.forwarded.some((m) => JSON.parse(m).method === "page.features" && JSON.parse(m).params.features.includes("permission.digest")), "the grant is told, and permission.digest among the page's features");
   ws.recv({ jsonrpc: "2.0", id: "s2", method: "workspace.read", params: { path: "/a" } });
