@@ -153,7 +153,7 @@ pub fn settings_script(app: &tauri::AppHandle) -> String {
     let keys = serde_json::to_string(SETTINGS_KEYS).unwrap_or_else(|_| "[]".into());
     let problem = serde_json::to_string(&problem).unwrap_or_else(|_| "\"\"".into());
     format!("window.__sbSettingsProblem = {problem};\n")
-        + &include_str!("settings-init.js").replace("/*SETTINGS*/null", &serde_json::Value::Object(kept).to_string()).replace("/*KEYS*/[]", &keys)
+        + &fill_settings_script(include_str!("settings-init.js"), &serde_json::Value::Object(kept).to_string(), &keys)
 }
 /// (settings.json that couldn't be read nor set aside: not written over this launch)
 static SETTINGS_BLOCKED: std::sync::atomic::AtomicBool = std::sync::atomic::AtomicBool::new(false);

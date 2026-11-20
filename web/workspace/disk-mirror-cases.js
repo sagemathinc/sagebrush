@@ -13,7 +13,22 @@ let n = 0;
 const launch = async () => { n++; localStorage.clear(); return W.Workspace.open({ name: `ws-disk-${n}-${Math.random().toString(36).slice(2, 8)}`, mainName: `main-disk-${n}` }); };
 const fast = (ms) => tick(Math.min(ms, 5));
 
-/** A disk in memory: files (bytes, mtime, sha256) and folders, by workspace path. */
+/** disk_fs.rs components() and windows_alias(), as the app's disk enforces them on every verb: a path with a name
+ * the disk refuses is an error (never a CONFLICT), so these tests see what the app would. */
+const DEVICE = (c) => {
+  const stem = [...c.split(".")[0].replace(/ +$/, "")].map((ch) => (ch < "\x80" ? ch.toUpperCase() : ch)), head = stem.slice(0, 3).join("");
+  return stem.length === 3 ? ["CON", "PRN", "AUX", "NUL"].includes(head) : stem.length === 4 && ["COM", "LPT"].includes(head) && /[1-9\u00b9\u00b2\u00b3]/.test(stem[3]);
+};
+function diskRule(p) {
+  if (!p.startsWith("/")) throw new Error(`${JSON.stringify(p)}: not a workspace path`);
+  if (p === "/") return;
+  for (const c of p.slice(1).split("/")) {
+    if (!c || c === "." || c === ".." || /[\\\0:\x00-\x1f]/.test(c) || enc(c).length > 255) throw new Error(`${JSON.stringify(p)}: not a workspace path`);
+    if (/[. ]$/.test(c) || DEVICE(c)) throw new Error(`${JSON.stringify(p)}: ${JSON.stringify(c)} isn't a name Windows keeps as written`);
+  }
+}
+
+/** A disk in memory: files (bytes, mtime, sha256) and folders, by disk path, with disk.rs's name rule. */
 function memDisk() {
   const files = new Map(), dirs = new Set(["/"]), held = new Map(), fail = new Map(), writes = new Map();
   let clock = 1000;
@@ -25,9 +40,10 @@ function memDisk() {
   const disk = {
     files, dirs, writes,
     async list() { return [...[...dirs].filter((d) => d !== "/").map(st), ...[...files.keys()].map(st)]; },
-    async stat(p) { return st(p); },
-    async read(p) { if (!files.has(p)) throw new Error("no " + p); return files.get(p).bytes.slice(); },
+    async stat(p) { diskRule(p); return st(p); },
+    async read(p) { diskRule(p); if (!files.has(p)) throw new Error("no " + p); return files.get(p).bytes.slice(); },
     async write(p, b, expect) {
+      diskRule(p);
       if (held.has(p)) await held.get(p).promise;
       const f = fail.get(p);
       if (f && f.n !== 0) { f.n--; throw new Error("disk full"); }
@@ -37,8 +53,10 @@ function memDisk() {
       await put(p, b, ++clock);
       return st(p);
     },
-    async mkdir(p) { mk(p); },
+    async mkdir(p) { diskRule(p); mk(p); },
     async rename(a, b, expect) {
+      diskRule(a);
+      diskRule(b);
       if (!files.has(a) && !dirs.has(a)) { if (expect === "any") throw new Error("no " + a); throw new Error(W.CONFLICT); }
       if (!holds(expect, a) || st(b)) throw new Error(W.CONFLICT);
       mk(parentOf(b));
@@ -47,6 +65,7 @@ function memDisk() {
       for (const d of [...dirs]) if (d === a || d.startsWith(a + "/")) { dirs.delete(d); dirs.add(b + d.slice(a.length)); }
     },
     async remove(p, expect) {
+      diskRule(p);
       if (!holds(expect, p)) throw new Error(W.CONFLICT);
       files.delete(p); for (const k of [...files.keys()]) if (k.startsWith(p + "/")) files.delete(k); for (const d of [...dirs]) if (d === p || d.startsWith(p + "/")) dirs.delete(d);
     },
@@ -451,6 +470,176 @@ async function cases() {
 
   // ---- 8f. Empty Trash's question in the app says what it deletes
   check(W.emptyTrashQuestion(true) === "Delete everything in Trash for good, including files changed outside Sagebrush while they were in Trash? This can't be undone: their histories and old versions go too.", "Empty Trash's question in the app: everything in it, files changed outside Sagebrush included");
+
+  // ---- 8i. names the disk refuses (disk_fs.rs components; Windows's own < > " | ? *): escaped on disk, read back as
+  // they were, and never in the way of the changes after them; a name too long even escaped given a shortened disk name
+  {
+    const disk = memDisk(), ws = await launch(), skipped = [], named = [];
+    const m = mirror(ws, disk, new Map(), { skipped: (p, e) => skipped.push([p, String(e?.message ?? e)]), named: (p, d) => named.push([p, d]) });
+    const names = ["/Lecture 3: Groups.ipynb", "/aux.txt", "/COM1.csv", "/trailing.", "/a\\b.txt", "/100%25 done.csv", "/Why?.csv", "/sub: dir/x.csv"];
+    await ws.create(names[0], { content: NB("g = 1") });
+    for (const p of names.slice(1, -1)) await ws.create(p, { content: enc("data " + p) });
+    await ws.mkdir("/sub: dir");
+    await ws.create(names.at(-1), { content: enc("in a folder") });
+    const long = "/" + "\u754c".repeat(100) + ".txt";
+    await ws.create(long, { content: enc("too long for a disk") });
+    await ws.create("/after.csv", { content: enc("after them") });
+    check(await m.drain(5000), "names the disk refuses: the queue drains, nothing waits on them");
+    check(text(disk, "/after.csv") === "after them", "a change after a refused name still reaches the disk");
+    const want = ["/Lecture 3%3A Groups.ipynb", "/%61ux.txt", "/%43OM1.csv", "/trailing%2E", "/a%5Cb.txt", "/100%2525 done.csv", "/Why%3F.csv", "/sub%3A dir/x.csv"];
+    check(want.every((d) => disk.files.has(d)), "escaped on disk: " + JSON.stringify([...disk.files.keys()].sort()));
+    check(nbSource(text(disk, want[0])) === "g = 1", "\"Lecture 3: Groups\" written, escaped");
+    const short = [...disk.files.keys()].find((k) => / \(long name\)\.txt$/.test(k));
+    check(!!short && enc(short.slice(1)).length <= 255 && text(disk, short) === "too long for a disk" && named.length === 1 && named[0][0] === long && named[0][1] === short && !skipped.length, "a name over 255 bytes even escaped: written under a shortened name, and said " + JSON.stringify([short, named, skipped]));
+    check(!m.failing, "nothing left failing at the head of the queue");
+    // (renamed to one the disk can keep: its file moves there, nothing left behind, no conflict said)
+    const conflicts = [];
+    m.on.conflict = (a, b) => conflicts.push([a, b]);
+    await ws.rename(long, "/short.txt");
+    await m.drain(5000);
+    check(text(disk, "/short.txt") === "too long for a disk" && !disk.files.has(short) && conflicts.length === 0, "the long name renamed to a short one: moved on disk, nothing left behind, no conflict said");
+    // (a file renamed to a name too long: moved to a shortened disk name; a new file of its old name is another file)
+    await ws.rename("/after.csv", long);
+    await m.drain(5000);
+    const short2 = [...disk.files.keys()].find((k) => / \(long name\)\.txt$/.test(k));
+    check(!disk.files.has("/after.csv") && text(disk, short2) === "after them", "renamed to a name too long: moved on disk to a shortened name");
+    await ws.write(long, enc("edited under the long name"));
+    await ws.create("/after.csv", { content: enc("a new file of the old name") });
+    await m.drain(5000);
+    check(text(disk, short2) === "edited under the long name" && text(disk, "/after.csv") === "a new file of the old name" && conflicts.length === 0, "…its saves go there, and a new file of its old name is another file on disk");
+    // (a new file whose own name is that shortened disk name: another file on disk, never written over it, nor over
+    // another program's file at the next free-looking name)
+    const [sb, se] = [short2.slice(0, short2.lastIndexOf(".")), short2.slice(short2.lastIndexOf("."))];
+    await disk.external(`${sb} 2${se}`, "another program's");
+    await ws.create(short2, { content: enc("named like the shortened one") });
+    await m.drain(5000);
+    check(text(disk, short2) === "edited under the long name" && text(disk, `${sb} 2${se}`) === "another program's" && text(disk, `${sb} 3${se}`) === "named like the shortened one", "a new file named as another's shortened disk name: written beside it at a free name, never over it nor another program's file");
+    await ws.remove(short2);
+    await m.drain(5000);
+    await ws.rename(long, "/after2.csv");
+    await m.drain(5000);
+    check(text(disk, "/after2.csv") === "edited under the long name" && !disk.files.has(short2) && text(disk, "/after.csv") === "a new file of the old name", "…renamed again, it moves on disk, nothing left behind");
+    m.close();
+    // (the round trip: the next launch reads each name back exactly)
+    const ws2 = await launch(), r = await W.importDisk(ws2, disk);
+    const back = (await ws2.list("/", { recursive: true })).map((e) => e.path).filter((p) => !p.startsWith("/Trash")).sort();
+    check(r.skipped.length === 0 && names.every((p) => back.includes(p)) && back.includes("/sub: dir"), "the next launch reads every escaped name back as it was: " + JSON.stringify(back));
+    check(dec((await ws2.read("/a\\b.txt")).content) === "data /a\\b.txt", "…with its contents");
+    // (a disk name another program made that only looks escaped: read as it is, and written back to itself)
+    await disk.external("/report%20final.txt", "made outside");
+    const ws3 = await launch(), r3 = await W.importDisk(ws3, disk);
+    check(dec((await ws3.read("/report%20final.txt")).content) === "made outside", "a name that only looks escaped: read as it is");
+    const m3 = new W.DiskMirror(ws3, disk, r3.known, {}, fast, [], r3.alias).start();
+    await ws3.write("/report%20final.txt", enc("edited here"));
+    await m3.drain(5000);
+    check(text(disk, "/report%20final.txt") === "edited here" && !disk.files.has("/report%2520final.txt"), "…and written back to the same file, not beside it");
+    await ws3.rename("/report%20final.txt", "/report final.txt");
+    await m3.drain(5000);
+    check(text(disk, "/report final.txt") === "edited here" && !disk.files.has("/report%20final.txt"), "…and renamed on disk with it");
+    m3.close();
+    // (two disk names read back as one workspace name: the escaping of "x%20y" and "x%20y" made outside: both
+    // imported, the second at a free name, each written back to its own file)
+    await disk.external("/x%2520y.txt", "escaped by Sagebrush");
+    await disk.external("/x%20y.txt", "made outside");
+    const ws4 = await launch(), r4 = await W.importDisk(ws4, disk);
+    const xs = (await ws4.list("/")).map((e) => e.path).filter((p) => p.startsWith("/x%20y")).sort();
+    check(r4.skipped.length === 0 && xs.length === 2, "two disk names read back as one: both imported " + JSON.stringify([xs, r4.skipped]));
+    const m4 = new W.DiskMirror(ws4, disk, r4.known, {}, fast, [], r4.alias).start();
+    for (const p of xs) await ws4.write(p, enc("edited " + dec((await ws4.read(p)).content)));
+    await m4.drain(5000);
+    check(text(disk, "/x%2520y.txt") === "edited escaped by Sagebrush" && text(disk, "/x%20y.txt") === "edited made outside" && ![...disk.files.keys()].some((k) => k.includes("from Sagebrush")), "…each written back to its own file, no conflict copy");
+    m4.close();
+    // (the codes themselves: every name round-trips; a name holding a code is escaped so it reads back as itself)
+    const all = ["plain.txt", "a:b", "%", "%3A", "100%25", "CON", "con.txt", "Aux.tar.gz", "LPT\u00b9", "COM0", "CONSOLE", "CONIN$", "conout$.log", "x.", "x ", "\\", "caf\u00e9.txt", "%E9", "a?b<c>|\"*"];
+    check(all.every((n) => W.decodeName(W.encodeName(n)).name === n && W.decodeName(W.encodeName(n)).exact), "every name reads back exactly as it was escaped");
+    check(W.encodeName("plain.txt") === "plain.txt" && W.encodeName("COM0") === "COM0" && W.encodeName("CONSOLE") === "CONSOLE" && W.encodeName("%E9") === "%E9", "a name the disk keeps, holding no code, is its own disk name");
+    let lone = false;
+    try { W.encodeName("a\ud800b"); } catch (e) { lone = e instanceof W.NameError; }
+    check(lone && !/[\ud800-\udfff]/.test(W.shortName("a\ud800b")), "a name that isn't valid Unicode: no escaping keeps it, and its shortened name is valid");
+  }
+
+  // ---- 8k. names that are the disk's own: a folder of the person's named .Trash is never the disk's Trash; a file
+  // named like a conflict's copy is never written over it
+  {
+    const disk = memDisk(), ws = await launch(), m = mirror(ws, disk);
+    await ws.mkdir("/.Trash");
+    await ws.create("/.Trash/notes.txt", { content: enc("my own folder") });
+    await ws.create("/notes.txt", { content: enc("to delete") });
+    await ws.remove("/notes.txt");
+    await m.drain(5000);
+    check(text(disk, "/%2ETrash/notes.txt") === "my own folder" && text(disk, "/.Trash/notes.txt") === "to delete", "a folder named .Trash: escaped on disk, apart from the disk's Trash " + JSON.stringify([...disk.files.keys()]));
+    m.close();
+    const ws2 = await launch(), r2 = await W.importDisk(ws2, disk);
+    check(dec((await ws2.read("/.Trash/notes.txt")).content) === "my own folder" && dec((await ws2.read("/Trash/notes.txt")).content) === "to delete" && r2.skipped.length === 0, "…the next launch: the folder in the files, the deleted file in Trash");
+    await disk.external("/a.txt", "x");
+    const m3ws = await launch(), r3 = await W.importDisk(m3ws, disk);
+    const m3 = new W.DiskMirror(m3ws, disk, r3.known, {}, fast, [], r3.alias).start();
+    await disk.external("/a.txt", "changed outside");
+    await m3ws.write("/a.txt", enc("Sagebrush's"));
+    await m3.drain(5000);
+    check(text(disk, "/a (from Sagebrush).txt") === "Sagebrush's", "a conflict: Sagebrush's version beside the file");
+    await m3ws.create("/a (from Sagebrush).txt", { content: enc("a file of that name") });
+    await m3ws.write("/a.txt", enc("Sagebrush's again"));
+    await m3.drain(5000);
+    check(text(disk, "/a (from Sagebrush).txt") === "Sagebrush's again" && [...disk.files.values()].some((f) => dec(f.bytes) === "a file of that name"), "a file named like the conflict's copy: written beside it, never over it " + JSON.stringify([...disk.files.keys()]));
+    m3.close();
+  }
+
+  // ---- 8j. Trash across launches: the disk's Trash imported into Trash; deleting a name used in an earlier launch's
+  // Trash, then emptying Trash, deletes it for good (the next launch doesn't bring it back)
+  {
+    const disk = memDisk();
+    const ws1 = await launch(), m1 = mirror(ws1, disk);
+    await ws1.create("/a.txt", { content: enc("first") });
+    await ws1.remove("/a.txt");
+    await m1.drain(5000);
+    m1.close();
+    check(text(disk, "/.Trash/a.txt") === "first", "launch 1: a.txt in Trash on disk");
+    const ws2 = await launch(), r2 = await W.importDisk(ws2, disk);
+    check(r2.skipped.length === 0 && dec((await ws2.read("/Trash/a.txt")).content) === "first", "launch 2: the disk's Trash imported into Trash");
+    const m2 = new W.DiskMirror(ws2, disk, r2.known, {}, fast, [], r2.alias).start();
+    await ws2.create("/a.txt", { content: enc("second") });
+    const t = await ws2.remove("/a.txt");
+    await m2.drain(5000);
+    check(!disk.files.has("/a.txt") && [...disk.files.keys()].filter((k) => k.startsWith("/.Trash/")).length === 2, "launch 2: a.txt deleted again: off the top of the disk, both in Trash " + JSON.stringify([...disk.files.keys()]) + " " + t.path);
+    await ws2.emptyTrash();
+    await m2.drain(5000);
+    check(![...disk.files.keys()].some((k) => k === "/a.txt" || k.startsWith("/.Trash/")), "launch 2: Trash emptied: both gone from disk " + JSON.stringify([...disk.files.keys()]));
+    m2.close();
+    const ws3 = await launch(), r3 = await W.importDisk(ws3, disk);
+    check(!(await ws3.stat("/a.txt")) && (await ws3.list("/Trash")).length === 0 && r3.files === 0, "launch 3: a.txt stays gone");
+    // (a Trash name taken on disk that the workspace doesn't know of: the move goes to a free name, emptying Trash
+    // deletes that one, and the other program's file is left)
+    const m3 = new W.DiskMirror(ws3, disk, r3.known, {}, fast, [], r3.alias).start();
+    await disk.external("/.Trash/b.txt", "someone else's");
+    await ws3.create("/b.txt", { content: enc("mine") });
+    await ws3.remove("/b.txt");
+    await m3.drain(5000);
+    check(!disk.files.has("/b.txt") && text(disk, "/.Trash/b 2.txt") === "mine" && text(disk, "/.Trash/b.txt") === "someone else's", "into Trash, its name taken on disk: moved to a free name, nothing left at the top " + JSON.stringify([...disk.files.keys()]));
+    await ws3.emptyTrash();
+    await m3.drain(5000);
+    check(!disk.files.has("/.Trash/b 2.txt") && text(disk, "/.Trash/b.txt") === "someone else's", "…emptying Trash deletes that one, not the other program's");
+    // (a Trash name that is another's disk path: b.txt went to "b 2.txt" on disk; then a file named "b 2.txt" deleted
+    // too: it goes to a free name, never over the first)
+    await ws3.create("/b.txt", { content: enc("first") });
+    await ws3.remove("/b.txt");
+    await ws3.create("/b 2.txt", { content: enc("second") });
+    await ws3.remove("/b 2.txt");
+    await m3.drain(5000);
+    const inTrash = [...disk.files.keys()].filter((k) => k.startsWith("/.Trash/")).sort();
+    check(inTrash.length === 3 && inTrash.map((k) => text(disk, k)).sort().join() === "first,second,someone else's", "a Trash name that is another's disk path: never written over " + JSON.stringify(inTrash));
+    await ws3.emptyTrash();
+    await m3.drain(5000);
+    check(JSON.stringify([...disk.files.keys()].filter((k) => k.startsWith("/.Trash/"))) === JSON.stringify(["/.Trash/b.txt"]), "…emptying Trash deletes both, not the other program's");
+    m3.close();
+    // (a folder in the disk's Trash that only partly imports (a notebook that can't be read): put in Trash all the
+    // same, never left at the top of the files; what didn't import reported)
+    const disk2 = memDisk();
+    await disk2.external("/.Trash/F/ok.txt", "fine");
+    await disk2.external("/.Trash/F/bad.ipynb", "not JSON");
+    const ws5 = await launch(), r5 = await W.importDisk(ws5, disk2);
+    check(!(await ws5.stat("/F")) && !!(await ws5.stat("/Trash/F/ok.txt")) && r5.skipped.length === 1 && r5.skipped[0][0] === "/.Trash/F/bad.ipynb", "a Trash folder that partly imports: in Trash, not at the top " + JSON.stringify(r5.skipped));
+  }
 
   // ---- 9. what the import can't open: reported, left on disk
   {

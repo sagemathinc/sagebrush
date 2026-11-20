@@ -2,8 +2,8 @@
 // the documents and files are real files under Workspace/ in the app's data folder, the canonical copy; this page's
 // workspace (IndexedDB, in a web view that keeps nothing between launches) is a cache of them for one launch.
 //   - importDisk: at the launch's first page, the tree on disk is made in the (empty) workspace, through its own
-//     verbs: folders, then notebooks (.ipynb), boards (.board.json) and data files.  The disk's Trash (.Trash/) is
-//     left on disk, not shown.  What can't be opened is reported (and stays on disk).
+//     verbs: the disk's Trash (.Trash/) into Trash, then folders, then notebooks (.ipynb), boards (.board.json) and
+//     data files.  What can't be opened is reported (and stays on disk).
 //   - DiskMirror: every change of the workspace becomes a task for the disk the moment it is committed, the reading of
 //     its contents initiated then (so a later rename can't change what it writes; not an immutable snapshot: a read
 //     that fails is tried again on the contents as they then are, and a move's recovery writes the workspace's
@@ -15,14 +15,16 @@
 //     waiting (`pending`, which the page shows as "Saving…"); a quit or a closed window waits for them
 //     (drainOnQuit), and so does leaving the page (beforeLeave).
 //   - A task that fails (not a conflict) stays first, is tried again (1 s, 2 s, 5 s, 10 s, then every 30 s), and is
-//     said to the person, by its file, until it succeeds: nothing after it runs before it.
+//     said to the person, by its file, until it succeeds: nothing after it runs before it.  A task that can never
+//     succeed (a name the disk can't keep even escaped: over 255 bytes) is left out and said, and the rest go on.
 //   - Every change carries what this page expects the file to be (the size, time and SHA-256 it last read or wrote,
 //     or that there is none), checked by disk.rs right before the change.  A file another program changed is never
 //     written over, moved or deleted: this page's version goes beside it, as "<name> (from Sagebrush)<ext>" (or
 //     "… 2", "… 3": whichever is free, never one that is there), later saves of it go there too, and the person is
 //     told.  What is left is the moment between disk.rs's check and its rename.  The check is a file's: a folder's
 //     move or removal (emptying Trash) doesn't check what is in it.
-// Folders and files are named as in the workspace; Trash, "/Trash", is ".Trash" on disk.
+// Folders and files are named as in the workspace, a name the disk refuses escaped (encodeName, below); Trash, "/Trash",
+// is ".Trash" on disk, and what is in it is imported into Trash at a launch's start.
 import { TRASH, kindOf, nameOf, parentOf, splitExt, within } from "./paths";
 import { notebookFileText, boardFileText } from "./file-bytes";
 import { Images } from "../board/images";
@@ -58,9 +60,136 @@ export function tauriDisk(invoke: (cmd: string, args?: any, opts?: any) => Promi
 }
 
 const DISK_TRASH = "/.Trash";
-/** A workspace path's on disk, and back. */
-export const toDisk = (p: string) => (within(p, TRASH) ? DISK_TRASH + p.slice(TRASH.length) : p);
-export const fromDisk = (p: string) => (within(p, DISK_TRASH) ? TRASH + p.slice(DISK_TRASH.length) : p);
+
+// ---- names: a workspace name the disk refuses (disk_fs.rs components: "\\", ":", control characters; a Windows device
+// name, CON, aux.txt, COM1, …; a trailing dot or space), or that Windows itself refuses (< > " | ? *, CONIN$, CONOUT$),
+// is written under an escaped name, and read back as it was.  The escape is percent-style, one fixed set of codes: "%"
+// itself, each refused character, the first letter of a device's name, a trailing dot or space.  A name needing none
+// of it is its own disk name, unless it holds one of those codes already (then its "%"s are escaped too, so it reads
+// back as itself).  A name the disk can't keep even escaped (over 255 bytes, or not valid Unicode) throws NameError:
+// the mirror then gives it a shortened disk name (shortName) and keeps that as its alias.  A disk name is read as the
+// name it escapes only if escaping that name gives it back exactly; any other (one made by another program:
+// "report%20final.pdf") is read as it is, and the mirror keeps its disk path (DiskMirror's alias), so the round trip
+// loses nothing either way.
+const CODES = /%(25|5C|3A|[01][0-9A-F]|2E|20|43|50|41|4E|4C|63|70|61|6E|6C|3C|3E|22|7C|3F|2A)/g;
+const REFUSED = /[%\\:\x00-\x1f<>"|?*]/g;
+const hex = (c: string) => "%" + c.charCodeAt(0).toString(16).toUpperCase().padStart(2, "0");
+/** Windows's device names, as disk_fs.rs windows_alias (CON, PRN, AUX, NUL, COM1–9, COM¹²³, LPT1–9, LPT¹²³, with any
+ * extension, in any case, the stem's trailing spaces ignored), and CONIN$ and CONOUT$. */
+const device = (c: string) => {
+  const stem = [...c.split(".")[0].replace(/ +$/, "")].map((ch) => (ch < "\x80" ? ch.toUpperCase() : ch));
+  const head = stem.slice(0, 3).join("");
+  if (stem.length === 3) return ["CON", "PRN", "AUX", "NUL"].includes(head);
+  if (stem.length === 4) return (head === "COM" || head === "LPT") && /[1-9\u00b9\u00b2\u00b3]/.test(stem[3]);
+  return ["CONIN$", "CONOUT$"].includes(stem.join(""));
+};
+/** A name the disk can't keep as written, even escaped. */
+export class NameError extends Error {}
+const bytesOf = (s: string) => new TextEncoder().encode(s).length;
+const LONE = /[\ud800-\udbff](?![\udc00-\udfff])|(?<![\ud800-\udbff])[\udc00-\udfff]/;
+/** `n` escaped, whatever its length. */
+function escapeName(n: string): string {
+  CODES.lastIndex = 0;
+  const looks = CODES.test(n);
+  CODES.lastIndex = 0;
+  if (!(looks || /[\\:\x00-\x1f<>"|?*]/.test(n) || /[. ]$/.test(n) || device(n))) return n;
+  let s = n.replace(REFUSED, hex);
+  if (/[. ]$/.test(s)) s = s.slice(0, -1) + hex(s.slice(-1));
+  if (device(s)) s = hex(s[0]) + s.slice(1);
+  return s;
+}
+/** A workspace name's disk name. */
+export function encodeName(n: string): string {
+  if (LONE.test(n)) throw new NameError(`${JSON.stringify(n)}: a name the disk can keep is valid Unicode`);
+  const s = escapeName(n);
+  if (bytesOf(s) > 255) throw new NameError(`${JSON.stringify(n)}: a name the disk can keep is at most 255 bytes${s === n ? "" : ", escaped"}`);
+  return s;
+}
+/** The disk name for a name encodeName can't keep: escaped, its broken characters replaced, cut to fit with its
+ * extension kept, and marked "(long name)" (DiskMirror then picks a free one and keeps it as the name's alias). */
+export function shortName(n: string): string {
+  const fixed = [...n].map((ch) => (LONE.test(ch) ? "_" : ch)).join(""), mark = " (long name)";
+  let [base, ext] = splitExt(fixed);
+  if (bytesOf(escapeName(ext)) > 40) { base = fixed; ext = ""; }
+  const cps = [...base];
+  // (245, not 255: room for DiskMirror's " 2", " 3", … when the name is taken)
+  while (cps.length && bytesOf(escapeName(cps.join("") + mark + ext)) > 245) cps.pop();
+  return encodeName(cps.join("") + mark + ext);
+}
+/** A disk name's workspace name, and whether it is that name's own escaping (else it's read as it is). */
+export function decodeName(d: string): { name: string; exact: boolean } {
+  const name = d.replace(CODES, (_, x) => String.fromCharCode(parseInt(x, 16)));
+  if (name === d) return { name, exact: true };
+  try { return encodeName(name) === d ? { name, exact: true } : { name: d, exact: false }; } catch { return { name: d, exact: false }; }
+}
+const mapNames = (p: string, f: (c: string) => string) => (p === "/" ? p : "/" + p.slice(1).split("/").map(f).join("/"));
+/** A name at the top of the files: escaped as encodeName, and a folder of the person's own named ".Trash" as
+ * "%2ETrash", so it is never the disk's Trash. */
+const OWN_TRASH = "%2ETrash";
+const encodeTop = (n: string) => (n === ".Trash" ? OWN_TRASH : encodeName(n));
+/** A workspace path's on disk (Trash as .Trash, each name escaped as encodeName), and back (each name as decodeName:
+ * `exact` false if one isn't an escaping, read as it is). */
+export function toDisk(p: string): string {
+  if (within(p, TRASH)) return mapNames(DISK_TRASH + p.slice(TRASH.length), encodeName);
+  if (p === "/") return p;
+  const [top, ...rest] = p.slice(1).split("/");
+  return "/" + [encodeTop(top), ...rest.map(encodeName)].join("/");
+}
+export function fromDiskPath(d: string): { path: string; exact: boolean } {
+  if (within(d, DISK_TRASH)) {
+    let exact = true;
+    const p = mapNames(d.slice(DISK_TRASH.length) || "/", (c) => { const r = decodeName(c); exact &&= r.exact; return r.name; });
+    return { path: TRASH + (p === "/" ? "" : p), exact };
+  }
+  let exact = true, first = true;
+  const p = mapNames(d, (c) => {
+    const top = first;
+    first = false;
+    if (top && c === OWN_TRASH) return ".Trash";
+    const r = decodeName(c);
+    exact &&= r.exact;
+    return r.name;
+  });
+  return { path: p, exact };
+}
+export const fromDisk = (d: string) => fromDiskPath(d).path;
+/** A workspace path's disk path given the paths read as they are (alias: workspace path -> disk path; the longest
+ * that holds `p` wins, the rest of `p` escaped below it). */
+export function diskPathOf(p: string, alias: Map<string, string>): string {
+  // (p's own path, then each folder it is in: the first with an alias is the longest)
+  let best: string | undefined;
+  if (alias.size) for (let q = p; ; q = parentOf(q)) { if (alias.has(q)) { best = q; break; } if (q === "/") break; }
+  if (!best) return toDisk(p);
+  const rest = p.slice(best.length);
+  return alias.get(best)! + (rest ? mapNames(rest, encodeName) : "");
+}
+/** A disk path's workspace path, the aliases read back (the inverse of diskPathOf), and whether it needs an alias of
+ * its own (a name read as it is): `alias`, for the caller to keep once the path is used. */
+export function workspacePathOf(d: string, alias: Map<string, string>, rev: Map<string, string> = reverse(alias)): { path: string; alias: boolean } {
+  let best: [string, string] | undefined;
+  if (rev.size) for (let q = d; ; q = parentOf(q)) { const k = rev.get(q); if (k !== undefined) { best = [k, q]; break; } if (q === "/") break; }
+  const rest = best ? d.slice(best[1].length) : "";
+  const p = best ? best[0] + (rest ? mapNames(rest, (c) => decodeName(c).name) : "") : fromDisk(d);
+  let same = false;
+  try { same = diskPathOf(p, alias) === d; } catch {}
+  return { path: p, alias: !same };
+}
+/** An alias map read backwards: disk path -> workspace path. */
+const reverse = (alias: Map<string, string>) => new Map([...alias].map(([k, v]) => [v, k]));
+/** `p`, or the first free "<name> 2<ext>", "… 3", … beside it in `ws` (a disk name read back as one already there). */
+async function freeIn(ws: any, p: string): Promise<string> {
+  if (!(await ws.stat(p))) return p;
+  const [base, ext] = splitExt(nameOf(p)), dir = parentOf(p) === "/" ? "" : parentOf(p);
+  for (let i = 2; ; i++) { const c = `${dir}/${base} ${i}${ext}`; if (!(await ws.stat(c))) return c; }
+}
+/** Where disk path `d` goes in `ws`: its workspace path, or a free one beside it if that is taken (two disk names
+ * read back as one), the alias it needs kept only once `use` has succeeded. */
+async function importAt(ws: any, d: string, alias: Map<string, string>, rev: Map<string, string>, use: (p: string) => Promise<void>): Promise<string> {
+  const w = workspacePathOf(d, alias, rev), p = await freeIn(ws, w.path);
+  await use(p);
+  if (w.alias || p !== w.path) { alias.set(p, d); rev.set(d, p); }
+  return p;
+}
 
 const enc = new TextEncoder(), dec = new TextDecoder();
 export async function sha256Hex(b: Uint8Array): Promise<string> {
@@ -80,26 +209,65 @@ export async function fileBytes(ws: any, p: string): Promise<Uint8Array | null> 
   return null;
 }
 
-/** The disk's tree made in `ws` (an empty workspace: this launch's): folders, then files.  Returns each file's stat
- * as read (with its SHA-256, for DiskMirror), what couldn't be imported and why, and how long it took. */
-export async function importDisk(ws: any, disk: Disk, now: () => number = () => performance.now()): Promise<{ known: Map<string, DiskStat>; skipped: [string, string][]; files: number; bytes: number; ms: number }> {
-  const t0 = now(), known = new Map<string, DiskStat>(), skipped: [string, string][] = [];
-  const all = (await disk.list()).filter((e) => !within(e.path, DISK_TRASH));
+/** The disk's tree made in `ws` (an empty workspace: this launch's): the disk's Trash first, then folders, then
+ * files, each disk name read back as decodeName.  Returns each file's stat as read (with its SHA-256, for DiskMirror),
+ * the paths read as they are (`alias`, for DiskMirror), what couldn't be imported and why, and how long it took. */
+export async function importDisk(ws: any, disk: Disk, now: () => number = () => performance.now()): Promise<{ known: Map<string, DiskStat>; alias: Map<string, string>; skipped: [string, string][]; files: number; bytes: number; ms: number }> {
+  const t0 = now(), known = new Map<string, DiskStat>(), alias = new Map<string, string>(), skipped: [string, string][] = [];
+  const listed = await disk.list();
   let files = 0, bytes = 0;
+  const file = async (e: DiskStat, p: string) => {
+    const b = await disk.read(e.path), kind = kindOf(p);
+    const content = kind === "file" ? b : JSON.parse(dec.decode(b));
+    await ws.create(p, { content });
+    known.set(e.path, { ...e, sha256: await sha256Hex(b) });
+    files++;
+    bytes += e.size;
+  };
+  // (the disk's Trash, while the workspace is still empty: each thing in it made at the top of the files, then put in
+  // Trash, where it is then /Trash/<its name>, as on disk, so a later deletion picks another name and emptying Trash
+  // deletes it; put back, it goes to the top of the files: the disk doesn't keep where it was.  A folder of it that
+  // only partly imports is put in Trash all the same, what didn't import reported)
+  for (const top of listed.filter((e) => parentOf(e.path) === DISK_TRASH)) {
+    const name = nameOf(workspacePathOf(top.path, alias).path), local = new Map<string, string>();
+    let temp: string | null = null;
+    try {
+      temp = await freeIn(ws, "/" + name);
+      const t = temp;
+      // (each disk path under the Trash entry, as a path under `temp`)
+      const here = (d: string) => t + (d === top.path ? "" : mapNames(d.slice(top.path.length), (c) => decodeName(c).name));
+      if (top.dir) {
+        await ws.mkdir(t);
+        const under = listed.filter((e) => e.path.startsWith(top.path + "/"));
+        for (const e of under.filter((e) => e.dir).sort((a, b) => a.path.length - b.path.length)) {
+          try { await ws.mkdir(here(e.path)); local.set(e.path, here(e.path)); } catch (err: any) { skipped.push([e.path, err?.message ?? String(err)]); }
+        }
+        for (const e of under.filter((e) => !e.dir)) {
+          try { await file(e, here(e.path)); local.set(e.path, here(e.path)); } catch (err: any) { skipped.push([e.path, err?.message ?? String(err)]); }
+        }
+      } else await file(top, t);
+    } catch (err: any) { skipped.push([top.path, err?.message ?? String(err)]); }
+    if (!temp || !(await ws.stat(temp))) continue;
+    try {
+      const put = await ws.remove(temp);
+      const inTrash: string = put?.path ?? TRASH + "/" + nameOf(temp);
+      // (each imported path's alias where its disk path isn't its escaping, now under Trash)
+      for (const [d, at] of [[top.path, temp], ...local] as [string, string][]) {
+        const w = inTrash + at.slice(temp.length);
+        let same = false;
+        try { same = diskPathOf(w, alias) === d; } catch {}
+        if (!same) alias.set(w, d);
+      }
+    } catch (err: any) { skipped.push([top.path, err?.message ?? String(err)]); }
+  }
+  const all = listed.filter((e) => !within(e.path, DISK_TRASH)), rev = reverse(alias);
   for (const e of all.filter((e) => e.dir).sort((a, b) => a.path.length - b.path.length)) {
-    try { await ws.mkdir(e.path); } catch (err: any) { skipped.push([e.path, err?.message ?? String(err)]); }
+    try { await importAt(ws, e.path, alias, rev, (p) => ws.mkdir(p)); } catch (err: any) { skipped.push([e.path, err?.message ?? String(err)]); }
   }
   for (const e of all.filter((e) => !e.dir)) {
-    try {
-      const b = await disk.read(e.path), kind = kindOf(e.path);
-      const content = kind === "file" ? b : JSON.parse(dec.decode(b));
-      await ws.create(e.path, { content });
-      known.set(e.path, { ...e, sha256: await sha256Hex(b) });
-      files++;
-      bytes += e.size;
-    } catch (err: any) { skipped.push([e.path, err?.message ?? String(err)]); }
+    try { await importAt(ws, e.path, alias, rev, (p) => file(e, p)); } catch (err: any) { skipped.push([e.path, err?.message ?? String(err)]); }
   }
-  return { known, skipped, files, bytes, ms: Math.round(now() - t0) };
+  return { known, alias, skipped, files, bytes, ms: Math.round(now() - t0) };
 }
 
 type Write = { k: "write"; path: string; bytes: Promise<Uint8Array | null>; capture: () => Promise<Uint8Array | null> };
@@ -107,6 +275,9 @@ type Task = Write | { k: "mkdir"; path: string } | { k: "move"; from: string; to
 const touches = (t: Task, p: string) => (t.k === "move" ? within(t.from, p) || within(p, t.from) || within(t.to, p) || within(p, t.to) : !!t.path && (within(t.path, p) || within(p, t.path)));
 const RETRY_MS = [1000, 2000, 5000, 10000, 30000];
 const isMissing = (e: unknown) => (e as any)?.code === "missing";
+/** An error no retry can fix: disk.rs refusing a path (disk_fs.rs components, which the escaping should make
+ * unreachable), or a name no disk name could be found for. */
+const refused = (e: unknown) => e instanceof NameError || /not a workspace path|isn't a name Windows keeps/.test(String((e as any)?.message ?? e));
 /** A write's contents that couldn't be read (as against its disk write failing: then the contents read are kept). */
 class CaptureError extends Error {
   constructor(readonly cause: unknown) { super((cause as any)?.message ?? String(cause)); }
@@ -119,12 +290,17 @@ export type MirrorEvents = {
   conflict?: (path: string, kept: string) => void;
   /** a task failed (it stays first and is tried again), or (`e` null) the failures are over */
   error?: (path: string, e: unknown) => void;
+  /** a task that can never succeed (disk.rs refusing its path, which the escaping should make unreachable): left
+   * out, said, and the tasks after it go on */
+  skipped?: (path: string, e: unknown) => void;
+  /** a name the disk can't keep even escaped, given a shortened disk name (`disk`, kept as its alias) */
+  named?: (path: string, disk: string) => void;
   /** how many tasks wait (coalesced: a file's writes one task) */
   pending?: (n: number) => void;
   /** what it knows changed (after a task: kept for the launch's next page) */
   state?: (m: DiskMirror) => void;
 };
-export type MirrorState = { known: [string, DiskStat][]; redirect: [string, string][] };
+export type MirrorState = { known: [string, DiskStat][]; redirect: [string, string][]; alias?: [string, string][] };
 
 /** The mirror's state kept for the launch's next page, in the window's IndexedDB (with the workspace it describes;
  * the web view keeps it for the launch only). */
@@ -146,22 +322,28 @@ export const idbState = {
  * last read or wrote them (their size or modification time not the kept ones), or that weren't known, imported, the
  * disk's contents winning, as at the launch's start; what is kept updated.  (A change keeping both size and time isn't
  * seen here; disk.rs still sees it by its SHA-256 before anything is written over it.) */
-export async function reconcileDisk(ws: any, disk: Disk, st: MirrorState): Promise<{ known: Map<string, DiskStat>; imported: string[]; skipped: [string, string][] }> {
-  const known = new Map(st.known), imported: string[] = [], skipped: [string, string][] = [];
+export async function reconcileDisk(ws: any, disk: Disk, st: MirrorState): Promise<{ known: Map<string, DiskStat>; alias: Map<string, string>; imported: string[]; skipped: [string, string][] }> {
+  const known = new Map(st.known), alias = new Map(st.alias ?? []), rev = reverse(alias), imported: string[] = [], skipped: [string, string][] = [];
   const redirected = new Set(st.redirect.map(([, side]) => side));
   for (const e of await disk.list()) {
     if (e.dir || within(e.path, DISK_TRASH) || redirected.has(e.path)) continue;
     const k = known.get(e.path);
     if (k && k.size === e.size && k.mtime === e.mtime) continue;
     try {
-      const b = await disk.read(e.path), kind = kindOf(e.path);
+      const w = workspacePathOf(e.path, alias, rev), p = w.path;
+      const b = await disk.read(e.path), kind = kindOf(p);
       const content = kind === "file" ? b : JSON.parse(dec.decode(b));
-      if (await ws.stat(e.path)) await ws.write(e.path, content); else await ws.create(e.path, { content });
+      // (the workspace's file whose disk path this is: its contents again; another disk name read back as a path
+      // that is taken (by a file whose disk path is another): at a free path beside it)
+      let at = p;
+      if (!w.alias && (await ws.stat(p))) await ws.write(p, content);
+      else { at = await freeIn(ws, p); await ws.create(at, { content }); }
+      if (w.alias || at !== p) { alias.set(at, e.path); rev.set(e.path, at); }
       known.set(e.path, { ...e, sha256: await sha256Hex(b) });
-      imported.push(e.path);
+      imported.push(at);
     } catch (err: any) { skipped.push([e.path, err?.message ?? String(err)]); }
   }
-  return { known, imported, skipped };
+  return { known, alias, imported, skipped };
 }
 
 export class DiskMirror {
@@ -174,18 +356,21 @@ export class DiskMirror {
   private tries = 0;
   /** the disk path a workspace path is written to: itself, or its "(from Sagebrush)" copy after a conflict */
   private redirect = new Map<string, string>();
+  /** the workspace paths whose disk path isn't their escaping (diskPathOf): a name read as it is, a Trash name taken */
+  private alias = new Map<string, string>();
   /** the last failure: [file, error], while there is one */
   failing: [string, unknown] | null = null;
   /** what it knows, kept for the launch's next page (diskWorkspace: idbState), the latest of it: resolves once it is,
    * rejects if that failed (keepAll waits for it) */
   persist: () => Promise<void> = async () => {};
   /** `known`: each file's stat as this page last read or wrote it (importDisk's, then each write's). */
-  constructor(private ws: any, private disk: Disk, private known: Map<string, DiskStat>, public on: MirrorEvents = {}, private sleep: (ms: number) => Promise<void> = (ms) => new Promise((r) => setTimeout(r, ms)), redirect: [string, string][] = []) {
+  constructor(private ws: any, private disk: Disk, private known: Map<string, DiskStat>, public on: MirrorEvents = {}, private sleep: (ms: number) => Promise<void> = (ms) => new Promise((r) => setTimeout(r, ms)), redirect: [string, string][] = [], alias: Iterable<[string, string]> = []) {
     this.redirect = new Map(redirect);
+    this.alias = new Map(alias);
   }
   /** What this page knows of the disk (each file as it last read or wrote it, and the conflicts' copies), for the
    * launch's next page (diskState): never rebuilt from the disk, which another program may have changed. */
-  state(): MirrorState { return { known: [...this.known], redirect: [...this.redirect] }; }
+  state(): MirrorState { return { known: [...this.known], redirect: [...this.redirect], alias: [...this.alias] }; }
 
   start() {
     this.stop = this.ws.watch((c: { ops: any[] }) => { for (const op of c.ops ?? []) this.op(op); });
@@ -302,6 +487,14 @@ export class DiskMirror {
           // (a file's contents that can't be read any more because a later task renames or removes it: that task
           // writes it where it went; else the failure stays first, said, and is tried again, its contents read again)
           if (t.k === "write" && e instanceof CaptureError && isMissing(e.cause) && this.q.slice(1).some((u) => u.k !== "write" && touches(u, t.path))) { this.q.shift(); continue; }
+          // (a path the disk can never take: this task left out, said, and never in the way of the ones after it)
+          if (refused(e)) {
+            this.q.shift();
+            this.tries = 0;
+            if (this.failing) { this.failing = null; this.on.error?.("", null); }
+            this.on.skipped?.((t.k === "move" ? t.to : t.path) || "a notebook", e);
+            continue;
+          }
           this.failing = [t.k === "move" ? t.from : t.path || "a notebook", e];
           this.on.error?.(this.failing[0], e);
           await this.sleep(RETRY_MS[Math.min(this.tries++, RETRY_MS.length - 1)]);
@@ -318,11 +511,38 @@ export class DiskMirror {
     }
   }
 
-  private at(p: string) { const d = toDisk(p); return this.redirect.get(d) ?? d; }
+  /** A workspace path's disk path (its escaping, or its alias); NameError if it has none until place gives it one. */
+  private dk(p: string) { return diskPathOf(p, this.alias); }
+  private dkOrNull(p: string): string | null { try { return this.dk(p); } catch (e) { if (e instanceof NameError) return null; throw e; } }
+  private at(p: string) { const d = this.dk(p); return this.redirect.get(d) ?? d; }
+  /** Whether disk path `d`, for workspace path `p`, is another path's (an alias's value, not one `p` is under). */
+  private taken(p: string, d: string) {
+    for (const [k, v] of this.alias) if (!within(p, k) && within(d, v)) return true;
+    // (a conflict's copy: another path's Sagebrush version)
+    for (const v of this.redirect.values()) if (within(d, v)) return true;
+    return false;
+  }
+  /** Workspace path `p`'s disk path, given one if it needs it: its folder's first; then its name escaped, or shortened
+   * (shortName) if the disk can't keep it even escaped, or the first free "<name> 2<ext>", … if that disk path is
+   * another path's; any but its escaping kept as its alias (and a shortened one said). */
+  private async place(p: string): Promise<string> {
+    const d = this.dkOrNull(p);
+    if (d !== null && !this.taken(p, d)) return d;
+    const folder = parentOf(p), fd = folder === "/" ? "" : await this.place(folder);
+    let name: string, short = false;
+    try { name = folder === "/" ? encodeTop(nameOf(p)) : encodeName(nameOf(p)); } catch (e) { if (!(e instanceof NameError)) throw e; name = shortName(nameOf(p)); short = true; }
+    let c = `${fd}/${name}`;
+    const [base, ext] = splitExt(name);
+    // (its own escaping is used unless it is another path's; any other name only if nothing is there at all: no
+    // alias's, no conflict copy, nothing this page knows of, nothing on disk)
+    for (let i = 2; this.taken(p, c) || (c !== d && (this.known.has(c) || (await this.disk.stat(c)))); i++) c = `${fd}/${base} ${i}${ext}`;
+    if (c !== d) { this.alias.set(p, c); this.knew(); }
+    if (short && !within(p, TRASH)) this.on.named?.(p, c);
+    return c;
+  }
   /** The redirects of `p` and what is in it ended, and what this page knew of the files there (it was moved or
    * removed: a file made there later is a new one). */
-  private unredirect(p: string) {
-    const d = toDisk(p);
+  private unredirect(p: string, d = this.dk(p)) {
     for (const k of [...this.redirect.keys()]) if (within(k, d)) this.redirect.delete(k);
     for (const k of [...this.known.keys()]) if (within(k, d)) this.known.delete(k);
     this.knew();
@@ -358,49 +578,106 @@ export class DiskMirror {
   }
   private told = new Set<string>();
 
+  /** A free name beside disk path `d`, for a move into Trash whose name is taken on disk (a Trash from an earlier
+   * launch): "<name> 2<ext>", "… 3", … (never one that is there). */
+  private async freeAt(d: string): Promise<string> {
+    const [base, ext] = splitExt(nameOf(d)), dir = parentOf(d) === "/" ? "" : parentOf(d);
+    for (let i = 2; ; i++) {
+      const c = `${dir}/${base} ${i}${ext}`;
+      if (!(await this.disk.stat(c))) return c;
+    }
+  }
+  /** The aliases of `p` and what is in it ended (it left that path: a path made there later is a new one). */
+  private dropAliases(p: string) {
+    for (const k of [...this.alias.keys()]) if (within(k, p)) this.alias.delete(k);
+    this.knew();
+  }
+  /** What it knows, moved with a move of workspace path `p` (disk path `from`) to `q` (disk path `to`). */
+  private moved(p: string, from: string, q: string, to: string) {
+    const d = this.dkOrNull(p) ?? from;
+    for (const [k, v] of [...this.known]) if (within(k, from)) { this.known.delete(k); this.known.set(to + k.slice(from.length), v); }
+    for (const [k, v] of [...this.alias]) {
+      if (!within(k, p)) continue;
+      this.alias.delete(k);
+      if (k !== p && within(v, from)) this.alias.set(q + k.slice(p.length), to + v.slice(from.length));
+    }
+    this.unredirect(p, d);
+    if (to !== this.dkOrNull(q)) this.alias.set(q, to);
+    this.knew();
+  }
+
   private async run(t: Task) {
-    if (t.k === "mkdir") return this.disk.mkdir(toDisk(t.path));
+    if (t.k === "mkdir") return this.disk.mkdir(await this.place(t.path));
     if (t.k === "write") {
       let bytes: Uint8Array | null;
       try { bytes = await t.bytes; } catch (e) { throw new CaptureError(e); }
-      if (bytes && t.path) await this.writeAt(toDisk(t.path), bytes);
+      if (bytes && t.path) await this.writeAt(await this.place(t.path), bytes);
       return;
     }
     if (t.k === "move") {
-      const from = this.at(t.from), to = toDisk(t.to);
+      const from0 = this.dkOrNull(t.from);
+      // (nothing of it on disk (a name never given a disk path): written now at its new place, a folder with what is in
+      // it; no conflict to tell of)
+      if (from0 === null) {
+        const e = await this.ws.stat(t.to);
+        if (e?.kind === "folder") {
+          await this.disk.mkdir(await this.place(t.to));
+          for (const x of await this.ws.list(t.to, { recursive: true })) {
+            if (x.kind === "folder") await this.disk.mkdir(await this.place(x.path));
+            else { const b = await fileBytes(this.ws, x.path); if (b) await this.writeAt(await this.place(x.path), b); }
+          }
+        } else if (e) { const b = await fileBytes(this.ws, t.to); if (b) await this.writeAt(await this.place(t.to), b); }
+        return;
+      }
+      const from = this.redirect.get(from0) ?? from0, to = await this.place(t.to);
       const st = await this.disk.stat(from);
       try {
         if (!st) throw new Error(CONFLICT);
         await this.disk.rename(from, to, st.dir ? "any" : this.expect(from));
       } catch (e) {
         if (!isConflict(e)) throw e;
+        // (into Trash, its name taken on disk (a Trash from an earlier launch): to a free name there instead, the
+        // workspace's name kept as its alias, so emptying Trash deletes it; a source changed meanwhile still refuses)
+        if (st && within(t.to, TRASH) && (await this.disk.stat(to))) {
+          const free = await this.freeAt(to);
+          try {
+            await this.disk.rename(from, free, st.dir ? "any" : this.expect(from));
+            this.moved(t.from, from, t.to, free);
+            return;
+          } catch (e2) { if (!isConflict(e2)) throw e2; }
+        }
         // (gone, changed by another program, or something at the destination: nothing moved there; the workspace's
         // file, if it is one, written where the workspace now has it, or beside that, and the person told)
-        if (st?.dir) { this.unredirect(t.from); this.on.conflict?.(from, from); return; }
+        if (st?.dir) { this.unredirect(t.from); this.dropAliases(t.from); this.on.conflict?.(from, from); return; }
         const bytes = await fileBytes(this.ws, t.to);
         this.unredirect(t.from);
+        this.dropAliases(t.from);
         if (bytes) await this.writeAt(to, bytes);
         if (!this.told.has(to)) this.on.conflict?.(from, this.redirect.get(to) ?? to);
         return;
       }
-      for (const [k, v] of [...this.known]) if (within(k, from)) { this.known.delete(k); this.known.set(to + k.slice(from.length), v); }
-      this.unredirect(t.from);
+      this.moved(t.from, from, t.to, to);
       return;
     }
     if (t.k === "remove") {
       // (emptying Trash: a person's explicit deletion; a file changed by another program meanwhile is kept, but a
       // folder's contents are deleted whatever they are: its files aren't checked one by one)
-      const d = this.at(t.path), st = await this.disk.stat(d);
+      const d0 = this.dkOrNull(t.path);
+      if (d0 === null) { for (const k of [...this.alias.keys()]) if (within(k, t.path)) this.alias.delete(k); this.knew(); return; }
+      const d = this.redirect.get(d0) ?? d0, st = await this.disk.stat(d);
       try {
         await this.disk.remove(d, st?.dir ? "any" : this.expect(d));
       } catch (e) {
         if (!isConflict(e)) throw e;
         this.unredirect(t.path);
+        this.dropAliases(t.path);
         this.on.conflict?.(d, d);
         return;
       }
       this.unredirect(t.path);
       for (const k of [...this.known.keys()]) if (within(k, d)) this.known.delete(k);
+      for (const k of [...this.alias.keys()]) if (within(k, t.path)) this.alias.delete(k);
+      this.knew();
     }
   }
 }
@@ -431,7 +708,7 @@ export function diskBanner(doc: Document = document) {
     }));
     el!.style.display = lines.size ? "block" : "none";
   };
-  return { set(kind: "error" | "conflict" | "report" | "settings", text: string | null) { if (text) lines.set(kind, text); else lines.delete(kind); draw(); }, el };
+  return { set(kind: "error" | "conflict" | "report" | "settings" | "skipped" | "named", text: string | null) { if (text) lines.set(kind, text); else lines.delete(kind); draw(); }, el };
 }
 
 /** "Saving…" at the window's lower right while changes wait for the disk. */
@@ -481,11 +758,12 @@ export async function diskWorkspace(ws: any, invoke: (cmd: string, args?: any, o
   // (a self-test's control, app/selftest/run.mjs: the import, or the write-through, left out, so that its two-launch
   // check is seen to fail without them; lib.rs sets it only in a self-test)
   const control = (window as any).__SB_DISK_CONTROL__;
-  let known: Map<string, DiskStat> | undefined;
+  let known: Map<string, DiskStat> | undefined, alias: Map<string, string> = new Map();
   if (control === "no-import") { known = new Map(); sessionStorage.setItem(IMPORTED, "1"); }
   else if (!sessionStorage.getItem(IMPORTED)) {
     const r = await importDisk(ws, disk);
     known = r.known;
+    alias = r.alias;
     sessionStorage.setItem(IMPORTED, "1");
     console.log(`disk: imported ${r.files} files (${r.bytes} bytes) in ${r.ms} ms`);
     if (r.skipped.length) banner.set("report", `${r.skipped.length} of the files in Sagebrush's folder couldn't be opened and aren't shown (they are still on disk): ${r.skipped.slice(0, 3).map(([p, why]) => `${p} (${why})`).join(", ")}${r.skipped.length > 3 ? ", …" : ""}`);
@@ -496,6 +774,7 @@ export async function diskWorkspace(ws: any, invoke: (cmd: string, args?: any, o
     const st = (await idbState.load().catch(() => null)) ?? { known: [], redirect: [] };
     const r = await reconcileDisk(ws, disk, st);
     known = r.known;
+    alias = r.alias;
     redirect = st.redirect;
     if (r.imported.length) banner.set("report", `Changed by another program, and brought in: ${r.imported.slice(0, 3).join(", ")}${r.imported.length > 3 ? ", …" : ""}`);
     if (r.skipped.length) banner.set("report", `${r.skipped.length} changed files in Sagebrush's folder couldn't be opened: ${r.skipped.slice(0, 3).map(([p, why]) => `${p} (${why})`).join(", ")}`);
@@ -505,8 +784,10 @@ export async function diskWorkspace(ws: any, invoke: (cmd: string, args?: any, o
     state: (mm) => saver.dirty(() => mm.state()),
     conflict: (p, kept) => banner.set("conflict", p === kept ? `${p} was changed by another program, so Sagebrush didn't change it.` : `${p} was changed by another program, so it wasn't written over: Sagebrush's version is ${kept}.`),
     error: (p, e) => banner.set("error", e === null ? null : `Couldn't save ${p} to disk: ${(e as any)?.message ?? e}. Trying again…`),
+    skipped: (p, e) => banner.set("skipped", `Couldn't save ${p} to disk, and won't try again: ${(e as any)?.message ?? e}. It's kept here for this launch only: rename it to keep it.`),
+    named: (p, d) => banner.set("named", `${p}: that name is too long for the disk, so its file there is named ${d}.`),
     pending: saving,
-  }, undefined, redirect);
+  }, undefined, redirect, alias);
   if (control !== "no-write") m.start();
   m.persist = () => saver.flush();
   saver.dirty(() => m.state());

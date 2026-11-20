@@ -144,3 +144,13 @@ fn links_are_never_followed() {
     assert!(open_root(&lroot).is_err());
     outside_untouched(&outside);
 }
+
+#[test]
+fn a_saved_setting_holding_a_blank_is_never_filled_in() {
+    let template = include_str!("settings-init.js");
+    let saved = serde_json::json!({ "sagebrush-files-open": "[\"/*KEYS*/[]\",\"/*SETTINGS*/null\"]" }).to_string();
+    let out = fill_settings_script(template, &saved, r#"["sagebrush-files-open"]"#);
+    assert!(out.contains(r#"new Set(["sagebrush-files-open"])"#), "the keys filled in");
+    assert!(out.contains(&format!("const saved = {saved};")), "the settings filled in, exactly as saved");
+    assert_eq!(out.matches("/*KEYS*/[]").count(), 1, "the blank inside the saved value left as it is");
+}

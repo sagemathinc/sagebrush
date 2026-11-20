@@ -325,6 +325,12 @@ pub fn write_small(dir: &Path, name: &str, text: &str) -> Result<(), String> {
     Ok(())
 }
 
+/// settings-init.js with its two blanks filled: the keys (disk.rs's own list) first, then the saved settings, so a
+/// saved value that holds the keys' blank (a folder named "/*KEYS*/[]", say) is never filled in itself.
+pub fn fill_settings_script(template: &str, settings_json: &str, keys_json: &str) -> String {
+    template.replacen("/*KEYS*/[]", keys_json, 1).replacen("/*SETTINGS*/null", settings_json, 1)
+}
+
 #[cfg(test)]
 #[path = "disk_fs_tests.rs"]
 mod tests;
