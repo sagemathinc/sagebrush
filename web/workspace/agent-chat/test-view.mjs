@@ -192,6 +192,11 @@ check(u.className === "user other", "a kept message with a hostile mode: class o
   check(info("i2") === null, "W3: a new turn shows nothing until its own turn_info (nothing carried over)");
   te("i2", { type: "turn_info", effort: "medium" });
   check(info("i2") === "thinking: medium", "W3: an effort alone, without a model", info("i2"));
+  te("i2", { type: "turn_info", model: "claude-opus-5-5[1m]" });
+  check(info("i2") === "claude-opus-5-5[1m] · thinking: medium", "W3: a model id with a context suffix, as given", info("i2"));
+  te("i2", { type: "turn_finished", outcome: "completed" });
+  te("i2", { type: "turn_info", effort: "max" });
+  check(info("i2") === "claude-opus-5-5[1m] · thinking: medium", "W3: nothing said after the turn's end changes it", info("i2"));
   // (a thread kept from before, with a hostile info in storage: escaped where drawn)
   const kept = th.entries.find((e) => e.kind === "turn" && e.turn_id === "i2");
   kept.info = { model: HOSTILE };

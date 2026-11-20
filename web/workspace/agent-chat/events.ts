@@ -268,8 +268,9 @@ export function apply(thread: Thread, e: TurnEvent, time = Date.now()): boolean 
       if (count(e.usage?.output_tokens) !== undefined) turn.usage = { input_tokens: count(e.usage.input_tokens) ?? 0, output_tokens: count(e.usage.output_tokens)! };
       break;
     case "turn_info": {
+      if (turn.outcome) break; // (a finished turn's info is what it ran with: nothing said after its end)
       // (only well-formed fields, as the agent bounds them: a model id as given, never mapped to a name)
-      const model = typeof e.model === "string" && /^[A-Za-z0-9._:-]{1,64}$/.test(e.model) ? e.model : undefined;
+      const model = typeof e.model === "string" && /^[A-Za-z0-9._:\/@[\]-]{1,128}$/.test(e.model) ? e.model : undefined;
       const effort = typeof e.effort === "string" && /^[a-z0-9]{1,16}$/.test(e.effort) ? e.effort : undefined;
       if (model !== undefined || effort !== undefined) turn.info = { ...turn.info, ...(model !== undefined ? { model } : {}), ...(effort !== undefined ? { effort } : {}) };
       break;
