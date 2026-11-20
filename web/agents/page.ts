@@ -1221,6 +1221,8 @@ function paneRun(ref: string, path: string, gone: () => void, from?: { conversat
   if (!workspace || !thread || thread.id !== current().id || runningTurn(thread)?.turn_id !== from.turnId) return null;
   const turnId = from.turnId;
   const mine = () => current().id === thread.id && runningTurn(thread)?.turn_id === turnId;
+  // (the person went to another chat, the call's turn still running: before any cell, today's run, not a stop)
+  const left = () => current().id !== thread.id && runningTurn(thread)?.turn_id === turnId;
   // (a pane that can't run it, known now: today's run, and nothing added or shown)
   if (hosts.get(hostKey(thread.id, path))?.nb?.canRun(ref) === false) return null;
   const shownOther = document.body.classList.contains("has-artifact") && openArtifact !== null && openArtifact !== path;
@@ -1245,7 +1247,10 @@ function paneRun(ref: string, path: string, gone: () => void, from?: { conversat
     headKey = "";
     renderArtifacts();
   }
-  return h.nb.pageRun(ref, path, gone, mine);
+  const pr = h.nb.pageRun(ref, path, gone, mine, left);
+  // (tests only, on a loopback page: the run held at "mount", before the pane's notebook is read)
+  const hold = /^(localhost|127\.0\.0\.1)$/.test(location.hostname) && typeof (window as any).__runHold === "function" ? (window as any).__runHold : null;
+  return hold ? { ...pr, inputs: async () => { await hold("mount"); return pr.inputs(); } } : pr;
 }
 /** An artifact's host made without showing it (its notebook live, hidden): for an agent's edit behind another tab. */
 function hiddenHost(threadId: string, a: Artifact) {

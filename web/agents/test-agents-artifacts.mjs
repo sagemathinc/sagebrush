@@ -620,9 +620,9 @@ try {
     const draft = "/notes/selfrun-draft.txt";
     await call("workspace.create", { path: draft, content: { text: "mine" } });
     await artifactTurn(draft, { finish: false, turn: t3 });
-    await until(`!!document.querySelector('${PANE} textarea')`);
-    // (the person in it: they type in its text)
-    await ev(`(document.querySelector('${PANE} textarea').focus(), true)`);
+    // (the person in it: they type in its text; found and focused in one step, retried, as the pane may render it
+    //  again between a look and a focus)
+    await until(`(() => { const t = document.querySelector('${PANE} textarea'); t?.focus(); return !!t && document.activeElement === t; })()`);
     await send("Input.insertText", { text: " typed" });
     const path3 = "/notes/selfrun3.ipynb";
     await call("workspace.create", { path: path3, content: docFor(path3, [{ code: "print('AWAY', 3)" }]), mode: "python" });
@@ -640,7 +640,8 @@ try {
   //  the person typed in: the pane stays there, the run is saved, its tab says it changed; PR4 no turn running: today's
   //  run (nothing opened, not saved); PR5 the pane closed while the run waits: the run ends, stopped; PR6-PR9 the call's
   //  chat and turn (run.context): none, an ended turn's, a background chat's, the chat left meanwhile; PR10 the turn ended
-  //  meanwhile: never this pane)
+  //  meanwhile: never this pane; PR9 a switch while the pane mounts: today's run; PR9b one after it read the notebook,
+  //  PR12 the turn ending and PR13 the pane closed while it mounts: stopped)
   if (want("panerun")) {
     await freshPage();
     const P1 = "/notes/pr-given.ipynb";
@@ -734,6 +735,11 @@ try {
     // (made before the turn, as PR5's: a notebook the agent creates in its turn runs once by itself)
     const P9 = "/notes/pr-switched.ipynb";
     await call("workspace.create", { path: P9, content: docFor(P9, [{ code: "print('SW', 9)" }]), mode: "python" });
+    const P9b = "/notes/pr-switched-late.ipynb", P12 = "/notes/pr-turnended-mount.ipynb";
+    await call("workspace.create", { path: P9b, content: docFor(P9b, [{ code: "print('SB', 9)" }]), mode: "python" });
+    await call("workspace.create", { path: P12, content: docFor(P12, [{ code: "print('TM', 12)" }]), mode: "python" });
+    const P13 = "/notes/pr-closed-mount.ipynb";
+    await call("workspace.create", { path: P13, content: docFor(P13, [{ code: "print('CM', 13)" }]), mode: "python" });
     const P10 = "/notes/pr-turnended.ipynb";
     await call("workspace.create", { path: P10, content: docFor(P10, [{ code: "print('TE', 10)" }]), mode: "python" });
     const t8 = `t${++turnN}`;
@@ -761,16 +767,61 @@ try {
     const t9 = `t${++turnN}`;
     event(t9, { type: "turn_started" });
     await sleep(300);
-    // (PR9: the run held; the person switches to another chat meanwhile: the run ends, stopped, nothing saved)
-    await ev(`(window.__held = false, window.__runHold = (st) => st === "page" ? new Promise((r) => { window.__held = true; window.__rel = r; }) : undefined, true)`);
-    const p9 = runIn(P9, t9);
+    // (a hold at `stage`: "mount", before the pane's notebook is read; "page", after it is read, before any cell)
+    const holdAt = (stage) => ev(`(window.__held = false, window.__runHold = (st) => st === ${JSON.stringify(stage)} ? new Promise((r) => { window.__held = true; window.__rel = r; }) : undefined, true)`);
+    const release = () => ev(`(window.__rel?.(), window.__runHold = () => undefined, true)`);
+    const unsaved = (f, out) => !JSON.stringify(f.content.json.cells[0].outputs ?? []).includes(out);
+    // (PR12: held while the pane mounts; the turn ends meanwhile, the chat still shown: the run ends, stopped, nothing run)
+    await holdAt("mount");
+    const p12 = runIn(P12, t9);
+    const held12 = await until(`window.__held === true`, 30000).catch(() => false);
+    event(t9, { type: "turn_finished", outcome: "completed" });
+    await sleep(300);
+    await release();
+    const r12 = await p12;
+    const f12 = await call("workspace.read", { path: P12 });
+    ok(held12 && r12?.ended === "stopped" && !r12.cells && unsaved(f12, "TM 12"), "PR12: the turn ends while the pane mounts the notebook: the run ends, stopped, nothing run or saved", { held12, r12 });
+    // (PR9: held while the pane mounts; the person switches to another chat meanwhile, the turn still running: today's
+    //  run, its result returned, nothing saved)
+    const t9b = `t${++turnN}`;
+    event(t9b, { type: "turn_started" });
+    await sleep(300);
+    // (PR13: held while the pane mounts; the person closes the pane, the chat still shown: the run ends, stopped)
+    await holdAt("mount");
+    const p13 = runIn(P13, t9b);
+    const held13 = await until(`window.__held === true`, 30000).catch(() => false);
+    await until(`document.body.classList.contains('has-artifact')`, 10000).catch(() => false);
+    await ev(`document.querySelector('#close').click()`);
+    const closed13 = await until(`!document.body.classList.contains('has-artifact')`, 10000).catch(() => false);
+    await release();
+    const r13 = await p13;
+    const f13 = await call("workspace.read", { path: P13 });
+    ok(held13 && closed13 && r13?.ended === "stopped" && unsaved(f13, "CM 13"), "PR13: the pane closed while it mounts the notebook, the chat still shown: the run ends, stopped, nothing run or saved", { held13, closed13, r13 });
+    await holdAt("mount");
+    const p9 = runIn(P9, t9b);
     const held9 = await until(`window.__held === true`, 30000).catch(() => false);
     await ev(`document.querySelector('#new').click()`);
     const left9 = await until(`!!document.querySelector('[data-try]')?.offsetParent`, 15000).catch(() => false);
-    await ev(`(window.__rel?.(), window.__runHold = () => undefined, true)`);
+    await release();
     const r9 = await p9;
     const f9 = await call("workspace.read", { path: P9 });
-    ok(held9 && left9 && r9?.ended === "stopped" && !JSON.stringify(f9.content.json.cells[0].outputs ?? []).includes("SW 9"), "PR9: the person switches chats while the run waits: the run ends, stopped, nothing saved", { held9, left9, r9 });
+    ok(held9 && left9 && today(r9, f9, "SW 9\n"), "PR9: the person switches chats while the pane mounts the notebook: today's run, its result, nothing saved (not stopped)", { held9, left9, r9 });
+    event(t9b, { type: "turn_finished", outcome: "completed" }, front);
+    // (PR9b: held after the pane read the notebook, before any cell; the person switches chats meanwhile: stopped)
+    await converse();
+    const t9c = `t${++turnN}`;
+    event(t9c, { type: "turn_started" });
+    await sleep(300);
+    await holdAt("page");
+    const p9b = runIn(P9b, t9c);
+    const held9b = await until(`window.__held === true`, 30000).catch(() => false);
+    await ev(`document.querySelector('#new').click()`);
+    const left9b = await until(`!!document.querySelector('[data-try]')?.offsetParent`, 15000).catch(() => false);
+    await release();
+    const r9b = await p9b;
+    const f9b = await call("workspace.read", { path: P9b });
+    ok(held9b && left9b && r9b?.ended === "stopped" && unsaved(f9b, "SB 9"), "PR9b: the person switches chats after the pane read the notebook, before any cell: the run ends, stopped, nothing saved", { held9b, left9b, r9b });
+    const c9 = conv;
     // (PR11: a notebook that asks to autorun (a reactive notebook's setting): the pane's isn't reactive, so the run is
     //  plain, each code cell once, in order, its own result; an error ends it, the cells after it not run, nothing rerun)
     await converse();
@@ -785,7 +836,7 @@ try {
     ok(r11?.ended === "error" && st11.join() === "ok,error,skipped" && r11.cells[0].out === "X 1\n" && /R11/.test(r11.cells[1].out ?? "") && !JSON.stringify(f11.content.json.cells[2].outputs ?? []).includes("AFTER") && String(n11[0]) === "1",
       "PR11: a notebook that asks to autorun runs plain in the pane: each cell once, in order, the error ends it, nothing after it run or rerun", { r11, n11 });
     event(t11, { type: "turn_finished", outcome: "completed" });
-    event(t9, { type: "turn_finished", outcome: "completed" }, front);
+    event(t9c, { type: "turn_finished", outcome: "completed" }, c9);
     event(tb, { type: "turn_finished", outcome: "completed" }, back);
   }
 
