@@ -905,6 +905,13 @@
    "owner": "polynomial factorization"
   },
   {
+   "id": "engineCall:qpoly_derivative",
+   "transport": "engineCall:qpoly_derivative",
+   "status": "planned",
+   "family": "E5 polynomials",
+   "owner": "polynomial factorization"
+  },
+  {
    "id": "engineCall:qpoly_divrem",
    "transport": "engineCall:qpoly_divrem",
    "status": "planned",
@@ -912,8 +919,22 @@
    "owner": "polynomial factorization"
   },
   {
+   "id": "engineCall:qpoly_integral",
+   "transport": "engineCall:qpoly_integral",
+   "status": "planned",
+   "family": "E5 polynomials",
+   "owner": "polynomial factorization"
+  },
+  {
    "id": "engineCall:qpoly_mul",
    "transport": "engineCall:qpoly_mul",
+   "status": "planned",
+   "family": "E5 polynomials",
+   "owner": "polynomial factorization"
+  },
+  {
+   "id": "engineCall:qpoly_scale",
+   "transport": "engineCall:qpoly_scale",
    "status": "planned",
    "family": "E5 polynomials",
    "owner": "polynomial factorization"

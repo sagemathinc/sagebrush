@@ -22,6 +22,25 @@ def _norm(c):
     return _sa().Rational._from_coprime_ints(f.numerator, f.denominator)
 
 
+def _from_tokens(ring, r):
+    """The polynomial of ring whose coefficients are an engine reply's tokens
+    (hex, `[-]num[/den]` in lowest terms, constant first, trailing zeros
+    dropped): each coefficient made once, an int or a Rational (the decoding
+    pass; no arithmetic)."""
+    p = Polynomial.__new__(Polynomial)
+    p._ring = ring
+    if not r:
+        p._c = []
+        return p
+    rat = _sa().Rational._from_coprime_ints
+    c = []
+    for tok in r.split(","):
+        n, _, d = tok.partition("/")
+        c.append(rat(int(n, 16), int(d, 16)) if d else int(n, 16))
+    p._c = c
+    return p
+
+
 def _qq_coeff(a):
     """a as an element of QQ when it is an integer: an integral coefficient
     of a QQ polynomial is stored as an int (_norm), but Sage hands it out
@@ -1072,7 +1091,9 @@ class Polynomial:
         return self.__add__(other)
 
     def __neg__(self):
-        return Polynomial(self._ring, [-a for a in self._c])
+        # (in the engine: sagebrush.poly.qscale by -1, its tokens' signs flipped)
+        from sagebrush import poly
+        return _from_tokens(self._ring, poly.qscale(self._c, -1, raw=True))
 
     def __pos__(self):
         return self
@@ -1098,10 +1119,17 @@ class Polynomial:
             return NotImplemented if L is None else L * other
         if not self._c or not o._c:
             return self._make([], o)
+        from sagebrush import poly
+        if len(o._c) == 1 or len(self._c) == 1:
+            # a constant (a number, or a polynomial of degree 0), in either
+            # order: each coefficient scaled in the engine (qpoly_scale),
+            # with no common denominator to clear
+            f, c = (self, o._c[0]) if len(o._c) == 1 else (o, self._c[0])
+            ring = o._ring if o._ring._base is QQ else self._ring
+            return _from_tokens(ring, poly.qscale(f._c, c, raw=True))
         # every product in the engine, by the ring: ZZ[x] by poly_mul (one
         # integer product), QQ[x] by qpoly_mul (the common denominators, the
         # product and each coefficient's reduction, all in Rust)
-        from sagebrush import poly
         if self._ring._base is ZZ and o._ring._base is ZZ:
             # (the engine's coefficients are already ints, trailing zeros
             # dropped: Polynomial's normalization pass would change nothing)
@@ -1199,8 +1227,17 @@ class Polynomial:
             # (x/2 is 1/2*x in QQ[x])
             if not o._c:
                 raise ZeroDivisionError("rational division by zero")
+            # each coefficient times 1/c in the engine (qpoly_scale); over ZZ
+            # by an integer the result stays in ZZ when every coefficient is
+            # an integer (read from the engine's reply), else it is over QQ
+            from sagebrush import poly
             c = _F(o._c[0])
-            return Polynomial(self._qq_ring(), [_F(a) / c for a in self._c]) if self._ring._base is QQ or c.denominator != 1 or any(_F(a) / c != int(_F(a) / c) for a in self._c) else Polynomial(self._ring, [int(_F(a) / c) for a in self._c])
+            if self._ring._base is ZZ and c.denominator == 1:
+                r = poly.qscale(self._c, 1 / c, raw=True)
+                if "/" not in r:
+                    return _from_tokens(self._ring, r)
+                return _from_tokens(self._qq_ring(), r)
+            return _from_tokens(self._qq_ring(), poly.qscale(self._c, 1 / c, raw=True))
         # a polynomial: an element of the fraction field, even when the
         # division is exact (x/x is 1 in Frac(ZZ[x]), as Sage)
         if not o._c:
@@ -1257,14 +1294,13 @@ class Polynomial:
             (3*x^2 + 2, 3*x^2)
             sage: (x^3).derivative(2), (x^3).derivative(x, 0), (x^3).derivative(x, 2, x)
             (6*x, x^3, 6)
+
+        In the engine (sagebrush.poly.qderivative), refused past its caps.
         """
         k = _derivative_count(args, self._ring.gen(), self._ring._name)
-        c = list(self._c)
-        for _ in range(k):
-            if not c:
-                break
-            c = [i * a for i, a in enumerate(c)][1:]
-        return Polynomial(self._ring, c)
+        # (in the engine: sagebrush.poly.qderivative, refused past its caps)
+        from sagebrush import poly
+        return _from_tokens(self._ring, poly.qderivative(self._c, int(k), raw=True))
 
     diff = differentiate = derivative
 
@@ -1276,8 +1312,11 @@ class Polynomial:
             sage: R.<x> = QQ[]
             sage: (3*x^2 + 1).integral()
             x^3 + x
+
+        In the engine (sagebrush.poly.qintegral), refused past its caps.
         """
-        return Polynomial(self._qq_ring(), [0] + [_F(a) / (i + 1) for i, a in enumerate(self._c)])
+        from sagebrush import poly
+        return _from_tokens(self._qq_ring(), poly.qintegral(self._c, 0, raw=True))
 
     def change_ring(self, R):
         """The polynomial with its coefficients converted to the ring R.
@@ -1343,9 +1382,17 @@ class Polynomial:
             sage: R.<x> = QQ[]
             sage: (2*x^2 + 3).monic()
             x^2 + 3/2
+
+        In the engine (sagebrush.poly.qscale), refused past its caps.
         """
+        if not self._c:
+            # (the zero polynomial: over QQ, as before; never 1/0)
+            return Polynomial(self._qq_ring(), [])
         lc = _F(self.leading_coefficient())
-        return Polynomial(self._qq_ring() if lc not in (1,) else self._ring, [_F(a) / lc for a in self._c])
+        if lc == 1:
+            return Polynomial(self._ring, self._c)
+        from sagebrush import poly
+        return _from_tokens(self._qq_ring(), poly.qscale(self._c, 1 / lc, raw=True))
 
     def content(self):
         """The gcd of the coefficients (over ZZ), as Sage's content().
@@ -1489,7 +1536,8 @@ class Polynomial:
         for g, e in fs:
             lc = g[-1]
             unit *= _F(lc) ** e
-            items.append((Polynomial(self._ring, [_F(a) / lc for a in g]), e))
+            # (each factor made monic in the engine: qpoly_scale by 1/lc)
+            items.append((_from_tokens(self._ring, poly.qscale(g, _F(1, lc), raw=True)), e))
         return PolyFactorization(items, _norm(unit), field=True)
 
     def is_irreducible(self):

@@ -69,6 +69,61 @@
   "owner": "engine arith (big-integer wire decoder)",
   "reason": "the decoder's and the gcd check's plumbing (bounds for the caller's reservation and work admission, the workspace, word masks); refuses nothing itself"
  },
+ "engine/arith/src/coprime.rs :: unbalanced :: assert_eq!(r.is_ok(), ok, \"limit {} of {}\", limit, m.used()); #0": {
+  "class": "none",
+  "owner": "qpoly_scale",
+  "reason": "qpoly_scale's derived sizes, plumbing (the ledger's and meter's limits, the plan's sizes, the reply's reservation) or a test assertion: refuses nothing itself"
+ },
+ "engine/arith/src/coprime.rs :: unbalanced :: for (limit, ok) in [(m.used(), true), (m.used() - 1, false)] { #0": {
+  "class": "none",
+  "owner": "qpoly_scale",
+  "reason": "qpoly_scale's derived sizes, plumbing (the ledger's and meter's limits, the plan's sizes, the reply's reservation) or a test assertion: refuses nothing itself"
+ },
+ "engine/arith/src/coprime.rs :: unbalanced :: let mut m = Meter::new(u64::MAX); #0": {
+  "class": "none",
+  "owner": "qpoly_scale",
+  "reason": "qpoly_scale's derived sizes, plumbing (the ledger's and meter's limits, the plan's sizes, the reply's reservation) or a test assertion: refuses nothing itself"
+ },
+ "engine/arith/src/coprime.rs :: unbalanced :: let mut m2 = Meter::new(u64::MAX); #0": {
+  "class": "none",
+  "owner": "qpoly_scale",
+  "reason": "qpoly_scale's derived sizes, plumbing (the ledger's and meter's limits, the plan's sizes, the reply's reservation) or a test assertion: refuses nothing itself"
+ },
+ "engine/arith/src/coprime.rs :: unbalanced :: let r = gcd_unbalanced(&mut c, nx, &mut d, ny, &mut Meter::new(limit)); #0": {
+  "class": "none",
+  "owner": "qpoly_scale",
+  "reason": "qpoly_scale's derived sizes, plumbing (the ledger's and meter's limits, the plan's sizes, the reply's reservation) or a test assertion: refuses nothing itself"
+ },
+ "engine/arith/src/coprime.rs :: unbalanced_gcd_bounds :: assert!(!rem_first(u64::MAX, 2)); #0": {
+  "class": "none",
+  "owner": "qpoly_scale",
+  "reason": "qpoly_scale's derived sizes, plumbing (the ledger's and meter's limits, the plan's sizes, the reply's reservation) or a test assertion: refuses nothing itself"
+ },
+ "engine/arith/src/coprime.rs :: unbalanced_gcd_bounds :: assert_eq!(gcd_unbalanced_work(u64::MAX, 0), None); #0": {
+  "class": "none",
+  "owner": "qpoly_scale",
+  "reason": "qpoly_scale's derived sizes, plumbing (the ledger's and meter's limits, the plan's sizes, the reply's reservation) or a test assertion: refuses nothing itself"
+ },
+ "engine/arith/src/coprime.rs :: unbalanced_gcd_bounds :: assert_eq!(gcd_unbalanced_work(u64::MAX, 1), None); #0": {
+  "class": "none",
+  "owner": "qpoly_scale",
+  "reason": "qpoly_scale's derived sizes, plumbing (the ledger's and meter's limits, the plan's sizes, the reply's reservation) or a test assertion: refuses nothing itself"
+ },
+ "engine/arith/src/coprime.rs :: unbalanced_gcd_bounds :: assert_eq!(gcd_unbalanced_work(u64::MAX, u64::MAX), None); #0": {
+  "class": "none",
+  "owner": "qpoly_scale",
+  "reason": "qpoly_scale's derived sizes, plumbing (the ledger's and meter's limits, the plan's sizes, the reply's reservation) or a test assertion: refuses nothing itself"
+ },
+ "engine/arith/src/coprime.rs :: unbalanced_gcd_bounds :: assert_eq!(rem_work(u64::MAX, 2), None); #0": {
+  "class": "none",
+  "owner": "qpoly_scale",
+  "reason": "qpoly_scale's derived sizes, plumbing (the ledger's and meter's limits, the plan's sizes, the reply's reservation) or a test assertion: refuses nothing itself"
+ },
+ "engine/arith/src/coprime.rs :: unbalanced_gcd_matches_gcd_in_place_within_its_bound :: unbalanced(&[u64::MAX; 40], &[3]); #0": {
+  "class": "none",
+  "owner": "qpoly_scale",
+  "reason": "qpoly_scale's derived sizes, plumbing (the ledger's and meter's limits, the plan's sizes, the reply's reservation) or a test assertion: refuses nothing itself"
+ },
  "engine/arith/src/coprime.rs :: window :: (lo | hi) & (u64::MAX >> 1) #0": {
   "class": "none",
   "owner": "engine arith (big-integer wire decoder)",
@@ -78,6 +133,132 @@
   "class": "none",
   "owner": "engine arith (big-integer wire decoder)",
   "reason": "test code: the big-integer decoder's correctness, allocation and Stop tests; refuses nothing itself"
+ },
+ "engine/arith/src/ledger.rs :: alloc :: if v.try_reserve_exact(cap).is_err() { #0": {
+  "class": "none",
+  "owner": "zpoly_divrem",
+  "reason": "zpoly_divrem's derived sizes, plumbing (the ledger's and meter's limits, the plan's sizes) or a test assertion: refuses nothing itself"
+ },
+ "engine/arith/src/ledger.rs :: alloc :: led.release(cap as u64); #0": {
+  "class": "none",
+  "owner": "zpoly_divrem",
+  "reason": "zpoly_divrem's derived sizes, plumbing (the ledger's and meter's limits, the plan's sizes) or a test assertion: refuses nothing itself"
+ },
+ "engine/arith/src/ledger.rs :: alloc :: pub(crate) fn alloc(led: &Words, cap: usize) -> Result<Vec<u64>, DivFault> { #0": {
+  "class": "none",
+  "owner": "zpoly_divrem",
+  "reason": "zpoly_divrem's derived sizes, plumbing (the ledger's and meter's limits, the plan's sizes) or a test assertion: refuses nothing itself"
+ },
+ "engine/arith/src/ledger.rs :: alloc :: v.resize(cap, 0); #0": {
+  "class": "none",
+  "owner": "zpoly_divrem",
+  "reason": "zpoly_divrem's derived sizes, plumbing (the ledger's and meter's limits, the plan's sizes) or a test assertion: refuses nothing itself"
+ },
+ "engine/arith/src/ledger.rs :: cap :: pub(crate) fn cap(&self) -> usize { #0": {
+  "class": "none",
+  "owner": "zpoly_divrem",
+  "reason": "zpoly_divrem's derived sizes, plumbing (the ledger's and meter's limits, the plan's sizes) or a test assertion: refuses nothing itself"
+ },
+ "engine/arith/src/ledger.rs :: credit :: self.limit.set(self.limit.get().checked_add(n).ok_or(DivFault::Memory)?); #0": {
+  "class": "none",
+  "owner": "qpoly_divrem",
+  "reason": "qpoly_divrem's derived sizes, plumbing (the ledger's and meter's limits, the plan's sizes) or a test assertion: refuses nothing itself"
+ },
+ "engine/arith/src/ledger.rs :: drop :: pub(crate) static MAX_BITS: Cell<u64> = const { Cell::new(0) }; #0": {
+  "class": "none",
+  "owner": "zpoly_divrem",
+  "reason": "zpoly_divrem's derived sizes, plumbing (the ledger's and meter's limits, the plan's sizes) or a test assertion: refuses nothing itself"
+ },
+ "engine/arith/src/ledger.rs :: from :: pub(crate) limit: Cell<u64>, #0": {
+  "class": "none",
+  "owner": "zpoly_divrem",
+  "reason": "zpoly_divrem's derived sizes, plumbing (the ledger's and meter's limits, the plan's sizes) or a test assertion: refuses nothing itself"
+ },
+ "engine/arith/src/ledger.rs :: limit :: pub fn limit(&self) -> u64 { #0": {
+  "class": "none",
+  "owner": "zpoly_divrem",
+  "reason": "zpoly_divrem's derived sizes, plumbing (the ledger's and meter's limits, the plan's sizes) or a test assertion: refuses nothing itself"
+ },
+ "engine/arith/src/ledger.rs :: limit :: self.limit.get() #0": {
+  "class": "none",
+  "owner": "zpoly_divrem",
+  "reason": "zpoly_divrem's derived sizes, plumbing (the ledger's and meter's limits, the plan's sizes) or a test assertion: refuses nothing itself"
+ },
+ "engine/arith/src/ledger.rs :: new :: Coef::tagged(led, cap, \"window\", m) #0": {
+  "class": "none",
+  "owner": "qpoly_divrem",
+  "reason": "qpoly_divrem's derived sizes, plumbing (the ledger's and meter's limits, the plan's sizes) or a test assertion: refuses nothing itself"
+ },
+ "engine/arith/src/ledger.rs :: new :: led.note(tag, cap as u64); #0": {
+  "class": "none",
+  "owner": "zpoly_divrem",
+  "reason": "zpoly_divrem's derived sizes, plumbing (the ledger's and meter's limits, the plan's sizes) or a test assertion: refuses nothing itself"
+ },
+ "engine/arith/src/ledger.rs :: new :: led.reserve(cap as u64)?; #0": {
+  "class": "none",
+  "owner": "zpoly_divrem",
+  "reason": "zpoly_divrem's derived sizes, plumbing (the ledger's and meter's limits, the plan's sizes) or a test assertion: refuses nothing itself"
+ },
+ "engine/arith/src/ledger.rs :: new :: let b = Buf { v: alloc(led, cap)?, led, tag }; #0": {
+  "class": "none",
+  "owner": "zpoly_divrem",
+  "reason": "zpoly_divrem's derived sizes, plumbing (the ledger's and meter's limits, the plan's sizes) or a test assertion: refuses nothing itself"
+ },
+ "engine/arith/src/ledger.rs :: new :: limit: Cell::new(limit), #0": {
+  "class": "none",
+  "owner": "zpoly_divrem",
+  "reason": "zpoly_divrem's derived sizes, plumbing (the ledger's and meter's limits, the plan's sizes) or a test assertion: refuses nothing itself"
+ },
+ "engine/arith/src/ledger.rs :: new :: m.add(cap + 1)?; #0": {
+  "class": "none",
+  "owner": "zpoly_divrem",
+  "reason": "zpoly_divrem's derived sizes, plumbing (the ledger's and meter's limits, the plan's sizes) or a test assertion: refuses nothing itself"
+ },
+ "engine/arith/src/ledger.rs :: new :: pub fn new(limit: u64) -> Words { #0": {
+  "class": "none",
+  "owner": "zpoly_divrem",
+  "reason": "zpoly_divrem's derived sizes, plumbing (the ledger's and meter's limits, the plan's sizes) or a test assertion: refuses nothing itself"
+ },
+ "engine/arith/src/ledger.rs :: new :: pub(crate) fn new(led: &'l Words, cap: usize, m: &mut Meter) -> Result<Coef<'l>, DivFault> { #0": {
+  "class": "none",
+  "owner": "zpoly_divrem",
+  "reason": "zpoly_divrem's derived sizes, plumbing (the ledger's and meter's limits, the plan's sizes) or a test assertion: refuses nothing itself"
+ },
+ "engine/arith/src/ledger.rs :: new :: pub(crate) fn new(led: &'l Words, cap: usize, tag: &'static str, m: &mut Meter) -> Result<Buf<'l>, DivFault> { #0": {
+  "class": "none",
+  "owner": "zpoly_divrem",
+  "reason": "zpoly_divrem's derived sizes, plumbing (the ledger's and meter's limits, the plan's sizes) or a test assertion: refuses nothing itself"
+ },
+ "engine/arith/src/ledger.rs :: reserve :: if l > self.limit.get() { #0": {
+  "class": "1+3",
+  "disposition": {
+   "1": "shared",
+   "3": {
+    "followup": "FU-B18-3"
+   }
+  },
+  "owner": "zpoly_divrem",
+  "reason": "zpoly_divrem's fixed caps (zmul's request, work and peak) with its work metered and its memory on a live word ledger within them; the fixed rows are refused before any work, the ledger's limit at each reservation; each refusal names the cap and the way around it"
+ },
+ "engine/arith/src/ledger.rs :: tagged :: Ok(Coef { buf: Buf::new(led, cap, tag, m)?, len: 0, neg: false }) #0": {
+  "class": "none",
+  "owner": "qpoly_divrem",
+  "reason": "qpoly_divrem's derived sizes, plumbing (the ledger's and meter's limits, the plan's sizes) or a test assertion: refuses nothing itself"
+ },
+ "engine/arith/src/ledger.rs :: tagged :: pub(crate) fn tagged(led: &'l Words, cap: usize, tag: &'static str, m: &mut Meter) -> Result<Coef<'l>, DivFault> { #0": {
+  "class": "none",
+  "owner": "qpoly_divrem",
+  "reason": "qpoly_divrem's derived sizes, plumbing (the ledger's and meter's limits, the plan's sizes) or a test assertion: refuses nothing itself"
+ },
+ "engine/arith/src/ledger.rs :: track :: MAX_BITS.with(|c| c.set(c.get().max(bits(_x)))); #0": {
+  "class": "none",
+  "owner": "zpoly_divrem",
+  "reason": "zpoly_divrem's derived sizes, plumbing (the ledger's and meter's limits, the plan's sizes) or a test assertion: refuses nothing itself"
+ },
+ "engine/arith/src/ledger.rs :: words :: (self.words.cap() + self.meta.cap()) as u64 #0": {
+  "class": "none",
+  "owner": "zpoly_divrem",
+  "reason": "zpoly_divrem's derived sizes, plumbing (the ledger's and meter's limits, the plan's sizes) or a test assertion: refuses nothing itself"
  },
  "engine/arith/src/nmod_poly.rs :: barrett_reduction_edges :: let mut xs: Vec<u64> = vec![0, 1, n - 1, n, n + 1, 2 * n - 1, u64::MAX, u64::MAX - 1, u64::MAX - n]; #0": {
   "class": "none",
@@ -141,6 +322,11 @@
   "owner": "qpoly_divrem",
   "reason": "qpoly_divrem's fixed caps (zmul's request and peak; its own work cap DIVREM_Q_WORK_MAX = 2^29, calibrated in time) with its lcms and division metered and its memory on the live word ledger; each refusal names the cap and the way around it"
  },
+ "engine/arith/src/pdivrem.rs ::  :: pub(crate) use crate::ledger::{EXACT, MAX_BITS}; #0": {
+  "class": "none",
+  "owner": "zpoly_divrem",
+  "reason": "zpoly_divrem's derived sizes, plumbing (the ledger's and meter's limits, the plan's sizes) or a test assertion: refuses nothing itself"
+ },
  "engine/arith/src/pdivrem.rs :: admit_z :: Ok(Ok(Plan { n, m, k, fixed, limit: cap - fixed, work })) #0": {
   "class": "none",
   "owner": "zpoly_divrem",
@@ -158,41 +344,6 @@
   "reason": "zpoly_divrem's fixed caps (zmul's request, work and peak) with its work metered and its memory on a live word ledger within them; the fixed rows are refused before any work, the ledger's limit at each reservation; each refusal names the cap and the way around it"
  },
  "engine/arith/src/pdivrem.rs :: admit_z :: let cap = caps.int.peak / 8; #0": {
-  "class": "none",
-  "owner": "zpoly_divrem",
-  "reason": "zpoly_divrem's derived sizes, plumbing (the ledger's and meter's limits, the plan's sizes) or a test assertion: refuses nothing itself"
- },
- "engine/arith/src/pdivrem.rs :: alloc :: fn alloc(led: &Words, cap: usize) -> Result<Vec<u64>, DivFault> { #0": {
-  "class": "none",
-  "owner": "zpoly_divrem",
-  "reason": "zpoly_divrem's derived sizes, plumbing (the ledger's and meter's limits, the plan's sizes) or a test assertion: refuses nothing itself"
- },
- "engine/arith/src/pdivrem.rs :: alloc :: if v.try_reserve_exact(cap).is_err() { #0": {
-  "class": "none",
-  "owner": "zpoly_divrem",
-  "reason": "zpoly_divrem's derived sizes, plumbing (the ledger's and meter's limits, the plan's sizes) or a test assertion: refuses nothing itself"
- },
- "engine/arith/src/pdivrem.rs :: alloc :: led.release(cap as u64); #0": {
-  "class": "none",
-  "owner": "zpoly_divrem",
-  "reason": "zpoly_divrem's derived sizes, plumbing (the ledger's and meter's limits, the plan's sizes) or a test assertion: refuses nothing itself"
- },
- "engine/arith/src/pdivrem.rs :: alloc :: v.resize(cap, 0); #0": {
-  "class": "none",
-  "owner": "zpoly_divrem",
-  "reason": "zpoly_divrem's derived sizes, plumbing (the ledger's and meter's limits, the plan's sizes) or a test assertion: refuses nothing itself"
- },
- "engine/arith/src/pdivrem.rs :: cap :: fn cap(&self) -> usize { #0": {
-  "class": "none",
-  "owner": "zpoly_divrem",
-  "reason": "zpoly_divrem's derived sizes, plumbing (the ledger's and meter's limits, the plan's sizes) or a test assertion: refuses nothing itself"
- },
- "engine/arith/src/pdivrem.rs :: credit :: self.limit.set(self.limit.get().checked_add(n).ok_or(DivFault::Memory)?); #0": {
-  "class": "none",
-  "owner": "qpoly_divrem",
-  "reason": "qpoly_divrem's derived sizes, plumbing (the ledger's and meter's limits, the plan's sizes) or a test assertion: refuses nothing itself"
- },
- "engine/arith/src/pdivrem.rs :: drop :: pub(crate) static MAX_BITS: Cell<u64> = const { Cell::new(0) }; #0": {
   "class": "none",
   "owner": "zpoly_divrem",
   "reason": "zpoly_divrem's derived sizes, plumbing (the ledger's and meter's limits, the plan's sizes) or a test assertion: refuses nothing itself"
@@ -217,66 +368,6 @@
   },
   "owner": "zpoly_divrem",
   "reason": "zpoly_divrem's fixed caps (zmul's request, work and peak) with its work metered and its memory on a live word ledger within them; the fixed rows are refused before any work, the ledger's limit at each reservation; each refusal names the cap and the way around it"
- },
- "engine/arith/src/pdivrem.rs :: from :: limit: Cell<u64>, #0": {
-  "class": "none",
-  "owner": "zpoly_divrem",
-  "reason": "zpoly_divrem's derived sizes, plumbing (the ledger's and meter's limits, the plan's sizes) or a test assertion: refuses nothing itself"
- },
- "engine/arith/src/pdivrem.rs :: limit :: pub fn limit(&self) -> u64 { #0": {
-  "class": "none",
-  "owner": "zpoly_divrem",
-  "reason": "zpoly_divrem's derived sizes, plumbing (the ledger's and meter's limits, the plan's sizes) or a test assertion: refuses nothing itself"
- },
- "engine/arith/src/pdivrem.rs :: limit :: self.limit.get() #0": {
-  "class": "none",
-  "owner": "zpoly_divrem",
-  "reason": "zpoly_divrem's derived sizes, plumbing (the ledger's and meter's limits, the plan's sizes) or a test assertion: refuses nothing itself"
- },
- "engine/arith/src/pdivrem.rs :: new :: Coef::tagged(led, cap, \"window\", m) #0": {
-  "class": "none",
-  "owner": "qpoly_divrem",
-  "reason": "qpoly_divrem's derived sizes, plumbing (the ledger's and meter's limits, the plan's sizes) or a test assertion: refuses nothing itself"
- },
- "engine/arith/src/pdivrem.rs :: new :: fn new(led: &'l Words, cap: usize, m: &mut Meter) -> Result<Coef<'l>, DivFault> { #0": {
-  "class": "none",
-  "owner": "zpoly_divrem",
-  "reason": "zpoly_divrem's derived sizes, plumbing (the ledger's and meter's limits, the plan's sizes) or a test assertion: refuses nothing itself"
- },
- "engine/arith/src/pdivrem.rs :: new :: led.note(tag, cap as u64); #0": {
-  "class": "none",
-  "owner": "zpoly_divrem",
-  "reason": "zpoly_divrem's derived sizes, plumbing (the ledger's and meter's limits, the plan's sizes) or a test assertion: refuses nothing itself"
- },
- "engine/arith/src/pdivrem.rs :: new :: led.reserve(cap as u64)?; #0": {
-  "class": "none",
-  "owner": "zpoly_divrem",
-  "reason": "zpoly_divrem's derived sizes, plumbing (the ledger's and meter's limits, the plan's sizes) or a test assertion: refuses nothing itself"
- },
- "engine/arith/src/pdivrem.rs :: new :: let b = Buf { v: alloc(led, cap)?, led, tag }; #0": {
-  "class": "none",
-  "owner": "zpoly_divrem",
-  "reason": "zpoly_divrem's derived sizes, plumbing (the ledger's and meter's limits, the plan's sizes) or a test assertion: refuses nothing itself"
- },
- "engine/arith/src/pdivrem.rs :: new :: limit: Cell::new(limit), #0": {
-  "class": "none",
-  "owner": "zpoly_divrem",
-  "reason": "zpoly_divrem's derived sizes, plumbing (the ledger's and meter's limits, the plan's sizes) or a test assertion: refuses nothing itself"
- },
- "engine/arith/src/pdivrem.rs :: new :: m.add(cap + 1)?; #0": {
-  "class": "none",
-  "owner": "zpoly_divrem",
-  "reason": "zpoly_divrem's derived sizes, plumbing (the ledger's and meter's limits, the plan's sizes) or a test assertion: refuses nothing itself"
- },
- "engine/arith/src/pdivrem.rs :: new :: pub fn new(limit: u64) -> Words { #0": {
-  "class": "none",
-  "owner": "zpoly_divrem",
-  "reason": "zpoly_divrem's derived sizes, plumbing (the ledger's and meter's limits, the plan's sizes) or a test assertion: refuses nothing itself"
- },
- "engine/arith/src/pdivrem.rs :: new :: pub(crate) fn new(led: &'l Words, cap: usize, tag: &'static str, m: &mut Meter) -> Result<Buf<'l>, DivFault> { #0": {
-  "class": "none",
-  "owner": "zpoly_divrem",
-  "reason": "zpoly_divrem's derived sizes, plumbing (the ledger's and meter's limits, the plan's sizes) or a test assertion: refuses nothing itself"
  },
  "engine/arith/src/pdivrem.rs :: norm_len :: pub limit: u64, #0": {
   "class": "none",
@@ -326,37 +417,6 @@
   "reason": "qpoly_divrem's derived sizes, plumbing (the ledger's and meter's limits, the plan's sizes) or a test assertion: refuses nothing itself"
  },
  "engine/arith/src/pdivrem.rs :: reply_z :: let led = Words::new(plan.limit); #0": {
-  "class": "none",
-  "owner": "zpoly_divrem",
-  "reason": "zpoly_divrem's derived sizes, plumbing (the ledger's and meter's limits, the plan's sizes) or a test assertion: refuses nothing itself"
- },
- "engine/arith/src/pdivrem.rs :: reserve :: if l > self.limit.get() { #0": {
-  "class": "1+3",
-  "disposition": {
-   "1": "shared",
-   "3": {
-    "followup": "FU-B18-3"
-   }
-  },
-  "owner": "zpoly_divrem",
-  "reason": "zpoly_divrem's fixed caps (zmul's request, work and peak) with its work metered and its memory on a live word ledger within them; the fixed rows are refused before any work, the ledger's limit at each reservation; each refusal names the cap and the way around it"
- },
- "engine/arith/src/pdivrem.rs :: tagged :: Ok(Coef { buf: Buf::new(led, cap, tag, m)?, len: 0, neg: false }) #0": {
-  "class": "none",
-  "owner": "qpoly_divrem",
-  "reason": "qpoly_divrem's derived sizes, plumbing (the ledger's and meter's limits, the plan's sizes) or a test assertion: refuses nothing itself"
- },
- "engine/arith/src/pdivrem.rs :: tagged :: fn tagged(led: &'l Words, cap: usize, tag: &'static str, m: &mut Meter) -> Result<Coef<'l>, DivFault> { #0": {
-  "class": "none",
-  "owner": "qpoly_divrem",
-  "reason": "qpoly_divrem's derived sizes, plumbing (the ledger's and meter's limits, the plan's sizes) or a test assertion: refuses nothing itself"
- },
- "engine/arith/src/pdivrem.rs :: track :: MAX_BITS.with(|c| c.set(c.get().max(bits(_x)))); #0": {
-  "class": "none",
-  "owner": "zpoly_divrem",
-  "reason": "zpoly_divrem's derived sizes, plumbing (the ledger's and meter's limits, the plan's sizes) or a test assertion: refuses nothing itself"
- },
- "engine/arith/src/pdivrem.rs :: words :: (self.words.cap() + self.meta.cap()) as u64 #0": {
   "class": "none",
   "owner": "zpoly_divrem",
   "reason": "zpoly_divrem's derived sizes, plumbing (the ledger's and meter's limits, the plan's sizes) or a test assertion: refuses nothing itself"
@@ -525,6 +585,154 @@
   "class": "none",
   "owner": "zpoly_divrem",
   "reason": "zpoly_divrem's derived sizes, plumbing (the ledger's and meter's limits, the plan's sizes) or a test assertion: refuses nothing itself"
+ },
+ "engine/arith/src/pscale.rs :: admit :: Ok(Ok(Plan { kind, na, k, bound, fixed, limit: cap - fixed, work })) #0": {
+  "class": "none",
+  "owner": "qpoly_scale",
+  "reason": "qpoly_scale's derived sizes, plumbing (the ledger's and meter's limits, the plan's sizes, the reply's reservation) or a test assertion: refuses nothing itself"
+ },
+ "engine/arith/src/pscale.rs :: admit :: if fixed > cap { #0": {
+  "class": "1+3",
+  "disposition": {
+   "1": "shared",
+   "3": {
+    "followup": "FU-B18-3"
+   }
+  },
+  "owner": "qpoly_scale",
+  "reason": "qpoly_scale's, qpoly_derivative's and qpoly_integral's fixed caps (zmul's request, work and peak, and the reply's closed-form bound within qpoly's REPLY_MAX) with their work metered and their memory on the live word ledger; each refusal names the cap and the way around it"
+ },
+ "engine/arith/src/pscale.rs :: admit :: let cap = caps.int.peak / 8; #0": {
+  "class": "none",
+  "owner": "qpoly_scale",
+  "reason": "qpoly_scale's derived sizes, plumbing (the ledger's and meter's limits, the plan's sizes, the reply's reservation) or a test assertion: refuses nothing itself"
+ },
+ "engine/arith/src/pscale.rs :: copy_reply :: debug_assert_eq!(out.capacity(), cap, \"the reply was written without allocating\"); #0": {
+  "class": "none",
+  "owner": "qpoly_scale",
+  "reason": "qpoly_scale's derived sizes, plumbing (the ledger's and meter's limits, the plan's sizes, the reply's reservation) or a test assertion: refuses nothing itself"
+ },
+ "engine/arith/src/pscale.rs :: copy_reply :: let cap = out.capacity(); #0": {
+  "class": "none",
+  "owner": "qpoly_scale",
+  "reason": "qpoly_scale's derived sizes, plumbing (the ledger's and meter's limits, the plan's sizes, the reply's reservation) or a test assertion: refuses nothing itself"
+ },
+ "engine/arith/src/pscale.rs :: emit :: debug_assert_eq!(out.capacity(), cap, \"the reply was written without allocating\"); #0": {
+  "class": "none",
+  "owner": "qpoly_scale",
+  "reason": "qpoly_scale's derived sizes, plumbing (the ledger's and meter's limits, the plan's sizes, the reply's reservation) or a test assertion: refuses nothing itself"
+ },
+ "engine/arith/src/pscale.rs :: emit :: let cap = out.capacity(); #0": {
+  "class": "none",
+  "owner": "qpoly_scale",
+  "reason": "qpoly_scale's derived sizes, plumbing (the ledger's and meter's limits, the plan's sizes, the reply's reservation) or a test assertion: refuses nothing itself"
+ },
+ "engine/arith/src/pscale.rs :: fault_text :: DivFault::Memory => format!(\"the {}'s memory needs more than {} bytes ({})\", plan.kind.name(), (plan.fixed + plan.limit).saturating_mul(8), HOW), #0": {
+  "class": "1+3",
+  "disposition": {
+   "1": "shared",
+   "3": {
+    "followup": "FU-B18-3"
+   }
+  },
+  "owner": "qpoly_scale",
+  "reason": "qpoly_scale's, qpoly_derivative's and qpoly_integral's fixed caps (zmul's request, work and peak, and the reply's closed-form bound within qpoly's REPLY_MAX) with their work metered and their memory on the live word ledger; each refusal names the cap and the way around it"
+ },
+ "engine/arith/src/pscale.rs :: reply :: let cap = caps.int.peak / 8; #0": {
+  "class": "none",
+  "owner": "qpoly_scale",
+  "reason": "qpoly_scale's derived sizes, plumbing (the ledger's and meter's limits, the plan's sizes, the reply's reservation) or a test assertion: refuses nothing itself"
+ },
+ "engine/arith/src/pscale.rs :: reply :: let led = Words::new(limit); #0": {
+  "class": "none",
+  "owner": "qpoly_scale",
+  "reason": "qpoly_scale's derived sizes, plumbing (the ledger's and meter's limits, the plan's sizes, the reply's reservation) or a test assertion: refuses nothing itself"
+ },
+ "engine/arith/src/pscale.rs :: reply :: let led = Words::new(plan.limit); #0": {
+  "class": "none",
+  "owner": "qpoly_scale",
+  "reason": "qpoly_scale's derived sizes, plumbing (the ledger's and meter's limits, the plan's sizes, the reply's reservation) or a test assertion: refuses nothing itself"
+ },
+ "engine/arith/src/pscale.rs :: reply :: let limit = cap.checked_sub(fixed).ok_or_else(|| format!(\"the memory (bytes) = {} is more than {} ({})\", fixed.saturating_mul(8), caps.int.peak, HOW))?; #0": {
+  "class": "1+3",
+  "disposition": {
+   "1": "shared",
+   "3": {
+    "followup": "FU-B18-3"
+   }
+  },
+  "owner": "qpoly_scale",
+  "reason": "qpoly_scale's, qpoly_derivative's and qpoly_integral's fixed caps (zmul's request, work and peak, and the reply's closed-form bound within qpoly's REPLY_MAX) with their work metered and their memory on the live word ledger; each refusal names the cap and the way around it"
+ },
+ "engine/arith/src/pscale.rs :: reply :: let plan = Plan { kind, na: 0, k: 0, bound: 0, fixed, limit, work }; #0": {
+  "class": "none",
+  "owner": "qpoly_scale",
+  "reason": "qpoly_scale's derived sizes, plumbing (the ledger's and meter's limits, the plan's sizes, the reply's reservation) or a test assertion: refuses nothing itself"
+ },
+ "engine/arith/src/pscale.rs :: token_reply :: pub limit: u64, #0": {
+  "class": "none",
+  "owner": "qpoly_scale",
+  "reason": "qpoly_scale's derived sizes, plumbing (the ledger's and meter's limits, the plan's sizes, the reply's reservation) or a test assertion: refuses nothing itself"
+ },
+ "engine/arith/src/pscale.rs :: zmulmax :: crate::zmul::REQUEST_MAX #0": {
+  "class": "none",
+  "owner": "qpoly_scale",
+  "reason": "qpoly_scale's derived sizes, plumbing (the ledger's and meter's limits, the plan's sizes, the reply's reservation) or a test assertion: refuses nothing itself"
+ },
+ "engine/arith/src/pscale/tests.rs :: ledger_and_meter_are_exact :: assert!(req <= high && high <= plan.limit); #0": {
+  "class": "none",
+  "owner": "qpoly_scale",
+  "reason": "qpoly_scale's derived sizes, plumbing (the ledger's and meter's limits, the plan's sizes, the reply's reservation) or a test assertion: refuses nothing itself"
+ },
+ "engine/arith/src/pscale/tests.rs :: ledger_and_meter_are_exact :: assert_eq!(run(kind, &a, &b, Some(req + 1000), None).3, req, \"the requirement is the same at every limit\"); #0": {
+  "class": "none",
+  "owner": "qpoly_scale",
+  "reason": "qpoly_scale's derived sizes, plumbing (the ledger's and meter's limits, the plan's sizes, the reply's reservation) or a test assertion: refuses nothing itself"
+ },
+ "engine/arith/src/pscale/tests.rs :: reply_bounds :: assert_eq!(falling_digits(u64::MAX / 64 + 1, u64::MAX), None); #0": {
+  "class": "none",
+  "owner": "qpoly_scale",
+  "reason": "qpoly_scale's derived sizes, plumbing (the ledger's and meter's limits, the plan's sizes, the reply's reservation) or a test assertion: refuses nothing itself"
+ },
+ "engine/arith/src/pscale/tests.rs :: reply_bounds :: assert_eq!(falling_digits(u64::MAX, 2), None); #0": {
+  "class": "none",
+  "owner": "qpoly_scale",
+  "reason": "qpoly_scale's derived sizes, plumbing (the ledger's and meter's limits, the plan's sizes, the reply's reservation) or a test assertion: refuses nothing itself"
+ },
+ "engine/arith/src/pscale/tests.rs :: reply_bounds :: assert_eq!(reply_bound(Kind::Derivative, 0, u64::MAX, \"1\", u64::MAX - 1), None); #0": {
+  "class": "none",
+  "owner": "qpoly_scale",
+  "reason": "qpoly_scale's derived sizes, plumbing (the ledger's and meter's limits, the plan's sizes, the reply's reservation) or a test assertion: refuses nothing itself"
+ },
+ "engine/arith/src/pscale/tests.rs :: reply_bounds :: assert_eq!(reply_bound(Kind::Integral, u64::MAX - 5, 1, \"1\", 0), None); #0": {
+  "class": "none",
+  "owner": "qpoly_scale",
+  "reason": "qpoly_scale's derived sizes, plumbing (the ledger's and meter's limits, the plan's sizes, the reply's reservation) or a test assertion: refuses nothing itself"
+ },
+ "engine/arith/src/pscale/tests.rs :: reply_bounds :: assert_eq!(reply_bound(Kind::Scale, 0, u64::MAX, \"3\", 0), None); #0": {
+  "class": "none",
+  "owner": "qpoly_scale",
+  "reason": "qpoly_scale's derived sizes, plumbing (the ledger's and meter's limits, the plan's sizes, the reply's reservation) or a test assertion: refuses nothing itself"
+ },
+ "engine/arith/src/pscale/tests.rs :: reply_bounds :: assert_eq!(reply_bound(Kind::Scale, u64::MAX, 1, \"3\", 0), None); #0": {
+  "class": "none",
+  "owner": "qpoly_scale",
+  "reason": "qpoly_scale's derived sizes, plumbing (the ledger's and meter's limits, the plan's sizes, the reply's reservation) or a test assertion: refuses nothing itself"
+ },
+ "engine/arith/src/pscale/tests.rs :: run :: fn run(kind: Kind, a: &str, b: &str, limit: Option<u64>, work: Option<u64>) -> (Result<u64, DivFault>, Plan, u64, u64, u64) { #0": {
+  "class": "none",
+  "owner": "qpoly_scale",
+  "reason": "qpoly_scale's derived sizes, plumbing (the ledger's and meter's limits, the plan's sizes, the reply's reservation) or a test assertion: refuses nothing itself"
+ },
+ "engine/arith/src/pscale/tests.rs :: run :: let led = Words::new(limit.unwrap_or(plan.limit)); #0": {
+  "class": "none",
+  "owner": "qpoly_scale",
+  "reason": "qpoly_scale's derived sizes, plumbing (the ledger's and meter's limits, the plan's sizes, the reply's reservation) or a test assertion: refuses nothing itself"
+ },
+ "engine/arith/src/pscale/tests.rs :: want :: let k = usize::from_str_radix(b, 16).unwrap_or(usize::MAX); #0": {
+  "class": "none",
+  "owner": "qpoly_scale",
+  "reason": "qpoly_scale's derived sizes, plumbing (the ledger's and meter's limits, the plan's sizes, the reply's reservation) or a test assertion: refuses nothing itself"
  },
  "engine/arith/src/qpoly.rs ::  :: pub const CAPS: Caps = Caps { int: zmul::CAPS, reply: REPLY_MAX }; #0": {
   "class": "1+3",
@@ -7001,6 +7209,17 @@
   "owner": "qpoly_clear",
   "reason": "qpoly_clear's fixed caps (zmul's five, and the reply's bytes <= 64 MiB, those of qpoly_mul) and its metered lcm work within them, admitted before what they size; each refusal names the cap and the way around it"
  },
+ "engine/web/src/series_ops.rs ::  :: SeriesOp { name: \"qpoly_derivative\", max_request: zmul::REQUEST_MAX as usize, peak: zmul::PEAK_MAX, work: zmul::WORK_MAX, run: qpoly_derivative }, #0": {
+  "class": "1+3",
+  "disposition": {
+   "1": "shared",
+   "3": {
+    "followup": "FU-B18-3"
+   }
+  },
+  "owner": "qpoly_scale",
+  "reason": "qpoly_scale's, qpoly_derivative's and qpoly_integral's fixed caps (zmul's request, work and peak, and the reply's closed-form bound within qpoly's REPLY_MAX) with their work metered and their memory on the live word ledger; each refusal names the cap and the way around it"
+ },
  "engine/web/src/series_ops.rs ::  :: SeriesOp { name: \"qpoly_divrem\", max_request: zmul::REQUEST_MAX as usize, peak: zmul::PEAK_MAX, work: pdivrem::DIVREM_Q_WORK_MAX, run: qpoly_divrem }, #0": {
   "class": "1+3",
   "disposition": {
@@ -7012,6 +7231,17 @@
   "owner": "qpoly_divrem",
   "reason": "qpoly_divrem's fixed caps (zmul's request and peak; its own work cap DIVREM_Q_WORK_MAX = 2^29, calibrated in time) with its lcms and division metered and its memory on the live word ledger; each refusal names the cap and the way around it"
  },
+ "engine/web/src/series_ops.rs ::  :: SeriesOp { name: \"qpoly_integral\", max_request: zmul::REQUEST_MAX as usize, peak: zmul::PEAK_MAX, work: zmul::WORK_MAX, run: qpoly_integral }, #0": {
+  "class": "1+3",
+  "disposition": {
+   "1": "shared",
+   "3": {
+    "followup": "FU-B18-3"
+   }
+  },
+  "owner": "qpoly_scale",
+  "reason": "qpoly_scale's, qpoly_derivative's and qpoly_integral's fixed caps (zmul's request, work and peak, and the reply's closed-form bound within qpoly's REPLY_MAX) with their work metered and their memory on the live word ledger; each refusal names the cap and the way around it"
+ },
  "engine/web/src/series_ops.rs ::  :: SeriesOp { name: \"qpoly_mul\", max_request: zmul::REQUEST_MAX as usize, peak: zmul::PEAK_MAX, work: zmul::WORK_MAX, run: qpoly_mul }, #0": {
   "class": "1+3",
   "disposition": {
@@ -7022,6 +7252,17 @@
   },
   "owner": "qpoly_mul",
   "reason": "qpoly_mul's fixed caps (zmul's five, and the reply's bytes <= 64 MiB) and phase A's metered lcm work within them, admitted before what they size; each refusal names the cap and the way around it"
+ },
+ "engine/web/src/series_ops.rs ::  :: SeriesOp { name: \"qpoly_scale\", max_request: zmul::REQUEST_MAX as usize, peak: zmul::PEAK_MAX, work: zmul::WORK_MAX, run: qpoly_scale }, #0": {
+  "class": "1+3",
+  "disposition": {
+   "1": "shared",
+   "3": {
+    "followup": "FU-B18-3"
+   }
+  },
+  "owner": "qpoly_scale",
+  "reason": "qpoly_scale's, qpoly_derivative's and qpoly_integral's fixed caps (zmul's request, work and peak, and the reply's closed-form bound within qpoly's REPLY_MAX) with their work metered and their memory on the live word ledger; each refusal names the cap and the way around it"
  },
  "engine/web/src/series_ops.rs ::  :: SeriesOp { name: \"series_euler\", max_request: SMALL_MAX_REQUEST, peak: 8 * MIB, work: zseries::WORK_MAX, run: series_euler }, #0": {
   "class": "1+3",
@@ -7448,6 +7689,51 @@
   "class": "none",
   "owner": "qpoly_clear",
   "reason": "qpoly_clear's derived bounds, plumbing (the meter's limit, the plan's sizes), an internal invariant or a test assertion: refuses nothing itself"
+ },
+ "engine/web/tests/scale_alloc.rs :: call :: fn call(kind: Kind, a: &str, b: &str, limit: Option<u64>, work: Option<u64>) -> (Result<String, DivFault>, u64, u64, u64, u64) { #0": {
+  "class": "none",
+  "owner": "qpoly_scale",
+  "reason": "qpoly_scale's derived sizes, plumbing (the ledger's and meter's limits, the plan's sizes, the reply's reservation) or a test assertion: refuses nothing itself"
+ },
+ "engine/web/tests/scale_alloc.rs :: call :: let led = Words::new(limit.unwrap_or(plan.limit)); #0": {
+  "class": "none",
+  "owner": "qpoly_scale",
+  "reason": "qpoly_scale's derived sizes, plumbing (the ledger's and meter's limits, the plan's sizes, the reply's reservation) or a test assertion: refuses nothing itself"
+ },
+ "engine/web/tests/scale_alloc.rs :: call_failing :: let led = Words::new(plan.limit); #0": {
+  "class": "none",
+  "owner": "qpoly_scale",
+  "reason": "qpoly_scale's derived sizes, plumbing (the ledger's and meter's limits, the plan's sizes, the reply's reservation) or a test assertion: refuses nothing itself"
+ },
+ "engine/web/tests/scale_alloc.rs :: scale_peaks_caps_and_baselines :: let led = Words::new(plan.limit); #0": {
+  "class": "none",
+  "owner": "qpoly_scale",
+  "reason": "qpoly_scale's derived sizes, plumbing (the ledger's and meter's limits, the plan's sizes, the reply's reservation) or a test assertion: refuses nothing itself"
+ },
+ "engine/web/tests/scale_calibrate.rs :: run :: let led = Words::new(plan.limit); #0": {
+  "class": "none",
+  "owner": "qpoly_scale",
+  "reason": "qpoly_scale's derived sizes, plumbing (the ledger's and meter's limits, the plan's sizes, the reply's reservation) or a test assertion: refuses nothing itself"
+ },
+ "engine/web/tests/scale_calibrate.rs :: run :: let mut m = Meter::new(u64::MAX); #0": {
+  "class": "none",
+  "owner": "qpoly_scale",
+  "reason": "qpoly_scale's derived sizes, plumbing (the ledger's and meter's limits, the plan's sizes, the reply's reservation) or a test assertion: refuses nothing itself"
+ },
+ "engine/web/tests/scale_calibrate.rs :: scale_ns_per_unit :: eprintln!(\"worst {:.3} ns/unit: at the cap (zmul::WORK_MAX units) {:.2} s\", worst, worst * (zmul::WORK_MAX as f64) / 1e9); #0": {
+  "class": "none",
+  "owner": "qpoly_scale",
+  "reason": "qpoly_scale's derived sizes, plumbing (the ledger's and meter's limits, the plan's sizes, the reply's reservation) or a test assertion: refuses nothing itself"
+ },
+ "engine/web/tests/scale_calibrate.rs :: scale_phases :: let led = Words::new(plan.limit); #0": {
+  "class": "none",
+  "owner": "qpoly_scale",
+  "reason": "qpoly_scale's derived sizes, plumbing (the ledger's and meter's limits, the plan's sizes, the reply's reservation) or a test assertion: refuses nothing itself"
+ },
+ "engine/web/tests/scale_calibrate.rs :: scale_phases :: let mut m = Meter::new(u64::MAX); #0": {
+  "class": "none",
+  "owner": "qpoly_scale",
+  "reason": "qpoly_scale's derived sizes, plumbing (the ledger's and meter's limits, the plan's sizes, the reply's reservation) or a test assertion: refuses nothing itself"
  },
  "engine/web/tests/series_ops.rs :: caps_name_the_limit_and_the_way_around :: fn caps_name_the_limit_and_the_way_around() { #0": {
   "class": "none",

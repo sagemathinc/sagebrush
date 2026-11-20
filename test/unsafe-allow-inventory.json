@@ -767,6 +767,12 @@
    "audit": "Can it produce or alter an Obligations, Operation, Reservation, Growth or Context (directly, generically or through a pointer)? No. Test glue: token for token engine/web/tests/series_alloc.rs's audited item (the same hash): a System-forwarding counting allocator whose counting only updates two atomics. Here it measures qpoly_mul's peak live memory against its admitted peak and checks that the heap returns to its baseline."
   },
   {
+   "file": "engine/web/tests/scale_alloc.rs",
+   "item": "impl GlobalAlloc for Counting",
+   "hash": "3f019520e6ba19c22c010e6d78590c43f0cba957a3e8a8d0a0102e1dd8872e7a",
+   "audit": "Can it produce or alter an Obligations, Operation, Reservation, Growth or Context (directly, generically or through a pointer)? No. Test glue: token-identical to engine/web/tests/divrem_alloc.rs's audited item (the same hash); here it measures the per-coefficient maps' (qpoly_scale, qpoly_derivative, qpoly_integral) live memory against their word ledger's prediction, checks that writing the reply allocates nothing, fails each of a call's allocations in turn, and checks the heap's baseline after each refusal and a Stop."
+  },
+  {
    "file": "engine/web/tests/series_alloc.rs",
    "item": "impl GlobalAlloc for Counting",
    "hash": "288c6281672cdb8eef99026977a4bfaa0bc9e73cadbbc361e9ab45e2026bb091",
