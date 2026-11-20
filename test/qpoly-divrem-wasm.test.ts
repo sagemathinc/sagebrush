@@ -45,8 +45,10 @@ for (const [name, a, b] of shapes) {
   test(`qpoly_divrem: a Stop mid-run traps within ${DEADLINE_MS} ms (${name})`, () => {
     const req = `{"fn":"qpoly_divrem","a":"${a}","b":"${b}"}`;
     flag = () => 0;
+    // (the calibration's instance made before t0: ms is the engine's alone)
+    const calibration = instance();
     const t0 = performance.now();
-    const { out: full, returned } = call(instance(), req);
+    const { out: full, returned } = call(calibration, req);
     const ms = returned - t0;
     if (full.includes("unknown fn")) return;
     assert.ok(full.startsWith('{"ok"'), full.slice(0, 200));
