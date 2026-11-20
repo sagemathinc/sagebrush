@@ -57,10 +57,13 @@ const PY = `def square(x):\n    return x ** 2  # a comment\n\ns = "</script><img
 const EVIL = `<img src=x onerror="window.__pwned=2"><b>bold</b>\n`;
 const page = (p) => `${W}.stat(${JSON.stringify(p)}).then((e) => e.fid)`;
 // (not opened: what the page showed instead, in the run's log, so a red here says where it stopped)
-const openCode = async (p) => {
+// (`tooLarge`: a file over the page's limit, which opens as its note, saying so, and sets no path: opened when the note
+// shows, never waited for to the end)
+const TOO_LARGE = `/too large to open here/.test(document.querySelector(".code-page .code-note")?.textContent ?? "")`;
+const openCode = async (p, { tooLarge = false } = {}) => {
   await until(`!!${W}`, 30000);
   const fid = await ev(page(p)); await go(base + "?code=" + fid);
-  const opened = await until(`!!${C} && ${C}.path === ${JSON.stringify(p)}`, 30000);
+  const opened = await until(tooLarge ? TOO_LARGE : `!!${C} && ${C}.path === ${JSON.stringify(p)}`, 30000);
   if (!opened) console.log(`(${p} didn't open; the workspace's warnings: ${JSON.stringify(wsWarnings.slice(-3))}: ` + JSON.stringify(await ev(`({ at: location.search, code: !!${C}, path: ${C}?.path ?? null, ready: document.readyState, old: !!window.__old, body: document.body?.innerText.slice(0, 200) ?? null })`).catch((e) => String(e).slice(0, 200))) + ")");
   return opened;
 };
@@ -541,7 +544,7 @@ try {
   check(await until(`${C}.path === "/notes2.txt" && document.querySelector(".code-page .code-name").textContent === "notes2.txt"`, 10000), "File ▸ Rename…: the file renamed, its new name shown");
 
   // too large; a missing id
-  check(await openCode("/big.json").then(() => until(`/too large to open here/.test(document.querySelector(".code-page .code-note")?.textContent ?? "")`, 10000)), "a file over 4 MB: said, with Download from Files");
+  check(await openCode("/big.json", { tooLarge: true }), "a file over 4 MB: said, with Download from Files");
   await go(base + "?code=nosuchfid000");
   check(await until(`/isn't here any more/.test(document.querySelector(".code-page .code-note")?.textContent ?? "")`, 30000), "an id no file has: said");
 
