@@ -1103,7 +1103,12 @@ class Polynomial:
         # product and each coefficient's reduction, all in Rust)
         from sagebrush import poly
         if self._ring._base is ZZ and o._ring._base is ZZ:
-            return self._make(poly.mul(self._c, o._c), o)
+            # (the engine's coefficients are already ints, trailing zeros
+            # dropped: Polynomial's normalization pass would change nothing)
+            r = Polynomial.__new__(Polynomial)
+            r._ring = self._ring
+            r._c = poly.mul(self._c, o._c)
+            return r
         return self._make(poly.qmul(self._c, o._c), o)
 
     def __rmul__(self, other):
