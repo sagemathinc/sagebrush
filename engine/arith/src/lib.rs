@@ -31,4 +31,5 @@ pub mod zmul;
 pub mod qpoly;
 pub mod ledger;
 pub mod pdivrem;
+pub mod pscale;
 pub mod zseries;

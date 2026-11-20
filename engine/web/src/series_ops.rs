@@ -34,12 +34,15 @@
 //! denominators cleared, `{"d": d, "c": "c0,c1,..."}`; zpoly_divrem the
 //! quotient and remainder in Z[x] by Sage's rule, `{"q": ..., "r": ...}`
 //! (its work metered, its memory on a word ledger); qpoly_divrem the same in
-//! Q[x], each coefficient in lowest terms.  qpoly_mul's admission has
+//! Q[x], each coefficient in lowest terms; qpoly_scale, qpoly_derivative and
+//! qpoly_integral one polynomial times a rational, its k-th derivative and
+//! its integral with a given constant term, each coefficient in lowest
+//! terms (one path, sagebrush_arith::pscale).  qpoly_mul's admission has
 //! two phases: the lcms' memory from the scans, their work metered (a named
 //! refusal at its limit); then the product's closed forms from the actual
 //! lcms, before any of its allocations.
 
-use sagebrush_arith::{pdivrem, qpoly, zmul, zseries};
+use sagebrush_arith::{pdivrem, pscale, qpoly, zmul, zseries};
 use serde_json::json;
 
 /// One row of the series ops' table: the op's caps and its path.
@@ -66,7 +69,7 @@ pub const SMALL_MAX_REQUEST: usize = 256;
 // (the peaks: the largest of the closed forms over the admitted corners, 53.3
 // MiB for the series ops and 29.0 MiB for sigma_table, with room; the
 // corner test in tests/series_ops.rs checks them)
-pub static OPS: [SeriesOp; 9] = [
+pub static OPS: [SeriesOp; 12] = [
     SeriesOp { name: "series_mul", max_request: SERIES_MAX_REQUEST, peak: 64 * MIB, work: zseries::WORK_MAX, run: series_mul },
     SeriesOp { name: "series_pow", max_request: SERIES_MAX_REQUEST, peak: 64 * MIB, work: zseries::WORK_MAX, run: series_pow },
     SeriesOp { name: "series_euler", max_request: SMALL_MAX_REQUEST, peak: 8 * MIB, work: zseries::WORK_MAX, run: series_euler },
@@ -83,6 +86,11 @@ pub static OPS: [SeriesOp; 9] = [
     // (exact division with remainder in Q[x]: the lcms metered, then the
     // division at the remainder's real scale, on the same meter and ledger)
     SeriesOp { name: "qpoly_divrem", max_request: zmul::REQUEST_MAX as usize, peak: zmul::PEAK_MAX, work: pdivrem::DIVREM_Q_WORK_MAX, run: qpoly_divrem },
+    // (per-coefficient maps over Q: the reply's bound admitted from the
+    // tokens, the work metered and the memory on the word ledger)
+    SeriesOp { name: "qpoly_scale", max_request: zmul::REQUEST_MAX as usize, peak: zmul::PEAK_MAX, work: zmul::WORK_MAX, run: qpoly_scale },
+    SeriesOp { name: "qpoly_derivative", max_request: zmul::REQUEST_MAX as usize, peak: zmul::PEAK_MAX, work: zmul::WORK_MAX, run: qpoly_derivative },
+    SeriesOp { name: "qpoly_integral", max_request: zmul::REQUEST_MAX as usize, peak: zmul::PEAK_MAX, work: zmul::WORK_MAX, run: qpoly_integral },
 ];
 
 /// The admitted request's path: run, then the reply text (an error reply
@@ -420,4 +428,32 @@ fn qpoly_divrem(req: &str, op: &SeriesOp) -> Result<String, String> {
     let pre = |e: String| format!("{}: {}", name, e);
     let (ca, cb) = (qpoly::scan(a).map_err(pre)?, qpoly::scan(b).map_err(pre)?);
     pdivrem::reply_q(&ca, &cb, req.len() as u64, &pdivrem::DIVREM_Q_CAPS).map_err(pre)
+}
+
+/// One map's request {a, b}: a the polynomial's tokens, b one token (k, a
+/// hex integer, for the derivative).
+fn pscale_op(req: &str, op: &SeriesOp, kind: pscale::Kind) -> Result<String, String> {
+    let name = op.name;
+    let [a, b] = fields(req, ["a", "b"], name)?;
+    let (a, b) = (need(get_str(a, "a", name)?, "a", name)?, need(get_str(b, "b", name)?, "b", name)?);
+    let pre = |e: String| format!("{}: {}", name, e);
+    let ca = qpoly::scan(a).map_err(pre)?;
+    let cb = if kind == pscale::Kind::Derivative { qpoly::scan_ints(b) } else { qpoly::scan(b) }.map_err(pre)?;
+    pscale::reply(kind, &ca, &cb, req.len() as u64, &qpoly::CAPS).map_err(pre)
+}
+
+/// qpoly_scale: {a, b} -> a b, b = p/q one rational token (tokens `[-]num[/den]`
+/// in hex, constant first; lowest terms; trailing zeros dropped).
+fn qpoly_scale(req: &str, op: &SeriesOp) -> Result<String, String> {
+    pscale_op(req, op, pscale::Kind::Scale)
+}
+
+/// qpoly_derivative: {a, b} -> the b-th derivative of a (b a hex integer).
+fn qpoly_derivative(req: &str, op: &SeriesOp) -> Result<String, String> {
+    pscale_op(req, op, pscale::Kind::Derivative)
+}
+
+/// qpoly_integral: {a, b} -> the integral of a with constant term b.
+fn qpoly_integral(req: &str, op: &SeriesOp) -> Result<String, String> {
+    pscale_op(req, op, pscale::Kind::Integral)
 }

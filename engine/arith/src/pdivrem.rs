@@ -285,7 +285,7 @@ fn floor_fix(tq: &mut Buf, nq: &mut usize, m: &mut Meter) -> Result<(), DivFault
 /// A token's bytes in the reply: `0`, or a sign, its numerator's hex
 /// digits and, unless its denominator is 1 (or absent), `/` and the
 /// denominator's.
-fn token_bytes(mag: &[u64], neg: bool, den: Option<&[u64]>) -> u64 {
+pub(crate) fn token_bytes(mag: &[u64], neg: bool, den: Option<&[u64]>) -> u64 {
     if mag.is_empty() {
         return 1;
     }

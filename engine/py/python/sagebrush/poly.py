@@ -192,6 +192,67 @@ def qdivrem(a, b):
     return ([_token(t) for t in q.split(",")] if q else []), ([_token(t) for t in rr.split(",")] if rr else [])
 
 
+def _qlist(r):
+    return [_token(t) for t in r.split(",")] if r else []
+
+
+def qscale(a, s, ints=False, raw=False):
+    """s * a for a polynomial a over Q and a rational s (int and Fraction
+    coefficients, constant term first; results in lowest terms, trailing
+    zeros dropped): the engine's qpoly_scale, refused past its caps.  With
+    ints=True, None unless every result coefficient is an integer (read from
+    the reply's tokens, before any is decoded); with raw=True the reply's
+    tokens themselves (a caller that decodes them once into its own type).
+
+    >>> from fractions import Fraction
+    >>> from sagebrush.poly import qscale
+    >>> qscale([1, Fraction(-2, 3), 0], Fraction(3, 4))
+    [Fraction(3, 4), Fraction(-1, 2)]
+    >>> qscale([4, 2], Fraction(1, 2), ints=True), qscale([3, 2], Fraction(1, 2), ints=True)
+    ([2, 1], None)
+    """
+    r = call_hex("qpoly_scale", _qtokens(a, "qscale"), _qtokens((s,), "qscale"))
+    if ints and "/" in r:
+        return None
+    return r if raw else _qlist(r)
+
+
+def qderivative(a, k=1, raw=False):
+    """The k-th derivative of a polynomial a over Q (int and Fraction
+    coefficients, constant term first; lowest terms, trailing zeros
+    dropped): the engine's qpoly_derivative, refused past its caps (raw=True:
+    the reply's tokens).
+
+    >>> from fractions import Fraction
+    >>> from sagebrush.poly import qderivative
+    >>> qderivative([1, Fraction(1, 2), 0, 5], 2)
+    [0, 30]
+    >>> qderivative([1, 2], 5)
+    []
+    """
+    if type(k) is not int or k < 0:
+        raise ValueError("qderivative: the order is a nonnegative int")
+    r = call_hex("qpoly_derivative", _qtokens(a, "qderivative"), format(k, "x"))
+    return r if raw else _qlist(r)
+
+
+def qintegral(a, c=0, raw=False):
+    """The integral of a polynomial a over Q with constant term c (int and
+    Fraction coefficients, constant term first; lowest terms, trailing zeros
+    dropped): the engine's qpoly_integral, refused past its caps (raw=True:
+    the reply's tokens).
+
+    >>> from fractions import Fraction
+    >>> from sagebrush.poly import qintegral
+    >>> qintegral([3, 0, Fraction(1, 2)])
+    [0, 3, 0, Fraction(1, 6)]
+    >>> qintegral([], Fraction(-1, 7))
+    [Fraction(-1, 7)]
+    """
+    r = call_hex("qpoly_integral", _qtokens(a, "qintegral"), _qtokens((c,), "qintegral"))
+    return r if raw else _qlist(r)
+
+
 def gcd(a, b):
     """The gcd in Z[x] of integer polynomials, with positive leading
     coefficient (constant term first; [] if both are zero)."""

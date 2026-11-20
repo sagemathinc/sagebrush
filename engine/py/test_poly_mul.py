@@ -419,6 +419,138 @@ def qdivrem_checks(r):
     return n
 
 
+def qscale_checks(r):
+    """sagebrush.poly.qscale, qderivative and qintegral (the engine's
+    qpoly_scale, qpoly_derivative and qpoly_integral) against Fraction
+    arithmetic (here only), results in lowest terms; their exact-type pins
+    (refused before the bridge); and Sage mode's routes through them: -f,
+    constants times f in either order, f / c, monic, derivative, integral
+    and QQ factor's monic factors, each keeping its ring and its zero cases,
+    and one past each cap a typed refusal with no partial result."""
+    from fractions import Fraction
+    from sagebrush import _engine as E
+
+    def trim(c):
+        c = [int(x) if Fraction(x).denominator == 1 else Fraction(x) for x in c]
+        while c and c[-1] == 0:
+            c.pop()
+        return c
+    n = 0
+    for _ in range(120):
+        a = [Fraction(coef(r, r.randint(0, 200)), r.randint(1, 1 << r.randint(1, 90))) for _ in range(r.randint(0, 12))]
+        s = Fraction(coef(r, r.randint(1, 150)) or 1, r.randint(1, 1 << r.randint(1, 70)))
+        k = r.randint(0, 14)
+        c0 = Fraction(coef(r, 30), r.randint(1, 99))
+        assert P.qscale(a, s) == trim([x * s for x in a]), (a, s)
+        d = list(a)
+        for _ in range(k):
+            d = [i * x for i, x in enumerate(d)][1:]
+        assert P.qderivative(a, k) == trim(d), (a, k)
+        assert P.qintegral(a, c0) == trim([c0] + [x / (i + 1) for i, x in enumerate(a)]), (a, c0)
+        n += 3
+    assert P.qscale([4, 2], Fraction(1, 2), ints=True) == [2, 1]
+    assert P.qscale([3, 2], Fraction(1, 2), ints=True) is None
+    assert P.qscale([3, 2], -1, raw=True) == "-3,-2"
+    assert P.qscale([], 5) == [] and P.qscale([1, 2], 0) == [] and P.qderivative([1, 2], 10 ** 40) == []
+    for bad_k in (-1, True, 1.0, "1", None):
+        try:
+            P.qderivative([1, 2], bad_k)
+        except ValueError as e:
+            assert "order" in str(e), e
+        else:
+            raise AssertionError("order %r accepted" % (bad_k,))
+        n += 1
+    # (exact types, as qdivrem's: refused before the bridge is reached)
+    name = "_sbengine" if hasattr(E, "_sbengine") else "_native"
+    real = getattr(E, name)
+    calls = []
+
+    class Spy:
+        def call(self, text):
+            calls.append(text)
+            return '{"ok":""}'
+
+    class I1(int):
+        def __index__(self):
+            return 0
+    setattr(E, name, Spy())
+    try:
+        for bad in [I1(3), True, 1.5, "1", None]:
+            for f in (lambda: P.qscale([1, bad], 2), lambda: P.qscale([1, 2], bad), lambda: P.qintegral([1, bad]),
+                      lambda: P.qintegral([1], bad), lambda: P.qderivative([bad], 1)):
+                try:
+                    f()
+                except TypeError:
+                    pass
+                else:
+                    raise AssertionError("accepted %r" % (bad,))
+                n += 1
+    finally:
+        setattr(E, name, real)
+    assert calls == [], calls
+    # Sage mode's routes, their rings and zero cases
+    try:
+        import sagebrush.sage as S
+    except ImportError:
+        import sage_all as S
+    QQ, ZZ = S.QQ, S.ZZ
+    R = S.PolynomialRing(QQ, "x")
+    Z = S.PolynomialRing(ZZ, "t")
+    T = S.PolynomialRing(QQ, "t")
+    x, t = R.gen(), Z.gen()
+    h = QQ(1) / 2
+    f = x ** 2 * QQ(2) / 3 - 1
+    pins = [
+        (-f, [1, 0, Fraction(-2, 3)], R), (-R(0), [], R), (-(t + 1), [-1, -1], Z),
+        (3 * f, [-3, 0, 2], R), (f * 3, [-3, 0, 2], R), (h * f, [Fraction(-1, 2), 0, Fraction(1, 3)], R),
+        (R(h) * f, [Fraction(-1, 2), 0, Fraction(1, 3)], R), (f * R(h), [Fraction(-1, 2), 0, Fraction(1, 3)], R),
+        (0 * f, [], R), (f * R(0), [], R), (Z(3) * (t + 1), [3, 3], Z), ((t + 1) * 5, [5, 5], Z),
+        ((t + 1) * h, [Fraction(1, 2), Fraction(1, 2)], T), (h * (t + 1), [Fraction(1, 2), Fraction(1, 2)], T),
+        ((2 * t + 4) / 2, [2, 1], Z), ((2 * t + 3) / 2, [Fraction(3, 2), 1], T), ((2 * t + 4) / -2, [-2, -1], Z),
+        ((t + 1) / h, [2, 2], T), (f / h, [-2, 0, Fraction(4, 3)], R), (Z(0) / 3, [], Z), (R(0) / -3, [], R),
+        ((2 * x ** 2 + 3).monic(), [Fraction(3, 2), 0, 1], R), ((2 * t ** 2 + 4).monic(), [2, 0, 1], T),
+        ((t + 1).monic(), [1, 1], Z), (R(0).monic(), [], R), (Z(0).monic(), [], T),
+        (f.derivative(), [0, Fraction(4, 3)], R), (f.derivative(0), [-1, 0, Fraction(2, 3)], R), (f.derivative(3), [], R),
+        ((t ** 3).derivative(2), [0, 6], Z), (Z(0).derivative(), [], Z),
+        ((3 * x ** 2 + 1).integral(), [0, 1, 0, 1], R), (R(0).integral(), [], R), ((t ** 2).integral(), [0, 0, 0, Fraction(1, 3)], T),
+        (Z(0).integral(), [], T),
+    ]
+    for got, want, ring in pins:
+        assert str(got.parent()) == str(ring), (got, ring)
+        assert [Fraction(c) for c in got.list()] == [Fraction(c) for c in want], (got, want)
+        n += 1
+    F = (6 * x ** 2 - h).factor()
+    assert F.unit() == 6 and [(list(g), e) for g, e in F] == [([Fraction(-1, 12), 0, 1], 1)], F
+    F = (2 * x ** 2 - 2).factor()
+    assert F.unit() == 2 and [list(g) for g, _ in F] == [[-1, 1], [1, 1]], F
+    # (f / 0 raises before the engine is called)
+    setattr(E, name, Spy())
+    try:
+        for g in (f, t + 1):
+            try:
+                g / 0
+            except ZeroDivisionError:
+                pass
+            else:
+                raise AssertionError("division by zero accepted")
+    finally:
+        setattr(E, name, real)
+    assert calls == [], calls
+    # one past each cap: a typed refusal naming it, no partial result
+    big = Fraction(1 << 16000, 3)
+    for g, what in ((lambda: R([1] * 20000) * big, "reply's bytes"), (lambda: R([1] * 20000) / big, "reply's bytes"),
+                    (lambda: R([1] * 70000).derivative(40000), "reply's bytes"),
+                    (lambda: R([Fraction(1, 3)] * 3000000).integral(), "memory needs more than")):
+        try:
+            g()
+        except ValueError as e:
+            assert what in str(e) and "a smaller polynomial per call" in str(e), e
+        else:
+            raise AssertionError("past a cap: accepted")
+        n += 1
+    return n
+
+
 def call_hex_checks(r):
     """sagebrush._engine.call_hex, the lean text lane poly.mul and qmul use:
     the same values as call() for ok replies (the empty one included) and
@@ -621,6 +753,7 @@ def main():
     n += call_hex_checks(r)
     n += zdivrem_checks(r)
     n += qdivrem_checks(r)
+    n += qscale_checks(r)
     print("poly_mul against exact products: %d cases ok" % n)
 
 

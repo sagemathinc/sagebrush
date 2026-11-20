@@ -1,12 +1,14 @@
-// The division ops run only in a worker.  A structural row over the web
+// The division and scaling ops run only in a worker.  A structural row over the web
 // build: from every bundle entry in web/build.ts, the closure of its relative
 // imports (static and dynamic) is walked, and every bundle whose closure
 // reaches the engine module (src/runtime/engine.ts, the only caller of the
 // module's sb_call in the runtime) must be a worker bundle.  So a long
 // qpoly_divrem call (its work cap is 2^29 units, about 2.15 s on the
 // production wasm engine at the worst measured rate) never runs on the UI
-// thread: Sage mode's Python (sagebrush.poly.qdivrem and zdivrem) runs in the
-// kernel's worker (web/worker.ts).
+// thread (nor a qpoly_scale, qpoly_derivative or qpoly_integral call, 2^28
+// units, about 2.11 s there): Sage mode's Python (sagebrush.poly.qdivrem,
+// zdivrem, qscale, qderivative and qintegral) runs in the kernel's worker
+// (web/worker.ts).
 import test from "node:test";
 import assert from "node:assert/strict";
 import { existsSync, readFileSync, statSync } from "node:fs";

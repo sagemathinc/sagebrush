@@ -77,7 +77,7 @@ CHEAP = {
 }
 FAMILY = [  # (name test, family, owner)
     (lambda n: n.startswith("mat_") or n in ("hermite_form", "elementary_divisors", "lll", "charpoly", "charpoly_exact", "charpoly_mod", "nmod_charpoly"), "E3 dense linear algebra", "linear algebra"),
-    (lambda n: n.startswith("poly_") or n in ("qpoly_mul", "qpoly_clear", "zpoly_divrem", "qpoly_divrem", "factor", "factor_mod", "nf_factor", "nf_gcd", "complex_roots"), "E5 polynomials", "polynomial factorization"),
+    (lambda n: n.startswith("poly_") or n in ("qpoly_mul", "qpoly_clear", "zpoly_divrem", "qpoly_divrem", "qpoly_scale", "qpoly_derivative", "qpoly_integral", "factor", "factor_mod", "nf_factor", "nf_gcd", "complex_roots"), "E5 polynomials", "polynomial factorization"),
     (lambda n: n.startswith("bnf") or n in ("nf_data", "primes_above", "quadratic_class_group"), "E7 number fields", "number fields"),
     (lambda n: n.startswith("ec_") or n in ("ap", "aplist", "aplist_many", "quartic_search", "moments", "ball_log"), "E12 elliptic curves / analytic", "analytic"),
     (lambda n: n in ("hecke_charpoly", "batch_exact", "newforms", "newspace", "rational_newforms", "weight2"), "E9 modular symbols", "modular symbols"),
