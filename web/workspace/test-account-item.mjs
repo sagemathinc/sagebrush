@@ -88,7 +88,8 @@ try {
   await send("Page.navigate", { url: base }); await sleep(300);
 
   const SLOT = "#acctslot";
-  const signInWant = `"/auth/login?return=" + encodeURIComponent(location.pathname + location.search + location.hash)`;
+  // (signInUrl's return: the page's address, a quick link's z= or c= fragment dropped, share-client/upload.ts)
+  const signInWant = `"/auth/login?return=" + encodeURIComponent(location.pathname + location.search + (/[zc]=[\\w-]/.test(location.hash) ? "" : location.hash))`;
   const shown = (sel) => `(() => { const e = document.querySelector(${J(sel)}); return !!e && !e.hidden && getComputedStyle(e).display !== "none" && e.getBoundingClientRect().width > 0; })()`;
 
   // ---- another answer (a 404): nothing
@@ -103,6 +104,13 @@ try {
   const signin = await ev(`(() => { const a = document.querySelector("${SLOT} a"); return { text: a.textContent, href: a.getAttribute("href"), want: ${signInWant} }; })()`);
   await shot("notebook-signed-out");
   check(signin.text === "Sign in" && signin.href === signin.want, "…to the site's sign-in and back to this page", signin);
+  // (a page whose address holds a quick link: its Sign in goes back to the page without the link's cells, the address
+  // read in the page, the href checked for no fragment at all, not against signInUrl's own rule)
+  // (a query of its own, so the page loads anew: a fragment alone would only scroll the page already there)
+  check(await load(base + "?ql=1#m=sage&z=abc-_123") && await until(shown(SLOT + " a.sbacct-in"), 8000), "signed out, a quick link's page: loaded");
+  const ql = await ev(`({ hash: location.hash, href: document.querySelector("${SLOT} a").getAttribute("href"), back: "/auth/login?return=" + encodeURIComponent(location.pathname + location.search) })`);
+  check(/z=abc-_123/.test(ql.hash) && ql.href === ql.back && !/abc-_123|%23/.test(ql.href), "…its Sign in leaves the quick link's cells out of the return", ql);
+  check(await load(base + "?ql=2#leaves") && await until(shown(SLOT + " a.sbacct-in"), 8000) && (await ev(`location.hash === "#leaves" && document.querySelector("${SLOT} a").getAttribute("href").endsWith("%23leaves")`)), "…another fragment stays in the return");
   const where = await ev(`(() => { const r = document.querySelector("${SLOT}").getBoundingClientRect(), h = document.querySelector("header").getBoundingClientRect(); return { top: r.top, bottom: r.bottom, right: r.right, w: innerWidth, hTop: h.top, hBottom: h.bottom, inHeader: !!document.querySelector("header ${SLOT}"), afterShare: !!(document.querySelector("#sharebtn").compareDocumentPosition(document.querySelector("${SLOT}")) & Node.DOCUMENT_POSITION_FOLLOWING) }; })()`);
   check(where.inHeader && where.afterShare && where.top >= where.hTop - 1 && where.bottom <= where.hBottom + 1 && where.right > where.w * 0.75, "…at the top right of the page's bar, right of Share", where);
   await ev(`localStorage.setItem("sagebrush-files-sidebar", "1")`);

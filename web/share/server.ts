@@ -203,7 +203,9 @@ export function returnPath(p: string | null, origin: string): string {
   try {
     const u = new URL(p, origin);
     // (and checked again as normalized: /%2e%2e//host is //host, another site, SEC-SHARE-1)
-    const out = u.pathname + u.search + u.hash;
+    // (a quick link's cells, a z= or c= fragment, are never kept, as signInUrl drops them in the page: not in the state
+    // cookie, nor in the redirect back)
+    const out = u.pathname + u.search + (/[zc]=[\w-]/.test(u.hash) ? "" : u.hash);
     return u.origin === origin && out.startsWith("/") && !out.startsWith("//") ? out : "/";
   } catch {
     return "/";
