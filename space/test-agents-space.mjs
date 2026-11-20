@@ -135,7 +135,7 @@ ok(JSON.parse(text1).selected === pick.id, `the selection is in the file: "selec
 const camBefore = await ev(`(${W}).camera.position.toArray().map((x) => +x.toFixed(2))`);
 
 // ---- the agent writes the space again (one more object, on the revision it read)
-const next = { ...JSON.parse(text1), nodes: [...space.nodes, { id: "added", kind: "note", title: "Added by the agent", text: "A new note." }] };
+const next = { ...JSON.parse(text1), nodes: [...space.nodes, { id: "added", kind: "note", title: "Added by the agent", text: "A new note with $\\frac{p}{q}$ and\n\n$$\\sum_{n \\ge 1} a_n q^n$$\n\n<img src=x onerror=\"parent.__pwned = 1\"> <script>parent.__pwned = 2</script> <b>bold</b>" }] };
 await call("workspace.write", { path, content: { text: JSON.stringify(next, null, 1) }, base: read1.rev });
 await until(`(${W})?.space?.nodes?.length === ${space.nodes.length + 1}`, 10000);
 ok(true, "the agent's rewrite shows up in the space");
@@ -150,6 +150,12 @@ const read2 = await call("workspace.read", { path });
 const text2 = typeof read2.content === "string" ? read2.content : read2.content?.text ?? JSON.stringify(read2.content);
 ok(JSON.parse(text2).selected === "added", "a new selection replaces it");
 ok(JSON.parse(text2).nodes.length === space.nodes.length + 1, "the selection write keeps the agent's objects");
+// (a note's Markdown: math typeset with KaTeX; raw HTML only formatting, never a script)
+const DOC = `document.querySelector('#artifacts .pane-host:not([hidden]) .space-frame').contentDocument`;
+await until(`${DOC}.querySelectorAll('#overlay .md .katex').length === 2`, 10000).then(() => ok(true, "a note's math is typeset (inline and display)"), (e) => ok(false, "a note's math is typeset", String(e).slice(0, 200)));
+ok((await ev(`${DOC}.querySelector('#overlay .md b')?.textContent ?? null`)) === "bold", "a note's formatting HTML is kept");
+await sleep(300);
+ok((await ev(`window.__pwned ?? null`)) === null && (await ev(`${DOC}.querySelectorAll('#overlay .md script, #overlay .md [onerror]').length`)) === 0, "a note's script and handlers never run (nor are kept)");
 
 // ---- code runs in the space, on the site's own engine
 const D = `document.querySelector('#artifacts .pane-host:not([hidden]) .space-frame').contentDocument`;

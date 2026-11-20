@@ -33,6 +33,10 @@ A space is a board in 3D: notes, code with its output, files and 3D plots, place
 - `near`: another object's id; this one is placed beside it (a sample beside the code it illustrates).
 - Don't give `position`: the layout is computed and is the same each time for the same file.
 
+Sage 3D plots that run in Sagebrush (each becomes the object): `plot3d(f, (x, a, b), (y, c, d))`, `icosahedron()`, `dodecahedron(color='orange')`. Not yet: `polytopes.icosahedron().plot()` (Sagebrush's `polytopes` has no `.plot()`).
+
+Notes are Markdown with math (`$...$`, `$$...$$`) typeset by KaTeX; raw HTML is limited to formatting, and pictures from other sites aren't shown.
+
 ## Links (`edges`)
 
 `{ "from": id, "to": id }`: imports, calls, "illustrates", "explains". Linked objects are pulled together, and an object's links are listed and clickable when the person reads it.

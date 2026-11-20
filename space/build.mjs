@@ -22,6 +22,9 @@ await build({
   target: "es2022",
   outfile: join(dist, "space.js"),
   logLevel: "warning",
+  // (src/main.js takes the site's Markdown, ../web/markdown.ts, whose "marked" comes from here when the repository's
+  //  own packages aren't installed)
+  nodePaths: [join(here, "node_modules")],
 });
 cpSync(join(here, "index.html"), join(dist, "index.html"));
 const spaces = [];

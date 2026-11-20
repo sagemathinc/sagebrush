@@ -5,7 +5,9 @@
 // panel finds any text and flies there; Back returns; 2D / 3D shows the same space on a plane, for comparison.
 import * as THREE from "three";
 import { OrbitControls } from "three/examples/jsm/controls/OrbitControls.js";
-import { marked } from "marked";
+// (notes: the site's own Markdown, web/markdown.ts: raw HTML limited to formatting, no pictures from other sites, and
+//  math marked for KaTeX; a space is the agent's or anyone's text, shown on the site's origin)
+import { render as markdown } from "../../web/markdown.ts";
 import { layout } from "./layout.js";
 import { highlight, editor } from "./code.js";
 import { run, interrupt, sceneObject, SCENE } from "./run.js";
@@ -552,18 +554,19 @@ const RUNS = ["python", "sage", "matlab", "magma"];
 const runnable = (nd) => nd.kind === "code" || nd.kind === "plot3d";
 function showOverlay(nd) {
   let body = "";
-  if (nd.kind === "note") body = `<div class="md">${marked.parse(nd.text ?? "")}</div>`;
+  if (nd.kind === "note") body = `<div class="md">${markdown(String(nd.text ?? ""), { remote: false })}</div>`;
   else if (runnable(nd)) {
     const mode = RUNS.includes(nd.lang) ? nd.lang : nd.kind === "plot3d" ? "sage" : "python";
     body = `<div class="runbar"><select class="mode" title="The language">${RUNS.map((m) => `<option${m === mode ? " selected" : ""}>${m}</option>`).join("")}</select>` +
       `<button class="run" title="Run (Shift+Enter)">▶ Run</button><button class="stop" title="Stop" hidden>■ Stop</button><span class="runstate"></span></div>` +
       `<div class="code-edit"></div><div class="label">Output</div><div class="output">${outputHtml(nd)}</div>` +
       (nd.kind === "plot3d" || nd.scene ? `<p class="hint">A 3D plot is a real object in the space: drag to turn around it. Edit its code and run it to change it.</p>` : "");
-  } else body = `<div class="meta">${esc(nd.lang ?? "")}${nd.lines ? " · " + nd.lines + " lines" : ""}</div><pre class="code hljs"><code>${highlight(String(nd.text ?? ""), nd.lang ?? "")}</code></pre>${nd.lines > 60 ? '<div class="hint">(its first 60 lines)</div>' : ""}`;
+  } else body = `<div class="meta">${esc(nd.lang ?? "")}${Number(nd.lines) > 0 ? " · " + Number(nd.lines) + " lines" : ""}</div><pre class="code hljs"><code>${highlight(String(nd.text ?? ""), nd.lang ?? "")}</code></pre>${Number(nd.lines) > 60 ? '<div class="hint">(its first 60 lines)</div>' : ""}`;
   const links = (label, list) => list.length ? `<div class="label">${label} (${list.length})</div><ul class="links">${list.map((m) => `<li><a href="#" data-i="${space.nodes.indexOf(m)}">${esc(m.title)}</a></li>`).join("")}</ul>` : "";
   $("#overlay").innerHTML = `<div class="grip" title="Drag to resize"></div><button class="close" title="Close (Esc)">×</button><h2>${esc(nd.title)}</h2>${body}${links(nd.kind === "file" ? "Imports" : "Links to", nd._out)}${links(nd.kind === "file" ? "Imported by" : "Linked from", nd._in)}`;
   grip($("#overlay .grip"));
   if (runnable(nd)) mountRunner(nd);
+  typeset($("#overlay"));
   $("#overlay").hidden = false;
   $("#overlay").scrollTop = 0;
   viewOffset();
@@ -571,6 +574,15 @@ function showOverlay(nd) {
   for (const a of $("#overlay").querySelectorAll("a[data-i]")) a.onclick = (e) => { e.preventDefault(); openOverlay(space.nodes[+a.dataset.i]); };
   setSelected(nd.id);
 }
+// (math: KaTeX, the site's /sagebrush-math.js, loaded the first time a note has some)
+let mathModule = null;
+function typeset(el) {
+  if (!el.querySelector(".math[data-tex]")) return;
+  const url = "/sagebrush-math.js";
+  mathModule ??= import(url);
+  mathModule.then((m) => m.typeset(el)).catch(() => {});
+}
+const isBase64 = (s) => typeof s === "string" && /^[A-Za-z0-9+/]*={0,2}$/.test(s);
 function closeOverlay() { $("#overlay").hidden = true; viewOffset(); if (space) setSelected(null); }
 // (while the overlay covers the right of the screen, the view is shifted so what it is about stays in the free part)
 function viewOffset() {
@@ -587,7 +599,7 @@ function outputHtml(nd) {
   let h = "";
   if (nd.output) h += `<pre class="out${nd.outputError ? " err" : ""}">${esc(nd.output)}</pre>`;
   if (nd.svg) h += `<img class="fig" alt="the figure" src="data:image/svg+xml;base64,${btoa(unescape(encodeURIComponent(nd.svg)))}">`;
-  if (nd.png) h += `<img class="fig" alt="the figure" src="data:image/png;base64,${nd.png}">`;
+  if (isBase64(nd.png)) h += `<img class="fig" alt="the figure" src="data:image/png;base64,${nd.png}">`;
   if (nd.scene) h += `<p class="hint">Its 3D plot is the object in the space.</p>`;
   return h || `<p class="hint">Not run yet.</p>`;
 }
@@ -638,7 +650,7 @@ function liveHtml(r) {
   let h = r.out ? `<pre class="out${r.error ? " err" : ""}">${esc(r.out)}</pre>` : "";
   for (const b of r.displays) {
     if (b["image/svg+xml"] && !b[SCENE]) h += `<img class="fig" alt="the figure" src="data:image/svg+xml;base64,${btoa(unescape(encodeURIComponent(b["image/svg+xml"])))}">`;
-    else if (b["image/png"]) h += `<img class="fig" alt="the figure" src="data:image/png;base64,${b["image/png"]}">`;
+    else if (isBase64(b["image/png"])) h += `<img class="fig" alt="the figure" src="data:image/png;base64,${b["image/png"]}">`;
     else if (b[SCENE]) h += `<p class="hint">A 3D plot: it appears in the space.</p>`;
   }
   return h || `<p class="hint">running…</p>`;
