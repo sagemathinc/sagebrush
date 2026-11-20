@@ -134,8 +134,9 @@ export class Mirror {
   private readonly refused = new Set<string>();
   /** who waits for a conversation's request to end (the reconcile, between its pages) */
   private readonly idle = new Map<string, (() => void)[]>();
-  /** answers missed in a row, by conversation (an agent that never answers isn't asked forever by itself) */
-  private readonly misses = new Map<string, number>();
+  /** answers missed in a row, by conversation, with the pairing they were missed on (an agent that never answers isn't
+   *  asked forever by itself; another pairing starts again from none) */
+  private readonly misses = new Map<string, { pairing: AgentPairing | null; n: number }>();
 
   constructor(private readonly host: MirrorHost) {
     const kept = host.loadCursors();
@@ -430,8 +431,12 @@ export class Mirror {
               // (refused because a request for it is still in flight or draining, or no answer came in time: run again
               //  once that request has ended; an agent that keeps not answering, only on the next real trigger)
               const why = (e as Error)?.message;
-              if (why === NO_REPLY) this.misses.set(conversation, (this.misses.get(conversation) ?? 0) + 1);
-              if (why === BUSY || (why === NO_REPLY && (this.misses.get(conversation) ?? 0) < MAX_MISSES)) this.later(conversation);
+              const p = this.host.pairing();
+              if (why === NO_REPLY) {
+                const m = this.misses.get(conversation);
+                this.misses.set(conversation, { pairing: p, n: m && m.pairing === p ? m.n + 1 : 1 });
+              }
+              if (why === BUSY || (why === NO_REPLY && this.misses.get(conversation)!.n < MAX_MISSES)) this.later(conversation);
             },
           );
         } while (this.again.has(conversation) && this.on() && this.source());

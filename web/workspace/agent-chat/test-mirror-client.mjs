@@ -433,7 +433,7 @@ const expected = (a, conv) => {
 
 // ---- an agent that never answers: asked again by itself at most a few times, then only on a real trigger
 {
-  const { a, m } = setup();
+  const { a, m, setPairing } = setup();
   await m.refresh();
   turn(a, "c1", "never");
   a.quiet = true;
@@ -442,6 +442,14 @@ const expected = (a, conv) => {
   const n = a.sent.filter(([mm]) => mm === "chat.resume").length;
   await tick(1500);
   check(n >= 3 && n <= 4 && a.sent.filter(([mm]) => mm === "chat.resume").length === n, "no answer, again and again: asked by itself a few times, then no more until a real trigger", n);
+  // (another pairing: missed answers start again from none, so it's asked again by itself after a miss)
+  const b = agent();
+  b.logs = a.logs;
+  b.quiet = true;
+  setPairing(b);
+  void m.kick("c1");
+  await tick(1600);
+  check(b.sent.filter(([mm]) => mm === "chat.resume").length >= 2, "another pairing: a miss is asked again by itself (the count starts again)", b.sent.length);
   a.quiet = false;
 }
 
@@ -578,6 +586,27 @@ const expected = (a, conv) => {
   await m.reconcile();
   await settle();
   check(s.stream("c1", "aaaaaaaa11").stale_from === null, "a reset on a later page: no conclusion, nothing marked", s.stream("c1", "aaaaaaaa11"));
+}
+
+// ---- a reconcile under way stops when the mirror is turned off
+{
+  const { a, s, m } = setup();
+  await m.refresh();
+  turn(a, "c1", "x", 5);
+  await m.kick("c1");
+  await settle();
+  a.chunk = 2;
+  a.sent.length = 0;
+  const r = m.reconcile();
+  await tick(100); // (its first request answered in part; it waits for that one to end)
+  s.on = false;
+  await m.refresh();
+  await r;
+  await settle();
+  const n = a.sent.filter(([mm]) => mm === "chat.resume").length;
+  await tick(600);
+  check(n <= 2 && a.sent.filter(([mm]) => mm === "chat.resume").length === n, "turned off during a reconcile: no more of the runner's log is asked for", n);
+  a.chunk = 0;
 }
 
 // ---- all a request asked for, not said done: the caller has it, and the request drains until it ends
