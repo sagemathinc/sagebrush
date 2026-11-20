@@ -920,6 +920,34 @@ for (const [what, grant] of [["a folder, not Everything", { folders: ["/A"], wri
   ed.close();
   S.srv.stop(true);
 }
+// ---- run.context: a run verb's call carries the chat and the turn it came from, added by the agent's server; taken out
+// before the params are checked and handed to the run beside them, both or neither; only when both ends said it
+{
+  const S = server(pairOk), W = fakeWs();
+  const seen = [];
+  const runVerbs = { serve: async (method, params, ctx) => { seen.push({ params, context: ctx.context }); ctx.reply({ ok: true, ended: "done" }); } };
+  const P = new AgentPairing(S.port, { code: "abcd-efgh ijkl" }, { verbsFor: W.verbsFor, store: W.storeApi, trashEntry: W.trashEntry, page, runVerbs });
+  await P.paired();
+  await P.allow({ folders: ["/"], write: true, run: true, expires: null }, false);
+  await until(() => S.got.some((m) => m.method === "page.features"));
+  ok(S.got.find((m) => m.method === "page.features").params.features.includes("run.context"), "a page with run verbs offers run.context (page.features)");
+  const run = async (params) => { const n = seen.length; const r = await S.request("workspace.run_notebook", params); return { r, got: seen.length > n ? seen.at(-1) : null }; };
+  const a0 = await run({ path: "/A/doc.ipynb", conversation: "c1", turn_id: "t1" });
+  ok(a0.got?.params.conversation === "c1" && a0.got.context === undefined, "the agent didn't say run.context: its params as they are, no context (the run's own check refuses them)", a0.got);
+  P.hello.features = ["run.context"];
+  const a1 = await run({ path: "/A/doc.ipynb", timeout_s: 5, conversation: "c1", turn_id: "t1" });
+  ok(JSON.stringify(a1.got?.params) === JSON.stringify({ path: "/A/doc.ipynb", timeout_s: 5 }) && a1.got.context?.conversation === "c1" && a1.got.context.turnId === "t1", "both said it: the chat and the turn taken out of the params and handed beside them", a1.got);
+  const a2 = await run({ path: "/A/doc.ipynb", conversation: "c1" });
+  ok(JSON.stringify(a2.got?.params) === JSON.stringify({ path: "/A/doc.ipynb" }) && a2.got.context === undefined, "the chat without the turn: taken out, no context", a2.got);
+  const a3 = await run({ path: "/A/doc.ipynb" });
+  ok(a3.got && a3.got.context === undefined, "neither: no context", a3.got);
+  for (const bad of [{ conversation: 5, turn_id: "t1" }, { conversation: "c1", turn_id: "" }, { conversation: "c1", turn_id: "x".repeat(129) }]) {
+    const b = await run({ path: "/A/doc.ipynb", ...bad });
+    ok(b.got === null && b.r.error?.data?.code === "invalid", `a chat or turn that isn't an id (${JSON.stringify(bad).slice(0, 60)}): refused, nothing run`, b.r);
+  }
+  await P.revoke();
+  S.srv.stop(true);
+}
 {
   // (a folder, not Everything: told nothing to run, and no answer)
   const S = server(pairOk), W = fakeWs(), base = W.verbsFor;

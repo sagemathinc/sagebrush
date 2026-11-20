@@ -367,7 +367,7 @@ const note = (n, text = "x") => JSON.stringify({ jsonrpc: "2.0", method: "chat.m
 // ---- the pairing over a link: agent.ready pairs; nothing before it; an old leg's messages reach nothing
 const ws0 = { forAgent: () => ({}), stat: async () => null, agentGrants: async () => ({}), putAgentGrant: async () => {} };
 const pairOn = (leg) => new AgentPairing(0, { link: leg, computer: "laptop" }, { verbsFor: () => ({ list: async () => [], stat: async () => null, read: async () => ({ entry: { path: "/a", kind: "file" }, content: "hi", rev: 1 }) }), store: ws0, trashEntry: async () => null, page: { origin: "https://x", path: "/agents/" } });
-const ready = (child = "child-1") => ({ jsonrpc: "2.0", method: "agent.ready", params: { agent: { name: "Claude", client: "claude-agent-sdk", version: "0.4.0" }, features: ["notebook.edit", "permission.digest"], child } });
+const ready = (child = "child-1") => ({ jsonrpc: "2.0", method: "agent.ready", params: { agent: { name: "Claude", client: "claude-agent-sdk", version: "0.4.0" }, features: ["notebook.edit", "permission.digest", "run.context", "other"], child } });
 {
   const { leg, ws, runner } = await openLeg();
   const p = pairOn(leg);
@@ -381,7 +381,7 @@ const ready = (child = "child-1") => ({ jsonrpc: "2.0", method: "agent.ready", p
   const p = pairOn(leg);
   ws.recv(ready());
   const h = await p.paired();
-  ok(p.state === "paired" && h.child === "child-1" && h.agent.name === "Claude" && h.features.includes("permission.digest"), "agent.ready pairs: the agent, its features and its child");
+  ok(p.state === "paired" && h.child === "child-1" && h.agent.name === "Claude" && h.features.includes("permission.digest") && h.features.includes("run.context") && !h.features.includes("other"), "agent.ready pairs: the agent, its features (those the page knows) and its child");
   ws.recv({ jsonrpc: "2.0", id: "s1", method: "workspace.read", params: { path: "/a" } });
   await until(() => runner.forwarded.length === 1, "the refusal");
   ok(/not granted|grant/.test(JSON.parse(runner.forwarded[0]).error?.message ?? ""), "before the person's grant, a call is refused (nothing of the workspace read)");

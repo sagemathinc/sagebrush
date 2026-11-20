@@ -24,8 +24,10 @@ import { MADE_CHANNEL, type TexMade, type TexMayRun, type TexMayRunYes } from ".
 export type Hello = { protocol: 1; agent: { name: string; client: string; version?: string }; wants: { folders?: string[]; write?: boolean; run?: boolean }; session?: string; features?: string[]; child?: string };
 /** What a page may offer beyond the workspace's verbs, said in its hello and in the agent's: "notebook.edit", an
  * agent's edit of an open notebook by cell (web/workspace/notebook-edit.ts, A12 step 1); "permission.digest", an Allow
- * that carries the digest of the action shown (agent-canon.ts). */
-export const FEATURES = ["notebook.edit", "permission.digest"] as const;
+ * that carries the digest of the action shown (agent-canon.ts); "run.context", a run verb's call that carries the chat and
+ * the turn it came from (`conversation`, `turn_id`), added by the agent's server after the model's arguments, never the
+ * model's own (run_notebook in the notebook open on the page runs there only for that chat's running turn). */
+export const FEATURES = ["notebook.edit", "permission.digest", "run.context"] as const;
 /** The pairing's other end on one of the person's computers (agent-relay.ts's AgentLeg), in place of the loopback
  * socket, with its own frame bound, queue and reply slots: what the pairing asks of it. */
 export type AgentLink = {
@@ -74,8 +76,12 @@ export type RunSide = {
   live: { state(): PairState; grant(): Grant | null; closeReason(): string };
   onChange(cb: () => void): () => void;
   reply(result: unknown): void; fail(code: string, message: string): void;
+  /** the chat and the turn the call came from (run.context), both or neither: as the agent's server said them */
+  context?: { conversation: string; turnId: string };
 };
 export type RunVerbs = { serve(method: string, params: unknown, side: RunSide): Promise<void> };
+/** run.context's ids: at most this long (notebook.edit's conversation's bound) */
+const RUN_CONTEXT_LENGTH = 128;
 export const RUN_VERBS = ["workspace.run_notebook", "workspace.run_file", "workspace.run_stop", "workspace.latex_build"] as const;
 /** Where the page keeps grants (Workspace.agentGrants / putAgentGrant). */
 export type GrantStore = { agentGrants(): Promise<Record<string, unknown>>; putAgentGrant(id: string, g: unknown | null): Promise<void> };
@@ -337,7 +343,7 @@ export class AgentPairing {
     this.send({ jsonrpc: "2.0", method: "grant.changed", params: { agent: grant.agent, client: grant.client, folders: grant.folders, write: grant.write, run: grant.run, expires: grant.expires } });
     // (what this page offers beyond the verbs: a notification, which a server that doesn't know it ignores, §1 rule 4)
     // (permission.digest: every Allow carries the digest of the action shown, from any page that pairs)
-    this.send({ jsonrpc: "2.0", method: "page.features", params: { features: [...(this.opts.notebookEdit ? ["notebook.edit"] : []), "permission.digest"] } });
+    this.send({ jsonrpc: "2.0", method: "page.features", params: { features: [...(this.opts.notebookEdit ? ["notebook.edit"] : []), "permission.digest", ...(this.opts.runVerbs ? ["run.context"] : [])] } });
     await this.keep();
     // (S4: while it waited, the grant may have been revoked, the pairing closed or the grant replaced: then nothing
     //  of this allow() goes on, no record, no timer, no "granted")
@@ -589,6 +595,16 @@ export class AgentPairing {
   private async runVerb(id: string, method: string, params: unknown, rv = this.opts.runVerbs, counted = false) {
     if (!rv) return this.fail(id, "invalid", `not a verb: ${JSON.stringify(method)}`);
     const h = this.hello!;
+    // (run.context, when both ends said it: the chat and turn taken out of the call before its params are checked;
+    //  each a short string, else the call is refused; one without the other is neither)
+    let context: RunSide["context"];
+    if (rv === this.opts.runVerbs && h.features?.includes("run.context") && params && typeof params === "object" && !Array.isArray(params) && ("conversation" in params || "turn_id" in params)) {
+      const { conversation, turn_id, ...rest } = params as Record<string, unknown>;
+      const id1 = (v: unknown) => v === undefined || (typeof v === "string" && v.length > 0 && v.length <= RUN_CONTEXT_LENGTH);
+      if (!id1(conversation) || !id1(turn_id)) return this.fail(id, "invalid", "run context: conversation and turn_id are the chat's and the turn's ids");
+      if (typeof conversation === "string" && typeof turn_id === "string") context = { conversation, turnId: turn_id };
+      params = rest;
+    }
     this.inFlight++;
     try {
       // (latex_build: the .tex as it was before, for its run once by itself if the build is done and it is unchanged; only
@@ -602,6 +618,7 @@ export class AgentPairing {
         current: (g) => this.current(g, this.verbs),
         live: { state: () => this.state, grant: () => this.grant, closeReason: () => this.closeReason },
         onChange: (cb) => this.onChange(cb),
+        ...(context ? { context } : {}),
         reply: (r) => { if (counted) { this.changes++; this.emit(); } this.reply(id, r); if (before && (r as any)?.ok === true && (r as any).ended === "done") void this.builtHere(before, g0, v0); }, fail: (c, m) => this.fail(id, c, m),
       });
     } finally {

@@ -119,9 +119,10 @@ export type RunHost = {
    * "deliver"; latex_build's "engine", "phase2" and "render" too) */
   hold?(stage: string): Promise<void>;
   /** run_notebook in the notebook open on this page (decided Nov 18 2026): the page's run of the notebook `ref` at
-   *  `path` if it is the one shown now and the page may run it, else null, nothing started (today's run instead).
-   *  Asked synchronously as the run is held; `gone` is called when the notebook shown changes */
-  inPage?(ref: string, path: string, gone: () => void): PageRun | null;
+   *  `path` if it is the one shown now and the page may run it (a page with chats: for the chat and turn the call came
+   *  from, `from`, that chat shown and that turn still its running one), else null, nothing started (today's run
+   *  instead). Asked synchronously as the run is held; `gone` is called when the notebook shown changes */
+  inPage?(ref: string, path: string, gone: () => void, from?: { conversation: string; turnId: string }): PageRun | null;
 };
 /** The page's run of its open notebook, for one generation of it (the notebook as shown when it was asked): its
  *  inputs as shown, each code cell run in the page's own interpreter as the person's Run is (outputs shown and saved
@@ -179,6 +180,9 @@ export type RunCtx = {
   /** the grant now (null if none): a write-only narrowing applies at once */
   grantNow(): Grant | null;
   onChange(cb: () => void): () => void;
+  /** the chat and turn the call came from (run.context), as the agent's server said them (a page with chats runs
+   *  run_notebook in its pane only for these) */
+  context?: { conversation: string; turnId: string };
 };
 
 // ---------------------------------------------------------------- pure helpers (unit-tested: test-run-verbs.mjs)
@@ -958,7 +962,7 @@ function runInPage(params: { timeout_s?: number }, ctx: RunCtx, host: RunHost, h
   // (the grant as it was when the run was asked, the same one, unchanged: a narrowing of its write too ends this run,
   //  which writes as the notebook's own trees allow)
   const granted = () => ctx.live() && g0 !== null && ctx.grantNow() === g0;
-  const pr = host.inPage!(ref, real, () => end("stopped"));
+  const pr = host.inPage!(ref, real, () => end("stopped"), ctx.context);
   if (!pr) return null;
   const alive = () => !stopped && granted() && pr.current();
   const t0 = performance.now();

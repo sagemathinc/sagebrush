@@ -103,7 +103,7 @@ export function runVerbsFor(runs: { load(): Promise<typeof import("./run-verbs")
         const now = side.live.grant();
         return side.live.state() === "granted" && now !== null && grantProblem(now, side.now()) === null && (now.run || !g!.run) && now.id === g!.id && same(now.folders, g!.folders);
       };
-      const ctx = { agent: side.agent, actor: side.actor, grant: g!, live, why, grantNow: (): Grant | null => side.live.grant(), onChange: side.onChange };
+      const ctx = { agent: side.agent, actor: side.actor, grant: g!, live, why, grantNow: (): Grant | null => side.live.grant(), onChange: side.onChange, ...(side.context ? { context: side.context } : {}) };
       try {
         const result: any = await call(method, params, ctx);
         if (!live()) return side.reply({ ok: false, ended: "revoked", reason: why() });
