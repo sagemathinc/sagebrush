@@ -235,17 +235,25 @@ export async function mount(root: HTMLElement, host: Host): Promise<void> {
   // leaving, so it asks, and stays if the person says no)
   // (mayLeave only decides; `leaving` is set as the navigation is asked for, and put back if the host refuses it or
   //  asking fails, said; no typing while the host decides (the desktop app's disk written first), as what's typed then
-  //  would be left behind; typing again if the page stays. One way out at a time: another asked for meanwhile (a second
-  //  ✕) is the same one, never a second drain, nor its state put back over the first's)
-  let leaving = false, navigating: Promise<boolean> | null = null;
+  //  would be left behind; typing again if the page stays. One way out at a time: every other (a second ✕, a copy,
+  //  Trash, a new notebook) does nothing meanwhile, never a second drain, nor its state put back over the first's; one
+  //  reaching `go` meanwhile is refused. A navigation the host made that doesn't happen (cancelled) frees the page after
+  //  a while, said)
+  let leaving = false, navigating: Promise<boolean> | null = null, navSeq = 0;
   mayLeave = async () => { await flush(); return !dirty() || confirm("Close this file? Your unsaved edits here are dropped."); };
-  const go = (to: string): Promise<boolean> => (navigating ??= (async () => {
-    const was = leaving, ro = ta.readOnly; leaving = true; ta.readOnly = true;
-    let went = false;
-    try { went = await host.navigate(to); } catch (err: any) { say("Couldn't leave this page: " + (err?.message ?? err)); }
-    if (!went) { leaving = was; ta.readOnly = ro; navigating = null; }
-    return went;
-  })());
+  const go = (to: string): Promise<boolean> => {
+    if (navigating) return navigating.then(() => false);
+    const n = ++navSeq;
+    return (navigating = (async () => {
+      const was = leaving, ro = ta.readOnly; leaving = true; ta.readOnly = true;
+      let went = false;
+      try { went = await host.navigate(to); } catch (err: any) { say("Couldn't leave this page: " + (err?.message ?? err)); }
+      const back = () => { leaving = was; ta.readOnly = ro; navigating = null; };
+      if (!went) back();
+      else setTimeout(() => { if (navSeq === n && navigating) { back(); say("This page wasn't left: try again."); } }, 15000);
+      return went;
+    })());
+  };
   leave = async (to = "/") => { if (navigating) return void (await navigating); if (await mayLeave()) await go(to); };
   // (decided to leave, with a step still to take first (a notebook made, this file moved to Trash): no typing until the
   //  navigation, as what's typed then would be dropped; typing again if the step fails)
@@ -253,6 +261,7 @@ export async function mount(root: HTMLElement, host: Host): Promise<void> {
   // (whether it navigated: a copy with no fid can't be opened here, and stays only said; nor one the host refused)
   const openCopy = async (e: Entry) => (e.fid ? go(codeUrl(e.fid)) : false);
   const thenGo = async (step: () => Promise<string>) => {
+    if (navigating) return;
     const was = ta.readOnly; ta.readOnly = true;
     try {
       // (a test's seam: the page test holds the step here to type during it; nothing sets it otherwise)
@@ -322,7 +331,7 @@ export async function mount(root: HTMLElement, host: Host): Promise<void> {
   // (one at a time: a second click while a copy is made does nothing)
   let copying = false;
   async function copyAndOpen() {
-    if (copying) return;
+    if (copying || navigating) return;
     copying = true;
     const was = ta.readOnly; ta.readOnly = true;
     let went = false;
@@ -343,7 +352,7 @@ export async function mount(root: HTMLElement, host: Host): Promise<void> {
     catch (err) { say("Not copied: " + String((err as Error)?.message ?? err).slice(0, 200)); return null; }
   }
   const actions: Record<string, () => unknown> = {
-    "c-new": async () => { const p = await free("/", "Untitled", ".ipynb"); if (!p) return say("No free name for a new notebook"); if (!(await mayLeave())) return; await thenGo(async () => "/?nb=" + encodeURIComponent((await ws.createByPerson(p, { mode: "python" })).ref!)); },
+    "c-new": async () => { if (navigating) return; const p = await free("/", "Untitled", ".ipynb"); if (!p) return say("No free name for a new notebook"); if (!(await mayLeave())) return; await thenGo(async () => "/?nb=" + encodeURIComponent((await ws.createByPerson(p, { mode: "python" })).ref!)); },
     "c-newboard": () => leave("/board/?new=python"),
     "c-newfolder": async () => { const n = prompt("A new folder, at the top of your files: its name", "New folder"); if (n?.trim()) await ws.mkdir("/" + safeName(n.trim())); },
     "c-examples": async () => { if (!(await host.examples())) void leave(); },
@@ -360,6 +369,7 @@ export async function mount(root: HTMLElement, host: Host): Promise<void> {
     "c-download": async () => { await flush(); download(encodeText(mode === "edit" ? ta.value : text, eol), nameOf(path)); },
     "c-print": () => window.print(),
     "c-delete": async () => {
+      if (navigating) return;
       if (!confirm(`Move "${nameOf(path)}" to Trash? Trash keeps it until you empty it.`)) return;
       // (the page is left after this: asked first, before anything is removed)
       if (!(await mayLeave())) return;

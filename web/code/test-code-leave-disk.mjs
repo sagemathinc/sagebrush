@@ -6,7 +6,8 @@
 //      on disk;
 //   2. ✕ with the disk's write failing: the page stays, saying why;
 //   3. File ▸ Save a copy with the disk held: the copy made, the page stays, typing back, and a second copy may be made;
-//   4. the control: nothing held, ✕ leaves with the edit on disk.
+//   4. the control: nothing held, ✕ leaves with the edit on disk;
+//   5. ✕ waiting for the disk, then File ▸ Save a copy: nothing more done (no copy), and once ✕ is refused, typing back.
 // Before the host's navigate, the page left at once: the edit in the workspace, its write to disk dropped with the page.
 //   CHROME=google-chrome bun web/code/test-code-leave-disk.mjs
 import { spawn } from "node:child_process";
@@ -27,11 +28,13 @@ const g: any = window;
 const run = new URLSearchParams(location.search).get("run") ?? "0";
 const ws = await Workspace.open({ name: "ws-code-leave-" + run, mainName: "main-code-leave-" + run });
 // (the disk: written files by path; a write held until the test releases it, or failing, as the test sets)
-g.disk = new Map(); g.hold = false; g.fail = false; g.release = () => {};
+g.disk = new Map(); g.hold = false; g.fail = false;
+const held: (() => void)[] = [];
+g.release = () => { for (const r of held.splice(0)) r(); };
 const disk = {
   list: async () => [], stat: async () => null, read: async () => new Uint8Array(), mkdir: async () => {}, rename: async () => {}, remove: async () => {},
   write: async (p: string, bytes: Uint8Array) => {
-    if (g.hold) await new Promise((r) => (g.release = r));
+    if (g.hold) await new Promise<void>((r) => held.push(r));
     if (g.fail) throw new Error("the disk is full (test)");
     g.disk.set(p, new TextDecoder().decode(bytes));
     return { path: p, dir: false, size: bytes.length, mtime: Date.now() };
@@ -129,6 +132,18 @@ try {
   check(await until(`!!sessionStorage.getItem("left-4")`), "the control, nothing held: ✕ leaves");
   l = await left(4);
   check(l?.disk?.["/a.py"] === "plain edit\n" && l.pending === 0, "…with the edit on disk: " + JSON.stringify(l));
+
+  // 5. another way out while ✕ waits
+  await open(5, "raced edit\n");
+  await ev("(window.hold = true, 1)");
+  await ev(`(document.querySelector(".code-page .code-close").click(), 1)`);
+  await until(`${TA}.readOnly === true`, 3000);
+  await ev(`(document.querySelector('.code-page [data-f="c-copy"]').click(), 1)`);
+  await sleep(2500);
+  s = await state();
+  const raced = await ev(`window.ws.read("/a (copy).py").then(() => true, () => false)`);
+  check(!raced && s.at === "?run=5" && !(await left(5)) && s.readOnly === false, "✕ waiting for the disk, then Save a copy: no copy made, and once ✕ is refused, the page stays with typing back: " + JSON.stringify({ raced, ...s }));
+  await ev("(window.hold = false, window.release(), 1)");
 
   const fails = results.filter(([ok]) => !ok);
   console.log(fails.length ? `FAIL: ${fails.length} of ${results.length} checks` : `ok: the code page leaves the desktop app's pages only once the disk has its changes, ${results.length} checks`);

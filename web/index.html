@@ -4904,12 +4904,15 @@ function diskBlocked(why) {
 // navigates, false if it stays (said on the disk banner); the code page's every way out too, web/code/boot.ts, whose
 // own edits are saved before it asks: no notebook to save there (`notebook` false))
 async function leaveTo(url, notebook = true) {
+  leaveSeen?.({ url, notebook });
   if (diskMirror && !(await (await desktopModule()).beforeLeave(diskMirror, notebook ? () => nb.saved() : undefined))) return false;
   location.assign(url);
   return true;
 }
-// (tests, loopback pages only: a stand-in for the desktop app's disk mirror, so the page's ways out meet its drain)
-if (/^(localhost|127\.0\.0\.1)$/.test(location.hostname)) window.__sbTestDiskMirror = (m) => { diskMirror = m; };
+// (tests, loopback pages in a browser only, never the app (whose page is on localhost too): a stand-in for the desktop
+// app's disk mirror, so the page's ways out meet its drain, and what each way out asked of leaveTo)
+let leaveSeen = null;
+if (!TAURI && /^(localhost|127\.0\.0\.1)$/.test(location.hostname)) window.__sbTestDiskMirror = (m, seen = null) => { diskMirror = m; leaveSeen = seen; };
 const wsReady = (async () => {
   try {
     const w = await Workspace.open();

@@ -398,24 +398,25 @@ try {
   check(await openCode("/demo.py"), "(the page again, its disk not yet written)");
   await ev(`${C}.setMode("edit").then(() => 1)`);
   await until(`!!document.querySelector(".code-page .code-edit textarea")`);
-  await ev(`(window.__sbTestDiskMirror(${STAND_IN}), 1)`);
+  await ev(`(window.__leaves = [], window.__sbTestDiskMirror(${STAND_IN}, (x) => window.__leaves.push(x)), 1)`);
   const stayAt = await ev("location.search");
   await ev(`(() => { window.__drains = 0; const x = document.querySelector(".code-page .code-close"); x.click(); x.click(); return 1; })()`);
   const diskSaid = await until(DISK_SAID, 15000);
   await sleep(500);
-  const diskStayed = await ev(`({ drains: window.__drains, at: location.search, code: !!${C}, readOnly: document.querySelector(".code-page .code-edit textarea")?.readOnly ?? null })`);
-  check(diskSaid && diskStayed.drains === 1 && diskStayed.at === stayAt && diskStayed.code && diskStayed.readOnly === false, "✕ twice, the desktop app's disk not yet written: one drain, the page stays, says so, and typing comes back: " + JSON.stringify(diskStayed));
+  const diskStayed = await ev(`({ drains: window.__drains, notebook: window.__leaves.map((x) => x.notebook), at: location.search, code: !!${C}, readOnly: document.querySelector(".code-page .code-edit textarea")?.readOnly ?? null })`);
+  check(diskSaid && diskStayed.drains === 1 && JSON.stringify(diskStayed.notebook) === "[false]" && diskStayed.at === stayAt && diskStayed.code && diskStayed.readOnly === false, "✕ twice, the desktop app's disk not yet written: one drain (no notebook to save), the page stays, says so, and typing comes back: " + JSON.stringify(diskStayed));
   await ev(`(window.__sbTestDiskMirror(null), 1)`);
   await ev(`(document.querySelector(".code-page .code-close").click(), 1)`);
   check(await until(`location.search !== ${JSON.stringify(stayAt)} && !${C}`, 15000), "…written: ✕ leaves");
   await until(`!!${W}`, 30000);
   const demoFid = await ev(page("/demo.py"));
-  await ev(`(window.__sbTestDiskMirror(${STAND_IN}), 1)`);
+  await ev(`(window.__leaves = [], window.__sbTestDiskMirror(${STAND_IN}, (x) => window.__leaves.push(x)), 1)`);
   const nbAt = await ev("location.search");
   await ev(`(window.__sbCode({ kind: "file", path: "/demo.py", fid: ${JSON.stringify(demoFid)} }), 1)`);
   const nbSaid = await until(DISK_SAID, 15000);
   await sleep(500);
-  check(nbSaid && (await ev("location.search")) === nbAt && !(await ev(`!!${C}`)), "the notebook page opening a code file, the disk not yet written: it stays, and says so");
+  const nbLeaves = await ev("window.__leaves.map((x) => x.notebook)");
+  check(nbSaid && JSON.stringify(nbLeaves) === "[true]" && (await ev("location.search")) === nbAt && !(await ev(`!!${C}`)), "the notebook page opening a code file (its notebook saved first), the disk not yet written: it stays, and says so: " + JSON.stringify(nbLeaves));
 
   // (File > Save a copy while the copy is being made (its create held): the text can't be typed into, as what's typed
   //  then would be in neither file; and a copy that fails gives the text back to typing, on the same page)
