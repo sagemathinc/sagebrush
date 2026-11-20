@@ -543,3 +543,23 @@ fn q_meter_pins_per_phase_on_the_benchmark() {
         assert_eq!(lg.len(), i, "{}: one unit less refuses inside it", name);
     }
 }
+
+/// pdivrem.rs's division paths allocate only through the ledger ([`Buf`]'s
+/// `alloc`) or the fallible fixed-row helpers: no `to_vec`, `vec!`,
+/// `clone()` or `Vec::with_capacity` anywhere in the module, and every
+/// `Vec::new()` outside the test hooks is followed by its `try_reserve_exact`.
+#[test]
+fn division_paths_allocate_only_through_the_ledger_or_fallible_fixed_rows() {
+    let src = include_str!("../pdivrem.rs");
+    let code: Vec<&str> = src.lines().filter(|l| !l.trim_start().starts_with("//")).collect();
+    for bad in [".to_vec()", "vec![", ".clone()", "Vec::with_capacity", "String::with_capacity"] {
+        let hits: Vec<&&str> = code.iter().filter(|l| l.contains(bad)).collect();
+        assert!(hits.is_empty(), "{}: {:?}", bad, hits);
+    }
+    for (i, l) in code.iter().enumerate() {
+        if l.contains("Vec::new()") && !l.contains("RefCell") {
+            let next = code[i + 1..(i + 3).min(code.len())].join(" ");
+            assert!(next.contains("try_reserve_exact"), "an infallible Vec at: {}", l);
+        }
+    }
+}

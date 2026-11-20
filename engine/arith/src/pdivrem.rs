@@ -228,6 +228,24 @@ fn track(_x: &[u64]) {
     MAX_BITS.with(|c| c.set(c.get().max(bits(_x))));
 }
 
+/// A fixed row of `n` zeroed words, allocated fallibly: an allocation
+/// failure is the memory refusal, never an abort.  Its words are counted in
+/// the fixed rows, not the ledger.
+fn fixed_words(n: usize) -> Result<Vec<u64>, DivFault> {
+    let mut v = Vec::new();
+    v.try_reserve_exact(n).map_err(|_| DivFault::Memory)?;
+    v.resize(n, 0);
+    Ok(v)
+}
+
+/// A fixed row's empty vector with room for `n` items, allocated fallibly
+/// (pushes within it allocate nothing).
+fn fixed_vec<T>(n: usize) -> Result<Vec<T>, DivFault> {
+    let mut v = Vec::new();
+    v.try_reserve_exact(n).map_err(|_| DivFault::Memory)?;
+    Ok(v)
+}
+
 fn cmp_mag(x: &[u64], y: &[u64]) -> Ordering {
     if x.len() != y.len() {
         return x.len().cmp(&y.len());
@@ -498,8 +516,8 @@ fn load_divisor(b: &Factor, plan: &Plan, m: &mut Meter) -> Result<Divisor, DivFa
     let _p = sagebrush_interrupt::enter("divrem load");
     sagebrush_interrupt::check_coarse();
     let w = plan.m as usize + 1;
-    let mut limbs = vec![0u64; b.n_sum as usize];
-    let mut rows = Vec::with_capacity(w);
+    let mut limbs = fixed_words(b.n_sum as usize)?;
+    let mut rows = fixed_vec(w)?;
     let mut at = 0usize;
     for tok in b.text.split(',').take(w) {
         let (neg, num, _) = parts(tok);
@@ -541,7 +559,7 @@ pub fn divide_z<'l>(a: &Factor, b: &Factor, plan: &Plan, led: &'l Words, m: &mut
     let skip = (a.tokens - plan.n - 1) as usize;
     let mut toks = a.text.rsplit(',').skip(skip);
     // the window: slot(l) = ring[(h + l) % w] holds degree (top - m + l)
-    let mut ring: Vec<Coef<'l>> = Vec::with_capacity(w);
+    let mut ring: Vec<Coef<'l>> = fixed_vec(w)?;
     for _ in 0..w {
         ring.push(Coef::new(led, 0, m)?);
     }
@@ -887,7 +905,8 @@ impl<'l> QScratch<'l> {
 }
 
 /// num / den (den > 0) in lowest terms, appended to the two arenas; num = 0
-/// appends 0 over 1.
+/// appends 0 over 1.  g and the scratch are ledger-owned; nothing else is
+/// allocated.
 #[allow(clippy::too_many_arguments)]
 fn push_reduced(num: &[u64], neg: bool, den: &[u64], an: &mut Arena, ad: &mut Arena, g: &mut Coef, s: &mut QScratch, m: &mut Meter) -> Result<(), DivFault> {
     if num.is_empty() {
@@ -895,15 +914,14 @@ fn push_reduced(num: &[u64], neg: bool, den: &[u64], an: &mut Arena, ad: &mut Ar
         return ad.push(&[1], false, m);
     }
     s.gcd(num, den, g, m)?;
-    let gv = g.mag().to_vec();
-    if gv.len() == 1 && gv[0] == 1 {
+    if g.is_one() {
         an.push(num, neg, m)?;
         return ad.push(den, false, m);
     }
-    m.add(2 * gv.len() + 2)?;
-    let n1 = s.divexact(num, &gv, m)?;
+    m.add(2 * g.len + 2)?;
+    let n1 = s.divexact(num, g.mag(), m)?;
     an.push(&s.q.v[..n1], neg, m)?;
-    let n2 = s.divexact(den, &gv, m)?;
+    let n2 = s.divexact(den, g.mag(), m)?;
     ad.push(&s.q.v[..n2], false, m)
 }
 
@@ -984,33 +1002,59 @@ pub fn reply_q_on(a: &Factor, b: &Factor, plan: &Plan, pa: &qpoly::PlanA, l: qpo
     Ok(out)
 }
 
-/// A token's cleared integer n_i (L / d_i) into c, through the scratch.
-fn cleared(tok: &str, l: &[u64], c: &mut Coef, s: &mut QScratch, m: &mut Meter) -> Result<(), DivFault> {
+/// Q's per-token scratch: a denominator and a numerator, ledger-owned.
+struct TokScratch<'l> {
+    d: Coef<'l>,
+    n: Coef<'l>,
+}
+
+/// A token's cleared integer n_i (L / d_i) into c: the parses into the
+/// token scratch, L / d_i into the scratch's quotient, and the product
+/// straight into c's buffer (grown first).  Nothing outside the ledger.
+fn cleared(tok: &str, l: &[u64], c: &mut Coef, t: &mut TokScratch, s: &mut QScratch, m: &mut Meter) -> Result<(), DivFault> {
     let (neg, num, den) = parts(tok);
     if num == "0" {
         c.len = 0;
         c.neg = false;
         return Ok(());
     }
-    // (d_i into y's buffer by way of x: the parse, then L / d_i)
-    let mut d = Coef::tagged(c.buf.led, den.len().div_ceil(16), "scratch", m)?;
-    d.set_hex(false, den, m)?;
-    let nq = s.divexact(l, d.mag(), m)?;
-    let qv = s.q.v[..nq].to_vec();
-    let mut nn = Coef::tagged(c.buf.led, num.len().div_ceil(16), "scratch", m)?;
-    nn.set_hex(false, num, m)?;
-    let np = s.mul(nn.mag(), &qv, m)?;
-    let pv = s.p.v[..np].to_vec();
-    c.set(&pv, neg, m)
+    t.d.set_hex(false, den, m)?;
+    let nq = s.divexact(l, t.d.mag(), m)?;
+    t.n.set_hex(false, num, m)?;
+    c.buf.grow(t.n.len + nq, 0, m)?;
+    let np = mul_into(t.n.mag(), &s.q.v[..nq], &mut c.buf.v, m)?;
+    c.len = np;
+    c.neg = neg && np > 0;
+    track(c.mag());
+    Ok(())
+}
+
+/// x y into c's buffer (grown first), c's sign `neg`.
+fn mul_to(c: &mut Coef, x: &[u64], y: &[u64], neg: bool, m: &mut Meter) -> Result<(), DivFault> {
+    if x.is_empty() || y.is_empty() {
+        c.len = 0;
+        c.neg = false;
+        return Ok(());
+    }
+    c.buf.grow(x.len() + y.len(), 0, m)?;
+    c.len = mul_into(x, y, &mut c.buf.v, m)?;
+    c.neg = neg && c.len > 0;
+    track(c.mag());
+    Ok(())
 }
 
 /// Q's division on the caller's ledger and meter, phase A's lcms given.
-pub fn divide_q<'l>(a: &Factor, b: &Factor, plan: &Plan, _pa: &qpoly::PlanA, l: qpoly::Lcms, led: &'l Words, m: &mut Meter) -> Result<Divided<'l>, DivFault> {
+/// Every buffer it makes is a ledger reservation ([`Buf`], [`Coef`],
+/// [`QScratch`], [`Arena`]) or a fixed row allocated fallibly
+/// ([`fixed_words`], [`fixed_vec`]); no other allocation happens here.
+pub fn divide_q<'l>(a: &Factor, b: &Factor, plan: &Plan, pa: &qpoly::PlanA, l: qpoly::Lcms, led: &'l Words, m: &mut Meter) -> Result<Divided<'l>, DivFault> {
     let qpoly::Lcms { la, lb, na, nb, .. } = l;
     let da = &la[..na];
     let w = plan.m as usize + 1;
     let mut s = QScratch::new(led, "scratch", m)?;
     let mut g = Coef::tagged(led, 1, "scratch", m)?;
+    let mut g2 = Coef::tagged(led, 1, "scratch", m)?;
+    let mut t = TokScratch { d: Coef::tagged(led, 0, "scratch", m)?, n: Coef::tagged(led, 0, "scratch", m)? };
     let mut q = Arena::new(led, "q arena", m)?;
     let mut qd = Arena::new(led, "q arena", m)?;
     let mut r = Arena::new(led, "r arena", m)?;
@@ -1019,17 +1063,14 @@ pub fn divide_q<'l>(a: &Factor, b: &Factor, plan: &Plan, _pa: &qpoly::PlanA, l: 
     if plan.n < plan.m {
         let _p = sagebrush_interrupt::enter("divrem divide");
         sagebrush_interrupt::check_coarse();
-        let mut nb_ = Coef::tagged(led, 0, "scratch", m)?;
-        let mut db_ = Coef::tagged(led, 0, "scratch", m)?;
         let skip = (a.tokens - plan.n - 1) as usize;
         for tok in a.text.rsplit(',').skip(skip) {
             let (neg, num, den) = parts(tok);
-            nb_.set_hex(neg, num, m)?;
-            db_.set_hex(false, den, m)?;
-            let (nv, dv) = (nb_.mag().to_vec(), db_.mag().to_vec());
-            push_reduced(&nv, nb_.neg, &dv, &mut r, &mut rd, &mut g, &mut s, m)?;
+            t.n.set_hex(neg, num, m)?;
+            t.d.set_hex(false, den, m)?;
+            push_reduced(t.n.mag(), t.n.neg, t.d.mag(), &mut r, &mut rd, &mut g, &mut s, m)?;
         }
-        drop((la, lb, s, g, nb_, db_));
+        drop((la, lb, s, g, g2, t));
         return Ok(Divided { q, r, qd: Some(qd), rd: Some(rd) });
     }
     // Q1: the divisor cleared into its fixed row, divided by its content in
@@ -1037,46 +1078,48 @@ pub fn divide_q<'l>(a: &Factor, b: &Factor, plan: &Plan, _pa: &qpoly::PlanA, l: 
     let (d, beta_n, beta_d) = {
         let _p = sagebrush_interrupt::enter("divrem load");
         sagebrush_interrupt::check_coarse();
-        let mut limbs = vec![0u64; b.n_sum as usize + w * nb];
-        let mut rows: Vec<(usize, usize, bool)> = Vec::with_capacity(w);
+        let mut limbs = fixed_words(b.n_sum as usize + w * nb)?;
+        let mut rows: Vec<(usize, usize, bool)> = fixed_vec(w)?;
         let mut at = 0usize;
-        let mut t = Coef::tagged(led, 0, "q1 scratch", m)?;
+        let mut c = Coef::tagged(led, 0, "q1 scratch", m)?;
         let mut q1 = QScratch::new(led, "q1 scratch", m)?;
         for tok in b.text.split(',').take(w) {
-            cleared(tok, &lb[..nb], &mut t, &mut q1, m)?;
-            let n = t.len;
+            cleared(tok, &lb[..nb], &mut c, &mut t, &mut q1, m)?;
+            let n = c.len;
+            if at + n > limbs.len() {
+                return Err(DivFault::Invariant);
+            }
             m.add(n + 1)?;
-            limbs[at..at + n].copy_from_slice(t.mag());
-            rows.push((at, n, t.neg));
+            limbs[at..at + n].copy_from_slice(c.mag());
+            rows.push((at, n, c.neg));
             at += n;
         }
-        // the content, stopping at 1
+        // the content, stopping at 1 (each gcd into the other coefficient,
+        // which then swaps in)
         let mut cont = Coef::tagged(led, 1, "q1 scratch", m)?;
+        let mut cont2 = Coef::tagged(led, 1, "q1 scratch", m)?;
         for &(st, n, _) in &rows {
             if n == 0 {
                 continue;
             }
             if cont.len == 0 {
-                let v = limbs[st..st + n].to_vec();
-                cont.set(&v, false, m)?;
+                cont.set(&limbs[st..st + n], false, m)?;
             } else {
-                let (cv, xv) = (cont.mag().to_vec(), limbs[st..st + n].to_vec());
-                q1.gcd(&cv, &xv, &mut cont, m)?;
+                q1.gcd(cont.mag(), &limbs[st..st + n], &mut cont2, m)?;
+                std::mem::swap(&mut cont, &mut cont2);
             }
             if cont.is_one() {
                 break;
             }
         }
         if !cont.is_one() {
-            let cv = cont.mag().to_vec();
             for row in rows.iter_mut() {
                 let (st, n, _) = *row;
                 if n == 0 {
                     continue;
                 }
-                let xv = limbs[st..st + n].to_vec();
-                let nq = q1.divexact(&xv, &cv, m)?;
-                m.add(nq + 1)?;
+                let nq = q1.divexact(&limbs[st..st + n], cont.mag(), m)?;
+                m.add(n + 1)?;
                 limbs[st..st + nq].copy_from_slice(&q1.q.v[..nq]);
                 limbs[st + nq..st + n].iter_mut().for_each(|x| *x = 0);
                 row.1 = nq;
@@ -1091,61 +1134,61 @@ pub fn divide_q<'l>(a: &Factor, b: &Factor, plan: &Plan, _pa: &qpoly::PlanA, l: 
         }
         // beta = (+-cont) / d_b, reduced: ledger reservations that never grow
         let mut gg = Coef::tagged(led, 1, "q1 scratch", m)?;
-        let cv = cont.mag().to_vec();
-        q1.gcd(&cv, &lb[..nb], &mut gg, m)?;
-        let gv = gg.mag().to_vec();
-        let n1 = q1.divexact(&cv, &gv, m)?;
+        q1.gcd(cont.mag(), &lb[..nb], &mut gg, m)?;
+        let n1 = q1.divexact(cont.mag(), gg.mag(), m)?;
         let mut beta_n = Coef::tagged(led, n1, "beta", m)?;
         beta_n.set(&q1.q.v[..n1], flip, m)?;
-        let n2 = q1.divexact(&lb[..nb], &gv, m)?;
+        let n2 = q1.divexact(&lb[..nb], gg.mag(), m)?;
         let mut beta_d = Coef::tagged(led, n2, "beta", m)?;
         beta_d.set(&q1.q.v[..n2], false, m)?;
-        drop((t, q1, cont, gg));
+        drop((c, q1, cont, cont2, gg));
         phase_end("divrem load", m);
         (Divisor { limbs, rows }, beta_n, beta_d)
     };
-    // d_b is no longer needed: freed, its fixed words credited to the ledger
-    let lb_words = lb.len() as u64;
+    // d_b is no longer needed: freed, and what the fixed rows charged for it
+    // (phase A's capacity, Lambda_b + 1 words) credited to the ledger
+    let charged = pa.lam_b.checked_add(1).ok_or(DivFault::Memory)?;
+    if lb.capacity() as u64 > charged {
+        return Err(DivFault::Invariant);
+    }
     drop(lb);
-    led.credit(lb_words)?;
+    led.credit(charged)?;
     let (c, _) = d.get(w - 1);
-    let c = c.to_vec();
     let monic = c.len() == 1 && c[0] == 1;
     let _p = sagebrush_interrupt::enter("divrem divide");
     sagebrush_interrupt::check_coarse();
     // DT = d_a |beta_n| c: q_j's denominator is DT T
     let mut dt = Coef::tagged(led, 0, "scratch", m)?;
-    {
-        let n1 = s.mul(da, beta_n.mag(), m)?;
-        let v = s.p.v[..n1].to_vec();
-        let n2 = s.mul(&v, &c, m)?;
-        let v2 = s.p.v[..n2].to_vec();
-        dt.set(&v2, false, m)?;
-    }
+    let mut dt0 = Coef::tagged(led, 0, "scratch", m)?;
+    mul_to(&mut dt0, da, beta_n.mag(), false, m)?;
+    mul_to(&mut dt, dt0.mag(), c, false, m)?;
+    drop(dt0);
     let mut tsc = Coef::tagged(led, 1, "T", m)?;
     tsc.set(&[1], false, m)?;
+    // the step's scratch: W_i, q_j's numerator and denominator
+    let mut wi = Coef::tagged(led, 0, "scratch", m)?;
+    let mut num = Coef::tagged(led, 0, "scratch", m)?;
+    let mut den = Coef::tagged(led, 0, "scratch", m)?;
     // the window, slot(l) = ring[(h + l) % w], from the dividend's top
     let skip = (a.tokens - plan.n - 1) as usize;
     let mut toks = a.text.rsplit(',').skip(skip);
-    let mut ring: Vec<Coef<'l>> = Vec::with_capacity(w);
+    let mut ring: Vec<Coef<'l>> = fixed_vec(w)?;
     for _ in 0..w {
         ring.push(Coef::new(led, 0, m)?);
     }
     for li in (0..w).rev() {
-        cleared(toks.next().ok_or(DivFault::Invariant)?, da, &mut ring[li], &mut s, m)?;
+        cleared(toks.next().ok_or(DivFault::Invariant)?, da, &mut ring[li], &mut t, &mut s, m)?;
     }
     let mut h = 0usize;
-    let mut tmp = Coef::tagged(led, 0, "scratch", m)?;
+    let mut ent = Coef::tagged(led, 0, "scratch", m)?;
     let k = plan.k as usize;
     for st in 0..k {
         let topi = (h + w - 1) % w;
-        let (wi, wi_neg) = (ring[topi].mag().to_vec(), ring[topi].neg);
+        wi.set(ring[topi].mag(), ring[topi].neg, m)?;
         // q_j = W_i beta_d / (DT T), reduced
-        let nn = s.mul(&wi, beta_d.mag(), m)?;
-        let num = s.p.v[..nn].to_vec();
-        let nd = s.mul(dt.mag(), tsc.mag(), m)?;
-        let den = s.p.v[..nd].to_vec();
-        push_reduced(&num, wi_neg != beta_n.neg, &den, &mut q, &mut qd, &mut g, &mut s, m)?;
+        mul_to(&mut num, wi.mag(), beta_d.mag(), wi.neg != beta_n.neg, m)?;
+        mul_to(&mut den, dt.mag(), tsc.mag(), false, m)?;
+        push_reduced(num.mag(), num.neg, den.mag(), &mut q, &mut qd, &mut g, &mut s, m)?;
         // W <- c W - W_i x^j P (the top: c W_i - W_i c = 0, checked)
         #[cfg(test)]
         let u0 = m.used();
@@ -1157,33 +1200,30 @@ pub fn divide_q<'l>(a: &Factor, b: &Factor, plan: &Plan, _pa: &qpoly::PlanA, l: 
                 // the coefficient's: both are the ledger's, so swapping them
                 // moves no reservation)
                 let len = ring[i].len;
-                let np = s.mul(&ring[i].buf.v[..len], &c, m)?;
+                let np = s.mul(&ring[i].buf.v[..len], c, m)?;
                 std::mem::swap(&mut ring[i].buf.v, &mut s.p.v);
                 ring[i].len = np;
             }
             let (pl, pneg) = d.get(li);
-            let pl = if li == w - 1 && probe_leaving() {
-                let mut v = pl.to_vec();
-                v[0] = v[0].wrapping_add(1);
-                v
-            } else {
-                pl.to_vec()
-            };
-            let np = s.mul(&wi, &pl, m)?;
-            ring[i].sub_signed(&s.p.v[..np], wi_neg != pneg, m)?;
+            let np = s.mul(wi.mag(), pl, m)?;
+            ring[i].sub_signed(&s.p.v[..np], wi.neg != pneg, m)?;
+            if li == w - 1 && probe_leaving() {
+                // (the probe: the top's update with P_m + 1, so W_i more)
+                ring[i].sub_signed(wi.mag(), wi.neg, m)?;
+            }
         }
         #[cfg(test)]
-        UPD_UNITS.with(|c| c.set(c.get() + m.used() - u0));
+        UPD_UNITS.with(|u| u.set(u.get() + m.used() - u0));
         if ring[topi].len != 0 {
             return Err(DivFault::Invariant);
         }
         if !monic {
-            let tv = tsc.mag().to_vec();
-            let np = s.mul(&tv, &c, m)?;
-            let v = s.p.v[..np].to_vec();
-            tsc.set(&v, false, m)?;
-            // g = gcd(T, the window's content), stopping at 1
-            g.set(&v, false, m)?;
+            let np = s.mul(tsc.mag(), c, m)?;
+            std::mem::swap(&mut tsc.buf.v, &mut s.p.v);
+            tsc.len = np;
+            // g = gcd(T, the window's content), stopping at 1 (each gcd into
+            // g2, which then swaps in)
+            g.set(tsc.mag(), false, m)?;
             for li in 0..w - 1 {
                 if g.is_one() {
                     break;
@@ -1192,63 +1232,54 @@ pub fn divide_q<'l>(a: &Factor, b: &Factor, plan: &Plan, _pa: &qpoly::PlanA, l: 
                 if ring[i].len == 0 {
                     continue;
                 }
-                let (gv, xv) = (g.mag().to_vec(), ring[i].mag().to_vec());
                 qcount(0, 1, 0, 0);
                 #[cfg(test)]
                 let u0 = m.used();
-                s.gcd(&gv, &xv, &mut g, m)?;
+                s.gcd(g.mag(), ring[i].mag(), &mut g2, m)?;
+                std::mem::swap(&mut g, &mut g2);
                 #[cfg(test)]
-                GCD_UNITS.with(|c| c.set(c.get() + m.used() - u0));
+                GCD_UNITS.with(|u| u.set(u.get() + m.used() - u0));
             }
             #[cfg(test)]
             let u1 = m.used();
             if !g.is_one() {
                 qcount(0, 0, 1, 0);
-                let gv = g.mag().to_vec();
                 for li in 0..w - 1 {
                     let i = (h + li) % w;
                     if ring[i].len == 0 {
                         continue;
                     }
                     let len = ring[i].len;
-                    let nq = s.divexact(&ring[i].buf.v[..len], &gv, m)?;
+                    let nq = s.divexact(&ring[i].buf.v[..len], g.mag(), m)?;
                     std::mem::swap(&mut ring[i].buf.v, &mut s.q.v);
                     ring[i].len = nq;
                 }
-                let tv = tsc.mag().to_vec();
-                let nq = s.divexact(&tv, &gv, m)?;
-                let qv = s.q.v[..nq].to_vec();
-                tsc.set(&qv, false, m)?;
+                let nq = s.divexact(tsc.mag(), g.mag(), m)?;
+                std::mem::swap(&mut tsc.buf.v, &mut s.q.v);
+                tsc.len = nq;
             }
             #[cfg(test)]
-            DIV_UNITS.with(|c| c.set(c.get() + m.used() - u1));
+            DIV_UNITS.with(|u| u.set(u.get() + m.used() - u1));
             qcount(0, 0, 0, tsc.len);
         }
         // the entering coefficient A_p T at the bottom (the top's slot)
         if st + 1 < k {
-            cleared(toks.next().ok_or(DivFault::Invariant)?, da, &mut tmp, &mut s, m)?;
             if tsc.is_one() {
-                let (v, ng) = (tmp.mag().to_vec(), tmp.neg);
-                ring[topi].set(&v, ng, m)?;
+                cleared(toks.next().ok_or(DivFault::Invariant)?, da, &mut ring[topi], &mut t, &mut s, m)?;
             } else {
-                let (x, tv) = (tmp.mag().to_vec(), tsc.mag().to_vec());
-                let np = s.mul(&x, &tv, m)?;
-                let v = s.p.v[..np].to_vec();
-                let ng = tmp.neg;
-                ring[topi].set(&v, ng, m)?;
+                cleared(toks.next().ok_or(DivFault::Invariant)?, da, &mut ent, &mut t, &mut s, m)?;
+                mul_to(&mut ring[topi], ent.mag(), tsc.mag(), ent.neg, m)?;
             }
             h = topi;
         }
     }
     // r_p = W_p / (d_a T), reduced, degrees m - 1 down to 0
-    let ndt = s.mul(da, tsc.mag(), m)?;
-    let den = s.p.v[..ndt].to_vec();
+    mul_to(&mut den, da, tsc.mag(), false, m)?;
     for li in (0..w - 1).rev() {
         let i = (h + li) % w;
-        let (x, ng) = (ring[i].mag().to_vec(), ring[i].neg);
-        push_reduced(&x, ng, &den, &mut r, &mut rd, &mut g, &mut s, m)?;
+        push_reduced(ring[i].mag(), ring[i].neg, den.mag(), &mut r, &mut rd, &mut g, &mut s, m)?;
     }
-    drop((ring, s, g, tmp, dt, tsc, beta_n, beta_d, la));
+    drop((ring, s, g, g2, t, ent, wi, num, den, dt, tsc, beta_n, beta_d, la));
     phase_end("divrem divide", m);
     Ok(Divided { q, r, qd: Some(qd), rd: Some(rd) })
 }
