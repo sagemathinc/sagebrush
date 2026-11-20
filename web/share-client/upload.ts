@@ -28,7 +28,14 @@ export async function shareStatus(ms = 10_000): Promise<ShareStatus> {
   }
 }
 
-export const signInUrl = (returnTo: string) => `/auth/login?return=${encodeURIComponent(returnTo)}`;
+/** A return path without a quick link's cells: a fragment that holds them (z= or c=, as index.html's fromLink finds
+ * them) is dropped, so they never reach the server in the sign-in's return, nor its cookie.  Any other fragment (a
+ * docs anchor, say) stays. */
+export const withoutQuickLink = (returnTo: string) => {
+  const i = returnTo.indexOf("#");
+  return i >= 0 && /[zc]=[\w-]/.test(returnTo.slice(i)) ? returnTo.slice(0, i) : returnTo;
+};
+export const signInUrl = (returnTo: string) => `/auth/login?return=${encodeURIComponent(withoutQuickLink(returnTo))}`;
 
 /**
  * A new share's attempt that already made a share with other contents (`used`, with that share),

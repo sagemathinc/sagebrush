@@ -21,7 +21,10 @@
 // through mobile_entry_point.  desktop and mobile are tauri-build's cfgs.)
 use std::sync::Mutex;
 #[cfg(desktop)]
+mod disk;
+#[cfg(desktop)]
 mod engine;
+mod nav;
 use tauri::{Emitter, Manager, WebviewUrl, WebviewWindowBuilder};
 
 // the Terminal's shell worker's Content-Security-Policy (shell/worker-boot.js), the site's own
@@ -239,14 +242,65 @@ fn serve_page(app: &tauri::AppHandle, listener: std::net::TcpListener, files: st
 // (a page the app doesn't have: the person can always get back to their files)
 const NOT_IN_APP: &str = "<!doctype html><meta charset=utf-8><meta name=viewport content=\"width=device-width\"><title>Not in the app · Sagebrush</title><body style=\"font:16px system-ui,sans-serif;margin:3em auto;max-width:36em;padding:0 1em\"><h1 style=\"font-size:1.3em\">This page isn't part of the Sagebrush app</h1><p>It's on the website, <a href=\"https://sagebrush.space/\">sagebrush.space</a>.</p><p><a href=\"/\">Back to your files</a></p>";
 
+// SAGEBRUSH_APP_PERSIST=write:<token> or check:<token>, in a desktop self-test: instead of the notebook's self-test, the
+// page's two-launch check of the workspace on disk (persistProbe in web/index.html; app/selftest/run.mjs)
+#[tauri::command]
+fn selftest_persist() -> Option<String> {
+    std::env::var("SAGEBRUSH_APP_PERSIST").ok().filter(|s| !s.is_empty() && std::env::var_os("SAGEBRUSH_APP_SELFTEST").is_some())
+}
+
+// Quitting (desktop): the person's quit, or the window's close, is held and the page asked ("sb-quit") to write
+// what it hasn't yet to disk (web/workspace/disk-mirror.ts drainOnQuit), which then quits (app_quit_now), after
+// asking the person if that takes long.  A page that doesn't answer within QUIT_ANSWER (app_quit_hold: it's
+// draining) is taken to have nothing it can write, and the app quits.  The self-test's own exits (app.exit with a
+// code) aren't held.
+#[cfg(desktop)]
+static QUIT_OK: std::sync::atomic::AtomicBool = std::sync::atomic::AtomicBool::new(false);
+#[cfg(desktop)]
+static QUIT_HELD: std::sync::atomic::AtomicBool = std::sync::atomic::AtomicBool::new(false);
+#[cfg(desktop)]
+const QUIT_ANSWER: std::time::Duration = std::time::Duration::from_secs(3);
+
+#[cfg(desktop)]
+fn ask_quit(app: &tauri::AppHandle) {
+    if app.emit("sb-quit", ()).is_err() {
+        QUIT_OK.store(true, std::sync::atomic::Ordering::SeqCst);
+        app.exit(0);
+        return;
+    }
+    let app = app.clone();
+    std::thread::spawn(move || {
+        std::thread::sleep(QUIT_ANSWER);
+        if !QUIT_HELD.load(std::sync::atomic::Ordering::SeqCst) {
+            QUIT_OK.store(true, std::sync::atomic::Ordering::SeqCst);
+            app.exit(0);
+        }
+    });
+}
+
+/// The page is writing what it has to disk before the app quits.
+#[cfg(desktop)]
+#[tauri::command]
+fn app_quit_hold() {
+    QUIT_HELD.store(true, std::sync::atomic::Ordering::SeqCst);
+}
+
+/// The page has written what it has (or the person chose to quit anyway): quit.
+#[cfg(desktop)]
+#[tauri::command]
+fn app_quit_now(app: tauri::AppHandle) {
+    QUIT_OK.store(true, std::sync::atomic::Ordering::SeqCst);
+    app.exit(0);
+}
+
 // the page's commands: the engine's on the desktop too
 #[cfg(desktop)]
 fn handlers() -> impl Fn(tauri::ipc::Invoke<tauri::Wry>) -> bool + Send + Sync + 'static {
-    tauri::generate_handler![startup_files, selftest_file, selftest_report, app_log, engine::engine_start, engine::engine_send, engine::engine_ack, engine::engine_stop]
+    tauri::generate_handler![startup_files, selftest_file, selftest_persist, selftest_report, app_log, engine::engine_start, engine::engine_send, engine::engine_ack, engine::engine_stop, disk::disk_list, disk::disk_stat, disk::disk_read, disk::disk_write, disk::disk_mkdir, disk::disk_rename, disk::disk_remove, disk::disk_where, disk::settings_write, app_quit_hold, app_quit_now]
 }
 #[cfg(mobile)]
 fn handlers() -> impl Fn(tauri::ipc::Invoke<tauri::Wry>) -> bool + Send + Sync + 'static {
-    tauri::generate_handler![startup_files, selftest_file, selftest_report, app_log]
+    tauri::generate_handler![startup_files, selftest_file, selftest_persist, selftest_report, app_log]
 }
 
 #[cfg_attr(mobile, tauri::mobile_entry_point)]
@@ -281,7 +335,10 @@ pub fn run() {
         .setup(move |app| {
             // (the page's server, listening before the window exists: the window never loads a page from a port
             // this app doesn't hold)
-            let listener = match std::net::TcpListener::bind(("127.0.0.1", 0)) {
+            // (a free port; in a self-test, SAGEBRUSH_APP_PORT, so two launches can be made to differ: the workspace
+            // never depends on the page's origin, web/workspace/disk-mirror.ts)
+            let ask = std::env::var("SAGEBRUSH_APP_PORT").ok().filter(|_| std::env::var_os("SAGEBRUSH_APP_SELFTEST").is_some()).and_then(|p| p.parse::<u16>().ok()).unwrap_or(0);
+            let listener = match std::net::TcpListener::bind(("127.0.0.1", ask)) {
                 Ok(l) => l,
                 Err(e) => {
                     fail_closed(app.handle(), format!("Sagebrush couldn't listen on 127.0.0.1 ({e})"));
@@ -293,8 +350,21 @@ pub fn run() {
                 eprintln!("[app] the page is at http://127.0.0.1:{port}/");
             }
             serve_page(app.handle(), listener, files.clone())?;
+            // (a self-test's controls, run.mjs: "open" leaves out the window's navigation guard; "wide" that and gives
+            // the commands to every http://127.0.0.1 port, as before nav.rs, so the check must see a page reach them)
+            let control = std::env::var("SAGEBRUSH_APP_NAV_CONTROL").ok().filter(|_| std::env::var_os("SAGEBRUSH_APP_SELFTEST").is_some());
+            let open = matches!(control.as_deref(), Some("open" | "wide"));
+            // (the app's commands for this page's exact origin only, nav.rs page_capability; before the window exists)
+            app.add_capability(if control.as_deref() == Some("wide") { nav::page_capability(port).replace(&format!("\"http://127.0.0.1:{port}\""), "\"http://127.0.0.1:*\"") } else { nav::page_capability(port) })?;
             let url = format!("http://127.0.0.1:{port}/").parse().unwrap();
-            let window = WebviewWindowBuilder::new(app, "main", WebviewUrl::External(url));
+            // (the window loads only this page's origin, the port just bound, and its own frames: nav.rs)
+            let window = WebviewWindowBuilder::new(app, "main", WebviewUrl::External(url)).on_navigation(move |u| {
+                let yes = open || nav::may_load(u, port);
+                if !yes {
+                    eprintln!("[app] refused to load {}", u.origin().ascii_serialization());
+                }
+                yes
+            });
             // (a phone's window is the screen: no title, size or drag-and-drop; and the page learns it is in the
             // desktop app, before its own script runs, from __SB_DESKTOP_APP__: window.__TAURI__ is there on phones
             // too, and what only the desktop app offers (the LaTeX editor, web/latex/boot.ts latexHereFor) asks this)
@@ -304,13 +374,36 @@ pub fn run() {
                 .inner_size(1100.0, 860.0)
                 .min_inner_size(480.0, 400.0)
                 .disable_drag_drop_handler()
-                .initialization_script("window.__SB_DESKTOP_APP__ = true;");
+                // (nothing kept by the web view between launches: the workspace and the settings are files on disk,
+                // the page's IndexedDB a cache of them for one launch, disk.rs)
+                .incognito(true)
+                .initialization_script("window.__SB_DESKTOP_APP__ = true;")
+                .initialization_script(&disk::settings_script(app.handle()));
+            // (a self-test's control of the workspace on disk: its import or its write-through left out, run.mjs)
+            #[cfg(desktop)]
+            let window = match std::env::var("SAGEBRUSH_APP_DISK_CONTROL").ok().filter(|_| std::env::var_os("SAGEBRUSH_APP_SELFTEST").is_some()).as_deref() {
+                Some(c @ ("no-import" | "no-write")) => window.initialization_script(&format!("window.__SB_DISK_CONTROL__ = {c:?};")),
+                _ => window,
+            };
             window.build()?;
             Ok(())
         })
         .build(context)
         .expect("error while starting Sagebrush")
         .run(|_app, _event| {
+            // (a window closed or the app quit by the person: held until the page has written its changes to disk)
+            #[cfg(desktop)]
+            match &_event {
+                tauri::RunEvent::ExitRequested { api, code: None, .. } if !QUIT_OK.load(std::sync::atomic::Ordering::SeqCst) => {
+                    api.prevent_exit();
+                    ask_quit(_app);
+                }
+                tauri::RunEvent::WindowEvent { event: tauri::WindowEvent::CloseRequested { api, .. }, .. } if !QUIT_OK.load(std::sync::atomic::Ordering::SeqCst) => {
+                    api.prevent_close();
+                    ask_quit(_app);
+                }
+                _ => {}
+            }
             // (the engine ends with the app)
             #[cfg(desktop)]
             if let tauri::RunEvent::Exit = _event {

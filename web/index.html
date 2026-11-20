@@ -1619,6 +1619,8 @@ nb.on("saved", (text) => {
 const TOUCH_MS = 30_000, touchedAt = new Map();
 nb.on("saved", (text) => {
   const id = current.kind === "browser" ? current.id : null, now = Date.now();
+  // (the desktop app: the notebook's file written at once, every save)
+  if (id && diskMirror && !/^not saved/.test(String(text))) diskMirror.docSaved(id);
   if (!id || !ws || /^not saved/.test(String(text)) || now - (touchedAt.get(id) ?? 0) < TOUCH_MS) return;
   touchedAt.set(id, now);
   void ws.touch(id, now).catch(() => {});
@@ -3965,7 +3967,7 @@ async function toBoard(url, what = "the whiteboard") {
     savedEl.textContent = "not saved: " + (e?.message ?? e) + notLeft;
     return;
   }
-  location.assign(url);
+  await leaveTo(url);
 }
 fileMenu.addEventListener("click", async (e) => {
   const b = e.target.closest("button");
@@ -4874,10 +4876,32 @@ addEventListener("appinstalled", () => { installPrompt = null; document.querySel
 // sees it (§8.2), its changes credited to agent:page.
 let ws = null;
 let wsSettled = false;
+// (the desktop app: the workspace's files on disk, web/workspace/disk-mirror.ts; null elsewhere) and its own module,
+// the app's only (web/workspace/desktop-entry.ts: sagebrush-desktop.js, which neither the site nor the CLI serves)
+let diskMirror = null, diskFailed = null;
+const desktopModule = () => import(new URL("sagebrush-desktop.js", location.href).href);
+// (the disk can't be read: nothing done here would be kept, so nothing can be done: said over the whole page, the
+// notebook read-only, every save refused by the save gate)
+function diskBlocked(why) {
+  nb.setReadOnly(true);
+  const shade = Object.assign(document.createElement("div"), { id: "sb-disk-blocked", role: "alertdialog" });
+  shade.style.cssText = "position:fixed;inset:0;z-index:2147483002;background:rgba(0,0,0,.45);display:flex;align-items:center;justify-content:center;font:15px system-ui,sans-serif";
+  const box = Object.assign(document.createElement("div"), { textContent: `Sagebrush couldn't open its folder of your files (${why}). Nothing you do now would be kept, so editing is off. Quit Sagebrush and open it again.` });
+  box.style.cssText = "background:#fff;color:#222;padding:16px 20px;border-radius:8px;max-width:32em";
+  shade.append(box);
+  document.body.append(shade);
+}
+// (the desktop app: this page is left only once its changes are on disk, the notebook's own save first)
+async function leaveTo(url) {
+  if (diskMirror && !(await (await desktopModule()).beforeLeave(diskMirror, () => nb.saved()))) return;
+  location.assign(url);
+}
 const wsReady = (async () => {
   try {
     const w = await Workspace.open();
     try { await migrate(w, localStorage); } catch (e) { console.warn("workspace: bringing in what was kept before:", e); }
+    // (the desktop app: its files are on disk, this workspace their copy for this launch)
+    if (TAURI && desktopApp()) try { diskMirror = await (await desktopModule()).diskWorkspace(w, (c, a, o) => TAURI.core.invoke(c, a, o)); } catch (e) { console.warn("disk workspace:", e); diskFailed = String(e?.message ?? e); diskBlocked(diskFailed); }
     ws = w;
     window.sagebrush.workspace = w.forAgent("agent:page");
     // (tests: the workspace itself, its verbs with a check of the test's own (admit): loopback pages only)
@@ -4889,7 +4913,7 @@ const wsReady = (async () => {
     // written until then, the notebook's own saves included; said again when that changes, another tab's say)
     showLossNotice(w);
     w.onDurability(() => showLossNotice(w));
-    setSaveGate(() => (w.quarantined ? "this browser's copy of your workspace was lost or is missing changes: choose what to do first" : w.closed ? "the workspace was reset or upgraded in another tab: reload this page" : w.fenceBlocked.length ? "this browser's record of the workspace couldn't be written: reload this page" : null));
+    setSaveGate(() => (w.quarantined ? "this browser's copy of your workspace was lost or is missing changes: choose what to do first" : w.closed ? "the workspace was reset or upgraded in another tab: reload this page" : w.fenceBlocked.length ? "this browser's record of the workspace couldn't be written: reload this page" : diskFailed ? `Sagebrush couldn't open its folder of your files (${diskFailed}): quit Sagebrush and open it again` : null));
     // (and the notebook read-only meanwhile, now and when another tab finds the loss)
     const readOnlyIfQuarantined = () => { if (w.quarantined || nb.store?.viewOnly) nb.setReadOnly(true); };
     readOnlyIfQuarantined();
@@ -5320,7 +5344,7 @@ function wsShowFiles(on) {
             if (matchMedia("(max-width: 640px)").matches) wsShowFiles(false);
           }, sayNotLeft);
         }
-        else { saveNow(); location.assign(url); }
+        else { saveNow(); void leaveTo(url); }
       },
       upload: (files, folder) => uploadHere(files, folder),
       openAs: (e, as) => openAs(e, as),
@@ -5652,7 +5676,11 @@ const historyDbReady = openHistoryDb({ onVersionChange: () => { nbHistory?.close
     TAURI.event.listen("open-files", (ev) => { for (const p of ev.payload ?? []) openDiskFile(p); });
     for (const p of await TAURI.core.invoke("startup_files")) await openDiskFile(p);
     const st = await TAURI.core.invoke("selftest_file");
-    if (st) selftest(st);
+    // (a quit, or the window closed: the notebook's save, the settings and every change on disk first)
+    if (desktopApp()) desktopModule().then((d) => d.drainOnQuit({ mirror: () => diskMirror, invoke: (c, a) => TAURI.core.invoke(c, a), listen: (ev, f) => TAURI.event.listen(ev, f), freeze: () => nb.setReadOnly(true), flushEditor: () => nb.saved() })).catch((e) => console.warn("quit:", e));
+    const persist = st && desktopApp() && await TAURI.core.invoke("selftest_persist");
+    if (persist) desktopModule().then((d) => d.persistProbe(persist, { ws: () => wsReady.then(() => ws), mirror: () => diskMirror, invoke: (c, a) => TAURI.core.invoke(c, a) }));
+    else if (st) selftest(st);
   }
   // (however the start ends, an error included, Share stops waiting for it)
 })().finally(() => booted());
