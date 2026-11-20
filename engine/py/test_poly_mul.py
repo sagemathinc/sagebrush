@@ -113,6 +113,45 @@ def call_hex_checks(r):
         else:
             raise AssertionError("accepted %r %r %r" % (fn, a, b))
         n += 1
+
+    # (exact types only: a str subclass whose translate hides JSON syntax, one
+    # that spoofs __eq__/__hash__ to match a cached op name, and str-subclass
+    # fields, are refused before the bridge is called; an unhashable op name
+    # is a ValueError too)
+    class Evil(str):
+        def translate(self, table):
+            return ""
+
+    class Spoof(str):
+        # (equal to and hashing as "poly_mul", already in the op-name cache)
+        def __eq__(self, other):
+            return other == "poly_mul"
+
+        def __hash__(self):
+            return hash("poly_mul")
+    # (the real name cached first; on CPython the spoof is then "in" the cache)
+    E.call_hex("poly_mul", "1", "1")
+    assert "poly_mul" in E._HEX_OPS
+    calls = []
+
+    class Spy:
+        def call(self, text):
+            calls.append(text)
+            return '{"ok":""}'
+    setattr(E, name, Spy())
+    try:
+        for fn, a, b in [(Evil('poly_mul","x'), "1", "1"), (Evil("poly_mul"), "1", "1"), (Spoof('poly_mul","x'), "1", "1"), ("poly_mul", Evil('1","x":"'), "1"),
+                         ("poly_mul", "1", Evil("1")), (["poly_mul"], "1", "1"), ({}, "1", "1"), (None, "1", "1")]:
+            try:
+                E.call_hex(fn, a, b)
+            except ValueError as e:
+                assert "call_hex" in str(e), e
+            else:
+                raise AssertionError("accepted %r %r %r" % (fn, a, b))
+            n += 1
+        assert calls == [], calls
+    finally:
+        setattr(E, name, real)
     return n
 
 

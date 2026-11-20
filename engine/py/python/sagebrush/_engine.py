@@ -61,14 +61,18 @@ _HEX_OPS = set()
 def call_hex(fn, a, b):
     """call(fn, a=a, b=b) for an op of two hex token lists whose ok value is
     a string of them (poly_mul, qpoly_mul): the same bridge entry and reply
-    mapping, without the json module on the common path.  a and b are
-    checked to be [0-9a-f,/-]* (so they never need escaping) and fn to be
-    [a-z0-9_]+ with no _LIMITED entry; the request is built by
+    mapping, without the json module on the common path.  a and b must be
+    exactly str and [0-9a-f,/-]* (so they never need escaping), fn exactly
+    str and [a-z0-9_]+ with no _LIMITED entry; the request is built by
     concatenation.  An ok reply is sliced only when it is exactly
     `{"ok":"..."}` with a value of the same characters; any other reply goes
     through reply(), so errors raise exactly as call()'s."""
+    # (exact types: a str subclass could override translate; checked before
+    # the cache, so any other fn is a ValueError)
+    if fn.__class__ is not str:
+        raise ValueError("call_hex: the op name is not a str")
     if fn not in _HEX_OPS:
-        if not isinstance(fn, str) or not fn or fn.translate(_NAME) or fn in _LIMITED:
+        if not fn or fn.translate(_NAME) or fn in _LIMITED:
             raise ValueError("call_hex: %r is not an op it can call" % (fn,))
         _HEX_OPS.add(fn)
     if a.__class__ is not str or b.__class__ is not str or a.translate(_HEX) or b.translate(_HEX):
