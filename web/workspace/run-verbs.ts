@@ -128,8 +128,11 @@ export type RunHost = {
  *  inputs as shown, each code cell run in the page's own interpreter as the person's Run is (outputs shown and saved
  *  with the notebook), what it says kept within `out`'s bounds before it is handed back. */
 export type PageRun = {
-  /** the notebook as shown, once the page has caught up with the workspace's copy; null: this generation gone */
-  inputs(): Promise<{ mode: string; cells: { id: string; type: string; code: string }[] } | null>;
+  /** the notebook as shown, once the page has caught up with the workspace's copy; null: this generation gone;
+   *  "fallback": the page couldn't take the run after all (its notebook not one it may run once it had it: a mount
+   *  refused, read only, another tab the writer) and has started nothing, so today's run runs instead, as for a null
+   *  from inPage. Only before any cell: answered by inputs() alone */
+  inputs(): Promise<{ mode: string; cells: { id: string; type: string; code: string }[] } | null | "fallback">;
   /** still this generation: the same notebook shown, not switched or reloaded since */
   current(): boolean;
   cell(id: string, out: Kept): Promise<{ status: "ok" | "error" | "stopped"; images: { count: number; bytes: number } }>;
@@ -433,9 +436,19 @@ async function runNow(method: "workspace.run_notebook" | "workspace.run_file" | 
   if (pre?.loading?.stopped) return { ok: false, ended: pre.loading.cause ?? "stopped", ms: 0 };
   // (the notebook open on this page, with Everything and May run code: run there, never also here; null only when the
   //  page has started nothing, so today's run below is the only one)
+  // (or "fallback": the page took it, then found it couldn't, before any cell: today's run, under the same deadline,
+  //  once what may have changed meanwhile is checked again as above)
+  let deadlineAt = pre?.deadlineAt;
   if (method === "workspace.run_notebook" && !root && host.inPage && target.ref && g.folders.length === 1 && g.folders[0] === "/") {
     const p = runInPage(params, ctx, host, holder, pre, real!, target.ref);
-    if (p) return await p;
+    const r = p ? await p : null;
+    if (r && !(r instanceof PageFallback)) return r;
+    if (r instanceof PageFallback) {
+      deadlineAt = r.deadlineAt;
+      if (!ctx.live()) refuse("invalid: " + ctx.why());
+      if (holder.current && holder.current !== pre) { const c = holder.current; refuse(c.owner === g.id ? RUN_TEXT.busyOwn(c.view) : RUN_TEXT.busyOther); }
+      if (pre?.loading?.stopped) return { ok: false, ended: pre.loading.cause ?? "stopped", ms: 0 };
+    }
   }
 
   // ---- the run, held: from here every way out goes through end() and settle()
@@ -475,7 +488,7 @@ async function runNow(method: "workspace.run_notebook" | "workspace.run_file" | 
   // (the deadline counts from the call's start, the chunk's load and the checks above included (daybreak3's P1): the
   //  pairing's record carries it)
   const timeoutS = params.timeout_s ?? RUN_LIMITS.timeoutDefault;
-  const deadline = setTimeout(() => end("timeout"), Math.max(0, (pre?.deadlineAt ?? performance.now() + timeoutS * 1000) - performance.now()));
+  const deadline = setTimeout(() => end("timeout"), Math.max(0, (deadlineAt ?? performance.now() + timeoutS * 1000) - performance.now()));
   // ---- where its code may write (§3): fixed from here (the ceiling), only narrowing
   const grantTrees = (gr: Grant | null) => (gr && gr.write ? gr.folders : []);
   const docTrees = () => (root ? [root] : method === "workspace.run_notebook" && target!.ref ? host.docTrees(target!.ref) : []);
@@ -922,11 +935,16 @@ async function runNow(method: "workspace.run_notebook" | "workspace.run_file" | 
   }
 }
 
+/** The page's answer that it took the run and then couldn't (PageRun.inputs()'s "fallback"): nothing started, the run
+ *  let go as it was before, and today's run to run under the deadline it was asked with. */
+class PageFallback { constructor(readonly deadlineAt: number) {} }
+
 /** run_notebook in the notebook open on this page: null if the page has none to give (nothing started), else the run,
  *  held from this call on as today's is (one per page, its line and Stop, the deadline, the grant, the page hidden), and
- *  never handed to today's run after, whatever happens to it. Bound to the grant as it is now and to the notebook's
- *  generation as shown now: any change to either ends it, no later cell starts and nothing it said is returned. */
-function runInPage(params: { timeout_s?: number }, ctx: RunCtx, host: RunHost, holder: RunHolder, pre: RunHolder["current"], real: string, ref: string): Promise<Record<string, unknown>> | null {
+ *  never handed to today's run after, whatever happens to it, except a PageFallback: the page's inputs() said, before
+ *  any cell, that it couldn't take it after all. Bound to the grant as it is now and to the notebook's generation as
+ *  shown now: any change to either ends it, no later cell starts and nothing it said is returned. */
+function runInPage(params: { timeout_s?: number }, ctx: RunCtx, host: RunHost, holder: RunHolder, pre: RunHolder["current"], real: string, ref: string): Promise<Record<string, unknown> | PageFallback> | null {
   const g = ctx.grant, g0 = ctx.grantNow();
   let stopped = false, cause: "done" | "error" | "stopped" | "timeout" | "revoked" = "done", reason = "";
   let deadline: ReturnType<typeof setTimeout> | undefined, ended!: () => void;
@@ -951,7 +969,8 @@ function runInPage(params: { timeout_s?: number }, ctx: RunCtx, host: RunHost, h
   const me = { owner: g.id, view: real, stop: () => end("stopped") };
   holder.current = me;
   holder.show(ctx.agent, real, me.stop);
-  deadline = setTimeout(() => end("timeout"), Math.max(0, (pre?.deadlineAt ?? performance.now() + (params.timeout_s ?? RUN_LIMITS.timeoutDefault) * 1000) - performance.now()));
+  const deadlineAt = pre?.deadlineAt ?? performance.now() + (params.timeout_s ?? RUN_LIMITS.timeoutDefault) * 1000;
+  deadline = setTimeout(() => end("timeout"), Math.max(0, deadlineAt - performance.now()));
   const onHide = () => end("stopped");
   addEventListener("pagehide", onHide);
   const unwatch = ctx.onChange(() => { if (!granted()) end("revoked", ctx.live() ? RUN_TEXT.grantChanged : ctx.why()); });
@@ -961,8 +980,18 @@ function runInPage(params: { timeout_s?: number }, ctx: RunCtx, host: RunHost, h
     try {
       // (what runs: the notebook as shown now, this generation's, bounded as today's run's; its inputHash from it)
       const doc = await Promise.race([quiet(pr.inputs()), endedP]);
+      // (the page couldn't take it after all, nothing started: let go as before this call, the holder the caller's again,
+      //  and today's run instead; an end that came first stands)
+      if (doc === "fallback" && !stopped) {
+        stopped = true;
+        ended();
+        clearTimeout(deadline);
+        holder.hide();
+        if (holder.current === me) holder.current = pre;
+        return new PageFallback(deadlineAt);
+      }
       lapsed();
-      if (stopped || !doc) { end("stopped"); return cause === "revoked" ? { ok: false, ended: "revoked", reason } : { ok: false, ended: cause, ms: Math.round(performance.now() - t0) }; }
+      if (stopped || !doc || doc === "fallback") { end("stopped"); return cause === "revoked" ? { ok: false, ended: "revoked", reason } : { ok: false, ended: cause, ms: Math.round(performance.now() - t0) }; }
       if (doc.cells.length > RUN_LIMITS.cells) refuse(RUN_TEXT.tooManyCells(doc.cells.length));
       const src = doc.cells.reduce((n, c) => n + enc.encode(c.code).length, 0);
       if (src > RUN_LIMITS.source) refuse(RUN_TEXT.tooMuchSource(src));
