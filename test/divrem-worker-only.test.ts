@@ -6,8 +6,11 @@
 // qpoly_divrem call (its work cap is 2^29 units, about 2.15 s on the
 // production wasm engine at the worst measured rate) never runs on the UI
 // thread (nor a qpoly_scale, qpoly_derivative, qpoly_integral, qpoly_add,
-// qpoly_sub, qpoly_eval or zpoly_fdiv call, 2^28 units, about 2.4 s there,
-// extrapolated from the slowest measured shape): Sage mode's Python
+// qpoly_sub or qpoly_eval call, 2^28 units, about 2.16 s there; nor a
+// zpoly_fdiv call, about 0.82 s at its work cap, measured on the slowest
+// admitted shape, 999 coefficients of 1025 limbs by a 128-limb divisor, as
+// the first call in a fresh process, engine module sha256 4ac9d990..., on
+// an AMD EPYC 7B13 host): Sage mode's Python
 // (sagebrush.poly.qdivrem, zdivrem, qscale, qderivative, qintegral, qadd,
 // qsub, qeval and zfdiv) runs in the kernel's worker (web/worker.ts).
 import test from "node:test";

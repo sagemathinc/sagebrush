@@ -1,0 +1,8 @@
+{
+ "v": 1,
+ "reason": "Division by an invariant divisor in the engine's exact division routines (Möller–Granlund 2-by-1 and 3-by-2 steps, the lazy reciprocal, and on wasm32 the 64 x 64 -> 128 products from four 32-bit products): the engine module grows 1822 B (CI's size row at cd7a851a). cli/pyjs.cjs embeds the engine module in base64, so it grows by 4/3 of that, 2428 B, with no other change: generated, not new library code. Each marked +64 over the measured growth; the engine module's ceiling is renewed to its measured size + 64.",
+ "bytes": {
+  "cli/pyjs.cjs": 2492,
+  "engine/sagebrush-engine.wasm": 1886
+ }
+}

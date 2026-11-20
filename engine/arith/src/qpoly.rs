@@ -939,5 +939,6 @@ pub fn clear_metered(f: &Factor, r: u64, caps: &Caps, plan: &PlanClear, m: &mut 
     Ok(out)
 }
 
-#[cfg(test)]
+// (its helpers use dashu's u64-word API: native targets only)
+#[cfg(all(test, not(target_arch = "wasm32")))]
 mod tests;
