@@ -25,7 +25,7 @@ impl Rng {
     /// bit, the top half, near 2^63.
     fn limb(&mut self) -> u64 {
         match self.next() % 8 {
-            0 | 1 | 2 => self.next(),
+            0..=2 => self.next(),
             3 => u64::MAX,
             4 => 0,
             5 => 1 << (self.next() % 64),
@@ -43,12 +43,9 @@ impl Rng {
 }
 
 fn words(x: &UBig, n: usize) -> Vec<u64> {
-    let mut v = x.as_words().iter().map(|&w| w as u64).collect::<Vec<u64>>();
-    // (dashu's Word may be 32 bits on wasm32: repack)
-    if std::mem::size_of::<dashu_int::Word>() == 4 {
-        let w32 = x.as_words().iter().map(|&w| w as u32).collect::<Vec<u32>>();
-        v = w32.chunks(2).map(|c| u64::from(c[0]) | (u64::from(*c.get(1).unwrap_or(&0)) << 32)).collect();
-    }
+    // (through bytes: dashu's Word is 32 bits on wasm32)
+    let b = x.to_le_bytes();
+    let mut v: Vec<u64> = b.chunks(8).map(|c| c.iter().rev().fold(0u64, |a, &y| (a << 8) | u64::from(y))).collect();
     v.resize(n.max(v.len()), 0);
     v
 }
@@ -78,8 +75,9 @@ fn limits(used: u64) -> Vec<u64> {
 /// Run `f` (old or new) on fresh copies of the buffers with a meter of
 /// `limit`; its result, the buffers after, the units and the largest charge.
 type Bufs = (Vec<u64>, Vec<u64>, Vec<u64>);
+type Routine<'a, T> = &'a dyn Fn(&mut [u64], &mut [u64], &mut [u64], &mut Meter) -> Result<T, Fault>;
 
-fn run<T>(f: &dyn Fn(&mut [u64], &mut [u64], &mut [u64], &mut Meter) -> Result<T, Fault>, b: &Bufs, limit: u64) -> (Result<T, Fault>, Bufs, u64, u64) {
+fn run<T>(f: Routine<T>, b: &Bufs, limit: u64) -> (Result<T, Fault>, Bufs, u64, u64) {
     let (mut x, mut y, mut q) = b.clone();
     let mut m = Meter::new(limit);
     let r = f(&mut x, &mut y, &mut q, &mut m);
@@ -88,7 +86,7 @@ fn run<T>(f: &dyn Fn(&mut [u64], &mut [u64], &mut [u64], &mut Meter) -> Result<T
 
 /// Old against new on one input, at an unbounded meter and at every probed
 /// limit.  Returns the unbounded result of the new routine.
-fn same<T: PartialEq + std::fmt::Debug>(name: &str, old: &dyn Fn(&mut [u64], &mut [u64], &mut [u64], &mut Meter) -> Result<T, Fault>, new: &dyn Fn(&mut [u64], &mut [u64], &mut [u64], &mut Meter) -> Result<T, Fault>, b: &Bufs) -> Result<T, Fault> {
+fn same<T: PartialEq + std::fmt::Debug>(name: &str, old: Routine<T>, new: Routine<T>, b: &Bufs) -> Result<T, Fault> {
     let (ro, bo, uo, lo) = run(old, b, u64::MAX);
     let (rn, bn, un, ln) = run(new, b, u64::MAX);
     assert_eq!(rn, ro, "{name}: result, x {:x?} y {:x?}", b.0, b.1);

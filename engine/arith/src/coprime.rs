@@ -256,14 +256,6 @@ fn window(x: &[u64], n: usize, shift: usize) -> u64 {
     (lo | hi) & (u64::MAX >> 1)
 }
 
-/// Knuth D's quotient digit at one step: floor((u2 b^2 + u1 b + u0) / (y1 b
-/// + y2)) by the 3-by-2 ([`invdiv::div3by2`], v3 its reciprocal), or b - 1
-/// when (u2, u1) = (y1, y2), where the true digit is b - 1 (the running
-/// remainder R >= (y1 b + y2) b^(ny-1) and R < Y b give R / Y > b - 1).
-/// This is the value the D3 correction loop reached (min(floor(U/D), b -
-/// 1)), so every digit, multiply-subtract and add-back is the same as with
-/// it.  (u2, u1) above (y1, y2) can't happen (the running remainder is below
-/// y b): an invariant failure.
 /// Test-only coverage counters for the differential test's hard-case rows
 /// (indices in `diff_tests`): which branches the inputs actually reached.
 #[cfg(test)]
@@ -284,6 +276,14 @@ pub(crate) mod hits {
     }
 }
 
+/// Knuth D's quotient digit at one step, with U = u2 b^2 + u1 b + u0 and
+/// D = y1 b + y2: floor(U / D) by the 3-by-2 ([`invdiv::div3by2`], v3 its
+/// reciprocal), or b - 1 when (u2, u1) = (y1, y2), where the true digit is
+/// b - 1 (the running remainder R is at least D b^(ny-1) and below Y b, so
+/// R / Y > b - 1).  This is the value the D3 correction loop reached, the
+/// smaller of floor(U / D) and b - 1, so every digit, multiply-subtract and
+/// add-back is the same as with it.  (u2, u1) above (y1, y2) can't happen
+/// (the running remainder is below y b): an invariant failure.
 #[inline]
 fn qdigit(u2: u64, u1: u64, u0: u64, y1: u64, y2: u64, v3: u64) -> Result<u128, Fault> {
     if (u2, u1) < (y1, y2) {

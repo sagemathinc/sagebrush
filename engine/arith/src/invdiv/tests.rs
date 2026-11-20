@@ -213,7 +213,7 @@ fn div3by2_64() {
 fn mul_wide32_is_the_product() {
     let mut rng = Rng(99);
     let edges = [0u64, 1, 0xffff_ffff, 1 << 32, u64::MAX, u64::MAX - 1, 1 << 63, (1 << 63) - 1];
-    let mut check = |a: u64, b: u64| {
+    let check = |a: u64, b: u64| {
         let p = u128::from(a) * u128::from(b);
         assert_eq!(mul_wide32(a, b), ((p >> 64) as u64, p as u64), "{a:x} {b:x}");
         assert_eq!(mul_wide(a, b), ((p >> 64) as u64, p as u64));

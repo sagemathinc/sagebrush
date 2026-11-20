@@ -101,9 +101,9 @@ macro_rules! invdiv {
                 v
             }
 
-            /// (q, r1, r0) with u2 b^2 + u1 b + u0 = q (d1 b + d0) + (r1 b
-            /// + r0), the remainder below d1 b + d0; (u2, u1) < (d1, d0),
-            /// d1 normalized, v3 = recip3(d1, d0, recip(d1)).
+            /// (q, r1, r0) with u2 b^2 + u1 b + u0 = q (d1 b + d0) + r1 b +
+            /// r0, the remainder below d1 b + d0; (u2, u1) < (d1, d0), d1
+            /// normalized, v3 = recip3(d1, d0, recip(d1)).
             #[inline]
             pub(crate) fn div3by2(u2: $L, u1: $L, u0: $L, d1: $L, d0: $L, v3: $L) -> ($L, $L, $L) {
                 debug_assert!((u2, u1) < (d1, d0));
@@ -172,7 +172,10 @@ pub(crate) fn mul_wide32(a: u64, b: u64) -> (u64, u64) {
     (p11 + (p01 >> 32) + (p10 >> 32) + (mid >> 32), (p00 & M) | (mid << 32))
 }
 
+// (the narrow limbs: the tests' exhaustive models of the same code)
+#[cfg(test)]
 invdiv!(w8, u8, u16);
+#[cfg(test)]
 invdiv!(w16, u16, u32);
 invdiv!(w64, u64, u128, mul_wide);
 
