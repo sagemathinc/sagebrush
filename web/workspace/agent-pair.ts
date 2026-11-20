@@ -21,20 +21,27 @@ import { MADE_CHANNEL, type TexMade, type TexMayRun, type TexMayRunYes } from ".
 
 /** What the hello's result says (the agent's own claims, shown as such). Over a runner (`link`), the agent's
  * agent.ready says it, with `child`: this agent process's identity, bound into every permission digest. */
-export type Hello = { protocol: 1; agent: { name: string; client: string; version?: string }; wants: { folders?: string[]; write?: boolean; run?: boolean }; session?: string; features?: string[]; child?: string };
+export type Hello = { protocol: 1; agent: { name: string; client: string; version?: string }; wants: { folders?: string[]; write?: boolean; run?: boolean }; session?: string; features?: string[]; child?: string; log?: { instance: string } };
 /** What a page may offer beyond the workspace's verbs, said in its hello and in the agent's: "notebook.edit", an
  * agent's edit of an open notebook by cell (web/workspace/notebook-edit.ts, A12 step 1); "permission.digest", an Allow
  * that carries the digest of the action shown (agent-canon.ts); "run.context", a run verb's call that carries the chat and
  * the turn it came from (`conversation`, `turn_id`), added by the agent's server after the model's arguments, never the
- * model's own (run_notebook in the notebook open on the page runs there only for that chat's running turn). */
-export const FEATURES = ["notebook.edit", "permission.digest", "run.context"] as const;
+ * model's own (run_notebook in the notebook open on the page runs there only for that chat's running turn);
+ * "chat.resume", an agent that keeps each conversation's log and replays what a page missed (its hello's `log` names
+ * the run its numbers belong to). */
+export const FEATURES = ["notebook.edit", "permission.digest", "run.context", "chat.resume"] as const;
+/** The `log` an agent's hello or agent.ready names: its run, as the agent's random hex id; anything else, none. */
+export const logOf = (v: unknown): { instance: string } | undefined => {
+  const i = (v as { instance?: unknown } | null)?.instance;
+  return typeof i === "string" && /^[0-9a-f]{8,64}$/.test(i) ? { instance: i } : undefined;
+};
 /** The pairing's other end on one of the person's computers (agent-relay.ts's AgentLeg), in place of the loopback
  * socket, with its own frame bound, queue and reply slots: what the pairing asks of it. */
 export type AgentLink = {
   /** the leg as the pairing's socket; `ended` hears why it ended first */
   socket(ended: (e: { kind: string; why: string }) => void): WebSocket;
   /** an agent.ready: who the agent is (undefined: not one; false: one in an unknown form) */
-  ready(msg: any): { agent: Hello["agent"]; features: string[]; child: string } | false | undefined;
+  ready(msg: any): { agent: Hello["agent"]; features: string[]; child: string; log?: { instance: string } } | false | undefined;
   send(text: string): "ok" | "full" | "over" | "closed";
   /** a reply's place, taken as a call arrives (false: too many owed, the leg ends) */
   owe(): boolean;
@@ -268,7 +275,7 @@ export class AgentPairing {
         const ready = this.link?.ready(msg);
         if (ready === false) return this.close(1002, "an agent.ready in an unknown form");
         if (ready) {
-          if (this.state !== "connecting") { this.hello = { ...this.hello!, ...ready }; this.emit(); return; }
+          if (this.state !== "connecting") { this.hello = { ...this.hello!, log: undefined, ...ready }; this.emit(); return; }
           this.hello = { protocol: 1, wants: { folders: ["/"], write: true }, ...ready };
           this.pairingId = newGrantId(12);
           this.state = "paired";
@@ -285,11 +292,12 @@ export class AgentPairing {
           }
           const r = msg.result;
           if (!r || r.protocol !== 1 || !r.agent || typeof r.agent.name !== "string") return this.close(1002, "a hello result in an unknown form");
-          this.hello = { protocol: 1, agent: { name: String(r.agent.name).slice(0, 80), client: String(r.agent.client ?? "").slice(0, 40), version: r.agent.version ? String(r.agent.version).slice(0, 40) : undefined }, wants: { folders: Array.isArray(r.wants?.folders) ? r.wants.folders.slice(0, 50).map(String) : undefined, write: !!r.wants?.write, run: !!r.wants?.run }, session: typeof r.session === "string" ? r.session : undefined, features: Array.isArray(r.features) ? r.features.filter((f: unknown): f is string => typeof f === "string" && (FEATURES as readonly string[]).includes(f)) : [], ...(typeof r.child === "string" && /^[A-Za-z0-9_-]{1,128}$/.test(r.child) ? { child: r.child } : {}) };
+          this.hello = { protocol: 1, agent: { name: String(r.agent.name).slice(0, 80), client: String(r.agent.client ?? "").slice(0, 40), version: r.agent.version ? String(r.agent.version).slice(0, 40) : undefined }, wants: { folders: Array.isArray(r.wants?.folders) ? r.wants.folders.slice(0, 50).map(String) : undefined, write: !!r.wants?.write, run: !!r.wants?.run }, session: typeof r.session === "string" ? r.session : undefined, log: logOf(r.log), features: Array.isArray(r.features) ? r.features.filter((f: unknown): f is string => typeof f === "string" && (FEATURES as readonly string[]).includes(f)) : [], ...(typeof r.child === "string" && /^[A-Za-z0-9_-]{1,128}$/.test(r.child) ? { child: r.child } : {}) };
           // (A14: a restore's session must be answered by the agent it was given to, name and client; else closed)
           if ("agent" in how && how.agent && (this.hello.agent.name !== how.agent.name || this.hello.agent.client !== how.agent.client)) {
-            this.close(1000, "another agent answered this page's session");
-            return reject(new AgentError("identity", "another agent answered this page's session"));
+            // (said first: a socket whose close is heard at once (Bun 1.3's) would otherwise answer it as a plain close)
+            reject(new AgentError("identity", "another agent answered this page's session"));
+            return this.close(1000, "another agent answered this page's session");
           }
           if (!this.pairingId) this.pairingId = newGrantId(12);
           if (this.hello.session) this.sessionSecret = this.hello.session;
@@ -340,10 +348,11 @@ export class AgentPairing {
     this.grant = grant;
     this.remember = remember;
     this.verbs = this.opts.verbsFor(actorOf(h.agent.name, h.agent.client), { owner: () => grant.id });
-    this.send({ jsonrpc: "2.0", method: "grant.changed", params: { agent: grant.agent, client: grant.client, folders: grant.folders, write: grant.write, run: grant.run, expires: grant.expires } });
-    // (what this page offers beyond the verbs: a notification, which a server that doesn't know it ignores, §1 rule 4)
+    // (what this page offers beyond the verbs, sent before its grant (A2-1): a notification, which a server that
+    //  doesn't know it ignores, §1 rule 4)
     // (permission.digest: every Allow carries the digest of the action shown, from any page that pairs)
     this.send({ jsonrpc: "2.0", method: "page.features", params: { features: [...(this.opts.notebookEdit ? ["notebook.edit"] : []), "permission.digest", ...(this.opts.runVerbs ? ["run.context"] : [])] } });
+    this.send({ jsonrpc: "2.0", method: "grant.changed", params: { id: grant.id, agent: grant.agent, client: grant.client, folders: grant.folders, write: grant.write, run: grant.run, expires: grant.expires } });
     await this.keep();
     // (S4: while it waited, the grant may have been revoked, the pairing closed or the grant replaced: then nothing
     //  of this allow() goes on, no record, no timer, no "granted")
@@ -387,7 +396,7 @@ export class AgentPairing {
     const next: Grant = { ...g, run: false };
     this.grant = next;
     this.verbs = this.opts.verbsFor(actorOf(this.hello!.agent.name, this.hello!.agent.client), { owner: () => next.id });
-    this.send({ jsonrpc: "2.0", method: "grant.changed", params: { agent: next.agent, client: next.client, folders: next.folders, write: next.write, run: false, expires: next.expires } });
+    this.send({ jsonrpc: "2.0", method: "grant.changed", params: { id: next.id, agent: next.agent, client: next.client, folders: next.folders, write: next.write, run: false, expires: next.expires } });
     this.emit();
     await this.keep();
     if (this.grant === next) this.keepForReload();

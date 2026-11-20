@@ -30,6 +30,8 @@ ok(rh.v.length === 1 && rc.sha.length === 1 && JSON.stringify(rh.v) === JSON.str
 // without its sha, or a sha copied from another release, fails here; a new release adds its line)
 const RELEASE_SHA256 = {
   "0.7.1": "2a131b9381de4b5d011bebc482dda7d2e13402f68a58b60dfba740fa18e0931c",
+  "0.7.2": "f3771776d713c9f76b4b13a8ea6f712963ea46489d5295488c9362474d3e40ab",
+  "0.7.3": "85ac62b714596920ee72c8426a164652b9c841a137ce846c905b3f4122ef4242",
 };
 const tgzVersions = [...new Set([...(html + conn0).matchAll(/sagebrush-agent-([^/"<\s]*)\.tgz/g)].map((m) => m[1]))];
 ok(tgzVersions.length === 1 && JSON.stringify(tgzVersions) === JSON.stringify(rc.v), `every .tgz link on both pages names the same one version, the one the pages name: ${JSON.stringify(tgzVersions)}`);

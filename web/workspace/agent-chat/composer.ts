@@ -1,5 +1,5 @@
-// The agents page's composer (web/agents): the message editor with its keys, the Send, Queue, Note and Stop buttons,
-// and their labels. What sending does (the queues, interrupting a turn) stays in page.ts, passed in as hooks.
+// The agents page's composer (web/agents): the message editor with its keys, the Send (Queue while a turn runs), Send
+// now, Note and Stop buttons, and their labels. What sending does (the queues, interrupting a turn) stays in page.ts, passed in as hooks.
 import { BlockEditor } from "../../board/blocks";
 import type { UserEntry } from "./events";
 
@@ -12,34 +12,43 @@ export interface ComposerHooks {
   typeset(el: Element): void;
 }
 
-/** The editor in #editor (Shift+Enter sends, Alt+Enter queues, Ctrl/Cmd+Enter adds a note) and the buttons' wiring. */
+// (whether the thread shown has a turn running, as last rendered: then the primary action queues, never interrupts)
+let running = false;
+
+/** The editor in #editor (Shift+Enter sends, or queues while a turn runs; Alt+Enter queues; Ctrl/Cmd+Enter adds a
+ *  note) and the buttons' wiring. Only Send now and Stop interrupt the agent. */
 export function mountComposer(h: ComposerHooks): BlockEditor {
+  const primary = () => h.submit(running ? "queued" : "sent");
   const editor = new BlockEditor("", {
     render: h.render,
     typeset: h.typeset,
     placeholder: "Message Claude…  (Shift+Enter to send)",
     onKey(e) {
       if (e.key !== "Enter") return false;
-      if (e.shiftKey && !e.altKey && !e.ctrlKey && !e.metaKey) return (e.preventDefault(), h.submit("sent"), true);
+      if (e.shiftKey && !e.altKey && !e.ctrlKey && !e.metaKey) return (e.preventDefault(), primary(), true);
       if (e.altKey) return (e.preventDefault(), h.submit("queued"), true);
       if (e.ctrlKey || e.metaKey) return (e.preventDefault(), h.submit("note"), true);
       return false;
     },
   });
   $("#editor").append(editor.el);
-  $("#send").onclick = () => h.submit("sent");
-  $("#queue").onclick = () => h.submit("queued");
+  $("#send").onclick = primary;
+  $("#send-now").onclick = () => h.submit("sent");
   $("#note").onclick = () => h.submit("note");
   $("#stop").onclick = () => h.stop();
   return editor;
 }
 
-/** The buttons for the thread shown: Send or Send now, Queue and Stop while a turn runs, and how many are queued. */
-export function renderComposerState(running: boolean, queued: number) {
-  $("#send").textContent = running ? "Send now" : "Send";
-  $("#send").title = running ? "Interrupt the agent and send (Shift+Enter)" : "Send (Shift+Enter)";
-  $("#queue").hidden = !running;
-  $("#stop").hidden = !running;
+/** The buttons for the thread shown: Send, or while a turn runs Queue with Send now and Stop beside it; and how many
+ *  are queued. `away`: the chat's last turn lost its agent's connection, and a message waits for that turn's end: the
+ *  primary action queues, with no one to interrupt or stop (no Send now, no Stop). */
+export function renderComposerState(busy: boolean, queued: number, away = false) {
+  running = busy || away;
+  $("#send").textContent = busy || away ? "Queue" : "Send";
+  $("#send").title = busy ? "Send after the current turn (Shift+Enter)" : away ? "Send once the agent says how its last turn went (Shift+Enter)" : "Send (Shift+Enter)";
+  $("#send-now").hidden = !busy;
+  $("#stop").hidden = !busy;
+  $("#keys").textContent = busy || away ? "queue" : "send";
   $("#queued").textContent = queued ? `${queued} queued` : "";
 }
 

@@ -56,7 +56,33 @@ const PNG = Uint8Array.from(atob("iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAA
 let sock = null, nextId = 1, picHits = 0;
 // (whether the stand-in says it edits notebooks by cell, notebook.edit: the A12 section pairs again with it)
 let FEATURES = false;
+// (whether the stand-in keeps each conversation's log, chat.resume, as sagebrush-agent 0.7.2 does: its hello names the
+//  run, its events and the person's messages are numbered, and each chat.resume is held until the row answers it)
+let RESUME = false, logSeq = 0;
+const LOG_INSTANCE = "0123456789abcdef";
+const agentLog = [], resumes = [];
+// (a hello held unanswered while set: the page stays not connected until the row lets it through)
+let holdHello = false, heldHello = null;
 const pending = new Map(), notes = [];
+function message(ws, data) {
+  const m = JSON.parse(String(data));
+  if (m.method === "hello" && holdHello) { heldHello = () => { holdHello = false; heldHello = null; message(ws, data); }; return; }
+  if (m.method === "hello") {
+    sock = ws;
+    // (it asks for run too: the page's grant must say run false whatever it asks; with RESUME, its session is 43
+    //  base64url characters, as the agent's own, since the page's reload record checks the form)
+    ws.send(JSON.stringify({ jsonrpc: "2.0", id: m.id, result: { protocol: 1, agent: { name: "Claude", client: "claude-agent-sdk", version: "0.3.0" }, wants: { folders: ["/"], write: true, run: true }, features: [...(FEATURES ? ["notebook.edit"] : []), "run.context", ...(RESUME ? ["chat.resume"] : [])], ...(RESUME ? { log: { instance: LOG_INSTANCE }, session: "BwcHBwcHBwcHBwcHBwcHBwcHBwcHBwcHBwcHBwcHBwc" } : {}) } }));
+  } else if (m.id && pending.has(m.id)) {
+    const p = pending.get(m.id);
+    pending.delete(m.id);
+    if (m.error) p.no(Object.assign(new Error(m.error.message), { code: m.error.data?.code }));
+    else p.ok(m.result);
+  } else if (m.method) {
+    notes.push(m);
+    if (RESUME && m.method === "chat.message") agentLog.push({ seq: ++logSeq, method: "chat.message", params: m.params });
+    if (RESUME && m.method === "chat.resume") resumes.push(m.params);
+  }
+}
 const daemon = Bun.serve({
   port: 0,
   hostname: "127.0.0.1",
@@ -70,19 +96,7 @@ const daemon = Bun.serve({
     return new Response("not here", { status: 404 });
   },
   websocket: {
-    message(ws, data) {
-      const m = JSON.parse(String(data));
-      if (m.method === "hello") {
-        sock = ws;
-        // (it asks for run too: the page's grant must say run false whatever it asks)
-        ws.send(JSON.stringify({ jsonrpc: "2.0", id: m.id, result: { protocol: 1, agent: { name: "Claude", client: "claude-agent-sdk", version: "0.3.0" }, wants: { folders: ["/"], write: true, run: true }, features: [...(FEATURES ? ["notebook.edit"] : []), "run.context"] } }));
-      } else if (m.id && pending.has(m.id)) {
-        const p = pending.get(m.id);
-        pending.delete(m.id);
-        if (m.error) p.no(Object.assign(new Error(m.error.message), { code: m.error.data?.code }));
-        else p.ok(m.result);
-      } else if (m.method) notes.push(m);
-    },
+    message,
     close(ws) {
       if (sock === ws) sock = null;
     },
@@ -96,7 +110,21 @@ const call = (method, params) =>
     sock.send(JSON.stringify({ jsonrpc: "2.0", id, method, params }));
   });
 let conv = null, turnN = 0;
-const event = (turn_id, e, conversation = conv) => sock.send(JSON.stringify({ jsonrpc: "2.0", method: "turn.event", params: { conversation, turn_id, event: e } }));
+const event = (turn_id, e, conversation = conv) => {
+  const params = { conversation, turn_id, event: e };
+  if (RESUME) agentLog.push({ seq: ++logSeq, method: "turn.event", params });
+  sock.send(JSON.stringify({ jsonrpc: "2.0", method: "turn.event", params: RESUME ? { ...params, seq: logSeq } : params }));
+};
+// (an event the stand-in logs while no page is there to get it: a turn it ended when its page went away)
+const logOnly = (turn_id, e, conversation = conv) => agentLog.push({ seq: ++logSeq, method: "turn.event", params: { conversation, turn_id, event: e } });
+// (the held chat.resume requests answered from the stand-in's log)
+// (`running`: the turn the stand-in still runs in that conversation, as an agent that kept it going does, step 2)
+const answerResumes = (running = []) => {
+  for (const r of resumes.splice(0)) {
+    const events = agentLog.filter((e) => e.params.conversation === r.conversation && e.seq > (r.instance === LOG_INSTANCE ? r.after : 0));
+    sock.send(JSON.stringify({ jsonrpc: "2.0", method: "chat.replay", params: { conversation: r.conversation, instance: LOG_INSTANCE, last: logSeq, running, events, done: true } }));
+  }
+};
 // (a run as the agent's server sends it with run.context: the chat and the turn it came from, after the model's args)
 const runIn = (path, turn_id, conversation = conv) => call("workspace.run_notebook", { path, timeout_s: 120, conversation, turn_id });
 /** A turn of the agent's that shows a file as an artifact (its tool wrote the file first, as the daemon's does). */
@@ -308,7 +336,7 @@ const loaded = (name) => requested.some((u) => new URL(u).pathname.endsWith("/" 
 
 /** Open the page with a pairing link, connect, and allow everything (the person's grant dialog); `run: false`: with
  * May run code unticked, so a notebook the agent creates isn't run by itself (workspace/agent-made.ts). */
-async function pair({ run = true } = {}) {
+async function pair({ run = true, remember = null, how = null } = {}) {
   const before = loads;
   stamp("pair: navigate");
   if (!firstLoadLogged) timing.clear();
@@ -338,7 +366,7 @@ async function pair({ run = true } = {}) {
   dialogNote ??= await ev(`[...document.querySelectorAll('.sbag-dlg')].at(-1)?.querySelector('.note')?.textContent ?? ''`);
   await ev(`[...document.querySelectorAll('.sbag-dlg button')].find((b) => b.textContent === 'Connect' && b.offsetParent).click()`);
   await until(`[...document.querySelectorAll('button')].some((b) => b.textContent === 'Allow' && b.offsetParent)`);
-  await ev(`(() => { const all = [...document.querySelectorAll('label')].find((l) => l.textContent.startsWith('Everything')).querySelector('input'); all.checked = true; all.dispatchEvent(new Event('change')); ${run ? "" : "const mr = [...document.querySelectorAll('label')].find((l) => l.textContent.includes('May run code'))?.querySelector('input'); if (mr?.checked) mr.click(); "}[...document.querySelectorAll('button')].find((b) => b.textContent === 'Allow').click(); })()`);
+  await ev(`(() => { const all = [...document.querySelectorAll('label')].find((l) => l.textContent.startsWith('Everything')).querySelector('input'); all.checked = true; all.dispatchEvent(new Event('change')); ${run ? "" : "const mr = [...document.querySelectorAll('label')].find((l) => l.textContent.includes('May run code'))?.querySelector('input'); if (mr?.checked) mr.click(); "}${how ? `const sel = [...document.querySelectorAll('.sbag-dlg')].at(-1).querySelector('select'); sel.value = ${JSON.stringify(how)}; sel.dispatchEvent(new Event('change')); ` : ""}${remember === false ? "const rm = [...document.querySelectorAll('label')].find((l) => l.textContent.startsWith('Remember'))?.querySelector('input'); if (rm?.checked) rm.click(); " : ""}[...document.querySelectorAll('button')].find((b) => b.textContent === 'Allow').click(); })()`);
   const t = Date.now();
   while (!notes.some((m) => m.method === "grant.changed") && Date.now() - t < 10000) await sleep(50);
   await until(`document.querySelector('#connect').textContent === 'Connected'`);
@@ -620,9 +648,9 @@ try {
     const draft = "/notes/selfrun-draft.txt";
     await call("workspace.create", { path: draft, content: { text: "mine" } });
     await artifactTurn(draft, { finish: false, turn: t3 });
-    await until(`!!document.querySelector('${PANE} textarea')`);
-    // (the person in it: they type in its text)
-    await ev(`(document.querySelector('${PANE} textarea').focus(), true)`);
+    // (the person in it: they type in its text; found and focused in one step, retried, as the pane may render it
+    //  again between a look and a focus)
+    await until(`(() => { const t = document.querySelector('${PANE} textarea'); t?.focus(); return !!t && document.activeElement === t; })()`);
     await send("Input.insertText", { text: " typed" });
     const path3 = "/notes/selfrun3.ipynb";
     await call("workspace.create", { path: path3, content: docFor(path3, [{ code: "print('AWAY', 3)" }]), mode: "python" });
@@ -640,7 +668,8 @@ try {
   //  the person typed in: the pane stays there, the run is saved, its tab says it changed; PR4 no turn running: today's
   //  run (nothing opened, not saved); PR5 the pane closed while the run waits: the run ends, stopped; PR6-PR9 the call's
   //  chat and turn (run.context): none, an ended turn's, a background chat's, the chat left meanwhile; PR10 the turn ended
-  //  meanwhile: never this pane)
+  //  meanwhile: never this pane; PR9 a switch while the pane mounts: today's run; PR9b one after it read the notebook,
+  //  PR12 the turn ending and PR13 the pane closed while it mounts: stopped)
   if (want("panerun")) {
     await freshPage();
     const P1 = "/notes/pr-given.ipynb";
@@ -734,6 +763,14 @@ try {
     // (made before the turn, as PR5's: a notebook the agent creates in its turn runs once by itself)
     const P9 = "/notes/pr-switched.ipynb";
     await call("workspace.create", { path: P9, content: docFor(P9, [{ code: "print('SW', 9)" }]), mode: "python" });
+    const P9b = "/notes/pr-switched-late.ipynb", P12 = "/notes/pr-turnended-mount.ipynb";
+    await call("workspace.create", { path: P9b, content: docFor(P9b, [{ code: "print('SB', 9)" }]), mode: "python" });
+    await call("workspace.create", { path: P12, content: docFor(P12, [{ code: "print('TM', 12)" }]), mode: "python" });
+    const P14 = "/notes/pr-held-close.ipynb", P15 = "/notes/pr-held-switch.ipynb";
+    await call("workspace.create", { path: P14, content: docFor(P14, [{ code: "print('HS', 14)" }]), mode: "python" });
+    await call("workspace.create", { path: P15, content: docFor(P15, [{ code: "print('HS', 15)" }]), mode: "python" });
+    const P13 = "/notes/pr-closed-mount.ipynb";
+    await call("workspace.create", { path: P13, content: docFor(P13, [{ code: "print('CM', 13)" }]), mode: "python" });
     const P10 = "/notes/pr-turnended.ipynb";
     await call("workspace.create", { path: P10, content: docFor(P10, [{ code: "print('TE', 10)" }]), mode: "python" });
     const t8 = `t${++turnN}`;
@@ -761,16 +798,99 @@ try {
     const t9 = `t${++turnN}`;
     event(t9, { type: "turn_started" });
     await sleep(300);
-    // (PR9: the run held; the person switches to another chat meanwhile: the run ends, stopped, nothing saved)
-    await ev(`(window.__held = false, window.__runHold = (st) => st === "page" ? new Promise((r) => { window.__held = true; window.__rel = r; }) : undefined, true)`);
-    const p9 = runIn(P9, t9);
+    // (a hold at `stage`: "mount", before the pane's notebook is read; "page", after it is read, before any cell)
+    const holdAt = (stage) => ev(`(window.__held = false, window.__runHold = (st) => st === ${JSON.stringify(stage)} ? new Promise((r) => { window.__held = true; window.__rel = r; }) : undefined, true)`);
+    const release = () => ev(`(window.__rel?.(), window.__runHold = () => undefined, true)`);
+    const unsaved = (f, out) => !JSON.stringify(f.content.json.cells[0].outputs ?? []).includes(out);
+    // (PR12: held while the pane mounts; the turn ends meanwhile, the chat still shown: the run ends, stopped, nothing run)
+    await holdAt("mount");
+    const p12 = runIn(P12, t9);
+    const held12 = await until(`window.__held === true`, 30000).catch(() => false);
+    event(t9, { type: "turn_finished", outcome: "completed" });
+    await sleep(300);
+    await release();
+    const r12 = await p12;
+    const f12 = await call("workspace.read", { path: P12 });
+    ok(held12 && r12?.ended === "stopped" && !r12.cells && unsaved(f12, "TM 12"), "PR12: the turn ends while the pane mounts the notebook: the run ends, stopped, nothing run or saved", { held12, r12 });
+    // (PR9: held while the pane mounts; the person switches to another chat meanwhile, the turn still running: today's
+    //  run, its result returned, nothing saved)
+    const t9b = `t${++turnN}`;
+    event(t9b, { type: "turn_started" });
+    await sleep(300);
+    // (PR13: held while the pane mounts; the person closes the pane, the chat still shown: the run ends, stopped)
+    await holdAt("mount");
+    const p13 = runIn(P13, t9b);
+    const held13 = await until(`window.__held === true`, 30000).catch(() => false);
+    await until(`document.body.classList.contains('has-artifact')`, 10000).catch(() => false);
+    await ev(`document.querySelector('#close').click()`);
+    const closed13 = await until(`!document.body.classList.contains('has-artifact')`, 10000).catch(() => false);
+    await release();
+    const r13 = await p13;
+    const f13 = await call("workspace.read", { path: P13 });
+    ok(held13 && closed13 && r13?.ended === "stopped" && unsaved(f13, "CM 13"), "PR13: the pane closed while it mounts the notebook, the chat still shown: the run ends, stopped, nothing run or saved", { held13, closed13, r13 });
+    // (PR14, PR15: held while the pane mounts; the person types in it and another tab holds the workspace, so the pane's
+    //  save waits; then they close the pane (PR14: stopped) or switch chats (PR15: today's run). Either answers at once,
+    //  not when the other tab lets go (4 s after the click here))
+    const heldSave = async (P, turn, act) => {
+      await holdAt("mount");
+      const pr = runIn(P, turn);
+      const held = await until(`window.__held === true`, 30000).catch(() => false);
+      const shown = await until(`document.querySelector('#artifacts .tab.on')?.dataset.tab === ${JSON.stringify(P)} && !!document.querySelector('${PANE} .nb-root .cell textarea')`, 30000).catch(() => false);
+      await until(`(() => { const t = document.querySelector('${PANE} .nb-root .cell textarea'); t?.focus(); return !!t && document.activeElement === t; })()`, 10000).catch(() => false);
+      await send("Input.insertText", { text: "  # mine" });
+      await lockWorkspace();
+      await release();
+      // (today's run's stages, timed: when it began (its snapshot), apart from how long it then waits on the hold)
+      await ev(`(window.__stages = [], window.__runHold = (st) => void window.__stages.push([st, Date.now()]), 1)`);
+      await sleep(800);
+      const t0 = Date.now();
+      await ev(`(window.__clickAt = Date.now(), 1)`);
+      await ev(act);
+      await ev(`(setTimeout(() => window.__release?.(), 4000), 1)`);
+      const r = await pr;
+      const ms = Date.now() - t0;
+      const began = await ev(`(() => { const s = window.__stages.find(([st]) => st === "snapshot"); return s ? s[1] - window.__clickAt : null; })()`);
+      await ev(`(window.__runHold = () => undefined, 1)`);
+      await sleep(4500);
+      return { held, shown, r, ms, began };
+    };
+    const r14 = await heldSave(P14, t9b, `document.querySelector('#close').click()`);
+    await until(`!document.body.classList.contains('has-artifact')`, 15000).catch(() => false);
+    ok(r14.held && r14.shown && r14.r?.ended === "stopped" && r14.ms < 3500 && r14.began === null, "PR14: the pane closed while its save waits on another tab's hold, the run still mounting: stopped at once, not when the hold ends", r14);
+    await holdAt("mount");
+    const p9 = runIn(P9, t9b);
     const held9 = await until(`window.__held === true`, 30000).catch(() => false);
     await ev(`document.querySelector('#new').click()`);
     const left9 = await until(`!!document.querySelector('[data-try]')?.offsetParent`, 15000).catch(() => false);
-    await ev(`(window.__rel?.(), window.__runHold = () => undefined, true)`);
+    await release();
     const r9 = await p9;
     const f9 = await call("workspace.read", { path: P9 });
-    ok(held9 && left9 && r9?.ended === "stopped" && !JSON.stringify(f9.content.json.cells[0].outputs ?? []).includes("SW 9"), "PR9: the person switches chats while the run waits: the run ends, stopped, nothing saved", { held9, left9, r9 });
+    ok(held9 && left9 && today(r9, f9, "SW 9\n"), "PR9: the person switches chats while the pane mounts the notebook: today's run, its result, nothing saved (not stopped)", { held9, left9, r9 });
+    event(t9b, { type: "turn_finished", outcome: "completed" }, front);
+    // (PR9b: held after the pane read the notebook, before any cell; the person switches chats meanwhile: stopped)
+    await converse();
+    const t9c = `t${++turnN}`;
+    event(t9c, { type: "turn_started" });
+    await sleep(300);
+    await holdAt("page");
+    const p9b = runIn(P9b, t9c);
+    const held9b = await until(`window.__held === true`, 30000).catch(() => false);
+    await ev(`document.querySelector('#new').click()`);
+    const left9b = await until(`!!document.querySelector('[data-try]')?.offsetParent`, 15000).catch(() => false);
+    await release();
+    const r9b = await p9b;
+    const f9b = await call("workspace.read", { path: P9b });
+    ok(held9b && left9b && r9b?.ended === "stopped" && unsaved(f9b, "SB 9"), "PR9b: the person switches chats after the pane read the notebook, before any cell: the run ends, stopped, nothing saved", { held9b, left9b, r9b });
+    const c9 = conv;
+    // (PR15: in a chat of its own, with its own turn)
+    await converse();
+    const t15 = `t${++turnN}`;
+    event(t15, { type: "turn_started" });
+    await sleep(300);
+    const r15 = await heldSave(P15, t15, `document.querySelector('#new').click()`);
+    const f15 = await call("workspace.read", { path: P15 });
+    ok(r15.held && r15.shown && r15.r?.ended === "done" && r15.r.saved === "not saved: main" && r15.r.cells?.[0]?.out === "HS 15\n" && r15.began !== null && r15.began < 3500 && unsaved(f15, "HS 15"), "PR15: the person switches chats while the pane's save waits on another tab's hold, the run still mounting: today's run begins at once, not when the hold ends", { ...r15, f15: f15.content.json.cells[0] });
+    event(t15, { type: "turn_finished", outcome: "completed" }, conv);
     // (PR11: a notebook that asks to autorun (a reactive notebook's setting): the pane's isn't reactive, so the run is
     //  plain, each code cell once, in order, its own result; an error ends it, the cells after it not run, nothing rerun)
     await converse();
@@ -785,7 +905,7 @@ try {
     ok(r11?.ended === "error" && st11.join() === "ok,error,skipped" && r11.cells[0].out === "X 1\n" && /R11/.test(r11.cells[1].out ?? "") && !JSON.stringify(f11.content.json.cells[2].outputs ?? []).includes("AFTER") && String(n11[0]) === "1",
       "PR11: a notebook that asks to autorun runs plain in the pane: each cell once, in order, the error ends it, nothing after it run or rerun", { r11, n11 });
     event(t11, { type: "turn_finished", outcome: "completed" });
-    event(t9, { type: "turn_finished", outcome: "completed" }, front);
+    event(t9c, { type: "turn_finished", outcome: "completed" }, c9);
     event(tb, { type: "turn_finished", outcome: "completed" }, back);
   }
 
@@ -1001,6 +1121,123 @@ try {
     await sleep(2500);
     const late = await ev(`({ closedAt: window.__closedAt, roots: document.querySelectorAll('#artifacts .nb-root').length, nbs: document.querySelectorAll('.sbnb').length, open: document.body.classList.contains('has-artifact') })`);
     ok(late.closedAt === 0 && late.roots === 0 && late.nbs === 0 && !late.open, "a notebook closed while it opened leaves nothing behind (its late load and attach let go)", late);
+  }
+
+  // ======================================================================== chat.resume: a reload mid-turn
+  // (an agent that keeps each conversation's log: after a reload the running turn is away, not interrupted; the real
+  //  composer queues a message typed then (its button says Queue; no Stop, no Send now); the replay finishes the turn
+  //  with the agent's own end, and the queued message goes)
+  if (want("resume")) {
+    RESUME = true;
+    // (not remembered, "while this page is open": a reload then reconnects by itself from the page's reload record, A14,
+    //  as a person sees it; the earlier sections' remembered access is forgotten first)
+    await ev(`(localStorage.removeItem("sagebrush-grants"), true)`);
+    await pair({ remember: false, how: "page" });
+    await converse();
+    const tR = `t${++turnN}`;
+    event(tR, { type: "turn_started" });
+    event(tR, { type: "message_revised", message: "m1", revision: 1 });
+    event(tR, { type: "text_delta", message: "m1", revision: 1, text: "working on it" });
+    await until(`/working on it/.test(document.body.innerText)`);
+    resumes.length = 0;
+    // (a person's reload of the page itself: the ?pair= link it was opened with is gone from the address by then)
+    await ev(`(history.replaceState(null, "", location.pathname), true)`);
+    // (the agent's answer to the page's re-pair is held: the person types while the page is not connected yet)
+    holdHello = true;
+    const before = loads;
+    await send("Page.reload", {});
+    for (const t1 = Date.now(); loads === before && Date.now() - t1 < 20000; ) await sleep(50);
+    // (the agent ends a turn whose page went away, and logs that end; no page got it live)
+    logOnly(tR, { type: "turn_finished", outcome: "interrupted" });
+    await until(`/The connection to the agent was lost while this ran/.test(document.body.innerText)`);
+    const st = await ev(`({ connected: document.querySelector('#connect').textContent === 'Connected', send: document.querySelector('#send').textContent, stop: document.querySelector('#stop').hidden, sendNow: document.querySelector('#send-now').hidden, keys: document.querySelector('#keys').textContent, aria: document.querySelector('#send').getAttribute('aria-disabled') })`);
+    ok(!st.connected && st.send === "Queue" && st.stop && st.sendNow && st.keys === "queue" && st.aria === null, "resume: after a reload mid-turn, not connected yet: the turn is away; the composer's one button says Queue (no Stop, no Send now) and is enabled", st);
+    // (typed into the real composer while not connected, Shift+Enter)
+    // (a click into the composer's block brings its textarea; under load the block may not be laid out yet at the first
+    //  click, so click again until the textarea is there)
+    for (let k = 0; k < 20 && !(await ev(`!!document.querySelector('#editor textarea')`)); k++) {
+      const at = await ev(`(() => { const b = document.querySelector('#editor .mb-block'); if (!b) return null; const r = b.getBoundingClientRect(); return r.width && r.height ? [r.x + r.width / 2, r.y + r.height / 2] : null; })()`);
+      if (at) for (const type of ["mousePressed", "mouseReleased"]) await send("Input.dispatchMouseEvent", { type, x: at[0], y: at[1], button: "left", clickCount: 1 });
+      await sleep(150);
+    }
+    await until(`!!document.querySelector('#editor textarea')`);
+    await ev(`document.querySelector('#editor textarea').focus()`);
+    await send("Input.insertText", { text: "while away" });
+    const m0 = notes.filter((m) => m.method === "chat.message").length;
+    await key("Enter", { modifiers: 8, windowsVirtualKeyCode: 13, text: "\r" });
+    await until(`/1 queued/.test(document.querySelector('#queued').textContent)`);
+    await sleep(300);
+    ok(notes.filter((m) => m.method === "chat.message").length === m0 && !notes.some((m) => m.method === "chat.interrupt"), "resume: the message waits (1 queued): nothing sent, nothing interrupted", notes.slice(-3).map((m) => m.method));
+    // (the agent answers the re-pair: connected, the page asks for what it missed)
+    for (const t3 = Date.now(); !heldHello && Date.now() - t3 < 20000; ) await sleep(50);
+    heldHello?.();
+    await until(`document.querySelector('#connect').textContent === 'Connected'`, 20000);
+    for (const t3 = Date.now(); !resumes.length && Date.now() - t3 < 10000; ) await sleep(50);
+    ok(resumes.some((r) => r.conversation === conv && r.instance === LOG_INSTANCE && r.after > 0), "resume: connected again, the page asks for what it missed, from its last number, with the run", resumes);
+    answerResumes();
+    const t2 = Date.now();
+    while (!notes.some((m) => m.method === "chat.message" && m.params.text === "while away") && Date.now() - t2 < 10000) await sleep(50);
+    ok(notes.some((m) => m.method === "chat.message" && m.params.text === "while away" && m.params.conversation === conv), "resume: the replay says how the turn went, and the queued message goes", notes.slice(-3));
+    const end = await ev(`({ away: /The connection to the agent was lost/.test(document.body.innerText), interrupted: [...document.querySelectorAll('.status')].some((s) => s.textContent === 'Interrupted') })`);
+    ok(!end.away && end.interrupted, "resume: the turn shows the agent's own end, no longer away", end);
+    const tQ = `t${++turnN}`;
+    event(tQ, { type: "turn_started" });
+    event(tQ, { type: "turn_finished", outcome: "completed" });
+    // (step 2: the grant the page sends names its id, which an agent carries a turn on under)
+    const gch = notes.filter((m) => m.method === "grant.changed").at(-1)?.params;
+    ok(typeof gch?.id === "string" && /^[0-9a-f]{32}$/.test(gch.id), "resume: the page's grant names its id", gch);
+    // (step 2: a turn the agent kept running while the page was away: after the reload and the replay it is running
+    //  again, Stop shown, and the agent's later events finish it)
+    const tS = `t${++turnN}`;
+    event(tS, { type: "turn_started" });
+    event(tS, { type: "message_revised", message: "m2", revision: 1 });
+    event(tS, { type: "text_delta", message: "m2", revision: 1, text: "still at it" });
+    await until(`/still at it/.test(document.body.innerText)`);
+    resumes.length = 0;
+    holdHello = true;
+    const before2 = loads;
+    await send("Page.reload", {});
+    for (const t1 = Date.now(); loads === before2 && Date.now() - t1 < 20000; ) await sleep(50);
+    await until(`/The connection to the agent was lost while this ran/.test(document.body.innerText)`);
+    for (const t3 = Date.now(); !heldHello && Date.now() - t3 < 20000; ) await sleep(50);
+    heldHello?.();
+    await until(`document.querySelector('#connect').textContent === 'Connected'`, 20000);
+    for (const t3 = Date.now(); !resumes.length && Date.now() - t3 < 10000; ) await sleep(50);
+    answerResumes([tS]);
+    // (that turn's own view: its status line, no longer the lost connection's)
+    const turnJs = `[...document.querySelectorAll('.turn')].find((d) => /still at it/.test(d.textContent))`;
+    await until(`!!${turnJs} && !/The connection to the agent was lost/.test(${turnJs}.textContent)`);
+    const back = await ev(`({ stop: !document.querySelector('#stop').hidden, send: document.querySelector('#send').textContent, working: /Working/.test(${turnJs}.querySelector('.status')?.textContent ?? '') })`);
+    ok(back.stop && back.send === "Queue" && back.working, "resume (step 2): the agent says the turn still runs: it is running again, Stop shown", back);
+    event(tS, { type: "text_delta", message: "m2", revision: 1, text: " and done" });
+    event(tS, { type: "turn_finished", outcome: "completed" });
+    await until(`/still at it and done/.test(document.body.innerText) && document.querySelector('#stop').hidden`);
+    ok(true, "resume (step 2): its later live events finish it");
+    // (the connection lost with no reload (the agent's socket closes): the running turn shows away at once, no Stop;
+    //  the person's Reconnect brings it back, running, from the agent's replay)
+    const tL = `t${++turnN}`;
+    event(tL, { type: "turn_started" });
+    event(tL, { type: "message_revised", message: "m3", revision: 1 });
+    event(tL, { type: "text_delta", message: "m3", revision: 1, text: "long haul" });
+    const lostJs = `[...document.querySelectorAll('.turn')].find((d) => /long haul/.test(d.textContent))`;
+    await until(`!!${lostJs}`);
+    resumes.length = 0;
+    sock.close();
+    await until(`/The connection to the agent was lost while this ran/.test(${lostJs}?.textContent ?? '') && document.querySelector('#stop').hidden`, 15000);
+    ok(true, "resume (step 2): the connection lost without a reload: the turn shows away at once, no Stop");
+    await until(`[...document.querySelectorAll('button')].some((b) => b.checkVisibility() && /^Reconnect$/.test(b.textContent))`, 15000);
+    await ev(`[...document.querySelectorAll('button')].find((b) => b.checkVisibility() && /^Reconnect$/.test(b.textContent)).click()`);
+    await until(`document.querySelector('#connect').textContent === 'Connected'`, 20000);
+    for (const t3 = Date.now(); !resumes.length && Date.now() - t3 < 10000; ) await sleep(50);
+    answerResumes([tL]);
+    await until(`!/The connection to the agent was lost/.test(${lostJs}.textContent) && !document.querySelector('#stop').hidden`);
+    ok(true, "resume (step 2): Reconnect: the agent says it still runs: running again, Stop shown");
+    event(tL, { type: "turn_finished", outcome: "completed" });
+    await until(`document.querySelector('#stop').hidden`);
+    // (the sections after this pair with a stand-in without a log, as before: its events unnumbered)
+    RESUME = false;
+    await pair();
+    await converse();
   }
 
   // ======================================================================== LaTeX: the editor where the build has it
