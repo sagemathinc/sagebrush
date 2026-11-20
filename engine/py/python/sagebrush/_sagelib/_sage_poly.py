@@ -1382,6 +1382,9 @@ class Polynomial:
 
     def _integral(self):
         """(d, the integer coefficients of d * self)."""
+        # (a Python loop over the coefficients for gcd, content and factor:
+        # a follow-up moves it onto the engine's lcm, as products moved to
+        # qpoly_mul)
         if all(isinstance(a, int) for a in self._c):
             return 1, list(self._c)
         from math import lcm

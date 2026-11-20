@@ -3,8 +3,8 @@
 //! refused at n + 1 (the whole call: the reduction is metered).  Integers
 //! and halves reach about 5.5 10^5 output terms, refused past that by the
 //! reduction's meter; denominators whose D = L_a L_b has 2, 3 or 5 limbs by
-//! the transform's points (zmul's cap); sum x^i / i squared up to degree
-//! 2152, then by the reduction's meter.
+//! the transform's points (zmul's cap); sum x^i / i squared with up to
+//! 2152 terms (degree 2151), then by the reduction's meter.
 
 use sagebrush_arith::qpoly;
 

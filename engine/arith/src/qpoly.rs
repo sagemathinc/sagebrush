@@ -27,7 +27,7 @@
 use crate::coprime::{self, divexact_in_place, gcd_in_place, Fault, Meter};
 use crate::counted;
 use crate::zmul::{self, hex, mul_words_schoolbook, schoolbook_work, unpack_digits, SCHOOLBOOK_WORDS};
-use crate::zseries::{bl, INTERNAL_PREFIX};
+use crate::zseries::{bl, preview, INTERNAL_PREFIX};
 use sagebrush_bigint::ntt::{mul_words_local, mul_words_local_peak, mul_words_local_work};
 
 /// The reply's bytes (the reply is also within the peak; its own cap makes
@@ -158,7 +158,7 @@ pub fn scan(text: &str) -> Result<Factor<'_>, String> {
     if text.is_empty() {
         return Ok(f);
     }
-    let bad = |tok: &str| format!("{:?} is not a hex rational (-?(0|[1-9a-f][0-9a-f]*)(/[1-9a-f][0-9a-f]*)?)", &tok[..tok.len().min(40)]);
+    let bad = |tok: &str| format!("{:?} is not a hex rational (-?(0|[1-9a-f][0-9a-f]*)(/[1-9a-f][0-9a-f]*)?)", preview(tok, 40));
     for (i, tok) in text.split(',').enumerate() {
         if i & 0xfff == 0 {
             sagebrush_interrupt::check_coarse();
