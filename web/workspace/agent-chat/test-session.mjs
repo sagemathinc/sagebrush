@@ -598,6 +598,162 @@ const turnOf = (t, id) => t.entries.find((e) => e.kind === "turn" && e.turn_id =
   check(s2.current()?.id === "a", "a current that names no thread: the first", s2.current()?.id);
 }
 
+// step 3, Steer: with an agent that takes steers (chat.steer), a message while its turn runs goes into that turn, never
+// interrupting it; the agent's receipts mark it (steering, delivered, or queued: it runs next on the agent's side)
+{
+  const steerable = (sent = []) => ({ ...resumable("aaaaaaaaaaaaaaaa", sent), hello: { agent: { name: "Claude" }, features: ["chat.resume", "chat.steer"], log: { instance: "aaaaaaaaaaaaaaaa" } } });
+  const mk = (p) => {
+    const { h, host: hs } = host();
+    const s = new ChatSession(hs);
+    const sent = [];
+    h.pairing = p(sent);
+    const t = s.current();
+    s.submit("long job", "sent");
+    s.onAgent(...ev(t, 2, "T1", { type: "turn_started" }));
+    return { h, s, t, sent };
+  };
+  {
+    const { s, t, sent } = mk(steerable);
+    check(s.canSteer(t), "an agent that takes steers, its turn running: the thread can be steered");
+    const n = sent.length;
+    check(s.submit("go left", "steer"), "a steer is taken");
+    const out = sent.slice(n);
+    const u = t.entries.at(-1);
+    check(out.length === 1 && out[0][0] === "chat.message" && out[0][1].steer === true && out[0][1].text === "go left", "it goes to the agent at once as a steer, and nothing interrupts the turn", out);
+    check(u.kind === "user" && u.mode === "steer" && !u.receipt && s.isRunning(t), "shown as a steer, the turn still running", u);
+    const r = (seq, state, reason) => ["chat.receipt", { conversation: t.id, id: u.id, state, seq, turn_id: "T1", ...(reason ? { reason } : {}) }];
+    s.onAgent(...r(3, "steering"));
+    check(u.receipt === "steering", "the agent says it went in: steering", u);
+    s.onAgent(...r(4, "delivered"));
+    check(u.receipt === "delivered", "…and that Claude took it: delivered", u);
+    s.onAgent(...r(5, "steering"));
+    check(u.receipt === "delivered", "a later receipt never takes delivered back", u);
+    s.onAgent(...r(4, "queued"));
+    check(u.receipt === "delivered" && t.agent_seq === 5, "a receipt numbered at or below the last is applied once only", [u, t.agent_seq]);
+    s.onAgent("chat.receipt", { conversation: t.id, id: u.id, state: "lost", seq: 6 });
+    s.onAgent("chat.receipt", { conversation: t.id, id: "nobody", state: "queued", seq: 7 });
+    check(u.receipt === "delivered", "an unknown state, or a receipt for another message, changes nothing", u);
+  }
+  {
+    const { s, t, sent } = mk(steerable);
+    s.submit("then this", "steer");
+    const u = t.entries.at(-1);
+    s.onAgent("chat.receipt", { conversation: t.id, id: u.id, state: "queued", reason: "ended", seq: 3 });
+    check(u.receipt === "queued" && u.receipt_reason === "ended", "a steer the agent queued: queued, with why", u);
+    const n = sent.length;
+    s.onAgent(...ev(t, 4, "T1", { type: "turn_finished", outcome: "completed" }));
+    check(!sent.slice(n).some(([m]) => m === "chat.message"), "…and the page never sends it again: the agent runs it next", sent.slice(n));
+  }
+  {
+    const { s, t, sent } = mk((x) => resumable("aaaaaaaaaaaaaaaa", x));
+    check(!s.canSteer(t), "an agent that didn't say chat.steer: no steering");
+    const n = sent.length;
+    s.submit("later", "steer");
+    check(t.entries.at(-1).mode === "queued" && !sent.slice(n).some(([m]) => m === "chat.message"), "…a steer is queued on the page, as Queue would", t.entries.at(-1));
+  }
+  {
+    const { h, host: hs } = host();
+    const s = new ChatSession(hs);
+    const sent = [];
+    h.pairing = steerable(sent);
+    const t = s.current();
+    s.submit("hello", "steer");
+    check(t.entries.at(-1).mode === "sent" && sent.some(([m, q]) => m === "chat.message" && !q.steer), "with no turn running, a steer is a plain send", sent);
+  }
+  {
+    const { h, s, t } = mk(steerable);
+    h.pairing.notifyWhy = () => "disconnected";
+    const before = t.entries.length;
+    check(!s.submit("lost", "steer") && t.entries.length === before && h.notSent.length === 1, "a steer that can't go: not taken (the draft stays), and the host says why", h.notSent);
+  }
+  {
+    // (a replay: a steer sent from another tab, and its receipts, from the agent's log)
+    const { s, t } = mk(steerable);
+    s.onAgent("chat.replay", { conversation: t.id, instance: "aaaaaaaaaaaaaaaa", last: 4, done: true, running: ["T1"], events: [
+      { seq: 3, method: "chat.message", params: { conversation: t.id, id: "m9", text: "from elsewhere", author: "person", steer: true } },
+      { seq: 4, method: "chat.receipt", params: { conversation: t.id, id: "m9", state: "delivered", turn_id: "T1" } },
+    ] });
+    const u = t.entries.find((e) => e.kind === "user" && e.id === "m9");
+    check(u?.mode === "steer" && u.receipt === "delivered", "a replay shows another tab's steer, delivered", u);
+    const before = JSON.stringify(t);
+    s.onAgent("chat.replay", { conversation: t.id, instance: "aaaaaaaaaaaaaaaa", last: 5, done: true, running: ["T1"], events: [
+      { seq: 5, method: "chat.receipt", params: { conversation: t.id, id: "m9", state: "bogus" } },
+    ] });
+    check(JSON.stringify(t) === before, "a replay with a malformed receipt changes nothing", t);
+  }
+}
+
+// PAGE-STEER-1 (rejected), K3 (settled): a steer the agent refused (chat.rejected, after a grant boundary) is final,
+// shown as not delivered; one still without a receipt when a turn ends is no longer said to be on its way
+{
+  const steerable = (sent = []) => ({ ...resumable("aaaaaaaaaaaaaaaa", sent), hello: { agent: { name: "Claude" }, features: ["chat.resume", "chat.steer"], log: { instance: "aaaaaaaaaaaaaaaa" } } });
+  const mk = () => {
+    const { h, host: hs } = host();
+    const s = new ChatSession(hs);
+    h.pairing = steerable([]);
+    const t = s.current();
+    s.submit("long job", "sent");
+    s.onAgent(...ev(t, 2, "T1", { type: "turn_started" }));
+    s.submit("go left", "steer");
+    return { h, s, t, u: t.entries.at(-1) };
+  };
+  const rejected = (t, id, seq) => ["chat.rejected", { conversation: t.id, id, seq, reason: { code: "cancelled", message: "AGENT TEXT <b>x</b>" } }];
+  {
+    const { s, t, u } = mk();
+    s.onAgent("chat.receipt", { conversation: t.id, id: u.id, state: "steering", seq: 3 });
+    s.onAgent(...rejected(t, u.id, 4));
+    check(u.receipt === "rejected" && u.receipt_reason === "cancelled", "live: steering, then chat.rejected after a grant boundary: rejected (cancelled), the agent's message text not kept", u);
+    s.onAgent("chat.receipt", { conversation: t.id, id: u.id, state: "steering", seq: 5 });
+    s.onAgent("chat.receipt", { conversation: t.id, id: u.id, state: "delivered", seq: 6 });
+    s.onAgent(...rejected(t, u.id, 7));
+    check(u.receipt === "rejected", "rejected is final: a late steering or delivered changes nothing", u);
+  }
+  {
+    const { s, t, u } = mk();
+    s.onAgent("chat.receipt", { conversation: t.id, id: u.id, state: "delivered", seq: 3 });
+    s.onAgent(...rejected(t, u.id, 4));
+    check(u.receipt === "delivered", "delivered is final: a later rejection changes nothing", u);
+  }
+  {
+    const { h, s, t, u } = mk();
+    s.onAgent("chat.rejected", null);
+    s.onAgent("chat.rejected", { conversation: t.id, id: 7, seq: 3 });
+    s.onAgent(...rejected(t, "nobody", 4));
+    s.onAgent(...rejected(t, u.id, 5), { notThePairing: true });
+    check(!u.receipt, "malformed, unknown-id or wrong-pairing rejections change nothing", u);
+  }
+  {
+    const { s, t } = mk();
+    const u = t.entries.at(-1);
+    s.onAgent("chat.replay", { conversation: t.id, instance: "aaaaaaaaaaaaaaaa", last: 5, done: true, running: ["T1"], events: [
+      { seq: 3, method: "chat.receipt", params: { conversation: t.id, id: u.id, state: "steering", turn_id: "T1" } },
+      { seq: 4, method: "chat.rejected", params: { conversation: t.id, id: u.id, reason: { code: "cancelled", message: "x" } } },
+      { seq: 5, method: "chat.receipt", params: { conversation: t.id, id: u.id, state: "delivered", turn_id: "T1" } },
+    ] });
+    check(u.receipt === "rejected", "the same from a replay: rejected, and final", u);
+  }
+  {
+    // (busy: the agent refuses a steer over its waiting cap at once, unnumbered (it never logged it); final, kept
+    //  across a reload, never sent again)
+    const { h, s, t, u } = mk();
+    const n = h.pairing.sent.length;
+    s.onAgent("chat.rejected", { conversation: t.id, id: u.id, reason: { code: "busy", message: "too many" } });
+    check(u.receipt === "rejected" && u.receipt_reason === "busy", "busy, unnumbered: rejected (busy)", u);
+    s.onAgent(...ev(t, 3, "T1", { type: "turn_finished", outcome: "completed" }));
+    check(!h.pairing.sent.slice(n).some(([m]) => m === "chat.message"), "…never sent again, also after the turn ends", h.pairing.sent.slice(n));
+    const kept = JSON.parse(JSON.stringify(h.stored)).threads.find((x) => x.id === t.id).entries.find((e) => e.id === u.id);
+    check(kept?.receipt === "rejected" && kept.receipt_reason === "busy", "…and kept as rejected (it survives a reload)", kept);
+  }
+  {
+    const { s, t, u } = mk();
+    s.onAgent("chat.receipt", { conversation: t.id, id: u.id, state: "steering", seq: 3 });
+    s.onAgent(...ev(t, 4, "T1", { type: "turn_finished", outcome: "completed" }));
+    check(u.settled === true && u.receipt === "steering", "a steer still steering when its turn ends: settled (no longer on its way)", u);
+    s.onAgent("chat.receipt", { conversation: t.id, id: u.id, state: "queued", reason: "ended", seq: 5 });
+    check(u.receipt === "queued", "…and a queued receipt after it still says what became of it", u);
+  }
+}
+
 const failed = results.filter(([ok]) => !ok).length;
 console.log(failed ? `test-session: ${failed} failed` : `ok: the agents chat's session, ${results.length} checks`);
 process.exit(failed ? 1 : 0);

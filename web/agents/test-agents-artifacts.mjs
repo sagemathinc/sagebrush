@@ -58,7 +58,7 @@ let sock = null, nextId = 1, picHits = 0;
 let FEATURES = false;
 // (whether the stand-in keeps each conversation's log, chat.resume, as sagebrush-agent 0.7.2 does: its hello names the
 //  run, its events and the person's messages are numbered, and each chat.resume is held until the row answers it)
-let RESUME = false, logSeq = 0;
+let RESUME = false, logSeq = 0, STEER = false;
 const LOG_INSTANCE = "0123456789abcdef";
 const agentLog = [], resumes = [];
 // (a hello held unanswered while set: the page stays not connected until the row lets it through)
@@ -71,7 +71,7 @@ function message(ws, data) {
     sock = ws;
     // (it asks for run too: the page's grant must say run false whatever it asks; with RESUME, its session is 43
     //  base64url characters, as the agent's own, since the page's reload record checks the form)
-    ws.send(JSON.stringify({ jsonrpc: "2.0", id: m.id, result: { protocol: 1, agent: { name: "Claude", client: "claude-agent-sdk", version: "0.3.0" }, wants: { folders: ["/"], write: true, run: true }, features: [...(FEATURES ? ["notebook.edit", "edit.turn"] : []), "run.context", ...(RESUME ? ["chat.resume"] : [])], ...(RESUME ? { log: { instance: LOG_INSTANCE }, session: "BwcHBwcHBwcHBwcHBwcHBwcHBwcHBwcHBwcHBwcHBwc" } : {}) } }));
+    ws.send(JSON.stringify({ jsonrpc: "2.0", id: m.id, result: { protocol: 1, agent: { name: "Claude", client: "claude-agent-sdk", version: "0.3.0" }, wants: { folders: ["/"], write: true, run: true }, features: [...(FEATURES ? ["notebook.edit", "edit.turn"] : []), "run.context", ...(RESUME ? ["chat.resume"] : []), ...(STEER ? ["chat.steer"] : [])], ...(RESUME ? { log: { instance: LOG_INSTANCE }, session: "BwcHBwcHBwcHBwcHBwcHBwcHBwcHBwcHBwcHBwcHBwc" } : {}) } }));
   } else if (m.id && pending.has(m.id)) {
     const p = pending.get(m.id);
     pending.delete(m.id);
@@ -1222,6 +1222,7 @@ try {
     const lostJs = `[...document.querySelectorAll('.turn')].find((d) => /long haul/.test(d.textContent))`;
     await until(`!!${lostJs}`);
     resumes.length = 0;
+    STEER = true; // (the agent the page reconnects to takes steers: step 3, below)
     sock.close();
     await until(`/The connection to the agent was lost while this ran/.test(${lostJs}?.textContent ?? '') && document.querySelector('#stop').hidden`, 15000);
     ok(true, "resume (step 2): the connection lost without a reload: the turn shows away at once, no Stop");
@@ -1232,8 +1233,54 @@ try {
     answerResumes([tL]);
     await until(`!/The connection to the agent was lost/.test(${lostJs}.textContent) && !document.querySelector('#stop').hidden`);
     ok(true, "resume (step 2): Reconnect: the agent says it still runs: running again, Stop shown");
+    // (step 3, Steer: with an agent that takes steers, the running turn's composer says Steer, with Queue beside it;
+    //  Shift+Enter sends the message into the turn (steer: true), nothing interrupted; the agent's receipts show under it)
+    const sc = await ev(`({ send: document.querySelector('#send').textContent, second: document.querySelector('#send-now').textContent, keys: document.querySelector('#keys').textContent })`);
+    ok(sc.send === "Steer" && sc.second === "Queue" && sc.keys === "steer", "steer (step 3): a running turn of an agent that takes steers: Steer, with Queue beside it", sc);
+    await ev(`document.querySelector('#editor textarea')?.focus()`);
+    for (let k = 0; k < 20 && !(await ev(`document.activeElement === document.querySelector('#editor textarea')`)); k++) {
+      const at = await ev(`(() => { const b = document.querySelector('#editor .mb-block'); if (!b) return null; const r = b.getBoundingClientRect(); return r.width && r.height ? [r.x + r.width / 2, r.y + r.height / 2] : null; })()`);
+      if (at) for (const type of ["mousePressed", "mouseReleased"]) await send("Input.dispatchMouseEvent", { type, x: at[0], y: at[1], button: "left", clickCount: 1 });
+      await sleep(150);
+      await ev(`document.querySelector('#editor textarea')?.focus()`);
+    }
+    await send("Input.insertText", { text: "go left instead" });
+    await key("Enter", { modifiers: 8, windowsVirtualKeyCode: 13, text: "\r" });
+    for (const t4 = Date.now(); !notes.some((m) => m.method === "chat.message" && m.params.text === "go left instead") && Date.now() - t4 < 10000; ) await sleep(50);
+    const sm = notes.find((m) => m.method === "chat.message" && m.params.text === "go left instead");
+    ok(sm?.params.steer === true && sm.params.conversation === conv && !notes.some((m) => m.method === "chat.interrupt"), "steer (step 3): Shift+Enter sends it into the running turn, steer: true; nothing interrupted", sm?.params);
+    const receipt = (state) => {
+      const params = { conversation: conv, id: sm.params.id, state, turn_id: tL };
+      agentLog.push({ seq: ++logSeq, method: "chat.receipt", params });
+      sock.send(JSON.stringify({ jsonrpc: "2.0", method: "chat.receipt", params: { ...params, seq: logSeq } }));
+    };
+    const smJs = `[...document.querySelectorAll('.user')].find((d) => /go left instead/.test(d.textContent))`;
+    receipt("steering");
+    await until(`/Steering: Claude reads it at its next step/.test(${smJs}?.textContent ?? '')`);
+    receipt("delivered");
+    await until(`/Delivered to the running turn/.test(${smJs}?.textContent ?? '')`);
+    ok(!(await ev(`document.querySelector('#stop').hidden`)), "steer (step 3): the agent's receipts show under the message (steering, then delivered), the turn still running");
+    // (K4: the second button beside Steer is Queue: clicked, the message waits for the turn's end, nothing sent or
+    //  interrupted now; it goes once the turn finishes)
+    for (let k = 0; k < 20 && !(await ev(`document.activeElement === document.querySelector('#editor textarea')`)); k++) {
+      const at = await ev(`(() => { const b = document.querySelector('#editor .mb-block'); if (!b) return null; const r = b.getBoundingClientRect(); return r.width && r.height ? [r.x + r.width / 2, r.y + r.height / 2] : null; })()`);
+      if (at) for (const type of ["mousePressed", "mouseReleased"]) await send("Input.dispatchMouseEvent", { type, x: at[0], y: at[1], button: "left", clickCount: 1 });
+      await sleep(150);
+      await ev(`document.querySelector('#editor textarea')?.focus()`);
+    }
+    await send("Input.insertText", { text: "after this turn" });
+    const n4 = notes.length;
+    await ev(`document.querySelector('#send-now').click()`);
+    await until(`/1 queued/.test(document.querySelector('#queued').textContent)`);
+    await sleep(300);
+    ok(!notes.slice(n4).some((m) => m.method === "chat.message" || m.method === "chat.interrupt"), "steer (step 3): Queue beside Steer: the message waits (1 queued), nothing sent, nothing interrupted", notes.slice(n4).map((m) => m.method));
     event(tL, { type: "turn_finished", outcome: "completed" });
+    for (const t5 = Date.now(); !notes.some((m) => m.method === "chat.message" && m.params.text === "after this turn") && Date.now() - t5 < 10000; ) await sleep(50);
+    const qm = notes.find((m) => m.method === "chat.message" && m.params.text === "after this turn");
+    ok(qm && !qm.params.steer, "steer (step 3): …and the queued message goes once the turn has finished, as a plain message", qm?.params);
+    if (qm) { const tQ2 = `t${++turnN}`; event(tQ2, { type: "turn_started" }); event(tQ2, { type: "turn_finished", outcome: "completed" }); }
     await until(`document.querySelector('#stop').hidden`);
+    STEER = false;
     // (the sections after this pair with a stand-in without a log, as before: its events unnumbered)
     RESUME = false;
     await pair();

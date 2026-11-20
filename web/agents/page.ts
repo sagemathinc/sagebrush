@@ -214,7 +214,7 @@ function renderThread() {
   for (const entry of thread.entries) {
     const eid = entry.kind === "user" ? entry.id : entry.turn_id;
     seen.add(eid);
-    const key = entry.kind === "user" ? `${entry.mode}` : JSON.stringify([entry.parts, entry.tools, entry.attention, entry.state, entry.error, !!entry.away]);
+    const key = entry.kind === "user" ? `${entry.mode}|${entry.receipt ?? ""}|${!!entry.settled}` : JSON.stringify([entry.parts, entry.tools, entry.attention, entry.state, entry.error, !!entry.away]);
     let r = rendered.get(eid);
     if (!r || r.key !== key) {
       const node = entry.kind === "user" ? userNode(entry) : turnNode(thread, entry);
@@ -869,7 +869,7 @@ function mountTexFrame(path: string, box: HTMLElement): FileHost {
 }
 
 function renderComposer() {
-  renderComposerState(isRunning(current()), queues.get(current().id)?.length ?? 0, session.isAway(current()));
+  renderComposerState(isRunning(current()), queues.get(current().id)?.length ?? 0, session.isAway(current()), session.canSteer(current()));
   renderConn();
 }
 

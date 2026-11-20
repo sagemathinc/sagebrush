@@ -41,6 +41,13 @@ export interface SessionHost {
 const id = () => Math.random().toString(36).slice(2, 10);
 /** One of the agent's log numbers: a positive safe integer. */
 const seqOk = (v: unknown): v is number => Number.isSafeInteger(v) && (v as number) > 0;
+/** A chat.rejected as a receipt: "rejected", with why as one of the agent's codes this page words (busy: too many
+ *  messages waiting; anything else: the turn ended), never its message text. */
+const rejection = (params: unknown) => {
+  const q = (params && typeof params === "object" ? params : {}) as { reason?: { code?: unknown } };
+  return { ...q, state: "rejected", reason: q.reason?.code === "busy" ? "busy" : "cancelled" };
+};
+const receiptOk = (v: unknown): v is NonNullable<UserEntry["receipt"]> => v === "steering" || v === "delivered" || v === "queued";
 
 export class ChatSession {
   readonly state: Saved;
@@ -153,8 +160,16 @@ export class ChatSession {
   emit(thread: Thread, turn_id: string, d: Draft, replayed = false) {
     const e = { ...d, seq: thread.applied_seq + 1, turn_id } as TurnEvent;
     apply(thread, e);
+    // (a turn ended: a steer still waiting for its receipt is no longer said to be on its way)
+    if (d.type === "turn_finished") for (const x of thread.entries) if (x.kind === "user" && x.mode === "steer" && x.receipt !== "delivered" && x.receipt !== "rejected" && x.receipt !== "queued") x.settled = true;
     this.host.emitted(thread, d, replayed);
     this.save();
+  }
+
+  /** Whether a message to this thread now can steer its running turn: the turn is the paired agent's, running, and
+   *  that agent said it takes steers (chat.steer). */
+  canSteer(thread: Thread): boolean {
+    return this.live() && this.liveRunning.has(thread.id) && !this.isAway(thread) && !!this.host.pairing()?.hello?.features?.includes("chat.steer");
   }
 
   /** The person's message in the current thread: false when it can't be taken (the draft stays). */
@@ -167,11 +182,21 @@ export class ChatSession {
     // (a turn away: no one to interrupt, so a message waits for its end, which the agent's log says once connected)
     const away = !busy && this.isAway(thread);
     if (away && mode === "sent") mode = "queued";
+    // (a steer only where it can go into the running turn now; otherwise as Queue would be, or a send with no turn)
+    if (mode === "steer" && !this.canSteer(thread)) mode = busy || away ? "queued" : "sent";
     if (mode === "queued" && !busy && !away) mode = "sent";
     const entry: UserEntry = { kind: "user", id: id(), text, mode, time: Date.now() };
     thread.entries.push(entry);
     if (thread.title === "New chat") thread.title = text.split("\n")[0].slice(0, 48);
-    if (mode === "queued") {
+    if (mode === "steer") {
+      // (into the running turn, never interrupting it: the agent's receipts say what became of it)
+      const sent = this.host.pairing()?.notifyWhy("chat.message", { conversation: thread.id, id: entry.id, author: "person", text: entry.text, steer: true });
+      if (sent !== "ok") {
+        thread.entries.pop();
+        this.host.notSent(this.host.pairing()?.link && sent === "full" ? "full" : this.host.pairing()?.link && sent === "over" ? "over" : "disconnected");
+        return false;
+      }
+    } else if (mode === "queued") {
       this.queues.set(thread.id, [...(this.queues.get(thread.id) ?? []), entry]);
     } else if (mode === "sent" && busy) {
       // Sending while a turn runs interrupts it, as in Claude Code; this goes first once it has stopped.
@@ -257,6 +282,8 @@ export class ChatSession {
   onAgent(method: string, params: unknown, from?: AgentPairing) {
     if (from !== undefined && from !== this.host.pairing()) return;
     if (method === "chat.replay") return this.onReplay(params);
+    if (method === "chat.receipt") return this.onReceipt(params, false);
+    if (method === "chat.rejected") return this.onReceipt(rejection(params), false);
     if (method !== "turn.event") return;
     const p = params as { conversation?: unknown } | null;
     const thread = this.state.threads.find((t) => t.id === p?.conversation);
@@ -272,6 +299,35 @@ export class ChatSession {
       const { seq: _drop, ...rest } = params as Record<string, unknown>;
       this.agentEvent(thread, rest, false);
     }
+  }
+
+  /** A steer's receipt, live or replayed: it marks the person's steer with what the agent says became of it. Only a
+   *  receipt for a steer this thread has, with a known state; numbered (in the run the hello names) where the agent
+   *  keeps a log, once. A "queued" steer runs next on the agent's side: the page never sends it again. */
+  private onReceipt(params: unknown, replayed: boolean) {
+    const p = params as { conversation?: unknown; id?: unknown; state?: unknown; reason?: unknown; seq?: unknown } | null;
+    const thread = this.state.threads.find((t) => t.id === p?.conversation);
+    if (!thread || !p || typeof p.id !== "string" || !(receiptOk(p.state) || p.state === "rejected")) return;
+    if (!replayed) {
+      const instance = this.resumable();
+      // (numbered where the agent keeps a log; a refusal it never logged, "busy", comes unnumbered)
+      if (instance && !(p.state === "rejected" && p.seq === undefined)) {
+        if (!seqOk(p.seq)) return;
+        if (thread.agent_instance !== instance) this.newRun(thread, instance);
+      }
+    }
+    if (seqOk(p.seq)) {
+      if (p.seq <= (thread.agent_seq ?? 0)) return;
+      thread.agent_seq = p.seq;
+    }
+    const entry = thread.entries.find((e): e is UserEntry => e.kind === "user" && e.id === p.id && e.mode === "steer");
+    // ("delivered" and "rejected" are final: no late or repeated receipt brings a steer back)
+    if (entry && entry.receipt !== "delivered" && entry.receipt !== "rejected") {
+      entry.receipt = p.state;
+      if (typeof p.reason === "string") entry.receipt_reason = p.reason.slice(0, 16);
+    }
+    this.save();
+    if (!replayed) this.host.changed(true);
   }
 
   /** The run named by the live pairing's hello, if that agent said it keeps a log (chat.resume); else undefined. */
@@ -330,6 +386,8 @@ export class ChatSession {
       const q = x.params as Record<string, unknown>;
       if (q.conversation !== thread.id) return false;
       if (x.method === "chat.message") return q.author === "person" && typeof q.id === "string" && typeof q.text === "string";
+      if (x.method === "chat.receipt") return typeof q.id === "string" && receiptOk(q.state);
+      if (x.method === "chat.rejected") return typeof q.id === "string";
       return true;
     };
     if (!p.events.every(ok)) return;
@@ -341,12 +399,14 @@ export class ChatSession {
     for (const e of p.events as Entry[]) {
       if (e.seq <= (thread.agent_seq ?? 0)) continue;
       if (e.method === "turn.event") this.agentEvent(thread, { ...e.params, seq: e.seq }, true);
+      else if (e.method === "chat.receipt") this.onReceipt({ ...e.params, seq: e.seq }, true);
+      else if (e.method === "chat.rejected") this.onReceipt({ ...rejection(e.params), seq: e.seq }, true);
       else {
         thread.agent_seq = e.seq;
         const m = e.params as { id: string; text: string };
         // (a message the person sent from another tab: shown as sent; never queued again, never sent again)
         if (e.method === "chat.message" && !thread.entries.some((x) => x.kind === "user" && x.id === m.id)) {
-          thread.entries.push({ kind: "user", id: m.id, text: m.text, mode: "sent", time: Date.now() });
+          thread.entries.push({ kind: "user", id: m.id, text: m.text, mode: (e.params as { steer?: unknown }).steer === true ? "steer" : "sent", time: Date.now() });
         }
       }
     }
