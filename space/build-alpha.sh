@@ -1,8 +1,10 @@
 #!/usr/bin/env bash
 # The whitespace's rough alpha as a static site: the whole Sagebrush site (the Agents page, its workspace, the engine)
-# with the space viewer at /space/, built into web/dist, ready for a static host such as Cloudflare Pages. Run from
-# anywhere in a checkout of space-prototype; needs node, pnpm and bun (1.3 or later). Nothing is deployed here.
+# with the space viewer at /space/, built into web/dist and copied to space/site/public, the assets of the Worker that
+# serves https://space.sagebrush.cloud (space/site/cloudflare.config.ts). Run from anywhere in a checkout of
+# space-prototype; needs node, pnpm and bun (1.3 or later). Nothing is deployed here; then:
 #   space/build-alpha.sh
+#   cd space/site && npm ci && npx cf deploy --dry-run && npx cf deploy
 set -euo pipefail
 cd "$(dirname "$0")/.."
 
@@ -18,6 +20,9 @@ bun web/csp.ts                       # web/dist/_headers: COOP/COEP everywhere, 
 # an alpha isn't for search engines
 printf 'User-agent: *\nDisallow: /\n' > web/dist/robots.txt
 rm -f web/dist/sitemap.xml
+# (the Worker's notFoundHandling "404-page": a plain page, no script)
+printf '<!doctype html>\n<html lang="en"><head><meta charset="utf-8"><meta name="robots" content="noindex"><title>Not found</title></head>\n<body style="font: 16px/1.5 system-ui, sans-serif; margin: 3em">Not found. <a href="/agents/">The Agents page</a> · <a href="/space/">The space</a></body></html>\n' > web/dist/404.html
+bun web/csp.ts                       # (again: the 404 page gets its rule)
 
 # checks: the parts the alpha needs, and a static host's limits (Cloudflare Pages: 25 MiB a file, 20,000 files)
 fail() { echo "build-alpha: $*" >&2; exit 1; }
@@ -31,4 +36,8 @@ big=$(find web/dist -type f -size +25M | head -1)
 [ -z "$big" ] || fail "$big is over 25 MiB"
 n=$(find web/dist -type f | wc -l)
 [ "$n" -le 20000 ] || fail "$n files (over 20,000)"
-echo "build-alpha: web/dist ready: $n files, $(du -sh web/dist | cut -f1), commit $(git rev-parse --short HEAD)"
+# the Worker's assets: web/dist as it is
+rm -rf space/site/public
+cp -a web/dist space/site/public
+cmp -s web/dist/_headers space/site/public/_headers || fail "space/site/public/_headers differs from web/dist's"
+echo "build-alpha: web/dist and space/site/public ready: $n files, $(du -sh web/dist | cut -f1), commit $(git rev-parse --short HEAD)"

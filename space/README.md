@@ -79,7 +79,7 @@ Over this connection Claude has the web and your Sagebrush files, not your disk.
 
 ## The rough alpha (a static site)
 
-`space/build-alpha.sh` builds the whole site with the space into `web/dist` (from clean, with checks), ready for a static host that applies `web/dist/_headers` (Cloudflare Pages does): those headers give every page COOP/COEP, which the engine's interrupt needs, and each page its CSP. The engine, its worker and the space are all in `web/dist`; nothing is fetched from elsewhere. The space says "rough alpha" in its corner, and the site isn't indexed (`robots.txt`).
+`space/build-alpha.sh` builds the whole site with the space into `web/dist` (from clean, with checks) and copies it to `space/site/public`, the assets of the Worker that serves https://space.sagebrush.cloud (`space/site/cloudflare.config.ts`: static assets only, as sagebrush.space is served; deploy with `cd space/site && npm ci && npx cf deploy`). Cloudflare applies `_headers`: every page gets COOP/COEP, which the engine's interrupt needs, and its CSP. The engine, its worker and the space are all in `web/dist`; nothing is fetched from elsewhere. The space says "rough alpha" in its corner, and the site isn't indexed (`robots.txt`).
 
 To use the Agents page there, start the agent with that site's origin, e.g. for https://space.sagebrush.cloud:
 
