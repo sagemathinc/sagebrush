@@ -521,6 +521,21 @@
   "owner": "zpoly_divrem",
   "reason": "zpoly_divrem's derived sizes, plumbing (the ledger's and meter's limits, the plan's sizes) or a test assertion: refuses nothing itself"
  },
+ "engine/arith/src/pdivrem/tests.rs :: reply_bytes_walks_a_zero_prefix_once :: let led = Words::new(u64::MAX / 4); #0": {
+  "class": "none",
+  "owner": "zpoly_divrem",
+  "reason": "zpoly_divrem's derived sizes, plumbing (the ledger's and meter's limits, the plan's sizes) or a test assertion: refuses nothing itself"
+ },
+ "engine/arith/src/pdivrem/tests.rs :: reply_bytes_walks_a_zero_prefix_once :: let mut m = Meter::new(u64::MAX); #0": {
+  "class": "none",
+  "owner": "zpoly_divrem",
+  "reason": "zpoly_divrem's derived sizes, plumbing (the ledger's and meter's limits, the plan's sizes) or a test assertion: refuses nothing itself"
+ },
+ "engine/arith/src/pdivrem/tests.rs :: reply_bytes_walks_a_zero_prefix_once :: let mut m = Meter::new(u64::MAX); #1": {
+  "class": "none",
+  "owner": "zpoly_divrem",
+  "reason": "zpoly_divrem's derived sizes, plumbing (the ledger's and meter's limits, the plan's sizes) or a test assertion: refuses nothing itself"
+ },
  "engine/arith/src/pdivrem/tests.rs :: run_q :: fn run_q(a: &str, b: &str, limit: Option<u64>) -> (Result<u64, DivFault>, u64, Vec<(&'static str, u64)>) { #0": {
   "class": "none",
   "owner": "qpoly_divrem",

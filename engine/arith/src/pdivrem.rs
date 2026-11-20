@@ -316,18 +316,19 @@ fn lead_zeros(a: &Arena, m: &mut Meter) -> Result<usize, DivFault> {
 /// in 4096-token chunks; an overflow is the memory refusal.
 pub fn reply_bytes(dv: &Divided, m: &mut Meter) -> Result<u64, DivFault> {
     let _p = sagebrush_interrupt::enter("divrem bytes");
+    // (the kept tokens summed from the end, as emit writes them: the only
+    // walk over the top zeros is lead_zeros', charged and polled)
     let list = |a: &Arena, d: Option<&Arena>, m: &mut Meter| -> Result<u64, DivFault> {
         let lead = lead_zeros(a, m)?;
-        let mut dens = d.map(|d| d.fwd().skip(lead));
+        let kept = a.nt - lead;
+        let mut dens = d.map(|d| d.rev().take(kept));
         let mut total = 0u64;
-        let mut count = 0u64;
-        for (i, (x, neg)) in a.fwd().skip(lead).enumerate() {
-            walk_charge(i, a.nt - lead, m)?;
+        for (i, (x, neg)) in a.rev().take(kept).enumerate() {
+            walk_charge(i, kept, m)?;
             let den = dens.as_mut().and_then(|it| it.next()).map(|(y, _)| y);
             total = total.checked_add(token_bytes(x, neg, den)).ok_or(DivFault::Memory)?;
-            count += 1;
         }
-        total.checked_add(count.saturating_sub(1)).ok_or(DivFault::Memory)
+        total.checked_add((kept as u64).saturating_sub(1)).ok_or(DivFault::Memory)
     };
     let q = list(&dv.q, dv.qd.as_ref(), m)?;
     let r = list(&dv.r, dv.rd.as_ref(), m)?;

@@ -566,10 +566,11 @@ fn division_paths_allocate_only_through_the_ledger_or_fallible_fixed_rows() {
     }
 }
 
-/// reply_bytes walks each list's top zeros and then its kept tokens, one
-/// unit a token, pre-charged and polled in 4096-token chunks (the zeros'
-/// walk pre-charges its chunk): for lists under 4096 tokens, 2 nt - lead per
-/// list; a meter one unit short refuses inside it.
+/// reply_bytes walks each list's top zeros (lead_zeros), then its kept
+/// tokens from the end, one unit a token, pre-charged and polled in
+/// 4096-token chunks (the zeros' walk pre-charges its chunk): for lists under
+/// 4096 tokens, 2 nt - lead per list; a meter one unit short refuses inside
+/// it.
 #[test]
 fn reply_bytes_is_charged_per_token() {
     let a = (0..=3000).map(|i| format!("{:x}", (i * 7919) % 97 + 1)).collect::<Vec<_>>().join(",");
@@ -584,4 +585,27 @@ fn reply_bytes_is_charged_per_token() {
     reply_bytes(&dv, &mut m).unwrap();
     assert_eq!(m.used() - before, want);
     assert_eq!(reply_bytes(&dv, &mut Meter::new(want - 1)), Err(DivFault::Work));
+}
+
+/// A large zero prefix: 200,000 top zeros in q (and an empty r).  reply_bytes
+/// walks them once (lead_zeros), charged and polled, and never again: the
+/// arena entries visited equal the units charged, 200,000; one unit short
+/// refuses.  (The kept tokens are summed from the end, so no walk steps over
+/// the prefix a second time.)
+#[test]
+fn reply_bytes_walks_a_zero_prefix_once() {
+    let led = Words::new(u64::MAX / 4);
+    let mut m = Meter::new(u64::MAX);
+    let mut q = Arena::new(&led, "q arena", &mut m).unwrap();
+    for _ in 0..200_000 {
+        q.push(&[], false, &mut m).unwrap();
+    }
+    let r = Arena::new(&led, "r arena", &mut m).unwrap();
+    let dv = Divided { q, r, qd: None, rd: None };
+    let mut m = Meter::new(u64::MAX);
+    crate::ledger::VISITS.with(|c| c.set(0));
+    assert_eq!(reply_bytes(&dv, &mut m), Ok(22));
+    let visits = crate::ledger::VISITS.with(|c| c.get());
+    assert_eq!((visits, m.used()), (200_000, 200_000), "each entry visited once, each visit charged");
+    assert_eq!(reply_bytes(&dv, &mut Meter::new(199_999)), Err(DivFault::Work));
 }
