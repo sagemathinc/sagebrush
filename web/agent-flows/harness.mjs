@@ -12,9 +12,20 @@ import { mkdtempSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { createInterface } from "node:readline";
-import { randomBytes } from "node:crypto";
+import { createHash, randomBytes } from "node:crypto";
 import { devtoolsPort } from "../test-port.mjs";
-import { cellHash } from "../workspace/notebook-edit.ts";
+// (a notebook cell's hash as the page computes it for an edit by cell, web/workspace/notebook-edit.ts's cellHash: the
+//  sha256 of the cell's canonical JSON in the form the notebook keeps it; in plain JS, so the harness loads under node)
+const canonical = (v) => Array.isArray(v) ? `[${v.map(canonical).join(",")}]` : v && typeof v === "object" ? `{${Object.keys(v).sort().filter((k) => v[k] !== undefined).map((k) => `${JSON.stringify(k)}:${canonical(v[k])}`).join(",")}}` : JSON.stringify(v) ?? "null";
+const cellForm = (c) => {
+  const type = c?.type ?? "code";
+  const out = { id: c?.id, ...(type === "code" ? {} : { type }), code: c?.code ?? "" };
+  if (type === "code") { out.outputs = Array.isArray(c?.outputs) ? c.outputs : []; out.n = c?.n == null ? null : String(c.n); if (c?.ms != null) out.ms = c.ms; }
+  if (type === "markdown" && c?.attachments) out.attachments = c.attachments;
+  if (c?.metadata) out.metadata = c.metadata;
+  return out;
+};
+const cellHash = (c) => createHash("sha256").update(canonical(cellForm(c)), "utf8").digest("hex");
 
 const here = new URL(".", import.meta.url).pathname;
 const SB_SRC = join(here, "../../engine/py/python/sagebrush");
@@ -138,6 +149,7 @@ export async function allow(page, grant) {
 // ---- surface mcp: sagebrush-mcp's Server, one JSON line each way, each call in its own thread
 const MCP_DRIVER = `
 import io, json, os, sys, threading, types
+
 src = os.environ["SB_SRC"]
 pkg = types.ModuleType("sagebrush"); pkg.__path__ = [src]; sys.modules["sagebrush"] = pkg
 from sagebrush import mcp_server as M
