@@ -18,6 +18,7 @@
 // products use them); re-exported here
 pub use sagebrush_bigint::{nmod, ntt};
 pub mod coprime;
+mod invdiv;
 mod counted;
 pub mod crt;
 pub mod nmod_poly;
