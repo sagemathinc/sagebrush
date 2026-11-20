@@ -46,9 +46,17 @@ export interface UserEntry {
   kind: "user";
   id: string;
   text: string;
-  // "sent": to the agent now; "queued": after the running turn; "note": never sent
-  mode: "sent" | "queued" | "note";
+  // "sent": to the agent now; "queued": after the running turn; "note": never sent; "steer": into the running turn
+  mode: "sent" | "queued" | "note" | "steer";
   time: number;
+  // (a steer's receipt, as the agent says it: "steering" (it went in), "delivered" (Claude took it), "queued" (it runs
+  //  next instead, with why: "ended", the turn ended first; "codex", that agent takes it after the turn; "idle")
+  //  and, on the page: "rejected", the agent refused it (chat.rejected: its turn ended at a grant's end); "delivered" and
+  //  "rejected" are final)
+  receipt?: "steering" | "delivered" | "queued" | "rejected";
+  receipt_reason?: string;
+  // (a steer still without a receipt when a turn ended: no longer said to be on its way)
+  settled?: boolean;
 }
 
 export interface ToolCall {

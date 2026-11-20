@@ -12,13 +12,15 @@ export interface ComposerHooks {
   typeset(el: Element): void;
 }
 
-// (whether the thread shown has a turn running, as last rendered: then the primary action queues, never interrupts)
+// (whether the thread shown has a turn running, as last rendered: then the primary action steers it where its agent
+//  takes steers, and queues otherwise; it never interrupts)
 let running = false;
+let steer = false;
 
-/** The editor in #editor (Shift+Enter sends, or queues while a turn runs; Alt+Enter queues; Ctrl/Cmd+Enter adds a
- *  note) and the buttons' wiring. Only Send now and Stop interrupt the agent. */
+/** The editor in #editor (Shift+Enter sends, or while a turn runs steers it (queues where the agent can't be steered);
+ *  Alt+Enter queues; Ctrl/Cmd+Enter adds a note) and the buttons' wiring. Only Send now and Stop interrupt the agent. */
 export function mountComposer(h: ComposerHooks): BlockEditor {
-  const primary = () => h.submit(running ? "queued" : "sent");
+  const primary = () => h.submit(running ? (steer ? "steer" : "queued") : "sent");
   const editor = new BlockEditor("", {
     render: h.render,
     typeset: h.typeset,
@@ -33,22 +35,27 @@ export function mountComposer(h: ComposerHooks): BlockEditor {
   });
   $("#editor").append(editor.el);
   $("#send").onclick = primary;
-  $("#send-now").onclick = () => h.submit("sent");
+  // (beside Steer, the second button queues; beside Queue, it is Send now, which interrupts)
+  $("#send-now").onclick = () => h.submit(steer ? "queued" : "sent");
   $("#note").onclick = () => h.submit("note");
   $("#stop").onclick = () => h.stop();
   return editor;
 }
 
-/** The buttons for the thread shown: Send, or while a turn runs Queue with Send now and Stop beside it; and how many
- *  are queued. `away`: the chat's last turn lost its agent's connection, and a message waits for that turn's end: the
- *  primary action queues, with no one to interrupt or stop (no Send now, no Stop). */
-export function renderComposerState(busy: boolean, queued: number, away = false) {
+/** The buttons for the thread shown: Send; while a turn runs, Steer with Queue and Stop beside it where the agent takes
+ *  steers (`canSteer`), else Queue with Send now and Stop; and how many are queued. `away`: the chat's last turn lost
+ *  its agent's connection, and a message waits for that turn's end: the primary action queues, with no one to
+ *  interrupt or stop (no Send now, no Stop). */
+export function renderComposerState(busy: boolean, queued: number, away = false, canSteer = false) {
   running = busy || away;
-  $("#send").textContent = busy || away ? "Queue" : "Send";
-  $("#send").title = busy ? "Send after the current turn (Shift+Enter)" : away ? "Send once the agent says how its last turn went (Shift+Enter)" : "Send (Shift+Enter)";
+  steer = busy && canSteer;
+  $("#send").textContent = steer ? "Steer" : busy || away ? "Queue" : "Send";
+  $("#send").title = steer ? "Send to the running turn: Claude reads it at its next step (Shift+Enter)" : busy ? "Send after the current turn (Shift+Enter)" : away ? "Send once the agent says how its last turn went (Shift+Enter)" : "Send (Shift+Enter)";
   $("#send-now").hidden = !busy;
+  $("#send-now").textContent = steer ? "Queue" : "Send now";
+  $("#send-now").title = steer ? "Send after the current turn (Alt+Enter)" : "Interrupt the agent and send this now";
   $("#stop").hidden = !busy;
-  $("#keys").textContent = busy || away ? "queue" : "send";
+  $("#keys").textContent = steer ? "steer" : busy || away ? "queue" : "send";
   $("#queued").textContent = queued ? `${queued} queued` : "";
 }
 
