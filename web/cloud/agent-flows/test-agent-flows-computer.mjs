@@ -46,7 +46,8 @@ try {
   process.exitCode = 1;
 } finally {
   await page?.close().catch(() => page?.killSync());
-  await site?.close();
+  // (the site's end: what failed or hung there fails the run, never swallowed)
+  for (const f of (await site?.close()) ?? []) { console.log(`FAIL the site's end: ${f}`); process.exitCode = 1; }
 }
 console.log("\n---- agent flows on the computer surface");
 for (const r of results) {
@@ -55,5 +56,5 @@ for (const r of results) {
   else console.log(`${r.failures.length ? "FAIL" : "ok  "} ${r.id} on computer (${r.s} s)${r.failures.length ? ": " + r.failures.length + " failed check(s)" : ""}`);
 }
 const failed = results.filter((r) => r.failures?.length), gaps = failed.filter((r) => r.gap);
-console.log(failed.length ? `FAIL: ${failed.length} of ${results.length} case runs${gaps.length ? ` (${gaps.length} of them with a declared known gap)` : ""}` : process.exitCode ? "FAIL: the harness didn't run its cases" : `ok: ${results.length} case runs`);
+console.log(failed.length ? `FAIL: ${failed.length} of ${results.length} case runs${gaps.length ? ` (${gaps.length} of them with a declared known gap)` : ""}` : process.exitCode ? "FAIL: the harness didn't run its cases, or its end failed (above)" : `ok: ${results.length} case runs`);
 process.exit(failed.length || process.exitCode ? 1 : 0);

@@ -20,8 +20,8 @@
 //   computerSurface(site, page, opts) -> the harness's surface: { name, tool, connect, beginTurn, endTurn, shownPath,
 //                                        liveCells, close }    (opts.runnerLate: ms, Chat here before the runner starts)
 import { spawn, execFileSync } from "node:child_process";
-import { createHash } from "node:crypto";
-import { existsSync, mkdtempSync, readFileSync, rmSync, statSync, writeFileSync, mkdirSync } from "node:fs";
+import { createHash, randomBytes } from "node:crypto";
+import { existsSync, lstatSync, mkdtempSync, readdirSync, readFileSync, rmSync, statSync, writeFileSync, mkdirSync } from "node:fs";
 import { createServer, request as httpRequest } from "node:http";
 import { connect } from "node:net";
 import { createRequire } from "node:module";
@@ -43,6 +43,11 @@ const STUB_DEPS = join(py, "remote_agent_stub_deps.mjs");
 const A = "11111111-1111-4111-8111-111111111111";
 /** The relay's start in Miniflare (the Worker built, workerd up), at most. */
 export const START_MS = 60_000;
+/** The surface's whole close (Disconnect, every process it started killed and reaped, the computer revoked), at most:
+ *  within the harness's own bound on a surface's close (runCase's CLEANUP_MS). */
+export const CLOSE_MS = CLEANUP_MS - 500;
+/** The variables the runner (and through it the agent) gets from this process's environment: nothing else of it. */
+const ENV_KEEP = ["PATH", "LANG", "LC_ALL", "LC_CTYPE", "TZ"];
 /** `p`, or a refusal saying `what` once `ms` have passed. */
 const bounded = (p, ms, what) => { let t; return Promise.race([p, new Promise((_, no) => { t = setTimeout(() => no(new Error(`${what}: no answer in ${ms / 1000} s`)), ms); })]).finally(() => clearTimeout(t)); };
 /** A request to the site, within CDP_MS (and `signal`, a surface's own). */
@@ -70,14 +75,42 @@ function siteHeaders() {
 const TYPES = { ".html": "text/html", ".js": "text/javascript", ".mjs": "text/javascript", ".css": "text/css", ".wasm": "application/wasm", ".json": "application/json", ".svg": "image/svg+xml", ".png": "image/png", ".woff2": "font/woff2", ".map": "application/json" };
 const RELAYED = (p) => p.startsWith("/api/") || p.startsWith("/auth/") || p.startsWith("/remote/");
 
-/** The relay and the site on one origin, and a signed-in session for the account the relay allows. */
-export async function startComputerSite(opts = {}) {
-  if (opts.site) {
-    // (a deployed site: its relay and its pages, and a session the caller made, read from a 0600 file, never printed)
-    const cookie = readFileSync(opts.site.cookieFile, "utf8").trim();
-    if (!/^[A-Za-z0-9_-]+=\S+$/.test(cookie)) throw new Error("the cookie file isn't one name=value");
-    return { origin: new URL(opts.site.origin).origin, cookie, close: () => {} };
+/** The site's own end: every upgraded socket destroyed (closeAllConnections leaves them), the server's close and
+ *  Miniflare's end each bounded by CLEANUP_MS; what failed or hung, as the problems (never swallowed). */
+export async function closeSite({ server = null, upgraded = new Set(), mf = null } = {}) {
+  const problems = [];
+  for (const s of upgraded) s.destroy();
+  upgraded.clear();
+  if (server?.listening) {
+    server.closeAllConnections?.();
+    const e = await bounded(new Promise((r) => server.close((err) => r(err ?? null))), CLEANUP_MS, "the site's server close").catch((x) => x);
+    if (e) problems.push(String(e.message ?? e));
   }
+  if (mf) {
+    const e = await bounded(Promise.resolve().then(() => mf.dispose()), CLEANUP_MS, "Miniflare's end").then(() => null, (x) => x);
+    if (e) problems.push(String(e.message ?? e).startsWith("Miniflare's end") ? e.message : "Miniflare's end: " + (e.message ?? e));
+  }
+  return problems;
+}
+
+/** A deployed site's origin and session, refused unless exactly as they must be: an https origin and nothing else,
+ *  and a regular file (no link) only its owner can read, holding one name=value (no ";", space or control). */
+export function deployedSite({ origin, cookieFile }) {
+  const u = new URL(origin);
+  if (u.protocol !== "https:" || u.username || u.password || u.origin !== origin.replace(/\/$/, "")) throw new Error("the site's origin must be https://host, nothing more");
+  const st = lstatSync(cookieFile);
+  if (!st.isFile()) throw new Error("the cookie file must be a regular file (not a link)");
+  if (st.mode & 0o077) throw new Error("the cookie file must be readable by its owner only (0600)");
+  const cookie = readFileSync(cookieFile, "utf8").replace(/\r?\n$/, "");
+  if (!/^[A-Za-z0-9_-]+=[\x21-\x3a\x3c-\x7e]+$/.test(cookie)) throw new Error("the cookie file must hold one name=value (no ';', space or control)");
+  return { origin: u.origin, cookie, close: async () => [] };
+}
+
+/** The relay and the site on one origin, and a signed-in session for the account the relay allows. close() resolves
+ *  to the problems of the site's end (none: []). */
+export async function startComputerSite(opts = {}) {
+  // (a deployed site: its relay and its pages, and a session the caller made, read from a 0600 file, never printed)
+  if (opts.site) return deployedSite(opts.site);
   if (!existsSync(join(dist, "agents", "agents.js"))) throw new Error("no web/dist/agents: SAGEBRUSH_AGENTS=1 bun web/build.ts first");
   const require = createRequire(join(root, "web", "site", "package.json"));
   const { Miniflare, convertV4MiniflareOptions } = require("miniflare");
@@ -89,7 +122,8 @@ export async function startComputerSite(opts = {}) {
       durableObjects: { REMOTE_RELAY: { className: "TestRemoteRelay", useSQLite: true }, REMOTE_ACCOUNT: { className: "TestRemoteAccount", useSQLite: true } } }],
   }));
   let server = null;
-  const close = async () => { server?.closeAllConnections?.(); server?.close(); await bounded(mf.dispose(), CLEANUP_MS, "Miniflare's end").catch(() => {}); };
+  const upgraded = new Set();
+  const close = () => closeSite({ server, upgraded, mf });
   try {
     const up = new URL((await bounded(mf.ready, START_MS, "the relay in Miniflare")).href);
     const db = await mf.getD1Database("SHARE_DB");
@@ -122,7 +156,9 @@ export async function startComputerSite(opts = {}) {
         u.pipe(sock);
         sock.pipe(u);
       });
-      const end = () => { sock.destroy(); u.destroy(); };
+      const end = () => { sock.destroy(); u.destroy(); upgraded.delete(sock); upgraded.delete(u); };
+      upgraded.add(sock);
+      upgraded.add(u);
       for (const s of [u, sock]) { s.on("error", end); s.on("close", end); }
     });
     await new Promise((r) => server.listen(0, "127.0.0.1", r));
@@ -158,34 +194,49 @@ function child(cmd, args, opts) {
   p.gone = new Promise((r) => p.once("exit", (code) => r(code)));
   return p;
 }
-async function stopChild(p, ms = CLEANUP_MS) {
-  if (!p || p.exitCode !== null || p.signalCode !== null) return;
-  try { process.kill(-p.pid, "SIGTERM"); } catch { p.kill("SIGTERM"); }
-  if (!(await Promise.race([p.gone.then(() => true), sleep(ms).then(() => false)]))) {
-    try { process.kill(-p.pid, "SIGKILL"); } catch { p.kill("SIGKILL"); }
-    await Promise.race([p.gone, sleep(CLEANUP_MS)]);
+/** The processes of group `pgid` still running (a zombie, ended and waiting to be reaped, doesn't count). */
+function inGroup(pgid) {
+  const left = [];
+  for (const d of readdirSync("/proc")) {
+    if (!/^\d+$/.test(d)) continue;
+    try {
+      const f = readFileSync(`/proc/${d}/stat`, "utf8").replace(/^.*\) /s, "").split(" ");
+      if (Number(f[2]) === pgid && f[0] !== "Z") left.push(Number(d));
+    } catch { /* (gone meanwhile) */ }
   }
+  return left;
 }
-const alive = (pid) => { try { process.kill(pid, 0); return true; } catch { return false; } };
+const running = (pid) => { try { return readFileSync(`/proc/${pid}/stat`, "utf8").replace(/^.*\) /s, "")[0] !== "Z"; } catch { return false; } };
+/** A process this surface started, and its whole group, ended: SIGKILL at once (a process that ignores TERM can't
+ *  hold it up), then waited for until `left()` ms run out; what is still running afterwards, as one problem. */
+async function endGroup(p, what, left) {
+  if (!p) return null;
+  try { process.kill(-p.pid, "SIGKILL"); } catch { try { p.kill("SIGKILL"); } catch {} }
+  for (; left() > 0 && (inGroup(p.pid).length || (p.exitCode === null && p.signalCode === null)); ) await sleep(25);
+  const still = inGroup(p.pid);
+  return still.length || (p.exitCode === null && p.signalCode === null) ? `${what}: still running after the close (pids ${[p.pid, ...still].join(", ")})` : null;
+}
+const alive = running;
 const ppidOf = (pid) => { try { return Number(readFileSync(`/proc/${pid}/stat`, "utf8").replace(/^.*\) /s, "").split(" ")[1]); } catch { return null; } };
 
-let computers = 0;
 /** The harness's surface (harness.mjs's mcp and chat have the same shape), on the site from startComputerSite. */
 export async function computerSurface(site, page, opts = {}) {
   const log = opts.log ?? ((s) => console.log(s));
-  const computer = opts.computer ?? `lab-box-${++computers}`;
+  // (a name no other computer of the account has: the revocation below takes only what this run enrolled)
+  const computer = opts.computer ?? `lab-box-${randomBytes(6).toString("hex")}`;
   const tmp = mkdtempSync(join(tmpdir(), "sb-computer-"));
   const script = join(tmp, "script");
   const home = join(tmp, "home");
   mkdirSync(script, { mode: 0o700 });
   mkdirSync(home, { mode: 0o700 });
-  const S = { login: null, runner: null, revoke: null, started: null, turn: false, ending: null, n: 0, failures: [], closed: false, abort: new AbortController() };
+  const S = { login: null, runner: null, revoke: null, enrolled: new Set(), started: null, turn: false, ending: null, n: 0, failures: [], closed: false, abort: new AbortController() };
   // (once closed, a connect still on its way stops at its next step: nothing it would start outlives the surface)
   const live = () => { if (S.closed) throw new Error("the computer surface was closed"); };
   const base = site.origin, cookie = site.cookie;
   const python = process.env.PYTHON ?? "python3";
-  const env = { ...process.env, HOME: home, XDG_CONFIG_HOME: join(home, ".config"), XDG_STATE_HOME: join(home, ".state"), SAGEBRUSH_REMOTE_ORIGIN: base, NO_PROXY: "localhost,127.0.0.1", no_proxy: "localhost,127.0.0.1" };
-  for (const k of ["HTTPS_PROXY", "https_proxy", "HTTP_PROXY", "http_proxy", "ALL_PROXY", "all_proxy", "PYTHONPATH"]) delete env[k];
+  // (the runner's environment, built here: the few variables of this one it needs (ENV_KEEP), its own home, and the
+  //  site; never this process's others (credentials, proxies, PYTHONPATH), and never the session cookie)
+  const env = { ...Object.fromEntries(ENV_KEEP.filter((k) => typeof process.env[k] === "string").map((k) => [k, process.env[k]])), HOME: home, XDG_CONFIG_HOME: join(home, ".config"), XDG_STATE_HOME: join(home, ".state"), XDG_CACHE_HOME: join(home, ".cache"), SAGEBRUSH_REMOTE_ORIGIN: base, NO_PROXY: "localhost,127.0.0.1", no_proxy: "localhost,127.0.0.1" };
   const pkg = unpackAgent(tmp);
   const agentCmd = [process.execPath, "--import", STUB_DEPS, join(here, "computer-agent.mjs"), pkg, script].map((a) => (/[\s"'\\]/.test(a) ? JSON.stringify(a) : a)).join(" ");
 
@@ -224,19 +275,33 @@ export async function computerSurface(site, page, opts = {}) {
         let code = null;
         for (let i = 0; i < 300 && !code; i++) { code = /the code ([A-Z]{4}-[A-Z]{4})/.exec(login.out)?.[1] ?? null; if (!code) await sleep(100); live(); }
         if (!code) throw new Error("sagebrush remote login printed no code: " + login.out.slice(-500));
+        // (the account's computers before this one: the revocation takes only computers that weren't among them and have
+        //  this run's name, so never another of the account's. It is this surface's from before the approval is sent:
+        //  once approved, the computer is enrolled whatever happens next, and a close revokes it, then checks it's gone)
+        const peers = async (ms = CDP_MS) => {
+          const r = await fetchT(base + "/api/remote/v1/peers", { headers: { cookie } }, ms);
+          if (!r.ok) throw new Error(`the account's computers weren't listed (${r.status})`);
+          return ((await r.json()).peers ?? []).filter((x) => x && typeof x.remote_id === "string");
+        };
+        const before = new Set((await peers()).map((x) => x.remote_id));
+        live();
+        const ours = (list) => list.filter((x) => x.name === computer && !before.has(x.remote_id)).map((x) => x.remote_id);
+        S.revoke = async (left) => {
+          for (const id of ours(await peers(left()))) S.enrolled.add(id);
+          for (const id of S.enrolled) {
+            const r = await fetchT(base + "/api/remote/v1/revoke", { method: "POST", headers: { "content-type": "application/json", origin: base, cookie }, body: JSON.stringify({ remote_id: id }) }, left());
+            if (!r.ok) S.failures.push(`${computer} (${id}) wasn't revoked (${r.status})`);
+          }
+          const stillThere = (await peers(left())).filter((x) => S.enrolled.has(x.remote_id)).map((x) => x.remote_id);
+          if (stillThere.length) S.failures.push(`${computer} is still enrolled after its revocation (${stillThere.join(", ")})`);
+        };
         const form = await fetchT(base + "/remote/activate", { method: "POST", redirect: "manual", headers: { "content-type": "application/x-www-form-urlencoded", origin: base, cookie }, body: new URLSearchParams({ code, decision: "approve" }).toString(), signal: S.abort.signal });
         live();
         if (form.status >= 400) throw new Error(`the approval was refused (${form.status}): ${(await form.text()).slice(0, 300)}`);
+        // (approved: the computer this run enrolled, by its id, the moment it is listed)
+        for (const id of ours(await peers().catch(() => []))) S.enrolled.add(id);
         if ((await Promise.race([login.gone, sleep(30000).then(() => "timeout")])) !== 0) throw new Error("sagebrush remote login didn't finish: " + login.out.slice(-500));
         live();
-        S.revoke = async () => {
-          // (this run's computer, revoked as the person revokes one: own account, same site)
-          const list = await (await fetchT(base + "/api/remote/v1/peers", { headers: { cookie } })).json();
-          for (const p of (list.peers ?? []).filter((x) => x.name === computer)) {
-            const r = await fetchT(base + "/api/remote/v1/revoke", { method: "POST", headers: { "content-type": "application/json", origin: base, cookie }, body: JSON.stringify({ remote_id: p.remote_id }) });
-            if (!r.ok) S.failures.push(`${computer} wasn't revoked (${r.status})`);
-          }
-        };
         log(`     [computer] ${computer} enrolled by the device flow, approved signed in`);
         if (!opts.runnerLate) await startRunner();
 
@@ -268,7 +333,7 @@ export async function computerSurface(site, page, opts = {}) {
         surface.whoSeen = await page.ev(`window.__whoSeen ?? []`);
       } catch (e) {
         // (enrollment refused, or closed meanwhile: the login ends with it, never left polling)
-        await stopChild(S.login);
+        await endGroup(S.login, "sagebrush remote login", () => CLEANUP_MS);
         throw e;
       }
     },
@@ -309,22 +374,27 @@ export async function computerSurface(site, page, opts = {}) {
     /** The notebook the person sees: the Agents page's pane, its tab shown. */
     shownPath: `document.querySelector(".pane-head .tab.on")?.dataset.tab ?? null`,
     liveCells: PANE_CELLS,
-    /** Disconnect: the runner ends the agent (its process gone); the computer revoked; everything removed. */
+    /** Disconnect: the runner ends the agent (its process gone); every process this surface started killed and
+     *  reaped; the computer revoked and checked gone; everything removed. All within CLOSE_MS: what isn't done by
+     *  then is a failure of the case. */
     async close() {
-      // (a turn's end still on its way gets CLEANUP_MS to finish first, so a case that ended normally closes cleanly)
-      if (S.ending) await Promise.race([S.ending, sleep(CLEANUP_MS)]);
+      const end = Date.now() + CLOSE_MS, left = () => Math.max(0, end - Date.now());
+      // (a turn's end still on its way gets a moment to finish first, so a case that ended normally closes cleanly)
+      if (S.ending) await Promise.race([S.ending, sleep(Math.min(1000, left()))]);
       S.closed = true;
       S.abort.abort();
       try {
         if (S.started) {
-          await page.ev(`([...document.querySelectorAll('.sbag-bar button')].find((b) => b.textContent === 'Disconnect')?.click(), true)`).catch(() => {});
-          for (const t = Date.now(); Date.now() - t < 15000 && alive(S.started.pid); ) await sleep(100);
+          await bounded(page.ev(`([...document.querySelectorAll('.sbag-bar button')].find((b) => b.textContent === 'Disconnect')?.click(), true)`), Math.max(1, Math.min(1000, left())), "Disconnect").catch(() => {});
+          for (const t = Date.now(); Date.now() - t < Math.min(1500, left()) && alive(S.started.pid); ) await sleep(50);
           if (alive(S.started.pid)) S.failures.push("Disconnect: the agent's process on the computer is still there");
         }
       } finally {
-        await stopChild(S.login);
-        await stopChild(S.runner);
-        if (S.revoke) await S.revoke().catch((e) => S.failures.push(`${computer} wasn't revoked: ${e.message}`));
+        // (the login, the runner and the agent, each with its group, ended outright and checked reaped)
+        if (S.started && alive(S.started.pid)) { try { process.kill(-S.started.pid, "SIGKILL"); } catch {} try { process.kill(S.started.pid, "SIGKILL"); } catch {} }
+        for (const [p, what] of [[S.login, "sagebrush remote login"], [S.runner, "the runner"]]) { const f = await endGroup(p, what, left); if (f) S.failures.push(f); }
+        if (S.started) { for (; left() > 0 && alive(S.started.pid); ) await sleep(25); if (alive(S.started.pid)) S.failures.push(`the agent (pid ${S.started.pid}): still running after the close`); }
+        if (S.revoke) await S.revoke(left).catch((e) => S.failures.push(`${computer} wasn't revoked: ${e.message}`));
         rmSync(tmp, { recursive: true, force: true });
       }
       return S.failures;
