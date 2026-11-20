@@ -220,7 +220,8 @@ const expected = (a, conv) => {
   await m.kick("c1");
   await settle();
   check(a.sent.filter(([mm]) => mm === "chat.resume").length === 1 && s.entries("c1", "aaaaaaaa11").length > 0, "a part cut short: what came is uploaded, and no second request goes while the first may still send", a.sent.length);
-  for (let i = 0; i < 10 && canonical(s.entries("c1", "aaaaaaaa11")) !== canonical(expected(a, "c1")); i++) { await tick(450); await m.kick("c1"); await settle(); }
+  // (no other trigger: the rest is asked for by itself, once each cut request has drained)
+  for (let i = 0; i < 12 && canonical(s.entries("c1", "aaaaaaaa11")) !== canonical(expected(a, "c1")); i++) { await tick(450); await settle(); }
   const asks = a.sent.filter(([mm]) => mm === "chat.resume");
   check(asks.length >= 3 && asks.every(([, p]) => p.tag === "mirror") && asks[1][1].after === 3, "after it drained, asked again from the last number read, tagged", asks.map(([, p]) => p.after));
   check(canonical(s.entries("c1", "aaaaaaaa11")) === canonical(expected(a, "c1")), "all of it uploaded, once");
@@ -241,9 +242,6 @@ const expected = (a, conv) => {
   await tick(60);
   await settle();
   const after1 = s.entries("c1", "aaaaaaaa11").length;
-  // (a turn ends meanwhile: its kick is refused, as the request still drains)
-  await m.kick("c1");
-  await settle();
   const asked = a.sent.filter(([mm]) => mm === "chat.resume").length;
   // (part 2 of the same answer, late, with done: true: discarded, and the request ends)
   m.onReplay({ conversation: "c1", instance: "aaaaaaaa11", last: a.seq, done: true, running: [], tag: "mirror", events: log.slice(3) }, a);
@@ -252,7 +250,7 @@ const expected = (a, conv) => {
   await settle();
   await tick(50);
   await settle();
-  check(canonical(s.entries("c1", "aaaaaaaa11")) === canonical(expected(a, "c1")) && a.sent.filter(([mm]) => mm === "chat.resume").length === 2, "once it ended, the refused kick ran: asked again from the cursor, everything uploaded, once", a.sent.map(([, p]) => p.after));
+  check(canonical(s.entries("c1", "aaaaaaaa11")) === canonical(expected(a, "c1")) && a.sent.filter(([mm]) => mm === "chat.resume").length === 2, "once it ended, with no other trigger: asked again from the cursor by itself, everything uploaded, once", a.sent.map(([, p]) => p.after));
 }
 
 // ---- another page moved the stream: reload its state, all of it, then go on
@@ -395,6 +393,21 @@ const expected = (a, conv) => {
   check(canonical(s.entries("c1", "aaaaaaaa11")) === canonical(expected(a, "c1")), "once it has ended, the refused kick runs: the next request reads all of it from the cursor, nothing skipped", s.entries("c1", "aaaaaaaa11").length);
 }
 
+// ---- no answer in time, and none late either: once the request has drained, the upload runs again by itself
+{
+  const { a, s, m } = setup();
+  await m.refresh();
+  turn(a, "c1", "unanswered");
+  a.quiet = true;
+  void m.kick("c1");
+  await tick(350); // (the wait runs out)
+  a.quiet = false;
+  check(!s.stream("c1", "aaaaaaaa11") && a.sent.filter(([mm]) => mm === "chat.resume").length === 1, "no answer within the wait: nothing uploaded, and nothing asked again while it drains");
+  await tick(500); // (the drain ends: nothing late came)
+  await settle();
+  check(canonical(s.entries("c1", "aaaaaaaa11")) === canonical(expected(a, "c1")), "the drain over, with no other trigger: asked again and uploaded", a.sent.map(([, q]) => q.after));
+}
+
 // ---- a conflict stops this run's uploads for good; a deleted copy is made again; a log that dropped entries stops
 {
   const { a, s, m, kept } = setup();
@@ -491,24 +504,69 @@ const expected = (a, conv) => {
   check(st.stale_from === 3 && st.stale_reason === "differs", "an entry of the runner's the stream skipped, between two it has: stale from the next one (differs)", { from: st.stale_from, reason: st.stale_reason });
 }
 
-// ---- the reconcile marks nothing from a partial answer
+// ---- the reconcile reads the runner's log whole, request by request; never from a partial answer
+{
+  const { a, s, m } = setup();
+  await m.refresh();
+  turn(a, "c1", "x", 3);
+  turn(a, "c2", "y", 3);
+  await m.kick("c1");
+  await settle();
+  await m.kick("c2");
+  await settle();
+  // (the runner's log of c1 differs late in it; of c2, not at all; each answer stops early, every two entries)
+  a.logs.get("c1").at(-2).params.event = { type: "turn_error", code: "changed" };
+  const at = expected(a, "c1").find((e) => e.k === "turn_error")?.n;
+  a.chunk = 2;
+  a.sent.length = 0;
+  await m.reconcile();
+  await settle();
+  const asks = a.sent.filter(([mm, q]) => mm === "chat.resume" && q.conversation === "c1").map(([, q]) => q.after);
+  check(s.stream("c1", "aaaaaaaa11").stale_from === at && s.stream("c1", "aaaaaaaa11").stale_reason === "differs", "an agent that stops early: the reconcile reads on, each request once the one before has ended, and marks where it differs", { got: s.stream("c1", "aaaaaaaa11").stale_from, at, asks });
+  check(asks.length >= 4 && asks[0] === 0 && asks.every((v, i) => i === 0 || v > asks[i - 1]), "each request from the highest number read", asks);
+  check(s.stream("c2", "aaaaaaaa11").stale_from === null, "read whole, equal: nothing marked");
+}
 {
   const { a, s, m } = setup();
   await m.refresh();
   turn(a, "c1", "x", 3);
   await m.kick("c1");
   await settle();
-  // (the runner's log differs late in it; its answer stops early, before that point)
   a.logs.get("c1").at(-2).params.event = { type: "turn_error", code: "changed" };
+  // (entries dropped between two pages: the log can't be read whole now, nothing is concluded)
   a.chunk = 2;
+  const real = a.notify;
+  let n = 0;
+  a.notify = (mm, q) => { if (mm === "chat.resume" && ++n === 2) a.dropped.set("c1", q.after + 1); return real(mm, q); };
   await m.reconcile();
   await settle();
-  check(s.stream("c1", "aaaaaaaa11").stale_from === null, "a partial answer (the agent stopped early): nothing marked, what it lacks can't be told from what the runner lacks", s.stream("c1", "aaaaaaaa11"));
-  a.chunk = 0;
-  await tick(450);
-  await m.reconcile();
+  check(s.stream("c1", "aaaaaaaa11").stale_from === null, "a reset on a later page: no conclusion, nothing marked", s.stream("c1", "aaaaaaaa11"));
+}
+
+// ---- all a request asked for, not said done: the caller has it, and the request drains until it ends
+{
+  const { a, s, m } = setup();
+  await m.refresh();
+  turn(a, "c1", "x");
+  const log = a.logs.get("c1");
+  a.quiet = true;
+  void m.kick("c1");
   await settle();
-  check(s.stream("c1", "aaaaaaaa11").stale_from !== null, "the whole answer, once the cut one has drained: marked");
+  m.onReplay({ conversation: "c1", instance: "aaaaaaaa11", last: a.seq, done: false, running: [], tag: "mirror", events: log }, a);
+  await settle();
+  check(canonical(s.entries("c1", "aaaaaaaa11")) === canonical(expected(a, "c1")), "everything up to last, without done: taken whole");
+  turn(a, "c1", "more");
+  void m.kick("c1");
+  await settle();
+  const asked = a.sent.filter(([mm]) => mm === "chat.resume").length;
+  // (its trailing part: never read as the next request's answer)
+  m.onReplay({ conversation: "c1", instance: "aaaaaaaa11", last: a.seq, done: true, running: [], tag: "mirror", events: a.logs.get("c1").slice(log.length) }, a);
+  check(asked === 1, "no second request while it still drained", asked);
+  a.quiet = false;
+  await settle();
+  await tick(50);
+  await settle();
+  check(canonical(s.entries("c1", "aaaaaaaa11")) === canonical(expected(a, "c1")) && a.sent.filter(([mm]) => mm === "chat.resume").length === 2, "its trailing part discarded; once it ended, the refused upload ran and asked for the rest", a.sent.map(([, q]) => q.after));
 }
 
 // ---- a list that can't be read is not an empty one

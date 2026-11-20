@@ -32,6 +32,8 @@ const QUIET_MS = 3000;
  *  long passes without a part: no second request is made for that conversation meanwhile, so no part is ever read as
  *  another request's (a reply names only the tag, never the request) */
 const DRAIN_MS = 60_000;
+/** the most requests one reconcile reads a conversation's log in */
+const RECONCILE_PAGES = 100;
 /** the most segments one stream is read in (each at most MIRROR_CAPS.entries entries) */
 const READ_MAX = 5000;
 
@@ -108,6 +110,7 @@ const seqOk = (v: unknown): v is number => Number.isSafeInteger(v) && (v as numb
 const natOk = (v: unknown): v is number => Number.isSafeInteger(v) && (v as number) >= 0;
 const conversationOk = (v: unknown): v is string => typeof v === "string" && v.length > 0 && v.length <= 256;
 const BUSY = "a request is still in flight";
+const NO_REPLY = "no replay";
 
 export class Mirror {
   status: MirrorStatus = { available: false };
@@ -120,8 +123,11 @@ export class Mirror {
   private readonly chains = new Map<string, Promise<unknown>>();
   private readonly again = new Set<string>();
   private readonly running = new Set<string>();
-  /** conversations whose upload was refused while a request drained: kicked again once it has */
+  /** conversations whose upload must run again once their request has ended: refused while it drained, given a
+   *  partial answer, or given none in time */
   private readonly refused = new Set<string>();
+  /** who waits for a conversation's request to end (the reconcile, between its pages) */
+  private readonly idle = new Map<string, (() => void)[]>();
 
   constructor(private readonly host: MirrorHost) {
     const kept = host.loadCursors();
@@ -283,7 +289,16 @@ export class Mirror {
       w.events.push(e);
       high = e.seq;
     }
-    if (p.done === true || high >= p.last) return this.settle(conv, w, true), true;
+    if (p.done === true) return this.settle(conv, w, true), true;
+    if (high >= p.last) {
+      // (all the request asked for, but not said done: the caller has it whole; the request drains until it ends, so
+      //  a trailing part of it is never read as the next one's)
+      const c = w.caller;
+      w.caller = null;
+      this.drain(conv, w);
+      c.resolve({ events: w.events, reset: w.reset, complete: true });
+      return true;
+    }
     // (more to come, or the agent stopped early: if nothing more arrives for a moment, the caller takes what came as a
     //  partial answer, and the request drains. Never a second request meanwhile: its parts couldn't be told from this
     //  one's. The next trigger asks again from where the caller got to)
@@ -303,6 +318,17 @@ export class Mirror {
     this.waiting.delete(conv);
     w.caller?.resolve({ events: w.events, reset: w.reset, complete });
     this.retry(conv);
+    this.wake(conv);
+  }
+  /** When the conversation has no request in flight or draining. */
+  private whenIdle(conv: string): Promise<void> {
+    if (!this.waiting.has(conv)) return Promise.resolve();
+    return new Promise((r) => this.idle.set(conv, [...(this.idle.get(conv) ?? []), r]));
+  }
+  private wake(conv: string) {
+    const l = this.idle.get(conv);
+    this.idle.delete(conv);
+    for (const f of l ?? []) f();
   }
   /** A request no one waits for any more: kept until its parts end or stop. */
   private drain(conv: string, w: Waiter) {
@@ -314,6 +340,7 @@ export class Mirror {
     if (this.waiting.get(conv) !== w) return;
     this.waiting.delete(conv);
     this.retry(conv);
+    this.wake(conv);
   }
   /** An upload refused while that request was in flight: run now. */
   private retry(conv: string) {
@@ -323,6 +350,7 @@ export class Mirror {
     clearTimeout(w.timer);
     this.waiting.delete(conv);
     w.caller?.reject(new Error(why));
+    this.wake(conv);
   }
   /** No part in time: the caller is told, and the request drains (its late parts discarded) before another is made. */
   private expire(conv: string, w: Waiter) {
@@ -330,7 +358,7 @@ export class Mirror {
     const c = w.caller;
     w.caller = null;
     this.drain(conv, w);
-    c?.reject(new Error("no replay"));
+    c?.reject(new Error(NO_REPLY));
   }
 
   /** The agent's log of a conversation after `after`, in its run `instance`, through a tagged replay. One request per
@@ -384,8 +412,9 @@ export class Mirror {
         do {
           this.again.delete(conversation);
           await this.upload(conversation).catch((e) => {
-            // (refused because a request for it is still in flight or draining: run again once it has ended)
-            if ((e as Error)?.message === BUSY) this.refused.add(conversation);
+            // (refused because a request for it is still in flight or draining, or no answer came in time: run again once
+            //  that request has ended)
+            if ((e as Error)?.message === BUSY || (e as Error)?.message === NO_REPLY) this.refused.add(conversation);
           });
         } while (this.again.has(conversation) && this.on() && this.source());
       } finally {
@@ -458,6 +487,8 @@ export class Mirror {
       // (everything read is uploaded, or left out by the allowlist: the cursor moves past it all; not past an entry
       //  too big for a segment, which stops the stream here)
       if (!stuck) this.saveCursor(conversation, { ...cur, seq: Math.max(cur.seq, high) });
+      // (a partial answer: the rest is asked for once this request has ended)
+      if (!ans.complete && !stuck) this.refused.add(conversation);
       return;
     }
   }
@@ -563,9 +594,23 @@ export class Mirror {
     //  runner's log too, never taken for one the runner doesn't have)
     const mine = new Map<string, Section>();
     for (const st of streams) if (st.log_instance === src.instance) mine.set(st.log_instance, await this.readStream(c.locator, st.log_instance));
-    const ans = await this.ask(c.conversation, 0, src);
-    // (a conversation this runner doesn't hold: nothing to compare with, nothing marked; nor from a partial answer: what
-    //  it lacks can't be told from what the runner lacks)
+    // (the runner's whole log of the conversation, request by request: each from the highest number read, once the
+    //  one before has ended; a partial answer is never taken as the whole, so what it lacks is never taken for what
+    //  the runner lacks)
+    const ans: Answer = { events: [], reset: false, complete: false };
+    for (let page = 0; page < RECONCILE_PAGES && !ans.complete; page++) {
+      await this.whenIdle(c.conversation);
+      if (this.host.pairing() !== src.pairing) return false;
+      const after = ans.events.length ? ans.events[ans.events.length - 1].seq : 0;
+      const got = await this.ask(c.conversation, after, src);
+      // (entries gone between two pages: the runner's log can't be read whole now)
+      if (page > 0 && got.reset) return false;
+      if (page === 0) ans.reset = got.reset;
+      for (const e of got.events) if (e.seq > (ans.events.length ? ans.events[ans.events.length - 1].seq : 0)) ans.events.push(e);
+      ans.complete = got.complete;
+      if (!got.complete && !got.events.length) return false;
+    }
+    // (a conversation this runner doesn't hold: nothing to compare with, nothing marked)
     if (!ans.events.length || !ans.complete || this.host.pairing() !== src.pairing) return false;
     // (by the agent's number, not by position: each uploaded entry against the runner's entry of that number, after the
     //  same normalization. Where the agent's log has dropped its oldest entries (reset), numbers before what it still
