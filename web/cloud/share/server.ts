@@ -1117,7 +1117,8 @@ const used = async (env: ShareEnv) => (await sharingUsed(env)) + (env.SYNC_ACCOU
 
 /** What the account's budget has in use: sharing's bytes, and sync's claim where sync is on. */
 async function usage(env: ShareEnv, id: string): Promise<number> {
-  const r = await env.SHARE_DB!.prepare(`SELECT ${await used(env)} AS n`).bind(id, now(), null, null, null, null, null, await accountHash(id)).first<{ n: number }>();
+  const u = await used(env);
+  const r = await env.SHARE_DB!.prepare(`SELECT ${u} AS n`).bind(id, now(), null, null, null, null, null, await accountHash(id)).first<{ n: number }>();
   return r?.n ?? 0;
 }
 
@@ -1182,7 +1183,8 @@ async function reserve(env: ShareEnv, who: Who, bytes: number, limit: number, ke
   const t = now();
   const h = await accountHash(who.id);
   try {
-    const r = (await db.batch([...live(db, who), db.prepare(`INSERT INTO reservations (id, account_id, bytes, key, expires) SELECT ?3, ?1, ?4, ?5, ?6 WHERE ${await used(env)} + ?4 <= ?7`).bind(who.id, t, rid, bytes, key, t + RESERVE_SECONDS, limit, h)])) as D1Result<unknown>[];
+    const u = await used(env);
+    const r = (await db.batch([...live(db, who), db.prepare(`INSERT INTO reservations (id, account_id, bytes, key, expires) SELECT ?3, ?1, ?4, ?5, ?6 WHERE ${u} + ?4 <= ?7`).bind(who.id, t, rid, bytes, key, t + RESERVE_SECONDS, limit, h)])) as D1Result<unknown>[];
     if (r[2]?.meta?.changes === 1) return { id: rid, expires: t + RESERVE_SECONDS };
   } catch {
     return null;

@@ -62,6 +62,15 @@ export class TestMirrorAccount extends MirrorAccount {
       case "/__alarm":
         await this.alarm();
         return Response.json({ alarm: await this.ctx.storage.getAlarm() });
+      case "/__fire":
+        // (the alarm as the runtime fires it: consumed first (no alarm left), then run)
+        await this.ctx.storage.deleteAlarm();
+        try {
+          await this.alarm();
+        } catch {
+          // (an alarm's own failure: the runtime's to retry; the row checks what it left scheduled)
+        }
+        return Response.json({ alarm: await this.ctx.storage.getAlarm() });
       case "/__restart":
         this.ctx.abort("restart (test)");
         return Response.json({});

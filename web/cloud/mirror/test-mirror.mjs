@@ -623,6 +623,20 @@ const pd = await page(D);
   await invariant(ph, 50 << 20, "cut before the commit's lowering");
   await alarm(ph.hash);
   ok((await claimOf(H)) === (await state(ph.hash)).held, "A2: repaired by the alarm");
+  // (one alarm, consumed as the runtime does, whose lowering fails, after a normal commit (nothing else pending): it
+  // leaves a future alarm, and that one repairs the claim, with no page append in between)
+  // (the object's clock an hour ahead: its alarms are then an hour off in real time, so only this row fires them)
+  await clock(ph.hash, 3_600_000);
+  const r4 = await ph.append(loc, body(3, 1));
+  const s4 = await state(ph.hash);
+  ok(r4.status === 200 && s4.reservations.length === 0 && (await claimOf(H)) > s4.held, `(after a commit: an overclaim, nothing else pending)`);
+  await doCall(ph.hash, "__cut", "?at=before-lower");
+  const f1 = await doCall(ph.hash, "__fire");
+  const s5 = await state(ph.hash);
+  ok(f1.alarm !== null && s5.reservations.length === 0 && s5.outbox.length === 0 && (await claimOf(H)) > s5.held, `A2: a consumed alarm whose lowering fails leaves a future alarm (${f1.alarm})`);
+  const f2 = await doCall(ph.hash, "__fire");
+  ok((await claimOf(H)) === (await state(ph.hash)).held && f2.alarm === null, `A2: that alarm repairs the claim, no page traffic needed (${await claimOf(H)}); then none is left`);
+  await clock(ph.hash, 0);
 }
 
 lap('S5: keys');

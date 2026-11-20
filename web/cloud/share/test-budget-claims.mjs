@@ -35,6 +35,21 @@ for (const [name, path] of [["core", "../../share/server.ts"], ["cloud", "./serv
   check(!(await sharingUsed(env)).includes("budget_claims"), "no table: no check of the budget reads it");
 }
 
+// (structural: every statement that counts the budget interpolates an expression captured once before it, never a probe
+// of its own: in one statement, two probes could answer either side of the migration (one in SET, the other in WHERE))
+{
+  const { readFileSync } = await import("node:fs");
+  const here = new URL(".", import.meta.url).pathname;
+  const files = { "share (core)": "../../share/server.ts", "share (cloud)": "./server.ts", "sync's account": "../../sync/account.ts", "the mirror's account": "../mirror/account.ts" };
+  for (const [name, rel] of Object.entries(files)) {
+    const src = readFileSync(here + rel, "utf8");
+    check(!/\$\{\s*await\s+(?:used|sharingUsed|budgetClaims)\b/.test(src), `${name}: no budget expression probed inside a statement's template`);
+  }
+  const sync = readFileSync(here + "../../sync/account.ts", "utf8");
+  const raise = sync.match(/UPDATE sync_accounts SET claim_bytes = claim_bytes \+ MIN\(\?3, \?6 - claim_bytes - \(\$\{(\w+)\}\)\) WHERE [^`]*MIN\(\?3, \?6 - claim_bytes - \(\$\{(\w+)\}\)\) >= \?7/);
+  check(raise && raise[1] === raise[2] && (sync.match(/sharingUsed\(/g) ?? []).length === 1, `sync's raise: SET and WHERE interpolate one captured expression (${raise?.[1]}, ${raise?.[2]})`);
+}
+
 const failed = results.filter(([ok]) => !ok).length;
 console.log(`${results.length - failed}/${results.length} budget claims checks passed`);
 process.exit(failed ? 1 : 0);

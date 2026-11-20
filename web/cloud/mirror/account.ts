@@ -43,6 +43,8 @@ export const MIRROR_LIMITS = Object.freeze({
   locatorTries: 4,
   /** how soon after a commit the alarm lowers the claim to what is held */
   lowerMs: 5_000,
+  /** after a lowering failed (D1 unavailable), how soon the alarm tries again: an overclaim is never left without one */
+  lowerRetryMs: 30_000,
   /** a raise asks for this much more than it needs, when that fits, so the appends after it write nothing to D1 */
   headroom: 4 * 1024 * 1024,
 });
@@ -536,14 +538,16 @@ export class MirrorAccount extends DurableObject<MirrorEnv> {
       }
     }
     // (the bytes are gone first, then the claim: and a stale overclaim is repaired here even if nobody writes again)
+    let lowered = true;
     try {
       await this.lower();
     } catch {
-      // (D1 failed: an overclaim stays until the next alarm)
+      lowered = false; // (D1 failed: the overclaim stays, and an alarm comes back for it below, whatever else is pending)
     }
     const next = this.one(`SELECT MIN(x) AS n FROM (SELECT MIN(expires) AS x FROM reservations UNION ALL SELECT MIN(due) AS x FROM outbox)`);
-    const n = next?.n === null || next?.n === undefined ? null : Number(next.n);
-    if (n !== null) await this.ctx.storage.setAlarm(Math.max(n, this.now() + 1000));
-    else if (this.num(`SELECT COUNT(*) AS n FROM outbox`) + this.num(`SELECT COUNT(*) AS n FROM reservations`) > 0) await this.ctx.storage.setAlarm(this.now() + 1000);
+    let at = next?.n === null || next?.n === undefined ? null : Math.max(Number(next.n), this.now() + 1000);
+    if (at === null && this.num(`SELECT COUNT(*) AS n FROM outbox`) + this.num(`SELECT COUNT(*) AS n FROM reservations`) > 0) at = this.now() + 1000;
+    if (!lowered) at = Math.min(at ?? Infinity, this.now() + MIRROR_LIMITS.lowerRetryMs);
+    if (at !== null) await this.ctx.storage.setAlarm(at);
   }
 }
