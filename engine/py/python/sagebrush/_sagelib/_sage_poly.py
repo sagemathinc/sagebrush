@@ -39,6 +39,16 @@ def _int_value(x):
     return None
 
 
+def _is_polynomial(x):
+    """Whether x's class is Polynomial or derives from it, by identity
+    along the class's MRO (type(x) and type's own slot: isinstance would
+    read the instance's own __class__, a hook of an untrusted value)."""
+    for k in _type_mro(type(x)):
+        if k is Polynomial:
+            return True
+    return False
+
+
 def _from_tokens(ring, r):
     """The polynomial of ring whose coefficients are an engine reply's tokens
     (hex, `[-]num[/den]` in lowest terms, constant first, trailing zeros
@@ -1072,7 +1082,7 @@ class Polynomial:
 
     # ---- arithmetic
     def _coerce(self, other):
-        if isinstance(other, Polynomial):
+        if _is_polynomial(other):
             if other._ring._name != self._ring._name:
                 raise TypeError("unsupported operation on polynomials in %s and %s" % (self._ring._name, other._ring._name))
             return other
@@ -1316,7 +1326,7 @@ class Polynomial:
         if o is None:
             L = self._inexact(other)
             return NotImplemented if L is None else L / other
-        if not isinstance(other, Polynomial) and o.degree() <= 0:
+        if not _is_polynomial(other) and o.degree() <= 0:
             # a number: a polynomial over the fraction field of the base
             # (x/2 is 1/2*x in QQ[x])
             if not o._c:
@@ -1539,7 +1549,7 @@ class Polynomial:
             sage: (x^2 - 1).gcd(x^2 + 2*x + 1)
             x + 1
         """
-        o = other if isinstance(other, Polynomial) else Polynomial(self._qq_ring(), [other])
+        o = other if _is_polynomial(other) else Polynomial(self._qq_ring(), [other])
         over_zz = self._ring._base is ZZ and o._ring._base is ZZ
         if not self._c or not o._c:
             # Sage returns the other one unchanged (monic over QQ)

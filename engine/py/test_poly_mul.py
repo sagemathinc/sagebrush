@@ -628,6 +628,46 @@ def qscale_checks(r):
             raise AssertionError("quo_rem accepted an unregistered class")
         n += 1
     assert hooks == [], hooks
+    # (an operand whose INSTANCE __getattribute__ raises: isinstance would
+    # read its __class__ through it; the identity MRO walk on type(x) runs
+    # no hook, for an int subclass (accepted) and an unrelated class
+    # (refused), across _coerce, //, %, divmod, / and the reflected ops)
+    inst = []
+
+    class GI(int):
+        def __getattribute__(self, name):
+            inst.append(name)
+            raise RuntimeError("instance attribute read: " + name)
+
+    class GO:
+        def __getattribute__(self, name):
+            inst.append(name)
+            raise RuntimeError("instance attribute read: " + name)
+    gi, go = GI(3), GO()
+    del inst[:]
+    assert t._coerce(gi).list() == [3] and t._coerce(go) is None
+    assert ((3 * t + 5) % gi).list() == [2] and divmod(3 * t + 5, gi)[0].list() == [1, 1] and ((3 * t + 5) // gi).list() == [1, 1]
+    assert (gi // (t + 2)).list() == [] and ((3 * t + 5) / gi).list() == [Fraction(5, 3), 1] and t.__rfloordiv__(go) is NotImplemented
+    try:
+        (3 * t + 5) % go
+    except ZeroDivisionError:
+        pass
+    assert inst == [], inst
+    n += 1
+    # (a metaclass mro() naming int for a class without int's layout: CPython
+    # refuses to create the class; where a runtime creates it, its real MRO
+    # (type's slot) has no int, so it is refused, its value never read)
+
+    class ForgedMro(type):
+        def mro(cls):
+            return (cls, int, object)
+    try:
+        forged = ForgedMro("Forged", (), {})()
+    except TypeError:
+        forged = None
+    if forged is not None:
+        assert t._coerce(forged) is None
+    n += 1
     # (other int subclasses: IntEnum; a Rational % or divmod by zero is
     # Sage's ZeroDivisionError, by a nonzero polynomial a TypeError)
     import enum
