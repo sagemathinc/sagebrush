@@ -573,6 +573,7 @@ function showOverlay(nd) {
   $("#overlay .close").onclick = closeOverlay;
   for (const a of $("#overlay").querySelectorAll("a[data-i]")) a.onclick = (e) => { e.preventDefault(); openOverlay(space.nodes[+a.dataset.i]); };
   setSelected(nd.id);
+  if (runningNode === nd) runState(nd, "running…", true);
 }
 // (math: KaTeX, the site's /sagebrush-math.js, loaded the first time a note has some)
 let mathModule = null;
@@ -613,39 +614,89 @@ function mountRunner(nd) {
   });
   mode.onchange = () => { nd.lang = mode.value; ed.lang = mode.value; save(nd); };
   async function go() {
-    runB.disabled = true; stopB.hidden = false; state.textContent = "starting the engine…";
-    const t0 = performance.now();
-    try {
-      const r = await run(ed.value, mode.value, {
-        start: () => (state.textContent = "running…"),
-        update: (r) => { out.innerHTML = liveHtml(r); },
-      });
-      nd.text = ed.value; nd.lang = mode.value;
-      nd.output = r.out.replace(/\s+$/, "") + (r.stopped ? (r.out ? "\n" : "") + r.stopped : "");
-      nd.outputError = r.error;
-      const last = (mime) => [...r.displays].reverse().find((b) => b[mime])?.[mime];
-      nd.svg = last("image/svg+xml") ?? null;
-      nd.png = last("image/png") ?? null;
-      const scene = last(SCENE);
-      // (a 3D plot: the object in the space becomes it; its SVG is only the still picture)
-      if (scene) { nd.scene = JSON.parse(scene); nd.svg = null; }
-      const o = objects[space.nodes.indexOf(nd)];
-      if (scene) setPlot(o, sceneObject(nd.scene));
-      // (its face drawn again, with the new output)
-      o.userData.tex = []; o.userData.level = -1;
-      out.innerHTML = outputHtml(nd);
-      state.textContent = (r.error ? "failed" : "done") + ` in ${Math.round(performance.now() - t0)} ms`;
-      save(nd);
-    } catch (e) {
-      out.innerHTML = `<pre class="out err">${esc("couldn't start Sagebrush's engine: " + (e?.message ?? e))}</pre>`;
-      state.textContent = "";
-    } finally {
-      runB.disabled = false; stopB.hidden = true;
-    }
+    nd.text = ed.value; nd.lang = mode.value;
+    await runNode(nd);
   }
   runB.onclick = go;
   stopB.onclick = () => interrupt();
 }
+// Running an object's code: its output, figure and 3D plot kept on it, its face drawn again, and the overlay (when it
+// shows this object) following along. The overlay's Run and Run all both come here.
+let runningNode = null;
+const shownRunner = (nd) => (!$("#overlay").hidden && selected === nd.id && $("#overlay .runbar") ? $("#overlay") : null);
+function runState(nd, text, busy) {
+  const box = shownRunner(nd);
+  if (!box) return;
+  box.querySelector(".runstate").textContent = text;
+  box.querySelector(".run").disabled = busy;
+  box.querySelector(".stop").hidden = !busy;
+}
+async function runNode(nd) {
+  const mode = RUNS.includes(nd.lang) ? nd.lang : nd.kind === "plot3d" ? "sage" : "python";
+  const t0 = performance.now();
+  runningNode = nd;
+  runState(nd, "starting the engine…", true);
+  try {
+    const r = await run(String(nd.text ?? ""), mode, {
+      start: () => runState(nd, "running…", true),
+      update: (r) => { const box = shownRunner(nd); if (box) box.querySelector(".output").innerHTML = liveHtml(r); },
+    });
+    nd.output = r.out.replace(/\s+$/, "") + (r.stopped ? (r.out ? "\n" : "") + r.stopped : "");
+    nd.outputError = r.error;
+    const last = (mime) => [...r.displays].reverse().find((b) => b[mime])?.[mime];
+    nd.svg = last("image/svg+xml") ?? null;
+    nd.png = last("image/png") ?? null;
+    const scene = last(SCENE);
+    // (a 3D plot: the object in the space becomes it; its SVG is only the still picture)
+    if (scene) { nd.scene = JSON.parse(scene); nd.svg = null; }
+    const o = objects[space.nodes.indexOf(nd)];
+    if (o) {
+      if (scene) setPlot(o, sceneObject(nd.scene));
+      // (its face drawn again, with the new output)
+      o.userData.tex = []; o.userData.level = -1;
+    }
+    const box = shownRunner(nd);
+    if (box) box.querySelector(".output").innerHTML = outputHtml(nd);
+    runState(nd, (r.error ? "failed" : "done") + ` in ${Math.round(performance.now() - t0)} ms`, false);
+    save(nd);
+    return { ok: !r.error && !r.stopped, stopped: !!r.stopped };
+  } catch (e) {
+    const box = shownRunner(nd);
+    if (box) box.querySelector(".output").innerHTML = `<pre class="out err">${esc("couldn't start Sagebrush's engine: " + (e?.message ?? e))}</pre>`;
+    runState(nd, "", false);
+    return { ok: false, stopped: false, failed: true };
+  } finally {
+    runningNode = null;
+  }
+}
+
+// Run all: every object with code, in the space's order, one after another (one engine, as a notebook's cells);
+// the button stops it
+let runAll = null;
+$("#runall").onclick = async () => {
+  if (runAll) { runAll.stop = true; interrupt(); return; }
+  if (!space) return;
+  const todo = space.nodes.filter(runnable);
+  if (!todo.length) { $("#status").textContent = "nothing here has code to run"; return; }
+  runAll = { stop: false };
+  const btn = $("#runall");
+  let done = 0, failed = 0;
+  for (const [i, nd] of todo.entries()) {
+    if (runAll.stop) break;
+    btn.textContent = `Stop (${i + 1} of ${todo.length})`;
+    $("#status").textContent = `running ${i + 1} of ${todo.length}: ${nd.title}`;
+    const r = await runNode(nd);
+    // (the one Stop interrupted is stopped, not failed)
+    if (runAll.stop) break;
+    if (r.failed) { failed++; break; }
+    if (r.ok) done++; else if (!r.stopped) failed++;
+  }
+  const stopped = runAll.stop;
+  runAll = null;
+  btn.textContent = "Run all";
+  $("#status").textContent = (stopped ? `stopped after ${done + failed} of ${todo.length}` : `ran ${done + failed} of ${todo.length}`) + (failed ? `, ${failed} failed` : "");
+};
+
 function liveHtml(r) {
   let h = r.out ? `<pre class="out${r.error ? " err" : ""}">${esc(r.out)}</pre>` : "";
   for (const b of r.displays) {

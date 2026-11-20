@@ -22,6 +22,7 @@ npm run serve        # http://127.0.0.1:8080/
 - **Read:** click an object to read it sharply, in the panel on the right. Its links (imports, imported by) are clickable.
 - **Search:** `/` focuses the search box, which searches the full text; click a result to fly there.
 - **Keys:** `B` goes back to where you were, and `H` shows everything.
+- **Run all:** runs every object's code, one after another (the button shows which, and stops it).
 - **Theme:** light by default (a white space), dark when your system is; the Theme button switches between Auto, Light and Dark.
 - **Flatten to 2D:** the same space on a plane, for comparison.
 - **Semantic zoom:** from afar you see the groups' names (directories) over colored blocks; nearer, each object's title; near, its first lines; and on a click, the sharp text.
