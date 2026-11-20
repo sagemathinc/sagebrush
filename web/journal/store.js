@@ -161,7 +161,8 @@ export const writerLock = (Base) => class extends Base {
       this.waiting = null;
       if (stale()) return null;
       // (a passOn that fails (throws, or rejects): not passed on; this tab takes the lock it was granted, as without one,
-      // never left with neither the lock nor a place in its queue)
+      // never left with neither the lock nor a place in its queue. While it asks (up to 500 ms, handover.ts), this tab
+      // holds the lock without writing, so no tab writes: a write that waits for the lock (an agent's) waits that long)
       let pass = false;
       try { pass = !!this.passOn && (await this.passOn()); } catch (e) { console.warn(`${this.kind.noun}: the focus takeover's passOn failed; this tab keeps the lock:`, e); }
       if (pass) { queueMicrotask(() => { if (!stale()) this.enqueue(); }); return null; }

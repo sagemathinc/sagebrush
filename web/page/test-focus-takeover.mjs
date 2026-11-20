@@ -29,6 +29,7 @@
 //  8e'. wants sent before their tab opened another notebook are void: the writer, going on, keeps the lock;
 //  8e''. two wants queued before the writer asked again, and no answer: it keeps the lock; 8e''': a want answering its
 //     question (the id echoed) gets it; 8e'''': that answer gone (a bye) while the writer saves first: it keeps it;
+//  8e''''''. the tab that answered keeps wanting (no id) while the writer saves: it still gets the lock;
 //  8e'''''. the lock granted to a tab whose passOn fails: it takes the lock, never left read-only for good;
 //  9. a reload: no "another tab" text at any moment, and the reloaded page writes;
 //  9b. the tab in use while the other is reloading: it writes, its keys kept;
@@ -495,6 +496,22 @@ try {
     await F.ev(`(window.__live8?.close(), delete window.__live8, 1)`);
     // (no other tab writes, ever; the writer's own cells read-only for a moment as it saved first)
     check(yields === 0 && ![...who].some((x) => x !== "-" && x !== W0) && who.at(-1) === W0, "8e''''. the want that answered the question gone (its bye) while the writer saved before letting go, a stale want heard meanwhile: the writer never lets the lock go, and keeps it", { writer: W0, yields, who });
+  }
+
+  // ---- 8e''''''. the tab that answered keeps wanting while the writer saves first (typed in again: wants with no id, as
+  // a tab still waiting sends them): its answer stands, and the lock is let go once the save is done
+  {
+    const W = (await A.ev(writes(A))) ? A : B, F = W === A ? B : A, W0 = W === A ? "A" : "B", F0 = W0 === "A" ? "B" : "A";
+    await W.ev(`(() => { window.__hold9 = new Promise((r) => { window.__release9 = r; }); ${N}.store.t2Hold = window.__hold9; return 1; })()`);
+    await W.key("t");
+    await W.ev(`(${N}.flush(), 1)`);
+    await sleep(150);
+    await F.ev(`(() => { const c = new BroadcastChannel(${lockName}); let once = false; c.onmessage = (ev) => { if (once || ev.data?.t !== "who-wants" || typeof ev.data.q !== "string") return; once = true; c.postMessage({ t: "want", tab: "typing", at: Date.now() + 60000, q: ev.data.q }); window.__typing9 = setInterval(() => c.postMessage({ t: "want", tab: "typing", at: Date.now() + 60000 }), 200); }; c.postMessage({ t: "want", tab: "typing", at: Date.now() + 60000 }); window.__c9 = c; return 1; })()`);
+    await sleep(1000);
+    await W.ev(`(window.__release9(), ${N}.store.t2Hold = undefined, 1)`);
+    const who = await writers(3000);
+    await F.ev(`(clearInterval(window.__typing9), window.__c9?.close(), delete window.__c9, 1)`);
+    check(who.at(-1) === F0, "8e''''''. the tab that answered keeps wanting (wants with no id) while the writer saves first: the writer still lets the lock go, and the follower writes", { writer: W0, who });
   }
 
   // ---- 8e'''''. the lock granted to a tab whose passOn fails (it rejects, after 400 ms): that tab, used, takes the lock

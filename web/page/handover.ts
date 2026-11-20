@@ -8,8 +8,8 @@
 //     still waiting asks again, with that id (a want sent while it was frozen may never have reached it; the lock is
 //     let go only for a want that answers the writer's current question);
 //   bye {tab}: this tab is gone, or shows another document now.
-// A tab granted the lock while another was used more recently and wants it passes it on at once (passOn), once that
-// want answers its own question as below, so the lock goes to the tab in use, not to whichever was first in the lock's
+// A tab granted the lock while another was used more recently and wants it passes it on (passOn), once that want
+// answers its own question as below (up to 500 ms, the lock held and no tab writing meanwhile), so the lock goes to the tab in use, not to whichever was first in the lock's
 // queue.  What is typed into the tab in use before it
 // writes is kept, and typed again into the same place once it does: up to 5000 input actions, and of a paste its text only.
 // No input is dropped without a word: what is kept is typed in once its field can take it (the cell still read-only, or
@@ -138,7 +138,10 @@ export function writerHandover(page: HandoverPage) {
   function heard(m: any) {
     if (m && (m.t === "write" || m.t === "commit")) return void onWrite(m);
     if (!m || typeof m.tab !== "string" && m.t !== "who-wants") return;
-    if (m.t === "want" && typeof m.at === "number") { wants.set(m.tab, { at: m.at, heard: Date.now(), q: typeof m.q === "string" ? m.q : null }); for (const f of [...onWant]) f(); void handOver(); }
+    // (a want that answers no question keeps the answer its tab gave before: the same tab, still wanting (each tab's
+    //  messages come in order, so it is newer than that answer), typed in again while this one saved; a tab that moved
+    //  on said bye, which forgets it)
+    if (m.t === "want" && typeof m.at === "number") { wants.set(m.tab, { at: m.at, heard: Date.now(), q: typeof m.q === "string" ? m.q : wants.get(m.tab)?.q ?? null }); for (const f of [...onWant]) f(); void handOver(); }
     else if (m.t === "writer" || m.t === "bye") wants.delete(m.tab);
     else if (m.t === "who-wants" && wanting) want(typeof m.q === "string" ? m.q : undefined);
   }
