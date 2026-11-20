@@ -1059,8 +1059,24 @@ class Polynomial:
             if other._ring._name != self._ring._name:
                 raise TypeError("unsupported operation on polynomials in %s and %s" % (self._ring._name, other._ring._name))
             return other
-        if isinstance(other, (int, _F)) or type(other).__name__ in ("Rational",):
+        if type(other) is _sa().Rational:
+            # (an element of QQ, integral or not: the constant is over QQ,
+            # so the result is, as Sage's coercion takes the parents, not
+            # the values)
+            return Polynomial(self._qq_ring(), [other])
+        # (the other exact numbers by the identity of their class against
+        # the registered ones, and bool: no hash, equality or subclass hook
+        # of an untrusted class runs, as Fraction's ABC isinstance would)
+        t = type(other)
+        if t is bool:
             return Polynomial(self._ring, [other])
+        from sagebrush import poly
+        for k in poly._QCLEAR_INTS:
+            if t is k:
+                return Polynomial(self._ring, [other])
+        for k in poly._QCLEAR_FRACTIONS:
+            if t is k:
+                return Polynomial(self._ring, [other])
         return None
 
     def _make(self, coeffs, other=None):
@@ -1198,7 +1214,11 @@ class Polynomial:
             sage: t.quo_rem(2*t + 1), (3*t^2 + 1).quo_rem(2*t + 1), (-3*t^2).quo_rem(2*t + 1)
             ((0, t), (t, t^2 - t + 1), (-2*t + 1, t^2 - 1))
         """
-        o = self._coerce(other)
+        # (a Rational divisor keeps its value-based ring here, as before:
+        # Sage takes // by an integral one in ZZ ((t + 2)//QQ(2) is 1 in
+        # ZZ[t]) but % and divmod in QQ, so parity for //, % and divmod is a
+        # later change of its own)
+        o = Polynomial(self._ring, [other]) if type(other) is _sa().Rational else self._coerce(other)
         if o is None or not o._c:
             raise ZeroDivisionError("division by zero polynomial")
         if self._ring._base is ZZ and o._ring._base is ZZ:
@@ -1234,16 +1254,10 @@ class Polynomial:
             # (x/2 is 1/2*x in QQ[x])
             if not o._c:
                 raise ZeroDivisionError("rational division by zero")
-            # each coefficient times 1/c in the engine (qpoly_scale); over ZZ
-            # by an integer the result stays in ZZ when every coefficient is
-            # an integer (read from the engine's reply), else it is over QQ
+            # each coefficient times 1/c in the engine (qpoly_scale), over
+            # QQ whatever the values ((2t + 4)/2 is t + 2 in QQ[t], as Sage)
             from sagebrush import poly
             c = _F(o._c[0])
-            if self._ring._base is ZZ and c.denominator == 1:
-                r = poly.qscale(self._c, 1 / c, raw=True)
-                if "/" not in r:
-                    return _from_tokens(self._ring, r)
-                return _from_tokens(self._qq_ring(), r)
             return _from_tokens(self._qq_ring(), poly.qscale(self._c, 1 / c, raw=True))
         # a polynomial: an element of the fraction field, even when the
         # division is exact (x/x is 1 in Frac(ZZ[x]), as Sage)
@@ -1257,14 +1271,16 @@ class Polynomial:
         return _sage_frac.FractionFieldElement(a, b)
 
     def __rtruediv__(self, other):
-        # a number over a polynomial: 2/x in Frac(ZZ[x]), 1/2/x in
-        # Frac(QQ[x]), 2/R(4) is 1/2 in Frac(R), as Sage
+        # a number over a polynomial: 2/x in Frac(ZZ[x]), QQ(2)/x and 1/2/x
+        # in Frac(QQ[x]) (by the number's parent, not its value), 2/R(4) is
+        # 1/2 in Frac(R), as Sage
         if self._coerce(other) is None:
             return NotImplemented
         if not self._c:
             raise ZeroDivisionError("fraction field element division by zero")
         import _sage_frac
-        R = self._ring if self._ring._base is QQ or _F(other).denominator == 1 else self._qq_ring()
+        qq = type(other) is _sa().Rational or _F(other).denominator != 1
+        R = self._qq_ring() if qq else self._ring
         return _sage_frac.FractionFieldElement(R(other), Polynomial(R, self._c))
 
     # ---- evaluation and calculus
@@ -1410,8 +1426,9 @@ class Polynomial:
         In the engine (sagebrush.poly.qscale), refused past its caps.
         """
         if not self._c:
-            # (the zero polynomial: over QQ, as before; never 1/0)
-            return Polynomial(self._qq_ring(), [])
+            # (the zero polynomial has no leading coefficient to divide by,
+            # as Sage)
+            raise ZeroDivisionError("rational division by zero")
         lc = _F(self.leading_coefficient())
         if lc == 1:
             return Polynomial(self._ring, self._c)
