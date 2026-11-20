@@ -56,6 +56,15 @@ export interface MirrorEnv {
   BUDGET_CLAIMS?: string;
 }
 
+/** Why a page marked a stream stale (S6d): its entries differ from the runner's, the runner doesn't have them, they are
+ *  from a run the live runner isn't, or another page holds the same range with other entries. */
+export const STALE_REASONS = ["differs", "missing_on_runner", "other_run", "conflict"] as const;
+export type StaleReason = (typeof STALE_REASONS)[number];
+export interface Stale {
+  stale_from: number | null;
+  stale_reason: StaleReason | null;
+}
+
 export type MirrorCode = "forbidden" | "off" | "missing" | "conflict" | "busy" | "limit" | "storage_full" | "mode" | "expired" | "mismatch" | "exhausted" | "invalid";
 export type R<T> = { ok: T } | { error: { code: MirrorCode; message?: string } };
 const fail = (code: MirrorCode, message?: string): { error: { code: MirrorCode; message?: string } } => ({ error: { code, ...(message ? { message } : {}) } });
@@ -94,6 +103,10 @@ export interface SegmentRecord {
 }
 
 const isPos = (v: unknown): v is number => Number.isSafeInteger(v) && (v as number) >= 1;
+const staleOf = (s: Record<string, SqlStorageValue> | undefined): Stale => ({
+  stale_from: s?.stale_from === null || s?.stale_from === undefined ? null : Number(s.stale_from),
+  stale_reason: s?.stale_reason === null || s?.stale_reason === undefined ? null : (String(s.stale_reason) as StaleReason),
+});
 const DIGEST = /^[0-9a-f]{64}$/;
 /** An R2 key: acct/<account hash>/conv/<locator>/<segment, 12 digits> (r7 §2). */
 export const objectKey = (hash: string, locator: string, segment: number) => `acct/${hash}/conv/${locator}/${String(segment).padStart(12, "0")}`;
@@ -111,6 +124,11 @@ export class MirrorAccount extends DurableObject<MirrorEnv> {
     this.sql.exec(`CREATE TABLE IF NOT EXISTS wraps (key_id TEXT NOT NULL, kek TEXT NOT NULL, wrapped TEXT NOT NULL, PRIMARY KEY (key_id, kek))`);
     this.sql.exec(`CREATE TABLE IF NOT EXISTS convs (conversation TEXT PRIMARY KEY, locator TEXT NOT NULL UNIQUE, mode TEXT NOT NULL, next_segment INTEGER NOT NULL, created INTEGER NOT NULL)`);
     this.sql.exec(`CREATE TABLE IF NOT EXISTS streams (locator TEXT NOT NULL, log_instance TEXT NOT NULL, next_n INTEGER NOT NULL, last_seq INTEGER NOT NULL, last_digest TEXT NOT NULL, PRIMARY KEY (locator, log_instance))`);
+    // (M2: a stream's stale marker, from the position on which a page found it disagrees with the runner (S6d); added
+    //  to a table an earlier version made, where existing rows read NULL: not stale)
+    const cols = this.sql.exec(`PRAGMA table_info(streams)`).toArray().map((c) => String(c.name));
+    if (!cols.includes("stale_from")) this.sql.exec(`ALTER TABLE streams ADD COLUMN stale_from INTEGER`);
+    if (!cols.includes("stale_reason")) this.sql.exec(`ALTER TABLE streams ADD COLUMN stale_reason TEXT`);
     this.sql.exec(`CREATE TABLE IF NOT EXISTS segments (locator TEXT NOT NULL, segment INTEGER NOT NULL, log_instance TEXT NOT NULL, first_n INTEGER NOT NULL, last_n INTEGER NOT NULL, first_seq INTEGER NOT NULL, last_seq INTEGER NOT NULL, prev TEXT NOT NULL, digest TEXT NOT NULL, key_id TEXT NOT NULL, nonce INTEGER NOT NULL, len INTEGER NOT NULL, size INTEGER NOT NULL, PRIMARY KEY (locator, segment))`);
     this.sql.exec(`CREATE INDEX IF NOT EXISTS segments_stream ON segments (locator, log_instance, first_n)`);
     this.sql.exec(`CREATE TABLE IF NOT EXISTS reservations (id TEXT PRIMARY KEY, locator TEXT NOT NULL, log_instance TEXT NOT NULL, segment INTEGER NOT NULL, first_n INTEGER NOT NULL, last_n INTEGER NOT NULL, first_seq INTEGER NOT NULL, last_seq INTEGER NOT NULL, prev TEXT NOT NULL, key_id TEXT NOT NULL, nonce INTEGER NOT NULL, bytes INTEGER NOT NULL, state TEXT NOT NULL, expires INTEGER NOT NULL)`);
@@ -245,9 +263,10 @@ export class MirrorAccount extends DurableObject<MirrorEnv> {
   // ---- the account
 
   /** On or off, the encryption mode, conversations and bytes held. */
-  async status(a: { account: string; hash: string }): Promise<R<{ state: string; mode: string; conversations: number; bytes: number }>> {
+  async status(a: { account: string; hash: string }): Promise<R<{ state: string; mode: string; conversations: number; bytes: number; pending: number }>> {
     if (!this.own(a.account, a.hash)) return fail("forbidden");
-    return { ok: { state: this.get("state") ?? "off", mode: this.get("mode") ?? "B", conversations: this.num(`SELECT COUNT(*) AS n FROM convs`), bytes: this.held() } };
+    // (pending: R2 deletions still to do; the page says "Mirrored history deleted" only once it is 0)
+    return { ok: { state: this.get("state") ?? "off", mode: this.get("mode") ?? "B", conversations: this.num(`SELECT COUNT(*) AS n FROM convs`), bytes: this.held(), pending: this.num(`SELECT COUNT(*) AS n FROM outbox`) } };
   }
 
   /** Turn the mirror on with the Worker's freshly wrapped DEK; if it is on with a key already, that key stays. */
@@ -339,7 +358,7 @@ export class MirrorAccount extends DurableObject<MirrorEnv> {
   }
 
   /** The account's conversations, and what each stream has mirrored (the page uploads from there). */
-  async list(a: { account: string; hash: string }): Promise<R<{ conversations: { conversation: string; locator: string; mode: string; streams: { log_instance: string; next_n: number; last_seq: number; last_digest: string }[] }[] }>> {
+  async list(a: { account: string; hash: string }): Promise<R<{ conversations: { conversation: string; locator: string; mode: string; streams: ({ log_instance: string; next_n: number; last_seq: number; last_digest: string } & Stale)[] }[] }>> {
     if (!this.own(a.account, a.hash)) return fail("forbidden");
     if (!this.on()) return fail("off");
     const streams = this.sql.exec(`SELECT * FROM streams ORDER BY log_instance`).toArray();
@@ -349,10 +368,27 @@ export class MirrorAccount extends DurableObject<MirrorEnv> {
           conversation: String(c.conversation),
           locator: String(c.locator),
           mode: String(c.mode),
-          streams: streams.filter((s) => s.locator === c.locator).map((s) => ({ log_instance: String(s.log_instance), next_n: Number(s.next_n), last_seq: Number(s.last_seq), last_digest: String(s.last_digest) })),
+          streams: streams.filter((s) => s.locator === c.locator).map((s) => ({ log_instance: String(s.log_instance), next_n: Number(s.next_n), last_seq: Number(s.last_seq), last_digest: String(s.last_digest), ...staleOf(s) })),
         })),
       },
     };
+  }
+
+  /**
+   * Mark a stream stale from position `from_n` (S6d): only an existing stream, only a committed position
+   * (1 <= from_n < next_n).  Monotonic: an earlier position replaces both the position and the reason, an equal or
+   * later one changes nothing, and nothing clears a mark but deleting the stream.  No bodies, no digests.
+   */
+  async markStale(a: { account: string; hash: string; locator: string; log_instance: string; from_n: number; reason: string }): Promise<R<Stale>> {
+    if (!this.own(a.account, a.hash)) return fail("forbidden");
+    if (!this.on()) return fail("off");
+    if (!LOCATOR.test(a.locator) || typeof a.log_instance !== "string" || !LOG_INSTANCE.test(a.log_instance) || !(STALE_REASONS as readonly string[]).includes(a.reason) || !isPos(a.from_n)) return fail("invalid");
+    if (this.tombed("locator", a.locator)) return fail("missing");
+    const s = this.one(`SELECT next_n FROM streams WHERE locator = ? AND log_instance = ?`, a.locator, a.log_instance);
+    if (!s) return fail("missing"); // (never a new row: a mark can't add streams past MIRROR_LIMITS.streams)
+    if (a.from_n >= Number(s.next_n)) return fail("invalid");
+    this.sql.exec(`UPDATE streams SET stale_from = ?, stale_reason = ? WHERE locator = ? AND log_instance = ? AND (stale_from IS NULL OR stale_from > ?)`, a.from_n, a.reason, a.locator, a.log_instance, a.from_n);
+    return { ok: staleOf(this.one(`SELECT stale_from, stale_reason FROM streams WHERE locator = ? AND log_instance = ?`, a.locator, a.log_instance)!) };
   }
 
   /** Delete one conversation: its objects into the outbox, its rows now, its locator tombstoned. */
@@ -498,13 +534,14 @@ export class MirrorAccount extends DurableObject<MirrorEnv> {
    * The stream's segment that starts at position `after + 1`, with what the reader checks it against: its record,
    * the previous segment's digest (the chain), and the key's wraps.  `end` if there is none.
    */
-  async readPlan(a: { account: string; hash: string; locator: string; log_instance: string; after: number }): Promise<R<{ end: true } | { seg: SegmentRecord; key: string; chain: string; wraps: Wrapped[]; account: string }>> {
+  async readPlan(a: { account: string; hash: string; locator: string; log_instance: string; after: number }): Promise<R<({ end: true } | { seg: SegmentRecord; key: string; chain: string; wraps: Wrapped[]; account: string }) & Stale>> {
     if (!this.own(a.account, a.hash)) return fail("forbidden");
     if (!this.on()) return fail("off");
     if (!LOCATOR.test(a.locator) || !LOG_INSTANCE.test(a.log_instance) || !Number.isSafeInteger(a.after) || a.after < 0) return fail("invalid");
     if (this.tombed("locator", a.locator) || !this.one(`SELECT 1 AS x FROM convs WHERE locator = ?`, a.locator)) return fail("missing");
+    const stale = staleOf(this.one(`SELECT stale_from, stale_reason FROM streams WHERE locator = ? AND log_instance = ?`, a.locator, a.log_instance));
     const r = this.one(`SELECT * FROM segments WHERE locator = ? AND log_instance = ? AND first_n = ?`, a.locator, a.log_instance, a.after + 1);
-    if (!r) return { ok: { end: true } };
+    if (!r) return { ok: { end: true, ...stale } };
     const seg: SegmentRecord = {
       locator: String(r.locator), segment: Number(r.segment), log_instance: String(r.log_instance), first_n: Number(r.first_n), last_n: Number(r.last_n),
       first_seq: Number(r.first_seq), last_seq: Number(r.last_seq), prev: String(r.prev), digest: String(r.digest), key_id: String(r.key_id), nonce: Number(r.nonce), len: Number(r.len), size: Number(r.size),
@@ -513,7 +550,7 @@ export class MirrorAccount extends DurableObject<MirrorEnv> {
     if (a.after !== 0 && !before) return fail("missing");
     // (a key that is gone, or tombstoned: a restored index reads nothing)
     if (this.tombed("key", seg.key_id) || seg.key_id !== this.currentKey()) return fail("missing");
-    return { ok: { seg, key: objectKey(this.get("hash")!, seg.locator, seg.segment), chain: before ? String(before.digest) : ZERO_DIGEST, wraps: this.wrapsOf(seg.key_id), account: this.get("account")! } };
+    return { ok: { seg, key: objectKey(this.get("hash")!, seg.locator, seg.segment), chain: before ? String(before.digest) : ZERO_DIGEST, wraps: this.wrapsOf(seg.key_id), account: this.get("account")!, ...stale } };
   }
 
   // ---- the alarm: expired reservations, the outbox, the claim

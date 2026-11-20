@@ -825,6 +825,46 @@ lap('S7a, S8');
 }
 
 lap('S5a: no plai');
+// ---- M2: the persisted stale mark (S6d-2): only existing streams, only committed positions, monotonic, on every device
+{
+  const loc = (await pa.conv("stale")).body.locator;
+  await pa.append(loc, body(1, 4));
+  await pa.append(loc, body(5, 4));
+  const mark = async (b) => asJson(await site("/api/mirror/v1/stale", { method: "POST", headers: pa.h({ "content-type": "application/json" }), body: JSON.stringify(b) }));
+  const streamsOf = async () => (await state(pa.hash)).streams.length;
+  const n0 = await streamsOf();
+  const none = await mark({ locator: loc, log_instance: "nosuchrun", from_n: 1, reason: "other_run" });
+  ok(none.status === 404 && none.body.error === "missing" && (await streamsOf()) === n0, `stale: a stream that doesn't exist is missing, and no row is made (${none.status})`);
+  let fakes = 0;
+  for (let i = 0; i < 40; i++) if ((await mark({ locator: loc, log_instance: "fake" + i, from_n: 1, reason: "differs" })).status === 404) fakes++;
+  ok(fakes === 40 && (await streamsOf()) === n0, `stale: 40 made-up instances can't grow the table (${fakes} refused, streams ${await streamsOf()} = ${n0})`);
+  const zero = await mark({ locator: loc, log_instance: INST, from_n: 0, reason: "differs" });
+  const past = await mark({ locator: loc, log_instance: INST, from_n: 9, reason: "differs" }); // (next_n is 9: nothing committed there)
+  const bad = await mark({ locator: loc, log_instance: INST, from_n: 2, reason: "because" });
+  const extra = await mark({ locator: loc, log_instance: INST, from_n: 2, reason: "differs", text: "no bodies" });
+  ok(zero.status === 400 && past.status === 400 && past.body.error === "invalid" && bad.status === 400 && extra.status === 400, `stale: position 0, a position not committed, an unknown reason, an extra field are refused (${zero.status} ${past.status} ${bad.status} ${extra.status})`);
+  const m1 = await mark({ locator: loc, log_instance: INST, from_n: 6, reason: "differs" });
+  ok(m1.status === 200 && JSON.stringify(m1.body) === JSON.stringify({ stale_from: 6, stale_reason: "differs" }), `stale: marked from 6, the answer only position and reason (${JSON.stringify(m1.body)})`);
+  const m2 = await mark({ locator: loc, log_instance: INST, from_n: 3, reason: "other_run" });
+  ok(m2.body.stale_from === 3 && m2.body.stale_reason === "other_run", "stale: an earlier position moves the reason with it");
+  const m3 = await mark({ locator: loc, log_instance: INST, from_n: 5, reason: "conflict" });
+  const m4 = await mark({ locator: loc, log_instance: INST, from_n: 3, reason: "differs" });
+  ok(m3.body.stale_from === 3 && m3.body.stale_reason === "other_run" && m4.body.stale_from === 3 && m4.body.stale_reason === "other_run", "stale: a later or equal position changes neither (never raised, never cleared)");
+  // (another device of the account sees it, in the list and on every read answer)
+  const other = await page(A);
+  const lst = (await other.list()).body.conversations.find((c) => c.locator === loc).streams.find((x) => x.log_instance === INST);
+  const r1 = await other.read(loc, INST, 0), r2 = await other.read(loc, INST, 8);
+  ok(lst.stale_from === 3 && lst.stale_reason === "other_run" && r1.body.stale_from === 3 && r1.body.entries?.length === 4 && r2.body.end === true && r2.body.stale_from === 3, "stale: a second device's list and reads carry the mark");
+  const row = (await state(pa.hash)).streams.find((x) => x.locator === loc);
+  ok(Object.keys(row).sort().join(",") === "last_digest,last_seq,locator,log_instance,next_n,stale_from,stale_reason", `stale: the stored mark is a position and a reason, no body or digest of it (${Object.keys(row)})`);
+  ok((await site("/api/mirror/v1/audit", { method: "POST", headers: pa.h({ "content-type": "application/json" }), body: "{}" })).status === 404, "stale: the old audit route is gone");
+  // (gone with the stream: deleting the conversation removes the mark)
+  ok((await pa.del(loc)).status === 200 && !(await state(pa.hash)).streams.some((x) => x.locator === loc), "stale: deleting the conversation removes its streams and their marks");
+  // (status says how many deletions are pending: the page's "Deleting mirrored history…")
+  const st = await pa.status();
+  ok(Number.isSafeInteger(st.body.pending) && st.body.pending >= 0, `status: pending deletions (${st.body.pending})`);
+}
+
 // ---- S5a: no plaintext DEK anywhere: the objects' tables, the logs, the answers
 {
   const scanned = [];
