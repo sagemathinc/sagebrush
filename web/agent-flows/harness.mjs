@@ -233,11 +233,12 @@ async function chatSurface(site, page) {
             return void ws.close(1008, "refused");
           }
           A.live = ws;
-          ws.send(JSON.stringify({ jsonrpc: "2.0", id: m.id, result: { protocol: 1, agent: { name: "Claude", client: "claude-agent-sdk", version: "0.7.1" }, wants: { folders: ["/"], write: true, run: true }, ...(typeof p.code === "string" ? { session: A.secret } : {}) } }));
+          ws.send(JSON.stringify({ jsonrpc: "2.0", id: m.id, result: { protocol: 1, agent: { name: "Claude", client: "claude-agent-sdk", version: "0.7.2" }, wants: { folders: ["/"], write: true, run: true }, features: ["run.context"], ...(typeof p.code === "string" ? { session: A.secret } : {}) } }));
         } else if (m.id && A.pending.has(m.id)) {
           A.pending.get(m.id)(m);
           A.pending.delete(m.id);
         } else if (m.method === "grant.changed") A.grants.push(m.params);
+        else if (m.method === "page.features") A.features = Array.isArray(m.params?.features) ? m.params.features : [];
         // (the person's message: a turn starts, and the case's tool calls are played in it, as sagebrush-agent's turns)
         else if (m.method === "chat.message") A.asked.push(m.params);
       },
@@ -259,7 +260,11 @@ async function chatSurface(site, page) {
     if (!name.startsWith("workspace_")) return { text: "no such tool here: " + name, structured: null, isError: true };
     const callId = "c" + ++A.n, t0 = Date.now();
     if (A.turn) event({ type: "tool_call_started", call: callId, tool: "tool", name, summary: args.path ?? "" });
-    const r = await call("workspace." + name.slice("workspace_".length), args);
+    // (run.context, as sagebrush-agent 0.7.2 does where the page offers it: a run says its chat and turn after the
+    //  model's arguments)
+    const runs = ["workspace_run_notebook", "workspace_run_file", "workspace_latex_build"].includes(name);
+    const ctx = runs && A.turn && A.features?.includes("run.context") ? { conversation: A.turn.conversation, turn_id: A.turn.id } : {};
+    const r = await call("workspace." + name.slice("workspace_".length), { ...args, ...ctx });
     const error = r.error ? { code: r.error.data?.code ?? r.error.code, message: r.error.data?.message ?? r.error.message } : null;
     const text = JSON.stringify(error ?? r.result).slice(0, 4000);
     if (A.turn) {
@@ -267,7 +272,9 @@ async function chatSurface(site, page) {
       const p = args.path;
       if (!error && typeof p === "string" && (name === "workspace_create" || name === "workspace_write")) {
         const json = args.content?.json;
-        if (json || p.endsWith(".ipynb")) event({ type: "artifact", id: p, kind: "notebook", title: p.split("/").pop(), path: p, body: `${json?.cells?.length ?? 0} cells (${args.mode ?? json?.mode ?? "python"})` });
+        // (sagebrush-agent 0.7.2's artifactKind: a .board.json as a board, shown with its Open)
+        if (/\.board\.json$/i.test(p)) event({ type: "artifact", id: p, kind: "board", title: p.split("/").pop(), path: p, body: args.content?.text ?? (json ? JSON.stringify(json) : "") });
+        else if (json || p.endsWith(".ipynb")) event({ type: "artifact", id: p, kind: "notebook", title: p.split("/").pop(), path: p, body: `${json?.cells?.length ?? 0} cells (${args.mode ?? json?.mode ?? "python"})` });
         // (sagebrush-agent's artifactKind: Markdown as markdown, anything else as code in its extension's language)
         else event({ type: "artifact", id: p, ...(/\.(md|markdown)$/i.test(p) ? { kind: "markdown" } : { kind: "code", lang: /\.([A-Za-z0-9]+)$/.exec(p)?.[1].toLowerCase() }), title: p.split("/").pop(), path: p, body: args.content?.text ?? args.text ?? "" });
       }

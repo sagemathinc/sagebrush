@@ -20,7 +20,6 @@ export default {
   id: "board",
   prompt: "make me a board about the primes: an intro, a plot of π(x) against x/log x, and a count of the primes up to N",
   surfaces: ["mcp", "chat"],
-  gaps: { chat: "sagebrush-agent 0.7.1 sends a board it writes as a notebook artifact, so the pane shows no board card with Open; 0.7.2 sends it as a board" },
   grant: { folders: ["/"], write: true, run: true },
   agent: [
     { tool: "workspace_create", args: { path: PATH, content: { json: board(1000) } } },
