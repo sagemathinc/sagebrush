@@ -253,6 +253,8 @@ export const STALE_TITLE = "Changed since the last Run: Shift+Enter or Run updat
 /** A code item not run yet, in the editor that can run it (Run is there whenever the document has code; on a phone,
  * Shift+Enter may not be, so Run is named first); elsewhere (a published page, an example, the CLI) just "not run". */
 export const RUN_HINT = "not run yet (press Run or Shift+Enter)";
+/** The same while presenting, where a slide has no Run button and Shift+Enter runs the code (present.ts). */
+export const PRESENT_RUN_HINT = "not run yet (press Shift+Enter)";
 /** Why an item a Run didn't reach keeps its value from an earlier one (@sagebrush's ruling and board's words, Nov 12),
  *  by the reason the Run wrote (run-core keepLast, the results file's `why`): after a failed item, the Run stopped, or
  *  the session ended. Only these are shown as such a value's title. */
