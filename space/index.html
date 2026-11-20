@@ -3,6 +3,7 @@
 <head>
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
+<meta name="robots" content="noindex">
 <title>Whitespace · Sagebrush prototype</title>
 <style>
   /* light by default (a white space); dark when the system is dark, or when chosen (Theme) */
@@ -23,6 +24,9 @@
   .embed #panel { width: 260px; top: 8px; left: 8px; }
   .embed #space { display: none; }
   #title { font-weight: 600; font-size: 15px; }
+  #alpha { position: fixed; left: 12px; bottom: 32px; z-index: 5; font-size: 11px; font-weight: 600; letter-spacing: 0.02em; padding: 2px 8px; border-radius: 999px;
+    background: #fff4d6; color: #6b4e00; border: 1px solid #e8d49a; cursor: help; }
+  :root[data-theme="dark"] #alpha { background: #3a2f12; color: #f2d58a; border-color: #6b5520; }
   #status, #hover { color: var(--muted); font-size: 12px; min-height: 16px; }
   .row { display: flex; gap: 6px; flex-wrap: wrap; }
   select, input, button { font: inherit; color: inherit; background: var(--ctl); border: 1px solid var(--ctl-line); border-radius: 6px; padding: 6px 8px; }
@@ -71,6 +75,7 @@
   /* narrow (the agents chat's pane): an open object hides the panel and the help, so the space stays in view */
   @media (max-width: 1000px) {
     body.reading #panel, #help { display: none; }
+    #alpha { bottom: 10px; left: 8px; }
     #overlay { width: min(560px, 55vw); }
   }
   #help { position: fixed; left: 12px; bottom: 10px; color: var(--muted); font-size: 12px; }
@@ -96,6 +101,7 @@
   <div id="status"></div>
 </div>
 <div id="overlay" hidden></div>
+<div id="alpha" title="A quick prototype: not reviewed, and it will change. Spaces you make may not open in a later version.">Whitespace · rough alpha</div>
 <div id="help">Drag to turn · scroll to move closer · right-drag to pan · W A S D / arrows, E Q: fly (Shift: faster) · click an object to read it · B / F: back, forward · H: see all · /: search</div>
 <script type="module" src="space.js"></script>
 </body>

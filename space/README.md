@@ -77,6 +77,16 @@ Over this connection Claude has the web and your Sagebrush files, not your disk,
 
 `bun space/test-agents-space.mjs` (from the repository's root, after the build above) checks this end to end in headless Chromium, with a stand-in for the agent.
 
+## The rough alpha (a static site)
+
+`space/build-alpha.sh` builds the whole site with the space into `web/dist` (from clean, with checks), ready for a static host that applies `web/dist/_headers` (Cloudflare Pages does): those headers give every page COOP/COEP, which the engine's interrupt needs, and each page its CSP. The engine, its worker and the space are all in `web/dist`; nothing is fetched from elsewhere. The space says "rough alpha" in its corner, and the site isn't indexed (`robots.txt`).
+
+To use the Agents page there, start the agent with that site's origin, e.g. for https://space.sagebrush.cloud:
+
+```sh
+SAGEBRUSH_AGENT_PAGE=https://space.sagebrush.cloud/agents/ npx -y https://agents.sagebrush.cloud/agents/sagebrush-agent-0.7.1.tgz --origin https://space.sagebrush.cloud
+```
+
 ## Running code
 
 Code and plots edit and run on Sagebrush's own engine (Python, Sage, MATLAB, Magma), in your browser. A Sage 3D plot becomes the object in the space. The engine is fetched from sagebrush.space by `npm run serve` on the first Run (about 37 MB, then cached in `.cache/`). Edits are kept in this browser.
