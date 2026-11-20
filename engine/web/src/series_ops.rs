@@ -36,8 +36,9 @@
 //! (its work metered, its memory on a word ledger); qpoly_divrem the same in
 //! Q[x], each coefficient in lowest terms; qpoly_scale, qpoly_derivative and
 //! qpoly_integral one polynomial times a rational, its k-th derivative and
-//! its integral with a given constant term, each coefficient in lowest
-//! terms (one path, sagebrush_arith::pscale).  qpoly_mul's admission has
+//! its integral with a given constant term, and qpoly_add and qpoly_sub two
+//! polynomials' sum and difference, each coefficient in lowest terms (one
+//! path, sagebrush_arith::pscale).  qpoly_mul's admission has
 //! two phases: the lcms' memory from the scans, their work metered (a named
 //! refusal at its limit); then the product's closed forms from the actual
 //! lcms, before any of its allocations.
@@ -69,7 +70,7 @@ pub const SMALL_MAX_REQUEST: usize = 256;
 // (the peaks: the largest of the closed forms over the admitted corners, 53.3
 // MiB for the series ops and 29.0 MiB for sigma_table, with room; the
 // corner test in tests/series_ops.rs checks them)
-pub static OPS: [SeriesOp; 12] = [
+pub static OPS: [SeriesOp; 14] = [
     SeriesOp { name: "series_mul", max_request: SERIES_MAX_REQUEST, peak: 64 * MIB, work: zseries::WORK_MAX, run: series_mul },
     SeriesOp { name: "series_pow", max_request: SERIES_MAX_REQUEST, peak: 64 * MIB, work: zseries::WORK_MAX, run: series_pow },
     SeriesOp { name: "series_euler", max_request: SMALL_MAX_REQUEST, peak: 8 * MIB, work: zseries::WORK_MAX, run: series_euler },
@@ -91,6 +92,8 @@ pub static OPS: [SeriesOp; 12] = [
     SeriesOp { name: "qpoly_scale", max_request: zmul::REQUEST_MAX as usize, peak: zmul::PEAK_MAX, work: zmul::WORK_MAX, run: qpoly_scale },
     SeriesOp { name: "qpoly_derivative", max_request: zmul::REQUEST_MAX as usize, peak: zmul::PEAK_MAX, work: zmul::WORK_MAX, run: qpoly_derivative },
     SeriesOp { name: "qpoly_integral", max_request: zmul::REQUEST_MAX as usize, peak: zmul::PEAK_MAX, work: zmul::WORK_MAX, run: qpoly_integral },
+    SeriesOp { name: "qpoly_add", max_request: zmul::REQUEST_MAX as usize, peak: zmul::PEAK_MAX, work: zmul::WORK_MAX, run: qpoly_add },
+    SeriesOp { name: "qpoly_sub", max_request: zmul::REQUEST_MAX as usize, peak: zmul::PEAK_MAX, work: zmul::WORK_MAX, run: qpoly_sub },
 ];
 
 /// The admitted request's path: run, then the reply text (an error reply
@@ -431,7 +434,8 @@ fn qpoly_divrem(req: &str, op: &SeriesOp) -> Result<String, String> {
 }
 
 /// One map's request {a, b}: a the polynomial's tokens, b one token (k, a
-/// hex integer, for the derivative).
+/// hex integer, for the derivative; a polynomial's tokens for the sum and
+/// difference).
 fn pscale_op(req: &str, op: &SeriesOp, kind: pscale::Kind) -> Result<String, String> {
     let name = op.name;
     let [a, b] = fields(req, ["a", "b"], name)?;
@@ -456,4 +460,14 @@ fn qpoly_derivative(req: &str, op: &SeriesOp) -> Result<String, String> {
 /// qpoly_integral: {a, b} -> the integral of a with constant term b.
 fn qpoly_integral(req: &str, op: &SeriesOp) -> Result<String, String> {
     pscale_op(req, op, pscale::Kind::Integral)
+}
+
+/// qpoly_add: {a, b} -> a + b (two polynomials' tokens).
+fn qpoly_add(req: &str, op: &SeriesOp) -> Result<String, String> {
+    pscale_op(req, op, pscale::Kind::Add)
+}
+
+/// qpoly_sub: {a, b} -> a - b.
+fn qpoly_sub(req: &str, op: &SeriesOp) -> Result<String, String> {
+    pscale_op(req, op, pscale::Kind::Sub)
 }

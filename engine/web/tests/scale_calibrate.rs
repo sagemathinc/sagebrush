@@ -5,7 +5,8 @@
 //! large rational s, two gcds each), product-heavy (a 64th derivative of
 //! wide coefficients, F_j's products and exact divisions) and token-heavy
 //! (an integral of many small coefficients: the parse, the word gcd and the
-//! emit per token).  The cap's time bound is the worst ns/unit times
+//! emit per token), and sum-heavy (a sum with large coprime denominators:
+//! both of a pair's gcds run).  The cap's time bound is the worst ns/unit times
 //! zmul::WORK_MAX.
 
 use sagebrush_arith::coprime::Meter;
@@ -33,11 +34,15 @@ pub fn shapes() -> Vec<(&'static str, Kind, String, String)> {
     let gcd_a = (0..2000).map(|i| format!("{:x}{}/{:x}{}", i * 7 + 1, "d".repeat(150), i % 97 + 3, "b".repeat(100))).collect::<Vec<_>>().join(",");
     let gcd_s = format!("-{}/{}", "e7".repeat(62), "9".repeat(100));
     let prod_a = (0..20000).map(|i| format!("{:x}{}", i + 1, "a".repeat(75))).collect::<Vec<_>>().join(",");
+    // (large coprime denominators: both gcds of every pair run)
+    let sum_a = (0..20_000).map(|i| format!("{:x}{}/{:x}{}", i + 1, "c".repeat(60), 2 * i + 1, "f".repeat(40))).collect::<Vec<_>>().join(",");
+    let sum_b = (0..20_000).map(|i| format!("-{:x}{}/{:x}{}", i + 7, "9".repeat(60), 2 * i + 3, "e".repeat(40))).collect::<Vec<_>>().join(",");
     let tok_a = (0..200_000).map(|i| format!("{:x}/{:x}", (i * 31) % 4093 + 1, i % 61 + 2)).collect::<Vec<_>>().join(",");
     vec![
         ("gcd-heavy: 2000 rationals by a 500/400-bit rational", Kind::Scale, gcd_a, gcd_s),
         ("product-heavy: the 64th derivative of 20,000 300-bit integers", Kind::Derivative, prod_a, "40".to_string()),
         ("token-heavy: the integral of 200,000 small rationals", Kind::Integral, tok_a, "1/3".to_string()),
+        ("sum-heavy: two 20,000-term polynomials with large coprime denominators", Kind::Add, sum_a, sum_b),
     ]
 }
 

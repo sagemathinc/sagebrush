@@ -1,9 +1,9 @@
-// qpoly_scale, qpoly_derivative and qpoly_integral on the production engine
-// module (wasm/sagebrush-engine.wasm): a Stop's wall-clock latency on the
-// calibration's slowest shapes.  The engine asks the host every 2^20 work
-// units; units differ in cost, so the latency is measured: the host's flag is
-// set partway through a call (at a wall-clock time T), and the call must trap
-// within the deadline after T.
+// qpoly_scale, qpoly_derivative, qpoly_integral and qpoly_add on the
+// production engine module (wasm/sagebrush-engine.wasm): a Stop's wall-clock
+// latency on the calibration's slowest shapes.  The engine asks the host
+// every 2^20 work units; units differ in cost, so the latency is measured:
+// the host's flag is set partway through a call (at a wall-clock time T),
+// and the call must trap within the deadline after T.
 import test from "node:test";
 import assert from "node:assert/strict";
 import { readFileSync } from "node:fs";
@@ -36,6 +36,7 @@ const hx = (n: number) => n.toString(16);
 const shapes: [string, string, string, string][] = [
   ["product-heavy: the 64th derivative of 20,000 300-bit integers", "qpoly_derivative", range(20000, (i) => `${hx(i + 1)}${"a".repeat(75)}`), "40"],
   ["token-heavy: the integral of 200,000 small rationals", "qpoly_integral", range(200000, (i) => `${hx(((i * 31) % 4093) + 1)}/${hx((i % 61) + 2)}`), "1/3"],
+  ["sum-heavy: two 20,000-term polynomials with large coprime denominators", "qpoly_add", range(20000, (i) => `${hx(i + 1)}${"c".repeat(60)}/${hx(2 * i + 1)}${"f".repeat(40)}`), range(20000, (i) => `-${hx(i + 7)}${"9".repeat(60)}/${hx(2 * i + 3)}${"e".repeat(40)}`)],
   ["gcd-heavy: 2000 rationals by a 500/400-bit rational", "qpoly_scale", range(2000, (i) => `${hx(i * 7 + 1)}${"d".repeat(150)}/${hx((i % 97) + 3)}${"b".repeat(100)}`), `-${"e7".repeat(62)}/${"9".repeat(100)}`],
 ];
 

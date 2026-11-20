@@ -86,6 +86,21 @@ fn want(kind: Kind, a: &str, b: &str) -> String {
             }
             ok(&list(&out))
         }
+        Kind::Add | Kind::Sub => {
+            let d = coeffs(b);
+            let neg = Q::new(-IBig::ONE, UBig::ONE);
+            let one = Q::new(IBig::ONE, UBig::ONE);
+            let zero = Q::new(IBig::ZERO, UBig::ONE);
+            let s = if kind == Kind::Sub { &neg } else { &one };
+            let out: Vec<Q> = (0..c.len().max(d.len()))
+                .map(|i| {
+                    let x = c.get(i).unwrap_or(&zero);
+                    let y = d.get(i).unwrap_or(&zero).mul(s);
+                    Q::new(&x.0 * IBig::from(y.1.clone()) + &y.0 * IBig::from(x.1.clone()), &x.1 * &y.1)
+                })
+                .collect();
+            ok(&list(&out))
+        }
         Kind::Integral => {
             let mut out = vec![Q::parse(b)];
             for (i, x) in c.iter().enumerate() {
@@ -197,6 +212,37 @@ fn hand_rows() {
     assert!(call(Kind::Derivative, "1,2", "-1").is_err());
 }
 
+/// The sum and difference against the reference: random operands of unequal
+/// lengths (integer-only, shared and coprime denominators, zeros), and the
+/// hand rows: f - f is "", the top coefficients cancelling with interior
+/// zeros kept, one side zero, equal denominators, a unit denominator, a
+/// longer b (its tail's signs flipped for the difference, 0 kept).
+#[test]
+fn sum_and_difference_match_the_reference() {
+    let mut g = Rng(0x5a5a_1120);
+    for case in 0..400 {
+        let (la, lb) = (g.below(30), g.below(30));
+        let (nb, db) = (1 + g.below(250), if case % 3 == 0 { 0 } else { g.below(150) });
+        let a = g.poly(la, nb, db);
+        let b = if case % 5 == 0 { a.clone() } else { g.poly(lb, nb, db) };
+        check(Kind::Add, &a, &b);
+        check(Kind::Sub, &a, &b);
+    }
+    let f = "1/2,0,-3/7,5,0,9/4";
+    assert_eq!(call(Kind::Sub, f, f).unwrap(), ok(""));
+    // (the top three cancel; the interior zero below them stays)
+    assert_eq!(call(Kind::Sub, "1,0,3,4,5,6", "0,0,2,4,5,6").unwrap(), ok("1,0,1"));
+    assert_eq!(call(Kind::Add, "1/2,1/3", "-1/2,-1/3").unwrap(), ok(""));
+    for (a, b) in [("", "1,2"), ("1,2", ""), ("", ""), ("0,0", "0"), ("1/6,5/6", "1/6,-5/6"), ("1/6,1/10", "1/15,1/14"), ("3,2", "1/2,7/9"), ("1/2", "1,-2,0,3/5"), ("7", "1,0,0,-1"), ("1/4,0", "-1/4")] {
+        check(Kind::Add, a, b);
+        check(Kind::Sub, a, b);
+    }
+    assert_eq!(call(Kind::Sub, "7", "1,0,0,-1").unwrap(), ok("6,0,0,1"));
+    assert_eq!(call(Kind::Sub, "", "1,0,-2/3").unwrap(), ok("-1,0,2/3"));
+    // (hex: 1/6 + 1/21 = 3/14, 1/16 + 1/20 = 9/80)
+    assert_eq!(call(Kind::Add, "1/6,1/10", "1/15,1/14").unwrap(), ok("3/e,9/50"));
+}
+
 // ---- the closed forms ----
 
 /// The reply bound: integer arithmetic, checked; at and around powers of 16;
@@ -215,6 +261,18 @@ fn reply_bounds() {
     assert_eq!(reply_bound(Kind::Scale, 0, u64::MAX, "3", 0), None);
     assert_eq!(reply_bound(Kind::Derivative, 0, u64::MAX, "1", u64::MAX - 1), None);
     assert_eq!(reply_bound(Kind::Integral, u64::MAX - 5, 1, "1", 0), None);
+    // the sum's bound: per pair max(n_a + d_b, n_b + d_a) + 1 + d_a + d_b + 2
+    // (a missing denominator counted as "1"), a tail token + 1, commas, 9
+    assert_eq!(pair_bound("3", 1, "5", 1), Some(9 + (2 + 1 + 2 + 2)));
+    assert_eq!(pair_bound("1/2,7", 2, "-3/4", 1), Some(9 + (2 + 1 + 2 + 2) + (1 + 1) + 1));
+    assert_eq!(pair_bound("", 0, "ab", 1), Some(9 + 3));
+    for (a, b) in [("1/2,7", "-3/4"), ("ff/7,0,1", "1/ab,2"), ("1/2,1/3", "-1/2,-1/3")] {
+        for kind in [Kind::Add, Kind::Sub] {
+            let (fa, fb) = (scan(a).unwrap(), scan(b).unwrap());
+            let Ok(Ok(plan)) = admit(kind, &fa, &fb, r_of(a, b), &CAPS) else { panic!() };
+            assert!(call(kind, a, b).unwrap().len() as u64 <= plan.bound);
+        }
+    }
     // the exact pins: (shape, its reply, the bound)
     for (kind, a, b, reply, bound) in [
         // a sign gained and a slash: "3" * -1/2 -> "-3/2" (the 1 byte of
@@ -265,6 +323,8 @@ fn shapes() -> Vec<(Kind, String, String)> {
         (Kind::Derivative, big(&mut g, 200, 300, 200), "40".to_string()),
         (Kind::Derivative, big(&mut g, 300, 64, 64), "1".to_string()),
         (Kind::Integral, big(&mut g, 300, 300, 300), "-5/7".to_string()),
+        (Kind::Add, big(&mut g, 300, 300, 200), big(&mut g, 250, 300, 200)),
+        (Kind::Sub, big(&mut g, 200, 200, 0), big(&mut g, 300, 100, 100)),
     ]
 }
 

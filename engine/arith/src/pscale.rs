@@ -13,6 +13,15 @@
 //!   the zero polynomial before any arithmetic; k = 0 copies the tokens.
 //! - **integral** (`b` = the constant term): the coefficient of x^(i+1) is
 //!   a_i/(i+1), reduced by g = gcd(a_n, i+1), a word.
+//! - **sum and difference** (`qpoly_add`, `qpoly_sub`; `b` a polynomial, the
+//!   add note r1): for x = a_n/a_d and y = +-b_n/b_d, with g = gcd(a_d, b_d),
+//!   t = a_n (b_d/g) +- b_n (a_d/g) and h = gcd(t, g), x +- y = (t/h) /
+//!   ((a_d/g)(b_d/h)), in lowest terms when x and y are (Knuth 4.5.1).  g is
+//!   a_d itself when the denominators are equal (a charged compare) and 1
+//!   when either is 1; h is 1 when g is.  Past the shorter operand each
+//!   coefficient is copied (b's with its sign flipped for the difference).
+//!   Cancellation can zero the top coefficients: the arenas keep them, and
+//!   the reply ([`trimmed`]) stops at the last nonzero one.
 //!
 //! Tokens not in lowest terms give the right values, possibly not in lowest
 //! terms (the Python side sends Fractions and ints, which are).
@@ -42,6 +51,8 @@ pub enum Kind {
     Scale,
     Derivative,
     Integral,
+    Add,
+    Sub,
 }
 
 impl Kind {
@@ -50,6 +61,8 @@ impl Kind {
             Kind::Scale => "scaling",
             Kind::Derivative => "derivative",
             Kind::Integral => "integral",
+            Kind::Add => "sum",
+            Kind::Sub => "difference",
         }
     }
 }
@@ -108,8 +121,42 @@ pub fn reply_bound(kind: Kind, prefix: u64, na: u64, b: &str, k: u64) -> Option<
             let per = hex_digits_of_bits(bit_length(na)).checked_add(1)?;
             (b.len() as u64).checked_add(1)?.checked_add(prefix)?.checked_add(na.checked_mul(per)?)?
         }
+        // (their bound is [`pair_bound`]'s, from both operands' tokens)
+        Kind::Add | Kind::Sub => return None,
     };
     FIXED_BYTES.checked_add(body)
+}
+
+/// The sum's and difference's reply bound in bytes, from the two operands'
+/// first `na` and `nb` tokens (checked; None on overflow).  For a pair of
+/// tokens with numerator and denominator digits (n_a, d_a) and (n_b, d_b) (a
+/// missing denominator counted as its digit "1"): the numerator has at most
+/// max(n_a + d_b, n_b + d_a) + 1 digits, the denominator d_a + d_b, plus a
+/// sign and a slash.  Past the shorter operand a token keeps its bytes, plus
+/// a sign.  Then the commas and the fixed bytes.  One pass, nothing
+/// allocated.
+pub fn pair_bound(a: &str, na: u64, b: &str, nb: u64) -> Option<u64> {
+    let (mut ia, mut ib) = (a.split(',').take(na as usize), b.split(',').take(nb as usize));
+    let mut total = FIXED_BYTES;
+    let mut i = 0u64;
+    loop {
+        if i & 0xfff == 0 {
+            sagebrush_interrupt::check_coarse();
+        }
+        let per = match (ia.next(), ib.next()) {
+            (None, None) => break,
+            (Some(t), None) | (None, Some(t)) => (t.len() as u64).checked_add(1)?,
+            (Some(x), Some(y)) => {
+                let ((_, xn, xd), (_, yn, yd)) = (parts(x), parts(y));
+                let (xn, xd, yn, yd) = (xn.len() as u64, xd.len() as u64, yn.len() as u64, yd.len() as u64);
+                let num = xn.checked_add(yd)?.max(yn.checked_add(xd)?).checked_add(1)?;
+                num.checked_add(xd)?.checked_add(yd)?.checked_add(2)?
+            }
+        };
+        total = total.checked_add(per)?;
+        i += 1;
+    }
+    total.checked_add(i.saturating_sub(1))
 }
 
 /// The fixed rows, in words: the request (ceil(R / 8)) and the call's owners
@@ -417,11 +464,113 @@ fn integral<'l>(a: &Factor, na: u64, b: &str, led: &'l Words, m: &mut Meter) -> 
     Ok(out)
 }
 
-/// The reply's exact bytes, `{"ok":"..."}` with every computed token.
+/// The sum's and difference's scratch coefficients.
+struct Pair<'l> {
+    an: Coef<'l>,
+    ad: Coef<'l>,
+    bn: Coef<'l>,
+    bd: Coef<'l>,
+    g: Coef<'l>,
+    h: Coef<'l>,
+    u: Coef<'l>,
+    v: Coef<'l>,
+    w: Coef<'l>,
+    z: Coef<'l>,
+}
+
+/// x + y for x = a_n/a_d and y = (-1)^y_neg b_n/b_d (the operands in `p`),
+/// pushed to the arenas reduced (the module docs' formula).
+fn add_one(p: &mut Pair, y_neg: bool, out: &mut Mapped, s: &mut Ints, m: &mut Meter) -> Result<(), DivFault> {
+    if p.bn.len == 0 {
+        return push(out, p.an.mag(), p.an.neg, p.ad.mag(), m);
+    }
+    if p.an.len == 0 {
+        return push(out, p.bn.mag(), y_neg, p.bd.mag(), m);
+    }
+    // g: a_d itself when the denominators are equal (the compare charged), 1
+    // when either is 1, else their gcd
+    m.add(p.ad.len.min(p.bd.len) + 1)?;
+    if p.ad.mag() == p.bd.mag() {
+        let ad = p.ad.mag();
+        p.g.set(ad, false, m)?;
+    } else if p.ad.is_one() || p.bd.is_one() {
+        p.g.set(&[1], false, m)?;
+    } else {
+        s.gcd(p.ad.mag(), p.bd.mag(), &mut p.g, m)?;
+    }
+    // w = a_d/g, z = b_d/g; t = a_n z + y_n w, in u
+    quotient(p.ad.mag(), &p.g, &mut p.w, s, m)?;
+    quotient(p.bd.mag(), &p.g, &mut p.z, s, m)?;
+    let n = s.mul(p.an.mag(), p.z.mag(), m)?;
+    p.u.set(&s.p.v[..n], p.an.neg, m)?;
+    let n = s.mul(p.bn.mag(), p.w.mag(), m)?;
+    p.v.set(&s.p.v[..n], y_neg, m)?;
+    let (vm, vn) = (p.v.mag(), p.v.neg);
+    p.u.sub_signed(vm, !vn, m)?;
+    if p.u.len == 0 {
+        return push(out, &[], false, &[], m);
+    }
+    // h = gcd(t, g), 1 when g is; the numerator t/h, the denominator w (b_d/h)
+    if p.g.is_one() {
+        p.h.set(&[1], false, m)?;
+    } else {
+        s.gcd(p.u.mag(), p.g.mag(), &mut p.h, m)?;
+    }
+    quotient(p.u.mag(), &p.h, &mut p.v, s, m)?;
+    out.num.push(p.v.mag(), p.u.neg, m)?;
+    quotient(p.bd.mag(), &p.h, &mut p.z, s, m)?;
+    let n = s.mul(p.w.mag(), p.z.mag(), m)?;
+    out.den.push(&s.p.v[..n], false, m)
+}
+
+/// The sum's or difference's coefficients: pairs, then the longer
+/// operand's tail copied (b's signs flipped for the difference).
+fn add_sub<'l>(a: &Factor, na: u64, b: &Factor, nb: u64, sub: bool, led: &'l Words, m: &mut Meter) -> Result<Mapped<'l>, DivFault> {
+    let mut s = Ints::new(led, m)?;
+    let t = |m: &mut Meter| Coef::tagged(led, 0, "scratch", m);
+    let mut p = Pair { an: t(m)?, ad: t(m)?, bn: t(m)?, bd: t(m)?, g: t(m)?, h: t(m)?, u: t(m)?, v: t(m)?, w: t(m)?, z: t(m)? };
+    let mut out = Mapped { num: Arena::new(led, "num arena", m)?, den: Arena::new(led, "den arena", m)? };
+    let (mut ia, mut ib) = (a.text.split(',').take(na as usize), b.text.split(',').take(nb as usize));
+    loop {
+        match (ia.next(), ib.next()) {
+            (None, None) => break,
+            (Some(x), None) => {
+                load(x, &mut p.an, &mut p.ad, m)?;
+                push(&mut out, p.an.mag(), p.an.neg, p.ad.mag(), m)?;
+            }
+            (None, Some(y)) => {
+                load(y, &mut p.bn, &mut p.bd, m)?;
+                push(&mut out, p.bn.mag(), p.bn.neg != sub, p.bd.mag(), m)?;
+            }
+            (Some(x), Some(y)) => {
+                load(x, &mut p.an, &mut p.ad, m)?;
+                load(y, &mut p.bn, &mut p.bd, m)?;
+                let y_neg = p.bn.neg != sub;
+                add_one(&mut p, y_neg, &mut out, &mut s, m)?;
+            }
+        }
+    }
+    Ok(out)
+}
+
+/// The tokens the reply holds: through the last nonzero numerator (the
+/// arenas keep the zeros a cancellation leaves on top).  The one count both
+/// [`reply_bytes`] and [`emit`] use.
+pub fn trimmed(mp: &Mapped) -> usize {
+    let mut n = 0;
+    for (i, (x, _)) in mp.num.fwd().enumerate() {
+        if !x.is_empty() {
+            n = i + 1;
+        }
+    }
+    n
+}
+
+/// The reply's exact bytes, `{"ok":"..."}` with every token [`trimmed`] keeps.
 pub fn reply_bytes(out: &Mapped) -> Option<u64> {
     let mut total = FIXED_BYTES;
     let mut count = 0u64;
-    for ((x, neg), (y, _)) in out.num.fwd().zip(out.den.fwd()) {
+    for ((x, neg), (y, _)) in out.num.fwd().zip(out.den.fwd()).take(trimmed(out)) {
         total = total.checked_add(token_bytes(x, neg, Some(y)))?;
         count += 1;
     }
@@ -436,7 +585,7 @@ pub fn emit(mp: &Mapped, out: &mut String, m: &mut Meter) -> Result<(), DivFault
     sagebrush_interrupt::check_coarse();
     let cap = out.capacity();
     out.push_str("{\"ok\":\"");
-    for (i, ((x, neg), (y, _))) in mp.num.fwd().zip(mp.den.fwd()).enumerate() {
+    for (i, ((x, neg), (y, _))) in mp.num.fwd().zip(mp.den.fwd()).take(trimmed(mp)).enumerate() {
         m.add(4 * (x.len() + y.len()) + 1)?;
         if i > 0 {
             out.push(',');
@@ -476,8 +625,8 @@ fn reserve_reply(bytes: u64, led: &Words) -> Result<(String, Reserved<'_>), DivF
     Ok((out, held))
 }
 
-/// A reply of the first `na` tokens copied (`flip`: each nonzero token's
-/// sign flipped), reserved exactly from one metered pass.
+/// A reply of the first `na` tokens of `a` copied (`flip`: each nonzero
+/// token's sign flipped), reserved exactly from one metered pass.
 fn copy_reply(a: &Factor, na: u64, flip: bool, led: &Words, m: &mut Meter) -> Result<String, DivFault> {
     let _p = sagebrush_interrupt::enter("scale emit");
     let end = prefix_end(a.text, na);
@@ -536,8 +685,10 @@ fn token_reply(tok: &str, led: &Words) -> Result<String, DivFault> {
 #[derive(Clone, Copy, Debug)]
 pub struct Plan {
     pub kind: Kind,
-    /// the normalized token count of a, and k (the derivative's order; 0 otherwise)
+    /// the normalized token counts of a and (for the sum and difference) b,
+    /// and k (the derivative's order; 0 otherwise)
     pub na: u64,
+    pub nb: u64,
     pub k: u64,
     /// the reply's closed-form bound (bytes)
     pub bound: u64,
@@ -549,11 +700,12 @@ pub struct Plan {
 }
 
 /// What a call answers without computing: the zero polynomial, a copy of
-/// a's tokens (sign flipped or not), or b's token alone.
+/// a's tokens or of b's (sign flipped or not), or b's token alone.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub enum Short<'a> {
     Zero,
     Copy { na: u64, flip: bool },
+    CopyB { nb: u64, flip: bool },
     Token(&'a str),
 }
 
@@ -571,18 +723,31 @@ fn order(b: &str) -> Result<Option<u64>, String> {
 }
 
 /// Admission, before anything is allocated: the request's bytes; b one
-/// token; the short answers; then the fixed rows and the reply's bound
-/// against the caps.
+/// token (a polynomial for the sum and difference); the short answers; then
+/// the fixed rows and the reply's bound against the caps.
 pub fn admit<'a>(kind: Kind, a: &Factor, b: &Factor<'a>, r: u64, caps: &qpoly::Caps) -> Result<Result<Plan, Short<'a>>, String> {
     if r > caps.int.request {
         return Err(format!("the request's bytes = {} is more than {} ({})", r, caps.int.request, HOW));
     }
-    if b.tokens != 1 {
+    let pair = matches!(kind, Kind::Add | Kind::Sub);
+    if !pair && b.tokens != 1 {
         return Err("b is exactly one token".to_string());
     }
     let na = norm_len(a);
+    let nb = if pair { norm_len(b) } else { 0 };
     let mut k = 0;
     match kind {
+        Kind::Add | Kind::Sub => {
+            if na == 0 && nb == 0 {
+                return Ok(Err(Short::Zero));
+            }
+            if na == 0 {
+                return Ok(Err(Short::CopyB { nb, flip: kind == Kind::Sub }));
+            }
+            if nb == 0 {
+                return Ok(Err(Short::Copy { na, flip: false }));
+            }
+        }
         Kind::Scale => {
             if na == 0 || b.all_zero {
                 return Ok(Err(Short::Zero));
@@ -603,8 +768,8 @@ pub fn admit<'a>(kind: Kind, a: &Factor, b: &Factor<'a>, r: u64, caps: &qpoly::C
             }
         }
     }
-    let prefix = prefix_end(a.text, na) as u64;
-    let bound = reply_bound(kind, prefix, na, b.text, k).ok_or_else(|| format!("the {}'s size overflows", kind.name()))?;
+    let bound = if pair { pair_bound(a.text, na, b.text, nb) } else { reply_bound(kind, prefix_end(a.text, na) as u64, na, b.text, k) };
+    let bound = bound.ok_or_else(|| format!("the {}'s size overflows", kind.name()))?;
     if bound > caps.reply {
         return Err(format!("the reply's bytes (at most {}) is more than {} ({})", bound, caps.reply, HOW));
     }
@@ -614,7 +779,7 @@ pub fn admit<'a>(kind: Kind, a: &Factor, b: &Factor<'a>, r: u64, caps: &qpoly::C
         return Err(format!("the memory (bytes) = {} is more than {} ({})", fixed.saturating_mul(8), caps.int.peak, HOW));
     }
     let work = caps.int.work.checked_sub(r).ok_or_else(|| format!("the request's bytes = {} leave no work within {} ({})", r, caps.int.work, HOW))?;
-    Ok(Ok(Plan { kind, na, k, bound, fixed, limit: cap - fixed, work }))
+    Ok(Ok(Plan { kind, na, nb, k, bound, fixed, limit: cap - fixed, work }))
 }
 
 /// The refusal or internal error for a fault.
@@ -635,6 +800,7 @@ pub fn compute<'l>(a: &Factor, b: &Factor, plan: &Plan, led: &'l Words, m: &mut 
         Kind::Scale => scale(a, plan.na, b.text, led, m),
         Kind::Derivative => derivative(a, plan.na, plan.k, led, m),
         Kind::Integral => integral(a, plan.na, b.text, led, m),
+        Kind::Add | Kind::Sub => add_sub(a, plan.na, b, plan.nb, plan.kind == Kind::Sub, led, m),
     }
 }
 
@@ -656,11 +822,12 @@ pub fn reply_on(a: &Factor, b: &Factor, plan: &Plan, led: &Words, m: &mut Meter)
 }
 
 /// A short answer's reply, on the caller's ledger and meter.
-pub fn short_on(s: Short, a: &Factor, led: &Words, m: &mut Meter) -> Result<String, DivFault> {
+pub fn short_on(s: Short, a: &Factor, b: &Factor, led: &Words, m: &mut Meter) -> Result<String, DivFault> {
     match s {
         Short::Zero => token_reply("", led),
         Short::Token(t) => token_reply(t, led),
         Short::Copy { na, flip } => copy_reply(a, na, flip, led, m),
+        Short::CopyB { nb, flip } => copy_reply(b, nb, flip, led, m),
     }
 }
 
@@ -680,8 +847,8 @@ pub fn reply(kind: Kind, a: &Factor, b: &Factor, r: u64, caps: &qpoly::Caps) -> 
             let work = caps.int.work.checked_sub(r).ok_or_else(|| format!("the request's bytes = {} leave no work within {} ({})", r, caps.int.work, HOW))?;
             let led = Words::new(limit);
             let mut m = Meter::new(work);
-            let plan = Plan { kind, na: 0, k: 0, bound: 0, fixed, limit, work };
-            short_on(short, a, &led, &mut m).map_err(|f| fault_text(f, &plan))
+            let plan = Plan { kind, na: 0, nb: 0, k: 0, bound: 0, fixed, limit, work };
+            short_on(short, a, b, &led, &mut m).map_err(|f| fault_text(f, &plan))
         }
     }
 }

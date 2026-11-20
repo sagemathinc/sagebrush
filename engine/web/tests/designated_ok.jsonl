@@ -29,3 +29,7 @@
 {"fn":"qpoly_derivative","a":"1,2","b":"fffffffff"}
 {"fn":"qpoly_integral","a":"1/2,0,3","b":"-5/7"}
 {"fn":"qpoly_integral","a":"","b":"3"}
+{"fn":"qpoly_add","a":"1/6,1/10","b":"1/15,1/14"}
+{"fn":"qpoly_add","a":"","b":"1,-2"}
+{"fn":"qpoly_sub","a":"1/2,0,-3/7,5","b":"1/2,0,-3/7,5"}
+{"fn":"qpoly_sub","a":"7","b":"1,0,0,-1"}

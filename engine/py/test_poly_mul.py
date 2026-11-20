@@ -524,9 +524,10 @@ def qscale_checks(r):
     F = (2 * x ** 2 - 2).factor()
     assert F.unit() == 2 and [list(g) for g, _ in F] == [[-1, 1], [1, 1]], F
     # (f / 0 raises before the engine is called)
+    divisors = (f, t + 1)
     setattr(E, name, Spy())
     try:
-        for g in (f, t + 1):
+        for g in divisors:
             try:
                 g / 0
             except ZeroDivisionError:
@@ -548,6 +549,95 @@ def qscale_checks(r):
         else:
             raise AssertionError("past a cap: accepted")
         n += 1
+    return n
+
+
+def qadd_checks(r):
+    """sagebrush.poly.qadd and qsub (the engine's qpoly_add and qpoly_sub)
+    against Fraction arithmetic (here only), results in lowest terms with
+    trailing zeros dropped; their exact-type pins (refused before the
+    bridge); and Sage mode's + and - through them: constants in either
+    order, ZZ and QQ and mixed, the zero results' rings, f - f, and one past
+    a cap a typed refusal with no partial result."""
+    from fractions import Fraction
+    from sagebrush import _engine as E
+
+    def trim(c):
+        c = [int(x) if Fraction(x).denominator == 1 else Fraction(x) for x in c]
+        while c and c[-1] == 0:
+            c.pop()
+        return c
+    n = 0
+    for _ in range(120):
+        a = [Fraction(coef(r, r.randint(0, 200)), r.randint(1, 1 << r.randint(1, 80))) for _ in range(r.randint(0, 12))]
+        b = [Fraction(coef(r, r.randint(0, 200)), r.randint(1, 1 << r.randint(1, 80))) for _ in range(r.randint(0, 12))]
+        if r.random() < 0.2:
+            b = list(a)
+        m = max(len(a), len(b))
+        pa, pb = a + [0] * (m - len(a)), b + [0] * (m - len(b))
+        assert P.qadd(a, b) == trim([x + y for x, y in zip(pa, pb)]), (a, b)
+        assert P.qsub(a, b) == trim([x - y for x, y in zip(pa, pb)]), (a, b)
+        n += 2
+    assert P.qsub([1, Fraction(1, 2)], [1, Fraction(1, 2)]) == [] and P.qadd([], []) == []
+    assert P.qsub([1, 0, 3, 4], [0, 0, 2, 4]) == [1, 0, 1]
+    assert P.qsub([], [1, -2], raw=True) == "-1,2"
+    name = "_sbengine" if hasattr(E, "_sbengine") else "_native"
+    real = getattr(E, name)
+    calls = []
+
+    class Spy:
+        def call(self, text):
+            calls.append(text)
+            return '{"ok":""}'
+
+    class I1(int):
+        def __index__(self):
+            return 0
+    setattr(E, name, Spy())
+    try:
+        for bad in [I1(3), True, 1.5, "1", None]:
+            for f in (lambda: P.qadd([1, bad], [2]), lambda: P.qadd([1], [bad]), lambda: P.qsub([bad], [1]), lambda: P.qsub([1], [2, bad])):
+                try:
+                    f()
+                except TypeError:
+                    pass
+                else:
+                    raise AssertionError("accepted %r" % (bad,))
+                n += 1
+    finally:
+        setattr(E, name, real)
+    assert calls == [], calls
+    try:
+        import sagebrush.sage as S
+    except ImportError:
+        import sage_all as S
+    QQ, ZZ = S.QQ, S.ZZ
+    R, Z, T = S.PolynomialRing(QQ, "x"), S.PolynomialRing(ZZ, "t"), S.PolynomialRing(QQ, "t")
+    x, t = R.gen(), Z.gen()
+    h = QQ(1) / 2
+    f = x ** 3 * h - 3 * x + QQ(1) / 7
+    pins = [
+        (f + f, [Fraction(2, 7), -6, 0, 1], R), (f - f, [], R), (f + 1, [Fraction(8, 7), -3, 0, Fraction(1, 2)], R),
+        (1 + f, [Fraction(8, 7), -3, 0, Fraction(1, 2)], R), (f - 1, [Fraction(-6, 7), -3, 0, Fraction(1, 2)], R),
+        (1 - f, [Fraction(6, 7), 3, 0, Fraction(-1, 2)], R), (f + R(0), [Fraction(1, 7), -3, 0, Fraction(1, 2)], R),
+        (R(0) - f, [Fraction(-1, 7), 3, 0, Fraction(-1, 2)], R), (R(0) - R(0), [], R),
+        ((t ** 2 + 1) + (t - 3), [-2, 1, 1], Z), ((t + 1) - (t + 1), [], Z), (t - 3, [-3, 1], Z), (2 - t, [2, -1], Z),
+        (t + h, [Fraction(1, 2), 1], T), (h - t, [Fraction(1, 2), -1], T), (t - h, [Fraction(-1, 2), 1], T),
+    ]
+    for got, want, ring in pins:
+        assert str(got.parent()) == str(ring), (got, ring)
+        assert [Fraction(c) for c in got.list()] == [Fraction(c) for c in want], (got, want)
+        n += 1
+    # one past a cap: a typed refusal naming it, no partial result
+    # (two 450,000-term operands of 20-byte tokens: a request over the 16 MiB cap)
+    big = R([Fraction(1, (1 << 64) + 2 * i + 1) for i in range(450000)])
+    try:
+        big + big
+    except ValueError as e:
+        assert "request" in str(e), e
+    else:
+        raise AssertionError("past a cap: accepted")
+    n += 1
     return n
 
 
@@ -754,6 +844,7 @@ def main():
     n += zdivrem_checks(r)
     n += qdivrem_checks(r)
     n += qscale_checks(r)
+    n += qadd_checks(r)
     print("poly_mul against exact products: %d cases ok" % n)
 
 
