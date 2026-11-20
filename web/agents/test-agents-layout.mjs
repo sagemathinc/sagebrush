@@ -325,6 +325,46 @@ try {
     const side = await ev(`({ path: location.pathname, shown: !document.getElementById('wssidebar').hidden, pref: localStorage.getItem("sagebrush-files-sidebar") })`);
     ok("L2-files-button-opens", side.path === "/" && side.shown && side.pref === "1", "Files… opens the notebook page with its file browser shown (though it had been hidden)", side);
   }
+  // ---- while a turn runs, the composer's primary action queues: Shift+Enter and the primary button never interrupt the
+  //  agent; only Send now (and Stop) do. The scripted agent slowed down, so its turn is still running meanwhile
+  {
+    await fresh(1600);
+    await send("Page.navigate", { url: `${origin}/agents/?speed=0.05` });
+    await until(`document.readyState === 'complete' && !!document.querySelector('#editor .mb')`);
+    await sleep(300);
+    const type = async (text) => {
+      if (!(await ev(`!!document.querySelector('#editor textarea')`))) {
+        const [x, y] = await ev(`(() => { const r = document.querySelector('#editor .mb-block').getBoundingClientRect(); return [r.x + r.width / 2, r.y + r.height / 2]; })()`);
+        for (const type of ["mousePressed", "mouseReleased"]) await send("Input.dispatchMouseEvent", { type, x, y, button: "left", clickCount: 1 });
+      }
+      await until(`!!document.querySelector('#editor textarea')`);
+      await ev(`document.querySelector('#editor textarea').focus()`);
+      await send("Input.insertText", { text });
+    };
+    const shiftEnter = async () => { for (const type of ["keyDown", "keyUp"]) await send("Input.dispatchKeyEvent", { type, key: "Enter", code: "Enter", modifiers: 8, windowsVirtualKeyCode: 13 }); };
+    const state = () => ev(`(() => { const q = (s) => document.querySelector(s); return { running: !q('#stop').hidden, primary: q('#send').textContent, keys: q('#keys').textContent, now: !q('#send-now').hidden && q('#send-now').textContent, queued: q('#queued').textContent, interrupted: [...document.querySelectorAll('.status')].filter((x) => x.textContent === 'Interrupted').length, users: [...document.querySelectorAll('.user')].map((u) => u.className) }; })()`);
+    const idle = await state();
+    ok("Q1-idle", idle.primary === "Send" && idle.keys === "send" && idle.now === false && !idle.running, "with no turn running: Send, Shift+Enter sends, no Send now", idle);
+    await type("plot a Fourier series");
+    await shiftEnter();
+    await until(`!document.querySelector('#stop').hidden`, 10000);
+    const run0 = await state();
+    ok("Q2-running", run0.primary === "Queue" && run0.keys === "queue" && run0.now === "Send now", "while a turn runs: the primary button is Queue, Shift+Enter queues, Send now beside it", run0);
+    await type("and a square wave too");
+    await shiftEnter();
+    await sleep(300);
+    const run1 = await state();
+    ok("Q3-shift-enter", run1.running && run1.interrupted === 0 && run1.queued === "1 queued" && /queued/.test(run1.users.at(-1) ?? ""), "Shift+Enter during a turn queues the message: the turn goes on, 1 queued", run1);
+    await type("label the axes");
+    await ev(`document.querySelector('#send').click()`);
+    await sleep(300);
+    const run2 = await state();
+    ok("Q4-primary", run2.running && run2.interrupted === 0 && run2.queued === "2 queued", "the primary button during a turn queues too: the turn goes on, 2 queued", run2);
+    await type("stop and do this instead");
+    await ev(`document.querySelector('#send-now').click()`);
+    const stopped = await until(`[...document.querySelectorAll('.status')].some((x) => x.textContent === 'Interrupted')`, 10000).then(() => true, () => false);
+    ok("Q5-send-now", stopped, "Send now interrupts the turn and sends", await state());
+  }
   console.log(`${checks - fails}/${checks} passed${fails ? "" : ", all passed"}`);
   code = fails ? 1 : 0;
 } finally {
