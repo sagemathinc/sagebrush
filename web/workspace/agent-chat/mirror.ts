@@ -23,8 +23,14 @@ export const STALE_REASONS = ["differs", "missing_on_runner", "other_run", "conf
 export type StaleReason = (typeof STALE_REASONS)[number];
 const MIRROR_TYPE = "application/vnd.sagebrush.mirror+json";
 const API = "/api/mirror/v1";
-/** a tagged replay's wait for its end */
+/** a tagged replay's wait for its next part (each part restarts it) */
 const REPLAY_MS = 20_000;
+/** after a part that says more is to come (done: false), how long nothing else may arrive before the answer is taken
+ *  to have stopped there and the page asks again from its highest number (the agent sends an answer's parts at once) */
+const QUIET_MS = 1000;
+/** a request whose wait ran out is kept, its late parts discarded, until it ends or this long passes without one: no
+ *  second request is made for that conversation meanwhile, so a late part is never read as another request's */
+const DRAIN_MS = 60_000;
 /** the most segments one stream is read in (each at most MIRROR_CAPS.entries entries) */
 const READ_MAX = 5000;
 
@@ -35,6 +41,9 @@ export interface Cursor {
   instance?: string;
   seq: number;
   n: number;
+  /** uploads of this run stopped: another history holds the range (conflict), or the agent's log no longer has what
+   *  comes after the cursor (reset), so going on would leave a hole the reader couldn't show */
+  blocked?: "conflict" | "reset";
 }
 
 export interface MirrorStatus {
@@ -76,11 +85,21 @@ export interface MirrorHost {
   storeCursors(c: Record<string, Cursor>): void;
   /** the status or the list changed: the settings and the thread list draw again */
   changed(): void;
-  /** for tests: a tagged replay's wait */
+  /** for tests: a tagged replay's waits */
   replayMs?: number;
+  quietMs?: number;
+  drainMs?: number;
 }
 
-type Waiter = { pairing: AgentPairing; instance: string; events: LogEntry[]; last: number; resolve: (e: LogEntry[]) => void; reject: (e: Error) => void; timer: ReturnType<typeof setTimeout> };
+/** What a tagged request got back: the log's entries after `after`, in order, and whether the agent said some it would
+ *  have held are gone (`reset`: dropped at its bounds, or another run). */
+interface Answer {
+  events: LogEntry[];
+  reset: boolean;
+}
+/** The one tagged request in flight for a conversation: its caller (null once its wait ran out: draining), the parts
+ *  so far, and its timer. */
+type Waiter = { pairing: AgentPairing; instance: string; after: number; events: LogEntry[]; reset: boolean; parts: number; caller: { resolve: (a: Answer) => void; reject: (e: Error) => void } | null; timer: ReturnType<typeof setTimeout> | undefined };
 
 const seqOk = (v: unknown): v is number => Number.isSafeInteger(v) && (v as number) > 0;
 const natOk = (v: unknown): v is number => Number.isSafeInteger(v) && (v as number) >= 0;
@@ -180,7 +199,9 @@ export class Mirror {
     if (!this.on()) return [];
     if (this.remoteList && !force) return this.remoteList;
     const r = await this.call("GET", "/conversations");
-    const list = Array.isArray(r.json.conversations) ? r.json.conversations : [];
+    // (a list that can't be read now is not an empty one: the last one stays, and the caller learns it failed)
+    if (r.status !== 200 || !Array.isArray(r.json.conversations)) throw new Error("the account's conversations can't be read now");
+    const list = r.json.conversations;
     this.remoteList = list.flatMap((c: unknown): RemoteConversation[] => {
       const x = c as { conversation?: unknown; locator?: unknown; streams?: unknown } | null;
       if (!x || !conversationOk(x.conversation) || typeof x.locator !== "string" || !/^[0-9a-f]{32}$/.test(x.locator) || !Array.isArray(x.streams)) return [];
@@ -233,45 +254,72 @@ export class Mirror {
     if (!src || (from !== undefined && from !== src.pairing) || p.tag !== MIRROR_TAG || !conversationOk(p.conversation)) return true;
     const w = this.waiting.get(p.conversation);
     if (!w || w.pairing !== src.pairing || p.instance !== src.instance || w.instance !== src.instance) return true;
-    if (!natOk(p.last) || typeof p.done !== "boolean" || !Array.isArray(p.events)) return true;
+    if (!natOk(p.last) || typeof p.done !== "boolean" || !Array.isArray(p.events) || ("reset" in p && typeof p.reset !== "boolean")) return true;
     const conv = p.conversation;
     const ok = (e: unknown): e is LogEntry => {
       const x = e as { seq?: unknown; method?: unknown; params?: unknown } | null;
       return !!x && seqOk(x.seq) && typeof x.method === "string" && !!x.params && typeof x.params === "object" && !Array.isArray(x.params) && (x.params as { conversation?: unknown }).conversation === conv;
     };
     if (!p.events.every(ok)) return true;
-    // (in the agent's order, each number once: anything not past the highest read is a repeat)
-    let high = w.events.length ? w.events[w.events.length - 1].seq : 0;
+    clearTimeout(w.timer);
+    if (!w.caller) {
+      // (a part of a request whose wait ran out: discarded; the request ends with its last part, or with quiet)
+      if (p.done === true) this.waiting.delete(conv);
+      else w.timer = setTimeout(() => this.waiting.get(conv) === w && this.waiting.delete(conv), this.host.drainMs ?? DRAIN_MS);
+      return true;
+    }
+    // (an answer's first part says whether entries it would hold are gone)
+    if (w.parts++ === 0 && p.reset === true) w.reset = true;
+    // (in the agent's order, each number once and past the request's own: anything not past the highest read is a repeat)
+    let high = w.events.length ? w.events[w.events.length - 1].seq : w.after;
     for (const e of p.events as LogEntry[]) {
       if (e.seq <= high) continue;
       w.events.push(e);
       high = e.seq;
     }
-    w.last = p.last;
-    if (p.done === true || high >= p.last) {
-      clearTimeout(w.timer);
-      this.waiting.delete(conv);
-      w.resolve(w.events);
-    } else {
-      // (stopped early: asked again from the last number read)
+    if (p.done === true || high >= p.last) return this.settle(conv, w), true;
+    // (more to come: the rest of this answer, or, if nothing more arrives, the agent stopped early: asked again from the
+    //  highest number read, as a new request, only once this one has stopped)
+    w.timer = setTimeout(() => {
+      if (this.waiting.get(conv) !== w || !w.caller) return;
+      if (this.host.pairing() !== w.pairing) return this.fail(conv, w, "the pairing changed");
+      w.after = high;
+      w.parts = 0;
+      w.timer = setTimeout(() => this.expire(conv, w), this.host.replayMs ?? REPLAY_MS);
       w.pairing.notify("chat.resume", { conversation: conv, after: high, instance: w.instance, tag: MIRROR_TAG });
-    }
+    }, this.host.quietMs ?? QUIET_MS);
     return true;
   }
 
-  /** The agent's log of a conversation after `after`, in its run `instance`, through a tagged replay. */
-  private ask(conversation: string, after: number, src: { pairing: AgentPairing; instance: string }): Promise<LogEntry[]> {
+  private settle(conv: string, w: Waiter) {
+    clearTimeout(w.timer);
+    this.waiting.delete(conv);
+    w.caller?.resolve({ events: w.events, reset: w.reset });
+  }
+  private fail(conv: string, w: Waiter, why: string) {
+    clearTimeout(w.timer);
+    this.waiting.delete(conv);
+    w.caller?.reject(new Error(why));
+  }
+  /** No part in time: the caller is told, and the request drains (its late parts discarded) before another is made. */
+  private expire(conv: string, w: Waiter) {
+    if (this.waiting.get(conv) !== w) return;
+    const c = w.caller;
+    w.caller = null;
+    w.timer = setTimeout(() => this.waiting.get(conv) === w && this.waiting.delete(conv), this.host.drainMs ?? DRAIN_MS);
+    c?.reject(new Error("no replay"));
+  }
+
+  /** The agent's log of a conversation after `after`, in its run `instance`, through a tagged replay. One request per
+   *  conversation at a time: while one is in flight or draining, another is refused (the next trigger tries again). */
+  private ask(conversation: string, after: number, src: { pairing: AgentPairing; instance: string }): Promise<Answer> {
     return new Promise((resolve, reject) => {
       const old = this.waiting.get(conversation);
-      if (old) {
-        clearTimeout(old.timer);
-        old.reject(new Error("superseded"));
-      }
-      const timer = setTimeout(() => {
-        if (this.waiting.get(conversation)?.timer === timer) this.waiting.delete(conversation);
-        reject(new Error("no replay"));
-      }, this.host.replayMs ?? REPLAY_MS);
-      this.waiting.set(conversation, { pairing: src.pairing, instance: src.instance, events: [], last: 0, resolve, reject, timer });
+      if (old && old.pairing === src.pairing) return reject(new Error("a request is still in flight"));
+      if (old) this.fail(conversation, old, "the pairing changed");
+      const w: Waiter = { pairing: src.pairing, instance: src.instance, after, events: [], reset: false, parts: 0, caller: { resolve, reject }, timer: undefined };
+      w.timer = setTimeout(() => this.expire(conversation, w), this.host.replayMs ?? REPLAY_MS);
+      this.waiting.set(conversation, w);
       src.pairing.notify("chat.resume", { conversation, after, instance: src.instance, tag: MIRROR_TAG });
     });
   }
@@ -325,6 +373,7 @@ export class Mirror {
       const src = this.source();
       if (!src || !this.on()) return;
       let cur: Cursor = { ...(this.cursors[conversation] ?? { seq: 0, n: 1 }) };
+      if (cur.blocked && cur.instance === src.instance) return;
       if (!cur.locator) {
         const r = await this.call("POST", "/conversations", { conversation });
         if (r.status !== 200 || typeof r.json.locator !== "string" || !/^[0-9a-f]{32}$/.test(r.json.locator)) return;
@@ -336,9 +385,15 @@ export class Mirror {
         cur = { locator: cur.locator, instance: src.instance, seq: st?.last_seq ?? 0, n: st?.next_n ?? 1 };
       }
       this.saveCursor(conversation, cur);
-      const events = await this.ask(conversation, cur.seq, src);
+      const ans = await this.ask(conversation, cur.seq, src);
       if (this.host.pairing() !== src.pairing) return;
-      const fresh = events.filter((e) => e.seq > cur.seq);
+      if (ans.reset && cur.seq > 0) {
+        // (entries after the cursor are gone from the agent's log: going on would join what's left to what came
+        //  before as if nothing were missing; this run's stream stops here)
+        this.saveCursor(conversation, { ...cur, blocked: "reset" });
+        return;
+      }
+      const fresh = ans.events.filter((e) => e.seq > cur.seq);
       if (!fresh.length) return;
       const high = fresh[fresh.length - 1].seq;
       const drafts = fresh.map(normalize).filter((d): d is MirrorDraft => d !== null);
@@ -361,9 +416,15 @@ export class Mirror {
           break;
         }
         if (r === "conflict") {
-          // (another page holds this range with other entries: stop, and say so in the account's object)
+          // (another page holds this range with other entries: this run's uploads stop, and the account's object says so)
+          this.saveCursor(conversation, { ...cur, blocked: "conflict" });
           await this.markStale(cur.locator!, src.instance, body.entries[0].n, "conflict");
-          await this.remote(true);
+          await this.remote(true).catch(() => []);
+        }
+        if (r === "missing") {
+          // (the conversation's copy was deleted, here or on another device: forgotten, so the next upload makes it again)
+          delete this.cursors[conversation];
+          this.host.storeCursors(this.cursors);
         }
         return;
       }
@@ -375,7 +436,7 @@ export class Mirror {
     }
   }
 
-  private async append(locator: string, body: MirrorBody): Promise<"ok" | "reload" | "conflict" | "stop"> {
+  private async append(locator: string, body: MirrorBody): Promise<"ok" | "reload" | "conflict" | "missing" | "stop"> {
     const first = body.entries[0], last = body.entries[body.entries.length - 1];
     const init: RequestInit = {
       method: "POST",
@@ -402,6 +463,7 @@ export class Mirror {
       this.host.changed();
       return "stop";
     }
+    if (r.status === 404 && j.error === "missing") return "missing";
     if (r.status === 409 && j.error === "conflict") return typeof j.message === "string" && /another history/.test(j.message) ? "conflict" : "reload";
     if (r.status === 403) await this.refresh();
     return "stop";
@@ -471,9 +533,22 @@ export class Mirror {
   }
 
   private async reconcileOne(c: RemoteConversation, streams: RemoteStream[], src: { pairing: AgentPairing; instance: string }): Promise<boolean> {
-    const events = await this.ask(c.conversation, 0, src);
+    // (the streams of this run first, then the runner's log: an entry another page appends meanwhile is then in the
+    //  runner's log too, never taken for one the runner doesn't have)
+    const mine = new Map<string, Section>();
+    for (const st of streams) if (st.log_instance === src.instance) mine.set(st.log_instance, await this.readStream(c.locator, st.log_instance));
+    const ans = await this.ask(c.conversation, 0, src);
     // (a conversation this runner doesn't hold: nothing to compare with, nothing marked)
-    if (!events.length || this.host.pairing() !== src.pairing) return false;
+    if (!ans.events.length || this.host.pairing() !== src.pairing) return false;
+    // (by the agent's number, not by position: each uploaded entry against the runner's entry of that number, after the
+    //  same normalization. Where the agent's log has dropped its oldest entries (reset), numbers before what it still
+    //  holds can't be confirmed or refuted, and are left as they are)
+    const runner = new Map<number, MirrorDraft>();
+    for (const e of ans.events) {
+      const d = normalize(e);
+      if (d) runner.set(e.seq, d);
+    }
+    const covers = ans.reset ? ans.events[0].seq : 0;
     let marked = false;
     for (const st of streams) {
       let at: number | null = null, reason: StaleReason = "differs";
@@ -481,19 +556,33 @@ export class Mirror {
         at = 1;
         reason = "other_run";
       } else {
-        const runner = events.map(normalize).filter((d): d is MirrorDraft => d !== null);
-        const sec = await this.readStream(c.locator, st.log_instance);
+        const sec = mine.get(st.log_instance)!;
+        const gapAt = (n: number) => sec.gaps.some((g) => g.first_n <= n && n <= g.last_n);
+        const seqs = [...runner.keys()]; // (ascending: the agent's order)
+        let j = 0;
+        let prev: MirrorEntry | null = null;
         for (const e of sec.entries) {
-          const r = runner[e.n - 1];
+          const r = runner.get(e.seq);
           if (!r) {
+            if (e.seq >= covers) {
+              at = e.n;
+              reason = "missing_on_runner";
+              break;
+            }
+          } else if (canonical({ ...r, n: e.n }) !== canonical(e)) {
             at = e.n;
-            reason = "missing_on_runner";
             break;
           }
-          if (canonical({ ...r, n: e.n }) !== canonical(e)) {
-            at = e.n;
-            break;
+          // (an entry of the runner's, after the previous uploaded one and before this one, that the stream skipped:
+          //  the stream differs from here; across a gap the skipped entries are unknown, so nothing is said)
+          if (prev) {
+            while (j < seqs.length && seqs[j] <= prev.seq) j++;
+            if (prev.n === e.n - 1 && !gapAt(e.n - 1) && j < seqs.length && seqs[j] < e.seq && seqs[j] >= covers) {
+              at = e.n;
+              break;
+            }
           }
+          prev = e;
         }
       }
       if (at !== null && (st.stale_from === null || at < st.stale_from)) marked = (await this.markStale(c.locator, st.log_instance, at, reason)) || marked;

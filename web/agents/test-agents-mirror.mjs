@@ -25,7 +25,7 @@ const origin = `http://127.0.0.1:${sport}`;
 // ---- the site's mirror routes, as this test answers them
 const LOC = "0123456789abcdef0123456789abcdef";
 const INST = "aaaaaaaa00000001";
-const fake = { on: true, pending: 0, calls: [], deleted: false, available: true };
+const fake = { on: true, pending: 0, calls: [], deleted: false, available: true, staleFrom: 5 };
 const segs = [
   { first_n: 1, last_n: 2, entries: [{ k: "user", n: 1, seq: 1, id: "u1", text: "Plot the partial sums\nof a Fourier series" }, { k: "turn_started", n: 2, seq: 2, turn: "T1" }] },
   { first_n: 3, last_n: 3, missing: true },
@@ -43,12 +43,12 @@ function answer(method, path, body) {
   if (path === "/api/mirror/v1/disable") { fake.on = false; fake.pending = 2; setTimeout(() => (fake.pending = 0), 1500); return [200, { state: "off" }]; }
   if (path === "/api/mirror/v1/enable") { fake.on = true; return [200, { state: "on" }]; }
   if (path === "/api/mirror/v1/conversations" && method === "GET")
-    return [200, { conversations: fake.on && !fake.deleted ? [{ conversation: "remote-1", locator: LOC, mode: "B", streams: [{ log_instance: INST, next_n: 8, last_seq: 7, last_digest: "x", stale_from: 5, stale_reason: "differs" }] }] : [] }];
+    return [200, { conversations: fake.on && !fake.deleted ? [{ conversation: "remote-1", locator: LOC, mode: "B", streams: [{ log_instance: INST, next_n: 8, last_seq: 7, last_digest: "x", stale_from: fake.staleFrom, stale_reason: "differs" }] }] : [] }];
   if (path === `/api/mirror/v1/conversations/${LOC}` && method === "DELETE") { fake.deleted = true; return [200, {}]; }
   const m = path.match(/^\/api\/mirror\/v1\/read\/[0-9a-f]{32}\/[A-Za-z0-9_-]+\?after=(\d+)$/);
   if (m) {
     const g = segs.find((s) => s.first_n === +m[1] + 1);
-    const stale = { stale_from: 5, stale_reason: "differs" };
+    const stale = { stale_from: fake.staleFrom, stale_reason: "differs" };
     if (!g) return [200, { end: true, ...stale }];
     if (g.missing) return [200, { missing: true, reason: "corrupt", first_n: g.first_n, last_n: g.last_n, ...stale }];
     return [200, { log_instance: INST, first_n: g.first_n, last_n: g.last_n, entries: g.entries, ...stale }];
@@ -129,19 +129,31 @@ try {
   ok(v.unconfirmed === "Not confirmed by your agent: it differs from your agent's history" && v.unconfirmedBlocks >= 1, "from the stream's stale mark on: \"Not confirmed by your agent\" with the reason", v);
   ok(v.user === "Plot the partial sums\nof a Fourier series" && v.text === "Here is <b>the</b> plot." && !v.bold, "messages drawn as text: markup in them is text, never HTML", v);
   ok(v.approval === "⚠ Run a command: No answer" && v.buttons === 0, "S7c: an open approval is a plain line; nothing in the conversation can be pressed or typed into", v);
-  ok(!v.composer && v.readonly && v.readonlyText.includes("read-only") && v.del === "Delete this conversation's mirrored copy", "S7c: no composer; the read-only line, with the per-conversation delete", v);
+  ok(!v.composer && v.readonly && v.readonlyText === "This is the copy in your account, and it's read-only. To continue this conversation, connect the agent that has it." && v.del === "Delete this conversation's mirrored copy", "S7c: no composer; the read-only line, with the per-conversation delete", v);
   ok(!v.log && v.title === "Plot the partial sums" && v.on, "the thread's own log is hidden; the list names it by its first line and marks it current", v);
   await shot("mirror-view");
-  // (a key press in the page sends nothing: no composer to type in)
-  const before = fake.calls.length;
-  await send("Input.dispatchKeyEvent", { type: "keyDown", key: "Enter", modifiers: 8 });
-  await send("Input.dispatchKeyEvent", { type: "keyUp", key: "Enter", modifiers: 8 });
-  await sleep(200);
-  ok(fake.calls.slice(before).every(([m]) => m === "GET"), "Shift+Enter in the mirrored conversation: nothing sent", fake.calls.slice(before));
+  // (no composer to type in: the editor can't take the focus, so typing and Shift+Enter post nothing, not even to the
+  //  scripted demo, which would answer any message in this page; the chats kept show no new message)
+  const entries = `(() => { try { return JSON.parse(localStorage.getItem("sagebrush-agents-preview-v1")).threads.reduce((n, t) => n + t.entries.length, 0); } catch { return -1; } })()`;
+  await sleep(400);
+  const kept0 = await ev(entries);
+  const focused = await ev(`(() => { const e = document.querySelector("#editor [contenteditable], #editor textarea"); e?.focus(); return !!e && document.activeElement === e; })()`);
+  await send("Input.insertText", { text: "continue it" });
+  await send("Input.dispatchKeyEvent", { type: "keyDown", key: "Enter", code: "Enter", windowsVirtualKeyCode: 13, modifiers: 8 });
+  await send("Input.dispatchKeyEvent", { type: "keyUp", key: "Enter", code: "Enter", windowsVirtualKeyCode: 13, modifiers: 8 });
+  await sleep(800);
+  ok(!focused && (await ev(entries)) === kept0 && !(await ev(`document.body.innerText.includes("continue it")`)), "S7c: the editor can't be focused there, and typing with Shift+Enter posts nothing", { focused, before: kept0, after: await ev(entries) });
 
-  // ---- back to a chat of this browser's
+  // ---- reopened, it is read again: a mark set meanwhile shows
+  fake.staleFrom = 2;
   await ev(`(document.querySelector("#threads .thread:not(.mirror)").click(), true)`);
   ok(await until(`document.querySelector("#mirror-log").hidden && !document.querySelector(".composer-wrap").hidden && !document.querySelector("#log").hidden`), "a chat of this browser's: the composer and its log are back");
+  await ev(`(document.querySelector("#threads .thread.mirror").click(), true)`);
+  ok(await until(`[...document.querySelectorAll("#mirror-log .mirror-section > *")].findIndex((e) => e.classList.contains("mirror-unconfirmed")) === 2`), "reopened: read again, the mark set meanwhile drawn (now before the turn)");
+  // ---- ＋ New chat from a mirrored conversation: closes it, and the new chat has its composer
+  await ev(`(document.querySelector("#new").click(), true)`);
+  ok(await until(`document.querySelector("#mirror-log").hidden && !document.querySelector(".composer-wrap").hidden && document.querySelector("#threads .thread.on")?.textContent === "New chat"`), "＋ New chat from a mirrored conversation: it closes, the new chat with its composer");
+  fake.staleFrom = 5;
 
   // ---- the settings
   await ev(`(document.querySelector("#mirror-btn").click(), true)`);

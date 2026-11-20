@@ -305,7 +305,8 @@ export class ChatSession {
     if (method !== "turn.event") return;
     const p = params as { conversation?: unknown } | null;
     const thread = this.state.threads.find((t) => t.id === p?.conversation);
-    if (!thread) return;
+    // (a mirrored conversation takes nothing from a runner: it is a snapshot, never its live thread)
+    if (!thread || this.readOnly(thread)) return;
     // (an agent that keeps a log numbers every event, in the run its hello names: an event without a valid number is
     //  dropped; a thread last in another run starts again. An agent without a log: events as they come, unnumbered)
     const instance = this.resumable();
@@ -325,7 +326,7 @@ export class ChatSession {
   private onReceipt(params: unknown, replayed: boolean) {
     const p = params as { conversation?: unknown; id?: unknown; state?: unknown; reason?: unknown; seq?: unknown } | null;
     const thread = this.state.threads.find((t) => t.id === p?.conversation);
-    if (!thread || !p || typeof p.id !== "string" || !(receiptOk(p.state) || p.state === "rejected")) return;
+    if (!thread || this.readOnly(thread) || !p || typeof p.id !== "string" || !(receiptOk(p.state) || p.state === "rejected")) return;
     if (!replayed) {
       const instance = this.resumable();
       // (numbered where the agent keeps a log; a refusal it never logged, "busy", comes unnumbered)
@@ -395,7 +396,7 @@ export class ChatSession {
   private onReplay(params: unknown) {
     const p = params as { conversation?: unknown; instance?: unknown; last?: unknown; events?: unknown; done?: unknown } | null;
     const thread = this.state.threads.find((t) => t.id === p?.conversation);
-    if (!thread || !p || typeof p.instance !== "string" || p.instance !== this.resumable()) return;
+    if (!thread || this.readOnly(thread) || !p || typeof p.instance !== "string" || p.instance !== this.resumable()) return;
     if (!Number.isSafeInteger(p.last) || (p.last as number) < 0 || typeof p.done !== "boolean" || !Array.isArray(p.events)) return;
     type Entry = { seq: number; method: string; params: Record<string, unknown> };
     const ok = (e: unknown): e is Entry => {

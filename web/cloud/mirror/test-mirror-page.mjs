@@ -219,6 +219,25 @@ ok(run1.sent.every(([m, q]) => m === "chat.resume" && q.tag === "mirror"), "uplo
   ok(C.full === "There isn't enough free storage to mirror new messages. Mirroring will resume when there's room.", "the storage-full line, as cleared");
   ok(C.switch === "Keep your agent conversations in your Sagebrush account" && C.confirmOffButton === "Turn off and delete" && C.deleteOne === "Delete this conversation's mirrored copy", "the switch, the confirmation's button and the per-conversation delete, as cleared");
   ok(C.storage("12 MB", "5 GB") === "Mirror: 12 MB of your 5 GB", "the storage line");
+  // (every other string, exactly, as COPY reviews it)
+  const exact = {
+    off: "Your conversations live on the computer that runs your agent. With this on, they're also uploaded to your account while this page is open and connected to your agent, so you can read them on your other devices. It counts toward your account's storage.",
+    on: "Uploaded by your pages: your messages, the agent's replies, and a short record of each turn and tool. Tool output, files and command output aren't uploaded. Sagebrush and Cloudflare can read your mirrored history. Anything you paste into a message is uploaded as written.",
+    confirmOff: "Turn off and delete your mirrored history? This stops uploads and starts deleting your mirrored copy. Your conversations stay on your agent's computer.",
+    updateAgent: "Update the agent to mirror this conversation",
+    section: "Uploaded by your page",
+    otherRun: "Uploaded by your page; not confirmed by your agent",
+    unconfirmed: "Not confirmed by your agent",
+    gap: "Part of this conversation couldn't be read",
+    readOnly: "This is the copy in your account, and it's read-only. To continue this conversation, connect the agent that has it.",
+    badge: "mirror",
+    viewCopy: "View the mirrored copy",
+    untitled: "Mirrored conversation",
+  };
+  const off = Object.entries(exact).filter(([k, v]) => C[k] !== v);
+  ok(off.length === 0, "every string exactly as reviewed", off.map(([k]) => k));
+  ok(JSON.stringify(C.reasons) === JSON.stringify({ differs: "it differs from your agent's history", missing_on_runner: "your agent doesn't have it", other_run: "it's from another run of your agent", conflict: "another page uploaded something different here" }), "each stale reason's words, exactly", C.reasons);
+  ok(C.storage("12 MB", null) === "Mirror: 12 MB", "the storage line without a quota");
 }
 
 // ---- turning it off

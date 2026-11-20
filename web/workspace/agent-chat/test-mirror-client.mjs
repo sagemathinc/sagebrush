@@ -14,16 +14,19 @@ const settle = async () => { for (let i = 0; i < 20; i++) await tick(); };
 /** A fake agent: a log per conversation, in one run; it answers chat.resume as the agent does (the tag given back). */
 function agent({ instance = "aaaaaaaa11", features = ["chat.resume", "chat.resume.tag"], chunk = 0 } = {}) {
   const a = {
-    state: "granted", hello: { agent: { name: "Claude" }, features, log: { instance } }, sent: [], logs: new Map(), seq: 0, mirror: null, quiet: false,
+    state: "granted", hello: { agent: { name: "Claude" }, features, log: { instance } }, sent: [], logs: new Map(), seq: 0, mirror: null, quiet: false, dropped: new Map(),
     log(conversation, method, params) { a.seq++; const l = a.logs.get(conversation) ?? []; l.push({ seq: a.seq, method, params: { conversation, ...params } }); a.logs.set(conversation, l); return a.seq; },
     notify(m, params) {
       a.sent.push([m, params]);
       if (m !== "chat.resume" || a.quiet) return true;
-      const all = (a.logs.get(params.conversation) ?? []).filter((e) => e.seq > params.after);
+      // (as lib/log.mjs: entries dropped at its bounds are gone; asking from before them says reset)
+      const drop = a.dropped.get(params.conversation) ?? 0;
+      const all = (a.logs.get(params.conversation) ?? []).filter((e) => e.seq > params.after && e.seq > drop);
       const last = (a.logs.get(params.conversation) ?? []).at(-1)?.seq ?? 0;
+      const reset = params.after < drop;
       const events = chunk ? all.slice(0, chunk) : all;
       const done = events.length === all.length;
-      setTimeout(() => a.mirror?.onReplay({ conversation: params.conversation, instance: a.hello.log.instance, last, running: [], events, done, ...(params.tag !== undefined ? { tag: params.tag } : {}) }, a), 0);
+      setTimeout(() => a.mirror?.onReplay({ conversation: params.conversation, instance: a.hello.log.instance, last, running: [], events, done, ...(reset ? { reset: true } : {}), ...(params.tag !== undefined ? { tag: params.tag } : {}) }, a), 0);
       return true;
     },
     notifyWhy(m, p) { return a.notify(m, p) ? "ok" : "full"; },
@@ -33,12 +36,13 @@ function agent({ instance = "aaaaaaaa11", features = ["chat.resume", "chat.resum
 
 /** The site's mirror routes, in memory, with the Worker's answers for each case the uploader meets. */
 function site({ quota = 1e9, on = true } = {}) {
-  const s = { on, quota, bytes: 0, convs: new Map(), csrf: "tok", calls: [], missing: new Set(), staleCalls: [] };
+  const s = { on, quota, bytes: 0, convs: new Map(), csrf: "tok", calls: [], missing: new Set(), staleCalls: [], made: 0 };
   const res = (status, body) => new Response(JSON.stringify(body), { status, headers: { "content-type": "application/json" } });
   const conv = (locator) => [...s.convs.values()].find((c) => c.locator === locator);
   s.fetch = async (path, init = {}) => {
     const m = init.method ?? "GET";
     s.calls.push([m, path]);
+    if (s.failList && path === "/api/mirror/v1/conversations" && m === "GET") return res(503, { error: "busy" });
     if (m !== "GET" && init.headers?.["x-sb-mirror-csrf"] !== s.csrf) return res(403, { error: "forbidden" });
     if (path === "/api/mirror/v1/status") return res(200, { available: true, state: s.on ? "on" : "off", bytes: s.bytes, quota: s.quota, pending: 0, conversations: s.convs.size, csrf: s.csrf });
     if (path === "/api/mirror/v1/enable") { s.on = true; return res(200, { state: "on" }); }
@@ -48,7 +52,7 @@ function site({ quota = 1e9, on = true } = {}) {
       return res(200, { conversations: [...s.convs.values()].map((c) => ({ conversation: c.conversation, locator: c.locator, mode: "B", streams: [...c.streams.entries()].map(([log_instance, st]) => ({ log_instance, next_n: st.next_n, last_seq: st.last_seq, last_digest: "x", stale_from: st.stale_from, stale_reason: st.stale_reason })) })) });
     if (path === "/api/mirror/v1/conversations" && m === "POST") {
       const { conversation } = JSON.parse(init.body);
-      if (!s.convs.has(conversation)) s.convs.set(conversation, { conversation, locator: (s.convs.size + 1).toString(16).padStart(32, "0"), streams: new Map() });
+      if (!s.convs.has(conversation)) s.convs.set(conversation, { conversation, locator: (++s.made).toString(16).padStart(32, "0"), streams: new Map() });
       return res(200, { locator: s.convs.get(conversation).locator });
     }
     let x;
@@ -105,7 +109,7 @@ function setup(o = {}) {
   const s = site(o.site);
   const kept = { cursors: o.cursors ?? null, changed: 0 };
   let current = a;
-  const m = new Mirror({ fetch: s.fetch, pairing: () => current, loadCursors: () => kept.cursors, storeCursors: (c) => { kept.cursors = JSON.parse(JSON.stringify(c)); }, changed: () => kept.changed++, replayMs: 300 });
+  const m = new Mirror({ fetch: s.fetch, pairing: () => current, loadCursors: () => kept.cursors, storeCursors: (c) => { kept.cursors = JSON.parse(JSON.stringify(c)); }, changed: () => kept.changed++, replayMs: 300, quietMs: 20, drainMs: 400 });
   a.mirror = m;
   return { a, s, m, kept, setPairing: (p) => { current = p; if (p) p.mirror = m; } };
 }
@@ -335,6 +339,139 @@ const expected = (a, conv) => {
   await settle();
   check(!s.staleCalls.some((c) => c.locator === s.convs.get("elsewhere").locator), "a stream already stale from that position: not marked again");
   check(runner.sent.every(([mm, p]) => mm === "chat.resume" && p.tag === "mirror"), "the new runner too: only read", runner.sent);
+}
+
+// ---- one request at a time: a late part of a request whose wait ran out is never another request's answer
+{
+  const { a, s, m } = setup();
+  await m.refresh();
+  turn(a, "c1", "first");
+  a.quiet = true;
+  await m.kick("c1"); // (asked; no answer within the wait)
+  await tick(350);
+  const asked = a.sent.filter(([mm]) => mm === "chat.resume").length;
+  await m.kick("c1"); // (the first request is draining: no second request is made)
+  await settle();
+  check(a.sent.filter(([mm]) => mm === "chat.resume").length === asked, "while a request whose wait ran out drains, no second request goes", a.sent.length);
+  // (its late answer arrives: discarded, nothing uploaded from it)
+  m.onReplay({ conversation: "c1", instance: "aaaaaaaa11", last: a.seq, done: true, running: [], tag: "mirror", events: a.logs.get("c1").slice(3) }, a);
+  await settle();
+  check(!s.stream("c1", "aaaaaaaa11"), "the late answer is discarded, not taken for a later request's");
+  a.quiet = false;
+  await m.kick("c1");
+  await settle();
+  check(canonical(s.entries("c1", "aaaaaaaa11")) === canonical(expected(a, "c1")), "once it has ended, the next request reads all of it from the cursor, nothing skipped");
+}
+
+// ---- a conflict stops this run's uploads for good; a deleted copy is made again; a log that dropped entries stops
+{
+  const { a, s, m, kept } = setup();
+  await m.refresh();
+  turn(a, "c1", "mine");
+  const loc = (await (await s.fetch("/api/mirror/v1/conversations", { method: "POST", headers: { "x-sb-mirror-csrf": "tok" }, body: JSON.stringify({ conversation: "c1" }) })).json()).locator;
+  const theirs = expected(a, "c1").map((e) => (e.k === "user" ? { ...e, text: "not mine" } : e));
+  await s.fetch(`/api/mirror/v1/append/${loc}`, { method: "POST", headers: { "x-sb-mirror-csrf": "tok", "x-sb-mirror-range": `aaaaaaaa11 1 ${theirs.length} ${theirs[0].seq} ${theirs.at(-1).seq}` }, body: JSON.stringify({ schema: 1, allowlist: 1, log_instance: "aaaaaaaa11", entries: theirs }) });
+  kept.cursors = null;
+  const m2 = new Mirror({ fetch: s.fetch, pairing: () => a, loadCursors: () => ({ c1: { locator: loc, instance: "aaaaaaaa11", seq: 0, n: 1 } }), storeCursors: (c) => { kept.cursors = JSON.parse(JSON.stringify(c)); }, changed: () => {}, replayMs: 300, quietMs: 20, drainMs: 400 });
+  a.mirror = m2;
+  await m2.refresh();
+  await m2.kick("c1");
+  await settle();
+  const appends = () => s.calls.filter(([mm, p]) => mm === "POST" && p.startsWith("/api/mirror/v1/append/")).length;
+  const n0 = appends(), stale0 = s.staleCalls.length;
+  turn(a, "c1", "more");
+  await m2.kick("c1");
+  await settle();
+  await m2.kick("c1");
+  await settle();
+  check(kept.cursors?.c1?.blocked === "conflict" && appends() === n0 && s.staleCalls.length === stale0, "after a conflict: no more appends and no more marks for that run, whatever the triggers", { blocked: kept.cursors?.c1?.blocked, appends: appends() - n0 });
+}
+{
+  const { a, s, m, kept } = setup();
+  await m.refresh();
+  turn(a, "c1", "one");
+  await m.kick("c1");
+  await settle();
+  const old = s.convs.get("c1").locator;
+  // (another device deletes this conversation's copy)
+  await s.fetch(`/api/mirror/v1/conversations/${old}`, { method: "DELETE", headers: { "x-sb-mirror-csrf": "tok" } });
+  turn(a, "c1", "two");
+  await m.kick("c1");
+  await settle();
+  check(!kept.cursors.c1, "an upload to a copy deleted elsewhere: the cursor is forgotten", kept.cursors);
+  await m.kick("c1");
+  await settle();
+  check(s.convs.get("c1")?.locator && s.convs.get("c1").locator !== old && canonical(s.entries("c1", "aaaaaaaa11")) === canonical(expected(a, "c1")), "the next upload makes the copy again, from the start of what the agent still has");
+}
+{
+  const { a, s, m, kept } = setup();
+  await m.refresh();
+  turn(a, "c1", "one");
+  await m.kick("c1");
+  await settle();
+  const before = s.entries("c1", "aaaaaaaa11").length;
+  turn(a, "c1", "two");
+  turn(a, "c1", "three");
+  a.dropped.set("c1", a.logs.get("c1")[8].seq); // (the agent dropped entries just after the cursor)
+  await m.kick("c1");
+  await settle();
+  check(kept.cursors.c1.blocked === "reset" && s.entries("c1", "aaaaaaaa11").length === before, "entries after the cursor gone from the agent's log (reset): this run's stream stops rather than join across a hole", kept.cursors.c1);
+}
+
+// ---- the reconcile by the agent's number
+{
+  const { a, s, m } = setup();
+  await m.refresh();
+  turn(a, "old", "kept long ago", 3);
+  turn(a, "skip", "will skip");
+  for (const c of ["old", "skip"]) { await m.kick(c); await settle(); }
+  // (the agent dropped its oldest entries of "old": the rest equal; the reconcile can't confirm the dropped ones, and
+  //  says nothing of them)
+  a.dropped.set("old", a.logs.get("old")[3].seq);
+  // (the runner has an allowlisted entry the stream skipped, between two the stream has)
+  const sk = a.logs.get("skip");
+  const t = sk[1].params.turn_id;
+  sk.splice(3, 0, { seq: sk[2].seq + 0.5, method: "turn.event", params: { conversation: "skip", turn_id: t, event: { type: "turn_error", code: "x" } } });
+  sk.forEach((e, i) => (e.seq = 1000 + i)); // (renumbered: the stream's numbers no longer exist on the runner...)
+  await m.reconcile();
+  await settle();
+  check(s.stream("old", "aaaaaaaa11").stale_from === null, "entries the agent dropped at its bounds: not marked (reset is read), the rest equal", s.stream("old", "aaaaaaaa11"));
+  check(s.stream("skip", "aaaaaaaa11").stale_from === 1 && s.stream("skip", "aaaaaaaa11").stale_reason === "missing_on_runner", "compared by number: a stream whose numbers the runner doesn't hold is unconfirmed from its first", s.stream("skip", "aaaaaaaa11"));
+}
+{
+  const { a, s, m } = setup();
+  await m.refresh();
+  turn(a, "gap", "a turn");
+  await m.kick("gap");
+  await settle();
+  // (the runner holds an allowlisted entry, between two the stream has, that the stream doesn't)
+  const g = a.logs.get("gap");
+  const t = g[1].params.turn_id;
+  const st = s.stream("gap", "aaaaaaaa11");
+  const e2 = st.segs[0].entries[1], e3 = st.segs[0].entries[2];
+  // (make room: a seq between e2 and e3 that the runner has, the stream doesn't)
+  for (const g2 of st.segs) for (const e of g2.entries) if (e.n >= 3) e.seq += 100;
+  for (const e of g) if (e.seq >= e3.seq - 100) e.seq += 100;
+  g.splice(2, 0, { seq: e2.seq + 1, method: "turn.event", params: { conversation: "gap", turn_id: t, event: { type: "turn_error", code: "skipped" } } });
+  g.sort((x, y) => x.seq - y.seq);
+  await m.reconcile();
+  await settle();
+  check(st.stale_from === 3 && st.stale_reason === "differs", "an entry of the runner's the stream skipped, between two it has: stale from the next one (differs)", { from: st.stale_from, reason: st.stale_reason });
+}
+
+// ---- a list that can't be read is not an empty one
+{
+  const { a, s, m } = setup();
+  await m.refresh();
+  turn(a, "c1", "x");
+  await m.kick("c1");
+  await settle();
+  const before = (await m.remote(true)).length;
+  s.failList = true;
+  let threw = false;
+  try { await m.remote(true); } catch { threw = true; }
+  check(threw && m.cached().length === before && before === 1, "a list that fails (503): an error, and the last list stays", { threw, cached: m.cached().length });
+  s.failList = false;
 }
 
 // ---- deleting

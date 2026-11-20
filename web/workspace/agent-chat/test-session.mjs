@@ -803,6 +803,11 @@ const turnOf = (t, id) => t.entries.find((e) => e.kind === "turn" && e.turn_id =
   check(s.answer(m, "q1", true, "T9", "aaaaaaaaaaaaaaaa") === false && m.entries[0].attention.q1.state === "open", "an approval in it can't be answered");
   s.resume();
   check(sent.length === 0 && s.queues.get(m.id).length === 1 && h.demos.length === 0, "next, interrupt and resume send nothing for it (no chat.message, no chat.interrupt, no chat.resume), and the demo never runs", sent);
+  const before = JSON.stringify(m);
+  s.onAgent("turn.event", { conversation: m.id, seq: 50, turn_id: "T9", event: { type: "turn_finished", outcome: "completed" } }, h.pairing);
+  s.onAgent("chat.receipt", { conversation: m.id, seq: 51, id: "q", state: "delivered" }, h.pairing);
+  s.onAgent("chat.replay", { conversation: m.id, instance: "aaaaaaaaaaaaaaaa", last: 52, done: true, events: [{ seq: 52, method: "chat.message", params: { conversation: m.id, author: "person", id: "z", text: "from a runner" } }] }, h.pairing);
+  check(JSON.stringify(m) === before, "a runner's events, receipts and replays for that id change nothing in it: a snapshot, never its live thread", m);
 }
 
 const failed = results.filter(([ok]) => !ok).length;

@@ -169,6 +169,7 @@ async function openMirror(c: RemoteConversation) {
   mirrorTitles.set(c.conversation, title);
   mirrorOpen = { conversation: c.conversation, locator: r.locator, title, sections: r.sections };
   openArtifact = null;
+  $("#mirror-log").dataset.conv = ""; // (drawn again, as read now: new sections, new marks)
   renderAll();
   document.body.classList.remove("nav-open");
 }
@@ -525,7 +526,8 @@ async function mayClosePane(threadId: string | null): Promise<boolean> {
 function renderArtifacts() {
   const thread = current();
   const pane = $("#artifacts");
-  const a = thread.artifacts.find((x) => x.id === openArtifact);
+  // (a mirrored conversation shown: no pane, not even the hidden chat's)
+  const a = mirrorOpen ? undefined : thread.artifacts.find((x) => x.id === openArtifact);
   applyPaneClasses(a, fullscreen);
   relayout(); // (the columns re-clamped for the pane now shown or gone: an agent's own open too)
   if (paneThread !== thread.id) {
@@ -1162,7 +1164,9 @@ async function toFiles() {
 $("#files-big").prepend(filesIcon());
 $("#files-big").onclick = () => void toFiles();
 $("#new").onclick = async () => {
-  if (!(await mayLeaveThread())) return;
+  // (from a mirrored conversation: nothing of this browser's to leave; it closes)
+  if (!mirrorOpen && !(await mayLeaveThread())) return;
+  closeMirror();
   session.newThread();
   openArtifact = null;
   renderAll();
@@ -1570,7 +1574,8 @@ function renderMirrorSettings() {
   if (on) lines.push(MIRROR_COPY.storage(fmtBytes(st.bytes ?? 0), st.quota !== undefined ? fmtBytes(st.quota) : null));
   if (on && mirror.full) lines.push(MIRROR_COPY.full);
   if (on && live() && !mirror.agentCan()) lines.push(MIRROR_COPY.updateAgent);
-  if (!on && mirrorDeleting) lines.push((st.pending ?? 0) > 0 ? MIRROR_COPY.deleting : MIRROR_COPY.deleted);
+  // ("deleted" only from a status read that says nothing is pending; one that couldn't be read says nothing more)
+  if (!on && mirrorDeleting) lines.push(st.available && st.pending === 0 ? MIRROR_COPY.deleted : MIRROR_COPY.deleting);
   $("#mirror-lines").replaceChildren(...lines.map((t) => Object.assign(document.createElement("div"), { textContent: t })));
   $("#mirror-confirm").hidden = !mirrorConfirm;
   box.toggleAttribute("data-on", on);
@@ -1607,7 +1612,7 @@ $("#mirror-confirm-yes").onclick = async () => {
     closeMirror();
     renderAll();
     // ("deleted" only once the account's object says nothing is pending)
-    for (let i = 0; i < 100 && (mirror.status.pending ?? 0) > 0 && !mirror.on(); i++) {
+    for (let i = 0; i < 100 && !(mirror.status.available && mirror.status.pending === 0) && !mirror.on(); i++) {
       await new Promise((r) => setTimeout(r, 3000));
       await mirror.refresh();
     }
