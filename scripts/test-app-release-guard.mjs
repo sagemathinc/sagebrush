@@ -110,7 +110,7 @@ const cases = [
   ["a push to track/math", "push", "refs/heads/track/math", {}, REPO, false],
   ["a push of another tag", "push", "refs/tags/v1.0.0", {}, REPO, false],
   ["a push of a branch named like the tag", "push", "refs/heads/app-v1", {}, REPO, false],
-  ["a merge group", "merge_group", "refs/heads/gh-readonly-queue/master/pr-1", {}, REPO, false],
+  ["a merge group", "merge_group", "refs/heads/gh-readonly-queue/master/pr-1306-dddddddddddddddddddddddddddddddddddddddd", {}, REPO, false],
   ["a merge group cannot request signing", "merge_group", "refs/tags/app-v0.4.0", { sign: true }, REPO, false],
   ["a pull request", "pull_request", "refs/pull/1/merge", {}, REPO, false],
   ["a pull request whose ref looks like the tag", "pull_request", "refs/tags/app-v0.4.0", { sign: true }, REPO, false],

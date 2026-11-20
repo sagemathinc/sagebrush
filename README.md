@@ -622,20 +622,25 @@ T_2 and T_3 at about 100 levels up to 2003.
 
 ### Merge queue on master
 
-`master`'s branch ruleset already requires GitHub's merge queue. Once the queue-aware workflows have landed, a
-repository administrator adds the required checks to that ruleset (**Settings → Rules → Rulesets**):
+`master`'s branch ruleset already requires GitHub's merge queue (squash, build concurrency 4, groups of 1 to 5,
+status-check timeout 90 minutes) but no status checks. Once the queue-aware workflows have landed, and `app-ci`
+has run at least once, a repository administrator edits that ruleset (**Settings → Rules → Rulesets**):
 
-- **Require status checks to pass**, with the GitHub Actions checks `ci` and `app-ci`. `ci` aggregates the
-  selected core jobs (size included); `app-ci` requires the page and all three desktop platforms. Leave
-  **Require branches to be up to date** off: the queue tests each entry on top of the entries ahead of it. Do
-  not require individual path-selected jobs, nightly jobs, mobile builds or release/signing jobs. Both workflows
-  report on every pull request, prose-only ones included, so a required check never stays pending because of a
-  path filter. `app-ci` appears in the check picker only after it has run once.
-- **Require a pull request before merging**, with **0** required approvals: changes are reviewed outside GitHub's
-  approval flow.
-- In **Require merge queue**: merge method **Squash**, build concurrency **4**, minimum group size **1**,
-  maximum **5**, wait **5 minutes** for the minimum, status-check timeout **90 minutes**, and **Only merge
-  non-failing pull requests** on.
+- Add **Require status checks to pass**, with the checks `ci` and `app-ci`, source **GitHub Actions**. `ci`
+  aggregates the selected core jobs (size included); `app-ci` requires the page and all three desktop platforms.
+  Leave **Require branches to be up to date** off: the queue tests each entry on top of the entries ahead of it.
+  Do not require individual path-selected jobs, nightly jobs, mobile builds or release/signing jobs. Both
+  workflows report on every pull request, prose-only ones included, so a required check never stays pending
+  because of a path filter. `app-ci` appears in the check picker only after it has run once.
+- Add **Require a pull request before merging**, with **0** required approvals: changes are reviewed outside
+  GitHub's approval flow.
+- In **Require merge queue**, turn **Only merge non-failing pull requests** on (it is off now), so an entry whose
+  own run failed never lands inside a passing group, and raise the status-check timeout to **120 minutes**: a
+  queue run of the desktop app can take about 80 minutes before it waits for a runner. Keep squash, build
+  concurrency 4 and groups of 1 to 5.
+
+An open pull request reports `app-ci` only after its next CI run, so a pull request opened before these
+workflows landed needs a new run (a push, or a re-run) before it can enter the queue.
 
 Build concurrency limits how many queue builds run at once; the group limits set how many passing entries land
 together. Every queue run tests its cumulative head with the full tier, so labels such as `full-ci` cannot be

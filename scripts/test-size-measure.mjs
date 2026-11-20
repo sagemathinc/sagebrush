@@ -123,7 +123,7 @@ try {
   const tip = git("rev-parse", "HEAD"); git("checkout", "-q", "feature");
   assert.equal(testedTransition({ cwd: dir, name: "workflow_dispatch", master: tip }).base, base, "no forced master merge");
   git("checkout", "-q", "queue");
-  assert.throws(() => testedTransition({ cwd: dir, name: "merge_group", ev: { merge_group: { base_sha: tip, head_sha: merge2 } } }), "a base that isn't an ancestor");
+  assert.throws(() => testedTransition({ cwd: dir, name: "merge_group", ev: { merge_group: { base_sha: tip, head_sha: merge2 } } }), /merge-base|ancestor|Command failed/, "a base that isn't an ancestor");
   git("checkout", "-q", "feature");
 
   // Exercise the actual CLI, record admission, exit status and summary output.

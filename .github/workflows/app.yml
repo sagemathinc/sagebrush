@@ -32,10 +32,10 @@ concurrency:
 
 jobs:
   # On a pull request, a queue group or a track ref, determine whether to build the four WebAssembly modules.  A pull
-  # request or a queue group builds when it changes their inputs (scripts/ci-paths.mjs, wasm_build, the same rule as
-  # ci.yml's), since the modules its wasm/pins.json names aren't published until it merges.  A track push or dispatch
-  # always builds (ci-paths.mjs's non-PR rule), so app.yml's integration run never depends on a deliberately
-  # unpublished track pin.  Master keeps its existing published-module path and timing; tracks never receive the
+  # request builds when it changes their inputs (scripts/ci-paths.mjs, wasm_build, the same rule as ci.yml's), since
+  # the modules its wasm/pins.json names aren't published until it merges.  A queue group, a track push and a
+  # dispatch always build (ci-paths.mjs's non-PR rule), so app.yml's integration and queue runs never depend on an
+  # unpublished pin.  Master keeps its existing published-module path and timing; tracks never receive the
   # publishing credential.
   wasm-changes:
     if: github.repository == 'sagemathinc/sagebrush' && (github.event_name == 'pull_request' || github.event_name == 'merge_group' || startsWith(github.ref, 'refs/heads/track/'))

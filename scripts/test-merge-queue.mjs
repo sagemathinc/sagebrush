@@ -24,7 +24,8 @@ function classify(ev, labels = '') {
   return spawnSync(process.execPath, [join(root, 'scripts/ci-paths.mjs')], {
     cwd: dir, encoding: 'utf8', env: { ...process.env, CI_PATHS_FILES: '', CI_PATHS_ROOT: root,
       GITHUB_EVENT_NAME: 'merge_group', GITHUB_EVENT_PATH: path, GITHUB_SHA: git('rev-parse', 'HEAD'),
-      GITHUB_REF: ev.merge_group.head_ref, CI_PR_LABELS: labels },
+      GITHUB_REF: ev.merge_group.head_ref, GITHUB_REF_NAME: String(ev.merge_group.head_ref ?? '').replace(/^refs\/heads\//, ''),
+      GITHUB_BASE_REF: '', GITHUB_HEAD_REF: '', CI_PR_LABELS: labels },
   });
 }
 function full(ev, labels = '') {
