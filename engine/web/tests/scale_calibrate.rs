@@ -73,7 +73,7 @@ fn scale_phases() {
         let t = std::time::Instant::now();
         let mp = pscale::compute(&fa, &fb, &plan, &led, &mut m).unwrap();
         let (u1, s1) = (m.used(), t.elapsed().as_secs_f64());
-        let bytes = pscale::reply_bytes(&mp).unwrap() as usize;
+        let bytes = pscale::reply_bytes(&mp, &mut m).unwrap() as usize;
         let mut out = String::with_capacity(bytes);
         let t = std::time::Instant::now();
         pscale::emit(&mp, &mut out, &mut m).unwrap();

@@ -256,7 +256,7 @@ fn divrem_peaks_caps_and_baselines() {
         let led = Words::new(plan.limit);
         let mut m = Meter::new(plan.work);
         let dv = pdivrem::divide_z(&fa, &fb, &plan, &led, &mut m).unwrap();
-        let bytes = pdivrem::reply_bytes(&dv).unwrap() as usize;
+        let bytes = pdivrem::reply_bytes(&dv, &mut m).unwrap() as usize;
         let mut out = String::with_capacity(bytes);
         let before = ALLOCS.load(Relaxed);
         pdivrem::emit(&dv, &mut out, &mut m).unwrap();
@@ -275,7 +275,7 @@ fn divrem_peaks_caps_and_baselines() {
         let plan = pdivrem::Plan { n: 3, m: 1, k: 3, fixed, limit: pdivrem::DIVREM_Q_CAPS.int.peak / 8 - fixed, work: pa.limit };
         let led = Words::new(plan.limit);
         let dv = pdivrem::divide_q(&fa, &fb, &plan, &pa, l, &led, &mut m).unwrap();
-        let bytes = pdivrem::reply_bytes(&dv).unwrap() as usize;
+        let bytes = pdivrem::reply_bytes(&dv, &mut m).unwrap() as usize;
         let mut out = String::with_capacity(bytes);
         let before = ALLOCS.load(Relaxed);
         pdivrem::emit(&dv, &mut out, &mut m).unwrap();
@@ -323,7 +323,7 @@ fn divrem_peaks_caps_and_baselines() {
         hooks::reset();
         hooks::trace();
         let _ = call(&p20k, "1,1,1", None, None);
-        let phases: Vec<(&str, Vec<u64>)> = ["divrem load", "divrem divide", "divrem emit"].iter().map(|p| (*p, hooks::traced(p))).collect();
+        let phases: Vec<(&str, Vec<u64>)> = ["divrem load", "divrem divide", "divrem bytes", "divrem emit"].iter().map(|p| (*p, hooks::traced(p))).collect();
         hooks::reset();
         let mut first = true;
         for (phase, idx) in &phases {
@@ -344,7 +344,7 @@ fn divrem_peaks_caps_and_baselines() {
         hooks::reset();
         hooks::trace();
         let _ = qcall(&qa, &qb, None, None);
-        let phases: Vec<(&str, Vec<u64>)> = ["divrem clear", "divrem load", "divrem divide", "divrem emit"].iter().map(|p| (*p, hooks::traced(p))).collect();
+        let phases: Vec<(&str, Vec<u64>)> = ["divrem clear", "divrem load", "divrem divide", "divrem bytes", "divrem emit"].iter().map(|p| (*p, hooks::traced(p))).collect();
         hooks::reset();
         for (phase, idx) in &phases {
             assert!(!idx.is_empty(), "Q: no poll in {}", phase);

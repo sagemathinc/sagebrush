@@ -24,10 +24,19 @@ fn scale_ops_stop_at_the_first_and_last_poll_of_each_phase() {
         hooks::reset();
         hooks::trace();
         let _ = pscale::reply(kind, &fa, &fb, r, &qpoly::CAPS).unwrap();
-        let phases: Vec<(&str, Vec<u64>)> = ["scale compute", "scale trim", "scale emit"].iter().map(|p| (*p, hooks::traced(p))).collect();
+        let phases: Vec<(&str, Vec<u64>)> = ["scale compute", "scale trim", "scale bytes", "scale emit"].iter().map(|p| (*p, hooks::traced(p))).collect();
         hooks::reset();
         for (phase, idx) in &phases {
             eprintln!("{:?} {}: {} polls", kind, phase, idx.len());
+            // (a - a keeps no token: its reply_bytes has nothing to walk)
+            if *phase == "scale bytes" && b == a.as_str() {
+                assert!(idx.is_empty(), "a walk over no kept token polled");
+                continue;
+            }
+            // (200k kept tokens: a poll each 4096, so at least 48)
+            if *phase == "scale bytes" {
+                assert!(idx.len() >= 48, "{}: {} polls", phase, idx.len());
+            }
             assert!(!idx.is_empty(), "no poll in {}", phase);
             for at in [idx[0], *idx.last().unwrap()] {
                 hooks::reset();

@@ -264,6 +264,25 @@ fn trim_is_charged_once_per_token() {
     assert_eq!(trim(&mp, &mut short), Err(DivFault::Work));
 }
 
+/// reply_bytes walks the kept tokens once, one unit each, pre-charged and
+/// polled in 4096-token chunks: exactly `kept` units, and a meter one unit
+/// short refuses inside it.
+#[test]
+fn reply_bytes_is_charged_once_per_token() {
+    let a = (0..10_000).map(|i| format!("{:x}/7", i + 1)).collect::<Vec<_>>().join(",");
+    let fa = scan(&a).unwrap();
+    let fb = scan("3/5").unwrap();
+    let Ok(Ok(plan)) = admit(Kind::Scale, &fa, &fb, r_of(&a, "3/5"), &CAPS) else { panic!() };
+    let led = Words::new(plan.limit);
+    let mut m = Meter::new(plan.work);
+    let mp = compute(&fa, &fb, &plan, &led, &mut m).unwrap();
+    let before = m.used();
+    let bytes = reply_bytes(&mp, &mut m).unwrap();
+    assert_eq!(m.used() - before, 10_000, "one unit a token");
+    assert!(bytes > 10_000);
+    assert_eq!(reply_bytes(&mp, &mut Meter::new(9_999)), Err(DivFault::Work));
+}
+
 // ---- the closed forms ----
 
 /// The reply bound: integer arithmetic, checked; at and around powers of 16;

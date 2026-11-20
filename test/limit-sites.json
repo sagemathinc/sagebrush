@@ -496,6 +496,11 @@
   "owner": "qpoly_divrem",
   "reason": "qpoly_divrem's derived sizes, plumbing (the ledger's and meter's limits, the plan's sizes) or a test assertion: refuses nothing itself"
  },
+ "engine/arith/src/pdivrem/tests.rs :: q_reach_at_the_real_scale :: let bytes = reply_bytes(&dv, &mut Meter::new(u64::MAX)).unwrap(); #0": {
+  "class": "none",
+  "owner": "qpoly_divrem",
+  "reason": "qpoly_divrem's derived sizes, plumbing (the ledger's and meter's limits, the plan's sizes) or a test assertion: refuses nothing itself"
+ },
  "engine/arith/src/pdivrem/tests.rs :: q_reach_at_the_real_scale :: let led = Words::new(plan.limit); #0": {
   "class": "none",
   "owner": "qpoly_divrem",
@@ -510,6 +515,11 @@
   "class": "none",
   "owner": "qpoly_divrem",
   "reason": "qpoly_divrem's derived sizes, plumbing (the ledger's and meter's limits, the plan's sizes) or a test assertion: refuses nothing itself"
+ },
+ "engine/arith/src/pdivrem/tests.rs :: reply_bytes_is_charged_per_token :: let led = Words::new(plan.limit); #0": {
+  "class": "none",
+  "owner": "zpoly_divrem",
+  "reason": "zpoly_divrem's derived sizes, plumbing (the ledger's and meter's limits, the plan's sizes) or a test assertion: refuses nothing itself"
  },
  "engine/arith/src/pdivrem/tests.rs :: run_q :: fn run_q(a: &str, b: &str, limit: Option<u64>) -> (Result<u64, DivFault>, u64, Vec<(&'static str, u64)>) { #0": {
   "class": "none",
@@ -715,6 +725,11 @@
   "reason": "qpoly_scale's derived sizes, plumbing (the ledger's and meter's limits, the plan's sizes, the reply's reservation) or a test assertion: refuses nothing itself"
  },
  "engine/arith/src/pscale/tests.rs :: reply_bounds :: assert_eq!(reply_bound(Kind::Scale, u64::MAX, 1, \"3\", 0), None); #0": {
+  "class": "none",
+  "owner": "qpoly_scale",
+  "reason": "qpoly_scale's derived sizes, plumbing (the ledger's and meter's limits, the plan's sizes, the reply's reservation) or a test assertion: refuses nothing itself"
+ },
+ "engine/arith/src/pscale/tests.rs :: reply_bytes_is_charged_once_per_token :: let led = Words::new(plan.limit); #0": {
   "class": "none",
   "owner": "qpoly_scale",
   "reason": "qpoly_scale's derived sizes, plumbing (the ledger's and meter's limits, the plan's sizes, the reply's reservation) or a test assertion: refuses nothing itself"

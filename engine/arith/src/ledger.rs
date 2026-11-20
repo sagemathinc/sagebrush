@@ -378,3 +378,14 @@ impl<'l> Arena<'l> {
         (self.words.cap() + self.meta.cap()) as u64
     }
 }
+
+/// The charge of one token of a walk over `total` tokens (the i-th): at each
+/// 4096-token chunk's start, Stop polled and the chunk's units (one a token)
+/// charged before its walk.
+pub(crate) fn walk_charge(i: usize, total: usize, m: &mut Meter) -> Result<(), DivFault> {
+    if i & 0xfff == 0 {
+        sagebrush_interrupt::check_coarse();
+        m.add(total.saturating_sub(i).min(0x1000))?;
+    }
+    Ok(())
+}
