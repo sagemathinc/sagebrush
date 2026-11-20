@@ -29,7 +29,7 @@ Code brought in from a link can't change your files until you allow it.
 
 ## Share a talk {#talk}
 
-In the LaTeX editor, **File ▸ Share…** shares a talk with the files it uses, because the talk's code can read them. The dialog lists the files it uses, ticked, and the other files in its folder, unticked; a file that looks like it holds a key or password is never ticked for you. Tick any the talk needs that weren't found, and untick any you don't want to publish. Each talk in the folder gets its own link, and the one you shared from is listed first.
+In the LaTeX editor, **File ▸ Share…** shares a talk with the files it uses, because the talk's code can read them. The dialog lists the files it uses, ticked, and the other files in its folder, unticked; a file that looks like it holds a key or password is never ticked for you. Tick any the talk needs that weren't found, and untick any you don't want to publish. Each talk or notebook left ticked gets its own link, and the one you shared from is listed first.
 
 On the shared page, a visitor sees the slides with your results. **Run** runs the talk's code in their own browser, and **Copy to my workspace** copies the talk's folder into their files.
 
