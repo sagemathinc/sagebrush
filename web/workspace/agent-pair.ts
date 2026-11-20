@@ -31,8 +31,9 @@ export type Hello = { protocol: 1; agent: { name: string; client: string; versio
  * the run its numbers belong to); "edit.turn", a notebook.edit that carries the turn it came from (`turn_id`, the
  * agent's server's), applied only while that turn is the chat's running one; "chat.steer", an agent that takes a message
  * into its running turn (Steer, step 3); "egress.turn", a web card (the agent's fetch, the built-in search) that also
- * offers "for this turn", its own action and digest (agent-egress.ts). */
-export const FEATURES = ["notebook.edit", "permission.digest", "run.context", "chat.resume", "edit.turn", "chat.steer", "egress.turn"] as const;
+ * offers "for this turn", its own action and digest (agent-egress.ts); "chat.resume.tag", an agent that gives a
+ * chat.resume's tag back on its chat.replay, so the log mirror reads the agent's log apart from the display (mirror.ts). */
+export const FEATURES = ["notebook.edit", "permission.digest", "run.context", "chat.resume", "edit.turn", "chat.steer", "egress.turn", "chat.resume.tag"] as const;
 /** The `log` an agent's hello or agent.ready names: its run, as the agent's random hex id; anything else, none. */
 export const logOf = (v: unknown): { instance: string } | undefined => {
   const i = (v as { instance?: unknown } | null)?.instance;

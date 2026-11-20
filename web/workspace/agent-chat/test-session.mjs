@@ -754,6 +754,57 @@ const turnOf = (t, id) => t.entries.find((e) => e.kind === "turn" && e.turn_id =
   }
 }
 
+// the log mirror (M2): a tagged replay is the mirror's alone; it moves nothing of the display's
+{
+  const { h, host: hs } = host();
+  const tagged = [];
+  hs.tagged = (params, from) => tagged.push([params, from]);
+  const s = new ChatSession(hs);
+  const t = s.current();
+  const sent = [];
+  h.pairing = resumable("aaaaaaaaaaaaaaaa", sent);
+  s.submit("start", "sent");
+  s.onAgent("turn.event", { conversation: t.id, seq: 3, turn_id: "T1", event: { type: "turn_started" } }, h.pairing);
+  s.endLive(true);
+  const turn = turnOf(t, "T1");
+  const before = JSON.stringify(t);
+  const replay = { conversation: t.id, instance: "aaaaaaaaaaaaaaaa", last: 9, done: true, running: [], events: [{ seq: 9, method: "turn.event", params: { conversation: t.id, turn_id: "T1", event: { type: "turn_finished", outcome: "completed" } } }] };
+  s.onAgent("chat.replay", { ...replay, tag: "mirror" }, h.pairing);
+  check(tagged.length === 1 && tagged[0][0].tag === "mirror" && tagged[0][1] === h.pairing, "a tagged replay goes to the mirror's host, with the pairing it came through", tagged.length);
+  check(JSON.stringify(t) === before && turn.away === true && !turn.outcome && t.agent_seq === 3, "...and changes nothing of the display's: the away turn stays away, the cursor where it was", { away: turn.away, seq: t.agent_seq });
+  s.onAgent("chat.replay", { ...replay, tag: "" }, h.pairing);
+  s.onAgent("chat.replay", { ...replay, tag: undefined }, h.pairing);
+  check(tagged.length === 3 && turn.away === true && t.agent_seq === 3, "any tag at all, even an empty or undefined one: never the display's", tagged.length);
+  const { h: h2, host: hs2 } = host();
+  const s2 = new ChatSession(hs2);
+  h2.pairing = resumable("aaaaaaaaaaaaaaaa", []);
+  s2.submit("x", "sent");
+  const t2 = s2.current();
+  s2.onAgent("chat.replay", { conversation: t2.id, instance: "aaaaaaaaaaaaaaaa", last: 5, done: true, tag: "mirror", events: [{ seq: 5, method: "chat.message", params: { conversation: t2.id, author: "person", id: "zz", text: "from the log" } }] }, h2.pairing);
+  check(!t2.entries.some((e) => e.text === "from the log") && (t2.agent_seq ?? 0) === 0, "a tagged replay with no mirror host: dropped, not the display's", t2.entries.map((e) => e.text));
+  s.onAgent("chat.replay", replay, h.pairing);
+  check(turn.outcome === "completed" && t.agent_seq === 9 && tagged.length === 3, "the same replay untagged is the display's, as before", { outcome: turn.outcome, seq: t.agent_seq });
+}
+
+// a conversation read back from the mirror is read-only: nothing in it is sent, queued, answered, interrupted or resumed
+{
+  const { h, host: hs } = host();
+  const sent = [];
+  h.pairing = resumable("aaaaaaaaaaaaaaaa", sent);
+  h.mayDemo = () => true;
+  const s = new ChatSession(hs);
+  const m = { id: "mirror-1", title: "From the mirror", entries: [{ kind: "turn", turn_id: "T9", state: "running", parts: [], tools: {}, attention: { q1: { state: "open", kind: "tool", title: "Run?" } }, started: 1, agent: "Claude" }], artifacts: [], applied_seq: 1, source: "mirror", agent: true };
+  s.state.threads.push(m);
+  s.select(m.id);
+  check(s.readOnly(m) && s.submit("hello", "sent") === false && s.submit("note", "note") === false && s.submit("steer", "steer") === false, "submit refuses a mirror thread, in every mode", m.entries.length);
+  s.queues.set(m.id, [{ kind: "user", id: "q", text: "queued", mode: "queued", time: 1 }]);
+  s.next(m);
+  s.interrupt(m);
+  check(s.answer(m, "q1", true, "T9", "aaaaaaaaaaaaaaaa") === false && m.entries[0].attention.q1.state === "open", "an approval in it can't be answered");
+  s.resume();
+  check(sent.length === 0 && s.queues.get(m.id).length === 1 && h.demos.length === 0, "next, interrupt and resume send nothing for it (no chat.message, no chat.interrupt, no chat.resume), and the demo never runs", sent);
+}
+
 const failed = results.filter(([ok]) => !ok).length;
 console.log(failed ? `test-session: ${failed} failed` : `ok: the agents chat's session, ${results.length} checks`);
 process.exit(failed ? 1 : 0);

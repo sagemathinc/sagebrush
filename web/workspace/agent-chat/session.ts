@@ -36,6 +36,8 @@ export interface SessionHost {
   changed(all: boolean): void;
   /** a message didn't go to the agent: its queue is full, it's over the connection's limit, or the agent is gone */
   notSent(why: "full" | "over" | "disconnected"): void;
+  /** a chat.replay with a tag: the log mirror's (mirror.ts), never the display's. Without a host for it, dropped */
+  tagged?(params: unknown, from?: AgentPairing): void;
 }
 
 const id = () => Math.random().toString(36).slice(2, 10);
@@ -103,7 +105,7 @@ export class ChatSession {
     if (!pairing || !this.live()) return;
     const instance = pairing.hello?.log?.instance;
     for (const t of this.state.threads) {
-      if (!this.marked(t)) continue;
+      if (!this.marked(t) || this.readOnly(t)) continue;
       if (!pairing.hello?.features?.includes("chat.resume") || !instance) { this.endAway(t); continue; }
       pairing.notify("chat.resume", { conversation: t.id, after: t.agent_seq ?? 0, ...(t.agent_instance ? { instance: t.agent_instance } : {}) });
     }
@@ -173,11 +175,17 @@ export class ChatSession {
     return this.live() && this.liveRunning.has(thread.id) && !this.isAway(thread) && !!this.host.pairing()?.hello?.features?.includes("chat.steer");
   }
 
+  /** A conversation read back from the mirror: read-only. Nothing in it is sent, queued, answered or resumed. */
+  readOnly(t: Thread): boolean {
+    return t.source === "mirror";
+  }
+
   /** The person's message in the current thread: false when it can't be taken (the draft stays). */
   submit(text: string, mode: UserEntry["mode"]): boolean {
     text = text.trim();
     if (!text) return false;
     const thread = this.current();
+    if (this.readOnly(thread)) return false;
     if (mode !== "note" && !this.canSend(thread)) return false;
     const busy = this.isRunning(thread);
     // (a turn away: no one to interrupt, so a message waits for its end, which the agent's log says once connected)
@@ -223,6 +231,7 @@ export class ChatSession {
 
   /** The next queued message, once a turn has ended. */
   next(thread: Thread) {
+    if (this.readOnly(thread)) return;
     const entry = this.queues.get(thread.id)?.shift();
     if (entry) {
       entry.mode = "sent";
@@ -233,6 +242,7 @@ export class ChatSession {
   }
 
   private send(thread: Thread, entry: UserEntry) {
+    if (this.readOnly(thread)) return;
     const pairing = this.host.pairing();
     if (this.live() && pairing) {
       this.mark(thread);
@@ -255,6 +265,7 @@ export class ChatSession {
   }
 
   interrupt(thread: Thread) {
+    if (this.readOnly(thread)) return;
     const scripted = this.local.get(thread.id);
     if (scripted) scripted.turn.interrupt();
     else if (this.liveRunning.has(thread.id)) this.host.pairing()?.notify("chat.interrupt", { conversation: thread.id });
@@ -262,6 +273,7 @@ export class ChatSession {
 
   /** A permission prompt's answer: true when the thread changed (the card now shows the answer). */
   answer(thread: Thread, attention: string, approve: boolean | "turn", turnId: string, instance: string): boolean {
+    if (this.readOnly(thread)) return false;
     const scripted = this.local.get(thread.id);
     if (scripted) {
       scripted.turn.answer(attention, approve !== false);
@@ -282,7 +294,12 @@ export class ChatSession {
    *  one must never be read against the new one's run). */
   onAgent(method: string, params: unknown, from?: AgentPairing) {
     if (from !== undefined && from !== this.host.pairing()) return;
-    if (method === "chat.replay") return this.onReplay(params);
+    // (a replay with a tag is the log mirror's request's answer: never the display's, whatever its tag, and it moves
+    //  none of the display's state (an away turn, a cursor); an untagged one is the display's)
+    if (method === "chat.replay") {
+      if (params && typeof params === "object" && "tag" in params) return this.host.tagged?.(params, from);
+      return this.onReplay(params);
+    }
     if (method === "chat.receipt") return this.onReceipt(params, false);
     if (method === "chat.rejected") return this.onReceipt(rejection(params), false);
     if (method !== "turn.event") return;

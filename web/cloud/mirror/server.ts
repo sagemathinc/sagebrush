@@ -3,7 +3,7 @@
 // authenticated here, by the site's session, and reaches exactly one object, the account's MirrorAccount, named by
 // the account it authenticated: the page never names an account or a storage prefix (S1).
 //
-//   GET    /api/mirror/v1/status                         -> {available, state, mode, conversations, bytes, csrf}
+//   GET    /api/mirror/v1/status                         -> {available, state, mode, conversations, bytes, pending, quota, csrf}
 //   POST   /api/mirror/v1/enable                         -> {state: "on"}
 //   POST   /api/mirror/v1/disable  {confirm: "delete"}   -> {state: "off"}   every key and index now, objects after
 //   GET    /api/mirror/v1/conversations                  -> {conversations: [{conversation, locator, mode, streams}]}
@@ -165,7 +165,9 @@ export async function handleMirror(req: Request, env: MirrorSiteEnv, ctx: Ctx, h
     const hash = await accountHash(who.id);
     const st = await stubOf(env, hash).status({ account: who.id, hash });
     const csrf = await csrfOf(env, who.session);
-    return answer(st, (v) => json({ available: true, ...v, csrf, encryption: "server", uploaded_by: "page" }));
+    // (the account's storage quota, for the settings' "Mirror: <size> of your <quota>"; absent when it can't be read now)
+    const lim = await limits(env, who).catch(() => null);
+    return answer(st, (v) => json({ available: true, ...v, ...(lim ? { quota: lim.storage_bytes } : {}), csrf, encryption: "server", uploaded_by: "page" }));
   }
   if (!ok) return err(403, "forbidden", "the mirror isn't part of this account's plan");
   // (everything else but a GET: the CSRF token, then the exact content type, before any body is read)
