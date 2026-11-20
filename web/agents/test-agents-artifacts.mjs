@@ -146,9 +146,19 @@ async function artifactTurn(path, { finish = true, turn = null } = {}) {
 const tagOf = (s) => "k" + [...s].reduce((h, c) => (h * 31 + c.charCodeAt(0)) >>> 0, 7).toString(16);
 const nbDoc = (cells, extra = {}, tag = "c") => ({ json: { mode: "python", ...extra, cells: cells.map((c, i) => ({ id: `${tag}${i}`, type: c.type ?? "code", code: c.code })) } });
 const docFor = (path, cells, extra, salt = "") => nbDoc(cells, extra, tagOf(path + salt));
-const write = async (path, cells, extra) => {
-  const r = await call("workspace.read", { path });
-  return call("workspace.write", { path, content: docFor(path, cells, extra), base: r.rev });
+// (as an agent does: on a conflict it reads again and writes again. The page saves an open notebook half a second after
+//  its last change, new output included (web/notebook/notebook.js schedule), so on a slow runner that save can land
+//  between the read and the write; a conflict that stays is still thrown)
+const write = async (path, cells, extra, tries = 5) => {
+  for (let i = 1; ; i++) {
+    const r = await call("workspace.read", { path });
+    try {
+      return await call("workspace.write", { path, content: docFor(path, cells, extra), base: r.rev });
+    } catch (e) {
+      if (e.code !== "conflict" || i >= tries) throw e;
+      await sleep(300);
+    }
+  }
 };
 const readCells = async (path) => (await call("workspace.read", { path })).content.json.cells;
 // (the hash an edit by cell names a cell by, as the helper computes it: web/workspace/notebook-edit.ts cellHash)
