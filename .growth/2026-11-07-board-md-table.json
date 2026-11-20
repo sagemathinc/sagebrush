@@ -1,7 +1,0 @@
-{
- "v": 1,
- "reason": "board render draws a note's Markdown table as a grid, as the board does (codex friction P10a): cells in columns sized as a browser's auto layout does, the header bold and ruled off, cells aligned as the separator row says and wrapped at words; web/board/svg.ts only. Measured vs master c32e38de, probe ca32330d, node 24.21.0, bun 1.4.4: the CLI carries svg.ts (pyjs +1871).",
- "bytes": {
-  "cli/pyjs.cjs": 1935
- }
-}

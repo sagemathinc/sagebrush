@@ -12,23 +12,29 @@ import { dirname, resolve, join } from "path";
 import { createRequire } from "module";
 import { homedir, tmpdir } from "os";
 import * as readline from "readline";
+import { PassThrough } from "stream";
 import { oneLine } from "./terminal-text";
 import { initParser, compile, execModule, R, libDir, findModuleSource, packageModuleNames, installPackageSet, coreBuildId, reservedNames } from "./compile";
 import { prepareSet } from "./pkgcache";
-import { magmaToPython, magmaIsIncomplete, MagmaSyntaxError, type Recover } from "./magma";
+import { magmaToPython, magmaIsIncomplete, MagmaSyntaxError, magmaSyntaxMessage, type Recover } from "./magma";
+import { installMagmaCompile } from "./magma-builtin";
 import { matlabToPython, MatlabSyntaxError, matlabSyntaxMessage, matlabHostOps, matlabIsIncomplete, looksLikeMagma } from "./matlab";
 import { needsMore, completeIn, helpSyntax, ipythonSyntax } from "./interactive";
 import { MAGIC_PRE, MAGIC_POST, GET_IPYTHON, magicTransform } from "./magic-syntax";
 import { getattr, unbox } from "./runtime/object";
-import { isMainThread, workerData, parentPort } from "worker_threads";
-import { installKernel, runKernel, kernelWorker, Mode } from "./kernel";
+import { isMainThread, workerData, parentPort, Worker } from "worker_threads";
+import { installKernel, runKernel, kernelWorker, Mode, FIGURE_MODES } from "./kernel";
 import { runNotebookServer, notebookWorker } from "./notebook";
 import { takeLimitsOption, launcherLimits, startLimits, setSessionLimits, type LimitsText } from "./limits";
 import { selectLimits } from "./limits-file";
 import { setDataRoot } from "./runtime/modules";
 import { rillRefusal, rillSource } from "./rill";
 import { sprigRefusal, sprigSource } from "./sprig";
-import type { ReplMode, TranslatedMode } from "./modes";
+import type { ReplMode } from "./modes";
+import { PromptSession, type StepResult } from "./repl-step";
+
+// __pyjs_compile_magma__: Magma for one Python driver, `sagebrush latex run` (src/magma-builtin.ts)
+installMagmaCompile(R);
 
 const VERSION = `sagebrush ${(globalThis as any).__SAGEBRUSH_VERSION__ ?? "dev"} (Python 3.14 language on a JavaScript runtime)`;
 const USAGE = `usage: sagebrush [-c cmd | -m mod | file | -] [args]
@@ -72,7 +78,10 @@ const USAGE = `usage: sagebrush [-c cmd | -m mod | file | -] [args]
            --mode: that language's functions (default: Sage's library,
            which Python mode imports too)
   --install-jupyter-kernel [--user | --sys-prefix | --prefix DIR] [--mode sage|python|magma|matlab|all]
-           register Sagebrush as a Jupyter kernel (no Python needed)
+                           [--figures auto|svg|png|both]
+           register Sagebrush as a Jupyter kernel (no Python needed); --figures:
+           how its figures are shown (default auto: an SVG, or a sharp PNG
+           when the SVG would be over 1 MiB; also SAGEBRUSH_FIGURES)
   --uninstall-jupyter-kernel [the same options]
   notebook [DIR] [--port N] [--no-browser]
            the Sagebrush notebook in your browser, running Python here;
@@ -163,7 +172,9 @@ function exitCode(c: any): number {
 // (an uncaught KeyboardInterrupt: after its traceback the process ends by
 // SIGINT, as CPython's does, so a shell sees 130: endByInterrupt)
 let keyboardInterrupt = false;
-function guarded(fn: () => void): number | null {
+// (brief: a KeyboardInterrupt as its name alone, as MATLAB's and Magma's prompts show it: their frames are the
+// translation's, not the user's)
+function guarded(fn: () => void, brief = false): number | null {
   try {
     fn();
     return null;
@@ -171,7 +182,7 @@ function guarded(fn: () => void): number | null {
     const exc = R.toPyExc(e);
     if (R.typeOf(exc).$mro.includes(R.T.SystemExit)) return exitCode(exc.code);
     R.stdout.flush();
-    R.stderr.write(R.formatException(exc));
+    R.stderr.write(brief && R.typeOf(exc).$mro.includes(R.T.KeyboardInterrupt) ? "KeyboardInterrupt\n" : R.formatException(exc));
     if (R.typeOf(exc).$mro.includes(R.T.KeyboardInterrupt)) {
       keyboardInterrupt = true;
       return 130;
@@ -291,6 +302,8 @@ function figurePath(): string {
   if (figuresDir === null) {
     sweepFigures();
     figuresDir = mkdtempSync(join(tmpdir(), `sagebrush-figures-${process.pid}-`));
+    // (the prompt's worker tells its front, which removes them if the process ends by a signal)
+    if (promptHost) parentPort?.postMessage({ figures: { dir: figuresDir, kept: false } });
     process.on("exit", removeFigures);
     writeFileSync(join(figuresDir, FIGURES_MARK), `sagebrush figures ${process.pid}\n`, { flag: "wx" });
   }
@@ -363,8 +376,7 @@ function magmaSource(src: string, file: string, recover: Recover = "file"): stri
     return magmaToPython(src, file, { recover });
   } catch (e) {
     if (!(e instanceof MagmaSyntaxError)) throw e;
-    const line = src.split("\n")[e.line - 1] ?? "";
-    process.stdout.write(`\n>> ${line}\n${" ".repeat(e.col + 2)}^\nUser error: bad syntax: ${e.message} (${file}, line ${e.line})\n`);
+    process.stdout.write(magmaSyntaxMessage(e, src, file));
     process.exitCode = 1;
     return null;
   }
@@ -417,38 +429,28 @@ function historyFile(): string | null {
   }
 }
 
-/**
- * One input typed at a Magma or MATLAB prompt, translated as the kernel's
- * cells are (src/kernel.ts) and run in the session's __main__: Magma as a
- * session (an error is reported and the session goes on), MATLAB in cell
- * mode (its error message on stderr, and the session goes on).  The exit
- * status of a quit, else null.
- */
-function runTranslated(mode: TranslatedMode, src: string, main: any): number | null {
-  if (mode === "magma") {
-    const py = magmaSource(src, "<stdin>", "session");
-    return py === null ? null : guarded(() => R.loader.exec(py, main, "exec", "<stdin>", opts()));
-  }
-  let py: string;
-  try {
-    py = matlabToPython(src, "<stdin>", { cell: true });
-  } catch (e) {
-    if (!(e instanceof MatlabSyntaxError)) throw e;
-    process.stderr.write(matlabSyntaxMessage(e, src, "<stdin>"));
-    return null;
-  }
-  const code = guarded(() => R.loader.exec(py, main, "exec", "<stdin>", opts()));
-  // (the error, if any, is on stderr already: forget that this input failed)
-  guarded(() => R.callObj(getattr(R.importModule("_matlab"), "cell_failed"), []));
-  return code;
+/** The line being typed, dropped without redrawing it (a Ctrl-C at the prompt starts a new one, as CPython's does). */
+function clearLine(rl: readline.Interface) {
+  (rl as any).line = "";
+  (rl as any).cursor = 0;
 }
 
 function repl(main: any, quiet: boolean, mode: ReplMode = "python"): Promise<number> {
   removeFiguresOnSignal();
   const leave = mode === "magma" ? "quit; or Ctrl-D to leave" : mode === "matlab" ? "exit or Ctrl-D to leave" : "exit() or Ctrl-D to leave";
   if (!quiet) process.stdout.write(mode === "python" ? `${VERSION}\nType help(obj) for help, ${leave}.\n` : `${VERSION} (${mode === "magma" ? "Magma" : "MATLAB"})\nType ${leave}.\n`);
-  // (the language's library, loaded before the first prompt rather than at the first input)
-  if (mode !== "python") guarded(() => R.importModule(mode === "magma" ? "_magma" : "_matlab"));
+  // (the session's step, shared with the Terminal's prompt: src/repl-step.ts; the language's library and
+  // get_ipython() loaded before the first prompt rather than at the first input)
+  const session = new PromptSession(main, mode, sage, {
+    guarded,
+    out: (t) => process.stdout.write(t),
+    err: (t) => process.stderr.write(t),
+    syntaxError: () => {
+      process.exitCode = 1;
+    },
+    flushFiles,
+  });
+  session.start();
   const hist = historyFile();
   let history: string[] = [];
   if (hist) {
@@ -460,17 +462,9 @@ function repl(main: any, quiet: boolean, mode: ReplMode = "python"): Promise<num
   }
   // (completion in the prompt's language: src/interactive.ts completeIn)
   const rl = readline.createInterface({ input: process.stdin, output: process.stdout, completer: completer(main, mode), history, historySize: 1000, terminal: process.stdin.isTTY });
-  const sys = R.importModule("sys");
-  // (Magma's prompt and MATLAB's; neither shows one for a continued input)
-  const ps1 = () => (mode === "magma" ? "> " : mode === "matlab" ? ">> " : typeof sys.ps1 === "string" ? sys.ps1 : sage ? "sage: " : ">>> ");
-  const ps2 = () => (mode !== "python" ? "" : typeof sys.ps2 === "string" ? sys.ps2 : sage ? "....: " : "... ");
-  const incomplete = (src: string) => (mode === "magma" ? magmaIsIncomplete(src) : mode === "matlab" ? matlabIsIncomplete(src) : needsMore(src, opts()));
+  const ps1 = () => session.ps1();
+  const ps2 = () => session.ps2();
   let buf: string[] = [];
-  // (the session's own Python around each input: %autoreload's hooks)
-  const host = R.newModule("__sagebrush_host__");
-  host.__builtins__ = R.builtins;
-  // get_ipython(), as in a notebook
-  guarded(() => R.loader.exec(GET_IPYTHON, host, "exec", "<init>"));
   rl.setPrompt(ps1());
   rl.prompt();
   return new Promise((resolveExit) => {
@@ -485,7 +479,7 @@ function repl(main: any, quiet: boolean, mode: ReplMode = "python"): Promise<num
     rl.on("line", (line) => {
       buf.push(line);
       const src = buf.join("\n");
-      if (src.trim() !== "" && incomplete(src)) {
+      if (session.incomplete(src)) {
         rl.setPrompt(ps2());
         rl.prompt();
         return;
@@ -499,40 +493,22 @@ function repl(main: any, quiet: boolean, mode: ReplMode = "python"): Promise<num
             // read-only home: no history
           }
         }
-        // (MATLAB's exit and quit, at the prompt: the session ends, with the status given; a comment may follow)
-        const q = mode === "matlab" ? /^\s*(?:exit|quit)\s*(?:\(\s*(\d*)\s*\))?\s*;?\s*(?:%.*)?$/.exec(src) : null;
-        if (q) return finish(Number(q[1] || 0));
-        // (a function definition at the prompt: refused with MATLAB's command-window error, not run line by line)
-        if (mode === "matlab" && /^\s*function\b/.test(src)) {
-          process.stderr.write("Function definitions are not supported in this context. Functions can only be created as local or nested functions in code files.\n");
-          rl.setPrompt(ps1());
-          rl.prompt();
-          return;
-        }
         promptSignals(true);
-        let code: number | null = null;
+        let r: StepResult;
         try {
-          if (mode !== "python") code = runTranslated(mode, src, main);
-          else {
-            guarded(() => R.loader.exec(MAGIC_PRE, host, "exec", "<autoreload>"));
-            code = guarded(() => R.loader.exec(ipythonSyntax(src) + "\n", main, "single", "<stdin>", { ...opts(), transform: magicTransform(sage) }));
-            guarded(() => R.loader.exec("import sys as _s\n" + MAGIC_POST, host, "exec", "<autoreload>"));
-          }
-          // (Python's file flushes are Python code too, and may not return:
-          // still busy, astra2 CORR-PR123-1)
-          flushFiles();
-          R.stdout.flush();
-          R.stderr.flush();
+          r = session.run(src);
         } finally {
           promptSignals(false);
         }
-        if (code !== null && code !== 1) return finish(code);
+        if ("end" in r) return finish(r.end);
+        if (r.code !== null && r.code !== 1) return finish(r.code);
       }
       rl.setPrompt(ps1());
       rl.prompt();
     });
     rl.on("SIGINT", () => {
       buf = [];
+      clearLine(rl);
       process.stdout.write("\nKeyboardInterrupt\n");
       rl.setPrompt(ps1());
       rl.prompt();
@@ -542,6 +518,323 @@ function repl(main: any, quiet: boolean, mode: ReplMode = "python"): Promise<num
       finish(0);
     });
   });
+}
+
+// ------------------------------------------------------------------ the prompt in a worker
+//
+// Ctrl-C must reach an input that is running, a call into the engine included: a signal handler runs only when
+// its thread is idle, so the prompt's inputs run in a worker (promptBack, with the session's __main__ and everything
+// it computes), and this thread keeps the terminal (readline, the history, the completions it asks the worker for)
+// and stays idle while an input runs. A Ctrl-C then sets the interrupt flag the compiled code polls, as the launcher
+// does for a program: the call raises KeyboardInterrupt, and the prompt comes back with the session as it was. A
+// second Ctrl-C within 2 s, while the first is still unseen (a call that does not poll), ends the process as SIGINT's
+// default action would. The terminal stays in raw mode: while the worker runs an input this thread reads the keys,
+// a Ctrl-C among them, and keeps the rest for readline; while it waits for an input, readline has them, and Ctrl-C
+// clears the line as before. A SIGINT from kill is a Ctrl-C too. SAGEBRUSH_NO_WORKER keeps the prompt on this
+// thread (repl).
+
+/** promptHost: set in the prompt's worker (promptWorker), where main() runs the prompt as promptBack. */
+let promptHost = false;
+
+/** Whether this thread starts the prompt's worker: the process's main thread, unless SAGEBRUSH_NO_WORKER, with
+ * shared memory for the flag and a file to start the worker on. */
+function promptInWorker(): boolean {
+  if (!isMainThread || typeof SharedArrayBuffer === "undefined") return false;
+  try {
+    if (process.env.SAGEBRUSH_NO_WORKER) return false;
+  } catch {} // (a Deno without --allow-env)
+  return cliEntry() !== null;
+}
+
+type FrontMsg = { interrupt?: SharedArrayBuffer | null; ready?: { ps1: string; ps2: string }; step?: { end?: number; ps1: string; ps2: string }; incomplete?: boolean; complete?: [string[], string]; figures?: { dir: string; kept: boolean }; keyboardInterrupt?: boolean };
+
+/** This thread's side of the prompt: the terminal, and the worker running main(argv) with the prompt in it. Resolves
+ * to the exit status. */
+function promptFront(argv: string[], limits: LimitsText): Promise<number> {
+  // (this process's own entry, as the kernel's and the notebook's workers: the npm launcher, started in a worker,
+  // loads the bundle, which runs the prompt's side by its workerData; stdout and stderr written to fds 1 and 2 by the
+  // worker itself, so that its output and this thread's prompts come out in the order written)
+  const entry = require.main?.filename ?? process.argv[1];
+  const worker = new Worker(entry, { stdout: true, stderr: true, workerData: { sagebrushPrompt: { argv, limits } } });
+  let intr: Int32Array | null = null, last = 0, interrupted = false, busy = true;
+  let figures: { dir: string; kept: boolean } | null = null;
+  const tty = process.stdin.isTTY === true;
+  // (the terminal is in raw mode from the start to the end, as readline keeps it at the prompt: a Ctrl-C is the key's
+  // byte, read here while an input runs, and what is typed meanwhile isn't echoed until readline takes it)
+  const raw = (on: boolean) => {
+    if (tty) try { process.stdin.setRawMode(on); } catch {}
+  };
+  raw(true);
+  // (and out of it however this thread ends, an exception's end included)
+  process.on("exit", () => raw(false));
+  const removeFiguresHere = () => { if (figures !== null && !figures.kept) try { rmSync(figures.dir, { recursive: true, force: true }); } catch {} };
+  const die = (sig: NodeJS.Signals) => {
+    removeFiguresHere();
+    raw(false);
+    process.removeAllListeners(sig);
+    process.kill(process.pid, sig);
+  };
+  // (Ctrl-C while an input runs, the key or a SIGINT: the flag, as the launcher sets it. Another while the first is
+  // still unseen: within GRACE of it, the same press (a double tap lands both before any call could have polled);
+  // from GRACE to 2 s, or one before the worker has handed over its flag: SIGINT's default action)
+  const GRACE = 1000; // (ms: four times the 250 ms in which a polling call honours a press)
+  const press = () => {
+    const now = Date.now();
+    if (intr === null) return die("SIGINT");
+    if ((Atomics.load(intr, 0) & 1) !== 0 && now - last < 2000) {
+      if (now - last < GRACE) return;
+      return die("SIGINT");
+    }
+    last = now;
+    Atomics.or(intr, 0, 1); // (bit 0, Ctrl-C: the word's other bits left, src/runtime/interrupt.ts)
+    Atomics.notify(intr, 0); // (a time.sleep waits on the flag)
+  };
+  // (a SIGINT while the prompt waits for an input comes from kill, not the key (readline has that): it ends the
+  // process as before, its figures removed)
+  process.on("SIGINT", () => (busy ? press() : die("SIGINT")));
+  // (SIGTERM and SIGHUP, a closed terminal's: their default action, the worker's figures removed first)
+  for (const sig of ["SIGTERM", "SIGHUP"] as const) process.on(sig, () => die(sig));
+  // What is typed goes to readline one line at a time: a line is given to it once the one before has run, so that
+  // lines typed or pasted ahead are echoed each after the output before it, as at a prompt that runs them on its
+  // own thread (repl). While an input runs, a Ctrl-C byte is the press above.
+  const inp = new PassThrough();
+  let held = "", eof = false, lineOut = false, sawLine = false;
+  const feed = () => {
+    while (held !== "" && !busy && !lineOut) {
+      const m = /\r\n?|\n/.exec(held);
+      const end = m === null ? held.length : m.index + m[0].length;
+      const part = held.slice(0, end);
+      held = held.slice(end);
+      if (m !== null) {
+        // (a line: the next waits until it has run; a terminator readline makes no line of waits for nothing)
+        lineOut = true;
+        sawLine = false;
+        setImmediate(() => {
+          if (!sawLine) {
+            lineOut = false;
+            feed();
+          }
+        });
+      }
+      inp.write(part);
+    }
+    if (held === "" && eof && !inp.writableEnded) inp.end();
+  };
+  process.stdin.setEncoding("utf8");
+  const onData = (d: string) => {
+    // (while an input runs, a Ctrl-C is the press; just after one stopped it, within the grace, the rest of a double
+    // tap, not a Ctrl-C at the prompt)
+    if (tty && d.includes("\x03") && (busy || Date.now() - last < GRACE)) {
+      if (busy) press();
+      d = d.replace(/\x03/g, "");
+    }
+    held += d;
+    feed();
+  };
+  const onEnd = () => {
+    eof = true;
+    feed();
+  };
+  process.stdin.on("data", onData);
+  process.stdin.on("end", onEnd);
+  let rl: readline.Interface | null = null;
+  // (what the worker answers, in order: one question at a time is asked)
+  const waiting: ((m: FrontMsg) => void)[] = [];
+  const ask = (m: object) => new Promise<FrontMsg>((res) => {
+    waiting.push(res);
+    worker.postMessage(m);
+  });
+  let ready: (m: FrontMsg) => void = () => {};
+  const started = new Promise<FrontMsg>((res) => (ready = res));
+  worker.on("message", (m: FrontMsg) => {
+    if (!m || typeof m !== "object") return;
+    if ("interrupt" in m) intr = m.interrupt ? new Int32Array(m.interrupt) : null;
+    else if (m.figures) figures = m.figures;
+    else if (m.keyboardInterrupt) interrupted = true;
+    else if (m.ready) ready(m);
+    else waiting.shift()?.(m);
+  });
+  return new Promise<number>((resolveExit) => {
+    let done = false;
+    // (the end: this thread lets go of the terminal, and the worker's figures go if it couldn't remove them itself)
+    const finish = (code: number) => {
+      process.stdin.off("data", onData);
+      process.stdin.off("end", onEnd);
+      process.stdin.pause();
+      raw(false);
+      removeFiguresHere();
+      if (interrupted) return die("SIGINT");
+      resolveExit(code);
+    };
+    const close = (code: number) => {
+      done = true;
+      worker.postMessage({ close: true });
+      worker.once("exit", (c) => finish(c ?? code));
+    };
+    worker.on("error", (e) => {
+      process.stderr.write(`sagebrush: ${(e as any)?.stack ?? e}\n`);
+      process.exitCode = 1;
+    });
+    worker.on("exit", (code) => {
+      if (done) return;
+      done = true;
+      rl?.close();
+      finish(code ?? 0);
+    });
+    started.then((first) => {
+      if (done) return;
+      let ps1 = first.ready!.ps1, ps2 = first.ready!.ps2;
+      const hist = historyFile();
+      let history: string[] = [];
+      if (hist) {
+        try {
+          history = readFileSync(hist, "utf8").split("\n").filter((l) => l).reverse().slice(0, 1000);
+        } catch {
+          // no history yet
+        }
+      }
+      // (the completions, from the worker's session: src/interactive.ts completeIn there)
+      const completer = (line: string, cb: (err: null, r: [string[], string]) => void) => {
+        if (busy) return cb(null, [[], line]);
+        ask({ complete: line }).then((m) => cb(null, m.complete ?? [[], line]));
+      };
+      rl = readline.createInterface({ input: inp, output: process.stdout, completer, history, historySize: 1000, terminal: tty });
+      let buf: string[] = [];
+      // (one line at a time, from feed: the next is given once this one is done)
+      const take = async (line: string) => {
+        buf.push(line);
+        const src = buf.join("\n");
+        if ((await ask({ incomplete: src })).incomplete) {
+          rl!.setPrompt(ps2);
+          rl!.prompt();
+          return;
+        }
+        buf = [];
+        if (src.trim() !== "") {
+          if (hist) {
+            try {
+              appendFileSync(hist, src.replace(/\n/g, " ") + "\n");
+            } catch {
+              // read-only home: no history
+            }
+          }
+          busy = true;
+          const m = await ask({ run: src });
+          busy = false;
+          const st = m.step!;
+          ps1 = st.ps1;
+          ps2 = st.ps2;
+          if (st.end !== undefined) {
+            // (the session ends: the worker finishes main(), and its exit gives the status)
+            rl!.close();
+            return close(st.end);
+          }
+        }
+        rl!.setPrompt(ps1);
+        rl!.prompt();
+      };
+      // (the line being taken: at the input's end, readline closes once it has its last line, which runs first)
+      let taking: Promise<void> = Promise.resolve();
+      rl.on("line", (line) => {
+        sawLine = true;
+        taking = take(line).then(() => {
+          lineOut = false;
+          if (!done) feed();
+        });
+      });
+      rl.on("SIGINT", () => {
+        if (busy) return;
+        buf = [];
+        clearLine(rl!);
+        process.stdout.write("\nKeyboardInterrupt\n");
+        rl!.setPrompt(ps1);
+        rl!.prompt();
+      });
+      rl.on("close", () => {
+        taking.then(() => {
+          if (done) return;
+          if (tty) process.stdout.write("\n");
+          close(0);
+        });
+      });
+      rl.setPrompt(ps1);
+      rl.prompt();
+      busy = false;
+      feed();
+    });
+  });
+}
+
+/** The worker's side of the prompt: the session, one message at a time from promptFront (is an input complete,
+ * run it, complete a line, close), each answered in order. Resolves to the prompt's exit status. */
+function promptBack(main: any, quiet: boolean, mode: ReplMode = "python"): Promise<number> {
+  const leave = mode === "magma" ? "quit; or Ctrl-D to leave" : mode === "matlab" ? "exit or Ctrl-D to leave" : "exit() or Ctrl-D to leave";
+  if (!quiet) process.stdout.write(mode === "python" ? `${VERSION}\nType help(obj) for help, ${leave}.\n` : `${VERSION} (${mode === "magma" ? "Magma" : "MATLAB"})\nType ${leave}.\n`);
+  const session = new PromptSession(main, mode, sage, {
+    // (a KeyboardInterrupt at the prompt is reported and the prompt goes on, as CPython's: its status isn't the
+    // session's, and it doesn't end the process when the prompt does)
+    guarded: (fn) => {
+      const code = guarded(fn, mode !== "python");
+      if (code === 130 && keyboardInterrupt) {
+        keyboardInterrupt = false;
+        return null;
+      }
+      return code;
+    },
+    out: (t) => process.stdout.write(t),
+    err: (t) => process.stderr.write(t),
+    syntaxError: () => {
+      process.exitCode = 1;
+    },
+    flushFiles,
+  });
+  session.start();
+  R.stdout.flush();
+  R.stderr.flush();
+  const port = parentPort!;
+  port.postMessage({ ready: { ps1: session.ps1(), ps2: session.ps2() } });
+  return new Promise<number>((resolveExit) => {
+    let done = false;
+    const finish = (code: number) => {
+      if (done) return;
+      done = true;
+      port.removeAllListeners("message");
+      // (the port no longer keeps this worker up: it ends when main() does, as a program's worker does)
+      port.unref();
+      R.stdout.flush();
+      resolveExit(code);
+    };
+    let ended: number | null = null;
+    port.on("message", (m: any) => {
+      if (!m || typeof m !== "object") return;
+      if (m.close) return finish(ended ?? 0);
+      if (typeof m.incomplete === "string") return port.postMessage({ incomplete: session.incomplete(m.incomplete) });
+      if (typeof m.complete === "string") {
+        let r: [string[], string] = [[], m.complete];
+        try {
+          r = completeIn(mode, main, m.complete, moduleNames);
+        } catch {}
+        return port.postMessage({ complete: r });
+      }
+      if (typeof m.run === "string") {
+        const r: StepResult = session.run(m.run);
+        R.stdout.flush();
+        R.stderr.flush();
+        let end: number | undefined;
+        if ("end" in r) end = r.end;
+        else if (r.code !== null && r.code !== 1) end = r.code;
+        if (end !== undefined) ended = end;
+        port.postMessage({ step: { end, ps1: session.ps1(), ps2: session.ps2() } });
+      }
+    });
+  });
+}
+
+/** The prompt's worker (promptFront): main() on the arguments as given, with the prompt as promptBack. Its stdout
+ * and stderr written to fds 1 and 2 as a program's are (cliWorker). */
+function promptWorker(argv: string[], limits?: LimitsText) {
+  promptHost = true;
+  return cliWorker(argv, limits);
 }
 
 // ------------------------------------------------------------------ main
@@ -581,6 +874,8 @@ async function main(argv = process.argv.slice(2), preset?: LimitsText) {
   }
   const lim: LimitsText = sel;
   setSessionLimits(lim);
+  // (the arguments as given, --limits FILE taken out: the prompt's worker runs this main() on them, promptFront)
+  const given = argv.slice();
   // (a board's command: loaded only then, src/board-cli.ts, HARD-974-2;
   // `board` with a command it doesn't have is said so there, R0-3, unless
   // there is a script named board here, to run as before)
@@ -610,8 +905,23 @@ async function main(argv = process.argv.slice(2), preset?: LimitsText) {
   }
   if (argv[0] === "--jupyter-kernel") {
     const i = argv.indexOf("--mode");
+    // (an optional package set for its cells, as for a run: --pkgset ID|FILE, or SAGEBRUSH_PKGSET)
+    const j = argv.indexOf("--pkgset");
+    if (j >= 0 && !argv[j + 1]) {
+      process.stderr.write("--pkgset takes a set id or a pkgset/<id>.json file\n");
+      process.exitCode = 2;
+      return;
+    }
+    // (how its figures are shown, unless a notebook's code says: --figures, or SAGEBRUSH_FIGURES; else "auto")
+    const k = argv.indexOf("--figures");
+    const figures = k >= 0 ? argv[k + 1] : process.env.SAGEBRUSH_FIGURES || null;
+    if (figures !== null && !FIGURE_MODES.includes(figures)) {
+      process.stderr.write(`--figures (or SAGEBRUSH_FIGURES) takes ${FIGURE_MODES.join(", ")}, not ${JSON.stringify(figures)}\n`);
+      process.exitCode = 2;
+      return;
+    }
     if (!(await serverLimits(lim))) return;
-    await runKernel(argv[1], (i >= 0 ? argv[i + 1] : "sage") as Mode);
+    await runKernel(argv[1], (i >= 0 ? argv[i + 1] : "sage") as Mode, j >= 0 ? argv[j + 1] : process.env.SAGEBRUSH_PKGSET || null, figures);
     return;
   }
   // sagebrush --search QUERY [--json]: search the documentation (lib/_pyjs_docsearch.py)
@@ -748,6 +1058,14 @@ async function main(argv = process.argv.slice(2), preset?: LimitsText) {
     process.stdout.write(compile(readFileSync(file, "utf8"), file, "__main__", false, false, { sage: sage || file.endsWith(".sage") }).code + "\n");
     return;
   }
+  // (in the prompt's worker the prompt is always interactive: its stdin is no terminal of its own)
+  const interactive = promptHost || (file === null && cmd === null && mod === null && process.stdin.isTTY) || inspect;
+  // (an interactive prompt runs its inputs, and -i's program, in a worker, so that Ctrl-C reaches a call that is
+  // running: this thread keeps the terminal and stays idle, as the launcher's does for a program)
+  if (interactive && promptInWorker()) {
+    process.exitCode = await promptFront(given, lim);
+    return;
+  }
   const sys = R.importModule("sys");
   sys.argv.length = 0;
   sys.argv.push(cmd !== null ? "-c" : mod !== null ? mod : file ?? "", ...argv);
@@ -768,7 +1086,6 @@ async function main(argv = process.argv.slice(2), preset?: LimitsText) {
   if (!giveLimits(lim)) return;
   let code: number | null = null;
   let main: any = null;
-  const interactive = (file === null && cmd === null && mod === null && process.stdin.isTTY) || inspect;
   if (cmd !== null && sprig) {
     main = mainModule("<string>");
     code = guarded(() => R.loader.exec(sprigSource(cmd!), main, "exec", "<string>", opts()));
@@ -794,17 +1111,18 @@ async function main(argv = process.argv.slice(2), preset?: LimitsText) {
   } else if (file !== null && file !== "-" && isMatlab(file)) {
     const py = matlabSource(readFileSync(file, "utf8"), file, true);
     code = py === null ? 1 : guarded(() => {
-      main = execModule(py, file!, "__main__", false, false);
+      main = execModule(py, file!, "__main__", false, false, (m) => (main = m));
     });
   } else if (file !== null && file !== "-" && isMagma(file)) {
     const py = magmaSource(readFileSync(file, "utf8"), file);
     if (py !== null) code = guarded(() => {
-      main = execModule(py, file!, "__main__", false, false);
+      main = execModule(py, file!, "__main__", false, false, (m) => (main = m));
     });
   } else if (file !== null && file !== "-") {
     const source = readFileSync(file, "utf8");
     code = guarded(() => {
-      main = execModule(source, file!, "__main__", false, sage || file!.endsWith(".sage"));
+      // (made: the module as soon as it exists, so that -i after a program that raised has what it defined)
+      main = execModule(source, file!, "__main__", false, sage || file!.endsWith(".sage"), (m) => (main = m));
     });
   } else if (!interactive && isMatlab(null)) {
     // MATLAB on stdin (or `--matlab -`): a program, run as a file of it is, up to its first
@@ -832,7 +1150,8 @@ async function main(argv = process.argv.slice(2), preset?: LimitsText) {
   if (interactive && (code === null || inspect)) {
     main ??= mainModule("<stdin>");
     // (the prompt speaks the program's language: --magma or --matlab, or that of the file -i ran)
-    code = await repl(main, quiet || inspect, isMagma(file) ? "magma" : isMatlab(file) ? "matlab" : "python");
+    const mode: ReplMode = isMagma(file) ? "magma" : isMatlab(file) ? "matlab" : "python";
+    code = await (promptHost ? promptBack(main, quiet || inspect, mode) : repl(main, quiet || inspect, mode));
   }
   flushFiles();
   R.stdout.flush();
@@ -897,6 +1216,7 @@ function execModuleAsMain(name: string): any {
 
 if (isMainThread) main();
 else if (workerData?.sagebrushCli) cliWorker(workerData.sagebrushCli.argv, workerData.sagebrushCli.limits);
+else if (workerData?.sagebrushPrompt) promptWorker(workerData.sagebrushPrompt.argv, workerData.sagebrushPrompt.limits);
 else if (workerData?.sagebrushKernel) kernelWorker(workerData.sagebrushKernel);
 else if (workerData?.sagebrushNotebook) notebookWorker(workerData.sagebrushNotebook);
 // (`board run`'s interpreter, src/board-run.ts)

@@ -11,7 +11,7 @@ import { existsSync, readdirSync, readFileSync, writeFileSync } from "node:fs";
 import { hasSite, siteDir } from "./site-dir.mts";
 import { createHash } from "node:crypto";
 import { dirname, join } from "node:path";
-import { frameOptions, framePolicy, pagePolicy, runnerPolicy, shellWorkerPolicy } from "./csp-policy.mts";
+import { frameOptions, framePolicy, ghPolicy, pagePolicy, runnerPolicy, shellWorkerPolicy } from "./csp-policy.mts";
 import { FILES_RUNNER_SCRIPT } from "./notebook/files-runner.js";
 
 const here = dirname(new URL(import.meta.url).pathname);
@@ -72,9 +72,15 @@ export function headersFor(dir: string): string {
   // policy would refuse anyway, and which a frame in others' pages shouldn't
   // have; the frame may be embedded by any page, even a cross-origin isolated
   // one: CORP)
+  // (a GitHub page, /gh/...: the /s/ page, with GitHub's three hosts to fetch from, csp-policy.mts ghPolicy; where the
+  // site's Worker serves it, web/site/src/preview.ts handleGhPage gives it the same)
+  const share = rules.find(([p]) => p === "/s/*");
+  if (share) rules.push(["/gh/*", ghPolicy(share[1])]);
   // the shell worker's script: a worker's policy is its own response's (plan-bash-shell r3 §6)
   if (existsSync(join(dir, "shell", "worker-boot.js"))) rules.push(["/shell/worker-boot.js", shellWorkerPolicy()]);
-  const extra = (pattern: string) => (pattern === "/runner/*" || pattern === "/frame/*" ? "\n  Cache-Control: public, max-age=0, must-revalidate, no-transform" : "") + (pattern === "/frame/*" ? "\n  Cross-Origin-Resource-Policy: cross-origin" : "");
+  // (and the runner's page is embedded by a cross-origin isolated page as an opaque origin, so cross-origin to it:
+  // Firefox loads it only with CORP, Chromium without; the engine's runner pages have theirs from web/_headers' /engine/*)
+  const extra = (pattern: string) => (pattern === "/runner/*" || pattern === "/frame/*" ? "\n  Cache-Control: public, max-age=0, must-revalidate, no-transform" : "") + (pattern === "/frame/*" || pattern === "/runner/*" ? "\n  Cross-Origin-Resource-Policy: cross-origin" : "");
   // web/_headers, but a rule for a path a policy is written for goes into
   // that one rule: Cloudflare keeps only the last rule given for a path, so
   // the first's headers would be lost (HDR-A75-1); a path given twice is refused

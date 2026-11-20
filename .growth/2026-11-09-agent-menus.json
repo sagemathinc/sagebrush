@@ -1,7 +1,0 @@
-{
- "v": 1,
- "reason": "Connect an agent… in the notebook page's ⋯ and the code page's File menu (agent-first step 4, @sagebrush's GO): ⋯ ▸ Connect an agent… beside the Agent button (a phone, where Agent is hidden, has it too), and the code page (/?code=) handed the page's one pairing, so a ?pair= link and a remembered agent work there too. The CLI embeds the page's script. Measured by size-measure --record (bun 1.4.4, Node 24.21.0, CI's order; base 3ef3944b and this branch on it, at the same path): cli/pyjs.cjs +1240 (r2: the code page's own failure line). Marker: the usual 64 B slack.",
- "bytes": {
-  "cli/pyjs.cjs": 1304
- }
-}

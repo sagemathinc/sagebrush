@@ -53,7 +53,9 @@ async function site() {
     req.pipe(up);
   });
   await new Promise((r) => front.listen(0, "127.0.0.1", r));
-  for (let i = 0; i < 100; i++) { try { await fetch(`http://127.0.0.1:${upstream}/`); break; } catch { await sleep(100); } }
+  // (the probe's body is cancelled, not left unread: a response paused on its unread body when the server's socket
+  //  ends makes Node's fetch client fail an assertion, "assert(!this.paused)", and the test with it)
+  for (let i = 0; i < 100; i++) { try { await (await fetch(`http://127.0.0.1:${upstream}/`)).body?.cancel(); break; } catch { await sleep(100); } }
   const stop = () => new Promise((r) => { server.kill(); front.closeAllConnections?.(); front.close(() => r()); });
   return { url: `http://127.0.0.1:${front.address().port}/`, asked, bytes, stop };
 }

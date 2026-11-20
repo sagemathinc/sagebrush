@@ -8,6 +8,7 @@
 // serving one silently.  No browser needed.
 //   node web/test-cli-assets.mjs [bundle]      (default build/cli/pyjs.cjs)
 import { spawn } from "node:child_process";
+import { createHash } from "node:crypto";
 import { mkdtempSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
@@ -25,7 +26,7 @@ let fail = 0;
 // (named by the page but deliberately not served by the CLI: the app
 // self-test's COI diagnosis, loaded by selftest() only under
 // SAGEBRUSH_APP_SELFTEST, web/notebook/selftest-diagnose.js)
-const APP_ONLY = ["sagebrush-selftest.js"];
+const APP_ONLY = ["sagebrush-selftest.js", "sagebrush-desktop.js"];
 // (and the site-only: the LaTeX editor's page module, which the page names but only fetches on the site's own hosts
 // (web/latex/boot.ts latexOn, web/build.ts: sagebrush.space, dev.sagebrush.space), never on the CLI's 127.0.0.1, where
 // the editor is off; the CLI doesn't carry it, so it must be 404 here, as an app-only file is)
@@ -33,7 +34,8 @@ const APP_ONLY = ["sagebrush-selftest.js"];
 // reach; the site and the app carry it, web/build.ts SITE_FILES and app/build-frontend.mjs)
 // (and the notebook page's agent chunk, #919: fetched only by its Agent button, which the page never shows on the CLI's
 // page (window.__SAGEBRUSH_LOCAL__): a page on this computer, which the agent's program doesn't accept)
-const SITE_ONLY = ["sagebrush-latex.js", "sagebrush-remote-terminal.js", "sagebrush-agent.js"];
+// (and an agent's runs of code, chat plan PR 4a: fetched only by that chunk, at an agent's first run)
+const SITE_ONLY = ["sagebrush-latex.js", "sagebrush-remote-terminal.js", "sagebrush-agent.js", "sagebrush-agent-run.js", "sagebrush-review.js"];
 const verdict = (name, status) => (APP_ONLY.includes(name) || SITE_ONLY.includes(name) ? status === 404 : status === 200);
 // (the verdict's own control: an app-only file served, or a page file
 // missing, must fail)
@@ -45,8 +47,22 @@ try {
   if (!token) throw new Error("the server printed no URL with a token: " + printed);
   const base = `http://127.0.0.1:${port}`;
   const get = (p) => fetch(base + p, { headers: { Cookie: `sagebrush_token=${token}` }, redirect: "manual" });
-  const page = await (await get("/nb/probe.ipynb/")).text();
-  if (!/<html/i.test(page)) throw new Error("no notebook page: " + page.slice(0, 200));
+  const html = await (await get("/nb/probe.ipynb/")).text();
+  if (!/<html/i.test(html)) throw new Error("no notebook page: " + html.slice(0, 200));
+  // (the page's script, its own file, sagebrush-app.js named by its hash (web/build.ts): served too, and what it names
+  //  is what the page names)
+  const tags = html.match(/<script src="\/sagebrush-app\.js[^>]*><\/script>/g) ?? [];
+  const tag = /<script src="(\/sagebrush-app\.js\?h=[0-9a-f]{16})" integrity="sha384-([A-Za-z0-9+\/]{64})"><\/script>/.exec(html);
+  const app = tags.length === 1 ? tag?.[1] : undefined;
+  const appRes = app ? await get(app) : null;
+  if (!appRes || appRes.status !== 200) fail++;
+  console.log((appRes?.status === 200 ? "ok   " : "FAIL ") + `the page's script ${app ?? "(not named once)"} ${appRes?.status ?? ""}`);
+  const appJs = appRes?.status === 200 ? Buffer.from(await appRes.arrayBuffer()) : null;
+  // (its integrity is sha384 of exactly the bytes served: a wrong one and the browser runs nothing)
+  const sri = appJs && createHash("sha384").update(appJs).digest("base64") === tag[2];
+  if (!sri) fail++;
+  console.log((sri ? "ok   " : "FAIL ") + "the page's script: its integrity is sha384 of the bytes served");
+  const page = html + (appJs ? appJs.toString() : "");
   // every sagebrush-*.js the page names, KaTeX's stylesheet, the notices
   const names = [...new Set(page.match(/sagebrush-[a-z0-9]+\.js\b/g) ?? [])].filter((n) => !["sagebrush-worker.js", "sagebrush-notebook.js"].includes(n));
   // (and the files the page names only through its code, lazily: the export's chunk and its worker, whose hyphenated

@@ -1,8 +1,0 @@
-{
- "v": 1,
- "reason": "%-format checks its conversions' results as CPython (follow-up to #858): %e/%f/%g through floatOfArg (PyFloat_AsDouble: __float__ must give a float, a subclass warns; __index__ an int), %d/%x/%c's __index__/__int__ results through intResult with any TypeError the format's own (mainformatlong), bytes' %c by PyNumber_Index (byte_converter) and bytes' %f errors replaced (BaseException's too); an int subclass's own __float__ (None too) used; %d's PyNumber_Long order. Measured with bun 1.4.4 (size-record.sh) on master 1d1e0f06 vs this head merged with it: cli/pyjs.cjs +987 (+64 slack); engine/sagebrush-worker.js +748, the same runtime code (ceiling renewed to measured + 64 = 1664085). No lib, notebook or lazy-group change; sw.js under its ceilings.",
- "bytes": {
-  "cli/pyjs.cjs": 1051,
-  "engine/sagebrush-worker.js": 748
- }
-}

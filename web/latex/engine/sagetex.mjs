@@ -97,8 +97,14 @@ const pyBig = (st, it) => typeof st.latex !== "string" ? { s: "error", msg: "the
   : utf8len(st.latex) > MAX_RESULT && { s: "error", msg: (it.mode === "py" ? "the result" : "the printed output") + " is over " + MAX_RESULT / 1024 + " KiB" };
 /** A PythonTeX item (\py, pycode, pyblock): run as Python, its result read back as TeX. */
 export const isPy = (it) => /^py/.test(it.mode);
+// Magma (a Sagebrush extension): \magma{}, magmablock, magmasilent. A Magma item's `latex` is the text Magma printed,
+// shown as text, never read as TeX
+export const isMagma = (it) => /^magma/.test(it.mode);
+/** a "code item" in the counts: any item that isn't SageTeX's (one predicate for the CLI, check and the page) */
+export const isNonSage = (it) => isPy(it) || isMagma(it);
+const langOf = (it) => (isPy(it) ? "Python" : isMagma(it) ? "Magma" : "Sage");
 export const UNSUPPORTED_ENVS = new Set(["sagecommandline", "sageexample"]);
-export const isCodeEnv = (env) => /^(sage(block|silent)|py(code|block))$/.test(env);
+export const isCodeEnv = (env) => /^(sage(block|silent)|py(code|block)|magma(block|silent))$/.test(env);
 
 // Python's textwrap.dedent rule (plan r4 section 4): the longest common leading whitespace of the non-blank lines
 // is removed; blank lines become empty. Two lines whose indentation differs inside the shared part (a tab against
@@ -139,23 +145,23 @@ export function itemOf(e) {
     else if (utf8len(d.code) > MAX_CODE) it.err = "toolong";
     else it.code = d.code;
   }
-  if (it.mode === "block" || it.mode === "pyblock") it.shown = String(e.text).replace(/\r\n/g, "\n");
+  if (it.mode === "block" || it.mode === "pyblock" || it.mode === "magmablock") it.shown = String(e.text).replace(/\r\n/g, "\n");
   return it;
 }
 // what makes two items the same code (the executor's identity uses the same key)
 export const itemKey = (it) => JSON.stringify([it.mode, it.code === undefined ? null : it.code, it.opts, it.err || null, WRAPPER_VERSION]);
 
-const only = (it) => "this preview supports only plain " + (it.mode === "py" ? "Python expressions inside \\py{}: " : "Sage expressions inside \\sage{}: ");
+const only = (it) => "this preview supports only plain " + (it.mode === "py" ? "Python expressions inside \\py{}: " : it.mode === "magma" ? "Magma expressions inside \\magma{}: " : "Sage expressions inside \\sage{}: ");
 const WHY = {
   cs: (it) => only(it) + "\\" + it.name + " is a TeX command",
   active: (it) => only(it) + it.name + " is an active character",
   unbalanced: () => "the argument is unbalanced (it runs to the end of the document)",
-  par: (it) => "the argument runs past a blank line (a % starts a comment in TeX" + (it.mode === "py" ? ")" : ": write mod(a, b))"),
+  par: (it) => "the argument runs past a blank line (a % starts a comment in TeX" + (it.mode === "sage" || it.mode === "plot" ? ": write mod(a, b))" : ")"),
   nobrace: () => "the argument must be in braces",
   empty: () => "the argument is empty",
   toolong: () => "the code is over 64 KiB (UTF-8)",
   inarg: () => "a code block inside a command's argument can't be read",
-  unterminated: (it) => "no \\end{" + (isPy(it) ? "" : "sage") + it.mode + "}",
+  unterminated: (it) => "no \\end{" + (isNonSage(it) ? "" : "sage") + it.mode + "}",
   truncated: () => "the code block is over 1 MiB",
   tabs: () => "the indentation mixes tabs and spaces",
   optstoolong: () => "the \\sageplot options are over 1 KiB",
@@ -209,19 +215,19 @@ export function savedStates(items, saved) {
   let k = 0;
   for (; k < items.length && k < saved.length; k++) {
     const x = saved[k];
-    if (!x || typeof x !== "object" || x.key !== itemKey(items[k]) || !["ok", "error", "blocked"].includes(x.s)) break;
+    if (!x || typeof x !== "object" || x.key !== itemKey(items[k]) || !["ok", "error", "blocked", "stale"].includes(x.s)) break;
     out.push(shown(x, x.s));
   }
   const keys = items.map(itemKey), now = new Set(keys), unused = new Map();
   for (let j = k; j < saved.length; j++) {
     const x = saved[j];
-    if (x && typeof x === "object" && x.s === "ok" && typeof x.key === "string") { if (!unused.has(x.key)) unused.set(x.key, []); unused.get(x.key).push(j); }
+    if (x && typeof x === "object" && (x.s === "ok" || x.s === "stale") && typeof x.key === "string") { if (!unused.has(x.key)) unused.set(x.key, []); unused.get(x.key).push(j); }
   }
   const taken = new Set();
   for (let i = k; i < items.length; i++) {
     let j = (unused.get(keys[i]) ?? []).find((q) => !taken.has(q));
     // (the result at i is never taken already: one taken by key is the code of an item still here, which `now` excludes)
-    if (j === undefined && i < saved.length && saved[i]?.s === "ok" && typeof saved[i].key === "string" && !now.has(saved[i].key) && sameKind(saved[i].key, items[i])) j = i;
+    if (j === undefined && i < saved.length && (saved[i]?.s === "ok" || saved[i]?.s === "stale") && typeof saved[i].key === "string" && !now.has(saved[i].key) && sameKind(saved[i].key, items[i])) j = i;
     if (j === undefined) continue;
     taken.add(j);
     out[i] = { ...shown(saved[j], "stale"), key: keys[i] };
@@ -235,6 +241,7 @@ function shown(x, s) {
   if (typeof x.src === "string") st.src = x.src;
   if (typeof x.msg === "string") st.msg = x.msg.slice(0, 4000);
   if (Array.isArray(x.interacts)) st.interacts = x.interacts;
+  if (keptWhy(x.why)) st.why = x.why;
   return st;
 }
 // (a saved key's item of the same kind as `it`: its mode, and the same wrapper)
@@ -246,6 +253,18 @@ export const STALE_TITLE = "Changed since the last Run: Shift+Enter or Run updat
 /** A code item not run yet, in the editor that can run it (Run is there whenever the document has code; on a phone,
  * Shift+Enter may not be, so Run is named first); elsewhere (a published page, an example, the CLI) just "not run". */
 export const RUN_HINT = "not run yet (press Run or Shift+Enter)";
+/** Why an item a Run didn't reach keeps its value from an earlier one (@sagebrush's ruling and board's words, Nov 12),
+ *  by the reason the Run wrote (run-core keepLast, the results file's `why`): after a failed item, the Run stopped, or
+ *  the session ended. Only these are shown as such a value's title. */
+export const KEPT = {
+  failed: "Not run this time: an item before it failed. This value is from an earlier run.",
+  stopped: "Not run this time: the run was stopped. This value is from an earlier run.",
+  ended: "Not run this time: the session ended. This value is from an earlier run.",
+};
+// (a stale value's title: why it was kept, if a Run kept it; else that its code changed)
+// (a why the file may hold: one of KEPT's own keys, a string only (hasOwn would coerce an object or an array to one))
+const keptWhy = (w) => typeof w === "string" && Object.hasOwn(KEPT, w);
+export const staleTitle = (st) => (keptWhy(st?.why) ? KEPT[st.why] : STALE_TITLE);
 export function stateOf(states, n, it, run) {
   if (it.err) return { s: "error", msg: whyRejected(it) };
   const s = states && states[n];
@@ -255,36 +274,84 @@ export function stateOf(states, n, it, run) {
 
 // inside a math region (plan r4 section 6): the placeholder this item contributes to the region's TeX string
 // (a stale value is its last one; the renderer marks the whole region stale: render.mjs mathStale)
+const TEX_ESC = { "\\": "\\textbackslash{}", "{": "\\{", "}": "\\}", $: "\\$", "&": "\\&", "#": "\\#", "^": "\\textasciicircum{}", _: "\\_", "%": "\\%", "~": "\\textasciitilde{}" };
 export function mathPart(st, it) {
   if ((st.s === "ok" || st.s === "stale") && it.mode === "sage" && typeof st.latex === "string" && utf8len(st.latex) <= MAX_RESULT) return "{" + st.latex + "}";
+  // (\magma in math: its one line as monospace text, every TeX special escaped)
+  if ((st.s === "ok" || st.s === "stale") && it.mode === "magma" && typeof st.latex === "string" && utf8len(st.latex) <= MAX_RESULT && !st.latex.replace(/\n$/, "").includes("\n")) return "{\\text{\\texttt{" + st.latex.replace(/\n$/, "").replace(/[\\{}$&#^_%~]/g, (c) => TEX_ESC[c]) + "}}}";
   if (st.s === "pending" || st.s === "notrun") return "{\\text{…}}";
   return "{\\boxed{\\text{?}}}";
 }
 
-const LABEL = { pending: "running…", notrun: "not run", error: "error", blocked: "not run: an earlier item failed" };
+/** What an item after a failed one says, everywhere (board's M4): a failing item stops the rest. */
+/** \magma's one-line rule (H6b's words) */
+export const ONE_LINE = "\\magma{} shows one line: this value prints on several. Use magmablock.";
+export const BLOCKED = "Not run: an item before this one failed (fix it and run again)";
+const LABEL = { pending: "running…", notrun: "not run", error: "error", blocked: BLOCKED };
 export const DATA_SVG = /^data:image\/svg\+xml;base64,[A-Za-z0-9+/]+={0,2}$/;
 // n: the item's number in the document (1-based), named in the chip so a reader can tell which code it is about
-function chip(st, esc, inline, n, py) {
+function chip(st, esc, inline, n, lang = "Sage") {
   const cls = "sagechip s-" + (LABEL[st.s] ? st.s : "error");
   const msg = String(st.msg || LABEL[st.s] || "error").slice(0, 4000);
-  const who = n ? (py ? "Python" : "Sage") + " item " + n + ": " : "";
+  const who = n ? lang + " item " + n + ": " : "";
   if (st.s === "error" && !inline) return '<pre class="' + cls + '">' + esc(who + msg) + "</pre>";
   // (the last line of a traceback; with the executor's "(... isn't defined here ...)" note, the line before it too)
   const lines = msg.split("\n").filter((l) => l.trim());
   const last = lines.length > 1 && /^\(/.test(lines[lines.length - 1]) ? lines.slice(-2).join(" ") : lines.pop() || "";
   return '<span class="' + cls + '" title="' + esc(who + msg) + '">' + esc((who + (st.s === "error" ? "error: " + last : msg)).slice(0, 600)) + "</span>";
 }
-// outside math: \sage as standalone inline math (math: the renderer's KaTeX call), \sageplot as an image; a stale
-// one is its last value, marked (class sagestale, its title saying why)
+// A Sage table() outside math (latex(table) is a tabular, which KaTeX can't set): drawn as the document's own tabular
+// is, each cell's $…$ by KaTeX and its plain text as text. Only that simple form: a column spec of l, c, r and |,
+// cells of plain text and $…$, rows ending in \\ and \hline rules. Anything else gives null and is set as math, as
+// before. The result never enters the TeX expander.
+const TABLE = /^\s*\\begin\{tabular\}\{([lcr|]+)\}([\s\S]*)\\end\{tabular\}\s*$/;
+const TOK = /\$[^$]*\$|\\\\|\\hline(?![A-Za-z])|[&{}$\\]|[^$\\&{}]+/g;
+export function sageTable(latex, esc, math) {
+  const m = TABLE.exec(latex);
+  if (!m) return null;
+  // (each column's alignment; whether a rule stands before the first, and after each)
+  const al = m[1].match(/[lcr]/g), bar = m[1].split(/[lcr]/).map((x) => x.includes("|")), rows = [{ cells: [""] }];
+  if (!al) return null;
+  for (const [t] of m[2].matchAll(TOK)) {
+    const r = rows[rows.length - 1];
+    if (t === "\\\\") rows.push({ cells: [""] });
+    else if (t === "\\hline") r[r.cells.length === 1 && !r.cells[0].trim() ? "top" : "bottom"] = true;
+    else if (t === "&") r.cells.push("");
+    else if (t.length === 1 && "{}$\\".includes(t)) return null;
+    else r.cells[r.cells.length - 1] += t;
+  }
+  const last = rows[rows.length - 1];
+  if (last.cells.length === 1 && !last.cells[0].trim()) { rows.pop(); if (last.top && rows.length) rows[rows.length - 1].bottom = true; }
+  if (!rows.length || rows.length > 500 || rows.some((r) => r.cells.length > al.length)) return null;
+  // a cell: its $…$ runs as math, the text between them as text
+  const cell = (x) => x.trim().split(/(\$[^$]*\$)/).map((p) => (p[0] === "$" && p.length > 1 ? math(p.slice(1, -1)) : esc(p))).join("");
+  const rule = "1px solid currentColor";
+  return '<table class="tabular sagetable' + (bar[0] ? " bl" : "") + '"><tbody>' + rows.map((r) => "<tr" + (r.top ? ' class="ht"' : "")
+    + (r.bottom ? ' style="border-bottom:' + rule + '"' : "") + ">" + r.cells.map((x, k) => '<td class="al-' + al[k] + '"'
+    + (bar[k + 1] ? ' style="border-right:' + rule + '"' : "") + ">" + cell(x) + "</td>").join("") + "</tr>").join("") + "</tbody></table>";
+}
+
+// outside math: \sage as standalone inline math (math: the renderer's KaTeX call), or a Sage table as a table;
+// \sageplot as an image; a stale one is its last value, marked (class sagestale, its title saying why)
 export function inlineHtml(st, it, esc, math, n) {
   const stale = st.s === "stale", ok = st.s === "ok" || stale;
   // (\py: its result was read back as TeX where it stands (demo-machine.mjs); only a state without one shows here)
-  if (it.mode === "py") return ok && !pyBig(st, it) ? "" : chip(ok ? pyBig(st, it) : st, esc, true, n, true);
-  if (ok && it.mode === "sage" && typeof st.latex === "string" && utf8len(st.latex) <= MAX_RESULT) return stale ? '<span class="sagestale" title="' + esc(STALE_TITLE) + '">' + math(st.latex) + "</span>" : math(st.latex);
+  if (it.mode === "py") return ok && !pyBig(st, it) ? "" : chip(ok ? pyBig(st, it) : st, esc, true, n, "Python");
+  // (\magma: what Magma printed, as text, in the text's monospace; one line only)
+  if (it.mode === "magma") {
+    const t = ok && typeof st.latex === "string" ? st.latex.replace(/\n$/, "") : null;
+    if (t === null || utf8len(t) > MAX_RESULT) return chip(ok ? { s: "error", msg: "the result can't be shown" } : st, esc, true, n, "Magma");
+    if (t.includes("\n")) return chip({ s: "error", msg: ONE_LINE }, esc, true, n, "Magma");
+    return '<code class="magmaout' + (stale ? ' sagestale" title="' + esc(staleTitle(st)) : "") + '">' + esc(t) + "</code>";
+  }
+  if (ok && it.mode === "sage" && typeof st.latex === "string" && utf8len(st.latex) <= MAX_RESULT) {
+    const h = sageTable(st.latex, esc, math) ?? math(st.latex);
+    return stale ? '<span class="sagestale" title="' + esc(staleTitle(st)) + '">' + h + "</span>" : h;
+  }
   if (ok && it.mode === "plot" && typeof st.src === "string" && DATA_SVG.test(st.src)) {
     const o = plotOptions(it.opts);
     if (o.ignored.length) return chip({ s: "error", msg: whyRejected({ err: "plotopts", name: o.ignored.join(", ") }) }, esc, true, n);
-    return '<img class="sageplot' + (stale ? ' sagestale" title="' + esc(STALE_TITLE) : "") + '" alt="a plot" src="' + st.src + '"' + (o.style ? ' style="' + esc(o.style) + '"' : "") + ">";
+    return '<img class="sageplot' + (stale ? ' sagestale" title="' + esc(staleTitle(st)) : "") + '" alt="a plot" src="' + st.src + '"' + (o.style ? ' style="' + esc(o.style) + '"' : "") + ">";
   }
   return chip(ok ? { s: "error", msg: "the result can't be shown" } : st, esc, true, n);
 }
@@ -292,9 +359,11 @@ export function inlineHtml(st, it, esc, math, n) {
 // not-yet-run state (a stale one, which ran, none: it has no value to keep), and the @interacts it made
 export function blockHtml(st, it, esc, n) {
   let h = it.shown !== undefined ? '<pre class="verbatim code sageblock">' + esc(it.shown) + "</pre>" : "";
-  if (st.s !== "ok" && st.s !== "stale") h += '<div class="sagestate">' + chip(st, esc, false, n, isPy(it)) + "</div>";
-  else if (isPy(it) && pyBig(st, it)) h += '<div class="sagestate">' + chip(pyBig(st, it), esc, false, n, true) + "</div>";
-  else h += interactsAt(st.interacts, esc, st.s === "stale");
+  if (st.s !== "ok" && st.s !== "stale") h += '<div class="sagestate">' + chip(st, esc, false, n, langOf(it)) + "</div>";
+  else if (isNonSage(it) && pyBig(st, it)) h += '<div class="sagestate">' + chip(pyBig(st, it), esc, false, n, langOf(it)) + "</div>";
+  // (magmablock: what Magma printed, under its code, as text)
+  else if (it.mode === "magmablock" && st.latex) h += '<pre class="verbatim code magmaout' + (st.s === "stale" ? ' sagestale" title="' + esc(staleTitle(st)) : "") + '">' + esc(st.latex.replace(/\n$/, "")) + "</pre>";
+  else h += interactsAt(st.interacts, esc, st.s === "stale" && staleTitle(st));
   return h;
 }
 // ---- @interact (a Sagebrush extension, William Nov 8: "@interact inside sagesilent/sageblock as a documented Sagebrush
@@ -304,5 +373,5 @@ export function blockHtml(st, it, esc, n) {
 // the drawing (its cap: a lazy split, not a raise)
 export function interactsAt(list, esc, stale = false) {
   if (!Array.isArray(list) || !list.length) return "";
-  return '<div class="sageinteract-at"' + (stale ? ' data-stale="1"' : "") + ' data-ia="' + esc(JSON.stringify(list.slice(0, 8))) + '"><div class="si-note">Interactive in Sagebrush</div></div>';
+  return '<div class="sageinteract-at"' + (stale ? ' data-stale="' + esc(stale) + '"' : "") + ' data-ia="' + esc(JSON.stringify(list.slice(0, 8))) + '"><div class="si-note">Interactive in Sagebrush</div></div>';
 }

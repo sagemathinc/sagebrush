@@ -116,3 +116,84 @@ export class TermOutput {
     return { stdout: this.out.text(), stderr: this.err.text(), output: { producedBytes: produced, deliveredBytes: delivered, exceeded, truncated: over && !exceeded } };
   }
 }
+
+// ------------------------------------------------------------------ a Terminal prompt's output
+
+/** One segment of a prompt's output: stdout (1) or stderr (2), in the order written. */
+export type PromptSegment = { fd: 1 | 2; text: string };
+
+/**
+ * A Terminal prompt's output, one statement at a time, in the order written (design term-prompt r1 §4–§5, r1a): every
+ * write comes here as it happens.  Per statement, with IN its bytes and RES stderr's reserve within them: a stdout
+ * byte is kept while out + err < IN − RES, a stderr byte while out + err < IN; the rest is counted as omitted, and
+ * one line, "… N bytes of output omitted", closes the statement's output.  Cuts fall at scalar boundaries.  The
+ * statement's counters start at begin() and are never reset by a flush: a flush frees storage only, so nothing is
+ * kept or shown twice and a flush (at input(), or forced) refills nothing.
+ *
+ * Kept text is held as segments, each an array of parts (adjacent writes to one fd push onto the last segment's
+ * parts; nothing is joined until a flush), at most `perFlush` segments held: a write that would open one more flushes first.
+ * `flush` sends the segments (the worker's `out`, which blocks until the page has taken them).
+ */
+export class PromptOutput {
+  private segs: { fd: 1 | 2; parts: string[] }[] = [];
+  private out = 0;
+  private err = 0;
+  private omitted = 0;
+  /** delivered across the session (the page charges each flush as it arrives) */
+  delivered = 0;
+  constructor(
+    readonly inBytes: number,
+    readonly reserve: number,
+    readonly perFlush: number,
+    private flushTo: (segs: PromptSegment[]) => void,
+  ) {}
+  /** A statement starts: its counters at zero. */
+  begin() {
+    this.out = this.err = this.omitted = 0;
+  }
+  write(fd: 1 | 2, s: string) {
+    if (!s) return;
+    const room = fd === 1 ? this.inBytes - this.reserve - (this.out + this.err) : this.inBytes - (this.out + this.err);
+    const p = utf8Prefix(s, Math.max(0, room));
+    const piece = p.end === s.length ? s : s.slice(0, p.end);
+    const kept = p.end === s.length ? p.bytes : utf8Prefix(piece, Infinity).bytes;
+    this.omitted += p.bytes - kept;
+    if (!piece) return;
+    if (fd === 1) this.out += kept;
+    else this.err += kept;
+    const last = this.segs[this.segs.length - 1];
+    if (last && last.fd === fd) last.parts.push(piece);
+    else {
+      if (this.segs.length >= this.perFlush) this.flush();
+      this.segs.push({ fd, parts: [piece] });
+    }
+  }
+  /** Send what is held, in order, and let it go. */
+  flush() {
+    if (!this.segs.length) return;
+    const segs = this.segs.map((g) => ({ fd: g.fd, text: g.parts.join("") }));
+    this.segs = [];
+    for (const g of segs) this.delivered += utf8Prefix(g.text, Infinity).bytes;
+    this.flushTo(segs);
+  }
+  /** A statement ends: the omitted line, if any, then everything held is sent. */
+  end() {
+    if (this.omitted > 0) {
+      const n = this.omitted;
+      this.omitted = 0;
+      // (past the statement's bytes: the line is the panel's own, sent outside the cut)
+      const last = this.segs[this.segs.length - 1];
+      const line = `… ${n} bytes of output omitted\n`;
+      if (last && last.fd === 2) last.parts.push(line);
+      else {
+        if (this.segs.length >= this.perFlush) this.flush();
+        this.segs.push({ fd: 2, parts: [line] });
+      }
+    }
+    this.flush();
+  }
+  /** Held now, in segments (the tests' probe: never more than perFlush). */
+  held(): number {
+    return this.segs.length;
+  }
+}

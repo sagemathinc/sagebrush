@@ -4,15 +4,15 @@
 // The editor's Run (run-core.mjs), without a browser: the session's script run in the CLI's own Sage (the same
 // engine's Python and preparser as the page's runner), its printed results parsed and turned into the results file's
 // states; then those states shown by the renderer's own rule (sagetex.mjs savedStates/stateOf). William's case: a
-// value, a computation, a name defined again later (page order), a failing item whose later readers show Sage's
-// NameError and the rest still run, a plot as an SVG; and the parts alone: refused items, a session that stopped,
+// value, a computation, a name defined again later (page order), a failing item, which stops the rest, a plot as an
+// SVG; and the parts alone: refused items, a session that stopped,
 // unreadable lines, bounds, a traceback without the script's frames.
 //   node scripts/build-cli.mjs && bun web/latex/test-latex-run.mjs
 import { mkdtempSync, mkdirSync, writeFileSync, rmSync, existsSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { spawn } from "node:child_process";
-import { seenOf, driver, runnable, parseOutput, statesOf, resultsText, msgOf, MARK, RUN_LIMITS, RESULTS_FORMAT, runAndSave, sessionOf, sandboxEngine, SANDBOX_FAILED, folderFiles, runIn, DEPS_MARK, parseDeps, depsWith, wsReader, checkedResults } from "./run-core.mjs";
+import { seenOf, driver, runnable, parseOutput, statesOf, BLOCKED, tally, resultsText, msgOf, MARK, RUN_LIMITS, RESULTS_FORMAT, runAndSave, sessionOf, sandboxEngine, SANDBOX_FAILED, folderFiles, runIn, DEPS_MARK, parseDeps, depsWith, wsReader, checkedResults } from "./run-core.mjs";
 import { Engine, installPythontex } from "./engine/pipeline.mjs";
 import * as pythontexCode from "./engine/pythontex.mjs";
 import { itemKey, savedStates, stateOf, WRAPPER_VERSION, MAX_RESULT, safeRel, depsOf, staleOf, staleOfSync, sha256hex, readComplete, DEPS_MAX, inlineHtml, blockHtml, mathPart } from "./engine/sagetex.mjs";
@@ -28,9 +28,9 @@ const item = (mode, code, extra = {}) => { const it = real(mode, code, extra); r
 // ---- the parts alone
 {
   const its = [item("silent", "x = 1"), item("sage", "x", { err: "cs", name: "foo" }), item("sage", "x")];
-  check("runnable: refused items aren't sent", JSON.stringify(runnable(its)) === JSON.stringify([{ mode: "silent", code: "x = 1" }, { mode: "sage", code: "x" }]), runnable(its));
-  const st = statesOf(its, [{ s: "ok" }, { s: "ok", latex: "1" }], "");
-  check("statesOf: a refused item says why, the next one is the next result", st[1].s === "error" && /TeX command/.test(st[1].msg) && st[2].s === "ok" && st[2].latex === "1", st);
+  check("runnable: a refused item isn't sent, nor anything after it (it fails, which stops the rest)", JSON.stringify(runnable(its)) === JSON.stringify([{ mode: "silent", code: "x = 1" }]), runnable(its));
+  const st = statesOf(its, [{ s: "ok" }], "");
+  check("statesOf: a refused item says why, the next one is not run (M4)", st[1].s === "error" && /TeX command/.test(st[1].msg) && st[2].s === "blocked" && st[2].msg === BLOCKED, st);
   check("statesOf: every state has its item's key", st.every((s, k) => s.key === its[k].key), st);
   const cut = statesOf([item("silent", "a"), item("sage", "b")], [{ s: "ok" }], "the run was stopped");
   check("statesOf: an item after the session stopped says so", cut[1].s === "error" && cut[1].msg === "not run: the run was stopped", cut);
@@ -38,6 +38,9 @@ const item = (mode, code, extra = {}) => { const it = real(mode, code, extra); r
   check("statesOf: a result over MAX_RESULT is an error", big[0].s === "error" && /over/.test(big[0].msg), big);
   const notSvg = statesOf([item("plot", "p")], [{ s: "ok", svg: "<script>alert(1)</script>" }], "");
   check("statesOf: a plot that isn't an SVG is an error", notSvg[0].s === "error" && !notSvg[0].src, notSvg);
+  // (grader's 985-r3-2: the SVG must begin the output; text before it is "isn't an SVG", and stops the rest)
+  const preSvg = statesOf([item("plot", "p"), item("sage", "q")], [{ s: "ok", svg: "x<svg xmlns='http://www.w3.org/2000/svg'></svg>" }], "");
+  check("statesOf: a plot whose output only contains an SVG (text before it) isn't an SVG, and the next item is blocked (M4)", preSvg[0].s === "error" && !preSvg[0].src && preSvg[1].s === "blocked" && preSvg[1].msg === BLOCKED, preSvg);
   const bigSvg = statesOf([item("plot", "p")], [{ s: "ok", svg: "<svg>" + "x".repeat(RUN_LIMITS.svg) }], "");
   check("statesOf: a plot over the SVG limit is an error", bigSvg[0].s === "error", bigSvg);
   const svg = statesOf([item("plot", "p")], [{ s: "ok", svg: "<svg xmlns='http://www.w3.org/2000/svg'>é</svg>" }], "");
@@ -45,7 +48,7 @@ const item = (mode, code, extra = {}) => { const it = real(mode, code, extra); r
   const out = `hello\n${MARK}{"s": "ok"}\n${MARK}not json\n${MARK}3\nbye`;
   const got = parseOutput(out);
   check("parseOutput: only marked lines; an unreadable one is an error", got.length === 3 && got[0].s === "ok" && got[1].s === "error" && got[2].s === "error", got);
-  const tb = 'Traceback (most recent call last):\n  File "<cell>", line 15, in <module>\n    _sbtx_r = {"s": "ok"}\n  File "<string>", line 1, in <module>\n    y\nNameError: name \'y\' is not defined\n';
+  const tb = 'Traceback (most recent call last):\n  File "<cell>", line 15, in <module>\n    _sx_r = {"s": "ok"}\n  File "<string>", line 1, in <module>\n    y\nNameError: name \'y\' is not defined\n';
   check("msgOf: the script's own frames are dropped", msgOf(tb) === 'Traceback (most recent call last):\n  File "<string>", line 1, in <module>\n    y\nNameError: name \'y\' is not defined', msgOf(tb));
   const j = JSON.parse(resultsText(st));
   check("resultsText: results v1 of this wrapper", j.format === RESULTS_FORMAT && j.version === 1 && j.wrapper === WRAPPER_VERSION && j.items.length === 3, j);
@@ -163,7 +166,7 @@ const sage = (code) => new Promise((res) => {
     ["silent", "print(type(__builtins__.__pyjs_host__ if hasattr(__builtins__, '__pyjs_host__') else None))"],
   ];
   const its = spec.map((a) => item(...a));
-  const r = await sage(driver(runnable(its)) + "\nimport builtins\nprint('HOSTBACK', getattr(builtins, '__pyjs_host__', None) is not _sbtx_host, getattr(builtins, '__pyjs_display__', None) is not _sbtx_disp)");
+  const r = await sage(driver(runnable(its)) + "\nimport builtins\nprint('HOSTBACK', getattr(builtins, '__pyjs_host__', None) is not _sx_host, getattr(builtins, '__pyjs_display__', None) is not _sx_disp)");
   const st = statesOf(its, parseOutput(r.out), "", interactsOf);
   const h = st[0].interacts?.[0];
   check("interact: none kept without the interact chunk's check (statesOf not given it)", statesOf(its, parseOutput(r.out), "").every((x) => !x.interacts), null);
@@ -219,29 +222,27 @@ const sage = (code) => new Promise((res) => {
 {
   const spec = [
     ["silent", "@interact\ndef s(c=selector(['a', 'b', 'c'], default='b'), t=slider(['p', 'q', 'r'], default='q')):\n    pass"],
-    ["silent", "@interact\ndef e(k=slider(0, 1, 1, 0)):\n    print('in e')\nraise ValueError('after the interact')"],
     ["silent", Array.from({ length: 9 }, (_, n) => `@interact\ndef f${n}(k=slider(0, 1, 1, 0)):\n    global RAN${n}\n    RAN${n} = True\n`).join("")],
-    ["silent", "@interact\ndef a(k=slider(0, 1, 1, 0)):\n    print('in a')\nimport sys\n_AFTER = sys.stdout\nprint('after')"],
+    ["silent", "@interact\ndef a(k=slider(0, 1, 1, 0)):\n    print('in a')\nimport sys\n_AFTER = sys.stdout is _sx_buf\nprint('after')"],
+    // (last: a failing item stops the rest)
+    ["silent", "@interact\ndef e(k=slider(0, 1, 1, 0)):\n    print('in e')\nraise ValueError('after the interact')"],
   ];
   const its = spec.map((a) => item(...a));
-  const r = await sage(driver(runnable(its)) + "\nprint('PINS', 'RAN7' in globals(), 'RAN8' in globals(), _AFTER is _sbtx_buf)");
+  const r = await sage(driver(runnable(its)) + "\nprint('PINS', 'RAN7' in globals(), 'RAN8' in globals(), _AFTER)");
   const got = parseOutput(r.out), st = statesOf(its, got, "", interactsOf);
   const pins = (r.out.split("\n").find((l) => l.startsWith("PINS")) ?? "").split(" ");
   const sh = interactsHtml(st[0].interacts ?? []);
   check("interact (Sage): a selector's default selected, a list slider at its default's label", st[0].s === "ok" && /<option value="1" selected>b<\/option>/.test(sh) && /value="1"><span class="si-v">q<\/span>/.test(sh), { st0: st[0], err: r.err.slice(-400) });
-  check("interact (Sage): an item that raises after its interact: its error, no interacts, no placeholder", st[1].s === "error" && /after the interact/.test(st[1].msg) && !st[1].interacts &&
-    !blockHtml(stateOf(savedStates([real(...spec[1])], st.slice(1, 2)), 0, real(...spec[1])), real(...spec[1]), (x) => String(x), 1).includes("sageinteract-at"), st[1]);
-  check("interact (Sage): at most 8 kept an item; the 9th not kept, run once at its defaults as on Sage's command line", got[2]?.interacts?.length === 8 && got[2].interacts.every((x) => x.spec?.name !== "f8") && pins[1] === "True" && pins[2] === "True", { n: got[2]?.interacts?.length, pins });
-  check("interact (Sage): after an interact's function, the item's own output is back (its later print isn't the interact's)", pins[3] === "True" && st[3].interacts?.[0]?.out === "in a\n", { pins, out: st[3].interacts?.[0]?.out });
+  check("interact (Sage): an item that raises after its interact: its error, no interacts, no placeholder", st[3].s === "error" && /after the interact/.test(st[3].msg) && !st[3].interacts &&
+    !blockHtml(stateOf(savedStates([real(...spec[3])], st.slice(3, 4)), 0, real(...spec[3])), real(...spec[3]), (x) => String(x), 1).includes("sageinteract-at"), st[3]);
+  check("interact (Sage): at most 8 kept an item; the 9th not kept, run once at its defaults as on Sage's command line", got[1]?.interacts?.length === 8 && got[1].interacts.every((x) => x.spec?.name !== "f8") && pins[1] === "True" && pins[2] === "True", { n: got[1]?.interacts?.length, pins });
+  check("interact (Sage): after an interact's function, the item's own output is back (its later print isn't the interact's)", pins[3] === "True" && st[2].interacts?.[0]?.out === "in a\n", { pins, out: st[2].interacts?.[0]?.out });
 }
 {
   const spec = [
     ["silent", "var('t')\nx = 2^10"],
     ["sage", "x"],
     ["sage", "integrate(t^2, t, 0, 1)"],
-    ["silent", "y = 1/0"],
-    ["sage", "y"],
-    ["sage", "x", { err: "cs", name: "foo" }],
     ["block", "x = 7\nprint('not a result')"],
     ["sage", "x"],
     ["plot", "plot(sin(t), (t, 0, 3))"],
@@ -253,13 +254,55 @@ const sage = (code) => new Promise((res) => {
   check("sage: the session ran", r.code === 0, r.err.slice(-600));
   check("sage: \\sage{x} is 1024", st[1].s === "ok" && st[1].latex === "1024", st[1]);
   check("sage: integrate is \\frac{1}{3}", st[2].s === "ok" && st[2].latex === "\\frac{1}{3}", st[2]);
-  check("sage: 1/0 shows ZeroDivisionError", st[3].s === "error" && /ZeroDivisionError/.test(st[3].msg) && !/<cell>|_sbtx_/.test(st[3].msg), st[3]);
-  check("sage: a later reader of y shows Sage's NameError", st[4].s === "error" && /NameError: name 'y' is not defined/.test(st[4].msg), st[4]);
-  check("sage: a refused item says why", st[5].s === "error" && /TeX command/.test(st[5].msg), st[5]);
-  check("sage: the rest still run after failures", st[6].s === "ok", st[6]);
-  check("sage: x defined again later is 7 (page order)", st[7].s === "ok" && st[7].latex === "7", st[7]);
+  check("sage: x defined again later is 7 (page order)", st[4].s === "ok" && st[4].latex === "7", st[4]);
   check("sage: an item's own printing isn't a result", !r.out.split("\n").some((l) => l === "not a result"), r.out.slice(0, 300));
-  check("sage: the plot is an SVG data URL", st[8].s === "ok" && /^data:image\/svg\+xml;base64,/.test(st[8].src ?? ""), { ...st[8], src: String(st[8].src).slice(0, 80) });
+  check("sage: the plot is an SVG data URL", st[5].s === "ok" && /^data:image\/svg\+xml;base64,/.test(st[5].src ?? ""), { ...st[5], src: String(st[5].src).slice(0, 80) });
+  // (a failing item stops the rest, every language (@sagebrush's ruling, Nov 10): the script ends at it, and each later
+  //  item says so, board's M4; a refused item is a failure too, and nothing after it is sent)
+  {
+    const fs = [["silent", "y = 1/0"], ["sage", "y"], ["sage", "1+1"]].map((a) => item(...a));
+    const fr = await sage(driver(runnable(fs)));
+    const fst = statesOf(fs, parseOutput(fr.out), "");
+    check("stop: 1/0 shows ZeroDivisionError", fst[0].s === "error" && /ZeroDivisionError/.test(fst[0].msg) && !/<cell>|_sx_/.test(fst[0].msg), fst[0]);
+    check("stop: the script ends at the failed item (one result printed)", fr.code === 0 && parseOutput(fr.out).length === 1, parseOutput(fr.out));
+    check("stop: each later item is not run, saying why (M4)", fst.slice(1).every((x) => x.s === "blocked" && x.msg === BLOCKED) && BLOCKED === "Not run: an item before this one failed (fix it and run again)", fst);
+    const rs = [["sage", "1"], ["sage", "x", { err: "cs", name: "foo" }], ["sage", "2"]].map((a) => item(...a));
+    const rr = await sage(driver(runnable(rs)));
+    const rst = statesOf(rs, parseOutput(rr.out), "");
+    check("stop: a refused item says why, and stops the rest; nothing after it is sent", runnable(rs).length === 1 && rst[0].s === "ok" && rst[1].s === "error" && /TeX command/.test(rst[1].msg) && rst[2].s === "blocked" && rst[2].msg === BLOCKED, rst);
+    // (a result over its cap, or a plot that isn't an SVG, fails before the next item runs (daybreak3's STOP-RESULT-1):
+    //  the driver checks it as statesOf does, so the later item's code never ran)
+    const big = [item("pyblock", "print('x' * 131072)"), item("pycode", "later = 1")];
+    const bg = await sage(driver(runnable(big)) + "\nprint('LATER', 'later' in _sx_pg)");
+    const bst = statesOf(big, parseOutput(bg.out), "");
+    check("stop: a result over its cap stops the rest in the session: the later item never ran", bst[0].s === "error" && /over 16 KiB/.test(bst[0].msg) && bst[1].s === "blocked" && /LATER False/.test(bg.out), [bst, bg.out.split("\n").filter((l) => l.startsWith("LATER"))]);
+    const ns = [item("plot", "type('P', (object,), {'_repr_svg_': lambda s: 'not an svg'})()"), item("silent", "later2 = 1")];
+    const nsr = await sage(driver(runnable(ns)) + "\nprint('LATER2', 'later2' in globals())");
+    check("stop: a plot that isn't an SVG stops the rest in the session", statesOf(ns, parseOutput(nsr.out), "")[1].s === "blocked" && /LATER2 False/.test(nsr.out), nsr.out.split("\n").filter((l) => /LATER2|SBTX/.test(l)).map((l) => l.slice(0, 120)));
+    // (grader's 985-r3-1: a plot over the SVG limit, the third case: the later item says M4 and never ran)
+    const bp = [item("plot", `type('P', (object,), {'_repr_svg_': lambda s: '<svg>' + 'x' * ${RUN_LIMITS.svg}})()`), item("silent", "later3 = 1")];
+    const bpr = await sage(driver(runnable(bp)) + "\nprint('LATER3', 'later3' in globals())");
+    const bps = statesOf(bp, parseOutput(bpr.out), "");
+    check("stop: a plot over the SVG limit stops the rest in the session: the later item says M4 and never ran", bps[0].s === "error" && bps[1].s === "blocked" && bps[1].msg === BLOCKED && /LATER3 False/.test(bpr.out), [bps.map((x) => [x.s, String(x.msg ?? "").slice(0, 80)]), bpr.out.split("\n").filter((l) => l.startsWith("LATER3"))]);
+    // (grader's 985-r3-2, in the session: the driver's own check, through SVG_HEAD.source, is anchored too)
+    const xs = [item("plot", "type('P', (object,), {'_repr_svg_': lambda s: \"x<svg xmlns='http://www.w3.org/2000/svg'></svg>\"})()"), item("silent", "later4 = 1")];
+    const xsr = await sage(driver(runnable(xs)) + "\nprint('LATER4', 'later4' in globals())");
+    const xss = statesOf(xs, parseOutput(xsr.out), "");
+    check("stop: a plot whose output has text before its SVG stops the rest in the session: the later item says M4 and never ran", xss[0].s === "error" && xss[1].s === "blocked" && xss[1].msg === BLOCKED && /LATER4 False/.test(xsr.out), [xss.map((x) => [x.s, String(x.msg ?? "").slice(0, 80)]), xsr.out.split("\n").filter((l) => l.startsWith("LATER4"))]);
+    // (the status line's count (board, #985): only the items that ran, and of those the failed; Stop after 2 of 5 ran 2,
+    //  none failed; a refused first item: 0 ran; never a field of the results file)
+    const five = ["a", "b", "c", "d", "e"].map((c) => item("sage", c));
+    const stop5 = statesOf(five, [{ s: "ok", latex: "1" }, { s: "ok", latex: "2" }], "the run was stopped");
+    const ref3 = [item("sage", "x", { err: "cs", name: "foo" }), item("sage", "1"), item("sage", "2")];
+    const fail5 = statesOf(five, [{ s: "ok", latex: "1" }, { s: "error", msg: "E" }], "");
+    check("tally: Stop after 2 of 5: 2 ran, none failed; a refused first item: 0 of 3 ran; a failure: 2 ran, 1 failed",
+      JSON.stringify([tally(stop5), tally(statesOf(ref3, [], "")), tally(fail5)]) === JSON.stringify([{ ran: 2, failed: 0 }, { ran: 0, failed: 0 }, { ran: 2, failed: 1 }]),
+      [tally(stop5), tally(statesOf(ref3, [], "")), tally(fail5)]);
+    check("tally: ran isn't written to the results file", !resultsText(stop5).includes('"ran"') && stop5.some((x) => x.ran === false), resultsText(stop5).slice(0, 200));
+    // (a session that ended for another reason keeps its own words)
+    const ended = statesOf(rs.slice(0, 1).concat([item("sage", "3")]), [], "");
+    check("stop: a session that ended keeps its own words, not M4", ended.every((x) => x.s === "error" && /the session ended before this item/.test(x.msg)), ended);
+  }
   check("sage: every state is shown by the renderer's rule (keys match, in order)", savedStates(reals, st).length === its.length, null);
   check("sage: the renderer shows 1024 for item 2", show(1).s === "ok" && show(1).latex === "1024", show(1));
   // Sage's arithmetic in every item (#706, a wrong answer: each item was exec'd as Python, 1/3 a float, an exact sum
@@ -578,7 +621,7 @@ const shown = (ws) => { const f = ws.files.get(RP); return f ? JSON.parse(f.text
   const run = (fid, signal) => runAndSave({
     items: [item("silent", "x = 1")], ws, fid, current: () => true, signal, max: 1 << 20, now: () => 0,
     session: s, store: s, serial: s.serial, folder: async () => tree[fid],
-    exec: (k, code) => { running = fid; log.push("exec " + fid + " " + /"\/[AB]"/.test(Buffer.from(code.match(/_sbtx_d = _sbtx_json\.loads\(_sbtx_b64\.b64decode\("([^"]*)"\)/)?.[1] ?? "", "base64").toString()) ); return new Promise((r) => (holds[fid] = () => { running = null; r({ out: "", stopped: "" }); })); },
+    exec: (k, code) => { running = fid; log.push("exec " + fid + " " + /"\/[AB]"/.test(Buffer.from(code.match(/_sx_d = _sx_json\.loads\(_sx_b64\.b64decode\("([^"]*)"\)/)?.[1] ?? "", "base64").toString()) ); return new Promise((r) => (holds[fid] = () => { running = null; r({ out: "", stopped: "" }); })); },
   });
   // (each wait bounded: a Run that never ends fails its check here, not the whole test)
   const within = (p, ms = 5000) => Promise.race([p, new Promise((r) => setTimeout(() => r({ timedOut: true }), ms))]);

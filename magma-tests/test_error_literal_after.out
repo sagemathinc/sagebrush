@@ -1,0 +1,6 @@
+1
+
+In file "test_error_literal_after.m", line 3, column 5:
+>> for not 'abc
+       ^
+User error: bad syntax

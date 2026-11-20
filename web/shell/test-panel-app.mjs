@@ -143,11 +143,12 @@ try {
       `${as}: a dead worker (no shell/ there): check 3 FAILS, no report: ${JSON.stringify(dead?.[2] ?? dead).slice(0, 300)}`);
     // ---- Tab completion, help, compgen and ls colours (plan-term-help-tab r3.1 §5 E1-E7), in the isolated pass only.
     // Each check's text starts with its case id ("E2.u1: ..."): the control runs (K*) compare the failing ids.  Tab and
-    // Shift-Tab are real key events (CDP Input), so the browser's own focus move happens when the panel leaves it.
+    // Shift-Tab are real key events (CDP Input), so the browser's own focus move happens when the panel leaves it (Tab
+    // stays in the Terminal; Esc then Tab, or Shift-Tab, leaves it).
     if (coi) {
       const TA = `document.querySelector(".sb-term .xterm-helper-textarea")`;
       const key = async (k, shift = false) => {
-        const ev = { key: k, code: k, windowsVirtualKeyCode: { Tab: 9, Enter: 13, ArrowUp: 38, ArrowDown: 40 }[k], modifiers: shift ? 8 : 0 };
+        const ev = { key: k, code: k === "Shift" ? "ShiftLeft" : k.length === 1 ? "Key" + k.toUpperCase() : k, windowsVirtualKeyCode: { Tab: 9, Enter: 13, Escape: 27, Shift: 16, ArrowUp: 38, ArrowDown: 40 }[k] ?? k.toUpperCase().charCodeAt(0), modifiers: shift || k === "Shift" ? 8 : 0 };
         await send("Input.dispatchKeyEvent", { type: "rawKeyDown", ...ev });
         await send("Input.dispatchKeyEvent", { type: "keyUp", ...ev });
       };
@@ -206,7 +207,7 @@ try {
       await e2("E2.d4", `cat "q`, "q$(touch m)");
       await e2("E2.d5", `cat "r`, "r`touch m`");
       await set("cat $"); const e2xf = await focused(); await key("Tab"); await sleepMs(500);
-      check(e2xf && (await value()) === "cat $" && !(await focused()), `E2.x: cat $+Tab declined: unchanged (${JSON.stringify(await value())}) and focus moved`);
+      check(e2xf && (await value()) === "cat $" && (await focused()), `E2.x: cat $+Tab declined: unchanged (${JSON.stringify(await value())}), and the focus stays`);
       // E3 Tab never executes
       const n3 = await ncmds();
       await set("echo hi"); await key("Tab"); await sleepMs(800);
@@ -214,31 +215,40 @@ try {
       await set(""); await key("ArrowUp");
       const up = await value();
       check(v3 === "echo hi" && n3b === n3 && up !== "echo hi", `E3: echo hi+Tab: input ${JSON.stringify(v3)}, commands ${n3} → ${n3b}, history's last ${JSON.stringify(up)}`);
-      // E4 no keyboard trap
-      const leaves = async (setup) => { await setup(); await key("Tab"); await sleepMs(300); return !(await focused()); };
+      // E4 Tab stays in the Terminal (completing where it can); the way out, no keyboard trap: Esc then Tab, or Shift-Tab
+      const leaves = async (setup, ...keys) => { await setup(); for (const k of keys) await key(...k); await sleepMs(300); return !(await focused()); };
+      const T_ = ["Tab"], ESC = ["Escape"];
       const e4 = {
-        empty: await leaves(() => set("")),
-        mid: await leaves(() => set("cat no", 5)),
-        shift: await (async () => { await set("cat no"); await key("Tab", true); await sleepMs(300); return !(await focused()); })(),
-        end: await (async () => { await set("cat no"); await key("Tab"); await settle("cat no"); return await focused(); })(),
+        empty: await leaves(() => set(""), T_),
+        mid: await leaves(() => set("cat no", 5), T_),
+        escTab: await leaves(() => set(""), ESC, T_),
+        escShiftTab: await leaves(() => set("cat no", 5), ESC, ["Shift"], ["Tab", true]),
+        escKeyTab: await leaves(() => set(""), ESC, ["a"], T_),
+        shift: await leaves(() => set("cat no"), ["Tab", true]),
+        end: await (async () => { await set("cat no"); await key("Tab"); await settle("cat no"); return !(await focused()); })(),
       };
       // (a command that runs until Stop: the shell has no sleep)
       await evaluate(`window.__sbTerm.term.focus(); window.__sbTerm.editor.reset("while :; do :; done")`); await realEnter();
       await until(`document.querySelector(".sb-term").classList.contains("running")`, 30000);
-      e4.running = await leaves(() => set("cat no"));
+      e4.running = await leaves(() => set("cat no"), T_);
+      e4.runningEsc = await leaves(() => evaluate(`(window.__sbTerm.term.focus(), 1)`), ESC, T_);
       await evaluate(`document.querySelector(".sb-term-stop").click()`);
       await until(`!document.querySelector(".sb-term").classList.contains("running")`, 30000);
-      check(e4.empty, `E4.empty: empty input + Tab: focus leaves`);
-      check(e4.mid, `E4.mid: caret mid-word + Tab: focus leaves`);
-      check(e4.running, `E4.running: a command running + Tab: focus leaves`);
-      check(e4.shift, `E4.shift: Shift-Tab: focus leaves`);
-      check(e4.end, `E4.end: at a word's end + Tab: focus stays (it completes)`);
-      // (TH-C1: inside a quoted word that goes on after the caret: declined, nothing asked of the host, focus leaves)
+      check(!e4.empty, `E4.empty: empty input + Tab: the focus stays`);
+      check(!e4.mid, `E4.mid: caret mid-word + Tab: the focus stays`);
+      check(!e4.running, `E4.running: a command running + Tab: the focus stays`);
+      check(e4.escTab, `E4.esc: Esc then Tab: the focus leaves`);
+      check(e4.runningEsc, `E4.escRunning: a command running, Esc then Tab: the focus leaves`);
+      check(e4.escShiftTab, `E4.escShift: Esc, then Shift-Tab (the Shift pressed between): the focus leaves (back)`);
+      check(!e4.escKeyTab, `E4.escKey: Esc, another key, then Tab: the focus stays (the way out is Esc right before Tab)`);
+      check(e4.shift, `E4.shift: Shift-Tab: the focus leaves`);
+      check(!e4.end, `E4.end: at a word's end + Tab: the focus stays (it completes)`);
+      // (TH-C1: inside a quoted word that goes on after the caret: declined, nothing asked of the host, the focus stays)
       const rq0 = Number(await evaluate(`document.querySelector(".sb-term").dataset.tabRequests ?? 0`));
       const qline = "cat 'notes x'";
-      const qleft = await leaves(() => set(qline, 10));
+      const qleft = await leaves(() => set(qline, 10), T_);
       const rq1 = Number(await evaluate(`document.querySelector(".sb-term").dataset.tabRequests ?? 0`));
-      check(qleft && (await value()) === qline && rq1 === rq0, `E4.qmid: Tab inside a quoted word, before its space: declined (focus left ${qleft}, ${JSON.stringify(await value())}, ${rq1 - rq0} requests)`);
+      check(!qleft && (await value()) === qline && rq1 === rq0, `E4.qmid: Tab inside a quoted word, before its space: declined (focus left ${qleft}, ${JSON.stringify(await value())}, ${rq1 - rq0} requests)`);
       // E5 a late listing inserts nothing
       await evaluate(`window.__sbTermTabDelayMs = 400`);
       const req0 = Number(await evaluate(`document.querySelector(".sb-term").dataset.tabRequests ?? 0`));

@@ -223,6 +223,27 @@ impl Mat {
         piv
     }
 
+    /// As `rref`, with the rows of the matrix the pivots were found in, in
+    /// increasing order (S), and det of the submatrix in those rows and the
+    /// pivot columns (P): the elimination is an LU factorization of it, so
+    /// the determinant is the product of the pivots, signed by the order in
+    /// which the rows were taken.
+    pub fn rref_rows(&mut self) -> (Vec<usize>, Vec<usize>, u64) {
+        let mut at: Vec<usize> = (0..self.rows).collect();
+        let (piv, det) = self.echelon_impl(true, true, None, Some(&mut at));
+        let k = piv.len();
+        // det is the pivots' product times the sign of the whole row
+        // permutation; make it the sign of the order of the first k rows
+        let sign = perm_sign(&at) ^ inversions_odd(&at[..k]);
+        let mut taken = vec![false; self.rows];
+        for &i in &at[..k] {
+            taken[i] = true;
+        }
+        let s: Vec<usize> = (0..self.rows).filter(|&i| taken[i]).collect();
+        let m = self.m;
+        (piv, s, if sign { m.neg(det) } else { det })
+    }
+
     pub fn rank(&self) -> usize {
         self.clone().echelon(false, false).0.len()
     }
@@ -249,7 +270,7 @@ impl Mat {
     /// permutation (the determinant, for a square matrix of full rank;
     /// computed only if `want_det`).
     pub fn echelon(&mut self, reduced: bool, want_det: bool) -> (Vec<usize>, u64) {
-        self.echelon_impl(reduced, want_det, None)
+        self.echelon_impl(reduced, want_det, None, None)
     }
 
     /// An LU factorization of a square matrix, if it is nonsingular.
@@ -258,7 +279,7 @@ impl Mat {
         let n = self.rows;
         let mut a = self.clone();
         let mut perm: Vec<usize> = (0..n).collect();
-        let (piv, _) = a.echelon_impl(false, false, Some((&mut perm, &mut vec![])));
+        let (piv, _) = a.echelon_impl(false, false, Some((&mut perm, &mut vec![])), None);
         if piv.len() < n {
             return None;
         }
@@ -268,7 +289,7 @@ impl Mat {
     /// With `lu` = Some((perm, _)): keep the multipliers below the pivots
     /// (L, with the pivot values on its diagonal) and record the row
     /// permutation, for a square matrix.
-    fn echelon_impl(&mut self, reduced: bool, want_det: bool, mut lu: Option<(&mut Vec<usize>, &mut Vec<u64>)>) -> (Vec<usize>, u64) {
+    fn echelon_impl(&mut self, reduced: bool, want_det: bool, mut lu: Option<(&mut Vec<usize>, &mut Vec<u64>)>, mut rows_at: Option<&mut Vec<usize>>) -> (Vec<usize>, u64) {
         const BLOCK: usize = 16;
         let keep = lu.is_some();
         let m = self.m;
@@ -311,6 +332,9 @@ impl Mat {
                 det = m.neg(det);
                 if let Some((perm, _)) = lu.as_mut() {
                     perm.swap(r, pr);
+                }
+                if let Some(at) = rows_at.as_mut() {
+                    at.swap(r, pr);
                 }
             }
             // the pivot row, up to date for the columns after col
@@ -649,9 +673,116 @@ impl Mat {
     }
 }
 
+/// Whether the permutation p of 0..n is odd.
+fn perm_sign(p: &[usize]) -> bool {
+    let mut seen = vec![false; p.len()];
+    let mut odd = false;
+    for i in 0..p.len() {
+        if seen[i] {
+            continue;
+        }
+        let mut j = i;
+        let mut len = 0;
+        while !seen[j] {
+            seen[j] = true;
+            j = p[j];
+            len += 1;
+        }
+        odd ^= len % 2 == 0;
+    }
+    odd
+}
+
+/// Whether the distinct values v have an odd number of inversions (pairs
+/// out of increasing order): the parity of the permutation that sorts them.
+fn inversions_odd(v: &[usize]) -> bool {
+    let mut odd = false;
+    for (i, &x) in v.iter().enumerate() {
+        for &y in &v[i + 1..] {
+            odd ^= x > y;
+        }
+    }
+    odd
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    /// rref_rows: the reduced form of rref, its pivot rows S in increasing
+    /// order, and det A[S, P], against the determinant computed directly;
+    /// with zeros that make the elimination swap rows (and so take rows out
+    /// of order) and with dependent rows.
+    #[test]
+    fn rref_rows_gives_the_pivot_minor() {
+        let m = Modulus::new(1_000_003);
+        let mut s = 0x1234_5678_9abc_def1u64;
+        for case in 0..60 {
+            let (r, c) = (1 + (case % 9), 1 + (case * 7 % 11));
+            let mut a = rand_mat(r, c, m, &mut s);
+            for i in 0..r {
+                for j in 0..c {
+                    if rng(&mut s) % 3 == 0 {
+                        a.d[i * c + j] = 0;
+                    }
+                }
+            }
+            if r > 2 && case % 2 == 0 {
+                // a dependent row: row 1 = 2 row 0
+                for j in 0..c {
+                    a.d[c + j] = m.add(a.d[j], a.d[j]);
+                }
+            }
+            let mut x = a.clone();
+            let piv0 = x.clone().rref();
+            let (piv, rows, d) = x.rref_rows();
+            assert_eq!(piv, piv0);
+            assert_eq!(x.d, { let mut y = a.clone(); y.rref(); y.d }, "case {case}: not rref's form");
+            assert_eq!(rows.len(), piv.len());
+            assert!(rows.windows(2).all(|w| w[0] < w[1]));
+            let k = piv.len();
+            let sub: Vec<Vec<u64>> = rows.iter().map(|&i| piv.iter().map(|&j| a.get(i, j)).collect()).collect();
+            if k > 0 {
+                assert_eq!(d, Mat::from_rows(&sub, m).det(), "case {case}: rows {rows:?}");
+            }
+        }
+    }
+
+    /// The same for more than 16 and more than 32 pivots: n rows in
+    /// staircase form (row i zero left of column i, nonzero there) and some
+    /// combinations of them, in shuffled order (eight shuffles of each), so
+    /// that each column's pivot row lies anywhere and the elimination takes
+    /// the pivot rows far out of order.
+    #[test]
+    fn rref_rows_gives_the_pivot_minor_past_16_and_32_pivots() {
+        let m = Modulus::new(1_000_003);
+        let mut s = 0x0fed_cba9_8765_4321u64;
+        for case in 0..40 {
+            let (n, deps, c) = [(20usize, 6usize, 30usize), (19, 8, 20), (38, 12, 55), (38, 14, 40), (40, 0, 40)][case % 5];
+            let mut rows: Vec<Vec<u64>> = (0..n)
+                .map(|i| (0..c).map(|j| if j < i { 0 } else if j == i { 1 + rng(&mut s) % (m.n - 1) } else { rng(&mut s) % m.n }).collect())
+                .collect();
+            for _ in 0..deps {
+                let (a, b) = ((rng(&mut s) % n as u64) as usize, (rng(&mut s) % n as u64) as usize);
+                let row = (0..c).map(|j| m.add(rows[a][j], m.mul(3, rows[b][j]))).collect();
+                rows.push(row);
+            }
+            for i in (1..rows.len()).rev() {
+                rows.swap(i, (rng(&mut s) % (i as u64 + 1)) as usize);
+            }
+            let a = Mat::from_rows(&rows, m);
+            let mut x = a.clone();
+            let piv0 = x.clone().rref();
+            let (piv, srows, d) = x.rref_rows();
+            assert_eq!(piv, piv0);
+            assert_eq!(piv, (0..n).collect::<Vec<_>>());
+            assert_eq!(x.d, { let mut y = a.clone(); y.rref(); y.d }, "{n} rows: not rref's form");
+            assert_eq!(srows.len(), n);
+            assert!(srows.windows(2).all(|w| w[0] < w[1]));
+            let sub: Vec<Vec<u64>> = srows.iter().map(|&i| piv.iter().map(|&j| a.get(i, j)).collect()).collect();
+            assert_eq!(d, Mat::from_rows(&sub, m).det(), "{n} rows: rows {srows:?}");
+        }
+    }
 
     /// For engine/hmf/tests/wasm-stop.mjs (the Stop button in wasm,
     /// daybreak HARD-FE6-1): the characteristic polynomial of a 1252 x 1252

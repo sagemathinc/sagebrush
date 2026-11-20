@@ -61,7 +61,7 @@ try {
   await ev("document.querySelector('#sharemenu').click()");
   // (the dialog opens at once, saying it's checking the sign-in: what it offers comes after the check)
   await until("document.querySelector('#sharedlg').open && document.querySelector('#sharechecking').dataset.state !== 'checking'");
-  ok(await ev("!document.querySelector('#sharesignin').hidden && document.querySelector('#shareform').hidden"), "signed out: Sign in with CoCalc");
+  ok(await ev("!document.querySelector('#sharesignin').hidden && document.querySelector('#shareform').hidden"), "signed out: Sign in");
   ok((await ev("document.querySelector('#signin').getAttribute('href')")).startsWith("/auth/login?return=%2F%3Fshare"), "sign-in returns to the page with ?share");
   await ev("document.querySelector('#sharedlg').close()");
   const signed = await ev(`fetch('/auth/dev', { method: 'POST', headers: {'content-type': 'application/json'}, body: JSON.stringify({ token: ${JSON.stringify(TOKEN)}, account_id: '${A}' }) }).then((r) => r.status)`);
@@ -97,6 +97,7 @@ try {
   const ran = await ev("document.querySelector('#nb .cell .out').textContent");
   ok(await ev("(() => { const f = document.querySelector('iframe[sandbox]'); return !!f && f.getAttribute('sandbox') === 'allow-scripts' && /\\/runner\\/$/.test(f.src); })()"), "shared code runs in the runner (an opaque-origin sandboxed frame), never a same-origin worker");
   ok(ran.includes("x,y;1,2;3,4"), "Run all runs it here, reading the mounted file: " + ran.trim());
+  ok(/^This notebook runs in your browser/.test(await ev("document.querySelector('#status').textContent")), "...and the page no longer says nothing has run");
   if (!REMOTE) ok(dev.log.files.length === 2, "the data file was fetched when read: " + JSON.stringify(dev.log.files));
 
   if (!REMOTE) {

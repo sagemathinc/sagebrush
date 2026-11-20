@@ -9,6 +9,7 @@ import { fileURLToPath } from "node:url";
 import { createRequire } from "node:module";
 import { execFileSync } from "node:child_process";
 import { createHash, createHmac } from "node:crypto";
+import { request } from "node:http";
 import { dispatch } from "../miniflare-dispatch.mjs";
 
 const here = dirname(fileURLToPath(import.meta.url));
@@ -148,7 +149,7 @@ const mf = new Miniflare(convertV4MiniflareOptions({
       durableObjects: { SYNC_ACCOUNT: { className: "SyncAccount", useSQLite: true }, SYNC_DOC: { className: "SyncDoc", useSQLite: true } },
       routes: ["sagebrush.test/*", "files.test/*"],
       outboundService: cocalc,
-      ratelimits: { SYNC_PREAUTH: { namespace_id: "1001", simple: { limit: 100000, period: 60 } }, SYNC_FILES_LIMIT: { namespace_id: "1003", simple: { limit: 100000, period: 60 } }, SYNC_ADMIN_LIMIT: { namespace_id: "1005", simple: { limit: 100000, period: 60 } } },
+      ratelimits: { SYNC_PREAUTH: { namespace_id: "1001", simple: { limit: 100000, period: 60 } }, SYNC_INGRESS_IP: { namespace_id: "81001", simple: { limit: 1000000, period: 60 } }, SYNC_ACCOUNT_INGRESS: { namespace_id: "91001", simple: { limit: 1000000, period: 60 } }, SYNC_FILES_LIMIT: { namespace_id: "1003", simple: { limit: 100000, period: 60 } }, SYNC_ADMIN_LIMIT: { namespace_id: "1005", simple: { limit: 100000, period: 60 } } },
     },
     // the user-content Worker's signed reads with a tight per-IP limit, 2 a minute; and one with none
     {
@@ -168,7 +169,7 @@ const mf = new Miniflare(convertV4MiniflareOptions({
       durableObjects: { SYNC_ACCOUNT: { className: "SyncAccount", useSQLite: true }, SYNC_DOC: { className: "SyncDoc", useSQLite: true } },
       routes: ["plain.test/*"],
       outboundService: cocalc,
-      ratelimits: { SYNC_PREAUTH: { namespace_id: "1007", simple: { limit: 100000, period: 60 } } },
+      ratelimits: { SYNC_PREAUTH: { namespace_id: "1007", simple: { limit: 100000, period: 60 } }, SYNC_INGRESS_IP: { namespace_id: "81007", simple: { limit: 1000000, period: 60 } }, SYNC_ACCOUNT_INGRESS: { namespace_id: "91007", simple: { limit: 1000000, period: 60 } } },
     },
     // sync's bindings, but no pre-authentication limit: off (LIMIT-321-1)
     {
@@ -185,7 +186,7 @@ const mf = new Miniflare(convertV4MiniflareOptions({
       bindings: { ...shareBindings, SYNC_ACCOUNTS: A },
       durableObjects: { SYNC_ACCOUNT: { className: "SyncAccount", useSQLite: true }, SYNC_DOC: { className: "SyncDoc", useSQLite: true } },
       routes: ["tight.test/*"],
-      ratelimits: { SYNC_PREAUTH: { namespace_id: "1002", simple: { limit: 3, period: 60 } }, SYNC_ADMIN_LIMIT: { namespace_id: "1006", simple: { limit: 2, period: 60 } } },
+      ratelimits: { SYNC_PREAUTH: { namespace_id: "1002", simple: { limit: 3, period: 60 } }, SYNC_INGRESS_IP: { namespace_id: "81002", simple: { limit: 1000000, period: 60 } }, SYNC_ACCOUNT_INGRESS: { namespace_id: "91002", simple: { limit: 1000000, period: 60 } }, SYNC_ADMIN_LIMIT: { namespace_id: "1006", simple: { limit: 2, period: 60 } } },
     },
     // the DEV test list (SYNC_TEST_ACCOUNTS), beside the secret list; and the test list alone
     {
@@ -195,7 +196,7 @@ const mf = new Miniflare(convertV4MiniflareOptions({
       durableObjects: { SYNC_ACCOUNT: { className: "SyncAccount", useSQLite: true }, SYNC_DOC: { className: "SyncDoc", useSQLite: true } },
       routes: ["testlist.test/*"],
       outboundService: cocalc,
-      ratelimits: { SYNC_PREAUTH: { namespace_id: "1011", simple: { limit: 100000, period: 60 } } },
+      ratelimits: { SYNC_PREAUTH: { namespace_id: "1011", simple: { limit: 100000, period: 60 } }, SYNC_INGRESS_IP: { namespace_id: "81011", simple: { limit: 1000000, period: 60 } }, SYNC_ACCOUNT_INGRESS: { namespace_id: "91011", simple: { limit: 1000000, period: 60 } } },
     },
     {
       ...base,
@@ -204,7 +205,7 @@ const mf = new Miniflare(convertV4MiniflareOptions({
       durableObjects: { SYNC_ACCOUNT: { className: "SyncAccount", useSQLite: true }, SYNC_DOC: { className: "SyncDoc", useSQLite: true } },
       routes: ["testonly.test/*"],
       outboundService: cocalc,
-      ratelimits: { SYNC_PREAUTH: { namespace_id: "1012", simple: { limit: 100000, period: 60 } } },
+      ratelimits: { SYNC_PREAUTH: { namespace_id: "1012", simple: { limit: 100000, period: 60 } }, SYNC_INGRESS_IP: { namespace_id: "81012", simple: { limit: 1000000, period: 60 } }, SYNC_ACCOUNT_INGRESS: { namespace_id: "91012", simple: { limit: 1000000, period: 60 } } },
     },
     // the same code with no sync bindings, as production is today
     { ...base, name: "prod", bindings: shareBindings, routes: ["prod.test/*"] },
@@ -301,14 +302,14 @@ const payloads = (item) => {
   ok(ej.status === 200 && bj.state === "active" && bj.held === undefined, "a Worker without the test entry ignores the seams' bindings: the hold-enable seam bound for this account does nothing");
   const sn = await signIn(A, "https://nolimit.test");
   r = await fetchAt("https://nolimit.test", "/api/sync/v1/enable", { method: "POST", headers: { cookie: sn, origin: "https://nolimit.test", "content-type": "application/json" }, body: "{}" });
-  ok(r.status === 404, "with the objects bound but no pre-authentication limit, sync is off too");
-  // the limit comes before any session is read: requests with no session get 429, not 401, once it is used up
+  ok(r.status === 404, "with the objects bound but none of the three limits, sync is off too");
+  // requests with no session count against the failure limit: past it they get 429, not 401
   await clearOfMinuteEdge();
   const codes = [];
   for (let i = 0; i < 5; i++) codes.push((await fetchAt("https://tight.test", "/api/sync/v1/enable", { method: "POST", headers: { origin: "https://tight.test", "content-type": "application/json", "cf-connecting-ip": "203.0.113.9" }, body: "{}" })).status);
-  ok(codes.join() === "401,401,401,429,429", "the pre-authentication limit is per IP and before the session check: " + codes.join());
+  ok(codes.join() === "401,401,401,429,429", "failures (no session) count against a limit per IP, and past it get 429: " + codes.join());
   const r429 = await (await fetchAt("https://tight.test", "/api/sync/v1/enable", { method: "POST", headers: { origin: "https://tight.test", "content-type": "application/json", "cf-connecting-ip": "203.0.113.9" }, body: "{}" })).json();
-  ok(r429.error === "too many requests" && r429.retry_after === 60_000, "and the 429 says how long to wait: the limit's minute (LIMIT-SYNC-STATUS-1): " + JSON.stringify(r429));
+  ok(r429.error === "rate" && r429.limit === "failed_sync_per_ip" && r429.retry_after === 60_000, "and the 429 names the failure limit and says how long to wait: the limit's minute (LIMIT-SYNC-STATUS-1): " + JSON.stringify(r429));
   r = await fetchAt("https://tight.test", "/api/sync/v1/enable", { method: "POST", headers: { origin: "https://tight.test", "content-type": "application/json", "cf-connecting-ip": "203.0.113.10" }, body: "{}" });
   ok(r.status === 401, "another IP has its own limit");
   const sa = await signIn(A);
@@ -1111,22 +1112,35 @@ const signedGet = (key, path, ts = Math.floor(Date.now() / 1000)) => fetchAt(SIT
   const huge = "x".repeat(5000);
   let r = await fetchAt(SITE, "/api/admin/limits", { method: "POST", headers: { "content-type": "application/json", "content-length": String(huge.length) }, body: huge });
   ok(r.status === 413, "an oversized notice is refused by its Content-Length, before it is read");
-  // (a body with no Content-Length: a stream)
-  const stream = () => new ReadableStream({ start(c) { for (let i = 0; i < 10; i++) c.enqueue(new TextEncoder().encode(huge)); c.close(); } });
-  r = await fetchAt(SITE, "/api/admin/limits", { method: "POST", headers: { "content-type": "application/json" }, body: stream(), duplex: "half" });
-  ok(r.status === 411, "a notice with no Content-Length is refused before it is read (" + r.status + ")");
+  // (a body with no Content-Length (chunked), sent with node:http to the runtime's own socket: its headers only, the
+  // body held back, so the gate must answer from the headers alone. A body sent at once was cut off by that early
+  // answer, and fetch() could fail with the reset (write ECONNRESET) instead of returning it; a gate that waited for the
+  // body gets none, and its answer is given up after 10 s)
+  const noLength = async (path) => {
+    const u = await mf.ready;
+    return new Promise((resolve) => {
+      let done = false;
+      const end = (v) => { if (!done) { done = true; clearTimeout(t); req.destroy(); resolve(v); } };
+      const req = request(new URL(path, u), { method: "POST", headers: { host: new URL(SITE).host, "content-type": "application/json", "transfer-encoding": "chunked" } }, (res) => { res.resume(); end(res.statusCode); });
+      const t = setTimeout(() => end("no answer in 10 s"), 10_000);
+      req.on("error", (e) => end("error " + e.code));
+      req.flushHeaders();
+    });
+  };
+  const s0 = await noLength("/api/admin/limits");
+  ok(s0 === 411, "a notice with no Content-Length is refused before it is read, from its headers alone (" + s0 + ")");
   r = await fetchAt(SITE, "/api/admin/purge", { method: "POST", headers: { "content-type": "application/json", "content-length": String(huge.length) }, body: huge });
   ok(r.status === 413, "so is an oversized purge, before sync or sharing read it");
   // (share-purge-411: sync's gate answers as sharing's adminLength does, for both its admin POSTs; the lengths a
-  // client can actually send: none (a stream), 0 (no body), 4096, 4097, 5000. Those the runtime refuses or rewrites
+  // client can actually send: none (chunked, sent as headers only), 0 (no body), 4096, 4097, 5000. Those the runtime refuses or rewrites
   // before the Worker ("+10", "0x10", ...) are adminLength's own cases, in web/share/test-share.mjs)
   // (adminLength's answers for these, as CLEARed at core 2f058642; that the gate calls it is checked below)
-  const sent = [["none", () => ({ body: stream(), duplex: "half" }), 411], ["0", () => ({ body: "" }), 411], ["4096", () => ({ body: "x".repeat(4096) }), null],
+  const sent = [["none", null, 411], ["0", () => ({ body: "" }), 411], ["4096", () => ({ body: "x".repeat(4096) }), null],
     ["4097", () => ({ body: "x".repeat(4097) }), 413], ["5000", () => ({ body: huge }), 413]];
   const got = [];
   for (const route of ["/api/admin/limits", "/api/admin/purge"])
     for (const [name, init, want] of sent) {
-      const s = (await fetchAt(SITE, route, { method: "POST", headers: { "content-type": "application/json" }, ...init() })).status;
+      const s = init ? (await fetchAt(SITE, route, { method: "POST", headers: { "content-type": "application/json" }, ...init() })).status : await noLength(route);
       // (null: past the gate, so refused by its signature instead)
       got.push({ route, name, s, want, same: want === null ? s === 401 : s === want });
     }

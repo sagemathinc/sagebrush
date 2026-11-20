@@ -4,7 +4,7 @@
 //! 64-bit limbs (von zur Gathen and Gerhard, section 5.6).
 
 use crate::nmod::Modulus;
-use sagebrush_bigint::{BigInt, BigUint, Sign};
+use sagebrush_bigint::{BigInt, Sign};
 
 pub struct MultiCrt {
     pub mods: Vec<Modulus>,
@@ -114,7 +114,8 @@ pub fn crt_bytes(k: usize, prime_bits: u64) -> Option<CrtBytes> {
     let prod_half = times(2, vec_of(q_row, 8)?)?;
     let resident = q.checked_add(pm)?.checked_add(small)?.checked_add(prod_half)?;
     let construction = vec_of(q_row, 8)?.checked_add(vec_of(grown(lp)?, 8)?)?;
-    // lo, hi (u128); x, t, sub's output; to_big's bytes; the result (a
+    // lo, hi (u128); x, t, sub's output; to_big's bytes (32-bit targets
+    // only: 64-bit ones build from the limbs); the result (a
     // BigInt of lp + 1 words with dashu's default capacity n + n/8 + 2)
     let n2 = lp.checked_add(2)?;
     let words = lp.checked_add(1)?;
@@ -127,8 +128,7 @@ pub fn crt_bytes(k: usize, prime_bits: u64) -> Option<CrtBytes> {
 }
 
 fn to_big(w: &[u64], neg: bool) -> BigInt {
-    let bytes: Vec<u8> = w.iter().flat_map(|x| x.to_le_bytes()).collect();
-    BigInt::from_biguint(if neg { Sign::Minus } else { Sign::Plus }, BigUint::from_bytes_le(&bytes))
+    sagebrush_bigint::from_limbs(neg, w)
 }
 
 impl MultiCrt {

@@ -81,7 +81,10 @@ for (const m of readdirSync(join(here, "migrations")).filter((f) => f.endsWith("
   for (const s of readFileSync(join(here, "migrations", m), "utf8").replace(/--.*$/gm, "").split(";").map((s) => s.trim()).filter(Boolean)) await db.prepare(s).run();
 
 // (each Miniflare answer through web/miniflare-dispatch.mjs: its body read at once, S4d)
-const fetchSite = (path, init = {}) => dispatch(mf, SITE + path, { redirect: "manual", ...init });
+// (every answer of the share API's and the files Worker's in this run, kept for the never-indexed check at the end)
+const answered = [];
+const kept = (what) => (r) => (answered.push([what, r.status, r.headers.get("x-robots-tag")]), r);
+const fetchSite = (path, init = {}) => dispatch(mf, SITE + path, { redirect: "manual", ...init }).then(kept(`${init.method ?? "GET"} ${path.split("?")[0]}`));
 const sessionOf = (r) => (r.headers.getSetCookie?.() ?? []).map((c) => c.split(";")[0]).find((c) => c.startsWith("__Host-sb_session="));
 
 async function signIn(account_id, { verified = true, ret = "/x" } = {}) {
@@ -156,7 +159,7 @@ async function upload(c, files, title = "T") {
 const keyOf = async (account, h) => (await db.prepare("SELECT key FROM holdings WHERE account_id = ?1 AND sha256 = ?2").bind(account, h).first())?.key ?? null;
 const stored = async (key) => !!key && !!(await bucket.head(key));
 const tick = async () => (await mf.getWorker()).scheduled({ cron: "17 3 * * *" });
-const fileAt = (col, h, init) => dispatch(mf, `${FILES}/c/${col}/${h}`, init);
+const fileAt = (col, h, init) => dispatch(mf, `${FILES}/c/${col}/${h}`, init).then(kept(`${init?.method ?? "GET"} files /c/`));
 const a = api((await signIn(A)).session);
 fake.limits.set(B, { tier: "member", storage_bytes: 10_000, max_file_bytes: 5_000, private_links: false });
 const b = api((await signIn(B)).session);
@@ -224,6 +227,19 @@ for (const ret of ["/\t/evil.example/proof", "/\n/evil.example/", "/\r/evil.exam
 {
   const { cb } = await signIn(A, { ret: "/s/abc?x=1#y" });
   ok(cb.headers.get("location") === "/s/abc?x=1#y", "an ordinary return path is kept");
+}
+{
+  // (an account of its own: its sign-ins don't evict A's sessions, SESSIONS_MAX)
+  const R = "52525252-5252-4252-8252-525252525252";
+  const { r, cb } = await signIn(R, { ret: "/?share#m=sage&z=abc-_123" });
+  // (the sign-in's state cookie, its payload before the MAC: base64url JSON, whose `ret` is the return kept)
+  const oauth = (r.headers.getSetCookie().find((c) => c.startsWith("__Host-sb_oauth=")) ?? "").split(";")[0].slice("__Host-sb_oauth=".length);
+  const kept = JSON.parse(Buffer.from(oauth.split(".")[0], "base64url").toString("utf8")).ret;
+  ok(kept === "/?share" && cb.headers.get("location") === "/?share", `a quick link's cells in the return are dropped: not in the sign-in's cookie (${JSON.stringify(kept)}), nor in the redirect back`);
+  for (const [ret, want] of [["/?share#c=eyJ4", "/?share"], ["/docs/storage#leaves", "/docs/storage#leaves"], ["/#m=sage", "/#m=sage"]]) {
+    const { cb: c2 } = await signIn(R, { ret });
+    ok(c2.headers.get("location") === want, `the return ${ret}: ${want}`);
+  }
 }
 
 // ---- validation and limits
@@ -750,23 +766,23 @@ async function purgeStatus(rid) {
     ok(a0 === 12_000 && a1 === 2000 && a2 === 0 && young === 5, `S10 12,000 receipts past their days: 10,000 removed by one run (20 pages of 500), the rest by the next; 5 younger ones stay (${a0} -> ${a1} -> ${a2}, young ${young})`);
   }
 
-  // S11 (daybreak3's S2): a Worker rolled back to before this change (b06b01b7's share server, from git history),
+  // S11 (daybreak3's S2): a Worker rolled back to before this change (07b50cf5's share server, from git history),
   // and this change's page client (uploadCollection, bundled as the page is): the upload fails, and the old server
   // never makes an empty collection, as nothing reaches the path that would.  Without that history (a shallow
   // clone, as in CI) it is skipped, saying so; test-upload.mjs's U5 checks the same against the old routes' answers.
   {
     let dir = null;
     try {
-      execFileSync("git", ["cat-file", "-e", "b06b01b7^{commit}"], { cwd: here, stdio: "ignore" });
+      execFileSync("git", ["cat-file", "-e", "07b50cf5^{commit}"], { cwd: here, stdio: "ignore" });
       const { mkdtempSync, writeFileSync } = await import("node:fs");
       const { tmpdir } = await import("node:os");
       dir = mkdtempSync(join(tmpdir(), "share-old-"));
-      for (const f of ["server.ts", "files.ts", "test-entry.ts"]) writeFileSync(join(dir, f), execFileSync("git", ["show", `b06b01b7:web/share/${f}`], { cwd: here }));
+      for (const f of ["server.ts", "files.ts", "test-entry.ts"]) writeFileSync(join(dir, f), execFileSync("git", ["show", `07b50cf5:web/share/${f}`], { cwd: here }));
     } catch { dir = null; }
     // (and only with this change's page client: in a two-phase rollout's first phase, the page is still the older one)
     const newClient = readFileSync(join(here, "../share-client/upload.ts"), "utf8").includes("/api/share/first-upload");
     if (!newClient) console.log("SKIP S11: the page client here predates /api/share/first-upload (the rollout's server-first phase)");
-    else if (!dir) console.log("SKIP S11: no git history for b06b01b7 here (a shallow clone); U5 in test-upload.mjs covers the client against the old routes");
+    else if (!dir) console.log("SKIP S11: no git history for 07b50cf5 here (a shallow clone); U5 in test-upload.mjs covers the client against the old routes");
     else {
       const oldScript = execFileSync("bun", ["build", join(dir, "test-entry.ts"), "--format", "esm", "--target", "browser"], { encoding: "utf8" });
       const m3 = new Miniflare(convertV4MiniflareOptions({ workers: [{ name: "old-share", modules: true, script: oldScript, compatibilityDate: "2026-10-01", d1Databases: ["SHARE_DB"], r2Buckets: ["SHARE_BUCKET"], bindings, outboundService: cocalc }] }));
@@ -789,7 +805,7 @@ async function purgeStatus(rid) {
       globalThis.location = realLocation;
       const n = (await d3.prepare("SELECT COUNT(*) AS n FROM collections WHERE owner = ?1").bind(O).first()).n;
       await m3.dispose();
-      ok(dev.status === 200 && !!cookie && e instanceof Error && n === 0 && !paths.includes("POST /api/share/collections") && paths.includes("POST /api/share/first-upload"), `S11 this page's client against b06b01b7's server (a rolled-back Worker): the upload fails (${e?.message}), and no collection is made (${n}); requests: ${paths.join(", ")}`);
+      ok(dev.status === 200 && !!cookie && e instanceof Error && n === 0 && !paths.includes("POST /api/share/collections") && paths.includes("POST /api/share/first-upload"), `S11 this page's client against 07b50cf5's server (a rolled-back Worker): the upload fails (${e?.message}), and no collection is made (${n}); requests: ${paths.join(", ")}`);
     }
   }
 
@@ -814,6 +830,138 @@ async function purgeStatus(rid) {
     await m2.dispose();
     ok(before === after && before.includes("bbbbbbbbbbbb"), "S7b a database at 0004 with collections, then 0005: the collections are unchanged");
   }
+}
+
+// ---- a version's byline: the publisher types any names, or none; it is stored in the version's
+// manifest as typed (trimmed), never taken from or checked against an account; plain text on one line, a bounded length
+{
+  const nbA = Buffer.from('{"cells": [{"cell_type": "markdown", "source": "byline"}]}');
+  const hA = sha(nbA);
+  await a.post("/api/share/check", { blobs: [{ sha256: hA, size: nbA.length }] });
+  await a.put(`/api/share/blob/${hA}`, nbA);
+  const files = [{ path: "b.ipynb", sha256: hA, size: nbA.length }];
+  const attempt = "b".repeat(32);
+  const made = await a.post("/api/share/first-upload", { title: "Bylines", license: "MIT", author: "  Ada Lovelace and Alan Turing  ", files, attempt });
+  const mj = await made.json();
+  const id = mj.collection;
+  const manifestOf = async (at) => (await (await fetchSite(`/api/share/c/${id}${at ? `?at=${at.slice(0, 16)}` : ""}`)).json()).manifest;
+  ok(made.status === 201 && (await manifestOf()).author === "Ada Lovelace and Alan Turing", "a byline is stored in the version's manifest as typed, trimmed: " + JSON.stringify((await manifestOf()).author));
+  // (a retry of the same attempt: the same byline is the same request; another byline is another)
+  const again = await a.post("/api/share/first-upload", { title: "Bylines", license: "MIT", author: "Ada Lovelace and Alan Turing", files, attempt });
+  const other = await a.post("/api/share/first-upload", { title: "Bylines", license: "MIT", author: "Someone else", files, attempt });
+  ok(again.status === 200 && (await again.json()).version === mj.version && other.status === 409, `a retry with the same byline gets its share back (${again.status}); with another, it is refused (${other.status})`);
+  // (each version has its own: none when left empty, or not sent)
+  const v = (author) => a.post(`/api/share/collections/${id}/versions`, { files, license: "MIT", ...(author === undefined ? {} : { author }) });
+  const empty = await (await v("   ")).json();
+  ok(!("author" in (await manifestOf(empty.version))), "an empty byline is none: the version's manifest has no author");
+  const named = await (await v("Ada")).json();
+  const none = await (await v(undefined)).json();
+  ok((await manifestOf(named.version)).author === "Ada" && !("author" in (await manifestOf(none.version))) && (await manifestOf(mj.version)).author === "Ada Lovelace and Alan Turing", "each version keeps its own byline; one sent without any has none");
+  const nul = await v(null);
+  ok(nul.status === 201 && !("author" in (await manifestOf((await nul.json()).version))), "a null byline is none");
+  // (refused: too long, more than one line or with control characters, not text; nothing made)
+  const count = async () => (await db.prepare("SELECT COUNT(*) AS n FROM versions WHERE collection = ?1").bind(id).first()).n;
+  const before = await count();
+  const bad = [];
+  for (const [what, author] of [["201 characters", "x".repeat(201)], ["a line break", "Ada\nAlan"], ["a tab", "Ada\tAlan"], ["a NUL", "Ada\u0000"], ["a number", 7], ["a list", ["Ada"]]]) {
+    const r = await v(author);
+    bad.push(`${what}: ${r.status} ${(await r.json()).error ?? ""}`);
+  }
+  ok(bad.every((x) => / 400 author: /.test(" " + x.split(": ").slice(1).join(": "))) && (await count()) === before, "a byline that is too long, not one line, or not text is refused (400), and makes no version: " + bad.join("; "));
+  ok((await v("y".repeat(200))).status === 201, "...and one of exactly 200 characters is kept");
+  // (never the account's: a version published with no byline says nothing of who published it)
+  ok(!JSON.stringify(await manifestOf(none.version)).includes("a@example.com") && !JSON.stringify(await manifestOf(none.version)).includes("Test"), "a version with no byline names no one: no account name or email in its manifest");
+}
+
+// ---- what sharing is for (William, Nov 12): one person sends a link to another, or a tweet does to many. A share is
+// never indexed by a search engine, publishing needs a signed-in account, and nothing lists shares: a share is reached
+// by its link alone
+{
+  const N = "noindex, nofollow";
+  const nbN = Buffer.from('{"cells": [{"cell_type": "code", "source": "1"}]}');
+  const { col: idN, v: vN } = await upload(a, [["n.ipynb", nbN]], "Never indexed");
+  const verN = (await vN.json()).version;
+  const h = sha(nbN);
+  // (anonymous reads: the manifest, an older version's, and its file, with no session at all)
+  const g = await fetchSite(`/api/share/c/${idN}`);
+  const gj = await g.json();
+  const gat = await fetchSite(`/api/share/c/${idN}?at=${verN.slice(0, 16)}`);
+  ok(g.status === 200 && gj.manifest.title === "Never indexed" && gat.status === 200 && (await gat.json()).version === verN, "anyone, signed out, reads a share's manifest and a pinned version's");
+  ok(g.headers.get("x-robots-tag") === N && gat.headers.get("x-robots-tag") === N, "...and both say X-Robots-Tag: noindex, nofollow");
+  // (the files Worker: every kind of answer it gives)
+  const etag = `"${h}"`;
+  const fr = {
+    get: await fileAt(idN, h),
+    head: await fileAt(idN, h, { method: "HEAD" }),
+    range: await fileAt(idN, h, { headers: { range: "bytes=0-3" } }),
+    notModified: await fileAt(idN, h, { headers: { "if-none-match": etag } }),
+    badRange: await fileAt(idN, h, { headers: { range: "bytes=9999-" } }),
+    post: await fileAt(idN, h, { method: "POST" }),
+    options: await fileAt(idN, h, { method: "OPTIONS" }),
+    unknown: await fileAt(idN, "0".repeat(64)),
+    otherPath: await dispatch(mf, `${FILES}/robots.txt`).then(kept("GET files /robots.txt")),
+  };
+  const fs = Object.fromEntries(Object.entries(fr).map(([k, r]) => [k, [r.status, r.headers.get("x-robots-tag")]]));
+  ok(JSON.stringify(fs) === JSON.stringify({ get: [200, N], head: [200, N], range: [206, N], notModified: [304, N], badRange: [416, N], post: [405, N], options: [204, N], unknown: [404, N], otherPath: [404, N] }), "the files Worker says noindex, nofollow on a file, HEAD, a range, a 304, a bad range, a POST, OPTIONS, an unknown file and any other path: " + JSON.stringify(fs));
+  // (sign-in pages and errors too)
+  const login = await fetchSite("/auth/login");
+  const unknownC = await fetchSite("/api/share/c/zzzzzzzzzzzz");
+  ok(login.status === 302 && login.headers.get("x-robots-tag") === N && unknownC.status === 404 && unknownC.headers.get("x-robots-tag") === N, "a sign-in redirect and an unknown share's 404 say it too");
+
+  // (publishing needs a signed-in account: every route that writes, signed out (no session, or a session that isn't
+  // one), is refused with 401 and changes nothing, in D1 or in R2; the request otherwise as a page would send it)
+  const TABLES = ["collections", "versions", "version_blobs", "holdings", "reservations", "upload_receipts", "r2_deletes", "accounts", "sessions"];
+  const state = async () => {
+    const t = {};
+    for (const n of TABLES) t[n] = (await db.prepare(`SELECT * FROM ${n}`).all()).results;
+    const keys = [];
+    let c;
+    do { const l = await bucket.list({ cursor: c }); keys.push(...l.objects.map((o) => o.key)); c = l.truncated ? l.cursor : undefined; } while (c);
+    return JSON.stringify({ t, keys: keys.sort() });
+  };
+  const fresh = Buffer.from("never stored");
+  const files = [{ path: "n.ipynb", sha256: h, size: nbN.length }];
+  const writes = [
+    ["POST", "/api/share/first-upload", { title: "x", license: "MIT", files, attempt: "a".repeat(32) }],
+    ["POST", "/api/share/collections", { title: "x" }],
+    ["POST", "/api/share/check", { blobs: [{ sha256: sha(fresh), size: fresh.length }] }],
+    ["PUT", `/api/share/blob/${sha(fresh)}`, fresh],
+    ["POST", `/api/share/collections/${idN}/versions`, { files, license: "MIT" }],
+    ["DELETE", `/api/share/collections/${idN}`, null],
+    ["POST", "/api/share/delete-everything", { confirm: "delete" }],
+  ];
+  const before = await state();
+  const refused = [];
+  for (const cookie of [null, "__Host-sb_session=" + "x".repeat(43)]) {
+    for (const [method, path, body] of writes) {
+      const headers = { origin: SITE, ...(cookie ? { cookie } : {}), "content-type": Buffer.isBuffer(body) ? "application/octet-stream" : "application/json" };
+      const r = await fetchSite(path, { method, headers, ...(body === null ? {} : { body: Buffer.isBuffer(body) ? body : JSON.stringify(body) }) });
+      refused.push(`${cookie ? "bad session" : "no session"} ${method} ${path.replace(idN, "<id>")}: ${r.status}`);
+    }
+  }
+  ok(refused.every((x) => x.endsWith(": 401")) && refused.length === 14, "signed out, every route that publishes, changes or deletes is refused with 401: " + refused.filter((x) => !x.endsWith(": 401")).join("; "));
+  ok((await state()) === before, "...and changes nothing: every share table and every stored object as before");
+  ok((await fetchSite(`/api/share/c/${idN}`)).status === 200 && (await fileAt(idN, h)).status === 200, "...and the share is still there for anyone with its link");
+
+  // (no listing: Your shares is the signed-in person's own, and only theirs; signed out, nothing)
+  // (another account, signed in now, of its own: the earlier cases' other accounts are signed out or deleted by now)
+  const O = "9b2d6c1e-0000-4000-8000-0000000000aa";
+  fake.limits.set(O, { tier: "member", storage_bytes: 10_000, max_file_bytes: 5_000, private_links: false });
+  const c = api((await signIn(O)).session);
+  const mineA = await (await a.get("/api/share/mine")).json();
+  const rC = await c.get("/api/share/mine");
+  const mineB = rC.status === 200 ? await rC.json() : null;
+  const ids = (m) => (m.collections ?? []).map((x) => x.id);
+  ok(ids(mineA).includes(idN) && !!mineB && !ids(mineB).includes(idN), "Your shares lists the owner's share, never another account's: " + JSON.stringify({ a: ids(mineA).length, other: mineB && ids(mineB) }));
+  ok((await fetchSite("/api/share/mine")).status === 401, "signed out, there is no list at all (401)");
+  const bDel = await c.del(`/api/share/collections/${idN}`);
+  const bVer = await c.post(`/api/share/collections/${idN}/versions`, { files, license: "MIT" });
+  ok(bDel.status === 404 && bVer.status === 404 && (await fetchSite(`/api/share/c/${idN}`)).status === 200, `another account can't delete it or publish a version of it (${bDel.status}, ${bVer.status}); it is unchanged`);
+
+  // (and every answer of this whole run, the share API's and the files Worker's, said noindex, nofollow)
+  const bad = answered.filter((x) => x[2] !== N);
+  const statuses = [...new Set(answered.map((x) => x[1]))].sort();
+  ok(answered.length > 200 && bad.length === 0, `every answer in this run said X-Robots-Tag: noindex, nofollow (${answered.length} answers, statuses ${statuses.join(" ")}): ` + JSON.stringify(bad.slice(0, 5)));
 }
 
 await mf.dispose();

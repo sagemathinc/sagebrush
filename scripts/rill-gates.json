@@ -1,12 +1,16 @@
 {
  "format": 1,
- "note": "Rill's gate inventory (design/rill.md §9): every route scripts/rill-gates.mjs finds in lib/_rill, each with a reviewed decision; a PR that adds a route lists it here.",
+ "note": "Rill's gate inventory (design/rill.md \u00a79): every route scripts/rill-gates.mjs finds in lib/_rill, each with a reviewed decision; a PR that adds a route lists it here.",
  "routes": {
   "builtin:!": {
    "decision": "internal",
    "why": "computes on R values only: no host effect"
   },
   "builtin:!=": {
+   "decision": "internal",
+   "why": "computes on R values only: no host effect"
+  },
+  "builtin:$": {
    "decision": "internal",
    "why": "computes on R values only: no host effect"
   },
@@ -62,9 +66,41 @@
    "decision": "internal",
    "why": "computes on R values only: no host effect"
   },
+  "builtin:[": {
+   "decision": "internal",
+   "why": "computes on R values only: no host effect"
+  },
   "builtin:^": {
    "decision": "internal",
    "why": "computes on R values only: no host effect"
+  },
+  "builtin:as.character": {
+   "decision": "internal",
+   "why": "computes on R values only: no host effect"
+  },
+  "builtin:as.complex": {
+   "decision": "internal",
+   "why": "computes on R values only: no host effect"
+  },
+  "builtin:as.double": {
+   "decision": "internal",
+   "why": "computes on R values only: no host effect"
+  },
+  "builtin:as.integer": {
+   "decision": "internal",
+   "why": "computes on R values only: no host effect"
+  },
+  "builtin:as.logical": {
+   "decision": "internal",
+   "why": "computes on R values only: no host effect"
+  },
+  "builtin:as.numeric": {
+   "decision": "internal",
+   "why": "computes on R values only: no host effect"
+  },
+  "builtin:as.raw": {
+   "decision": "refused",
+   "why": "raw vectors are deferred (A1.2's scope note): an R-level refusal before any effect (gate:raw vectors)"
   },
   "builtin:c": {
    "decision": "internal",
@@ -74,13 +110,101 @@
    "decision": "internal",
    "why": "writes to the session's output only; its file = argument is refused (gate:cat(file =))"
   },
+  "builtin:character": {
+   "decision": "internal",
+   "why": "computes on R values only: no host effect"
+  },
+  "builtin:complex": {
+   "decision": "internal",
+   "why": "computes on R values only: no host effect"
+  },
+  "builtin:double": {
+   "decision": "internal",
+   "why": "computes on R values only: no host effect"
+  },
+  "builtin:integer": {
+   "decision": "internal",
+   "why": "computes on R values only: no host effect"
+  },
   "builtin:invisible": {
    "decision": "internal",
    "why": "computes on R values only: no host effect"
   },
+  "builtin:is.character": {
+   "decision": "internal",
+   "why": "computes on R values only: no host effect"
+  },
+  "builtin:is.complex": {
+   "decision": "internal",
+   "why": "computes on R values only: no host effect"
+  },
+  "builtin:is.double": {
+   "decision": "internal",
+   "why": "computes on R values only: no host effect"
+  },
+  "builtin:is.finite": {
+   "decision": "internal",
+   "why": "computes on R values only: no host effect"
+  },
+  "builtin:is.infinite": {
+   "decision": "internal",
+   "why": "computes on R values only: no host effect"
+  },
+  "builtin:is.integer": {
+   "decision": "internal",
+   "why": "computes on R values only: no host effect"
+  },
+  "builtin:is.logical": {
+   "decision": "internal",
+   "why": "computes on R values only: no host effect"
+  },
+  "builtin:is.na": {
+   "decision": "internal",
+   "why": "computes on R values only: no host effect"
+  },
+  "builtin:is.nan": {
+   "decision": "internal",
+   "why": "computes on R values only: no host effect"
+  },
+  "builtin:is.null": {
+   "decision": "internal",
+   "why": "computes on R values only: no host effect"
+  },
+  "builtin:is.numeric": {
+   "decision": "internal",
+   "why": "computes on R values only: no host effect"
+  },
+  "builtin:is.vector": {
+   "decision": "internal",
+   "why": "computes on R values only: no host effect"
+  },
+  "builtin:length": {
+   "decision": "internal",
+   "why": "computes on R values only: no host effect"
+  },
+  "builtin:logical": {
+   "decision": "internal",
+   "why": "computes on R values only: no host effect"
+  },
+  "builtin:names": {
+   "decision": "internal",
+   "why": "computes on R values only: no host effect"
+  },
+  "builtin:numeric": {
+   "decision": "internal",
+   "why": "computes on R values only: no host effect"
+  },
+  "builtin:options": {
+   "decision": "internal",
+   "why": "sets the session's own print options (digits, scipen), checked as R checks them: no host effect"
+  },
   "builtin:print": {
    "decision": "internal",
    "why": "writes to the session's output only"
+  },
+  "builtin:raw": {
+   "decision": "refused",
+   "why": "raw vectors are deferred (A1.2's scope note): an R-level refusal before any effect (gate:raw vectors)"
   },
   "builtin:|": {
    "decision": "internal",
@@ -94,13 +218,17 @@
    "decision": "refused",
    "why": "a file route: an R error before any effect until Rill's files go through the page's and the CLI's file gates (test/rill.test.ts)"
   },
+  "gate:raw vectors": {
+   "decision": "refused",
+   "why": "raw() and as.raw() refused with Rill's one-line message until a later PR implements raw vectors"
+  },
   "host:_capacity.capacity": {
    "decision": "internal",
-   "why": "reads the host's free-memory figure, for §8.5's reservations"
+   "why": "reads the host's free-memory figure, for \u00a78.5's reservations"
   },
   "host:_capacity.effective_guard_bytes": {
    "decision": "internal",
-   "why": "the allowance from that figure, for §8.5's reservations"
+   "why": "the allowance from that figure, for \u00a78.5's reservations"
   },
   "host:_memguard.SagebrushMemoryError": {
    "decision": "internal",
@@ -130,21 +258,33 @@
    "decision": "internal",
    "why": "arithmetic only"
   },
+  "import:re": {
+   "decision": "internal",
+   "why": "pattern matching on R strings only (as.numeric's number syntax)"
+  },
   "import:sys": {
    "decision": "internal",
    "why": "the output streams only (host:sys.*)"
   },
-  "preflight:c": {
-   "decision": "internal",
-   "why": "c() with names refused before its arguments are evaluated"
+  "preflight:as.raw": {
+   "decision": "refused",
+   "why": "as.raw() refused before any argument is evaluated (gate:raw vectors)"
   },
   "preflight:cat": {
    "decision": "refused",
    "why": "cat's file = and any argument name but sep, refused before any argument is evaluated (gate:cat(file =))"
   },
+  "preflight:options": {
+   "decision": "refused",
+   "why": "options() listing every option, an unnamed argument, or any option but digits and scipen, refused before any argument is evaluated"
+  },
   "preflight:print": {
-   "decision": "internal",
-   "why": "print with anything but one value refused before its arguments are evaluated"
+   "decision": "refused",
+   "why": "print() without x refused before any argument is evaluated (R reaches print.default's digits first, through dispatch Rill doesn't have yet)"
+  },
+  "preflight:raw": {
+   "decision": "refused",
+   "why": "raw() refused before any argument is evaluated (gate:raw vectors)"
   },
   "value:F": {
    "decision": "internal",

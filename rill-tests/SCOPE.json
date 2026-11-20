@@ -11,6 +11,9 @@
   "rill-tests/core/test_2.R",
   "rill-tests/parse/test_6.R",
   "rill-tests/core/test_3.R",
-  "rill-tests/errfmt/test_2.R"
+  "rill-tests/errfmt/test_2.R",
+  "rill-tests/print/test_1.R",
+  "rill-tests/access/test_1.R",
+  "rill-tests/args/test_1.R"
  ]
 }

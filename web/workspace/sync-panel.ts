@@ -1,8 +1,9 @@
 // The Storage panel's Sync section (sync client step 5, plan-step5-sync-ui r4 §1): the switch, turning sync on and
 // off, what the sync left aside, and "Delete my synced data…".
 //
-// - GET /api/sync/v1/status decides the switch; the page never probes with POST enable.  not_allowlisted: hidden;
-//   plan_has_no_sync, cocalc_unreachable, deleted: shown disabled with the server's words (or a plain fallback);
+// - GET /api/sync/v1/status decides the switch; the page never probes with POST enable.  not_allowlisted: hidden, unless
+//   this browser synced before (then said, with the account signed in); plan_has_no_sync, cocalc_unreachable, deleted:
+//   shown disabled with the server's sentence, else the code in plain words (REASON_WORDS), never the code itself;
 //   deleting: "Deleting…"; a status that can't be read: "unknown", never taken as off or on.
 // - One PanelPoll per open panel: at most one request in flight and one timer; the server's delay clamped to
 //   [PANEL.minMs, PANEL.maxMs], else a backoff of 2 s doubling to 60 s, ±20 %; closing aborts the request, clears the
@@ -23,6 +24,8 @@ import { CLIENT, type Refusal } from "./sync-client";
 import { listedSummary } from "./sync-view";
 import { OLD_SYNC_REASON, UNREADABLE_MESSAGE, UNREADABLE_REASON, OldSyncError } from "./sync-old";
 import { learnMore } from "../docs-link";
+import { signInUrl } from "../share-client/upload";
+import { syncConfirmDocs } from "./doc-sync-switch";
 
 export const PANEL = {
   /** the server's delay, clamped to this range */
@@ -38,7 +41,7 @@ export type Status = { available: boolean; reason?: string; state: string; gener
 /** `verified`: the server named the account it computed the answer for (its echo) and it is the session's; an old
  * server names none: the answer is shown, but its limit is not taken and no delete is offered from it.  "mismatch":
  * the echo names another account: never applied, asked again after the poll's backoff (no immediate retry). */
-export type Answer = { ok: true; status: Status; account: string | null; life?: LifeMark; verified: boolean } | { ok: false; why: "network" | "http" | "stale" | "mismatch"; code?: number; retryAfter?: number };
+export type Answer = { ok: true; status: Status; account: string | null; email?: string | null; life?: LifeMark; verified: boolean } | { ok: false; why: "network" | "http" | "stale" | "mismatch"; code?: number; retryAfter?: number };
 
 /** The server's delay as the panel takes it: a finite safe integer of ms, clamped; anything else, none. */
 export function clampDelay(ms: unknown): number | undefined {
@@ -105,11 +108,22 @@ export class PanelPoll {
 }
 
 type Fetch = typeof fetch;
-const fallback: Record<string, string> = {
-  plan_has_no_sync: "Sync isn't available for this account",
+/** The server's reason codes for sync being off or not available, in plain words: the foot says "Sync off: <words>",
+ * the panel the same as a sentence; the code itself only in the foot's tooltip.  A reason in words already (the
+ * client's own: "sign in first") is said as it is; a code not in the table, generic words. */
+export const REASON_WORDS: Record<string, string> = {
+  not_allowlisted: "not available for this account",
+  plan_has_no_sync: "your plan doesn't include sync",
   cocalc_unreachable: "CoCalc can't be reached right now",
-  deleted: "This CoCalc account was deleted",
+  deleted: "this account was deleted",
+  unavailable: "not available right now",
 };
+const CODE = /^[a-z0-9]+(_[a-z0-9]+)*$/;
+export function reasonWords(reason: string): { text: string; code?: string } {
+  if (Object.hasOwn(REASON_WORDS, reason)) return { text: REASON_WORDS[reason], code: reason };
+  return CODE.test(reason) && !/^[a-z]+$/.test(reason) ? { text: REASON_WORDS.unavailable, code: reason } : { text: reason };
+}
+const sentence = (t: string) => t.charAt(0).toUpperCase() + t.slice(1);
 const fmt = (n: number) => (n < 1024 ? `${n} B` : n < 2 ** 20 ? `${(n / 1024).toFixed(1)} KB` : n < 2 ** 30 ? `${(n / 2 ** 20).toFixed(1)} MB` : `${(n / 2 ** 30).toFixed(2)} GB`);
 function h<K extends keyof HTMLElementTagNameMap>(tag: K, props: Record<string, unknown> = {}, ...kids: (Node | string)[]): HTMLElementTagNameMap[K] {
   const el = document.createElement(tag);
@@ -130,10 +144,12 @@ function retryOf(r: Response, body: { retry_after?: unknown } | null): number | 
  * it is asked again (astra3's CORR-PR130-4). */
 export async function askStatus(f: Fetch, signal: AbortSignal): Promise<Answer> {
   try {
+    let email: string | null = null;
     const who = async () => {
       const me = await f("/api/share/me", { credentials: "same-origin", signal });
-      const id = me.ok ? ((await me.json()) as { account_id?: unknown }).account_id : null;
-      return typeof id === "string" ? id : null;
+      const b = me.ok ? ((await me.json()) as { account_id?: unknown; email?: unknown }) : null;
+      email = typeof b?.email === "string" && b.email ? b.email : null;
+      return typeof b?.account_id === "string" ? b.account_id : null;
     };
     const id = await who();
     const r = await f("/api/sync/v1/status", { credentials: "same-origin", signal });
@@ -144,7 +160,7 @@ export async function askStatus(f: Fetch, signal: AbortSignal): Promise<Answer> 
     // (the server's echo: the account it computed this answer for, from the same request's session; a session that
     // went to another account and back across the read (A, B, A) is caught here, astra3's CORR-PR130-4)
     if (typeof status.account === "string" && status.account !== account) return { ok: false, why: "mismatch" };
-    return { ok: true, status, account, verified: typeof status.account === "string" && account !== null };
+    return { ok: true, status, account, email, verified: typeof status.account === "string" && account !== null };
   } catch {
     return { ok: false, why: "network" };
   }
@@ -170,8 +186,12 @@ export function syncSection(w: Workspace, into: HTMLElement, host: SectionHost, 
   const confirmFn = host.confirm ?? ((t: string) => confirm(t)), promptFn = host.prompt ?? ((t: string) => prompt(t));
   const owner = SyncOwner.of(w);
   const sec = h("div", { className: "sync" });
+  // (until sync's status is read: said, never a blank section)
+  sec.append(h("h4", { textContent: "Sync" }), h("p", { className: "note", textContent: "Checking sync…" }));
   into.append(sec);
-  let last: { status: Status; account: string | null; verified: boolean } | null = null;
+  let last: { status: Status; account: string | null; email?: string | null; verified: boolean } | null = null;
+  // (whether this browser synced before (a lease kept): then a sync that is off for the account is said, not hidden)
+  let usedHere = false;
   // (a deletion being followed: its account and generation, until status says off)
   let deleting: { generation: number; account: string } | null = null;
   let note = "";
@@ -201,13 +221,17 @@ export function syncSection(w: Workspace, into: HTMLElement, host: SectionHost, 
     if (!a.ok) {
       last = null;
       const signedOut = a.why === "http" && a.code === 401;
-      sec.replaceChildren(h("h4", { textContent: "Sync" }), h("p", { className: "note", textContent: signedOut ? "Sign in (Share…) to use sync" : "Can't check sync right now" }));
+      // (signed out: sign-in itself, back to this page, never through the share dialog)
+      sec.replaceChildren(h("h4", { textContent: "Sync" }), signedOut
+        ? h("p", { className: "note" }, h("a", { className: "btn", href: signInUrl(location.pathname + location.search + location.hash), textContent: "Sign in" }), " to use sync")
+        : h("p", { className: "note", textContent: "Can't check sync right now" }));
       // (unknown is never off or on: asked again later; a 401 is said and left)
       if (!signedOut) poll.later(a.retryAfter);
       return;
     }
     poll.good();
-    last = { status: a.status, account: a.account, verified: a.verified };
+    last = { status: a.status, account: a.account, email: a.email ?? null, verified: a.verified };
+    if (!a.status.available && a.status.reason === "not_allowlisted") void readLife(w).then((l) => { const was = usedHere; usedHere = l.ns !== null; if (was !== usedHere) draw(); }, () => {});
     const st = a.status;
     // (the plan's limit is the account's: kept for this browser's sync only if its namespace is that account's, so no
     // other account's limit is ever published under it)
@@ -235,8 +259,13 @@ export function syncSection(w: Workspace, into: HTMLElement, host: SectionHost, 
     const st = last.status;
     renderGen++;
     sec.replaceChildren();
-    // (off the allowlist: nothing at all)
-    if (!st.available && st.reason === "not_allowlisted") return;
+    // (off the allowlist: nothing at all, unless this browser synced before: then what changed, and as whom)
+    if (!st.available && st.reason === "not_allowlisted") {
+      if (!usedHere) return;
+      sec.append(h("h4", { textContent: "Sync" }));
+      sec.append(h("p", { className: "note" }, `${st.message ?? `Sync is off here: ${REASON_WORDS.not_allowlisted}`}${last.email ? ` (signed in as ${last.email})` : ""}. `.replace(/\.\. $/, ". "), learnMore("storage#sync-off")));
+      return;
+    }
     sec.append(h("h4", { textContent: "Sync" }));
     if (note) sec.append(h("p", { className: "note", textContent: note }));
     // (one short line, and what it means or what to do in the docs: /docs/storage, web/docs/storage.md)
@@ -255,7 +284,7 @@ export function syncSection(w: Workspace, into: HTMLElement, host: SectionHost, 
       const sw = btn("Turn on sync…", () => {});
       sw.disabled = true;
       sec.append(sw);
-      line(st.message ?? fallback[st.reason ?? ""] ?? "Sync isn't available", "storage#sync");
+      line(st.message ?? (st.reason ? sentence(reasonWords(st.reason).text) : "Sync isn't available"), "storage#sync");
       return;
     }
     if (deleting || st.state === "deleting") {
@@ -268,7 +297,7 @@ export function syncSection(w: Workspace, into: HTMLElement, host: SectionHost, 
     const on = st.state !== "off";
     const here = owner.client !== null || v.s.state !== "off";
     if (!on || !here) {
-      sec.append(btn("Turn on sync…", () => void enable()));
+      sec.append(btn("Turn on sync…", () => void enableOnce()));
       line(on ? "Sync is on for your account, not in this browser." : "Sync your notebooks between your own devices.", "storage#sync");
     } else {
       // (the foot: its count of refused changes not yet looked at is added by the details' read, below; what sync does
@@ -357,6 +386,13 @@ export function syncSection(w: Workspace, into: HTMLElement, host: SectionHost, 
     return applied;
   }
 
+  // (one Turn on at a time: a click while one is asking (its status request, its confirm) does nothing)
+  let enabling = false;
+  async function enableOnce() {
+    if (enabling) return;
+    enabling = true;
+    try { await enable(); } finally { enabling = false; }
+  }
   async function enable() {
     const st = last?.status, bound = last?.account ?? null;
     if (!st) return;
@@ -372,7 +408,8 @@ export function syncSection(w: Workspace, into: HTMLElement, host: SectionHost, 
     // are uploaded again as they are (sync-docs' ruling (5)); said, not counted: @sagebrush's ruling (b); not beside
     // "0 data files")
     const fetched = owner.view().s.used && use.files.count > 0 ? " (files fetched from your other devices included)" : "";
-    if (!confirmFn(`Turn on sync?\n${use.files.count} data file${use.files.count === 1 ? "" : "s"} (${fmt(use.files.bytes)}) will be uploaded${fetched}. Your notebooks and boards are listed; their contents sync in a later step.${lim}${warn}`)) return;
+    const docs = await syncConfirmDocs(location.origin, f);
+    if (!confirmFn(`Turn on sync?\n${use.files.count} data file${use.files.count === 1 ? "" : "s"} (${fmt(use.files.bytes)}) will be uploaded${fetched}. ${docs}${lim}${warn}`)) return;
     // (without the server's precondition: the account read again just before, and the enable not sent if it moved)
     if (!supported) {
       const again = await askStatus(f, new AbortController().signal);
@@ -513,9 +550,18 @@ export function syncSection(w: Workspace, into: HTMLElement, host: SectionHost, 
 
 /** The Files sidebar's sync line ("" hides it): the foot's words while sync is on (with the notebooks', `nb`: readNotebooks); once sync was used here and is
  * off, "Sync off" (and why: "Sync off: your synced data was deleted"); never used here, nothing. */
-export function sidebarLine(s: { state: string; waiting?: number; reason?: string; used?: boolean; lastSynced?: number; full?: boolean }, now = Date.now(), nb?: Notebooks): string {
+export function sidebarLine(s: { state: string; waiting?: number; unsent?: number; unsentMore?: boolean; reason?: string; message?: string; used?: boolean; lastSynced?: number; full?: boolean }, now = Date.now(), nb?: Notebooks): string {
   if (s.state !== "off") return foot(s, now, 0, nb);
-  return s.reason ? `Sync off: ${s.reason}` : s.used ? "Sync off" : "";
+  // (sync on here but not running now: what hasn't gone up is said, never nothing)
+  if (hasUnsent(s)) return unsentWords(s);
+  // (the server's own sentence when it gave one, else the reason in the table's words)
+  if (s.message) return s.message;
+  return s.reason ? `Sync off: ${reasonWords(s.reason).text}` : s.used ? "Sync off" : "";
+}
+/** The foot's tooltip: the server's reason code, when the line says it in words. */
+export function sidebarTitle(s: { state: string; reason?: string }): string | undefined {
+  const code = s.state === "off" && s.reason ? reasonWords(s.reason).code : undefined;
+  return code ? `Sync off (${code}): opens the Storage panel` : undefined;
 }
 /** Notebooks for the foot (2c-3): how many have edits waiting to go up, how many this page's document sync stopped
  * (they won't go up), and whether the waiting ones couldn't be counted (then said without a number). */
@@ -523,7 +569,7 @@ export type Notebooks = { waiting: number; stopped: number; unknown?: boolean };
 /** The foot's words for a snapshot (r2 §2.3); while sync is on, the notebooks' (`nb`: edits waiting, said while
  * offline or syncing, and those that can't sync), and how many changes the server refused that nobody has looked at
  * yet, pointing to their list (the panel's "changes the server refused", below the foot). */
-export function foot(s: { state: string; waiting?: number; reason?: string; lastSynced?: number; full?: boolean }, now = Date.now(), refused = 0, nb?: Notebooks): string {
+export function foot(s: { state: string; waiting?: number; unsent?: number; unsentMore?: boolean; reason?: string; lastSynced?: number; full?: boolean }, now = Date.now(), refused = 0, nb?: Notebooks): string {
   let base = footOf(s, now, nb);
   if (s.state === "off" || base === "Sync off") return base;
   const k = nb?.stopped ?? 0;
@@ -539,15 +585,26 @@ function waitingWords(n: number, nb?: Notebooks): string {
   else if ((nb?.waiting ?? 0) > 0) parts.push(`edits in ${nb!.waiting} notebook${nb!.waiting === 1 ? "" : "s"}`);
   return parts.join(" and ");
 }
-function footOf(s: { state: string; waiting?: number; reason?: string; lastSynced?: number; full?: boolean }, now: number, nb?: Notebooks): string {
-  const n = s.waiting ?? 0;
+const hasUnsent = (s: { unsent?: number; unsentMore?: boolean }) => (s.unsent ?? 0) > 0 || !!s.unsentMore;
+/** This browser's changes not sent, in words ("3 changes not sent"; "1,000 or more changes not sent"; not all read
+ * yet, none found so far: "some changes not sent"). */
+export function unsentWords(s: { unsent?: number; unsentMore?: boolean }): string {
+  const u = s.unsent ?? 0;
+  if (s.unsentMore && u === 0) return "some changes not sent";
+  return s.unsentMore ? `${u.toLocaleString("en-US")} or more changes not sent` : `${u.toLocaleString("en-US")} change${u === 1 ? "" : "s"} not sent`;
+}
+function footOf(s: { state: string; waiting?: number; unsent?: number; unsentMore?: boolean; reason?: string; lastSynced?: number; full?: boolean }, now: number, nb?: Notebooks): string {
+  // (what hasn't gone up: the client's waiting records, or this browser's count of changes not sent, the larger)
+  const u = s.unsent ?? 0, n = Math.max(s.waiting ?? 0, u);
+  const notSent = hasUnsent(s) ? ` · ${unsentWords(s)}` : "";
   if (s.full) return "too many changes waiting to sync";
   switch (s.state) {
-    case "synced": return s.lastSynced ? `Synced · ${ago(now - s.lastSynced)}` : "Synced";
+    // (never "Synced" while a change of this browser hasn't gone up)
+    case "synced": return hasUnsent(s) ? unsentWords(s) : s.lastSynced ? `Synced · ${ago(now - s.lastSynced)}` : "Synced";
     case "syncing": return `Syncing ${waitingWords(n, nb) || `${n} changes`}…`;
     case "offline": return `Offline: ${waitingWords(n, nb) || `${n} changes`} wait`;
-    case "paused": return `Paused: ${s.reason ?? "waiting"}`;
-    case "connecting": case "waiting": return "Connecting…";
+    case "paused": return `Paused: ${s.reason ?? "waiting"}${notSent}`;
+    case "connecting": case "waiting": return `Connecting…${notSent}`;
     default: return "Sync off";
   }
 }

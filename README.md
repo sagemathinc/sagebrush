@@ -12,9 +12,16 @@ in seconds. Every result should come with a status saying whether it is
 *proven* or only heuristic. The design is many small, strong engines that
 share one core, not one huge system.
 
-Status: early, unpublished. Engines for modular symbols and newforms, a_p
-of elliptic curves, polynomials over Z, and class groups and units of number
-fields; a Python front end in the browser with Sage and Magma modes.
+Released versions are on [GitHub's releases
+page](https://github.com/sagemathinc/sagebrush/releases), npm
+([`sagebrush`](https://www.npmjs.com/package/sagebrush)) and PyPI
+([`sagebrush`](https://pypi.org/project/sagebrush/) and
+[`sagebrush-mcp`](https://pypi.org/project/sagebrush-mcp/)).
+[PRODUCT.md](PRODUCT.md) describes Sagebrush Space, the Sagebrush app and the
+Sagebrush engine. Sagebrush includes engines for modular symbols and newforms,
+a_p of elliptic curves, polynomials over Z, and class groups and units of
+number fields, and a Python front end in the browser with Sage and Magma
+modes.
 
 ## Principles
 
@@ -54,7 +61,10 @@ These define what Sagebrush is.
    documented and known to mathematicians, so Sagebrush speaks both. The test
    suites check printed output byte for byte against Sage and Magma
    themselves. Every engine also has a plain-data API (lists, ints, dicts)
-   for programs and AI agents.
+   for programs and AI agents. The Python libraries Sagebrush rewrites
+   (NumPy, parts of SciPy and matplotlib, and others) keep their API but
+   not their bugs: a bug confirmed upstream is fixed as it's found, and
+   each fix names its upstream issue and has a test showing both results.
 7. **Small strong engines, one core.** Many focused engines sharing
    arithmetic and linear algebra, not one monolith.
 
@@ -224,7 +234,10 @@ the file is finalized. pyjs writes UTF-8 with `"\n"` newlines, CPython's
 POSIX defaults.
 
 - **Browser:** [sagebrush.space](https://sagebrush.space) is a notebook and a
-  console running in the page, and nothing is sent to a server. See
+  console whose code runs in the page; running it uploads nothing. Sync,
+  publishing, Push to GitHub, a connected computer, an agent, pictures and files
+  from other sites, and counting use do send data or make requests: see
+  [What leaves this browser](https://sagebrush.space/docs/storage#leaves) and
   [web/README.md](web/README.md).
 - **Command line:** `npx sagebrush`, or one self-contained executable from
   `curl -fsSL https://get.sagebrush.space/install.sh | sh`.
@@ -398,6 +411,7 @@ is `pnpm-lock.yaml`; `npm ci` does not apply) and bun:
 
 ```sh
 pnpm install --frozen-lockfile        # seconds with a warm store
+node scripts/wasm-fetch.mjs           # the four WebAssembly modules wasm/pins.json names (or build them: next line)
 node scripts/build-engine.mjs         # the Rust engine as WebAssembly (35 s on 16 cores)
 pnpm run build:cli                    # build/cli/pyjs.cjs, the single-file CLI (a few seconds)
 bun web/build.ts                      # the notebook page in web/dist (about 17 s)
@@ -406,16 +420,15 @@ pnpm test                             # the Node tests (about 24 min one after a
 
 The engine's Rust toolchain is pinned (`engine/rust-toolchain.toml`, 1.99.1;
 rustup installs it on the first `cargo` command under `engine/`), so that
-the committed `wasm/sagebrush-engine.wasm` is exactly what a fresh build
-gives: CI rebuilds it and fails on master pushes, dispatches and the
-schedule if they differ. Bumping the toolchain is a deliberate pull request
-that commits the rebuilt `wasm/` and `cdn/` files with their size marker.
-The module embeds the crate registry's paths, so a local build reproduces
-the committed bytes only with CI's path:
+a fresh build gives exactly the bytes `wasm/pins.json` pins: CI rebuilds
+the modules and fails on master pushes, dispatches and the schedule if they
+differ. Bumping the toolchain is a deliberate pull request that commits the
+new pins with their size marker. The modules embed the crate registry's
+paths, so a local build reproduces the pinned bytes only with CI's path:
 
 ```sh
 RUSTFLAGS="--remap-path-prefix=${CARGO_HOME:-$HOME/.cargo}=/home/runner/.cargo" node scripts/build-engine.mjs
-cmp wasm/sagebrush-engine.wasm <(git show HEAD:wasm/sagebrush-engine.wasm) && echo identical
+node scripts/wasm-pins.mjs --check   # each module: pinned, or not
 ```
 
 ### The notebook on your computer

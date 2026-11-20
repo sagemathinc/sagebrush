@@ -103,7 +103,10 @@ class _Mixin:
             self.write(line)
 
     def __repr__(self):
-        return "<_io.%s name=%r mode=%r>" % ("TextIOWrapper" if isinstance(self, io.TextIOBase) else "BufferedReader", self.name, self.mode)
+        # (a text file says its encoding too, as CPython's TextIOWrapper)
+        if isinstance(self, io.TextIOBase):
+            return "<_io.TextIOWrapper name=%r mode=%r encoding=%r>" % (self.name, self.mode, self.encoding)
+        return "<_io.BufferedReader name=%r mode=%r>" % (self.name, self.mode)
 
     def __del__(self):
         pass

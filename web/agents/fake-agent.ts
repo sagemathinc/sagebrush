@@ -3,10 +3,9 @@
 // live output, an approval, diffs and artifacts), on a timer, with nothing
 // sent anywhere. Each prompt picks a scenario by its words.
 
-import type { TurnEvent } from "../workspace/agent-chat/events";
+import type { Draft } from "../workspace/agent-chat/events";
 
-// An event without the stream's own fields, which the page assigns.
-export type Draft = TurnEvent extends infer E ? (E extends unknown ? Omit<E, "seq" | "turn_id"> : never) : never;
+export type { Draft };
 
 export interface FakeTurn {
   // stops the turn at its next step; it finishes as interrupted

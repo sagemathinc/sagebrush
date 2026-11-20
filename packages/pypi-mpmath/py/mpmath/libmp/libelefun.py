@@ -1426,3 +1426,22 @@ if BACKEND == 'sage':
         log_int_fixed = _lbmp.log_int_fixed
     except (ImportError, AttributeError):
         print("Warning: Sage imports in libelefun failed")
+elif BACKEND == 'sagebrush':
+    import _sagebrush_mpcore
+    mpf_sqrt = _sagebrush_mpcore.mpf_sqrt
+    mpf_exp = _sagebrush_mpcore.mpf_exp
+    mpf_log = _sagebrush_mpcore.mpf_log
+    mpf_cos = _sagebrush_mpcore.mpf_cos
+    mpf_sin = _sagebrush_mpcore.mpf_sin
+    mpf_pow = _sagebrush_mpcore.mpf_pow
+    exp_fixed = _sagebrush_mpcore.exp_fixed
+    cos_sin_fixed = _sagebrush_mpcore.cos_sin_fixed
+    log_int_fixed = _sagebrush_mpcore.log_int_fixed
+    # (the constants too, so that one memo serves every caller; the mpf
+    # constants are rebuilt, as each holds its fixed-point function)
+    pi_fixed = _sagebrush_mpcore.pi_fixed
+    ln2_fixed = _sagebrush_mpcore.ln2_fixed
+    e_fixed = _sagebrush_mpcore.e_fixed
+    mpf_pi = def_mpf_constant(pi_fixed)
+    mpf_ln2 = def_mpf_constant(ln2_fixed)
+    mpf_e = def_mpf_constant(e_fixed)

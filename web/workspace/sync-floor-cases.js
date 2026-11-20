@@ -1,17 +1,17 @@
 // The force-reload floor rows (plan p0-harness r2, PR 0b; revision 2: P0B-DATA-1, P0B-CODE-1/2): the REAL old front,
-// 98a9f74fb's page (ws.js, built from a clean checkout of it and proved file by file: test-sync-client-ref.mjs,
+// c1df54b2e's page (ws.js, built from a clean checkout of it and proved file by file: test-sync-client-ref.mjs,
 // oldFront), against core's reference server with floors (PR 0), through the runner's front (CASES=floors).  Each row
 // starts and ends with the floors reset (bound 0, served 1) and raises them to bound 1 only by an asserted step; each has
 // a positive witness from the front's log, so no row passes because nothing happened.  A failed check is labelled with
 // its kind: a "precondition" or a "witness" failing in an unmutated run is a STOP (grader N1).
-//   P0-0    it is the old front: its checkout's HEAD is 98a9f74fb, and its own refusalOf maps stale_build to a final
+//   P0-0    it is the old front: its checkout's HEAD is c1df54b2e, and its own refusalOf maps stale_build to a final
 //           `invalid` (the hazard D-1 avoids); the bundle the page loaded is the one built
 //   P0-pos  no floor: the old front syncs as it always has
 //   P0-a    a welcomed old front's op after a raise: refused by a push with no req, then a 4426 close; nothing lost or
 //           final; its reconnects refused before welcome, on its backoff (not a loop)
 //   P0-b    its upload after a raise: one PUT, refused 409 with retry_after 60000, before any op or close; its timer
 //           kept as the server's; pending, not final
-//   P0-c    its REAL document sync (98a9f74fb's DocSync, the notebook journal and its durable l rows): a persisted edit's
+//   P0-c    its REAL document sync (c1df54b2e's DocSync, the notebook journal and its durable l rows): a persisted edit's
 //           batch held across a raise, refused in the commit's own turn (a push, then 4426); after the close and a
 //           refused reconnect its pending rows are the same rows (ids, cseqs, bytes, stored patches), the notebook not
 //           stopped (not final), and nothing stored on the server
@@ -160,7 +160,7 @@ async function p00(row) {
   row.check(prov.head === window.OLD_SHA, `(i) the old front's checkout is at ${window.OLD_SHA}: ${prov.head} (${prov.mode} mode)`, "provenance");
   let e = null;
   try { e = W.refusalOf({ code: "stale_build", message: "Sagebrush was updated: reload this page" }); } catch (x) { e = { threw: String(x) }; }
-  row.check(e?.code === "invalid" && e?.detail?.final === true, `(ii) the page's own refusalOf maps stale_build to invalid, final (the old build's mapping, protocol.ts:118 at 98a9f74fb): ${J({ code: e?.code, detail: e?.detail })}`, "old-mapping");
+  row.check(e?.code === "invalid" && e?.detail?.final === true, `(ii) the page's own refusalOf maps stale_build to invalid, final (the old build's mapping, protocol.ts:118 at c1df54b2e): ${J({ code: e?.code, detail: e?.detail })}`, "old-mapping");
   row.check(typeof prov.built === "string" && prov.served.length >= 1 && prov.served.every((h) => h === prov.built), `the bundle the page loaded is the one built: ${J({ built: prov.built, served: prov.served })}`, "provenance-bundle");
 }
 
@@ -218,8 +218,8 @@ async function p0a(row) {
   const h = helloRefusals(after);
   const inWindow = h.hellos.filter((at) => at < h.hellos[0] + 30_000).length;
   row.check(h.ok && h.refused >= 2, "its reconnects refused before any welcome (a stale_build push, no req, then 4426, for each): " + J({ hellos: h.hellos.length, refused: h.refused, welcomes: h.welcomes }), "witness");
-  row.check(seen.length >= 2 && seen.every((n, i) => i === 0 || n > seen[i - 1]), "backoff: the persisted retry:connect's n strictly increasing (98a9f74fb sync-client.ts:1720, 1726): " + J(seen), "backoff");
-  row.check(inWindow >= 2 && inWindow <= 6, "backoff, not a loop: the hellos in the 30 s from the first, at most 6 (the declared regression guard, from sync-client.ts:59 and 1726-1731 at 98a9f74fb): " + inWindow, "backoff");
+  row.check(seen.length >= 2 && seen.every((n, i) => i === 0 || n > seen[i - 1]), "backoff: the persisted retry:connect's n strictly increasing (c1df54b2e sync-client.ts:1720, 1726): " + J(seen), "backoff");
+  row.check(inWindow >= 2 && inWindow <= 6, "backoff, not a loop: the hellos in the 30 s from the first, at most 6 (the declared regression guard, from sync-client.ts:59 and 1726-1731 at c1df54b2e): " + inWindow, "backoff");
   const opsNow = await hashOf(sendable((await w.ops()).filter((o) => o.seq > from)));
   const k = await kept(w, ns, "/a");
   const refused = (await metaGet(w.ws, `sync:${ns}:refused`)) ?? [];
@@ -254,13 +254,13 @@ async function p0b(row) {
   row.check(iPut >= 0 && !es.slice(0, iPut).some((e) => (e.k === "sent" && e.t === "ops") || e.k === "close"), "order: the 409 before any ops frame and any close: " + J(es.map((e) => e.t ?? e.k)), "order");
   const t = await metaGet(w.ws, `sync:${ns}:retry:upload`);
   row.check(t?.server === true && t?.n === 1 && puts[0] && Math.abs(t.at - (puts[0].at + 60_000)) <= 1000,
-    "data: retry:upload is the server's, {at: PUT + 60000 (±1000), n: 1, server: true} (timerFail(c.ns, \"upload\", res.retryAfter), sync-client.ts:1239 at 98a9f74fb): " + J({ timer: t, put: puts[0]?.at }), "data");
+    "data: retry:upload is the server's, {at: PUT + 60000 (±1000), n: 1, server: true} (timerFail(c.ns, \"upload\", res.retryAfter), sync-client.ts:1239 at c1df54b2e): " + J({ timer: t, put: puts[0]?.at }), "data");
   const k = await kept(w, ns, "/b.txt");
   row.check(!es.some((e) => e.k === "sent" && e.t === "ops") && k.ok, "data: the upload pending, not final (no op sent, its record undecided; 400/413's final, :1223, not taken): " + J(k), "data");
   row.check((await snapshot(row, id)) === snap0, "data: the server's account unchanged since the raise", "data");
 }
 
-/** A notebook's durable doc outbox, as 98a9f74fb's document sync keeps it (journal/rows.js): its pending l rows (each
+/** A notebook's durable doc outbox, as c1df54b2e's document sync keeps it (journal/rows.js): its pending l rows (each
  * row's j, gen, client, cseq and bytes, never its `sent` mark, which a resend rewrites), the stored patch each carries
  * (its envelope in the synced history), and the journal's count and slot */
 async function docOutbox(hdb, id) {
@@ -282,7 +282,7 @@ async function p0c(row) {
   if (!(await reset(row))) return;
   const id = await account(row);
   const w = await workspace(row);
-  // (98a9f74fb's document sync, set up as its own test sets up a device (test-doc-sync.page.js T.init): the journal
+  // (c1df54b2e's document sync, set up as its own test sets up a device (test-doc-sync.page.js T.init): the journal
   // active, docsync on, the notebook store classes, and its DocSync, here handed to its own SyncClient as `docs`)
   W.registerJournalWriter("notebooks");
   W.registerJournalWriter("boards");
@@ -340,7 +340,7 @@ async function p0c(row) {
   const stopped = Object.fromEntries(ds.stopped);
   row.check(J(after.rows) === J(before.rows) && after.patches === before.patches && after.stored && after.lrows === before.lrows && J(after.slot) === J(before.slot),
     "data: the doc outbox unchanged across the refusal, the close and the refused reconnect (the same l rows: j, time, gen, client, cseq, bytes; the same stored patches; the same slot): " + J({ before: before.rows.length, after: after.rows.length, patches: after.patches === before.patches, lrows: [before.lrows, after.lrows] }), "data");
-  row.check(!(nb in stopped) && !ds.events.some((e) => e.t === "stopped" && e.doc === nb), "data: the notebook not stopped, not final (DocSync.stopped, 98a9f74fb doc-sync.ts:123-128, 219-230): " + J(stopped), "data");
+  row.check(!(nb in stopped) && !ds.events.some((e) => e.t === "stopped" && e.doc === nb), "data: the notebook not stopped, not final (DocSync.stopped, c1df54b2e doc-sync.ts:123-128, 219-230): " + J(stopped), "data");
   row.check((await snapshot(row, id)) === snap0, "data: the server's document and account unchanged since the raise (nothing stored)", "data");
 }
 

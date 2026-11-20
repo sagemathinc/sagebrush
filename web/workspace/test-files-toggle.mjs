@@ -147,8 +147,15 @@ try {
   await ev(`(window.__tPrevented = null, addEventListener("keydown", (e) => { if (e.key === "b") window.__tPrevented = e.defaultPrevented; }, { once: true }), 1)`);
   await ctrlB();
   check((await shown()) && (await ev(`window.__tPrevented`)) === true, "Ctrl+B shows them, and the browser's own Ctrl+B is prevented");
+  // (the focus in the files as they hide: it goes to the button, not left in the hidden files)
+  check(await ev(`(() => { const f = ${S}.querySelector("button, [tabindex], a[href], input"); if (!f) return false; f.focus(); return document.activeElement === f; })()`), "a control in the files has the focus");
   await ctrlB();
   check(!(await shown()) && (await ev(`document.activeElement === ${B}`)), "Ctrl+B hides them, and the focus goes to the button (not left in the hidden files)");
+  // (the focus in the document as they hide: it stays there, never moved to the button)
+  await ctrlB();
+  const cell = await ev(`(() => { const t = ${ta}; t.focus(); return document.activeElement === t; })()`);
+  await ctrlB();
+  check(cell && !(await shown()) && (await ev(`document.activeElement === ${ta}`)), "Ctrl+B from a cell hides them and leaves the focus in the cell");
   await ev(`(${B}.hidden = true, 1)`);
   const hid = await ev(`getComputedStyle(${B}).display`);
   await ctrlB();
