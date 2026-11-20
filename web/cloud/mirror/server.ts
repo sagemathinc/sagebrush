@@ -21,11 +21,16 @@
 // before its body is read.  Responses are private, no-store.
 //
 // Inert until bound: every route answers 404 unless MIRROR_ACCOUNT (the object), MIRROR_BUCKET (a private R2 bucket),
-// MIRROR_PREAUTH (the per-IP limit), SHARE_DB, SESSION_KEY and a current KEK (MIRROR_KEK_CURRENT, MIRROR_KEK_V<n>) are
-// all set, so merging this changes no deployment.
+// MIRROR_PREAUTH (the per-IP limit), SHARE_DB, SESSION_KEY, a current KEK (MIRROR_KEK_CURRENT, MIRROR_KEK_V<n>) and
+// BUDGET_CLAIMS "on" are all set and the database has budget_claims (migration 0016), so merging this changes no
+// deployment.  Its object checks the same before it writes a claim.
+//
+// Deploy contract (M3): apply 0016 before setting BUDGET_CLAIMS "on".  Once a claim exists, keep this code deployed (or
+// later code that counts budget_claims): no Worker rollback to before it until every claim row is gone.  Unbinding
+// BUDGET_CLAIMS is safe (counting is by the table, sharingUsed; the mirror goes inert).
 //
 // Bodies, plaintext and keys are never logged; the audit line has counts and positions only.
-import { accountHash, authTier, limits, sessionResult, same, type Ctx, type ShareEnv } from "../share/server.ts";
+import { accountHash, authTier, claimsWritable, limits, sessionResult, same, type Ctx, type ShareEnv } from "../share/server.ts";
 import { MIRROR_CAPS, MIRROR_SCHEMA, canonical, parseBody, LOG_INSTANCE, entryOk, type MirrorEntry } from "../../workspace/agent-chat/mirror-format.ts";
 import { ALG, ENVELOPE, LOCATOR, OVERHEAD, b64url, currentKek, hex, newWrappedDek, nonceOf, open, openDek, seal, sha256Hex, type Header, type KekEnv } from "./crypto.ts";
 import type { MirrorAccount, MirrorCode, R } from "./account.ts";
@@ -68,8 +73,10 @@ const answer = <T>(r: R<T>, ok: (v: T) => Response) => ("error" in r ? err(STATU
 const listOf = (v: string | undefined) => (v ?? "").split(",").map((s) => s.trim()).filter(Boolean);
 const enc = new TextEncoder();
 
-export function mirrorEnabled(env: MirrorSiteEnv): boolean {
-  return !!(env.MIRROR_ACCOUNT && env.MIRROR_BUCKET && env.MIRROR_PREAUTH && env.SHARE_DB && typeof env.SESSION_KEY === "string" && env.SESSION_KEY.length > 0 && currentKek(env));
+export async function mirrorEnabled(env: MirrorSiteEnv): Promise<boolean> {
+  if (!(env.MIRROR_ACCOUNT && env.MIRROR_BUCKET && env.MIRROR_PREAUTH && env.SHARE_DB && typeof env.SESSION_KEY === "string" && env.SESSION_KEY.length > 0 && currentKek(env))) return false;
+  // (and claims writable: BUDGET_CLAIMS "on" and the table there, so every check of the budget counts the mirror's claim)
+  return claimsWritable(env);
 }
 
 // ---- the CSRF token (ruling Q2: derived from SESSION_KEY with its own label)
@@ -142,7 +149,7 @@ export async function handleMirror(req: Request, env: MirrorSiteEnv, ctx: Ctx, h
   const url = new URL(req.url);
   const p = url.pathname;
   if (!p.startsWith("/api/mirror/")) return null;
-  if (!mirrorEnabled(env)) return err(404, "not found");
+  if (!(await mirrorEnabled(env))) return err(404, "not found");
   // (before anything that reads a session: one limit per IP)
   if (!(await env.MIRROR_PREAUTH!.limit({ key: req.headers.get("cf-connecting-ip") ?? "unknown" })).success) return err(429, "rate");
   const m = req.method;

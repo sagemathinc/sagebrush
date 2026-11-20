@@ -10,11 +10,15 @@
 // The Worker: headers x-test-kek-current and x-test-kek-drop (KEK versions, as a rotation would set them),
 // x-test-preauth "deny", x-test-lose-commit (the commit's answer is lost), x-test-replace (after the put, the object is
 // replaced by these bytes, base64), x-test-crash-after-put (the Worker stops after its put: no commit, no abandon),
-// x-test-mirror-down (the account object unreachable, for the purge); /__stream (an append fed a counted body
+// x-test-mirror-down (the account object unreachable, for the purge); x-test-budget-claims "off" (BUDGET_CLAIMS unbound,
+// as a rollback of the binding would leave it); x-test-core (sharing's routes, /__bindpurge and /__scheduled answered by
+// core's share server, web/share, instead of this directory's); /__stream (an append fed a counted body
 // stream); /__read (a read with a counting writer); /__forge (a segment sealed from any plaintext, past the
 // body checks: S6's schema row); /__purge, /__gone (purgeMirror, mirrorGone); /__bindpurge and /__scheduled (sharing's
 // own purge, to its end); /__logs (every console line, for S5's scan).
 import { handleShare, bindPurge, scheduled, type ShareEnv } from "../share/server.ts";
+// (core's share server too, MIT, as the production site runs it: x-test-core sends a request there)
+import * as core from "../../share/server.ts";
 import { handleMirror, purgeMirror, mirrorGone, type MirrorSiteEnv, type Writer } from "./server.ts";
 import { MirrorAccount, type MirrorEnv } from "./account.ts";
 import { ALG, ENVELOPE, hex, nonceOf, openDek, seal, sha256Hex, unb64url } from "./crypto.ts";
@@ -127,6 +131,8 @@ export default {
     let e: Env = { ...env, MIRROR_PREAUTH: { limit: async () => ({ success: h.get("x-test-preauth") !== "deny" }) } };
     if (h.get("x-test-kek-current")) e = { ...e, MIRROR_KEK_CURRENT: h.get("x-test-kek-current")! };
     for (const v of (h.get("x-test-kek-drop") ?? "").split(",").filter(Boolean)) delete e[`MIRROR_KEK_V${v}`];
+    if (h.get("x-test-budget-claims") === "off") delete e.BUDGET_CLAIMS;
+    const isCore = h.get("x-test-core") === "1";
     if (h.get("x-test-mirror-down")) e = { ...e, MIRROR_ACCOUNT: { idFromName: () => ({}), get: () => new Proxy({}, { get: () => async () => { throw new Error("unreachable (test)"); } }) } as unknown as Env["MIRROR_ACCOUNT"] };
     const dm = /^\/__do\/([0-9a-f]{64})(\/__[a-z]+)$/.exec(url.pathname);
     if (dm) {
@@ -146,11 +152,11 @@ export default {
     if (url.pathname === "/__gone" && req.method === "POST") return Response.json({ gone: await mirrorGone(e, ((await req.json()) as { account: string }).account) });
     if (url.pathname === "/__bindpurge" && req.method === "POST") {
       const b = (await req.json()) as { account: string; rid: string; kind?: "admin" | "self" };
-      return Response.json({ r: await bindPurge(e as ShareEnv, b.account, b.rid, b.kind ?? "self") });
+      return Response.json({ r: await (isCore ? core.bindPurge : bindPurge)(e as ShareEnv, b.account, b.rid, b.kind ?? "self") });
     }
     if (url.pathname === "/__scheduled" && req.method === "POST") {
       try {
-        await scheduled(e as ShareEnv);
+        await (isCore ? core.scheduled : scheduled)(e as ShareEnv);
         return Response.json({ ok: true });
       } catch (x) {
         return Response.json({ ok: false, error: String((x as Error).message) });
@@ -246,6 +252,7 @@ export default {
     if (replace !== null) hooks.afterPut = async (key) => void (await env.MIRROR_BUCKET!.put(key, unb64url(replace)));
     if (h.get("x-test-crash-after-put")) hooks.afterPut = async () => { throw new Error("crash (test): after the put"); };
     try {
+      if (isCore) return (await core.handleShare(req, e as ShareEnv, ctx)) ?? new Response("not the API", { status: 404 });
       return (await handleMirror(req, e, ctx, hooks)) ?? (await handleShare(req, e as ShareEnv, ctx)) ?? new Response("not the API", { status: 404 });
     } catch (x) {
       return Response.json({ crashed: String((x as Error).message) }, { status: 500 });

@@ -67,6 +67,9 @@ export interface R2 {
 export interface ShareEnv {
   SHARE_DB?: D1;
   SHARE_BUCKET?: R2;
+  /** "on" once migration 0016 (budget_claims) is applied here: a holder (the log mirror) may then write its claim on the
+   *  storage budget (claimsWritable).  Counting claims doesn't depend on it: wherever the table exists, they count */
+  BUDGET_CLAIMS?: string;
   /** e.g. https://cocalc.ai; with no origin, sign-in is off */
   COCALC_ORIGIN?: string;
   COCALC_CLIENT_SECRET?: string;
@@ -338,12 +341,34 @@ async function limits(env: ShareEnv, who: Who): Promise<Limits | null> {
   }
 }
 
-// (SQL: what sharing holds for account ?1, reservations still running at ?2 included, and every other holder's claim
-// on the same budget (budget_claims, migration 0016); the sync service's claim, CLAIM, is added where sync is on)
+// (SQL: what sharing holds for account ?1, reservations still running at ?2 included; the sync
+// service's claim on the same budget, CLAIM, is added where sync is on)
 export const SHARING_USED = `(SELECT COALESCE(SUM(size), 0) FROM holdings WHERE account_id = ?1)
   + (SELECT COALESCE(SUM(manifest_bytes), 0) FROM versions WHERE owner = ?1)
-  + (SELECT COALESCE(SUM(bytes), 0) FROM reservations WHERE account_id = ?1 AND expires > ?2)
-  + (SELECT COALESCE(SUM(bytes), 0) FROM budget_claims WHERE account_id = ?1)`;
+  + (SELECT COALESCE(SUM(bytes), 0) FROM reservations WHERE account_id = ?1 AND expires > ?2)`;
+/**
+ * Whether other holders' claims on the budget can exist here: whether the database has budget_claims (migration
+ * 0016).  One way: asked of the database until it says yes, never again after (a table is never dropped).  So a
+ * database without 0016 is never read for claims, and once it has the table every check counts every claim in it,
+ * whatever the bindings say: turning BUDGET_CLAIMS off (which only lets a holder such as the log mirror write) can
+ * never leave a claim uncounted.
+ */
+let claimsTable = false;
+export async function budgetClaims(env: { SHARE_DB?: D1 }): Promise<boolean> {
+  if (claimsTable) return true;
+  if (!env.SHARE_DB) return false;
+  const found = !!(await env.SHARE_DB.prepare("SELECT 1 AS x FROM sqlite_master WHERE type = 'table' AND name = 'budget_claims'").first());
+  // (only ever to true: an older probe's "no" that answers after a newer "yes" changes nothing)
+  if (found) claimsTable = true;
+  return claimsTable;
+}
+/** Whether a holder may write a claim here: BUDGET_CLAIMS "on" (a deployment's word that 0016 is applied), and the table there. */
+export async function claimsWritable(env: { SHARE_DB?: D1; BUDGET_CLAIMS?: string }): Promise<boolean> {
+  return env.BUDGET_CLAIMS === "on" && (await budgetClaims(env));
+}
+/** SHARING_USED, and every other holder's claim wherever there can be any (budgetClaims). */
+export const sharingUsed = async (env: { SHARE_DB?: D1 }) =>
+  SHARING_USED + ((await budgetClaims(env)) ? `\n  + (SELECT COALESCE(SUM(bytes), 0) FROM budget_claims WHERE account_id = ?1)` : "");
 /** sharing's clock, in seconds (reservations' expiry) */
 export const nowSeconds = () => now();
 // (the bytes sync has claimed of account ?8's budget (its hash): every byte of it may be in use, so
@@ -351,11 +376,11 @@ export const nowSeconds = () => now();
 // and refuses, §6.1)
 const CLAIM = ` + (SELECT COALESCE(SUM(claim_bytes), 0) FROM sync_accounts WHERE account_hash = ?8 AND state <> 'purged')`;
 // (without sync, ?8 is still named, adding nothing, so every caller binds the same parameters)
-const used = (env: ShareEnv) => SHARING_USED + (env.SYNC_ACCOUNT ? CLAIM : " + 0 * COALESCE(length(?8), 0)");
+const used = async (env: ShareEnv) => (await sharingUsed(env)) + (env.SYNC_ACCOUNT ? CLAIM : " + 0 * COALESCE(length(?8), 0)");
 
 /** What the account's budget has in use: sharing's bytes, and sync's claim where sync is on. */
 async function usage(env: ShareEnv, id: string): Promise<number> {
-  const r = await env.SHARE_DB!.prepare(`SELECT ${used(env)} AS n`).bind(id, now(), null, null, null, null, null, await accountHash(id)).first<{ n: number }>();
+  const r = await env.SHARE_DB!.prepare(`SELECT ${await used(env)} AS n`).bind(id, now(), null, null, null, null, null, await accountHash(id)).first<{ n: number }>();
   return r?.n ?? 0;
 }
 
@@ -417,7 +442,7 @@ async function reserve(env: ShareEnv, who: Who, bytes: number, limit: number, ke
   const t = now();
   const h = await accountHash(who.id);
   try {
-    const r = (await db.batch([...live(db, who), db.prepare(`INSERT INTO reservations (id, account_id, bytes, key, expires) SELECT ?3, ?1, ?4, ?5, ?6 WHERE ${used(env)} + ?4 <= ?7`).bind(who.id, t, rid, bytes, key, t + RESERVE_SECONDS, limit, h)])) as D1Result<unknown>[];
+    const r = (await db.batch([...live(db, who), db.prepare(`INSERT INTO reservations (id, account_id, bytes, key, expires) SELECT ?3, ?1, ?4, ?5, ?6 WHERE ${await used(env)} + ?4 <= ?7`).bind(who.id, t, rid, bytes, key, t + RESERVE_SECONDS, limit, h)])) as D1Result<unknown>[];
     if (r[2]?.meta?.changes === 1) return { id: rid, expires: t + RESERVE_SECONDS };
   } catch {
     return null;
@@ -858,7 +883,7 @@ export async function drain(env: ShareEnv, budget = 50): Promise<void> {
         db.prepare("UPDATE accounts SET deleting = NULL WHERE account_id = ?1 AND NOT EXISTS (SELECT 1 FROM tombstones WHERE account_hash = ?2)").bind(r.account_id, h),
         db.prepare("DELETE FROM limits_cache WHERE account_id = ?1").bind(r.account_id),
         // (other holders' claims on the budget, last: each holder's own data went before this batch)
-        db.prepare("DELETE FROM budget_claims WHERE account_id = ?1").bind(r.account_id),
+        ...((await budgetClaims(env)) ? [db.prepare("DELETE FROM budget_claims WHERE account_id = ?1").bind(r.account_id)] : []),
         db.prepare("UPDATE purges SET status = 'done', finished = ?2, account_id = NULL, lease = NULL WHERE account_hash = ?1 AND status <> 'done' AND kind <> 'collection'").bind(h, now()),
       ]);
     } catch {

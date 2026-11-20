@@ -53,7 +53,7 @@ const fmt = await bundle("../../workspace/agent-chat/mirror-format.ts", "format.
 const cr = await bundle("crypto.ts", "crypto.mjs");
 
 const script = execFileSync("bun", ["build", join(here, "test-entry.ts"), "--format", "esm", "--target", "browser", "--external", "cloudflare:workers"], { encoding: "utf8", maxBuffer: 1 << 26 });
-const bindings = { SESSION_KEY: "session-key", SHARE_DEV: "1", DEV_AUTH_TOKEN: "dev-token", MIRROR_ACCOUNTS: [A, B, D, E, F, G, H, I].join(","), MIRROR_KEK_CURRENT: "1", MIRROR_KEK_V1: KEK1, MIRROR_KEK_V2: KEK2 };
+const bindings = { SESSION_KEY: "session-key", SHARE_DEV: "1", DEV_AUTH_TOKEN: "dev-token", MIRROR_ACCOUNTS: [A, B, D, E, F, G, H, I].join(","), MIRROR_KEK_CURRENT: "1", MIRROR_KEK_V1: KEK1, MIRROR_KEK_V2: KEK2, BUDGET_CLAIMS: "on" };
 const mf = new Miniflare(convertV4MiniflareOptions({
   workers: [{ name: "mirror", modules: true, script, compatibilityDate: "2026-10-01", d1Databases: ["SHARE_DB"], r2Buckets: ["SHARE_BUCKET", "MIRROR_BUCKET"], bindings,
     durableObjects: { MIRROR_ACCOUNT: { className: "TestMirrorAccount", useSQLite: true } } }],
@@ -147,7 +147,7 @@ const appendHeaders = (p, extra = {}) => ({ cookie: p.cookie, origin: SITE, "x-s
 // ---- inert: without any one binding, every route is 404 and nothing is written
 {
   // (the KEK: a current version named but no such secret, or a malformed one)
-  for (const [what, hdr] of [["no current KEK secret", { "x-test-kek-current": "9" }], ["the current KEK dropped", { "x-test-kek-drop": "1" }]]) {
+  for (const [what, hdr] of [["no current KEK secret", { "x-test-kek-current": "9" }], ["the current KEK dropped", { "x-test-kek-drop": "1" }], ["BUDGET_CLAIMS unbound", { "x-test-budget-claims": "off" }]]) {
     const r = await site("/api/mirror/v1/status", { headers: { cookie: pa.cookie, origin: SITE, ...hdr } });
     ok(r.status === 404, `inert: ${what} -> 404 (${r.status})`);
   }
@@ -539,6 +539,56 @@ const pd = await page(D);
     await clock(pd.hash, 0);
   }
   ok(both === 0 && neither === 0, `A2: racing sharing at the edge, exactly one wins each time (both ${both}, neither ${neither})`);
+  // (counting is one way: with BUDGET_CLAIMS unbound after claims exist (a rollback of the binding), sharing, core's and
+  // this directory's, still counts the mirror's claim; the mirror itself is then inert)
+  await alarm(pd.hash);
+  const c = await claimOf(D);
+  const shared = (await db.prepare("SELECT COALESCE(SUM(size), 0) AS n FROM holdings WHERE account_id = ?1").bind(D).first()).n;
+  ok(c > 0, `(the mirror holds a claim: ${c})`);
+  const S = 2000;
+  await limitsRow(D, shared + c + S - 1);
+  for (const [who, hdr] of [["this directory's sharing", {}], ["core's sharing", { "x-test-core": "1" }]]) {
+    const blob = randomBytes(S);
+    const sha = createHash("sha256").update(blob).digest("hex");
+    const r = await site(`/api/share/blob/${sha}`, { method: "PUT", headers: { cookie: pd.cookie, origin: SITE, "content-length": String(S), "x-test-budget-claims": "off", ...hdr }, body: blob });
+    ok(r.status === 413, `A2/gate: BUDGET_CLAIMS off after a claim exists: ${who} still counts it, and refuses what wouldn't fit (${r.status})`);
+  }
+  ok((await site("/api/mirror/v1/status", { headers: { cookie: pd.cookie, origin: SITE, "x-test-budget-claims": "off" } })).status === 404, "A2/gate: and the mirror, the claim's only writer, is inert without it");
+  await limitsRow(D, 10 << 20);
+  // (a cap that comes down: headroom admitted under the old cap is never spent past the new one)
+  await alarm(pd.hash);
+  const st0 = (await state(pd.hash)).streams.find((x) => x.locator === loc);
+  const nx = st0.next_n, sq = st0.last_seq + 3;
+  const big = await pd.append(loc, body(nx, 1, sq));
+  const cBig = await claimOf(D), sBig = await state(pd.hash);
+  ok(big.status === 200 && cBig >= sBig.held + 4 * 1024 * 1024, `downgrade: an append under 10 MiB took its headroom (${big.status}; claim ${cBig}, held ${sBig.held})`);
+  await limitsRow(D, RES - 1); // (below the claim, and below what one more append reserves)
+  const objs0 = (await objects(`acct/${pd.hash}/`)).length;
+  const down = await stream(`/api/mirror/v1/append/${loc}`, 4096, appendHeaders(pd, { "x-sb-mirror-range": `${INST} ${nx + 1} ${nx + 1} ${sq + 3} ${sq + 3}` }), 4096);
+  ok(down.status === 507 && down.pulled === 0 && (await objects(`acct/${pd.hash}/`)).length === objs0 && !(await state(pd.hash)).segments.some((s) => s.locator === loc && s.first_n === nx + 1),
+    `downgrade: an append the old headroom would cover is refused under the lower cap: ${down.status}, ${down.pulled} pulled, no new object`);
+  await invariant(pd, null, "after the downgrade");
+  // (a cap cycle: headroom admitted at 10 MiB; the cap rises to 20 MiB and another holder grows; the cap comes down to
+  // 15 MiB, still above the cap the headroom was admitted under: the append is refused all the same)
+  await limitsRow(D, 10 << 20);
+  await alarm(pd.hash);
+  const st1 = (await state(pd.hash)).streams.find((x) => x.locator === loc);
+  const h1 = await pd.append(loc, body(st1.next_n, 1, st1.last_seq + 3));
+  const c1 = await claimOf(D), held1 = (await state(pd.hash)).held;
+  ok(h1.status === 200 && c1 >= held1 + 4 * 1024 * 1024, `cap cycle: headroom admitted under 10 MiB (${h1.status}; claim ${c1})`);
+  await limitsRow(D, 20 << 20);
+  const sharedNow = (await db.prepare("SELECT COALESCE(SUM(size), 0) AS n FROM holdings WHERE account_id = ?1").bind(D).first()).n;
+  const other = (15 << 20) - sharedNow - held1 - RES + 1; // (with it, one more append can't fit 15 MiB, however the mirror's claim shrinks)
+  await db.prepare("INSERT INTO budget_claims (account_id, holder, bytes) VALUES (?1, 'other', ?2)").bind(D, other).run();
+  await limitsRow(D, 15 << 20);
+  const objs1 = (await objects(`acct/${pd.hash}/`)).length;
+  const cyc = await stream(`/api/mirror/v1/append/${loc}`, 4096, appendHeaders(pd, { "x-sb-mirror-range": `${INST} ${st1.next_n + 1} ${st1.next_n + 1} ${st1.last_seq + 6} ${st1.last_seq + 6}` }), 4096);
+  ok(cyc.status === 507 && cyc.pulled === 0 && (await objects(`acct/${pd.hash}/`)).length === objs1, `cap cycle: 10 -> 20 MiB, another holder grows, 15 MiB: refused (${cyc.status}, ${cyc.pulled} pulled, no new object)`);
+  // (and 10 -> 20 -> 10: the cap back where the headroom was admitted)
+  await limitsRow(D, 10 << 20);
+  const cyc2 = await stream(`/api/mirror/v1/append/${loc}`, 4096, appendHeaders(pd, { "x-sb-mirror-range": `${INST} ${st1.next_n + 1} ${st1.next_n + 1} ${st1.last_seq + 6} ${st1.last_seq + 6}` }), 4096);
+  ok(cyc2.status === 507 && cyc2.pulled === 0 && (await objects(`acct/${pd.hash}/`)).length === objs1, `cap cycle: 10 -> 20 -> 10 MiB with another holder grown: refused (${cyc2.status}, ${cyc2.pulled} pulled)`);
+  await db.prepare("DELETE FROM budget_claims WHERE account_id = ?1 AND holder = 'other'").bind(D).run();
 }
 {
   // (crash cuts on both sides of the raise and the lowering: only ever an overclaim, repaired by the alarm)
@@ -774,6 +824,43 @@ lap('S5a: no plai');
   ok(scanned.every(Boolean), "S5a: no plaintext DEK (hex, base64, raw) in any object's storage, log line or answer");
   const logs = (await (await site("/__logs")).json()).logs.join("\n");
   ok(!logs.includes("message 1") && !logs.includes("PLANTED") && !logs.includes("secret plaintext"), "no body in any log line");
+}
+
+// ---- a database without migration 0016 (production's until it is applied): sharing, core's and this directory's,
+// uploads and purges as before, reading no budget_claims; the mirror stays inert even with BUDGET_CLAIMS "on"
+{
+  const mf0 = new Miniflare(convertV4MiniflareOptions({
+    workers: [{ name: "mirror0", modules: true, script, compatibilityDate: "2026-10-01", d1Databases: ["SHARE_DB"], r2Buckets: ["SHARE_BUCKET", "MIRROR_BUCKET"], bindings,
+      durableObjects: { MIRROR_ACCOUNT: { className: "TestMirrorAccount", useSQLite: true } } }],
+  }));
+  const db0 = await mf0.getD1Database("SHARE_DB");
+  for (const { path: m, name } of migrations()) {
+    if (name.startsWith("0016")) continue;
+    for (const s of readFileSync(m, "utf8").replace(/--.*$/gm, "").split(";").map((s) => s.trim()).filter(Boolean)) await db0.prepare(s).run();
+  }
+  ok(!(await db0.prepare("SELECT 1 AS x FROM sqlite_master WHERE name = 'budget_claims'").first()), "(no budget_claims in this database)");
+  const at0 = (path, init = {}) => dispatch(mf0, SITE + path, { redirect: "manual", ...init });
+  for (const [who, hdr, acct] of [["this directory's", {}, A], ["core's", { "x-test-core": "1" }, B]]) {
+    const r = await at0("/auth/dev", { method: "POST", headers: { origin: SITE, "content-type": "application/json", ...hdr }, body: JSON.stringify({ token: "dev-token", account_id: acct }) });
+    const cookie = (r.headers.getSetCookie?.() ?? []).map((c) => c.split(";")[0]).find((c) => c.startsWith("__Host-sb_session="));
+    const blob = randomBytes(1500);
+    const sha = createHash("sha256").update(blob).digest("hex");
+    const put = await at0(`/api/share/blob/${sha}`, { method: "PUT", headers: { cookie, origin: SITE, "content-length": "1500", ...hdr }, body: blob });
+    const me = await at0("/api/share/me", { headers: { cookie, origin: SITE, ...hdr } });
+    ok(put.status === 200 && me.status === 200, `no 0016: ${who} sharing uploads (${put.status}) and reports usage (${me.status})`);
+    const rid = "p0-" + randomBytes(4).toString("hex");
+    await at0("/__bindpurge", { method: "POST", headers: hdr, body: JSON.stringify({ account: acct, rid, kind: "self" }) });
+    let st;
+    for (let i = 0; i < 5 && st?.status !== "done"; i++) {
+      await at0("/__scheduled", { method: "POST", headers: hdr });
+      st = await db0.prepare("SELECT status FROM purges WHERE request_id = ?1").bind(rid).first();
+    }
+    ok(st?.status === "done", `no 0016: ${who} purge runs to its end (${st?.status})`);
+  }
+  const r0 = await at0("/auth/dev", { method: "POST", headers: { origin: SITE, "content-type": "application/json" }, body: JSON.stringify({ token: "dev-token", account_id: D }) });
+  const c0 = (r0.headers.getSetCookie?.() ?? []).map((c) => c.split(";")[0]).find((c) => c.startsWith("__Host-sb_session="));
+  ok((await at0("/api/mirror/v1/status", { headers: { cookie: c0, origin: SITE } })).status === 404, "no 0016: the mirror is inert even with BUDGET_CLAIMS on (no table, no claim can be written)");
+  await mf0.dispose();
 }
 
 console.log(`${count - failures}/${count} mirror tests passed`);

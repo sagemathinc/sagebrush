@@ -18,10 +18,11 @@
 // is conditional on everything else in the budget plus the new value fitting storage_bytes, and comes before what it
 // pays for; a lowering comes after the bytes are gone, and only ever lowers.  So a crash anywhere leaves at most an
 // overclaim, which the alarm repairs.  The object remembers the value D1 last confirmed (`claimed`): a raise the claim
-// already covers writes nothing, and a commit leaves its lowering to the alarm, LOWER_MS later.  So a conversation that
+// already covers only reads (the whole budget against today's cap), and a commit leaves its lowering to the alarm,
+// LOWER_MS later.  So a conversation that
 // appends turn after turn costs D1 a write now and then, not two each time; the claim stays above what is held.
 import { DurableObject } from "cloudflare:workers";
-import { SHARING_USED } from "../share/server.ts";
+import { SHARING_USED, budgetClaims, claimsWritable } from "../share/server.ts";
 import { KEY_ID, LOCATOR, NONCE_MAX, WRAPPED, ZERO_DIGEST, locatorOf, type Wrapped } from "./crypto.ts";
 import { LOG_INSTANCE, MIRROR_CAPS } from "../../workspace/agent-chat/mirror-format.ts";
 
@@ -49,6 +50,8 @@ export const MIRROR_LIMITS = Object.freeze({
 export interface MirrorEnv {
   SHARE_DB?: D1Database;
   MIRROR_BUCKET?: R2Bucket;
+  /** "on": claims may be written (share/server.ts claimsWritable); checked again here before every raise */
+  BUDGET_CLAIMS?: string;
 }
 
 export type MirrorCode = "forbidden" | "off" | "missing" | "conflict" | "busy" | "limit" | "storage_full" | "mode" | "expired" | "mismatch" | "exhausted" | "invalid";
@@ -185,23 +188,32 @@ export class MirrorAccount extends DurableObject<MirrorEnv> {
   /**
    * Raise the mirror's claim to `held() + extra` (with headroom when that fits too), if everything else in the account's
    * budget plus that fits `limit`: one conditional statement, so a race with sharing or sync lets at most the budget
-   * through.  True if it did, or if the claim D1 last confirmed covers it already.
+   * through.  True if it did, or if the claim D1 last confirmed covers it already and the whole budget is within `limit`.
    */
   private raise(extra: number, limit: number): Promise<boolean> {
     return this.serial(async () => {
       const db = this.env.SHARE_DB;
-      if (!db) return false;
+      // (the one writer of a claim: only where every check of the budget counts it)
+      if (!db || !(await claimsWritable(this.env))) return false;
       const target = this.held() + extra;
-      // (the claim D1 last confirmed covers it already: that claim was within the budget when it was written, and every
-      // other holder has counted it since)
-      const claimed = this.get("claimed");
-      if (claimed !== undefined && Number(claimed) >= target) return true;
       const account = this.get("account")!, hash = this.get("hash")!;
+      // (the claim D1 last confirmed covers it already, and everything in the budget, that claim included, is within
+      // today's cap: one read, no write.  Not otherwise: after a cap comes down, or another holder grew under a higher
+      // one, the conditional below decides, and old headroom is never spent past the current cap)
+      const claimed = this.get("claimed");
+      if (claimed !== undefined && Number(claimed) >= target) {
+        const all = await db.prepare(
+          `SELECT (${SHARING_USED}) + (SELECT COALESCE(SUM(bytes), 0) FROM budget_claims WHERE account_id = ?1)
+             + (SELECT COALESCE(SUM(claim_bytes), 0) FROM sync_accounts WHERE account_hash = ?3 AND state <> 'purged') AS n`,
+        ).bind(account, Math.floor(this.now() / 1000), hash).first<{ n: number }>();
+        if (all && all.n <= limit) return true;
+      }
       // (with headroom if that fits, else exactly: at the budget's edge, a raise is never refused for the headroom)
       for (const want of [target + MIRROR_LIMITS.headroom, target]) {
+        // (everything in the budget but this holder's own row: sharing's bytes, the other holders', sync's claim)
         const r = await db.prepare(
           `INSERT INTO budget_claims (account_id, holder, bytes) SELECT ?1, 'mirror', ?3 WHERE (${SHARING_USED})
-             - (SELECT COALESCE(SUM(bytes), 0) FROM budget_claims WHERE account_id = ?1 AND holder = 'mirror')
+             + (SELECT COALESCE(SUM(bytes), 0) FROM budget_claims WHERE account_id = ?1 AND holder <> 'mirror')
              + (SELECT COALESCE(SUM(claim_bytes), 0) FROM sync_accounts WHERE account_hash = ?5 AND state <> 'purged')
              + ?3 <= ?4
            ON CONFLICT (account_id, holder) DO UPDATE SET bytes = excluded.bytes`,
@@ -219,7 +231,8 @@ export class MirrorAccount extends DurableObject<MirrorEnv> {
     return this.serial(async () => {
       const db = this.env.SHARE_DB;
       const account = this.get("account");
-      if (!db || !account) return;
+      // (a lowering only ever lowers: it needs the table, not the binding)
+      if (!db || !account || !(await budgetClaims(this.env))) return;
       // (forgotten first: if this write's answer is lost, the next raise writes rather than trusting a value D1 may not have)
       this.sql.exec(`DELETE FROM meta WHERE k = 'claimed'`);
       const r = await db.prepare(`UPDATE budget_claims SET bytes = MIN(bytes, ?2) WHERE account_id = ?1 AND holder = 'mirror' RETURNING bytes`).bind(account, this.held()).first<{ bytes: number }>();
@@ -414,7 +427,7 @@ export class MirrorAccount extends DurableObject<MirrorEnv> {
     }
     if (!raised) {
       this.sql.exec(`DELETE FROM reservations WHERE id = ? AND state = 'raising'`, id);
-      return fail("storage_full", "this account's storage is full");
+      return fail("storage_full", "This account does not have enough free storage for this upload.");
     }
     // (turned off, or the conversation deleted, while D1 answered: the reservation went with it)
     if (this.sql.exec(`UPDATE reservations SET state = 'live' WHERE id = ? AND state = 'raising'`, id).rowsWritten !== 1) {
