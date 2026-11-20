@@ -45,7 +45,7 @@ const ok = (c, msg) => { console.log((c ? "ok   " : "FAIL ") + msg); if (!c) fai
 const J = JSON.stringify;
 const MINE = {
   empty: "You haven't shared anything yet.",
-  signIn: "Sign in with CoCalc to see your shares.",
+  signIn: "Sign in to see your shares.",
   cantLoad: "Couldn't load your shares. Try again in a moment.",
   deleteFailed: "Couldn't delete it. Try again in a moment.",
   none: "You have no shares now.",
@@ -82,7 +82,7 @@ try {
   const items = await ev("[...document.querySelectorAll('#filemenu [data-f]')].filter((b) => !b.hidden).map((b) => b.dataset.f)");
   ok(items.indexOf("mine") === items.indexOf("share") + 1 && (await ev("document.querySelector('#filemenu [data-f=\"mine\"]').textContent")) === "Your shares…", "File has Your shares… right under Share… (" + J(items) + ")");
   await openFromMenu();
-  ok((await status()) === MINE.signIn && (await ev("document.querySelector('#sbminedlg a.btn')?.textContent")) === "Sign in with CoCalc", "signed out: board's line, and Sign in with CoCalc");
+  ok((await status()) === MINE.signIn && (await ev("document.querySelector('#sbminedlg a.btn')?.textContent")) === "Sign in", "signed out: board's line, and Sign in");
   ok((await ev(`fetch('/auth/dev', { method: 'POST', headers: {'content-type': 'application/json'}, body: ${J(J({ token: "dev-token", account_id: A }))} }).then((r) => r.status)`)) === 200, "(signs in: dev)");
 
   // ---- 2. none yet

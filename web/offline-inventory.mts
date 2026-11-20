@@ -71,6 +71,9 @@ export function checkStartCoverage(modes: Record<string, readonly string[]>): vo
 /** a library group's item id, by rule; a group no rule covers fails the build (each new group is placed on purpose) */
 export function itemOfGroup(group: string): string {
   if (group.startsWith("pkg-")) return group;
+  // (a Sage-layer module in a group of its own, such as mod-sage-ffmat or mod-sage-ec-ff (web/lib-chunks.mts groupOf):
+  // the Sage item's, so Sage downloaded for offline use has finite-field matrices and curves without "modules")
+  if (group.startsWith("mod-sage-")) return "sage";
   if (group.startsWith("mod-")) return "modules";
   for (const m of MODES) {
     if (m.exact !== undefined ? group === m.exact : group === m.prefix || group.startsWith(m.prefix + "-")) return m.id;

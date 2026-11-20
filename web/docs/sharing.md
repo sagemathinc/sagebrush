@@ -7,7 +7,7 @@ Open **File ▸ Share…** to share a notebook. The window has three tabs: **Lin
 
 On the **Link** tab, **Publish link** puts this notebook on a page of its own at sagebrush.space/s/…, with its outputs and the data files you choose. Anyone with the link can view it, run it in their own browser and copy it. The link is copied for you.
 
-- Publishing needs a CoCalc account: **Sign in with CoCalc** appears in the dialog when you aren't signed in.
+- Publishing needs you to be signed in: **Sign in** appears in the dialog when you aren't.
 - The **Download** tab saves the notebook as an .ipynb file, or with the files it uses as one .zip, to send any way you like; Jupyter or Sagebrush opens it. It needs no account and works on every site.
 - A site that can't publish, such as Sagebrush on your own computer, says so in the dialog and still offers a quick link. Publish from [sagebrush.space](https://sagebrush.space/) instead.
 - **Options** holds the title, the byline, the license, the edit history and the files; its summary line shows what you'll share. The files the notebook's code uses are included for you when Sagebrush can find them. **Add files…** shows them, and its search finds any other file to include.

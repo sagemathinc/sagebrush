@@ -8,7 +8,9 @@ import { imageCandidates, graphicsPathOf, notFoundWhy, relativePath, sniffImage,
 import { splitChunk, PIECE_MAX, CHUNK_MAX, bytes, weight, tooLargeProblem } from "./split.ts";
 import { autoClose } from "./envclose.ts";
 import { tokenizeLine } from "./highlight.ts";
-import { latexOn } from "./boot.ts";
+import { latexOn, latexHereFor, desktopApp, APP_NO_RUN } from "./boot.ts";
+import { latexChecks, LATEX_CHECKS } from "../notebook/selftest-latex.js";
+import { readFileSync } from "node:fs";
 import { RenderGate } from "./gate.ts";
 import { boxClass } from "./boxclass.mjs";
 import { previewHost } from "./preview-host.mjs";
@@ -844,6 +846,21 @@ check("on-site-hosts", latexOn("sagebrush.space", SITE) && latexOn("dev.sagebrus
 check("off-elsewhere", !latexOn("127.0.0.1", SITE) && !latexOn("localhost", SITE) && !latexOn("tauri.localhost", SITE), null);
 check("off-lookalike-hosts", !latexOn("x.dev.sagebrush.space", SITE) && !latexOn("dev.sagebrush.space.evil", SITE) && !latexOn("sagebrush.space.evil", SITE), null);
 check("test-hosts-only-in-list", latexOn("127.0.0.1", [...SITE, "127.0.0.1"]) && !latexOn("127.0.0.1", SITE), null);
+// (the desktop app: on, by the flag only its desktop build sets (app/src-tauri/src/lib.rs, cfg(desktop)); not the phone
+// apps (window.__TAURI__ alone), not the CLI's page on the same 127.0.0.1 (neither), not a flag without the app's bridge)
+const T = {};
+check("desktop-app-flag", desktopApp({ __TAURI__: T, __SB_DESKTOP_APP__: true }) && !desktopApp({ __TAURI__: T }) && !desktopApp({ __SB_DESKTOP_APP__: true }) && !desktopApp({}) && !desktopApp({ __TAURI__: T, __SB_DESKTOP_APP__: "true" }) && !desktopApp({ __TAURI__: T, __SB_DESKTOP_APP__: 1 }), null);
+check("on-in-desktop-app", latexHereFor("127.0.0.1", true, SITE), null);
+check("off-cli-and-phone", !latexHereFor("127.0.0.1", false, SITE) && !latexHereFor("localhost", false, SITE) && !latexHereFor("tauri.localhost", false, SITE), null);
+check("site-unchanged", latexHereFor("sagebrush.space", false, SITE) && latexHereFor("dev.sagebrush.space", false, SITE) && !latexHereFor("sagebrush.space.evil", false, SITE), null);
+check("app-run-why", /desktop app/.test(APP_NO_RUN) && /sagebrush\.space/.test(APP_NO_RUN), APP_NO_RUN);
+// (the app self-test's LaTeX checks, web/notebook/selftest-latex.js: none outside the desktop app, so a phone's report has
+// none; in it, its three rows, named as the desktop report's judge requires them, app/selftest/android-report.py DESKTOP)
+const judgeNames = [...(/DESKTOP = \[([\s\S]*?)\]/.exec(readFileSync(new URL("../../app/selftest/android-report.py", import.meta.url), "utf8"))?.[1] ?? "").matchAll(/"([^"]+)"/g)].map((m) => m[1]);
+check("selftest-latex-phone-none", (await latexChecks({ desktop: false, on: true, menu: null, ws: null })).length === 0 && (await latexChecks({ on: true, menu: null, ws: null })).length === 0, null);
+const deskRows = await latexChecks({ desktop: true, on: false, menu: null, ws: null });
+check("selftest-latex-desktop-rows", deskRows.length === 3 && deskRows.every((r, i) => r[0] === LATEX_CHECKS[i] && r[1] === false), deskRows);
+check("selftest-latex-names-are-the-judge's", judgeNames.length === 3 && JSON.stringify(judgeNames) === JSON.stringify(LATEX_CHECKS), judgeNames);
 
 // ---- the examples (examples.ts; William, Oct 29: "good tests to illustrate the breadth of editor support"): each one
 // rendered by the pipeline the page uses, and its result recorded (one line each): it renders (outcome ok), with no
@@ -1046,6 +1063,23 @@ check("test-hosts-only-in-list", latexOn("127.0.0.1", [...SITE, "127.0.0.1"]) &&
   // (and every scratch folder of the CLI goes through it: no direct rmSync of the profile or a run's folder left)
   const src = (await import("node:fs")).readFileSync(new URL("../../src/latex-cli.ts", import.meta.url), "utf8");
   check("cli-remove-temp-used", !/rmSync\((tmp|profile)\b/.test(src) && (src.match(/removeTemp\((tmp|profile)\)/g) || []).length === 3, src.match(/rmSync\([a-z]+/g));
+}
+
+// ---- SageTeX's code arguments: read from the file, the code is the source between the braces (a backslash, a ~ or a
+// run of spaces in it is Sage's), its line ends joined with one space; from a macro, the inline subset's rules still
+{
+  const sd = (b, pre = "") => "\\documentclass{article}\n\\usepackage{sagetex}\n" + pre + "\\begin{document}\n" + b + "\n\\end{document}\n";
+  const its = (src) => new Engine().update(src).sageItems.map((x) => (x.err ? { mode: x.mode, err: x.err, name: x.name } : { mode: x.mode, code: x.code }));
+  const eq = (a, b) => JSON.stringify(a) === JSON.stringify(b);
+  // (an agent's document, as it wrote it: a label with \sin in a Python string, and the call over three lines)
+  const plot = its(sd("$f'(x) = \\sage{diff(sin(x^2), x)}$.\n\\begin{center}\n\\sageplot[width=0.9\\textwidth]{plot(sin(x^2), (x,\n-2*pi, 2*pi), axes_labels=['$x$', '$\\sin(x^2)$'],\n  gridlines=True)}\n\\end{center}"));
+  check("sagetex-source-args-plot", eq(plot, [{ mode: "sage", code: "diff(sin(x^2), x)" }, { mode: "plot", code: "plot(sin(x^2), (x, -2*pi, 2*pi), axes_labels=['$x$', '$\\sin(x^2)$'], gridlines=True)" }]), plot);
+  const kinds = its(sd("$\\sage{print('a\\nb')}$ $\\sage{'a  b'}$ $\\sage{~5}$ $\\sage{1 +\n   2}$ \\sage{\\left}"));
+  check("sagetex-source-args-escapes-spaces-tilde-lines", eq(kinds.map((x) => x.code), ["print('a\\nb')", "'a  b'", "~5", "1 + 2", "\\left"]), kinds);
+  // (where the text and TeX's reading could differ: a % comment, and an argument a macro made, keep the subset's rules)
+  const pct = its(sd("$\\sage{7 % 3}$\n\n$\\sage{1}$"));
+  const mac = its(sd("$\\x$", "\\newcommand{\\x}{\\sage{1+\\foo}}\n"));
+  check("sagetex-source-args-comment-and-macro-keep-the-subset", pct[0].err === "par" && pct[1].code === "1" && eq(mac, [{ mode: "sage", err: "cs", name: "foo" }]), { pct, mac });
 }
 
 const failed = results.filter(([, ok]) => !ok).map(([n]) => n);

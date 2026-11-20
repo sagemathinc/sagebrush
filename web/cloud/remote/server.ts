@@ -299,7 +299,7 @@ const UNAVAILABLE = "sign-in can't be checked right now; try again soon";
 async function connectPage(req: Request, env: RemoteEnv, ctx: Ctx): Promise<Response> {
   const s = await signedIn(req, env, ctx);
   if (s === "unavailable") return page("Connect a computer", `<p>${esc(UNAVAILABLE)}</p>`, 503);
-  if (!s) return page("Connect a computer", `<p>Sign in to connect a computer.</p><p><a href="/auth/login?return=${encodeURIComponent("/remote/connect")}">Sign in with CoCalc</a></p>`);
+  if (!s) return page("Connect a computer", `<p>Sign in to connect a computer.</p><p><a href="/auth/login?return=${encodeURIComponent("/remote/connect")}">Sign in</a></p>`);
   if (!(await allowed(env, s))) return page("Connect a computer", `<p>${esc(NOT_ENABLED)}</p>`, 403);
   const origin = new URL(req.url).origin;
   // (the published command enrolls with sagebrush.space by default; any other site is named)
@@ -317,7 +317,7 @@ async function activatePage(req: Request, env: RemoteEnv, ctx: Ctx): Promise<Res
   const code = (url.searchParams.get("code") ?? "").slice(0, 16);
   if (!s) {
     const back = "/remote/activate" + (code ? "?code=" + encodeURIComponent(code) : "");
-    return page("Connect a computer", `<p>Sign in to approve a remote for your account.</p><p><a href="/auth/login?return=${encodeURIComponent(back)}">Sign in with CoCalc</a></p>`);
+    return page("Connect a computer", `<p>Sign in to approve a remote for your account.</p><p><a href="/auth/login?return=${encodeURIComponent(back)}">Sign in</a></p>`);
   }
   if (!(await allowed(env, s))) return page("Connect a computer", `<p>${esc(NOT_ENABLED)}</p>`, 403);
   return page("Connect a computer", codeForm("", code));

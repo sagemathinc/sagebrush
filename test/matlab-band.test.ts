@@ -15,7 +15,7 @@ const LIB = __dirname + "/../../lib/";
 const CLI = __dirname + "/../src/cli.js";
 const WALL = (ms: number) => ms * (Number(process.env.SAGEBRUSH_TIME_SCALE) || 1);
 
-test("bandwidths, the band path, the route, the fallback table and ruling d2 (test/matlab_band_cases.py)", () => {
+test("bandwidths, the band path, the route, the fallback table and ruling d2 (test/matlab_band_cases.py)", { timeout: 900_000 }, () => {
   const r = spawnSync(process.execPath, [CLI, TEST + "matlab_band_cases.py"], { encoding: "utf8", timeout: WALL(900000) });
   assert.equal(r.status, 0, r.stderr);
   // (MATLAB's singular-matrix warning is expected, on the zero-pivot fixture only)

@@ -1,0 +1,32 @@
+[
+  {
+    "name": "assert",
+    "kind": "function",
+    "signature": "assert(cond)\nassert(cond, msg, A1, ...)\nassert(cond, errID, msg, A1, ...)\nassert(observed, expected)\nassert(observed, expected, tol)",
+    "summary": "Raises an error when a condition is false or, in Octave's form, when an observed value doesn't match the expected one (within a tolerance).",
+    "doc": "**MATLAB's form.** `assert(cond)` raises `Assertion failed.` unless every element of `cond` is true. A message, with an identifier and `sprintf` arguments, may follow as text.\n\n**Octave's form,** used when the second argument is not text, or the first is text, a cell or a struct. `assert(observed, expected)` compares class, size, then each element:\n- text as text;\n- cells and structs element by element;\n- NaN with NaN, and Inf with an Inf of the same sign.\n\nWith `tol`, a scalar or one per element:\n- a positive `tol` allows that absolute error;\n- a negative one allows a relative error of `abs(tol)`. Where the expected value is 0, the comparison is absolute.\n\nA mismatch raises an error whose table lists each failing element with its location, the observed and expected values, and the reason, as Octave prints it.\n\nNumeric-array comparisons list their failing elements. Cell and struct comparisons stop at the first failing nested comparison.",
+    "examples": [
+      {
+        "code": "assert([1 2 3], [1 2 4])",
+        "expected": "ASSERT errors for:  assert (cond,expected,tol)\n\n  Location  |  Observed  |  Expected  |  Reason\n    (3)           3            4         Abs err 1 exceeds tol 0 by 1\n"
+      },
+      {
+        "code": "assert(pi, 3.14159, 1e-5)",
+        "expected": ""
+      },
+      {
+        "code": "x = -1;\nassert(x > 0, 'x must be positive, not %d', x)",
+        "expected": "x must be positive, not -1\n"
+      }
+    ],
+    "differs": [
+      "MATLAB has no assert(observed, expected, tol): that form follows Octave 11.1.",
+      "Octave's error header quotes the call's own text (assert (([1, 2, 3]),([1, 2, 4]))); Sagebrush writes assert (cond,expected,tol), as Octave does inside cells and structs.",
+      "When the first argument is a number or logical and the second is text, it is MATLAB's condition and message: assert(1, 'a') passes, where Octave compares 1 with 'a' and fails.",
+      "A failing condition alone gives MATLAB's Assertion failed., not Octave's assert (cond) failed."
+    ],
+    "status": "full",
+    "see_also": ["error", "isequal"],
+    "tags": ["language-dynamic"]
+  }
+]

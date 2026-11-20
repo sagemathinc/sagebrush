@@ -1,0 +1,815 @@
+{
+ "setup": "\nA = matrix(QQ, [[1, 2], [3, 4]])\nB3 = matrix(QQ, 3, 3, list(range(9)))\nZ = matrix(ZZ, [[1, 2], [3, 4]])\nZ3 = matrix(ZZ, 3, 3, list(range(9)))\nR23 = matrix(QQ, 2, 3, list(range(6)))\nI2 = identity_matrix(QQ, 2)\nv2 = vector(QQ, [1, 2])\nv3 = vector(QQ, [1, 2, 3])\nw3 = vector(ZZ, [1, 2, 3])\n",
+ "cases": [
+  {
+   "case": "A + B3",
+   "ok": false,
+   "exc": "TypeError",
+   "msg": "unsupported operand parent(s) for +: 'Full MatrixSpace of 2 by 2 dense matrices over Rational Field' and 'Full MatrixSpace of 3 by 3 dense matrices over Rational Field'"
+  },
+  {
+   "case": "A - B3",
+   "ok": false,
+   "exc": "TypeError",
+   "msg": "unsupported operand parent(s) for -: 'Full MatrixSpace of 2 by 2 dense matrices over Rational Field' and 'Full MatrixSpace of 3 by 3 dense matrices over Rational Field'"
+  },
+  {
+   "case": "B3 + A",
+   "ok": false,
+   "exc": "TypeError",
+   "msg": "unsupported operand parent(s) for +: 'Full MatrixSpace of 3 by 3 dense matrices over Rational Field' and 'Full MatrixSpace of 2 by 2 dense matrices over Rational Field'"
+  },
+  {
+   "case": "R23 + A",
+   "ok": false,
+   "exc": "TypeError",
+   "msg": "unsupported operand parent(s) for +: 'Full MatrixSpace of 2 by 3 dense matrices over Rational Field' and 'Full MatrixSpace of 2 by 2 dense matrices over Rational Field'"
+  },
+  {
+   "case": "A - R23",
+   "ok": false,
+   "exc": "TypeError",
+   "msg": "unsupported operand parent(s) for -: 'Full MatrixSpace of 2 by 2 dense matrices over Rational Field' and 'Full MatrixSpace of 2 by 3 dense matrices over Rational Field'"
+  },
+  {
+   "case": "Z + B3",
+   "ok": false,
+   "exc": "TypeError",
+   "msg": "unsupported operand parent(s) for +: 'Full MatrixSpace of 2 by 2 dense matrices over Integer Ring' and 'Full MatrixSpace of 3 by 3 dense matrices over Rational Field'"
+  },
+  {
+   "case": "Z + Z3",
+   "ok": false,
+   "exc": "TypeError",
+   "msg": "unsupported operand parent(s) for +: 'Full MatrixSpace of 2 by 2 dense matrices over Integer Ring' and 'Full MatrixSpace of 3 by 3 dense matrices over Integer Ring'"
+  },
+  {
+   "case": "A + A",
+   "ok": true,
+   "type": "Matrix",
+   "str": "[2 4]\n[6 8]"
+  },
+  {
+   "case": "A * R23",
+   "ok": true,
+   "type": "Matrix",
+   "str": "[ 6  9 12]\n[12 19 26]"
+  },
+  {
+   "case": "R23 * A",
+   "ok": false,
+   "exc": "TypeError",
+   "msg": "unsupported operand parent(s) for *: 'Full MatrixSpace of 2 by 3 dense matrices over Rational Field' and 'Full MatrixSpace of 2 by 2 dense matrices over Rational Field'"
+  },
+  {
+   "case": "R23 * R23",
+   "ok": false,
+   "exc": "TypeError",
+   "msg": "unsupported operand parent(s) for *: 'Full MatrixSpace of 2 by 3 dense matrices over Rational Field' and 'Full MatrixSpace of 2 by 3 dense matrices over Rational Field'"
+  },
+  {
+   "case": "I2 * v3",
+   "ok": false,
+   "exc": "TypeError",
+   "msg": "unsupported operand parent(s) for *: 'Full MatrixSpace of 2 by 2 dense matrices over Rational Field' and 'Vector space of dimension 3 over Rational Field'"
+  },
+  {
+   "case": "I2 * v2",
+   "ok": true,
+   "type": "Vector",
+   "str": "(1, 2)"
+  },
+  {
+   "case": "v3 * I2",
+   "ok": false,
+   "exc": "TypeError",
+   "msg": "unsupported operand parent(s) for *: 'Vector space of dimension 3 over Rational Field' and 'Full MatrixSpace of 2 by 2 dense matrices over Rational Field'"
+  },
+  {
+   "case": "v2 * I2",
+   "ok": true,
+   "type": "Vector",
+   "str": "(1, 2)"
+  },
+  {
+   "case": "Z3 * vector(ZZ, [1, 2])",
+   "ok": false,
+   "exc": "TypeError",
+   "msg": "unsupported operand parent(s) for *: 'Full MatrixSpace of 3 by 3 dense matrices over Integer Ring' and 'Ambient free module of rank 2 over the principal ideal domain Integer Ring'"
+  },
+  {
+   "case": "w3 * identity_matrix(ZZ, 2)",
+   "ok": false,
+   "exc": "TypeError",
+   "msg": "unsupported operand parent(s) for *: 'Ambient free module of rank 3 over the principal ideal domain Integer Ring' and 'Full MatrixSpace of 2 by 2 dense matrices over Integer Ring'"
+  },
+  {
+   "case": "A ** 2",
+   "ok": true,
+   "type": "Matrix",
+   "str": "[ 7 10]\n[15 22]"
+  },
+  {
+   "case": "A ** (QQ(4) / 2)",
+   "ok": true,
+   "type": "Matrix",
+   "str": "[ 7 10]\n[15 22]"
+  },
+  {
+   "case": "A ** ZZ(2)",
+   "ok": true,
+   "type": "Matrix",
+   "str": "[ 7 10]\n[15 22]"
+  },
+  {
+   "case": "A ** -1",
+   "ok": true,
+   "type": "Matrix",
+   "str": "[  -2    1]\n[ 3/2 -1/2]"
+  },
+  {
+   "case": "A ** (QQ(1) / 2)",
+   "ok": false,
+   "exc": "NotImplementedError",
+   "msg": "non-integral exponents not supported"
+  },
+  {
+   "case": "A ** (-QQ(1) / 2)",
+   "ok": false,
+   "exc": "NotImplementedError",
+   "msg": "non-integral exponents not supported"
+  },
+  {
+   "case": "A ** 2.0",
+   "ok": false,
+   "exc": "NotImplementedError",
+   "msg": "non-integral exponents not supported"
+  },
+  {
+   "case": "A ** 2.5",
+   "ok": false,
+   "exc": "NotImplementedError",
+   "msg": "non-integral exponents not supported"
+  },
+  {
+   "case": "Z ** (QQ(1) / 2)",
+   "ok": false,
+   "exc": "NotImplementedError",
+   "msg": "the given exponent is not supported"
+  },
+  {
+   "case": "Z ** 2.0",
+   "ok": true,
+   "type": "Matrix",
+   "str": "[ 7 10]\n[15 22]"
+  },
+  {
+   "case": "I2 ** (QQ(1) / 2)",
+   "ok": false,
+   "exc": "NotImplementedError",
+   "msg": "non-integral exponents not supported"
+  },
+  {
+   "case": "matrix(QQ, [[1, 'a']])",
+   "ok": false,
+   "exc": "TypeError",
+   "msg": "unable to convert 'a' to a rational"
+  },
+  {
+   "case": "matrix(QQ, [[1, '1/2']])",
+   "ok": true,
+   "type": "Matrix",
+   "str": "[  1 1/2]"
+  },
+  {
+   "case": "matrix(QQ, [[1, ' 3 ']])",
+   "ok": true,
+   "type": "Matrix",
+   "str": "[1 3]"
+  },
+  {
+   "case": "matrix(QQ, [[1, '0.5']])",
+   "ok": false,
+   "exc": "TypeError",
+   "msg": "unable to convert '0.5' to a rational"
+  },
+  {
+   "case": "matrix(QQ, [[1, None]])",
+   "ok": true,
+   "type": "Matrix",
+   "str": "[1 0]"
+  },
+  {
+   "case": "matrix(QQ, 1, 2, [1, 'a'])",
+   "ok": false,
+   "exc": "TypeError",
+   "msg": "unable to convert 'a' to a rational"
+  },
+  {
+   "case": "matrix(ZZ, [[1, '3/1']])",
+   "ok": false,
+   "exc": "TypeError",
+   "msg": "unable to convert '3/1' to an integer"
+  },
+  {
+   "case": "matrix(ZZ, [[1, '3']])",
+   "ok": true,
+   "type": "Matrix",
+   "str": "[1 3]"
+  },
+  {
+   "case": "matrix(ZZ, [[1, 'a']])",
+   "ok": false,
+   "exc": "TypeError",
+   "msg": "unable to convert 'a' to an integer"
+  },
+  {
+   "case": "matrix([[ZZ(1), 'a']])",
+   "ok": false,
+   "exc": "TypeError",
+   "msg": "no common canonical parent for objects with parents: 'Integer Ring' and '<class 'str'>'"
+  },
+  {
+   "case": "vector(QQ, [1, 'a'])",
+   "ok": false,
+   "exc": "TypeError",
+   "msg": "unable to convert a to an element of Rational Field"
+  },
+  {
+   "case": "vector(ZZ, [1, 'a'])",
+   "ok": false,
+   "exc": "TypeError",
+   "msg": "unable to convert a to an element of Integer Ring"
+  },
+  {
+   "case": "vector(QQ, ['1/2', 3])",
+   "ok": true,
+   "type": "Vector",
+   "str": "(1/2, 3)"
+  },
+  {
+   "case": "vector(ZZ, ['3'])",
+   "ok": true,
+   "type": "Vector",
+   "str": "(3)"
+  },
+  {
+   "case": "vector([1, 'a'])",
+   "ok": false,
+   "exc": "TypeError",
+   "msg": "unable to find a common ring for all elements"
+  },
+  {
+   "case": "vector(QQ, [1, None])",
+   "ok": true,
+   "type": "Vector",
+   "str": "(1, 0)"
+  },
+  {
+   "case": "vector(ZZ, [1, None])",
+   "ok": true,
+   "type": "Vector",
+   "str": "(1, 0)"
+  },
+  {
+   "case": "vector(QQ, [None])",
+   "ok": true,
+   "type": "Vector",
+   "str": "(0)"
+  },
+  {
+   "case": "vector([1, None])",
+   "ok": false,
+   "exc": "TypeError",
+   "msg": "unable to find a common ring for all elements"
+  },
+  {
+   "case": "matrix(ZZ, [[1, None]])",
+   "ok": true,
+   "type": "Matrix",
+   "str": "[1 0]"
+  },
+  {
+   "case": "matrix([[1, None]])",
+   "ok": false,
+   "exc": "TypeError",
+   "msg": "NoneType takes no arguments"
+  },
+  {
+   "case": "QQ('0.5')",
+   "ok": false,
+   "exc": "TypeError",
+   "msg": "unable to convert '0.5' to a rational"
+  },
+  {
+   "case": "QQ('1.2345678901234567')",
+   "ok": false,
+   "exc": "TypeError",
+   "msg": "unable to convert '1.2345678901234567' to a rational"
+  },
+  {
+   "case": "QQ('1e-3')",
+   "ok": false,
+   "exc": "TypeError",
+   "msg": "unable to convert '1e-3' to a rational"
+  },
+  {
+   "case": "QQ('3')",
+   "ok": true,
+   "type": "Rational",
+   "str": "3"
+  },
+  {
+   "case": "QQ(' 3 ')",
+   "ok": true,
+   "type": "Rational",
+   "str": "3"
+  },
+  {
+   "case": "QQ('-3/4')",
+   "ok": true,
+   "type": "Rational",
+   "str": "-3/4"
+  },
+  {
+   "case": "QQ('+3/4')",
+   "ok": false,
+   "exc": "TypeError",
+   "msg": "unable to convert '+3/4' to a rational"
+  },
+  {
+   "case": "QQ('3/-4')",
+   "ok": true,
+   "type": "Rational",
+   "str": "-3/4"
+  },
+  {
+   "case": "QQ('3 / 4')",
+   "ok": true,
+   "type": "Rational",
+   "str": "3/4"
+  },
+  {
+   "case": "QQ('1/0')",
+   "ok": false,
+   "exc": "TypeError",
+   "msg": "unable to convert '1/0' to a rational"
+  },
+  {
+   "case": "QQ('0x10')",
+   "ok": true,
+   "type": "Rational",
+   "str": "16"
+  },
+  {
+   "case": "QQ('1_000')",
+   "ok": false,
+   "exc": "TypeError",
+   "msg": "unable to convert '1_000' to a rational"
+  },
+  {
+   "case": "QQ('')",
+   "ok": false,
+   "exc": "TypeError",
+   "msg": "unable to convert '' to a rational"
+  },
+  {
+   "case": "QQ('a')",
+   "ok": false,
+   "exc": "TypeError",
+   "msg": "unable to convert 'a' to a rational"
+  },
+  {
+   "case": "QQ('2/4')",
+   "ok": true,
+   "type": "Rational",
+   "str": "1/2"
+  },
+  {
+   "case": "QQ('010')",
+   "ok": true,
+   "type": "Rational",
+   "str": "8"
+  },
+  {
+   "case": "QQ('0o10')",
+   "ok": false,
+   "exc": "TypeError",
+   "msg": "unable to convert '0o10' to a rational"
+  },
+  {
+   "case": "QQ('0b11')",
+   "ok": true,
+   "type": "Rational",
+   "str": "3"
+  },
+  {
+   "case": "QQ('0X1F')",
+   "ok": true,
+   "type": "Rational",
+   "str": "31"
+  },
+  {
+   "case": "QQ('-0x10')",
+   "ok": true,
+   "type": "Rational",
+   "str": "-16"
+  },
+  {
+   "case": "QQ('0x10/3')",
+   "ok": true,
+   "type": "Rational",
+   "str": "16/3"
+  },
+  {
+   "case": "QQ('00')",
+   "ok": true,
+   "type": "Rational",
+   "str": "0"
+  },
+  {
+   "case": "QQ('-0')",
+   "ok": true,
+   "type": "Rational",
+   "str": "0"
+  },
+  {
+   "case": "QQ('1/-0')",
+   "ok": false,
+   "exc": "TypeError",
+   "msg": "unable to convert '1/-0' to a rational"
+  },
+  {
+   "case": "QQ('\\t5\\n')",
+   "ok": true,
+   "type": "Rational",
+   "str": "5"
+  },
+  {
+   "case": "QQ('5 /')",
+   "ok": false,
+   "exc": "TypeError",
+   "msg": "unable to convert '5 /' to a rational"
+  },
+  {
+   "case": "QQ('/5')",
+   "ok": false,
+   "exc": "TypeError",
+   "msg": "unable to convert '/5' to a rational"
+  },
+  {
+   "case": "QQ('1/2/3')",
+   "ok": false,
+   "exc": "TypeError",
+   "msg": "unable to convert '1/2/3' to a rational"
+  },
+  {
+   "case": "QQ(' - 3')",
+   "ok": false,
+   "exc": "TypeError",
+   "msg": "unable to convert ' - 3' to a rational"
+  },
+  {
+   "case": "QQ('-3 /4')",
+   "ok": true,
+   "type": "Rational",
+   "str": "-3/4"
+  },
+  {
+   "case": "QQ(None)",
+   "ok": true,
+   "type": "Rational",
+   "str": "0"
+  },
+  {
+   "case": "ZZ('3/1')",
+   "ok": false,
+   "exc": "TypeError",
+   "msg": "unable to convert '3/1' to an integer"
+  },
+  {
+   "case": "ZZ('a')",
+   "ok": false,
+   "exc": "TypeError",
+   "msg": "unable to convert 'a' to an integer"
+  },
+  {
+   "case": "ZZ(' 3 ')",
+   "ok": true,
+   "type": "Integer",
+   "str": "3"
+  },
+  {
+   "case": "ZZ('010')",
+   "ok": true,
+   "type": "Integer",
+   "str": "10"
+  },
+  {
+   "case": "ZZ('0x10')",
+   "ok": true,
+   "type": "Integer",
+   "str": "16"
+  },
+  {
+   "case": "ZZ(None)",
+   "ok": true,
+   "type": "Integer",
+   "str": "0"
+  },
+  {
+   "case": "matrix(ZZ, [['010']])",
+   "ok": true,
+   "type": "Matrix",
+   "str": "[10]"
+  },
+  {
+   "case": "vector(ZZ, ['010'])",
+   "ok": true,
+   "type": "Vector",
+   "str": "(10)"
+  },
+  {
+   "case": "matrix(QQ, [['010']])",
+   "ok": true,
+   "type": "Matrix",
+   "str": "[8]"
+  },
+  {
+   "case": "QQ('3', '4')",
+   "ok": false,
+   "exc": "TypeError",
+   "msg": "an integer is required"
+  },
+  {
+   "case": "QQ('3', 4)",
+   "ok": true,
+   "type": "Rational",
+   "str": "3"
+  },
+  {
+   "case": "QQ('12', 5)",
+   "ok": true,
+   "type": "Rational",
+   "str": "7"
+  },
+  {
+   "case": "QQ('1/2', 3)",
+   "ok": true,
+   "type": "Rational",
+   "str": "1/2"
+  },
+  {
+   "case": "QQ('-0x10', 16)",
+   "ok": false,
+   "exc": "TypeError",
+   "msg": "unable to convert '-0x10' to a rational"
+  },
+  {
+   "case": "QQ('10', 2)",
+   "ok": true,
+   "type": "Rational",
+   "str": "2"
+  },
+  {
+   "case": "QQ('z', 36)",
+   "ok": true,
+   "type": "Rational",
+   "str": "35"
+  },
+  {
+   "case": "QQ('12', 1)",
+   "ok": false,
+   "exc": "TypeError",
+   "msg": "unable to convert '12' to a rational"
+  },
+  {
+   "case": "QQ('12', 37)",
+   "ok": true,
+   "type": "Rational",
+   "str": "39"
+  },
+  {
+   "case": "QQ('12', 0)",
+   "ok": true,
+   "type": "Rational",
+   "str": "12"
+  },
+  {
+   "case": "QQ('1 2', 10)",
+   "ok": true,
+   "type": "Rational",
+   "str": "12"
+  },
+  {
+   "case": "QQ('0x10', 10)",
+   "ok": false,
+   "exc": "TypeError",
+   "msg": "unable to convert '0x10' to a rational"
+  },
+  {
+   "case": "QQ('010', 8)",
+   "ok": true,
+   "type": "Rational",
+   "str": "8"
+  },
+  {
+   "case": "QQ('010', 10)",
+   "ok": true,
+   "type": "Rational",
+   "str": "10"
+  },
+  {
+   "case": "QQ('12', 2)",
+   "ok": false,
+   "exc": "TypeError",
+   "msg": "unable to convert '12' to a rational"
+  },
+  {
+   "case": "QQ('12', 62)",
+   "ok": true,
+   "type": "Rational",
+   "str": "64"
+  },
+  {
+   "case": "QQ('zZ', 62)",
+   "ok": true,
+   "type": "Rational",
+   "str": "3817"
+  },
+  {
+   "case": "QQ('12', 63)",
+   "ok": false,
+   "exc": "TypeError",
+   "msg": "unable to convert '12' to a rational"
+  },
+  {
+   "case": "QQ('1A', 16)",
+   "ok": true,
+   "type": "Rational",
+   "str": "26"
+  },
+  {
+   "case": "QQ('1a', 16)",
+   "ok": true,
+   "type": "Rational",
+   "str": "26"
+  },
+  {
+   "case": "QQ('1a', 37)",
+   "ok": true,
+   "type": "Rational",
+   "str": "73"
+  },
+  {
+   "case": "A * [1, 2]",
+   "ok": false,
+   "exc": "TypeError",
+   "msg": "can't multiply sequence by non-int of type 'sage.matrix.matrix_rational_dense.Matrix_rational_dense'"
+  },
+  {
+   "case": "A * (1, 2)",
+   "ok": false,
+   "exc": "TypeError",
+   "msg": "can't multiply sequence by non-int of type 'sage.matrix.matrix_rational_dense.Matrix_rational_dense'"
+  },
+  {
+   "case": "[1, 2] * A",
+   "ok": false,
+   "exc": "TypeError",
+   "msg": "can't multiply sequence by non-int of type 'sage.matrix.matrix_rational_dense.Matrix_rational_dense'"
+  },
+  {
+   "case": "(1, 2) * A",
+   "ok": false,
+   "exc": "TypeError",
+   "msg": "can't multiply sequence by non-int of type 'sage.matrix.matrix_rational_dense.Matrix_rational_dense'"
+  },
+  {
+   "case": "A * [1, 2, 3]",
+   "ok": false,
+   "exc": "TypeError",
+   "msg": "can't multiply sequence by non-int of type 'sage.matrix.matrix_rational_dense.Matrix_rational_dense'"
+  },
+  {
+   "case": "QQ('1 2')",
+   "ok": true,
+   "type": "Rational",
+   "str": "12"
+  },
+  {
+   "case": "QQ('1\\t2')",
+   "ok": true,
+   "type": "Rational",
+   "str": "12"
+  },
+  {
+   "case": "QQ('- 3')",
+   "ok": false,
+   "exc": "TypeError",
+   "msg": "unable to convert '- 3' to a rational"
+  },
+  {
+   "case": "QQ('1 /2')",
+   "ok": true,
+   "type": "Rational",
+   "str": "1/2"
+  },
+  {
+   "case": "QQ('1/ 2')",
+   "ok": true,
+   "type": "Rational",
+   "str": "1/2"
+  },
+  {
+   "case": "QQ('12 ')",
+   "ok": true,
+   "type": "Rational",
+   "str": "12"
+  },
+  {
+   "case": "QQ('1 2/3 4')",
+   "ok": true,
+   "type": "Rational",
+   "str": "6/17"
+  },
+  {
+   "case": "QQ('0x1 0')",
+   "ok": true,
+   "type": "Rational",
+   "str": "16"
+  },
+  {
+   "case": "QQ('0 10')",
+   "ok": true,
+   "type": "Rational",
+   "str": "8"
+  },
+  {
+   "case": "QQ('- 0x10')",
+   "ok": false,
+   "exc": "TypeError",
+   "msg": "unable to convert '- 0x10' to a rational"
+  },
+  {
+   "case": "QQ('-0 x10')",
+   "ok": false,
+   "exc": "TypeError",
+   "msg": "unable to convert '-0 x10' to a rational"
+  },
+  {
+   "case": "QQ('1 2/0')",
+   "ok": false,
+   "exc": "TypeError",
+   "msg": "unable to convert '1 2/0' to a rational"
+  },
+  {
+   "case": "QQ('  ')",
+   "ok": false,
+   "exc": "TypeError",
+   "msg": "unable to convert '  ' to a rational"
+  },
+  {
+   "case": "QQ('1/2 ')",
+   "ok": true,
+   "type": "Rational",
+   "str": "1/2"
+  },
+  {
+   "case": "QQ('3/- 4')",
+   "ok": false,
+   "exc": "TypeError",
+   "msg": "unable to convert '3/- 4' to a rational"
+  },
+  {
+   "case": "QQ('-3/-4')",
+   "ok": true,
+   "type": "Rational",
+   "str": "3/4"
+  },
+  {
+   "case": "QQ('0')",
+   "ok": true,
+   "type": "Rational",
+   "str": "0"
+  },
+  {
+   "case": "QQ('-0x')",
+   "ok": true,
+   "type": "Rational",
+   "str": "0"
+  },
+  {
+   "case": "QQ('0b')",
+   "ok": true,
+   "type": "Rational",
+   "str": "0"
+  },
+  {
+   "case": "QQ('1/2/')",
+   "ok": false,
+   "exc": "TypeError",
+   "msg": "unable to convert '1/2/' to a rational"
+  }
+ ]
+}

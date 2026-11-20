@@ -1,0 +1,58 @@
+{
+ "singular_inverse": {
+  "result": null,
+  "error_info": {
+   "type": "exception",
+   "exception": "ZeroDivisionError",
+   "message": "input matrix must be nonsingular"
+  }
+ },
+ "add_2x2_3x3": {
+  "result": "[1 2]\n[4 5]",
+  "error_info": null
+ },
+ "frac_power": {
+  "result": "[1 0]\n[0 1]",
+  "error_info": null
+ },
+ "matvec_mismatch": {
+  "result": "(1, 2)",
+  "error_info": null
+ },
+ "str_in_QQ_matrix": {
+  "result": "['a'   1]\n[  0   1]",
+  "error_info": null
+ },
+ "nonsquare_power": {
+  "result": null,
+  "error_info": {
+   "type": "exception",
+   "exception": "TypeError",
+   "message": "unsupported operand parent(s) for *: matrices of incompatible sizes"
+  }
+ },
+ "submatrix": {
+  "result": null,
+  "error_info": {
+   "type": "exception",
+   "exception": "AttributeError",
+   "message": "'Matrix' object has no attribute 'submatrix'"
+  }
+ },
+ "preparse_global": {
+  "result": null,
+  "error_info": {
+   "type": "exception",
+   "exception": "NameError",
+   "message": "name 'preparse' is not defined"
+  }
+ },
+ "syntax": {
+  "result": null,
+  "error_info": {
+   "type": "syntax",
+   "exception": "SyntaxError",
+   "message": "'(' was never closed (<cell>, line 1)"
+  }
+ }
+}
