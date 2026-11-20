@@ -5,6 +5,7 @@ printed as Sage prints them.  Dense, coefficients constant term first."""
 
 from fractions import Fraction as _F
 import re as _re
+import sys as _sys
 
 
 def _sa():
@@ -39,14 +40,17 @@ def _int_value(x):
     return None
 
 
+# (the real number classes a numeric symbolic exponent's value may have,
+# float-based, by module and name: an integral one counts, as Sage)
+_REAL_FLOATS = (("_sage_lang", ("RealNumber", "_RealLiteral")), ("_sage_rdf", ("RealDoubleElement",)))
+
+
 def _is_polynomial(x):
-    """Whether x's class is Polynomial or derives from it, by identity
-    along the class's MRO (type(x) and type's own slot: isinstance would
-    read the instance's own __class__, a hook of an untrusted value)."""
-    for k in _type_mro(type(x)):
-        if k is Polynomial:
-            return True
-    return False
+    """Whether x's class is Polynomial itself, by identity (type(x):
+    isinstance would read the instance's own __class__, a hook of an
+    untrusted value).  A subclass is declined, as any other unclassified
+    operand: its fields would be read through its own attribute hooks."""
+    return type(x) is Polynomial
 
 
 def _from_tokens(ring, r):
@@ -1202,7 +1206,27 @@ class Polynomial:
         raise RuntimeError("Use ** for exponentiation, not '^', which means xor\nin Python, and has the wrong precedence.")
 
     def __pow__(self, n):
-        n = int(n)
+        """self^n for an integer n (an int, a Sage integer, a Rational with
+        denominator 1, an element of Z/nZ, a symbolic expression whose
+        value is an integer), as Sage.  The exponent is classified without
+        running any of its hooks; a float, a real number, a string or a
+        Python Fraction is refused, as Sage refuses them.  A fractional
+        power is made for the constants 0, 1 and -1 only.
+
+        EXAMPLES::
+
+            sage: R.<t> = ZZ[]
+            sage: (t + 1)^3, t^QQ(2)
+            (t^3 + 3*t^2 + 3*t + 1, t^2)
+            sage: try:
+            ....:     t^1.5
+            ....: except TypeError as e:
+            ....:     print(e)
+            no canonical coercion of this exponent to Rational Field
+        """
+        n = self._exponent(n)
+        if type(n) is tuple:
+            return self._root_power(*n)
         if n < 0:
             raise ValueError("negative exponent")
         r, b = Polynomial(self._ring, [1]), self
@@ -1212,6 +1236,61 @@ class Polynomial:
             b = b * b
             n >>= 1
         return r
+
+    @staticmethod
+    def _exponent(n):
+        # (an int, p/q as a pair for a fractional Rational, else TypeError, as
+        # Sage.  An integer by identity along its class's MRO, read through
+        # int's own method; a Rational, an element of Z/nZ (its lift) or a
+        # symbolic expression whose value is an integer (SR(2), x/x,
+        # SR(2.0)) by the identity of its class, read through that class's
+        # own methods: no hook of n runs.  Anything else is refused, a
+        # Python Fraction too, as Sage refuses it; the old int(n) took the
+        # floor of a fractional exponent, a wrong value)
+        k = _int_value(n)
+        if k is not None:
+            return k
+        t = type(n)
+        if t is _sa().Rational:
+            from sagebrush import poly
+            p, q = int.__index__(poly._numerator(n)), int.__index__(poly._denominator(n))
+            return p if q == 1 else (p, q)
+        ff = _sys.modules.get("_sage_ff")
+        if ff is not None:
+            d = ff.__dict__
+            for name in ("IntegerMod_int", "IntegerMod_int64", "IntegerMod_gmp"):
+                if d.get(name) is t:
+                    return int.__index__(t.lift(n))
+        ex = _sys.modules.get("_sage_expr")
+        if ex is not None and ex.__dict__.get("Expression") is t:
+            try:
+                v = t.pyobject(n)
+            except (TypeError, ValueError):
+                v = None
+            k = _int_value(v)
+            if k is not None:
+                return k
+            import _sage_rpoly
+            if _sage_rpoly._known(type(v), _REAL_FLOATS) and float.is_integer(v):
+                return float.__trunc__(v)
+        raise TypeError("no canonical coercion of this exponent to Rational Field")
+
+    def _root_power(self, p, q):
+        # self^(p/q), p/q in lowest terms with q > 1: Sage's q-th root of
+        # self to the p, made here for the constants 0, 1 and -1, as Sage
+        # (0 to a negative power and an even root of -1 are its errors)
+        c = self._c
+        if not c:
+            if p < 0:
+                raise ZeroDivisionError("negative exponent in power of zero")
+            return self
+        if c == [1]:
+            return self
+        if c == [-1]:
+            if q % 2 == 0:
+                raise ValueError("cannot take even root of negative number")
+            return self if p % 2 else Polynomial(self._ring, [1])
+        raise NotImplementedError("a polynomial to a fractional power (an n-th root) is not implemented in Sagebrush")
 
     def __eq__(self, other):
         try:
@@ -1242,7 +1321,11 @@ class Polynomial:
             ((0, t), (t, t^2 - t + 1), (-2*t + 1, t^2 - 1))
         """
         o = self._coerce(other)
-        if o is None or not o._c:
+        if o is None:
+            # (no common parent: Sage's quo_rem by a real number is over
+            # its field, not made here)
+            raise TypeError("no common canonical parent for this polynomial and the divisor")
+        if not o._c:
             raise ZeroDivisionError("division by zero polynomial")
         if self._ring._base is ZZ and o._ring._base is ZZ:
             # (Sage's rule in ZZ[x], in the engine: sagebrush.poly.zdivrem)
@@ -1287,30 +1370,45 @@ class Polynomial:
                     raise ZeroDivisionError("division by zero")
                 from sagebrush import poly
                 return _from_tokens(self._ring, poly.zfdiv(self._c, n, raw=True))
-        return self.quo_rem(other)[0]
+        # (an operand nobody classifies, 1.5 or a string: declined, so
+        # Python's TypeError unless the operand's own reflected method
+        # answers)
+        o = self._coerce(other)
+        return NotImplemented if o is None else self.quo_rem(o)[0]
 
     def __mod__(self, other):
         """quo_rem's remainder, as Sage (over ZZ by a number too: (-t-1) % 3
         is -t - 1, not the floor remainder)."""
-        return self.quo_rem(other)[1]
+        o = self._coerce(other)
+        return NotImplemented if o is None else self.quo_rem(o)[1]
 
     def __divmod__(self, other):
-        return self.quo_rem(other)
+        o = self._coerce(other)
+        return NotImplemented if o is None else self.quo_rem(o)
+
+    def _plain(self):
+        # (self as a Polynomial itself: a subclass's own fields, read
+        # through its own access, for an operand that declines subclasses)
+        if type(self) is Polynomial:
+            return self
+        p = Polynomial.__new__(Polynomial)
+        p._ring, p._c = self._ring, self._c
+        return p
 
     def __rfloordiv__(self, other):
         o = self._coerce(other)
-        return NotImplemented if o is None else o.quo_rem(self)[0]
+        return NotImplemented if o is None else o.quo_rem(self._plain())[0]
 
     def __rmod__(self, other):
         # (a Rational % a polynomial is a TypeError in Sage, though // is
         # defined, and a ZeroDivisionError by zero; an integer's is
         # quo_rem's remainder)
         o = self._rational_left(other, "Rational modulo by zero")
-        return NotImplemented if o is None else o.quo_rem(self)[1]
+        return NotImplemented if o is None else o.quo_rem(self._plain())[1]
 
     def __rdivmod__(self, other):
         o = self._rational_left(other, "rational division by zero")
-        return NotImplemented if o is None else o.quo_rem(self)
+        return NotImplemented if o is None else o.quo_rem(self._plain())
 
     def _rational_left(self, other, by_zero):
         # (a Rational on the left of % or divmod: Sage's ZeroDivisionError
