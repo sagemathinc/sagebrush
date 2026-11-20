@@ -42,16 +42,26 @@ export async function docSyncAvailable(origin: string, fetchFn: typeof fetch): P
  * origin exactly; an empty or unparsable one is refused), must be 200 JSON, and must say `available: true` and
  * `public_url` equal to `origin` byte for byte (no case, slash, scheme or port folding).  Anything else, false. */
 export async function docSyncSelfHosted(origin: string, fetchFn: typeof fetch): Promise<boolean> {
+  return (await selfHostedAnswer(origin, fetchFn)) === "yes";
+}
+/** The same one request, its answer in three: "yes" (every condition above); "no" (the status answered, unredirected,
+ * from this very origin, as a JSON object whose public_url is missing or another origin's: the deployment's own
+ * configuration, so it doesn't change from one request to the next); "unknown" (anything else: a failure, a redirect,
+ * another status, another origin, no JSON, or this origin's public_url with `available` not true, which can change: a
+ * plan service unreachable, an allowlist or a plan changed).  docSyncSelfHosted is its "yes": it fails closed. */
+export async function selfHostedAnswer(origin: string, fetchFn: typeof fetch): Promise<"yes" | "no" | "unknown"> {
   try {
     const r = await fetchFn(origin + "/api/sync/v1/status", { credentials: "same-origin", redirect: "manual" });
-    if (r.redirected || r.type === "opaqueredirect" || r.status !== 200) return false;
+    if (r.redirected || r.type === "opaqueredirect" || r.status !== 200) return "unknown";
     let at: string;
-    try { at = new URL(r.url).origin; } catch { return false; }
-    if (at !== origin) return false;
+    try { at = new URL(r.url).origin; } catch { return "unknown"; }
+    if (at !== origin) return "unknown";
     const j = (await r.json()) as { available?: unknown; public_url?: unknown } | null;
-    return !!j && typeof j === "object" && j.available === true && typeof j.public_url === "string" && j.public_url === origin;
+    if (!j || typeof j !== "object") return "unknown";
+    if (typeof j.public_url !== "string" || j.public_url !== origin) return "no";
+    return j.available === true ? "yes" : "unknown";
   } catch {
-    return false;
+    return "unknown";
   }
 }
 
@@ -144,16 +154,21 @@ export const DOC_SYNC_NOTE = [
  * origin).  Boards' contents don't sync yet anywhere (board/journal.ts sync.on false). */
 export const SYNC_CONFIRM_DOCS = "Your notebooks' code and text sync too, but not their outputs. Boards are listed; their contents don't sync yet.";
 export const SYNC_CONFIRM_FILES_ONLY = "Your notebooks and boards are listed; their contents don't sync on this site.";
+export const SYNC_CONFIRM_MAYBE = "Your notebooks' code and text may also sync, depending on this site's server; their outputs never do. Boards are listed; their contents don't sync yet.";
 /** How long syncConfirmDocs waits for a site's status. */
 export const SYNC_CONFIRM_MS = 4000;
-/** Which of the two this origin is told: DEV's and PROD's own with no request; another, its status asked within
- * SYNC_CONFIRM_MS (a status that doesn't answer by then, or fails: files only, which is what such a site does). */
+/** Which this origin is told: DEV's and PROD's own, notebooks' contents sync, with no request; another, its status
+ * asked within SYNC_CONFIRM_MS: they sync if it says so, files only if it says not, and if it can't be told (a failure,
+ * no answer by then), that they may: notebook sync asks again later, and may then begin. */
 export async function syncConfirmDocs(origin: string, fetchFn: typeof fetch, allowed: readonly string[] = DOC_SYNC_ORIGINS, ms = SYNC_CONFIRM_MS): Promise<string> {
   if (docSyncOrigin(origin, allowed)) return SYNC_CONFIRM_DOCS;
   let timer: ReturnType<typeof setTimeout> | undefined;
-  const late = new Promise<boolean>((r) => { timer = setTimeout(() => r(false), ms); });
+  const late = new Promise<"unknown">((r) => { timer = setTimeout(() => r("unknown"), ms); });
   const timed: typeof fetch = (u, init) => fetchFn(u, { ...init, signal: AbortSignal.timeout(ms) });
-  try { return (await Promise.race([docSyncSelfHosted(origin, timed), late])) ? SYNC_CONFIRM_DOCS : SYNC_CONFIRM_FILES_ONLY; } finally { clearTimeout(timer); }
+  try {
+    const a = await Promise.race([selfHostedAnswer(origin, timed), late]);
+    return a === "yes" ? SYNC_CONFIRM_DOCS : a === "no" ? SYNC_CONFIRM_FILES_ONLY : SYNC_CONFIRM_MAYBE;
+  } finally { clearTimeout(timer); }
 }
 
 /** Said on the notebook page when the journal's activation began (it can't go back) but this page couldn't go on with
