@@ -1905,6 +1905,16 @@ def _iscallable(v):
     return t is Builtin or t is Function or t is Anon or t is Handle
 
 
+def foreign(v):
+    """a value of another language in the shared workspace, not a MATLAB variable: one engine session
+    runs Sage, Python and MATLAB in one namespace, so a Python or Sage function, class or module there
+    (Sage's norm) leaves the MATLAB function of its name in view (src/matlab.ts inWorkspace)"""
+    t = type(v)
+    if t is type(_math):
+        return True
+    return callable(v) and t not in _CALLABLE and not isinstance(v, (Cell, Struct, Char, Str, StrArr))
+
+
 def _call(f, args, nargout=1):
     """call a function value with Python arguments, for one result"""
     r = f.call(nargout, args)
@@ -10215,9 +10225,7 @@ def _ws_vars(ns):
     for k, v in ns.items():
         if k.startswith("_") and not k.startswith("_k_"):
             continue
-        if isinstance(v, Undef) or type(v) is Function or type(v) is type(_math):
-            continue
-        if callable(v) and type(v) not in _CALLABLE and not isinstance(v, (Cell, Struct, Char, Str, StrArr)):
+        if isinstance(v, Undef) or type(v) is Function or foreign(v):
             continue
         out.append(k[3:] if k.startswith("_k_") else k)
     return out

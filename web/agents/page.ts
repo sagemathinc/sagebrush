@@ -1451,7 +1451,7 @@ function renderHeader() {
   } else if (connectingTo !== null) {
     whoText(who, "wait", "", waitingFor ? RUNNER.waiting(connectingTo) : RUNNER.connecting(connectingTo));
   } else if (pairing && pairing.state === "paired") {
-    who.innerHTML = `<span class="conn wait"></span>${esc(agentName())} <small>connected: allow it in the dialog</small>`;
+    whoText(who, "wait", agentName(), "waiting: allow it in the dialog");
   } else if (inert(current())) {
     who.innerHTML = `<span class="conn"></span>Claude <small>not connected</small>`;
   } else {
@@ -1465,6 +1465,8 @@ function renderHeader() {
     ? `Connected to ${esc(agentName())} on your computer (your own login). Its files are in this browser's workspace; chats are kept in this browser.`
     : connBar?.kind === "restoring"
     ? "Reconnecting to Claude on your computer…"
+    : pairing && pairing.state === "paired" && connectingTo === null
+    ? `${esc(agentName())} is waiting for you to allow it in the dialog. Chats are kept in this browser only.`
     : inert(current())
     ? "Claude isn't connected to this page. Chats are kept in this browser only."
     : "Preview: the chat is driven by a <b>scripted</b> stand-in for Claude until you connect your own (\"Use your own Claude\"). Chats are kept in this browser only.";

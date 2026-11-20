@@ -1057,8 +1057,8 @@ try {
     // (the agent ends a turn whose page went away, and logs that end; no page got it live)
     logOnly(tR, { type: "turn_finished", outcome: "interrupted" });
     await until(`/The connection to the agent was lost while this ran/.test(document.body.innerText)`);
-    const st = await ev(`({ connected: document.querySelector('#connect').textContent === 'Connected', send: document.querySelector('#send').textContent, stop: document.querySelector('#stop').hidden, queue: document.querySelector('#queue').hidden, aria: document.querySelector('#send').getAttribute('aria-disabled') })`);
-    ok(!st.connected && st.send === "Queue" && st.stop && st.queue && st.aria === null, "resume: after a reload mid-turn, not connected yet: the turn is away; the composer's one button says Queue (no Stop, no Send now) and is enabled", st);
+    const st = await ev(`({ connected: document.querySelector('#connect').textContent === 'Connected', send: document.querySelector('#send').textContent, stop: document.querySelector('#stop').hidden, sendNow: document.querySelector('#send-now').hidden, keys: document.querySelector('#keys').textContent, aria: document.querySelector('#send').getAttribute('aria-disabled') })`);
+    ok(!st.connected && st.send === "Queue" && st.stop && st.sendNow && st.keys === "queue" && st.aria === null, "resume: after a reload mid-turn, not connected yet: the turn is away; the composer's one button says Queue (no Stop, no Send now) and is enabled", st);
     // (typed into the real composer while not connected, Shift+Enter)
     if (!(await ev(`!!document.querySelector('#editor textarea')`))) {
       const [x, y] = await ev(`(() => { const r = document.querySelector('#editor .mb-block').getBoundingClientRect(); return [r.x + r.width / 2, r.y + r.height / 2]; })()`);
