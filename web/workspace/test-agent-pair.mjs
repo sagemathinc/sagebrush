@@ -937,6 +937,37 @@ for (const [what, grant] of [["a folder, not Everything", { folders: ["/A"], wri
   ed.close();
   S.srv.stop(true);
 }
+// ---- edit.turn: a notebook.edit carries the turn it came from, added by the agent's server; taken out before the edit's
+// grammar is checked and handed to the page's apply beside the edit; only when both ends said it
+{
+  const S = server(pairOk), W = fakeWs();
+  const seen = [];
+  const P = new AgentPairing(S.port, { code: "abcd-efgh ijkl" }, { verbsFor: W.verbsFor, store: W.storeApi, trashEntry: W.trashEntry, page, notebookEdit: async (e, may, hold, turnId) => { seen.push({ e, turnId }); return { ok: true, inserted: [] }; } });
+  await P.paired();
+  await P.allow({ folders: ["/"], write: true, expires: null }, false);
+  await until(() => S.got.some((m) => m.method === "page.features"));
+  ok(S.got.find((m) => m.method === "page.features").params.features.includes("edit.turn"), "a page that edits notebooks offers edit.turn (page.features)");
+  const edit = (extra = {}) => ({ conversation: "c", path: "/A/doc.ipynb", ref: "r", base: 1, insert: [{ source: "1", after: null }], was: {}, ...extra });
+  const send = async (params) => { const n = seen.length; const r = await S.request("notebook.edit", params); return { r, got: seen.length > n ? seen.at(-1) : null }; };
+  P.hello.features = ["notebook.edit"];
+  const b0 = await send(edit({ turn_id: "t1" }));
+  ok(b0.got === null && b0.r.error?.data?.code === "invalid", "the agent didn't say edit.turn: an edit with turn_id is refused by the edit's grammar, nothing applied", b0.r);
+  P.hello.features = ["notebook.edit", "edit.turn"];
+  const b1 = await send(edit({ turn_id: "t1" }));
+  ok(b1.got?.turnId === "t1" && !("turn_id" in b1.got.e) && b1.r.result?.ok === true, "both said it: the turn taken out of the edit and handed beside it", b1.got);
+  const b2 = await send(edit());
+  ok(b2.got === null && b2.r.error?.data?.code === "invalid", "both said it: an edit without turn_id is refused, nothing applied (it can't pass the turn's check by leaving it out)", b2.r);
+  P.hello.features = ["notebook.edit"];
+  const b3 = await send(edit());
+  ok(b3.got && b3.got.turnId === undefined, "an agent that didn't say edit.turn: an edit without turn_id as before, no turn handed", b3.got);
+  P.hello.features = ["notebook.edit", "edit.turn"];
+  for (const bad of [5, "", "x".repeat(129), null]) {
+    const b = await send(edit({ turn_id: bad }));
+    ok(b.got === null && b.r.error?.data?.code === "invalid", `a turn_id that isn't an id (${JSON.stringify(bad).slice(0, 20)}): refused, nothing applied`, b.r);
+  }
+  await P.revoke();
+  S.srv.stop(true);
+}
 // ---- run.context: a run verb's call carries the chat and the turn it came from, added by the agent's server; taken out
 // before the params are checked and handed to the run beside them, both or neither; only when both ends said it
 {

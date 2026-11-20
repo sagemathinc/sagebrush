@@ -1161,11 +1161,14 @@ async function openWorkspace(again = false): Promise<boolean> {
 await openWorkspace();
 // An agent's edit of a notebook by cell (A12 step 1): in its chat's pane, the notebook opened there first (as a write
 // opens it), then the open notebook's own edit (notebook-artifact.ts): checked whole, applied, saved once.
-async function editNotebook(e: NotebookEdit, may: () => boolean, hold?: () => Promise<() => void>): Promise<unknown> {
+async function editNotebook(e: NotebookEdit, may: () => boolean, hold?: () => Promise<() => void>, from?: string): Promise<unknown> {
   const thread = state.threads.find((t) => t.id === e.conversation);
   if (!thread) throw new AgentError("invalid", "no such chat on this page");
   const turn = runningTurn(thread);
   if (!turn) throw new AgentError("busy", "this chat has no turn running: an edit comes from a turn");
+  // (edit.turn: the turn the edit says it came from must be the running one, else nothing changes: a late edit of a
+  //  turn that ended never lands in the next turn's notebook)
+  if (from !== undefined && from !== turn.turn_id) throw new AgentError("busy", "the turn this edit came from is no longer running in this chat: nothing changed");
   // (a chat that isn't the one shown has no pane here: its notebook isn't opened over the person's view)
   if (thread.id !== current().id) throw new AgentError("busy", "the person is looking at another chat: this one's notebook isn't open, so it isn't changed (ask them to open this chat)");
   // (the authority the host checks right before the change: the pairing's grant, and THIS turn still the running one)
