@@ -5474,9 +5474,17 @@ const historyDbReady = openHistoryDb({ onVersionChange: () => { nbHistory?.close
   await wsNow();
   // (an editor's own page, /?code= or /?tex=, shows nothing but its file, so it waits for the workspace however long
   // it takes to open, rather than taking the few seconds above as "your files can't be opened here"; wsReady settles
-  // to null only when the workspace really can't be opened)
+  // to null only when the workspace really can't be opened; it may never settle while another tab holds the
+  // workspace's lock, so the wait is said, and after a minute, why it may go on; /?tex= only in a build with the editor)
   const editorQ = new URLSearchParams(location.search);
-  if (!ws && (editorQ.has("code") || editorQ.has("tex"))) await wsReady;
+  if (!ws && (editorQ.has("code") || (typeof __SB_LATEX__ !== "undefined" && __SB_LATEX__ && editorQ.has("tex")))) {
+    const opening = document.createElement("p");
+    opening.className = "sb-opening";
+    opening.textContent = "Opening your files…";
+    document.body.prepend(opening);
+    const slow = setTimeout(() => { opening.textContent = "Still opening your files: another tab may be busy with them. This page opens the file once they're ready, or reload it."; }, 60000);
+    try { await wsReady; } finally { clearTimeout(slow); opening.remove(); }
+  }
   // (the LaTeX editor: in a build with it, and on, its hooks are installed, and /?tex=<fid> is its page; a build
   // without it has none of this: web/latex/boot.ts, web/build.ts SAGEBRUSH_LATEX_PREVIEW)
   // (either editor's page up: its Terminal button's pressed state set at once, as the Terminal's changes set it after)
