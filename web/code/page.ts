@@ -241,15 +241,15 @@ export async function mount(root: HTMLElement, host: Host): Promise<void> {
   //  while, said, typing still off (the page may yet go); a page come back from the back/forward cache is freed)
   let leaving = false, exiting = false;
   const stay = () => { exiting = false; leaving = false; ta.readOnly = false; };
-  addEventListener("pageshow", (ev) => { if (ev.persisted && exiting) stay(); }, { signal: life.signal });
+  addEventListener("pageshow", (ev) => { if (ev.persisted) stay(); }, { signal: life.signal });
   const exit = async (run: () => Promise<boolean>) => {
     if (exiting) return;
     exiting = true; ta.readOnly = true;
     let went = false;
-    try { went = await run(); } finally { if (!went) stay(); }
+    try { went = await run(); } catch (err: any) { say("Couldn't leave this page: " + String(err?.message ?? err).slice(0, 200)); } finally { if (!went) stay(); }
     if (went) {
       const t = setTimeout(() => { exiting = false; leaving = false; say("This page hasn't been left yet: try again."); }, 30000);
-      addEventListener("pagehide", () => clearTimeout(t), { once: true });
+      addEventListener("pagehide", () => clearTimeout(t), { once: true, signal: life.signal });
     }
   };
   mayLeave = async () => { await flush(); return !dirty() || confirm("Close this file? Your unsaved edits here are dropped."); };
@@ -273,7 +273,7 @@ export async function mount(root: HTMLElement, host: Host): Promise<void> {
     stopped = true; clearTimeout(saveTimer);
     say("Not saved");
     const reload = el("button", "", "Reload (theirs)"), copy = el("button", "", "Save mine as a copy");
-    reload.onclick = () => { if (dirty() && !confirm("Reload this file? Your unsaved edits here are dropped.")) return; void mount(root, host); };
+    reload.onclick = () => { if (exiting) return; if (dirty() && !confirm("Reload this file? Your unsaved edits here are dropped.")) return; void mount(root, host); };
     copy.onclick = () => void copyAndOpen();
     bar.replaceChildren(el("span", "", why), reload, copy);
     bar.hidden = false;
