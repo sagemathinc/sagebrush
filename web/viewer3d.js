@@ -1097,15 +1097,28 @@
         canvas.style.height = h + "px";
       }
       if (!fitted && scene.fit !== false) fit();
+      gl.bindFramebuffer(gl.FRAMEBUFFER, null);
       gl.viewport(0, 0, canvas.width, canvas.height);
       gl.clearColor(0, 0, 0, 0);
       gl.clear(gl.COLOR_BUFFER_BIT | gl.DEPTH_BUFFER_BIT);
-      gl.enable(gl.DEPTH_TEST);
       const { eye, M } = camera(), P = projection();
+      drawWith({ M, P, eye, height: canvas.height });
+      placeLabels(M, P);
+      snapshot();
+    }
+
+    // The scene's draws for one view: M (display coordinates to the view's), P (its projection), eye (the eye, in
+    // display coordinates: the volumes' rays start there) and height (the viewport's, in pixels: world-sized points
+    // scale with it), into whatever framebuffer and viewport are bound. The page's view (draw, above) and a headset's
+    // two eyes (web/viewer3d-xr.js) both come here.
+    function drawWith({ M, P, eye, height }) {
+      const dpr = window.devicePixelRatio || 1;
+      gl.enable(gl.DEPTH_TEST);
       gl.useProgram(prog.p);
       gl.uniformMatrix4fv(prog.M, false, new Float32Array(M));
       gl.uniformMatrix4fv(prog.P, false, new Float32Array(P));
-      const pixPerUnit = ortho ? (canvas.height / 2) / halfH() : (canvas.height / 2) / Math.tan(fov / 2);
+      // (pixels per display unit at distance 1: P[5] is 1/tan(fov/2) for the perspective, 1/halfH for the orthographic)
+      const pixPerUnit = (height / 2) * P[5];
       const run = (d) => {
         gl.bindBuffer(gl.ARRAY_BUFFER, d.p);
         gl.vertexAttribPointer(prog.ap, 3, gl.FLOAT, false, 0, 0);
@@ -1189,8 +1202,6 @@
         gl.useProgram(prog.p);
       }
       gl.depthMask(true);
-      placeLabels(M, P);
-      snapshot();
     }
 
     // screen position (CSS pixels) of a display point
@@ -1408,6 +1419,23 @@
     if (wrap.requestFullscreen) mk("Full screen", "Full screen (Esc leaves)", () => {
       if (document.fullscreenElement) document.exitFullscreen(); else wrap.requestFullscreen().catch(() => {});
     });
+    // (a headset: "Enter VR", where the page offers the headset module (SagebrushViewer3d.xrModule, web/viewer3d-xr.js:
+    //  the site's pages set it; a Jupyter export or a snapshot never does) and the browser has immersive VR; scenes of
+    //  version 1 (Graphics3d) for now. The module loads only when pressed.)
+    let xr = null;
+    const xrModule = window.SagebrushViewer3d && window.SagebrushViewer3d.xrModule;
+    if (xrModule && (scene.version ?? 1) === 1 && typeof navigator !== "undefined" && navigator.xr && navigator.xr.isSessionSupported) {
+      navigator.xr.isSessionSupported("immersive-vr").then((ok) => {
+        if (!ok) return;
+        const vrB = mk("Enter VR", "This plot in your headset: hold a grip to move and turn it, thumbstick to scale and turn it, B or Y to leave", () => {
+          if (xr) return xr.end();
+          import(xrModule)
+            .then((m) => m.enter({ gl, drawWith, half: hx, onEnd: () => { xr = null; vrB.textContent = "Enter VR"; redraw(); } }))
+            .then((h) => { xr = h; vrB.textContent = "Exit VR"; })
+            .catch((e) => { vrB.title = "Couldn't start VR: " + ((e && e.message) || e); });
+        });
+      }, () => {});
+    }
     const help = document.createElement("div");
     help.style.cssText = "position:absolute;left:6px;bottom:34px;max-width:300px;padding:6px 9px;border-radius:6px;display:none;" +
       "background:rgba(20,20,24,.86);color:#eee;font:11px/1.45 system-ui,sans-serif;pointer-events:none";
@@ -1551,7 +1579,7 @@
     canvas.addEventListener("keyup", (e) => { keys.delete(e.code); });
     window.addEventListener("gamepadconnected", () => { if (fly) redraw(); });
     // for tests and embedding pages: the camera state and the modes
-    canvas.sagebrush = { get view() { return { ...view, t: [...view.t] }; }, get fly() { return fly; }, setFly, home, focus, pick };
+    canvas.sagebrush = { get view() { return { ...view, t: [...view.t] }; }, get fly() { return fly; }, setFly, home, focus, pick, get xr() { return xr; } };
     if (typeof ResizeObserver !== "undefined") new ResizeObserver(redraw).observe(container);
     if (scene.fill) window.addEventListener("resize", redraw);
     document.addEventListener("fullscreenchange", redraw);
