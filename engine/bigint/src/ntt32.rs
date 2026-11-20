@@ -153,6 +153,7 @@ pub fn mul_words(a: &[u32], b: &[u32]) -> Vec<u32> {
 mod tests {
     use super::*;
     use dashu_int::UBig;
+    #[cfg(not(target_os = "wasi"))]
     use std::process::Command;
 
     fn rng(seed: &mut u64) -> u32 {
@@ -224,6 +225,24 @@ mod tests {
 
     #[test]
     fn cache_and_fresh_memory_have_separate_bounds() {
+        // (the shared cache is process-wide: other tests' products fill it.
+        // Natively the check runs in its own process, so no concurrent test
+        // can; under WASI, whose tests run one after another in a single
+        // process, it starts from an emptied cache)
+        const CHILD: &str = "SAGEBRUSH_NTT32_CACHE_CHILD";
+        #[cfg(not(target_os = "wasi"))]
+        if std::env::var_os(CHILD).is_none() {
+            let status = Command::new(std::env::current_exe().unwrap())
+                .args(["--exact", "ntt32::tests::cache_and_fresh_memory_have_separate_bounds"])
+                .env(CHILD, "1")
+                .status()
+                .unwrap();
+            assert!(status.success());
+            return;
+        }
+        #[cfg(target_os = "wasi")]
+        let _ = CHILD;
+        CACHE.lock().unwrap_or_else(|e| e.into_inner()).clear();
         let a = vec![u32::MAX; 10_000];
         let _ = mul_words(&a, &a);
         let (tables, bytes) = ntt_core::cache_stats(&CACHE);
@@ -241,6 +260,9 @@ mod tests {
         // cache; caller inputs are outside this fresh-operation bound.
     }
 
+    // (where a panic unwinds, in its own process: under WASI a Stop traps and
+    // there are no processes)
+    #[cfg(all(panic = "unwind", not(target_os = "wasi")))]
     #[test]
     fn stop_unwinds_and_the_next_product_recovers() {
         const CHILD: &str = "SAGEBRUSH_NTT32_STOP_CHILD";
