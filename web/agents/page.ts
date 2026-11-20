@@ -638,7 +638,7 @@ function mountSpace(path: string, h: Host) {
   const frame = el("iframe", "space-frame");
   frame.src = "/space/?embed=1";
   frame.title = "The space " + path;
-  frame.allow = "fullscreen";
+  frame.allow = "fullscreen; xr-spatial-tracking"; // (and a headset: the space's Enter VR, src/xr.js)
   h.el.replaceChildren(head, frame);
   h.el.classList.add("space-host");
   let alive = true, ready = false, rev = -1, fid: string | undefined, text = "", space: Record<string, unknown> | null = null, shown = "";

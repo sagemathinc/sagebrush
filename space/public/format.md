@@ -33,7 +33,7 @@ A space is a board in 3D: notes, code with its output, files and 3D plots, place
 - `near`: another object's id; this one is placed beside it (a sample beside the code it illustrates).
 - Don't give `position`: the layout is computed and is the same each time for the same file.
 
-Sage 3D plots that run in Sagebrush (each becomes the object): `plot3d(f, (x, a, b), (y, c, d))`, `icosahedron()`, `dodecahedron(color='orange')`. Not yet: `polytopes.icosahedron().plot()` (Sagebrush's `polytopes` has no `.plot()`).
+Sage 3D graphics that run in the space (checked Nov 20 2026; each becomes the object): `plot3d`, `parametric_plot3d`, `implicit_plot3d`, `spherical_plot3d`, `cylindrical_plot3d`, `revolution_plot3d`, `sphere`, `cube`, `tetrahedron`, `octahedron`, `icosahedron`, `dodecahedron`, `point3d`, `line3d`, `arrow3d`, `polygon3d`, `text3d`, sums of these (`P + Q`), and the options `color=` (names such as 'seagreen', or 'rainbow' as a colormap), `opacity=`, `mesh=`, `frame=`. Not yet: `list_plot3d`, and `polytopes.X().plot()`.
 
 Notes are Markdown with math (`$...$`, `$$...$$`) typeset by KaTeX; raw HTML is limited to formatting, and pictures from other sites aren't shown.
 

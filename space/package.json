@@ -15,6 +15,7 @@
     "three": "0.187.0"
   },
   "devDependencies": {
-    "esbuild": "0.28.2"
+    "esbuild": "0.28.2",
+    "iwer": "2.8.0"
   }
 }

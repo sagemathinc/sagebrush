@@ -9,6 +9,8 @@ import { OrbitControls } from "three/examples/jsm/controls/OrbitControls.js";
 //  math marked for KaTeX; a space is the agent's or anyone's text, shown on the site's origin)
 import { render as markdown } from "../../web/markdown.ts";
 import { layout } from "./layout.js";
+import { texToText } from "./tex.js";
+import { setupXR } from "./xr.js";
 import { highlight, editor } from "./code.js";
 import { run, interrupt, sceneObject, SCENE } from "./run.js";
 
@@ -16,7 +18,8 @@ const $ = (s) => document.querySelector(s);
 const esc = (s) => String(s ?? "").replace(/[&<>"]/g, (c) => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;" })[c]);
 
 // ---------------------------------------------------------------- the scene
-const renderer = new THREE.WebGLRenderer({ antialias: true });
+// (alpha: in AR the room shows where the space has no background)
+const renderer = new THREE.WebGLRenderer({ antialias: true, alpha: true });
 renderer.setPixelRatio(Math.min(devicePixelRatio, 2));
 renderer.setSize(innerWidth, innerHeight);
 $("#view").appendChild(renderer.domElement);
@@ -65,7 +68,8 @@ function canvasFor(nd, px) {
 const bgOf = (nd) => nd.kind === "note" ? "#f4ecd8" : nd.kind === "code" ? T.code : nd.kind === "plot3d" ? T.plot : "#" + new THREE.Color().setHSL(hue(nd.group ?? nd.kind), 0.45, T.fileL).getHexString();
 const fgOf = (nd) => nd.kind === "note" ? "#2b2a26" : T.fg;
 const sideColor = (nd) => new THREE.Color().setHSL(hue(nd.group ?? nd.kind), 0.35, nd.kind === "note" ? 0.75 : T.sideL);
-const shortTitle = (nd) => nd.kind === "file" ? nd.title.split("/").pop() : nd.title;
+// (a title as drawn on a face: its math as text, texToText; the drawer typesets it)
+const shortTitle = (nd) => (nd.kind === "file" ? nd.title.split("/").pop() : texToText(nd.title));
 function texture(c) {
   const tex = new THREE.CanvasTexture(c);
   tex.colorSpace = THREE.SRGBColorSpace;
@@ -118,14 +122,19 @@ function faceTexture(nd) {
   }
   const mono = nd.kind !== "note";
   const fs = mono ? c.height * (nd.kind === "file" ? 0.05 : 0.04) : c.height * 0.045;
-  for (const raw of String(nd.kind === "plot3d" ? "" : nd.text ?? "").split("\n")) {
+  for (const raw of String(nd.kind === "plot3d" ? "" : nd.kind === "note" ? texToText(nd.text).replace(/\n\s*\n(\s*\n)+/g, "\n\n") : nd.text ?? "").split("\n")) {
     if (y > c.height - pad) break;
     let line = raw, size = fs, weight = "";
     if (!mono && /^#+\s/.test(raw)) { line = raw.replace(/^#+\s/, ""); size = fs * 1.3; weight = "600 "; }
     g.font = `${weight}${size}px ${mono ? "ui-monospace, Menlo, monospace" : "Georgia, serif"}`;
     g.fillStyle = fg;
-    g.fillText(mono ? line : line.replace(/\*\*|`/g, ""), pad, y, c.width - 2 * pad);
-    y += size * 1.35;
+    // (a note's paragraph wrapped to the face, never squeezed; code keeps its lines)
+    const parts = mono ? [line] : wrap(g, line.replace(/\*\*|`/g, ""), c.width - 2 * pad);
+    for (const part of parts.length ? parts : [""]) {
+      if (y > c.height - pad) break;
+      g.fillText(part, pad, y, c.width - 2 * pad);
+      y += size * 1.35;
+    }
   }
   if (nd.svg) {
     // (a figure the code made: drawn in the lower part once its image has loaded)
@@ -207,8 +216,11 @@ function setPlot(group, obj) {
 
 // semantic zoom: 0 far (a block in its group's color), 1 its title, 2 its face; textures made lazily, a few a frame
 const LEVEL_DIST = { file: [14, 45], note: [26, 90], code: [26, 90], plot3d: [26, 90] };
+// (where you see from: the camera's place in the world, which in a headset is your head's)
+const eyeV = new THREE.Vector3();
+const eye = () => camera.getWorldPosition(eyeV);
 function stepZoom() {
-  const cam = camera.position, pending = [];
+  const cam = eye().clone(), pending = [];
   for (const o of objects) {
     const nd = o.userData.node, [nearD, midD] = LEVEL_DIST[nd.kind] ?? LEVEL_DIST.file;
     const d = cam.distanceTo(o.position);
@@ -287,16 +299,17 @@ function stepLandmarks() {
   const placed = [], v = new THREE.Vector3(), pxPerUnit = innerHeight / (2 * Math.tan(THREE.MathUtils.degToRad(camera.fov / 2)));
   const order = [...landmarks].sort((a, b) => b.members.length - a.members.length);
   for (const l of order) {
-    const d = camera.position.distanceTo(l.center);
+    const d = eye().distanceTo(l.center);
     const a = THREE.MathUtils.clamp((d - l.radius * 1.2) / (l.radius * 1.5), 0, 1);
-    const h = Math.max(1.6, d * 0.03) * Math.min(1.5, 0.8 + Math.sqrt(l.members.length) / 10);
+    // (smaller in a headset, where you're among them rather than looking at a screen)
+    const h = Math.max(1.6, d * 0.03) * Math.min(1.5, 0.8 + Math.sqrt(l.members.length) / 10) * (renderer.xr.isPresenting ? 0.45 : 1);
     l.sprite.scale.set(h * l.sprite.userData.aspect, h, 1);
     let show = a > 0.02;
     if (show) {
       v.copy(l.sprite.position).project(camera);
       if (v.z > 1) show = false;
       else {
-        const x = (v.x + 1) / 2 * innerWidth, y = (1 - v.y) / 2 * innerHeight, dist = camera.position.distanceTo(l.sprite.position);
+        const x = (v.x + 1) / 2 * innerWidth, y = (1 - v.y) / 2 * innerHeight, dist = eye().distanceTo(l.sprite.position);
         const hh = h * pxPerUnit / dist, ww = hh * l.sprite.userData.aspect;
         const r = [x - ww / 2, y - hh / 2, x + ww / 2, y + hh / 2];
         if (placed.some((q) => r[0] < q[2] && r[2] > q[0] && r[1] < q[3] && r[3] > q[1])) show = false;
@@ -457,7 +470,9 @@ const back = () => go(history, future);
 const forward = () => go(future, history);
 function stepFlight(now) {
   if (!flight) return;
-  const u = Math.min(1, (now - flight.t0) / flight.ms), e = u < 0.5 ? 2 * u * u : 1 - Math.pow(-2 * u + 2, 2) / 2;
+  // (clamped below too: a frame's time can be a little before the flight's start, which flung the camera far out for
+  //  that frame)
+  const u = Math.max(0, Math.min(1, (now - flight.t0) / flight.ms)), e = u < 0.5 ? 2 * u * u : 1 - Math.pow(-2 * u + 2, 2) / 2;
   // (an arc: up and over, so a long flight passes above the space instead of through it)
   const lift = Math.sin(Math.PI * u) * flight.from.distanceTo(flight.to) * 0.25;
   camera.position.lerpVectors(flight.from, flight.to, e).add(new THREE.Vector3(0, lift, 0));
@@ -480,7 +495,7 @@ $("#dims").onclick = () => {
 };
 function stepMorph(now) {
   if (!morph) return;
-  const u = Math.min(1, (now - morph.t0) / morph.ms), e = u * u * (3 - 2 * u);
+  const u = Math.max(0, Math.min(1, (now - morph.t0) / morph.ms)), e = u * u * (3 - 2 * u);
   const P = new Float64Array(morph.from.length);
   for (let i = 0; i < P.length; i++) P[i] = morph.from[i] + (morph.to[i] - morph.from[i]) * e;
   place(P);
@@ -790,7 +805,7 @@ addEventListener("keyup", (e) => held.delete(e.key.toLowerCase()));
 addEventListener("blur", () => held.clear());
 let lastFly = performance.now();
 function stepFly(now) {
-  const dt = Math.min(0.1, (now - lastFly) / 1000);
+  const dt = Math.max(0, Math.min(0.1, (now - lastFly) / 1000));
   lastFly = now;
   if (!held.size || typing()) return;
   const fwd = new THREE.Vector3().subVectors(controls.target, camera.position);
@@ -881,16 +896,41 @@ async function start() {
 function fail(e) { $("#status").textContent = "couldn't load: " + (e?.message ?? e); }
 start().catch(fail);
 
+// ---------------------------------------------------------------- a headset (src/xr.js): Enter VR, Enter AR
+const xr = setupXR({
+  renderer, scene, camera, controls, runnable,
+  pickables: () => pickables,
+  select: (nd) => setSelected(nd ? nd.id : null),
+  run: (nd) => runNode(nd),
+  glow: (nd, v) => setGlow(nd, v),
+  theme: () => T,
+  changed(on, mode) {
+    $("#vr").textContent = on && mode === "immersive-vr" ? "Exit VR" : "Enter VR";
+    $("#ar").textContent = on && mode === "immersive-ar" ? "Exit AR" : "Enter AR";
+  },
+});
+const xrFail = (e) => ($("#status").textContent = "couldn't start: " + (e?.message ?? e));
+$("#vr").onclick = () => xr.enter("immersive-vr").catch(xrFail);
+$("#ar").onclick = () => xr.enter("immersive-ar").catch(xrFail);
+xr.supported("immersive-vr").then((ok) => ($("#vr").hidden = !ok));
+xr.supported("immersive-ar").then((ok) => ($("#ar").hidden = !ok));
+
+let lastTick = performance.now();
 function tick(now) {
-  stepFlight(now);
-  stepFly(now);
+  const dt = Math.max(0, Math.min(0.1, (now - lastTick) / 1000));
+  lastTick = now;
+  if (xr.presenting) xr.step(dt);
+  else {
+    stepFlight(now);
+    stepFly(now);
+    controls.update();
+  }
   stepMorph(now);
-  controls.update();
   if (space) { stepZoom(); stepLandmarks(); }
   renderer.render(scene, camera);
-  requestAnimationFrame(tick);
 }
-requestAnimationFrame(tick);
+// (the renderer's loop: the browser's frames, or the headset's while in VR)
+renderer.setAnimationLoop(tick);
 // (for tests and the curious: the loaded space and the camera)
 // (the API for an agent driving the page, and for tests: what is selected, select an object (and fly to it), the
 // space, Back and Forward)
@@ -899,4 +939,5 @@ window.whitespace = {
   get selection() { return selectionOf(selected); },
   select(id) { const nd = space?.nodes.find((n) => n.id === id); if (!nd) return false; openOverlay(nd); return true; },
   back, forward, frame: () => frame(positions, true), flyTo,
+  xr,
 };

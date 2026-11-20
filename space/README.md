@@ -64,16 +64,16 @@ python3 web/serve.py 8765                                       # http://127.0.0
 and in another terminal:
 
 ```sh
-SAGEBRUSH_AGENT_PAGE=http://127.0.0.1:8765/agents/ npx -y https://agents.sagebrush.cloud/agents/sagebrush-agent-0.7.1.tgz --origin http://127.0.0.1:8765
+SAGEBRUSH_AGENT_PAGE=http://127.0.0.1:8765/agents/ npx -y https://agents.sagebrush.cloud/agents/sagebrush-agent-0.7.6.tgz --origin http://127.0.0.1:8765
 ```
 
 Open the link it prints, press Connect, and Allow. Then ask, for example:
 
 > Read the space format at https://raw.githubusercontent.com/sagemathinc/sagebrush/space-prototype/space/public/format.md (all of it, verbatim). Then make a space, /polytopes.space.json, with notes on the regular polytopes and Sage code I can run that plots the icosahedron, dodecahedron and the others in 3D.
 
-Expect two or three web-fetch approvals, all for the format: the fetch tool gives Claude a summary of the page rather than the page itself, so it often asks again. The file opens beside the chat as a space; if it shows as JSON text instead, the page was built without the space: `grep -c space-frame web/dist/agents/agents.js` says 0. Build again (the four commands above, from `bun web/build.ts` on), then reload the page and click the file's card.
+With agent 0.7.6, fetches return the page itself (no summary), and "Allow for this turn" covers a turn's fetches. The file opens beside the chat as a space; if it shows as JSON text instead, the page was built without the space: `grep -c space-frame web/dist/agents/agents.js` says 0. Build again (the four commands above, from `bun web/build.ts` on), then reload the page and click the file's card.
 
-Over this connection Claude has the web and your Sagebrush files, not your disk, and each web fetch asks you first. So a space of a codebase on GitHub (such as "lay out the Rust code for modular forms") costs one approval per file it reads. `modular-forms.space.json` (above) is that space, already made by `gen-modular.mjs` from a checkout.
+Over this connection Claude has the web and your Sagebrush files, not your disk. With 0.7.6 it reads public GitHub repositories without asking, so a space of a codebase on GitHub (such as "lay out the Rust code for modular forms") is practical; older agents asked once per file. `modular-forms.space.json` (above) is that space, already made by `gen-modular.mjs` from a checkout.
 
 `bun space/test-agents-space.mjs` (from the repository's root, after the build above) checks this end to end in headless Chromium, with a stand-in for the agent.
 
@@ -84,8 +84,17 @@ Over this connection Claude has the web and your Sagebrush files, not your disk,
 To use the Agents page there, start the agent with that site's origin, e.g. for https://space.sagebrush.cloud:
 
 ```sh
-SAGEBRUSH_AGENT_PAGE=https://space.sagebrush.cloud/agents/ npx -y https://agents.sagebrush.cloud/agents/sagebrush-agent-0.7.1.tgz --origin https://space.sagebrush.cloud
+SAGEBRUSH_AGENT_PAGE=https://space.sagebrush.cloud/agents/ npx -y https://agents.sagebrush.cloud/agents/sagebrush-agent-0.7.6.tgz --origin https://space.sagebrush.cloud
 ```
+
+## In a headset (Meta Quest 3, and other WebXR browsers)
+
+**Enter VR** (in the panel, where the browser has WebXR) puts you in the space, where a slab is about a metre wide; **Enter AR** puts the space in your room through the headset's passthrough.
+
+- Point a controller at an object and pull the **trigger**: its reading panel opens in front of you (its text, code and output), with **Run**, scrolling and **Close**. The object is selected, as a click selects it, so the agent sees it.
+- **Left thumbstick**: move where you look. **Right thumbstick**: up and down, and turn in 30° steps. Hold the **grip** to go 4× faster. **A** or **X** closes the panel.
+- WebXR needs a secure page: the https alpha, or your laptop's server over USB (`adb reverse tcp:8765 tcp:8765`, then http://localhost:8765/ in the headset's browser).
+- `node space/test-xr.mjs` checks it without a headset, on Meta's emulated Quest 3 (IWER).
 
 ## Running code
 
