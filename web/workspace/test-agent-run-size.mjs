@@ -31,7 +31,9 @@ const CEILING_RAW = 64 * 1024, CEILING_GZIP = 24 * 1024;
 //  (+1,979 / +628), measured by CI (bun 1.4.4, Node 24.21.0's gzip -9) on the head merged with master 48f0b854; + 64)
 // (an agent's run of the notebook open on its page, in that notebook (runInPage): 25,150 / 9,659 -> 27,846 / 10,446,
 //  measured by CI on the shipped build, the head merged with master 79d8ac8a; + 64)
-const CAP_RAW = 27910, CAP_GZIP = 10510;
+// (28,377 / 10,626: Nov 20 2026, a page's run_notebook handed to today's run when the page takes it and then can't
+//  (PageRun.inputs()'s "fallback"), master 595eb958: 28,313 / 10,562 measured on the shipped build, + 64)
+const CAP_RAW = 28377, CAP_GZIP = 10626;
 // (latex_build's first use: this chunk and the three LaTeX chunks it fetches (the page module, its tools, Run's code),
 //  together, so that moving code between them can't hide growth (daybreak2's Q1 aggregate cap: the landing measurement
 //  + 64 each), measured on master 4d4225f9 after the review's fixes: 23,171 + 88,703 + 16,494 + 17,241 = 145,609 raw,
