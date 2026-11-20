@@ -170,6 +170,11 @@ lifecycle("keyword-only default", ["a", "*r", "k:"], ["a", "*r", "k:="], ["a", "
   const dotted = { api: 1, level: 61, modules: { a: { since: 1, names: { b: { kind: "function", since: 61, params: "opaque" } } } } };
   const both = { ...dotted, modules: { ...dotted.modules, "a.b": { since: 61, names: {} } } };
   check("module a.b at the base's level fails beside name b of module a", baseErrors(both, dotted).some((e) => e.startsWith("module a.b is recorded at level 61")), baseErrors(both, dotted).join("; "));
+  // *args and **kwargs renamed (a compatible change: widenParams keeps their levels) are the same entries
+  const star = api(61, { f: f(sig(["*args", "**kw"], 1)) });
+  const renamed = api(61, { f: f(sig(["*rest", "**kwds"], 1)) });
+  check("*args and **kwargs renamed at their levels pass", baseErrors(renamed, star).length === 0, baseErrors(renamed, star).join("; "));
+  check("**kwargs added at the base's level the base lacks fails", baseErrors(api(61, { f: f([...sig(["*args"], 1), ...sig(["**kw"], 61)]) }), api(61, { f: f(sig(["*args"], 1)) })).some((e) => e.startsWith("m:f(**) is recorded at level 61")));
   // the level can't fall below the base's
   check("a level below the base's fails", baseErrors(api(60, base.modules.m.names), base).some((e) => e.includes("below the base branch's 61")));
 }
@@ -202,6 +207,15 @@ lifecycle("keyword-only default", ["a", "*r", "k:"], ["a", "*r", "k:="], ["a", "
     const guarded = run("--check", "--base", "HEAD");
     check("CLI: --check --base fails on it", guarded.status === 1, `status ${guarded.status}`);
     check("CLI: the message names the entry and the base's level", guarded.stderr.includes("m:f(grow) is recorded at level 61, but the base branch's level 61 surface doesn't have it"), guarded.stderr);
+    // --base=REF is the same guard; a misspelled or extra argument, or a ref like an option, is a usage error (never
+    // a silent pass); a ref this checkout lacks fails and says so
+    const eq = run("--check", "--base=HEAD");
+    check("CLI: --check --base=HEAD fails on it too", eq.status === 1 && eq.stderr.includes("m:f(grow) is recorded at level 61"), `status ${eq.status} ${eq.stderr}`);
+    for (const bad of [["--check", "--bases", "HEAD"], ["--check", "--base"], ["--check", "--base="], ["--check", "--base", "--output=x"], ["--check", "--base", "HEAD", "x"], ["--update", "--base", "HEAD"], ["--update", "x"], ["--check", "--base=-x"], ["--chek"]]) {
+      check(`CLI: ${bad.join(" ")} is a usage error`, run(...bad).status === 2, bad.join(" "));
+    }
+    const missing = run("--check", "--base", "no-such-ref");
+    check("CLI: a ref this checkout lacks fails with a message", missing.status === 1 && missing.stderr.includes("the base branch's core-api-surface.json at no-such-ref can't be read (fatal: ") && !missing.stderr.includes("    at "), missing.stderr);
     check("CLI: the message gives the restoring command with the ref", guarded.stderr.includes("git checkout HEAD -- core-api-surface.json && node scripts/core-api-surface.mjs --update"), guarded.stderr);
     // --update on the merged file moves nothing (why the message restores the base's file first)
     const stuck = run("--update");

@@ -312,14 +312,17 @@ function recordedEntry(api, name) {
 
 // Every level a surface records, by key: "module mod", "mod:Name", "mod:Name.member", "mod:f(p)" for a parameter,
 // "mod:f(p)=" for a parameter's default_since, and "removed where (kind)" for a recorded removal.  (A module's
-// own name has dots, so ":" separates it from its names: module "a.b" and module a's name b stay two keys.)
+// own name has dots, so ":" separates it from its names: module "a.b" and module a's name b stay two keys.  *args
+// and **kwargs are keyed by kind, "mod:f(*)" and "mod:f(**)", as widenParams matches them: renaming one is
+// compatible and keeps its level.)
 function levelsByPath(api) {
   const out = new Map();
   const params = (path, e) => {
     if (!Array.isArray(e.params)) return;
     for (const p of e.params) {
-      out.set(`${path}(${p.name})`, p.since);
-      if (p.default_since !== undefined) out.set(`${path}(${p.name})=`, p.default_since);
+      const key = `${path}(${p.kind === "varargs" ? "*" : p.kind === "varkw" ? "**" : p.name})`;
+      out.set(key, p.since);
+      if (p.default_since !== undefined) out.set(`${key}=`, p.default_since);
     }
   };
   const entry = (path, e) => {
@@ -350,7 +353,7 @@ export function baseErrors(recorded, base, ref = "BASE") {
   const had = levelsByPath(base);
   for (const [path, since] of levelsByPath(recorded)) {
     if (since > base.level) continue;
-    if (!had.has(path)) errs.push(`${path} is recorded at level ${since}, but the base branch's level ${base.level} surface doesn't have it: record the branch's additions again on the base's surface, \`git checkout ${ref} -- core-api-surface.json && node scripts/core-api-surface.mjs --update\` (they move to the next free level), then set CORE_API_LEVEL`);
+    if (!had.has(path)) errs.push(`${path} is recorded at level ${since}, but the base branch's level ${base.level} surface doesn't have it: record the branch's additions again on the base's surface, with the base merged in: \`git checkout ${ref} -- core-api-surface.json && node scripts/core-api-surface.mjs --update\` (they move to the next free level), then set CORE_API_LEVEL`);
     else if (had.get(path) !== since) errs.push(`${path} is recorded at level ${since}, the base branch's surface has it at level ${had.get(path)}`);
   }
   return errs;
@@ -464,8 +467,23 @@ function pkgsetConstants() {
   return { api: Number(/export const CORE_API = (\d+);/.exec(src)[1]), level: Number(/export const CORE_API_LEVEL = (\d+);/.exec(src)[1]) };
 }
 
+function usage() {
+  console.error("usage: core-api-surface.mjs --check [--base REF] | --update");
+  process.exit(2);
+}
+
 if (process.argv[1] === fileURLToPath(import.meta.url)) {
   const mode = process.argv[2];
+  // (the arguments, before any work: --update takes none; --check only `--base REF` or `--base=REF`, the base
+  // branch's surface from git, e.g. the pull request's base commit.  Anything else is a usage error, so a misspelled
+  // guard never passes silently, and a ref like an option never reaches git.)
+  const args = process.argv.slice(3);
+  let ref;
+  if (mode !== "--check" && mode !== "--update") usage();
+  if (mode === "--check" && args.length === 1 && args[0].startsWith("--base=")) ref = args[0].slice("--base=".length);
+  else if (mode === "--check" && args.length === 2 && args[0] === "--base") ref = args[1];
+  else if (args.length) usage();
+  if (ref !== undefined && (!ref || ref.startsWith("-"))) usage();
   const recorded = existsSync(FILE) ? JSON.parse(readFileSync(FILE, "utf8")) : null;
   const consts = pkgsetConstants();
   const gen = process.env.CORE_API_GENERATED ? JSON.parse(readFileSync(process.env.CORE_API_GENERATED, "utf8")) : generate();
@@ -490,21 +508,20 @@ if (process.argv[1] === fileURLToPath(import.meta.url)) {
   } else if (mode === "--check") {
     if (!recorded) throw new Error("core-api-surface.json is missing (node scripts/core-api-surface.mjs --update)");
     const errs = checkErrors(recorded, gen, changes, consts, readFileSync(FILE, "utf8").length);
-    // (--base REF: the base branch's surface, from git, e.g. the pull request's base commit)
-    const at = process.argv.indexOf("--base");
-    if (at > 0) {
-      const ref = process.argv[at + 1];
-      if (!ref) throw new Error("--base needs a git ref");
-      const text = execFileSync("git", ["show", `${ref}:core-api-surface.json`], { cwd: root, encoding: "utf8", maxBuffer: 2 * LIMITS.bytes });
-      errs.push(...baseErrors(recorded, JSON.parse(text), ref));
+    if (ref !== undefined) {
+      let base;
+      try {
+        base = JSON.parse(execFileSync("git", ["show", `${ref}:core-api-surface.json`], { cwd: root, encoding: "utf8", maxBuffer: 2 * LIMITS.bytes, stdio: ["ignore", "pipe", "pipe"] }));
+      } catch (e) {
+        const why = String(e.stderr || e.message || e).trim().split("\n")[0].slice(0, 300);
+        errs.push(`the base branch's core-api-surface.json at ${ref} can't be read (${why}): fetch the base commit first`);
+      }
+      if (base) errs.push(...baseErrors(recorded, base, ref));
     }
     if (errs.length) {
       console.error("the Core API contract check failed:\n  " + errs.join("\n  "));
       process.exit(1);
     }
     console.log(`Core API ${recorded.api} level ${recorded.level}: ${countEntries(recorded)} entries, unchanged`);
-  } else {
-    console.error("usage: core-api-surface.mjs --check [--base REF] | --update");
-    process.exit(2);
-  }
+  } else usage();
 }
