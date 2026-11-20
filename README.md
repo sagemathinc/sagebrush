@@ -622,27 +622,26 @@ T_2 and T_3 at about 100 levels up to 2003.
 
 ### Merge queue on master
 
-After the queue-aware workflows land, a repository administrator opens **Settings →
-Rules → Rulesets**, creates or edits a branch ruleset targeting `master`, sets it
-**Active**, and enables **Require a pull request**, **Require status checks** and
-**Require merge queue**. Require the GitHub Actions checks `ci` and `app-ci`.
-`ci` aggregates the selected core jobs (including size); `app-ci` requires the page
-and all three desktop platforms. Do not require individual path-selected jobs,
-nightly jobs, mobile builds or release/signing jobs. The app workflow reports its
-checks on every pull request, including prose-only changes, so a required check
-cannot stay pending because of a workflow path filter.
+`master`'s branch ruleset already requires GitHub's merge queue. Once the queue-aware workflows have landed, a
+repository administrator adds the required checks to that ruleset (**Settings → Rules → Rulesets**):
 
-Choose **Squash**, build concurrency **3**, minimum merge group size **1**, maximum
-**3**, status-check timeout **90 minutes**, and **Only merge non-failing pull
-requests**. Build concurrency limits speculative queue builds; merge limits control
-how many passing entries land together, not how many CI builds GitHub creates.
-Every queue run tests its cumulative head with the full tier; labels such as
-`full-ci` cannot be lost. The slower nightly tier stays nightly. Size comparisons
-use that payload's `base_sha` and `head_sha`, not a moving master or `HEAD^1`.
-An epoch-reset pull request must enter and pass the queue alone, with group size
-**1** for that entry. If GitHub cannot enforce this per entry, the guarded merge
-script must hold it until the queue is empty and admit no other entry until it
-merges (or leaves the queue). Never batch an epoch reset with another change.
+- **Require status checks to pass**, with the GitHub Actions checks `ci` and `app-ci`. `ci` aggregates the
+  selected core jobs (size included); `app-ci` requires the page and all three desktop platforms. Leave
+  **Require branches to be up to date** off: the queue tests each entry on top of the entries ahead of it. Do
+  not require individual path-selected jobs, nightly jobs, mobile builds or release/signing jobs. Both workflows
+  report on every pull request, prose-only ones included, so a required check never stays pending because of a
+  path filter. `app-ci` appears in the check picker only after it has run once.
+- **Require a pull request before merging**, with **0** required approvals: changes are reviewed outside GitHub's
+  approval flow.
+- In **Require merge queue**: merge method **Squash**, build concurrency **4**, minimum group size **1**,
+  maximum **5**, wait **5 minutes** for the minimum, status-check timeout **90 minutes**, and **Only merge
+  non-failing pull requests** on.
+
+Build concurrency limits how many queue builds run at once; the group limits set how many passing entries land
+together. Every queue run tests its cumulative head with the full tier, so labels such as `full-ci` cannot be
+lost; the slower nightly tier stays nightly. A queue run is strict about the engine's modules: a stale
+`wasm/pins.json` fails it, as on a master push. Size comparisons use the payload's `base_sha` and `head_sha`, not
+a moving master or `HEAD^1`, so a group is measured as one change.
 
 The guarded merge script must retain review, expected-head and required-check
 checks, first verify that master actively requires the queue (refuse if that cannot
