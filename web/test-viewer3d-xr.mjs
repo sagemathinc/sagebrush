@@ -37,6 +37,9 @@ async function browser(withXR) {
   const profile = mkdtempSync(join(tmpdir(), "sb-viewer3d-xr-"));
   const chrome = spawn(process.env.CHROME ?? "chromium", ["--headless", "--no-sandbox", "--use-angle=swiftshader", "--enable-unsafe-swiftshader", "--ignore-gpu-blocklist",
     "--remote-debugging-port=0", `--user-data-dir=${profile}`, "--window-size=1280,900", "about:blank"], { stdio: "ignore" });
+  // (Chromium and its profile go away however this ends)
+  const close = () => { chrome.kill("SIGKILL"); rmSync(profile, { recursive: true, force: true }); };
+  process.on("exit", close);
   let port;
   for (let i = 0; i < 300 && !port; i++) { try { port = Number(readFileSync(join(profile, "DevToolsActivePort"), "utf8").split("\n")[0]); } catch {} await sleep(100); }
   const targets = await (await fetch(`http://127.0.0.1:${port}/json`)).json();
@@ -66,7 +69,6 @@ async function browser(withXR) {
   await send("Page.enable");
   if (withXR) await send("Page.addScriptToEvaluateOnNewDocument", { source: iwer });
   await send("Page.navigate", { url });
-  const close = () => { chrome.kill("SIGKILL"); rmSync(profile, { recursive: true, force: true }); };
   return { ev, until, send, errors, requested, close };
 }
 
@@ -92,6 +94,9 @@ const xr = "window.__canvas.sagebrush.xr";
     await b.ev(`(window.__canvas = document.querySelector('figure.plot3d canvas'), ${vrButton}.click(), true)`);
     ok(await b.until(`(${xr})?.state.frames > 5`, 15000), "Enter VR: the plot is drawn in the headset, frame after frame", await b.ev(`(${xr})?.state.frames ?? null`).catch(() => null));
     ok(b.requested.some((u) => u.includes("sagebrush-viewer3d-xr.js")), "the module was fetched when pressed");
+    // (the headset's image: part of it is the plot, not the backdrop)
+    const px = await b.ev(`(${xr}).probe()`);
+    ok(px && px.covered > 0.01 && px.covered < 0.9, "the headset sees the plot (part of its view isn't the backdrop)", px);
     ok((await b.ev(`${vrButton}.textContent`)) === "Exit VR", "the button says Exit VR");
 
     // a grip takes the plot; moving the hand moves it
@@ -100,7 +105,7 @@ const xr = "window.__canvas.sagebrush.xr";
     await b.ev("window.__xrDevice.controllers.right.updateButtonValue('squeeze', 1), true");
     ok(await b.until(`(${xr}).state.grabbed === 'right'`, 3000), "the right grip takes the plot");
     await b.ev("(() => { const p = window.__xrDevice.controllers.right.position; p.set(p.x + 0.2, p.y + 0.1, p.z); return true; })()");
-    await sleep(400);
+    await b.until(`(${xr}).state.model[12] > ${before[0]} + 0.19`, 3000);
     const moved = await model();
     ok(Math.abs(moved[0] - before[0] - 0.2) < 0.02 && Math.abs(moved[1] - before[1] - 0.1) < 0.02, "and it follows the hand (20 cm right, 10 cm up)", { before, moved });
     await b.ev("window.__xrDevice.controllers.right.updateButtonValue('squeeze', 0), true");
@@ -114,7 +119,16 @@ const xr = "window.__canvas.sagebrush.xr";
     await b.ev("window.__xrDevice.controllers.left.updateAxes('thumbstick', 0, 0), true");
     const s1 = await scale();
     ok(s1 > s0 * 1.2, "thumbstick up makes it bigger", { s0: +s0.toFixed(4), s1: +s1.toFixed(4) });
+    // the thumbstick sideways turns it about its upright axis
+    const yaw = () => b.ev(`(() => { const m = (${xr}).state.model; return Math.atan2(m[8], m[10]); })()`);
+    const a0 = await yaw();
+    await b.ev("window.__xrDevice.controllers.right.updateAxes('thumbstick', 1, 0), true");
+    await sleep(300);
+    await b.ev("window.__xrDevice.controllers.right.updateAxes('thumbstick', 0, 0), true");
+    const d = (await yaw()) - a0, turned = Math.abs(Math.atan2(Math.sin(d), Math.cos(d)));
+    ok(turned > 0.2, "thumbstick sideways turns it", { turned: +turned.toFixed(3) });
 
+    // the page's pixels now, to compare after leaving (its canvas keeps its drawing: preserveDrawingBuffer)
     // B leaves; the page's view is back and draws again
     await b.ev("window.__xrDevice.controllers.right.updateButtonValue('b-button', 1), true");
     await sleep(300);
@@ -122,8 +136,29 @@ const xr = "window.__canvas.sagebrush.xr";
     ok(await b.until(`${xr} === null`, 5000), "B leaves VR");
     ok((await b.ev(`${vrButton}.textContent`)) === "Enter VR", "the button says Enter VR again");
     ok(await b.ev("document.querySelector('figure.plot3d canvas') === window.__canvas"), "the view's canvas is back in its figure");
-    const drew = await b.ev("(() => { const c = window.__canvas; const t0 = c.sagebrush.view.az; c.focus(); c.dispatchEvent(new KeyboardEvent('keydown', { key: 'ArrowLeft', code: 'ArrowLeft', bubbles: true })); return new Promise((r) => setTimeout(() => r(c.sagebrush.view.az !== t0), 400)); })()");
-    ok(drew, "the page's view works as before (arrow keys turn it)");
+    const drew = await b.ev("(() => { const c = window.__canvas, t0 = c.sagebrush.view.az, p0 = c.toDataURL(); c.focus(); c.dispatchEvent(new KeyboardEvent('keydown', { key: 'ArrowLeft', code: 'ArrowLeft', bubbles: true })); return new Promise((r) => setTimeout(() => r({ turned: c.sagebrush.view.az !== t0, pixels: c.toDataURL() !== p0 }), 600)); })()");
+    ok(drew.turned && drew.pixels, "the page's view works as before (arrow keys turn it, and its pixels change)", drew);
+
+    // again, leaving with Y on the left hand this time
+    await b.ev(`${vrButton}.click(), true`);
+    ok(await b.until(`(${xr})?.state.frames > 3`, 15000), "Enter VR a second time");
+    await b.ev("window.__xrDevice.controllers.left.updateButtonValue('y-button', 1), true");
+    await sleep(300);
+    await b.ev("window.__xrDevice.controllers.left.updateButtonValue('y-button', 0), true");
+    ok(await b.until(`${xr} === null`, 5000), "Y leaves too");
+
+    // the view replaced while in VR (its cell run again): the session ends with it
+    await b.ev(`${vrButton}.click(), true`);
+    ok(await b.until(`(${xr})?.state.frames > 3`, 15000), "Enter VR a third time");
+    await b.ev(`(() => { const c = [...document.querySelectorAll('.cell')].filter((c) => c.querySelector('textarea').value.trim()).at(-1); c.querySelector('[data-a=run]').click(); return true; })()`);
+    ok(await b.until("!window.__canvas.isConnected && window.__canvas.sagebrush.xr === null", 20000), "running the cell again ends the session with the old view");
+    ok(await b.until("!!document.querySelector('figure.plot3d canvas')", 60000), "and the new view comes up");
+
+    // a version 2 scene (k3d) offers no Enter VR (for now)
+    const v2 = await b.ev(`(() => { const d = document.createElement('div'); d.innerHTML = '<svg></svg>'; document.body.appendChild(d);
+      window.SagebrushViewer3d.mount(d, { version: 2, lo: [0, 0, 0], hi: [1, 1, 1], scale: [2, 2, 2], objects: [{ type: 'mesh2', color: '#ff0000', positions: btoa(String.fromCharCode(...new Uint8Array(new Float32Array([0, 0, 0, 1, 0, 0, 0, 1, 0]).buffer))), indices: btoa(String.fromCharCode(...new Uint8Array(new Uint32Array([0, 1, 2]).buffer))) }] });
+      return new Promise((r) => setTimeout(() => { const has = [...d.querySelectorAll('.sb3d-buttons button')].some((x) => /VR/.test(x.textContent)); const mounted = !!d.querySelector('canvas'); d.remove(); r({ mounted, has }); }, 1500)); })()`);
+    ok(v2.mounted && !v2.has, "a version 2 scene shows its 3D view but offers no Enter VR", v2);
     ok(b.errors.length === 0, "no page errors", b.errors.slice(0, 3));
   } finally {
     b.close();

@@ -11,12 +11,18 @@ export async function supported(mode = "immersive-vr") {
   }
 }
 
-/** An immersive session drawing with `gl`: { session, refSpace, layer, floor } (floor: the reference space's origin is
- * on the floor, "local-floor"; else it is where the head started, "local"). */
+/** An immersive session drawing with `gl`: { session, refSpace, layer, floor, ended } (floor: the reference space's
+ * origin is on the floor, "local-floor"; else it is where the head started, "local"; ended(): whether the session has
+ * ended, watched from the moment it was granted). Throws an error with code "context-lost" if making `gl` ready for
+ * the headset cost its context (a browser may move it to another GPU): the caller's view is gone then. */
 export async function startSession(gl, mode = "immersive-vr") {
   const session = await navigator.xr.requestSession(mode, { optionalFeatures: ["local-floor"] });
+  let over = false;
+  session.addEventListener("end", () => (over = true));
   try {
     await gl.makeXRCompatible();
+    if (gl.isContextLost()) throw Object.assign(new Error("the view's graphics context was lost on entering VR"), { code: "context-lost" });
+    if (over) throw new Error("the headset session ended as it started");
     const layer = new XRWebGLLayer(session, gl);
     session.updateRenderState({ baseLayer: layer });
     let refSpace, floor = true;
@@ -26,7 +32,8 @@ export async function startSession(gl, mode = "immersive-vr") {
       refSpace = await session.requestReferenceSpace("local");
       floor = false;
     }
-    return { session, refSpace, layer, floor };
+    if (over) throw new Error("the headset session ended as it started");
+    return { session, refSpace, layer, floor, ended: () => over };
   } catch (e) {
     await session.end().catch(() => {});
     throw e;
