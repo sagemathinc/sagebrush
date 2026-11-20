@@ -140,6 +140,7 @@ try {
   await click(Math.min(r0.left + 40, 1260), r0.top + 60);
   check(await open(), "a click on a note opens the drawer");
   check((await heading()) === "Long note", "…its title is the drawer's heading", await heading());
+  check(await A.ev(`${D}.getAttribute("aria-label") === "Long note" && !${D}.querySelector("[id]") && !${D}.id`), "…and its name (an aria-label: the board's parts have no ids)", await A.ev(`[${D}.getAttribute("aria-label"), [...${D}.querySelectorAll("[id]")].map((e) => e.id)]`));
   const t0 = await drawerText();
   check(/Paragraph 0:/.test(t0) && /Paragraph 39:/.test(t0) && /A detail, shown/.test(t0), "…with all of the note: every paragraph, and its detail");
   check(JSON.stringify(await cardBox("long")) === JSON.stringify(card0), "…and the card keeps its size", [card0, await cardBox("long")]);

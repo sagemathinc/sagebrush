@@ -74,15 +74,10 @@ export class Drawer {
     el.className = "sbb-drawer";
     el.dataset.sbb = "drawer";
     el.hidden = true;
-    const uid = Math.random().toString(36).slice(2, 10), headingId = "sbb-drawer-h" + uid;
-    el.id = "sbb-drawer-" + uid;
-    this.heading.id = headingId;
     this.heading.tabIndex = -1;
-    el.setAttribute("aria-labelledby", headingId);
     this.grip.className = "sbb-drawer-grip";
     this.grip.tabIndex = 0;
     this.grip.setAttribute("role", "separator");
-    this.grip.setAttribute("aria-controls", el.id);
     this.grip.title = "Drag to resize (double-click: the usual size)";
     this.head.className = "sbb-drawer-head";
     this.editBtn.className = "sbb-drawer-edit";
@@ -234,6 +229,9 @@ export class Drawer {
     const t = this.host.title(id);
     this.heading.replaceChildren(...(t ? [t] : []));
     if (!t) this.heading.textContent = "Note";
+    // (named by its note's title: an aria-label, not aria-labelledby, as the board's parts have no ids, which two
+    // boards on a page, or a board and its host, would share)
+    this.el.setAttribute("aria-label", this.host.label(id) || "Note");
     this.body.replaceChildren(content);
     this.setEditing(this.editing);
     return true;
