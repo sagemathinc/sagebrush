@@ -211,7 +211,7 @@ impl Pivots<'_> {
     /// for large p.
     pub fn reduce_random(&self, rows: &[Row], ncols: usize, threads: usize, block: usize, seed: u64) -> Vec<Row> {
         let blocks: Vec<&[Row]> = rows.chunks(block.max(1)).collect();
-        let threads = threads.max(1).min(blocks.len().max(1));
+        let threads = usable(threads).min(blocks.len().max(1));
         if threads == 1 {
             let mut acc = Acc { d: vec![0; ncols] };
             let mut out = vec![];
@@ -223,7 +223,7 @@ impl Pivots<'_> {
         }
         #[cfg(target_arch = "wasm32")]
         {
-            unreachable!()
+            unreachable!("usable() is 1 in WebAssembly")
         }
         #[cfg(not(target_arch = "wasm32"))]
         {
@@ -252,7 +252,7 @@ impl Pivots<'_> {
     /// Every row reduced by the pivots (in order; empty rows reduced to 0),
     /// natively on up to `threads` threads.
     pub fn reduce(&self, rows: &[Row], ncols: usize, threads: usize) -> Vec<Row> {
-        let threads = threads.max(1).min(rows.len().max(1));
+        let threads = usable(threads).min(rows.len().max(1));
         if threads == 1 || rows.len() < 8 {
             let mut acc = Acc { d: vec![0; ncols] };
             return rows
@@ -271,7 +271,7 @@ impl Pivots<'_> {
         }
         #[cfg(target_arch = "wasm32")]
         {
-            unreachable!()
+            unreachable!("usable() is 1 in WebAssembly")
         }
         #[cfg(not(target_arch = "wasm32"))]
         {
@@ -333,6 +333,17 @@ impl Pivots<'_> {
         }
         let _ = p;
         ops
+    }
+}
+
+/// The threads a parallel entry may use: the caller's count (at least
+/// one) natively, and one in WebAssembly, which has no threads, whatever
+/// the caller asks for.
+fn usable(threads: usize) -> usize {
+    if cfg!(target_arch = "wasm32") {
+        1
+    } else {
+        threads.max(1)
     }
 }
 
@@ -440,7 +451,7 @@ pub fn reduce_fl(piv: &Pivots, rows: &[Row], ncols: usize, threads: usize) -> Ve
     // the non-pivot columns in slices (Faugère and Lachartre's column
     // blocks): B' = A^-1 B and the rows' updates separate by columns, so
     // each thread does all of it on its own slice
-    let t = threads.max(1).min(nb / 128).max(1);
+    let t = usable(threads).min(nb / 128).max(1);
     let slice = |lo: usize, hi: usize| -> Vec<Row> {
         let w = hi - lo;
         let mut bp: Vec<Option<Vec<u32>>> = vec![None; ncols];
@@ -518,7 +529,7 @@ pub fn reduce_fl(piv: &Pivots, rows: &[Row], ncols: usize, threads: usize) -> Ve
     }
     #[cfg(target_arch = "wasm32")]
     {
-        unreachable!()
+        unreachable!("usable() is 1 in WebAssembly")
     }
     #[cfg(not(target_arch = "wasm32"))]
     {
@@ -974,6 +985,21 @@ mod tests {
         let ex = back_reduce(echelonize(piv.reduce(&[r1, r2, r3], 4, 1), 4, p), 4, p);
         let got = back_reduce(echelonize(out, 4, p), 4, p);
         assert_eq!(got, ex);
+    }
+
+    #[test]
+    fn random_blocks_any_threads() {
+        // several blocks: the same rows for any thread count (each block's
+        // coefficients come from its own seed), and in WebAssembly a count
+        // above one runs on one thread
+        let p = 1000003;
+        let a = row(&[(0, 1), (2, 5)]);
+        let piv = Pivots { p, rows: vec![Some(&a), None, None, None] };
+        let rows: Vec<Row> = (0..12u32).map(|k| row(&[(0, 1 + k), (1, 2 + k), (3, 3 * k + 1)])).collect();
+        let one = piv.reduce_random(&rows, 4, 1, 2, 42);
+        assert_eq!(piv.reduce_random(&rows, 4, 4, 2, 42), one);
+        assert_eq!(usable(4), if cfg!(target_arch = "wasm32") { 1 } else { 4 });
+        assert_eq!(usable(0), 1);
     }
 
     #[test]
