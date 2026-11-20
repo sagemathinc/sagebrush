@@ -3,8 +3,8 @@
 // never the desktop app's grant commands, which a phone doesn't have. In headless Chromium against the built site,
 // with window.__TAURI__ before the page's scripts as a phone's web view has it (no __SB_DESKTOP_APP__): its fs plugin
 // over files in memory, and every desktop grant command (file_*, folder_*) refused as a phone refuses it, "not found".
-// The notebook handed to the app at its start opens, the files beside it are read for Python, and a change is saved
-// to the notebook's own path. (#1436's first page took the opened file for a grant, "undefined", on phones: every
+// The notebook handed to the app at its start opens, the files beside it are read for Python, a change is saved to the
+// notebook's own path, and a file Python writes reaches the notebook's folder. (#1436's first page took the opened file for a grant, "undefined", on phones: every
 // read went to file_read_text.)
 //   bun web/build.ts && (python3 web/serve.py 8765 &) && CHROME=chromium node web/test-app-phone-file.mjs
 import { spawn } from "node:child_process";
@@ -12,6 +12,7 @@ import { mkdtempSync, rmSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { devtoolsPort } from "./test-port.mjs";
+import { allowFiles } from "./test-allow.mjs";
 
 const url = process.env.SB_URL ?? "http://127.0.0.1:8765/";
 const profile = mkdtempSync(join(tmpdir(), "sb-phone-file-"));
@@ -74,6 +75,14 @@ try {
   const saved = await until(`(window.__phone.files.get("/phone/nb/doc.ipynb") ?? "").includes("print(2 + 2)")`, 20000);
   const after = await ev(`({ refused: window.__phone.refused, wrote: window.__phone.fs.filter((f) => f.startsWith("writeTextFile")) })`);
   check(saved && after.refused.length === 0 && after.wrote.every((w) => w === "writeTextFile /phone/nb/doc.ipynb"), "a change saved to the notebook's own path, by the fs plugin: " + JSON.stringify(after));
+
+  // what Python writes, to the notebook's folder (writeDisk): by the fs plugin, beside the notebook (file changes
+  // allowed first, as a person does: every notebook starts with them off)
+  await allowFiles(send, ev);
+  await ev(`(() => { const c = [...document.querySelectorAll(".cell")].at(-1); const ta = c.querySelector("textarea"); ta.value = "open('out.txt', 'w').write('from python')"; ta.dispatchEvent(new Event("input", { bubbles: true })); c.querySelector("[data-a=run]").click(); return 1; })()`);
+  const pyWrote = await until(`window.__phone.files.get("/phone/nb/out.txt") === "from python"`, 120000);
+  const last = await ev(`({ refused: window.__phone.refused, wrote: window.__phone.fs.filter((f) => f.startsWith("writeFile")), out: [...document.querySelectorAll(".cell .out")].at(-1)?.textContent.slice(0, 200) })`);
+  check(pyWrote && last.refused.length === 0 && last.wrote.includes("writeFile /phone/nb/out.txt"), "what Python wrote reaches the notebook's folder, by the fs plugin: " + JSON.stringify(last));
 
   const fails = results.filter(([ok]) => !ok);
   console.log(fails.length ? `FAIL: ${fails.length} of ${results.length} checks` : `ok: a phone's notebook opened and saved by its path, ${results.length} checks`);
