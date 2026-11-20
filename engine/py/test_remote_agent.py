@@ -1262,8 +1262,8 @@ async def test_cycles_ending_in_a_detach_leave_no_attached_line_behind():
 
 # ================= the reviewed sagebrush-agent, vendored: its version, and its clamp against the runner's frame
 
-VENDORED = os.path.join(HERE, "fixtures", "sagebrush-agent-0.5.0.tgz")
-VENDORED_SHA256 = "019b9020c12a0294705ac6c1ba76433b71dab8e89ef3be31e063cba54401016b"
+VENDORED = os.path.join(HERE, "fixtures", "sagebrush-agent-0.7.3.tgz")
+VENDORED_SHA256 = "85ac62b714596920ee72c8426a164652b9c841a137ce846c905b3f4122ef4242"
 STUB_DEPS = os.path.join(HERE, "remote_agent_stub_deps.mjs")
 
 
@@ -1311,8 +1311,9 @@ def test_vendored_agent_is_the_version_usage_names():
 
 
 def test_the_vendored_rows_stand_ins_fail_loudly_when_used():
-    """The two npm imports the vendored agent gets as stand-ins throw on any real use (ws constructed, a zod schema
-    validated or looked inside), so the clamp row passing shows neither does anything on the --stdio path."""
+    """The three npm imports the vendored agent gets as stand-ins throw on any real use (ws constructed, a zod schema
+    validated or looked inside, the Claude Agent SDK's settings resolver, model or MCP server called), so the clamp row
+    passing shows none does anything on the --stdio path with the fake model."""
     import shutil
     import subprocess
     probe = (
@@ -1324,11 +1325,14 @@ def test_the_vendored_rows_stand_ins_fail_loudly_when_used():
         'try { JSON.stringify(s); } catch { threw.push("JSON"); }'
         'const ws = await import("ws");'
         'try { new ws.WebSocketServer({}); } catch { threw.push("ws"); }'
+        'const sdk = await import("@anthropic-ai/claude-agent-sdk");'
+        'for (const k of ["resolveSettings", "filterEscalatingDefaultMode", "query", "deleteSession", "createSdkMcpServer", "tool"]) { try { sdk[k]({}); } catch { threw.push(k); } }'
         'console.log(threw.join(","));'
     )
     r = subprocess.run([shutil.which("node"), "--import", STUB_DEPS, "--input-type=module", "-e", probe],
                        capture_output=True, text=True, timeout=60)
-    assert r.stdout.strip() == "parse,safeParse,shape,_def,String,JSON,ws", (r.stdout, r.stderr[-500:])
+    assert r.stdout.strip() == ("parse,safeParse,shape,_def,String,JSON,ws,"
+                                "resolveSettings,filterEscalatingDefaultMode,query,deleteSession,createSdkMcpServer,tool"), (r.stdout, r.stderr[-500:])
 
 @aio
 async def test_vendored_agent_clamps_at_the_runner_frame():
