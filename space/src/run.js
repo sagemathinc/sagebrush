@@ -3,8 +3,11 @@
 // Sagebrush's site; deployed under that site, they are simply there).  A 3D plot's scene becomes a real object.
 import * as THREE from "three";
 
-let kernelP = null;
-export function engine() {
+// (one engine per language: a MATLAB object doesn't see the names a Sage or Python one left behind, such as Sage's
+//  `norm`, which MATLAB's norm(...) would otherwise find first)
+const kernels = new Map();
+export function engine(mode = "python") {
+  let kernelP = kernels.get(mode);
   if (!kernelP) {
     // (not bundled: the engine is Sagebrush's, loaded from where the page is)
     const url = "/sagebrush-notebook.js";
@@ -13,15 +16,19 @@ export function engine() {
       k.start();
       return k;
     });
-    kernelP.catch(() => (kernelP = null));
+    kernelP.catch(() => kernels.delete(mode));
+    kernels.set(mode, kernelP);
   }
   return kernelP;
 }
 
 /** Run code; `on.update(result)` as output arrives; resolves with {out, error, displays, ms, stopped} */
+let running = null; // (the engine running code now: the one Stop interrupts)
 export async function run(code, mode, on = {}) {
-  const k = await engine();
-  return new Promise((resolve) => {
+  const k = await engine(mode);
+  running = k;
+  return new Promise((done) => {
+    const resolve = (r) => { if (running === k) running = null; done(r); };
     const r = { out: "", error: false, displays: [], ms: 0, stopped: null };
     const tell = () => on.update?.(r);
     k.execute(code, { mode }, {
@@ -36,7 +43,7 @@ export async function run(code, mode, on = {}) {
     });
   });
 }
-export function interrupt() { kernelP?.then((k) => k.interrupt()); }
+export function interrupt() { running?.interrupt(); }
 
 export const SCENE = "application/vnd.sagebrush.scene3d+json";
 

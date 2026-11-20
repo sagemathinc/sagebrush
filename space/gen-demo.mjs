@@ -22,7 +22,7 @@ const space = {
       text: "import numpy as np\nrs = np.linspace(2.5, 4.0, 1500)\nx = np.full_like(rs, 0.4)\nlyap = np.zeros_like(rs)\nfor i in range(700):\n    x = rs * x * (1 - x)\n    if i >= 500:\n        lyap += np.log(np.abs(rs * (1 - 2 * x)))\nlyap /= 200\nprint('chaos from r =', rs[np.argmax(lyap > 0)])",
       output: "chaos from r = 3.570713809206138" },
     { id: "zeta", kind: "code", title: "A sum, in Sage", group: "code", lang: "sage",
-      text: "sum(1/n^2 for n in [1..oo])", output: "1/6*pi^2" },
+      text: "n = var('n')\nsum(1/n^2, n, 1, oo)", output: "1/6*pi^2" },
     { id: "sinc", kind: "plot3d", title: "z = sin(r)/r", group: "plots", lang: "sage",
       text: "x, y = var('x y')\nr = sqrt(x^2 + y^2)\nplot3d(sin(r) / r, (x, -10, 10), (y, -10, 10), plot_points=60)",
       surface: grid(sinc, -10, 10, 48) },
