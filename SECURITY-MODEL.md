@@ -160,21 +160,43 @@ junctions, so it cannot set up such a swap itself;
 `web/test-app-engine-links.mjs` runs Python in the app's engine subprocess,
 where the engine runs (not yet Windows), and checks every tested route to one.
 
-These commands are not yet a boundary against script running in the app's own
-page. The app grants that page (its exact origin only) Tauri's file-system
-plugin with a scope of every path (`capabilities/default.json`), so script in
-the page can read and write anywhere the person can. Notebook output renders
-in that page today (see G2 under Status today), so saved output that got past
-the sanitizers would reach the whole grant. Narrowing the grant to the
-workspace folder is not yet done.
+The app's own page is the remaining reach. On the desktop it has no
+file-system plugin: the plugin is neither registered nor linked, so there is
+no `window.__TAURI__.fs`, and the page's capability
+(`capabilities/default.json`, checked by `nav.rs`'s tests) grants no `fs:` or
+`dialog:` permission. The desktop self-test checks that the API is absent and
+that the plugin's commands are refused by Tauri's access control. Script in
+the page can still use the app's own commands, so it reaches the whole
+workspace folder and the files the person has granted (below), and no other
+path. Notebook output renders in that page today (see G2 under Status today),
+so saved output that got past the sanitizers would reach all of those.
 
-Files the person opens or saves through the app's file dialogs, and paths
-granted outside the workspace, are meant to be the "Files on" mode under
-Weaker modes, with G1a and G1d dropped for exactly those handles or paths. Two
-gaps remain: a notebook opened from a folder on the computer writes its files
-back there by path name, following links, so a link in that folder can send a
-write elsewhere; and the dialogs don't yet name the dropped goals, as Weaker
-modes requires.
+Files from the rest of the computer come only from the person:
+- **How a file is granted.** The app's own Open and Save dialogs (drawn by the
+  app, over its window), a file the system hands it (double-clicked, or on the
+  command line), or the self-test's notebook. Each becomes a grant: a random
+  128-bit id for that file (`app/src-tauri/src/folder_fs.rs`, `disk.rs`).
+  Only the newest 8 grants are kept. The page names grants, never paths.
+- **What a grant reaches.** The granted file, and the files beside it in its
+  folder by name only: top-level, not hidden (no leading `.`, no Windows short
+  name such as `REPORT~1.CSV`, no invisible format characters), and never a
+  link or anything but a plain file. A write goes to a temporary file in the
+  same folder, keeps the file's permissions, and replaces it by a rename, so
+  it never writes through a link.
+- **The risk this accepts.** Any other top-level file in that folder that
+  isn't hidden can be read and written, as the notebook's Python can: a
+  `conftest.py`, a `Makefile`, or `_netrc` in a home folder. In a notebook
+  inside a hidden folder (such as `~/.ssh`), the names beside it aren't
+  hidden. A file with Windows' Hidden attribute isn't covered by the dot rule.
+  The names are checked and then used, so a link swapped in between would be
+  followed by a read; that needs a local program, out of scope above.
+
+These grants are meant to be the "Files on" mode under Weaker modes, with G1a
+and G1d dropped for exactly the granted file and the files beside it. One gap
+remains: the dialogs don't yet name the dropped goals, as Weaker modes
+requires. The phone apps are different: their system pickers hand over paths
+that only the file-system plugin reads, so on a phone the page keeps that
+plugin, with a scope of every path the app may reach there.
 
 This subsection scopes which local actors G1a and G1d defend against on the
 desktop. It drops nothing else: G3, G4's package and update authority, and
