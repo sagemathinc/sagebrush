@@ -103,14 +103,16 @@ export function pythonRoom(text, { path = "", sage = /\.sage$/.test(path), scope
   const nodes = [], edges = [];
   const named = new Map(); // (a name the file binds at the top -> the id of the object binding it)
   const portals = new Map(); // (module -> its portal)
-  const bindPortal = (name, mod, line) => {
+  // (name: what the file calls it; orig: what `from mod import orig as name` takes from the module)
+  const bindPortal = (name, mod, line, orig = null) => {
     if (!portals.has(mod)) {
-      const p = { id: "m:" + mod, kind: "import", title: mod, group: "imports", lang, names: [], text: "", start: line, end: line, lines: 1 };
+      const p = { id: "m:" + mod, kind: "import", title: mod, group: "imports", lang, names: [], imported: [], text: "", start: line, end: line, lines: 1 };
       portals.set(mod, p);
       nodes.push(p);
     }
     const p = portals.get(mod);
     if (name && !p.names.includes(name)) p.names.push(name);
+    if (orig && !p.imported.includes(orig)) p.imported.push(orig);
     if (name && name !== "*") named.set(name, p.id);
   };
   const body = flat(tree.body);
@@ -147,7 +149,7 @@ export function pythonRoom(text, { path = "", sage = /\.sage$/.test(path), scope
       addImportLine(portals, s, src);
     } else if (s._type === "ImportFrom") {
       const mod = ".".repeat(s.level ?? 0) + (s.module ?? "");
-      for (const al of s.names) bindPortal(al.asname ?? al.name, mod, s.lineno);
+      for (const al of s.names) bindPortal(al.asname ?? al.name, mod, s.lineno, al.name);
       addImportLine(portals, s, src);
     } else {
       if (!run) run = { stmts: [] };

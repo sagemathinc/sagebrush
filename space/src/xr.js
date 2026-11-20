@@ -112,6 +112,7 @@ export function setupXR(api) {
       add(texToText(stop.text).replace(/\*\*|`/g, ""), "tour");
       out.push({ text: "", style: "prose" });
     }
+    if (api.noRoomWhy(nd)) { add(api.noRoomWhy(nd), "hint"); out.push({ text: "", style: "prose" }); }
     if (nd.summary) { add(texToText(nd.summary).replace(/\*\*|`/g, ""), "summary"); out.push({ text: "", style: "prose" }); }
     // (its links, by name: what it calls and what calls it, in a room)
     const [outL, inL] = api.linkLabels(nd);
@@ -188,7 +189,7 @@ export function setupXR(api) {
       x += w + 18;
     };
     if (stop) { button("◀", "tourprev"); button(stop.i + 1 < stop.n ? "Next stop ▶" : "Finish", "tournext", true); }
-    if (api.canEnter(nd)) button("Enter ▶", "enter", !stop);
+    if (api.canEnter(nd)) button(nd.kind === "import" ? "Go there ▶" : "Enter ▶", "enter", !stop);
     if (api.runnable(nd)) button(state === "running" ? "Running…" : "▶ Run", "run", !stop && !api.canEnter(nd));
     if (rows.length > fit) { button("▲", "up"); button("▼", "down"); }
     button("✕ Close", "close");
@@ -242,8 +243,10 @@ export function setupXR(api) {
       if (!ok) { if (shown === nd) { state = "couldn't enter it"; draw(); } return; }
       close();
       backStack.push({ ...from, leave: true }); fwdStack.length = 0;
-      const h = api.home();
-      if (h) flyRig(h.to, h.toT, 700, false);
+      // (through an import that named one thing: to it, its panel open; else the view of the whole room)
+      const f = api.focus();
+      if (f) { open(f, false); const v = api.viewOf(f); flyRig(v.to, v.toT, 700, false); }
+      else { const h = api.home(); if (h) flyRig(h.to, h.toT, 700, false); }
       drawMenu();
       return;
     }

@@ -63,3 +63,52 @@ export function treeRoom(tree, dir = "") {
     room: { kind: "dir", path: dir, labels: [] }, directed: true, tree, nodes, edges,
   };
 }
+
+// Where a Python import leads in the tree: `from .x import a`, `import pkg.mod`, `from pkg import sub` (a submodule
+// when there is one), as gen-repo.mjs resolves them: { path, sub } (sub: the one name taken is that submodule), or
+// null for what isn't in the repository (the standard library, a package from elsewhere).  `names`: the names taken
+// from the module (`from mod import a, b`), as the module calls them.
+const dottedOf = new WeakMap();
+export function resolveImport(tree, from, mod, names = []) {
+  const files = tree.files;
+  let idx = dottedOf.get(tree);
+  if (!idx) {
+    idx = { map: new Map(), paths: new Set(files.map((f) => f[0])) };
+    for (const [p] of files) {
+      if (!/\.py$/.test(p)) continue;
+      const parts = p.replace(/\.py$/, "").replace(/\/__init__$/, "").split("/");
+      for (let i = 0; i < parts.length; i++) {
+        const key = parts.slice(i).join(".");
+        if (!idx.map.has(key)) idx.map.set(key, []);
+        idx.map.get(key).push(p);
+      }
+    }
+    dottedOf.set(tree, idx);
+  }
+  const dir = (p) => p.slice(0, Math.max(0, p.lastIndexOf("/")));
+  const asFile = (p) => (idx.paths.has(p + ".py") ? p + ".py" : idx.paths.has(p + "/__init__.py") ? p + "/__init__.py" : null);
+  const join = (...xs) => xs.filter(Boolean).join("/");
+  if (mod.startsWith(".")) {
+    const dots = mod.match(/^\.*/)[0].length;
+    let d = dir(from);
+    for (let i = 1; i < dots; i++) d = dir(d);
+    const rest = mod.slice(dots).split(".").filter(Boolean);
+    const base = join(d, ...rest);
+    if (names.length === 1 && names[0] !== "*") { const sub = asFile(join(base, names[0])); if (sub) return { path: sub, sub: true }; }
+    const p = asFile(base);
+    return p ? { path: p, sub: false } : null;
+  }
+  const pick = (m) => {
+    let ks = idx.map.get(m);
+    if (!ks) return null;
+    // (a one-word module is the repository's only beside the importer; several: the one nearest the importer)
+    if (!m.includes(".")) ks = ks.filter((p) => dir(p.replace(/\/__init__\.py$/, "")) === dir(from));
+    if (ks.length <= 1) return ks[0] ?? null;
+    const score = (p) => { const a = p.split("/"), b = from.split("/"); let s = 0; while (s < a.length && a[s] === b[s]) s++; return s; };
+    const best = ks.reduce((b, p) => (score(p) > score(b) ? p : b));
+    return score(best) > 0 ? best : null;
+  };
+  if (names.length === 1 && names[0] !== "*") { const sub = pick(mod + "." + names[0]); if (sub) return { path: sub, sub: true }; }
+  const p = pick(mod);
+  return p ? { path: p, sub: false } : null;
+}

@@ -205,6 +205,16 @@ ok((await ev(`whitespace.space.edges.length`)) > 5 && (await ev(`whitespace.spac
 await until(`whitespace.xr.history.flying === false`, 3000);
 await sleep(400);
 await shot("vr-room-file");
+// (through an import: nf.py's `from ._engine import call` leads to _engine.py, at its `call`; its text put in as above)
+const engFile = "lib/sagebrush/_engine.py";
+await ev(`(() => { window.__realFetch ??= fetch; const t = ${JSON.stringify(readFileSync(join(here, "..", engFile), "utf8"))};
+  window.fetch = (u, o) => String(u).endsWith("/${engFile}") ? Promise.resolve(new Response(t)) : window.__realFetch(u, o); return true; })()`);
+await ev(`(() => { whitespace.xr.open(whitespace.space.nodes.find((n) => n.id === 'm:._engine')); return true; })()`);
+await until(`whitespace.xr.history.flying === false`, 3000);
+ok((await ev(`whitespace.xr.panel?.buttons ?? []`)).includes("enter"), "an import's panel offers Go there", await ev(`whitespace.xr.panel`));
+await ev(`whitespace.xr.press('enter'), true`);
+ok(await until(`whitespace.room?.endsWith('nf.py › _engine.py') && whitespace.xr.panel?.id === 'f:call'`, 10000), "Go there leads to the imported file, at the name imported", { room: await ev(`whitespace.room`), panel: await ev(`whitespace.xr.panel`) });
+await until(`whitespace.xr.history.flying === false`, 3000);
 for (let i = 0; i < 8 && (await ev(`whitespace.room`)) !== null; i++) {
   await ev(`whitespace.xr.menuPress('back'), true`);
   await until(`whitespace.xr.history.flying === false`, 3000);
