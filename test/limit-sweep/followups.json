@@ -132,6 +132,9 @@
   {
    "id": "FU-B18-3",
    "keys": [
+    "engine/arith/src/pdivrem.rs :: admit_z :: if fixed > cap { #0",
+    "engine/arith/src/pdivrem.rs :: fault_text :: DivFault::Memory => format!(\"the division's memory needs more than {} bytes ({})\", (plan.fixed + plan.limit).saturating_mul(8), HOW), #0",
+    "engine/arith/src/pdivrem.rs :: reserve :: if l > self.limit.get() { #0",
     "engine/arith/src/qpoly.rs ::  :: pub const CAPS: Caps = Caps { int: zmul::CAPS, reply: REPLY_MAX }; #0",
     "engine/arith/src/qpoly.rs ::  :: pub const REPLY_MAX: u64 = zmul::PEAK_MAX; #0",
     "engine/arith/src/qpoly.rs :: admit_a :: let limit = caps.int.work.checked_sub(r).ok_or_else(|| format!(\"the request's bytes = {} leave no work within {} ({})\", r, caps.int.work, HOW))?; #0",
@@ -143,16 +146,17 @@
     "engine/arith/src/qpoly.rs :: over :: fn over(what: &str, value: u64, max: u64) -> Result<(), String> { #0",
     "engine/arith/src/qpoly.rs :: over :: if value > max { #0",
     "engine/arith/src/qpoly.rs :: over :: return Err(format!(\"{} = {} is more than {} ({})\", what, value, max, HOW)); #0",
-    "engine/arith/src/qpoly.rs :: scan :: if i as u64 >= zmul::REQUEST_MAX { #0",
-    "engine/arith/src/qpoly.rs :: scan :: if n.len() > zmul::TOKEN_DIGITS_MAX || d.len() > zmul::TOKEN_DIGITS_MAX { #0",
-    "engine/arith/src/qpoly.rs :: scan :: return Err(format!(\"a coefficient of more than {} hex digits\", zmul::TOKEN_DIGITS_MAX)); #0",
-    "engine/arith/src/qpoly.rs :: scan :: return Err(format!(\"more than {} coefficients\", zmul::REQUEST_MAX)); #0",
+    "engine/arith/src/qpoly.rs :: scan_with :: if i as u64 >= zmul::REQUEST_MAX { #0",
+    "engine/arith/src/qpoly.rs :: scan_with :: if n.len() > zmul::TOKEN_DIGITS_MAX || d.len() > zmul::TOKEN_DIGITS_MAX { #0",
+    "engine/arith/src/qpoly.rs :: scan_with :: return Err(format!(\"a coefficient of more than {} hex digits\", zmul::TOKEN_DIGITS_MAX)); #0",
+    "engine/arith/src/qpoly.rs :: scan_with :: return Err(format!(\"more than {} coefficients\", zmul::REQUEST_MAX)); #0",
     "engine/web/src/series_ops.rs ::  :: SeriesOp { name: \"qpoly_clear\", max_request: zmul::REQUEST_MAX as usize, peak: zmul::PEAK_MAX, work: zmul::WORK_MAX, run: qpoly_clear }, #0",
-    "engine/web/src/series_ops.rs ::  :: SeriesOp { name: \"qpoly_mul\", max_request: zmul::REQUEST_MAX as usize, peak: zmul::PEAK_MAX, work: zmul::WORK_MAX, run: qpoly_mul }, #0"
+    "engine/web/src/series_ops.rs ::  :: SeriesOp { name: \"qpoly_mul\", max_request: zmul::REQUEST_MAX as usize, peak: zmul::PEAK_MAX, work: zmul::WORK_MAX, run: qpoly_mul }, #0",
+    "engine/web/src/series_ops.rs ::  :: SeriesOp { name: \"zpoly_divrem\", max_request: zmul::REQUEST_MAX as usize, peak: zmul::PEAK_MAX, work: zmul::WORK_MAX, run: zpoly_divrem }, #0"
    ],
    "owner": "qpoly_mul",
    "status": "open",
-   "what": "qpoly_mul's fixed caps (zmul's, and the reply's bytes) and its metered work (the lcms, the reduction), and qpoly_clear's (the same caps; the lcm and the scaling): lift the integer product's caps with FU-B18-2's product in blocks, and a larger work cap for qpoly_mul, with timings, as a later engine change."
+   "what": "qpoly_mul's fixed caps (zmul's, and the reply's bytes) and its metered work (the lcms, the reduction), qpoly_clear's (the same caps; the lcm and the scaling), and zpoly_divrem's (the same caps; the metered division, the word ledger): lift the integer product's caps with FU-B18-2's product in blocks, and a larger work cap for qpoly_mul, with timings, as a later engine change."
   }
  ],
  "note": "The sweep's follow-ups, the source of truth (plan-limit-sites-sweep-r3 section 2): {id FU-<batch>-<n>, status open|fixed|withdrawn, keys, what, owner, withdrawn_because; fixed_by {pr?, commit?} is optional history, checked when given}. A fixed one needs no fixed_by: master's squash merge puts the fix and the status in one commit, its provenance. An open one has at least one active key, and its active keys and the entries pointing to it agree; no active key points to a fixed or withdrawn one.",

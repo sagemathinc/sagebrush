@@ -731,6 +731,12 @@
    "audit": "Can it produce or alter an Obligations, Operation, Reservation, Growth or Context (directly, generically or through a pointer)? No. Test glue: a System-forwarding counting allocator. Token-identical to engine/web/tests/nmod_alloc.rs's audited item (the same hash); here it measures the binary entry point's allocations against its reservations."
   },
   {
+   "file": "engine/web/tests/divrem_alloc.rs",
+   "item": "impl GlobalAlloc for Counting",
+   "hash": "6143d022fd87de6160b764282e42003d015305b863cab244dc000d1ba617d4e4",
+   "audit": "Can it produce or alter an Obligations, Operation, Reservation, Growth or Context (directly, generically or through a pointer)? No. Test glue: series_alloc.rs's audited System-forwarding counting allocator (alloc, dealloc and realloc pass the caller's own pointer and layout to System unchanged; the counting only updates atomics), with two test-only additions: it counts allocations (an atomic), and it can refuse one allocation of at least a set size by returning null, which GlobalAlloc's contract allows (the caller's try_reserve_exact sees the failure). Here it measures zpoly_divrem's live memory against its word ledger's prediction, checks that writing the reply allocates nothing, and checks the heap's baseline after each refusal, an allocation failure and a Stop."
+  },
+  {
    "file": "engine/web/tests/host_handles.rs",
    "item": "fn reply",
    "hash": "c288fcf5fe0a8e6c439d4c45d20a512b7addf5a5c415e1920342adb5f347131b",

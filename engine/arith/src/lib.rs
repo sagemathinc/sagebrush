@@ -29,4 +29,5 @@ pub mod zmat;
 pub mod zpoly;
 pub mod zmul;
 pub mod qpoly;
+pub mod pdivrem;
 pub mod zseries;

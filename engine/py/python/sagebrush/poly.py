@@ -118,6 +118,41 @@ def qclear(coeffs):
     return int(r["d"], 16), ([int(t, 16) for t in c.split(",")] if c else [])
 
 
+def _zhex(coeffs):
+    # (exact integer classes only, matched by identity with the registered
+    # ones, read through int's own __index__: no hook of the coefficient's
+    # class runs, and the refusal reads nothing of it)
+    toks = []
+    for c in coeffs:
+        t = type(c)
+        for k in _QCLEAR_INTS:
+            if t is k:
+                toks.append(format(int.__index__(c), "x"))
+                break
+        else:
+            raise TypeError("zdivrem: a coefficient that is not exactly an int")
+    return ",".join(toks)
+
+
+def zdivrem(a, b):
+    """(q, r) with a = q b + r in Z[x], by Sage's rule (constant term first,
+    trailing zeros dropped): from the top degree down, a coefficient at least
+    |lc(b)| in size gives the floor of its quotient by lc(b), a smaller one
+    none and stays in r (so r may keep a degree >= deg b).  The engine's
+    zpoly_divrem, refused past its caps.
+
+    >>> from sagebrush.poly import zdivrem
+    >>> zdivrem([0, 1], [1, 2])
+    ([], [0, 1])
+    >>> zdivrem([1, 0, 3], [1, 2])
+    ([0, 1], [1, -1, 1])
+    >>> zdivrem([-1, 0, 0, 1], [-1, 1])
+    ([1, 1, 1], [])
+    """
+    r = call("zpoly_divrem", a=_zhex(a), b=_zhex(b))
+    return _ints(r["q"]), _ints(r["r"])
+
+
 def gcd(a, b):
     """The gcd in Z[x] of integer polynomials, with positive leading
     coefficient (constant term first; [] if both are zero)."""

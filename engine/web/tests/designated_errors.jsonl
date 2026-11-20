@@ -63,3 +63,16 @@
 {"fn":"primes","start":9007199254740990,"stop":9007199254740993}
 {"fn":"primes","start":0}
 {"fn":"primes","start":-1,"stop":10}
+{"fn":"zpoly_divrem","a":"1,2,3","b":"0"}
+{"fn":"zpoly_divrem","a":"1,2,3","b":"0,0,0"}
+{"fn":"zpoly_divrem","a":"1,2,3","b":""}
+{"fn":"zpoly_divrem","a":"1,2,3"}
+{"fn":"zpoly_divrem","b":"1,2"}
+{"fn":"zpoly_divrem","a":"1,2,3","b":"1,,2"}
+{"fn":"zpoly_divrem","a":"1,2,3","b":"1/2"}
+{"fn":"zpoly_divrem","a":"1/2","b":"1"}
+{"fn":"zpoly_divrem","a":"1,2,3","b":["1","2"]}
+{"fn":"zpoly_divrem","a":"1,2,3","b":12}
+{"fn":"zpoly_divrem","a":"-0","b":"1"}
+{"fn":"zpoly_divrem","a":"01","b":"1"}
+{"fn":"zpoly_divrem","a":"1,2","b":"1","c":"1"}
