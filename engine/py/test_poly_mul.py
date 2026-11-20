@@ -105,6 +105,40 @@ def qclear_checks(r):
         def __getattribute__(self, attr):
             touched.append(attr)
             return Fraction.__getattribute__(self, attr)
+    # (rejected classes whose metaclass hooks hashing and attribute reads:
+    # the dispatch compares the class by identity only, and the refusal
+    # reads nothing of it)
+    def meta(base):
+        class Meta(base):
+            def __hash__(cls):
+                touched.append("hash")
+                return base.__hash__(cls)
+
+            def __eq__(cls, other):
+                touched.append("eq")
+                return base.__eq__(cls, other)
+
+            def __getattribute__(cls, attr):
+                touched.append("get:" + attr)
+                return base.__getattribute__(cls, attr)
+        return Meta
+
+    # (and a metaclass that claims to equal int and hashes as int: by
+    # identity it is still not int)
+    class Claims(type):
+        def __hash__(cls):
+            return hash(int)
+
+        def __eq__(cls, other):
+            return other is int or type.__eq__(cls, other)
+
+    M4 = Claims("M4", (int,), {})
+
+    M1 = meta(type)("M1", (), {})
+    M2 = meta(type)("M2", (int,), {})
+    M3 = meta(type(Fraction))("M3", (Fraction,), {})
+    bads = [I1(3), I2(3), F1(1, 2), F2(1, 2), F3(1, 2), F4(1, 2), F5(1, 2), M1(), M2(3), M3(1, 2), M4(7), True, 1.5, "1", None]
+    del touched[:]
     name = "_sbengine" if hasattr(E, "_sbengine") else "_native"
     real = getattr(E, name)
     calls = []
@@ -115,7 +149,7 @@ def qclear_checks(r):
             return '{"ok":{"d":"1","c":""}}'
     setattr(E, name, Spy())
     try:
-        for bad in [I1(3), I2(3), F1(1, 2), F2(1, 2), F3(1, 2), F4(1, 2), F5(1, 2), True, 1.5, "1", None]:
+        for bad in bads:
             try:
                 P.qclear([1, bad])
             except TypeError as e:

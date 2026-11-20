@@ -91,17 +91,28 @@ def qclear(coeffs):
     """
     toks = []
     for c in coeffs:
-        t = type(c)
-        if t in _QCLEAR_INTS:
+        # (by identity with the registered classes only: no hash, attribute
+        # or other hook of the coefficient's class runs)
+        t, kind = type(c), 0
+        for k in _QCLEAR_INTS:
+            if t is k:
+                kind = 1
+                break
+        else:
+            for k in _QCLEAR_FRACTIONS:
+                if t is k:
+                    kind = 2
+                    break
+        if kind == 1:
             toks.append(format(int.__index__(c), "x"))
-        elif t in _QCLEAR_FRACTIONS:
+        elif kind == 2:
             # (the stored parts through Fraction's own properties, their int
             # values through int's own __index__: no hook of a subclass runs,
             # and anything not an int raises TypeError)
             n, d = int.__index__(_numerator(c)), int.__index__(_denominator(c))
             toks.append(format(n, "x") if d == 1 else format(n, "x") + "/" + format(d, "x"))
         else:
-            raise TypeError("qclear: a coefficient of type %s (ints and Fractions only)" % t.__name__)
+            raise TypeError("qclear: a coefficient that is not exactly an int or a Fraction")
     r = call("qpoly_clear", a=",".join(toks))
     c = r["c"]
     return int(r["d"], 16), ([int(t, 16) for t in c.split(",")] if c else [])
