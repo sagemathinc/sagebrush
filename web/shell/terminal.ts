@@ -28,7 +28,9 @@ const INTRO = "Commands here change the files in your workspace right away, as t
 
 /** A terminal panel on a new ShellHost; ✕ ends its shell too. */
 export function openTerminal(o: OpenTerminal): TerminalPanel {
-  const host = new ShellHost(o.ws, async (signal) => (await startShell(o.S, o.base ?? "./", { signal })).shell);
-  const term = new TerminalPanel({ host, label: "bash · " + o.S.slice(0, 8), intro: INTRO, commands: terminalCommands({ open: o.open, ps: () => gatherPresence(o.here, 300, o.tab), tab: o.tab }), tab: panelTab(host) });
+  // (the Terminal commands, python, sage, matlab and magma: their bridge is its own chunk beside this one, loaded on the
+  // first command, design-term-3b2 r1 §1)
+  const host = new ShellHost(o.ws, async (signal) => (await startShell(o.S, o.base ?? "./", { signal })).shell, { commands: () => import(new URL("term-bridge.js", import.meta.url).href), size: () => (term ? { cols: term.term.cols, rows: term.term.rows } : null) });
+  const term: TerminalPanel = new TerminalPanel({ host, label: "bash · " + o.S.slice(0, 8), intro: INTRO, commands: terminalCommands({ open: o.open, ps: () => gatherPresence(o.here, 300, o.tab), tab: o.tab }), tab: panelTab(host) });
   return term; // (✕ ends its host's shell itself: TerminalPanel.end)
 }

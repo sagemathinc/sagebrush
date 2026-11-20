@@ -1,0 +1,6 @@
+1
+
+In file "test_error_literal_open.m", line 4, column 5:
+>> 'abc
+       ^
+User error: Unexpected newline in literal identifier

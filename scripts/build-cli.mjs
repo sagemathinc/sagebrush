@@ -99,7 +99,9 @@ if (JSON.stringify(packages.registry, null, 2) + "\n" !== readFileSync(join(root
 writeFileSync(join(out, "packages.gen.js"), packagesGenSource(packages));
 // The engines (wasm/sagebrush-engine.wasm), embedded: the bundle stays one file.
 // (and the PNG module, wasm/sagebrush-raster.wasm, decoded when a PNG is
-// first written or read: src/runtime/raster.ts; and engine/nd's numerics
+// first written or read: src/runtime/raster.ts; the multiprecision core,
+// wasm/sagebrush-mp.wasm, at mpmath's first call into it: src/runtime/mpcore.ts;
+// and engine/nd's numerics
 // module, wasm/sagebrush-nd.wasm, at np.linalg.cholesky's first call:
 // src/runtime/nd.ts)
 // (and nd's thread-pool helper, src/runtime/nd-helper.ts: the code each helper thread of nd.ts's pool runs, as a
@@ -107,6 +109,7 @@ writeFileSync(join(out, "packages.gen.js"), packagesGenSource(packages));
 const ndHelper = execFileSync("bun", ["build", join(root, "src", "runtime", "nd-helper.ts"), "--target=node", "--format=esm", "--minify"], { cwd: root, encoding: "utf8" });
 writeFileSync(join(out, "engine.gen.js"), `globalThis.__SAGEBRUSH_ENGINE__ = ${JSON.stringify(readFileSync(join(root, "wasm", "sagebrush-engine.wasm")).toString("base64"))};\n` +
   `globalThis.__SAGEBRUSH_RASTER__ = ${JSON.stringify(readFileSync(join(root, "wasm", "sagebrush-raster.wasm")).toString("base64"))};\n` +
+  `globalThis.__SAGEBRUSH_MP__ = ${JSON.stringify(readFileSync(join(root, "wasm", "sagebrush-mp.wasm")).toString("base64"))};\n` +
   `globalThis.__SAGEBRUSH_ND__ = ${JSON.stringify(readFileSync(join(root, "wasm", "sagebrush-nd.wasm")).toString("base64"))};\n` +
   `globalThis.__SAGEBRUSH_ND_HELPER__ = ${JSON.stringify(ndHelper)};\n`);
 // The notebook page for `sagebrush notebook` (src/notebook.ts), from web/dist
@@ -115,7 +118,7 @@ writeFileSync(join(out, "engine.gen.js"), `globalThis.__SAGEBRUSH_ENGINE__ = ${J
 // there, so the page's worker and the wasm engines are not needed.
 const web = {};
 const webDir = join(root, "web", "dist");
-for (const f of ["index.html", "sagebrush-console.js", "sagebrush-math.js", "sagebrush-myst.js", "sagebrush-viewer3d.js", "sagebrush-graphview.js", "sagebrush-history.js", "sagebrush-code.js", "sagebrush-analyze.js", "sagebrush-remote.js", "sagebrush-export.js", "sagebrush-export-worker.js", "docs-index.json", "THIRD-PARTY-NOTICES.txt"]) {
+for (const f of ["index.html", "sagebrush-app.js", "sagebrush-console.js", "sagebrush-math.js", "sagebrush-myst.js", "sagebrush-viewer3d.js", "sagebrush-graphview.js", "sagebrush-history.js", "sagebrush-gradescope.js", "sagebrush-code.js", "sagebrush-analyze.js", "sagebrush-remote.js", "sagebrush-export.js", "sagebrush-export-worker.js", "docs-index.json", "THIRD-PARTY-NOTICES.txt"]) {
   if (existsSync(join(webDir, f))) web[f] = readFileSync(join(webDir, f)).toString("base64");
 }
 // (the site's early-alpha notice is for sagebrush.space, not the page `sagebrush notebook` serves on this
@@ -123,7 +126,8 @@ for (const f of ["index.html", "sagebrush-console.js", "sagebrush-math.js", "sag
 if (web["index.html"]) {
   const page = Buffer.from(web["index.html"], "base64").toString("utf8");
   const without = page.replace(/<!-- the early-alpha notice[^\n]*-->\n<script src="\/alpha-banner\.js" defer><\/script>\n/, "");
-  if (page.includes("alpha-banner") && without.includes("alpha-banner")) throw new Error("build-cli: the early-alpha notice's tag in web/dist/index.html changed; update its removal here");
+  // (the script's own name: the page's CSS also names the notice's height, --sb-alpha-banner)
+  if (page.includes("/alpha-banner.js") && without.includes("/alpha-banner.js")) throw new Error("build-cli: the early-alpha notice's tag in web/dist/index.html changed; update its removal here");
   web["index.html"] = Buffer.from(without, "utf8").toString("base64");
 }
 // (`sagebrush board open`'s page, src/board-open.ts: the frame other sites show a board in, gzipped (1.4 MB, of
@@ -152,7 +156,9 @@ for (const mode of existsSync(catalogDir) ? readdirSync(catalogDir).sort() : [])
   const groups = {};
   for (const f of readdirSync(d).sort()) if (f.endsWith(".json")) groups[f.slice(0, -".json".length)] = JSON.parse(readFileSync(join(d, f), "utf8"));
   const miss = existsSync(join(d, "missing.txt")) ? readFileSync(join(d, "missing.txt"), "utf8").split("\n").map((l) => l.trim()).filter((l) => l && !l.startsWith("#")) : [];
-  catalog[mode] = { groups, missing: miss };
+  // (a mode with only the real system's names, upstream.txt, has no catalog: those are the web search's only,
+  // web/upstream-names.mts)
+  if (Object.keys(groups).length || miss.length) catalog[mode] = { groups, missing: miss };
 }
 // (and the commit it is built from, for the catalog's links to the source,
 // lib/_catalog.py source_url: only from a clean tree, whose lines are that

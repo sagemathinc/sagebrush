@@ -1,0 +1,6 @@
+5
+
+In file "test_error_literal_quote.m", line 3, column 2:
+>> '
+    ^
+User error: Unexpected newline in literal identifier

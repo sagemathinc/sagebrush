@@ -1,7 +1,0 @@
-{
- "v": 1,
- "reason": "board run and board check report an @interact item's run at its default values (Codex's friction P11a, python's reproduction): its output kept with the item, after its controls, and an error its function raised there (lib/_interact.py prints it as a traceback, as Sage's interact does, rather than raising) failing the item, saying so. src/board-run.ts only, in the CLI: a few lines in collect() and the item's status. r2 (astra, daybreak3): kept output known per interact under the item's caps (WeakMaps of target and bytes), cleared per interact with its bytes given back, interactError() reading only that (+1.5 KB); r3: an item's interact flags bounded, cleared by its clear, an interact's clear lifting the cut: +2.0 KB; r4: an item's cut said once: +2.2 KB in all. No new module or dependency.",
- "bytes": {
-  "cli/pyjs.cjs": 2300
- }
-}

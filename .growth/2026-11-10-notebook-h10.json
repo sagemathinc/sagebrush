@@ -1,7 +1,0 @@
-{
- "v": 1,
- "reason": "Notebook (William's H10): the notebook's stylesheet gains the rule hiding the hover + Code + Text below the last cell, and the file browser's popup() closes a menu it replaces with that menu's own close (its listeners too). engine/sagebrush-notebook.js +147. cli/pyjs.cjs shrinks (-748: the board page it embeds loses New ▸ MATLAB notebook). No other artifact grows. The marker is the measured growth + 64. Measured with bun 1.4.4 / node 24.21.0 (size-record.sh) on master d74c34c2 vs head 0ec260de; this marker's own commit changes no artifact.",
- "bytes": {
-  "engine/sagebrush-notebook.js": 211
- }
-}

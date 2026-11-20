@@ -1,8 +1,0 @@
-{
-  "v": 1,
-  "reason": "Where you were in a notebook (#991): the browser keeps each workspace notebook's top cell and offset, a proportional fallback if that cell was deleted, and its selected cell through notebook switches and reloads; bounded browser-only keys use the shared view-state keeper. Measured in CI's build order with bun 1.4.4 and Node 24.21.0, base master 25891e2f after #989 vs rebased test head d4e19a14c: engine/sagebrush-notebook.js 241912 -> 241937 (+25), cli/pyjs.cjs 27414678 -> 27418478 (+3800). Each tight marker is the incremental delta +64 B; #989's existing notebook ceiling 241976 already covers this head.",
-  "bytes": {
-    "engine/sagebrush-notebook.js": 89,
-    "cli/pyjs.cjs": 3864
-  }
-}

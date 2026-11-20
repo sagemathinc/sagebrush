@@ -4,7 +4,7 @@
 // class). Markers are plain objects; tokens are the core's integers. Each unit carries its events (unit.ev), so the D4
 // incremental layer reuses a converged suffix's events together with its units.
 // incremental-demo.mjs is core/incremental.mjs with only its two import lines changed (to this module).
-import { isCodeEnv } from "./sagetex.mjs";
+import { isCodeEnv, utf8len } from "./sagetex.mjs";
 import { Machine as CoreMachine, Intern, BoundError, StopError, setCurrentIntern, DEFAULT_LIMITS, CAT, mkChar, isCs, catOf, codeOf, SPACE_TOK, meaning } from "../core/machine.mjs";
 
 export { Intern, BoundError, StopError, setCurrentIntern, DEFAULT_LIMITS, CAT, mkChar, isCs, catOf, codeOf, SPACE_TOK };
@@ -13,7 +13,10 @@ export { Intern, BoundError, StopError, setCurrentIntern, DEFAULT_LIMITS, CAT, m
 // instead of being dropped with E-UNDEF-CS
 const ALL_KNOWN = { has: () => true };
 const VERBATIM = new Set(["verbatim", "verbatim*", "Verbatim", "lstlisting", "minted", "comment", "filecontents", "filecontents*",
-  "pycode", "pyblock", "pysub", "pyverbatim", "pyconsole", "sageblock", "sagesilent", "sagecommandline", "sageexample", "sageverbatim", "sympycode", "pylabcode"]);
+  "pycode", "pyblock", "pysub", "pyverbatim", "pyconsole", "sageblock", "sagesilent", "sagecommandline", "sageexample", "sageverbatim", "sympycode", "pylabcode",
+  "magmablock", "magmasilent"]);
+// (Magma's names, a Sagebrush extension: a document that defines one itself uses its own, and ours is off for it)
+const MAGMA_ENVS = new Set(["magmablock", "magmasilent"]);
 const MAX_VERB = 1 << 20;   // characters kept from one verbatim block
 // s03 (William's report: a self-recursive \newcommand hung the page): every machine also stops at a WALL-CLOCK bound
 // (checked at the core's own poll points, every pollEvery work units) and at an output-event bound; both stop the
@@ -240,13 +243,27 @@ export class Machine extends CoreMachine {
   // sequence or an active character, a blank line (a \par token: the argument ran on, as "a % b}" does), the end of
   // the input, an empty argument, or more than SAGE_MAX_CODE characters is rejected. The whole argument is consumed
   // either way, so the rest of the document reads as TeX would read it.
+  // Read straight from a file (the usual case), the code is the argument's own source text, exactly as written between
+  // its braces, its line ends joined as TeX joins them (one space): so a backslash, a ~ or a run of spaces inside it
+  // (a Python string's '$\sin(x^2)$', '\n') is Sage's to read, never TeX's. The tokens above still decide where the
+  // argument ends, as TeX reads it; where the text and the tokens could differ (a % comment, ^^ notation, an argument
+  // that came from a macro), the subset's rules above apply instead.
   readSageArg() {
     const t0 = this.skipSpacesRaw();
     if (t0 === null) return { err: "unbalanced" };
     if (isCs(t0) || catOf(t0) !== CAT.BGROUP) { this.back(t0); return { err: "nobrace" }; }
+    // (the file the brace came from: under it, a list already read to its end, as \sageplot's look past its options
+    //  leaves one, holds nothing more)
+    let k = this.stack.length - 1;
+    while (k >= 0 && this.stack[k].kind !== "file" && this.stack[k].i >= this.stack[k].toks.length) k--;
+    const f = this.stack[k];
+    const fromFile = !!f && f.kind === "file" && f.line !== null;
+    const start = fromFile ? f.lineStart + f.li : -1;
+    let same = fromFile && f.text[start - 1] === "{";
     let depth = 1, s = "", bytes = 0, err = null, name = null, n = 0;
     for (;;) {
       const t = this.nextRaw();
+      if (same && this.stack[this.stack.length - 1] !== f) same = false;
       if (t === null) return { err: "unbalanced" };
       this.charge(1);
       if (++n > this.limits.tokenList) throw new BoundError("E-BOUND-TOKENS");
@@ -265,6 +282,19 @@ export class Machine extends CoreMachine {
       bytes += cp < 0x80 ? 1 : cp < 0x800 ? 2 : cp < 0x10000 ? 3 : 4;
       if (bytes <= SAGE_MAX_CODE) s += String.fromCodePoint(cp);
     }
+    // (the closing brace read from the same file, right before where its reader now is: the text between the braces)
+    const end = same && this.stack[this.stack.length - 1] === f && f.line !== null ? f.lineStart + f.li - 1 : -1;
+    if (end >= 0 && end >= start && f.text[end] === "}") {
+      const raw = f.text.slice(start, end);
+      let plain = !raw.includes("^^");
+      for (let i = 0; plain && i < raw.length; i++) if (this.cat(raw.codePointAt(i)) === CAT.COMMENT) plain = false;
+      if (plain) {
+        const code = raw.replace(/[ \t]*\r?\n[ \t]*/g, " ");
+        if (utf8len(code) > SAGE_MAX_CODE) return { err: "toolong" };
+        if (code.trim() === "") return { err: "empty" };
+        return { code };
+      }
+    }
     if (err !== null) return { err, name };
     if (bytes > SAGE_MAX_CODE) return { err: "toolong" };
     if (s.trim() === "") return { err: "empty" };
@@ -280,8 +310,13 @@ export class Machine extends CoreMachine {
     P.prim("begin", function (t) {
       const ap = this.placeOf(), env = this.readArgString();
       // verbatim: exactly the core's branch (its reader must be the file on top of the stack, not a pushed list)
-      if (isVerb(env)) { this.charge(env.length); this.skipVerbatim(env, ap); return; }
-      if (env === "document") { this.mark({ k: "doc" }); this.shortVerbAtBegin(this.getS("sb:cls")); }
+      if (isVerb(env) && !(MAGMA_ENVS.has(env) && this.getS("m:" + env) !== undefined)) { this.charge(env.length); this.skipVerbatim(env, ap); return; }
+      if (env === "document") {
+        this.mark({ k: "doc" }); this.shortVerbAtBegin(this.getS("sb:cls"));
+        // (Magma's names the document took over: said once each, by check and the editor)
+        if (this.getS("m:magma") !== ourMagma) this.mark({ k: "own", name: "magma" });
+        for (const e of MAGMA_ENVS) if (this.getS("m:" + e) !== undefined) this.mark({ k: "own", name: e });
+      }
       else this.mark({ k: "be", env, user: this.getS("m:" + env) !== undefined });
       this.pushArg(env);
       coreBegin.call(this, t);
@@ -336,7 +371,8 @@ export class Machine extends CoreMachine {
     P.prim("newcommand", function (t) {
       const s0 = this.skipSpacesRaw(); const star = s0 === mkChar(CAT.OTHER, 42); if (!star && s0 !== null) this.back(s0);
       const cs = this.csArg(); if (cs === null) return;
-      if (this.getS("m:" + this.intern.name(cs)) !== undefined) {
+      // (\magma, ours, gives way to the document's: Magma is a Sagebrush extension, not a package's command)
+      if (this.getS("m:" + this.intern.name(cs)) !== undefined && !(this.intern.name(cs) === "magma" && this.getS("m:magma") === ourMagma)) {
         this.d("E-ALREADY-DEFINED"); this.readOptRaw(); this.readOptRaw(); this.readArgRaw(); this.finishAssignment();
         this.mark({ k: "err", code: "already-defined", name: this.intern.name(cs) });
         return;
@@ -354,6 +390,10 @@ export class Machine extends CoreMachine {
     // \printpythontex, what the last pyblock passed printed, by the results pass (plan r3.1)
     P.prim("py", function () { const ap = this.placeOf(); this.item(Object.assign({ k: "sage", mode: "py" }, this.readSageArg()), ap); });
     P.prim("printpythontex", function () { PY?.call(this); });
+    // Magma (a Sagebrush extension, William Nov 10): \magma{expr}, an item (Magma prints it); magmablock and magmasilent
+    // are code environments (VERBATIM)
+    P.prim("magma", function () { const ap = this.placeOf(); this.item(Object.assign({ k: "sage", mode: "magma" }, this.readSageArg()), ap); });
+    const ourMagma = this.getS("m:magma");
     P.prim("sageplot", function () {
       const ap = this.placeOf(), o1 = this.readOptRaw(); const o2 = o1 === null ? null : this.readOptRaw();
       const opts = [o1, o2].filter((o) => o !== null).map((o) => this.toks2str(o).trim());

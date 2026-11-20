@@ -72,6 +72,8 @@ export function goneChapters(before: string[] | null, after: string[]): string[]
   return before.filter((p) => /\.ipynb$/i.test(p) && !now.has(p));
 }
 
+/** Board's line: a folder whose share was deleted, shared again. */
+export const FOLDER_GONE = "This folder's links were deleted. Upload makes new ones, at new addresses.";
 export type FolderShare = { share_id: string; share_attempt: null } | { share_id: null; share_attempt: string };
 type Sent = { tag: "none" } | { tag: "attempt"; attempt: string } | { tag: "unreadable" };
 export interface FolderShareDeps {
@@ -81,9 +83,9 @@ export interface FolderShareDeps {
   set: (expect: FolderShare | undefined, next: FolderShare | undefined) => Promise<boolean>;
   /** this device's record of the attempt it sent (shareSent, "folder:<fid>") */
   sent: { get: () => Promise<Sent>; put: (attempt: string) => Promise<string>; drop: (attempt: string) => Promise<unknown> };
-  upload: (o: { id: string | null; attempt?: string; title: string; license?: string; files: LazyFile[] }, progress: (done: number, total: number) => void, opts: { beforeCommit: () => Promise<void> }) => Promise<{ id: string; url: string }>;
+  upload: (o: { id: string | null; attempt?: string; title: string; license?: string; author?: string; files: LazyFile[] }, progress: (done: number, total: number) => void, opts: { beforeCommit: () => Promise<void> }) => Promise<{ id: string; url: string }>;
   /** an AttemptError's kind and share (upload.ts), else null */
-  attemptError: (e: unknown) => { kind: "used" | "retired"; share?: { id: string; url: string } } | null;
+  attemptError: (e: unknown) => { kind: "used" | "retired" | "gone"; share?: { id: string; url: string } } | null;
   random: () => string;
   /** the most first uploads this device keeps unconfirmed (SHARE_SENT_MAX) */
   sentMax: number;
@@ -95,7 +97,7 @@ const same = (a: FolderShare | undefined, b: FolderShare | undefined) => (a === 
  * id, `again` (a new version), and `settled` (tests: the record's settling, done in the background).
  */
 export async function shareFolderUpload(
-  o: { title: string; license?: string; files: LazyFile[] },
+  o: { title: string; license?: string; author?: string; files: LazyFile[] },
   d: FolderShareDeps,
   progress: (done: number, total: number) => void = () => {},
 ): Promise<{ id: string; url: string; again: boolean; settled: Promise<void> }> {
@@ -149,10 +151,16 @@ export async function shareFolderUpload(
   };
   let r: { id: string; url: string };
   try {
-    r = await d.upload({ id: prev, attempt: attempt ?? undefined, title: o.title, license: o.license, files: o.files }, progress, { beforeCommit });
+    r = await d.upload({ id: prev, attempt: attempt ?? undefined, title: o.title, license: o.license, author: o.author, files: o.files }, progress, { beforeCommit });
   } catch (e) {
     // (an unknown outcome (no answer, a 5xx): the attempt stays the folder's, and its record, so a retry gets it back)
     const ae = d.attemptError(e);
+    // (its share deleted by its owner: the record goes only if it is still exactly that share (compare-and-set: a newer
+    // one, from another tab, is kept); nothing more is sent: the next Upload makes a new share, as any first one)
+    if (ae?.kind === "gone" && prev) {
+      await d.set(b, undefined).catch(() => false);
+      throw Object.assign(new Error(FOLDER_GONE), { plain: true });
+    }
     if (!ae || attempt === null) throw e;
     const held: FolderShare = { share_id: null, share_attempt: attempt };
     if (ae.kind === "used" && ae.share) {

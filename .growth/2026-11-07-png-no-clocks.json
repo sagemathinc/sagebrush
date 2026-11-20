@@ -1,8 +1,0 @@
-{
- "v": 1,
- "reason": "png's tests without clocks (flake #806, HARD-6BC-1/-2): src/runtime/raster.ts gains _sbraster.memory_bytes(), the PNG module's linear memory in bytes, so test/png.test.ts can tell by memory, not by time, that a drawing was refused before its rasters were allocated. Measured vs master 0a255d10, node 24.21.0, bun 1.4.4: the CLI bundle +97 and the worker +78 (the accessor and its comment); markers measured + 64.",
- "bytes": {
-  "cli/pyjs.cjs": 161,
-  "engine/sagebrush-worker.js": 142
- }
-}

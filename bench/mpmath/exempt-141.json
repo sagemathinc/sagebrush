@@ -1,0 +1,26 @@
+{
+ "note": "mpmath 1.4.1's special values that the multiprecision core already follows (William, Nov 10 2026: target 1.4.1, fix the known mpmath bugs) while this repository's references are still mpmath 1.3.0: CPython's mpmath==1.3.0 in CI (the fuzzer's reference) and the pinned pypi-mpmath 1.3.0 package (the python backend, conformance.py's reference). A comparison may pass a mismatch only when its case matches one rule below AND the core's value is that rule's exact 1.4.1 value; anything else stays a mismatch. Each rule's exact value is pinned on its own in test/mpcore-reimport.test.ts. REMOVED BY the pypi-mpmath 1.4.1 bump, which moves the references to 1.4.1 and deletes this file.",
+ "rules": [
+  {
+   "id": "pow-one-zero",
+   "rule": "mpf_pow (1.4.1): 1**y is 1 and x**0 is 1 for y and x infinite or nan; mpmath 1.3.0 gives nan",
+   "removed_by": "the pypi-mpmath 1.4.1 bump",
+   "conformance": "^(one\\.__pow__\\((inf|nan)\\)|(inf|nan)\\.__rpow__\\(one\\)|(inf|nan)\\.__pow__\\(zero\\))$",
+   "conformance_core": "mpf(0,1,0,1)"
+  },
+  {
+   "id": "csqrt-inf-imag",
+   "rule": "mpc_sqrt (1.4.1): sqrt(x + i*inf) = inf + i*inf and sqrt(x - i*inf) = inf - i*inf for every x; mpmath 1.3.0 gives a nan imaginary part",
+   "removed_by": "the pypi-mpmath 1.4.1 bump",
+   "fuzz": "^mpc_sqrt \\(\\([^()]*\\),\\((?P<im>0,0,-456,-2|1,0,-789,-3)\\)\\) ",
+   "fuzz_core": "((0,0,-456,-2),({im}))"
+  },
+  {
+   "id": "cdiv-finite-by-inf",
+   "rule": "mpc_div (1.4.1): a finite complex divided by a complex with an infinite part (and no nan) is 0; mpmath 1.3.0 gives nan + i*nan",
+   "removed_by": "the pypi-mpmath 1.4.1 bump",
+   "fuzz": "^mpc_div \\(\\((?P<a>[^()]*)\\),\\((?P<b>[^()]*)\\)\\) \\(\\((?P<c>[^()]*)\\),\\((?P<d>[^()]*)\\)\\) ",
+   "fuzz_core": "((0,0,0,0),(0,0,0,0))"
+  }
+ ]
+}

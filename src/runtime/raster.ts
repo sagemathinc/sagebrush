@@ -5,14 +5,9 @@
 //   decode(png bytes) -> (width, height, channels, float32 bytes)
 // The WebAssembly module (wasm/sagebrush-raster.wasm, about 750 KB) is
 // compiled the first time a PNG is written or read, from wherever the host
-// keeps it (as the engine's, src/runtime/engine.ts):
-//   globalThis.__SAGEBRUSH_RASTER__      its bytes, as base64 (the CLI bundle)
-//   globalThis.__SAGEBRUSH_RASTER_URL__  a URL to fetch synchronously (the
-//                                        notebook's worker), checked against
-//                                        __SAGEBRUSH_RASTER_SHA256__
-//   else, in Node, the file wasm/sagebrush-raster.wasm above this module.
+// keeps it (src/runtime/wasm-asset.ts, key RASTER).
 
-import { sha256Hex } from "./sha256";
+import { assetBytes } from "./wasm-asset";
 import * as Obj from "./object";
 import { newBuiltinModule } from "./modules";
 import * as O from "./ops";
@@ -35,40 +30,7 @@ let R: Raster | null = null;
 
 // (exported for test/png.test.ts)
 export function rasterBytes(): Uint8Array {
-  const g = globalThis as any;
-  if (typeof g.__SAGEBRUSH_RASTER__ === "string") {
-    const bin = atob(g.__SAGEBRUSH_RASTER__);
-    const b = new Uint8Array(bin.length);
-    for (let i = 0; i < bin.length; i++) b[i] = bin.charCodeAt(i);
-    return b;
-  }
-  if (g.__SAGEBRUSH_RASTER_URL__) {
-    // only the bytes the page was built with run (design/security.md,
-    // SEC-522-1): without the hash they are not fetched at all
-    const want = g.__SAGEBRUSH_RASTER_SHA256__;
-    if (typeof want !== "string" || !/^[0-9a-f]{64}$/.test(want)) throw new Error("the PNG module has no SHA-256 to check, so it is not loaded");
-    let b: Uint8Array;
-    if (typeof g.__SAGEBRUSH_FETCH_SYNC__ === "function") b = g.__SAGEBRUSH_FETCH_SYNC__(String(g.__SAGEBRUSH_RASTER_URL__));
-    else {
-      const x = new XMLHttpRequest();
-      x.open("GET", String(g.__SAGEBRUSH_RASTER_URL__), false);
-      x.responseType = "arraybuffer";
-      x.send();
-      if (x.status !== 200) throw new Error(`could not load the PNG module (HTTP ${x.status})`);
-      b = new Uint8Array(x.response);
-    }
-    if (sha256Hex(b) !== want) throw new Error("the PNG module fetched is not the one this page was built with");
-    return b;
-  }
-  const fs = g.process?.getBuiltinModule?.("fs"), path = g.process?.getBuiltinModule?.("path");
-  if (fs && path) {
-    const start = typeof __dirname === "string" ? __dirname : g.process.cwd();
-    for (let dir = start, i = 0; i < 6; i++, dir = path.dirname(dir)) {
-      const f = path.join(dir, "wasm", "sagebrush-raster.wasm");
-      if (fs.existsSync(f)) return new Uint8Array(fs.readFileSync(f));
-    }
-  }
-  throw new Error("Sagebrush's PNG module (sagebrush-raster.wasm) is not available here");
+  return assetBytes("RASTER", "sagebrush-raster.wasm", "PNG module");
 }
 
 function raster(): Raster {

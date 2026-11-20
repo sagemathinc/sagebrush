@@ -7,34 +7,9 @@ use crate::funcs::{euler_gamma, pi};
 use crate::mag::Mag;
 use num_traits::{One, Zero};
 use sagebrush_bigint::{BigInt, BigRational};
-use std::cell::RefCell;
 
-thread_local! {
-    static BERNOULLI: RefCell<Vec<BigRational>> = const { RefCell::new(Vec::new()) };
-}
-
-/// B_0 .. B_n exactly (B_1 = -1/2), from sum_(j<=m) C(m+1, j) B_j = 0.
-pub fn bernoulli(n: usize) -> Vec<BigRational> {
-    BERNOULLI.with(|c| {
-        let mut b = c.borrow_mut();
-        if b.is_empty() {
-            b.push(BigRational::one());
-        }
-        while b.len() <= n {
-            let m = b.len();
-            let mut s = BigRational::zero();
-            let mut binom = BigInt::one(); // C(m+1, j)
-            for (j, bj) in b.iter().enumerate() {
-                if !bj.is_zero() {
-                    s += BigRational::from_integer(binom.clone()) * bj;
-                }
-                binom = binom * BigInt::from(m + 1 - j) / BigInt::from(j + 1);
-            }
-            b.push(-s / BigRational::from_integer(BigInt::from(m + 1)));
-        }
-        b[..=n].to_vec()
-    })
-}
+/// B_0 .. B_n exactly (B_1 = -1/2): the engines' one table (sagebrush-bigint's exact module).
+pub use sagebrush_bigint::exact::bernoulli;
 
 fn rat_ball(q: &BigRational, wp: u64) -> Ball {
     Ball::from_rational(q.numer(), q.denom(), wp)

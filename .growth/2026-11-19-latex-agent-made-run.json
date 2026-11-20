@@ -1,0 +1,7 @@
+{
+  "v": 1,
+  "reason": "A .tex the paired agent created or built runs once by itself in the LaTeX editor that shows it: the pairing's record of it and its answer over the site's channel (web/workspace/agent-pair.ts, agent-made-tex.ts), carried into cli/pyjs.cjs with the notebook page. Measured with the shared size-gate-exact.sh (bun 1.4.4, node 24.21.0) on master 6614eb38 and a two-parent merge probe of the branch head, which carries the embedded mode beneath it: cli/pyjs.cjs +752, less the embedded mode's own +84 (its marker), = +668, + 64.",
+  "bytes": {
+    "cli/pyjs.cjs": 732
+  }
+}

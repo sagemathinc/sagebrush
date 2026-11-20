@@ -833,3 +833,10 @@ if BACKEND == 'sage':
         mpc_sqrt = _lbmp.mpc_sqrt
     except (ImportError, AttributeError):
         print("Warning: Sage imports in libmpc failed")
+elif BACKEND == 'sagebrush':
+    import _sagebrush_mpcore
+    mpc_exp = _sagebrush_mpcore.mpc_exp
+    mpc_sqrt = _sagebrush_mpcore.mpc_sqrt
+    mpc_mul = _sagebrush_mpcore.mpc_mul
+    mpc_div = _sagebrush_mpcore.mpc_div
+    mpc_abs = _sagebrush_mpcore.mpc_abs

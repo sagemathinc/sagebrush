@@ -1,7 +1,0 @@
-{
- "v": 1,
- "reason": "1a, documents as folders (William, Nov 5: \"users can easily browse these .py (etc) files\"; plan approved by @sagebrush Nov 6): a .py, .sage, .m, .mag, .js, .json or .txt file opens on its own page, /?code=<fid>: highlighted View, autosaved Edit, the one File menu. The page is a lazy chunk (sagebrush-code.js, 23 KB, fetched only at /?code=) that the CLI's `sagebrush notebook` serves too, so cli/pyjs.cjs carries it; the notebook page's own script gains only the boot hook (~3 KB). Measured +33691 B on master b960770f (with the save loop and the follow recheck: an edit made during a write, or while a change made elsewhere is read, is kept), marked 33750. r6: grader's pins; the edit rule in its own module, a stopped page's early return, a test seam: +64 B. r7: the read-only reason kept as it is now (+34 B); measured +33863 B on master c32e38de.",
- "bytes": {
-  "cli/pyjs.cjs": 34400
- }
-}

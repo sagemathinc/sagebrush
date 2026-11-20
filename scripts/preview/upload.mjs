@@ -25,7 +25,7 @@ export async function upload(client, name, output, signal) {
     const same = previous.has(key) && await client.matches(key, file);
     check(); // A peer can fail during HEAD: never start a successor PUT then.
     if (same) { skipped++; return; }
-    await client.put(key, file.bytes, file.type);
+    await client.put(key, file.bytes, file.type, file.cacheControl);
     uploaded++;
   };
   // A full barrier keeps policies/assets ahead of all entry pages.

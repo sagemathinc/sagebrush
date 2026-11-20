@@ -6,7 +6,7 @@
 //   bun web/build.ts && node web/test-offline-inventory.mjs
 import { readFileSync } from "node:fs";
 import { join } from "node:path";
-import { OFFLINE_CAPS, itemOfGroup, offlineInventory } from "./offline-inventory.mts";
+import { OFFLINE_CAPS, itemOfGroup, itemCovers, checkStartCoverage, offlineInventory } from "./offline-inventory.mts";
 
 let failures = 0;
 const ok = (c, name) => (console.log((c ? "ok   " : "FAIL ") + name), c || failures++);
@@ -20,7 +20,7 @@ const invText = readFileSync(join(here, "dist", "offline-inventory.json"), "utf8
 // K3: the built inventory partitions LAZY exactly, and names no path or hash
 const CHUNK = /^lib\/([a-z0-9][a-z0-9-]*)\.(?:src|pre)\.[0-9a-f]{16}\.json$/;
 const owner = (p) => {
-  const hits = inv.items.filter((it) => it.rule === "engine" ? /^sagebrush-engine\.wasm/.test(p) : it.rule === "myst" ? p === "sagebrush-myst.js" : it.rule === "docs" ? /^docs-index(-[a-z]+)?\.json$/.test(p) : it.rule === "tzdata" ? p.startsWith("lib/tzdata/") : (it.groups ?? []).includes(CHUNK.exec(p)?.[1]));
+  const hits = inv.items.filter((it) => it.rule === "engine" ? /^sagebrush-engine\.wasm/.test(p) : it.rule === "myst" ? p === "sagebrush-myst.js" : it.rule === "docs" ? /^docs-(index(-[a-z]+)?|upstream-[a-z]+)\.json$/.test(p) : it.rule === "tzdata" ? p.startsWith("lib/tzdata/") : (it.groups ?? []).includes(CHUNK.exec(p)?.[1]));
   return hits.map((it) => it.id);
 };
 const owners = LAZY.map(owner);
@@ -31,6 +31,11 @@ const stored = Object.fromEntries(inv.items.map((it) => [it.id, LAZY.filter((_, 
 ok(inv.items.every((it) => it.stored === stored[it.id]), "K3: each item's stored bytes are its files' DIGESTS sizes");
 ok(inv.totals.files === LAZY.length && inv.totals.stored === Object.values(stored).reduce((a, b) => a + b, 0), "K3: the totals are the sums");
 ok(!/lib\/|\.json|\?h=|[0-9a-f]{16}/.test(invText), "K3: the inventory names no path and no hash");
+// (a Sage-layer module's own group is the Sage item's: Sage downloaded for offline use has finite-field matrices
+// (mod-sage-ffmat, which the Sage start leaves to its first use) and curves over GF(p) without "Other Python modules")
+const sageItem = inv.items.find((it) => it.id === "sage"), modulesItem = inv.items.find((it) => it.id === "modules");
+ok(["mod-sage-ffmat", "mod-sage-ec-ff", "mod-sage-ffsub"].every((g) => sageItem?.groups.includes(g)), "the Sage item holds mod-sage-ffmat, mod-sage-ec-ff and mod-sage-ffsub: " + JSON.stringify(sageItem?.groups));
+ok(!(modulesItem?.groups ?? []).some((g) => g.startsWith("mod-sage-")), "the modules item holds no mod-sage- group");
 
 // Hidden items (@sagebrush's ruling on #847, Nov 8; agents-ui's three points): the Rill and Sprig items are in the
 // inventory, so every control above counts them, but each is hidden until the page can run its mode (Rill's A2,
@@ -48,6 +53,7 @@ ok(!visible.some((it) => it.id === "rill" || it.id === "sprig"), "hidden: a new-
 
 // K2: a group no rule places, and each cap exceeded, are refused by the build
 ok(refuses(() => itemOfGroup("brand-new-group"), /belongs to no item/), "K2: a library group no rule places is refused");
+ok(itemOfGroup("mod-sage-ffmat") === "sage" && itemOfGroup("mod-sage-ec-ff") === "sage" && itemOfGroup("mod-sagex") === "modules", "a mod-sage- group is the Sage item's; mod-sagex isn't one");
 ok(itemOfGroup("core") === "python" && itemOfGroup("sci") === "scientific" && itemOfGroup("sage-x") === "sage" && itemOfGroup("pkg-foo") === "pkg-foo" && itemOfGroup("mod-bar") === "modules", "K2: the rules place the known groups");
 const h = "0123456789abcdef";
 const lazy = (n) => Array.from({ length: n }, (_, i) => `lib/core.src.${(h + i.toString(16)).slice(-16)}.json`);
@@ -60,5 +66,20 @@ ok(!refuses(() => build(lazy(2), 1, OFFLINE_CAPS.transfer / 2), /./) && refuses(
 ok(!refuses(() => build(lazy(1), OFFLINE_CAPS.maxEntry, 1), /./) && refuses(() => build(lazy(1), OFFLINE_CAPS.maxEntry + 1, 1), /an entry of/), "K2: the largest-entry cap: exactly passes, 1 byte over is refused");
 ok(refuses(() => offlineInventory(["lib/core.src.0123456789abcdef.json", "lib/core.src.0123456789abcdef.json"], sizes(["lib/core.src.0123456789abcdef.json"], 1), sizes(["lib/core.src.0123456789abcdef.json"], 1)), /twice/), "K2: a path listed twice is refused");
 ok(refuses(() => build(["something/else.bin"], 1, 1), /belongs to no item/), "K2: a LAZY path of no item is refused");
+// (a mode's start fetches only groups its item holds or needs: what each item covers, and the build's check refusing a
+// start that fetches another's group, naming the mode, the group and its item)
+ok(itemCovers("sage", "sage") && itemCovers("sage", "python") && itemCovers("sage", "modules") && itemCovers("magma", "sage") && itemCovers("matlab", "scientific"),
+  "an item covers itself and what it needs");
+ok(!itemCovers("sage", "matlab") && !itemCovers("rill", "sage") && !itemCovers("python", "modules") && !itemCovers("matlab", "sage") && !itemCovers("nope", "python"),
+  "an item covers nothing else: sage not matlab, rill not sage, python not modules, matlab not sage, an unknown item nothing");
+ok(!refuses(() => checkStartCoverage({ matlab: ["core", "sci", "matlab", "mod-scipy"], magma: ["core", "sage", "magma-x", "mod-y"] }), /./),
+  "a start that fetches only its own, its needs' and the modules' groups passes");
+// (a package's group is an item of its own, which no mode's item needs: a start that fetched one would be refused)
+ok(refuses(() => checkStartCoverage({ matlab: ["core", "matlab", "pkg-scipy-io"] }), /matlab's start fetches pkg-scipy-io, whose item pkg-scipy-io/),
+  "a start that fetches a package's group is refused (each package is an item of its own)");
+ok(refuses(() => checkStartCoverage({ sage: ["core", "sage", "matlab"] }), /sage's start fetches matlab, whose item matlab the sage item neither holds nor needs/),
+  "a start that fetches another mode's group is refused, naming the mode, the group and its item");
+ok(refuses(() => checkStartCoverage({ rill: ["core", "rill-a", "sage-ec"] }), /rill's start fetches sage-ec, whose item sage/),
+  "...and rill's start fetching a sage group too");
 console.log(failures ? `${failures} failure(s)` : "offline inventory: all controls pass");
 process.exit(failures ? 1 : 0);

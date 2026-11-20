@@ -84,7 +84,8 @@ def _where(line, col):
 def _undeclared(name, line, col):
     """Where `name` is first used at or after (line, col), as Magma points at
     an undeclared identifier."""
-    rx = _re.compile(r"(?<![A-Za-z0-9_'])%s(?![A-Za-z0-9_])" % _re.escape(name))
+    # (or written as a literal identifier, 'name': Magma points at its quote)
+    rx = _re.compile(r"(?<![A-Za-z0-9_'])%s(?![A-Za-z0-9_])|'%s'" % (_re.escape(name), _re.escape(name)))
     for k in range(line - 1, len(_src[1])):
         start = col - 1 if k == line - 1 else 0
         m = rx.search(_src[1][k], start)
@@ -2801,6 +2802,23 @@ def _rule_pow(A, B, a, b, err, pos, unsupported):
     if ka == "M" and not _sq(A):
         raise MagmaError("Argument 1 is not square", "'^'", True, pos)
 
+
+
+def _chain(x, *steps):
+    # a long chain of operators at one precedence (src/magma.ts Parser.chain): steps are (op, operand, pos), the
+    # operand a function that evaluates it, called when its step is reached, so the chain runs left to right as the
+    # nested form does; op is the operator's helper, or "and", "or" or "xor", which skip their operand as Magma does
+    for k in range(0, len(steps), 3):
+        f, r, pos = steps[k], steps[k + 1], steps[k + 2]
+        if f == "and":
+            x = _bool(x) and _bool(r())
+        elif f == "or":
+            x = _bool(x) or _bool(r())
+        elif f == "xor":
+            x = _bool(x) != _bool(r())
+        else:
+            x = f(x, r(), pos)
+    return x
 
 
 def _add(a, b, pos=None, op="+"):
@@ -8304,6 +8322,15 @@ def StringToInteger(s, b=10):
     if not m or any(int(c, 36) >= b for c in m.group(2)):
         raise _arg_error("StringToInteger", 'String "%s" does not represent an number in base %d' % (s, b))
     return int(m.group(1) + m.group(2), b)
+
+
+def sagebrush_figures(mode=None):
+    """sagebrush_figures(mode): how figures are shown, in every language (Python's sagebrush.figures): "auto" (the
+    default: an SVG, unless it would be over 1 MiB, then a PNG drawn at twice the size, said under it), "svg", "png"
+    (drawn at twice the size, sharp on a high-density screen) or "both"; "reset", the default again.  Without an
+    argument, the current one."""
+    import _graphics
+    return _graphics.figures(None if mode is None else str(mode))
 
 
 def Sprint(x):

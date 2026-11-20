@@ -4,6 +4,8 @@
 //! are BigInts.  Calls are synchronous and use `threads` worker threads
 //! (0 or omitted = all cores).  Invalid arguments throw.
 
+mod mp;
+
 use sagebrush_modsym::exact::Exact;
 use napi::bindgen_prelude::BigInt;
 use napi::{Error, Result};

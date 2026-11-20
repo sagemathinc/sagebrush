@@ -111,7 +111,7 @@ const shareBindings = { SESSION_KEY: "session-key", SHARE_DEV: "1", DEV_AUTH_TOK
 const plan = { storage_bytes: 1 << 30, max_file_bytes: 1 << 20, sync: { enabled: true, version_bytes: 1 << 20, read_bytes_per_day: 1 << 30 } };
 const cocalc = async () => Response.json(plan);
 const objects = { SYNC_ACCOUNT: { className: "SyncAccount", useSQLite: true }, SYNC_DOC: { className: "SyncDoc", useSQLite: true } };
-const ratelimits = (id, fails = 1_000_000) => ({ SYNC_PREAUTH: { namespace_id: id, simple: { limit: 1_000_000, period: 60 } }, SYNC_AGENT_FAIL: { namespace_id: id + "9", simple: { limit: fails, period: 60 } } });
+const ratelimits = (id, fails = 1_000_000) => ({ SYNC_PREAUTH: { namespace_id: id, simple: { limit: 1_000_000, period: 60 } }, SYNC_INGRESS_IP: { namespace_id: "8" + id, simple: { limit: 1_000_000, period: 60 } }, SYNC_ACCOUNT_INGRESS: { namespace_id: "9" + id, simple: { limit: 1_000_000, period: 60 } }, SYNC_AGENT_FAIL: { namespace_id: id + "9", simple: { limit: fails, period: 60 } } });
 const RO = "a9a9a9a9-0009-4a9a-8a9a-a9a9a9a9a909"; // read-only
 const FA = "a9a9a9a9-000b-4a9a-8a9a-a9a9a9a9a90b"; // the first logged row's alarm
 const FB = "a9a9a9a9-000c-4a9a-8a9a-a9a9a9a9a90c"; // a grant's expiry armed by its make
@@ -122,10 +122,10 @@ const mf = new Miniflare(convertV4MiniflareOptions({
     { ...base, name: "on", bindings: { ...shareBindings, SYNC_ACCOUNTS: listed, SYNC_AGENT: "1", GRANT_TAG_KEY: KEY, SYNC_TEST_PIN_MS: "1000" }, durableObjects: objects, routes: ["sagebrush.test/*"], outboundService: cocalc, ratelimits: ratelimits("3001") },
     { ...base, name: "off", bindings: { ...shareBindings, SYNC_ACCOUNTS: listed, GRANT_TAG_KEY: KEY, SYNC_TEST_PIN_MS: "1000" }, durableObjects: objects, routes: ["off.test/*"], outboundService: cocalc, ratelimits: ratelimits("3002") },
     { ...base, name: "nokey", bindings: { ...shareBindings, SYNC_ACCOUNTS: listed, SYNC_AGENT: "1", SYNC_TEST_PIN_MS: "1000" }, durableObjects: objects, routes: ["nokey.test/*"], outboundService: cocalc, ratelimits: ratelimits("3003") },
-    { ...base, name: "noip", bindings: { ...shareBindings, SYNC_ACCOUNTS: listed, SYNC_AGENT: "1", GRANT_TAG_KEY: KEY, SYNC_TEST_PIN_MS: "1000" }, durableObjects: objects, routes: ["noip.test/*"], outboundService: cocalc, ratelimits: { ...ratelimits("3004"), SYNC_PREAUTH: { namespace_id: "3004", simple: { limit: 2, period: 60 } } } },
+    { ...base, name: "noip", bindings: { ...shareBindings, SYNC_ACCOUNTS: listed, SYNC_AGENT: "1", GRANT_TAG_KEY: KEY, SYNC_TEST_PIN_MS: "1000" }, durableObjects: objects, routes: ["noip.test/*"], outboundService: cocalc, ratelimits: { ...ratelimits("3004"), SYNC_PREAUTH: { namespace_id: "3004", simple: { limit: 2, period: 60 } }, SYNC_INGRESS_IP: { namespace_id: "83004", simple: { limit: 1000000, period: 60 } }, SYNC_ACCOUNT_INGRESS: { namespace_id: "93004", simple: { limit: 1000000, period: 60 } } } },
     // (§7's 10 failed authentications a minute per IP, on its own Worker; and a Worker without that binding)
     { ...base, name: "fail", bindings: { ...shareBindings, SYNC_ACCOUNTS: listed, SYNC_AGENT: "1", GRANT_TAG_KEY: KEY, SYNC_TEST_PIN_MS: "1000" }, durableObjects: objects, routes: ["fail.test/*"], outboundService: cocalc, ratelimits: ratelimits("3005", 10) },
-    { ...base, name: "nofail", bindings: { ...shareBindings, SYNC_ACCOUNTS: listed, SYNC_AGENT: "1", GRANT_TAG_KEY: KEY, SYNC_TEST_PIN_MS: "1000" }, durableObjects: objects, routes: ["nofail.test/*"], outboundService: cocalc, ratelimits: { SYNC_PREAUTH: { namespace_id: "3006", simple: { limit: 1_000_000, period: 60 } } } },
+    { ...base, name: "nofail", bindings: { ...shareBindings, SYNC_ACCOUNTS: listed, SYNC_AGENT: "1", GRANT_TAG_KEY: KEY, SYNC_TEST_PIN_MS: "1000" }, durableObjects: objects, routes: ["nofail.test/*"], outboundService: cocalc, ratelimits: { SYNC_PREAUTH: { namespace_id: "3006", simple: { limit: 1_000_000, period: 60 } }, SYNC_INGRESS_IP: { namespace_id: "83006", simple: { limit: 1000000, period: 60 } }, SYNC_ACCOUNT_INGRESS: { namespace_id: "93006", simple: { limit: 1000000, period: 60 } } } },
   ],
 }));
 {
@@ -172,6 +172,16 @@ async function enabled(id, origin = SITE) {
   return s;
 }
 const answer = async (r) => ({ status: r.status, ...(await r.json().catch(() => ({}))) });
+/**
+ * Miniflare's emulated per-IP limits use wall-clock windows, with epoch =
+ * floor(now / period). These short test bursts can miss the expected 429 if
+ * split across a minute boundary. If fewer than `need` ms remain, wait until
+ * 50 ms after the next boundary before starting the burst.
+ */
+async function clearOfMinuteEdge(need = 10_000) {
+  const left = 60_000 - (Date.now() % 60_000);
+  if (left < need) await new Promise((r) => setTimeout(r, left + 50));
+}
 
 await section("the switch", async () => {
   for (const origin of ["https://off.test", "https://nokey.test", "https://nofail.test"]) {
@@ -234,6 +244,7 @@ await section("before any object: the Worker", async () => {
   const t = await answer(await agent(tA, "stat", big));
   ok(t.status === 413 && t.limit === "body_bytes", "a body over 64 KiB is refused before the object: " + t.status);
   // the IP's pre-authentication limit comes first (2 a minute on this Worker)
+  await clearOfMinuteEdge();
   const n = [];
   for (let i = 0; i < 3; i++) n.push((await agent("x", "stat", {}, {}, "https://noip.test")).status);
   ok(n[0] === 401 && n[1] === 401 && n[2] === 429, "the IP's pre-authentication limit stops a flood: " + n);
@@ -368,6 +379,24 @@ await section("50 live grants at most", async () => {
   await restart(L);
   await new Promise((res) => setTimeout(res, 500));
   ok((await settled(L, 50)) === 50, "after it expires, the alarm arm() set trims the table to 50 again");
+  // (and one that expired before the object restarted, with no alarm armed for it: arm() at the start finds 51 dead
+  // and has the alarm trim them at once)
+  const two = await make(s, [{ path: "/past", access: "read" }]);
+  ok((await settled(L, 51)) === 51, "(one more grant: 51 rows again)");
+  await seam(L, { expireIn: { id: two.grant.id, ms: 0 } });
+  await restart(L);
+  ok((await settled(L, 50)) === 50, "a grant that expired before the restart, with no alarm armed: arm() at the start trims the table to 50");
+  // (exactly 50 dead, the bound itself, and a restart: arm() arms no wake for them, so the alarm can't fire again and
+  // again at the bound; nothing else here is due within a minute)
+  await restart(L);
+  const cap = await (await seam(L, {})).json();
+  ok(cap.grants === 50 && (cap.alarm === null || cap.alarm > Date.now() + 60_000), "exactly 50 dead and a restart: no wake armed for them: " + cap.grants + ", " + (cap.alarm === null ? null : cap.alarm - Date.now()));
+  // (and one over by a revoked grant, revoked with no trim and no alarm: arm() at the start counts it as dead too)
+  const three = await make(s, [{ path: "/revoked", access: "read" }]);
+  ok((await settled(L, 51)) === 51, "(one more grant: 51 rows again)");
+  await seam(L, { revokeQuiet: three.grant.id });
+  await restart(L);
+  ok((await settled(L, 50)) === 50, "51 dead, one of them revoked, and a restart: arm() at the start trims the table to 50");
 }, 120_000);
 
 await section("rates: the grant's, then the account's", async () => {
@@ -432,6 +461,7 @@ await section("10 failed authentications a minute per IP", async () => {
   const g = await make(s, [{ path: "/", access: "read" }], {}, F);
   ok(g.status === 201, "a grant on this Worker");
   const wrongSecret = ["sbg1", ...parts(g.token).slice(1, 3), b64url(Buffer.alloc(32, 3)), parts(g.token)[4]].join(".");
+  await clearOfMinuteEdge();
   const codes = [];
   // (failures at the Worker, a bad tag, and at the object, a wrong secret, count alike)
   for (let i = 0; i < 11; i++) codes.push((await agent(i % 2 ? wrongSecret : "x", "stat", { path: "/x" }, {}, F)).status);
@@ -493,6 +523,9 @@ await section("the access log", async () => {
     if (left) await new Promise((res) => setTimeout(res, 100));
   }
   ok(left === 0, "and the alarm deletes them, a page at a time, until none is left: " + left);
+  // (the log's age back to its 7 days first: at 200 ms the new row could age out before it was read, hidden by the read
+  // and swept by the alarm its own write armed, whenever the request and the read took longer than that)
+  await seam(LG, { logMs: 7 * 86400_000 });
   await agent(g2.token, "stat", { path: "/new" });
   const aged = await logOf(s);
   ok(aged.rows.length === 1 && aged.rows[0].paths === '["/new"]', "a new row is shown: " + aged.rows.length);

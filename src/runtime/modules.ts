@@ -1702,7 +1702,11 @@ newBuiltinModule("types", (m) => {
   // (CPython's own Python class, from lib/_pytypes.py; enum.py imports it)
   m.DynamicClassAttribute = importModule("_pytypes").DynamicClassAttribute;
   setattr(m.DynamicClassAttribute, "__module__", "types");
-  for (const n of ["MemberDescriptorType", "WrapperDescriptorType", "MethodWrapperType", "MethodDescriptorType", "ClassMethodDescriptorType", "FrameType", "TracebackType", "AsyncGeneratorType", "CapsuleType"]) {
+  // (the runtime's own descriptor types, so that isinstance with these is true of them, as inspect needs)
+  m.WrapperDescriptorType = (T as any).wrapper_descriptor;
+  m.MethodDescriptorType = (T as any).method_descriptor;
+  m.MemberDescriptorType = (T as any).member_descriptor;
+  for (const n of ["MethodWrapperType", "ClassMethodDescriptorType", "FrameType", "TracebackType", "AsyncGeneratorType", "CapsuleType"]) {
     m[n] = Ty.builtinTypeFor(n, class {}, "types", () => raise(T.TypeError, `cannot create '${n}' instances`));
   }
   // A generator function whose generators may be awaited.
@@ -1970,16 +1974,19 @@ export function setDataRoot(dir: string): void {
 
 // ------------------------------------------------------------------ _fs (backs open() in lib/_pyjs_open.py)
 
+// The Python exception for a failed read or write of a file (_fs's, open()'s), and for the import system's read of a
+// module's source (src/compile.ts, as fsOSError): a file it finds but can't read raises what open() raises on it
+export const oserr = (e: any, path: string): never => {
+  // (an exception the file system raised as Python's own, a Stop's KeyboardInterrupt in a Terminal command: as it is)
+  if (e?.$cls !== undefined) throw e;
+  if (e?.name === "NotCapable" || e?.name === "PermissionDenied" || e?.code === "ERR_ACCESS_DENIED") throw markRaised(callObj(T.PermissionError, [13, String(e.message).split("\n")[0], path]));
+  const cls = e.code === "ENOENT" ? T.FileNotFoundError : e.code === "EISDIR" ? T.IsADirectoryError : e.code === "EACCES" ? T.PermissionError : e.code === "EEXIST" ? T.FileExistsError : T.OSError;
+  // (CPython's strerror, as os's own errors give it: "Is a directory", not node's message)
+  throw markRaised(callObj(cls, [e.errno ? -e.errno : 0, e.code === "ENOENT" ? "No such file or directory" : STRERROR[e.code] ?? String(e.message), path]));
+};
+
 newBuiltinModule("_fs", (m) => {
   const fs = require("fs");
-  const oserr = (e: any, path: string): never => {
-    // (an exception the file system raised as Python's own, a Stop's KeyboardInterrupt in a Terminal command: as it is)
-    if (e?.$cls !== undefined) throw e;
-    if (e?.name === "NotCapable" || e?.name === "PermissionDenied" || e?.code === "ERR_ACCESS_DENIED") throw markRaised(callObj(T.PermissionError, [13, String(e.message).split("\n")[0], path]));
-    const cls = e.code === "ENOENT" ? T.FileNotFoundError : e.code === "EISDIR" ? T.IsADirectoryError : e.code === "EACCES" ? T.PermissionError : e.code === "EEXIST" ? T.FileExistsError : T.OSError;
-    // (CPython's strerror, as os's own errors give it: "Is a directory", not node's message)
-    throw markRaised(callObj(cls, [e.errno ? -e.errno : 0, e.code === "ENOENT" ? "No such file or directory" : STRERROR[e.code] ?? String(e.message), path]));
-  };
   fn(m, "read", (path: string) => {
     try {
       return new PyBytes(new Uint8Array(fs.readFileSync(at(path))));

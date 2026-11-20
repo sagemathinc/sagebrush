@@ -26,6 +26,22 @@
    "id": "int-string-host-bound",
    "kind": "memory",
    "where": "src/runtime/format.ts::admitDigits"
+  },
+  {
+   "id": "mp-limb-limit",
+   "kind": "memory",
+   "where": "src/runtime/mpcore.ts::limit"
+  },
+  {
+   "id": "engine-budget-memory",
+   "kind": "memory",
+   "where": "engine/poly/src/budget.rs::reserve"
+  },
+  {
+   "id": "engine-budget-work",
+   "kind": "host",
+   "where": "engine/poly/src/budget.rs::with_default_limits",
+   "default": "engine/poly/src/budget.rs::default_with"
   }
  ]
 }

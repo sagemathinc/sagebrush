@@ -24,7 +24,7 @@ import { IX, SCHEMA as IX_SCHEMA, IX_TABLES, Budget, BudgetStop, Entangled, appl
 import type { SyncEntry, SyncOp } from "../workspace/sync-reduce.ts";
 import { TIERED, canonical, checkManifest, sha256Hex, type Manifest } from "./manifest.ts";
 import { Sha256, type ShaState } from "./sha256.ts";
-import { MAX_PUT, SHARING_USED, nowSeconds } from "../share/server.ts";
+import { MAX_PUT, sharingUsed, nowSeconds } from "../share/server.ts";
 
 type Row = Record<string, ArrayBuffer | string | number | null>;
 
@@ -1168,11 +1168,14 @@ export class SyncAccount extends DurableObject<SyncEnv> {
       // taken in one write, never one an edit.  Nothing short, it checks the claim against the cap.
       // (files: within L only; documents: within L first, then the ceiling)
       const caps = kind === "document" ? [L, L + this.ceiling(L)] : [L];
+      // (one expression, captured once, in both places of each statement: the table's probe can't answer one way for
+      // SET and another for WHERE)
+      const sharing = await sharingUsed(this.env);
       for (const cap of caps) {
         let r: { claim_bytes: number } | null;
         try {
           if (testMode(this.env) && this.failClaim) throw new Error("D1 unavailable (test seam)");
-          r = await db.prepare(`UPDATE sync_accounts SET claim_bytes = claim_bytes + MIN(?3, ?6 - claim_bytes - (${SHARING_USED})) WHERE account_hash = ?4 AND generation = ?5 AND state = 'active' AND MIN(?3, ?6 - claim_bytes - (${SHARING_USED})) >= ?7 RETURNING claim_bytes`)
+          r = await db.prepare(`UPDATE sync_accounts SET claim_bytes = claim_bytes + MIN(?3, ?6 - claim_bytes - (${sharing})) WHERE account_hash = ?4 AND generation = ?5 AND state = 'active' AND MIN(?3, ?6 - claim_bytes - (${sharing})) >= ?7 RETURNING claim_bytes`)
             .bind(this.get("account_id"), nowSeconds(), whole, this.get("account_hash"), Number(this.get("generation")), cap, short).first<{ claim_bytes: number }>();
         } catch {
           return "busy";
@@ -2263,6 +2266,9 @@ export class SyncAccount extends DurableObject<SyncEnv> {
     // (the next live grant's expiry, when the dead ones past AGENT.deadGrants are trimmed)
     const exp = this.hasGrants() ? this.one("SELECT MIN(expires) AS t FROM grants WHERE revoked IS NULL AND expires > ?", now)?.t : null;
     if (exp !== null && exp !== undefined) t.push(Number(exp) + 1);
+    // (more dead grants than AGENT.deadGrants: at once, as when a live one expired with no alarm armed for it, before a
+    // restart's arm() ran)
+    if (this.hasGrants() && Number(this.one("SELECT COUNT(*) AS n FROM grants WHERE revoked IS NOT NULL OR expires <= ?", now)!.n) > AGENT.deadGrants) t.push(now + 1);
     // (the access log's oldest row, when it ages out)
     const log = this.logDue();
     if (log !== null) t.push(log);
@@ -2922,7 +2928,7 @@ export class SyncAccount extends DurableObject<SyncEnv> {
   }
 
   /** Tests only: lower the agents' bounds, or expire a grant now. */
-  async testAgent(a: { perMinute?: number; perHour?: number; accountPerMinute?: number; logRows?: number; logMs?: number; logSweep?: number; logPage?: number; readonly?: boolean; noArm?: boolean; expireLive?: boolean; dayMs?: number; expireIn?: { id: string; ms: number }; clearAlarm?: boolean; sweepNow?: boolean; minuteMs?: number; hourMs?: number; resetRates?: boolean; expire?: string }): Promise<{ log: number; grants: number; rates: number; rateRows: string; alarm: number | null }> {
+  async testAgent(a: { perMinute?: number; perHour?: number; accountPerMinute?: number; logRows?: number; logMs?: number; logSweep?: number; logPage?: number; readonly?: boolean; noArm?: boolean; expireLive?: boolean; dayMs?: number; expireIn?: { id: string; ms: number }; revokeQuiet?: string; clearAlarm?: boolean; sweepNow?: boolean; minuteMs?: number; hourMs?: number; resetRates?: boolean; expire?: string }): Promise<{ log: number; grants: number; rates: number; rateRows: string; alarm: number | null }> {
     if (!testMode(this.env)) return { log: 0, grants: 0, rates: 0, rateRows: "", alarm: null };
     const b = this.agentBounds;
     if (a.perMinute !== undefined) b.perMinute = a.perMinute;
@@ -2947,6 +2953,8 @@ export class SyncAccount extends DurableObject<SyncEnv> {
     if (a.expire !== undefined || a.expireLive) this.wakeBy(Date.now() + 1);
     // (a grant set to expire in `ms`, with no alarm armed for it here: only arm() can schedule its trim)
     if (a.expireIn && this.hasGrants()) this.sql.exec("UPDATE grants SET expires = ? WHERE id = ?", Date.now() + a.expireIn.ms, a.expireIn.id);
+    // (a grant revoked directly, with no trim and no alarm: only arm() can have the table trimmed)
+    if (a.revokeQuiet && this.hasGrants()) this.sql.exec("UPDATE grants SET revoked = ? WHERE id = ?", Date.now(), a.revokeQuiet);
     if (a.clearAlarm) {
       await this.ctx.storage.deleteAlarm();
       this.alarmAt = null;

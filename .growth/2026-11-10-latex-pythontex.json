@@ -1,8 +1,0 @@
-{
- "v": 1,
- "reason": "LaTeX editor: PythonTeX's \\py, pycode, pyblock and \\printpythontex now run with Run. The PythonTeX example's note says so (it said the code wasn't run), and its committed preview.html, made by `latex run` then `latex render`, now shows the Python results (10! = 3628800, the binomial, the Pascal row) instead of not-run chips. examples/corpus holds the example's .tex and preview; site/examples copies the preview. Measured +127 B (examples/corpus) and +208 B (site/examples) by the exact size gate against master faa57603 (probe of this PR's head); marked +64 B over each.",
- "bytes": {
-  "examples/corpus": 191,
-  "site/examples": 272
- }
-}

@@ -8,7 +8,7 @@ Apache-2.0. You don't need Sage, PARI or FLINT, or a C compiler; the
 wheels cover Linux, macOS and Windows.
 
 ```sh
-pip install sagebrush-mcp        # or: uvx sagebrush-mcp
+pip install sagebrush-mcp        # or: uvx sagebrush-mcp@latest
 ```
 
 **Claude Code:** `claude mcp add sagebrush -- sagebrush-mcp`
@@ -19,7 +19,7 @@ pip install sagebrush-mcp        # or: uvx sagebrush-mcp
 { "mcpServers": { "sagebrush": { "command": "sagebrush-mcp" } } }
 ```
 
-(`uvx sagebrush-mcp` as the command works without installing anything first.)
+(`uvx sagebrush-mcp@latest` as the command works without installing anything first, and uv checks for a newer release each time it starts.)
 
 ## Tools
 

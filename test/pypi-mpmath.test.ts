@@ -24,7 +24,8 @@ test("mpmath_zeta_cases.out is what CPython 3.14.10 prints", (t) => {
   if (v !== "3.14.10") return t.skip(`python3 is ${v}, not the recording's 3.14.10`);
   const live = execFileSync("python3", [CASES], {
     encoding: "utf8",
-    env: { ...process.env, PYTHONPATH: join(ROOT, "packages/pypi-mpmath/py") },
+    // (CPython runs the overlaid package on its python backend: the default, the core, is only Sagebrush's)
+    env: { ...process.env, PYTHONPATH: join(ROOT, "packages/pypi-mpmath/py"), SAGEBRUSH_MPMATH_BACKEND: "python" },
   });
   assert.equal(live, readFileSync(OUT, "utf8"));
 });

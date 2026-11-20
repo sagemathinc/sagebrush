@@ -1,7 +1,0 @@
-{
- "v": 1,
- "reason": "U0's LaTeX half (William's U0 plan, Nov 2; split from #566; @sagebrush's ruling (a), Nov 6, past the 2 KiB line): one New > order in every File menu and the file panel's + (Notebook, MATLAB notebook, Board, LaTeX document, Folder, From an example...), New > LaTeX document as a real item on the notebook and board pages, New LaTeX document here on a folder, the empty file list's buttons, and the LaTeX editor's File menu drawn from the page; minus boot.ts's MutationObserver that injected items after load, and the editor's own New and Print buttons (sagebrush-latex.js -276 B). The CLI carries web/dist as base64 (4/3): index.html +1619 B, board.js and board-nosync.js +1060 B each, measured +2672 vs master 39e23a6f (probe eb72fce5, bun 1.4.4, node 24.21.0). (Context only, not budget: #751's Console removal, -484,791 on this file in #566, comes separately.)",
- "bytes": {
-  "cli/pyjs.cjs": 2736
- }
-}

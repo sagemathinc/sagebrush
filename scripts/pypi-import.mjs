@@ -23,6 +23,20 @@
 // scripts/third-party-notices.mjs puts in each package that carries the
 // library.  Then run node scripts/packages.mjs (the registry).
 //
+// An overlay (design/mpmath-core.md, section 4.3): a package may carry one
+// patch, packages/<dir>/overlay.patch, applied to its wheel's files when the
+// tree is derived. The committed tree is the effective source (the wheel with
+// the patch applied; nothing is patched at run time), and sagebrush.json's
+// source.pypi.overlay records the patch's SHA-256 and, for each file it
+// touches, the wheel's SHA-256 and the result's. The patch must apply
+// exactly: every hunk at its stated line, every context and removed line as
+// the wheel has it, no fuzz and no offset. --check re-derives wheel, patch
+// and tree and fails on any difference. The patch itself is review material:
+// it is not one of the package's files and does not ship.
+//
+//   node scripts/pypi-import.mjs --overlay PROJECT   apply packages/pypi-<project>/overlay.patch to the pinned
+//   wheel and record it (after editing the patch; a new wheel version needs the patch reviewed again)
+//
 // A wheel is untrusted input until its files are checked: every size and
 // count below is a fixed ceiling, checked before the work it bounds (the
 // download while it streams, the archive's directory before anything is
@@ -173,13 +187,75 @@ const fetchBounded = async (url, max) => {
   return boundedBody(r, max, url);
 };
 
+export const OVERLAY = "overlay.patch";
+
+/** files (path -> bytes) with a unified diff applied exactly: each hunk at
+ * its stated line of the original, every context and removed line equal to
+ * the original's, hunks in order and not overlapping, every file's headers
+ * "--- a/<path>" and "+++ b/<path>" naming a file there is (and only once).
+ * Returns {files, touched: [path...]}; throws on anything else. */
+export function applyPatch(files, patchText) {
+  const bad = (why) => { throw new Error(`${OVERLAY}: ${why}`); };
+  if (/\r/.test(patchText)) bad("has a carriage return");
+  const lines = patchText.split("\n");
+  if (lines.pop() !== "") bad("does not end with a newline");
+  const out = new Map(files), touched = [];
+  let i = 0;
+  while (i < lines.length) {
+    const l = lines[i];
+    if (l.startsWith("diff ")) { i++; continue; }
+    if (!l.startsWith("--- a/")) bad(`line ${i + 1}: expected "--- a/<path>", found ${JSON.stringify(l.slice(0, 80))}`);
+    let path;
+    try { path = archivePath(l.slice(6)); } catch (e) { bad(e.message); }
+    if (lines[i + 1] !== `+++ b/${path}`) bad(`line ${i + 2}: expected "+++ b/${path}"`);
+    if (!out.has(path)) bad(`${path}: not a file of the wheel`);
+    if (touched.includes(path)) bad(`${path}: patched twice`);
+    touched.push(path);
+    i += 2;
+    const orig = out.get(path).toString("utf8").split("\n");
+    const res = [];
+    let at = 0; // (the original's lines consumed so far)
+    let hunks = 0;
+    while (i < lines.length && lines[i].startsWith("@@")) {
+      const m = /^@@ -(\d+)(?:,(\d+))? \+(\d+)(?:,(\d+))? @@$/.exec(lines[i]);
+      if (!m) bad(`line ${i + 1}: a malformed hunk header`);
+      const oldStart = Number(m[1]), oldLen = m[2] === undefined ? 1 : Number(m[2]);
+      const newStart = Number(m[3]), newLen = m[4] === undefined ? 1 : Number(m[4]);
+      const from = oldLen === 0 ? oldStart : oldStart - 1;
+      if (from < at) bad(`${path}: hunk at line ${oldStart} overlaps or is out of order`);
+      if (newStart - 1 !== res.length + (from - at) && !(newLen === 0 && newStart === res.length + (from - at))) bad(`${path}: hunk at line ${oldStart}: its new start ${newStart} is not where it lands`);
+      res.push(...orig.slice(at, from));
+      at = from;
+      i++;
+      let o = 0, n = 0;
+      while (i < lines.length && (o < oldLen || n < newLen)) {
+        const t = lines[i], body = t.slice(1);
+        if (t.startsWith(" ") || t.startsWith("-")) {
+          if (at >= orig.length - 1 + (orig[orig.length - 1] === "" ? 0 : 1) || orig[at] !== body) bad(`${path}: line ${at + 1} is not as the patch has it (no fuzz)`);
+          at++, o++;
+          if (t.startsWith(" ")) res.push(body), n++;
+        } else if (t.startsWith("+")) res.push(body), n++;
+        else bad(`line ${i + 1}: ${JSON.stringify(t.slice(0, 40))} in a hunk (a "\\ No newline" or a short hunk is not supported)`);
+        i++;
+      }
+      if (o !== oldLen || n !== newLen) bad(`${path}: hunk at line ${oldStart} is short`);
+      hunks++;
+    }
+    if (!hunks) bad(`${path}: no hunk`);
+    res.push(...orig.slice(at));
+    out.set(path, Buffer.from(res.join("\n"), "utf8"));
+  }
+  if (!touched.length) bad("patches nothing");
+  return { files: out, touched };
+}
+
 // (a name as PyPI normalizes it, PEP 503)
 const normalize = (n) => n.toLowerCase().replace(/[-_.]+/g, "-");
 const IDENT = /^[A-Za-z_][A-Za-z0-9_]*$/;
 
 /** What a pinned wheel becomes: {files: path -> bytes (the package's
  * directory), manifest (sagebrush.json), notice (its NOTICE.md section)}. */
-export function derive(source, wheel) {
+export function derive(source, wheel, patch = null) {
   if (sha256(wheel) !== source.sha256) throw new Error(`${source.filename}: its SHA-256 is ${sha256(wheel)}, not the pinned ${source.sha256}`);
   const dir = "pypi-" + normalize(source.project);
   if (!/^pypi-[a-z0-9]+(-[a-z0-9]+)*$/.test(dir)) throw new Error(`${source.project}: not a project name this can make a directory of`);
@@ -231,6 +307,18 @@ export function derive(source, wheel) {
   if (!LICENSES.has(source.license)) throw new Error(`${source.filename}: license ${source.license} is not on the list (${[...LICENSES].join(", ")})`);
   licenseFiles.forEach((n, i) => files.set(licenseFiles.length === 1 ? "LICENSE" : `LICENSE-${i + 1}`, z.get(n)));
   for (const f of files.keys()) archivePath(f);
+  // (the overlay: the patch the package carries, exactly the one recorded)
+  let overlay = null;
+  if (source.overlay !== undefined || patch !== null) {
+    if (patch === null) throw new Error(`${source.project}: sagebrush.json records an overlay, but there is no ${OVERLAY}`);
+    const rec = source.overlay;
+    if (rec !== undefined && rec !== "record" && (rec?.patch !== OVERLAY || rec.sha256 !== sha256(patch))) throw new Error(`${source.project}: ${OVERLAY}'s SHA-256 is ${sha256(patch)}, not the recorded ${rec?.sha256} (re-record it: node scripts/pypi-import.mjs --overlay ${source.project})`);
+    const applied = applyPatch(files, patch.toString("utf8"));
+    const touched = Object.fromEntries(applied.touched.sort().map((f) => [f, { wheel: sha256(files.get(f)), result: sha256(applied.files.get(f)) }]));
+    if (rec !== undefined && rec !== "record" && JSON.stringify(rec.files) !== JSON.stringify(touched)) throw new Error(`${source.project}: ${OVERLAY} applied to the pinned wheel gives files other than those recorded`);
+    overlay = { patch: OVERLAY, sha256: sha256(patch), files: touched };
+    for (const [f, b] of applied.files) files.set(f, b);
+  }
   if (!/^\d+\.\d+\.\d+$/.test(source.version)) throw new Error(`${source.project} ${source.version}: a version MAJOR.MINOR.PATCH is needed`);
   const manifest = {
     name: `@sagebrush/${dir}`,
@@ -241,11 +329,11 @@ export function derive(source, wheel) {
     files: Object.fromEntries([...files].filter(([p]) => p.startsWith("py/")).map(([p, b]) => [p, sha256(b)])),
     requires: [],
     catalog: null,
-    source: { pypi: { project: source.project, version: source.version, filename: source.filename, url: source.url, sha256: source.sha256, license: source.license, ...(skipped.length ? { skipped } : {}) } },
+    source: { pypi: { project: source.project, version: source.version, filename: source.filename, url: source.url, sha256: source.sha256, license: source.license, ...(skipped.length ? { skipped } : {}), ...(overlay ? { overlay } : {}) } },
   };
   const licText = licenseFiles.map((n) => z.get(n).toString("utf8").replace(/\r\n/g, "\n").trimEnd()).join("\n\n");
   const notice = `### ${source.project} ${source.version} (${source.license}), from PyPI\n\n` +
-    `\`packages/${dir}/py/\` is the Python source of ${source.project} ${source.version}'s wheel, unchanged:\n` +
+    (overlay ? `\`packages/${dir}/py/\` is the Python source of ${source.project} ${source.version}'s wheel, unchanged but for\nSagebrush's overlay (packages/${dir}/${OVERLAY}, ${Object.keys(overlay.files).length} files):\n` : `\`packages/${dir}/py/\` is the Python source of ${source.project} ${source.version}'s wheel, unchanged:\n`) +
     `${source.url}\n(SHA-256 ${source.sha256}). Its license:\n\n` + licText.split("\n").map((l) => (l ? "    " + l : "")).join("\n") +
     // (a license whose text the wheel only refers to: the text, from the repository)
     (source.license === "Apache-2.0" ? "\n\nThe Apache License 2.0's full text is LICENSE-APACHE, in the repository and in each package\nthat carries this code." : "");
@@ -282,6 +370,8 @@ function noticeWith(sections) {
   if (k < 0) throw new Error("NOTICE.md has no ## Data section");
   return text.slice(0, k) + `\n## Python packages from PyPI (unchanged, pinned)\n\n${block}\n` + text.slice(k);
 }
+// (a package's patch, if it carries one)
+const patchOf = (d) => { const p = within(join(root, "packages"), join(d, OVERLAY)); return existsSync(p) ? readFileSync(p) : null; };
 const pypiDirs = () => readdirSync(join(root, "packages")).filter((d) => d.startsWith("pypi-") && existsSync(join(root, "packages", d, "sagebrush.json"))).sort();
 const sourceOf = (d) => JSON.parse(readFileSync(within(join(root, "packages"), join(d, "sagebrush.json")), "utf8")).source?.pypi;
 // (a package directory's files, refusing symbolic links and anything not a
@@ -303,8 +393,8 @@ export function compareTree(packagesDir, d, files, manifest) {
   const bad = [];
   const at = within(packagesDir, d);
   const want = new Map([...files, ["sagebrush.json", Buffer.from(manifestText(manifest))]]);
-  // (README.md and known.json are the package's own, not the wheel's)
-  const have = walk(at).filter((f) => !/(^|\/)__pycache__\//.test(f) && f !== "README.md" && f !== "known.json");
+  // (README.md, known.json and the overlay's patch are the package's own, not the wheel's)
+  const have = walk(at).filter((f) => !/(^|\/)__pycache__\//.test(f) && f !== "README.md" && f !== "known.json" && f !== OVERLAY);
   for (const f of have) if (!want.has(f)) bad.push(`packages/${d}/${f}: not in the wheel`);
   for (const [f, b] of want) {
     const p = within(at, archivePath(f));
@@ -319,7 +409,7 @@ export function compareTree(packagesDir, d, files, manifest) {
 export function writeTree(packagesDir, dir, files, manifest) {
   const at = within(packagesDir, dir);
   for (const f of files.keys()) within(at, archivePath(f));
-  const keep = ["known.json", "README.md"].filter((f) => existsSync(within(at, f))).map((f) => [f, readFileSync(within(at, f))]);
+  const keep = ["known.json", "README.md", OVERLAY].filter((f) => existsSync(within(at, f))).map((f) => [f, readFileSync(within(at, f))]);
   rmSync(at, { recursive: true, force: true });
   mkdirSync(at, { recursive: true });
   for (const [f, b] of keep) writeFileSync(within(at, f), b);
@@ -340,7 +430,7 @@ if (process.argv[1] === fileURLToPath(import.meta.url)) {
       for (const d of pypiDirs()) {
         const src = sourceOf(d);
         if (!src) { bad.push(`packages/${d}: no source.pypi in sagebrush.json`); continue; }
-        const { dir, files, manifest, notice } = derive(src, await wheelBytes(src));
+        const { dir, files, manifest, notice } = derive(src, await wheelBytes(src), patchOf(d));
         sections.push(notice);
         if (dir !== d) bad.push(`packages/${d}: is ${src.project}'s, whose directory is packages/${dir}`);
         bad.push(...compareTree(join(root, "packages"), d, files, manifest));
@@ -351,6 +441,16 @@ if (process.argv[1] === fileURLToPath(import.meta.url)) {
       if (readFileSync(join(root, "NOTICE.md"), "utf8") !== noticeWith(sections)) bad.push("NOTICE.md: its PyPI packages' section is out of date (node scripts/pypi-import.mjs PROJECT VERSION)");
       if (bad.length) { console.error(bad.join("\n")); process.exit(1); }
       console.log(`${pypiDirs().length} PyPI packages, each as its pinned wheel has it`);
+    } else if (args[0] === "--overlay") {
+      const d = "pypi-" + normalize(args[1] ?? "");
+      const src = pypiDirs().includes(d) ? sourceOf(d) : null;
+      if (!src) throw new Error("usage: node scripts/pypi-import.mjs --overlay PROJECT (a curated package with an overlay.patch)");
+      const { files, manifest } = derive({ ...src, overlay: "record" }, await wheelBytes(src), patchOf(d));
+      writeTree(join(root, "packages"), d, files, manifest);
+      const sections = [];
+      for (const e of pypiDirs()) { const s = sourceOf(e); sections.push(derive(s, await wheelBytes(s), patchOf(e)).notice); }
+      writeFileSync(join(root, "NOTICE.md"), noticeWith(sections));
+      console.log(`packages/${d}: ${OVERLAY} applied to ${src.project} ${src.version}'s wheel, ${Object.keys(manifest.source.pypi.overlay.files).length} files; now run node scripts/packages.mjs`);
     } else {
       const [project, version, spdx] = args;
       if (!project || !version) throw new Error("usage: node scripts/pypi-import.mjs PROJECT VERSION | --check");
@@ -361,10 +461,13 @@ if (process.argv[1] === fileURLToPath(import.meta.url)) {
       // (only unambiguous names; anything else needs SPDX, chosen by reading the license file)
       const license = spdx ?? { "Apache 2.0": "Apache-2.0", "Apache-2.0": "Apache-2.0", "Apache License 2.0": "Apache-2.0", MIT: "MIT", "MIT License": "MIT" }[lic.trim()] ?? lic.trim();
       const source = { project: info.info.name, version, filename: whl[0].filename, url: whl[0].url, sha256: whl[0].digests.sha256, license };
-      const { dir, files, manifest } = derive(source, await wheelBytes(source));
+      const pd = "pypi-" + normalize(source.project);
+      const old = pypiDirs().includes(pd) ? sourceOf(pd) : null;
+      if (old?.overlay && old.version !== version) throw new Error(`packages/${pd} carries ${OVERLAY} for ${old.version}: a new version needs the patch reviewed again (remove it and its record, import, then --overlay)`);
+      const { dir, files, manifest } = derive(old?.overlay ? { ...source, overlay: old.overlay } : source, await wheelBytes(source), old?.overlay ? patchOf(pd) : null);
       writeTree(join(root, "packages"), dir, files, manifest);
       const sections = [];
-      for (const d of pypiDirs()) { const s = sourceOf(d); sections.push(derive(s, await wheelBytes(s)).notice); }
+      for (const d of pypiDirs()) { const s = sourceOf(d); sections.push(derive(s, await wheelBytes(s), patchOf(d)).notice); }
       writeFileSync(join(root, "NOTICE.md"), noticeWith(sections));
       console.log(`packages/${dir}: ${source.project} ${version} (${license}), ${files.size} files; now run node scripts/packages.mjs and node scripts/third-party-notices.mjs`);
     }

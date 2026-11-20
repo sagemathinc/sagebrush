@@ -54,8 +54,10 @@ export async function checkNoticeBrowser() {
       res.end(file.bytes);
     });
     await new Promise(resolve => server.listen(0, '127.0.0.1', resolve));
-    chrome = spawn(process.env.CHROME ?? 'chromium', ['--headless', '--no-sandbox', '--disable-gpu', '--disable-background-networking', '--host-resolver-rules=MAP * ~NOTFOUND, EXCLUDE 127.0.0.1, EXCLUDE localhost', '--remote-debugging-port=0', `--user-data-dir=${profile}`, 'about:blank'], { stdio: 'ignore' });
-    const port = await devtoolsPort(profile, 15000);
+    chrome = spawn(process.env.CHROME ?? 'chromium', ['--headless', '--no-sandbox', '--disable-gpu', '--disable-background-networking', '--host-resolver-rules=MAP * ~NOTFOUND, EXCLUDE 127.0.0.1, EXCLUDE localhost', '--remote-debugging-port=0', `--user-data-dir=${profile}`, 'about:blank'], { stdio: ['ignore', 'ignore', 'pipe'] });
+    // Hosted runners can start Chrome slowly under load; use the shared startup wait
+    // and retain stderr so a failed or stalled launch explains itself.
+    const port = await devtoolsPort(profile, undefined, { child: chrome });
     const targets = await (await fetch(`http://127.0.0.1:${port}/json`, { signal: AbortSignal.timeout(5000) })).json();
     ws = new WebSocket(targets.find(t => t.type === 'page').webSocketDebuggerUrl);
     await new Promise((resolve, reject) => { const t = setTimeout(() => reject(new Error('CDP socket deadline')), 5000); ws.onopen = () => { clearTimeout(t); resolve(); }; ws.onerror = reject; });
@@ -86,6 +88,19 @@ export async function checkNoticeBrowser() {
     assert.equal(await ev('!!document.getElementById("sb-preview-pill")'), false);
     await click('[aria-label=New]');
     await ev('sessionStorage.clear()'); await send('Page.reload'); await until('!!document.getElementById("sb-preview-pill")');
+    // (with the site's early-alpha notice showing, as web/alpha-banner.js puts it: the pill inside it, no gutter of its
+    // own; the notice dismissed, the pill back in its dock)
+    const { identifier } = await send('Page.addScriptToEvaluateOnNewDocument', { source: "document.addEventListener('DOMContentLoaded', () => { const b = document.createElement('div'); b.id = 'sb-alpha-banner'; b.style.cssText = 'position:fixed;left:0;right:0;bottom:0;display:flex;gap:.6em;align-items:center'; b.append('Early alpha'); document.body.append(b); });" });
+    await send('Page.reload'); await until('!!document.getElementById("sb-preview-pill")');
+    const inside = await ev(`(()=>({ parent: document.getElementById('sb-preview-pill').parentElement.id, pad: getComputedStyle(document.body).paddingBottom, dock: !!document.getElementById('sb-preview-notice') }))()`);
+    assert.deepEqual(inside, { parent: 'sb-alpha-banner', pad: '0px', dock: false }, 'with the early-alpha notice, the pill is inside it and takes no gutter: ' + JSON.stringify(inside));
+    await click('#sb-preview-pill');
+    await until('document.getElementById("sb-preview-dialog").open');
+    await ev('document.getElementById("sb-preview-dialog").close(), 1');
+    await ev('document.getElementById("sb-alpha-banner").remove(), 1');
+    await until('document.getElementById("sb-preview-pill")?.parentElement?.id === "sb-preview-notice"');
+    assert.notEqual(await ev('getComputedStyle(document.body).paddingBottom'), '0px', 'the notice dismissed: the pill back in its own dock, with its gutter');
+    await send('Page.removeScriptToEvaluateOnNewDocument', { identifier });
     assert.deepEqual(violations, []);
     return geometry;
   } finally {

@@ -25,7 +25,7 @@ import { dispatch } from "../../miniflare-dispatch.mjs";
 import { dirname, join } from "node:path";
 import { fileURLToPath } from "node:url";
 import { execFileSync } from "node:child_process";
-import { webcrypto } from "node:crypto";
+import { createHash, webcrypto } from "node:crypto";
 const { subtle } = webcrypto;
 
 const here = dirname(fileURLToPath(import.meta.url));
@@ -38,6 +38,7 @@ const B = "22222222-2222-4222-8222-222222222222";
 const C = "33333333-3333-4333-8333-333333333333";
 const D = "44444444-4444-4444-8444-444444444444";
 const E = "55555555-5555-4555-8555-555555555555";
+const F = "66666666-6666-4666-8666-666666666666";
 
 let failures = 0, count = 0;
 function ok(cond, what) {
@@ -51,7 +52,7 @@ const b64url = (b) => Buffer.from(b).toString("base64url");
 const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
 
 const script = execFileSync("bun", ["build", join(here, "test-entry.ts"), "--format", "esm", "--target", "browser", "--external", "cloudflare:workers"], { encoding: "utf8" });
-const bindings = { SESSION_KEY: "session-key", SHARE_DEV: "1", DEV_AUTH_TOKEN: "dev-token", REMOTE_CHAL_KEY: "chal-key", REMOTE_ACCOUNTS: `${A}, ${C}, ${D}, ${E}` };
+const bindings = { SESSION_KEY: "session-key", SHARE_DEV: "1", DEV_AUTH_TOKEN: "dev-token", REMOTE_CHAL_KEY: "chal-key", REMOTE_ACCOUNTS: `${A}, ${C}, ${D}, ${E}, ${F}` };
 const mf = new Miniflare(convertV4MiniflareOptions({
   workers: [{ name: "remote", modules: true, script, compatibilityDate: "2026-10-01", d1Databases: ["SHARE_DB"], r2Buckets: ["SHARE_BUCKET"], bindings,
     durableObjects: { REMOTE_RELAY: { className: "TestRemoteRelay", useSQLite: true }, REMOTE_ACCOUNT: { className: "TestRemoteAccount", useSQLite: true } } }],
@@ -189,8 +190,9 @@ pg = await dialPage(sb, r1.rid);
 ok(pg.status === 403, `page: an account not allowed -> 403 (${pg.status})`);
 pg = await dialPage(sc, r1.rid);
 ok(pg.status === 404, `page: another account's remote -> 404 (${pg.status})`);
-pg = await dialPage(sa, r1.rid, "agent");
-ok(pg.status === 400, `page: a channel of another kind -> 400 (${pg.status})`);
+// (a runner serves kernel, terminal and, with --serve-agents, agent pages: every channel in its row of the caps table)
+pg = await dialPage(sa, r1.rid, "nope");
+ok(pg.status === 400, `page: a channel not in the runner's row -> 400 (${pg.status})`);
 pg = await dialPage(sa, "r" + "Z".repeat(20));
 ok(pg.status === 404, `page: an unknown remote -> 404 (${pg.status})`);
 // (channels are the table's own entries only, never inherited names (astra's B109-CHAN-2, daybreak3's #1): refused
@@ -201,11 +203,14 @@ for (const chan of ["constructor", "__proto__", "toString", "hasOwnProperty", "v
 }
 {
   const caps = async (kind, chan) => (await json(await post("/__caps", { kind, chan }))).body;
-  const k = await caps("runner", "kernel"), t = await caps("runner", "terminal"), g = await caps("agent", "agent");
+  const k = await caps("runner", "kernel"), t = await caps("runner", "terminal"), g = await caps("agent", "agent"), ra = await caps("runner", "agent");
   ok(JSON.stringify(k.r) === JSON.stringify({ legs: 1, pageToPeer: 2424832, peerToPage: 1048576, window: 8388608 }) && k.w === 8388608
-    && t.r.legs === 4 && t.r.window === 1048576 && g.r.window === 16777216 && g.w === 16777216, `caps: the table's own entries, exactly (${JSON.stringify([k, t, g])})`);
+    && t.r.legs === 4 && t.r.window === 1048576 && g.r.window === 16777216 && g.w === 16777216
+    // (a runner's agent channel, `sagebrush remote --serve-agents`: one page, 4 MiB less 2 KiB either way, in the runner's 8 MiB window)
+    && JSON.stringify(ra.r) === JSON.stringify({ legs: 1, pageToPeer: 4192256, peerToPage: 4192256, window: 8388608 }) && ra.w === 8388608,
+    `caps: the table's own entries, exactly (${JSON.stringify([k, t, g, ra])})`);
   let none = true;
-  for (const [kind, chan] of [["runner", "constructor"], ["runner", "__proto__"], ["runner", "toString"], ["constructor", "kernel"], ["__proto__", "kernel"], ["runner", "agent"], ["agent", "kernel"],
+  for (const [kind, chan] of [["runner", "constructor"], ["runner", "__proto__"], ["runner", "toString"], ["constructor", "kernel"], ["__proto__", "kernel"], ["agent", "kernel"], ["agent", "terminal"],
     ["constructor", "name"], ["constructor", "prototype"], ["constructor", "length"], ["__proto__", "hasOwnProperty"]])
     none &&= (await caps(kind, chan)).r === null;
   for (const kind of ["constructor", "__proto__", "toString", "page"]) none &&= (await caps(kind, "x")).w === null;
@@ -232,7 +237,19 @@ for (const chan of ["constructor", "__proto__", "toString", "hasOwnProperty", "v
   const windows = [...Object.entries(caps).flatMap(([kind, byChan]) => Object.entries(byChan).map(([chan, c]) => [`${kind}/${chan}`, c.window])),
     ...Object.entries(peerWindow).map(([kind, w]) => [`${kind} peer`, w])];
   const due = windows.map(([what, w]) => [what, Math.floor(w / Math.min(limits.receiptEvery, w / 4))]);
-  ok(windows.length === 5 && due.every(([, n]) => n >= 1 && n <= limits.tokens),
+  // (a runner's lease is its largest message rounded up to 4 MiB: its agent channel stays below 4 MiB, so the lease
+  // stays exactly 4 MiB for every runner, kernel-only ones included; raising that channel's cap fails here)
+  const { leases: lb } = (await json(await site("/__limits"))).body;
+  ok(caps.runner.agent && caps.runner.agent.pageToPeer === 4 * 1024 * 1024 - 2048 && lb.runner === 4 * 1024 * 1024,
+    `leases: a runner with its agent channel still leases exactly 4 MiB (${JSON.stringify([caps.runner.agent, lb])})`);
+  // (the runner reads and refuses by its own literal, AGENT_FRAME in agent_child.py: it must equal this channel's cap
+  // both ways, or one side cuts a message the other passed; changing either literal alone fails here)
+  const childSrc = readFileSync(join(here, "../../../engine/py/python/sagebrush/remote/agent_child.py"), "utf8");
+  const frameExpr = (childSrc.match(/^AGENT_FRAME = ([^#\n]+)/m) || [])[1]?.trim().replace(/\bMiB\b/g, "(1024 * 1024)") ?? "";
+  const childFrame = /^[0-9 ()*+-]+$/.test(frameExpr) ? Function(`return (${frameExpr});`)() : NaN;
+  ok(/^MiB = 1024 \* 1024$/m.test(childSrc) && childFrame === caps.runner.agent.pageToPeer && childFrame === caps.runner.agent.peerToPage,
+    `caps: the runner's AGENT_FRAME (${frameExpr} = ${childFrame}) equals the runner/agent cap both ways (${caps.runner.agent.pageToPeer})`);
+  ok(windows.length === 6 && due.every(([, n]) => n >= 1 && n <= limits.tokens),
     `receipts: window / receipt interval <= ${limits.tokens} tokens for every receiver (${JSON.stringify(due)})`);
 }
 
@@ -650,6 +667,27 @@ const r5 = await enroll(sa, "box-5");
   await pg.next();
   lz = await R("__leases", l1.rid);
   ok(lz.leases[0].consumed === 1000 + `${o.gen}\n`.length + 2, "leases: both directions count, the payload's bytes");
+  {
+    // (a runner's agent page: a message of exactly the channel's cap reaches the peer and is paid; one byte more is
+    // refused (1009) before anything is paid, and the leg and the peer are kept)
+    const ka = await enroll(sd, "agent-cap");
+    const pa = (await dialPeer(ka)).leg;
+    const ga = (await dialPage(sd, ka.rid, "agent")).leg;
+    const oa = J(await pa.next());
+    const capA = 4 * 1024 * 1024 - 2048;
+    await until(async () => (await R("__leases", ka.rid)).leases.length === 1);
+    const c0 = (await R("__consumed", ka.rid)).consumed;
+    ga.send("a".repeat(capA));
+    const gotA = await pa.next();
+    const c1 = (await R("__consumed", ka.rid)).consumed;
+    ok(oa.chan === "agent" && gotA === `${oa.gen}\n` + "a".repeat(capA) && c1 - c0 === capA + `${oa.gen}\n`.length,
+      `agent page: a message of exactly the cap (${capA} bytes) delivered and paid (${c1 - c0})`);
+    ga.send("b".repeat(capA + 1));
+    const closedA = await ga.closedWith(20000);
+    const c2 = (await R("__consumed", ka.rid)).consumed;
+    ok(closedA === 1009 && c2 === c1 && pa.closed === null, `agent page: one byte over the cap -> 1009, nothing paid, the peer kept (${closedA}, ${c2 - c1})`);
+    await done(ka);
+  }
 
   // midnight: yesterday's lease is void (settled with the account, never spent); today's is reserved first
   await clockAt(Date.UTC(2030, 0, 16, 0, 0, 1));
@@ -1239,13 +1277,17 @@ const r5 = await enroll(sa, "box-5");
     let w;
     const held = await until(async () => { w = await W(k.rid); return big() === 3 && w.frames === 1 && w.fetching; });
     const calls1 = await A("__calls", D);
-    // (the peer reads what it got, as a runner does: its latest receipt acked, so the fourth fits its window)
-    p.send(JSON.stringify({ relay: "ack", r: p.got.filter((t) => t.startsWith('{"relay":"receipt"')).map(J).at(-1).r }));
+    // (the peer reads what it got, as a runner does: its latest receipt acked, so the fourth fits its window; and the
+    // relay has that ack before the settlement is let go, or the fourth, paid, would find the window still full and
+    // close the page 1013: the ack and the lease come on different connections, in either order)
+    const last = p.got.filter((t) => t.startsWith('{"relay":"receipt"')).map(J).at(-1);
+    p.send(JSON.stringify({ relay: "ack", r: last.r }));
+    const acked = await until(async () => (await json(await site(`/__state?remote=${k.rid}`))).body.some((x) => x.leg === "peer" && !x.ended && x.rx.acked === last.upto));
     await A("__hold", D, "&settle=0");
     const sent = await until(() => big() === 4);
     const calls2 = await A("__calls", D);
-    ok(two && held && calls1.lease === calls0.lease && sent && g.closed === null && calls2.refused === calls0.refused && calls2.lease > calls0.lease,
-      `settle before refill: no lease request while the spent lease's settlement is held; then granted (none refused), and the waiting frame sent (${held} ${calls1.lease - calls0.lease} ${calls2.lease - calls0.lease} refused ${calls2.refused - calls0.refused}; ${g.closed})`);
+    ok(two && held && acked && calls1.lease === calls0.lease && sent && g.closed === null && calls2.refused === calls0.refused && calls2.lease > calls0.lease,
+      `settle before refill: no lease request while the spent lease's settlement is held; then granted (none refused), and the waiting frame sent (${held} ${acked} ${calls1.lease - calls0.lease} ${calls2.lease - calls0.lease} refused ${calls2.refused - calls0.refused}; ${g.closed})`);
     await done(k);
   }
   // (Q5) a page the relay ends (replaced by a newer kernel page) while its frame waits: dropped at once, so when the
@@ -1567,6 +1609,136 @@ const r5 = await enroll(sa, "box-5");
   const rd = await (await post("/__remotedeletes", { account: E })).json();
   const again = await dialPeer(h17);
   ok(p17.status === 101 && rd.ok && again.status === 403, `H17: remoteDeletes revokes in the relay first: the remote can't connect after (${again.status})`);
+}
+
+// ---- a runner's agent kinds (x-sb-remote-agents): written with their time only once the relay admitted its leg, read
+// back in the account's peer list (a hint for the page; its hello decides).  (Each case on a computer of its own,
+// revoked after: the relay holds at most 4 used challenges per computer until they expire)
+{
+  const sf = await session(F);
+  const peersF = async (cookie = sf) => (await json(await site("/api/remote/v1/peers", { headers: { cookie } }))).body.peers ?? [];
+  async function computer(name, kind = "runner") {
+    const r = await enroll(sf, name, kind);
+    const legs = [];
+    r.row = () => db.prepare("SELECT agents, agents_at FROM remotes WHERE remote_id = ?1").bind(r.rid).first();
+    r.peer = async (cookie) => (await peersF(cookie)).find((p) => p.remote_id === r.rid);
+    r.dial = async (over) => { const d = await dialPeer(r, over); if (d.leg) legs.push(d.leg); return d; };
+    r.done = async () => { for (const L of legs) L.close(); await post("/api/remote/v1/revoke", { remote_id: r.rid }, { cookie: sf, origin: SITE }); };
+    return r;
+  }
+  {
+    const r = await computer("kinds-a");
+    let p = await r.peer();
+    ok(JSON.stringify(p.agents) === "[]" && p.agents_at === null, `agents: none reported yet: [] and null (${JSON.stringify(p)})`);
+    const t0 = Date.now();
+    const d = await r.dial({ headers: { "x-sb-remote-agents": "claude,codex" } });
+    const t1 = Date.now();
+    p = await r.peer();
+    ok(d.status === 101 && JSON.stringify(p.agents) === '["claude","codex"]' && p.agents_at >= t0 && p.agents_at <= t1,
+      `agents: an admitted leg's list, in its order, with the time it was admitted (${d.status}, ${JSON.stringify(p)})`);
+    // (refused legs change nothing: the same challenge again with another list (the relay refuses it), a bad
+    // signature, and another key's signature)
+    const kept = JSON.stringify(await r.row());
+    const replay = await r.dial({ c: d.c, sig: d.sig, headers: { "x-sb-remote-agents": "other" } });
+    const badSig = await r.dial({ sig: "A".repeat(86), headers: { "x-sb-remote-agents": "other" } });
+    const other = await key();
+    const c2 = (await json(await post("/api/remote/v1/challenge", { remote_id: r.rid }))).body.challenge;
+    const otherKey = await r.dial({ c: c2, sig: await sign(other.priv, "sb-remote-chal/1\n" + c2), headers: { "x-sb-remote-agents": "other" } });
+    ok(replay.status === 403 && badSig.status === 403 && otherKey.status === 403 && JSON.stringify(await r.row()) === kept,
+      `agents: a replayed challenge, a bad signature and another key's, each with another list: refused, list and time unchanged (${replay.status}, ${badSig.status}, ${otherKey.status})`);
+    // (another account never sees this computer)
+    const resA = await json(await site("/api/remote/v1/peers", { headers: { cookie: await session(D) } }));
+    ok(resA.status === 200 && Array.isArray(resA.body.peers) && !resA.body.peers.some((p) => p.remote_id === r.rid) && (await r.peer()) !== undefined,
+      `agents: another account's peer list doesn't have this computer, its own does (${resA.status})`);
+    await r.done();
+  }
+  // (lists that aren't one valid list, on admitted legs: stored as none, the leg admitted all the same)
+  const bad = [["a,b,c,d,e", "five names"], ["Claude", "an upper-case letter"], ["a,a", "a name twice"], ["a,,b", "an empty name"],
+    ["a,b,", "a trailing comma"], ["a, b", "a space"], ["1a", "a name starting with a digit"], ["a".repeat(17), "17 characters"],
+    ["a-b_c", "an underscore"], [("x".repeat(16) + ",").repeat(6).slice(0, 101), "101 bytes"], ["caf\u00e9", "a non-ASCII byte"]];
+  for (const [h, what] of bad) {
+    const r = await computer("kinds-bad");
+    await r.dial({ headers: { "x-sb-remote-agents": "claude" } });
+    const was = await r.peer();
+    const t2 = Date.now();
+    const b = await r.dial({ headers: { "x-sb-remote-agents": h } });
+    const now = await r.peer(), row = await r.row();
+    ok(JSON.stringify(was.agents) === '["claude"]' && b.status === 101 && JSON.stringify(now.agents) === "[]" && now.agents_at === null
+      && row.agents === null && row.agents_at >= t2, `agents: ${what}: the leg admitted, stored as none (${b.status}, ${JSON.stringify(now.agents)}, ${JSON.stringify(row)})`);
+    await r.done();
+  }
+  {
+    // (the longest valid list, four names of 16 (67 bytes); then a leg with no header clears it)
+    const r = await computer("kinds-four");
+    const four = ["a", "b", "c", "d"].map((c) => c.repeat(16));
+    let d = await r.dial({ headers: { "x-sb-remote-agents": four.join(",") } });
+    let p = await r.peer();
+    ok(d.status === 101 && JSON.stringify(p.agents) === JSON.stringify(four), `agents: four names of 16 characters (${JSON.stringify(p.agents)})`);
+    d = await r.dial();
+    p = await r.peer();
+    ok(d.status === 101 && JSON.stringify(p.agents) === "[]" && p.agents_at === null && (await r.row()).agents === null, `agents: a leg with no header clears them (${JSON.stringify(p.agents)})`);
+    // (read back defensively: a stored value that isn't a valid list, or a time that isn't, reads as none or no time)
+    for (const [agents, at, what, want] of [["not json", 5, "not JSON", "[]"], ['["Claude"]', 5, "an invalid name", "[]"], ['["a","b","c","d","e"]', 5, "five names", "[]"],
+      ['{"a":1}', 5, "an object", "[]"], ['["claude,codex"]', 5, "one element with a comma", "[]"], ['["a,b","c,d"]', 5, "two elements with commas", "[]"],
+      ['["a","a"]', 5, "a name twice", "[]"], ["[]", 5, "an empty list", "[]"], ['[1]', 5, "a number", "[]"], ['["claude"]', -1, "a negative time", '["claude"]'], ['["claude"]', 1.5, "a fractional time", '["claude"]']]) {
+      await db.prepare("UPDATE remotes SET agents = ?2, agents_at = ?3 WHERE remote_id = ?1").bind(r.rid, agents, at).run();
+      const q = await r.peer();
+      ok(JSON.stringify(q.agents) === want && q.agents_at === null, `agents: a stored value with ${what}: read as ${want} and no time (${JSON.stringify(q.agents)}, ${q.agents_at})`);
+    }
+    await r.done();
+  }
+  {
+    // (an agent's key reads [] and null, whatever is stored)
+    const ag = await computer("kinds-agent", "agent");
+    await db.prepare("UPDATE remotes SET agents = ?2, agents_at = ?3 WHERE remote_id = ?1").bind(ag.rid, '["claude"]', 5).run();
+    const p = await ag.peer();
+    ok(JSON.stringify(p.agents) === "[]" && p.agents_at === null, `agents: an agent's key reads [] and null (${JSON.stringify(p)})`);
+    await ag.done();
+  }
+  {
+    // (a revoked runner: its legs are refused, and its row isn't written)
+    const r = await computer("kinds-revoked");
+    await r.dial({ headers: { "x-sb-remote-agents": "claude" } });
+    const before = JSON.stringify(await r.row());
+    await post("/api/remote/v1/revoke", { remote_id: r.rid }, { cookie: sf, origin: SITE });
+    const gone = await r.dial({ headers: { "x-sb-remote-agents": "codex" } });
+    const after = await db.prepare("SELECT agents, agents_at, revoked FROM remotes WHERE remote_id = ?1").bind(r.rid).first();
+    ok(gone.status !== 101 && JSON.stringify({ agents: after.agents, agents_at: after.agents_at }) === before && after.revoked !== null,
+      `agents: a revoked runner's leg is refused and its row not written (${gone.status})`);
+    await r.done();
+  }
+  // (a revoke, the account's deletion or its tombstone landing while the relay admits the leg: the leg is admitted, and
+  // the write's own guards keep the list and its time as they were)
+  const fHash = createHash("sha256").update("sagebrush-account\n" + F).digest("hex");
+  for (const [what, arg, landed, undo] of [
+    ["revoke", (r) => r.rid, (r) => db.prepare("SELECT revoked AS x FROM remotes WHERE remote_id = ?1").bind(r.rid).first(), null],
+    ["deleting", () => F, () => db.prepare("SELECT deleting AS x FROM accounts WHERE account_id = ?1").bind(F).first(),
+      () => db.prepare("UPDATE accounts SET deleting = NULL WHERE account_id = ?1").bind(F).run()],
+    ["tombstone", () => fHash, () => db.prepare("SELECT created AS x FROM tombstones WHERE account_hash = ?1").bind(fHash).first(),
+      () => db.prepare("DELETE FROM tombstones WHERE account_hash = ?1").bind(fHash).run()]]) {
+    const r = await computer(`kinds-at-${what}`);
+    const d = await r.dial({ headers: { "x-sb-remote-agents": "claude", "x-test-at-admit": `${what} ${arg(r)}` } });
+    const row = await r.row(), mark = await landed(r);
+    if (undo) await undo();
+    ok(d.status === 101 && mark?.x != null && row.agents === null && row.agents_at === null,
+      `agents: ${what} as the relay admits the leg: admitted, the list and its time not written (${d.status}, ${mark?.x}, ${JSON.stringify(row)})`);
+    await r.done();
+  }
+}
+
+{
+  // (a database before the agents columns' migration: the peer list as before, with agents [] and null, and a runner's
+  // leg with the header admitted all the same; last, since it takes the columns away)
+  const sf = await session(F);
+  const r = await enroll(sf, "kinds-old-db");
+  await db.prepare("ALTER TABLE remotes DROP COLUMN agents_at").run();
+  await db.prepare("ALTER TABLE remotes DROP COLUMN agents").run();
+  const d = await dialPeer(r, { headers: { "x-sb-remote-agents": "claude" } });
+  const pe = await json(await site("/api/remote/v1/peers", { headers: { cookie: sf } }));
+  const p = (pe.body.peers ?? []).find((x) => x.remote_id === r.rid);
+  ok(d.status === 101 && pe.status === 200 && p && JSON.stringify(p.agents) === "[]" && p.agents_at === null,
+    `agents: a database without the agents columns: the leg admitted, the peer list with [] and null (${d.status}, ${pe.status}, ${JSON.stringify(p)})`);
+  d.leg?.close();
 }
 
 await mf.dispose();

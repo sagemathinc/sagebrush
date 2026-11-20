@@ -1,9 +1,9 @@
 // The LaTeX editor's entry from the notebook page (index.html), in a build with it (__SB_LATEX__, on by default:
 // web/build.ts). Kept small: it is in the page's own script. On on the hosts that serve the editor's files (the build's
 // list: sagebrush.space and dev.sagebrush.space; the loopback hosts too in a "test" build), for everyone: no flag (William,
-// Nov 2: on by default). On, it installs the hooks the file browser and the preview call (__sbTex, __sbTexP) and, for
-// /?tex=<fid>, fetches the page (dist/sagebrush-latex.js) and mounts it. Elsewhere (the CLI's page, the desktop app),
-// with ?tex=: a one-line note offering the file's preview.
+// Nov 2: on by default), and in the desktop app, which ships them (app/build-frontend.mjs). On, it installs the hooks the
+// file browser and the preview call (__sbTex, __sbTexP) and, for /?tex=<fid>, fetches the page (dist/sagebrush-latex.js)
+// and mounts it. Elsewhere (the CLI's page, the phone apps), with ?tex=: a one-line note offering the file's preview.
 import type { Workspace, Entry } from "../workspace/api";
 import { openPreview } from "../workspace/preview";
 import { renderFileMenu, fileMenuKey } from "../workspace/filemenu";
@@ -12,13 +12,24 @@ import { freePath, safeName } from "../workspace/paths";
 import { openGallery } from "../examples/open";
 import { render as markdown } from "../markdown";
 import { loadRemotePicture } from "../safe-html";
+import { siteHref } from "../docs-link";
 
 declare const __SB_LATEX_HOSTS__: string[];
+declare const __SB_LATEX_TEST__: boolean | undefined;
 
 /** Whether the editor is on here: the host exactly (hosts: the build's define, web/build.ts; the unit tests pass their own). */
 export function latexOn(host: string, hosts: readonly string[] = __SB_LATEX_HOSTS__) {
   return hosts.includes(host);
 }
+/** Whether this page is the desktop app's: app/src-tauri/src/lib.rs sets __SB_DESKTOP_APP__ there only (window.__TAURI__
+ * is in the phone apps too; the CLI's page, on the same 127.0.0.1, has neither). */
+export const desktopApp = (w: any = globalThis) => !!w.__TAURI__ && w.__SB_DESKTOP_APP__ === true;
+/** Whether the editor is on here: on the build's hosts (latexOn), and in the desktop app. */
+export function latexHereFor(host: string, desktop: boolean, hosts: readonly string[] = __SB_LATEX_HOSTS__) {
+  return desktop || latexOn(host, hosts);
+}
+/** Why Run doesn't run in the desktop app: its code would run in the app's interpreter, which has no sandbox. */
+export const APP_NO_RUN = "Run isn't available in the desktop app: to run this document's code, upload it, and the files it uses, to sagebrush.space and run it there in Chrome or Edge";
 
 // (the page module, from the site's root, where this page is: a variable, so the bundler leaves it to the browser)
 const PAGE = "/sagebrush-latex.js";
@@ -31,7 +42,7 @@ export const texExamplesOpen = (ws: Workspace) => import(PAGE).then((x) => x.tex
 /** The editor's File menu, drawn by the one File menu (filemenu.ts, as on the notebook and board pages: the same items
  * in the same order, U0) from this page's script, so the editor's chunk carries no copy of it: handed to the editor
  * at mount (its host's `fileMenu`). `print`: the editor's own Print or save as PDF; `close`: the menu closed. */
-function texFileMenu(ws: Workspace, menu: HTMLElement, o: { print(): void; close(): void; fid: string }) {
+function texFileMenu(ws: Workspace, menu: HTMLElement, o: { print(): void; close(): void; fid: string; text?(): string | null; save?(): Promise<void>; share?: TexShare | null }) {
   const go = (e: Entry, how: "here" | "tab" = "here") => {
     const url = e.kind === "board" ? "/board/?doc=local:" + e.ref : e.kind === "notebook" ? "/?nb=" + encodeURIComponent(e.ref!) : isTex(e) && e.fid ? "/?tex=" + e.fid : null;
     if (url) how === "tab" ? open(url, "_blank", "noopener") : location.assign(url);
@@ -47,10 +58,23 @@ function texFileMenu(ws: Workspace, menu: HTMLElement, o: { print(): void; close
     texexamples: async () => { if (!(await openGallery(ws, go, "latex"))) await texExamplesOpen(ws); },
     texopen: () => openFilesDialog(ws, go),
     texprint: () => o.print(),
+    // (Share…: the page's Share dialog for this .tex (latexBoot's `share`), its path as it is now; the dialog saves it
+    //  before it reads the saved file (save: rejects unless the editor's text is written), and checks that against its
+    //  text then (data). Nothing before the editor has the document's text)
+    texshare: async () => {
+      if (!o.share || !o.save || o.text?.() == null) return;
+      const at = await ws.pathOfFile(o.fid);
+      if (!at.ok) throw new Error("This file isn't here any more.");
+      const share = o.share, text = o.text;
+      share({ fid: o.fid, path: at.path, data: () => new TextEncoder().encode(text() ?? ""), save: o.save });
+    },
   };
   renderFileMenu(menu, {
     attr: "data-f", latex: true, downloads: [], chosen: o.close,
-    keys: { newNotebook: "texnb", newBoard: "texboard", newLatex: "texnew", newFolder: "texfolder", fromExample: "texexamples", open: "texopen", print: "texprint" },
+    keys: { newNotebook: "texnb", newBoard: "texboard", newLatex: "texnew", newFolder: "texfolder", fromExample: "texexamples", open: "texopen", print: "texprint", ...(o.share ? { share: "texshare" } : {}) },
+    // (no sharing on this page at all (index.html's LOCAL: the CLI's page, where a build turns the editor on there): why,
+    //  as board wrote it; a page that hasn't said (share undefined) shows it disabled with no title, as before)
+    ...(o.share === null ? { why: { share: TEX_SHARE_WHY } } : {}),
     recent: async () => (await recentOpened(ws)).filter((e) => e.fid !== o.fid).map((e) => ({ label: recentLabel(e), title: e.path, open: () => go(e) })),
   });
   menu.addEventListener("click", (ev) => {
@@ -72,12 +96,19 @@ const commentMarkdown = (box: HTMLElement, text: string) => {
   if (box.querySelector(".math")) (mathModule ??= import(MATH)).then((m) => m.typeset(box)).catch(() => {});
 };
 
+/** The page's Share dialog for a .tex (the share client's: the .tex in a notebook's place, its results file beside it):
+ * its id, its workspace path now, its text when the dialog publishes, and a save of it now (rejects unless written). */
+export type TexShare = (doc: { fid: string; path: string; data: () => Uint8Array; save: () => Promise<void> }) => void;
+/** Why the editor's Share… is disabled on a page without sharing (board's words). */
+export const TEX_SHARE_WHY = "Sharing isn't available here: upload this file, and the files it uses, to sagebrush.space and share it there";
 /** Called once by the notebook page; true if the LaTeX page took the page over. `sandbox`: the page's own runner
- * and kernel classes where it runs code in the runner (index.html's RUNNER), for the editor's Run; null elsewhere. */
-export async function latexBoot(ws: Workspace | null, sandbox: { WorkerKernel: unknown; RunnerWorker: unknown } | null = null) {
+ * and kernel classes where it runs code in the runner (index.html's RUNNER), for the editor's Run; null elsewhere.
+ * `opts.share`: the page's Share dialog for a .tex (File ▸ Share…); null where the page has no sharing at all; left
+ * out, the item is disabled, as before. */
+export async function latexBoot(ws: Workspace | null, sandbox: { WorkerKernel: unknown; RunnerWorker: unknown } | null = null, opts: { share?: TexShare | null } = {}) {
   const p = new URLSearchParams(location.search), tex = p.get("tex");
   const el = (t: string, s = "") => { const e = document.createElement(t); e.textContent = s; return e; };
-  if (!latexOn(location.hostname)) {
+  if (!latexHereFor(location.hostname, desktopApp())) {
     if (tex === null) return false;
     // (r5 N2: the file's own preview, found by the same lookup; or why there is none)
     const d = el("p", "The LaTeX editor isn't enabled here."), at = ws && (await ws.pathOfFile(tex).catch(() => null));
@@ -110,6 +141,17 @@ export async function latexBoot(ws: Workspace | null, sandbox: { WorkerKernel: u
   if (tex === null || !ws) return false;
   const root = el("div");
   document.body.append(root);
-  await (await import(PAGE)).mount(root, { ws, fid: tex, back: () => location.assign("/"), sandbox, fileMenu: (menu: HTMLElement, o: { print(): void; close(): void }) => texFileMenu(ws, menu, { ...o, fid: tex }), markdown: commentMarkdown });
+  // (the test build only: the page test gives its own Share (a spy, or null), set before this page's script runs; it
+  //  wins over the page's, so the editor's own test stays the editor's)
+  const share = typeof __SB_LATEX_TEST__ !== "undefined" && __SB_LATEX_TEST__ && "__sbTexShare" in g ? g.__sbTexShare : opts.share;
+  // (?embed=1: the Agents page's pane, a frame of this site's own (the page's frame-ancestors 'self'): web/latex/page.ts's embed)
+  await mountTex(root, ws, tex, sandbox, share, p.get("embed") === "1" && parent !== window);
   return true;
+}
+
+/** The editor for file `fid` mounted in `root`, as /?tex=<fid> has it (latexBoot); the app's self-test mounts it the same
+ * way (web/notebook/selftest-latex.js). In the desktop app (`app`): no Agent, as on its notebook page, and Run says why
+ * it doesn't run (it has no sandbox: `sandbox` is null there, index.html's RUNNER). */
+export async function mountTex(root: HTMLElement, ws: Workspace, fid: string, sandbox: { WorkerKernel: unknown; RunnerWorker: unknown } | null, share: TexShare | null | undefined, embed = false) {
+  await (await import(PAGE)).mount(root, { ws, fid, back: () => location.assign("/"), sandbox, site: siteHref(""), ...(desktopApp() ? { app: APP_NO_RUN } : {}), ...(embed ? { embed: true } : {}), fileMenu: (menu: HTMLElement, o: { print(): void; close(): void; text(): string | null; save(): Promise<void> }) => texFileMenu(ws, menu, { ...o, fid, share }), markdown: commentMarkdown });
 }

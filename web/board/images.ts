@@ -5,9 +5,13 @@
 // them.  A board leaving the browser (Download, Copy, an exported HTML file)
 // carries them in `images`, as data: URLs, and opening one puts them back.
 
-import type { BoardDoc, DocNode } from "./doc";
+import type { BoardDoc, DocNode, DocNote } from "./doc";
 import { PixelBudget, SVG_MAX_BYTES, pictureSize, pictureUrl, svgDataUrl, svgSize, svgText } from "../image-size";
 import { openDb } from "./idb-open";
+
+/** A note (a code item too), as doc.ts's isNote says it, with its type narrowed here (a type-only import: doc.ts isn't
+ * loaded by this module). */
+const isNoteNode = (n: DocNode): n is DocNote => n.kind === undefined || n.kind === "note";
 
 /** A picture a note shows, by its name in the document's `images`. */
 export interface ImageInfo {
@@ -267,7 +271,7 @@ export class Images {
       const walk = (ns: DocNode[] | undefined) => {
         for (const n of ns ?? []) {
           if (n.kind === "group") walk(n.children);
-          else if ((n.kind === undefined || n.kind === "note") && n.image && rename.has(n.image)) n.image = rename.get(n.image);
+          else if (isNoteNode(n) && n.image && rename.has(n.image)) n.image = rename.get(n.image);
         }
       };
       walk(d.nodes);

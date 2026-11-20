@@ -1,7 +1,0 @@
-{
- "v": 1,
- "reason": "How to connect your agent (#875): mountAgentPairing's new `program` option (web/workspace/agent-ui.ts: the helper that names the page's own program instead of sagebrush-mcp in the Connect dialog's line, its failure text and the Chrome note), which the CLI carries in the web assets it embeds. The new page /agents/connect.html is static and isn't in the CLI; web/dist/_headers is unchanged (no new script hash). Measured by daybreak2 in the binding size-gate run 42525765845 (tested merge fc0d8737 vs base bb6b4e82, bun 1.4.4 / Node 24.21.0): cli/pyjs.cjs +132; no other row moves. Marker: +132 with the usual 64 B slack.",
- "bytes": {
-  "cli/pyjs.cjs": 196
- }
-}
