@@ -347,10 +347,11 @@ export class AgentPairing {
     this.grant = grant;
     this.remember = remember;
     this.verbs = this.opts.verbsFor(actorOf(h.agent.name, h.agent.client), { owner: () => grant.id });
-    this.send({ jsonrpc: "2.0", method: "grant.changed", params: { id: grant.id, agent: grant.agent, client: grant.client, folders: grant.folders, write: grant.write, run: grant.run, expires: grant.expires } });
-    // (what this page offers beyond the verbs: a notification, which a server that doesn't know it ignores, §1 rule 4)
+    // (what this page offers beyond the verbs, sent before its grant (A2-1): a notification, which a server that
+    //  doesn't know it ignores, §1 rule 4)
     // (permission.digest: every Allow carries the digest of the action shown, from any page that pairs)
     this.send({ jsonrpc: "2.0", method: "page.features", params: { features: [...(this.opts.notebookEdit ? ["notebook.edit"] : []), "permission.digest", ...(this.opts.runVerbs ? ["run.context"] : [])] } });
+    this.send({ jsonrpc: "2.0", method: "grant.changed", params: { id: grant.id, agent: grant.agent, client: grant.client, folders: grant.folders, write: grant.write, run: grant.run, expires: grant.expires } });
     await this.keep();
     // (S4: while it waited, the grant may have been revoked, the pairing closed or the grant replaced: then nothing
     //  of this allow() goes on, no record, no timer, no "granted")

@@ -931,6 +931,12 @@ for (const [what, grant] of [["a folder, not Everything", { folders: ["/A"], wri
   await P.allow({ folders: ["/"], write: true, run: true, expires: null }, false);
   await until(() => S.got.some((m) => m.method === "page.features"));
   ok(S.got.find((m) => m.method === "page.features").params.features.includes("run.context"), "a page with run verbs offers run.context (page.features)");
+  {
+    // (A2-1: said before the grant, so a server never takes the grant from a page whose features it doesn't know yet)
+    await until(() => S.got.some((m) => m.method === "grant.changed"));
+    const at = (method) => S.got.findIndex((m) => m.method === method);
+    ok(at("page.features") >= 0 && at("page.features") < at("grant.changed"), "page.features is sent before grant.changed", S.got.map((m) => m.method));
+  }
   const run = async (params) => { const n = seen.length; const r = await S.request("workspace.run_notebook", params); return { r, got: seen.length > n ? seen.at(-1) : null }; };
   const a0 = await run({ path: "/A/doc.ipynb", conversation: "c1", turn_id: "t1" });
   ok(a0.got?.params.conversation === "c1" && a0.got.context === undefined, "the agent didn't say run.context: its params as they are, no context (the run's own check refuses them)", a0.got);
