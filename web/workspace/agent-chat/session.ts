@@ -58,7 +58,8 @@ export class ChatSession {
       const t = newThread(id(), "New chat");
       this.state = { threads: [t], current: t.id };
     }
-    this.cards = new PermissionCards({ current: () => host.pairing(), gate: digestGate, charge: DIGEST_CHARGE });
+    // (the chat is where a web card's "for this turn" is offered: its pairing says egress.turn, egressTurn below)
+    this.cards = new PermissionCards({ current: () => host.pairing(), gate: digestGate, charge: DIGEST_CHARGE, egressTurn: true });
   }
 
   /** A turn that was running when the page closed (the host calls this once it can draw): an agent's turn in a thread
@@ -235,10 +236,10 @@ export class ChatSession {
   }
 
   /** A permission prompt's answer: true when the thread changed (the card now shows the answer). */
-  answer(thread: Thread, attention: string, approve: boolean, turnId: string, instance: string): boolean {
+  answer(thread: Thread, attention: string, approve: boolean | "turn", turnId: string, instance: string): boolean {
     const scripted = this.local.get(thread.id);
     if (scripted) {
-      scripted.turn.answer(attention, approve);
+      scripted.turn.answer(attention, approve !== false);
       return false;
     }
     // (a card of a turn that's away, or of no turn here, answers nothing: nothing claimed, nothing sent; once the turn
@@ -247,7 +248,7 @@ export class ChatSession {
     if (!turn || turn.away) return false;
     // (claimed: the card shows the person's answer at once, both buttons gone; a second click finds it claimed)
     if (!this.cards.answer(attention, approve, thread.id, turnId, instance)) return false;
-    turn.attention[attention].state = approve ? "approved" : "denied";
+    turn.attention[attention].state = approve !== false ? "approved" : "denied";
     return true;
   }
 

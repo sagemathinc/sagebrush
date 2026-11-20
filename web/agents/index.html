@@ -156,6 +156,12 @@
   .att-detail > summary { cursor: pointer; color: var(--muted); }
   .att-detail pre { max-height: 240px; overflow: auto; white-space: pre-wrap; overflow-wrap: anywhere; margin: 4px 0 0; padding: 6px 8px; background: var(--code-bg, rgba(127,127,127,.08)); border-radius: 6px; }
   .att-actions { display: flex; gap: 8px; margin-top: 8px; }
+  .att-body { font-size: 14px; margin-top: 4px; }
+  .att-reason { font-size: 14px; color: var(--muted); margin-top: 4px; overflow-wrap: anywhere; }
+  /* (a web card's three answers: Deny set apart; on a phone, one per row, Deny last after a gap) */
+  .att-actions.three { flex-wrap: wrap; }
+  .att-actions.three .att-deny { margin-left: auto; }
+  @media (max-width: 480px) { .att-actions.three { flex-direction: column; align-items: stretch; } .att-actions.three .att-deny { margin: 8px 0 0; } }
   .att-actions button, .composer button { border: 1px solid var(--line); background: var(--card); border-radius: 8px; padding: 5px 12px; cursor: pointer; }
   button.primary { background: var(--ink); color: #fff; border-color: var(--ink); }
   .att-state { font-size: 13px; color: var(--muted); margin-top: 6px; }

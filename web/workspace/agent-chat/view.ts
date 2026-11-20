@@ -1,7 +1,7 @@
 // The agents chat's turn view (web/agents, and the chat panel to come): a person's message and an agent's turn as DOM
 // nodes, its tool calls, permission prompts and artifact cards, as the Agents page has always drawn them. What a click
 // does (answering a prompt, opening an artifact) and how Markdown is rendered are the caller's, passed in.
-import { ATTENTION_STATES, TOOL_STATUSES, count, langOf, own, type Artifact, type Thread, type ToolCall, type Turn, type UserEntry } from "./events";
+import { ATTENTION_STATES, TOOL_STATUSES, count, langOf, own, type Artifact, type Attention, type Thread, type ToolCall, type Turn, type UserEntry } from "./events";
 
 // (a class name from a known set only, whatever the thread holds: a stored thread from before apply checked it included)
 const cls = (v: unknown, xs: readonly string[]) => (typeof v === "string" && xs.includes(v) ? v : "other");
@@ -9,8 +9,9 @@ const esc = (s: string) => s.replace(/&/g, "&amp;").replace(/</g, "&lt;").replac
 
 /** What a turn's node does when it's used: answer a permission prompt, open an artifact; and its Markdown renderer. */
 export interface TurnHooks {
-  /** a permission prompt's answer: its id, the turn it was shown in, and the page's token for that very card */
-  answer(attention: string, approve: boolean, turn: string, instance: string): void;
+  /** a permission prompt's answer: its id, Allow (true), Deny (false) or a web card's "for this turn" ("turn"), the
+   *  turn it was shown in, and the page's token for that very card */
+  answer(attention: string, approve: boolean | "turn", turn: string, instance: string): void;
   openArtifact(id: string): void;
   md(src: string): string;
 }
@@ -45,10 +46,12 @@ export function turnNode(thread: Thread, turn: Turn, h: TurnHooks): HTMLElement 
       const open = a.state === "open" && !turn.outcome && !turn.away;
       parts.push(
         `<div class="attention ${cls(a.state, ATTENTION_STATES)}" data-attention="${esc(a.id)}" data-instance="${esc(a.instance ?? "")}"><div class="att-title">⚠ ${esc(a.title)}</div>` +
+          (a.body ? `<div class="att-body">${esc(a.body)}</div>` : "") +
           (a.summary ? `<div class="att-summary">${esc(a.summary)}</div>` : "") +
+          (a.reason ? `<div class="att-reason">${esc(a.reason)}</div>` : "") +
           (a.detail ? `<details class="att-detail"${open ? " open" : ""}><summary>All of the request</summary><pre>${esc(a.detail)}</pre></details>` : "") +
           (open
-            ? `<div class="att-actions"><button class="primary" data-approve="1">Allow</button><button data-approve="0">Deny</button></div>`
+            ? `<div class="att-actions${a.buttons === "three" ? " three" : ""}">${attButtons(a)}</div>`
             : `<div class="att-state">${a.state === "approved" ? "Allowed" : a.state === "denied" ? "Denied" : "No answer"}</div>`) +
           `</div>`,
       );
@@ -73,13 +76,24 @@ export function turnNode(thread: Thread, turn: Turn, h: TurnHooks): HTMLElement 
   for (const b of div.querySelectorAll<HTMLButtonElement>("[data-approve]")) {
     b.onclick = () => {
       const card = b.closest<HTMLElement>("[data-attention]")!;
-      h.answer(card.dataset.attention!, b.dataset.approve === "1", turn.turn_id, card.dataset.instance ?? "");
+      const v = b.dataset.approve;
+      h.answer(card.dataset.attention!, v === "turn" ? "turn" : v === "1", turn.turn_id, card.dataset.instance ?? "");
     };
   }
   for (const b of div.querySelectorAll<HTMLButtonElement>("[data-artifact]")) {
     b.onclick = () => h.openArtifact(b.dataset.artifact!);
   }
   return div;
+}
+
+/** A card's buttons: a web card's three (for this turn, this request, Deny), two, or Deny alone, as it was admitted;
+ *  any other card's Allow and Deny. Deny is set apart (att-deny), so on a phone it stands alone below the others. */
+function attButtons(a: Attention): string {
+  const deny = `<button class="att-deny" data-approve="0">Deny</button>`;
+  if (a.buttons === "deny") return deny;
+  const allow = `<button class="primary" data-approve="1">${esc(a.allow || "Allow")}</button>`;
+  if (a.buttons === "three" && a.turn_label) return `<button class="primary" data-approve="turn">${esc(a.turn_label)}</button><button data-approve="1">${esc(a.allow || "Allow")}</button>${deny}`;
+  return allow + deny;
 }
 
 export function toolHtml(t: ToolCall): string {
