@@ -8,6 +8,7 @@
 import { writerHandover } from "../page/handover";
 import type { Workspace } from "../workspace/api";
 import { canonical, cellForm, preflight, type NotebookEdit } from "../workspace/notebook-edit";
+import type { Kept, PageRun } from "../workspace/run-verbs";
 
 // (stores.js's FENCE, the workspace's record in the notebooks store; test-agents-artifacts checks they're equal)
 export const FENCE = "__sagebrush-workspace__";
@@ -53,6 +54,11 @@ export type NotebookHost = {
    * the person's Run here, if this pane is bound to `ref` and may run it now (attached, saving here, not closing; under
    * sync's journal, the writer) and `ok` holds for what it shows. True if it ran. */
   runCreated(ref: string, ok: (doc: any) => boolean): boolean;
+  /** An agent's run_notebook in this notebook (run-verbs.ts's PageRun, as the notebook page's agentPageRun): its cells
+   * run here cell by cell as the person's Run is, their outputs shown and saved with it, while this pane is bound to
+   * `ref` and may save it (attached, not closing, the writer under sync's journal). Its inputs wait for the mount;
+   * `gone` is called if the pane lets the notebook go (closed, disposed) while the run holds it. */
+  pageRun(ref: string, path: string, gone: () => void): PageRun;
   copyText(): string;
 };
 
@@ -201,6 +207,8 @@ export function mountNotebook(ws: Workspace, path: string, box: HTMLElement, ui:
   // (observed from the start, so a move, Trash or replacement while the mount reads and loads isn't missed: before
   // attach it is caught by the check after it, ART-C2)
   const unwatch = ws.watch(() => void check());
+  // (an agent's runs in this notebook (pageRun), told when the pane lets it go)
+  const pageRuns = new Set<() => void>();
   const watchRunning = new MutationObserver(() => {
     const n = nbRoot.querySelectorAll(".cell.running, .cell.queued").length;
     if ((n > 0) !== (running > 0)) ui.running(n > 0);
@@ -224,6 +232,8 @@ export function mountNotebook(ws: Workspace, path: string, box: HTMLElement, ui:
     async dispose() {
       if (!alive) return;
       unwatch();
+      for (const g of [...pageRuns]) g();
+      pageRuns.clear();
       watchRunning.disconnect();
       const comp = nb;
       alive = false;
@@ -364,6 +374,70 @@ export function mountNotebook(ws: Workspace, path: string, box: HTMLElement, ui:
       const rec1 = await stored().catch(() => null);
       if (!keptAsShown(rec1) || !(rec1.rev > baseRev)) return { ok: false, code: "busy", why: "applied here but not saved: the store refused it" };
       return { ok: true, inserted };
+    },
+    pageRun(ref, path, gone) {
+      let comp: Nb = null;
+      // (this pane's notebook, the one the run started in, still bound to `ref` and saving here)
+      const here = () => alive && !!comp && nb === comp && attached && bound && !frozen && guard === "open" && docRef === ref && owns(comp);
+      let told = false;
+      const tell = () => { if (!told) { told = true; pageRuns.delete(tell); gone(); } };
+      pageRuns.add(tell);
+      const text = (v: unknown) => (Array.isArray(v) ? v.join("") : typeof v === "string" ? v : "");
+      const inputsOf = (d: any) => JSON.stringify((d?.cells ?? []).map((c: any) => [String(c.id), c.type ?? "code", String(c.code ?? "")]));
+      return {
+        // (the notebook as shown, caught up first: the person's edits saved, and the workspace's copy (an agent's write
+        //  just made in it) applied here as any change from elsewhere is, so the run is of what both have)
+        inputs: async () => {
+          await host.ready;
+          comp = nb;
+          if (!here()) return null;
+          comp.flush();
+          try { await comp.saved(); } catch {}
+          const r = here() ? await ws.read(path).catch(() => null) : null;
+          if (!here()) return null;
+          const e = r?.entry as any;
+          if (r && e?.kind === "notebook" && e.ref === ref && inputsOf(r.content) !== inputsOf(comp.snapshot())) {
+            comp.applyRemote({ ...(r.content as any), rev: r.rev });
+            await new Promise((go) => setTimeout(go, 0));
+          }
+          if (!here()) return null;
+          const s = comp.snapshot();
+          return { mode: typeof s.mode === "string" ? s.mode : "python", cells: s.cells.map((c: any) => ({ id: String(c.id), type: c.type ?? "code", code: String(c.code ?? "") })) };
+        },
+        current: here,
+        cell: async (id: string, out: Kept) => {
+          const images = { count: 0, bytes: 0 };
+          const c = here() ? comp.cells().find((x: any) => x.id === id && (x.type ?? "code") === "code") : null;
+          if (!c) return { status: "stopped" as const, images };
+          const ran = await comp.runCells([id], { budget: 0 });
+          const r = Array.isArray(ran) ? ran[0] : ran;
+          if (!here() || !r) return { status: "stopped" as const, images };
+          for (const o of comp.snapshot().cells.find((x: any) => x.id === id)?.outputs ?? []) {
+            if (o.output_type === "stream") out.add(text(o.text));
+            else if (o.output_type === "error") out.add(text(o.traceback?.join?.("\n")) || `${o.ename}: ${o.evalue}\n`);
+            else {
+              for (const [k, v] of Object.entries(o.data ?? {})) if (k.startsWith("image/") && typeof v === "string") { images.count++; images.bytes += v.length; }
+              const t = text(o.data?.["text/plain"]);
+              if (t) out.add(t.endsWith("\n") ? t : t + "\n");
+            }
+          }
+          const stopped = r.stopped || r.interrupted;
+          const failed = r.ok === false || c.el.classList.contains("error");
+          return { status: stopped ? ("stopped" as const) : failed ? ("error" as const) : ("ok" as const), images };
+        },
+        // (saved only if the workspace's copy now has what is shown: a save can end in a refusal it only says)
+        save: async () => {
+          if (!here()) return false;
+          comp.flush();
+          try { await comp.saved(); } catch { return false; }
+          const r = here() ? await ws.read(path).catch(() => null) : null;
+          const outs = (d: any) => JSON.stringify((d?.cells ?? []).filter((c: any) => (c.type ?? "code") === "code").map((c: any) => [c.id, String(c.code ?? ""), c.outputs ?? []]));
+          const e = r?.entry as any;
+          return here() && e?.kind === "notebook" && e.ref === ref && outs(r!.content) === outs(comp.snapshot());
+        },
+        stop: () => { if (comp && nb === comp) comp.interrupt(); },
+        close: () => { told = true; pageRuns.delete(tell); },
+      };
     },
     copyText: () => (nb ? nb.cells().map((c: any) => c.ta.value).join("\n\n") : ""),
   };

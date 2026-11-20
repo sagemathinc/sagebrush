@@ -22,6 +22,7 @@ import { mountAgentPairing, type RestoreState } from "../workspace/agent-ui";
 import { createdRunner } from "../workspace/agent-made";
 import { runVerbsFor } from "../workspace/run-holder";
 import { agentRunsFor } from "../workspace/agent-runs";
+import type { PageRun } from "../workspace/run-verbs";
 import { createPermissions } from "../notebook/permissions.js";
 import * as gitBranches from "../workspace/git-branch";
 import { openReviewDialog, showWhenBranches } from "../workspace/review/open-dialog";
@@ -1207,6 +1208,38 @@ async function editNotebook(e: NotebookEdit, may: () => boolean, hold?: () => Pr
   }
   return { ok: true, inserted: r.inserted };
 }
+// An agent's run_notebook here (run-verbs.ts's inPage, as the notebook page's agentPageRun, decided Nov 18 2026): in its
+// chat's pane, the notebook opened there first as an edit opens it (shown, or mounted behind the artifact the person
+// is in), then run in that notebook cell by cell, its outputs shown and saved with it. Only for the chat shown with a
+// turn running (an agent's call comes from a turn); else null and nothing started: today's run instead.
+function paneRun(ref: string, path: string, gone: () => void): PageRun | null {
+  const thread = current();
+  if (!workspace || !runningTurn(thread)) return null;
+  const turnId = runningTurn(thread)!.turn_id;
+  const shownOther = document.body.classList.contains("has-artifact") && openArtifact !== null && openArtifact !== path;
+  const keep = openArtifact;
+  if (!thread.artifacts.some((a) => a.id === path && a.kind === "notebook")) session.emit(thread, turnId, { type: "artifact", id: path, kind: "notebook", title: path.split("/").pop()!, path, body: "run by the agent" });
+  const art = thread.artifacts.find((a) => a.id === path && a.kind === "notebook");
+  if (!art) return null;
+  // (the artifact just added doesn't take the pane from the one the person is in: it stays, this one behind it)
+  if (shownOther) {
+    openArtifact = keep;
+    hiddenHost(thread.id, art);
+  }
+  else {
+    openArtifact = path;
+    renderArtifacts();
+  }
+  const h = hosts.get(hostKey(thread.id, path));
+  if (!h?.nb) return null;
+  // (behind another tab: its tab says it changed, until it is shown)
+  if (shownHost() !== h) {
+    h.changed = true;
+    headKey = "";
+    renderArtifacts();
+  }
+  return h.nb.pageRun(ref, path, gone);
+}
 /** An artifact's host made without showing it (its notebook live, hidden): for an agent's edit behind another tab. */
 function hiddenHost(threadId: string, a: Artifact) {
   const key = hostKey(threadId, a.id);
@@ -1288,7 +1321,8 @@ const agentRuns = (ws: Workspace) => agentRunsFor(ws as any, {
   sandbox: globalThis.crossOriginIsolated === true && !!globalThis.navigator && !(window as any).__TAURI__ && !(window as any).__SAGEBRUSH_LOCAL__ ? "ok" : "none",
   perms: createPermissions(),
   chunks: { run: "sagebrush-agent-run.js", ...(__SB_LATEX__ ? { latex: ["sagebrush-latex.js", "sagebrush-latex-tools.js", "sagebrush-latex-run.js"] as [string, string, string] } : {}) },
-  more: () => (/^(localhost|127\.0\.0\.1)$/.test(location.hostname) && typeof (window as any).__runHold === "function" ? { hold: (st: string) => (window as any).__runHold(st) } : {}),
+  // (run_notebook in the pane's notebook: paneRun)
+  more: () => ({ inPage: paneRun, ...(/^(localhost|127\.0\.0\.1)$/.test(location.hostname) && typeof (window as any).__runHold === "function" ? { hold: (st: string) => (window as any).__runHold(st) } : {}) }),
 });
 
 function mountPairing(ws: Workspace) {
