@@ -26,7 +26,7 @@ function setup(o = {}) {
     onChange: (cb) => (changes.add(cb), () => changes.delete(cb)),
   };
   const setGrant = (g) => { grant = g; for (const cb of [...changes]) cb(); };
-  const holder = { current: null, shown: 0, show() { this.shown++; }, hide() {} };
+  const holder = { current: null, shown: 0, hides: [], show() { this.shown++; }, hide() { this.hides.push(performance.now()); } };
   const waits = new Map();
   let shown = true, gone = null;
   const page = {
@@ -37,7 +37,7 @@ function setup(o = {}) {
   const ws = {
     stat: async (p) => ({ kind: "notebook", ref: "r1", path: p }),
     branchAt: async () => ({ no: null, root: { path: "/Branches/b", fid: "f", name: "b" } }),
-    list: async () => { log.fallback++; throw new Error("today's run"); },
+    list: async () => { log.fallback++; if (o.todayDelay) await new Promise((r) => setTimeout(r, o.todayDelay)); throw new Error("today's run"); },
   };
   const host = {
     ws: { runHost: () => ws }, WorkerKernel: class { constructor() { log.fallback++; throw new Error("today's run"); } }, RunnerWorker: class {}, runnerSrc: "runner/", sandbox: "ok",
@@ -47,7 +47,7 @@ function setup(o = {}) {
       if (!o.open || ref !== "r1") return null;
       gone = g;
       return {
-        inputs: async () => (o.inputsGone ? null : structuredClone(page.doc)),
+        inputs: async () => (o.inputs ? o.inputs() : o.inputsGone ? null : structuredClone(page.doc)),
         current: () => shown,
         cell: async (id, out) => {
           log.started.push(id);
@@ -112,6 +112,38 @@ const call = (s, path = "/labs/n.ipynb", params = {}) => run("workspace.run_note
   check(new TextEncoder().encode(JSON.stringify(r)).length <= RUN_LIMITS.result, "the result within 256 KiB");
 }
 
+// ---- the page took it, then couldn't (inputs() answers "fallback", before any cell): today's run instead, under the
+// same deadline, nothing started on the page and nothing of its hold left; an end that came first stands
+{
+  // (as a pane that couldn't bind its notebook answers: not current either)
+  const s = setup({ open: true, inputs: async () => "fallback" });
+  const inPage = s.host.inPage;
+  s.host.inPage = (...a) => { const pr = inPage(...a); return pr && { ...pr, current: () => false }; };
+  const { e } = await call(s);
+  check(e?.message === "today's run" && s.log.asked === 1 && s.log.fallback === 1 && s.log.started.length === 0 && s.log.stops === 0 && s.log.saves === 0 && s.log.closed === 1,
+    `"fallback": today's run, no cell started or stopped on the page, nothing saved there, the page's run closed (${e?.message})`);
+  check(s.holder.current === null, "\"fallback\": nothing held after (the run's holder as before the call)");
+}
+{
+  let go;
+  const s = setup({ open: true, inputs: () => new Promise((r) => (go = r)) });
+  const p = call(s);
+  await until(() => !!go);
+  stop(s.ctx, s.holder);
+  go("fallback");
+  const { r, e } = await p;
+  check(!e && r?.ended === "stopped" && s.log.fallback === 0 && s.holder.current === null, `Stop before the page's "fallback": stopped, no today's run after (${JSON.stringify(r ?? e?.message)})`);
+}
+{
+  // (the deadline it was asked with carries over: 1 s asked, the page's "fallback" at 0.6 s, today's run (its snapshot
+  //  slow here, 2 s) ended by that same deadline at about 1 s, its line let go then, not a fresh second after the fallback)
+  const s = setup({ open: true, todayDelay: 2000, inputs: () => new Promise((r) => setTimeout(() => r("fallback"), 600)) });
+  const t0 = performance.now();
+  const { r, e } = await call(s, "/labs/n.ipynb", { timeout_s: 1 });
+  const ends = s.holder.hides.map((t) => Math.round(t - t0));
+  const last = ends[ends.length - 1] ?? -1;
+  check(s.log.fallback === 1 && last >= 900 && last < 1400 && (r?.ended === "timeout" || !!e), `"fallback": today's run under the same deadline (its end at ${last} ms of 1000; ${JSON.stringify(r ?? e?.message)})`);
+}
 // ---- busy: refused, never the other run
 {
   const s = setup({ open: true });

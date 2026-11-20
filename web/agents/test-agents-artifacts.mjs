@@ -75,7 +75,7 @@ const daemon = Bun.serve({
       if (m.method === "hello") {
         sock = ws;
         // (it asks for run too: the page's grant must say run false whatever it asks)
-        ws.send(JSON.stringify({ jsonrpc: "2.0", id: m.id, result: { protocol: 1, agent: { name: "Claude", client: "claude-agent-sdk", version: "0.3.0" }, wants: { folders: ["/"], write: true, run: true }, ...(FEATURES ? { features: ["notebook.edit"] } : {}) } }));
+        ws.send(JSON.stringify({ jsonrpc: "2.0", id: m.id, result: { protocol: 1, agent: { name: "Claude", client: "claude-agent-sdk", version: "0.3.0" }, wants: { folders: ["/"], write: true, run: true }, features: [...(FEATURES ? ["notebook.edit"] : []), "run.context"] } }));
       } else if (m.id && pending.has(m.id)) {
         const p = pending.get(m.id);
         pending.delete(m.id);
@@ -96,7 +96,9 @@ const call = (method, params) =>
     sock.send(JSON.stringify({ jsonrpc: "2.0", id, method, params }));
   });
 let conv = null, turnN = 0;
-const event = (turn_id, e) => sock.send(JSON.stringify({ jsonrpc: "2.0", method: "turn.event", params: { conversation: conv, turn_id, event: e } }));
+const event = (turn_id, e, conversation = conv) => sock.send(JSON.stringify({ jsonrpc: "2.0", method: "turn.event", params: { conversation, turn_id, event: e } }));
+// (a run as the agent's server sends it with run.context: the chat and the turn it came from, after the model's args)
+const runIn = (path, turn_id, conversation = conv) => call("workspace.run_notebook", { path, timeout_s: 120, conversation, turn_id });
 /** A turn of the agent's that shows a file as an artifact (its tool wrote the file first, as the daemon's does). */
 async function artifactTurn(path, { finish = true, turn = null } = {}) {
   const t = turn ?? `t${++turnN}`;
@@ -629,6 +631,162 @@ try {
     const stays = await ev(`document.querySelector('#artifacts .tab.on')?.dataset.tab ?? null`);
     ok(stays === draft && !JSON.stringify(r3.content.json.cells[0].outputs ?? []).includes("AWAY 3"), "a notebook created while the person is in another artifact (they typed in it): the pane stays there, and it isn't run", { stays, cell: r3.content.json.cells[0] });
     event(t3, { type: "turn_finished", outcome: "completed" });
+  }
+
+  // ======================================================================== an agent's run_notebook in the pane
+  // (run-verbs.ts's inPage here, as on the notebook page: the notebook opened in its chat's pane (or behind the artifact
+  //  the person is in), run there cell by cell, its outputs shown and saved with it. PR1 a notebook the agent only reads
+  //  and runs: opened, run, saved; PR2 written then run in one turn: the run is of what it wrote; PR3 behind the artifact
+  //  the person typed in: the pane stays there, the run is saved, its tab says it changed; PR4 no turn running: today's
+  //  run (nothing opened, not saved); PR5 the pane closed while the run waits: the run ends, stopped; PR6-PR9 the call's
+  //  chat and turn (run.context): none, an ended turn's, a background chat's, the chat left meanwhile; PR10 the turn ended
+  //  meanwhile: never this pane)
+  if (want("panerun")) {
+    await freshPage();
+    const P1 = "/notes/pr-given.ipynb";
+    await call("workspace.create", { path: P1, content: docFor(P1, [{ code: "print('PR', 6 * 7)" }]), mode: "python" });
+    const t1 = `t${++turnN}`;
+    event(t1, { type: "turn_started" });
+    await sleep(300);
+    const r1 = await runIn(P1, t1);
+    await sleep(500);
+    const shown1 = await ev(`document.querySelector('#artifacts .tab.on')?.dataset.tab ?? null`);
+    const pane1 = await until(`/PR 42/.test(document.querySelector('${PANE} .nb-root .cell .out')?.textContent ?? '')`, 30000).catch(() => false);
+    const f1 = await call("workspace.read", { path: P1 });
+    ok(r1?.ended === "done" && r1.saved === "saved" && r1.cells?.[0]?.out === "PR 42\n" && shown1 === P1 && pane1 && JSON.stringify(f1.content.json.cells[0].outputs ?? []).includes("PR 42"),
+      "PR1: run_notebook of a notebook the agent only reads: opened in the pane, run there, its output shown and saved with it", { r1, shown1, pane1 });
+    // (PR2: a cell the agent writes, then its run in the same turn: the run is of what it wrote)
+    await write(P1, [{ code: "print('PR', 6 * 7)" }, { code: "print('NEW', 2 + 3)" }]);
+    const r2 = await runIn(P1, t1);
+    const f2 = await call("workspace.read", { path: P1 });
+    const pane2 = await until(`/NEW 5/.test(document.querySelector('${PANE} .nb-root')?.textContent ?? '')`, 30000).catch(() => false);
+    ok(r2?.saved === "saved" && r2.cells?.[1]?.out === "NEW 5\n" && pane2 && JSON.stringify(f2.content.json.cells[1]?.outputs ?? []).includes("NEW 5"),
+      "PR2: a cell the agent wrote, then its run in the same turn: the run is of what it wrote, shown and saved", { r2, pane2 });
+    // (PR3: the person in another artifact, typing: the run goes on behind it)
+    const draft = "/notes/pr-draft.txt";
+    await call("workspace.create", { path: draft, content: { text: "mine" } });
+    await artifactTurn(draft, { finish: false, turn: t1 });
+    const drafted = await until(`document.querySelector('#artifacts .tab.on')?.dataset.tab === ${JSON.stringify(draft)} && !!document.querySelector('${PANE} textarea')`, 15000).catch(() => false);
+    ok(drafted, "(PR3: the agent's draft shown in the pane)", await ev(`document.querySelector('#artifacts .tab.on')?.dataset.tab ?? null`));
+    await ev(`(document.querySelector('${PANE} textarea')?.focus(), true)`);
+    await send("Input.insertText", { text: " typed" });
+    const P3 = "/notes/pr-behind.ipynb";
+    await call("workspace.create", { path: P3, content: docFor(P3, [{ code: "print('BEHIND', 7)" }]), mode: "python" });
+    await sleep(500);
+    const r3 = await runIn(P3, t1);
+    const f3 = await call("workspace.read", { path: P3 });
+    const pr3 = { stays: await ev(`document.querySelector('#artifacts .tab.on')?.dataset.tab ?? null`), mark: await ev(`!!document.querySelector('#artifacts .tab[data-tab="${P3}"] .tab-changed')`), typed: await ev(`document.querySelector('${PANE} textarea')?.value ?? null`) };
+    ok(r3?.saved === "saved" && r3.cells?.[0]?.out === "BEHIND 7\n" && JSON.stringify(f3.content.json.cells[0].outputs ?? []).includes("BEHIND 7") && pr3.stays === draft && pr3.mark && /typed/.test(pr3.typed ?? ""),
+      "PR3: with the person in another artifact, the run goes on behind it: saved, the pane stays where they are, its tab says it changed", { r3, pr3 });
+    event(t1, { type: "turn_finished", outcome: "completed" });
+    // (PR4: no turn running: today's run, in the sandbox, nothing opened, not saved)
+    await freshPage();
+    const P4 = "/notes/pr-noturn.ipynb";
+    await call("workspace.create", { path: P4, content: docFor(P4, [{ code: "print('NT', 1)" }]), mode: "python" });
+    const r4 = await runIn(P4, "t-none");
+    const f4 = await call("workspace.read", { path: P4 });
+    const tab4 = await ev(`!!document.querySelector('#artifacts .tab[data-tab="${P4}"]')`);
+    ok(r4?.ended === "done" && r4.saved === "not saved: main" && r4.cells?.[0]?.out === "NT 1\n" && !tab4 && !JSON.stringify(f4.content.json.cells[0].outputs ?? []).includes("NT 1"),
+      "PR4: with no turn running, run_notebook is today's run: its result, nothing opened, nothing saved", { r4, tab4 });
+    // (PR5: the run held before its cells run; its tab closed meanwhile: the run ends, stopped, nothing saved)
+    // (made before the turn: a notebook the agent creates in its turn runs once by itself, which would save it)
+    const P5 = "/notes/pr-closed.ipynb";
+    await call("workspace.create", { path: P5, content: docFor(P5, [{ code: "print('CLOSED', 5)" }]), mode: "python" });
+    const t5 = `t${++turnN}`;
+    event(t5, { type: "turn_started" });
+    await sleep(300);
+    await ev(`(window.__runHold = (st) => st === "page" ? new Promise((r) => { window.__held = true; window.__rel = r; }) : undefined, true)`);
+    const p5 = runIn(P5, t5);
+    const held = await until(`window.__held === true`, 30000).catch(() => false);
+    await ev(`document.querySelector('#close').click()`);
+    const closed5 = await until(`!document.body.classList.contains('has-artifact')`, 10000).catch(() => false);
+    await ev(`(window.__rel?.(), window.__runHold = () => undefined, true)`);
+    const r5 = await p5;
+    const f5 = await call("workspace.read", { path: P5 });
+    ok(held && closed5 && r5?.ended === "stopped" && !JSON.stringify(f5.content.json.cells[0].outputs ?? []).includes("CLOSED 5"), "PR5: the pane closed while the run waits: the run ends, stopped, nothing saved", { held, closed5, r5 });
+    event(t5, { type: "turn_finished", outcome: "completed" });
+    // (the call's chat and turn (run.context): the pane runs only for the shown chat's running turn that made the call;
+    //  anything else is today's run, nothing opened, nothing saved)
+    const today = (r, f, out) => r?.ended === "done" && r.saved === "not saved: main" && r.cells?.[0]?.out === out && !JSON.stringify(f.content.json.cells[0].outputs ?? []).includes(out.trim());
+    const tabOf = (p) => ev(`!!document.querySelector('#artifacts .tab[data-tab="${p}"]')`);
+    // (PR6: a call that doesn't say its chat and turn (an agent without run.context), its chat's turn running)
+    const P6 = "/notes/pr-nocontext.ipynb";
+    await call("workspace.create", { path: P6, content: docFor(P6, [{ code: "print('NC', 6)" }]), mode: "python" });
+    const t6 = `t${++turnN}`;
+    event(t6, { type: "turn_started" });
+    await sleep(300);
+    const r6 = await call("workspace.run_notebook", { path: P6, timeout_s: 120 });
+    const f6 = await call("workspace.read", { path: P6 }), tab6 = await tabOf(P6);
+    ok(today(r6, f6, "NC 6\n") && !tab6, "PR6: a run that doesn't say its chat and turn is today's run: nothing opened, nothing saved", { r6, tab6 });
+    // (PR7: same chat, a call from its turn that has ended, landing after the next turn started)
+    event(t6, { type: "turn_finished", outcome: "completed" });
+    const t7 = `t${++turnN}`;
+    event(t7, { type: "turn_started" });
+    await sleep(300);
+    const r7 = await runIn(P6, t6);
+    const f7 = await call("workspace.read", { path: P6 }), tab7 = await tabOf(P6);
+    ok(today(r7, f7, "NC 6\n") && !tab7, "PR7: a call from the chat's earlier turn, after its next turn started: today's run, nothing opened, nothing saved", { r7, tab7 });
+    // (PR8: two chats each with a turn running; a call from the one in the background, the other shown)
+    const back = conv, tb = t7;
+    await converse();
+    const front = conv, P8 = "/notes/pr-background.ipynb";
+    await call("workspace.create", { path: P8, content: docFor(P8, [{ code: "print('BG', 8)" }]), mode: "python" });
+    // (made before the turn, as PR5's: a notebook the agent creates in its turn runs once by itself)
+    const P9 = "/notes/pr-switched.ipynb";
+    await call("workspace.create", { path: P9, content: docFor(P9, [{ code: "print('SW', 9)" }]), mode: "python" });
+    const P10 = "/notes/pr-turnended.ipynb";
+    await call("workspace.create", { path: P10, content: docFor(P10, [{ code: "print('TE', 10)" }]), mode: "python" });
+    const t8 = `t${++turnN}`;
+    event(t8, { type: "turn_started" });
+    await sleep(300);
+    const r8 = await runIn(P8, tb, back);
+    const f8 = await call("workspace.read", { path: P8 }), tab8 = await tabOf(P8);
+    const shown8 = await ev(`document.querySelector('#artifacts .tab.on')?.dataset.tab ?? null`);
+    ok(back !== front && today(r8, f8, "BG 8\n") && !tab8 && shown8 !== P8,
+      "PR8: two chats with turns running, a call from the one in the background: nothing opened, run or saved in the shown chat's pane (today's run)", { r8, tab8, shown8 });
+    // (and a call that pairs the background chat with the shown chat's turn: the pair, not either alone)
+    const r8b = await runIn(P8, t8, back);
+    const f8b = await call("workspace.read", { path: P8 }), tab8b = await tabOf(P8);
+    ok(today(r8b, f8b, "BG 8\n") && !tab8b, "PR8: a call that names the background chat with the shown chat's turn: today's run, nothing opened or saved", { r8b, tab8b });
+    // (PR10: the run held; its turn ends meanwhile, the chat still shown: the run ends, stopped, nothing saved)
+    await ev(`(window.__held = false, window.__runHold = (st) => st === "page" ? new Promise((r) => { window.__held = true; window.__rel = r; }) : undefined, true)`);
+    const p10 = runIn(P10, t8);
+    const held10 = await until(`window.__held === true`, 30000).catch(() => false);
+    event(t8, { type: "turn_finished", outcome: "completed" });
+    await sleep(300);
+    await ev(`(window.__rel?.(), window.__runHold = () => undefined, true)`);
+    const r10 = await p10;
+    const f10 = await call("workspace.read", { path: P10 });
+    ok(held10 && r10?.ended === "stopped" && !JSON.stringify(f10.content.json.cells[0].outputs ?? []).includes("TE 10"), "PR10: the turn ends while its run waits, the chat still shown: the run ends, stopped, nothing saved", { held10, r10 });
+    const t9 = `t${++turnN}`;
+    event(t9, { type: "turn_started" });
+    await sleep(300);
+    // (PR9: the run held; the person switches to another chat meanwhile: the run ends, stopped, nothing saved)
+    await ev(`(window.__held = false, window.__runHold = (st) => st === "page" ? new Promise((r) => { window.__held = true; window.__rel = r; }) : undefined, true)`);
+    const p9 = runIn(P9, t9);
+    const held9 = await until(`window.__held === true`, 30000).catch(() => false);
+    await ev(`document.querySelector('#new').click()`);
+    const left9 = await until(`!!document.querySelector('[data-try]')?.offsetParent`, 15000).catch(() => false);
+    await ev(`(window.__rel?.(), window.__runHold = () => undefined, true)`);
+    const r9 = await p9;
+    const f9 = await call("workspace.read", { path: P9 });
+    ok(held9 && left9 && r9?.ended === "stopped" && !JSON.stringify(f9.content.json.cells[0].outputs ?? []).includes("SW 9"), "PR9: the person switches chats while the run waits: the run ends, stopped, nothing saved", { held9, left9, r9 });
+    // (PR11: a notebook that asks to autorun (a reactive notebook's setting): the pane's isn't reactive, so the run is
+    //  plain, each code cell once, in order, its own result; an error ends it, the cells after it not run, nothing rerun)
+    await converse();
+    const P11 = "/notes/pr-reactive.ipynb";
+    await call("workspace.create", { path: P11, content: docFor(P11, [{ code: "x = 1\nprint('X', x)" }, { code: "raise ValueError('R11')" }, { code: "print('AFTER', x)" }], { autorun: "always" }), mode: "python" });
+    const t11 = `t${++turnN}`;
+    event(t11, { type: "turn_started" });
+    await sleep(300);
+    const r11 = await runIn(P11, t11);
+    const f11 = await call("workspace.read", { path: P11 });
+    const st11 = (r11?.cells ?? []).map((c) => c.status), n11 = f11.content.json.cells.map((c) => c.n ?? null);
+    ok(r11?.ended === "error" && st11.join() === "ok,error,skipped" && r11.cells[0].out === "X 1\n" && /R11/.test(r11.cells[1].out ?? "") && !JSON.stringify(f11.content.json.cells[2].outputs ?? []).includes("AFTER") && String(n11[0]) === "1",
+      "PR11: a notebook that asks to autorun runs plain in the pane: each cell once, in order, the error ends it, nothing after it run or rerun", { r11, n11 });
+    event(t11, { type: "turn_finished", outcome: "completed" });
+    event(t9, { type: "turn_finished", outcome: "completed" }, front);
+    event(tb, { type: "turn_finished", outcome: "completed" }, back);
   }
 
   // ======================================================================== a forged `here`: remote pictures wait for a click
@@ -2194,6 +2352,33 @@ try {
         for (let i = 0; i < 5; i++) await cycle();
         const n1 = await listeners();
         ok(n0.document >= 0 && n1.document === n0.document && n1.window === n0.window, "J9: a notebook pane under the journal opened and closed 5 more times leaves no listener behind (document, window)", { n0, n1 });
+      }
+      // J11: the notebook open in a notebook tab, the journal's writer; the agent's run_notebook from the chat: the pane
+      // follows the tab, so it can't run it there: today's run, its result returned, not "stopped". (Paired again first,
+      // with May run code, the journal already on: an earlier section may have left a grant without it)
+      {
+        await pair();
+        await converse();
+        // (made before the turn: a notebook the agent creates in its turn runs once by itself)
+        const path = "/notes/live-run.ipynb";
+        await call("workspace.create", { path, content: docFor(path, [{ code: "print('J11', 11)" }]), mode: "python" });
+        const ref = await refOf(path);
+        const tj = `t${++turnN}`;
+        event(tj, { type: "turn_started" });
+        const P = await tab(`${site}/?nb=${ref}`);
+        // (the person takes it over in the tab, a real click and a key there: the tab the journal's writer)
+        const ready = await tabReady(P);
+        await typeIn(P, " ");
+        const writer0 = await P.until(`!!(${NB}.store.ready && !${NB}.store.readOnly)`, 20000);
+        await send("Page.bringToFront");
+        const r = await call("workspace.run_notebook", { path, timeout_s: 120, conversation: conv, turn_id: tj });
+        const follows = await until(`document.querySelector('#artifacts .tab.on')?.dataset.tab === ${JSON.stringify(path)} && document.querySelector('${PANE} .nb-root .cell textarea')?.readOnly === true`, 10000).catch(() => false);
+        const bar = await barText();
+        const f = await call("workspace.read", { path });
+        ok(ready && writer0 && follows && !/gone/.test(bar) && r?.ended === "done" && r.saved === "not saved: main" && r.cells?.[0]?.out === "J11 11\n" && !JSON.stringify(f.content.json.cells[0].outputs ?? []).includes("J11 11"),
+          "J11: with a notebook tab the journal's writer, the pane follows it, and the agent's run from the chat is today's run: its result, not stopped", { ready, follows, bar, r, writer0, pane: await ev(`[document.querySelector('#artifacts .tab.on')?.dataset.tab ?? null, document.querySelector('${PANE} .nb-root .cell textarea')?.readOnly ?? null, document.querySelector('${PANE} .nb-root .cell .out')?.textContent ?? null]`), tab: await P.ev(`[${NB}.store.readOnly ?? null, !!${NB}.store.ready, document.querySelector("#cells .cell .out")?.textContent ?? null]`) });
+        event(tj, { type: "turn_finished", outcome: "completed" });
+        await P.close();
       }
     } finally {
       for (const x of tabs) await x.close().catch(() => {});
