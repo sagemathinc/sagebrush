@@ -330,6 +330,7 @@ jobs:
           node scripts/web-tests.mjs run checks.5
           node scripts/core-api-surface.mjs --check
           node dist/src/cli.js engine/py/test_matrix_checks.py
+          node dist/src/cli.js engine/py/test_sage_colors.py
           node scripts/size-budget.mjs --check
           node scripts/web-tests.mjs run checks.6
           node scripts/heap-budget.mjs --check
@@ -1738,6 +1739,7 @@ jobs:
           python3 engine/py/test_workspace_tools.py
           python3 engine/py/test_latex_comments.py
           python3 engine/py/test_matrix_checks.py
+          python3 engine/py/test_sage_colors.py
           python3 engine/py/test_pairing.py
           python3 engine/py/test_chat.py
           python3 engine/py/test_sage_names.py
