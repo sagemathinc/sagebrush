@@ -40,12 +40,17 @@ pub enum Family {
     Move,
     /// Reductions mod p (nmod, CRT).
     ModArith,
+    /// Linear limb addition and subtraction with carry (one carry chain;
+    /// not a copy's speed).
+    AddSub,
+    /// A reply walk: one unit per output token, formatting included.
+    Walk,
     /// The rest (kept small: untagged charge sites count here).
     Other,
 }
 
 /// The number of [`Family`] values.
-pub const FAMILIES: usize = 8;
+pub const FAMILIES: usize = 10;
 
 const _: () = assert!(Family::Other as usize + 1 == FAMILIES);
 
