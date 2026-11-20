@@ -7,7 +7,9 @@
 //   2. ✕ with the disk's write failing: the page stays, saying why;
 //   3. File ▸ Save a copy with the disk held: the copy made, the page stays, typing back, and a second copy may be made;
 //   4. the control: nothing held, ✕ leaves with the edit on disk;
-//   5. ✕ waiting for the disk, then File ▸ Save a copy: nothing more done (no copy), and once ✕ is refused, typing back.
+//   5. ✕ waiting for the disk, then File ▸ Save a copy: nothing more done (no copy), and once ✕ is refused, typing back;
+//   6. the other way round: ✕ while the copy is being made does nothing, and the copy opens;
+//   7. a navigation reported but not made: after 30 s a way out may be tried again (said), typing still off; then ✕ leaves.
 // Before the host's navigate, the page left at once: the edit in the workspace, its write to disk dropped with the page.
 //   CHROME=google-chrome bun web/code/test-code-leave-disk.mjs
 import { spawn } from "node:child_process";
@@ -45,7 +47,8 @@ g.ws = ws;
 addEventListener("pagehide", () => sessionStorage.setItem("left-" + run, JSON.stringify({ from: location.search, disk: Object.fromEntries(g.disk), pending: g.m.pending })));
 const e = (await ws.stat("/a.py").catch(() => null)) ?? (await ws.create("/a.py", { content: new TextEncoder().encode("base\\n") }));
 // (index.html's leaveTo for the code page, with a shorter wait: the page left only once the disk has its changes)
-const navigate = async (to: string) => { if (!(await beforeLeave(g.m, undefined, 1500))) return false; location.assign(to); return true; };
+// (g.cancel: the navigation reported made, but not made, as one the browser or the app's guard cancels)
+const navigate = async (to: string) => { if (!(await beforeLeave(g.m, undefined, 1500))) return false; if (!g.cancel) location.assign(to); return true; };
 const root = document.createElement("div"); document.body.append(root);
 await mount(root, { ws, fid: e.fid!, open() {}, openFiles() {}, examples: async () => false, renderFileMenu, navigate });
 g.ready = true;
@@ -144,6 +147,34 @@ try {
   const raced = await ev(`window.ws.read("/a (copy).py").then(() => true, () => false)`);
   check(!raced && s.at === "?run=5" && !(await left(5)) && s.readOnly === false, "✕ waiting for the disk, then Save a copy: no copy made, and once ✕ is refused, the page stays with typing back: " + JSON.stringify({ raced, ...s }));
   await ev("(window.hold = false, window.release(), 1)");
+
+  // 6. ✕ while a copy is made
+  await open(6, "copy first\n");
+  await ev(`(window.__sbCodeBeforeCopyCreate = () => new Promise((r) => (window.releaseCopy = r)), 1)`);
+  await ev(`(document.querySelector('.code-page [data-f="c-copy"]').click(), 1)`);
+  await until("!!window.releaseCopy", 3000);
+  await ev(`(document.querySelector(".code-page .code-close").click(), 1)`);
+  await sleep(2000);
+  s = await state();
+  check(s.at === "?run=6" && !(await left(6)) && s.banner === "" && s.readOnly === true, "✕ while a copy is made: nothing done (no drain, nothing said), typing still off: " + JSON.stringify(s));
+  await ev("(window.releaseCopy(), 1)");
+  check(await until(`!!sessionStorage.getItem("left-6")`), "…and the copy opens");
+  l = await left(6);
+  check(l?.disk?.["/a (copy).py"] === "copy first\n" && l.pending === 0, "…on disk: " + JSON.stringify(l));
+
+  // 7. a navigation reported but not made
+  await open(7, "cancelled\n");
+  await ev("(window.cancel = true, 1)");
+  await ev(`(document.querySelector(".code-page .code-close").click(), 1)`);
+  await sleep(2000);
+  s = await state();
+  check(s.at === "?run=7" && s.readOnly === true, "a navigation reported but not made: typing off meanwhile: " + JSON.stringify(s));
+  const said = await until(`/hasn't been left yet/.test(document.querySelector(".code-page .code-status")?.textContent ?? document.body.innerText)`, 35000);
+  s = await state();
+  check(said && s.readOnly === true, "…after 30 s, said, typing still off: " + JSON.stringify(s));
+  await ev("(window.cancel = false, 1)");
+  await ev(`(document.querySelector(".code-page .code-close").click(), 1)`);
+  check(await until(`!!sessionStorage.getItem("left-7")`), "…and ✕ may be tried again: it leaves");
 
   const fails = results.filter(([ok]) => !ok);
   console.log(fails.length ? `FAIL: ${fails.length} of ${results.length} checks` : `ok: the code page leaves the desktop app's pages only once the disk has its changes, ${results.length} checks`);
