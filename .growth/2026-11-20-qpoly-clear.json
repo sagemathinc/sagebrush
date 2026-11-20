@@ -1,0 +1,11 @@
+{
+ "v": 1,
+ "reason": "Clearing denominators in Q[x] in the engine (qpoly_clear): arith::qpoly's admission, scaling and streamed reply and the op row, in the engine module and the CLI that embeds it; sagebrush.poly.qclear and Sage mode's _integral() through it in the Sage chunk. CI's size row for this change on its merge with the track (57ffb627): engine/sagebrush-engine.wasm +9479, cli/pyjs.cjs +13592, engine/lib/sage.pre +5196, engine/lib/sage.src +2482, cli/lib.gen.js +984; each marked +64 over that. The sage.pre and sage.src ceilings are renewed to the measured size + 64.",
+ "bytes": {
+  "cli/lib.gen.js": 1048,
+  "cli/pyjs.cjs": 13656,
+  "engine/lib/sage.pre": 5260,
+  "engine/lib/sage.src": 2546,
+  "engine/sagebrush-engine.wasm": 9543
+ }
+}
