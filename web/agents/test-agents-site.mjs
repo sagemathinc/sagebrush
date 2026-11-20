@@ -4,7 +4,7 @@
 // web/site/public/agents, byte for byte: no tarball (the help box points at the reviewed tarball's own URL) and nothing
 // left from an earlier build.  Its policy: /agents/* in the site's _headers, frame-ancestors 'none'.
 //   bun web/build.ts && node web/agents/test-agents-site.mjs
-import { existsSync, readdirSync, readFileSync, statSync } from "node:fs";
+import { existsSync, lstatSync, readdirSync, readFileSync, statSync } from "node:fs";
 import { join } from "node:path";
 import { fileURLToPath } from "node:url";
 
@@ -38,6 +38,59 @@ const RELEASE_SHA256 = {
 const tgzVersions = [...new Set([...(html + conn0).matchAll(/sagebrush-agent-([^/"<\s]*)\.tgz/g)].map((m) => m[1]))];
 ok(tgzVersions.length === 1 && JSON.stringify(tgzVersions) === JSON.stringify(rc.v), `every .tgz link on both pages names the same one version, the one the pages name: ${JSON.stringify(tgzVersions)}`);
 ok(RELEASE_SHA256[rc.v[0]] !== undefined && JSON.stringify(rc.sha) === JSON.stringify([RELEASE_SHA256[rc.v[0]]]), `the connect page's sha256 is the reviewed one for sagebrush-agent ${rc.v[0]}: ${JSON.stringify(rc.sha)}`);
+// (the docs the vendored agent's sagebrush_docs verb may fetch, its lib/docs-paths.json: each one a file this site
+//  serves, on sagebrush.space, so the agent's list and the site can't drift apart. The agent is the release these pages
+//  name, through one chain: the pages' version (rc.v) -> that release's reviewed SHA-256 (RELEASE_SHA256) -> the
+//  fixture engine/py/test_remote_agent.py names (its version and its pin, both equal to those) -> the fixture's bytes
+//  (hashed) -> the docs list read out of them.)
+/** A docs path's problem, or null: it must be a canonical URL path (one URL parsing leaves byte for byte, with no query
+ *  or fragment, so no dot, encoded-dot or doubled-slash segment), naming a regular file inside `distDir` (lstat: not a
+ *  link or a folder) of at most 512 KiB. */
+function docsPathProblem(p, distDir) {
+  if (typeof p !== "string" || !/^\/[A-Za-z0-9._~-]+(?:\/[A-Za-z0-9._~-]+)*$/.test(p)) return "not a plain URL path";
+  let u;
+  try { u = new URL(p, "https://sagebrush.space"); } catch { return "not a URL path"; }
+  if (u.pathname !== p || u.search || u.hash || p.split("/").some((seg) => seg === "." || seg === "..")) return "not canonical";
+  const f = join(distDir, p);
+  if (!f.startsWith(distDir + "/")) return "outside web/dist";
+  let st;
+  try { st = lstatSync(f); } catch { return "not served"; }
+  if (!st.isFile()) return "not a regular file";
+  if (st.size > 512 * 1024) return "over 512 KiB";
+  return null;
+}
+{
+  const { createHash } = await import("node:crypto");
+  const { execFileSync } = await import("node:child_process");
+  const py = join(web, "..", "engine", "py");
+  const pins = readFileSync(join(py, "test_remote_agent.py"), "utf8");
+  const name = /^VENDORED = os\.path\.join\(HERE, "fixtures", "sagebrush-agent-([0-9]+\.[0-9]+\.[0-9]+)\.tgz"\)$/m.exec(pins);
+  const version = name?.[1], pin = /^VENDORED_SHA256 = "([0-9a-f]{64})"$/m.exec(pins)?.[1];
+  const tgz = join(py, "fixtures", `sagebrush-agent-${version}.tgz`);
+  const chain = { pages: rc.v[0], fixture: version, release: RELEASE_SHA256[rc.v[0]], pin };
+  const bound = version === rc.v[0] && typeof pin === "string" && pin === RELEASE_SHA256[version] && existsSync(tgz) && createHash("sha256").update(readFileSync(tgz)).digest("hex") === pin;
+  ok(bound, `the vendored agent is the release these pages name: its version, its pin and its bytes all that release's ${JSON.stringify(chain)}`);
+  let list = null;
+  if (bound) { try { list = JSON.parse(execFileSync("tar", ["-xzOf", tgz, "package/lib/docs-paths.json"], { encoding: "utf8", timeout: 30000 })); } catch { list = null; } }
+  const paths = Array.isArray(list?.paths) ? list.paths : [];
+  const distDir = join(web, "dist");
+  const bad = paths.map((p) => [p, docsPathProblem(p, distDir)]).filter(([, why]) => why);
+  ok(bound && list?.host === "sagebrush.space" && paths.length > 0 && bad.length === 0, `…its docs (lib/docs-paths.json, ${paths.length} paths on ${list?.host}) are each a regular file this site serves, at most 512 KiB: ${JSON.stringify(bad)}`);
+  // (the path rule itself, against a folder of its own: what it refuses, and what it takes)
+  const { mkdtempSync, mkdirSync, writeFileSync, symlinkSync, rmSync } = await import("node:fs");
+  const { tmpdir } = await import("node:os");
+  const d = mkdtempSync(join(tmpdir(), "sb-docs-paths-"));
+  try {
+    writeFileSync(join(d, "ok.md"), "x");
+    mkdirSync(join(d, "folder"));
+    symlinkSync(join(d, "ok.md"), join(d, "link.md"));
+    writeFileSync(join(d, "big.md"), "x".repeat(512 * 1024 + 1));
+    writeFileSync(join(d, "a%41.md"), "x"); // (a real file whose name has a percent escape: URL parsing keeps "/a%41.md", a server decodes it)
+    const refused = { "/folder": "a folder", "/link.md": "a symlink", "/big.md": "over 512 KiB", "/missing.md": "not served", "/a/../ok.md": "a dot-dot segment", "/./ok.md": "a dot segment", "/%2e%2e/ok.md": "an encoded-dot segment", "//ok.md": "a doubled slash", "/ok.md?x": "a query", "/ok.md#x": "a fragment", "ok.md": "relative", "/ok md": "a space", "/a%41.md": "a percent escape" };
+    const taken = Object.entries(refused).filter(([p]) => docsPathProblem(p, d) === null).map(([, what]) => what);
+    ok(docsPathProblem("/ok.md", d) === null && taken.length === 0, `…the path rule takes a regular file and refuses ${Object.values(refused).join(", ")}: ${JSON.stringify(taken)}`);
+  } finally { rmSync(d, { recursive: true, force: true }); }
+}
 // (William, Nov 8: no wall of text in the app: the help box is one short line, its command, and Learn more)
 const helpText = (/<div id="help"[^>]*>([\s\S]*?)<\/div>/.exec(html)?.[1] ?? "").replace(/<pre>[\s\S]*?<\/pre>/g, "").replace(/<[^>]+>/g, "").replace(/\s+/g, " ").trim();
 ok(helpText.length > 0 && helpText.length <= 100 && /Learn more/.test(helpText), `the help box is one short line with Learn more (${helpText.length} characters): ${helpText}`);
