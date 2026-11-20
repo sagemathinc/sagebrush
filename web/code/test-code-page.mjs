@@ -377,10 +377,24 @@ try {
   await sleep(1500);
   check(await ev(`${text("/demo.py")}`) === "theirs\n", "…their change is never written over");
   check(await ev(`[...document.querySelectorAll(".code-page .code-bar button")].map((b) => b.textContent).join("|") === "Reload (theirs)|Save mine as a copy"`), "…offering Reload (theirs) or Save mine as a copy");
+  // (no question on the way: the copy holds the edits; a "no" to one would strand the person on the stopped original)
+  dialogAccept = false;
+  const askedCopy = dialogs.length;
   await ev(`(() => { [...document.querySelectorAll(".code-page .code-bar button")].find((b) => b.textContent === "Save mine as a copy").click(); return 1; })()`);
   check(await until(`${text("/demo (copy).py")}.then((s) => s === "mine\\n").catch(() => false)`, 10000), "…Save mine as a copy: a new file beside it, with the text from here");
   // (and it opens the copy here: waited for, so the page's own navigation is over before the test navigates again)
-  check(await until(`${C}?.path === "/demo (copy).py"`, 15000), "…and opens the copy here");
+  check(await until(`${C}?.path === "/demo (copy).py"`, 15000) && dialogs.length === askedCopy, "…and opens the copy here, asking nothing: " + JSON.stringify(dialogs.slice(askedCopy).map((d) => d.message)));
+  dialogAccept = true;
+
+  // (Ctrl+Alt+N on the code page: its own New notebook, by its way out (the edit saved first), never the hidden
+  //  notebook page's underneath)
+  check(await openCode("/demo.py"), "(the page again, for Ctrl+Alt+N)");
+  await ev(`${C}.setMode("edit").then(() => 1)`);
+  await until(`!!document.querySelector(".code-page .code-edit textarea") && !${C}.stopped()`);
+  await ev(`(() => { const t = document.querySelector(".code-page .code-edit textarea"); t.value = "before new\\n"; t.dispatchEvent(new Event("input")); return 1; })()`);
+  await ev(`(document.dispatchEvent(new KeyboardEvent("keydown", { key: "n", code: "KeyN", ctrlKey: true, altKey: true, bubbles: true })), 1)`);
+  check(await until(`/[?&]nb=/.test(location.search) && !document.querySelector(".code-page")`, 15000), "Ctrl+Alt+N on the code page: a new notebook, on its own page");
+  check(await until(`${text("/demo.py")}.then((s) => s === "before new\\n").catch(() => false)`, 10000), "…the edit saved first");
 
   // following a change made elsewhere, in Edit with nothing unsaved: followed (the control), and an edit typed while
   // that change is read keeps the draft and stops following (astra on #773: the read's bytes were installed over it)

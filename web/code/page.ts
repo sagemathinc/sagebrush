@@ -19,6 +19,7 @@ import { freePath, nameOf, parentOf, safeName, splitExt } from "../workspace/pat
 import { tokensOf, drawTokens } from "./tokens";
 import { langOf, type Lang } from "./langs";
 import { EDIT_BYTES, editableOf } from "./edit";
+import { codeUrl } from "./url";
 
 export const CODE = { openBytes: 4 * 2 ** 20, editBytes: EDIT_BYTES, viewBytes: 2 ** 20, liveBytes: 256 * 1024, saveMs: 600 };
 /** What the notebook page gives the code page: its workspace and the file's id; how to open what is chosen here; and
@@ -236,6 +237,8 @@ export async function mount(root: HTMLElement, host: Host): Promise<void> {
   leave = async (to = "/") => { if (await mayLeave()) go(to); };
   // (decided to leave, with a step still to take first (a notebook made, this file moved to Trash): no typing until the
   //  navigation, as what's typed then would be dropped; typing again if the step fails)
+  // (the copy just saved holds the edits: opened straight away, never asking whether to drop them)
+  const openCopy = (e: Entry) => { if (e.fid) go(codeUrl(e.fid)); else host.open(e, "here"); };
   const thenGo = async (step: () => Promise<string>) => {
     const was = ta.readOnly; ta.readOnly = true;
     try {
@@ -250,7 +253,7 @@ export async function mount(root: HTMLElement, host: Host): Promise<void> {
     say("Not saved");
     const reload = el("button", "", "Reload (theirs)"), copy = el("button", "", "Save mine as a copy");
     reload.onclick = () => { if (dirty() && !confirm("Reload this file? Your unsaved edits here are dropped.")) return; void mount(root, host); };
-    copy.onclick = () => void saveCopy(mode === "edit" ? ta.value : text).then((e) => { if (e) host.open(e, "here"); });
+    copy.onclick = () => void saveCopy(mode === "edit" ? ta.value : text).then((e) => { if (e) openCopy(e); });
     bar.replaceChildren(el("span", "", why), reload, copy);
     bar.hidden = false;
   }
@@ -314,7 +317,7 @@ export async function mount(root: HTMLElement, host: Host): Promise<void> {
     "c-newfolder": async () => { const n = prompt("A new folder, at the top of your files: its name", "New folder"); if (n?.trim()) await ws.mkdir("/" + safeName(n.trim())); },
     "c-examples": async () => { if (!(await host.examples())) void leave(); },
     "c-open": () => host.openFiles(),
-    "c-copy": async () => { await flush(); const e = await saveCopy(mode === "edit" ? ta.value : text); if (e) host.open(e, "here"); },
+    "c-copy": async () => { await flush(); const e = await saveCopy(mode === "edit" ? ta.value : text); if (e) openCopy(e); },
     "c-rename": async () => {
       await flush();
       const [base, ext] = splitExt(nameOf(path));

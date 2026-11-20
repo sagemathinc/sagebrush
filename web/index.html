@@ -3736,6 +3736,8 @@ document.addEventListener("keydown", (e) => {
   // (the LaTeX editor's page over this one: its own File menu answers them, never both: one notebook a Ctrl+Alt+N)
   if (!it || document.querySelector(".tex-page")) return;
   e.preventDefault();
+  // (the code page over this one: its own File menu's item, which leaves it by its way out)
+  if (codePageUp) return void document.querySelector(`[data-f="${it === "open" ? "c-open" : "c-new"}"]`)?.click();
   fileMenu.querySelector(`[data-item="${it}"]:not([disabled])`)?.click();
 });
 // (the ⋯ menu's items have their own handlers; a pick closes it)
@@ -3956,6 +3958,8 @@ $("#boardbtn").onclick = () => toBoard("/board/?recent=" + encodeURIComponent(nb
 // (to the board, or another page (`what` names it), once this notebook is saved, every change of it; not saved:
 // it stays open, and says so, CORR-7F9-1)
 async function toBoard(url, what = "the whiteboard") {
+  // (from the code page: by its way out, which saves its edits first)
+  if (codePageUp) return void leaveCodePage(url);
   notLeft = "";
   try {
     await nb.saved();
@@ -4420,6 +4424,7 @@ async function uploadHere(list, folder) {
     const e = r.made[0];
     // (a board brought in from a file: its code waits for the person; what was said carried to its page)
     if (e.kind === "board") { pauseBoard(e.ref); carryNotice(refused); return openEntry(e); }
+    if (codePageUp) return openEntry(e);
     saveNow();
     return openId(e.ref).then(() => { wsTrackCurrent(); if (refused) statusEl.textContent = refused; }, sayNotLeft);
   }
@@ -4441,7 +4446,7 @@ async function openAs(e, as) {
     const made = await convertCopy(ws, e, "notebook", { maxBytes: LIMITS.maxBoardBytes, mode: nb.mode, myst: fromMyst, said: (m) => { said = m; } });
     wsBrowser?.refresh();
     // (what was said, after the notebook opened: its own status lines come first)
-    if (!said) return openEntry(made);
+    if (!said || codePageUp) return openEntry(made);
     saveNow();
     await openId(made.ref).then(() => { wsTrackCurrent(); statusEl.textContent = said; }, sayNotLeft);
   } catch (err) { statusEl.textContent = `could not open ${nameOf(e.path)} as a notebook: ${err?.message ?? err}`; }
@@ -5164,6 +5169,9 @@ const pairAgent = (w) => (agentPairing ??= import(new URL("sagebrush-agent.js", 
 // (a notebook an agent created, opened as an automatic open: saved first as any switch, and dropped, unsaid, if the person
 // opened another meanwhile; any other failure said as any open's)
 function agentOpen(ref, intent) {
+  // (under the code page a notebook would open hidden, and leaving would interrupt the person's editing: it stays in
+  // Files, not opened)
+  if (codePageUp) return Promise.resolve(false);
   saveNow();
   return openId(ref, null, intent).then((ok) => { wsTrackCurrent(); return ok; }, (e) => { if (!e?.navWon) sayNotLeft(e); return false; });
 }
