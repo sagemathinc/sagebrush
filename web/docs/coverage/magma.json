@@ -5,7 +5,7 @@
       "id": "language",
       "title": "The Magma language: statements, functions and errors",
       "catalog": {
-        "files": [],
+        "files": ["sagebrush.json"],
         "tags": []
       },
       "suites": [

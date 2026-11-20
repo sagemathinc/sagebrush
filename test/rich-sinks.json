@@ -114,11 +114,7 @@
   }
  },
  "sinks": {
-  "web/agents/page.ts :: changed :: saved.insertAdjacentHTML(\"afterend\", ` <a class=\"open-full\" href=\"/w${esc(path)}\" target=\"_blank\" rel=\"noopener\">Open in Sagebrush</a>`); #0": {
-   "kind": "host",
-   "owner": "host"
-  },
-  "web/agents/page.ts :: keepFocus :: h.el.innerHTML = `<div class=\"file-path\">${esc(a.path)} <span class=\"saved\"></span> <a class=\"open-full\" href=\"/w${esc(a.path)}\" target=\"_blank\" rel=\"noopener\">Open in Sagebrush</a></div><div class=\"file-body\"></div>`; #0": {
+  "web/agents/page.ts :: keepFocus :: h.el.innerHTML = `<div class=\"file-path\">${esc(a.path)} <span class=\"saved\"></span> </div><div class=\"file-body\"></div>`; #0": {
    "kind": "host",
    "owner": "host"
   },
@@ -164,10 +160,6 @@
    "owner": "host"
   },
   "web/agents/page.ts :: renderHeader :: who.innerHTML = `<span class=\"conn on\"></span>${esc(agentName())} <small>on your computer</small>`; #0": {
-   "kind": "host",
-   "owner": "host"
-  },
-  "web/agents/page.ts :: renderHeader :: who.innerHTML = `<span class=\"conn wait\"></span>${esc(agentName())} <small>connected: allow it in the dialog</small>`; #0": {
    "kind": "host",
    "owner": "host"
   },

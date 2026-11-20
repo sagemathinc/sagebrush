@@ -7,7 +7,7 @@ The app's page (the notebook) has its own notices, THIRD-PARTY-NOTICES.txt besid
 
 == Derived code and data ==
 
-== Rust crates compiled into the app (403) ==
+== Rust crates compiled into the app (402) ==
 
 Sagebrush's own crates: sagebrush-app. The list includes dependencies on every platform and those used only while compiling (procedural macros), so it covers more than any one build contains.
 
@@ -302,7 +302,6 @@ tauri-codegen 2.7.1: Apache-2.0 OR MIT
 tauri-macros 2.7.1: Apache-2.0 OR MIT
 tauri-plugin-dialog 2.8.1: Apache-2.0 OR MIT
 tauri-plugin-fs 2.6.0: Apache-2.0 OR MIT
-tauri-plugin-localhost 2.4.0: Apache-2.0 OR MIT
 tauri-runtime 2.12.1: Apache-2.0 OR MIT
 tauri-runtime-wry 2.12.1: Apache-2.0 OR MIT
 tauri-utils 2.10.1: Apache-2.0 OR MIT
@@ -6390,7 +6389,7 @@ IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER
 DEALINGS IN THE SOFTWARE.
 
 ------------------------------------------------------------------------
-Used by: fdeflate 0.3.7 (LICENSE-APACHE), field-offset 0.3.6 (LICENSE-APACHE), miniz_oxide 0.8.9 (LICENSE-APACHE.md), miniz_oxide 0.9.1 (LICENSE-APACHE.md), num-conv 0.2.2 (LICENSE-Apache), pin-project-lite 0.2.17 (LICENSE-APACHE), portable-atomic 1.15.0 (LICENSE-APACHE), portable-atomic-util 0.2.8 (LICENSE-APACHE), raw-window-handle 0.6.2 (LICENSE-APACHE.md), sync_wrapper 1.0.2 (LICENSE), tauri 2.12.1 (LICENSE-APACHE-2.0), tauri-codegen 2.7.1 (LICENSE-APACHE-2.0), tauri-macros 2.7.1 (LICENSE-APACHE-2.0), tauri-plugin-dialog 2.8.1 (LICENSE_APACHE-2.0), tauri-plugin-fs 2.6.0 (LICENSE_APACHE-2.0), tauri-plugin-localhost 2.4.0 (LICENSE_APACHE-2.0), tauri-runtime 2.12.1 (LICENSE-APACHE-2.0), tauri-runtime-wry 2.12.1 (LICENSE-APACHE-2.0), tauri-utils 2.10.1 (LICENSE-APACHE-2.0), time 0.3.55 (LICENSE-Apache), time-core 0.1.9 (LICENSE-Apache), time-macros 0.2.32 (LICENSE-Apache)
+Used by: fdeflate 0.3.7 (LICENSE-APACHE), field-offset 0.3.6 (LICENSE-APACHE), miniz_oxide 0.8.9 (LICENSE-APACHE.md), miniz_oxide 0.9.1 (LICENSE-APACHE.md), num-conv 0.2.2 (LICENSE-Apache), pin-project-lite 0.2.17 (LICENSE-APACHE), portable-atomic 1.15.0 (LICENSE-APACHE), portable-atomic-util 0.2.8 (LICENSE-APACHE), raw-window-handle 0.6.2 (LICENSE-APACHE.md), sync_wrapper 1.0.2 (LICENSE), tauri 2.12.1 (LICENSE-APACHE-2.0), tauri-codegen 2.7.1 (LICENSE-APACHE-2.0), tauri-macros 2.7.1 (LICENSE-APACHE-2.0), tauri-plugin-dialog 2.8.1 (LICENSE_APACHE-2.0), tauri-plugin-fs 2.6.0 (LICENSE_APACHE-2.0), tauri-runtime 2.12.1 (LICENSE-APACHE-2.0), tauri-runtime-wry 2.12.1 (LICENSE-APACHE-2.0), tauri-utils 2.10.1 (LICENSE-APACHE-2.0), time 0.3.55 (LICENSE-Apache), time-core 0.1.9 (LICENSE-Apache), time-macros 0.2.32 (LICENSE-Apache)
 ------------------------------------------------------------------------
 
 Apache License
@@ -11798,7 +11797,7 @@ PackageDownloadLocation: git+ssh://github.com/tauri-apps/tao.git
 Creator: Person: Daniel Thompson-Yvetot
 
 ------------------------------------------------------------------------
-Used by: tauri 2.12.1 (LICENSE-MIT), tauri-codegen 2.7.1 (LICENSE-MIT), tauri-macros 2.7.1 (LICENSE-MIT), tauri-plugin-dialog 2.8.1 (LICENSE_MIT), tauri-plugin-fs 2.6.0 (LICENSE_MIT), tauri-plugin-localhost 2.4.0 (LICENSE_MIT), tauri-runtime 2.12.1 (LICENSE-MIT), tauri-runtime-wry 2.12.1 (LICENSE-MIT), tauri-utils 2.10.1 (LICENSE-MIT)
+Used by: tauri 2.12.1 (LICENSE-MIT), tauri-codegen 2.7.1 (LICENSE-MIT), tauri-macros 2.7.1 (LICENSE-MIT), tauri-plugin-dialog 2.8.1 (LICENSE_MIT), tauri-plugin-fs 2.6.0 (LICENSE_MIT), tauri-runtime 2.12.1 (LICENSE-MIT), tauri-runtime-wry 2.12.1 (LICENSE-MIT), tauri-utils 2.10.1 (LICENSE-MIT)
 ------------------------------------------------------------------------
 
 MIT License
@@ -11824,7 +11823,7 @@ OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE
 SOFTWARE.
 
 ------------------------------------------------------------------------
-Used by: tauri-plugin-dialog 2.8.1 (LICENSE.spdx), tauri-plugin-fs 2.6.0 (LICENSE.spdx), tauri-plugin-localhost 2.4.0 (LICENSE.spdx)
+Used by: tauri-plugin-dialog 2.8.1 (LICENSE.spdx), tauri-plugin-fs 2.6.0 (LICENSE.spdx)
 ------------------------------------------------------------------------
 
 SPDXVersion: SPDX-2.1

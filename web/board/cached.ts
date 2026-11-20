@@ -349,7 +349,7 @@ export function cachedStore(remote: RemoteBoard, key: string, cache: DocCache = 
   // edit it made (when made), and each document given it, once it says it is
   // shown.  The copy may be ahead of what an edit was made from (documents
   // given and not yet shown, CORR-891-3): the edit is merged with it.
-  const listeners = new Set<(d: BoardDoc, notice?: string) => void | Promise<void>>();
+  const listeners = new Set<(d: BoardDoc, notice?: string) => unknown>();
   let view: BoardDoc | null = null;
   const unsent: [BoardDoc, string | undefined][] = [];
   let showing: Promise<unknown> = Promise.resolve();

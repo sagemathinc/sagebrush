@@ -39,7 +39,8 @@ export const NOT_ENABLED = "Connecting a computer isn't enabled for your account
 export async function listComputers(f: typeof fetch = fetch): Promise<{ available: boolean; runners: Runner[] }> {
   const r = await f("/api/remote/v1/peers", { credentials: "same-origin", headers: { accept: "application/json" } });
   if (r.status === 401 || r.status === 403) throw Object.assign(new Error("sign in to see them"), { signedOut: true });
-  if (!r.ok) throw new Error(`this site can't list your computers (HTTP ${r.status})`);
+  // (404: a site without computers at all, a local one: marked absent, so a list that is only an offer can leave itself out)
+  if (!r.ok) throw Object.assign(new Error(`this site can't list your computers (HTTP ${r.status})`), r.status === 404 ? { absent: true } : {});
   const j = await r.json().catch(() => null);
   const peers = Array.isArray(j?.peers) ? j.peers : [];
   const runners = peers

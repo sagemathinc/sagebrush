@@ -8,6 +8,8 @@
 // `artifact` (a document, file or diff the turn produced, shown beside the
 // chat).
 
+import { webSummary } from "../agent-egress";
+
 export type TurnOutcome = "completed" | "interrupted" | "error";
 
 // One event of the stream. `seq` is per thread, strictly increasing by one.
@@ -31,7 +33,7 @@ export type TurnEvent = { seq: number; turn_id: string } & (
       diff?: { path: string; before: string; after: string };
     }
   | { type: "attention"; id: string; kind: string; state: "open" | "approved" | "denied"; title: string; summary?: string; detail?: string; instance?: string }
-  | { type: "artifact"; id: string; kind: "markdown" | "code" | "diff" | "notebook"; title: string; lang?: string; body: string; path?: string }
+  | { type: "artifact"; id: string; kind: "markdown" | "code" | "diff" | "notebook" | "board"; title: string; lang?: string; body: string; path?: string }
   | { type: "turn_usage"; usage: { input_tokens: number; output_tokens: number } }
   | { type: "turn_error"; code: string; message: string }
   | { type: "turn_finished"; outcome: TurnOutcome; code?: string }
@@ -44,9 +46,17 @@ export interface UserEntry {
   kind: "user";
   id: string;
   text: string;
-  // "sent": to the agent now; "queued": after the running turn; "note": never sent
-  mode: "sent" | "queued" | "note";
+  // "sent": to the agent now; "queued": after the running turn; "note": never sent; "steer": into the running turn
+  mode: "sent" | "queued" | "note" | "steer";
   time: number;
+  // (a steer's receipt, as the agent says it: "steering" (it went in), "delivered" (Claude took it), "queued" (it runs
+  //  next instead, with why: "ended", the turn ended first; "codex", that agent takes it after the turn; "idle")
+  //  and, on the page: "rejected", the agent refused it (chat.rejected: its turn ended at a grant's end); "delivered" and
+  //  "rejected" are final)
+  receipt?: "steering" | "delivered" | "queued" | "rejected";
+  receipt_reason?: string;
+  // (a steer still without a receipt when a turn ended: no longer said to be on its way)
+  settled?: boolean;
 }
 
 export interface ToolCall {
@@ -69,11 +79,18 @@ export interface Attention {
   summary?: string;
   detail?: string; // all of the request's arguments, for the person to review
   instance?: string; // (the page's own token for this card, which its click gives back: agent-cards.ts)
+  // (a web card's, agent-egress.ts: its fixed sentences, the model's reason as shown, which buttons it offers and the
+  //  words on its Allow buttons; a card without them is the two-button Allow / Deny)
+  body?: string;
+  reason?: string;
+  buttons?: "deny" | "two" | "three";
+  allow?: string;
+  turn_label?: string;
 }
 
 export interface Artifact {
   id: string;
-  kind: "markdown" | "code" | "diff" | "notebook";
+  kind: "markdown" | "code" | "diff" | "notebook" | "board";
   title: string;
   lang?: string;
   body: string;
@@ -104,6 +121,9 @@ export interface Turn {
   finished?: number;
   // set for a turn of an agent on the person's computer (else the scripted demo's)
   agent?: string;
+  // the connection to its agent was lost while it ran (a reload, a navigation, a dropped pairing); the agent's log
+  // says how it went once the page is paired again (chat.resume), and its turn_finished clears this
+  away?: true;
 }
 
 export interface Thread {
@@ -112,6 +132,10 @@ export interface Thread {
   entries: (UserEntry | Turn)[];
   artifacts: Artifact[];
   applied_seq: number;
+  // the agent's own numbering (its log's, chat.resume): the last number applied here, and the run of the agent it
+  // came from; the page's applied_seq above is its own, separate from these
+  agent_seq?: number;
+  agent_instance?: string;
 }
 
 export function newThread(id: string, title: string): Thread {
@@ -140,7 +164,7 @@ function messagePart(turn: Turn, id: string) {
 // a turn made here (null prototype) and in one kept from before (JSON's, an ordinary object) alike.
 export const TOOL_STATUSES = ["running", "ok", "error", "unknown"] as const;
 export const ATTENTION_STATES = ["open", "approved", "denied"] as const;
-export const ARTIFACT_KINDS = ["markdown", "code", "diff", "notebook"] as const;
+export const ARTIFACT_KINDS = ["markdown", "code", "diff", "notebook", "board"] as const;
 const OUTCOMES: readonly TurnOutcome[] = ["completed", "interrupted", "error"];
 const oneOf = <T extends string>(v: unknown, xs: readonly T[]): v is T => typeof v === "string" && (xs as readonly string[]).includes(v);
 /** An artifact's language as a name the view can show: letters, digits and "+#._-", at most 32; anything else, none. */
@@ -150,6 +174,13 @@ export const count = (v: unknown): number | undefined => (typeof v === "number" 
 /** A record's own entry for `k`, never one inherited (an id like "__proto__" or "toString"). */
 export const own = <T,>(rec: Record<string, T> | undefined, k: string): T | undefined => (rec && Object.hasOwn(rec, k) ? rec[k] : undefined);
 const put = <T,>(rec: Record<string, T>, k: string, v: T) => { Object.defineProperty(rec, k, { value: v, writable: true, enumerable: true, configurable: true }); };
+/** A web card's own fields, each kept only in a form the view knows and within its bound (a stored thread's too). */
+function webCard(e: any): Partial<Attention> {
+  const str = (v: unknown, max: number) => (typeof v === "string" && v.length <= max ? v : undefined);
+  const buttons = oneOf(e.buttons, ["deny", "two", "three"] as const) ? e.buttons : undefined;
+  if (!buttons) return {};
+  return { buttons, body: str(e.body, 400), reason: str(e.reason, 2048), allow: str(e.allow, 80), turn_label: str(e.turn_label, 400) };
+}
 
 // Applies one event. A duplicate (seq <= applied_seq) is dropped; a gap
 // means the caller must ask for a reset (returns false).
@@ -192,7 +223,7 @@ export function apply(thread: Thread, e: TurnEvent, time = Date.now()): boolean 
       else turn.parts.push({ kind: "thinking", text: e.text });
       break;
     case "tool_call_started":
-      put(turn.tools, e.call, { call: e.call, tool: e.tool, name: e.name, summary: e.summary, status: "running", output: "" });
+      put(turn.tools, e.call, { call: e.call, tool: e.tool, name: e.name, summary: webSummary(e.name, e.summary), status: "running", output: "" });
       turn.parts.push({ kind: "tool", call: e.call });
       break;
     case "tool_output": {
@@ -204,7 +235,7 @@ export function apply(thread: Thread, e: TurnEvent, time = Date.now()): boolean 
       const tool = own(turn.tools, e.call);
       if (!tool) break;
       tool.status = oneOf(e.status, TOOL_STATUSES) && e.status !== "running" ? e.status : "unknown";
-      if (e.summary != null) tool.summary = e.summary;
+      if (e.summary != null) tool.summary = webSummary(tool.name, e.summary);
       if (e.body != null) tool.output = e.body;
       tool.body_cut = e.body_cut;
       tool.duration_ms = count(e.duration_ms);
@@ -214,7 +245,7 @@ export function apply(thread: Thread, e: TurnEvent, time = Date.now()): boolean 
     case "attention":
       if (!oneOf(e.state, ATTENTION_STATES)) break;
       if (!own(turn.attention, e.id)) turn.parts.push({ kind: "attention", id: e.id });
-      put(turn.attention, e.id, { id: e.id, kind: e.kind, state: e.state, title: e.title, summary: e.summary, detail: e.detail, ...(typeof e.instance === "string" ? { instance: e.instance } : {}) });
+      put(turn.attention, e.id, { id: e.id, kind: e.kind, state: e.state, title: e.title, summary: e.summary, detail: e.detail, ...(typeof e.instance === "string" ? { instance: e.instance } : {}), ...webCard(e) });
       break;
     case "artifact": {
       if (!oneOf(e.kind, ARTIFACT_KINDS)) break;
@@ -238,16 +269,28 @@ export function apply(thread: Thread, e: TurnEvent, time = Date.now()): boolean 
       turn.outcome = OUTCOMES.includes(e.outcome) ? e.outcome : "error";
       turn.state = turn.outcome;
       turn.finished = time;
+      delete turn.away;
       for (const tool of Object.values(turn.tools)) if (tool.status === "running") tool.status = "unknown";
       break;
   }
   return true;
 }
 
+// The thread's turn that is running here: never one that is away (its agent isn't connected, so nothing on the page
+// may bind to it).
 export function runningTurn(thread: Thread): Turn | undefined {
   for (let i = thread.entries.length - 1; i >= 0; i--) {
     const e = thread.entries[i];
-    if (e.kind === "turn") return e.outcome ? undefined : e;
+    if (e.kind === "turn") return e.outcome || e.away ? undefined : e;
+  }
+  return undefined;
+}
+
+/** The thread's last turn, if it is away. */
+export function awayTurn(thread: Thread): Turn | undefined {
+  for (let i = thread.entries.length - 1; i >= 0; i--) {
+    const e = thread.entries[i];
+    if (e.kind === "turn") return !e.outcome && e.away ? e : undefined;
   }
   return undefined;
 }
