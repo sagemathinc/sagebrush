@@ -61,11 +61,14 @@ check(LATEX_CAPS.raw === 253962 && LATEX_CAPS.gzip === 84895, "the caps are 253,
 // (agent 53,887 / 18,520 B: Nov 19 2026, the reload record's handling on master aadff4d0: 53,823 / 18,456 measured + 64)
 // (agent 54,819 / 18,896 B: Nov 19 2026, the reload record's handling on master 3c4319ba: 54,755 / 18,832 measured + 64)
 // (agent 56,431 / 19,403 B: Nov 19 2026, the reload record's handling on master a3f1e30b: 56,367 / 19,339 measured + 64)
+// (agent 62,408 / 21,455 B: Nov 20 2026, the agent's bar as a compact chip with its menu (keyboard, focus kept across
+//  updates, controls only for the pairing shown): 62,344 / 21,391 measured with bun 1.4.4 and node 24.21.0, + 64; was
+//  57,557 / 19,786)
 // (tools 16,546 / 6,950 B: Nov 11 2026: latex_build's own code moved here out
 //  of the eager group, its landing measurement + 64; was 16/6 KiB)
 // (tools 17,335 / 7,231 B: renewed at the landing merge on master 14279164, 17,271 / 7,167 measured + 64; its +777 / +286
 //  over 16,494 / 6,881 is inherited from a shared check's and the tools' changes)
-const lazyPinned = { COMMENTS: [16384, 6144], COMMENTS_DOC: [40960, 16384], AGENT: [57557, 19786], TOOLS: [17335, 7231], PRESENT: [16384, 6144], DOC: [3584, 1792], EXAMPLES: [13312, 6144], BEAMER: [8192, 3584], PYTHONTEX: [5120, 2304], RUN: [19644, 7812], INTERACT: [9453, 3805], VIEW: [3378, 1672], SHARE: [3853, 2021] };
+const lazyPinned = { COMMENTS: [16384, 6144], COMMENTS_DOC: [40960, 16384], AGENT: [62408, 21455], TOOLS: [17335, 7231], PRESENT: [16384, 6144], DOC: [3584, 1792], EXAMPLES: [13312, 6144], BEAMER: [8192, 3584], PYTHONTEX: [5120, 2304], RUN: [19644, 7812], INTERACT: [9453, 3805], VIEW: [3378, 1672], SHARE: [3853, 2021] };
 check(JSON.stringify(Object.fromEntries(Object.entries(LATEX_LAZY_CAPS).map(([k, c]) => [k, [c.raw, c.gzip]]))) === JSON.stringify(lazyPinned), "each lazy chunk's cap as ruled", LATEX_LAZY_CAPS);
 
 // ---- which build is measured: only the shipped LaTeX build (version.json's latexMode "shipped"); anything else is a
