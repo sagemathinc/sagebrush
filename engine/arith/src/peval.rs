@@ -114,6 +114,26 @@ pub fn admit_b(a: &Factor, b: &Factor, d: &[u64], plan: &Plan, r: u64, caps: &qp
     Ok((bound, fixed, cap - fixed))
 }
 
+/// The `eval point` phase, the call's first, on its meter: whether b is in
+/// lowest terms (gcd(p, q) = 1; zero only as `0`).  The reduction's c = 1
+/// branch rests on it, so a point not in lowest terms is refused.
+pub fn point_reduced(b: &Factor, led: &Words, m: &mut Meter) -> Result<bool, DivFault> {
+    let _p = sagebrush_interrupt::enter("eval point");
+    sagebrush_interrupt::check_coarse();
+    let mut s = Ints::new(led, m)?;
+    let t = |m: &mut Meter| Coef::tagged(led, 0, "scratch", m);
+    let (mut p, mut q, mut g) = (t(m)?, t(m)?, t(m)?);
+    load(b.text, &mut p, &mut q, m)?;
+    if q.is_one() {
+        return Ok(true);
+    }
+    if p.len == 0 {
+        return Ok(false);
+    }
+    s.gcd(p.mag(), q.mag(), &mut g, m)?;
+    Ok(g.is_one())
+}
+
 #[cfg(test)]
 thread_local! {
     /// (tests) the last call's final reduction: true for gcd(S, D) (c = 1),
@@ -256,6 +276,13 @@ pub fn reply_on(a: &Factor, b: &Factor, d: &[u64], plan: &Plan, bound: u64, led:
     let (num, den) = horner(a, b, d, plan, led, m)?;
     let _p = sagebrush_interrupt::enter("eval emit");
     sagebrush_interrupt::check_coarse();
+    write_token(&num, &den, bound, led, m)
+}
+
+/// `{"ok":"num/den"}` (num alone for den = 1 or num = 0) in its exact
+/// reservation, without allocating past it; more than `bound` bytes is an
+/// Invariant.
+fn write_token(num: &Coef, den: &Coef, bound: u64, led: &Words, m: &mut Meter) -> Result<String, DivFault> {
     let bytes = FIXED_BYTES.checked_add(token_bytes(num.mag(), num.neg, Some(den.mag()))).ok_or(DivFault::Memory)?;
     if bytes > bound {
         return Err(DivFault::Invariant);
@@ -280,21 +307,55 @@ pub fn reply_on(a: &Factor, b: &Factor, d: &[u64], plan: &Plan, bound: u64, led:
     Ok(out)
 }
 
+/// v = 0: a_0 in lowest terms (the `eval emit` phase, on the call's meter
+/// and ledger): its token's gcd and exact divisions, then the reply.
+pub fn a0_reply(tok: &str, led: &Words, m: &mut Meter) -> Result<String, DivFault> {
+    let _p = sagebrush_interrupt::enter("eval emit");
+    sagebrush_interrupt::check_coarse();
+    let mut s = Ints::new(led, m)?;
+    let t = |m: &mut Meter| Coef::tagged(led, 0, "scratch", m);
+    let (mut n, mut d, mut g, mut q) = (t(m)?, t(m)?, t(m)?, t(m)?);
+    load(tok, &mut n, &mut d, m)?;
+    if n.len == 0 {
+        d.set(&[1], false, m)?;
+    } else if !d.is_one() {
+        s.gcd(n.mag(), d.mag(), &mut g, m)?;
+        if !g.is_one() {
+            let neg = n.neg;
+            quotient(n.mag(), &g, &mut q, &mut s, m)?;
+            n.set(q.mag(), neg, m)?;
+            quotient(d.mag(), &g, &mut q, &mut s, m)?;
+            d.set(q.mag(), false, m)?;
+        }
+    }
+    // (a reduced token is no longer than the one given)
+    let bound = FIXED_BYTES.checked_add(tok.len() as u64).ok_or(DivFault::Memory)?;
+    write_token(&n, &d, bound, led, m)
+}
+
 /// The whole call on scanned operands: `{"ok":"tok"}`, a(v) in lowest terms,
 /// or the refusal (no partial reply).
 pub fn reply(a: &Factor, b: &Factor, r: u64, caps: &qpoly::Caps) -> Result<String, String> {
-    let plan = match admit(a, b, r, caps)? {
-        Ok(plan) => plan,
-        Err(short) => {
-            let led = Words::new(caps.int.peak / 8);
-            let tok = match short {
-                Short::Zero => "0",
-                Short::Token(t) => t,
-            };
-            return token_reply(tok, &led).map_err(|_| format!("the memory (bytes) is more than {} ({})", caps.int.peak, HOW));
+    let admitted = admit(a, b, r, caps)?;
+    // (the point's check first, on the call's one meter and a ledger of the
+    // peak less the request, released before the lcm)
+    let work = caps.int.work.saturating_sub(r);
+    let mut m = Meter::new(work);
+    {
+        let fixed = r.div_ceil(8).saturating_add(OVERHEAD_WORDS);
+        let led = Words::new((caps.int.peak / 8).saturating_sub(fixed));
+        match point_reduced(b, &led, &mut m) {
+            Ok(true) => {}
+            Ok(false) => return Err("b is not in lowest terms".to_string()),
+            Err(f) => return Err(fault_text(f, work, fixed, led.limit())),
         }
-    };
-    let mut m = Meter::new(plan.work);
+        match admitted {
+            Ok(_) => {}
+            Err(Short::Zero) => return token_reply("0", &led).map_err(|_| format!("the memory (bytes) is more than {} ({})", caps.int.peak, HOW)),
+            Err(Short::Token(t)) => return a0_reply(t, &led, &mut m).map_err(|f| fault_text(f, work, fixed, led.limit())),
+        }
+    }
+    let Ok(plan) = admitted else { return Err(format!("{}: a short answer past its branch", INTERNAL_PREFIX)) };
     let d = clear(a, &plan, &mut m).map_err(|f| match f {
         Fault::Overrun => format!("the denominators' lcm needs more than {} word operations (fewer or simpler denominators per call)", plan.work),
         Fault::Invariant => format!("{}: the lcm (Invariant)", INTERNAL_PREFIX),

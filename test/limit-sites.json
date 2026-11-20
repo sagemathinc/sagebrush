@@ -653,6 +653,16 @@
   "owner": "qpoly_eval",
   "reason": "qpoly_eval's derived sizes, plumbing (the ledger's and meter's limits, the plan's sizes, the reply's reservation) or a test assertion: refuses nothing itself"
  },
+ "engine/arith/src/peval.rs :: reply :: Err(Short::Token(t)) => return a0_reply(t, &led, &mut m).map_err(|f| fault_text(f, work, fixed, led.limit())), #0": {
+  "class": "none",
+  "owner": "qpoly_eval",
+  "reason": "qpoly_eval's derived sizes, plumbing (the ledger's and meter's limits, the plan's sizes, the reply's reservation) or a test assertion: refuses nothing itself"
+ },
+ "engine/arith/src/peval.rs :: reply :: Err(f) => return Err(fault_text(f, work, fixed, led.limit())), #0": {
+  "class": "none",
+  "owner": "qpoly_eval",
+  "reason": "qpoly_eval's derived sizes, plumbing (the ledger's and meter's limits, the plan's sizes, the reply's reservation) or a test assertion: refuses nothing itself"
+ },
  "engine/arith/src/peval.rs :: reply :: let (bound, fixed, limit) = admit_b(a, b, &d, &plan, r, caps)?; #0": {
   "class": "none",
   "owner": "qpoly_eval",
@@ -668,12 +678,12 @@
   "owner": "qpoly_eval",
   "reason": "qpoly_eval's derived sizes, plumbing (the ledger's and meter's limits, the plan's sizes, the reply's reservation) or a test assertion: refuses nothing itself"
  },
- "engine/arith/src/peval.rs :: reply_on :: debug_assert_eq!(out.capacity(), cap, \"the reply was written without allocating\"); #0": {
+ "engine/arith/src/peval.rs :: write_token :: debug_assert_eq!(out.capacity(), cap, \"the reply was written without allocating\"); #0": {
   "class": "none",
   "owner": "qpoly_eval",
   "reason": "qpoly_eval's derived sizes, plumbing (the ledger's and meter's limits, the plan's sizes, the reply's reservation) or a test assertion: refuses nothing itself"
  },
- "engine/arith/src/peval.rs :: reply_on :: let cap = out.capacity(); #0": {
+ "engine/arith/src/peval.rs :: write_token :: let cap = out.capacity(); #0": {
   "class": "none",
   "owner": "qpoly_eval",
   "reason": "qpoly_eval's derived sizes, plumbing (the ledger's and meter's limits, the plan's sizes, the reply's reservation) or a test assertion: refuses nothing itself"
@@ -7764,6 +7774,36 @@
   "class": "none",
   "owner": "qpoly_divrem",
   "reason": "qpoly_divrem's derived sizes, plumbing (the ledger's and meter's limits, the plan's sizes) or a test assertion: refuses nothing itself"
+ },
+ "engine/web/tests/eval_alloc.rs :: call :: fn call(a: &str, v: &str, limit: Option<u64>, work: Option<u64>) -> (Result<String, DivFault>, u64, u64, u64, u64) { #0": {
+  "class": "none",
+  "owner": "qpoly_eval",
+  "reason": "qpoly_eval's derived sizes, plumbing (the ledger's and meter's limits, the plan's sizes, the reply's reservation) or a test assertion: refuses nothing itself"
+ },
+ "engine/web/tests/eval_alloc.rs :: call :: let led = Words::new(limit.unwrap_or(lim)); #0": {
+  "class": "none",
+  "owner": "qpoly_eval",
+  "reason": "qpoly_eval's derived sizes, plumbing (the ledger's and meter's limits, the plan's sizes, the reply's reservation) or a test assertion: refuses nothing itself"
+ },
+ "engine/web/tests/eval_calibrate.rs :: eval_ns_per_unit :: eprintln!(\"worst {:.3} ns/unit: at the cap (zmul::WORK_MAX units) {:.2} s\", worst, worst * (zmul::WORK_MAX as f64) / 1e9); #0": {
+  "class": "none",
+  "owner": "qpoly_eval",
+  "reason": "qpoly_eval's derived sizes, plumbing (the ledger's and meter's limits, the plan's sizes, the reply's reservation) or a test assertion: refuses nothing itself"
+ },
+ "engine/web/tests/eval_calibrate.rs :: run :: let (bound, _, limit) = peval::admit_b(&fa, &fv, &d, &plan, r, &qpoly::CAPS).unwrap(); #0": {
+  "class": "none",
+  "owner": "qpoly_eval",
+  "reason": "qpoly_eval's derived sizes, plumbing (the ledger's and meter's limits, the plan's sizes, the reply's reservation) or a test assertion: refuses nothing itself"
+ },
+ "engine/web/tests/eval_calibrate.rs :: run :: let led = Words::new(limit); #0": {
+  "class": "none",
+  "owner": "qpoly_eval",
+  "reason": "qpoly_eval's derived sizes, plumbing (the ledger's and meter's limits, the plan's sizes, the reply's reservation) or a test assertion: refuses nothing itself"
+ },
+ "engine/web/tests/eval_calibrate.rs :: run :: let mut m = Meter::new(u64::MAX); #0": {
+  "class": "none",
+  "owner": "qpoly_eval",
+  "reason": "qpoly_eval's derived sizes, plumbing (the ledger's and meter's limits, the plan's sizes, the reply's reservation) or a test assertion: refuses nothing itself"
  },
  "engine/web/tests/nmod_alloc.rs :: peaks_within_bounds :: a[GCD_MAX_LEN - 1] = 1; #0": {
   "class": "none",

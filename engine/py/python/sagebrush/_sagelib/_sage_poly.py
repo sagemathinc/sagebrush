@@ -1285,8 +1285,15 @@ class Polynomial:
         else:
             (v,) = args
         from sagebrush import poly
+        # (an exact type, compared by identity only: no hash or equality of
+        # the point's class runs while classifying it)
         t, Q = type(v), _sa().Rational
-        if t is Q or t in poly._QCLEAR_INTS:
+        routed = t is Q
+        for k in poly._QCLEAR_INTS:
+            if routed:
+                break
+            routed = t is k
+        if routed:
             # an exact integer or rational point: in the engine (qpoly_eval,
             # one token in lowest terms), in QQ when the ring or the point
             # is, else in ZZ, as Sage

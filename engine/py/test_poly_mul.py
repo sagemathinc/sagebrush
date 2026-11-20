@@ -705,6 +705,36 @@ def qeval_checks(r):
     # (other points keep the old path: a polynomial, True)
     assert f(t + 1) == t ** 2 + 2 * t + 2 and f(True) == 2
     n += 1
+    # (the selector compares the point's class by identity only: a class
+    # whose metaclass hash or equality raises is never hashed or compared,
+    # and an int subclass keeps the old path)
+    hooks = []
+
+    class Hostile(type):
+        def __hash__(cls):
+            hooks.append("hash")
+            raise RuntimeError("untrusted class hash invoked")
+
+        def __eq__(cls, other):
+            hooks.append("eq")
+            raise RuntimeError("untrusted class equality invoked")
+
+    class I(int, metaclass=Hostile):
+        pass
+    assert f(I(3)) == 10 and hooks == [], hooks
+    n += 1
+    # (the engine refuses a point not in lowest terms; v = 0 reduces a_0)
+    for bad in ("2/6", "-2/6", "0/5"):
+        try:
+            E.call("qpoly_eval", a="1,0,1", b=bad)
+        except ValueError as e:
+            assert "lowest terms" in str(e), e
+        else:
+            raise AssertionError("an unreduced point was admitted: %s" % bad)
+        n += 1
+    assert E.call("qpoly_eval", a="1,0,1", b="1/3") == "a/9"
+    assert E.call("qpoly_eval", a="2/4,1", b="0") == "1/2" and E.call("qpoly_eval", a="0/2,1", b="0") == "0"
+    n += 1
     # one past the reply cap: a typed refusal before any work
     # (1000 terms at a 1,200,000-bit point: a value of about 2^30 bits)
     try:

@@ -37,3 +37,6 @@
 {"fn":"qpoly_eval","a":"1,2,3","b":"1/3"}
 {"fn":"qpoly_eval","a":"","b":"5"}
 {"fn":"qpoly_eval","a":"1/2,3","b":"0"}
+{"fn":"qpoly_eval","a":"2/4,1","b":"0"}
+{"fn":"qpoly_eval","a":"0/2,1","b":"0"}
+{"fn":"qpoly_eval","a":"2/4,3/6","b":"1/3"}

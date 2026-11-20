@@ -128,8 +128,8 @@ fn eval_matches_the_reference() {
     }
 }
 
-/// The hand rows: the zero polynomial, constants, v = 0 (a_0's token, as
-/// given), v = 1 and -1, an integer v, denominators sharing v's primes, and
+/// The hand rows: the zero polynomial, constants, v = 0 (a_0's token, in
+/// lowest terms), v = 1 and -1, an integer v, denominators sharing v's primes, and
 /// both branches of the final reduction: c = gcd(A_n, q) = 1 (x^2 + 1 at
 /// 1/3) and c > 1 (3x^2 + 2x + 1 at 1/3: A_n = 3 shares q's 3).
 #[test]
@@ -147,8 +147,51 @@ fn hand_rows() {
     assert_eq!(call("1,0,1/3", "1/3").unwrap(), want("1,0,1/3", "1/3"));
     assert_eq!(BY_D.with(|b| b.get()), Some(true));
     assert_eq!(call("1/2,3,5", "0").unwrap(), "{\"ok\":\"1/2\"}");
+    // (v = 0 reduces a_0: every reply is in lowest terms)
+    assert_eq!(call("2/4,1", "0").unwrap(), "{\"ok\":\"1/2\"}");
+    assert_eq!(call("0/2,1", "0").unwrap(), "{\"ok\":\"0\"}");
+    assert_eq!(call("-6/4", "0").unwrap(), "{\"ok\":\"-3/2\"}");
+    assert_eq!(call("c/4,1", "0").unwrap(), "{\"ok\":\"3\"}");
     assert_eq!(call("", "5").unwrap(), "{\"ok\":\"0\"}");
     assert!(call("1,2", "1,2").unwrap_err().contains("one token"));
+    // a point not in lowest terms is refused (the output stays canonical),
+    // the zero polynomial and v = 0 included; 1/3 is admitted
+    for v in ["2/6", "-2/6", "0/5", "a/f"] {
+        for a in ["1,0,1", "", "1/2,3"] {
+            assert_eq!(call(a, v).unwrap_err(), "b is not in lowest terms", "a={} v={}", a, v);
+        }
+    }
+    assert_eq!(call("1,0,1", "1/3").unwrap(), "{\"ok\":\"a/9\"}");
+    // unreduced coefficients are admitted: the value is exact and the reply
+    // in lowest terms (2/4 + (3/6) t at 1/3, as 1/2 + (1/2) t)
+    assert_eq!(call("2/4,3/6", "1/3").unwrap(), call("1/2,1/2", "1/3").unwrap());
+    assert_eq!(call("2/4,3/6", "1/3").unwrap(), "{\"ok\":\"2/3\"}");
+}
+
+/// Unreduced coefficients (each token's numerator and denominator times a
+/// common factor) give the reduced coefficients' reply, in lowest terms, on
+/// both branches of the final reduction.
+#[test]
+fn unreduced_coefficients_reduce() {
+    let mut g = Rng(0x2026_1120_00a1);
+    for case in 0..200 {
+        let len = 1 + g.below(12);
+        let a = (0..len).map(|_| g.token(80, if case % 2 == 0 { 40 } else { 0 }, true)).collect::<Vec<_>>();
+        let k = 2 + g.below(1000);
+        let scaled = a
+            .iter()
+            .map(|t| {
+                let (neg, n, d) = parts(t);
+                let (n, d) = (UBig::from_str_radix(n, 16).unwrap() * k, UBig::from_str_radix(d, 16).unwrap() * k);
+                format!("{}{:x}/{:x}", if neg { "-" } else { "" }, n, d)
+            })
+            .collect::<Vec<_>>()
+            .join(",");
+        let v = g.token(60, if case % 3 == 0 { 0 } else { 50 }, false);
+        let a = a.join(",");
+        // (v = 0 copies a_0 as supplied: not this test's case)
+        assert_eq!(call(&scaled, &v).unwrap(), want(&a, &v), "a={} k={} v={}", a, k, v);
+    }
 }
 
 /// The reply bound: integer arithmetic, None at the limits, and the reply
@@ -201,8 +244,14 @@ fn ledger_and_meter_are_exact() {
 #[test]
 fn eval_paths_allocate_only_through_the_ledger() {
     let src = include_str!("../peval.rs");
-    let code: Vec<&str> = src.lines().filter(|l| !l.trim_start().starts_with("//")).take_while(|l| !l.starts_with("#[cfg(test)]")).collect();
-    for bad in [".to_vec()", "vec![", ".clone()", "Vec::with_capacity", "String::with_capacity", "Vec::new()"] {
+    // (all of the production code: up to the final test module, not the
+    // first cfg(test) item, the BY_D pin's thread-local)
+    let end = src.rfind("#[cfg(test)]\nmod tests;").expect("the test module's declaration");
+    let code: Vec<&str> = src[..end].lines().filter(|l| !l.trim_start().starts_with("//")).collect();
+    for f in ["fn horner", "fn write_token", "fn a0_reply", "fn point_reduced", "pub fn reply("] {
+        assert!(code.iter().any(|l| l.contains(f)), "the check misses {}", f);
+    }
+    for bad in [".to_vec()", "vec![", ".clone()", "Vec::with_capacity", "String::with_capacity", "Vec::new()", "Vec::<", "String::new", "String::from", "Box::new"] {
         let hits: Vec<&&str> = code.iter().filter(|l| l.contains(bad)).collect();
         assert!(hits.is_empty(), "{}: {:?}", bad, hits);
     }
