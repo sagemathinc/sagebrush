@@ -3282,6 +3282,13 @@ try {
         const shown = await ev(`(() => { const p = ${PRE}; return { text: p?.textContent, tags: [...new Set([...(p?.querySelectorAll("*") ?? [])].map((e) => e.tagName + "." + e.className))] }; })()`);
         check(coloured && shown.text?.trim() === CODE && shown.tags.length > 0 && shown.tags.every((t) => /^SPAN\.h[a-z]$/.test(t)) && hlFetched() === 1,
           "L5: a sageblock's code is coloured, its text the same and none of it HTML (no <b> from '<b>&amp;</b>'); the chunk fetched once", { coloured, shown, fetched: hlFetched() });
+        // (a Magma block beside a Sage one: the Sage one coloured, the Magma one left plain, as its comments and strings
+        //  aren't Sage's)
+        await open(await mk("/t/hl-magma.tex", enc(blockDoc(block("x = 1  # sage") + "\\begin{magmablock}\nx := 'a'; // it's Magma\n\\end{magmablock}\n"))));
+        const bothShown = await until(`!!document.querySelector(".tex-preview .ch:not([hidden]) pre.sageblock[data-hl]") && !!document.querySelector(".tex-preview .ch:not([hidden]) pre.sageblock.magma")`, 20000);
+        await sleep(800);
+        const magmaPre = await ev(`(() => { const p = document.querySelector(".tex-preview .ch:not([hidden]) pre.sageblock.magma"); return p && { hl: p.hasAttribute("data-hl"), spans: p.querySelectorAll("span").length, text: p.textContent }; })()`);
+        check(bothShown && magmaPre && !magmaPre.hl && magmaPre.spans === 0 && magmaPre.text.includes("// it's Magma"), "L5: a Magma block stays plain beside a coloured Sage block", magmaPre);
         // (many blocks: all coloured, a few at a time: no long task on a timing box; reported on a build box)
         await ev(watchLt);
         await typeInto(blockDoc(Array.from({ length: 300 }, (_, k) => block("for i in range(" + k + "):\n    x = i * " + k + "  # block " + k)).join("\n")));
@@ -3304,7 +3311,7 @@ try {
         const plain = await ev(`(() => { const p = ${PRE}; return { spans: p.querySelectorAll("span").length, text: p.textContent }; })()`);
         await send("Fetch.disable"); onPaused = null;
         check(plain.spans === 0 && plain.text.trim() === CODE && errors.length === e0, "L5: the highlighting chunk refused: the code stays plain, and no error", { plain, errors: errors.slice(e0) });
-        // (renders while the chunk is on its way: 20 of them make one wait and one queue, and once
+        // (renders while the chunk is on its way (astra's SEC on #1009): 20 of them make one wait and one queue, and once
         //  it comes the newest render's block is the one coloured)
         let held = null;
         onPaused = (p) => { held = p.requestId; };
@@ -3342,6 +3349,7 @@ try {
         check(!!held && otherDone && queues2 === 1 && errors.length === e0, "L5: the page leaves a file while the chunk is on its way: the left file's wait colours nothing, the new one's block is coloured", { held: !!held, otherDone, queues2, errors: errors.slice(e0) });
         await typeInto(blockDoc(block(CODE)));
         await savedNow(10000);
+      }
       // (William's L3, Nov 10: Shift+Enter moved the preview by a page, Follow off: the place the person looks at keeps its
       //  place. Twelve sageblocks, each losing its "not run" chip as the Run's results come; the person looks at the
       //  seventh's code, near the top of the preview, so the groups replaced are the ones in view, which the browser's

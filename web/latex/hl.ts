@@ -16,6 +16,8 @@ declare const __SB_LATEX_TEST__: boolean | undefined;
 export const HL_MAX = 64 * 1024;
 const FRAME_MS = 8, FRAME_BLOCKS = 64;
 // (the code page's colours, web/code/page.ts)
+// (a block not coloured yet: Sage's and Python's only, never a Magma block, whose comments and strings differ)
+const UNCOLOURED = "pre.sageblock:not(.magma):not([data-hl])";
 const CSS = "pre.sageblock .hc{color:#6a737d;font-style:italic}pre.sageblock .hs{color:#22863a}pre.sageblock .hn{color:#005cc5}pre.sageblock .hk{color:#d73a49;font-weight:600}pre.sageblock .hb,pre.sageblock .hf{color:#6f42c1}pre.sageblock .hf{font-weight:600}pre.sageblock .hd{color:#e36209}";
 
 type Tok = [cls: string, text: string];
@@ -90,7 +92,7 @@ export function colour(root: HTMLElement, signal: AbortSignal) {
     if (signal.aborted || !root.isConnected) { queued.delete(root); return; }
     const t0 = performance.now();
     let n = 0;
-    for (let pre = root.querySelector<HTMLElement>("pre.sageblock:not([data-hl])"); pre; pre = root.querySelector<HTMLElement>("pre.sageblock:not([data-hl])")) {
+    for (let pre = root.querySelector<HTMLElement>(UNCOLOURED); pre; pre = root.querySelector<HTMLElement>(UNCOLOURED)) {
       colourBlock(pre);
       if (++n >= FRAME_BLOCKS || performance.now() - t0 > FRAME_MS) { requestAnimationFrame(step); return; }
     }
