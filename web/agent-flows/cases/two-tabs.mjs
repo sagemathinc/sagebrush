@@ -15,7 +15,6 @@ export default {
   // (two tabs, a run, and both reloaded: more than the default 120 s)
   ms: 240_000,
   why: "on chat the notebook is the pane's own; its second-tab case (the pane and a notebook tab, sync on) is test-agents-artifacts' journal-live J4",
-  gaps: { mcp: "sagebrush-mcp has no workspace_run_notebook tool yet, so the agent can't run the notebook it changed" },
   given: { [PATH]: { json: { cells: [{ code: "x = 1" }, { code: "y = 1" }] } } },
   agent: [{ tool: "workspace_read", args: { path: PATH } }],
   async expect(h) {

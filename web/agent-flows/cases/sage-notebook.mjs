@@ -5,7 +5,6 @@ export default {
   prompt: "draw a plot of sin(x^2)",
   surfaces: ["mcp", "chat"],
   // (decided Nov 19 2026: one rule everywhere, a notebook the agent creates runs once by itself under "may run code")
-  gaps: { chat: "the Agents page's pane shows the agent's notebook but doesn't run it by itself yet" },
   agent: [
     { tool: "workspace_create", args: { path: "/sin x squared.ipynb", mode: "sage", content: { json: { mode: "sage", cells: [{ code: "plot(sin(x^2), (x, -3, 3))" }] } } } },
   ],

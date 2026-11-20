@@ -26,7 +26,7 @@ export default {
   prompt: "Open this Jupyter notebook and run it. Then change the damping to 0.5 and run it again.",
   surfaces: ["mcp", "chat"],
   gaps: {
-    chat: "the pane doesn't show the notebook the agent was pointed at or run it by itself yet, and /agents/ offers no run verbs yet",
+    chat: "the pane shows only files the agent wrote, not a notebook it was pointed at, and the agent's own run there isn't shown or saved with the notebook",
   },
   given: { [PATH]: { json: NOTEBOOK } },
   // (the agent reads the notebook it was pointed at; its runs and its edit are in expect, where their answers are checked)

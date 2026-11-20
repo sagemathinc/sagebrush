@@ -4,9 +4,6 @@ export default {
   id: "magma-notebook",
   prompt: "make a Magma notebook that factors 2^64 - 1 and finds the class number of Q(sqrt(-23))",
   surfaces: ["mcp", "chat"],
-  gaps: {
-    chat: "the Agents page's pane shows the agent's notebook but doesn't run it by itself yet",
-  },
   agent: [
     {
       tool: "workspace_create",

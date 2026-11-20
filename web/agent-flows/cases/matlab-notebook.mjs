@@ -4,9 +4,6 @@ export default {
   id: "matlab-notebook",
   prompt: "make a MATLAB notebook plotting sin(x^2)",
   surfaces: ["mcp", "chat"],
-  gaps: {
-    chat: "the pane doesn't run it by itself yet, and /agents/ offers no run verbs yet",
-  },
   agent: [
     { tool: "workspace_create", args: { path: "/sin_x_squared.ipynb", mode: "matlab", content: { json: { cells: [{ code: "x = linspace(0, 3, 200);\nplot(x, sin(x.^2))\ntitle('sin(x^2)')" }] } } } },
   ],

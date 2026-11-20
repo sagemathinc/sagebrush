@@ -24,7 +24,7 @@ export default {
   prompt: "Make a Python notebook that plots sin(x) and cos(x) on [0, 2π] with numpy and matplotlib, with a legend, and prints the maximum of sin(x)·cos(x). Then: add a histogram of 1000 normal samples.",
   surfaces: ["mcp", "chat"],
   gaps: {
-    chat: "the Agents page's pane doesn't run the agent's notebook by itself yet, and the run tools aren't offered there yet",
+    chat: "the agent's own run (workspace_run_notebook) on the Agents page isn't shown in the pane's notebook or saved with it: after the follow-up, the pane shows the first run's outputs only",
   },
   grant: { folders: ["/"], write: true, run: true },
   agent: [
