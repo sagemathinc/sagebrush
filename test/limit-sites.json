@@ -605,7 +605,22 @@
   "owner": "exact linear algebra (engine/arith)",
   "reason": "the multimodular elimination's prime count (the largest entry's size, in a Hadamard-type bound); refuses nothing"
  },
- "engine/arith/src/zmul.rs ::  :: assert!(w == 205_069_830 && w <= WORK_MAX); #0": {
+ "engine/arith/src/zmul.rs ::  :: assert!(REQUEST_MAX + sized + allowance <= PEAK_MAX); #0": {
+  "class": "none",
+  "owner": "poly_mul",
+  "reason": "poly_mul's derived bounds, a closed form's const assertion, a field mask, a benchmark's output or a test assertion: refuses nothing itself"
+ },
+ "engine/arith/src/zmul.rs ::  :: assert!(points <= 1 << sagebrush_bigint::ntt::LOCAL32_MAX_LOG); #0": {
+  "class": "none",
+  "owner": "poly_mul",
+  "reason": "poly_mul's derived bounds, a closed form's const assertion, a field mask, a benchmark's output or a test assertion: refuses nothing itself"
+ },
+ "engine/arith/src/zmul.rs ::  :: assert!(w == 208_477_704 && w <= WORK_MAX); #0": {
+  "class": "none",
+  "owner": "poly_mul",
+  "reason": "poly_mul's derived bounds, a closed form's const assertion, a field mask, a benchmark's output or a test assertion: refuses nothing itself"
+ },
+ "engine/arith/src/zmul.rs ::  :: let emit = O_MAX / 4 + 3 * (O_MAX / 11) + 32 + 32 * (O_MAX / 64 + 1) + 64; #0": {
   "class": "none",
   "owner": "poly_mul",
   "reason": "poly_mul's derived bounds, a closed form's const assertion, a field mask, a benchmark's output or a test assertion: refuses nothing itself"
@@ -620,7 +635,22 @@
   "owner": "poly_mul",
   "reason": "poly_mul's derived bounds, a closed form's const assertion, a field mask, a benchmark's output or a test assertion: refuses nothing itself"
  },
+ "engine/arith/src/zmul.rs ::  :: let m = N_MAX + 1; #1": {
+  "class": "none",
+  "owner": "poly_mul",
+  "reason": "poly_mul's derived bounds, a closed form's const assertion, a field mask, a benchmark's output or a test assertion: refuses nothing itself"
+ },
  "engine/arith/src/zmul.rs ::  :: let n = N_MAX; #0": {
+  "class": "none",
+  "owner": "poly_mul",
+  "reason": "poly_mul's derived bounds, a closed form's const assertion, a field mask, a benchmark's output or a test assertion: refuses nothing itself"
+ },
+ "engine/arith/src/zmul.rs ::  :: let n = N_MAX; #1": {
+  "class": "none",
+  "owner": "poly_mul",
+  "reason": "poly_mul's derived bounds, a closed form's const assertion, a field mask, a benchmark's output or a test assertion: refuses nothing itself"
+ },
+ "engine/arith/src/zmul.rs ::  :: let points = 2 * N_MAX; #0": {
   "class": "none",
   "owner": "poly_mul",
   "reason": "poly_mul's derived bounds, a closed form's const assertion, a field mask, a benchmark's output or a test assertion: refuses nothing itself"
@@ -1181,6 +1211,11 @@
   "owner": "engine arith (big-integer wire decoder)",
   "reason": "test code: the big-integer decoder's correctness, allocation and Stop tests; refuses nothing itself"
  },
+ "engine/arith/tests/zmul_admission_targets.rs :: points :: let plan = zmul::admit(&c, &c, 2 * a.len() as u64 + 20, &Caps { n: u64::MAX, o: u64::MAX, peak: u64::MAX, work: u64::MAX, ..CAPS }).unwrap().unwrap(); #0": {
+  "class": "none",
+  "owner": "poly_mul",
+  "reason": "poly_mul's derived bounds, a closed form's const assertion, a field mask, a benchmark's output or a test assertion: refuses nothing itself"
+ },
  "engine/arith/tests/zmul_work_width.rs :: the_schoolbook_closed_form_never_wraps :: let m = usize::MAX; #0": {
   "class": "none",
   "owner": "poly_mul",
@@ -1206,10 +1241,25 @@
   "owner": "poly_mul",
   "reason": "poly_mul's derived bounds, a closed form's const assertion, a field mask, a benchmark's output or a test assertion: refuses nothing itself"
  },
+ "engine/bigint/src/ntt.rs ::  :: assert!((1u128 << LOCAL32_MAX_LOG) * digit * digit < p0 * p1 * p2); #0": {
+  "class": "none",
+  "owner": "bigint",
+  "reason": "NTT implementation metadata, internal invariants, routing thresholds, and test stress values; these sites refuse no user computation"
+ },
+ "engine/bigint/src/ntt.rs ::  :: assert!((p - 1).trailing_zeros() == order && order >= LOCAL32_MAX_LOG); #0": {
+  "class": "none",
+  "owner": "bigint",
+  "reason": "NTT implementation metadata, internal invariants, routing thresholds, and test stress values; these sites refuse no user computation"
+ },
  "engine/bigint/src/ntt.rs ::  :: const MAX_LOG: u32 = 50; #0": {
   "class": "2",
   "owner": "bigint",
   "row": "inv-46"
+ },
+ "engine/bigint/src/ntt.rs ::  :: pub const LOCAL32_MAX_LOG: u32 = 23; #0": {
+  "class": "none",
+  "owner": "bigint",
+  "reason": "NTT implementation metadata, internal invariants, routing thresholds, and test stress values; these sites refuse no user computation"
  },
  "engine/bigint/src/ntt.rs :: mul_mod_matches_naive :: u64::MAX - 58, #0": {
   "class": "none",
@@ -1261,12 +1311,17 @@
   "owner": "series ops",
   "reason": "the series ops' derived bounds, counters, saturating overflow (refused by a cap's own site), a metered gcd's limit, an internal shape assert or a test assertion: refuses nothing itself"
  },
- "engine/bigint/src/ntt32.rs ::  :: const MAX_LOG: u32 = 23; #0": {
+ "engine/bigint/src/ntt32.rs ::  :: const MAX_LOG: u32 = crate::ntt::LOCAL32_MAX_LOG; #0": {
   "class": "none",
   "owner": "bigint",
   "reason": "NTT implementation metadata, internal invariants, routing thresholds, and test stress values; these sites refuse no user computation"
  },
  "engine/bigint/src/ntt32.rs :: cache_and_fresh_memory_have_separate_bounds :: let a = vec![u32::MAX; 10_000]; #0": {
+  "class": "none",
+  "owner": "bigint",
+  "reason": "NTT implementation metadata, internal invariants, routing thresholds, and test stress values; these sites refuse no user computation"
+ },
+ "engine/bigint/src/ntt32.rs :: mul_words_local :: assert!(log <= MAX_LOG, \"transform too long\"); #0": {
   "class": "none",
   "owner": "bigint",
   "reason": "NTT implementation metadata, internal invariants, routing thresholds, and test stress values; these sites refuse no user computation"
@@ -1306,6 +1361,11 @@
   "owner": "bigint",
   "reason": "NTT implementation metadata, internal invariants, routing thresholds, and test stress values; these sites refuse no user computation"
  },
+ "engine/bigint/src/ntt32.rs :: words :: (0..n).map(|_| if ones { u64::MAX } else { rng(s) }).collect() #0": {
+  "class": "none",
+  "owner": "bigint",
+  "reason": "NTT implementation metadata, internal invariants, routing thresholds, and test stress values; these sites refuse no user computation"
+ },
  "engine/bigint/src/ntt_core.rs :: new :: assert!(log <= max_root_log); #0": {
   "class": "none",
   "owner": "bigint",
@@ -1340,6 +1400,16 @@
   "class": "none",
   "owner": "poly_mul",
   "reason": "poly_mul's derived bounds, a closed form's const assertion, a field mask, a benchmark's output or a test assertion: refuses nothing itself"
+ },
+ "engine/bigint/tests/ntt_local_peak.rs :: peak_within_64n_plus_8m :: assert_eq!(mul_words_local_peak(usize::MAX / 2 + 1, usize::MAX / 2), None); #0": {
+  "class": "none",
+  "owner": "bigint",
+  "reason": "NTT implementation metadata, internal invariants, routing thresholds, and test stress values; these sites refuse no user computation"
+ },
+ "engine/bigint/tests/ntt_local_peak.rs :: peak_within_64n_plus_8m :: assert_eq!(mul_words_local_peak(usize::MAX, 1), None); #0": {
+  "class": "none",
+  "owner": "bigint",
+  "reason": "NTT implementation metadata, internal invariants, routing thresholds, and test stress values; these sites refuse no user computation"
  },
  "engine/bigint/tests/ntt_table_poll_gap.rs :: local_table_poll_gap :: let gap = hooks::max_gap_ns(); #0": {
   "class": "none",
