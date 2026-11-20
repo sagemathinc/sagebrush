@@ -226,6 +226,29 @@ const ws: Workspace | null = embedded() || q.has("items") || q.has("strokes") ||
   return null;
 }), 5000, null);
 if (!ws) wsAbandoned = true;
+// (the desktop app: its files are on disk, this workspace their copy for this launch; web/workspace/disk-mirror.ts:
+// a quit or a page left waits for them to be on disk, and a disk that can't be read leaves nothing to edit here)
+const desktopApp = !!ws && !!(window as any).__TAURI__ && (window as any).__SB_DESKTOP_APP__ === true;
+const desktopModule = () => import(new URL("../sagebrush-desktop.js", location.href).href);
+let diskMirror: any = null;
+if (desktopApp) {
+  const invoke = (c: string, a?: any, o?: any) => (window as any).__TAURI__.core.invoke(c, a, o);
+  try { diskMirror = await (await desktopModule()).diskWorkspace(ws, invoke); } catch (e) {
+    console.warn("disk workspace:", e);
+    const shade = Object.assign(document.createElement("div"), { id: "sb-disk-blocked", role: "alertdialog" });
+    shade.style.cssText = "position:fixed;inset:0;z-index:2147483002;background:rgba(0,0,0,.45);display:flex;align-items:center;justify-content:center;font:15px system-ui,sans-serif";
+    const box = Object.assign(document.createElement("div"), { textContent: `Sagebrush couldn't open its folder of your files (${(e as Error)?.message ?? e}). Nothing you do now would be kept, so editing is off. Quit Sagebrush and open it again.` });
+    box.style.cssText = "background:#fff;color:#222;padding:16px 20px;border-radius:8px;max-width:32em";
+    shade.append(box);
+    document.body.append(shade);
+  }
+  void desktopModule().then((d) => d.drainOnQuit({ mirror: () => diskMirror, invoke, listen: (ev: string, f: () => void) => (window as any).__TAURI__.event.listen(ev, f), freeze: () => document.body.setAttribute("inert", ""), flushEditor: () => wsFlush() })).catch((e) => console.warn("quit:", e));
+}
+/** To `url`, once this page's changes are on disk (the desktop app; elsewhere at once). */
+async function leaveTo(url: string) {
+  if (diskMirror && !(await (await desktopModule()).beforeLeave(diskMirror, () => wsFlush()))) return;
+  location.assign(url);
+}
 // (a newer page upgraded the workspace: said, with Reload; and its files moved beside the index, a little at a time)
 if (ws) {
   ws.onClosed(() => showReloadNotice());
@@ -691,7 +714,7 @@ function blockedBar(message: string) {
     const back = Object.assign(document.createElement("button"), { textContent: "Back to files" });
     back.onclick = () => {
       const files = document.querySelector<HTMLButtonElement>('[data-sbb="files"]');
-      if (!files) return location.assign("/");
+      if (!files) return void leaveTo("/");
       if (files.getAttribute("aria-pressed") !== "true") files.click();
       document.querySelector<HTMLElement>("#wssidebar .fsearch, #wssidebar")?.focus();
     };
@@ -1095,6 +1118,8 @@ async function leaveFor(url: string, what: string): Promise<boolean> {
 }
 async function go(url: string, what: string): Promise<boolean> {
   if (!(await settled(what))) return false;
+  // (the desktop app: and on disk)
+  if (diskMirror && !(await (await desktopModule()).beforeLeave(diskMirror))) return false;
   location.assign(url);
   return true;
 }
@@ -1210,7 +1235,7 @@ async function uploadToWorkspace(w: Workspace, files: File[], mode: string, fold
 // (a data file opened as a document: its converted copy, made beside it, opened; the original stays; why not, if not)
 async function openAsHere(w: Workspace, e: Entry, as: DocKind, mode: string): Promise<string | null> {
   // (a Jupytext MyST .md as a notebook: the notebook page reads it, which this page's bundle doesn't carry the reader for)
-  if (as === "notebook" && /\.md$/i.test(e.path)) { location.assign(asNotebook(e as { path: string; fid: string })); return null; }
+  if (as === "notebook" && /\.md$/i.test(e.path)) { void leaveTo(asNotebook(e as { path: string; fid: string })); return null; }
   try {
     const made = as === "board" ? await convertedAsBoard(w, e, mode) : await convertCopy(w, e, as, { maxBytes: LIMITS.maxBoardBytes, mode, said: (m) => carryNotice(m) });
     openEntry(made, "here");
