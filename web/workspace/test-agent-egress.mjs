@@ -3,7 +3,7 @@
 // form the agent sends (agent-egress.ts); their three answers, each with its own action and digest (agent-cards.ts); the
 // card as the chat draws it (view.ts); and the tool rows' fixed label for a summary in another form (events.ts).
 //   bun web/workspace/test-agent-egress.mjs
-import { egressOf, turnInputOf, visible, webSummary, WEB_FETCH, WEB_SEARCH } from "./agent-egress.ts";
+import { egressOf, hostOk, turnInputOf, visible, webSummary, WEB_FETCH, WEB_SEARCH } from "./agent-egress.ts";
 import { PermissionCards } from "./agent-cards.ts";
 import { digestGate, DIGEST_CHARGE } from "./agent-relay.ts";
 import { permissionDigest } from "./agent-canon.ts";
@@ -48,11 +48,27 @@ const searchIn = (o = {}) => ({ provider: "Anthropic", reason: "", ...o });
     "a reason over 200 characters": fetchIn({ reason: "r".repeat(201) }),
     "a search with terms": searchIn({ query: "secret" }),
     "a search's provider not a name": searchIn({ provider: "<b>x</b>" }),
+    // (the platform's URL parser must give back exactly what was sent: never a form it rejects or rewrites)
+    "an invalid A-label": fetchIn({ origin: "https://xn--a.com" }),
+    "an A-label that isn't Punycode": fetchIn({ origin: "https://xn--abc.com" }),
+    "an A-label decoding to nothing non-ASCII": fetchIn({ origin: "https://xn--zz.com" }),
+    "a reserved ??-- label": fetchIn({ origin: "https://ab--c.com" }),
+    "an escaped dot segment the parser removes": fetchIn({ path: "/%2e%2e/x" }),
+    "a backslash the parser rewrites": fetchIn({ path: "/a\\b" }),
+    "a dot segment the parser removes": fetchIn({ path: "/a/../b" }),
+    "a short path claiming a cut": fetchIn({ path: "/a…" }),
+    "a cut at 197 bytes": fetchIn({ path: "/" + "a".repeat(196) + "…" }),
+    "a search's provider other than Anthropic": searchIn({ provider: "Evil Corp" }),
   };
   const passed = Object.entries(bad).filter(([, i]) => egressOf(i.provider !== undefined || i.query !== undefined ? WEB_SEARCH : WEB_FETCH, i) !== "bad").map(([k]) => k);
   ok(passed.length === 0, `each other form is refused (shown with Deny only): ${Object.keys(bad).length} forms`, passed);
   ok(egressOf(WEB_FETCH, fetchIn({ path: "/" + "a".repeat(199) + "…" })) !== "bad" && egressOf(WEB_FETCH, fetchIn({ path: "/%E2%80%AE" })) !== "bad", "a path the agent cut (200 bytes, then …) and an escape kept as it is are its form");
+  ok(egressOf(WEB_FETCH, fetchIn({ path: "/" + "a".repeat(197) + "…" })) !== "bad", "a cut at 198 bytes is its form too (the agent cuts before a %HH it would otherwise split)");
   ok(egressOf(WEB_FETCH, fetchIn({ origin: "https://xn--gthub-n4a.com" })) !== "bad", "a punycode host is its form (shown in ASCII)");
+  // (the A-labels checked by the page itself: a browser's URL parser takes https://xn--a.com as it is)
+  const hosts = { "xn--bcher-kva.com": true, "xn--bcher-kvaa.com": true, "xn--ls8h.la": true, "xn--bcher-kva.xn--p1ai": true, "github.com": true, "xn--a.com": false, "xn--abc.com": false, "xn--zz.com": false, "xn--.com": false, "ab--c.com": false };
+  const wrong = Object.entries(hosts).filter(([h, w]) => hostOk(h) !== w).map(([h]) => h);
+  ok(wrong.length === 0, "an A-label is one only if it decodes, encodes back to itself and the URL parser's IDNA gives back that host", wrong);
   ok(egressOf(WEB_FETCH, fetchIn({ reason: "r".repeat(200) })) !== "bad" && egressOf(WEB_FETCH, fetchIn({ reason: "😀".repeat(200) })) !== "bad", "a reason of 200 characters, counted as Unicode scalars");
 }
 
@@ -176,6 +192,8 @@ for (const [which, want] of [["turn", "allow_turn"], ["1", "allow"], ["0", "deny
 {
   ok(webSummary(WEB_FETCH, "https://github.com/a/b") === "https://github.com/a/b" && webSummary(WEB_SEARCH, "Anthropic") === "Anthropic", "a web row's summary in the agent's form is kept");
   ok(webSummary(WEB_FETCH, "https://github.com/s?q=secret") === "(address withheld)" && webSummary("web_fetch", "https://evil.com/#tok") === "(address withheld)" && webSummary(WEB_SEARCH, "secret terms here?") === "(search withheld)" && webSummary(WEB_FETCH, undefined) === "(address withheld)", "a query, a fragment or search terms: the fixed label");
+  const odd = ["https://xn--a.com/a", "https://github.com/a\\b", "https://github.com/a/../b", "https://github.com/a…", "https://github.com:443/a"].filter((x) => webSummary(WEB_FETCH, x) !== "(address withheld)");
+  ok(odd.length === 0 && webSummary(WEB_SEARCH, "Evil Corp") === "(search withheld)", "a row's summary the URL parser rejects or rewrites, a short cut, a port, or another provider: the fixed label", odd);
   ok(webSummary("mcp__sagebrush_page__workspace_read", "/a?b") === "/a?b", "other tools' rows unchanged");
   const t = newThread("conv", "chat");
   apply(t, { seq: 1, turn_id: "t1", type: "tool_call_started", call: "c1", tool: "tool", name: WEB_FETCH, summary: "https://x.com/?token=secret" });
