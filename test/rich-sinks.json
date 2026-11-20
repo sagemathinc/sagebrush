@@ -163,10 +163,6 @@
    "kind": "host",
    "owner": "host"
   },
-  "web/agents/page.ts :: renderHeader :: who.innerHTML = `<span class=\"conn wait\"></span>${esc(agentName())} <small>connected: allow it in the dialog</small>`; #0": {
-   "kind": "host",
-   "owner": "host"
-  },
   "web/agents/page.ts :: renderHeader :: who.innerHTML = `<span class=\"conn\"></span>Claude <small>not connected</small>`; #0": {
    "kind": "host",
    "owner": "host"
