@@ -1,7 +1,0 @@
-{
- "v": 1,
- "reason": "board pictures and code previews take SVG, shown only as an image (Codex friction recheck P9a, part 2): web/image-size.ts reads an SVG's size from its root (svgSize, svgText, pictureUrl, pictureSize, svgDataUrl) with byte caps and a fatal UTF-8 decode; doc.ts, images.ts, svg.ts, preview.ts and src/board-check.ts take a canonical base64 SVG data: URL; board run keeps an SVG preview. Growth is the SVG reader and its callers in the CLI. Figures: CI-order size record (bun 1.4.4) of the probe merge of this branch (stacked on #787) onto master c7d329d1 (#787 landed; r10, with one admission for every SVG and board check's reasons): pyjs +9299 of #791's own, this marker with a small margin; site/examples unchanged beyond #787's +504.",
- "bytes": {
-  "cli/pyjs.cjs": 9400
- }
-}

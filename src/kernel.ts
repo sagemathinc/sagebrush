@@ -6,7 +6,7 @@
 //
 //   sagebrush --install-jupyter-kernel [--user | --sys-prefix | --prefix P] [--mode sage|python|magma|matlab|all]
 //   sagebrush --uninstall-jupyter-kernel [...the same options]
-//   sagebrush --jupyter-kernel CONNECTION_FILE [--mode sage]   (what kernel.json runs)
+//   sagebrush --jupyter-kernel CONNECTION_FILE [--mode sage] [--pkgset ID|FILE]   (what kernel.json runs)
 //
 // The kernel's main thread owns the sockets (so heartbeats and interrupt
 // requests are answered while a cell runs); the code runs in a worker
@@ -21,15 +21,18 @@ import { homedir } from "os";
 import { Worker, parentPort, workerData } from "worker_threads";
 import { sessionLimits, startLimits } from "./limits";
 import { ZSocket } from "./zmtp";
-import { initParser, R, libDir, packageModuleNames } from "./compile";
+import { initParser, R, libDir, packageModuleNames, installPackageSet, coreBuildId, reservedNames } from "./compile";
+import { prepareSet } from "./pkgcache";
+import { admitIndex } from "./pkgset";
+import { oneLine } from "./terminal-text";
 import { needsMore, completeIn, ipythonSyntax } from "./interactive";
 import { magmaToPython, MagmaSyntaxError } from "./magma";
 import { matlabToPython, MatlabSyntaxError, matlabSyntaxMessage, matlabHostOps, matlabIsIncomplete } from "./matlab";
-import { mimeBundle } from "./runtime/index";
+import { mimeBundle, bundleMetadata, sayNote } from "./runtime/index";
 import { requestCtrlC } from "./runtime/interrupt";
 import { typeName } from "./runtime/object";
 import { exitStatus } from "./notebook-session";
-import { MAGIC_PRE, MAGIC_POST, GET_IPYTHON, magicTransform } from "./magic-syntax";
+import { MAGIC_PRE, MAGIC_POST, GET_IPYTHON, magicTransform, outputHistory } from "./magic-syntax";
 import { KERNEL_MODES, KERNEL_SPECS, isModeName, type KernelMode } from "./modes";
 
 export type Mode = KernelMode;
@@ -102,8 +105,14 @@ function modes(args: string[]): Mode[] {
 
 const LOGO = `<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 100 100"><rect width="100" height="100" rx="18.75" fill="#AE472A"/><path fill="#FADEB6" d="M14.5 63.4 16.5 61.8 18.8 59.8 25.3 58.4 26.3 56 27.4 54 28.6 52 30.2 50 32.8 48 33.3 43.3 43.5 43.3 43.5 48.6 45.7 48.6 45.7 45 47.3 45 47.3 49.2 47.9 50 49.6 52 43 54.2 37.1 56 34.4 58 31.2 60 29.6 62 28.9 63.4Z"/><path fill="#FADEB6" d="M55.6 63.4 57 62 59.7 60 63.6 58.6 64 55.2 67.7 55.2 67.7 51 68.2 49.6 69.6 49.6 70.4 51 70.4 55 71 56 72 58 76.9 60 79.6 62 81.6 63.4Z"/><path fill="#FADEB6" d="M58 39.5C57.7 40.7 58 44.7 57.6 46.5 57.2 48.3 56.9 49.1 55.6 50.2 54.3 51.4 52.5 52.1 50 53.4 47.5 54.7 42.6 56.8 40.4 58.2 38.2 59.6 36.6 60.7 36.7 62 36.8 63.3 38.6 64.7 41.2 66 43.8 67.3 50.3 68.7 52.4 69.9 54.5 71.1 54.9 72.2 53.8 73.4 52.6 74.6 49.2 75.6 45.5 77 41.8 78.4 34.9 80.6 31.5 82 28.1 83.4 25.4 84.7 25.3 85.4 25.2 86.2 27.7 86.2 31 86.5 34.3 86.8 40.2 87.7 45 87.5 49.8 87.3 55.7 86.4 60 85.2 64.3 84 68.4 82.3 70.6 80.6 72.8 78.9 73.4 76.8 73.3 75 73.2 73.2 72.4 71.5 70 70 67.6 68.5 62.7 67.2 59 66 55.3 64.8 50.2 63.7 48 62.6 45.8 61.5 45.2 60.8 45.9 59.6 46.6 58.4 49.9 56.7 52 55.2 54.1 53.7 57.1 52.3 58.4 50.6 59.7 48.9 59.5 46.9 59.7 45 59.9 43.1 59.7 40.4 59.4 39.5 59.1 38.6 58.3 38.3 58 39.5Z"/><path fill="#BAC49E" d="M59.2 40.8C54.5 36 54.8 28.5 60 24 65 19.6 72 17.5 79.3 13.4 79 21 77.5 28.5 71.5 33.6 67 37.4 62.5 39.3 59.9 40.8Z"/><path fill="#AE472A" d="M57.7 37C57.3 31 62 26.2 72.6 22.3 66 26.6 61.6 31.2 59.5 36.8Z"/></svg>`;
 
+/** How a kernel's figures are shown (lib/_graphics.py figures): its --figures */
+export const FIGURE_MODES = ["auto", "svg", "png", "both"];
+
 export function installKernel(args: string[], uninstall = false): number {
   try {
+    const f = args.indexOf("--figures");
+    const figures = f >= 0 ? args[f + 1] : null;
+    if (figures !== null && !FIGURE_MODES.includes(figures)) throw new Error(`--figures must be ${FIGURE_MODES.join(", ")}, not ${figures}`);
     const base = join(jupyterDataDir(args), "kernels");
     for (const mode of modes(args)) {
       const spec = SPECS[mode];
@@ -123,7 +132,7 @@ export function installKernel(args: string[], uninstall = false): number {
         run = [process.execPath, join(dir, "sagebrush.cjs")];
       }
       const kernel = {
-        argv: [...run, "--jupyter-kernel", "{connection_file}", "--mode", mode],
+        argv: [...run, "--jupyter-kernel", "{connection_file}", "--mode", mode, ...(figures ? ["--figures", figures] : [])],
         display_name: spec.display,
         language: spec.language,
         interrupt_mode: "message",
@@ -152,7 +161,21 @@ interface Msg {
   content: any;
 }
 
-export async function runKernel(connectionFile: string, mode: Mode): Promise<void> {
+export async function runKernel(connectionFile: string, mode: Mode, pkgset: string | null = null, figures: string | null = null): Promise<void> {
+  // The optional package set (src/pkgcache.ts): fetched and checked before the kernel starts, so a set that can't be
+  // had stops it with the reason, as `sagebrush --pkgset` stops a run; the worker then reads it from the cache.  (A
+  // relative file stays the same file: a cell's os.chdir moves only Python's working folder, never the process's.)
+  if (pkgset !== null) {
+    try {
+      // (admitted as the worker will admit it: an index that isn't the one its id names is refused here)
+      const [S, index] = await prepareSet(pkgset, coreBuildId(), reservedNames());
+      admitIndex(S, index, coreBuildId(), reservedNames());
+    } catch (e: any) {
+      process.stderr.write(`sagebrush: package set: ${oneLine(String(e?.message ?? e))}\n`);
+      process.exitCode = 2;
+      return;
+    }
+  }
   const c = JSON.parse(readFileSync(connectionFile, "utf8"));
   if (c.transport && c.transport !== "tcp") throw new Error(`transport ${c.transport} is not supported (only tcp)`);
   const key: string = c.key ?? "";
@@ -205,9 +228,17 @@ export async function runKernel(connectionFile: string, mode: Mode): Promise<voi
 
   const startWorker = () => {
     const entry = require.main?.filename ?? process.argv[1];
-    worker = new Worker(entry, { workerData: { sagebrushKernel: mode, sagebrushLimits: sessionLimits() }, stdout: false, stderr: false });
+    worker = new Worker(entry, { workerData: { sagebrushKernel: mode, sagebrushLimits: sessionLimits(), sagebrushPkgset: pkgset, sagebrushFigures: figures }, stdout: false, stderr: false });
     workerReady = new Promise((res) => {
       worker.on("message", (m: any) => {
+        // (the worker could not set itself up, e.g. a restart's package set gone since the kernel started: said as a
+        // run says it, and the kernel ends, so no request waits for a reply that can't come)
+        if (typeof m.fatal === "string") {
+          process.stderr.write(`sagebrush: ${m.fatal}\n`);
+          worker.terminate();
+          for (const s of [shell, control, stdin, iopub, hb]) s.close();
+          process.exit(2);
+        }
         if (m.ready) {
           intr = m.interrupt ? new Int32Array(m.interrupt) : null;
           res();
@@ -215,8 +246,8 @@ export async function runKernel(connectionFile: string, mode: Mode): Promise<voi
         }
         if (current && m.id === current.id) {
           if (m.stream && !current.silent) send(iopub, "stream", { name: m.stream, text: m.text }, current.msg);
-          else if (m.display && !current.silent) send(iopub, "display_data", { data: m.display, metadata: {}, transient: {} }, current.msg);
-          else if (m.result && !current.silent) send(iopub, "execute_result", { execution_count: current.count, data: m.result, metadata: {} }, current.msg);
+          else if (m.display && !current.silent) send(iopub, "display_data", { data: m.display, metadata: m.metadata ?? {}, transient: {} }, current.msg);
+          else if (m.result && !current.silent) send(iopub, "execute_result", { execution_count: current.count, data: m.result, metadata: m.metadata ?? {} }, current.msg);
           else if (m.clear && !current.silent) send(iopub, "clear_output", { wait: false }, current.msg);
           else if (m.error) {
             current.error = true;
@@ -257,7 +288,10 @@ export async function runKernel(connectionFile: string, mode: Mode): Promise<voi
     current = { id, msg, count, silent, error: false };
     const done = new Promise<any>((res) => pending.set(id, res));
     if (intr) Atomics.and(intr, 0, ~1); // (a Ctrl-C before this run: not for it; the other bits left)
-    worker.postMessage({ id, code: ct.code });
+    // (the execution count its values are recorded under, _N and Out[N]: its own when it counts (store_history), else
+    // the last one counted, 0 before any, whose entries it replaces, as IPython's displayhook does; a silent request
+    // shows and records nothing, as IPython runs it without the displayhook)
+    worker.postMessage({ id, code: ct.code, ...(silent ? { silent } : { count }) });
     const r = await done;
     if (killTimer !== null) {
       clearTimeout(killTimer);
@@ -437,7 +471,10 @@ export function interactNote(spec: any): string {
 
 export function kernelWorker(mode: Mode) {
   const port = parentPort!;
+  const figureMode: string | null = typeof workerData?.sagebrushFigures === "string" ? workerData.sagebrushFigures : null;
   let current: number | null = null;
+  let currentCount: number | null = null;
+  let currentSilent = false;
   // stdout and stderr to the main thread, at least every 100 ms during a run
   // (timed from the start of the cell)
   let last = 0;
@@ -482,12 +519,15 @@ export function kernelWorker(mode: Mode) {
     // (a Python notebook: a value shown as IPython shows it, src/runtime/index.ts
     // displayText; Sage's, Magma's and MATLAB's keep the repr, as SageMath's shell does)
     ipython: mode === "python",
+    // (how figures are shown, unless the notebook's code says otherwise (lib/_graphics.py figures): the kernel's
+    // --figures, or SAGEBRUSH_FIGURES; else "auto")
+    figures: () => figureMode,
     // (MATLAB: a function file, name.m, found on the path, as Python)
     ...matlabHostOps(),
     display(bundle: Record<string, string>) {
       if (current === null) return false;
       flush();
-      port.postMessage({ id: current, display: bundle });
+      port.postMessage({ id: current, display: bundle, metadata: bundleMetadata(bundle) });
       return true;
     },
     clear_output() {
@@ -537,6 +577,16 @@ export function kernelWorker(mode: Mode) {
     const sys = R.importModule("sys");
     sys.path.push(process.cwd());
     sys.path.push(libDir());
+    // (the kernel's package set, which the main thread fetched and checked)
+    if (typeof workerData?.sagebrushPkgset === "string") {
+      try {
+        const [S, index, read] = await prepareSet(workerData.sagebrushPkgset, coreBuildId(), reservedNames());
+        installPackageSet(S, index, read);
+      } catch (e: any) {
+        port.postMessage({ fatal: `package set: ${oneLine(String(e?.message ?? e))}` });
+        throw e;
+      }
+    }
     // (the kernel's limits, before any cell: src/limits.ts; checked by the
     // main thread before this worker started, so a failure here is not expected)
     const bad = startLimits(R, workerData?.sagebrushLimits ?? null);
@@ -552,16 +602,19 @@ export function kernelWorker(mode: Mode) {
     R.builtins.__sagebrush_jupyter__ = true;
     // the value of a cell's last expression: an execute_result
     R.builtins.__pyjs_displayhook__ = (v: any) => {
-      if (v !== null) {
-        R.builtins._ = v;
+      if (v !== null && !currentSilent) {
+        // (IPython's output history: _, __, ___, _N and Out: src/magic-syntax.ts)
+        R.callObj(R.builtins.__pyjs_record_output__, currentCount === null ? [v] : [v, currentCount]);
         const b = mimeBundle(v) ?? {};
         b["text/plain"] ??= R.displayText(v);
         flush();
-        if (current !== null) port.postMessage({ id: current, result: b });
+        if (current !== null) port.postMessage({ id: current, result: b, metadata: bundleMetadata(b) });
+        sayNote();
       }
       return null;
     };
     run(GET_IPYTHON, host, "exec", "<init>");
+    run(outputHistory(true), host, "exec", "<init>");
     if (mode === "sage") run("from sage_all import *\nimport _sage_lazy as _sage_lazy_; _sage_lazy_.bind(globals()); del _sage_lazy_\n", main, "exec", "<sage>");
     return { main, host };
   })();
@@ -579,6 +632,8 @@ export function kernelWorker(mode: Mode) {
       return;
     }
     current = m.id;
+    currentCount = typeof m.count === "number" ? m.count : null;
+    currentSilent = m.silent === true;
     last = Date.now();
     errorReported = null;
     line = "";

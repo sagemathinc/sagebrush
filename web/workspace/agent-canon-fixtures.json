@@ -1,0 +1,282 @@
+{
+ "source": "sagebrush-agent 0.4.0 test/canon-fixtures.json, sha256 09f5400ad4232158984bafacf234dfb002a02c939372a47ea1656996a930714d (source 5a5ba27c); the four size cases as the strings they are made of (string: [[character, count], ...], their input JSON.stringify of it), not written out",
+ "domain": "sb-agent-permission/1\n",
+ "ids": {
+  "child": "child-fixture",
+  "conversation": "conversation-fixture",
+  "request": "perm-fixture",
+  "tool": "WebFetch"
+ },
+ "max": 16384,
+ "depth": 32,
+ "cases": [
+  {
+   "class": "key-order",
+   "name": "ascii keys sorted",
+   "input": "{\"b\":1,\"a\":2,\"C\":3,\"_\":4}",
+   "ok": true,
+   "canon": "{\"C\":3,\"_\":4,\"a\":2,\"b\":1}",
+   "digest": "S8A46XLahhGwqFdKffmvM2jlFICXI3TBO6207JAKimk"
+  },
+  {
+   "class": "key-order",
+   "name": "non-ASCII keys by UTF-16 unit",
+   "input": "{\"é\":1,\"z\":2,\"€\":3,\"Z\":4}",
+   "ok": true,
+   "canon": "{\"Z\":4,\"z\":2,\"é\":1,\"€\":3}",
+   "digest": "BWASOoZeYAlX_Y1K0oFz-RBGGn25Ppn_I6t9YyewIRY"
+  },
+  {
+   "class": "key-order",
+   "name": "an astral key sorts before U+FFFF (UTF-16 units, not code points)",
+   "input": "{\"\\uffff\":1,\"\\ud83d\\ude00\":2,\"a\":3}",
+   "ok": true,
+   "canon": "{\"a\":3,\"😀\":2,\"￿\":1}",
+   "digest": "WwsZhVU6eUfYnF2jced8pMZCXu1FTQfWpolgx1C3mFk"
+  },
+  {
+   "class": "key-order",
+   "name": "nested objects sorted at each level",
+   "input": "{\"y\":{\"b\":1,\"a\":[{\"d\":1,\"c\":2}]},\"x\":null}",
+   "ok": true,
+   "canon": "{\"x\":null,\"y\":{\"a\":[{\"c\":2,\"d\":1}],\"b\":1}}",
+   "digest": "ELuqi8XpZLCoe_9sodVyhPOaGS-tMa6ODzeJs85zVhc"
+  },
+  {
+   "class": "key-order",
+   "name": "the empty key first",
+   "input": "{\"a\":1,\"\":2}",
+   "ok": true,
+   "canon": "{\"\":2,\"a\":1}",
+   "digest": "_lkHwE2royOMVPEr1h-w5oQ4q2GX8KaWz3BMAnwR5Cs"
+  },
+  {
+   "class": "escape",
+   "name": "quote",
+   "input": "\"say \\\"hi\\\"\"",
+   "ok": true,
+   "canon": "\"say \\\"hi\\\"\"",
+   "digest": "k8ybwMZyaZUGbONtpKTdMLQbu1y-V8qL4c7spJ0iKZI"
+  },
+  {
+   "class": "escape",
+   "name": "backslash",
+   "input": "\"a\\\\b\"",
+   "ok": true,
+   "canon": "\"a\\\\b\"",
+   "digest": "tIsxKp_zdDobmPrSNJmV2fOAi6U5Dp2mfmh2dFISSmU"
+  },
+  {
+   "class": "escape",
+   "name": "the short escapes b f n r t",
+   "input": "\"\\b\\f\\n\\r\\t\"",
+   "ok": true,
+   "canon": "\"\\b\\f\\n\\r\\t\"",
+   "digest": "b4K4o_SbWxk7TmZyP06V_bIkLKcumunXexi_0Op0fB8"
+  },
+  {
+   "class": "escape",
+   "name": "NUL and U+001F as lower-case \\u00xx",
+   "input": "\"\\u0000\\u001f\\u000b\"",
+   "ok": true,
+   "canon": "\"\\u0000\\u001f\\u000b\"",
+   "digest": "RcKy01lp-Ri7Qt1DQ3pzENwBZy2_EC-giW_jTcwj8II"
+  },
+  {
+   "class": "escape",
+   "name": "DEL, U+2028 and solidus written as they are",
+   "input": "\"\\u007f\\u2028/\"",
+   "ok": true,
+   "canon": "\" /\"",
+   "digest": "fKgkrE8jGg0xd4WukYqvk1zvnZQMNfVnC490cdQLLg4"
+  },
+  {
+   "class": "escape",
+   "name": "non-ASCII and astral written as they are",
+   "input": "\"é€\\ud83d\\ude00\"",
+   "ok": true,
+   "canon": "\"é€😀\"",
+   "digest": "OSnl1LQ88ph7XSV1iui0HUlUqPeFosxbJc9rrljsjj8"
+  },
+  {
+   "class": "escape",
+   "name": "escapes inside keys",
+   "input": "{\"a\\\"b\\n\":1}",
+   "ok": true,
+   "canon": "{\"a\\\"b\\n\":1}",
+   "digest": "q0JG858iiRah6LfJ6HCZ0Lp_iy5qDAkx-v7FK5WcSzo"
+  },
+  {
+   "class": "surrogate",
+   "name": "a lone high surrogate",
+   "input": "\"x\\ud800y\"",
+   "ok": true,
+   "canon": "\"x\\ud800y\"",
+   "digest": "zDeS3VaHLvPB_Qlk-oltBwmBEe2hrxN-tCz8hr7oKI0"
+  },
+  {
+   "class": "surrogate",
+   "name": "a lone low surrogate",
+   "input": "\"\\udc00\"",
+   "ok": true,
+   "canon": "\"\\udc00\"",
+   "digest": "H3iuSRum6ckykieOSN9i0o59kZlnGp0RL-0qpbOEBP0"
+  },
+  {
+   "class": "surrogate",
+   "name": "a reversed pair",
+   "input": "\"\\ude00\\ud83d\"",
+   "ok": true,
+   "canon": "\"\\ude00\\ud83d\"",
+   "digest": "D8Uy674bmJqHboJD5XwiX_wzi6WMOcwmx0Y6YfOS2T0"
+  },
+  {
+   "class": "surrogate",
+   "name": "a high surrogate at the end",
+   "input": "\"ab\\udbff\"",
+   "ok": true,
+   "canon": "\"ab\\udbff\"",
+   "digest": "KvcCfaMBuayEHzbZcrS53tPQHmN1oS7RTx3Q2OU1zf4"
+  },
+  {
+   "class": "integer",
+   "name": "2^53 - 1",
+   "input": "9007199254740991",
+   "ok": true,
+   "canon": "9007199254740991",
+   "digest": "LUO4-4N2ipg-VdRKJ2YOTGPvOoAXTrf6aK8StWbpSAM"
+  },
+  {
+   "class": "integer",
+   "name": "-(2^53 - 1)",
+   "input": "-9007199254740991",
+   "ok": true,
+   "canon": "-9007199254740991",
+   "digest": "LG-mvqIsPNarqAw_sfCkW0z2uPiAN1nkpKPfyUNccUY"
+  },
+  {
+   "class": "integer",
+   "name": "zero",
+   "input": "0",
+   "ok": true,
+   "canon": "0",
+   "digest": "SzMk6q4MTk99mRdV_XNPaBGzmEGF3jf5RP20hnptj-c"
+  },
+  {
+   "class": "integer",
+   "name": "2^53 refused",
+   "input": "9007199254740992",
+   "ok": false
+  },
+  {
+   "class": "integer",
+   "name": "-2^53 refused",
+   "input": "-9007199254740992",
+   "ok": false
+  },
+  {
+   "class": "refused-value",
+   "name": "a fraction refused",
+   "input": "1.5",
+   "ok": false
+  },
+  {
+   "class": "refused-value",
+   "name": "-0 refused",
+   "input": "-0",
+   "ok": false
+  },
+  {
+   "class": "refused-value",
+   "name": "an overflow to Infinity refused",
+   "input": "1e400",
+   "ok": false
+  },
+  {
+   "class": "refused-value",
+   "name": "a fraction inside an object refused",
+   "input": "{\"a\":[1,2.5]}",
+   "ok": false
+  },
+  {
+   "class": "literal",
+   "name": "null, true, false, empty containers",
+   "input": "[null,true,false,[],{}]",
+   "ok": true,
+   "canon": "[null,true,false,[],{}]",
+   "digest": "TCPiydYu6nSrFBJVw-fJHIyFe_6z3hgQDL4nAEhx-Vo"
+  },
+  {
+   "class": "depth",
+   "name": "32 nested containers accepted",
+   "input": "[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[0]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]",
+   "ok": true,
+   "canon": "[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[0]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]",
+   "digest": "ydA6jZo19R6gQgbVe2694sbfGfIL_3d84_egPv74ynU"
+  },
+  {
+   "class": "depth",
+   "name": "33 nested containers refused",
+   "input": "[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[0]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]",
+   "ok": false
+  },
+  {
+   "class": "size",
+   "name": "exactly 16 KiB accepted",
+   "input": null,
+   "ok": true,
+   "digest": "6GvCsPS49FFQ6lBl4at-Vm-Vbl3oP5X5jNy3PPqCGYw",
+   "string": [
+    [
+     "x",
+     16382
+    ]
+   ]
+  },
+  {
+   "class": "size",
+   "name": "16 KiB + 1 refused",
+   "input": null,
+   "ok": false,
+   "string": [
+    [
+     "x",
+     16383
+    ]
+   ]
+  },
+  {
+   "class": "size",
+   "name": "16 KiB of 3-byte characters, exactly",
+   "input": null,
+   "ok": true,
+   "digest": "umSmO7k5TP-tAYtz2K5Cen784GMGKw8k1Nq-JoX_Qhc",
+   "string": [
+    [
+     "€",
+     5460
+    ],
+    [
+     "x",
+     2
+    ]
+   ]
+  },
+  {
+   "class": "size",
+   "name": "an escape that crosses the edge refused",
+   "input": null,
+   "ok": false,
+   "string": [
+    [
+     "x",
+     16381
+    ],
+    [
+     "\n",
+     1
+    ]
+   ]
+  }
+ ]
+}

@@ -56,6 +56,11 @@ declare const __SB_RASTER_HASH__: string;
 declare const __SB_ND_HASH__: string;
 (globalThis as any).__SAGEBRUSH_ND_URL__ = FILES ? FILES["sagebrush-nd.wasm"] : new URL("sagebrush-nd.wasm?h=" + __SB_ND_HASH__.slice(0, 16), BASE).href;
 (globalThis as any).__SAGEBRUSH_ND_SHA256__ = __SB_ND_HASH__;
+// the multiprecision core likewise, the first time mpmath calls into it
+// (src/runtime/mpcore.ts; the runner's broker may fetch it, web/runner-fetch.mts)
+declare const __SB_MP_HASH__: string;
+(globalThis as any).__SAGEBRUSH_MP_URL__ = FILES ? FILES["sagebrush-mp.wasm"] : new URL("sagebrush-mp.wasm?h=" + __SB_MP_HASH__.slice(0, 16), BASE).href;
+(globalThis as any).__SAGEBRUSH_MP_SHA256__ = __SB_MP_HASH__;
 // (the build's id, version and notices; the library itself is fetched in
 // chunks, web/lib-lazy.ts, which must come before src/compile)
 import "../build/cli/lib-meta.gen.js";
@@ -66,6 +71,7 @@ import { decide, policyOf } from "./notebook/confine.js";
 import { startDirOf } from "./start-dir";
 import { ndWarm, ndWarmAsked } from "../src/runtime/nd";
 import { R, onOptionalUse } from "../src/compile";
+import { setStreamClock } from "../src/runtime/builtins";
 import { notebookSession } from "../src/notebook-session";
 import { waitForLine } from "../src/stdin-wait";
 import { LIVE_DEADLINE_MS, LIVE_MAX_BYTES, waitForAnswer, type LiveAnswer } from "../src/live-data";
@@ -123,6 +129,8 @@ function liveData(req: LiveRequest): LiveAnswer | null {
   postMessage({ id: req.id, target: req.target, liveData: { op: req.op, params: req.params, key }, buffer });
   return waitForAnswer(buffer, R.INTR, LIVE_DEADLINE_MS);
 }
+// (the streams flush by the real clock, not the one a run's replay records: web/replay-env.ts)
+setStreamClock(replayEnv.now);
 const session = notebookSession((m) => postMessage(m), {
   stdin,
   liveData,

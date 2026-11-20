@@ -1012,6 +1012,9 @@ class _MCmap:
 
 
 def call(name, nargout, args):
+    if _m._latex[0] and name in ("print", "saveas", "exportgraphics"):
+        # (a LaTeX run writes no picture file: refused by the name called, before anything is drawn or written)
+        _m._latex_refuse(name)
     f = _FUNCS.get(name)
     if f is None:
         raise _m._err("'%s' is not supported yet." % name)
@@ -3309,7 +3312,7 @@ def _tick_values(lo, hi, ticint=5):
     return out
 
 
-from _graphics import Primitive as _Primitive, _fmt as _gfmt, _esc as _gesc
+from _graphics import Primitive as _Primitive, _fmt as _gfmt, _esc as _gesc, InlineFigure as _InlineFigure
 
 
 class _Faces(_Primitive):
@@ -3916,7 +3919,7 @@ def _scene_within(scene):
     return True
 
 
-class FigureView:
+class FigureView(_InlineFigure):
     """a figure as shown: its SVG everywhere, and for one 3-D axes also the
     interactive 3-D view (drag to rotate), as Sage's 3-D graphics show"""
 
@@ -3924,8 +3927,12 @@ class FigureView:
         self.svg = figure_svg(fig, mfig)
         self.scene = figure_scene(fig)
 
-    def _repr_svg_(self):
+    def _sagebrush_svg_(self):
         return self.svg
+
+    def _repr_png_(self):
+        # (a 3-D axes shows its interactive view, with its SVG as the still picture, as before)
+        return None if self.scene is not None else _InlineFigure._repr_png_(self)
 
     def description(self):
         from _graphics import describe_svg
@@ -3933,7 +3940,16 @@ class FigureView:
 
     def _repr_mimebundle_(self, include=None, exclude=None):
         if self.scene is None:
-            return {"image/svg+xml": self.svg, "text/plain": self.description()}
+            # (in the formats figures are shown in: _graphics.figure_formats)
+            b, md = {"text/plain": self.description()}, {}
+            svg, png = self._repr_svg_(), self._repr_png_()
+            if svg is not None:
+                b["image/svg+xml"] = svg
+            if isinstance(png, tuple):  # ("retina": the PNG at twice the size, and the size to show it at)
+                png, md["image/png"] = png
+            if png is not None:
+                b["image/png"] = png
+            return (b, md) if md else b
         import json
         from sage_plot3d import SCENE_MIME, viewer_html, jupyter_bundle, _in_jupyter
         title = self.description()
@@ -3958,6 +3974,10 @@ def flush():
         if _m._text(f.props["Visible"]) == "off":
             continue
         if not any(isinstance(a, Axes) and a.valid and (a.children or _text_value(a.title.props["String"])) for a in f.children):
+            continue
+        if _m._latex[0]:
+            # (a LaTeX run: the figure isn't drawn, and its item's output says so)
+            _m._write(_m.LATEX_FIGURE + "\n")
             continue
         _gshow(FigureView(f), "figure")
 

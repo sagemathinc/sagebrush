@@ -79,6 +79,34 @@ test("magma: files in order, name:=value, -b and -n accepted; refusals and the a
   });
   assert.deepEqual(said(readCommand("magma", ["-d"], W, false)), { code: 2, stdout: "", stderr: "magma: -d isn't available in the Terminal\n" });
   assert.equal(said(readCommand("magma", ["--bogus"], W, false))!.code, 1);
+  // (an option Magma doesn't have: Magma 2.18-5's usage line, on stderr, status 1, nothing run; @sagebrush-magma's record,
+  // with `magma` for the internal magma.exe)
+  const usage = "Usage: magma [-d] [-l limit] [-b] [-n] [-s startfile] [-S seed] [-r workspace] [-c package] [-q directory machine] [filelist]\n";
+  for (const argv of [["-Z", "file.m"], ["-Z"], ["--foo"], ["--foo", "file.m"]]) assert.deepEqual(said(readCommand("magma", argv, W, false)), { code: 1, stdout: "", stderr: usage }, argv.join(" "));
   assert.deepEqual(said(readCommand("magma", [], W, false)), { code: 2, stdout: "", stderr: "magma: the interactive prompt isn't available in the Terminal yet. Run magma FILE, or pipe code in.\n" });
   assert.deepEqual(readCommand("magma", ["x:=1"], W, true), { run: true, mode: "magma", argv0: "magma", source: { kind: "stdin" }, argv: [""], path0: W, vars: [["x", "1"]] });
+});
+
+test("a bare python, sage, matlab or magma at the person's own Terminal line (interactive) is a prompt plan; every other form keeps its answer", () => {
+  const prompt = (name: "python" | "python3" | "sage" | "matlab" | "magma", args: string[] = []) => readCommand(name, args, W, false, true);
+  assert.deepEqual(prompt("python3"), { run: true, mode: "python", argv0: "python3", source: { kind: "prompt" }, argv: [""], path0: "" });
+  assert.deepEqual(prompt("python"), { run: true, mode: "python", argv0: "python", source: { kind: "prompt" }, argv: [""], path0: "" });
+  // (the options a prompt accepts are the line's: -B and -u, as CPython's interactive python)
+  assert.deepEqual(prompt("python3", ["-B"]), { run: true, mode: "python", argv0: "python3", source: { kind: "prompt" }, argv: [""], path0: "", noBytecode: true });
+  assert.deepEqual(prompt("sage"), { run: true, mode: "sage", argv0: "sage", source: { kind: "prompt" }, argv: [""], path0: "" });
+  assert.deepEqual(prompt("matlab", ["-nodesktop", "-sd", "../t"]), { run: true, mode: "matlab", argv0: "matlab", source: { kind: "prompt" }, argv: [""], path0: "", startIn: "/w/t" });
+  assert.deepEqual(prompt("magma", ["n:=3"]), { run: true, mode: "magma", argv0: "magma", source: { kind: "prompt" }, argv: [""], path0: W, vars: [["n", "3"]] });
+  // (interactive changes only the bare form: a file, -c, -batch, a pipe and every refusal read as before)
+  assert.equal((prompt("python3", ["a.py"]) as any).source.kind, "file");
+  assert.equal((prompt("sage", ["-c", "1"]) as any).source.kind, "code");
+  assert.equal((prompt("matlab", ["-batch", "disp(1)"]) as any).source.kind, "code");
+  assert.deepEqual(said(prompt("sage", ["-n"])), { code: 2, stdout: "", stderr: "sage: -n isn't available in the Terminal\n" });
+  assert.deepEqual(readCommand("python3", [], W, true, true), { run: true, mode: "python", argv0: "python3", source: { kind: "stdin" }, argv: [""], path0: "" });
+  // (not interactive, which is the default: the alone-line refusal, byte for byte as before)
+  for (const n of ["python3", "sage", "matlab", "magma"] as const) {
+    const was = readCommand(n, [], W, false);
+    assert.equal(was.run, false, n);
+    assert.deepEqual(readCommand(n, [], W, false, false), was, n);
+    assert.match((was as any).stderr, /the interactive prompt isn't available in the Terminal yet/, n);
+  }
 });

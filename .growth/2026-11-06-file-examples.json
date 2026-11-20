@@ -1,7 +1,0 @@
-{
- "v": 1,
- "reason": "File > Examples… (sim run 12, @sagebrush option B, Nov 6): a top-level Examples… item and New > From an example… open the examples gallery's panel (#549, its lazy chunk) on the notebook and board pages where the site serves it, else the page's own list as before (web/examples/open.ts: the catalog checked, then the chunk imported); a disabled File-menu item's reason as its title (the board's Share…: Download > HTML instead). Growth: the menu item, the reason option, open.ts and its wiring in the web build cli/pyjs.cjs embeds, measured +1779 B on master f4574baf, marked 1840.",
- "bytes": {
-  "cli/pyjs.cjs": 1840
- }
-}

@@ -1,7 +1,7 @@
 // The agents chat's turn view (web/agents, and the chat panel to come): a person's message and an agent's turn as DOM
 // nodes, its tool calls, permission prompts and artifact cards, as the Agents page has always drawn them. What a click
 // does (answering a prompt, opening an artifact) and how Markdown is rendered are the caller's, passed in.
-import { ATTENTION_STATES, TOOL_STATUSES, count, langOf, own, type Artifact, type Thread, type ToolCall, type Turn, type UserEntry } from "./events";
+import { ATTENTION_STATES, TOOL_STATUSES, count, langOf, own, type Artifact, type Attention, type Thread, type ToolCall, type Turn, type UserEntry } from "./events";
 
 // (a class name from a known set only, whatever the thread holds: a stored thread from before apply checked it included)
 const cls = (v: unknown, xs: readonly string[]) => (typeof v === "string" && xs.includes(v) ? v : "other");
@@ -9,18 +9,30 @@ const esc = (s: string) => s.replace(/&/g, "&amp;").replace(/</g, "&lt;").replac
 
 /** What a turn's node does when it's used: answer a permission prompt, open an artifact; and its Markdown renderer. */
 export interface TurnHooks {
-  answer(attention: string, approve: boolean): void;
+  /** a permission prompt's answer: its id, Allow (true), Deny (false) or a web card's "for this turn" ("turn"), the
+   *  turn it was shown in, and the page's token for that very card */
+  answer(attention: string, approve: boolean | "turn", turn: string, instance: string): void;
   openArtifact(id: string): void;
   md(src: string): string;
 }
 
+/** A steer's line under the person's message: what the agent said happened to it. */
+export function steerTag(e: UserEntry): string {
+  if (e.receipt === "delivered") return "Delivered to the running turn";
+  if (e.receipt === "rejected") return e.receipt_reason === "busy" ? "Not delivered: the agent had too many messages waiting" : "Not delivered: the agent dropped it when the turn ended";
+  if (e.receipt === "queued") return e.receipt_reason === "codex" ? "Queued, runs next: this agent takes it after the turn" : e.receipt_reason === "ended" ? "Queued, runs next: the turn ended first" : "Queued, runs next";
+  if (e.settled && (!e.receipt || e.receipt === "steering")) return "Sent during the turn";
+  return "Steering: Claude reads it at its next step";
+}
+
 export function userNode(e: UserEntry, md: (src: string) => string): HTMLElement {
   const div = document.createElement("div");
-  div.className = `user ${cls(e.mode, ["sent", "queued", "note"])}`;
+  div.className = `user ${cls(e.mode, ["sent", "queued", "note", "steer"])}`;
   div.innerHTML =
     `<div class="bubble board-text">${md(e.text)}</div>` +
     (e.mode === "queued" ? `<div class="tag">Queued: sent when the current turn ends</div>` : "") +
-    (e.mode === "note" ? `<div class="tag">Note: not sent to the agent</div>` : "");
+    (e.mode === "note" ? `<div class="tag">Note: not sent to the agent</div>` : "") +
+    (e.mode === "steer" ? `<div class="tag">${steerTag(e)}</div>` : "");
   return div;
 }
 
@@ -41,13 +53,15 @@ export function turnNode(thread: Thread, turn: Turn, h: TurnHooks): HTMLElement 
     } else if (p.kind === "attention") {
       const a = own(turn.attention, p.id);
       if (!a) continue;
-      const open = a.state === "open" && !turn.outcome;
+      const open = a.state === "open" && !turn.outcome && !turn.away;
       parts.push(
-        `<div class="attention ${cls(a.state, ATTENTION_STATES)}" data-attention="${esc(a.id)}"><div class="att-title">⚠ ${esc(a.title)}</div>` +
+        `<div class="attention ${cls(a.state, ATTENTION_STATES)}" data-attention="${esc(a.id)}" data-instance="${esc(a.instance ?? "")}"><div class="att-title">⚠ ${esc(a.title)}</div>` +
+          (a.body ? `<div class="att-body">${esc(a.body)}</div>` : "") +
           (a.summary ? `<div class="att-summary">${esc(a.summary)}</div>` : "") +
+          (a.reason ? `<div class="att-reason">${esc(a.reason)}</div>` : "") +
           (a.detail ? `<details class="att-detail"${open ? " open" : ""}><summary>All of the request</summary><pre>${esc(a.detail)}</pre></details>` : "") +
           (open
-            ? `<div class="att-actions"><button class="primary" data-approve="1">Allow</button><button data-approve="0">Deny</button></div>`
+            ? `<div class="att-actions${a.buttons === "three" ? " three" : ""}">${attButtons(a)}</div>`
             : `<div class="att-state">${a.state === "approved" ? "Allowed" : a.state === "denied" ? "Denied" : "No answer"}</div>`) +
           `</div>`,
       );
@@ -60,6 +74,8 @@ export function turnNode(thread: Thread, turn: Turn, h: TurnHooks): HTMLElement 
   const status =
     turn.outcome === "interrupted"
       ? `<div class="status">Interrupted</div>`
+      : !turn.outcome && turn.away
+        ? `<div class="status">The connection to the agent was lost while this ran. Connect again to see how it went.</div>`
       : !turn.outcome
         ? `<div class="status working"><span class="spinner"></span>Working…</div>`
         : turn.usage
@@ -69,14 +85,26 @@ export function turnNode(thread: Thread, turn: Turn, h: TurnHooks): HTMLElement 
   div.innerHTML = `<div class="who"><span class="avatar">✳</span>${esc(turn.agent ?? "Claude")} ${tag}</div>${parts.join("")}${status}`;
   for (const b of div.querySelectorAll<HTMLButtonElement>("[data-approve]")) {
     b.onclick = () => {
-      const att = b.closest<HTMLElement>("[data-attention]")!.dataset.attention!;
-      h.answer(att, b.dataset.approve === "1");
+      const card = b.closest<HTMLElement>("[data-attention]")!;
+      const v = b.dataset.approve;
+      h.answer(card.dataset.attention!, v === "turn" ? "turn" : v === "1", turn.turn_id, card.dataset.instance ?? "");
     };
   }
   for (const b of div.querySelectorAll<HTMLButtonElement>("[data-artifact]")) {
     b.onclick = () => h.openArtifact(b.dataset.artifact!);
   }
   return div;
+}
+
+/** A card's buttons: a web card's three (for this turn, this request, Deny), two, or Deny alone, as it was admitted;
+ *  any other card's Allow and Deny. Deny is set apart (att-deny), so on a phone it stands alone below the others. */
+function attButtons(a: Attention): string {
+  const deny = `<button class="att-deny" data-approve="0">Deny</button>`;
+  if (a.buttons === "deny") return deny;
+  const allow = `<button class="primary" data-approve="1">${esc(a.allow || "Allow")}</button>`;
+  // (the primary style on Allow this request: the narrowest grant is the default-looking answer)
+  if (a.buttons === "three" && a.turn_label) return `<button data-approve="turn">${esc(a.turn_label)}</button>${allow}${deny}`;
+  return allow + deny;
 }
 
 export function toolHtml(t: ToolCall): string {
@@ -90,10 +118,10 @@ export function toolHtml(t: ToolCall): string {
 }
 
 export function artifactIcon(a: Artifact) {
-  return a.kind === "markdown" ? "📝" : a.kind === "diff" ? "±" : a.kind === "notebook" ? "📓" : "⌨";
+  return a.kind === "markdown" ? "📝" : a.kind === "diff" ? "±" : a.kind === "notebook" ? "📓" : a.kind === "board" ? "▦" : "⌨";
 }
 export function artifactLabel(a: Artifact) {
-  return a.kind === "markdown" ? "Document" : a.kind === "diff" ? "Changes" : a.kind === "notebook" ? "Notebook" : `Code${langOf(a.lang) ? ` · ${esc(langOf(a.lang)!)}` : ""}`;
+  return a.kind === "markdown" ? "Document" : a.kind === "diff" ? "Changes" : a.kind === "notebook" ? "Notebook" : a.kind === "board" ? "Board" : `Code${langOf(a.lang) ? ` · ${esc(langOf(a.lang)!)}` : ""}`;
 }
 
 // A line diff (longest common subsequence): small files only.

@@ -198,7 +198,7 @@ export function parseToml(texts) {
 }
 
 const isConfig = (f) => /(^|\/)\.cargo\/config(\.toml)?$/.test(f);
-export function workspaceModel(files, read, verifiedToolchain) {
+export function workspaceModel(files, read, verifiedToolchain, externalGitSources = {}) {
   const errors = [];
   const manifests = files.filter((f) => f.startsWith("engine/") && /(^|\/)Cargo\.toml$/.test(f));
   const configs = files.filter(isConfig);
@@ -249,7 +249,11 @@ export function workspaceModel(files, read, verifiedToolchain) {
         if (spec.workspace === true) spec = { ...(typeof wsDeps[key] === "string" ? { version: wsDeps[key] } : wsDeps[key] ?? {}), ...spec, fromWorkspace: true };
         const name = spec.package ?? key;
         deps[m].add(name);
-        if (spec.git !== undefined || spec.registry !== undefined || spec["registry-index"] !== undefined) errors.push(`${f}: ${where}.${key} comes from a git or alternative registry source (not modelled)`);
+        if (spec.git !== undefined || spec.registry !== undefined || spec["registry-index"] !== undefined) {
+          const pin = externalGitSources[name];
+          const exact = pin && spec.git === pin.git && spec.rev === pin.rev && spec.registry === undefined && spec["registry-index"] === undefined && spec.branch === undefined && spec.tag === undefined;
+          if (!exact) errors.push(`${f}: ${where}.${key} comes from an unpinned git or alternative registry source`);
+        }
         if (spec.path !== undefined) {
           const target = resolvePath(spec.fromWorkspace ? "engine" : `engine/${m}`, spec.path);
           const tm = /^engine\/([^/]+)$/.exec(target);
@@ -330,7 +334,7 @@ export function scan(files = tracked(), read = (f) => readFileSync(join(ROOT, f)
     for (const it of r.items) found.push({ file: f, item: it.item, hash: it.hash, from: it.from, to: it.to, bFrom: it.bFrom, bTo: it.bTo });
   }
   if (!files.includes("engine/Cargo.toml")) return { errors: [...errors, "engine/Cargo.toml missing"], found };
-  const model = workspaceModel(files, read, premises?.verified_toolchain);
+  const model = workspaceModel(files, read, premises?.verified_toolchain, premises?.external_git_sources);
   errors.push(...model.errors);
   errors.push(...overrideErrors(files, read));
   // build scripts: exactly the pinned ones, byte for byte (a build script can generate code: #234 r2 U1)
@@ -427,8 +431,8 @@ export function compilerSites(jsonTexts, found, root = ROOT) {
 // `--metadata FILE`: `cargo metadata --format-version 1 --locked` run in engine/ (the sweep's own root, config and
 // lockfile; a failed run rejects).  Checked against it (#234 r2 U2, r3 U1-SOURCE):
 // - its workspace members equal the model's;
-// - every package outside the workspace comes from crates.io (a path, git or other-registry package outside the
-//   workspace is treated as local and isn't modelled: that also refuses [patch]/[replace] and path overrides);
+// - every package outside the workspace comes from crates.io or an exact reviewed name/version/git/rev pin
+//   (other path, git or registry packages are refused, as are [patch]/[replace] and path overrides);
 // - no member is an unpinned local proc-macro crate;
 // - the compile-time closure (the external proc-macro crates, the members' build dependencies, and everything
 //   they depend on: the code that generates or shapes our crates' code at build time) is exactly the pinned set,
@@ -464,7 +468,8 @@ export function metadataErrors(metaText, model, premises, lockPackages, root = R
   const a = [...dirs].sort().join(","), b = [...model.members].sort().join(",");
   if (a !== b) errors.push(`cargo metadata's workspace members (${a}) differ from the model's (${b})`);
   const kinds = (p) => p.targets.flatMap((t) => t.kind);
-  for (const p of meta.packages) if (!ws.has(p.id) && p.source !== CRATES_IO) errors.push(`${p.name} ${p.version}: a package from ${p.source ?? "a local path"} outside the workspace (path, git, other-registry, patch or replace: treated as local, not modelled)`);
+  const gitPins = new Set(Object.entries(premises?.external_git_sources ?? {}).map(([name, p]) => `${name} ${p.version} git+${p.git}?rev=${p.rev}#${p.rev}`));
+  for (const p of meta.packages) if (!ws.has(p.id) && p.source !== CRATES_IO && !gitPins.has(`${p.name} ${p.version} ${p.source}`)) errors.push(`${p.name} ${p.version}: a package from ${p.source ?? "a local path"} outside the workspace (path, git, other-registry, patch or replace: not pinned)`);
   const pinnedPm = premises?.local_proc_macros ?? {};
   for (const p of meta.packages) if (ws.has(p.id) && kinds(p).includes("proc-macro") && !pinnedPm[`engine/${rel(p.manifest_path)}`]) errors.push(`engine/${rel(p.manifest_path)}: a local proc-macro crate not pinned (its expansions are invisible to the compiler sweep)`);
   const ext = meta.packages.filter((p) => !ws.has(p.id) && kinds(p).includes("proc-macro")).map((p) => `${p.name} ${p.version}`).sort();

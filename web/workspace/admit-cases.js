@@ -168,6 +168,65 @@ async function cases(check) {
     check(chosen.length === 1 && chosen[0].startsWith("/A/f (2)"), `a chosen name is asked about too: ${chosen}`);
   }
 
+  // ---- duplicate's expect: the source entry by identity, and the revision of the very record cloned, checked holding
+  // the lock before the destination is asked about; a mismatch is a conflict, nothing made (a notebook, a board, a file)
+  {
+    const docs = [
+      ["/A/n.ipynb", { cells: [{ cell_type: "code", source: "1", outputs: [] }] }, (i) => ({ cells: [{ cell_type: "code", source: String(i % 10), outputs: [] }] }), (i) => ({ cells: Array.from({ length: 20 + i }, () => ({ cell_type: "code", source: "y".repeat(50), outputs: [] })) })],
+      ["/A/b.board.json", { title: "b", nodes: [] }, (i) => ({ title: "c", nodes: [], n: i }), (i) => ({ title: "b", nodes: [], big: "z".repeat(500 + i) })],
+    ];
+    let k = 0;
+    const expectOf = async (p) => { const r = await w.read(p); return { kind: r.entry.kind, ref: r.entry.ref, fid: r.entry.fid, created: r.entry.created, rev: r.rev }; };
+    for (const [p, first, small, large] of docs) {
+      const kind = p.endsWith(".ipynb") ? "notebook" : "board", ext = kind === "notebook" ? ".ipynb" : ".board.json";
+      const to = () => `/A/seam-${++k}${ext}`;
+      await w.create(p, { content: first });
+      const tries = [
+        ["an in-place, record-only edit", async () => { const r = await w.read(p); await w.write(p, small(k), { base: r.rev }); }],
+        ["a larger edit", async () => { const r = await w.read(p); await w.write(p, large(k), { base: r.rev }); }],
+        ["a replacement (removed, made again: another ref)", async () => { await w.remove(p); await w.create(p, { content: first }); }],
+      ];
+      for (const [what, change] of tries) {
+        const x = await expectOf(p);
+        await change();
+        const d = to(), a = grant(A.fid);
+        let err = null;
+        try { await w.duplicate(p, d, { admit: a.admit, expect: x }); } catch (e) { err = e; }
+        check(err instanceof W.WorkspaceError && err.code === "conflict" && !(await w.stat(d)) && !a.seen.some((s) => s.role === "destination"),
+          `duplicate's expect, a ${kind}: ${what} between the expected rev and the copy is a conflict, nothing made, the destination never asked (${err?.code}: ${err?.message})`);
+      }
+      // (a replacement at the SAME revision: only the identity tells it from the record expected)
+      {
+        const q = p.replace(/(\.ipynb|\.board\.json)$/, "-same$1");
+        await w.create(q, { content: first });
+        const x = await expectOf(q);
+        await w.remove(q);
+        await w.create(q, { content: first });
+        const now = await expectOf(q), d = to();
+        let err = null;
+        try { await w.duplicate(q, d, { expect: x }); } catch (e) { err = e; }
+        check(now.rev === x.rev && now.ref !== x.ref && err instanceof W.WorkspaceError && err.code === "conflict" && !(await w.stat(d)),
+          `duplicate's expect, a ${kind} replaced by another at the same revision (${x.rev} and ${now.rev}): a conflict, nothing made (${err?.code}: ${err?.message})`);
+      }
+      const x = await expectOf(p), d = to();
+      await w.duplicate(p, d, { expect: x });
+      const src = await w.read(p), got = await w.read(d);
+      check(got.entry.kind === kind && JSON.stringify(kind === "notebook" ? got.content.cells : got.content) === JSON.stringify(kind === "notebook" ? src.content.cells : src.content), `duplicate's expect, a ${kind} unchanged: copied`);
+      const d2 = to(), old = await expectOf(p);
+      await w.write(p, small(k + 100), { base: old.rev });
+      await w.duplicate(p, d2);
+      check((await w.stat(d2))?.kind === kind, `a ${kind}'s duplicate without expect: as before (the file browser's Duplicate)`);
+    }
+    await w.create("/A/seam.txt", { content: enc("one") });
+    const f0 = await w.stat("/A/seam.txt"), x = { kind: f0.kind, ref: f0.ref, fid: f0.fid, created: f0.created, rev: f0.rev ?? 0 };
+    await w.write("/A/seam.txt", enc("two"), { base: f0.rev, fid: f0.fid });
+    let err = null;
+    try { await w.duplicate("/A/seam.txt", "/A/seam-copy.txt", { expect: x }); } catch (e) { err = e; }
+    check(err instanceof W.WorkspaceError && err.code === "conflict" && !(await w.stat("/A/seam-copy.txt")), `a file through the same seam: a changed rev is a conflict, nothing made (${err?.code})`);
+    await w.duplicate("/A/seam.txt", "/A/seam-copy.txt", { expect: { ...x, rev: (await w.stat("/A/seam.txt")).rev ?? 0 } });
+    check(dec((await w.readUpTo("/A/seam-copy.txt", 100)).content) === "two", "a file through the seam, unchanged since: copied");
+  }
+
   // ---- remove
   {
     const a = grant(A.fid);

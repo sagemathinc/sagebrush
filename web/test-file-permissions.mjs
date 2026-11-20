@@ -323,7 +323,8 @@ try {
   const remoteId = await ev("localStorage.getItem('sagebrush-current')");
   await go(base + "?open=" + encodeURIComponent(base + "remote.ipynb") + "&runner=0");
   await runAll();
-  check(await until("/can't run here/.test(document.querySelector('#cells .cell .out')?.textContent ?? '')", 30000), "?runner=0: a notebook from elsewhere doesn't run in the page's own interpreter, and says why: " + (await out()).slice(0, 120));
+  // (it says why in the run bar, above the notebook, with its one way to run it; its cells untouched)
+  check(await until(`!document.querySelector('#runbar').hidden && /To run in this page, this notebook needs permission to change files/.test(document.querySelector('#rbtext').textContent)`, 30000) && !/can't run here/.test(await out()), "?runner=0: a notebook from elsewhere doesn't run in the page's own interpreter, and the run bar says why: " + (await ev("document.querySelector('#rbtext').textContent")).slice(0, 160));
 
   // ---- the person's own notebook: writes; Don't allow file changes; a run in flight; reopen; Allow again
   await go(base + "?runner=1");
@@ -492,7 +493,7 @@ try {
   check(idA && idB && idA !== idB && (await files()) === false, "(two notebooks of the person's: A, then B, which isn't allowed)");
   await setCode("print('B ran')");
   await runAll();
-  check(await until("/can't run here: it isn't allowed to change your files/.test(document.querySelector('#cells .cell .out')?.textContent ?? '')", 30000), "?runner=0: the person's own notebook not allowed to change files doesn't run in the page's own interpreter, and says why: " + (await out()).slice(0, 140));
+  check(await until(`!document.querySelector('#runbar').hidden && /To run in this page, this notebook needs permission to change files/.test(document.querySelector('#rbtext').textContent)`, 30000) && !/B ran/.test(await out()), "?runner=0: the person's own notebook not allowed to change files doesn't run in the page's own interpreter, and the run bar says why");
   const { identifier: statusLog } = await send("Page.addScriptToEvaluateOnNewDocument", { source: `window.__statuses = []; new MutationObserver((ms) => { for (const m of ms) if (m.target.id === "status" || m.target.parentElement?.id === "status") for (const n of m.addedNodes) window.__statuses.push(n.textContent); }).observe(document, { childList: true, subtree: true });` });
   await go(base + "?runner=0");
   check((await ev("localStorage.getItem('sagebrush-current')")) === idB, "(reloaded into B; A has no interpreter in this page)");

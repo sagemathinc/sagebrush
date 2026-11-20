@@ -4,7 +4,7 @@
 // then `active`; the fences' counters and their mark kept by every later write (a reset's, a quarantine's, a
 // refresh's); a stop after each fence write carried on by the next open; a fence that can't be written leaving
 // it begun; and every writer from before the journal refused, this build's and the pinned pre-journal build's
-// (master f8976bfe's workspace and notebook stores, built beside this one: its open of a current (version-9) workspace
+// (master 35eab193's workspace and notebook stores, built beside this one: its open of a current (version-9) workspace
 // fails, and its saves and history writes are refused before they change anything).
 // The cases are in test-workspace-journal.page.js.
 //   CHROME=google-chrome bun web/workspace/test-workspace-journal.mjs
@@ -15,23 +15,34 @@ import { join } from "node:path";
 import { devtoolsPort } from "../test-port.mjs";
 
 const here = new URL(".", import.meta.url).pathname, root = join(here, "../..");
-// (the build from before the journal: its web/ and src/ as master f8976bfe had them, fetched if this checkout is shallow;
-// nothing here is skipped if it can't be had: the run fails)
-const PINNED = "f8976bfe971eb60fac535fa73ed5d2e2fee9083e";
+// (the build from before the journal: its web/ and src/ as master 35eab193 had them, fetched if this checkout is shallow,
+// else downloaded as that commit's archive; nothing here is skipped if it can't be had: the run fails, saying why)
+const PINNED = "35eab1937c7a201d5e7ce98bc0c4fa1cf7631285";
 const git = (...a) => spawnSync("git", a, { cwd: root, encoding: "utf8" });
 const have = () => git("rev-parse", "--verify", "-q", `${PINNED}^{commit}`).stdout.trim();
-const pinned = have() || (git("fetch", "-q", "--depth=1", "origin", PINNED), have());
-if (pinned !== PINNED) {
-  console.error("FAIL: the pinned pre-journal build (f8976bfe) isn't in this checkout and couldn't be fetched");
-  process.exit(1);
-}
+// (fetched by its hash, a few times (a CI runner's network may drop one); else its archive from GitHub, the same
+// commit's web/ and src/; git's and the download's own errors said if neither can be had)
+let gitWhy = "";
+const fetched = () => {
+  for (let i = 0; i < 3; i++) {
+    const r = git("fetch", "-q", "--depth=1", "origin", PINNED);
+    if (have() === PINNED) return true;
+    gitWhy = (r.stderr || r.error?.message || `exit ${r.status}`).trim().slice(0, 300);
+    spawnSync("sleep", [String(2 * (i + 1))]);
+  }
+  return false;
+};
+const viaGit = have() === PINNED || fetched();
 const site = mkdtempSync(join(tmpdir(), "sb-wsj-site-")), old = mkdtempSync(join(tmpdir(), "sb-wsj-old-"));
 {
-  const tar = spawnSync("sh", ["-c", `git archive ${pinned} web src | tar -x -C '${old}'`], { cwd: root });
-  if (tar.status !== 0) {
-    console.error("FAIL: the pinned build couldn't be unpacked: " + tar.stderr);
+  const unpack = viaGit
+    ? spawnSync("sh", ["-c", `git archive ${PINNED} web src | tar -x -C '${old}'`], { cwd: root, encoding: "utf8" })
+    : spawnSync("sh", ["-c", `curl -fsSL --retry 3 'https://codeload.github.com/sagemathinc/sagebrush/tar.gz/${PINNED}' | tar -xz -C '${old}' --strip-components=1 'sagebrush-${PINNED}/web' 'sagebrush-${PINNED}/src'`], { encoding: "utf8" });
+  if (unpack.status !== 0) {
+    console.error(`FAIL: the pinned pre-journal build (35eab193) couldn't be had: ${viaGit ? "" : `git fetch: ${gitWhy || "not fetched"}; `}${viaGit ? "git archive" : "its archive from GitHub"}: ${(unpack.stderr || `exit ${unpack.status}`).trim().slice(0, 300)}`);
     process.exit(1);
   }
+  if (!viaGit) console.log(`(the pinned build from its archive on GitHub: git fetch said ${gitWhy || "nothing"})`);
   symlinkSync(join(root, "node_modules"), join(old, "node_modules"));
 }
 const build = async (entry, naming) => {

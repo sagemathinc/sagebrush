@@ -1,6 +1,8 @@
 // A terminal on one of your computers (terminal addendum T1.4, build step T-3): its own chunk,
 // sagebrush-remote-terminal.js (web/build.ts), loaded by the notebook page only when ⋯ ▸ Terminal on your computer…
-// is chosen (offered with ?remote=1).  The site and the app serve it; the CLI's page doesn't (it can't reach a relay).  It lists your enrolled computers (GET /api/remote/v1/peers, kind "runner"),
+// is chosen (offered on the site when the account can use it).  The site and the app serve it, though only the site
+// offers it; the CLI's page doesn't (it can't reach a relay).  It lists your enrolled computers (GET
+// /api/remote/v1/peers, kind "runner"),
 // and draws one's shell in xterm (the @xterm/xterm 6.0 the console already ships, with @xterm/addon-fit), over the
 // relay's terminal page leg (remote-terminal.js: the protocol, the page's DPoP key and proofs, credit and acks).
 //
@@ -9,6 +11,7 @@
 // terminals (no image addons; OSC 52 swallowed; the title as text in the panel's header; links http(s) only, on a click).
 import { Terminal, FitAddon, TOOLBAR_CSS, BUTTON_CSS, ensureXtermCss, extraKeysRow, safeTerminal, themeFromCss } from "../term/xterm-view.ts";
 import { RemoteTerminal, terminalKey } from "./remote-terminal.js";
+import { listRunners, pageLegUrl as sharedLegUrl, type Runner } from "../workspace/remote-runners";
 
 // (the module's own check of a link, under xterm's OSC 8 filter: the page test imports it from this chunk)
 export { webHref, webLinksIn } from "../term/xterm-view.ts";
@@ -35,26 +38,12 @@ html.phone #rterm { bottom: calc(var(--bar-h, 56px) + var(--sb-preview-gutter, 0
 #rterm .rbody { flex: 1; min-height: 0; padding: 0 0 0 8px; }
 `;
 
-export interface Runner {
-  remote_id: string;
-  name: string;
-}
-
-/** Your enrolled computers: GET /api/remote/v1/peers (this site, its session cookie), kind "runner" only. */
-export async function listRunners(f: typeof fetch = fetch): Promise<Runner[]> {
-  const r = await f("/api/remote/v1/peers", { credentials: "same-origin", headers: { accept: "application/json" } });
-  if (r.status === 401 || r.status === 403) throw new Error("sign in to use your computers");
-  if (!r.ok) throw new Error(`this site can't list your computers (HTTP ${r.status})`);
-  const j = await r.json().catch(() => null);
-  const peers = Array.isArray(j?.peers) ? j.peers : [];
-  return peers
-    .filter((p: any) => p && p.kind === "runner" && typeof p.remote_id === "string" && p.remote_id.length > 0 && p.remote_id.length <= 200)
-    .map((p: any) => ({ remote_id: p.remote_id, name: typeof p.name === "string" && p.name.trim() ? p.name.trim().slice(0, 80) : p.remote_id.slice(0, 12) }));
-}
+// (your computers: the shared listing, web/workspace/remote-runners.ts, as the Agents page's Chat here uses it)
+export { listRunners, type Runner } from "../workspace/remote-runners";
 
 /** The relay's terminal page leg for a remote, on this site. */
 export function pageLegUrl(remoteId: string, loc: { protocol: string; host: string } = location): string {
-  return `${loc.protocol === "https:" ? "wss:" : "ws:"}//${loc.host}/api/remote/v1/page?${new URLSearchParams({ remote: remoteId, chan: "terminal" })}`;
+  return sharedLegUrl(remoteId, "terminal", loc);
 }
 
 

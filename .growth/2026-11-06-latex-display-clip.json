@@ -1,8 +1,0 @@
-{
- "v": 1,
- "reason": "LaTeX preview: displays never squeezed or clipped to fit a beamer slide, and their space as TeX's (sim run 11 X01 and run 12 BL01: a nested fraction's denominators cut off while check and render reported nothing). Three page CSS rules: a slide's blocks don't shrink, so an over-full frame overflows and is reported; KaTeX's .katex-display margin, doubled inside .dmath, is 0; a slide's display margin .4em beside the paragraph's .3em (flex items' margins don't collapse). Every LaTeX example's committed preview.html embeds the page CSS: the 10 previews in examples/ grow 146 B each; site/examples copies them. No other bundle grows. Measured +1460 B on each against master f6c42a88 (the size gate's paired records), marked exactly.",
- "bytes": {
-  "examples/corpus": 1460,
-  "site/examples": 1460
- }
-}

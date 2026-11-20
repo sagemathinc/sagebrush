@@ -1,7 +1,7 @@
 // Build engine/nd as the browser/Node WebAssembly module wasm/sagebrush-nd.wasm (numerics-core r4.2, B1):
 // SIMD128, threads (atomics, a shared imported memory up to 4 GiB) and an exported stack pointer, so that
-// each worker instance runs on its own stack. Committed, like wasm/sagebrush-engine.wasm, so that building
-// sagebrush does not require Rust; scripts/build-engine.mjs rebuilds it too, so the engine-wasm job's
+// each worker instance runs on its own stack. Pinned and fetched, like wasm/sagebrush-engine.wasm (wasm/pins.json),
+// so that building sagebrush does not require Rust; scripts/build-engine.mjs rebuilds it too, so the engine-wasm job's
 // check-fresh-wasm.mjs holds it to its source.  Run: node scripts/build-nd.mjs
 import { execFileSync } from "node:child_process";
 import { readFileSync } from "node:fs";

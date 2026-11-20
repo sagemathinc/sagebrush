@@ -1,7 +1,0 @@
-{
- "v": 1,
- "reason": "Resizable panels (William, Nov 8: \"make every single panel resizable\"): web/workspace/resize.ts (the edge: drag, arrow keys, double-click reset, the size kept in localStorage; its style; the files' width as --sbfw for every view; the LaTeX editor's split), imported by the notebook page (which also carries the LaTeX editor and the Terminal) and the board; the Terminal's grip kept per device with a double-click reset. The CLI embeds the notebook page's script, so cli/pyjs.cjs grows. Measured locally (bun 1.4.4, the CLI rebuilt after the web build), on top of #906 (6b83312e), with the split's listeners tied to the editor's mount and the chosen size kept apart from the window's clamp: cli/pyjs.cjs +7229 (r4: the LaTeX split is the notebook page's, handed to the editor, so the LaTeX bundles keep their budget). Marker: +7229 with the usual 64 B slack; the binding size-gate decides.",
- "bytes": {
-  "cli/pyjs.cjs": 7293
- }
-}

@@ -1,6 +1,6 @@
 // Code shown in the LaTeX preview (a sageblock's, a PythonTeX block's: <pre class="... sageblock">), coloured as the
 // notebook colours Sage and Python. Its own chunk, /sagebrush-latex-hl.js, fetched only once a preview shows such a block
-// (daybreak2's SIZE plan, astra's SEC terms, Nov 10):
+// (Nov 10):
 //  - the text is only ever set as text: the highlighter's HTML (escaped text and <span class="hX"> only) is read back
 //    into tokens, which must give back the block's text exactly, and drawn as text nodes and fixed-class spans; any
 //    other shape, or a mismatch, leaves the block plain (the code page's reading, web/code/tokens.ts, copied here so this
@@ -80,7 +80,7 @@ const queued = new WeakSet<HTMLElement>();
 /** Colours `root`'s blocks not yet done, FRAME_MS a frame, until there are none, `root` leaves the page, or `signal`
  * is aborted (the editor closed). */
 export function colour(root: HTMLElement, signal: AbortSignal) {
-  // (the test build counts the calls: renders while the chunk was on its way make one, astra's SEC on #1009)
+  // (the test build counts the calls: renders while the chunk was on its way make one)
   if (typeof __SB_LATEX_TEST__ !== "undefined" && __SB_LATEX_TEST__) (globalThis as any).__sbHlCalls = ((globalThis as any).__sbHlCalls ?? 0) + 1;
   if (signal.aborted || queued.has(root)) return;
   const d = root.ownerDocument;

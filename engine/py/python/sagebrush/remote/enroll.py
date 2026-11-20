@@ -77,13 +77,14 @@ def login(origin, name, kind="runner", out=None, sleep=time.sleep, clock=time.mo
     code, uri = d.get("device_code"), d.get("verification_uri_complete") or d.get("verification_uri")
     user_code, interval, life = d.get("user_code"), d.get("interval", 5), d.get("expires_in", 600)
     if not (isinstance(code, str) and isinstance(user_code, str) and isinstance(uri, str)
-            and type(interval) is int and type(life) is int and 1 <= interval <= 60 and 1 <= life <= 3600):
+            and type(interval) is int and type(life) is int and 1 <= interval <= 60 and 1 <= life <= 86400):
         raise EnrollError("%s answered the enrollment unexpectedly" % origin)
     u = urllib.parse.urlsplit(uri)
     if "%s://%s" % (u.scheme, u.netloc) != origin or any(ord(c) < 0x21 or ord(c) > 0x7e for c in uri + user_code):
         raise EnrollError("%s sent an unexpected approval page (another site?)" % origin)
+    wait = "%d hours" % (life // 3600) if life >= 7200 else "%d minutes" % (life // 60)
     out("To let this computer run code for your sagebrush account, open\n  %s\nsigned in, and check that it shows "
-        "the code %s.  (Waiting %d minutes.)\n" % (uri, user_code, life // 60))
+        "the code %s.  (Waiting %s.)\n" % (uri, user_code, wait))
     end = clock() + life
     while True:
         sleep(interval)

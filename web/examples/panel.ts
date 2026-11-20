@@ -19,6 +19,9 @@ const CSS = `
 dialog.sb-examples { width: min(1100px, 96vw); height: min(780px, 92vh); padding: 0; border: 1px solid #8884; border-radius: 10px; color: inherit; background: Canvas; }
 dialog.sb-examples::backdrop { background: #0006; }
 .sb-examples .bar { display: flex; gap: 0.5rem; align-items: center; padding: 0.6rem 0.8rem; border-bottom: 1px solid #8884; }
+/* (not the notebook page's toolbar, also .bar: its phone layout fixes that one to the foot of the screen and hides it
+   while a field has the focus, as this one's search does; :root outranks html.phone.typing .bar) */
+:root dialog.sb-examples > div.bar { position: static; display: flex; margin: 0; overflow: visible; box-shadow: none; z-index: auto; }
 .sb-examples .bar h2 { margin: 0 0.6rem 0 0; font-size: 1.1rem; }
 .sb-examples .bar input { flex: 1; min-width: 6rem; padding: 0.3rem 0.5rem; }
 .sb-examples .bar button[aria-pressed="true"] { font-weight: 700; }
@@ -37,6 +40,25 @@ dialog.sb-examples.big { width: 100vw; height: 100vh; max-width: none; max-heigh
 .sb-examples.big ul { display: none; }
 .sb-examples iframe { flex: 1; width: 100%; border: 0; background: #fff; }
 .sb-examples .empty { padding: 2rem; opacity: 0.7; }
+/* A phone's screen: the whole screen, one column at a time, the list, then the example picked with its preview across
+   the screen and a button back to the list (two columns left the preview a sliver) */
+@media (max-width: 640px) {
+  dialog.sb-examples { width: 100vw; height: 100dvh; max-width: none; max-height: none; margin: 0; border: 0; border-radius: 0; }
+  dialog.sb-examples[open] { display: flex; flex-direction: column; overflow: hidden; }
+  dialog.sb-examples > div.bar { flex: none; flex-wrap: wrap; }
+  .sb-examples .bar h2 { flex: 1 1 auto; }
+  .sb-examples .bar > button:last-child { order: 1; }
+  .sb-examples .bar::after { content: ""; order: 2; flex-basis: 100%; height: 0; }
+  .sb-examples .bar > button[data-kind] { order: 3; }
+  .sb-examples .bar input { order: 9; flex: 1 1 100%; font-size: 16px; }
+  .sb-examples .body { grid-template-columns: 1fr; grid-template-rows: minmax(0, 1fr); flex: 1; min-height: 0; height: auto; }
+  .sb-examples ul { border-right: 0; min-height: 0; }
+  .sb-examples .show { min-height: 0; }
+  .sb-examples li button { padding: 0.7rem 0.6rem; }
+  .sb-examples:not(.pick) .show { display: none; }
+  .sb-examples.pick ul { display: none; }
+  .sb-examples .acts { flex-wrap: wrap; }
+}
 `;
 
 function el<K extends keyof HTMLElementTagNameMap>(tag: K, props: Partial<HTMLElementTagNameMap[K]> = {}, ...kids: (Node | string)[]): HTMLElementTagNameMap[K] {
@@ -83,7 +105,23 @@ export async function openExamplesPanel(host: ExamplesHost, opts: { kind?: Kind;
   const bigBtn = el("button", { type: "button", textContent: "Expand", title: "Show the preview across the whole window" });
   bigBtn.dataset.act = "expand";
   bigBtn.setAttribute("aria-pressed", "false");
+  // (a phone's screen: one column, the list or the example picked; this button goes back to the list)
+  const narrow = typeof matchMedia === "function" ? matchMedia("(max-width: 640px)") : null;
+  const pick = (on: boolean) => dlg.classList.toggle("pick", on);
+  const fitBig = () => {
+    if (narrow?.matches) {
+      dlg.classList.remove("big");
+      bigBtn.textContent = "← Examples";
+      bigBtn.title = "Back to the list of examples";
+      bigBtn.setAttribute("aria-pressed", "false");
+    } else {
+      pick(false);
+      bigBtn.textContent = dlg.classList.contains("big") ? "Show the list" : "Expand";
+      bigBtn.title = dlg.classList.contains("big") ? "Back to the list of examples beside the preview" : "Show the preview across the whole window";
+    }
+  };
   bigBtn.onclick = () => {
+    if (narrow?.matches) return void pick(false);
     const on = dlg.classList.toggle("big");
     bigBtn.setAttribute("aria-pressed", String(on));
     bigBtn.textContent = on ? "Show the list" : "Expand";
@@ -96,6 +134,9 @@ export async function openExamplesPanel(host: ExamplesHost, opts: { kind?: Kind;
   const show = el("div", { className: "show" }, el("div", { className: "acts" }, copyBtn, zipLink, msg, bigBtn), frame);
   dlg.append(el("div", { className: "body" }, list, show));
   document.body.append(dlg);
+  fitBig();
+  narrow?.addEventListener?.("change", fitBig);
+  dlg.addEventListener("close", () => narrow?.removeEventListener?.("change", fitBig), { once: true });
 
   let kind: Kind | "all" = opts.kind ?? "all", chosen: CatalogEntry | null = null, busy = false;
   let catalog: Catalog = { examples: [] };
@@ -128,7 +169,7 @@ export async function openExamplesPanel(host: ExamplesHost, opts: { kind?: Kind;
         b.dataset.id = e.id;
         b.title = e.summary ?? "";
         b.setAttribute("role", "option");
-        b.onclick = () => choose(e);
+        b.onclick = () => { choose(e); if (narrow?.matches) pick(true); };
         return el("li", {}, b);
       }),
     );

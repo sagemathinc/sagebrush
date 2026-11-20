@@ -1,7 +1,0 @@
-{
- "v": 1,
- "reason": "The Terminal on xterm.js (plan-term-xterm PR 2): web/index.html gives the Terminal its place in the bottom panels' front order and room (panelToFront over three panels, bottomRoom counting the Terminal's height, the sb-term-place event), so cli/pyjs.cjs, which embeds the page, grows. The Terminal itself is shell/terminal.js, a lazy chunk the CLI doesn't carry (its own gate: web/shell/panel-size.mjs). Measured by daybreak2 with bun 1.4.4 / Node 24.21.0 on master 41afffef vs the probe merge: cli/pyjs.cjs +408; no other row moves. Marker exact.",
- "bytes": {
-  "cli/pyjs.cjs": 408
- }
-}

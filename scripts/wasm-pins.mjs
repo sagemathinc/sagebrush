@@ -1,0 +1,488 @@
+// The pins of the four WebAssembly modules (wasm/pins.json; design/wasm-artifacts.md).
+//   node scripts/wasm-pins.mjs --check              each module's state: pinned, local build, an earlier pin, unidentified, missing
+//   node scripts/wasm-pins.mjs --verify-committed   pins.json matches the modules committed at HEAD (while they are committed)
+//   node scripts/wasm-pins.mjs --from-committed     write pins.json from the modules committed at HEAD
+//   node scripts/wasm-pins.mjs --from-local         write pins.json from the files in wasm/ (a build with the pinned
+//                                                   toolchain and the path mapping is byte-identical to CI's)
+//   node scripts/wasm-pins.mjs --mark-local [name]  record a module built here (wasm/<name>.local.json), for SAGEBRUSH_WASM_LOCAL=1
+//   node scripts/wasm-pins.mjs --verify-published [--base URL]   every pin is in the bucket with matching length and sha256
+//   node scripts/wasm-pins.mjs --self-test          the planted controls: each must fail with its own message
+import { execFileSync } from "node:child_process";
+import { createServer } from "node:http";
+import { chmodSync, existsSync, mkdirSync, mkdtempSync, readdirSync, readFileSync, rmSync, symlinkSync, writeFileSync } from "node:fs";
+import { tmpdir } from "node:os";
+import { join } from "node:path";
+import { fileURLToPath } from "node:url";
+import { MODULES, ROOT, checkModules, committedMismatches, formatPins, loadPins, matches, moduleState, modulePath, parsePins, pinsPath, readStamp, runMode, sha256, writeSidecar } from "./wasm-modules.mjs";
+import { DEFAULT_BASE, LIMITS, fetchModules } from "./wasm-fetch.mjs";
+import { MANIFEST, install, pack, policy, readArtifact } from "./wasm-artifact.mjs";
+import { BUCKET, awsPut, keyOf, publish } from "./wasm-publish.mjs";
+
+// Every pin, fetched from `base` (bounded as wasm-fetch's downloads are) and checked
+export async function verifyPublished({ root = ROOT, base = DEFAULT_BASE, limits = LIMITS } = {}) {
+  const pins = loadPins(root);
+  const scratch = mkdtempSync(join(tmpdir(), "wasm-verify-"));
+  try {
+    // a fresh root and an empty cache, so only the network can satisfy it
+    mkdirSync(join(scratch, "wasm"));
+    writeFileSync(pinsPath(scratch), formatPins(pins));
+    await fetchModules({ root: scratch, base, cacheDir: join(scratch, "cache"), limits, log: () => {} });
+    return MODULES.map((n) => `${n}: published, ${pins[n].bytes} bytes, sha256 ${pins[n].sha256}`);
+  } finally {
+    rmSync(scratch, { recursive: true, force: true });
+  }
+}
+
+function pinsFrom(read) {
+  const modules = {};
+  for (const n of MODULES) {
+    const bytes = read(n);
+    modules[n] = { sha256: sha256(bytes), bytes: bytes.length };
+  }
+  return modules;
+}
+
+// ---- the planted controls: a small fixture root, served by a local HTTP server
+async function selfTest() {
+  const results = [];
+  const expect = async (what, fn, pattern) => {
+    try {
+      await fn();
+      results.push(`FAIL ${what}: no error`);
+    } catch (e) {
+      const ok = pattern.test(e.message);
+      results.push(`${ok ? "ok  " : "FAIL"} ${what}${ok ? "" : `: wrong error: ${e.message.split("\n").join(" | ")}`}`);
+    }
+  };
+  const pass = async (what, fn) => {
+    try {
+      const r = await fn();
+      results.push(r === false ? `FAIL ${what}` : `ok   ${what}`);
+    } catch (e) {
+      results.push(`FAIL ${what}: ${e.message.split("\n").join(" | ")}`);
+    }
+  };
+  const dir = mkdtempSync(join(tmpdir(), "wasm-pins-self-test-"));
+  const mods = Object.fromEntries(MODULES.map((n, i) => [n, Buffer.from(`\0asm\x01\0\0\0 fixture ${n} ${"x".repeat(100 + i)}`)]));
+  const pinsOf = (m) => Object.fromEntries(MODULES.map((n) => [n, { sha256: sha256(m[n]), bytes: m[n].length }]));
+  const served = new Map(MODULES.map((n) => [`${sha256(mods[n])}.wasm`, mods[n]]));
+  let requests = 0, mode = "ok", live = 0;
+  const server = createServer((req, res) => {
+    requests++;
+    // a response counts as live until it is finished or its connection is closed
+    live++;
+    let counted = true;
+    const done = () => counted && (counted = false, live--);
+    res.on("finish", done);
+    res.on("close", done);
+    const key = req.url.split("?")[0].split("/").pop();
+    if (mode === "500") return res.writeHead(500).end();
+    if (mode === "slow") return; // never answers: the headers limit must fire
+    if (mode === "stall") return res.writeHead(200, { "content-type": "application/wasm" }).write("\0asm"); // headers, then a body that never ends
+    if (mode === "stream500") return res.writeHead(500).write("error page that never ends");
+    if (mode === "biglen") return res.writeHead(200, { "content-length": String(1 << 30) }).write("\0asm");
+    let body = served.get(key);
+    if (!body) return res.writeHead(404).end();
+    if (mode === "wrong") body = Buffer.from(body).fill(0x41, 8);
+    if (mode === "extra") body = Buffer.concat([body, Buffer.from("!")]);
+    if (mode === "huge") body = Buffer.alloc(body.length * 4, 1);
+    res.writeHead(200, { "content-type": "application/wasm" }).end(body);
+  });
+  await new Promise((r) => server.listen(0, "127.0.0.1", r));
+  const base = `http://127.0.0.1:${server.address().port}/wasm/sha256/`;
+  const fast = { ...LIMITS, headersMs: 300, downloadMs: 1_000, backoffMs: [10, 20], deadlineMs: 5_000 };
+  const root = (name) => {
+    const r = join(dir, name);
+    mkdirSync(join(r, "wasm"), { recursive: true });
+    writeFileSync(pinsPath(r), formatPins(pinsOf(mods)));
+    return r;
+  };
+  const opts = (r, extra = {}) => ({ root: r, base, cacheDir: join(r, "cache"), limits: fast, log: () => {}, ...extra });
+  try {
+    // pins.json itself
+    await expect("pins.json with an extra module", async () => parsePins(JSON.stringify({ v: 1, modules: { ...pinsOf(mods), "x.wasm": { sha256: "0".repeat(64), bytes: 1 } } })), /exactly/);
+    await expect("pins.json with a short sha256", async () => parsePins(JSON.stringify({ v: 1, modules: { ...pinsOf(mods), [MODULES[0]]: { sha256: "abc", bytes: 1 } } })), /64 lowercase hex/);
+    // the fetch: a clean download, then the controls
+    const r1 = root("r1");
+    await pass("a cold fetch downloads all four and they check as pinned", async () => {
+      await fetchModules(opts(r1));
+      return checkModules({ root: r1, mode: "pinned" }).every((l) => l.endsWith("pinned"));
+    });
+    await pass("a second run makes no request", async () => {
+      const before = requests;
+      await fetchModules(opts(r1));
+      return requests === before;
+    });
+    {
+      mode = "500";
+      const lim = { ...fast, parallel: 1, backoffMs: [60, 120] }, rr = root("r-retry");
+      writeFileSync(pinsPath(rr), formatPins(pinsOf(mods)));
+      for (const n of MODULES.slice(1)) writeFileSync(modulePath(n, rr), mods[n]); // only the first module to fetch
+      const before = requests, t0 = Date.now();
+      await expect("a 5xx is retried", () => fetchModules(opts(rr, { limits: lim })), /HTTP 500/);
+      const n = requests - before, ms = Date.now() - t0;
+      results.push(n === lim.attempts && ms >= 180 ? `ok   ...exactly ${n} attempts, with the backoff (${ms} ms)` : `FAIL ...${n} attempts in ${ms} ms (expected ${lim.attempts}, at least 180 ms)`);
+      mode = "ok";
+    }
+    for (const [m, what, pattern] of [["wrong", "wrong bytes with the right length", /don't match the pin/], ["extra", "the right bytes plus one", /more than the pinned/], ["huge", "an oversized download", /more than the pinned/], ["500", "a 5xx on every attempt", /HTTP 500/]]) {
+      const r = root(`r-${m}`);
+      mode = m;
+      await expect(`the fetch refuses ${what}`, () => fetchModules(opts(r)), pattern);
+      mode = "ok";
+      await pass(`...and leaves no module and no partial file (${m})`, async () => MODULES.every((n) => !existsSync(modulePath(n, r))) && !execFileSync("find", [r, "-name", "*.part"], { encoding: "utf8" }).trim());
+    }
+    mode = "slow";
+    await expect("an origin that never answers fails within the limits", () => fetchModules(opts(root("r-slow"))), /no response headers/);
+    mode = "ok";
+    // stopping: the whole-run deadline, a stalled body, and responses that are rejected mid-stream
+    const settle = () => new Promise((r) => setTimeout(r, 300));
+    mode = "stall";
+    {
+      // (in event order, not by the clock: a busy machine fires the deadline's timer late, and a request started
+      // before it fired isn't late.  The deadline is seen when it aborts a request in flight.)
+      const realFetch = globalThis.fetch;
+      let seq = 0, fired = Infinity;
+      const calls = [];
+      globalThis.fetch = (url, init) => {
+        calls.push(++seq);
+        init.signal.addEventListener("abort", () => /whole run took more than/.test(init.signal.reason?.message) && (fired = Math.min(fired, ++seq)), { once: true });
+        return realFetch(url, init);
+      };
+      const t0 = Date.now(), rd = root("r-deadline");
+      try {
+        await expect("the whole-run deadline stops the run, queued modules included", () => fetchModules(opts(rd, { limits: { ...fast, headersMs: 1_000, downloadMs: 5_000, attempts: 1, deadlineMs: 80 } })), /whole run took more than/);
+      } finally {
+        globalThis.fetch = realFetch;
+      }
+      const elapsed = Date.now() - t0, late = calls.filter((i) => i > fired).length;
+      results.push(fired < Infinity && elapsed < 2_000 && late === 0 ? `ok   ...within ${elapsed} ms, and no request starts after the deadline` : `FAIL ...took ${elapsed} ms; ${late} requests started after the deadline${fired === Infinity ? " (the deadline aborted no request)" : ""}`);
+      const left = readdirSync(join(rd, "wasm")).filter((f) => f !== "pins.json");
+      results.push(left.length === 0 ? "ok   ...and installs nothing in wasm/" : `FAIL ...left ${left.join(", ")} in wasm/`);
+    }
+    await expect("a body that stalls after its headers is stopped by the download limit", () => fetchModules(opts(root("r-stall"), { limits: { ...fast, headersMs: 1_000, downloadMs: 200, attempts: 1, deadlineMs: 5_000 } })), /not complete within/);
+    for (const [m, what, pattern] of [["stream500", "a 5xx whose body never ends, on every attempt", /HTTP 500/], ["biglen", "a content-length past the pinned length", /more than the pinned/]]) {
+      mode = m;
+      // the fetch's own view: a request is open from the call until its signal aborts.  The server sees
+      // each close a little later, so its count can briefly overlap the next request on a slow machine.
+      const realFetch = globalThis.fetch;
+      let open = 0, most = 0;
+      globalThis.fetch = (url, init) => {
+        let counted = true;
+        open++;
+        most = Math.max(most, open);
+        init.signal.addEventListener("abort", () => counted && (counted = false, open--), { once: true });
+        return realFetch(url, init);
+      };
+      try {
+        await expect(`the fetch refuses ${what}`, () => fetchModules(opts(root(`r-${m}`))), pattern);
+      } finally {
+        globalThis.fetch = realFetch;
+      }
+      await settle();
+      results.push(live === 0 && open === 0 && most <= LIMITS.parallel ? `ok   ...and closes every rejected response (none live afterwards; at most ${most} open at once)` : `FAIL ...${live} responses still live afterwards, ${open} never closed; ${most} open at once`);
+    }
+    mode = "ok";
+    await expect("an unreachable origin fails", () => fetchModules({ ...opts(root("r-down")), base: "http://127.0.0.1:9/" }), /ECONNREFUSED|fetch failed|refused/i);
+    const r404 = root("r404");
+    writeFileSync(pinsPath(r404), formatPins({ ...pinsOf(mods), [MODULES[1]]: { sha256: "f".repeat(64), bytes: 10 } }));
+    for (const n of MODULES) if (n !== MODULES[1]) writeFileSync(modulePath(n, r404), mods[n]);
+    {
+      const before = requests;
+      await expect("an unpublished pin says so (404, not retried)", () => fetchModules(opts(r404)), /isn't published yet/);
+      results.push(requests - before === 1 ? "ok   ...with exactly one request" : `FAIL ...${requests - before} requests for a 404`);
+    }
+    await expect("--offline with an empty cache fails at once", () => fetchModules({ ...opts(root("r-off")), offline: true }), /--offline makes no request/);
+    // a branch switch: bytes this machine installed for an earlier pin are replaced from the cache, with no request
+    const r2 = root("r2");
+    await fetchModules(opts(r2));
+    const newer = { ...mods, [MODULES[0]]: Buffer.concat([mods[MODULES[0]], Buffer.from(" v2")]) };
+    served.set(`${sha256(newer[MODULES[0]])}.wasm`, newer[MODULES[0]]);
+    writeFileSync(pinsPath(r2), formatPins(pinsOf(newer)));
+    await fetchModules(opts(r2)); // to the new pin (downloads one)
+    writeFileSync(pinsPath(r2), formatPins(pinsOf(mods)));
+    await pass("switching back to a cached pin replaces the installed module with no request", async () => {
+      const before = requests;
+      await fetchModules(opts(r2));
+      return requests === before && moduleState(MODULES[0], pinsOf(mods)[MODULES[0]], r2).state === "pinned";
+    });
+    // unidentified bytes, a local build and its sidecar
+    const r3 = root("r3");
+    await fetchModules(opts(r3));
+    writeFileSync(modulePath(MODULES[2], r3), Buffer.from("not ours"));
+    await expect("unidentified bytes in wasm/ are refused", () => fetchModules(opts(r3)), /--force/);
+    await expect("...and fail the pinned check", async () => checkModules({ root: r3, mode: "pinned" }), /matches neither/);
+    writeSidecar(MODULES[2], r3);
+    await expect("a local build fails the pinned check", async () => checkModules({ root: r3, mode: "pinned" }), /local build/);
+    await pass("...and passes in local mode, labelled", async () => checkModules({ root: r3, mode: "local" }).some((l) => /using a local build/.test(l)));
+    await pass("--force replaces a local build that has its sidecar", async () => {
+      const rl = root("r-local");
+      await fetchModules(opts(rl));
+      writeFileSync(modulePath(MODULES[0], rl), Buffer.from("built here"));
+      writeSidecar(MODULES[0], rl);
+      const kept = (await fetchModules(opts(rl))).find((r) => r.name === MODULES[0]).action.startsWith("kept a local build");
+      await fetchModules({ ...opts(rl), force: true });
+      return kept && moduleState(MODULES[0], pinsOf(mods)[MODULES[0]], rl).state === "pinned";
+    });
+    writeFileSync(modulePath(MODULES[2], r3), Buffer.from("not ours either"));
+    await expect("a sidecar that doesn't match its module is refused", async () => checkModules({ root: r3, mode: "local" }), /matches neither/);
+    await pass("--force replaces them with the pinned bytes", async () => {
+      await fetchModules({ ...opts(r3), force: true });
+      return checkModules({ root: r3, mode: "pinned" }).length === MODULES.length;
+    });
+    await expect("local mode is refused under CI", async () => runMode({ SAGEBRUSH_WASM_LOCAL: "1", CI: "true" }), /refused under CI/);
+    await expect("a missing module names the fix", async () => checkModules({ root: root("r-missing"), mode: "pinned" }), /is missing: run node scripts\/wasm-fetch\.mjs/);
+    await pass("an oversized file in wasm/ is unidentified without being read", async () => {
+      const ro = root("r-oversized");
+      execFileSync("truncate", ["-s", String(1 << 30), modulePath(MODULES[0], ro)]); // 1 GiB, sparse
+      const t0 = Date.now(), st = moduleState(MODULES[0], pinsOf(mods)[MODULES[0]], ro);
+      return st.state === "unidentified" && Date.now() - t0 < 200;
+    });
+    await pass("an oversized cache entry is dropped without being read", async () => {
+      const rq = root("r-cache-oversized"), cache = join(rq, "cache");
+      mkdirSync(cache, { recursive: true });
+      execFileSync("truncate", ["-s", String(1 << 30), join(cache, `${sha256(mods[MODULES[0]])}.wasm`)]);
+      const t0 = Date.now();
+      await fetchModules(opts(rq));
+      return Date.now() - t0 < 1_000 && matches(readFileSync(modulePath(MODULES[0], rq)), pinsOf(mods)[MODULES[0]]);
+    });
+    // two runs sharing one cache
+    const shared = join(dir, "shared-cache");
+    const [ra, rb] = [root("ra"), root("rb")];
+    await pass("two concurrent fetches into one cache both end pinned", async () => {
+      await Promise.all([fetchModules({ ...opts(ra), cacheDir: shared }), fetchModules({ ...opts(rb), cacheDir: shared })]);
+      return [ra, rb].every((r) => checkModules({ root: r, mode: "pinned" }).length === MODULES.length);
+    });
+    await pass("a cache entry whose bytes don't match its name is dropped, not used", async () => {
+      const rc = root("rc");
+      const cache = join(rc, "cache");
+      mkdirSync(cache, { recursive: true });
+      const corrupt = Buffer.from(mods[MODULES[3]]);
+      corrupt[corrupt.length - 1] ^= 1; // the pinned length, one byte different
+      writeFileSync(join(cache, `${sha256(mods[MODULES[3]])}.wasm`), corrupt);
+      await fetchModules(opts(rc));
+      return matches(readFileSync(modulePath(MODULES[3], rc)), pinsOf(mods)[MODULES[3]]);
+    });
+    // the committed modules against pins.json: all four, none, or a partial set; and git failures
+    const repo = join(dir, "repo");
+    mkdirSync(join(repo, "wasm"), { recursive: true });
+    const g = (...a) => execFileSync("git", ["-C", repo, ...a], { stdio: "ignore" });
+    g("init", "-q");
+    g("config", "user.email", "self-test@example.invalid");
+    g("config", "user.name", "self-test");
+    writeFileSync(pinsPath(repo), formatPins(pinsOf(mods)));
+    for (const n of MODULES) writeFileSync(modulePath(n, repo), mods[n]);
+    g("add", "-A");
+    g("commit", "-qm", "all four");
+    await pass("all four committed and matching their pins pass", async () => committedMismatches({ root: repo }).length === 0);
+    const head = execFileSync("git", ["-C", repo, "rev-parse", "HEAD"], { encoding: "utf8" }).trim();
+    rmSync(modulePath(MODULES[2], repo));
+    symlinkSync(MODULES[0], modulePath(MODULES[2], repo));
+    g("add", "-A");
+    g("commit", "-qm", "a symlink");
+    await pass("a module committed as a symlink fails, naming it", async () => committedMismatches({ root: repo }).some((l) => l.startsWith(MODULES[2]) && /not a regular file \(120000/.test(l)));
+    g("reset", "-q", "--hard", head);
+    chmodSync(modulePath(MODULES[2], repo), 0o755);
+    g("add", "-A");
+    g("commit", "-qm", "an executable");
+    await pass("a module committed as executable fails, naming it", async () => committedMismatches({ root: repo }).some((l) => l.startsWith(MODULES[2]) && /not a regular file \(100755/.test(l)));
+    g("reset", "-q", "--hard", head);
+    chmodSync(modulePath(MODULES[2], repo), 0o644);
+    writeFileSync(modulePath(MODULES[3], repo), Buffer.from("changed"));
+    g("commit", "-qam", "one changed");
+    await pass("a committed module that differs from its pin fails, naming it", async () => committedMismatches({ root: repo }).some((l) => l.startsWith(MODULES[3])));
+    await pass("a pin whose length differs from the committed module fails, naming it", async () => committedMismatches({ root: repo, pins: { ...pinsOf(mods), [MODULES[3]]: { sha256: sha256(Buffer.from("changed")), bytes: 8 } } }).some((l) => l.startsWith(MODULES[3])));
+    g("rm", "-q", `wasm/${MODULES[1]}`);
+    g("commit", "-qm", "one removed");
+    await pass("a partial set fails, naming the missing module", async () => committedMismatches({ root: repo }).some((l) => /only 3 of the 4/.test(l) && l.includes(MODULES[1])));
+    g("rm", "-q", ...MODULES.filter((n) => n !== MODULES[1]).map((n) => `wasm/${n}`));
+    g("commit", "-qm", "none");
+    await pass("no module committed passes (nothing to compare)", async () => committedMismatches({ root: repo }).length === 0);
+    await expect("an unknown revision is an error, not a pass", async () => committedMismatches({ root: repo, rev: "no-such-rev" }), /is not a commit/);
+    await expect("a directory that isn't a repository is an error", async () => committedMismatches({ root: join(dir, "r1") }), /is not a commit/);
+    // the CI artifact: exactly the four modules and this run's manifest, every module matching it
+    const run = { GITHUB_RUN_ID: "7", GITHUB_SHA: "c".repeat(40), GITHUB_EVENT_NAME: "push" };
+    const artifact = (name, env = run) => {
+      const ra = root(`ra-${name}`), d = join(ra, "artifact");
+      for (const n of MODULES) writeFileSync(modulePath(n, ra), mods[n]);
+      pack(d, { root: ra, env });
+      return { ra, d };
+    };
+    await pass("an artifact of this run installs all four, pinned", async () => {
+      const { d } = artifact("ok"), rt = root("ra-target");
+      return install(d, { root: rt, env: run }).mode === "pinned" && checkModules({ root: rt, mode: "pinned" }).length === MODULES.length;
+    });
+    await pass("on a track, an artifact that doesn't match the pins installs, fresh, and records nothing as pinned", async () => {
+      const track = { ...run, GITHUB_REF_NAME: "track/math" };
+      const { d } = artifact("track", track), rt = root("ra-track-target");
+      writeFileSync(pinsPath(rt), formatPins({ ...pinsOf(mods), [MODULES[0]]: { sha256: "e".repeat(64), bytes: 9 } }));
+      const r = install(d, { root: rt, env: track });
+      return r.mode === "fresh" && Object.keys(readStamp(rt)).length === 0 && moduleState(MODULES[0], loadPins(rt)[MODULES[0]], rt).state !== "pinned";
+    });
+    for (const n of MODULES) {
+      await expect(`an artifact missing ${n} is refused`, async () => {
+        const { d } = artifact(`miss-${n}`);
+        rmSync(join(d, n));
+        return readArtifact(d, { env: run });
+      }, new RegExp(`missing: ${n.replace(".", "\\.")}`));
+    }
+    await expect("an artifact with an extra file is refused", async () => {
+      const { d } = artifact("extra");
+      writeFileSync(join(d, "notes.txt"), "x");
+      return readArtifact(d, { env: run });
+    }, /unexpected files: notes\.txt/);
+    await expect("an artifact with a corrupted member is refused", async () => {
+      const { d } = artifact("corrupt");
+      const b = readFileSync(join(d, MODULES[2]));
+      b[b.length - 1] ^= 1;
+      writeFileSync(join(d, MODULES[2]), b);
+      return readArtifact(d, { env: run });
+    }, new RegExp(`${MODULES[2].replace(".", "\\.")}: .*the manifest says`));
+    await expect("an artifact from another run is refused", async () => readArtifact(artifact("other-run", { ...run, GITHUB_RUN_ID: "6" }).d, { env: run }), /from run 6 .* not this run/);
+    await expect("an artifact from another commit is refused", async () => readArtifact(artifact("other-sha", { ...run, GITHUB_SHA: "d".repeat(40) }).d, { env: run }), /not this run/);
+    // the pin policy: a build that doesn't match the pins
+    const freshMods = { ...pinsOf(mods), [MODULES[0]]: { sha256: "e".repeat(64), bytes: 9 } };
+    for (const ev of ["push", "workflow_dispatch", "schedule"]) {
+      await expect(`a stale pin is an error on ${ev}, even for an engine test job`, async () => policy(freshMods, { root: r1, allowFresh: true, env: { GITHUB_EVENT_NAME: ev } }), /the pin is stale: commit these wasm\/pins\.json lines/);
+    }
+    // a merge queue group is what lands on its target: strict into master, even for an engine test job; fresh into a track
+    await expect("a stale pin is an error in a queue group into master, even for an engine test job", async () => policy(freshMods, { root: r1, allowFresh: true, env: { GITHUB_EVENT_NAME: "merge_group", GITHUB_REF_NAME: "gh-readonly-queue/master/pr-7-cccccccccccccccccccccccccccccccccccccccc" } }), /the pin is stale: commit these wasm\/pins\.json lines/);
+    await pass("a stale pin in a queue group into a track: fresh, labelled", async () => {
+      const r = policy(freshMods, { root: r1, env: { GITHUB_EVENT_NAME: "merge_group", GITHUB_REF_NAME: "gh-readonly-queue/track/math/pr-7-cccccccccccccccccccccccccccccccccccccccc" } });
+      if (r.mode !== "fresh") throw new Error(`mode ${r.mode}`);
+    });
+    await expect("a stale pin is an error for every other reader on a pull request", async () => policy(freshMods, { root: r1, env: { GITHUB_EVENT_NAME: "pull_request" } }), /the pin is stale/);
+    await pass("...and a labelled fresh run for a pull request's engine test job", async () => {
+      const r = policy(freshMods, { root: r1, allowFresh: true, env: { GITHUB_EVENT_NAME: "pull_request" } });
+      return r.mode === "fresh" && r.lines.some((l) => l.startsWith(`${MODULES[0]}: fresh build (pin mismatch)`));
+    });
+    // on a track every reader runs the fresh build, labelled, and records nothing as pinned
+    for (const env of [{ GITHUB_EVENT_NAME: "push", GITHUB_REF_NAME: "track/math" }, { GITHUB_EVENT_NAME: "workflow_dispatch", GITHUB_REF: "refs/heads/track/math" }, { GITHUB_EVENT_NAME: "pull_request", GITHUB_BASE_REF: "track/math", GITHUB_HEAD_REF: "r6" }, { GITHUB_EVENT_NAME: "pull_request_target", GITHUB_BASE_REF: "track/math" }]) {
+      await pass(`a stale pin on a track (${env.GITHUB_EVENT_NAME}): fresh for every reader, labelled`, async () => {
+        const r = policy(freshMods, { root: r1, env });
+        return r.mode === "fresh" && r.lines.some((l) => l.startsWith(`${MODULES[0]}: fresh build (pin mismatch)`)) && r.lines.some((l) => /a track's run/.test(l));
+      });
+    }
+    await expect("a stale pin on a track's pull into master is an error for every other reader", async () => policy(freshMods, { root: r1, env: { GITHUB_EVENT_NAME: "pull_request", GITHUB_BASE_REF: "master", GITHUB_HEAD_REF: "track/math" } }), /the pin is stale/);
+    await expect("a stale pin on a track/math-like branch that isn't a track is an error", async () => policy(freshMods, { root: r1, env: { GITHUB_EVENT_NAME: "push", GITHUB_REF_NAME: "trackmath" } }), /the pin is stale/);
+    await expect("the schedule is never a track's run", async () => policy(freshMods, { root: r1, env: { GITHUB_EVENT_NAME: "schedule", GITHUB_REF_NAME: "track/math" } }), /the pin is stale/);
+    // publishing, against this server as the bucket
+    {
+      const { ra, d } = artifact("publish");
+      const gone = MODULES.map((n) => `${sha256(mods[n])}.wasm`);
+      const stash = new Map(gone.map((k) => [k, served.get(k)]));
+      const puts = [];
+      const put = (key, bytes) => (puts.push(key), served.set(key.split("/").pop(), bytes), "written");
+      for (const k of gone.slice(0, 2)) served.delete(k); // two published already, two not
+      await pass("publishing uploads only the absent keys, and reads every one back", async () => {
+        const res = await publish(d, { root: ra, base, put, limits: fast, env: run, log: () => {} });
+        return puts.length === 2 && res.filter((r) => r.state === "uploaded and read back").length === 2 && res.filter((r) => r.state === "already published").length === 2;
+      });
+      served.delete(gone[3]);
+      const wrongPut = (key, bytes) => (served.set(key.split("/").pop(), Buffer.from(bytes).fill(0x42, 8)), "written");
+      await expect("a bucket that returns other bytes after the upload fails the read-back", () => publish(d, { root: ra, base, put: wrongPut, limits: fast, env: run, log: () => {} }), /read-back .* failed: .*don't match the pin/);
+      served.set(gone[3], Buffer.from(mods[MODULES[3]]).fill(0x43, 8));
+      let overwrote = false;
+      await expect("a key that holds other bytes fails, and is never overwritten", () => publish(d, { root: ra, base, put: () => (overwrote = true, "written"), limits: fast, env: run, log: () => {} }), /never overwritten/);
+      results.push(overwrote ? "FAIL ...it was overwritten" : "ok   ...no upload was attempted");
+      // a checkout whose pins.json names other bytes than the artifact: refused before any request or upload
+      const rs = root("ra-stale-pins");
+      writeFileSync(pinsPath(rs), formatPins(freshMods));
+      const before = requests, putsBefore = puts.length;
+      await expect("a build that doesn't match the pins is never published", () => publish(d, { root: rs, base, put, limits: fast, env: run, log: () => {} }), /the pin is stale/);
+      results.push(requests === before && puts.length === putsBefore ? "ok   ...with no request and no upload" : `FAIL ...${requests - before} requests, ${puts.length - putsBefore} uploads`);
+      await expect("on a track, a build that doesn't match the pins is never published either", () => publish(d, { root: rs, base, put, limits: fast, env: { ...run, GITHUB_REF_NAME: "track/math" }, log: () => {} }), /refusing to publish a fresh build/);
+      results.push(requests === before && puts.length === putsBefore ? "ok   ...with no request and no upload, on a track too" : `FAIL ...${requests - before} requests, ${puts.length - putsBefore} uploads on a track`);
+      for (const [k, v] of stash) served.set(k, v);
+    }
+    // the upload itself (awsPut), with a stand-in for the aws CLI
+    {
+      const creds = { R2_ACCOUNT_ID: "acct", AWS_ACCESS_KEY_ID: "id", AWS_SECRET_ACCESS_KEY: "secret" };
+      const calls = [];
+      const fake = (result) => (cmd, args, opts) => (calls.push({ cmd, args, opts }), result);
+      const key = keyOf("a".repeat(64));
+      await pass("the upload is a conditional write of this key to the release bucket, immutable", async () => {
+        const how = awsPut(key, Buffer.from("x"), creds, fake({ status: 0, stderr: "" }));
+        const a = calls.at(-1).args, at = (flag) => a[a.indexOf(flag) + 1];
+        return how === "written" && calls.at(-1).cmd === "aws" && a.slice(0, 2).join(" ") === "s3api put-object" &&
+          at("--if-none-match") === "*" && at("--bucket") === BUCKET && at("--key") === key &&
+          at("--content-type") === "application/wasm" && at("--cache-control") === "public, max-age=31536000, immutable" &&
+          at("--endpoint-url") === "https://acct.r2.cloudflarestorage.com";
+      });
+      for (const v of Object.keys(creds)) {
+        const before = calls.length;
+        const { [v]: _, ...without } = creds;
+        await expect(`a missing ${v} is refused before any upload`, async () => awsPut(key, Buffer.from("x"), without, fake({ status: 0, stderr: "" })), new RegExp(`${v} is not set`));
+        results.push(calls.length === before ? "ok   ...and the aws CLI never ran" : "FAIL ...the aws CLI ran anyway");
+      }
+      await pass("a key written meanwhile (412, PreconditionFailed) is \"exists\", for the read-back to decide", async () =>
+        awsPut(key, Buffer.from("x"), creds, fake({ status: 254, stderr: "An error occurred (PreconditionFailed) when calling the PutObject operation: At least one of the pre-conditions you specified did not hold" })) === "exists");
+      await expect("any other failed upload throws", async () => awsPut(key, Buffer.from("x"), creds, fake({ status: 255, stderr: "An error occurred (AccessDenied) when calling the PutObject operation" })), /exit 255: An error occurred \(AccessDenied\)/);
+      // and publish then decides by the read-back alone
+      const { ra, d } = artifact("publish-exists");
+      const k = `${sha256(mods[MODULES[1]])}.wasm`, keep = served.get(k);
+      served.delete(k);
+      const meanwhile = (pkey, bytes) => (served.set(pkey.split("/").pop(), bytes), "exists");
+      await pass("publishing after a 412 reads the key back and accepts it when it matches", async () =>
+        (await publish(d, { root: ra, base, put: meanwhile, limits: fast, env: run, log: () => {} })).some((r) => r.state === "written meanwhile by another run; read back"));
+      served.delete(k);
+      const otherBytes = (pkey, bytes) => (served.set(pkey.split("/").pop(), Buffer.from(bytes).fill(0x44, 8)), "exists");
+      await expect("...and fails when the key written meanwhile holds other bytes", () => publish(d, { root: ra, base, put: otherBytes, limits: fast, env: run, log: () => {} }), /read-back .* failed: .*don't match the pin/);
+      served.set(k, keep);
+    }
+    // publication
+    await pass("--verify-published passes when every pin is served", async () => (await verifyPublished({ root: r1, base, limits: fast })).length === MODULES.length);
+    await expect("--verify-published fails for a missing key", () => verifyPublished({ root: r404, base, limits: fast }), /isn't published yet/);
+    mode = "wrong";
+    await expect("--verify-published fails for wrong bytes", () => verifyPublished({ root: r1, base, limits: fast }), /don't match the pin/);
+    mode = "ok";
+  } finally {
+    server.close();
+    rmSync(dir, { recursive: true, force: true });
+  }
+  return results;
+}
+
+if (process.argv[1] === fileURLToPath(import.meta.url)) {
+  const [cmd, ...rest] = process.argv.slice(2);
+  const arg = (name) => {
+    const i = rest.indexOf(name);
+    return i >= 0 ? rest[i + 1] : undefined;
+  };
+  try {
+    if (cmd === "--check") {
+      const pins = loadPins();
+      for (const n of MODULES) {
+        const s = moduleState(n, pins[n]);
+        console.log(`${n}: ${s.state}${s.sha256 && s.state !== "pinned" ? ` (sha256 ${s.sha256}, ${s.bytes} bytes)` : ""}`);
+      }
+    } else if (cmd === "--verify-committed") {
+      const bad = committedMismatches({ rev: arg("--rev") ?? "HEAD" });
+      if (bad.length) throw new Error(`wasm/pins.json doesn't match the committed modules (run node scripts/wasm-pins.mjs --from-committed):\n${bad.join("\n")}`);
+      console.log("wasm/pins.json matches the committed modules");
+    } else if (cmd === "--from-committed" || cmd === "--from-local") {
+      const read = cmd === "--from-local" ? (n) => readFileSync(modulePath(n)) : (n) => execFileSync("git", ["-C", ROOT, "show", `HEAD:wasm/${n}`], { maxBuffer: 1 << 27 });
+      writeFileSync(pinsPath(), formatPins(pinsFrom(read)));
+      console.log(readFileSync(pinsPath(), "utf8").trimEnd());
+    } else if (cmd === "--mark-local") {
+      for (const n of rest.length ? rest : MODULES) {
+        if (!MODULES.includes(n)) throw new Error(`unknown module ${n}`);
+        writeSidecar(n);
+        console.log(`wasm/${n}.local.json written`);
+      }
+    } else if (cmd === "--verify-published") {
+      for (const l of await verifyPublished({ base: arg("--base") ?? DEFAULT_BASE })) console.log(l);
+    } else if (cmd === "--self-test") {
+      const r = await selfTest();
+      for (const l of r) console.log(l);
+      const failed = r.filter((l) => l.startsWith("FAIL")).length;
+      console.log(failed ? `wasm-pins self-test: ${failed} of ${r.length} FAILED` : `wasm-pins self-test: all ${r.length} controls pass`);
+      if (failed) process.exit(1);
+    } else {
+      console.error("usage: node scripts/wasm-pins.mjs --check | --verify-committed | --from-committed | --from-local | --mark-local [name...] | --verify-published [--base URL] | --self-test");
+      process.exit(2);
+    }
+  } catch (e) {
+    console.error(e.message);
+    process.exit(1);
+  }
+}

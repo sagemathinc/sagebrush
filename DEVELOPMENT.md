@@ -52,7 +52,7 @@ scripts; nothing is installed into your system Python.
 ```sh
 scripts/build-all.sh             # about 6.5 min here (pnpm's store and cargo's registry already downloaded)
 scripts/build-all.sh --no-app    # without the desktop app (no Tauri CLI or WebKitGTK needed)
-scripts/build-all.sh --no-engine # keep the committed wasm/sagebrush-engine.wasm
+scripts/build-all.sh --no-engine # fetch the four WebAssembly modules by their pins (no Rust needed)
 ```
 
 It runs these steps, in this order, and prints each one's time:
@@ -75,12 +75,18 @@ It runs these steps, in this order, and prints each one's time:
 
 Notes:
 
-- **The engine and the committed `wasm/sagebrush-engine.wasm`.** Building the engine writes over the committed
-  module, and with the pinned toolchain it's byte-identical to it. The module embeds its crates' source paths
-  (`$CARGO_HOME/registry/...`), so `build-all.sh` maps yours to CI's (`--remap-path-prefix=...=/home/runner/.cargo`,
-  as the README shows). Without that, a plain `node scripts/build-engine.mjs` differs by a few bytes: the same
-  engine, but `git diff` shows it. `git checkout -- wasm/` puts the committed one back. CI's `engine-wasm` job
-  checks that a fresh build equals the committed module (an error on master, a warning on a pull request).
+- **The WebAssembly modules and `wasm/pins.json`.** The four modules in `wasm/` aren't in git: `wasm/pins.json`
+  names each one's sha256 and length, and `node scripts/wasm-fetch.mjs` (or `pnpm wasm`) puts them there from
+  `https://get.sagebrush.space/wasm/sha256/`, through a cache in `~/.cache/sagebrush/wasm`, checking every byte
+  (design/wasm-artifacts.md). Run it after a clone, and after switching to a branch with other pins.
+  Building the engine writes over them, and with the pinned toolchain the build matches its pins. The modules
+  embed their crates' source paths (`$CARGO_HOME/registry/...`), so `build-all.sh` maps yours to CI's
+  (`--remap-path-prefix=...=/home/runner/.cargo`, as the README shows). Without that, a plain
+  `node scripts/build-engine.mjs` differs by a few bytes: the same engine, but not its pin.
+  `node scripts/wasm-fetch.mjs --force` puts the pinned ones back, and `node scripts/wasm-pins.mjs --check` says
+  which you have. A change to the engine commits its new pins (`node scripts/wasm-pins.mjs --from-local` after the
+  mapped build, or the lines its pull request's CI prints). CI's `engine-wasm` job checks that a fresh build matches
+  the pins (an error on master, a warning on a pull request).
   `test-all.sh` runs that job as CI does, without the mapping, so locally it only warns.
 - **The atlas data** (`web/dist/atlas/data`, about 50 MB of JSON) isn't built by default: `bun web/build.ts` says
   it's missing. It's rebuilt from the engine as [web/atlas/README.md](web/atlas/README.md) describes, and needs the
@@ -106,7 +112,8 @@ would then wait for an engine that was never deployed. Each job keeps CI's time 
 is one budget for all its steps, even past a step marked continue-on-error. What a step leaves running carries on
 into the job's later steps, as on CI, and is ended (found by ancestry) before the next job. If something won't end,
 the whole run stops there, even with `--keep-going`, and leaves everything as it is for inspection. At the end, the
-committed engine is put back only over this run's own engine-wasm build; any other change to it is left and reported.
+pinned engine is put back (`wasm-fetch.mjs --force`) only over this run's own engine-wasm build; any other change to it
+is left and reported.
 One known difference from CI: when a step runs past its own `timeout-minutes`, everything still running under the
 run is ended, including what earlier steps of the same job left in the background; on CI only that step's
 processes go. A later `continue-on-error` step that relied on such a background process won't have it here.
@@ -136,7 +143,7 @@ their times here:
 | `engine-cpython` | the CPython extension, audit regressions, MCP and Sage | 4.3 min (warm; below) |
 
 The engine jobs run last: `engine-wasm` builds a fresh engine, and the `engine-*` jobs after it test that engine,
-as in CI. The committed engine is restored at the end.
+as in CI. The pinned engine is restored at the end.
 
 The times were measured on the 16-core VM, except `web-runner`'s, which was measured alone on an 8-core VM. In the
 full run its step stopped at a failure (since fixed: the first paragraph of this section), so the time there

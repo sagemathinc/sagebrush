@@ -31,7 +31,7 @@ viewToRestore(key, el, skip) -> () => View | null
 | Editor | Fields |
 |---|---|
 | notebook | `cell` (the top cell's id) + `dy` (the offset in it), so reflowing output can't drift it; `frac` as a fallback |
-| tex | `src` {line, sel}, `preview` {anchor, frac}, `pdf` {page, zoom} |
+| tex | `src` {line, sel}, `preview` {anchor (the source line its top group begins on), dy, frac}; `pdf` {page, zoom} once the editor has a PDF view |
 | board | `x`, `y`, `zoom`, `page` |
 
 ## The restore rules, the same for every editor

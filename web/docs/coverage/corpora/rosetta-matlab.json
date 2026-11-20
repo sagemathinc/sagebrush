@@ -1,0 +1,17 @@
+{
+ "id": "rosetta-matlab",
+ "mode": "matlab",
+ "title": "Rosetta Code's MATLAB and Octave solutions",
+ "source": "https://github.com/acmeism/RosettaCodeData/tree/1d475861",
+ "licence": "GNU FDL 1.2",
+ "oracle": "GNU Octave 11.1",
+ "commit": "9534e4195d7cf681251ffc68c7af4bf087a92f3b",
+ "date": "2026-11-12",
+ "sections": {
+  "all": {
+   "run": 118,
+   "match": 89,
+   "wrong": 9
+  }
+ }
+}

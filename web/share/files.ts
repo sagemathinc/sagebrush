@@ -24,6 +24,8 @@ const BASE: Record<string, string> = {
   "access-control-allow-origin": "*",
   "access-control-expose-headers": "content-length, content-range, etag",
   "referrer-policy": "no-referrer",
+  // (a shared file is reached by its share's link only, never through a search engine: every answer, errors too)
+  "x-robots-tag": "noindex, nofollow",
 };
 
 const plain = (status: number, text: string) => new Response(text, { status, headers: { ...BASE, "content-type": "text/plain; charset=utf-8", "cache-control": "no-store" } });

@@ -28,15 +28,23 @@ export async function shareStatus(ms = 10_000): Promise<ShareStatus> {
   }
 }
 
-export const signInUrl = (returnTo: string) => `/auth/login?return=${encodeURIComponent(returnTo)}`;
+/** A return path without a quick link's cells: a fragment that holds them (z= or c=, as index.html's fromLink finds
+ * them) is dropped, so they never reach the server in the sign-in's return, nor its cookie.  Any other fragment (a
+ * docs anchor, say) stays. */
+export const withoutQuickLink = (returnTo: string) => {
+  const i = returnTo.indexOf("#");
+  return i >= 0 && /[zc]=[\w-]/.test(returnTo.slice(i)) ? returnTo.slice(0, i) : returnTo;
+};
+export const signInUrl = (returnTo: string) => `/auth/login?return=${encodeURIComponent(withoutQuickLink(returnTo))}`;
 
 /**
  * A new share's attempt that already made a share with other contents (`used`, with that share),
- * or whose share was deleted since (`retired`): never a success, and not retried as it was.
+ * or whose share was deleted since (`retired`); or a new version of a share its owner deleted (`gone`): never a
+ * success, and not retried as it was.
  */
 export class AttemptError extends Error {
-  constructor(readonly kind: "used" | "retired", readonly share?: { id: string; version: string; url: string }) {
-    super(kind === "used" ? "an earlier upload of this notebook was shared with other files" : "this notebook's earlier share was deleted");
+  constructor(readonly kind: "used" | "retired" | "gone", readonly share?: { id: string; version: string; url: string }) {
+    super(kind === "used" ? "an earlier upload of this notebook was shared with other files" : kind === "gone" ? "this share was deleted" : "this notebook's earlier share was deleted");
   }
 }
 
@@ -45,9 +53,11 @@ async function api(method: string, path: string, body?: unknown): Promise<any> {
   const v = await r.json().catch(() => ({}));
   if (r.status === 409 && v.error === "attempt_used") throw new AttemptError("used", { id: v.collection, version: v.version, url: new URL(v.url, location.href).href });
   if (r.status === 410 && v.error === "attempt_retired") throw new AttemptError("retired");
-  if (!r.ok) throw new Error(v.error ?? `HTTP ${r.status}`);
+  if (!r.ok) throw Object.assign(new Error(v.error ?? `HTTP ${r.status}`), { status: r.status });
   return v;
 }
+// (a share's public record: 404 once its owner deleted it; any other answer, or none, is not that)
+const recordGone = async (id: string) => (await fetch(`/api/share/c/${encodeURIComponent(id)}`, { credentials: "same-origin" }).catch(() => null))?.status === 404;
 
 const hex = (b: ArrayBuffer) => [...new Uint8Array(b)].map((x) => x.toString(16).padStart(2, "0")).join("");
 
@@ -80,8 +90,11 @@ export const UPLOAD_BATCH_BYTES = 64 * 1024 * 1024;
  * collection).  `progress(done, total)` counts
  * bytes read (total: the files' known sizes).
  */
+/** The byline field's hint, in both Share dialogs: what it is, and that it may be left empty. */
+export const AUTHOR_HINT = "Optional: shown as \u201cby \u2026\u201d. Any names, or none.";
+
 export async function uploadCollection(
-  o: { id: string | null; attempt?: string; title: string; license?: string; files: LazyFile[] },
+  o: { id: string | null; attempt?: string; title: string; license?: string; author?: string; files: LazyFile[] },
   progress: (done: number, total: number) => void = () => {},
   opts: { batchBytes?: number; beforeCommit?: () => void | Promise<void> } = {},
 ): Promise<{ id: string; version: string; url: string; frozen: string }> {
@@ -118,10 +131,15 @@ export async function uploadCollection(
     progress(Math.min(done, total || done), total || done);
   }
   await flush();
-  const body = { title: o.title, license: o.license || undefined, files: manifest };
+  // (the byline as typed: none when empty)
+  const body = { title: o.title, license: o.license || undefined, author: o.author?.trim() || undefined, files: manifest };
   // (a new share: its collection is made with this version, by this one request)
   if (o.id === null) await opts.beforeCommit?.();
   // (a new share: its own path, which a server from before this answers with 404, creating nothing)
-  const v = o.id === null ? await api("POST", "/api/share/first-upload", { ...body, attempt: o.attempt }) : await api("POST", `/api/share/collections/${o.id}/versions`, body);
+  // (a new version refused with 404 is `gone` only if the share's own record says so too: the same 404 answers a share
+  // that is another account's (a sign-in changed), which isn't deleted, and whose link is kept)
+  const v = o.id === null
+    ? await api("POST", "/api/share/first-upload", { ...body, attempt: o.attempt })
+    : await api("POST", `/api/share/collections/${o.id}/versions`, body).catch(async (e) => { throw e?.status === 404 && (await recordGone(o.id!)) ? new AttemptError("gone") : e; });
   return { id: o.id ?? v.collection, version: v.version, url: new URL(v.url, location.href).href, frozen: new URL(v.frozen, location.href).href };
 }

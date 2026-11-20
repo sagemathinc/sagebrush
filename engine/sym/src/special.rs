@@ -129,21 +129,15 @@ fn binomial(n: i64, k: i64) -> BigInt {
     r
 }
 
-/// The Bernoulli numbers B_0, ..., B_n (B_1 = -1/2), from
-/// sum_(k=0)^m binomial(m + 1, k) B_k = 0.
+/// The Bernoulli numbers B_0, ..., B_n (B_1 = -1/2), n >= 0: the engines'
+/// one exact table (sagebrush-bigint's exact module).
 fn bernoulli(n: i64) -> Vec<Q> {
-    let mut b: Vec<Q> = vec![Q::one()];
-    for m in 1..=n {
-        // binomial(m + 1, k) for k = 0, 1, ... built along the row
-        let mut s = Q::zero();
-        let mut c = BigInt::one();
-        for (k, bk) in b.iter().enumerate() {
-            s += Q::from_integer(c.clone()) * bk;
-            c = c * BigInt::from(m + 1 - k as i64) / BigInt::from(k as i64 + 1);
-        }
-        b.push(-s / qi(m + 1));
-    }
-    b
+    sagebrush_bigint::exact::bernoulli(n as usize)
+}
+
+/// B_n alone, n >= 0, from the same table.
+fn bernoulli_number(n: i64) -> Q {
+    sagebrush_bigint::exact::bernoulli_number(n as usize)
 }
 
 /// The Bernoulli polynomial B_n(a) = sum_k binomial(n, k) B_k a^(n-k).
@@ -180,14 +174,12 @@ fn zeta_int(k: i64) -> Expr {
     if k < 0 {
         // zeta(-n) = -B_(n+1)/(n+1)
         let n = -k;
-        let b = bernoulli(n + 1);
-        return qnum(-b[(n + 1) as usize].clone() / qi(n + 1));
+        return qnum(-bernoulli_number(n + 1) / qi(n + 1));
     }
     if k % 2 == 0 {
         // zeta(2m) = (-1)^(m+1) B_(2m) (2 pi)^(2m) / (2 (2m)!)
-        let b = bernoulli(k);
         let sign = if (k / 2) % 2 == 1 { Q::one() } else { -Q::one() };
-        let c = sign * &b[k as usize] * Q::from_integer(BigInt::from(2).pow(k as u32)) / Q::from_integer(BigInt::from(2) * factorial(k));
+        let c = sign * bernoulli_number(k) * Q::from_integer(BigInt::from(2).pow(k as u32)) / Q::from_integer(BigInt::from(2) * factorial(k));
         return mul2(&qnum(c), &pow(&pi(), &int(k)));
     }
     raw(Kind::Fun(Fun::Zeta, vec![int(k)]))

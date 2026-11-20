@@ -1,0 +1,299 @@
+[
+  {
+    "case": "index_zero",
+    "engine": "sagebrush",
+    "command": [
+      "./runtime/node_modules/.bin/sagebrush",
+      "--matlab",
+      "./scripts/probe_index_zero.m"
+    ],
+    "returncode": 0,
+    "elapsed_seconds": 1.105451912037097,
+    "stdout": "PROBE_STATUS=error\nERROR_ID=MATLAB:index:expected_positive_integer\nERROR_MESSAGE=Index in position 1 is invalid. Array indices must be positive integers or logical values.\n",
+    "stderr": "",
+    "probe_status": "error",
+    "error_id": "MATLAB:index:expected_positive_integer",
+    "error_message": "Index in position 1 is invalid. Array indices must be positive integers or logical values."
+  },
+  {
+    "case": "index_zero",
+    "engine": "octave",
+    "command": [
+      "octave",
+      "--no-gui",
+      "--quiet",
+      "./scripts/probe_index_zero.m"
+    ],
+    "returncode": 0,
+    "elapsed_seconds": 0.18359762598993257,
+    "stdout": "PROBE_STATUS=error\nERROR_ID=Octave:invalid-index\nERROR_MESSAGE=a(0): subscripts must be either integers 1 to (2^63)-1 or logicals\n",
+    "stderr": "",
+    "probe_status": "error",
+    "error_id": "Octave:invalid-index",
+    "error_message": "a(0): subscripts must be either integers 1 to (2^63)-1 or logicals"
+  },
+  {
+    "case": "matrix_dimensions",
+    "engine": "sagebrush",
+    "command": [
+      "./runtime/node_modules/.bin/sagebrush",
+      "--matlab",
+      "./scripts/probe_matrix_dimensions.m"
+    ],
+    "returncode": 0,
+    "elapsed_seconds": 1.8278957099537365,
+    "stdout": "PROBE_STATUS=error\nERROR_ID=MATLAB:innerdim\nERROR_MESSAGE=Incorrect dimensions for matrix multiplication. Check that the number of columns in the first matrix matches the number of rows in the second matrix. To operate on each element of the matrix individually, use TIMES (.*) for elementwise multiplication.\n",
+    "stderr": "",
+    "probe_status": "error",
+    "error_id": "MATLAB:innerdim",
+    "error_message": "Incorrect dimensions for matrix multiplication. Check that the number of columns in the first matrix matches the number of rows in the second matrix. To operate on each element of the matrix individually, use TIMES (.*) for elementwise multiplication."
+  },
+  {
+    "case": "matrix_dimensions",
+    "engine": "octave",
+    "command": [
+      "octave",
+      "--no-gui",
+      "--quiet",
+      "./scripts/probe_matrix_dimensions.m"
+    ],
+    "returncode": 0,
+    "elapsed_seconds": 0.15811159898294136,
+    "stdout": "PROBE_STATUS=error\nERROR_ID=Octave:nonconformant-args\nERROR_MESSAGE=operator *: nonconformant arguments (op1 is 1x2, op2 is 1x2)\n",
+    "stderr": "",
+    "probe_status": "error",
+    "error_id": "Octave:nonconformant-args",
+    "error_message": "operator *: nonconformant arguments (op1 is 1x2, op2 is 1x2)"
+  },
+  {
+    "case": "objective_nan",
+    "engine": "sagebrush",
+    "command": [
+      "./runtime/node_modules/.bin/sagebrush",
+      "--matlab",
+      "./scripts/probe_objective_nan.m"
+    ],
+    "returncode": 0,
+    "elapsed_seconds": 1.1360702889505774,
+    "stdout": "PROBE_STATUS=error\nERROR_ID=\nERROR_MESSAGE=fminsearch: the objective function returned NaN (FunValCheck is on).\n",
+    "stderr": "",
+    "probe_status": "error",
+    "error_id": "",
+    "error_message": "fminsearch: the objective function returned NaN (FunValCheck is on)."
+  },
+  {
+    "case": "objective_nan",
+    "engine": "octave",
+    "command": [
+      "octave",
+      "--no-gui",
+      "--quiet",
+      "./scripts/probe_objective_nan.m"
+    ],
+    "returncode": 0,
+    "elapsed_seconds": 0.18851539603201672,
+    "stdout": "PROBE_STATUS=error\nERROR_ID=fminsearch:isnan\nERROR_MESSAGE=fminsearch: NaN value encountered\n",
+    "stderr": "",
+    "probe_status": "error",
+    "error_id": "fminsearch:isnan",
+    "error_message": "fminsearch: NaN value encountered"
+  },
+  {
+    "case": "objective_complex",
+    "engine": "sagebrush",
+    "command": [
+      "./runtime/node_modules/.bin/sagebrush",
+      "--matlab",
+      "./scripts/probe_objective_complex.m"
+    ],
+    "returncode": 0,
+    "elapsed_seconds": 1.0363026370177977,
+    "stdout": "PROBE_STATUS=error\nERROR_ID=\nERROR_MESSAGE=fminsearch: the objective function returned a complex value; only real values can be minimized.\n",
+    "stderr": "",
+    "probe_status": "error",
+    "error_id": "",
+    "error_message": "fminsearch: the objective function returned a complex value; only real values can be minimized."
+  },
+  {
+    "case": "objective_complex",
+    "engine": "octave",
+    "command": [
+      "octave",
+      "--no-gui",
+      "--quiet",
+      "./scripts/probe_objective_complex.m"
+    ],
+    "returncode": 0,
+    "elapsed_seconds": 0.2283685639849864,
+    "stdout": "PROBE_STATUS=error\nERROR_ID=fminsearch:notreal\nERROR_MESSAGE=fminsearch: non-real value encountered\n",
+    "stderr": "",
+    "probe_status": "error",
+    "error_id": "fminsearch:notreal",
+    "error_message": "fminsearch: non-real value encountered"
+  },
+  {
+    "case": "objective_vector",
+    "engine": "sagebrush",
+    "command": [
+      "./runtime/node_modules/.bin/sagebrush",
+      "--matlab",
+      "./scripts/probe_objective_vector.m"
+    ],
+    "returncode": 0,
+    "elapsed_seconds": 1.4036548500298522,
+    "stdout": "PROBE_STATUS=error\nERROR_ID=\nERROR_MESSAGE=fminsearch: the objective function must return a numeric scalar.\n",
+    "stderr": "",
+    "probe_status": "error",
+    "error_id": "",
+    "error_message": "fminsearch: the objective function must return a numeric scalar."
+  },
+  {
+    "case": "objective_vector",
+    "engine": "octave",
+    "command": [
+      "octave",
+      "--no-gui",
+      "--quiet",
+      "./scripts/probe_objective_vector.m"
+    ],
+    "returncode": 0,
+    "elapsed_seconds": 0.3514019050053321,
+    "stdout": "PROBE_STATUS=error\nERROR_ID=Octave:nonconformant-args\nERROR_MESSAGE==: nonconformant arguments (op1 is 1x1, op2 is 1x2)\n",
+    "stderr": "",
+    "probe_status": "error",
+    "error_id": "Octave:nonconformant-args",
+    "error_message": "=: nonconformant arguments (op1 is 1x1, op2 is 1x2)"
+  },
+  {
+    "case": "ode_wrong_rhs",
+    "engine": "sagebrush",
+    "command": [
+      "./runtime/node_modules/.bin/sagebrush",
+      "--matlab",
+      "./scripts/probe_ode_wrong_rhs.m"
+    ],
+    "returncode": 0,
+    "elapsed_seconds": 1.2463728610309772,
+    "stdout": "PROBE_STATUS=error\nERROR_ID=\nERROR_MESSAGE=ode45: the ODE function must return a vector of length 1 (as y0).\n",
+    "stderr": "",
+    "probe_status": "error",
+    "error_id": "",
+    "error_message": "ode45: the ODE function must return a vector of length 1 (as y0)."
+  },
+  {
+    "case": "ode_wrong_rhs",
+    "engine": "octave",
+    "command": [
+      "octave",
+      "--no-gui",
+      "--quiet",
+      "./scripts/probe_ode_wrong_rhs.m"
+    ],
+    "returncode": 0,
+    "elapsed_seconds": 0.20528290601214394,
+    "stdout": "PROBE_STATUS=error\nERROR_ID=Octave:nonconformant-args\nERROR_MESSAGE=operator -: nonconformant arguments (op1 is 4x1, op2 is 2x1)\n",
+    "stderr": "",
+    "probe_status": "error",
+    "error_id": "Octave:nonconformant-args",
+    "error_message": "operator -: nonconformant arguments (op1 is 4x1, op2 is 2x1)"
+  },
+  {
+    "case": "ode_nonmonotonic_times",
+    "engine": "sagebrush",
+    "command": [
+      "./runtime/node_modules/.bin/sagebrush",
+      "--matlab",
+      "./scripts/probe_ode_nonmonotonic_times.m"
+    ],
+    "returncode": 0,
+    "elapsed_seconds": 0.9877186099765822,
+    "stdout": "PROBE_STATUS=error\nERROR_ID=\nERROR_MESSAGE=ode45: the entries of tspan must be strictly increasing or strictly decreasing.\n",
+    "stderr": "",
+    "probe_status": "error",
+    "error_id": "",
+    "error_message": "ode45: the entries of tspan must be strictly increasing or strictly decreasing."
+  },
+  {
+    "case": "ode_nonmonotonic_times",
+    "engine": "octave",
+    "command": [
+      "octave",
+      "--no-gui",
+      "--quiet",
+      "./scripts/probe_ode_nonmonotonic_times.m"
+    ],
+    "returncode": 0,
+    "elapsed_seconds": 0.18421957804821432,
+    "stdout": "PROBE_STATUS=success\n",
+    "stderr": "",
+    "probe_status": "success",
+    "error_id": null,
+    "error_message": null
+  },
+  {
+    "case": "ode_negative_tolerance",
+    "engine": "sagebrush",
+    "command": [
+      "./runtime/node_modules/.bin/sagebrush",
+      "--matlab",
+      "./scripts/probe_ode_negative_tolerance.m"
+    ],
+    "returncode": 0,
+    "elapsed_seconds": 1.0251827079919167,
+    "stdout": "PROBE_STATUS=error\nERROR_ID=\nERROR_MESSAGE=odeset: RelTol must be a positive scalar.\n",
+    "stderr": "",
+    "probe_status": "error",
+    "error_id": "",
+    "error_message": "odeset: RelTol must be a positive scalar."
+  },
+  {
+    "case": "ode_negative_tolerance",
+    "engine": "octave",
+    "command": [
+      "octave",
+      "--no-gui",
+      "--quiet",
+      "./scripts/probe_ode_negative_tolerance.m"
+    ],
+    "returncode": 0,
+    "elapsed_seconds": 0.17558715702034533,
+    "stdout": "PROBE_STATUS=error\nERROR_ID=Octave:expected-positive\nERROR_MESSAGE=ode45: RelTol must be positive\n",
+    "stderr": "",
+    "probe_status": "error",
+    "error_id": "Octave:expected-positive",
+    "error_message": "ode45: RelTol must be positive"
+  },
+  {
+    "case": "jsonencode",
+    "engine": "sagebrush",
+    "command": [
+      "./runtime/node_modules/.bin/sagebrush",
+      "--matlab",
+      "./scripts/probe_jsonencode.m"
+    ],
+    "returncode": 0,
+    "elapsed_seconds": 1.4492240769905038,
+    "stdout": "PROBE_STATUS=error\nERROR_ID=MATLAB:UndefinedFunction\nERROR_MESSAGE=Unrecognized function or variable 'jsonencode'. jsonencode is not in Sagebrush; instead: Python mode's json.dumps.\n",
+    "stderr": "",
+    "probe_status": "error",
+    "error_id": "MATLAB:UndefinedFunction",
+    "error_message": "Unrecognized function or variable 'jsonencode'. jsonencode is not in Sagebrush; instead: Python mode's json.dumps."
+  },
+  {
+    "case": "jsonencode",
+    "engine": "octave",
+    "command": [
+      "octave",
+      "--no-gui",
+      "--quiet",
+      "./scripts/probe_jsonencode.m"
+    ],
+    "returncode": 0,
+    "elapsed_seconds": 0.17918866698164493,
+    "stdout": "{\"x\":1}\nPROBE_STATUS=success\n",
+    "stderr": "",
+    "probe_status": "success",
+    "error_id": null,
+    "error_message": null
+  }
+]
