@@ -34,6 +34,7 @@ const RELEASE_SHA256 = {
   "0.7.3": "85ac62b714596920ee72c8426a164652b9c841a137ce846c905b3f4122ef4242",
   "0.7.4": "d51be4668b9508477b73e5d969424702808d6a3cfd6b83bb0f1bdb00a60e4e3c",
   "0.7.5": "8fb25135ad02c52cb1aacdb83e6b731164ab90e18213121eb1cda51446b2101b",
+  "0.7.6": "f6a2cdea609ddec69d5da534b6a12434abc203dac5ee4603a17e8f51723a9eb8",
 };
 const tgzVersions = [...new Set([...(html + conn0).matchAll(/sagebrush-agent-([^/"<\s]*)\.tgz/g)].map((m) => m[1]))];
 ok(tgzVersions.length === 1 && JSON.stringify(tgzVersions) === JSON.stringify(rc.v), `every .tgz link on both pages names the same one version, the one the pages name: ${JSON.stringify(tgzVersions)}`);
