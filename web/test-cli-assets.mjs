@@ -26,7 +26,7 @@ let fail = 0;
 // (named by the page but deliberately not served by the CLI: the app
 // self-test's COI diagnosis, loaded by selftest() only under
 // SAGEBRUSH_APP_SELFTEST, web/notebook/selftest-diagnose.js)
-const APP_ONLY = ["sagebrush-selftest.js"];
+const APP_ONLY = ["sagebrush-selftest.js", "sagebrush-desktop.js"];
 // (and the site-only: the LaTeX editor's page module, which the page names but only fetches on the site's own hosts
 // (web/latex/boot.ts latexOn, web/build.ts: sagebrush.space, dev.sagebrush.space), never on the CLI's 127.0.0.1, where
 // the editor is off; the CLI doesn't carry it, so it must be 404 here, as an app-only file is)
