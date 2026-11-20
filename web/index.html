@@ -4849,7 +4849,14 @@ async function selftest(path) {
       check("a grant the app didn't make reaches nothing", await no("folder_list", { grant: "0123456789abcdef0123456789abcdef" }) && await no("file_read_text", { grant: "nope" }));
       const put = (name) => TAURI.core.invoke("folder_write", new TextEncoder().encode("x"), { headers: { "Sagebrush-Grant": diskFile.grant, "Sagebrush-Name": encodeURIComponent(name) } }).then(() => false, () => true);
       check("a name outside the notebook's folder is refused", await no("folder_read", { grant: diskFile.grant, name: "../" + diskFile.name }) && await put("sub/x") && await put("../x") && await put(".bashrc") && await no("folder_read", { grant: diskFile.grant, name: ".bashrc" }));
-      check("the page has no fs plugin", typeof TAURI.fs === "undefined" && await no("plugin:fs|exists", { path: "/" }));
+      // (neither the plugin's API on the page nor its commands: each found on its own, never one cut short by the other,
+      // and both said. Only the ACL's refusal passes, the command never run: "Command plugin:fs|… not allowed by ACL" in a
+      // release build, "fs.… not allowed. Plugin not found" (or another of its reasons) in a debug one; a reached plugin's
+      // own refusal ("forbidden path", outside its scope) fails)
+      const facade = typeof TAURI.fs;
+      const native = await Promise.all([["plugin:fs|exists", { path: "/" }], ["plugin:fs|read_dir", { path: "/" }]].map(([c, a]) => TAURI.core.invoke(c, a).then(() => `${c} REACHED`, (e) => `${c} refused: ${String(e?.message ?? e).slice(0, 120)}`)));
+      const aclRefused = (r) => / refused: (Command plugin:fs\|\w+ not allowed by ACL|fs\.\w+ not allowed\. (Plugin not found|Command not found|Permissions associated)|fs\.\w+ not allowed on origin)/.test(r);
+      check("the page has no fs plugin", facade === "undefined" && native.every(aclRefused), JSON.stringify({ facade, native }));
     }
     // Stop: KeyboardInterrupt in a running loop, keeping the variables
     const exec = (code) => new Promise((resolve) => {

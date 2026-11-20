@@ -3,7 +3,7 @@ ok   cross-origin isolated (Stop keeps variables)
 ok   opened the notebook from disk: ready
 ok   a grant the app didn't make reaches nothing
 ok   a name outside the notebook's folder is refused
-ok   the page has no fs plugin
+ok   the page has no fs plugin: {"facade":"undefined","native":["plugin:fs|exists refused: Command plugin:fs|exists not allowed by ACL","plugin:fs|read_dir refused: Command plugin:fs|read_dir not allowed by ACL"]}
 ok   ran it: Sage and the engines: "274177 * 67280421310721"
 ok   Python read a file in the notebook's folder
 ok   3D graphics
