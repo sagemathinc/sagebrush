@@ -162,7 +162,8 @@ export const LATEX_LAZY_CAPS = {
   //  measured on their merge (master 3c4319ba): 56,277 / 19,307 (bun 1.4.4, node 24.21.0), + 64)
   // (56,431 / 19,403: Nov 19 2026, the reload record's handling on master a3f1e30b: 56,367 / 19,339 measured, + 64)
   // (56,961 / 19,577: Nov 20 2026, run.context: a run verb's call carries its chat and turn (agent-pair.ts), measured on the shipped build of the head merged with master d5c49e20: 56,897 / 19,513, + 64)
-  AGENT: { label: "the LaTeX agent pairing's chunk", raw: 56961, gzip: 19577 },
+  // (57,232 / 19,644: Nov 20 2026, edit.turn: a notebook edit carries its turn (agent-pair.ts), measured on the shipped build of the head on master 8fddefd8: 57,168 / 19,580, + 64)
+  AGENT: { label: "the LaTeX agent pairing's chunk", raw: 57232, gzip: 19644 },
   // (the agent tools' work: web/latex/tools.ts, latex_check's report and latex_render's pictures, on an agent's first call)
   // (16,546 / 6,950: Nov 11 2026: latex_build's own code (build.ts, the
   //  engine driven from a snapshot, and the pages' fit) here, out of the eager group, its shared rules handed in by the
