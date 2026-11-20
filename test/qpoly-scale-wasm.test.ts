@@ -1,4 +1,4 @@
-// qpoly_scale, qpoly_derivative, qpoly_integral and qpoly_add on the
+// qpoly_scale, qpoly_derivative, qpoly_add and qpoly_sub on the
 // production engine module (wasm/sagebrush-engine.wasm): a Stop's wall-clock
 // latency on the calibration's slowest shapes.  The engine asks the host
 // every 2^20 work units; units differ in cost, so the latency is measured:
@@ -9,10 +9,13 @@ import assert from "node:assert/strict";
 import { readFileSync } from "node:fs";
 import { join } from "node:path";
 
-const DEADLINE_MS = 50;
+// (a smoke deadline for a shared CI runner, where parallel test files contend
+// for the CPUs: the engine's 2^20-unit poll cadence, a few ms of work, is
+// pinned strictly by the native Stop tests)
+const DEADLINE_MS = 200;
 // (each calibration call at least this long, 4x the deadline: a shorter
 // one could end within the deadline of T whether or not Stop works)
-const MIN_CALL_MS = 200;
+const MIN_CALL_MS = 800;
 
 let flag: () => number = () => 0;
 const mod = new WebAssembly.Module(readFileSync(join(__dirname, "..", "..", "wasm", "sagebrush-engine.wasm")));
@@ -38,14 +41,30 @@ function call(e: any, request: string): { out: string; returned: number } {
 const range = (n: number, f: (i: number) => string) => Array.from({ length: n }, (_, i) => f(i)).join(",");
 const hx = (n: number) => n.toString(16);
 
-// (the calibration's shapes, each long enough, at least MIN_CALL_MS, that a
-// Stop at a quarter or half of the call is tested, not outrun by the call's
-// own end)
+// (pairs whose denominators are a large P times pseudo-random 48-limb
+// cofactors: each pair's gcds run Lehmer over the whole length)
+const P = BigInt("0x" + "9e3779b97f4a7c15".repeat(64));
+let seed = 0x2026n;
+const rnd = (limbs: number) => {
+  let v = 0n;
+  for (let i = 0; i < limbs; i++) {
+    seed = (seed * 6364136223846793005n + 1442695040888963407n) & 0xffffffffffffffffn;
+    v = (v << 64n) | seed;
+  }
+  return v | 1n;
+};
+const rpairs = (n: number, sign: string) => range(n, () => `${sign}${rnd(4).toString(16)}/${(P * rnd(48)).toString(16)}`);
+
+// (shapes long enough, at least MIN_CALL_MS, that a Stop at a quarter or
+// half of the call is tested, not outrun by the call's own end, within the
+// request's 16 MiB and the reply's and memory's caps; the integral's work is
+// too little per request byte to reach it, and its Stop is pinned by the
+// native tests)
 const shapes: [string, string, string, string][] = [
-  ["product-heavy: the 64th derivative of 20,000 1900-bit integers", "qpoly_derivative", range(20000, (i) => `${hx(i + 1)}${"a".repeat(475)}`), "40"],
-  ["token-heavy: the integral of 600,000 small rationals", "qpoly_integral", range(600000, (i) => `${hx(((i * 31) % 4093) + 1)}/${hx((i % 61) + 2)}`), "1/3"],
-  ["sum-heavy: two 50,000-term polynomials with large coprime denominators", "qpoly_add", range(50000, (i) => `${hx(i + 1)}${"c".repeat(60)}/${hx(2 * i + 1)}${"f".repeat(40)}`), range(50000, (i) => `-${hx(i + 7)}${"9".repeat(60)}/${hx(2 * i + 3)}${"e".repeat(40)}`)],
-  ["gcd-heavy: 24,000 rationals by a 500/400-bit rational", "qpoly_scale", range(24000, (i) => `${hx(i * 7 + 1)}${"d".repeat(150)}/${hx((i % 97) + 3)}${"b".repeat(100)}`), `-${"e7".repeat(62)}/${"9".repeat(100)}`],
+  ["product-heavy: the 1500th derivative of 6000 10,000-bit integers", "qpoly_derivative", range(6000, (i) => `${hx(i + 1)}${"a".repeat(2560)}`), "5dc"],
+  ["gcd-heavy: 44,000 rationals by a 500/1600-bit rational", "qpoly_scale", range(44000, (i) => `${hx(i * 7 + 1)}${"d".repeat(150)}/${hx((i % 97) + 3)}${"b".repeat(100)}`), `-${"e7".repeat(62)}/${"9".repeat(400)}`],
+  ["sum-heavy: 2500 pairs over denominators sharing a 4096-bit factor", "qpoly_add", rpairs(2500, ""), rpairs(2500, "-")],
+  ["difference-heavy: 2500 pairs over denominators sharing a 4096-bit factor", "qpoly_sub", rpairs(2500, ""), rpairs(2500, "")],
 ];
 
 for (const [name, fn, a, b] of shapes) {

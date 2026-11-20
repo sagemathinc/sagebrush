@@ -8,10 +8,13 @@ import assert from "node:assert/strict";
 import { readFileSync } from "node:fs";
 import { join } from "node:path";
 
-const DEADLINE_MS = 50;
+// (a smoke deadline for a shared CI runner, where parallel test files contend
+// for the CPUs: the engine's 2^20-unit poll cadence, a few ms of work, is
+// pinned strictly by the native Stop tests)
+const DEADLINE_MS = 200;
 // (each calibration call at least this long, 4x the deadline: a shorter
 // one could end within the deadline of T whether or not Stop works)
-const MIN_CALL_MS = 200;
+const MIN_CALL_MS = 800;
 
 let flag: () => number = () => 0;
 const mod = new WebAssembly.Module(readFileSync(join(__dirname, "..", "..", "wasm", "sagebrush-engine.wasm")));
@@ -42,7 +45,7 @@ const range = (n: number, f: (i: number) => string) => Array.from({ length: n },
 // half of it is tested, not outrun by the call's own end)
 const shapes: [string, string, string][] = [
   ["cancel-heavy: dense 1000 / non-monic 500", range(1001, (i) => tok(3 * i + 1, (i % 12) + 1)), range(501, (i) => tok(3 * i + 6, (i % 12) + 1))],
-  ["update-heavy: 2400 / non-monic 1200", range(2401, (i) => tok(((i * 7919) % 201) - 100, 1)), range(1201, (i) => (i === 1200 ? "3" : tok(((i * 104729) % 19) - 9, 1)))],
+  ["update-heavy: 3400 / non-monic 1700", range(3401, (i) => tok(((i * 7919) % 201) - 100, 1)), range(1701, (i) => (i === 1700 ? "3" : tok(((i * 104729) % 19) - 9, 1)))],
 ];
 
 for (const [name, a, b] of shapes) {
