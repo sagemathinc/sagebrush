@@ -50,6 +50,7 @@
 // through a collection: /c/<collection>/<sha256>, for files of its versions.
 
 import { purgeRemotes, remoteDeletes } from "../remote/server.ts";
+import { purgeMirror, mirrorGone } from "../mirror/server.ts";
 import { authorizeUrl, exchangeCode, refreshSession, revokeSession, sidOf, verifyAccessToken, type WorkosConfig, type WorkosUser } from "../../share/identity/workos.ts";
 import { seal, sealKeys, unseal } from "../../share/identity/seal.ts";
 import { periods } from "./periods.ts";
@@ -1016,7 +1017,7 @@ async function localLimits(env: ShareEnv, id: string): Promise<Limits | null> {
   return ok(v) ? { tier: "local", storage_bytes: v.storage_bytes, max_file_bytes: Math.min(v.max_file_bytes, MAX_PUT), private_links: false } : null;
 }
 
-async function limits(env: ShareEnv, who: Who): Promise<Limits | null> {
+export async function limits(env: ShareEnv, who: Who): Promise<Limits | null> {
   // (no CoCalc plan counts with WorkOS sign-in: Sagebrush's free plan, until grants)
   if (workosMode(env)) return FREE_LIMITS;
   if (localMode(env)) return localLimits(env, who.id);
@@ -1074,11 +1075,12 @@ export async function authTier(env: ShareEnv, who: { id: string; session: string
   return l && typeof l.tier === "string" && l.tier !== "" ? l.tier : null;
 }
 
-// (SQL: what sharing holds for account ?1, reservations still running at ?2 included; the sync
-// service's claim on the same budget, CLAIM, is added where sync is on)
+// (SQL: what sharing holds for account ?1, reservations still running at ?2 included, and every other holder's claim
+// on the same budget (budget_claims, migration 0016); the sync service's claim, CLAIM, is added where sync is on)
 export const SHARING_USED = `(SELECT COALESCE(SUM(size), 0) FROM holdings WHERE account_id = ?1)
   + (SELECT COALESCE(SUM(manifest_bytes), 0) FROM versions WHERE owner = ?1)
-  + (SELECT COALESCE(SUM(bytes), 0) FROM reservations WHERE account_id = ?1 AND expires > ?2)`;
+  + (SELECT COALESCE(SUM(bytes), 0) FROM reservations WHERE account_id = ?1 AND expires > ?2)
+  + (SELECT COALESCE(SUM(bytes), 0) FROM budget_claims WHERE account_id = ?1)`;
 /** sharing's clock, in seconds (reservations' expiry) */
 export const nowSeconds = () => now();
 // (the bytes sync has claimed of account ?8's budget (its hash): every byte of it may be in use, so
@@ -1101,11 +1103,11 @@ async function usage(env: ShareEnv, id: string): Promise<number> {
  * claim (above).  If the account object can't be reached, sync's claim stands
  * in for its parts.
  */
-async function breakdown(env: ShareEnv, id: string): Promise<{ usage: number; usage_breakdown: { sharing_files: number; sharing_versions: number; sync_files: number; sync_documents: number; sync_claim?: number }; sync_retention?: { state: string; readonly_since: number | null; purge_after: number | null } }> {
+async function breakdown(env: ShareEnv, id: string): Promise<{ usage: number; usage_breakdown: { sharing_files: number; sharing_versions: number; sync_files: number; sync_documents: number; sync_claim?: number; claims?: number }; sync_retention?: { state: string; readonly_since: number | null; purge_after: number | null } }> {
   const db = env.SHARE_DB!;
   const t = now();
   const s = await db.prepare("SELECT (SELECT COALESCE(SUM(size), 0) FROM holdings WHERE account_id = ?1) + (SELECT COALESCE(SUM(bytes), 0) FROM reservations WHERE account_id = ?1 AND expires > ?2) AS files, (SELECT COALESCE(SUM(manifest_bytes), 0) FROM versions WHERE owner = ?1) AS versions").bind(id, t).first<{ files: number; versions: number }>();
-  const parts = { sharing_files: s?.files ?? 0, sharing_versions: s?.versions ?? 0, sync_files: 0, sync_documents: 0 } as { sharing_files: number; sharing_versions: number; sync_files: number; sync_documents: number; sync_claim?: number };
+  const parts = { sharing_files: s?.files ?? 0, sharing_versions: s?.versions ?? 0, sync_files: 0, sync_documents: 0 } as { sharing_files: number; sharing_versions: number; sync_files: number; sync_documents: number; sync_claim?: number; claims?: number };
   let retention: { state: string; readonly_since: number | null; purge_after: number | null } | undefined;
   if (env.SYNC_ACCOUNT) {
     const h = await accountHash(id);
@@ -1124,7 +1126,10 @@ async function breakdown(env: ShareEnv, id: string): Promise<{ usage: number; us
       }
     }
   }
-  return { usage: parts.sharing_files + parts.sharing_versions + parts.sync_files + parts.sync_documents + (parts.sync_claim ?? 0), usage_breakdown: parts, ...(retention ? { sync_retention: retention } : {}) };
+  // (other holders' claims on the budget, budget_claims: the log mirror's; named only when there are any)
+  const claims = (await db.prepare("SELECT COALESCE(SUM(bytes), 0) AS n FROM budget_claims WHERE account_id = ?1").bind(id).first<{ n: number }>())?.n ?? 0;
+  if (claims > 0) parts.claims = claims;
+  return { usage: parts.sharing_files + parts.sharing_versions + parts.sync_files + parts.sync_documents + (parts.sync_claim ?? 0) + claims, usage_breakdown: parts, ...(retention ? { sync_retention: retention } : {}) };
 }
 
 /**
@@ -1534,6 +1539,9 @@ async function purgeAccount(env: ShareEnv, account: string, rid: string, admin: 
   // (the account's remotes, web/remote: their enrolled keys, before the purge advances, so a failure here leaves it
   // running, retried when its lease ends; skipped where 0009 isn't applied yet)
   await purgeRemotes(env, account);
+  // (the account's log mirror, web/cloud/mirror: its keys and index now, its objects by its own alarm; a failure here
+  // leaves the purge running, retried when its lease ends)
+  await purgeMirror(env, account);
   const counts = await db.prepare(`SELECT (SELECT COUNT(*) FROM collections WHERE owner = ?1) AS c, (SELECT COALESCE(SUM(size), 0) FROM holdings WHERE account_id = ?1) + (SELECT COALESCE(SUM(manifest_bytes), 0) FROM versions WHERE owner = ?1) AS b`).bind(account).first<{ c: number; b: number }>();
   await db.batch([
     db.prepare("INSERT OR IGNORE INTO r2_deletes (key, prefix, account_id, purge, created) VALUES (?1, 1, ?2, ?3, ?4)").bind(await prefixOf(account), account, rid, t),
@@ -1587,6 +1595,8 @@ export async function drain(env: ShareEnv, budget = 50): Promise<void> {
       const left = await bucket.list({ prefix: r.key, limit: 1 });
       const uploading = r.account_id ? await db.prepare("SELECT 1 AS x FROM reservations WHERE account_id = ?1 AND expires > ?2 LIMIT 1").bind(r.account_id, now()).first() : null;
       if (left.objects.length || uploading) continue; // (again next time)
+      // (the log mirror's objects gone too, before its claim goes in the batch below)
+      if (!(await mirrorGone(env, r.account_id!))) continue;
       // done: every purge of this account (they coalesce) is.  An account deleted
       // in CoCalc (it has a tombstone, whichever purge got here first) is gone;
       // one that only deleted its shared data can share again.  (Which one is
@@ -1601,6 +1611,8 @@ export async function drain(env: ShareEnv, budget = 50): Promise<void> {
         db.prepare("DELETE FROM accounts WHERE account_id = ?1 AND EXISTS (SELECT 1 FROM tombstones WHERE account_hash = ?2)").bind(r.account_id, h),
         db.prepare("UPDATE accounts SET deleting = NULL WHERE account_id = ?1 AND NOT EXISTS (SELECT 1 FROM tombstones WHERE account_hash = ?2)").bind(r.account_id, h),
         db.prepare("DELETE FROM limits_cache WHERE account_id = ?1").bind(r.account_id),
+        // (other holders' claims on the budget, last: each holder's own data went before this batch)
+        db.prepare("DELETE FROM budget_claims WHERE account_id = ?1").bind(r.account_id),
         db.prepare("UPDATE purges SET status = 'done', finished = ?2, account_id = NULL, lease = NULL WHERE account_hash = ?1 AND status <> 'done' AND kind <> 'collection'").bind(h, now()),
       ]);
     } catch {

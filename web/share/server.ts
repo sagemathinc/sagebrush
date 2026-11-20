@@ -338,11 +338,12 @@ async function limits(env: ShareEnv, who: Who): Promise<Limits | null> {
   }
 }
 
-// (SQL: what sharing holds for account ?1, reservations still running at ?2 included; the sync
-// service's claim on the same budget, CLAIM, is added where sync is on)
+// (SQL: what sharing holds for account ?1, reservations still running at ?2 included, and every other holder's claim
+// on the same budget (budget_claims, migration 0016); the sync service's claim, CLAIM, is added where sync is on)
 export const SHARING_USED = `(SELECT COALESCE(SUM(size), 0) FROM holdings WHERE account_id = ?1)
   + (SELECT COALESCE(SUM(manifest_bytes), 0) FROM versions WHERE owner = ?1)
-  + (SELECT COALESCE(SUM(bytes), 0) FROM reservations WHERE account_id = ?1 AND expires > ?2)`;
+  + (SELECT COALESCE(SUM(bytes), 0) FROM reservations WHERE account_id = ?1 AND expires > ?2)
+  + (SELECT COALESCE(SUM(bytes), 0) FROM budget_claims WHERE account_id = ?1)`;
 /** sharing's clock, in seconds (reservations' expiry) */
 export const nowSeconds = () => now();
 // (the bytes sync has claimed of account ?8's budget (its hash): every byte of it may be in use, so
@@ -856,6 +857,8 @@ export async function drain(env: ShareEnv, budget = 50): Promise<void> {
         db.prepare("DELETE FROM accounts WHERE account_id = ?1 AND EXISTS (SELECT 1 FROM tombstones WHERE account_hash = ?2)").bind(r.account_id, h),
         db.prepare("UPDATE accounts SET deleting = NULL WHERE account_id = ?1 AND NOT EXISTS (SELECT 1 FROM tombstones WHERE account_hash = ?2)").bind(r.account_id, h),
         db.prepare("DELETE FROM limits_cache WHERE account_id = ?1").bind(r.account_id),
+        // (other holders' claims on the budget, last: each holder's own data went before this batch)
+        db.prepare("DELETE FROM budget_claims WHERE account_id = ?1").bind(r.account_id),
         db.prepare("UPDATE purges SET status = 'done', finished = ?2, account_id = NULL, lease = NULL WHERE account_hash = ?1 AND status <> 'done' AND kind <> 'collection'").bind(h, now()),
       ]);
     } catch {
