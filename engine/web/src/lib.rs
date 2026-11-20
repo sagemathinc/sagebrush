@@ -597,7 +597,7 @@ fn error_json(e: String) -> Value {
 /// The row of [`series_ops::OPS`] named exactly by the request's last
 /// top-level "fn", if any.
 fn series_op(req: &str) -> Option<&'static series_ops::SeriesOp> {
-    static NAMES: [&str; 4] = [series_ops::OPS[0].name, series_ops::OPS[1].name, series_ops::OPS[2].name, series_ops::OPS[3].name];
+    static NAMES: [&str; 5] = [series_ops::OPS[0].name, series_ops::OPS[1].name, series_ops::OPS[2].name, series_ops::OPS[3].name, series_ops::OPS[4].name];
     last_fn(req, &NAMES).map(|i| &series_ops::OPS[i])
 }
 
@@ -1653,11 +1653,8 @@ fn dispatch(v: &Value) -> Result<Value, String> {
             }
             Ok(zrows(&a.mul(&b), v))
         }
-        // ---- sagebrush.poly: products and gcds in Z[x] ----
-        "poly_mul" => Ok(zvec(
-            &sagebrush_arith::zpoly::mul(&sagebrush_arith::zpoly::trim(bigs(v.get("a"))?), &sagebrush_arith::zpoly::trim(bigs(v.get("b"))?)),
-            v,
-        )),
+        // ---- sagebrush.poly: gcds and exact division in Z[x] (products:
+        // poly_mul, admitted before any parse, series_ops.rs) ----
         "poly_gcd" => Ok(zvec(&sagebrush_arith::zpoly::gcd(&bigs(v.get("a"))?, &bigs(v.get("b"))?), v)),
         "poly_divexact" => {
             let a = sagebrush_arith::zpoly::trim(bigs(v.get("a"))?);

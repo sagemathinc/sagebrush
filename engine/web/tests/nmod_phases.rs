@@ -67,13 +67,14 @@ fn phases(label: &str, req: &str, want: &[(&str, usize)]) {
 
 #[test]
 fn stop_in_every_phase() {
-    // fill the shared cache with other ops' tables first (integer
+    // fill the shared cache with other computations' tables first (integer
     // polynomial products: many primes, several lengths)
     let mut s = 99u64;
     for len in [100usize, 1000, 5000, 20000] {
-        let a: Vec<String> = (0..len).map(|_| format!("{}{}", rng(&mut s), rng(&mut s))).collect();
-        let r = call(&format!(r#"{{"fn":"poly_mul","a":{:?},"b":{:?}}}"#, a, a));
-        assert!(r.starts_with("{\"ok\""), "{}", &r[..r.len().min(200)]);
+        // (zpoly::mul's multimodular product, through the shared cache:
+        // poly_mul itself builds its own tables)
+        let a: Vec<sagebrush_bigint::BigInt> = (0..len).map(|_| format!("{}{}", rng(&mut s), rng(&mut s)).parse().unwrap()).collect();
+        assert!(!sagebrush_arith::zpoly::mul(&a, &a).is_empty());
     }
     let filled = stats();
     eprintln!("shared cache: {:?}", filled);

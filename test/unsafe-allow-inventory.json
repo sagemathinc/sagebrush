@@ -739,7 +739,7 @@
   {
    "file": "engine/web/tests/nmod_alloc.rs",
    "item": "fn abi_frees_the_old_reply_first",
-   "hash": "92a3fc319fb171b67e311df9a6ae801718960cf7741dc3190748f6c7325fadda",
+   "hash": "7293ba0ac7c55df119a567ab4d70509416dcf774dabc63e02dd80a4e7698e68c",
    "audit": "Can it produce or alter an Obligations, Operation, Reservation, Growth or Context (directly, generically or through a pointer)? No. Test glue: it calls the C-ABI exports with pointers to live test-owned bytes; any reservation goes through sb_reserve's safe ledger calls."
   },
   {

@@ -160,10 +160,15 @@ class Engine:
                 rows += [[0] * len(x[0])] * (len(x) - len(rows))
                 t.answer = fingerprint((v, den) for v in _flatten(rows))
         else:
-            a, b = ",".join(map(str, x)), ",".join(map(str, y))
-            fn = "poly_mul" if op == "mul" else "poly_gcd"
-            t = sample(lambda: call(fn, a=a, b=b, wire="csv"), repeat)
-            t.answer = fingerprint((v, 1) for v in ints(t.answer))
+            if op == "mul":
+                # (poly_mul's wire is hex)
+                a, b = ",".join(format(v, "x") for v in x), ",".join(format(v, "x") for v in y)
+                t = sample(lambda: call("poly_mul", a=a, b=b), repeat)
+                t.answer = fingerprint((int(v, 16), 1) for v in t.answer.split(",") if v)
+            else:
+                a, b = ",".join(map(str, x)), ",".join(map(str, y))
+                t = sample(lambda: call("poly_gcd", a=a, b=b, wire="csv"), repeat)
+                t.answer = fingerprint((v, 1) for v in ints(t.answer))
         return t
 
     def close(self):

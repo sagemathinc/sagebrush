@@ -26,4 +26,5 @@ mod series_primes;
 pub mod wire_decode;
 pub mod zmat;
 pub mod zpoly;
+pub mod zmul;
 pub mod zseries;

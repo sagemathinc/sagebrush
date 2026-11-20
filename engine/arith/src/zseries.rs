@@ -163,12 +163,27 @@ impl Csv<'_> {
     }
 }
 
+/// The first at most `n` bytes of `s` for an error message, cut at a
+/// character boundary (a request string may hold any UTF-8).
+pub fn preview(s: &str, n: usize) -> &str {
+    let mut end = s.len().min(n);
+    while !s.is_char_boundary(end) {
+        end -= 1;
+    }
+    &s[..end]
+}
+
 /// Scan a comma-separated list of hex integers (`-?(0|[1-9a-f][0-9a-f]*)`,
 /// no sign when `signed` is false), at most `max_tokens` of them and each
 /// at most B_MAX bits, counting what admission needs.  The work is one pass
 /// over the text.
 pub fn scan<'a>(text: &'a str, max_tokens: usize, signed: bool) -> Result<Csv<'a>, String> {
-    let max_digits = (B_MAX / 4) as usize;
+    scan_with(text, max_tokens, signed, (B_MAX / 4) as usize)
+}
+
+/// [`scan`] with each token at most `max_digits` hex digits (zmul's own
+/// limit).
+pub fn scan_with<'a>(text: &'a str, max_tokens: usize, signed: bool, max_digits: usize) -> Result<Csv<'a>, String> {
     let mut c = Csv { text, tokens: 0, max_digits: 0, limbs: 0, all_zero: true, valuation: 0 };
     if text.is_empty() {
         return Ok(c);
@@ -190,10 +205,10 @@ pub fn scan<'a>(text: &'a str, max_tokens: usize, signed: bool) -> Result<Csv<'a
             && (digits == "0" || !digits.starts_with('0'))
             && !(digits == "0" && digits.len() != tok.len());
         if !ok {
-            return Err(format!("{:?} is not a hex integer (-?(0|[1-9a-f][0-9a-f]*))", &tok[..tok.len().min(40)]));
+            return Err(format!("{:?} is not a hex integer (-?(0|[1-9a-f][0-9a-f]*))", preview(tok, 40)));
         }
         if digits.len() > max_digits {
-            return Err(format!("a coefficient of {} hex digits: at most {} ({} bits)", digits.len(), max_digits, B_MAX));
+            return Err(format!("a coefficient of {} hex digits: at most {} ({} bits)", digits.len(), max_digits, 4 * max_digits as u64));
         }
         c.tokens = i + 1;
         c.max_digits = c.max_digits.max(digits.len());

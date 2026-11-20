@@ -1,7 +1,9 @@
 //! Truncated power series over Z and Q, the Euler product and sigma_k: the
 //! engine ops behind Sage mode's series and modular forms arithmetic
 //! (`series_mul`, `series_pow`, `series_euler`, `sigma_table`), on
-//! sagebrush_arith::zseries's one residue backend.
+//! sagebrush_arith::zseries's one residue backend; and products in Z[x]
+//! (`poly_mul`, sagebrush_arith::zmul: Kronecker substitution on one NTT
+//! product with the call's own tables), admitted the same way.
 //!
 //! **Admission, before anything sized by the request is allocated:**
 //! 1. the request's bytes, at most the op's `max_request`, by
@@ -24,9 +26,10 @@
 //! (raw, or over Z) or `{"c": "c0,n1/d1,..."}` (reduced, over Q: each
 //! coefficient in lowest terms), in hex, trailing zeros dropped (the zero
 //! series is "").  series_euler gives "1,-1,-1,0,0,1,..."; sigma_table its n
-//! values in hex.
+//! values in hex.  poly_mul gives the product's coefficients in hex, trailing
+//! zeros dropped (the zero polynomial is "").
 
-use sagebrush_arith::zseries;
+use sagebrush_arith::{zmul, zseries};
 use serde_json::json;
 
 /// One row of the series ops' table: the op's caps and its path.
@@ -53,11 +56,13 @@ pub const SMALL_MAX_REQUEST: usize = 256;
 // (the peaks: the largest of the closed forms over the admitted corners, 53.3
 // MiB for the series ops and 29.0 MiB for sigma_table, with room; the
 // corner test in tests/series_ops.rs checks them)
-pub static OPS: [SeriesOp; 4] = [
+pub static OPS: [SeriesOp; 5] = [
     SeriesOp { name: "series_mul", max_request: SERIES_MAX_REQUEST, peak: 64 * MIB, work: zseries::WORK_MAX, run: series_mul },
     SeriesOp { name: "series_pow", max_request: SERIES_MAX_REQUEST, peak: 64 * MIB, work: zseries::WORK_MAX, run: series_pow },
     SeriesOp { name: "series_euler", max_request: SMALL_MAX_REQUEST, peak: 8 * MIB, work: zseries::WORK_MAX, run: series_euler },
     SeriesOp { name: "sigma_table", max_request: SMALL_MAX_REQUEST, peak: 32 * MIB, work: zseries::WORK_MAX, run: sigma_table },
+    // (each request is admitted on its own closed-form peak and work, zmul::admit)
+    SeriesOp { name: "poly_mul", max_request: zmul::REQUEST_MAX as usize, peak: zmul::PEAK_MAX, work: zmul::WORK_MAX, run: poly_mul },
 ];
 
 /// The admitted request's path: run, then the reply text (an error reply
@@ -135,7 +140,7 @@ fn fields<'a, const K: usize>(req: &'a str, keys: [&str; K], op: &str) -> Result
             match keys.iter().position(|&k| k == key) {
                 Some(j) if out[j].is_some() => return Err(format!("{}: the key {:?} appears twice", op, key)),
                 Some(j) => Some(j),
-                None => return Err(format!("{}: unknown key {:?} (accepted: fn, {})", op, &key[..key.len().min(40)], keys.join(", "))),
+                None => return Err(format!("{}: unknown key {:?} (accepted: fn, {})", op, zseries::preview(key, 40), keys.join(", "))),
             }
         };
         ws(&mut i);
@@ -322,4 +327,32 @@ fn sigma_table(req: &str, op: &SeriesOp) -> Result<String, String> {
     let pre = |e: String| format!("{}: {}", name, e);
     let adm = zseries::sigma_admit(k, n, req.len() as u64).map_err(pre)?;
     reply(&adm, op, |out| zseries::sigma(k, n, &adm, out).map_err(pre))
+}
+
+/// poly_mul: {a, b} -> a b in Z[x] (hex coefficients, constant first).
+fn poly_mul(req: &str, op: &SeriesOp) -> Result<String, String> {
+    let name = op.name;
+    let [a, b] = fields(req, ["a", "b"], name)?;
+    let (a, b) = (need(get_str(a, "a", name)?, "a", name)?, need(get_str(b, "b", name)?, "b", name)?);
+    let pre = |e: String| format!("{}: {}", name, e);
+    let ca = zmul::scan(a).map_err(pre)?;
+    let cb = zmul::scan(b).map_err(pre)?;
+    match zmul::admit(&ca, &cb, req.len() as u64, &zmul::CAPS).map_err(pre)? {
+        // (an empty or all-zero factor: the zero polynomial)
+        None => Ok("{\"ok\":\"\"}".to_string()),
+        Some(plan) => {
+            // (the row's caps first, then the product, then the reply reserved:
+            // the transforms and the reply are never live together)
+            if plan.admitted.peak > op.peak || plan.admitted.work > op.work {
+                return reply(&plan.admitted, op, |_| Ok(()));
+            }
+            let product = zmul::product(&ca, &cb, &plan);
+            reply(&plan.admitted, op, |out| {
+                out.push('"');
+                zmul::emit(&product, &plan, out).map_err(pre)?;
+                out.push('"');
+                Ok(())
+            })
+        }
+    }
 }

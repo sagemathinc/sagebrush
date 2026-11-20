@@ -6,15 +6,16 @@ use std::sync::{Arc, Mutex};
 
 const BLOCK: usize = 1 << 12;
 
-// (tests only: the word operations Table::new performs, counted where they
-// happen, against table_work's closed form)
+// (tests only: the word operations Table::new and conv_table perform,
+// counted where they happen, against table_work's and conv_work's closed
+// forms)
 #[cfg(test)]
 thread_local! {
-    pub(crate) static TABLE_WORK: std::cell::Cell<u64> = const { std::cell::Cell::new(0) };
+    pub(crate) static WORK: std::cell::Cell<u64> = const { std::cell::Cell::new(0) };
 }
 #[cfg(test)]
 fn count(n: u64) {
-    TABLE_WORK.with(|c| c.set(c.get() + n));
+    WORK.with(|c| c.set(c.get() + n));
 }
 #[cfg(not(test))]
 #[inline(always)]
@@ -32,6 +33,29 @@ pub const fn table_work(log: u32) -> Option<u64> {
     let n = if log == 0 { 2 } else { 1u64 << log };
     match n.checked_mul(16) {
         Some(x) => x.checked_add(512),
+        None => None,
+    }
+}
+/// A bound on [`conv_table`]'s word operations for a product of length
+/// `len` (N = len padded to a power of two, `log` = log2 N): two loads (a
+/// zero-filled N-word vector and at most N reductions each: 4N), two
+/// forward transforms and one inverse ((N / 2) log N butterflies each), the
+/// pointwise products (N), and the final reduction (at most N): at most
+/// 3 (N / 2) log N + 6N, here 3 (N / 2) log N + 8N + 64.
+pub const fn conv_work(log: u32) -> Option<u64> {
+    if log >= 63 {
+        return None;
+    }
+    let n = 1u64 << log;
+    let butterflies = match (n / 2).checked_mul(3 * log as u64) {
+        Some(x) => x,
+        None => return None,
+    };
+    match n.checked_mul(8) {
+        Some(x) => match butterflies.checked_add(x) {
+            Some(y) => y.checked_add(64),
+            None => None,
+        },
         None => None,
     }
 }
@@ -130,6 +154,7 @@ impl<W: NttWord> Table<W> {
 
 #[inline(always)]
 fn dif_layer<W: NttWord>(lo: &mut [W], hi: &mut [W], w: &[W], wp: &[W], p: W) {
+    count(lo.len() as u64);
     let p2 = p + p;
     for j in 0..lo.len() {
         let (x, y) = (lo[j], hi[j]);
@@ -141,6 +166,7 @@ fn dif_layer<W: NttWord>(lo: &mut [W], hi: &mut [W], w: &[W], wp: &[W], p: W) {
 
 #[inline(always)]
 fn dit_layer<W: NttWord>(lo: &mut [W], hi: &mut [W], w: &[W], wp: &[W], p: W) {
+    count(lo.len() as u64);
     let p2 = p + p;
     for j in 0..lo.len() {
         let mut x = lo[j];
@@ -159,9 +185,15 @@ fn dif<W: NttWord>(a: &mut [W], t: &Table<W>) {
         return;
     }
     if n > BLOCK {
-        sagebrush_interrupt::check_coarse();
+        // (a layer of n / 2 butterflies, in BLOCK-sized chunks with a poll
+        // between them: at most BLOCK butterflies between two polls, with no
+        // branch in the butterfly loop)
         let (lo, hi) = a.split_at_mut(n / 2);
-        dif_layer(lo, hi, &t.tw[n / 2..n], &t.twp[n / 2..n], t.p);
+        let (w, wp) = (&t.tw[n / 2..n], &t.twp[n / 2..n]);
+        for (((l, h), w), wp) in lo.chunks_mut(BLOCK).zip(hi.chunks_mut(BLOCK)).zip(w.chunks(BLOCK)).zip(wp.chunks(BLOCK)) {
+            sagebrush_interrupt::check_coarse();
+            dif_layer(l, h, w, wp, t.p);
+        }
         dif(lo, t);
         dif(hi, t);
         return;
@@ -185,8 +217,12 @@ fn dit<W: NttWord>(a: &mut [W], t: &Table<W>) {
         let (lo, hi) = a.split_at_mut(n / 2);
         dit(lo, t);
         dit(hi, t);
-        sagebrush_interrupt::check_coarse();
-        dit_layer(lo, hi, &t.itw[n / 2..n], &t.itwp[n / 2..n], t.p);
+        // (the layer in BLOCK-sized chunks with a poll between them, as in dif)
+        let (w, wp) = (&t.itw[n / 2..n], &t.itwp[n / 2..n]);
+        for (((l, h), w), wp) in lo.chunks_mut(BLOCK).zip(hi.chunks_mut(BLOCK)).zip(w.chunks(BLOCK)).zip(wp.chunks(BLOCK)) {
+            sagebrush_interrupt::check_coarse();
+            dit_layer(l, h, w, wp, t.p);
+        }
         return;
     }
     let mut m = 1;
@@ -206,6 +242,7 @@ pub(crate) fn conv_table<W: NttWord>(a: &[W], b: &[W], t: &Table<W>) -> Vec<W> {
     let n = 1usize << log;
     let p = t.p;
     let load = |x: &[W]| {
+        count((n + x.len()) as u64);
         let mut f = vec![W::default(); n];
         for (d, &s) in f.iter_mut().zip(x) {
             *d = W::reduce(s, t.modulus);
@@ -227,6 +264,7 @@ pub(crate) fn conv_table<W: NttWord>(a: &[W], b: &[W], t: &Table<W>) -> Vec<W> {
     };
     let ninv = W::inv_mod(W::from_usize(n), t.modulus);
     let ninvp = W::shoup(ninv, p);
+    count(n as u64);
     for i in 0..n {
         let x = if fa[i] >= p { fa[i] - p } else { fa[i] };
         let y0 = fb.as_ref().map_or(x, |v| v[i]);
@@ -237,6 +275,7 @@ pub(crate) fn conv_table<W: NttWord>(a: &[W], b: &[W], t: &Table<W>) -> Vec<W> {
     dit(&mut fa, t);
     sagebrush_interrupt::check_coarse();
     fa.truncate(len);
+    count(len as u64);
     let p2 = p + p;
     for x in &mut fa {
         if *x >= p2 {
@@ -305,10 +344,10 @@ mod table_work_tests {
     #[test]
     fn table_work_bounds_the_counted_build() {
         for log in [0u32, 1, 2, 3, 8, 12, 13, 16, 18] {
-            TABLE_WORK.with(|c| c.set(0));
+            WORK.with(|c| c.set(0));
             let (p, g) = crate::ntt::PRIMES[0];
             let t = Table::<u64>::new(p, g, (p - 1).trailing_zeros(), log);
-            let counted = TABLE_WORK.with(|c| c.get());
+            let counted = WORK.with(|c| c.get());
             let bound = table_work(log).unwrap();
             assert!(counted <= bound, "log {}: counted {} > bound {}", log, counted, bound);
             drop(t);
