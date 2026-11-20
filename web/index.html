@@ -770,6 +770,7 @@
 // or reports the URL; the agent chunk, loaded later, is handed it)
 import { pairLink, adoptLink } from "./workspace/pair-link.ts";
 import { takeHandoff } from "./workspace/pair-handoff.ts";
+import { createdRunner, runInputs } from "./workspace/agent-made.ts";
 // (a bare pairing link the board page handed over within this tab (pair-handoff.ts): this page's link, taken once, before
 // anything reads it; only when the address has no query and no hash)
 if (!pairLink() && !location.search && !location.hash) { const h = takeHandoff(location.pathname); if (h) adoptLink(h); }
@@ -5166,49 +5167,24 @@ function agentOpen(ref, intent) {
   return openId(ref, null, intent).then((ok) => { wsTrackCurrent(); return ok; }, (e) => { if (!e?.navWon) sayNotLeft(e); return false; });
 }
 // A notebook a paired agent created: opened here at once, then run once by itself, as the person's Run all would, when
-// the conditions decided Nov 18 2026 hold. Its creation's op is spent the first time it is announced, before anything
-// is read or checked, and never armed again (in memory only: a reload starts with none, so nothing runs after one): a
-// second announcement, a reconnect, a second open, a failure or a refusal never runs it. It runs only
-//   - if this page's own pairing created it, and the grant it was created under is still in force as the run is
-//     admitted, with May run code and Everything (AgentPairing.mayRunCreated);
-//   - if, read back at once, it is still at its creation's own revision (a new notebook's first: one more at each write,
-//     stores.js), and at the admission the notebook shown is that one with what Run all reads the same as read back
-//     (runInputs, canonical: its language, pinned package set, seed, autorun and metadata, and each cell's id, kind,
-//     source and metadata, manual among them). Nothing else is compared: an edit undone meanwhile isn't seen, nor a
-//     change to anything Run all doesn't read;
-//   - in the notebook's own interpreter, the sandboxed runner with its write trees: none for a new notebook, so a write
-//     asks the person (Confinement phase 2), with Run's state, Stop and outputs as ever.
-const agentRunSpent = new Set();
-// (a value with its object keys sorted, so the same inputs always give the same text; a value left out stays left out
-//  and null stays null, as they differ: no pin is the current package set, a null pin turns optional packages off)
-const canon = (v) => Array.isArray(v) ? v.map(canon) : v && typeof v === "object" ? Object.fromEntries(Object.keys(v).sort().map((k) => [k, canon(v[k])])) : v;
-const runInputs = (doc) => JSON.stringify(canon({ mode: doc?.mode, pkgset: doc?.pkgset, seed: doc?.seed, autorun: doc?.autorun, metadata: doc?.metadata,
-  cells: (doc?.cells ?? []).map((c) => ({ id: c.id, kind: c.type === "markdown" || c.type === "raw" ? c.type : "code", code: String(c.code ?? ""), metadata: c.metadata })) }));
-const CREATED_REV = 1;
+// the conditions decided Nov 18 2026 hold (workspace/agent-made.ts, the one decision, the Agents page's pane's too):
+// here, the notebook shown is current, and it runs in its own interpreter, the sandboxed runner with its write trees:
+// none for a new notebook, so a write asks the person (Confinement phase 2), with Run's state, Stop and outputs as ever.
 const testHost = /^(localhost|127\.0\.0\.1)$/.test(location.hostname);
 // (the tests' view, on a local host only: how many creations were announced to this page, and the last one, kept here,
 //  never handed out; the tests' holds get its path, a string, never the record or the pairing)
 let agentAnnounced = 0, agentMadeLast = null;
-async function agentMade(c, p, intent) {
-  // (spent at once: a second announcement of the same creation is no second chance)
-  if (agentRunSpent.has(c.op)) return;
-  agentRunSpent.add(c.op);
-  if (testHost) { agentAnnounced++; agentMadeLast = { c, p }; }
-  let made = null;
-  try {
-    // (the tests' hold, on a local host only: between the announcement and the read back)
-    if (testHost && typeof window.__agentReadHold === "function") await window.__agentReadHold(String(c.path));
-    const w = await wsNow();
-    const r = w && (await w.read(c.path));
-    if (r?.entry?.kind === "notebook" && r.entry.ref === c.ref && r.rev === CREATED_REV) made = runInputs(r.content);
-  } catch {}
-  const opened = await agentOpen(c.ref, intent);
-  // (the tests' hold, on a local host only: between the open and the admission)
-  if (testHost && typeof window.__agentRunHold === "function") await window.__agentRunHold(String(c.path));
-  // (admitted here, all in one turn: every condition, then the run)
-  if (!opened || current.id !== c.ref || made === null || runInputs(nb.snapshot()) !== made || !p.mayRunCreated(c)) return;
-  nb.runAll();
-}
+const agentMade = createdRunner({
+  read: async (path) => { const w = await wsNow(); return w && (await w.read(path)); },
+  open: (c, intent) => agentOpen(c.ref, intent),
+  runIfShown: (ref, ok) => { if (current.id !== ref || !ok(nb.snapshot())) return false; nb.runAll(); return true; },
+  ...(testHost ? {
+    // (the tests' holds, on a local host only: between the announcement and the read back, and between the open and the admission)
+    holdRead: (path) => (typeof window.__agentReadHold === "function" ? window.__agentReadHold(path) : undefined),
+    holdRun: (path) => (typeof window.__agentRunHold === "function" ? window.__agentRunHold(path) : undefined),
+    announced: (c, p) => { agentAnnounced++; agentMadeLast = { c, p }; },
+  } : {}),
+});
 // (the tests' replay of exactly the last announcement, which its spent op refuses; and the count, read only)
 if (testHost) { window.__agentMadeAgain = () => (agentMadeLast ? agentMade(agentMadeLast.c, agentMadeLast.p, { attach: attachSeq }) : null); Object.defineProperty(window, "__agentAnnounced", { get: () => agentAnnounced }); }
 // (an agent's runs of code: workspace/agent-runs.ts, in the agent's chunk, shared with the Agents page; this page gives
