@@ -29,9 +29,10 @@ _type_mro = type.__dict__["__mro__"].__get__
 
 def _int_value(x):
     """x's value when its class is int or derives from it (bool, Sage's
-    integers, numpy's, IntEnum), found by identity along the class's MRO
-    and read through int's own __index__; else None.  No hook of x's class
-    or metaclass runs."""
+    integers, Sagebrush's bundled numpy integers, IntEnum), found by
+    identity along the class's MRO and read through int's own __index__;
+    else None.  No hook of x's class or metaclass runs.  (CPython NumPy's
+    integers, numpy.int64 and the like, don't derive from int: refused.)"""
     for k in _type_mro(type(x)):
         if k is int:
             return int.__index__(x)
@@ -1245,7 +1246,8 @@ class Polynomial:
 
     def _floor_divisor(self, other):
         """other as an int when it is an integer (its class int or derived
-        from it, by identity: bool, Sage's, numpy's, IntEnum) or a Rational
+        from it, by identity: bool, Sage's, Sagebrush's bundled numpy's,
+        IntEnum; not CPython NumPy's, which don't derive from int) or a Rational
         with denominator 1, else None: Sage's // of a ZZ polynomial by a number
         is the floor of each coefficient."""
         from sagebrush import poly
