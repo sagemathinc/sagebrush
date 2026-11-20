@@ -1,0 +1,11 @@
+{
+ "v": 1,
+ "reason": "A polynomial over Q at a rational point in the engine (qpoly_eval): arith::peval (the point's check, qpoly_clear's lcm, Horner on integers, one reduction) and an op row, in the engine module and the CLI that embeds it; sagebrush.poly.qeval and Sage mode's f(v) through it in the Sage chunk. CI's size row for this change at d426a8f8 (run 44751275836): engine/sagebrush-engine.wasm +21412, cli/pyjs.cjs +29052, engine/lib/sage.pre +4216, engine/lib/sage.src +1449, cli/lib.gen.js +484; each marked +64 over that.",
+ "bytes": {
+  "cli/lib.gen.js": 548,
+  "cli/pyjs.cjs": 29116,
+  "engine/lib/sage.pre": 4280,
+  "engine/lib/sage.src": 1513,
+  "engine/sagebrush-engine.wasm": 21476
+ }
+}
