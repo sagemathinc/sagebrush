@@ -45,8 +45,8 @@ check(app.includes("cancel-in-progress: ${{ github.ref != 'refs/heads/master' &&
 const appChanges = app.slice(app.indexOf("\n  wasm-changes:\n"), app.indexOf("\n  wasm-modules:\n"));
 const appModules = app.slice(app.indexOf("\n  wasm-modules:\n"), app.indexOf("\n  page:\n"));
 for (const [name, section] of [["classifier", appChanges], ["builder", appModules]]) {
-  check(section.includes("github.event_name == 'pull_request' || startsWith(github.ref, 'refs/heads/track/')"),
-    `app wasm ${name} must use a same-run build on track refs`);
+  check(section.includes("github.event_name == 'pull_request' || github.event_name == 'merge_group' || startsWith(github.ref, 'refs/heads/track/')"),
+    `app wasm ${name} must use a same-run build on pull requests, merge queue groups and track refs`);
 }
 const release = app.slice(app.indexOf("\n  mac-release:\n"));
 check(release.includes("github.event_name == 'workflow_dispatch' && github.ref == 'refs/heads/master' && inputs.sign"),
