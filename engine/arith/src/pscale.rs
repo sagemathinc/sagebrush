@@ -21,7 +21,7 @@
 //!   when either is 1; h is 1 when g is.  Past the shorter operand each
 //!   coefficient is copied (b's with its sign flipped for the difference).
 //!   Cancellation can zero the top coefficients: the arenas keep them, and
-//!   the reply ([`trimmed`]) stops at the last nonzero one.
+//!   the reply ([`trim`], run once) stops at the last nonzero one.
 //!
 //! Tokens not in lowest terms give the right values, possibly not in lowest
 //! terms (the Python side sends Fractions and ints, which are).
@@ -324,10 +324,13 @@ impl<'l> Tmp<'l> {
     }
 }
 
-/// The computed coefficients: numerators and denominators, constant first.
+/// The computed coefficients: numerators and denominators, constant first,
+/// and how many of them the reply keeps ([`trim`], once, at the end of the
+/// compute).
 pub struct Mapped<'l> {
     pub(crate) num: Arena<'l>,
     pub(crate) den: Arena<'l>,
+    pub(crate) kept: usize,
 }
 
 /// Push num/den (den > 0) to the arenas.
@@ -355,7 +358,7 @@ fn scale<'l>(a: &Factor, na: u64, b: &str, led: &'l Words, m: &mut Meter) -> Res
     let mut t = Tmp::new(led, m)?;
     let (mut p, mut q) = (Coef::tagged(led, 0, "scalar", m)?, Coef::tagged(led, 0, "scalar", m)?);
     load(b, &mut p, &mut q, m)?;
-    let mut out = Mapped { num: Arena::new(led, "num arena", m)?, den: Arena::new(led, "den arena", m)? };
+    let mut out = Mapped { num: Arena::new(led, "num arena", m)?, den: Arena::new(led, "den arena", m)?, kept: 0 };
     let (mut w, mut z) = (Coef::tagged(led, 0, "scratch", m)?, Coef::tagged(led, 0, "scratch", m)?);
     for tok in a.text.split(',').take(na as usize) {
         load(tok, &mut t.an, &mut t.ad, m)?;
@@ -399,7 +402,7 @@ fn derivative<'l>(a: &Factor, na: u64, k: u64, led: &'l Words, m: &mut Meter) ->
     for i in 2..=k {
         mul_word(&mut f, i, m)?;
     }
-    let mut out = Mapped { num: Arena::new(led, "num arena", m)?, den: Arena::new(led, "den arena", m)? };
+    let mut out = Mapped { num: Arena::new(led, "num arena", m)?, den: Arena::new(led, "den arena", m)?, kept: 0 };
     let outs = na - k;
     for (j, tok) in a.text.split(',').take(na as usize).skip(k as usize).enumerate() {
         let j = j as u64;
@@ -439,7 +442,7 @@ fn integral<'l>(a: &Factor, na: u64, b: &str, led: &'l Words, m: &mut Meter) -> 
         return Err(DivFault::Invariant);
     }
     let mut t = Tmp::new(led, m)?;
-    let mut out = Mapped { num: Arena::new(led, "num arena", m)?, den: Arena::new(led, "den arena", m)? };
+    let mut out = Mapped { num: Arena::new(led, "num arena", m)?, den: Arena::new(led, "den arena", m)?, kept: 0 };
     load(b, &mut t.an, &mut t.ad, m)?;
     push(&mut out, t.an.mag(), t.an.neg, t.ad.mag(), m)?;
     for (i, tok) in a.text.split(',').take(na as usize).enumerate() {
@@ -529,7 +532,7 @@ fn add_sub<'l>(a: &Factor, na: u64, b: &Factor, nb: u64, sub: bool, led: &'l Wor
     let mut s = Ints::new(led, m)?;
     let t = |m: &mut Meter| Coef::tagged(led, 0, "scratch", m);
     let mut p = Pair { an: t(m)?, ad: t(m)?, bn: t(m)?, bd: t(m)?, g: t(m)?, h: t(m)?, u: t(m)?, v: t(m)?, w: t(m)?, z: t(m)? };
-    let mut out = Mapped { num: Arena::new(led, "num arena", m)?, den: Arena::new(led, "den arena", m)? };
+    let mut out = Mapped { num: Arena::new(led, "num arena", m)?, den: Arena::new(led, "den arena", m)?, kept: 0 };
     let (mut ia, mut ib) = (a.text.split(',').take(na as usize), b.text.split(',').take(nb as usize));
     loop {
         match (ia.next(), ib.next()) {
@@ -553,24 +556,32 @@ fn add_sub<'l>(a: &Factor, na: u64, b: &Factor, nb: u64, sub: bool, led: &'l Wor
     Ok(out)
 }
 
-/// The tokens the reply holds: through the last nonzero numerator (the
-/// arenas keep the zeros a cancellation leaves on top).  The one count both
-/// [`reply_bytes`] and [`emit`] use.
-pub fn trimmed(mp: &Mapped) -> usize {
+/// How many tokens the reply holds: through the last nonzero numerator (the
+/// arenas keep the zeros a cancellation leaves on top).  Run once, at the end
+/// of the compute (the `scale trim` phase): one unit a token, charged and
+/// Stop polled every 4096 tokens; its count is stored in the [`Mapped`],
+/// the one value both [`reply_bytes`] and [`emit`] use.
+pub fn trim(mp: &Mapped, m: &mut Meter) -> Result<usize, DivFault> {
+    let _p = sagebrush_interrupt::enter("scale trim");
+    let total = mp.num.nt;
     let mut n = 0;
     for (i, (x, _)) in mp.num.fwd().enumerate() {
+        if i & 0xfff == 0 {
+            sagebrush_interrupt::check_coarse();
+            m.add((total - i).min(0x1000))?;
+        }
         if !x.is_empty() {
             n = i + 1;
         }
     }
-    n
+    Ok(n)
 }
 
-/// The reply's exact bytes, `{"ok":"..."}` with every token [`trimmed`] keeps.
+/// The reply's exact bytes, `{"ok":"..."}` with the [`Mapped`]'s kept tokens.
 pub fn reply_bytes(out: &Mapped) -> Option<u64> {
     let mut total = FIXED_BYTES;
     let mut count = 0u64;
-    for ((x, neg), (y, _)) in out.num.fwd().zip(out.den.fwd()).take(trimmed(out)) {
+    for ((x, neg), (y, _)) in out.num.fwd().zip(out.den.fwd()).take(out.kept) {
         total = total.checked_add(token_bytes(x, neg, Some(y)))?;
         count += 1;
     }
@@ -585,7 +596,7 @@ pub fn emit(mp: &Mapped, out: &mut String, m: &mut Meter) -> Result<(), DivFault
     sagebrush_interrupt::check_coarse();
     let cap = out.capacity();
     out.push_str("{\"ok\":\"");
-    for (i, ((x, neg), (y, _))) in mp.num.fwd().zip(mp.den.fwd()).take(trimmed(mp)).enumerate() {
+    for (i, ((x, neg), (y, _))) in mp.num.fwd().zip(mp.den.fwd()).take(mp.kept).enumerate() {
         m.add(4 * (x.len() + y.len()) + 1)?;
         if i > 0 {
             out.push(',');
@@ -794,14 +805,18 @@ fn fault_text(f: DivFault, plan: &Plan) -> String {
 /// The map's coefficients into the arenas, on the caller's ledger and meter
 /// (the `scale compute` phase).
 pub fn compute<'l>(a: &Factor, b: &Factor, plan: &Plan, led: &'l Words, m: &mut Meter) -> Result<Mapped<'l>, DivFault> {
-    let _p = sagebrush_interrupt::enter("scale compute");
-    sagebrush_interrupt::check_coarse();
-    match plan.kind {
-        Kind::Scale => scale(a, plan.na, b.text, led, m),
-        Kind::Derivative => derivative(a, plan.na, plan.k, led, m),
-        Kind::Integral => integral(a, plan.na, b.text, led, m),
-        Kind::Add | Kind::Sub => add_sub(a, plan.na, b, plan.nb, plan.kind == Kind::Sub, led, m),
-    }
+    let mut mp = {
+        let _p = sagebrush_interrupt::enter("scale compute");
+        sagebrush_interrupt::check_coarse();
+        match plan.kind {
+            Kind::Scale => scale(a, plan.na, b.text, led, m)?,
+            Kind::Derivative => derivative(a, plan.na, plan.k, led, m)?,
+            Kind::Integral => integral(a, plan.na, b.text, led, m)?,
+            Kind::Add | Kind::Sub => add_sub(a, plan.na, b, plan.nb, plan.kind == Kind::Sub, led, m)?,
+        }
+    };
+    mp.kept = trim(&mp, m)?;
+    Ok(mp)
 }
 
 /// The compute, the reply's exact reservation (checked against the

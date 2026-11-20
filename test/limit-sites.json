@@ -729,6 +729,11 @@
   "owner": "qpoly_scale",
   "reason": "qpoly_scale's derived sizes, plumbing (the ledger's and meter's limits, the plan's sizes, the reply's reservation) or a test assertion: refuses nothing itself"
  },
+ "engine/arith/src/pscale/tests.rs :: trim_is_charged_once_per_token :: let led = Words::new(plan.limit); #0": {
+  "class": "none",
+  "owner": "qpoly_scale",
+  "reason": "qpoly_scale's derived sizes, plumbing (the ledger's and meter's limits, the plan's sizes, the reply's reservation) or a test assertion: refuses nothing itself"
+ },
  "engine/arith/src/pscale/tests.rs :: want :: let k = usize::from_str_radix(b, 16).unwrap_or(usize::MAX); #0": {
   "class": "none",
   "owner": "qpoly_scale",

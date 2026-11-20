@@ -243,6 +243,27 @@ fn sum_and_difference_match_the_reference() {
     assert_eq!(call(Kind::Add, "1/6,1/10", "1/15,1/14").unwrap(), ok("3/e,9/50"));
 }
 
+/// The trim runs once, charged one unit a token on the call's meter (in
+/// chunks of 4096, each polled): a cancellation that zeros 9,000 of 10,000
+/// coefficients keeps 1,000, and the trim alone is exactly 10,000 units.
+#[test]
+fn trim_is_charged_once_per_token() {
+    let a = (0..10_000).map(|i| format!("{:x}/7", i + 1)).collect::<Vec<_>>().join(",");
+    let b = (0..10_000).map(|i| if i < 1000 { "0".to_string() } else { format!("{:x}/7", i + 1) }).collect::<Vec<_>>().join(",");
+    let (fa, fb) = (scan(&a).unwrap(), scan(&b).unwrap());
+    let Ok(Ok(plan)) = admit(Kind::Sub, &fa, &fb, r_of(&a, &b), &CAPS) else { panic!() };
+    let led = Words::new(plan.limit);
+    let mut m = Meter::new(plan.work);
+    let mp = compute(&fa, &fb, &plan, &led, &mut m).unwrap();
+    assert_eq!(mp.kept, 1000);
+    let before = m.used();
+    assert_eq!(trim(&mp, &mut m), Ok(1000));
+    assert_eq!(m.used() - before, 10_000, "one unit a token");
+    // (and a meter one unit short of the trim refuses inside it)
+    let mut short = Meter::new(9_999);
+    assert_eq!(trim(&mp, &mut short), Err(DivFault::Work));
+}
+
 // ---- the closed forms ----
 
 /// The reply bound: integer arithmetic, checked; at and around powers of 16;

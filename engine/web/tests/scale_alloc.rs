@@ -234,7 +234,7 @@ fn scale_peaks_caps_and_baselines() {
             hooks::reset();
             hooks::trace();
             let _ = call(kind, &long, b, None, None);
-            let phases: Vec<(&str, Vec<u64>)> = ["scale compute", "scale emit"].iter().map(|p| (*p, hooks::traced(p))).collect();
+            let phases: Vec<(&str, Vec<u64>)> = ["scale compute", "scale trim", "scale emit"].iter().map(|p| (*p, hooks::traced(p))).collect();
             hooks::reset();
             for (phase, idx) in &phases {
                 assert!(!idx.is_empty(), "no poll in {}", phase);
