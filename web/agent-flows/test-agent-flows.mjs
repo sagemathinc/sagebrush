@@ -24,10 +24,16 @@ for (const f of readdirSync(join(here, "cases")).filter((f) => f.endsWith(".mjs"
 }
 if (!cases.length) { console.log(`FAIL no case${onlyCase ? " " + onlyCase : ""}`); process.exit(2); }
 
-const site = await startSite();
-const page = await startChrome();
+// (the site and Chrome stopped on every way out: at the end, on a failure to start, and at the process's exit or a
+//  signal, Chrome's profile removed)
+let site = null, page = null;
+const stopNow = () => { try { page?.killSync(); } catch {} try { site?.kill(); } catch {} };
+process.on("exit", stopNow);
+for (const sig of ["SIGINT", "SIGTERM"]) process.on(sig, () => { stopNow(); process.exit(130); });
 const results = [];
 try {
+  site = await startSite();
+  page = await startChrome();
   for (const kase of cases) {
     for (const s of kase.surfaces) {
       if (onlySurface && s !== onlySurface) continue;
@@ -38,9 +44,12 @@ try {
       results.push({ id: kase.id, surface: s, failures, gap: kase.gaps?.[s] ?? null, s: ((Date.now() - t) / 1000).toFixed(1) });
     }
   }
+} catch (e) {
+  console.log(`FAIL the harness couldn't run: ${String(e?.message ?? e).slice(0, 400)}`);
+  process.exitCode = 1;
 } finally {
-  await page.close();
-  site.close();
+  await page?.close().catch(() => page?.killSync());
+  site?.close();
 }
 console.log("\n---- agent flows");
 for (const r of results) {
@@ -50,5 +59,5 @@ for (const r of results) {
   else console.log(`${r.failures.length ? "FAIL" : "ok  "} ${r.id} on ${r.surface} (${r.s} s)${r.failures.length ? ": " + r.failures.length + " failed check(s)" : ""}`);
 }
 const failed = results.filter((r) => r.failures?.length), gaps = failed.filter((r) => r.gap);
-console.log(failed.length ? `FAIL: ${failed.length} of ${results.length} case runs${gaps.length ? ` (${gaps.length} of them with a declared known gap)` : ""}` : `ok: ${results.length} case runs`);
-process.exit(failed.length ? 1 : 0);
+console.log(failed.length ? `FAIL: ${failed.length} of ${results.length} case runs${gaps.length ? ` (${gaps.length} of them with a declared known gap)` : ""}` : process.exitCode ? "FAIL: the harness didn't run its cases" : `ok: ${results.length} case runs`);
+process.exit(failed.length || process.exitCode ? 1 : 0);

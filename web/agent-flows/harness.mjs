@@ -13,7 +13,7 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { createInterface } from "node:readline";
 import { createHash, randomBytes } from "node:crypto";
-import { devtoolsPort } from "../test-port.mjs";
+import { CHROME_START_MS, SERVE_MS, devtoolsPort, startServe } from "../test-port.mjs";
 // (a notebook cell's hash as the page computes it for an edit by cell, web/workspace/notebook-edit.ts's cellHash: the
 //  sha256 of the cell's canonical JSON in the form the notebook keeps it; in plain JS, so the harness loads under node)
 const canonical = (v) => Array.isArray(v) ? `[${v.map(canonical).join(",")}]` : v && typeof v === "object" ? `{${Object.keys(v).sort().filter((k) => v[k] !== undefined).map((k) => `${JSON.stringify(k)}:${canonical(v[k])}`).join(",")}}` : JSON.stringify(v) ?? "null";
@@ -35,47 +35,123 @@ export const DEFAULT_GRANT = { folders: ["/"], write: true, run: true };
 /** A case's whole budget (each wait inside it is shorter). */
 export const CASE_MS = 120_000;
 
-// ---- the site
-export async function startSite() {
-  const proc = spawn("python3", ["-u", join(here, "..", "serve.py"), "0"], { stdio: ["ignore", "pipe", "inherit"] });
-  const port = await new Promise((res, rej) => {
-    let acc = "";
-    proc.stdout.on("data", (b) => { acc += b; const m = /(\d{2,5})/.exec(acc); if (m) res(+m[1]); });
-    proc.on("exit", (c) => rej(new Error("web/serve.py exited: " + c)));
-    setTimeout(() => rej(new Error("web/serve.py said no port in 15 s")), 15000);
-  });
-  return { origin: `http://127.0.0.1:${port}`, close: () => proc.kill() };
-}
+// ---- deadlines: every DevTools command, every startup step and every cleanup is bounded
+/** A DevTools command's deadline (an evaluation's may be shorter: until() gives each what is left of its own). */
+export const CDP_MS = 30_000;
+/** A cleanup step's bound: a surface's close, a tab's close, a cancelled case's settling, a process's exit. */
+export const CLEANUP_MS = 5_000;
+/** `p`, or `fallback` once `ms` have passed. */
+const within = (p, ms, fallback) => { let t; return Promise.race([p, new Promise((r) => { t = setTimeout(() => r(fallback), ms); })]).finally(() => clearTimeout(t)); };
 
-// ---- Chrome, one tab, driven over the DevTools protocol
-export async function startChrome() {
-  const profile = mkdtempSync(join(tmpdir(), "sb-agent-flows-"));
-  const proc = spawn(process.env.CHROME ?? "chromium", ["--headless", "--no-sandbox", "--remote-debugging-port=0", "--window-size=1400,900", `--user-data-dir=${profile}`, "about:blank"], { stdio: "ignore" });
-  const cdp = await devtoolsPort(profile);
-  let targets;
-  for (let i = 0; i < 300; i++) { try { targets = await (await fetch(`http://127.0.0.1:${cdp}/json`)).json(); break; } catch { await sleep(100); } }
-  const sock = new WebSocket(targets.find((t) => t.type === "page").webSocketDebuggerUrl);
-  await new Promise((r) => (sock.onopen = r));
-  let n = 0;
-  const waiting = new Map(), errors = [];
-  sock.onmessage = (e) => {
-    const m = JSON.parse(e.data);
-    if (m.id && waiting.has(m.id)) { waiting.get(m.id)(m); waiting.delete(m.id); }
-    // (the page's own errors, which fail a case: an uncaught exception or an unhandled rejection)
-    if (m.method === "Runtime.exceptionThrown") errors.push(String(m.params.exceptionDetails?.exception?.description ?? m.params.exceptionDetails?.text).slice(0, 300));
-  };
-  const send = (method, params = {}) => new Promise((r) => { const id = ++n; waiting.set(id, r); sock.send(JSON.stringify({ id, method, params })); });
-  for (const m of ["Page.enable", "Runtime.enable"]) await send(m);
-  const ev = async (expr) => {
-    const r = await send("Runtime.evaluate", { expression: expr, awaitPromise: true, returnByValue: true });
+/** A DevTools socket's commands, each answered or rejected by its deadline: a command unanswered in `ms`, or still
+ *  pending when the socket closes or `cancel()` is called, is rejected and its entry dropped. `on(m)`: every message. */
+export function cdpClient(sock, on = () => {}) {
+  let n = 0, closed = false;
+  const pending = new Map();
+  const drop = (id, err) => { const p = pending.get(id); if (!p) return; pending.delete(id); clearTimeout(p.timer); p.reject(err); };
+  const failAll = (why) => { for (const id of [...pending.keys()]) drop(id, new Error(why)); };
+  sock.addEventListener("message", (e) => {
+    let m;
+    try { m = JSON.parse(e.data); } catch { return; }
+    const p = m.id ? pending.get(m.id) : null;
+    if (p) { pending.delete(m.id); clearTimeout(p.timer); p.resolve(m); }
+    on(m);
+  });
+  sock.addEventListener("close", () => { closed = true; failAll("the DevTools socket closed"); });
+  const send = (method, params = {}, ms = CDP_MS) => new Promise((resolve, reject) => {
+    if (closed) return reject(new Error(`${method}: the DevTools socket is closed`));
+    const id = ++n;
+    const timer = setTimeout(() => drop(id, new Error(`${method}: no answer in ${ms} ms`)), Math.max(1, ms));
+    pending.set(id, { resolve, reject, timer });
+    try { sock.send(JSON.stringify({ id, method, params })); } catch (e) { drop(id, e); }
+  });
+  return { send, pending, cancel: (why = "cancelled") => failAll(why) };
+}
+/** Evaluate `expr` over `send`, its value or an error; and until(), each evaluation within what is left of its time. */
+function evaluator(send) {
+  const ev = async (expr, ms = CDP_MS) => {
+    const r = await send("Runtime.evaluate", { expression: expr, awaitPromise: true, returnByValue: true }, ms);
     if (!r.result || r.result.exceptionDetails) throw new Error(JSON.stringify(r.result?.exceptionDetails ?? r.error ?? r).slice(0, 400));
     return r.result.result?.value;
   };
-  const until = async (expr, ms = 20000) => { const t = Date.now(); while (Date.now() - t < ms) { if (await ev(expr).catch(() => false)) return true; await sleep(100); } return false; };
+  const until = async (expr, ms = 20000) => {
+    const end = Date.now() + ms;
+    for (let left = ms; left > 0; left = end - Date.now()) {
+      if (await ev(expr, left).catch(() => false)) return true;
+      await sleep(Math.min(100, Math.max(0, end - Date.now())));
+    }
+    return false;
+  };
+  return { ev, until };
+}
+/** A socket to `url`, open, or an error within `ms`. */
+async function openSocket(url, ms) {
+  const ws = new WebSocket(url);
+  const opened = await within(new Promise((ok) => { ws.addEventListener("open", () => ok(true)); ws.addEventListener("error", () => ok(false)); ws.addEventListener("close", () => ok(false)); }), ms, false);
+  if (!opened) { try { ws.close(); } catch {} throw new Error("no DevTools socket at " + url); }
+  return ws;
+}
+
+// ---- the site
+/** web/serve.py on a free port, through startServe (its exact port line, its output capped, killed on any failure).
+ *  `command` and `ms`: the self-checks' stand-in servers. */
+export async function startSite({ command = ["python3", "-u", join(here, "..", "serve.py"), "0"], ms = SERVE_MS } = {}) {
+  const { child, port } = startServe(() => spawn(command[0], command.slice(1), { stdio: ["ignore", "pipe", "pipe"] }), ms);
+  const kill = () => { try { child.kill("SIGKILL"); } catch {} };
+  let p;
+  try { p = await port; } catch (e) { kill(); throw e; }
+  return { origin: `http://127.0.0.1:${p}`, child, close: kill, kill };
+}
+
+// ---- Chrome, one tab, driven over the DevTools protocol
+/** Chrome with a profile of its own, its first tab's DevTools socket; on any failure before it returns, Chrome is
+ *  killed and the profile removed. `bin` and `startMs`: the self-checks' stand-ins. */
+export async function startChrome({ bin = process.env.CHROME ?? "chromium", startMs = CHROME_START_MS } = {}) {
+  const profile = mkdtempSync(join(tmpdir(), "sb-agent-flows-"));
+  let proc = null, sock = null;
+  const exited = () => !proc || proc.exitCode !== null || proc.signalCode !== null;
+  const killSync = () => {
+    try { sock?.close(); } catch {}
+    try { if (!exited()) proc.kill("SIGKILL"); } catch {}
+    try { rmSync(profile, { recursive: true, force: true, maxRetries: 5 }); } catch {}
+  };
+  const stop = async () => {
+    try { sock?.close(); } catch {}
+    try { if (!exited()) proc.kill("SIGKILL"); } catch {}
+    for (const t = Date.now(); !exited() && Date.now() - t < CLEANUP_MS; ) await sleep(50);
+    rmSync(profile, { recursive: true, force: true, maxRetries: 5 });
+  };
+  try {
+    proc = spawn(bin, ["--headless", "--no-sandbox", "--remote-debugging-port=0", "--window-size=1400,900", `--user-data-dir=${profile}`, "about:blank"], { stdio: ["ignore", "ignore", "pipe"] });
+    const cdp = await devtoolsPort(profile, startMs, { child: proc });
+    let page = null;
+    for (const end = Date.now() + startMs; !page && Date.now() < end; await sleep(100)) {
+      const list = await fetch(`http://127.0.0.1:${cdp}/json`, { signal: AbortSignal.timeout(Math.max(1, Math.min(5000, end - Date.now()))) }).then((r) => r.json(), () => []);
+      page = list.find((t) => t.type === "page") ?? null;
+    }
+    if (!page) throw new Error(`Chrome showed no page over DevTools in ${startMs / 1000} s`);
+    sock = await openSocket(page.webSocketDebuggerUrl, startMs);
+    const ctx = startedPage(sock, cdp, { stop, killSync });
+    for (const m of ["Page.enable", "Runtime.enable"]) await ctx.send(m);
+    return ctx;
+  } catch (e) {
+    await stop().catch(() => killSync());
+    throw e;
+  }
+}
+
+/** The page over its DevTools socket: what a case drives. */
+function startedPage(sock, cdp, { stop, killSync }) {
+  const errors = [];
+  const client = cdpClient(sock, (m) => {
+    // (the page's own errors, which fail a case: an uncaught exception or an unhandled rejection)
+    if (m.method === "Runtime.exceptionThrown") errors.push(String(m.params.exceptionDetails?.exception?.description ?? m.params.exceptionDetails?.text).slice(0, 300));
+  });
+  const send = client.send;
+  const { ev, until } = evaluator(send);
   const navigate = async (url) => { await ev("window.__old = 1").catch(() => {}); await send("Page.navigate", { url }); await sleep(300); return until("!window.__old && document.readyState !== 'loading'", 60000); };
   const shot = async (file) => { const r = await send("Page.captureScreenshot", { format: "png" }); writeFileSync(file, Buffer.from(r.result.data, "base64")); };
   const fresh = async (origin) => { await send("Storage.clearDataForOrigin", { origin, storageTypes: "all" }); errors.length = 0; };
-  const close = async () => { try { proc.kill(); } catch {} await sleep(300); rmSync(profile, { recursive: true, force: true, maxRetries: 5 }); };
   // (a real click, as the person's: the mouse pressed and released at the element's centre. A scripted el.click() isn't
   //  a user gesture, so the browser blocks a tab it would open; this one isn't)
   const click = async (selector) => {
@@ -89,40 +165,29 @@ export async function startChrome() {
   const tabs = [];
   const tab = async (match, ms = 20000) => {
     let found = null;
-    for (const t = Date.now(); !found && Date.now() - t < ms; await sleep(100)) {
-      const list = await (await fetch(`http://127.0.0.1:${cdp}/json`)).json().catch(() => []);
+    for (const end = Date.now() + ms; !found && Date.now() < end; await sleep(100)) {
+      const list = await fetch(`http://127.0.0.1:${cdp}/json`, { signal: AbortSignal.timeout(Math.max(1, Math.min(5000, end - Date.now()))) }).then((r) => r.json(), () => []);
       found = list.find((x) => x.type === "page" && match.test(x.url) && !tabs.some((o) => o.id === x.id)) ?? null;
     }
     if (!found) throw new Error("no tab at " + match);
-    const ws = new WebSocket(found.webSocketDebuggerUrl);
-    await new Promise((ok, fail) => { ws.onopen = ok; ws.onerror = () => fail(new Error("no socket to the tab at " + found.url)); });
-    let k = 0;
-    const wait = new Map();
-    ws.onmessage = (e) => {
-      const m = JSON.parse(e.data);
-      if (m.id && wait.has(m.id)) { wait.get(m.id)(m); wait.delete(m.id); }
-      if (m.method === "Runtime.exceptionThrown") errors.push("(tab) " + String(m.params.exceptionDetails?.exception?.description ?? m.params.exceptionDetails?.text).slice(0, 300));
-    };
-    const tsend = (method, params = {}) => new Promise((r) => { const id = ++k; wait.set(id, r); ws.send(JSON.stringify({ id, method, params })); });
-    await tsend("Runtime.enable");
-    const tev = async (expr) => {
-      const r = await tsend("Runtime.evaluate", { expression: expr, awaitPromise: true, returnByValue: true });
-      if (!r.result || r.result.exceptionDetails) throw new Error(JSON.stringify(r.result?.exceptionDetails ?? r.error ?? r).slice(0, 400));
-      return r.result.result?.value;
-    };
+    const ws = await openSocket(found.webSocketDebuggerUrl, CDP_MS);
+    const tc = cdpClient(ws, (m) => { if (m.method === "Runtime.exceptionThrown") errors.push("(tab) " + String(m.params.exceptionDetails?.exception?.description ?? m.params.exceptionDetails?.text).slice(0, 300)); });
     const t = {
       id: found.id,
       url: found.url,
-      ev: tev,
-      until: async (expr, wms = 20000) => { const s = Date.now(); while (Date.now() - s < wms) { if (await tev(expr).catch(() => false)) return true; await sleep(100); } return false; },
-      shot: async (file) => { const r = await tsend("Page.captureScreenshot", { format: "png" }); writeFileSync(file, Buffer.from(r.result.data, "base64")); },
-      close: async () => { try { ws.close(); } catch {} await send("Target.closeTarget", { targetId: found.id }).catch(() => {}); },
+      ...evaluator(tc.send),
+      shot: async (file) => { const r = await tc.send("Page.captureScreenshot", { format: "png" }); writeFileSync(file, Buffer.from(r.result.data, "base64")); },
+      close: async () => { try { ws.close(); } catch {} await send("Target.closeTarget", { targetId: found.id }, CLEANUP_MS).catch(() => {}); },
+      cancel: (why) => tc.cancel(why),
     };
     tabs.push(t);
+    await tc.send("Runtime.enable");
     return t;
   };
-  const closeTabs = async () => { for (const t of tabs.splice(0)) await t.close(); };
-  return { send, ev, until, navigate, shot, fresh, errors, close, click, tab, closeTabs };
+  const closeTabs = async () => { for (const t of tabs.splice(0)) await within(t.close(), CLEANUP_MS); };
+  /** A case over its time: what it still waits on, here and in its tabs, rejected at once. */
+  const cancel = (why = "the case was cancelled") => { client.cancel(why); for (const t of tabs) t.cancel(why); };
+  return { send, ev, until, navigate, shot, fresh, errors, close: stop, killSync, click, tab, closeTabs, cancel };
 }
 
 // ---- the grant dialog ("Allow this agent?"), set as the case's grant, then Allow
@@ -348,7 +413,8 @@ async function chatSurface(site, page) {
     /** The notebook the person sees: the Agents page's pane, its tab shown. */
     shownPath: `document.querySelector(".pane-head .tab.on")?.dataset.tab ?? null`,
     liveCells: PANE_CELLS,
-    close: () => server.stop(true),
+    // (its pending calls answered as the agent's are when its page goes: the page disconnected)
+    close: () => { for (const r of [...A.pending.values()]) r({ error: { code: "not_connected", message: "the page disconnected" } }); A.pending.clear(); server.stop(true); },
   };
 }
 
@@ -424,12 +490,20 @@ export function helpers(page, surface, failures, shotDir, caseId, gap) {
 
 /** One case on one surface: a fresh profile's storage, the pairing and the grant, the case's given files, the agent's
  * calls, then its expect(h). Returns the failures (empty when it passed). */
-export async function runCase(kase, surfaceName, { site, page, shotDir = process.env.SHOT_DIR } = {}) {
+export async function runCase(kase, surfaceName, { site, page, shotDir = process.env.SHOT_DIR, surfaces = SURFACES } = {}) {
   const failures = [];
   page.origin = site.origin;
   await page.fresh(site.origin);
-  const surface = await SURFACES[surfaceName](site, page);
+  const surface = await surfaces[surfaceName](site, page);
   const h = helpers(page, surface, failures, shotDir, kase.id, kase.gaps?.[surfaceName]);
+  // (a case over its time is cancelled: every helper it calls after that throws at once, what it waits on over DevTools is
+  //  rejected, its surface and tabs are closed, and the next case starts only once it has settled, within CLEANUP_MS)
+  const ctl = { dead: false };
+  for (const k of Object.keys(h)) {
+    const f = h[k];
+    if (typeof f !== "function" || k === "ok") continue;
+    h[k] = function (...a) { if (ctl.dead) throw new Error(`[${kase.id} ${surface.name}] the case was cancelled (over its time)`); return f.apply(this, a); };
+  }
   const body = async () => {
     if (kase.unpaired) await kase.unpaired(h); // (what the agent does before anything is connected: one-link's case)
     else await surface.connect(kase.grant ?? DEFAULT_GRANT);
@@ -446,15 +520,21 @@ export async function runCase(kase, surfaceName, { site, page, shotDir = process
     //  its turn, as sagebrush-agent's do; ended after)
     try { await kase.expect(h); } finally { surface.endTurn?.(); }
   };
+  const ms = kase.ms ?? CASE_MS;
+  let timer;
+  const running = body();
   try {
-    await Promise.race([body(), sleep(kase.ms ?? CASE_MS).then(() => { throw new Error(`over ${(kase.ms ?? CASE_MS) / 1000} s`); })]);
+    await Promise.race([running, new Promise((_, no) => { timer = setTimeout(() => { ctl.dead = true; no(new Error(`over ${ms / 1000} s`)); }, ms); })]);
   } catch (e) {
     h.ok(false, "threw: " + String(e?.stack ?? e).slice(0, 400));
   } finally {
+    clearTimeout(timer);
+    if (ctl.dead) page.cancel?.(`the case ${kase.id} on ${surface.name} was cancelled (over its time)`);
     // (a surface's close may check its own end: what it finds wrong fails the case)
-    const found = await Promise.resolve(surface.close()).catch((e) => ["close threw: " + String(e).slice(0, 200)]);
+    const found = await within(Promise.resolve().then(() => surface.close()).catch((e) => ["close threw: " + String(e).slice(0, 200)]), CLEANUP_MS, [`the surface's close took over ${CLEANUP_MS / 1000} s`]);
     for (const f of Array.isArray(found) ? found : []) h.ok(false, f);
-    await page.closeTabs();
+    await within(page.closeTabs(), CLEANUP_MS);
+    if (ctl.dead && !(await within(running.then(() => true, () => true), CLEANUP_MS, false))) h.ok(false, `the cancelled case didn't settle within ${CLEANUP_MS / 1000} s`);
   }
   h.ok(page.errors.length === 0, "no errors on the page", page.errors.slice(0, 3));
   return failures;
