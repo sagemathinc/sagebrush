@@ -386,6 +386,53 @@ try {
   check(await until(`${C}?.path === "/demo (copy).py"`, 15000) && dialogs.length === askedCopy, "…and opens the copy here, asking nothing: " + JSON.stringify(dialogs.slice(askedCopy).map((d) => d.message)));
   dialogAccept = true;
 
+  // (File > Save a copy while the copy is being made (its create held): the text can't be typed into, as what's typed
+  //  then would be in neither file; and a copy that fails gives the text back to typing, on the same page)
+  check(await openCode("/demo.py"), "(the page again, for a held copy)");
+  await ev(`${C}.setMode("edit").then(() => 1)`);
+  await until(`!!document.querySelector(".code-page .code-edit textarea") && !${C}.stopped()`);
+  await ev(`(() => { const t = document.querySelector(".code-page .code-edit textarea"); t.value = "to copy\\n"; t.dispatchEvent(new Event("input")); return 1; })()`);
+  await ev(`(() => { const held = new Promise((r) => (window.__releaseCopy = r)); window.__sbCodeBeforeCopyCreate = async () => { window.__copyStarted = true; await held; delete window.__sbCodeBeforeCopyCreate; }; return 1; })()`);
+  await ev(`(document.querySelector('.code-page [data-f="c-copy"]').click(), 1)`);
+  check(await until(`window.__copyStarted === true`, 10000), "(the copy's create, held)");
+  await ev(`(() => { const t = document.querySelector(".code-page .code-edit textarea"); t.focus(); t.setSelectionRange(t.value.length, t.value.length); return 1; })()`);
+  await send("Input.insertText", { text: "late edit" });
+  check(await ev(`document.querySelector(".code-page .code-edit textarea").value === "to copy\\n"`), "File > Save a copy: while the copy is made, typing doesn't go in (it would be in neither file)");
+  await ev(`(window.__releaseCopy(), 1)`);
+  check(await until(`/^\\/demo \\(copy\\)( \\(\\d+\\))?\\.py$/.test(${C}?.path ?? "")`, 15000), "…then the copy opens: " + (await ev(`${C}?.path`)));
+  check(await openCode("/demo.py"), "(the page again, for a copy that fails)");
+  await ev(`${C}.setMode("edit").then(() => 1)`);
+  await until(`!!document.querySelector(".code-page .code-edit textarea") && !${C}.stopped()`);
+  await ev(`(() => { window.__sbCodeBeforeCopyCreate = async () => { delete window.__sbCodeBeforeCopyCreate; throw new Error("disk full"); }; return 1; })()`);
+  await ev(`(document.querySelector('.code-page [data-f="c-copy"]').click(), 1)`);
+  check(await until(`/Not copied/.test(document.querySelector(".code-page").textContent) && !document.querySelector(".code-page .code-edit textarea").readOnly`, 10000) && (await ev(`${C}?.path`)) === "/demo.py", "…a copy that fails: said, the text can be typed into again, the page stays");
+
+  // (the bar's Save mine as a copy, saving stopped by a change made elsewhere: a copy that fails gives the text back to
+  //  typing, on the same page; one held while it's made takes no typing, then opens with the text as it was taken)
+  await ev(`${W}.create("/race.py", { content: new TextEncoder().encode("base\\n") }).then(() => 1)`);
+  check(await openCode("/race.py"), "(a file to stop saving on)");
+  await ev(`${C}.setMode("edit").then(() => 1)`);
+  await until(`!!document.querySelector(".code-page .code-edit textarea") && !${C}.stopped()`);
+  await ev(`(() => { const t = document.querySelector(".code-page .code-edit textarea"); t.value = "mine\\n"; t.dispatchEvent(new Event("input")); return 1; })()`);
+  await ev(`${W}.write("/race.py", "theirs\\n").then(() => ${C}.flush()).then(() => 1)`);
+  check(await until(`${C}.stopped()`, 10000), "(saving stopped)");
+  const barCopy = `(() => { [...document.querySelectorAll(".code-page .code-bar button")].find((b) => b.textContent === "Save mine as a copy").click(); return 1; })()`;
+  await ev(`(() => { window.__sbCodeBeforeCopyCreate = async () => { delete window.__sbCodeBeforeCopyCreate; throw new Error("disk full"); }; return 1; })()`);
+  await ev(barCopy);
+  check(await until(`/Not copied/.test(document.querySelector(".code-page").textContent) && !document.querySelector(".code-page .code-edit textarea").readOnly`, 10000) && (await ev(`${C}?.path`)) === "/race.py" && (await ev(`document.querySelector(".code-page .code-edit textarea").value`)) === "mine\n", "the bar's Save mine as a copy that fails: said, the text kept and typeable, the page stays");
+  dialogAccept = false;
+  const askedBar = dialogs.length;
+  await ev(`(() => { const held = new Promise((r) => (window.__releaseCopy = r)); window.__copyStarted = false; window.__sbCodeBeforeCopyCreate = async () => { window.__copyStarted = true; await held; delete window.__sbCodeBeforeCopyCreate; }; return 1; })()`);
+  await ev(barCopy);
+  check(await until(`window.__copyStarted === true`, 10000), "(the bar's copy, held)");
+  await ev(`(() => { const t = document.querySelector(".code-page .code-edit textarea"); t.focus(); t.setSelectionRange(0, 0); return 1; })()`);
+  await send("Input.insertText", { text: "later " });
+  check(await ev(`document.querySelector(".code-page .code-edit textarea").value === "mine\\n"`), "the bar's Save mine as a copy, while the copy is made: typing doesn't go in");
+  await ev(`(window.__releaseCopy(), 1)`);
+  check(await until(`/^\\/race \\(copy\\)( \\(\\d+\\))?\\.py$/.test(${C}?.path ?? "")`, 15000) && dialogs.length === askedBar, "…then the copy opens, asking nothing");
+  check(await ev(`${text("/race (copy).py")}`) === "mine\n" && (await ev(`${text("/race.py")}`)) === "theirs\n", "…with the text as it was taken; theirs never written over");
+  dialogAccept = true;
+
   // (Ctrl+Alt+N on the code page: its own New notebook, by its way out (the edit saved first), never the hidden
   //  notebook page's underneath)
   check(await openCode("/demo.py"), "(the page again, for Ctrl+Alt+N)");

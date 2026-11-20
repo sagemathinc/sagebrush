@@ -253,7 +253,7 @@ export async function mount(root: HTMLElement, host: Host): Promise<void> {
     say("Not saved");
     const reload = el("button", "", "Reload (theirs)"), copy = el("button", "", "Save mine as a copy");
     reload.onclick = () => { if (dirty() && !confirm("Reload this file? Your unsaved edits here are dropped.")) return; void mount(root, host); };
-    copy.onclick = () => void saveCopy(mode === "edit" ? ta.value : text).then((e) => { if (e) openCopy(e); });
+    copy.onclick = () => void copyAndOpen();
     bar.replaceChildren(el("span", "", why), reload, copy);
     bar.hidden = false;
   }
@@ -304,11 +304,25 @@ export async function mount(root: HTMLElement, host: Host): Promise<void> {
 
   // ---- the one File menu (filemenu.ts), this page's keys
   const free = async (folder: string, base: string, ext: string) => { const taken = new Set((await ws.list(folder)).map((e) => e.path)); return freePath(folder, base, ext, (p) => taken.has(p)); };
+  // (a copy of the text as it is now, then the copy opened: no typing from the moment the text is taken until the
+  //  navigation, as what's typed then would be in neither file; typing again if no copy is made)
+  async function copyAndOpen() {
+    const was = ta.readOnly; ta.readOnly = true;
+    let went = false;
+    try {
+      const e = await saveCopy(mode === "edit" ? ta.value : text);
+      if (e) { openCopy(e); went = true; }
+    } finally { if (!went) ta.readOnly = was; }
+  }
   async function saveCopy(t: string): Promise<Entry | null> {
     const [base, ext] = splitExt(nameOf(path));
     const p = await free(parentOf(path), base + " (copy)", ext);
     if (!p) { say("No free name for a copy"); return null; }
-    try { const e = await ws.create(p, { content: encodeText(t, eol) }); say("Copied to " + nameOf(p)); return e; }
+    try {
+      // (a test's seam: the page test holds the copy's create here, or fails it; nothing sets it otherwise)
+      await (globalThis as any).__sbCodeBeforeCopyCreate?.();
+      const e = await ws.create(p, { content: encodeText(t, eol) }); say("Copied to " + nameOf(p)); return e;
+    }
     catch (err) { say("Not copied: " + String((err as Error)?.message ?? err).slice(0, 200)); return null; }
   }
   const actions: Record<string, () => unknown> = {
@@ -317,7 +331,7 @@ export async function mount(root: HTMLElement, host: Host): Promise<void> {
     "c-newfolder": async () => { const n = prompt("A new folder, at the top of your files: its name", "New folder"); if (n?.trim()) await ws.mkdir("/" + safeName(n.trim())); },
     "c-examples": async () => { if (!(await host.examples())) void leave(); },
     "c-open": () => host.openFiles(),
-    "c-copy": async () => { await flush(); const e = await saveCopy(mode === "edit" ? ta.value : text); if (e) openCopy(e); },
+    "c-copy": async () => { await flush(); await copyAndOpen(); },
     "c-rename": async () => {
       await flush();
       const [base, ext] = splitExt(nameOf(path));
