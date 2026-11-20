@@ -1,9 +1,11 @@
 //! Division by an invariant divisor (Möller and Granlund, "Improved division
 //! by invariant integers", IEEE Trans. Computers 60(2), 2011: Algorithms 4,
 //! 5 and 6), for coprime's Knuth D and one-limb loops.  A reciprocal of the
-//! normalized divisor is made once; each quotient limb then takes one
-//! double-width product, a few adds and at most two corrections, where a
-//! u128 division (a software loop on wasm32) took one or two.
+//! normalized divisor is made once.  Then each quotient limb takes, in place
+//! of a u128 division (a software loop on wasm32), either a 2-by-1 step (one
+//! double-width product, v u1, and one low-half product, q1 d) or, for Knuth
+//! D's digit, a 3-by-2 step (two double-width products, v3 u2 and d0 q1, and
+//! one low-half product, q1 d1); a few adds; and at most two corrections.
 //!
 //! With b = 2^BITS and a normalized divisor (its top bit set):
 //! - [`recip`]: v = floor((b^2 - 1) / d) - b, in [0, b);
@@ -12,15 +14,24 @@
 //! - [`div3by2`]: q = floor((u2 b^2 + u1 b + u0) / (d1 b + d0)) and its
 //!   remainder, for (u2, u1) < (d1, d0) (Algorithm 5).
 //!
-//! **The wraps.**  In [`div2by1`], step 1's sum v u1 + (u1 + 1) b + u0 can
-//! reach b^2 (q1 = b, one more than any true quotient): it wraps to 0, the
-//! candidate remainder is then negative, and step 3's test r > q0 takes q1
-//! back to b - 1.  In [`div3by2`], step 4's q1 + 1 wraps the same way when
-//! q1 = b - 1, and step 5 takes it back.  So those steps are written with
-//! wrapping operations; every other add, subtraction and product here is
-//! plain, so a test build (overflow checks on) panics on any wrap the proof
-//! doesn't allow.  The steps are generated for (u8, u16), (u16, u32) and
-//! (u64, u128) from one macro: the narrow ones are tested exhaustively.
+//! **Wrapping arithmetic, two kinds.**
+//! - Modular limb arithmetic, as the algorithms state it: the candidate
+//!   remainders are computed mod b (the 2-by-1's r = u0 - q1 d and its
+//!   correction r + d) or mod b^2 (the 3-by-2's (r1, r0) and its
+//!   correction), and recip3's p mod b.  These use `wrapping_*` and
+//!   `overflowing_*` with explicit carries and borrows.
+//! - The candidate quotient's two wraps.  In [`div2by1`], step 1's sum
+//!   v u1 + (u1 + 1) b + u0 can reach b^2 (q1 = b, one more than any true
+//!   quotient): it wraps to 0, the candidate remainder is then negative, and
+//!   step 3's test r > q0 takes q1 back to b - 1.  In [`div3by2`], step 4's
+//!   q1 + 1 wraps the same way when q1 = b - 1, and step 5 takes it back.
+//!   So q1 is updated with wrapping operations at exactly those steps.
+//!
+//! The rest is plain: u1 + 1, the corrections that can't wrap (the 2-by-1's
+//! step 4, the 3-by-2's step 1 high limb and step 6), and recip3's
+//! decrements of v.  So a test build (overflow checks on) panics if any of
+//! them wraps.  The steps are generated for (u8, u16), (u16, u32) and (u64,
+//! u128) from one macro: the narrow ones are tested exhaustively.
 
 macro_rules! invdiv {
     ($name:ident, $L:ty, $W:ty) => {
