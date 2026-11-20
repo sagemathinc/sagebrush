@@ -44,9 +44,12 @@ const ws = new WebSocket(targets.find((t) => t.type === "page").webSocketDebugge
 await new Promise((r) => (ws.onopen = r));
 let n = 0; const waiting = new Map();
 const responses = []; // (the page's requests' responses: Network.responseReceived)
+let held = 0, holdMs = 0;
 ws.onmessage = (ev) => {
   const m = JSON.parse(ev.data);
   if (m.method === "Network.responseReceived") responses.push({ url: m.params.response.url, status: m.params.response.status });
+  // (the events stream held back holdMs: Fetch.enable below)
+  if (m.method === "Fetch.requestPaused") { held++; setTimeout(() => send("Fetch.continueRequest", { requestId: m.params.requestId }), holdMs); }
   if (m.id && waiting.has(m.id)) { waiting.get(m.id)(m.result ?? m.error); waiting.delete(m.id); }
 };
 const send = (method, params = {}) => new Promise((r) => { const id = ++n; waiting.set(id, r); ws.send(JSON.stringify({ id, method, params })); });
@@ -109,6 +112,26 @@ out = await runCode("print(6 * 7)");
 ok(out.includes("42"), "...and the next cell runs: " + JSON.stringify(out));
 await runCode("icosahedron(color='orange', opacity=0.5).translate((0, 0, 1)) + tetrahedron()");
 ok(await ev("!!document.querySelector('figure.plot3d svg')"), "3D graphics show");
+// (the first message waits for the session the events stream starts: that stream held back 1.5 s, the interpreter's
+// init isn't refused, nothing fails, and Python runs)
+await send("Network.enable");
+responses.length = 0; holdMs = 1500;
+await send("Fetch.enable", { patterns: [{ urlPattern: "*/api/session/*/events", requestStage: "Request" }] });
+await go(`${base}/nb/sub/second.ipynb/`);
+await ready();
+await send("Fetch.disable");
+out = await runCode("print(6 * 7)");
+const failed = responses.filter((r) => r.status >= 400);
+ok(held >= 1 && failed.length === 0 && out.includes("42"), `a message sent before the session started waits for it: held ${held}, failed ${JSON.stringify(failed)}, ` + JSON.stringify(out));
+// (a message the server refuses twice is said on the page, not dropped: its session ended under it)
+const sid = responses.map((r) => /\/api\/session\/([\w-]+)\/events/.exec(r.url)?.[1]).filter(Boolean).at(-1);
+ok((await ev(`fetch('api/session/${sid}/stop', { method: 'POST' }).then((r) => r.status)`)) === 200, "(the page's session ended by the server)");
+await put("print(1)");
+ok(await until("document.body.innerText.includes('the local server refused a message to Python (404: no such session)')", 15000), "...and the next run's message, refused, is said on the page: " + JSON.stringify(await ev(`${LAST}.querySelector('.out').textContent + ' | ' + document.querySelector('#status').textContent`)));
+await ready();
+out = await runCode("print(6 * 7)");
+ok(out.includes("42"), "...and Python starts again: " + JSON.stringify(out));
+await send("Network.disable");
 await sleep(1500);
 // reopen: the cells come back from the file
 await go(`${base}/nb/sub/first.ipynb/`);
@@ -223,6 +246,15 @@ ok(r.second[0] === "c 30" && /NameError: name 'z' is not defined/.test(r.second[
   ok((await rawPath("/tree/%E0%A4%A", {})) === 400 && (await rawPath("/tree/a%5Cb", {})) === 400, "...and a malformed escape or an encoded backslash is a bad path");
   ok((await hostIs(`127.0.0.1:${aport}`)) === 403 && (await hostIs("127.0.0.1")) === 403 && (await hostIs(`localhost:${port}`)) === 302, "...and the Host must be its own host and port (fetch() can't send another)");
 }
+
+// (the server gone: a message that can't reach it is said on the page, not dropped with the cell left running)
+await go(`${base}/nb/sub/third.ipynb/`);
+await ready();
+ok((await runCode("print(6 * 7)")).includes("42"), "(a notebook running)");
+server.kill();
+await new Promise((r) => (server.exitCode !== null || server.signalCode !== null ? r() : server.once("exit", r)));
+await put("print(2)");
+ok(await until("document.body.innerText.includes(\"couldn't reach the local server\")", 15000), "a message that can't reach the stopped server is said on the page: " + JSON.stringify(await ev(`${LAST}.querySelector('.out').textContent + ' | ' + document.querySelector('#status').textContent`)));
 
 cleanup();
 console.log(failures ? `${failures} failures` : "all passed");

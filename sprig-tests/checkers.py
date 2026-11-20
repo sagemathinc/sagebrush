@@ -232,7 +232,11 @@ def to_sr(e, S):
         m = re.match(r"^(-?\d+(?:\.\d*)?)(?:`[\d.]*)?(?:\*\^(-?\d+))?$", e[1])
         if not m:
             raise NotDecided("real %r" % e[1])
-        return S.SR(S.QQ(m.group(1)) * S.QQ(10) ** int(m.group(2) or 0))
+        # (the decimal exactly, as digits over a power of ten: QQ of a decimal
+        # string is an error in Sage, as in Sage mode)
+        whole, _, frac = m.group(1).partition(".")
+        value = S.Integer(whole + frac) / S.Integer(10) ** len(frac)
+        return S.SR(value * S.QQ(10) ** int(m.group(2) or 0))
     if k == "str":
         raise NotDecided("a string has no value to compare")
     if k == "sym":

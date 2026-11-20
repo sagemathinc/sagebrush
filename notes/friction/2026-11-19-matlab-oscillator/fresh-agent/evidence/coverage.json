@@ -1,0 +1,116 @@
+{
+  "runtime": "npm sagebrush@0.10.1",
+  "reference": "GNU Octave 11.1.0; proprietary MATLAB unavailable/not used",
+  "hits": [
+    "MATLAB elementwise arithmetic, vectors, transposes, indexing, anonymous closures, loops and if",
+    "fminsearch, optimset, four-output solver interface, three convergent starts",
+    "positive-parameter log transform, mod phase wrapping",
+    "ode45 two-state system, odeset tolerances, requested output times",
+    "assert, exist, mean, sum, max, all, exp, sin, cos, log, sqrt",
+    "fopen/fprintf/fclose numeric JSON and CSV export",
+    "MATLAB try/catch err.identifier and err.message (identifiers partially populated)",
+    "notebook UI Stop interrupts while loop and preserves prior scalar/vector; later arithmetic works",
+    "documentation search JSON including coverage statuses and alternatives",
+    "Reactive notebook blocks downstream reads from interrupted cell; prior-only recovery passes"
+  ],
+  "misses": [
+    "MATLAB jsonencode absent",
+    "Several numerical error identifiers empty",
+    "CLI has no advertised general --json execution/error envelope; uncaught errors observed as text",
+    "Notebook interruption is saved as stderr stream, not structured error metadata",
+    "Local notebook auxiliary requests include 404/403",
+    "MATLAB proprietary reference parity unavailable"
+  ],
+  "not_tested": [
+    "GUI plot export",
+    "MAT-file round trip",
+    "confidence intervals/statistical noise inference",
+    "Stop during native/WASM numerical kernels or memory-intensive allocations",
+    "Interrupted computation rollback/atomicity",
+    "Proprietary MATLAB identifiers and exact error text",
+    "general JSON serialization including strings and nonfinite values"
+  ],
+  "error_probes": [
+    {
+      "case": "index_zero",
+      "sagebrush_status": "error",
+      "sagebrush_identifier": "MATLAB:index:expected_positive_integer",
+      "octave_status": "error",
+      "octave_identifier": "Octave:invalid-index",
+      "rejection_parity": true,
+      "identifier_literal_parity": false
+    },
+    {
+      "case": "matrix_dimensions",
+      "sagebrush_status": "error",
+      "sagebrush_identifier": "MATLAB:innerdim",
+      "octave_status": "error",
+      "octave_identifier": "Octave:nonconformant-args",
+      "rejection_parity": true,
+      "identifier_literal_parity": false
+    },
+    {
+      "case": "objective_nan",
+      "sagebrush_status": "error",
+      "sagebrush_identifier": "",
+      "octave_status": "error",
+      "octave_identifier": "fminsearch:isnan",
+      "rejection_parity": true,
+      "identifier_literal_parity": false
+    },
+    {
+      "case": "objective_complex",
+      "sagebrush_status": "error",
+      "sagebrush_identifier": "",
+      "octave_status": "error",
+      "octave_identifier": "fminsearch:notreal",
+      "rejection_parity": true,
+      "identifier_literal_parity": false
+    },
+    {
+      "case": "objective_vector",
+      "sagebrush_status": "error",
+      "sagebrush_identifier": "",
+      "octave_status": "error",
+      "octave_identifier": "Octave:nonconformant-args",
+      "rejection_parity": true,
+      "identifier_literal_parity": false
+    },
+    {
+      "case": "ode_wrong_rhs",
+      "sagebrush_status": "error",
+      "sagebrush_identifier": "",
+      "octave_status": "error",
+      "octave_identifier": "Octave:nonconformant-args",
+      "rejection_parity": true,
+      "identifier_literal_parity": false
+    },
+    {
+      "case": "ode_nonmonotonic_times",
+      "sagebrush_status": "error",
+      "sagebrush_identifier": "",
+      "octave_status": "success",
+      "octave_identifier": null,
+      "rejection_parity": false,
+      "identifier_literal_parity": null
+    },
+    {
+      "case": "ode_negative_tolerance",
+      "sagebrush_status": "error",
+      "sagebrush_identifier": "",
+      "octave_status": "error",
+      "octave_identifier": "Octave:expected-positive",
+      "rejection_parity": true,
+      "identifier_literal_parity": false
+    },
+    {
+      "case": "jsonencode",
+      "sagebrush_status": "error",
+      "sagebrush_identifier": "MATLAB:UndefinedFunction",
+      "octave_status": "success",
+      "octave_identifier": null,
+      "rejection_parity": false,
+      "identifier_literal_parity": null
+    }
+  ]
+}
