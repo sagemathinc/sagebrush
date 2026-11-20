@@ -8,6 +8,7 @@ import { cleanPreview } from "../web/board/preview";
 import { codeOrder } from "../web/board/doc";
 import { boardExample, boardExamples } from "./board-examples";
 import { collect, interactError, interactFlags, ITEM_DISPLAYS_MAX, ITEM_OUTPUT_MAX, RUN_OUTPUT_MAX } from "../src/board-run";
+import { DISPLAY_ENVELOPE } from "../src/output-cost";
 
 // `sagebrush board run`: every code item of a board run as the board runs it
 // in a browser (src/board-run.ts), each item's output or error reported.
@@ -468,4 +469,17 @@ test("board run: pictures the board leaves out for their names are named on stde
   assert.equal(r.status, 0, r.stderr);
   assert.match(r.stdout, /1\n/);
   assert.equal(r.stderr, 'sagebrush board run: pictures left out: a picture\'s name is letters, digits, _ and -, at most 100 characters (plot-1, not "plot 1" or "figure.png"), and this one is not: "figure.png"\n');
+});
+
+test("collect keeps a display's metadata, charged with it: a PNG's size to show it at, saved and exported with it; anything but a plain object kept as {}", () => {
+  const out: any[] = [], kept = { run: 0 };
+  const png = { "image/png": "iVBORw0KGgo=", "text/plain": "a figure" }, md = { "image/png": { width: 200, height: 100 } };
+  collect(out, { display: png, metadata: md }, kept);
+  assert.deepEqual(out[0], { output_type: "display_data", data: png, metadata: md });
+  assert.equal(kept.run, DISPLAY_ENVELOPE + Object.entries(png).reduce((n, [k, v]) => n + k.length + v.length, 0) + JSON.stringify(md).length, "charged with its metadata");
+  for (const bad of [null, [1], "x", 3]) {
+    const o: any[] = [];
+    collect(o, { display: png, metadata: bad }, { run: 0 });
+    assert.deepEqual(o[0].metadata, {}, JSON.stringify(bad));
+  }
 });

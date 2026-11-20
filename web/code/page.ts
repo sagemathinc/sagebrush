@@ -83,7 +83,9 @@ export async function mount(root: HTMLElement, host: Host): Promise<void> {
   const page = el("div", "code-page"); root.append(page);
   const head = el("div", "code-head"), bar = el("div", "code-bar"), body = el("div", "code-body");
   bar.hidden = true;
-  page.append(head, bar, body);
+  // (the agent's bar, when one is connected: its row under the head, over the notebook page's; workspace/agent-ui.ts)
+  const agentRow = el("div", "code-agent"); agentRow.dataset.sbagSlot = "2";
+  page.append(head, agentRow, bar, body);
   const files = el("button", "code-files", "Files"); files.setAttribute("aria-controls", "wssidebar");
   files.onclick = () => { const b = document.getElementById("wsfilesbtn"); if (b) b.click(); else void leave(); };
   const name = el("span", "code-name"), lang = el("span", "code-lang"), status = el("span", "code-status");

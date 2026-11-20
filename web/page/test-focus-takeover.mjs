@@ -22,6 +22,10 @@
 //      among them);
 //  8b. the writer unable to answer at all (paused in the debugger): the follower used meanwhile stays quiet, read-only,
 //     what is typed kept; the writer going on hands over, nothing lost on either side;
+//  8d-8k. no input dropped without a word: kept input typed in once its field can take it (still read-only: 8d; in two
+//     cells, the second later: 8f; a field not there yet: 8h), else counted in the bar as input actions not applied
+//     (another notebook opened first: 8e; its cell deleted: 8g, what is typed next not held behind it; no field: 8k;
+//     past 5000: 8j; the takeover failed, with a control: 8i);
 //  9. a reload: no "another tab" text at any moment, and the reloaded page writes;
 //  9b. the tab in use while the other is reloading: it writes, its keys kept;
 //  9c. a writer held in its first load (the lock free when it opened), a tab opened and used meanwhile: its want is
@@ -385,6 +389,199 @@ try {
     doc = got[0];
   }
 
+  // ---- 8d. the cell still read-only when the takeover is done (the page's change to editable 2 s late): the key kept is
+  // typed in once the cell can take it, never dropped
+  {
+    const W = (await A.ev(writes(A))) ? A : B, F = W === A ? B : A;
+    await W.ev(`${N}.saved().then(() => 1)`);
+    const was = await code(W);
+    await F.until(`${S}.snapshot().cells[0].code === ${J(was)}`, 5000);
+    await F.ev(`(() => { const n = ${N}; window.__realRO = n.setReadOnly; n.setReadOnly = (ro) => { if (ro) return window.__realRO.call(n, ro); setTimeout(() => window.__realRO.call(n, false), 2000); }; return 1; })()`);
+    await F.clickCell();
+    await F.key("q");
+    // (and a key typed once it writes, its cell still read-only: kept after the first, in order)
+    const wrote = await F.until(`!!(${S}?.store?.writer && ${S}.store.ready)`, 10000);
+    const roAtR = await F.ev(`document.querySelector("#cells .cell textarea").readOnly`);
+    await F.key("r");
+    const tookF = await F.until(writes(F), 10000);
+    await sleep(400);
+    const got = await code(F);
+    await F.ev(`(${N}.setReadOnly = window.__realRO, 1)`);
+    check(wrote && roAtR && tookF && keptAll(got, was, "qr") && got.includes("qr"), "8d. the cell still read-only when its takeover is done (made editable 2 s late): the kept key, and one typed meanwhile, typed in in order once it can be, never dropped", { wrote, roAtR, tookF, got, was });
+    doc = got;
+  }
+
+  // ---- 8e. keys kept, then another notebook shown in that tab before they could be typed in (the writer paused): said in
+  // the bar, never dropped without a word; the bar's words gone once another notebook is opened
+  {
+    const W = (await A.ev(writes(A))) ? A : B, F = W === A ? B : A;
+    const other = await F.ev(`window.sagebrush.workspace.create("/Other.ipynb", { content: { name: "Other", mode: "python", cells: [{ id: "o1", code: "other" }] } }).then((e) => e.ref)`);
+    await W.ev(`${N}.saved().then(() => 1)`);
+    await W.send("Debugger.enable");
+    await W.send("Debugger.pause");
+    await F.clickCell();
+    await F.type("lo");
+    await sleep(300);
+    await F.ev(`window.sagebrush.open(${J(other)}).then(() => 1)`);
+    const said8e = await F.ev(`(() => { const b = document.querySelector("#writerbar"); return b && !b.hidden ? b.textContent : null; })()`);
+    await W.send("Debugger.resume");
+    await W.send("Debugger.disable");
+    check(/^2 input actions made here while this tab was taking over weren't applied: enter that input again\.$/.test(said8e ?? ""), "8e. two keys kept, then another notebook opened in that tab before they could be typed in: the bar says those 2 input actions weren't applied", { said8e });
+    await F.ev(`window.sagebrush.open(${J(ref)}).then(() => 1)`);
+    await F.until(follows, 15000);
+    const cleared = await F.ev(`(() => { const b = document.querySelector("#writerbar"); return !b || b.hidden || !/input actions? made here/.test(b.textContent); })()`);
+    check(cleared, "8e. …and once the notebook is opened again there, the bar says it no more");
+  }
+
+  // (the writer and the follower now; the writer's typing saved and shown in the follower; the writer paused (it can't
+  // answer: what the follower is used for is kept) and going on again; the count of input actions the bar says weren't
+  // applied)
+  // (roles settled first: one tab writes and the other follows (a lock handed on late, by a want answered after its tab
+  // moved on, can still be on its way))
+  const wf = async () => {
+    for (const t0 = Date.now(); Date.now() - t0 < 10000; await sleep(100)) {
+      const a = await A.ev(writes(A)), b = await B.ev(writes(B));
+      if (a !== b && (await (a ? B : A).ev(follows))) { const W = a ? A : B; return [W, W === A ? B : A]; }
+    }
+    throw new Error("no settled writer and follower");
+  };
+  const settle = async (W, F) => { await W.ev(`${N}.saved().then(() => 1)`); const cs = await codes(W); await F.until(`JSON.stringify(${S}.snapshot().cells.map((c) => c.code)) === ${J(J(cs))}`, 8000); return cs; };
+  const pause = async (W) => { await W.send("Debugger.enable"); await W.send("Debugger.pause"); };
+  const resume = async (W) => { await W.send("Debugger.resume"); await W.send("Debugger.disable"); };
+  const notApplied = (x) => x.ev(`(() => { const b = document.querySelector("#writerbar"); const m = b && !b.hidden ? /(\\d+) input actions? made here while this tab was taking over (?:wasn't|weren't) applied: enter that input again\\./.exec(b.textContent) : null; return m ? Number(m[1]) : 0; })()`);
+
+  // ---- 8f. keys kept in two cells; once it writes, the first cell takes its key and the second is still read-only (until
+  // let go): a key typed in the second meanwhile goes after the one kept there, in order
+  {
+    const [W, F] = await wf();
+    const [c1, c2] = await settle(W, F);
+    await F.ev(`(() => { const n = ${N}; const real = n.setReadOnly; n.setReadOnly = (ro) => { real.call(n, ro); if (!ro) { n.setReadOnly = real; const t = document.querySelectorAll("#cells .cell textarea")[1]; t.readOnly = true; window.__releaseCell2 = () => { t.readOnly = false; }; } }; return 1; })()`);
+    await pause(W);
+    await F.clickAt(0, "end");
+    await F.key("x");
+    await F.clickAt(1, "end");
+    await F.key("y");
+    await sleep(300);
+    await resume(W);
+    const held = await F.until(`!!window.__releaseCell2 && ${S}.snapshot().cells[0].code === ${J(c1 + "x")}`, 10000);
+    await F.clickAt(1, "end");
+    const roAtZ = await F.ev(`document.querySelectorAll("#cells .cell textarea")[1].readOnly`);
+    await F.key("z");
+    await sleep(300);
+    await F.ev(`(window.__releaseCell2?.(), delete window.__releaseCell2, 1)`);
+    await F.until(`${S}.snapshot().cells[1].code === ${J(c2 + "yz")}`, 8000);
+    const got = await codes(F);
+    check(held && roAtZ && got[0] === c1 + "x" && got[1] === c2 + "yz", "8f. kept in two cells, the second still read-only once the first took its key: a key typed in the second meanwhile goes after the kept one, in order", { held, roAtZ, got, want: [c1 + "x", c2 + "yz"] });
+  }
+
+  // ---- 8h. a cell's field not there yet once it writes (not found by the page, the cell still in the notebook): the key kept for it waits,
+  // nothing said, and is typed in once the field is there
+  {
+    const [W, F] = await wf();
+    const [, c2] = await settle(W, F);
+    const before = await notApplied(F);
+    await F.ev(`(() => { const n = ${N}; const real = n.setReadOnly; n.setReadOnly = (ro) => { if (ro) return real.call(n, ro); n.setReadOnly = real; const el = document.querySelectorAll("#cells .cell")[1]; el.classList.remove("cell"); window.__showField = () => { el.classList.add("cell"); real.call(n, false); }; }; return 1; })()`);
+    await pause(W);
+    await F.clickAt(1, "end");
+    await F.key("y");
+    await sleep(300);
+    await resume(W);
+    const took = await F.until(`!!window.__showField`, 10000);
+    await sleep(1500);
+    const waiting = await codes(F);
+    await F.ev(`(window.__showField?.(), delete window.__showField, 1)`);
+    await F.until(`${S}.snapshot().cells[1].code === ${J(c2 + "y")}`, 8000);
+    const got = await codes(F), after = await notApplied(F);
+    check(took && waiting[1] === c2 && got[1] === c2 + "y" && after === before, "8h. a cell's field not there yet once it writes, the cell still in the notebook: its kept key waits, nothing said, and is typed in once the field is there", { took, waiting, got, before, after });
+  }
+
+  // ---- 8k. a key kept with no field to type it into (the focus on something else among the cells): not applied, and
+  // the bar counts it
+  {
+    const [W, F] = await wf();
+    const cs = await settle(W, F);
+    const before = await notApplied(F);
+    await pause(W);
+    await F.send("Page.bringToFront");
+    await F.ev(`(() => { const d = document.createElement("div"); d.id = "nofield"; d.tabIndex = 0; document.querySelector("#cells").append(d); d.focus(); return 1; })()`);
+    await F.key("k");
+    await sleep(300);
+    await resume(W);
+    const tookF = await F.until(writes(F), 8000);
+    await sleep(600);
+    const got = await codes(F), after = await notApplied(F);
+    await F.ev(`(document.getElementById("nofield")?.remove(), 1)`);
+    check(tookF && J(got) === J(cs) && after === before + 1, "8k. a key kept with no field to type it into: not applied, and the bar counts it", { tookF, got, cs, before, after });
+  }
+
+  // ---- 8j. more than 5000 input actions kept: the first 5000 typed in, the 2 past them not, and the bar counts those 2
+  {
+    const [W, F] = await wf();
+    const [c1] = await settle(W, F);
+    const before = await notApplied(F);
+    await pause(W);
+    await F.clickAt(0, "end");
+    await Promise.all(Array.from({ length: 5002 }, () => F.key("o")));
+    await sleep(500);
+    await resume(W);
+    const tookF = await F.until(writes(F), 20000);
+    const all = await F.until(`${S}.snapshot().cells[0].code.length >= ${c1.length + 5000}`, 120000);
+    await sleep(600);
+    const got = await code(F), after = await notApplied(F);
+    check(tookF && all && got === c1 + "o".repeat(5000) && after === before + 2, "8j. 5002 input actions kept: 5000 typed in, the 2 past them not, and the bar counts those 2", { tookF, all, len: got.length, want: c1.length + 5000, before, after });
+  }
+
+  // ---- 8g. the cell a key was kept for deleted before it could be typed in (once it writes, still read-only): that key
+  // counted and said, and what is typed next, in another cell, typed in at once (not held behind it)
+  {
+    const [W, F] = await wf();
+    const [c1] = await settle(W, F);
+    const before = await notApplied(F);
+    await F.ev(`(() => { const n = ${N}; const real = n.setReadOnly; n.setReadOnly = (ro) => { if (ro) return real.call(n, ro); n.setReadOnly = real; window.__releaseRO = () => real.call(n, false); }; return 1; })()`);
+    await pause(W);
+    await F.clickAt(1, "end");
+    await F.key("q");
+    await sleep(300);
+    await resume(W);
+    const took = await F.until(`!!window.__releaseRO`, 10000);
+    await F.ev(`(document.querySelectorAll("#cells .cell")[1].querySelector('[data-a="del"]').click(), 1)`);
+    const deleted = await F.ev(`document.querySelectorAll("#cells .cell").length === 1`);
+    await F.ev(`(window.__releaseRO?.(), delete window.__releaseRO, 1)`);
+    await sleep(600);
+    await F.clickAt(0, "end");
+    await F.key("r");
+    await F.until(`${S}.snapshot().cells[0].code.length === ${c1.length + 1}`, 8000);
+    const got = await codes(F), after = await notApplied(F);
+    check(took && deleted && got.length === 1 && keptAll(got[0], c1, "r") && after === before + 1, "8g. the cell a key was kept for deleted before it could be typed in: that key counted and said; a key typed next in another cell typed in at once", { took, deleted, cells: got.length, len: got[0]?.length, want: c1.length + 1, before, after });
+  }
+
+  // ---- 8i. a takeover that fails (its reload refused, injected): said; with nothing kept, no input counted (the
+  // control); with two keys kept, the bar counts them too. The follower reloaded after each
+  {
+    const failOnce = `(() => { const n = ${N}; const real = n.attach; n.attach = () => { n.attach = real; return Promise.reject(new Error("injected: the takeover's reload refused")); }; return 1; })()`;
+    const failedBar = `(() => { const b = document.querySelector("#writerbar"); return b && !b.hidden && /couldn't be opened for editing here/.test(b.textContent) ? b.textContent : null; })()`;
+    const reloadF = async (F) => { await F.send("Page.reload", {}); await sleep(300); await F.until(`${follows} || ${writes(F)}`, 30000); };
+    let [W, F] = await wf();
+    await settle(W, F);
+    await F.ev(failOnce);
+    await F.clickCell();
+    const failed0 = await F.until(`!!${failedBar}`, 10000);
+    const bar0 = await F.ev(failedBar);
+    await reloadF(F);
+    [W, F] = await wf();
+    await settle(W, F);
+    await F.ev(failOnce);
+    await pause(W);
+    await F.clickCell();
+    await F.type("fi");
+    await sleep(300);
+    await resume(W);
+    const failed2 = await F.until(`!!${failedBar}`, 10000);
+    const bar2 = await F.ev(failedBar);
+    await reloadF(F);
+    check(failed0 && !/input action/.test(bar0 ?? "") && failed2 && /2 input actions made here while this tab was taking over weren't applied: enter that input again\./.test(bar2 ?? ""), "8i. a takeover that fails: said; with nothing kept, no input counted; with two keys kept, the bar counts them", { failed0, bar0, failed2, bar2 });
+  }
+
   // ---- 9. a reload: nothing said at any moment; the reloaded page writes
   await B.send("Page.reload", {});
   let said = false;
@@ -437,13 +634,18 @@ try {
     const E = await tab(url);
     tabs.push(E);
     const followsE = await E.until(follows, 30000);
+    // (E, opened while D's first load is held, must load and follow D: said by name if it doesn't, rather than a click on
+    // a cell that isn't there)
+    check(followsE, "9c. …E, opened while D's first load was held, loads and follows D within 30 s", { e: await st(E).catch(() => null) });
     const before = followsE ? await code(E) : "";
-    await E.clickCell();
-    await E.type("e9");
+    if (followsE) {
+      await E.clickCell();
+      await E.type("e9");
+    }
     await sleep(400);
     await D.send("Debugger.resume");
     await D.send("Debugger.disable");
-    const t9 = Date.now(), tookE = await E.until(writes(E), 5000), ms = Date.now() - t9;
+    const t9 = Date.now(), tookE = followsE && (await E.until(writes(E), 5000)), ms = Date.now() - t9;
     await sleep(300);
     // (only a load really held counts: the place found in the bundle, the breakpoint set there, and D stopped at it)
     check(at >= 0 && !!bp?.breakpointId && caught, "9c. D held in its first load: the place found in the bundle, a breakpoint set there, and D stopped at it", { at, bp, caught });

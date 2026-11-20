@@ -25,8 +25,8 @@
 # (src-tauri/src, Cargo.toml, Cargo.lock, tauri.conf.json: a release-only
 # breakage, e.g. R8 or LTO, can come from there) changes, or by hand
 # (workflow_dispatch), and is
-# never a required check or a need of ci.yml's aggregate (@sagebrush's ruling
-# after #304); making it gate is a separate decision.
+# never a required check or a need of ci.yml's aggregate (as ruled);
+# making it gate is a separate decision.
 name: app-mobile
 
 on:

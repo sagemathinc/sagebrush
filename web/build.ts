@@ -10,6 +10,7 @@ import { tmpdir } from "node:os";
 import { previewHost } from "./latex/preview-host.mjs";
 import { latexModeName } from "./latex/build-mode.mjs";
 import { bundledPackageDir } from "./build-package-dir.mjs";
+import { builtAt } from "./build-time.mjs";
 
 /** A site page with the early-alpha notice's script (web/alpha-banner.js), just before </head>. */
 // (the same tag that board/export.ts's assemble() takes out of every board it makes from a page)
@@ -771,10 +772,12 @@ if (hasSite) rmSync(join(siteDir, "public", "agents"), { recursive: true, force:
     for (const l of r.logs) console.error(l);
     process.exit(1);
   }
-  // (and "How to connect your agent to Sagebrush", a static page without scripts: /agents/connect/, a directory's
+  // (and "How to connect your agent to Sagebrush", a static page with no inline script: /agents/connect/, a directory's
   // index so that every host serves it without a .html: the site's assets and the preview Worker alike)
   mkdirSync(join(here, "dist", "agents", "connect"), { recursive: true });
-  for (const f of ["index.html", "connect/index.html"]) copyFileSync(join(here, "agents", f), join(here, "dist", "agents", f));
+  // (its Copy buttons' script, connect/copy.js, a file of the site's own: the page has no inline script; and the full
+  //  reference for agents, connect.md, the long text the page's boxes stand on)
+  for (const f of ["index.html", "connect/index.html", "connect/copy.js", "connect.md"]) copyFileSync(join(here, "agents", f), join(here, "dist", "agents", f));
   // (the reviewed sagebrush-agent tarball the help box points to: not committed; placed in web/agents by the publisher)
   for (const f of readdirSync(join(here, "agents"))) if (/^sagebrush-agent-\d+\.\d+\.\d+\.tgz$/.test(f)) copyFileSync(join(here, "agents", f), join(here, "dist", "agents", f));
   // (the site's copy: the pages and the script; the help box points at the reviewed tarball's own immutable URL, so
@@ -782,7 +785,7 @@ if (hasSite) rmSync(join(siteDir, "public", "agents"), { recursive: true, force:
   if (hasSite) {
     mkdirSync(join(siteDir, "public", "agents"), { recursive: true });
     mkdirSync(join(siteDir, "public", "agents", "connect"), { recursive: true });
-    for (const f of ["index.html", "agents.js", "connect/index.html"]) copyFileSync(join(here, "dist", "agents", f), join(siteDir, "public", "agents", f));
+    for (const f of ["index.html", "agents.js", "connect/index.html", "connect/copy.js", "connect.md"]) copyFileSync(join(here, "dist", "agents", f), join(siteDir, "public", "agents", f));
   }
 }
 // the numerics core's browser-threads demo (web/threads, numerics-core r4.2 milestone M0): a dense product on 1 and N
@@ -813,15 +816,16 @@ mkdirSync(join(here, "dist", "badge"), { recursive: true });
 copyFileSync(join(here, "gh", "badge.svg"), join(here, "dist", "badge", "open-in-sagebrush.svg"));
 if (hasSite) mkdirSync(join(siteDir, "public", "s"), { recursive: true });
 // /version.json: what this build is, for an agent (or a person) asking a site which code it runs: the core commit it was
-// built from (HEAD of the core tree the build ran in: a deploy's, at its core.lock), when, its engine's and library's ids,
-// whether the LaTeX editor is in it, and how (latexMode: shipped, test (with the LaTeX tests' seams) or off). Never
-// cached (web/_headers), and outside the service worker's shell, so always this deploy's.
+// built from (HEAD of the core tree the build ran in: a deploy's, at its core.lock), when (SOURCE_DATE_EPOCH if set:
+// web/build-time.mjs), its engine's and library's ids, whether the LaTeX editor is in it, and how (latexMode: shipped,
+// test (with the LaTeX tests' seams) or off). Never cached (web/_headers), and outside the service worker's shell, so
+// always this deploy's.
 {
   const git = (...a: string[]) => { try { return execFileSync("git", a, { cwd: join(here, ".."), encoding: "utf8" }).trim(); } catch { return null; } };
   const sha = git("rev-parse", "HEAD");
   writeFileSync(join(here, "dist", "version.json"), JSON.stringify({
     core: sha && /^[0-9a-f]{40}$/.test(sha) ? sha : null,
-    built: new Date().toISOString(),
+    built: builtAt(),
     engine: engineHash,
     build: buildId,
     latex: LATEX,
