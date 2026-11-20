@@ -238,7 +238,8 @@ export async function mount(root: HTMLElement, host: Host): Promise<void> {
   // (decided to leave, with a step still to take first (a notebook made, this file moved to Trash): no typing until the
   //  navigation, as what's typed then would be dropped; typing again if the step fails)
   // (the copy just saved holds the edits: opened straight away, never asking whether to drop them)
-  const openCopy = (e: Entry) => { if (e.fid) go(codeUrl(e.fid)); else host.open(e, "here"); };
+  // (whether it navigated: a copy with no fid can't be opened here, and stays only said)
+  const openCopy = (e: Entry) => { if (!e.fid) return false; go(codeUrl(e.fid)); return true; };
   const thenGo = async (step: () => Promise<string>) => {
     const was = ta.readOnly; ta.readOnly = true;
     try {
@@ -306,13 +307,17 @@ export async function mount(root: HTMLElement, host: Host): Promise<void> {
   const free = async (folder: string, base: string, ext: string) => { const taken = new Set((await ws.list(folder)).map((e) => e.path)); return freePath(folder, base, ext, (p) => taken.has(p)); };
   // (a copy of the text as it is now, then the copy opened: no typing from the moment the text is taken until the
   //  navigation, as what's typed then would be in neither file; typing again if no copy is made)
+  // (one at a time: a second click while a copy is made does nothing)
+  let copying = false;
   async function copyAndOpen() {
+    if (copying) return;
+    copying = true;
     const was = ta.readOnly; ta.readOnly = true;
     let went = false;
     try {
       const e = await saveCopy(mode === "edit" ? ta.value : text);
-      if (e) { openCopy(e); went = true; }
-    } finally { if (!went) ta.readOnly = was; }
+      if (e) went = openCopy(e);
+    } finally { if (!went) { ta.readOnly = was; copying = false; } }
   }
   async function saveCopy(t: string): Promise<Entry | null> {
     const [base, ext] = splitExt(nameOf(path));
