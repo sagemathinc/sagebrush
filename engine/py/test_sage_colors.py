@@ -1,6 +1,7 @@
 """Sage's named colors, in 3D as in 2D, against Sage's own table recorded once
-(sage.plot.colors.colors_dict: fixtures/sage_colors.json): every name is taken,
-with Sage's value.  The same file runs on the native wheel and in pyjs (the
+(sage.plot.colors.colors_dict: fixtures/sage_colors.json): all 148 names are
+accepted, and the 147 named colors have Sage's values ("automatic" keeps the
+existing 3D default color, not Sage's lightblue).  The same file runs on the native wheel and in pyjs (the
 site's Sage worker), so the two builds take the same set of names: each run
 prints that set's size and digest, and both must equal Sage's.  (3D once took
 only 37 names: cube(color='seagreen') was "unknown color" when drawn.)
@@ -25,6 +26,7 @@ SAGE = json.load(open(os.path.join(HERE, "fixtures", "sage_colors.json")))["colo
 def main():
     bad = []
     taken = []
+    checked = agree = 0
     for name, want in SAGE.items():
         try:
             got = sage_plot3d._hex(sage_plot3d._rgb(name))
@@ -32,8 +34,12 @@ def main():
             bad.append("%s: %s" % (name, e))
             continue
         taken.append(name)
-        # ("automatic" is the 3D default color here, as plot3d's own default; Sage's alias of lightblue is a 2D one)
-        if name != "automatic" and got != want.lower():
+        if name == "automatic":  # (the existing 3D default color is kept: no value check)
+            continue
+        checked += 1
+        if got == want.lower():
+            agree += 1
+        else:
             bad.append("%s: %s, Sage's is %s" % (name, got, want))
     # drawn, in 3D and in 2D: the name's color is in the picture
     try:
@@ -53,10 +59,10 @@ def main():
     names = sorted(taken)
     digest = hashlib.sha256("\n".join(names).encode()).hexdigest()[:16]
     want_digest = hashlib.sha256("\n".join(sorted(SAGE)).encode()).hexdigest()[:16]
-    print("names taken: %d of Sage's %d, digest %s (Sage's %s)" % (len(names), len(SAGE), digest, want_digest))
+    print("names accepted: %d of Sage's %d, digest %s (Sage's %s)" % (len(names), len(SAGE), digest, want_digest))
+    print("values: %d of %d named colors have Sage's value (\"automatic\" keeps the 3D default, not checked)" % (agree, checked))
     for b in bad:
         print("FAIL", b)
-    print("%d/%d Sage colors agree" % (len(SAGE) - len([b for b in bad if b.split(":")[0] in SAGE]), len(SAGE)))
     if bad or digest != want_digest:
         raise SystemExit(1)
 
