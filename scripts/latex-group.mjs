@@ -167,7 +167,10 @@ export const LATEX_LAZY_CAPS = {
   // (57,209 / 19,692: Nov 20 2026, a framed page leaves the tab's reload record alone (agent-ui.ts), measured on the shipped build of the head on master 005c7187: 57,145 / 19,628, + 64)
   // (57,465 / 19,751: Nov 20 2026, edit.turn and the framed page's reload record together, measured on the shipped build of the head merged with master 4eac951c: 57,401 / 19,687, + 64)
   // (57,557 / 19,786: Nov 20 2026, egress.turn: the pairing takes it from a hello and the Agents page offers it (agent-pair.ts, agent-ui.ts), measured on the shipped build of the head on master 889aca62: 57,493 / 19,722, + 64)
-  AGENT: { label: "the LaTeX agent pairing's chunk", raw: 57557, gzip: 19786 },
+  // (62,408 / 21,455: Nov 20 2026, the agent's bar as a compact chip with its menu (keyboard, focus kept across updates,
+  //  controls only for the pairing shown; agent-ui.ts), measured on the shipped build of the head on master 300519cb with
+  //  bun 1.4.4 and node 24.21.0: 62,344 / 21,391, + 64)
+  AGENT: { label: "the LaTeX agent pairing's chunk", raw: 62408, gzip: 21455 },
   // (the agent tools' work: web/latex/tools.ts, latex_check's report and latex_render's pictures, on an agent's first call)
   // (16,546 / 6,950: Nov 11 2026: latex_build's own code (build.ts, the
   //  engine driven from a snapshot, and the pages' fit) here, out of the eager group, its shared rules handed in by the
