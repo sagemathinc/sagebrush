@@ -51,13 +51,15 @@ for (const [name, a, b] of shapes) {
     if (full.includes("unknown fn")) return;
     assert.ok(full.startsWith('{"ok"'), full.slice(0, 200));
     for (const frac of [0.25, 0.5]) {
+      // (the instance made before T: its instantiation isn't the Stop's)
+      const e = instance();
       const T = performance.now() + ms * frac;
       flag = () => (performance.now() >= T ? 1 : 0);
       // (the engine's own end: its return, or the trap)
       let trapped = false;
       let after: number;
       try {
-        after = call(instance(), req).returned;
+        after = call(e, req).returned;
       } catch {
         after = performance.now();
         trapped = true;
