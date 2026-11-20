@@ -100,7 +100,7 @@ try {
   const item = await ev(`(() => { const b = document.querySelector("#threads .thread.mirror"); return { text: b.textContent, badge: b.querySelector(".badge")?.textContent }; })()`);
   ok(item.badge === "mirror" && item.text.startsWith("Mirrored conversation"), "with a small mirror badge, in the same list (Q2)", item);
   const banner = await ev(`document.querySelector("#banner").textContent`);
-  ok(banner.endsWith("Chats are kept in this browser and mirrored to your Sagebrush account.") && !banner.includes("this browser only"), "with the mirror on, the banner says the chats are mirrored to the account, never \"this browser only\"", banner);
+  ok(banner.endsWith("Chats are kept in this browser. Mirroring to your Sagebrush account is on for supported agents while this page is connected.") && !banner.includes("this browser only"), "with the mirror on, the banner says when chats are mirrored (a supported agent, this page connected), never \"this browser only\"", banner);
   await ev(`(document.querySelector("#threads .thread.mirror").click(), true)`);
   ok(await until(`!document.querySelector("#mirror-log").hidden && !!document.querySelector("#mirror-log .mirror-section")`), "opening it shows its sections");
   const v = await ev(`(() => {
