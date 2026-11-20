@@ -13,6 +13,9 @@ export default defineConfig({
     entrypoint,
     assets: { htmlHandling: "auto-trailing-slash", notFoundHandling: "404-page" },
     domains: ["space.sagebrush.cloud"],
+    // web/preview's Worker has a route on *.sagebrush.cloud/*, which wins over a custom domain; this more
+    // specific route sends space.sagebrush.cloud here.
+    triggers: [{ type: "fetch", pattern: "space.sagebrush.cloud/*", zone: "sagebrush.cloud" }],
     env: { ASSETS: bindings.assets() },
   },
 });
