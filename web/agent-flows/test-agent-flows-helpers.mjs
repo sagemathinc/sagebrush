@@ -84,6 +84,17 @@ async function check(name, f) {
   ws.close();
   const r2 = await Promise.race([p2, new Promise((r) => setTimeout(() => r("still pending after 2 s"), 2000))]);
   ok(/closed/.test(r2) && c.pending.size === 0, "a socket that closes rejects the command still pending", { r2, pending: c.pending.size });
+  const ws2 = new WebSocket(`ws://127.0.0.1:${srv.port}/`);
+  await new Promise((r) => ws2.addEventListener("open", r));
+  const c2 = cdpClient(ws2);
+  const p3 = c2.send("Runtime.evaluate", {}, 60000).then(() => "answered", (e) => e.message);
+  c2.cancel("the case was cancelled");
+  const r3 = await p3, r4 = await c2.send("Page.navigate", {}, 60000).then(() => "sent", (e) => e.message);
+  c2.resume();
+  const p5 = c2.send("Runtime.evaluate", {}, 200).then(() => "answered", (e) => e.message);
+  ok(/cancelled/.test(r3) && /Page\.navigate: the case was cancelled/.test(r4) && /no answer in 200 ms/.test(await p5),
+    "a cancel rejects what's pending and refuses every new command until resume()", { r3, r4 });
+  ws2.close();
   srv.stop(true);
 }
 
@@ -108,6 +119,75 @@ async function check(name, f) {
   const took = Date.now() - t0;
   ok(fails.some((f) => /over 0\.4 s/.test(f)) && cancelled === 1 && closed === 1 && tabsClosed === 1 && /cancelled/.test(after ?? "") && took < 400 + CLEANUP_MS,
     "a case whose page never answers fails at its time: cancelled, its surface and tabs closed, its later calls refused, within CLEANUP_MS", { fails, cancelled, closed, tabsClosed, after, took });
+
+  // ...and a case's own steps stop too: a connect or a tool that settles after the case's time sends nothing more (no
+  // given file, no agent call, no turn, no expect) after its surface and tabs are closed
+  const late = async (slow) => {
+    const events = [];
+    const wait = (name) => new Promise((r) => setTimeout(r, slow === name ? 120 : 0));
+    const page = { errors: [], fresh: async () => {}, cancel: () => events.push("cancel"), closeTabs: async () => { events.push("tabs closed"); } };
+    const surface = {
+      name: "chat",
+      connect: async () => { await wait("connect"); events.push("connect settled"); },
+      tool: async (name, a) => { events.push("tool " + name + " " + (a.path ?? "")); await wait("tool"); return {}; },
+      beginTurn: async () => { events.push("turn"); },
+      endTurn: () => events.push("turn ended"),
+      close: async () => { events.push("surface closed"); return []; },
+    };
+    const kase = { id: "late-" + slow, prompt: "p", ms: 40, given: { "/x": "x" }, agent: [{ tool: "workspace_write", args: { path: "/y" } }], expect: async () => { events.push("expect"); } };
+    const fails = await check("late", () => runCase(kase, "stub", { site: { origin: "http://x" }, page, surfaces: { stub: async () => surface }, shotDir: null }));
+    await new Promise((r) => setTimeout(r, 200));
+    const afterClose = events.slice(events.indexOf("surface closed") + 1).filter((e) => !/^(tabs closed|connect settled)$/.test(e));
+    return { fails, events, afterClose };
+  };
+  const lc = await late("connect");
+  ok(lc.fails.some((f) => /over 0\.04 s/.test(f)) && lc.events.includes("connect settled") && lc.afterClose.length === 0 && !lc.events.some((e) => /^tool|^turn|^expect/.test(e)),
+    "...a connect that settles after the case's time: no given file, agent call, turn or expect follows", lc);
+  const lt = await late("tool");
+  ok(lt.fails.some((f) => /over 0\.04 s/.test(f)) && lt.afterClose.length === 0 && lt.events.filter((e) => /^tool/.test(e)).length === 1 && !lt.events.some((e) => /^turn|^expect/.test(e)),
+    "...a tool that settles after the case's time: no later tool, turn or expect follows", lt);
+}
+
+// (5a) the mcp surface's close answers the call still in flight at once, refuses every later one, and kills the server:
+//      nothing reaches it after the close
+{
+  const { lineCalls } = await import("./harness.mjs");
+  const { spawn } = await import("node:child_process");
+  const { mkdtempSync, readFileSync, rmSync } = await import("node:fs");
+  const { tmpdir } = await import("node:os");
+  const dir = mkdtempSync(tmpdir() + "/sb-flows-line-"), got = dir + "/got";
+  // (a server that takes every call and never answers, writing down what it got)
+  const proc = spawn(process.execPath, ["-e", `const fs = require("node:fs"); process.stdin.on("data", (d) => fs.appendFileSync(${JSON.stringify(got)}, d)); setInterval(() => {}, 1e9);`], { stdio: ["pipe", "pipe", "ignore"] });
+  const calls = lineCalls(proc);
+  const first = calls.tool("workspace_write", { path: "/a" });
+  await new Promise((r) => setTimeout(r, 300));
+  const t0 = Date.now();
+  await calls.close();
+  const r1 = await Promise.race([first, new Promise((r) => setTimeout(() => r("still in flight"), 1000))]);
+  const r2 = await Promise.race([calls.tool("workspace_write", { path: "/b" }), new Promise((r) => setTimeout(() => r({ text: "never answered" }), 1000))]);
+  await new Promise((r) => setTimeout(r, 200));
+  const seen = (() => { try { return readFileSync(got, "utf8"); } catch { return ""; } })();
+  const gone = proc.exitCode !== null || proc.signalCode !== null;
+  ok(/closed/.test(r1?.text ?? "") && r1.isError && /closed/.test(r2.text) && gone && /"\/a"/.test(seen) && !/"\/b"/.test(seen) && Date.now() - t0 < 2000,
+    "the mcp surface's close answers the call in flight, refuses later ones and kills its server", { r1, r2, gone, seen });
+  if (!gone) proc.kill("SIGKILL");
+  rmSync(dir, { recursive: true, force: true });
+}
+
+// (5b) a cancelled case that doesn't settle within CLEANUP_MS stops the suite: no next case starts, the page isn't given
+//      back (no resume, no tab closed through it)
+{
+  const { runCases, CLEANUP_MS } = await import("./harness.mjs");
+  let made = 0, resumed = 0, tabsClosed = 0;
+  const page = { errors: [], fresh: async () => {}, cancel: () => {}, resume: () => { resumed++; }, closeTabs: async () => { tabsClosed++; } };
+  const surfaces = { stub: async () => { made++; return { name: "stub", connect: async () => {}, tool: async () => ({}), close: async () => [] }; } };
+  const stuck = { id: "stuck", prompt: "p", surfaces: ["stub"], ms: 40, expect: () => new Promise(() => {}) };
+  const next = { id: "next", prompt: "p", surfaces: ["stub"], expect: async () => {} };
+  const t0 = Date.now();
+  const r = await check("stuck", () => runCases([stuck, next], { site: { origin: "http://x" }, page, surfaces, log: () => {} }));
+  const took = Date.now() - t0;
+  ok(r.results.length === 1 && r.results[0].failures.unsettled && /stuck on stub .*didn't settle/.test(r.stopped ?? "") && made === 1 && resumed === 0 && tabsClosed === 0 && took < 40 + 2 * CLEANUP_MS,
+    "a cancelled case that doesn't settle stops the suite: no next case, the page not given back", { stopped: r.stopped, runs: r.results.length, made, resumed, tabsClosed, took });
 }
 
 // (6) the site: a server that fails, says something other than its port, or says nothing is refused, and its process is gone

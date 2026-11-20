@@ -9,7 +9,7 @@
 //  a .tex need, as above)
 import { readdirSync } from "node:fs";
 import { join } from "node:path";
-import { startSite, startChrome, runCase, SURFACES } from "./harness.mjs";
+import { startSite, startChrome, runCases, SURFACES } from "./harness.mjs";
 
 const here = new URL(".", import.meta.url).pathname;
 const arg = (name) => { const i = process.argv.indexOf(name); return i > 0 ? process.argv[i + 1] : null; };
@@ -30,24 +30,17 @@ let site = null, page = null;
 const stopNow = () => { try { page?.killSync(); } catch {} try { site?.kill(); } catch {} };
 process.on("exit", stopNow);
 for (const sig of ["SIGINT", "SIGTERM"]) process.on(sig, () => { stopNow(); process.exit(130); });
-const results = [];
+let results = [], stopped = null;
 try {
   site = await startSite();
   page = await startChrome();
-  for (const kase of cases) {
-    for (const s of kase.surfaces) {
-      if (onlySurface && s !== onlySurface) continue;
-      if (!SURFACES[s]) { results.push({ id: kase.id, surface: s, skipped: `no surface ${s} in this harness yet` }); continue; }
-      const t = Date.now();
-      console.log(`---- ${kase.id} on ${s}: "${kase.prompt}"`);
-      const failures = await runCase(kase, s, { site, page });
-      results.push({ id: kase.id, surface: s, failures, gap: kase.gaps?.[s] ?? null, s: ((Date.now() - t) / 1000).toFixed(1) });
-    }
-  }
+  ({ results, stopped } = await runCases(cases, { site, page, only: onlySurface }));
+  if (stopped) { console.log(`FAIL ${stopped}`); process.exitCode = 1; }
 } catch (e) {
   console.log(`FAIL the harness couldn't run: ${String(e?.message ?? e).slice(0, 400)}`);
   process.exitCode = 1;
 } finally {
+  // (Chrome killed and its profile removed: so a case that didn't settle loses the page with it)
   await page?.close().catch(() => page?.killSync());
   site?.close();
 }

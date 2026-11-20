@@ -11,6 +11,7 @@ import { spawn } from "node:child_process";
 import { mkdtempSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
+import { once } from "node:events";
 import { createInterface } from "node:readline";
 import { createHash, randomBytes } from "node:crypto";
 import { CHROME_START_MS, SERVE_MS, devtoolsPort, startServe } from "../test-port.mjs";
@@ -44,9 +45,10 @@ export const CLEANUP_MS = 5_000;
 const within = (p, ms, fallback) => { let t; return Promise.race([p, new Promise((r) => { t = setTimeout(() => r(fallback), ms); })]).finally(() => clearTimeout(t)); };
 
 /** A DevTools socket's commands, each answered or rejected by its deadline: a command unanswered in `ms`, or still
- *  pending when the socket closes or `cancel()` is called, is rejected and its entry dropped. `on(m)`: every message. */
+ *  pending when the socket closes or `cancel()` is called, is rejected and its entry dropped. `on(m)`: every message.
+ *  After `cancel(why)` it refuses every new command too, until `resume()`. */
 export function cdpClient(sock, on = () => {}) {
-  let n = 0, closed = false;
+  let n = 0, closed = false, refused = null;
   const pending = new Map();
   const drop = (id, err) => { const p = pending.get(id); if (!p) return; pending.delete(id); clearTimeout(p.timer); p.reject(err); };
   const failAll = (why) => { for (const id of [...pending.keys()]) drop(id, new Error(why)); };
@@ -60,12 +62,13 @@ export function cdpClient(sock, on = () => {}) {
   sock.addEventListener("close", () => { closed = true; failAll("the DevTools socket closed"); });
   const send = (method, params = {}, ms = CDP_MS) => new Promise((resolve, reject) => {
     if (closed) return reject(new Error(`${method}: the DevTools socket is closed`));
+    if (refused) return reject(new Error(`${method}: ${refused}`));
     const id = ++n;
     const timer = setTimeout(() => drop(id, new Error(`${method}: no answer in ${ms} ms`)), Math.max(1, ms));
     pending.set(id, { resolve, reject, timer });
     try { sock.send(JSON.stringify({ id, method, params })); } catch (e) { drop(id, e); }
   });
-  return { send, pending, cancel: (why = "cancelled") => failAll(why) };
+  return { send, pending, cancel: (why = "cancelled") => { refused = why; failAll(why); }, resume: () => { refused = null; } };
 }
 /** Evaluate `expr` over `send`, its value or an error; and until(), each evaluation within what is left of its time. */
 function evaluator(send) {
@@ -163,12 +166,15 @@ function startedPage(sock, cdp, { stop, killSync }) {
   // (another tab of this Chrome, one the person opened (a link, an Open that opens a tab of its own): the page whose
   //  address matches, over a DevTools socket of its own; closed with the case, tabs.splice(0))
   const tabs = [];
+  let refused = null;
   const tab = async (match, ms = 20000) => {
     let found = null;
+    if (refused) throw new Error(refused);
     for (const end = Date.now() + ms; !found && Date.now() < end; await sleep(100)) {
       const list = await fetch(`http://127.0.0.1:${cdp}/json`, { signal: AbortSignal.timeout(Math.max(1, Math.min(5000, end - Date.now()))) }).then((r) => r.json(), () => []);
       found = list.find((x) => x.type === "page" && match.test(x.url) && !tabs.some((o) => o.id === x.id)) ?? null;
     }
+    if (refused) throw new Error(refused);
     if (!found) throw new Error("no tab at " + match);
     const ws = await openSocket(found.webSocketDebuggerUrl, CDP_MS);
     const tc = cdpClient(ws, (m) => { if (m.method === "Runtime.exceptionThrown") errors.push("(tab) " + String(m.params.exceptionDetails?.exception?.description ?? m.params.exceptionDetails?.text).slice(0, 300)); });
@@ -185,9 +191,11 @@ function startedPage(sock, cdp, { stop, killSync }) {
     return t;
   };
   const closeTabs = async () => { for (const t of tabs.splice(0)) await within(t.close(), CLEANUP_MS); };
-  /** A case over its time: what it still waits on, here and in its tabs, rejected at once. */
-  const cancel = (why = "the case was cancelled") => { client.cancel(why); for (const t of tabs) t.cancel(why); };
-  return { send, ev, until, navigate, shot, fresh, errors, close: stop, killSync, click, tab, closeTabs, cancel };
+  /** A case over its time: what it still waits on, here and in its tabs, rejected at once, and every new command or tab
+   *  refused until resume() (once the case has settled). */
+  const cancel = (why = "the case was cancelled") => { refused = why; client.cancel(why); for (const t of tabs) t.cancel(why); };
+  const resume = () => { refused = null; client.resume(); };
+  return { send, ev, until, navigate, shot, fresh, errors, close: stop, killSync, click, tab, closeTabs, cancel, resume };
 }
 
 // ---- the grant dialog ("Allow this agent?"), set as the case's grant, then Allow
@@ -236,13 +244,31 @@ for line in sys.stdin:
     threading.Thread(target=one, args=(json.loads(line),), daemon=True).start()
 `;
 
-async function mcpSurface(site, page) {
-  const proc = spawn("python3", ["-s", "-c", MCP_DRIVER], { env: { ...process.env, SB_SRC, SAGEBRUSH_MCP_DEV_ORIGIN: site.origin }, stdio: ["pipe", "pipe", "ignore"] });
+/** Tool calls over a process's stdin and stdout, one JSON line each way. close(): the calls still in flight answered at
+ *  once, every later call refused, and the process killed, so none of them goes on after it. */
+export function lineCalls(proc) {
   const wait = new Map();
   let id = 0;
-  createInterface({ input: proc.stdout }).on("line", (l) => { const m = JSON.parse(l); wait.get(m.id)?.(m); wait.delete(m.id); });
-  proc.on("exit", () => { for (const w of wait.values()) w({ text: "the MCP server exited", isError: true, raised: true }); wait.clear(); });
-  const tool = (name, args = {}) => new Promise((r) => { const i = ++id; wait.set(i, r); proc.stdin.write(JSON.stringify({ id: i, name, args }) + "\n"); });
+  createInterface({ input: proc.stdout }).on("line", (l) => { let m; try { m = JSON.parse(l); } catch { return; } wait.get(m.id)?.(m); wait.delete(m.id); });
+  const answerAll = (text) => { for (const w of wait.values()) w({ text, isError: true, raised: true }); wait.clear(); };
+  proc.on("exit", () => answerAll("the MCP server exited"));
+  let closed = false;
+  const tool = (name, args = {}) => new Promise((r) => {
+    if (closed) return r({ text: "the MCP server is closed", isError: true, raised: true });
+    const i = ++id; wait.set(i, r); proc.stdin.write(JSON.stringify({ id: i, name, args }) + "\n");
+  });
+  const close = async () => {
+    closed = true;
+    answerAll("the MCP server was closed");
+    if (proc.exitCode === null && proc.signalCode === null) { proc.kill("SIGKILL"); await within(once(proc, "exit"), CLEANUP_MS); }
+    return [];
+  };
+  return { tool, close };
+}
+
+async function mcpSurface(site, page) {
+  const proc = spawn("python3", ["-s", "-c", MCP_DRIVER], { env: { ...process.env, SB_SRC, SAGEBRUSH_MCP_DEV_ORIGIN: site.origin }, stdio: ["pipe", "pipe", "ignore"] });
+  const { tool, close } = lineCalls(proc);
   return {
     name: "mcp",
     tool,
@@ -265,7 +291,7 @@ async function mcpSurface(site, page) {
     shownPath: `(async () => { const id = localStorage.getItem("sagebrush-current"); return (await window.sagebrush.workspace.list("/", { recursive: true })).find((e) => e.ref === id)?.path ?? null; })()`,
     /** Its cells' outputs as the page has them now (null if it isn't shown). */
     liveCells: `(() => { try { return window.sagebrush.notebook.snapshot().cells.map((c) => c.outputs ?? []); } catch { return null; } })()`,
-    close: () => proc.kill(),
+    close,
   };
 }
 
@@ -489,36 +515,47 @@ export function helpers(page, surface, failures, shotDir, caseId, gap) {
 }
 
 /** One case on one surface: a fresh profile's storage, the pairing and the grant, the case's given files, the agent's
- * calls, then its expect(h). Returns the failures (empty when it passed). */
+ * calls, then its expect(h). Returns the failures (empty when it passed); `failures.unsettled` when it was cancelled and
+ * didn't settle within CLEANUP_MS, so the shared page may still be in its hands: run no case after it (runCases). */
 export async function runCase(kase, surfaceName, { site, page, shotDir = process.env.SHOT_DIR, surfaces = SURFACES } = {}) {
   const failures = [];
   page.origin = site.origin;
   await page.fresh(site.origin);
-  const surface = await surfaces[surfaceName](site, page);
-  const h = helpers(page, surface, failures, shotDir, kase.id, kase.gaps?.[surfaceName]);
+  const raw = await surfaces[surfaceName](site, page);
   // (a case over its time is cancelled: every helper it calls after that throws at once, what it waits on over DevTools is
-  //  rejected, its surface and tabs are closed, and the next case starts only once it has settled, within CLEANUP_MS)
+  //  rejected and every new DevTools command refused, its surface closed (which answers what is in flight there), and
+  //  only once it has settled, within CLEANUP_MS, is the page given back and its tabs closed. Every step of it goes
+  //  through one gate, step(), checked before and right after each await: the surface the case and its helpers use, and
+  //  each phase below. So a cancelled case sends no connect, tool, turn or expect after its cleanup, nor goes on with
+  //  what a late one returned.)
   const ctl = { dead: false };
+  const live = () => { if (ctl.dead) throw new Error(`[${kase.id} ${raw.name}] the case was cancelled (over its time)`); };
+  const step = async (f) => { live(); const r = await f(); live(); return r; };
+  const surface = Object.create(raw);
+  for (const k of ["connect", "tool", "beginTurn"]) {
+    if (typeof raw[k] === "function") surface[k] = (...a) => step(() => raw[k](...a));
+  }
+  const h = helpers(page, surface, failures, shotDir, kase.id, kase.gaps?.[surfaceName]);
   for (const k of Object.keys(h)) {
     const f = h[k];
     if (typeof f !== "function" || k === "ok") continue;
-    h[k] = function (...a) { if (ctl.dead) throw new Error(`[${kase.id} ${surface.name}] the case was cancelled (over its time)`); return f.apply(this, a); };
+    h[k] = function (...a) { live(); return f.apply(this, a); };
   }
   const body = async () => {
-    if (kase.unpaired) await kase.unpaired(h); // (what the agent does before anything is connected: one-link's case)
-    else await surface.connect(kase.grant ?? DEFAULT_GRANT);
+    if (kase.unpaired) await step(() => kase.unpaired(h)); // (what the agent does before anything is connected: one-link's case)
+    else await step(() => surface.connect(kase.grant ?? DEFAULT_GRANT));
     for (const [path, content] of Object.entries(kase.given ?? {})) {
-      const r = await surface.tool("workspace_create", { path, content });
+      const r = await step(() => surface.tool("workspace_create", { path, content }));
       h.ok(!r.isError, `(given) ${path}`, r.text);
     }
-    if (surface.beginTurn && kase.agent?.length) await surface.beginTurn(kase.prompt);
-    for (const step of kase.agent ?? []) {
-      const r = await surface.tool(step.tool, step.args ?? {});
-      h.ok(!r.isError || step.expectError, `the agent: ${step.tool} ${step.args?.path ?? ""}`.trim(), r.text);
+    if (surface.beginTurn && kase.agent?.length) await step(() => surface.beginTurn(kase.prompt));
+    for (const call of kase.agent ?? []) {
+      const r = await step(() => surface.tool(call.tool, call.args ?? {}));
+      h.ok(!r.isError || call.expectError, `the agent: ${call.tool} ${call.args?.path ?? ""}`.trim(), r.text);
     }
     // (the turn stays open while the case checks: an agent's later calls (its read-back, its edit, its run) come within
-    //  its turn, as sagebrush-agent's do; ended after)
-    try { await kase.expect(h); } finally { surface.endTurn?.(); }
+    //  its turn, as sagebrush-agent's do; ended after, unless the case was cancelled)
+    try { await step(() => kase.expect(h)); } finally { if (!ctl.dead) surface.endTurn?.(); }
   };
   const ms = kase.ms ?? CASE_MS;
   let timer;
@@ -531,11 +568,36 @@ export async function runCase(kase, surfaceName, { site, page, shotDir = process
     clearTimeout(timer);
     if (ctl.dead) page.cancel?.(`the case ${kase.id} on ${surface.name} was cancelled (over its time)`);
     // (a surface's close may check its own end: what it finds wrong fails the case)
-    const found = await within(Promise.resolve().then(() => surface.close()).catch((e) => ["close threw: " + String(e).slice(0, 200)]), CLEANUP_MS, [`the surface's close took over ${CLEANUP_MS / 1000} s`]);
+    const found = await within(Promise.resolve().then(() => raw.close()).catch((e) => ["close threw: " + String(e).slice(0, 200)]), CLEANUP_MS, [`the surface's close took over ${CLEANUP_MS / 1000} s`]);
     for (const f of Array.isArray(found) ? found : []) h.ok(false, f);
-    await within(page.closeTabs(), CLEANUP_MS);
-    if (ctl.dead && !(await within(running.then(() => true, () => true), CLEANUP_MS, false))) h.ok(false, `the cancelled case didn't settle within ${CLEANUP_MS / 1000} s`);
+    if (ctl.dead && !(await within(running.then(() => true, () => true), CLEANUP_MS, false))) {
+      // (still alive: the page stays refused, and no case may run after it)
+      failures.unsettled = true;
+      h.ok(false, `the cancelled case didn't settle within ${CLEANUP_MS / 1000} s; no case runs after it`);
+    } else {
+      if (ctl.dead) page.resume?.();
+      await within(page.closeTabs(), CLEANUP_MS);
+    }
   }
   h.ok(page.errors.length === 0, "no errors on the page", page.errors.slice(0, 3));
   return failures;
+}
+
+/** Each case on each surface it names (`only`: one surface), in order, through `run` (runCase). A case that was cancelled
+ *  and didn't settle stops the suite there: no next case starts while it may still hold the page; `stopped` says which.
+ *  The caller then closes Chrome and the site. */
+export async function runCases(cases, { site, page, only = null, surfaces = SURFACES, run = runCase, log = console.log } = {}) {
+  const results = [];
+  for (const kase of cases) {
+    for (const s of kase.surfaces) {
+      if (only && s !== only) continue;
+      if (!surfaces[s]) { results.push({ id: kase.id, surface: s, skipped: `no surface ${s} in this harness yet` }); continue; }
+      const t = Date.now();
+      log(`---- ${kase.id} on ${s}: "${kase.prompt}"`);
+      const failures = await run(kase, s, { site, page, surfaces });
+      results.push({ id: kase.id, surface: s, failures, gap: kase.gaps?.[s] ?? null, s: ((Date.now() - t) / 1000).toFixed(1) });
+      if (failures.unsettled) return { results, stopped: `${kase.id} on ${s} was cancelled and didn't settle: the suite stops there, Chrome closed` };
+    }
+  }
+  return { results, stopped: null };
 }
