@@ -34,7 +34,7 @@
 //! the arenas are held, and written without allocating.
 
 use crate::coprime::{gcd_unbalanced, Meter};
-use crate::ledger::{Arena, Buf, Coef, DivFault, Words};
+use crate::ledger::{walk_charge, Arena, Buf, Coef, DivFault, Words};
 use crate::pdivrem::{norm_len, token_bytes, OVERHEAD_WORDS};
 use crate::qpoly::{self, mul_into, parts, Factor};
 use crate::zmul::hex;
@@ -577,15 +577,19 @@ pub fn trim(mp: &Mapped, m: &mut Meter) -> Result<usize, DivFault> {
     Ok(n)
 }
 
-/// The reply's exact bytes, `{"ok":"..."}` with the [`Mapped`]'s kept tokens.
-pub fn reply_bytes(out: &Mapped) -> Option<u64> {
+/// The reply's exact bytes, `{"ok":"..."}` with the [`Mapped`]'s kept
+/// tokens.  Its own phase, `scale bytes`: one unit a token, charged and Stop
+/// polled in 4096-token chunks; an overflow is the memory refusal.
+pub fn reply_bytes(out: &Mapped, m: &mut Meter) -> Result<u64, DivFault> {
+    let _p = sagebrush_interrupt::enter("scale bytes");
     let mut total = FIXED_BYTES;
     let mut count = 0u64;
-    for ((x, neg), (y, _)) in out.num.fwd().zip(out.den.fwd()).take(out.kept) {
-        total = total.checked_add(token_bytes(x, neg, Some(y)))?;
+    for (i, ((x, neg), (y, _))) in out.num.fwd().zip(out.den.fwd()).take(out.kept).enumerate() {
+        walk_charge(i, out.kept, m)?;
+        total = total.checked_add(token_bytes(x, neg, Some(y))).ok_or(DivFault::Memory)?;
         count += 1;
     }
-    total.checked_add(count.saturating_sub(1))
+    total.checked_add(count.saturating_sub(1)).ok_or(DivFault::Memory)
 }
 
 /// Write the reply into `out`, which already holds capacity for exactly
@@ -824,7 +828,7 @@ pub fn compute<'l>(a: &Factor, b: &Factor, plan: &Plan, led: &'l Words, m: &mut 
 /// tests drive both).
 pub fn reply_on(a: &Factor, b: &Factor, plan: &Plan, led: &Words, m: &mut Meter) -> Result<String, DivFault> {
     let mp = compute(a, b, plan, led, m)?;
-    let bytes = reply_bytes(&mp).ok_or(DivFault::Memory)?;
+    let bytes = reply_bytes(&mp, m)?;
     if bytes > plan.bound {
         return Err(DivFault::Invariant);
     }

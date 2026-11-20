@@ -23,7 +23,7 @@ fn qpoly_divrem_stops_at_the_first_and_last_poll_of_each_phase() {
     hooks::reset();
     hooks::trace();
     let _ = pdivrem::reply_q(&fa, &fb, r, &pdivrem::DIVREM_Q_CAPS).unwrap();
-    let phases: Vec<(&str, Vec<u64>)> = ["divrem clear", "divrem load", "divrem divide", "divrem emit"].iter().map(|p| (*p, hooks::traced(p))).collect();
+    let phases: Vec<(&str, Vec<u64>)> = ["divrem clear", "divrem load", "divrem divide", "divrem bytes", "divrem emit"].iter().map(|p| (*p, hooks::traced(p))).collect();
     hooks::reset();
     for (phase, idx) in &phases {
         eprintln!("{}: {} polls", phase, idx.len());

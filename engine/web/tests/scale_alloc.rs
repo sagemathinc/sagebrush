@@ -172,7 +172,7 @@ fn scale_peaks_caps_and_baselines() {
         let led = Words::new(plan.limit);
         let mut m = Meter::new(plan.work);
         let mp = pscale::compute(&fa, &fb, &plan, &led, &mut m).unwrap();
-        let bytes = pscale::reply_bytes(&mp).unwrap() as usize;
+        let bytes = pscale::reply_bytes(&mp, &mut m).unwrap() as usize;
         let mut out = String::with_capacity(bytes);
         let before = ALLOCS.load(Relaxed);
         pscale::emit(&mp, &mut out, &mut m).unwrap();
@@ -188,7 +188,7 @@ fn scale_peaks_caps_and_baselines() {
         let led = Words::new(plan.limit);
         let mut m = Meter::new(plan.work);
         let mp = pscale::compute(&fa, &fb, &plan, &led, &mut m).unwrap();
-        let bytes = pscale::reply_bytes(&mp).unwrap() as usize;
+        let bytes = pscale::reply_bytes(&mp, &mut m).unwrap() as usize;
         let mut out = String::with_capacity(bytes);
         let before = ALLOCS.load(Relaxed);
         pscale::emit(&mp, &mut out, &mut m).unwrap();
@@ -234,7 +234,7 @@ fn scale_peaks_caps_and_baselines() {
             hooks::reset();
             hooks::trace();
             let _ = call(kind, &long, b, None, None);
-            let phases: Vec<(&str, Vec<u64>)> = ["scale compute", "scale trim", "scale emit"].iter().map(|p| (*p, hooks::traced(p))).collect();
+            let phases: Vec<(&str, Vec<u64>)> = ["scale compute", "scale trim", "scale bytes", "scale emit"].iter().map(|p| (*p, hooks::traced(p))).collect();
             hooks::reset();
             for (phase, idx) in &phases {
                 assert!(!idx.is_empty(), "no poll in {}", phase);

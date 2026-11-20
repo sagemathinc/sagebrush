@@ -27,7 +27,7 @@ use std::cell::Cell;
 use std::cmp::Ordering;
 
 pub use crate::ledger::{DivFault, Words};
-pub(crate) use crate::ledger::{cmp_mag, fixed_vec, fixed_words, track, Arena, Buf, Coef};
+pub(crate) use crate::ledger::{cmp_mag, fixed_vec, fixed_words, track, walk_charge, Arena, Buf, Coef};
 #[cfg(test)]
 pub(crate) use crate::ledger::{EXACT, MAX_BITS};
 
@@ -296,22 +296,43 @@ pub(crate) fn token_bytes(mag: &[u64], neg: bool, den: Option<&[u64]>) -> u64 {
     u64::from(neg) + bits(mag).div_ceil(4) + d
 }
 
-/// The reply's exact bytes, `{"ok":{"q":"...","r":"..."}}` (22 fixed
-/// bytes), each list trimmed of its trailing (top-degree) zeros.
-pub fn reply_bytes(dv: &Divided) -> Option<u64> {
-    let list = |a: &Arena, d: Option<&Arena>| -> Option<u64> {
-        let lead = a.fwd().take_while(|(x, _)| x.is_empty()).count();
-        let mut dens = d.map(|d| d.fwd().skip(lead));
-        let mut total = 0u64;
-        let mut count = 0u64;
-        for (x, neg) in a.fwd().skip(lead) {
-            let den = dens.as_mut().and_then(|it| it.next()).map(|(y, _)| y);
-            total = total.checked_add(token_bytes(x, neg, den))?;
-            count += 1;
+/// An arena's top-degree zeros (stored first): their count.  One unit a
+/// token visited, charged and Stop polled in 4096-token chunks.
+fn lead_zeros(a: &Arena, m: &mut Meter) -> Result<usize, DivFault> {
+    let mut lead = 0;
+    for (i, (x, _)) in a.fwd().enumerate() {
+        walk_charge(i, a.nt, m)?;
+        if !x.is_empty() {
+            break;
         }
-        total.checked_add(count.saturating_sub(1))
+        lead += 1;
+    }
+    Ok(lead)
+}
+
+/// The reply's exact bytes, `{"ok":{"q":"...","r":"..."}}` (22 fixed
+/// bytes), each list trimmed of its trailing (top-degree) zeros.  Its own
+/// phase, `divrem bytes`: each walk charged one unit a token and Stop polled
+/// in 4096-token chunks; an overflow is the memory refusal.
+pub fn reply_bytes(dv: &Divided, m: &mut Meter) -> Result<u64, DivFault> {
+    let _p = sagebrush_interrupt::enter("divrem bytes");
+    // (the kept tokens summed from the end, as emit writes them: the only
+    // walk over the top zeros is lead_zeros', charged and polled)
+    let list = |a: &Arena, d: Option<&Arena>, m: &mut Meter| -> Result<u64, DivFault> {
+        let lead = lead_zeros(a, m)?;
+        let kept = a.nt - lead;
+        let mut dens = d.map(|d| d.rev().take(kept));
+        let mut total = 0u64;
+        for (i, (x, neg)) in a.rev().take(kept).enumerate() {
+            walk_charge(i, kept, m)?;
+            let den = dens.as_mut().and_then(|it| it.next()).map(|(y, _)| y);
+            total = total.checked_add(token_bytes(x, neg, den)).ok_or(DivFault::Memory)?;
+        }
+        total.checked_add((kept as u64).saturating_sub(1)).ok_or(DivFault::Memory)
     };
-    22u64.checked_add(list(&dv.q, dv.qd.as_ref())?)?.checked_add(list(&dv.r, dv.rd.as_ref())?)
+    let q = list(&dv.q, dv.qd.as_ref(), m)?;
+    let r = list(&dv.r, dv.rd.as_ref(), m)?;
+    22u64.checked_add(q).and_then(|t| t.checked_add(r)).ok_or(DivFault::Memory)
 }
 
 /// Write the reply into `out`, which already holds capacity for exactly
@@ -322,7 +343,7 @@ pub fn emit(dv: &Divided, out: &mut String, m: &mut Meter) -> Result<(), DivFaul
     sagebrush_interrupt::check_coarse();
     let cap = out.capacity();
     let list = |a: &Arena, d: Option<&Arena>, out: &mut String, m: &mut Meter| -> Result<(), DivFault> {
-        let lead = a.fwd().take_while(|(x, _)| x.is_empty()).count();
+        let lead = lead_zeros(a, m)?;
         let mut dens = d.map(|d| d.rev().take(d.nt - lead));
         for (i, (x, neg)) in a.rev().take(a.nt - lead).enumerate() {
             let den = dens.as_mut().and_then(|it| it.next()).map(|(y, _)| y);
@@ -394,7 +415,7 @@ impl Drop for Reserved<'_> {
 /// [`emit`] writes it into that capacity without allocating.
 pub fn reply_z_on(a: &Factor, b: &Factor, plan: &Plan, led: &Words, m: &mut Meter) -> Result<String, DivFault> {
     let dv = divide_z(a, b, plan, led, m)?;
-    let bytes = reply_bytes(&dv).ok_or(DivFault::Memory)?;
+    let bytes = reply_bytes(&dv, m)?;
     let words = bytes.div_ceil(8);
     led.note("reply", words);
     led.reserve(words)?;
@@ -625,7 +646,7 @@ pub fn reply_q(a: &Factor, b: &Factor, r: u64, caps: &qpoly::Caps) -> Result<Str
 /// caller's ledger and meter (the tests drive both), phase A done.
 pub fn reply_q_on(a: &Factor, b: &Factor, plan: &Plan, pa: &qpoly::PlanA, l: qpoly::Lcms, led: &Words, m: &mut Meter) -> Result<String, DivFault> {
     let dv = divide_q(a, b, plan, pa, l, led, m)?;
-    let bytes = reply_bytes(&dv).ok_or(DivFault::Memory)?;
+    let bytes = reply_bytes(&dv, m)?;
     let words = bytes.div_ceil(8);
     led.note("reply", words);
     led.reserve(words)?;

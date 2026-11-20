@@ -27,7 +27,7 @@ fn run_z(a: &str, b: &str, limit: Option<u64>, work: Option<u64>) -> Run {
     let led = Words::new(limit.unwrap_or(plan.limit));
     let mut m = Meter::new(work.unwrap_or(plan.work));
     let out = divide_z(&fa, &fb, &plan, &led, &mut m).and_then(|dv| {
-        let bytes = reply_bytes(&dv).unwrap();
+        let bytes = reply_bytes(&dv, &mut m)?;
         led.note("reply", bytes.div_ceil(8));
         led.reserve(bytes.div_ceil(8))?;
         let mut s = String::with_capacity(bytes as usize);
@@ -344,7 +344,7 @@ fn q_reach_at_the_real_scale() {
             // policy's slack at most 1.5x: so the quotient's arenas hold at
             // most 1.5 (reply bytes + 4 (k + 1)) + 4 words, where
             // pseudo-division's would hold about k^2 / 128)
-            let bytes = reply_bytes(&dv).unwrap();
+            let bytes = reply_bytes(&dv, &mut Meter::new(u64::MAX)).unwrap();
             let qw = dv.q.words() + dv.qd.as_ref().unwrap().words();
             let bound = (3 * (bytes + 4 * (plan.k + 1))).div_ceil(2) + 4;
             eprintln!("k = {} b = {}: {:.1} ms, high-water {} words, q arenas {} words (bound {})", k, b, ms, led.high(), qw, bound);
@@ -564,4 +564,48 @@ fn division_paths_allocate_only_through_the_ledger_or_fallible_fixed_rows() {
             }
         }
     }
+}
+
+/// reply_bytes walks each list's top zeros (lead_zeros), then its kept
+/// tokens from the end, one unit a token, pre-charged and polled in
+/// 4096-token chunks (the zeros' walk pre-charges its chunk): for lists under
+/// 4096 tokens, 2 nt - lead per list; a meter one unit short refuses inside
+/// it.
+#[test]
+fn reply_bytes_is_charged_per_token() {
+    let a = (0..=3000).map(|i| format!("{:x}", (i * 7919) % 97 + 1)).collect::<Vec<_>>().join(",");
+    let (fa, fb) = (scan_ints(&a).unwrap(), scan_ints("1,1").unwrap());
+    let Ok(Ok(plan)) = admit_z(&fa, &fb, (a.len() + 24) as u64, &CAPS) else { panic!() };
+    let led = Words::new(plan.limit);
+    let mut m = Meter::new(plan.work);
+    let dv = divide_z(&fa, &fb, &plan, &led, &mut m).unwrap();
+    let lead = |ar: &Arena| ar.fwd().take_while(|(x, _)| x.is_empty()).count() as u64;
+    let want = 2 * dv.q.nt as u64 - lead(&dv.q) + 2 * dv.r.nt as u64 - lead(&dv.r);
+    let before = m.used();
+    reply_bytes(&dv, &mut m).unwrap();
+    assert_eq!(m.used() - before, want);
+    assert_eq!(reply_bytes(&dv, &mut Meter::new(want - 1)), Err(DivFault::Work));
+}
+
+/// A large zero prefix: 200,000 top zeros in q (and an empty r).  reply_bytes
+/// walks them once (lead_zeros), charged and polled, and never again: the
+/// arena entries visited equal the units charged, 200,000; one unit short
+/// refuses.  (The kept tokens are summed from the end, so no walk steps over
+/// the prefix a second time.)
+#[test]
+fn reply_bytes_walks_a_zero_prefix_once() {
+    let led = Words::new(u64::MAX / 4);
+    let mut m = Meter::new(u64::MAX);
+    let mut q = Arena::new(&led, "q arena", &mut m).unwrap();
+    for _ in 0..200_000 {
+        q.push(&[], false, &mut m).unwrap();
+    }
+    let r = Arena::new(&led, "r arena", &mut m).unwrap();
+    let dv = Divided { q, r, qd: None, rd: None };
+    let mut m = Meter::new(u64::MAX);
+    crate::ledger::VISITS.with(|c| c.set(0));
+    assert_eq!(reply_bytes(&dv, &mut m), Ok(22));
+    let visits = crate::ledger::VISITS.with(|c| c.get());
+    assert_eq!((visits, m.used()), (200_000, 200_000), "each entry visited once, each visit charged");
+    assert_eq!(reply_bytes(&dv, &mut Meter::new(199_999)), Err(DivFault::Work));
 }

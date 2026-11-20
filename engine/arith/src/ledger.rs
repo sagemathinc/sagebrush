@@ -183,6 +183,13 @@ thread_local! {
     /// (tests) grow to the exact need instead: the exact policy's live words,
     /// to measure the deterministic policy's slack against
     pub(crate) static EXACT: Cell<bool> = const { Cell::new(false) };
+    /// (tests) the arena entries the iterators have visited
+    pub(crate) static VISITS: Cell<u64> = const { Cell::new(0) };
+}
+
+fn visit() {
+    #[cfg(test)]
+    VISITS.with(|c| c.set(c.get() + 1));
 }
 
 pub(crate) fn track(_x: &[u64]) {
@@ -357,6 +364,7 @@ impl<'l> Arena<'l> {
     pub(crate) fn rev(&self) -> impl Iterator<Item = (&[u64], bool)> + '_ {
         let mut end = self.nw;
         (0..self.nt).rev().map(move |t| {
+            visit();
             let w = self.meta.v[t];
             let len = (w >> 1) as usize;
             end -= len;
@@ -367,6 +375,7 @@ impl<'l> Arena<'l> {
     pub(crate) fn fwd(&self) -> impl Iterator<Item = (&[u64], bool)> + '_ {
         let mut start = 0;
         (0..self.nt).map(move |t| {
+            visit();
             let w = self.meta.v[t];
             let len = (w >> 1) as usize;
             start += len;
@@ -377,4 +386,15 @@ impl<'l> Arena<'l> {
     pub(crate) fn words(&self) -> u64 {
         (self.words.cap() + self.meta.cap()) as u64
     }
+}
+
+/// The charge of one token of a walk over `total` tokens (the i-th): at each
+/// 4096-token chunk's start, Stop polled and the chunk's units (one a token)
+/// charged before its walk.
+pub(crate) fn walk_charge(i: usize, total: usize, m: &mut Meter) -> Result<(), DivFault> {
+    if i & 0xfff == 0 {
+        sagebrush_interrupt::check_coarse();
+        m.add(total.saturating_sub(i).min(0x1000))?;
+    }
+    Ok(())
 }
