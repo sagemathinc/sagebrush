@@ -117,8 +117,10 @@ try {
     const chip = await ev(`(() => { const c = document.querySelector(".sbag-bar button.chip"), m = document.querySelector(".sbag-bar .menu");
       return c && m ? { popup: c.getAttribute("aria-haspopup"), exp: c.getAttribute("aria-expanded"), text: c.textContent, menuShown: getComputedStyle(m).display !== "none",
         items: [...m.querySelectorAll("[role=menuitem]")].map((b) => b.textContent) } : null; })()`);
-    ok(chip?.popup === "menu" && chip.exp === "false" && !chip.menuShown && chip.text.includes(run ? "runs code" : "can edit") && JSON.stringify(chip.items) === JSON.stringify(run ? ["Turn off running code", "Revoke"] : ["Revoke"]),
+    ok(chip?.popup === "menu" && chip.exp === "false" && !chip.menuShown && chip.text.includes(run ? "can edit · can run code" : "can edit") && (run || !chip.text.includes("run code")) && JSON.stringify(chip.items) === JSON.stringify(run ? ["Turn off running code", "Revoke"] : ["Revoke"]),
       "W4: the bar is a compact chip, its menu closed, holding the controls (Revoke last)", chip);
+    const fullLine = await ev(`document.querySelector(".sbag-bar .menu .full")?.textContent ?? ""`);
+    ok(/^\S.* on your computer: can read and write everywhere · /.test(fullLine) && fullLine.includes("may run code") === !!run && !fullLine.includes("as it says"), "W4: the menu's first line says what the agent is and what it may do", fullLine);
     const opened = await ev(`(() => { const c = document.querySelector(".sbag-bar button.chip"); c.focus(); c.click();
       const m = document.querySelector(".sbag-bar .menu");
       return { exp: c.getAttribute("aria-expanded"), shown: getComputedStyle(m).display !== "none", focus: document.activeElement?.textContent }; })()`);

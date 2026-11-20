@@ -205,23 +205,25 @@ export function mountAgentPairing(ws: PairingWorkspace, o: { button?: HTMLElemen
   let barText: ((short: string, full: string) => void) | null = null;
   // (what the agent made last, Open beside it: replaced on its own, never redrawing the chip)
   let barMade: ((made: Created | null) => void) | null = null;
+  // (the pairing the chip shows: its controls act on it alone)
+  let shownP: AgentPairing | null = null;
   document.addEventListener("pointerdown", (e) => { if (bar && closeMenu && !bar.contains(e.target as Node)) closeMenu(); }, true);
   addEventListener("resize", () => closeMenu?.());
   addEventListener("scroll", (e) => { if (bar && !bar.contains(e.target as Node)) closeMenu?.(); }, true);
 
   function showBar() {
     const p = pairing;
-    if (!p || p.state !== "granted" || !p.grant) { bar?.remove(); bar = null; barKey = ""; barText = null; barMade = null; closeMenu = null; return; }
+    if (!p || p.state !== "granted" || !p.grant) { bar?.remove(); bar = null; barKey = ""; barText = null; barMade = null; closeMenu = null; shownP = null; return; }
     const g = p.grant;
     const where = g.folders.includes("/") ? "everywhere" : "in " + g.folders.join(", ");
     const changes = `${p.changes} change${p.changes === 1 ? "" : "s"}`;
     // (the whole of it, as the menu's description and the chip's title; the chip says it short: W4)
-    const full = `${p.hello!.agent.name} (as it says): ${g.write ? "read and write" : "read only"} ${where}${g.run ? " · may run code" : ""} · ${changes}`;
-    const short = `${p.hello!.agent.name} · ${g.write ? "can edit" : "read only"}${g.folders.includes("/") ? "" : " · some folders"}${g.run ? " · runs code" : ""} · ${changes}`;
+    const full = `${p.hello!.agent.name} on ${p.link ? p.computer : "your computer"}: ${g.write ? "can read and write" : "can only read"} ${where}${g.run ? " · may run code" : ""} · ${changes}`;
+    const short = `${p.hello!.agent.name} · ${g.write ? "can edit" : "read only"}${g.folders.includes("/") ? "" : " · some folders"}${g.run ? " · can run code" : ""} · ${changes}`;
     const made = o.open && p.created ? p.created : null;
     // (the controls the chip holds: the same, it is updated in place (its words, and Open), never redrawn)
     const key = JSON.stringify([p.hello!.agent.name, !!p.link, p.computer ?? "", g.run]);
-    if (bar && key === barKey && barText && barMade) { barText(short, full); barMade(made); return; }
+    if (bar && key === barKey && barText && barMade) { shownP = p; barText(short, full); barMade(made); return; }
     // (drawn again: an open menu stays open, and the focus goes back to the same kind of control: the chip, the same
     //  place in the menu (or its first, where that control is gone), or Open)
     const wasOpen = !!bar?.classList.contains("open");
@@ -231,19 +233,27 @@ export function mountAgentPairing(ws: PairingWorkspace, o: { button?: HTMLElemen
     // (over a runner, Revoke is a Disconnect that also stops the agent there: the runner ends its process group)
     const revoke = p.link ? h("button", { textContent: "Disconnect", title: `Disconnect and stop the agent on ${p.computer}` }) : h("button", { textContent: "Revoke" });
     revoke.className = "danger";
-    revoke.onclick = () => void pairing?.revoke("revoked by the person"); // (the pairing of the moment the person presses it)
+    // (only the pairing the chip shows, while it is still the page's and granted: a chip left from another acts on nothing)
+    const shown = () => (shownP && shownP === pairing && shownP.state === "granted" ? shownP : null);
+    revoke.onclick = () => { const q = shown(); if (q) void q.revoke("revoked by the person"); else showBar(); };
     // ("May run code" turned off here, mid-session: a run going ends (chat plan PR 4); turned on only by a new grant)
     const noRun = g.run ? h("button", { textContent: "Turn off running code", title: "The agent may no longer run code, and a run going now stops (connect it again to allow it)" }) : null;
-    if (noRun) noRun.onclick = () => void pairing?.noRun();
+    if (noRun) noRun.onclick = () => { const q = shown(); if (q) void q.noRun(); else showBar(); };
     // (Open: what the agent created last, where the page can open it (its `open`), as Files would)
     // (a board it made opens in a tab of its own, never by itself (a tab only opens on a click, and this page keeps the
     //  pairing): said as what the agent did, with Open beside it, the bar's one call to action)
     const madeSlot = h("span", { className: "made-slot" });
     let openBtn: HTMLButtonElement | null = null;
+    // (the same thing made again (the counts moved): the same button, so a press already under way on it still lands)
+    let madeKey: string | null = null, madeNow: Created | null = null;
     barMade = (m) => {
+      madeNow = m;
+      const mk = m ? JSON.stringify([m.kind, m.path]) : "";
+      if (mk === madeKey) return;
+      madeKey = mk;
       const board = m?.kind === "board";
       const open = m ? h("button", { className: board ? "cta" : "open", textContent: board ? "Open" : "Open " + nameOf(m.path), title: board ? `Open ${m.path} in a new tab, where its code runs` : `Open ${m.path}` }) : null;
-      if (open && m) open.onclick = () => o.open!(m);
+      if (open) open.onclick = () => { if (madeNow) o.open!(madeNow); };
       const did = board && open ? h("span", { className: "made" }, `${p.hello!.agent.name} made`, h("b", { textContent: nameOf(m!.path) }), open) : open;
       const focused = !!openBtn && document.activeElement === openBtn;
       madeSlot.replaceChildren(...(did ? [did] : []));
@@ -302,6 +312,7 @@ export function mountAgentPairing(ws: PairingWorkspace, o: { button?: HTMLElemen
     };
     closeMenu = () => show(false, false);
     bar = h("div", { className: "sbag-bar" }, chip, menu, said, madeSlot);
+    shownP = p;
     barKey = key;
     dock();
     if (wasOpen) show(true, false);
@@ -368,6 +379,7 @@ export function mountAgentPairing(ws: PairingWorkspace, o: { button?: HTMLElemen
 
   function watch(p: AgentPairing) {
     pairing = p;
+    showBar(); // (a newer pairing, not yet granted: the chip of the one before goes now)
     o.onPairing?.(p);
     let was = false;
     p.onChange(() => {

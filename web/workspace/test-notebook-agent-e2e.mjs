@@ -263,8 +263,19 @@ try {
   // (the bar's Open, after the person moved away: it opens the agent's notebook again)
   const left = path.slice(path.lastIndexOf("/") + 1);
   ok(await fromFiles(left) && await until(`!${shownIs("Made by the agent")} && ${sources}.includes("x = 3")`, 15000), "(the person opens their own notebook again, from Files)");
-  await ev(`(${barButton("Open Made by the agent.ipynb")}.click(), true)`);
-  ok(await until(shownIs("Made by the agent"), 15000) && await ev("performance.timeOrigin") === origin0, "the bar's Open opens the agent's notebook, in place");
+  // (pressed as a person does, with a real mouse, and the agent changes a file while the button is held down: the counts
+  //  change under it, the button stays the same one, and the press lands (W4))
+  const at = await ev(`(() => { const b = window.__w4open = ${barButton("Open Made by the agent.ipynb")}; b.scrollIntoView({ block: "center" }); const r = b.getBoundingClientRect(); window.__w4clicks = 0; b.addEventListener("click", () => window.__w4clicks++);
+    return { x: r.x + r.width / 2, y: r.y + r.height / 2, chip: document.querySelector(".sbag-bar button.chip").textContent }; })()`);
+  await send("Input.dispatchMouseEvent", { type: "mousePressed", button: "left", clickCount: 1, x: at.x, y: at.y });
+  const fr4 = await drive({ op: "req", method: "workspace.read", params: { path } });
+  const wa4 = await drive({ op: "req", method: "workspace.write", params: { path, base: fr4.ok?.rev, content: fr4.ok?.content } });
+  const moved = await until(`document.querySelector(".sbag-bar button.chip").textContent !== ${JSON.stringify(at.chip)}`, 10000);
+  const same = await ev(`window.__w4open.isConnected && window.__w4open === ${barButton("Open Made by the agent.ipynb")}`);
+  const box4 = await ev(`(() => { const r = window.__w4open.getBoundingClientRect(); return [r.x, r.y, r.width, r.height]; })()`);
+  await send("Input.dispatchMouseEvent", { type: "mouseReleased", button: "left", clickCount: 1, x: at.x, y: at.y });
+  ok(!!wa4.ok && moved && same && at.y > 0 && box4[1] <= at.y && at.y <= box4[1] + box4[3], "W4: the agent writes while Open is held down: the counts change, the same Open button stays", { wa: !!wa4.ok, moved, same, at, box4 });
+  ok(await until(shownIs("Made by the agent"), 15000) && await ev("performance.timeOrigin") === origin0, "the bar's Open, pressed across that change, opens the agent's notebook, in place", { at, box4, clicks: await ev("window.__w4clicks") });
   // (the person's open wins: the agent's notebook, its open held before it attaches, never replaces a notebook the person
   //  opened meanwhile)
   ok(await fromFiles(left) && await until(`!${shownIs("Made by the agent")}`, 15000), "(the person's own notebook again)");

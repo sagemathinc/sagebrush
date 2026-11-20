@@ -370,6 +370,31 @@ try {
     const kept = await ev(`T.ws.agentGrants().then((g) => Object.values(g).map((k) => k.session))`);
     ok(kept.length === 1 && kept[0] === kept0[0], `reload ${n}: the kept session is still the one in force (${kept[0] === undefined ? "lost" : kept[0] === kept0[0] ? "same" : "changed"})`);
   }
+  // (W4, the chip: a newer pairing started while one is shown (the remembered grant's reconnect, asked again while the
+  //  agent is still connected; its hello answered 1 s late, so the newer pairing says nothing meanwhile): the old chip
+  //  goes at once, and its Revoke and Turn off running code, pressed after, act on nothing, neither pairing)
+  {
+    const shown = await ev(`(() => { window.__w4a = T.ui.pairing; const items = [...document.querySelectorAll(".sbag-bar [role=menuitem]")];
+      window.__w4rev = items.find((b) => b.textContent === "Revoke"); window.__w4off = items.find((b) => b.textContent === "Turn off running code");
+      return { granted: window.__w4a?.state === "granted", rev: !!window.__w4rev, off: !!window.__w4off }; })()`);
+    ok(shown.granted && shown.rev && shown.off, "W4 stale chip: the chip shows Revoke and Turn off running code " + JSON.stringify(shown));
+    await drive({ op: "helloslow", s: 1.0 });
+    const pressed = await ev(`(async () => { void T.ui.useRemembered();
+      for (let i = 0; i < 500 && T.ui.pairing === window.__w4a; i++) await new Promise((r) => setTimeout(r, 2));
+      const b = window.__w4b = T.ui.pairing;
+      const r = { replaced: b !== window.__w4a, quiet: b?.state === "connecting", bar: !!document.querySelector(".sbag-bar"), attached: window.__w4rev.isConnected || window.__w4off.isConnected };
+      window.__w4rev.click(); window.__w4off.click(); await new Promise((r) => setTimeout(r, 50));
+      return { ...r, after: b?.state, why: b?.closeReason ?? "" }; })()`);
+    ok(pressed.replaced && pressed.quiet && !pressed.bar && !pressed.attached && pressed.why !== "revoked by the person",
+      "W4 stale chip: a newer pairing, not yet heard from: the old chip is gone at once, and its Revoke and Turn off pressed then touch neither " + JSON.stringify(pressed));
+    ok((await drive({ op: "grant" })).ok?.run === true && (await ev(`T.ws.agentGrants().then((g) => Object.values(g).map((k) => k.session))`))[0] === kept0[0],
+      "W4 stale chip: the connected agent keeps May run code, and the remembered grant is kept");
+    await until(`T.ui.pairing !== window.__w4b || T.ui.pairing.state !== "connecting"`, 8000);
+    await drive({ op: "helloslow", s: 0 });
+    await sleep(2500); // (the reconnect's tries over: BUSY_FOR_MS)
+    ok(await open(""), "W4 stale chip: reload");
+    ok(await until(`!!document.querySelector(".sbag-bar")`, 15000) && await grantedAtServer(), "W4 stale chip: after a reload the remembered agent reconnects, the bar shows it, its server has the grant");
+  }
   // ("May run code" given again only as kept (chat plan PR 4a, Q5): this grant was made with it; one kept before it
   //  existed has none, and a reconnect never promotes it)
   ok((await drive({ op: "grant" })).ok?.run === true, "a remembered grant made with May run code: given again with it");
