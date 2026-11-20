@@ -58,7 +58,7 @@ export type NotebookHost = {
    * run here cell by cell as the person's Run is, their outputs shown and saved with it, while this pane is bound to
    * `ref` and may save it (attached, not closing, the writer under sync's journal). Its inputs wait for the mount;
    * `gone` is called if the pane lets the notebook go (closed, disposed) while the run holds it. */
-  pageRun(ref: string, path: string, gone: () => void, may: () => boolean): PageRun;
+  pageRun(ref: string, path: string, gone: () => void, may: () => boolean, left?: () => boolean): PageRun;
   /** Whether an agent's run of `ref` could run here now (pageRun's own condition), decided synchronously: null while the
    * notebook is still being mounted (not known yet). */
   canRun(ref: string): boolean | null;
@@ -149,6 +149,8 @@ export const CLOSE_SAVE_MS = 3000;
 export const CLOSE_COPY_MS = 5000;
 /** How long an agent's edit waits for another tab of this browser to hand the notebook over (sync's journal). */
 export const TAKE_MS = 10_000;
+/** A read of an agent's run that the pane's letting go cut short. */
+const GONE = Symbol("gone");
 
 // What the store keeps beside a notebook's content, for itself (ART-C2a r4): left out when "is this what the store
 // has" is asked, and when content is kept as a copy. Everything else is the content: the mode, the document's
@@ -383,40 +385,50 @@ export function mountNotebook(ws: Workspace, path: string, box: HTMLElement, ui:
       if (!nb || !attached) return docRef === null && guard === "open" && !frozen ? null : false;
       return bound && !frozen && guard === "open" && docRef === ref && owns(nb);
     },
-    pageRun(ref, path, gone, may) {
+    pageRun(ref, path, gone, may, left = () => false) {
       let comp: Nb = null;
       // (this pane's notebook, the one the run started in, still bound to `ref` and saving here; and the call's chat
       //  and turn still the page's (`may`))
       const here = () => may() && alive && !!comp && nb === comp && attached && bound && !frozen && guard === "open" && docRef === ref && owns(comp);
-      let told = false;
-      const tell = () => { if (!told) { told = true; pageRuns.delete(tell); gone(); } };
+      let told = false, reading = true, woke!: () => void;
+      // (resolved when the pane lets the notebook go: the read below never waits past it, whatever it waits on)
+      const released = new Promise<typeof GONE>((r) => (woke = () => r(GONE)));
+      // (let go: the run is told, and ends; while its inputs are still being read, inputs() answers instead, at once
+      //  (every wait of the read is raced with this): "fallback" if the person is going to another chat (`left`, which
+      //  knows it while the chat's panes are let go, before the chat shown changes), else null, stopped)
+      const tell = () => { if (!told) { told = true; pageRuns.delete(tell); woke(); if (!reading) gone(); } };
+      const unlessReleased = <T,>(p: Promise<T>) => Promise.race([p, released]);
       pageRuns.add(tell);
       const text = (v: unknown) => (Array.isArray(v) ? v.join("") : typeof v === "string" ? v : "");
       const inputsOf = (d: any) => JSON.stringify((d?.cells ?? []).map((c: any) => [String(c.id), c.type ?? "code", String(c.code ?? "")]));
+      const read = async (): Promise<Awaited<ReturnType<PageRun["inputs"]>>> => {
+        // (not here, before any cell: the person went to another chat while the call's turn still runs ("left": its
+        //  release may have told this run too), or this pane can't run it (its mount refused, read only, another tab
+        //  the journal's writer): "fallback", nothing has started, today's run instead; else ended (this pane's
+        //  notebook let go with the chat still shown, or the call's turn over): null, stopped)
+        const lost = () => (left() ? "fallback" as const : told || !may() ? null : "fallback" as const);
+        // (each wait raced with the pane letting go: a save held by another tab's hold on the workspace, or a mount
+        //  still loading, never keeps the agent's run waiting once the pane has let the notebook go)
+        if ((await unlessReleased(host.ready)) === GONE) return lost();
+        comp = nb;
+        if (!here()) return lost();
+        comp.flush();
+        if ((await unlessReleased(comp.saved().catch(() => {}))) === GONE) return lost();
+        const r = here() ? await unlessReleased(ws.read(path).catch(() => null)) : null;
+        if (r === GONE || !here()) return lost();
+        const e = r?.entry as any;
+        if (r && e?.kind === "notebook" && e.ref === ref && inputsOf(r.content) !== inputsOf(comp.snapshot())) {
+          comp.applyRemote({ ...(r.content as any), rev: r.rev });
+          await new Promise((go) => setTimeout(go, 0));
+        }
+        if (!here()) return lost();
+        const s = comp.snapshot();
+        return { mode: typeof s.mode === "string" ? s.mode : "python", cells: s.cells.map((c: any) => ({ id: String(c.id), type: c.type ?? "code", code: String(c.code ?? "") })) };
+      };
       return {
         // (the notebook as shown, caught up first: the person's edits saved, and the workspace's copy (an agent's write
         //  just made in it) applied here as any change from elsewhere is, so the run is of what both have)
-        inputs: async () => {
-          // (not here: ended (this pane's notebook gone, or the call's chat or turn no longer the page's), null, stopped;
-          //  else this pane can't run it (its mount refused, read only, another tab the journal's writer), "fallback":
-          //  nothing has started, today's run instead)
-          const lost = () => (told || !may() ? null : "fallback" as const);
-          await host.ready;
-          comp = nb;
-          if (!here()) return lost();
-          comp.flush();
-          try { await comp.saved(); } catch {}
-          const r = here() ? await ws.read(path).catch(() => null) : null;
-          if (!here()) return lost();
-          const e = r?.entry as any;
-          if (r && e?.kind === "notebook" && e.ref === ref && inputsOf(r.content) !== inputsOf(comp.snapshot())) {
-            comp.applyRemote({ ...(r.content as any), rev: r.rev });
-            await new Promise((go) => setTimeout(go, 0));
-          }
-          if (!here()) return lost();
-          const s = comp.snapshot();
-          return { mode: typeof s.mode === "string" ? s.mode : "python", cells: s.cells.map((c: any) => ({ id: String(c.id), type: c.type ?? "code", code: String(c.code ?? "") })) };
-        },
+        inputs: () => read().finally(() => { reading = false; }),
         current: here,
         cell: async (id: string, out: Kept) => {
           const images = { count: 0, bytes: 0 };
