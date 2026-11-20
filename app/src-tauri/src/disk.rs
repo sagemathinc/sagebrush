@@ -13,6 +13,9 @@ use tauri::Manager;
 #[path = "disk_fs.rs"]
 mod fs;
 use fs::*;
+#[path = "folder_fs.rs"]
+mod folder_fs;
+use folder_fs::Grant;
 
 /// The app's data folder (a self-test may name its own, SAGEBRUSH_APP_DATA_DIR).
 fn data_dir(app: &tauri::AppHandle) -> Result<PathBuf, String> {
@@ -165,4 +168,106 @@ pub fn settings_write(app: tauri::AppHandle, json: String) -> Result<(), String>
     }
     settings_of(&json)?;
     write_small(&open_root(&data_dir(&app)?)?, "settings.json", &json)
+}
+
+// ---- a notebook opened from the computer, and the files beside it (folder_fs.rs): through grants made here only,
+// for a file the person picked in the app's own Open or Save dialog, or the system handed over; the page names a
+// grant, never a path.  The fs plugin isn't the page's on the desktop (capabilities/default.json).
+
+/// The app's grants (its one window's), the newest GRANTS_KEPT only (each id random, never a count another could guess).
+#[derive(Default)]
+pub struct Grants(std::sync::Mutex<(u64, std::collections::VecDeque<(String, Grant)>)>);
+const GRANTS_KEPT: usize = 8;
+
+/// 128 random bits, as hex: two SipHash keys of the system's randomness, each over a fresh count.
+fn new_id(n: u64) -> String {
+    use std::hash::{BuildHasher, Hasher};
+    let mut out = String::new();
+    for i in 0..2u64 {
+        let mut h = std::collections::hash_map::RandomState::new().build_hasher();
+        h.write_u64(n);
+        h.write_u64(i);
+        out.push_str(&format!("{:016x}", h.finish()));
+    }
+    out
+}
+
+/// A grant for `file`, as the page gets it: {grant, name, path} (the path to show, never one the page can use).
+pub fn grant(app: &tauri::AppHandle, file: &std::path::Path) -> Result<serde_json::Value, String> {
+    let g = folder_fs::grant_for(file)?;
+    let (shown, name) = (folder_fs::shown(&g), g.name.clone());
+    let state = app.state::<Grants>();
+    let mut s = state.0.lock().map_err(|_| "the grants".to_string())?;
+    s.0 += 1;
+    let id = new_id(s.0);
+    s.1.push_back((id.clone(), g));
+    while s.1.len() > GRANTS_KEPT {
+        s.1.pop_front();
+    }
+    Ok(serde_json::json!({ "grant": id, "name": name, "path": shown }))
+}
+fn granted(app: &tauri::AppHandle, id: &str) -> Result<Grant, String> {
+    let state = app.state::<Grants>();
+    let s = state.0.lock().map_err(|_| "the grants".to_string())?;
+    s.1.iter().find(|(k, _)| k == id).map(|(_, g)| g.clone()).ok_or_else(|| "not a file this window was given".to_string())
+}
+
+/// The app's Open dialog, over its window: the notebook picked, granted; None if the person cancelled.
+#[tauri::command]
+pub async fn file_open_dialog(app: tauri::AppHandle) -> Result<Option<serde_json::Value>, String> {
+    use tauri_plugin_dialog::DialogExt;
+    let mut b = app.dialog().file().add_filter("Notebooks", &["ipynb", "sage", "py", "m"]);
+    if let Some(w) = app.get_webview_window("main") {
+        b = b.set_parent(&w);
+    }
+    let Some(p) = b.blocking_pick_file() else { return Ok(None) };
+    grant(&app, &p.into_path().map_err(|e| e.to_string())?).map(Some)
+}
+
+/// The app's Save dialog, over its window, proposing the page's `name` made a plain notebook's (folder_fs.rs
+/// save_name): the file to save as, always a .ipynb (as_notebook), granted; None if the person cancelled.
+#[tauri::command]
+pub async fn file_save_dialog(app: tauri::AppHandle, name: String) -> Result<Option<serde_json::Value>, String> {
+    use tauri_plugin_dialog::DialogExt;
+    let mut b = app.dialog().file().set_file_name(folder_fs::save_name(&name)).add_filter("Jupyter notebook", &["ipynb"]);
+    if let Some(w) = app.get_webview_window("main") {
+        b = b.set_parent(&w);
+    }
+    let Some(p) = b.blocking_save_file() else { return Ok(None) };
+    let picked = p.into_path().map_err(|e| e.to_string())?;
+    let p = folder_fs::as_notebook(picked.clone());
+    // (.ipynb added here, so the dialog never asked about the file of that name: one there is never written over)
+    if p != picked && p.exists() {
+        return Err(format!("{} is already there: Save as again, choosing it by its full name to replace it", p.display()));
+    }
+    grant(&app, &p).map(Some)
+}
+
+#[tauri::command]
+pub fn file_read_text(app: tauri::AppHandle, grant: String) -> Result<String, String> {
+    String::from_utf8(folder_fs::read_own(&granted(&app, &grant)?)?).map_err(|_| "the file isn't UTF-8 text".to_string())
+}
+
+#[tauri::command]
+pub fn file_write_text(app: tauri::AppHandle, grant: String, text: String) -> Result<(), String> {
+    folder_fs::write_own(&granted(&app, &grant)?, text.as_bytes())
+}
+
+#[tauri::command]
+pub fn folder_list(app: tauri::AppHandle, grant: String) -> Result<Vec<Entry>, String> {
+    folder_fs::list_beside(&granted(&app, &grant)?)
+}
+
+#[tauri::command]
+pub fn folder_read(app: tauri::AppHandle, grant: String, name: String) -> Result<tauri::ipc::Response, String> {
+    Ok(tauri::ipc::Response::new(folder_fs::read_beside(&granted(&app, &grant)?, &name)?))
+}
+
+/// The bytes are the request's body; the grant its Sagebrush-Grant header, the name its Sagebrush-Name (percent-encoded).
+#[tauri::command]
+pub fn folder_write(app: tauri::AppHandle, request: tauri::ipc::Request) -> Result<(), String> {
+    let grant = request.headers().get("Sagebrush-Grant").ok_or("no grant")?.to_str().map_err(|_| "a grant that isn't text")?.to_string();
+    let name = percent_decode(request.headers().get("Sagebrush-Name").ok_or("no name")?.to_str().map_err(|_| "a name that isn't text")?)?;
+    let tauri::ipc::InvokeBody::Raw(bytes) = request.body() else { return Err("the bytes must be sent as bytes".into()) };
+    folder_fs::write_beside(&granted(&app, &grant)?, &name, bytes)
 }

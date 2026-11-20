@@ -1,6 +1,9 @@
 ok   ready: ready (sagebrush 0.6.4, 300 ms)
 ok   cross-origin isolated (Stop keeps variables)
 ok   opened the notebook from disk: ready
+ok   a grant the app didn't make reaches nothing
+ok   a name outside the notebook's folder is refused
+ok   the page has no fs plugin
 ok   ran it: Sage and the engines: "274177 * 67280421310721"
 ok   Python read a file in the notebook's folder
 ok   3D graphics
