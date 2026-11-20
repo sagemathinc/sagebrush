@@ -144,6 +144,11 @@ export function mountAgentPairing(ws: PairingWorkspace, o: { button?: HTMLElemen
   let bar: HTMLElement | null = null;
   const trashEntry = async (p: string) => (await ws.stat(p)) as any;
   const page = { origin: location.origin, path: location.pathname };
+  // (a page in a frame of this tab (the Agents page's .tex pane): the tab's reload record is the top page's, so this
+  //  page's pairing neither takes it, writes it, nor marks it left; it pairs as any page without a record does)
+  let framed = true;
+  try { framed = window.top !== window; } catch { framed = true; }
+  if (framed && o.reload) o = { ...o, reload: undefined };
   // (the reload record's storage: this tab's sessionStorage, or none if it can't be reached)
   let storage: Pick<Storage, "getItem" | "setItem" | "removeItem"> | null = null;
   if (o.reload) { try { storage = o.reload.storage === undefined ? sessionStorage : o.reload.storage; } catch { storage = null; } }
