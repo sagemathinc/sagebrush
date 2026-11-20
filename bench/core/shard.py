@@ -429,6 +429,10 @@ def identity_of(rec: dict) -> dict:
     out["machine"] = {
         k: v for k, v in (rec.get("machine") or {}).items() if k != "label"
     }
+    # (a point's "backends" holds its own results, per backend: only which
+    # backends the run measured belongs to the type's identity; the
+    # executables themselves are in "artifacts")
+    out["backends"] = sorted(rec.get("backends") or {})
     return out
 
 

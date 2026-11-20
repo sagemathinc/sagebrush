@@ -357,6 +357,25 @@ class Acceptance(unittest.TestCase):
             self.accept(row(status="timeout"))
         self.assertEqual(len(list((self.d / "rows/x86/.conflict").iterdir())), 1)
 
+    def test_points_with_their_own_results_share_the_identity(self):
+        # (a real point's backends hold its own timings and signatures)
+        first = row(
+            backends={
+                "native": {"status": "ok", "time": {"seconds": 1.0}},
+                "magma": {"status": "ok"},
+            }
+        )
+        self.accept(first)
+        other = row(
+            backends={
+                "native": {"status": "ok", "time": {"seconds": 2.5}},
+                "magma": {"status": "timeout"},
+            }
+        )
+        self.rows.check_identity("x86", other)
+        with self.assertRaisesRegex(shard.Fatal, "identity"):
+            self.rows.check_identity("x86", row(backends={"native": {"status": "ok"}}))
+
     def test_identity_must_match_within_a_type(self):
         self.accept()
         with self.assertRaisesRegex(shard.Fatal, "identity"):
