@@ -288,8 +288,9 @@ export class AgentPairing {
           this.hello = { protocol: 1, agent: { name: String(r.agent.name).slice(0, 80), client: String(r.agent.client ?? "").slice(0, 40), version: r.agent.version ? String(r.agent.version).slice(0, 40) : undefined }, wants: { folders: Array.isArray(r.wants?.folders) ? r.wants.folders.slice(0, 50).map(String) : undefined, write: !!r.wants?.write, run: !!r.wants?.run }, session: typeof r.session === "string" ? r.session : undefined, features: Array.isArray(r.features) ? r.features.filter((f: unknown): f is string => typeof f === "string" && (FEATURES as readonly string[]).includes(f)) : [], ...(typeof r.child === "string" && /^[A-Za-z0-9_-]{1,128}$/.test(r.child) ? { child: r.child } : {}) };
           // (A14: a restore's session must be answered by the agent it was given to, name and client; else closed)
           if ("agent" in how && how.agent && (this.hello.agent.name !== how.agent.name || this.hello.agent.client !== how.agent.client)) {
-            this.close(1000, "another agent answered this page's session");
-            return reject(new AgentError("identity", "another agent answered this page's session"));
+            // (said first: a socket whose close is heard at once (Bun 1.3's) would otherwise answer it as a plain close)
+            reject(new AgentError("identity", "another agent answered this page's session"));
+            return this.close(1000, "another agent answered this page's session");
           }
           if (!this.pairingId) this.pairingId = newGrantId(12);
           if (this.hello.session) this.sessionSecret = this.hello.session;
