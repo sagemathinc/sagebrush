@@ -5,9 +5,10 @@
 // used by the page in "app mode"), and open the files the system hands it
 // (double-clicked .ipynb files, or paths on the command line).
 //
-// The page is served from http://127.0.0.1:<a free port> (the localhost
-// plugin) with COOP/COEP headers, not from tauri://: WebKit (macOS, Linux)
-// makes a page cross-origin isolated only on http(s) or localhost, and the
+// The page is served from http://127.0.0.1:<a free port> (serve_page, below,
+// on a listener the app holds before its window exists) with COOP/COEP
+// headers, not from tauri://: WebKit (macOS, Linux) makes a page cross-origin
+// isolated only on http(s) or localhost, and the
 // notebook needs that for SharedArrayBuffer (Stop interrupts Python and keeps
 // its variables).  The port serves only the app's own (public) page files;
 // the computer's files are reached through Tauri's IPC, which is allowed for
@@ -85,19 +86,48 @@ fn ios_selftest_dir(_app: &tauri::AppHandle) -> Option<std::path::PathBuf> {
 // answers, for the self-test's diagnosis of cross-origin isolation
 // (app/selftest/coi-reading.py): the plugin's hook sees only the URL (no
 // method or Sec-Fetch headers) and runs only for a file it serves, so each
-// line is that URL, whether it carries the self-test's ?sb-diag= marker, and
-// the two headers the hook set.  A release build has none of it.
-#[cfg(debug_assertions)]
+// line is that URL (the path and query of one of the app's own files), whether
+// it carries the self-test's ?sb-diag= marker, the two headers the hook set,
+// and the milliseconds since the server started.
+// A desktop RELEASE build logs them too, but only during its self-test
+// (SAGEBRUSH_APP_SELFTEST set), at most SELFTEST_LOG_REQUESTS: whether a
+// request reached the server at all (the self-test's module import is now and
+// then never answered).  Without that variable it logs nothing.  A phone's
+// release build has none of it (app-mobile.yml checks its library).
+#[cfg(any(debug_assertions, desktop))]
 const LOG_REQUESTS: usize = 40;
+#[cfg(any(debug_assertions, desktop))]
+const SELFTEST_LOG_REQUESTS: usize = 200;
 
-#[cfg(debug_assertions)]
-fn log_request(url: &str) {
+/// How many requests this run logs: a debug build's LOG_REQUESTS; a desktop release build's SELFTEST_LOG_REQUESTS
+/// during its self-test, else none.
+#[cfg(any(debug_assertions, desktop))]
+fn request_log_cap() -> usize {
+    static CAP: std::sync::OnceLock<usize> = std::sync::OnceLock::new();
+    *CAP.get_or_init(|| {
+        if cfg!(debug_assertions) {
+            LOG_REQUESTS
+        } else if std::env::var_os("SAGEBRUSH_APP_SELFTEST").is_some() {
+            SELFTEST_LOG_REQUESTS
+        } else {
+            0
+        }
+    })
+}
+
+#[cfg(any(debug_assertions, desktop))]
+fn log_request(url: &str, started: std::time::Instant) {
+    let cap = request_log_cap();
+    if cap == 0 {
+        return;
+    }
     static SEEN: std::sync::atomic::AtomicUsize = std::sync::atomic::AtomicUsize::new(0);
     let n = SEEN.fetch_add(1, std::sync::atomic::Ordering::Relaxed) + 1;
-    if n <= LOG_REQUESTS {
+    if n <= cap {
         let diag = if url.contains("sb-diag=") { "yes" } else { "no" };
-        eprintln!("[localhost] #{n} url={url:?} diag={diag} dest=unavailable mode=unavailable status=200(served) set: COOP=same-origin COEP=require-corp");
-    } else if n == LOG_REQUESTS + 1 {
+        let ms = started.elapsed().as_millis();
+        eprintln!("[localhost] #{n} url={url:?} diag={diag} dest=unavailable mode=unavailable status=200(served) set: COOP=same-origin COEP=require-corp t={ms}ms");
+    } else if n == cap + 1 {
         eprintln!("[localhost] cap reached; later requests not logged");
     }
 }
@@ -122,6 +152,93 @@ fn selftest_report(app: tauri::AppHandle, report: String, ok: bool) {
     app.exit(if ok { 0 } else { 1 });
 }
 
+/// The page's listener can't be had: no window, and the app says why and stops (a self-test, which has no one to
+/// read a dialog, prints it and exits 3 at once: no window was made, nothing is left to save).
+fn fail_closed(app: &tauri::AppHandle, why: String) {
+    eprintln!("[app] {why}");
+    if std::env::var_os("SAGEBRUSH_APP_SELFTEST").is_some() {
+        std::process::exit(3);
+    }
+    use tauri_plugin_dialog::{DialogExt, MessageDialogKind};
+    let handle = app.clone();
+    app.dialog().message(why).title("Sagebrush can't start").kind(MessageDialogKind::Error).show(move |_| handle.exit(1));
+}
+
+/// The app's own page files, from `listener`: each with its type, its CSP (if it has one), no-cache, COOP/COEP
+/// (cross-origin isolation, for SharedArrayBuffer), and the Terminal's shell worker its own policy.  Only the files
+/// the app has (`files`, the embedded ones' paths), "/" and a folder's index.html: Tauri's own resolver answers any
+/// other path with the notebook's index.html, so a page the app doesn't have (/board/ before the app had it,
+/// /agents/) loaded the notebook at that path, and each of its relative loads (the analyzer's worker, KaTeX) got
+/// that index.html too, until the app was restarted.  Any other path: 404, and a page asked for (a link to one of
+/// the site's own pages) a short one with a way back.  One request at a time, as the localhost plugin this replaces
+/// did; a response that can't be sent is logged, never the end of the server (the plugin's panicked its one thread),
+/// which serves until the app exits.
+fn serve_page(app: &tauri::AppHandle, listener: std::net::TcpListener, files: std::collections::HashSet<String>) -> Result<(), Box<dyn std::error::Error>> {
+    let server = tiny_http::Server::from_listener(listener, None).map_err(|e| e.to_string())?;
+    let assets = app.asset_resolver();
+    #[cfg(any(debug_assertions, desktop))]
+    let started = std::time::Instant::now();
+    #[cfg(any(debug_assertions, desktop))]
+    if request_log_cap() > 0 {
+        let port = server.server_addr().to_ip().map_or(0, |a| a.port());
+        let build = if cfg!(debug_assertions) { "debug build" } else { "release build, self-test" };
+        eprintln!("[localhost] logger start port={port} cap={} ({build}; \"set:\" is what this server put on the response, not what the web view received)", request_log_cap());
+    }
+    std::thread::spawn(move || {
+        for req in server.incoming_requests() {
+            let path = req.url().split(['?', '#']).next().unwrap_or("").to_string();
+            let known = path == "/" || files.contains(&path) || (path.ends_with('/') && files.contains(&format!("{path}index.html")));
+            let Some(asset) = assets.get(path.clone()).filter(|_| known) else {
+                let page = req.headers().iter().any(|h| {
+                    (h.field.equiv("Sec-Fetch-Dest") && h.value.as_str() == "document") || (h.field.equiv("Accept") && h.value.as_str().contains("text/html"))
+                });
+                let resp = if page {
+                    tiny_http::Response::from_string(NOT_IN_APP).with_status_code(404).with_header(tiny_http::Header::from_bytes(&b"Content-Type"[..], &b"text/html; charset=utf-8"[..]).unwrap())
+                } else {
+                    tiny_http::Response::from_string("").with_status_code(404)
+                };
+                let _ = req.respond(resp);
+                continue;
+            };
+            let mut headers = vec![("Content-Type", asset.mime_type.clone())];
+            if let Some(csp) = asset.csp_header.clone() {
+                headers.push(("Content-Security-Policy", csp));
+            }
+            headers.push(("Cache-Control", "no-cache".into()));
+            headers.push(("Cross-Origin-Opener-Policy", "same-origin".into()));
+            headers.push(("Cross-Origin-Embedder-Policy", "require-corp".into()));
+            // (File > Examples… shows an example's page in an <iframe sandbox>, an opaque origin: what that page loads from
+            // here (KaTeX's style and fonts) is cross-origin to it, so needs CORP, as the site's web/_headers gives it)
+            if path.starts_with("/katex/") || path.starts_with("/examples/") {
+                headers.push(("Cross-Origin-Resource-Policy", "cross-origin".into()));
+            }
+            // (the Terminal's shell worker, with its own policy as the site serves it (no network connections, no
+            // eval, no further workers, scripts from this origin and blob: only: web/csp-policy.mts
+            // shellWorkerPolicy, checked equal by web/test-app-frontend.mjs); the app sets no other CSP
+            // (tauri.conf.json))
+            if path == "/shell/worker-boot.js" {
+                headers.retain(|(h, _)| *h != "Content-Security-Policy");
+                headers.push(("Content-Security-Policy", SHELL_WORKER_CSP.into()));
+            }
+            #[cfg(any(debug_assertions, desktop))]
+            log_request(req.url(), started);
+            let mut resp = tiny_http::Response::from_data(asset.bytes);
+            for (h, v) in headers {
+                if let Ok(h) = tiny_http::Header::from_bytes(h.as_bytes(), v.as_bytes()) {
+                    resp.add_header(h);
+                }
+            }
+            if let Err(e) = req.respond(resp) {
+                eprintln!("[app] a page file wasn't sent in full: {path} ({e})");
+            }
+        }
+    });
+    Ok(())
+}
+
+// (a page the app doesn't have: the person can always get back to their files)
+const NOT_IN_APP: &str = "<!doctype html><meta charset=utf-8><meta name=viewport content=\"width=device-width\"><title>Not in the app · Sagebrush</title><body style=\"font:16px system-ui,sans-serif;margin:3em auto;max-width:36em;padding:0 1em\"><h1 style=\"font-size:1.3em\">This page isn't part of the Sagebrush app</h1><p>It's on the website, <a href=\"https://sagebrush.space/\">sagebrush.space</a>.</p><p><a href=\"/\">Back to your files</a></p>";
+
 // the page's commands: the engine's on the desktop too
 #[cfg(desktop)]
 fn handlers() -> impl Fn(tauri::ipc::Invoke<tauri::Wry>) -> bool + Send + Sync + 'static {
@@ -145,34 +262,7 @@ pub fn run() {
     if std::env::var_os("JSC_useSharedArrayBuffer").is_none() {
         std::env::set_var("JSC_useSharedArrayBuffer", "1");
     }
-    let port = std::net::TcpListener::bind("127.0.0.1:0")
-        .and_then(|l| l.local_addr())
-        .map(|a| a.port())
-        .expect("no free port for the notebook page");
-    if std::env::var("SAGEBRUSH_APP_SELFTEST").is_ok() {
-        eprintln!("[app] the page is at http://127.0.0.1:{port}/");
-    }
-    #[cfg(debug_assertions)]
-    eprintln!("[localhost] logger start port={port} cap={LOG_REQUESTS} (debug build; \"set:\" is what this server's hook put on the response, not what the web view received)");
     let builder = tauri::Builder::default()
-        .plugin(
-            tauri_plugin_localhost::Builder::new(port)
-                .host("127.0.0.1")
-                .on_request(|request, response| {
-                    response.add_header("Cross-Origin-Opener-Policy", "same-origin");
-                    response.add_header("Cross-Origin-Embedder-Policy", "require-corp");
-                    // the Terminal's shell worker, with its own policy as the site serves it (no network
-                    // connections, no eval, no further workers, scripts from this origin and blob: only:
-                    // web/csp-policy.mts shellWorkerPolicy, checked equal by web/test-app-frontend.mjs); the app
-                    // sets no other CSP (tauri.conf.json)
-                    if request.url().split(['?', '#']).next() == Some("/shell/worker-boot.js") {
-                        response.add_header("Content-Security-Policy", SHELL_WORKER_CSP);
-                    }
-                    #[cfg(debug_assertions)]
-                    log_request(request.url());
-                })
-                .build(),
-        )
         .plugin(tauri_plugin_dialog::init())
         .plugin(tauri_plugin_fs::init())
         .manage(Pending(Mutex::new(args)))
@@ -180,21 +270,45 @@ pub fn run() {
     // (the engine subprocess, on the desktop only: phones run the page's own worker, design/native-desktop.md §5)
     #[cfg(desktop)]
     let builder = builder.manage(engine::Engine::default());
+    // (the paths of the app's own page files, as serve_page answers them: "/index.html", "/board/board.js")
+    let context = tauri::generate_context!();
+    let files: std::collections::HashSet<String> = context
+        .assets()
+        .iter()
+        .map(|(k, _)| if k.starts_with('/') { k.into_owned() } else { format!("/{k}") })
+        .collect();
     builder
         .setup(move |app| {
+            // (the page's server, listening before the window exists: the window never loads a page from a port
+            // this app doesn't hold)
+            let listener = match std::net::TcpListener::bind(("127.0.0.1", 0)) {
+                Ok(l) => l,
+                Err(e) => {
+                    fail_closed(app.handle(), format!("Sagebrush couldn't listen on 127.0.0.1 ({e})"));
+                    return Ok(());
+                }
+            };
+            let port = listener.local_addr()?.port();
+            if std::env::var("SAGEBRUSH_APP_SELFTEST").is_ok() {
+                eprintln!("[app] the page is at http://127.0.0.1:{port}/");
+            }
+            serve_page(app.handle(), listener, files.clone())?;
             let url = format!("http://127.0.0.1:{port}/").parse().unwrap();
             let window = WebviewWindowBuilder::new(app, "main", WebviewUrl::External(url));
-            // (a phone's window is the screen: no title, size or drag-and-drop)
+            // (a phone's window is the screen: no title, size or drag-and-drop; and the page learns it is in the
+            // desktop app, before its own script runs, from __SB_DESKTOP_APP__: window.__TAURI__ is there on phones
+            // too, and what only the desktop app offers (the LaTeX editor, web/latex/boot.ts latexHereFor) asks this)
             #[cfg(desktop)]
             let window = window
                 .title("Sagebrush")
                 .inner_size(1100.0, 860.0)
                 .min_inner_size(480.0, 400.0)
-                .disable_drag_drop_handler();
+                .disable_drag_drop_handler()
+                .initialization_script("window.__SB_DESKTOP_APP__ = true;");
             window.build()?;
             Ok(())
         })
-        .build(tauri::generate_context!())
+        .build(context)
         .expect("error while starting Sagebrush")
         .run(|_app, _event| {
             // (the engine ends with the app)

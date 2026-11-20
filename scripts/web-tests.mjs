@@ -6,7 +6,7 @@
 //   // ci: web-runner order=120 runner=bun chrome
 //   // ci: web-browser/board-a order=30 env=NO_EDIT=1 -- examples/primes.board.json
 //   // ci: none (needs a signed-in DEV account)
-//   // ci: inline (nightly.yml's export controls)
+//   // ci: inline (ci.yml's export controls)
 //
 // A target is a job's name, with /GROUP for a matrix group and .N when the
 // job runs its suites in more than one place.  The options: order=N (the

@@ -1,9 +1,11 @@
 // For test_remote_agent.py's vendored-agent rows only: the reviewed sagebrush-agent tarball run on its fake model with
-// no npm install. Its two npm imports are answered with stand-ins that fail loudly if they are actually used:
+// no npm install. Its three npm imports are answered with stand-ins that fail loudly if they are actually used:
 //   - ws: --stdio starts no WebSocket server; constructing one, or reading anything from the module's default, throws.
 //   - zod: the agent builds its tool schemas when a turn starts (z.string().describe(...), ...), and those building
 //     calls chain on a stand-in; the fake model never reads a schema, so anything that would validate or look inside
 //     one (parse, safeParse, shape, _def, a conversion to text or JSON) throws.
+//   - @anthropic-ai/claude-agent-sdk: the agent imports its settings resolver at start, even on the fake model, and
+//     calls it only for a native-mode turn; that call, the real model's query and its MCP server each throw.
 // Every other module is the tarball's own. So when the vendored rows pass, the clamp and the pipe they test are the
 // agent's own code: the stand-ins did nothing but let the schemas be built.
 import { registerHooks } from "node:module";
@@ -22,6 +24,14 @@ const any = new Proxy(function () {}, {
 });
 export const z = any;
 export default any;`,
+  "@anthropic-ai/claude-agent-sdk": `const used = (name) => () => { throw new Error("claude-agent-sdk stand-in: used (" + name + ")"); };
+export const resolveSettings = used("resolveSettings");
+export const filterEscalatingDefaultMode = used("filterEscalatingDefaultMode");
+export const query = used("query");
+export const deleteSession = used("deleteSession");
+export const createSdkMcpServer = used("createSdkMcpServer");
+export const tool = used("tool");
+export default new Proxy({}, { get() { throw new Error("claude-agent-sdk stand-in: used"); } });`,
 };
 
 registerHooks({

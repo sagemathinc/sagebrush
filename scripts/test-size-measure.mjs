@@ -1,622 +1,161 @@
 // ci: checks.6 order=10
-// The core's growth gate (scripts/size-measure.mjs, plan-growth-budget-r5 §5):
-// records, base selection, bundles and the bootstrap, the rules, epoch resets,
-// the range rule, markers, the merge protocol's lease, docs-only inputs and
-// the normalization.  No build: synthetic records and files.
-//   node scripts/test-size-measure.mjs
-import { execFileSync } from "node:child_process";
+// Stateless size gate: boundary, record integrity, normalization and event binding.
+// No build or network access.
+import assert from "node:assert/strict";
+import { execFileSync, spawnSync } from "node:child_process";
 import { mkdtempSync, mkdirSync, readFileSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
-import {
-  budgetsProblems, countAssignments, epochHash, evaluate, examplesFiles, gateInputs, jcs, measureFiles, overCap, parseMarker, recordProblems, resetGroups, safeSum, strictParse, testedTransition, LIMITS, MAX_DEPTH, NEUTRAL_WIDTH,
-} from "./size-measure.mjs";
+import { evaluate, growthLimit, producerProblems, recordProblems, strictParse, measureFiles,
+  examplesFiles, testedTransition, gateInputs, TOOLCHAIN, MAX_DEPTH, overCap, sha256 } from "./size-measure.mjs";
 
-let passed = 0, failures = 0;
-function check(name, ok, detail = "") {
-  if (ok) passed++;
-  else {
-    failures++;
-    console.error(`FAIL ${name}${detail ? `: ${detail}` : ""}`);
-  }
-}
-const passes = (name, r) => check(`${name} passes`, r.ok, r.problems.join("; "));
-const fails = (name, r, re) => check(`${name} fails`, !r.ok && (!re || r.problems.some((p) => re.test(p))), r.ok ? "passed" : r.problems.join("; "));
+const key = { ...TOOLCHAIN, measure_sha256: "a".repeat(64) };
+const record = (sizes, commit = "merge", k = key) => ({
+  format: "sagebrush-size-record", v: 1, repo: "sagemathinc/sagebrush",
+  commit, tree: "tree", key: k, bundles: Object.keys(sizes).sort(), sizes, neutral: {},
+  run: { id: "7", attempt: "2", job: "checks" },
+});
+const compare = (base, merge, k = key) => evaluate({ merge: { record: record(merge, "merge", k) },
+  base: { commit: "base", record: record(base, "base") } });
+assert.equal(growthLimit(0), 50000);
+assert.equal(growthLimit(2_500_000), 50000);
+for (const [base, delta, ok] of [
+  [0, 50000, true], [0, 50001, false], [1000, 50000, true], [1000, 50001, false],
+  [2_500_000, 50000, true], [2_500_000, 50001, false],
+  [10_000_000, 200000, true], [10_000_000, 200001, false],
+  [10_000_049, 200000, true], [10_000_049, 200001, false],
+  [100000, 0, true], [100000, -100000, true],
+]) assert.equal(compare({ x: base }, { x: base + delta }).ok, ok, base + "/" + delta);
+assert.equal(compare({ a: 1000 }, { a: 1000, added: 50000 }).ok, true);
+assert.equal(compare({ a: 1000 }, { a: 1000, added: 50001 }).ok, true);
+const split = compare({ "engine/lib/sage.pre": 1_000_000, "engine/lib/sage.src": 500_000 },
+  { "engine/lib/sage.pre": 463_204, "engine/lib/sage.src": 381_687,
+    "engine/lib/mod-sage-ffmat.pre": 538_944, "engine/lib/mod-sage-ffmat.src": 119_962 });
+assert.equal(split.ok, true, "a lazy split reports new chunks without failing them");
+assert.deepEqual(split.rows.find(r => r.bundle === "engine/lib/mod-sage-ffmat.pre"),
+  { bundle: "engine/lib/mod-sage-ffmat.pre", base: 0, merge: 538944, delta: 538944, limit: 50000, note: "new" });
+assert.equal(compare({}, { standalone: 999_999_999 }).ok, true, "all genuinely new bundles are report-only");
+assert.equal(compare({ x: 0 }, { x: 50001 }).ok, false, "present zero-byte bundle is not new");
+assert.equal(compare({ x: 1000 }, { x: 51001, added: 999999 }).ok, false, "new bundle cannot exempt existing growth");
+assert.deepEqual(compare({ gone: 1000 }, {}).rows[0],
+  { bundle: "gone", base: 1000, merge: 0, delta: -1000, limit: 50000, note: "removed" });
+assert.equal(compare({ a: 100000, b: 100000 }, { a: 0, b: 150001 }).ok, false, "shrink cannot offset another bundle");
+const count = compare({ "registry/packages": 300 }, { "registry/packages": 50300 });
+assert.equal(count.ok, true);
+assert.deepEqual(count.rows, [], "package counts are not gated or reported as bytes");
+assert.deepEqual(evaluate({ mode: "absolute", merge: { record: record({ "registry/packages": 50300 }) } }).rows, []);
+assert.equal(compare({ x: 1 }, { "\n| forged |": 1 }).ok, false);
+for (const name of ["x\ry", "x\ty", "x\u001by", "x|y", "x y"])
+  assert(recordProblems(record({ [name]: 1 })).length, name);
+assert.equal(compare({ x: 1 }, { x: 1 }, { ...key, bun: "wrong" }).ok, false);
+assert.equal(compare({ x: 1 }, { x: 1 }, { ...key, node: "wrong" }).ok, false);
+assert.equal(compare({ x: 1 }, { x: 1 }, { ...key, measure_sha256: "b".repeat(64) }).ok, false);
+assert.equal(evaluate({ merge: { record: record({ x: 1 }) } }).ok, false, "missing base fails closed");
+assert.equal(evaluate({ mode: "absolute", merge: { record: record({ x: 999999999 }) } }).ok, true);
+for (const sizes of [{ x: -1 }, { x: 0.1 }, { x: Number.MAX_SAFE_INTEGER + 1 }])
+  assert(recordProblems(record(sizes)).length);
+assert(recordProblems({ ...record({ x: 1 }), bundles: ["x", "x"] }).length);
+assert(recordProblems({ ...record({ x: 1 }), bundles: [] }).length);
+assert(recordProblems({ ...record({ x: 1 }), repo: "wrong" }).length);
+const env = { GITHUB_RUN_ID: "7", GITHUB_RUN_ATTEMPT: "2" };
+assert.deepEqual(producerProblems(record({ x: 1 }), "merge", "tree", "checks", env), []);
+assert(producerProblems(record({ x: 1 }), "wrong", "tree", "checks", env).length);
+assert(producerProblems(record({ x: 1 }), "merge", "wrong", "checks", env).length);
+assert(producerProblems(record({ x: 1 }), "merge", "tree", "size-base", env).length);
+assert(producerProblems(record({ x: 1 }), "merge", "tree", "checks", { ...env, GITHUB_RUN_ATTEMPT: "3" }).length);
+assert.throws(() => strictParse('{"a":1,"a":2}'), /duplicate/);
+assert.throws(() => strictParse('{"a":1e3}'), /integer/);
+assert.throws(() => strictParse("[".repeat(MAX_DEPTH + 1) + "0" + "]".repeat(MAX_DEPTH + 1)), /nesting/);
+assert(overCap("record", 262145, 262144));
+assert.equal(overCap("record", 262144, 262144), null);
+assert.equal(gateInputs(["scripts/size-measure.mjs"]).length, 1);
+assert.equal(gateInputs(["README.md"]).length, 0);
 
-// ---- fixtures
-const KEY = { bun: "1.4.4", node: "24.21.0", measure_sha256: "a".repeat(64) };
-const KEY2 = { ...KEY, bun: "1.4.5" };
-const BASE = "b".repeat(40), MERGE = "c".repeat(40);
-const rec = (commit, sizes, key = KEY) => ({ format: "sagebrush-size-record", v: 1, repo: "sagemathinc/sagebrush", commit, tree: "t", event: "push", run: { id: "1", attempt: "1", job: "checks" }, key, bundles: Object.keys(sizes).sort(), sizes, neutral: Object.fromEntries(Object.keys(sizes).map((k) => [k, 0])) });
-const ne = (ceiling, extra = {}) => ({ exact: false, ceiling, noise_bytes: 0, noise_total: 0, marker_slack: 1024, ...extra });
-function budgets({ sizes = { "cli/pyjs.cjs": 100000, "engine/w.js": 5000 }, max = 300, bundles = {}, reset = null } = {}) {
-  const b = { format: "sagebrush-budgets", v: 1, toolchain: { bun: "1.4.4" }, bundles: {}, epoch: { sizes: {}, reset } };
-  for (const [k, v] of Object.entries(sizes)) {
-    b.bundles[k] = ne(Math.floor(v * 1.1));
-    b.epoch.sizes[k] = v;
-  }
-  b.bundles["cli/packages.gen.js"] = { exact: true, max };
-  Object.assign(b.bundles, bundles);
-  return b;
-}
-const clone = (x) => JSON.parse(JSON.stringify(x));
-const marker = (bytes, reason = "a reviewed feature") => JSON.stringify({ v: 1, reason, bytes });
-// one integration: base N (sizes), merge M (sizes), the merge's budgets and markers, the base's budgets
-function transition({ n, m, B = budgets(), baseB = budgets(), markers = [], diff, key = KEY, nKey = KEY, declaredKey = KEY, old = null, legacy = null }) {
-  return evaluate({
-    mode: "transition",
-    merge: { record: rec(MERGE, m, key), budgets: B, markers },
-    declaredNode: "24.21.0",
-    base: { commit: BASE, record: rec(BASE, n, nKey), budgets: baseB, declaredKey },
-    old,
-    legacy,
-    markerDiff: diff ?? markers.map((x) => ({ status: "A", path: x.path })),
+const dir = mkdtempSync(join(tmpdir(), "stateless-size-"));
+try {
+  mkdirSync(join(dir, "examples"));
+  writeFileSync(join(dir, "examples", "x.txt"), "x");
+  assert.equal(examplesFiles(dir)["examples/corpus"].length, 1);
+  const f = join(dir, "bundle.js");
+  writeFileSync(f, 'globalThis.__SAGEBRUSH_VERSION__="1";globalThis.__SAGEBRUSH_BUILD_ID__="id";' + dir);
+  const values = { VERSION: "1", BUILD_ID: "id" };
+  const files = Object.fromEntries(["cli/pyjs.cjs", "cli/lib.gen.js", "engine/sagebrush-worker.js"].map(k => [k, [f]]));
+  const a = measureFiles(files, dir, values);
+  assert.deepEqual(a.problems, []);
+  writeFileSync(f, 'globalThis.__SAGEBRUSH_VERSION__="0.10.222";globalThis.__SAGEBRUSH_BUILD_ID__="long-id";' + dir);
+  const b = measureFiles(files, dir, { VERSION: "0.10.222", BUILD_ID: "long-id" });
+  assert.deepEqual(b.problems, []);
+  assert.equal(a.sizes["cli/pyjs.cjs"], b.sizes["cli/pyjs.cjs"]);
+  writeFileSync(f, "");
+  assert(measureFiles({ "cli/pyjs.cjs": [f] }, dir, values).problems.length);
+
+  const git = (...args) => execFileSync("git", args, { cwd: dir, encoding: "utf8", stdio: ["ignore", "pipe", "pipe"] }).trim();
+  git("init", "-q"); git("config", "user.email", "size@test"); git("config", "user.name", "size");
+  git("add", "."); git("commit", "-qm", "base");
+  const base = git("rev-parse", "HEAD");
+  git("checkout", "-qb", "feature");
+  writeFileSync(join(dir, "feature"), "feature"); git("add", "."); git("commit", "-qm", "feature");
+  const head = git("rev-parse", "HEAD");
+  git("checkout", "-qb", "integration", base); git("merge", "--no-ff", "-qm", "tested merge", head);
+  const merge = git("rev-parse", "HEAD");
+  const t = testedTransition({ cwd: dir, name: "pull_request", ev: { pull_request: { head: { sha: head } } } });
+  assert.deepEqual(t, { mode: "transition", base, head, merge });
+  assert.throws(() => testedTransition({ cwd: dir, name: "pull_request", ev: { pull_request: { head: { sha: base } } } }));
+  assert.equal(testedTransition({ cwd: dir, name: "push", ev: { before: base } }).base, base);
+  assert.equal(testedTransition({ cwd: dir, name: "merge_group", ev: { merge_group: { base_sha: base } } }).base, base);
+  assert.throws(() => testedTransition({ cwd: dir, name: "merge_group", ev: { merge_group: { base_sha: head } } }));
+  assert.equal(testedTransition({ cwd: dir, name: "schedule" }).mode, "absolute");
+  git("checkout", "-qb", "new-master", base);
+  writeFileSync(join(dir, "unrelated"), "master moved"); git("add", "."); git("commit", "-qm", "master move");
+  const tip = git("rev-parse", "HEAD"); git("checkout", "-q", "feature");
+  assert.equal(testedTransition({ cwd: dir, name: "workflow_dispatch", master: tip }).base, base, "no forced master merge");
+
+  // Exercise the actual CLI, record admission, exit status and summary output.
+  git("checkout", "-q", "integration");
+  mkdirSync(join(dir, "scripts"));
+  const source = readFileSync(new URL("./size-measure.mjs", import.meta.url));
+  const script = join(dir, "scripts", "size-measure.mjs");
+  writeFileSync(script, source);
+  const eventPath = join(dir, "event.json"), summary = join(dir, "summary.md");
+  writeFileSync(eventPath, JSON.stringify({ pull_request: { head: { sha: head } } }));
+  const make = (sizes, commit, job) => ({ ...record(sizes, commit, { ...key, measure_sha256: sha256(source) }),
+    tree: git("rev-parse", commit + "^{tree}"), event: "pull_request", run: { id: "123", attempt: "1", job } });
+  writeFileSync(join(dir, "base-record.json"), JSON.stringify(make({ x: 1_000_000 }, base, "size-base")));
+  const put = n => writeFileSync(join(dir, "merge-record.json"), JSON.stringify(make({ x: n }, merge, "checks")));
+  const run = (extra = [], overrides = {}) => spawnSync(process.execPath, [script, "--gate", "--records", dir, ...extra], {
+    encoding: "utf8", env: { ...process.env, GITHUB_EVENT_NAME: "pull_request", GITHUB_EVENT_PATH: eventPath,
+      GITHUB_RUN_ID: "123", GITHUB_RUN_ATTEMPT: "1", GITHUB_STEP_SUMMARY: summary, ...overrides },
   });
-}
-const S = (pyjs, w = 5000, pk = 300) => ({ "cli/pyjs.cjs": pyjs, "engine/w.js": w, "cli/packages.gen.js": pk });
+  put(1_050_000);
+  assert.equal(run().status, 0);
+  assert.equal(run([], { GITHUB_RUN_ATTEMPT: "2" }).status, 1, "another attempt's record is rejected");
+  assert.match(readFileSync(summary, "utf8"), /\| x \| 1000000 \| 1050000 \| \+50000 \| 50000 \|/);
+  put(1_050_001);
+  assert.equal(run().status, 1);
+  writeFileSync(join(dir, "merge-record.json"), JSON.stringify(make({ x: 1_000_000, lazy: 538_944 }, merge, "checks")));
+  assert.equal(run().status, 0, "actual gate accepts a new chunk");
+  assert.match(readFileSync(summary, "utf8"), /\| lazy \| 0 \| 538944 \| \+538944 \| 50000 \| new \|/);
+  assert.equal(run(["--docs-only"]).status, 0);
+  assert.equal(run(["--docs-only"], { SIZE_GATE_NODE: "true" }).status, 1);
+  const bad = make({ x: 1 }, merge, "checks"); bad.key.measure_sha256 = "a".repeat(64);
+  writeFileSync(join(dir, "merge-record.json"), JSON.stringify(bad));
+  assert.match(run().stdout, /recipe is not this run/);
+  writeFileSync(join(dir, "merge-record.json"), JSON.stringify(make({ "\n| forged |": 1 }, merge, "checks")));
+  const forged = run();
+  assert.equal(forged.status, 1);
+  assert.match(forged.stdout, /printable path-like/);
+  assert(!forged.stdout.includes("\n| forged |"), "untrusted bundle names cannot inject summary rows");
+  writeFileSync(join(dir, "merge-record.json"), " ".repeat(262145));
+  assert.match(run().stdout, /refused before parsing/);
+  rmSync(join(dir, "base-record.json"));
+  assert.equal(run().status, 1, "missing records fail closed");
+} finally { rmSync(dir, { recursive: true, force: true }); }
 
-// ---- strict JSON and JCS
-check("strictParse: duplicate keys refused", (() => { try { strictParse('{"a":1,"a":2}'); return false; } catch (e) { return /duplicate/.test(e.message); } })());
-for (const lit of ["1.5", "1e400", "1.0", "1e3", "-0.0"]) check(`strictParse: ${lit} refused`, (() => { try { strictParse(`{"a":${lit}}`); return false; } catch { return true; } })());
-check("strictParse: a truncated text refused", (() => { try { strictParse('{"a":1'); return false; } catch { return true; } })());
-check("jcs sorts keys, nests", jcs({ b: 1, a: { d: [1, "x"], c: null } }) === '{"a":{"c":null,"d":[1,"x"]},"b":1}');
-check("safeSum: out of range is null", safeSum([Number.MAX_SAFE_INTEGER, 1]) === null && safeSum([1, 2]) === 3);
-
-// ---- records (r5 §1.1)
-check("record: valid", recordProblems(rec(BASE, S(1)), BASE).length === 0);
-check("record: wrong repo", recordProblems({ ...rec(BASE, S(1)), repo: "fork/sagebrush" }, BASE).length > 0);
-check("record: wrong commit", recordProblems(rec(MERGE, S(1)), BASE).length > 0);
-check("record: no key", recordProblems({ ...rec(BASE, S(1)), key: undefined }, BASE).length > 0);
-check("record: a listed bundle missing from sizes", recordProblems({ ...rec(BASE, S(1)), bundles: [...Object.keys(S(1)), "x"] }, BASE).length > 0);
-check("record: an extra size", recordProblems({ ...rec(BASE, S(1)), bundles: ["cli/pyjs.cjs"] }, BASE).length > 0);
-check("record: negative size", recordProblems(rec(BASE, S(-1)), BASE).length > 0);
-check("record: fractional size", recordProblems(rec(BASE, S(1.5)), BASE).length > 0);
-check("record: wrong format", recordProblems({ ...rec(BASE, S(1)), v: 2 }, BASE).length > 0);
-
-// ---- rule 2: growth needs a marker, tightly
-passes("Δ 0", transition({ n: S(100000), m: S(100000) }));
-passes("a decrease", transition({ n: S(100000), m: S(99000) }));
-fails("+1 with no marker", transition({ n: S(100000), m: S(100001) }), /needs a marker/);
-const mk = (bytes, path = ".growth/2026-10-24-x.json") => ({ path, text: marker(bytes) });
-let Bm = (bytes) => { const b = budgets(); b.epoch.sizes["cli/pyjs.cjs"] = 100000; return b; };
-passes("a marker equal to Δ", transition({ n: S(100000), m: S(102000), markers: [mk({ "cli/pyjs.cjs": 2000 })] }));
-passes("a marker of Δ + marker_slack", transition({ n: S(100000), m: S(102000), markers: [mk({ "cli/pyjs.cjs": 3024 })] }));
-fails("a marker of Δ + marker_slack + 1", transition({ n: S(100000), m: S(102000), markers: [mk({ "cli/pyjs.cjs": 3025 })] }), /tight/);
-fails("a marker smaller than Δ", transition({ n: S(100000), m: S(102000), markers: [mk({ "cli/pyjs.cjs": 1999 })] }), /needs a marker/);
-fails("a stale marker on a decrease of 2000", transition({ n: S(100000), m: S(98000), markers: [mk({ "cli/pyjs.cjs": 2000 })] }), /tight/);
-passes("two markers summing", transition({ n: S(100000), m: S(103000), markers: [mk({ "cli/pyjs.cjs": 2000 }), mk({ "cli/pyjs.cjs": 1000 }, ".growth/y.json")] }));
-{
-  const B = budgets();
-  B.bundles["cli/pyjs.cjs"].noise_bytes = 64;
-  B.bundles["cli/pyjs.cjs"].noise_total = 1024;
-  passes("jitter: Δ = noise_bytes (test values)", transition({ n: S(100000), m: S(100064), B, baseB: B }));
-  fails("jitter: Δ = noise_bytes + 1", transition({ n: S(100000), m: S(100065), B, baseB: B }), /needs a marker/);
-  passes("jitter accumulated to noise_total", transition({ n: S(100990), m: S(101024), B, baseB: B }));
-  fails("jitter one past noise_total", transition({ n: S(100990), m: S(101025), B, baseB: B }), /rule 3/);
-}
-// ---- rule 3: the ledger, rule 4: the ceiling
-{
-  const inTree = { path: ".growth/old.json", text: marker({ "cli/pyjs.cjs": 500 }) };
-  passes("the ledger counts a marker already in the tree", transition({ n: S(100400), m: S(100400), markers: [inTree], diff: [] }));
-  fails("one byte past epoch + markers in the tree", transition({ n: S(100500), m: S(100501), markers: [inTree], diff: [] }), /rule 3/);
-  fails("the ledger: a marker deleted in this PR no longer counts", transition({ n: S(100400), m: S(100400), markers: [], diff: [{ status: "D", path: ".growth/old.json" }] }), /rule 3/);
-  const B = budgets();
-  B.bundles["cli/pyjs.cjs"].ceiling = 101000;
-  passes("at the ceiling", transition({ n: S(100000), m: S(101000), B, baseB: B, markers: [mk({ "cli/pyjs.cjs": 1000 })] }));
-  fails("one over the ceiling, even with a marker", transition({ n: S(100000), m: S(101001), B, baseB: B, markers: [mk({ "cli/pyjs.cjs": 1001 })] }), /ceiling/);
-}
-// ---- rule 1: exact bundles
-fails("an exact bundle +1, max unchanged", transition({ n: S(100000, 5000, 300), m: S(100000, 5000, 301), B: budgets({ max: 301 }), baseB: budgets({ max: 301 }) }), /may not grow/);
-fails("an exact bundle +1, with a marker naming it", transition({ n: S(100000, 5000, 300), m: S(100000, 5000, 301), markers: [mk({ "cli/packages.gen.js": 1 })] }), /exact bundle can't be named/);
-passes("an exact bundle −1", transition({ n: S(100000, 5000, 300), m: S(100000, 5000, 299) }));
-passes("a raise of max in the same PR, up to the new max", transition({ n: S(100000, 5000, 300), m: S(100000, 5000, 400), B: budgets({ max: 400 }), baseB: budgets({ max: 300 }) }));
-fails("a raise of max, one over the new max", transition({ n: S(100000, 5000, 300), m: S(100000, 5000, 401), B: budgets({ max: 400 }), baseB: budgets({ max: 300 }) }), /max 400/);
-// ---- markers (r5 §1.4)
-for (const [name, text, re] of [
-  ["duplicate keys", '{"v":1,"reason":"x","bytes":{"cli/pyjs.cjs":1,"cli/pyjs.cjs":2}}', /duplicate/],
-  ["an unknown bundle", marker({ "cli/nope.js": 1 }), /not a bundle/],
-  ["0", marker({ "cli/pyjs.cjs": 0 }), /positive/],
-  ["1.5", '{"v":1,"reason":"x","bytes":{"cli/pyjs.cjs":1.5}}', /integer literal/],
-  ["1e400", '{"v":1,"reason":"x","bytes":{"cli/pyjs.cjs":1e400}}', /integer literal/],
-  ["an empty reason", marker({ "cli/pyjs.cjs": 1 }, "  "), /reason/],
-  ["an unknown key", '{"v":1,"reason":"x","bytes":{"cli/pyjs.cjs":1},"extra":1}', /exactly/],
-]) check(`marker: ${name} refused`, parseMarker(text, budgets()).problems.some((p) => re.test(p)), jcs(parseMarker(text, budgets()).problems));
-fails("a malformed marker anywhere in .growth/", transition({ n: S(1), m: S(1), markers: [{ path: ".growth/bad.json", text: "{" }], diff: [] }), /bad\.json/);
-fails("an edit of an old marker", transition({ n: S(100000), m: S(101000), markers: [mk({ "cli/pyjs.cjs": 1000 }, ".growth/old.json")], diff: [{ status: "M", path: ".growth/old.json" }] }), /can't be edited/);
-{
-  const t = mk({ "cli/pyjs.cjs": 1000 }, ".growth/new.json");
-  const r = evaluate({ mode: "transition", merge: { record: rec(MERGE, S(101000)), budgets: budgets(), markers: [t] }, declaredNode: "24.21.0", base: { commit: BASE, record: rec(BASE, S(100000)), budgets: budgets(), declaredKey: KEY }, markerDiff: [{ status: "D", path: ".growth/old.json" }, { status: "A", path: ".growth/new.json" }], deletedMarkerTexts: [t.text] });
-  passes("a rename (D + A) is a new request", r);
-  check("a rename: noted", r.notes.some((n) => /new request/.test(n)));
-}
-fails("a rebase onto a base that already has the marker (not eligible)", transition({ n: S(100000), m: S(101000), markers: [mk({ "cli/pyjs.cjs": 1000 })], diff: [] }), /needs a marker/);
-// ---- bundles and the key sets (r5 §1.2)
-{
-  const B = budgets({ sizes: { "cli/pyjs.cjs": 100000, "engine/w.js": 5000, "engine/new.js": 700 } });
-  passes("a new bundle, implicit zero, epoch = its size", transition({ n: S(100000), m: { ...S(100000), "engine/new.js": 700 }, B }));
-  const B2 = clone(B);
-  B2.epoch.sizes["engine/new.js"] = 600;
-  B2.bundles["engine/new.js"].ceiling = 800;
-  fails("a new bundle whose epoch isn't its size", transition({ n: S(100000), m: { ...S(100000), "engine/new.js": 700 }, B: B2 }), /new bundle's epoch/);
-  fails("measured but not listed", transition({ n: S(100000), m: { ...S(100000), "engine/x.js": 1 } }), /measured but not listed/);
-  fails("a bundle measured in the base but not in budgets.json, outside a reset", transition({ n: { ...S(100000), "engine/gone.js": 9 }, m: S(100000) }), /only in an epoch reset/);
-}
-// ---- comparability (r5 §1.1)
-fails("the base's record under another key", transition({ n: S(1), m: S(1), nKey: KEY2 }), /comparability key/);
-fails("bun changed, without a reset", transition({ n: S(100000, 5000, 300), m: S(100000, 5000, 300), declaredKey: KEY2 }), /key changed/);
-fails("the merge built with another bun than budgets.json pins", transition({ n: S(1), m: S(1), key: KEY2, nKey: KEY2, declaredKey: KEY2 }), /pins 1\.4\.4/);
-// ---- the bootstrap (PR A)
-{
-  const n = S(100000, 5000, 300);
-  const B = budgets({ sizes: { "cli/pyjs.cjs": 100000, "engine/w.js": 5000 }, max: 300 });
-  const legacy = { measured: { ...n, "cli/pyjs.cjs": 99989 }, recorded: { ...n, "cli/pyjs.cjs": 99992 } };
-  const N = rec(BASE, n);
-  N.neutral["cli/pyjs.cjs"] = 11;
-  const boot = (B2, lg = legacy, m = n) => evaluate({ mode: "transition", merge: { record: rec(MERGE, m), budgets: B2, markers: [] }, declaredNode: "24.21.0", base: { commit: BASE, record: N, budgets: null, declaredKey: { bun: null, node: "24.21.0", measure_sha256: null } }, legacy: lg, markerDiff: [] });
-  const r = boot(B);
-  passes("the bootstrap with epoch = the rebuilt base", r);
-  check("the bootstrap: the legacy file's upper-bound slack is noted", r.notes.some((x) => /over its build/.test(x)));
-  const B1 = clone(B);
-  B1.epoch.sizes["cli/pyjs.cjs"] = 100001;
-  fails("the bootstrap, epoch off by 1", boot(B1), /epoch must equal/);
-  const B3 = clone(B);
-  B3.bundles["cli/packages.gen.js"].max = 301;
-  fails("the bootstrap, an exact max off by 1", boot(B3), /max must equal/);
-  fails("the bootstrap, a cross-check mismatch", boot(B, { ...legacy, measured: { ...legacy.measured, "cli/pyjs.cjs": 99990 } }), /cross-check/);
-  fails("the bootstrap, the base measuring over its size-budget.json", boot(B, { ...legacy, recorded: { ...legacy.recorded, "cli/pyjs.cjs": 99988 } }), /over its size-budget|> its size-budget/);
-  fails("the bootstrap without the legacy measurement", boot(B, null), /cross-check/);
-  fails("the bootstrap, growth without a marker", boot(B, legacy, S(100001, 5000, 300)), /needs a marker/);
-}
-{
-  // r6 §1.2: the real case, push run 40070967084 (cli/pyjs.cjs measured 28160134 < recorded 28160137)
-  const n = { "cli/pyjs.cjs": 28160145, "cli/packages.gen.js": 278428 };
-  const B = { format: "sagebrush-budgets", v: 1, toolchain: { bun: "1.4.4" }, bundles: { "cli/pyjs.cjs": ne(30976159), "cli/packages.gen.js": { exact: true, max: 278428 } }, epoch: { sizes: { "cli/pyjs.cjs": 28160145 }, reset: null } };
-  const boot = (pyjs, recorded = 28160137) => {
-    const N = rec(BASE, { ...n, "cli/pyjs.cjs": pyjs });
-    N.neutral["cli/pyjs.cjs"] = 11;
-    const B2 = clone(B);
-    B2.epoch.sizes["cli/pyjs.cjs"] = pyjs;
-    return evaluate({ mode: "transition", merge: { record: rec(MERGE, N.sizes), budgets: B2, markers: [] }, declaredNode: "24.21.0", base: { commit: BASE, record: N, budgets: null, declaredKey: { bun: null, node: "24.21.0", measure_sha256: null } }, legacy: { measured: { "cli/pyjs.cjs": 28160134, "cli/packages.gen.js": 278428 }, recorded: { "cli/pyjs.cjs": recorded, "cli/packages.gen.js": 278428 } }, markerDiff: [] });
-  };
-  const r = boot(28160145);
-  passes("r6: the real −3 B case (28160134 + 11 = 28160145)", r);
-  check("r6: the real case's 3 B of slack is printed", r.notes.some((x) => /3 B over its build for cli\/pyjs\.cjs/.test(x)), jcs(r.notes));
-  fails("r6: the real case, 28160146", boot(28160146), /cross-check/);
-  fails("r6: the real case, a recorded 28160133", boot(28160145, 28160133), /over its size-budget|> its size-budget/);
-}
-
-// ---- epoch resets (r5 §1.3 rule 5)
-function resetCase({ O, N, M, growth = {}, keyChanged = true, markers = [], map = [], added = [], removed = [], baseB, B, old, mutate }) {
-  baseB ??= budgets({ sizes: { "cli/pyjs.cjs": 100000, "engine/w.js": 5000 } });
-  B ??= clone(baseB);
-  B.epoch = { sizes: Object.fromEntries(Object.keys(B.bundles).filter((k) => !B.bundles[k].exact).map((k) => [k, M[k]])), reset: { reason: "bun 1.4.5", prev: epochHash(baseB.epoch), growth, map, added, removed } };
-  for (const k of Object.keys(B.epoch.sizes)) B.bundles[k].ceiling = Math.max(B.bundles[k].ceiling, B.epoch.sizes[k]);
-  mutate?.(B);
-  return evaluate({
-    mode: "transition",
-    merge: { record: rec(MERGE, M, keyChanged ? KEY2 : KEY), budgets: { ...B, toolchain: { bun: keyChanged ? "1.4.5" : "1.4.4" } }, markers },
-    declaredNode: "24.21.0",
-    base: { commit: BASE, record: rec(BASE, N, keyChanged ? KEY2 : KEY), budgets: baseB, declaredKey: KEY },
-    old: old !== undefined ? old : keyChanged ? rec(BASE, O, KEY) : null,
-    markerDiff: [],
-  });
-}
-const R = (pyjs, w = 5000, pk = 300) => S(pyjs, w, pk);
-fails("astra's first example, growth 1000", resetCase({ O: R(100000), N: R(101000), M: R(102000), growth: { "cli/pyjs.cjs": 1000 } }), /not within charge 2000/);
-passes("astra's first example, growth 2000", resetCase({ O: R(100000), N: R(101000), M: R(102000), growth: { "cli/pyjs.cjs": 2000 } }));
-passes("astra's first example, growth 2000 + marker_slack", resetCase({ O: R(100000), N: R(101000), M: R(102000), growth: { "cli/pyjs.cjs": 3024 } }));
-fails("astra's first example, one past the slack", resetCase({ O: R(100000), N: R(101000), M: R(102000), growth: { "cli/pyjs.cjs": 3025 } }), /not within/);
-passes("astra's second example (ΔT 5000, ΔI 1000), growth 6000", resetCase({ O: R(100000), N: R(105000), M: R(106000), growth: { "cli/pyjs.cjs": 6000 } }));
-passes("astra's r4 example: ΔT +1000, ΔI −1000, growth 1000, epoch unchanged", resetCase({ O: R(100000), N: R(101000), M: R(100000), growth: { "cli/pyjs.cjs": 1000 } }));
-fails("astra's r4 example, growth 999", resetCase({ O: R(100000), N: R(101000), M: R(100000), growth: { "cli/pyjs.cjs": 999 } }), /not within/);
-fails("ΔT −1000 doesn't offset ΔI +1000", resetCase({ O: R(100000), N: R(99000), M: R(100000), growth: {} }), /needs epoch\.reset\.growth/);
-passes("a zero-byte toolchain reset: no growth entries, epoch unchanged", resetCase({ O: R(100000), N: R(100000), M: R(100000) }));
-passes("a zero-byte release reset (same key)", resetCase({ O: R(100000), N: R(100000), M: R(100000), keyChanged: false }));
-fails("a charge of 0 with an entry over the slack", resetCase({ O: R(100000), N: R(100000), M: R(100000), growth: { "cli/pyjs.cjs": 1025 } }), /not within/);
-fails("a reset that leaves a marker", resetCase({ O: R(100000), N: R(100000), M: R(100000), markers: [mk({ "cli/pyjs.cjs": 1 })] }), /\.growth\/ empty/);
-fails("a key change with no old-key record: fails closed", resetCase({ O: R(100000), N: R(100000), M: R(100000), old: null }), /fails closed/);
-fails("a growth entry for no group", resetCase({ O: R(100000), N: R(100000), M: R(100000), growth: { "cli/nope.js": 5 } }), /not a group/);
-fails("epoch.sizes ≠ the merge after a reset", resetCase({ O: R(100000), N: R(100000), M: R(100000), mutate: (B) => (B.epoch.sizes["cli/pyjs.cjs"] = 99999) }), /must equal the merge/);
-{
-  // eligibility
-  const baseB = budgets();
-  const B = clone(baseB);
-  B.epoch.reset = { reason: "old reset", prev: "f".repeat(64), growth: {}, map: [], added: [], removed: [] };
-  const persisted = clone(B);
-  fails("prev ≠ the base's epoch block (a reset rebased across another)", transition({ n: S(100000), m: S(100000), B, baseB }), /without a new reset declaration/);
-  fails("a persisted epoch.reset on an ordinary later PR: markers needed", transition({ n: S(100000), m: S(101000), B: persisted, baseB: persisted }), /needs a marker/);
-  const B2 = clone(baseB);
-  B2.epoch.sizes["cli/pyjs.cjs"] = 101000;
-  fails("an epoch.sizes edit without epoch.reset", transition({ n: S(100000), m: S(101000), B: B2, baseB }), /without a new reset declaration/);
-}
-{
-  // the key map: rename, join, split, exact rename, and the refusals
-  const baseB = budgets({ sizes: { "engine/a.js": 100, "engine/w.js": 5000 } });
-  const B = budgets({ sizes: { "engine/b.js": 120, "engine/w.js": 5000 } });
-  const O = { "engine/a.js": 100, "engine/w.js": 5000, "cli/packages.gen.js": 300 };
-  const N = { "engine/b.js": 110, "engine/w.js": 5000, "cli/packages.gen.js": 300 };
-  const M = { "engine/b.js": 120, "engine/w.js": 5000, "cli/packages.gen.js": 300 };
-  passes("a rename A → B (O 100, N 110, M 120), growth 20", resetCase({ O, N, M, baseB, B, map: [{ old: ["engine/a.js"], new: ["engine/b.js"] }], growth: { "engine/b.js": 20 } }));
-  fails("a rename A → B, growth 19", resetCase({ O, N, M, baseB, B, map: [{ old: ["engine/a.js"], new: ["engine/b.js"] }], growth: { "engine/b.js": 19 } }), /charge 20/);
-  fails("a rename with no map entry (an unmatched key)", resetCase({ O, N, M, baseB, B }), /no place/);
-  fails("a key in two entries", resetCase({ O, N, M, baseB, B, map: [{ old: ["engine/a.js"], new: ["engine/b.js"] }, { old: ["engine/a.js"], new: ["engine/w.js"] }] }), /two places/);
-  const joinB = budgets({ sizes: { "engine/ab.js": 300 } });
-  passes("a join", resetCase({ O: { "engine/a.js": 100, "engine/w.js": 200, "cli/packages.gen.js": 300 }, N: { "engine/ab.js": 300, "cli/packages.gen.js": 300 }, M: { "engine/ab.js": 300, "cli/packages.gen.js": 300 }, baseB: budgets({ sizes: { "engine/a.js": 100, "engine/w.js": 200 } }), B: joinB, map: [{ old: ["engine/a.js", "engine/w.js"], new: ["engine/ab.js"] }] }));
-  const splitB = budgets({ sizes: { "engine/a1.js": 60, "engine/a2.js": 40, "engine/w.js": 5000 } });
-  passes("a split", resetCase({ O, N: { "engine/a1.js": 60, "engine/a2.js": 40, "engine/w.js": 5000, "cli/packages.gen.js": 300 }, M: { "engine/a1.js": 60, "engine/a2.js": 40, "engine/w.js": 5000, "cli/packages.gen.js": 300 }, baseB, B: splitB, map: [{ old: ["engine/a.js"], new: ["engine/a1.js", "engine/a2.js"] }] }));
-  const mixB = budgets({ sizes: { "engine/w.js": 5000 }, bundles: { "engine/b.js": { exact: true, max: 120 } } });
-  fails("an exact/non-exact mix", resetCase({ O, N, M, baseB, B: mixB, map: [{ old: ["engine/a.js"], new: ["engine/b.js"] }] }), /mixes exact/);
-  const slackB = budgets({ sizes: { "engine/a1.js": 60, "engine/a2.js": 40, "engine/w.js": 5000 } });
-  slackB.bundles["engine/a2.js"].marker_slack = 512;
-  fails("a merged group with different marker_slack", resetCase({ O, N: { "engine/a1.js": 60, "engine/a2.js": 40, "engine/w.js": 5000, "cli/packages.gen.js": 300 }, M: { "engine/a1.js": 60, "engine/a2.js": 40, "engine/w.js": 5000, "cli/packages.gen.js": 300 }, baseB, B: slackB, map: [{ old: ["engine/a.js"], new: ["engine/a1.js", "engine/a2.js"] }] }), /different marker_slack/);
-  // an exact rename: exactness carried; growth needs a raise of max
-  const exBase = budgets({ sizes: { "engine/w.js": 5000 } }), exB = budgets({ sizes: { "engine/w.js": 5000 } });
-  delete exB.bundles["cli/packages.gen.js"];
-  exB.bundles["cli/pkgs.gen.js"] = { exact: true, max: 300 };
-  const eO = { "engine/w.js": 5000, "cli/packages.gen.js": 300 }, eN = { "engine/w.js": 5000, "cli/pkgs.gen.js": 300 };
-  passes("an exact rename, no growth", resetCase({ O: eO, N: eN, M: eN, baseB: exBase, B: exB, map: [{ old: ["cli/packages.gen.js"], new: ["cli/pkgs.gen.js"] }] }));
-  fails("an exact rename that grows, without a raise of max", resetCase({ O: eO, N: eN, M: { ...eN, "cli/pkgs.gen.js": 301 }, baseB: exBase, B: exB, map: [{ old: ["cli/packages.gen.js"], new: ["cli/pkgs.gen.js"] }] }), /max/);
-  // an exact split whose aggregate is fine but one key is over its own max
-  const spB = budgets({ sizes: { "engine/w.js": 5000 } });
-  delete spB.bundles["cli/packages.gen.js"];
-  spB.bundles["cli/p1.js"] = { exact: true, max: 150 };
-  spB.bundles["cli/p2.js"] = { exact: true, max: 150 };
-  fails("an exact split, one key over its own max", resetCase({ O: eO, N: { "engine/w.js": 5000, "cli/p1.js": 160, "cli/p2.js": 140 }, M: { "engine/w.js": 5000, "cli/p1.js": 160, "cli/p2.js": 140 }, baseB: exBase, B: spB, map: [{ old: ["cli/packages.gen.js"], new: ["cli/p1.js", "cli/p2.js"] }] }), /cli\/p1\.js: 160 > max 150/);
-  // a sum past the safe-integer range
-  const big = Number.MAX_SAFE_INTEGER - 10;
-  const bigBase = budgets({ sizes: { "engine/a1.js": 1, "engine/a2.js": 1 } });
-  for (const k of ["engine/a1.js", "engine/a2.js"]) (bigBase.bundles[k].ceiling = big), (bigBase.epoch.sizes[k] = big);
-  fails("a sum past Number.MAX_SAFE_INTEGER", resetCase({ O: { "engine/a1.js": big, "engine/a2.js": big, "cli/packages.gen.js": 300 }, N: { "engine/a.js": 5, "cli/packages.gen.js": 300 }, M: { "engine/a.js": 5, "cli/packages.gen.js": 300 }, baseB: bigBase, B: budgets({ sizes: { "engine/a.js": 5 } }), map: [{ old: ["engine/a1.js", "engine/a2.js"], new: ["engine/a.js"] }] }), /safe-integer/);
-  check("resetGroups: identity for unchanged names", resetGroups(budgets(), budgets(), { map: [], added: [], removed: [] }).groups.map((g) => g.name).sort().join(",") === "cli/packages.gen.js,cli/pyjs.cjs,engine/w.js");
-}
-// ---- the range rule (r5 §1.3 rule 6)
-function range({ n, m, markers, k = 2, epochChanged = false, key = KEY }) {
-  return evaluate({ mode: "range", merge: { record: rec(MERGE, m), budgets: budgets(), markers }, declaredNode: "24.21.0", base: { commit: BASE, record: rec(BASE, n, key), budgets: budgets(), declaredKey: KEY }, markerDiff: markers.map((x) => ({ status: "A", path: x.path })), range: { k, epochChanged } });
-}
-const two = [mk({ "cli/pyjs.cjs": 2024 }, ".growth/a.json"), mk({ "cli/pyjs.cjs": 2024 }, ".growth/b.json")];
-passes("astra's trace: two +1000 transitions with 2024 markers (no range tightness)", range({ n: S(100000), m: S(102000), markers: two }));
-passes("growth then shrink", range({ n: S(100000), m: S(100500), markers: [mk({ "cli/pyjs.cjs": 1000 })] }));
-fails("a range short of authorization by 1", range({ n: S(100000), m: S(101001), markers: [mk({ "cli/pyjs.cjs": 1000 })] }), /rule 6/);
-fails("a range containing a reset, even when the final tree passes", range({ n: S(100000), m: S(100000), markers: [], epochChanged: true }), /epoch reset/);
-fails("a range that changes the key", range({ n: S(100000), m: S(100000), markers: [], key: KEY2 }), /key/);
-check("a range is flagged", range({ n: S(1), m: S(1), markers: [] }).notes.some((x) => /outside the single-writer/.test(x)));
-// ---- the absolute checks (schedule, dispatch)
-// ---- the examples gallery's three bundles (U7, daybreak2's ruling on #548): an absent tree isn't measured (a rebuilt
-// base from before the gallery), and a merge missing any of the three rows' bundles fails the measured-bundles check
-{
-  const t = mkdtempSync(join(tmpdir(), "size-examples-"));
-  mkdirSync(join(t, "examples", "notebook", "a"), { recursive: true });
-  writeFileSync(join(t, "examples", "notebook", "a", "main.ipynb"), "{}");
-  writeFileSync(join(t, "examples", "tags.json"), "[]");
-  check("examples: a base with the corpus but no site measures examples/corpus alone", JSON.stringify(Object.keys(examplesFiles(t))) === JSON.stringify(["examples/corpus"]), JSON.stringify(examplesFiles(t)));
-  check("examples: the corpus's files, sorted", JSON.stringify(examplesFiles(t)["examples/corpus"].map((f) => f.slice(t.length))) === JSON.stringify(["/examples/notebook/a/main.ipynb", "/examples/tags.json"]));
-  mkdirSync(join(t, "web", "site", "public", "examples", "notebook", "a"), { recursive: true });
-  writeFileSync(join(t, "web", "site", "public", "examples", "notebook", "a", "index.html"), "<p>");
-  check("examples: a site tree without its catalog isn't measured", JSON.stringify(Object.keys(examplesFiles(t))) === JSON.stringify(["examples/corpus"]));
-  writeFileSync(join(t, "web", "site", "public", "examples", "index.json"), "{}");
-  const f = examplesFiles(t);
-  check("examples: with the site's tree, all three", JSON.stringify(Object.keys(f).sort()) === JSON.stringify(["examples/corpus", "examples/index.json", "site/examples"]) && f["site/examples"].length === 2 && f["examples/index.json"].length === 1, JSON.stringify(Object.keys(f)));
-  check("examples: an empty tree measures nothing", JSON.stringify(examplesFiles(mkdtempSync(join(tmpdir(), "size-none-")))) === "{}");
-  rmSync(t, { recursive: true, force: true });
-  const three = { "examples/corpus": 2000, "site/examples": 7000, "examples/index.json": 200 };
-  const B3 = budgets({ sizes: { "cli/pyjs.cjs": 100000, "engine/w.js": 5000, ...three } });
-  passes("examples: a merge measuring all three rows", evaluate({ mode: "absolute", merge: { record: rec(MERGE, { ...S(100000), ...three }), budgets: B3, markers: [] }, declaredNode: "24.21.0" }));
-  for (const k of Object.keys(three)) {
-    const m = { ...S(100000), ...three };
-    delete m[k];
-    fails(`examples: a merge missing ${k}`, evaluate({ mode: "absolute", merge: { record: rec(MERGE, m), budgets: B3, markers: [] }, declaredNode: "24.21.0" }), new RegExp(`measured bundles differ.*listed but not measured: ${k.replace(/[./]/g, "\\$&")}`));
-  }
-}
-passes("absolute: within", evaluate({ mode: "absolute", merge: { record: rec(MERGE, S(100000)), budgets: budgets(), markers: [] }, declaredNode: "24.21.0" }));
-fails("absolute: over the ledger", evaluate({ mode: "absolute", merge: { record: rec(MERGE, S(100001)), budgets: budgets(), markers: [] }, declaredNode: "24.21.0" }), /rule 3/);
-// ---- docs-only inputs (r5 §1.5)
-for (const f of ["budgets.json", ".github/workflows/optional.yml", "scripts/ci-paths.mjs", "pnpm-lock.yaml", ".growth/x.json", "scripts/size-measure.mjs", "heap-budget.json", "core-api-surface.json"]) check(`docs-only: ${f} is a gate input`, gateInputs([f]).length === 1);
-check("docs-only: design/x.md is not a gate input", gateInputs(["design/x.md", "README.md"]).length === 0);
-// ---- normalization (r5 §1.6)
-{
-  const dir = mkdtempSync(join(tmpdir(), "size-measure-test-"));
-  try {
-    const write = (name, version, id, extra = "") => {
-      const f = join(dir, name);
-      writeFileSync(f, `globalThis.__SAGEBRUSH_BUILD_ID__ = ${JSON.stringify(id)};\nglobalThis.__SAGEBRUSH_VERSION__ = ${JSON.stringify(version)};\nlib();${extra}\n`);
-      return f;
-    };
-    const expected = { "cli/lib.gen.js": { VERSION: 1, BUILD_ID: 1 } };
-    const size = (version, id, extra) => {
-      const m = measureFiles({ "cli/lib.gen.js": [write("lib.gen.js", version, id, extra)] }, dir, { VERSION: version, BUILD_ID: id }, {}, expected);
-      return { size: m.sizes["cli/lib.gen.js"], problems: m.problems };
-    };
-    const a = size("0.9.9", "0123456789abcdef"), b = size("0.10.0", "0123456789abcdef"), c = size("0.10.0-rc.1", "fedcba9876543210");
-    check("normalization: 0.9.9 → 0.10.0 → 0.10.0-rc.1 and a build id change give Δ 0", a.size === b.size && b.size === c.size && !a.problems.length, `${a.size} ${b.size} ${c.size}`);
-    check("normalization: the value counts as NEUTRAL_WIDTH", a.size === size("0.9.9", "0123456789abcdef").size && NEUTRAL_WIDTH === 16);
-    check("normalization: an unrelated literal \"0.9.9\" still counts", size("0.9.9", "0123456789abcdef", ' x("0.9.9");').size === a.size + ' x("0.9.9");'.length);
-    check("normalization: an added field still counts", size("0.9.9", "0123456789abcdef", " globalThis.__SAGEBRUSH_OTHER__ = 1;").size > a.size);
-    check("normalization: an assignment beyond the count fails", size("0.9.9", "0123456789abcdef", ' globalThis.__SAGEBRUSH_VERSION__ = "0.9.9";').problems.some((p) => /VERSION/.test(p)));
-    const m0 = measureFiles({ "cli/lib.gen.js": [(() => { const f = join(dir, "none.js"); writeFileSync(f, "lib();\n"); return f; })()] }, dir, { VERSION: "0.9.9", BUILD_ID: "x" }, {}, expected);
-    check("normalization: a missing assignment fails", m0.problems.length === 2);
-    check("normalization: the minified form", countAssignments('globalThis.__SAGEBRUSH_VERSION__="0.9.9",globalThis.__SAGEBRUSH_VERSION__=`0.9.9`', "VERSION", "0.9.9") === 2);
-    check("normalization: only the known value", countAssignments('globalThis.__SAGEBRUSH_VERSION__="0.9.8"', "VERSION", "0.9.9") === 0);
-    const other = measureFiles({ "engine/w.js": [write("w.js", "0.9.9", "0123456789abcdef")] }, dir, { VERSION: "0.9.9", BUILD_ID: "0123456789abcdef" }, {}, expected);
-    check("normalization: an assignment in a bundle not listed fails", other.problems.some((p) => /engine\/w\.js/.test(p)));
-    check("normalization: the checkout path isn't counted", measureFiles({ "x": [(() => { const f = join(dir, "p.js"); writeFileSync(f, `a${dir}b`); return f; })()] }, dir, { VERSION: "v", BUILD_ID: "i" }, {}, {}).sizes.x === 2);
-  } finally {
-    rmSync(dir, { recursive: true, force: true });
-  }
-}
-// ---- base selection and the merge protocol, in a scratch repository (r5 §1.1, §3.2)
-{
-  const dir = mkdtempSync(join(tmpdir(), "size-measure-git-"));
-  const g = (cwd, ...a) => execFileSync("git", a, { cwd, encoding: "utf8", stdio: ["ignore", "pipe", "pipe"], env: { ...process.env, GIT_AUTHOR_NAME: "t", GIT_AUTHOR_EMAIL: "t@t", GIT_COMMITTER_NAME: "t", GIT_COMMITTER_EMAIL: "t@t" } }).trim();
-  try {
-    const origin = join(dir, "origin.git"), w = join(dir, "w");
-    g(dir, "init", "-q", "--bare", "-b", "master", origin);
-    g(dir, "clone", "-q", origin, w);
-    const commit = (msg) => (writeFileSync(join(w, "f"), msg), g(w, "add", "f"), g(w, "commit", "-q", "-m", msg), g(w, "rev-parse", "HEAD"));
-    const A0 = commit("a0");
-    g(w, "push", "-q", "origin", "HEAD:master");
-    const B = commit("b");
-    g(w, "push", "-q", "origin", "HEAD:master");
-    g(w, "checkout", "-q", "-b", "pr", A0);
-    const H = commit("h");
-    g(w, "checkout", "-q", "--detach", B);
-    g(w, "merge", "-q", "--no-ff", "--no-edit", "-X", "theirs", H);
-    const Mg = g(w, "rev-parse", "HEAD");
-    // base selection
-    const t = testedTransition({ cwd: w, name: "pull_request", ev: { pull_request: { head: { sha: H } } } });
-    check("base selection: a pull request's base is HEAD^1", t.mode === "transition" && t.base === B && t.head === H);
-    check("base selection: HEAD^2 ≠ the event's head fails", (() => { try { testedTransition({ cwd: w, name: "pull_request", ev: { pull_request: { head: { sha: A0 } } } }); return false; } catch { return true; } })());
-    check("base selection: a merge_group base ≠ HEAD^1 fails", (() => { try { testedTransition({ cwd: w, name: "merge_group", ev: { merge_group: { base_sha: A0 } } }); return false; } catch { return true; } })());
-    check("base selection: a merge_group base = HEAD^1", testedTransition({ cwd: w, name: "merge_group", ev: { merge_group: { base_sha: B } } }).base === B);
-    check("base selection: a schedule run is absolute", testedTransition({ cwd: w, name: "schedule", ev: {} }).mode === "absolute");
-    check("base selection: a first push (zero before) is absolute", testedTransition({ cwd: w, name: "push", ev: { before: "0".repeat(40) } }).mode === "absolute");
-    check("base selection: a push of one transition", testedTransition({ cwd: w, name: "push", ev: { before: B } }).mode === "transition");
-    const r = testedTransition({ cwd: w, name: "push", ev: { before: A0 } });
-    check("base selection: a multi-transition push uses the range rule", r.mode === "range" && r.k === 2, jcs(r));
-    g(w, "checkout", "-q", "--detach", H);
-    check("base selection: a head checkout (one parent) fails", (() => { try { testedTransition({ cwd: w, name: "pull_request", ev: { pull_request: { head: { sha: H } } } }); return false; } catch (e) { return /two-parent/.test(e.message); } })());
-    // the lease (astra's probe): master moved B → H, an ancestor of the merge
-    g(w, "push", "-q", "--force", "origin", `${H}:refs/heads/master`);
-    let plain = true;
-    try { g(w, "push", "-q", "origin", `${Mg}:refs/heads/master`); } catch { plain = false; }
-    check("the merge protocol: a plain push after B → H succeeds (the documented failure)", plain);
-    g(w, "push", "-q", "--force", "origin", `${H}:refs/heads/master`);
-    let lease = true;
-    try { g(w, "push", "-q", `--force-with-lease=refs/heads/master:${B}`, "origin", `${Mg}:refs/heads/master`); } catch { lease = false; }
-    check("the merge protocol: the lease push after B → H is rejected", !lease);
-    g(w, "push", "-q", "--force", "origin", `${A0}:refs/heads/master`);
-    lease = true;
-    try { g(w, "push", "-q", `--force-with-lease=refs/heads/master:${B}`, "origin", `${Mg}:refs/heads/master`); } catch { lease = false; }
-    check("the merge protocol: master reset to an ancestor of B rejects the lease", !lease);
-    g(w, "checkout", "-q", "--detach", B);
-    const D = commit("divergent");
-    g(w, "push", "-q", "--force", "origin", `${D}:refs/heads/master`);
-    lease = true;
-    try { g(w, "push", "-q", `--force-with-lease=refs/heads/master:${B}`, "origin", `${Mg}:refs/heads/master`); } catch { lease = false; }
-    check("the merge protocol: a divergent tip rejects the lease", !lease);
-    g(w, "push", "-q", "--force", "origin", `${B}:refs/heads/master`);
-    lease = true;
-    try { g(w, "push", "-q", `--force-with-lease=refs/heads/master:${B}`, "origin", `${Mg}:refs/heads/master`); } catch { lease = false; }
-    check("the merge protocol: master at B: the lease push lands B → M", lease && g(origin, "rev-parse", "refs/heads/master") === Mg);
-  } finally {
-    rmSync(dir, { recursive: true, force: true });
-  }
-}
-
-// ---- a dispatch's base (plan-size-gate-dispatch-range r2): master absolute; a head without origin/master
-// refused; one PR one transition (any number of commits); a train a range of k = its PR merges
-{
-  const dir = mkdtempSync(join(tmpdir(), "size-measure-dispatch-"));
-  const g = (cwd, ...a) => execFileSync("git", a, { cwd, encoding: "utf8", stdio: ["ignore", "pipe", "pipe"], env: { ...process.env, GIT_AUTHOR_NAME: "t", GIT_AUTHOR_EMAIL: "t@t", GIT_COMMITTER_NAME: "t", GIT_COMMITTER_EMAIL: "t@t" } }).trim();
-  // (true only for an error matching `re`: a wrong message is a failure, printed)
-  const throws = (f, re) => { try { f(); return false; } catch (e) { if (re.test(e.message)) return true; console.log(`  (got: ${e.message})`); return false; } };
-  try {
-    const origin = join(dir, "origin.git"), w = join(dir, "w"), o = join(dir, "other");
-    g(dir, "init", "-q", "--bare", "-b", "master", origin);
-    g(dir, "clone", "-q", origin, w);
-    g(dir, "clone", "-q", origin, o);
-    let n = 0;
-    const commit = (cwd, msg) => (writeFileSync(join(cwd, `f${n++}`), msg), g(cwd, "add", "-A"), g(cwd, "commit", "-q", "-m", msg), g(cwd, "rev-parse", "HEAD"));
-    const T0 = commit(w, "t0");
-    g(w, "push", "-q", "origin", "HEAD:master");
-    const D = (master) => testedTransition({ cwd: w, name: "workflow_dispatch", ev: {}, master });
-    const fetch = () => g(w, "fetch", "-q", "origin");
-    // master itself
-    fetch();
-    g(w, "checkout", "-q", "--detach", T0);
-    check("dispatch: HEAD == origin/master is absolute", D().mode === "absolute");
-    // one PR of one commit, HEAD not a merge (no HEAD^2 assumed: grader's note 1)
-    g(w, "checkout", "-q", "-b", "one", T0);
-    const H1 = commit(w, "h1");
-    let t = D();
-    check("dispatch: a one-commit PR (HEAD not a merge) is one transition against master's tip", t.mode === "transition" && t.base === T0 && t.head === H1 && t.merge === H1 && t.master === T0, jcs(t));
-    // a 30-commit PR with two merges of master in it: still one transition, never k = 30 (SG-1), and a merge
-    // of master is no PR merge
-    g(w, "checkout", "-q", "-b", "long", T0);
-    for (let i = 0; i < 10; i++) commit(w, `l${i}`);
-    g(o, "pull", "-q", "origin", "master");
-    commit(o, "t1a");
-    g(o, "push", "-q", "origin", "HEAD:master");
-    fetch();
-    g(w, "merge", "-q", "--no-edit", "origin/master");
-    for (let i = 10; i < 20; i++) commit(w, `l${i}`);
-    const T1 = commit(o, "t1");
-    g(o, "push", "-q", "origin", "HEAD:master");
-    fetch();
-    g(w, "merge", "-q", "--no-edit", "origin/master");
-    for (let i = 20; i < 30; i++) commit(w, `l${i}`);
-    t = D();
-    check("dispatch: a 30-commit PR with two merges of master in it is one transition (SG-1)", t.mode === "transition" && t.base === T1, jcs(t));
-    // a PR head that is its own merge commit (--no-ff onto master's tip): one transition
-    g(w, "checkout", "-q", "-b", "pr2", T1);
-    const P2 = commit(w, "p2");
-    g(w, "checkout", "-q", "--detach", T1);
-    g(w, "merge", "-q", "--no-ff", "--no-edit", P2);
-    t = D();
-    check("dispatch: a PR merged --no-ff onto master is one transition", t.mode === "transition" && t.base === T1, jcs(t));
-    // a train: three PR merges on master's tip: a range of k = 3
-    const prs = ["a", "b", "c"].map((x) => (g(w, "checkout", "-q", "-b", `tr-${x}`, T1), commit(w, `tr-${x}`)));
-    g(w, "checkout", "-q", "--detach", T1);
-    for (const p of prs) g(w, "merge", "-q", "--no-ff", "--no-edit", p);
-    const train = g(w, "rev-parse", "HEAD");
-    t = D();
-    check("dispatch: a train of 3 PR merges is a range, k = 3", t.mode === "range" && t.k === 3 && t.base === T1, jcs(t));
-    // master moved during the run: the run's own master (size-base's output) is used, not refused
-    const T2 = commit(o, "t2");
-    g(o, "push", "-q", "origin", "HEAD:master");
-    fetch();
-    t = D(T1);
-    check("dispatch: master moved during the run: the run's master is the base", t.mode === "range" && t.base === T1 && t.master === T1, jcs(t));
-    check("dispatch: a run's master that isn't a commit of origin/master is refused", throws(() => D(prs[0]), /isn't a commit of refs\/remotes\/origin\/master/));
-    check("dispatch: a malformed run's master is refused", throws(() => D("abc"), /isn't a commit of/));
-    // a stale head: master has moved past it (1 commit here, then 2)
-    const want = (k) => new RegExp(`^HEAD is ${k} behind origin/master ${g(w, "rev-parse", "origin/master")}: merge master and re-dispatch$`);
-    check("dispatch: a stale head (1 behind) is refused, as ruled", throws(() => D(), want(1)));
-    commit(o, "t3");
-    g(o, "push", "-q", "origin", "HEAD:master");
-    fetch();
-    check("dispatch: a stale head (2 behind) is refused, naming N and origin/master's sha", throws(() => D(), want(2)));
-    // a diverged head (master rewritten to a line HEAD doesn't contain)
-    g(o, "checkout", "-q", "--detach", T0);
-    const X = commit(o, "x");
-    g(o, "push", "-q", "--force", "origin", `${X}:refs/heads/master`);
-    fetch();
-    g(w, "checkout", "-q", "--detach", train);
-    check("dispatch: a diverged head is refused the same way", throws(() => D(), /^HEAD is 1 behind origin\/master [0-9a-f]{40}: merge master and re-dispatch$/));
-    // no origin/master: an error naming the ref, never absolute (N4)
-    g(w, "update-ref", "-d", "refs/remotes/origin/master");
-    check("dispatch: no origin/master is an error naming the ref", throws(() => D(), /refs\/remotes\/origin\/master is missing/));
-    // the modes it gives, through the gate's rules: a marker-short single PR fails (#164's case), a covered
-    // one passes; a train's noise is k transitions'; a train containing a reset fails (the push's range rule)
-    fails("dispatch, one PR: a marker short of Δ (#164's case)", transition({ n: S(100000), m: S(100547) }), /needs a marker/);
-    passes("dispatch, one PR: a marker covering Δ", transition({ n: S(100000), m: S(100547), markers: [mk({ "cli/pyjs.cjs": 547 })] }));
-    passes("dispatch, a train of 3: markers + 3 × noise", range({ n: S(100000), m: S(101000), markers: [mk({ "cli/pyjs.cjs": 1000 })], k: 3 }));
-    fails("dispatch, a train of 3: one byte past markers + 3 × noise", range({ n: S(100000), m: S(101001), markers: [mk({ "cli/pyjs.cjs": 1000 })], k: 3 }), /rule 6/);
-    fails("dispatch, a train containing a reset", range({ n: S(100000), m: S(100000), markers: [], k: 3, epochChanged: true }), /epoch reset/);
-  } finally {
-    rmSync(dir, { recursive: true, force: true });
-  }
-}
-
-// ---- CORR-GATE95-2 (#95 review): a max change must be a raise
-{
-  const t = (oldMax, newMax) => transition({ n: S(100000, 5000, 100), m: S(100000, 5000, 110), B: budgets({ max: newMax }), baseB: budgets({ max: oldMax }) });
-  fails("an exact bundle 100 → 110 while max is lowered 200 → 150 (a transition)", t(200, 150), /may not grow/);
-  fails("an exact bundle 100 → 110 with max unchanged at 200", t(200, 200), /may not grow/);
-  passes("an exact bundle 100 → 110 with max raised 100 → 150", t(100, 150));
-  const rg = (oldMax, newMax) => evaluate({ mode: "range", merge: { record: rec(MERGE, S(100000, 5000, 110)), budgets: budgets({ max: newMax }), markers: [] }, declaredNode: "24.21.0", base: { commit: BASE, record: rec(BASE, S(100000, 5000, 100)), budgets: budgets({ max: oldMax }), declaredKey: KEY }, markerDiff: [], range: { k: 2, epochChanged: false } });
-  fails("an exact bundle 100 → 110 while max is lowered 200 → 150 (a range)", rg(200, 150), /over the range/);
-  passes("an exact bundle 100 → 110 with max raised 100 → 150 (a range)", rg(100, 150));
-  // through a reset's map: the group's new maxima must sum above the old
-  const exBase = budgets({ sizes: { "engine/w.js": 5000 }, max: 200 });
-  const ren = (newMax) => {
-    const b = budgets({ sizes: { "engine/w.js": 5000 } });
-    delete b.bundles["cli/packages.gen.js"];
-    b.bundles["cli/pkgs.gen.js"] = { exact: true, max: newMax };
-    return b;
-  };
-  const eO = { "engine/w.js": 5000, "cli/packages.gen.js": 100 }, eM = { "engine/w.js": 5000, "cli/pkgs.gen.js": 110 };
-  fails("an exact rename that grows while its max is lowered 200 → 150", resetCase({ O: eO, N: eO, M: eM, baseB: exBase, B: ren(150), map: [{ old: ["cli/packages.gen.js"], new: ["cli/pkgs.gen.js"] }] }), /raise of max/);
-  passes("an exact rename that grows with its max raised 200 → 250", resetCase({ O: eO, N: eO, M: eM, baseB: exBase, B: ren(250), map: [{ old: ["cli/packages.gen.js"], new: ["cli/pkgs.gen.js"] }] }));
-}
-// ---- CORR-GATE95-3: the strict parser keeps every key as an own property
-{
-  const refused = (text, re) => { try { strictParse(text); return false; } catch (e) { return re.test(e.message); } };
-  check("strictParse: duplicate __proto__ refused (top level)", refused('{"__proto__":{},"__proto__":{}}', /duplicate/));
-  check("strictParse: duplicate __proto__ refused (nested)", refused('{"a":{"b":{"__proto__":1,"__proto__":2}}}', /duplicate/));
-  const o = strictParse('{"__proto__":{"x":1}}');
-  check("strictParse: __proto__ is an own data property, not the prototype", Object.hasOwn(o, "__proto__") && Object.getPrototypeOf(o) === null && o.x === undefined);
-  check("a record naming a bundle __proto__ is a bundle budgets.json doesn't list", evaluate({ mode: "absolute", merge: { record: (() => { const r = rec(MERGE, S(100000)); r.sizes = JSON.parse('{"__proto__":1,' + JSON.stringify(r.sizes).slice(1)); r.bundles = Object.keys(r.sizes).sort(); return r; })(), budgets: budgets(), markers: [] }, declaredNode: "24.21.0" }).problems.some((p) => /measured but not listed: __proto__/.test(p)));
-  check("strictParse: Object.prototype is untouched", ({}).x === undefined);
-  check("a marker with an extra __proto__ field is refused", parseMarker('{"v":1,"reason":"x","bytes":{"cli/pyjs.cjs":1},"__proto__":{"extra":1}}', budgets()).problems.some((p) => /exactly/.test(p)));
-  check("a marker's bytes with a __proto__ key are refused", parseMarker('{"v":1,"reason":"x","bytes":{"__proto__":1}}', budgets()).problems.length > 0);
-  const bud = clone(budgets());
-  const text = JSON.stringify(bud).replace('"toolchain":', '"__proto__":{"a":1},"toolchain":');
-  check("budgets.json with a __proto__ key is refused", budgetsProblems(strictParse(text)).some((p) => /unknown key __proto__/.test(p)));
-  check(`strictParse: nesting at ${MAX_DEPTH} admitted`, (() => { try { strictParse("[".repeat(MAX_DEPTH) + "]".repeat(MAX_DEPTH)); return true; } catch { return false; } })());
-  check(`strictParse: nesting at ${MAX_DEPTH + 1} refused`, refused("[".repeat(MAX_DEPTH + 1) + "]".repeat(MAX_DEPTH + 1), /nesting/));
-}
-// ---- LIMIT-GATE95-2: hard caps before parsing
-{
-  check("overCap: at the cap", overCap("x", 10, 10) === null);
-  check("overCap: one over", overCap("x", 11, 10) !== null);
-  const pad = (n) => {
-    const base = marker({ "cli/pyjs.cjs": 1 }, "");
-    const t = marker({ "cli/pyjs.cjs": 1 }, "r".repeat(n - base.length));
-    return t;
-  };
-  check("a marker of exactly marker_bytes is admitted", pad(LIMITS.marker_bytes).length === LIMITS.marker_bytes && parseMarker(pad(LIMITS.marker_bytes), budgets()).problems.every((p) => !/cap/.test(p)));
-  check("a marker of marker_bytes + 1 is refused before parsing", parseMarker(pad(LIMITS.marker_bytes + 1), budgets()).problems.some((p) => /over the cap/.test(p)));
-  check("a reason of string_chars is admitted", parseMarker(marker({ "cli/pyjs.cjs": 1 }, "r".repeat(LIMITS.string_chars)), budgets()).problems.length === 0);
-  check("a reason of string_chars + 1 is refused", parseMarker(marker({ "cli/pyjs.cjs": 1 }, "r".repeat(LIMITS.string_chars + 1)), budgets()).problems.some((p) => /reason is over/.test(p)));
-  const many = (n) => Array.from({ length: n }, (_, i) => ({ path: `.growth/m${i}.json`, text: marker({ "cli/pyjs.cjs": 1 }) }));
-  const withMarkers = (ms) => evaluate({ mode: "absolute", merge: { record: rec(MERGE, S(100000)), budgets: budgets(), markers: ms }, declaredNode: "24.21.0" });
-  check("markers: exactly the cap is admitted", !withMarkers(many(LIMITS.markers)).problems.some((p) => /over the cap/.test(p)));
-  fails("markers: one over the cap", withMarkers(many(LIMITS.markers + 1)), /over the cap of 256/);
-  const big = Array.from({ length: 70 }, (_, i) => ({ path: `.growth/b${i}.json`, text: marker({ "cli/pyjs.cjs": 1 }, "r".repeat(1000)) + " ".repeat(3800 - 1000) }));
-  fails("markers: their total over markers_total_bytes", withMarkers(big), /in all/);
-  const b2 = budgets();
-  for (let i = 0; i < LIMITS.entries; i++) b2.bundles[`engine/x${i}.js`] = ne(10), (b2.epoch.sizes[`engine/x${i}.js`] = 1);
-  check("budgets.json: more than the entry cap refused", budgetsProblems(b2).some((p) => /more than 1024 bundles/.test(p)));
-  const r2 = rec(BASE, S(1));
-  r2.bundles = Array.from({ length: LIMITS.entries + 1 }, (_, i) => `b${i}`);
-  check("a record with more than the entry cap refused", recordProblems(r2, BASE).some((p) => /more than 1024/.test(p)));
-  const lgBad = evaluate({ mode: "transition", merge: { record: rec(MERGE, S(100000, 5000, 300)), budgets: budgets(), markers: [] }, declaredNode: "24.21.0", base: { commit: BASE, record: rec(BASE, S(100000, 5000, 300)), budgets: null, declaredKey: KEY }, legacy: { measured: { "cli/pyjs.cjs": "100000" }, recorded: null }, markerDiff: [] });
-  fails("the cross-check's legacy input must be safe integers", lgBad, /non-negative safe integers/);
-}
-// ---- LIMIT-GATE95-1 and CORR-GATE95-1: the workflow's bounds and inputs
-{
-  const ci = readFileSync(new URL("../.github/workflows/ci.yml", import.meta.url), "utf8");
-  const job = (name) => {
-    const start = ci.indexOf(`\n  ${name}:\n`);
-    const rest = ci.slice(start + 1);
-    const end = rest.slice(1).search(/\n  [a-z][a-z0-9-]*:\n/);
-    return end < 0 ? rest : rest.slice(0, end + 1);
-  };
-  const sb = job("size-base");
-  const outer = Number(/\n    timeout-minutes: (\d+)/.exec(sb)?.[1]);
-  const steps = [...sb.matchAll(/\n        timeout-minutes: (\d+)/g)].map((m) => Number(m[1]));
-  const OVERHEAD = 15;
-  // (and inside each step: the `timeout <n>m` commands one after another fit in its own timeout-minutes)
-  for (const m of sb.matchAll(/\n      - name: ([^\n]+)\n((?:        [^\n]*\n|\n)*)/g)) {
-    const body = m[2], own = Number(/^        timeout-minutes: (\d+)/m.exec(body)?.[1]);
-    const inner = [...body.matchAll(/\btimeout (\d+)m\b/g)].map((t) => Number(t[1]));
-    if (inner.length && own) check(`size-base, ${m[1]}: its inner timeouts (${inner.join(" + ")}) fit in its ${own} minutes`, safeSum(inner) <= own, `${safeSum(inner)} > ${own}`);
-  }
-  // (a sum counts only the timeouts that are there: each wasm fetch, one per worktree, must carry its own)
-  const fetches = sb.split("\n").filter((l) => /scripts\/wasm-fetch\.mjs/.test(l) && !/^\s*#/.test(l));
-  const bare = fetches.filter((l) => !/\btimeout \d+m node scripts\/wasm-fetch\.mjs\b/.test(l));
-  check(`size-base: each of its ${fetches.length} wasm fetches runs under its own \`timeout <n>m\``, fetches.length >= 2 && bare.length === 0, bare.map((l) => l.trim()).join(" | ") || `${fetches.length} fetches`);
-  check(`size-base: the outer timeout ${outer} covers every sequential step (${steps.join(" + ")}) + ${OVERHEAD} of overhead`, outer >= safeSum(steps) + OVERHEAD && steps.length >= 4, `${outer} < ${safeSum(steps)} + ${OVERHEAD}`);
-  check("size-base: its mode is a job output", /outputs:\n      mode: \$\{\{ steps\.resolve\.outputs\.mode \}\}/.test(sb));
-  const sg = job("size-gate");
-  check("size-gate: an absolute run doesn't download base records", /name: size-base-\$\{\{ github\.sha \}\}/.test(sg) && /needs\.size-base\.outputs\.mode != 'absolute'/.test(sg));
-}
-
-// ---- jitter (William, Oct 23: 64 B / 1 KiB for cli/pyjs.cjs only; plan r6 §1.3 rules 2, 3, 5)
-{
-  const committed = strictParse(readFileSync(new URL("../budgets.json", import.meta.url), "utf8"));
-  const jitter = Object.entries(committed.bundles).filter(([, e]) => !e.exact && (e.noise_bytes || e.noise_total));
-  check("budgets.json: only cli/pyjs.cjs has jitter, at exactly 64 B / 1024 B", jitter.length === 1 && jitter[0][0] === "cli/pyjs.cjs" && jitter[0][1].noise_bytes === 64 && jitter[0][1].noise_total === 1024, jcs(jitter));
-  check("budgets.json is valid", budgetsProblems(committed).length === 0, jcs(budgetsProblems(committed)));
-  // the reset's exception, written out (daybreak2's r4 note): charge <= noise_bytes needs no growth entry;
-  // otherwise charge <= growth <= charge + marker_slack
-  const jb = (b) => {
-    b.bundles["cli/pyjs.cjs"].noise_bytes = 64;
-    b.bundles["cli/pyjs.cjs"].noise_total = 1024;
-    return b;
-  };
-  const baseB = jb(budgets({ sizes: { "cli/pyjs.cjs": 100000, "engine/w.js": 5000 } }));
-  passes("a reset with charge = noise_bytes (64) needs no growth entry", resetCase({ O: R(100000), N: R(100064), M: R(100064), baseB, B: clone(baseB) }));
-  fails("a reset with charge = noise_bytes + 1 (65) needs one", resetCase({ O: R(100000), N: R(100065), M: R(100065), baseB, B: clone(baseB) }), /needs epoch\.reset\.growth/);
-  passes("a reset with charge 65 and a tight entry", resetCase({ O: R(100000), N: R(100065), M: R(100065), baseB, B: clone(baseB), growth: { "cli/pyjs.cjs": 65 } }));
-  // and the ordinary rules at the committed values
-  const B = jb(budgets());
-  passes("Δ = 64 on cli/pyjs.cjs, no marker", transition({ n: S(100000), m: S(100064), B, baseB: B }));
-  fails("Δ = 65 on cli/pyjs.cjs, no marker", transition({ n: S(100000), m: S(100065), B, baseB: B }), /needs a marker/);
-  passes("drift up to epoch + noise_total (1024)", transition({ n: S(100990), m: S(101024), B, baseB: B }));
-  fails("drift one past noise_total", transition({ n: S(100990), m: S(101025), B, baseB: B }), /rule 3/);
-  fails("jitter on another bundle stays zero (engine/w.js +1)", transition({ n: S(100000, 5000), m: S(100000, 5001), B, baseB: B }), /engine\/w\.js.*needs a marker/);
-}
-
-console.log(`test-size-measure: ${passed} passed, ${failures} failed`);
-if (failures) process.exit(1);
+// Workflow wiring: base always rebuilt under this run's recipe/pins, no epochs,
+// and advice must not read the removed budget file.
+const ci = readFileSync(new URL("../.github/workflows/ci.yml", import.meta.url), "utf8");
+assert(!ci.includes("need_old")); assert(!ci.includes("--legacy")); assert(!ci.includes("size-advice.mjs --core"));
+for (const [name, pin] of [["bun-version", TOOLCHAIN.bun], ["node-version", TOOLCHAIN.node]])
+  assert(ci.includes(name + ': "' + pin + '"'));
+assert(!readFileSync(new URL("./size-measure.mjs", import.meta.url), "utf8").includes("function epochReset"));
+console.log("test-size-measure: stateless boundaries, records, normalization, transitions and CI all pass");

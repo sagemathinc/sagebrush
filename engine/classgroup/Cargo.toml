@@ -12,6 +12,11 @@ sagebrush-interrupt = { path = "../interrupt" }
 num-integer = "0.1"
 num-traits = "0.2"
 sagebrush-poly = { path = "../poly" }
+sagebrush-arith = { path = "../arith", default-features = false }
+
+[dev-dependencies]
+# (the LLL benchmark examples drive the unbudgeted L^2 entries)
+sagebrush-poly = { path = "../poly", features = ["bench"] }
 
 [lints]
 workspace = true

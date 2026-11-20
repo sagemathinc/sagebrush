@@ -3,6 +3,11 @@
 *October 12, 2026.* William's requirement: Sagebrush should be software where
 XSS attacks are not possible, even at the cost of functionality.
 
+This is the detailed design and review history for the implementation. The
+normative goals, trust boundaries, weaker modes, and honest current status are
+in [SECURITY-MODEL.md](../SECURITY-MODEL.md). Vulnerability reporting remains
+in [SECURITY.md](../SECURITY.md).
+
 ## What is at stake
 
 sagebrush.space keeps a person's notebooks, boards and files in their
