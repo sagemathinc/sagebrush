@@ -2,7 +2,7 @@
 // Replay queue payloads against real git histories, including a cumulative head.
 import assert from 'node:assert/strict';
 import { execFileSync, spawnSync } from 'node:child_process';
-import { mkdtempSync, writeFileSync, rmSync } from 'node:fs';
+import { existsSync, mkdtempSync, readdirSync, writeFileSync, rmSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { fileURLToPath } from 'node:url';
@@ -72,6 +72,48 @@ assert.equal(guard(appGuard, passingApp), 0);
 for (const env of [{ PAGE: 'skipped' }, { APP: 'failure' }, { WASM_CHANGES: 'skipped' }, { WASM: 'failure' }])
   assert.notEqual(guard(appGuard, { ...passingApp, ...env }), 0);
 console.log('PASS: required workflow triggers and aggregate failure/skip guards');
+
+// Queue runs never write a cache: a queue ref is unique, so a cache saved there is never read again and only evicts
+// master's.  Every cache-capable step of a workflow that runs on merge_group, and of every local action, is guarded;
+// a cache action this test doesn't know fails it, so a new writer can't slip through.
+{
+  const NO_QUEUE = "github.event_name != 'merge_group'";
+  const parse = path => JSON.parse(execFileSync('bun', ['-e',
+    'console.log(JSON.stringify(Bun.YAML.parse(await Bun.file(process.argv[1]).text())))', path], { encoding: 'utf8' }));
+  const files = [];
+  const wfDir = join(root, '.github/workflows'), acDir = join(root, '.github/actions');
+  for (const f of readdirSync(wfDir).filter(f => /\.ya?ml$/.test(f))) {
+    const wf = parse(join(wfDir, f));
+    if (wf.on && typeof wf.on === 'object' && 'merge_group' in wf.on)
+      files.push([f, Object.values(wf.jobs).flatMap(j => j.steps ?? [])]);
+  }
+  for (const d of existsSync(acDir) ? readdirSync(acDir) : []) {
+    for (const n of ['action.yml', 'action.yaml']) {
+      const f = join(acDir, d, n);
+      if (existsSync(f)) files.push([`actions/${d}/${n}`, parse(f).runs?.steps ?? []]);
+    }
+  }
+  assert.ok(files.some(([f]) => f === 'ci.yml') && files.some(([f]) => f === 'app.yml'), 'ci.yml and app.yml run on merge_group');
+  let writers = 0;
+  for (const [file, steps] of files) for (const step of steps) {
+    const uses = String(step.uses ?? ''), action = uses.split('@')[0], w = step.with ?? {};
+    const where = `${file}: ${step.name ?? uses}`;
+    if (/^actions\/setup-(node|python)$/.test(action)) {
+      if ('cache' in w) { writers++; assert.ok(String(w.cache).includes(NO_QUEUE), `${where}: its cache input is set on merge_group`); }
+    } else if (action === 'Swatinem/rust-cache') {
+      writers++; assert.ok(String(w['save-if'] ?? '').includes(NO_QUEUE), `${where}: rust-cache saves on merge_group`);
+    } else if (action === 'actions/cache/restore') {
+      // restoring is fine
+    } else if (action === 'actions/cache/save' || action === 'actions/cache') {
+      writers++; assert.ok(String(step.if ?? '').includes(NO_QUEUE), `${where}: a cache save runs on merge_group`);
+    } else {
+      assert.ok(!/cache/i.test(action), `${where}: an unknown cache action; guard it here`);
+      assert.ok(!('cache' in w), `${where}: an unknown action with a cache input; guard it here`);
+    }
+  }
+  assert.ok(writers >= 40, `every cache writer is checked (${writers})`);
+  console.log(`PASS: no cache writer runs on merge_group (${writers} guarded steps)`);
+}
 try {
   git('init', '-q', '-b', 'master');
   git('config', 'user.name', 'Test'); git('config', 'user.email', 'test@example.invalid');

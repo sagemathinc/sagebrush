@@ -71,6 +71,7 @@ jobs:
       - uses: Swatinem/rust-cache@d1527c8f67ef9af357290475d4af4b0fab8f12e0 # v2.9.3
         with:
           workspaces: engine
+          save-if: ${{ github.event_name != 'merge_group' }}
       - uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020 # v4.4.0
         with:
           node-version: 24
@@ -101,7 +102,7 @@ jobs:
       - uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020 # v4.4.0
         with:
           node-version: 24
-          cache: pnpm
+          cache: ${{ github.event_name != 'merge_group' && 'pnpm' || '' }}
       # (the four WebAssembly modules wasm/pins.json names: this run's build on a track ref or an engine-changing pull
       # request, else the published ones: design/wasm-artifacts.md sections 4 and 6)
       - uses: ./.github/actions/wasm-modules
@@ -149,6 +150,7 @@ jobs:
       - uses: Swatinem/rust-cache@d1527c8f67ef9af357290475d4af4b0fab8f12e0 # v2.9.3
         with:
           workspaces: app/src-tauri
+          save-if: ${{ github.event_name != 'merge_group' }}
       # (`apt-get update` has hung silently: on Nov 1 and twice on Nov 10 it
       # printed nothing after "Get:5 ... jammy-security InRelease" until the
       # job's 40-minute timeout. On a passing run it takes 8-26 s (30 passes,
