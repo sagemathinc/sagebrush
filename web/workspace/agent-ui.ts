@@ -24,6 +24,9 @@ export type PairingWorkspace = GrantStore & {
   stat(p: string): Promise<{ trashed?: { from: string } } | null | undefined>;
 };
 
+/** The chips' menus, numbered once for the page: no two mounts give two menus one id. */
+let menuSeq = 0;
+
 export const SAFARI = "Safari can't reach a program on this computer: use Chrome or Firefox.";
 // (Chrome asks once, per site, before a page may reach a program on this computer (Chrome 149: its "loopback network"
 // permission); headless or blocked, the socket fails with ERR_BLOCKED_BY_LOCAL_NETWORK_ACCESS_CHECKS.  A paraphrase, not
@@ -92,9 +95,10 @@ const CSS = `
 .sbag-bar button.chip > span:not(.dot) { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; min-width: 0; }
 .sbag-bar button.chip:hover, .sbag-bar button.chip[aria-expanded=true] { background: #e9e7de; }
 .sbag-bar .dot { width: 7px; height: 7px; border-radius: 50%; background: #4f8a3c; flex: none; }
-.sbag-bar .menu { display: none; position: absolute; left: 0; bottom: calc(100% + 6px); z-index: 1000; min-width: 260px; max-width: min(420px, 90vw); background: #fff; color: #24231f; border: 1px solid #e0ddd2; border-radius: 10px; box-shadow: 0 6px 20px rgba(0,0,0,.15); padding: 8px; gap: 6px; }
+.sbag-bar .menu { display: none; position: fixed; z-index: 10000; min-width: 260px; max-width: min(420px, calc(100vw - 16px)); background: #fff; color: #24231f; border: 1px solid #e0ddd2; border-radius: 10px; box-shadow: 0 6px 20px rgba(0,0,0,.15); padding: 8px; gap: 6px; }
 .sbag-bar.open .menu { display: grid; }
-.sbag-bar.down .menu { bottom: auto; top: calc(100% + 6px); }
+.sbag-bar .menu .items { display: grid; gap: 6px; }
+.sbag-bar .sr { position: absolute; width: 1px; height: 1px; overflow: hidden; clip: rect(0 0 0 0); white-space: nowrap; }
 .sbag-bar .menu .full { color: #6b6a63; line-height: 1.4; }
 .sbag-bar .menu button { text-align: left; border: 1px solid #e0ddd2; background: #fff; color: #24231f; border-radius: 6px; padding: 5px 10px; }
 .sbag-bar .menu button:hover, .sbag-bar .menu button:focus-visible { background: #f4f3ee; }
@@ -192,23 +196,32 @@ export function mountAgentPairing(ws: PairingWorkspace, o: { button?: HTMLElemen
     return close;
   }
 
-  // (the chip's menu closes on a press anywhere else on the page)
-  let menuSeq = 0;
+  // (the chip's menu closes on a press anywhere else on the page, and when the page scrolls or resizes under it)
   let closeMenu: (() => void) | null = null;
+  // (what the bar is drawn from, but for its counts: the same, its words are updated in place, so focus and a press
+  //  under way are kept; else it is drawn again)
+  let barKey = "";
+  let barText: ((short: string, full: string) => void) | null = null;
   document.addEventListener("pointerdown", (e) => { if (bar && closeMenu && !bar.contains(e.target as Node)) closeMenu(); }, true);
+  addEventListener("resize", () => closeMenu?.());
+  addEventListener("scroll", (e) => { if (bar && !bar.contains(e.target as Node)) closeMenu?.(); }, true);
 
   function showBar() {
-    // (drawn again as its counts change: a menu the person has open stays open, without taking the focus)
-    const wasOpen = !!bar?.classList.contains("open");
-    bar?.remove();
     const p = pairing;
-    if (!p || p.state !== "granted" || !p.grant) { bar = null; return; }
+    if (!p || p.state !== "granted" || !p.grant) { bar?.remove(); bar = null; barKey = ""; barText = null; closeMenu = null; return; }
     const g = p.grant;
     const where = g.folders.includes("/") ? "everywhere" : "in " + g.folders.join(", ");
     const changes = `${p.changes} change${p.changes === 1 ? "" : "s"}`;
-    // (the whole of it, in the chip's menu and its title; the chip says it short: W4)
+    // (the whole of it, as the menu's description and the chip's title; the chip says it short: W4)
     const full = `${p.hello!.agent.name} (as it says): ${g.write ? "read and write" : "read only"} ${where}${g.run ? " · may run code" : ""} · ${changes}`;
     const short = `${p.hello!.agent.name} · ${g.write ? "can edit" : "read only"}${g.folders.includes("/") ? "" : " · some folders"}${g.run ? " · runs code" : ""} · ${changes}`;
+    const made = o.open && p.created ? p.created : null;
+    const key = JSON.stringify([p.hello!.agent.name, !!p.link, p.computer ?? "", g.run, made?.path ?? "", made?.kind ?? ""]);
+    if (bar && key === barKey && barText) { barText(short, full); return; }
+    // (drawn again: an open menu stays open, and the control that had the focus gets it back)
+    const wasOpen = !!bar?.classList.contains("open");
+    const had = bar && bar.contains(document.activeElement) ? (document.activeElement as HTMLElement).textContent : null;
+    bar?.remove();
     // (over a runner, Revoke is a Disconnect that also stops the agent there: the runner ends its process group)
     const revoke = p.link ? h("button", { textContent: "Disconnect", title: `Disconnect and stop the agent on ${p.computer}` }) : h("button", { textContent: "Revoke" });
     revoke.className = "danger";
@@ -217,7 +230,6 @@ export function mountAgentPairing(ws: PairingWorkspace, o: { button?: HTMLElemen
     const noRun = g.run ? h("button", { textContent: "Turn off running code", title: "The agent may no longer run code, and a run going now stops (connect it again to allow it)" }) : null;
     if (noRun) noRun.onclick = () => void p.noRun();
     // (Open: what the agent created last, where the page can open it (its `open`), as Files would)
-    const made = o.open && p.created ? p.created : null;
     // (a board it made opens in a tab of its own, never by itself (a tab only opens on a click, and this page keeps the
     //  pairing): said as what the agent did, with Open beside it, the bar's one call to action)
     const board = made?.kind === "board";
@@ -225,38 +237,59 @@ export function mountAgentPairing(ws: PairingWorkspace, o: { button?: HTMLElemen
     if (open && made) open.onclick = () => o.open!(made);
     const did = board && open ? h("span", { className: "made" }, `${p.hello!.agent.name} made`, h("b", { textContent: nameOf(made!.path) }), open) : open;
     // (the chip, and its menu: what the agent may do, Turn off running code, and Revoke one click away; by keyboard too:
-    //  Enter, Space or ↓ opens it on its first control, ↑ ↓ move, Escape and Tab close it, focus back on the chip)
-    const chip = h("button", { className: "chip", title: full }, h("span", { className: "dot" }), h("span", { textContent: short }), h("span", { textContent: "▾" }));
+    //  Enter, Space or ↓ opens it on its first control, ↑ ↓ Home End move, Escape closes it back on the chip, Tab closes it)
+    const n = ++menuSeq;
+    const chipWords = h("span", { textContent: short });
+    const arrow = h("span", { textContent: "▾" });
+    arrow.setAttribute("aria-hidden", "true");
+    const chip = h("button", { className: "chip", title: full }, h("span", { className: "dot" }), chipWords, arrow);
     const items = [...(noRun ? [noRun] : []), revoke];
-    const menu = h("div", { className: "menu", id: `sbag-menu-${++menuSeq}` }, h("div", { className: "full", textContent: full }), ...items);
-    menu.setAttribute("role", "menu");
-    menu.setAttribute("aria-label", `${p.hello!.agent.name}: access`);
+    const fullEl = h("div", { className: "full", id: `sbag-menu-desc-${n}`, textContent: full });
+    const list = h("div", { className: "items", id: `sbag-menu-${n}` }, ...items);
+    list.setAttribute("role", "menu");
+    list.setAttribute("aria-label", `${p.hello!.agent.name}: access`);
+    list.setAttribute("aria-describedby", fullEl.id);
     for (const b of items) { b.setAttribute("role", "menuitem"); b.tabIndex = -1; }
+    const menu = h("div", { className: "menu" }, fullEl, list);
     chip.setAttribute("aria-haspopup", "menu");
     chip.setAttribute("aria-expanded", "false");
-    chip.setAttribute("aria-controls", menu.id);
+    chip.setAttribute("aria-controls", list.id);
+    // (said to a screen reader as it changes: the summary only, never the menu)
+    const said = h("span", { className: "sr", textContent: short });
+    said.setAttribute("role", "status");
+    barText = (sh, fu) => { chipWords.textContent = sh; said.textContent = sh; chip.title = fu; fullEl.textContent = fu; };
+    const place = () => {
+      // (fixed, from the chip's own box: no ancestor clips it; above the chip where there is room, else below; kept
+      //  within the window's width)
+      const r = chip.getBoundingClientRect(), w = menu.offsetWidth, ht = menu.offsetHeight;
+      menu.style.left = `${Math.max(8, Math.min(r.left, innerWidth - w - 8))}px`;
+      menu.style.top = `${r.top - ht - 6 >= 8 ? r.top - ht - 6 : Math.min(r.bottom + 6, innerHeight - ht - 8)}px`;
+    };
     const show = (on: boolean, focus = on) => {
       if (!bar) return;
-      // (below the chip where there's no room above it, as in a page's header)
-      if (on) bar.classList.toggle("down", bar.getBoundingClientRect().top < 260);
       bar.classList.toggle("open", on);
       chip.setAttribute("aria-expanded", String(on));
+      if (on) place();
       if (on && focus) items[0].focus();
       else if (!on && focus) chip.focus();
     };
     chip.onclick = () => show(!bar?.classList.contains("open"));
     chip.onkeydown = (e) => { if (e.key === "ArrowDown") { e.preventDefault(); show(true); } };
-    menu.onkeydown = (e) => {
+    list.onkeydown = (e) => {
+      // (a key held down from the chip's Enter never repeats onto a control: Revoke may be the first)
+      if (e.repeat) { e.preventDefault(); return; }
       const i = items.indexOf(document.activeElement as HTMLButtonElement);
       if (e.key === "Escape") { e.preventDefault(); show(false, true); }
       else if (e.key === "Tab") show(false, false);
       else if (e.key === "ArrowDown" || e.key === "ArrowUp") { e.preventDefault(); items[(i + (e.key === "ArrowDown" ? 1 : items.length - 1)) % items.length].focus(); }
+      else if (e.key === "Home" || e.key === "End") { e.preventDefault(); items[e.key === "Home" ? 0 : items.length - 1].focus(); }
     };
     closeMenu = () => show(false, false);
-    bar = h("div", { className: "sbag-bar" }, chip, menu, ...(did ? [did] : []));
-    bar.setAttribute("role", "status");
+    bar = h("div", { className: "sbag-bar" }, chip, menu, said, ...(did ? [did] : []));
+    barKey = key;
     dock();
     if (wasOpen) show(true, false);
+    if (had !== null) [chip, ...items].find((b) => b.textContent === had)?.focus();
   }
   // (the bar's place: a [data-sbag-slot] the page shows, a row or a header of its layout, the highest-numbered one (an
   //  editor's page over the notebook page's); an overlay at the bottom left only on a page that has none. Placed again,

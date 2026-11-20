@@ -132,6 +132,22 @@ try {
       const r = { exp: c.getAttribute("aria-expanded"), focus: document.activeElement?.textContent };
       document.activeElement.dispatchEvent(new KeyboardEvent("keydown", { key: "Escape", bubbles: true })); return r; })()`);
     ok(keyOpen.exp === "true" && keyOpen.focus === (run ? "Turn off running code" : "Revoke"), "W4: ↓ on the chip opens its menu too", keyOpen);
+    // (the menu open, focus in it, and the agent changes a file: the counts change in place, the menu stays open, the
+    //  focus where it was; a held Enter never repeats onto a control; Home, End; the menu within the window; the live
+    //  region says the summary only)
+    await ev(`(() => { const c = document.querySelector(".sbag-bar button.chip"); c.focus(); c.click(); const k = (key) => document.activeElement.dispatchEvent(new KeyboardEvent("keydown", { key, bubbles: true })); k("End"); return true; })()`);
+    const before = await ev(`document.querySelector(".sbag-bar button.chip").textContent`);
+    ok(!!(await req("workspace.create", { path: `/w4-count-${run ? "run" : "norun"}.txt`, content: { text: "x" } })).ok, "(the agent writes a file while the menu is open)");
+    ok(await until(`document.querySelector(".sbag-bar button.chip").textContent !== ${JSON.stringify(before)}`), "W4: the chip's count moves");
+    const kept = await ev(`(() => { const c = document.querySelector(".sbag-bar button.chip"), m = document.querySelector(".sbag-bar .menu"), r = m.getBoundingClientRect();
+      const rep = new KeyboardEvent("keydown", { key: "Enter", repeat: true, bubbles: true, cancelable: true }); document.activeElement.dispatchEvent(rep);
+      const home = (document.activeElement.dispatchEvent(new KeyboardEvent("keydown", { key: "Home", bubbles: true })), document.activeElement?.textContent);
+      return { open: c.getAttribute("aria-expanded") === "true", focus: document.activeElement?.getAttribute("role"), repeatStopped: rep.defaultPrevented, home,
+        inWindow: r.left >= 0 && r.top >= 0 && r.right <= innerWidth && r.bottom <= innerHeight,
+        live: [...document.querySelectorAll(".sbag-bar [role=status]")].map((e) => e.textContent), statusWrapsMenu: !!document.querySelector(".sbag-bar[role=status], [role=status] [role=menu]") }; })()`);
+    ok(kept.open && kept.focus === "menuitem" && kept.repeatStopped && kept.home === (run ? "Turn off running code" : "Revoke") && kept.inWindow && kept.live.length === 1 && kept.live[0].includes("change") && !kept.statusWrapsMenu,
+      "W4: counts change in place (menu open, focus kept); a repeated Enter is stopped; Home; the menu within the window; the live region is the summary only", kept);
+    await ev(`(document.activeElement.dispatchEvent(new KeyboardEvent("keydown", { key: "Escape", bubbles: true })), true)`);
   };
 
   // ---- a grant with May run code: every run verb works here
