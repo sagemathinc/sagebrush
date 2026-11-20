@@ -64,6 +64,7 @@ fn requests() -> Vec<Value> {
         json!({"fn": "qpoly_add", "a": "1/2,0,3", "b": "-1/2,1/3"}),
         json!({"fn": "qpoly_sub", "a": "1/2,0,3", "b": "1/2,0,3"}),
         json!({"fn": "qpoly_eval", "a": "1/2,0,3", "b": "-2/3"}),
+        json!({"fn": "zpoly_fdiv", "a": "-7,0,1f", "b": "-3"}),
         json!({"fn": "poly_gcd", "a": [1, 1], "b": [1, -1]}),
         json!({"fn": "poly_divexact", "a": [-1, 0, 1], "b": [1, 1]}),
         json!({"fn": "newspace", "n": 11, "k": 2}),

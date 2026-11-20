@@ -529,10 +529,46 @@ def qscale_checks(r):
         q = num / (t + 2)
         assert str(q.parent()) == "Fraction Field of Univariate Polynomial Ring in t over " + base, (num, q.parent())
         n += 1
-    # (//, % and divmod by a Rational keep their ring from the value, as
-    # before; their parity with Sage is a later change)
-    for got, want, ring in (((t + 2) // QQ(2), [1], Z), ((t + 2) % QQ(2), [0, 1], Z), (divmod(3 * t + 5, QQ(2))[1], [1, 1], Z), ((t + 2) // h, [4, 2], T)):
+    # (//, % and divmod as Sage: over ZZ, // by a number floors each
+    # coefficient (in the engine, zpoly_fdiv); % and divmod are quo_rem's,
+    # so (-t-1) % 3 is -t - 1 and divmod(-t-1, 3) is (0, -t - 1) while
+    # (-t-1) // 3 is -t - 1; by a Rational, // floors when it is integral
+    # and % and divmod divide exactly over QQ; an integer or a Rational on
+    # the left is the constant of its parent's ring)
+    rows = [
+        ((t + 2) // QQ(2), [1], Z), ((t + 2) % QQ(2), [], T), (divmod(3 * t + 5, QQ(2))[1], [], T),
+        (divmod(3 * t + 5, QQ(2))[0], [Fraction(5, 2), Fraction(3, 2)], T), ((3 * t + 5) // 2, [2, 1], Z),
+        ((-t - 1) // 3, [-1, -1], Z), ((-t - 1) % 3, [-1, -1], Z), (divmod(-t - 1, 3)[0], [], Z), (divmod(-t - 1, 3)[1], [-1, -1], Z),
+        ((t + 1) % -3, [1, 1], Z), ((3 * t + 5) // -3, [-2, -1], Z), ((t + 1) // 3, [], Z), ((5 * t - 7) // 1, [-7, 5], Z),
+        ((5 * t - 7) // -1, [7, -5], Z), ((3 * t + 5) // True, [5, 3], Z), (ZZ(2) // (3 * t + 5), [], Z), (ZZ(-3) % (3 * t + 5), [-3], Z),
+        (QQ(2) // (3 * t + 5), [], T), ((t + 2).quo_rem(QQ(2))[0], [1, Fraction(1, 2)], T),
+        (2 // (3 * t + 5), [], Z), (divmod(ZZ(2), 3 * t + 5)[1], [2], Z),
+    ]
+    for got, want, ring in rows:
         assert str(got.parent()) == str(ring) and [Fraction(c) for c in got.list()] == [Fraction(c) for c in want], (got, want, ring)
+        n += 1
+    # (// by a non-integral Rational and a Rational's % or divmod: TypeError,
+    # as Sage; by zero: ZeroDivisionError with Sage's texts)
+    for run, err, text in ((lambda: (t + 2) // h, TypeError, "no conversion of this rational to integer"), (lambda: QQ(2) % (t + 2), TypeError, None),
+                         (lambda: divmod(h, t + 2), TypeError, None), (lambda: (t + 2) // 0, ZeroDivisionError, "division by zero"),
+                         (lambda: (t + 2) % 0, ZeroDivisionError, "division by zero polynomial")):
+        try:
+            run()
+        except err as e:
+            assert text is None or str(e) == text, e
+        else:
+            raise AssertionError("accepted")
+        n += 1
+    # (the engine op: floor of each coefficient, the bound's edge rows)
+    assert P.zfdiv([-0xfff], 0x10) == [-0x100] and P.zfdiv([-(2 ** 128 - 1)], 2 ** 64) == [-(2 ** 64)]
+    assert P.zfdiv([-(2 ** 192 - 1)], 2 ** 64) == [-(2 ** 128)] and P.zfdiv([1, 1], 3) == [] and P.zfdiv([5, -7], -1) == [-5, 7]
+    for _ in range(100):
+        a = [coef(r, r.randint(0, 300)) for _ in range(r.randint(0, 12))]
+        b = coef(r, r.randint(0, 200)) or 7
+        want = [x // b for x in a]
+        while want and want[-1] == 0:
+            want.pop()
+        assert P.zfdiv(a, b) == want, (a, b)
         n += 1
     # (an operand's class is matched by identity only: a class whose
     # metaclass hash, equality, instance or subclass checks would run is
@@ -556,14 +592,32 @@ def qscale_checks(r):
             hooks.append("subclasscheck")
             raise RuntimeError("untrusted subclass check invoked")
 
+        def __getattribute__(cls, name):
+            hooks.append("getattr " + name)
+            return type.__getattribute__(cls, name)
+
     class HI(int, metaclass=Hostile):
-        pass
+        def __index__(self):
+            hooks.append("index")
+            return 0
+
+        def __int__(self):
+            hooks.append("int")
+            return 0
 
     class HO(metaclass=Hostile):
         pass
     # (and an unrelated class named Rational: its name is never read)
     HR = Hostile("Rational", (), {})
-    for v in (HI(3), HO(), HR()):
+    (hi2, hi3, ho, hr) = (HI(2), HI(3), HO(), HR())
+    del hooks[:]
+    # (an int subclass is an integer, its value read through int's own
+    # method, its MRO through type's slot: none of its hooks run)
+    assert t._coerce(hi3).list() == [3] and ((3 * t + 5) // hi2).list() == [2, 1] and ((3 * t + 5) % hi2).list() == [1, 1]
+    assert divmod(3 * t + 5, hi2)[0].list() == [2, 1] and (hi3 // (t + 2)).list() == []
+    assert hooks == [], hooks
+    n += 1
+    for v in (ho, hr):
         assert t._coerce(v) is None and (t + 2)._coerce(v) is None
         assert t.__rtruediv__(v) is NotImplemented
         try:
@@ -574,6 +628,87 @@ def qscale_checks(r):
             raise AssertionError("quo_rem accepted an unregistered class")
         n += 1
     assert hooks == [], hooks
+    # (an operand whose INSTANCE __getattribute__ raises: isinstance would
+    # read its __class__ through it; the identity MRO walk on type(x) runs
+    # no hook, for an int subclass (accepted) and an unrelated class
+    # (refused), across _coerce, //, %, divmod, / and the reflected ops)
+    inst = []
+
+    class GI(int):
+        def __getattribute__(self, name):
+            inst.append(name)
+            raise RuntimeError("instance attribute read: " + name)
+
+    class GO:
+        def __getattribute__(self, name):
+            inst.append(name)
+            raise RuntimeError("instance attribute read: " + name)
+    gi, go = GI(3), GO()
+    del inst[:]
+    assert t._coerce(gi).list() == [3] and t._coerce(go) is None
+    assert ((3 * t + 5) % gi).list() == [2] and divmod(3 * t + 5, gi)[0].list() == [1, 1] and ((3 * t + 5) // gi).list() == [1, 1]
+    assert (gi // (t + 2)).list() == [] and ((3 * t + 5) / gi).list() == [Fraction(5, 3), 1] and t.__rfloordiv__(go) is NotImplemented
+    try:
+        (3 * t + 5) % go
+    except ZeroDivisionError:
+        pass
+    assert inst == [], inst
+    n += 1
+    # (a number over a polynomial and gcd read the classified constant,
+    # never the operand: an int subclass's own __int__ or numerator never
+    # runs; gcd(5t, 5) is 5 in ZZ[t], as Sage; gcd with a float refuses)
+    log = []
+
+    class Liar(int):
+        def __int__(self):
+            log.append("__int__")
+            return 99
+
+        numerator = property(lambda self: (log.append("numerator"), 1)[1])
+        denominator = property(lambda self: (log.append("denominator"), 2)[1])
+    q = Liar(5) / t
+    assert str(q.parent()) == "Fraction Field of Univariate Polynomial Ring in t over Integer Ring" and str(q) == "5/t", q
+    g = (5 * t).gcd(Liar(5))
+    assert g.list() == [5] and str(g.parent()) == str(Z), g
+    assert log == [], log
+    assert (5 * t).gcd(5).list() == [5] and (5 * t).gcd(QQ(5)).list() == [1]
+    try:
+        (5 * t).gcd(1.5)
+    except TypeError:
+        pass
+    else:
+        raise AssertionError("gcd accepted a float")
+    n += 1
+    # (a metaclass mro() naming int for a class without int's layout: CPython
+    # refuses to create the class; where a runtime creates it, its real MRO
+    # (type's slot) has no int, so it is refused, its value never read)
+
+    class ForgedMro(type):
+        def mro(cls):
+            return (cls, int, object)
+    try:
+        forged = ForgedMro("Forged", (), {})()
+    except TypeError:
+        forged = None
+    if forged is not None:
+        assert t._coerce(forged) is None
+    n += 1
+    # (other int subclasses: IntEnum; a Rational % or divmod by zero is
+    # Sage's ZeroDivisionError, by a nonzero polynomial a TypeError)
+    import enum
+
+    class Two(enum.IntEnum):
+        TWO = 2
+    assert ((3 * t + 5) // Two.TWO).list() == [2, 1] and ((3 * t + 5) % Two.TWO).list() == [1, 1]
+    for run, err, text in ((lambda: QQ(2) % Z(0), ZeroDivisionError, "Rational modulo by zero"), (lambda: divmod(h, Z(0)), ZeroDivisionError, "rational division by zero"),
+                           (lambda: QQ(2) % (3 * t + 5), TypeError, None)):
+        try:
+            run()
+        except err as e:
+            assert text is None or str(e) == text, e
+        else:
+            raise AssertionError("accepted")
+        n += 1
     # (the registered classes and bool keep coercing)
     assert (t + True).list() == [1, 1] and (t + Fraction(1, 2)).list() == [Fraction(1, 2), 1] and (t + ZZ(3)).list() == [3, 1]
     # (the zero polynomial has no monic multiple: ZeroDivisionError, as Sage)

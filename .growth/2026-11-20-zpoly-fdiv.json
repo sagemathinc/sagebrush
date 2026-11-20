@@ -1,0 +1,11 @@
+{
+ "v": 1,
+ "reason": "Sage mode's //, % and divmod by numbers as Sage, the coefficient loops in the engine (zpoly_fdiv, a new pscale kind), and hook-free operand classification: the engine module, the CLI that embeds it, and the Sage chunk. CI's size row at 6d2b2598 (run 44782204819): cli/lib.gen.js +1196, cli/pyjs.cjs +8988, engine/lib/sage.pre +9025, engine/lib/sage.src +3194, engine/sagebrush-engine.wasm +5826; the classification fixes that follow add +244, +302, +544 and +622 to the first four (measured locally, the same build sequence, its 6d2b2598 sizes equal to CI's); each marked +64 over the total. The sage.pre, sage.src and engine module ceilings are renewed to the measured size + 64.",
+ "bytes": {
+  "cli/lib.gen.js": 1504,
+  "cli/pyjs.cjs": 9354,
+  "engine/lib/sage.pre": 9633,
+  "engine/lib/sage.src": 3880,
+  "engine/sagebrush-engine.wasm": 5890
+ }
+}

@@ -1052,6 +1052,13 @@
    "owner": "polynomial factorization"
   },
   {
+   "id": "engineCall:zpoly_fdiv",
+   "transport": "engineCall:zpoly_fdiv",
+   "status": "planned",
+   "family": "E5 polynomials",
+   "owner": "polynomial factorization"
+  },
+  {
    "id": "symCall:add",
    "transport": "symCall:add",
    "status": "cheap-candidate",
