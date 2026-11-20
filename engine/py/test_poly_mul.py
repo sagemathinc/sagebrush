@@ -115,8 +115,9 @@ def call_hex_checks(r):
         n += 1
 
     # (exact types only: a str subclass whose translate hides JSON syntax, one
-    # that spoofs __eq__/__hash__ to match a cached op name, one that also
-    # claims str through a __class__ property (as fn, a and b), and
+    # that spoofs __eq__/__hash__ to match a cached op name, ones that also
+    # claim str through a __class__ property or a __getattribute__ override
+    # (as fn, a and b), and
     # str-subclass fields, are refused before the bridge is called; an
     # unhashable op name is a ValueError too)
     class Evil(str):
@@ -138,6 +139,16 @@ def call_hex_checks(r):
         def translate(self, table):
             return ""
 
+    class Shadow(str):
+        # (answers every attribute lookup itself: __class__ is str, translate
+        # hides the contents)
+        def __getattribute__(self, attr):
+            if attr == "__class__":
+                return str
+            if attr == "translate":
+                return lambda table: ""
+            return str.__getattribute__(self, attr)
+
     # (the real name cached first; on CPython the spoof is then "in" the cache)
     E.call_hex("poly_mul", "1", "1")
     assert "poly_mul" in E._HEX_OPS
@@ -150,7 +161,9 @@ def call_hex_checks(r):
     setattr(E, name, Spy())
     try:
         for fn, a, b in [(Evil('poly_mul","x'), "1", "1"), (Evil("poly_mul"), "1", "1"), (Spoof('poly_mul","x'), "1", "1"), (Masked('poly_mul","x'), "1", "1"),
-                         ("poly_mul", Masked('1","x":"'), "1"), ("poly_mul", "1", Masked('1","x":"')), ("poly_mul", Evil('1","x":"'), "1"),
+                         ("poly_mul", Masked('1","x":"'), "1"), ("poly_mul", "1", Masked('1","x":"')),
+                         (Shadow('poly_mul","x'), "1", "1"), ("poly_mul", Shadow('1","x":"'), "1"), ("poly_mul", "1", Shadow('1","x":"')),
+                         ("poly_mul", Evil('1","x":"'), "1"),
                          ("poly_mul", "1", Evil("1")), (["poly_mul"], "1", "1"), ({}, "1", "1"), (None, "1", "1")]:
             try:
                 E.call_hex(fn, a, b)
