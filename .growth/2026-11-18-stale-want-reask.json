@@ -1,7 +1,0 @@
-{
-  "v": 1,
-  "reason": "Focus takeover hands the lock over only for a want that answers the writer's question by its id, carried to the last check before letting go (and passOn asks the same, a failed passOn keeping the granted lock), so a want heard late from a tab that moved on never moves it (web/page/handover.ts, web/journal/store.js); the CLI's bundle carries the notebook page. cli/pyjs.cjs grows +1356 bytes, exact, base master 3c46b533, pinned node 24.21.0 and bun 1.4.4, on the head before this marker's last edit (+712, +928, +1188, +1356 over this pull request's commits); the bound adds 64 bytes of slack.",
-  "bytes": {
-    "cli/pyjs.cjs": 1420
-  }
-}
