@@ -1,0 +1,11 @@
+{
+ "v": 1,
+ "reason": "Products in Q[x] (qpoly_mul): arith::qpoly (the metered lcms, the scaled packing, D, the metered reduction), coprime's quotient-keeping Knuth D, the op row, in the engine module and the CLI that embeds it; sagebrush.poly.qmul and Sage mode's QQ[x] products by ring in the Sage chunk. CI's size row for this change on its merge with the track (0a49d4dd on 43984fa3): engine/sagebrush-engine.wasm +31468, cli/pyjs.cjs +42364, engine/lib/sage.pre +3811, engine/lib/sage.src +1208, cli/lib.gen.js +388; each marked +64 over that. The sage.pre and sage.src ceilings are renewed to the measured size + 64.",
+ "bytes": {
+  "cli/lib.gen.js": 452,
+  "cli/pyjs.cjs": 42428,
+  "engine/lib/sage.pre": 3875,
+  "engine/lib/sage.src": 1272,
+  "engine/sagebrush-engine.wasm": 31532
+ }
+}
