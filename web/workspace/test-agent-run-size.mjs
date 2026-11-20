@@ -85,7 +85,10 @@ const LATEX_FIRST_USE = ["sagebrush-agent-run.js", "sagebrush-latex.js", "sagebr
 //  160,303 / 58,187 on the shipped build; + 64)
 // (160,741 / 58,407: Nov 19 2026, the reload record on the LaTeX page with the run of a .tex the agent made, master
 //  a3f1e30b: 160,677 / 58,343 measured on the shipped build, + 64)
-const AGG_RAW = 160741, AGG_GZIP = 58407;
+// (161,208 / 58,523: Nov 20 2026, a page's run_notebook handed to today's run when the page takes it and then can't
+//  (PageRun.inputs()'s "fallback", run-verbs.ts, in the run's chunk), master 595eb958: 161,144 / 58,459 measured on the
+//  shipped build, + 64)
+const AGG_RAW = 161208, AGG_GZIP = 58523;
 // (the reviewed inputs, relative to web/: the entry and what it imports)
 // (the review page's run line: a finished run's note in its branch, canon-doc.ts's canonical bytes and blob id, and branch-wake.ts's
 //  wake, which needs sha256-hex.ts for the branch store's name)
