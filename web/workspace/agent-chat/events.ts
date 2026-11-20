@@ -44,9 +44,13 @@ export interface UserEntry {
   kind: "user";
   id: string;
   text: string;
-  // "sent": to the agent now; "queued": after the running turn; "note": never sent
-  mode: "sent" | "queued" | "note";
+  // "sent": to the agent now; "queued": after the running turn; "note": never sent; "steer": into the running turn
+  mode: "sent" | "queued" | "note" | "steer";
   time: number;
+  // (a steer's receipt, as the agent says it: "steering" (it went in), "delivered" (Claude took it), "queued" (it runs
+  //  next instead, with why: "ended", the turn ended first; "codex", that agent takes it after the turn; "idle")
+  receipt?: "steering" | "delivered" | "queued";
+  receipt_reason?: string;
 }
 
 export interface ToolCall {

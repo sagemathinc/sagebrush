@@ -50,6 +50,16 @@ const kh = turnNode({ ...newThread("k", "k"), entries: [keptTurn] }, keptTurn, h
 check(!bad(kh) && /class="attention other"/.test(kh) && /0 tokens/.test(kh), "a kept prompt with a hostile state, usage not a number: class other, 0 tokens", kh.slice(0, 400));
 const u = userNode({ kind: "user", id: "u", mode: HOSTILE, text: "hi" }, hooks.md);
 check(u.className === "user other", "a kept message with a hostile mode: class other", u.className);
+// (a steer's line: what the agent said became of it; a hostile receipt or reason is never written into the page)
+{
+  const tag = (e) => userNode({ kind: "user", id: "s", mode: "steer", text: "go", ...e }, hooks.md).innerHTML.match(/<div class="tag">(.*?)<\/div>/)?.[1];
+  check(tag({}) === "Steering: Claude reads it at its next step", "a steer, no receipt yet: steering", tag({}));
+  check(tag({ receipt: "delivered" }) === "Delivered to the running turn", "delivered", tag({ receipt: "delivered" }));
+  check(tag({ receipt: "queued", receipt_reason: "ended" }) === "Queued, runs next: the turn ended first", "queued, the turn ended first");
+  check(tag({ receipt: "queued", receipt_reason: "codex" }) === "Queued, runs next: this agent takes it after the turn", "queued, Codex");
+  check(tag({ receipt: "queued", receipt_reason: HOSTILE }) === "Queued, runs next" && tag({ receipt: HOSTILE }) === "Steering: Claude reads it at its next step", "a hostile receipt or reason: fixed words only");
+  check(userNode({ kind: "user", id: "s", mode: "steer", text: "go" }, hooks.md).className === "user steer", "class steer");
+}
 
 // ---- an agent's ids are keys, never a prototype's (daybreak3's E932-1): "__proto__" and "constructor" as a tool's call
 // and a prompt's id, in a turn made here and in one kept from before (an ordinary object, as JSON.parse makes it)

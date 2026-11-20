@@ -28,8 +28,8 @@ export type Hello = { protocol: 1; agent: { name: string; client: string; versio
  * the turn it came from (`conversation`, `turn_id`), added by the agent's server after the model's arguments, never the
  * model's own (run_notebook in the notebook open on the page runs there only for that chat's running turn);
  * "chat.resume", an agent that keeps each conversation's log and replays what a page missed (its hello's `log` names
- * the run its numbers belong to). */
-export const FEATURES = ["notebook.edit", "permission.digest", "run.context", "chat.resume"] as const;
+ * the run its numbers belong to); "chat.steer", an agent that takes a message into its running turn (Steer, step 3). */
+export const FEATURES = ["notebook.edit", "permission.digest", "run.context", "chat.resume", "chat.steer"] as const;
 /** The `log` an agent's hello or agent.ready names: its run, as the agent's random hex id; anything else, none. */
 export const logOf = (v: unknown): { instance: string } | undefined => {
   const i = (v as { instance?: unknown } | null)?.instance;
