@@ -5,7 +5,6 @@ export default {
   prompt: "make a MATLAB notebook plotting sin(x^2)",
   surfaces: ["mcp", "chat"],
   gaps: {
-    mcp: "sagebrush-mcp has no workspace_run_notebook tool yet",
     chat: "the pane doesn't run it by itself yet, and /agents/ offers no run verbs yet",
   },
   agent: [

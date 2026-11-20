@@ -26,7 +26,6 @@ export default {
   prompt: "Open this Jupyter notebook and run it. Then change the damping to 0.5 and run it again.",
   surfaces: ["mcp", "chat"],
   gaps: {
-    mcp: "sagebrush-mcp has no workspace_run_notebook tool yet, its run isn't in the notebook open on the page yet, and the reactive notebook renames `_` as a cell's own",
     chat: "the pane doesn't show the notebook the agent was pointed at or run it by itself yet, and /agents/ offers no run verbs yet",
   },
   given: { [PATH]: { json: NOTEBOOK } },

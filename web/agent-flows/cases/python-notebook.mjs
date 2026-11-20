@@ -24,7 +24,6 @@ export default {
   prompt: "Make a Python notebook that plots sin(x) and cos(x) on [0, 2π] with numpy and matplotlib, with a legend, and prints the maximum of sin(x)·cos(x). Then: add a histogram of 1000 normal samples.",
   surfaces: ["mcp", "chat"],
   gaps: {
-    mcp: "the follow-up's run: sagebrush-mcp offers workspace_run_notebook once its run tools land, and the person sees that run's outputs once an agent's run of the open notebook runs in it",
     chat: "the Agents page's pane doesn't run the agent's notebook by itself yet, and the run tools aren't offered there yet",
   },
   grant: { folders: ["/"], write: true, run: true },

@@ -5,7 +5,6 @@ export default {
   prompt: "make a Magma notebook that factors 2^64 - 1 and finds the class number of Q(sqrt(-23))",
   surfaces: ["mcp", "chat"],
   gaps: {
-    mcp: "sagebrush-mcp doesn't offer the page's run verbs as tools yet, so the agent can't run it again",
     chat: "the Agents page's pane shows the agent's notebook but doesn't run it by itself yet",
   },
   agent: [
