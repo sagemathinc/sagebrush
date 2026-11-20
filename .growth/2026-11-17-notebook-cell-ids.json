@@ -1,8 +1,0 @@
-{
-  "v": 1,
-  "reason": "Notebook cells without ids get ids that are the same on every device and load (web/notebook/nbformat.js cellIdFor, withCellIds), stored: by the workspace's notebook create and write (web/workspace/api.ts), before the history first takes in an older record (web/journal/store.js normalizeStored, the notebook kind's normalize in web/notebook/journal.js), and by the page's writer after a load (web/notebook/notebook.js load); the notebook engine bundle carries the page's part, the CLI embeds the page. Measured by the exact size gate on master 84da19ac (cli/pyjs.cjs +2484, engine/sagebrush-notebook.js +533, the latter's ceiling raised to the measured 252240); marked +64 B over each growth.",
-  "bytes": {
-    "cli/pyjs.cjs": 2548,
-    "engine/sagebrush-notebook.js": 597
-  }
-}
