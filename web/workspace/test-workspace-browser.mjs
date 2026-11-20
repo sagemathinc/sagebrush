@@ -1636,17 +1636,26 @@ try {
       words.push(word);
       await typeCell(word);
       await ev(click);
-      await until(`location.pathname !== "/" || /agents page was not opened/.test(document.querySelector("#saved")?.textContent ?? "")`, 45000);
       const state = `({ path: location.pathname, text: document.querySelector("#cells .cell textarea")?.value ?? "", said: document.querySelector("#saved")?.textContent ?? "" })`;
-      const st = await ev(state);
-      check(st.path === "/" && st.text.includes(word) && /not saved/.test(st.said) && /agents page was not opened/.test(st.said), `${name} with the save ${how}: this page stays, the edit kept, and says so: ` + JSON.stringify(st));
+      // (looked at and judged in one step, retried: the line can be empty for a moment, cleared by the notebook's change
+      //  reported after its refusal, until the save sent again is refused and says so again; a page left ends it at once)
+      const stays = (st) => st.path === "/" && st.text.includes(word) && /not saved/.test(st.said) && /agents page was not opened/.test(st.said);
+      let st = null;
+      for (const t0 = Date.now(); Date.now() - t0 < 45000; await sleep(100)) {
+        st = await ev(state).catch(() => null);
+        if (st && (st.path !== "/" || stays(st))) break;
+      }
+      check(!!st && stays(st), `${name} with the save ${how}: this page stays, the edit kept, and says so: ` + JSON.stringify(st));
       // (the edit sent again by the next change, refused or failed again: the save's line says so, and the page still says
       //  the agents page wasn't opened, on the same line)
       await ev(`(document.querySelector("#cells .cell textarea").dispatchEvent(new Event("input", { bubbles: true })), 1)`);
-      await until(`/not saved/.test(document.querySelector("#saved")?.textContent ?? "")`, 10000).catch(() => {});
-      await sleep(300);
-      const st2 = await ev(state);
-      check(st2.path === "/" && /not saved: the test (refusal|failure)/.test(st2.said) && /agents page was not opened/.test(st2.said), `…and once it is sent again by a later change, still: ` + JSON.stringify(st2));
+      const still = (x) => x.path === "/" && /not saved: the test (refusal|failure)/.test(x.said) && /agents page was not opened/.test(x.said);
+      let st2 = null;
+      for (const t0 = Date.now(); Date.now() - t0 < 10000; await sleep(100)) {
+        st2 = await ev(state).catch(() => null);
+        if (st2 && (st2.path !== "/" || still(st2))) break;
+      }
+      check(!!st2 && still(st2), `…and once it is sent again by a later change, still: ` + JSON.stringify(st2));
     }
   }
   await ev(`(() => { const st = sagebrush.notebook.store; window.__release = null; st.save = (...a) => new Promise((ok, no) => { window.__release = () => window.__save.apply(st, a).then(ok, no); }); return 1; })()`);
