@@ -13,7 +13,7 @@ import { readFileSync, readdirSync, statSync } from "node:fs";
 import { dirname, join, relative } from "node:path";
 import { fileURLToPath } from "node:url";
 import { hasSite, SITE_GENERATED_ROOTS } from "../site-dir.mts";
-import { DOC_SYNC_ORIGINS, DOC_SYNC_NOTE, DOC_SYNC_RELOAD, docSyncOrigin, docSyncAvailable, docSyncSelfHosted, docSyncAllowed, untilAllowed, enableDocSync, followDocSync, docSyncChannel } from "./doc-sync-switch.ts";
+import { DOC_SYNC_ORIGINS, DOC_SYNC_NOTE, SYNC_CONFIRM_DOCS, SYNC_CONFIRM_FILES_ONLY, syncConfirmDocs, DOC_SYNC_RELOAD, docSyncOrigin, docSyncAvailable, docSyncSelfHosted, docSyncAllowed, untilAllowed, enableDocSync, followDocSync, docSyncChannel } from "./doc-sync-switch.ts";
 
 const here = dirname(fileURLToPath(import.meta.url)), web = join(here, "..");
 const results = [];
@@ -128,6 +128,22 @@ for (const o of ["", "null"]) await docSyncAllowed({ origin: o, fetch: async () 
 check(opaqueAsked === 0, "an empty or opaque (\"null\") origin asks nothing");
 check((await docSyncSelfHosted(SELF, async () => reply())) === true && (await docSyncSelfHosted(SELF, async () => reply({ body: { available: true, public_url: SELF + "/" } }))) === false, "docSyncSelfHosted: its own exact origin yes, a trailing slash no");
 
+// (the Turn on sync confirmation, before sync is on, says the same of notebooks and boards as the note: no "later step")
+const panelSrc = readFileSync(join(dirname(fileURLToPath(import.meta.url)), "sync-panel.ts"), "utf8");
+check(/notebooks' code and text sync too, but not their outputs/.test(SYNC_CONFIRM_DOCS) && /their contents don't sync yet/.test(SYNC_CONFIRM_DOCS) && /their contents don't sync on this site/.test(SYNC_CONFIRM_FILES_ONLY) && /syncConfirmDocs\(location\.origin, f\)/.test(panelSrc) && /\$\{docs\}/.test(panelSrc) && !/later step/.test(panelSrc), "the Turn on sync confirmation says what syncs of notebooks and boards, and nothing of a later step");
+// (said by the origin: notebooks' contents only where they sync, DEV's and PROD's own origins with no request, or a
+// self-hosted site whose own status names it; anywhere else, only files)
+{
+  let asked = 0;
+  const no = async () => { asked++; return reply({ status: 404 }); };
+  check((await syncConfirmDocs(DOC_SYNC_ORIGINS[0], no)) === SYNC_CONFIRM_DOCS && (await syncConfirmDocs(DOC_SYNC_ORIGINS[1], no)) === SYNC_CONFIRM_DOCS && asked === 0, "the confirmation on DEV's and PROD's origins: notebooks' contents sync (nothing asked)");
+  check((await syncConfirmDocs("http://other.localhost:9", no)) === SYNC_CONFIRM_FILES_ONLY, "…on another origin whose status doesn't name it: only files sync");
+  check((await syncConfirmDocs(SELF, async () => reply())) === SYNC_CONFIRM_DOCS, "…on a self-hosted site whose own status names it: notebooks' contents sync");
+  check((await syncConfirmDocs(SELF, async () => reply({ body: { available: true, state: "active" } }))) === SYNC_CONFIRM_FILES_ONLY, "…on a site whose status is available but doesn't name it (every sync server today): only files sync");
+  check((await syncConfirmDocs(SELF, async () => { throw new TypeError("network"); })) === SYNC_CONFIRM_FILES_ONLY, "…a status request that fails: only files");
+  const t0 = Date.now(), hung = await syncConfirmDocs(SELF, () => new Promise(() => {}), DOC_SYNC_ORIGINS, 50);
+  check(hung === SYNC_CONFIRM_FILES_ONLY && Date.now() - t0 < 2000, "…a status request that never answers: files only, after its time");
+}
 // (William's M9: each sentence as the code does it: merged, not "the later change is kept"; history from the first sync,
 // on every device; no snapshot or cleared history as a cause; no "lasting" and no DEV/PROD line; boards said not to sync)
 const note = DOC_SYNC_NOTE.join("\n");

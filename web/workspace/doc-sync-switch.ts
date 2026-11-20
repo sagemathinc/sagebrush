@@ -138,6 +138,24 @@ export const DOC_SYNC_NOTE = [
   "Boards don't sync yet. A board made on another device is listed here, but can't be opened until boards sync.",
 ] as const;
 
+/** The Turn on sync confirmation's sentence on notebooks and boards (sync-panel.ts enable), said before sync is on:
+ * where notebooks' contents sync (docSyncOrigin, or a self-hosted site docSyncSelfHosted admits), their code and text
+ * do (doc-sync.ts) and their outputs don't; anywhere else only files sync (index.html's sync owner runs on every
+ * origin).  Boards' contents don't sync yet anywhere (board/journal.ts sync.on false). */
+export const SYNC_CONFIRM_DOCS = "Your notebooks' code and text sync too, but not their outputs. Boards are listed; their contents don't sync yet.";
+export const SYNC_CONFIRM_FILES_ONLY = "Your notebooks and boards are listed; their contents don't sync on this site.";
+/** How long syncConfirmDocs waits for a site's status. */
+export const SYNC_CONFIRM_MS = 4000;
+/** Which of the two this origin is told: DEV's and PROD's own with no request; another, its status asked within
+ * SYNC_CONFIRM_MS (a status that doesn't answer by then, or fails: files only, which is what such a site does). */
+export async function syncConfirmDocs(origin: string, fetchFn: typeof fetch, allowed: readonly string[] = DOC_SYNC_ORIGINS, ms = SYNC_CONFIRM_MS): Promise<string> {
+  if (docSyncOrigin(origin, allowed)) return SYNC_CONFIRM_DOCS;
+  let timer: ReturnType<typeof setTimeout> | undefined;
+  const late = new Promise<boolean>((r) => { timer = setTimeout(() => r(false), ms); });
+  const timed: typeof fetch = (u, init) => fetchFn(u, { ...init, signal: AbortSignal.timeout(ms) });
+  try { return (await Promise.race([docSyncSelfHosted(origin, timed), late])) ? SYNC_CONFIRM_DOCS : SYNC_CONFIRM_FILES_ONLY; } finally { clearTimeout(timer); }
+}
+
 /** Said on the notebook page when the journal's activation began (it can't go back) but this page couldn't go on with
  * it: the notebook stays read-only here until a reload, which opens it through the journal. */
 export const DOC_SYNC_RELOAD = "Notebook sync was turned on for this browser, but this page couldn't switch to it: reload this page to edit the notebook.";
