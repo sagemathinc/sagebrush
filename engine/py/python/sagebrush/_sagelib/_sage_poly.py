@@ -1171,17 +1171,10 @@ class Polynomial:
             from sagebrush import poly
             q, r = poly.zdivrem(self._c, o._c)
             return Polynomial(self._ring, q), Polynomial(self._ring, r)
-        r = [_F(a) for a in self._c]
-        d = [_F(a) for a in o._c]
-        q = [_F(0)] * max(len(r) - len(d) + 1, 0)
-        for i in range(len(q) - 1, -1, -1):
-            c = r[i + len(d) - 1] / d[-1]
-            q[i] = c
-            if c:
-                for j, b in enumerate(d):
-                    r[i + j] -= c * b
-        qq, rr = Polynomial(self._qq_ring(), q), Polynomial(self._qq_ring(), r[: len(d) - 1])
-        return qq, rr
+        # (exact division in QQ[x], in the engine: sagebrush.poly.qdivrem)
+        from sagebrush import poly
+        q, r = poly.qdivrem(self._c, o._c)
+        return Polynomial(self._qq_ring(), q), Polynomial(self._qq_ring(), r)
 
     def __floordiv__(self, other):
         if isinstance(other, int) and self._ring._base is ZZ:

@@ -37,6 +37,18 @@ const _: () = assert!(std::mem::size_of::<Coef<'static>>() as u64 <= 8 * META_WO
 
 const HOW: &str = "a smaller division per call";
 
+/// qpoly_divrem's work cap (word operations): 2^29.  zmul's 2^28 was sized
+/// for products; at it, a dense Q[x] division the real-scale algorithm
+/// finishes in 0.4 s natively (degree 1000 by a non-monic degree 500, 3.59e8
+/// units) was refused.  Calibrated in time: the worst measured rate (4.01
+/// ns/unit on the production wasm engine, 2.29 natively) gives at most
+/// about 2.15 s (wasm) and 1.2 s (native) for the longest admitted call.
+/// zpoly_divrem keeps zmul's cap; the peak cap is zmul's for both.
+pub const DIVREM_Q_WORK_MAX: u64 = 1 << 29;
+
+/// qpoly_divrem's caps: zmul's, but the work cap [`DIVREM_Q_WORK_MAX`].
+pub const DIVREM_Q_CAPS: qpoly::Caps = qpoly::Caps { int: crate::zmul::Caps { work: DIVREM_Q_WORK_MAX, ..crate::zmul::CAPS }, reply: qpoly::REPLY_MAX };
+
 /// Why a division stopped: its work passed the meter's limit, its memory
 /// the ledger's, or an invariant failed (internal).
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
@@ -63,8 +75,13 @@ pub struct Words {
     live: Cell<u64>,
     limit: Cell<u64>,
     high: Cell<u64>,
+    /// the fixed rows' words credited so far, and the largest of live minus
+    /// them: the least starting limit the call's reservations need
+    credited: Cell<u64>,
+    required: Cell<u64>,
     /// (tests) each reservation's owner tag and its requirement: the least
-    /// limit at which it succeeds (live + the words it reserves)
+    /// starting limit at which it succeeds (live + the words it reserves,
+    /// less the fixed rows' words credited before it)
     #[cfg(test)]
     log: std::cell::RefCell<Vec<(&'static str, u64)>>,
 }
@@ -75,6 +92,8 @@ impl Words {
             live: Cell::new(0),
             limit: Cell::new(limit),
             high: Cell::new(0),
+            credited: Cell::new(0),
+            required: Cell::new(0),
             #[cfg(test)]
             log: std::cell::RefCell::new(Vec::new()),
         }
@@ -88,10 +107,16 @@ impl Words {
     pub fn high(&self) -> u64 {
         self.high.get()
     }
+    /// The least starting limit at which the same call succeeds: the
+    /// largest of live minus the words credited before it (the high-water,
+    /// when nothing is credited).
+    pub fn required(&self) -> u64 {
+        self.required.get()
+    }
     /// (tests) record a reservation's requirement: live + need.
     fn note(&self, _tag: &'static str, _need: u64) {
         #[cfg(test)]
-        self.log.borrow_mut().push((_tag, self.live.get().saturating_add(_need)));
+        self.log.borrow_mut().push((_tag, self.live.get().saturating_add(_need).saturating_sub(self.credited.get())));
     }
     fn reserve(&self, n: u64) -> Result<(), DivFault> {
         let l = self.live.get().checked_add(n).ok_or(DivFault::Memory)?;
@@ -100,6 +125,14 @@ impl Words {
         }
         self.live.set(l);
         self.high.set(self.high.get().max(l));
+        self.required.set(self.required.get().max(l - self.credited.get().min(l)));
+        Ok(())
+    }
+    /// A fixed row's words, freed, become the ledger's (checked): the limit
+    /// grows by them, so fixed + limit, the admitted peak, is unchanged.
+    fn credit(&self, n: u64) -> Result<(), DivFault> {
+        self.limit.set(self.limit.get().checked_add(n).ok_or(DivFault::Memory)?);
+        self.credited.set(self.credited.get().checked_add(n).ok_or(DivFault::Memory)?);
         Ok(())
     }
     fn release(&self, n: u64) {
@@ -217,7 +250,23 @@ pub(crate) struct Coef<'l> {
 
 impl<'l> Coef<'l> {
     fn new(led: &'l Words, cap: usize, m: &mut Meter) -> Result<Coef<'l>, DivFault> {
-        Ok(Coef { buf: Buf::new(led, cap, "window", m)?, len: 0, neg: false })
+        Coef::tagged(led, cap, "window", m)
+    }
+    fn tagged(led: &'l Words, cap: usize, tag: &'static str, m: &mut Meter) -> Result<Coef<'l>, DivFault> {
+        Ok(Coef { buf: Buf::new(led, cap, tag, m)?, len: 0, neg: false })
+    }
+    /// Set from a magnitude and a sign.  Charges the growth and the copy.
+    fn set(&mut self, mag: &[u64], neg: bool, m: &mut Meter) -> Result<(), DivFault> {
+        self.buf.grow(mag.len(), 0, m)?;
+        m.add(mag.len() + 1)?;
+        self.buf.v[..mag.len()].copy_from_slice(mag);
+        self.len = mag.len();
+        self.neg = neg && self.len > 0;
+        track(self.mag());
+        Ok(())
+    }
+    fn is_one(&self) -> bool {
+        self.len == 1 && self.buf.v[0] == 1
     }
     fn mag(&self) -> &[u64] {
         &self.buf.v[..self.len]
@@ -466,12 +515,15 @@ fn load_divisor(b: &Factor, plan: &Plan, m: &mut Meter) -> Result<Divisor, DivFa
 pub struct Divided<'l> {
     q: Arena<'l>,
     r: Arena<'l>,
+    /// (Q) the reduced denominators, one per coefficient of q and of r
+    qd: Option<Arena<'l>>,
+    rd: Option<Arena<'l>>,
 }
 
 impl Divided<'_> {
-    /// The words the two arenas hold.
+    /// The words the arenas hold.
     pub fn words(&self) -> u64 {
-        self.q.words() + self.r.words()
+        self.q.words() + self.r.words() + self.qd.as_ref().map_or(0, |a| a.words()) + self.rd.as_ref().map_or(0, |a| a.words())
     }
 }
 
@@ -508,6 +560,8 @@ pub fn divide_z<'l>(a: &Factor, b: &Factor, plan: &Plan, led: &'l Words, m: &mut
     for s in 0..k {
         let topi = (h + w - 1) % w;
         let (lt, t_neg) = (ring[topi].len, ring[topi].neg != c_neg);
+        // (the comparison reads at most min(lt, lc) limbs, charged before)
+        m.add(lt.min(lc) + 1)?;
         if cmp_mag(ring[topi].mag(), c) != Ordering::Less {
             // t = floor(top / c): Knuth D on the magnitudes, then the floor's
             // sign fix-up when the signs differ and the remainder isn't 0
@@ -549,7 +603,7 @@ pub fn divide_z<'l>(a: &Factor, b: &Factor, plan: &Plan, led: &'l Words, m: &mut
         r.push(ring[i].mag(), ring[i].neg, m)?;
     }
     drop((ring, cbuf, tmag, tq, prod));
-    Ok(Divided { q, r })
+    Ok(Divided { q, r, qd: None, rd: None })
 }
 
 /// |t| += 1 (the floor of a negative inexact quotient): `floor_fix(l_t) =
@@ -572,29 +626,36 @@ fn floor_fix(tq: &mut Buf, nq: &mut usize, m: &mut Meter) -> Result<(), DivFault
     Ok(())
 }
 
-/// A token's bytes in the reply: `0`, or a sign and its hex digits.
-fn token_bytes(mag: &[u64], neg: bool) -> u64 {
+/// A token's bytes in the reply: `0`, or a sign, its numerator's hex
+/// digits and, unless its denominator is 1 (or absent), `/` and the
+/// denominator's.
+fn token_bytes(mag: &[u64], neg: bool, den: Option<&[u64]>) -> u64 {
     if mag.is_empty() {
-        1
-    } else {
-        u64::from(neg) + bits(mag).div_ceil(4)
+        return 1;
     }
+    let d = match den {
+        Some(d) if !(d.len() == 1 && d[0] == 1) => 1 + bits(d).div_ceil(4),
+        _ => 0,
+    };
+    u64::from(neg) + bits(mag).div_ceil(4) + d
 }
 
 /// The reply's exact bytes, `{"ok":{"q":"...","r":"..."}}` (22 fixed
 /// bytes), each list trimmed of its trailing (top-degree) zeros.
 pub fn reply_bytes(dv: &Divided) -> Option<u64> {
-    let list = |a: &Arena| -> Option<u64> {
+    let list = |a: &Arena, d: Option<&Arena>| -> Option<u64> {
         let lead = a.fwd().take_while(|(x, _)| x.is_empty()).count();
+        let mut dens = d.map(|d| d.fwd().skip(lead));
         let mut total = 0u64;
         let mut count = 0u64;
         for (x, neg) in a.fwd().skip(lead) {
-            total = total.checked_add(token_bytes(x, neg))?;
+            let den = dens.as_mut().and_then(|it| it.next()).map(|(y, _)| y);
+            total = total.checked_add(token_bytes(x, neg, den))?;
             count += 1;
         }
         total.checked_add(count.saturating_sub(1))
     };
-    22u64.checked_add(list(&dv.q)?)?.checked_add(list(&dv.r)?)
+    22u64.checked_add(list(&dv.q, dv.qd.as_ref())?)?.checked_add(list(&dv.r, dv.rd.as_ref())?)
 }
 
 /// Write the reply into `out`, which already holds capacity for exactly
@@ -604,10 +665,12 @@ pub fn emit(dv: &Divided, out: &mut String, m: &mut Meter) -> Result<(), DivFaul
     let _p = sagebrush_interrupt::enter("divrem emit");
     sagebrush_interrupt::check_coarse();
     let cap = out.capacity();
-    let list = |a: &Arena, out: &mut String, m: &mut Meter| -> Result<(), DivFault> {
+    let list = |a: &Arena, d: Option<&Arena>, out: &mut String, m: &mut Meter| -> Result<(), DivFault> {
         let lead = a.fwd().take_while(|(x, _)| x.is_empty()).count();
+        let mut dens = d.map(|d| d.rev().take(d.nt - lead));
         for (i, (x, neg)) in a.rev().take(a.nt - lead).enumerate() {
-            m.add(x.len() + 1)?;
+            let den = dens.as_mut().and_then(|it| it.next()).map(|(y, _)| y);
+            m.add(x.len() + den.map_or(0, |y| y.len()) + 1)?;
             if i > 0 {
                 out.push(',');
             }
@@ -615,13 +678,19 @@ pub fn emit(dv: &Divided, out: &mut String, m: &mut Meter) -> Result<(), DivFaul
                 out.push('-');
             }
             hex(out, x);
+            if let Some(y) = den {
+                if !x.is_empty() && !(y.len() == 1 && y[0] == 1) {
+                    out.push('/');
+                    hex(out, y);
+                }
+            }
         }
         Ok(())
     };
     out.push_str("{\"ok\":{\"q\":\"");
-    list(&dv.q, out, m)?;
+    list(&dv.q, dv.qd.as_ref(), out, m)?;
     out.push_str("\",\"r\":\"");
-    list(&dv.r, out, m)?;
+    list(&dv.r, dv.rd.as_ref(), out, m)?;
     out.push_str("\"}}");
     debug_assert_eq!(out.capacity(), cap, "the reply was written without allocating");
     Ok(())
@@ -696,6 +765,492 @@ pub fn reply_z(a: &Factor, b: &Factor, r: u64, caps: &qpoly::Caps) -> Result<Str
     let led = Words::new(plan.limit);
     let mut m = Meter::new(plan.work);
     reply_z_on(a, b, &plan, &led, &mut m).map_err(|f| fault_text(f, &plan))
+}
+
+// ---- qpoly_divrem: exact division in Q[x] (r3.3's Q section) ----
+//
+// Phase A clears the denominators (qpoly_mul's lcms, on the call's meter):
+// a = A / d_a and b = B / d_b with A, B integral.  Q1 divides B by its
+// content in place, in its fixed row: B = cont(B) P, c = lc(P) > 0, and b =
+// beta P with beta = (+-cont / d_b) reduced.  Q2 divides at the remainder's
+// real scale: below the window rho_p = A_p / d_a; in it rho_p = W_p / (d_a
+// T).  A step at the top degree i (quotient degree j = i - m):
+//   q_j = W_i beta_d / (d_a T beta_n c),  W <- c W - W_i x^j P,  T <- T c,
+// the top then 0 (checked); then g = gcd(T, the window's content) cancels
+// (stopping at 1), and the entering coefficient is A_p T.  Each q_j, and at
+// the end each r_p = W_p / (d_a T), is stored reduced.  With c = 1 (Q5), T
+// stays 1: no multiplication by c and no gcd.
+
+#[cfg(test)]
+thread_local! {
+    /// (tests) Q2's counts: multiplications by c, content gcds, the steps
+    /// whose content was more than 1 (cancelled), and T's largest length
+    pub(crate) static Q_COUNTS: Cell<(u64, u64, u64, usize)> = const { Cell::new((0, 0, 0, 0)) };
+}
+
+fn qcount(_cmul: u64, _cgcd: u64, _cancel: u64, _t: usize) {
+    #[cfg(test)]
+    Q_COUNTS.with(|c| {
+        let (a, b, x, t) = c.get();
+        c.set((a + _cmul, b + _cgcd, x + _cancel, t.max(_t)));
+    });
+}
+
+#[cfg(test)]
+thread_local! {
+    /// (tests) the units the content gcds, the window's update and the
+    /// cancelling divisions charged
+    pub(crate) static GCD_UNITS: Cell<u64> = const { Cell::new(0) };
+    pub(crate) static UPD_UNITS: Cell<u64> = const { Cell::new(0) };
+    pub(crate) static DIV_UNITS: Cell<u64> = const { Cell::new(0) };
+}
+
+#[cfg(test)]
+thread_local! {
+    /// (tests) each phase's end: its name and the meter's count then
+    pub(crate) static PHASES: std::cell::RefCell<Vec<(&'static str, u64)>> = const { std::cell::RefCell::new(Vec::new()) };
+}
+
+fn phase_end(_name: &'static str, _m: &Meter) {
+    #[cfg(test)]
+    PHASES.with(|p| p.borrow_mut().push((_name, _m.used())));
+}
+
+#[cfg(test)]
+thread_local! {
+    /// (tests) Q's leaving-coefficient probe: the top's update uses P_m + 1,
+    /// so the leaving coefficient isn't 0 and the invariant must refuse.
+    pub(crate) static PROBE_LEAVING: Cell<bool> = const { Cell::new(false) };
+}
+
+fn probe_leaving() -> bool {
+    #[cfg(test)]
+    return PROBE_LEAVING.with(|p| p.get());
+    #[cfg(not(test))]
+    false
+}
+
+/// Q's integer scratch, ledger-owned and grown on demand.
+struct QScratch<'l> {
+    x: Buf<'l>,
+    y: Buf<'l>,
+    q: Buf<'l>,
+    p: Buf<'l>,
+    ws: Buf<'l>,
+}
+
+impl<'l> QScratch<'l> {
+    fn new(led: &'l Words, tag: &'static str, m: &mut Meter) -> Result<QScratch<'l>, DivFault> {
+        Ok(QScratch { x: Buf::new(led, 0, tag, m)?, y: Buf::new(led, 0, tag, m)?, q: Buf::new(led, 0, tag, m)?, p: Buf::new(led, 0, tag, m)?, ws: Buf::new(led, 0, tag, m)? })
+    }
+    /// The product x y into p: its normalized length.
+    fn mul(&mut self, x: &[u64], y: &[u64], m: &mut Meter) -> Result<usize, DivFault> {
+        if x.is_empty() || y.is_empty() {
+            return Ok(0);
+        }
+        self.p.grow(x.len() + y.len(), 0, m)?;
+        Ok(mul_into(x, y, &mut self.p.v, m)?)
+    }
+    /// x / y exactly (y normalized, nonzero; x a multiple of y) into q: its
+    /// normalized length.
+    fn divexact(&mut self, x: &[u64], y: &[u64], m: &mut Meter) -> Result<usize, DivFault> {
+        if x.is_empty() {
+            return Ok(0);
+        }
+        if x.len() < y.len() {
+            return Err(DivFault::Invariant);
+        }
+        let (nx, ny) = (x.len(), y.len());
+        self.x.grow(nx + 1, 0, m)?;
+        self.y.grow(ny, 0, m)?;
+        self.q.grow(nx - ny + 1, 0, m)?;
+        m.add(nx + ny + 2)?;
+        self.x.v[..nx].copy_from_slice(x);
+        self.y.v[..ny].copy_from_slice(y);
+        Ok(crate::coprime::divexact_in_place(&mut self.x.v, nx, &mut self.y.v, ny, &mut self.q.v, m)?)
+    }
+    /// gcd(x, y) of two magnitudes (not both zero) into g.
+    fn gcd(&mut self, x: &[u64], y: &[u64], g: &mut Coef, m: &mut Meter) -> Result<(), DivFault> {
+        let room = x.len().max(y.len()) + 1;
+        self.ws.grow(2 * room, 0, m)?;
+        m.add(2 * room + 1)?;
+        let (s0, s1) = self.ws.v.split_at_mut(room);
+        let s1 = &mut s1[..room];
+        s0.iter_mut().for_each(|w| *w = 0);
+        s1.iter_mut().for_each(|w| *w = 0);
+        s0[..x.len()].copy_from_slice(x);
+        s1[..y.len()].copy_from_slice(y);
+        let (slot, lg) = crate::coprime::gcd_in_place(s0, x.len(), s1, y.len(), m)?;
+        let r: &[u64] = if slot { &s1[..lg] } else { &s0[..lg] };
+        g.set(r, false, m)
+    }
+}
+
+/// num / den (den > 0) in lowest terms, appended to the two arenas; num = 0
+/// appends 0 over 1.
+#[allow(clippy::too_many_arguments)]
+fn push_reduced(num: &[u64], neg: bool, den: &[u64], an: &mut Arena, ad: &mut Arena, g: &mut Coef, s: &mut QScratch, m: &mut Meter) -> Result<(), DivFault> {
+    if num.is_empty() {
+        an.push(&[], false, m)?;
+        return ad.push(&[1], false, m);
+    }
+    s.gcd(num, den, g, m)?;
+    let gv = g.mag().to_vec();
+    if gv.len() == 1 && gv[0] == 1 {
+        an.push(num, neg, m)?;
+        return ad.push(den, false, m);
+    }
+    m.add(2 * gv.len() + 2)?;
+    let n1 = s.divexact(num, &gv, m)?;
+    an.push(&s.q.v[..n1], neg, m)?;
+    let n2 = s.divexact(den, &gv, m)?;
+    ad.push(&s.q.v[..n2], false, m)
+}
+
+/// The fixed rows for Q, in words, once phase A's lcms are known: the
+/// request; d_a and d_b at phase A's capacities; the cleared divisor (each
+/// of its m + 1 coefficients at most its numerator's limbs plus d_b's) and
+/// its metadata; the window's metadata; and the call's other owners.
+pub fn fixed_rows_q(b: &Factor, m: u64, r: u64, pa: &qpoly::PlanA, nb_words: u64) -> Option<u64> {
+    let meta = m.checked_add(1)?.checked_mul(META_WORDS)?;
+    let divisor = b.n_sum.checked_add(m.checked_add(1)?.checked_mul(nb_words)?)?;
+    r.div_ceil(8)
+        .checked_add(pa.lam_a.checked_add(1)?)?
+        .checked_add(pa.lam_b.checked_add(1)?)?
+        .checked_add(divisor)?
+        .checked_add(meta)?
+        .checked_add(meta)?
+        .checked_add(OVERHEAD_WORDS)
+}
+
+/// Phase A for Q, the `divrem clear` phase: the two lcms (qpoly_mul's, on
+/// the call's meter), polled at its start.
+pub fn clear_q(a: &Factor, b: &Factor, pa: &qpoly::PlanA, m: &mut Meter) -> Result<qpoly::Lcms, Fault> {
+    let _p = sagebrush_interrupt::enter("divrem clear");
+    sagebrush_interrupt::check_coarse();
+    let l = qpoly::lcms_metered(a, b, pa, m)?;
+    phase_end("divrem clear", m);
+    Ok(l)
+}
+
+/// The whole qpoly_divrem call on scanned operands (`num` and `num/den`
+/// tokens): `{"ok":{"q":...,"r":...}}` in lowest terms, or the refusal.
+pub fn reply_q(a: &Factor, b: &Factor, r: u64, caps: &qpoly::Caps) -> Result<String, String> {
+    if r > caps.int.request {
+        return Err(format!("the request's bytes = {} is more than {} ({})", r, caps.int.request, HOW));
+    }
+    let nb = norm_len(b);
+    if nb == 0 {
+        return Err("division by zero polynomial".to_string());
+    }
+    let na = norm_len(a);
+    if na == 0 {
+        return Ok("{\"ok\":{\"q\":\"\",\"r\":\"\"}}".to_string());
+    }
+    let pa = qpoly::admit_a(a, b, r, caps)?.ok_or_else(|| format!("{}: a nonzero operand admitted as zero", INTERNAL_PREFIX))?;
+    let mut m = Meter::new(pa.limit);
+    let lcm_refusal = |f: Fault| match f {
+        Fault::Overrun => format!("the denominators' lcm needs more than {} word operations (fewer or simpler denominators per call)", pa.limit),
+        Fault::Invariant => format!("{}: the lcm (Invariant)", INTERNAL_PREFIX),
+    };
+    let l = clear_q(a, b, &pa, &mut m).map_err(lcm_refusal)?;
+    let (n, mm) = (na - 1, nb - 1);
+    let fixed = fixed_rows_q(b, mm, r, &pa, l.nb as u64).ok_or_else(|| "the division's size overflows".to_string())?;
+    let cap = caps.int.peak / 8;
+    if fixed > cap {
+        return Err(format!("the memory (bytes) = {} is more than {} ({})", fixed.saturating_mul(8), caps.int.peak, HOW));
+    }
+    let plan = Plan { n, m: mm, k: if n >= mm { n - mm + 1 } else { 0 }, fixed, limit: cap - fixed, work: pa.limit };
+    let led = Words::new(plan.limit);
+    reply_q_on(a, b, &plan, &pa, l, &led, &mut m).map_err(|f| fault_text(f, &plan))
+}
+
+/// Q's division, the reply's exact reservation and its writing, on the
+/// caller's ledger and meter (the tests drive both), phase A done.
+pub fn reply_q_on(a: &Factor, b: &Factor, plan: &Plan, pa: &qpoly::PlanA, l: qpoly::Lcms, led: &Words, m: &mut Meter) -> Result<String, DivFault> {
+    let dv = divide_q(a, b, plan, pa, l, led, m)?;
+    let bytes = reply_bytes(&dv).ok_or(DivFault::Memory)?;
+    let words = bytes.div_ceil(8);
+    led.note("reply", words);
+    led.reserve(words)?;
+    let _held = Reserved(words, led);
+    let mut out = String::new();
+    out.try_reserve_exact(bytes as usize).map_err(|_| DivFault::Memory)?;
+    emit(&dv, &mut out, m)?;
+    phase_end("divrem emit", m);
+    if out.len() as u64 != bytes {
+        return Err(DivFault::Invariant);
+    }
+    Ok(out)
+}
+
+/// A token's cleared integer n_i (L / d_i) into c, through the scratch.
+fn cleared(tok: &str, l: &[u64], c: &mut Coef, s: &mut QScratch, m: &mut Meter) -> Result<(), DivFault> {
+    let (neg, num, den) = parts(tok);
+    if num == "0" {
+        c.len = 0;
+        c.neg = false;
+        return Ok(());
+    }
+    // (d_i into y's buffer by way of x: the parse, then L / d_i)
+    let mut d = Coef::tagged(c.buf.led, den.len().div_ceil(16), "scratch", m)?;
+    d.set_hex(false, den, m)?;
+    let nq = s.divexact(l, d.mag(), m)?;
+    let qv = s.q.v[..nq].to_vec();
+    let mut nn = Coef::tagged(c.buf.led, num.len().div_ceil(16), "scratch", m)?;
+    nn.set_hex(false, num, m)?;
+    let np = s.mul(nn.mag(), &qv, m)?;
+    let pv = s.p.v[..np].to_vec();
+    c.set(&pv, neg, m)
+}
+
+/// Q's division on the caller's ledger and meter, phase A's lcms given.
+pub fn divide_q<'l>(a: &Factor, b: &Factor, plan: &Plan, _pa: &qpoly::PlanA, l: qpoly::Lcms, led: &'l Words, m: &mut Meter) -> Result<Divided<'l>, DivFault> {
+    let qpoly::Lcms { la, lb, na, nb, .. } = l;
+    let da = &la[..na];
+    let w = plan.m as usize + 1;
+    let mut s = QScratch::new(led, "scratch", m)?;
+    let mut g = Coef::tagged(led, 1, "scratch", m)?;
+    let mut q = Arena::new(led, "q arena", m)?;
+    let mut qd = Arena::new(led, "q arena", m)?;
+    let mut r = Arena::new(led, "r arena", m)?;
+    let mut rd = Arena::new(led, "r arena", m)?;
+    // a lower degree: r = a, each token reduced
+    if plan.n < plan.m {
+        let _p = sagebrush_interrupt::enter("divrem divide");
+        sagebrush_interrupt::check_coarse();
+        let mut nb_ = Coef::tagged(led, 0, "scratch", m)?;
+        let mut db_ = Coef::tagged(led, 0, "scratch", m)?;
+        let skip = (a.tokens - plan.n - 1) as usize;
+        for tok in a.text.rsplit(',').skip(skip) {
+            let (neg, num, den) = parts(tok);
+            nb_.set_hex(neg, num, m)?;
+            db_.set_hex(false, den, m)?;
+            let (nv, dv) = (nb_.mag().to_vec(), db_.mag().to_vec());
+            push_reduced(&nv, nb_.neg, &dv, &mut r, &mut rd, &mut g, &mut s, m)?;
+        }
+        drop((la, lb, s, g, nb_, db_));
+        return Ok(Divided { q, r, qd: Some(qd), rd: Some(rd) });
+    }
+    // Q1: the divisor cleared into its fixed row, divided by its content in
+    // place there (P reuses B's capacity: nothing is allocated for P)
+    let (d, beta_n, beta_d) = {
+        let _p = sagebrush_interrupt::enter("divrem load");
+        sagebrush_interrupt::check_coarse();
+        let mut limbs = vec![0u64; b.n_sum as usize + w * nb];
+        let mut rows: Vec<(usize, usize, bool)> = Vec::with_capacity(w);
+        let mut at = 0usize;
+        let mut t = Coef::tagged(led, 0, "q1 scratch", m)?;
+        let mut q1 = QScratch::new(led, "q1 scratch", m)?;
+        for tok in b.text.split(',').take(w) {
+            cleared(tok, &lb[..nb], &mut t, &mut q1, m)?;
+            let n = t.len;
+            m.add(n + 1)?;
+            limbs[at..at + n].copy_from_slice(t.mag());
+            rows.push((at, n, t.neg));
+            at += n;
+        }
+        // the content, stopping at 1
+        let mut cont = Coef::tagged(led, 1, "q1 scratch", m)?;
+        for &(st, n, _) in &rows {
+            if n == 0 {
+                continue;
+            }
+            if cont.len == 0 {
+                let v = limbs[st..st + n].to_vec();
+                cont.set(&v, false, m)?;
+            } else {
+                let (cv, xv) = (cont.mag().to_vec(), limbs[st..st + n].to_vec());
+                q1.gcd(&cv, &xv, &mut cont, m)?;
+            }
+            if cont.is_one() {
+                break;
+            }
+        }
+        if !cont.is_one() {
+            let cv = cont.mag().to_vec();
+            for row in rows.iter_mut() {
+                let (st, n, _) = *row;
+                if n == 0 {
+                    continue;
+                }
+                let xv = limbs[st..st + n].to_vec();
+                let nq = q1.divexact(&xv, &cv, m)?;
+                m.add(nq + 1)?;
+                limbs[st..st + nq].copy_from_slice(&q1.q.v[..nq]);
+                limbs[st + nq..st + n].iter_mut().for_each(|x| *x = 0);
+                row.1 = nq;
+            }
+        }
+        // lc(P) > 0: a negative leading coefficient flips every sign, in place
+        let flip = rows[w - 1].2;
+        if flip {
+            for row in rows.iter_mut() {
+                row.2 = !row.2 && row.1 > 0;
+            }
+        }
+        // beta = (+-cont) / d_b, reduced: ledger reservations that never grow
+        let mut gg = Coef::tagged(led, 1, "q1 scratch", m)?;
+        let cv = cont.mag().to_vec();
+        q1.gcd(&cv, &lb[..nb], &mut gg, m)?;
+        let gv = gg.mag().to_vec();
+        let n1 = q1.divexact(&cv, &gv, m)?;
+        let mut beta_n = Coef::tagged(led, n1, "beta", m)?;
+        beta_n.set(&q1.q.v[..n1], flip, m)?;
+        let n2 = q1.divexact(&lb[..nb], &gv, m)?;
+        let mut beta_d = Coef::tagged(led, n2, "beta", m)?;
+        beta_d.set(&q1.q.v[..n2], false, m)?;
+        drop((t, q1, cont, gg));
+        phase_end("divrem load", m);
+        (Divisor { limbs, rows }, beta_n, beta_d)
+    };
+    // d_b is no longer needed: freed, its fixed words credited to the ledger
+    let lb_words = lb.len() as u64;
+    drop(lb);
+    led.credit(lb_words)?;
+    let (c, _) = d.get(w - 1);
+    let c = c.to_vec();
+    let monic = c.len() == 1 && c[0] == 1;
+    let _p = sagebrush_interrupt::enter("divrem divide");
+    sagebrush_interrupt::check_coarse();
+    // DT = d_a |beta_n| c: q_j's denominator is DT T
+    let mut dt = Coef::tagged(led, 0, "scratch", m)?;
+    {
+        let n1 = s.mul(da, beta_n.mag(), m)?;
+        let v = s.p.v[..n1].to_vec();
+        let n2 = s.mul(&v, &c, m)?;
+        let v2 = s.p.v[..n2].to_vec();
+        dt.set(&v2, false, m)?;
+    }
+    let mut tsc = Coef::tagged(led, 1, "T", m)?;
+    tsc.set(&[1], false, m)?;
+    // the window, slot(l) = ring[(h + l) % w], from the dividend's top
+    let skip = (a.tokens - plan.n - 1) as usize;
+    let mut toks = a.text.rsplit(',').skip(skip);
+    let mut ring: Vec<Coef<'l>> = Vec::with_capacity(w);
+    for _ in 0..w {
+        ring.push(Coef::new(led, 0, m)?);
+    }
+    for li in (0..w).rev() {
+        cleared(toks.next().ok_or(DivFault::Invariant)?, da, &mut ring[li], &mut s, m)?;
+    }
+    let mut h = 0usize;
+    let mut tmp = Coef::tagged(led, 0, "scratch", m)?;
+    let k = plan.k as usize;
+    for st in 0..k {
+        let topi = (h + w - 1) % w;
+        let (wi, wi_neg) = (ring[topi].mag().to_vec(), ring[topi].neg);
+        // q_j = W_i beta_d / (DT T), reduced
+        let nn = s.mul(&wi, beta_d.mag(), m)?;
+        let num = s.p.v[..nn].to_vec();
+        let nd = s.mul(dt.mag(), tsc.mag(), m)?;
+        let den = s.p.v[..nd].to_vec();
+        push_reduced(&num, wi_neg != beta_n.neg, &den, &mut q, &mut qd, &mut g, &mut s, m)?;
+        // W <- c W - W_i x^j P (the top: c W_i - W_i c = 0, checked)
+        #[cfg(test)]
+        let u0 = m.used();
+        for li in 0..w {
+            let i = (h + li) % w;
+            if !monic {
+                qcount(1, 0, 0, 0);
+                // (the product into the scratch, whose buffer then becomes
+                // the coefficient's: both are the ledger's, so swapping them
+                // moves no reservation)
+                let len = ring[i].len;
+                let np = s.mul(&ring[i].buf.v[..len], &c, m)?;
+                std::mem::swap(&mut ring[i].buf.v, &mut s.p.v);
+                ring[i].len = np;
+            }
+            let (pl, pneg) = d.get(li);
+            let pl = if li == w - 1 && probe_leaving() {
+                let mut v = pl.to_vec();
+                v[0] = v[0].wrapping_add(1);
+                v
+            } else {
+                pl.to_vec()
+            };
+            let np = s.mul(&wi, &pl, m)?;
+            ring[i].sub_signed(&s.p.v[..np], wi_neg != pneg, m)?;
+        }
+        #[cfg(test)]
+        UPD_UNITS.with(|c| c.set(c.get() + m.used() - u0));
+        if ring[topi].len != 0 {
+            return Err(DivFault::Invariant);
+        }
+        if !monic {
+            let tv = tsc.mag().to_vec();
+            let np = s.mul(&tv, &c, m)?;
+            let v = s.p.v[..np].to_vec();
+            tsc.set(&v, false, m)?;
+            // g = gcd(T, the window's content), stopping at 1
+            g.set(&v, false, m)?;
+            for li in 0..w - 1 {
+                if g.is_one() {
+                    break;
+                }
+                let i = (h + li) % w;
+                if ring[i].len == 0 {
+                    continue;
+                }
+                let (gv, xv) = (g.mag().to_vec(), ring[i].mag().to_vec());
+                qcount(0, 1, 0, 0);
+                #[cfg(test)]
+                let u0 = m.used();
+                s.gcd(&gv, &xv, &mut g, m)?;
+                #[cfg(test)]
+                GCD_UNITS.with(|c| c.set(c.get() + m.used() - u0));
+            }
+            #[cfg(test)]
+            let u1 = m.used();
+            if !g.is_one() {
+                qcount(0, 0, 1, 0);
+                let gv = g.mag().to_vec();
+                for li in 0..w - 1 {
+                    let i = (h + li) % w;
+                    if ring[i].len == 0 {
+                        continue;
+                    }
+                    let len = ring[i].len;
+                    let nq = s.divexact(&ring[i].buf.v[..len], &gv, m)?;
+                    std::mem::swap(&mut ring[i].buf.v, &mut s.q.v);
+                    ring[i].len = nq;
+                }
+                let tv = tsc.mag().to_vec();
+                let nq = s.divexact(&tv, &gv, m)?;
+                let qv = s.q.v[..nq].to_vec();
+                tsc.set(&qv, false, m)?;
+            }
+            #[cfg(test)]
+            DIV_UNITS.with(|c| c.set(c.get() + m.used() - u1));
+            qcount(0, 0, 0, tsc.len);
+        }
+        // the entering coefficient A_p T at the bottom (the top's slot)
+        if st + 1 < k {
+            cleared(toks.next().ok_or(DivFault::Invariant)?, da, &mut tmp, &mut s, m)?;
+            if tsc.is_one() {
+                let (v, ng) = (tmp.mag().to_vec(), tmp.neg);
+                ring[topi].set(&v, ng, m)?;
+            } else {
+                let (x, tv) = (tmp.mag().to_vec(), tsc.mag().to_vec());
+                let np = s.mul(&x, &tv, m)?;
+                let v = s.p.v[..np].to_vec();
+                let ng = tmp.neg;
+                ring[topi].set(&v, ng, m)?;
+            }
+            h = topi;
+        }
+    }
+    // r_p = W_p / (d_a T), reduced, degrees m - 1 down to 0
+    let ndt = s.mul(da, tsc.mag(), m)?;
+    let den = s.p.v[..ndt].to_vec();
+    for li in (0..w - 1).rev() {
+        let i = (h + li) % w;
+        let (x, ng) = (ring[i].mag().to_vec(), ring[i].neg);
+        push_reduced(&x, ng, &den, &mut r, &mut rd, &mut g, &mut s, m)?;
+    }
+    drop((ring, s, g, tmp, dt, tsc, beta_n, beta_d, la));
+    phase_end("divrem divide", m);
+    Ok(Divided { q, r, qd: Some(qd), rd: Some(rd) })
 }
 
 #[cfg(test)]

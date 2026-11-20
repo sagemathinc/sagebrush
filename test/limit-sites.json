@@ -119,6 +119,28 @@
   "owner": "exact linear algebra (engine/arith)",
   "reason": "test code: every work bound at extreme lengths is None (a refusal) or a number, never an overflow; refuses nothing itself"
  },
+ "engine/arith/src/pdivrem.rs ::  :: pub const DIVREM_Q_CAPS: qpoly::Caps = qpoly::Caps { int: crate::zmul::Caps { work: DIVREM_Q_WORK_MAX, ..crate::zmul::CAPS }, reply: qpoly::REPLY_MAX }; #0": {
+  "class": "1+3",
+  "disposition": {
+   "1": "shared",
+   "3": {
+    "followup": "FU-B18-3"
+   }
+  },
+  "owner": "qpoly_divrem",
+  "reason": "qpoly_divrem's fixed caps (zmul's request and peak; its own work cap DIVREM_Q_WORK_MAX = 2^29, calibrated in time) with its lcms and division metered and its memory on the live word ledger; each refusal names the cap and the way around it"
+ },
+ "engine/arith/src/pdivrem.rs ::  :: pub const DIVREM_Q_WORK_MAX: u64 = 1 << 29; #0": {
+  "class": "1+3",
+  "disposition": {
+   "1": "shared",
+   "3": {
+    "followup": "FU-B18-3"
+   }
+  },
+  "owner": "qpoly_divrem",
+  "reason": "qpoly_divrem's fixed caps (zmul's request and peak; its own work cap DIVREM_Q_WORK_MAX = 2^29, calibrated in time) with its lcms and division metered and its memory on the live word ledger; each refusal names the cap and the way around it"
+ },
  "engine/arith/src/pdivrem.rs :: admit_z :: Ok(Ok(Plan { n, m, k, fixed, limit: cap - fixed, work })) #0": {
   "class": "none",
   "owner": "zpoly_divrem",
@@ -165,6 +187,11 @@
   "owner": "zpoly_divrem",
   "reason": "zpoly_divrem's derived sizes, plumbing (the ledger's and meter's limits, the plan's sizes) or a test assertion: refuses nothing itself"
  },
+ "engine/arith/src/pdivrem.rs :: credit :: self.limit.set(self.limit.get().checked_add(n).ok_or(DivFault::Memory)?); #0": {
+  "class": "none",
+  "owner": "qpoly_divrem",
+  "reason": "qpoly_divrem's derived sizes, plumbing (the ledger's and meter's limits, the plan's sizes) or a test assertion: refuses nothing itself"
+ },
  "engine/arith/src/pdivrem.rs :: drop :: pub(crate) static MAX_BITS: Cell<u64> = const { Cell::new(0) }; #0": {
   "class": "none",
   "owner": "zpoly_divrem",
@@ -206,10 +233,10 @@
   "owner": "zpoly_divrem",
   "reason": "zpoly_divrem's derived sizes, plumbing (the ledger's and meter's limits, the plan's sizes) or a test assertion: refuses nothing itself"
  },
- "engine/arith/src/pdivrem.rs :: new :: Ok(Coef { buf: Buf::new(led, cap, \"window\", m)?, len: 0, neg: false }) #0": {
+ "engine/arith/src/pdivrem.rs :: new :: Coef::tagged(led, cap, \"window\", m) #0": {
   "class": "none",
-  "owner": "zpoly_divrem",
-  "reason": "zpoly_divrem's derived sizes, plumbing (the ledger's and meter's limits, the plan's sizes) or a test assertion: refuses nothing itself"
+  "owner": "qpoly_divrem",
+  "reason": "qpoly_divrem's derived sizes, plumbing (the ledger's and meter's limits, the plan's sizes) or a test assertion: refuses nothing itself"
  },
  "engine/arith/src/pdivrem.rs :: new :: fn new(led: &'l Words, cap: usize, m: &mut Meter) -> Result<Coef<'l>, DivFault> { #0": {
   "class": "none",
@@ -256,6 +283,48 @@
   "owner": "zpoly_divrem",
   "reason": "zpoly_divrem's derived sizes, plumbing (the ledger's and meter's limits, the plan's sizes) or a test assertion: refuses nothing itself"
  },
+ "engine/arith/src/pdivrem.rs :: reply_q :: Fault::Overrun => format!(\"the denominators' lcm needs more than {} word operations (fewer or simpler denominators per call)\", pa.limit), #0": {
+  "class": "1+3",
+  "disposition": {
+   "1": "shared",
+   "3": {
+    "followup": "FU-B18-3"
+   }
+  },
+  "owner": "qpoly_divrem",
+  "reason": "qpoly_divrem's fixed caps (zmul's request and peak; its own work cap DIVREM_Q_WORK_MAX = 2^29, calibrated in time) with its lcms and division metered and its memory on the live word ledger; each refusal names the cap and the way around it"
+ },
+ "engine/arith/src/pdivrem.rs :: reply_q :: if fixed > cap { #0": {
+  "class": "1+3",
+  "disposition": {
+   "1": "shared",
+   "3": {
+    "followup": "FU-B18-3"
+   }
+  },
+  "owner": "qpoly_divrem",
+  "reason": "qpoly_divrem's fixed caps (zmul's request and peak; its own work cap DIVREM_Q_WORK_MAX = 2^29, calibrated in time) with its lcms and division metered and its memory on the live word ledger; each refusal names the cap and the way around it"
+ },
+ "engine/arith/src/pdivrem.rs :: reply_q :: let cap = caps.int.peak / 8; #0": {
+  "class": "none",
+  "owner": "qpoly_divrem",
+  "reason": "qpoly_divrem's derived sizes, plumbing (the ledger's and meter's limits, the plan's sizes) or a test assertion: refuses nothing itself"
+ },
+ "engine/arith/src/pdivrem.rs :: reply_q :: let led = Words::new(plan.limit); #0": {
+  "class": "none",
+  "owner": "qpoly_divrem",
+  "reason": "qpoly_divrem's derived sizes, plumbing (the ledger's and meter's limits, the plan's sizes) or a test assertion: refuses nothing itself"
+ },
+ "engine/arith/src/pdivrem.rs :: reply_q :: let mut m = Meter::new(pa.limit); #0": {
+  "class": "none",
+  "owner": "qpoly_divrem",
+  "reason": "qpoly_divrem's derived sizes, plumbing (the ledger's and meter's limits, the plan's sizes) or a test assertion: refuses nothing itself"
+ },
+ "engine/arith/src/pdivrem.rs :: reply_q :: let plan = Plan { n, m: mm, k: if n >= mm { n - mm + 1 } else { 0 }, fixed, limit: cap - fixed, work: pa.limit }; #0": {
+  "class": "none",
+  "owner": "qpoly_divrem",
+  "reason": "qpoly_divrem's derived sizes, plumbing (the ledger's and meter's limits, the plan's sizes) or a test assertion: refuses nothing itself"
+ },
  "engine/arith/src/pdivrem.rs :: reply_z :: let led = Words::new(plan.limit); #0": {
   "class": "none",
   "owner": "zpoly_divrem",
@@ -272,6 +341,16 @@
   "owner": "zpoly_divrem",
   "reason": "zpoly_divrem's fixed caps (zmul's request, work and peak) with its work metered and its memory on a live word ledger within them; the fixed rows are refused before any work, the ledger's limit at each reservation; each refusal names the cap and the way around it"
  },
+ "engine/arith/src/pdivrem.rs :: tagged :: Ok(Coef { buf: Buf::new(led, cap, tag, m)?, len: 0, neg: false }) #0": {
+  "class": "none",
+  "owner": "qpoly_divrem",
+  "reason": "qpoly_divrem's derived sizes, plumbing (the ledger's and meter's limits, the plan's sizes) or a test assertion: refuses nothing itself"
+ },
+ "engine/arith/src/pdivrem.rs :: tagged :: fn tagged(led: &'l Words, cap: usize, tag: &'static str, m: &mut Meter) -> Result<Coef<'l>, DivFault> { #0": {
+  "class": "none",
+  "owner": "qpoly_divrem",
+  "reason": "qpoly_divrem's derived sizes, plumbing (the ledger's and meter's limits, the plan's sizes) or a test assertion: refuses nothing itself"
+ },
  "engine/arith/src/pdivrem.rs :: track :: MAX_BITS.with(|c| c.set(c.get().max(bits(_x)))); #0": {
   "class": "none",
   "owner": "zpoly_divrem",
@@ -281,6 +360,116 @@
   "class": "none",
   "owner": "zpoly_divrem",
   "reason": "zpoly_divrem's derived sizes, plumbing (the ledger's and meter's limits, the plan's sizes) or a test assertion: refuses nothing itself"
+ },
+ "engine/arith/src/pdivrem/tests.rs :: q_constants_content_monic_and_cancelling :: assert_eq!(tmax, 1, \"the quotient is integral: T is back to 1 after each step\"); #0": {
+  "class": "none",
+  "owner": "qpoly_divrem",
+  "reason": "qpoly_divrem's derived sizes, plumbing (the ledger's and meter's limits, the plan's sizes) or a test assertion: refuses nothing itself"
+ },
+ "engine/arith/src/pdivrem/tests.rs :: q_constants_content_monic_and_cancelling :: let (cmul, cgcd, cancels, tmax) = counts(); #0": {
+  "class": "none",
+  "owner": "qpoly_divrem",
+  "reason": "qpoly_divrem's derived sizes, plumbing (the ledger's and meter's limits, the plan's sizes) or a test assertion: refuses nothing itself"
+ },
+ "engine/arith/src/pdivrem/tests.rs :: q_ledger_pins :: assert_eq!(run_q(&a, &b, Some(l)).0.unwrap_err(), DivFault::Memory, \"limit {} of {}\", l, high); #0": {
+  "class": "none",
+  "owner": "qpoly_divrem",
+  "reason": "qpoly_divrem's derived sizes, plumbing (the ledger's and meter's limits, the plan's sizes) or a test assertion: refuses nothing itself"
+ },
+ "engine/arith/src/pdivrem/tests.rs :: q_meter_pins_per_phase_on_the_benchmark :: assert!(out.is_ok(), \"the benchmark is admitted under the division's cap\"); #0": {
+  "class": "none",
+  "owner": "qpoly_divrem",
+  "reason": "qpoly_divrem's derived sizes, plumbing (the ledger's and meter's limits, the plan's sizes) or a test assertion: refuses nothing itself"
+ },
+ "engine/arith/src/pdivrem/tests.rs :: q_meter_pins_per_phase_on_the_benchmark :: assert!(total <= pa.limit && total > crate::zmul::WORK_MAX, \"{} units: above zmul's 2^28, within the division's cap\", total); #0": {
+  "class": "none",
+  "owner": "qpoly_divrem",
+  "reason": "qpoly_divrem's derived sizes, plumbing (the ledger's and meter's limits, the plan's sizes) or a test assertion: refuses nothing itself"
+ },
+ "engine/arith/src/pdivrem/tests.rs :: q_meter_pins_per_phase_on_the_benchmark :: eprintln!(\"the benchmark: {} units of {} ({:?})\", total, pa.limit, phases); #0": {
+  "class": "none",
+  "owner": "qpoly_divrem",
+  "reason": "qpoly_divrem's derived sizes, plumbing (the ledger's and meter's limits, the plan's sizes) or a test assertion: refuses nothing itself"
+ },
+ "engine/arith/src/pdivrem/tests.rs :: q_meter_pins_per_phase_on_the_benchmark :: let (out, phases) = run(pa.limit); #0": {
+  "class": "none",
+  "owner": "qpoly_divrem",
+  "reason": "qpoly_divrem's derived sizes, plumbing (the ledger's and meter's limits, the plan's sizes) or a test assertion: refuses nothing itself"
+ },
+ "engine/arith/src/pdivrem/tests.rs :: q_meter_pins_per_phase_on_the_benchmark :: let led = Words::new(plan.limit); #0": {
+  "class": "none",
+  "owner": "qpoly_divrem",
+  "reason": "qpoly_divrem's derived sizes, plumbing (the ledger's and meter's limits, the plan's sizes) or a test assertion: refuses nothing itself"
+ },
+ "engine/arith/src/pdivrem/tests.rs :: q_meter_pins_per_phase_on_the_benchmark :: let plan = Plan { n: 1000, m: 500, k: 501, fixed, limit: QCAPS.int.peak / 8 - fixed, work }; #0": {
+  "class": "none",
+  "owner": "qpoly_divrem",
+  "reason": "qpoly_divrem's derived sizes, plumbing (the ledger's and meter's limits, the plan's sizes) or a test assertion: refuses nothing itself"
+ },
+ "engine/arith/src/pdivrem/tests.rs :: q_profile_dense :: MAX_BITS.with(|c| c.set(0)); #0": {
+  "class": "none",
+  "owner": "qpoly_divrem",
+  "reason": "qpoly_divrem's derived sizes, plumbing (the ledger's and meter's limits, the plan's sizes) or a test assertion: refuses nothing itself"
+ },
+ "engine/arith/src/pdivrem/tests.rs :: q_profile_dense :: dv.is_ok(), t.elapsed().as_secs_f64(), after_clear, m.used(), Q_COUNTS.with(|c| c.get()), MAX_BITS.with(|c| c.get()), led.high()); #0": {
+  "class": "none",
+  "owner": "qpoly_divrem",
+  "reason": "qpoly_divrem's derived sizes, plumbing (the ledger's and meter's limits, the plan's sizes) or a test assertion: refuses nothing itself"
+ },
+ "engine/arith/src/pdivrem/tests.rs :: q_profile_dense :: eprintln!(\"ok {} in {:.2} s; units: clear {}, all {}; counts (cmul, content gcds, cancels, T limbs) {:?}; max bits {}; ledger high {}\", #0": {
+  "class": "none",
+  "owner": "qpoly_divrem",
+  "reason": "qpoly_divrem's derived sizes, plumbing (the ledger's and meter's limits, the plan's sizes) or a test assertion: refuses nothing itself"
+ },
+ "engine/arith/src/pdivrem/tests.rs :: q_profile_dense :: let led = Words::new(plan.limit); #0": {
+  "class": "none",
+  "owner": "qpoly_divrem",
+  "reason": "qpoly_divrem's derived sizes, plumbing (the ledger's and meter's limits, the plan's sizes) or a test assertion: refuses nothing itself"
+ },
+ "engine/arith/src/pdivrem/tests.rs :: q_profile_dense :: let mut m = Meter::new(u64::MAX); #0": {
+  "class": "none",
+  "owner": "qpoly_divrem",
+  "reason": "qpoly_divrem's derived sizes, plumbing (the ledger's and meter's limits, the plan's sizes) or a test assertion: refuses nothing itself"
+ },
+ "engine/arith/src/pdivrem/tests.rs :: q_profile_dense :: let plan = Plan { n: 1000, m: 500, k: 501, fixed, limit: QCAPS.int.peak / 8 - fixed, work: u64::MAX }; #0": {
+  "class": "none",
+  "owner": "qpoly_divrem",
+  "reason": "qpoly_divrem's derived sizes, plumbing (the ledger's and meter's limits, the plan's sizes) or a test assertion: refuses nothing itself"
+ },
+ "engine/arith/src/pdivrem/tests.rs :: q_reach_at_the_real_scale :: let led = Words::new(plan.limit); #0": {
+  "class": "none",
+  "owner": "qpoly_divrem",
+  "reason": "qpoly_divrem's derived sizes, plumbing (the ledger's and meter's limits, the plan's sizes) or a test assertion: refuses nothing itself"
+ },
+ "engine/arith/src/pdivrem/tests.rs :: q_reach_at_the_real_scale :: let mut m = Meter::new(pa.limit); #0": {
+  "class": "none",
+  "owner": "qpoly_divrem",
+  "reason": "qpoly_divrem's derived sizes, plumbing (the ledger's and meter's limits, the plan's sizes) or a test assertion: refuses nothing itself"
+ },
+ "engine/arith/src/pdivrem/tests.rs :: q_reach_at_the_real_scale :: let plan = Plan { n: k as u64, m: fb.tokens - 1, k: k as u64 - fb.tokens + 2, fixed, limit: QCAPS.int.peak / 8 - fixed, work: pa.limit }; #0": {
+  "class": "none",
+  "owner": "qpoly_divrem",
+  "reason": "qpoly_divrem's derived sizes, plumbing (the ledger's and meter's limits, the plan's sizes) or a test assertion: refuses nothing itself"
+ },
+ "engine/arith/src/pdivrem/tests.rs :: run_q :: fn run_q(a: &str, b: &str, limit: Option<u64>) -> (Result<u64, DivFault>, u64, Vec<(&'static str, u64)>) { #0": {
+  "class": "none",
+  "owner": "qpoly_divrem",
+  "reason": "qpoly_divrem's derived sizes, plumbing (the ledger's and meter's limits, the plan's sizes) or a test assertion: refuses nothing itself"
+ },
+ "engine/arith/src/pdivrem/tests.rs :: run_q :: let led = Words::new(limit.unwrap_or(plan.limit)); #0": {
+  "class": "none",
+  "owner": "qpoly_divrem",
+  "reason": "qpoly_divrem's derived sizes, plumbing (the ledger's and meter's limits, the plan's sizes) or a test assertion: refuses nothing itself"
+ },
+ "engine/arith/src/pdivrem/tests.rs :: run_q :: let mut m = Meter::new(pa.limit); #0": {
+  "class": "none",
+  "owner": "qpoly_divrem",
+  "reason": "qpoly_divrem's derived sizes, plumbing (the ledger's and meter's limits, the plan's sizes) or a test assertion: refuses nothing itself"
+ },
+ "engine/arith/src/pdivrem/tests.rs :: run_q :: let plan = Plan { n, m: mm, k: if n >= mm { n - mm + 1 } else { 0 }, fixed, limit: QCAPS.int.peak / 8 - fixed, work: pa.limit }; #0": {
+  "class": "none",
+  "owner": "qpoly_divrem",
+  "reason": "qpoly_divrem's derived sizes, plumbing (the ledger's and meter's limits, the plan's sizes) or a test assertion: refuses nothing itself"
  },
  "engine/arith/src/pdivrem/tests.rs :: run_z :: fn run_z(a: &str, b: &str, limit: Option<u64>, work: Option<u64>) -> Run { #0": {
   "class": "none",
@@ -6812,6 +7001,17 @@
   "owner": "qpoly_clear",
   "reason": "qpoly_clear's fixed caps (zmul's five, and the reply's bytes <= 64 MiB, those of qpoly_mul) and its metered lcm work within them, admitted before what they size; each refusal names the cap and the way around it"
  },
+ "engine/web/src/series_ops.rs ::  :: SeriesOp { name: \"qpoly_divrem\", max_request: zmul::REQUEST_MAX as usize, peak: zmul::PEAK_MAX, work: pdivrem::DIVREM_Q_WORK_MAX, run: qpoly_divrem }, #0": {
+  "class": "1+3",
+  "disposition": {
+   "1": "shared",
+   "3": {
+    "followup": "FU-B18-3"
+   }
+  },
+  "owner": "qpoly_divrem",
+  "reason": "qpoly_divrem's fixed caps (zmul's request and peak; its own work cap DIVREM_Q_WORK_MAX = 2^29, calibrated in time) with its lcms and division metered and its memory on the live word ledger; each refusal names the cap and the way around it"
+ },
  "engine/web/src/series_ops.rs ::  :: SeriesOp { name: \"qpoly_mul\", max_request: zmul::REQUEST_MAX as usize, peak: zmul::PEAK_MAX, work: zmul::WORK_MAX, run: qpoly_mul }, #0": {
   "class": "1+3",
   "disposition": {
@@ -7088,6 +7288,46 @@
   "class": "none",
   "owner": "zpoly_divrem",
   "reason": "zpoly_divrem's derived sizes, plumbing (the ledger's and meter's limits, the plan's sizes) or a test assertion: refuses nothing itself"
+ },
+ "engine/web/tests/divrem_alloc.rs :: qcall :: fn qcall(a: &str, b: &str, limit: Option<u64>, work: Option<u64>) -> (Result<String, DivFault>, u64, u64, u64, u64) { #0": {
+  "class": "none",
+  "owner": "qpoly_divrem",
+  "reason": "qpoly_divrem's derived sizes, plumbing (the ledger's and meter's limits, the plan's sizes) or a test assertion: refuses nothing itself"
+ },
+ "engine/web/tests/divrem_alloc.rs :: qcall :: let led = Words::new(limit.unwrap_or(plan.limit)); #0": {
+  "class": "none",
+  "owner": "qpoly_divrem",
+  "reason": "qpoly_divrem's derived sizes, plumbing (the ledger's and meter's limits, the plan's sizes) or a test assertion: refuses nothing itself"
+ },
+ "engine/web/tests/divrem_alloc.rs :: qcall :: let mut m = Meter::new(work.unwrap_or(pa.limit)); #0": {
+  "class": "none",
+  "owner": "qpoly_divrem",
+  "reason": "qpoly_divrem's derived sizes, plumbing (the ledger's and meter's limits, the plan's sizes) or a test assertion: refuses nothing itself"
+ },
+ "engine/web/tests/divrem_alloc.rs :: qcall :: let plan = pdivrem::Plan { n, m: mm, k: if n >= mm { n - mm + 1 } else { 0 }, fixed, limit: pdivrem::DIVREM_Q_CAPS.int.peak / 8 - fixed, work: pa.limit }; #0": {
+  "class": "none",
+  "owner": "qpoly_divrem",
+  "reason": "qpoly_divrem's derived sizes, plumbing (the ledger's and meter's limits, the plan's sizes) or a test assertion: refuses nothing itself"
+ },
+ "engine/web/tests/divrem_calibrate.rs :: qpoly_divrem_ns_per_unit :: eprintln!(\"worst {:.3} ns/unit: at the cap (DIVREM_Q_WORK_MAX units) {:.2} s\", worst, worst * (pdivrem::DIVREM_Q_WORK_MAX as f64) / 1e9); #0": {
+  "class": "none",
+  "owner": "qpoly_divrem",
+  "reason": "qpoly_divrem's derived sizes, plumbing (the ledger's and meter's limits, the plan's sizes) or a test assertion: refuses nothing itself"
+ },
+ "engine/web/tests/divrem_calibrate.rs :: run :: let led = Words::new(plan.limit); #0": {
+  "class": "none",
+  "owner": "qpoly_divrem",
+  "reason": "qpoly_divrem's derived sizes, plumbing (the ledger's and meter's limits, the plan's sizes) or a test assertion: refuses nothing itself"
+ },
+ "engine/web/tests/divrem_calibrate.rs :: run :: let mut m = Meter::new(u64::MAX); #0": {
+  "class": "none",
+  "owner": "qpoly_divrem",
+  "reason": "qpoly_divrem's derived sizes, plumbing (the ledger's and meter's limits, the plan's sizes) or a test assertion: refuses nothing itself"
+ },
+ "engine/web/tests/divrem_calibrate.rs :: run :: let plan = pdivrem::Plan { n, m: mm, k: if n >= mm { n - mm + 1 } else { 0 }, fixed, limit: caps.int.peak / 8 - fixed, work: u64::MAX }; #0": {
+  "class": "none",
+  "owner": "qpoly_divrem",
+  "reason": "qpoly_divrem's derived sizes, plumbing (the ledger's and meter's limits, the plan's sizes) or a test assertion: refuses nothing itself"
  },
  "engine/web/tests/nmod_alloc.rs :: peaks_within_bounds :: a[GCD_MAX_LEN - 1] = 1; #0": {
   "class": "none",

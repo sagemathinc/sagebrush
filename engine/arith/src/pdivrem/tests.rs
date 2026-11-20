@@ -1,5 +1,7 @@
 use super::*;
 use crate::qpoly::{scan_ints, CAPS};
+/// (Q's caps: the division's own work cap)
+const QCAPS: qpoly::Caps = DIVREM_Q_CAPS;
 
 /// zpoly_divrem's reply for a and b (a request of their length + 20 bytes).
 fn z(a: &str, b: &str, caps: &qpoly::Caps) -> Result<String, String> {
@@ -279,7 +281,265 @@ fn z_reach_and_genuine_growth() {
             }
         }
         let e = z(&x(hi), b, &CAPS).unwrap_err();
+        assert!(e.contains("the division's memory needs more than"), "refused by the ledger, by name: {}", e);
+        eprintln!("x^n / ({}): admitted to n ~ {}, refused from ~ {}: {}", what, lo, hi, e);
+    }
+}
+
+// ---- Q ----
+
+/// qpoly_divrem's reply for a and b (a request of their length + 20 bytes).
+fn qz(a: &str, b: &str) -> Result<String, String> {
+    let (fa, fb) = (qpoly::scan(a)?, qpoly::scan(b)?);
+    reply_q(&fa, &fb, (a.len() + b.len() + 20) as u64, &QCAPS)
+}
+
+#[test]
+fn q_matches_a_fraction_schoolbook() {
+    let text = include_str!("reference_q.txt");
+    let mut n = 0;
+    for line in text.lines().filter(|l| !l.starts_with('#')) {
+        let f: Vec<&str> = line.split('|').collect();
+        assert_eq!(qz(f[0], f[1]).unwrap(), want(f[2], f[3]), "{} / {}", f[0], f[1]);
+        n += 1;
+    }
+    assert_eq!(n, 400);
+}
+
+/// Q at the real scale (pin group 9): (2t + 1)(1 + t + ... + t^(k-1)) /
+/// (2t + 1) (q all 1, r = 0) and (t^n - 1) / (2t - 2) (q all 1/2) admitted at
+/// 20k, 50k and 100k (timings and the ledger's high-water with
+/// --nocapture); the quotient arena's words at most the reply's words plus
+/// 2 (k + 1) words of metadata plus the window's; genuine growth refused.
+#[test]
+fn q_reach_at_the_real_scale() {
+    for k in [20_000usize, 50_000, 100_000] {
+        // (2t + 1)(1 + ... + t^(k-1)) = 1 + 3t + 3t^2 + ... + 3t^(k-1) + 2t^k
+        let mut a = vec!["3"; k + 1];
+        a[0] = "1";
+        a[k] = "2";
+        let a1 = a.join(",");
+        let mut a = vec!["0"; k + 1];
+        a[0] = "-1";
+        a[k] = "1";
+        let a2 = a.join(",");
+        for (a, b, q) in [(&a1, "1,2", "1"), (&a2, "-2,2", "1/2")] {
+            let t = std::time::Instant::now();
+            let out = qz(a, b).unwrap();
+            let ms = t.elapsed().as_secs_f64() * 1e3;
+            assert_eq!(out, want(&vec![q; k].join(","), ""), "k = {} b = {}", k, b);
+            // the arena against the reply
+            let (fa, fb) = (qpoly::scan(a).unwrap(), qpoly::scan(b).unwrap());
+            let r = (a.len() + b.len() + 20) as u64;
+            let pa = qpoly::admit_a(&fa, &fb, r, &QCAPS).unwrap().unwrap();
+            let mut m = Meter::new(pa.limit);
+            let l = clear_q(&fa, &fb, &pa, &mut m).unwrap();
+            let fixed = fixed_rows_q(&fb, fb.tokens - 1, r, &pa, l.nb as u64).unwrap();
+            let plan = Plan { n: k as u64, m: fb.tokens - 1, k: k as u64 - fb.tokens + 2, fixed, limit: QCAPS.int.peak / 8 - fixed, work: pa.limit };
+            let led = Words::new(plan.limit);
+            let dv = divide_q(&fa, &fb, &plan, &pa, l, &led, &mut m).unwrap();
+            // (each stored limb carries at least one of the reply's hex
+            // digits; a denominator of 1 is stored but not printed; one
+            // metadata word per numerator and per denominator; the growth
+            // policy's slack at most 1.5x: so the quotient's arenas hold at
+            // most 1.5 (reply bytes + 4 (k + 1)) + 4 words, where
+            // pseudo-division's would hold about k^2 / 128)
+            let bytes = reply_bytes(&dv).unwrap();
+            let qw = dv.q.words() + dv.qd.as_ref().unwrap().words();
+            let bound = (3 * (bytes + 4 * (plan.k + 1))).div_ceil(2) + 4;
+            eprintln!("k = {} b = {}: {:.1} ms, high-water {} words, q arenas {} words (bound {})", k, b, ms, led.high(), qw, bound);
+            assert!(qw <= bound, "the quotient arenas: {} > {}", qw, bound);
+        }
+    }
+    // genuine growth over Q: x^n / (x - 3/2) and x^n / (x^2 - x - 1)
+    for (b, what) in [("-3/2,1", "x - 3/2"), ("-1,-1,1", "x^2 - x - 1")] {
+        let x = |n: usize| {
+            let mut a = vec!["0"; n + 1];
+            a[n] = "1";
+            a.join(",")
+        };
+        let (mut lo, mut hi) = (500usize, 1usize << 18);
+        while hi - lo > lo / 50 {
+            let mid = (lo + hi) / 2;
+            if qz(&x(mid), b).is_ok() { lo = mid } else { hi = mid }
+        }
+        let e = qz(&x(hi), b).unwrap_err();
         assert!(e.contains("the division's memory needs more than") || e.contains("the division needs more than"), "{}", e);
         eprintln!("x^n / ({}): admitted to n ~ {}, refused from ~ {}: {}", what, lo, hi, e);
+    }
+}
+
+/// Constant divisors over Q (m = 0: after Q1 the primitive part is 1), Q1's
+/// content cases, Q5's monic divisor (no multiplication by c, no content
+/// gcd), Q2's cancelling steps, and the leaving coefficient's invariant.
+#[test]
+fn q_constants_content_monic_and_cancelling() {
+    let reset = || Q_COUNTS.with(|c| c.set((0, 0, 0, 0)));
+    let counts = || Q_COUNTS.with(|c| c.get());
+    // constants 3 and -2/3: q = a / c, r = 0
+    assert_eq!(qz("6,-9,c", "3").unwrap(), want("2,-3,4", ""));
+    assert_eq!(qz("1,2,3", "-2/3").unwrap(), want("-3/2,-3,-9/2", ""));
+    // (m = 0: Q1 divides a constant by its content, so P = 1 is monic and Q5
+    // applies; T never leaves 1, and nothing is spent on c)
+    reset();
+    let _ = qz(&vec!["5/7"; 50].join(","), "-2/3").unwrap();
+    assert_eq!(counts(), (0, 0, 0, 0), "m = 0: a constant's primitive part is 1");
+    // Q1: a divisor with content gives its primitive part's quotient, beta's
+    // sign carried: (6t - 6) and (-4t^2 + 2)
+    assert_eq!(qz("-1,0,1", "-6,6").unwrap(), want("1/6,1/6", ""));
+    assert_eq!(qz("-1,0,1", "-1,1").unwrap(), want("1,1", ""));
+    assert_eq!(qz("0,0,0,1", "2,0,-4").unwrap(), want("0,-1/4", "0,1/2"));
+    // Q5: a monic primitive part (2t - 2 = 2 (t - 1)): no multiplication by
+    // c and no content gcd
+    reset();
+    assert_eq!(qz("-1,0,0,1", "-2,2").unwrap(), want("1/2,1/2,1/2", ""));
+    assert_eq!((counts().0, counts().1), (0, 0), "monic P: no work on c");
+    // Q2: 3t + 1 (non-monic): steps whose content gcd cancels (g > 1) and
+    // T back at 1, on (3t + 1)(t^2 + t + 1)
+    reset();
+    assert_eq!(qz("1,4,4,3", "1,3").unwrap(), want("1,1,1", ""));
+    let (cmul, cgcd, cancels, tmax) = counts();
+    assert!(cmul > 0 && cgcd > 0 && cancels > 0, "{:?}", counts());
+    assert_eq!(tmax, 1, "the quotient is integral: T is back to 1 after each step");
+    // a step whose content is 1 at the first coefficient: (t^3 + 1) / (2t + 1)
+    reset();
+    assert_eq!(qz("1,0,0,1", "1,2").unwrap(), want("1/8,-1/4,1/2", "7/8"));
+    // the leaving coefficient's invariant: with P_m altered in the top's
+    // update it isn't 0, and the call fails internally, with no reply
+    PROBE_LEAVING.with(|p| p.set(true));
+    let e = qz("1,4,4,3", "1,3").unwrap_err();
+    PROBE_LEAVING.with(|p| p.set(false));
+    assert!(e.contains(INTERNAL_PREFIX), "{}", e);
+}
+
+/// A Q division on a ledger of `limit` words (the plan's by default): its
+/// outcome, the ledger's high-water and log.
+fn run_q(a: &str, b: &str, limit: Option<u64>) -> (Result<u64, DivFault>, u64, Vec<(&'static str, u64)>) {
+    let (fa, fb) = (qpoly::scan(a).unwrap(), qpoly::scan(b).unwrap());
+    let r = (a.len() + b.len() + 20) as u64;
+    let pa = qpoly::admit_a(&fa, &fb, r, &QCAPS).unwrap().unwrap();
+    let mut m = Meter::new(pa.limit);
+    let l = clear_q(&fa, &fb, &pa, &mut m).unwrap();
+    let (n, mm) = (norm_len(&fa) - 1, norm_len(&fb) - 1);
+    let fixed = fixed_rows_q(&fb, mm, r, &pa, l.nb as u64).unwrap();
+    let plan = Plan { n, m: mm, k: if n >= mm { n - mm + 1 } else { 0 }, fixed, limit: QCAPS.int.peak / 8 - fixed, work: pa.limit };
+    let led = Words::new(limit.unwrap_or(plan.limit));
+    let out = reply_q_on(&fa, &fb, &plan, &pa, l, &led, &mut m).map(|s| s.len() as u64);
+    assert_eq!(led.live(), 0, "the ledger holds words after the call");
+    let log = led.log.borrow().clone();
+    // (the least starting limit: d_b's fixed words are credited after Q1)
+    (out, led.required(), log)
+}
+
+/// Q's ledger: its requirement (the high-water less d_b's words, credited
+/// to the limit after Q1) admits, one word below refuses, a sampled
+/// sweep below refuses; and the events that raise the maximum, Q1's
+/// handoff among them (B / P, d_b, beta and Q1's scratch all held), each
+/// admit at their requirement and refuse one word below, exactly there.
+#[test]
+fn q_ledger_pins() {
+    // (a divisor with content and large coprime denominators: Q1's scratch
+    // and beta are the first events; then the window, the arenas, the reply)
+    let a = (0..1500).map(|i| format!("{:x}/{:x}", (i * 7919) % 1000 + 1, (i % 13) + 1)).collect::<Vec<_>>().join(",");
+    let b = format!("{}/3,-{}/5,{}/7", "6".repeat(40), "c".repeat(40), "12".repeat(20));
+    let (ok, high, log) = run_q(&a, &b, None);
+    assert!(ok.is_ok(), "{:?}", ok);
+    assert!(run_q(&a, &b, Some(high)).0.is_ok());
+    assert_eq!(run_q(&a, &b, Some(high - 1)).0.unwrap_err(), DivFault::Memory);
+    let mut x = 0x2545_f491_4f6c_dd1du64;
+    for _ in 0..16 {
+        x ^= x << 13;
+        x ^= x >> 7;
+        x ^= x << 17;
+        let l = x % high;
+        assert_eq!(run_q(&a, &b, Some(l)).0.unwrap_err(), DivFault::Memory, "limit {} of {}", l, high);
+    }
+    let mut best = 0;
+    let records: Vec<usize> = (0..log.len()).filter(|&i| { let r = log[i].1 > best; best = best.max(log[i].1); r }).collect();
+    let first = |tag: &str| records.iter().copied().find(|&i| log[i].0 == tag);
+    let last = |tag: &str| records.iter().copied().rfind(|&i| log[i].0 == tag);
+    let mut pinned = 0;
+    for (what, e) in [
+        ("Q1's scratch", first("q1 scratch")),
+        ("beta (Q1's handoff)", first("beta")),
+        ("the first window growth", first("window")),
+        ("a later window growth", last("window")),
+        ("the first quotient growth", first("q arena")),
+        ("the high-water event", records.last().copied()),
+    ] {
+        let Some(e) = e else {
+            eprintln!("{}: no record on this input", what);
+            continue;
+        };
+        let req = log[e].1;
+        let (out, _, lg) = run_q(&a, &b, Some(req - 1));
+        assert_eq!(out.unwrap_err(), DivFault::Memory, "{}", what);
+        assert_eq!(lg.len(), e + 1, "{}: one word below refuses exactly there", what);
+        let (out, _, lg) = run_q(&a, &b, Some(req));
+        assert!(lg.len() > e + 1 || out.is_ok(), "{}: the requirement admits it", what);
+        pinned += 1;
+    }
+    assert!(pinned >= 4, "only {} events pinned", pinned);
+}
+
+#[test]
+#[ignore]
+fn q_profile_dense() {
+    // r1's QQ benchmark: degree 1000 by a non-monic degree 500
+    let tok = |n: i64, d: i64| if d == 1 { format!("{:x}", n) } else { format!("{:x}/{:x}", n, d) };
+    let a = (0..1001).map(|i| tok(3 * i + 1, i % 12 + 1)).collect::<Vec<_>>().join(",");
+    let b = (0..501).map(|i| tok(3 * i + 6, i % 12 + 1)).collect::<Vec<_>>().join(",");
+    let (fa, fb) = (qpoly::scan(&a).unwrap(), qpoly::scan(&b).unwrap());
+    let r = 64;
+    let pa = qpoly::admit_a(&fa, &fb, r, &QCAPS).unwrap().unwrap();
+    let mut m = Meter::new(u64::MAX);
+    let l = clear_q(&fa, &fb, &pa, &mut m).unwrap();
+    let after_clear = m.used();
+    let fixed = fixed_rows_q(&fb, 500, r, &pa, l.nb as u64).unwrap();
+    let plan = Plan { n: 1000, m: 500, k: 501, fixed, limit: QCAPS.int.peak / 8 - fixed, work: u64::MAX };
+    let led = Words::new(plan.limit);
+    Q_COUNTS.with(|c| c.set((0, 0, 0, 0)));
+    MAX_BITS.with(|c| c.set(0));
+    let t = std::time::Instant::now();
+    let dv = divide_q(&fa, &fb, &plan, &pa, l, &led, &mut m);
+    eprintln!("units: content gcds {}, window update {}, cancelling divisions {}", GCD_UNITS.with(|c| c.get()), UPD_UNITS.with(|c| c.get()), DIV_UNITS.with(|c| c.get()));
+    eprintln!("ok {} in {:.2} s; units: clear {}, all {}; counts (cmul, content gcds, cancels, T limbs) {:?}; max bits {}; ledger high {}",
+        dv.is_ok(), t.elapsed().as_secs_f64(), after_clear, m.used(), Q_COUNTS.with(|c| c.get()), MAX_BITS.with(|c| c.get()), led.high());
+}
+
+/// The meter at each Q phase's end, on r1's benchmark (dense 1000 /
+/// non-monic 500, now admitted under DIVREM_Q_WORK_MAX): the count at the
+/// phase's end admits that phase, one unit less refuses inside it, by name.
+#[test]
+fn q_meter_pins_per_phase_on_the_benchmark() {
+    let tok = |n: i64, d: i64| if d == 1 { format!("{:x}", n) } else { format!("{:x}/{:x}", n, d) };
+    let a = (0..1001).map(|i| tok(3 * i + 1, i % 12 + 1)).collect::<Vec<_>>().join(",");
+    let b = (0..501).map(|i| tok(3 * i + 6, i % 12 + 1)).collect::<Vec<_>>().join(",");
+    let (fa, fb) = (qpoly::scan(&a).unwrap(), qpoly::scan(&b).unwrap());
+    let r = (a.len() + b.len() + 20) as u64;
+    let pa = qpoly::admit_a(&fa, &fb, r, &QCAPS).unwrap().unwrap();
+    let run = |work: u64| -> (Result<String, DivFault>, Vec<(&'static str, u64)>) {
+        PHASES.with(|p| p.borrow_mut().clear());
+        let mut m = Meter::new(work);
+        let out = clear_q(&fa, &fb, &pa, &mut m).map_err(DivFault::from).and_then(|l| {
+            let fixed = fixed_rows_q(&fb, 500, r, &pa, l.nb as u64).unwrap();
+            let plan = Plan { n: 1000, m: 500, k: 501, fixed, limit: QCAPS.int.peak / 8 - fixed, work };
+            let led = Words::new(plan.limit);
+            reply_q_on(&fa, &fb, &plan, &pa, l, &led, &mut m)
+        });
+        (out, PHASES.with(|p| p.borrow().clone()))
+    };
+    let (out, phases) = run(pa.limit);
+    assert!(out.is_ok(), "the benchmark is admitted under the division's cap");
+    let total = phases.last().unwrap().1;
+    eprintln!("the benchmark: {} units of {} ({:?})", total, pa.limit, phases);
+    assert!(total <= pa.limit && total > crate::zmul::WORK_MAX, "{} units: above zmul's 2^28, within the division's cap", total);
+    for (i, &(name, used)) in phases.iter().enumerate() {
+        let (out, lg) = run(used);
+        assert!(lg.len() > i, "{}: its count admits it", name);
+        let _ = out;
+        let (out, lg) = run(used - 1);
+        assert_eq!(out.unwrap_err(), DivFault::Work, "{}", name);
+        assert_eq!(lg.len(), i, "{}: one unit less refuses inside it", name);
     }
 }

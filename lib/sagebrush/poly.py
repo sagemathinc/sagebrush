@@ -153,6 +153,45 @@ def zdivrem(a, b):
     return _ints(r["q"]), _ints(r["r"])
 
 
+def _qtokens(coeffs, who):
+    # (qclear's exact types: int and Fraction, and the Sage layer's
+    # registered classes, matched by identity and read through int's and
+    # Fraction's own methods; the refusal reads nothing of the class)
+    toks = []
+    for c in coeffs:
+        t = type(c)
+        for k in _QCLEAR_INTS:
+            if t is k:
+                toks.append(format(int.__index__(c), "x"))
+                break
+        else:
+            for k in _QCLEAR_FRACTIONS:
+                if t is k:
+                    n, d = int.__index__(_numerator(c)), int.__index__(_denominator(c))
+                    toks.append(format(n, "x") if d == 1 else format(n, "x") + "/" + format(d, "x"))
+                    break
+            else:
+                raise TypeError(who + ": a coefficient that is not exactly an int or a Fraction")
+    return ",".join(toks)
+
+
+def qdivrem(a, b):
+    """(q, r) with a = q b + r and deg r < deg b in Q[x] (int and Fraction
+    coefficients, constant term first; results in lowest terms, trailing
+    zeros dropped): the engine's qpoly_divrem, refused past its caps.
+
+    >>> from fractions import Fraction
+    >>> from sagebrush.poly import qdivrem
+    >>> qdivrem([1, 0, 0, 1], [1, 2])
+    ([Fraction(1, 8), Fraction(-1, 4), Fraction(1, 2)], [Fraction(7, 8)])
+    >>> qdivrem([-1, 0, 1], [Fraction(-1, 2), Fraction(1, 2)])
+    ([2, 2], [])
+    """
+    r = call("qpoly_divrem", a=_qtokens(a, "qdivrem"), b=_qtokens(b, "qdivrem"))
+    q, rr = r["q"], r["r"]
+    return ([_token(t) for t in q.split(",")] if q else []), ([_token(t) for t in rr.split(",")] if rr else [])
+
+
 def gcd(a, b):
     """The gcd in Z[x] of integer polynomials, with positive leading
     coefficient (constant term first; [] if both are zero)."""

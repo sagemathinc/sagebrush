@@ -79,6 +79,24 @@ fn call(a: &str, b: &str, limit: Option<u64>, work: Option<u64>) -> (Result<Stri
     (out, led.high(), plan.fixed, m.used())
 }
 
+/// One Q call on its own ledger (phase A on the call's meter): the reply or
+/// the fault, the ledger's requirement (its high-water less d_b's words,
+/// credited after Q1), the fixed rows, the high-water, and the units used.
+fn qcall(a: &str, b: &str, limit: Option<u64>, work: Option<u64>) -> (Result<String, DivFault>, u64, u64, u64, u64) {
+    let (fa, fb) = (qpoly::scan(a).unwrap(), qpoly::scan(b).unwrap());
+    let r = (a.len() + b.len() + 20) as u64;
+    let pa = qpoly::admit_a(&fa, &fb, r, &pdivrem::DIVREM_Q_CAPS).unwrap().unwrap();
+    let mut m = Meter::new(work.unwrap_or(pa.limit));
+    let l = pdivrem::clear_q(&fa, &fb, &pa, &mut m).unwrap();
+    let (n, mm) = (pdivrem::norm_len(&fa) - 1, pdivrem::norm_len(&fb) - 1);
+    let fixed = pdivrem::fixed_rows_q(&fb, mm, r, &pa, l.nb as u64).unwrap();
+    let plan = pdivrem::Plan { n, m: mm, k: if n >= mm { n - mm + 1 } else { 0 }, fixed, limit: pdivrem::DIVREM_Q_CAPS.int.peak / 8 - fixed, work: pa.limit };
+    let led = Words::new(limit.unwrap_or(plan.limit));
+    let out = pdivrem::reply_q_on(&fa, &fb, &plan, &pa, l, &led, &mut m);
+    assert_eq!(led.live(), 0, "the ledger holds words after the call");
+    (out, led.required(), fixed, led.high(), m.used())
+}
+
 /// (the growth of live memory during f, the live bytes after it less
 /// before it), f's result dropped inside.
 fn measure<T>(f: impl FnOnce() -> T, keep: impl FnOnce(&T)) -> (usize, isize) {
@@ -137,6 +155,45 @@ fn divrem_peaks_caps_and_baselines() {
         assert_eq!(after, 0, "{}: after the meter's refusal", what);
     }
 
+    // Q: (the phase A row is closed form and freed before the ledger's
+    // first reservation; the ledger's part is measured here)
+    let qa = (0..1500).map(|i| format!("{:x}/{:x}", (i * 7919) % 1000 + 1, (i % 13) + 1)).collect::<Vec<_>>().join(",");
+    let qb = format!("{}/3,-{}/5,{}/7", "6".repeat(40), "c".repeat(40), "12".repeat(20));
+    let mut half = vec!["0"; 20_001];
+    half[0] = "-1";
+    half[20_000] = "1";
+    let half = half.join(",");
+    let qcases: [(&str, &str, &str, u64); 3] = [
+        ("Q1 with content and coprime denominators", &qa, &qb, 654_979),
+        ("(t^20000 - 1) / (2t - 2)", &half, "-2,2", 127_463),
+        ("a constant -2/3", &qa, "-2/3", 7_610),
+    ];
+    // (a warm-up: Q's phase names are registered once)
+    let _ = qcall(&qa, "-2/3", None, None);
+    for (what, a, b, pinned) in qcases {
+        let (peak, after) = measure(|| qcall(a, b, None, None), |x| assert!(x.0.is_ok(), "{}: {:?}", what, x.0));
+        let (_, need, fixed, high, used) = qcall(a, b, None, None);
+        eprintln!("{}: measured {} bytes, predicted {} (fixed {} + high-water {} words; required {})", what, peak, 8 * (fixed + high), fixed, high, need);
+        assert!(peak as u64 <= 8 * (fixed + high), "{}: {} > {}", what, peak, 8 * (fixed + high));
+        assert_eq!(after, 0, "{}: after the call", what);
+        assert_eq!(need, pinned, "{}: the requirement is target-independent", what);
+        assert!(qcall(a, b, Some(need), None).0.is_ok(), "{}", what);
+        let (_, after) = measure(|| qcall(a, b, Some(need - 1), None), |x| assert_eq!(x.0.as_ref().unwrap_err(), &DivFault::Memory, "{}", what));
+        assert_eq!(after, 0, "{}: after the ledger's refusal", what);
+        let (_, after) = measure(|| qcall(a, b, None, Some(used - 1)), |x| assert_eq!(x.0.as_ref().unwrap_err(), &DivFault::Work, "{}", what));
+        assert_eq!(after, 0, "{}: after the meter's refusal", what);
+    }
+    let (_, after) = measure(
+        || {
+            FAIL_FROM.store(100_000, Relaxed);
+            let x = qcall(&half, "-2,2", None, None);
+            FAIL_FROM.store(0, Relaxed);
+            x
+        },
+        |x| assert_eq!(x.0.as_ref().unwrap_err(), &DivFault::Memory),
+    );
+    assert_eq!(after, 0, "Q: after an allocation failure");
+
     // the reply is written without allocating: emit against its reservation
     {
         let (fa, fb) = (qpoly::scan_ints(&long).unwrap(), qpoly::scan_ints("3,-5,7").unwrap());
@@ -188,6 +245,23 @@ fn divrem_peaks_caps_and_baselines() {
                     assert!(first || after == 0, "{}: {} bytes after a Stop at poll {}", phase, after, at);
                     first = false;
                 }
+            }
+        }
+        // Q: each of its four phases
+        hooks::reset();
+        hooks::trace();
+        let _ = qcall(&qa, &qb, None, None);
+        let phases: Vec<(&str, Vec<u64>)> = ["divrem clear", "divrem load", "divrem divide", "divrem emit"].iter().map(|p| (*p, hooks::traced(p))).collect();
+        hooks::reset();
+        for (phase, idx) in &phases {
+            assert!(!idx.is_empty(), "Q: no poll in {}", phase);
+            for at in [idx[0], *idx.last().unwrap()] {
+                hooks::reset();
+                hooks::arm_at(at);
+                let (_, after) = measure(|| sagebrush_interrupt::catch(|| qcall(&qa, &qb, None, None)), |x| assert!(x.is_err(), "Q: no Stop at poll {} ({})", at, phase));
+                hooks::reset();
+                sagebrush_interrupt::clear();
+                assert_eq!(after, 0, "Q {}: {} bytes after a Stop at poll {}", phase, after, at);
             }
         }
     }
