@@ -64,6 +64,60 @@ def qmul(a, b):
     return [_token(t) for t in r.split(",")] if r else []
 
 
+# (the coefficient types qclear accepts, by exact type: int and Fraction, and
+# the Sage layer's own Integer, Rational and the int a Rational's numerator()
+# returns, which it registers here; any
+# other type, a subclass of these included, is refused before its fields or
+# its formatting are touched.  Values are read through int's and Fraction's
+# own methods, never through the object's)
+_QCLEAR_INTS = {int}
+_QCLEAR_FRACTIONS = {_Fraction}
+_numerator = _Fraction.numerator.fget
+_denominator = _Fraction.denominator.fget
+
+
+def qclear(coeffs):
+    """(d, the integer coefficients of d * f) for a polynomial f over QQ
+    (coefficients constant first, ints and Fractions), d the lcm of the
+    denominators of its nonzero coefficients: the engine's qpoly_clear, one
+    integer per coefficient, in order, trailing zeros kept.
+
+    >>> from fractions import Fraction
+    >>> from sagebrush.poly import qclear
+    >>> qclear([Fraction(1, 2), 3, Fraction(-5, 6), 0])
+    (6, [3, 18, -5, 0])
+    >>> qclear([])
+    (1, [])
+    """
+    toks = []
+    for c in coeffs:
+        # (by identity with the registered classes only: no hash, attribute
+        # or other hook of the coefficient's class runs)
+        t, kind = type(c), 0
+        for k in _QCLEAR_INTS:
+            if t is k:
+                kind = 1
+                break
+        else:
+            for k in _QCLEAR_FRACTIONS:
+                if t is k:
+                    kind = 2
+                    break
+        if kind == 1:
+            toks.append(format(int.__index__(c), "x"))
+        elif kind == 2:
+            # (the stored parts through Fraction's own properties, their int
+            # values through int's own __index__: no hook of a subclass runs,
+            # and anything not an int raises TypeError)
+            n, d = int.__index__(_numerator(c)), int.__index__(_denominator(c))
+            toks.append(format(n, "x") if d == 1 else format(n, "x") + "/" + format(d, "x"))
+        else:
+            raise TypeError("qclear: a coefficient that is not exactly an int or a Fraction")
+    r = call("qpoly_clear", a=",".join(toks))
+    c = r["c"]
+    return int(r["d"], 16), ([int(t, 16) for t in c.split(",")] if c else [])
+
+
 def gcd(a, b):
     """The gcd in Z[x] of integer polynomials, with positive leading
     coefficient (constant term first; [] if both are zero)."""

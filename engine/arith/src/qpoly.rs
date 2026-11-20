@@ -110,6 +110,13 @@ pub struct Factor<'a> {
     /// scaling divisions' closed form is lambda a1 - a2 + 8 l
     pub a1: u64,
     pub a2: u64,
+    /// the same over the tokens with a nonzero numerator only (qpoly_clear
+    /// takes no zero numerator's denominator into its lcm): their count,
+    /// denominators' limbs, a1 and a2
+    pub nz_tokens: u64,
+    pub nz_d_sum: u64,
+    pub nz_a1: u64,
+    pub nz_a2: u64,
 }
 
 impl Factor<'_> {
@@ -154,7 +161,7 @@ fn nibble(c: u8) -> u64 {
 /// ("-0" refused), at most 2^24 of them (the request bounds them), each part
 /// at most zmul's TOKEN_DIGITS_MAX digits.  One pass; nothing allocated.
 pub fn scan(text: &str) -> Result<Factor<'_>, String> {
-    let mut f = Factor { text, tokens: 0, all_zero: true, num_bits: 0, n_max: 0, d_max: 0, sd: 0, n_sum: 0, d_sum: 0, a1: 0, a2: 0 };
+    let mut f = Factor { text, tokens: 0, all_zero: true, num_bits: 0, n_max: 0, d_max: 0, sd: 0, n_sum: 0, d_sum: 0, a1: 0, a2: 0, nz_tokens: 0, nz_d_sum: 0, nz_a1: 0, nz_a2: 0 };
     if text.is_empty() {
         return Ok(f);
     }
@@ -186,6 +193,12 @@ pub fn scan(text: &str) -> Result<Factor<'_>, String> {
         f.d_sum = add(f.d_sum, Some(ld))?;
         f.a1 = add(f.a1, ld.checked_mul(2).and_then(|x| x.checked_add(7)))?;
         f.a2 = add(f.a2, (ld - 1).checked_mul(2 * ld + 4))?;
+        if n != "0" {
+            f.nz_tokens += 1;
+            f.nz_d_sum = add(f.nz_d_sum, Some(ld))?;
+            f.nz_a1 = add(f.nz_a1, ld.checked_mul(2).and_then(|x| x.checked_add(7)))?;
+            f.nz_a2 = add(f.nz_a2, (ld - 1).checked_mul(2 * ld + 4))?;
+        }
     }
     Ok(f)
 }
@@ -328,12 +341,16 @@ struct LcmScratch {
 }
 
 /// The factor's lcm into l (zero, capacity Lambda_f + 1): its length.
-fn lcm(f: &Factor, l: &mut [u64], s: &mut LcmScratch, m: &mut Meter) -> Result<usize, Fault> {
+/// With `skip_zero`, a token whose numerator is 0 takes no part (qpoly_clear).
+fn lcm(f: &Factor, l: &mut [u64], s: &mut LcmScratch, m: &mut Meter, skip_zero: bool) -> Result<usize, Fault> {
     let half = s.ws.len() / 2;
     l[0] = 1;
     let mut nl = 1;
     for tok in f.text.split(',') {
-        let (_, _, den) = parts(tok);
+        let (_, num, den) = parts(tok);
+        if skip_zero && num == "0" {
+            continue;
+        }
         let nd = parse_hex(den, &mut s.kx, m)?;
         let room = nl.max(nd) + 1;
         if room > half {
@@ -376,8 +393,8 @@ pub fn lcms_metered(a: &Factor, b: &Factor, plan: &PlanA, m: &mut Meter) -> Resu
     let mut lb = vec![0u64; plan.lam_b as usize + 1];
     let ws = coprime::workspace_words(plan.lam).ok_or(Fault::Invariant)? as usize;
     let mut s = LcmScratch { ws: vec![0u64; ws], q: vec![0u64; d + 1], kx: vec![0u64; d + 1], ky: vec![0u64; d], prod: vec![0u64; lam + 1] };
-    let na = lcm(a, &mut la, &mut s, m)?;
-    let nb = lcm(b, &mut lb, &mut s, m)?;
+    let na = lcm(a, &mut la, &mut s, m, false)?;
+    let nb = lcm(b, &mut lb, &mut s, m, false)?;
     Ok(Lcms { la, lb, na, nb, used: m.used() })
 }
 
@@ -720,6 +737,188 @@ pub fn reply(a: &Factor, b: &Factor, r: u64, caps: &Caps) -> Result<String, Stri
     out.push_str("\"}");
     if out.len() as u64 > plan.reply {
         return Err(format!("{}: the reply passed its bound", INTERNAL_PREFIX));
+    }
+    Ok(out)
+}
+
+// ---- qpoly_clear: one factor's denominators cleared ----
+//
+// d = lcm of the denominators of the tokens with a nonzero numerator, AS
+// GIVEN (no reduction: `2/4` contributes 4, `0/5` nothing), and each token's
+// integer n_i (d / d_i), one per token, in order, untrimmed.  The scan,
+// phase A (the metered lcm) and the scaling are qpoly_mul's; one meter spans
+// both phases, never reset; the reply is streamed into one String reserved at
+// its exact bound.
+
+/// qpoly_clear's phase A admission: one factor's row (its L, the gcd's two
+/// slots, the quotient, Knuth D's dividend and divisor, the product's
+/// output), admitted from the scan before anything is allocated.
+#[derive(Clone, Copy, Debug)]
+pub struct PlanClear {
+    pub lam: u64,
+    pub d_max: u64,
+    pub row: u64,
+    pub peak: u64,
+    /// the meter's limit, WORK_MAX - R
+    pub limit: u64,
+}
+
+/// None for the empty factor (the reply `{"ok":{"d":"1","c":""}}`).
+pub fn admit_clear(f: &Factor, r: u64, caps: &Caps) -> Result<Option<PlanClear>, String> {
+    over("the request's bytes", r, caps.int.request)?;
+    if f.tokens == 0 {
+        return Ok(None);
+    }
+    let lam = f.lam().ok_or_else(ovf)?;
+    let d = f.d_max;
+    let words = sum(&[
+        lam.checked_add(1),
+        coprime::workspace_words(lam),
+        d.checked_add(1),
+        d.checked_mul(2).and_then(|x| x.checked_add(1)),
+        lam.checked_add(1),
+    ])
+    .ok_or_else(ovf)?;
+    let row = words.checked_mul(8).ok_or_else(ovf)?;
+    let peak = r.checked_add(row).and_then(|x| x.checked_add(allowance(row))).ok_or_else(ovf)?;
+    over("the memory (bytes)", peak, caps.int.peak)?;
+    let limit = caps.int.work.checked_sub(r).ok_or_else(|| format!("the request's bytes = {} leave no work within {} ({})", r, caps.int.work, HOW))?;
+    Ok(Some(PlanClear { lam, d_max: d, row, peak, limit }))
+}
+
+/// qpoly_clear's scaling units, its lcm of `lam` limbs: per token with a
+/// nonzero numerator, the two parses, L's copy, the division L / d_i (sum
+/// Q(lam, l_d) = lam a1 - a2 + 8 l over those tokens), the product n_i (L /
+/// d_i) (at most lam (l_n + 2) + l_n) and its hex out (at most lam + l_n + 1
+/// words, one unit each: scale_work's packing term); per zero token its `0`,
+/// one; and L's hex out, lam + 1.
+pub fn clear_work(f: &Factor, lam: u64) -> Option<u64> {
+    let l = f.nz_tokens;
+    let div = lam.checked_mul(f.nz_a1)?.checked_sub(f.nz_a2)?.checked_add(l.checked_mul(8)?)?;
+    let per = lam.checked_add(1)?.checked_mul(l)?;
+    sum(&[
+        f.n_sum.checked_add(l),
+        f.nz_d_sum.checked_add(l),
+        Some(per),
+        Some(div),
+        lam.checked_mul(f.n_sum.checked_add(l.checked_mul(2)?)?)?.checked_add(f.n_sum),
+        per.checked_add(f.n_sum),
+        Some(f.tokens - l),
+        lam.checked_add(1),
+    ])
+}
+
+/// qpoly_clear's reply, exactly: `{"ok":{"d":"` (12 bytes), L's
+/// ceil(bits(L) / 4) digits, `","c":"` (7), then per token a sign and at most
+/// ceil((B_n + bits(L)) / 4) digits (|n_i (L / d_i)| <= |n_i| L < 2^(B_n +
+/// bits(L))), l - 1 commas, and `"}}` (3).  For l >= 1; None on overflow.
+pub fn clear_reply_bound(f: &Factor, bits_l: u64) -> Option<u64> {
+    let per = f.num_bits.checked_add(bits_l)?.div_ceil(4).checked_add(1)?;
+    sum(&[Some(22), Some(bits_l.div_ceil(4)), f.tokens.checked_mul(per), Some(f.tokens - 1)])
+}
+
+/// The scaling's buffers for qpoly_clear (qpoly_mul's ScaleScratch).
+fn clear_scratch(f: &Factor, nl: usize) -> ScaleScratch {
+    let (ns, ds) = (f.n_max as usize, f.d_max as usize);
+    ScaleScratch { num: vec![0u64; ns], den: vec![0u64; ds], kx: vec![0u64; nl + 1], q: vec![0u64; nl + 1], prod: vec![0u64; nl + ns + 1] }
+}
+
+/// Phase B's admission for qpoly_clear, from the actual lcm: the work
+/// against WORK_MAX - R - phase A's count (checked), the reply against its
+/// cap, and the peak: R, L at its capacity (Lambda + 1), the scaling's
+/// scratch 8 (3 lambda + 2 n* + d* + 3), the reply, and the allowance.
+/// Returns (the reply's bound, the peak).
+pub fn admit_clear_b(f: &Factor, l: &[u64], plan: &PlanClear, used: u64, r: u64, caps: &Caps) -> Result<(u64, u64), String> {
+    let nl = l.len() as u64;
+    let work = clear_work(f, nl).ok_or_else(|| format!("{}: a scaling bound underflows", INTERNAL_PREFIX))?;
+    let spent = r.checked_add(used).ok_or_else(ovf)?;
+    let budget = caps.int.work.checked_sub(spent).ok_or_else(|| format!("{}: phase A's count passed its limit", INTERNAL_PREFIX))?;
+    if work > budget {
+        over("the work (word operations)", spent.saturating_add(work), caps.int.work)?;
+    }
+    let reply = clear_reply_bound(f, bits(l)).ok_or_else(ovf)?;
+    over("the reply's bytes", reply, caps.reply)?;
+    let scratch = sum(&[nl.checked_mul(3), f.n_max.checked_mul(2), Some(f.d_max), Some(3)]).and_then(|x| x.checked_mul(8)).ok_or_else(ovf)?;
+    let sized = sum(&[plan.lam.checked_add(1).and_then(|x| x.checked_mul(8)), Some(scratch), Some(reply)]).ok_or_else(ovf)?;
+    let peak = r.checked_add(sized).and_then(|x| x.checked_add(allowance(sized))).ok_or_else(ovf)?;
+    over("the memory (bytes)", peak, caps.int.peak)?;
+    Ok((reply, peak.max(plan.peak)))
+}
+
+/// The whole qpoly_clear call on a scanned factor: `{"ok":{"d":...,"c":...}}`
+/// or the refusal (no partial reply).  `r` is the request's bytes.
+pub fn clear_reply(f: &Factor, r: u64, caps: &Caps) -> Result<String, String> {
+    let Some(plan) = admit_clear(f, r, caps)? else {
+        return Ok("{\"ok\":{\"d\":\"1\",\"c\":\"\"}}".to_string());
+    };
+    let mut m = Meter::new(plan.limit);
+    clear_metered(f, r, caps, &plan, &mut m).map_err(|e| match e {
+        ClearError::Refused(s) => s,
+        ClearError::Fault(Fault::Overrun, true) => format!("the denominators' lcm needs more than {} word operations (fewer or simpler denominators per call)", plan.limit),
+        ClearError::Fault(f, _) => internal("the cleared denominators", f),
+    })
+}
+
+/// How a qpoly_clear call stopped: a refusal at phase B's admission, or a
+/// fault (in phase A when the flag is set).
+pub enum ClearError {
+    Refused(String),
+    Fault(Fault, bool),
+}
+
+/// Phase A of qpoly_clear alone: the lcm, normalized (tests: phase B's
+/// admission needs it).
+pub fn clear_lcm(f: &Factor, plan: &PlanClear, m: &mut Meter) -> Result<Vec<u64>, Fault> {
+    let (lam, d) = (plan.lam as usize, plan.d_max as usize);
+    let mut l = vec![0u64; lam + 1];
+    let ws = coprime::workspace_words(plan.lam).ok_or(Fault::Invariant)? as usize;
+    let mut s = LcmScratch { ws: vec![0u64; ws], q: vec![0u64; d + 1], kx: vec![0u64; d + 1], ky: vec![0u64; d], prod: vec![0u64; lam + 1] };
+    let nl = lcm(f, &mut l, &mut s, m, true)?;
+    l.truncate(nl);
+    Ok(l)
+}
+
+/// [`clear_reply`] on the caller's meter (tests read it after a refusal).
+pub fn clear_metered(f: &Factor, r: u64, caps: &Caps, plan: &PlanClear, m: &mut Meter) -> Result<String, ClearError> {
+    let (lam, d) = (plan.lam as usize, plan.d_max as usize);
+    let mut l = vec![0u64; lam + 1];
+    let nl = {
+        let ws = coprime::workspace_words(plan.lam).ok_or(ClearError::Fault(Fault::Invariant, false))? as usize;
+        let mut s = LcmScratch { ws: vec![0u64; ws], q: vec![0u64; d + 1], kx: vec![0u64; d + 1], ky: vec![0u64; d], prod: vec![0u64; lam + 1] };
+        lcm(f, &mut l, &mut s, m, true).map_err(|e| ClearError::Fault(e, true))?
+    };
+    let (bound, _) = admit_clear_b(f, &l[..nl], plan, m.used(), r, caps).map_err(ClearError::Refused)?;
+    let fault = |e| ClearError::Fault(e, false);
+    let mut out = String::with_capacity(bound as usize);
+    out.push_str("{\"ok\":{\"d\":\"");
+    m.add(nl + 1).map_err(fault)?;
+    hex(&mut out, &l[..nl]);
+    out.push_str("\",\"c\":\"");
+    let mut s = clear_scratch(f, nl);
+    for (i, tok) in f.text.split(',').enumerate() {
+        if i > 0 {
+            out.push(',');
+        }
+        let (negative, n, den) = parts(tok);
+        if n == "0" {
+            m.add(1).map_err(fault)?;
+            out.push('0');
+            continue;
+        }
+        let nn = parse_hex(n, &mut s.num, m).map_err(fault)?;
+        let nd = parse_hex(den, &mut s.den, m).map_err(fault)?;
+        copy(&mut s.kx, &l[..nl], m).map_err(fault)?;
+        let nq = divexact_in_place(&mut s.kx, nl, &mut s.den, nd, &mut s.q, m).map_err(fault)?;
+        let np = mul_into(&s.num[..nn], &s.q[..nq], &mut s.prod, m).map_err(fault)?;
+        m.add(np + 1).map_err(fault)?;
+        if negative {
+            out.push('-');
+        }
+        hex(&mut out, &s.prod[..np]);
+    }
+    out.push_str("\"}}");
+    if out.len() as u64 > bound {
+        return Err(ClearError::Fault(Fault::Invariant, false));
     }
     Ok(out)
 }

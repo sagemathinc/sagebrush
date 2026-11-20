@@ -72,6 +72,14 @@ fn measure<T>(f: impl FnOnce() -> T, keep: impl FnOnce(&T)) -> (usize, isize) {
     (peak, LIVE.load(Relaxed) as isize - base as isize)
 }
 
+/// qpoly_clear's admitted peak for a factor, from its own closed forms
+/// (phase A's row from the scan, phase B's from the actual lcm).
+fn admitted_clear_peak(f: &qpoly::Factor, r: u64, plan: &qpoly::PlanClear) -> u64 {
+    let mut m = sagebrush_arith::coprime::Meter::new(plan.limit);
+    let l = qpoly::clear_lcm(f, plan, &mut m).unwrap();
+    qpoly::admit_clear_b(f, &l, plan, m.used(), r, &qpoly::CAPS).unwrap().1
+}
+
 #[test]
 fn peaks_caps_and_baselines() {
     // (a first call sets up the call's one-time state, which stays)
@@ -129,6 +137,57 @@ fn peaks_caps_and_baselines() {
         let less = qpoly::Caps { int: zmul::Caps { peak: p.peak - 1, ..zmul::CAPS }, ..qpoly::CAPS };
         let (_, after) = measure(|| qpoly::reply(&fa, &fb, r, &less), |x| assert!(x.as_ref().err().is_some_and(|e| e.contains("the memory (bytes)") && e.contains(&(p.peak - 1).to_string())), "{}: {:?}", what, x.as_ref().map(|s| s.len())));
         assert_eq!(after, 0, "{}: the heap did not return to its baseline after the refusal", what);
+    }
+    // qpoly_clear: its peak within the admitted one (phase A's row and phase
+    // B's: L, the scaling's scratch, the reply), at exactly the admitted peak
+    // it runs and one byte less refuses, the heap back at its baseline; and a
+    // refusal by the reply's cap alone
+    let n_big = format!("{}/{}", "f".repeat(4000), format!("1{}", "0".repeat(999)));
+    let clears: Vec<(&str, String)> = vec![
+        ("clear: 2^17 halves", list(1 << 17, "7/2")),
+        ("clear: 2^17 integers", list(1 << 17, "-3")),
+        ("clear: n* and d* in one token", format!("{},{}", n_big, list(300, "1/3"))),
+        ("clear: 200 coprime 63-bit denominators", (0..200u64).map(|i| format!("-{}/{:x}", "d".repeat(20), (1u64 << 62) + 2 * i + 1)).collect::<Vec<_>>().join(",")),
+    ];
+    for (what, a) in &clears {
+        let req = format!(r#"{{"fn":"qpoly_clear","a":"{}"}}"#, a);
+        let f = qpoly::scan(a).unwrap();
+        let r = req.len() as u64;
+        let plan = qpoly::admit_clear(&f, r, &qpoly::CAPS).unwrap().unwrap();
+        let admitted = admitted_clear_peak(&f, r, &plan);
+        let (peak, after) = measure(|| sagebrush_web::call(&req), |x| assert!(x.starts_with("{\"ok\":{\"d\":\""), "{}: {}", what, &x[..x.len().min(200)]));
+        eprintln!("{}: measured {:.2} MiB, admitted {:.2} MiB", what, peak as f64 / (1 << 20) as f64, admitted as f64 / (1 << 20) as f64);
+        assert!(peak as u64 <= admitted, "{}: {} > {}", what, peak, admitted);
+        assert_eq!(after, 0, "{}", what);
+        let at = qpoly::Caps { int: zmul::Caps { peak: admitted, ..zmul::CAPS }, ..qpoly::CAPS };
+        let (_, after) = measure(|| qpoly::clear_reply(&f, r, &at), |x| assert!(x.is_ok(), "{}: {:?}", what, x.as_ref().err()));
+        assert_eq!(after, 0);
+        let less = qpoly::Caps { int: zmul::Caps { peak: admitted - 1, ..zmul::CAPS }, ..qpoly::CAPS };
+        let (_, after) = measure(|| qpoly::clear_reply(&f, r, &less), |x| assert!(x.as_ref().err().is_some_and(|e| e.contains("the memory (bytes)")), "{}: {:?}", what, x.as_ref().map(|s| s.len())));
+        assert_eq!(after, 0, "{}: after the refusal", what);
+        let small = qpoly::Caps { reply: 64, ..qpoly::CAPS };
+        let (_, after) = measure(|| qpoly::clear_reply(&f, r, &small), |x| assert!(x.as_ref().err().is_some_and(|e| e.contains("the reply's bytes")), "{}", what));
+        assert_eq!(after, 0, "{}: after the reply's refusal", what);
+        // a Stop at its first and last poll: back at the baseline (a warm-up
+        // Stop first, for the unwinder's own one-time allocations)
+        #[cfg(panic = "unwind")]
+        {
+            use sagebrush_interrupt::hooks;
+            hooks::reset();
+            hooks::trace();
+            let _ = qpoly::clear_reply(&f, r, &qpoly::CAPS);
+            let polls = hooks::total();
+            hooks::reset();
+            // (a call too small to poll has nothing to stop)
+            for (i, at) in [1, 1, polls].into_iter().enumerate().filter(|_| polls > 0) {
+                hooks::reset();
+                hooks::arm_at(at);
+                let (_, after) = measure(|| sagebrush_interrupt::catch(|| qpoly::clear_reply(&f, r, &qpoly::CAPS)), |x| assert!(x.is_err(), "{}: no Stop at poll {}", what, at));
+                hooks::reset();
+                sagebrush_interrupt::clear();
+                assert!(i == 0 || after == 0, "{}: {} bytes after a Stop at poll {} of {}", what, after, at, polls);
+            }
+        }
     }
     // each phase's refusal returns to the baseline (phase A's memory, above,
     // at its exact cap less one): phase A's metered work, phase B's output

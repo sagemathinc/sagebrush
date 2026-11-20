@@ -30,7 +30,8 @@
 //! series is "").  series_euler gives "1,-1,-1,0,0,1,..."; sigma_table its n
 //! values in hex.  poly_mul gives the product's coefficients in hex, trailing
 //! zeros dropped (the zero polynomial is ""); qpoly_mul the same, each
-//! coefficient `[-]num[/den]` in lowest terms.  qpoly_mul's admission has
+//! coefficient `[-]num[/den]` in lowest terms; qpoly_clear one factor's
+//! denominators cleared, `{"d": d, "c": "c0,c1,..."}`.  qpoly_mul's admission has
 //! two phases: the lcms' memory from the scans, their work metered (a named
 //! refusal at its limit); then the product's closed forms from the actual
 //! lcms, before any of its allocations.
@@ -62,7 +63,7 @@ pub const SMALL_MAX_REQUEST: usize = 256;
 // (the peaks: the largest of the closed forms over the admitted corners, 53.3
 // MiB for the series ops and 29.0 MiB for sigma_table, with room; the
 // corner test in tests/series_ops.rs checks them)
-pub static OPS: [SeriesOp; 6] = [
+pub static OPS: [SeriesOp; 7] = [
     SeriesOp { name: "series_mul", max_request: SERIES_MAX_REQUEST, peak: 64 * MIB, work: zseries::WORK_MAX, run: series_mul },
     SeriesOp { name: "series_pow", max_request: SERIES_MAX_REQUEST, peak: 64 * MIB, work: zseries::WORK_MAX, run: series_pow },
     SeriesOp { name: "series_euler", max_request: SMALL_MAX_REQUEST, peak: 8 * MIB, work: zseries::WORK_MAX, run: series_euler },
@@ -71,6 +72,8 @@ pub static OPS: [SeriesOp; 6] = [
     SeriesOp { name: "poly_mul", max_request: zmul::REQUEST_MAX as usize, peak: zmul::PEAK_MAX, work: zmul::WORK_MAX, run: poly_mul },
     // (each request admitted in two phases, qpoly::admit_a and admit_b)
     SeriesOp { name: "qpoly_mul", max_request: zmul::REQUEST_MAX as usize, peak: zmul::PEAK_MAX, work: zmul::WORK_MAX, run: qpoly_mul },
+    // (one factor's denominators cleared: qpoly's phase A and scaling)
+    SeriesOp { name: "qpoly_clear", max_request: zmul::REQUEST_MAX as usize, peak: zmul::PEAK_MAX, work: zmul::WORK_MAX, run: qpoly_clear },
 ];
 
 /// The admitted request's path: run, then the reply text (an error reply
@@ -374,4 +377,16 @@ fn qpoly_mul(req: &str, op: &SeriesOp) -> Result<String, String> {
     let pre = |e: String| format!("{}: {}", name, e);
     let (ca, cb) = (qpoly::scan(a).map_err(pre)?, qpoly::scan(b).map_err(pre)?);
     qpoly::reply(&ca, &cb, req.len() as u64, &qpoly::CAPS).map_err(pre)
+}
+
+/// qpoly_clear: {a} -> {"d": the lcm of the nonzero numerators'
+/// denominators, as given, "c": the integer tokens n_i (d / d_i), one per
+/// token} (hex).
+fn qpoly_clear(req: &str, op: &SeriesOp) -> Result<String, String> {
+    let name = op.name;
+    let [a] = fields(req, ["a"], name)?;
+    let a = need(get_str(a, "a", name)?, "a", name)?;
+    let pre = |e: String| format!("{}: {}", name, e);
+    let ca = qpoly::scan(a).map_err(pre)?;
+    qpoly::clear_reply(&ca, req.len() as u64, &qpoly::CAPS).map_err(pre)
 }

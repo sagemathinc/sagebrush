@@ -40,6 +40,138 @@ def coef(r, bits):
     return -x if r.random() < 0.5 else x
 
 
+def qclear_checks(r):
+    """sagebrush.poly.qclear (the engine's qpoly_clear): (d, the integers of
+    d f) with d the lcm of the nonzero coefficients' denominators as given,
+    one integer per coefficient, in order, trailing zeros kept; against
+    Fraction arithmetic.  Coefficients of any type but exactly int and
+    Fraction (and Sage's own Integer, Rational and the int a Rational's
+    numerator() returns) are refused before any of
+    their properties, formatting or the engine's bridge is reached."""
+    from fractions import Fraction
+    from math import lcm
+    from sagebrush import _engine as E
+
+    def ref(c):
+        d = 1
+        for x in c:
+            if x:
+                d = lcm(d, Fraction(x).denominator)
+        return d, [int(Fraction(x) * d) for x in c]
+    n = 0
+    shapes = [[], [0], [0, 0, 0], [5], [Fraction(-3, 7)], [Fraction(1, 2), Fraction(1, 3), Fraction(1, 6)],
+              [Fraction(1, 2), 0, 0], [3, -2, 1], [Fraction(2 ** 200 + 1, 3 ** 90), -(2 ** 150), Fraction(1, 2 ** 70), 0]]
+    for la, nb, db in [(10, 8, 8), (100, 63, 20), (300, 30, 3)]:
+        shapes.append([qcoef(r, nb, db) for _ in range(la)])
+    for c in shapes:
+        assert P.qclear(c) == ref(c), c[:5]
+        n += 1
+    # (Fractions are always in lowest terms here; zero is 0, whose
+    # denominator takes no part)
+    assert P.qclear([0, Fraction(1, 3)]) == (3, [0, 1])
+    # (exact types only: subclasses whose numerator, denominator, format or
+    # __class__ are spoofed are refused before any of those runs, and before
+    # the bridge is called; bool is refused too)
+    touched = []
+
+    class I1(int):
+        def __format__(self, spec):
+            touched.append("format")
+            return "0"
+
+    class I2(int):
+        __class__ = property(lambda self: int)
+
+    class F1(Fraction):
+        @property
+        def numerator(self):
+            touched.append("numerator")
+            return 1
+
+    class F2(Fraction):
+        @property
+        def denominator(self):
+            touched.append("denominator")
+            return 1
+
+    class F3(Fraction):
+        def __format__(self, spec):
+            touched.append("format")
+            return "0"
+
+    class F4(Fraction):
+        __class__ = property(lambda self: Fraction)
+
+    class F5(Fraction):
+        def __getattribute__(self, attr):
+            touched.append(attr)
+            return Fraction.__getattribute__(self, attr)
+    # (rejected classes whose metaclass hooks hashing and attribute reads:
+    # the dispatch compares the class by identity only, and the refusal
+    # reads nothing of it)
+    def meta(base):
+        class Meta(base):
+            def __hash__(cls):
+                touched.append("hash")
+                return base.__hash__(cls)
+
+            def __eq__(cls, other):
+                touched.append("eq")
+                return base.__eq__(cls, other)
+
+            def __getattribute__(cls, attr):
+                touched.append("get:" + attr)
+                return base.__getattribute__(cls, attr)
+        return Meta
+
+    # (and a metaclass that claims to equal int and hashes as int: by
+    # identity it is still not int)
+    class Claims(type):
+        def __hash__(cls):
+            return hash(int)
+
+        def __eq__(cls, other):
+            return other is int or type.__eq__(cls, other)
+
+    M4 = Claims("M4", (int,), {})
+
+    M1 = meta(type)("M1", (), {})
+    M2 = meta(type)("M2", (int,), {})
+    M3 = meta(type(Fraction))("M3", (Fraction,), {})
+    bads = [I1(3), I2(3), F1(1, 2), F2(1, 2), F3(1, 2), F4(1, 2), F5(1, 2), M1(), M2(3), M3(1, 2), M4(7), True, 1.5, "1", None]
+    del touched[:]
+    name = "_sbengine" if hasattr(E, "_sbengine") else "_native"
+    real = getattr(E, name)
+    calls = []
+
+    class Spy:
+        def call(self, text):
+            calls.append(text)
+            return '{"ok":{"d":"1","c":""}}'
+    setattr(E, name, Spy())
+    try:
+        for bad in bads:
+            try:
+                P.qclear([1, bad])
+            except TypeError as e:
+                assert "qclear" in str(e), e
+            else:
+                raise AssertionError("accepted %r" % (bad,))
+            n += 1
+    finally:
+        setattr(E, name, real)
+    assert calls == [] and touched == [], (calls, touched)
+    # (Sage's own Integer and Rational, and the int numerator() returns, are
+    # accepted)
+    try:
+        import sagebrush.sage as S
+    except ImportError:
+        import sage_all as S
+    q = S.QQ(5) / 7
+    assert P.qclear([S.Integer(3), q, q.numerator()]) == (7, [21, 5, 35])
+    return n
+
+
 def call_hex_checks(r):
     """sagebrush._engine.call_hex, the lean text lane poly.mul and qmul use:
     the same values as call() for ok replies (the empty one included) and
@@ -238,6 +370,7 @@ def main():
     x = R.gen()
     f = (x + Fraction(1, 2)) * (x - Fraction(1, 3)) * (3 * x + 1)
     assert list(f) == [Fraction(-1, 6), Fraction(-1, 3), Fraction(3, 2), 3], list(f)
+    n += qclear_checks(r)
     n += call_hex_checks(r)
     print("poly_mul against exact products: %d cases ok" % n)
 

@@ -444,3 +444,174 @@ fn a_long_reduction_is_refused_by_the_meter() {
     assert!(p.meter.largest_charge() <= max_charge(pb.lc.max(pb.ld)).unwrap());
     assert!(reply(&fa, &fb, r, &CAPS).err().unwrap().contains("the coefficients' reduction needs more than"));
 }
+
+// ---- qpoly_clear ----
+
+/// The reference: d = the lcm of the nonzero numerators' denominators, as
+/// given; c_i = n_i (d / d_i); in the reply's form.
+fn clear_reference(a: &str) -> String {
+    if a.is_empty() {
+        return "{\"ok\":{\"d\":\"1\",\"c\":\"\"}}".to_string();
+    }
+    let toks: Vec<(IBig, UBig)> = a.split(',').map(parse_big).collect();
+    let mut d = UBig::from(1u8);
+    for (n, dd) in &toks {
+        if *n != IBig::from(0) {
+            let g = d.clone().gcd(dd);
+            d = &d / &g * dd;
+        }
+    }
+    let c: Vec<String> = toks
+        .iter()
+        .map(|(n, dd)| {
+            if *n == IBig::from(0) {
+                return "0".to_string();
+            }
+            let v = n * IBig::from(&d / dd);
+            if v < IBig::from(0) {
+                format!("-{:x}", v.unsigned_abs())
+            } else {
+                format!("{:x}", v.unsigned_abs())
+            }
+        })
+        .collect();
+    format!("{{\"ok\":{{\"d\":\"{:x}\",\"c\":\"{}\"}}}}", d, c.join(","))
+}
+
+fn clear_run(a: &str, caps: &Caps) -> Result<(String, u64, u64), String> {
+    let f = scan(a)?;
+    let r = (a.len() + 20) as u64;
+    let Some(plan) = admit_clear(&f, r, caps)? else {
+        return Ok((clear_reply(&f, r, caps)?, 0, 0));
+    };
+    let mut m = Meter::new(plan.limit);
+    let out = clear_metered(&f, r, caps, &plan, &mut m).map_err(|e| match e {
+        ClearError::Refused(s) => s,
+        ClearError::Fault(f, a) => format!("fault {:?} (phase A {})", f, a),
+    })?;
+    Ok((out, m.used(), m.largest_charge()))
+}
+
+#[test]
+fn clear_matches_the_reference() {
+    let mut next = rng(808);
+    let cases: Vec<String> = vec![
+        "".into(),
+        "0".into(),
+        "0,0,0".into(),
+        "5".into(),
+        "-3/7".into(),
+        "1/2,1/3,1/6".into(),
+        "1/2,0,0".into(),
+        "3,-2,1".into(),
+        tokens(&[(1, 2), (0, 1), (-5, 6), (7, 1)]),
+        format!("{}/{},-{}/{},1,0", "f".repeat(70), "1".to_string() + &"0".repeat(40), "e".repeat(33), "3".repeat(37)),
+    ];
+    let mut all = cases;
+    for &(l, nb, db) in &[(10usize, 8u32, 8u32), (100, 63, 20), (300, 30, 3), (50, 63, 63)] {
+        let v: Vec<(i64, u64)> = (0..l).map(|_| ((next() >> (64 - nb)) as i64 * if next() & 1 == 0 { 1 } else { -1 }, (next() >> (64 - db)).max(1))).collect();
+        all.push(tokens(&v));
+    }
+    for a in &all {
+        let (out, _, _) = clear_run(a, &CAPS).unwrap();
+        assert_eq!(out, clear_reference(a), "{}", &a[..a.len().min(80)]);
+    }
+}
+
+/// The lcm is of the NONZERO numerators' denominators, AS GIVEN: `0/5`
+/// takes no part, `2/4` contributes 4 (not 2).
+#[test]
+fn clear_takes_nonzero_denominators_as_given() {
+    let (out, _, _) = clear_run("0/5,1/3", &CAPS).unwrap();
+    assert_eq!(out, "{\"ok\":{\"d\":\"3\",\"c\":\"0,1\"}}");
+    let (out, _, _) = clear_run("2/4,1", &CAPS).unwrap();
+    assert_eq!(out, "{\"ok\":{\"d\":\"4\",\"c\":\"2,4\"}}");
+    // (trailing zeros kept, length and order as given)
+    let (out, _, _) = clear_run("-1/2,0,0/9,0", &CAPS).unwrap();
+    assert_eq!(out, "{\"ok\":{\"d\":\"2\",\"c\":\"-1,0,0,0\"}}");
+}
+
+/// The meter's count within the admitted forms: phase B's within clear_work
+/// (and pinned exactly for two shapes); the largest charge within
+/// max_charge(Lambda).
+#[test]
+fn clear_counts_within_its_forms() {
+    let mut next = rng(99);
+    for &(l, nb, db) in &[(1usize, 8u32, 8u32), (40, 63, 30), (200, 20, 4), (64, 63, 63)] {
+        let v: Vec<(i64, u64)> = (0..l).map(|_| ((next() >> (64 - nb)) as i64 * if next() & 1 == 0 { 1 } else { -1 }, (next() >> (64 - db)).max(1))).collect();
+        let a = tokens(&v);
+        let f = scan(&a).unwrap();
+        let r = (a.len() + 20) as u64;
+        let plan = admit_clear(&f, r, &CAPS).unwrap().unwrap();
+        let mut m = Meter::new(plan.limit);
+        // (phase A alone, to split the count)
+        let mut lb = vec![0u64; plan.lam as usize + 1];
+        let ws = coprime::workspace_words(plan.lam).unwrap() as usize;
+        let d = plan.d_max as usize;
+        let mut s = LcmScratch { ws: vec![0u64; ws], q: vec![0u64; d + 1], kx: vec![0u64; d + 1], ky: vec![0u64; d], prod: vec![0u64; plan.lam as usize + 1] };
+        let nl = lcm(&f, &mut lb, &mut s, &mut m, true).unwrap();
+        let used_a = m.used();
+        let mut m2 = Meter::new(plan.limit);
+        let out = clear_metered(&f, r, &CAPS, &plan, &mut m2).ok().unwrap();
+        assert!(out.len() as u64 <= clear_reply_bound(&f, bits(&lb[..nl])).unwrap());
+        let used_b = m2.used() - used_a;
+        let form = clear_work(&f, nl as u64).unwrap();
+        assert!(used_b <= form, "{} tokens: phase B {} > {}", l, used_b, form);
+        assert!(m2.largest_charge() <= max_charge(plan.lam.max(nl as u64 + f.n_max + 1)).unwrap());
+    }
+    // (pinned: all halves and all integers, 100 tokens)
+    let pin = |a: &str| {
+        let f = scan(a).unwrap();
+        let r = (a.len() + 20) as u64;
+        let plan = admit_clear(&f, r, &CAPS).unwrap().unwrap();
+        let mut m = Meter::new(plan.limit);
+        clear_metered(&f, r, &CAPS, &plan, &mut m).ok().unwrap();
+        m.used()
+    };
+    assert_eq!((pin(&vec!["1/2"; 100].join(",")), pin(&vec!["5"; 100].join(","))), CLEAR_COUNTS);
+}
+
+// (all halves and all integers count the same: one gcd, quotient and product
+// per denominator, 1 included, then the scaling)
+const CLEAR_COUNTS: (u64, u64) = (15602, 15602);
+
+/// The reply's exact bound: a reply cap at exactly the bound admits; one
+/// byte less refuses at phase B's admission, naming the cap, with no
+/// partial reply; the reply cap alone (work and memory well within theirs).
+#[test]
+fn clear_reply_bound_is_exact() {
+    let a = (0..40).map(|i| format!("-{}/{:x}", "f".repeat(30), (1u64 << 62) + 2 * i + 1)).collect::<Vec<_>>().join(",");
+    let f = scan(&a).unwrap();
+    let r = (a.len() + 20) as u64;
+    let plan = admit_clear(&f, r, &CAPS).unwrap().unwrap();
+    let mut m = Meter::new(plan.limit);
+    let mut l = vec![0u64; plan.lam as usize + 1];
+    let ws = coprime::workspace_words(plan.lam).unwrap() as usize;
+    let d = plan.d_max as usize;
+    let mut s = LcmScratch { ws: vec![0u64; ws], q: vec![0u64; d + 1], kx: vec![0u64; d + 1], ky: vec![0u64; d], prod: vec![0u64; plan.lam as usize + 1] };
+    let nl = lcm(&f, &mut l, &mut s, &mut m, true).unwrap();
+    let bound = clear_reply_bound(&f, bits(&l[..nl])).unwrap();
+    let at = Caps { reply: bound, ..CAPS };
+    let (out, _, _) = clear_run(&a, &at).unwrap();
+    assert!(out.len() as u64 <= bound);
+    let e = clear_run(&a, &Caps { reply: bound - 1, ..CAPS }).err().unwrap();
+    assert!(e.contains("the reply's bytes") && e.contains(&bound.to_string()), "{}", e);
+}
+
+/// Many coprime denominators: refused by the lcm's meter, by name, at most
+/// max_charge(Lambda) past its limit.
+#[test]
+fn clear_refused_by_the_lcm_meter() {
+    let a: String = (0..12_000u64).map(|i| format!("1/{:x}", (1u64 << 62) + 2 * i + 1)).collect::<Vec<_>>().join(",");
+    let f = scan(&a).unwrap();
+    let r = (a.len() + 20) as u64;
+    let plan = admit_clear(&f, r, &CAPS).unwrap().unwrap();
+    let mut m = Meter::new(plan.limit);
+    match clear_metered(&f, r, &CAPS, &plan, &mut m) {
+        Err(ClearError::Fault(Fault::Overrun, true)) => {}
+        _ => panic!("not refused by the lcm's meter"),
+    }
+    assert!(m.used() > plan.limit && m.used() - plan.limit <= max_charge(plan.lam).unwrap());
+    let e = clear_reply(&f, r, &CAPS).err().unwrap();
+    assert!(e.contains("the denominators' lcm needs more than"), "{}", e);
+}
