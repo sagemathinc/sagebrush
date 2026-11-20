@@ -5,9 +5,10 @@
 //!   grounds for refusing before starting: memory against what is
 //!   available, work (through the calibration) against the user's time
 //!   budget.
-//! - $E$ (`work_estimate`): an estimate in meter units; the per-op error
-//!   factor $k$ and the units-to-seconds tables live with the calibration,
-//!   keyed by op.  `None` until the harness has measured $k$.
+//! - $E$ (`work_estimate`): an estimate in meter units, per [`Family`] of
+//!   primitive (the units-to-seconds rates are per family and per target;
+//!   the per-op error factor $k$ lives with the calibration, keyed by op).
+//!   `None` until the harness has measured $k$.
 //! - $U$ (`work_upper`): a proven upper bound where one is cheap.  It never
 //!   refuses: an operation runs on a [`Meter::accounting`] meter with $U$ as
 //!   its limit, and passing it is an accounting bug, not a budget.
@@ -19,6 +20,50 @@
 
 pub use crate::coprime::{accounting_overruns, Meter};
 
+/// The families of primitive work a meter counts separately: their
+/// units convert to seconds at different rates.  A charge site names its
+/// family as a constant.
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Hash)]
+#[repr(usize)]
+pub enum Family {
+    /// Schoolbook products (limbs, and multiply-adds mod p).
+    MulSchool,
+    /// NTT transforms and pointwise products.
+    MulNtt,
+    /// Knuth D and Möller–Granlund steps, one-limb divisions.
+    Div,
+    /// Newton inversion and division.
+    DivNewton,
+    /// Lehmer windows and cosequences.
+    Gcd,
+    /// Loads, copies, clears, normalisation.
+    Move,
+    /// Reductions mod p (nmod, CRT).
+    ModArith,
+    /// The rest (kept small: untagged charge sites count here).
+    Other,
+}
+
+/// The number of [`Family`] values.
+pub const FAMILIES: usize = 8;
+
+const _: () = assert!(Family::Other as usize + 1 == FAMILIES);
+
+/// Meter units per [`Family`] (deterministic from the inputs).
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
+pub struct Units(pub [u64; FAMILIES]);
+
+impl Units {
+    /// The units of one family.
+    pub fn get(&self, f: Family) -> u64 {
+        self.0[f as usize]
+    }
+    /// The total, or `None` if it overflows u64.
+    pub fn total(&self) -> Option<u64> {
+        self.0.iter().try_fold(0u64, |t, &u| t.checked_add(u))
+    }
+}
+
 /// What is known about an operation's cost before it runs.
 #[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
 pub struct Cost {
@@ -26,8 +71,9 @@ pub struct Cost {
     pub mem_lower: u64,
     /// $L$: a rigorous lower bound on the work, in meter units.
     pub work_lower: u64,
-    /// $E$: the estimated work in meter units (`None` until calibrated).
-    pub work_estimate: Option<u64>,
+    /// $E$: the estimated work in meter units, per family (`None` until
+    /// calibrated).
+    pub work_estimate: Option<Units>,
     /// $U$: a proven upper bound on the work in meter units, where cheap.
     pub work_upper: Option<u64>,
 }

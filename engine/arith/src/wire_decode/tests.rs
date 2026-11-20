@@ -117,6 +117,11 @@ fn run(x: &UBig, y: &UBig) -> (UBig, u64, u64) {
     let bound = gcd_work(lx as u64, ly as u64).unwrap();
     let mut m = Meter::new(bound);
     let (slot, n) = gcd_in_place(s0, lx, s1, ly, &mut m).unwrap();
+    // the per-family units add up to the meter's total, and the gcd's
+    // work is tagged (no untagged units)
+    let u = m.units();
+    assert_eq!(u.total(), Some(m.used()));
+    assert_eq!(u.get(crate::cost::Family::Other), 0);
     let (g, other) = if slot { (&s1[..n], &s0[..]) } else { (&s0[..n], &s1[..]) };
     assert!(other.iter().all(|&w| w == 0), "the other slot is not zero");
     (UBig::from_words(g), m.used(), bound)

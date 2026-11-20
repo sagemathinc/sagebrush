@@ -9,17 +9,17 @@
   "owner": "poly_mul",
   "reason": "poly_mul's derived bounds, a closed form's const assertion, a field mask, a benchmark's output or a test assertion: refuses nothing itself"
  },
- "engine/arith/src/coprime.rs :: add :: None if self.accounting => self.used = u64::MAX, #0": {
+ "engine/arith/src/coprime.rs :: add_in :: None if self.accounting => self.used = u64::MAX, #0": {
   "class": "none",
   "owner": "engine arith (big-integer wire decoder)",
   "reason": "the work meter's accounting mode: passing a proven upper bound is an accounting bug, counted (and a debug assertion), never a refusal"
  },
- "engine/arith/src/coprime.rs :: add :: debug_assert!(false, \"a meter passed its proven upper bound: {} units of at most {}\", self.used, self.limit); #0": {
+ "engine/arith/src/coprime.rs :: add_in :: debug_assert!(false, \"a meter passed its proven upper bound: {} units of at most {}\", self.used, self.limit); #0": {
   "class": "none",
   "owner": "engine arith (big-integer wire decoder)",
   "reason": "the work meter's accounting mode: passing a proven upper bound is an accounting bug, counted (and a debug assertion), never a refusal"
  },
- "engine/arith/src/coprime.rs :: add :: if self.used > self.limit { #0": {
+ "engine/arith/src/coprime.rs :: add_in :: if self.used > self.limit { #0": {
   "class": "none",
   "owner": "engine arith (big-integer wire decoder)",
   "reason": "the gcd check's work meter: the admitted work is a proven bound, so going over it is an Internal error (a bug), not a limit"
@@ -34,7 +34,7 @@
   "owner": "engine arith (big-integer wire decoder)",
   "reason": "the decoder's and the gcd check's plumbing (bounds for the caller's reservation and work admission, the workspace, word masks); refuses nothing itself"
  },
- "engine/arith/src/coprime.rs :: new :: Meter { used: 0, limit, since_poll: 0, largest: 0, accounting: false, overran: false } #0": {
+ "engine/arith/src/coprime.rs :: new :: Meter { used: 0, limit, since_poll: 0, largest: 0, accounting: false, overran: false, units: [0; FAMILIES] } #0": {
   "class": "none",
   "owner": "engine arith (big-integer wire decoder)",
   "reason": "the work meter's accounting mode: passing a proven upper bound is an accounting bug, counted (and a debug assertion), never a refusal"

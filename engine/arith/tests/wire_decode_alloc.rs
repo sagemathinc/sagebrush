@@ -1,8 +1,10 @@
 //! The big-integer decoder's allocations, by a counting allocator (S2,
 //! E1-E3): computing a payload's need allocates nothing; a decode's peak
-//! live memory is within its need; a refused pair allocates exactly its
-//! gcd workspace; an over-cap integer and a refused aggregate work charge
-//! allocate nothing.  One test (the counters are global).
+//! live memory is within its reservation and at least its memory lower
+//! bound; a refused pair allocates exactly its gcd workspace; an integer
+//! far above the former cap decodes within its need; a refused aggregate
+//! memory admission allocates nothing.  One test (the counters are
+//! global).
 
 use dashu_int::UBig;
 use sagebrush_arith::coprime::pair_work;

@@ -52,6 +52,8 @@
 use sagebrush_wire::BigRef;
 use std::sync::atomic::{AtomicU64, Ordering::Relaxed};
 
+use crate::cost::{Family, Units, FAMILIES};
+
 use crate::invdiv;
 
 /// At most this many cosequence steps per Lehmer window (Lamé on 63 bits
@@ -195,6 +197,8 @@ pub struct Meter {
     /// accounting bug, recorded, never a refusal.
     accounting: bool,
     overran: bool,
+    /// The units charged per family (their sum is `used`).
+    units: [u64; FAMILIES],
 }
 
 /// Meters that passed their proven upper bound since the start (the engine
@@ -214,7 +218,7 @@ impl Meter {
     /// [`Meter::accounting`] (the engine cost policy: an upper bound never
     /// refuses).
     pub fn new(limit: u64) -> Meter {
-        Meter { used: 0, limit, since_poll: 0, largest: 0, accounting: false, overran: false }
+        Meter { used: 0, limit, since_poll: 0, largest: 0, accounting: false, overran: false, units: [0; FAMILIES] }
     }
     /// A meter whose limit is a proven upper bound on the work (a cost's
     /// `work_upper`, or u64::MAX where there is none).  Passing it is an
@@ -236,8 +240,21 @@ impl Meter {
     pub fn largest_charge(&self) -> u64 {
         self.largest
     }
+    /// The units charged so far, per family (their total is [`Meter::used`]).
+    pub fn units(&self) -> Units {
+        let u = Units(self.units);
+        debug_assert_eq!(u.total(), Some(self.used), "the per-family units drifted from the total");
+        u
+    }
+    /// Charge `n` units, untagged: [`Family::Other`].  The pre-family form,
+    /// for the charge sites still to migrate to [`Meter::add_in`].
     #[inline]
     pub(crate) fn add(&mut self, n: usize) -> Result<(), Fault> {
+        self.add_in(Family::Other, n)
+    }
+    /// Charge `n` units of family `f` (a constant at each charge site).
+    #[inline]
+    pub(crate) fn add_in(&mut self, f: Family, n: usize) -> Result<(), Fault> {
         let n = u64::try_from(n).map_err(|_| Fault::Overrun)?;
         self.largest = self.largest.max(n);
         match self.used.checked_add(n) {
@@ -245,6 +262,10 @@ impl Meter {
             None if self.accounting => self.used = u64::MAX,
             None => return Err(Fault::Overrun),
         }
+        // (a family's count is at most the total, so it fits where the
+        // total did; it saturates with the total in accounting mode)
+        let fu = &mut self.units[f as usize];
+        *fu = fu.saturating_add(n);
         if self.used > self.limit {
             if !self.accounting {
                 return Err(Fault::Overrun);
@@ -349,7 +370,7 @@ fn div_limb(x: &mut [u64], nx: usize, d: u64, q: &mut [u64], m: &mut Meter) -> R
     if nx == 1 {
         // (one limb by one limb: the machine's own u64 division, no
         // reciprocal; the same charge)
-        m.add(6)?;
+        m.add_in(Family::Div, 6)?;
         let (qj, r) = (x[0] / d, x[0] % d);
         q[0] = qj;
         x[0] = 0;
@@ -361,7 +382,7 @@ fn div_limb(x: &mut [u64], nx: usize, d: u64, q: &mut [u64], m: &mut Meter) -> R
     let mut r = if s > 0 { x[nx - 1] >> (64 - s) } else { 0 };
     let mut inv = None;
     for j in (0..nx).rev() {
-        m.add(6)?;
+        m.add_in(Family::Div, 6)?;
         let v = *inv.get_or_insert_with(|| invdiv::recip(dn));
         let low = if s > 0 && j > 0 { x[j - 1] >> (64 - s) } else { 0 };
         let u0 = if s > 0 { (x[j] << s) | low } else { x[j] };
@@ -397,7 +418,7 @@ fn rem_limb(a: &[u64], na: usize, d: u64) -> u64 {
 /// restored.  The remainder's length.
 fn rem_in_place(x: &mut [u64], nx: usize, y: &mut [u64], ny: usize, m: &mut Meter) -> Result<usize, Fault> {
     let s = y[ny - 1].leading_zeros();
-    m.add(nx + ny + 2)?;
+    m.add_in(Family::Move, nx + ny + 2)?;
     if s > 0 {
         for i in (1..ny).rev() {
             y[i] = (y[i] << s) | (y[i - 1] >> (64 - s));
@@ -416,7 +437,7 @@ fn rem_in_place(x: &mut [u64], nx: usize, y: &mut [u64], ny: usize, m: &mut Mete
     // charge, which pays for more than it costs)
     let mut inv = None;
     for j in (0..=nx - ny).rev() {
-        m.add(2 * ny + 4)?;
+        m.add_in(Family::Div, 2 * ny + 4)?;
         let v3 = *inv.get_or_insert_with(|| invdiv::recip3(y1, y2, invdiv::recip(y1)));
         let qh = qdigit(x[j + ny], x[j + ny - 1], x[j + ny - 2], y1, y2, v3)?;
         // x[j .. j + ny + 1] -= qh y
@@ -446,7 +467,7 @@ fn rem_in_place(x: &mut [u64], nx: usize, y: &mut [u64], ny: usize, m: &mut Mete
             x[j + ny] = x[j + ny].wrapping_add(c as u64);
         }
     }
-    m.add(2 * ny + nx + 1)?;
+    m.add_in(Family::Move, 2 * ny + nx + 1)?;
     if s > 0 {
         for i in 0..ny - 1 {
             x[i] = (x[i] >> s) | (x[i + 1] << (64 - s));
@@ -501,10 +522,10 @@ pub fn divexact_in_place(x: &mut [u64], nx: usize, y: &mut [u64], ny: usize, q: 
     if ny == 0 || nx < ny || x.len() <= nx || y.len() < ny || y[ny - 1] == 0 || q.len() < nx - ny + 1 {
         return Err(Fault::Invariant);
     }
-    m.add(nx + ny + 2)?;
+    m.add_in(Family::Move, nx + ny + 2)?;
     if ny == 1 {
         let r = div_limb(x, nx, y[0], q, m)?;
-        m.add(nx + 2)?;
+        m.add_in(Family::Move, nx + 2)?;
         x[nx] = 0;
         if r != 0 {
             return Err(Fault::Invariant);
@@ -530,7 +551,7 @@ pub fn divexact_in_place(x: &mut [u64], nx: usize, y: &mut [u64], ny: usize, q: 
     // charge, which pays for more than it costs)
     let mut inv = None;
     for j in (0..=nx - ny).rev() {
-        m.add(2 * ny + 4)?;
+        m.add_in(Family::Div, 2 * ny + 4)?;
         let v3 = *inv.get_or_insert_with(|| invdiv::recip3(y1, y2, invdiv::recip(y1)));
         let mut qh = qdigit(x[j + ny], x[j + ny - 1], x[j + ny - 2], y1, y2, v3)?;
         let (mut borrow, mut carry) = (0u64, 0u128);
@@ -561,7 +582,7 @@ pub fn divexact_in_place(x: &mut [u64], nx: usize, y: &mut [u64], ny: usize, q: 
         q[j] = qh as u64;
     }
     // (the remainder, still shifted, is x[..ny]; above it everything is zero)
-    m.add(nx + 2)?;
+    m.add_in(Family::Move, nx + 2)?;
     if x[..=nx].iter().any(|&w| w != 0) {
         return Err(Fault::Invariant);
     }
@@ -587,10 +608,10 @@ pub fn divrem_in_place(x: &mut [u64], nx: usize, y: &mut [u64], ny: usize, q: &m
     if ny == 0 || nx < ny || x.len() <= nx || y.len() < ny || y[ny - 1] == 0 || q.len() < nx - ny + 1 {
         return Err(Fault::Invariant);
     }
-    m.add(nx + ny + 2)?;
+    m.add_in(Family::Move, nx + ny + 2)?;
     if ny == 1 {
         let r = div_limb(x, nx, y[0], q, m)?;
-        m.add(nx + 2)?;
+        m.add_in(Family::Move, nx + 2)?;
         x[nx] = 0;
         x[0] = r;
         return Ok((norm(q, nx), usize::from(r != 0)));
@@ -614,7 +635,7 @@ pub fn divrem_in_place(x: &mut [u64], nx: usize, y: &mut [u64], ny: usize, q: &m
     // charge, which pays for more than it costs)
     let mut inv = None;
     for j in (0..=nx - ny).rev() {
-        m.add(2 * ny + 4)?;
+        m.add_in(Family::Div, 2 * ny + 4)?;
         let v3 = *inv.get_or_insert_with(|| invdiv::recip3(y1, y2, invdiv::recip(y1)));
         let mut qh = qdigit(x[j + ny], x[j + ny - 1], x[j + ny - 2], y1, y2, v3)?;
         let (mut borrow, mut carry) = (0u64, 0u128);
@@ -645,7 +666,7 @@ pub fn divrem_in_place(x: &mut [u64], nx: usize, y: &mut [u64], ny: usize, q: &m
         q[j] = qh as u64;
     }
     // (the remainder, shifted, is x[..ny]; unshift it and y, zero the rest)
-    m.add(2 * ny + nx + 1)?;
+    m.add_in(Family::Move, 2 * ny + nx + 1)?;
     if s > 0 {
         for i in 0..ny - 1 {
             x[i] = (x[i] >> s) | (x[i + 1] << (64 - s));
@@ -681,7 +702,7 @@ pub fn gcd_in_place(x: &mut [u64], nx: usize, y: &mut [u64], ny: usize, m: &mut 
     let (mut na, mut nb) = (nx, ny);
     let mut swapped = false;
     loop {
-        m.add(na + 2)?;
+        m.add_in(Family::Gcd, na + 2)?;
         if less(a, na, b, nb) {
             std::mem::swap(&mut a, &mut b);
             std::mem::swap(&mut na, &mut nb);
@@ -691,7 +712,7 @@ pub fn gcd_in_place(x: &mut [u64], nx: usize, y: &mut [u64], ny: usize, m: &mut 
             return Ok((swapped, na));
         }
         if nb == 1 {
-            m.add(2 * na + 93)?;
+            m.add_in(Family::Div, 2 * na + 93)?;
             let d = b[0];
             let g = gcd_u64(d, rem_limb(a, na, d));
             for v in &mut a[..na] {
@@ -706,7 +727,7 @@ pub fn gcd_in_place(x: &mut [u64], nx: usize, y: &mut [u64], ny: usize, m: &mut 
         let (mut xh, mut yh) = (i128::from(window(a, na, shift)), i128::from(window(b, nb, shift)));
         let (mut ca, mut cb, mut cc, mut cd) = (1i128, 0i128, 0i128, 1i128);
         if na <= nb + 1 {
-            m.add(LEHMER_STEPS as usize)?;
+            m.add_in(Family::Gcd, LEHMER_STEPS as usize)?;
             for _ in 0..LEHMER_STEPS {
                 // (Algorithm L's invariant keeps these positive; checked,
                 // so a truncating division is a floor)
@@ -726,7 +747,7 @@ pub fn gcd_in_place(x: &mut [u64], nx: usize, y: &mut [u64], ny: usize, m: &mut 
             na = rem_in_place(a, na, b, nb, m)?;
             continue;
         }
-        m.add(3 * na)?;
+        m.add_in(Family::Gcd, 3 * na)?;
         apply_window(a, b, na, [ca, cb, cc, cd])?;
         let n = na;
         na = norm(a, n);
@@ -798,7 +819,7 @@ fn apply_window(a: &mut [u64], b: &mut [u64], na: usize, c: [i128; 4]) -> Result
 /// Copy a wire integer's magnitude into a zeroed slot.
 fn load(slot: &mut [u64], v: &BigRef, m: &mut Meter) -> Result<usize, Fault> {
     let k = v.limb_count();
-    m.add(k + 1)?;
+    m.add_in(Family::Move, k + 1)?;
     for (i, w) in slot[..k].iter_mut().enumerate() {
         *w = v.limb(i);
     }
@@ -807,7 +828,7 @@ fn load(slot: &mut [u64], v: &BigRef, m: &mut Meter) -> Result<usize, Fault> {
 
 /// Zero the first `n` limbs of a slot.
 fn clear(slot: &mut [u64], n: usize, m: &mut Meter) -> Result<(), Fault> {
-    m.add(n + 1)?;
+    m.add_in(Family::Move, n + 1)?;
     for v in &mut slot[..n] {
         *v = 0;
     }
@@ -861,7 +882,7 @@ pub fn coprime_row<'a>(ws: &mut [u64], row: impl Iterator<Item = BigRef<'a>>, m:
         dirty = dirty.max(room);
         let (slot, len) = gcd_in_place(s0, lg, s1, ln, m)?;
         if slot {
-            m.add(len + 1)?;
+            m.add_in(Family::Move, len + 1)?;
             s0[..len].copy_from_slice(&s1[..len]);
         }
         clear(s1, room, m)?;
@@ -901,6 +922,8 @@ mod tests {
         // the quotient loop's and the shifts' units, as gcd_work counts them
         let units = (nx + ny + 2) + (nx - ny + 1) * (2 * ny + 4) + (2 * ny + nx + 1);
         assert_eq!(m.used(), units as u64);
+        assert_eq!(m.units().total(), Some(m.used()));
+        assert_eq!(m.units().get(Family::Other), 0, "a remainder's work is tagged");
     }
 
     /// The cofactor guard: Algorithm L's bound holds at its edges, and a
