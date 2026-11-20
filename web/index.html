@@ -5006,7 +5006,9 @@ docSyncReady.then(async (on) => {
   };
   w.watch((c) => {
     let added = false;
-    for (const o of c?.ops ?? []) if (o?.op === "create" && o.kind === "notebook" && typeof o.ref === "string" && !made.has(o.ref)) { made.add(o.ref); added = true; }
+    // (made here, or in another tab of this browser; never one the server told of (another device's: its create carries
+    // its ref, but it isn't this device's to start, and a first pull of a large library is thousands of them))
+    for (const o of c?.ops ?? []) if (o?.op === "create" && o.kind === "notebook" && o.origin !== "server" && typeof o.ref === "string" && !made.has(o.ref)) { made.add(o.ref); added = true; }
     if (!added) return;
     clearTimeout(madeTimer);
     madeTimer = setTimeout(walkMade, 1000);

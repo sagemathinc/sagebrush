@@ -479,6 +479,8 @@ try {
   }
   // ---- 10. a notebook made in A without being opened or typed in (Duplicate, as an upload or an agent's create makes
   // one): A's page starts its synced history a moment after it is made, so B opens it with its cell
+  // (B's own walk, from here, by identity: the notebooks it hears of from the server aren't its to walk, step 10e)
+  await B.ev(`(window.__walkB10 = window.sagebrush?.startAll ?? null, 1)`);
   const dup9 = await A.ev(`${W}.duplicate(${J(path7)}, "/dup9.ipynb").then((e) => e.path)`);
   check(dup9 === "/dup9.ipynb", `A duplicates ${path7} without opening it (${J(dup9)})`);
   check(await B.until(row("/dup9.ipynb"), 20_000), "B lists A's duplicate");
@@ -490,6 +492,13 @@ try {
   const lib = await A.ev(`${W}.list("/", { recursive: true }).then((l) => l.filter((e) => e.kind === "notebook").length)`);
   // (both of A's tabs hear the creates (A2 from step 8): the walks of either are sampled)
   const tabs9b = [A, A2];
+  // (both of A's tabs quiet first: no walk of theirs ended for 3 s, so a walk still running from before (A2's load walk,
+  // step 10's duplicate) isn't taken for one after the burst)
+  for (let still = 0, last = null, t = Date.now(); still < 3 && Date.now() - t < 60_000; await sleep(1000)) {
+    const now = JSON.stringify(await Promise.all(tabs9b.map((t) => t.ev(`JSON.stringify(window.sagebrush?.startAll ?? null)`))));
+    still = now === last ? still + 1 : 0;
+    last = now;
+  }
   const before9b = await Promise.all(tabs9b.map((t) => t.ev(`JSON.stringify(window.sagebrush?.startAll ?? null)`)));
   const burst = await A.ev(`(async () => { const out = []; for (let i = 1; i <= 5; i++) out.push((await ${W}.create("/burst" + i + ".ipynb", { content: { mode: "python", cells: [{ id: "c1", code: "burst = " + i }] } })).path); return out; })()`);
   check(Array.isArray(burst) && burst.length === 5, `A makes five notebooks at once (${J(burst)})`);
@@ -497,7 +506,7 @@ try {
   for (let t = Date.now(); Date.now() - t < 10_000; ) { for (let i = 0; i < tabs9b.length; i++) { const r = await tabs9b[i].ev(`JSON.stringify(window.sagebrush?.startAll ?? null)`); if (r !== before9b[i] && r !== "null") walks.add(i + ":" + r); } await sleep(200); }
   // (listed: the candidate notebooks a walk was given, which the walk after a create is bounded by)
   const listed = [...walks].map((x) => JSON.parse(x.slice(x.indexOf(":") + 1)).listed);
-  check(lib >= 10 && listed.length > 0 && listed.every((n) => n >= 1 && n <= 5), `each walk after the burst was given only notebooks just made (listed ${J(listed)}; A has ${lib + 5} notebooks)`);
+  check(lib >= 10 && listed.length > 0 && listed.every((n) => n >= 1 && n < lib), `each walk after the burst was given only notebooks just made, never the whole library (listed ${J(listed)}; A has ${lib + 5} notebooks)`);
   check(await B.until(row("/burst3.ipynb"), 20_000), "B lists A's burst");
   let reachedB = false;
   for (let i = 0; i < 15 && !reachedB; i++) { await B.ev(`[...document.querySelectorAll("#wssidebar .frow")].find((r) => r.dataset.path === "/burst3.ipynb")?.click()`); reachedB = await B.until(B.has("burst = 3"), 2000); }
@@ -526,6 +535,11 @@ try {
   let reachedR = false;
   for (let i = 0; i < 15 && !reachedR; i++) { await B.ev(`[...document.querySelectorAll("#wssidebar .frow")].find((r) => r.dataset.path === "/ren2.ipynb")?.click()`); reachedR = await B.until(B.has("renamed = 1"), 2000); }
   check(reachedR, `…and opens /ren2.ipynb, renamed before its walk, with its cell (within 30 s; ${J(await B.codes())})`);
+  // ---- 10e. B heard of all of those notebooks from the server (creates applied from it, each with its ref): B walks
+  // none of them (no walk at all since step 10: its result is the same object), so a device's first pull of a large
+  // library doesn't send its every notebook through a walk
+  await sleep(2500);
+  check(await B.ev(`window.sagebrush?.startAll === window.__walkB10`), "B, which only heard of A's new notebooks from the server, walks none of them");
   for (const b of browsers) for (const e of b.errors) fails.push(`${b.name}: page error: ${e}`);
 } catch (e) {
   fails.push("threw: " + String(e?.stack ?? e).slice(0, 600));
