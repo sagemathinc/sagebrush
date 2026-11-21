@@ -1,9 +1,9 @@
 use super::*;
 
 thread_local! {
-    /// Tests: corrupt the next step 4's first factor, as a bug would, to
-    /// reach invariants_with's fallback.
-    pub(super) static CORRUPT_STEP4: std::cell::Cell<bool> = const { std::cell::Cell::new(false) };
+    /// Tests: the next step 4's first factor is replaced by this value, as
+    /// a bug could give, to reach invariants_with's fallback.
+    pub(super) static CORRUPT_STEP4: std::cell::RefCell<Option<BigInt>> = const { std::cell::RefCell::new(None) };
 }
 
 fn rng(seed: &mut u64) -> u64 {
@@ -342,8 +342,12 @@ fn a_failed_check_falls_back_to_e_equals_d() {
     let inv = vec![big(1), big(2), big(6), big(12)];
     let a = structured(4, 4, &inv, &mut s);
     let d: BigInt = inv.iter().product();
-    CORRUPT_STEP4.with(|c| c.set(true));
-    let got = invariants_with(&a, &d, &big(12));
-    assert!(!CORRUPT_STEP4.with(|c| c.get()), "the hook was reached");
-    assert_eq!(got, inv);
+    // a factor that does not divide d, a zero one (the division must not
+    // be reached) and a negative one
+    for bad in [&d + big(1), big(0), big(-2)] {
+        CORRUPT_STEP4.with(|c| *c.borrow_mut() = Some(bad.clone()));
+        let got = invariants_with(&a, &d, &big(12));
+        assert!(CORRUPT_STEP4.with(|c| c.borrow().is_none()), "the hook was reached ({bad})");
+        assert_eq!(got, inv, "corrupted to {bad}");
+    }
 }

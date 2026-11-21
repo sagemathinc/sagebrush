@@ -348,17 +348,15 @@ fn invariants_with(a: &ZMat, d: &BigInt, e: &BigInt) -> Vec<BigInt> {
     let n = a.rows;
     let mut t = if e.is_one() { vec![BigInt::one(); n - 1] } else { smith_mod(a, e)[..n - 1].to_vec() };
     #[cfg(test)]
-    let forced = tests::CORRUPT_STEP4.with(|c| c.replace(false));
-    #[cfg(test)]
-    if forced {
-        // (tests: a factor that cannot divide d, as a bug would give)
-        t[0] = d + BigInt::one();
-    }
-    let prod: BigInt = t.iter().product();
-    let (last, rem) = d.div_rem(&prod);
-    if rem.is_zero() && t.iter().all(|x| x.is_positive()) {
-        t.push(last);
-        return t;
+    let forced = tests::CORRUPT_STEP4.with(|c| c.borrow_mut().take()).inspect(|bad| t[0] = bad.clone()).is_some();
+    // (every factor positive first: a zero one must not reach the division)
+    if t.iter().all(|x| x.is_positive()) {
+        let prod: BigInt = t.iter().product();
+        let (last, rem) = d.div_rem(&prod);
+        if rem.is_zero() {
+            t.push(last);
+            return t;
+        }
     }
     #[cfg(test)]
     let expected = forced;
