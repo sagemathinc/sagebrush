@@ -17,6 +17,8 @@ State lives in a run directory:
   rows/<type>/     accepted points (authoritative for "done"), and the
                    type's identity.json
   incoming/<type>/ partial transfers (never read as results)
+  known_hosts.d/   one known_hosts per VM (trust on first use per VM: the
+                   provider reuses addresses)
   lock             held (flock) for the driver's whole life
 
   python3 bench/core/shard.py plan RUN_DIR --types TYPES.json [--envelope H]
@@ -791,24 +793,39 @@ class TransferError(Exception):
 
 
 class Ssh:
-    """Commands and bounded transfers to a VM, by its IP. Remote commands are
-    fixed words, each shell-quoted; remote paths come from the requested
-    point, never from the VM."""
+    """Commands and bounded transfers to a VM (its name and IP). Remote
+    commands are fixed words, each shell-quoted; remote paths come from the
+    requested point, never from the VM.
+
+    Each VM has its own known_hosts (known_hosts.d/<name>): its key is
+    trusted on first use for that VM only. The provider reuses ephemeral IPs,
+    and one file shared by IP would refuse a new VM's key on an old VM's
+    address, every time, which looks just like an ssh that is not up yet."""
 
     def __init__(self, run_dir: Path, cancel: threading.Event | None = None):
         self.cancel = cancel or threading.Event()
-        self.opts = [
+        self.hosts = run_dir / "known_hosts.d"
+        self.hosts.mkdir(mode=0o700, exist_ok=True)
+
+    def _opts(self, vm: dict) -> list[str]:
+        name = str(vm.get("name") or "")
+        if not NAME_RE.match(name):
+            raise TransferError(f"bad VM name {name!r}")
+        return [
             "-o",
             "BatchMode=yes",
             "-o",
             "StrictHostKeyChecking=accept-new",
             "-o",
-            f"UserKnownHostsFile={run_dir / 'known_hosts'}",
+            f"UserKnownHostsFile={self.hosts / name}",
+            "-o",
+            "GlobalKnownHostsFile=/dev/null",
             "-o",
             "ConnectTimeout=20",
         ]
 
-    def _target(self, ip: str) -> str:
+    def _target(self, vm: dict) -> str:
+        ip = vm.get("ip")
         if not re.match(r"^\d{1,3}(\.\d{1,3}){3}$", ip or ""):
             raise TransferError(f"bad address {ip!r}")
         return f"user@{ip}"
@@ -854,32 +871,38 @@ class Ssh:
             status = "ok" if p.returncode == 0 else "error"
         return {"status": status, "exit": p.returncode, "output": text}
 
-    def run(self, ip: str, words: list[str], timeout: float) -> dict:
+    def run(self, vm: dict, words: list[str], timeout: float) -> dict:
         cmd = [
             "ssh",
-            *self.opts,
-            self._target(ip),
+            *self._opts(vm),
+            self._target(vm),
             " ".join(shlex.quote(w) for w in words),
         ]
         return self._call(cmd, timeout)
 
-    def push(self, ip: str, local: Path, remote_name: str, timeout: float) -> None:
+    def push(self, vm: dict, local: Path, remote_name: str, timeout: float) -> None:
         if not TOKEN_RE.match(remote_name.replace(".", "_").replace("-", "_")):
             raise TransferError(f"bad remote name {remote_name!r}")
         r = self._call(
-            ["scp", "-q", *self.opts, str(local), f"{self._target(ip)}:{remote_name}"],
+            [
+                "scp",
+                "-q",
+                *self._opts(vm),
+                str(local),
+                f"{self._target(vm)}:{remote_name}",
+            ],
             timeout,
         )
         if r["status"] != "ok":
             raise TransferError(f"scp {r['status']} (exit {r['exit']})")
 
-    def fetch(self, ip: str, path: str, max_bytes: int, timeout: float) -> bytes:
+    def fetch(self, vm: dict, path: str, max_bytes: int, timeout: float) -> bytes:
         """At most max_bytes from `cat -- path` on the VM; more is an error,
         and the transfer is cut at max_bytes + 1."""
         import select
         import signal
 
-        cmd = ["ssh", *self.opts, self._target(ip), "cat -- " + shlex.quote(path)]
+        cmd = ["ssh", *self._opts(vm), self._target(vm), "cat -- " + shlex.quote(path)]
         p = subprocess.Popen(
             cmd,
             stdin=subprocess.DEVNULL,
@@ -918,6 +941,19 @@ class Ssh:
 
 
 # ------------------------------------------------------------------ the driver
+
+
+# What an unreachable VM's last ssh attempt said, for the ledger: the last
+# SSH_DETAIL bytes, printable ASCII, with key material removed (fingerprints,
+# and any long base64 run such as a key line)
+SSH_DETAIL = 2048
+_KEYISH = re.compile(r"(SHA256|MD5):[A-Za-z0-9+/=:]+|[A-Za-z0-9+/=]{32,}")
+
+
+def ssh_detail(text: str) -> str:
+    text = _KEYISH.sub("[key]", text or "")
+    text = "".join(c if c == "\n" or " " <= c <= "~" else "?" for c in text)
+    return text[-SSH_DETAIL:]
 
 
 def point_sizes(plan: dict) -> dict:
@@ -1224,19 +1260,22 @@ class Driver:
             return True
 
     # -- per VM
-    def wait_ssh(self, vm: dict) -> bool:
-        """Whether the VM answers ssh (`true`) within SSH_READY_S."""
-        deadline = self.clock() + SSH_READY_S
+    def wait_ssh(self, vm: dict) -> tuple[bool, str]:
+        """Whether the VM answers ssh (`true`) within SSH_READY_S, and the
+        last attempt's output (scrubbed: see ssh_detail)."""
+        deadline, last = self.clock() + SSH_READY_S, ""
         while not self.stop.is_set():
             try:
-                if self.remote.run(vm["ip"], ["true"], 30)["status"] == "ok":
-                    return True
-            except TransferError:
-                pass
+                r = self.remote.run(vm, ["true"], 30)
+                if r["status"] == "ok":
+                    return True, ""
+                last = f"{r['status']} (exit {r.get('exit')}): {r.get('output') or ''}"
+            except TransferError as e:
+                last = str(e)
             if self.clock() > deadline:
-                return False
+                return False, ssh_detail(last)
             self.sleep(self.poll_s)
-        return False
+        return False, ssh_detail(last)
 
     def setup(self, vm: dict) -> str:
         """The payload and the build, once per VM; its wall time goes in the
@@ -1246,7 +1285,8 @@ class Driver:
         retires that VM."""
         t0 = self.clock()
         want = self.plan["archive_sha256"]
-        if not self.wait_ssh(vm):
+        up, detail = self.wait_ssh(vm)
+        if not up:
             self.ledger.append(
                 {
                     "ev": "build",
@@ -1254,6 +1294,7 @@ class Driver:
                     "seconds": round(self.clock() - t0, 1),
                     "ok": False,
                     "why": "unreachable",
+                    "ssh": detail,
                 }
             )
             return "unreachable"
@@ -1263,8 +1304,8 @@ class Driver:
             # the VM after it, before anything is extracted)
             if hashlib.sha256(self.archive.read_bytes()).hexdigest() != want:
                 raise Fatal("payload.tar changed after its approval")
-            self.remote.push(vm["ip"], self.archive, "payload.tar", 600)
-            r = self.remote.run(vm["ip"], ["sha256sum", "--", "payload.tar"], 300)
+            self.remote.push(vm, self.archive, "payload.tar", 600)
+            r = self.remote.run(vm, ["sha256sum", "--", "payload.tar"], 300)
             got = (r.get("output") or "").split()[:1]
             if r["status"] == "ok" and got != [want]:
                 raise Fatal(
@@ -1273,7 +1314,7 @@ class Driver:
             if r["status"] != "ok":
                 raise TransferError(f"sha256sum {r['status']}")
             r = self.remote.run(
-                vm["ip"],
+                vm,
                 [
                     "bash",
                     "-c",
@@ -1310,7 +1351,7 @@ class Driver:
         tk = vm["type"]
         timeout = expected_seconds(key) * 12 + 600
         r = self.remote.run(
-            vm["ip"],
+            vm,
             [
                 "bash",
                 "sb/bench/core/cgroup-setup.sh",
@@ -1336,9 +1377,9 @@ class Driver:
         name = f"out/rows/{row}-{size}.json"
         for attempt in range(TRANSFER_TRIES):
             try:
-                data = self.remote.fetch(vm["ip"], name, MAX_ROW, TRANSFER_TIMEOUT)
+                data = self.remote.fetch(vm, name, MAX_ROW, TRANSFER_TIMEOUT)
                 side = self.remote.fetch(
-                    vm["ip"], name + ".sha256", MAX_SIDECAR, TRANSFER_TIMEOUT
+                    vm, name + ".sha256", MAX_SIDECAR, TRANSFER_TIMEOUT
                 )
                 break
             except TransferError:
