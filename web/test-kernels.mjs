@@ -71,9 +71,12 @@ try {
   ok((await ev("window.__c.trim()")) === "False", "the console does not see the notebook's variables");
   await setRun(1, "print('scratch' in globals())");
   ok((await ev(out(1))) === "False", "the notebook does not see the console's variables");
-  // a reload: outputs loaded from storage are stale
+  // a reload: outputs loaded from storage are stale (once they are saved: a save still waiting asks the browser to
+  // confirm leaving; and the old page marked, so what is waited for is the new page's, never the old one's)
+  await ev("sagebrush.notebook.saved().then(() => true)");
+  await ev("(window.__old = 1, 1)");
   await send("Page.reload");
-  await until(ready);
+  await until(`!window.__old && ${ready}`);
   await until(`sagebrush.notebook.cells().length >= 2`, 10000);
   ok((await ev(stale(0))) && (await ev(out(0))) === "42", "after a reload, the outputs are shown, stale");
 } catch (e) {

@@ -990,8 +990,11 @@ try {
   const WS = "window.__ws9";
   const grabWs = () => evaluate(`(window.__ws9 = ${T}.opts.host.ws, !!window.__ws9?.termKept)`);
   const reopen9 = async () => {
+    // (the old page marked first, so what is waited for is the new page's, never the old one's still showing: a page
+    // with a notebook save running is navigated away from a moment later)
+    await evaluate("(window.__old = 1, 1)");
     await send("Page.reload", {});
-    await until(`(() => { const b = document.querySelector("#termbtn"); return !!b && !b.hidden && !!window.sagebrush?.workspace; })()`, 30000);
+    await until(`(() => { const b = document.querySelector("#termbtn"); return !window.__old && !!b && !b.hidden && !!window.sagebrush?.workspace; })()`, 30000);
     await evaluate(`document.querySelector("#termbtn").click()`);
     await until(`!!document.querySelector(".sb-term") && !document.querySelector(".sb-term").hidden && !!${T} && !document.querySelector(".sb-term-loading")`, 30000);
     await evaluate(HELPERS);

@@ -58,6 +58,10 @@ export const isLocal = (name: string): boolean => name === "__" || (name.startsW
 /** IPython's output names: `_`, `__` and `___`, the last three values shown, and `_N`, the one shown at count N. Read in
  * a cell that doesn't bind them, they are the interpreter's (the history the notebook keeps), never the cell's own. */
 export const isOutputName = (name: string): boolean => /^(_{1,3}|_[0-9]+)$/.test(name);
+/** The output names a reactive notebook follows: `_`, `__` and `___`, the values shown by the 1st, 2nd and 3rd
+ * nearest cells above that showed one. (`_N` is IPython's fixed history: the value shown at count N, which no later
+ * run changes.) */
+export const OUTPUT_NAMES: string[] = ["_", "__", "___"];
 
 // (names to show in the message's example, for the modules people star-import most)
 const STAR_EXAMPLES: Record<string, [string, string]> = {
@@ -105,6 +109,11 @@ export interface CellAnalysis {
    * out another cell's x (ours: marimo counts x as local to the handler)
    */
   unbinds?: Set<string>;
+  /**
+   * the output names (`_`, `__`, `___`: OUTPUT_NAMES) it reads without binding them: in a reactive notebook, the
+   * values shown by the cells above it (ours; src/notebook-graph.ts gives the edges)
+   */
+  outputs?: Set<string>;
 }
 
 const clone = (x: any): any =>
@@ -114,6 +123,8 @@ class Visitor {
   blocks: Block[] = [new Block()];
   obscured: (string | null)[] = [];
   refs = new Map<string, RefData[]>();
+  /** the output names read and not bound (OUTPUT_NAMES): the interpreter's */
+  outputReads = new Set<string>();
   constructor(public id: string, public strict = false) {}
 
   mangle(name: string, ignoreScope = false): string {
@@ -383,7 +394,9 @@ class Visitor {
       node.id = this.mangle(node.id);
       this.define(node.id, "variable");
     } else if (ctx === "Load" && !this.isDefined(node.id) && !isLocal(node.id)) {
-      this.addRef(node.id, false);
+      // (`___`, not private by marimo's rule: an output name, the interpreter's, never a reference)
+      if (node.id === "___") this.outputReads.add(node.id);
+      else this.addRef(node.id, false);
     } else if (ctx === "Del" && !this.isDefined(node.id) && !isLocal(node.id)) {
       this.addRef(node.id, true);
     } else if (!this.strict && ctx === "Del" && this.blocks[this.blocks.length - 1].scope === Scope.Class && !this.blocks[this.blocks.length - 1].outside) {
@@ -397,6 +410,7 @@ class Visitor {
         const b = this.blocks[i];
         if (i === 0) {
           if (b.defs.has(mangled) || (!b.defs.has(node.id) && !isOutputName(node.id))) node.id = mangled;
+          else if (ctx === "Load" && !b.defs.has(node.id) && OUTPUT_NAMES.includes(node.id)) this.outputReads.add(node.id);
         } else if (b.defs.has(node.id)) break;
       }
     }
@@ -520,6 +534,8 @@ export function analyzeCell(source: string, cellId = "c", opts: { mode?: Documen
     mutations: new Set([...mutated(tree)].filter((n) => refs.has(n) && !defs.has(n))),
     imports: new Map([...v.imported].filter((e): e is [string, string] => e[1] !== null && defs.has(e[0]))),
     unbinds: new Set([...handlers].filter((n) => !defs.has(n) && !isLocal(n))),
+    // (Python and Sage: the languages with IPython's output names; MATLAB's and Magma's translations have none)
+    outputs: ipython ? new Set(OUTPUT_NAMES.filter((n) => v.outputReads.has(n))) : new Set<string>(),
   };
 }
 

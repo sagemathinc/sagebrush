@@ -22,18 +22,40 @@ const profile = mkdtempSync(join(tmpdir(), "sb-pwa-"));
 let cdpPort = Number(process.env.CDP_PORT) || 0;
 const chrome = spawn(process.env.CHROME ?? "chromium", ["--headless", "--no-sandbox", `--remote-debugging-port=${cdpPort}`, `--user-data-dir=${profile}`, "about:blank"], { stdio: "ignore" });
 if (!cdpPort) cdpPort = await devtoolsPort(profile);
-const cleanup = () => { chrome.kill(); server.kill(); };
+let ending = false;
+const cleanup = () => { ending = true; chrome.kill(); server.kill(); };
+// (the browser gone before the end (it exited, or its DevTools connection closed): said, with its exit code, and the
+// run ended, rather than a request left waiting until the process gives up on it)
+chrome.on("exit", (code, signal) => { if (ending) return; console.log(`FAIL the browser exited (${code ?? signal})`); cleanup(); process.exit(1); });
 process.on("uncaughtException", (e) => { console.log("FAIL " + (e?.stack ?? e)); cleanup(); process.exit(1); });
 let targets;
 for (let i = 0; i < 300; i++) { try { targets = await (await fetch(`http://127.0.0.1:${cdpPort}/json`)).json(); break; } catch { await sleep(100); } }
 const ws = new WebSocket(targets.find((t) => t.type === "page").webSocketDebuggerUrl);
 await new Promise((r) => (ws.onopen = r));
+ws.onclose = (e) => { if (ending) return; console.log(`FAIL the DevTools connection closed (${e.code})`); cleanup(); process.exit(1); };
 let n = 0; const waiting = new Map();
-ws.onmessage = (ev) => { const m = JSON.parse(ev.data); if (m.id && waiting.has(m.id)) { waiting.get(m.id)(m.result ?? m.error); waiting.delete(m.id); } };
+// (a leave prompt at a reload: the notebook asks the browser to confirm leaving only while a save is waiting or
+// running, and every reload here waits for its saves first (reload(), below), as a person sees "saved" before leaving;
+// one anyway is a failure, said, and accepted, so the reload goes on and the run never hangs on it)
+ws.onmessage = (ev) => {
+  const m = JSON.parse(ev.data);
+  if (m.method === "Page.javascriptDialogOpening") {
+    ok(false, `a ${m.params.type} prompt at ${m.params.url}, with the notebook's saves settled`);
+    ws.send(JSON.stringify({ id: ++n, method: "Page.handleJavaScriptDialog", params: { accept: true } }));
+  }
+  if (m.id && waiting.has(m.id)) { waiting.get(m.id)(m.result ?? m.error); waiting.delete(m.id); }
+};
 const send = (method, params = {}) => new Promise((r) => { const id = ++n; waiting.set(id, r); ws.send(JSON.stringify({ id, method, params })); });
+await send("Page.enable");
 const ev = async (expression) => (await send("Runtime.evaluate", { expression, awaitPromise: true, returnByValue: true })).result?.value;
 const until = async (expr, ms = 30000) => { for (let i = 0; i < ms / 100; i++) { if (await ev(expr)) return true; await sleep(100); } return false; };
 const ready = () => until("document.querySelector('#status')?.textContent.startsWith('ready')");
+// (a reload once the notebook's saves are done: a run's output is saved half a second after it shows)
+const savesDone = () => ev("sagebrush.notebook.saved().then(() => true, () => false)");
+const reload = async () => {
+  if (!(await savesDone())) ok(false, "a save failed before reload");
+  await send("Page.reload", { ignoreCache: false });
+};
 async function runCode(code) {
   await ev(`(() => { const cs = [...document.querySelectorAll('.cell')]; let c = cs.at(-1); if (c.querySelector('textarea').value.trim()) { document.querySelector('#add').click(); c = [...document.querySelectorAll('.cell')].at(-1); } const ta = c.querySelector('textarea'); ta.value = ${JSON.stringify(code)}; ta.dispatchEvent(new Event('input', {bubbles: true})); c.querySelector('[data-a=run]').click(); })()`);
   const last = "[...document.querySelectorAll('.cell')].filter(c => c.querySelector('textarea').value.trim()).at(-1)";
@@ -59,7 +81,7 @@ const kept = (match) => ev(`(async () => { for (const name of await caches.keys(
 ok(!(await kept("sagebrush-engine.wasm")) && !(await kept("docs-index")) && !(await kept("/lib/")), "installing keeps neither the engine, the documentation indexes nor the library's chunks");
 // a page the service worker controls (its worker too): the engine and Python's
 // documentation index, used online, are kept
-await send("Page.reload", { ignoreCache: false });
+await reload();
 await sleep(1000);
 await ready();
 out = await runCode("from sage_all import factor\nprint(factor(2**64 + 1))");
@@ -86,7 +108,7 @@ const poison = (match, body) => ev(`(async () => {
 })()`);
 ok(await poison("/lib/core.pre.", `async (res) => { const p = await res.json(); p.modules["py|fractions"].code = "(function module$$($g, R) { $g.POISONED = 'cache-poison-ran'; })"; return JSON.stringify(p); }`), "(the kept copy of the library's compiled core rewritten)");
 ok(await poison("sagebrush-engine.wasm?h=", `async (res) => new Uint8Array(await res.arrayBuffer()).map((b, i) => (i > 1000 && i < 2000 ? 0 : b))`), "(the engine's kept copy rewritten)");
-await send("Page.reload", { ignoreCache: false });
+await reload();
 await sleep(1000);
 await ready();
 out = await runCode("import fractions\nprint(getattr(fractions, 'POISONED', 'clean'))\nfrom sage_all import factor\nprint(factor(2**64 + 1))");
@@ -98,7 +120,7 @@ ok(await ev(`fetch("/", { cache: "no-store" }).then((r) => r.status === 200 && /
 server.kill();
 await sleep(500);
 ok((await fetch(url).then(() => "up", () => "down")) === "down", "the server is stopped");
-await send("Page.reload", { ignoreCache: false });
+await reload();
 await sleep(1500);
 ok(await ready(), "offline, the notebook loads: " + (await ev("document.querySelector('#status')?.textContent")));
 ok(await ev("crossOriginIsolated"), "offline, the page is still cross-origin isolated (Stop keeps variables)");
@@ -118,7 +140,7 @@ ok(await ev(`fetch("docs-index-python.json").then((r) => r.ok, () => false)`), "
 ok(await ev(`fetch("docs-index-magma.json").then(() => "served", () => "refused")`) === "refused", "offline, a documentation index never used is not there (a fetch error, as for any file offline)");
 // offline, a rewritten worker is not served (it would run without the server to correct it)
 ok(await poison("sagebrush-worker.js", `async () => 'postMessage({ ready: true, version: "POISONED", interrupt: null, seeded: false, startup: [] })'`), "(the worker's kept copy rewritten)");
-await send("Page.reload", { ignoreCache: false });
+await reload();
 await sleep(3000);
 const status = await ev("document.querySelector('#status')?.textContent");
 ok(!/POISONED/.test(status), "offline, a rewritten worker never runs (the browser's own HTTP cache, which no script can write, may still start the real one): " + JSON.stringify(status));
@@ -217,6 +239,11 @@ ok(!/redirect-proof/.test(seen.went ?? "") && !/redirect-proof/.test(seen.href ?
 ok(await putPage({ headers: { "Content-Type": "text/html", Refresh: "0; url=/refresh-proof" } }), "(the page's kept copy: its bytes, with a Refresh)");
 seen = await openTab("/");
 ok(!/refresh-proof/.test(seen.went ?? "") && !/refresh-proof/.test(seen.href ?? "") && (!seen.loaded || seen.isolated), "offline, a kept Refresh is not followed (the page served with the build's headers only): " + JSON.stringify(seen));
-ws.close(); cleanup();
+// (the control for reload()'s check: a save that fails is seen as one, so a reload after it says "a save failed
+// before reload" rather than passing over it)
+await ev("(window.__saved = sagebrush.notebook.saved, sagebrush.notebook.saved = () => Promise.reject(new Error('refused for the test')), 1)");
+ok((await savesDone()) === false, "reload()'s check sees a failed save (it would say \"a save failed before reload\")");
+await ev("(sagebrush.notebook.saved = window.__saved, 1)");
+ending = true; ws.close(); cleanup();
 console.log(failures ? `${failures} failures` : "all passed");
 process.exit(failures ? 1 : 0);

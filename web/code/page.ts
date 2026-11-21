@@ -281,7 +281,8 @@ export async function mount(root: HTMLElement, host: Host): Promise<void> {
     "c-new": async () => { const p = await free("/", "Untitled", ".ipynb"); if (!p) return say("No free name for a new notebook"); await flush(); const e = await ws.createByPerson(p, { mode: "python" }); location.assign("/?nb=" + encodeURIComponent(e.ref!)); },
     "c-newboard": async () => { await flush(); location.assign("/board/?new=python"); },
     "c-newfolder": async () => { const n = prompt("A new folder, at the top of your files: its name", "New folder"); if (n?.trim()) await ws.mkdir("/" + safeName(n.trim())); },
-    "c-examples": async () => { if (!(await host.examples())) location.assign("/"); },
+    // (the gallery's panel, the only list of examples; where this page can't reach it, said)
+    "c-examples": async () => { if (!(await host.examples())) say("The examples aren't available here."); },
     "c-open": () => host.openFiles(),
     "c-copy": async () => { await flush(); const e = await saveCopy(mode === "edit" ? ta.value : text); if (e) host.open(e, "here"); },
     "c-rename": async () => {
