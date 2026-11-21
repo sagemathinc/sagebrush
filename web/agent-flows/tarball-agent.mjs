@@ -22,7 +22,7 @@ const LINK = /\?pair=([^&\s]+)&port=(\d+)/g;
 
 /**
  * Start the tarball's agent. Resolves once it has printed its first pairing link: `{ port, code, codes, latestCode,
- * nextCode, tasksHome, output, stop }`. `codes` holds every code printed, in order (a new one each time a page goes);
+ * nextCode, tasksHome, pause, resume, output, stop }`. `codes` holds every code printed, in order (a new one each time a page goes);
  * `nextCode(after)` waits for one after `after`.
  */
 export async function startTarballAgent({ tgz = process.env.SAGEBRUSH_AGENT_TGZ, sha256 = process.env.SAGEBRUSH_AGENT_TGZ_SHA256, origin, ms = 180_000 } = {}) {
@@ -49,7 +49,7 @@ export async function startTarballAgent({ tgz = process.env.SAGEBRUSH_AGENT_TGZ,
   let stopping = null;
   /** Stop the agent (SIGTERM to its group, SIGKILL after 2 s) and remove the temporary HOME. */
   const stop = () => stopping ??= (async () => {
-    try { process.kill(-child.pid, "SIGTERM"); } catch {}
+    try { process.kill(-child.pid, "SIGCONT"); process.kill(-child.pid, "SIGTERM"); } catch {}
     for (const t = Date.now(); exited === null && Date.now() - t < 2000; ) await sleep(50);
     killNow();
     process.off("exit", killNow);
@@ -70,6 +70,10 @@ export async function startTarballAgent({ tgz = process.env.SAGEBRUSH_AGENT_TGZ,
       throw new Error("the agent printed no new pairing link");
     },
     tasksHome,
+    /** The agent's whole process group stopped (SIGSTOP), and let go on (SIGCONT): a negative control's agent that
+     *  does nothing while no page is paired. */
+    pause: () => { try { process.kill(-child.pid, "SIGSTOP"); } catch {} },
+    resume: () => { try { process.kill(-child.pid, "SIGCONT"); } catch {} },
     output: () => ({ stdout: out, stderr: err }),
     stop,
   };

@@ -4,14 +4,19 @@
 //   0. Pair: the person asks for a notebook; the agent writes /notes/plot.ipynb, shown beside the chat;
 //   1. turns Delegate on (its confirmation);
 //   2. starts a task on that notebook (Delegate…, the sheet: the file open in the pane as its document);
-//   3. closes the page;
-//   4. the agent works on its own copy meanwhile: a closing Markdown cell added, then a proposal;
+//   3. closes the page while the task is still working (checked: its chip, and the agent's own task record);
+//   4. with no page paired, the agent finishes the task: its own record (task.json, under the agent's tasks home)
+//      reaches the proposal before anything is opened again;
 //   5. reopens the page, pairs again with the agent's fresh code, and turns Delegate on again (a new pairing starts
 //      with it off);
 //   6. sees the task's proposal: Proposal ready, the notebook changed, its diff with the added cell.
 // Merge (step 7) comes with the page's Merge.
+// DELEGATE_E2E_CONTROL=paused, a negative control: the agent is paused while no page is paired, so step 4 must FAIL
+// (the case then exits 1, saying so).
+//   (the agent's record: SAGEBRUSH_TASKS_HOME/.sagebrush/tasks/<task>/task.json, its status and proposals)
 //   SAGEBRUSH_AGENTS=1 bun web/build.ts && SAGEBRUSH_AGENT_TGZ=... SAGEBRUSH_AGENT_TGZ_SHA256=... \
 //     CHROME=chromium bun web/agent-flows/test-delegate-e2e.mjs        (SHOT_DIR=dir: a screenshot at each step)
+import { existsSync, readFileSync } from "node:fs";
 import { join } from "node:path";
 import { startSite, startChrome, sleep } from "./harness.mjs";
 import { startTarballAgent, pairTarballAgent } from "./tarball-agent.mjs";
@@ -19,6 +24,11 @@ import { startTarballAgent, pairTarballAgent } from "./tarball-agent.mjs";
 // (May run code off: with it on, a notebook the agent creates would run once by itself in the browser; not needed here)
 const GRANT = { folders: ["/"], write: true, run: false };
 const NOTEBOOK = "/notes/plot.ipynb", NOTE = "Done by the fake model, for this task.";
+const CONTROL = process.env.DELEGATE_E2E_CONTROL === "paused";
+// (how long the agent has, with no page, to reach the proposal: its fake model waits 3 s, then works)
+const UNPAIRED_MS = CONTROL ? 20_000 : 60_000;
+/** The agent's own record of a task (task.json), as it keeps it on disk; null until it exists. */
+const record = (agent, task) => { const f = join(agent.tasksHome, ".sagebrush", "tasks", task, "task.json"); try { return existsSync(f) ? JSON.parse(readFileSync(f, "utf8")) : null; } catch { return null; } };
 let failures = 0;
 const ok = (c, msg, detail) => { console.log((c ? "ok   " : "FAIL ") + msg + (!c && detail !== undefined ? "  " + JSON.stringify(detail).slice(0, 600) : "")); if (!c) failures++; };
 
@@ -69,15 +79,29 @@ try {
   await page.ev(`(document.querySelector("dialog.sheet[open] button[type=submit]").click(), true)`);
   await must(`!document.querySelector("dialog.sheet[open]") && document.querySelector("#task-view h2")?.textContent === "A closing note"`, "the started task's view");
   const task = await page.ev(`document.querySelector("#tasks .task.on")?.dataset.task ?? null`);
-  ok(/^[0-9a-f]{32}$/.test(task ?? "") && ["Working", "Proposal ready"].includes(await page.ev(`document.querySelector("#tasks .task.on .chip").textContent`)), "2. a task started on " + NOTEBOOK + ": its view shown, listed with its chip", { task });
+  ok(/^[0-9a-f]{32}$/.test(task ?? ""), "2. a task started on " + NOTEBOOK + ": its view shown, listed", { task });
   await shot("2-started");
 
-  // ---- 3. the page closed (the agent goes on by itself)
+  // ---- 3. the page closed while the task still works (its chip, and the agent's own record)
+  const chip0 = await page.ev(`document.querySelector("#tasks .task.on .chip").textContent`), rec0 = record(agent, task);
+  ok(chip0 === "Working" && rec0?.status === "working" && (rec0.proposals ?? []).length === 0, "3. before the page closes the task is still working: chip Working, the agent's record working with no proposal", { chip0, status: rec0?.status, proposals: rec0?.proposals });
   const code = agent.latestCode();
   await page.navigate("about:blank");
-  ok(true, "3. the page closed");
+  if (CONTROL) agent.pause();
+  ok(true, "3. the page closed" + (CONTROL ? " (control: the agent paused while no page is paired)" : ""));
 
-  // ---- 4 and 5. reopened, paired again with the fresh code, Delegate on again
+  // ---- 4. no page paired: the agent's own record reaches the proposal
+  let rec = null;
+  for (const t = Date.now(); Date.now() - t < UNPAIRED_MS; await sleep(250)) {
+    rec = record(agent, task);
+    if (rec?.status === "proposal" && (rec.proposals ?? []).length > 0) break;
+  }
+  const done = rec?.status === "proposal" && (rec.proposals ?? []).length > 0;
+  if (CONTROL) agent.resume();
+  if (!done) throw new Error(`4. with no page paired, the task didn't reach its proposal in ${UNPAIRED_MS / 1000} s (the agent's record: ${JSON.stringify({ status: rec?.status, proposals: rec?.proposals?.length })})` + (CONTROL ? " (as the paused control must)" : ""));
+  ok(true, "4. with no page paired, the agent finished the task: its own record says proposal, with its commit, before the page reopens");
+
+  // ---- 5. reopened, paired again with the fresh code, Delegate on again
   await agent.nextCode(code);
   await pairTarballAgent(page, site, agent, GRANT);
   await must(`document.querySelector("#connect")?.textContent === "Connected"`, "connected again");
@@ -87,8 +111,8 @@ try {
   // ---- 6. the proposal
   const chipJs = `document.querySelector('#tasks .task[data-task="${task}"] .chip')`;
   await must(`!!${chipJs}`, "the task in the list again");
-  await must(`${chipJs}.textContent === "Proposal ready"`, "the task's proposal (the agent worked while the page was closed)", 90000);
-  ok(true, "4. the agent worked with the page closed: the task's chip says Proposal ready");
+  await must(`${chipJs}.textContent === "Proposal ready"`, "the task's chip, Proposal ready", 30000);
+  ok(true, "6. reopened: the task's chip says Proposal ready");
   await page.ev(`(document.querySelector('#tasks .task[data-task="${task}"]').click(), true)`);
   await must(`!!document.querySelector("#task-view .proposal-card")`, "the proposal's card");
   const card = await page.ev(`document.querySelector("#task-view .proposal-card").textContent`);
@@ -112,5 +136,5 @@ try {
   await page?.close().catch(() => {});
   site.close();
 }
-console.log(failures ? `${failures} FAILED` : "all passed");
+console.log(failures ? `${failures} FAILED` + (CONTROL ? " (the paused control: expected)" : "") : "all passed");
 process.exit(failures ? 1 : 0);
