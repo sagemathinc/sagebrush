@@ -7,8 +7,8 @@
 // rejected with "timeout" if no answer comes within its time: a bound on waiting, not a promise that the agent answers.
 // Every pending one ends with the pairing. Its own module, so the pages that don't offer Delegate (the LaTeX editor's
 // pairing) carry none of it.
-// Not here: the grant's delegate:true (the Agents page's switch: checked by the page from UI-3 on, and by the agent
-// always), and §2.5's schema of each result, which every caller checks before any use.
+// The grant's delegate:true (the Agents page's switch, AgentPairing.setDelegate) is checked here before each request,
+// and by the agent always. Not here: §2.5's schema of each result, which every caller checks before any use.
 import { AgentError, type AgentPairing } from "./agent-pair";
 
 export const DELEGATE_FEATURE = "delegate.1";
@@ -49,6 +49,7 @@ export class TaskClient {
     if (this.p.link) return no("unavailable", "Delegate works only with an agent on this computer for now");
     if (this.p.state !== "granted") return no("closed", "the agent isn't connected");
     if (!this.offered()) return no("forbidden", "this agent doesn't offer Delegate");
+    if (this.p.grant?.delegate !== true) return no("forbidden", "Delegate tasks aren't turned on for this agent");
     if (!TASK_METHODS.includes(method)) return no("bad_request", "not a Delegate request");
     if (this.pending.size >= TASK_REQUESTS.pending) return no("busy", "too many requests to the agent at once");
     const id = "p" + ++this.next;

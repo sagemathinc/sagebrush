@@ -197,6 +197,9 @@ export class AgentError extends Error {
 
 /** The pairing.  `verbsFor(actor)` gives the workspace's verbs credited to `actor` (Workspace.forAgent). */
 // (what is said when the grant changed under a call: nothing of what it read, and, for a change, no claim either way)
+/** A grant as the server is told it (grant.changed): `delegate` only when on, so an agent that doesn't know it reads
+ * the same grant as before. */
+const changed = (g: Grant) => ({ id: g.id, agent: g.agent, client: g.client, folders: g.folders, write: g.write, run: g.run, expires: g.expires, ...(g.delegate ? { delegate: true } : {}) });
 export const CHANGED_WHILE_RUNNING = "the grant changed or expired while this ran: nothing of it is said (a change may or may not have been made)";
 
 export class AgentPairing {
@@ -361,7 +364,8 @@ export class AgentPairing {
     if (this.state !== "paired" && this.state !== "granted") throw new AgentError("invalid", "not paired");
     const h = this.hello!, now = this.now();
     const id = typeof g.id === "string" && GRANT_ID.test(g.id) ? g.id : this.grant?.id ?? newGrantId();
-    const grant: Grant = { id, agent: h.agent.name, client: h.agent.client, folders: grantFolders(g.folders), write: !!g.write, run: g.run === true, expires: g.expires, created: this.grant?.created ?? now, lastUsed: now };
+    // (the Delegate switch is apart from Pair's grant (§6.2): a new grant from the person keeps it as it was)
+    const grant: Grant = { id, agent: h.agent.name, client: h.agent.client, folders: grantFolders(g.folders), write: !!g.write, run: g.run === true, expires: g.expires, ...(this.grant?.delegate ? { delegate: true as const } : {}), created: this.grant?.created ?? now, lastUsed: now };
     this.grant = grant;
     this.remember = remember;
     this.verbs = this.opts.verbsFor(actorOf(h.agent.name, h.agent.client), { owner: () => grant.id });
@@ -369,7 +373,7 @@ export class AgentPairing {
     //  doesn't know it ignores, §1 rule 4)
     // (permission.digest: every Allow carries the digest of the action shown, from any page that pairs)
     this.send({ jsonrpc: "2.0", method: "page.features", params: { features: [...(this.opts.notebookEdit ? ["notebook.edit", "edit.turn"] : []), "permission.digest", ...(this.opts.runVerbs ? ["run.context"] : []), ...(this.opts.egressTurn ? ["egress.turn"] : [])] } });
-    this.send({ jsonrpc: "2.0", method: "grant.changed", params: { id: grant.id, agent: grant.agent, client: grant.client, folders: grant.folders, write: grant.write, run: grant.run, expires: grant.expires } });
+    this.send({ jsonrpc: "2.0", method: "grant.changed", params: changed(grant) });
     await this.keep();
     // (S4: while it waited, the grant may have been revoked, the pairing closed or the grant replaced: then nothing
     //  of this allow() goes on, no record, no timer, no "granted")
@@ -385,7 +389,10 @@ export class AgentPairing {
     // (only a remembered grant outlives the page: "until this page closes" is never kept. The session kept is the one in
     //  force: the hello's after a code, the remembered one after a reconnect, whose hello carries none; the hello's alone
     //  lost it on the first reconnect, and the next had nothing to send (T1, found by git-proto at b72938d8a))
-    if (this.remember && this.grant.expires !== null) await this.opts.store.putAgentGrant(this.pairingId, { grant: this.grant, session: this.sessionSecret, port: this.port } satisfies Kept);
+    if (this.remember && this.grant.expires !== null) {
+      const { delegate: _, ...grant } = this.grant;
+      await this.opts.store.putAgentGrant(this.pairingId, { grant, session: this.sessionSecret, port: this.port } satisfies Kept);
+    }
   }
 
   /** The reload record (A14): written for an unremembered grant only (a remembered one is kept in IndexedDB, above),
@@ -413,10 +420,26 @@ export class AgentPairing {
     const next: Grant = { ...g, run: false };
     this.grant = next;
     this.verbs = this.opts.verbsFor(actorOf(this.hello!.agent.name, this.hello!.agent.client), { owner: () => next.id });
-    this.send({ jsonrpc: "2.0", method: "grant.changed", params: { id: next.id, agent: next.agent, client: next.client, folders: next.folders, write: next.write, run: false, expires: next.expires } });
+    this.send({ jsonrpc: "2.0", method: "grant.changed", params: changed(next) });
     this.emit();
     await this.keep();
     if (this.grant === next) this.keepForReload();
+  }
+
+  /** The Delegate switch (§6.2), turned on or off by the person: the grant in force replaced by the same one with or
+   * without `delegate: true`, told to the server at once (whose every tasks.* call checks it; off stops the tasks'
+   * turns there). On only for an agent on this computer whose hello offers delegate.1. False if nothing was sent. */
+  setDelegate(on: boolean): boolean {
+    const g = this.grant;
+    if (this.state !== "granted" || !g || !!g.delegate === on) return false;
+    if (on && (this.link || !this.hello?.features?.includes("delegate.1"))) return false;
+    const { delegate: _, ...rest } = g;
+    const next: Grant = on ? { ...rest, delegate: true } : rest;
+    this.grant = next;
+    this.verbs = this.opts.verbsFor(actorOf(this.hello!.agent.name, this.hello!.agent.client), { owner: () => next.id });
+    this.send({ jsonrpc: "2.0", method: "grant.changed", params: changed(next) });
+    this.emit();
+    return true;
   }
 
   /** Dropped: the socket closed and nothing else (no grant change sent, nothing forgotten): an attempt another pairing

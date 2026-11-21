@@ -1135,6 +1135,8 @@ console.log(failures ? `${failures} failed` : "all passed");
     await P.paired();
     await P.allow({ folders: ["/"], write: true, expires: null }, false);
     ok((await why(TaskClient.of(P).request("tasks.list", {}))) === "forbidden" && heard.length === 0 && !(P.hello.features ?? []).includes(DELEGATE_FEATURE), "an agent whose negotiated hello doesn't list delegate.1: refused (forbidden), nothing sent");
+    const grants = S.got.filter((m) => m.method === "grant.changed").length;
+    ok(P.setDelegate(true) === false && !P.grant.delegate && S.got.filter((m) => m.method === "grant.changed").length === grants, "the Delegate switch for an agent that doesn't offer delegate.1: not turned on, nothing sent");
     await P.revoke();
     S.srv.stop(true);
   }
@@ -1146,7 +1148,23 @@ console.log(failures ? `${failures} failed` : "all passed");
   await P.paired();
   ok(P.hello.features.includes(DELEGATE_FEATURE) && TaskClient.of(P).offered(), "a hello that lists delegate.1 keeps it through the page's negotiation (FEATURES), and the client sees it offered", P.hello.features);
   ok((await why(TaskClient.of(P).request("tasks.list", {}))) === "closed" && heard.length === 0, "before the grant: refused (closed), nothing sent");
-  await P.allow({ folders: ["/"], write: true, expires: null }, false);
+  await P.allow({ folders: ["/"], write: true, run: true, expires: Date.now() + 3600_000 }, true);
+  // (the Delegate switch, AgentPairing.setDelegate: off until the person turns it on, apart from Pair's grant)
+  const grantsSent = () => S.got.filter((m) => m.method === "grant.changed").map((m) => m.params);
+  await until(() => grantsSent().length > 0);
+  ok((await why(TaskClient.of(P).request("tasks.list", {}))) === "forbidden" && heard.length === 0 && !("delegate" in grantsSent().at(-1)), "granted, the switch off: refused (forbidden), nothing sent; the grant sent has no delegate");
+  ok(P.setDelegate(true) === true && P.grant.delegate === true, "the switch turned on");
+  await until(() => grantsSent().at(-1)?.delegate === true);
+  ok(grantsSent().at(-1).delegate === true && grantsSent().at(-1).folders.join() === "/" && grantsSent().at(-1).run === true, "on: the server told at once, the same grant with delegate: true", grantsSent().at(-1));
+  ok(P.setDelegate(true) === false, "turning it on again: nothing sent");
+  await P.allow({ folders: ["/A"], write: true, run: true, expires: Date.now() + 3600_000 }, true);
+  await until(() => grantsSent().at(-1)?.folders?.join() === "/A");
+  ok(grantsSent().at(-1).delegate === true && P.grant.delegate === true, "a new Pair grant from the person keeps the switch as it was", grantsSent().at(-1));
+  await P.noRun();
+  await until(() => grantsSent().at(-1)?.run === false);
+  ok(grantsSent().at(-1).delegate === true, "May run code turned off: the switch kept", grantsSent().at(-1));
+  const kept = [...W.store.values()].at(-1);
+  ok(kept && kept.grant.folders.join() === "/A" && !("delegate" in kept.grant), "a remembered grant is kept without the switch: a new pairing starts with it off", kept?.grant);
   const r1 = await TaskClient.of(P).request("tasks.list", {});
   const r2 = await TaskClient.of(P).request("tasks.get", { task: "a".repeat(32), after: 0 });
   ok(r1?.echo === "tasks.list" && r2?.echo === "tasks.get" && heard.map((m) => m.id).join() === "p2,p3", "negotiated delegate.1, granted: answered by id, the page's ids p2, p3, ... (the hello was p1)", heard.map((m) => m.id));
@@ -1182,6 +1200,15 @@ console.log(failures ? `${failures} failed` : "all passed");
   sendSized(L + 40, { error: true, ch: "é" });
   ok((await why(TaskClient.of(P).request("tasks.list", {}))) === "too_large", "an error over 4 MiB in UTF-8 (é): refused (too_large)");
   ok(P.state === "granted", "after the over-limit answers the pairing is still up (its own 12 MiB frames unchanged)");
+  // (the switch turned off: the server told at once, the grant without delegate; every request refused, nothing sent)
+  {
+    const n = heard.length;
+    ok(P.setDelegate(false) === true && !("delegate" in P.grant), "the switch turned off");
+    await until(() => !("delegate" in grantsSent().at(-1)));
+    ok(!("delegate" in grantsSent().at(-1)) && grantsSent().at(-1).folders.join() === "/A", "off: the server told at once, the same grant without delegate", grantsSent().at(-1));
+    ok((await why(TaskClient.of(P).request("tasks.list", {}))) === "forbidden" && heard.length === n, "off: a request is refused (forbidden), nothing sent");
+    ok(P.setDelegate(true) === true, "and on again");
+  }
   // (the limit: at most TASK_REQUESTS.pending at once; unanswered ones end with the pairing)
   answer = () => {};
   const before = heard.length;
@@ -1204,6 +1231,7 @@ console.log(failures ? `${failures} failed` : "all passed");
     const P2 = mk(S2, W2);
     await P2.paired();
     await P2.allow({ folders: ["/"], write: true, expires: null }, false);
+    P2.setDelegate(true);
     let code = null;
     try { await TaskClient.of(P2).request("tasks.list", {}, { timeoutMs: 150 }); } catch (e) { code = e.code; }
     late?.();
