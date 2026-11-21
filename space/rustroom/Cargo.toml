@@ -1,0 +1,24 @@
+# The whitespace's Rust parser (space/src/rsroom.js): syn, Rust's own parser, compiled to WebAssembly, giving a file's
+# outline as JSON.  Built by space/build.mjs (cargo build --release --target wasm32-unknown-unknown --offline).
+[package]
+name = "rustroom"
+version = "0.1.0"
+edition = "2021"
+publish = false
+
+[lib]
+crate-type = ["cdylib"]
+path = "src/lib.rs"
+
+[dependencies]
+syn = { version = "2", default-features = false, features = ["full", "parsing", "printing", "visit"] }
+proc-macro2 = { version = "1", default-features = false, features = ["span-locations"] }
+
+[profile.release]
+opt-level = "z"
+lto = true
+codegen-units = 1
+panic = "abort"
+strip = true
+
+[workspace]

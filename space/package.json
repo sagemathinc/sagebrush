@@ -10,6 +10,7 @@
     "start": "node build.mjs && node serve.mjs"
   },
   "dependencies": {
+    "@babel/parser": "8.1.3",
     "highlight.js": "11.12.0",
     "marked": "18.2.1",
     "three": "0.187.0"

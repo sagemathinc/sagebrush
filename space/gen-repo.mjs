@@ -6,6 +6,7 @@ import { execFileSync } from "node:child_process";
 import { writeFileSync } from "node:fs";
 import { dirname, join, posix } from "node:path";
 import { fileURLToPath } from "node:url";
+import { resolveRust } from "./src/rsroom.js";
 
 const here = dirname(fileURLToPath(import.meta.url));
 const repo = join(here, "..");
@@ -55,6 +56,7 @@ const pyModule = (from, mod) => {
 const PYIMP = /^[ \t]*(?:from[ \t]+(\.*[\w.]*)[ \t]+import[ \t]+(?:\(([^)]*)\)|([\w., \t*]+))|import[ \t]+([\w., \t]+))/gm;
 const JSIMP = /(?:import|export)\s[^;"'`]*?from\s*["']([^"']+)["']|import\s*\(\s*["']([^"']+)["']\s*\)|import\s+["']([^"']+)["']/g;
 const imports = new Set();
+const pathTree = { files: entries.map((x) => [x.path]) }; // (for resolveRust)
 entries.forEach((e, k) => {
   const t = texts[k];
   const add = (j) => { if (j !== null && j !== undefined && j !== k) imports.add(k + "," + j); };
@@ -77,6 +79,14 @@ entries.forEach((e, k) => {
       }
       const subs = names.map((n) => pyModule(e.path, base + "." + n)).filter((j) => j !== null);
       if (subs.length) subs.forEach(add); else add(pyModule(e.path, base));
+    }
+  } else if (/\.rs$/.test(e.path)) {
+    // (Rust: `mod x;` and `use crate::a::b::{…}`, resolved as the viewer does, src/rsroom.js)
+    for (const m of t.matchAll(/^[ \t]*(?:pub(?:\([^)]*\))?[ \t]+)?mod[ \t]+(\w+)[ \t]*;/gm)) add(index.get(resolveRust(pathTree, e.path, { rust: { mod: m[1] } })?.path));
+    for (const m of t.matchAll(/^[ \t]*(?:pub(?:\([^)]*\))?[ \t]+)?use[ \t]+((?:\w+::)*)(\w+|\{[^}]*\}|\*)/gm)) {
+      const mod = m[1].replace(/::$/, ""), names = m[2].startsWith("{") ? m[2].slice(1, -1).split(",").map((x) => x.trim().split(/\s+/)[0].split("::")[0]).filter(Boolean) : [m[2]];
+      if (!mod) continue;
+      add(index.get(resolveRust(pathTree, e.path, { rust: { use: mod }, imported: names })?.path));
     }
   } else if (/\.(ts|mts|tsx|js|mjs)$/.test(e.path)) {
     for (const m of t.matchAll(JSIMP)) {

@@ -3,6 +3,7 @@
 // Into a built site instead, at /space/ (where the agents chat shows a .space.json in it):
 //   node build.mjs --site ../web/dist      (then `bun web/csp.ts`, so the site's _headers cover the page)
 import { build } from "esbuild";
+import { execFileSync } from "node:child_process";
 import { cpSync, existsSync, mkdirSync, readFileSync, readdirSync, rmSync, writeFileSync } from "node:fs";
 import { dirname, join, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
@@ -31,6 +32,16 @@ await build({
   nodePaths: [join(here, "node_modules")],
 });
 cpSync(join(here, "index.html"), join(dist, "index.html"));
+// (the Rust parser, src/rsroom.js: syn compiled to WebAssembly from space/rustroom, built here, offline, from the
+//  crates cargo already has)
+//  crates cargo already has; without cargo (or its wasm32-unknown-unknown target) it is left out, and Rust files
+//  say their parser didn't load)
+try {
+  execFileSync("cargo", ["build", "--release", "--target", "wasm32-unknown-unknown", "--offline", "--quiet"], { cwd: join(here, "rustroom"), stdio: "inherit" });
+  cpSync(join(here, "rustroom", "target", "wasm32-unknown-unknown", "release", "rustroom.wasm"), join(dist, "rustroom.wasm"));
+} catch (e) {
+  console.warn("build.mjs: the Rust parser wasn't built (cargo, with the wasm32-unknown-unknown target, is needed):", e.message);
+}
 const spaces = [];
 for (const f of readdirSync(join(here, "public"))) {
   // (the site's build refuses any file in web/dist with the service worker's test hook in it, web/sw-hook.mts: refused

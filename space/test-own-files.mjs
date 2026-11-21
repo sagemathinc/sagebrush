@@ -61,6 +61,45 @@ const NB = { mode: "python", cells: [
   { id: "c2", code: "z = x * y\nprint(z)", outputs: [{ output_type: "stream", name: "stdout", text: "6\n" }] },
   { id: "c3", code: "import math\nprint(math.pi)", outputs: [] },
 ] };
+const RS = `//! Points in the plane.
+pub struct Point {
+    x: f64,
+    y: f64,
+}
+
+impl Point {
+    /// A point.
+    pub fn new(x: f64, y: f64) -> Self {
+        Point { x, y }
+    }
+    /// Its distance from the origin.
+    pub fn norm(&self) -> f64 {
+        self.dot(self).sqrt()
+    }
+    fn dot(&self, o: &Point) -> f64 {
+        self.x * o.x + self.y * o.y
+    }
+}
+
+pub fn origin_distance(x: f64, y: f64) -> f64 {
+    Point::new(x, y).norm()
+}
+`;
+const JSC = `import { helper } from "./d.js";
+
+export function main() {
+  return helper(2) + new Box().open();
+}
+
+class Box {
+  open() {
+    return this.peek();
+  }
+  peek() {
+    return 1;
+  }
+}
+`;
 const seeded = await ev(`(async () => {
   const w = window.sagebrush.workspace;
   await w.mkdir("/proj/sub");
@@ -69,6 +108,9 @@ const seeded = await ev(`(async () => {
   await w.create("/proj/sub/c.sage", { content: "R.<t> = QQ[]\\nprint(t^2 + 1)\\n" });
   await w.create("/proj/demo.ipynb", { content: ${JSON.stringify(NB)}, mode: "python" });
   await w.create("/outside.py", { content: "secret = 1\\n" });
+  await w.create("/proj/geom.rs", { content: ${JSON.stringify(RS)} });
+  await w.create("/proj/c.js", { content: ${JSON.stringify(JSC)} });
+  await w.create("/proj/d.js", { content: ${JSON.stringify("/** One more than x. */\nexport function helper(x) {\n  return x + 1;\n}\n")} });
   return (await w.list("/proj", { recursive: true })).map((e) => e.path).sort();
 })()`);
 ok(Array.isArray(seeded) && seeded.includes("/proj/demo.ipynb") && seeded.includes("/proj/sub/c.sage"), "the folder is made", seeded);
@@ -107,6 +149,29 @@ ok(await ev(`${F}.whitespace.enter('m:b')`) && await until(`${F}.whitespace.room
 ok((await ev(`${F}.whitespace.space.nodes.find((n) => n.id === 'f:f')?.summary`)) === "One more than x.", "f's docstring is its summary");
 await ev(`(() => { ${F}.whitespace.leave(); ${F}.whitespace.leave(); return 1; })()`);
 ok(await until(`${F}.whitespace.room === null`, 5000), "and Back out to the folder");
+
+// ---- Rust: the file's room (syn, in WebAssembly), an impl block's room
+ok(await ev(`${F}.whitespace.enter('p:geom.rs')`), "a Rust file is entered", await ev(`${F}.document.querySelector('#status')?.textContent`));
+const rs = await ev(`(() => { const W = ${F}.whitespace; return { room: W.room, ids: W.space.nodes.map((n) => n.id).sort(), edges: W.space.edges.map((e) => e.from + ">" + e.to) }; })()`);
+const implId = rs.ids.find((x) => x.startsWith("i:Point@"));
+ok(rs.room === "proj › geom.rs" && implId && ["f:origin_distance", "y:Point"].every((x) => rs.ids.includes(x)), "its room: the function, the impl block, the struct", rs);
+ok(rs.edges.includes(`f:origin_distance>${implId}`) && rs.edges.includes(`${implId}>y:Point`), "Point::new() leads to the impl block, which is for the struct", rs.edges);
+ok(await ev(`${F}.whitespace.enter(${JSON.stringify(implId)})`), "the impl block is entered");
+const impl = await ev(`(() => { const W = ${F}.whitespace; return { room: W.room, ids: W.space.nodes.map((n) => n.id).sort(), edges: W.space.edges.map((e) => e.from + ">" + e.to), doc: W.space.nodes.find((n) => n.id === 'f:norm')?.summary }; })()`);
+ok(impl.room === "proj › geom.rs › impl Point" && impl.edges.includes("f:norm>f:dot") && impl.doc === "Its distance from the origin.", "its methods, norm calling dot through self, their doc comments", impl);
+await ev(`(() => { ${F}.whitespace.leave(); ${F}.whitespace.leave(); return 1; })()`);
+await until(`${F}.whitespace.room === null`, 5000);
+
+// ---- JavaScript: the file's room (Babel), the import through to d.js, a class's room
+ok(await ev(`${F}.whitespace.enter('p:c.js')`), "a JavaScript file is entered");
+const js = await ev(`(() => { const W = ${F}.whitespace; return { room: W.room, ids: W.space.nodes.map((n) => n.id).sort(), edges: W.space.edges.map((e) => e.from + ">" + e.to) }; })()`);
+ok(js.ids.includes("m:./d.js") && js.ids.includes("c:Box") && js.edges.includes("f:main>m:./d.js") && js.edges.includes("f:main>c:Box"), "its room: main calls the import and the class", js);
+ok(await ev(`${F}.whitespace.enter('m:./d.js')`) && await until(`${F}.whitespace.room === 'proj › c.js › d.js' && ${F}.whitespace.selection?.id === 'f:helper'`, 8000), "the import leads through to d.js, at helper", await ev(`${F}.whitespace.room`));
+await ev(`(() => { ${F}.whitespace.leave(); return 1; })()`);
+await until(`${F}.whitespace.room === 'proj › c.js'`, 5000);
+ok(await ev(`${F}.whitespace.enter('c:Box')`) && (await ev(`${F}.whitespace.space.edges.map((e) => e.from + ">" + e.to)`)).includes("f:open>f:peek"), "the class's room: open calls peek through this");
+await ev(`(() => { ${F}.whitespace.leave(); ${F}.whitespace.leave(); return 1; })()`);
+await until(`${F}.whitespace.room === null`, 5000);
 
 // ---- the notebook: its cells and what flows between them
 ok(await ev(`${F}.whitespace.enter('p:demo.ipynb')`), "the notebook is entered");
