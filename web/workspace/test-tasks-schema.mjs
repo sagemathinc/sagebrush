@@ -4,7 +4,7 @@
 // sagebrush-agent's fake-tasks: its real task store), and each answer altered in the ways §6.1 refuses.
 //   bun web/workspace/test-tasks-schema.mjs
 import { readFileSync } from "node:fs";
-import { TASK_RESULTS, TaskShapeError, taskNotification, taskEvent, blobId, contentBytes } from "./tasks-schema.ts";
+import { TASK_RESULTS, TaskShapeError, taskNotification, taskEvent, taskLog, taskNotice, blobId, contentBytes } from "./tasks-schema.ts";
 
 const F = JSON.parse(readFileSync(new URL("./tasks-fixtures.json", import.meta.url), "utf8"));
 let checks = 0;
@@ -157,6 +157,27 @@ const BAD_TURN = [
 ];
 for (const [what, e] of BAD_TURN) ok(refused(() => taskEvent(e)), `a turn event: ${what}: refused`);
 ok(refused(() => taskNotification({ task: "c".repeat(32), seq: 0, event: prop })), "a task.event with seq 0: refused");
+
+// (the page's showing of a task's log, taskLog and taskNotice: everything around each event checked closed, and each
+//  event alone, so one it refuses is kept as refused, with its seq, and the rest still show)
+{
+  const g = pick("tasks.get");
+  const n = g.events.length;
+  g.events.splice(1, 0, { seq: g.events[0].seq + 0.5, event: { type: "task_status", status: "working" } });
+  ok(refused(() => taskLog(g)), "taskLog: a seq that isn't an integer: refused, the whole answer");
+  const h = pick("tasks.get");
+  h.events[0].event = { ...h.events[0].event, extra: 1 };
+  const l = taskLog(h);
+  ok(refused(() => TASK_RESULTS["tasks.get"](h)) && l.events.length === n && "refused" in l.events[0] && l.events[0].seq === h.events[0].seq && l.events.slice(1).every((e) => "event" in e), "taskLog: an event the page refuses kept as refused, with its seq; the others as tasks.get's check gives them (which refuses the whole answer)");
+  const k = pick("tasks.get");
+  k.extra = 1;
+  ok(refused(() => taskLog(k)), "taskLog: a field the answer doesn't have: refused, the whole answer");
+  const m = pick("tasks.get");
+  if (m.events.length > 1) { [m.events[0], m.events[1]] = [m.events[1], m.events[0]]; ok(refused(() => taskLog(m)), "taskLog: events out of seq order: refused"); }
+  ok("refused" in taskNotice({ task: "c".repeat(32), seq: 3, event: { type: "ask" } }) && taskNotice({ task: "c".repeat(32), seq: 3, event: { type: "ask" } }).seq === 3, "taskNotice: an event the page refuses: kept as refused, with its task and seq");
+  ok("event" in taskNotice({ task: "c".repeat(32), seq: 3, event: prop }), "taskNotice: a good event: checked as taskNotification's");
+  ok(refused(() => taskNotice({ task: "C".repeat(32), seq: 3, event: prop })) && refused(() => taskNotice({ task: "c".repeat(32), seq: 0, event: prop })) && refused(() => taskNotice({ task: "c".repeat(32), seq: 3, event: prop, x: 1 })), "taskNotice: a bad task, seq or field around the event: refused, the whole notification");
+}
 
 console.log(fails.length ? `FAIL: ${fails.length} of ${checks}\n  ${fails.join("\n  ")}` : `ok: tasks-schema, ${checks} checks (fixture from sagebrush-agent ${F.agent.head.slice(0, 10)})`);
 process.exit(fails.length ? 1 : 0);
