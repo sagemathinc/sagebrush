@@ -1,0 +1,206 @@
+{
+ "schema": "absorbing-markov-report/v1",
+ "rational_encoding": "Each exact rational is a JSON string 'p/q' in lowest terms with q>0, or 'p' when q==1 (Sage QQ str()). Parse with Python fractions.Fraction(s).",
+ "states": [
+  "new",
+  "engaged",
+  "converted",
+  "abandoned"
+ ],
+ "transient_states": [
+  "new",
+  "engaged"
+ ],
+ "absorbing_states": [
+  "converted",
+  "abandoned"
+ ],
+ "P": [
+  [
+   "1/2",
+   "1/4",
+   "1/4",
+   "0"
+  ],
+  [
+   "1/5",
+   "1/2",
+   "1/10",
+   "1/5"
+  ],
+  [
+   "0",
+   "0",
+   "1",
+   "0"
+  ],
+  [
+   "0",
+   "0",
+   "0",
+   "1"
+  ]
+ ],
+ "Q": [
+  [
+   "1/2",
+   "1/4"
+  ],
+  [
+   "1/5",
+   "1/2"
+  ]
+ ],
+ "R": [
+  [
+   "1/4",
+   "0"
+  ],
+  [
+   "1/10",
+   "1/5"
+  ]
+ ],
+ "fundamental_matrix_N": {
+  "rows": [
+   "new",
+   "engaged"
+  ],
+  "cols": [
+   "new",
+   "engaged"
+  ],
+  "value": [
+   [
+    "5/2",
+    "5/4"
+   ],
+   [
+    "1",
+    "5/2"
+   ]
+  ]
+ },
+ "absorption_probabilities_B": {
+  "rows": [
+   "new",
+   "engaged"
+  ],
+  "cols": [
+   "converted",
+   "abandoned"
+  ],
+  "value": [
+   [
+    "3/4",
+    "1/4"
+   ],
+   [
+    "1/2",
+    "1/2"
+   ]
+  ]
+ },
+ "expected_steps_to_absorption_t": {
+  "rows": [
+   "new",
+   "engaged"
+  ],
+  "value": [
+   "15/4",
+   "7/2"
+  ]
+ },
+ "step_count_variance": {
+  "rows": [
+   "new",
+   "engaged"
+  ],
+  "formula": "(2N - I) t - t_sq",
+  "value": [
+   "155/16",
+   "37/4"
+  ]
+ },
+ "P_power_5": {
+  "rows": [
+   "new",
+   "engaged",
+   "converted",
+   "abandoned"
+  ],
+  "cols": [
+   "new",
+   "engaged",
+   "converted",
+   "abandoned"
+  ],
+  "value": [
+   [
+    "1/10",
+    "11/100",
+    "31/50",
+    "17/100"
+   ],
+   [
+    "11/125",
+    "1/10",
+    "48/125",
+    "107/250"
+   ],
+   [
+    "0",
+    "0",
+    "1",
+    "0"
+   ],
+   [
+    "0",
+    "0",
+    "0",
+    "1"
+   ]
+  ]
+ },
+ "engine": {
+  "tool": "sagebrush",
+  "distribution": "npm sagebrush@0.10.1 (also reproduced byte-identically with PyPI sagebrush==0.10.1 via `python -m sagebrush`)",
+  "version_string": "sagebrush 0.10.1 (Python 3.14 language on a JavaScript runtime)",
+  "mode": "--sage",
+  "script": "scripts/markov.sage",
+  "command": "npmpkg/node_modules/.bin/sagebrush scripts/markov.sage",
+  "workaround": "Matrix.submatrix() missing in Sagebrush 0.10.1; Q and R taken by slicing P[0:2,0:2], P[0:2,2:4]"
+ },
+ "definitions": {
+  "Q": "transient-to-transient block of P",
+  "R": "transient-to-absorbing block of P",
+  "fundamental_matrix_N": "N = (I - Q)^-1; N[i][j] = expected visits to transient j starting from transient i (counting the start)",
+  "absorption_probabilities_B": "B = N R; B[i][k] = P(eventually absorbed in k | start i)",
+  "expected_steps_to_absorption_t": "t = N 1",
+  "step_count_variance": "Var = (2N - I) t - t_sq, t_sq = elementwise square of t",
+  "P_power_5": "P^5 (5-step transition probabilities)"
+ },
+ "verification": {
+  "in_sagebrush_asserts": [
+   "(I-Q)N == I",
+   "rows of B sum to 1",
+   "P^5 == P*P*P*P*P",
+   "rows of P^5 sum to 1"
+  ],
+  "cpython_fractions": {
+   "N": true,
+   "B": true,
+   "t": true,
+   "var": true,
+   "P5": true
+  },
+  "sagemath_10.9": {
+   "N": true,
+   "B": true,
+   "t": true,
+   "var": true,
+   "P5": true
+  },
+  "note": "Independent checks only compare against Sagebrush's numbers; no value in this report was produced by CPython or Sage."
+ }
+}

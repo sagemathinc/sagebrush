@@ -8,7 +8,7 @@ import { spawn } from "node:child_process";
 import { mkdirSync, mkdtempSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
-import { CHROME_STDERR_TAIL, PROFILE_LIST_MAX, devtoolsPort } from "./test-port.mjs";
+import { CHROME_START_MS, CHROME_STDERR_TAIL, PROFILE_LIST_MAX, devtoolsPort, startChrome } from "./test-port.mjs";
 
 const dir = mkdtempSync(join(tmpdir(), "sb-devtools-port-"));
 let failed = 0, passed = 0;
@@ -34,6 +34,54 @@ const failure = async (p) => {
 };
 
 try {
+  check(CHROME_START_MS === 60_000, "shared startup default is 60 seconds", CHROME_START_MS);
+  // The first child never announces a port. It must be dead before relaunch,
+  // and a stale announcement must not satisfy either attempt.
+  {
+    const profile = join(dir, "retry-profile");
+    mkdirSync(profile);
+    writeFileSync(join(profile, "DevToolsActivePort"), "12345\n");
+    const children = [];
+    const launch = () => {
+      if (children.length) check(children[0].signalCode === "SIGKILL", "failed child exits before retry", children[0].signalCode);
+      const source = children.length === 0 ? 'setInterval(() => {}, 1000)' :
+        `require('node:fs').writeFileSync(${JSON.stringify(join(profile, "DevToolsActivePort"))}, '43211\\n'); setInterval(() => {}, 1000)`;
+      const child = spawn(process.execPath, ["-e", source], { stdio: ["ignore", "ignore", "pipe"] });
+      children.push(child);
+      return child;
+    };
+    try {
+      const started = await startChrome(profile, launch, 2000);
+      check(started.port === 43211 && started.child === children[1] && children.length === 2,
+        "one timed-out launch retries and ignores the stale port", { port: started.port, attempts: children.length });
+    } finally { for (const child of children) child.kill("SIGKILL"); }
+  }
+  {
+    const profile = join(dir, "both-fail-profile");
+    mkdirSync(profile);
+    const children = [];
+    const r = await failure(startChrome(profile, () => {
+      const child = spawn(process.execPath, ["-e", "setInterval(() => {}, 1000)"], { stdio: ["ignore", "ignore", "pipe"] });
+      children.push(child);
+      return child;
+    }, 100));
+    check(children.length === 2 && children.every(c => c.signalCode === "SIGKILL") && /after 2 attempts.*within 0\.1 s/.test(r.message ?? ""),
+      "both failures are bounded, diagnosed and killed without a third launch", r);
+  }
+  {
+    const profile = join(dir, "first-ready-profile");
+    let child;
+    let launches = 0;
+    try {
+      const started = await startChrome(profile, () => {
+        launches++;
+        child = fake("first-ready", `import { mkdirSync, writeFileSync } from "node:fs"; mkdirSync(process.argv[2]); writeFileSync(process.argv[2] + "/DevToolsActivePort", "43212\\n"); setInterval(() => {}, 1000);`).child;
+        return child;
+      });
+      check(launches === 1 && started.child === child && started.port === 43212 && child.signalCode === null,
+        "healthy first launch is returned alive without retry", started.port);
+    } finally { child?.kill("SIGKILL"); }
+  }
   // (1) no process, no profile: the timeout says there is none
   {
     const r = await failure(devtoolsPort(join(dir, "never"), 300));

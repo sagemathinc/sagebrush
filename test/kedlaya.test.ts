@@ -37,7 +37,7 @@ test("the planner, the ledger's digit count and L = p: the same under python3 an
 });
 
 // (193 s on master: a slow test, test/slow-tests.ts)
-test("the offset-add reduction gives the padded one's forms, G and matrix (python3; the whole grid: kedlaya_cases.py full)", { skip: slowSkip }, () => {
+test("the offset-add reduction gives the padded one's forms, G and matrix (python3; the whole grid: kedlaya_cases.py full)", { timeout: 900_000, skip: slowSkip }, () => {
   const out = py3(TEST + "kedlaya_cases.py", "equivalence");
   assert.doesNotMatch(out, /DIFFERENT/);
   assert.match(out, /^equivalence: \d+ reductions compared$/m);

@@ -1,0 +1,165 @@
+{
+  "schema_version": 1,
+  "rational_encoding": {
+    "type": "string",
+    "format": "n or n/d",
+    "normalization": "coprime numerator and denominator; positive denominator; integers omit /1"
+  },
+  "engine": {
+    "product": "Sagebrush",
+    "distribution": "npm sagebrush",
+    "version": "0.10.1",
+    "mode": "sage"
+  },
+  "state_order": [
+    "new",
+    "engaged",
+    "converted",
+    "abandoned"
+  ],
+  "transient_state_order": [
+    "new",
+    "engaged"
+  ],
+  "absorbing_state_order": [
+    "converted",
+    "abandoned"
+  ],
+  "step_count_definition": "Number of transitions until first entry into an absorbing state; zero if initially absorbing",
+  "P": [
+    [
+      "1/2",
+      "1/4",
+      "1/4",
+      "0"
+    ],
+    [
+      "1/5",
+      "1/2",
+      "1/10",
+      "1/5"
+    ],
+    [
+      "0",
+      "0",
+      "1",
+      "0"
+    ],
+    [
+      "0",
+      "0",
+      "0",
+      "1"
+    ]
+  ],
+  "Q": [
+    [
+      "1/2",
+      "1/4"
+    ],
+    [
+      "1/5",
+      "1/2"
+    ]
+  ],
+  "R": [
+    [
+      "1/4",
+      "0"
+    ],
+    [
+      "1/10",
+      "1/5"
+    ]
+  ],
+  "fundamental_matrix": [
+    [
+      "5/2",
+      "5/4"
+    ],
+    [
+      "1",
+      "5/2"
+    ]
+  ],
+  "absorption_probabilities_transient": [
+    [
+      "3/4",
+      "1/4"
+    ],
+    [
+      "1/2",
+      "1/2"
+    ]
+  ],
+  "absorption_probabilities_all_states": [
+    [
+      "3/4",
+      "1/4"
+    ],
+    [
+      "1/2",
+      "1/2"
+    ],
+    [
+      "1",
+      "0"
+    ],
+    [
+      "0",
+      "1"
+    ]
+  ],
+  "expected_steps_all_states": [
+    "15/4",
+    "7/2",
+    "0",
+    "0"
+  ],
+  "second_moment_steps_all_states": [
+    "95/4",
+    "43/2",
+    "0",
+    "0"
+  ],
+  "variance_steps_all_states": [
+    "155/16",
+    "37/4",
+    "0",
+    "0"
+  ],
+  "P_power_5": [
+    [
+      "1/10",
+      "11/100",
+      "31/50",
+      "17/100"
+    ],
+    [
+      "11/125",
+      "1/10",
+      "48/125",
+      "107/250"
+    ],
+    [
+      "0",
+      "0",
+      "1",
+      "0"
+    ],
+    [
+      "0",
+      "0",
+      "0",
+      "1"
+    ]
+  ],
+  "formulas": {
+    "N": "(I-Q)^(-1)",
+    "B": "N R",
+    "t": "N 1",
+    "m2": "(2N-I)t",
+    "variance": "m2 - t elementwise squared"
+  },
+  "sagebrush_identity_checks_passed": true
+}
