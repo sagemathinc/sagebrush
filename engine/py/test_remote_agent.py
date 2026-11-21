@@ -852,16 +852,39 @@ async def test_line_split_across_writes_and_a_last_line_without_newline():
     sg = await signer()
     try:
         await AgentPage(run, sg).open()
+        before = []
         while True:
             m = await run.leg.json()
             if m.get("method") == "agent.ended":
                 break
-        # (the runner's pump logs the dropped tail when it reads EOF, and the reaper tells the page the agent ended:
-        #  two tasks, in either order, so the line is waited for, not assumed written 0.2 s after agent.ended)
-        await until(lambda: b"a last line with no newline was dropped" in read_bytes(run.log.path), what="the dropped tail in the agent's log")
+            before.append(m)
+        # (the unterminated tail never reaches the page as a message. Whether the runner logs it is best effort: its
+        #  watcher, at the child's exit, cancels the pump, which logs the tail only if it reads EOF first. So it isn't
+        #  asserted here; the pump's own handling of a tail at EOF is the next test's)
+        assert not any("cut" in json.dumps(x) for x in before), before
     finally:
         sg.close()
         await run.end()
+
+
+@aio
+async def test_the_pump_delivers_whole_lines_and_logs_a_tail_without_newline_at_eof():
+    # (the pump alone, on a stream fed here: a whole line is delivered; at EOF the tail with no newline isn't, and is
+    #  logged with its length)
+    d = tempfile.mkdtemp(dir=TMP)
+    c = A.AgentChild([sys.executable, "-c", "pass"], log=A.AgentLog(os.path.join(d, "state")))
+    got = []
+
+    async def deliver(text, msg):
+        got.append(text)
+    c._deliver = deliver
+    c.stdout = asyncio.StreamReader()
+    c.stdout.feed_data(b'{"a":1}\n{"cut":')
+    c.stdout.feed_eof()
+    await asyncio.wait_for(c._pump(), 5)
+    assert got == ['{"a":1}'], got
+    assert b"[runner] a last line with no newline was dropped (7 bytes)\n" in read_bytes(c.log.path)
+    shutil.rmtree(d)
 
 
 @aio
