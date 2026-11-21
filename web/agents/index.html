@@ -235,7 +235,7 @@
   }
   /* (the notebook's popups, appended to the body, above the pane: fixed at z-index 20 in full screen and below 900 px) */
   body.agents-host .sbnb-menu, body.agents-host .sbnb-completer, body.agents-host .sbnb-dropline, body.agents-host .sbnb-tip { z-index: 40; }
-  .pane-host { flex: 1; overflow: auto; }
+  .pane-host { flex: 1; overflow: auto; min-height: 0; }
   .pane-host[hidden] { display: none; }
   .pane-bar[hidden] { display: none; } /* (else display: flex below beats [hidden]: an empty strip, BAC-7) */
   .pane-bar { padding: 6px 12px; font-size: 13px; display: flex; gap: 8px; align-items: center; border-bottom: 1px solid var(--line); background: #fff7e6; }
@@ -276,7 +276,9 @@
   .tab.on { background: var(--card); box-shadow: 0 0 0 1px var(--line); font-weight: 550; }
   .icon { border: 0; background: none; width: 30px; height: 30px; border-radius: 7px; cursor: pointer; font-size: 16px; color: var(--muted); }
   .icon:hover { background: var(--side); color: var(--ink); }
-  .pane-body { flex: 1; overflow: auto; }
+  /* (one scroller: the host shown; the body only holds it, so a host a pixel taller than its content never adds a
+     second scrollbar inside the body's, William's QA, Nov 21) */
+  .pane-body { flex: 1; overflow: hidden; display: flex; flex-direction: column; min-height: 0; }
   .pane-body .doc { padding: 22px 30px; max-width: 820px; margin: 0 auto; }
   body.fullscreen .pane-body .doc { font-size: 16px; padding-top: 40px; }
   .pane-body pre.code { margin: 0; padding: 16px 18px; white-space: pre; line-height: 1.5; }
