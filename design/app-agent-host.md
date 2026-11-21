@@ -14,7 +14,7 @@ The direction, Nov 21, 2026, about 11:28 AM PST (verbatim): "for windows I think
 
 Nothing in Sagebrush's design may make it hard to install later through the channels people already use: the platform stores, Homebrew, winget, Flathub, pip and npm. Every artifact stays packageable by them:
 - **relocatable:** no absolute paths fixed at build time;
-- **no network fetches after install,** except pinned, hash-checked ones that are declared;
+- **no downloads of executables or dependencies after install,** except declared ones that are pinned and hash-checked (Store builds allow none, §1). This is about installing or running components; the agent's ordinary web reads and the person's own data fetches are not covered;
 - **versions that a machine can read.**
 
 ## 1. The app as the agent host
