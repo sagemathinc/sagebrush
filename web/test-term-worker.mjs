@@ -73,18 +73,27 @@ const harness = `(() => {
   window.WS = new Map();
   window.put = (p, text) => window.WS.set(p, { fid: "f" + fid++, rev: 1, bytes: enc.encode(text) });
   window.text = (p) => window.WS.has(p) ? new TextDecoder().decode(window.WS.get(p).bytes) : null;
-  window.command = (plan, { stdin = "", refuse = [], hold = [], stopAfterMs = null, allowance = 1 << 20, gen = null, controlBytes = null, ctrlCAfterReadMs = null } = {}) => new Promise((res) => {
+  window.command = (plan, { stdin = "", refuse = [], hold = [], stopAfterMs = null, allowance = 1 << 20, gen = null, controlBytes = null, stopInLoopOf = null } = {}) => new Promise((res) => {
     const w = new Worker("sagebrush-worker.js", { type: "module" });
     const err = (code, message) => ({ error: { code, message } });
     let intr = null, stopArmed = false;
     const handler = async (h) => {
       const a = h.args, f = window.WS.get(a.path);
       if (hold.includes(h.op)) return new Promise(() => {});
-      // (a Stop that lands in running code, which makes no request: the worker's shared interrupt flag (bit 0, Ctrl-C)
-      // and the channel cancelled, ctrlCAfterReadMs after FILE's bytes were served)
-      if (h.op === "read" && ctrlCAfterReadMs !== null && !stopArmed) {
+      // (a Stop that lands in running code, which makes no request: once the file stopInLoopOf names is read, the files
+      // before it having run, the page sets the flush request (bit 4) on the worker's interrupt word; when a running
+      // loop's check has taken it, the Stop: the shared interrupt flag (bit 0, Ctrl-C) and the channel cancelled.
+      // Events, not a delay: how long the files before it take never decides where the Stop lands)
+      if (h.op === "read" && a.path === stopInLoopOf && !stopArmed) {
         stopArmed = true;
-        setTimeout(() => { Atomics.or(new Int32Array(intr), 0, 1); page.cancel(); }, ctrlCAfterReadMs);
+        const word = new Int32Array(intr);
+        Atomics.or(word, 0, 16);
+        const taken = setInterval(() => {
+          if (Atomics.load(word, 0) & 16) return;
+          clearInterval(taken);
+          Atomics.or(word, 0, 1);
+          page.cancel();
+        }, 5);
       }
       if (refuse.includes(h.op)) return err("EACCES", a.path + ": Permission denied");
       const isDir = (p) => p === "/" || [...window.WS.keys()].some((k) => k.startsWith(p + "/"));
@@ -214,9 +223,10 @@ try {
   check(r.code === 0 && r.stdout === "\n[Interrupted]\n" && r.stderr === "", `Stop while a Magma FILE is read: Magma's own interrupt (a blank line, [Interrupted], status 0), not its "Can't open" (${JSON.stringify({ code: r.code, out: r.stdout?.slice(-80), err: r.stderr?.slice(-80) })})`);
   // (Stop inside Magma code: no Magma call implemented here asks the page for anything (Read isn't), so the Stop lands
   // in a running loop, by the interrupt flag; the session ends as Magma 2.18-5's does (@sagebrush-magma's record:
-  // "\n[Interrupted]\n" on stdout, no Python frames, status 0) and goes no further)
-  await ev(`put("/w/loop.m", "print 1;\\nwhile true do\\n  x := 1;\\nend while;\\nprint 2;\\n")`);
-  r = await cmd({ run: true, mode: "magma", argv0: "magma", source: { kind: "file", path: "/w/loop.m", shown: "/w/loop.m", typed: "loop.m" }, more: [{ kind: "file", path: "/w/in.txt", shown: "/w/in.txt", typed: "in.txt" }], argv: ["loop.m", "in.txt"], path0: "/w" }, { ctrlCAfterReadMs: 1500 });
+  // "\n[Interrupted]\n" on stdout, no Python frames, status 0) and goes no further.  The loop is the second file's:
+  // its read comes after the first file's print, and the Stop after the loop is running)
+  await ev(`put("/w/one.m", "print 1;\\n"); put("/w/loop.m", "while true do\\n  x := 1;\\nend while;\\nprint 2;\\n")`);
+  r = await cmd({ run: true, mode: "magma", argv0: "magma", source: { kind: "file", path: "/w/one.m", shown: "/w/one.m", typed: "one.m" }, more: ["loop.m", "in.txt"].map((f) => ({ kind: "file", path: "/w/" + f, shown: "/w/" + f, typed: f })), argv: ["one.m", "loop.m", "in.txt"], path0: "/w" }, { stopInLoopOf: "/w/loop.m" });
   check(r.code === 0 && r.stdout === "1\n\n[Interrupted]\n" && r.stderr === "", `Stop inside a running Magma loop: Magma's interrupt, status 0, no frames, and the session goes no further (${JSON.stringify({ code: r.code, out: r.stdout?.slice(-80), err: r.stderr?.slice(-100) })})`);
 
   // (every way into the file system: the interrupt is never turned into an OSError, nor caught as a quiet False)

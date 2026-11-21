@@ -283,7 +283,7 @@ esac
     const iPack = sb.findIndex((s) => s.includes("npm-pack-metrics.mjs --base"));
     const iRecord = sb.findIndex((s) => s.startsWith("name: record (the base)"));
     const iOld = sb.findIndex((s) => /\n {8}if: .*need_old/.test(s));
-    check("contract: size-base packs after the base record and before the old-key toolchain", iRecord >= 0 && iPack === iRecord + 1 && iOld > iPack, `${iRecord} ${iPack} ${iOld}`);
+    check("contract: size-base packs after the base record, without an old-key build", iRecord >= 0 && iPack === iRecord + 1 && iOld === -1, `${iRecord} ${iPack} ${iOld}`);
     const ck = steps(job("checks"));
     const iRec = ck.findIndex((s) => s.includes("npm-pack-metrics.mjs --record"));
     const iSizes = ck.findIndex((s) => s.startsWith("name: the size record"));

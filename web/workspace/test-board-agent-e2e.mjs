@@ -14,6 +14,7 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { createInterface } from "node:readline";
 import { devtoolsPort } from "../test-port.mjs";
+import { BAR_CLEAR } from "./agent-bar-check.mjs";
 
 const here = new URL(".", import.meta.url).pathname;
 let failures = 0, checks = 0;
@@ -75,11 +76,11 @@ try {
   const sock = new WebSocket(targets.find((t) => t.type === "page").webSocketDebuggerUrl);
   await new Promise((r) => (sock.onopen = r));
   let n = 0;
-  const waiting = new Map(), requests = [], console_ = [];
+  const waiting = new Map(), requests = [], console_ = [], sent = [];
   sock.onmessage = (e) => {
     const m = JSON.parse(e.data);
     if (m.id && waiting.has(m.id)) { waiting.get(m.id)(m); waiting.delete(m.id); }
-    if (m.method === "Network.requestWillBeSent") requests.push(m.params.request.url);
+    if (m.method === "Network.requestWillBeSent") { requests.push(m.params.request.url); sent.push({ url: m.params.request.url, ref: m.params.request.headers?.Referer ?? "", doc: m.params.documentURL ?? "" }); }
     if (m.method === "Log.entryAdded" || m.method === "Runtime.consoleAPICalled") console_.push(JSON.stringify(m.params).slice(0, 300));
     if (m.method === "Fetch.requestPaused" && m.params.responseStatusCode !== undefined && asFile) void asSavedFile(m.params);
     else if (m.method === "Fetch.requestPaused") send(failChunk ? "Fetch.failRequest" : "Fetch.continueRequest", failChunk ? { requestId: m.params.requestId, errorReason: "InternetDisconnected" } : { requestId: m.params.requestId });
@@ -152,12 +153,50 @@ try {
   await ev(`([...document.querySelectorAll(".sbag-box button")].find((b) => b.textContent === "Cancel").click(), true)`);
   ok(await until(`!document.querySelector(".sbag-box") && document.activeElement === document.querySelector('#board [data-sbb="menubtn"]')`), "Cancel closes it, and the focus goes back to ⋯");
 
+  // a pairing link to the board with nothing else, as sagebrush-mcp prints it: the notebook page, the code handed over
+  // within the tab (sessionStorage), never in a second URL (it would reach the server's log and the Referer); the person pairs there, where what
+  // the agent makes opens in place. The code isn't used, so it pairs the board below
+  const codeIn = (t) => String(t).includes(first.code);
+  const navTo = async (url) => { await ev("window.__old = 1").catch(() => {}); sent.length = 0; await send("Page.navigate", { url }); await sleep(300); };
+  const connectWith = (code) => `[...document.querySelectorAll(".sbag-box input")].some((i) => i.value === ${JSON.stringify(code)})`;
+  const cancel = () => ev(`([...document.querySelectorAll(".sbag-box button")].find((b) => b.textContent === "Cancel")?.click(), true)`);
+  await navTo(origin + `/board/?pair=${first.code}&port=${first.port}`);
+  ok(await until(`!window.__old && location.pathname === "/" && ${connectWith(first.code)}`, 60000), "a bare /board/?pair= link opens Connect on the notebook page, its code filled in", await ev("location.href").catch(() => ""));
+  const withCode = sent.filter((r) => codeIn(r.url));
+  ok(withCode.length === 1 && withCode[0].url.startsWith(origin + "/board/?pair="), "the only request with the code in it is the original /board/ one", withCode.map((r) => r.url));
+  const after = sent.filter((r) => !r.doc.startsWith(origin + "/board/"));
+  ok(after.length > 0 && !after.some((r) => codeIn(r.url) || codeIn(r.ref) || codeIn(r.doc)), "the notebook page, its requests and their referrers: no code", after.filter((r) => codeIn(r.url) || codeIn(r.ref) || codeIn(r.doc)).slice(0, 3));
+  const hist = await send("Page.getNavigationHistory");
+  ok(!codeIn(await ev("location.href")) && !(hist.result?.entries ?? []).some((e) => codeIn(e.url)), "the address bar and the history: no code", (hist.result?.entries ?? []).map((e) => e.url));
+  ok(await ev(`sessionStorage.getItem("sb-pair-handoff-v1") === null`), "the handover is gone once taken");
+  await cancel();
+  await send("Page.reload");
+  await sleep(300);
+  ok(await until(`!!window.sagebrush?.workspace`, 60000) && (await sleep(2000), !(await ev(`!!document.querySelector(".sbag-box")`))), "a reload doesn't use it again: no Connect");
+  await send("Page.navigateToHistoryEntry", { entryId: (await send("Page.getNavigationHistory")).result.entries.slice(-2)[0].id }).catch(() => {});
+  await sleep(1500);
+  ok(!(await ev(`location.pathname === "/" && !!document.querySelector(".sbag-box")`).catch(() => false)), "nor does Back");
+  // (only the bare form: a hash, or anything else in the query, pairs on the board as before)
+  await navTo(origin + `/board/?pair=${first.code}&port=${first.port}#p2`);
+  ok(await until(`!window.__old && location.pathname === "/board/" && ${connectWith(first.code)}`, 60000) && !sent.some((r) => r.doc.startsWith(origin + "/") && !r.doc.startsWith(origin + "/board/")), "with a hash: Connect on the board itself, the notebook page never loaded", await ev("location.href").catch(() => ""));
+  await cancel();
+  await navTo(origin + `/board/?agents=1&pair=${first.code}&port=${first.port}`);
+  ok(await until(`!window.__old && location.pathname === "/board/" && ${connectWith(first.code)}`, 60000), "with ?agents: Connect on the board itself", await ev("location.href").catch(() => ""));
+  await cancel();
+  // (fail closed: a tab whose storage refuses the handover pairs on the board, the code shown nowhere else)
+  const noStore = await send("Page.addScriptToEvaluateOnNewDocument", { source: "Storage.prototype.setItem = function () { throw new Error('refused'); };" });
+  await navTo(origin + `/board/?pair=${first.code}&port=${first.port}`);
+  ok(await until(`!window.__old && location.pathname === "/board/" && ${connectWith(first.code)}`, 60000) && !sent.some((r) => codeIn(r.url) && !r.url.startsWith(origin + "/board/?pair=")), "storage refused: Connect on the board itself, nothing forwarded", await ev("location.href").catch(() => ""));
+  await send("Page.removeScriptToEvaluateOnNewDocument", { identifier: noStore.result.identifier });
+  await cancel();
+
   // a ?pair= link on the board (no ?agents): Connect with its code, then the grant
   ok(await goBoard(`?doc=${encodeURIComponent(doc)}&pair=${first.code}&port=${first.port}`), "a ?pair= link opens the board");
   ok(await ev(`!/pair=/.test(location.search)`), "the code is taken out of the address bar");
   ok(await until(`[...document.querySelectorAll(".sbag-box input")].some((i) => i.value === ${JSON.stringify(first.code)})`), "the Connect dialog shows, its code filled in");
   await ev(`(document.querySelector(".sbag-box button.primary").click(), true)`);
   ok(await grant(true), "allowed for 1 hour, remembered: the bar shows");
+  ok(await until(`${BAR_CLEAR} === true`, 5000), "the board: the agent's bar is in its own row, over nothing the person types in or reads", await ev(BAR_CLEAR).catch((e) => String(e)));
   const ls = await drive({ op: "req", method: "workspace.list", params: { folder: "/", recursive: true } });
   ok(JSON.stringify(ls).includes(".board.json"), "the agent lists the workspace, the board in it", JSON.stringify(ls).slice(0, 300));
 

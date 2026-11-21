@@ -149,7 +149,7 @@ const cocalc = async (req) => {
   return l ? Response.json(l) : Response.json({ error: "no_account" }, { status: 404 });
 };
 const objects = { SYNC_ACCOUNT: { className: "SyncAccount", useSQLite: true }, SYNC_DOC: { className: "SyncDoc", useSQLite: true } };
-const ratelimits = (id) => ({ SYNC_PREAUTH: { namespace_id: id, simple: { limit: 1_000_000, period: 60 } } });
+const ratelimits = (id) => ({ SYNC_PREAUTH: { namespace_id: id, simple: { limit: 1_000_000, period: 60 } }, SYNC_INGRESS_IP: { namespace_id: "8" + id, simple: { limit: 1_000_000, period: 60 } }, SYNC_ACCOUNT_INGRESS: { namespace_id: "9" + id, simple: { limit: 1_000_000, period: 60 } } });
 const mf = new Miniflare(convertV4MiniflareOptions({
   workers: [
     { ...base, name: "on", bindings: { ...shareBindings, SYNC_ACCOUNTS: `${A},${B},${R},${C},${E},${Z},${F2}`, SYNC_TIERED: "1", SYNC_TEST_PIN_MS: "1000" }, durableObjects: objects, routes: ["sagebrush.test/*"], outboundService: cocalc, ratelimits: ratelimits("2001") },

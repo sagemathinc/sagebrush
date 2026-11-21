@@ -1,6 +1,6 @@
 // ci: checks.3 order=150 runner=bun
-// The Terminal commands' bridge's size gate (design-term-3b2 r1 §1, daybreak2's ruling: a check of its own, not a
-// budgets.json row): web/dist/shell/term-bridge.js as web/build.ts made it (CI's pinned bun), its raw bytes and Node's
+// The Terminal commands' bridge's independent size gate: web/dist/shell/term-bridge.js as web/build.ts made it
+// (CI's pinned bun), its raw bytes and Node's
 // gzip -9 bytes each under its own ceiling.  Also pinned: the chunk's inputs are exactly the reviewed ones (a bare or
 // unexpected import fails here), it is rebuilt from them to the same bytes, terminal.js names it only for its dynamic
 // import, the site serves the same bytes, and the app's copy (app/build-frontend.mjs copies dist/shell whole) too.

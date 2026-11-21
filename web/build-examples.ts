@@ -302,8 +302,7 @@ const cards = (list: Example[]) => `<ul class="cards">\n${list.map(card).join("\
 export type CatalogEntry = { id: string; kind: string; title: string; summary: string; tags: string[]; level: string; mode?: string; modes?: string[]; features?: string[]; main: string; files: number; bytes: number; files_sha256: string; url: string };
 
 /**
- * The site's examples within plan section 5's caps (daybreak2's ruling: budgets.json's site/examples row binds only
- * the total, 180 MiB; these parts are bound here): each example's generated preview (its page, and a LaTeX
+ * The site's examples within plan section 5's independent caps: each example's generated preview (its page, and a LaTeX
  * document's preview.html) at most 1 MiB, all of them at most 120 MiB, the ZIPs at most 60 MiB, the catalog at most
  * 200 KiB (also its own row). Exported for the tests, which pass smaller caps.
  */

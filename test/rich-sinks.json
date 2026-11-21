@@ -103,14 +103,18 @@
   "web/notebook/notebook.js :: renderMd :: if (cell.md.querySelector(\".math\")) typesetMath(cell.md); #0": {
    "owner": "phase-2",
    "role": "host"
+  },
+  "web/notebook/gradescope/render.ts :: cellSources :: for (const k of c.md.children) { #0": {
+   "owner": "phase-4",
+   "role": "print"
+  },
+  "web/notebook/gradescope/render.ts :: cellSources :: if (outputs) for (const k of c.out.children as HTMLCollectionOf<HTMLElement>) { #0": {
+   "owner": "phase-4",
+   "role": "print"
   }
  },
  "sinks": {
-  "web/agents/page.ts :: changed :: saved.insertAdjacentHTML(\"afterend\", ` <a class=\"open-full\" href=\"/w${esc(path)}\" target=\"_blank\" rel=\"noopener\">Open in Sagebrush</a>`); #0": {
-   "kind": "host",
-   "owner": "host"
-  },
-  "web/agents/page.ts :: keepFocus :: h.el.innerHTML = `<div class=\"file-path\">${esc(a.path)} <span class=\"saved\"></span> <a class=\"open-full\" href=\"/w${esc(a.path)}\" target=\"_blank\" rel=\"noopener\">Open in Sagebrush</a></div><div class=\"file-body\"></div>`; #0": {
+  "web/agents/page.ts :: keepFocus :: h.el.innerHTML = `<div class=\"file-path\">${esc(a.path)} <span class=\"saved\"></span> </div><div class=\"file-body\"></div>`; #0": {
    "kind": "host",
    "owner": "host"
   },
@@ -159,10 +163,6 @@
    "kind": "host",
    "owner": "host"
   },
-  "web/agents/page.ts :: renderHeader :: who.innerHTML = `<span class=\"conn wait\"></span>${esc(agentName())} <small>connected: allow it in the dialog</small>`; #0": {
-   "kind": "host",
-   "owner": "host"
-  },
   "web/agents/page.ts :: renderHeader :: who.innerHTML = `<span class=\"conn\"></span>Claude <small>not connected</small>`; #0": {
    "kind": "host",
    "owner": "host"
@@ -171,7 +171,7 @@
    "kind": "host",
    "owner": "host"
   },
-  "web/workspace/agent-chat/view.ts :: turnNode :: div.innerHTML = `<div class=\"who\"><span class=\"avatar\">✳</span>${esc(turn.agent ?? \"Claude\")} ${tag}</div>${parts.join(\"\")}${status}`; #0": {
+  "web/workspace/agent-chat/view.ts :: turnNode :: div.innerHTML = `<div class=\"who\"><span class=\"avatar\">✳</span>${esc(turn.agent ?? \"Claude\")} ${tag}</div>${info ? `<div class=\"who-info\">${esc(info)}</div>` : \"\"}${parts.join(\"\")}${status}`; #0": {
    "kind": "host",
    "owner": "host"
   },
@@ -624,6 +624,10 @@
    "readers": []
   },
   "web/latex/page.ts :: agentFailed :: shareBtn.innerHTML = '<svg viewBox=\"0 0 16 16\" aria-hidden=\"true\"><path d=\"M8 10.5V2.2M4.9 5.1 8 2l3.1 3.1\" fill=\"none\" stroke=\"currentColor\" stroke-width=\"1.4\" stroke-linecap=\"round\" stroke-linejoin=\"round\"/><path d=\"M3 8.5v4.3c0 .4.3.7.7.7h8.6c.4 0 .7-.3.7-.7V8.5\" fill=\"none\" stroke=\"currentColor\" stroke-width=\"1.4\" stroke-linecap=\"round\"/></svg>'; #0": {
+   "kind": "host",
+   "owner": "host"
+  },
+  "web/workspace/persist-probe.ts :: on :: f.srcdoc = probe; #0": {
    "kind": "host",
    "owner": "host"
   }
