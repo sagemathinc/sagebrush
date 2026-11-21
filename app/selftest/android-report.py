@@ -5,8 +5,8 @@
 --engine is the engine family the CALLER's platform fixes (android-selftest.sh: chromium, Android's WebView;
 ios-selftest.sh: webkit, WKWebView), never read from the report; missing or unknown: a usage error, exit 2.
 --desktop, the caller's too (the desktop app's runner, app/selftest/run-judge.mjs; never the phones'): the LaTeX
-editor's checks (web/notebook/selftest-latex.js), which only the desktop app runs, are REQUIRED as well; without it
-they are unknown lines, so a phone's report that has them fails.
+editor's checks (web/notebook/selftest-latex.js) and the board page's (web/notebook/selftest-board.js), which only
+the desktop app runs, are REQUIRED as well; without it they are unknown lines, so a phone's report that has them fails.
 The Terminal's check 3 ("the shell worker can't reach the app's bridge", web/notebook/selftest-terminal.js)
 must report that same engine, and its detail's closed grammar is judged again here with that engine's rule
 (chromium: 3 of 3 connect-src violations, every IPC fetch refused; webkit: 0 or 3, the IPC fetches information
@@ -54,6 +54,18 @@ DESKTOP = [
     "the LaTeX editor is on in the desktop app",
     "a .tex opens in the editor and renders",
     "Share, Agent and Run say what the app doesn't offer",
+]
+# (the board page and the app's 404s in the desktop app, web/notebook/selftest-board.js: required with --desktop only)
+DESKTOP_BOARD = [
+    "a board opens and runs its code",
+    "a page the app doesn't have isn't the notebook",
+    "the analyzer and KaTeX still load",
+]
+# (the desktop app's files from the computer by its grants only, web/index.html selftest: required with --desktop only)
+DESKTOP_FILES = [
+    "a grant the app didn't make reaches nothing",
+    "a name outside the notebook's folder is refused",
+    "the page has no fs plugin",
 ]
 # (none is a prefix of another)
 INFO = [
@@ -132,7 +144,7 @@ def main():
     if engine not in ENGINES or not 1 <= len(args) <= 2:
         print("usage: android-report.py --engine chromium|webkit [--desktop] report.txt [summary.md]", file=sys.stderr)
         sys.exit(2)
-    required = REQUIRED + (DESKTOP if desktop else [])
+    required = REQUIRED + (DESKTOP + DESKTOP_BOARD + DESKTOP_FILES if desktop else [])
     known = required + REPORTED + ["no exception"]
     lines = open(args[0], encoding="utf-8").read().splitlines()
     summary = args[1] if len(args) > 1 else None

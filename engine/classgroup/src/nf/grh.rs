@@ -295,7 +295,10 @@ pub(crate) mod balls {
         // contributes nothing for l <= L; one that may be below is kept)
         let mut terms: Vec<(Ball, Ball)> = vec![];
         for &q in norms {
-            let lq = Ball::from_i64(q as i64).log(prec)?;
+            // (q exactly: a prime-power norm p^f can lie above 2^63, where
+            // `q as i64` turned negative, its logarithm failed and the
+            // witness was refused, so the bound fell back to the uniform one)
+            let lq = Ball::from_int(&BigInt::from(q)).log(prec)?;
             let mut m: i64 = 1;
             loop {
                 let u = lq.mul_i64(m, prec);

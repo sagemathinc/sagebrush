@@ -1,0 +1,48 @@
+% jsonencode and jsondecode, where MATLAB's documented behaviour and Octave's
+% agree: numbers, logicals, text, nested numeric arrays, cells, structs,
+% Inf and NaN, escaping; and decoding back to MATLAB values.
+s.a = 1;
+s.b = [1 2 3];
+s.c = 'hi';
+s.d = {1, 'x'};
+s.e = true;
+s.f = [];
+s.g = [1 2; 3 4];
+s.h = NaN;
+disp(jsonencode(s));
+disp(jsonencode(pi));
+disp(jsonencode(-2.5));
+disp(jsonencode(1.5e-7));
+disp(jsonencode(123456789012));
+disp(jsonencode(single(0.1)));
+disp(jsonencode(int8([-3 4])));
+disp(jsonencode(reshape(1:8, 2, 2, 2)));
+disp(jsonencode([1; 2; 3]));
+disp(jsonencode(true(2, 2)));
+disp(jsonencode(['ab'; 'cd']));
+disp(jsonencode(''));
+disp(jsonencode({1 2; 3 4}));
+disp(jsonencode({}));
+disp(jsonencode(zeros(0, 3)));
+disp(jsonencode(struct()));
+disp(jsonencode([Inf -Inf NaN]));
+disp(jsonencode([NaN Inf -Inf], 'ConvertInfAndNaN', false));
+disp(jsonencode(['tab' char(9) 'quote"back\slash' char(10)]));
+v = jsondecode('{"a":1,"b":[1,2,3],"c":"hi","d":[1,"x"],"e":true,"f":null,"g":[[1,2],[3,4]],"i":[{"p":1},{"p":2}]}');
+show(v.a); show(v.b); show(v.c); show(v.d); show(v.e); show(v.f); show(v.g); show(size(v.i)); show([v.i.p]);
+show(jsondecode('[1,null,3]'));
+show(jsondecode('[[[1,2],[3,4]],[[5,6],[7,8]]]'));
+show(jsondecode('[[1,2],[3]]'));
+show(jsondecode('[true,false]'));
+show(jsondecode('[]'));
+show(jsondecode('null'));
+show(jsondecode('""'));
+show(jsondecode('["one","two","three"]'));
+show(jsondecode('[{"a":1},{"b":2}]'));
+show(jsondecode('[1,"a"]'));
+show(jsondecode('[NaN, Infinity, -Infinity]'));
+show(jsondecode('{}'));
+show(jsondecode('3.25'));
+show(fieldnames(jsondecode('{"1a":1,"b c":2}'))');
+w = jsondecode(jsonencode(s));
+show(w.b'); show(w.g); show(w.d);

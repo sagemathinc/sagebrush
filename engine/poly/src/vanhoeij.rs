@@ -245,6 +245,162 @@ macro_rules! handoff {
     };
 }
 
+/// Reduce `$rows` and cut them at `$bb` (Stages 1 and 2): drop the last row
+/// while |b_s*|^2 > $bb (strictly). The L^2 route (`lll::l2_route`, taken
+/// when its whole peak is at most the exact LLL's): L^2 runs on a copy,
+/// reserved for first, while the rows stay charged by `$held`; once it
+/// succeeds the rows and their charge go, then the kept rows and the cut's
+/// state are reserved before L^2's state is released; when it stops on its
+/// cap or its proof, its state is gone by then, and the exact LLL starts over
+/// from the rows, as on the exact route (the LLL state reserved, the rows'
+/// charge handed to it, then the kept rows and the d + 1 determinants).
+/// Leaves `$rows` the kept rows and `$held` charging rows_bytes(d, w, c)
+/// for them (c: the route's entry bound); evaluates to (s, c). `$live` are
+/// the ledger's other live entries.
+macro_rules! reduce_cut {
+    ($b:expr, $rows:ident, $held:ident, $held_want:ident, [$($live:expr),*], $bb:expr, $site:literal, $before:literal, $cut:literal) => {{
+        let b = $b;
+        let d = $rows.len();
+        let w = $rows[0].len();
+        let e = $rows.iter().map(|x| maxbits(x)).max().unwrap_or(0);
+        let cap = lll::cap_bits(d, e).ok_or_else(|| b.refuse("lll bits (overflow)", u64::MAX, 0))?;
+        let mut reduced2: Option<(Vec<Vec<BigInt>>, lll::L2Route)> = None;
+        if let Some(rt) = lll::l2_route(d, w, e, $held.bytes(), rows_bytes) {
+            let (state, result) = {
+                let _p = b.enter(Phase::Lll);
+                ledger!(b, $before, $($live,)* $held_want);
+                // L^2's state first, then the copy (its input term)
+                let state = b.reserve(Some(rt.state))?;
+                handoff!($($live,)* $held_want, rt.state);
+                ledger!(b, concat!($before, " (L2)"), $($live,)* $held_want, rt.state);
+                // (tests: this thread's live bytes before the copy)
+                #[cfg(test)]
+                let live0 = crate::alloc_spy::live();
+                let copy = $rows.clone();
+                let _site = sagebrush_interrupt::enter($site);
+                let result = crate::l2::l2_budgeted_typed(b, copy, rt.cap);
+                // (tests: a stopped attempt left nothing allocated, its copy
+                // included: the rows are as they were before it)
+                #[cfg(test)]
+                if let Err(crate::l2::L2Err::Fallback(_)) = result {
+                    assert_eq!(crate::alloc_spy::live(), live0, "a stopped L2 attempt left allocations live");
+                    lll::LIVE_CHECKED.with(|c| c.set(c.get() + 1));
+                }
+                (state, result)
+            };
+            match result {
+                Ok(basis) => {
+                    // the rows and their charge go; the kept rows and the
+                    // cut's state are reserved while L^2's is still held
+                    drop(std::mem::take(&mut $rows));
+                    $held.shrink(0);
+                    #[cfg(test)]
+                    {
+                        $held_want = 0;
+                    }
+                    ledger!(b, concat!($before, " (L2 reduced)"), $($live,)* rt.state);
+                    let kept = b.reserve(Some(rt.kept))?;
+                    handoff!($($live,)* rt.state, rt.kept);
+                    $held = kept;
+                    #[cfg(test)]
+                    {
+                        $held_want = rt.kept;
+                    }
+                    drop(state);
+                    #[cfg(test)]
+                    lll::L2_REDUCED.with(|c| c.set(c.get() + 1));
+                    reduced2 = Some((basis, rt));
+                }
+                Err(crate::l2::L2Err::Fallback(_)) => {
+                    drop(state);
+                    #[cfg(test)]
+                    lll::FALLBACKS.with(|c| c.set(c.get() + 1));
+                    ledger!(b, concat!($before, " (L2 stopped)"), $($live,)* $held_want);
+                }
+                Err(crate::l2::L2Err::Refused(e)) => return Err(e),
+            }
+        }
+        match reduced2 {
+            Some((basis, rt)) => {
+                let (s, _exact) = {
+                    let _p = b.enter(Phase::Lattice);
+                    ledger!(b, $cut, $($live,)* rt.kept);
+                    lll::cut(b, &basis, &$bb, rt.cap)?
+                };
+                // (the cut's exact stage, when it ran: a peak candidate)
+                #[cfg(test)]
+                if let Some(x) = _exact {
+                    handoff!($($live,)* rt.kept, x);
+                }
+                let rows_b = rows_bytes(d, w, rt.cap);
+                $held.shrink(rows_b.unwrap_or(0));
+                #[cfg(test)]
+                {
+                    $held_want = rows_b.unwrap();
+                }
+                $rows = basis;
+                $rows.truncate(s);
+                (s, rt.cap)
+            }
+            None => {
+                // the exact LLL: reserve the lattice and the LLL state first (5.3)
+                let reduced = {
+                    let _p = b.enter(Phase::Lll);
+                    ledger!(b, $before, $($live,)* $held_want);
+                    let l = b.reserve(lll::lattice_bytes(d, w, cap))?;
+                    #[cfg(test)]
+                    {
+                        // the hand-off: the rows' charge is live until the LLL's replaces it
+                        handoff!($($live,)* $held_want, lll::lattice_bytes(d, w, cap).unwrap());
+                        $held_want = lll::lattice_bytes(d, w, cap).unwrap();
+                    }
+                    drop(std::mem::replace(&mut $held, l));
+                    let _site = sagebrush_interrupt::enter($site);
+                    lll::lll(b, std::mem::take(&mut $rows), cap)?
+                };
+                // the reduced rows and the d + 1 Gram determinants, at most `cap`
+                // bits each: both held until the cut ends, then the rows (gap 4)
+                let lll::Reduced { basis, d: dets } = reduced;
+                let dets_bytes = big_bytes(cap).and_then(|x| x.checked_mul(d as u64 + 1));
+                let kept = b.reserve(rows_bytes(d, w, cap).zip(dets_bytes).and_then(|(x, y)| x.checked_add(y)))?;
+                #[cfg(test)]
+                let (rows_b, dets_b) = (rows_bytes(d, w, cap).unwrap(), big_bytes(cap).unwrap() * (d as u64 + 1));
+                #[cfg(test)]
+                {
+                    // the hand-off: the LLL's charge is live until `kept` replaces it
+                    handoff!($($live,)* $held_want, rows_b + dets_b);
+                    $held_want = rows_b + dets_b;
+                }
+                $held = kept;
+                #[cfg(test)]
+                assert!(dets.iter().all(|x| x.bits() <= cap), "a Gram determinant above cap bits");
+                let mut s = basis.len();
+                {
+                    let _p = b.enter(Phase::Lattice);
+                    while s > 0 {
+                        ledger!(b, $cut, $($live,)* rows_b + dets_b);
+                        b.debit(Some(limbs(dets[s].bits()) * limbs(dets[s - 1].bits()) + 1))?;
+                        if dets[s] > &$bb * &dets[s - 1] {
+                            s -= 1;
+                        } else {
+                            break;
+                        }
+                    }
+                }
+                drop(dets);
+                $held.shrink(rows_bytes(d, w, cap).unwrap_or(0));
+                #[cfg(test)]
+                {
+                    $held_want = rows_b;
+                }
+                $rows = basis;
+                $rows.truncate(s);
+                (s, cap)
+            }
+        }
+    }};
+}
+
 /// The tests' record of the ledger's checkpoints and of the peak it
 /// predicts.
 #[cfg(test)]
@@ -506,64 +662,11 @@ fn lattice<'b>(b: &'b Budget, g: &[BigInt], m: &Modular, rest0: &[Held<'b>], a_l
             if added == 0 {
                 continue;
             }
-            // reduce: reserve the lattice and the LLL state first (5.3)
-            let d = rows.len();
-            let w = rows[0].len();
-            let e = rows.iter().map(|x| maxbits(x)).max().unwrap_or(0);
-            let cap = lll::cap_bits(d, e).ok_or_else(|| b.refuse("lll bits (overflow)", u64::MAX, 0))?;
-            let reduced = {
-                let _p = b.enter(Phase::Lll);
-                ledger!(b, "before LLL", whole, level_bytes, held_want);
-                let l = b.reserve(lll::lattice_bytes(d, w, cap))?;
-                #[cfg(test)]
-                {
-                    // the hand-off: the rows' charge is live until the LLL's replaces it
-                    handoff!(whole, level_bytes, held_want, lll::lattice_bytes(d, w, cap).unwrap());
-                    held_want = lll::lattice_bytes(d, w, cap).unwrap();
-                }
-                drop(std::mem::replace(&mut held, l));
-                let _site = sagebrush_interrupt::enter("recombination stage 1 LLL");
-                lll::lll(b, std::mem::take(&mut rows), cap)?
-            };
-            // the reduced rows and the d + 1 Gram determinants, at most `cap`
-            // bits each: both held until the cut ends, then the rows (gap 4)
-            let lll::Reduced { basis, d: dets } = reduced;
-            let dets_bytes = big_bytes(cap).and_then(|x| x.checked_mul(d as u64 + 1));
-            let kept = b.reserve(rows_bytes(d, w, cap).zip(dets_bytes).and_then(|(x, y)| x.checked_add(y)))?;
-            #[cfg(test)]
-            let (rows_b, dets_b) = (rows_bytes(d, w, cap).unwrap(), big_bytes(cap).unwrap() * (d as u64 + 1));
-            #[cfg(test)]
-            {
-                // the hand-off: the LLL's charge is live until `kept` replaces it
-                handoff!(whole, level_bytes, held_want, rows_b + dets_b);
-                held_want = rows_b + dets_b;
-            }
-            held = kept;
-            #[cfg(test)]
-            assert!(dets.iter().all(|x| x.bits() <= cap), "a Gram determinant above cap bits");
-            // the cut: drop the last row while |b_s*|^2 = d_s / d_{s-1} > B^2 (strictly)
+            // reduce, then cut with B^2 = r + c (r + 1)^2 (c: the columns so far)
             let bb = BigInt::from(r as u64) + BigInt::from(cols.len() as u64) * BigInt::from(r as u64 + 1).pow(2);
-            let mut s = basis.len();
-            {
-                let _p = b.enter(Phase::Lattice);
-                while s > 0 {
-                    ledger!(b, "the cut", whole, level_bytes, rows_b + dets_b);
-                    b.debit(Some(limbs(dets[s].bits()) * limbs(dets[s - 1].bits()) + 1))?;
-                    if dets[s] > &bb * &dets[s - 1] {
-                        s -= 1;
-                    } else {
-                        break;
-                    }
-                }
-            }
-            drop(dets);
-            held.shrink(rows_bytes(d, w, cap).unwrap_or(0));
+            let (mut s, _) = reduce_cut!(b, rows, held, held_want, [whole, level_bytes], bb, "recombination stage 1 LLL", "before LLL", "the cut");
             #[cfg(test)]
-            {
-                held_want = rows_b;
-            }
-            rows = basis;
-            rows.truncate(s);
+            let rows_b = held_want;
             ledger!(b, "certify", whole, level_bytes, rows_b);
             if fault(fault::FORCE_S0) {
                 s = 0;
@@ -840,59 +943,11 @@ fn stage2<'b>(b: &'b Budget, g: &[BigInt], m: &Modular, rest0: &[Held<'b>], a_la
             if added == 0 {
                 continue;
             }
-            let d = rows.len();
-            let w = rows[0].len();
-            let e = rows.iter().map(|x| maxbits(x)).max().unwrap_or(0);
-            let cap = lll::cap_bits(d, e).ok_or_else(|| b.refuse("lll bits (overflow)", u64::MAX, 0))?;
-            let reduced = {
-                let _p = b.enter(Phase::Lll);
-                ledger!(b, "stage 2 before LLL", whole, level_bytes, held_want);
-                let l = b.reserve(lll::lattice_bytes(d, w, cap))?;
-                #[cfg(test)]
-                {
-                    handoff!(whole, level_bytes, held_want, lll::lattice_bytes(d, w, cap).unwrap());
-                    held_want = lll::lattice_bytes(d, w, cap).unwrap();
-                }
-                drop(std::mem::replace(&mut held, l));
-                let _site = sagebrush_interrupt::enter("recombination stage 2 LLL");
-                lll::lll(b, std::mem::take(&mut rows), cap)?
-            };
-            let lll::Reduced { basis, d: dets } = reduced;
-            let dets_bytes = big_bytes(cap).and_then(|x| x.checked_mul(d as u64 + 1));
-            let kept = b.reserve(rows_bytes(d, w, cap).zip(dets_bytes).and_then(|(x, y)| x.checked_add(y)))?;
-            #[cfg(test)]
-            let (rows_b, dets_b) = (rows_bytes(d, w, cap).unwrap(), big_bytes(cap).unwrap() * (d as u64 + 1));
-            #[cfg(test)]
-            {
-                handoff!(whole, level_bytes, held_want, rows_b + dets_b);
-                held_want = rows_b + dets_b;
-            }
-            held = kept;
-            #[cfg(test)]
-            assert!(dets.iter().all(|x| x.bits() <= cap), "a Gram determinant above cap bits");
-            // the cut, with B^2 = r + c (r + 1)^2 (c: the columns so far)
+            // reduce, then cut with B^2 = r + c (r + 1)^2 (c: the columns so far)
             let bb = BigInt::from(r as u64) + BigInt::from(c as u64) * BigInt::from(r as u64 + 1).pow(2);
-            let mut s = basis.len();
-            {
-                let _p = b.enter(Phase::Lattice);
-                while s > 0 {
-                    ledger!(b, "stage 2 cut", whole, level_bytes, rows_b + dets_b);
-                    b.debit(Some(limbs(dets[s].bits()) * limbs(dets[s - 1].bits()) + 1))?;
-                    if dets[s] > &bb * &dets[s - 1] {
-                        s -= 1;
-                    } else {
-                        break;
-                    }
-                }
-            }
-            drop(dets);
-            held.shrink(rows_bytes(d, w, cap).unwrap_or(0));
+            let (mut s, _) = reduce_cut!(b, rows, held, held_want, [whole, level_bytes], bb, "recombination stage 2 LLL", "stage 2 before LLL", "stage 2 cut");
             #[cfg(test)]
-            {
-                held_want = rows_b;
-            }
-            rows = basis;
-            rows.truncate(s);
+            let rows_b = held_want;
             ledger!(b, "stage 2 certify", whole, level_bytes, rows_b);
             if fault(fault::FORCE_S0) {
                 s = 0;
@@ -1400,8 +1455,10 @@ pub(crate) mod tests {
     fn s6_tight_memory() {
         // the predicted peak (the formula, not an observed Budget::peak)
         let b = Budget::new(Limits { memory: 1 << 30, ..Limits::DEFAULT });
+        let routed = crate::lll::L2_REDUCED.with(|c| c.get());
         let (_, r, _) = s6_lattice(&b, None);
         assert_eq!(r.unwrap(), Some(1));
+        eprintln!("S_6: L2 reduced {} times", crate::lll::L2_REDUCED.with(|c| c.get()) - routed);
         let (_, peak, _) = ledger_log::get();
         let line = ledger_log::peak_line();
         drop(b);
@@ -1707,6 +1764,117 @@ pub(crate) mod tests {
         assert_eq!(e.need - e.remaining, 1, "{e}");
         assert_eq!(after, crate::alloc_spy::refused_at(), "allocations after the refusal");
         assert_eq!(b.live(), 0);
+    }
+
+    /// The LLL routes (LLL design r2, section 2.5), in both stages: the
+    /// exact LLL forced, the L^2 route as chosen, and L^2 made to stop on its
+    /// cap (`Bits`) or on its proof (`Precision`), then the exact LLL from the
+    /// original rows. Each certifies the same factors; every equality
+    /// checkpoint holds (the stopped attempt's state gone before the exact
+    /// LLL reserves); the predicted reservation peak is the Budget's
+    /// observed one; exactly that peak admits, one byte less refuses at that
+    /// reservation, before the allocation it would authorize, with no
+    /// allocation after the refusal; nothing stays reserved.
+    #[test]
+    fn every_lll_route_holds_the_ledger_in_both_stages() {
+        use crate::lll::{Force, FALLBACKS, FORCE, L2_REDUCED};
+        let count = || (FALLBACKS.with(|c| c.get()), L2_REDUCED.with(|c| c.get()));
+        for force in [Force::Exact, Force::Auto, Force::Bits, Force::BitsInRun, Force::Precision] {
+            FORCE.with(|f| f.set(force));
+            let (fb0, l20) = count();
+            let lc0 = crate::lll::LIVE_CHECKED.with(|c| c.get());
+            let b = Budget::new(Limits { memory: 1 << 30, ..Limits::DEFAULT });
+            let (_, r, rep) = s6_lattice(&b, None);
+            assert_eq!(r.unwrap(), Some(1), "{force:?}");
+            assert_eq!(rep.tag_breaches, 0, "{force:?}: {:?}", rep.first_breach);
+            let (reached, peak1, _) = ledger_log::get();
+            assert_eq!(b.peak(), peak1, "{force:?}: stage 1 predicted at line {}", ledger_log::peak_line());
+            assert_eq!(b.live(), 0);
+            if force != Force::Exact && force != Force::Auto {
+                assert!(reached.get("before LLL (L2 stopped)").copied().unwrap_or(0) >= 1, "{force:?}: {reached:?}");
+            }
+            let b = Budget::new(Limits { memory: 1 << 30, ..Limits::DEFAULT });
+            let (r, rep, _) = s5_stage2(&b, None);
+            assert_eq!(r.unwrap(), 1, "{force:?}");
+            assert_eq!(rep.tag_breaches, 0, "{force:?}: {:?}", rep.first_breach);
+            let (_, peak2, _) = ledger_log::get();
+            assert_eq!(b.peak(), peak2, "{force:?}: stage 2 predicted at line {}", ledger_log::peak_line());
+            assert_eq!(b.live(), 0);
+            let (fb, l2) = count();
+            let (fb, l2) = (fb - fb0, l2 - l20);
+            // (every fallback's live heap checked back at its level before the copy)
+            assert_eq!(crate::lll::LIVE_CHECKED.with(|c| c.get()) - lc0, fb, "{force:?}");
+            match force {
+                Force::Exact => assert_eq!((fb, l2), (0, 0)),
+                Force::Auto => assert!(fb == 0 && l2 > 0, "{force:?}: {fb} fallbacks, {l2} reduced"),
+                _ => assert!(fb > 0 && l2 == 0, "{force:?}: {fb} fallbacks, {l2} reduced"),
+            }
+            eprintln!("{force:?}: peaks {peak1} (stage 1), {peak2} (stage 2); {fb} fallbacks, {l2} reduced by L2");
+            for (stage, peak) in [(1, peak1), (2, peak2)] {
+                for (limit, admits) in [(peak, true), (peak - 1, false)] {
+                    let b = Budget::new(Limits { memory: 1 << 30, ..Limits::DEFAULT });
+                    let r = if stage == 1 { s6_lattice(&b, Some(limit)).1.map(|_| ()) } else { s5_stage2(&b, Some(limit)).0.map(|_| ()) };
+                    let after = crate::alloc_spy::allocated();
+                    if admits {
+                        assert!(r.is_ok(), "{force:?}: stage {stage} at its peak {peak}: {:?}", r.err().map(|e| e.to_string()));
+                    } else {
+                        let e = r.unwrap_err();
+                        assert_eq!((e.what, e.kind), ("memory", crate::Kind::Resource), "{force:?}, stage {stage}: {e}");
+                        assert_eq!(e.need - e.remaining, 1, "{force:?}, stage {stage}: {e}");
+                        assert_eq!(after, crate::alloc_spy::refused_at(), "{force:?}, stage {stage}: allocations after the refusal");
+                    }
+                    assert_eq!(b.live(), 0);
+                }
+            }
+        }
+        FORCE.with(|f| f.set(Force::Auto));
+    }
+
+    /// At the caller, the work limit ends the call (no fallback to the exact
+    /// LLL): a zero work budget on a lattice the L^2 route takes refuses with
+    /// L^2's work refusal, counts no fallback and leaves nothing reserved.
+    #[test]
+    fn a_work_refusal_at_the_caller_never_falls_back() {
+        use crate::lll::{Force, FALLBACKS, FORCE};
+        FORCE.with(|f| f.set(Force::Auto));
+        let mut rows: Vec<Vec<BigInt>> = (0..40)
+            .map(|i| {
+                let mut r: Vec<BigInt> = (0..40).map(|j| BigInt::from((i == j) as u8)).collect();
+                r.push((BigInt::from(1) << 256u32) + BigInt::from(i));
+                r
+            })
+            .collect();
+        let b = Budget::new(Limits { work: 0, ..Limits::UNLIMITED });
+        let e = rows.iter().map(|r| maxbits(r)).max().unwrap();
+        let mut held_want = rows_bytes(40, 41, e).unwrap();
+        assert!(lll::l2_route(40, 41, e, held_want, rows_bytes).is_some());
+        let mut held = b.reserve(Some(held_want)).unwrap();
+        ledger_log::reset();
+        let fb0 = FALLBACKS.with(|c| c.get());
+        let result: FResult<(usize, u64)> = (|| Ok(reduce_cut!(&b, rows, held, held_want, [], BigInt::from(1), "work refusal route", "work refusal before", "work refusal cut")))();
+        let err = result.unwrap_err();
+        assert_eq!(err.what, "l2 work");
+        assert_eq!(FALLBACKS.with(|c| c.get()), fb0, "a work refusal fell back");
+        drop(held);
+        assert_eq!(b.live(), 0);
+    }
+
+    /// With a finite work limit the L^2 attempt's work stays debited when it
+    /// falls back: the forced fallback spends more than the exact LLL alone.
+    #[test]
+    fn a_fallback_keeps_the_l2_attempts_work() {
+        use crate::lll::{Force, FORCE};
+        let mut used = vec![];
+        for force in [Force::Exact, Force::Precision] {
+            FORCE.with(|f| f.set(force));
+            let b = Budget::new(Limits::CALIBRATED);
+            let left = b.work_left();
+            let (_, r, _) = ledger_log::without_checkpoints(|| s6_lattice(&b, None));
+            assert_eq!(r.unwrap(), Some(1), "{force:?}");
+            used.push(left - b.work_left());
+        }
+        FORCE.with(|f| f.set(Force::Auto));
+        assert!(used[1] > used[0], "work: exact {}, L2 then exact {}", used[0], used[1]);
     }
 
     /// A lattice (Stage 1) call on f's modular data under `b`, with `limit`

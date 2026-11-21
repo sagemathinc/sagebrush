@@ -146,13 +146,14 @@ export async function latexBoot(ws: Workspace | null, sandbox: { WorkerKernel: u
   // (the test build only: the page test gives its own Share (a spy, or null), set before this page's script runs; it
   //  wins over the page's, so the editor's own test stays the editor's)
   const share = typeof __SB_LATEX_TEST__ !== "undefined" && __SB_LATEX_TEST__ && "__sbTexShare" in g ? g.__sbTexShare : opts.share;
-  await mountTex(root, ws, tex, sandbox, share);
+  // (?embed=1: the Agents page's pane, a frame of this site's own (the page's frame-ancestors 'self'): web/latex/page.ts's embed)
+  await mountTex(root, ws, tex, sandbox, share, p.get("embed") === "1" && parent !== window);
   return true;
 }
 
 /** The editor for file `fid` mounted in `root`, as /?tex=<fid> has it (latexBoot); the app's self-test mounts it the same
  * way (web/notebook/selftest-latex.js). In the desktop app (`app`): no Agent, as on its notebook page, and Run says why
  * it doesn't run (it has no sandbox: `sandbox` is null there, index.html's RUNNER). */
-export async function mountTex(root: HTMLElement, ws: Workspace, fid: string, sandbox: { WorkerKernel: unknown; RunnerWorker: unknown } | null, share: TexShare | null | undefined) {
-  await (await import(PAGE)).mount(root, { ws, fid, back: () => leave("/"), sandbox, site: siteHref(""), ...(desktopApp() ? { app: APP_NO_RUN } : {}), fileMenu: (menu: HTMLElement, o: { print(): void; close(): void; text(): string | null; save(): Promise<void> }) => texFileMenu(ws, menu, { ...o, fid, share }), markdown: commentMarkdown });
+export async function mountTex(root: HTMLElement, ws: Workspace, fid: string, sandbox: { WorkerKernel: unknown; RunnerWorker: unknown } | null, share: TexShare | null | undefined, embed = false) {
+  await (await import(PAGE)).mount(root, { ws, fid, back: () => leave("/"), sandbox, site: siteHref(""), ...(desktopApp() ? { app: APP_NO_RUN } : {}), ...(embed ? { embed: true } : {}), fileMenu: (menu: HTMLElement, o: { print(): void; close(): void; text(): string | null; save(): Promise<void> }) => texFileMenu(ws, menu, { ...o, fid, share }), markdown: commentMarkdown });
 }

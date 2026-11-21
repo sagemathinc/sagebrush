@@ -31,6 +31,11 @@ const stored = Object.fromEntries(inv.items.map((it) => [it.id, LAZY.filter((_, 
 ok(inv.items.every((it) => it.stored === stored[it.id]), "K3: each item's stored bytes are its files' DIGESTS sizes");
 ok(inv.totals.files === LAZY.length && inv.totals.stored === Object.values(stored).reduce((a, b) => a + b, 0), "K3: the totals are the sums");
 ok(!/lib\/|\.json|\?h=|[0-9a-f]{16}/.test(invText), "K3: the inventory names no path and no hash");
+// (a Sage-layer module's own group is the Sage item's: Sage downloaded for offline use has finite-field matrices
+// (mod-sage-ffmat, which the Sage start leaves to its first use) and curves over GF(p) without "Other Python modules")
+const sageItem = inv.items.find((it) => it.id === "sage"), modulesItem = inv.items.find((it) => it.id === "modules");
+ok(["mod-sage-ffmat", "mod-sage-ec-ff", "mod-sage-ffsub"].every((g) => sageItem?.groups.includes(g)), "the Sage item holds mod-sage-ffmat, mod-sage-ec-ff and mod-sage-ffsub: " + JSON.stringify(sageItem?.groups));
+ok(!(modulesItem?.groups ?? []).some((g) => g.startsWith("mod-sage-")), "the modules item holds no mod-sage- group");
 
 // Hidden items (@sagebrush's ruling on #847, Nov 8; agents-ui's three points): the Rill and Sprig items are in the
 // inventory, so every control above counts them, but each is hidden until the page can run its mode (Rill's A2,
@@ -48,6 +53,7 @@ ok(!visible.some((it) => it.id === "rill" || it.id === "sprig"), "hidden: a new-
 
 // K2: a group no rule places, and each cap exceeded, are refused by the build
 ok(refuses(() => itemOfGroup("brand-new-group"), /belongs to no item/), "K2: a library group no rule places is refused");
+ok(itemOfGroup("mod-sage-ffmat") === "sage" && itemOfGroup("mod-sage-ec-ff") === "sage" && itemOfGroup("mod-sagex") === "modules", "a mod-sage- group is the Sage item's; mod-sagex isn't one");
 ok(itemOfGroup("core") === "python" && itemOfGroup("sci") === "scientific" && itemOfGroup("sage-x") === "sage" && itemOfGroup("pkg-foo") === "pkg-foo" && itemOfGroup("mod-bar") === "modules", "K2: the rules place the known groups");
 const h = "0123456789abcdef";
 const lazy = (n) => Array.from({ length: n }, (_, i) => `lib/core.src.${(h + i.toString(16)).slice(-16)}.json`);

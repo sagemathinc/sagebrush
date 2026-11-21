@@ -4,6 +4,11 @@ import Integer` ...  Every sage.* module is a view of Sagebrush's public
 names (sage_all, then the Sage-layer modules); a name Sagebrush lacks is an
 ImportError, as for a missing name in Sage.
 
+A name is looked up in the name index (_sage_names): only the module that
+supplies it is imported, not every Sage-layer module.  `from sage.x import *`
+still gives every public name of the Sage layer, so it imports them all (and
+only then: a module's __all__ is computed when it is first asked for).
+
 Installed in pyjs (sage_all installs it there).  Never under CPython by
 default, where a real Sage may be installed: install() is explicit.
 """
@@ -29,23 +34,68 @@ _PACKAGES = {"sage"} | {"sage." + p for p in (
 _EXPLICIT = {"sage.manifolds.operators": ["grad", "div", "curl", "laplacian"]}
 
 
+def _source_of(name):
+    """The Sage-layer module whose attribute `name` a sage.* module gives, as
+    the name index records it (the session's names, then the names only Sage's
+    module paths reach), or None.  The same module as the first of _SOURCES
+    that has the name (engine/py/test_sage_names.py checks that)."""
+    import _sage_names as N
+    m = N.NAMES.get(name)
+    if m is not None:
+        return m
+    m = N.SHIM_NAMES.get(name)
+    if m is not None:
+        return m
+    if name in N.ALIASES or name in _all_names():
+        return "sage_all"
+    return None
+
+
+_ALL = []
+
+
+def _all_names():
+    if not _ALL:
+        import _sage_names as N
+        _ALL.append(frozenset(N.ALL))
+    return _ALL[0]
+
+
+def _star_names():
+    """Every public name of the Sage layer, the first module of _SOURCES that
+    has a name first: what `from sage.x import *` binds."""
+    names = []
+    seen = set()
+    for src in _SOURCES:
+        try:
+            m = sys.modules.get(src) or __import__(src)
+        except ImportError:
+            continue
+        for n in getattr(m, "__all__", None) or [n for n in dir(m) if not n.startswith("_")]:
+            if n not in seen and not n.startswith("_"):
+                seen.add(n)
+                names.append(n)
+    return names
+
+
 class _SageModule(types.ModuleType):
     """A sage.* module: attribute lookup in Sagebrush's Sage layer."""
 
     def __getattr__(self, name):
+        if name == "__all__":
+            # asked for by `from sage.x import *` only: every public name of
+            # the Sage layer, so the whole layer is imported then, not before
+            self.__all__ = _star_names()
+            return self.__all__
         if name.startswith("__"):
             raise AttributeError(name)
         if name.islower() and self.__name__ in _PACKAGES and name != "all":
             # sage.rings.ideal is a module, not the function ideal
             return self._submodule(name)
         if not name.startswith("_"):
-            for src in _SOURCES:
-                try:
-                    m = sys.modules.get(src) or __import__(src)
-                except ImportError:
-                    continue
-                if hasattr(m, name):
-                    return getattr(m, name)
+            src = _source_of(name)
+            if src is not None:
+                return getattr(sys.modules.get(src) or __import__(src), name)
             # a submodule by attribute (sage.rings.ideal.Katsura without an
             # import, as in a Sage session)
             if name.islower():
@@ -82,25 +132,10 @@ class _Finder:
         return m
 
     def exec_module(self, module):
-        # `from sage.x import *`: every public name of the Sage layer
+        # `from sage.x import *` gives every public name of the Sage layer
+        # (__getattr__ computes __all__ when it is asked for)
         if module.__name__ in _EXPLICIT:
             module.__all__ = [n for n in _EXPLICIT[module.__name__] if hasattr(module, n)]
-            parent, _, child = module.__name__.rpartition(".")
-            if parent and parent in sys.modules:
-                setattr(sys.modules[parent], child, module)
-            return
-        names = []
-        seen = set()
-        for src in _SOURCES:
-            try:
-                m = sys.modules.get(src) or __import__(src)
-            except ImportError:
-                continue
-            for n in getattr(m, "__all__", None) or [n for n in dir(m) if not n.startswith("_")]:
-                if n not in seen and not n.startswith("_"):
-                    seen.add(n)
-                    names.append(n)
-        module.__all__ = names
         parent, _, child = module.__name__.rpartition(".")
         if parent and parent in sys.modules:
             setattr(sys.modules[parent], child, module)

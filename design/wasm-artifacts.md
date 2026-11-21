@@ -163,10 +163,10 @@ there's no race with `wasm-publish`.
 | workflow | reads `wasm/` | change |
 |---|---|---|
 | `ci.yml` | most jobs | `engine-wasm` becomes a call of the producer |
-| `app.yml` (desktop page, on PRs and master pushes for `wasm/**` and more) | `pnpm run build`, `build-cli.mjs`, `web/build.ts` | calls the producer; its path filter's `wasm/**` becomes `wasm/pins.json` |
+| `app.yml` (desktop page, on PRs and master or track pushes for `wasm/**` and more) | `pnpm run build`, `build-cli.mjs`, `web/build.ts` | calls the producer; its path filter's `wasm/**` becomes `wasm/pins.json` |
 | `app-mobile.yml`, `app-mobile-selftest.yml`, `app-ios-selftest.yml` | `build-cli.mjs`, `web/build.ts` | call the producer; their path filters (app files, and web/index.html for the self-tests, today) are unchanged |
 | `optional.yml` | `build-cli.mjs` | calls the producer |
-| `nightly.yml` (schedule) | `build-cli.mjs`, `web/build.ts` | calls the producer |
+| `nightly.yml` (schedule; since removed: its jobs are `ci.yml`'s long tier, `export-controls` and `lookalike-controls`) | `build-cli.mjs`, `web/build.ts` | calls the producer |
 | `release.yml` (`v*` tags) | `build-cli.mjs`, `web/build.ts`, `cdn/build.mjs` | calls the producer; a tag's commit is on master, so its pins are published and fetched, and anything else fails |
 | `pypi.yml`, `pypi-mcp.yml`, `install-timing.yml`, `app-ios-generate.yml` | no | none |
 
@@ -179,9 +179,9 @@ credentials.
 ## 5. Publishing, on a push to master
 
 A new job, `wasm-publish`:
-- **Where it runs:** only for `push` to `master` in `sagemathinc/sagebrush`. It runs in a GitHub environment,
-  `wasm-publish`, whose deployment branches are `master` only and which holds the bucket credentials.
-  `concurrency: wasm-publish`, never cancelled.
+- **Where it runs:** only for `push` to `master` in `sagemathinc/sagebrush`, plus a repair dispatch on master. It runs
+  in a GitHub environment, `wasm-publish`, whose deployment branch is `master` and which holds the bucket credentials.
+  Its concurrency group is global and is never cancelled. Track branches never reach this job or its credential.
 - **Its bytes:** `needs: engine-wasm` of the same run. It takes that run's artifact, checks the manifest (this run,
   this commit), and checks that all four modules match `pins.json`. Otherwise it stops.
 - **For each of the four pins:** a bounded GET of the key (section 6's limits).
@@ -190,20 +190,22 @@ A new job, `wasm-publish`:
   - **Absent:** upload it with a conditional write (only if the key doesn't exist), then GET it back from
     `get.sagebrush.space` and check its length and sha256.
 - **It succeeds** only when all four keys have been read back and match.
-- **Afterwards**, in the same run, `wasm-pins.mjs --verify-published` (`needs: wasm-publish`) checks master's pins
-  again from a cold client.
+- **Afterwards**, in the same run, `wasm-pins.mjs --verify-published` checks that commit's pins again from a cold
+  client.
 
 **The first publication.** The four current modules are published once, before any pin depends on the bucket:
-- by a `workflow_dispatch` of the same workflow, on ref `master` only (the environment's branch rule enforces
+- by a `workflow_dispatch` of the same workflow on master (the environment's branch rule enforces
   that);
 - its `engine-wasm` builds the modules in that run and checks them against the committed files and `pins.json`;
 - `wasm-publish` then runs as above.
 
-This is the only exception to "push to master", and the dispatch stays as the repair path for a failed publish.
+This is the only non-push publication path, and the dispatch stays as the repair path for a failed or newly enabled
+master publication, without requiring a new commit.
 
 **The credentials.** Today the bucket credentials (`R2_ACCOUNT_ID`, `R2_ACCESS_KEY_ID`, `R2_SECRET_ACCESS_KEY`) are
 repository-level secrets, and `release.yml`'s job has no environment. As part of step 2 of the rollout:
-- they move into two environments, `wasm-publish` and `releases`, each limited to its ref (`master`, and `v*` tags);
+- they move into two environments, `wasm-publish` and `releases`, limited to their trusted refs (`master` and `v*`
+  tags, respectively);
 - the repository-level copies are deleted;
 - `gh secret list` at repository level then shows none of them.
 
@@ -214,6 +216,12 @@ A maintainer makes these changes.
 An explicit step, never a hook: run by a developer (`pnpm wasm`), by `build-all.sh` and `test-all.sh`, and by the CI
 fetch step. One process handles all four modules: each at most once, at most two downloads at a time. No reader
 fetches on its own.
+
+The size gate has one additional base-only path. A track can contain a pin that has not yet reached master and is
+therefore deliberately unpublished. When `size-base` receives only genuine HTTP 404 responses for a base pin, it
+builds that base commit's engine from its own source and pinned toolchain, then requires all four output lengths and
+sha256 values to equal that base's `wasm/pins.json`. Any other fetch error, or any build/pin mismatch, fails closed.
+This gives track pull requests a valid measured base without exposing the publishing credential to a track.
 
 **For each module:**
 1. **`wasm/<module>` already matches the pin:** done. It's still hashed (a local read of up to 7.3 MB), with no
@@ -285,7 +293,7 @@ the limits without it.
 | `check-fresh-wasm.mjs`: the fresh build equals the committed bytes (an error on master, a dispatch or the schedule; a warning on a PR) | the fresh manifest equals the pins, with section 4's event policy |
 | `build-all.sh`: "byte-identical to the committed wasm" | "matches the pin" |
 | `cdn/build.mjs --check`: builds from the committed wasm | builds from the pinned wasm |
-| none | `wasm-pins.mjs --verify-published` on master pushes (after `wasm-publish`) and on the schedule: every pin at master's tip is in the bucket, with matching length and sha256 |
+| none | `wasm-pins.mjs --verify-published` after master pushes, and on the schedule: every selected commit's pin is in the bucket, with matching length and sha256 |
 | none | the scheduled check also reads the bucket's lifecycle rule: it covers only `dev/` |
 | `ci-paths.mjs`: `wasm/**` and two of the four builders | section 4's routing |
 
@@ -327,8 +335,8 @@ message:
   and the scheduled check notices.
 - **Unpinned bytes** (fresh or local mode) never reach a release, a package, the bucket, the size records or a
   performance measurement (section 3).
-- **Write access:** only `wasm-publish`, in its environment, on `master` (and its dispatch on `master`), can write.
-  It never overwrites a key, and it checks every key by reading it back.
+- **Write access:** only `wasm-publish`, in its environment, on `master` (including a dispatch there),
+  can write. It never overwrites a key, and it checks every key by reading it back.
 - **No new execution path.** The page already loads modules by URL only with their sha256
   (`src/runtime/wasm-asset.ts`; design/security.md, SEC-522-1). The same rule now applies at build time, and the
   page's runtime check is unchanged.
