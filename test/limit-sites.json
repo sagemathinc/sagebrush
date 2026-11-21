@@ -5053,6 +5053,11 @@
   "owner": "lattice reduction (engine/poly l2)",
   "reason": "the memory bound's arithmetic (l2_bytes): sizes a reservation; refuses nothing"
  },
+ "engine/poly/src/l2.rs :: l2_bytes_fails_closed :: assert!(l2_bytes(1, usize::MAX, 1).is_some()); #0": {
+  "class": "none",
+  "owner": "lattice reduction (engine/poly l2)",
+  "reason": "test code (and the tests-only entry that forces a proof path): exercises the budget, the cap and l2_bytes; refuses nothing itself"
+ },
  "engine/poly/src/l2.rs :: l2_bytes_fails_closed :: assert_eq!(l2_bytes(1, 1, u64::MAX), None); #0": {
   "class": "none",
   "owner": "lattice reduction (engine/poly l2)",
@@ -5069,6 +5074,11 @@
   "reason": "test code (and the tests-only entry that forces a proof path): exercises the budget, the cap and l2_bytes; refuses nothing itself"
  },
  "engine/poly/src/l2.rs :: l2_bytes_fails_closed :: assert_eq!(l2_bytes(usize::MAX, usize::MAX, u64::MAX), None); #0": {
+  "class": "none",
+  "owner": "lattice reduction (engine/poly l2)",
+  "reason": "test code (and the tests-only entry that forces a proof path): exercises the budget, the cap and l2_bytes; refuses nothing itself"
+ },
+ "engine/poly/src/l2.rs :: l2_bytes_fails_closed :: const WIDE: &[(usize, usize, u64)] = &[(usize::MAX, 2, 64), (3, usize::MAX, 1 << 24)]; #0": {
   "class": "none",
   "owner": "lattice reduction (engine/poly l2)",
   "reason": "test code (and the tests-only entry that forces a proof path): exercises the budget, the cap and l2_bytes; refuses nothing itself"
@@ -6120,7 +6130,12 @@
   "owner": "lattice reduction (engine/poly lll)",
   "reason": "test code: exercises the routes, the cut, the budget and the census; refuses nothing itself"
  },
- "engine/poly/src/lll.rs :: the_route_sizes_fail_closed :: for (d, w, c) in [(usize::MAX, 1, 1), (1, 1, u64::MAX), (1 << 32, 1 << 32, 64), (1 << 20, 1, u64::MAX / 4)] { #0": {
+ "engine/poly/src/lll.rs :: the_route_sizes_fail_closed :: const WIDE: &[(usize, usize, u64)] = &[(usize::MAX, usize::MAX, 64)]; #0": {
+  "class": "none",
+  "owner": "lattice reduction (engine/poly lll)",
+  "reason": "test code: exercises the routes, the cut, the budget and the census; refuses nothing itself"
+ },
+ "engine/poly/src/lll.rs :: the_route_sizes_fail_closed :: for &(d, w, c) in [(usize::MAX, 1, 1), (1, 1, u64::MAX), (1 << 20, 1, u64::MAX / 4)].iter().chain(WIDE) { #0": {
   "class": "none",
   "owner": "lattice reduction (engine/poly lll)",
   "reason": "test code: exercises the routes, the cut, the budget and the census; refuses nothing itself"

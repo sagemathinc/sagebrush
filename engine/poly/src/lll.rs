@@ -1054,8 +1054,14 @@ mod tests {
         let rows = |d: usize, w: usize, c: u64| (d as u64).checked_mul(w as u64)?.checked_mul(c / 8 + 32);
         assert_eq!(l2_cap(1, u64::MAX), None);
         assert_eq!(l2_cap(usize::MAX, u64::MAX - 63), None);
+        // (a shape past a 32-bit usize only where usize holds it; the widest
+        // a 32-bit one holds there)
+        #[cfg(target_pointer_width = "64")]
+        const WIDE: &[(usize, usize, u64)] = &[(1 << 32, 1 << 32, 64)];
+        #[cfg(not(target_pointer_width = "64"))]
+        const WIDE: &[(usize, usize, u64)] = &[(usize::MAX, usize::MAX, 64)];
         // (the row length enters only through its logarithm)
-        for (d, w, c) in [(usize::MAX, 1, 1), (1, 1, u64::MAX), (1 << 32, 1 << 32, 64), (1 << 20, 1, u64::MAX / 4)] {
+        for &(d, w, c) in [(usize::MAX, 1, 1), (1, 1, u64::MAX), (1 << 20, 1, u64::MAX / 4)].iter().chain(WIDE) {
             assert_eq!(cut_bytes(d, w, c), None, "{d} {w} {c}");
             assert_eq!(cut_exact_bytes(d, w, c), None, "{d} {w} {c}");
         }
