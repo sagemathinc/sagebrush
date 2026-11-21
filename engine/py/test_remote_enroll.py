@@ -347,10 +347,40 @@ def test_login_approved():
     assert slept == [5, 5, 10, 10]  # (slow_down: 5 s more from then on)
     assert (k.remote_id, k.origin, k.name) == ("r" + "B" * 20, "https://sagebrush.space", "box (2)")
     assert "https://sagebrush.space/remote/activate?code=BCDFGHJK" in said and "BCDF-GHJK" in said
+    assert "(Waiting 10 minutes.)" in said  # (a life under two hours, in minutes)
     path, body = cloud.requests[0]
     assert path == "/api/remote/v1/device"
     assert body == {"kind": "runner", "name": "box", "pub": k.jwk()}  # (the public key only)
     assert keys.b64url(k._d) not in json.dumps(cloud.requests)
+
+
+def day_cloud(polls, life=86400, interval=5):
+    return FakeCloud(polls, device=(200, {
+        "device_code": "D" * 43, "user_code": "BCDF-GHJK", "verification_uri": "https://sagebrush.space/remote/activate",
+        "verification_uri_complete": "https://sagebrush.space/remote/activate?code=BCDFGHJK", "interval": interval,
+        "expires_in": life}))
+
+
+def test_login_a_day():
+    # a code that lives a day (the server's deviceSeconds): accepted, said in hours, approved
+    k, slept, said = run_login(day_cloud([PENDING, OK]))
+    assert "(Waiting 24 hours.)" in said and k.remote_id == "r" + "B" * 20
+    # the client's own clock: pending all day stops at the day's end, not before
+    cloud = day_cloud([PENDING] * 1500, interval=60)
+    slept = []
+    t = [0.0]
+
+    def sleep(s):
+        slept.append(s)
+        t[0] += s
+    try:
+        enroll.login("https://sagebrush.space", "box", out=lambda s: None, sleep=sleep, clock=lambda: t[0], post=cloud.post)
+        raise AssertionError("enrolled")
+    except enroll.EnrollError as e:
+        assert "expired" in str(e)
+    assert 86400 < sum(slept) <= 86400 + 60, sum(slept)
+    # longer than a day: answered unexpectedly, refused
+    assert "unexpectedly" in login_error(day_cloud([OK], life=86401))
 
 
 def test_login_refusals():

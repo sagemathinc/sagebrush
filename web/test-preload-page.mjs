@@ -19,6 +19,7 @@ import { createServer, request } from "node:http";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { devtoolsPort, startServe } from "./test-port.mjs";
+import { readPage } from "../scripts/notebook-page.mjs";
 
 const here = new URL(".", import.meta.url).pathname;
 const dist = join(here, "dist");
@@ -38,7 +39,8 @@ process.on("exit", () => { for (const c of children) try { c.kill("SIGKILL"); } 
 for (const sig of ["SIGINT", "SIGTERM"]) process.on(sig, () => { console.log(`FAIL stopped by ${sig} (in: ${phase})`); process.exit(1); });
 
 // the build's table, as the page has it (web/build.ts PRELOAD, in index.html's script)
-const html = readFileSync(join(dist, "index.html"), "utf8");
+// (the page as one file: its script, dist/sagebrush-app.js, back inline where the page names it: scripts/notebook-page.mjs)
+const html = readPage(join(dist, "index.html")).toString("utf8");
 const at = html.indexOf("{groups:{");
 let depth = 0, end = at;
 for (; end < html.length; end++) { if (html[end] === "{") depth++; else if (html[end] === "}" && --depth === 0) break; }

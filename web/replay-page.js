@@ -142,6 +142,8 @@ export function createJournal(o) {
         ? { mode: rec.mode, _code: rec.code, ...(rec.cell && rec.at ? { cell: rec.cell } : {}), ...(rec.repl ? { repl: true } : {}) }
         : { iid: rec.iid, values: rec.values }),
       ...(rec.clock ? { clock: rec.clock } : {}),
+      // (how its figures were shown, the notebook's Figures choice: given again when it is replayed)
+      ...(typeof rec.figures === "string" ? { figures: rec.figures } : {}),
       ...(rec.overflow ? { overflow: true } : {}),
       ...(rec.status ? { status: rec.status } : {}),
       // (the versions of the page's files whose bytes it read: a bundle carries only those, web/notebook/bundle-blobs.mjs)
@@ -225,7 +227,7 @@ export function createJournal(o) {
           const cell = r.cell ? o.nb.cells().find((c) => c.id === r.cell) : null;
           const box = cell?.out ?? document.createElement("div");
           if (cell) { o.nb.output.forget(box); box.replaceChildren(); cell.n.textContent = "[*]"; }
-          await new Promise((resolve) => o.kernel.execute(e.code, { mode: r.mode, repl: r.repl, cell: r.cell, clock: r.clock ?? [], forget: r.forget, mangle: !!r.mangle, seed: r.seed }, {
+          await new Promise((resolve) => o.kernel.execute(e.code, { mode: r.mode, repl: r.repl, cell: r.cell, clock: r.clock ?? [], forget: r.forget, mangle: !!r.mangle, seed: r.seed, figures: r.figures }, {
             start() {},
             ...o.nb.output.sink(box),
             done() { k++; if (cell) cell.n.textContent = `[${k}]`; resolve(); },
@@ -240,7 +242,7 @@ export function createJournal(o) {
             it.out.replaceChildren();
           }
           const quiet = { start() {}, out() {}, display() {}, interact() {}, clear() {} };
-          await new Promise((resolve) => o.kernel.interact(r.iid, r.values, { ...quiet, done: resolve, stopped: resolve, skipped: resolve }, { clock: r.clock ?? [] }));
+          await new Promise((resolve) => o.kernel.interact(r.iid, r.values, { ...quiet, done: resolve, stopped: resolve, skipped: resolve }, { clock: r.clock ?? [], figures: r.figures }));
         }
         recorded += r.ms ?? 0;
         actual += performance.now() - t0;

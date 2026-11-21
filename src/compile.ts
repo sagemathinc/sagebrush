@@ -11,7 +11,7 @@ import * as TK from "../pyparse/src/tokens.gen";
 import { analyze, SyntaxErr } from "./scope";
 import { Emitter, Compiled } from "./emit";
 import { R, ENTRY_FILE, ENTRY_NAME, frameState } from "./runtime/index";
-import { cwdPath, isBuiltinModule } from "./runtime/modules";
+import { cwdPath, isBuiltinModule, oserr as fsOSError } from "./runtime/modules";
 import { dictDelete } from "./runtime/object";
 import { admitIndex, checkChunk, gradingExcluded, PkgsetError, type ChunkRef, type SetPlan, type SrcChunk, type PreChunk } from "./pkgset";
 import { INTR, INTR_GRADING } from "./runtime/interrupt";
@@ -397,7 +397,15 @@ const dirExists = (p: string) => {
 const fileRead = (p: string) => {
   const checked = mounted.get(p);
   if (checked !== undefined) return checked;
-  if (embedded === undefined || !p.startsWith(LIB_VIRTUAL + "/")) return readFileSync(cwdPath(p), "utf8");
+  if (embedded === undefined || !p.startsWith(LIB_VIRTUAL + "/")) {
+    // (a file there that can't be read, a shared file whose bytes are not the ones shared say: the OSError open()
+    // raises on it, as CPython's loader does, not an internal error)
+    try {
+      return readFileSync(cwdPath(p), "utf8");
+    } catch (e) {
+      return fsOSError(e, p);
+    }
+  }
   try {
     return embedded[p.slice(LIB_VIRTUAL.length + 1)];
   } catch (e: any) {

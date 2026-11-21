@@ -20,6 +20,7 @@
   /* the list of chats */
   nav.side { width: 250px; flex: none; background: var(--side); border-right: 1px solid var(--line); display: flex; flex-direction: column; padding: 10px; gap: 8px; }
   nav.side .brand { font-weight: 650; padding: 4px 6px 8px; display: flex; align-items: center; gap: 8px; }
+  nav.side .brand .sb-mark { flex: none; }
   nav.side #new { border: 1px solid var(--line); background: var(--card); border-radius: 8px; padding: 7px 10px; text-align: left; cursor: pointer; }
   nav.side #new:hover { border-color: #c9c5b8; }
   #threads { overflow: auto; display: flex; flex-direction: column; gap: 2px; }
@@ -27,13 +28,32 @@
   .thread:hover { background: #e8e5db; }
   .thread.on { background: #e2ded2; font-weight: 550; }
   .thread .dot { width: 7px; height: 7px; border-radius: 50%; background: var(--accent); margin-left: auto; flex: none; animation: pulse 1.2s infinite; }
-  nav.side .foot { margin-top: auto; font-size: 12px; color: var(--muted); padding: 6px; }
+  nav.side .foot { font-size: 12px; color: var(--muted); padding: 6px; }
+  /* (the files, one big button at the foot of the chat list: a person who came here from an agent's link finds them
+     without knowing the small switch at the top) */
+  nav.side #files-big { margin-top: auto; display: flex; align-items: center; gap: 10px; width: 100%; padding: 11px 12px; border: 1px solid var(--line); border-radius: 10px; background: var(--card); color: inherit; font: inherit; font-size: 15px; font-weight: 600; text-align: left; cursor: pointer; }
+  nav.side #files-big:hover { border-color: #c9c5b8; }
+  nav.side #files-big:focus-visible { outline: 2px solid #4a6b49; outline-offset: 1px; }
+  nav.side #files-big svg { width: 20px; height: 20px; flex: none; }
 
   /* the chat: primary, full height */
   main { flex: 1; min-width: 0; display: flex; flex-direction: column; }
   .top { display: flex; flex-wrap: wrap; align-items: center; gap: 4px 10px; padding: 9px 16px; border-bottom: 1px solid var(--line); flex: none; min-width: 0; }
   .top #who { min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
-  .top #menu { display: none; border: 0; background: none; font-size: 20px; cursor: pointer; }
+  .top #menu { display: none; }
+  /* (the side panel's toggle, as the files' corner button on the other pages (William, Nov 12: the same in every mode):
+     the panel icon alone; in the chat list's header while it is shown, at the left of the top bar while it is hidden) */
+  .sb-side-toggle { display: inline-grid; place-items: center; flex: none; width: 32px; height: 32px; padding: 0; border: 0; border-radius: 8px; background: none; color: #5d645f; cursor: pointer; }
+  .top #menu.sb-side-toggle, nav.side #sidetoggle { border: 0; background: none; }
+  .top #menu.sb-side-toggle:hover, nav.side #sidetoggle:hover, .sb-side-toggle:hover { background: rgba(0, 0, 0, .07); color: var(--fg, #1f2421); }
+  .sb-side-toggle:focus-visible { outline: 2px solid var(--accent); outline-offset: -2px; }
+  .sb-side-toggle svg { width: 18px; height: 18px; }
+  nav.side .brand { padding: 0 0 6px; gap: 6px; }
+  nav.side .brand .brand-name { font-size: 15px; font-weight: 650; }
+  .top .wordmark { color: #4a6b49; font-size: 20px; font-weight: 700; letter-spacing: -0.01em; text-decoration: none; margin-right: 6px; }
+  body.side-hidden nav.side, body.side-hidden #sep-side { display: none !important; }
+  body.side-hidden .top #menu { display: inline-grid; }
+  body.side-hidden .top { padding-left: 8px; }
   .agent { display: flex; align-items: center; gap: 8px; font-weight: 600; }
   .agent .conn { width: 8px; height: 8px; border-radius: 50%; background: #b8b4a8; }
   .agent .conn.on { background: var(--ok); }
@@ -41,6 +61,15 @@
   .top .spacer { flex: 1; }
   .top button { font: inherit; font-size: 13px; border: 1px solid var(--line); background: var(--card); border-radius: 8px; padding: 4px 10px; cursor: pointer; }
   .top button.link { border: 0; background: none; color: var(--accent2); text-decoration: underline; }
+  /* (Copy chat: the conversation's first row, at its right; the header has no room for it at the chat's narrowest) */
+  #log-tools { display: flex; justify-content: flex-end; margin: -12px 0 6px; }
+  #log-tools[hidden] { display: none; }
+  #copychat { font: 12px system-ui, sans-serif; border: 1px solid var(--line); background: var(--card); color: var(--muted); border-radius: 6px; padding: 2px 8px; cursor: pointer; }
+  #copychat:hover { color: var(--fg, #1f2421); }
+  .user, .turn { position: relative; }
+  .copy-msg { position: absolute; top: 0; right: 0; opacity: 0; font: 12px system-ui, sans-serif; border: 1px solid var(--line); background: var(--card); border-radius: 6px; padding: 2px 8px; cursor: pointer; }
+  .user:hover > .copy-msg, .turn:hover > .copy-msg, .copy-msg:focus-visible { opacity: 1; }
+  @media (hover: none) { .copy-msg { opacity: .8; } }
   .top button:disabled { opacity: .6; cursor: default; }
   #help { flex: none; margin: 8px 16px 0; padding: 10px 14px; border: 1px solid var(--line); background: #fffdf6; border-radius: 10px; font-size: 14px; }
   #help pre { background: var(--code); padding: 8px 10px; border-radius: 6px; overflow-x: auto; user-select: all; }
@@ -65,6 +94,8 @@
       .top #howto { margin-left: auto; }
       .top #who .conn { margin-right: 6px; }
     }
+    /* (the Sagebrush wordmark gives way first: the chat list's header still says where you are) */
+    @container sb-top (max-width: 600px) { .top .wordmark { display: none; } }
   }
   .demo.live { color: var(--ok); border-color: #b9d7b5; }
   #log { flex: 1; overflow-y: auto; overflow-x: hidden; padding: 24px 16px 8px; }
@@ -87,6 +118,7 @@
 
   .turn { margin-bottom: 26px; }
   .who { display: flex; align-items: center; gap: 7px; font-weight: 600; font-size: 14px; margin-bottom: 6px; }
+  .who-info { font-size: 12px; color: var(--muted); margin: -4px 0 6px 31px; }
   .avatar { color: var(--accent); font-size: 16px; }
   .demo { font-weight: 400; font-size: 11px; color: var(--muted); border: 1px solid var(--line); border-radius: 8px; padding: 0 6px; }
   .msg { margin: 6px 0 10px; }
@@ -125,6 +157,12 @@
   .att-detail > summary { cursor: pointer; color: var(--muted); }
   .att-detail pre { max-height: 240px; overflow: auto; white-space: pre-wrap; overflow-wrap: anywhere; margin: 4px 0 0; padding: 6px 8px; background: var(--code-bg, rgba(127,127,127,.08)); border-radius: 6px; }
   .att-actions { display: flex; gap: 8px; margin-top: 8px; }
+  .att-body { font-size: 14px; margin-top: 4px; }
+  .att-reason { font-size: 14px; color: var(--muted); margin-top: 4px; overflow-wrap: anywhere; }
+  /* (a web card's three answers: Deny set apart; on a phone, one per row, Deny last after a gap) */
+  .att-actions.three { flex-wrap: wrap; }
+  .att-actions.three .att-deny { margin-left: auto; }
+  @media (max-width: 480px) { .att-actions.three { flex-direction: column; align-items: stretch; } .att-actions.three .att-deny { margin: 8px 0 0; } }
   .att-actions button, .composer button { border: 1px solid var(--line); background: var(--card); border-radius: 8px; padding: 5px 12px; cursor: pointer; }
   button.primary { background: var(--ink); color: #fff; border-color: var(--ink); }
   .att-state { font-size: 13px; color: var(--muted); margin-top: 6px; }
@@ -190,7 +228,7 @@
     /* (a window too narrow for 180 + 420 + 320 beside an open pane: the chat list becomes the narrow overlay's) */
     body.side-collapsed nav.side { position: fixed; z-index: 15; top: 0; bottom: 0; left: 0; transform: translateX(-100%); transition: transform .15s; }
     body.side-collapsed.nav-open nav.side { transform: none; box-shadow: 0 0 30px #0003; }
-    body.side-collapsed .top #menu { display: block; }
+    body.side-collapsed .top #menu { display: inline-grid; }
   }
   /* (the notebook's popups, appended to the body, above the pane: fixed at z-index 20 in full screen and below 900 px) */
   body.agents-host .sbnb-menu, body.agents-host .sbnb-completer, body.agents-host .sbnb-dropline, body.agents-host .sbnb-tip { z-index: 40; }
@@ -201,6 +239,13 @@
   .pane-bar.refused, .pane-bar.gone { background: #fdecea; }
   .pane-bar button { font-size: 12px; }
   .open-full { margin-left: 8px; font-size: 12px; }
+  .board-made { display: flex; align-items: center; gap: 12px; padding: 16px 18px; flex-wrap: wrap; }
+  .board-made .who { min-width: 0; overflow-wrap: anywhere; }
+  .board-made .open-board { background: #3f6b35; color: #fff; font-weight: 600; border-radius: 6px; padding: 5px 18px; text-decoration: none; }
+  .board-made .open-board[aria-disabled] { opacity: .5; pointer-events: none; }
+  .board-made .view-source { font: inherit; font-size: 12px; border: 1px solid var(--line, #cfd5c8); background: transparent; border-radius: 6px; padding: 4px 10px; cursor: pointer; }
+  .board-made .gone { color: var(--muted); }
+  .board-source { margin: 0 18px 16px; }
   .nb-notice { margin: 8px 12px; padding: 6px 10px; font-size: 12.5px; color: var(--muted); border: 1px solid var(--line); border-radius: 6px; }
   /* (the notebook's wrapper, not its root: a container query styles what is inside the container, and .sbnb is the root) */
   .nb-artifact { container-type: inline-size; container-name: sbnb-pane; }
@@ -239,7 +284,7 @@
   @media (max-width: 900px) {
     nav.side { position: fixed; z-index: 15; top: 0; bottom: 0; left: 0; transform: translateX(-100%); transition: transform .15s; }
     body.nav-open nav.side { transform: none; box-shadow: 0 0 30px #0003; }
-    .top #menu { display: block; }
+    .top #menu { display: inline-grid; }
     body.has-artifact #artifacts { position: fixed; inset: 0; width: auto; z-index: 20; }
   }
 </style>
@@ -259,26 +304,30 @@
 <div class="ws-error" id="ws-error" role="alert" hidden><span id="ws-error-text"></span> <span class="ws-why" id="ws-error-why"></span> <button id="ws-retry">Retry</button></div>
 <div class="app">
   <nav class="side" id="chats" aria-label="Chats">
-    <div class="brand"><svg class="sb-mark" viewBox="0 0 32 32" width="18" height="18" aria-hidden="true" style="vertical-align:-3px;border-radius:4px"><rect width="32" height="32" fill="#AE472A"/><path fill="#FADEB6" d="M4.4 30.8 L7.4 30.8 L10.6 30.6 L13.7 30.2 L16.7 29.6 L19.3 28.8 L21.6 27.7 L23.3 25.9 L23.9 23.4 L22.9 21.3 L21.2 20.1 L19.5 19.4 L17.7 18.9 L16.1 18.4 L14.9 18.0 L14.4 17.6 L14.2 17.1 L14.3 16.8 L14.5 16.4 L14.8 16.1 L15.4 15.6 L16.0 15.2 L16.7 14.8 L17.4 14.3 L18.0 13.7 L18.3 13.3 L18.4 12.8 L18.3 12.4 L18.1 12.0 L17.7 11.7 L17.2 11.6 L16.8 11.7 L16.4 11.9 L15.9 12.3 L15.4 12.6 L14.7 13.0 L13.9 13.5 L13.1 14.0 L12.3 14.8 L11.7 15.8 L11.4 17.3 L11.9 19.2 L13.3 20.5 L14.9 21.4 L16.6 22.0 L18.3 22.6 L19.5 23.2 L20.1 23.7 L20.1 23.8 L20.1 23.9 L19.5 24.3 L18.0 24.9 L15.8 25.4 L13.2 25.7 L10.3 25.8 L7.4 25.8 L4.6 25.6 L3.6 25.8 L2.7 26.3 L2.1 27.1 L1.9 28.1 L2.1 29.1 L2.6 30.0 L3.4 30.6 Z"/><path fill="#BAC49E" d="M16.4 13.8C13.6 8.6 17.6 4.2 28.4 3C28.2 10.4 24 15 16.4 13.8Z"/></svg> Sagebrush agents</div>
+    <div class="brand"><button id="sidetoggle" class="sb-side-toggle" aria-controls="chats"></button><span class="brand-name">Agents</span></div>
     <button id="new">＋ New chat</button>
     <div id="threads"></div>
-    <div class="foot">Shift+Enter sends · Alt+Enter queues · Ctrl+Enter posts a note</div>
+    <button id="files-big" type="button" title="Your files and notebooks, in the file browser">Files…</button>
+    <div class="foot">Shift+Enter sends (queues while the agent works) · Alt+Enter queues · Ctrl+Enter posts a note</div>
   </nav>
   <div class="sep" id="sep-side" role="separator" tabindex="0" aria-orientation="vertical" aria-label="Resize the chat list" aria-controls="chats"></div>
   <main>
     <div class="top">
-      <button id="menu" aria-label="Chats">☰</button>
+      <button id="menu" class="sb-side-toggle" aria-controls="chats"></button>
+      <a class="wordmark" href="/?home" title="About Sagebrush, and where to start">Sagebrush</a>
       <div class="agent" id="who"><span class="conn demo"></span>Claude <small>scripted demo</small></div>
       <span class="spacer"></span>
       <button id="howto" class="link">Use your own Claude</button>
+      <button id="review" class="link" hidden>Review changes</button>
       <button id="connect" hidden>Connect Claude</button>
       <span id="who-status" class="vh" role="status"></span>
     </div>
     <div id="help" hidden>
       <b>Run this on your computer</b>, then open the link it prints. <a href="/agents/connect/">Learn more</a>
-      <pre>npx -y https://agents.sagebrush.cloud/agents/sagebrush-agent-0.3.1.tgz</pre>
+      <pre>npx -y https://agents.sagebrush.cloud/agents/sagebrush-agent-0.7.8.tgz</pre>
     </div>
     <div id="log">
+      <div id="log-tools" hidden><button id="copychat" type="button" title="This chat as Markdown: what you wrote, the agent's answers, a line for each thing it did, and links to its files">⧉ Copy chat</button></div>
       <div id="empty">
         <h1>What should we work on?</h1>
         <div>Ask anything, or try one of these:</div>
@@ -291,13 +340,15 @@
       </div>
     </div>
     <div class="composer-wrap">
+      <!-- (the agent's bar: a row above the composer, never over it; workspace/agent-ui.ts) -->
+      <div data-sbag-slot="1"></div>
       <div class="composer">
         <div id="editor"></div>
         <div class="row">
-          <span class="hint"><kbd>Shift</kbd>+<kbd>Enter</kbd> send · <kbd>Alt</kbd>+<kbd>Enter</kbd> queue · <kbd>Ctrl</kbd>+<kbd>Enter</kbd> note</span>
+          <span class="hint"><kbd>Shift</kbd>+<kbd>Enter</kbd> <span id="keys">send</span> · <kbd>Alt</kbd>+<kbd>Enter</kbd> queue · <kbd>Ctrl</kbd>+<kbd>Enter</kbd> note</span>
           <span id="queued"></span>
           <button id="note" title="Post a note, not sent to the agent (Ctrl+Enter)">Note</button>
-          <button id="queue" title="Send after the current turn (Alt+Enter)" hidden>Queue</button>
+          <button id="send-now" title="Interrupt the agent and send this now" hidden>Send now</button>
           <button id="stop" title="Stop the agent (Esc)" hidden>Stop</button>
           <span id="send-hint" hidden><span id="send-hint-text">Not connected: Connect Claude to send</span> <button id="send-hint-act">Connect</button></span>
           <button id="send" title="Send (Shift+Enter)">Send</button>

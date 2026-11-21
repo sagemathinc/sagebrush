@@ -142,3 +142,47 @@ test("the fuzzer's cases in a shuffled order, in one session on the core: the sa
   const i = plain.findIndex((l, j) => l !== shuffled[j]);
   assert.ok(i < 0, `case ${i}: in order ${plain[i]?.slice(0, 200)}, shuffled ${shuffled[i]?.slice(0, 200)}`);
 });
+
+test("mpf_div at precision 0 keeps the quotient's own bits, as mpmath 1.4.1 gives them (the core alone: 1.3.0's rounds to one bit)", () => {
+  // the values are mpmath 1.4.1's python backend's (CPython); from_str and from_rational at precision 0 divide
+  // through mpf_div.  (The python backend here is still 1.3.0, so the core is checked against the values.)
+  const r = run("sagebrush", `from mpmath.libmp import mpf_div, from_int, from_man_exp, from_str, from_rational
+pairs = [(from_int(199999999), from_int(10**8)), (from_int(1), from_int(3)), (from_int(3), from_man_exp(7, -5))]
+for s, t in pairs:
+    print("div", [tuple(int(x) for x in mpf_div(s, t, 0, r)) for r in "nfcdu"])
+print("from_str", tuple(int(x) for x in from_str('1.5', 0)), tuple(int(x) for x in from_str('1.99999999', 0)))
+print("from_rational", tuple(int(x) for x in from_rational(1, 3, 0)), tuple(int(x) for x in from_rational(-22, 7, 0)))
+`);
+  assert.equal(r.status, 0, r.err);
+  const five = (t: string) => `[${Array(5).fill(t).join(", ")}]`;
+  assert.equal(
+    r.out,
+    `div ${five("(0, 17179869099, -33, 34)")}\n` +
+      `div ${five("(0, 171, -9, 8)")}\n` +
+      `div ${five("(0, 439, -5, 9)")}\n` +
+      "from_str (0, 3, -1, 2) (0, 17179869099, -33, 34)\n" +
+      "from_rational (0, 171, -9, 8) (1, 805, -8, 10)\n",
+  );
+});
+
+test("mpf_div at precision 0 by a power of two gives the exact quotient (past mpmath 1.4.1: one bit there, or no return)", () => {
+  // a power-of-two divisor only moves the exponent, so the dividend's own bits come back for every rounding;
+  // 1.4.1 rounds them to one bit there, or with round_floor/round_down (and 1/2 with round_nearest) doesn't return
+  const r = run("sagebrush", `from mpmath.libmp import mpf_div, from_int, from_man_exp, from_rational
+pairs = [(from_int(3), from_int(4)), (from_int(-3), from_int(4)), (from_int(1), from_int(2)), (from_man_exp(7, 3), from_man_exp(1, -2)), (from_man_exp(12345, -4), from_man_exp(1, 7))]
+for s, t in pairs:
+    print("div", [tuple(int(x) for x in mpf_div(s, t, 0, r)) for r in "nfcdu"])
+print("from_rational", tuple(int(x) for x in from_rational(3, 4, 0)), tuple(int(x) for x in from_rational(-1, 2, 0)))
+`);
+  assert.equal(r.status, 0, r.err);
+  const five = (t: string) => `[${Array(5).fill(t).join(", ")}]`;
+  assert.equal(
+    r.out,
+    `div ${five("(0, 3, -2, 2)")}\n` +
+      `div ${five("(1, 3, -2, 2)")}\n` +
+      `div ${five("(0, 1, -1, 1)")}\n` +
+      `div ${five("(0, 7, 5, 3)")}\n` +
+      `div ${five("(0, 12345, -11, 14)")}\n` +
+      "from_rational (0, 3, -2, 2) (1, 1, -1, 1)\n",
+  );
+});

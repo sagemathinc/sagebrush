@@ -1,0 +1,13 @@
+{"case": "singular_inverse", "ok": false, "type": "ZeroDivisionError", "msg": "input matrix must be nonsingular"}
+{"case": "singular_I_minus_Q", "ok": false, "type": "ZeroDivisionError", "msg": "input matrix must be nonsingular"}
+{"case": "nonsquare_inverse", "ok": false, "type": "ArithmeticError", "msg": "self must be a square matrix"}
+{"case": "dim_mismatch_mul", "ok": false, "type": "TypeError", "msg": "unsupported operand parent(s) for *: 'Full MatrixSpace of 2 by 3 dense matrices over Rational Field' and 'Full MatrixSpa"}
+{"case": "ragged_rows", "ok": false, "type": "ValueError", "msg": "inconsistent number of columns: should be 2 but got 1"}
+{"case": "non_numeric_entry", "ok": false, "type": "TypeError", "msg": "unable to convert 'a' to a rational"}
+{"case": "rational_div_zero", "ok": false, "type": "ZeroDivisionError", "msg": "rational division by zero"}
+{"case": "QQ_parse_1_over_0", "ok": false, "type": "TypeError", "msg": "unable to convert '1/0' to a rational"}
+{"case": "negative_power_singular", "ok": false, "type": "ZeroDivisionError", "msg": "input matrix must be nonsingular"}
+{"case": "fractional_power", "ok": false, "type": "NotImplementedError", "msg": "non-integral exponents not supported"}
+{"case": "nonsquare_power", "ok": false, "type": "ArithmeticError", "msg": "self must be a square matrix"}
+{"case": "index_out_of_range", "ok": false, "type": "IndexError", "msg": "matrix index out of range"}
+{"case": "add_mismatch", "ok": false, "type": "TypeError", "msg": "unsupported operand parent(s) for +: 'Full MatrixSpace of 2 by 2 dense matrices over Rational Field' and 'Full MatrixSpa"}

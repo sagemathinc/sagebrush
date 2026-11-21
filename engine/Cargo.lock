@@ -167,8 +167,7 @@ dependencies = [
 [[package]]
 name = "dashu-base"
 version = "0.6.1"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "861a614e79388a4c72aa66b0bdabc91e3a4f30d53e0c8d962953e207d75884d0"
+source = "git+https://github.com/sagemathinc/dashu?rev=2ebb9357c86b14e6d0a7a8e6d4d3c5f162ed164f#2ebb9357c86b14e6d0a7a8e6d4d3c5f162ed164f"
 dependencies = [
  "num-modular",
 ]
@@ -176,8 +175,7 @@ dependencies = [
 [[package]]
 name = "dashu-int"
 version = "0.6.2"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "64a0490b40a6a3f6427970035f17f76fd59c01d3cd9f9140809672863a0d64c8"
+source = "git+https://github.com/sagemathinc/dashu?rev=2ebb9357c86b14e6d0a7a8e6d4d3c5f162ed164f#2ebb9357c86b14e6d0a7a8e6d4d3c5f162ed164f"
 dependencies = [
  "cfg-if",
  "dashu-base",
@@ -781,6 +779,7 @@ version = "0.1.0"
 dependencies = [
  "num-integer",
  "num-traits",
+ "sagebrush-arith",
  "sagebrush-ball",
  "sagebrush-bigint",
  "sagebrush-interrupt",
@@ -854,6 +853,14 @@ dependencies = [
 [[package]]
 name = "sagebrush-ledger"
 version = "0.1.0"
+
+[[package]]
+name = "sagebrush-lfun"
+version = "0.1.0"
+dependencies = [
+ "sagebrush-ap",
+ "sagebrush-interrupt",
+]
 
 [[package]]
 name = "sagebrush-modsym"
@@ -948,6 +955,13 @@ dependencies = [
 ]
 
 [[package]]
+name = "sagebrush-primes"
+version = "0.1.0"
+dependencies = [
+ "sagebrush-interrupt",
+]
+
+[[package]]
 name = "sagebrush-py"
 version = "0.1.0"
 dependencies = [
@@ -1014,6 +1028,7 @@ dependencies = [
  "sagebrush-modsym",
  "sagebrush-mpoly",
  "sagebrush-poly",
+ "sagebrush-primes",
  "sagebrush-sym",
  "serde",
  "serde_json",

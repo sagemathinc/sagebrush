@@ -1021,7 +1021,7 @@ test("L28 a run while one runs: 409 busy", async () => {
   } finally { await t.s.close(); }
 });
 // (268 s on master: a slow test, test/slow-tests.ts)
-test("L29a the 10,000th record admitted (L29a+), the 10,001st 429 runs; L29b restarts at the cap: still 429, the count unchanged; L29c recordBytes <= 5,120,000", { skip: slowSkip }, async () => {
+test("L29a the 10,000th record admitted (L29a+), the 10,001st 429 runs; L29b restarts at the cap: still 429, the count unchanged; L29c recordBytes <= 5,120,000", { timeout: 900_000, skip: slowSkip }, async () => {
   const t = await setup();
   try {
     const b = await bind(t.page);

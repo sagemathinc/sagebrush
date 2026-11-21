@@ -1,0 +1,41 @@
+// One interpreter of the engine (app/engine/main.mjs): the page's own worker,
+// web/worker.ts as web/build.ts builds it (sagebrush-worker.js), run unchanged
+// in a Node worker thread.  This file gives it what a browser's Web Worker
+// would: self, postMessage and onmessage, its location, crossOriginIsolated,
+// and fetch, but only of its own files, under the engine's root folder; the
+// interpreter's synchronous reads (the engines' modules, the library's
+// chunks) use the same reader (__SAGEBRUSH_FETCH_SYNC__).  Then Node's own
+// globals are removed, so the bundle runs as it does in a browser: its file
+// system is web/shims/fs, never Node's (design/native-desktop.md §5: the
+// engine enforces the page's permissions, with no OS sandbox).
+import { parentPort, workerData } from "node:worker_threads";
+import { readFileSync } from "node:fs";
+import { registerHooks } from "node:module";
+import { engineRoot, localFile } from "./files.mjs";
+
+const where = engineRoot(workerData.root);
+const bundle = where.base;
+const local = (u) => localFile(where, u);
+const port = parentPort;
+const g = globalThis;
+g.self = g;
+g.name = typeof workerData.name === "string" ? workerData.name : "";
+g.location = new URL(bundle);
+g.crossOriginIsolated = true;
+g.__SAGEBRUSH_FETCH_SYNC__ = (u) => new Uint8Array(readFileSync(local(u)));
+g.fetch = async (u) => {
+  const p = local(typeof u === "string" || u instanceof URL ? u : u.url);
+  return new Response(readFileSync(p), { status: 200 });
+};
+g.postMessage = (m) => port.postMessage(m);
+// (messages that come while the bundle loads wait for it, in order: the page sends its init and files at once)
+let early = [];
+port.on("message", (data) => (early ? early.push(data) : g.onmessage?.({ data })));
+// (the bundle is an ES module, as a browser loads it, whatever the package.json above it says: the repository's
+// says commonjs)
+registerHooks({ load: (url, context, next) => (url === bundle ? { ...next(url, context), format: "module" } : next(url, context)) });
+// (Node's globals, which no browser worker has: the bundle's shims (web/shims/process.ts) stand in for process)
+for (const k of ["process", "Buffer", "global", "setImmediate", "clearImmediate"]) delete g[k];
+await import(bundle);
+for (const data of early) g.onmessage?.({ data });
+early = null;

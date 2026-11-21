@@ -128,7 +128,9 @@ export function runProc({ host, flags = [], src, schedule = [], guard_ms = G_MS,
   });
 }
 export function parseMarker(line) {
-  const m = line.replace(/\r/g, "").match(/^(ENTER|KI|RET|CONT|PROBE|END)\b(?: (\d+)(?= |$))? ?(.*)$/);
+  // (a Ctrl-C pressed while an input runs at the prompt is echoed by the terminal, "^C", before the program's
+  // next output, as at CPython's prompt: not part of the marker)
+  const m = line.replace(/\r/g, "").replace(/^(\^C)+/, "").match(/^(ENTER|KI|RET|CONT|PROBE|END)\b(?: (\d+)(?= |$))? ?(.*)$/);
   return m ? { mk: m[1] + (m[2] ? " " + m[2] : ""), rest: m[3].trim() } : null;
 }
 const safeRead = (f) => { try { return readFileSync(f, "utf8"); } catch { return ""; } };
@@ -192,7 +194,8 @@ export const TRIALS = {
         if (r.ki_text_t == null) return malformed("the KeyboardInterrupt text was seen but its line was never stamped");
         const g = pressGate(r, 0, r.ki_text_t, "the KeyboardInterrupt");
         if (g) return g;
-        if (!markT(r, "PROBE")) return { outcome: "FAIL", why: "the prompt did not take the next input", ...lat(r.ki_text_t - r.sends[0].t) };
+        // (the probe prints "PROBE 41": the marker with its number)
+        if (!markT(r, "PROBE 41")) return { outcome: "FAIL", why: "the prompt did not take the next input", ...lat(r.ki_text_t - r.sends[0].t) };
         return { outcome: "PASS", ...lat(r.ki_text_t - r.sends[0].t) };
       }
       if (!/KeyboardInterrupt/.test(r.text)) return { outcome: "FAIL", why: "no KeyboardInterrupt traceback" };
@@ -224,7 +227,7 @@ export const TRIALS = {
       return { outcome: "PASS", ...lat(l1), latency2_ms: Math.round(l2), latency2_raw_ms: l2 };
     },
   },
-  // S3: a second press 0.5 s after the first, while the first is pending (a regex that doesn't poll): escalation, 130.
+  // S3: a second press 0.5 s after the first (1.1 s on the prompt), while the first is pending (a regex that doesn't poll): escalation, 130.
   // Two independent verdicts on every judged path, CLI and prompt: escalation, as before, and first_stop, press 1
   // against the Stop bound (astra2/magma/daybreak2 #225 R3).  The missed first deadline is proven from the ACTUAL
   // sends, never the schedule: both presses sent at valid times more than 250 ms apart, with no endpoint for press 1
@@ -236,7 +239,9 @@ export const TRIALS = {
     hosts: ["cli", "prompt"],
     needsRegex: true,
     src: (n) => REGEX(n) + `print("ENTER 1", flush=True)\nre.match(r"(a+)+$", _s)\nprint("RET 1", flush=True)\n`,
-    schedule: () => [{ after: "ENTER 1", ms: 500, act: "press" }, { after: "ENTER 1", ms: 1000, act: "press" }],
+    // (the prompt merges a second press within 1 s of an unseen first into it, as a double tap: its press 2 comes
+    // 1.1 s after press 1, still inside the 2 s in which it escalates)
+    schedule: (host) => [{ after: "ENTER 1", ms: 500, act: "press" }, { after: "ENTER 1", ms: host === "prompt" ? 1600 : 1000, act: "press" }],
     judge(r, host) {
       const both = (v) => ({ escalation: v, first_stop: v });
       const bad = (w) => ({ ...malformed(w), ...both("INVALID") });
@@ -339,7 +344,7 @@ export const TRIALS = {
 // in it unless a step is off 2x by more than about 9%; [6, 12] s was a ratio of exactly 2, and train-17
 // missed it by 50 ms and 21 ms (n = 27 5950 ms, n = 28 12021 ms).  The floor keeps S4's margin: its
 // second press is at 3.5 s, so a 5.5 s call outlasts it by 2 s, and still by 350 ms if the trial runs
-// 30% shorter than its calibration (S3's presses are at 0.5 s and 1 s).  A size is never run twice.
+// 30% shorter than its calibration (S3's presses are at 0.5 s and 1 s, at 0.5 s and 1.6 s on the prompt).  A size is never run twice.
 export const REGEX_BAND = { floor: 5500, min: 6000, max: 8000, ceiling: 12000 };
 export function pickRegex(attempts) {
   const timed = attempts.filter((x) => x.T_ms != null);

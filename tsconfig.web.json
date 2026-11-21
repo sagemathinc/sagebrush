@@ -20,6 +20,11 @@
     "web/workspace/agent-grant.ts",
     "web/workspace/agent-pair.ts",
     "web/workspace/agent-ui.ts",
-    "web/preload.ts"
+    "web/workspace/agent-relay.ts",
+    "web/workspace/agent-canon.ts",
+    "web/workspace/agent-cards.ts",
+    "web/preload.ts",
+    "web/notebook/gradescope/dialog.ts",
+    "web/zip/read.ts"
   ]
 }

@@ -12,6 +12,10 @@
 /version.json
   Cache-Control: no-store
   Access-Control-Allow-Origin: *
+# the notebook page's script (web/build.ts): the page names it by its content's hash (?h=), so a URL's bytes never
+# change, and a browser keeps it until the page names another
+/sagebrush-app.js
+  Cache-Control: public, max-age=31536000, immutable
 # the interpreter's files, which the runner (an opaque origin: web/runner/)
 # fetches with CORS
 /sagebrush-worker.js
@@ -23,6 +27,19 @@
 # a shared collection page's link-preview image (web/share-client/og.png): fetched by preview
 # services, cross-origin; a redesign gets a new name, as crawlers keep cards for days
 /s/og.png
+  Cross-Origin-Resource-Policy: cross-origin
+  Cache-Control: public, max-age=86400
+# a shared collection's page (/s/<id> and /s/<id>@<version>, served from /s/) and its image: a share is reached by its
+# link only, never through a search engine, so never indexed (as its API and files say, web/share/server.ts NOINDEX).
+# robots.txt doesn't block /s/: a fetcher it blocks never sees this, and the link previews need the page fetched
+/s/*
+  X-Robots-Tag: noindex, nofollow
+# a public GitHub repository's notebook or folder (/gh/..., the same page as /s/, web/gh): GitHub's content, so never
+# indexed here
+/gh/*
+  X-Robots-Tag: noindex, nofollow
+# the "Open in Sagebrush" badge (web/gh/badge.svg): shown in other sites' READMEs, so cross-origin, and kept a day
+/badge/*
   Cross-Origin-Resource-Policy: cross-origin
   Cache-Control: public, max-age=86400
 # File > Examples… shows an example's page in an <iframe sandbox>, an opaque origin: what that page loads from

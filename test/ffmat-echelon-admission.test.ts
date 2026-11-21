@@ -6,6 +6,7 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { Worker } from "node:worker_threads";
 import { engineCall } from "../src/runtime/engine";
+import { SLOW } from "./slow-tests";
 
 // GF(p) echelon admission by shape (plan F4 r4, d5c6c1cd) in pyjs: the
 // cases of test/ffmat_echelon_admission.py (shared with CPython,
@@ -16,9 +17,9 @@ const CLI = join(__dirname, "..", "src", "cli.js");
 const CASES = join(__dirname, "..", "..", "test", "ffmat_echelon_admission.py");
 const HEAP = ["--max-old-space-size=1024", "--expose-gc"];
 // (the memory measurements build four 2^20-entry operands over a 63-bit
-// prime each: the full tier's, as the plan has them; SAGEBRUSH_FULL=1 runs
-// them anywhere)
-const FULL = ["workflow_dispatch", "schedule"].includes(process.env.GITHUB_EVENT_NAME ?? "") || process.env.GITHUB_REF === "refs/heads/master" || process.env.SAGEBRUSH_FULL === "1";
+// prime each: CI's long tier only, with the slow tests (test/slow-tests.ts:
+// SAGEBRUSH_SLOW_TESTS=1); SAGEBRUSH_FULL=1 runs them anywhere)
+const FULL = SLOW || process.env.SAGEBRUSH_FULL === "1";
 
 function run(c: string, timeout = 600000) {
   return spawnSync(process.execPath, [...HEAP, CLI, "--sage", CASES, c], { encoding: "utf8", timeout, maxBuffer: 1 << 24 });

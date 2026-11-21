@@ -45,17 +45,23 @@ try {
     await send("Page.navigate", { url: `http://127.0.0.1:${port}/${query}` });
     await until("document.querySelector('#status')?.textContent.startsWith('ready')", 60_000);
   };
-  const showEverything = () => ev(`(() => {
-    for (const id of ["installbtn", "moreagent", "termendbtn", "rtermbtn"]) document.getElementById(id).hidden = false;
+  // (the terminal on your computer offered as the page offers it: the peers answer, here stubbed, says the account can
+  // use it, asked at this first ⋯ open)
+  const showEverything = () => ev(`(async () => {
+    for (const id of ["installbtn", "moreagent", "termendbtn"]) document.getElementById(id).hidden = false;
+    const f = window.fetch;
+    window.fetch = (u, o) => String(u).includes("/api/remote/v1/peers") ? Promise.resolve(new Response('{"peers":[],"available":true}', { headers: { "content-type": "application/json" } })) : f(u, o);
     document.getElementById("morebtn").click();
-    return !document.getElementById("moremenu").hidden;
+    for (let i = 0; i < 100 && document.getElementById("rtermbtn").hidden; i++) await new Promise((r) => setTimeout(r, 20));
+    window.fetch = f;
+    return !document.getElementById("moremenu").hidden && !document.getElementById("rtermbtn").hidden;
   })()`);
 
   await send("Page.enable");
   await send("Runtime.enable");
   await send("Emulation.setFocusEmulationEnabled", { enabled: true });
   await send("Emulation.setDeviceMetricsOverride", { width: 800, height: 600, deviceScaleFactor: 1, mobile: false });
-  await goto("?phone=0&remote=1");
+  await goto("?phone=0");
 
   ok(await ev(`(() => {
     const g = document.querySelector('button[data-group="help"]');
@@ -64,8 +70,8 @@ try {
   })()`), "Help has the approved label, title and six rows in order");
   ok(await ev(`(() => {
     const ids = [...document.querySelectorAll('#moremenu > button, #moremenu > a')].map((x) => x.id || x.dataset.group);
-    return ids.indexOf("installbtn") === ids.indexOf("moretools") + 1 && document.getElementById("filesbtn").textContent === "Python's files";
-  })()`), "Install follows More tools, and Files is named Python's files");
+    return ids.indexOf("installbtn") === ids.indexOf("moresearch") + 1 && !ids.includes("moretools") && !document.getElementById("toolrow") && document.getElementById("filesbtn").textContent === "Python's files";
+  })()`), "Install follows Search functions, with no More tools (its row is gone), and Files is named Python's files");
   ok(await ev(`(() => {
     const a = Object.fromEntries(["howruns", "tipslink", "aboutlink", "llmslink", "supportlink"].map((id) => [id, document.getElementById(id).getAttribute("href")]));
     return JSON.stringify(a) === JSON.stringify({ howruns: "/articles/notebook/01-how-cells-run", tipslink: "/?home#tips", aboutlink: "/?home", llmslink: "/llms.txt", supportlink: "https://cocalc.ai/support/new" });
@@ -147,7 +153,7 @@ try {
   // The phone sheet bounds its height; every top-level and child row can be
   // focused and scrolled wholly into the sheet.
   await send("Emulation.setDeviceMetricsOverride", { width: 390, height: 844, deviceScaleFactor: 2, mobile: true });
-  await goto("?phone=1&remote=1");
+  await goto("?phone=1");
   ok(await showEverything(), "the phone ⋯ sheet opens with every conditional row offered");
   const phone = await ev(`(() => { const m = document.getElementById("moremenu"), r = m.getBoundingClientRect(); return { top: r.top, bottom: r.bottom, h: innerHeight, overflow: getComputedStyle(m).overflowY }; })()`);
   ok(phone.top >= 0 && phone.bottom <= phone.h && phone.overflow === "auto", `at 390x844 the ⋯ menu is a bounded scrolling sheet (${JSON.stringify(phone)})`);

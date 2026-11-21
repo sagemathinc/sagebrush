@@ -211,7 +211,9 @@ try {
   const send = (method, params = {}) => new Promise((r) => { const id = ++n; waiting.set(id, r); sock.send(JSON.stringify({ id, method, params })); });
   const ev = async (expr) => { const r = await send("Runtime.evaluate", { expression: expr, awaitPromise: true, returnByValue: true }); if (r.result?.exceptionDetails) throw new Error(JSON.stringify(r.result.exceptionDetails).slice(0, 400)); return r.result?.result?.value; };
   const until = async (expr, ms = 15000) => { const t = Date.now(); while (Date.now() - t < ms) { if (await ev(expr).catch(() => false)) return true; await sleep(100); } return false; };
-  const open = async (q) => { await send("Page.navigate", { url: origin + "/" + q }); await sleep(300); return until("window.ready === true"); };
+  // (the old document marked first: under load it can still answer `ready` after the navigation was asked, and a row
+  // acting on it then loses what it did when the new one replaces it (reload 9's Connect dialog))
+  const open = async (q) => { await ev("(window.__sbOldDoc = true, 1)").catch(() => {}); await send("Page.navigate", { url: origin + "/" + q }); await sleep(300); return until("window.ready === true && !window.__sbOldDoc"); };
   const click = (sel) => ev(`(() => { const b = [...document.querySelectorAll(${JSON.stringify(sel)})].pop(); if (!b) throw new Error("no ${sel}"); b.click(); return true; })()`);
 
   // (the page shows its bar once it has SENT the grant (agent-pair.ts allow(): grant.changed, then "granted"); the
@@ -368,6 +370,42 @@ try {
     const kept = await ev(`T.ws.agentGrants().then((g) => Object.values(g).map((k) => k.session))`);
     ok(kept.length === 1 && kept[0] === kept0[0], `reload ${n}: the kept session is still the one in force (${kept[0] === undefined ? "lost" : kept[0] === kept0[0] ? "same" : "changed"})`);
   }
+  // (W4, the chip: a newer pairing started while one is shown (the remembered grant's reconnect, asked again while the
+  //  agent is still connected; its hello answered 1 s late, so the newer pairing says nothing meanwhile): the old chip
+  //  goes at once, and its Revoke and Turn off running code, pressed after, act on nothing, neither pairing)
+  {
+    const shown = await ev(`(() => { window.__w4a = T.ui.pairing; const items = [...document.querySelectorAll(".sbag-bar [role=menuitem]")];
+      window.__w4rev = items.find((b) => b.textContent === "Revoke"); window.__w4off = items.find((b) => b.textContent === "Turn off running code");
+      return { granted: window.__w4a?.state === "granted", rev: !!window.__w4rev, off: !!window.__w4off }; })()`);
+    ok(shown.granted && shown.rev && shown.off, "W4 stale chip: the chip shows Revoke and Turn off running code " + JSON.stringify(shown));
+    await drive({ op: "helloslow", s: 1.0 });
+    const pressed = await ev(`(async () => { void T.ui.useRemembered();
+      for (let i = 0; i < 500 && T.ui.pairing === window.__w4a; i++) await new Promise((r) => setTimeout(r, 2));
+      const b = window.__w4b = T.ui.pairing;
+      const r = { replaced: b !== window.__w4a, quiet: b?.state === "connecting", bar: !!document.querySelector(".sbag-bar"), attached: window.__w4rev.isConnected || window.__w4off.isConnected };
+      window.__w4rev.click(); window.__w4off.click(); await new Promise((r) => setTimeout(r, 50));
+      return { ...r, after: b?.state, why: b?.closeReason ?? "" }; })()`);
+    ok(pressed.replaced && pressed.quiet && !pressed.bar && !pressed.attached && pressed.why !== "revoked by the person",
+      "W4 stale chip: a newer pairing, not yet heard from: the old chip is gone at once, and its Revoke and Turn off pressed then touch neither " + JSON.stringify(pressed));
+    ok((await drive({ op: "grant" })).ok?.run === true && (await ev(`T.ws.agentGrants().then((g) => Object.values(g).map((k) => k.session))`))[0] === kept0[0],
+      "W4 stale chip: the connected agent keeps May run code, and the remembered grant is kept");
+    await until(`T.ui.pairing !== window.__w4b || T.ui.pairing.state !== "connecting"`, 8000);
+    await drive({ op: "helloslow", s: 0 });
+    await sleep(2500); // (the reconnect's tries over: BUSY_FOR_MS)
+    // (and pressed again after a newer pairing is granted and shown: the old agent's connection let go, the remembered
+    //  grant reconnects, its chip drawn; the old chip's controls still act on nothing)
+    await ev(`(window.__w4a.drop(), 1)`);
+    await sleep(500);
+    await ev(`(void T.ui.useRemembered(), 1)`);
+    ok(await until(`T.ui.pairing !== window.__w4a && T.ui.pairing !== window.__w4b && T.ui.pairing?.state === "granted" && !!document.querySelector(".sbag-bar")`, 15000) && await grantedAtServer(),
+      "W4 stale chip: a newer pairing, granted, its chip shown");
+    const late = await ev(`(async () => { const c = T.ui.pairing; window.__w4rev.click(); window.__w4off.click(); await new Promise((r) => setTimeout(r, 300));
+      return { same: T.ui.pairing === c, state: c.state, run: !!c.grant?.run, why: c.closeReason ?? "", turnOff: [...document.querySelectorAll(".sbag-bar [role=menuitem]")].some((b) => b.textContent === "Turn off running code") }; })()`);
+    ok(late.same && late.state === "granted" && late.run && late.turnOff && (await drive({ op: "grant" })).ok?.run === true,
+      "W4 stale chip: the old chip's Revoke and Turn off, pressed after the newer pairing is granted, touch it neither " + JSON.stringify(late));
+    ok(await open(""), "W4 stale chip: reload");
+    ok(await until(`!!document.querySelector(".sbag-bar")`, 15000) && await grantedAtServer(), "W4 stale chip: after a reload the remembered agent reconnects, the bar shows it, its server has the grant");
+  }
   // ("May run code" given again only as kept (chat plan PR 4a, Q5): this grant was made with it; one kept before it
   //  existed has none, and a reconnect never promotes it)
   ok((await drive({ op: "grant" })).ok?.run === true, "a remembered grant made with May run code: given again with it");
@@ -388,15 +426,22 @@ try {
   ok(hellos.length >= 2 && span < 2000 && !(await ev(`!!document.querySelector(".sbag-bar")`)),
     `reload 4: while the old connection is held, the reconnect asks again within 2 s only, then gives up (${hellos.length} hellos over ${Math.round(span)} ms)`);
 
-  // (connect() shows the bar instead while an attempt is still connecting: asked again until its dialog is open)
-  const openConnect = async (code, port) => {
-    for (let i = 0; i < 40; i++) {
-      await ev(`(T.ui.connect(${JSON.stringify(code)}, ${JSON.stringify(String(port))}), 1)`);
-      if (await ev(`[...document.querySelectorAll(".sbag-box h2")].some((h) => h.textContent === "Connect an agent")`)) return true;
-      await sleep(25);
-    }
-    return false;
-  };
+  // (connect() shows the bar instead while an attempt is still connecting, and opens its dialog only when no pairing is
+  //  in progress: here asked in the page itself, in the same task that sees a refused attempt's pairing closed, before its
+  //  next attempt begins (BUSY_STEP_MS later); asked over CDP, a slow runner could miss that gap every time)
+  const openConnect = (code, port) => ev(`new Promise((res) => {
+    const t0 = Date.now();
+    const tick = () => {
+      const p = T.ui.pairing;
+      if (!p || p.state === "closed") {
+        T.ui.connect(${JSON.stringify(code)}, ${JSON.stringify(String(port))});
+        if ([...document.querySelectorAll(".sbag-box h2")].some((h) => h.textContent === "Connect an agent")) return res(true);
+      }
+      if (Date.now() - t0 > 10000) return res(false);
+      setTimeout(tick, 0);
+    };
+    tick();
+  })`);
   // ---- a retry superseded by the person's own Connect stops there (RECONNECT-OWNER-1): reconnect()'s path, a
   // remembered grant
   await sleep(1500); // (reload 4's hold over)
@@ -419,13 +464,20 @@ try {
 
   // ---- superseded while its grant is being given: a Connect dialog opened during the wait, submitted while the retry's
   // allow() is held in its store; the retry's socket goes, so the old server is left neither paired nor granted
-  await drive({ op: "slow", s: 0.6 });
+  // (the server's reader held at the reconnect's grant until released, not for a time: the reload's hellos are refused
+  //  however long the page takes to load, so there is a refused attempt's gap to open the dialog in; then released, so
+  //  the next retry pairs)
+  await drive({ op: "slow", s: 0 });
+  await drive({ op: "hold" });
   ok(await open(""), "reload 8a");
-  ok(await until(`!!document.querySelector(".sbag-bar")`, 15000), "reload 8a: reconnected (its grant holds the server's reader for 0.6 s)");
+  ok(await until(`!!document.querySelector(".sbag-bar")`, 15000), "reload 8a: reconnected (its grant held at the server until released)");
+  ok(await heldAt(1), "reload 8a: its grant's message waits at the server");
   const fourth = await drive({ op: "code2" });
   ok(await open(""), "reload 8, at once: refused, asking again");
   ok(await openConnect(fourth.code, fourth.port), "reload 8: the person opens the Connect dialog during the wait");
   await ev("(window.__grantDelay = 2000, 1)");
+  await drive({ op: "release" });
+  ok(await heldAt(0), "reload 8: the hold released");
   // (allow() sets the pairing's grant, sends it, then waits in the store before "granted": that is the moment)
   ok(await until(`!!T.ui.pairing?.grant && T.ui.pairing.state === "paired"`, 5000), "reload 8: the retry pairs, and its allow() waits in the grant's store");
   await click(".sbag-box button.primary");
@@ -438,9 +490,12 @@ try {
 
   // ---- superseded BEFORE its pairing completes (A7): a Connect submitted while the retry's hello is still unanswered; the
   // old server is never sent a grant, not even for a moment
-  await drive({ op: "slow", s: 0.6 });
+  // (held as in reload 8; released only after the person's Connect, so the old server is seen unpaired at the end)
+  await drive({ op: "slow", s: 0 });
+  await drive({ op: "hold" });
   ok(await open(""), "reload 9a");
-  ok(await until(`!!document.querySelector(".sbag-bar")`, 15000), "reload 9a: reconnected (its grant holds the server's reader for 0.6 s)");
+  ok(await until(`!!document.querySelector(".sbag-bar")`, 15000), "reload 9a: reconnected (its grant held at the server until released)");
+  ok(await heldAt(1), "reload 9a: its grant's message waits at the server");
   const fifth = await drive({ op: "code2" });
   ok(await open(""), "reload 9, at once: refused, asking again");
   ok(await openConnect(fifth.code, fifth.port), "reload 9: the person opens the Connect dialog during the wait");
@@ -451,6 +506,9 @@ try {
   await sleep(2500);
   await drive({ op: "helloslow", s: 0 });
   const g9 = ((await drive({ op: "grants" })).ok ?? []).filter(([port]) => port === PORT);
+  await drive({ op: "release" });
+  ok(await heldAt(0), "reload 9: the hold released");
+  ok(await (async () => { const t = Date.now(); while (Date.now() - t < 10000) { if ((await drive({ op: "status" })).ok?.paired === false) return true; await sleep(25); } return false; })(), "reload 9: the old connection seen closed");
   const v1 = (await drive({ op: "status" })).ok;
   ok(g9.length === 0 && v1.paired === false && v1.granted === false,
     `reload 9: superseded before its pairing completed, the retry never gives the old server its grant (${g9.length} grants; first ${JSON.stringify(v1)})`);
@@ -572,6 +630,18 @@ try {
   const g13 = ((await drive({ op: "grants" })).ok ?? []).filter(([port]) => port === sixth.port);
   ok(h13.length >= 1 && h13.length <= 2 && g13.length === 0, `reload 13: the reload record's grant expired during the window: no further attempt, and it isn't given again (${h13.length} hellos, ${g13.length} grants)`);
   await drive({ op: "slow", s: 0 });
+
+  // ---- a spent code (A5): the agent refuses it, and the dialog says so, with no local-network advice; Connect shows
+  // that it is trying
+  ok(await open(""), "a spent code: a fresh page");
+  await sleep(500);
+  ok(await openConnect(CODE, PORT), "a spent code: the Connect dialog opens with the first link's code, long used");
+  const tryingSeen = ev(`new Promise((res) => { const b = [...document.querySelectorAll(".sbag-box button.primary")].pop(); const mo = new MutationObserver(() => { if (b.textContent === "Connecting…") { mo.disconnect(); res(true); } }); mo.observe(b, { childList: true, characterData: true, subtree: true }); setTimeout(() => res(b.textContent === "Connecting…"), 15000); })`);
+  await click(".sbag-box button.primary");
+  ok(await tryingSeen, "Connect says Connecting… while it tries");
+  ok(await until(`(document.querySelector(".sbag-box .err")?.textContent ?? "").length > 0`, 15000), "a spent code: an answer in the dialog");
+  const spent = await ev(`({ err: document.querySelector(".sbag-box .err").textContent, field: document.querySelector(".sbag-box input").value, btn: [...document.querySelectorAll(".sbag-box button.primary")].pop().textContent })`);
+  ok(spent.err === "That code didn't work: it was already used, has expired or was mistyped. Ask your agent for a new link." && !/reach apps/.test(spent.err) && spent.field === "" && spent.btn === "Connect", `a spent code: said as spent, never the local-network advice; the field emptied, Connect again (${JSON.stringify(spent)})`);
 } finally {
   try { py.kill(); } catch {}
   try { chrome.kill(); } catch {}

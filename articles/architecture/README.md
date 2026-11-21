@@ -9,5 +9,5 @@ How Sagebrush is built, as one map: the Rust engine, pyjs (Python 3.14 compiled 
 
 1. [The map](01-the-map.md): the board's text, region by region, for reading without the board.
 
-Last updated 2026-10-25, at sagebrush [`cfa609d4`](https://github.com/sagemathinc/sagebrush/tree/cfa609d474f72401fa7e8792a5c2291a7d22b5c5).
+Last updated 2026-10-25, at sagebrush [`d7802d3e`](https://github.com/sagemathinc/sagebrush/tree/d7802d3e37a3098e95a00a1c2f1d8a1e408d0e80).
 The map is refreshed when the architecture changes, and every link in it is checked against the repository at that commit.

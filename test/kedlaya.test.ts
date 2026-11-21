@@ -50,7 +50,7 @@ function py3Async(...args: string[]): Promise<{ code: number | null; signal: str
     ch.on("close", (code, signal) => resolve({ code, signal, stdout, stderr, ms: performance.now() - t0 }));
   });
 }
-test("the offset-add reduction gives the padded one's forms, G and matrix (python3; the small grid: kedlaya_cases.py equivalence, 5 curves, 462 checks)", { skip: slowSkip }, async (t) => {
+test("the offset-add reduction gives the padded one's forms, G and matrix (python3; the small grid: kedlaya_cases.py equivalence, 5 curves, 462 checks)", { timeout: 900_000, skip: slowSkip }, async (t) => {
   const parts = await Promise.all(PARTS.map((_, i) => py3Async(TEST + "kedlaya_cases.py", `equivalence:${i}`)));
   assert.equal(parts.length, PARTS.length, "every curve's part ran");
   let n = 0;

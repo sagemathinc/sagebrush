@@ -71,6 +71,9 @@ export function checkStartCoverage(modes: Record<string, readonly string[]>): vo
 /** a library group's item id, by rule; a group no rule covers fails the build (each new group is placed on purpose) */
 export function itemOfGroup(group: string): string {
   if (group.startsWith("pkg-")) return group;
+  // (a Sage-layer module in a group of its own, such as mod-sage-ffmat or mod-sage-ec-ff (web/lib-chunks.mts groupOf):
+  // the Sage item's, so Sage downloaded for offline use has finite-field matrices and curves without "modules")
+  if (group.startsWith("mod-sage-")) return "sage";
   if (group.startsWith("mod-")) return "modules";
   for (const m of MODES) {
     if (m.exact !== undefined ? group === m.exact : group === m.prefix || group.startsWith(m.prefix + "-")) return m.id;
@@ -82,7 +85,8 @@ const CHUNK = /^lib\/([a-z0-9][a-z0-9-]*)\.(?:src|pre)\.[0-9a-f]{16}\.json$/;
 /** the rule or group of a LAZY path */
 function classify(path: string): { rule: "engine" | "docs" | "tzdata" } | { group: string } {
   if (/^sagebrush-engine\.wasm\?h=[0-9a-f]+$/.test(path)) return { rule: "engine" };
-  if (/^docs-index(?:-[a-z]+)?\.json$/.test(path)) return { rule: "docs" };
+  // (an index, and its mode's upstream names: web/upstream-names.mts)
+  if (/^docs-(?:index(?:-[a-z]+)?|upstream-[a-z]+)\.json$/.test(path)) return { rule: "docs" };
   if (path === "sagebrush-myst.js") return { rule: "myst" };
   if (path.startsWith("lib/tzdata/")) return { rule: "tzdata" };
   const m = CHUNK.exec(path);

@@ -107,13 +107,14 @@ export function parsePkgsetIndex(bytes) {
 export class RunnerWorker {
   /**
    * @param {string} src the runner page's URL
-   * @param {{name?: string, fallback?: () => any, files?: Record<string, ArrayBuffer>}} [o]
+   * @param {{name?: string, fallback?: () => any, files?: Record<string, ArrayBuffer>, notRun?: string}} [o]
    *   the worker's name (TimeTravel replay's parameters); a plain worker to use
    *   if the frame doesn't answer; or, with src null, the engine's files
    *   themselves (sagebrush-worker.js, sagebrush-engine.wasm and the
-   *   library's chunks, lib/...), for files mode
+   *   library's chunks, lib/...), for files mode; and what a run held when
+   *   the fallback is given says it wasn't run (NOT_RUN unless given)
    */
-  constructor(src, { name = "", fallback, files } = {}) {
+  constructor(src, { name = "", fallback, files, notRun = NOT_RUN } = {}) {
     this.onmessage = null;
     this.onerror = null;
     this.queue = [];
@@ -148,7 +149,7 @@ export class RunnerWorker {
       for (const m of held) {
         const say = (d) => this.onmessage?.({ data: d });
         if (m.code !== undefined || m.interact !== undefined) {
-          say({ id: m.id, stream: "stderr", text: NOT_RUN });
+          say({ id: m.id, stream: "stderr", text: notRun });
           say({ id: m.id, done: true, error: true, ms: 0 });
         } else say({ id: m.id, skipped: true });
       }
@@ -282,6 +283,11 @@ export class RunnerWorker {
   get interrupt() {
     if (this.inner) return this.inner.interrupt;
     return this.interruptible ? (id) => this.postMessage({ runnerInterrupt: id }) : undefined;
+  }
+  /** Ask the run in flight for the output it has written (the flush request), if the frame has the flag. */
+  get flush() {
+    if (this.inner) return this.inner.flush;
+    return this.interruptible ? () => this.postMessage({ runnerFlush: 1 }) : undefined;
   }
   terminate() {
     this.closed = true;

@@ -24,7 +24,8 @@
 //
 // There is no verb that empties Trash or removes contents for good: only a
 // person does that, from the file browser (§2.4, §8.2).
-import { BRANCHES, BRANCH_KEY, BRANCH_HASH_KEY, BRANCH_LIMITS, BRANCH_NAME, branchCopy, branchRefusal, BranchStop, type BranchAt, type BranchRecord, type BranchSource } from "./branch-rules";
+import { docValue } from "./notebook-form";
+import { BRANCHES, BRANCH_KEY, BRANCH_HASH_KEY, BRANCH_LIMITS, BRANCH_NAME, branchCopy, branchRefusal, BranchStop, BRANCH_REVIEW_KEY, BRANCH_RUNS_KEY, mergeRun, type BranchAt, type BranchCanon, type BranchRecord, type BranchReview, type BranchRun, type BranchRuns, type BranchSource } from "./branch-rules";
 import { TERM_KEPT_KEY, keepable, termKeptOf, type TermKept } from "./term-kept";
 import { inTx, req, hex, openWorkspaceDb, WS_DB, type JournalState, type OpenInfo } from "./db";
 import { best, decide, newer, placeOf, readLocal, readOpfs, resolveReset, writeLocal, writeOpfs, type Held, type Place, type ResetKind, type State, type Witness } from "./witness";
@@ -33,12 +34,13 @@ import { IdbStore, bytesHash, openDb as openMainDb, openHistoryDb, openBoardHist
 import { dropRows } from "../notebook/journal-rows.js";
 import { SYNC_NB } from "../notebook/sync-rows.js";
 import { isBoard } from "../board/doc";
-import { fromNbformat, kernelMode } from "../notebook/nbformat.js";
+import { fromNbformat, cellId, kernelMode } from "../notebook/nbformat.js";
 import { reserve, tryReserve, type Release } from "./reserve";
 import { lowestWatermark } from "./sync-outbox";
 import { syncState as ledgerState, waitSync as ledgerWait, type SyncAnswer, type SyncLevel, type WaitResult } from "./sync-ledger";
 import { entriesOf, fenceCheck, physicalOf, busyError, dropView, rewriting, under, D11, RW, FENCE_READ, STAGE, type ERecord } from "./sync-rewrite";
 import { noteToken, chainOf, HIST_STORES, type Chain } from "../history/tokens";
+import { BLOB_STORES, BlobError, blobPresent, inBlobReset, readBlob } from "./blobs";
 import { VDUE, VOVER, PINS, SYNC_STORES, RELEASE_STORES, noteChange, pinOfCurrent, charge, release, collapse, scheduleClean, capNow, liveLease, pinTotal, epochOf, finishBackfillFor, afterReleases, GONE, filePage, type Pin } from "./sync-pins";
 
 export type Entry = {
@@ -69,6 +71,10 @@ export type Entry = {
   nkey?: string;
   /** a data file whose bytes are in "sagebrush-workspace"/fileBytes under its fid (design/capabilities.md §2b) */
   migrated?: boolean;
+  /** a data file whose bytes are in blobs, under this SHA-256 (always its `sha256`): read first, before `migrated`
+   * and the legacy stores (db.ts version 11, blobs.ts). Such an entry keeps `migrated: true` too, so that nothing
+   * takes it for a file still kept the old way; its fileBytes row is gone */
+  blob?: string;
   /** a data file's SHA-256 (hex): of the bytes it was made, moved or last written with (the migrator gives it to
    * a file written before it was kept: design/sync-client.md §3) */
   sha256?: string;
@@ -301,6 +307,22 @@ const isFolderShare = (x: any): x is FolderShare => !!x && typeof x === "object"
     || (x.share_id === null && typeof x.share_attempt === "string" && /^[0-9a-f]{32}$/.test(x.share_attempt)));
 const sameShare = (a: FolderShare | undefined, b: FolderShare | undefined) => a === undefined || b === undefined ? a === b : a.share_id === b.share_id && a.share_attempt === b.share_attempt;
 const fidOk = (fid: unknown): fid is string => typeof fid === "string" && /^[\w-]{1,128}$/.test(fid);
+/** Where a copy made from a public GitHub repository came from (Open from GitHub, web/gh): the repository, the ref it
+ * was opened at and the commit that named (null where jsDelivr listed it at the ref), the file's path there and its
+ * listed id (git blob SHA-1, or SHA-256), and, a notebook's, the files of its folder that stayed on GitHub. In meta by
+ * the copy's identity (a notebook's ref, a data file's fid), which a rename keeps. Per browser: not exported or synced,
+ * and changing nothing of the entry's own provenance, which stays "elsewhere". */
+export type GhSource = { owner: string; repo: string; ref: string; commit: string | null; path: string; listed: string; left: string[] };
+const GH_SOURCE = "gh:src:";
+const ghText = (s: unknown, max: number): s is string => typeof s === "string" && s.length > 0 && s.length <= max && !/[\u0000-\u001f\u007f]/.test(s);
+const isGhSource = (x: any): x is GhSource => !!x && typeof x === "object" && Object.keys(x).length === 7
+  && ghText(x.owner, 100) && ghText(x.repo, 100) && ghText(x.ref, 255) && ghText(x.path, 4096)
+  && (x.commit === null || (typeof x.commit === "string" && /^[0-9a-f]{40}$/.test(x.commit))) && typeof x.listed === "string" && /^(?:[0-9a-f]{40}|[0-9a-f]{64})$/.test(x.listed)
+  && Array.isArray(x.left) && x.left.length <= 10000 && x.left.every((p: unknown) => ghText(p, 4096));
+const ghIdent = (kind: "notebook" | "file", id: string) => {
+  if ((kind !== "notebook" && kind !== "file") || !fidOk(id)) throw new WorkspaceError("invalid", "a copy's id");
+  return GH_SOURCE + kind + ":" + id;
+};
 /** The most a value kept the old way can be (design/capabilities.md §2b, LIMIT-CAP1A-1): the page's
  * writes were bounded by FILE_QUEUE_MAX (256 MiB) and uploads by maxFileBytes (200 MB).  Its size isn't
  * known until it is read, so reading one reserves this × COPIES, exclusively, first. */
@@ -314,14 +336,21 @@ const tooLarge = (e: Entry) => `${e.path} is too large to change here (${e.size}
 export const nkeyOf = (p: string) => parentOf(p) + "\u0000" + nameOf(p).normalize("NFC");
 const isPath = (k: string) => { try { return normPath(k) === k && k !== "/"; } catch { return false; } };
 const LOCK = "sagebrush-workspace";
-type Change = { ops: Op[] };
+/** This device's own entry put at another name by sync, because another device has one with its name (the shared
+ * reducer's `name (k)`): its kind, ref (a document's) or fid, and the path it had and has. */
+export type SyncRenamed = { kind: Entry["kind"]; ref: string | null; fid?: string; from: string; to: string };
+/** A change: its ops; and `renamed`, this device's own entries sync renamed in it (sync-confirmed's applyConfirmed),
+ * so a page with one open can say so. */
+type Change = { ops: Op[]; renamed?: SyncRenamed[] };
 /** The workspace's identity, in meta (design/workspace-durability.md A.1): its own id, and the generation a
  * deliberate reset bumps.  The witnesses kept outside IndexedDB are compared with it. */
 export type Identity = { workspace: string; generation: number };
 const isIdentity = (x: any): x is Identity => !!x && typeof x.workspace === "string" && /^[0-9a-f]{16}$/.test(x.workspace) && Number.isSafeInteger(x.generation) && x.generation >= 1;
 // (the stores a reset to a new workspace empties, a page at a time, those holding files' bytes first; and meta's
 // keys it keeps)
-const RESET_STORES = ["fileBytes", "versionBytes", "trash", "entries", "boards", "ops", "versions", "grants", "outbox", "syncIndex", "adoptJournal", "pins", "pending", "prunable", "syncLedger", "htokens", "hmeta"];
+// (the blob stores first, with the other bytes: the one place blobs go without dropBlobRef, the reset's, fenced by
+// its `resetting` state, and marked for the test build's guard: blobs.ts BLOB_HOOK)
+const RESET_STORES = ["blobs", "versionBlobs", "fileBytes", "versionBytes", "trash", "entries", "boards", "ops", "versions", "grants", "outbox", "syncIndex", "adoptJournal", "pins", "pending", "prunable", "syncLedger", "htokens", "hmeta"];
 /** A verb's `collect` (task #14): the list each op the call commits is appended to; anything else refused. */
 type Collect = { collect?: number[] };
 /** What a rename was asked for: the entry by its identity, and optionally the revision read (rename's `expect`). */
@@ -375,7 +404,7 @@ function admitOf(a: unknown): ((c: AdmitCheck) => void) | undefined {
   return a as (c: AdmitCheck) => void;
 }
 /** makeBranchRoot's refusal by the grant, thrown so that its transaction aborts (the root folder with it). */
-const ROOT_REFUSED = Symbol("the grant changed"), PUBLISH_REFUSED = Symbol("the grant changed");
+const ROOT_REFUSED = Symbol("the grant changed"), PUBLISH_REFUSED = Symbol("the grant changed"), REVIEW_REFUSED = Symbol("the grant changed"), RUN_NOTE_REFUSED = Symbol("the grant changed");
 /** The longest the workspace's lock is held for an agent's edit (holdChange) before it is let go regardless. */
 const HOLD_MS = 5_000;
 /** Tests' hooks inside the branch's transactions (each may throw, as a tab closed there would: nothing of that
@@ -394,7 +423,7 @@ function foldersAbove(p: string): string[] {
   for (let i = p.indexOf("/", 1); i > 0; i = p.indexOf("/", i + 1)) out.push(p.slice(0, i));
   return out;
 }
-const BYTE_STORES = new Set(["fileBytes", "versionBytes", "trash", "files"]);
+const BYTE_STORES = new Set(["blobs", "fileBytes", "versionBytes", "trash", "files"]);
 // (`journal`: a reset keeps the journal's activation, which is one way (plan-sync-slice2-client r4 §1a))
 const META_KEPT = new Set(["device", "identity", "resetting", "opsFloor", "purgeMain", "purgeLocal", "fenceStep", "fenceBlocked", "journal"]);
 /** The notebooks' fence record's counters of their unjournaled entries (plan-sync-slice2-client r4 §2.1, 2c-1d):
@@ -494,12 +523,26 @@ export const PATH_OF_FILE_MAX = 64;
 
 /** A notebook's document as written (web/notebook/nbformat.js: Jupyter's nbformat made Sagebrush's), what it can't
  * convert (a heading level not 1 to 6) refused as invalid. */
+/** A new notebook's cells, each with its id: one it was given, or a new one, as the page gives an id-less cell when it opens
+ * it, so the notebook stored is the one shown (an agent's notebook that runs by itself is compared by its cells' ids). */
+const withCellIds = (cells: any[]) => cells.map((c) => (c && typeof c === "object" && !c.id ? { ...c, id: cellId() } : c));
+/** A notebook's writer lock under sync's journal (notebook/journal.js's lockPrefix + its ref), held by the one tab of
+ * this browser that writes it. */
+export const NB_WRITER_LOCK = "sagebrush-nb-writer:";
+/** How long a whole write waits for the notebook's holder to answer, each phase. */
+export const NB_HOLDER_MS = 5000;
+/** A write that found a notebook under sync's journal: written through the journal (Workspace.writeJournaled). */
+class ToJournal { constructor(readonly ref: string) {} }
+/** The whole writes of notebooks a page may have under way at once (each holds its document until it ends). */
+export const NB_WRITES_MAX = 64;
 function nbDoc(content: unknown): unknown {
   try { return fromNbformat(content); } catch (err) { throw new WorkspaceError("invalid", (err as Error)?.message ?? String(err)); }
 }
 
 export class Workspace {
   private subs = new Set<(c: Change) => void>();
+  /** The whole writes of notebooks under sync's journal under way here, by what they write (writeJournaled). */
+  private nbWrites = new Map<string, { run: Promise<{ entry: Entry; rev: number }> }>();
   private channel: BroadcastChannel | null = null;
   private tab = hex(8);
   /** Who makes the changes from here: "person", or "agent:<name>" (§8.3); in the operation log and on versions. */
@@ -575,6 +618,20 @@ export class Workspace {
       else st.put({ share_id: next.share_id, share_attempt: next.share_attempt }, k);
       return true;
     });
+  }
+  /** A GitHub copy's source, by its identity (a notebook's ref, a data file's fid): undefined if it has none, or if
+   * its row isn't one (then it isn't a copy this site can name the source of). */
+  async ghSource(kind: "notebook" | "file", id: string): Promise<GhSource | undefined> {
+    const k = ghIdent(kind, id);
+    const v = await inTx(this.ws, "meta", "readonly", (tx) => req(tx.objectStore("meta").get(k)));
+    return isGhSource(v) ? { ...v, left: [...v.left] } : undefined;
+  }
+  /** Records a GitHub copy's source, by its identity, made just now: written over any row there. */
+  async setGhSource(kind: "notebook" | "file", id: string, src: GhSource): Promise<void> {
+    const k = ghIdent(kind, id);
+    if (!isGhSource(src)) throw new WorkspaceError("invalid", "a GitHub copy's source");
+    const row: GhSource = { owner: src.owner, repo: src.repo, ref: src.ref, commit: src.commit, path: src.path, listed: src.listed, left: [...src.left] };
+    await inTx(this.ws, "meta", "readwrite", async (tx) => { tx.objectStore("meta").put(row, k); });
   }
   /** (the migrator's cleanup, holding the lock: an old copy's mark still there after its attempt, counted, and why;
    * the mark as written, or undefined if it went) */
@@ -749,7 +806,7 @@ export class Workspace {
       this.channel = new BroadcastChannel(CHANNEL);
       this.channel.onmessage = (ev) => {
         if (ev.data?.from === this.tab) return;
-        if (Array.isArray(ev.data?.ops)) this.tell({ ops: ev.data.ops }, false);
+        if (Array.isArray(ev.data?.ops)) this.tell({ ops: ev.data.ops, ...(Array.isArray(ev.data.renamed) ? { renamed: ev.data.renamed } : {}) }, false);
         if (ev.data?.quarantine) this.adoptQuarantine(ev.data.quarantine);
         // (reset in another tab: this page's workspace is no longer the workspace; reload, as after an upgrade)
         if (ev.data?.reset && (ev.data.reset.workspace !== this.identity.workspace || ev.data.reset.generation !== this.identity.generation)) this.closedElsewhere();
@@ -1177,7 +1234,11 @@ export class Workspace {
         }
         keys = keys.slice(0, cut);
       }
-      if (keys.length) st.delete(IDBKeyRange.bound(keys[0], keys[keys.length - 1]));
+      if (keys.length) {
+        // (every page a reset deletes is marked as the reset's: the blob stores', and the references in entries,
+        // versions and pins it takes with them, the one change of them made without the blob helpers)
+        inBlobReset(() => st.delete(IDBKeyRange.bound(keys[0], keys[keys.length - 1])));
+      }
       if (fence) st.put(fence);
       return keys.length;
     });
@@ -1394,6 +1455,7 @@ export class Workspace {
     if (e.kind === "folder") return true;
     if (e.kind === "notebook") return (await this.mainTx("notebooks", "readonly", (st) => st.getKey(e.ref!))) !== undefined;
     if (e.kind === "board") return (await inTx(this.ws, "boards", "readonly", (tx) => req(tx.objectStore("boards").getKey(e.ref!)))) !== undefined;
+    if (e.blob !== undefined) return (await inTx(this.ws, "blobs", "readonly", (tx) => blobPresent(tx, e.blob!)));
     if (e.migrated) return (await inTx(this.ws, "fileBytes", "readonly", (tx) => req(tx.objectStore("fileBytes").getKey(e.fid!)))) !== undefined;
     // (kept the old way: read, as contents() does; such files are few, and the migrator moves them)
     return (await this.contents(e)) !== undefined;
@@ -1517,16 +1579,151 @@ export class Workspace {
   /** `tag` (a board): who wrote it, kept on the record (a page's session, so that page can tell its own writes from others'). `keepEmpty: false` (a data file): no version of empty bytes (Python's open("w") empties a file before writing it); a version of an empty file is kept otherwise. */
   /** `fid` (a data file): only if the file at `p` is still that one, its own id, not another put at its path since (a WorkspaceError("conflict")).  Checked holding the lock, before anything else is done: another file at `p`, not yet moved beside the index, isn't moved first (astra3 R6-A3-1). */
   /** `opts.admit` (the host's, AdmitCheck): asked holding the lock, before anything is read or changed. */
-  async write(p: string, content: unknown, opts: { base?: number; tag?: string; keepEmpty?: boolean; fid?: string } & Collect & Admitted = {}): Promise<{ entry: Entry; rev: number }> {
-    return this.writeLocked(p, owned(content, this.limits.maxFileBytes), opts).then((out) => { this.askToKeep(); return out; });
+  /** `opts.expect`: only that entry (its kind, fid, creation and, a document's, ref, as remove's), checked holding the
+   * lock: another there now, a WorkspaceError("conflict"), nothing written. */
+  async write(p: string, content: unknown, opts: { base?: number; tag?: string; keepEmpty?: boolean; fid?: string; expect?: Pick<Entry, "kind" | "fid" | "created" | "ref"> } & Collect & Admitted = {}): Promise<{ entry: Entry; rev: number }> {
+    // (the bytes as given at the call, copied before any wait: a caller's change to them afterwards is never written)
+    const c = owned(content, this.limits.maxFileBytes);
+    // (every write takes its turn for the workspace's lock at the call, as before; one that finds a notebook under
+    // sync's journal there is written through the journal instead (writeJournaled), which checks the path again under
+    // the lock before anything is written.  Refused, when NB_WRITES_MAX are already under way, before it is read as a
+    // notebook or anything is made or sent for it (its copy above, taken at the call, is let go with it))
+    let out: { entry: Entry; rev: number };
+    try {
+      out = await this.writeLocked(p, c, opts);
+    } catch (e) {
+      if (!(e instanceof ToJournal)) throw e;
+      this.nbWriteRoom();
+      out = await this.writeJournaled(p, c, opts, e.ref);
+    }
+    this.askToKeep();
+    return out;
   }
-  private async writeLocked(p: string, content: unknown, opts: { base?: number; tag?: string; keepEmpty?: boolean; fid?: string } & Collect & Admitted, guard?: SaveGuard): Promise<{ entry: Entry; rev: number }> {
+  /** A whole write of the notebook at `p` (ref `ref`) under sync's journal (design: an agent's whole write of a
+   * notebook under sync's journal, r3).  The notebook's writer is whoever holds its writer lock
+   * (NB_WRITER_LOCK + ref, the journal store's): with no holder, the record is written as `create` writes one under
+   * the journal (marked unjournaled, the stored j kept) for the next writer's load to take in; with one, the holder
+   * makes the write, asked on the notebook's handover channel (web/page/handover.ts) in two phases, the commit sent
+   * only after the path and the grant are checked again.  The workspace's lock is held only around bounded steps,
+   * never across another tab's answer or save; every ok comes from reading the record again (this ref, a revision
+   * past the base, this whole document), never from an answer alone. */
+  private async writeJournaled(p: string, content: unknown, opts: { base?: number; tag?: string; expect?: Pick<Entry, "kind" | "fid" | "created" | "ref"> } & Collect & Admitted, ref: string): Promise<{ entry: Entry; rev: number }> {
+    const base = opts.base;
+    const doc = nbDoc(content) as any;
+    if (!doc || typeof doc !== "object" || !Array.isArray(doc.cells)) throw new WorkspaceError("invalid", "a notebook is {cells: [...]}");
+    const { id: _i, rev: _r, updated: _u, baseRev: _b, ...rest } = doc;
+    const want = { ...rest, cells: withCellIds(rest.cells) };
+    // (an ok: the record holds this whole document (notebook-form docValue: every field but the store's envelope, each
+    // cell whole), its language too if it names one)
+    const withMode = want.mode !== undefined, key = docValue(want, withMode);
+    // (one request per document asked for at once: the same write asked again while it is under way is that one; at
+    // most NB_WRITES_MAX under way, each holding its document; one that ended is forgotten at once, its document with it)
+    const one = `${ref}\n${base ?? ""}\n${key}`, running = this.nbWrites.get(one);
+    if (running) return running.run;
+    this.nbWriteRoom();
+    const entry = { run: null as unknown as Promise<{ entry: Entry; rev: number }> };
+    this.nbWrites.set(one, entry);
+    entry.run = this.writeJournaledOnce(p, want, key, withMode, opts, ref).finally(() => { if (this.nbWrites.get(one) === entry) this.nbWrites.delete(one); });
+    return entry.run;
+  }
+  /** Refuses a whole write of a notebook when NB_WRITES_MAX are under way in this page (each holds its document). */
+  private nbWriteRoom() {
+    if (this.nbWrites.size >= NB_WRITES_MAX) throw new WorkspaceError("busy", `too many notebook writes are under way in this page (${NB_WRITES_MAX}): nothing changed (try again shortly)`);
+  }
+  private async writeJournaledOnce(p: string, want: any, key: string, withMode: boolean, opts: { base?: number; tag?: string; expect?: Pick<Entry, "kind" | "fid" | "created" | "ref"> } & Collect & Admitted, ref: string): Promise<{ entry: Entry; rev: number }> {
+    const collect = sinkOf(opts.collect), admit = admitOf(opts.admit), base = opts.base;
+    const lock = NB_WRITER_LOCK + ref, locks = (globalThis as any).navigator?.locks;
+    if (!locks?.request) throw new WorkspaceError("storage", "this browser can't take a notebook's writer lock, which sync's journal needs");
+    // (the path still this notebook, outside Trash, and the grant in force: under the workspace's lock, right before a
+    // mutation or an ok)
+    const target = async (): Promise<Entry> => {
+      await this.admitAt(admit, "write", "target", path(p));
+      const e = await this.mustStat(p);
+      if (e.trashed || within(e.path, TRASH)) throw new WorkspaceError("invalid", "restore it from Trash first");
+      if (e.kind !== "notebook" || e.ref !== ref) throw new WorkspaceError("conflict", `${e.path} is another notebook now (read it again)`);
+      if (e.remote) throw new WorkspaceError("invalid", `${e.path}'s content is synced in the next step: open it on the device that made it`);
+      if (opts.expect && (e.kind !== opts.expect.kind || e.fid !== opts.expect.fid || e.created !== opts.expect.created || (e.ref ?? null) !== (opts.expect.ref ?? null))) throw new WorkspaceError("conflict", `${e.path} is another notebook now (read it again)`);
+      return e;
+    };
+    // (an ok: the record holds this document, at a revision not before the base; then its entry and op, as write's)
+    const verified = () => this.lockedFor(p, async () => {
+      const e = await target();
+      const rec = await this.mainTx("notebooks", "readonly", (st) => st.get(ref));
+      if (!rec || (base !== undefined && !(rec.rev > base)) || docValue(rec, withMode) !== key) return null;
+      const ops: Op[] = [], t = this.now();
+      const entry = await inTx(this.ws, withSync("entries", "ops"), "readwrite", async (tx) => {
+        await fenceCheck(tx, [e.path]);
+        const st = tx.objectStore("entries"), cur: Entry | undefined = await req(st.get(e.path));
+        if (!cur || cur.ref !== ref) throw new WorkspaceError("conflict", `${e.path} was moved while it was written`);
+        const next: Entry = { ...cur, updated: t };
+        delete next.missing;
+        st.put(next);
+        await this.log(tx, ops, { op: "write", path: e.path, kind: e.kind }, next);
+        return next;
+      });
+      this.tell({ ops });
+      return { entry, rev: rec.rev as number };
+    }, undefined, collect);
+    // (no holder: the writer lock taken if free (never waited for) for the write, under the workspace's lock; null if a
+    // tab holds it)
+    const direct = () => this.lockedFor(p, async () => {
+      const e = await target();
+      return locks.request(lock, { ifAvailable: true }, async (l: unknown) => {
+        if (!l) return null;
+        const mode = want.mode ?? (await this.mainTx("notebooks", "readonly", (st) => st.get(ref)))?.mode ?? e.mode;
+        const out = await new IdbStore(this.main!, ref, null, { journal: true }).save({ ...want, ...(mode !== undefined ? { mode } : {}), name: splitExt(nameOf(e.path))[0], ...(base !== undefined ? { baseRev: base } : {}) }, { lockHeld: true, journal: { keep: true, hash: "", unjournaled: true } });
+        if (typeof out === "string") throw new WorkspaceError("storage", out);
+        if (out.conflict) throw new WorkspaceError("conflict", `${e.path} was changed elsewhere`, out.conflict);
+        return out.rev as number;
+      });
+    }, undefined, collect);
+    // (a holder: asked on the notebook's channel; its answers only steer, never decide an ok)
+    const id = hex(16);
+    const ask = async (): Promise<any> => {
+      const ch = new BroadcastChannel(lock);
+      try {
+        const answer = (ts: string[]) => new Promise<any>((done) => {
+          const timer = setTimeout(() => done({ t: "timeout" }), NB_HOLDER_MS);
+          ch.onmessage = (ev) => { const m = ev.data; if (m && typeof m === "object" && m.req === id && ts.includes(m.t)) { clearTimeout(timer); done(m); } };
+        });
+        let a = answer(["ready", "wrote", "conflict", "lost", "failed"]);
+        ch.postMessage({ t: "write", req: id, ref, doc: want, base: base ?? null });
+        const m = await a;
+        if (m.t !== "ready") return m;
+        a = answer(["wrote", "conflict", "lost", "failed"]);
+        // (the path and the grant checked again, and the commit sent in the same hold of the workspace's lock)
+        await this.lockedFor(p, async () => { await target(); ch.postMessage({ t: "commit", req: id, ref }); }, undefined, collect);
+        return await a;
+      } finally {
+        ch.close();
+      }
+    };
+    for (let i = 0; i < 3; i++) {
+      const rev = await direct();
+      if (rev !== null) {
+        const ok = await verified();
+        if (ok) return ok;
+        throw new WorkspaceError("busy", `couldn't confirm the write of ${path(p)}: its record no longer matches it (read it again)`);
+      }
+      const m = await ask();
+      if (m.t === "conflict") throw new WorkspaceError("conflict", `${path(p)} was changed elsewhere`, m.current ?? null);
+      if (m.t === "failed") throw new WorkspaceError("storage", `not saved: ${typeof m.why === "string" ? m.why.slice(0, 300) : "the tab that has it open couldn't save it"}`);
+      // (written, or not answered, or the holder let go first: what the record holds decides; a write already made (an
+      // answer that came late, or none) is answered ok, once)
+      const ok = await verified();
+      if (ok) return ok;
+    }
+    // (not confirmed: a commit already sent may still be made, so what happened isn't said, only what to do)
+    throw new WorkspaceError("busy", `couldn't confirm the write of ${path(p)}: a tab of this browser has it open and didn't confirm it (read it again before trying again)`);
+  }
+  private async writeLocked(p: string, content: unknown, opts: { base?: number; tag?: string; keepEmpty?: boolean; fid?: string; expect?: Pick<Entry, "kind" | "fid" | "created" | "ref"> } & Collect & Admitted, guard?: SaveGuard): Promise<{ entry: Entry; rev: number }> {
     const collect = sinkOf(opts.collect), admit = admitOf(opts.admit);
     return this.lockedFor(p, async () => {
       await this.admitAt(admit, "write", "target", path(p));
       let e = await this.mustStat(p);
       if (e.trashed || within(e.path, TRASH)) throw new WorkspaceError("invalid", "restore it from Trash first");
       if (opts.fid !== undefined && (e.kind !== "file" || e.fid !== opts.fid)) throw new WorkspaceError("conflict", `${e.path} is another file now`);
+      if (opts.expect && (e.kind !== opts.expect.kind || e.fid !== opts.expect.fid || e.created !== opts.expect.created || (e.kind !== "file" && (e.ref ?? null) !== (opts.expect.ref ?? null)))) throw new WorkspaceError("conflict", `${e.path} is another file now`);
       if (e.kind === "file") return this.writeFile(await this.migrateOne(e), content, opts, guard);
       if (guard) throw new WorkspaceError("invalid", "a guarded save is of a data file");
       // (a document listed from the server: its content comes in slice 2, read-only until then)
@@ -1535,6 +1732,8 @@ export class Workspace {
       let rev: number;
       if (e.kind === "notebook") {
         if (!this.main) throw new WorkspaceError("storage", "this browser has no storage for notebooks");
+        // (sync's journal writes this browser's notebooks: written through it, outside this hold (write)
+        if (opts.fid === undefined && (await this.mainTx("notebooks", "readonly", (st) => st.get(FENCE)))?.phase === "journal") throw new ToJournal(e.ref!);
         // (written as Jupyter's nbformat, as agents do: its cells made Sagebrush's, or the page shows them empty)
         const doc = nbDoc(content) as any;
         if (!doc || typeof doc !== "object" || !Array.isArray(doc.cells)) throw new WorkspaceError("invalid", "a notebook is {cells: [...]}");
@@ -1819,7 +2018,8 @@ export class Workspace {
       await this.admitAt(admit, "duplicate", "destination", dest);
       if (e.kind === "notebook") {
         const { id: _i, rev: _r, updated: _u, ...doc } = c;
-        return this.make(dest, "notebook", doc, e.mode, undefined, e.made);
+        // (the notebook's own mode, as it is now; the entry's is the one it was made with)
+        return this.make(dest, "notebook", doc, (doc as { mode?: string }).mode ?? e.mode, undefined, e.made);
       }
       // (a copy has its source's provenance: a copy of something from elsewhere is still from elsewhere)
       if (e.kind === "board") return this.make(dest, "board", structuredClone((c as BoardRecord).doc), e.mode, (c as BoardRecord).origin, e.made);
@@ -2421,6 +2621,26 @@ export class Workspace {
     });
   }
 
+  /** The document `ref` (a notebook's or board's id) was edited at `t` (ms): a save here, or its changes stored from
+   * another device.  Its entry's `updated` (what Files shows as last modified) moves up to `t`, never back.  This
+   * device's entry only: no op is logged (the contents travel on their own, and each device stamps its own), and
+   * nothing is told (Files shows it at its next refresh).  False if no live entry names `ref`. */
+  async touch(ref: string, t: number): Promise<boolean> {
+    if (typeof ref !== "string" || ref === "" || !Number.isFinite(t)) return false;
+    this.open();
+    return inTx(this.ws, "entries", "readwrite", async (tx): Promise<boolean> => {
+      const v = await entriesOf(tx), st = tx.objectStore("entries");
+      if ((await v.byIdentCount(ref)) > PATH_OF_FILE_MAX) return false;
+      let found = false;
+      for (const e of await v.byIdentAll(IDBKeyRange.only(ref))) {
+        if (e.kind === "folder" || e.kind === "file" || e.ref !== ref || e.trashed || within(e.path, TRASH)) continue;
+        found = true;
+        if (t > e.updated) st.put({ ...e, updated: t });
+      }
+      return found;
+    });
+  }
+
   /** The path of the entry naming these contents (a board's or notebook's id, a data file's key), or undefined. */
   async pathOf(kind: Exclude<Kind, "folder">, ref: string): Promise<string | undefined> {
     return inTx(this.ws, "entries", "readonly", async (tx) => (await (await entriesOf(tx)).byRef(kind, ref, 1))[0]?.path);
@@ -2568,15 +2788,19 @@ export class Workspace {
     const as: Workspace = Object.create(this);
     as.actor = actor;
     return Object.freeze({
+      dbName: as.ws.name,
       list: (folder: string) => as.list(folder, { recursive: true }),
       stat: (p: string) => as.stat(p),
       read: (p: string) => as.read(p),
       records: () => as.branchRecords(),
       makeBranchRoot: (name: string, charge: { owner: string; entries: number; bytes: number }, live: () => boolean) => as.makeBranchRoot(name, charge, live),
-      copyForBranch: (src: BranchSource, dest: string, root: { fid: string; name: string }, live: () => boolean) => as.copyForBranch(src, dest, root, live),
-      publishBranch: (fid: string, name: string, pages: [string, string][][], live: () => boolean) => as.publishBranch(fid, name, pages, live),
+      copyForBranch: (src: BranchSource, dest: string, root: { fid: string; name: string }, live: () => boolean, canon?: BranchCanon) => as.copyForBranch(src, dest, root, live, canon),
+      publishBranch: (fid: string, name: string, pages: [string, string][][], live: () => boolean, canon?: 2) => as.publishBranch(fid, name, pages, live, canon),
       failBranch: (fid: string, reason: string) => as.failBranch(fid, reason),
       reconcileBranches: (closed: string) => as.reconcileBranches(closed),
+      branchAtName: (name: string) => as.branchAtName(name),
+      branchReview: (fid: string, name: string) => as.branchReview(fid, name),
+      putBranchReview: (fid: string, name: string, next: BranchReview, expect: number | null, gate?: { owner: string; live: () => boolean }) => as.putBranchReview(fid, name, next, expect, gate),
     });
   }
 
@@ -2600,15 +2824,45 @@ export class Workspace {
       readUpTo: (p: string, max: number, admit: (c: AdmitCheck) => void) => as.readUpTo(p, max, { admit }),
       /** The branches' rule for a change at `p` (as a write there is asked), and the branch's root: asked at a run's
        * start, so another agent's branch is refused before anything runs */
-      branchAt: async (p: string): Promise<{ no: string | null; root?: { path: string; fid?: string } }> => {
+      branchAt: async (p: string): Promise<{ no: string | null; root?: { path: string; fid?: string; name?: string; canon?: 1 | 2 } }> => {
         let got: AdmitCheck | undefined;
         await as.admitAt((c) => { got = c; }, "write", "target", path(p));
-        return { no: got ? branchRefusal(got, owner()) : null, ...(got?.branch?.root ? { root: { path: got.branch.root.path, fid: got.branch.root.fid } } : {}) };
+        const rec = got?.branch?.record;
+        return { no: got ? branchRefusal(got, owner()) : null, ...(got?.branch?.root ? { root: { path: got.branch.root.path, fid: got.branch.root.fid, ...(rec ? { name: rec.name, canon: rec.canon ?? 1 } : {}) } } : {}) };
       },
+      /** A finished run's note in its branch (run-verbs.ts): for the grant `owner()` names, while `live()` */
+      noteBranchRun: (fid: string, name: string, p: string, run: BranchRun, live: () => boolean) => as.noteBranchRun(fid, name, p, run, { owner: owner() ?? "", live }),
+      dbName: as.ws.name,
       putFile: (p: string, bytes: Uint8Array, admit: (c: AdmitCheck) => void, guard?: SaveGuard) => (guard === undefined ? as.putFile(p, bytes, { admit: both(admit) }) : as.putFileGuarded(p, bytes, both(admit), guard)),
       remove: (p: string, admit: (c: AdmitCheck) => void) => as.remove(p, undefined, undefined, { admit: both(admit) }),
       write: (p: string, content: unknown, base: number, admit: (c: AdmitCheck) => void) => as.write(p, content, { base, admit: both(admit) }),
     });
+  }
+
+  /** The person's own host for their review of a branch (review-actions.ts' PersonHost): their own workspace, its
+   * writes by compare-and-swap on the revision checked, and a removal only of the entry checked, at its revision,
+   * both checked holding the path's lock. */
+  reviewHost() {
+    return Object.freeze({
+      dbName: this.ws.name,
+      list: (folder: string) => this.list(folder, { recursive: true }),
+      stat: (p: string) => this.stat(p),
+      read: (p: string) => this.read(p),
+      branchAtName: (name: string) => this.branchAtName(name),
+      branchReview: (fid: string, name: string) => this.branchReview(fid, name),
+      putBranchReview: (fid: string, name: string, next: BranchReview, expect: number | null) => this.putBranchReview(fid, name, next, expect),
+      branchRuns: (fid: string, name: string) => this.branchRuns(fid, name),
+      branchRecords: () => this.branchRecords(),
+      write: (p: string, content: unknown, opts: { base: number; expect: Pick<Entry, "kind" | "fid" | "created" | "ref"> }) => this.write(p, content, { base: opts.base, expect: opts.expect }),
+      create: (p: string, opts: { content: unknown; mode?: string }) => this.createByPerson(p, opts),
+      // (a WorkspaceError("conflict") either way: another entry there now, or this one at another revision)
+      remove: (p: string, expect: { entry: Entry; base: number }) => this.remove(p, expect.entry, undefined, { still: async () => (await this.read(p)).rev === expect.base }),
+    });
+  }
+
+  /** The workspace's database name (the branch store's key, branch-store.ts). */
+  get dbName(): string {
+    return this.ws.name;
   }
 
   /** The branch records, by their root folder's fid. */
@@ -2655,7 +2909,7 @@ export class Workspace {
    * and root, the source's identity, and the live grant (`live`), the last thing before the write.  The copy has a
    * fresh identity (a new ref, fid or id) and provenance "elsewhere".  Its base hash, or null for a folder; a
    * BranchStop if anything moved (and then nothing of this entry is kept). */
-  private async copyForBranch(src: BranchSource, dest: string, root: { fid: string; name: string }, live: () => boolean): Promise<string | null> {
+  private async copyForBranch(src: BranchSource, dest: string, root: { fid: string; name: string }, live: () => boolean, canon?: BranchCanon): Promise<string | null> {
     let copy: ReturnType<typeof branchCopy> | undefined, hash: string | null = null, mode: string | undefined, origin: string | undefined;
     if (src.kind !== "folder") {
       let r: Awaited<ReturnType<Workspace["read"]>>;
@@ -2663,8 +2917,10 @@ export class Workspace {
       if (!sameSource(r.entry, src) || r.rev !== src.rev) throw new BranchStop("changed", src.path);
       copy = branchCopy(src.kind, r.content);
       if (copy.size > src.size) throw new BranchStop("changed", src.path);
-      hash = await bytesHash(copy.canonical);
-      mode = r.entry.mode;
+      // (the base hash's bytes: the caller's canonical function (branch-canon.ts, on the pages that offer branches),
+      //  else git_branch's first form, canon 1)
+      hash = await bytesHash(canon ? canon(src.kind, r.content) : copy.canonical);
+      mode = (src.kind === "notebook" ? (r.content as { mode?: string } | null)?.mode : undefined) ?? r.entry.mode;
       if (src.kind === "board") origin = ((await this.journalRecord(r.entry.ref!)) as { origin?: string } | null)?.origin;
     }
     await BRANCH_HOOK.afterRead?.(src.path);
@@ -2699,18 +2955,97 @@ export class Workspace {
   /** The branch made ready, with its base hashes' pages (hashPages), in one transaction, holding the lock: only if
    * its record is still `making`, `/Branches/<name>` is still its root folder ("moved" otherwise) and the grant
    * (`live`) is still in force ("grant"), checked in that transaction; else nothing written. */
-  private async publishBranch(fid: string, name: string, pages: [string, string][][], live: () => boolean): Promise<"ok" | "moved" | "grant"> {
+  private async publishBranch(fid: string, name: string, pages: [string, string][][], live: () => boolean, canon?: 2): Promise<"ok" | "moved" | "grant"> {
     return this.locked(() => inTx(this.ws, ["entries", "meta"], "readwrite", async (tx): Promise<"ok" | "moved" | "grant"> => {
       const st = tx.objectStore("meta"), rec = (await req(st.get(BRANCH_KEY + fid))) as BranchRecord | undefined, at = await (await entriesOf(tx)).get(BRANCHES + "/" + name);
       if (rec?.status !== "making" || rec.name !== name || at?.kind !== "folder" || at.fid !== fid) return "moved";
       BRANCH_HOOK.atCheck?.("publish");
-      st.put({ ...rec, status: "ready" } satisfies BranchRecord, BRANCH_KEY + fid);
+      st.put({ ...rec, status: "ready", ...(canon ? { canon } : {}) } satisfies BranchRecord, BRANCH_KEY + fid);
       pages.forEach((page, k) => st.put(page, `${BRANCH_HASH_KEY}${fid}:${k}`));
       BRANCH_HOOK.inPublish?.();
       // (the grant the transaction's last act: a refusal aborts ready and its pages)
       if (!live()) throw PUBLISH_REFUSED;
       return "ok";
     }).catch((e) => { if (e === PUBLISH_REFUSED) return "grant" as const; throw e; }));
+  }
+
+  /** The branch named `name` now: its root folder's fid and its record, read together, if `/Branches/<name>` is a
+   * folder that has a record naming it (git_branch's rule: a renamed root is no branch); else null. */
+  async branchAtName(name: string): Promise<{ fid: string; record: BranchRecord } | null> {
+    if (!BRANCH_NAME.test(name)) return null;
+    return inTx(this.ws, ["entries", "meta"], "readonly", async (tx) => {
+      const at = await (await entriesOf(tx)).get(BRANCHES + "/" + name);
+      if (at?.kind !== "folder" || !at.fid) return null;
+      const rec = (await req(tx.objectStore("meta").get(BRANCH_KEY + at.fid))) as BranchRecord | undefined;
+      return rec && rec.name === name ? { fid: at.fid, record: rec } : null;
+    });
+  }
+
+  /** A branch's record and review state, read together, only while `/Branches/<name>` is still its root (by fid and
+   * name); null otherwise.  The review is null before its first commit. */
+  async branchReview(fid: string, name: string): Promise<{ record: BranchRecord; review: BranchReview | null } | null> {
+    return inTx(this.ws, ["entries", "meta"], "readonly", async (tx) => {
+      const st = tx.objectStore("meta"), rec = (await req(st.get(BRANCH_KEY + fid))) as BranchRecord | undefined;
+      const at = await (await entriesOf(tx)).get(BRANCHES + "/" + name);
+      if (!rec || rec.name !== name || at?.kind !== "folder" || at.fid !== fid) return null;
+      return { record: rec, review: ((await req(st.get(BRANCH_REVIEW_KEY + fid))) as BranchReview | undefined) ?? null };
+    });
+  }
+
+  /** A branch's review state replaced by `next`, by compare-and-swap: only if the branch is still ready at its root
+   * (by fid and name) and the stored state's seq is `expect` (null: none yet), checked in the same transaction.
+   * With `gate` (an agent's call): the record's owner must be `gate.owner`, and `gate.live()` (its grant still in
+   * force) is the transaction's last act, so a revoke aborts the write.
+   * "ok", "moved" (no longer this branch), "stale" (another change came first: read again) or "grant". */
+  async putBranchReview(fid: string, name: string, next: BranchReview, expect: number | null, gate?: { owner: string; live: () => boolean }): Promise<"ok" | "moved" | "stale" | "grant"> {
+    return this.locked(() => inTx(this.ws, ["entries", "meta"], "readwrite", async (tx): Promise<"ok" | "moved" | "stale" | "grant"> => {
+      const st = tx.objectStore("meta"), rec = (await req(st.get(BRANCH_KEY + fid))) as BranchRecord | undefined;
+      const at = await (await entriesOf(tx)).get(BRANCHES + "/" + name);
+      if (rec?.status !== "ready" || rec.name !== name || at?.kind !== "folder" || at.fid !== fid) return "moved";
+      const cur = (await req(st.get(BRANCH_REVIEW_KEY + fid))) as BranchReview | undefined;
+      if ((cur?.seq ?? null) !== expect) return "stale";
+      if (gate && rec.owner !== gate.owner) return "grant";
+      st.put(next, BRANCH_REVIEW_KEY + fid);
+      if (gate && !gate.live()) throw REVIEW_REFUSED;
+      return "ok";
+    }).catch((e) => { if (e === REVIEW_REFUSED) return "grant" as const; throw e; }));
+  }
+
+  /** A branch's runs (BranchRuns), only while `/Branches/<name>` is still its root (by fid and name); null otherwise. */
+  async branchRuns(fid: string, name: string): Promise<BranchRuns | null> {
+    return inTx(this.ws, ["entries", "meta"], "readonly", async (tx) => {
+      const st = tx.objectStore("meta"), rec = (await req(st.get(BRANCH_KEY + fid))) as BranchRecord | undefined;
+      const at = await (await entriesOf(tx)).get(BRANCHES + "/" + name);
+      if (!rec || rec.name !== name || at?.kind !== "folder" || at.fid !== fid) return null;
+      return ((await req(st.get(BRANCH_RUNS_KEY + fid))) as BranchRuns | undefined) ?? { seq: 0, runs: [] };
+    });
+  }
+
+  /** A finished run's note (run-verbs.ts, through runHost only): `run` for the file `p` (its real path) of the branch
+   * `name` (root fid `fid`), in one transaction, holding the lock: the branch ready at its root, its record's owner
+   * `gate.owner`, `p` a document under the root now; merged as mergeRun says (the newer run kept, paths gone dropped,
+   * bounded); `gate.live()` the transaction's last act, so a revoke aborts the write.  "ok" with the new seq (the
+   * caller's wake), "same" (nothing to write), "moved" (not this branch, or `p` gone) or "grant". */
+  private async noteBranchRun(fid: string, name: string, p: string, run: BranchRun, gate: { owner: string; live: () => boolean }): Promise<{ r: "ok"; seq: number } | { r: "same" | "moved" | "grant" }> {
+    const root = BRANCHES + "/" + name, q = path(p);
+    if (!within(q, root) || q === root) return { r: "moved" };
+    return this.locked(() => inTx(this.ws, ["entries", "meta"], "readwrite", async (tx): Promise<{ r: "ok"; seq: number } | { r: "same" | "moved" | "grant" }> => {
+      const st = tx.objectStore("meta"), ev = await entriesOf(tx), rec = (await req(st.get(BRANCH_KEY + fid))) as BranchRecord | undefined;
+      const at = await ev.get(root);
+      if (rec?.status !== "ready" || rec.name !== name || at?.kind !== "folder" || at.fid !== fid) return { r: "moved" };
+      if (!gate.owner || rec.owner !== gate.owner) return { r: "grant" };
+      const t = await ev.get(q);
+      if (!t || t.kind === "folder") return { r: "moved" };
+      const cur = ((await req(st.get(BRANCH_RUNS_KEY + fid))) as BranchRuns | undefined) ?? null;
+      // (the paths kept, each looked up once: at most RUNS_LIMITS.count)
+      const alive = new Set<string>();
+      for (const [rel] of cur?.runs ?? []) { const e = await ev.get(root + rel); if (e && e.kind !== "folder") alive.add(rel); }
+      const next = mergeRun(cur, q.slice(root.length), run, (rel) => alive.has(rel));
+      if (!next) return { r: "same" };
+      st.put(next, BRANCH_RUNS_KEY + fid);
+      if (!gate.live()) throw RUN_NOTE_REFUSED;
+      return { r: "ok", seq: next.seq };
+    }).catch((e) => { if (e === RUN_NOTE_REFUSED) return { r: "grant" as const }; throw e; }));
   }
 
   /** A `making` branch turned `failed`, with why: still charged, read-only to every agent, until the person removes it. */
@@ -2733,6 +3068,8 @@ export class Workspace {
         const at = await ev.get(BRANCHES + "/" + rec.name);
         if (at?.kind !== "folder" || at.fid !== fid) {
           st.delete(BRANCH_KEY + fid);
+          st.delete(BRANCH_REVIEW_KEY + fid);
+          st.delete(BRANCH_RUNS_KEY + fid);
           st.delete(IDBKeyRange.bound(`${BRANCH_HASH_KEY}${fid}:`, `${BRANCH_HASH_KEY}${fid}:\uffff`));
           out.released++;
         } else if (rec.status === "making") {
@@ -3081,12 +3418,15 @@ export class Workspace {
     if (e.kind === "file") {
       // (listed from the server, its bytes not fetched yet: not here)
       if (e.remote) return undefined;
+      // (a missing blob reads as not here, as a missing fileBytes row does)
+      if (e.blob !== undefined) return inTx(this.ws, "blobs", "readonly", (tx) => readBlob(tx, e.blob!)).catch((x) => { if (x instanceof BlobError) return undefined; throw x; });
       if (e.migrated) return inTx(this.ws, "fileBytes", "readonly", (tx) => req(tx.objectStore("fileBytes").get(e.fid!)));
       const old = await this.legacyBytes(e);
       if (old !== undefined) return old;
       // (moved meanwhile by another tab, its old copy deleted: read where it is now; a file is never
       // unreadable because it is being moved)
       const now = await this.stat(e.path);
+      if (now?.blob !== undefined && now.fid !== undefined && (e.fid === undefined || now.fid === e.fid)) return this.contents(now);
       if (now?.migrated && now.fid !== undefined && (e.fid === undefined || now.fid === e.fid)) return inTx(this.ws, "fileBytes", "readonly", (tx) => req(tx.objectStore("fileBytes").get(now.fid!)));
       return undefined;
     }
@@ -3346,8 +3686,19 @@ export class Workspace {
     const all = (await this.list("/", { recursive: true })).filter((e) => e.kind === "file");
     // (the bytes kept beside the index read in one transaction, not one each: what a kernel's start waits for;
     // any other, or all of them if that transaction fails, read one at a time as before)
-    const kept = all.filter((e) => e.migrated && !e.remote && e.fid !== undefined);
+    const kept = all.filter((e) => e.blob === undefined && e.migrated && !e.remote && e.fid !== undefined);
     const got = new Map<Entry, unknown>();
+    // (files kept in blobs, likewise in one transaction, each blob read once however many files name it; a missing
+    // one is left out, as a missing fileBytes row is)
+    const byBlob = all.filter((e) => e.blob !== undefined && !e.remote);
+    if (byBlob.length) {
+      const shas = [...new Set(byBlob.map((e) => e.blob!))];
+      const read = await inTx(this.ws, "blobs", "readonly", (tx) => Promise.all(shas.map((sha) => readBlob(tx, sha).catch((x) => { if (x instanceof BlobError) return undefined; throw x; })))).catch(() => null);
+      if (read) {
+        const bytes = new Map(shas.map((sha, i) => [sha, read[i]]));
+        for (const e of byBlob) got.set(e, bytes.get(e.blob!));
+      }
+    }
     if (kept.length) {
       const read = await inTx(this.ws, "fileBytes", "readonly", (tx) => {
         const st = tx.objectStore("fileBytes");
@@ -3403,7 +3754,7 @@ export class Workspace {
       // notebook's first writer load takes it into the journal (recovery's catch-up, 2c-1d-iii §3); a plain store's
       // save is refused there, and so was every notebook made here: the Files' New, create, duplicate, an upload)
       const journaled = (await this.mainTx("notebooks", "readonly", (st) => st.get(FENCE)))?.phase === "journal";
-      const out = await new IdbStore(this.main, ref, null, { journal: journaled }).save({ ...doc, cells: doc.cells ?? [], mode, name: splitExt(nameOf(q))[0], id: ref }, { lockHeld: true, ...(journaled ? { journal: { keep: true, hash: "", unjournaled: true } } : {}) });
+      const out = await new IdbStore(this.main, ref, null, { journal: journaled }).save({ ...doc, cells: withCellIds(doc.cells ?? []), mode, name: splitExt(nameOf(q))[0], id: ref }, { lockHeld: true, ...(journaled ? { journal: { keep: true, hash: "", unjournaled: true } } : {}) });
       if (typeof out === "string") throw new WorkspaceError("storage", out);
       undo = () => this.deleteNotebook(ref);
     } else if (kind === "board") {
@@ -3993,6 +4344,18 @@ export class Workspace {
     })().catch((e) => console.warn("workspace: resuming a large move:", e));
   }
 
+  /** (sync) This device's own document renamed by sync (SyncRenamed): retitled as a rename made here retitles it,
+   * if its title is still its old name, holding the lock as a rename does.  After the view's transaction (the titles
+   * are in other stores); nothing if it has moved on since. */
+  async retitleRenamed(r: SyncRenamed): Promise<void> {
+    if (r.kind !== "notebook" && r.kind !== "board") return;
+    await this.lockedFor(r.to, async () => {
+      const e = await this.stat(r.to);
+      if (!e || e.kind !== r.kind || e.ref !== r.ref) return;
+      await this.retitle(e, r.from);
+    });
+  }
+
   /** A renamed document whose title was its old name: titled with its new one. */
   private async retitle(e: Entry, was: string) {
     const oldName = splitExt(nameOf(was))[0], newName = splitExt(nameOf(e.path))[0];
@@ -4015,10 +4378,10 @@ export class Workspace {
 
   /** Changes told to this tab's watchers, and (made here) to the other tabs. */
   tell(c: Change, broadcast = true) {
-    if (!c.ops.length) return;
+    if (!c.ops.length && !c.renamed?.length) return;
     // (this page's own commits, during a call that collects: each local op's seq, once, before the call returns)
     if (broadcast && this.sink) for (const o of c.ops) if (o.origin !== "server" && o.seq !== undefined) this.sink.push(o.seq);
-    if (broadcast) try { this.channel?.postMessage({ from: this.tab, ops: c.ops }); } catch {}
+    if (broadcast) try { this.channel?.postMessage({ from: this.tab, ops: c.ops, ...(c.renamed?.length ? { renamed: c.renamed } : {}) }); } catch {}
     for (const f of this.subs) try { f(c); } catch (e) { console.warn("workspace watcher:", e); }
   }
 }

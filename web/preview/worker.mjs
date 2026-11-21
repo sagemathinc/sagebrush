@@ -15,7 +15,26 @@ export function frameOptions(policy) {
   const fa = /(?:^|;)\s*frame-ancestors\s+([^;]*?)\s*(?:;|$)/.exec(policy)?.[1];
   return fa === "'none'" ? 'DENY' : fa === "'self'" ? 'SAMEORIGIN' : null;
 }
+// (a GitHub page's policy, /gh/...: the published /s/ page's, its fetches to GitHub's hosts only; the twin of
+// web/csp-policy.mts ghPolicy)
+export const GITHUB_CONNECT = ['https://api.github.com', 'https://raw.githubusercontent.com', 'https://data.jsdelivr.com'];
+export function ghPolicy(policy) {
+  return policy.split(';').map(d => d.trim()).filter(Boolean).map(d => {
+    const [name, ...sources] = d.split(/\s+/);
+    return name === 'connect-src' ? [name, ...sources.filter(s => s !== 'https:' && s !== 'http:'), ...GITHUB_CONNECT].join(' ') : d;
+  }).join('; ');
+}
 export const SCRIPT_POLICY = "default-src 'none'; script-src 'self' blob: 'unsafe-eval' 'wasm-unsafe-eval'; connect-src 'self'; worker-src 'self' blob:; base-uri 'none'; form-action 'none'";
+
+// A file's Cache-Control: production's, which the publisher signed into the object's metadata (prepare.mjs, from the
+// build's _headers); directive tokens only, else (an object published before this, or anything malformed) the
+// static-asset default, so that a browser revalidates it.
+export const DEFAULT_CACHE_CONTROL = 'public, max-age=0, must-revalidate';
+const CACHE_CONTROL = /^[a-z][a-z0-9-]*(=[0-9]{1,10})?(, [a-z][a-z0-9-]*(=[0-9]{1,10})?){0,7}$/;
+export function cacheControl(object) {
+  const value = object.customMetadata?.['preview-cache-control'];
+  return typeof value === 'string' && CACHE_CONTROL.test(value) ? value : DEFAULT_CACHE_CONTROL;
+}
 
 export function baseHeaders() {
   return new Headers({
@@ -25,7 +44,7 @@ export function baseHeaders() {
     'X-Robots-Tag': 'noindex, nofollow, noarchive',
     'X-Content-Type-Options': 'nosniff',
     'Referrer-Policy': 'no-referrer',
-    'Cache-Control': 'no-store, no-transform',
+    'Cache-Control': 'no-store, no-transform', // (errors; a file's own is set below)
     'Access-Control-Allow-Origin': '*', // Opaque-origin runner fetches, as on sagebrush.space.
     'Content-Security-Policy': DENY,
   });
@@ -44,6 +63,9 @@ export function route(input) {
   if (u.protocol !== 'https:' || u.port || !u.hostname.endsWith(suffix)) return null;
   const name = u.hostname.slice(0, -suffix.length);
   if (!NAME.test(name)) return null;
+  // A public GitHub repository's notebook or folder (/gh/...): the shared-collection page, which reads the rest of the
+  // path itself and fetches GitHub from the reader's browser; nothing of the path reaches R2 (web/gh/source.ts).
+  if (u.pathname.startsWith('/gh/')) return { name, path: 's/index.html', gh: true };
   const parts = u.pathname.split('/').slice(1);
   if (parts.at(-1) === '') parts[parts.length - 1] = 'index.html';
   const decoded = [];
@@ -63,7 +85,7 @@ export default {
     const target = route(request.url);
     if (!target) return error(404);
     if (!['GET', 'HEAD'].includes(request.method)) return error(405);
-    const { name, path } = target;
+    const { name, path, gh } = target;
     try {
       // Exact file or a directory index only. Missing API routes never fall back to the app.
       let key = path;
@@ -82,11 +104,19 @@ export default {
         if (!policy || policy.size > 32768) return error(503);
         const { csp } = await policy.json();
         if (typeof csp !== 'string' || !csp.includes('default-src ') || /[\r\n]/.test(csp)) return error(503);
-        headers.set('Content-Security-Policy', csp);
+        headers.set('Content-Security-Policy', gh ? ghPolicy(csp) : csp);
         if (extension === 'html' && frameOptions(csp)) headers.set('X-Frame-Options', frameOptions(csp));
       }
-      headers.set('Content-Length', String(object.size));
       headers.set('ETag', object.httpEtag);
+      headers.set('Cache-Control', cacheControl(object));
+      // (a revalidation of the copy the browser has: its ETag still this object's, so 304 and no body, as production)
+      const tags = (request.headers.get('If-None-Match') ?? '').split(',').map(t => t.trim().replace(/^W\//, ''));
+      if (tags.includes(object.httpEtag) || tags.includes('*')) {
+        await object.body.cancel();
+        headers.delete('Content-Type');
+        return new Response(null, { status: 304, headers });
+      }
+      headers.set('Content-Length', String(object.size));
       // No R2 httpMetadata is copied: in particular no cookies or arbitrary response headers.
       if (request.method === 'HEAD') await object.body.cancel();
       return new Response(request.method === 'HEAD' ? null : object.body, { headers });

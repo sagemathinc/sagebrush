@@ -45,7 +45,9 @@
 //      then {id, done, ms, error?} (or {id, skipped} for a run queued before an
 //      interrupt); `error`: the code raised (a traceback was written); `names`:
 //      global names whose widgets changed (an interact update: the reactive
-//      notebook reruns the cells reading them).
+//      notebook reruns the cells reading them); `exited`: a `repl` run left its
+//      prompt (exit() or quit(), Magma's quit;, MATLAB's exit): the page's
+//      Console then ends this session and starts a new one.
 // With RunHooks (the browser worker, for TimeTravel replay): a run's `clock`
 // is the clock values to replay, and `done` also has the run's clock record
 // (web/replay-env.ts ClockRecord).
@@ -53,13 +55,14 @@
 // whose function is running, whose output area should receive it.
 import { initParser, R, libDir, packageModuleNames, optionalModuleNames } from "./compile";
 import { needsMore, completeIn, ipythonSyntax } from "./interactive";
-import { MAGIC_PRE, MAGIC_POST, GET_IPYTHON, magicTransform } from "./magic-syntax";
+import { MAGIC_PRE, MAGIC_POST, GET_IPYTHON, magicTransform, QUITTERS, matlabQuit, outputHistory } from "./magic-syntax";
 import { magmaToPython, MagmaSyntaxError } from "./magma";
 import { installMagmaCompile } from "./magma-builtin";
 import { matlabToPython, MatlabSyntaxError, matlabSyntaxMessage, matlabHostOps, matlabIsIncomplete } from "./matlab";
 import { mangleLocals, localPrefix } from "./dataflow";
 import { restoreDefNames, RENAME_HELPER, takeInitLines } from "./rename";
 import { unbox } from "./runtime/object";
+import { bundleMetadata } from "./runtime/index";
 import { checkParams, type LiveAnswer, type LiveOp, type LiveParams } from "./live-data";
 import { consumeCtrlC, INTR_GRADING } from "./runtime/interrupt";
 import { DISPLAY_ENVELOPE, displayCost } from "./output-cost";
@@ -204,7 +207,11 @@ export function notebookSession(post: (m: any) => void, opts: { captureStreams?:
     R.stderr.flush();
   };
   let ipythonDisplay = true;
+  // (how the notebook's figures are shown, its page's choice (Figures in its ⋯ menu, kept in the notebook): given
+  // with each run; the notebook's code may still say otherwise, lib/_graphics.py figures)
+  let pageFigures: string | null = null;
   R.host = {
+    figures: () => pageFigures,
     // (a Python cell's value shown as IPython shows it, src/runtime/index.ts
     // displayText; a Sage, Magma or MATLAB cell's keeps the repr, as
     // SageMath's shell shows <class 'int'>; set by each run)
@@ -216,9 +223,10 @@ export function notebookSession(post: (m: any) => void, opts: { captureStreams?:
     display(bundle: Record<string, string>) {
       if (current === null) return false;
       flush();
+      const metadata = bundleMetadata(bundle);
       if (opts.limit) {
         if (used.cut) return true;
-        const n = displayCost(bundle);
+        const n = displayCost(bundle, metadata);
         if (n > room() || used.displays >= opts.limit.displays) {
           cut(n > room() ? undefined : "displays");
           return true;
@@ -227,7 +235,10 @@ export function notebookSession(post: (m: any) => void, opts: { captureStreams?:
         used.run += n;
         used.displays++;
       }
-      post({ id: current, target, display: bundle });
+      // (its metadata too, when it has any: a PNG's size to show it at, src/runtime/index.ts bundleMetadata;
+      // charged with the bundle above)
+      if (metadata) post({ id: current, target, display: bundle, metadata });
+      else post({ id: current, target, display: bundle });
       return true;
     },
     interact(spec: string) {
@@ -327,6 +338,8 @@ export function notebookSession(post: (m: any) => void, opts: { captureStreams?:
     // get_ipython(), also a builtin in a notebook (Jupyter's exports call
     // get_ipython().run_line_magic): lib/_pyjs_magic.py's shell
     R.loader.exec(GET_IPYTHON, host, "exec", "<init>");
+    // IPython's output history (_, __, ___), as in a Jupyter notebook; no execution count here: the page counts
+    R.loader.exec(outputHistory(false), host, "exec", "<init>");
     return { main, host };
   })();
 
@@ -383,6 +396,10 @@ export function notebookSession(post: (m: any) => void, opts: { captureStreams?:
     ...packageModuleNames(),
   ];
 
+  // (a SystemExit in this run: whether its status was a success; null if none)
+  let exitSeen: boolean | null = null;
+  // (the Console's exit() and quit(), installed at its first run)
+  let quitters = false;
   // Run Python, reporting an exception as a traceback on stderr; false if it raised.
   function run(src: string, ns: any, mode: string, filename: string, o: { sage?: boolean; transform?: (tree: any) => void } = {}): boolean {
     try {
@@ -398,6 +415,7 @@ export function notebookSession(post: (m: any) => void, opts: { captureStreams?:
       // said them); a message for a status is written, as Python does.
       if (R.typeOf(exc).$mro.includes(R.T.SystemExit)) {
         const s = exitStatus(exc.code);
+        exitSeen = s.ok;
         if (s.ok) return true;
         if (s.text !== null) R.stderr.write(s.text + "\n");
         return false;
@@ -515,6 +533,7 @@ export function notebookSession(post: (m: any) => void, opts: { captureStreams?:
     used.item = 0;
     used.cut = false;
     used.displays = 0;
+    exitSeen = null;
     post({ id, start: true });
     // (the run's time, for the reactive notebook's budget: from here, but not
     // counting Sage's one-time load below, which is the interpreter's, not the cell's)
@@ -528,6 +547,7 @@ export function notebookSession(post: (m: any) => void, opts: { captureStreams?:
     // are imported already or in the cell (lib/random.py, lib/numpy/random.py
     // read builtins.__pyjs_seed__ when they are), so the numbers do not depend
     // on what ran before.  os.urandom and secrets stay truly random.
+    if ("figures" in m) pageFigures = typeof m.figures === "string" && ["auto", "svg", "png", "both"].includes(m.figures) ? m.figures : null;
     const seed = typeof m.seed === "string" && /^[0-9a-f]{64}$/i.test(m.seed) ? m.seed : null;
     if (seed || seededBefore) {
       const words = seed ? Array.from({ length: 8 }, (_, i) => parseInt(seed.slice(8 * i, 8 * i + 8), 16)) : [];
@@ -572,6 +592,9 @@ export function notebookSession(post: (m: any) => void, opts: { captureStreams?:
         }
         if (py !== null) ok = run(py, main, "exec", "<cell>");
         else ok = false;
+      } else if (m.matlab && m.repl && matlabQuit(m.code) !== null) {
+        // (MATLAB's exit or quit at the Console: the session ends, below)
+        exitSeen = true;
       } else if (m.matlab) {
         // MATLAB: translated to Python (src/matlab.ts) in cell mode: variables and
         // functions stay for the next cells; MATLAB prints its own values, and an
@@ -625,6 +648,7 @@ export function notebookSession(post: (m: any) => void, opts: { captureStreams?:
         const magics = magicTransform(!!m.sage);
         const transform = (t: any) => { magics(t); if (inits.length) initialize(t); if (mangle) mangleLocals(t, mangle, { sage: !!m.sage }); if (scopedNames.length) restoreDefNames(t, scoped); };
         run(MAGIC_PRE, host, "exec", "<autoreload>");
+        if (m.repl && !quitters) quitters = run(QUITTERS, host, "exec", "<site>");
         ok = run(ipythonSyntax(code) + "\n", main, m.repl ? "single" : "cell", m.repl ? "<stdin>" : "<cell>", { sage: !!m.sage, transform });
       }
       if (modeReady) run(FLUSH_FIGURES, host, "exec", "<figures>");
@@ -632,7 +656,10 @@ export function notebookSession(post: (m: any) => void, opts: { captureStreams?:
     flush();
     target = null;
     const more = opts.runs?.end() ?? {};
-    post({ id, done: true, ms: performance.now() - t0, ...(ok ? {} : { error: true }), ...(changedNames.size ? { names: [...changedNames] } : {}), ...(evaluated !== null ? { evaluated } : {}), ...(modeReady !== null ? { mode: modeOf(m), modeReady } : {}), ...more });
+    // (the Console's session ends: any exit at a Python or Sage prompt, as CPython's; Magma's quit; and MATLAB's exit,
+    // not Magma's errors, which end their cell with a failing status)
+    const exited = !!m.repl && exitSeen !== null && (exitSeen || !(m.magma || m.matlab));
+    post({ id, done: true, ms: performance.now() - t0, ...(ok ? {} : { error: true }), ...(exited ? { exited: true } : {}), ...(changedNames.size ? { names: [...changedNames] } : {}), ...(evaluated !== null ? { evaluated } : {}), ...(modeReady !== null ? { mode: modeOf(m), modeReady } : {}), ...more });
     current = null;
   }
 

@@ -1,4 +1,6 @@
 node_modules/
+# (and a symlink of that name, as a worktree may have, which the directory pattern above does not match)
+node_modules
 __pycache__/
 dist/
 pyparse/dist/
@@ -7,3 +9,11 @@ packages/sagebrush/dist/
 web/app.tmp.js
 dist-test/
 web/dist-output-shell/
+# the npm package sagebrush-web's modules: build outputs of node cdn/build.mjs
+cdn/sagebrush-engine.mjs
+cdn/pyparse.mjs
+# the four WebAssembly modules: build outputs, fetched by their pins in wasm/pins.json (node scripts/wasm-fetch.mjs)
+wasm/*.wasm
+# wasm-fetch.mjs records what it installed; a local build records its sidecar (design/wasm-artifacts.md)
+wasm/.installed.json
+wasm/*.local.json

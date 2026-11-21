@@ -33,14 +33,19 @@ const policyOf = (mts) => {
   return [...m[1].matchAll(/"([^"]*)"/g)].map((x) => x[1]).join("; ");
 };
 const appServes = (rs, policy) => !!policy && /const SHELL_WORKER_CSP: &str = "([^"]*)";/.exec(rs)?.[1] === policy &&
-  rs.includes(`if request.url().split(['?', '#']).next() == Some("/shell/worker-boot.js") {\n                        response.add_header("Content-Security-Policy", SHELL_WORKER_CSP);`);
+  rs.includes(`if path == "/shell/worker-boot.js" {\n                headers.retain(|(h, _)| *h != "Content-Security-Policy");\n                headers.push(("Content-Security-Policy", SHELL_WORKER_CSP.into()));`);
 const libRs = readFileSync(join(here, "..", "app", "src-tauri", "src", "lib.rs"), "utf8");
 const policyMts = readFileSync(join(here, "csp-policy.mts"), "utf8");
 const policy = policyOf(policyMts);
 ok(policyOf(policyMts.replace(`"connect-src 'none'",`, "CONNECT,")) === null && policyOf(policyMts.replace(`"connect-src 'none'",`, "`connect-src 'none'`,")) === null &&
   policyOf(policyMts.replace(`"connect-src 'none'",`, `"connect-src 'none'", ...more,`)) === null, "a shell worker policy with an element other than a string literal: no policy read (a constant, a template, a spread)");
 ok(!!policy && /connect-src 'none'/.test(policy) && appServes(libRs, policy), "the app serves shell/worker-boot.js with the site's shell worker policy (lib.rs = csp-policy.mts)");
-ok(!appServes(libRs.replace("connect-src 'none'; ", ""), policy) && !appServes(libRs.replace(`Some("/shell/worker-boot.js")`, `Some("/shell/worker.js")`), policy),
+// (an example's page in File > Examples…'s sandboxed iframe, an opaque origin, loads KaTeX cross-origin: the app's
+// server gives /katex/* and /examples/* CORP, as web/_headers does on the site)
+const corp = (rs) => /if path\.starts_with\("\/katex\/"\) \|\| path\.starts_with\("\/examples\/"\) \{\s*headers\.push\(\("Cross-Origin-Resource-Policy", "cross-origin"\.into\(\)\)\);/.test(rs);
+ok(corp(libRs) && /^\/katex\/\*\n  Cross-Origin-Resource-Policy: cross-origin$/m.test(readFileSync(join(here, "_headers"), "utf8")), "the app serves /katex/* and /examples/* with Cross-Origin-Resource-Policy: cross-origin, as the site does /katex/* (web/_headers)");
+ok(!corp(libRs.replace('"/katex/"', '"/kat/"')) && !corp(libRs.replace('"cross-origin".into()', '"same-origin".into()')), "a lib.rs rule on another path, or another policy: refused");
+ok(!appServes(libRs.replace("connect-src 'none'; ", ""), policy) && !appServes(libRs.replace(`path == "/shell/worker-boot.js"`, `path == "/shell/worker.js"`), policy),
   "a lib.rs policy other than the site's, or on another path: refused");
 
 // (each change on a copy, undone after)
@@ -85,7 +90,8 @@ try {
   ok(/checked, [1-9]\d* by a relative path; the Terminal's set with [1-9]\d* packages?\)/.test(check().out), "the Terminal's module, worker and set are in app/dist and checked");
   const page = join(copy, "index.html");
   const html = readFileSync(page, "utf8");
-  ok(html.includes(`"./shell/terminal.js"`), "the page imports ./shell/terminal.js (the check's case)");
+  // (the page's script is its own file, sagebrush-app.js (web/build.ts): the import is there, and the check reads it too)
+  ok(readFileSync(join(copy, "sagebrush-app.js"), "utf8").includes(`"./shell/terminal.js"`) && /<script src="\/sagebrush-app\.js\?h=[0-9a-f]{16}" integrity="sha384-[A-Za-z0-9+\/]{64}"><\/script>/.test(html), "the page's script imports ./shell/terminal.js (the check's case)");
   const moveAway = (f) => { renameSync(join(copy, f), join(dir, "moved")); return () => renameSync(join(dir, "moved"), join(copy, f)); };
   let back = moveAway("shell/terminal.js");
   r = check();

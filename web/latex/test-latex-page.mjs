@@ -20,6 +20,7 @@
 //     zoom kept; a notebook from the files opened by URL; an unclosed $$ ended at a blank line.
 //   SAGEBRUSH_LATEX_PREVIEW=test bun web/build.ts && CHROME=google-chrome node web/latex/test-latex-page.mjs
 import { spawn } from "node:child_process";
+import { createHash } from "node:crypto";
 import { mkdtempSync, rmSync, readFileSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
@@ -97,7 +98,9 @@ const bytesOf = (p) => ev(`${W}.read(${JSON.stringify(p)}).then((r) => Array.fro
 const mk = (p, arr) => ev(`${W}.create(${JSON.stringify(p)}, { content: new Uint8Array(${JSON.stringify(arr)}) }).then((e) => e.fid)`);
 const enc = (s) => Array.from(new TextEncoder().encode(s));
 const DOC = "\\documentclass{article}\n\\begin{document}\n\\section{Hello}\nSome text with $x^2$.\n\\end{document}\n";
-const open = async (fid, q = "&latex=1") => { await go(base + "?tex=" + encodeURIComponent(fid) + q); return until(`!!document.querySelector(".tex-page")`, 20000); };
+// (and the editor's kept view put back, or not, once its chunk came (view.ts's mark, data-view): a selection made in code
+//  before then is put back over, as a person's never is (a pointer or a key counts as moving); no editor, no mark)
+const open = async (fid, q = "&latex=1") => { await go(base + "?tex=" + encodeURIComponent(fid) + q); return until(`!!document.querySelector(".tex-page") && (!document.querySelector(".tex-right") || document.querySelector(".tex-right").dataset.view === "1")`, 20000); };
 const page = (expr) => ev(`(() => { const P = document.querySelector(".tex-page"); return ${expr}; })()`);
 const typeInto = (text) => ev(`(() => { const t = document.querySelector(".tex-src"); t.value = ${JSON.stringify(text)}; t.dispatchEvent(new Event("input")); return true; })()`);
 const ctrlS = () => send("Input.dispatchKeyEvent", { type: "keyDown", key: "s", code: "KeyS", modifiers: 2, windowsVirtualKeyCode: 83 });
@@ -139,7 +142,7 @@ try {
     await until(`!!document.querySelector('.sbfiles .frow[data-path="/Welcome.ipynb"]')`, 20000);
     await ev(`${W}.remove("/Welcome.ipynb").then(() => true)`);
     const listed = await until(`[...document.querySelectorAll(".sbfiles .fempty button")].some((b) => b.textContent === "New LaTeX document")`, 20000);
-    check(listed && await ev(`[...document.querySelectorAll(".sbfiles .fempty button")].some((b) => b.textContent === "From an example…")`), "phone: the empty file list offers From an example… too (U0)");
+    check(listed && await ev(`[...document.querySelectorAll(".sbfiles .fempty button")].some((b) => b.textContent === "Examples…")`), "phone: the empty file list offers From an example… too (U0)");
     const er = listed ? await reach(".sbfiles .fempty button", "New LaTeX document") : await ev(`({ files: !!document.querySelector(".sbfiles"), hidden: document.getElementById("wssidebar")?.hidden, rows: [...document.querySelectorAll(".sbfiles .frow")].map((r) => r.dataset.path).slice(0, 8), empty: [...document.querySelectorAll(".sbfiles .fempty")].map((x) => x.textContent.slice(0, 60)) })`);
     check(listed && er.found && er.inView && er.top && er.w === 390, "phone: the empty file list offers New LaTeX document, in view and not covered", er);
     if (listed) { await mark(); await ev(`([...document.querySelectorAll(".sbfiles .fempty button")].find((b) => b.textContent === "New LaTeX document").click(), true)`); }
@@ -147,7 +150,7 @@ try {
     // (the File menu with the files panel closed: on a phone the panel lies over the page, as it is meant to)
     await ev(`localStorage.removeItem("sagebrush-files-sidebar"); true`);
     await go(base + "?latex=1"); await until(`!!${W}`, 60000);
-    const fb = await reach("#filebtn", "File ▾");
+    const fb = await reach("#filebtn", "File");
     await ev(`(document.getElementById("filebtn").click(), true)`);
     await until(`!!document.querySelector('.fmgroup[aria-label="New"]')`, 10000);
     await ev(`(document.querySelector('#filemenu button[data-group="new"]').click(), true)`);
@@ -157,14 +160,14 @@ try {
       "phone: File > New offers LaTeX document, in the file panel's order (U0), File and the item in view and not covered", { fb, items, mr });
     await mark(); await ev(`([...document.querySelectorAll('.fmgroup[aria-label="New"] button')].find((b) => b.textContent === "LaTeX document").click(), true)`);
     check(await madeAs("/Untitled (2).tex"), "phone: File > New > LaTeX document: /Untitled (2).tex made and opened in the editor");
-    // the editor's File > New > From an example… (U0: "From an example…" replaces "LaTeX example", William Nov 2), on
+    // the editor's File > New > From an example… (U0: "Examples…" replaces "LaTeX example", William Nov 2), on
     // a site without the examples gallery (this test's server: web/examples/open.ts finds no catalog): the LaTeX
     // examples' own list fits the phone (10 large buttons, the dialog within the width, each button reachable), and the
     // figure example opens with its image (a folder of its own, plot.png beside it)
     await ev(`(document.querySelector(".tex-filebtn").click(), true)`);
     await until(`!!document.querySelector('.tex-filemenu .fmgroup[aria-label="New"]')`, 10000);
     await ev(`(document.querySelector('.tex-filemenu button[data-group="new"]').click(), true)`);
-    const exItem = await reach('.tex-filemenu .fmgroup[aria-label="New"] button', "From an example…");
+    const exItem = await reach('.tex-filemenu .fmgroup[aria-label="New"] button', "Examples…");
     // (the examples are a chunk of their own, sagebrush-latex-examples.js: not fetched before their list is asked for)
     const exAsks = () => requests.filter((u) => /sagebrush-latex-examples\.js/.test(u)).length, exBefore = exAsks();
     await ev(`(document.querySelector('.tex-filemenu [data-item="fromExample"]').click(), true)`);
@@ -234,6 +237,33 @@ try {
     check(await until(galleryOn, 20000), "the editor's New ▸ From an example…: the same panel, not the LaTeX examples' own list");
     await ev(closeGallery);
     await ev(`(() => { if (window.__sbFetch0) window.fetch = window.__sbFetch0; return 1; })()`);
+  }
+  // ---- the notebook page's File ▸ Examples…, a LaTeX example, Open a copy: the copy opens in the LaTeX editor
+  // (/?tex=<fid>), not as a notebook (/?nb=<its path>, an empty one); the example served as a site with the gallery
+  // serves one (its catalog, files.json and a stored ZIP, stubbed: this test's server has none)
+  {
+    const sha = (b) => createHash("sha256").update(b).digest("hex");
+    const tex = Buffer.from("\\documentclass{article}\n\\begin{document}\nA copied stub.\n\\end{document}\n"), name = Buffer.from("stub.tex");
+    const fj = JSON.stringify({ id: "latex/stub", main: "stub.tex", files: [{ path: "stub.tex", bytes: tex.length, sha256: sha(tex) }] });
+    const hd = Buffer.alloc(30);
+    hd.writeUInt32LE(0x04034b50, 0); hd.writeUInt16LE(20, 4); hd.writeUInt32LE(tex.length, 18); hd.writeUInt32LE(tex.length, 22); hd.writeUInt16LE(name.length, 26);
+    const zip64 = Buffer.concat([hd, name, tex]).toString("base64");
+    const catalog = JSON.stringify({ examples: [{ id: "latex/stub", kind: "latex", title: "Stub LaTeX", summary: "", main: "stub.tex", files_sha256: sha(fj) }] });
+    await go(base); await until(`!!${W} && !!document.querySelector("#filemenu [data-item=examples]")`, 60000);
+    await ev(`(() => { const f0 = window.fetch, at = { "/examples/index.json": ${JSON.stringify(catalog)}, "/examples/latex/stub/files.json": ${JSON.stringify(fj)} };
+      window.fetch = (u, o) => { const p = new URL(String(u?.url ?? u), location.href).pathname;
+        if (p === "/examples/latex/stub/stub.zip") return Promise.resolve(new Response(Uint8Array.from(atob(${JSON.stringify(zip64)}), (c) => c.charCodeAt(0))));
+        return p in at ? Promise.resolve(new Response(at[p], { headers: { "content-type": "application/json" } })) : f0(u, o); };
+      document.querySelector("#filemenu [data-item=examples]").click(); return 1; })()`);
+    const listed = await until(`!!document.querySelector("dialog.sb-examples[open] button[data-kind=latex]")`, 20000);
+    await ev(`(() => { document.querySelector("dialog.sb-examples button[data-kind=latex]").click(); return 1; })()`);
+    await until(`[...document.querySelectorAll("dialog.sb-examples [role=option]")].some((b) => b.textContent.includes("Stub LaTeX"))`, 10000);
+    await ev(`(() => { [...document.querySelectorAll("dialog.sb-examples [role=option]")].find((b) => b.textContent.includes("Stub LaTeX")).click(); return 1; })()`);
+    await sleep(300);
+    await ev(`(() => { [...document.querySelectorAll("dialog.sb-examples button")].find((b) => b.textContent === "Open a copy").click(); return 1; })()`);
+    const opened = await until(`/^\\?tex=[0-9a-f]+$/.test(location.search) && /A copied stub/.test(document.querySelector(".tex-preview")?.textContent ?? "")`, 30000);
+    const at = await ev(`(async () => { const fid = new URLSearchParams(location.search).get("tex"); return { url: location.pathname + location.search, path: (await ${W}.list("/", { recursive: true })).find((e) => e.fid === fid)?.path ?? null }; })()`).catch((e) => String(e));
+    check(listed && opened && at?.path === "/Examples/Stub LaTeX/stub.tex", "the notebook page's File ▸ Examples…, a LaTeX example's Open a copy: the copy opens in the LaTeX editor", at);
   }
   // ---- every example opened in the editor (made by the page module's makeExample, as the list does; the test's
   // workspace handle has create, not the page's createByPerson): each renders in the preview,
@@ -1143,8 +1173,13 @@ try {
     // (1) the person: a comment on a preview selection (the Comment button), one on a source selection (Ctrl+Alt+M)
     const selectInPreview = (word) => ev(`(() => { const P = document.querySelector(".tex-preview"); const tw = document.createTreeWalker(P, NodeFilter.SHOW_TEXT);
       for (let t = tw.nextNode(); t; t = tw.nextNode()) { const i = t.data.indexOf(${J(word)}); if (i >= 0) { const r = document.createRange(); r.setStart(t, i); r.setEnd(t, i + ${word.length}); const s = getSelection(); s.removeAllRanges(); s.addRange(r); P.dispatchEvent(new MouseEvent("mouseup", { bubbles: true })); return true; } } return false; })()`);
-    const post = (text) => ev(`(async () => { for (let i = 0; i < 100 && !document.querySelector(".sb-cm-compose textarea"); i++) await new Promise((r) => setTimeout(r, 50));
+    // (a composer that never opened fails here, by name, rather than as whatever the row checks next)
+    const post = async (text) => {
+      const ok = await ev(`(async () => { for (let i = 0; i < 100 && !document.querySelector(".sb-cm-compose textarea"); i++) await new Promise((r) => setTimeout(r, 50));
       const ta = document.querySelector(".sb-cm-compose textarea"); if (!ta) return false; ta.value = ${J(text)}; document.querySelector(".sb-cm-compose .sb-cm-send").click(); return true; })()`);
+      if (!ok) check(false, "comments: the composer never opened, for " + J(text), await ev(`(() => { const t = document.querySelector(".tex-src"); return { selection: t ? [t.selectionStart, t.selectionEnd] : null }; })()`));
+      return ok;
+    };
     // (the first comment loads the chunk: the button opens the list first)
     await ev(`(document.querySelector(".tex-comments").click(), true)`);
     await until(`!!document.querySelector(".sb-cm-list")`, 15000);
@@ -2413,9 +2448,9 @@ try {
     return ev(`(async () => { document.querySelector('.sbfiles .fh button[aria-label="New"]').click(); await new Promise((r) => setTimeout(r, 0)); return [...document.querySelectorAll(".sbfmenu button")].map((b) => b.textContent); })()`);
   };
   const offItems = await newMenu("");
-  check(JSON.stringify(offItems) === JSON.stringify(["Notebook", "Board", "LaTeX document", "Folder", "From an example…"]), "A0: on by default: with no flag, New offers a LaTeX file", offItems);
+  check(JSON.stringify(offItems) === JSON.stringify(["Notebook", "Board", "LaTeX document", "Folder", "Examples…"]), "A0: on by default: with no flag, New offers a LaTeX file", offItems);
   const onItems = await newMenu("?latex=1");
-  check(JSON.stringify(onItems) === JSON.stringify(["Notebook", "Board", "LaTeX document", "Folder", "From an example…"]), "A0: the editor on: New offers a LaTeX file", onItems);
+  check(JSON.stringify(onItems) === JSON.stringify(["Notebook", "Board", "LaTeX document", "Folder", "Examples…"]), "A0: the editor on: New offers a LaTeX file", onItems);
   await mark();
   await ev(`([...document.querySelectorAll(".sbfmenu button")].find((b) => b.textContent === "LaTeX document").click(), true)`);
   const made = await fresh(`!!document.querySelector(".tex-page .tex-src") && !!${W}`, 20000);
@@ -2480,9 +2515,9 @@ try {
     const subRow = '.sbfiles .frow[data-path="/u0sub"]';
     await until(`!!document.querySelector(${JSON.stringify(subRow)})`, 20000);
     await ev(`(document.querySelector(${JSON.stringify(subRow)}).querySelector("button.more").click(), true)`);
-    const here = await until(`[...document.querySelectorAll(".sbfmenu button")].some((b) => b.textContent === "New LaTeX document here")`, 5000);
+    const here = await until(`[...document.querySelectorAll(".sbfmenu button")].some((b) => b.textContent === "New LaTeX")`, 5000);
     check(here, "U0: a folder's ⋯ menu offers New LaTeX document here", await ev(`[...document.querySelectorAll(".sbfmenu button")].map((b) => b.textContent)`));
-    if (here) { await mark(); await ev(`([...document.querySelectorAll(".sbfmenu button")].find((b) => b.textContent === "New LaTeX document here").click(), true)`); }
+    if (here) { await mark(); await ev(`([...document.querySelectorAll(".sbfmenu button")].find((b) => b.textContent === "New LaTeX").click(), true)`); }
     const inSub = here && (await fresh(`!!document.querySelector(".tex-page .tex-src") && !!${W}`, 20000).catch(() => false)) && await ev(`${W}.stat("/u0sub/Untitled.tex").then((e) => !!e?.fid && new URLSearchParams(location.search).get("tex") === e.fid)`);
     check(inSub, "U0: New LaTeX document here: /u0sub/Untitled.tex, made in that folder and opened", { at: await ev("location.search"), sub: await ev(`${W}.list("/u0sub").then((l) => l.map((e) => e.path))`) });
     // (File ▸ New ▸ LaTeX document from a notebook with an edit not yet saved: saved first, and nobody asked to leave)
@@ -2500,7 +2535,7 @@ try {
     await mark(); await send("Page.navigate", { url: base + "board/?new=python" });
     await fresh(`!!window.sagebrush?.board?.snapshot && window.sagebrush.board.snapshot().doc !== null && !!document.querySelector('.sbfiles .fh button[aria-label="New"]')`, 60000);
     const boardPanelNew = await ev(`(async () => { document.querySelector('.sbfiles .fh button[aria-label="New"]').click(); await new Promise((r) => setTimeout(r, 0)); return [...document.querySelectorAll(".sbfmenu button")].map((b) => b.textContent); })()`);
-    check(boardPanelNew.includes("From an example…"), "U0: the board's file panel New offers From an example…", boardPanelNew);
+    check(boardPanelNew.includes("Examples…"), "U0: the board's file panel New offers From an example…", boardPanelNew);
     await ev(`(document.querySelectorAll(".sbfmenu").forEach((m) => m.remove()), true)`);
     // (the editor's File ▸ Open…: the files dialog; and Ctrl+O, its shortcut, the same)
     const subFid = await ev(`${W}.stat("/u0sub/Untitled.tex").then((e) => e?.fid ?? null)`);
@@ -2574,6 +2609,38 @@ try {
   // (the notebook's own page, a new document, with its workspace up: the next file is made there)
   const leftByRow = await fresh(`!document.querySelector(".tex-page") && !!${W}`, 30000);
   check(leftByRow && requests.some((u) => u.includes("?nb=" + nbRef)), "A7: a notebook clicked in the files beside the editor: its page opened by URL", { leftByRow, nbRef, reqs: requests.slice(0, 5) });
+  // A7: leaving the page right after an edit, within its save delay (the two-device audit: the edit was in neither the
+  // file nor the other device): a notebook clicked in the files waits for the edit's write, held here, and goes once it
+  // is written, the edit in the file; a write that fails asks first, and No keeps the page and the text
+  const readUx = () => ev(`${W}.read("/t/ux.tex").then((r) => new TextDecoder().decode(r.content), (e) => "ERR " + (e?.message ?? e))`);
+  const typeEnd = async (text) => { await ev(`(() => { const t = document.querySelector(".tex-src"); t.focus(); t.setSelectionRange(t.value.length, t.value.length); return 1; })()`); await send("Input.insertText", { text }); };
+  {
+    await open(fu); await until(`!!${rowOf("/uxnb.ipynb")}`, 15000);
+    await ev(`(() => { window.__heldW = 0; window.__hold = new Promise((r) => (window.__rel = r)); window.__sbTexSaveWrite = () => (window.__heldW++, window.__hold); return true; })()`);
+    await typeEnd("% held leave");
+    await mark();
+    await ev(`(${rowOf("/uxnb.ipynb")}.click(), true)`);
+    await sleep(1500);
+    const waiting = await ev(`({ page: !!document.querySelector(".tex-page"), url: location.search, held: window.__heldW, ro: document.querySelector(".tex-src")?.readOnly })`).catch((e) => ({ gone: String(e).slice(0, 80) }));
+    check(waiting.page === true && /tex=/.test(waiting.url) && waiting.held >= 1 && waiting.ro === true, "A7: a notebook clicked right after an edit, its write held: the page waits, held read-only, nothing left yet", waiting);
+    await ev(`(window.__rel?.(), true)`).catch(() => {});
+    const went = await fresh(`!document.querySelector(".tex-page") && !!${W}`, 30000).catch(() => false);
+    const bytes = went ? await readUx() : "";
+    check(went && bytes.endsWith("% held leave"), "A7: …the write let go: the notebook's page opened, and the edit is in the file", { went, tail: bytes.slice(-30) });
+  }
+  {
+    await open(fu); await until(`!!${rowOf("/uxnb.ipynb")}`, 15000);
+    await ev(`(() => { window.__asked = 0; window.confirm = () => { window.__asked++; return false; }; window.__sbTexSaveWrite = () => { throw new Error("test: the write failed"); }; return true; })()`);
+    await typeEnd("% refused leave");
+    await ev(`(${rowOf("/uxnb.ipynb")}.click(), true)`);
+    await until(`window.__asked >= 1`, 10000);
+    await sleep(800);
+    const stayed = await ev(`({ page: !!document.querySelector(".tex-page"), url: location.search, asked: window.__asked, text: document.querySelector(".tex-src")?.value.endsWith("% refused leave"), ro: document.querySelector(".tex-src")?.readOnly, state: document.querySelector(".tex-savestate")?.textContent })`);
+    check(stayed.page && /tex=/.test(stayed.url) && stayed.asked === 1 && stayed.text && stayed.ro === false, "A7: a notebook clicked after an edit whose write fails: asked first; No keeps the page, the text and the editor editable", stayed);
+    // (the write let succeed again and saved, so nothing is left to ask about)
+    await ev(`(delete window.__sbTexSaveWrite, true)`); await ctrlS(); await savedNow();
+    check((await readUx()).endsWith("% refused leave"), "A7: …then saved with Ctrl+S: the edit in the file");
+  }
   await ev(`localStorage.removeItem("sagebrush-files-sidebar"); true`);
   // A2: an unclosed formula ends at a blank line: shown with a note, the rest of the document rendered as text
   const fa2 = await mk("/t/open-math.tex", enc("\\documentclass{article}\n\\begin{document}\n$$x^\n\nAfter words here.\n\n\\section{Later}\nThen $$y=1$$ shown.\n\\end{document}\n"));
@@ -2977,10 +3044,117 @@ try {
       const run = i("tex-run"); return { run, toggle: i("tex-toggle"), file: i("tex-filebtn"), label: h[run]?.textContent ?? null, hidden: h[run]?.hidden ?? null }; })()`);
     check(bar.run >= 0 && bar.label === "Run" && bar.hidden === false && bar.run === bar.toggle + 1 && (bar.file < 0 || bar.file < bar.run),
       "Run: in the toolbar, right after the preview toggle (after File ▾ where there is one), shown for a document with SageTeX code", bar);
+    // the view (William, Nov 18: hide the source, one click): Source | Both | PDF, each a button of the toggle, remembered
+    // for this file in this browser; a file with none kept opens with both on a wide page, the source on a narrow one
+    {
+      const vis = () => ev(`(() => { const s = (c) => getComputedStyle(document.querySelector(c)).display !== "none";
+        const m = document.querySelector(".tex-main").getBoundingClientRect().width, r = document.querySelector(".tex-right").getBoundingClientRect().width;
+        return { view: document.querySelector(".tex-page").dataset.view, src: s(".tex-left"), doc: s(".tex-right"), full: r >= m - 2, both: s('.tex-view [data-view="both"]'),
+          pressed: [...document.querySelectorAll(".tex-view button")].map((b) => b.dataset.view + ":" + b.getAttribute("aria-pressed")).join() }; })()`);
+      const pick = (v) => ev(`(document.querySelector('.tex-view [data-view="${v}"]').click(), true)`);
+      const v0 = await vis();
+      check(v0.view === "both" && v0.src && v0.doc && !v0.full && v0.pressed === "source:false,both:true,pdf:false", "view: a file with none kept opens with both on a wide page, Both pressed", v0);
+      await pick("pdf");
+      const v1 = await vis();
+      check(v1.view === "pdf" && !v1.src && v1.doc && v1.full && v1.pressed === "source:false,both:false,pdf:true", "view: PDF shows the document alone, the page's width", v1);
+      await open(fr);
+      const v2 = await vis();
+      const fo = await mk("/t/view-other.tex", enc("\\documentclass{article}\n\\begin{document}\nOther.\n\\end{document}\n"));
+      await open(fo);
+      const v3 = await vis();
+      await pick("source");
+      const v4 = await vis();
+      check(v2.view === "pdf" && v3.view === "both" && v4.view === "source" && v4.src && !v4.doc, "view: kept for this file (reopened: PDF), another file its own (both, then Source shows the source alone)", { v2, v3, v4 });
+      await send("Emulation.setDeviceMetricsOverride", { width: 390, height: 844, deviceScaleFactor: 2, mobile: true });
+      const fn = await mk("/t/view-new.tex", enc("\\documentclass{article}\n\\begin{document}\nNew.\n\\end{document}\n"));
+      await open(fn);
+      const v5 = await vis();
+      await open(fr);
+      const v6 = await vis();
+      await send("Emulation.clearDeviceMetricsOverride");
+      check(v5.view === "source" && v5.src && !v5.doc && !v5.both && v6.view === "pdf" && !v6.src && v6.doc, "view: on a phone, a file with none kept opens with the source, Both isn't offered, and a kept PDF shows the document", { v5, v6 });
+      await open(fr);
+      await pick("both");
+    }
     // (never on open: no runner frame, no worker script for it, no results file, after the preview has rendered)
     await sleep(1500);
     const onOpen = { runner: requests.slice(n0).filter((u) => /\/runner\/|sagebrush-worker\.js/.test(u)), frames: await ev(`document.querySelectorAll("iframe[sandbox]").length`), results: await resultsOf("/t/run.tex"), chips: await ev(`document.querySelectorAll(".tex-preview .sagechip").length`) };
     check(onOpen.runner.length === 0 && onOpen.frames === 0 && onOpen.results === null && onOpen.chips >= 2, "Run: nothing runs on open (no runner, no worker, no results file; the items show as not run)", onOpen);
+    // embedded (?embed=1: the Agents page's pane frames the editor; the page's frame-ancestors 'self' admits this site's
+    // own frames only): the document alone, no Files, home, title, File menu, Agent or Share, no pairing of its own (the
+    // agent chunk never fetched, though this browser remembers a grant), and the pane's may-close answered by the
+    // frame's leave guard: at once with nothing pending, and only once a held write is written
+    {
+      const hdr = await ev(`fetch("/").then((r) => ({ csp: r.headers.get("content-security-policy") ?? "", xfo: r.headers.get("x-frame-options") }))`);
+      check(/frame-ancestors 'self'/.test(hdr.csp) && hdr.xfo === "SAMEORIGIN", "embed: the editor's page may be framed by this site's own pages only (frame-ancestors 'self', X-Frame-Options SAMEORIGIN)", hdr);
+      const fe = await mk("/t/embed.tex", enc("\\documentclass{article}\n\\begin{document}\nEmbedded.\n\\end{document}\n"));
+      // (a grant this browser remembers: put through the editor page's own workspace, the test build's __sbTexWs)
+      await ev(`window.__sbTexWs.putAgentGrant("embedtest", { id: "embedtest", folders: ["/"], write: true, run: true, expires: null })`);
+      await go(base + "?latex=1"); await until(`!!${W}`, 60000);
+      const n0 = requests.length;
+      await ev(`(() => { const f = document.createElement("iframe"); f.id = "sbembed"; f.style.cssText = "position:fixed;left:0;top:0;width:1000px;height:700px;z-index:99999;border:0;background:#fff"; f.src = "/?tex=${fe}&latex=1&embed=1"; document.body.append(f); return true; })()`);
+      const D = `document.getElementById("sbembed").contentDocument`;
+      await until(`!!${D}?.querySelector(".tex-page .tex-preview")?.textContent.includes("Embedded")`, 30000);
+      await sleep(1500);
+      const st = await ev(`(() => { const d = ${D}; const gone = (c) => { const e = d.querySelector(c); return !e || e.hidden || getComputedStyle(e).display === "none"; };
+        return { view: d.querySelector(".tex-page").dataset.view, back: gone(".tex-back"), home: gone(".tex-home"), title: gone(".tex-title"), file: gone(".tex-filebtn"), agent: gone(".tex-agent"), share: gone(".tex-sharebtn"),
+          left: d.querySelector(".tex-page").getBoundingClientRect().left, focusInside: document.activeElement?.id === "sbembed" }; })()`);
+      const agentFetched = requests.slice(n0).filter((u) => /sagebrush-latex-agent/.test(u));
+      check(st.view === "pdf" && st.back && st.home && st.title && st.file && st.agent && st.share && st.left === 0 && !st.focusInside && agentFetched.length === 0,
+        "embed: the frame shows the document alone, without Files, home, title, File, Agent or Share, takes no focus, and starts no pairing (no agent chunk, a grant remembered)", { st, agentFetched });
+      const ask = (id) => ev(`new Promise((res) => { const f = document.getElementById("sbembed"); const h = (e) => { if (e.source === f.contentWindow && e.data?.t === "may-close" && e.data.id === ${JSON.stringify(id)}) { removeEventListener("message", h); res(e.data); } }; addEventListener("message", h); f.contentWindow.postMessage({ t: "may-close", id: ${JSON.stringify(id)} }, location.origin); setTimeout(() => res(null), 15000); })`);
+      const a1 = await ask("q1");
+      check(a1?.ok === true, "embed: the pane's may-close, nothing pending: answered ok at once", a1);
+      // (a may-close that isn't its parent's: from a frame beside it of this origin (the wrong source), and from a
+      //  sandboxed frame, whose origin is opaque (the wrong origin); each posted by code in that frame (a CDP isolated
+      //  world there), so the message's source is that frame. Neither is answered; the parent's next one still is.
+      //  The parent of another origin can't be made here: frame-ancestors 'self' refuses it, as checked above)
+      {
+        await ev(`(() => { window.__stray = []; addEventListener("message", (e) => { if (e.data?.t === "may-close") window.__stray.push(e.data.id); });
+          for (const [nm, sb] of [["sbsib", null], ["sbnull", "allow-scripts"]]) { const f = document.createElement("iframe"); f.name = nm; if (sb) f.setAttribute("sandbox", sb); f.onload = () => (f.dataset.loaded = "1"); f.src = "/manifest.webmanifest"; document.body.append(f); } return true; })()`);
+        await until(`[...document.querySelectorAll("iframe[name^=sb]")].every((f) => f.dataset.loaded === "1")`, 15000);
+        const inFrame = async (name, expression) => {
+          const t = await send("Page.getFrameTree");
+          const find = (x) => x.frame.name === name ? x.frame : (x.childFrames ?? []).map(find).find(Boolean);
+          const f = find(t.frameTree);
+          if (f) {
+            const w = await send("Page.createIsolatedWorld", { frameId: f.id, worldName: "sbtest" });
+            return (await send("Runtime.evaluate", { expression, contextId: w.executionContextId, returnByValue: true })).result?.value;
+          }
+          // (out of the page's process, as Chrome puts a sandboxed frame: its own target, evaluated in its session)
+          const ti = (await send("Target.getTargets")).targetInfos.find((x) => x.type === "iframe" && /manifest\.webmanifest/.test(x.url));
+          if (!ti) return "no frame target";
+          const { sessionId } = await send("Target.attachToTarget", { targetId: ti.targetId, flatten: true });
+          const r = await new Promise((res) => { const id = ++n; waiting.set(id, res); ws.send(JSON.stringify({ id, sessionId, method: "Runtime.evaluate", params: { expression, returnByValue: true } })); });
+          await send("Target.detachFromTarget", { sessionId });
+          return r?.result?.value ?? JSON.stringify(r).slice(0, 300);
+        };
+        const sib = await inFrame("sbsib", `(parent.document.getElementById("sbembed").contentWindow.postMessage({ t: "may-close", id: "s1" }, location.origin), self.origin)`);
+        const opaque = await inFrame("sbnull", `(() => { for (let i = 0; i < parent.frames.length; i++) parent.frames[i].postMessage({ t: "may-close", id: "o1" }, "*"); return self.origin; })()`);
+        await sleep(2000);
+        const stray = await ev(`window.__stray.slice()`);
+        const a0 = await ask("q0");
+        check(sib === new URL(base).origin && opaque === "null" && !stray.includes("s1") && !stray.includes("o1") && a0?.ok === true,
+          "embed: a may-close from a frame beside it (this origin, not its parent) or from an opaque origin is ignored, unanswered; its parent's is answered", { sib, opaque, stray, a0 });
+        await ev(`(document.querySelectorAll("iframe[name^=sb]").forEach((f) => f.remove()), true)`);
+      }
+      // (a held write: typed in the frame's source, the answer waits for it, then ok)
+      const F = `document.getElementById("sbembed").contentWindow`;
+      await ev(`(() => { const w = ${F}; w.__hold = new Promise((r) => (w.__rel = r)); w.__sbTexSaveWrite = () => w.__hold; w.document.querySelector('.tex-view [data-view="source"]').click(); const t = w.document.querySelector(".tex-src"); t.focus(); t.setRangeText(" Typed.", t.value.length, t.value.length, "end"); t.dispatchEvent(new Event("input", { bubbles: true })); return true; })()`);
+      await sleep(1200);
+      let a2 = null;
+      const p2 = ask("q2").then((r) => (a2 = r));
+      await sleep(2500);
+      const early = a2;
+      await ev(`(${F}.__rel(), delete ${F}.__sbTexSaveWrite, true)`);
+      await p2;
+      const bytes = await ev(`${W}.read("/t/embed.tex").then((r) => new TextDecoder().decode(r.content))`);
+      check(early === null && a2?.ok === true && /Typed\./.test(bytes), "embed: with a write held, the may-close answer waits for it, then ok, the edit in the file", { early, a2, bytes: bytes.slice(-40) });
+      await ev(`(document.getElementById("sbembed").remove(), true)`);
+      await open(fr);
+      await until(`!!window.__sbTexWs`, 20000);
+      await ev(`window.__sbTexWs.putAgentGrant("embedtest", null)`);
+    }
     // (Run's code is a chunk of its own, /sagebrush-latex-run.js (daybreak2, #551's group cap): not fetched by the editor's
     //  load or by any document opened so far, Run shown or not; the first Run fetches it once, later Runs not again)
     const runChunk = () => byId.filter((x) => /\/sagebrush-latex-run\.js(\?|$)/.test(x.url));
@@ -3017,6 +3191,59 @@ try {
     await ev(`(document.querySelector(".tex-status").textContent = "", document.querySelector(".tex-head .tex-run").click(), 1)`);
     const ranAgain = await statusIs(/Ran 5 SageTeX items in [0-9.]+ s$/, 60000);
     check(ranAgain && runChunk().length === 2, "Run's chunk: a second Run on the page uses the one fetched, not fetched again", { ranAgain, fetched: runChunk().length });
+    // (a .tex the paired agent made runs once by itself when it is shown (decided Nov 19 2026, workspace/
+    //  agent-made-tex.ts): shown at a revision with code not run yet, unedited, the editor asks the pairing's page over
+    //  the site's channel, once for that revision; it runs only on the yes to its own question, and only if it still
+    //  shows that revision unedited; asked again when the pairing says its agent made the revision shown. Here this
+    //  page plays the pairing's (its side: test-agent-pair.mjs), the editor in a frame of it, as the Agents page's pane)
+    {
+      const TXT = (x) => `\\documentclass{article}\n\\usepackage{sagetex}\n\\begin{document}\nMade: $\\sage{${x}}$.\n\\end{document}\n`;
+      const fa = await mk("/t/made.tex", enc(TXT("6*7"))), fb = await mk("/t/made-b.tex", enc(TXT("5*5")));
+      await go(base + "?latex=1"); await until(`!!${W}`, 60000);
+      await ev(`(window.__asks = [], window.__bc = new BroadcastChannel("sagebrush-agent-made"), window.__bc.onmessage = (e) => { if (e.data?.t === "tex-may-run" && !("ok" in e.data)) window.__asks.push(e.data); }, true)`);
+      const frame = (fid) => ev(`(() => { document.getElementById("sbmade")?.remove(); const f = document.createElement("iframe"); f.id = "sbmade"; f.style.cssText = "position:fixed;left:0;top:0;width:1000px;height:700px;z-index:99999;border:0;background:#fff"; f.src = "/?tex=${fid}&latex=1&embed=1"; document.body.append(f); return true; })()`);
+      const D = `document.getElementById("sbmade").contentDocument`;
+      const asks = () => ev(`window.__asks.slice()`);
+      const say = (m) => ev(`(window.__bc.postMessage(${JSON.stringify(m)}), true)`);
+      // (any sign of a Run within 8 s: its button no longer "Run" (Starting Sage…, Running…) or a "Ran …" said)
+      const runs = () => until(`(() => { const d = ${D}; return d.querySelector(".tex-head .tex-run")?.textContent !== "Run" || /Ran /.test(d.querySelector(".tex-status")?.textContent ?? ""); })()`, 8000);
+      const fstate = () => ev(`({ status: ${D}.querySelector(".tex-status")?.textContent ?? "", pdf: ${D}.querySelector(".tex-preview")?.textContent.replace(/\\s+/g, " ").slice(0, 120) ?? "" })`);
+      await frame(fa);
+      await until(`!!${D}?.querySelector(".tex-page .tex-preview")?.textContent.includes("Made")`, 30000);
+      const r1 = await runs();
+      const a1 = await asks();
+      check(a1.length === 1 && a1[0].fid === fa && a1[0].rev === 0 && /^[0-9a-f-]{36}$/.test(a1[0].id), "agent-made: shown with code not run yet, unedited, the editor asks once, for this file at its revision", a1);
+      const s1 = await fstate();
+      check(!r1 && (await resultsOf("/t/made.tex")) === null, "agent-made: no answer, nothing runs", s1);
+      await say({ t: "tex-may-run", id: "not-its-question", ok: true });
+      const r2 = await runs();
+      const s2 = await fstate();
+      check(!r2 && (await resultsOf("/t/made.tex")) === null, "agent-made: a yes to another question: nothing runs", s2);
+      await say({ t: "tex-made", fid: fa, rev: 0 });
+      await until(`window.__asks.length === 2`, 5000);
+      const a2 = await asks();
+      check(a2.length === 2 && a2[1].fid === fa && a2[1].rev === 0 && a2[1].id !== a2[0].id, "agent-made: the pairing says its agent made this revision: the editor asks again", a2);
+      await say({ t: "tex-may-run", id: a2[1]?.id, ok: true });
+      const ran = await until(`/Ran 1 SageTeX item/.test(${D}.querySelector(".tex-status")?.textContent ?? "")`, 120000);
+      await sleep(800);
+      const s3 = await fstate(), res = await resultsOf("/t/made.tex");
+      check(ran && /Made: ?42/.test(s3.pdf) && typeof res === "string", "agent-made: the yes to its question: its own Run runs it, the result in the PDF, saved as a Run's", { s3, res: res?.slice(0, 80) });
+      await say({ t: "tex-made", fid: fa, rev: 0 });
+      await say({ t: "tex-made", fid: fb, rev: 0 });
+      await sleep(1500);
+      check((await asks()).length === 2, "agent-made: once it has run, or for another file, nothing is asked", await asks());
+      // (an edit after the question: the yes runs nothing)
+      await frame(fb);
+      await until(`!!${D}?.querySelector(".tex-page .tex-preview")?.textContent.includes("Made")`, 30000);
+      await until(`window.__asks.length === 3`, 5000);
+      const qb = (await asks())[2];
+      await ev(`(() => { const d = ${D}; d.querySelector('.tex-view [data-view="source"]').click(); const t = d.querySelector(".tex-src"); t.setRangeText("% mine\\n", t.value.length, t.value.length, "end"); t.dispatchEvent(new Event("input", { bubbles: true })); return true; })()`);
+      await say({ t: "tex-may-run", id: qb?.id, ok: true });
+      const r4 = await runs();
+      const s4 = await fstate();
+      check(qb?.fid === fb && !r4 && (await resultsOf("/t/made-b.tex")) === null, "agent-made: edited after it asked, the yes runs nothing", { qb, s4 });
+      await ev(`(document.getElementById("sbmade").remove(), window.__bc.close(), true)`);
+    }
     // (PythonTeX, step (a): \py and pycode run by the same Run, as Python; their results read back by the worker's
     //  PythonTeX chunk (sagebrush-latex-pythontex.js; when it is fetched, only for a result to read back, is pinned in
     //  test-latex-pythontex.mjs: the page doesn't see the worker's own requests). The Run button says what it runs
