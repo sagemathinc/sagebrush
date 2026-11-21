@@ -34,6 +34,15 @@ const NOW = new Date("2026-11-13T06:30:00.000Z");
   check(validSnapshot(r.json), "what it makes is valid");
 }
 
+// a steer is a message the person sent: in the snapshot whatever became of it (steering, delivered, queued), in send
+// order; one the agent refused is left out
+{
+  const steer = (text, receipt) => ({ ...user(text, "steer"), ...(receipt ? { receipt } : {}) });
+  const r = snapshotOf(thread([user("first"), steer("steered in", "delivered"), steer("on its way"), steer("runs next", "queued"), steer("refused", "rejected"), turn([msg("done")])]), NOW);
+  const texts = r.snapshot.messages.filter((m) => m.role === "user").map((m) => m.text);
+  check(JSON.stringify(texts) === JSON.stringify(["first", "steered in", "on its way", "runs next"]), "steers in send order, delivered, steering and queued; a rejected one left out", texts);
+}
+
 // a scripted turn has no agent name: none is made up
 {
   const r = snapshotOf(thread([user("hi"), turn([msg("hello")])]), NOW);

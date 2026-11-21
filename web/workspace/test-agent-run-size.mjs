@@ -29,7 +29,11 @@ const CEILING_RAW = 64 * 1024, CEILING_GZIP = 24 * 1024;
 // (the review page's run note: a finished run in a branch notes its target's blob id (the canonical bytes under the
 //  branch's canon, from the run's own snapshot) and wakes the branch's subscribers: 23,171 / 9,031 -> 25,150 / 9,659
 //  (+1,979 / +628), measured by CI (bun 1.4.4, Node 24.21.0's gzip -9) on the head merged with master 48f0b854; + 64)
-const CAP_RAW = 25214, CAP_GZIP = 9723;
+// (an agent's run of the notebook open on its page, in that notebook (runInPage): 25,150 / 9,659 -> 27,846 / 10,446,
+//  measured by CI on the shipped build, the head merged with master 79d8ac8a; + 64)
+// (28,377 / 10,626: Nov 20 2026, a page's run_notebook handed to today's run when the page takes it and then can't
+//  (PageRun.inputs()'s "fallback"), master 595eb958: 28,313 / 10,562 measured on the shipped build, + 64)
+const CAP_RAW = 28377, CAP_GZIP = 10626;
 // (latex_build's first use: this chunk and the three LaTeX chunks it fetches (the page module, its tools, Run's code),
 //  together, so that moving code between them can't hide growth (daybreak2's Q1 aggregate cap: the landing measurement
 //  + 64 each), measured on master 4d4225f9 after the review's fixes: 23,171 + 88,703 + 16,494 + 17,241 = 145,609 raw,
@@ -52,7 +56,44 @@ const LATEX_FIRST_USE = ["sagebrush-agent-run.js", "sagebrush-latex.js", "sagebr
 // (renewed for the editor's bar in the notebook's colours, with its Sagebrush name, Share and the File caret, and math
 //  typeset in the same step as its text: 151,420 / 55,457 -> 153,968 / 56,242, +2,548 / +785, the page module's, measured
 //  by CI on the shipped build, the head merged with master 4176831e; + 64)
-const AGG_RAW = 154032, AGG_GZIP = 56306;
+// (renewed for an edit written before the LaTeX page is left, daybreak2, Nov 17: 153,968 / 56,242 -> 154,446 / 56,395,
+//  +478 / +153, the page module's (91,967 / 31,667 -> 92,445 / 31,820), measured on the shipped build, master 79dccfff;
+//  + 64)
+// (154,774 / 56,580: Nov 19 2026, a reload record that doesn't prove a reload of its own tab discarded, said as not a
+//  reload, and the LaTeX page loading its agent chunk when a reload record is there (latex/page.ts, agent-ui.ts):
+//  154,710 / 56,516 measured on the shipped build, master 0c4267c5 with it, + 64)
+// (154,622 raw: Nov 19 2026, the agent's bar's row under the LaTeX page's head and strip (latex/page.ts): measured 154,558
+//  with it, + 64; the gzip cap holds it: 56,458)
+// (renewed for the LaTeX editor's Source | Both | PDF toggle, Nov 19, provisional until the exact-head CI packet: 154,501 /
+//  56,425 -> 156,368 / 56,891, +1,867 / +466, the page module's (92,500 / 31,850 -> 94,367 / 32,316), measured on the
+//  shipped build, master 25de21b2; + 64)
+// (156,641 / 57,058: Nov 19 2026, the reload record on the LaTeX page (latex/page.ts, agent-ui.ts) with the view toggle,
+//  master abc38965: 156,577 / 56,994 measured on the shipped build, + 64)
+// (renewed for an agent's run of the notebook open on its page, in this chunk: 156,368 / 56,891 -> 159,064 / 57,678,
+//  +2,696 / +787, this chunk's alone, measured on the shipped build with bun 1.4.4, master abc38965 merged; + 64)
+// (159,538 / 57,910: Nov 19 2026, the reload record on the LaTeX page, counted only on a reload, master aadff4d0: 159,474 /
+//  57,846 measured on the shipped build, + 64)
+// (renewed for the LaTeX editor embedded in the Agents page's pane, Nov 19, provisional until the exact-head CI packet:
+//  156,368 / 56,891 -> 156,778 / 57,060, +410 / +169, the page module's (94,367 / 32,316 -> 94,777 / 32,485), measured on
+//  the shipped build, on the toggle's head; + 64)
+// (the two above together, the agent's run of the open notebook and the LaTeX editor embedded in the pane, measured on
+//  their merge (master f8b9e013): 159,537 / 57,867 on the shipped build (bun 1.4.4, node 24.21.0); + 64)
+// (159,975 / 58,094: Nov 19 2026, the reload record on the LaTeX page with the editor's embedded mode, master 3c4319ba:
+//  159,911 / 58,030 measured on the shipped build, + 64)
+// (renewed for a .tex the agent made running once by itself in the editor, Nov 19, provisional until the exact-head CI
+//  packet: 156,778 / 57,060 -> 157,546 / 57,374, +768 / +314, the page module's (94,777 / 32,485 -> 95,545 / 32,799),
+//  measured on the shipped build, on the embedded mode's head; + 64)
+// (and with a .tex the agent made running by itself, measured on that merge (the embedded mode on master f8b9e013):
+//  160,303 / 58,187 on the shipped build; + 64)
+// (160,741 / 58,407: Nov 19 2026, the reload record on the LaTeX page with the run of a .tex the agent made, master
+//  a3f1e30b: 160,677 / 58,343 measured on the shipped build, + 64)
+// (161,208 / 58,523: Nov 20 2026, a page's run_notebook handed to today's run when the page takes it and then can't
+//  (PageRun.inputs()'s "fallback", run-verbs.ts, in the run's chunk), master 595eb958: 161,144 / 58,459 measured on the
+//  shipped build, + 64)
+// (161,425 / 58,588: Nov 20 2026, A5 (reconnect): the pagehide mark scoped to its page's record and the page-duration
+//  choice's words, in the pairing chunk the LaTeX page module carries (agent-ui.ts, agent-pair.ts), merged with master
+//  7b77c654: 161,361 / 58,524 measured on the shipped build (bun 1.4.4, node 24.21.0), + 64)
+const AGG_RAW = 161425, AGG_GZIP = 58588;
 // (the reviewed inputs, relative to web/: the entry and what it imports)
 // (the review page's run line: a finished run's note in its branch, canon-doc.ts's canonical bytes and blob id, and branch-wake.ts's
 //  wake, which needs sha256-hex.ts for the branch store's name)

@@ -1,0 +1,13 @@
+{"case": "singular_inverse", "ok": false, "type": "ZeroDivisionError", "msg": "input matrix must be nonsingular"}
+{"case": "singular_I_minus_Q", "ok": false, "type": "ZeroDivisionError", "msg": "input matrix must be nonsingular"}
+{"case": "nonsquare_inverse", "ok": false, "type": "ArithmeticError", "msg": "self must be a square matrix"}
+{"case": "dim_mismatch_mul", "ok": false, "type": "TypeError", "msg": "unsupported operand parent(s) for *: matrices of incompatible sizes"}
+{"case": "ragged_rows", "ok": false, "type": "ValueError", "msg": "the rows of a matrix must have the same length"}
+{"case": "non_numeric_entry", "ok": true, "value": "['a'   1]\n[  0   1]"}
+{"case": "rational_div_zero", "ok": false, "type": "ZeroDivisionError", "msg": "rational division by zero"}
+{"case": "QQ_parse_1_over_0", "ok": false, "type": "ZeroDivisionError", "msg": "Fraction(1, 0)"}
+{"case": "negative_power_singular", "ok": false, "type": "ZeroDivisionError", "msg": "input matrix must be nonsingular"}
+{"case": "fractional_power", "ok": true, "value": "[1 0]\n[0 1]"}
+{"case": "nonsquare_power", "ok": false, "type": "TypeError", "msg": "unsupported operand parent(s) for *: matrices of incompatible sizes"}
+{"case": "index_out_of_range", "ok": false, "type": "IndexError", "msg": "matrix index out of range"}
+{"case": "add_mismatch", "ok": true, "value": "[0 2]\n[5 7]"}

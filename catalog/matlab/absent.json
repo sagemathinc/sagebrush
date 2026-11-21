@@ -421,34 +421,6 @@
     ]
   },
   {
-    "name": "jsondecode",
-    "kind": "function",
-    "signature": "value = jsondecode(txt)",
-    "summary": "Parses JSON text into MATLAB values.",
-    "examples": [],
-    "differs": [],
-    "status": "absent",
-    "alternative": "Python mode's json.loads.",
-    "tags": [
-      "text",
-      "files"
-    ]
-  },
-  {
-    "name": "jsonencode",
-    "kind": "function",
-    "signature": "txt = jsonencode(value)",
-    "summary": "Encodes MATLAB values as JSON text.",
-    "examples": [],
-    "differs": [],
-    "status": "absent",
-    "alternative": "Python mode's json.dumps.",
-    "tags": [
-      "text",
-      "files"
-    ]
-  },
-  {
     "name": "keyboard",
     "kind": "function",
     "signature": "keyboard",

@@ -55,7 +55,44 @@ export const LATEX_LAZY = {
 //  page's Share dialog), Nov 12: 246,705 / 82,532 measured on master 831ff4eb with it (+110 / +53), + 64)
 // (249,317 raw / 83,380 gzip: the LaTeX editor's bar in the notebook's colours and buttons, with its Share button, and
 //  math typeset in the same step as its text, ruled Nov 13: 249,253 / 83,316 measured (bun 1.4.4, node 24.21.0), + 64)
-export const LATEX_CAPS = { raw: 249317, gzip: 83380 };
+// (249,795 raw / 83,533 gzip: an edit written before the page is left (a notebook, a board or another page opened from
+//  it), Nov 17: 249,731 / 83,469 measured on master 9529624b with it (+478 / +153), + 64)
+// (249,907 raw / 83,533 gzip: Nov 19 2026, the agent's bar in its own row under the LaTeX page's head (latex/page.ts),
+//  never over the source or the preview; measured 249,843 / 83,532, + 64 raw; the gzip cap still holds it)
+// (250,482 raw / 83,764 gzip: a SageTeX code argument read from the file as its own source text (\sage{}, \sageplot{},
+//  \py{}, \magma{}: the engine's reader, in the worker), Nov 19, provisional until the exact-head CI packet: 250,418 /
+//  83,700 measured on the shipped build (bun 1.4.4, node 24.21.0), master 8bf4b126 with it, and the same again on
+//  master 6288dbcf; 249,786 / 83,499 with master's web/latex/engine/demo-machine.mjs in the same tree (+632 / +201), + 64)
+// (250,059 raw / 83,654 gzip: Nov 19 2026, a reload of the tab keeps the agent (latex/page.ts: the reload record's scope,
+//  and the agent module loaded for a tab that has one); measured 249,995 / 83,590 on master 25de21b2 with it, + 64)
+// (250,691 raw / 83,855 gzip: Nov 19 2026, the two above together, a reload of the tab keeping the agent and SageTeX's
+//  code arguments, measured on their merge (master e478921b): 250,627 / 83,791, + 64)
+// (250,539 raw / 83,797 gzip: the two above together, the agent's bar in its own row and the SageTeX code argument,
+//  measured on their merge (master 0c4267c5): 250,475 / 83,733 (bun 1.4.4, node 24.21.0), + 64)
+// (252,349 raw / 84,230 gzip: the editor's Source | Both | PDF toggle, remembered for each file (the page module's code
+//  and styles), Nov 19, provisional until the exact-head CI packet: 252,285 / 84,166 measured on the shipped build (bun
+//  1.4.4, node 24.21.0), master e478921b with it; 250,418 / 83,700 with master's web/latex/page.ts and style.ts in the
+//  same tree (+1,867 / +466), + 64)
+// (252,558 raw / 84,333 gzip: Nov 19 2026, the LaTeX page's reload record (latex/page.ts) on master abc38965 with the view
+//  toggle: 252,494 / 84,269 measured (bun 1.4.4, node 24.21.0), + 64)
+// (252,759 raw / 84,398 gzip: Nov 19 2026, a reload record counted only on a reload, dropped unread otherwise (latex/page.ts),
+//  master aadff4d0: 252,695 / 84,334 measured, + 64)
+// (252,759 raw / 84,399 gzip: the editor embedded in the Agents page's pane (?embed=1: no bar of its own, no pairing,
+//  the pane's may-close answered by the leave guard), Nov 19, provisional until the exact-head CI packet: 252,695 / 84,335
+//  measured on the shipped build (bun 1.4.4, node 24.21.0), on the toggle's head; 252,285 / 84,166 without it (+410 /
+//  +169, the page module's), + 64)
+// (253,196 raw / 84,582 gzip: Nov 19 2026, the reload record on the LaTeX page with the editor's embedded mode, master
+//  3c4319ba: 253,132 / 84,518 measured, + 64)
+// (253,527 raw / 84,713 gzip: a .tex the agent made runs once by itself in the editor that shows it (the page module
+//  asks the pairing over the site's channel), Nov 19, provisional until the exact-head CI packet: 253,463 / 84,649
+//  measured on the shipped build (bun 1.4.4, node 24.21.0), on the embedded mode's head; 252,695 / 84,335 without it
+//  (+768 / +314), + 64)
+// (253,962 raw / 84,895 gzip: Nov 19 2026, the reload record on the LaTeX page with the run of a .tex the agent made,
+//  master a3f1e30b: 253,898 / 84,831 measured, + 64)
+// (254,169 raw / 84,955 gzip: Nov 20 2026, A5: the LaTeX page leaves another page's reconnect record alone and takes its
+//  own on a navigation back as on a reload (latex/page.ts), measured on the shipped build of the head on master ddafeb50
+//  with bun 1.4.4 and node 24.21.0: 254,105 / 84,891, + 64)
+export const LATEX_CAPS = { raw: 254169, gzip: 84955 };
 export const gz = (b) => gzipSync(b, { level: 9 }).length;
 
 // Each lazy chunk's own cap (raw, gzip), fetched only on its own use, so outside the group:
@@ -83,7 +120,67 @@ export const LATEX_LAZY_CAPS = {
   // (49,666 / 16,943: renewed for Chat here, whose link hooks every page's pairing carries (a socket, agent.ready, the
   //  reply's place and answer, Revoke as the link's drain), the leg itself being the Agents page's own; measured in CI at
   //  97f13a7b (run 43173133995): 49,602 / 16,879, + 64)
-  AGENT: { label: "the LaTeX agent pairing's chunk", raw: 49666, gzip: 16943 },
+  // (50,581 / 17,299: Nov 18 2026, for what an agent creates, which every page's pairing carries: the created record,
+  //  told to the page only from its current pairing, and the bar's Open for it (the notebook page opens it in place); the
+  //  handover of a bare link stays out of this chunk (pair-handoff.ts, the board and notebook pages' only). Measured
+  //  locally on the toolchain CI pins, with the board page's forward merged too: 50,517 / 17,235, + 64)
+  // (50,816 / 17,368: Nov 18 2026, for the one check a page asks before a notebook an agent created runs by itself
+  //  (AgentPairing.mayRunCreated: the creation's own grant still in force, with May run code and Everything); the run
+  //  itself is the notebook page's. Measured locally with the board page's forward merged: 50,752 / 17,304, + 64)
+  // (51,193 / 17,561: Nov 19 2026, for workspace_create's description of a notebook's language, mode (python, sage,
+  //  matlab or magma, an example each), which the pairing's compiled schema carries. Measured in CI at 1055da1d (run
+  //  44462639042): 51,129 / 17,497, + 64)
+  // (51,283 / 17,591: Nov 19 2026, a reload record that doesn't prove a reload of its own tab discarded, said as not a
+  //  reload (agent-ui.ts). Measured on master 25de21b2 with it: 51,219 / 17,527, + 64)
+  // (51,671 / 17,686: Nov 19 2026, for Connect's one field: the agent's link pasted, or its code and port, read by
+  //  readConnect, and a code alone told to ask for the link (agent-ui.ts). Measured locally on the toolchain CI pins on
+  //  master 35e6a6d0 with this change: 51,607 / 17,622, + 64)
+  // (52,033 / 17,878: the two above together, Connect's one field and the languages' description, measured on their
+  //  merge (master 25de21b2): 51,969 / 17,814, + 64)
+  // (52,123 / 17,908: the reload record above with Connect's one field, measured on their merge (master 0c4267c5):
+  //  52,059 / 17,844, + 64)
+  // (53,214 / 18,327: Nov 19 2026, the agent's bar docked in the page's own row for it ([data-sbag-slot]), placed again
+  //  as the page changes what it shows. Measured locally on the toolchain CI pins on master 25de21b2 with the one-link
+  //  change merged: 53,150 / 18,263, + 64)
+  // (53,304 / 18,358: Nov 19 2026, the reload record's handling with the agent's bar docked, master 4bcbb434: 53,240 /
+  //  18,294 measured, + 64)
+  // (53,797 / 18,488: Nov 19 2026, for the bar's offer of a board an agent made ("<agent> made <name> · Open", Open
+  //  in a tab of its own, where its code runs), which every page's pairing carries. Measured locally on the toolchain
+  //  CI pins, merged with master 4bcbb434 (whose 53,150 / 18,263 it reproduces): 53,733 / 18,424, + 64)
+  // (53,887 / 18,520: Nov 19 2026, the reload record's handling on master aadff4d0: 53,823 / 18,456 measured, + 64)
+  // (54,145 / 18,691: Nov 19 2026, an answer's entry with its page's address (url, entry-url.ts with
+  //  the code page's languages), for the agent to give the person a link. Measured on master 4bcbb434 with it:
+  //  54,081 / 18,627, + 64)
+  // (54,729 / 18,864: the two above together, the bar's offer of a board an agent made and an answer's entry with its
+  //  page's address, measured on their merge (master 3fbaf351): 54,665 / 18,800 (bun 1.4.4, node 24.21.0), + 64)
+  // (54,819 / 18,896: Nov 19 2026, the reload record's handling on master 3c4319ba: 54,755 / 18,832 measured, + 64)
+  // (54,811 / 18,846: a .tex the agent made runs once by itself in the editor that shows it, the pairing's answer over
+  //  the site's channel (agent-pair.ts, agent-made-tex.ts), Nov 19, provisional until the exact-head CI packet: 54,747 /
+  //  18,782 measured on the shipped build (bun 1.4.4, node 24.21.0) with master 6614eb38 merged (the agent's bar's row
+  //  among it); + 64)
+  // (55,409 / 19,025: the two above together, the bar's offer of a board an agent made and a .tex it made running by
+  //  itself, measured on their merge (with the embedded mode on master f8b9e013): 55,345 / 18,961 (bun 1.4.4, node
+  //  24.21.0), + 64)
+  // (56,341 / 19,371: an answer's entry with its page's address and a .tex the agent made running by itself together,
+  //  measured on their merge (master 3c4319ba): 56,277 / 19,307 (bun 1.4.4, node 24.21.0), + 64)
+  // (56,431 / 19,403: Nov 19 2026, the reload record's handling on master a3f1e30b: 56,367 / 19,339 measured, + 64)
+  // (56,961 / 19,577: Nov 20 2026, run.context: a run verb's call carries its chat and turn (agent-pair.ts), measured on the shipped build of the head merged with master d5c49e20: 56,897 / 19,513, + 64)
+  // (57,103 / 19,637: Nov 20 2026, chat.resume: the hello's and agent.ready's log instance (agent-pair.ts), measured on the shipped build on master c25e7247: 57,039 / 19,573, + 64)
+  // (57,359 / 19,697: Nov 20 2026, edit.turn: a notebook edit carries its turn (agent-pair.ts), measured on the shipped build of the head merged with master 3fbfbcff (chat.resume in): 57,295 / 19,633, + 64)
+  // (57,209 / 19,692: Nov 20 2026, a framed page leaves the tab's reload record alone (agent-ui.ts), measured on the shipped build of the head on master 005c7187: 57,145 / 19,628, + 64)
+  // (57,465 / 19,751: Nov 20 2026, edit.turn and the framed page's reload record together, measured on the shipped build of the head merged with master 4eac951c: 57,401 / 19,687, + 64)
+  // (57,557 / 19,786: Nov 20 2026, egress.turn: the pairing takes it from a hello and the Agents page offers it (agent-pair.ts, agent-ui.ts), measured on the shipped build of the head on master 889aca62: 57,493 / 19,722, + 64)
+  // (62,408 / 21,455: Nov 20 2026, the agent's bar as a compact chip with its menu (keyboard, focus kept across updates,
+  //  controls only for the pairing shown; agent-ui.ts), measured on the shipped build of the head on master 300519cb with
+  //  bun 1.4.4 and node 24.21.0: 62,344 / 21,391, + 64)
+  // (63,737 / 21,833: Nov 20 2026, A5 (reconnect): the Connect dialog offers Reconnect or remembered access first, a spent
+  //  code said as spent, a same-tab return within 10 min reconnects, another page's record is left alone, and a ?pair= link drops the page's own
+  //  (agent-ui.ts, agent-pair.ts), measured on the shipped build of the head on master ddafeb50 with bun 1.4.4 and node
+  //  24.21.0: 63,673 / 21,769, + 64)
+  // (63,833 / 21,862: Nov 21 2026, A5 review: the pagehide mark scoped to this page's own record, and the page-duration
+  //  choice's words (agent-ui.ts, agent-pair.ts), measured on the shipped build of the head on master ddafeb50 with bun
+  //  1.4.4 and node 24.21.0: 63,769 / 21,798, + 64)
+  AGENT: { label: "the LaTeX agent pairing's chunk", raw: 63833, gzip: 21862 },
   // (the agent tools' work: web/latex/tools.ts, latex_check's report and latex_render's pictures, on an agent's first call)
   // (16,546 / 6,950: Nov 11 2026: latex_build's own code (build.ts, the
   //  engine driven from a snapshot, and the pages' fit) here, out of the eager group, its shared rules handed in by the

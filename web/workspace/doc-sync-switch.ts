@@ -1,8 +1,12 @@
 // The switch for notebooks' contents (sync 2c-3's DocSync on the account connection, web/workspace/doc-sync.ts), on
 // DEV since Oct and on PROD since Nov 1 (William's GO: his account first; the server's allowlist decides who).
 // It fails closed: on only if ALL of these hold, checked in this order on every page load and never cached:
-//   1. this page's origin is exactly one of DOC_SYNC_ORIGINS (DEV's and PROD's own, nothing else: nothing at all is
-//      asked or started on any other origin);
+//   1. this page's origin is exactly one of DOC_SYNC_ORIGINS (DEV's and PROD's own), or, for any other origin, the
+//      site's own server states it: its status (below, the same one request) answers, unredirected and from this very
+//      origin, with `public_url` equal to this origin byte for byte.  A self-hosted site's server takes public_url only
+//      from its deployment's configuration (its canonical SITE_ORIGIN), never from the request, and refuses any other
+//      Host; so any origin running a conforming self-host server may opt itself in, and nothing a page, a URL or
+//      storage holds can;
 //   2. the server says this account may sync: GET /api/sync/v1/status answers 200 with `available: true` (the
 //      allowlist: SYNC_ACCOUNTS, on each site its own);
 //   3. this page's sync client runs (signed in, sync on for this account).
@@ -33,13 +37,43 @@ export async function docSyncAvailable(origin: string, fetchFn: typeof fetch): P
   }
 }
 
+/** Conditions 1 and 2 for an origin not in DOC_SYNC_ORIGINS (a self-hosted site), from one status request to this
+ * origin itself: its answer must not be a redirect (a manual redirect is refused, and the final URL must be of this
+ * origin exactly; an empty or unparsable one is refused), must be 200 JSON, and must say `available: true` and
+ * `public_url` equal to `origin` byte for byte (no case, slash, scheme or port folding).  Anything else, false. */
+export async function docSyncSelfHosted(origin: string, fetchFn: typeof fetch): Promise<boolean> {
+  return (await selfHostedAnswer(origin, fetchFn)) === "yes";
+}
+/** The same one request, its answer in three: "yes" (every condition above); "no" (the status answered, unredirected,
+ * from this very origin, as a JSON object whose public_url is missing or another origin's: the deployment's own
+ * configuration, so it doesn't change from one request to the next); "unknown" (anything else: a failure, a redirect,
+ * another status, another origin, no JSON, or this origin's public_url with `available` not true, which can change: a
+ * plan service unreachable, an allowlist or a plan changed).  docSyncSelfHosted is its "yes": it fails closed. */
+export async function selfHostedAnswer(origin: string, fetchFn: typeof fetch): Promise<"yes" | "no" | "unknown"> {
+  try {
+    const r = await fetchFn(origin + "/api/sync/v1/status", { credentials: "same-origin", redirect: "manual" });
+    if (r.redirected || r.type === "opaqueredirect" || r.status !== 200) return "unknown";
+    let at: string;
+    try { at = new URL(r.url).origin; } catch { return "unknown"; }
+    if (at !== origin) return "unknown";
+    const j = (await r.json()) as { available?: unknown; public_url?: unknown } | null;
+    if (!j || typeof j !== "object") return "unknown";
+    if (typeof j.public_url !== "string" || j.public_url !== origin) return "no";
+    return j.available === true ? "yes" : "unknown";
+  } catch {
+    return "unknown";
+  }
+}
+
 /** The gate: conditions 1, 2 and 3 in order; false at the first that fails (and nothing after it asked). */
 export async function docSyncAllowed(
   o: { origin: string; fetch: typeof fetch; clientRunning: () => Promise<boolean> },
   allowed: readonly string[] = DOC_SYNC_ORIGINS,
 ): Promise<boolean> {
-  if (!docSyncOrigin(o.origin, allowed)) return false;
-  if (!(await docSyncAvailable(o.origin, o.fetch))) return false;
+  if (typeof o.origin !== "string" || !o.origin || o.origin === "null") return false;
+  if (docSyncOrigin(o.origin, allowed)) {
+    if (!(await docSyncAvailable(o.origin, o.fetch))) return false;
+  } else if (!(await docSyncSelfHosted(o.origin, o.fetch))) return false;
   try {
     return (await o.clientRunning()) === true;
   } catch {
@@ -47,21 +81,95 @@ export async function docSyncAllowed(
   }
 }
 
+/** The gate asked again after a load where it failed (signed out, the sync client not yet running, the status not yet
+ * saying so): resolves true once `allowed()` (the full gate) says so.  Asked when `onChange` reports a change of the
+ * page's own sync, and once right after subscribing (a change during the load's own ask is not lost); nothing polls, so
+ * a change on the server alone is seen at the page's next sync change.  Each ask first checks
+ * `running()` (this page's client, no wait, no request): while it doesn't run, nothing is requested, and the next change
+ * asks again.  Requests at most every `gapMs`, one at a time; a change while one is out is kept and asked after it. */
+export function untilAllowed(o: {
+  onChange(f: () => void): () => void;
+  running(): boolean | Promise<boolean>;
+  allowed(): Promise<boolean>;
+  gapMs?: number;
+  now?: () => number;
+  setTimer?: (f: () => void, ms: number) => unknown;
+  clearTimer?: (t: unknown) => void;
+}): Promise<boolean> {
+  const gap = o.gapMs ?? 10_000, now = o.now ?? Date.now;
+  const set = o.setTimer ?? ((f: () => void, ms: number) => setTimeout(f, ms)), clear = o.clearTimer ?? ((t: unknown) => clearTimeout(t as ReturnType<typeof setTimeout>));
+  return new Promise((done) => {
+    let asking = false, again = false, over = false, last = -Infinity, timer: unknown = null;
+    const ask = async (): Promise<void> => {
+      if (over) return;
+      if (asking) { again = true; return; }
+      asking = true;
+      again = false;
+      let ok = false;
+      try {
+        if (!(await o.running())) return;
+        const wait = gap - (now() - last);
+        if (wait > 0) {
+          timer ??= set(() => { timer = null; void ask(); }, wait);
+          return;
+        }
+        last = now();
+        ok = (await o.allowed()) === true;
+      } catch {
+        ok = false;
+      } finally {
+        asking = false;
+      }
+      if (ok) {
+        over = true;
+        off();
+        if (timer !== null) clear(timer);
+        done(true);
+      } else if (again) void ask();
+    };
+    const off = o.onChange(() => void ask());
+    void ask();
+  });
+}
+
 /** What the Sync panel says of notebooks while the switch is on (DEV and PROD), each sentence as the code does it
  * (William's M9, Nov 3; the facts, with file:line, in the PR): the account's own devices and Sagebrush's server, never
- * peer-to-peer or another account; no outputs on any synced path (journal.js versionedOf, sync-outbox.ts wireOf,
- * gitpush/rules.ts stripOutputs); concurrent edits merged (history.js, db-merge3.ts); a later device pulls the history
+ * peer-to-peer or another account; no cell outputs on any synced path (journal.js versionedOf, sync-outbox.ts wireOf,
+ * gitpush/rules.ts stripOutputs), while data files sync with their bytes (sync-client.ts); concurrent edits merged (history.js, db-merge3.ts); a later device pulls the history
  * from its start (doc-sync.ts pull); no clear sent (journal/core.js NO_CLEAR_SYNCED); what stops a notebook
  * (doc-sync.ts refused, its 1 MiB bound); boards' contents not synced (board/journal.ts sync.on false). */
 export const DOC_SYNC_NOTE = [
   "Your notebooks sync between your own browsers and devices, through Sagebrush's server, signed in with your account. Not peer-to-peer, and not shared with other people.",
-  "Only cells' code and text sync. Outputs never leave this browser: not to the server, not into TimeTravel, not in a push to GitHub.",
+  "Cells' code and text, and pictures attached to text cells, sync; their outputs don't. Outputs aren't kept in TimeTravel or included in a push to GitHub either. Data files sync with their contents.",
   "If the same cell is edited on two devices before they sync, the edits are merged, as in CoCalc. Both are kept.",
   "TimeTravel shows every version since the notebook first synced, on every device, including ones added later.",
   "Clearing TimeTravel isn't available yet for a synced notebook.",
   "If a notebook can't sync (the server refuses its changes, or a change is too large), the Sync panel says so, and its changes stay in this browser.",
   "Boards don't sync yet. A board made on another device is listed here, but can't be opened until boards sync.",
 ] as const;
+
+/** The Turn on sync confirmation's sentence on notebooks and boards (sync-panel.ts enable), said before sync is on:
+ * where notebooks' contents sync (docSyncOrigin, or a self-hosted site docSyncSelfHosted admits), their code and text
+ * do (doc-sync.ts) and their outputs don't; anywhere else only files sync (index.html's sync owner runs on every
+ * origin).  Boards' contents don't sync yet anywhere (board/journal.ts sync.on false). */
+export const SYNC_CONFIRM_DOCS = "Your notebooks' code and text sync too, but not their outputs. Boards are listed; their contents don't sync yet.";
+export const SYNC_CONFIRM_FILES_ONLY = "Your notebooks and boards are listed; their contents don't sync on this site.";
+export const SYNC_CONFIRM_MAYBE = "Your notebooks' code and text may also sync, depending on this site's server; their outputs never do. Boards are listed; their contents don't sync yet.";
+/** How long syncConfirmDocs waits for a site's status. */
+export const SYNC_CONFIRM_MS = 4000;
+/** Which this origin is told: DEV's and PROD's own, notebooks' contents sync, with no request; another, its status
+ * asked within SYNC_CONFIRM_MS: they sync if it says so, files only if it says not, and if it can't be told (a failure,
+ * no answer by then), that they may: notebook sync asks again later, and may then begin. */
+export async function syncConfirmDocs(origin: string, fetchFn: typeof fetch, allowed: readonly string[] = DOC_SYNC_ORIGINS, ms = SYNC_CONFIRM_MS): Promise<string> {
+  if (docSyncOrigin(origin, allowed)) return SYNC_CONFIRM_DOCS;
+  let timer: ReturnType<typeof setTimeout> | undefined;
+  const late = new Promise<"unknown">((r) => { timer = setTimeout(() => r("unknown"), ms); });
+  const timed: typeof fetch = (u, init) => fetchFn(u, { ...init, signal: AbortSignal.timeout(ms) });
+  try {
+    const a = await Promise.race([selfHostedAnswer(origin, timed), late]);
+    return a === "yes" ? SYNC_CONFIRM_DOCS : a === "no" ? SYNC_CONFIRM_FILES_ONLY : SYNC_CONFIRM_MAYBE;
+  } finally { clearTimeout(timer); }
+}
 
 /** Said on the notebook page when the journal's activation began (it can't go back) but this page couldn't go on with
  * it: the notebook stays read-only here until a reload, which opens it through the journal. */

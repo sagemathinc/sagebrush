@@ -29,7 +29,10 @@ concurrency:
 
 jobs:
   packages:
-    if: github.repository == 'sagemathinc/sagebrush' || vars.CI_RUNNER != ''
+    # Tracks build fresh engines; published pins move only at the pull to master.
+    if: >-
+      !startsWith(github.base_ref, 'track/') &&
+      (github.repository == 'sagemathinc/sagebrush' || vars.CI_RUNNER != '')
     runs-on: ${{ vars.CI_RUNNER || 'ubuntu-24.04' }}
     timeout-minutes: 20
     steps:

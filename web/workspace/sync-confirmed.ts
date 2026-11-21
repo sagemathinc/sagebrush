@@ -16,7 +16,7 @@ import { OVERLAY, runPage, rowsOf, Halt, type Hidden, type Overlay, type Store }
 import { D11, RW, type Mapping } from "./sync-rewrite";
 import { VIEW_STORES, applyView, type ListedWhy } from "./sync-view";
 import { capNow } from "./sync-pins";
-import type { Entry, Op } from "./api";
+import type { Entry, Op, SyncRenamed } from "./api";
 import type { SyncEntry, SyncOp } from "./sync-reduce";
 
 const keyOf = (p: string) => p.normalize("NFC");
@@ -335,7 +335,7 @@ export async function applyOps(
   w: Workspace,
   ns: string,
   ops: SyncOp[],
-  opts: { prefix?: string; cursorAt?: string; stores?: string[]; onPage?: (tx: IDBTransaction, changed: string[], prefix: string, large?: LargeApplied) => Promise<void>; locked?: <T>(f: () => Promise<T>) => Promise<T>; afterLarge?: (gen: string) => Promise<void> } = {},
+  opts: { prefix?: string; cursorAt?: string; stores?: string[]; onPage?: (tx: IDBTransaction, changed: string[], prefix: string, large?: LargeApplied, taken?: SyncOp[]) => Promise<void>; locked?: <T>(f: () => Promise<T>) => Promise<T>; afterLarge?: (gen: string) => Promise<void> } = {},
 ): Promise<Applied> {
   const stores = [...new Set(["syncIndex", META, ...(opts.stores ?? [])])];
   let at = 0, pages = 0, carry = 0, cursor = 0;
@@ -399,7 +399,7 @@ export async function applyOps(
         }
       }
       const changed = [...page.changed];
-      if (opts.onPage) await opts.onPage(tx, changed, prefix, large);
+      if (opts.onPage) await opts.onPage(tx, changed, prefix, large, ops.slice(at, at + taken));
       for (const id of changed) changedAll.push(id);
       at += taken;
       carry = page.carry;
@@ -426,7 +426,7 @@ export async function applyOps(
 export async function applyConfirmed(w: Workspace, ns: string, ops: SyncOp[], hooks: { onLarge?: (tx: IDBTransaction, large: LargeApplied) => Promise<void>; afterLarge?: (gen: string) => Promise<void> } = {}): Promise<Applied & { listed: [string, ListedWhy][] }> {
   const cap = await capNow();
   return (async () => {
-    const told: Op[] = [], gone: Entry[] = [], listed: [string, ListedWhy][] = [];
+    const told: Op[] = [], gone: Entry[] = [], listed: [string, ListedWhy][] = [], renamed: SyncRenamed[] = [];
     // (a page's results kept once it has committed: when the next page begins, or applyOps returns; a page that
     // aborts throws out of applyOps, and its results go with it)
     let last: Awaited<ReturnType<typeof applyView>> | null = null;
@@ -435,6 +435,7 @@ export async function applyConfirmed(w: Workspace, ns: string, ops: SyncOp[], ho
       told.push(...last.ops);
       gone.push(...last.gone);
       listed.push(...last.listed);
+      renamed.push(...last.renamed);
       last = null;
     };
     // (this device's own adopts and creates, by identity, with the path each asked for: the view says which the
@@ -444,6 +445,12 @@ export async function applyConfirmed(w: Workspace, ns: string, ops: SyncOp[], ho
       const id = o.kind === "file" || o.kind === "folder" ? o.fid : o.ref;
       if (typeof id === "string") ownPlaced.set(id, o.path);
     }
+    // (this device's own writes in a page: each one's identity recomputed too (its record was decided when its echo
+    // came, before the view runs).  A write that lost to another device's is a conflict copy, and the page deciding
+    // it changes only the copy; the other's write, come down while this one was undecided, left this device's own
+    // bytes under the name: recomputed now, it takes the confirmed state, the other's bytes queued for their fetch,
+    // as on every device)
+    const own = (taken: SyncOp[] = []) => taken.filter((o) => o.device === w.device && o.op === "write" && typeof o.fid === "string").map((o) => o.fid as string);
     let r: Applied;
     try {
       r = await applyOps(w, ns, ops, {
@@ -451,20 +458,24 @@ export async function applyConfirmed(w: Workspace, ns: string, ops: SyncOp[], ho
         // (each page holding the workspace's lock: an ordinary change's hold, refused while quarantined or after a
         // reset elsewhere, the durability witness brought up to its commit; never across a large move's own pages)
         locked: (f) => w.locked(f),
-        onPage: async (tx, changed, prefix, large) => {
+        onPage: async (tx, changed, prefix, large, taken) => {
           keep();
           // (a large move's view: its tops and everything under their new places are the replay's (D11 r4 §3), the
           // rest of the page's view applied as usual)
           if (large && hooks.onLarge) await hooks.onLarge(tx, large);
           const skip = new Set(large?.replay ?? []);
-          last = await applyView({ w, tx, ns, store: idbStore(tx, prefix), cap, ownPlaced }, changed.filter((id) => !skip.has(id)));
+          const ids = [...new Set([...changed, ...own(taken)])];
+          last = await applyView({ w, tx, ns, store: idbStore(tx, prefix), cap, ownPlaced }, ids.filter((id) => !skip.has(id)));
         },
         afterLarge: hooks.afterLarge,
       });
       keep();
     } finally {
-      w.tell({ ops: told });
+      // (this device's own entries the reducer renamed, with the change: a page with one open says so)
+      w.tell({ ops: told, ...(renamed.length ? { renamed } : {}) });
     }
+    // (and a document among them retitled, as a rename made here retitles it: its title is its file's name again)
+    for (const r of renamed) await w.retitleRenamed(r).catch((err) => console.warn("sync: retitling a renamed document:", err));
     if (gone.length) await w.dropContents(gone).catch((err) => console.warn("sync: dropping forgotten contents:", err));
     return { ...r, listed };
   })();

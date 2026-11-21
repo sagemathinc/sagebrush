@@ -1,0 +1,45 @@
+{"a":1,"b":[1,2,3],"c":"hi","d":[1,"x"],"e":true,"f":[],"g":[[1,2],[3,4]],"h":null}
+3.141592653589793
+-2.5
+1.5e-7
+123456789012
+0.10000000149011612
+[-3,4]
+[[[1,5],[3,7]],[[2,6],[4,8]]]
+[1,2,3]
+[[true,true],[true,true]]
+["ab","cd"]
+""
+[1,3,2,4]
+[]
+[]
+{}
+[null,null,null]
+[NaN,Infinity,-Infinity]
+"tab\tquote\"back\\slash\n"
+double 1x1 1
+double 3x1 [1;2;3]
+char 1x2 ['hi']
+cell 2x1 {double 1x1 1, char 1x1 ['x']}
+logical 1x1 true
+double 0x0 []
+double 2x2 [1 2;3 4]
+double 1x2 [2 1]
+double 1x2 [1 2]
+double 3x1 [1;NaN;3]
+double 2x2x2 [1 3 2 4;5 7 6 8]
+cell 2x1 {double 2x1 [1;2], double 1x1 3}
+logical 2x1 [true;false]
+double 0x0 []
+double 0x0 []
+char 0x0 []
+cell 3x1 {char 1x3 ['one'], char 1x3 ['two'], char 1x5 ['three']}
+cell 2x1 {struct {a=double 1x1 1}, struct {b=double 1x1 2}}
+cell 2x1 {double 1x1 1, char 1x1 ['a']}
+double 3x1 [NaN;Inf;-Inf]
+struct {}
+double 1x1 3.25
+cell 1x2 {char 1x3 ['x1a'], char 1x2 ['bC']}
+double 1x3 [1 2 3]
+double 2x2 [1 2;3 4]
+cell 2x1 {double 1x1 1, char 1x1 ['x']}

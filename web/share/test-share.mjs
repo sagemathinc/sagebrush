@@ -228,6 +228,19 @@ for (const ret of ["/\t/evil.example/proof", "/\n/evil.example/", "/\r/evil.exam
   const { cb } = await signIn(A, { ret: "/s/abc?x=1#y" });
   ok(cb.headers.get("location") === "/s/abc?x=1#y", "an ordinary return path is kept");
 }
+{
+  // (an account of its own: its sign-ins don't evict A's sessions, SESSIONS_MAX)
+  const R = "52525252-5252-4252-8252-525252525252";
+  const { r, cb } = await signIn(R, { ret: "/?share#m=sage&z=abc-_123" });
+  // (the sign-in's state cookie, its payload before the MAC: base64url JSON, whose `ret` is the return kept)
+  const oauth = (r.headers.getSetCookie().find((c) => c.startsWith("__Host-sb_oauth=")) ?? "").split(";")[0].slice("__Host-sb_oauth=".length);
+  const kept = JSON.parse(Buffer.from(oauth.split(".")[0], "base64url").toString("utf8")).ret;
+  ok(kept === "/?share" && cb.headers.get("location") === "/?share", `a quick link's cells in the return are dropped: not in the sign-in's cookie (${JSON.stringify(kept)}), nor in the redirect back`);
+  for (const [ret, want] of [["/?share#c=eyJ4", "/?share"], ["/docs/storage#leaves", "/docs/storage#leaves"], ["/#m=sage", "/#m=sage"]]) {
+    const { cb: c2 } = await signIn(R, { ret });
+    ok(c2.headers.get("location") === want, `the return ${ret}: ${want}`);
+  }
+}
 
 // ---- validation and limits
 {
