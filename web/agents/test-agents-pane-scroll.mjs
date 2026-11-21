@@ -1,5 +1,5 @@
 // ci: web-artifacts.1 order=45 runner=bun chrome
-// The artifact pane has one vertical scrollbar (William's QA, Nov 21 2026): a long notebook the agent made, open beside
+// The artifact pane has one vertical scrollbar (found in testing, Nov 21 2026): a long notebook the agent made, open beside
 // the chat, scrolls in one place, not in the pane's body and its host both. The built page (SAGEBRUSH_AGENTS=1),
 // served by web/serve.py, paired as a person pairs it with the stand-in agent (test-delegate-host.mjs), which writes
 // the notebook with the workspace verb and shows it as its turn's artifact, as sagebrush-agent does. Checked at the
