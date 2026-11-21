@@ -1,9 +1,9 @@
 {
  "v": 1,
- "reason": "Kernel metering: nmod_poly, nmod_mat, the NTT and the modular factoring count their work by family in a thread-local tally, charged to a meter at the call. The engine module grows 11407 B and the multiprecision module 377 B (it shares the NTT); cli/pyjs.cjs embeds them in base64, +15724 B (CI's size row at acaeaa73, run 44858609642). Each marked +64 over the measured growth. The two modules' ceilings are renewed to their measured size + 64.",
+ "reason": "Kernel metering: nmod_poly, nmod_mat, the NTT and the modular factoring count their work by family in a thread-local tally, charged to a meter at the call. Against base 4cd4439c (CI's size row at 69336c80, run 44860742202): the engine module grows 12427 B and the multiprecision module 377 B (it shares the NTT); cli/pyjs.cjs embeds them in base64, +17076 B. Each marked +64 over the measured growth. The two modules' ceilings are renewed to their measured size + 64.",
  "bytes": {
-  "cli/pyjs.cjs": 15788,
-  "engine/sagebrush-engine.wasm": 11471,
+  "cli/pyjs.cjs": 17140,
+  "engine/sagebrush-engine.wasm": 12491,
   "engine/sagebrush-mp.wasm": 441
  }
 }
