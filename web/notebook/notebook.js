@@ -1897,7 +1897,9 @@ export function createNotebook(root, opts = {}) {
       highlight: (src) => highlightMarkdown(src, isSage()),
       placeholder: "Text: Markdown, with math: $x^2$",
       tabIndents: true,
-      onChange: (v) => { cell.blocksText = v; setText(cell, v); cell.ta.dispatchEvent(new Event("input")); },
+      // (the person's own edit: the block editor's paste, a block split or joined, has no input event of its own, so it
+      // counts as typed here, for the leave prompt)
+      onChange: (v) => { typed = true; cell.blocksText = v; setText(cell, v); cell.ta.dispatchEvent(new Event("input")); },
       onKey: (e) => mdKey(cell, e),
       onEdge: (up) => { const to = up ? prevCell(cell) : nextCell(cell); if (!to) return false; edit(to, up ? "end" : "start"); return true; },
     });
@@ -2032,7 +2034,7 @@ export function createNotebook(root, opts = {}) {
   // ---------------------------------------------------------- the document
   // A document is {mode, cells: [{id, type?, code, outputs?, n?, attachments?, metadata?}], ...meta}.
   // A cell's metadata (nbformat's: tags, ...) is kept as it is.
-  let loading = false, timer = null, lastJson = null, store = null, unsubscribe = null, saveChain = Promise.resolve(), savesPending = 0;
+  let loading = false, timer = null, lastJson = null, store = null, unsubscribe = null, saveChain = Promise.resolve(), savesPending = 0, guarded = false, typed = false;
   // The document shown, from when it is loaded until another is (or it is
   // detached): what is known of it, which its saves keep to, even one still
   // waiting its turn when another document is shown (CORR-989-1).
@@ -2143,8 +2145,10 @@ export function createNotebook(root, opts = {}) {
     clearTimeout(timer);
     emit("dirty");
     timer = setTimeout(flush, 500);
+    guard();
   }
-  function flush() {
+  function flush() { try { return flushNow(); } finally { guard(); } }
+  function flushNow() {
     clearTimeout(timer);
     timer = null;
     if (loading) return;
@@ -2239,7 +2243,7 @@ export function createNotebook(root, opts = {}) {
         if (e?.busy) { busy.set(mine, { st, sent, json, seq }); mine.busyError = e; mine.busySeq = seq; }
         saveFailed(mine, st, sent, json, seq, e ?? new Error("not saved"));
         emit("saved", "not saved: " + (e?.message ?? e));
-      }).finally(() => { savesPending--; mine.inflight--; leftSettled(mine); });
+      }).finally(() => { savesPending--; mine.inflight--; leftSettled(mine); guard(); });
     }
   }
   // Every change so far saved: resolves once the saves asked for (this one
@@ -2287,6 +2291,38 @@ export function createNotebook(root, opts = {}) {
   observer.observe(cellsEl, { childList: true, subtree: true, characterData: true });
   const onHidden = () => { if (document.visibilityState === "hidden" && timer) flush(); };
   addEventListener("visibilitychange", onHidden);
+  // (the page going away (a reload, a closed tab) with an edit not yet saved: a waiting save flushed, and the browser's
+  // leave prompt requested, since a save can't finish once the page is gone; if the person leaves anyway, the last
+  // edit may not be kept)
+  // (unsaved: a save running, the last one failed or was busy (kept to send again), or a change waiting that differs
+  // from what was last saved (typed and undone before its save asks nothing); a notebook left, with its saves still
+  // to make, is the page's to ask about (its "left" listener))
+  // (and only once the person has typed here since everything was last saved (`typed`: a trusted input event, or a
+  // Markdown cell's block editor's change); while this notebook's saves fail or are busy, any of the person's own
+  // keys, clicks, pastes or drops too, as a cell moved, deleted or retyped then can't be saved either. A run's output,
+  // a change from elsewhere or one a script made do not arm it by themselves; once `typed` is set, though, any work
+  // still to save keeps it armed. So a script that hasn't set `typed` (a test, an automation) isn't held by the
+  // prompt; one that sends trusted input (CDP Input.*, as a person types) sets it, and must answer the prompt or let
+  // its saves finish first. Notebooks left are the page's own prompt's, as before)
+  const unsaved = (dirty) => typed && !!store && !store.readOnly && !!(savesPending || failed.has(shown) || busy.size || dirty());
+  root.addEventListener("input", (e) => { if (e.isTrusted) typed = true; }, true);
+  // (armed at once: such a key or click may change nothing that schedules a save, so nothing else would call guard())
+  for (const t of ["keydown", "pointerdown", "paste", "drop"]) root.addEventListener(t, (e) => { if (e.isTrusted && store && (failed.has(shown) || busy.size)) { typed = true; guard(); } }, true);
+  function onBeforeUnload(ev) {
+    if (!unsaved(() => timer && JSON.stringify(snapshot()) !== lastJson)) return;
+    if (timer) flush();
+    ev.preventDefault();
+    ev.returnValue = "";
+  }
+  // (the listener there only while something may be unsaved, and taken away once nothing is: a page with any
+  // beforeunload listener is navigated away from more slowly, so a clean notebook's page reloads exactly as before)
+  function guard() {
+    if (!(savesPending || failed.has(shown) || busy.size || timer)) typed = false; // (all saved: the person's typing kept)
+    const want = unsaved(() => timer);
+    if (want === guarded) return;
+    guarded = want;
+    (want ? addEventListener : removeEventListener)("beforeunload", onBeforeUnload);
+  }
 
   function fill(cell, c) {
     cell.metadata = c.metadata ?? null;
@@ -2324,6 +2360,8 @@ export function createNotebook(root, opts = {}) {
     shown.synced = { ...syncedOf(rev, snap.cells, snap.mode), doc: baseOf(snap.mode, list ?? []) };
     Promise.resolve().then(() => { loading = false; showParked(); }); // after the observer's records for this
     reactiveLoad();
+    typed = false; // (another document shown: nothing typed in it yet; one left with saves to make is the page's to ask)
+    guard(); // (its own failed save, or none)
   }
   // (the runs of this notebook that ended while it wasn't shown (execCell's done): their output, prompt number and
   // time put in their cells, once loaded, as a change of the document, so it is saved)
@@ -2790,6 +2828,7 @@ export function createNotebook(root, opts = {}) {
       const doc = await s.load();
       load(doc);
       store = s;
+      guard();
       unsubscribe = s.subscribe?.((d) => applyRemote(d)) ?? null;
       // (2c-3: another device's changes reached this notebook's history: merged with the record by the store, then with
       // what this page shows, its unsaved edits merged cell by cell (applyRemote), and saved.  Every edit is kept, as in
@@ -2832,7 +2871,7 @@ export function createNotebook(root, opts = {}) {
     /** Saves of documents no longer shown that met a change made elsewhere and couldn't be kept: only in this page. */
     get unkeptCount() { return unkept.size; },
     onDetachedConflict(f) { const was = detachedConflict; detachedConflict = f; return was; },
-    detach() { if (timer) flush(); unsubscribe?.(); unsubscribe = null; if (store?.journaled) store.onremote = null; store = null; shown = { synced: null, remoteSeen: 0 }; leftChanged(); },
+    detach() { if (timer) flush(); unsubscribe?.(); unsubscribe = null; if (store?.journaled) store.onremote = null; store = null; shown = { synced: null, remoteSeen: 0 }; leftChanged(); guard(); },
     get store() { return store; },
     on(event, f) { (listeners[event] ??= []).push(f); return () => { listeners[event] = listeners[event].filter((g) => g !== f); }; },
     showKeys() { keysDlg.showModal(); },
@@ -2846,6 +2885,8 @@ export function createNotebook(root, opts = {}) {
       sizeObserver?.disconnect();
       removeEventListener("resize", resizeAll);
       removeEventListener("visibilitychange", onHidden);
+      removeEventListener("beforeunload", onBeforeUnload);
+      guarded = false;
       document.removeEventListener("pointerdown", onPointerDown);
       for (const el of [completer, menu, dropline, keysDlg]) el.remove();
       root.replaceChildren();

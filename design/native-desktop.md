@@ -1,6 +1,6 @@
 # Native engines in the desktop app
 
-*Status: plan r18: r11 (the architecture revision, its tests and the page items) with William's answers to every §9 question recorded (Nov 7, about 2:26–2:31 PM PST), and (r14–r17) the licence invariant, the support-window clock and the PDF milestone N6 with its tests (T6) and measurements (§7.1), and (r18) William's revised PDF decision (installed TeX only) and his test-key choice; docs only, nothing is built. It replaces r12 (merged at 2999416e) with William's architecture decision of
+*Status: plan r19: r11 (the architecture revision, its tests and the page items) with William's answers to every §9 question recorded (Nov 7, about 2:26–2:31 PM PST), and (r14–r17) the licence invariant, the support-window clock and the PDF milestone N6 with its tests (T6) and measurements (§7.1), and (r18) William's revised PDF decision (installed TeX only) and his test-key choice, and (r19) the signing policy (§1 item 13, §6): the environment settings that keep the keys away from pull requests, where each key lives, and that a signed build kept as an Actions artifact is public; docs only, nothing is built. It replaces r12 (merged at 2999416e) with William's architecture decision of
 Nov 7, 2026, about 12:15–12:30 PM PST.
 
 Owner and sole author: @sagebrush-remote-compute. Reviewers: astra (SEC), daybreak3 (ENGINE), daybreak4 (PERF),
@@ -27,7 +27,7 @@ recorded the §7 answers, is part of r12.*
   - File and network permissions are enforced in the engine.
   - There is still no OS sandbox.
 - **Which JavaScript runtime the engine uses is a packaging choice, not architecture.** The options are Bun, Deno and Node's single executable (SEA). V8 against JSC is part of that choice. N1 measures it (§7).
-- **Signing and notarizing engine binaries:** William's keys only. Agents never touch them (§6).
+- **Signing and notarizing engine binaries and the app:** William's keys only, used only by a CI job, from a GitHub environment he fills. Agents never see or handle them (§6).
 - **Nothing ships, is signed, tagged, renamed or relicensed without William.**
 
 ## 1. William's decisions
@@ -52,6 +52,7 @@ recorded the §7 answers, is part of r12.*
 10. **LaTeX to PDF** (about 2:31 PM PST): "Both: user's TeX if present, else offer the Tectonic download" (§4.1). Its Tectonic half is **superseded** by item 11.
 11. **LaTeX to PDF, revised** (about 2:57 PM PST): "To keep scope focused, it sounds like we should just suggest to users "install latex" and leave it to them. We will use installed latex, but otherwise it is their responsibility." (§4.1).
 12. **Test keys** (about 2:49 PM PST): "(b) Tests may generate a throwaway in-memory keypair each run (never saved, never trusted by any shipped engine)" (§4.4).
+13. **Signing only in CI** (Nov 13, 2026): "We could do the apple keys in probably minutes. I setup exactly this for sagejs on github". Apple signing and notarization happen only in CI jobs, with the keys kept as secrets of a GitHub environment, as William set up for sagejs. It is his standing rule, and §6 applies it to every key.
 
 r12's lead question ("decide after the prototype's side-by-side measurements") was about where pyjs runs inside the app. The architecture decision answers it: pyjs and the native engine run in the engine process. N1 still measures, but now only to choose the engine's runtime (§7).
 
@@ -209,7 +210,7 @@ r4's A-vs-B timings stay withdrawn: the PyPI wheel came from a different commit.
 - **Upgrades:**
   - The engine upgrades itself from the release channel (`engine upgrade`). The app can trigger that.
   - Every upgrade is checked against the release's published checksum.
-  - Signature checks use William's keys once he sets them up (§6). No agent creates or holds an updater key; development uses unsigned or mock update metadata.
+  - Signature checks use William's update key once he makes it (§6.1). No agent creates or holds an updater key; development uses unsigned or mock update metadata.
   - **One scoped exception, for tests only** (William, §1 item 12): a test run may generate an **ephemeral in-memory keypair** and inject its public key as that test's pinned key.
     - The keypair must be made fresh in each run, and must never be written to disk, logged or committed.
     - It must never be pinned or accepted by any shipped engine, app or release metadata.
@@ -242,10 +243,63 @@ r4's A-vs-B timings stay withdrawn: the PyPI wheel came from a different commit.
 
 ## 6. Signing and notarization
 
-- Engine binaries and app installers are signed and notarized **only with William's keys, by William.**
+- Engine binaries and app installers are signed and notarized **only with William's keys.**
   - This covers Apple notarization, Windows Authenticode and the update signing key.
-  - Agents never touch the keys, accounts, certificates or signing steps.
-- Until then, every build an agent makes is an unsigned local build, and nothing is published.
+- **Where the keys are used:** CI jobs, and nowhere else (§1 items 3 and 13).
+  - Agents may write such jobs; each lands through a pull request that a person merges, since agents don't push workflow files. Their secret handling gets a security review.
+  - Agents never see, hold, copy or print a key, a certificate, its password or an account login, and never sign anything outside those jobs.
+- Every build an agent makes on its own machine is an unsigned local build, and nothing is published. CI's other app jobs keep their installers as artifacts, unsigned.
+
+### 6.1 Where each key lives
+
+| Key | Where it lives | How a CI job reaches it |
+|---|---|---|
+| Apple Developer ID certificate and notary key | Secrets of the GitHub environment `sagebrush-signing`, which William creates and fills himself | `mac-release` and `signing-check` name that environment |
+| Windows Authenticode | An Azure Artifact Signing account that William holds. The certificate's private key stays in Microsoft's hardware and is never exported, so no copy of it exists anywhere else. | A short-lived token from GitHub's OIDC, accepted only for jobs in a GitHub environment of its own (`sagebrush-signing-windows`); GitHub stores no Windows secret at all |
+| The update signing key (Tauri's updater) | Not made yet. William makes the keypair on his own computer. The private key and its password become secrets of their own environment (`sagebrush-signing-update`), and the public key is committed in the app's configuration. | Only the release job that signs update metadata |
+
+- Each signing system has its own environment: Apple, Windows and updates. A job that signs for one never receives another's credentials. Within Apple, the two jobs that name `sagebrush-signing` (`mac-release` and `signing-check`) receive both Apple credential sets, the certificate and the notary key, because each uses both.
+- The test-only keypair of §4.4 is none of these and is never stored.
+
+### 6.2 What keeps the keys away from pull requests
+
+Today this rests on each job's `if:`.
+- `mac-release` runs only for a push of an `app-v*` tag, or for a dispatch from master that asks to sign. It never runs on a pull request; `scripts/test-app-release-guard.mjs` pins the cases.
+- `signing-check` (`.github/workflows/signing-check.yml`), run by hand, checks the secrets: it signs only throwaway probes (a copied executable and a throwaway installer package), and prints PASS/FAIL checks and non-secret counts, never secret values. It is dispatch-only, but nothing checks which branch it runs from.
+
+A job's `if:` is in a workflow file, and any branch or tag pushed to this repository can carry a changed one. A run from that branch (a push, or a pull request from it) could then name the environment and receive its secrets. So the controls that count are the environment's own settings, which only a repository admin can change.
+
+**These settings are proposed, not yet in force.** `sagebrush-signing` as it stands (read through GitHub's API on Nov 21, 2026):
+- its deployment rules admit the branch `master` and the tag pattern `v*`, not `app-v*`;
+- it has no required reviewer;
+- administrators may bypass it;
+- the repository has no tag ruleset.
+
+So today a changed workflow on a pushed `v*` tag would be admitted with no approval. Until William applies the settings below and they are checked again through the API, only the jobs' `if:` lines stand in the way. Each signing environment (§6.1) must have:
+
+- **Deployment branches and tags: "Selected branches and tags"**, with only the branch `master` and the tag pattern `app-v*` (today's `v*` rule is removed). A job from any other branch or tag can't use the environment's secrets, whatever its `if:` says.
+- **Required reviewers:** William. Every job that uses the environment waits until he approves that run.
+  - "Prevent self-review" stays off: William is the one reviewer, and he also pushes the tags.
+- **"Allow administrators to bypass configured protection rules": off**, so no one, an admin included, can skip the approval.
+
+And the repository must have:
+
+- **A tag ruleset for `app-v*`:** only William may create, move or delete those tags.
+  - Its bypass list holds William alone, never the agents' account. Without it, anyone who can push a tag could start a signing run, which would then wait for William's approval.
+- **No `pull_request_target` workflows:** they run with the base repository's secrets on a pull request's event. There are none today; a new one needs William's OK.
+- **`signing-check` from master only:** its job gets `if: github.ref == 'refs/heads/master'`, so it is dispatch-only from master, like `mac-release`'s dispatch. The environment's branch limit enforces the same thing.
+
+Changing these settings needs an admin, so William applies them. They are listed exactly in the proposed settings that come with this revision. Once they are applied and the API shows them in force, this section's "proposed" note goes.
+
+### 6.3 A signed build kept as an artifact is public
+
+- `mac-release` keeps the signed, notarized disk image as an Actions artifact (`sagebrush-app-macos-signed`, for 14 days).
+- In a public repository, anyone with read access can download an artifact, which means any signed-in GitHub user. So a signed run publishes that build, in practice, whether or not a release is made.
+- Therefore:
+  - Ask for a signed run (a tag push, or a dispatch with `sign`) only for a build William means to publish. To test signing, use `signing-check`, which signs only throwaway probes.
+  - A signed artifact is kept for at most 1 day, long enough to move it to the release. A later workflow change sets this, and William merges it.
+  - Unsigned builds stay as artifacts, as now. Nothing in them carries William's signature.
+- Making a release (a release page, a download link, an update) stays William's decision.
 
 ## 7. N1, narrowed
 
@@ -409,3 +463,4 @@ All five were answered on Nov 7, 2026, between about 2:26 and 2:31 PM PST. They 
   - `engine/interrupt/src/lib.rs`, `engine/ap/src/lib.rs` (#831).
 - **Evidence:** the §3 packets.
 - **External, checked Nov 7, 2026:** bun.com/docs/project/licensing.
+- **Signing (r19):** `.github/workflows/app.yml` (`mac-release`), `.github/workflows/signing-check.yml` and `scripts/test-app-release-guard.mjs`, at 9215a0f0. GitHub's documentation on deployment environments and on downloading workflow artifacts, checked Nov 21, 2026.
