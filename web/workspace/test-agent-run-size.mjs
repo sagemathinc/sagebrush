@@ -90,7 +90,10 @@ const LATEX_FIRST_USE = ["sagebrush-agent-run.js", "sagebrush-latex.js", "sagebr
 // (161,208 / 58,523: Nov 20 2026, a page's run_notebook handed to today's run when the page takes it and then can't
 //  (PageRun.inputs()'s "fallback", run-verbs.ts, in the run's chunk), master 595eb958: 161,144 / 58,459 measured on the
 //  shipped build, + 64)
-const AGG_RAW = 161208, AGG_GZIP = 58523;
+// (161,460 / 58,611: Nov 20 2026, a sageblock's code coloured in the LaTeX preview (the page module's hook for the lazy
+//  highlighting chunk; the engine's Magma marker), on its merge with master a9ee2bab: 161,396 / 58,547 measured on the
+//  shipped build (bun 1.4.4, node 24.22.3), + 64)
+const AGG_RAW = 161460, AGG_GZIP = 58611;
 // (the reviewed inputs, relative to web/: the entry and what it imports)
 // (the review page's run line: a finished run's note in its branch, canon-doc.ts's canonical bytes and blob id, and branch-wake.ts's
 //  wake, which needs sha256-hex.ts for the branch store's name)
