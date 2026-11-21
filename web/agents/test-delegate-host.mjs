@@ -4,7 +4,7 @@
 // notifications. CI can't import the agent's own repo, so this is the agent's behavior as the protocol says it, no
 // more: every tasks.* is refused (forbidden) unless the page's last grant.changed holds delegate: true, as the agent
 // checks; a grant without it ends the tasks' turns (their status goes to interrupted). Controls for the rows: `hold`
-// (methods left unanswered), `fail` (methods answered with an error code), `pageSize` (tasks.get's events per answer).
+// (methods left unanswered until `release`), `fail` (methods answered with an error code), `pageSize` (tasks.get's events per answer).
 import { blobId } from "../workspace/tasks-schema.ts";
 
 const enc = new TextEncoder();
@@ -89,6 +89,17 @@ export function delegateHost({ features = ["delegate.1", "chat.resume"], pageSiz
       default: return refuse(m.id, "bad_request");
     }
   }
+  // (the agent's own requests to the page: a workspace verb, as Pair's tools call them)
+  let cn = 0;
+  const calls = new Map();
+  H.call = (method, params, ms = 10000) => new Promise((resolve, reject) => {
+    const id = "s" + ++cn;
+    calls.set(id, resolve);
+    send({ jsonrpc: "2.0", id, method, params });
+    setTimeout(() => { if (calls.delete(id)) reject(new Error("no answer to " + method)); }, ms);
+  });
+  /** Answer the held requests now, as if they had just come. */
+  H.release = () => { for (const m of H.held.splice(0)) task(m); };
   H.srv = Bun.serve({
     port: 0, hostname: "127.0.0.1",
     fetch(req, srv) { return srv.upgrade(req) ? undefined : new Response("no", { status: 400 }); },
@@ -97,6 +108,7 @@ export function delegateHost({ features = ["delegate.1", "chat.resume"], pageSiz
       message(ws, data) {
         const m = JSON.parse(String(data));
         H.got.push(m);
+        if (m.method === undefined && calls.has(m.id)) { calls.get(m.id)(m); calls.delete(m.id); return; }
         if (m.method === "hello") return answer(m.id, { protocol: 1, agent: { name: "Claude Code", client: "claude-code", version: "2.0" }, wants: { write: true, run: false }, session: "SECRET", features });
         if (m.method === "grant.changed") {
           const g = Array.isArray(m.params?.folders) ? m.params : null;

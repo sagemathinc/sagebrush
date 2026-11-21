@@ -38,6 +38,9 @@ import { filesIcon, modeSwitch } from "../workspace/mode-switch";
 import { icon as panelIcon } from "../workspace/files-toggle";
 import { entryUrl } from "../workspace/entry-url";
 import { threadMarkdown, turnMarkdown, userMarkdown } from "../workspace/agent-chat/transcript";
+import { DelegateTasks } from "./delegate";
+import { mountDelegate } from "./delegate-ui";
+import { toIpynb } from "../notebook/ipynb.js";
 
 // (the LaTeX editor, in builds that have it: web/build.ts's define)
 declare const __SB_LATEX__: boolean | undefined;
@@ -185,6 +188,8 @@ function renderSidebar() {
     a.textContent = t.title;
     if (isRunning(t)) a.append(Object.assign(document.createElement("span"), { className: "dot", title: "working" }));
     a.onclick = async () => {
+      // (a task's view shown: back to the chats, this one)
+      if (delegateUi.showing() !== null) delegateUi.close();
       if (t.id === state.current) return;
       if (!(await mayLeaveThread())) return;
       state.current = t.id;
@@ -1056,6 +1061,30 @@ function toast(text: string, ms = 1500) {
 // The page
 
 const editor = mountComposer({ submit, stop: () => interrupt(current()), render: md, typeset: (el) => typeset(el) });
+// (Delegate, for an agent on this computer that offers it: delegate.ts's tasks, drawn by delegate-ui.ts)
+const delegateTasks = new DelegateTasks({ changed: () => delegateUi?.render() });
+const delegateUi = mountDelegate({
+  tasks: delegateTasks,
+  agent: agentName,
+  mayRun: () => pairing?.grant?.run === true,
+  openPath: () => current().artifacts.find((x) => x.id === openArtifact)?.path ?? null,
+  draft: () => editor.value,
+  clearDraft: () => { editor.value = ""; },
+  // (a workspace document as the task's copy starts from it: a notebook's .ipynb text, a text file's text; its path as
+  //  the protocol has it, relative)
+  async readDoc(path) {
+    if (!workspace) throw new Error("this browser's workspace isn't open");
+    const r = await workspace.read("/" + path);
+    if (/\.ipynb$/i.test(path)) return { path, kind: "notebook", content: toIpynb(r.content) };
+    if (typeof r.content === "string") return { path, kind: "file", content: r.content };
+    if (r.content instanceof Uint8Array) return { path, kind: "file", content: new TextDecoder("utf-8", { fatal: true }).decode(r.content) };
+    throw new Error(`${path} isn't a notebook or a text file`);
+  },
+  turnNode: (thread, turn) => viewTurnNode(thread, turn, { answer: () => {}, openArtifact: () => {}, md }),
+  shown: (on) => { document.body.classList.toggle("task-shown", on); if (!on) renderAll(); },
+  site: new URL("../", import.meta.url),
+  toast,
+});
 // (the Files | Agents switch at the right of the chat list's header, Agents pressed: Files opens the notebook page with
 //  its files, as the file panel's switch opens this page; William, Nov 12)
 { const sw = modeSwitch("agents"), brand = document.querySelector<HTMLElement>("nav.side .brand"); sw.style.marginLeft = "auto"; if (brand) { brand.style.whiteSpace = "nowrap"; brand.append(sw); } const f = sw.querySelector<HTMLButtonElement>('[data-mode="files"]'); if (f) f.onclick = () => void toFiles(); }
@@ -1089,6 +1118,7 @@ async function toFiles() {
 $("#files-big").prepend(filesIcon());
 $("#files-big").onclick = () => void toFiles();
 $("#new").onclick = async () => {
+  if (delegateUi.showing() !== null) delegateUi.close();
   if (!(await mayLeaveThread())) return;
   session.newThread();
   openArtifact = null;
@@ -1393,6 +1423,7 @@ function mountPairing(ws: Workspace) {
     extra: (close) => chatHereSection(close),
     onPairing(p) {
       pairing = p;
+      delegateTasks.attach(p);
       cards.clear();
       // (only while this pairing is the page's: a late message from one it replaced changes nothing; the replaced
       //  one's listener goes too)
