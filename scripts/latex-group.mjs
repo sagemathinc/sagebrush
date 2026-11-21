@@ -197,8 +197,8 @@ export const LATEX_LAZY_CAPS = {
   //  master 97da53af with bun 1.4.4 and node 24.21.0: 63,984 / 21,874, + 64; with "delegate.1" in FEATURES (the
   //  hello keeps it): 64,003 / 21,896, under it)
   // (64,345 / 22,064: Nov 21 2026, the Delegate switch (protocol §6.2: the grant's delegate, sent with every grant
-  //  change, setDelegate, a kept grant stored without it; agent-pair.ts), measured on the shipped build of the head
-  //  merged with master c411fca4, bun 1.4.4 and node 24.21.0: 64,281 / 22,000, + 64)
+  //  change, setDelegate, a kept grant stored without it; agent-pair.ts), measured on the shipped build of the head,
+  //  on master c411fca4, bun 1.4.4 and node 24.21.0: 64,281 / 22,000, + 64)
   AGENT: { label: "the LaTeX agent pairing's chunk", raw: 64345, gzip: 22064 },
   // (the agent tools' work: web/latex/tools.ts, latex_check's report and latex_render's pictures, on an agent's first call)
   // (16,546 / 6,950: Nov 11 2026: latex_build's own code (build.ts, the
