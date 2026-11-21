@@ -87,7 +87,9 @@ try {
   // File ▸ Examples…: New ▸ From an example…, at the top. A site without the gallery: said, and no list of the page's
   // own (the gallery's panel is the only one)
   await ev(`(() => { document.querySelector("#filemenu [data-item=examples]").click(); return 1; })()`);
-  check(await until(`/The examples aren't available here\./.test(document.querySelector("#status")?.textContent ?? "")`) && !(await ev(`!!document.querySelector("#exdlg, dialog.sb-examples")`)), "File ▸ Examples… on a site without the gallery: the examples aren't available here, no list");
+  // (said in the status line and announced: the announcement read too, as the status line's next news (the interpreter
+  //  ready) can replace it first on a slow machine)
+  check(await until(`/The examples aren't available here\./.test((document.querySelector("#announce")?.textContent ?? "") + " " + (document.querySelector("#status")?.textContent ?? ""))`) && !(await ev(`!!document.querySelector("#exdlg, dialog.sb-examples")`)), "File ▸ Examples… on a site without the gallery: the examples aren't available here, no list");
   // (a site with the gallery: its panel, for Examples… and From an example… alike)
   await ev(STUB_CATALOG);
   await ev(`(() => { document.querySelector("#filemenu [data-item=examples]").click(); return 1; })()`);
