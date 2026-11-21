@@ -1,6 +1,6 @@
 # The numeric track
 
-*November 21, 2026, r2.* track/numeric is where MATLAB mode's numerical
+*November 21, 2026, r3.* track/numeric is where MATLAB mode's numerical
 side grows: the functions an agent reaches for when it writes MATLAB, and a
 subset of the Symbolic Toolbox. It works like track/math: PRs go into
 track/numeric, and the track is pulled into master. This note settles what
@@ -20,7 +20,7 @@ Two kinds of behaviour, held to two standards.
 - **Errors:** which inputs raise, and the identifier. Identifiers come only from a MATLAB-printed source (an observed MATLAB run, or the documentation's text); otherwise the identifier is empty, never guessed. The message keeps Sagebrush's wording unless a test pins MATLAB's.
 - **Warnings:** which inputs warn (singular matrix, nearly singular with the RCOND value's form, iteration limits), and the identifier where MATLAB prints one.
 - **Edge cases:** empty inputs and their shapes (`sum(zeros(0,3))` is `zeros(1,3)`), `NaN` and `Inf` propagation, `-0` where MATLAB's documentation says so, dimension arguments, `'omitnan'`, integer saturation and rounding, and implicit expansion's rules.
-- **Exact values:** results whose value is defined exactly. These are integer-valued results, sorting and set results with their index outputs, `find`, logical results, the order of `eig`'s values where it is documented, and display formatting (`disp`, `format`, `mat2str`, `num2str`), which scripts parse.
+- **Exact values:** results whose value is defined exactly. These are integer-valued results (`rank` and other tolerance decisions only away from the tolerance: near it, §2), sorting and set results with their index outputs, `find`, logical results, the order of `eig`'s values where it is documented, and display formatting (`disp`, `format`, `mat2str`, `num2str`), which scripts parse.
 - **Random numbers:** `rand`, `randn` and `randi` after `rng(seed)` give MATLAB's numbers (already so: design/matlab.md).
 
 **Matched within a stated accuracy.** Floating-point values from an algorithm:
@@ -72,8 +72,9 @@ These rules apply to engine/nd (numerics-core r4.2 §7) and everything built on 
 - (The other choice, `mul_add` everywhere, would be correct everywhere but slow in wasm, where FMA is in software.)
 - Where a target uses the platform's libm instead, the bound is 1 ulp, and the test says which.
 
-**Iterative dense algorithms** (QR iteration for `eig` and `svd`, Jacobi sweeps, and the like) branch on comparisons: convergence tests, deflation, shift choices.
+**Iterative dense algorithms and anything that decides by comparison** branch on comparisons. That covers QR iteration for `eig` and `svd`, Jacobi sweeps, partial pivoting in LU, column pivoting in QR, and the tolerance tests in `rank`, `null`, `orth` and `pinv` (convergence tests, deflation, shift choices, pivot choices, rank decisions).
 - An FMA difference in their inner products can change an iteration count or a deflation point.
+- Discrete outputs can differ across targets near a tie or the tolerance: the pivot vector P, `rank`'s integer, the dimension of `null`'s basis.
 - So across targets, their results agree within the algorithm's backward-stability bound, stated per function (for example, `eig`'s computed values are exact for $A + E$ with $\|E\| \le c\,n\,\varepsilon\|A\|$), not within the dot-product bound.
 - **Their metered units are bitwise per target, and across targets only for non-iterative kernels.** So E is calibrated per target (§3).
 - (Unlike the Smith and Hecke work, which reproduces units across native and wasm.)
@@ -130,18 +131,21 @@ for the families $f$ the kernel charges (for most kernels, one Flop family domin
 
 **Direct-like.** The dense eigensolvers and SVD iterate, but their iteration counts are nearly constant per size in practice. So E uses the leading-term counts above, and the reduction phase dominates. That's stated as a model, not a bound: their $k$ is measured like any other kernel's. Inputs where the iterations run unusually long show up as rows with large actual/E, and are reported, not hidden.
 
-**L per kernel**, the rigorous lower bound and the only refusal. It's the output plus the workspace that can't be avoided, in bytes for real f64 input, doubled for complex:
+**L per kernel**, the rigorous lower bound and the only refusal. It's what the shipped route necessarily holds, the output plus unavoidable workspace, in bytes for real f64 input, doubled for complex, and never more: an L above what the code holds refuses calls that would fit, which r4 counts as a defect. Each kernel PR derives L from that kernel's actual buffers at their peak, lowered where storage is reused or freed early, and pins it from its definition at one known size.
+
+L counts what the op itself allocates (the input is the caller's), per MATLAB call form, not per kernel. The table below is the kernel's floor. Each catalog op adds the outputs it returns, by nargout and options: `[L, U, P] = lu(A)` returns L and U separately plus P as a full $n \times n$ matrix unless `'vector'`, about $3 \cdot 8n^2$; `A\b` keeps A, so it adds an $8n^2$ copy. The kernel floors, for the routes we expect:
 
 | kernel | L |
 |---|---|
 | GEMM | $8mn$ (C) |
-| LU in place | $8n^2$ + pivots $8n$ |
+| LU in place | $8n^2$ + pivots $4n$ |
 | QR, economy / full | $8mn + 8n$ / $8m^2 + 8mn$ |
 | Cholesky | $8n^2$ |
-| eig, values / with vectors | $8n^2 + 16n$ / $3\cdot 8n^2$ (complex: $3\cdot16n^2$) |
-| SVD, values / economy vectors | $8mn + 8n$ / $8(mn + n^2 + n) + 8mn$ |
+| eig, values / with vectors (`[V, D] = eig(A)`, real input) | $8n^2 + 16n$ / V and the full D, $2\cdot 8n^2$, plus a third $8n^2$ only if the route keeps the Hessenberg/Schur working copy apart from D's storage: $2\cdot8n^2$ or $3\cdot8n^2$ by route, stated and pinned in the eig PR (complex V doubles V's term) |
+| SVD, values / economy vectors | $8mn + 8n$ / $8(mn + n^2 + n)$, plus another $8mn$ only if the route keeps the bidiagonalized copy apart from U: stated and pinned in the SVD PR |
 | FFT of length $n$ | $16n$ out, $+16n'$ for Bluestein's padded length $n'$ |
 
+- Pivots count 4 bytes each, the floor on every target: they're `usize`, which is 4 bytes on wasm32.
 - Each L is computed with checked arithmetic. An overflow refuses as "out of memory", and an extremes test covers sizes near `usize::MAX` and the wasm32 4 GiB limit.
 - **Outputs of unknown size** (ode45 with a 2-element tspan, whose output grows per step; `find`; `unique`) can't be refused up front. The ledger charges as the output grows, and refuses only at the step that exceeds memory.
 
@@ -169,7 +173,7 @@ An indicative run today, on a shared 16-core host with other jobs running, so it
   - lib/_matlab.py `_rcond_warning` estimates rcond only for $n \le 500$.
   - It refactors A with a Python loop of unblocked rank-1 updates (`_lu_factors`) and runs the estimator's triangular solves row by row in Python (`_tri_solve`).
   - So every solve up to 500 rows paid for a second, slow LU. Above 500 rows the check was skipped, and a nearly singular matrix bigger than that never warned, which breaks §1's contract.
-  - The fix, in the measurement PR: estimate rcond from the factors the solve already computed, with engine/nd's `gecon` (the same Higham/dlacn2 algorithm, already tested against the Python one), for every $n$. That removes both the cost and the 500-row cap.
+  - The fix, in the measurement PR: estimate rcond from the factors the solve already computed, with engine/nd's `gecon` (the same Higham/dlacn2 algorithm, already tested against the Python one), for every $n$. That removes both the cost and the 500-row cap, and a test pins that a nearly singular $n = 600$ matrix warns.
 
 ## 4. Where we start
 
