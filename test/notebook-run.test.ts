@@ -1,7 +1,7 @@
 import test from "node:test";
 import assert from "node:assert/strict";
 import { spawnSync } from "node:child_process";
-import { existsSync, linkSync, mkdirSync, mkdtempSync, readFileSync, rmSync, symlinkSync, writeFileSync } from "node:fs";
+import { existsSync, linkSync, mkdirSync, mkdtempSync, readFileSync, realpathSync, rmSync, symlinkSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { readNotebook } from "../src/notebook-run";
@@ -15,7 +15,8 @@ const nb = (cells: { id?: string; src: string; type?: string }[], extra: Record<
   metadata: { kernelspec: { name: "python3", display_name: "Python 3", language: "python" }, ...((extra.metadata as object) ?? {}) },
   nbformat: 4, nbformat_minor: 5, ...Object.fromEntries(Object.entries(extra).filter(([k]) => k !== "metadata")),
 });
-const folder = () => mkdtempSync(join(tmpdir(), "sb-nbrun-"));
+// (real paths throughout, as the Delegate runner passes them: on macOS the temporary folder is under /var, a link)
+const folder = () => realpathSync(mkdtempSync(join(tmpdir(), "sb-nbrun-")));
 const run = (dir: string, args: string[]) => spawnSync(process.execPath, [CLI, "notebook", "run", ...args], { cwd: dir, encoding: "utf8", timeout: 180_000 });
 const json = (r: { stdout: string }) => JSON.parse(r.stdout);
 const cell = (rep: any, id: string) => rep.cells.find((c: any) => c.id === id);
@@ -279,7 +280,7 @@ test("--confine: a notebook outside the folders named, or reached through a link
 });
 
 // ---- the Delegate runner's own launch (plan r3 §2.6): the built bundle under Deno, the environment replaced
-const BUNDLE = __dirname + "/../../build/cli/pyjs.cjs";
+const BUNDLE = ((b) => (existsSync(b) ? realpathSync(b) : b))(__dirname + "/../../build/cli/pyjs.cjs");
 // (its absolute path: the runner's environment has no PATH)
 const deno = ((w) => (w.status === 0 && w.stdout.trim().startsWith("/") ? w.stdout.trim() : null))(spawnSync("sh", ["-c", "command -v deno"], { encoding: "utf8" }));
 // (the runner's environment: replaced whole, so --allow-env exposes exactly these; the pinned zone data copied into
@@ -296,6 +297,8 @@ const underDeno = (work: string, runTmp: string, args: string[], confine = true)
   spawnSync(deno!, denoArgs(work, runTmp, args, confine), { cwd: work, encoding: "utf8", timeout: 180_000, env: denoEnv(work, runTmp) });
 const underDenoAsync = (work: string, runTmp: string, args: string[]) => runAsync(deno!, denoArgs(work, runTmp, args), { cwd: work, env: denoEnv(work, runTmp) });
 const skipDeno = !deno || !existsSync(BUNDLE) ? "needs deno on PATH and the built bundle (node scripts/build-cli.mjs)" : false;
+// (a job that exists to produce this evidence sets SAGEBRUSH_REQUIRE_DENO=1: then a missing deno or bundle is a failure, never a skip)
+if (skipDeno && process.env.SAGEBRUSH_REQUIRE_DENO === "1") test("Deno rows required here (SAGEBRUSH_REQUIRE_DENO=1)", () => { assert.fail(String(skipDeno)); });
 
 test("Deno: the runner's flags with --confine: every escape refused, before and during the run; the notebook's own work done", { skip: skipDeno }, async () => {
   const p = planted();
