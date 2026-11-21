@@ -1,0 +1,11 @@
+{
+  "interface": "npm notebook UI",
+  "language": "MATLAB",
+  "stop_clicked": true,
+  "keyboard_interrupt": true,
+  "stop_latency_ms": 54,
+  "prior_scalar_preserved": true,
+  "prior_vector_preserved": true,
+  "new_calculation": 42,
+  "url": "http://127.0.0.1:8877/nb/oscillator-stop-1795105472101.ipynb/"
+}

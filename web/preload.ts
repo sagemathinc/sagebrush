@@ -146,7 +146,7 @@ export async function preloadFetch(urls: readonly string[], blocked: () => strin
 
 /** What the page's background loading did: null until it ran; then why it skipped, or the files it fetched (the
  * notebook page shows it as window.sagebrush.preload, for its tests and an agent's look) */
-export const preloadState: { outcome: null | "off" | "stopped" | "save-data" | "slow" | "offline" | "hidden" | "nothing" | "no-room" | "fetched"; urls: string[]; fetched: string[] } = { outcome: null, urls: [], fetched: [] };
+export const preloadState: { outcome: null | "off" | "local" | "stopped" | "save-data" | "slow" | "offline" | "hidden" | "nothing" | "no-room" | "fetched"; urls: string[]; fetched: string[] } = { outcome: null, urls: [], fetched: [] };
 
 /** At the browser's next idle moment (at most `wait` ms later), once per page: the open document's intent, fetched.
  * `base`: where the library files are (the page's own address by default, the notebook page's; a shared

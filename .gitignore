@@ -1,4 +1,6 @@
 node_modules/
+# (and a symlink of that name, as a worktree may have, which the directory pattern above does not match)
+node_modules
 __pycache__/
 dist/
 pyparse/dist/

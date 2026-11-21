@@ -779,6 +779,7 @@ version = "0.1.0"
 dependencies = [
  "num-integer",
  "num-traits",
+ "sagebrush-arith",
  "sagebrush-ball",
  "sagebrush-bigint",
  "sagebrush-interrupt",

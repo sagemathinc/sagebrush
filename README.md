@@ -12,9 +12,16 @@ in seconds. Every result should come with a status saying whether it is
 *proven* or only heuristic. The design is many small, strong engines that
 share one core, not one huge system.
 
-Status: early, unpublished. Engines for modular symbols and newforms, a_p
-of elliptic curves, polynomials over Z, and class groups and units of number
-fields; a Python front end in the browser with Sage and Magma modes.
+Released versions are on [GitHub's releases
+page](https://github.com/sagemathinc/sagebrush/releases), npm
+([`sagebrush`](https://www.npmjs.com/package/sagebrush)) and PyPI
+([`sagebrush`](https://pypi.org/project/sagebrush/) and
+[`sagebrush-mcp`](https://pypi.org/project/sagebrush-mcp/)).
+[PRODUCT.md](PRODUCT.md) describes Sagebrush Space, the Sagebrush app and the
+Sagebrush engine. Sagebrush includes engines for modular symbols and newforms,
+a_p of elliptic curves, polynomials over Z, and class groups and units of
+number fields, and a Python front end in the browser with Sage and Magma
+modes.
 
 ## Principles
 
@@ -227,7 +234,10 @@ the file is finalized. pyjs writes UTF-8 with `"\n"` newlines, CPython's
 POSIX defaults.
 
 - **Browser:** [sagebrush.space](https://sagebrush.space) is a notebook and a
-  console running in the page, and nothing is sent to a server. See
+  console whose code runs in the page; running it uploads nothing. Sync,
+  publishing, Push to GitHub, a connected computer, an agent, pictures and files
+  from other sites, and counting use do send data or make requests: see
+  [What leaves this browser](https://sagebrush.space/docs/storage#leaves) and
   [web/README.md](web/README.md).
 - **Command line:** `npx sagebrush`, or one self-contained executable from
   `curl -fsSL https://get.sagebrush.space/install.sh | sh`.
@@ -609,6 +619,47 @@ several primes, quadratic Hensel lifting on a factor tree, recombination) it
 checks the factorization against FLINT on 400 random products, the
 cyclotomic polynomials x^n - 1 and x^(2^k) + 1, and the Hecke polynomials of
 T_2 and T_3 at about 100 levels up to 2003.
+
+### Merge queue on master
+
+`master`'s branch ruleset already requires GitHub's merge queue (squash, build concurrency 4, groups of 1 to 5,
+status-check timeout 90 minutes) but no status checks. Once the queue-aware workflows have landed, and `app-ci`
+has run at least once, a repository administrator edits that ruleset (**Settings → Rules → Rulesets**):
+
+- Add **Require status checks to pass**, with the checks `ci` and `app-ci`, source **GitHub Actions**. `ci`
+  aggregates the selected core jobs (size included); `app-ci` requires the page and all three desktop platforms.
+  Leave **Require branches to be up to date** off: the queue tests each entry on top of the entries ahead of it.
+  Do not require individual path-selected jobs, nightly jobs, mobile builds or release/signing jobs. Both
+  workflows report on every pull request, prose-only ones included, so a required check never stays pending
+  because of a path filter. `app-ci` appears in the check picker only after it has run once.
+- Add **Require a pull request before merging**, with **0** required approvals: changes are reviewed outside
+  GitHub's approval flow.
+- In **Require merge queue**, turn **Only merge non-failing pull requests** on (it is off now), so an entry whose
+  own run failed never lands inside a passing group, and raise the status-check timeout to **120 minutes**: a
+  queue run of the desktop app can take about 80 minutes before it waits for a runner. Keep squash, build
+  concurrency 4 and groups of 1 to 5.
+
+An open pull request reports `app-ci` only after its next CI run, so a pull request opened before these
+workflows landed needs a new run (a push, or a re-run) before it can enter the queue.
+
+Build concurrency limits how many queue builds run at once; the group limits set how many passing entries land
+together. Every queue run tests its cumulative head with the full tier, so labels such as `full-ci` cannot be
+lost; the slower nightly tier stays nightly. A queue run is strict about the engine's modules: a stale
+`wasm/pins.json` fails it, as on a master push. Size comparisons use the payload's `base_sha` and `head_sha`, not
+a moving master or `HEAD^1`, so a group is measured as one change.
+
+The guarded merge script must retain review, expected-head and required-check
+checks, first verify that master actively requires the queue (refuse if that cannot
+be confirmed), and replace its final direct merge/push with
+`gh pr merge NUMBER --repo sagemathinc/sagebrush --match-head-commit HEAD_SHA`.
+With the ruleset active, this enqueues a passing pull request (or enables auto-merge
+until its required checks pass); it does not bypass the queue. Do not use `--admin`,
+force-push master, or re-merge master just because an earlier queued entry landed.
+Report “enqueued” after admission and “merged” only after GitHub reports it merged.
+This repository change does not enable the ruleset or modify an external merge script.
+
+See [GitHub's queue settings](https://docs.github.com/en/repositories/configuring-branches-and-merges-in-your-repository/configuring-pull-request-merges/managing-a-merge-queue)
+and [the CLI's queue behavior](https://cli.github.com/manual/gh_pr_merge).
 
 ## Performance
 
