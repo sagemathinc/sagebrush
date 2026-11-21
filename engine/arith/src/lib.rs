@@ -11,6 +11,8 @@
 //! - [`zmat`]: dense matrices over Z and Q (multimodular, certified);
 //! - [`zpoly`]: polynomials over Z (Kronecker products, modular gcd);
 //! - [`qpoly`]: products in Q[x], reduced (the `qpoly_mul` op);
+//! - [`cost`]: what an operation's cost is known to be before it runs
+//!   (lower bounds, an estimate, an upper bound), and its meter;
 //! - [`wire_decode`]: the wire's big-integer payloads, decoded under one
 //!   reservation, with the gcd = 1 checks of [`coprime`].
 
@@ -18,6 +20,7 @@
 // products use them); re-exported here
 pub use sagebrush_bigint::{nmod, ntt};
 pub mod coprime;
+pub mod cost;
 mod invdiv;
 mod counted;
 pub mod crt;

@@ -1,13 +1,15 @@
-//! How long a Stop can go unnoticed while a decoder checks gcd = 1 at the
-//! limb cap: the longest wall time between two Stop checks, and between
-//! two polls of the WebAssembly host as the interrupt crate's test hooks
-//! simulate them, for a pair of cap-size integers (Lehmer windows) and a
-//! cap-size integer against one of half its size (a Knuth-D remainder of
-//! LIMB_CAP / 2 quotient limbs first); and a Stop requested in the middle
-//! of a check ends the decode.  One test: the hooks are global.
+//! How long a Stop can go unnoticed while a decoder checks gcd = 1 on
+//! large integers (there is no size cap: the check is metered and polls
+//! Stop): the longest wall time between two Stop checks, and between two
+//! polls of the WebAssembly host as the interrupt crate's test hooks
+//! simulate them, for a pair of 24576-limb integers (Lehmer windows) and a
+//! 32768-limb integer against one of half its size (a Knuth-D remainder of
+//! 16385 quotient limbs first), all above the former 16384-limb cap; and a
+//! Stop requested in the middle of a check ends the decode.  One test: the
+//! hooks are global.
 
 use dashu_int::UBig;
-use sagebrush_arith::coprime::LIMB_CAP;
+use sagebrush_arith::cost::Cost;
 use sagebrush_arith::wire_decode::{decode_qv, Admit};
 use sagebrush_wire::WireError;
 use sagebrush_interrupt::hooks;
@@ -28,7 +30,7 @@ fn rnd(words: usize, seed: &mut u64) -> UBig {
 struct Open;
 
 impl Admit for Open {
-    fn admit(&mut self, _work: u64, _bytes: u64) -> Result<(), WireError> {
+    fn admit(&mut self, _bytes: u64, _cost: Cost) -> Result<(), WireError> {
         Ok(())
     }
 }
@@ -58,10 +60,9 @@ fn pair(a: usize, b: usize, seed: &mut u64) -> Vec<u8> {
 }
 
 #[test]
-fn gcd_checks_at_the_cap_poll_stop() {
-    let cap = LIMB_CAP as usize;
+fn gcd_checks_above_the_old_cap_poll_stop() {
     let mut seed = 0x1234_5678_9abc_def1u64;
-    for (what, a, b) in [("equal sizes", cap, cap), ("half size", cap, cap / 2)] {
+    for (what, a, b) in [("equal sizes", 24576, 24576), ("half size", 32768, 16384)] {
         let p = pair(a, b, &mut seed);
         let q = qv1(Arg { bytes: &p, offset: 0 }).unwrap();
         hooks::reset();
