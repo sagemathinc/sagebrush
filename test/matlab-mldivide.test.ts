@@ -61,6 +61,25 @@ for (const [name, noWasm] of BACKENDS) {
     ].join("\n"));
   });
 
+  test(`${name}: singular systems as an observed MATLAB run prints them, Inf, NaN and signs`, () => {
+    // (MATLAB R2026b Update 2, MATLAB Online, 2026-11-21: values and warnings only. No step of the substitution
+    // is skipped, so 0/0 and 0 * Inf are NaN; a diagonal A is forward-substituted; a -0 pivot flips the sign)
+    const rows: [string, string, string][] = [
+      ["[1 2;2 4]", "[1;2]", "[NaN NaN]"], ["[1 2;3 6]", "[1;3]", "[NaN NaN]"], ["[2 4;1 2]", "[1;2]", "[-Inf Inf]"],
+      ["[1 2;0 0]", "[1;1]", "[-Inf Inf]"], ["[1 2;0 0]", "[1;0]", "[NaN NaN]"], ["[0 1;0 1]", "[1;1]", "[NaN 1]"],
+      ["[0 0;0 0]", "[1;1]", "[Inf NaN]"], ["[0 0;0 0]", "[0;0]", "[NaN NaN]"], ["[-0 1;0 1]", "[0;1]", "[Inf 1]"],
+    ];
+    const src = rows.map(([a, b]) => `lastwarn(''); x = ${a} \\ ${b}; [~, id] = lastwarn(); fprintf('%s %s\\n', mat2str(x'), id);`).join("\n");
+    const r = run(src, noWasm);
+    assert.equal(r.status, 0, r.err);
+    assert.equal(r.out, rows.map(([, , x]) => `${x} MATLAB:singularMatrix\n`).join(""));
+    // (the -0 pivot's +Inf, and a nonsingular diagonal's exact quotients and signed zero: [2 0;0 3] \\ [1;1] is
+    // [0.5; 1/3] to the last bit (the correctly rounded quotients, 3fe0... and 3fd5...), [1 0;0 1] \\ [-0;0] is [-0; 0])
+    const s = run("x = [-0 1;0 1] \\ [0;1]; disp(x(1) == Inf)\nx = [2 0;0 3] \\ [1;1]; disp([x(1) == 0.5, x(2) == 1/3])\nx = [1 0;0 1] \\ [-0;0]; disp(1./x')", noWasm);
+    assert.equal(s.status, 0, s.err);
+    assert.equal(s.out, "   1\n   1   1\n  -Inf   Inf\n");
+  });
+
   // (a known gap against design §1, not the contract: MATLAB computes with an Inf or NaN and warns, RCOND = NaN;
   // Sagebrush refuses, as before this change. Pinned so the gap stays visible until it is closed: issue #1500.)
   test(`${name}: an Inf or NaN in A or B is still refused before the solve (a known gap)`, () => {
