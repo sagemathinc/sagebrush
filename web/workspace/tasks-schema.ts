@@ -12,7 +12,7 @@ const bad = (m: string): never => { throw new TaskShapeError(m); };
 
 export const TASK_STATUSES = ["working", "proposal", "merged", "closed", "failed", "interrupted"] as const;
 export type TaskStatus = (typeof TASK_STATUSES)[number];
-export const TASK_LIMITS = Object.freeze({ list: 64, title: 200, text: 64 * 1024, reason: 1024, files: 2000, path: 1024 });
+export const TASK_LIMITS = Object.freeze({ list: 64, title: 200, text: 64 * 1024, reason: 1024, files: 2000, path: 1024, component: 255 });
 
 const HEX32 = /^[0-9a-f]{32}$/, HEX40 = /^[0-9a-f]{40}$/;
 const enc = new TextEncoder();
@@ -30,9 +30,23 @@ const int = (v: unknown, min: number, what: string) => (typeof v === "number" &&
 const bool = (v: unknown, what: string) => (typeof v === "boolean" ? v : bad(`${what} isn't true or false`));
 const text = (v: unknown, max: number, what: string) => (typeof v === "string" && enc.encode(v).length <= max ? v : bad(`${what} isn't text of at most ${max} bytes`));
 const status = (v: unknown, what = "status") => ((TASK_STATUSES as readonly unknown[]).includes(v) ? (v as TaskStatus) : bad(`${what} isn't a task status`));
+// (§6.1's path rules, as the host's own checker has them (sagebrush-agent lib/task-paths.mjs pathProblem), and §2's
+//  common rule that text is well formed: relative and normalized, no empty, "." or ".." component, no backslash,
+//  ":" (drive or ADS), control character or NUL, no lone surrogate, no Windows reserved name (CON, NUL, COM1, ... with
+//  any extension), no component ending in a space or dot, no .git (any case) or .sagebrush component, each component at
+//  most 255 bytes and the path at most 1,024)
+const RESERVED = /^(con|prn|aux|nul|com[0-9\u00b9\u00b2\u00b3]|lpt[0-9\u00b9\u00b2\u00b3])(\..*)?$/i;
+const LONE_SURROGATE = /[\ud800-\udbff](?![\udc00-\udfff])|(?<![\ud800-\udbff])[\udc00-\udfff]/;
 function path(v: unknown, what: string): string {
-  if (typeof v !== "string" || v === "" || enc.encode(v).length > TASK_LIMITS.path) return bad(`${what} isn't a path`);
-  if (v.startsWith("/") || v.includes("\\") || v.includes(":") || v.split("/").some((c) => c === "" || c === "." || c === ".." || /^\.git$/i.test(c) || c === ".sagebrush")) bad(`${what} isn't a relative, normalized task path`);
+  if (typeof v !== "string" || v === "" || enc.encode(v).length > TASK_LIMITS.path) return bad(`${what} isn't a path of 1 to ${TASK_LIMITS.path} bytes`);
+  if (LONE_SURROGATE.test(v)) bad(`${what} isn't well-formed text`);
+  if (v.startsWith("/") || /[\\:\x00-\x1f\x7f]/.test(v)) bad(`${what} isn't relative, or has a backslash, colon or control character`);
+  for (const c of v.split("/")) {
+    if (c === "" || c === "." || c === "..") bad(`${what} has an empty, . or .. component`);
+    if (enc.encode(c).length > TASK_LIMITS.component) bad(`${what} has a component over ${TASK_LIMITS.component} bytes`);
+    if (c.toLowerCase() === ".git" || c === ".sagebrush") bad(`${what} has a .git or .sagebrush component`);
+    if (RESERVED.test(c) || /[ .]$/.test(c)) bad(`${what} has a Windows reserved name, or a component ending in a space or dot`);
+  }
   return v;
 }
 function kindFor(p: string, v: unknown, what: string): "notebook" | "file" {
@@ -62,8 +76,10 @@ function diffFile(v: unknown, what: string): DiffFile {
 function diffFiles(v: unknown, what: string): DiffFile[] {
   if (!Array.isArray(v) || v.length > TASK_LIMITS.files) return bad(`${what} isn't a list of at most ${TASK_LIMITS.files}`);
   const out = v.map((f, i) => diffFile(f, `${what}[${i}]`));
+  // (one task's set of paths, as the host's pathSetProblem: none twice ignoring case, and none also another's folder)
   const seen = new Set<string>();
-  for (const f of out) { const k = f.path.toLowerCase(); if (seen.has(k)) bad(`${what}: a path twice`); seen.add(k); }
+  for (const f of out) { const k = f.path.toLowerCase(); if (seen.has(k)) bad(`${what}: a path twice (case aside)`); seen.add(k); }
+  for (const f of out) { const parts = f.path.toLowerCase().split("/"); for (let i = 1; i < parts.length; i++) if (seen.has(parts.slice(0, i).join("/"))) bad(`${what}: a path is also another's folder`); }
   return out;
 }
 

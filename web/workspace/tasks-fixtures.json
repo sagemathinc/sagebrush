@@ -1,7 +1,7 @@
 {
  "agent": {
   "repo": "sagebrush-agent",
-  "head": "293082022e4d71a446bc6202e7e625feef364cc6"
+  "head": "4f2ce4d268c5a541f6510a73848b63f0b567fe51"
  },
  "answers": [
   {
@@ -11,8 +11,8 @@
     "jsonrpc": "2.0",
     "id": "p2",
     "result": {
-     "task": "7730b6cf8e134052cee57b31e3cd4170",
-     "base": "9a1a0ffca680afbfb4cfb6f148a078480a35ab28",
+     "task": "5a346d582bb378d2748d6afd77d18a12",
+     "base": "79668be1375b1411b49ddc7e56ff2a68db2572a2",
      "seq": 1
     }
    }
@@ -26,16 +26,16 @@
     "result": {
      "tasks": [
       {
-       "task": "7730b6cf8e134052cee57b31e3cd4170",
+       "task": "5a346d582bb378d2748d6afd77d18a12",
        "title": "Fixture task",
        "status": "proposal",
        "target": "local",
        "run": false,
        "round": 1,
        "seq": 3,
-       "proposal": "550b621732cdc44cffbd5d882bc74edb4bbf9660",
+       "proposal": "1bec97c7faef808f513af914972fd22bb57a06bb",
        "question": false,
-       "updated": 1795256090104
+       "updated": 1795256589385
       }
      ]
     }
@@ -44,7 +44,7 @@
   {
    "method": "tasks.get",
    "params": {
-    "task": "7730b6cf8e134052cee57b31e3cd4170",
+    "task": "5a346d582bb378d2748d6afd77d18a12",
     "after": 0
    },
    "answer": {
@@ -52,16 +52,16 @@
     "id": "p4",
     "result": {
      "task": {
-      "task": "7730b6cf8e134052cee57b31e3cd4170",
+      "task": "5a346d582bb378d2748d6afd77d18a12",
       "title": "Fixture task",
       "status": "proposal",
       "target": "local",
       "run": false,
       "round": 1,
       "seq": 3,
-      "proposal": "550b621732cdc44cffbd5d882bc74edb4bbf9660",
+      "proposal": "1bec97c7faef808f513af914972fd22bb57a06bb",
       "question": false,
-      "updated": 1795256090104
+      "updated": 1795256589385
      },
      "events": [
       {
@@ -76,8 +76,8 @@
        "event": {
         "type": "proposal",
         "round": 1,
-        "base": "9a1a0ffca680afbfb4cfb6f148a078480a35ab28",
-        "commit": "550b621732cdc44cffbd5d882bc74edb4bbf9660",
+        "base": "79668be1375b1411b49ddc7e56ff2a68db2572a2",
+        "commit": "1bec97c7faef808f513af914972fd22bb57a06bb",
         "files": [
          {
           "path": "work/a.ipynb",
@@ -118,16 +118,16 @@
     "result": {
      "tasks": [
       {
-       "task": "7730b6cf8e134052cee57b31e3cd4170",
+       "task": "5a346d582bb378d2748d6afd77d18a12",
        "title": "Fixture task",
        "status": "proposal",
        "target": "local",
        "run": false,
        "round": 1,
        "seq": 3,
-       "proposal": "550b621732cdc44cffbd5d882bc74edb4bbf9660",
+       "proposal": "1bec97c7faef808f513af914972fd22bb57a06bb",
        "question": false,
-       "updated": 1795256090104
+       "updated": 1795256589385
       }
      ]
     }
@@ -136,16 +136,16 @@
   {
    "method": "tasks.diff",
    "params": {
-    "task": "7730b6cf8e134052cee57b31e3cd4170",
-    "commit": "550b621732cdc44cffbd5d882bc74edb4bbf9660"
+    "task": "5a346d582bb378d2748d6afd77d18a12",
+    "commit": "1bec97c7faef808f513af914972fd22bb57a06bb"
    },
    "answer": {
     "jsonrpc": "2.0",
     "id": "p6",
     "result": {
-     "task": "7730b6cf8e134052cee57b31e3cd4170",
-     "base": "9a1a0ffca680afbfb4cfb6f148a078480a35ab28",
-     "commit": "550b621732cdc44cffbd5d882bc74edb4bbf9660",
+     "task": "5a346d582bb378d2748d6afd77d18a12",
+     "base": "79668be1375b1411b49ddc7e56ff2a68db2572a2",
+     "commit": "1bec97c7faef808f513af914972fd22bb57a06bb",
      "round": 1,
      "seq": 3,
      "files": [
@@ -170,8 +170,8 @@
   {
    "method": "tasks.file",
    "params": {
-    "task": "7730b6cf8e134052cee57b31e3cd4170",
-    "commit": "9a1a0ffca680afbfb4cfb6f148a078480a35ab28",
+    "task": "5a346d582bb378d2748d6afd77d18a12",
+    "commit": "79668be1375b1411b49ddc7e56ff2a68db2572a2",
     "path": "work/a.ipynb"
    },
    "answer": {
@@ -186,8 +186,8 @@
   {
    "method": "tasks.file",
    "params": {
-    "task": "7730b6cf8e134052cee57b31e3cd4170",
-    "commit": "550b621732cdc44cffbd5d882bc74edb4bbf9660",
+    "task": "5a346d582bb378d2748d6afd77d18a12",
+    "commit": "1bec97c7faef808f513af914972fd22bb57a06bb",
     "path": "work/a.ipynb"
    },
    "answer": {
@@ -202,8 +202,8 @@
   {
    "method": "tasks.file",
    "params": {
-    "task": "7730b6cf8e134052cee57b31e3cd4170",
-    "commit": "9a1a0ffca680afbfb4cfb6f148a078480a35ab28",
+    "task": "5a346d582bb378d2748d6afd77d18a12",
+    "commit": "79668be1375b1411b49ddc7e56ff2a68db2572a2",
     "path": "work/notes.txt"
    },
    "answer": {
@@ -218,8 +218,8 @@
   {
    "method": "tasks.file",
    "params": {
-    "task": "7730b6cf8e134052cee57b31e3cd4170",
-    "commit": "550b621732cdc44cffbd5d882bc74edb4bbf9660",
+    "task": "5a346d582bb378d2748d6afd77d18a12",
+    "commit": "1bec97c7faef808f513af914972fd22bb57a06bb",
     "path": "work/notes.txt"
    },
    "answer": {
@@ -252,16 +252,16 @@
     "result": {
      "tasks": [
       {
-       "task": "7730b6cf8e134052cee57b31e3cd4170",
+       "task": "5a346d582bb378d2748d6afd77d18a12",
        "title": "Fixture task",
        "status": "proposal",
        "target": "local",
        "run": false,
        "round": 2,
-       "seq": 7,
-       "proposal": "5f4cf4a6e9677226e5eb39e8dbe49aece8860c46",
+       "seq": 6,
+       "proposal": "59bceb5451fb27eb50774bf4a5409671354baa90",
        "question": false,
-       "updated": 1795256090154
+       "updated": 1795256589435
       }
      ]
     }
@@ -270,18 +270,18 @@
   {
    "method": "tasks.diff",
    "params": {
-    "task": "7730b6cf8e134052cee57b31e3cd4170",
-    "commit": "5f4cf4a6e9677226e5eb39e8dbe49aece8860c46"
+    "task": "5a346d582bb378d2748d6afd77d18a12",
+    "commit": "59bceb5451fb27eb50774bf4a5409671354baa90"
    },
    "answer": {
     "jsonrpc": "2.0",
     "id": "p13",
     "result": {
-     "task": "7730b6cf8e134052cee57b31e3cd4170",
-     "base": "9a1a0ffca680afbfb4cfb6f148a078480a35ab28",
-     "commit": "5f4cf4a6e9677226e5eb39e8dbe49aece8860c46",
+     "task": "5a346d582bb378d2748d6afd77d18a12",
+     "base": "79668be1375b1411b49ddc7e56ff2a68db2572a2",
+     "commit": "59bceb5451fb27eb50774bf4a5409671354baa90",
      "round": 2,
-     "seq": 7,
+     "seq": 6,
      "files": [
       {
        "path": "work/a.ipynb",
@@ -316,7 +316,7 @@
   {
    "method": "tasks.get",
    "params": {
-    "task": "7730b6cf8e134052cee57b31e3cd4170",
+    "task": "5a346d582bb378d2748d6afd77d18a12",
     "after": 0
    },
    "answer": {
@@ -324,16 +324,16 @@
     "id": "p15",
     "result": {
      "task": {
-      "task": "7730b6cf8e134052cee57b31e3cd4170",
+      "task": "5a346d582bb378d2748d6afd77d18a12",
       "title": "Fixture task",
       "status": "merged",
       "target": "local",
       "run": false,
       "round": 2,
-      "seq": 9,
-      "proposal": "5f4cf4a6e9677226e5eb39e8dbe49aece8860c46",
+      "seq": 7,
+      "proposal": "59bceb5451fb27eb50774bf4a5409671354baa90",
       "question": false,
-      "updated": 1795256090163
+      "updated": 1795256589443
      },
      "events": [
       {
@@ -348,8 +348,8 @@
        "event": {
         "type": "proposal",
         "round": 1,
-        "base": "9a1a0ffca680afbfb4cfb6f148a078480a35ab28",
-        "commit": "550b621732cdc44cffbd5d882bc74edb4bbf9660",
+        "base": "79668be1375b1411b49ddc7e56ff2a68db2572a2",
+        "commit": "1bec97c7faef808f513af914972fd22bb57a06bb",
         "files": [
          {
           "path": "work/a.ipynb",
@@ -378,26 +378,17 @@
       {
        "seq": 4,
        "event": {
-        "type": "ask",
-        "round": 1,
-        "note": "Also a line at the top.",
-        "mine": "98066a6bba0ca36d81e7c8e017d6f1f2c8157ac3"
-       }
-      },
-      {
-       "seq": 5,
-       "event": {
         "type": "task_status",
         "status": "working"
        }
       },
       {
-       "seq": 6,
+       "seq": 5,
        "event": {
         "type": "proposal",
         "round": 2,
-        "base": "9a1a0ffca680afbfb4cfb6f148a078480a35ab28",
-        "commit": "5f4cf4a6e9677226e5eb39e8dbe49aece8860c46",
+        "base": "79668be1375b1411b49ddc7e56ff2a68db2572a2",
+        "commit": "59bceb5451fb27eb50774bf4a5409671354baa90",
         "files": [
          {
           "path": "work/a.ipynb",
@@ -417,43 +408,21 @@
        }
       },
       {
-       "seq": 7,
+       "seq": 6,
        "event": {
         "type": "task_status",
         "status": "proposal"
        }
       },
       {
-       "seq": 8,
-       "event": {
-        "type": "merge_receipt",
-        "proposal": "5f4cf4a6e9677226e5eb39e8dbe49aece8860c46",
-        "merge_id": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
-        "files": [
-         {
-          "path": "work/a.ipynb",
-          "proposal_blob": "07b2f223bd516c459bb1acd21cca93ae50b31b9a",
-          "mine": "not sent",
-          "merged": "not sent"
-         },
-         {
-          "path": "work/notes.txt",
-          "proposal_blob": "dd62f0713f2c498870750932e4046aee3adcb176",
-          "mine": "not sent",
-          "merged": "not sent"
-         }
-        ]
-       }
-      },
-      {
-       "seq": 9,
+       "seq": 7,
        "event": {
         "type": "task_status",
         "status": "merged"
        }
       }
      ],
-     "last": 9,
+     "last": 7,
      "reset": false
     }
    }
@@ -465,8 +434,8 @@
     "jsonrpc": "2.0",
     "id": "p16",
     "result": {
-     "task": "fada25b06099743cd30d40c1a1446c52",
-     "base": "80707f4a517ff5fe39976399ff5e155f8e1f2e94",
+     "task": "333302053387b802f181015a5251db52",
+     "base": "45f2600759197eea2cd1624cb979cdc5a9b91230",
      "seq": 1
     }
    }
@@ -474,7 +443,7 @@
   {
    "method": "tasks.stop",
    "params": {
-    "task": "fada25b06099743cd30d40c1a1446c52"
+    "task": "333302053387b802f181015a5251db52"
    },
    "answer": {
     "jsonrpc": "2.0",
@@ -487,7 +456,7 @@
   {
    "method": "tasks.resume",
    "params": {
-    "task": "fada25b06099743cd30d40c1a1446c52"
+    "task": "333302053387b802f181015a5251db52"
    },
    "answer": {
     "jsonrpc": "2.0",
@@ -504,7 +473,7 @@
   {
    "method": "tasks.revoke",
    "params": {
-    "task": "fada25b06099743cd30d40c1a1446c52"
+    "task": "333302053387b802f181015a5251db52"
    },
    "answer": {
     "jsonrpc": "2.0",
@@ -517,7 +486,7 @@
   {
    "method": "tasks.close",
    "params": {
-    "task": "7730b6cf8e134052cee57b31e3cd4170",
+    "task": "5a346d582bb378d2748d6afd77d18a12",
     "proposal": null,
     "seq": 0
    },
@@ -554,7 +523,7 @@
  ],
  "notifications": [
   {
-   "task": "7730b6cf8e134052cee57b31e3cd4170",
+   "task": "5a346d582bb378d2748d6afd77d18a12",
    "seq": 1,
    "event": {
     "type": "task_status",
@@ -562,13 +531,13 @@
    }
   },
   {
-   "task": "7730b6cf8e134052cee57b31e3cd4170",
+   "task": "5a346d582bb378d2748d6afd77d18a12",
    "seq": 2,
    "event": {
     "type": "proposal",
     "round": 1,
-    "base": "9a1a0ffca680afbfb4cfb6f148a078480a35ab28",
-    "commit": "550b621732cdc44cffbd5d882bc74edb4bbf9660",
+    "base": "79668be1375b1411b49ddc7e56ff2a68db2572a2",
+    "commit": "1bec97c7faef808f513af914972fd22bb57a06bb",
     "files": [
      {
       "path": "work/a.ipynb",
@@ -588,7 +557,7 @@
    }
   },
   {
-   "task": "7730b6cf8e134052cee57b31e3cd4170",
+   "task": "5a346d582bb378d2748d6afd77d18a12",
    "seq": 3,
    "event": {
     "type": "task_status",
@@ -596,31 +565,21 @@
    }
   },
   {
-   "task": "7730b6cf8e134052cee57b31e3cd4170",
+   "task": "5a346d582bb378d2748d6afd77d18a12",
    "seq": 4,
-   "event": {
-    "type": "ask",
-    "round": 1,
-    "note": "Also a line at the top.",
-    "mine": "98066a6bba0ca36d81e7c8e017d6f1f2c8157ac3"
-   }
-  },
-  {
-   "task": "7730b6cf8e134052cee57b31e3cd4170",
-   "seq": 5,
    "event": {
     "type": "task_status",
     "status": "working"
    }
   },
   {
-   "task": "7730b6cf8e134052cee57b31e3cd4170",
-   "seq": 6,
+   "task": "5a346d582bb378d2748d6afd77d18a12",
+   "seq": 5,
    "event": {
     "type": "proposal",
     "round": 2,
-    "base": "9a1a0ffca680afbfb4cfb6f148a078480a35ab28",
-    "commit": "5f4cf4a6e9677226e5eb39e8dbe49aece8860c46",
+    "base": "79668be1375b1411b49ddc7e56ff2a68db2572a2",
+    "commit": "59bceb5451fb27eb50774bf4a5409671354baa90",
     "files": [
      {
       "path": "work/a.ipynb",
@@ -640,46 +599,23 @@
    }
   },
   {
-   "task": "7730b6cf8e134052cee57b31e3cd4170",
-   "seq": 7,
+   "task": "5a346d582bb378d2748d6afd77d18a12",
+   "seq": 6,
    "event": {
     "type": "task_status",
     "status": "proposal"
    }
   },
   {
-   "task": "7730b6cf8e134052cee57b31e3cd4170",
-   "seq": 8,
-   "event": {
-    "type": "merge_receipt",
-    "proposal": "5f4cf4a6e9677226e5eb39e8dbe49aece8860c46",
-    "merge_id": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
-    "files": [
-     {
-      "path": "work/a.ipynb",
-      "proposal_blob": "07b2f223bd516c459bb1acd21cca93ae50b31b9a",
-      "mine": "not sent",
-      "merged": "not sent"
-     },
-     {
-      "path": "work/notes.txt",
-      "proposal_blob": "dd62f0713f2c498870750932e4046aee3adcb176",
-      "mine": "not sent",
-      "merged": "not sent"
-     }
-    ]
-   }
-  },
-  {
-   "task": "7730b6cf8e134052cee57b31e3cd4170",
-   "seq": 9,
+   "task": "5a346d582bb378d2748d6afd77d18a12",
+   "seq": 7,
    "event": {
     "type": "task_status",
     "status": "merged"
    }
   },
   {
-   "task": "fada25b06099743cd30d40c1a1446c52",
+   "task": "333302053387b802f181015a5251db52",
    "seq": 1,
    "event": {
     "type": "task_status",
@@ -687,13 +623,13 @@
    }
   },
   {
-   "task": "fada25b06099743cd30d40c1a1446c52",
+   "task": "333302053387b802f181015a5251db52",
    "seq": 2,
    "event": {
     "type": "proposal",
     "round": 1,
-    "base": "80707f4a517ff5fe39976399ff5e155f8e1f2e94",
-    "commit": "b2927c48c1df7d687b5bb36588748da78df9e021",
+    "base": "45f2600759197eea2cd1624cb979cdc5a9b91230",
+    "commit": "724d7cbde578bd8bd156792e5d078638368a056b",
     "files": [
      {
       "path": "work/notes.txt",
@@ -706,7 +642,7 @@
    }
   },
   {
-   "task": "fada25b06099743cd30d40c1a1446c52",
+   "task": "333302053387b802f181015a5251db52",
    "seq": 3,
    "event": {
     "type": "task_status",
@@ -714,7 +650,7 @@
    }
   },
   {
-   "task": "fada25b06099743cd30d40c1a1446c52",
+   "task": "333302053387b802f181015a5251db52",
    "seq": 4,
    "event": {
     "type": "task_status",

@@ -12,7 +12,8 @@ const fails = [];
 const ok = (c, what, got) => { checks++; if (!c) fails.push(`${what}${got === undefined ? "" : `  ${JSON.stringify(got).slice(0, 300)}`}`); };
 const refused = (f) => { try { f(); return false; } catch (e) { return e instanceof TaskShapeError; } };
 const clone = (v) => JSON.parse(JSON.stringify(v));
-// (event kinds the host emits that §6.1 doesn't list yet: refused until it does)
+// (event kinds an earlier host emitted that §6.1 doesn't list: the host no longer emits them (A1 4f2ce4d2), and the page
+//  refuses them, as any unlisted kind)
 const NOT_IN_P0 = new Set(["ask", "merge_receipt", "merged"]);
 
 // ---- every answer the real host gave is accepted, and each file's bytes have the blob id it says
@@ -58,6 +59,22 @@ alter("tasks.diff", "an absolute path", (v) => { v.files.find((x) => x.kind === 
 alter("tasks.diff", "a .git component (any case)", (v) => { v.files.find((x) => x.kind === "file").path = "work/.GIT/config.txt"; });
 alter("tasks.diff", "a backslash or a drive", (v) => { v.files.find((x) => x.kind === "file").path = "C:\\work\\x.txt"; });
 alter("tasks.diff", "an empty component", (v) => { v.files.find((x) => x.kind === "file").path = "work//x.txt"; });
+// (§6.1's path rules in full, each on the text file's entry, so only the path rule can refuse it; and in a proposal event too)
+const PATHS_REFUSED = [
+  ["a Windows reserved name", "work/NUL.txt"], ["a reserved name with a superscript digit", "work/COM\u00b9.txt"], ["an embedded NUL", "work/a\u0000b.txt"],
+  ["a control character", "work/a\u0007.txt"], ["a component over 255 bytes", "work/" + "x".repeat(252) + ".txt"], ["a component ending in a dot", "work./a.txt"],
+  ["a component ending in a space", "work /a.txt"], ["a lone surrogate", "work/a\ud800.txt"], ["a lone low surrogate", "work/\udc00a.txt"], ["a .sagebrush component", ".sagebrush/a.txt"],
+  ["a colon (an alternate stream)", "work/a.txt:x.txt"], ["a path over 1,024 bytes", ("d/").repeat(520) + "a.txt"],
+];
+for (const [what, p] of PATHS_REFUSED) {
+  alter("tasks.diff", `${what}`, (v) => { v.files.find((x) => x.kind === "file").path = p; });
+  const e = clone(F.notifications.find((n) => n.event.type === "proposal").event);
+  e.files.find((x) => x.kind === "file").path = p;
+  ok(refused(() => taskEvent(e)), `a proposal event: ${what}: refused`);
+}
+ok(!refused(() => TASK_RESULTS["tasks.diff"]({ ...pick("tasks.diff"), files: pick("tasks.diff").files.map((f) => (f.kind === "file" ? { ...f, path: "work/" + "x".repeat(251) + ".txt" } : f)) })), "a component of exactly 255 bytes: accepted");
+ok(!refused(() => TASK_RESULTS["tasks.diff"]({ ...pick("tasks.diff"), files: pick("tasks.diff").files.map((f) => (f.kind === "file" ? { ...f, path: "work/\ud83d\ude00 notes.txt" } : f)) })), "a well-formed pair (an emoji) and an inner space: accepted");
+alter("tasks.diff", "a path that is also another's folder", (v) => { const f = v.files.find((x) => x.kind === "file"); v.files.push({ ...f, path: f.path + "/inner.txt" }); });
 alter("tasks.diff", "a notebook kind on a .txt", (v) => { const f = v.files.find((x) => x.kind === "file"); f.kind = "notebook"; });
 alter("tasks.diff", "a change whose blobs don't match it (added with a base)", (v) => { v.files[0].change = "added"; });
 alter("tasks.diff", "a path twice (case aside)", (v) => { v.files.push({ ...v.files[0], path: v.files[0].path.toUpperCase().replace(".IPYNB", ".ipynb").replace(".TXT", ".txt") }); });
@@ -70,6 +87,9 @@ alter("tasks.revoke", "a status not in §6.1", (v) => { v.status = "revoked"; })
 ok(refused(() => TASK_RESULTS["tasks.answer"]({ accepted: true })), "tasks.answer: a missing field: refused");
 ok(refused(() => TASK_RESULTS["tasks.list"](Object.assign(Object.create({ polluted: 1 }), { tasks: [] }))), "a result that isn't a plain object: refused");
 ok(refused(() => TASK_RESULTS["tasks.list"](JSON.parse('{"tasks": [], "__proto__": {"x": 1}}'))), "a result with an own __proto__ field: refused (an unknown field)");
+
+ok(!F.notifications.some((n) => NOT_IN_P0.has(n.event.type)), "the recorded host emits only §6.1's event kinds");
+for (const k of NOT_IN_P0) ok(refused(() => taskEvent({ type: k, proposal: "a".repeat(40), merge_id: "b".repeat(32) })), `an event of kind ${k} (not in §6.1): refused`);
 
 // ---- task events, altered
 const prop = clone(F.notifications.find((n) => n.event.type === "proposal").event);
