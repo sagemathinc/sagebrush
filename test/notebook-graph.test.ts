@@ -105,3 +105,31 @@ test("the same import in several cells is not a multiple definition", () => {
   const k = build(["from math import pi", "from math import pi\npi = 3", "print(pi)"], false);
   assert.deepEqual([...k.errors.keys()].sort(), ["c0", "c1", "c2"]);
 });
+
+test("output names: a cell reading _, __, ___ runs after the 1st, 2nd, 3rd nearest cell above that showed a value", () => {
+  const g = build(["10", "x = 1", "20", "_", "(_, __, ___)", "30", "_N = 1\n_N"], false);
+  // (no run yet: nothing showed a value, so no edges)
+  assert.deepEqual([...g.parents("c3")], []);
+  g.setShown(["c0", "c2", "c3"]);
+  // c3 reads _: c2 (c1 showed nothing)
+  assert.deepEqual([...g.parents("c3")], ["c2"]);
+  // c4 reads all three: c3, c2, c0
+  assert.deepEqual([...g.parents("c4")].sort(), ["c0", "c2", "c3"]);
+  // c6 binds nothing of the three (its _N is its own): no edge; c5 reads none
+  assert.deepEqual([...g.parents("c6")], []);
+  assert.deepEqual([...g.parents("c5")], []);
+  // the facts change: c1 shows, c2 doesn't; c3's _ is c1 now, and c4's ___ has none above
+  g.setShown(["c0", "c1", "c3"]);
+  assert.deepEqual([...g.parents("c3")], ["c1"]);
+  assert.deepEqual([...g.parents("c4")].sort(), ["c0", "c1", "c3"]);
+  // (a reader's output parents are only cells above it, so they never close a cycle)
+  const h = build(["1", "y = _", "y"], false);
+  h.setShown(["c0", "c2"]);
+  assert.deepEqual([...h.parents("c1")], ["c0"]);
+  assert.deepEqual(h.order(h.ids), ["c0", "c1", "c2"]);
+  // (setShown with the same facts doesn't rebuild: the version is kept)
+  const v = h.version;
+  h.setShown(new Set(["c2", "c0"]));
+  assert.equal(h.version, v);
+});
+

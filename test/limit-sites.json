@@ -12117,6 +12117,22 @@
   "owner": "notebook/kernel",
   "row": "src-17"
  },
+ "src/notebook-session.ts ::  :: const MAX_ABOVE = 4096; #0": {
+  "class": "1",
+  "owner": "notebook/kernel",
+  "reason": "a reactive run's list of the cells above it (for _, __, ___): a protocol guard on a message field; only the first three that showed a value are used, so a page longer than this still binds correctly unless 4096 cells above showed nothing",
+  "disposition": {
+   "1": "shared"
+  }
+ },
+ "src/notebook-session.ts :: aboveOf :: return m.above.filter((k: unknown): k is string => typeof k === \"string\" && /^[A-Za-z0-9]{1,128}$/.test(k)).slice(0, MAX_ABOVE); #0": {
+  "class": "1",
+  "owner": "notebook/kernel",
+  "reason": "applies the cap above (MAX_ABOVE)",
+  "disposition": {
+   "1": "shared"
+  }
+ },
  "src/pkgcache.ts ::  :: export const CACHE_LIMITS = Object.freeze({ bytes: 1024 * 1024 * 1024, entries: 256, staleMs: 60 * 60 * 1000, lockMs: 10 * 60 * 1000, adminLockMs: 5000, cleanPerRun: 100 }); #0": {
   "class": "1",
   "owner": "package runtime",
