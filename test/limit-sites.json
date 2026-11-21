@@ -1630,6 +1630,11 @@
   "owner": "engine arith (big-integer wire decoder)",
   "reason": "test code: the big-integer decoder's correctness, allocation and Stop tests; refuses nothing itself"
  },
+ "engine/arith/src/zmat.rs :: det_with_solve :: if n <= 6 || (n <= 12 && a.max_bits() > 200) { #0": {
+  "class": "none",
+  "owner": "engine arithmetic (exact linear algebra)",
+  "reason": "the determinant's route choice (Bareiss for small or very wide-entry matrices, else multimodular): a crossover on the size and the entries' bits, not a cap; refuses nothing"
+ },
  "engine/arith/src/zmat.rs :: rref_multimodular :: let amax = a.max_bits() as f64; #0": {
   "class": "none",
   "owner": "exact linear algebra (engine/arith)",
