@@ -192,6 +192,9 @@ pub struct Meter {
     used: u64,
     limit: u64,
     since_poll: u64,
+    /// Stop is polled at least every this many units (the meter's own
+    /// interval: [`POLL_UNITS`] by default, [`Meter::polled`] to change it).
+    poll: u64,
     largest: u64,
     /// The limit is a proven upper bound (U), not a budget: passing it is an
     /// accounting bug, recorded, never a refusal.
@@ -218,7 +221,7 @@ impl Meter {
     /// [`Meter::accounting`] (the engine cost policy: an upper bound never
     /// refuses).
     pub fn new(limit: u64) -> Meter {
-        Meter { used: 0, limit, since_poll: 0, largest: 0, accounting: false, overran: false, units: [0; FAMILIES] }
+        Meter { used: 0, limit, since_poll: 0, poll: POLL_UNITS, largest: 0, accounting: false, overran: false, units: [0; FAMILIES] }
     }
     /// A meter whose limit is a proven upper bound on the work (a cost's
     /// `work_upper`, or u64::MAX where there is none).  Passing it is an
@@ -226,6 +229,15 @@ impl Meter {
     /// a wrong bound); a release build counts it once per meter
     /// ([`accounting_overruns`]) and the work goes on, metered and polling
     /// Stop.
+    /// This meter polling Stop at least every `units` units (at least 1),
+    /// instead of [`POLL_UNITS`]: for kernels whose units are slower than
+    /// the default assumes (nmod's multiply-adds poll every 2^16, as their
+    /// own counters did), so Stop is never noticed later than before.  The
+    /// units keep their meaning: only the poll interval changes.
+    pub fn polled(mut self, units: u64) -> Meter {
+        self.poll = units.max(1);
+        self
+    }
     pub fn accounting(upper: u64) -> Meter {
         Meter { accounting: true, ..Meter::new(upper) }
     }
@@ -256,6 +268,23 @@ impl Meter {
     #[inline]
     pub(crate) fn add_in(&mut self, f: Family, n: usize) -> Result<(), Fault> {
         let n = u64::try_from(n).map_err(|_| Fault::Overrun)?;
+        self.add_at(f as usize, n)?;
+        self.poll_after(n);
+        Ok(())
+    }
+    /// Whether this is an accounting meter (its limit a proven upper
+    /// bound, never a refusal).
+    pub fn is_accounting(&self) -> bool {
+        self.accounting
+    }
+    /// Charge `n` units to the family at `index` (Family as usize), without
+    /// polling Stop: for the tally's end-of-region charge, which runs in a
+    /// Drop guard (also while a Stop unwinds, where a poll would panic in
+    /// the destructor), the region's own polls having run in its kernels.
+    pub(crate) fn add_at(&mut self, index: usize, n: u64) -> Result<(), Fault> {
+        if index >= FAMILIES {
+            return Err(Fault::Invariant);
+        }
         self.largest = self.largest.max(n);
         let before = self.used;
         match self.used.checked_add(n) {
@@ -268,7 +297,7 @@ impl Meter {
         // fitted.  So the families always sum to the total exactly, and this
         // sum cannot overflow (the families sum to `before` <= u64::MAX -
         // (used - before)).
-        self.units[f as usize] += self.used - before;
+        self.units[index] += self.used - before;
         if self.used > self.limit {
             if !self.accounting {
                 return Err(Fault::Overrun);
@@ -276,15 +305,23 @@ impl Meter {
             if !self.overran {
                 self.overran = true;
                 ACCOUNTING_OVERRUNS.fetch_add(1, Relaxed);
-                debug_assert!(false, "a meter passed its proven upper bound: {} units of at most {}", self.used, self.limit);
+                // (not while unwinding: a second panic in a Drop guard would abort)
+                if !std::thread::panicking() {
+                    debug_assert!(false, "a meter passed its proven upper bound: {} units of at most {}", self.used, self.limit);
+                }
             }
         }
+        Ok(())
+    }
+
+    /// The Stop poll after a charge of `n` units.
+    #[inline]
+    fn poll_after(&mut self, n: u64) {
         self.since_poll = self.since_poll.saturating_add(n);
-        if self.since_poll >= POLL_UNITS {
+        if self.since_poll >= self.poll {
             self.since_poll = 0;
             sagebrush_interrupt::check_coarse();
         }
-        Ok(())
     }
 }
 

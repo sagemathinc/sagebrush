@@ -6,6 +6,34 @@ use std::sync::{Arc, Mutex};
 
 const BLOCK: usize = 1 << 12;
 
+// The work of this thread's transform products since it started, by kind:
+// [butterflies and pointwise products, reductions mod p, words zero-filled].
+// Cumulative and wrapping: a caller meters a product by the difference
+// around it ([`units`]).
+thread_local! {
+    static UNITS: std::cell::Cell<[u64; 3]> = const { std::cell::Cell::new([0; 3]) };
+}
+
+#[inline]
+fn tally(ntt: u64, reductions: u64, fills: u64) {
+    UNITS.with(|u| {
+        let v = u.get();
+        u.set([v[0].wrapping_add(ntt), v[1].wrapping_add(reductions), v[2].wrapping_add(fills)]);
+    });
+}
+
+/// This thread's transform-product work so far: [butterflies and pointwise
+/// products, reductions mod p, words zero-filled], cumulative and wrapping.
+/// The units of one product are the difference across it (wrapping_sub).
+pub fn units() -> [u64; 3] {
+    UNITS.with(|u| u.get())
+}
+
+/// Records `n` reductions mod p done outside the transforms (the CRT pass).
+pub(crate) fn tally_reductions(n: u64) {
+    tally(0, n, 0);
+}
+
 // (tests only: the word operations Table::new and conv_table perform,
 // counted where they happen, against table_work's and conv_work's closed
 // forms)
@@ -252,6 +280,17 @@ pub(crate) fn conv_table<W: NttWord>(a: &[W], b: &[W], t: &Table<W>) -> Vec<W> {
     assert!(log <= t.log);
     let n = 1usize << log;
     let p = t.p;
+    let square = std::ptr::eq(a, b);
+    {
+        // (the exact work below: one or two loads of n zero-filled words and
+        // their inputs reduced; two or three transforms of (n/2) log n
+        // butterflies; n pointwise products; len final reductions)
+        let (nn, lg) = (n as u64, u64::from(log));
+        let transforms = if square { 2 } else { 3 };
+        let loads = if square { 1 } else { 2 };
+        let inputs = (a.len() + if square { 0 } else { b.len() }) as u64;
+        tally(transforms * (nn / 2) * lg + nn, inputs + len as u64, loads * nn);
+    }
     let load = |x: &[W]| {
         count((n + x.len()) as u64);
         let mut f = vec![W::default(); n];
@@ -264,7 +303,6 @@ pub(crate) fn conv_table<W: NttWord>(a: &[W], b: &[W], t: &Table<W>) -> Vec<W> {
     let mut fa = load(a);
     sagebrush_interrupt::check_coarse();
     dif(&mut fa, t);
-    let square = std::ptr::eq(a, b);
     let fb = if square {
         None
     } else {
@@ -311,6 +349,13 @@ pub(crate) fn conv_table_cyclic<W: NttWord>(a: &[W], b: &[W], t: &Table<W>) -> V
     let n = 1usize << t.log;
     assert!(len <= n + 1);
     let p = t.p;
+    {
+        // (as conv_table: two loads, three transforms, n pointwise
+        // products, min(len, n) final reductions, and the fold's product)
+        let (nn, lg) = (n as u64, u64::from(t.log));
+        let fold = u64::from(len == n + 1);
+        tally(3 * (nn / 2) * lg + nn, (a.len() + b.len() + len.min(n)) as u64 + fold, 2 * nn);
+    }
     let load = |x: &[W]| {
         count((n + x.len()) as u64);
         let mut f = vec![W::default(); n];

@@ -517,13 +517,35 @@ pub fn try_factor_mod_with(f: &[BigInt], p: u64, b: &Budget) -> Result<Vec<(Vec<
     factor_mod_with(b, f, p)
 }
 
+/// (No metered region here: the kernels' units reach the thread's tally
+/// regardless, and a caller that reads them opens the region.)
 fn factor_mod_with(b: &Budget, f: &[BigInt], p: u64) -> FResult<Vec<(Vec<u64>, u32)>> {
-    Ok(factor_mod_draws(b, f, p)?.0)
+    Ok(factor_mod_region(b, f, p)?.0)
 }
+
+/// [`factor_mod`] and the work it did, in meter units per family (the
+/// nmod kernels' and the transforms' exact counts, one metered region per
+/// call).
+pub fn factor_mod_units(f: &[BigInt], p: u64) -> (Vec<(Vec<u64>, u32)>, sagebrush_arith::cost::Units) {
+    let b = Budget::unlimited();
+    let mut meter = sagebrush_arith::cost::Meter::accounting(u64::MAX);
+    let r = factor_mod_draws(&b, f, p, &mut meter).expect("no limits").0;
+    (r, meter.units())
+}
+
+/// The factors mod p with their multiplicities, and the state of the random
+/// generator after the call.
+type Draws = (Vec<(Vec<u64>, u32)>, u64);
 
 /// [`factor_mod_with`], and the state of its random generator after the
 /// call (the tests' check that the candidates drawn are the oracle's).
-fn factor_mod_draws(b: &Budget, f: &[BigInt], p: u64) -> FResult<(Vec<(Vec<u64>, u32)>, u64)> {
+fn factor_mod_draws(b: &Budget, f: &[BigInt], p: u64, meter: &mut sagebrush_arith::cost::Meter) -> FResult<Draws> {
+    sagebrush_arith::cost::metered(meter, || factor_mod_region(b, f, p))
+}
+
+/// [`factor_mod_draws`]' body: one metered region (the units of every nmod
+/// kernel it calls, on this thread).
+fn factor_mod_region(b: &Budget, f: &[BigInt], p: u64) -> FResult<Draws> {
     assert!(p >= 2 && p < 1 << 32);
     let _p = b.enter(Phase::Modular);
     let _m = b.reserve(modular_bytes(f.len()))?;
