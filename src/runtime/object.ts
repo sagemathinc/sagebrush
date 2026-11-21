@@ -1474,8 +1474,44 @@ export function toPyExc(e: any): any {
     Object.defineProperty(r, "$tb", { value: e, writable: true, enumerable: false });
     return markRaised(r);
   }
-  const r = T.SystemError(`internal error: ${e && e.stack ? e.stack : String(e)}`);
-  Object.defineProperty(r, "$tb", { value: e instanceof Error ? e : {}, writable: true, enumerable: false });
+  // (V8 keeps a stack in the form it is first read in: its call sites are
+  // taken first, for the traceback (the frames that caught it are found
+  // among them), and the message's text is made from them; reading e.stack
+  // as text first left only text, and printing the traceback failed. The
+  // sites are kept on the error ($sites), so the same error made a Python
+  // one again (a catch that only asks its type, then rethrows it) still has
+  // them; its header as V8 makes it, the error's toString)
+  let tb: any = e instanceof Error ? e : {};
+  let text: string | null = null;
+  if (e instanceof Error) {
+    let sites: any = (e as any).$sites;
+    if (sites === undefined) {
+      const prev = (Error as any).prepareStackTrace;
+      (Error as any).prepareStackTrace = (_: any, cs: any[]) => cs;
+      try {
+        sites = e.stack;
+      } finally {
+        (Error as any).prepareStackTrace = prev;
+      }
+      if (Array.isArray(sites)) {
+        let head: string;
+        try {
+          head = String(e);
+        } catch {
+          head = "Error";
+        }
+        text = head + sites.map((cs: any) => `\n    at ${cs}`).join("");
+        try {
+          Object.defineProperty(e, "$sites", { value: sites, enumerable: false });
+          e.stack = text;
+        } catch {}
+      } else if (sites) text = String(sites);
+    }
+    if (Array.isArray(sites)) tb = { stack: sites };
+  }
+  if (text === null) text = e && e.stack ? e.stack : String(e);
+  const r = T.SystemError(`internal error: ${text}`);
+  Object.defineProperty(r, "$tb", { value: tb, writable: true, enumerable: false });
   return markRaised(r);
 }
 

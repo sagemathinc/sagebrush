@@ -12,6 +12,7 @@
 import "../workspace/pair-link";
 import { BlockEditor } from "../board/blocks";
 import { render as markdown } from "../markdown";
+import { colorBlock } from "./code-color";
 import { runningTurn, type Artifact, type Thread, type Turn, type UserEntry } from "../workspace/agent-chat/events";
 import { ChatSession } from "../workspace/agent-chat/session";
 import { userNode as viewUserNode, turnNode as viewTurnNode, artifactIcon, diffHtml } from "../workspace/agent-chat/view";
@@ -161,8 +162,11 @@ function typeset(el: Element) {
   mathModule.then((m) => m.typeset(el)).catch(() => {});
 }
 
+// (a message's code blocks in colour, up to CODE_COLOR_MAX characters each: a longer one, re-rendered as it streams,
+//  stays plain)
+const CODE_COLOR_MAX = 64 * 1024;
 function md(src: string): string {
-  return markdown(src, { remote: "click" });
+  return markdown(src, { remote: "click", highlight: (code, lang) => (code.length <= CODE_COLOR_MAX ? colorBlock(code, lang) : null) });
 }
 
 function renderAll() {
@@ -1133,10 +1137,14 @@ addEventListener("keydown", (e) => {
 
 // (a turn that was running when the page closed can't go on: it ends interrupted)
 session.endInterrupted();
-// (A14: a reload record waiting for its restore says this page was connected: no demo, even before the workspace is
-// open and the restore decided; only its presence is read here)
+// (A14: a reload record of this page waiting for its restore says this page was connected: no demo, even before the
+// workspace is open and the restore decided; only its page is read here (another page's record, left in the tab for that
+// page, A5, says nothing about this one))
 try {
-  if (sessionStorage.getItem(RELOAD_KEY) !== null) connectedHere = true;
+  const raw = sessionStorage.getItem(RELOAD_KEY);
+  let page: unknown = null;
+  try { page = raw === null ? null : JSON.parse(raw)?.page ?? null; } catch {}
+  if (raw !== null && (typeof page !== "string" || page === location.origin + location.pathname)) connectedHere = true;
 } catch {
   // (no sessionStorage: no record)
 }
