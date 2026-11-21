@@ -1,0 +1,77 @@
+# The remote's container image (docker/remote). `image` builds and smoke-tests it on every event, with a read-only
+# token. `publish` (only on a release tag, or a manual run asking to push) needs `image` to have passed, rebuilds
+# from the same trusted ref, and pushes ghcr.io/sagemathinc/sagebrush-remote as :latest and :<sagebrush version>.
+# Only `publish` can write packages, and its token is in the login step alone, never in a build or a container.
+name: remote-image
+on:
+  pull_request:
+    paths:
+      - "docker/remote/**"
+      - "engine/py/test_remote_relay.py"
+      - "engine/py/test_remote_pair.py"
+      - "engine/py/remote_test_signer.mjs"
+      - ".github/workflows/remote-image.yml"
+  workflow_dispatch:
+    inputs:
+      push:
+        description: "Push the image to ghcr.io/sagemathinc/sagebrush-remote"
+        type: boolean
+        default: false
+  push:
+    tags: ["v*"]
+permissions: {}
+concurrency:
+  group: remote-image-${{ github.ref }}
+  cancel-in-progress: true
+jobs:
+  image:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 30
+    permissions:
+      contents: read
+    steps:
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4.4.0
+        with:
+          persist-credentials: false
+      - name: build
+        run: DOCKER_BUILDKIT=1 docker build -t sagebrush-remote:ci docker/remote
+      - name: smoke (start, connect, run a cell; restart, connect again with the volume's key)
+        run: docker/remote/smoke.sh sagebrush-remote:ci
+  publish:
+    needs: image
+    if: github.event_name == 'push' || (github.event_name == 'workflow_dispatch' && inputs.push)
+    runs-on: ubuntu-24.04
+    timeout-minutes: 30
+    permissions:
+      contents: read
+      packages: write
+    steps:
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4.4.0
+        with:
+          persist-credentials: false
+      - name: build (again, from this run's own trusted ref)
+        run: DOCKER_BUILDKIT=1 docker build -t sagebrush-remote:ci docker/remote
+      - name: smoke (the image that is pushed is the image tested)
+        run: docker/remote/smoke.sh sagebrush-remote:ci
+      - name: version
+        id: v
+        run: |
+          set -euo pipefail
+          v=$(docker run --rm --entrypoint sagebrush sagebrush-remote:ci --version | awk '{print $2}')
+          [[ $v =~ ^[0-9]+\.[0-9]+\.[0-9]+$ ]] || { echo "unexpected version: $v"; exit 1; }
+          echo "version=$v" >> "$GITHUB_OUTPUT"
+      - name: log in to GHCR
+        env:
+          TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          ACTOR: ${{ github.actor }}
+        run: echo "$TOKEN" | docker login ghcr.io -u "$ACTOR" --password-stdin
+      - name: push
+        env:
+          V: ${{ steps.v.outputs.version }}
+        run: |
+          set -euo pipefail
+          for t in latest "$V"; do
+            docker tag sagebrush-remote:ci "ghcr.io/sagemathinc/sagebrush-remote:$t"
+            docker push "ghcr.io/sagemathinc/sagebrush-remote:$t"
+          done
+          docker logout ghcr.io
