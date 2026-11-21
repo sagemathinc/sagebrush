@@ -11,7 +11,7 @@ import * as TK from "../pyparse/src/tokens.gen";
 import { analyze, SyntaxErr } from "./scope";
 import { Emitter, Compiled } from "./emit";
 import { R, ENTRY_FILE, ENTRY_NAME, frameState } from "./runtime/index";
-import { cwdPath, isBuiltinModule, oserr as fsOSError } from "./runtime/modules";
+import { cwdPath, isBuiltinModule, isConfined, oserr as fsOSError } from "./runtime/modules";
 import { dictDelete } from "./runtime/object";
 import { admitIndex, checkChunk, gradingExcluded, PkgsetError, type ChunkRef, type SetPlan, type SrcChunk, type PreChunk } from "./pkgset";
 import { INTR, INTR_GRADING } from "./runtime/interrupt";
@@ -81,7 +81,8 @@ let cacheRoot: string | null | undefined;
 function compileCacheDir(): string | null {
   if (cacheRoot !== undefined) return cacheRoot;
   cacheRoot = null;
-  if (!BUILD_ID || process.env.SAGEBRUSH_NO_COMPILE_CACHE) return null;
+  // (none while confined, `notebook run --confine`: a module cache the program could write would be run again)
+  if (!BUILD_ID || process.env.SAGEBRUSH_NO_COMPILE_CACHE || isConfined()) return null;
   try {
     const base = process.env.XDG_CACHE_HOME || join(homedir(), ".cache");
     const parent = join(base, "sagebrush");
@@ -168,6 +169,8 @@ function precompiled(source: string, filename: string, name: string, sage: boole
 const recording: Record<string, Compiled & { path: string }> | null = process.versions?.node && process.env.SAGEBRUSH_PRECOMPILE_OUT ? {} : null;
 if (recording !== null) {
   process.on("exit", () => {
+    // (a build step's recording, written with raw fs: never by a confined run)
+    if (isConfined()) return;
     const out = process.env.SAGEBRUSH_PRECOMPILE_OUT!;
     let prev: Precompiled | null = null;
     try { prev = JSON.parse(readFileSync(out, "utf8")); } catch {}
@@ -556,7 +559,8 @@ function packageRegistry(): Registry | null {
   return (registry = r);
 }
 function packagesDir(): string {
-  const env = process.env.SAGEBRUSH_PACKAGES;
+  // (a host's package folder, read with raw fs: never while confined; the bundle's own copies then)
+  const env = isConfined() ? undefined : process.env.SAGEBRUSH_PACKAGES;
   if (env) return resolvePath(env);
   return embeddedPackages !== undefined ? PKG_VIRTUAL : resolvePath(__dirname, "../../packages");
 }

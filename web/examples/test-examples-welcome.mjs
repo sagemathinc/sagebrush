@@ -1,13 +1,12 @@
 // ci: checks.3 order=98 runner=bun
-// The editors' old example lists as a bundle carries them (web/examples/legacy.ts legacySource, web/build.ts's
-// plugin): the generated module evaluates to exactly the lists read from the corpus, its texts String.raw templates
-// (each backslash once, as the lists were written by hand), and rawLiteral falls back to JSON where a template
-// wouldn't read back the same.
-//   bun web/examples/test-examples-legacy.mjs
-import { existsSync, mkdtempSync, readdirSync, readFileSync, writeFileSync } from "node:fs";
+// The first visit's notebooks as a bundle carries them (web/examples/welcome.ts welcomeSource, web/build.ts's plugin):
+// the generated module evaluates to exactly the notebooks read from the corpus, its texts String.raw templates (each
+// backslash once), and rawLiteral falls back to JSON where a template wouldn't read back the same.
+//   bun web/examples/test-examples-welcome.mjs
+import { mkdtempSync, readFileSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
-import { latexExamples, legacySource, NOT_IN_OLD_MENU, notebookExamples, rawLiteral } from "./legacy.ts";
+import { rawLiteral, welcomeNotebooks, welcomeSource } from "./welcome.ts";
 
 let n = 0;
 const fails = [];
@@ -18,13 +17,15 @@ const check = (ok, what) => {
     console.log("FAIL " + what);
   }
 };
-const src = legacySource();
-const f = join(mkdtempSync(join(process.env.TMPDIR || tmpdir(), "examples-legacy-")), "legacy.mjs");
+const src = welcomeSource();
+const f = join(mkdtempSync(join(process.env.TMPDIR || tmpdir(), "examples-welcome-")), "welcome.mjs");
 writeFileSync(f, src);
 const gen = await import(f);
-check(JSON.stringify(gen.notebookExamples()) === JSON.stringify(notebookExamples()), "the generated notebook lists equal the corpus's");
-check(JSON.stringify(gen.latexExamples()) === JSON.stringify(latexExamples()), "the generated LaTeX list equals the corpus's");
-check(src.includes("String.raw`\\documentclass") && !src.includes("\\\\documentclass"), "a LaTeX text is a String.raw template, its backslashes once");
+const nbs = welcomeNotebooks();
+check(JSON.stringify(gen.welcomeNotebooks()) === JSON.stringify(nbs), "the generated notebooks equal the corpus's");
+// (exactly the two the page opens on a first visit, each the corpus notebook's cells, in order)
+const corpus = (slug) => { const root = join(import.meta.dir, "..", "..", "examples", "notebook", slug); const m = JSON.parse(readFileSync(join(root, "example.json"), "utf8")); return JSON.parse(readFileSync(join(root, m.main), "utf8")).cells.length; };
+check(JSON.stringify(Object.keys(nbs)) === JSON.stringify(["Welcome", "Sage"]) && nbs.Welcome.length === corpus("welcome") && nbs.Sage.length === corpus("sage-first-steps") && nbs.Welcome.some((c) => typeof c === "object" && c.md), "Welcome and Sage, each with its corpus notebook's cells, Markdown as {md}");
 check(!/readFileSync|node:fs|import\.meta/.test(src), "the generated module reads no files");
 const cases = ["a\\b", "x`y", "${z}", "a\r\nb", "ends\\", "plain", "", "\u00e9\n\t", "Gr\u00f6bner \u25b6 \u2013", "\\\u00e9", "\\`", "\\${x}", "$", "\\$", "\ud83d\ude00!", "a\\\\\\"];
 // (and random strings over the characters that matter)
@@ -41,7 +42,7 @@ for (const t of cases) {
 check(bad === 0, `rawLiteral reads back every string, ${cases.length} of them (${bad} not)`);
 // (through Bun's own transpiler and minifier, as a bundle is made: the strings beyond ASCII survive)
 {
-  const dir = mkdtempSync(join(process.env.TMPDIR || tmpdir(), "examples-legacy-b-"));
+  const dir = mkdtempSync(join(process.env.TMPDIR || tmpdir(), "examples-welcome-b-"));
   writeFileSync(join(dir, "m.js"), `export const xs = [${cases.slice(0, 200).map(rawLiteral).join(",")}];`);
   const r = await Bun.build({ entrypoints: [join(dir, "m.js")], outdir: dir, naming: "out.js", minify: true, format: "esm" });
   const out = await import(join(dir, "out.js"));
@@ -64,15 +65,6 @@ for (const [what, end] of [["a backtick", "`"], ['"${"', "${"], ["a carriage ret
     back = "(" + e.message + ")";
   }
   check(lit.startsWith("String.raw`") && back === t, `a long backslash-heavy text ending in ${what} is a raw template that reads back the same: ${lit.slice(-24)}`);
-}
-// (the notebook menu has every corpus notebook, by title: a slug dropped from the list would vanish unnoticed; grader's G5)
-{
-  const root = join(import.meta.dir, "..", "..", "examples", "notebook");
-  const want = readdirSync(root).filter((d) => existsSync(join(root, d, "example.json"))).map((d) => JSON.parse(readFileSync(join(root, d, "example.json"), "utf8")).title).sort();
-  // (but those the old menu can't carry, each named with why in NOT_IN_OLD_MENU: a folder, or cells' Jupyter metadata)
-  const left = Object.keys(NOT_IN_OLD_MENU).map((slug) => JSON.parse(readFileSync(join(root, slug, "example.json"), "utf8")).title);
-  const got = Object.keys(notebookExamples().cells).sort();
-  check(JSON.stringify([...got, ...left].sort()) === JSON.stringify(want) && !left.some((t) => got.includes(t)), `the notebook menu lists every corpus notebook but those named with why in NOT_IN_OLD_MENU (${got.length} + ${left.length} of ${want.length})`);
 }
 console.log(`${n - fails.length}/${n} passed`);
 if (fails.length) process.exit(1);

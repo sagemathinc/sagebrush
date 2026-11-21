@@ -24,7 +24,7 @@ import { modeFlags, type DocumentMode } from "./modes";
 
 export type Mode = DocumentMode;
 /** what one run sent back: its time, whether it raised, ran out of time, or found the interpreter stopped */
-export interface Sent { ms: number; error: boolean; timedOut: boolean; dead: boolean; evaluated?: string }
+export interface Sent { ms: number; error: boolean; timedOut: boolean; dead: boolean; evaluated?: string; shown?: boolean }
 
 const START_GRACE_MS = 60_000;
 const clamp = (ms: number) => Math.min(ms, 2 ** 31 - 1);
@@ -39,15 +39,20 @@ export interface Interpreter {
   close(): Promise<void>;
 }
 
-/** The interpreter in a worker thread of this process's own bundle (`entry`: by default the script running), in a
- * directory of its own, warmed up. `label` names a cell in what it says when one is stopped. */
-export async function startInterpreter(o: { mode: Mode; entry?: string; label?: (cell: string) => string }): Promise<Interpreter> {
-  const dir = mkdtempSync(join(tmpdir(), "sagebrush-run-"));
+/** The interpreter in a worker thread of this process's own bundle (the script running, exactly), in a
+ * directory of its own, warmed up. `label` names a cell in what it says when one is stopped. `dir`: its working
+ * directory instead (`notebook run`: the notebook's folder, also on sys.path, so the files beside it are there and
+ * import), which is the caller's and is never removed. `confine`: the only folders its program may use
+ * (src/runtime/modules.ts setConfine). */
+export async function startInterpreter(o: { mode: Mode; label?: (cell: string) => string; dir?: string; confine?: string[] }): Promise<Interpreter> {
+  const own = o.dir === undefined;
+  const dir = o.dir ?? mkdtempSync(join(tmpdir(), "sagebrush-run-"));
   const label = o.label ?? ((c: string) => c);
   const sinks = new Map<number, (m: any) => void>();
   const err: string[] = [];
   let dead: string | null = null, intr: Int32Array | null = null, nextId = 1;
-  const worker = new Worker(o.entry ?? require.main?.filename ?? process.argv[1], { workerData: { sagebrushBoardRun: { dir }, sagebrushLimits: sessionLimits() }, stdout: true, stderr: true });
+  // (the CLI's own entry, exactly: no caller chooses what the interpreter's worker runs)
+  const worker = new Worker(require.main?.filename ?? process.argv[1], { workerData: { sagebrushBoardRun: { dir, importable: !own, ...(o.confine ? { confine: o.confine } : {}) }, sagebrushLimits: sessionLimits() }, stdout: true, stderr: true });
   worker.stdout?.resume();
   worker.stderr?.on("data", (b) => { if (err.length < 100) err.push(String(b)); });
   await new Promise<void>((resolve) => {
@@ -69,7 +74,7 @@ export async function startInterpreter(o: { mode: Mode; entry?: string; label?: 
       sinks.delete(id);
       clearTimeout(timer);
       clearTimeout(kill);
-      resolve({ ms: m.ms ?? 0, error: !!m.error || !!m.skipped, timedOut, dead: !!m.dead, ...(typeof m.evaluated === "string" ? { evaluated: m.evaluated } : {}) });
+      resolve({ ms: m.ms ?? 0, error: !!m.error || !!m.skipped, timedOut, dead: !!m.dead, ...(typeof m.evaluated === "string" ? { evaluated: m.evaluated } : {}), ...(typeof m.shown === "boolean" ? { shown: m.shown } : {}) });
     });
     const over = () => {
       timedOut = true;
@@ -83,7 +88,7 @@ export async function startInterpreter(o: { mode: Mode; entry?: string; label?: 
   if (!dead) await send({ cell: "warm-up", code: "" }, () => {}, START_GRACE_MS, true);
   return {
     send, dead: () => dead, err,
-    close: async () => { await worker.terminate(); rmSync(dir, { recursive: true, force: true }); },
+    close: async () => { await worker.terminate(); if (own) rmSync(dir, { recursive: true, force: true }); },
   };
 }
 
@@ -122,9 +127,12 @@ export async function runCells(interp: Interpreter, cells: Cell[], o: { mode: Mo
       return analyses.get(code)!;
     },
     async execute(id, code, forget, scoped) {
-      const r = await interp.send({ cell: id, code, opts: { forget, mangle: mangle(id), seed: o.seedOf(id), ...(scoped && Object.keys(scoped).length ? { scoped } : {}) } }, (m) => o.onMessage(id, m), o.timeoutMs);
+      // (above: the cells above it, nearest first, for _, __ and ___, as the notebook page sends them)
+      const at = cells.findIndex((c) => c.key === id);
+      const above = at < 0 ? [] : cells.slice(0, at).reverse().map((c) => mangle(c.key));
+      const r = await interp.send({ cell: id, code, opts: { forget, mangle: mangle(id), above, seed: o.seedOf(id), ...(scoped && Object.keys(scoped).length ? { scoped } : {}) } }, (m) => o.onMessage(id, m), o.timeoutMs);
       if (r.timedOut) timedOut.add(id);
-      return { ok: !r.error, ms: r.ms, ...(r.timedOut ? { stopped: true, interrupted: true } : r.dead ? { stopped: true } : {}) };
+      return { ok: !r.error, ms: r.ms, ...(r.timedOut ? { stopped: true, interrupted: true } : r.dead ? { stopped: true } : {}), ...(typeof r.shown === "boolean" ? { shown: r.shown } : {}) };
     },
     forget: (names) => interp.send({ cell: "forget", code: "", opts: { forget: names } }, () => {}).then(() => {}),
     rename: async (q) => {

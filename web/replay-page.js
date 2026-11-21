@@ -227,7 +227,7 @@ export function createJournal(o) {
           const cell = r.cell ? o.nb.cells().find((c) => c.id === r.cell) : null;
           const box = cell?.out ?? document.createElement("div");
           if (cell) { o.nb.output.forget(box); box.replaceChildren(); cell.n.textContent = "[*]"; }
-          await new Promise((resolve) => o.kernel.execute(e.code, { mode: r.mode, repl: r.repl, cell: r.cell, clock: r.clock ?? [], forget: r.forget, mangle: !!r.mangle, seed: r.seed, figures: r.figures }, {
+          await new Promise((resolve) => o.kernel.execute(e.code, { mode: r.mode, repl: r.repl, cell: r.cell, clock: r.clock ?? [], forget: r.forget, mangle: !!r.mangle, seed: r.seed, figures: r.figures, ...(Array.isArray(r.above) ? { above: r.above } : {}) }, {
             start() {},
             ...o.nb.output.sink(box),
             done() { k++; if (cell) cell.n.textContent = `[${k}]`; resolve(); },

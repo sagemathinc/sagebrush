@@ -108,7 +108,7 @@ Other settings:
 | C5 | SageTeX's `example.tex` | SageTeX; the browser also times Run |
 | C5b | PythonTeX's gallery | PythonTeX |
 | C6 | the pgfplots manual's chapter on 2D plots | TikZ and pgfplots, heavy |
-| C7a–j | our ten examples (`web/latex/examples.ts`) | the baseline: what we show people first |
+| C7a–j | our ten examples (`scripts/latex-examples.mjs`) | the baseline: what we show people first |
 
 Some documents need more than plain `latexmk` (`corpus.json` says how each one runs):
 

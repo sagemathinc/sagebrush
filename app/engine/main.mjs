@@ -4,8 +4,8 @@
 //   node app/engine/main.mjs --stdio --root DIR [--memory MB]
 //
 // DIR: the page's worker and its files (web/dist, or app/dist); MB: each
-// interpreter's heap (default: three quarters of this computer's memory; a
-// limit per interpreter, not for the engine: app/engine/serve.mjs).
+// interpreter's heap (default: all of this computer's memory, the operating
+// system the limit; a test's own setting: app/engine/serve.mjs).
 import { Socket } from "node:net";
 import { serve } from "./serve.mjs";
 
