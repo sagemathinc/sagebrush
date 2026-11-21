@@ -37,5 +37,6 @@ for p in ("p_inner_missing", "p_sub_missing", "p_sub_raises", "p_circular", "p_h
         # (up to " from": CPython names the module "partially initialized"
         # while its __init__ runs, and adds its path; Sagebrush doesn't track that)
         msg = str(e).split(" from ")[0]
-        print(p, type(e).__name__, msg, "name=%s" % getattr(e, "name", None))
+        path = getattr(e, "path", None)
+        print(p, type(e).__name__, msg, "name=%s" % getattr(e, "name", None), "name_from=%s" % getattr(e, "name_from", None), "path=%s" % (os.path.basename(path) if path else None))
     print(p, "left in sys.modules:", p in sys.modules, p + ".sub" in sys.modules)

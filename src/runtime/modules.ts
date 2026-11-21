@@ -372,14 +372,18 @@ export function importFrom(m: any, name: string): any {
   }
   // only the submodule itself being missing becomes "cannot import name"; a
   // module the submodule imports being missing, or a None in sys.modules,
-  // propagates, as in CPython's _handle_fromlist (and handleFromlist above)
+  // propagates, as CPython's _handle_fromlist does for a package (and
+  // handleFromlist above)
   try {
     return importModule(`${m.__name__}.${name}`);
   } catch (e: any) {
     if (!(e?.$cls !== undefined && isinstance(e, T.ModuleNotFoundError) && e.name === `${m.__name__}.${name}` && dictGet(sysModules, `${m.__name__}.${name}`) !== null)) throw e;
   }
   const err = T.ImportError(`cannot import name '${name}' from '${m.__name__}'`);
-  err.name = m.__name__;
+  // (as CPython's import_from: name the module's, path its file, name_from the name asked for; None where not a str)
+  err.name = typeof m.__name__ === "string" ? m.__name__ : null;
+  err.path = typeof m.__file__ === "string" ? m.__file__ : null;
+  err.name_from = name;
   throw err;
 }
 function hasattr(o: any, name: string): boolean {
