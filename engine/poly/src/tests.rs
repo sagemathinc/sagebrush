@@ -529,7 +529,7 @@ fn modp_matches_the_oracle() {
     for p in MODP_PRIMES {
         for f in modp_cases(p) {
             let (want, want_rng) = oracle::factor_mod(&f, p);
-            let (got, got_rng) = factor_mod_draws(&Budget::unlimited(), &f, p).unwrap();
+            let (got, got_rng) = factor_mod_draws(&Budget::unlimited(), &f, p, &mut sagebrush_arith::cost::Meter::accounting(u64::MAX)).unwrap();
             assert_eq!(got, want, "p={} deg {}", p, f.len() - 1);
             assert_eq!(got_rng, want_rng, "draws: p={} deg {}", p, f.len() - 1);
         }

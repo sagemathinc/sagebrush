@@ -9,17 +9,17 @@
   "owner": "poly_mul",
   "reason": "poly_mul's derived bounds, a closed form's const assertion, a field mask, a benchmark's output or a test assertion: refuses nothing itself"
  },
- "engine/arith/src/coprime.rs :: add_in :: None if self.accounting => self.used = u64::MAX, #0": {
+ "engine/arith/src/coprime.rs :: add_at :: None if self.accounting => self.used = u64::MAX, #0": {
   "class": "none",
   "owner": "engine arith (big-integer wire decoder)",
   "reason": "the work meter's accounting mode: passing a proven upper bound is an accounting bug, counted (and a debug assertion), never a refusal"
  },
- "engine/arith/src/coprime.rs :: add_in :: debug_assert!(false, \"a meter passed its proven upper bound: {} units of at most {}\", self.used, self.limit); #0": {
+ "engine/arith/src/coprime.rs :: add_at :: debug_assert!(false, \"a meter passed its proven upper bound: {} units of at most {}\", self.used, self.limit); #0": {
   "class": "none",
   "owner": "engine arith (big-integer wire decoder)",
   "reason": "the work meter's accounting mode: passing a proven upper bound is an accounting bug, counted (and a debug assertion), never a refusal"
  },
- "engine/arith/src/coprime.rs :: add_in :: if self.used > self.limit { #0": {
+ "engine/arith/src/coprime.rs :: add_at :: if self.used > self.limit { #0": {
   "class": "none",
   "owner": "engine arith (big-integer wire decoder)",
   "reason": "the gcd check's work meter: the admitted work is a proven bound, so going over it is an Internal error (a bug), not a limit"
@@ -34,7 +34,7 @@
   "owner": "engine arith (big-integer wire decoder)",
   "reason": "the decoder's and the gcd check's plumbing (bounds for the caller's reservation and work admission, the workspace, word masks); refuses nothing itself"
  },
- "engine/arith/src/coprime.rs :: new :: Meter { used: 0, limit, since_poll: 0, largest: 0, accounting: false, overran: false, units: [0; FAMILIES] } #0": {
+ "engine/arith/src/coprime.rs :: new :: Meter { used: 0, limit, since_poll: 0, poll: POLL_UNITS, largest: 0, accounting: false, overran: false, units: [0; FAMILIES] } #0": {
   "class": "none",
   "owner": "engine arith (big-integer wire decoder)",
   "reason": "the work meter's accounting mode: passing a proven upper bound is an accounting bug, counted (and a debug assertion), never a refusal"
@@ -298,6 +298,51 @@
   "class": "none",
   "owner": "engine arithmetic (division) tests",
   "reason": "test code (the invariant-division and differential tests): u64::MAX as a limb value, the meter limits probed by the Overrun sweep; no cap, refuses nothing"
+ },
+ "engine/arith/src/cost/tally.rs :: bigeuclid_units :: let n = bigdiv_units(la, lb).total().unwrap_or(u64::MAX).saturating_add(bigmul_units(q, lb).total().unwrap_or(u64::MAX)); #0": {
+  "class": "none",
+  "owner": "engine arith (kernel metering)",
+  "reason": "the BigInt unit helpers' saturating arithmetic: a count that overflows u64 saturates (an accounting figure, never a refusal)"
+ },
+ "engine/arith/src/cost/tally/tests.rs :: acct :: Meter::accounting(u64::MAX) #0": {
+  "class": "none",
+  "owner": "engine arith (kernel metering)",
+  "reason": "test code: the kernel metering's pinned units, Stop poll counts and unwinding tests (an accounting meter with no bound, saturation checks of the unit helpers); refuses nothing itself"
+ },
+ "engine/arith/src/cost/tally/tests.rs :: bigint_helpers_pinned :: assert_eq!(only(bigdiv_units(usize::MAX, 0), Family::Div), cap(big + 1)); #0": {
+  "class": "none",
+  "owner": "engine arith (kernel metering)",
+  "reason": "test code: the kernel metering's pinned units, Stop poll counts and unwinding tests (an accounting meter with no bound, saturation checks of the unit helpers); refuses nothing itself"
+ },
+ "engine/arith/src/cost/tally/tests.rs :: bigint_helpers_pinned :: assert_eq!(only(bigeuclid_units(usize::MAX, 0), Family::Gcd), cap(big + 1)); #0": {
+  "class": "none",
+  "owner": "engine arith (kernel metering)",
+  "reason": "test code: the kernel metering's pinned units, Stop poll counts and unwinding tests (an accounting meter with no bound, saturation checks of the unit helpers); refuses nothing itself"
+ },
+ "engine/arith/src/cost/tally/tests.rs :: bigint_helpers_pinned :: assert_eq!(only(bigeuclid_units(usize::MAX, 2), Family::Gcd), cap(cap(2 * (big - 1)) as u128 + cap(2 * (big - 1)) as u128)); #0": {
+  "class": "none",
+  "owner": "engine arith (kernel metering)",
+  "reason": "test code: the kernel metering's pinned units, Stop poll counts and unwinding tests (an accounting meter with no bound, saturation checks of the unit helpers); refuses nothing itself"
+ },
+ "engine/arith/src/cost/tally/tests.rs :: bigint_helpers_pinned :: assert_eq!(only(bigmul_units(usize::MAX, 0), Family::MulSchool), 0); #0": {
+  "class": "none",
+  "owner": "engine arith (kernel metering)",
+  "reason": "test code: the kernel metering's pinned units, Stop poll counts and unwinding tests (an accounting meter with no bound, saturation checks of the unit helpers); refuses nothing itself"
+ },
+ "engine/arith/src/cost/tally/tests.rs :: bigint_helpers_pinned :: assert_eq!(only(bigmul_units(usize::MAX, usize::MAX), Family::MulSchool), cap(big * big)); #0": {
+  "class": "none",
+  "owner": "engine arith (kernel metering)",
+  "reason": "test code: the kernel metering's pinned units, Stop poll counts and unwinding tests (an accounting meter with no bound, saturation checks of the unit helpers); refuses nothing itself"
+ },
+ "engine/arith/src/cost/tally/tests.rs :: bigint_helpers_pinned :: let big = usize::MAX as u128; #0": {
+  "class": "none",
+  "owner": "engine arith (kernel metering)",
+  "reason": "test code: the kernel metering's pinned units, Stop poll counts and unwinding tests (an accounting meter with no bound, saturation checks of the unit helpers); refuses nothing itself"
+ },
+ "engine/arith/src/cost/tally/tests.rs :: bigint_helpers_pinned :: let cap = |x: u128| x.min(u64::MAX as u128) as u64; #0": {
+  "class": "none",
+  "owner": "engine arith (kernel metering)",
+  "reason": "test code: the kernel metering's pinned units, Stop poll counts and unwinding tests (an accounting meter with no bound, saturation checks of the unit helpers); refuses nothing itself"
  },
  "engine/arith/src/invdiv.rs :: recip :: let num = (((!d) as $W) << BITS) | (<$L>::MAX as $W); #0": {
   "class": "none",
@@ -2289,6 +2334,26 @@
   "class": "none",
   "owner": "engine arith (big-integer wire decoder)",
   "reason": "test code: the big-integer decoder's correctness, allocation and Stop tests; refuses nothing itself"
+ },
+ "engine/arith/tests/nmod_poll_count.rs :: metering_polls_stop_at_least_as_often :: let mut full = Meter::accounting(u64::MAX); #0": {
+  "class": "none",
+  "owner": "engine arith (kernel metering)",
+  "reason": "test code: the kernel metering's pinned units, Stop poll counts and unwinding tests (an accounting meter with no bound, saturation checks of the unit helpers); refuses nothing itself"
+ },
+ "engine/arith/tests/nmod_poll_count.rs :: metering_polls_stop_at_least_as_often :: let mut meter = Meter::accounting(u64::MAX); #0": {
+  "class": "none",
+  "owner": "engine arith (kernel metering)",
+  "reason": "test code: the kernel metering's pinned units, Stop poll counts and unwinding tests (an accounting meter with no bound, saturation checks of the unit helpers); refuses nothing itself"
+ },
+ "engine/arith/tests/nmod_poll_count.rs :: metering_polls_stop_at_least_as_often :: let mut meter = Meter::accounting(u64::MAX); #1": {
+  "class": "none",
+  "owner": "engine arith (kernel metering)",
+  "reason": "test code: the kernel metering's pinned units, Stop poll counts and unwinding tests (an accounting meter with no bound, saturation checks of the unit helpers); refuses nothing itself"
+ },
+ "engine/arith/tests/nmod_poll_count.rs :: metering_polls_stop_at_least_as_often :: let mut whole = Meter::accounting(u64::MAX); #0": {
+  "class": "none",
+  "owner": "engine arith (kernel metering)",
+  "reason": "test code: the kernel metering's pinned units, Stop poll counts and unwinding tests (an accounting meter with no bound, saturation checks of the unit helpers); refuses nothing itself"
  },
  "engine/arith/tests/qpoly_admitted_max.rs :: the_admitted_maxima :: fn the_admitted_maxima() { #0": {
   "class": "none",
@@ -5179,15 +5244,35 @@
   "owner": "polynomial factorization",
   "reason": "a re-export of the budget's names: refuses nothing"
  },
- "engine/poly/src/lib.rs :: factor_mod_draws :: fn factor_mod_draws(b: &Budget, f: &[BigInt], p: u64) -> FResult<(Vec<(Vec<u64>, u32)>, u64)> { #0": {
+ "engine/poly/src/lib.rs :: factor_mod_draws :: fn factor_mod_draws(b: &Budget, f: &[BigInt], p: u64, meter: &mut sagebrush_arith::cost::Meter) -> FResult<Draws> { #0": {
   "class": "none",
   "owner": "polynomial factorization",
   "reason": "the modular phase's budget parameter, imports and work bounds; its reservations and debits refuse through the engine Budget's own sites; refuses nothing itself"
  },
- "engine/poly/src/lib.rs :: factor_mod_draws :: let _t = transients(b, 2, maxbits(f))?; #0": {
+ "engine/poly/src/lib.rs :: factor_mod_region :: fn factor_mod_region(b: &Budget, f: &[BigInt], p: u64) -> FResult<Draws> { #0": {
   "class": "none",
   "owner": "polynomial factorization",
   "reason": "the modular phase's budget parameter, imports and work bounds; its reservations and debits refuse through the engine Budget's own sites; refuses nothing itself"
+ },
+ "engine/poly/src/lib.rs :: factor_mod_region :: let _t = transients(b, 2, maxbits(f))?; #0": {
+  "class": "none",
+  "owner": "polynomial factorization",
+  "reason": "the modular phase's budget parameter, imports and work bounds; its reservations and debits refuse through the engine Budget's own sites; refuses nothing itself"
+ },
+ "engine/poly/src/lib.rs :: factor_mod_units :: let b = Budget::unlimited(); #0": {
+  "class": "none",
+  "owner": "polynomial factorization",
+  "reason": "the modular phase's accounting meter (its units counted, never a refusal) and the unlimited budget of the units entry point for the calibration harness; refuses nothing itself"
+ },
+ "engine/poly/src/lib.rs :: factor_mod_units :: let mut meter = sagebrush_arith::cost::Meter::accounting(u64::MAX); #0": {
+  "class": "none",
+  "owner": "polynomial factorization",
+  "reason": "the modular phase's accounting meter (its units counted, never a refusal) and the unlimited budget of the units entry point for the calibration harness; refuses nothing itself"
+ },
+ "engine/poly/src/lib.rs :: factor_mod_units :: let r = factor_mod_draws(&b, f, p, &mut meter).expect(\"no limits\").0; #0": {
+  "class": "none",
+  "owner": "polynomial factorization",
+  "reason": "the modular phase's accounting meter (its units counted, never a refusal) and the unlimited budget of the units entry point for the calibration harness; refuses nothing itself"
  },
  "engine/poly/src/lib.rs :: hensel :: pub(crate) fn hensel<'b>(b: &'b Budget, f: &[BigInt], fs: &[FPoly], p: u64, k: u64) -> FResult<Vec<Held<'b>>> { #0": {
   "class": "none",
@@ -6245,7 +6330,7 @@
   "owner": "polynomial factorization",
   "reason": "test code: the modular phase's per-operation debit, exact-reservation boundary and Stop allocation tests; refuses nothing itself"
  },
- "engine/poly/src/tests.rs :: modp_matches_the_oracle :: let (got, got_rng) = factor_mod_draws(&Budget::unlimited(), &f, p).unwrap(); #0": {
+ "engine/poly/src/tests.rs :: modp_matches_the_oracle :: let (got, got_rng) = factor_mod_draws(&Budget::unlimited(), &f, p, &mut sagebrush_arith::cost::Meter::accounting(u64::MAX)).unwrap(); #0": {
   "class": "none",
   "owner": "polynomial factorization",
   "reason": "test code: the modular phase's oracle equivalence, memory, work-refusal and Stop tests; refuses nothing itself"

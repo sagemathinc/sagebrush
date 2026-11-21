@@ -15,7 +15,7 @@
 
 use crate::nmod::Modulus;
 use crate::ntt_core::{self, NttWord, Table};
-pub use crate::ntt_core::{conv_work, table_work};
+pub use crate::ntt_core::{conv_work, table_work, units};
 use std::sync::atomic::{AtomicUsize, Ordering::Relaxed};
 use std::sync::{Arc, Mutex};
 
@@ -294,11 +294,16 @@ pub fn mul_mod(a: &[u64], b: &[u64], m: &Modulus) -> Vec<u64> {
 /// The products modulo the primes needed, combined modulo m.n (CRT).
 fn combine(a: &[u64], b: &[u64], m: &Modulus, conv: impl Fn(usize) -> Vec<u64>) -> Vec<u64> {
     let len = a.len() + b.len() - 1;
-    match primes_needed(m.n, a.len().min(b.len())) {
+    let k = primes_needed(m.n, a.len().min(b.len()));
+    // (the CRT pass, counted once done: one reduction per prime per
+    // coefficient)
+    let crt_done = || crate::ntt_core::tally_reductions(k as u64 * len as u64);
+    match k {
         1 => {
             let mut r = conv(0);
             sagebrush_interrupt::check_coarse();
             r.iter_mut().for_each(|x| *x = m.reduce(*x));
+            crt_done();
             r
         }
         2 => {
@@ -308,24 +313,28 @@ fn combine(a: &[u64], b: &[u64], m: &Modulus, conv: impl Fn(usize) -> Vec<u64>) 
             let m1 = Modulus::new(p1);
             let c01 = m1.inv(p0 % p1).unwrap();
             let p0n = m.reduce(p0);
-            (0..len)
+            let r = (0..len)
                 .map(|i| {
                     let t1 = m1.mul(m1.sub(r1[i], m1.reduce(r0[i])), c01);
                     m.add(m.reduce(r0[i]), m.mul(p0n, m.reduce(t1)))
                 })
-                .collect()
+                .collect();
+            crt_done();
+            r
         }
         _ => {
             let (r0, r1, r2) = (conv(0), conv(1), conv(2));
             sagebrush_interrupt::check_coarse();
             let c = crt();
             let p01n = m.reduce_u128(c.p01);
-            (0..len)
+            let r = (0..len)
                 .map(|i| {
                     let (v, t2) = c.garner(r0[i], r1[i], r2[i]);
                     m.add(m.reduce_u128(v), m.mul(p01n, m.reduce(t2)))
                 })
-                .collect()
+                .collect();
+            crt_done();
+            r
         }
     }
 }
@@ -588,6 +597,44 @@ fn garner_words(r0: &[u64], r1: &[u64], r2: &[u64], words: usize) -> Vec<u64> {
 
 #[cfg(test)]
 mod tests {
+
+    /// The per-thread work counter (units) against the butterflies the
+    /// transforms count where they happen: for products modulo m of many
+    /// lengths, by every route (the NTT prime itself, one, two or three
+    /// primes), a square or not, the counter's transform part minus the
+    /// pointwise products equals the butterflies performed; its reductions
+    /// are the inputs, the result per prime and the CRT pass.
+    #[test]
+    fn units_count_exactly_what_the_transforms_do() {
+        let moduli = [Modulus::new(7), Modulus::new(65537), Modulus::new((1u64 << 31) - 1), Modulus::new(0x3ffffffffffe0001), Modulus::new((1 << 61) - 1)];
+        for m in &moduli {
+            for (la, lb) in [(1usize, 1usize), (3, 5), (40, 40), (100, 37), (513, 300), (1000, 1000)] {
+                for square in [false, true] {
+                    if square && la != lb {
+                        continue;
+                    }
+                    let a: Vec<u64> = (0..la as u64).map(|i| (i * 7 + 3) % m.n).collect();
+                    let b: Vec<u64> = (0..lb as u64).map(|i| (i * 11 + 5) % m.n).collect();
+                    crate::ntt_core::BUTTERFLIES.with(|w| w.set(0));
+                    let u0 = units();
+                    let c = if square { mul_mod(&a, &a, m) } else { mul_mod(&a, &b, m) };
+                    let u1 = units();
+                    let fly = crate::ntt_core::BUTTERFLIES.with(|w| w.get());
+                    let len = la + lb - 1;
+                    assert_eq!(c.len(), len);
+                    let n = len.next_power_of_two() as u64;
+                    let convs = if is_ntt_prime(m, len) { 1 } else { primes_needed(m.n, la.min(lb)) as u64 };
+                    let d = [u1[0].wrapping_sub(u0[0]), u1[1].wrapping_sub(u0[1]), u1[2].wrapping_sub(u0[2])];
+                    assert_eq!(d[0] - convs * n, fly, "p={} {}x{} square={}: butterflies", m.n, la, lb, square);
+                    let loads = if square { 1 } else { 2 };
+                    assert_eq!(d[2], convs * loads * n, "zero fills");
+                    let inputs = (la + if square { 0 } else { lb }) as u64;
+                    let crt = if is_ntt_prime(m, len) { 0 } else { convs * len as u64 };
+                    assert_eq!(d[1], convs * (inputs + len as u64) + crt, "reductions");
+                }
+            }
+        }
+    }
     use super::*;
 
     #[test]

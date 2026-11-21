@@ -3,7 +3,14 @@
 //! characteristic polynomial (Hessenberg reduction, H. Cohen, A Course in
 //! Computational Algebraic Number Theory, Algorithm 2.2.9).  Row
 //! operations multiply by a fixed scalar with Shoup's trick.
+//!
+//! Units ([`cost::tally`](crate::cost::tally)), counted here and nowhere
+//! else: multiply-adds summed in u128 (MulSchool); reductions of those
+//! sums, multiplications by a scalar (each reduced), inverses and
+//! reductions of inputs (ModArith); copies, row swaps, transposes and
+//! zero fills (Move).
 
+use crate::cost::{publish_progress, tally, tally_all, Family, FAMILIES};
 use crate::nmod::{mul_shoup, Modulus};
 
 /// P A = L U modulo p: L lower triangular (the pivots on its diagonal),
@@ -22,6 +29,13 @@ impl Lu {
         let m = self.a.m;
         let batch = batch_len(&m);
         let d = &self.a.d;
+        // (no Stop poll here, as before: the counts only)
+        let mut poll = Poll::new();
+        // the two triangular solves' products, their dot products'
+        // reductions (one per chunk), and an inverse and a product per row
+        poll.count(Family::MulSchool, (n * n.saturating_sub(1)) as u64);
+        poll.count(Family::ModArith, (2 * (0..n).map(|i| i.div_ceil(batch)).sum::<usize>() + 2 * n) as u64);
+        poll.count(Family::Move, 2 * n as u64);
         let dot = |row: &[u64], v: &[u64]| -> u64 {
             let mut r = 0u64;
             for (ca, cb) in row.chunks(batch).zip(v.chunks(batch)) {
@@ -61,21 +75,71 @@ pub struct Mat {
 /// host at every call) about every 2^16 multiply-adds, a few milliseconds
 /// in wasm, where the 128-bit products are emulated: the natural
 /// checkpoints of the dense algorithms here (a row, a column, a block) can
-/// each cost tens of millions of them for large matrices.
-struct Poll(u64);
+/// each cost tens of millions of them for large matrices.  Counts the
+/// units by family in a local accumulator, flushed to the thread's tally
+/// at each poll (with a metered region's progress) and when the Poll
+/// drops, also while unwinding (one thread-local access per call).
+struct Poll {
+    since: u64,
+    acc: [u64; FAMILIES],
+    /// The units of one step of a loop whose steps all cost the same (a
+    /// row of a product), counted as `steps` (one add per step).
+    step: [u64; FAMILIES],
+    steps: u64,
+}
 
 impl Poll {
     fn new() -> Poll {
-        Poll(0)
+        Poll::stepping([0; FAMILIES])
     }
+    fn stepping(step: [u64; FAMILIES]) -> Poll {
+        Poll { since: 0, acc: [0; FAMILIES], step, steps: 0 }
+    }
+    /// One more step done.
+    #[inline]
+    fn step(&mut self) {
+        self.steps += 1;
+    }
+    /// `work` toward the next Stop poll (the weights as before metering).
     #[inline]
     fn add(&mut self, work: usize) {
-        self.0 += work as u64;
-        if self.0 >= 1 << 16 {
-            self.0 = 0;
+        self.since += work as u64;
+        if self.since >= 1 << 16 {
+            self.since = 0;
+            self.flush();
             sagebrush_interrupt::check_coarse();
+            publish_progress();
         }
     }
+    /// `n` units of family `f` (not a poll).
+    #[inline]
+    fn count(&mut self, f: Family, n: u64) {
+        self.acc[f as usize] += n;
+    }
+    fn flush(&mut self) {
+        if self.steps > 0 {
+            for (a, &u) in self.acc.iter_mut().zip(&self.step) {
+                *a += self.steps * u;
+            }
+            self.steps = 0;
+        }
+        if self.acc.iter().any(|&x| x != 0) {
+            tally_all(&self.acc);
+            self.acc = [0; FAMILIES];
+        }
+    }
+}
+
+impl Drop for Poll {
+    fn drop(&mut self) {
+        self.flush();
+    }
+}
+
+/// The reductions of `rows` sums of `terms` products each, `batch` at a
+/// time: one per started batch, and at least one per sum.
+fn reductions(rows: usize, terms: usize, batch: usize) -> usize {
+    rows * (terms / batch + 1)
 }
 
 /// How many products of reduced residues fit in a u128 sum.
@@ -91,12 +155,14 @@ fn batch_len(m: &Modulus) -> usize {
 /// row[j] -= sum_t row[blk[t]] * src(t)[j] for j >= from: the products
 /// summed in u128 (`batch` at a time), one reduction per entry.
 #[inline]
-fn update_row<'a, F: Fn(usize) -> &'a [u64]>(row: &mut [u64], from: usize, blk: &[usize], src: F, m: &Modulus, batch: usize, acc: &mut [u128]) {
+#[allow(clippy::too_many_arguments)]
+fn update_row<'a, F: Fn(usize) -> &'a [u64]>(row: &mut [u64], from: usize, blk: &[usize], src: F, m: &Modulus, batch: usize, acc: &mut [u128], poll: &mut Poll) {
     let len = row.len() - from;
     let acc = &mut acc[..len];
     let mut part: Option<Vec<u64>> = None;
     acc.iter_mut().for_each(|x| *x = 0);
     let mut cnt = 0;
+    let mut batches = 0;
     for (t, &ct) in blk.iter().enumerate() {
         let f = row[ct];
         if f == 0 {
@@ -114,8 +180,14 @@ fn update_row<'a, F: Fn(usize) -> &'a [u64]>(row: &mut [u64], from: usize, blk: 
                 *a = 0;
             }
             cnt = 0;
+            batches += 1;
         }
     }
+    // (the products are len per nonzero factor, batch * batches + cnt of
+    // them; the reductions len per full batch, plus the last)
+    poll.count(Family::MulSchool, ((batch * batches + cnt) * len) as u64);
+    poll.count(Family::ModArith, (len * (batches + 1)) as u64);
+    poll.count(Family::Move, len as u64);
     let tail = &mut row[from..];
     match part {
         None => {
@@ -165,7 +237,14 @@ fn scale(v: &mut [u64], c: u64, m: &Modulus) {
 
 impl Mat {
     pub fn zero(rows: usize, cols: usize, m: Modulus) -> Mat {
+        tally(Family::Move, (rows * cols) as u64);
         Mat { rows, cols, m, d: vec![0; rows * cols] }
+    }
+
+    /// A copy (counted: Move).
+    fn copy(&self) -> Mat {
+        tally(Family::Move, self.d.len() as u64);
+        self.clone()
     }
 
     pub fn identity(n: usize, m: Modulus) -> Mat {
@@ -179,6 +258,7 @@ impl Mat {
     pub fn from_rows(rows: &[Vec<u64>], m: Modulus) -> Mat {
         let r = rows.len();
         let c = rows.first().map_or(0, |x| x.len());
+        tally(Family::ModArith, (r * c) as u64);
         Mat { rows: r, cols: c, m, d: rows.iter().flat_map(|row| row.iter().map(|&x| m.reduce(x))).collect() }
     }
 
@@ -196,6 +276,7 @@ impl Mat {
         &self.d[i * self.cols..(i + 1) * self.cols]
     }
 
+    /// (not counted here: the callers count 2 cols Move in their Poll)
     fn swap_rows(&mut self, i: usize, j: usize) {
         if i != j {
             let c = self.cols;
@@ -245,12 +326,12 @@ impl Mat {
     }
 
     pub fn rank(&self) -> usize {
-        self.clone().echelon(false, false).0.len()
+        self.copy().echelon(false, false).0.len()
     }
 
     pub fn det(&self) -> u64 {
         assert_eq!(self.rows, self.cols, "determinant of a non-square matrix");
-        let (piv, d) = self.clone().echelon(false, true);
+        let (piv, d) = self.copy().echelon(false, true);
         if piv.len() < self.rows {
             0
         } else {
@@ -277,7 +358,7 @@ impl Mat {
     pub fn lu(&self) -> Option<Lu> {
         assert_eq!(self.rows, self.cols);
         let n = self.rows;
-        let mut a = self.clone();
+        let mut a = self.copy();
         let mut perm: Vec<usize> = (0..n).collect();
         let (piv, _) = a.echelon_impl(false, false, Some((&mut perm, &mut vec![])), None);
         if piv.len() < n {
@@ -308,6 +389,8 @@ impl Mat {
             poll.add((rows - r) * (blk.len() + 1));
             // column col of the rows below, up to date with the block
             if !blk.is_empty() {
+                poll.count(Family::MulSchool, ((rows - r) * blk.len()) as u64);
+                poll.count(Family::ModArith, reductions(rows - r, blk.len(), batch) as u64);
                 for i in r..rows {
                     let mut s = 0u128;
                     let mut red = 0u64;
@@ -328,6 +411,7 @@ impl Mat {
                 continue;
             };
             if pr != r {
+                poll.count(Family::Move, 2 * cols as u64);
                 self.swap_rows(r, pr);
                 det = m.neg(det);
                 if let Some((perm, _)) = lu.as_mut() {
@@ -341,7 +425,7 @@ impl Mat {
             if !blk.is_empty() {
                 let (head, tail) = self.d.split_at_mut(r * cols);
                 let row = &mut tail[..cols];
-                update_row(row, col + 1, blk, |t| &head[(block_start + t) * cols..(block_start + t + 1) * cols], &m, batch, &mut acc);
+                update_row(row, col + 1, blk, |t| &head[(block_start + t) * cols..(block_start + t + 1) * cols], &m, batch, &mut acc, &mut poll);
                 if !keep {
                     for &ct in blk {
                         row[ct] = 0;
@@ -352,6 +436,8 @@ impl Mat {
             if want_det {
                 det = m.mul(det, pv);
             }
+            // the inverse, the det product and the row's scaling
+            poll.count(Family::ModArith, (cols - col) as u64 + want_det as u64);
             let inv = m.inv(pv).expect("modulus not prime");
             scale(&mut self.d[r * cols + col + 1..(r + 1) * cols], inv, &m);
             // the pivot value stays (as L's diagonal) when keeping L
@@ -370,6 +456,7 @@ impl Mat {
         }
         // rows r.. are zero (every column was processed or no rows remain)
         if !keep {
+            poll.count(Family::Move, ((rows - r) * cols) as u64);
             for x in self.d[r * cols..].iter_mut() {
                 *x = 0;
             }
@@ -395,7 +482,7 @@ impl Mat {
             if blk.iter().all(|&ct| row[ct] == 0) {
                 continue;
             }
-            update_row(row, from, blk, |t| &head[(start + t) * cols..(start + t + 1) * cols], &m, batch, acc);
+            update_row(row, from, blk, |t| &head[(start + t) * cols..(start + t + 1) * cols], &m, batch, acc, poll);
             if !keep {
                 for &ct in blk {
                     row[ct] = 0;
@@ -424,7 +511,7 @@ impl Mat {
             let step = ((1usize << 16) / cols.max(1)).max(1);
             for (s, chunk) in later.chunks(step).enumerate() {
                 let off = s * step;
-                update_row(row, piv[i] + 1, chunk, |t| &tail[(off + t) * cols..(off + t + 1) * cols], &m, batch, acc);
+                update_row(row, piv[i] + 1, chunk, |t| &tail[(off + t) * cols..(off + t + 1) * cols], &m, batch, acc, &mut poll);
                 poll.add(cols * chunk.len());
             }
             for &ct in later {
@@ -437,6 +524,7 @@ impl Mat {
     pub fn augment(&self, other: &Mat) -> Mat {
         assert_eq!(self.rows, other.rows);
         let cols = self.cols + other.cols;
+        tally(Family::Move, (self.rows * cols) as u64);
         let mut d = Vec::with_capacity(self.rows * cols);
         for i in 0..self.rows {
             d.extend_from_slice(self.row(i));
@@ -447,6 +535,7 @@ impl Mat {
 
     /// Columns lo..hi.
     pub fn columns(&self, lo: usize, hi: usize) -> Mat {
+        tally(Family::Move, (self.rows * (hi - lo)) as u64);
         let mut d = Vec::with_capacity(self.rows * (hi - lo));
         for i in 0..self.rows {
             d.extend_from_slice(&self.row(i)[lo..hi]);
@@ -473,10 +562,11 @@ impl Mat {
 
     /// A basis of the right kernel {x : self x = 0}, as the rows of the result.
     pub fn nullspace(&self) -> Mat {
-        let mut a = self.clone();
+        let mut a = self.copy();
         let piv = a.rref();
         let free: Vec<usize> = (0..self.cols).filter(|c| !piv.contains(c)).collect();
         let mut k = Mat::zero(free.len(), self.cols, self.m);
+        tally(Family::ModArith, (free.len() * piv.len()) as u64);
         for (t, &f) in free.iter().enumerate() {
             k.set(t, f, 1 % self.m.n);
             for (i, &pc) in piv.iter().enumerate() {
@@ -488,6 +578,7 @@ impl Mat {
 
     pub fn transpose(&self) -> Mat {
         let mut t = Mat::zero(self.cols, self.rows, self.m);
+        tally(Family::Move, self.d.len() as u64);
         for i in 0..self.rows {
             for j in 0..self.cols {
                 t.d[j * self.rows + i] = self.d[i * self.cols + j];
@@ -503,7 +594,11 @@ impl Mat {
         let sq = (m.n as u128 - 1) * (m.n as u128 - 1);
         let batch = if sq == 0 { usize::MAX } else { (u128::MAX / sq).min(1 << 30) as usize };
         let mut c = Mat::zero(self.rows, o.cols, m);
-        let mut poll = Poll::new();
+        // a row: its products, and one reduction per chunk of each entry
+        let mut step = [0; FAMILIES];
+        step[Family::MulSchool as usize] = (o.cols * self.cols) as u64;
+        step[Family::ModArith as usize] = (o.cols * self.cols.div_ceil(batch)) as u64;
+        let mut poll = Poll::stepping(step);
         for i in 0..self.rows {
             let a = self.row(i);
             for j in 0..o.cols {
@@ -518,6 +613,7 @@ impl Mat {
                 }
                 c.d[i * o.cols + j] = r;
             }
+            poll.step();
             poll.add(o.cols * self.cols);
         }
         c
@@ -527,7 +623,10 @@ impl Mat {
     pub fn mul_vec(&self, v: &[u64]) -> Vec<u64> {
         let m = self.m;
         let batch = batch_len(&m);
-        let mut poll = Poll::new();
+        let mut step = [0; FAMILIES];
+        step[Family::MulSchool as usize] = self.cols as u64;
+        step[Family::ModArith as usize] = self.cols.div_ceil(batch) as u64;
+        let mut poll = Poll::stepping(step);
         (0..self.rows)
             .map(|i| {
                 poll.add(self.cols);
@@ -539,6 +638,7 @@ impl Mat {
                     }
                     r = m.add(r, m.reduce_u128(acc));
                 }
+                poll.step();
                 r
             })
             .collect()
@@ -575,6 +675,8 @@ impl Mat {
         // S has columns v, Av, ..., A^n v
         let mut s = Mat::zero(n, n + 1, m);
         let mut poll = Poll::new();
+        poll.count(Family::ModArith, n as u64);
+        poll.count(Family::Move, ((n + 1) * n) as u64);
         for i in 0..=n {
             for j in 0..n {
                 s.d[j * (n + 1) + i] = v[j];
@@ -589,6 +691,7 @@ impl Mat {
             return None;
         }
         // A^n v = sum c_i A^i v: the charpoly is x^n - sum c_i x^i
+        poll.count(Family::ModArith, n as u64);
         let mut c: Vec<u64> = (0..n).map(|i| m.neg(s.d[i * (n + 1) + n])).collect();
         c.push(1 % m.n);
         Some(c)
@@ -599,7 +702,7 @@ impl Mat {
         assert_eq!(self.rows, self.cols);
         let m = self.m;
         let n = self.rows;
-        let mut h = self.clone();
+        let mut h = self.copy();
         let mut poll = Poll::new();
         // Hessenberg form by similarity transformations
         for k in 1..n.saturating_sub(1) {
@@ -608,11 +711,13 @@ impl Mat {
             let Some(i) = (k..n).find(|&i| h.get(i, k - 1) != 0) else { continue };
             if i != k {
                 h.swap_rows(i, k);
+                poll.count(Family::Move, 4 * n as u64);
                 for r in 0..n {
                     h.d.swap(r * n + i, r * n + k);
                 }
             }
             let tinv = m.inv(h.get(k, k - 1)).expect("modulus not prime");
+            poll.count(Family::ModArith, (n - k) as u64);
             // H <- L^-1 H L with L = I + sum_i u_i e_i e_k^T: the elementary
             // factors commute, so all the row operations, then column k +=
             // sum_i u_i column_i as one dot product per row
@@ -620,6 +725,7 @@ impl Mat {
             for (t, &u) in us.iter().enumerate() {
                 if u != 0 {
                     poll.add(n - k + 1);
+                    poll.count(Family::ModArith, (n - k + 1) as u64);
                     let (dst, src) = h.rows2(k + 1 + t, k);
                     axpy(&mut dst[k - 1..], &src[k - 1..], m.neg(u), &m);
                 }
@@ -627,6 +733,8 @@ impl Mat {
             if us.iter().any(|&u| u != 0) {
                 poll.add(n * (n - k));
                 let batch = batch_len(&m);
+                poll.count(Family::MulSchool, (n * us.len()) as u64);
+                poll.count(Family::ModArith, (n * us.len().div_ceil(batch)) as u64);
                 for r in 0..n {
                     let row = &h.d[r * n + k + 1..(r + 1) * n];
                     let mut add = 0u64;
@@ -647,6 +755,7 @@ impl Mat {
         let mut p: Vec<Vec<u64>> = vec![vec![1 % m.n]];
         for k in 0..n {
             poll.add(k + 2);
+            poll.count(Family::ModArith, p[k].len() as u64);
             let mut next = vec![0u64; k + 2];
             for (j, &c) in p[k].iter().enumerate() {
                 next[j + 1] = m.add(next[j + 1], c);
@@ -657,11 +766,14 @@ impl Mat {
                 poll.add(1);
                 t = m.mul(t, h.get(k - i + 1, k - i));
                 if t == 0 {
+                    poll.count(Family::ModArith, 1);
                     break;
                 }
                 let f = m.mul(t, h.get(k - i, k));
+                poll.count(Family::ModArith, 2);
                 if f != 0 {
                     poll.add(p[k - i].len());
+                    poll.count(Family::ModArith, p[k - i].len() as u64);
                     for (j, &c) in p[k - i].iter().enumerate() {
                         next[j] = m.sub(next[j], m.mul(f, c));
                     }
@@ -708,6 +820,24 @@ fn inversions_odd(v: &[usize]) -> bool {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    /// The Poll flushes its accumulator when it drops while unwinding (a
+    /// panic, or a Stop raised outside its own poll).
+    #[test]
+    fn a_poll_flushes_when_unwinding() {
+        use crate::cost::{tallied, Family};
+        let before = tallied();
+        let r = std::panic::catch_unwind(|| {
+            let mut poll = Poll::new();
+            poll.count(Family::MulSchool, 1000);
+            poll.count(Family::Move, 7);
+            panic!("mid-kernel");
+        });
+        assert!(r.is_err());
+        let now = tallied();
+        assert_eq!(now.get(Family::MulSchool).wrapping_sub(before.get(Family::MulSchool)), 1000);
+        assert_eq!(now.get(Family::Move).wrapping_sub(before.get(Family::Move)), 7);
+    }
 
     /// rref_rows: the reduced form of rref, its pivot rows S in increasing
     /// order, and det A[S, P], against the determinant computed directly;

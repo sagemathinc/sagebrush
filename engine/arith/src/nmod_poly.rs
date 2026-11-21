@@ -6,7 +6,10 @@
 //! reversed divisor (von zur Gathen and Gerhard, Modern Computer Algebra,
 //! section 9.1).
 
+use crate::cost::Family;
 use crate::nmod::Modulus;
+use crate::cost::FAMILIES;
+use crate::cost::{publish_progress, tally, tally_all};
 use crate::ntt;
 
 pub type Poly = Vec<u64>;
@@ -20,20 +23,70 @@ enum Tabs<'a> {
 }
 
 /// Asks for Stop (check_coarse, which asks the wasm host at every call)
-/// about every 2^16 multiply-adds.
-pub(crate) struct Poll(u64);
+/// about every 2^16 units of work; counts the units by family
+/// ([`cost::tally`](crate::cost::tally)) and publishes a metered region's
+/// progress at each poll.
+pub(crate) struct Poll {
+    since: u64,
+    /// The part of `since` already counted: the rest is multiply-adds
+    /// (MulSchool), so on the hot path the Stop counter is the unit
+    /// counter and a row costs one add, as before metering.
+    mark: u64,
+    /// Units counted since the last flush, per family: flushed to the
+    /// thread's counter at each poll and when the Poll drops (one
+    /// thread-local access per kernel call, not per row).
+    acc: [u64; FAMILIES],
+}
 
 impl Poll {
     pub(crate) fn new() -> Poll {
-        Poll(0)
+        Poll { since: 0, mark: 0, acc: [0; FAMILIES] }
+    }
+    /// `work` units of family `f`, of which `poll` count toward the next
+    /// Stop poll (the poll interval keeps its old weights where a unit is
+    /// cheaper than its weight: an inverse).
+    #[inline]
+    pub(crate) fn add_weighted(&mut self, f: Family, work: usize, poll: usize) {
+        self.settle();
+        self.acc[f as usize] += work as u64;
+        self.since += poll as u64;
+        self.mark = self.since;
+        self.check();
+    }
+    /// `work` multiply-adds (MulSchool), all counting toward the next poll.
+    #[inline]
+    pub(crate) fn mul_adds(&mut self, work: usize) {
+        self.since += work as u64;
+        self.check();
     }
     #[inline]
-    pub(crate) fn add(&mut self, work: usize) {
-        self.0 += work as u64;
-        if self.0 >= 1 << 16 {
-            self.0 = 0;
+    fn settle(&mut self) {
+        self.acc[Family::MulSchool as usize] += self.since - self.mark;
+        self.mark = self.since;
+    }
+    #[inline]
+    fn check(&mut self) {
+        if self.since >= 1 << 16 {
+            self.flush();
+            self.since = 0;
+            self.mark = 0;
             sagebrush_interrupt::check_coarse();
+            publish_progress();
         }
+    }
+    fn flush(&mut self) {
+        self.settle();
+        if self.acc.iter().any(|&x| x != 0) {
+            tally_all(&self.acc);
+            self.acc = [0; FAMILIES];
+        }
+    }
+}
+
+impl Drop for Poll {
+    fn drop(&mut self) {
+        // (also while unwinding: work done before a Stop is still counted)
+        self.flush();
     }
 }
 
@@ -64,13 +117,76 @@ fn batch(m: &Modulus) -> usize {
     }
 }
 
+/// mul_classical's Stop poll and unit count.  The poll keeps its weight
+/// from before metering, min(la, lb) per output row (a poll at least that
+/// often); the units are the exact multiply-adds of the rows completed,
+/// from their closed form, charged at each poll and at the end (also when
+/// a Stop unwinds: only the rows done), never ahead of the work.
+struct SchoolRows {
+    since: u64,
+    next: u64,
+    w: u64,
+    la: u64,
+    lb: u64,
+    credited: u64,
+    complete: bool,
+}
+
+impl SchoolRows {
+    fn new(la: usize, lb: usize) -> SchoolRows {
+        let w = la.min(lb) as u64;
+        SchoolRows { since: 0, next: 1 << 16, w, la: la as u64, lb: lb as u64, credited: 0, complete: false }
+    }
+    /// The start of an output row (the poll, as before metering).
+    #[inline]
+    fn row(&mut self) {
+        self.since += self.w;
+        if self.since >= self.next {
+            self.next = self.since + (1 << 16);
+            // (the rows before this one are done)
+            self.credit(self.since / self.w - 1);
+            sagebrush_interrupt::check_coarse();
+            publish_progress();
+        }
+    }
+    /// The multiply-adds of output rows 0..rows: row r has
+    /// min(r, la - 1) - max(0, r - (lb - 1)) + 1 of them.
+    fn units(&self, rows: u64) -> u64 {
+        let (c, d) = (self.la - 1, self.lb - 1);
+        let upto_c = if rows <= c + 1 { rows * rows.saturating_sub(1) / 2 } else { c * (c + 1) / 2 + (rows - c - 1) * c };
+        let past_d = if rows <= d + 1 {
+            0
+        } else {
+            let k = rows - d - 1;
+            k * (k + 1) / 2
+        };
+        upto_c - past_d + rows
+    }
+    fn credit(&mut self, rows: u64) {
+        let u = self.units(rows);
+        if u > self.credited {
+            tally(Family::MulSchool, u - self.credited);
+            self.credited = u;
+        }
+    }
+}
+
+impl Drop for SchoolRows {
+    fn drop(&mut self) {
+        // all rows on completion; on an unwind (a Stop at a row's poll) the
+        // rows before that one
+        let started = self.since / self.w;
+        self.credit(if self.complete { started } else { started.saturating_sub(1) });
+    }
+}
+
 fn mul_classical(a: &[u64], b: &[u64], m: &Modulus) -> Poly {
     let len = a.len() + b.len() - 1;
     let k = batch(m);
     let mut c = Vec::with_capacity(len);
-    let mut poll = Poll::new();
+    let mut poll = SchoolRows::new(a.len(), b.len());
     for i in 0..len {
-        poll.add(a.len().min(b.len()));
+        poll.row();
         let lo = i.saturating_sub(b.len() - 1);
         let hi = i.min(a.len() - 1);
         let mut acc = 0u128;
@@ -87,6 +203,7 @@ fn mul_classical(a: &[u64], b: &[u64], m: &Modulus) -> Poly {
         }
         c.push(m.add(r, m.reduce_u128(acc)));
     }
+    poll.complete = true;
     c
 }
 
@@ -143,6 +260,8 @@ fn mullow_t(a: &[u64], b: &[u64], k: usize, m: &Modulus, t: Tabs) -> Poly {
 
 pub fn add(a: &[u64], b: &[u64], m: &Modulus) -> Poly {
     let (long, short) = if a.len() >= b.len() { (a, b) } else { (b, a) };
+    tally(Family::Move, long.len() as u64);
+    tally(Family::ModArith, short.len() as u64);
     let mut c = long.to_vec();
     for (x, &y) in c.iter_mut().zip(short) {
         *x = m.add(*x, y);
@@ -151,6 +270,8 @@ pub fn add(a: &[u64], b: &[u64], m: &Modulus) -> Poly {
 }
 
 pub fn sub(a: &[u64], b: &[u64], m: &Modulus) -> Poly {
+    tally(Family::Move, a.len().max(b.len()) as u64);
+    tally(Family::ModArith, b.len() as u64);
     let mut c = a.to_vec();
     if c.len() < b.len() {
         c.resize(b.len(), 0);
@@ -162,10 +283,12 @@ pub fn sub(a: &[u64], b: &[u64], m: &Modulus) -> Poly {
 }
 
 pub fn scale(a: &[u64], s: u64, m: &Modulus) -> Poly {
+    tally(Family::ModArith, a.len() as u64);
     trim(a.iter().map(|&x| m.mul(x, s)).collect())
 }
 
 pub fn neg(a: &[u64], m: &Modulus) -> Poly {
+    tally(Family::ModArith, a.len() as u64);
     a.iter().map(|&x| m.neg(x)).collect()
 }
 
@@ -173,15 +296,21 @@ pub fn neg(a: &[u64], m: &Modulus) -> Poly {
 pub fn monic(a: &[u64], m: &Modulus) -> Poly {
     match a.last() {
         None => vec![],
-        Some(&l) => scale(a, m.inv(l).expect("leading coefficient not a unit"), m),
+        Some(&l) => {
+            // (the inverse: one ModArith unit; the scaling: a.len())
+            tally(Family::ModArith, 1);
+            scale(a, m.inv(l).expect("leading coefficient not a unit"), m)
+        }
     }
 }
 
 pub fn derivative(a: &[u64], m: &Modulus) -> Poly {
+    tally(Family::ModArith, a.len().saturating_sub(1) as u64);
     trim(a.iter().enumerate().skip(1).map(|(i, &c)| m.mul(m.reduce(i as u64), c)).collect())
 }
 
 pub fn eval(a: &[u64], x: u64, m: &Modulus) -> u64 {
+    tally(Family::MulSchool, a.len() as u64);
     a.iter().rev().fold(0, |acc, &c| m.add(m.mul(acc, x), c))
 }
 
@@ -208,7 +337,15 @@ fn inv_series_t(f: &[u64], k: usize, m: &Modulus, t: Tabs) -> Poly {
     g
 }
 
+/// A copy of a polynomial, counted as Move.
+#[inline]
+fn copy(a: &[u64]) -> Poly {
+    tally(Family::Move, a.len() as u64);
+    a.to_vec()
+}
+
 fn rev(a: &[u64], len: usize) -> Poly {
+    tally(Family::Move, len.max(a.len()) as u64);
     let mut r: Poly = a.iter().rev().cloned().collect();
     r.resize(len, 0);
     r
@@ -254,7 +391,7 @@ fn rem_in_place(r: &mut Poly, b: &[u64], linv: u64, m: &Modulus, mut q: Option<&
         // the usual Euclid step: both quotient coefficients first, then one
         // fused pass (row by row, each row would wait on the previous one)
         let ql = r.len() - db;
-        poll.add(2 * db);
+        poll.mul_adds(2 * db);
         let q1 = m.mul(r[r.len() - 1], linv);
         let q0 = if ql == 2 { m.mul(m.sub(r[db], m.mul(q1, b[db - 1])), linv) } else { 0 };
         let (q0, q1) = if ql == 2 { (q0, q1) } else { (q1, 0) };
@@ -291,7 +428,7 @@ fn rem_in_place(r: &mut Poly, b: &[u64], linv: u64, m: &Modulus, mut q: Option<&
         let n = m.n;
         let v = ((1u128 << 64) / n as u128) as u64;
         for i in (0..r.len() - db).rev() {
-            poll.add(db + 1);
+            poll.mul_adds(db + 1);
             let c = barrett(r[i + db] * linv, n, v);
             if let Some(q) = q.as_deref_mut() {
                 q[i] = c;
@@ -305,7 +442,7 @@ fn rem_in_place(r: &mut Poly, b: &[u64], linv: u64, m: &Modulus, mut q: Option<&
         }
     } else {
         for i in (0..r.len() - db).rev() {
-            poll.add(db + 1);
+            poll.mul_adds(db + 1);
             let c = m.mul(r[i + db], linv);
             if let Some(q) = q.as_deref_mut() {
                 q[i] = c;
@@ -323,7 +460,7 @@ fn rem_in_place(r: &mut Poly, b: &[u64], linv: u64, m: &Modulus, mut q: Option<&
 
 fn divrem_classical(a: &[u64], b: &[u64], linv: u64, m: &Modulus) -> (Poly, Poly) {
     let _phase = sagebrush_interrupt::enter("classical-divide");
-    let mut r = a.to_vec();
+    let mut r = copy(a);
     let mut q = vec![];
     rem_in_place(&mut r, b, linv, m, Some(&mut q), &mut Poll::new());
     (trim(q), r)
@@ -337,7 +474,9 @@ fn gcd_euclid(mut a: Poly, mut b: Poly, m: &Modulus) -> Poly {
     let _phase = sagebrush_interrupt::enter("euclid");
     let mut poll = Poll::new();
     while !b.is_empty() {
-        poll.add(128);
+        // (one inverse of the leading coefficient: one ModArith unit, weighted
+        // 128 toward the next Stop poll as before)
+        poll.add_weighted(Family::ModArith, 1, 128);
         let linv = m.inv(*b.last().unwrap()).expect("modulus not prime");
         rem_in_place(&mut a, &b, linv, m, None, &mut poll);
         std::mem::swap(&mut a, &mut b);
@@ -383,9 +522,10 @@ pub fn divrem_table_len(la: usize, lb: usize) -> usize {
 fn divrem_t(a: &[u64], b: &[u64], m: &Modulus, t: Tabs) -> (Poly, Poly) {
     assert!(!b.is_empty(), "division by zero polynomial");
     if a.len() < b.len() {
-        return (vec![], a.to_vec());
+        return (vec![], copy(a));
     }
     let linv = m.inv(*b.last().unwrap()).expect("leading coefficient not a unit");
+    tally(Family::ModArith, 1);
     let ql = a.len() - b.len() + 1;
     if b.len() < DIV_CUTOFF || ql < DIV_CUTOFF {
         return divrem_classical(a, b, linv, m);
@@ -399,7 +539,7 @@ fn divrem_with_inverse_t(a: &[u64], b: &[u64], binv: &[u64], m: &Modulus, t: Tab
     let _phase = sagebrush_interrupt::enter("newton-divide");
     sagebrush_interrupt::check_coarse();
     if a.len() < b.len() {
-        return (vec![], a.to_vec());
+        return (vec![], copy(a));
     }
     let ql = a.len() - b.len() + 1;
     let ra = rev(a, a.len());
@@ -420,7 +560,7 @@ pub fn rem(a: &[u64], b: &[u64], m: &Modulus) -> Poly {
 /// The monic gcd (n prime): Euclid for short inputs, otherwise the
 /// half-gcd ([`hgcd`]), O(M(n) log n).
 pub fn gcd(a: &[u64], b: &[u64], m: &Modulus) -> Poly {
-    gcd_t(a.to_vec(), b.to_vec(), m, Tabs::Shared)
+    gcd_t(copy(a), copy(b), m, Tabs::Shared)
 }
 
 /// [`gcd`] of a and b taken by value, with the caller's transform tables
@@ -497,7 +637,7 @@ impl Mat2 {
     /// The Euclid step for quotient q, times self.
     fn step_t(&self, q: &[u64], md: &Modulus, t: Tabs) -> Mat2 {
         let [a, b, c, d] = &self.m;
-        Mat2 { m: [c.clone(), d.clone(), sub(a, &mul_t(q, c, md, t), md), sub(b, &mul_t(q, d, md, t), md)] }
+        Mat2 { m: [copy(c), copy(d), sub(a, &mul_t(q, c, md, t), md), sub(b, &mul_t(q, d, md, t), md)] }
     }
 
     /// self * (a, b).
@@ -518,7 +658,7 @@ fn shift(a: &[u64], k: usize) -> Poly {
     if a.len() <= k {
         vec![]
     } else {
-        a[k..].to_vec()
+        copy(&a[k..])
     }
 }
 
@@ -539,7 +679,7 @@ fn hgcd_t(a: &[u64], b: &[u64], md: &Modulus, t: Tabs) -> Mat2 {
     if n < HGCD_CUTOFF {
         // Euclid's steps until the degree drops below m
         let mut m2 = Mat2::identity();
-        let (mut x, mut y) = (a.to_vec(), b.to_vec());
+        let (mut x, mut y) = (copy(a), copy(b));
         while y.len() > m {
             let (q, r) = divrem_t(&x, &y, md, t);
             m2 = m2.step_t(&q, md, t);
@@ -565,7 +705,7 @@ fn hgcd_t(a: &[u64], b: &[u64], md: &Modulus, t: Tabs) -> Mat2 {
 
 /// (g, s, t) with g = s a + t b the monic gcd (n prime).
 pub fn xgcd(a: &[u64], b: &[u64], m: &Modulus) -> (Poly, Poly, Poly) {
-    let (mut r0, mut r1) = (trim(a.to_vec()), trim(b.to_vec()));
+    let (mut r0, mut r1) = (trim(copy(a)), trim(copy(b)));
     let (mut s0, mut s1) = (vec![1 % m.n], vec![]);
     let (mut t0, mut t1) = (vec![], vec![1 % m.n]);
     while !r1.is_empty() {
@@ -610,7 +750,7 @@ impl PolyModulus {
     }
 
     fn new_t(f: &[u64], m: &Modulus, t: Tabs) -> PolyModulus {
-        let f = trim(f.to_vec());
+        let f = trim(copy(f));
         assert!(!f.is_empty(), "zero modulus");
         let prec = f.len().max(2) - 1;
         let finv = inv_series_t(&rev(&f, f.len()), prec, m, t);
@@ -629,10 +769,11 @@ impl PolyModulus {
 
     fn reduce_t(&self, x: &[u64], t: Tabs) -> Poly {
         if x.len() < self.f.len() {
-            return trim(x.to_vec());
+            return trim(copy(x));
         }
         if self.f.len() < DIV_CUTOFF {
             let linv = self.m.inv(*self.f.last().unwrap()).unwrap();
+            tally(Family::ModArith, 1);
             return divrem_classical(x, &self.f, linv, &self.m).1;
         }
         if x.len() - self.f.len() + 1 > self.prec {
@@ -674,7 +815,7 @@ impl PolyModulus {
                 r = self.mulmod_t(&r, &r, t);
             }
             if (e[i / 64] >> (i % 64)) & 1 == 1 {
-                r = if started { self.mulmod_t(&r, &a, t) } else { a.clone() };
+                r = if started { self.mulmod_t(&r, &a, t) } else { copy(&a) };
                 started = true;
             }
             if i % 64 == 0 {

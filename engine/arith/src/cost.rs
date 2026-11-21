@@ -19,6 +19,9 @@
 //! must reserve that overflows means it cannot fit (a memory refusal).
 
 pub use crate::coprime::{accounting_overruns, Meter};
+pub use tally::{bigdiv_units, bigeuclid_units, bigmul_units, metered, metered_with, publish_progress, tally, tally_all, tallied, Progress};
+
+mod tally;
 
 /// The families of primitive work a meter counts separately: their
 /// units convert to seconds at different rates.  A charge site names its
@@ -62,6 +65,12 @@ impl Units {
     /// The units of one family.
     pub fn get(&self, f: Family) -> u64 {
         self.0[f as usize]
+    }
+    /// Adds `o`, family by family (wrapping, like the tally).
+    pub fn add(&mut self, o: &Units) {
+        for (x, &y) in self.0.iter_mut().zip(&o.0) {
+            *x = x.wrapping_add(y);
+        }
     }
     /// The total, or `None` if it overflows u64.
     pub fn total(&self) -> Option<u64> {
