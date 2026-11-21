@@ -56,4 +56,12 @@ def newforms(n, k, chi=None, bound=100, factor=None, threads=0):
     return _native.newforms(n, k, factor or _factor, chi=chi_arg(chi), bound=bound, threads=threads)
 
 
-__all__ = ["characters", "dims", "charpoly", "charpoly_mod", "newspace", "newforms"]
+def cusp_hecke_matrix(n, k, q, prec, new_only=False, factor=None, threads=0):
+    """T_q (q prime) on S_k(Gamma0(n)), or its new subspace, in the reduced
+    echelon q-expansion basis: "dim", "pivots", "basis" (rows a_0..a_(prec-1))
+    and "matrix" (rows: the images of the basis elements), both integer rows
+    over the denominator "den".  prec must exceed the Sturm bound."""
+    return _native.cusp_hecke_matrix(n, k, factor or _factor, q, prec, new_only=new_only, threads=threads)
+
+
+__all__ = ["characters", "dims", "charpoly", "charpoly_mod", "newspace", "newforms", "cusp_hecke_matrix"]

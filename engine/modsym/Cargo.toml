@@ -9,7 +9,9 @@ default = ["parallel"]
 parallel = ["sagebrush-par/parallel"]
 
 [dependencies]
+sagebrush-arith = { path = "../arith" }
 sagebrush-bigint = { path = "../bigint" }
+num-integer = "0.1"
 sagebrush-interrupt = { path = "../interrupt" }
 sagebrush-par = { path = "../par" }
 num-traits = "0.2"

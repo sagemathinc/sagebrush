@@ -6,7 +6,7 @@
 use sagebrush_modsym::exact::Exact;
 use pyo3::exceptions::{PyKeyboardInterrupt, PyValueError};
 use pyo3::prelude::*;
-use pyo3::types::PyDict;
+use pyo3::types::{PyDict, PyList};
 
 mod mp;
 mod remote;
@@ -430,6 +430,63 @@ fn newforms<'py>(py: Python<'py>, n: u64, k: usize, factor: Py<PyAny>, chi: Opti
         Ok(o)
     }).collect::<PyResult<_>>()?;
     d.set_item("newforms", list)?;
+    Ok(d)
+}
+
+/// An engine op's admission: its peak bytes reserved in the ledger, held
+/// until the op returns (no work budget here: the op's work bound is its
+/// documentation, and Stop is polled throughout).
+struct LedgerAdmit {
+    what: &'static str,
+    held: Option<sagebrush_ledger::Reservation>,
+}
+
+impl sagebrush_modsym::hecke_q::Admit for LedgerAdmit {
+    fn admit(&mut self, _work: u64, bytes: u64) -> Result<(), String> {
+        let r = sagebrush_ledger::reserve(self.what, bytes).map_err(|e| format!("{}: {} bytes refused: {:?}", self.what, bytes, e))?;
+        self.held = Some(r);
+        Ok(())
+    }
+}
+
+/// T_q (q prime) on S_k(Gamma0(n)) (or its new subspace) in its reduced
+/// echelon q-expansion basis (sagebrush_modsym::hecke_q): "dim", "pivots", "basis" (integer
+/// rows a_0..a_(prec-1)) and "matrix" (rows: the images of the basis
+/// elements), both over the denominator "den"; "stats", the twisted
+/// traces' prime loops (primes used, primes set aside by reason, setups
+/// with a combination functional or seeded candidates); "units", the meter
+/// units the op tallied per family (cost::Family order).
+#[pyfunction]
+#[pyo3(signature = (n, k, factor, q, prec, new_only=false, threads=0))]
+#[allow(clippy::too_many_arguments)]
+fn cusp_hecke_matrix<'py>(py: Python<'py>, n: u64, k: usize, factor: Py<PyAny>, q: u64, prec: usize, new_only: bool, threads: usize) -> PyResult<Bound<'py, PyDict>> {
+    lk(n, Some(k))?;
+    let f = python_factorer(factor);
+    let (h, units) = run(py, threads, || {
+        let mut admit = LedgerAdmit { what: "cusp_hecke_matrix", held: None };
+        let before = sagebrush_arith::cost::tallied();
+        let h = sagebrush_modsym::hecke_q::cusp_hecke_matrix(n, k, q, prec, new_only, &f, &mut admit);
+        let after = sagebrush_arith::cost::tallied();
+        h.map(|h| (h, after.0.iter().zip(before.0).map(|(a, b)| a.wrapping_sub(b)).collect::<Vec<u64>>()))
+    })?.map_err(err)?;
+    let d = PyDict::new(py);
+    d.set_item("dim", h.dim)?;
+    d.set_item("pivots", h.pivots.clone())?;
+    d.set_item("basis", py2(&h.basis))?;
+    d.set_item("matrix", py2(&h.matrix))?;
+    d.set_item("den", py1(std::slice::from_ref(&h.den)).pop())?;
+    let st = PyDict::new(py);
+    st.set_item("e", h.stats.e)?;
+    st.set_item("primes", h.stats.primes)?;
+    st.set_item("seeded", h.stats.seeded)?;
+    st.set_item("combined", h.stats.combined)?;
+    let rej = PyDict::new(py);
+    for (r, c) in sagebrush_modsym::traces::Reject::ALL.iter().zip(h.stats.rejected) {
+        rej.set_item(r.name(), c)?;
+    }
+    st.set_item("rejected", rej)?;
+    d.set_item("stats", st)?;
+    d.set_item("units", units)?;
     Ok(d)
 }
 
@@ -881,6 +938,7 @@ fn _native(m: &Bound<'_, PyModule>) -> PyResult<()> {
     mf.add_function(wrap_pyfunction!(charpoly, &mf)?)?;
     mf.add_function(wrap_pyfunction!(newspace, &mf)?)?;
     mf.add_function(wrap_pyfunction!(newforms, &mf)?)?;
+    mf.add_function(wrap_pyfunction!(cusp_hecke_matrix, &mf)?)?;
     m.add_submodule(&mf)?;
     let raster = PyModule::new(m.py(), "raster")?;
     raster.add_function(wrap_pyfunction!(raster_render, &raster)?)?;

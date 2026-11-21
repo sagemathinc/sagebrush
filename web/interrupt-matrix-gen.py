@@ -80,7 +80,7 @@ FAMILY = [  # (name test, family, owner)
     (lambda n: n.startswith("poly_") or n in ("qpoly_mul", "qpoly_clear", "zpoly_divrem", "qpoly_divrem", "qpoly_scale", "qpoly_derivative", "qpoly_integral", "qpoly_add", "qpoly_sub", "qpoly_eval", "zpoly_fdiv", "factor", "factor_mod", "nf_factor", "nf_gcd", "complex_roots"), "E5 polynomials", "polynomial factorization"),
     (lambda n: n.startswith("bnf") or n in ("nf_data", "primes_above", "quadratic_class_group"), "E7 number fields", "number fields"),
     (lambda n: n.startswith("ec_") or n in ("ap", "aplist", "aplist_many", "quartic_search", "moments", "ball_log"), "E12 elliptic curves / analytic", "analytic"),
-    (lambda n: n in ("hecke_charpoly", "batch_exact", "newforms", "newspace", "rational_newforms", "weight2"), "E9 modular symbols", "modular symbols"),
+    (lambda n: n in ("hecke_charpoly", "batch_exact", "newforms", "newspace", "rational_newforms", "weight2", "cusp_hecke_matrix"), "E9 modular symbols", "modular symbols"),
     (lambda n: n in ("galois_group", "transitive_group"), "E10 Galois", "groups/Galois"),
     (lambda n: n in ("prime_pi", "primes", "zeta_zeros", "siegel"), "E14 primes", "the primes engine"),
     (lambda n: n.startswith("series_") or n == "sigma_table", "E15 series", "series ops"),

@@ -3642,6 +3642,56 @@
   "owner": "modular symbols",
   "row": "inv-42"
  },
+ "engine/modsym/src/traces.rs :: orbit_hecke_traces_from :: if len as u64 >= crate::linalg::MAX_HECKE_PRIME || q >= crate::linalg::MAX_HECKE_PRIME { #0": {
+  "class": "3",
+  "disposition": {
+   "3": {
+    "followup": "FU-B5-3"
+   }
+  },
+  "owner": "cusp_hecke_matrix",
+  "reason": "the input domain of the Heilbronn matrices and mod-ell kernels: q and the q-expansion length below 2^30, refused up front naming the bound (FU-B5-3)"
+ },
+ "engine/modsym/src/traces.rs :: orbit_hecke_traces_from :: let head: Vec<u64> = primes.by_ref().take(usize::try_from(count).unwrap_or(usize::MAX)).collect(); #0": {
+  "class": "3",
+  "disposition": {
+   "3": {
+    "followup": "FU-B5-1"
+   }
+  },
+  "owner": "cusp_hecke_matrix",
+  "reason": "primes = 1 mod e below 2^32 (u64 kernels), a reachable r4 limit: refused up front if the CRT count exceeds S(e) (only where L admits >= 2.0 PiB), or once S(e) - c primes are set aside (S(1) = 148,880,193); FU-B5-1"
+ },
+ "engine/modsym/src/traces.rs :: orbit_hecke_traces_from :: return Err(format!(\"twisted traces: the limit of primes = 1 mod {} below 2^32 (the u64 kernels): ran out after {} drawn ({} set aside: {})\", e_top, drawn, stats.rejected_total(), stats.rejected_summary())); #0": {
+  "class": "3",
+  "disposition": {
+   "3": {
+    "followup": "FU-B5-1"
+   }
+  },
+  "owner": "cusp_hecke_matrix",
+  "reason": "primes = 1 mod e below 2^32 (u64 kernels), a reachable r4 limit: refused up front if the CRT count exceeds S(e) (only where L admits >= 2.0 PiB), or once S(e) - c primes are set aside (S(1) = 148,880,193); FU-B5-1"
+ },
+ "engine/modsym/src/traces.rs :: orbit_hecke_traces_from :: return Err(format!(\"twisted traces: the limit of primes = 1 mod {} below 2^32 (the u64 kernels): the CRT needs {}, there are {}\", e_top, count, head.len())); #0": {
+  "class": "3",
+  "disposition": {
+   "3": {
+    "followup": "FU-B5-1"
+   }
+  },
+  "owner": "cusp_hecke_matrix",
+  "reason": "primes = 1 mod e below 2^32 (u64 kernels), a reachable r4 limit: refused up front if the CRT count exceeds S(e) (only where L admits >= 2.0 PiB), or once S(e) - c primes are set aside (S(1) = 148,880,193); FU-B5-1"
+ },
+ "engine/modsym/src/traces.rs :: orbit_traces :: return Err(\"too many bad primes for traces (the limit of 16)\".into()); #0": {
+  "class": "3",
+  "disposition": {
+   "3": {
+    "followup": "FU-B5-2"
+   }
+  },
+  "owner": "newforms traces",
+  "reason": "the newforms trace route's fixed cap of 16 bad primes, kept as is; to move to the twisted traces' uncounted per-site loop (FU-B5-2)"
+ },
  "engine/modsym/tests/newforms_poll_gap.rs :: trace_coefficient_bound_poll_gap :: let (gap, poll) = (hooks::max_gap_ns(), hooks::max_poll_gap_ns()); #0": {
   "class": "none",
   "owner": "modular symbols",
@@ -7573,6 +7623,16 @@
  "engine/web/src/lib.rs :: dispatch :: Some(w) => sagebrush_poly::try_factor_with(&f, &sagebrush_poly::Budget::new(sagebrush_poly::Limits { work: w, ..sagebrush_poly::Limits::DEFAULT })), #0": {
   "class": "3",
   "owner": "polynomial factorization"
+ },
+ "engine/web/src/lib.rs :: dispatch :: let prec = size(v, \"prec\", None, sagebrush_modsym::linalg::MAX_HECKE_PRIME)?; #0": {
+  "class": "3",
+  "disposition": {
+   "3": {
+    "followup": "FU-B5-3"
+   }
+  },
+  "owner": "cusp_hecke_matrix",
+  "reason": "the input domain of the Heilbronn matrices and mod-ell kernels: q and the q-expansion length below 2^30, refused up front naming the bound (FU-B5-3)"
  },
  "engine/web/src/lib.rs :: host_map_room :: h.reserve_exact((new - cap) as usize); #0": {
   "class": "none",

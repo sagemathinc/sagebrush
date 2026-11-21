@@ -28,6 +28,7 @@ export const EXEMPT = [
   ["engine/ledger/src/tests.rs", null, "the ledger's own unit tests (threads that race admissions on purpose)"],
   ["engine/interrupt/src/progress.rs", "let a = std::thread::spawn(move || {", "inside #[cfg(test)] mod tests"],
   ["engine/interrupt/src/progress.rs", "let w = std::thread::spawn(move || {", "inside #[cfg(test)] mod tests"],
+  ["engine/modsym/src/traces/tests.rs", "std::thread::spawn(move || {", "a #[cfg(test)] module: the site-3 regression's watchdog thread, so a search that never ends fails the test"],
   [
     "engine/arith/src/cost/tally/tests.rs",
     "std::thread::spawn(move || drop(np::mul(&a2, &b2, &Modulus::new(65537)))).join().unwrap();",

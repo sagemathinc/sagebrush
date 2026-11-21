@@ -15,6 +15,7 @@ sagebrush-mp = { path = "../mp" }
 sagebrush-interrupt = { path = "../interrupt" }
 sagebrush-ledger = { path = "../ledger" }
 sagebrush-modsym = { path = "../modsym" }
+sagebrush-arith = { path = "../arith" }
 sagebrush-ap = { path = "../ap" }
 sagebrush-web = { path = "../web" }
 sagebrush-mpoly = { path = "../mpoly" }

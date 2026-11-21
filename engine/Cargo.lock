@@ -867,9 +867,11 @@ dependencies = [
 name = "sagebrush-modsym"
 version = "0.1.0"
 dependencies = [
+ "num-integer",
  "num-traits",
  "rayon",
  "sagebrush-ap",
+ "sagebrush-arith",
  "sagebrush-bigint",
  "sagebrush-interrupt",
  "sagebrush-par",
@@ -971,6 +973,7 @@ dependencies = [
  "p256",
  "pyo3",
  "sagebrush-ap",
+ "sagebrush-arith",
  "sagebrush-bigint",
  "sagebrush-interrupt",
  "sagebrush-ledger",

@@ -141,7 +141,17 @@ fn sign_str(s: i32) -> &'static str {
 
 /// Inverse of a square matrix mod p (p prime), or None if singular.
 pub(crate) fn invert_mod(a: &[Vec<u64>], p: u64) -> Option<Vec<Vec<u64>>> {
+    invert_mod_c(a, p, &mut sagebrush_arith::cost::Units::default())
+}
+
+/// invert_mod, counting its units (crate::count): the augmented copy
+/// (Move), and per pivot its inverse, the row's scaling and two ModArith
+/// per entry of each row it clears.
+pub(crate) fn invert_mod_c(a: &[Vec<u64>], p: u64, u: &mut sagebrush_arith::cost::Units) -> Option<Vec<Vec<u64>>> {
+    use crate::count;
+    use sagebrush_arith::cost::Family;
     let n = a.len();
+    count::n(u, Family::Move, 2 * (n * n) as u64);
     let mut m: Vec<Vec<u64>> = a.iter().enumerate().map(|(i, row)| {
         let mut r = row.clone();
         r.extend((0..n).map(|j| (i == j) as u64));
@@ -151,17 +161,21 @@ pub(crate) fn invert_mod(a: &[Vec<u64>], p: u64) -> Option<Vec<Vec<u64>>> {
         let piv = (c..n).find(|&r| m[r][c] != 0)?;
         m.swap(c, piv);
         let iv = powmod(m[c][c], p - 2, p);
+        count::pow(u, p - 2);
         for x in m[c].iter_mut() {
             *x = mul(*x, iv, p);
         }
+        let mut ops = 2 * n as u64;
         for r in 0..n {
             if r != c && m[r][c] != 0 {
                 let f = m[r][c];
                 for t in 0..2 * n {
                     m[r][t] = (m[r][t] + p - mul(f, m[c][t], p)) % p;
                 }
+                ops += 4 * n as u64;
             }
         }
+        count::n(u, Family::ModArith, ops);
     }
     Some(m.into_iter().map(|r| r[n..].to_vec()).collect())
 }
@@ -298,6 +312,32 @@ pub fn exact_charpoly(n: u64, k: usize, eps: &Character, sign: i32, q: u64) -> R
 }
 
 /// CRT to symmetric representatives; parallel over the coordinates.
+/// crt's units (crate::count) for r primes and `entries` values, from its
+/// loops: the inverses (a products and one powmod for prime a), then per
+/// value the Garner digits (four ModArith per prefix step, two per digit)
+/// and the Horner pass in BigUint (bigmul_units of the partial value's
+/// limbs by one, below 2^(32 t) after t steps), and the final copy (Move).
+pub(crate) fn crt_units(ls: &[u64], entries: usize) -> sagebrush_arith::cost::Units {
+    use crate::count;
+    use sagebrush_arith::cost::{bigmul_units, Family, Units};
+    let r = ls.len() as u64;
+    let mut u = Units::default();
+    for (a, &l) in ls.iter().enumerate() {
+        count::n(&mut u, Family::ModArith, a as u64);
+        count::pow(&mut u, l - 2);
+    }
+    let mut one = Units::default();
+    count::n(&mut one, Family::ModArith, 4 * (r * r.saturating_sub(1) / 2) + 2 * r);
+    for t in 0..ls.len() {
+        one.add(&bigmul_units((32 * t).div_ceil(64).max(1), 1));
+    }
+    count::n(&mut one, Family::Move, (32 * r).div_ceil(64).max(1));
+    for (x, y) in u.0.iter_mut().zip(one.0) {
+        *x = x.saturating_add(y.saturating_mul(entries as u64));
+    }
+    u
+}
+
 pub(crate) fn crt(residues: &[(u64, Vec<Vec<u64>>)], d: usize, phi: usize) -> Vec<Vec<BigInt>> {
     // Mixed-radix (Garner) digits in u64, then one Horner pass in BigUint.
     let ls: Vec<u64> = residues.iter().map(|r| r.0).collect();
