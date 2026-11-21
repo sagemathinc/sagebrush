@@ -92,7 +92,10 @@ export const LATEX_LAZY = {
 // (254,169 raw / 84,955 gzip: Nov 20 2026, A5: the LaTeX page leaves another page's reconnect record alone and takes its
 //  own on a navigation back as on a reload (latex/page.ts), measured on the shipped build of the head on master ddafeb50
 //  with bun 1.4.4 and node 24.21.0: 254,105 / 84,891, + 64)
-export const LATEX_CAPS = { raw: 254169, gzip: 84955 };
+// (254,326 raw / 85,015 gzip: Nov 21 2026, a code item not run yet saying how to run it in the editor (the worker's
+//  run flag and the hint): 254,262 / 84,951 measured on the shipped build of its merge with master 2e90b8b3, with bun
+//  1.4.4 and node 24.21.0 (+157 / +60 over master's 254,105 / 84,891), + 64)
+export const LATEX_CAPS = { raw: 254326, gzip: 85015 };
 export const gz = (b) => gzipSync(b, { level: 9 }).length;
 
 // Each lazy chunk's own cap (raw, gzip), fetched only on its own use, so outside the group:

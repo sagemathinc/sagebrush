@@ -66,8 +66,9 @@ try {
   // run at most once a second, which would merge edits made 800 ms apart
   await fetch(`http://127.0.0.1:${cdpPort}/json/close/` + tx.id);
   await a.send("Page.bringToFront");
+  await a.ev("(window.__old = 1, 1)");
   await a.send("Page.reload");
-  await a.until("window.sagebrush && document.querySelectorAll('#cells .cell').length > 0 && document.querySelector('#status').textContent.startsWith('ready')");
+  await a.until("!window.__old && window.sagebrush && document.querySelectorAll('#cells .cell').length > 0 && document.querySelector('#status').textContent.startsWith('ready')");
   // ---- keeping your place: the Welcome notebook, a version or two, the middle cell stays put
   await sleep(1200);
   for (const code of ["def primes(n):\n    return [p for p in range(2, n) if all(p % q for q in range(2, p))]\n\nprimes(50)", "def primes(n):\n    return [p for p in range(2, n + 1) if all(p % q for q in range(2, p))]\n\nprimes(50)"]) {
@@ -143,8 +144,9 @@ try {
   ok(/"type":"settings","kernel":"python3"/.test(rec.first) && /"type":"cell"/.test(rec.first) && /"cell_type":"code"/.test(rec.first) && /"pos":0/.test(rec.first), `kept in IndexedDB as CoCalc Jupyter records (${rec.n} patches, ${rec.size} bytes): ${rec.first.slice(0, 120)}`);
 
   // a reload keeps the history
+  await a.ev("(window.__old = 1, 1)");
   await a.send("Page.reload");
-  await a.until("window.sagebrush && document.querySelectorAll('#cells .cell').length > 0");
+  await a.until("!window.__old && window.sagebrush && document.querySelectorAll('#cells .cell').length > 0");
   await sleep(1500);
   await a.ev("document.querySelector('#ttbtn').click()");
   await a.until(`${versions} === ${n + 1}`, 8000);
@@ -204,8 +206,11 @@ try {
   await choose(a, "matlab");
   await a.until("sagebrush.notebook.mode === 'matlab'", 10000);
   await sleep(900);
+  await a.ev("(window.__old = 1, 1)");
   await a.send("Page.reload");
-  await a.until("window.sagebrush && document.querySelectorAll('#cells .cell').length > 0 && sagebrush.notebook.mode === 'matlab'", 30000);
+  // (the old page marked before the reload, and waited out: with a save's leave-prompt listener on it, the old page
+  // goes more slowly, and a wait on it would read the new one while it still loads, in its default mode)
+  await a.until("!window.__old && window.sagebrush && document.querySelectorAll('#cells .cell').length > 0 && sagebrush.notebook.mode === 'matlab'", 30000);
   ok(/^MATLAB mode:/.test(await a.ev(tip)), "a notebook opened in MATLAB (a reload): the tooltip is MATLAB's: " + (await a.ev(tip)));
   a.ws.close();
 } catch (e) {
