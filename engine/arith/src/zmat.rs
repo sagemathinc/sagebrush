@@ -934,20 +934,31 @@ fn rows_in_span(a: &ZMat, rows: &[usize], piv: &[usize], n: &[BigInt], den: &Big
     true
 }
 
-/// The rank over Q.  First the rank modulo one word prime (the prime `rref`
-/// starts from), by elimination modulo it: a lower bound for the rank, so
-/// when it is min(rows, cols) it is the rank, proven.  Otherwise the exact
-/// `rref`.  (rref's own one-prime shortcut needs rank = cols: a wide matrix
-/// of full row rank went through the whole rational rref.)
-pub fn rank(a: &ZMat) -> usize {
+/// How many word primes [`rank`] tries before the exact `rref`.  A matrix of
+/// full rank over Q is deficient modulo a prime only when the prime divides
+/// every maximal minor, so a second prime settles the unlucky first one
+/// unless it divides them all too; a third would mostly add a reduction and
+/// an elimination to the matrices that are deficient over Q, which go to
+/// `rref` either way.
+const RANK_PRIMES: usize = 2;
+
+/// min(rows, cols) when the rank modulo one of the first `primes` word
+/// primes (from the prime `rref` starts from) reaches it, by elimination
+/// modulo each: each is a lower bound for the rank over Q, so then it is
+/// the rank, proven.  None otherwise.
+fn rank_by_primes(a: &ZMat, primes: usize) -> Option<usize> {
     let full = a.rows.min(a.cols);
-    if full > 0 {
-        let p = Primes::new().next().expect("a prime");
-        if a.reduce(&Modulus::new(p)).rank() == full {
-            return full;
-        }
+    if full == 0 {
+        return Some(0);
     }
-    rref(a).2.len()
+    Primes::new().take(primes).any(|p| a.reduce(&Modulus::new(p)).rank() == full).then_some(full)
+}
+
+/// The rank over Q: [`rank_by_primes`] with [`RANK_PRIMES`] primes, or else
+/// the exact `rref`.  (rref's own one-prime shortcut needs rank = cols: a
+/// wide matrix of full row rank went through the whole rational rref.)
+pub fn rank(a: &ZMat) -> usize {
+    rank_by_primes(a, RANK_PRIMES).unwrap_or_else(|| rref(a).2.len())
 }
 
 /// A basis of the right kernel {x : a x = 0} over Q, scaled to integer
@@ -1279,6 +1290,38 @@ mod tests {
         assert_eq!(rank(&zm(2, 4, vec![p, 2 * p, 0, 0, 0, 0, 1, 1])), 2); // wide: a row that is 0 mod p
         assert_eq!(rank(&zm(3, 2, vec![p, 0, 0, p, 1, 1])), 2); // tall
         assert_eq!(rank(&zm(2, 2, vec![p, 2 * p, 1, 2])), 1); // and deficient over Q too
+        // deficient modulo both primes rank tries: the rref's exact rank
+        let q: Vec<BigInt> = Primes::new().take(2).map(BigInt::from).collect();
+        let pq = &q[0] * &q[1];
+        let big = |d: Vec<BigInt>, r: usize, c: usize| ZMat { rows: r, cols: c, d };
+        let one = || BigInt::from(1);
+        let zero = || BigInt::from(0);
+        assert_eq!(rank(&big(vec![pq.clone(), zero(), zero(), one()], 2, 2)), 2);
+        assert_eq!(rank(&big(vec![q[0].clone(), zero(), zero(), q[1].clone()], 2, 2)), 2);
+        assert_eq!(rank(&big(vec![pq.clone(), BigInt::from(2) * &pq, one(), BigInt::from(2)], 2, 2)), 1);
+    }
+
+    /// The bench's full-rank matrix whose rank is one less modulo the first
+    /// prime (R diag(1, ..., 1, p) R'): proven full by the second prime,
+    /// without the rref.
+    #[test]
+    fn rank_of_a_matrix_unlucky_for_the_first_prime_comes_from_the_second() {
+        let p = BigInt::from(Primes::new().next().unwrap());
+        let mut s = 0x2545_f491_4f6c_dd1du64;
+        let n = 12;
+        let r1 = rand_zmat(n, n, 50, &mut s);
+        let mut r2 = rand_zmat(n, n, 50, &mut s);
+        for x in &mut r2.d[(n - 1) * n..] {
+            *x *= &p;
+        }
+        let a = r1.mul(&r2);
+        let ps: Vec<u64> = Primes::new().take(2).collect();
+        assert!(a.reduce(&Modulus::new(ps[0])).rank() < n, "deficient modulo the first prime");
+        assert_eq!(a.reduce(&Modulus::new(ps[1])).rank(), n, "full modulo the second");
+        assert_eq!(rank_by_primes(&a, 1), None);
+        assert_eq!(rank_by_primes(&a, RANK_PRIMES), Some(n), "proven by the primes, without the rref");
+        assert_eq!(rank(&a), n);
+        assert_eq!(rref(&a).2.len(), n);
     }
 
     #[test]
