@@ -39,6 +39,7 @@ const NOTEBOOKS = [
 export const NOT_IN_OLD_MENU: Record<string, string> = {
   "helper-code": "its helper files beside it (_code/, data/): the old menu makes a notebook from cells alone",
   "hidden-setup": "its cells' Jupyter metadata (source_hidden, outputs_hidden): the old menu keeps code and Markdown only",
+  "gradescope-homework": "newer than the old menu, which the Examples panel replaces: it opens from the panel, under its own name",
 };
 const LATEX = ["article", "beamer", "sagetex", "pythontex", "matlab", "figure", "cv", "tikz", "bibliography", "homework"];
 const BOARDS = ["how-sagebrush-is-built", "infinitely-many-primes", "collatz-live", "mermaid-flowcharts", "what-is-transitive"];

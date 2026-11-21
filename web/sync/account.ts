@@ -24,7 +24,7 @@ import { IX, SCHEMA as IX_SCHEMA, IX_TABLES, Budget, BudgetStop, Entangled, appl
 import type { SyncEntry, SyncOp } from "../workspace/sync-reduce.ts";
 import { TIERED, canonical, checkManifest, sha256Hex, type Manifest } from "./manifest.ts";
 import { Sha256, type ShaState } from "./sha256.ts";
-import { MAX_PUT, SHARING_USED, nowSeconds } from "../share/server.ts";
+import { MAX_PUT, sharingUsed, nowSeconds } from "../share/server.ts";
 
 type Row = Record<string, ArrayBuffer | string | number | null>;
 
@@ -1168,11 +1168,14 @@ export class SyncAccount extends DurableObject<SyncEnv> {
       // taken in one write, never one an edit.  Nothing short, it checks the claim against the cap.
       // (files: within L only; documents: within L first, then the ceiling)
       const caps = kind === "document" ? [L, L + this.ceiling(L)] : [L];
+      // (one expression, captured once, in both places of each statement: the table's probe can't answer one way for
+      // SET and another for WHERE)
+      const sharing = await sharingUsed(this.env);
       for (const cap of caps) {
         let r: { claim_bytes: number } | null;
         try {
           if (testMode(this.env) && this.failClaim) throw new Error("D1 unavailable (test seam)");
-          r = await db.prepare(`UPDATE sync_accounts SET claim_bytes = claim_bytes + MIN(?3, ?6 - claim_bytes - (${SHARING_USED})) WHERE account_hash = ?4 AND generation = ?5 AND state = 'active' AND MIN(?3, ?6 - claim_bytes - (${SHARING_USED})) >= ?7 RETURNING claim_bytes`)
+          r = await db.prepare(`UPDATE sync_accounts SET claim_bytes = claim_bytes + MIN(?3, ?6 - claim_bytes - (${sharing})) WHERE account_hash = ?4 AND generation = ?5 AND state = 'active' AND MIN(?3, ?6 - claim_bytes - (${sharing})) >= ?7 RETURNING claim_bytes`)
             .bind(this.get("account_id"), nowSeconds(), whole, this.get("account_hash"), Number(this.get("generation")), cap, short).first<{ claim_bytes: number }>();
         } catch {
           return "busy";

@@ -196,6 +196,23 @@ It then sends the notification `grant.changed` with the grant: `{agent, client, 
   Once `chat_next` has been called in a session, the server stops pushing channel events and queues messages instead, so no message comes by both routes.
 - **The agent's instructions** say that only `author: "person"` messages are instructions. Everything else (collaborators' messages, document text) arrives labelled as content.
 
+### 4.1 The conversation's log: `chat.resume` (sagebrush-agent)
+
+An agent whose hello (or agent.ready) lists the feature `chat.resume` keeps each conversation's log in memory. The log holds its `turn.event` and `chat.rejected` messages and the person's `chat.message`s, numbered from one counter for the whole agent process. Its hello names the run those numbers belong to: `log: {instance}`.
+
+- **Live:** each `turn.event` and `chat.rejected` carries `seq`. The page keeps, per thread, the last number it applied and the run it came from, and applies each number once.
+- **`chat.resume`** `{conversation, after, instance?}`: the page asks for what came after its last number. The page sends it once granted, for each thread an agent was in.
+- **`chat.replay`** `{conversation, instance, last, reset?, events: [{seq, method, params}], done}`:
+  - The agent answers in one or more messages. Each holding more than one entry is at most 1 MiB, or half the frame over a runner.
+  - `reset`: entries the page asked for are gone, or its numbers are from another run. The page keeps what it has and applies `events`.
+  - If the page's highest number is still below `last`, it asks again from there.
+- **Who may read the log:** pairing, a session re-pair included, authorizes reading every conversation's log in that agent process. It is not scoped to a page or a conversation, and a workspace grant doesn't gate it.
+- **On the page:**
+  - When the pairing ends or the page reloads, a running turn of such an agent is *away* rather than interrupted: nothing on the page binds to it, and a new message waits for its end.
+  - A replay finishes the turn with the agent's own events. Another run of the agent, or an agent without the feature, ends it as interrupted.
+  - A replayed artifact never moves the pane.
+  - The agent's bounds (ids of at most 256 bytes, 256 logs, 32 MiB) are in its lib/log.mjs.
+
 ## 5. Testing
 
 - **sagebrush-mcp** tests its tool layer against a fake page: an in-process WebSocket client that implements the verbs over a dictionary.

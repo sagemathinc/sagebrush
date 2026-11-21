@@ -249,8 +249,16 @@ export function createNotebook(root, opts = {}) {
     graphView ??= import(asset("sagebrush-graphview.js")).then(() => window.SagebrushGraphView);
     graphView.then((v) => v?.mount(fig, graph)).catch(() => {});
   }
-  let mathModule = null;
-  const loadMath = () => (mathModule ??= import(asset("sagebrush-math.js")));
+  // KaTeX (sagebrush-math.js), fetched the first time math is shown; once it and its stylesheet are in, math is
+  // typeset in the same step as the text around it, so no paint shows the TeX source (William: "visually disturbing")
+  let mathModule = null, mathNow = null;
+  const loadMath = () => (mathModule ??= import(asset("sagebrush-math.js")).then(async (m) => { await m.ready?.(); return (mathNow = m); }));
+  // (math in `el` typeset now if KaTeX is in, else hidden until it is: never its source first)
+  function typesetMath(el) {
+    if (mathNow) { try { mathNow.typeset(el); } catch {} return; }
+    el.classList.add("mathwait");
+    loadMath().then((m) => m.typeset(el), () => {}).finally(() => el.classList.remove("mathwait"));
+  }
   // A Jupytext MyST notebook (a copy of a MyST .md: web/notebook/myst.js): its Markdown's directives and roles
   // drawn by sagebrush-myst.js (web/myst), fetched only for such a notebook, once; until it has come, plain Markdown.
   // (`editing`: a block of a cell being written, drawn as it is typed)
@@ -274,7 +282,7 @@ export function createNotebook(root, opts = {}) {
     m.dataset.tex = tex;
     el.appendChild(m);
     box.appendChild(el);
-    loadMath().then((mm) => mm.typeset(el)).catch(() => {});
+    typesetMath(el);
   }
   // Markdown output (mo.md, IPython.display.Markdown): drawn as Markdown cells are
   function appendMarkdown(box, b) {
@@ -283,7 +291,7 @@ export function createNotebook(root, opts = {}) {
     // (no images from other sites: code made this, and an image's address could carry away what it read)
     el.innerHTML = renderMarkdown(b["text/markdown"], { highlight: mdHighlight, remote: false, pixels });
     box.appendChild(el);
-    if (el.querySelector(".math")) loadMath().then((mm) => mm.typeset(el)).catch(() => {});
+    if (el.querySelector(".math")) typesetMath(el);
   }
   // HTML output (IPython.display.HTML, tables): the restricted HTML of
   // web/safe-html.ts (formatting only, nothing that runs), no images from
@@ -339,9 +347,19 @@ export function createNotebook(root, opts = {}) {
     }
   }
   // (an output that can't be drawn, however malformed: said, with its text, the rest of the document drawn all the same)
-  function appendDisplay(box, b) {
+  // A picture's size to show it at, from a display's metadata ({mime: {width, height}}): both finite positive numbers
+  // (at most 100,000 each), else none, and the picture is shown at its own size.
+  function pictureShownSize(md, mime) {
+    const m = md && typeof md === "object" ? md[mime] : null;
+    const w = m && typeof m === "object" ? m.width : undefined, ht = m && typeof m === "object" ? m.height : undefined;
+    const ok = (x) => typeof x === "number" && Number.isFinite(x) && x > 0 && x <= 1e5;
+    return ok(w) && ok(ht) ? { width: Math.round(w), height: Math.round(ht) } : null;
+  }
+  // (md: the display's metadata, Jupyter's: a picture's width and height to show it at, a PNG drawn at twice its
+  // size, lib/_graphics.py; taken only as finite positive numbers, pictureShownSize)
+  function appendDisplay(box, b, md) {
     try {
-      drawDisplay(box, b);
+      drawDisplay(box, b, md);
     } catch (e) {
       const el = h("div", "html-out");
       el.sbBundle = { ...b };
@@ -351,7 +369,7 @@ export function createNotebook(root, opts = {}) {
       box.appendChild(el);
     }
   }
-  function drawDisplay(box, b) {
+  function drawDisplay(box, b, md) {
     if (b["text/latex"] && b["application/vnd.sagebrush.typeset"]) return appendLatex(box, b);
     if (typeof b["text/markdown"] === "string" && !b["image/svg+xml"] && !b["image/png"] && !b["image/jpeg"] && !b["image/webp"]) return appendMarkdown(box, b);
     const fig = h("figure", "plot");
@@ -384,7 +402,10 @@ export function createNotebook(root, opts = {}) {
     else if (raster) {
       // (within the bounds its header gives, and this document's pixels in
       // all: image-size.ts; else a placeholder, the picture kept as it was)
-      const show = () => Object.assign(new Image(), { src: `data:${raster[0]};base64,${raster[1]}`, alt: b["text/plain"] || "image" });
+      // (shown at the size its metadata gives, when it gives one: a PNG drawn at twice it is sharp on a dense screen)
+      const size = pictureShownSize(md, raster[0]);
+      if (size) fig.sbMeta = { [raster[0]]: size };
+      const show = () => Object.assign(new Image(), { src: `data:${raster[0]};base64,${raster[1]}`, alt: b["text/plain"] || "image" }, size ?? {});
       const why = pixels.take(imageSize(raster[0], raster[1]), raster[0] + "\n" + pictureKey(raster[1]));
       if (!why) fig.appendChild(show());
       else {
@@ -420,7 +441,7 @@ export function createNotebook(root, opts = {}) {
     if (!box) return null;
     return {
       out: (text, isErr) => appendText(box, text, isErr),
-      display: (b) => appendDisplay(box, b),
+      display: (b, md) => appendDisplay(box, b, md),
       interact: (spec) => renderInteract(box, spec),
       clear: () => box.replaceChildren(),
       input: (prompt, reply) => askInput(box, prompt, reply, waiting),
@@ -490,12 +511,12 @@ export function createNotebook(root, opts = {}) {
         // notebook: its picture is, and running the cell again restores the view
         const b = { ...el.sbBundle };
         if ((b[SCENE3D]?.length ?? 0) > 8e6) delete b[SCENE3D];
-        outs.push({ output_type: "display_data", data: b, metadata: {} });
+        outs.push({ output_type: "display_data", data: b, metadata: el.sbMeta ?? {} });
       } else if (el.tagName === "FIGURE") {
         const svg = el.querySelector("svg"), img = el.querySelector("img"), data = {};
         if (svg) { data["image/svg+xml"] = new XMLSerializer().serializeToString(svg); data["text/plain"] = svg.getAttribute("aria-label") || "picture"; }
         else if (img) { const [head, b64] = img.src.split(","); data[head.slice(5, head.indexOf(";"))] = b64; data["text/plain"] = img.alt; }
-        outs.push({ output_type: "display_data", data, metadata: {} });
+        outs.push({ output_type: "display_data", data, metadata: (img && el.sbMeta) || {} });
       } else if (el.classList.contains("interact")) {
         stream("stdout", "[interactive controls: run the cell to use them]\n");
         outs.push(...saveOutputs(el.querySelector(".iout")));
@@ -516,15 +537,20 @@ export function createNotebook(root, opts = {}) {
         const b = {};
         for (const [key, v] of Object.entries(o.data)) b[key] = joinText(v);
         if (Object.keys(b).every((k) => k === "text/plain")) appendText(box, (b["text/plain"] ?? "") + "\n", false);
-        else appendDisplay(box, b);
+        else appendDisplay(box, b, o.metadata);
       }
     }
   }
 
   // ---------------------------------------------------------- @interact
   // Controls drawn from the kernel's spec; each change reruns the function
-  // (one update in flight at a time, always with the latest values), and its
-  // new output replaces the old in one step, so dragging a slider does not flicker.
+  // (one update in flight at a time, always with the latest values).  A rerun's
+  // new output replaces the old in one step, so dragging a slider does not
+  // flicker; one still running after INTERACT_SWAP_MS shows its output as it
+  // comes instead.  While it runs, its cell shows that it is running, as for a
+  // run of the cell (its time counting, its ▶ a Stop), and a change made then
+  // interrupts it: the latest values run once it has stopped.
+  const INTERACT_SWAP_MS = 150;
   const interacts = new Map(); // "generation:id" -> state
   let controlCount = 0;
   // (which interpreter, and which start of it: interacts drawn by another are stale)
@@ -614,7 +640,22 @@ export function createNotebook(root, opts = {}) {
     }
   }
   bindKernel(kernel);
-  const forgetInteracts = (box) => box.querySelectorAll(".interact").forEach((el) => interacts.delete(el.dataset.key));
+  // (an interact's output gone: its rerun, if one shows on the cell, no longer does)
+  const forgetInteracts = (box) => box.querySelectorAll(".interact").forEach((el) => {
+    const it = interacts.get(el.dataset.key);
+    if (it?.cell?.interactRun === it) {
+      releaseInteract(it.cell);
+      settle(it.cell);
+    }
+    interacts.delete(el.dataset.key);
+  });
+  // (the cell stops showing an interact's rerun: its timer ends; what the cell shows is then its own)
+  function releaseInteract(cell) {
+    const it = cell.interactRun;
+    if (!it) return;
+    clearInterval(it.timer);
+    cell.interactRun = null;
+  }
   function renderInteract(box, spec) {
     const it = { iid: spec.id, gen: generation(), name: spec.name, values: {}, setters: {}, busy: false, dirty: false, buffer: null, waiters: [] };
     const el = h("div", "interact");
@@ -716,20 +757,80 @@ export function createNotebook(root, opts = {}) {
       for (const w of it.waiters.splice(0)) w();
       return;
     }
-    if (it.busy) { it.dirty = true; return; }
+    if (it.busy) {
+      it.dirty = true;
+      // (a rerun already showing its output is superseded: interrupted, what it still prints dropped, and the
+      // latest values run when it has stopped; only where a Stop keeps the interpreter and stops nothing else)
+      if (it.streaming && !it.superseded && kernel.pending?.size === 1 && (kernel.interruptFlag || kernel.worker?.interrupt)) {
+        it.superseded = true;
+        it.buffer = document.createElement("div");
+        kernel.interrupt(STOP_MESSAGE);
+      }
+      return;
+    }
     it.busy = true;
     it.buffer = document.createElement("div");
+    // (the cell showing it, unless the cell itself is being run)
+    const cell = it.out.closest(".cell")?.cell;
+    const own = cell && !cell.el.classList.contains("queued") && !cell.el.classList.contains("running") ? cell : null;
+    if (own) {
+      it.cell = own;
+      own.interactRun = it;
+      own.el.classList.add("queued");
+      armStop(own);
+    }
+    let swap = 0;
+    const ours = () => own && own.interactRun === it;
+    // (the run is over: the cell shows its time, or nothing if it didn't finish)
+    const end = (ms) => {
+      clearTimeout(swap);
+      if (!ours()) return;
+      releaseInteract(own);
+      settle(own);
+      own.time.title = "";
+      own.time.textContent = ms == null ? "" : `${ms < 10 ? ms.toFixed(1) : Math.round(ms)} ms`;
+    };
     const finish = () => {
       it.busy = false;
+      it.streaming = false;
       if (it.dirty) { it.dirty = false; return changed(it); }
       for (const w of it.waiters.splice(0)) w();
     };
+    // (where its output goes now: the buffer until it is shown, then the interact's own output)
+    const box = () => it.buffer ?? it.out;
     kernel.interact(it.iid, it.values, {
-      start() {},
-      ...areaSink(it.buffer),
+      start() {
+        const t0 = performance.now();
+        if (ours()) {
+          own.el.classList.replace("queued", "running");
+          const tick = () => { own.time.textContent = `running… ${((performance.now() - t0) / 1000).toFixed(1)} s`; };
+          tick();
+          it.timer = setInterval(tick, 250);
+        }
+        swap = setTimeout(() => {
+          if (!it.buffer || it.superseded) return;
+          it.out.replaceChildren(...it.buffer.childNodes);
+          it.buffer = null;
+          it.streaming = true;
+        }, INTERACT_SWAP_MS);
+      },
+      out: (text, isErr) => appendText(box(), text, isErr),
+      display: (b, md) => appendDisplay(box(), b, md),
+      interact: (spec) => renderInteract(box(), spec),
+      clear: () => box().replaceChildren(),
+      input: (prompt, reply) => askInput(box(), prompt, reply),
       done(ms, info) {
-        it.out.replaceChildren(...it.buffer.childNodes);
+        if (it.superseded) {
+          it.superseded = false;
+          it.buffer = null;
+          end(null);
+          return finish();
+        }
+        if (it.buffer) it.out.replaceChildren(...it.buffer.childNodes);
         it.buffer = null;
+        end(ms);
+        // (a Stop: the changes made while it ran are dropped with it)
+        if (info?.interrupted) it.dirty = false;
         // widgets are inputs: the cells reading the ones that changed rerun (not the cell showing them)
         if (info?.names?.length && reactive() && kernel.reactive) {
           const owner = it.out.closest(".cell")?.cell;
@@ -737,8 +838,8 @@ export function createNotebook(root, opts = {}) {
         }
         finish();
       },
-      stopped(message) { it.buffer = null; appendText(it.out, message, true); it.dirty = false; finish(); },
-    });
+      stopped(message) { end(null); it.buffer = null; it.superseded = false; appendText(it.out, message, true); it.dirty = false; finish(); },
+    }, { figures: figures() });
   }
 
   // ---------------------------------------------------------- running cells
@@ -762,8 +863,107 @@ export function createNotebook(root, opts = {}) {
     const r = kernel?.reactive;
     if (r) for (const c of cells()) if (c.type === "code" && c.ms != null && !r.times.has(c.id)) r.times.set(c.id, c.ms);
   }
+  // ---- a Run's upstream (the reactive notebook): the cells it needs run first, said, and asked about when slow
+  // (cells this interpreter never ran whose text the scheduler doesn't have yet: typed, not run)
+  function pendingCells(except) {
+    const r = kernel?.reactive;
+    return cells().filter((c) => c !== except && c.type === "code" && !kernel?.ran?.has(c.id) && c.version.text.trim() !== "" && r?.submitted(c.id) !== c.version.text).map((c) => c.id);
+  }
+  // (cells this interpreter ran and that were edited since: a Run runs them first, as it does the never-run ones)
+  function editedCells(except) {
+    const r = kernel?.reactive;
+    return cells().filter((c) => c !== except && c.type === "code" && kernel?.ran?.has(c.id) && r?.submitted(c.id) !== undefined && r.submitted(c.id) !== c.version.text).map((c) => c.id);
+  }
+  // (after a Run: one line under the cell while a cell it needs stays unrun, whatever the reason, and a button that
+  //  runs them, then this one; gone once none is.  A remote kernel's Run runs only the cell: the line, no button.
+  //  `shown`: only update a line already there)
+  async function saySkipped(cell, shown = false) {
+    const r = kernel?.reactive;
+    if (!r || opts.readOnly || !reactive() || (shown && !cell.el.querySelector(".upstream.skipped"))) return;
+    const need = await r.plan([cell.id], [...pendingCells(cell), ...editedCells(cell)]);
+    cell.el.querySelector(".upstream.skipped")?.remove();
+    if (!need.length || !cell.el.isConnected) return;
+    const n = need.length, total = need.reduce((a, id) => a + (r.times.get(id) ?? 0), 0);
+    const last = !total ? "" : n === 1 ? ` (took ${secs(total)} last time)` : ` (${secs(total)} in all last time)`;
+    const bar = h("div", "upstream fixes skipped", { textContent: `Ran without re-running ${n} earlier cell${n === 1 ? "" : "s"} it needs${last}.` });
+    if (!kernel.remote) {
+      bar.append(" ");
+      const b = bar.appendChild(h("button", "", { textContent: `Run ${n === 1 ? "it" : "them"} too` }));
+      b.onclick = () => { b.disabled = true; return run(cell, true, true); };
+    }
+    cell.out.before(bar);
+  }
+  let skippedSoon = false;
+  function refreshSkipped() {
+    if (skippedSoon) return;
+    skippedSoon = true;
+    setTimeout(() => { skippedSoon = false; for (const c of cells()) void saySkipped(c, true); });
+  }
+  // (one line over the cell while what it needs runs; null takes it away)
+  function sayUpstream(cell, n) {
+    cell.el.querySelector(".upstream:not(.skipped)")?.remove();
+    if (n) cell.out.before(h("div", "upstream", { textContent: `Running ${n} cell${n === 1 ? "" : "s"} this needs…` }));
+  }
+  // (cells that last took over 10 s: asked once first, in the cell; resolves to whether to run)
+  const UPSTREAM_SLOW_MS = 10000;
+  function askUpstream(cell, n, slow) {
+    return new Promise((resolve) => {
+      cell.el.querySelector(".upstream")?.remove();
+      const total = slow.reduce((a, b) => a + b, 0);
+      const it = n === 1 ? "it" : "them";
+      const text = slow.length === 1 ? `This needs ${n} earlier cell${n === 1 ? "" : "s"}; ${n === 1 ? "it" : "one"} took ${secs(slow[0])}. Run ${it}?` : `This needs ${n} earlier cells; ${slow.length} of them took over 10 s, ${secs(total)} in all. Run them?`;
+      const bar = h("div", "upstream fixes", { textContent: text + " " });
+      const done = (go) => { bar.remove(); resolve(go); };
+      bar.appendChild(h("button", "", { textContent: `Run ${it}`, onclick: () => done(true) }));
+      bar.appendChild(h("button", "", { textContent: "Not now", onclick: () => done(false) }));
+      cell.out.before(bar);
+    });
+  }
+  // (the cells to run first, said; null when a slow one was asked about and declined; `ask` false: none asked)
+  async function upstreamFirst(cell, pending, ask = true) {
+    const r = kernel?.reactive;
+    if (!r || opts.readOnly) return [];
+    const need = await r.plan([cell.id], pending);
+    if (!need.length) return need;
+    const slow = need.map((id) => r.times.get(id) ?? 0).filter((ms) => ms > UPSTREAM_SLOW_MS);
+    if (ask && slow.length && !(await askUpstream(cell, need.length, slow))) return null;
+    sayUpstream(cell, need.length);
+    return need;
+  }
+  // (where the dependencies the analyzer sees miss one, exec, globals(), a star import: a NameError for a name another
+  //  cell defines offers that cell's run, then this one's)
+  async function definerOf(cell, name) {
+    const order = cells().filter((c) => c.type === "code" && c.version.text.trim() !== "");
+    const i = order.indexOf(cell), others = [...order.slice(0, i).reverse(), ...order.slice(i + 1)];
+    const r = kernel?.reactive;
+    const analysis = async (c) => { try { const a = await r?.host.analyze(c.version.text); return a && !a.error ? a : null; } catch { return null; } };
+    const word = new RegExp(`(^|[^\\w])${name.replace(/[.*+?^${}()|[\]\\]/g, "\\$&")}([^\\w]|$)`);
+    const found = [];
+    for (const c of others) found.push([c, await analysis(c)]);
+    // (sure: the analysis says it defines the name; otherwise a cell that may: the name written where the analysis
+    //  doesn't count it as a read, or a star import, exec, globals(), load or attach above)
+    const sure = found.find(([, a]) => a?.defs.has(name));
+    if (sure) return { cell: sure[0], sure: true };
+    const may = found.find(([c, a]) => word.test(c.version.text) && !a?.refs.has(name))
+      ?? found.slice(0, i).find(([c]) => /\bimport\s+\*|\bexec\s*\(|\bglobals\s*\(\s*\)|\bload\s*\(|\battach\s*\(/.test(c.version.text));
+    return may ? { cell: may[0], sure: false } : null;
+  }
+  async function offerDefiner(cell) {
+    if (opts.readOnly || cell.out.querySelector(".definer")) return;
+    const m = /NameError: name '([^']+)' is not defined\s*$/.exec(cell.out.textContent);
+    const name = m?.[1] && kernel?.reactive ? kernel.reactive.written(m[1]) : null;
+    if (!name) return;
+    const found = await definerOf(cell, name);
+    if (!found || !cell.el.isConnected || !/NameError/.test(cell.out.textContent)) return;
+    const d = found.cell, bar = cell.out.appendChild(h("div", "fixes definer"));
+    const b = bar.appendChild(h("button", "", { title: `Run ${label(d.id)}, then try this cell again` }));
+    b.append(found.sure ? "Run the cell that defines " : "Run a cell that may define ", h("code", "", { textContent: name }));
+    b.onclick = async () => { b.disabled = true; await run(d, true); await run(cell, true); };
+  }
+
   // (`gesture`: a person's Run, from its handler: their consent to run the cell as shown is captured)
-  function run(cell, gesture = false) {
+  // (`too`: the cells it needs run first, none asked about)
+  function run(cell, gesture = false, too = false) {
     if (cell.type === "markdown") return renderMd(cell);
     if (cell.type === "raw") return Promise.resolve(); // raw text is not run
     // (a Run the page knows its interpreter would refuse: no cell touched, its outputs kept; the page says why instead)
@@ -777,15 +977,24 @@ export function createNotebook(root, opts = {}) {
       const asked = (cell.runsAsked ??= new Set());
       if (asked.has(text)) return Promise.resolve();
       asked.add(text);
-      return engine().run([cell.id], consentFor([cell.id])).finally(() => asked.delete(text));
+      return engine().run([cell.id], consentFor([cell.id])).finally(() => asked.delete(text)).then(async (report) => { if (report) await saySkipped(cell); return report; });
     }
-    if (cell.el.classList.contains("queued") || cell.el.classList.contains("running")) return Promise.resolve();
+    // (a cell showing an interact's rerun isn't being run: it can be)
+    if (!cell.interactRun && (cell.el.classList.contains("queued") || cell.el.classList.contains("running"))) return Promise.resolve();
     // (an explicit run, synchronously, before anything is asked of the kernel: the page's moment to start a new
     // interpreter for a permission widened since this one started (confinement phase 2); never the reactive
     // scheduler's own reruns)
     if (gesture) opts.onExplicitRun?.();
-    // the reactive notebook: the cell, its stale ancestors, its descendants (within the budget)
-    if (reactive()) return engine().run([cell.id], gesture ? consentFor([cell.id]) : {});
+    // the reactive notebook: the cell, its stale ancestors and the never-run or edited cells it needs (said, and asked about
+    // when slow), its descendants (within the budget)
+    if (reactive()) {
+      const pending = [...pendingCells(cell), ...editedCells(cell)];
+      return upstreamFirst(cell, pending, !too).then((need) => need === null ? undefined
+        : engine().run([cell.id], { ...(gesture ? consentFor([cell.id, ...need]) : {}), pending })
+          .then((report) => { for (const id of report?.failed ?? []) { const c = cellById(id); if (c) void offerDefiner(c); } return report; }))
+        .finally(() => sayUpstream(cell, null))
+        .then(async (report) => { if (report) await saySkipped(cell); return report; });
+    }
     if (kernel?.remote) { appendText(cell.out, REMOTE_NEEDS_REACTIVE, true); return Promise.resolve(); }
     return execCell(cell, cell.ta.value);
   }
@@ -805,13 +1014,20 @@ export function createNotebook(root, opts = {}) {
       cell.time.textContent = "";
       cell.stoppedAfter = null;
       freshen(cell);
-      cell.el.classList.remove("cancelled", "error");
+      cell.el.classList.remove("cancelled", "error", "edited");
     };
     if (!viaWave) clear();
+    // (the code its output will be from: outside the reactive notebook, an edit after it marks the cell edited)
+    cell.ranText = code;
     if (!kernel) {
       clear();
       appendText(cell.out, "(no kernel: this notebook cannot run code)\n", true);
       return Promise.resolve({ ok: false, ms: 0, stopped: true });
+    }
+    // (an interact's rerun shown on the cell: the cell's own run shows instead)
+    if (cell.interactRun) {
+      releaseInteract(cell);
+      cell.el.classList.remove("running");
     }
     cell.el.classList.add("queued");
     cell.n.textContent = "[*]";
@@ -820,7 +1036,7 @@ export function createNotebook(root, opts = {}) {
     let waited = 0, waitFrom = null;
     const k = kernel;
     const send = viaWave ?? ((c, o, sink) => k.execute(c, o, sink));
-    return cellSeed(cell).then((seed) => new Promise((resolve) => send(code, { mode, cell: cell.id, forget, mangle: reactive(), ...(seed ? { seed } : {}), ...(scoped ? { scoped } : {}), ...(extra ?? {}) }, {
+    return cellSeed(cell).then((seed) => new Promise((resolve) => send(code, { mode, cell: cell.id, forget, mangle: reactive(), figures: figures(), ...(seed ? { seed } : {}), ...(scoped ? { scoped } : {}), ...(extra ?? {}) }, {
       start() {
         clear();
         cell.el.classList.replace("queued", "running");
@@ -870,6 +1086,7 @@ export function createNotebook(root, opts = {}) {
         }
         cell.n.textContent = `[${kernel ? ++kernel.execCount : ++execCount}]`;
         kernel?.ran?.add(cell.id);
+        if (reactive()) refreshSkipped();
         if (!info?.interrupted) rememberTime(cell, ms);
         cell.time.textContent = `${ms < 10 ? ms.toFixed(1) : Math.round(ms)} ms`;
         announce(`Cell ${index(cell) + 1} ${failed || info?.error ? "raised an error" : "finished"}`);
@@ -1132,6 +1349,12 @@ export function createNotebook(root, opts = {}) {
   // A cell whose code differs from what last ran ("edited": its output and
   // what other cells see are the old code's)
   function markEdited(cell) {
+    // (outside the reactive notebook: a cell with an output whose code was changed since, by a run or as loaded;
+    // its output is the old code's, as the notebook page shows)
+    if (!reactive()) {
+      cell.el.classList.toggle("edited", cell.type === "code" && !!cell.out.firstChild && cell.ranText != null && cell.ta.value != cell.ranText);
+      return;
+    }
     const r = kernel?.reactive;
     const sub = reactive() && r ? r.submitted(cell.id) : undefined;
     // (or never ran, with code)
@@ -1146,7 +1369,7 @@ export function createNotebook(root, opts = {}) {
   }
   const interrupt = () => kernel?.interrupt(STOP_MESSAGE);
   function clearOutputs() {
-    for (const c of cells()) if (c.type === "code") { forgetInteracts(c.out); c.out.textContent = ""; c.time.textContent = ""; c.n.textContent = "[ ]"; freshen(c); }
+    for (const c of cells()) if (c.type === "code") { forgetInteracts(c.out); c.out.textContent = ""; c.time.textContent = ""; c.n.textContent = "[ ]"; freshen(c); markEdited(c); }
   }
 
   function autosize(ta) {
@@ -1643,8 +1866,6 @@ export function createNotebook(root, opts = {}) {
     paint(cell);
     relabel();
   }
-  // (or 200 ms, whichever is first: a hidden page, e.g. a background tab, does not paint)
-  const afterPaint = () => new Promise((resolve) => { requestAnimationFrame(() => setTimeout(resolve, 0)); setTimeout(resolve, 200); });
   // Highlight fenced Python/Sage code in Markdown as in code cells.
   const mdHighlight = (code, lang) => (/^(matlab|m)$/i.test(lang ?? "") || (!lang && isMatlab()) ? highlightMatlab(code).replace(/\n$/, "")
     : !lang || /^(python|py|python3|sage|ipython)$/i.test(lang) ? highlight(code, /sage/i.test(lang) || (!lang && isSage())).replace(/\n$/, "") : null);
@@ -1652,10 +1873,7 @@ export function createNotebook(root, opts = {}) {
     closeBlocks(cell);
     cell.md.innerHTML = cell.ta.value.trim() ? renderMarkdown(cell.ta.value, { highlight: mdHighlight, attachments: cell.attachments, pixels, remote: remotePictures(), myst: mystFor(cell) }) : '<p class="hc">Empty Markdown cell: double-click to edit.</p>';
     cell.el.classList.add("rendered");
-    if (cell.md.querySelector(".math")) {
-      await afterPaint(); // the text shows first; KaTeX (275 KB) typesets the math after
-      try { (await loadMath()).typeset(cell.md); } catch {}
-    }
+    if (cell.md.querySelector(".math")) typesetMath(cell.md);
     schedule();
   }
   // (at: where it was double-clicked: that block, the caret there; nothing
@@ -1675,7 +1893,7 @@ export function createNotebook(root, opts = {}) {
     if (cell.blocks || opts.readOnly) return cell.blocks;
     const b = new BlockEditor(cell.ta.value, {
       render: (src) => renderMarkdown(src, { highlight: mdHighlight, attachments: cell.attachments, pixels, remote: remotePictures(), myst: mystFor(cell, true) }),
-      typeset: (el) => { loadMath().then((m) => m.typeset(el)).catch(() => {}); },
+      typeset: (el) => typesetMath(el),
       highlight: (src) => highlightMarkdown(src, isSage()),
       placeholder: "Text: Markdown, with math: $x^2$",
       tabIndents: true,
@@ -1814,7 +2032,7 @@ export function createNotebook(root, opts = {}) {
   // ---------------------------------------------------------- the document
   // A document is {mode, cells: [{id, type?, code, outputs?, n?, attachments?, metadata?}], ...meta}.
   // A cell's metadata (nbformat's: tags, ...) is kept as it is.
-  let loading = false, timer = null, lastJson = null, store = null, unsubscribe = null, saveChain = Promise.resolve(), savesPending = 0, lastSaveError = null;
+  let loading = false, timer = null, lastJson = null, store = null, unsubscribe = null, saveChain = Promise.resolve(), savesPending = 0;
   // The document shown, from when it is loaded until another is (or it is
   // detached): what is known of it, which its saves keep to, even one still
   // waiting its turn when another document is shown (CORR-989-1).
@@ -1844,24 +2062,67 @@ export function createNotebook(root, opts = {}) {
   // before closing while there are any, their saves only here)
   const leftChanged = () => emit("left", leftCount());
   // (one whose save was busy stays outstanding until it is sent again: counted, asked about before closing)
-  const leftSettled = (s) => { if (!s.inflight && !unkept.has(s) && !busy.has(s)) outstanding.delete(s); leftChanged(); };
-  async function keepDetached(key, doc, theirs) {
+  const leftSettled = (s) => { if (!s.inflight && !unkept.has(s) && !busy.has(s) && !failed.has(s)) outstanding.delete(s); leftChanged(); };
+  // (a save that failed, thrown or refused ("not saved: ..."), kept with ITS notebook, shown or left, with what it sent:
+  // only a later save of that same notebook that succeeds clears it, never another notebook's; saved() sends a left one
+  // again, and rejects, naming it, while any is still failed; a left one stays counted (LIMIT-900-2))
+  const failed = new Map();
+  function saveFailed(mine, st, sent, json, seq, error) {
+    if ((failed.get(mine)?.seq ?? 0) > seq) return;
+    failed.set(mine, { st, sent, json, seq, error });
+    outstanding.add(mine);
+  }
+  function saveSucceeded(mine, seq) {
+    if ((failed.get(mine)?.seq ?? Infinity) <= seq) failed.delete(mine);
+  }
+  // (`why`: absent for a conflict (changed elsewhere); for a save refused or failed again when sent once more,
+  // { refused, message }, passed to the page so that what it names and says is what happened)
+  async function keepDetached(key, doc, theirs, why = null) {
+    const what = why ? `couldn't be saved after it was closed here (${why.refused ? "refused" : "failed"}: ${why.message})` : "changed elsewhere after it was closed here";
     try {
-      if (!detachedConflict) throw new Error("changed elsewhere after it was closed here, and not kept");
-      await detachedConflict(doc, theirs, key);
+      if (!detachedConflict) throw new Error(`${what}, and not kept`);
+      await detachedConflict(doc, theirs, key, why);
       unkept.delete(key);
       leftSettled(key);
     } catch (e) {
-      unkept.set(key, { doc, theirs, error: e ?? new Error("not kept") });
+      unkept.set(key, { doc, theirs, why, error: e ?? new Error("not kept") });
       outstanding.add(key);
       leftChanged();
-      emit("saved", `not saved: ${doc.name ?? "a notebook"} changed elsewhere after it was closed here, and your changes to it couldn't be kept (${e?.message ?? e})`);
+      emit("saved", `not saved: ${doc.name ?? "a notebook"} ${what}, and your changes to it couldn't be kept (${e?.message ?? e})`);
     }
   }
   const cellType = (c) => (c.type === "markdown" || c.type === "raw" ? c.type : "code");
   const cellKey = (c) => ({ code: c.code ?? "", outputs: JSON.stringify(c.outputs ?? []), type: cellType(c), metadata: JSON.stringify(c.metadata ?? null), ms: c.ms ?? null });
-  const syncedOf = (rev, list) => ({ rev, cells: new Map((list ?? []).map((c) => [c.id, cellKey(c)])) });
-  const setSynced = (rev, list) => { shown.synced = syncedOf(rev, list); };
+  // (`doc`: the versioned part of that document, exactly: the base a version of what is typed here is merged from
+  // (web/notebook/history.js record), so a change the history has and this page doesn't show yet is never recorded
+  // back out)
+  const baseOf = (m, list) => ({ mode: m, cells: (list ?? []).map((c) => ({ id: c.id, code: c.code ?? "", ...(c.type === "markdown" || c.type === "raw" ? { type: c.type } : {}), ...(c.type === "markdown" && c.attachments ? { attachments: c.attachments } : {}) })) });
+  const syncedOf = (rev, list, m) => ({ rev, cells: new Map((list ?? []).map((c) => [c.id, cellKey(c)])), doc: baseOf(m, list) });
+  const setSynced = (rev, list, m) => { shown.synced = syncedOf(rev, list, m); };
+  // How this notebook's figures are shown (the page's Figures choice, in every language): "auto" (an SVG, or a sharp
+  // PNG for one whose SVG would be over 1 MiB), "svg" or "png"; kept in the notebook's metadata, sagebrush.figures,
+  // only when it isn't "auto", and given to the interpreter with each run (lib/_graphics.py figures).
+  const FIGURES = ["auto", "svg", "png"];
+  function figures() {
+    const f = meta.metadata?.sagebrush?.figures;
+    return FIGURES.includes(f) ? f : "auto";
+  }
+  // m with sagebrush.figures set to f in its metadata (undefined: removed), and no empty metadata left; m itself unchanged
+  function withFigures(m, f) {
+    const { metadata, ...r } = m;
+    const md = { ...(metadata ?? {}) }, sb = { ...(md.sagebrush ?? {}) };
+    if (f === undefined) delete sb.figures;
+    else sb.figures = f;
+    if (Object.keys(sb).length) md.sagebrush = sb;
+    else delete md.sagebrush;
+    return Object.keys(md).length ? { ...r, metadata: md } : r;
+  }
+  function setFigures(f) {
+    if (!FIGURES.includes(f) || f === figures()) return;
+    meta = withFigures(meta, f === "auto" ? undefined : f);
+    gateCfg = null;
+    schedule();
+  }
   function snapshot() {
     return {
       ...meta, mode,
@@ -1887,10 +2148,13 @@ export function createNotebook(root, opts = {}) {
     clearTimeout(timer);
     timer = null;
     if (loading) return;
+    // (a journal's store that follows another tab's (focus takeover): nothing saved from here, nothing refused to say;
+    // this page is read-only, so nothing typed waits, and it reloads the document when it writes)
+    if (store?.journaled && store.readOnly === "other") return;
     const doc = snapshot(), json = JSON.stringify(doc), mine = shown, seen = mine.remoteSeen;
     if (json === lastJson) return;
     lastJson = json;
-    emit("change", doc);
+    emit("change", doc, mine.synced?.doc ?? null);
     if (store) queueSave(mine, store, doc, json, seen);
   }
   // (a save the workspace's lock didn't let through in time, "busy" (notebook/stores.js LOCK_WAIT): kept by
@@ -1911,10 +2175,12 @@ export function createNotebook(root, opts = {}) {
       // saves run one after another (a slow earlier write cannot land after
       // a later one), and a failed save is retried by the next flush; each
       // is made from the synced revision when it starts (stores.js)
+      // (the document and its base taken together, when the save starts: the base is the one the document derives
+      // from, never a later one (a change from elsewhere applied meanwhile is in both, or in neither))
       const start = () => {
         if (mine === shown && seen !== mine.remoteSeen) sent = snapshot();
         const base = mine.synced?.rev;
-        try { return Promise.resolve(st.save(base !== undefined ? { ...sent, baseRev: base } : sent)); } catch (e) { return Promise.reject(e); }
+        try { return Promise.resolve(st.save(base !== undefined ? { ...sent, baseRev: base } : sent, { base: mine.synced?.doc ?? null })); } catch (e) { return Promise.reject(e); }
       };
       // (started at once when no earlier save is pending)
       const p = savesPending ? saveChain.then(start) : start();
@@ -1922,8 +2188,10 @@ export function createNotebook(root, opts = {}) {
       saveChain = p.then((t) => {
         // (an older busy one, superseded by this save: its error no longer stands, and it isn't sent again)
         if ((busy.get(mine)?.seq ?? Infinity) <= seq) busy.delete(mine);
-        if (mine.busyError && mine.busySeq <= seq) { if (lastSaveError === mine.busyError) lastSaveError = null; mine.busyError = null; }
+        if (mine.busyError && mine.busySeq <= seq) mine.busyError = null;
         if (t && typeof t === "object" && t.conflict) {
+          // (answered, not failed: an older failure of this notebook no longer stands; what it had is merged, or kept)
+          saveSucceeded(mine, seq);
           // written elsewhere first: merge that, then save the merge; a
           // document no longer shown has nothing here to merge into: what
           // this save had is kept by the page, beside the other, never over
@@ -1935,18 +2203,41 @@ export function createNotebook(root, opts = {}) {
           applyRemote(t.conflict, true, true);
           return;
         }
-        // (its revision kept for its next save, shown or not)
-        const r = t && typeof t === "object" ? t.rev : undefined;
-        if (r === undefined || mine.synced?.rev === undefined || r > mine.synced.rev) mine.synced = syncedOf(r, sent.cells);
+        // (a save the store refused, answered rather than thrown ("not saved: ...", the journal's way): nothing of it was
+        // kept, so nothing here is taken as saved (not its revision, not its cells as the base), it is sent again with the
+        // next save, and saved() rejects with why, as for a thrown one: a page leaving for elsewhere stays, its edit kept)
+        const refused = (t && typeof t === "object" ? t.saved : t);
+        if (typeof refused === "string" && /^not saved\b/.test(refused)) {
+          if (lastJson === json) lastJson = null;
+          // (refused by a journal's store that, still this page's, isn't the writer, or isn't ready again yet: the focus
+          // takeover's moment, while another tab writes; this page follows, and reloads the document when it writes
+          // again, the keys typed meanwhile passed on (web/page/handover.ts): nothing to say or send again, as flush
+          // sends nothing while it follows; a store let go (another notebook opened) is a failed save, as any)
+          if (st.journaled && !st.released && (!st.writer || !st.ready)) return;
+          // (for any notebook, shown or just left, as a thrown one is: saved() names it; said only for the one shown)
+          saveFailed(mine, st, sent, json, seq, Object.assign(new Error(refused.replace(/^not saved:?\s*/, "") || "not saved"), { refused: true }));
+          if (mine !== shown || store !== st) return;
+          emit("saved", refused);
+          return;
+        }
+        // (its revision kept for its next save, shown or not; what the store saved, which a journal store merged
+        // with changes from elsewhere this page doesn't show yet: shown here at once, typed text kept, and the base
+        // from then on (never an older one))
+        const r = t && typeof t === "object" ? t.rev : undefined, kept = (t && typeof t === "object" && t.doc) || sent;
+        const newer = r === undefined || mine.synced?.rev === undefined || r > mine.synced.rev;
+        if (newer && kept !== sent && mine === shown && store === st && JSON.stringify(baseOf(kept.mode, kept.cells)) !== JSON.stringify(baseOf(sent.mode, sent.cells))) {
+          if (lastJson === json) lastJson = null;
+          applyRemote({ ...kept, rev: r }, true, true);
+        } else if (newer) mine.synced = syncedOf(r, kept.cells, kept.mode);
+        saveSucceeded(mine, seq);
         if (mine !== shown || store !== st) return;
-        lastSaveError = null;
         emit("saved", (t && typeof t === "object" ? t.saved : t) ?? "saved");
       }, (e) => {
         if (lastJson === json) lastJson = null;
         // (a busy one superseded by a later save of this document, asked for since: that one answers for it)
         if (e?.busy && seq !== mine.saveSeq) return;
         if (e?.busy) { busy.set(mine, { st, sent, json, seq }); mine.busyError = e; mine.busySeq = seq; }
-        lastSaveError = e ?? new Error("not saved");
+        saveFailed(mine, st, sent, json, seq, e ?? new Error("not saved"));
         emit("saved", "not saved: " + (e?.message ?? e));
       }).finally(() => { savesPending--; mine.inflight--; leftSettled(mine); });
     }
@@ -1961,12 +2252,29 @@ export function createNotebook(root, opts = {}) {
       flush();
       // (busy ones sent again, the shown document's by flush already)
       for (const [m, b] of [...busy]) if (busy.get(m) === b && m !== shown) queueSave(m, b.st, b.sent, b.json, m.remoteSeen);
+      // (failed ones of documents left sent again once, as they were, through their own store: a refusal that has
+      // passed recovers here; one that fails again (refused, or a store that can no longer write it) is kept as a
+      // copy beside it, as a conflict's is, never written over it; a copy not kept is unkept, tried again below)
+      const resent = new Map();
+      for (const [m, f] of [...failed]) if (failed.get(m) === f && m !== shown && !busy.has(m)) { resent.set(m, f.seq); queueSave(m, f.st, f.sent, f.json, m.remoteSeen); }
       await saveChain;
-      if (lastSaveError) throw lastSaveError;
+      for (const [m, seq] of resent) {
+        const f = failed.get(m);
+        if (!f || f.seq <= seq || m === shown || busy.has(m)) continue;
+        failed.delete(m);
+        saveChain = saveChain.then(() => keepDetached(m, f.sent, null, { refused: !!f.error?.refused, message: String(f.error?.message ?? f.error ?? "not saved") }));
+      }
+      await saveChain;
+      // (still failed: the shown notebook's, said as it is; else the first notebook left, named)
+      if (failed.has(shown)) throw failed.get(shown).error;
+      if (failed.size) {
+        const [m, f] = [...failed][0];
+        throw Object.assign(new Error(`${f.sent?.name ?? "a notebook"}, a notebook you left: ${f.error?.message ?? f.error}`), { left: m });
+      }
       // (saves of documents no longer shown that couldn't be kept: tried
       // again, in turn with the saves; one kept or replaced meanwhile isn't)
       if (unkept.size) {
-        saveChain = saveChain.then(async () => { for (const [key, u] of [...unkept]) if (unkept.get(key) === u) await keepDetached(key, u.doc, u.theirs); });
+        saveChain = saveChain.then(async () => { for (const [key, u] of [...unkept]) if (unkept.get(key) === u) await keepDetached(key, u.doc, u.theirs, u.why); });
         await saveChain;
       }
       if (unkept.size) throw [...unkept.values()].at(-1).error;
@@ -1988,6 +2296,7 @@ export function createNotebook(root, opts = {}) {
       renderMd(cell);
     } else {
       loadOutputs(cell.out, c.outputs);
+      cell.ranText = cell.ta.value;
       if (c.n != null) cell.n.textContent = `[${c.n}]`;
       cell.ms = typeof c.ms === "number" && c.ms >= 0 ? c.ms : null;
       // (and one this interpreter's scheduler left stale while the notebook wasn't shown: a run it stopped then)
@@ -2011,7 +2320,8 @@ export function createNotebook(root, opts = {}) {
     for (const c of list?.length ? list : [{ code: "" }]) fill(addCell(c.code ?? "", null, false, c.type, c.id), c);
     const snap = snapshot();
     lastJson = JSON.stringify(snap);
-    setSynced(rev, snap.cells);
+    // (the base: the document as loaded, not as shown: an empty one is shown with a blank cell it doesn't have)
+    shown.synced = { ...syncedOf(rev, snap.cells, snap.mode), doc: baseOf(snap.mode, list ?? []) };
     Promise.resolve().then(() => { loading = false; showParked(); }); // after the observer's records for this
     reactiveLoad();
   }
@@ -2074,6 +2384,12 @@ export function createNotebook(root, opts = {}) {
     let dirty = false;
     meta = { ...meta, ...rest };
     gateCfg = null;
+    // (how its figures are shown is the incoming document's alone: none there is Auto, never the old choice kept)
+    const incoming = rest.metadata?.sagebrush?.figures;
+    if (meta.metadata?.sagebrush?.figures !== incoming) {
+      meta = withFigures(meta, incoming);
+      gateCfg = null;
+    }
     if (!keepLocal) kernel?.remoteGate?.documentReplaced(); // (a revert replaces the document)
     if (m && m !== mode) setMode(m, false);
     const order = cells().map((c) => c.id);
@@ -2150,6 +2466,8 @@ export function createNotebook(root, opts = {}) {
             forgetInteracts(c.out);
             c.out.replaceChildren();
             loadOutputs(c.out, rc.outputs);
+            c.ranText = rc.code ?? "";
+            markEdited(c);
             if (opts.staleOnLoad) { markStale(c); kernel?.reactive?.staleFromElsewhere(c.id); }
             c.n.textContent = rc.n != null ? `[${rc.n}]` : "[ ]";
           }
@@ -2187,7 +2505,7 @@ export function createNotebook(root, opts = {}) {
     if (!cells().length) addCell("");
     relabel();
     // (a revert is not the store's document: the base stays until it is saved)
-    if (keepLocal) setSynced(rev, list);
+    if (keepLocal) setSynced(rev, list, mode);
     lastJson = dirty ? null : JSON.stringify(snapshot()); // a merged change still has to be saved
     Promise.resolve().then(() => { loading = false; if (dirty) schedule(); });
     reactiveSync();
@@ -2404,7 +2722,7 @@ export function createNotebook(root, opts = {}) {
     /** Use another interpreter (each notebook its own, on the full page): the outputs shown become stale unless it made them. */
     setKernel(k, { stale = true } = {}) { if (k === kernel) return; bindKernel(k); if (stale) for (const c of cells()) markStale(c); },
     /** The reactive notebook (design/reactive-notebook.md): on or off, and its budget (ms; Infinity: autorun, 0: lazy). */
-    setReactive(on) { reactiveOn = !!on; gateCfg = null; if (on) reactiveLoad(); else for (const c of cells()) c.el.classList.remove("edited", "cancelled", "error"); },
+    setReactive(on) { reactiveOn = !!on; gateCfg = null; if (on) reactiveLoad(); else for (const c of cells()) { c.el.classList.remove("cancelled", "error"); markEdited(c); } },
     /** the scheduler (null until the document is loaded, or when off); reactiveOn: whether the notebook is reactive */
     get reactive() { return reactive() ? kernel.reactive ?? null : null; },
     get reactiveOn() { return reactive(); },
@@ -2449,7 +2767,7 @@ export function createNotebook(root, opts = {}) {
     // started starts a new one first (confinement phase 2), whose restart makes every cell stale)
     runCells(ids, { consent: _consent, ...o } = {}) { opts.onExplicitRun?.(); return reactive() ? engine().run(ids, o) : Promise.all(ids.map((id) => cellById(id)).filter(Boolean).map((c) => run(c))); },
     applyEdits, graph, verify, fixRedefinitions,
-    setMode, setType, setInput, renderMd, select, edit,
+    setMode, setType, setInput, renderMd, select, edit, figures, setFigures,
     /** X1: load the language's environment now, for the user's choice of it (index.html's menu). */
     warm,
     /** Measure every editor again now (after the notebook was hidden). */
@@ -2482,6 +2800,8 @@ export function createNotebook(root, opts = {}) {
         if (!rec || store !== s) return;
         const { j: _j, hash: _h, rev: _r, unjournaled: _u, ...mine } = rec;
         const { doc: merged } = await s.mergeRemote(mine);
+        // (`gapHold`, tests only: the merge done, not yet shown (test-doc-sync.mjs 12e))
+        if (s.gapHold) await s.gapHold;
         if (store !== s) return;
         // (the merge is not yet the record: shown against the record's own revision, the base its save then needs (a
         // change typed meanwhile kept by applyRemote, cell by cell), and saved: after applyRemote's loading phase,

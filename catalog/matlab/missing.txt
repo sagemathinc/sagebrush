@@ -23,7 +23,6 @@ asech
 asin
 asind
 asinh
-assert
 atan
 atan2
 atand
@@ -392,7 +391,6 @@ pi
 pie
 pink
 pinv
-pkg
 plot
 plot3
 plus

@@ -46,6 +46,10 @@ import { reserve } from "./reserve";
 import { accountHash, Bucket, VERSION } from "../sync-protocol/protocol";
 import type { DocSync } from "./doc-sync";
 
+/** (syncReady) refresh tokens: at most this many waiting, and as many answered kept in the status; each a short
+ * random word (the status message's bound, sync-owner STATUS_PUB, holds them) */
+export const READY = { tokens: 8, form: /^[0-9a-z]{12}$/ };
+
 export const CLIENT = {
   /** ops in one `ops` message (the server's opsPerMessage) */
   opsPerMessage: 500,
@@ -75,6 +79,12 @@ export const CLIENT = {
   /** with the confirmed index: one pull from the cursor while connected and idle, this often (D8b: a notice lost
    * on a socket that stays open is found within it) */
   idlePullMs: 5 * 60_000,
+  /** the liveness check (an open socket that carries nothing any more, after a laptop's idle: no close ever comes):
+   * a pull from the cursor, and anything heard on the socket within `liveMs` proves it; nothing heard, the socket is
+   * replaced at once.  Asked when the page is shown, focused or back online, and every `liveEveryMs` while the page
+   * is visible and the socket has been silent that long */
+  liveMs: 3000,
+  liveEveryMs: 30_000,
   /** downloads at once (a secondary cap: the reservation decides, L2) */
   downloadsAtOnce: 4,
   /** a signed URL is reused while at least this much of its life is left */
@@ -100,20 +110,24 @@ export type Work = "ops" | "index" | "check" | "upload" | "url" | "fetch" | "ena
  * never cuts short. */
 type Timer = { at: number; n: number; server?: true };
 /** The network as the browser sees it (P0 #3): whether it says it is online, and `f` told when it comes back or the
- * page is shown again (a laptop waking), returning how to stop. */
-export type NetWatch = { online(): boolean; onBack(f: () => void): () => void };
-/** The browser's: `online`, and `visibilitychange` to visible. */
+ * page is shown again or focused (a laptop waking, a person coming back to the tab), returning how to stop; and
+ * whether the page is visible (absent: taken as visible). */
+export type NetWatch = { online(): boolean; onBack(f: () => void): () => void; visible?(): boolean };
+/** The browser's: `online`, `visibilitychange` to visible, and the window's `focus`. */
 export const browserNet: NetWatch = {
   online: () => globalThis.navigator?.onLine !== false,
   onBack(f) {
     const vis = () => { if (globalThis.document?.visibilityState === "visible") f(); };
     globalThis.addEventListener?.("online", f);
+    globalThis.addEventListener?.("focus", f);
     globalThis.document?.addEventListener?.("visibilitychange", vis);
     return () => {
       globalThis.removeEventListener?.("online", f);
+      globalThis.removeEventListener?.("focus", f);
       globalThis.document?.removeEventListener?.("visibilitychange", vis);
     };
   },
+  visible: () => globalThis.document?.visibilityState !== "hidden",
 };
 type Paused = { why: "storage_full"; at: number; until?: number; generation: number; state: string };
 /** What the foot shows (step 5). */
@@ -124,11 +138,19 @@ export type SyncStatus = {
   waiting?: number;
   /** why it is paused or offline, in the server's words where it gave them */
   reason?: string;
+  /** (off) the server's own sentence for it, when it gave one (at most 200 characters) */
+  message?: string;
   /** when a timer or pause ends */
   resumesAt?: number;
   lastSynced?: number;
   /** (step 5) the outbox stopped at its bound: "too many changes waiting to sync" (C1) */
   full?: boolean;
+  /** (syncReady) the refresh() tokens answered, newest last (at most READY.tokens): for each, a pull asked after it
+   * read the server's log to its end and its pages are applied, so this device's index holds every op the log had
+   * when the token was given */
+  ready?: string[];
+  /** the server's log can't be read here now (a large move's replay stopped, or a rebuild under way): no refresh ends */
+  stuck?: boolean;
 };
 /** An op of the server's log, as an `index` message carries it. */
 export type IndexOp = WireOp & { seq: number; device: string };
@@ -144,6 +166,9 @@ export type ClientOptions = {
   /** this device's name, as the server lists it */
   name?: string;
   clock?: Clock;
+  /** the periodic liveness check (CLIENT.liveEveryMs): on by default with the real clock only (it is about the
+   * network's real time; a test's fake clock paces the server's side), so a test with a fake clock asks for it */
+  live?: boolean;
   fetch?: typeof fetch;
   WebSocket?: typeof WebSocket;
   /** each page of the server's log, in order (step 4) */
@@ -177,9 +202,12 @@ const isNat = (n: unknown): n is number => Number.isSafeInteger(n) && (n as numb
 const SAME = ["dseq", "t", "by", "op", "path", "to", "kind", "ref", "fid", "sha256", "size", "base", "parent"] as const;
 const sameOp = (a: WireOp, b: Record<string, unknown>) => SAME.every((k) => (a as Record<string, unknown>)[k] === b[k]);
 
-type Pending = { kind: "ops"; recs: OutboxRecord[] } | { kind: "index" } | { kind: "rebuilt"; through: number } | { kind: "doc"; answer: (m: Record<string, unknown>) => void };
+type Pending = { kind: "ops"; recs: OutboxRecord[] } | { kind: "index"; n?: number } | { kind: "rebuilt"; through: number } | { kind: "doc"; answer: (m: Record<string, unknown>) => void };
 type Conn = {
   ns: string;
+  /** when anything was last heard on the socket (the liveness check's proof), and whether a check is waiting */
+  heard: number;
+  probing?: boolean;
   /** the account's hash and the generation this connection is bound to: sent in hello and on every blob request,
    * and checked by the server against the socket's and the request's own session (CORR-PR58-1) */
   account: string;
@@ -231,7 +259,8 @@ type Conn = {
   chain: Promise<void>;
   end: (why: End) => void;
 };
-type End = "closed" | "generation" | "revoked" | "fenced" | "stopped" | "deleting";
+// ("stale": the liveness check heard nothing on a socket that looked open: replaced at once, no backoff step)
+type End = "closed" | "generation" | "revoked" | "fenced" | "stopped" | "deleting" | "stale";
 
 /** The sync client for workspace `w`: start() runs it until stop(). */
 export class SyncClient {
@@ -264,8 +293,13 @@ export class SyncClient {
   private subs = new Set<(s: SyncStatus) => void>();
   private unwatch: (() => void) | null = null;
   status: SyncStatus = { state: "off" };
+  /** (syncReady) the index pulls asked so far (each numbered), the tokens waiting (each with the count when it was
+   * given: a pull numbered above it answers it), and those answered */
+  private pullsAsked = 0;
+  private barriers = new Map<string, number>();
+  private answered: string[] = [];
   /** (tests: what the client did) */
-  readonly stats = { connects: 0, opsMessages: 0, opsSent: 0, checks: 0, puts: 0, putsAtOnce: 0, maxPutsAtOnce: 0, pulls: 0, maxInflight: 0, maxOps: 0, wakesFired: 0, maxWakes: 0, mismatches: 0, pages: 0, readsAtOnce: 0, maxReadsAtOnce: 0, wideReads: 0, rebuildPasses: 0, rebuildPhase: "" as string, rebuildDoneAt: 0, rebuildResumedAt: 0, rebuildError: "" as string, resetUnsupported: 0, deferred: 0, resumed: 0, urls: 0, fetches: 0, fetchesAtOnce: 0, maxFetchesAtOnce: 0, installed: 0, stale: 0, fetchFailed: 0 };
+  readonly stats = { connects: 0, opsMessages: 0, opsSent: 0, checks: 0, puts: 0, putsAtOnce: 0, maxPutsAtOnce: 0, pulls: 0, maxInflight: 0, maxOps: 0, wakesFired: 0, maxWakes: 0, mismatches: 0, pages: 0, readsAtOnce: 0, maxReadsAtOnce: 0, wideReads: 0, rebuildPasses: 0, rebuildPhase: "" as string, rebuildDoneAt: 0, rebuildResumedAt: 0, rebuildError: "" as string, resetUnsupported: 0, deferred: 0, resumed: 0, urls: 0, fetches: 0, fetchesAtOnce: 0, maxFetchesAtOnce: 0, installed: 0, stale: 0, fetchFailed: 0, liveChecks: 0, liveFails: 0, ends: {} as Record<string, number> };
 
   constructor(readonly w: Workspace, private opts: ClientOptions = {}) {
     this.clock = opts.clock ?? realClock;
@@ -274,6 +308,28 @@ export class SyncClient {
     this.WS = opts.WebSocket ?? globalThis.WebSocket;
     this.bucket = new Bucket(CLIENT.opsPerMessage, CLIENT.opsPerMinute / 60, this.clock.now());
     this.pullBucket = new Bucket(CLIENT.pullBurst, CLIENT.pullsPerSecond, this.clock.now());
+  }
+
+  /** (syncReady) Reads the server's log to its end for `token`: the first pull asked after this call whose page says
+   * there is no more, once applied, answers it (`status.ready`).  Not connected: done on the next connection.  At
+   * most READY.tokens wait; a token not of READY.form is ignored. */
+  refresh(token: string): void {
+    if (typeof token !== "string" || !READY.form.test(token)) return;
+    if (!this.barriers.has(token)) {
+      // (a token given again after its answer: a new barrier, its old answer taken back, never an answer at once)
+      const was = this.answered.indexOf(token);
+      this.barriers.set(token, this.pullsAsked);
+      if (was >= 0) {
+        this.answered.splice(was, 1);
+        this.say({ ...this.status });
+      }
+      while (this.barriers.size > READY.tokens) this.barriers.delete(this.barriers.keys().next().value!);
+    }
+    const c = this.conn;
+    if (c?.welcomed) {
+      c.discover = true;
+      this.pull(c);
+    }
   }
 
   /** `f(status)` on each change; returns how to stop. */
@@ -285,8 +341,10 @@ export class SyncClient {
     // (closed by another page's upgrade: that status is the last; work still in flight then (a retry's write, a
     // namespace request) ends without saying anything over it)
     if (this.closedHere) return;
-    this.status = s;
-    for (const f of this.subs) try { f(s); } catch (e) { console.warn("sync status:", e); }
+    // (the answers always this client's own, never a `ready` carried in from an earlier status)
+    const { ready: _was, ...base } = s;
+    this.status = this.answered.length ? { ...base, ready: this.answered.slice() } : base;
+    for (const f of this.subs) try { f(this.status); } catch (e) { console.warn("sync status:", e); }
   }
 
   /** Runs until stop(), or until the server says sync is off for this account, or the session ends. */
@@ -302,7 +360,11 @@ export class SyncClient {
     if (this.w.closed) return void closed();
     const unclosed = this.w.onClosed(closed);
     // (the network back, or the page shown again: a connection waiting out its own backoff goes at once, P0 #3)
-    const unnet = (this.opts.net ?? browserNet).onBack(() => void this.netBack());
+    // (and a socket that looks open checked at once: it may have gone dead meanwhile, with no close)
+    const unnet = (this.opts.net ?? browserNet).onBack(() => {
+      void this.netBack();
+      if (this.conn) this.live(this.conn);
+    });
     this.unwatch = this.w.watch(() => this.kick());
     // (other namespaces' ledgers, queued for deletion, deleted a page at a time while this client runs: task #14)
     void driveObsolete(this.w, (ms) => new Promise<void>((ok) => {
@@ -385,10 +447,10 @@ export class SyncClient {
         const st = await this.http("GET", "/api/sync/v1/status");
         if (st.status === 401) return this.offWith("sign in first");
         if (!st.ok) throw new Retry(st.retryAfter);
-        const b = st.body as { available?: boolean; reason?: string; state?: string; generation?: number; retry_after?: number };
+        const b = st.body as { available?: boolean; reason?: string; message?: unknown; state?: string; generation?: number; retry_after?: number };
         if (!b.available) {
           if (b.reason === "cocalc_unreachable") throw new Retry(isNat(b.retry_after) ? b.retry_after : undefined);
-          return this.offWith(b.reason ?? "unavailable");
+          return this.offWith(b.reason ?? "unavailable", typeof b.message === "string" ? b.message : undefined);
         }
         if (b.state === "off" || !isNat(b.generation) || b.generation < 1) return this.offWith("sync is off for this account");
         // (registering, deleting: not yet, or not now; asked again on the timer)
@@ -405,8 +467,8 @@ export class SyncClient {
       }
     }
   }
-  private offWith(reason: string): null {
-    this.say({ state: "off", reason });
+  private offWith(reason: string, message?: string): null {
+    this.say({ state: "off", reason, ...(message ? { message: message.slice(0, 200) } : {}) });
     return null;
   }
 
@@ -483,11 +545,12 @@ export class SyncClient {
     return new Promise<End>((done) => {
       let ended = false;
       const c: Conn = {
-        ns, account: ns.split(":")[0], generation: Number(ns.split(":")[1]), ob, ws, epoch, welcomed: false, writable: false, resync: false, req: 0, pending: new Map(), pulling: false, target: awaiting?.hi ?? 0, pages: 0,
+        ns, heard: this.clock.now(), account: ns.split(":")[0], generation: Number(ns.split(":")[1]), ob, ws, epoch, welcomed: false, writable: false, resync: false, req: 0, pending: new Map(), pulling: false, target: awaiting?.hi ?? 0, pages: 0,
         have: new Set(), missing: new Set(), final: new Set(), gone: new Set(), chain: Promise.resolve(),
         end: (why) => {
           if (ended) return;
           ended = true;
+          this.stats.ends[why] = (this.stats.ends[why] ?? 0) + 1;
           if (this.conn === c) this.conn = null;
           this.unwake();
           // (2c-3: document requests still waiting answered as a dropped connection: transient, sent again later)
@@ -518,6 +581,7 @@ export class SyncClient {
         this.send(c, { t: "hello", v: VERSION, device: this.w.device, name: (this.opts.name ?? "browser").slice(0, 100), index_after: start, account: c.account, generation: c.generation });
       };
       ws.onmessage = (ev) => {
+        c.heard = this.clock.now();
         c.chain = c.chain.then(() => this.message(c, ev.data)).catch((e) => {
           if (e instanceof Fenced) return c.end("fenced");
           console.warn("sync:", e);
@@ -592,6 +656,8 @@ export class SyncClient {
     c.serverNext = m.next_dseq;
     // (step 4's confirmed index reads the whole log as it stood: up to the head welcome gives, no further)
     if (this.opts.onIndex && isNat(m.index_head)) c.target = Math.max(c.target, m.index_head);
+    // (a refresh asked for before this connection: read to the log's end on it)
+    if (this.barriers.size) c.discover = true;
     c.writable = m.state === "active";
     // (storage_full lifts on a welcome with another generation or state than when it began)
     if (this.paused && (this.paused.generation !== m.generation || this.paused.state !== m.state)) {
@@ -611,6 +677,7 @@ export class SyncClient {
     // (D11: a large move's rewrite or view left by a reload, resumed now, not at the next page (quiescence))
     if (this.opts.onIndex && !c.halted) this.largeKick(c);
     this.armIdle(c);
+    this.armLive(c);
     this.fetchKick(c);
     this.kick();
     // (2c-3: notebooks' contents on this connection, once it is writable and not halted)
@@ -634,16 +701,70 @@ export class SyncClient {
     this.pull(c);
   }
 
-  /** The idle pull (D8b): re-armed after each page and each pull, ended with the connection and on stop(). */
-  private armIdle(c: Conn) {
-    if (!this.opts.onIndex) return;
-    this.wake(c, "idle", this.clock.now() + CLIENT.idlePullMs, () => {
-      c.discover = true;
-      this.pull(c);
+  /** The liveness check: a pull from the cursor (unless one is in flight), then anything heard on the socket within
+   * CLIENT.liveMs proves it alive; nothing heard, it ends as `stale`, and the next connection starts at once.  One at a
+   * time; nothing asked of a server that owes no answer (a rebuild's log under way, the requests in flight at the cap,
+   * none sent) concludes nothing. */
+  private live(c: Conn) {
+    if (this.conn !== c || !c.welcomed || c.probing || this.stopped) return;
+    // (after whatever the socket brought is handled, on its chain: a page being applied clears `pulling` before it
+    // moves the cursor, and a pull asked from the cursor in between would be answered with ops the cursor has passed,
+    // which ends the connection)
+    c.probing = true;
+    this.onChain(c, () => this.liveNow(c));
+  }
+  // (the check itself, begun when the chain reaches it: its deadline counts from then, not from when it was asked, so a
+  // page that held the chain longer than CLIENT.liveMs never leaves it a deadline already past)
+  private liveNow(c: Conn) {
+    c.probing = false;
+    if (this.conn !== c || this.stopped) return;
+    const t0 = this.clock.now();
+    // (a pull only where pull() itself would send one now: never past the server's timer (retry_after), the bucket,
+    // a slice's rest, a rebuild or its announce, a large move's halt, or the cap on requests in flight)
+    const may = !c.pulling && !c.rebuilding && !c.largeHalt && !this.announcing(c) && c.pages < CLIENT.replayPages && c.pending.size < CLIENT.inflight && this.left(c.ns, "index") <= 0;
+    if (may && this.pullBucket.take(1, t0) <= 0) {
+      c.pulling = true;
+      this.stats.pulls++;
+      this.armIdle(c);
+      this.ask(c, { t: "pull_index", after: this.cursor }, { kind: "index", n: ++this.pullsAsked });
+    }
+    if (!c.pending.size) return;
+    c.probing = true;
+    this.stats.liveChecks++;
+    this.wake(c, "live", t0 + CLIENT.liveMs, () => {
+      c.probing = false;
+      if (this.conn !== c || c.heard >= t0) return;
+      this.stats.liveFails++;
+      c.end("stale");
+    });
+  }
+  /** The periodic liveness check: while the page is visible and the socket has been silent CLIENT.liveEveryMs. */
+  private armLive(c: Conn) {
+    if (this.clock !== realClock && !this.opts.live) return;
+    this.wake(c, "liveEvery", this.clock.now() + CLIENT.liveEveryMs, () => {
+      if ((this.opts.net ?? browserNet).visible?.() !== false && this.clock.now() - c.heard >= CLIENT.liveEveryMs) this.live(c);
+      this.armLive(c);
     });
   }
 
+  /** The idle pull (D8b): re-armed after each page and each pull, ended with the connection and on stop(). */
+  private armIdle(c: Conn) {
+    if (!this.opts.onIndex) return;
+    this.wake(c, "idle", this.clock.now() + CLIENT.idlePullMs, () => this.onChain(c, () => {
+      c.discover = true;
+      this.pull(c);
+    }));
+  }
+  /** `f` on the connection's message chain, after whatever the socket brought is handled (nothing if the connection
+   * has ended meanwhile).  A pull asked by a timer runs here: a page being applied clears `pulling` before it moves the
+   * cursor, and a pull asked from the cursor in between would be answered with ops the cursor has passed, which ends
+   * the connection. */
+  private onChain(c: Conn, f: () => void) {
+    c.chain = c.chain.then(() => { if (this.conn === c && !this.stopped) f(); }).catch((e) => console.warn("sync:", e));
+  }
+
   private async index(c: Conn, m: Record<string, unknown>) {
+    const asked = isNat(m.req) ? c.pending.get(m.req) : undefined;
     if (isNat(m.req)) {
       c.pending.delete(m.req);
       c.pulling = false;
@@ -709,6 +830,21 @@ export class SyncClient {
     }
     // (no further than the target: past it, pages are another time's, LIMIT-PR58-3)
     if (!m.more && c.target > last) c.target = last;
+    // (syncReady: the log's end, read by a pull asked after a token was given, its pages applied: that token answered;
+    // a token given after this pull was asked: once more, to the end)
+    if (!m.more && this.barriers.size) {
+      const n = asked?.kind === "index" ? asked.n ?? 0 : 0;
+      let any = false;
+      for (const [token, given] of this.barriers) {
+        if (n <= given) continue;
+        this.barriers.delete(token);
+        this.answered.push(token);
+        any = true;
+      }
+      if (this.answered.length > READY.tokens) this.answered.splice(0, this.answered.length - READY.tokens);
+      if (any) this.say({ ...this.status });
+      if (this.barriers.size) c.discover = true;
+    }
     this.armIdle(c);
     this.pull(c);
     this.kick();
@@ -753,22 +889,22 @@ export class SyncClient {
       // (the first rest's end stands until the slice resumes: a pull asked for meanwhile (each ack asks) never moves
       // it later, astra's narrowed CORR-PR58-4)
       if (this.wakes.has("replay")) return;
-      return this.wake(c, "replay", this.clock.now() + CLIENT.replayRestMs, () => {
+      return this.wake(c, "replay", this.clock.now() + CLIENT.replayRestMs, () => this.onChain(c, () => {
         c.pages = 0;
         this.pull(c);
-      });
+      }));
     }
     if (c.pending.size >= CLIENT.inflight) return;
     // (the index timer, however the pull was asked for (a page, an ack, a reconnect): woken at its end, when the
     // timer is checked again, so a prolonged one waits on, CORR-PR58-3)
     const left = this.left(c.ns, "index");
-    if (left > 0) return this.wake(c, "index", this.clock.now() + left, () => this.pull(c));
+    if (left > 0) return this.wake(c, "index", this.clock.now() + left, () => this.onChain(c, () => this.pull(c)));
     const wait = this.pullBucket.take(1, this.clock.now());
-    if (wait > 0) return this.wake(c, "pull", this.clock.now() + wait, () => this.pull(c));
+    if (wait > 0) return this.wake(c, "pull", this.clock.now() + wait, () => this.onChain(c, () => this.pull(c)));
     c.pulling = true;
     this.stats.pulls++;
     this.armIdle(c);
-    this.ask(c, { t: "pull_index", after: this.cursor }, { kind: "index" });
+    this.ask(c, { t: "pull_index", after: this.cursor }, { kind: "index", n: ++this.pullsAsked });
   }
 
   /** The seqs of the records accepted and awaiting their echo, lowest and highest (read in pages: the outbox is
@@ -894,7 +1030,7 @@ export class SyncClient {
     if (p?.kind === "index") {
       c.pulling = false;
       const at = await this.timerFail(c.ns, "index", ra);
-      this.wake(c, "index", at, () => this.pull(c));
+      this.wake(c, "index", at, () => this.onChain(c, () => this.pull(c)));
       return;
     }
     if (p?.kind !== "ops") return;
@@ -1063,8 +1199,8 @@ export class SyncClient {
     if (!c.writable) return this.say({ ...this.status, ns: c.ns, waiting: count });
     if (c.halted === "reset-unsupported") return this.say({ state: "paused", ns: c.ns, waiting: count, reason: "this device's sync can't continue: the server can't reset its refused changes. Delete my synced data to start again" });
     if (c.halted === "stuck") return this.say({ state: "paused", ns: c.ns, waiting: count, reason: "this device's queue can't continue here: Delete my synced data to start again" });
-    if (c.rebuilding) return this.say({ state: "paused", ns: c.ns, waiting: count, reason: "rebuilding sync" });
-    if (c.largeHalt) return this.say({ state: "paused", ns: c.ns, waiting: count, reason: c.largeHalt });
+    if (c.rebuilding) return this.say({ state: "paused", ns: c.ns, waiting: count, reason: "rebuilding sync", stuck: true });
+    if (c.largeHalt) return this.say({ state: "paused", ns: c.ns, waiting: count, reason: c.largeHalt, stuck: true });
     if (c.halted) return this.say({ state: "paused", ns: c.ns, waiting: count, reason: c.halted === "diverged" ? "this device's changes need a rebuild" : "the server asks for a rebuild" });
     if (this.paused) return this.say({ state: "paused", ns: c.ns, waiting: count, reason: "storage full", ...(this.paused.until ? { resumesAt: this.paused.until } : {}) });
     this.say({ state: count ? "syncing" : "synced", ns: c.ns, waiting: count, ...(resumesAt ? { resumesAt } : {}), ...(count ? {} : { lastSynced: this.clock.now() }), ...(c.full ? { full: true } : {}) });

@@ -82,7 +82,9 @@ async function measure(mode, url) {
     front = proxy(upstream);
     await new Promise((r) => front.listen(0, "127.0.0.1", r));
     url = `http://127.0.0.1:${front.address().port}/`;
-    for (let i = 0; i < 100; i++) { try { await fetch(`http://127.0.0.1:${upstream}/`); break; } catch { await sleep(100); } }
+    // (the probe's body is cancelled, not left unread: a response paused on its unread body when the server's socket
+    //  ends makes Node's fetch client fail an assertion, "assert(!this.paused)", and the test with it)
+    for (let i = 0; i < 100; i++) { try { await (await fetch(`http://127.0.0.1:${upstream}/`)).body?.cancel(); break; } catch { await sleep(100); } }
   }
   const profile = mkdtempSync(join(tmpdir(), "sb-load-"));
   const chrome = spawn(process.env.CHROME ?? "chromium", ["--headless", "--no-sandbox", "--remote-debugging-port=0", `--user-data-dir=${profile}`, "--disable-background-networking", "about:blank"], { stdio: "ignore" });

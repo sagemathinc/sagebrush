@@ -10,6 +10,8 @@
 //   kernel.start();
 
 const STOPPED = "\nStopped: it did not stop when interrupted, so the interpreter was restarted; variables are gone.\n";
+// the flush request's bit in the interrupt word (src/runtime/interrupt.ts INTR_FLUSH), and how often it is set
+const INTR_FLUSH = 16, FLUSH_MS = 200;
 
 // A fast 53-bit hash of a run's output messages (cyrb53, fed incrementally),
 // for TimeTravel replay to check that a replayed run printed the same.
@@ -167,7 +169,7 @@ export class WorkerKernel {
     this.started = Promise.resolve();
     this.startError = null;
     this.interruptFlag = null;
-    // id -> a sink {start(), out(text, isErr), display(bundle), interact(spec),
+    // id -> a sink {start(), out(text, isErr), display(bundle, metadata), interact(spec),
     // clear(), done(ms), stopped(message), skipped()} for running code, or
     // {reply(message)} for a question
     this.pending = new Map();
@@ -264,6 +266,21 @@ export class WorkerKernel {
         this.readyInfo = { seeded: !!m.seeded, startup: m.startup?.clock ?? [], ms: performance.now() - t0, version: m.version || "" };
         this.version = m.version || "";
         this.interruptFlag = m.interrupt ? new Int32Array(m.interrupt) : null;
+        // (what is in flight is asked, every FLUSH_MS, for the output it has written: its compiled loops
+        // and the engine's polls send it (src/runtime/interrupt.ts, INTR_FLUSH), so a long computation
+        // shows what it printed before it.  This page's timer asks, whoever holds the word: a runner frame
+        // is asked by message (runner-worker.js flush), as its own timers are throttled while it is hidden;
+        // nothing is asked while nothing is in flight)
+        clearInterval(this.flushTimer);
+        const frameFlush = this.interruptFlag ? undefined : w.flush;
+        // (notified, as every producer of the word is: a time.sleep waiting on it wakes, sees no Ctrl-C, and waits on)
+        this.flushTimer = this.interruptFlag || frameFlush ? setInterval(() => {
+          if (!this.pending.size || w !== this.worker) return;
+          if (this.interruptFlag) {
+            Atomics.or(this.interruptFlag, 0, INTR_FLUSH);
+            Atomics.notify(this.interruptFlag, 0);
+          } else frameFlush();
+        }, FLUSH_MS) : 0;
         // (the epoch word of what this document may change, a plain worker's: setPolicy stores it at once; a runner's
         // stays in its frame, which stores it as the policy passes through)
         this.epochWord = m.epoch ? new Int32Array(m.epoch) : null;
@@ -337,7 +354,7 @@ export class WorkerKernel {
       }
       if (dest) {
         if (m.stream) dest.out(m.text, m.stream === "stderr");
-        if (m.display) dest.display(m.display);
+        if (m.display) dest.display(m.display, m.metadata);
         if (m.interact) dest.interact(m.interact);
         if (m.clear) dest.clear();
       }
@@ -349,7 +366,7 @@ export class WorkerKernel {
         const interrupted = this.interrupted.has(m.id) && !!m.error;
         if (r) this.finishRun(m, r);
         else this.interrupted.delete(m.id);
-        p.done(m.ms, { error: !!m.error, ...(interrupted ? { interrupted: true } : {}), ...(m.files ? { files: m.files } : {}), ...(m.names ? { names: m.names } : {}), ...(typeof m.evaluated === "string" ? { evaluated: m.evaluated } : {}) });
+        p.done(m.ms, { error: !!m.error, ...(interrupted ? { interrupted: true } : {}), ...(m.exited === true ? { exited: true } : {}), ...(m.files ? { files: m.files } : {}), ...(m.names ? { names: m.names } : {}), ...(typeof m.evaluated === "string" ? { evaluated: m.evaluated } : {}) });
       }
     };
     // (while a hold is pending, holdMessages, this worker's messages wait behind it, in order: a run's
@@ -375,8 +392,9 @@ export class WorkerKernel {
    * forget (global names to delete first: the reactive notebook), mangle
    * (the cell's `_` names are its own: the reactive notebook), seed (64 hex
    * digits: the run's entropy, the reactive notebook's per-cell seeds)}
-   * The sink's done(ms, {error, interrupted, files}) says whether the code
-   * raised (interrupted: KeyboardInterrupt from interrupt()), and
+   * The sink's done(ms, {error, interrupted, exited, files}) says whether the code
+   * raised (interrupted: KeyboardInterrupt from interrupt()), whether a repl
+   * run left its prompt (exited: exit() or quit(), the Console's), and
    * which files it read and wrote ({reads, writes}: paths).
    */
   execute(code, opts, sink) {
@@ -385,13 +403,13 @@ export class WorkerKernel {
     const id = this.nextId++;
     this.pending.set(id, sink);
     const forget = { ...(opts.forget?.length ? { forget: [...opts.forget] } : {}), ...(opts.mangle && opts.cell ? { mangle: String(opts.cell).replace(/[^A-Za-z0-9]/g, "") } : {}), ...(opts.seed ? { seed: opts.seed } : {}), ...(opts.scoped && Object.keys(opts.scoped).length ? { scoped: { ...opts.scoped } } : {}) };
-    const run = { kind: "code", code, mode: opts.mode, ...(opts.repl ? { repl: true } : {}), ...(opts.cell ? { cell: opts.cell } : {}), ...forget };
+    const run = { kind: "code", code, mode: opts.mode, ...(opts.repl ? { repl: true } : {}), ...(opts.cell ? { cell: opts.cell } : {}), ...(opts.figures ? { figures: opts.figures } : {}), ...forget };
     // (what the run is, and the document version its code is from, are taken
     // now ("execute"); it goes to the worker once the start is done, and into
     // the journal when it is done ("run"))
     this.track(id, run);
     this.claim(id, opts.mode);
-    this.whenStarted(id, sink, () => this.worker.postMessage({ id, code, sage: opts.mode === "sage", magma: opts.mode === "magma", matlab: opts.mode === "matlab", ...(opts.repl ? { repl: true } : {}), ...(opts.clock ? { clock: opts.clock } : {}), ...forget }));
+    this.whenStarted(id, sink, () => this.worker.postMessage({ id, code, sage: opts.mode === "sage", magma: opts.mode === "magma", matlab: opts.mode === "matlab", ...(opts.repl ? { repl: true } : {}), ...(opts.clock ? { clock: opts.clock } : {}), ...(opts.figures ? { figures: opts.figures } : {}), ...forget }));
   }
 
   // after the start, in the order asked, if this is still pending in the same worker
@@ -493,8 +511,8 @@ export class WorkerKernel {
     this.pending.set(id, sink);
     // (a copy: the journal's document freezes what it is given, and the
     // notebook keeps changing its own values object)
-    this.track(id, { kind: "interact", iid, values: JSON.parse(JSON.stringify(values)) });
-    this.whenStarted(id, sink, () => this.worker.postMessage({ id, interact: iid, values, ...(opts.clock ? { clock: opts.clock } : {}) }));
+    this.track(id, { kind: "interact", iid, values: JSON.parse(JSON.stringify(values)), ...(opts.figures ? { figures: opts.figures } : {}) });
+    this.whenStarted(id, sink, () => this.worker.postMessage({ id, interact: iid, values, ...(opts.clock ? { clock: opts.clock } : {}), ...(opts.figures ? { figures: opts.figures } : {}) }));
   }
 
   /**
@@ -612,6 +630,7 @@ export class WorkerKernel {
 
   /** Stop for good: what was running or queued is told `message`. */
   close(message = "\nThe interpreter was stopped.\n") {
+    clearInterval(this.flushTimer);
     this.live.abort();
     this.worker?.terminate();
     this.worker = null;

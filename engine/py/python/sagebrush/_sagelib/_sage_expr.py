@@ -143,6 +143,17 @@ def _rat_s(p, q=1):
     return "n%d/%d;" % (p, q)
 
 
+# The elements of RR, RDF, RealField(p), CC, CDF and ComplexField(p) (by
+# their classes' names, as _to_s reads RDF's); a Python float is not one
+_FIELD_ELEMENTS = frozenset(("RealNumber", "RealNumberMP", "RealDoubleElement", "ComplexNumber",
+                             "ComplexNumberMP", "ComplexDoubleElement"))
+
+
+def _exp_in_own_field(v):
+    """Whether e^v is v.exp(), an element of v's own field."""
+    return any(c.__name__ in _FIELD_ELEMENTS for c in type(v).__mro__)
+
+
 def _to_s(v):
     """The engine serialization of a Python value, or None."""
     if isinstance(v, Expression):
@@ -318,6 +329,14 @@ class Expression:
         if mod is not None:
             # (the modulus was ignored: pow(SR(2), 3/2, 5) was 2*sqrt(2)), as Sage
             raise TypeError("the 3-argument version of pow() is not supported")
+        if self._s == "ce" and _exp_in_own_field(o):
+            # e^x for an element x of a real or complex field is x.exp() in
+            # x's field, as Sage: e^727.95 is past the doubles, 1.39...e316
+            h = getattr(o, "exp", None)
+            if h is not None:
+                return h()
+            import sage_all
+            return sage_all.exp(o)
         return self._bin("pow", o)
     def __rpow__(self, o): return self._bin("pow", o, True)
     def __xor__(self, o): raise RuntimeError("Use ** for exponentiation, not '^', which means xor\nin Python, and has the wrong precedence.")
@@ -712,6 +731,22 @@ class Expression:
             return _sage_real.N(self, prec, digits)
         re, im = _call("n", _lower_special(self._s))
         re, im = float(re), float(im)
+        if re != re or im != im:
+            # NaN from the doubles can be an overflow inside the expression
+            # (n(10^400*pi): inf*pi is taken as complex): the 53-bit MP
+            # evaluation decides; where it fails too, the doubles' NaN stays
+            import _sage_real
+            import _sage_lang
+            try:
+                v = _sage_real.evaluate(self, 53, _sage_lang._rr_mp())
+            except (NotImplementedError, TypeError, ValueError, ArithmeticError):
+                v = None
+            if isinstance(v, _sage_real.RealNumberMP) and v._special != "nan":
+                from sage_all import RR
+                return RR(v)
+            if isinstance(v, _sage_real.ComplexNumberMP) and "nan" not in (v.real()._special, v.imag()._special):
+                # (CC's numbers are doubles: an error, not NaN)
+                raise NotImplementedError("the value %s is past the range of CC's numbers, which are doubles in Sagebrush" % (v,))
         if im == 0:
             from _sage_lang import RealNumber
             if re == re and not _NORMAL_MIN < abs(re) < _INF:
@@ -3958,7 +3993,40 @@ def log(v, b=None, base=None):
             t, k = t * b, k + 1
         if t == v:
             return k
+    if _exp_in_own_field(v) and _is_real_element(v) and v > 0 and _numeric_base(b):
+        # log(x, b) for a positive element x of RR, RDF or RealField(p) is
+        # x.log(b), in x's field as Sage: log(RR(2), 10) is 0.301029995663981
+        return v.log(b)
+    if _is_mp_real(v) and _zero_base(b):
+        # log(x, 0) for x in RR or RealField(p) is log(x)/log(0) =
+        # log(x)/(-infinity) as Sage: a signed zero in x's field for x > 0
+        # (log(RR(2), 0) is -0.000000000000000), in its complex field for
+        # x < 0, and NaN for x = 0
+        return -(_log1(v) * 0)
     return _log1(v) / _log1(b)
+
+
+def _is_real_element(v):
+    return not any(c.__name__ in ("ComplexNumber", "ComplexNumberMP", "ComplexDoubleElement") for c in type(v).__mro__)
+
+
+def _numeric_base(b):
+    """Whether the base b of log(x, b) is a positive number other than 1: an
+    int, a rational or an element of a real field, or the constant e (a base
+    1 or negative keeps log(x)/log(b), as before)."""
+    if isinstance(b, Expression):
+        return b._s == "ce"
+    return (isinstance(b, (int, _Fraction)) or (_exp_in_own_field(b) and _is_real_element(b))) and b > 0 and b != 1
+
+
+def _is_mp_real(v):
+    return any(c.__name__ in ("RealNumber", "RealNumberMP") for c in type(v).__mro__)
+
+
+def _zero_base(b):
+    """Whether the base b of log(x, b) is zero: an int, a rational or an
+    element of a real field."""
+    return (isinstance(b, (int, _Fraction)) or (_exp_in_own_field(b) and _is_real_element(b))) and b == 0
 
 
 ln = log

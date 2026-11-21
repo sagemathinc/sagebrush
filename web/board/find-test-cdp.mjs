@@ -1,8 +1,9 @@
 // Transport for test-find.mjs. Every external wait has a deadline; failures
 // retain the caller's phase and method instead of leaving board-c silent.
+import { WAIT_MS } from "../test-deadline.mjs";
 export class CDPError extends Error {}
 
-export async function discoverPage(url, ms = 30_000) {
+export async function discoverPage(url, ms = WAIT_MS) {
   const deadline = Date.now() + ms;
   let last;
   while (Date.now() < deadline) {
@@ -16,10 +17,10 @@ export async function discoverPage(url, ms = 30_000) {
     } catch (error) { last = error; }
     await new Promise((resolve) => setTimeout(resolve, Math.min(100, Math.max(0, deadline - Date.now()))));
   }
-  throw new CDPError(`browser startup: target discovery ${url} timed out after ${ms} ms (${last?.message})`);
+  throw new CDPError(`discoverPage browser startup: target discovery ${url} timed out after ${ms} ms (${last?.message})`);
 }
 
-export function connectCDP(url, { ms = 30_000, onEvent = () => {}, Socket = WebSocket } = {}) {
+export function connectCDP(url, { ms = WAIT_MS, onEvent = () => {}, Socket = WebSocket } = {}) {
   return new Promise((resolve, reject) => {
     const ws = new Socket(url), pending = new Map();
     let next = 0, opened = false, failure;
@@ -35,7 +36,7 @@ export function connectCDP(url, { ms = 30_000, onEvent = () => {}, Socket = WebS
       pending.clear();
       try { ws.close(); } catch {} // No close handshake is awaited.
     };
-    const openTimer = setTimeout(() => fail(new CDPError(`browser startup: WebSocket open timed out after ${ms} ms`)), ms);
+    const openTimer = setTimeout(() => fail(new CDPError(`connectCDP browser startup: WebSocket open timed out after ${ms} ms`)), ms);
     ws.addEventListener("error", () => fail(new CDPError("CDP WebSocket error")));
     ws.addEventListener("close", (event) => fail(new CDPError(`CDP WebSocket closed (${event.code ?? "unknown"})`)));
     ws.addEventListener("message", (event) => {
@@ -56,7 +57,7 @@ export function connectCDP(url, { ms = 30_000, onEvent = () => {}, Socket = WebS
       clearTimeout(openTimer);
       resolve({
         send(method, params = {}, phase = "test-find") {
-          const label = `${phase}: ${method}`;
+          const label = `${phase}: ${method}${params.expression ? " " + params.expression.slice(0, 160) : ""}`;
           if (failure) return Promise.reject(new CDPError(`${label}: ${failure.message}`));
           return new Promise((resolve, reject) => {
             const id = ++next;

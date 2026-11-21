@@ -22,6 +22,13 @@ export const INTR_CTRL_C = 1; //    bit 0: Ctrl-C, a KeyboardInterrupt
 export const INTR_FRAME = 2; //     bit 1: a CLI indicator frame is due (item E)
 export const INTR_SOFT_STOP = 4; // bit 2: a soft stop of the current call (PR 5a)
 export const INTR_GRADING = 8; //   bit 3: a grading allowance is armed (item G; persistent)
+export const INTR_FLUSH = 16; //    bit 4: the page asks for the output written so far (a long run's print)
+
+/** Take a pending flush request: bit 4 cleared, the others left; true if it was set. */
+export function takeFlush(intr: Int32Array = INTR): boolean {
+  if ((intr[0] & INTR_FLUSH) === 0) return false;
+  return (Atomics.and(intr, 0, ~INTR_FLUSH) & INTR_FLUSH) !== 0;
+}
 
 /** Request a Ctrl-C: bit 0 set, the others left; and wake a time.sleep
  * waiting on the word. */

@@ -1,0 +1,158 @@
+[
+  {
+    "name": "addpath",
+    "kind": "function",
+    "signature": "addpath(folder1, ..., folderN)\naddpath(___, '-end')\noldpath = addpath(___)",
+    "summary": "Puts folders on the search path, at the top or with '-end' at the bottom, so the functions and scripts in them can be called by name.",
+    "doc": "Each folder is made absolute. An argument may hold several folders separated by `pathsep`, as `genpath` returns them, so `addpath(genpath('lib'))` adds a whole tree. A folder already on the path moves to the new position. A folder that doesn't exist is skipped with a warning; a `+namespace`, `@class` or `private` folder is skipped with a warning too, since the folder containing it is what goes on the path. With an output, gives the path as it was before.\n\nA name is looked up in the current folder first, then in the path's folders in order, then in the program's own folder.",
+    "examples": [
+      {
+        "code": "addpath(pwd);\nnumel(strfind(path, pwd))",
+        "expected": "\nans =\n\n     1\n\n"
+      }
+    ],
+    "differs": [
+      "The path holds only the folders a program added: MATLAB's own toolbox folders are not on it, and the built-in functions are found before it.",
+      "'-frozen' and the position 0 or 1 are accepted; -frozen changes nothing.",
+      "The path is the session's: it is not saved (there is no savepath) and starts empty in a new session."
+    ],
+    "status": "partial",
+    "see_also": ["rmpath", "genpath", "path", "which"],
+    "tags": ["search path", "files"]
+  },
+  {
+    "name": "rmpath",
+    "kind": "function",
+    "signature": "rmpath(folder1, ..., folderN)\noldpath = rmpath(___)",
+    "summary": "Takes folders off the search path; a folder that isn't on it gives a warning.",
+    "doc": "Folders are given as to `addpath`, several in one argument separated by `pathsep` included. With an output, gives the path as it was before.",
+    "examples": [
+      {
+        "code": "addpath(pwd);\nrmpath(pwd);\nisempty(path)",
+        "expected": "\nans =\n\n  logical\n\n   1\n\n"
+      }
+    ],
+    "differs": [],
+    "status": "full",
+    "see_also": ["addpath", "path"],
+    "tags": ["search path", "files"]
+  },
+  {
+    "name": "genpath",
+    "kind": "function",
+    "signature": "p = genpath(folder)",
+    "summary": "The folder and every folder below it, as one path text for addpath, leaving out private, resources, @class and +namespace folders.",
+    "doc": "Each folder in the result is followed by `pathsep`. Subfolders come after their parent, in name order. Hidden folders (a name starting with `.`) are left out. A folder that doesn't exist gives an empty char.",
+    "examples": [
+      {
+        "code": "p = genpath('no such folder')",
+        "expected": "\np =\n\n  0×0 empty char array\n\n"
+      }
+    ],
+    "differs": [
+      "Hidden folders, whose names start with a dot (.git), are left out."
+    ],
+    "status": "full",
+    "see_also": ["addpath", "path"],
+    "tags": ["search path", "files"]
+  },
+  {
+    "name": "path",
+    "kind": "function",
+    "signature": "path\np = path\npath(newpath)\npath(path1, path2)",
+    "summary": "The search path: shown one folder per line, or given as one text separated by pathsep; path(newpath) replaces it.",
+    "doc": "`path(path1, path2)` sets the path to the two joined, so `path(path, 'more')` adds at the end. With an output and inputs, gives the path as it was before.",
+    "examples": [
+      {
+        "code": "isempty(path)",
+        "expected": "\nans =\n\n  logical\n\n   1\n\n"
+      }
+    ],
+    "differs": [
+      "The path holds only the folders a program added: MATLAB's own toolbox folders are not on it."
+    ],
+    "status": "partial",
+    "see_also": ["addpath", "rmpath", "genpath"],
+    "tags": ["search path", "files"]
+  },
+  {
+    "name": "import",
+    "kind": "function",
+    "signature": "import ns.name\nimport ns.*\nL = import",
+    "summary": "Lets code call a namespace's functions by their short names: import geom.* then area(1) for geom.area(1).",
+    "doc": "A namespace is a folder whose name starts with `+` in a folder on the search path (or the current folder): `+geom/area.m` is the function `geom.area`, and `+geom/+sub/f.m` is `geom.sub.f`. `import ns.name` brings in one function, `import ns.*` all of them; a name imported by itself is found before one imported with `*`. A function's or a script's imports apply to the whole of it and to nothing else; at the top level they last until `clear import`. `import` alone shows the list, and `L = import` gives it as a cell array.",
+    "examples": [
+      {
+        "code": "import mytools.*\nL = import",
+        "expected": "\nL =\n\n  1×1 cell array\n\n    {'mytools.*'}\n\n"
+      }
+    ],
+    "differs": [
+      "Classes and Java packages can't be imported; only functions in namespace folders.",
+      "An import inside an if or a loop of a function applies from where it runs, to the top level's list, rather than to the whole function."
+    ],
+    "status": "partial",
+    "see_also": ["addpath", "which"],
+    "tags": ["search path", "files"]
+  },
+  {
+    "name": "which",
+    "kind": "function",
+    "signature": "which name\ns = which(name)",
+    "summary": "Where a name is found: a variable, a built-in function, or the file on the search path that defines it.",
+    "doc": "Looks in the order code does: the caller's variables, the program's own functions, the built-in functions, then the current folder and the search path. `s = which(name)` gives the file's full path, `'variable'` for a variable, `'built-in (Sagebrush)'` for a built-in function, or an empty char for a name not found.",
+    "examples": [
+      {
+        "code": "which sin\nx = 2;\nwhich x\nwhich nosuchname",
+        "expected": "built-in (Sagebrush)\n'x' is a variable.\n'nosuchname' not found.\n"
+      }
+    ],
+    "differs": [
+      "which -all, which name in file and which of a method call are not supported.",
+      "A built-in function shows built-in (Sagebrush), not the folder of a MATLAB toolbox."
+    ],
+    "status": "partial",
+    "see_also": ["exist", "addpath"],
+    "tags": ["search path", "files"]
+  },
+  {
+    "name": "run",
+    "kind": "function",
+    "signature": "run(scriptname)",
+    "summary": "Runs a script in the caller's workspace; given with a folder, it runs there and then comes back to the current folder.",
+    "doc": "`scriptname` is a name found on the search path (with or without `.m`), or a file's path. For a path with a folder, `run` changes to that folder for the run and changes back afterwards, unless the script itself changed folder. A function file's function is called with no arguments. A script can also be run by naming it as a statement.",
+    "examples": [
+      {
+        "code": "run('nosuchscript')",
+        "expected": "RUN cannot execute the file 'nosuchscript'. RUN requires a valid MATLAB script\n"
+      }
+    ],
+    "differs": [
+      "run, and a script named as a statement, work at the top level only: inside a function they give an error saying so.",
+      "Only .m files run (no live scripts, P-files or models)."
+    ],
+    "status": "partial",
+    "see_also": ["addpath", "which"],
+    "tags": ["search path", "files"]
+  },
+  {
+    "name": "pkg",
+    "kind": "function",
+    "signature": "pkg load name\npkg install name\nL = pkg('list')",
+    "summary": "Octave's package command: no Octave package is loaded or installed in Sagebrush yet, so pkg says so with a warning and the program goes on.",
+    "doc": "`pkg load` and `pkg install` print a warning naming what was not loaded or installed, then the program continues, so a script that loads a package it doesn't use still runs. `pkg list` gives an empty cell array. To use a package's functions, put its `.m` files in a folder and `addpath` it.",
+    "examples": [
+      {
+        "code": "pkg load statistics\ndisp('still running')",
+        "expected": "Warning: pkg load: Octave packages are not available in Sagebrush yet, so nothing was loaded (statistics).\nstill running\n"
+      }
+    ],
+    "differs": [
+      "No Octave package can be loaded or installed yet: functions they provide are undefined."
+    ],
+    "status": "partial",
+    "see_also": ["addpath"],
+    "upstream": "GNU Octave",
+    "tags": ["search path", "files"]
+  }
+]

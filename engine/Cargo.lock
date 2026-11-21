@@ -779,6 +779,7 @@ version = "0.1.0"
 dependencies = [
  "num-integer",
  "num-traits",
+ "sagebrush-arith",
  "sagebrush-ball",
  "sagebrush-bigint",
  "sagebrush-interrupt",
@@ -852,6 +853,14 @@ dependencies = [
 [[package]]
 name = "sagebrush-ledger"
 version = "0.1.0"
+
+[[package]]
+name = "sagebrush-lfun"
+version = "0.1.0"
+dependencies = [
+ "sagebrush-ap",
+ "sagebrush-interrupt",
+]
 
 [[package]]
 name = "sagebrush-modsym"
@@ -946,6 +955,13 @@ dependencies = [
 ]
 
 [[package]]
+name = "sagebrush-primes"
+version = "0.1.0"
+dependencies = [
+ "sagebrush-interrupt",
+]
+
+[[package]]
 name = "sagebrush-py"
 version = "0.1.0"
 dependencies = [
@@ -1012,6 +1028,7 @@ dependencies = [
  "sagebrush-modsym",
  "sagebrush-mpoly",
  "sagebrush-poly",
+ "sagebrush-primes",
  "sagebrush-sym",
  "serde",
  "serde_json",

@@ -55,6 +55,23 @@
     });
     bar.append(text, more, close);
     document.body.append(bar);
+    // (a narrow screen, a phone's: two words, the link itself, so the notice keeps one short line; the whole sentence
+    // stays its title and what a screen reader says)
+    const LONG = text.textContent;
+    const narrow = window.matchMedia ? window.matchMedia("(max-width: 640px)") : null;
+    let wasShort = false;
+    const fit = () => {
+      const short = !!narrow?.matches;
+      text.hidden = short;
+      more.textContent = short ? "Early alpha" : "Security";
+      more.title = short ? LONG : "";
+      if (short) more.setAttribute("aria-label", "Early alpha: " + LONG + " Security");
+      else if (wasShort) more.removeAttribute("aria-label");
+      wasShort = short;
+      if (bar.isConnected) root.style.setProperty("--sb-alpha-banner", `${bar.offsetHeight}px`);
+    };
+    fit();
+    narrow?.addEventListener?.("change", fit);
     root.style.setProperty("--sb-alpha-banner", `${bar.offsetHeight}px`);
   };
   if (document.body) show();

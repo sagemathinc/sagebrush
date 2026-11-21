@@ -10,7 +10,8 @@
 //     held open by another process): no waiting forever;
 //   - a stream or spawn error, or a close without both streams' end.
 // judge(): the report (stdout's report lines) through android-report.py with
-// the engine THIS platform fixes, and the native witness (probe-log.py
+// the engine THIS platform fixes and --desktop (the desktop app's own checks, the
+// LaTeX editor's, required too), and the native witness (probe-log.py
 // --desktop) on all of stderr, with check 2's nonce.
 import { spawnSync } from "node:child_process";
 import { writeFileSync } from "node:fs";
@@ -71,14 +72,14 @@ export function judge(res, { dir, platform = process.platform }) {
   const lines = reportLines(res.out);
   const report = join(dir, "report.txt");
   writeFileSync(report, lines.join("\n") + "\n");
-  // (the report judge, with this platform's engine)
+  // (the report judge, with this platform's engine, as the desktop app's report: --desktop)
   const engine = Object.hasOwn(ENGINE_OF_PLATFORM, platform) ? ENGINE_OF_PLATFORM[platform] : null;
   let judged = false;
   if (!engine) console.log(`FAIL no engine family is known for the platform ${JSON.stringify(platform)}`);
   else {
-    const j = python([fileURLToPath(new URL("android-report.py", here)), "--engine", engine, report]);
+    const j = python([fileURLToPath(new URL("android-report.py", here)), "--engine", engine, "--desktop", report]);
     judged = j.status === 0;
-    if (!judged) console.log(`FAIL the report judge, --engine ${engine} (android-report.py: ${j.error ? "no python" : "exit " + j.status})`);
+    if (!judged) console.log(`FAIL the report judge, --engine ${engine} --desktop (android-report.py: ${j.error ? "no python" : "exit " + j.status})`);
   }
   // (the native witness: the app's log, all of it, this run's nonce from the report's check 2)
   const stderr = join(dir, "stderr.txt");

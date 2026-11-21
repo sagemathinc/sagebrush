@@ -50,6 +50,7 @@ function mayChange(r: string, what: string) {
 }
 
 import { sha256Hex } from "../../src/runtime/sha256";
+import { gitBlobSha1 } from "../../src/runtime/sha1";
 
 // ------------------------------------------------------------------ the mediated mode (a Terminal command's worker)
 // PR 3a (b1) design r4 §3: in a worker that runs one Terminal command, every path outside the scratch trees (exactly
@@ -144,9 +145,11 @@ function liveWrite(h: LiveFd, data: Uint8Array): number {
   return data.length;
 }
 
+// (a mounted file is checked by one hash: a shared collection's SHA-256, or a GitHub listing's git blob id)
 interface Remote {
   url: string;
-  sha256: string;
+  sha256?: string;
+  gitSha1?: string;
   size: number;
 }
 interface Entry {
@@ -250,13 +253,18 @@ export function load(entries: [string, Uint8Array, string?][]) {
     place(r, { data: new Uint8Array(data), mtime: Date.now(), path: r, origin: typeof tok === "string" ? tok : "s:" + String(p) });
   }
 }
-// A shared collection's files: [path, {url, sha256, size}], fetched when read.
+// A shared collection's files: [path, {url, sha256, size}], fetched when read; or a GitHub repository's, each with its
+// git blob id in place of the SHA-256 (web/gh). One without either hash isn't mounted: nothing is read unchecked.
+const HEX = (n: number) => new RegExp(`^[0-9a-f]{${n}}$`);
 export function mount(entries: [string, Remote][]) {
   if (med !== null) throw new Error("a shared collection can't be mounted in a Terminal command");
   for (const [p, remote] of entries) {
+    const sha256 = typeof remote.sha256 === "string" && HEX(64).test(remote.sha256) ? remote.sha256 : undefined;
+    const gitSha1 = !sha256 && typeof remote.gitSha1 === "string" && HEX(40).test(remote.gitSha1) ? remote.gitSha1 : undefined;
+    if (!sha256 && !gitSha1) continue;
     const r = resolve(p);
     ensureDirs(r);
-    place(r, { data: new Uint8Array(0), mtime: Date.now(), remote: { url: String(remote.url), sha256: String(remote.sha256), size: Number(remote.size) }, path: r });
+    place(r, { data: new Uint8Array(0), mtime: Date.now(), remote: { url: String(remote.url), ...(sha256 ? { sha256 } : { gitSha1 }), size: Number(remote.size) }, path: r });
   }
 }
 // (synchronously: Python's open() is synchronous, and a worker may block)
@@ -283,7 +291,7 @@ function fetchRemote(path: string, m: Remote): Uint8Array {
     if (x.status !== 200) fail("EIO", -5, `fetch (HTTP ${x.status})`, path);
     data = new Uint8Array(x.response as ArrayBuffer);
   }
-  if (data.length !== m.size || sha256Hex(data) !== m.sha256) fail("EIO", -5, "fetch (the file is not the one shared: wrong SHA-256)", path);
+  if (data.length !== m.size || (m.sha256 ? sha256Hex(data) !== m.sha256 : !m.gitSha1 || gitBlobSha1(data) !== m.gitSha1)) fail("EIO", -5, `fetch (the file is not the one shared: wrong ${m.sha256 ? "SHA-256" : "git blob id"})`, path);
   return data;
 }
 function contents(r: string, f: Entry): Uint8Array {

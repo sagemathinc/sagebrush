@@ -9,9 +9,9 @@
 
 export type TermName = "python" | "python3" | "sage" | "matlab" | "magma";
 
-/** What the program is: a file, code given on the line, or stdin. */
+/** What the program is: a file, code given on the line, stdin, or the person typing at an interactive prompt. */
 /** `typed`: a file's name as typed (Magma's messages name it so); `shown`: the workspace path messages show. */
-export type Source = { kind: "file"; path: string; shown: string; typed: string } | { kind: "code"; code: string } | { kind: "stdin" };
+export type Source = { kind: "file"; path: string; shown: string; typed: string } | { kind: "code"; code: string } | { kind: "stdin" } | { kind: "prompt" };
 
 /** A plan to run.  `argv` is sys.argv; `path0` sys.path[0] ("" for -c and stdin, else FILE's directory). */
 export type RunPlan = {
@@ -61,7 +61,7 @@ const PY_HAS = new Set([..."bBcdEhiImOPqRsSuvVWxX?"]);
 const PY_LONG_REFUSED = new Set(["--check-hash-based-pycs", "--help-env", "--help-xoptions", "--help-all"]);
 const pyUsage = (argv0: string) => `usage: ${argv0} [option] ... [-c cmd | -m mod | file | -] [arg] ...\nTry \`python -h' for more information.\n`;
 
-function python(argv0: "python" | "python3", args: string[], cwd: string, stdinRedirected: boolean): Plan {
+function python(argv0: "python" | "python3", args: string[], cwd: string, stdinRedirected: boolean, interactive: boolean): Plan {
   let noBytecode = false;
   const refuse = (a: string) => answer(2, "", `${argv0}: ${clip(a)} isn't available in the Terminal\n`);
   const run = (source: Source, argv: string[], path0: string): RunPlan => ({ run: true, mode: "python", argv0, source, argv, path0, ...(noBytecode ? { noBytecode: true as const } : {}) });
@@ -106,7 +106,10 @@ function python(argv0: "python" | "python3", args: string[], cwd: string, stdinR
     return run(src, rest, dirOf(join(cwd, rest[0])));
   }
   if (rest[0] === "-") return run({ kind: "stdin" }, rest, "");
-  if (!stdinRedirected) return answer(2, "", `${argv0}: the interactive prompt isn't available in the Terminal yet. Run ${argv0} FILE, ${argv0} -c CODE, or pipe code in.\n`);
+  if (!stdinRedirected) {
+    if (interactive) return run({ kind: "prompt" }, [""], "");
+    return answer(2, "", `${argv0}: the interactive prompt isn't available in the Terminal yet. Run ${argv0} FILE, ${argv0} -c CODE, or pipe code in.\n`);
+  }
   return run({ kind: "stdin" }, [""], "");
 }
 const help = (argv0: string) =>
@@ -117,9 +120,10 @@ const help = (argv0: string) =>
 // Sage's options the Terminal refuses; anything else that starts with "-" is Sage's own unknown option
 const SAGE_REFUSED = new Set(["-n", "--notebook", "-t", "-pip", "--pip", "-i", "--python", "--ipython", "-sh", "--sh", "-docbuild", "--docbuild", "-gap", "--gap", "-gp", "--gp", "-maxima", "--maxima", "-singular", "--singular", "-preparse", "--preparse", "-root", "--root", "-v", "--version", "-h", "--help", "-advanced", "--advanced"]);
 
-function sage(args: string[], cwd: string, stdinRedirected: boolean): Plan {
+function sage(args: string[], cwd: string, stdinRedirected: boolean, interactive: boolean): Plan {
   const a = args[0];
   if (a === undefined) {
+    if (!stdinRedirected && interactive) return { run: true, mode: "sage", argv0: "sage", source: { kind: "prompt" }, argv: [""], path0: "" };
     if (!stdinRedirected) return answer(2, "", "sage: the interactive prompt isn't available in the Terminal yet. Run sage FILE, sage -c CODE, or pipe code in.\n");
     return { run: true, mode: "sage", argv0: "sage", source: { kind: "stdin" }, argv: [""], path0: "" };
   }
@@ -138,7 +142,7 @@ function sage(args: string[], cwd: string, stdinRedirected: boolean): Plan {
 
 const MATLAB_NOOPS = new Set(["-nodesktop", "-nodisplay", "-nojvm", "-nosplash"]);
 
-function matlab(args: string[], cwd: string, stdinRedirected: boolean): Plan {
+function matlab(args: string[], cwd: string, stdinRedirected: boolean, interactive: boolean): Plan {
   let startIn: string | undefined;
   let batch: string | null = null;
   let file: string | null = null;
@@ -170,6 +174,7 @@ function matlab(args: string[], cwd: string, stdinRedirected: boolean): Plan {
     const src = fileSource(startIn ?? cwd, file);
     return { run: true, mode: "matlab", argv0: "matlab", source: src, argv: [file], path0: dirOf((src as any).path), ...at };
   }
+  if (!stdinRedirected && interactive) return { run: true, mode: "matlab", argv0: "matlab", source: { kind: "prompt" }, argv: [""], path0: "", ...at };
   if (!stdinRedirected) return answer(2, "", "matlab: the interactive prompt isn't available in the Terminal yet. Run matlab -batch CODE, matlab FILE.m, or pipe code in.\n");
   return { run: true, mode: "matlab", argv0: "matlab", source: { kind: "stdin" }, argv: [""], path0: "", ...at };
 }
@@ -181,7 +186,7 @@ const MAGMA_REFUSED = new Set(["-d", "-l", "-s", "-S", "-r", "-c", "-q"]);
 // names itself magma.exe there, the Terminal's command is magma)
 const MAGMA_USAGE = "Usage: magma [-d] [-l limit] [-b] [-n] [-s startfile] [-S seed] [-r workspace] [-c package] [-q directory machine] [filelist]\n";
 
-function magma(args: string[], cwd: string, stdinRedirected: boolean): Plan {
+function magma(args: string[], cwd: string, stdinRedirected: boolean, interactive: boolean): Plan {
   const files: Source[] = [];
   const vars: [string, string][] = [];
   for (const a of args) {
@@ -205,22 +210,28 @@ function magma(args: string[], cwd: string, stdinRedirected: boolean): Plan {
     const [first, ...more] = files;
     return { run: true, mode: "magma", argv0: "magma", source: first, argv: args, path0: cwd, ...(more.length ? { more } : {}), ...v };
   }
+  if (!stdinRedirected && interactive) return { run: true, mode: "magma", argv0: "magma", source: { kind: "prompt" }, argv: [""], path0: cwd, ...v };
   if (!stdinRedirected) return answer(2, "", "magma: the interactive prompt isn't available in the Terminal yet. Run magma FILE, or pipe code in.\n");
   return { run: true, mode: "magma", argv0: "magma", source: { kind: "stdin" }, argv: [""], path0: cwd, ...v };
 }
 
-/** Read a Terminal command line: a plan to run, or the answer it gets at once. */
-export function readCommand(name: TermName, args: readonly string[], cwd: string, stdinRedirected: boolean): Plan {
+/**
+ * Read a Terminal command line: a plan to run, or the answer it gets at once.  `interactive`: the page's bridge says
+ * this is the person's own line at the panel, a single top-level command with the keyboard as its stdin (never set
+ * by the command or a caller); only then does a bare python, sage, matlab or magma open a prompt.  Every other form
+ * keeps the answer it had before.
+ */
+export function readCommand(name: TermName, args: readonly string[], cwd: string, stdinRedirected: boolean, interactive = false): Plan {
   const a = [...args];
   switch (name) {
     case "python":
     case "python3":
-      return python(name, a, cwd, stdinRedirected);
+      return python(name, a, cwd, stdinRedirected, interactive);
     case "sage":
-      return sage(a, cwd, stdinRedirected);
+      return sage(a, cwd, stdinRedirected, interactive);
     case "matlab":
-      return matlab(a, cwd, stdinRedirected);
+      return matlab(a, cwd, stdinRedirected, interactive);
     case "magma":
-      return magma(a, cwd, stdinRedirected);
+      return magma(a, cwd, stdinRedirected, interactive);
   }
 }
