@@ -88,7 +88,9 @@ export const LATEX_LAZY = {
 //  (+768 / +314), + 64)
 // (253,962 raw / 84,895 gzip: Nov 19 2026, the reload record on the LaTeX page with the run of a .tex the agent made,
 //  master a3f1e30b: 253,898 / 84,831 measured, + 64)
-export const LATEX_CAPS = { raw: 253962, gzip: 84895 };
+// (251,665 raw / 84,217 gzip: Nov 20 2026, the editor's own list of examples gone (the gallery's panel the only one):
+//  251,601 / 84,153 measured on the shipped build (bun 1.4.4, node 24.22.3) on its merge with master bc899e81, + 64)
+export const LATEX_CAPS = { raw: 251665, gzip: 84217 };
 export const gz = (b) => gzipSync(b, { level: 9 }).length;
 
 // Each lazy chunk's own cap (raw, gzip), fetched only on its own use, so outside the group:
