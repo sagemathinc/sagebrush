@@ -167,8 +167,12 @@ const mirrorTitles = new Map<string, string>();
 let mirrorDeleting = false;
 
 async function openMirror(c: RemoteConversation) {
+  // (a task's view shown: it gives the main pane to the mirrored conversation, closed first, as a thread's click does)
+  if (delegateUi.showing() !== null) delegateUi.close();
   if (!mirrorOpen && !(await mayLeaveThread())) return;
   const r = await mirror.readConversation(c.conversation).catch(() => null);
+  // (a task opened while the conversation was read: the person's later choice stands)
+  if (delegateUi.showing() !== null) return;
   if (!r) return toast(MIRROR_COPY.gap);
   const title = mirrorTitle(r.sections);
   mirrorTitles.set(c.conversation, title);
@@ -1173,7 +1177,12 @@ const delegateUi = mountDelegate({
   },
   // (a task's turns are the paired agent's, on this computer: never shown as the scripted demo's)
   turnNode: (thread, turn) => viewTurnNode(thread, { ...turn, agent: turn.agent ?? agentName() }, { answer: () => {}, openArtifact: () => {}, md }),
-  shown: (on) => { document.body.classList.toggle("task-shown", on); if (!on) renderAll(); },
+  // (a task shown takes the main pane from a mirrored conversation too: the mirror closes, as when a thread is opened)
+  shown: (on) => {
+    document.body.classList.toggle("task-shown", on);
+    if (on && mirrorOpen) { closeMirror(); renderAll(); }
+    if (!on) renderAll();
+  },
   site: new URL("../", import.meta.url),
   toast,
 });
