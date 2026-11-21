@@ -1,14 +1,14 @@
 # The numeric track
 
-*November 21, 2026, r5.* track/numeric is where MATLAB mode's numerical
+*November 21, 2026, r6.* track/numeric is where MATLAB mode's numerical
 side grows: the functions an agent reaches for when it writes MATLAB, and a
 subset of the Symbolic Toolbox. It works like track/math: PRs go into
 track/numeric, and the track is pulled into master. This note settles what
 "compatible" means there, how results may differ between targets, what
 things may cost, where the work starts, and how it is checked.
 
-"MATLAB users" now mostly means agents (Claude, Codex) directed by people.
-So the priorities are the agents' own: what they would write first (§4).
+This track prioritizes agents directed by people: its priorities are what
+agents (Claude, Codex) would write first (§4).
 
 ## 1. The compatibility contract
 
