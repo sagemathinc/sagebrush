@@ -36,8 +36,7 @@ async function open(url) {
     if (m.id && waiting.has(m.id)) { waiting.get(m.id)(m.result ?? m.error); waiting.delete(m.id); }
     if (m.method === "Runtime.exceptionThrown") fails.push("page error: " + (m.params.exceptionDetails?.exception?.description ?? JSON.stringify(m.params.exceptionDetails)).slice(0, 500));
   };
-  // (an answer that never comes, the page or the browser gone, fails by name instead of leaving node nothing to wait for)
-  const send = (method, params = {}, ms = 120000) => new Promise((resolve, reject) => { const id = ++n, timer = setTimeout(() => { waiting.delete(id); reject(new Error(`${method}: no answer within ${ms / 1000} s`)); }, ms); waiting.set(id, (r) => { clearTimeout(timer); resolve(r); }); ws.send(JSON.stringify({ id, method, params })); });
+  const send = (method, params = {}) => new Promise((r) => { const id = ++n; waiting.set(id, r); ws.send(JSON.stringify({ id, method, params })); });
   // (a page that hangs (a zoom of 0 put back) answers nothing: given up on after 20 s, as a failure, not a hang)
   const ev = async (expression) => { const r = await Promise.race([send("Runtime.evaluate", { expression, awaitPromise: true, returnByValue: true }), sleep(20000).then(() => ({ exceptionDetails: { text: "no answer in 20 s" } }))]); if (r.exceptionDetails) throw new Error(JSON.stringify(r.exceptionDetails).slice(0, 400)); return r.result?.value; };
   await send("Runtime.enable");

@@ -33,8 +33,7 @@ async function tab(port, first) {
   let n = 0;
   const waiting = new Map();
   ws.onmessage = (e) => { const m = JSON.parse(e.data); if (m.id && waiting.has(m.id)) { waiting.get(m.id)(m.result ?? m.error); waiting.delete(m.id); } };
-  // (an answer that never comes, the page or the browser gone, fails by name instead of leaving node nothing to wait for)
-  const send = (method, params = {}, ms = 120000) => new Promise((resolve, reject) => { const id = ++n, timer = setTimeout(() => { waiting.delete(id); reject(new Error(`${method}: no answer within ${ms / 1000} s`)); }, ms); waiting.set(id, (r) => { clearTimeout(timer); resolve(r); }); ws.send(JSON.stringify({ id, method, params })); });
+  const send = (method, params = {}) => new Promise((r) => { const id = ++n; waiting.set(id, r); ws.send(JSON.stringify({ id, method, params })); });
   const ev = async (expression, ms = 30000) => {
     const r = await Promise.race([send("Runtime.evaluate", { expression, awaitPromise: true, returnByValue: true }), sleep(ms).then(() => ({ timedOut: true }))]);
     if (r?.timedOut || r?.exceptionDetails) return undefined;

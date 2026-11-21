@@ -30,7 +30,7 @@ ws.onmessage = (ev) => {
   if (m.method === "Runtime.exceptionThrown") errors.push(m.params.exceptionDetails?.exception?.description ?? JSON.stringify(m.params.exceptionDetails));
 };
 // (an answer that never comes, the page or the browser gone, fails by name instead of leaving node nothing to wait for)
-const send = (method, params = {}, ms = 120000) => new Promise((resolve, reject) => { const id = ++n, timer = setTimeout(() => { waiting.delete(id); reject(new Error(`${method}: no answer within ${ms / 1000} s`)); }, ms); waiting.set(id, (r) => { clearTimeout(timer); resolve(r); }); ws.send(JSON.stringify({ id, method, params })); });
+const send = (method, params = {}, ms = 60000) => new Promise((resolve, reject) => { const id = ++n, timer = setTimeout(() => { waiting.delete(id); reject(new Error(`${method}: no answer within ${ms / 1000} s`)); }, ms); waiting.set(id, (r) => { clearTimeout(timer); resolve(r); }); ws.send(JSON.stringify({ id, method, params })); });
 const ev = async (expression) => { const r = await send("Runtime.evaluate", { expression, awaitPromise: true, returnByValue: true }); if (r.exceptionDetails) throw new Error(JSON.stringify(r.exceptionDetails).slice(0, 400)); return r.result.value; };
 const until = async (expr, ms = 10000) => { const t = Date.now(); while (Date.now() - t < ms) { if (await ev(expr).catch(() => false)) return true; await sleep(100); } return false; };
 const fails = [];
