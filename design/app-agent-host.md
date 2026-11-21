@@ -1,6 +1,6 @@
 # The desktop app as the agent host
 
-*Status: r2, a design note; nothing is built. r2 answers the COPY review of r1 (the CLI's real form, what exists versus what is proposed, Apple's rules as cited). Author: @sagebrush-macapp. Lanes: SEC (launching agents from the app, and the agent's file access), COPY. Steps that need William (store accounts, signing identities) stay his.*
+*Status: r2, a design note; nothing is built. r2 answers r1's COPY review (the CLI's real form, what exists versus what is proposed, Apple's rules as cited) and its SEC review (§5, the security requirements). Author: @sagebrush-macapp. Lanes: SEC (launching agents from the app, and the agent's file access), COPY. Steps that need William (store accounts, signing identities) stay his.*
 
 The direction, Nov 21, 2026, about 11:28 AM PST (verbatim): "for windows I think the sagebrush instructions should not require using a terminal, if possible. I think windows users in particular would be most comfortable getting a signed official sagebrush app from the windows app store, then install it. It would: provide of course our native tauri app; ALSO provide a way to launch claude (etc) sessions. The same argument should also apply to MacOS and maybe even linux. This doesn't at all mean we don't also offer the cli options. it's just that we should have both."
 
@@ -19,16 +19,16 @@ The direction, Nov 21, 2026, about 11:28 AM PST (verbatim): "for windows I think
 - pairs with one page origin, using a one-time code that it generates and prints.
 
 **What the app adds.** Everything in this list is proposed; none of it exists yet.
-- **Bundling.** The app packs the exact `sagebrush-agent` tarball, its shrinkwrapped dependencies, its pinned Claude Code and, for Connect Codex, its pinned Codex binary for that platform, beside the engine as a resource. Bundling Codex is what lets Connect Codex work with no download at run time. The release's sha256 is pinned in the app's build, the same rule as the agents site's `RELEASE_SHA256`. A mismatch fails the build. At run time the app checks the bundled files' hashes before starting the agent and refuses to start on a mismatch.
+- **Bundling.** The app packs the exact `sagebrush-agent` tarball, its shrinkwrapped dependencies, its pinned Claude Code and, for Connect Codex, its pinned Codex binary for that platform, beside the engine as a resource. Bundling Codex is what lets Connect Codex work with no download at run time. The release's sha256 is pinned in the app's build, the same rule as the agents site's `RELEASE_SHA256`, and a mismatch fails the build. The build also writes a manifest of every file the agent will load. At run time the app checks the files actually loaded against it before starting the agent (§5). If a Store build can't bundle Codex for a platform, Connect Codex is unavailable in that build; it never falls back to a download.
 - **The Connect button.** It goes in the app's agents page; it needs that page to ship in the app (the app shows a short "not in the app" page for /agents/ today). The app starts the agent on its Node sidecar as a child process, with:
   - `--origin` set to the app page's exact origin, `http://127.0.0.1:<the port the app holds>`, and no other origin;
   - a one-time pairing code that the app generates and hands to both the agent (on its stdin) and its own page (over a Tauri command). Nothing is typed or shown. This needs new agent support: today the agent generates the code and prints it for the person to type;
-  - the agent's working folder set to the app's workspace on disk, or to a folder the person picks.
+  - the agent's working folder: the selected workspace on disk, shown to the person; when there is none, the app asks for a folder and never falls back to the home folder.
 
-  The agent ends when the app quits.
+  The app stops the agent, and the work it started, when the app quits (§5).
 - **Sign-in.** It is the agent's own: Claude's and Codex's login flows open the browser. The app never sees a password or a token; the logins live where the CLIs keep them, in `~/.claude` and `~/.codex`. *To verify before building:* how Claude Code's and Codex's logins can be started without a terminal. Both open a browser URL today, but the CLI front ends expect a TTY. The app may need to run them in a hidden pseudo-terminal and open the URL, or use the SDK's own login entry if it has one.
 - **The version shown.** The app's About box and the agents page show the bundled `sagebrush-agent`, Claude Code and Codex versions.
-- **Updates.** A new agent release reaches app users in the next app release, through the app's normal update. There are no separate downloads at run time in the Store builds (§2). The direct-download builds may keep the agent's own first-use fetch of the pinned Codex, which is hash-checked as in the CLI.
+- **Updates.** A new agent release reaches app users in the next app release, through the app's normal update. There are no downloads at run time in the Store builds (§2). The direct-download builds may keep the agent's own first-use fetch of the pinned Codex, which is hash-checked as in the CLI.
 
 **What the agent may touch.**
 - **Today, with the CLI:** a local `sagebrush-agent` paired with a page reaches only the workspace tools that page's grant allows (writing a notebook, its own git branch, and so on); it has no shell or files on the computer. Shell and files on a computer come only through `sagebrush remote` and that computer's explicit grant ("Allow shell and files on <computer>").
@@ -83,10 +83,28 @@ Open items that could still need one, to settle while building:
 
 Steps 1–4 are mine; step 5 follows the Windows engine; steps 6–7 wait on William's accounts.
 
-## Questions for SEC
+## 5. Security requirements
 
-- **Which origins may the agent take:** only the app page's exact origin when the app starts it, with no `sagebrush.space` alongside it?
-- **Where the pairing code lives:** passing it over the child's stdin and a Tauri command, never a file or an argument (arguments are visible to other processes), is enough? This needs a new agent option that takes the code instead of generating it.
-- **Shell and files:** should the app-hosted agent ever get them on this computer, and only through an explicit, visible grant like the remote one?
-- **The working folder:** default to the app's workspace on disk, or ask every time?
-- **Run-time checks:** the bundled tarball's hash is checked before each start, and a failed check refuses to start, with no fallback to a network copy?
+SEC answered r1's questions; these are requirements for the implementation, not things the agent does today.
+
+- **Origin.** An app-launched agent accepts only the app's own exact origin, `http://127.0.0.1:<the bound port>`. It takes no other port, `localhost` alias, `sagebrush.space`, or null or missing origin. The app keeps its exact-origin capability and its navigation guard, and notebook and example output frames can't reach the launch, pairing or file commands.
+- **Launch.** The app alone chooses the executable (an absolute path to its own read-only resources), the fixed arguments, the origin and the working folder. It launches without a shell and without searching PATH. The page can only ask to connect or disconnect; it never supplies a command, an argument, an environment, a code or a process id.
+- **Pairing.** The code is unpredictable, fresh for each launch, single-use, and invalid once the start fails, the child exits or a new one replaces it.
+  - It travels only over the child's stdin and an exact-origin Tauri command. It never goes in arguments, the environment, a URL, logs or disk, and never back through the app's HTTP server.
+  - The page pairs only with the child the app has just launched. A stale page or a replaced child keeps no new code or permission.
+- **Grants.** Connect is not a grant. Pairing automatically keeps the page's grant prompt and the Pair and Delegate boundaries, and gives no shell or host files (§1).
+- **Working folder.** The default is the selected workspace on disk, shown; with none, the app asks. It isn't asked again on reconnecting to the same folder. The folder is a default, not a sandbox: the agent runs as the person.
+- **Integrity.** The build pins the source archive and writes a manifest of the installed files. Extraction refuses paths or links that would escape.
+  - At each start the app checks the files actually loaded against the manifest: the agent's modules and dependencies, the Node sidecar, and the bundled Claude Code and Codex executables. Checking the archive alone isn't enough.
+  - The app runs its own immutable, versioned resources, never a copy in a workspace or cache.
+  - A mismatch refuses to start, with no fallback to the network.
+  - This doesn't protect against a hostile program already running as the same person.
+- **Shutdown.** Quitting, or reconnecting, stops the agent the app started and the work it started, through the agent's task-cleanup protocol, and invalidates its pairing. The app never signals a process id the page supplies, and doesn't assume that killing the parent stops its children.
+- **Login.** Starting the Claude Code and Codex logins stays open (§3). The app doesn't parse or keep credentials, and the output of any hidden terminal used for login never goes into the app's general logs.
+- **Tests with the implementation:**
+  - a second origin, a null origin and an output frame are refused;
+  - an injected launch argument is refused;
+  - a stale or replayed pairing code is refused;
+  - Connect without a shell-and-files grant gets no shell;
+  - a corrupted dependency or vendor binary refuses to start, with the network off;
+  - quitting with a task still running stops it.
