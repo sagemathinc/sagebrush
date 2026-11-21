@@ -2649,7 +2649,7 @@ try {
   {
     const nbRef7 = await ev(`${W}.list("/").then((l) => l.find((e) => e.path === "/uxnb.ipynb")?.ref ?? null)`);
     await ev(`${W}.create("/uxboard.board.json").then(() => 1)`);
-    const heldExit = async (what, act, gone, noNav) => {
+    const heldExit = async (what, act, gone, noNav, readFrom = null) => {
       await open(fu); await until(`!!${rowOf("/uxnb.ipynb")} && !!${rowOf("/uxboard.board.json")}`, 15000);
       const api = await ev(`!!window.navigation`);
       await ev(`(() => { window.__heldW = 0; window.__hold = new Promise((r) => (window.__rel = r)); window.__sbTexSaveWrite = () => (window.__heldW++, window.__hold); return true; })()`);
@@ -2662,6 +2662,8 @@ try {
       check(api === !noNav && waiting.page === true && /tex=/.test(waiting.url) && waiting.held >= 1 && waiting.ro === true, `A7${noNav ? " (no Navigation API)" : ""}: ${what} right after an edit, its write held: the page waits, held read-only`, { api, ...waiting });
       await ev(`(window.__rel?.(), true)`).catch(() => {});
       const went = await fresh(gone, 30000).catch(() => false);
+      // (a page with no workspace of its own, the agents page: the file read back from the editor's page)
+      if (went && readFrom) await go(readFrom);
       const bytes = went ? await readUx() : "";
       check(went && bytes.endsWith(tag), `A7${noNav ? " (no Navigation API)" : ""}: …${what}, the write let go: gone, and the edit is in the file`, { went, url: went ? await ev(`location.pathname + location.search`) : null, tail: bytes.slice(-40) });
     };
@@ -2673,6 +2675,9 @@ try {
     await heldExit("a board clicked in the files", `(${rowOf("/uxboard.board.json")}.click(), true)`, `/board/.test(location.pathname)`, true);
     await heldExit("the File menu's New notebook", `(document.querySelector('.tex-filemenu [data-f="texnb"]').click(), true)`, notTex, true);
     await heldExit("the File menu's New board", `(document.querySelector('.tex-filemenu [data-f="texboard"]').click(), true)`, `/board/.test(location.pathname)`, true);
+    // (the page's home link, a plain click; and the files' Agents… (the hosting page's way out by its board path))
+    await heldExit("the Sagebrush home link", `(document.querySelector(".tex-page .tex-home").click(), true)`, `location.search.startsWith("?home") && !document.querySelector(".tex-page")`, true);
+    await heldExit("the files' Agents…", `(document.querySelector("#wssidebar .sbfiles .fagents").click(), true)`, `/agents/.test(location.pathname)`, true, base + "?latex=1");
     await send("Page.removeScriptToEvaluateOnNewDocument", { identifier: hide.identifier });
   }
   await ev(`localStorage.removeItem("sagebrush-files-sidebar"); true`);

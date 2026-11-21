@@ -36,7 +36,7 @@ const PAGE = "/sagebrush-latex.js";
 const g: any = globalThis;
 const isTex = (e: Entry) => /\.tex$/i.test(e.path);
 // (to another page once the editor's edit is written: page.ts's leaveThen, once the editor is up)
-const leave = (url: string) => (g.__sbTexLeave ?? ((go: () => void) => go()))(() => location.assign(url));
+const leave = (url: string) => (g.__sbLeaveTo ? void g.__sbLeaveTo(url) : (g.__sbTexLeave ?? ((go: () => void) => go()))(() => location.assign(url)));
 /** New ▸ LaTeX document in `folder`: "Untitled.tex" (or "Untitled (2).tex", ...) there, opened in the editor. */
 export const texNew = (ws: Workspace, folder = "/") => import(PAGE).then((x) => x.newTex(ws, g.__sbTex, folder), (r) => alert(r));
 /** The LaTeX examples' list (the editor's "From an example…"; examples.ts). */
@@ -124,7 +124,10 @@ export async function latexBoot(ws: Workspace | null, sandbox: { WorkerKernel: u
     // (a fid is hex: nothing to encode)
     if (!isTex(e) || !e.fid) return false;
     const url = "/?tex=" + e.fid;
-    tab ? open(url, "_blank", "noopener") : location.assign(url);
+    // (in this tab by the page's way out: the notebook's save, the disk in the app, index.html leaveTo)
+    if (tab) open(url, "_blank", "noopener");
+    else if (g.__sbLeaveTo) void g.__sbLeaveTo(url);
+    else location.assign(url);
     return true;
   };
   // a .tex file's preview: the editor's button; disabled, saying why, for a file without a stable id
