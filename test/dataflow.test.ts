@@ -167,3 +167,24 @@ test("IPython's output names (_, __, ___, _N) read in a cell that doesn't bind t
   assert.deepEqual([...a.defs], []);
   assert.deepEqual([...a.refs].sort(), ["print", "r"]);
 });
+
+test("a cell's outputs: the output names it reads without binding them (_, __, ___; not _N)", () => {
+  const outs = (code: string, mode?: "python" | "sage" | "matlab" | "magma") => [...(analyzeCell(code, "c", mode ? { mode } : {}).outputs ?? [])].sort();
+  assert.deepEqual(outs("_"), ["_"]);
+  assert.deepEqual(outs("print(_, __, ___, _1)"), ["_", "__", "___"]);
+  // (read in a function or a comprehension: still the interpreter's, read when it runs)
+  assert.deepEqual(outs("def f():\n    return __\n[___ for i in range(2)]"), ["__", "___"]);
+  // (bound in the cell: the cell's own, not an output read)
+  assert.deepEqual(outs("_ = 5\nprint(_)"), []);
+  assert.deepEqual(outs("for _ in range(3):\n    pass"), []);
+  assert.deepEqual(outs("_2 * 2"), []);
+  assert.deepEqual(outs("x = 1"), []);
+  // (Sage too; MATLAB and Magma have no output names)
+  assert.deepEqual(outs("_ + 1", "sage"), ["_"]);
+  assert.deepEqual(outs("x = 1;", "matlab"), []);
+  // (and an output name is still neither a definition nor a reference)
+  const a = analyzeCell("y = _ + __");
+  assert.deepEqual([...a.defs], ["y"]);
+  assert.ok(!a.refs.has("_") && !a.refs.has("__"));
+});
+

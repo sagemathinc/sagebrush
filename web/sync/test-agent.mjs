@@ -581,12 +581,26 @@ await section("making a grant arms its expiry", async () => {
   ok(a1 !== null && Math.abs(a1 - (g1.grant.expires + 1)) <= 1, "a grant made sets the alarm to its own expiry: " + (a1 === null ? null : a1 - g1.grant.expires));
   // (a day of 0.3 s here, so a 1-day grant expires 0.3 s after it is made)
   await seam(FB, { dayMs: 300 });
+  // (an alarm read by `after`, once a grant's expiry has passed by then (a loaded runner: the make and the read can
+  //  take longer than such a day), may have fired and moved on: due at the earliest expiry, or at a later one whose
+  //  earlier ones have all passed; while none has passed, exactly as before)
+  const dueAt = (al, expiries, after) => {
+    for (const e of [...expiries].sort((x, y) => x - y)) {
+      if (al !== null && Math.abs(al - (e + 1)) <= 1) return true;
+      if (e + 1 > after) return false;
+    }
+    return false;
+  };
   const g2 = await make(s, [{ path: "/", access: "read" }], { days: 1 });
   const a2 = (await (await seam(FB, {})).json()).alarm;
-  ok(a2 !== null && Math.abs(a2 - (g2.grant.expires + 1)) <= 1 && g2.grant.expires - t0 < 5000, "a shorter-lived grant made later brings it forward to that expiry: " + (a2 === null ? null : a2 - g2.grant.expires));
+  const after2 = Date.now();
+  const passed2 = after2 >= g2.grant.expires + 1;
+  ok((passed2 ? dueAt(a2, [g1.grant.expires, g2.grant.expires], after2) : a2 !== null && Math.abs(a2 - (g2.grant.expires + 1)) <= 1) && g2.grant.expires - t0 < 5000, "a shorter-lived grant made later brings it forward to that expiry: " + (a2 === null ? null : a2 - g2.grant.expires) + (passed2 ? " (that expiry passed before the read)" : ""));
   const g3 = await make(s, [{ path: "/", access: "read" }], { days: 2 });
   const a3 = (await (await seam(FB, {})).json()).alarm;
-  ok(a3 === a2 || a3 === null || a3 <= g2.grant.expires + 1, "a later-expiring one doesn't push it back");
+  const after3 = Date.now();
+  const passed3 = after3 >= g2.grant.expires + 1;
+  ok(passed3 ? dueAt(a3, [g1.grant.expires, g2.grant.expires, g3.grant.expires], after3) : a3 === a2 || a3 === null || a3 <= g2.grant.expires + 1, "a later-expiring one doesn't push it back" + (passed3 ? ` (the shorter one's expiry passed before the read: due at ${a3 === null ? null : a3 - g2.grant.expires} from it)` : ""));
 });
 
 await section("a read-only account: reads pass, writes are refused", async () => {

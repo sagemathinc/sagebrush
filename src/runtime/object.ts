@@ -1461,9 +1461,11 @@ export function toPyExc(e: any): any {
   // largest, V8's or JavaScriptCore's, 2^20 bits, so Bun's): MemoryError,
   // as CPython's when memory runs out, not an internal error (HARD-978-2).
   // (JavaScriptCore sizes a result before it computes or allocates it, so
-  // nothing is spent first)
-  if (e instanceof RangeError && /Invalid string length|Invalid array length|Array buffer allocation failed|Invalid typed array length|Maximum BigInt size exceeded|BigInt generated from this operation is too big/.test(e.message)) {
-    const r = T.MemoryError();
+  // nothing is spent first) It says which limit: the JavaScript engine's own,
+  // a hard limit and no cap of ours, or memory the computer couldn't give.
+  if (e instanceof RangeError && /Invalid string length|Invalid array length|Array buffer allocation failed|Invalid typed array length|Maximum BigInt size exceeded|BigInt generated from this operation is too big|(Map|Set) maximum size exceeded|WebAssembly\.Memory\.grow|failed to grow memory/.test(e.message)) {
+    const why = engineLimit(e.message);
+    const r = why === undefined ? T.MemoryError() : T.MemoryError(why);
     Object.defineProperty(r, "$tb", { value: e, writable: true, enumerable: false });
     return markRaised(r);
   }
@@ -1472,9 +1474,63 @@ export function toPyExc(e: any): any {
     Object.defineProperty(r, "$tb", { value: e, writable: true, enumerable: false });
     return markRaised(r);
   }
-  const r = T.SystemError(`internal error: ${e && e.stack ? e.stack : String(e)}`);
-  Object.defineProperty(r, "$tb", { value: e instanceof Error ? e : {}, writable: true, enumerable: false });
+  // (V8 keeps a stack in the form it is first read in: its call sites are
+  // taken first, for the traceback (the frames that caught it are found
+  // among them), and the message's text is made from them; reading e.stack
+  // as text first left only text, and printing the traceback failed. The
+  // sites are kept on the error ($sites), so the same error made a Python
+  // one again (a catch that only asks its type, then rethrows it) still has
+  // them; its header as V8 makes it, the error's toString)
+  let tb: any = e instanceof Error ? e : {};
+  let text: string | null = null;
+  if (e instanceof Error) {
+    let sites: any = (e as any).$sites;
+    if (sites === undefined) {
+      const prev = (Error as any).prepareStackTrace;
+      (Error as any).prepareStackTrace = (_: any, cs: any[]) => cs;
+      try {
+        sites = e.stack;
+      } finally {
+        (Error as any).prepareStackTrace = prev;
+      }
+      if (Array.isArray(sites)) {
+        let head: string;
+        try {
+          head = String(e);
+        } catch {
+          head = "Error";
+        }
+        text = head + sites.map((cs: any) => `\n    at ${cs}`).join("");
+        try {
+          Object.defineProperty(e, "$sites", { value: sites, enumerable: false });
+          e.stack = text;
+        } catch {}
+      } else if (sites) text = String(sites);
+    }
+    if (Array.isArray(sites)) tb = { stack: sites };
+  }
+  if (text === null) text = e && e.stack ? e.stack : String(e);
+  const r = T.SystemError(`internal error: ${text}`);
+  Object.defineProperty(r, "$tb", { value: tb, writable: true, enumerable: false });
   return markRaised(r);
+}
+
+// The JavaScript engine's limit a RangeError hit, in words (V8's figures, and JavaScriptCore's where its message is its
+// own), for its MemoryError; none for one it doesn't name.
+const ENGINE_LIMITS: [RegExp, string][] = [
+  [/Invalid array length/, "a list, tuple or other array past the JavaScript engine's largest (about 2**27 = 134,217,728 items in V8: Chrome, Edge, the app, the CLI on Node)"],
+  [/(Map|Set) maximum size exceeded/, "a dict or set past the JavaScript engine's largest (2**24 = 16,777,216 entries in V8: Chrome, Edge, the app, the CLI on Node)"],
+  [/Invalid string length/, "a string past the JavaScript engine's largest (2**29 - 24 = 536,870,888 characters in V8: Chrome, Edge, the app, the CLI on Node)"],
+  [/Maximum BigInt size exceeded/, "an int past the JavaScript engine's largest (2**30 bits in V8: Chrome, Edge, the app, the CLI on Node)"],
+  [/BigInt generated from this operation is too big/, "an int past the JavaScript engine's largest (2**20 bits in JavaScriptCore: Safari, Bun)"],
+  [/Invalid typed array length/, "an array buffer past the JavaScript engine's length limit"],
+  [/Array buffer allocation failed/, "the computer couldn't give the memory an array buffer needed"],
+  [/WebAssembly\.Memory\.grow\(\): Maximum memory size exceeded|would exceed the memory's declared maximum size|expects the delta to be a valid page count/, "a WebAssembly module's memory past its maximum (4 GiB at most: wasm32)"],
+  // (Firefox's "failed to grow memory" doesn't say which: taken as the computer's)
+  [/WebAssembly\.Memory\.grow|Unable to grow instance memory|failed to grow memory/, "a WebAssembly module's memory: more than the computer could give"],
+];
+function engineLimit(message: string): string | undefined {
+  return ENGINE_LIMITS.find(([re]) => re.test(message))?.[1];
 }
 
 export function excMatch(e: any, spec: any): boolean {

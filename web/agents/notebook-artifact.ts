@@ -391,6 +391,9 @@ export function mountNotebook(ws: Workspace, path: string, box: HTMLElement, ui:
       //  and turn still the page's (`may`))
       const here = () => may() && alive && !!comp && nb === comp && attached && bound && !frozen && guard === "open" && docRef === ref && owns(comp);
       let told = false, reading = true, woke!: () => void;
+      // (the call ended (stop: Stop, run_stop, its deadline, a grant change, the page going): no cell of it starts after;
+      //  and whether one of its cells is in the kernel now, the only run its stop may interrupt)
+      let halted = false, inKernel = false;
       // (resolved when the pane lets the notebook go: the read below never waits past it, whatever it waits on)
       const released = new Promise<typeof GONE>((r) => (woke = () => r(GONE)));
       // (let go: the run is told, and ends; while its inputs are still being read, inputs() answers instead, at once
@@ -432,9 +435,17 @@ export function mountNotebook(ws: Workspace, path: string, box: HTMLElement, ui:
         current: here,
         cell: async (id: string, out: Kept) => {
           const images = { count: 0, bytes: 0 };
-          const c = here() ? comp.cells().find((x: any) => x.id === id && (x.type ?? "code") === "code") : null;
-          if (!c) return { status: "stopped" as const, images };
-          const ran = await comp.runCells([id], { budget: 0 });
+          const find = () => (here() ? comp.cells().find((x: any) => x.id === id && (x.type ?? "code") === "code") : null);
+          // (the cell already queued or running in another run (its run once by itself when the agent created it, or
+          //  the person's Run): a Run of it now would do nothing (notebook.js run), which this answered as "stopped" and
+          //  the agent was told "skipped", for a run nobody stopped; so it runs once that one is over. The wait ends
+          //  with the pane letting go or the call ending (stop), and then nothing of it runs)
+          const busy = (x: any) => x.el.classList.contains("queued") || x.el.classList.contains("running");
+          for (let x = find(); x && !told && !halted && busy(x); x = find()) await new Promise((go) => setTimeout(go, 50));
+          const c = told || halted ? null : find();
+          if (!c || told || halted) return { status: "stopped" as const, images };
+          inKernel = true;
+          const ran = await comp.runCells([id], { budget: 0 }).finally(() => { inKernel = false; });
           const r = Array.isArray(ran) ? ran[0] : ran;
           if (!here() || !r) return { status: "stopped" as const, images };
           for (const o of comp.snapshot().cells.find((x: any) => x.id === id)?.outputs ?? []) {
@@ -464,7 +475,9 @@ export function mountNotebook(ws: Workspace, path: string, box: HTMLElement, ui:
           const e = r?.entry as any;
           return here() && e?.kind === "notebook" && e.ref === ref && outs(r!.content) === outs(comp.snapshot());
         },
-        stop: () => { if (comp && nb === comp) comp.interrupt(); },
+        // (the call ended: a cell still waiting never starts; only this call's own cell in the kernel is interrupted,
+        //  never the run it was waiting for)
+        stop: () => { halted = true; if (inKernel && comp && nb === comp) comp.interrupt(); },
         close: () => { told = true; pageRuns.delete(tell); },
       };
     },

@@ -1507,10 +1507,6 @@ const host: BoardHost = {
   home: file ? "https://sagebrush.space/board/" : "/",
   // (an exported file has no examples beside it)
   examples: file ? undefined : {
-    async list() {
-      const ex = (await (await fetch(new URL("examples/index.json", location.href))).json()) as { file: string; title: string; about: string }[];
-      return ex.map((e) => ({ title: e.title, about: e.about, href: `?doc=${encodeURIComponent("examples/" + e.file)}`, current: source === "examples/" + e.file }));
-    },
     // (the gallery's panel, boards first: a copy opens as any document from the File menu)
     panel: () => openGallery(ws, (e) => openEntry(e, "here"), "board"),
   },

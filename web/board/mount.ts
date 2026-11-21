@@ -134,11 +134,9 @@ export interface BoardHost {
   title?(title: string): void;
   /** where "Sagebrush" in the top bar goes */
   home?: string;
-  /** the example boards (Examples…) */
+  /** Examples…: the gallery's panel (web/examples/open.ts), where the site has it: whether it opened (else said) */
   examples?: {
-    list(): Promise<{ title: string; about: string; href: string; current?: boolean }[]>;
-    /** the gallery's panel (web/examples/open.ts), where the site has it: whether it opened (else the list above) */
-    panel?(): Promise<boolean>;
+    panel(): Promise<boolean>;
   };
   /** which Sagebrush runs this board's code: the site's version, its build (as
    * `sagebrush --version` says it) and its engine; or only the engine (round 0's 17) */
@@ -259,7 +257,6 @@ const CHROME = `<div data-sbb="top"><a data-sbb="home" href="/">Sagebrush</a><sp
 <li><a href="https://sagebrush.space/articles/" target="_blank" rel="noopener">All the articles</a></li>
 </ul>
 <div data-sbb="ver" class="ver" hidden></div><form method="dialog"><button>Close</button></form></dialog>
-<dialog data-sbb="exdlg"><h3>Example boards</h3><div data-sbb="exlist"></div><form method="dialog"><button>Close</button></form></dialog>
 <dialog data-sbb="mmdlg"><h3>Import a Mermaid flowchart</h3><form method="dialog"><p class="prnote">Paste a flowchart (<code>graph</code> or <code>flowchart</code>), or Markdown with <code>\`\`\`mermaid</code> blocks (a page each). The board lays it out and routes its edges, so labels do not overlap. It replaces this board (Undo brings it back).</p><textarea data-sbb="mmtext" spellcheck="false" placeholder="flowchart LR&#10;  A[Start] --> B{Is it?}&#10;  B -->|Yes| C[OK]&#10;  B -->|No| D[Rethink]"></textarea><div data-sbb="mmerr"></div><div class="prbtns"><button value="cancel" formnovalidate>Cancel</button><button data-sbb="mm-go" class="be-done">Import</button></div></form></dialog>
 <dialog data-sbb="pgdlg"><h3>Page</h3><form data-sbb="pgform" method="dialog">
 <fieldset data-sbb="pg-title-set"><label>Title <input type="text" data-sbb="pg-title" maxlength="200"></label></fieldset>
@@ -1597,23 +1594,9 @@ export function mountBoard(root: HTMLElement, host: BoardHost) {
     on(d, "click", (e: MouseEvent) => { if (fromOutside && outside(e)) d.close(); fromOutside = false; });
   };
   closeOnBackdrop($("helpdlg") as HTMLDialogElement);
-  closeOnBackdrop($("exdlg") as HTMLDialogElement);
   $("examples").onclick = async () => {
-    if (await host.examples?.panel?.()) return;
-    const list = $("exlist");
-    try {
-      const ex = await host.examples!.list();
-      list.replaceChildren(...ex.map((e) => {
-        const a = document.createElement("a");
-        a.href = e.href;
-        if (e.current) a.className = "current";
-        a.append(Object.assign(document.createElement("b"), { textContent: e.title }), Object.assign(document.createElement("span"), { textContent: e.about }));
-        return a;
-      }));
-    } catch (e) {
-      list.textContent = "The examples could not be loaded: " + String(e);
-    }
-    ($("exdlg") as HTMLDialogElement).showModal();
+    // (the gallery's panel, the only list of examples; where this page can't reach it, said)
+    if (!(await host.examples?.panel())) say("The examples aren't available here.");
   };
   $("tidy").onclick = () => inEdit() && editor.commit((d) => { const p = pageOf(d, pageIx); Object.assign(p, tidy(p)); });
   // the language of the board's code (one per board): Python or Sage

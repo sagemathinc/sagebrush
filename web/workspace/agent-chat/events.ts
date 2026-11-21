@@ -35,6 +35,8 @@ export type TurnEvent = { seq: number; turn_id: string } & (
   | { type: "attention"; id: string; kind: string; state: "open" | "approved" | "denied"; title: string; summary?: string; detail?: string; instance?: string }
   | { type: "artifact"; id: string; kind: "markdown" | "code" | "diff" | "notebook" | "board"; title: string; lang?: string; body: string; path?: string }
   | { type: "turn_usage"; usage: { input_tokens: number; output_tokens: number } }
+  // (W3: the model and thinking level the turn runs with, as the agent's backend reported them; either may be absent)
+  | { type: "turn_info"; model?: string; effort?: string }
   | { type: "turn_error"; code: string; message: string }
   | { type: "turn_finished"; outcome: TurnOutcome; code?: string }
 );
@@ -117,6 +119,9 @@ export interface Turn {
   outcome?: TurnOutcome;
   error?: { code: string; message: string };
   usage?: { input_tokens: number; output_tokens: number };
+  // (W3: the model and thinking level of this turn, from its turn_info events: each field as the last one that carried
+  //  it said; absent until one comes, and never carried from another turn)
+  info?: { model?: string; effort?: string };
   started: number;
   finished?: number;
   // set for a turn of an agent on the person's computer (else the scripted demo's)
@@ -262,6 +267,14 @@ export function apply(thread: Thread, e: TurnEvent, time = Date.now()): boolean 
       // (a fresh object of the two counts, each finite and not negative; without an output count, none)
       if (count(e.usage?.output_tokens) !== undefined) turn.usage = { input_tokens: count(e.usage.input_tokens) ?? 0, output_tokens: count(e.usage.output_tokens)! };
       break;
+    case "turn_info": {
+      if (turn.outcome) break; // (a finished turn's info is what it ran with: nothing said after its end)
+      // (only well-formed fields, as the agent bounds them: a model id as given, never mapped to a name)
+      const model = typeof e.model === "string" && /^[A-Za-z0-9._:\/@[\]-]{1,128}$/.test(e.model) ? e.model : undefined;
+      const effort = typeof e.effort === "string" && /^[a-z0-9]{1,16}$/.test(e.effort) ? e.effort : undefined;
+      if (model !== undefined || effort !== undefined) turn.info = { ...turn.info, ...(model !== undefined ? { model } : {}), ...(effort !== undefined ? { effort } : {}) };
+      break;
+    }
     case "turn_error":
       turn.error = { code: e.code, message: e.message };
       break;
