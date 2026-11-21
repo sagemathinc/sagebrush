@@ -10,7 +10,8 @@
 //   3. the grant (agent-grant.ts): folders, write, expiry;
 //   4. the limits: 8 calls in flight, 100 a second (a burst of 200), 8 MiB of contents;
 //   5. the workspace, through forAgent: every change credited to agent:<name>.
-// Nothing the server sends is ever evaluated; the page sends it nothing but notifications after the hello.
+// Nothing the server sends is ever evaluated. After the hello the page sends it notifications, and, through own()
+// (tasks-client.ts, Delegate's tasks.* only), its own requests, whose answers are matched by id.
 
 import { checkCall, badValue, AGENT_LIMITS } from "./agent-schema";
 import { editProblem, type NotebookEdit } from "./notebook-edit";
@@ -31,8 +32,9 @@ export type Hello = { protocol: 1; agent: { name: string; client: string; versio
  * the run its numbers belong to); "edit.turn", a notebook.edit that carries the turn it came from (`turn_id`, the
  * agent's server's), applied only while that turn is the chat's running one; "chat.steer", an agent that takes a message
  * into its running turn (Steer, step 3); "egress.turn", a web card (the agent's fetch, the built-in search) that also
- * offers "for this turn", its own action and digest (agent-egress.ts). */
-export const FEATURES = ["notebook.edit", "permission.digest", "run.context", "chat.resume", "edit.turn", "chat.steer", "egress.turn"] as const;
+ * offers "for this turn", its own action and digest (agent-egress.ts); "delegate.1", an agent that takes Delegate's
+ * tasks.* requests (pair-delegate-plan-r3.3 §2.5; the page's side is tasks-client.ts). */
+export const FEATURES = ["notebook.edit", "permission.digest", "run.context", "chat.resume", "edit.turn", "chat.steer", "egress.turn", "delegate.1"] as const;
 /** The `log` an agent's hello or agent.ready names: its run, as the agent's random hex id; anything else, none. */
 export const logOf = (v: unknown): { instance: string } | undefined => {
   const i = (v as { instance?: unknown } | null)?.instance;
@@ -230,6 +232,8 @@ export class AgentPairing {
   private readonly gen = ++pairingGen;
   lostRecord: ReloadRecord | null = null;
   private revoked = false;
+  // (the page's own requests (Delegate's, tasks-client.ts): who hears their answers)
+  private ownAnswers: ((msg: any, bytes: number) => boolean) | null = null;
 
   /** Over a runner: the leg, the computer's name, and why the leg ended (for the page's words). */
   readonly link: AgentLink | null = null;
@@ -269,7 +273,8 @@ export class AgentPairing {
         if (this.state === "closed") return; // (nothing after the end)
         if (typeof e.data !== "string") return this.close(1003, "only text frames");
         const max = this.state === "connecting" ? PRE_HELLO_MAX : AGENT_LIMITS.maxFrameBytes;
-        if (frameBytes(e.data, max) > max) return this.close(1009, `a message over ${max} bytes`);
+        const bytes = frameBytes(e.data, max);
+        if (bytes > max) return this.close(1009, `a message over ${max} bytes`);
         let msg: any;
         try { msg = parseStrict(e.data); } catch (err) { return this.close(1007, "not strict JSON: " + (err as Error).message); }
         if (!msg || typeof msg !== "object" || Array.isArray(msg) || msg.jsonrpc !== "2.0") return this.close(1002, "not JSON-RPC 2.0");
@@ -314,7 +319,9 @@ export class AgentPairing {
           return;
         }
         if (typeof msg.method === "string" && typeof msg.id === "string") return void this.call(msg.id, msg.method, msg.params);
-        // (an answer: the page sends no requests after the hello)
+        // (an answer to one of the page's own requests, if its client knows the id; any other answer is dropped)
+        if (msg.method === undefined && typeof msg.id === "string" && this.ownAnswers?.(msg, bytes)) return;
+        // (any other answer: to no request the page has pending (not one of own()'s ids), dropped)
       };
     });
   }
@@ -339,6 +346,13 @@ export class AgentPairing {
     return this.sendBounded({ jsonrpc: "2.0", method, params }) ? "ok" : "over";
   }
   private emit() { for (const cb of this.listeners) cb(); }
+  /** For the page's own requests (tasks-client.ts, its only user): send one message, while granted and on the loopback
+   * pairing only, within the frame bound; and hear the answers, each with its frame's UTF-8 bytes as received (`hear`
+   * returns true for an id it knows). */
+  own(hear: (msg: any, bytes: number) => boolean): { send(m: unknown): "ok" | "closed" | "over" | "link" } {
+    this.ownAnswers = hear;
+    return { send: (m) => (this.link ? "link" : this.state !== "granted" ? "closed" : this.sendBounded(m) ? "ok" : "over") };
+  }
 
   /** The person's grant: sent to the server, kept (with the session secret if `remember`), and in force from now.
    * `id`: the id of the grant this resumes (a remembered one, or the reload record's); else this pairing's grant's,
