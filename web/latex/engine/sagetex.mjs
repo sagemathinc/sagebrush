@@ -250,6 +250,11 @@ function sameKind(key, it) {
 }
 /** What a stale value's mark says (its title). */
 export const STALE_TITLE = "Changed since the last Run: Shift+Enter or Run updates it";
+/** A code item not run yet, in the editor that can run it (Run is there whenever the document has code; on a phone,
+ * Shift+Enter may not be, so Run is named first); elsewhere (a published page, an example, the CLI) just "not run". */
+export const RUN_HINT = "not run yet (press Run or Shift+Enter)";
+/** The same while presenting, where a slide has no Run button and Shift+Enter runs the code (present.ts). */
+export const PRESENT_RUN_HINT = "not run yet (press Shift+Enter)";
 /** Why an item a Run didn't reach keeps its value from an earlier one (@sagebrush's ruling and board's words, Nov 12),
  *  by the reason the Run wrote (run-core keepLast, the results file's `why`): after a failed item, the Run stopped, or
  *  the session ended. Only these are shown as such a value's title. */
@@ -262,11 +267,11 @@ export const KEPT = {
 // (a why the file may hold: one of KEPT's own keys, a string only (hasOwn would coerce an object or an array to one))
 const keptWhy = (w) => typeof w === "string" && Object.hasOwn(KEPT, w);
 export const staleTitle = (st) => (keptWhy(st?.why) ? KEPT[st.why] : STALE_TITLE);
-export function stateOf(states, n, it) {
+export function stateOf(states, n, it, run) {
   if (it.err) return { s: "error", msg: whyRejected(it) };
   const s = states && states[n];
   if (s && s.key === itemKey(it)) return s;
-  return { s: "notrun", msg: "not run" };
+  return { s: "notrun", msg: run ? RUN_HINT : "not run" };
 }
 
 // inside a math region (plan r4 section 6): the placeholder this item contributes to the region's TeX string
@@ -355,7 +360,8 @@ export function inlineHtml(st, it, esc, math, n) {
 // a code block: sageblock shows its code (as SageTeX typesets it), sagesilent nothing; both show a failed or
 // not-yet-run state (a stale one, which ran, none: it has no value to keep), and the @interacts it made
 export function blockHtml(st, it, esc, n) {
-  let h = it.shown !== undefined ? '<pre class="verbatim code sageblock">' + esc(it.shown) + "</pre>" : "";
+  // (a Magma block marked: the preview colours Sage and Python code only, latex/hl.ts)
+  let h = it.shown !== undefined ? '<pre class="verbatim code sageblock' + (isMagma(it) ? " magma" : "") + '">' + esc(it.shown) + "</pre>" : "";
   if (st.s !== "ok" && st.s !== "stale") h += '<div class="sagestate">' + chip(st, esc, false, n, langOf(it)) + "</div>";
   else if (isNonSage(it) && pyBig(st, it)) h += '<div class="sagestate">' + chip(pyBig(st, it), esc, false, n, langOf(it)) + "</div>";
   // (magmablock: what Magma printed, under its code, as text)

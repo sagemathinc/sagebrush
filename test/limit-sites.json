@@ -12059,6 +12059,46 @@
   "owner": "sagebrush-remote-compute",
   "reason": "The scheduler's cache of run outputs: at most 5,000 entries. When it is full, the entries the action in progress doesn't use are dropped, and if every entry is in use a new output isn't kept (the remote check then refuses that send). It refuses no computation."
  },
+ "src/notebook-run.ts ::  :: const MAX_TIMEOUT = 2147483; #0": {
+  "class": "1",
+  "disposition": {
+   "1": "shared"
+  },
+  "owner": "notebook run (@sagebrush-remote-compute)",
+  "reason": "--timeout's range: Node's timers hold at most 2^31 - 1 ms (board run's rule); refuses a bad argument, not a computation"
+ },
+ "src/notebook-run.ts ::  :: export const NOTEBOOK_FILE_MAX = 64 * 2 ** 20; #0": {
+  "class": "1",
+  "disposition": {
+   "1": "shared"
+  },
+  "owner": "notebook run (@sagebrush-remote-compute)",
+  "reason": "the notebook file read whole into memory before parsing: at most 64 MiB (input protection for the host, not a limit on the code it runs)"
+ },
+ "src/notebook-run.ts :: at :: if (bytes.length > NOTEBOOK_FILE_MAX) { say(`${file}: ${bytes.length} bytes, more than the ${NOTEBOOK_FILE_MAX} a notebook run reads`); return 1; } #0": {
+  "class": "1",
+  "disposition": {
+   "1": "shared"
+  },
+  "owner": "notebook run (@sagebrush-remote-compute)",
+  "reason": "the notebook file read whole into memory before parsing: at most 64 MiB (input protection for the host, not a limit on the code it runs)"
+ },
+ "src/notebook-run.ts :: cutLines :: const cutLines = (s: string, max: number) => { const ls = s.split(\"\\n\"); return ls.length <= max ? s : [...ls.slice(0, max - 5), `… ${ls.length - max + 1} more lines …`, ...ls.slice(-4)].join(\"\\n\"); }; #0": {
+  "class": "1",
+  "disposition": {
+   "1": "shared"
+  },
+  "owner": "notebook run (@sagebrush-remote-compute)",
+  "reason": "the plain-text report shows at most 40 lines of a cell's output (display protection; --json and --write keep all)"
+ },
+ "src/notebook-run.ts :: notebookRunInner :: if (!Number.isFinite(timeout) || timeout <= 0 || timeout > MAX_TIMEOUT) { say(`--timeout takes a number of seconds, more than 0 and at most ${MAX_TIMEOUT}`); return 2; } #0": {
+  "class": "1",
+  "disposition": {
+   "1": "shared"
+  },
+  "owner": "notebook run (@sagebrush-remote-compute)",
+  "reason": "--timeout's range: Node's timers hold at most 2^31 - 1 ms (board run's rule); refuses a bad argument, not a computation"
+ },
  "src/notebook-session.ts ::  :: export const STATUS_MAX = 4096; #0": {
   "class": "1",
   "owner": "notebook/kernel",
@@ -12116,6 +12156,22 @@
   "class": "1",
   "owner": "notebook/kernel",
   "row": "src-17"
+ },
+ "src/notebook-session.ts ::  :: const MAX_ABOVE = 4096; #0": {
+  "class": "1",
+  "owner": "notebook/kernel",
+  "reason": "a reactive run's list of the cells above it (for _, __, ___): a protocol guard on a message field; only the first three that showed a value are used, so a page longer than this still binds correctly unless 4096 cells above showed nothing",
+  "disposition": {
+   "1": "shared"
+  }
+ },
+ "src/notebook-session.ts :: aboveOf :: return m.above.filter((k: unknown): k is string => typeof k === \"string\" && /^[A-Za-z0-9]{1,128}$/.test(k)).slice(0, MAX_ABOVE); #0": {
+  "class": "1",
+  "owner": "notebook/kernel",
+  "reason": "applies the cap above (MAX_ABOVE)",
+  "disposition": {
+   "1": "shared"
+  }
  },
  "src/pkgcache.ts ::  :: export const CACHE_LIMITS = Object.freeze({ bytes: 1024 * 1024 * 1024, entries: 256, staleMs: 60 * 60 * 1000, lockMs: 10 * 60 * 1000, adminLockMs: 5000, cleanPerRun: 100 }); #0": {
   "class": "1",
@@ -12237,10 +12293,10 @@
   "owner": "the reactive session (@sagebrush-latex)",
   "reason": "an item's time limit (the caller's --timeout), interrupted when over it: board-run's reviewed interpreter rules, the same lines registered there (limit-sweep manifest B17)"
  },
- "src/reactive-session.ts :: startInterpreter :: const worker = new Worker(o.entry ?? require.main?.filename ?? process.argv[1], { workerData: { sagebrushBoardRun: { dir }, sagebrushLimits: sessionLimits() }, stdout: true, stderr: true }); #0": {
+ "src/reactive-session.ts :: startInterpreter :: const worker = new Worker(require.main?.filename ?? process.argv[1], { workerData: { sagebrushBoardRun: { dir, importable: !own, ...(o.confine ? { confine: o.confine } : {}) }, sagebrushLimits: sessionLimits() }, stdout: true, stderr: true }); #0": {
   "class": "none",
   "owner": "the reactive session (@sagebrush-latex)",
-  "reason": "the session's limits handed to the interpreter's worker: board-run's reviewed interpreter rules, the same lines registered there (limit-sweep manifest B17)"
+  "reason": "the session's limits handed to the interpreter's worker, now with notebook run's working folder, importability and --confine roots: board-run's reviewed interpreter rules (limit-sweep manifest B17)"
  },
  "src/reactive-session.ts :: startInterpreter :: if (m.start && limit < Infinity && limit > 0 && !started && !absolute && !timedOut) { started = true; clearTimeout(timer); timer = setTimeout(over, clamp(limit)); } #0": {
   "class": "1",
@@ -13605,6 +13661,11 @@
   "owner": "NumPy shim/runtime memory",
   "row": "src-10"
  },
+ "src/runtime/numpy.ts :: prod :: if (nativeHost()) ARRAY_LIMITS.bytes = Number.MAX_SAFE_INTEGER; #0": {
+  "class": "none",
+  "owner": "NumPy shim/runtime memory",
+  "reason": "lifts the browser's array byte cap on the person's own computer (the desktop app's engine, the CLI); refuses nothing"
+ },
  "src/runtime/numpy.ts :: prodOrder :: raise(T.NotImplementedError, `${rt.name} prod over several axes or a non-contiguous view is not supported yet`); #0": {
   "class": "3",
   "owner": "NumPy shim",
@@ -13630,10 +13691,70 @@
   "owner": "NumPy shim",
   "row": "src-11"
  },
- "src/runtime/object.ts :: toPyExc :: if (e instanceof RangeError && /Invalid string length|Invalid array length|Array buffer allocation failed|Invalid typed array length|Maximum BigInt size exceeded|BigInt generated from this operation is too big/.test(e.message)) { #0": {
-  "class": "2",
+ "src/runtime/numpy_fft.ts :: cacheBound :: const cacheBound = () => Math.min(fftCacheMax, ARRAY_LIMITS.bytes); #0": {
+  "class": "none",
+  "owner": "NumPy shim/runtime memory",
+  "reason": "the FFT table cache's retention bound (and its test hook): evicts or skips caching a table, refuses nothing"
+ },
+ "src/runtime/numpy_fft.ts :: cs2pi :: let fftCacheMax = 2 ** 32; #0": {
+  "class": "none",
+  "owner": "NumPy shim/runtime memory",
+  "reason": "the FFT table cache's retention bound (and its test hook): evicts or skips caching a table, refuses nothing"
+ },
+ "src/runtime/numpy_fft.ts :: setFftCacheBytes :: const was = fftCacheMax; #0": {
+  "class": "none",
+  "owner": "NumPy shim/runtime memory",
+  "reason": "the FFT table cache's retention bound (and its test hook): evicts or skips caching a table, refuses nothing"
+ },
+ "src/runtime/numpy_fft.ts :: setFftCacheBytes :: fftCacheMax = n; #0": {
+  "class": "none",
+  "owner": "NumPy shim/runtime memory",
+  "reason": "the FFT table cache's retention bound (and its test hook): evicts or skips caching a table, refuses nothing"
+ },
+ "src/runtime/object.ts :: engineLimit :: function engineLimit(message: string): string | undefined { #0": {
+  "class": "none",
   "owner": "pyjs runtime",
-  "row": "src-5"
+  "reason": "translates the JavaScript engine's own allocation failure into a MemoryError naming that engine limit; no limit of ours"
+ },
+ "src/runtime/object.ts :: engineLimit :: return ENGINE_LIMITS.find(([re]) => re.test(message))?.[1]; #0": {
+  "class": "none",
+  "owner": "pyjs runtime",
+  "reason": "translates the JavaScript engine's own allocation failure into a MemoryError naming that engine limit; no limit of ours"
+ },
+ "src/runtime/object.ts :: toPyExc :: [/(Map|Set) maximum size exceeded/, \"a dict or set past the JavaScript engine's largest (2**24 = 16,777,216 entries in V8: Chrome, Edge, the app, the CLI on Node)\"], #0": {
+  "class": "none",
+  "owner": "pyjs runtime",
+  "reason": "translates the JavaScript engine's own allocation failure into a MemoryError naming that engine limit; no limit of ours"
+ },
+ "src/runtime/object.ts :: toPyExc :: [/Invalid typed array length/, \"an array buffer past the JavaScript engine's length limit\"], #0": {
+  "class": "none",
+  "owner": "pyjs runtime",
+  "reason": "translates the JavaScript engine's own allocation failure into a MemoryError naming that engine limit; no limit of ours"
+ },
+ "src/runtime/object.ts :: toPyExc :: [/Maximum BigInt size exceeded/, \"an int past the JavaScript engine's largest (2**30 bits in V8: Chrome, Edge, the app, the CLI on Node)\"], #0": {
+  "class": "none",
+  "owner": "pyjs runtime",
+  "reason": "translates the JavaScript engine's own allocation failure into a MemoryError naming that engine limit; no limit of ours"
+ },
+ "src/runtime/object.ts :: toPyExc :: [/WebAssembly\\.Memory\\.grow\\(\\): Maximum memory size exceeded|would exceed the memory's declared maximum size|expects the delta to be a valid page count/, \"a WebAssembly module's memory past its maximum (4 GiB at most: wasm32)\"], #0": {
+  "class": "none",
+  "owner": "pyjs runtime",
+  "reason": "translates the JavaScript engine's own allocation failure into a MemoryError naming that engine limit; no limit of ours"
+ },
+ "src/runtime/object.ts :: toPyExc :: const ENGINE_LIMITS: [RegExp, string][] = [ #0": {
+  "class": "none",
+  "owner": "pyjs runtime",
+  "reason": "translates the JavaScript engine's own allocation failure into a MemoryError naming that engine limit; no limit of ours"
+ },
+ "src/runtime/object.ts :: toPyExc :: const why = engineLimit(e.message); #0": {
+  "class": "none",
+  "owner": "pyjs runtime",
+  "reason": "translates the JavaScript engine's own allocation failure into a MemoryError naming that engine limit; no limit of ours"
+ },
+ "src/runtime/object.ts :: toPyExc :: if (e instanceof RangeError && /Invalid string length|Invalid array length|Array buffer allocation failed|Invalid typed array length|Maximum BigInt size exceeded|BigInt generated from this operation is too big|(Map|Set) maximum size exceeded|WebAssembly\\.Memory\\.grow|failed to grow memory/.test(e.message)) { #0": {
+  "class": "none",
+  "owner": "pyjs runtime",
+  "reason": "translates the JavaScript engine's own allocation failure into a MemoryError naming that engine limit; no limit of ours"
  },
  "src/runtime/ops.ts :: bytearrayInplaceRepeat :: if (size > SSIZE_MAX) raise(T.MemoryError); #0": {
   "class": "2",

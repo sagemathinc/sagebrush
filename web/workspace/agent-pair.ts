@@ -10,7 +10,8 @@
 //   3. the grant (agent-grant.ts): folders, write, expiry;
 //   4. the limits: 8 calls in flight, 100 a second (a burst of 200), 8 MiB of contents;
 //   5. the workspace, through forAgent: every change credited to agent:<name>.
-// Nothing the server sends is ever evaluated; the page sends it nothing but notifications after the hello.
+// Nothing the server sends is ever evaluated. After the hello the page sends it notifications, and, through own()
+// (tasks-client.ts, Delegate's tasks.* only), its own requests, whose answers are matched by id.
 
 import { checkCall, badValue, AGENT_LIMITS } from "./agent-schema";
 import { editProblem, type NotebookEdit } from "./notebook-edit";
@@ -31,8 +32,9 @@ export type Hello = { protocol: 1; agent: { name: string; client: string; versio
  * the run its numbers belong to); "edit.turn", a notebook.edit that carries the turn it came from (`turn_id`, the
  * agent's server's), applied only while that turn is the chat's running one; "chat.steer", an agent that takes a message
  * into its running turn (Steer, step 3); "egress.turn", a web card (the agent's fetch, the built-in search) that also
- * offers "for this turn", its own action and digest (agent-egress.ts). */
-export const FEATURES = ["notebook.edit", "permission.digest", "run.context", "chat.resume", "edit.turn", "chat.steer", "egress.turn"] as const;
+ * offers "for this turn", its own action and digest (agent-egress.ts); "delegate.1", an agent that takes Delegate's
+ * tasks.* requests (pair-delegate-plan-r3.3 §2.5; the page's side is tasks-client.ts). */
+export const FEATURES = ["notebook.edit", "permission.digest", "run.context", "chat.resume", "edit.turn", "chat.steer", "egress.turn", "delegate.1"] as const;
 /** The `log` an agent's hello or agent.ready names: its run, as the agent's random hex id; anything else, none. */
 export const logOf = (v: unknown): { instance: string } | undefined => {
   const i = (v as { instance?: unknown } | null)?.instance;
@@ -195,6 +197,9 @@ export class AgentError extends Error {
 
 /** The pairing.  `verbsFor(actor)` gives the workspace's verbs credited to `actor` (Workspace.forAgent). */
 // (what is said when the grant changed under a call: nothing of what it read, and, for a change, no claim either way)
+/** A grant as the server is told it (grant.changed): `delegate` only when on, so an agent that doesn't know it reads
+ * the same grant as before. */
+const changed = (g: Grant) => ({ id: g.id, agent: g.agent, client: g.client, folders: g.folders, write: g.write, run: g.run, expires: g.expires, ...(g.delegate ? { delegate: true } : {}) });
 export const CHANGED_WHILE_RUNNING = "the grant changed or expired while this ran: nothing of it is said (a change may or may not have been made)";
 
 export class AgentPairing {
@@ -230,6 +235,8 @@ export class AgentPairing {
   private readonly gen = ++pairingGen;
   lostRecord: ReloadRecord | null = null;
   private revoked = false;
+  // (the page's own requests (Delegate's, tasks-client.ts): who hears their answers)
+  private ownAnswers: ((msg: any, bytes: number) => boolean) | null = null;
 
   /** Over a runner: the leg, the computer's name, and why the leg ended (for the page's words). */
   readonly link: AgentLink | null = null;
@@ -269,7 +276,8 @@ export class AgentPairing {
         if (this.state === "closed") return; // (nothing after the end)
         if (typeof e.data !== "string") return this.close(1003, "only text frames");
         const max = this.state === "connecting" ? PRE_HELLO_MAX : AGENT_LIMITS.maxFrameBytes;
-        if (frameBytes(e.data, max) > max) return this.close(1009, `a message over ${max} bytes`);
+        const bytes = frameBytes(e.data, max);
+        if (bytes > max) return this.close(1009, `a message over ${max} bytes`);
         let msg: any;
         try { msg = parseStrict(e.data); } catch (err) { return this.close(1007, "not strict JSON: " + (err as Error).message); }
         if (!msg || typeof msg !== "object" || Array.isArray(msg) || msg.jsonrpc !== "2.0") return this.close(1002, "not JSON-RPC 2.0");
@@ -314,7 +322,9 @@ export class AgentPairing {
           return;
         }
         if (typeof msg.method === "string" && typeof msg.id === "string") return void this.call(msg.id, msg.method, msg.params);
-        // (an answer: the page sends no requests after the hello)
+        // (an answer to one of the page's own requests, if its client knows the id; any other answer is dropped)
+        if (msg.method === undefined && typeof msg.id === "string" && this.ownAnswers?.(msg, bytes)) return;
+        // (any other answer: to no request the page has pending (not one of own()'s ids), dropped)
       };
     });
   }
@@ -339,6 +349,13 @@ export class AgentPairing {
     return this.sendBounded({ jsonrpc: "2.0", method, params }) ? "ok" : "over";
   }
   private emit() { for (const cb of this.listeners) cb(); }
+  /** For the page's own requests (tasks-client.ts, its only user): send one message, while granted and on the loopback
+   * pairing only, within the frame bound; and hear the answers, each with its frame's UTF-8 bytes as received (`hear`
+   * returns true for an id it knows). */
+  own(hear: (msg: any, bytes: number) => boolean): { send(m: unknown): "ok" | "closed" | "over" | "link" } {
+    this.ownAnswers = hear;
+    return { send: (m) => (this.link ? "link" : this.state !== "granted" ? "closed" : this.sendBounded(m) ? "ok" : "over") };
+  }
 
   /** The person's grant: sent to the server, kept (with the session secret if `remember`), and in force from now.
    * `id`: the id of the grant this resumes (a remembered one, or the reload record's); else this pairing's grant's,
@@ -347,7 +364,8 @@ export class AgentPairing {
     if (this.state !== "paired" && this.state !== "granted") throw new AgentError("invalid", "not paired");
     const h = this.hello!, now = this.now();
     const id = typeof g.id === "string" && GRANT_ID.test(g.id) ? g.id : this.grant?.id ?? newGrantId();
-    const grant: Grant = { id, agent: h.agent.name, client: h.agent.client, folders: grantFolders(g.folders), write: !!g.write, run: g.run === true, expires: g.expires, created: this.grant?.created ?? now, lastUsed: now };
+    // (the Delegate switch is apart from Pair's grant (§6.2): a new grant from the person keeps it as it was)
+    const grant: Grant = { id, agent: h.agent.name, client: h.agent.client, folders: grantFolders(g.folders), write: !!g.write, run: g.run === true, expires: g.expires, ...(this.grant?.delegate ? { delegate: true as const } : {}), created: this.grant?.created ?? now, lastUsed: now };
     this.grant = grant;
     this.remember = remember;
     this.verbs = this.opts.verbsFor(actorOf(h.agent.name, h.agent.client), { owner: () => grant.id });
@@ -355,7 +373,7 @@ export class AgentPairing {
     //  doesn't know it ignores, §1 rule 4)
     // (permission.digest: every Allow carries the digest of the action shown, from any page that pairs)
     this.send({ jsonrpc: "2.0", method: "page.features", params: { features: [...(this.opts.notebookEdit ? ["notebook.edit", "edit.turn"] : []), "permission.digest", ...(this.opts.runVerbs ? ["run.context"] : []), ...(this.opts.egressTurn ? ["egress.turn"] : [])] } });
-    this.send({ jsonrpc: "2.0", method: "grant.changed", params: { id: grant.id, agent: grant.agent, client: grant.client, folders: grant.folders, write: grant.write, run: grant.run, expires: grant.expires } });
+    this.send({ jsonrpc: "2.0", method: "grant.changed", params: changed(grant) });
     await this.keep();
     // (S4: while it waited, the grant may have been revoked, the pairing closed or the grant replaced: then nothing
     //  of this allow() goes on, no record, no timer, no "granted")
@@ -371,7 +389,10 @@ export class AgentPairing {
     // (only a remembered grant outlives the page: "until this page closes" is never kept. The session kept is the one in
     //  force: the hello's after a code, the remembered one after a reconnect, whose hello carries none; the hello's alone
     //  lost it on the first reconnect, and the next had nothing to send (T1, found by git-proto at b72938d8a))
-    if (this.remember && this.grant.expires !== null) await this.opts.store.putAgentGrant(this.pairingId, { grant: this.grant, session: this.sessionSecret, port: this.port } satisfies Kept);
+    if (this.remember && this.grant.expires !== null) {
+      const { delegate: _, ...grant } = this.grant;
+      await this.opts.store.putAgentGrant(this.pairingId, { grant, session: this.sessionSecret, port: this.port } satisfies Kept);
+    }
   }
 
   /** The reload record (A14): written for an unremembered grant only (a remembered one is kept in IndexedDB, above),
@@ -396,13 +417,28 @@ export class AgentPairing {
   async noRun() {
     const g = this.grant;
     if (this.state !== "granted" || !g || !g.run) return;
-    const next: Grant = { ...g, run: false };
-    this.grant = next;
-    this.verbs = this.opts.verbsFor(actorOf(this.hello!.agent.name, this.hello!.agent.client), { owner: () => next.id });
-    this.send({ jsonrpc: "2.0", method: "grant.changed", params: { id: next.id, agent: next.agent, client: next.client, folders: next.folders, write: next.write, run: false, expires: next.expires } });
-    this.emit();
+    const next = this.regrant({ ...g, run: false });
     await this.keep();
     if (this.grant === next) this.keepForReload();
+  }
+
+  /** The Delegate switch (§6.2), turned on or off by the person: the grant in force replaced by the same one with or
+   * without `delegate: true`, told to the server at once (whose every tasks.* call checks it; off stops the tasks'
+   * turns there). On only for an agent on this computer whose hello offers delegate.1. False if nothing was sent. */
+  setDelegate(on: boolean): boolean {
+    const g = this.grant;
+    if (this.state !== "granted" || !g || !!g.delegate === on || (on && (this.link || !this.hello?.features?.includes("delegate.1")))) return false;
+    const { delegate: _, ...rest } = g;
+    this.regrant(on ? { ...rest, delegate: true } : rest);
+    return true;
+  }
+  // (the grant in force replaced by `next`: a call or run made under the old one finds it changed (current()) and ends)
+  private regrant(next: Grant): Grant {
+    this.grant = next;
+    this.verbs = this.opts.verbsFor(actorOf(this.hello!.agent.name, this.hello!.agent.client), { owner: () => next.id });
+    this.send({ jsonrpc: "2.0", method: "grant.changed", params: changed(next) });
+    this.emit();
+    return next;
   }
 
   /** Dropped: the socket closed and nothing else (no grant change sent, nothing forgotten): an attempt another pairing
@@ -756,8 +792,9 @@ export class AgentPairing {
 export const RELOAD_KEY = "sb-agent-reload-v1";
 // (the newest pairing's number on this page: only the newest writes or drops the record, A14 r3.1 §3)
 let pairingGen = 0;
-/** At most this long between the page leaving (pagehide) and its reload for the restore to be silent (R1-b). */
-export const RELOAD_FRESH_MS = 30_000;
+/** At most this long between the page leaving (pagehide) and its return, a reload or a navigation back to the same page
+ * in this browsing context, for the reconnect to be silent (R1-b; A5 item 2, ruled Nov 20 2026: one constant). */
+export const RETURN_MS = 10 * 60 * 1000;
 const RELOAD_MAX = 4096;
 
 export type ReloadRecord = {
@@ -807,18 +844,21 @@ export function parseReloadRecord(raw: string | null): ReloadRecord | null {
 }
 
 /** What a page may do with a parsed record:
- *  - "silent": reconnect now, with no gesture (a reload, fresh, same scope, not expired: R1-a..e);
- *  - "click": keep it in memory for one [Reconnect] (a reload of this tab, the same scope, not expired; only its
- *    freshness failed);
- *  - "discard": never usable: another workspace or page, the grant over, or no proof of a reload of this tab (a
- *    navigation, or a record with no leftAt, as a copy in a new tab has): those need a new Allow unless the grant
- *    was remembered (decided Nov 19 2026: fail closed). */
+ *  - "silent": reconnect now, with no gesture: a reload, or a navigation back to the same page in this browsing context
+ *    (leaving for Files and coming back), within RETURN_MS of leaving, the same scope, the grant not expired (R1-a..e;
+ *    A5 item 2, design r3, SEC-cleared Nov 20 2026). A copy of the record in a duplicated, restored or window.open tab is
+ *    taken once there too: the agent's one live page decides between them;
+ *  - "click": keep it in memory for one [Reconnect]: a reload, the same scope, not expired, only older than RETURN_MS;
+ *  - "discard": never usable: another workspace or page, the grant over, a record with no leftAt (as a copy taken
+ *    while its page lived has), any other navigation type, or a navigation back older than RETURN_MS: those need a new
+ *    Allow unless the grant was remembered. */
 export function reloadDecision(r: ReloadRecord, o: { scope: ReloadScope; navType: string; now: number }): "silent" | "click" | "discard" {
   if (r.workspace !== o.scope.workspace || r.page !== o.scope.page) return "discard";
   if (r.grant.expires !== null && !(o.now < r.grant.expires)) return "discard";
-  if (o.navType !== "reload" || r.leftAt === undefined) return "discard";
+  if (r.leftAt === undefined || !(o.navType === "reload" || o.navType === "navigate" || o.navType === "back_forward")) return "discard";
   const age = o.now - r.leftAt;
-  return age >= 0 && age <= RELOAD_FRESH_MS ? "silent" : "click";
+  if (age >= 0 && age <= RETURN_MS) return "silent";
+  return o.navType === "reload" ? "click" : "discard";
 }
 
 /** What taking the record found (S1): "none", no storage or no entry (genuinely absent); "bad", an entry this page
@@ -827,11 +867,17 @@ export function reloadDecision(r: ReloadRecord, o: { scope: ReloadScope; navType
 export type ReloadTake = { kind: "none" } | { kind: "bad" } | { kind: "ok"; record: ReloadRecord };
 /** The record, taken: read, removed at once (before any attempt, R1-c, this page only), then parsed. Fails closed: an
  * entry that can't be read or removed is "bad", never used. */
-export function takeReloadRecord(s: ReloadStorage | null): ReloadTake {
+export function takeReloadRecord(s: ReloadStorage | null, scope?: ReloadScope): ReloadTake {
   if (!s) return { kind: "none" };
   let raw: string | null = null;
   try { raw = s.getItem(RELOAD_KEY); } catch { return { kind: "bad" }; }
   if (raw === null) return { kind: "none" };
+  // (another page's record (the Agents page's, while the person is on a board): left alone, for that page to take when
+  //  they go back to it; A5. This page's own, or one that can't be read: taken, as before)
+  if (scope) {
+    const r = parseReloadRecord(raw);
+    if (r && r.page !== scope.page) return { kind: "none" };
+  }
   try { s.removeItem(RELOAD_KEY); } catch { return { kind: "bad" }; }
   const record = parseReloadRecord(raw);
   return record ? { kind: "ok", record } : { kind: "bad" };
@@ -845,10 +891,12 @@ export function putReloadRecord(s: ReloadStorage | null, r: ReloadRecord | null)
   const fits = raw !== null && parseReloadRecord(raw) !== null;
   try { if (fits) s.setItem(RELOAD_KEY, raw!); else s.removeItem(RELOAD_KEY); } catch { /* (no storage: no restore) */ }
 }
-/** On pagehide: the time the page left, on the record it holds (if it holds a valid one). */
-export function markReloadLeft(s: ReloadStorage | null, now: number): void {
+/** On pagehide: the time the page left, on the record it holds: a valid record of this page's own scope (workspace and
+ * page) only. Another page's record (the Agents page's, while the person is on a board) is left byte for byte as it
+ * is: a page passed through on the way never renews another page's window (A5). */
+export function markReloadLeft(s: ReloadStorage | null, now: number, scope: ReloadScope): void {
   if (!s) return;
   let r: ReloadRecord | null = null;
   try { r = parseReloadRecord(s.getItem(RELOAD_KEY)); } catch { return; }
-  if (r) putReloadRecord(s, { ...r, leftAt: now });
+  if (r && r.workspace === scope.workspace && r.page === scope.page) putReloadRecord(s, { ...r, leftAt: now });
 }
