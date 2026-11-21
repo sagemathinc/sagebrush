@@ -514,7 +514,51 @@ pub fn hermite_modular(m: &ZMat) -> Option<ZMat> {
 
 /// The elementary divisors (Smith form diagonal) of an m x n integer matrix:
 /// min(m, n) entries d_1 | d_2 | ..., zeros last.
+///
+/// A square nonsingular matrix goes straight to
+/// `sagebrush_arith::snf::invariants_square` (the determinant, one solve,
+/// then the Smith form modulo d / delta: that module's docs).  Any other
+/// keeps its invariants through two Hermite forms: `hermite` of the rows
+/// (r x n of full row rank, unimodular row operations), then, unless that
+/// is already square, `hermite` of its transpose (r x r, nonsingular: the
+/// column operations).  Their r x r form is upper triangular, so |det| is
+/// the product of its diagonal; its r invariants, then min(m, n) - r zeros.
 pub fn elementary_divisors(m: &ZMat) -> Vec<BigInt> {
+    use sagebrush_arith::snf;
+    use sagebrush_arith::zmat::ZMat as Dense;
+    let rows = m.len();
+    let cols = m.first().map_or(0, |r| r.len());
+    let k = rows.min(cols);
+    if k == 0 {
+        return vec![];
+    }
+    if rows == cols {
+        if let Some(t) = snf::invariants_square(&Dense::from_rows(m.clone())) {
+            return t;
+        }
+    }
+    let h = hermite(m);
+    let r = h.len();
+    let sq = if r == cols {
+        h
+    } else {
+        let ht: ZMat = (0..cols).map(|j| h.iter().map(|row| row[j].clone()).collect()).collect();
+        hermite(&ht)
+    };
+    let mut t = if r == 0 {
+        vec![]
+    } else {
+        let d: BigInt = (0..r).map(|i| sq[i][i].clone()).product();
+        snf::invariants_nonsingular(&Dense::from_rows(sq), &d.abs(), None)
+    };
+    t.extend((r..k).map(|_| BigInt::zero()));
+    t
+}
+
+/// The textbook smallest-pivot Smith form over Z that `elementary_divisors`
+/// replaced, kept for its tests.
+#[cfg(test)]
+fn elementary_divisors_elim(m: &ZMat) -> Vec<BigInt> {
     let rows = m.len();
     let cols = m.first().map_or(0, |r| r.len());
     let k = rows.min(cols);
@@ -965,6 +1009,43 @@ mod tests {
         let e = lll(&z(&[&[1, 2], &[3, 4]])).unwrap_err();
         REFUSE_LLL.with(|r| r.set(false));
         assert!(e.starts_with("LLL: resource limit exceeded"), "{e}");
+    }
+
+    /// elementary_divisors against the smallest-pivot elimination it
+    /// replaced, on every route: square nonsingular, square singular, tall
+    /// and wide (the two Hermite compressions), zero, empty, and
+    /// relation-like tall matrices with an h* I block appended.
+    #[test]
+    fn elementary_divisors_agree_with_the_elimination() {
+        let mut seed = 0x0123_4567_89ab_cdefu64;
+        let mut next = |m: i64| {
+            seed ^= seed << 13;
+            seed ^= seed >> 7;
+            seed ^= seed << 17;
+            (seed % (2 * m as u64 + 1)) as i64 - m
+        };
+        let mut shapes: Vec<ZMat> = vec![vec![], vec![vec![]], vec![vec![]; 3]];
+        for (r, c) in [(1, 1), (2, 2), (3, 3), (5, 5), (7, 7), (2, 5), (5, 2), (4, 7), (7, 4), (1, 6), (6, 1)] {
+            for range in [0, 1, 9, 1000] {
+                let a: ZMat = (0..r).map(|_| (0..c).map(|_| BigInt::from(next(range))).collect()).collect();
+                shapes.push(a);
+            }
+            // rank deficient: a product through an inner dimension of about half
+            let h = (r.min(c) / 2).max(1);
+            let b: Vec<Vec<i64>> = (0..r).map(|_| (0..h).map(|_| next(5)).collect()).collect();
+            let cm: Vec<Vec<i64>> = (0..h).map(|_| (0..c).map(|_| next(5)).collect()).collect();
+            shapes.push((0..r).map(|i| (0..c).map(|j| BigInt::from((0..h).map(|t| b[i][t] * cm[t][j]).sum::<i64>())).collect()).collect());
+        }
+        // relations with h* I appended (the class group's shape)
+        for hs in [12i64, 360, 1_000_003] {
+            let m = 4;
+            let mut a: ZMat = (0..6).map(|_| (0..m).map(|_| BigInt::from(next(50))).collect()).collect();
+            a.extend((0..m).map(|t| (0..m).map(|j| BigInt::from(if j == t { hs } else { 0 })).collect()));
+            shapes.push(a);
+        }
+        for a in shapes {
+            assert_eq!(elementary_divisors(&a), elementary_divisors_elim(&a), "{:?}", a);
+        }
     }
 
     #[test]
