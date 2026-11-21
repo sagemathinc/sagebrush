@@ -11,7 +11,7 @@ import * as TK from "../pyparse/src/tokens.gen";
 import { analyze, SyntaxErr } from "./scope";
 import { Emitter, Compiled } from "./emit";
 import { R, ENTRY_FILE, ENTRY_NAME, frameState } from "./runtime/index";
-import { cwdPath, isBuiltinModule, oserr as fsOSError } from "./runtime/modules";
+import { cwdPath, isBuiltinModule, isConfined, oserr as fsOSError } from "./runtime/modules";
 import { dictDelete } from "./runtime/object";
 import { admitIndex, checkChunk, gradingExcluded, PkgsetError, type ChunkRef, type SetPlan, type SrcChunk, type PreChunk } from "./pkgset";
 import { INTR, INTR_GRADING } from "./runtime/interrupt";
@@ -81,7 +81,8 @@ let cacheRoot: string | null | undefined;
 function compileCacheDir(): string | null {
   if (cacheRoot !== undefined) return cacheRoot;
   cacheRoot = null;
-  if (!BUILD_ID || process.env.SAGEBRUSH_NO_COMPILE_CACHE) return null;
+  // (none while confined, `notebook run --confine`: a module cache the program could write would be run again)
+  if (!BUILD_ID || process.env.SAGEBRUSH_NO_COMPILE_CACHE || isConfined()) return null;
   try {
     const base = process.env.XDG_CACHE_HOME || join(homedir(), ".cache");
     const parent = join(base, "sagebrush");

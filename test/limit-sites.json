@@ -12059,6 +12059,46 @@
   "owner": "sagebrush-remote-compute",
   "reason": "The scheduler's cache of run outputs: at most 5,000 entries. When it is full, the entries the action in progress doesn't use are dropped, and if every entry is in use a new output isn't kept (the remote check then refuses that send). It refuses no computation."
  },
+ "src/notebook-run.ts ::  :: const MAX_TIMEOUT = 2147483; #0": {
+  "class": "1",
+  "disposition": {
+   "1": "shared"
+  },
+  "owner": "notebook run (@sagebrush-remote-compute)",
+  "reason": "--timeout's range: Node's timers hold at most 2^31 - 1 ms (board run's rule); refuses a bad argument, not a computation"
+ },
+ "src/notebook-run.ts ::  :: export const NOTEBOOK_FILE_MAX = 64 * 2 ** 20; #0": {
+  "class": "1",
+  "disposition": {
+   "1": "shared"
+  },
+  "owner": "notebook run (@sagebrush-remote-compute)",
+  "reason": "the notebook file read whole into memory before parsing: at most 64 MiB (input protection for the host, not a limit on the code it runs)"
+ },
+ "src/notebook-run.ts :: at :: if (bytes.length > NOTEBOOK_FILE_MAX) { say(`${file}: ${bytes.length} bytes, more than the ${NOTEBOOK_FILE_MAX} a notebook run reads`); return 1; } #0": {
+  "class": "1",
+  "disposition": {
+   "1": "shared"
+  },
+  "owner": "notebook run (@sagebrush-remote-compute)",
+  "reason": "the notebook file read whole into memory before parsing: at most 64 MiB (input protection for the host, not a limit on the code it runs)"
+ },
+ "src/notebook-run.ts :: cutLines :: const cutLines = (s: string, max: number) => { const ls = s.split(\"\\n\"); return ls.length <= max ? s : [...ls.slice(0, max - 5), `… ${ls.length - max + 1} more lines …`, ...ls.slice(-4)].join(\"\\n\"); }; #0": {
+  "class": "1",
+  "disposition": {
+   "1": "shared"
+  },
+  "owner": "notebook run (@sagebrush-remote-compute)",
+  "reason": "the plain-text report shows at most 40 lines of a cell's output (display protection; --json and --write keep all)"
+ },
+ "src/notebook-run.ts :: notebookRun :: if (!Number.isFinite(timeout) || timeout <= 0 || timeout > MAX_TIMEOUT) { say(`--timeout takes a number of seconds, more than 0 and at most ${MAX_TIMEOUT}`); return 2; } #0": {
+  "class": "1",
+  "disposition": {
+   "1": "shared"
+  },
+  "owner": "notebook run (@sagebrush-remote-compute)",
+  "reason": "--timeout's range: Node's timers hold at most 2^31 - 1 ms (board run's rule); refuses a bad argument, not a computation"
+ },
  "src/notebook-session.ts ::  :: export const STATUS_MAX = 4096; #0": {
   "class": "1",
   "owner": "notebook/kernel",
@@ -12237,10 +12277,10 @@
   "owner": "the reactive session (@sagebrush-latex)",
   "reason": "an item's time limit (the caller's --timeout), interrupted when over it: board-run's reviewed interpreter rules, the same lines registered there (limit-sweep manifest B17)"
  },
- "src/reactive-session.ts :: startInterpreter :: const worker = new Worker(o.entry ?? require.main?.filename ?? process.argv[1], { workerData: { sagebrushBoardRun: { dir }, sagebrushLimits: sessionLimits() }, stdout: true, stderr: true }); #0": {
+ "src/reactive-session.ts :: startInterpreter :: const worker = new Worker(o.entry ?? require.main?.filename ?? process.argv[1], { workerData: { sagebrushBoardRun: { dir, importable: !own, ...(o.confine ? { confine: o.confine } : {}) }, sagebrushLimits: sessionLimits() }, stdout: true, stderr: true }); #0": {
   "class": "none",
   "owner": "the reactive session (@sagebrush-latex)",
-  "reason": "the session's limits handed to the interpreter's worker: board-run's reviewed interpreter rules, the same lines registered there (limit-sweep manifest B17)"
+  "reason": "the session's limits handed to the interpreter's worker, now with notebook run's working folder, importability and --confine roots: board-run's reviewed interpreter rules (limit-sweep manifest B17)"
  },
  "src/reactive-session.ts :: startInterpreter :: if (m.start && limit < Infinity && limit > 0 && !started && !absolute && !timedOut) { started = true; clearTimeout(timer); timer = setTimeout(over, clamp(limit)); } #0": {
   "class": "1",
