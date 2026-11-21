@@ -377,11 +377,55 @@ class Acceptance(unittest.TestCase):
             self.rows.check_identity("x86", row(backends={"native": {"status": "ok"}}))
 
     def test_identity_must_match_within_a_type(self):
+        # (another toolchain, from another VM of the type: the message says
+        # what differs)
         self.accept()
-        with self.assertRaisesRegex(shard.Fatal, "identity"):
+        with self.assertRaisesRegex(shard.Fatal, r"identity.*differs in build\.rustc"):
+            self.rows.check_identity("x86", row(build={"rustc": "1.99.2"}), "bc-vm-2")
+
+    def test_two_vms_of_a_type_may_have_their_own_builds(self):
+        # (each VM builds the payload: its wheels' and binaries' sha256s and
+        # its memory cap are its own, recorded once per VM)
+        self.accept()
+        other = row(artifacts={"native": "d" * 64, "engine-wasm": "a" * 64}, mem_cap=2)
+        self.rows.check_identity("x86", other, "bc-vm-2")
+        self.rows.check_identity("x86", other, "bc-vm-2")
+        evs = [e for e in self.rows.ledger.events if e["ev"] == "vm-identity"]
+        self.assertEqual(
+            [
+                (
+                    e["name"],
+                    e["identity"]["artifacts"]["native"],
+                    e["identity"]["mem_cap"],
+                )
+                for e in evs
+            ],
+            [("bc-vm", "c" * 64, 1), ("bc-vm-2", "d" * 64, 2)],
+        )
+        # (and a restarted driver knows them from the ledger)
+        again = shard.Rows(self.d, self.rows.ledger, self.plan)
+        self.assertEqual(sorted(again.vms), ["bc-vm", "bc-vm-2"])
+
+    def test_a_vms_build_may_not_change_between_its_points(self):
+        self.accept()
+        with self.assertRaisesRegex(
+            shard.Fatal, r"bc-vm's build changed.*differs in artifacts\.native"
+        ):
             self.rows.check_identity(
-                "x86", row(artifacts={"native": "d" * 64, "engine-wasm": "a" * 64})
+                "x86",
+                row(artifacts={"native": "d" * 64, "engine-wasm": "a" * 64}),
+                "bc-vm",
             )
+
+    def test_a_rejected_point_is_kept_for_diagnosis(self):
+        self.rows.check_identity("x86", row(build={"rustc": "1.99.2"}), "bc-vm-0")
+        with self.assertRaisesRegex(shard.Fatal, "differs in build.rustc"):
+            self.accept()
+        kept = list((self.d / "rows/x86/.rejected").iterdir())
+        self.assertEqual(len(kept), 1)
+        self.assertFalse((self.d / "rows/x86/poly_fp_mul-s.json").exists())
+        # (and a rejected point is never read as one)
+        self.assertEqual(self.rows.recover({"poly_fp_mul:s": 1000}), 0)
 
     def test_an_unpinned_engine_is_refused(self):
         stale = {
@@ -433,21 +477,25 @@ class Acceptance(unittest.TestCase):
         self.rows.plan = self.plan = plan(pin_policy="track")
 
     def test_on_a_track_tip_the_fresh_engine_is_recorded(self):
-        # (the pin lags the source there: not ok, but its sha256 is the
-        # identity's, so a second point with another fresh build is refused)
+        # (the pin lags the source there: not ok, but its sha256 is the VM's
+        # identity's, so a second point of that VM with another fresh build
+        # is refused)
         self.track()
         fresh = {"ok": False, "policy": "track", "sha256": "e" * 64, "pinned": "f" * 64}
         arts = {"native": "c" * 64, "engine-wasm": "e" * 64}
         self.accept(row(engine_pin=fresh, artifacts=arts))
         ident = json.loads((self.d / "rows/x86/identity.json").read_text())
-        self.assertEqual(ident["engine_pin"]["sha256"], "e" * 64)
-        with self.assertRaisesRegex(shard.Fatal, "identity"):
+        self.assertEqual(ident["pin_policy"], "track")
+        [ev] = [e for e in self.rows.ledger.events if e["ev"] == "vm-identity"]
+        self.assertEqual(ev["identity"]["engine_pin"]["sha256"], "e" * 64)
+        with self.assertRaisesRegex(shard.Fatal, "engine_pin.sha256"):
             self.rows.check_identity(
                 "x86",
                 row(
                     engine_pin=dict(fresh, sha256="d" * 64),
                     artifacts=dict(arts, **{"engine-wasm": "d" * 64}),
                 ),
+                "bc-vm",
             )
 
     def test_a_track_plan_needs_a_recorded_fresh_sha(self):
@@ -934,13 +982,14 @@ class Drivers(unittest.TestCase):
         # (the first VM's key is refused, as ssh refuses a changed key for a
         # known address: the ledger says why, with the key material removed)
         first = "bc-0123456789abcdef-x86-0"
+        # (the padding comes first, so the key lines are inside the kept
+        # tail and only the scrub can remove them)
         said = (
-            "@@@ WARNING: REMOTE HOST IDENTIFICATION HAS CHANGED! @@@\n"
+            "x " * 2000 + "\n@@@ WARNING: REMOTE HOST IDENTIFICATION HAS CHANGED! @@@\n"
             "The fingerprint for the ED25519 key sent by the remote host is\n"
             "SHA256:Qm9ndXNGaW5nZXJwcmludEZvclRoZVRlc3RPbmx5MDAw.\n"
             "ssh-ed25519 AAAAC3NzaC1lZDI1NTE5AAAAIBogusKeyMaterialForTheTestOnly00000\n"
-            + "x " * 2000
-            + "\nHost key verification failed.\n"
+            "Host key verification failed.\n"
         )
         orig = self.prov.inst
 
@@ -956,6 +1005,8 @@ class Drivers(unittest.TestCase):
         self.assertEqual((ev["name"], ev["why"]), (first, "unreachable"))
         self.assertLessEqual(len(ev["ssh"]), shard.SSH_DETAIL)
         self.assertIn("Host key verification failed.", ev["ssh"])
+        self.assertIn("REMOTE HOST IDENTIFICATION HAS CHANGED", ev["ssh"])
+        self.assertEqual(ev["ssh"].count("[key]"), 2)
         self.assertNotIn("Qm9ndXNG", ev["ssh"])
         self.assertNotIn("AAAAC3Nza", ev["ssh"])
         self.assertNotIn("Bogus", ev["ssh"])

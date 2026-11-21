@@ -414,27 +414,54 @@ def check_engine_pin(tk: str, rec: dict, policy: str) -> None:
 IDENTITY_KEYS = (
     "machine",
     "versions",
-    "artifacts",
     "build",
-    "engine_pin",
     "threads",
-    "mem_cap",
     "backends",
     "protocol",
 )
+# What one VM's build and memory decide: each VM builds the (approved,
+# checksummed) payload itself, and neither its wheels nor MemTotal are the
+# same from one VM to the next, so these are compared only between points of
+# one VM
+VM_IDENTITY_KEYS = ("artifacts", "mem_cap", "engine_pin")
 
 
 def identity_of(rec: dict) -> dict:
-    """What every point of one machine type must share (the machine label
-    and kernel included; the point's own fields excluded)."""
+    """What every point of one machine type must share, from any of its VMs:
+    the machine (its label excepted), the toolchain and its flags, the
+    versions, the backends measured and the engine pin policy. The same
+    source on every VM is the plan's payload sha256, checked on each before
+    extraction."""
     out = {k: rec.get(k) for k in IDENTITY_KEYS}
     out["machine"] = {
         k: v for k, v in (rec.get("machine") or {}).items() if k != "label"
     }
     # (a point's "backends" holds its own results, per backend: only which
     # backends the run measured belongs to the type's identity; the
-    # executables themselves are in "artifacts")
+    # executables themselves are in "artifacts", per VM)
     out["backends"] = sorted(rec.get("backends") or {})
+    out["pin_policy"] = (rec.get("engine_pin") or {}).get("policy")
+    return out
+
+
+def vm_identity_of(rec: dict) -> dict:
+    """What every point measured on one VM must share: its build's
+    artifacts (the engine pin's sha256 among them) and its memory cap."""
+    return {k: rec.get(k) for k in VM_IDENTITY_KEYS}
+
+
+def differing(a: dict, b: dict) -> list[str]:
+    """The keys where two identities differ (one level into a nested
+    object), for a fatal message that says what changed."""
+    out = []
+    for k in sorted(set(a) | set(b)):
+        x, y = a.get(k), b.get(k)
+        if x == y:
+            continue
+        if isinstance(x, dict) and isinstance(y, dict):
+            out += [f"{k}.{j}" for j in sorted(set(x) | set(y)) if x.get(j) != y.get(j)]
+        else:
+            out.append(k)
     return out
 
 
@@ -444,6 +471,10 @@ class Rows:
     def __init__(self, run_dir: Path, ledger: Ledger, plan: dict):
         self.run_dir, self.ledger, self.plan = run_dir, ledger, plan
         self.lock = threading.Lock()
+        # (each VM's identity: its first point's, from the ledger)
+        self.vms = {
+            e["name"]: e["identity"] for e in ledger.events if e["ev"] == "vm-identity"
+        }
 
     def paths(self, tk: str, key: str) -> tuple[Path, Path]:
         row, _, size = key.partition(":")
@@ -464,19 +495,37 @@ class Rows:
             (e["type"], e["key"]) for e in self.ledger.events if e["ev"] == "accepted"
         }
 
-    def check_identity(self, tk: str, rec: dict) -> None:
+    def check_identity(self, tk: str, rec: dict, vm: str | None = None) -> None:
         """The first accepted point of a type sets its identity; every later
-        one, from any VM of the type, must equal it. The user column's
-        engine: under the plan's "strict" pin policy, the pinned one; under
-        "track", a fresh build recorded by its sha256 (in the identity, so
-        every point of the type shares it), checked under that policy."""
+        one, from any VM of the type, must equal it. The first point of a VM
+        sets that VM's identity (its build's artifacts and its memory cap: a
+        "vm-identity" ledger line); every later point of the VM must equal
+        it. The user column's engine: under the plan's "strict" pin policy,
+        the pinned one; under "track", a fresh build recorded by its sha256
+        (in the VM's identity), checked under that policy. A point recovered
+        without its VM's name is checked against its type only."""
         check_engine_pin(tk, rec, self.plan["pin_policy"])
+        if vm and vm != "recovered":
+            mine = vm_identity_of(rec)
+            seen = self.vms.get(vm)
+            if seen is None:
+                self.ledger.append(
+                    {"ev": "vm-identity", "type": tk, "name": vm, "identity": mine}
+                )
+                self.vms[vm] = mine
+            elif seen != mine:
+                raise Fatal(
+                    f"{tk}: {vm}'s build changed between its points"
+                    f" (differs in {', '.join(differing(seen, mine))})"
+                )
         path = self.run_dir / "rows" / tk / "identity.json"
         ident = identity_of(rec)
         if path.exists():
-            if json.loads(path.read_text()) != ident:
+            have = json.loads(path.read_text())
+            if have != ident:
                 raise Fatal(
-                    f"{tk}: a point's identity differs from the type's (another machine, toolchain or binary)"
+                    f"{tk}: a point's identity differs from the type's (another machine,"
+                    f" toolchain or flags; differs in {', '.join(differing(have, ident))})"
                 )
             return
         make_dirs(path.parent)
@@ -517,7 +566,12 @@ class Rows:
                 raise Fatal(
                     f"{tk}/{key}: a different file is already accepted; the new one is quarantined"
                 )
-            self.check_identity(tk, rec)
+            try:
+                self.check_identity(tk, rec, vm)
+            except Fatal:
+                # (kept for diagnosis, never read as a point)
+                self.quarantine(tk, key, data, sha, ".rejected")
+                raise
             make_dirs(part.parent)
             make_dirs(dest.parent)
             if part.exists() or part.is_symlink():
@@ -536,8 +590,10 @@ class Rows:
             )
         return sha
 
-    def quarantine(self, tk: str, key: str, data: bytes, sha: str) -> None:
-        q = self.run_dir / "rows" / tk / ".conflict"
+    def quarantine(
+        self, tk: str, key: str, data: bytes, sha: str, where: str = ".conflict"
+    ) -> None:
+        q = self.run_dir / "rows" / tk / where
         make_dirs(q)
         p = q / f"{key.replace(':', '-')}-{sha[:16]}.json"
         if not p.exists():
@@ -557,10 +613,11 @@ class Rows:
         accepted line goes through the same checks and is adopted (its key
         and sha256), never measured again; one that fails them is
         quarantined and fatal. Partial .part files are removed."""
-        acks = {}
+        acks, names = {}, {}
         for e in self.ledger.events:
             if e["ev"] == "accepted":
                 acks[(e["type"], e["key"])] = e["sha256"]
+                names.setdefault((e["type"], e["key"]), e.get("name"))
         for (tk, key), sha in sorted(acks.items()):
             dest, _ = self.paths(tk, key)
             if dest.is_symlink() or not dest.is_file():
@@ -573,7 +630,7 @@ class Rows:
                 raise Fatal(f"recovery: {tk}/{key} changed after it was acknowledged")
             try:
                 _, rec = check_row(data, sha.encode(), key, self.plan, sizes[key])
-                self.check_identity(tk, rec)
+                self.check_identity(tk, rec, names.get((tk, key)))
             except (Fatal, KeyError) as e:
                 raise Fatal(
                     f"recovery: acknowledged {tk}/{key} fails its checks ({e})"
