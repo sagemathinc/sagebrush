@@ -25,6 +25,8 @@ import { openBranchStore, type BranchStore } from "../branch-store";
 import type { BranchReview, BranchRuns, FileDecision, ReviewStatus } from "../branch-rules";
 import { REVIEW_DIFF, reviewLineDiff, utf8Length } from "./line-diff";
 import { DIFF_TEXT, h, notebookDiff, style, textDiff } from "./diff-render";
+// (the Delegate proposal view rides in this chunk: one lazy fetch for both reviews)
+export { openProposal, PROPOSAL_TEXT, PROPOSAL_LIMITS, type ProposalSource, type ProposalView } from "./proposal-view";
 import { CELL_LIMITS, type CellKey } from "./cells";
 import { JSON_LIMITS, jsonValues } from "./json-scan";
 import { filterOutputs } from "./outputs";
