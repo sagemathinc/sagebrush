@@ -1,0 +1,8 @@
+{
+ "v": 1,
+ "reason": "The Smith form with its transforms natively (engine/arith smith: the cyclic route, the trailing-block route with its retry, and the classical fallback, each metered by family, with the mat_smith_form op): the engine module grows 113454 B (CI's size row at aa383aad). cli/pyjs.cjs embeds the engine module in base64, so it grows with it, 151060 B, with no other change: generated, not new library code. Each marked +64 over the measured growth; the engine module's ceiling is renewed to its measured size + 64.",
+ "bytes": {
+  "cli/pyjs.cjs": 151124,
+  "engine/sagebrush-engine.wasm": 113518
+ }
+}

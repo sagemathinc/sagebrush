@@ -908,7 +908,7 @@
   },
   "engine/sagebrush-engine.wasm": {
    "exact": false,
-   "ceiling": 8015465,
+   "ceiling": 8128919,
    "noise_bytes": 0,
    "noise_total": 0,
    "marker_slack": 1024
