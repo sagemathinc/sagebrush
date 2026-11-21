@@ -701,8 +701,13 @@ export async function runA14({ site, ok, want = () => true }) {
     await chat(P, A);
     const g1 = A.grants().at(-1);
     const n0 = A.grants().length;
-    await P.send("Page.navigate", { url: "about:blank" });
-    await sleep(500);
+    // (out through the Files page itself, "/", which loads its own pairing code (index.html's reloadRecorded) and must
+    //  leave this page's record alone, then back)
+    await P.send("Page.navigate", { url: `${site}/` });
+    await P.until(`location.pathname === '/' && document.readyState === 'complete'`);
+    await sleep(1500);
+    const kept = await P.ev(`sessionStorage.getItem('sb-agent-reload-v1') !== null`);
+    ok(kept, "A14-11: the Files page (/) leaves the Agents page's record where it is");
     const h0 = A.hellos;
     await P.navigate(`${site}/agents/`);
     const seen = await P.seen(), nav = await P.nav();
@@ -710,6 +715,24 @@ export async function runA14({ site, ok, want = () => true }) {
     await P.until(`document.querySelector('#connect').textContent === 'Connected'`);
     const g2 = A.grants().at(-1);
     ok(A.hellos > h0 && canon(g2) === canon(g1) && A.grants().length === n0 + 1 && (await P.ev(`document.querySelectorAll('.sbag-dlg').length`)) === 0, "A14-11: a navigation back within 10 min reconnects by itself, with the same grant (given again exactly, never widened), and no dialog", { hellos: A.hellos - h0, g1: canon(g1), g2: canon(g2) });
+  });
+
+  // A14-11c: out through a board page, which takes only its own record (takeReloadRecord's scope), then back: the
+  // record is still there, and the return reconnects by itself
+  await run("A14-11c", async (B, A) => {
+    const P = await B.tab();
+    await pair(P, A, site, "page");
+    await chat(P, A);
+    const n0 = A.grants().length;
+    await P.send("Page.navigate", { url: `${site}/board/` });
+    await P.until(`location.pathname === '/board/' && document.readyState === 'complete'`);
+    await sleep(2500);
+    const kept = await P.ev(`sessionStorage.getItem('sb-agent-reload-v1') !== null`);
+    ok(kept, "A14-11c: a board page leaves the Agents page's record where it is");
+    const h0 = A.hellos;
+    await P.navigate(`${site}/agents/`);
+    await P.until(`document.querySelector('#connect').textContent === 'Connected'`);
+    ok(A.hellos > h0 && A.grants().length === n0 + 1, "A14-11c: back from the board, it reconnects by itself, the same grant", { hellos: A.hellos - h0 });
   });
 
   // A14-11b: a navigation back older than RETURN_MS (fixed clock): the record is discarded: no attempt, and the bar
@@ -794,8 +817,9 @@ export async function runA14({ site, ok, want = () => true }) {
     ok(during.visible && during.before === "Reconnect" && during.act === "Reconnecting…" && during.busy === "true" && during.ariaDisabled === "true" && !during.disabled && after.status === COPY.merged && active === "conn-act", "A14-14.hint-act: after ×, the hint's own [Reconnect] runs the bar's action (Reconnecting…, aria-busy, never disabled); its outcome brings the bar back with focus on the bar's button", { during, after, active });
   });
 
-  // A14-15 (R1-d): a valid, fresh, reload-type record for another workspace (or page): no attempt, gone, [Connect]
-  for (const [id, field, value] of [["A14-15.workspace", "workspace", "sagebrush-workspace/ffffffffffffffff"], ["A14-15.page", "page", new URL(site).origin + "/other/"]]) {
+  // A14-15 (R1-d): a valid, fresh, reload-type record for another workspace of this page: no attempt, gone, [Connect].
+  // (Another page's record: A14-15.page below, left alone for that page, A5)
+  for (const [id, field, value] of [["A14-15.workspace", "workspace", "sagebrush-workspace/ffffffffffffffff"]]) {
     await run(id, async (B, A) => {
       const P = await B.tab();
       await pair(P, A, site, "page");
@@ -814,6 +838,29 @@ export async function runA14({ site, ok, want = () => true }) {
       ok(quiet && A.hellos === h0 && rec === null && bar.status === COPY.discarded && bar.act === "Connect" && dialog === "Connect an agent" && quiet2, `${id}: no attempt; the record gone; nothing kept for a click: the bar offers [Connect], which opens the Connect dialog and tries nothing`, { quiet, bar, rec: !!rec, dialog });
     });
   }
+
+  // A14-15.page (A5): a valid, fresh record of another page of this site, in this tab's storage: not this page's. No
+  // attempt, and it is left where it is, untouched, for that page to take when the person goes back to it; this page
+  // shows nothing of it and offers Connect
+  await run("A14-15.page", async (B, A) => {
+    const P = await B.tab();
+    await pair(P, A, site, "page");
+    await chat(P, A);
+    const other = new URL(site).origin + "/other/";
+    await P.ev(`(() => { const r = JSON.parse(sessionStorage.getItem(${JSON.stringify(KEY)})); r.page = ${JSON.stringify(other)}; sessionStorage.setItem(${JSON.stringify(KEY)}, JSON.stringify(r)); return true; })()`);
+    const before = await P.ev(`sessionStorage.getItem(${JSON.stringify(KEY)})`);
+    const h0 = A.hellos;
+    await P.reload();
+    await sleep(1500);
+    const quiet = await A.quiet(3000);
+    const after = await P.ev(`sessionStorage.getItem(${JSON.stringify(KEY)})`);
+    const bar = await P.bar();
+    ok(quiet && A.hellos === h0 && JSON.parse(after ?? "{}").page === other && JSON.parse(after).session === JSON.parse(before).session && bar.status !== COPY.discarded && !(await P.connected()), "A14-15.page: another page's record: no attempt, left where it is (its page and session untouched), nothing said of it here", { quiet, hellos: A.hellos - h0, bar, kept: !!after });
+    await P.ev(`(document.querySelector('#connect').click(), true)`);
+    await P.until(`[...document.querySelectorAll('.sbag-dlg h2')].some((h) => h.textContent === 'Connect an agent')`);
+    const offered = await P.ev(`!!document.querySelector('.sbag-box .earlier:not([hidden]) button')`);
+    ok(!offered && A.hellos === h0, "A14-15.page: Connect asks for a code: another page's record is never offered as a Reconnect here", { offered });
+  });
 
   // A14-16 (r3.2): a timed restore on the fixed clock; the original expiry stands and its timer fires at it
   await run("A14-16", async (B, A) => {

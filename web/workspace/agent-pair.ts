@@ -831,11 +831,17 @@ export function reloadDecision(r: ReloadRecord, o: { scope: ReloadScope; navType
 export type ReloadTake = { kind: "none" } | { kind: "bad" } | { kind: "ok"; record: ReloadRecord };
 /** The record, taken: read, removed at once (before any attempt, R1-c, this page only), then parsed. Fails closed: an
  * entry that can't be read or removed is "bad", never used. */
-export function takeReloadRecord(s: ReloadStorage | null): ReloadTake {
+export function takeReloadRecord(s: ReloadStorage | null, scope?: ReloadScope): ReloadTake {
   if (!s) return { kind: "none" };
   let raw: string | null = null;
   try { raw = s.getItem(RELOAD_KEY); } catch { return { kind: "bad" }; }
   if (raw === null) return { kind: "none" };
+  // (another page's record (the Agents page's, while the person is on a board): left alone, for that page to take when
+  //  they go back to it; A5. This page's own, or one that can't be read: taken, as before)
+  if (scope) {
+    const r = parseReloadRecord(raw);
+    if (r && r.page !== scope.page) return { kind: "none" };
+  }
   try { s.removeItem(RELOAD_KEY); } catch { return { kind: "bad" }; }
   const record = parseReloadRecord(raw);
   return record ? { kind: "ok", record } : { kind: "bad" };

@@ -39,7 +39,7 @@ export const OTHER_FAIL = "This browser couldn't reach the agent on this compute
 /** A code the agent refused (already used, or past its 5 minutes): never the local-network advice, which is for a
  *  connection that got no answer at all. */
 export const SPENT_CODE = (program?: string) => program === "sagebrush-agent"
-  ? "This code was already used or has expired. Use the newest link sagebrush-agent printed: it prints a new one when the page goes away, or when you press Enter in its terminal."
+  ? "This code was already used or has expired. Use the newest link sagebrush-agent printed. Version 0.7.8 and later print a new one when the page goes away, or when you press Enter in its terminal; an earlier version needs a restart."
   : "This code was already used or has expired: ask your agent for a new link.";
 export const ONLY_CODE = "That's only the code: ask your agent for its link (sagebrush.space/board/?pair=…), and open it.";
 
@@ -463,6 +463,8 @@ export function mountAgentPairing(ws: PairingWorkspace, o: { button?: HTMLElemen
           ]);
           document.removeEventListener("securitypolicyviolation", onViolation);
           close();
+          // (a pairing that another way in replaced meanwhile asks for nothing: it lets go)
+          if (pairing !== p) { p.drop(); return; }
           await grantDialog(p);
         } catch (e) {
           document.removeEventListener("securitypolicyviolation", onViolation);
@@ -486,14 +488,14 @@ export function mountAgentPairing(ws: PairingWorkspace, o: { button?: HTMLElemen
       const back1 = kept ?? pairing?.lostRecord ?? null;
       if (back1) {
         const rb = h("button", { className: "primary", textContent: "Reconnect" });
-        rb.onclick = () => { close(); void reconnectKept(); };
+        rb.onclick = () => { if (pairingLive() || go.disabled) return; close(); void reconnectKept(); };
         earlier.append(h("span", { textContent: "Claude was connected to this page earlier." }), rb);
         earlier.hidden = false;
       } else {
         void remembered().then((g) => {
           if (!g || !box.isConnected || pairingLive()) return;
           const ub = h("button", { className: "primary", textContent: "Use remembered access" });
-          ub.onclick = () => { close(); void reconnect(); };
+          ub.onclick = () => { if (pairingLive() || go.disabled) return; close(); void reconnect(); };
           earlier.append(h("span", { textContent: "This page remembers an agent." }), ub);
           earlier.hidden = false;
         });
@@ -601,13 +603,14 @@ export function mountAgentPairing(ws: PairingWorkspace, o: { button?: HTMLElemen
   /** On load (A14 §1): the reload record, taken (consumed before anything), decided; with no record, the remembered
    * grants as before. After a record that wasn't restored, a remembered grant is not tried silently. */
   async function restoreOnLoad() {
-    const t = o.reload ? takeReloadRecord(storage) : ({ kind: "none" } as const);
+    const t = o.reload ? takeReloadRecord(storage, o.reload.scope) : ({ kind: "none" } as const);
     // (genuinely no record: the remembered reconnect, as before; an unusable one (unreadable, not removable, malformed)
     //  is said, and a remembered grant is only offered, never tried in its place, S1)
     if (t.kind === "none") { const g = await reconnect(); if (g) o.reload?.onRemembered?.(g); return; }
     if (t.kind === "bad") return say({ kind: "not-restored", why: "unusable", canReconnect: false });
     const r = t.record;
-    const nav = (performance.getEntriesByType?.("navigation")[0] as PerformanceNavigationTiming | undefined)?.type ?? "navigate";
+    // (no navigation entry: no type, so nothing silent (reloadDecision discards an unknown type))
+    const nav = (performance.getEntriesByType?.("navigation")[0] as PerformanceNavigationTiming | undefined)?.type ?? "";
     const d = reloadDecision(r, { scope: o.reload!.scope, navType: nav, now: Date.now() });
     // (discarded: its grant over, another workspace or page, or not a reload of this tab: the last needs a new Allow)
     const sameScope = r.workspace === o.reload!.scope.workspace && r.page === o.reload!.scope.page;
@@ -623,7 +626,9 @@ export function mountAgentPairing(ws: PairingWorkspace, o: { button?: HTMLElemen
 
   if (o.button) o.button.addEventListener("click", () => connect());
   const link = pairLink();
-  if (link) connect(link.code, link.port);
+  // (a fresh ?pair= link supersedes this page's record of an earlier pairing: taken (dropped) now, before anything of
+  //  the new one, so a cancelled Allow and a reload never bring the old agent back; another page's record stays)
+  if (link) { if (o.reload) void takeReloadRecord(storage, o.reload.scope); connect(link.code, link.port); }
   // (in a microtask: the caller has this function's result before any restore state is said to it)
   else queueMicrotask(() => void restoreOnLoad());
   return { connect, reconnectKept, remembered, useRemembered: () => reconnect(), get canReconnect() { return !!(kept ?? pairing?.lostRecord); }, get pairing() { return pairing; },

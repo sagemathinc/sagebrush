@@ -447,6 +447,23 @@ ok(actorOf("Claude Code", "claude-code") === "agent:Claude-Code" && actorOf("", 
   ok(d({ ...timed, leftAt: 4990 }, "reload", 5000) === "discard", "U-8.at: now = expires: discarded (R1-e)");
   ok(d({ ...timed, leftAt: 4990 }, "reload", 5001) === "discard", "U-8.after: now = expires + 1: discarded");
   ok(d({ ...timed, leftAt: 4990 }, "navigate", 5000) === "discard", "U-8.click: an expired record is never kept for a click");
+  // take with this page's scope (A5): another page's record is left where it is; this page's own, or one that can't be
+  // read, is taken as before
+  {
+    const m = new Map();
+    const st = { getItem: (k) => (m.has(k) ? m.get(k) : null), setItem: (k, v) => void m.set(k, String(v)), removeItem: (k) => void m.delete(k) };
+    m.set(RELOAD_KEY, js(good));
+    const other = takeReloadRecord(st, { workspace: scope.workspace, page: "http://127.0.0.1:1/" });
+    ok(other.kind === "none" && m.has(RELOAD_KEY), "U-9.other-page: another page's record, taken with this page's scope: left where it is", other);
+    const mine = takeReloadRecord(st, scope);
+    ok(mine.kind === "ok" && !m.has(RELOAD_KEY), "U-9.own: this page's record: taken and removed");
+    m.set(RELOAD_KEY, "{not json");
+    const bad = takeReloadRecord(st, scope);
+    ok(bad.kind === "bad" && !m.has(RELOAD_KEY), "U-9.bad: a record that can't be read: taken (removed), as before");
+    m.set(RELOAD_KEY, js({ ...good, workspace: "other" }));
+    const ws2 = takeReloadRecord(st, scope);
+    ok(ws2.kind === "ok" && !m.has(RELOAD_KEY), "U-9.workspace: this page's address, another workspace: taken (the decision discards it)");
+  }
   // take/put/markLeft over a Storage-like map; and storage that throws
   const store = () => { const m = new Map(); return { m, getItem: (k) => (m.has(k) ? m.get(k) : null), setItem: (k, v) => void m.set(k, String(v)), removeItem: (k) => void m.delete(k) }; };
   const s1 = store(); putReloadRecord(s1, noLeft); markReloadLeft(s1, 777);
