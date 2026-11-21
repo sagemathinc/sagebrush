@@ -140,6 +140,45 @@ fn metering_polls_stop_at_least_as_often() {
         }
         k += 1;
     }
+    // modular composition charges each block's fill and each row's copy
+    // where it happens: f of degree 10, g of 16 coefficients (k = r = 4),
+    // stopped at its first check (the first Horner step) and at every one
+    {
+        let f: Vec<u64> = std::iter::once(2).chain(std::iter::repeat_n(1, 10)).collect();
+        let pmf = np::PolyModulus::new(&f, &m);
+        let (g, h) = (vec![3u64; 16], vec![2u64, 3, 5]);
+        for route in [np::ComposeRoute::Streamed, np::ComposeRoute::Blocked] {
+            let mut whole = Meter::accounting(u64::MAX);
+            metered(&mut whole, || drop(pmf.compose_route(&g, &h, route)));
+            let first = stopped(1, &|| drop(pmf.compose_route(&g, &h, route))).units();
+            // (at the first Horner step: the powers' products and fills,
+            // and for the streamed route the top block and its row; for the
+            // blocked one all the blocks, the product C and the top row's
+            // copy, as performed)
+            let pin = match route {
+                np::ComposeRoute::Streamed => (88, 72, 10),
+                np::ComposeRoute::Blocked => (208, 214, 40),
+            };
+            assert_eq!((first.get(Family::MulSchool), first.get(Family::Move), first.get(Family::ModArith)), pin, "compose {:?}: {:?}", route, first.0);
+            let mut k = 1;
+            loop {
+                let mut meter = Meter::accounting(u64::MAX);
+                hooks::reset();
+                hooks::arm_after(k);
+                let r = sagebrush_interrupt::catch(|| metered(&mut meter, || drop(pmf.compose_route(&g, &h, route))));
+                hooks::reset();
+                sagebrush_interrupt::clear();
+                if r.is_ok() {
+                    assert_eq!(meter.units(), whole.units());
+                    break;
+                }
+                for (got, all) in meter.units().0.iter().zip(whole.units().0) {
+                    assert!(*got <= all, "compose {:?} check {}: {:?} of {:?}", route, k, meter.units(), whole.units());
+                }
+                k += 1;
+            }
+        }
+    }
     // nmod_mat: a Stop in the middle of an elimination charges the work
     // before it, part of the whole
     let mut full = Meter::accounting(u64::MAX);

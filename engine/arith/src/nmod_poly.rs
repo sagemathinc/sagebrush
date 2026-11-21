@@ -883,7 +883,7 @@ impl PolyModulus {
         }
         let n = lf - 1;
         let m = self.m;
-        let h = if h.len() < 2 * lf - 1 { self.reduce_t(h, t) } else { divrem_t(h, &self.f, &m, t).1 };
+        let h = if h.len() < lf.saturating_mul(2) - 1 { self.reduce_t(h, t) } else { divrem_t(h, &self.f, &m, t).1 };
         if lg == 1 {
             return self.reduce_t(&g[..1], t);
         }
@@ -915,9 +915,9 @@ impl PolyModulus {
             let mut a = vec![0u64; k];
             let hi = ((j + 1) * k).min(lg);
             a[..hi - j * k].copy_from_slice(&g[j * k..hi]);
+            tally(Family::Move, k as u64);
             a
         };
-        tally(Family::Move, (r * k) as u64);
         match route {
             ComposeRoute::Blocked => {
                 let mut a = crate::nmod_mat::Mat { rows: r, cols: k, m, d: Vec::with_capacity(r * k) };
@@ -926,8 +926,10 @@ impl PolyModulus {
                 }
                 let c = a.mul(&b);
                 drop(b);
-                let row = |j: usize| trim(c.d[j * n..(j + 1) * n].to_vec());
-                tally(Family::Move, (r * n) as u64);
+                let row = |j: usize| {
+                    tally(Family::Move, n as u64);
+                    trim(c.d[j * n..(j + 1) * n].to_vec())
+                };
                 let mut acc = row(r - 1);
                 for j in (0..r - 1).rev() {
                     sagebrush_interrupt::check();
@@ -949,7 +951,9 @@ impl PolyModulus {
 }
 
 /// [`PolyModulus::compose`]'s route for a modulus of lf coefficients and g
-/// of lg: the faster of the two where measured (both do the same work).
+/// of lg: the streamed one everywhere.  The two measured the same (within
+/// 1%) at lf = 50 to 10^4, and the streamed one holds less; the lengths
+/// are kept as arguments for a crossover a future measurement may show.
 pub fn compose_route_for(lf: usize, lg: usize) -> ComposeRoute {
     let _ = (lf, lg);
     ComposeRoute::Streamed
@@ -1189,7 +1193,7 @@ pub const fn compose_work(lf: usize, lg: usize, lh: usize) -> Option<u64> {
         // (a zero modulus: refused, never charged)
         return None;
     }
-    let red = if lh < 2 * lf - 1 { ck!(reduce_work(lf, lh)) } else { ck!(divrem_work(lh, lf)) };
+    let red = if lh < ck!(lf.checked_mul(2)) - 1 { ck!(reduce_work(lf, lh)) } else { ck!(divrem_work(lh, lf)) };
     if lf == 1 || lg <= 1 {
         return red.checked_add(lg as u64);
     }
@@ -1202,23 +1206,28 @@ pub const fn compose_work(lf: usize, lg: usize, lh: usize) -> Option<u64> {
     ck!(ck!(red.checked_add(mulmods)).checked_add(matrix)).checked_add(linear)
 }
 
-/// The words [`PolyModulus::compose`] holds besides its products' own
-/// transients, by route: the powers' matrix (k n), and for the blocked
-/// route also the product's transposed copy of it and C (r n); plus the
-/// running value, a row and a block.
+/// The words [`PolyModulus::compose`] holds at once besides its products'
+/// own transients, by route (n = lf - 1; (k, r) = [`compose_shape`]):
+/// - both: the powers' matrix B (k n); h reduced, the power being computed
+///   or h^k, the running value and a row (4 n); a block (k);
+/// - the blocked route also: the product's transposed copy of B (k n),
+///   g's blocks A (r k) and the product C (r n).
 pub const fn compose_words(lf: usize, lg: usize, route: ComposeRoute) -> Option<u64> {
     if lf <= 1 || lg <= 1 {
-        return Some(lf as u64 + 1);
+        return (lf as u64).checked_add(1);
     }
     let n = (lf - 1) as u64;
     let (k, r) = compose_shape(lg);
     let (k, r) = (k as u64, r as u64);
     let b = ck!(k.checked_mul(n));
-    let held = match route {
-        ComposeRoute::Streamed => b,
-        ComposeRoute::Blocked => ck!(ck!(b.checked_mul(2)).checked_add(ck!(r.checked_mul(n)))),
-    };
-    ck!(held.checked_add(ck!(n.checked_mul(3)))).checked_add(k)
+    let common = ck!(ck!(b.checked_add(ck!(n.checked_mul(4)))).checked_add(k));
+    match route {
+        ComposeRoute::Streamed => Some(common),
+        ComposeRoute::Blocked => {
+            let extra = ck!(ck!(b.checked_add(ck!(r.checked_mul(k)))).checked_add(ck!(r.checked_mul(n))));
+            common.checked_add(extra)
+        }
+    }
 }
 
 // (its helpers use dashu's u64-word API: native targets only)
@@ -1328,6 +1337,33 @@ mod tests {
             }
         }
         assert_eq!(compose_work(0, 5, 5), None);
+        // every extreme shape: a value or None, never a panic
+        let big = [0, 1, 2, usize::MAX / 2, usize::MAX / 2 + 1, usize::MAX - 1, usize::MAX];
+        for &lf in &big {
+            for &lg in &big {
+                for &lh in &big {
+                    let _ = compose_work(lf, lg, lh);
+                }
+                for route in [ComposeRoute::Blocked, ComposeRoute::Streamed] {
+                    let _ = compose_words(lf, lg, route);
+                }
+            }
+        }
+        assert_eq!(compose_work(usize::MAX / 2 + 1, 0, 0), None);
+        for lg in [0, 1] {
+            assert_eq!(compose_work(usize::MAX, lg, 0), None);
+            assert_eq!(compose_words(usize::MAX, lg, ComposeRoute::Streamed), None);
+        }
+        for lg in [0, 1, 2, usize::MAX / 2, usize::MAX] {
+            let (k, r) = compose_shape(lg);
+            assert!(k.checked_mul(r).is_none_or(|x| x >= lg), "lg {}", lg);
+        }
+        // the shape's terms: a long g's blocks counted by the blocked route
+        // (A, r k = 10^4 words for g of 10^4 coefficients mod a quadratic)
+        let (k, r) = compose_shape(10000);
+        assert_eq!((k, r), (100, 100));
+        assert_eq!(compose_words(3, 10000, ComposeRoute::Blocked), Some(2 * 100 * 2 + 100 * 100 + 100 * 2 + 4 * 2 + 100));
+        assert_eq!(compose_words(3, 10000, ComposeRoute::Streamed), Some(100 * 2 + 4 * 2 + 100));
         assert_eq!(compose_work(usize::MAX / 2, usize::MAX / 2, 3), None);
         assert_eq!(compose_words(usize::MAX, usize::MAX, ComposeRoute::Blocked), None);
     }
