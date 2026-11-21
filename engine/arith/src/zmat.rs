@@ -18,7 +18,7 @@
 //!   norms, bounding the sums of principal minors by Hadamard).
 //!
 //! Units ([`cost::tally`](crate::cost::tally)): each function counts its own
-//! work, in a local [`Acc`] flushed at its existing Stop checks and when it
+//! work, in a [`Local`] flushed at its existing Stop checks and when it
 //! returns (also while unwinding), and none counts the work of the kernels
 //! it calls, which count themselves (nmod_mat's eliminations, products and
 //! solves; the solve and the products here).  Big-integer products,
@@ -29,7 +29,7 @@
 //! product; copies of entries are Move, a unit per limb.  Scans that only
 //! read sizes or signs (max_bits, the zero tests) are not counted.
 
-use crate::cost::{bigdiv_units, bigeuclid_units, bigmul_units, publish_progress, tally_all, Family, Units, FAMILIES};
+use crate::cost::{bigdiv_units, bigeuclid_units, biggcd_units, bigmul_units, bigsqrt_units, Family, Local};
 use crate::nmod::{Modulus, Primes};
 use crate::nmod_mat::{Lu, Mat};
 use num_integer::Integer;
@@ -59,7 +59,7 @@ fn bits(x: &BigInt) -> u64 {
 /// The 64-bit limbs of x for the cost helpers (at least 1: a zero or a
 /// one-limb value costs one limb step).
 #[inline]
-pub(crate) fn limbs(x: &BigInt) -> usize {
+pub fn limbs(x: &BigInt) -> usize {
     // (the i64 test is about half the cost of `bits` for small values)
     if x.to_i64().is_some() {
         1
@@ -71,58 +71,12 @@ pub(crate) fn limbs(x: &BigInt) -> usize {
 /// [`limbs`] of a value known to be large (a remainder, a modulus): its
 /// bit length directly, without the one-word test first.
 #[inline]
-pub(crate) fn limbs_big(x: &BigInt) -> usize {
+pub fn limbs_big(x: &BigInt) -> usize {
     (x.bits().div_ceil(64) as usize).max(1)
 }
 
-/// A local per-family count of the work a function does itself, added to
-/// the thread's tally (and published to a metered region's progress) at
-/// [`Acc::flush`] (called next to the function's existing Stop checks) and
-/// when dropped (on return, and while
-/// unwinding), so that a loop pays one thread-local access per flush, not
-/// one per entry.
-pub(crate) struct Acc([u64; FAMILIES]);
-
-impl Acc {
-    pub(crate) fn new() -> Acc {
-        Acc([0; FAMILIES])
-    }
-    #[inline]
-    pub(crate) fn add(&mut self, u: Units) {
-        for (a, &x) in self.0.iter_mut().zip(&u.0) {
-            *a += x;
-        }
-    }
-    #[inline]
-    pub(crate) fn n(&mut self, f: Family, n: u64) {
-        self.0[f as usize] += n;
-    }
-    /// n times the units `u`.
-    #[inline]
-    pub(crate) fn times(&mut self, n: u64, u: Units) {
-        for (a, &x) in self.0.iter_mut().zip(&u.0) {
-            *a += n * x;
-        }
-    }
-    /// Adds the count to the thread's tally and publishes a metered
-    /// region's running units to its progress cell (as nmod's polls do).
-    pub(crate) fn flush(&mut self) {
-        if self.0.iter().any(|&x| x != 0) {
-            tally_all(&self.0);
-            self.0 = [0; FAMILIES];
-            publish_progress();
-        }
-    }
-}
-
-impl Drop for Acc {
-    fn drop(&mut self) {
-        self.flush();
-    }
-}
-
 /// The Move units of copying `v`: a unit per limb.
-pub(crate) fn copy_units(v: &[BigInt]) -> u64 {
+pub fn copy_units(v: &[BigInt]) -> u64 {
     v.iter().map(|x| limbs(x) as u64).sum()
 }
 
@@ -130,31 +84,6 @@ pub(crate) fn copy_units(v: &[BigInt]) -> u64 {
 #[inline]
 pub(crate) fn reduce_units(x: &BigInt) -> u64 {
     limbs(x) as u64
-}
-
-/// The units of an integer square root of x (Newton's iteration): about
-/// log2 of its bits steps, each a division of x by a root of half its limbs
-/// (Div, through `bigdiv_units`).
-pub(crate) fn bigsqrt_units(x: &BigInt) -> Units {
-    let l = limbs_big(x);
-    let steps = (64 - (x.bits().max(1)).leading_zeros()) as u64;
-    let mut u = bigdiv_units(l, l.div_ceil(2));
-    for v in u.0.iter_mut() {
-        *v = v.saturating_mul(steps);
-    }
-    u
-}
-
-/// The units of a full gcd of BigInts of `la` and `lb` limbs (la >= lb), as
-/// about lb Euclid steps on those sizes (a word of the quotient sequence
-/// per limb of the smaller): `bigeuclid_units` lb times.
-pub(crate) fn biggcd_units(la: usize, lb: usize) -> Units {
-    let (la, lb) = if la >= lb { (la, lb) } else { (lb, la) };
-    let mut u = bigeuclid_units(la, lb);
-    for x in u.0.iter_mut() {
-        *x = x.saturating_mul(lb as u64);
-    }
-    u
 }
 
 impl ZMat {
@@ -209,7 +138,7 @@ impl ZMat {
                 }
             })
             .collect();
-        let mut acc = Acc::new();
+        let mut acc = Local::new();
         acc.n(Family::ModArith, units);
         Mat { rows: self.rows, cols: self.cols, m: *m, d }
     }
@@ -224,7 +153,7 @@ impl ZMat {
     }
 
     pub fn transpose(&self) -> ZMat {
-        let mut acc = Acc::new();
+        let mut acc = Local::new();
         acc.n(Family::Move, copy_units(&self.d));
         let mut d = Vec::with_capacity(self.d.len());
         for j in 0..self.cols {
@@ -237,7 +166,7 @@ impl ZMat {
 
     /// The submatrix on the given rows and columns.
     pub fn select(&self, rows: &[usize], cols: &[usize]) -> ZMat {
-        let mut acc = Acc::new();
+        let mut acc = Local::new();
         let mut d = Vec::with_capacity(rows.len() * cols.len());
         for &i in rows {
             for &j in cols {
@@ -253,7 +182,7 @@ impl ZMat {
     pub fn mul(&self, o: &ZMat) -> ZMat {
         assert_eq!(self.cols, o.rows, "matrix dimensions do not match");
         let (r, k, c) = (self.rows, self.cols, o.cols);
-        let mut acc = Acc::new();
+        let mut acc = Local::new();
         let (abits, obits) = (self.max_bits(), o.max_bits());
         let small = abits + obits + (64 - (k as u64).leading_zeros() as u64) < 126;
         if small {
@@ -298,7 +227,7 @@ impl ZMat {
 
     /// Every entry times s (counted: `bigmul_units` per entry).
     pub fn scale(&self, s: &BigInt) -> ZMat {
-        let mut acc = Acc::new();
+        let mut acc = Local::new();
         let ls = limbs(s);
         for x in &self.d {
             acc.add(bigmul_units(limbs(x), ls));
@@ -328,7 +257,7 @@ fn norm_log2_of<'a>(v: impl Iterator<Item = &'a BigInt>) -> f64 {
     // (one-word entries squared and summed in a u128 while it cannot
     // overflow, the rest as big integers: the same sum, counted as a 1 x 1
     // limb product per small entry)
-    let mut acc = Acc::new();
+    let mut acc = Local::new();
     let mut s = BigInt::zero();
     let mut w = 0u128;
     for x in v {
@@ -380,7 +309,7 @@ impl Crt {
     /// One more residue (counted: the two reductions, the word steps, and
     /// the two products by a word).
     pub fn add(&mut self, r: u64, mp: &Modulus) {
-        let mut acc = Acc::new();
+        let mut acc = Local::new();
         acc.n(Family::ModArith, reduce_units(&self.x) + reduce_units(&self.m) + 4);
         acc.add(bigmul_units(limbs(&self.m), 1));
         acc.add(bigmul_units(limbs(&self.m), 1));
@@ -423,7 +352,7 @@ fn crt_all(primes: &[u64], res: &[Vec<u64>]) -> Vec<BigInt> {
     // (charged for the work done: MultiCrt counts nothing itself; n
     // reconstructions, each k rows of product limbs summed in u128 and k
     // word steps)
-    let mut acc = Acc::new();
+    let mut acc = Local::new();
     acc.times(n as u64, crt.units());
     out
 }
@@ -431,7 +360,7 @@ fn crt_all(primes: &[u64], res: &[Vec<u64>]) -> Vec<BigInt> {
 /// Rational reconstruction: (a, b) with a = b u mod m, |a| <= nb,
 /// 0 < b <= db and gcd(a, b) = 1, if one exists (unique when 2 nb db < m).
 pub fn ratrecon(u: &BigInt, m: &BigInt, nb: &BigInt, db: &BigInt) -> Option<(BigInt, BigInt)> {
-    let mut acc = Acc::new();
+    let mut acc = Local::new();
     acc.add(bigdiv_units(limbs(u), limbs(m)));
     let (mut r0, mut r1) = (m.clone(), u.mod_floor(m));
     let (mut t0, mut t1) = (BigInt::zero(), BigInt::one());
@@ -471,7 +400,7 @@ pub fn ratrecon(u: &BigInt, m: &BigInt, nb: &BigInt, db: &BigInt) -> Option<(Big
 /// Reconstruct a vector of residues mod m as N / den with one common
 /// denominator, every |N_i| <= nb and den <= db.
 fn ratrecon_vec(u: &[BigInt], m: &BigInt, nb: &BigInt, db: &BigInt) -> Option<(Vec<BigInt>, BigInt)> {
-    let mut acc = Acc::new();
+    let mut acc = Local::new();
     let lm = limbs(m);
     let mut den = BigInt::one();
     let lu: Vec<usize> = u.iter().map(limbs).collect();
@@ -565,7 +494,7 @@ pub fn solve(a: &ZMat, b: &ZMat) -> Option<(ZMat, BigInt)> {
     // (counted: the residues mod p, the residual's update and division by p,
     // the digits' accumulation; the LU, its solves, the reconstruction and
     // the check count themselves)
-    let mut acc = Acc::new();
+    let mut acc = Local::new();
     acc.n(Family::Move, copy_units(&b.d));
     let la: Option<Vec<usize>> = a64.is_none().then(|| a.d.iter().map(limbs).collect());
     let mut r: Vec<BigInt> = b.d.clone();
@@ -679,7 +608,7 @@ pub fn solve(a: &ZMat, b: &ZMat) -> Option<(ZMat, BigInt)> {
         sagebrush_interrupt::check();
         if iter == check {
             // N, D with 2 N D < p^iter
-            acc.add(bigsqrt_units(&pk));
+            acc.add(bigsqrt_units(pk.bits()));
             let half = (&pk / 2u32).sqrt();
             if let Some((nums, den)) = ratrecon_vec(&x, &pk, &half, &half) {
                 let nm = ZMat { rows: n, cols: k, d: nums };
@@ -707,7 +636,7 @@ pub fn det_bareiss(a: &ZMat) -> BigInt {
         return BigInt::one();
     }
     // (counted: per update two products and an exact division)
-    let mut acc = Acc::new();
+    let mut acc = Local::new();
     acc.n(Family::Move, copy_units(&a.d));
     let mut m = a.d.clone();
     let mut sign = 1;
@@ -756,7 +685,7 @@ fn hadamard_log2(a: &ZMat) -> f64 {
 fn det_crt(a: &ZMat, divisor: &BigInt, bound_log2: f64) -> BigInt {
     // (counted: the divisor's reduction and two word steps per prime; the
     // reductions, eliminations and CRT steps count themselves)
-    let mut acc = Acc::new();
+    let mut acc = Local::new();
     let mut crt = Crt::new();
     let target = bound_log2 + 2.0;
     for p in Primes::new() {
@@ -912,7 +841,7 @@ fn rref_dixon(a: &ZMat, piv: &[usize], m: &Modulus) -> Option<(ZMat, BigInt, Vec
     let free: Vec<usize> = (0..cols).filter(|c| !piv.contains(c)).collect();
     let (x, den) = solve(&a.select(&srows, piv), &a.select(&srows, &free))?;
     // (counted: the copies of den and X into the form)
-    let mut acc = Acc::new();
+    let mut acc = Local::new();
     acc.n(Family::Move, k as u64 * limbs(&den) as u64 + copy_units(&x.d));
     let mut nm = ZMat::zero(k, cols);
     for i in 0..k {
@@ -974,7 +903,7 @@ pub fn rref_multimodular(a: &ZMat) -> (ZMat, BigInt, Vec<usize>) {
     // (counted: the residues' scaling by d_p, the trigger and its tests,
     // and the lowest-terms pass; the reductions, eliminations, CRT and
     // reconstructions count themselves)
-    let mut acc = Acc::new();
+    let mut acc = Local::new();
     for p in Primes::new() {
         let m = Modulus::new(p);
         let mut r = a.reduce(&m);
@@ -1130,7 +1059,7 @@ fn trigger_weight(i: usize) -> u64 {
 /// (each term is below 2^80, so the sum of fewer than 2^48 fits).
 fn trigger(m: &Modulus, v: &[u64], free: &[usize]) -> u64 {
     // (counted: the products summed in u128, then one reduction)
-    let mut acc = Acc::new();
+    let mut acc = Local::new();
     acc.times(free.len() as u64, bigmul_units(1, 1));
     acc.n(Family::ModArith, 1);
     let mut t = 0u128;
@@ -1144,7 +1073,7 @@ fn trigger(m: &Modulus, v: &[u64], free: &[usize]) -> u64 {
 /// n / d with |n|, d <= sqrt(m / 2), m the primes' product, from the
 /// residues d_p R_p (and d_p last).
 fn sentinel_rational(primes: &[u64], res: &[Vec<u64>], free: &[usize]) -> Option<(BigInt, BigInt)> {
-    let mut acc = Acc::new();
+    let mut acc = Local::new();
     acc.n(Family::ModArith, 2 * primes.len() as u64);
     let raw: Vec<Vec<u64>> = primes
         .iter()
@@ -1155,7 +1084,7 @@ fn sentinel_rational(primes: &[u64], res: &[Vec<u64>], free: &[usize]) -> Option
         })
         .collect();
     let m = product(primes);
-    acc.add(bigsqrt_units(&m));
+    acc.add(bigsqrt_units(m.bits()));
     let half = (&m / 2u32).sqrt();
     ratrecon(&crt_all(primes, &raw)[0], &m, &half, &half)
 }
@@ -1163,7 +1092,7 @@ fn sentinel_rational(primes: &[u64], res: &[Vec<u64>], free: &[usize]) -> Option
 /// The product of the primes.
 fn product(primes: &[u64]) -> BigInt {
     // (counted: the i-th product is i limbs by one)
-    let mut acc = Acc::new();
+    let mut acc = Local::new();
     for i in 0..primes.len() {
         acc.add(bigmul_units(i + 1, 1));
     }
@@ -1193,7 +1122,7 @@ const EARLY_STOP_SHARE: f64 = 0.6;
 /// |numerators|, L <= sqrt(m / 2), returned as L R's entries then L; None
 /// if they are not such rationals yet.
 fn rref_rational(primes: &[u64], res: &[Vec<u64>]) -> Option<Vec<BigInt>> {
-    let mut acc = Acc::new();
+    let mut acc = Local::new();
     acc.n(Family::ModArith, res.iter().map(|v| v.len() as u64 + 1).sum());
     let m = &product(primes);
     let raw: Vec<Vec<u64>> = primes
@@ -1206,7 +1135,7 @@ fn rref_rational(primes: &[u64], res: &[Vec<u64>]) -> Option<Vec<BigInt>> {
             body.iter().map(|&x| md.mul(x, inv)).collect()
         })
         .collect();
-    acc.add(bigsqrt_units(m));
+    acc.add(bigsqrt_units(m.bits()));
     let half = (m / 2u32).sqrt();
     let (mut nm, den) = ratrecon_vec(&crt_all(primes, &raw), m, &half, &half)?;
     nm.push(den);
@@ -1236,7 +1165,7 @@ fn rows_in_span(a: &ZMat, rows: &[usize], piv: &[usize], n: &[BigInt], den: &Big
         ispiv[c] = true;
     }
     // (counted: the products, from N's limbs taken once; flushed per row)
-    let mut acc = Acc::new();
+    let mut acc = Local::new();
     let lden = limbs(den);
     let ln: Vec<usize> = n[..piv.len() * cols].iter().map(limbs).collect();
     for &row in rows {
@@ -1294,7 +1223,7 @@ pub fn kernel(a: &ZMat) -> ZMat {
     let (nm, den, piv) = rref(a);
     let free: Vec<usize> = (0..a.cols).filter(|c| !piv.contains(c)).collect();
     // (counted: the copies into the basis)
-    let mut acc = Acc::new();
+    let mut acc = Local::new();
     acc.n(Family::Move, free.len() as u64 * (limbs(&den) as u64 + piv.iter().enumerate().map(|(i, _)| free.iter().map(|&f| limbs(nm.get(i, f)) as u64).sum::<u64>()).sum::<u64>()));
     let mut k = ZMat::zero(free.len(), a.cols);
     for (t, &f) in free.iter().enumerate() {
@@ -1362,7 +1291,7 @@ pub fn hermite_cyclic(a: &ZMat) -> Option<ZMat> {
     // (counted: the columns' scaling and reduction mod d, the gcds and
     // Bezout steps, the combination; the solves, det and check count
     // themselves)
-    let acc = std::cell::RefCell::new(Acc::new());
+    let acc = std::cell::RefCell::new(Local::new());
     let ld = limbs(&d);
     // the columns x = d u / den modulo d (integral: den divides det a)
     let cols = |u: &ZMat, den: &BigInt| -> Option<Vec<Vec<BigInt>>> {
@@ -1473,7 +1402,7 @@ pub fn hermite_cyclic_holds(a: &ZMat, h: &[BigInt], d: &BigInt) -> bool {
         return false;
     }
     // (counted: the products and a reduction per row; flushed per row)
-    let mut acc = Acc::new();
+    let mut acc = Local::new();
     for r in 0..n {
         acc.flush();
         sagebrush_interrupt::check();
@@ -1511,7 +1440,7 @@ pub fn inverse(a: &ZMat) -> Option<(ZMat, BigInt)> {
     let mut singular = 0;
     // (counted: the adjugate's scaling per prime and the lowest-terms pass;
     // the reductions, eliminations and CRT count themselves)
-    let mut acc = Acc::new();
+    let mut acc = Local::new();
     for p in Primes::new() {
         let m = Modulus::new(p);
         let mut aug = a.reduce(&m).augment(&Mat::identity(n, m));

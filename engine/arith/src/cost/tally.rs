@@ -9,7 +9,10 @@
 //!   products, reductions, zero fills: MulNtt, ModArith, Move), read
 //!   through [`tallied`].
 //! - BigInt arithmetic is counted through [`bigmul_units`],
-//!   [`bigdiv_units`] and [`bigeuclid_units`] only, never inline formulas.
+//!   [`bigdiv_units`], [`bigeuclid_units`], [`biggcd_units`] and
+//!   [`bigsqrt_units`] only, never inline formulas.
+//! - Code outside the kernels counts in a [`Local`], flushed at its
+//!   existing Stop checks and when dropped.
 //! - A site uses either an explicit [`Meter`] or the tally, never both.
 //!   Code that runs an explicit meter inside a region adds its units to the
 //!   tally when done (`tally_all(&inner.units().0)`), or they are lost to
@@ -202,6 +205,97 @@ pub fn bigeuclid_units(la: usize, lb: usize) -> Units {
     let q = la.saturating_sub(lb).saturating_add(1);
     let n = bigdiv_units(la, lb).total().unwrap_or(u64::MAX).saturating_add(bigmul_units(q, lb).total().unwrap_or(u64::MAX));
     one(Family::Gcd, n)
+}
+
+/// Units of a full BigInt gcd of `la` and `lb` 64-bit limbs, in either
+/// order, at the operands' actual sizes: about one Euclid step per limb of
+/// the smaller (a word of the quotient sequence each), so
+/// `bigeuclid_units(max, min)` times `min` (Gcd).  A zero-limb operand
+/// costs nothing; callers pass at least one limb per value.
+pub fn biggcd_units(la: usize, lb: usize) -> Units {
+    let (la, lb) = if la >= lb { (la, lb) } else { (lb, la) };
+    let n = bigeuclid_units(la, lb).total().unwrap_or(u64::MAX).saturating_mul(lb as u64);
+    one(Family::Gcd, n)
+}
+
+/// Units of the integer square root of a value of `bits` bits (Newton's
+/// iteration): the bit length of `bits` steps, each a division of the
+/// value (l = ceil(bits / 64) limbs, at least 1) by a root of ceil(l / 2)
+/// limbs (Div, `bigdiv_units` per step).
+pub fn bigsqrt_units(bits: u64) -> Units {
+    let l = usize::try_from(bits.div_ceil(64)).unwrap_or(usize::MAX).max(1);
+    let steps = (64 - bits.max(1).leading_zeros()) as u64;
+    let n = bigdiv_units(l, l.div_ceil(2)).total().unwrap_or(u64::MAX).saturating_mul(steps);
+    one(Family::Div, n)
+}
+
+/// A function's own per-family count, outside arith's two kernels (whose
+/// Polls fuse the Stop counter with the units): zmat, snf, classgroup.
+///
+/// - [`Local::add`], [`Local::n`] and [`Local::times`] accumulate locally,
+///   saturating (never a panic).  Count after the work is done, never
+///   ahead of it.
+/// - [`Local::flush`] adds the count to the thread's tally, then publishes
+///   the outermost region's progress (nothing without a region), then
+///   zeroes the count.  It does not poll Stop: call it next to the
+///   function's existing Stop checks, which stay where they are.
+/// - Dropping it flushes, on return and while unwinding, so the work done
+///   before a Stop or a panic is charged.
+/// - In a loop whose step is tiny and uniform, count the steps in a scalar
+///   and add them once with [`Local::times`], not one `n` per row.
+/// - Never merge a [`metered`] meter's units into a Local: they went
+///   through the tally already.
+pub struct Local([u64; FAMILIES]);
+
+impl Default for Local {
+    fn default() -> Local {
+        Local::new()
+    }
+}
+
+impl Local {
+    pub fn new() -> Local {
+        Local([0; FAMILIES])
+    }
+    /// Adds the units `u`.
+    #[inline]
+    pub fn add(&mut self, u: Units) {
+        for (a, &x) in self.0.iter_mut().zip(&u.0) {
+            *a = a.saturating_add(x);
+        }
+    }
+    /// Adds `n` units of family `f`.
+    #[inline]
+    pub fn n(&mut self, f: Family, n: u64) {
+        let a = &mut self.0[f as usize];
+        *a = a.saturating_add(n);
+    }
+    /// Adds `k` steps of `u` units each: `k` times `u`, family by family.
+    #[inline]
+    pub fn times(&mut self, k: u64, u: Units) {
+        for (a, &x) in self.0.iter_mut().zip(&u.0) {
+            *a = a.saturating_add(k.saturating_mul(x));
+        }
+    }
+    /// The units held, not yet flushed.
+    pub fn held(&self) -> Units {
+        Units(self.0)
+    }
+    /// Adds the count to the thread's tally, publishes the outermost
+    /// region's running units to its progress cell, and zeroes the count.
+    pub fn flush(&mut self) {
+        if self.0.iter().any(|&x| x != 0) {
+            tally_all(&self.0);
+            publish_progress();
+            self.0 = [0; FAMILIES];
+        }
+    }
+}
+
+impl Drop for Local {
+    fn drop(&mut self) {
+        self.flush();
+    }
 }
 
 fn one(f: Family, n: u64) -> Units {

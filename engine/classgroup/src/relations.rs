@@ -417,12 +417,23 @@ pub fn collect(fb: &FactorBase, want: usize, par: &Params, seed: u64, stats: &mu
 }
 
 pub fn is_prime_u64(n: u64) -> bool {
+    is_prime_u64_units(n).0
+}
+
+/// [`is_prime_u64`] and its ModArith units: a unit per trial division, per
+/// base's reduction, and per modular product of Miller-Rabin (the
+/// powering's squarings and multiplications by closed form, with its two
+/// reductions; then each squaring done).
+#[inline]
+pub fn is_prime_u64_units(n: u64) -> (bool, u64) {
     if n < 2 {
-        return false;
+        return (false, 0);
     }
+    let mut units = 0;
     for p in [2u64, 3, 5, 7, 11, 13, 17, 19, 23, 29, 31, 37] {
+        units += 1;
         if n % p == 0 {
-            return n == p;
+            return (n == p, units);
         }
     }
     let (mut d, mut s) = (n - 1, 0);
@@ -433,23 +444,29 @@ pub fn is_prime_u64(n: u64) -> bool {
     // deterministic bases: {2, 7, 61} below 4759123141 (Jaeschke), the
     // first twelve primes below 3.3e24
     let bases: &[u64] = if n < 4_759_123_141 { &[2, 7, 61] } else { &[2, 3, 5, 7, 11, 13, 17, 19, 23, 29, 31, 37] };
+    // (powmod's products: a squaring per bit of d, a product per set bit,
+    // and its two reductions)
+    let pow = (64 - d.leading_zeros() + d.count_ones()) as u64 + 2;
     'outer: for &a in bases {
+        units += 1;
         if a % n == 0 {
             continue;
         }
         let mut x = powmod(a, d, n);
+        units += pow;
         if x == 1 || x == n - 1 {
             continue;
         }
         for _ in 0..s - 1 {
             x = mulmod(x, x, n);
+            units += 1;
             if x == n - 1 {
                 continue 'outer;
             }
         }
-        return false;
+        return (false, units);
     }
-    true
+    (true, units)
 }
 
 #[cfg(test)]

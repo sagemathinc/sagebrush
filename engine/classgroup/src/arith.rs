@@ -17,17 +17,27 @@ pub fn gcd_i(a: i128, b: i128) -> i128 {
 
 /// (g, x, y) with a x + b y = g = gcd(a, b) >= 0.
 pub fn xgcd(a: i128, b: i128) -> (i128, i128, i128) {
+    let (g, x, y, _) = xgcd_steps(a, b);
+    (g, x, y)
+}
+
+/// [`xgcd`] and its quotient steps (a word Euclid's ModArith units, one per
+/// step; xgcd(a, 0) takes none).
+#[inline]
+pub fn xgcd_steps(a: i128, b: i128) -> (i128, i128, i128, u64) {
     let (mut r0, mut r1, mut s0, mut s1, mut t0, mut t1) = (a, b, 1i128, 0i128, 0i128, 1i128);
+    let mut steps = 0;
     while r1 != 0 {
         let q = r0.div_euclid(r1);
         (r0, r1) = (r1, r0 - q * r1);
         (s0, s1) = (s1, s0 - q * s1);
         (t0, t1) = (t1, t0 - q * t1);
+        steps += 1;
     }
     if r0 < 0 {
-        (-r0, -s0, -t0)
+        (-r0, -s0, -t0, steps)
     } else {
-        (r0, s0, t0)
+        (r0, s0, t0, steps)
     }
 }
 
@@ -54,21 +64,30 @@ pub fn powmod(mut b: u64, mut e: u64, p: u64) -> u64 {
 }
 
 pub fn invmod(a: u64, p: u64) -> u64 {
+    invmod_units(a, p).0
+}
+
+/// [`invmod`] and its ModArith units: one per quotient step of the
+/// extended Euclid, plus one for the call (the reduction of a).
+#[inline]
+pub fn invmod_units(a: u64, p: u64) -> (u64, u64) {
     // extended Euclid on (a mod p, p), tracking the coefficient of a only
     let (mut r0, mut r1) = (p, a % p);
     let (mut s0, mut s1) = (0i64, 1i64);
     if p < 1 << 62 {
+        let mut units = 1;
         while r1 != 0 {
             let q = r0 / r1;
             (r0, r1) = (r1, r0 - q * r1);
             (s0, s1) = (s1, s0 - q as i64 * s1);
+            units += 1;
         }
         debug_assert_eq!(r0, 1);
-        return s0.rem_euclid(p as i64) as u64;
+        return (s0.rem_euclid(p as i64) as u64, units);
     }
-    let (g, x, _) = xgcd(a as i128, p as i128);
+    let (g, x, _, steps) = xgcd_steps(a as i128, p as i128);
     debug_assert_eq!(g, 1);
-    x.rem_euclid(p as i128) as u64
+    (x.rem_euclid(p as i128) as u64, steps + 1)
 }
 
 /// a mod p for a signed 128-bit a.

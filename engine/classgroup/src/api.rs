@@ -473,7 +473,11 @@ pub fn hermite_cyclic(m: &ZMat) -> Option<ZMat> {
         return None;
     }
     let a = sagebrush_arith::zmat::ZMat::from_rows(m.to_vec());
+    // (Units: the copies in and out as Move; zmat counts the rest)
+    let mut acc = sagebrush_arith::cost::Local::new();
+    acc.n(sagebrush_arith::cost::Family::Move, m.iter().map(|r| sagebrush_arith::zmat::copy_units(r)).sum());
     let h = sagebrush_arith::zmat::hermite_cyclic(&a)?;
+    acc.n(sagebrush_arith::cost::Family::Move, (0..n).map(|i| sagebrush_arith::zmat::copy_units(h.row(i))).sum());
     Some((0..n).map(|i| h.row(i).to_vec()).collect())
 }
 
@@ -485,27 +489,45 @@ pub fn hermite_cyclic(m: &ZMat) -> Option<ZMat> {
 /// (Domich, Kannan and Trotter, "Hermite normal form computation using
 /// modulo determinant arithmetic", Math. Oper. Res. 12 (1987)).  Its rows are then reduced above each pivot into [0, pivot),
 /// the normalization of `zlin::hnf`: the Hermite form is unique.
+///
+/// Units (`cost::tally`): the conversion to words as Move; det_crt and
+/// hnf_mod count themselves; the reduction above the diagonal, per pivot
+/// after its work and flushed at its check: a quotient per entry
+/// (`bigdiv_units`), and for a nonzero one the row copied (Move) and its
+/// products (`bigmul_units`; a product's accumulation into its row is part
+/// of its units, as in zmat).
 pub fn hermite_modular(m: &ZMat) -> Option<ZMat> {
+    use sagebrush_arith::cost::{bigdiv_units, bigmul_units, Family, Local};
+    use sagebrush_arith::zmat::{copy_units, limbs};
     let n = m.len();
     if n == 0 || m.iter().any(|r| r.len() != n) {
         return None;
     }
     let rows: Vec<Vec<i64>> = m.iter().map(|r| r.iter().map(num_traits::ToPrimitive::to_i64).collect::<Option<Vec<i64>>>()).collect::<Option<Vec<_>>>()?;
+    let mut acc = Local::new();
+    acc.n(Family::Move, (n * n) as u64);
     let d = crate::linalg::det_crt(&rows).abs();
     if d.is_zero() {
         return None;
     }
     let mut w = crate::linalg::hnf_mod(&rows, n, &d);
     for i in 0..n {
+        acc.flush();
         sagebrush_interrupt::check();
         let p = w[i][i].clone();
+        let lp = limbs(&p);
+        let row = copy_units(&w[i][i..]);
+        acc.n(Family::Move, lp as u64);
         for k in 0..i {
             let q = w[k][i].div_floor(&p);
+            acc.add(bigdiv_units(limbs(&w[k][i]), lp));
             if !q.is_zero() {
                 let wi = w[i].clone();
                 for (x, y) in w[k].iter_mut().zip(&wi).skip(i) {
                     *x -= &q * y;
                 }
+                acc.n(Family::Move, copy_units(&wi));
+                acc.add(bigmul_units(limbs(&q), usize::try_from(row).unwrap_or(usize::MAX)));
             }
         }
     }
