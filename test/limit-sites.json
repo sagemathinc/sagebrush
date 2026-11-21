@@ -13716,7 +13716,7 @@
    }
   },
   "owner": "python (@sagebrush-python)",
-  "reason": "64-bit CPython's own bound for bytes(n), PY_SSIZE_T_MAX (2**63 - 1) less a bytes object's header, refused with its OverflowError and message; not a cap of ours"
+  "reason": "a memory guard on bytes(n)'s count, on the bytes-count-bound route with every refusal in toBytes: past PY_SSIZE_T_MAX (2**63 - 1) less a bytes object's 33-byte header, an OverflowError, the same limit, exception and message as 64-bit CPython's own; not a cap of ours"
  },
  "src/runtime/zlib.ts ::  :: import { ARRAY_LIMITS } from \"./numpy\"; #0": {
   "class": "2",
