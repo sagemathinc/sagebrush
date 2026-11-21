@@ -232,6 +232,8 @@ fn dif<W: NttWord>(a: &mut [W], t: &Table<W>) {
         for (((l, h), w), wp) in lo.chunks_mut(BLOCK).zip(hi.chunks_mut(BLOCK)).zip(w.chunks(BLOCK)).zip(wp.chunks(BLOCK)) {
             sagebrush_interrupt::check_coarse();
             dif_layer(l, h, w, wp, t.p);
+            // (counted as done, chunk by chunk between the polls)
+            tally(l.len() as u64, 0, 0);
         }
         dif(lo, t);
         dif(hi, t);
@@ -245,6 +247,8 @@ fn dif<W: NttWord>(a: &mut [W], t: &Table<W>) {
         }
         m /= 2;
     }
+    // (no poll inside a block: its (n/2) log n butterflies, once done)
+    tally((n / 2) as u64 * u64::from(n.trailing_zeros()), 0, 0);
 }
 
 fn dit<W: NttWord>(a: &mut [W], t: &Table<W>) {
@@ -261,6 +265,7 @@ fn dit<W: NttWord>(a: &mut [W], t: &Table<W>) {
         for (((l, h), w), wp) in lo.chunks_mut(BLOCK).zip(hi.chunks_mut(BLOCK)).zip(w.chunks(BLOCK)).zip(wp.chunks(BLOCK)) {
             sagebrush_interrupt::check_coarse();
             dit_layer(l, h, w, wp, t.p);
+            tally(l.len() as u64, 0, 0);
         }
         return;
     }
@@ -272,6 +277,7 @@ fn dit<W: NttWord>(a: &mut [W], t: &Table<W>) {
         }
         m *= 2;
     }
+    tally((n / 2) as u64 * u64::from(n.trailing_zeros()), 0, 0);
 }
 
 pub(crate) fn conv_table<W: NttWord>(a: &[W], b: &[W], t: &Table<W>) -> Vec<W> {
@@ -281,22 +287,17 @@ pub(crate) fn conv_table<W: NttWord>(a: &[W], b: &[W], t: &Table<W>) -> Vec<W> {
     let n = 1usize << log;
     let p = t.p;
     let square = std::ptr::eq(a, b);
-    {
-        // (the exact work below: one or two loads of n zero-filled words and
-        // their inputs reduced; two or three transforms of (n/2) log n
-        // butterflies; n pointwise products; len final reductions)
-        let (nn, lg) = (n as u64, u64::from(log));
-        let transforms = if square { 2 } else { 3 };
-        let loads = if square { 1 } else { 2 };
-        let inputs = (a.len() + if square { 0 } else { b.len() }) as u64;
-        tally(transforms * (nn / 2) * lg + nn, inputs + len as u64, loads * nn);
-    }
+    // (the units are counted as each stage is done, never ahead of it: a
+    // load's n zero-filled words and its inputs reduced; each transform's
+    // (n/2) log n butterflies, in dif and dit; the n pointwise products;
+    // the len final reductions)
     let load = |x: &[W]| {
         count((n + x.len()) as u64);
         let mut f = vec![W::default(); n];
         for (d, &s) in f.iter_mut().zip(x) {
             *d = W::reduce(s, t.modulus);
         }
+        tally(0, x.len() as u64, n as u64);
         f
     };
     sagebrush_interrupt::check_coarse();
@@ -320,6 +321,7 @@ pub(crate) fn conv_table<W: NttWord>(a: &[W], b: &[W], t: &Table<W>) -> Vec<W> {
         let y = if y0 >= p { y0 - p } else { y0 };
         fa[i] = W::pointwise(x, y, ninv, ninvp, p, t.modulus);
     }
+    tally(n as u64, 0, 0);
     sagebrush_interrupt::check_coarse();
     dit(&mut fa, t);
     sagebrush_interrupt::check_coarse();
@@ -334,6 +336,7 @@ pub(crate) fn conv_table<W: NttWord>(a: &[W], b: &[W], t: &Table<W>) -> Vec<W> {
             *x = *x - p;
         }
     }
+    tally(0, len as u64, 0);
     fa
 }
 
@@ -349,19 +352,16 @@ pub(crate) fn conv_table_cyclic<W: NttWord>(a: &[W], b: &[W], t: &Table<W>) -> V
     let n = 1usize << t.log;
     assert!(len <= n + 1);
     let p = t.p;
-    {
-        // (as conv_table: two loads, three transforms, n pointwise
-        // products, min(len, n) final reductions, and the fold's product)
-        let (nn, lg) = (n as u64, u64::from(t.log));
-        let fold = u64::from(len == n + 1);
-        tally(3 * (nn / 2) * lg + nn, (a.len() + b.len() + len.min(n)) as u64 + fold, 2 * nn);
-    }
+    // (counted as conv_table, stage by stage as done: two loads, three
+    // transforms, n pointwise products, min(len, n) final reductions, and
+    // the fold's product)
     let load = |x: &[W]| {
         count((n + x.len()) as u64);
         let mut f = vec![W::default(); n];
         for (d, &s) in f.iter_mut().zip(x) {
             *d = W::reduce(s, t.modulus);
         }
+        tally(0, x.len() as u64, n as u64);
         f
     };
     sagebrush_interrupt::check_coarse();
@@ -379,6 +379,7 @@ pub(crate) fn conv_table_cyclic<W: NttWord>(a: &[W], b: &[W], t: &Table<W>) -> V
         let y = if fb[i] >= p { fb[i] - p } else { fb[i] };
         fa[i] = W::pointwise(x, y, ninv, ninvp, p, t.modulus);
     }
+    tally(n as u64, 0, 0);
     drop(fb);
     sagebrush_interrupt::check_coarse();
     dit(&mut fa, t);
@@ -399,7 +400,9 @@ pub(crate) fn conv_table_cyclic<W: NttWord>(a: &[W], b: &[W], t: &Table<W>) -> V
         // (index 0 holds c_0 + c_n, c_n = a_last b_last: take it off)
         let top = W::mul_mod(W::reduce(a[a.len() - 1], t.modulus), W::reduce(b[b.len() - 1], t.modulus), t.modulus);
         fa[0] = if fa[0] >= top { fa[0] - top } else { fa[0] + p - top };
+        tally(0, 1, 0);
     }
+    tally(0, kept as u64, 0);
     fa
 }
 

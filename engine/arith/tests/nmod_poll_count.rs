@@ -59,6 +59,9 @@ fn metering_polls_stop_at_least_as_often() {
     let lu = a.lu().unwrap();
     let v = poly(200, 11, &m);
     let mut rows = rows;
+    // (the boundary: 39 per row over 1688 rows crosses 2^16 once, though
+    // the exact multiply-adds, 64350, do not)
+    rows.push(("mul 39x1650 schoolbook (boundary)", coarse_checks(|| drop(np::mul(&poly(39, 3, &m), &poly(1650, 4, &m), &m)))));
     rows.extend(vec![
         ("mul 200x200 200x10", coarse_checks(|| drop(a.mul(&b)))),
         ("mul 120x120 big p", coarse_checks(|| drop(ab.mul(&ab)))),
@@ -92,17 +95,51 @@ fn metering_polls_stop_at_least_as_often() {
         hooks::reset();
         sagebrush_interrupt::clear();
         assert!(r.is_err(), "the Stop ended the call");
-        assert!(meter.used() > 0, "the work before the Stop is charged");
         assert_eq!(meter.units().total(), Some(meter.used()));
         meter
     };
     let pm = np::PolyModulus::new(&poly(301, 7, &m), &m);
-    stopped(100, &|| drop(pm.powmod(&[0, 1], &[65537])));
-    // the schoolbook product's one poll comes after the row that reaches
-    // 2^16 multiply-adds (rows of at most 39): exactly those are charged
+    assert!(stopped(100, &|| drop(pm.powmod(&[0, 1], &[65537]))).used() > 0, "the work before the Stop is charged");
+    // the schoolbook product polls with its weight from before metering,
+    // min(la, lb) = 39 per output row, at the start of row 1680 (39 * 1681 >=
+    // 2^16): the units charged are exactly the multiply-adds of rows
+    // 0..1680, never the product's whole la * lb
     let (x, y) = (poly(39, 3, &m), poly(2000, 4, &m));
     let u = stopped(1, &|| drop(np::mul(&x, &y, &m))).units();
-    assert!((1 << 16..(1 << 16) + 39).contains(&u.get(Family::MulSchool)), "{:?}", u);
+    let rows_done = (0..1680usize).map(|r| (r.min(38) - r.saturating_sub(1999) + 1) as u64).sum::<u64>();
+    assert_eq!(u.get(Family::MulSchool), rows_done, "{:?}", u);
+    assert_eq!(rows_done, 64779);
+    // the NTT: each stage is charged once done, never ahead.  A product of
+    // 300 by 200 (one prime, 512 points): a Stop at the first check
+    // charges nothing; one at the third, after a's load and transform and
+    // b's load, charges exactly those
+    let (x, y) = (poly(300, 5, &m), poly(200, 6, &m));
+    drop(np::mul(&x, &y, &m)); // (the table, built outside the regions)
+    let mut whole = Meter::accounting(u64::MAX);
+    metered(&mut whole, || drop(np::mul(&x, &y, &m)));
+    let first = stopped(1, &|| drop(np::mul(&x, &y, &m)));
+    assert_eq!(first.units().get(Family::MulNtt), 0, "{:?}", first.units());
+    assert_eq!(first.units().get(Family::Move), 0);
+    let u = stopped(3, &|| drop(np::mul(&x, &y, &m))).units();
+    assert_eq!((u.get(Family::MulNtt), u.get(Family::Move), u.get(Family::ModArith)), (256 * 9, 2 * 512, 300 + 200), "{:?}", u);
+    // and at every check, the charge is part of the whole call's
+    let mut k = 1;
+    loop {
+        let mut meter = Meter::accounting(u64::MAX);
+        hooks::reset();
+        hooks::arm_after(k);
+        let r = sagebrush_interrupt::catch(|| metered(&mut meter, || drop(np::mul(&x, &y, &m))));
+        hooks::reset();
+        sagebrush_interrupt::clear();
+        if r.is_ok() {
+            assert_eq!(meter.units(), whole.units());
+            break;
+        }
+        for (got, all) in meter.units().0.iter().zip(whole.units().0) {
+            assert!(*got <= all, "check {}: {:?} of {:?}", k, meter.units(), whole.units());
+        }
+        k += 1;
+    }
     // nmod_mat: a Stop in the middle of an elimination charges the work
     // before it, part of the whole
     let mut full = Meter::accounting(u64::MAX);
@@ -113,12 +150,13 @@ fn metering_polls_stop_at_least_as_often() {
 
 // The counts before metering (nmod_poly and nmod_mat at track/math
 // aba5e297, the same calls run there).
-const BEFORE: [(&str, u64); 17] = [
+const BEFORE: [(&str, u64); 18] = [
     ("mul 39x2000 schoolbook", 1),
     ("divrem 3000/50 classical", 2),
     ("divrem 3000/50 classical, p = 2^61 - 1", 2),
     ("gcd 900,800 Euclid", 13),
     ("powmod 65537 mod deg 300", 243),
+    ("mul 39x1650 schoolbook (boundary)", 1),
     ("mul 200x200 200x10", 6),
     ("mul 120x120 big p", 24),
     ("mul_vec 200", 0),

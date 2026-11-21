@@ -117,15 +117,78 @@ fn batch(m: &Modulus) -> usize {
     }
 }
 
+/// mul_classical's Stop poll and unit count.  The poll keeps its weight
+/// from before metering, min(la, lb) per output row (a poll at least that
+/// often); the units are the exact multiply-adds of the rows completed,
+/// from their closed form, charged at each poll and at the end (also when
+/// a Stop unwinds: only the rows done), never ahead of the work.
+struct SchoolRows {
+    since: u64,
+    next: u64,
+    w: u64,
+    la: u64,
+    lb: u64,
+    credited: u64,
+    complete: bool,
+}
+
+impl SchoolRows {
+    fn new(la: usize, lb: usize) -> SchoolRows {
+        let w = la.min(lb) as u64;
+        SchoolRows { since: 0, next: 1 << 16, w, la: la as u64, lb: lb as u64, credited: 0, complete: false }
+    }
+    /// The start of an output row (the poll, as before metering).
+    #[inline]
+    fn row(&mut self) {
+        self.since += self.w;
+        if self.since >= self.next {
+            self.next = self.since + (1 << 16);
+            // (the rows before this one are done)
+            self.credit(self.since / self.w - 1);
+            sagebrush_interrupt::check_coarse();
+            publish_progress();
+        }
+    }
+    /// The multiply-adds of output rows 0..rows: row r has
+    /// min(r, la - 1) - max(0, r - (lb - 1)) + 1 of them.
+    fn units(&self, rows: u64) -> u64 {
+        let (c, d) = (self.la - 1, self.lb - 1);
+        let upto_c = if rows <= c + 1 { rows * rows.saturating_sub(1) / 2 } else { c * (c + 1) / 2 + (rows - c - 1) * c };
+        let past_d = if rows <= d + 1 {
+            0
+        } else {
+            let k = rows - d - 1;
+            k * (k + 1) / 2
+        };
+        upto_c - past_d + rows
+    }
+    fn credit(&mut self, rows: u64) {
+        let u = self.units(rows);
+        if u > self.credited {
+            tally(Family::MulSchool, u - self.credited);
+            self.credited = u;
+        }
+    }
+}
+
+impl Drop for SchoolRows {
+    fn drop(&mut self) {
+        // all rows on completion; on an unwind (a Stop at a row's poll) the
+        // rows before that one
+        let started = self.since / self.w;
+        self.credit(if self.complete { started } else { started.saturating_sub(1) });
+    }
+}
+
 fn mul_classical(a: &[u64], b: &[u64], m: &Modulus) -> Poly {
     let len = a.len() + b.len() - 1;
     let k = batch(m);
     let mut c = Vec::with_capacity(len);
-    let mut poll = Poll::new();
+    let mut poll = SchoolRows::new(a.len(), b.len());
     for i in 0..len {
+        poll.row();
         let lo = i.saturating_sub(b.len() - 1);
         let hi = i.min(a.len() - 1);
-        poll.mul_adds(hi - lo + 1);
         let mut acc = 0u128;
         let mut cnt = 0;
         let mut r = 0u64;
@@ -140,6 +203,7 @@ fn mul_classical(a: &[u64], b: &[u64], m: &Modulus) -> Poly {
         }
         c.push(m.add(r, m.reduce_u128(acc)));
     }
+    poll.complete = true;
     c
 }
 

@@ -91,31 +91,34 @@ const PINNED: [(&str, [u64; FAMILIES]); 5] = [
     ("powmod 65537", units_of(&[(MulSchool, 7855), (MulNtt, 396032), (Move, 55654), (ModArith, 50818)])),
 ];
 
-/// Nested regions charge once: in release the inner region charges
-/// nothing and the outer one everything; in debug the nested call is
-/// flagged (a panic), and the outer region's Drop guard still charges the
-/// work done before it.
+/// Regions nest: each charges its own meter with the work in its own span
+/// (the inner call's meter is not left at zero), only the outermost
+/// publishes progress at the polls, and a nested region's progress cell is
+/// set at its end.
 #[test]
-fn nested_regions_charge_once() {
+fn nested_regions_charge_their_own_meters() {
     let m = Modulus::new(65537);
     let (a, b) = (poly(10, 5, &m), poly(20, 6, &m));
     let mut outer = acct();
     let mut inner = acct();
-    let r = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
-        metered(&mut outer, || {
-            drop(np::mul(&a, &b, &m));
-            metered(&mut inner, || drop(np::mul(&a, &b, &m)));
-        })
-    }));
-    if cfg!(debug_assertions) {
-        assert!(r.is_err(), "a nested region is flagged in debug");
-        assert_eq!(outer.units().get(Family::MulSchool), 200, "the work before the panic is charged");
-    } else {
-        assert!(r.is_ok());
-        assert_eq!(outer.units().get(Family::MulSchool), 400, "the outer region charges both products");
-    }
-    assert_eq!(inner.used(), 0, "the inner region charges nothing");
-    // and the region is released: a new one charges normally
+    let p = Progress::new();
+    metered(&mut outer, || {
+        drop(np::mul(&a, &b, &m));
+        metered_with(&mut inner, Some(p.clone()), || drop(np::mul(&a, &b, &m)));
+    });
+    assert_eq!(outer.units().get(Family::MulSchool), 400, "the outer region charges both products");
+    assert_eq!(inner.units().get(Family::MulSchool), 200, "the inner region charges its own");
+    assert_eq!(p.units().get(Family::MulSchool), 200);
+    // an entry point that opens its own region, called inside one
+    let g = poly(41, 9, &m);
+    let entry = |meter: &mut Meter| metered(meter, || drop(np::gcd(&g, &b, &m)));
+    let mut alone = acct();
+    entry(&mut alone);
+    let (mut caller, mut nested) = (acct(), acct());
+    metered(&mut caller, || entry(&mut nested));
+    assert_eq!(nested.units(), alone.units(), "a nested call's meter gets its whole span");
+    assert_eq!(caller.units(), alone.units(), "the outer meter counts the work once, not inner + work");
+    // the region is released: a new one charges normally
     let mut again = acct();
     metered(&mut again, || drop(np::mul(&a, &b, &m)));
     assert_eq!(again.units().get(Family::MulSchool), 200);
@@ -245,6 +248,13 @@ fn bigint_helpers_pinned() {
     assert_eq!(only(bigeuclid_units(4, 4), Family::Gcd), 8);
     assert_eq!(only(bigmul_units(usize::MAX, usize::MAX), Family::MulSchool), u64::MAX);
     assert_eq!(only(bigeuclid_units(usize::MAX, 2), Family::Gcd), u64::MAX);
+    // the extremes: saturated, never a panic (a zero divisor length counts
+    // as one limb)
+    assert_eq!(only(bigdiv_units(usize::MAX, 0), Family::Div), u64::MAX);
+    assert_eq!(only(bigeuclid_units(usize::MAX, 0), Family::Gcd), u64::MAX);
+    assert_eq!(only(bigdiv_units(0, 0), Family::Div), 1);
+    assert_eq!(only(bigeuclid_units(0, 0), Family::Gcd), 1);
+    assert_eq!(only(bigmul_units(usize::MAX, 0), Family::MulSchool), 0);
     // through a region, charged to the meter
     let mut meter = acct();
     metered(&mut meter, || {
