@@ -181,4 +181,14 @@ fn a_stop_charges_only_the_work_before_it() {
     }
     want[Family::MulSchool as usize] = mul;
     assert_eq!(got, want, "the small Smith form stopped at pivot 1: pivot 0's pass");
+
+    // the divisibility scan counts the tests it makes: diag(2, 1, 1) modulo
+    // 12.  Pivot 0's first pass has nothing to eliminate; gcd(2, 12) takes
+    // one quotient step; the scan's first test (a_11 = 1 by 2) fails, so one
+    // test; then row 1 is added to row 0, 3 additions (ModArith).  The second
+    // check opens the next pass.
+    let got = stopped_at_second_check(|| smith::small_smith_route(&z(&[&[2, 0, 0], &[0, 1, 0], &[0, 0, 1]]), &BigInt::from(12)));
+    let mut want = [0; FAMILIES];
+    want[Family::ModArith as usize] = euclid_steps(12, 2) + 1 + 3;
+    assert_eq!(got, want, "the small Smith form's divisibility scan: the tests made only");
 }

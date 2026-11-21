@@ -309,7 +309,8 @@ fn outputs_are_pinned() {
 /// The small Smith form of route 2's relations: d_1 | .. | d_k | delta, V
 /// unimodular with V V^-1 = I, L V in D Z^k for the generators and delta
 /// Z^k, the invariants those of the classical elimination of [rel; delta
-/// I], and the transforms within the proved bound; word and big delta.
+/// I], and the transforms within the proved bound (asserted here, in
+/// release builds too, up to k = 8); word and big delta.
 #[test]
 fn the_small_smith_form_is_exact_and_bounded() {
     let mut s: u64 = 0x2545f4914f6cdd1d;
@@ -327,7 +328,7 @@ fn the_small_smith_form_is_exact_and_bounded() {
         (BigInt::from((1u64 << 61) - 1) << 70usize) * BigInt::from(45),
     ];
     for delta in &deltas {
-        for k in 1..=6usize {
+        for k in 1..=8usize {
             for _ in 0..6 {
                 let mut rel = ZMat::zero(k, k);
                 for x in rel.d.iter_mut() {
@@ -369,4 +370,35 @@ fn the_small_smith_form_is_exact_and_bounded() {
             }
         }
     }
+}
+
+/// The exact transform's growth guard: on this lattice (found by a search
+/// over 120,000 random ones, the only such) the elimination's own exact
+/// transform passes the proved bound, so its tracking is dropped and the
+/// construction is returned, valid and within the bound.  (Without the
+/// guard the exact pair would be kept to the end and lose on size.)
+#[test]
+fn the_exact_transform_is_dropped_past_the_bound() {
+    let delta = BigInt::from((1u64 << 61) - 2);
+    let rel = ZMat::from_rows(
+        [
+            ["51039702996356152", "312", "44696181706988778"],
+            ["584", "888", "534702549680384832"],
+            ["2305843009213693945", "604", "2305843009213693901"],
+        ]
+        .iter()
+        .map(|r| r.iter().map(|x| x.parse::<BigInt>().unwrap()).collect())
+        .collect(),
+    );
+    let (d, v, vinv, pick) = small_smith_pick(&rel, &delta);
+    assert_eq!(pick, Pick::Dropped, "the exact transform passed the bound and was dropped");
+    assert_eq!(v.mul(&vinv).d, ZMat::identity(3).d);
+    let lv = rel.mul(&v);
+    for i in 0..3 {
+        for j in 0..3 {
+            assert!(lv.get(i, j).is_multiple_of(&d[j]));
+        }
+    }
+    let bound = 3 * 2 * (delta.bits() + 1) + 2 * 2 + 2;
+    assert!(v.max_bits() <= bound && vinv.max_bits() <= bound);
 }

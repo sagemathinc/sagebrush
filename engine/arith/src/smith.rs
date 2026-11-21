@@ -453,7 +453,7 @@ fn row2<R: Zn>(ring: &R, m: &mut [Vec<R::T>], r: usize, i: usize, b: &(R::T, R::
 /// So both V and V^-1 have at most 3 (k - 1) (bits(delta) + 1) + 2
 /// bits(k) + 2 bits, whatever the elimination's path: the classical
 /// elimination's transforms, which this replaces, had no such bound.
-fn small_smith<R: Zn>(ring: &R, rel: Vec<Vec<R::T>>, delta: &BigInt, acc: &mut Local) -> (Vec<BigInt>, ZMat, ZMat) {
+fn small_smith<R: Zn>(ring: &R, rel: Vec<Vec<R::T>>, delta: &BigInt, acc: &mut Local) -> (Vec<BigInt>, ZMat, ZMat, Pick) {
     let k = rel.len();
     let one = ring.residue(&BigInt::one());
     let zero = ring.residue(&BigInt::zero());
@@ -541,8 +541,17 @@ fn small_smith<R: Zn>(ring: &R, rel: Vec<Vec<R::T>>, delta: &BigInt, acc: &mut L
             // divisibility: gcd(a_tt, delta) must divide the rest (else a
             // row added to row t lowers that gcd on the next pass)
             let g = ring.gcd_e(&a[t][t], &mut steps);
-            let bad = (t + 1..k).find(|&i| (t + 1..k).any(|j| !ring.divides(&g, &a[i][j])));
-            ops = ops.saturating_add(((k - t - 1) * (k - t - 1)) as u64);
+            // (one unit per test made: the scan stops at the first failure)
+            let mut bad = None;
+            'scan: for i in t + 1..k {
+                for j in t + 1..k {
+                    ops = ops.saturating_add(1);
+                    if !ring.divides(&g, &a[i][j]) {
+                        bad = Some(i);
+                        break 'scan;
+                    }
+                }
+            }
             match bad {
                 Some(i) => {
                     let ai = a[i].clone();
@@ -566,18 +575,39 @@ fn small_smith<R: Zn>(ring: &R, rel: Vec<Vec<R::T>>, delta: &BigInt, acc: &mut L
     // (the outputs' sizes: V's columns c V_2 and W's rows B = D V^-1)
     let dk = d.last().map_or(0, |x| x.bits());
     let size = |a: &ZMat, b: &ZMat| (a.max_bits() + delta.bits()).max(b.max_bits() + dk);
-    let (v, vinv) = match ex {
-        Some((ve, vie)) if size(&ve, &vie) <= size(&v, &vinv) => (ve, vie),
-        _ => (v, vinv),
+    let (v, vinv, pick) = match ex {
+        Some((ve, vie)) if size(&ve, &vie) <= size(&v, &vinv) => (ve, vie, Pick::Exact),
+        Some(_) => (v, vinv, Pick::Construction),
+        None => (v, vinv, Pick::Dropped),
     };
     debug_assert!(v.max_bits() <= growth && vinv.max_bits() <= growth, "the transforms' proved bound");
-    (d, v, vinv)
+    (d, v, vinv, pick)
+}
+
+/// Which transform [`small_smith`] returned (for its tests).
+#[doc(hidden)]
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum Pick {
+    /// the elimination's own exact transform (no larger)
+    Exact,
+    /// the construction (smaller than the exact transform)
+    Construction,
+    /// the construction, the exact transform having passed the bound
+    /// and been dropped (its tracking stopped there)
+    Dropped,
 }
 
 /// [`small_smith`] with delta's ring, from k generators of the relations
 /// (any integers; reduced modulo delta), for its tests: (d, V, V^-1).
 #[doc(hidden)]
 pub fn small_smith_route(rel: &ZMat, delta: &BigInt) -> (Vec<BigInt>, ZMat, ZMat) {
+    let (d, v, vinv, _) = small_smith_pick(rel, delta);
+    (d, v, vinv)
+}
+
+/// [`small_smith_route`] and which transform it returned.
+#[doc(hidden)]
+pub fn small_smith_pick(rel: &ZMat, delta: &BigInt) -> (Vec<BigInt>, ZMat, ZMat, Pick) {
     assert!(rel.rows == rel.cols && rel.rows > 0 && delta > &BigInt::one(), "k x k generators and delta > 1");
     let mut acc = Local::new();
     match delta.to_u64() {
@@ -1210,7 +1240,7 @@ fn trailing<R: Zn>(ring: &R, nm: &ZMat, delta: &BigInt, d: &BigInt, k: usize, ac
     acc.n(Family::Div, div);
     acc.n(Family::ModArith, wops);
     acc.flush();
-    let (db, v2, v2inv) = small_smith(ring, rel, delta, acc);
+    let (db, v2, v2inv, _) = small_smith(ring, rel, delta, acc);
     // B = D_B V_2^-1
     let mut mul = 0u64;
     let b: Vec<Vec<BigInt>> = (0..k)

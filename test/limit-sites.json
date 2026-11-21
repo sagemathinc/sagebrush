@@ -1806,6 +1806,11 @@
   "owner": "engine arithmetic (exact linear algebra)",
   "reason": "test code: the Smith form with transforms' route, floor and metering tests (route thresholds, the floor's saturation at the extremes, an accounting meter with no upper bound); refuses nothing"
  },
+ "engine/arith/src/smith/tests.rs :: the_exact_transform_is_dropped_past_the_bound :: assert!(v.max_bits() <= bound && vinv.max_bits() <= bound); #0": {
+  "class": "none",
+  "owner": "engine arithmetic (exact linear algebra)",
+  "reason": "test code: route 2's small Smith form, its transforms' sizes checked against the proved bound (entry sizes, not caps)"
+ },
  "engine/arith/src/smith/tests.rs :: the_floor_is_checked :: assert_eq!(floor_bytes(usize::MAX, 1), None); #0": {
   "class": "none",
   "owner": "engine arithmetic (exact linear algebra)",
