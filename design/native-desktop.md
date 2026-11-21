@@ -258,7 +258,7 @@ r4's A-vs-B timings stay withdrawn: the PyPI wheel came from a different commit.
 | Windows Authenticode | An Azure Artifact Signing account that William holds. The certificate's private key stays in Microsoft's hardware and is never exported, so no copy of it exists anywhere else. | A short-lived token from GitHub's OIDC, accepted only for jobs in a GitHub environment of its own (`sagebrush-signing-windows`); GitHub stores no Windows secret at all |
 | The update signing key (Tauri's updater) | Not made yet. William makes the keypair on his own computer. The private key and its password become secrets of their own environment (`sagebrush-signing-update`), and the public key is committed in the app's configuration. | Only the release job that signs update metadata |
 
-- Each key has its own environment, so the jobs that need one key never receive the others.
+- Each signing system has its own environment: Apple, Windows and updates. A job that signs for one never receives another's credentials. Within Apple, the two jobs that name `sagebrush-signing` (`mac-release` and `signing-check`) receive both Apple credential sets, the certificate and the notary key, because each uses both.
 - The test-only keypair of §4.4 is none of these and is never stored.
 
 ### 6.2 What keeps the keys away from pull requests
@@ -267,9 +267,17 @@ Today this rests on each job's `if:`.
 - `mac-release` runs only for a push of an `app-v*` tag, or for a dispatch from master that asks to sign. It never runs on a pull request; `scripts/test-app-release-guard.mjs` pins the cases.
 - `signing-check` (`.github/workflows/signing-check.yml`), run by hand, checks the secrets: it signs only throwaway probes (a copied executable and a throwaway installer package), and prints PASS/FAIL checks and non-secret counts, never secret values. It is dispatch-only, but nothing checks which branch it runs from.
 
-A job's `if:` is in a workflow file, and any branch pushed to this repository can carry a changed one. A run from that branch (a push, or a pull request from it) could then name the environment and receive its secrets. So the controls that count are the environment's own settings, which only a repository admin can change. Each signing environment (§6.1) must have:
+A job's `if:` is in a workflow file, and any branch or tag pushed to this repository can carry a changed one. A run from that branch (a push, or a pull request from it) could then name the environment and receive its secrets. So the controls that count are the environment's own settings, which only a repository admin can change.
 
-- **Deployment branches and tags: "Selected branches and tags"**, with only the branch `master` and the tag pattern `app-v*`. A job from any other branch or tag can't use the environment's secrets, whatever its `if:` says.
+**These settings are proposed, not yet in force.** `sagebrush-signing` as it stands (read through GitHub's API on Nov 21, 2026):
+- its deployment rules admit the branch `master` and the tag pattern `v*`, not `app-v*`;
+- it has no required reviewer;
+- administrators may bypass it;
+- the repository has no tag ruleset.
+
+So today a changed workflow on a pushed `v*` tag would be admitted with no approval. Until William applies the settings below and they are checked again through the API, only the jobs' `if:` lines stand in the way. Each signing environment (§6.1) must have:
+
+- **Deployment branches and tags: "Selected branches and tags"**, with only the branch `master` and the tag pattern `app-v*` (today's `v*` rule is removed). A job from any other branch or tag can't use the environment's secrets, whatever its `if:` says.
 - **Required reviewers:** William. Every job that uses the environment waits until he approves that run.
   - "Prevent self-review" stays off: William is the one reviewer, and he also pushes the tags.
 - **"Allow administrators to bypass configured protection rules": off**, so no one, an admin included, can skip the approval.
@@ -281,7 +289,7 @@ And the repository must have:
 - **No `pull_request_target` workflows:** they run with the base repository's secrets on a pull request's event. There are none today; a new one needs William's OK.
 - **`signing-check` from master only:** its job gets `if: github.ref == 'refs/heads/master'`, so it is dispatch-only from master, like `mac-release`'s dispatch. The environment's branch limit enforces the same thing.
 
-Changing these settings needs an admin, so William applies them. They are listed exactly in the proposed settings that come with this revision.
+Changing these settings needs an admin, so William applies them. They are listed exactly in the proposed settings that come with this revision. Once they are applied and the API shows them in force, this section's "proposed" note goes.
 
 ### 6.3 A signed build kept as an artifact is public
 
