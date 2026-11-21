@@ -14,6 +14,7 @@
 //   POST /api/share/check              {blobs: [{sha256, size}]} -> {missing}
 //   PUT  /api/share/blob/<sha256>      the bytes (R2 checks the hash)
 //   POST /api/share/collections/<id>/versions   {title, license, files} -> {version}
+//   GET  /api/share/collections/<id>/versions   yours: its versions, oldest first -> {versions: [{hash, created, size, title}]}
 //   GET  /api/share/c/<id>[?at=hash]   a collection's (latest) manifest
 //   DELETE /api/share/collections/<id> delete a collection and its files
 //   POST /api/share/delete-everything  {confirm: "delete"}: all of yours
@@ -66,6 +67,9 @@ export interface R2 {
 export interface ShareEnv {
   SHARE_DB?: D1;
   SHARE_BUCKET?: R2;
+  /** "on" once migration 0016 (budget_claims) is applied here: a holder (the log mirror) may then write its claim on the
+   *  storage budget (claimsWritable).  Counting claims doesn't depend on it: wherever the table exists, they count */
+  BUDGET_CLAIMS?: string;
   /** e.g. https://cocalc.ai; with no origin, sign-in is off */
   COCALC_ORIGIN?: string;
   COCALC_CLIENT_SECRET?: string;
@@ -118,6 +122,8 @@ export const MAX_PUT = 95 * 1024 * 1024;
 export const MAX_FILES = 10000;
 export const MAX_COLLECTIONS = 1000;
 export const MAX_VERSIONS = 1000;
+// (a version's byline, as its publisher typed it: at most this many characters)
+export const MAX_AUTHOR = 200;
 const DEV_LIMITS: Limits = { tier: "dev", storage_bytes: 1 << 30, max_file_bytes: MAX_PUT, private_links: false };
 const HEX64 = /^[0-9a-f]{64}$/;
 
@@ -182,6 +188,8 @@ function cookies(req: Request): Map<string, string> {
   return m;
 }
 const SESSION = "__Host-sb_session";
+/** A session token as this site makes it: 32 random bytes, base64url without padding (43 characters). */
+export const SESSION_TOKEN = /^[A-Za-z0-9_-]{43}$/;
 const OAUTH = "__Host-sb_oauth";
 const cookie = (name: string, value: string, maxAge: number) => `${name}=${value}; Path=/; Secure; HttpOnly; SameSite=Lax; Max-Age=${maxAge}`;
 
@@ -195,7 +203,9 @@ export function returnPath(p: string | null, origin: string): string {
   try {
     const u = new URL(p, origin);
     // (and checked again as normalized: /%2e%2e//host is //host, another site, SEC-SHARE-1)
-    const out = u.pathname + u.search + u.hash;
+    // (a quick link's cells, a z= or c= fragment, are never kept, as signInUrl drops them in the page: not in the state
+    // cookie, nor in the redirect back)
+    const out = u.pathname + u.search + (/[zc]=[\w-]/.test(u.hash) ? "" : u.hash);
     return u.origin === origin && out.startsWith("/") && !out.startsWith("//") ? out : "/";
   } catch {
     return "/";
@@ -234,7 +244,9 @@ async function account(req: Request, env: ShareEnv): Promise<Who | null> {
  */
 export async function sessionOf(req: Request, env: ShareEnv): Promise<{ id: string; session: string; expires: number } | null> {
   const t = cookies(req).get(SESSION);
-  if (!t || !env.SHARE_DB) return null;
+  // (a token not of the shape this site makes is none, before any hash or D1 read: the sync service's failure
+  // limit counts it with no database work)
+  if (!t || !SESSION_TOKEN.test(t) || !env.SHARE_DB) return null;
   const session = await sha256Hex(t);
   const row = await env.SHARE_DB.prepare("SELECT s.account_id, s.expires FROM sessions s JOIN accounts a ON a.account_id = s.account_id WHERE s.token_hash = ?1 AND s.expires > ?2 AND a.deleting IS NULL").bind(session, now()).first<{ account_id: string; expires: number }>();
   return row ? { id: row.account_id, session, expires: row.expires } : null;
@@ -336,6 +348,29 @@ async function limits(env: ShareEnv, who: Who): Promise<Limits | null> {
 export const SHARING_USED = `(SELECT COALESCE(SUM(size), 0) FROM holdings WHERE account_id = ?1)
   + (SELECT COALESCE(SUM(manifest_bytes), 0) FROM versions WHERE owner = ?1)
   + (SELECT COALESCE(SUM(bytes), 0) FROM reservations WHERE account_id = ?1 AND expires > ?2)`;
+/**
+ * Whether other holders' claims on the budget can exist here: whether the database has budget_claims (migration
+ * 0016).  One way: asked of the database until it says yes, never again after (a table is never dropped).  So a
+ * database without 0016 is never read for claims, and once it has the table every check counts every claim in it,
+ * whatever the bindings say: turning BUDGET_CLAIMS off (which only lets a holder such as the log mirror write) can
+ * never leave a claim uncounted.
+ */
+let claimsTable = false;
+export async function budgetClaims(env: { SHARE_DB?: D1 }): Promise<boolean> {
+  if (claimsTable) return true;
+  if (!env.SHARE_DB) return false;
+  const found = !!(await env.SHARE_DB.prepare("SELECT 1 AS x FROM sqlite_master WHERE type = 'table' AND name = 'budget_claims'").first());
+  // (only ever to true: an older probe's "no" that answers after a newer "yes" changes nothing)
+  if (found) claimsTable = true;
+  return claimsTable;
+}
+/** Whether a holder may write a claim here: BUDGET_CLAIMS "on" (a deployment's word that 0016 is applied), and the table there. */
+export async function claimsWritable(env: { SHARE_DB?: D1; BUDGET_CLAIMS?: string }): Promise<boolean> {
+  return env.BUDGET_CLAIMS === "on" && (await budgetClaims(env));
+}
+/** SHARING_USED, and every other holder's claim wherever there can be any (budgetClaims). */
+export const sharingUsed = async (env: { SHARE_DB?: D1 }) =>
+  SHARING_USED + ((await budgetClaims(env)) ? `\n  + (SELECT COALESCE(SUM(bytes), 0) FROM budget_claims WHERE account_id = ?1)` : "");
 /** sharing's clock, in seconds (reservations' expiry) */
 export const nowSeconds = () => now();
 // (the bytes sync has claimed of account ?8's budget (its hash): every byte of it may be in use, so
@@ -343,11 +378,12 @@ export const nowSeconds = () => now();
 // and refuses, §6.1)
 const CLAIM = ` + (SELECT COALESCE(SUM(claim_bytes), 0) FROM sync_accounts WHERE account_hash = ?8 AND state <> 'purged')`;
 // (without sync, ?8 is still named, adding nothing, so every caller binds the same parameters)
-const used = (env: ShareEnv) => SHARING_USED + (env.SYNC_ACCOUNT ? CLAIM : " + 0 * COALESCE(length(?8), 0)");
+const used = async (env: ShareEnv) => (await sharingUsed(env)) + (env.SYNC_ACCOUNT ? CLAIM : " + 0 * COALESCE(length(?8), 0)");
 
 /** What the account's budget has in use: sharing's bytes, and sync's claim where sync is on. */
 async function usage(env: ShareEnv, id: string): Promise<number> {
-  const r = await env.SHARE_DB!.prepare(`SELECT ${used(env)} AS n`).bind(id, now(), null, null, null, null, null, await accountHash(id)).first<{ n: number }>();
+  const u = await used(env);
+  const r = await env.SHARE_DB!.prepare(`SELECT ${u} AS n`).bind(id, now(), null, null, null, null, null, await accountHash(id)).first<{ n: number }>();
   return r?.n ?? 0;
 }
 
@@ -409,7 +445,8 @@ async function reserve(env: ShareEnv, who: Who, bytes: number, limit: number, ke
   const t = now();
   const h = await accountHash(who.id);
   try {
-    const r = (await db.batch([...live(db, who), db.prepare(`INSERT INTO reservations (id, account_id, bytes, key, expires) SELECT ?3, ?1, ?4, ?5, ?6 WHERE ${used(env)} + ?4 <= ?7`).bind(who.id, t, rid, bytes, key, t + RESERVE_SECONDS, limit, h)])) as D1Result<unknown>[];
+    const u = await used(env);
+    const r = (await db.batch([...live(db, who), db.prepare(`INSERT INTO reservations (id, account_id, bytes, key, expires) SELECT ?3, ?1, ?4, ?5, ?6 WHERE ${u} + ?4 <= ?7`).bind(who.id, t, rid, bytes, key, t + RESERVE_SECONDS, limit, h)])) as D1Result<unknown>[];
     if (r[2]?.meta?.changes === 1) return { id: rid, expires: t + RESERVE_SECONDS };
   } catch {
     return null;
@@ -439,7 +476,7 @@ async function check(req: Request, env: ShareEnv, who: Who): Promise<Response> {
   const blobs = body?.blobs;
   if (!Array.isArray(blobs) || blobs.length > MAX_FILES || !blobs.every((b) => b && HEX64.test(b.sha256) && Number.isSafeInteger(b.size) && b.size >= 0)) return err(400, "bad request");
   const lim = await limits(env, who);
-  if (!lim) return err(403, "uploads need a CoCalc account in good standing");
+  if (!lim) return err(403, "uploads need an account in good standing");
   const max = Math.min(lim.max_file_bytes, MAX_PUT);
   const big = blobs.find((b) => b.size > max);
   if (big) return json({ error: "file too large", sha256: big.sha256, max_file_bytes: max }, 413);
@@ -465,7 +502,7 @@ async function putBlob(req: Request, env: ShareEnv, who: Who, sha: string): Prom
   if (!cl || !/^\d{1,12}$/.test(cl)) return err(411, "content-length required");
   const size = Number(cl);
   const lim = await limits(env, who);
-  if (!lim) return err(403, "uploads need a CoCalc account in good standing");
+  if (!lim) return err(403, "uploads need an account in good standing");
   if (size > Math.min(lim.max_file_bytes, MAX_PUT)) return err(413, "file too large");
   const db = env.SHARE_DB!;
   if (await db.prepare("SELECT 1 AS x FROM holdings WHERE account_id = ?1 AND sha256 = ?2").bind(id, sha).first()) return json({ ok: true });
@@ -498,7 +535,7 @@ async function putBlob(req: Request, env: ShareEnv, who: Who, sha: string): Prom
     ]);
   } catch {
     await abandon(env, key, rid);
-    return err(403, "uploads need a CoCalc account in good standing");
+    return err(403, "uploads need an account in good standing");
   }
   return json({ ok: true });
 }
@@ -507,7 +544,7 @@ async function createCollection(env: ShareEnv, who: Who, body: { title?: unknown
   const id = who.id;
   const title = typeof body?.title === "string" ? body.title.trim().slice(0, 200) : "";
   if (!title) return err(400, "a title is required");
-  if (!(await limits(env, who))) return err(403, "uploads need a CoCalc account in good standing");
+  if (!(await limits(env, who))) return err(403, "uploads need an account in good standing");
   const cid = newId();
   const t = now();
   const db = env.SHARE_DB!;
@@ -561,7 +598,7 @@ async function replay(env: ShareEnv, owner: string, attemptHash: string, digest:
   return json({ version: r.version, collection: r.collection, ...shareUrls(r.collection, r.version) }, 200);
 }
 
-type CommitBody = { title?: unknown; license?: unknown; files?: unknown };
+type CommitBody = { title?: unknown; license?: unknown; author?: unknown; files?: unknown };
 
 /** A version: of collection `cidIn`, or (cidIn null) of a new one, made by `attempt`. */
 async function commitVersion(env: ShareEnv, who: Who, body: CommitBody | null, cidIn: string | null, attempt: string | null): Promise<Response> {
@@ -582,18 +619,27 @@ async function commitVersion(env: ShareEnv, who: Who, body: CommitBody | null, c
   }
   const title = typeof body?.title === "string" && body.title.trim() ? body.title.trim().slice(0, 200) : col!.title;
   if (body?.license !== undefined && !(typeof body.license === "string" && LICENSE.test(body.license))) return err(400, "license: an SPDX identifier");
+  // (who it's by, as the publisher typed it, shown on the page as "by <it>": any names, or none (empty), never taken
+  // from an account and never checked against one; plain text on one line, at most MAX_AUTHOR characters)
+  let author: string | undefined;
+  if (body?.author !== undefined && body.author !== null) {
+    if (typeof body.author !== "string" || /[\u0000-\u001f\u007f]/.test(body.author)) return err(400, "author: plain text on one line");
+    const a = body.author.trim();
+    if (a.length > MAX_AUTHOR) return err(400, `author: at most ${MAX_AUTHOR} characters`);
+    author = a || undefined;
+  }
   const listed = files.map((f: { path: string; sha256: string; size: number }) => ({ path: f.path, sha256: f.sha256, size: f.size })).sort((a, b) => (a.path < b.path ? -1 : 1));
   // (a first upload's receipt: its attempt, and what it asked for, exactly the manifest's own fields)
   let attemptHash: string | null = null, digest: string | null = null;
   if (attempt !== null) {
     attemptHash = await sha256Hex("sagebrush-attempt\n" + attempt);
-    digest = await sha256Hex(canonical({ title, license: body?.license ?? null, files: listed }));
+    digest = await sha256Hex(canonical({ title, license: body?.license ?? null, author, files: listed }));
     const again = await replay(env, id, attemptHash, digest);
     if (again) return again;
   }
   // (after the receipt: a retry's answer needs no limits, and what follows may wait on CoCalc's)
   const lim = await limits(env, who);
-  if (!lim) return err(403, "uploads need a CoCalc account in good standing");
+  if (!lim) return err(403, "uploads need an account in good standing");
   // every file must be one this account has uploaded, at its stated size
   // (a held file's size can't change: it is the size of bytes with that hash)
   const shas = [...new Set(files.map((f: { sha256: string }) => f.sha256))];
@@ -613,6 +659,7 @@ async function commitVersion(env: ShareEnv, who: Who, body: CommitBody | null, c
     created: new Date(t * 1000).toISOString(),
     title,
     license: body?.license,
+    author,
     parent: col?.latest ?? undefined,
     files: listed,
   };
@@ -713,6 +760,15 @@ async function getCollection(env: ShareEnv, cid: string, at: string | null): Pro
   const o = await env.SHARE_BUCKET!.get(v.results[0].manifest_key);
   if (!o) return err(404, "no such version");
   return json({ id: cid, version: v.results[0].hash, latest: col.latest, files_origin: env.FILES_ORIGIN ?? null, manifest: JSON.parse(await new Response(o.body).text()) });
+}
+
+/** one of the account's collections, its versions oldest first (the n-th is version n); 404 for a collection that isn't theirs */
+async function versionsOf(env: ShareEnv, id: string, cid: string): Promise<Response> {
+  const db = env.SHARE_DB!;
+  const c = await db.prepare("SELECT owner, latest FROM collections WHERE id = ?1").bind(cid).first<{ owner: string; latest: string | null }>();
+  if (!c || c.owner !== id) return err(404, "no such collection");
+  const r = await db.prepare("SELECT hash, created, size, title FROM versions WHERE collection = ?1 ORDER BY created, rowid").bind(cid).all();
+  return json({ latest: c.latest, versions: r.results });
 }
 
 async function mine(env: ShareEnv, id: string): Promise<Response> {
@@ -830,6 +886,8 @@ export async function drain(env: ShareEnv, budget = 50): Promise<void> {
         db.prepare("DELETE FROM accounts WHERE account_id = ?1 AND EXISTS (SELECT 1 FROM tombstones WHERE account_hash = ?2)").bind(r.account_id, h),
         db.prepare("UPDATE accounts SET deleting = NULL WHERE account_id = ?1 AND NOT EXISTS (SELECT 1 FROM tombstones WHERE account_hash = ?2)").bind(r.account_id, h),
         db.prepare("DELETE FROM limits_cache WHERE account_id = ?1").bind(r.account_id),
+        // (other holders' claims on the budget, last: each holder's own data went before this batch)
+        ...((await budgetClaims(env)) ? [db.prepare("DELETE FROM budget_claims WHERE account_id = ?1").bind(r.account_id)] : []),
         db.prepare("UPDATE purges SET status = 'done', finished = ?2, account_id = NULL, lease = NULL WHERE account_hash = ?1 AND status <> 'done' AND kind <> 'collection'").bind(h, now()),
       ]);
     } catch {
@@ -1040,6 +1098,7 @@ async function route(req: Request, env: ShareEnv, ctx: Ctx): Promise<Response | 
   if (g && m === "PUT") return putBlob(req, env, who, g[1]);
   g = p.match(/^\/api\/share\/collections\/([a-z2-7]{12})\/versions$/);
   if (g && m === "POST") return commit(req, env, who, g[1]);
+  if (g && m === "GET") return versionsOf(env, id, g[1]);
   g = p.match(/^\/api\/share\/collections\/([a-z2-7]{12})$/);
   if (g && m === "DELETE") {
     const c = await env.SHARE_DB.prepare("SELECT owner FROM collections WHERE id = ?1").bind(g[1]).first<{ owner: string }>();

@@ -9,6 +9,7 @@ import { existsSync, mkdtempSync, readFileSync, rmSync, statSync, writeFileSync 
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { devtoolsPort } from "../test-port.mjs";
+import { deadline, waitFor, WAIT_MS } from "../test-deadline.mjs";
 
 const here = new URL(".", import.meta.url).pathname;
 export const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
@@ -154,7 +155,7 @@ export function where() {
   return `section "${place.section}", after check ${place.checks} ("${place.last.slice(0, 200)}"), DevTools call(s) in flight: ${calls.length ? calls.join("; ").slice(0, 600) : "none"}`;
 }
 // (each DevTools call's bound: no answer within it fails the call, naming it)
-const CDP_MS = 60_000;
+const CDP_MS = WAIT_MS;
 
 /** The runner's own bounds: `ms`, below the VM step's (its supervisor's SIGTERM, then SIGKILL 10 s later), and
  * SIGTERM/SIGINT/SIGHUP.  Either ends the run with one line, "FAIL: <label>: … during <where()>"; then every Chrome
@@ -232,7 +233,7 @@ export async function browser() {
   async function tab(name = "tab") {
     const t = await (await fetch(`http://127.0.0.1:${port}/json/new?about:blank`, { method: "PUT", signal: AbortSignal.timeout(CDP_MS) })).json();
     const ws = new WebSocket(t.webSocketDebuggerUrl);
-    await new Promise((ok, no) => { ws.onopen = ok; ws.onerror = () => no(new Error(`${name}: its DevTools connection didn't open`)); setTimeout(() => no(new Error(`${name}: its DevTools connection didn't open within ${CDP_MS / 1000} s`)), CDP_MS); });
+    await deadline("journal.tab", `${name}: DevTools WebSocket open`, () => new Promise((ok, no) => { ws.onopen = ok; ws.onerror = () => no(new Error(`${name}: its DevTools connection didn't open`)); }), CDP_MS);
     let n = 0;
     const waiting = new Map();
     ws.onclose = () => { for (const [, w] of waiting) w.no(new Error(`${name}: its DevTools connection closed during ${w.what}`)); waiting.clear(); };
@@ -244,7 +245,8 @@ export async function browser() {
     const send = (method, params = {}, ms = CDP_MS) => new Promise((ok, no) => {
       const id = ++n, c = ++callIds;
       const what = `${name} ${method}` + (params.expression ? ` ${J(params.expression.slice(0, 160))}` : params.url ? ` ${params.url}` : "");
-      const timer = setTimeout(() => { waiting.delete(id); place.calls.delete(c); no(new Error(`${what}: no answer within ${Math.round(ms / 1000)} s`)); }, ms);
+      const start = performance.now();
+      const timer = setTimeout(() => { waiting.delete(id); place.calls.delete(c); no(new Error(`journal.send(${what}) timed out after ${((performance.now() - start) / 1000).toFixed(3)} s`)); }, ms);
       const fin = (f) => (v) => { clearTimeout(timer); place.calls.delete(c); f(v); };
       place.calls.set(c, { what, t0: Date.now() });
       waiting.set(id, { ok: fin(ok), no: fin(no), what });
@@ -252,7 +254,7 @@ export async function browser() {
     });
     const ev = async (expression, ms = CDP_MS) => { const r = await send("Runtime.evaluate", { expression, awaitPromise: true, returnByValue: true }, ms); if (r?.exceptionDetails) throw new Error(J(r.exceptionDetails).slice(0, 800)); return r?.result?.value; };
     // (each poll bounded by what is left of `ms`, so until() itself keeps its bound)
-    const until = async (expr, ms = 15000) => { const t0 = Date.now(); while (Date.now() - t0 < ms) { if (await ev(expr, Math.max(1000, ms - (Date.now() - t0))).catch(() => false)) return true; await sleep(50); } return false; };
+    const until = (expr, ms = WAIT_MS) => waitFor("journal.until", `${name}: ${expr}`, (remaining) => ev(expr, remaining), ms);
     /** The tab as it is (for a failure's message): its URL, title, readiness, page errors and the start of its text. */
     const state = async () => {
       const s = await ev(`({ url: location.href, title: document.title, ready: document.readyState, text: (document.body?.innerText ?? "").slice(0, 300) })`, 5000).catch((e) => ({ unavailable: String(e?.message ?? e).slice(0, 200) }));

@@ -1,5 +1,5 @@
-"""Serve app/dist as the app serves it (app/src-tauri/src/lib.rs: the localhost
-plugin's on_request), for a test of the app's page in a browser:
+"""Serve app/dist as the app serves it (app/src-tauri/src/lib.rs: serve_page's
+headers), for a test of the app's page in a browser:
   python3 app/serve-app.py [--no-coi] [port]
 
 Every response: COOP/COEP, as the desktop app's (--no-coi: without them, as
@@ -34,6 +34,9 @@ class Handler(http.server.SimpleHTTPRequestHandler):
         if COI:
             self.send_header("Cross-Origin-Opener-Policy", "same-origin")
             self.send_header("Cross-Origin-Embedder-Policy", "require-corp")
+            # (lib.rs serve_page: an example's page in its sandboxed iframe loads KaTeX cross-origin)
+            if re.match(r"/(katex|examples)/", self.path):
+                self.send_header("Cross-Origin-Resource-Policy", "cross-origin")
         # (localhost, not the app's 127.0.0.1: the "other origin" of web/shell/test-panel-app.mjs's probes, served
         # as a permissive site elsewhere may be, readable from anywhere; so only the shell worker's policy refuses it)
         if self.headers.get("Host", "").split(":")[0] == "localhost":

@@ -15,7 +15,7 @@
 // the top of the files isn't shared: its folder would be all of them (@sagebrush's ruling, Nov 12).
 import { folderPlan, shareFolderUpload, chapterLink, linksText, goneChapters, type PlanEntry, type FolderShare } from "./folder";
 import { findSecret, secretName, secretWarning, SCANNED } from "./secrets";
-import { uploadCollection, AttemptError, shareStatus, signInUrl, type LazyFile } from "./upload";
+import { uploadCollection, AttemptError, shareStatus, signInUrl, AUTHOR_HINT, type LazyFile } from "./upload";
 import { texUses } from "./tex-uses";
 
 export interface ShareFolderHost {
@@ -53,9 +53,9 @@ export const TALK_SCOPE = "Shares this document and the files it uses, ticked be
 export const SHARE_OPEN = "Anyone with a link can open the share, run its code and edit its LaTeX in their browser, with no account. Nothing shared is listed by search engines.";
 export const SHARE_COPY = "The share is a copy: it stays as it is while you keep working here. Share again to publish your changes, at the same links.";
 /** Where sharing isn't (a preview, the CLI's page): what it is and where it works, never a dead end (William, Nov 12). */
-export const SHARE_NOSERVER = "Publishing a link needs Sagebrush's share service, which this site doesn't have. On sagebrush.space, sign in with CoCalc (or make an account) and share from there.";
+export const SHARE_NOSERVER = "Publishing a link needs Sagebrush's share service, which this site doesn't have. On sagebrush.space, sign in (or make an account) and share from there.";
 export const SHARE_SITE = "https://sagebrush.space";
-export const SHARE_SIGNIN = "Sharing needs a CoCalc account: sign in, or make one, and come back here.";
+export const SHARE_SIGNIN = "Sharing needs you to be signed in: sign in, or make an account, and come back here.";
 export const POLICIES = "https://cocalc.ai/policies";
 
 // (files read for secrets: text by name, each at most this many bytes; a larger one isn't read, and says so)
@@ -151,7 +151,7 @@ export async function openShareFolder(h: ShareFolderHost): Promise<void> {
   const s = await shareStatus();
   if (!s.enabled || !s.me) {
     status.textContent = s.enabled ? SHARE_SIGNIN : s.error ? "Couldn't reach the server to check your sign-in. Try again in a moment." : SHARE_NOSERVER;
-    if (s.enabled) body.append(el("p", { className: "note", textContent: SHARE_OPEN }), el("a", { className: "btn", href: signInUrl(location.pathname + location.search), textContent: "Sign in with CoCalc" }));
+    if (s.enabled) body.append(el("p", { className: "note", textContent: SHARE_OPEN }), el("a", { className: "btn", href: signInUrl(location.pathname + location.search), textContent: "Sign in" }));
     else if (!s.error) body.append(el("p", { className: "note", textContent: SHARE_OPEN }), el("a", { className: "btn", href: SHARE_SITE, target: "_blank", rel: "noopener", textContent: "Open sagebrush.space" }));
     // (and the share that needs no service: the files themselves, downloaded)
     if (h.zip && !s.error) {
@@ -197,6 +197,10 @@ export async function openShareFolder(h: ShareFolderHost): Promise<void> {
   for (const r of rows) if (maxFile !== undefined && (r.f.entry.size ?? 0) > maxFile) { r.box.checked = false; r.box.disabled = true; r.warn ||= `larger than the ${h.fmtSize(maxFile)} a shared file can be`; }
 
   const title = el("input", { type: "text", value: talk ? nameOf(talk.rel).replace(/\.tex$/i, "") : nameOf(h.folder.path), maxLength: 200 });
+  // (who it's by, as typed, shown on its page as "by …": any names, or none; for a share made before, its last
+  // version's, unless typed over first; never the account's name)
+  const author = el("input", { type: "text", maxLength: 200, placeholder: AUTHOR_HINT });
+  author.addEventListener("input", () => (author.dataset.typed = "1"), { once: true });
   const license = el("select");
   // (None given first, the default: what that means is CoCalc's policies, linked beside it)
   for (const [v, t] of [["", "None given"], ["CC-BY-4.0", "CC BY 4.0"], ["CC0-1.0", "CC0 (public domain)"], ["MIT", "MIT"], ["Apache-2.0", "Apache 2.0"]]) license.append(el("option", { value: v, textContent: t }));
@@ -236,8 +240,9 @@ export async function openShareFolder(h: ShareFolderHost): Promise<void> {
     ...(talk ? [el("p", { className: "note", textContent: TALK_SCOPE })] : []),
     el("p", { className: "note", textContent: (talk ? "Publishes a copy of this document and the files it uses, with a link to it. " : "Publishes a copy of the folder's contents, with a link to each notebook and LaTeX document in it. ") + SHARE_OPEN }),
     el("p", { className: "note", textContent: SHARE_COPY }),
-    ...(me.name || me.email ? [el("p", { className: "note", textContent: `Signed in to CoCalc as ${me.name || me.email}.` })] : []),
+    ...(me.name || me.email ? [el("p", { className: "note", textContent: `Signed in as ${me.name || me.email}.` })] : []),
     el("label", { className: "f" }, "Title ", title),
+    el("label", { className: "f" }, "Author(s) ", author),
     el("label", { className: "f" }, "License ", license, el("a", { href: POLICIES, target: "_blank", rel: "noopener", textContent: "What “None given” means" })),
     list, notes, summary, el("div", {}, upload, " ", ...(h.zip ? [zipButton(ticked, zipSaid), " "] : []), progress), zipSaid, result,
   );
@@ -262,6 +267,13 @@ export async function openShareFolder(h: ShareFolderHost): Promise<void> {
       return null;
     }
   };
+  void (async () => {
+    const b = await h.getShare().catch(() => null);
+    if (!b?.share_id) return;
+    const r = await fetch(`/api/share/c/${encodeURIComponent(b.share_id)}`, { credentials: "same-origin" }).catch(() => null);
+    const was = r?.ok ? (await r.json().catch(() => null))?.manifest?.author : undefined;
+    if (typeof was === "string" && !author.dataset.typed) author.value = was;
+  })();
   upload.onclick = async () => {
     if (busy) return;
     busy = true;
@@ -277,7 +289,7 @@ export async function openShareFolder(h: ShareFolderHost): Promise<void> {
       const files: LazyFile[] = chosen.map((f) => f.notebook
         ? { path: f.rel, read: async () => new TextEncoder().encode(h.notebookText(await h.readNotebook(f.entry))) }
         : { path: f.rel, size: f.entry.size, read: () => h.readFile(f.entry) });
-      const r = await shareFolderUpload({ title: title.value.trim() || nameOf(h.folder.path), license: license.value, files }, deps, (d, t) => { progress.textContent = t ? `Uploading… ${Math.round((100 * d) / t)}%` : "Uploading…"; });
+      const r = await shareFolderUpload({ title: title.value.trim() || nameOf(h.folder.path), license: license.value, author: author.value, files }, deps, (d, t) => { progress.textContent = t ? `Uploading… ${Math.round((100 * d) / t)}%` : "Uploading…"; });
       const chapters = chosen.filter(chapter).map((f) => f.rel).sort(firstTalk);
       progress.textContent = r.again ? "A new version is up, at the same links." : "Shared.";
       const copyAll = el("button", { type: "button", textContent: "Copy all links" });

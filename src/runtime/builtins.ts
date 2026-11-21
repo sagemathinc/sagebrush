@@ -15,16 +15,27 @@ const isInt = Number.isInteger;
 
 // ------------------------------------------------------------------ stdout
 
+// The clock the streams' 100 ms rule reads: a host that records the program's clock reads for replay
+// (web/replay-env.ts) gives its real one, so that when output is flushed is never one of the program's reads.
+let streamNow: () => number = () => Date.now();
+export function setStreamClock(now: () => number): void {
+  streamNow = now;
+}
+
 export class StdStream {
   buf: string[] = [];
   size = 0;
+  // (when it was last flushed: a write more than 100 ms later goes out at once, as the Jupyter kernel's output does,
+  // so a long run shows what it prints as it goes)
+  last = 0;
   constructor(public fd: number, public name: string) {}
   write(s: string) {
     this.buf.push(s);
     this.size += s.length;
-    if (this.size > 1 << 16 || this.fd === 2) this.flush();
+    if (this.size > 1 << 16 || this.fd === 2 || streamNow() - this.last > 100) this.flush();
   }
   flush() {
+    this.last = streamNow();
     if (this.fd === 2) stdout.flush();
     if (this.buf.length) {
       const data = this.buf.join("");

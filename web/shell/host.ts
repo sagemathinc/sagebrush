@@ -148,6 +148,20 @@ const why = (err: unknown) => String((err as Error)?.message ?? err).slice(0, 20
 
 /** One run's port for a Terminal command (ShellRun.commandPort). */
 export type CommandPort = ReturnType<ShellRun["commandPort"]>;
+/**
+ * A Terminal prompt's surface, the panel's (term-prompt design r1 §3, r1a, r1b): what the person typed is answered by
+ * `line`, the prompt's output drawn by `out` (resolved once the panel's writer has taken it), the language's
+ * interrupt (Ctrl+C) bound by the bridge when its worker is ready.  Given by the panel with its own line only; the host
+ * hands it to that run's first command, once, and only for the person.
+ */
+export type PromptSurface = {
+  bounds: { sourceBytes: number; lines: number; inBytes: number; reserve: number };
+  begin(mode: string): void;
+  out(segs: { fd: 1 | 2; text: string }[]): Promise<void>;
+  line(args: { kind: "prompt" | "input"; cont: boolean; prompt: string; bytes: number; lines: number }): Promise<{ line: string } | { eof: true } | { refused: "too-long" } | { interrupt: true }>;
+  bindInterrupt(f: (() => void) | null): void;
+  end(): void;
+};
 /** A host's Terminal commands (web/shell/term-bridge.ts): each command run, start to end, and answered. */
 export type Bridge = { run(port: CommandPort, r: CmdRequest): Promise<CmdAnswer> };
 
@@ -215,8 +229,11 @@ export class ShellRun {
   }
 
   /** One invocation of the run: `{ SCRIPT\n}` (D8 point 1) in `cwd`, classified by this host. */
-  async invoke(script: string, opts: { stdin?: string; cwd?: string } = {}): Promise<HostOutcome> {
+  /** the panel's prompt surface for this run's first command, once (the person's own line: exec's `prompt`) */
+  private prompt: PromptSurface | null = null;
+  async invoke(script: string, opts: { stdin?: string; cwd?: string; prompt?: PromptSurface } = {}): Promise<HostOutcome> {
     const n = ++this.invocation;
+    this.prompt = opts.prompt && this.principal.kind === "person" && n === 1 ? opts.prompt : null;
     if (this.terminal) return this.typed();
     const L = this.limits;
     // (bash.invocations: charged at admission, before dispatch, a refused one included; never given back)
@@ -711,9 +728,22 @@ export class ShellRun {
    */
   commandPort(n: number) {
     const live = () => !this.terminal && n === this.invocation;
+    // (the prompt surface goes to the first command asking, once: never to a later command of the run)
+    const prompt = this.prompt;
+    this.prompt = null;
     return {
       live,
       principal: this.principal.kind,
+      prompt,
+      /** a prompt's output, charged to the run's ledger as it is drawn; false past output_bytes (the limit, latched) */
+      charge: (bytes: number): boolean => {
+        this.used.output_bytes += bytes;
+        if (this.used.output_bytes > this.limits.output_bytes!) {
+          this.limitHit("output_bytes");
+          return false;
+        }
+        return true;
+      },
       size: () => this.host.size(),
       turn: <T,>(p: string, fn: () => Promise<T>) => this.turn(n, p, fn),
       canon: (p: unknown) => this.canon(p),
@@ -1130,7 +1160,7 @@ export class ShellHost {
     }
   }
   /** One run of one invocation; `signal` is Stop. */
-  async exec(principal: Principal, script: string, opts: { stdin?: string; cwd?: string; signal?: AbortSignal } = {}): Promise<HostOutcome> {
+  async exec(principal: Principal, script: string, opts: { stdin?: string; cwd?: string; signal?: AbortSignal; prompt?: PromptSurface } = {}): Promise<HostOutcome> {
     const r = this.run(principal);
     const onAbort = () => r.stop();
     if (opts.signal?.aborted) r.stop();

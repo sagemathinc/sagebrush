@@ -458,9 +458,9 @@ class Pairing:
     def _admitted(self):
         """_admit, with self.lock held."""
         if self.conn is None:
-            raise NotConnected("no Sagebrush page is paired with this agent: call workspace_connect for a code, and enter it in the page (Chrome or Firefox)")
+            raise NotConnected("no Sagebrush page is paired with this agent")
         if self.grant is None:
-            raise NotConnected("the page is paired but the person has not granted access (or revoked it): they choose what this agent may do in the page")
+            raise NotConnected("not granted: the page is paired but the person has not allowed access (or revoked it)")
         return self.conn, self.generation
 
     def request(self, method, params, timeout=60.0):

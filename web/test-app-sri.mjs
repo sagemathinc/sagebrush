@@ -34,11 +34,12 @@ async function site() {
   try {
     const serve = startServe(() => (server = spawn("python3", [join(here, "serve.py"), "0"], { stdio: ["ignore", "pipe", "pipe"] })));
     const upstream = await serve.port;
-    const s = { asked: [], tamper: false };
+    const s = { asked: [], served: [], tamper: false };
     front = createServer((req, res) => {
       const path = new URL(req.url, "http://x").pathname;
       s.asked.push(path);
       const up = request({ host: "127.0.0.1", port: upstream, path: req.url, method: req.method, headers: { ...req.headers, "if-none-match": "", "if-modified-since": "" } }, (r) => {
+        if (path === "/sagebrush-app.js") s.served.push({ status: r.statusCode, tampered: false, length: 0, whole: 0 });
         if (path !== "/sagebrush-app.js" || r.statusCode !== 200) { res.writeHead(r.statusCode, r.headers); return r.pipe(res); }
         const parts = [];
         r.on("data", (d) => parts.push(d));
@@ -46,6 +47,11 @@ async function site() {
           const body = Buffer.concat(parts);
           // (its last space a tab: the script still parses, so only its integrity can refuse it)
           if (s.tamper) body[body.lastIndexOf(0x20)] = 0x09;
+          // (what this server answered for the script: its status, whether its bytes were changed, the length it sent
+          // (counted where it is sent) and the length of the build's own file (the change keeps the length))
+          const rec = Object.assign(s.served.at(-1), { tampered: s.tamper, whole: Buffer.concat(parts).length });
+          const end = res.end.bind(res);
+          res.end = (b) => { rec.length = b?.length ?? 0; return end(b); };
           const h = { ...r.headers, "cache-control": "no-store", "content-length": String(body.length) };
           delete h.etag; delete h["last-modified"];
           res.writeHead(200, h);
@@ -75,11 +81,16 @@ async function visit(withSW) {
   for (let i = 0; i < 300; i++) { try { targets = await (await fetch(`http://127.0.0.1:${cdpPort}/json`)).json(); break; } catch { await sleep(100); } }
   const ws = new WebSocket(targets.find((t) => t.type === "page").webSocketDebuggerUrl);
   await new Promise((r) => (ws.onopen = r));
-  let n = 0; const waiting = new Map(), logs = [];
+  let n = 0; const waiting = new Map(), logs = [], refused = [];
   ws.onmessage = (ev) => {
     const m = JSON.parse(ev.data);
     if (m.id && waiting.has(m.id)) { waiting.get(m.id)(m.result ?? m.error); waiting.delete(m.id); }
-    if (m.method === "Log.entryAdded") logs.push(m.params.entry.text);
+    if (m.method === "Log.entryAdded") {
+      logs.push(m.params.entry.text);
+      // (a load of the app's script that failed, by its URL: with the service worker, the worker's own fetch of the
+      // page's request (its integrity with it) may refuse the bytes first, and the page then sees the load fail)
+      if (/\/sagebrush-app\.js(\?|$)/.test(m.params.entry.url ?? "") && /Failed to load resource/.test(m.params.entry.text)) refused.push(m.params.entry.url);
+    }
     if (m.method === "Runtime.consoleAPICalled") logs.push(m.params.args.map((a) => a.value ?? a.description).join(" "));
   };
   const send = (method, params = {}) => new Promise((r) => { const id = ++n; waiting.set(id, r); ws.send(JSON.stringify({ id, method, params })); });
@@ -87,7 +98,7 @@ async function visit(withSW) {
   const until = async (expr, ms = 30000) => { for (let i = 0; i < ms / 100; i++) { if (await ev(expr)) return true; await sleep(100); } return false; };
   const ready = () => until("document.querySelector('#status')?.textContent.startsWith('ready')", 60000);
   const name = withSW ? "service worker, its caches emptied:" : "no service worker:";
-  const load = async () => { logs.length = 0; s.asked.length = 0; await send("Network.clearBrowserCache"); await send("Page.reload", { ignoreCache: false }); await sleep(1000); };
+  const load = async () => { logs.length = 0; refused.length = 0; s.asked.length = 0; s.served.length = 0; await send("Network.clearBrowserCache"); await send("Page.reload", { ignoreCache: false }); await sleep(1000); };
   try {
     await send("Page.enable");
     await send("Runtime.enable");
@@ -117,7 +128,13 @@ async function visit(withSW) {
     await sleep(3000);
     ok(s.asked.includes("/sagebrush-app.js"), `${name} (the script was asked for, and answered with other bytes)`);
     if (withSW) ok(await ev("navigator.serviceWorker.controller !== null"), `${name} (the service worker still controls the page)`);
-    ok((await ev("window.__appError === true")) && logs.some((t) => /integrity/i.test(t)), `${name} other bytes: the browser refuses the script, naming its integrity: ` + JSON.stringify(logs.filter((t) => /integrity/i.test(t)).map((t) => t.slice(0, 160))));
+    // (refused: the script's error event, and either the page's integrity message or, with the service worker, the
+    // load of that script failing (the worker's fetch refused the bytes); the rows below hold either way)
+    // (and a failed load counts only if this server answered that script 200 with the changed bytes, whole: a 404, an
+    // empty or short answer from it never counts)
+    const servedTampered = s.served.some((x) => x.status === 200 && x.tampered && x.length > 0 && x.length === x.whole);
+    const named = logs.some((t) => /integrity/i.test(t)), failed = withSW && refused.length > 0 && servedTampered;
+    ok((await ev("window.__appError === true")) && (named || failed), `${name} other bytes: the browser refuses the script, ${named ? "naming its integrity" : "its load failing"}: ` + JSON.stringify({ integrity: logs.filter((t) => /integrity/i.test(t)).map((t) => t.slice(0, 160)), failed: refused, served: s.served }));
     const started = await ev(`({ app: typeof window.sagebrush !== "undefined", cells: document.querySelectorAll(".cell").length, ready: !!document.querySelector("#status")?.textContent.startsWith("ready") })`);
     const fetched = s.asked.filter((p) => p !== "/sagebrush-app.js" && (/^\/sagebrush-[\w-]+\.js$/.test(p) || p.startsWith("/lib/")));
     ok(started && !started.app && started.cells === 0 && !started.ready && fetched.length === 0, `${name} ...and nothing of the app starts: no window.sagebrush, no cell, no worker or chunk fetched: ` + JSON.stringify({ ...started, fetched }));

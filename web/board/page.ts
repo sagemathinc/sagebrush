@@ -79,13 +79,16 @@ import { langOf } from "../code/langs";
 import { codeUrl } from "../code/url";
 import { openGallery } from "../examples/open";
 import { mountBrowser } from "../workspace/browser";
+import { mountAccount } from "../workspace/account";
 import { mountAgentPairing } from "../workspace/agent-ui";
+import { pairLink } from "../workspace/pair-link";
+import { handOver } from "../workspace/pair-handoff";
 import * as gitBranches from "../workspace/git-branch";
 import { openReviewDialog, showWhenBranches } from "../workspace/review/open-dialog";
 import { SyncOwner } from "../workspace/sync-owner";
 import { DocSync } from "../workspace/doc-sync";
 import { answerPresence, TAB } from "../shell/presence";
-import { docSyncOrigin, docSyncAllowed, followDocSync, docSyncChannel } from "../workspace/doc-sync-switch";
+import { docSyncAllowed, followDocSync, docSyncChannel } from "../workspace/doc-sync-switch";
 // (the frame other sites embed and exported boards: built with __SB_NO_SYNC__, so no sync owner, and with it no
 // client, is in that copy of the page: web/build.ts)
 declare const __SB_NO_SYNC__: boolean | undefined;
@@ -101,6 +104,19 @@ import { modeOf, modeKey, rememberMode } from "../doc-mode";
 registerJournalWriter("boards");
 
 const q = new URLSearchParams(location.search);
+
+// (an agent's pairing link to the board page with nothing else in the address, as sagebrush-mcp prints it: the person
+// pairs on the notebook page instead, which opens what the agent makes in place, so the pairing stays (decided Nov 18
+// 2026). A link with a board in it (?doc=, ?agents, …) or a hash, a board saved as a file and the desktop app are as before)
+{
+  const link = pairLink();
+  // (only the bare form, nothing else in the address, its hash included; the code handed over within this tab, never in
+  //  the next URL (pair-handoff.ts); if it can't be stored, the person pairs here, as before)
+  if (link && !location.search && !location.hash && !embedded() && !(window as any).__TAURI__ && handOver(link)) {
+    location.replace(new URL("../", import.meta.url).href);
+    await new Promise(() => {});
+  }
+}
 
 // Boards made here (New board, Duplicate, and the notebook's New whiteboard
 // and Whiteboard) are each a board of their own, `?doc=local:ID`, kept in
@@ -210,6 +226,29 @@ const ws: Workspace | null = embedded() || q.has("items") || q.has("strokes") ||
   return null;
 }), 5000, null);
 if (!ws) wsAbandoned = true;
+// (the desktop app: its files are on disk, this workspace their copy for this launch; web/workspace/disk-mirror.ts:
+// a quit or a page left waits for them to be on disk, and a disk that can't be read leaves nothing to edit here)
+const desktopApp = !!ws && !!(window as any).__TAURI__ && (window as any).__SB_DESKTOP_APP__ === true;
+const desktopModule = () => import(new URL("../sagebrush-desktop.js", location.href).href);
+let diskMirror: any = null;
+if (desktopApp) {
+  const invoke = (c: string, a?: any, o?: any) => (window as any).__TAURI__.core.invoke(c, a, o);
+  try { diskMirror = await (await desktopModule()).diskWorkspace(ws, invoke); } catch (e) {
+    console.warn("disk workspace:", e);
+    const shade = Object.assign(document.createElement("div"), { id: "sb-disk-blocked", role: "alertdialog" });
+    shade.style.cssText = "position:fixed;inset:0;z-index:2147483002;background:rgba(0,0,0,.45);display:flex;align-items:center;justify-content:center;font:15px system-ui,sans-serif";
+    const box = Object.assign(document.createElement("div"), { textContent: `Sagebrush couldn't open its folder of your files (${(e as Error)?.message ?? e}). Nothing you do now would be kept, so editing is off. Quit Sagebrush and open it again.` });
+    box.style.cssText = "background:#fff;color:#222;padding:16px 20px;border-radius:8px;max-width:32em";
+    shade.append(box);
+    document.body.append(shade);
+  }
+  void desktopModule().then((d) => d.drainOnQuit({ mirror: () => diskMirror, invoke, listen: (ev: string, f: () => void) => (window as any).__TAURI__.event.listen(ev, f), freeze: () => document.body.setAttribute("inert", ""), flushEditor: () => wsFlush() })).catch((e) => console.warn("quit:", e));
+}
+/** To `url`, once this page's changes are on disk (the desktop app; elsewhere at once). */
+async function leaveTo(url: string) {
+  if (diskMirror && !(await (await desktopModule()).beforeLeave(diskMirror, () => wsFlush()))) return;
+  location.assign(url);
+}
 // (a newer page upgraded the workspace: said, with Reload; and its files moved beside the index, a little at a time)
 if (ws) {
   ws.onClosed(() => showReloadNotice());
@@ -227,18 +266,19 @@ if (ws) {
   // (sync, step 5: the page's sync owner; it runs a client only while this browser's sync is on, for the account
   // signed in: nothing at all otherwise)
   if (!NO_SYNC) SyncOwner.of(ws).start();
-  // (DEV's switch for notebooks' contents (workspace/doc-sync-switch.ts): the account connection is whichever tab holds
+  // (the switch for notebooks' contents (workspace/doc-sync-switch.ts): the account connection is whichever tab holds
   // it, this one's too, so this page's carries notebooks once the notebook page turned the switch on (astra's DEVSW-1);
-  // behind the same gate, evaluated here on every load; on any other origin nothing is asked or started.  Boards' own
-  // contents never: DocSync carries only notebooks)
-  if (!NO_SYNC && docSyncOrigin(location.origin)) void docSyncHere(ws).catch((e) => console.warn("sync: notebooks on this page's connection:", e));
+  // behind the same gate, evaluated here on every load (DEV's or PROD's origin, or a self-hosted site whose own server
+  // states this origin).  Boards' own contents never: DocSync carries only notebooks)
+  if (!NO_SYNC) void docSyncHere(ws).catch((e) => console.warn("sync: notebooks on this page's connection:", e));
 }
 async function docSyncHere(w: Workspace) {
   const owner = SyncOwner.of(w);
   const allowed = await docSyncAllowed({ origin: location.origin, fetch: globalThis.fetch.bind(globalThis), clientRunning: () => owner.clientRunning() });
   if (!allowed) return;
   await followDocSync({
-    makeDocs: () => new DocSync(),
+    // (a document's changes stored from another device: its Files entry's last-modified time, here too)
+    makeDocs: () => new DocSync({ onPage: (p) => void ws?.touch(p.doc, p.at).catch(() => {}) }),
     makeChannel: () => (typeof BroadcastChannel === "function" ? new BroadcastChannel(docSyncChannel(w.ws.name)) : null),
     journalActive: () => w.journalActive(),
     setDocs: (docs) => owner.setDocs(docs),
@@ -674,7 +714,7 @@ function blockedBar(message: string) {
     const back = Object.assign(document.createElement("button"), { textContent: "Back to files" });
     back.onclick = () => {
       const files = document.querySelector<HTMLButtonElement>('[data-sbb="files"]');
-      if (!files) return location.assign("/");
+      if (!files) return void leaveTo("/");
       if (files.getAttribute("aria-pressed") !== "true") files.click();
       document.querySelector<HTMLElement>("#wssidebar .fsearch, #wssidebar")?.focus();
     };
@@ -873,7 +913,7 @@ function wsSave(id: string, d: BoardDoc, bridge?: string) {
  * read or wrote it: both kept.  This page's version becomes a board of its
  * own; only once that is written is its pending copy dropped; then the
  * board shows the other version, saying so (CORR-AA2-1). */
-const wsSubs = new Set<(d: BoardDoc, notice?: string) => void | Promise<void>>();
+const wsSubs = new Set<(d: BoardDoc, notice?: string, from?: { held?: true; fenced?: true }) => unknown>();
 async function wsConflict(w: Workspace, id: string, d: BoardDoc, header: string, epoch: number) {
   try {
     const title = safeTitle(d.title) + " (your changes, made while it changed elsewhere)";
@@ -897,10 +937,50 @@ async function wsConflict(w: Workspace, id: string, d: BoardDoc, header: string,
     wsRev = cur.rev;
     if (wsLatest.get(epoch) === d) wsLatest.delete(epoch);
     const notice = `**This board was changed elsewhere while you edited it.** Its version is shown; yours is kept as a board of its own, "${title}".`;
-    for (const f of wsSubs) await f(cur.content as BoardDoc, notice);
+    // (the other version's new and changed code waits for the person's Run, as any write made elsewhere)
+    for (const f of wsSubs) await f(cur.content as BoardDoc, notice, { held: true });
   } catch (e: any) {
     wsRefused = e instanceof Error ? e : new Error(String(e));
   }
+}
+/** This board written elsewhere (an agent paired with the notebook page, another tab of this browser): shown here at
+ * once, as a reload would show it; its new and changed code waits for the person's Run, whoever wrote it (write
+ * access isn't leave to run code, and a write doesn't say who made it). Read after this page's
+ * own save in flight (the same queue), so this page's own write is known by its revision and passed over; while a
+ * save of this page's waits, nothing: that save meets the write as a conflict, and both are kept (wsConflict). */
+let wsFollowing = false;
+function followWrites(w: Workspace, id: string) {
+  if (wsFollowing) return;
+  wsFollowing = true;
+  let timer: ReturnType<typeof setTimeout> | null = null;
+  w.watch((c) => {
+    if (!c.ops?.some((op) => op.kind === "board" && op.ref === id && op.op === "write")) return;
+    if (timer) clearTimeout(timer);
+    timer = setTimeout(() => {
+      timer = null;
+      wsWriting = wsWriting.then(() => adoptWrite(w, id)).catch((e) => console.warn("board: a write made elsewhere not shown:", e));
+    }, 100);
+  });
+}
+async function adoptWrite(w: Workspace, id: string) {
+  if (wsLatest.size || wsCopy) return;
+  let cur: { content: unknown; rev: number } | null;
+  if (journalOn && jstore) {
+    const rec = await jstore.load();
+    cur = rec ? { content: stripBoard(rec), rev: rec.rev } : null;
+  } else {
+    const path = await w.pathOf("board", id);
+    cur = path ? await w.read(path) : null;
+  }
+  if (!cur || cur.rev === wsRev || !isBoard(cur.content) || wsLatest.size) return;
+  // (shown first, fenced: an edit made here meanwhile (while its pictures were read) wins, and this page then keeps the
+  // revision it had, so that edit's save meets the write as a conflict and both are kept (wsConflict); only a version
+  // shown, with no save of this page's waiting, becomes the one this page writes over)
+  let shown = true;
+  for (const f of wsSubs) if ((await f(cur.content as BoardDoc, undefined, { held: true, fenced: true })) === false) shown = false;
+  if (!shown || wsLatest.size || wsCopy) return;
+  wsEpoch++;
+  wsRev = cur.rev;
 }
 /** The pending copy of `id` dropped, only if it still starts with `prefix` (its own). */
 function dropPending(id: string, prefix: string) {
@@ -1038,6 +1118,8 @@ async function leaveFor(url: string, what: string): Promise<boolean> {
 }
 async function go(url: string, what: string): Promise<boolean> {
   if (!(await settled(what))) return false;
+  // (the desktop app: and on disk)
+  if (diskMirror && !(await (await desktopModule()).beforeLeave(diskMirror))) return false;
   location.assign(url);
   return true;
 }
@@ -1153,7 +1235,7 @@ async function uploadToWorkspace(w: Workspace, files: File[], mode: string, fold
 // (a data file opened as a document: its converted copy, made beside it, opened; the original stays; why not, if not)
 async function openAsHere(w: Workspace, e: Entry, as: DocKind, mode: string): Promise<string | null> {
   // (a Jupytext MyST .md as a notebook: the notebook page reads it, which this page's bundle doesn't carry the reader for)
-  if (as === "notebook" && /\.md$/i.test(e.path)) { location.assign(asNotebook(e as { path: string; fid: string })); return null; }
+  if (as === "notebook" && /\.md$/i.test(e.path)) { void leaveTo(asNotebook(e as { path: string; fid: string })); return null; }
   try {
     const made = as === "board" ? await convertedAsBoard(w, e, mode) : await convertCopy(w, e, as, { maxBytes: LIMITS.maxBoardBytes, mode, said: (m) => carryNotice(m) });
     openEntry(made, "here");
@@ -1162,6 +1244,8 @@ async function openAsHere(w: Workspace, e: Entry, as: DocKind, mode: string): Pr
 }
 // (Download ▸ Everything (.zip)…: set by the Files sidebar below, which owns the file browser that exports)
 let exportAllHere: (() => void) | null = null;
+// (the Storage panel, from the account's menu: the files' own, opened, where this page has them)
+let storageHere: (() => void) | null = null;
 const host: BoardHost = {
   // (this browser's boards open in View, except one made here or last left in Edit: web/doc-mode.ts)
   mode: local ? { start: modeOf(modeKey("board", source.slice(6))) === "edit", toggled: (on) => rememberMode(modeKey("board", source.slice(6)), on ? "edit" : "view") } : undefined,
@@ -1207,6 +1291,8 @@ const host: BoardHost = {
           blockBoard(new Error(`${path}'s content isn't in this browser: boards don't sync yet`), why, "This board was made on another device. Boards don't sync yet.");
           return { doc: { ...blankBoard((entry as { mode?: string }).mode ?? "python"), title: splitExt(nameOf(path))[0] }, original: null, notice: why };
         }
+        // (written elsewhere from now on, an agent's write too: shown here, followWrites)
+        if (path) followWrites(ws, id);
         // (the board journal: its store's load first, then the pending copy ordered against what it settled)
         if (path && journalOn) return journalLoad(id, path, pend, notice);
         if (path) {
@@ -1298,7 +1384,7 @@ const host: BoardHost = {
     },
     // (a board of the workspace: its version from elsewhere, when this page's write met it: CORR-AA2-1)
     ...(local && ws ? {
-      subscribe(f: (d: BoardDoc, notice?: string) => void | Promise<void>) { wsSubs.add(f); return () => { wsSubs.delete(f); }; },
+      subscribe(f: (d: BoardDoc, notice?: string, from?: { held?: true; fenced?: true }) => unknown) { wsSubs.add(f); return () => { wsSubs.delete(f); }; },
       // (Edit not offered while the board can't be written here: blockBoard)
       editing(f: (s: { allowed: boolean; why?: string }) => void) { blockedSubs.add(f); f(wsBlocked ? { allowed: false, why: wsBlockedWhy } : { allowed: true }); return () => { blockedSubs.delete(f); }; },
     } : {}),
@@ -1516,6 +1602,12 @@ if (openAsFailed && host.store) {
   host.store.load = async () => { const r = await load0(); return r ? { ...r, notice: openAsFailed + (r.notice ? "\n\n" + r.notice : "") } : r; };
 }
 const mounted = mountBoard(document.getElementById("board")!, host);
+// the account, right of Share (../workspace/account.ts): Sign in, or your initial and its menu; the site's board page
+// only, not a board saved as a file; hidden for any other answer
+{
+  const slot = document.querySelector<HTMLElement>('#board [data-sbb="acct"]');
+  if (slot && !file) mountAccount(slot, { storage: () => storageHere?.() });
+}
 // (N-2's offer focused once the caption shows it)
 if (offerNotebook) {
   let tries = 0;
@@ -1525,7 +1617,8 @@ if (offerNotebook) {
 // (an agent on this computer, paired with this page (workspace/agent-ui.ts): ⋯ ▸ Connect an agent…, a ?pair= link, or an
 // agent this browser remembers. Not in the desktop app or a board saved as a file: pages the agent's program doesn't accept)
 if (ws && !file && !(window as any).__TAURI__) {
-  const agent = mountAgentPairing(ws, { branches: gitBranches });
+  // (a reload of this tab keeps the agent, from the tab's reload record, while the grant lasts (decided Nov 19 2026))
+  const agent = mountAgentPairing(ws, { branches: gitBranches, reload: { scope: { workspace: `sagebrush-workspace/${ws.identity.workspace}`, page: location.origin + location.pathname } } });
   const item = document.querySelector<HTMLButtonElement>('#board [data-sbb="agent"]');
   if (item) {
     item.hidden = false;
@@ -1656,6 +1749,7 @@ if (ws) {
   const boardEl = document.getElementById("board")!;
   let browser: ReturnType<typeof mountBrowser> | null = null;
   exportAllHere = () => { show(true); browser?.exportAll(); };
+  storageHere = () => { show(true); browser?.storage(); };
   const phone = () => matchMedia("(max-width: 640px)").matches;
   const show = (on: boolean) => {
     side.hidden = !on;
@@ -1677,6 +1771,8 @@ if (ws) {
       upload: (files, folder) => uploadToWorkspace(ws, files, mounted.agent.snapshot().doc?.mode ?? "python", folder),
       openAs: (e, as) => openAsHere(ws, e, as, mounted.agent.snapshot().doc?.mode ?? "python").then((err) => (err ? `"${nameOf(e.path)}" couldn't be opened as a ${as}: ${err}` : undefined)),
       close: () => show(false),
+      // (Agents…: the agents page, left as for any other page, this board's saves made first)
+      agents: () => void leaveFor("/agents/", "Agents"),
       // (the Storage panel's export: its lazy chunk at the site's root, beside the notebook page)
       exportUrl: (f) => new URL("/" + f, location.href).href,
       // (and this board's own saves settled first, as settled() waits for them before the page goes elsewhere:

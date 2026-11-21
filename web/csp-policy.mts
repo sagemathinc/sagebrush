@@ -34,6 +34,20 @@ export function pagePolicy(scriptHashes: string[] = [], frameAncestors: "'self'"
   ].join("; ");
 }
 
+// A public GitHub repository's notebook or folder page (/gh/..., web/gh): the
+// shared-collection page's policy (as given: production's, or a preview's),
+// its fetches to the three hosts the page reads GitHub from (the API, raw
+// files, jsDelivr's listing when the API is limited: web/gh/source.ts), by
+// exact origin, and to no other site (no https: or http:). A policy without
+// connect-src is kept as it is: what default-src allows, nothing added.
+export const GITHUB_CONNECT = ["https://api.github.com", "https://raw.githubusercontent.com", "https://data.jsdelivr.com"];
+export function ghPolicy(policy: string): string {
+  return policy.split(";").map((d) => d.trim()).filter(Boolean).map((d) => {
+    const [name, ...sources] = d.split(/\s+/);
+    return name === "connect-src" ? [name, ...sources.filter((s) => s !== "https:" && s !== "http:"), ...GITHUB_CONNECT].join(" ") : d;
+  }).join("; ");
+}
+
 // The X-Frame-Options a policy's frame-ancestors means, for browsers without
 // frame-ancestors: DENY for 'none', SAMEORIGIN for 'self', and none for any
 // other (the embeddable frame's *), whose header would forbid what it allows.

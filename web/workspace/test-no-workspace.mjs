@@ -28,7 +28,9 @@ const cleanup = () => { try { chrome.kill(); } catch {} try { server.kill(); } c
 setTimeout(() => { console.log("FAIL: the run did not finish in 3 min (a hang)"); cleanup(); process.exit(1); }, 180_000).unref();
 const cdp = await devtoolsPort(profile);
 const origin = `http://127.0.0.1:${port}`;
-for (let i = 0; i < 100; i++) { try { await fetch(origin + "/"); break; } catch { await sleep(100); } }
+// (the probe's body is cancelled, not left unread: a response paused on its unread body when the server's socket
+//  ends makes Node's fetch client fail an assertion, "assert(!this.paused)", and the test with it)
+for (let i = 0; i < 100; i++) { try { await (await fetch(origin + "/")).body?.cancel(); break; } catch { await sleep(100); } }
 
 // (a tab: its own CDP socket, evaluate, and navigate)
 async function tab(url) {

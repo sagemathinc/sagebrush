@@ -198,6 +198,10 @@
 .sbnb .cell.manual .runb { outline: 1px dashed currentColor; outline-offset: -3px; }
 .sbnb .out .fixes { display: flex; flex-wrap: wrap; gap: .4em; margin: .3em 0; }
 .sbnb .out .fixes button { font: inherit; font-size: .9em; }
+/* a Run's upstream: what it needs run first, said (and asked, when slow) over the cell's output */
+.sbnb .cell .upstream { font-size: 12px; color: var(--muted); padding: 2px 11px 0; }
+.sbnb .cell .upstream.fixes { display: flex; flex-wrap: wrap; align-items: center; gap: .4em; color: inherit; }
+.sbnb .cell .upstream button { font: inherit; }
 /* input(): the line asked for, under the cell */
 .sbnb .stdin { display: flex; align-items: baseline; gap: .5em; padding: 3px 11px; font: 13.5px/1.45 ui-monospace, "SF Mono", Menlo, Consolas, monospace; }
 .sbnb .stdin-prompt { white-space: pre-wrap; }
