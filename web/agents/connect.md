@@ -5,7 +5,7 @@ The page for people is https://sagebrush.space/agents/connect/: two choices, eac
 | Way | Where it works today | What you install | With a sandboxed Claude Code |
 |---|---|---|---|
 | 1. `sagebrush remote` | dev.sagebrush.space (testing). On sagebrush.space, Connect a computer says whether your account can use it | PyPI `sagebrush` 0.10.2 | Not an agent connection: Claude isn't involved |
-| 2. `sagebrush-agent` | The Agents page, /agents/ on sagebrush.space. Claude here; Codex only on a connected computer | `sagebrush-agent` 0.7.7 (a download, not on npm) | Works: it never uses your Claude Code session |
+| 2. `sagebrush-agent` | The Agents page, /agents/ on sagebrush.space. Claude here; Codex only on a connected computer | `sagebrush-agent` 0.7.8 (a download, not on npm) | Works: it never uses your Claude Code session |
 | 3. `sagebrush-mcp` | Math tools anywhere; your Sagebrush files from the notebook page, the LaTeX editor and boards | PyPI `sagebrush-mcp` 0.10.2 | Only if your Claude Code can load MCP servers |
 | 4. A cocalc.ai agent | Not yet | — | — |
 
@@ -40,7 +40,7 @@ There is also a relayed version, with a terminal on your computer: open [Connect
 
 ## 2. `sagebrush-agent`: Claude on your computer, the chat in your browser
 
-Needs `sagebrush-agent` 0.7.7 (below), Node 20 or later, and Claude Code logged in once with your Claude account. Works with the [Agents page](https://sagebrush.space/agents/) on this site. Codex: not here, only on a [connected computer](https://sagebrush.space/remote/connect).
+Needs `sagebrush-agent` 0.7.8 (below), Node 20 or later, and Claude Code logged in once with your Claude account. Works with the [Agents page](https://sagebrush.space/agents/) on this site. Codex: not here, only on a [connected computer](https://sagebrush.space/remote/connect).
 
 A small program on your computer runs Claude with your own Claude login. You chat with it in the Agents page, and it works in the files of your Sagebrush workspace in this browser, in the folders you allow.
 
@@ -49,16 +49,16 @@ A small program on your computer runs Claude with your own Claude login. You cha
 On sagebrush.space:
 
 ```
-npx -y https://agents.sagebrush.cloud/agents/sagebrush-agent-0.7.7.tgz
+npx -y https://agents.sagebrush.cloud/agents/sagebrush-agent-0.7.8.tgz
 ```
 
 On dev.sagebrush.space, the testing site (macOS or Linux terminal):
 
 ```
-SAGEBRUSH_AGENT_PAGE=https://dev.sagebrush.space/agents/ npx -y https://agents.sagebrush.cloud/agents/sagebrush-agent-0.7.7.tgz --origin https://dev.sagebrush.space
+SAGEBRUSH_AGENT_PAGE=https://dev.sagebrush.space/agents/ npx -y https://agents.sagebrush.cloud/agents/sagebrush-agent-0.7.8.tgz --origin https://dev.sagebrush.space
 ```
 
-The sha256 of that file is `fdb1032ec6601e8a176b4f7246ffe62da18f61d5c671fb2c0a9a4c8731ae4928`.
+The sha256 of that file is `56926520d8b1095ee83a04d962aaa458283d50932c1c542ac6038e0b7988a645`.
 
 - It prints a link with a one-time code. Open it in Chrome or Firefox. Safari can't reach a program on your computer.
 - The browser asks once whether this site may reach apps on this computer; its wording depends on the browser's version. Click Allow, then Connect again if it asks.
