@@ -206,6 +206,8 @@ for s in sections:
         equivalence(SMALL, [CURVES[int(s.split(":")[1])]])
         import resource
         print("part: cpu %.1f s, maxrss %d kB" % (time.process_time(), resource.getrusage(resource.RUSAGE_SELF).ru_maxrss))
+    elif s == "curves":  # (how many the grid has: the test runs one part for each)
+        print("curves: %d" % len(CURVES))
     elif s == "full":
         equivalence(FULL)
     elif s == "planner":

@@ -39,10 +39,11 @@ test("the planner, the ledger's digit count and L = p: the same under python3 an
 // (a slow test, test/slow-tests.ts.  The grid's five curves run at once, one python3 each: 196 to 290 s as one
 // process on CI's shard 8)
 const PARTS = [78, 78, 102, 102, 102]; // (the reductions each curve compares, by its index in kedlaya_cases.py's CURVES)
-function py3Async(...args: string[]): Promise<{ code: number | null; signal: string | null; stdout: string; stderr: string; ms: number }> {
+// (`signal`: the test's own, so a test that times out or is cancelled kills its python3 processes with it)
+function py3Async(signal: AbortSignal, ...args: string[]): Promise<{ code: number | null; signal: string | null; stdout: string; stderr: string; ms: number }> {
   const t0 = performance.now();
   return new Promise((resolve, reject) => {
-    const ch = spawn("python3", ["-I", ...args], { stdio: ["ignore", "pipe", "pipe"] });
+    const ch = spawn("python3", ["-I", ...args], { stdio: ["ignore", "pipe", "pipe"], signal });
     let stdout = "", stderr = "";
     ch.stdout.setEncoding("utf8").on("data", (d) => (stdout += d));
     ch.stderr.setEncoding("utf8").on("data", (d) => (stderr += d));
@@ -51,7 +52,9 @@ function py3Async(...args: string[]): Promise<{ code: number | null; signal: str
   });
 }
 test("the offset-add reduction gives the padded one's forms, G and matrix (python3; the small grid: kedlaya_cases.py equivalence, 5 curves, 462 checks)", { timeout: 900_000, skip: slowSkip }, async (t) => {
-  const parts = await Promise.all(PARTS.map((_, i) => py3Async(TEST + "kedlaya_cases.py", `equivalence:${i}`)));
+  // (one part for each curve of the grid: a curve added there and not here fails)
+  assert.equal(Number(/^curves: (\d+)$/m.exec(String(py3(TEST + "kedlaya_cases.py", "curves")))?.[1]), PARTS.length, "a part for every curve of the grid");
+  const parts = await Promise.all(PARTS.map((_, i) => py3Async(t.signal, TEST + "kedlaya_cases.py", `equivalence:${i}`)));
   assert.equal(parts.length, PARTS.length, "every curve's part ran");
   let n = 0;
   parts.forEach((r, i) => {
