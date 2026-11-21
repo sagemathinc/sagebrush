@@ -59,7 +59,7 @@ fn bits(x: &BigInt) -> u64 {
 /// The 64-bit limbs of x for the cost helpers (at least 1: a zero or a
 /// one-limb value costs one limb step).
 #[inline]
-pub(crate) fn limbs(x: &BigInt) -> usize {
+pub fn limbs(x: &BigInt) -> usize {
     // (the i64 test is about half the cost of `bits` for small values)
     if x.to_i64().is_some() {
         1
@@ -71,12 +71,12 @@ pub(crate) fn limbs(x: &BigInt) -> usize {
 /// [`limbs`] of a value known to be large (a remainder, a modulus): its
 /// bit length directly, without the one-word test first.
 #[inline]
-pub(crate) fn limbs_big(x: &BigInt) -> usize {
+pub fn limbs_big(x: &BigInt) -> usize {
     (x.bits().div_ceil(64) as usize).max(1)
 }
 
 /// The Move units of copying `v`: a unit per limb.
-pub(crate) fn copy_units(v: &[BigInt]) -> u64 {
+pub fn copy_units(v: &[BigInt]) -> u64 {
     v.iter().map(|x| limbs(x) as u64).sum()
 }
 

@@ -2745,6 +2745,11 @@
   "owner": "class groups and matrix.LLL (engine/classgroup api)",
   "reason": "test code: the whole-call LLL budget's tests (peaks, refusals, the Hermite stage, the rank stage); refuses nothing itself"
  },
+ "engine/classgroup/src/api.rs :: hermite_modular :: acc.add(bigmul_units(limbs(&q), usize::try_from(row).unwrap_or(usize::MAX))); #0": {
+  "class": "none",
+  "owner": "class groups and matrix.LLL (engine/classgroup api)",
+  "reason": "the unit count's saturating size conversion: a length past usize saturates (an accounting figure, never a refusal)"
+ },
  "engine/classgroup/src/api.rs :: lll :: let b = sagebrush_poly::Budget::default(); #0": {
   "class": "none",
   "owner": "class groups and matrix.LLL (engine/classgroup api)",
@@ -3215,9 +3220,29 @@
   "class": "none",
   "owner": "class group/number fields"
  },
+ "engine/classgroup/src/nf/zlin.rs :: hnf :: acc.add(bigmul_units(limbs(&q), usize::try_from(row).unwrap_or(usize::MAX))); #0": {
+  "class": "none",
+  "owner": "class group/number fields",
+  "reason": "the unit count's saturating size conversion: a length past usize saturates (an accounting figure, never a refusal)"
+ },
+ "engine/classgroup/src/nf/zlin.rs :: hnf :: let rest = usize::try_from(row.saturating_sub(lp as u64)).unwrap_or(usize::MAX); #0": {
+  "class": "none",
+  "owner": "class group/number fields",
+  "reason": "the unit count's saturating size conversion: a length past usize saturates (an accounting figure, never a refusal)"
+ },
  "engine/classgroup/src/realq.rs :: class_group_real_with :: for round in 0..crate::limits::round_limit() { #0": {
   "class": "3",
   "owner": "class group/number fields"
+ },
+ "engine/classgroup/tests/hermite_meter.rs :: hermite_units_and_stop_checks :: let mut meter = Meter::accounting(u64::MAX); #0": {
+  "class": "none",
+  "owner": "class groups and matrix.LLL (engine/classgroup api)",
+  "reason": "test code: the metering test's accounting meter with no upper bound; refuses nothing"
+ },
+ "engine/classgroup/tests/hermite_progress.rs :: seen_by :: let mut meter = Meter::accounting(u64::MAX); #0": {
+  "class": "none",
+  "owner": "class groups and matrix.LLL (engine/classgroup api)",
+  "reason": "test code: the progress test's accounting meter with no upper bound; refuses nothing"
  },
  "engine/galois/src/tables.rs ::  :: pub const MAX_DEGREE: usize = 23; #0": {
   "class": "3",
