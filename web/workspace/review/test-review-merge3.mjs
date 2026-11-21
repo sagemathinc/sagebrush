@@ -75,6 +75,18 @@ const codes = (n) => n.cells.map((c) => `${c.id}:${c.code}`).join("|");
   ok(r.conflicts.length === 1 && r.conflicts[0].id === "field:mode" && resolveNotebook(r, { "field:mode": "theirs" }).mode === "sage", "a field changed differently on both: a conflict", r.conflicts);
   r = mergeNotebooks({ ...base, autorun: "always" }, { ...base, autorun: "always" }, { ...base });
   ok(r.conflicts.length === 0 && !("autorun" in r.merged), "a field theirs removed: removed", r.merged);
+  // a field named like a prototype key is data (JSON.parse makes it an own property)
+  const P = (o) => JSON.parse(JSON.stringify(o).replace('"PROTO"', '"__proto__"'));
+  r = mergeNotebooks(nb(["a", "1"]), nb(["a", "1"]), P({ ...nb(["a", "1"]), PROTO: { keep: "proposal" } }));
+  ok(r.conflicts.length === 0 && Object.hasOwn(r.merged, "__proto__") && J(Object.getOwnPropertyDescriptor(r.merged, "__proto__").value) === J({ keep: "proposal" }) && Object.getPrototypeOf(r.merged) === Object.prototype,
+    "a field named __proto__ added on one side: kept as a field, the prototype untouched", Object.getOwnPropertyNames(r.merged));
+  r = mergeNotebooks(P({ cells: [], PROTO: { v: "base" } }), P({ cells: [], PROTO: { v: "mine" } }), P({ cells: [], PROTO: { v: "theirs" } }));
+  const pr = resolveNotebook(r, { "field:__proto__": "theirs" });
+  ok(r.conflicts.length === 1 && r.conflicts[0].key === "__proto__" && J(Object.getOwnPropertyDescriptor(pr, "__proto__")?.value) === J({ v: "theirs" }) && Object.getPrototypeOf(pr) === Object.prototype,
+    "a field named __proto__ changed on both: a conflict, and the pick lands as a field", r.conflicts);
+  // a cell's missing type is "code"
+  r = mergeNotebooks(nb(["a", "1"]), nb(["a", "1", { type: "code" }]), nb(["a", "2"]));
+  ok(r.conflicts.length === 0 && r.merged.cells[0].code === "2", "a cell with no type and one that says code are the same: no false conflict", r.conflicts);
   // inputs untouched
   const m0 = nb(["a", "1"]), s0 = J(m0);
   mergeNotebooks(nb(["a", "0"]), m0, nb(["a", "2"]));
@@ -100,15 +112,24 @@ const codes = (n) => n.cells.map((c) => `${c.id}:${c.code}`).join("|");
   ok(r.conflicts === 1 && resolveText(r, { "text:0": "mine" }) === base.replace("two\n", ""), "text: removed on one side, changed on the other: a conflict", r.parts);
   r = mergeText("", "a\n", "b\n");
   ok(r.conflicts === 1, "text: both wrote an empty file differently: a conflict", r.parts);
+  // past the line diff's bounds (50,000 lines a side): the whole file one conflict, never a silent side
+  const big = "base\n".repeat(50001);
+  r = mergeText(big, "mine\n" + big, "theirs\n" + big);
+  let unpicked = false;
+  try { resolveText(r, {}); } catch { unpicked = true; }
+  ok(r.conflicts === 1 && r.parts.length === 1 && r.parts[0].kind === "conflict" && unpicked && resolveText(r, { "text:0": "theirs" }) === "theirs\n" + big,
+    "text past the diff's bounds: one whole-file conflict, which must be picked", { conflicts: r.conflicts, parts: r.parts.length });
   r = mergeText("x", "x", "y");
   ok(r.conflicts === 0 && resolveText(r, {}) === "y", "text: no final newline, one side", r);
 }
 
 // ---- seeded random: disjoint edits never conflict, and every edit lands
 {
+  // (mulberry32, its high bits: an LCG's low bits are degenerate, and % 2 of them alternates)
   let seed = 7;
-  const rnd = (n) => { seed = (seed * 1103515245 + 12345) & 0x7fffffff; return seed % n; };
-  let bad = 0, runs = 0;
+  const next = () => { seed = (seed + 0x6d2b79f5) | 0; let t = Math.imul(seed ^ (seed >>> 15), 1 | seed); t = (t + Math.imul(t ^ (t >>> 7), 61 | t)) ^ t; return ((t ^ (t >>> 14)) >>> 0) / 4294967296; };
+  const rnd = (n) => Math.floor(next() * n);
+  let bad = 0, runs = 0, bothNb = 0;
   for (let k = 0; k < 300; k++) {
     const n = 3 + rnd(12);
     const base = { mode: "python", cells: Array.from({ length: n }, (_, i) => ({ id: `c${i}`, code: `x${i} = ${i}` })) };
@@ -116,8 +137,11 @@ const codes = (n) => n.cells.map((c) => `${c.id}:${c.code}`).join("|");
     const m = JSON.parse(mine), t = JSON.parse(theirs);
     // (each cell to at most one side: edited, or removed)
     const want = new Map(base.cells.map((c) => [c.id, c.code]));
+    let sm = 0, st = 0;
     for (const c of base.cells) {
       const r = rnd(5);
+      if (r === 0 || r === 3) sm++;
+      if (r === 1 || r === 2) st++;
       if (r === 0) { const x = m.cells.find((y) => y.id === c.id); x.code += " # m"; want.set(c.id, x.code); }
       else if (r === 1) { const x = t.cells.find((y) => y.id === c.id); x.code += " # t"; want.set(c.id, x.code); }
       else if (r === 2) { t.cells = t.cells.filter((y) => y.id !== c.id); want.delete(c.id); }
@@ -126,22 +150,26 @@ const codes = (n) => n.cells.map((c) => `${c.id}:${c.code}`).join("|");
     if (rnd(2)) { const at = rnd(t.cells.length + 1); t.cells.splice(at, 0, { id: `t${k}`, code: "added" }); want.set(`t${k}`, "added"); }
     const r = mergeNotebooks(base, m, t);
     runs++;
+    if (sm && st) bothNb++;
     const got = new Map(r.merged.cells.map((c) => [c.id, c.code]));
     if (r.conflicts.length || got.size !== want.size || [...want].some(([id, code]) => got.get(id) !== code)) bad++;
   }
   ok(bad === 0, `random notebooks (${runs}): disjoint edits never conflict, and every edit and removal lands`, { bad });
-  let badT = 0;
+  ok(bothNb >= 150, "random notebooks: most runs have edits on both sides (the case the check is for)", { bothNb, runs });
+  let badT = 0, bothT = 0;
   for (let k = 0; k < 200; k++) {
     const n = 6 + rnd(20);
     const lines = Array.from({ length: n }, (_, i) => `line ${i}\n`);
     const m = [...lines], t = [...lines];
     // (edits on lines at least two apart on the two sides: never overlapping or touching)
     for (let i = 0; i < n; i += 4) { if (rnd(2)) m[i] = `m ${i}\n`; if (i + 2 < n && rnd(2)) t[i + 2] = `t ${i + 2}\n`; }
+    if (m.some((l, i) => l !== lines[i]) && t.some((l, i) => l !== lines[i])) bothT++;
     const want = lines.map((l, i) => (m[i] !== l ? m[i] : t[i])).join("");
     const r = mergeText(lines.join(""), m.join(""), t.join(""));
     if (r.conflicts || resolveText(r, {}) !== want) badT++;
   }
   ok(badT === 0, "random texts (200): edits two lines apart never conflict, and both land", { badT });
+  ok(bothT >= 120, "random texts: most runs have edits on both sides (the case the check is for)", { bothT });
 }
 
 console.log(fails.length ? `FAIL: ${fails.length} of ${checks}\n  ${fails.join("\n  ")}` : `ok: merge3, ${checks} checks`);

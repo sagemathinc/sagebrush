@@ -12,6 +12,8 @@
 //     added with one id on both, alike: once, else a conflict;
 //   - the order is the person's; the agent's moves of existing cells are not applied;
 //   - the notebook's other fields (its mode and the rest), key by key, by the same rule; a clash is a conflict.
+// The notebook's fields are read and written as own properties, so one named like an Object.prototype key ("__proto__")
+// is kept as data. A cell's type is "code" when it has none, as when it says so.
 // Outputs: a cell taken from a side takes that side's outputs, count and time; a cell unchanged on both takes the
 // person's, unless only the agent's has outputs (it ran the cell, the person didn't); one changed alike on both takes
 // the person's.
@@ -39,10 +41,14 @@ const OUT_KEYS = new Set(["outputs", "n", "ms", "exec_count", "execution_count"]
 /** A cell's content, as text, for comparing: everything but its outputs, count and time, keys sorted. */
 function content(c: Cell | undefined): string | null {
   if (!c) return null;
-  const k = Object.keys(c).filter((x) => !OUT_KEYS.has(x)).sort();
-  return JSON.stringify(k.map((x) => [x, x === "type" ? c.type ?? "code" : c[x]]));
+  // (the type normalized: a cell with no type is a code cell, as one that says so)
+  const k = Object.keys(c).filter((x) => !OUT_KEYS.has(x) && x !== "type").sort();
+  return JSON.stringify([["type", c.type ?? "code"], ...k.map((x) => [x, c[x]])]);
 }
 const same = (a: unknown, b: unknown) => JSON.stringify(a) === JSON.stringify(b);
+// (a field read and written as an own property only: a field named "__proto__" is data, never the prototype)
+const own = (o: object, k: string): unknown => (Object.hasOwn(o, k) ? (o as Record<string, unknown>)[k] : undefined);
+const put = (o: object, k: string, v: unknown) => Object.defineProperty(o, k, { value: v, writable: true, enumerable: true, configurable: true });
 const byId = (cells: Cell[]) => new Map(cells.map((c) => [String(c.id), c]));
 
 export function mergeNotebooks(base: Notebook, mine: Notebook, theirs: Notebook): NotebookMerge {
@@ -89,12 +95,12 @@ export function mergeNotebooks(base: Notebook, mine: Notebook, theirs: Notebook)
   const merged: Notebook = { cells } as Notebook;
   const keys = new Set([...Object.keys(base), ...Object.keys(mine), ...Object.keys(theirs)].filter((k) => k !== "cells"));
   for (const k of [...keys].sort()) {
-    const b = base[k], m = mine[k], t = theirs[k];
+    const b = own(base, k), m = own(mine, k), t = own(theirs, k);
     let v: unknown;
     if (same(m, b)) v = t;
     else if (same(t, b) || same(m, t)) v = m;
     else { conflicts.push({ id: `field:${k}`, kind: "field", key: k, mine: m, theirs: t }); v = m; }
-    if (v !== undefined) merged[k] = v;
+    if (v !== undefined) put(merged, k, v);
   }
   return { merged, conflicts, order };
 }
@@ -116,7 +122,7 @@ export function resolveNotebook(r: NotebookMerge, picks: Record<string, Pick>): 
     if (c.kind !== "field") continue;
     const v = picks[c.id] === "mine" ? c.mine : c.theirs;
     if (v === undefined) delete out[c.key];
-    else out[c.key] = v;
+    else put(out, c.key, v);
   }
   return out;
 }
