@@ -921,27 +921,29 @@ fn rows_in_span(a: &ZMat, rows: &[usize], piv: &[usize], n: &[BigInt], den: &Big
 
 /// How many word primes [`rank`] tries before the exact `rref`.  A matrix of
 /// full rank over Q is deficient modulo a prime only when the prime divides
-/// every maximal minor, so a second prime settles the unlucky first one; a
-/// third would mostly add an elimination to the matrices that are deficient
-/// over Q, which go to `rref` either way.
+/// every maximal minor, so a second prime settles the unlucky first one
+/// unless it divides them all too; a third would mostly add a reduction and
+/// an elimination to the matrices that are deficient over Q, which go to
+/// `rref` either way.
 const RANK_PRIMES: usize = 2;
 
-/// The rank over Q.  First the rank modulo up to [`RANK_PRIMES`] word primes
-/// (from the prime `rref` starts from), by elimination modulo each: each is
-/// a lower bound for the rank, so when one is min(rows, cols) it is the
-/// rank, proven.  Otherwise the exact `rref`.  (rref's own one-prime
-/// shortcut needs rank = cols: a wide matrix of full row rank went through
-/// the whole rational rref.)
-pub fn rank(a: &ZMat) -> usize {
+/// min(rows, cols) when the rank modulo one of the first `primes` word
+/// primes (from the prime `rref` starts from) reaches it, by elimination
+/// modulo each: each is a lower bound for the rank over Q, so then it is
+/// the rank, proven.  None otherwise.
+fn rank_by_primes(a: &ZMat, primes: usize) -> Option<usize> {
     let full = a.rows.min(a.cols);
-    if full > 0 {
-        for p in Primes::new().take(RANK_PRIMES) {
-            if a.reduce(&Modulus::new(p)).rank() == full {
-                return full;
-            }
-        }
+    if full == 0 {
+        return Some(0);
     }
-    rref(a).2.len()
+    Primes::new().take(primes).any(|p| a.reduce(&Modulus::new(p)).rank() == full).then_some(full)
+}
+
+/// The rank over Q: [`rank_by_primes`] with [`RANK_PRIMES`] primes, or else
+/// the exact `rref`.  (rref's own one-prime shortcut needs rank = cols: a
+/// wide matrix of full row rank went through the whole rational rref.)
+pub fn rank(a: &ZMat) -> usize {
+    rank_by_primes(a, RANK_PRIMES).unwrap_or_else(|| rref(a).2.len())
 }
 
 /// A basis of the right kernel {x : a x = 0} over Q, scaled to integer
@@ -1274,7 +1276,7 @@ mod tests {
         assert_eq!(rank(&zm(3, 2, vec![p, 0, 0, p, 1, 1])), 2); // tall
         assert_eq!(rank(&zm(2, 2, vec![p, 2 * p, 1, 2])), 1); // and deficient over Q too
         // deficient modulo both primes rank tries: the rref's exact rank
-        let q: Vec<BigInt> = Primes::new().take(RANK_PRIMES).map(BigInt::from).collect();
+        let q: Vec<BigInt> = Primes::new().take(2).map(BigInt::from).collect();
         let pq = &q[0] * &q[1];
         let big = |d: Vec<BigInt>, r: usize, c: usize| ZMat { rows: r, cols: c, d };
         let one = || BigInt::from(1);
@@ -1298,8 +1300,11 @@ mod tests {
             *x *= &p;
         }
         let a = r1.mul(&r2);
-        let m = Modulus::new(Primes::new().next().unwrap());
-        assert!(a.reduce(&m).rank() < n, "deficient modulo the first prime");
+        let ps: Vec<u64> = Primes::new().take(2).collect();
+        assert!(a.reduce(&Modulus::new(ps[0])).rank() < n, "deficient modulo the first prime");
+        assert_eq!(a.reduce(&Modulus::new(ps[1])).rank(), n, "full modulo the second");
+        assert_eq!(rank_by_primes(&a, 1), None);
+        assert_eq!(rank_by_primes(&a, RANK_PRIMES), Some(n), "proven by the primes, without the rref");
         assert_eq!(rank(&a), n);
         assert_eq!(rref(&a).2.len(), n);
     }
