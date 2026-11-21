@@ -26,6 +26,7 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { devtoolsPort } from "../test-port.mjs";
 import { boxClass } from "./boxclass.mjs";
+import { EXAMPLES } from "../../scripts/latex-examples.mjs";
 import * as C from "./comments-core.mjs";
 
 const here = new URL(".", import.meta.url).pathname;
@@ -128,13 +129,16 @@ try {
   // centre is the button itself), and each makes a .tex and opens it in the editor
   {
     await send("Emulation.setDeviceMetricsOverride", { width: 390, height: 844, deviceScaleFactor: 2, mobile: true });
-    const reach = (sel, text) => ev(`(() => {
+    // (measured once the cross-document view transition a navigation starts has ended: while it runs, the page under it
+    // takes no input and elementFromPoint finds the root)
+    const settled = () => until(`(() => { try { return !document.documentElement.matches(":active-view-transition"); } catch { return true; } })()`, 3000);
+    const reach = async (sel, text) => (await settled(), ev(`(() => {
       const b = [...document.querySelectorAll(${JSON.stringify(sel)})].find((x) => x.firstChild?.textContent === ${JSON.stringify(text)});
       if (!b) return { found: false, items: [...document.querySelectorAll(${JSON.stringify(sel)})].map((x) => x.textContent) };
       b.scrollIntoView({ block: "center" });
       const r = b.getBoundingClientRect(), at = document.elementFromPoint(r.left + r.width / 2, r.top + r.height / 2);
       return { found: true, inView: r.top >= 0 && r.bottom <= innerHeight && r.left >= 0 && r.right <= innerWidth, top: at === b || b.contains(at), at: at ? at.tagName + "#" + at.id + "." + at.className + " " + (at.textContent ?? "").slice(0, 40) : null, w: innerWidth, h: innerHeight };
-    })()`);
+    })()`));
     const madeAs = async (p) => (await fresh(`!!document.querySelector(".tex-page .tex-src") && !!${W}`, 20000)) && ev(`${W}.stat(${JSON.stringify(p)}).then((e) => !!e?.fid && new URLSearchParams(location.search).get("tex") === e.fid)`);
     await ev(`localStorage.setItem("sagebrush-files-sidebar", "1"); true`);
     await go(base + "?latex=1"); await until(`!!${W}`, 60000);
@@ -160,72 +164,34 @@ try {
       "phone: File > New offers LaTeX document, in the file panel's order (U0), File and the item in view and not covered", { fb, items, mr });
     await mark(); await ev(`([...document.querySelectorAll('.fmgroup[aria-label="New"] button')].find((b) => b.textContent === "LaTeX document").click(), true)`);
     check(await madeAs("/Untitled (2).tex"), "phone: File > New > LaTeX document: /Untitled (2).tex made and opened in the editor");
-    // the editor's File > New > From an example… (U0: "Examples…" replaces "LaTeX example", William Nov 2), on
-    // a site without the examples gallery (this test's server: web/examples/open.ts finds no catalog): the LaTeX
-    // examples' own list fits the phone (10 large buttons, the dialog within the width, each button reachable), and the
-    // figure example opens with its image (a folder of its own, plot.png beside it)
+    // the editor's File > New > From an example… on a phone, on a site without the examples gallery (this test's
+    // server: web/examples/open.ts finds no catalog): the item fits and is reachable; chosen, an alert says the examples
+    // aren't available here, and no list of the editor's own is shown (the gallery's panel is the only one)
     await ev(`(document.querySelector(".tex-filebtn").click(), true)`);
     await until(`!!document.querySelector('.tex-filemenu .fmgroup[aria-label="New"]')`, 10000);
     await ev(`(document.querySelector('.tex-filemenu button[data-group="new"]').click(), true)`);
     const exItem = await reach('.tex-filemenu .fmgroup[aria-label="New"] button', "Examples…");
-    // (the examples are a chunk of their own, sagebrush-latex-examples.js: not fetched before their list is asked for)
-    const exAsks = () => requests.filter((u) => /sagebrush-latex-examples\.js/.test(u)).length, exBefore = exAsks();
+    const d0 = dialogText.length;
     await ev(`(document.querySelector('.tex-filemenu [data-item="fromExample"]').click(), true)`);
-    const listed2 = await until(`document.querySelectorAll("dialog.sb-tex-examples[open] button[data-example]").length === 10`, 20000);
-    check(exBefore === 0 && exAsks() === 1, "phone: the examples' chunk fetched once, by their list, and not before", { exBefore, after: exAsks() });
-    const dlg = listed2 && await ev(`(() => { const d = document.querySelector("dialog.sb-tex-examples"), r = d.getBoundingClientRect(), bs = [...d.querySelectorAll("button[data-example]")];
-      const last = bs[bs.length - 1]; last.scrollIntoView({ block: "center" }); const lr = last.getBoundingClientRect(), at = document.elementFromPoint(lr.left + lr.width / 2, lr.top + lr.height / 2);
-      return { menuHidden: document.querySelector(".tex-filemenu").hidden, left: r.left, right: r.right, w: innerWidth, n: bs.length, minH: Math.min(...bs.map((b) => b.getBoundingClientRect().height)), lastReach: at === last || last.contains(at) }; })()`);
-    check(exItem.found && exItem.inView && exItem.top && listed2 && dlg.menuHidden && dlg.left >= 0 && dlg.right <= dlg.w && dlg.n === 10 && dlg.minH >= 44 && dlg.lastReach,
-      "phone: the editor's File > New > From an example…: the File menu closed, the list of 10 fits the screen, every button at least 44 px and reachable", { exItem, dlg });
-    // (in the editor, another .tex opens in place, its URL pushed: no new document)
-    await ev(`(document.querySelector('dialog.sb-tex-examples button[data-example="figure"]').click(), true)`);
-    const figOk = await until(`${W}.stat("/LaTeX examples/Figure with an image/figure.tex").then((e) => !!e?.fid && new URLSearchParams(location.search).get("tex") === e.fid && !!document.querySelector(".tex-page .tex-src"))`, 20000);
-    const figImg = figOk && await until(`[...document.querySelectorAll(".tex-preview img.graphic")].some((i) => i.src.startsWith("blob:"))`, 20000);
-    check(figOk && figImg && await ev(`${W}.stat("/LaTeX examples/Figure with an image/plot.png").then((e) => e?.kind === "file")`), "phone: the figure example: its folder made, figure.tex opened, plot.png beside it and shown in the preview");
+    const said = await (async () => { for (let i = 0; i < 100 && dialogText.length === d0; i++) await sleep(100); return dialogText.slice(d0); })();
+    check(exItem.found && exItem.inView && exItem.top && said.length === 1 && said[0] === "The examples aren't available here." && !(await ev(`!!document.querySelector("dialog.sb-tex-examples, dialog.sb-examples[open]")`)),
+      "phone: the editor's File > New > From an example… without the gallery: the item reachable; an alert says the examples aren't available here, no list", { exItem, said });
     await ev(`localStorage.removeItem("sagebrush-files-sidebar"); true`);
     await send("Emulation.clearDeviceMetricsOverride");
   }
-  // ---- the examples' chunk fails to load (grader #685 E1, E2, E4): the first request for it refused (the Fetch
-  // domain), the editor's File > New > From an example… says so in an alert, and the list isn't shown; asked again, the
-  // list loads, by a new URL (?try=2: the browser keeps a failed module import for its URL), so a failure is never cached
+  // ---- the examples gallery from the LaTeX editor
   {
     await go(base + "?latex=1"); await until(`!!${W}`, 60000);
     await open(await ev(`${W}.stat("/Untitled.tex").then((e) => e.fid)`));
-    let refused = 0;
-    onPaused = (p) => { if (!refused++) send("Fetch.failRequest", { requestId: p.requestId, errorReason: "ConnectionFailed" }); else send("Fetch.continueRequest", { requestId: p.requestId }); };
-    await send("Fetch.enable", { patterns: [{ urlPattern: "*sagebrush-latex-examples.js*" }] });
-    const exUrls = () => requests.filter((u) => /sagebrush-latex-examples\.js/.test(u));
     const askExamples = async () => {
       await ev(`(document.querySelector(".tex-filebtn").click(), true)`);
       await until(`!!document.querySelector('.tex-filemenu .fmgroup[aria-label="New"]')`, 10000);
       await ev(`(document.querySelector('.tex-filemenu button[data-group="new"]').click(), true)`);
       await ev(`(document.querySelector('.tex-filemenu [data-item="fromExample"]').click(), true)`);
     };
-    const r0 = exUrls().length, d0 = dialogText.length;
-    await askExamples();
-    const said = await (async () => { for (let i = 0; i < 100 && dialogText.length === d0; i++) await sleep(100); return dialogText.slice(d0); })();
-    const fail = { refused, said, listed: await ev(`!!document.querySelector("dialog.sb-tex-examples[open]")`), urls: exUrls().slice(r0) };
-    check(refused === 1 && said.length === 1 && said[0] === "The examples couldn't be loaded. Check the network, then try again." && !fail.listed && fail.urls.length === 1 && !/\?try=/.test(fail.urls[0]),
-      "the examples' chunk refused: an alert says so (check the network, try again), no list", fail);
-    await askExamples();
-    const again = { listed: await until(`document.querySelectorAll("dialog.sb-tex-examples[open] button[data-example]").length === 10`, 20000), urls: exUrls().slice(r0), alerts: dialogText.length - d0 };
-    check(again.listed && again.urls.length === 2 && /sagebrush-latex-examples\.js\?try=2$/.test(again.urls[1]) && again.alerts === 1,
-      "…asked again: the list of 10, loaded by a new URL (?try=2), no second alert", again);
-    // (and once loaded, kept: asked a third time, the same 10 with no new request for the chunk; grader #685 E3,
-    //  loadExamples() not memoized would ask by ?try=3)
-    await ev(`(document.querySelector("dialog.sb-tex-examples[open]")?.close(), true)`);
-    await askExamples();
-    const kept = { listed: await until(`document.querySelectorAll("dialog.sb-tex-examples[open] button[data-example]").length === 10`, 20000) };
-    await sleep(300);
-    Object.assign(kept, { urls: exUrls().slice(r0), ids: await ev(`[...document.querySelectorAll("dialog.sb-tex-examples[open] button[data-example]")].map((b) => b.dataset.example).join()`) });
-    check(kept.listed && kept.urls.length === 2 && !kept.urls.some((u) => /\?try=3/.test(u)) && kept.ids.split(",").length === 10,
-      "…asked a third time, once loaded: the same 10, the chunk not fetched again", kept);
-    await send("Fetch.disable"); onPaused = null;
-    await ev(`(document.querySelector("dialog.sb-tex-examples[open]")?.close(), true)`);
     // a site with the examples gallery (its catalog stubbed: one LaTeX document, one notebook): the editor's File ▸
     // Examples… and New ▸ From an example… open the gallery's panel, on LaTeX first, as the notebook and board pages
-    // open it on theirs (#759), not the LaTeX examples' own list
+    // open it on theirs
     await ev(`(() => { const f0 = window.__sbFetch0 ??= window.fetch; window.fetch = (u, o) => new URL(String(u?.url ?? u), location.href).pathname === "/examples/index.json" ? Promise.resolve(new Response(JSON.stringify({ examples: [{ id: "latex/stub", kind: "latex", title: "Stub LaTeX", summary: "" }, { id: "notebook/stub", kind: "notebook", title: "Stub notebook", summary: "" }] }), { headers: { "content-type": "application/json" } })) : f0(u, o); return 1; })()`);
     const galleryOn = `!!document.querySelector("dialog.sb-examples[open]") && !document.querySelector("dialog.sb-tex-examples[open]") && (() => { const t = [...document.querySelectorAll("dialog.sb-examples [role=option]")].map((b) => b.textContent); return t.some((x) => x.includes("Stub LaTeX")) && !t.some((x) => x.includes("Stub notebook")); })()`;
     const closeGallery = `(() => { [...document.querySelectorAll("dialog.sb-examples button")].find((b) => b.textContent === "Close")?.click(); return 1; })()`;
@@ -265,15 +231,20 @@ try {
     const at = await ev(`(async () => { const fid = new URLSearchParams(location.search).get("tex"); return { url: location.pathname + location.search, path: (await ${W}.list("/", { recursive: true })).find((e) => e.fid === fid)?.path ?? null }; })()`).catch((e) => String(e));
     check(listed && opened && at?.path === "/Examples/Stub LaTeX/stub.tex", "the notebook page's File ▸ Examples…, a LaTeX example's Open a copy: the copy opens in the LaTeX editor", at);
   }
-  // ---- every example opened in the editor (made by the page module's makeExample, as the list does; the test's
-  // workspace handle has create, not the page's createByPerson): each renders in the preview,
+  // ---- every LaTeX example of the corpus opened in the editor (its files made in a folder of its own, as a copy from the
+  // gallery is: scripts/latex-examples.mjs reads them): each renders in the preview,
   // with nothing shown as unsupported (gray tags; the SageTeX and PythonTeX "not run" chips are expected), recorded
   {
     await go(base + "?latex=1"); await until(`!!${W}`, 60000);
-    const ids = await ev(`import("/sagebrush-latex.js").then(async (x) => (await x.loadExamples()).map((e) => e.id))`);
+    const ids = EXAMPLES.map((e) => e.id);
     const rec = [];
-    for (const id of ids) {
-      const fidEx = await ev(`import("/sagebrush-latex.js").then(async (x) => (await x.makeExample({ stat: (p) => ${W}.stat(p), mkdir: (p) => ${W}.mkdir(p), createByPerson: (p, o) => ${W}.create(p, o) }, (await x.loadExamples()).find((e) => e.id === ${JSON.stringify(id)}))).fid)`);
+    for (const ex of EXAMPLES) {
+      const id = ex.id;
+      let fidEx = null;
+      for (const [name, text, b64] of ex.files) {
+        const fid = await mk(`/LaTeX examples/${ex.title}/${name}`, Array.from(b64 ? Buffer.from(text, "base64") : new TextEncoder().encode(text)));
+        fidEx ??= fid;
+      }
       await open(fidEx);
       const shown = await until(`(() => { const P = document.querySelector(".tex-preview"); return !!P && P.textContent.length > 80; })()`, 30000);
       await sleep(400);
@@ -297,8 +268,9 @@ try {
     const nm = await ev(`(async () => { document.querySelector(".tex-filebtn").click(); await new Promise((r) => setTimeout(r, 50)); document.querySelector('.tex-filemenu button[data-group="new"]').click();
       const items = [...document.querySelectorAll('.tex-filemenu .fmgroup[aria-label="New"] button')].map((b) => b.dataset.item);
       document.querySelector('.tex-filemenu [data-item="fromExample"]').click(); await new Promise((r) => setTimeout(r, 300));
-      const n = document.querySelectorAll("dialog.sb-tex-examples[open] button[data-example]").length; document.querySelector("dialog.sb-tex-examples")?.close(); return { items, n, closed: document.querySelector(".tex-filemenu").hidden }; })()`);
-    check(JSON.stringify(nm.items) === JSON.stringify(["newNotebook", "newBoard", "newLatex", "newFolder", "fromExample"]) && nm.n === 10 && nm.closed, "B1 + U0: from a LaTeX file, File > New has every editor's items in the file panel's order, and From an example… opens the LaTeX examples", nm);
+      return { items, closed: document.querySelector(".tex-filemenu").hidden }; })()`);
+    nm.said = dialogText.at(-1);
+    check(JSON.stringify(nm.items) === JSON.stringify(["newNotebook", "newBoard", "newLatex", "newFolder", "fromExample"]) && nm.said === "The examples aren't available here." && nm.closed, "B1 + U0: from a LaTeX file, File > New has every editor's items in the file panel's order, and From an example… goes to the gallery (here, without one: said)", nm);
     const sel = (p) => JSON.stringify(`.frow[data-path="${p}"]`);
     await until(`!!document.querySelector(${sel("/sw/b.tex")}) || (document.querySelector('.frow[data-path="/sw"]')?.click(), false)`, 20000);
     const sw = await ev(`(async () => {
@@ -1775,7 +1747,6 @@ try {
   check(latexFetches().some((u) => /sagebrush-latex\.js/.test(u)) && latexFetches().some((u) => /sagebrush-latex-worker\.js/.test(u)), "the page and its worker fetched now", latexFetches());
   // (grader's #966 TESTS966-1: a browser without WebMCP (navigator.modelContext) never fetches the agent tools' chunk)
   check(!(await ev(`"modelContext" in navigator`)) && !latexFetches().some((u) => /sagebrush-latex-tools\.js/.test(u)), "…and not the agent tools' chunk: this browser has no WebMCP", latexFetches());
-  check(!latexFetches().some((u) => /sagebrush-latex-examples\.js/.test(u)), "…and not the examples' chunk: opening a .tex doesn't fetch it", latexFetches());
   const rev0 = await ev(`${W}.stat("/t/doc.tex").then((e) => e.rev ?? 0)`);
   await send("Runtime.evaluate", { expression: `document.querySelector(".tex-src").focus()` });
   await ctrlS();
@@ -2612,7 +2583,8 @@ try {
   // A7: leaving the page right after an edit, within its save delay (the two-device audit: the edit was in neither the
   // file nor the other device): a notebook clicked in the files waits for the edit's write, held here, and goes once it
   // is written, the edit in the file; a write that fails asks first, and No keeps the page and the text
-  const readUx = () => ev(`${W}.read("/t/ux.tex").then((r) => new TextDecoder().decode(r.content), (e) => "ERR " + (e?.message ?? e))`);
+  // (the workspace of the page shown: the notebook page's, or the LaTeX page's own (__sbTexWs, the test build's))
+  const readUx = async () => { await until(`!!(window.sagebrush?.workspace ?? window.__sbTexWs)`, 15000); return ev(`(window.sagebrush?.workspace ?? window.__sbTexWs)?.read("/t/ux.tex").then((r) => new TextDecoder().decode(r.content), (e) => "ERR " + (e?.message ?? e)) ?? "no workspace"`); };
   const typeEnd = async (text) => { await ev(`(() => { const t = document.querySelector(".tex-src"); t.focus(); t.setSelectionRange(t.value.length, t.value.length); return 1; })()`); await send("Input.insertText", { text }); };
   {
     await open(fu); await until(`!!${rowOf("/uxnb.ipynb")}`, 15000);
@@ -2640,6 +2612,44 @@ try {
     // (the write let succeed again and saved, so nothing is left to ask about)
     await ev(`(delete window.__sbTexSaveWrite, true)`); await ctrlS(); await savedNow();
     check((await readUx()).endsWith("% refused leave"), "A7: …then saved with Ctrl+S: the edit in the file");
+  }
+  // A7: every way out of the page waits for an edit's write, held here, and goes once it is written, the edit in the
+  // file: with the Navigation API, the page's own reload and replace; without it (a browser that has none, as Safari
+  // before it, or a WebView), a notebook and a board from the files beside it, and the File menu's New notebook and New
+  // board. (A code file clicked there opens its preview, in place: no way out) (A reload by the browser itself can't be held by a page: not here)
+  {
+    const nbRef7 = await ev(`${W}.list("/").then((l) => l.find((e) => e.path === "/uxnb.ipynb")?.ref ?? null)`);
+    await ev(`${W}.create("/uxboard.board.json").then(() => 1)`);
+    const heldExit = async (what, act, gone, noNav, readFrom = null) => {
+      await open(fu); await until(`!!${rowOf("/uxnb.ipynb")} && !!${rowOf("/uxboard.board.json")}`, 15000);
+      const api = await ev(`!!window.navigation`);
+      await ev(`(() => { window.__heldW = 0; window.__hold = new Promise((r) => (window.__rel = r)); window.__sbTexSaveWrite = () => (window.__heldW++, window.__hold); return true; })()`);
+      const tag = "% " + what;
+      await typeEnd(tag);
+      await mark();
+      await ev(act);
+      await sleep(1500);
+      const waiting = await ev(`({ page: !!document.querySelector(".tex-page"), url: location.search, held: window.__heldW, ro: document.querySelector(".tex-src")?.readOnly })`).catch((e) => ({ gone: String(e).slice(0, 80) }));
+      check(api === !noNav && waiting.page === true && /tex=/.test(waiting.url) && waiting.held >= 1 && waiting.ro === true, `A7${noNav ? " (no Navigation API)" : ""}: ${what} right after an edit, its write held: the page waits, held read-only`, { api, ...waiting });
+      await ev(`(window.__rel?.(), true)`).catch(() => {});
+      const went = await fresh(gone, 30000).catch(() => false);
+      // (a page with no workspace of its own, the agents page: the file read back from the editor's page)
+      if (went && readFrom) await go(readFrom);
+      const bytes = went ? await readUx() : "";
+      check(went && bytes.endsWith(tag), `A7${noNav ? " (no Navigation API)" : ""}: …${what}, the write let go: gone, and the edit is in the file`, { went, url: went ? await ev(`location.pathname + location.search`) : null, tail: bytes.slice(-40) });
+    };
+    const notTex = `!document.querySelector(".tex-page") && !!${W}`;
+    await heldExit("the page's own reload", `(location.reload(), true)`, `!!document.querySelector(".tex-page .tex-src") && !!window.__sbTexWs`, false);
+    await heldExit("the page's own replace", `(location.replace("/?nb=" + ${JSON.stringify(nbRef7)}), true)`, notTex, false);
+    const hide = await send("Page.addScriptToEvaluateOnNewDocument", { source: "try { Object.defineProperty(window, 'navigation', { value: undefined, configurable: true }); } catch {}" });
+    await heldExit("a notebook clicked in the files", `(${rowOf("/uxnb.ipynb")}.click(), true)`, notTex, true);
+    await heldExit("a board clicked in the files", `(${rowOf("/uxboard.board.json")}.click(), true)`, `/board/.test(location.pathname)`, true);
+    await heldExit("the File menu's New notebook", `(document.querySelector('.tex-filemenu [data-f="texnb"]').click(), true)`, notTex, true);
+    await heldExit("the File menu's New board", `(document.querySelector('.tex-filemenu [data-f="texboard"]').click(), true)`, `/board/.test(location.pathname)`, true);
+    // (the page's home link, a plain click; and the files' Agents… (the hosting page's way out by its board path))
+    await heldExit("the Sagebrush home link", `(document.querySelector(".tex-page .tex-home").click(), true)`, `location.search.startsWith("?home") && !document.querySelector(".tex-page")`, true);
+    await heldExit("the files' Agents…", `(document.querySelector("#wssidebar .sbfiles .fagents").click(), true)`, `/agents/.test(location.pathname)`, true, base + "?latex=1");
+    await send("Page.removeScriptToEvaluateOnNewDocument", { identifier: hide.identifier });
   }
   await ev(`localStorage.removeItem("sagebrush-files-sidebar"); true`);
   // A2: an unclosed formula ends at a blank line: shown with a note, the rest of the document rendered as text
@@ -3080,6 +3090,10 @@ try {
     await sleep(1500);
     const onOpen = { runner: requests.slice(n0).filter((u) => /\/runner\/|sagebrush-worker\.js/.test(u)), frames: await ev(`document.querySelectorAll("iframe[sandbox]").length`), results: await resultsOf("/t/run.tex"), chips: await ev(`document.querySelectorAll(".tex-preview .sagechip").length`) };
     check(onOpen.runner.length === 0 && onOpen.frames === 0 && onOpen.results === null && onOpen.chips >= 2, "Run: nothing runs on open (no runner, no worker, no results file; the items show as not run)", onOpen);
+    // (in the editor, where Run is, a code item not run yet says how to run it; the published page,
+    //  examples and the CLI, with no Run, keep "not run": sagetex.mjs RUN_HINT)
+    const hint = await ev(`[...document.querySelectorAll(".tex-preview .sagechip.s-notrun")].map((c) => c.textContent)`);
+    check(hint.some((t) => /^(Sage|Python|Magma) item \d+: not run yet \(press Run or Shift\+Enter\)$/.test(t)) && !hint.some((t) => /item \d+: not run$/.test(t)), "Run: an item not run yet says \"not run yet (press Run or Shift+Enter)\" in the editor", hint);
     // embedded (?embed=1: the Agents page's pane frames the editor; the page's frame-ancestors 'self' admits this site's
     // own frames only): the document alone, no Files, home, title, File menu, Agent or Share, no pairing of its own (the
     // agent chunk never fetched, though this browser remembers a grant), and the pane's may-close answered by the
@@ -3259,6 +3273,97 @@ try {
       check(title === "Run the document's Python code in this browser: Shift+Enter" && ranPy && shown,
         "PythonTeX: Run runs \\py and pycode; their results read back where they stand (pycode's \\textbf bold), no item left not run; the Run button says it runs PythonTeX",
         { title, ranPy, shown, html: await ev(`document.querySelector(".tex-preview").innerHTML.slice(0, 1500)`) });
+      // (L5, Nov 10: the code a sageblock shows is coloured as the notebook colours it: hl.ts, its own chunk,
+      //  fetched only once a preview has such a block; drawn as text and fixed-class spans, never as HTML; refused, the
+      //  code stays plain; a render while it is on its way is coloured once it comes; many blocks, a few at a time)
+      {
+        const blockDoc = (b) => "\\documentclass{article}\n\\usepackage{sagetex}\n\\begin{document}\n" + b + "\\end{document}\n";
+        const block = (code) => "\\begin{sageblock}\n" + code + "\n\\end{sageblock}\n";
+        const CODE = "for k in range(3):\n    s = '<b>&amp;</b>' < 2  # not HTML";
+        const hlFetched = () => requests.filter((u) => /sagebrush-latex-hl\.js/.test(u)).length;
+        const PRE = `document.querySelector(".tex-preview .ch:not([hidden]) pre.sageblock")`;
+        // (no block: never fetched)
+        requests.length = 0;
+        await open(await mk("/t/hl-none.tex", enc(blockDoc("No block here: $\\sage{1+1}$.\n"))));
+        await until(`(document.querySelector(".tex-preview")?.textContent ?? "").includes("No block here")`, 20000);
+        await sleep(800);
+        check(hlFetched() === 0, "L5: a preview without a code block never fetches the highlighting chunk", { fetched: hlFetched() });
+        // (a block: coloured, its text the same, nothing in it parsed as HTML; the chunk fetched once)
+        const fhl = await mk("/t/hl.tex", enc(blockDoc(block(CODE))));
+        requests.length = 0;
+        await open(fhl);
+        const coloured = await until(`!!${PRE}?.matches("[data-hl]") && !!${PRE}.querySelector(".hk")`, 20000);
+        const shown = await ev(`(() => { const p = ${PRE}; return { text: p?.textContent, tags: [...new Set([...(p?.querySelectorAll("*") ?? [])].map((e) => e.tagName + "." + e.className))] }; })()`);
+        check(coloured && shown.text?.trim() === CODE && shown.tags.length > 0 && shown.tags.every((t) => /^SPAN\.h[a-z]$/.test(t)) && hlFetched() === 1,
+          "L5: a sageblock's code is coloured, its text the same and none of it HTML (no <b> from '<b>&amp;</b>'); the chunk fetched once", { coloured, shown, fetched: hlFetched() });
+        // (a Magma block beside a Sage one: the Sage one coloured, the Magma one left plain, as its comments and strings
+        //  aren't Sage's)
+        await open(await mk("/t/hl-magma.tex", enc(blockDoc(block("x = 1  # sage") + "\\begin{magmablock}\nx := 'a'; // it's Magma\n\\end{magmablock}\n"))));
+        const bothShown = await until(`!!document.querySelector(".tex-preview .ch:not([hidden]) pre.sageblock[data-hl]") && !!document.querySelector(".tex-preview .ch:not([hidden]) pre.sageblock.magma")`, 20000);
+        await sleep(800);
+        const magmaPre = await ev(`(() => { const p = document.querySelector(".tex-preview .ch:not([hidden]) pre.sageblock.magma"); return p && { hl: p.hasAttribute("data-hl"), spans: p.querySelectorAll("span").length, text: p.textContent }; })()`);
+        check(bothShown && magmaPre && !magmaPre.hl && magmaPre.spans === 0 && magmaPre.text.includes("// it's Magma"), "L5: a Magma block stays plain beside a coloured Sage block", magmaPre);
+        // (many blocks: all coloured, a few at a time: no long task on a timing box; reported on a build box)
+        await ev(watchLt);
+        await typeInto(blockDoc(Array.from({ length: 300 }, (_, k) => block("for i in range(" + k + "):\n    x = i * " + k + "  # block " + k)).join("\n")));
+        const allDone = await until(`document.querySelectorAll(".tex-preview .ch:not([hidden]) pre.sageblock").length === 300 && document.querySelectorAll(".tex-preview .ch:not([hidden]) pre.sageblock:not([data-hl])").length === 0`, 30000);
+        const ltHl = await ev(`window.__lt`);
+        check(allDone, "L5: 300 blocks: all coloured", { allDone, n: await ev(`document.querySelectorAll(".tex-preview .ch:not([hidden]) pre.sageblock[data-hl]").length`) });
+        if (BOX === "timing") check(ltHl.every((d) => d <= 50), "L5: 300 blocks coloured with no long task over 50 ms (a timing box)", ltHl);
+        else console.log("timing, reported, not gated (a build box): long tasks while 300 blocks were coloured (ms):", JSON.stringify(ltHl));
+        await typeInto(blockDoc(block(CODE)));
+        await savedNow(10000);
+        // (refused: the code stays plain, with no error. The cache off for this and the next row, so the chunk is asked
+        //  for over the network each time, where the Fetch domain sees it, not taken from the memory cache)
+        await send("Network.setCacheDisabled", { cacheDisabled: true });
+        const e0 = errors.length;
+        onPaused = (p) => { send("Fetch.failRequest", { requestId: p.requestId, errorReason: "ConnectionFailed" }); };
+        await send("Fetch.enable", { patterns: [{ urlPattern: "*sagebrush-latex-hl.js*" }] });
+        await open(fhl);
+        await until(`!!${PRE}`, 20000);
+        await sleep(1500);
+        const plain = await ev(`(() => { const p = ${PRE}; return { spans: p.querySelectorAll("span").length, text: p.textContent }; })()`);
+        await send("Fetch.disable"); onPaused = null;
+        check(plain.spans === 0 && plain.text.trim() === CODE && errors.length === e0, "L5: the highlighting chunk refused: the code stays plain, and no error", { plain, errors: errors.slice(e0) });
+        // (renders while the chunk is on its way (astra's SEC on #1009): 20 of them make one wait and one queue, and once
+        //  it comes the newest render's block is the one coloured)
+        let held = null;
+        onPaused = (p) => { held = p.requestId; };
+        await send("Fetch.enable", { patterns: [{ urlPattern: "*sagebrush-latex-hl.js*" }] });
+        await open(fhl);
+        await until(`!!${PRE}`, 20000);
+        for (let i = 0; i < 100 && !held; i++) await sleep(100);
+        for (let i = 1; i <= 20; i++) { await typeInto(blockDoc(block(CODE + "\nn = " + i))); await sleep(60); }
+        const rerendered = await until(`(${PRE}?.textContent ?? "").includes("n = 20")`, 20000);
+        if (held) await send("Fetch.continueRequest", { requestId: held });
+        const late = await until(`(() => { const p = ${PRE}; return !!p && p.textContent.includes("n = 20") && !!p.querySelector(".hn"); })()`, 20000);
+        await sleep(300);
+        const queues = await ev(`window.__sbHlCalls ?? 0`);
+        await send("Fetch.disable"); onPaused = null;
+        check(!!held && rerendered && late && queues === 1 && errors.length === e0, "L5: 20 renders while the chunk is on its way: one call to colour once it comes, and the newest block coloured", { held: !!held, rerendered, late, queues, errors: errors.slice(e0) });
+        await typeInto(blockDoc(block(CODE)));
+        await savedNow(10000);
+        // (the page goes to another file while the chunk is on its way: the first file's wait colours nothing; the other's
+        //  block is coloured by its own)
+        const fother = await mk("/t/hl-other.tex", enc(blockDoc(block("OTHER = 1"))));
+        held = null;
+        onPaused = (p) => { held = p.requestId; };
+        await send("Fetch.enable", { patterns: [{ urlPattern: "*sagebrush-latex-hl.js*" }] });
+        await open(fhl);
+        await until(`!!${PRE}`, 20000);
+        for (let i = 0; i < 100 && !held; i++) await sleep(100);
+        await ev(`(window.__sbTex({ path: "/t/hl-other.tex", fid: ${JSON.stringify(fother)} }), 1)`);
+        await until(`(${PRE}?.textContent ?? "").includes("OTHER")`, 20000);
+        if (held) await send("Fetch.continueRequest", { requestId: held });
+        const otherDone = await until(`!!${PRE}?.querySelector(".hn")`, 20000);
+        await sleep(300);
+        const queues2 = await ev(`window.__sbHlCalls ?? 0`);
+        await send("Fetch.disable"); onPaused = null;
+        await send("Network.setCacheDisabled", { cacheDisabled: false });
+        check(!!held && otherDone && queues2 === 1 && errors.length === e0, "L5: the page leaves a file while the chunk is on its way: the left file's wait colours nothing, the new one's block is coloured", { held: !!held, otherDone, queues2, errors: errors.slice(e0) });
+        await typeInto(blockDoc(block(CODE)));
+        await savedNow(10000);
+      }
       // (William's L3, Nov 10: Shift+Enter moved the preview by a page, Follow off: the place the person looks at keeps its
       //  place. Twelve sageblocks, each losing its "not run" chip as the Run's results come; the person looks at the
       //  seventh's code, near the top of the preview, so the groups replaced are the ones in view, which the browser's

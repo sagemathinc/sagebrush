@@ -110,6 +110,8 @@ const cases = [
   ["a push to track/math", "push", "refs/heads/track/math", {}, REPO, false],
   ["a push of another tag", "push", "refs/tags/v1.0.0", {}, REPO, false],
   ["a push of a branch named like the tag", "push", "refs/heads/app-v1", {}, REPO, false],
+  ["a merge group", "merge_group", "refs/heads/gh-readonly-queue/master/pr-1306-dddddddddddddddddddddddddddddddddddddddd", {}, REPO, false],
+  ["a merge group cannot request signing", "merge_group", "refs/tags/app-v0.4.0", { sign: true }, REPO, false],
   ["a pull request", "pull_request", "refs/pull/1/merge", {}, REPO, false],
   ["a pull request whose ref looks like the tag", "pull_request", "refs/tags/app-v0.4.0", { sign: true }, REPO, false],
   ["a pull_request_target", "pull_request_target", "refs/tags/app-v0.4.0", { sign: true }, REPO, false],
@@ -257,6 +259,36 @@ if (jit) {
       }
     }
   }
+}
+// The secrets check (.github/workflows/signing-check.yml): run by hand only, in the same environment, and only from
+// master on this repository; its `if:` read and evaluated as above (it has no job upstream).
+{
+  const sc = readFileSync(join(root, ".github", "workflows", "signing-check.yml"), "utf8");
+  const on = /^on:\n([\s\S]*?)(?=^\S)/m.exec(sc)?.[1] ?? "";
+  ok(/^  workflow_dispatch:\s*$/m.test(on) && on.split("\n").filter((l) => /^  \S/.test(l)).length === 1, "signing-check runs only by hand (workflow_dispatch alone)");
+  const check = /^  check:\n([\s\S]*?)(?=^  [A-Za-z0-9_-]+:\n|(?![\s\S]))/m.exec(sc)?.[1] ?? "";
+  ok(/^    environment: sagebrush-signing$/m.test(check), "signing-check uses the sagebrush-signing environment");
+  const scIf = /^    if: (.+)$/m.exec(check)?.[1];
+  ok(!!scIf, "signing-check's job has an if: on one line");
+  if (scIf) {
+    for (const [what, ref, repository, runs] of [
+      ["a dispatch from master", "refs/heads/master", REPO, true],
+      ["a dispatch from a branch", "refs/heads/track/math", REPO, false],
+      ["a dispatch from a branch named master-ish", "refs/heads/master2", REPO, false],
+      ["a dispatch from a tag", "refs/tags/app-v0.4.0", REPO, false],
+      ["a fork's dispatch from master", "refs/heads/master", "someone/sagebrush", false],
+    ]) {
+      let got;
+      try { got = jobIf(scIf, { github: { event_name: "workflow_dispatch", ref, repository }, inputs: {}, needs: {}, cancelled: false, upstream: [] }); } catch (e) { ok(false, `signing-check, ${what}: ${e.message}`); continue; }
+      ok(got === runs, `signing-check, ${what}: ${runs ? "runs" : "never runs"} (the condition says ${got})`);
+    }
+  }
+}
+// The signed disk image is kept 1 day as an artifact: in a public repository any signed-in GitHub user can download
+// it (design/native-desktop.md §6.3).
+{
+  const up = /name: sagebrush-app-macos-signed\n[\s\S]*?retention-days: (\d+)/.exec(job[1]);
+  ok(up && up[1] === "1", `the signed artifact is kept 1 day (retention-days ${up ? up[1] : "missing"})`);
 }
 console.log(`${passed} passed, ${failed} failed`);
 process.exit(failed ? 1 : 0);

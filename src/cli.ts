@@ -898,6 +898,12 @@ async function main(argv = process.argv.slice(2), preset?: LimitsText) {
     process.exitCode = installKernel(argv.slice(1), argv[0] === "--uninstall-jupyter-kernel");
     return;
   }
+  // (sagebrush notebook run FILE.ipynb: src/notebook-run.ts; as `board`'s commands: `run` is the command unless a
+  // folder named run is here and nothing names a notebook, when it is still the server's folder)
+  if (argv[0] === "notebook" && argv[1] === "run" && argv.length > 2 && (argv.slice(2).some((a) => /\.ipynb$/i.test(a) || a === "-h" || a === "--help") || !existsSync("run"))) {
+    process.exitCode = await (await import("./notebook-run")).notebookRun(argv.slice(2));
+    return;
+  }
   if (argv[0] === "notebook" || argv[0] === "--notebook") {
     if (!(await serverLimits(lim))) return;
     await runNotebookServer(argv.slice(1));

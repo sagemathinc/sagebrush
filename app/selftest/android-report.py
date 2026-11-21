@@ -61,6 +61,12 @@ DESKTOP_BOARD = [
     "a page the app doesn't have isn't the notebook",
     "the analyzer and KaTeX still load",
 ]
+# (the desktop app's files from the computer by its grants only, web/index.html selftest: required with --desktop only)
+DESKTOP_FILES = [
+    "a grant the app didn't make reaches nothing",
+    "a name outside the notebook's folder is refused",
+    "the page has no fs plugin",
+]
 # (none is a prefix of another)
 INFO = [
     "origin",
@@ -138,7 +144,7 @@ def main():
     if engine not in ENGINES or not 1 <= len(args) <= 2:
         print("usage: android-report.py --engine chromium|webkit [--desktop] report.txt [summary.md]", file=sys.stderr)
         sys.exit(2)
-    required = REQUIRED + (DESKTOP + DESKTOP_BOARD if desktop else [])
+    required = REQUIRED + (DESKTOP + DESKTOP_BOARD + DESKTOP_FILES if desktop else [])
     known = required + REPORTED + ["no exception"]
     lines = open(args[0], encoding="utf-8").read().splitlines()
     summary = args[1] if len(args) > 1 else None

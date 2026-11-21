@@ -118,11 +118,32 @@ try {
       check(!(await shown()), `${at}: a click hides them`);
     }
   }
+  // ---- the first paint: once the page's HTML is parsed (readyState "interactive"), before its workspace is open, the
+  // files are already shown as they were left, and the placeholder notebook (its name and cells) is hidden
+  {
+    await send("Emulation.setDeviceMetricsOverride", { width: 1280, height: 800, deviceScaleFactor: 1, mobile: false });
+    await ev(`(localStorage.setItem("sagebrush-files-sidebar", "1"), 1)`);
+    const { identifier } = await send("Page.addScriptToEvaluateOnNewDocument", { source: `document.addEventListener("readystatechange", () => {
+      if (document.readyState !== "interactive" || window.__firstPaint) return;
+      const side = document.getElementById("wssidebar"), cells = document.getElementById("cells"), name = document.getElementById("nbname");
+      window.__firstPaint = { files: document.body.classList.contains("wsfiles") && !!side && !side.hidden,
+        cells: cells ? getComputedStyle(cells).visibility : null, name: name ? getComputedStyle(name).visibility : null };
+    });` });
+    await go(base);
+    await until(`!!window.sagebrush?.notebook && !!document.querySelector(".cell textarea")`, 60000);
+    const fp = await ev("window.__firstPaint ?? null");
+    check(!!fp && fp.files === true, "first paint: the files shown as they were left, before the workspace is open", fp);
+    check(!!fp && fp.cells === "hidden" && fp.name === "hidden", "first paint: the placeholder notebook's name and cells hidden while the page opens its document", fp);
+    check(await until(`!document.body.classList.contains("opening") && getComputedStyle(document.getElementById("cells")).visibility === "visible"`, 30000), "the document opened: its cells shown");
+    await send("Page.removeScriptToEvaluateOnNewDocument", { identifier });
+  }
+
   // ---- the shortcut's near misses, on the notebook page at a desktop width (the files hidden to begin with)
   await send("Emulation.setDeviceMetricsOverride", { width: 1280, height: 800, deviceScaleFactor: 1, mobile: false });
   await ev(`(localStorage.setItem("sagebrush-files-sidebar", "0"), 1)`);
   await go(base);
-  await until(`!!window.sagebrush?.notebook && !!${B} && !${B}.hidden && !!document.querySelector(".cell textarea")`, 60000);
+  // (the document opened: until then the placeholder's cells are hidden, and a focus() on one does nothing)
+  await until(`!!window.sagebrush?.notebook && !!${B} && !${B}.hidden && !!document.querySelector(".cell textarea") && !document.body.classList.contains("opening")`, 60000);
   // (a code cell's editor, visible: the caret at its end)
   const ta = `[...document.querySelectorAll(".cell textarea")].find((t) => t.offsetParent)`;
   const v0 = await ev(`(() => { const t = ${ta}; t.focus(); t.setSelectionRange(t.value.length, t.value.length); return t.value; })()`);

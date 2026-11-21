@@ -84,10 +84,12 @@ try {
   check(await ev(`!document.querySelector("#filemenu").hidden && !document.querySelector("#filemenu [data-group=new]").nextElementSibling.hidden`), "New ▸ opens in place, the menu staying open");
   check(await ev(`document.querySelector("#filemenu [data-group=download]").nextElementSibling.getBoundingClientRect().height === 0`), "…a group not opened shows nothing");
   await shot("notebook-file-menu");
-  // File ▸ Examples…: New ▸ From an example…, at the top. A site without the gallery: this page's own list, as before
+  // File ▸ Examples…: New ▸ From an example…, at the top. A site without the gallery: said, and no list of the page's
+  // own (the gallery's panel is the only one)
   await ev(`(() => { document.querySelector("#filemenu [data-item=examples]").click(); return 1; })()`);
-  check(await until(`!!document.querySelector("#exdlg[open]")`), "File ▸ Examples… on a site without the gallery: the page's own list");
-  await ev(`(() => { document.querySelector("#exdlg").close(); return 1; })()`);
+  // (said in the status line and announced: the announcement read too, as the status line's next news (the interpreter
+  //  ready) can replace it first on a slow machine)
+  check(await until(`/The examples aren't available here\./.test((document.querySelector("#announce")?.textContent ?? "") + " " + (document.querySelector("#status")?.textContent ?? ""))`) && !(await ev(`!!document.querySelector("#exdlg, dialog.sb-examples")`)), "File ▸ Examples… on a site without the gallery: the examples aren't available here, no list");
   // (a site with the gallery: its panel, for Examples… and From an example… alike)
   await ev(STUB_CATALOG);
   await ev(`(() => { document.querySelector("#filemenu [data-item=examples]").click(); return 1; })()`);
@@ -95,7 +97,7 @@ try {
   await ev(closeGallery);
   await until(`!document.querySelector("dialog.sb-examples")`);
   await ev(`(() => { document.querySelector("#filemenu [data-item=fromExample]").click(); return 1; })()`);
-  check(await until(galleryShown("Stub notebook", "Stub board")) && !(await ev(`!!document.querySelector("#exdlg[open]")`)), "New ▸ From an example…: the same panel, not the old list");
+  check(await until(galleryShown("Stub notebook", "Stub board")), "New ▸ From an example…: the same panel");
   await ev(closeGallery);
   await ev(UNSTUB);
   await ev(`(() => { document.querySelector("#filebtn").click(); return 1; })()`);
@@ -221,13 +223,12 @@ try {
   check(bdShape[8]?.startsWith("download▸[.board.json,HTML (one file),JSON Canvas,Copy JSON,Everything (.zip)…]") && (await ev(`(() => { const b = document.querySelector("[data-sbb=filemenu] [data-item=share]"); return b.disabled && !b.hidden; })()`)), "…its own downloads; Share… shown, disabled (Sagebrush's board page: disabled, not hidden, design §3): " + JSON.stringify(bdShape));
   // (why Share… is disabled, said where it is: run 12, X01 clicked it and got nothing)
   check(await ev(`/isn't available yet.*HTML \\(one file\\)/.test(document.querySelector("[data-sbb=filemenu] [data-item=share]").title)`), "…its disabled Share… says why, and what to do instead (Download ▸ HTML)");
-  // File ▸ Examples… on the board page: the page's own list here; the gallery's panel where the site has it
+  // File ▸ Examples… on the board page: said here, without the gallery; the gallery's panel where the site has it
   await ev(`(() => { document.querySelector("[data-sbb=filemenu] [data-item=examples]").click(); return 1; })()`);
-  check(await until(`!!document.querySelector("[data-sbb=exdlg][open]")`), "the board page's File ▸ Examples… on a site without the gallery: its own list");
-  await ev(`(() => { document.querySelector("[data-sbb=exdlg]").close(); return 1; })()`);
+  check(await until(`/The examples aren't available here\./.test(document.querySelector("[data-sbb=say]")?.textContent ?? "")`) && !(await ev(`!!document.querySelector("[data-sbb=exdlg], dialog.sb-examples")`)), "the board page's File ▸ Examples… on a site without the gallery: the examples aren't available here, no list");
   await ev(STUB_CATALOG);
   await ev(`(() => { document.querySelector("[data-sbb=filemenu] [data-item=examples]").click(); return 1; })()`);
-  check(await until(galleryShown("Stub board", "Stub notebook")) && !(await ev(`!!document.querySelector("[data-sbb=exdlg][open]")`)), "the board page's File ▸ Examples…: the gallery's panel, on boards first");
+  check(await until(galleryShown("Stub board", "Stub notebook")), "the board page's File ▸ Examples…: the gallery's panel, on boards first");
   await ev(closeGallery);
   await ev(UNSTUB);
   check(await ev(`!!document.querySelector("[data-sbb=menu] [data-sbb=mermaid]") && !!document.querySelector("[data-sbb=menu] [data-sbb=revert]")`), "Import Mermaid… and Revert are in the board's ⋯");
@@ -262,12 +263,12 @@ try {
   await until(`!!window.sagebrush?.board?.snapshot() && !!document.querySelector("[data-sbb=filemenu] [data-item=newNotebook]")`, 60000);
   check(await ev(`!document.querySelector("[data-sbb=filemenu] [data-item=newMatlab]") && !document.querySelector("[data-sbb=newmatlab]")`), "H10: no New ▸ MATLAB notebook on the board page");
   // File ▸ Examples… on a page with no workspace (?workspace=0, a localhost-only switch): the gallery would have
-  // nowhere to copy into, so even where the site has it, the page's own list opens
+  // nowhere to copy into, so even where the site has it, it isn't opened: said
   await go(base + "board/?workspace=0");
   await until(`!!window.sagebrush?.board?.snapshot() && !!document.querySelector("[data-sbb=filemenu] [data-item=examples]:not([disabled])")`, 60000);
   await ev(STUB_CATALOG);
   await ev(`(() => { document.querySelector("[data-sbb=filemenu] [data-item=examples]").click(); return 1; })()`);
-  check(await until(`!!document.querySelector("[data-sbb=exdlg][open]")`) && !(await ev(`!!document.querySelector("dialog.sb-examples")`)), "a page with no workspace: File ▸ Examples… opens its own list, not the gallery (nowhere to copy into)");
+  check(await until(`/The examples aren't available here\./.test(document.querySelector("[data-sbb=say]")?.textContent ?? "")`) && !(await ev(`!!document.querySelector("[data-sbb=exdlg], dialog.sb-examples")`)), "a page with no workspace: File ▸ Examples… says the examples aren't available here, not the gallery (nowhere to copy into)");
 } catch (e) {
   fails.push("threw: " + (e?.stack ?? e));
 } finally {

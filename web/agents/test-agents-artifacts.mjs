@@ -521,8 +521,77 @@ try {
   }
 
   // ======================================================================== saved, with its base; reopened
+  // ======================================================================== a message's code blocks, in colour
+  // (each fenced block coloured by its fence's language, or a guess without one; the text exactly as written)
+  if (want("codecolor")) {
+    const blocks = [
+      ["python", "def f(x):\n    # square it\n    return x ** 2  # done\nprint(f(3), 'ok')"],
+      ["", "x = var('x')\nprint(factor(2^64 - 1))"],
+      ["matlab", "% a sine\nx = linspace(0, 3, 200);\nplot(x, sin(x.^2))"],
+      ["js", "const n = 42; // the answer\nconsole.log(`n is ${n}`);"],
+      ["text", "plain words, if 1 else 2"],
+      ["js", "const s = '<img src=x onerror=\"window.__cc=1\">' + \"</code></pre><b>bold</b> & more\";"],
+    ];
+    const text = "Here:\n\n" + blocks.map(([l, c]) => "```" + l + "\n" + c + "\n```").join("\n\n") + "\n";
+    const t = `t${++turnN}`;
+    event(t, { type: "turn_started" });
+    event(t, { type: "message_revised", message: "mc", revision: 1 });
+    event(t, { type: "text_delta", message: "mc", revision: 1, text });
+    event(t, { type: "turn_finished", outcome: "completed" });
+    await until(`[...document.querySelectorAll('.msg pre.code')].length >= ${blocks.length}`, 15000);
+    const got = await ev(`[...document.querySelectorAll('.msg pre.code code')].slice(-${blocks.length}).map((c) => ({ text: c.textContent, spans: [...c.querySelectorAll('span')].map((s) => [s.className, s.textContent]), color: (() => { const s = c.querySelector('.hk, .hb'); return s ? getComputedStyle(s).color : null; })() }))`);
+    const has = (i, cls, txt) => got[i]?.spans.some(([c, x]) => c === cls && x === txt);
+    ok(got.length === blocks.length && got.every((g, i) => g.text === blocks[i][1]), "a message's code blocks keep their text exactly, coloured or not", got.map((g) => g.text));
+    ok(has(0, "hk", "def") && has(0, "hf", "f") && has(0, "hc", "# square it") && has(0, "hs", "'ok'") && has(0, "hb", "print") && has(0, "hn", "2"),
+      "a python block: keywords, the name defined, comments, strings, builtins and numbers in colour", got[0]?.spans);
+    ok(has(1, "hb", "factor") && has(1, "hs", "'x'"), "a block without a language is guessed (here Sage: factor is one of its builtins)", got[1]?.spans);
+    ok(got[2]?.spans.some(([c, x]) => c === "hc" && x.startsWith("% a sine")) && has(2, "hn", "200"), "a matlab block: its % comment and numbers", got[2]?.spans);
+    ok(has(3, "hk", "const") && has(3, "hc", "// the answer") && has(3, "hn", "42"), "a js block: keywords, comments and numbers", got[3]?.spans);
+    ok(got[4]?.spans.length === 0, "a text block stays plain", got[4]?.spans);
+    const inj = await ev(`(() => { const c = [...document.querySelectorAll('.msg pre.code code')].at(-1); return { tags: [...c.querySelectorAll('*')].map((e) => e.tagName), cc: window.__cc ?? null }; })()`);
+    ok(inj.tags.every((t) => t === "SPAN") && inj.cc === null, "markup in a code block stays text: no element but the colour spans, nothing run", inj);
+    ok(got[0]?.color && got[0].color !== "rgb(36, 35, 31)", "the colours are the page's own (not the text colour)", got[0]?.color);
+  }
+
   // ======================================================================== the way to the files: Files… and the switch
   if (want("filesbtn")) {
+    const BIG = `document.getElementById('files-big').click()`, SWITCH = `document.querySelector('nav.side .sb-mode [data-mode="files"]').click()`;
+    // (with the agent connected, Files… and the switch open the files in a new tab: this page, its connection and a
+    //  running turn stay (leaving would lose the connection, and a page come back by navigating can't take it up again).
+    //  window.open stubbed: what it was asked, and a tab given or refused)
+    const besideTab = async (click, give) => {
+      await ev(`(() => { window.__opened = []; window.open = (...a) => { window.__opened.push(a); return ${give ? "{ opener: 1 }" : "null"}; }; })()`);
+      await ev(`localStorage.setItem("sagebrush-files-sidebar", "0")`);
+      const tB = `t${++turnN}`;
+      event(tB, { type: "turn_started" });
+      event(tB, { type: "message_revised", message: "mb", revision: 1 });
+      event(tB, { type: "text_delta", message: "mb", revision: 1, text: "still at it" });
+      await until(`[...document.querySelectorAll('.turn')].some((d) => /still at it/.test(d.textContent))`);
+      await ev(click);
+      await sleep(1000);
+      await until(`document.readyState === "complete"`, 30000).catch(() => {}); // (a page that left: read where it is)
+      const st = await ev(`({ path: location.pathname, opened: window.__opened, pref: localStorage.getItem("sagebrush-files-sidebar"), toast: document.getElementById('toast')?.hidden === false ? document.getElementById('toast').textContent : null, stop: document.querySelector('#stop')?.hidden === false, connect: document.querySelector('#connect')?.textContent ?? null })`);
+      const r = await call("workspace.list", { folder: "/" }).then(() => "answered", (e) => e.message);
+      // (a page that left lost its agent (what these rows guard against): paired again, so the rows after it run)
+      if (sock) event(tB, { type: "turn_finished", outcome: "completed" });
+      if (st.path !== "/agents/") { await pair(); await converse(); }
+      return { ...st, r };
+    };
+    const tabBig = await besideTab(BIG, true);
+    ok(tabBig.path === "/agents/" && JSON.stringify(tabBig.opened) === JSON.stringify([["/", "_blank"]]) && tabBig.pref === "1" && tabBig.stop && tabBig.connect === "Connected" && tabBig.r === "answered" && tabBig.toast === null,
+      "with the agent connected, Files… opens the files in a new tab: this page stays, the turn still running, the agent still answered", tabBig);
+    const tabSwitch = await besideTab(SWITCH, true);
+    ok(tabSwitch.path === "/agents/" && JSON.stringify(tabSwitch.opened) === JSON.stringify([["/", "_blank"]]) && tabSwitch.stop && tabSwitch.r === "answered",
+      "with the agent connected, the switch's Files opens a new tab the same way", tabSwitch);
+    const blocked = await besideTab(BIG, false);
+    ok(blocked.path === "/agents/" && blocked.r === "answered" && /blocked the new tab for Files/.test(blocked.toast ?? ""),
+      "a new tab the browser refuses: this page stays, connected, and says how to get to the files", blocked);
+    await ev(`delete window.open`);
+    // (no agent connected (its connection closed): Files leaves this page, as before)
+    const unpair = async () => {
+      sock.close();
+      await until(`document.querySelector('#connect').textContent !== 'Connected'`, 15000);
+    };
     // (a text file's edit typed just now (its 700 ms save still pending), then Files… at once: the page leaves only after
     //  the edit is saved; read back through the agent once paired again)
     const quick = async (path, click, word) => {
@@ -532,6 +601,7 @@ try {
       await ev(`(() => { const t = document.querySelector('${PANE} .file-body textarea'); t.focus(); t.setSelectionRange(t.value.length, t.value.length); })()`);
       await send("Input.insertText", { text: word });
       await ev(`localStorage.setItem("sagebrush-files-sidebar", "0")`);
+      await unpair();
       await ev(click);
       await until(`location.pathname === "/" && document.readyState === "complete"`, 30000);
       const pref = await ev(`localStorage.getItem("sagebrush-files-sidebar")`);
@@ -540,9 +610,9 @@ try {
       const r = await call("workspace.read", { path });
       return { pref, text: typeof r.content === "string" ? r.content : r.content?.text ?? JSON.stringify(r.content) };
     };
-    const big = await quick("/notes/quick.txt", `document.getElementById('files-big').click()`, "NEW-BIG");
+    const big = await quick("/notes/quick.txt", BIG, "NEW-BIG");
     ok(big.text.includes("NEW-BIG") && big.pref === "1", "an edit typed just before Files… is saved before the page leaves, and the files are set to show", big);
-    const small = await quick("/notes/quick2.txt", `document.querySelector('nav.side .sb-mode [data-mode="files"]').click()`, "NEW-SMALL");
+    const small = await quick("/notes/quick2.txt", SWITCH, "NEW-SMALL");
     ok(small.text.includes("NEW-SMALL") && small.pref === "1", "the switch's Files leaves the same way: the edit saved, the files set to show", small);
     // (a cell running: Files… asks first, as closing the pane does; Cancel keeps this page, the cell running, nothing set)
     const path = "/notes/slow-files.ipynb";
@@ -551,7 +621,8 @@ try {
     await ev(`${cellJs(0)}.querySelector('.runb').click()`);
     await until(`/· running/.test([...document.querySelectorAll('#artifacts .tab')].map((t) => t.textContent).join())`, 120000);
     await ev(`localStorage.setItem("sagebrush-files-sidebar", "0")`);
-    await ev(`document.getElementById('files-big').click()`);
+    await unpair();
+    await ev(BIG);
     await until(`document.querySelector('#close-running').open`);
     await ev(`document.querySelector('#close-running').close('')`);
     await sleep(500);
@@ -561,6 +632,8 @@ try {
     await until(`document.querySelector('#close-running').open`);
     await ev(`document.querySelector('#close-running').close('stop')`);
     await until(`!document.body.classList.contains('has-artifact')`, 10000);
+    await pair();
+    await converse();
   }
 
   // ======================================================================== Open in Sagebrush: the file's own page
@@ -750,6 +823,90 @@ try {
     const f5 = await call("workspace.read", { path: P5 });
     ok(held && closed5 && r5?.ended === "stopped" && !JSON.stringify(f5.content.json.cells[0].outputs ?? []).includes("CLOSED 5"), "PR5: the pane closed while the run waits: the run ends, stopped, nothing saved", { held, closed5, r5 });
     event(t5, { type: "turn_finished", outcome: "completed" });
+    // (PR-SELF: a notebook the agent creates in its turn runs once by itself in the pane; the agent's own run of it,
+    //  asked at once while that run still holds the cell, runs it and answers with what it ran: done, its output,
+    //  saved; never the cell "skipped" and the run "error", which the agent reads as its run not allowed)
+    {
+      const PS = "/notes/pr-self.ipynb";
+      const tS = `t${++turnN}`;
+      event(tS, { type: "turn_started" });
+      await sleep(300);
+      await call("workspace.create", { path: PS, content: docFor(PS, [{ code: "import time\ntime.sleep(1.5)\nprint('SELF', 7)" }]), mode: "python" });
+      const rS = await runIn(PS, tS);
+      await until(`document.querySelector('${PANE} .saved')?.textContent === 'Saved'`, 10000).catch(() => {});
+      const fS = await call("workspace.read", { path: PS });
+      ok(rS?.ended === "done" && rS.cells?.[0]?.status === "ok" && rS.cells?.[0]?.out === "SELF 7\n" && JSON.stringify(fS.content.json.cells[0].outputs ?? []).includes("SELF 7"),
+        "PR-SELF: the agent's run of a notebook it just created, while its run once by itself still holds the cell: done, its output, saved (not stopped)", { rS });
+      event(tS, { type: "turn_finished", outcome: "completed" });
+    }
+    // (PR-SELF-STOP: the agent's run stopped (run_stop) while it still waits for the run once by itself: its cell never
+    //  starts after the call ended, and the run it waited for isn't interrupted: the cell ran exactly once, to its end)
+    {
+      const PT = "/notes/pr-self-stop.ipynb";
+      const tT = `t${++turnN}`;
+      event(tT, { type: "turn_started" });
+      await sleep(300);
+      await call("workspace.create", { path: PT, content: docFor(PT, [{ code: "try:\n    n += 1\nexcept NameError:\n    n = 1\nimport time\ntime.sleep(3)\nprint('RUNS', n)" }]), mode: "python" });
+      const pT = runIn(PT, tT);
+      const waiting = await until(`/running|queued/.test(document.querySelector('${PANE} .nb-root .cell')?.className ?? '')`, 60000).catch(() => false);
+      await sleep(500);
+      const st = await call("workspace.run_stop", {});
+      const rT = await pT;
+      // (until the cell is idle and stays so: a late run would start only as the run it waited for ends)
+      for (let quiet = 0, t0 = Date.now(); quiet < 4000 && Date.now() - t0 < 30000; ) { await sleep(250); quiet = /running|queued/.test(await ev(`document.querySelector('${PANE} .nb-root .cell')?.className ?? ''`)) ? 0 : quiet + 250; }
+      await until(`document.querySelector('${PANE} .saved')?.textContent === 'Saved'`, 10000).catch(() => {});
+      const outT = await ev(`document.querySelector('${PANE} .nb-root .cell .out')?.textContent ?? ''`);
+      const fileT = JSON.stringify((await call("workspace.read", { path: PT })).content.json.cells[0].outputs ?? []);
+      ok(waiting && st?.stopped === true && rT?.ended === "stopped" && /RUNS 1/.test(outT) && !/RUNS 2|Interrupt/.test(outT) && /RUNS 1/.test(fileT) && !/RUNS 2/.test(fileT),
+        "PR-SELF-STOP: the agent's run stopped while it waits for the run once by itself: it never starts the cell after, and doesn't interrupt that run (the cell ran once, to its end)", { waiting, st, rT, outT, fileT });
+      event(tT, { type: "turn_finished", outcome: "completed" });
+      // (the same with the call's own deadline (timeout_s 1) ending it while it waits)
+      const PU = "/notes/pr-self-timeout.ipynb";
+      const tU = `t${++turnN}`;
+      event(tU, { type: "turn_started" });
+      await sleep(300);
+      await call("workspace.create", { path: PU, content: docFor(PU, [{ code: "try:\n    m += 1\nexcept NameError:\n    m = 1\nimport time\ntime.sleep(3)\nprint('TRIES', m)" }]), mode: "python" });
+      await until(`/running|queued/.test(document.querySelector('${PANE} .nb-root .cell')?.className ?? '')`, 60000).catch(() => false);
+      const rU = await call("workspace.run_notebook", { path: PU, timeout_s: 1, conversation: conv, turn_id: tU }).catch((e) => ({ error: e.message }));
+      // (until the cell is idle and stays so: a late run would start only as the run it waited for ends)
+      for (let quiet = 0, t0 = Date.now(); quiet < 4000 && Date.now() - t0 < 30000; ) { await sleep(250); quiet = /running|queued/.test(await ev(`document.querySelector('${PANE} .nb-root .cell')?.className ?? ''`)) ? 0 : quiet + 250; }
+      await until(`document.querySelector('${PANE} .saved')?.textContent === 'Saved'`, 10000).catch(() => {});
+      const outU = await ev(`document.querySelector('${PANE} .nb-root .cell .out')?.textContent ?? ''`);
+      const fileU = JSON.stringify((await call("workspace.read", { path: PU })).content.json.cells[0].outputs ?? []);
+      ok(rU?.ended !== "done" && /TRIES 1/.test(outU) && !/TRIES 2|Interrupt/.test(outU) && /TRIES 1/.test(fileU) && !/TRIES 2/.test(fileU),
+        "PR-SELF-STOP: the same when the call's deadline ends it while it waits: no late run of the cell, and the run it waited for not interrupted", { rU, outU, fileU });
+      event(tU, { type: "turn_finished", outcome: "completed" });
+    }
+    // (PR-LATE: the cell busy with the person's own Run; the agent's call on it ends while it waits, by its deadline
+    //  (timeout_s 1) or by run_stop: it answers at once, and never runs the cell afterwards. The cell counts its runs in
+    //  the kernel, so the person's run says 1 and a late one would say 2, shown or saved. The ended call's last stage
+    //  (deliver) held 2.5 s: the person's run ends inside it, the moment a wait that only the call's close ended would
+    //  start the cell)
+    for (const how of ["timeout", "run_stop"]) {
+      const PX = `/notes/pr-late-${how}.ipynb`, word = `LATE-AFTER-${how.toUpperCase()}`;
+      await call("workspace.create", { path: PX, content: docFor(PX, [{ code: `try:\n    k += 1\nexcept NameError:\n    k = 1\nimport time\ntime.sleep(2)\nprint('${word}', k)` }]), mode: "python" });
+      const tx = `t${++turnN}`;
+      event(tx, { type: "turn_started" });
+      await sleep(200);
+      await openNotebook(PX, { turn: tx, finish: false });
+      await ev(`document.querySelector('${PANE} .cell .runb').click()`);
+      const busy = await until(`!!document.querySelector('${PANE} .cell.running, ${PANE} .cell.queued')`).catch(() => false);
+      await ev(`(window.__runHold = (st) => st === "deliver" ? new Promise((r) => setTimeout(r, 2500)) : undefined, true)`);
+      const t0 = Date.now();
+      const px = call("workspace.run_notebook", { path: PX, timeout_s: how === "timeout" ? 1 : 120, conversation: conv, turn_id: tx });
+      if (how === "run_stop") { await sleep(500); await call("workspace.run_stop", {}); }
+      const result = await px.catch((e) => ({ error: e.message }));
+      const returned = Date.now() - t0;
+      await ev(`(window.__runHold = () => undefined, true)`);
+      await sleep(5500);
+      await until(`document.querySelector('${PANE} .saved')?.textContent === 'Saved'`, 10000).catch(() => {});
+      const f = await call("workspace.read", { path: PX });
+      const saved = JSON.stringify(f.content.json.cells[0].outputs ?? []), shown = await ev(`document.querySelector('${PANE} .cell .out')?.textContent ?? ''`);
+      const late = saved.includes(`${word} 2`) || shown.includes(`${word} 2`);
+      ok(busy && result?.ended === (how === "timeout" ? "timeout" : "stopped") && returned < 4500 && shown.includes(`${word} 1`) && !late,
+        `PR-LATE: an agent's call waiting on the person's busy cell, ended by ${how === "timeout" ? "its deadline" : "run_stop"}: it answers (its last stage held 2.5 s) and never runs or saves the cell afterwards`, { how, busy, result, returned, late, shown, saved: saved.slice(0, 200) });
+      event(tx, { type: "turn_finished", outcome: "completed" });
+    }
     // (the call's chat and turn (run.context): the pane runs only for the shown chat's running turn that made the call;
     //  anything else is today's run, nothing opened, nothing saved)
     const today = (r, f, out) => r?.ended === "done" && r.saved === "not saved: main" && r.cells?.[0]?.out === out && !JSON.stringify(f.content.json.cells[0].outputs ?? []).includes(out.trim());
