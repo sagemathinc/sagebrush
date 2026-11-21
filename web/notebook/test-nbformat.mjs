@@ -81,6 +81,11 @@ check(J(back.cells.map((c) => [c.id, c.type ?? "code", c.code])) === J(got.cells
   const all = [{ id: "x1", code: "" }, { id: "x2", code: "" }];
   check(withCellIds(REF, all) === all && withCellIds(REF, "not cells") === "not cells", "cells that all have ids, or anything not a list, given back as they are");
   // (an id the next one would be, already taken by another cell: never given twice)
+  // (two cells with one id: the second given its own, the first keeping it; what isn't a cell left as it is)
+  const dup = withCellIds(REF, [{ code: "a", id: "same" }, { code: "b", id: "same" }]);
+  check(dup[0].id === "same" && /^[0-9a-f]{12}$/.test(dup[1].id) && dup[1].id !== "same" && dup[1].id === withCellIds(REF, [{ code: "a", id: "same" }, { code: "b", id: "same" }])[1].id, "a repeated id: the later cell given its own (the same on every load), the first keeping it", dup);
+  const odd = withCellIds(REF, [null, "ab", { code: "c" }]);
+  check(odd[0] === null && odd[1] === "ab" && /^[0-9a-f]{12}$/.test(odd[2].id), "what isn't a cell (null, a string) left as it is", odd);
   const next = cellIdFor(REF, 0, new Set());
   const taken = withCellIds(REF, [{ code: "first" }, { code: "second", id: next }]);
   check(taken[1].id === next && taken[0].id !== next && /^[0-9a-f]{12}$/.test(taken[0].id), "an id another cell already has is never given: the next one is", taken);
