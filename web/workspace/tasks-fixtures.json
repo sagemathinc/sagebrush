@@ -1,0 +1,726 @@
+{
+ "agent": {
+  "repo": "sagebrush-agent",
+  "head": "293082022e4d71a446bc6202e7e625feef364cc6"
+ },
+ "answers": [
+  {
+   "method": "tasks.start",
+   "params": "(omitted)",
+   "answer": {
+    "jsonrpc": "2.0",
+    "id": "p2",
+    "result": {
+     "task": "7730b6cf8e134052cee57b31e3cd4170",
+     "base": "9a1a0ffca680afbfb4cfb6f148a078480a35ab28",
+     "seq": 1
+    }
+   }
+  },
+  {
+   "method": "tasks.list",
+   "params": {},
+   "answer": {
+    "jsonrpc": "2.0",
+    "id": "p3",
+    "result": {
+     "tasks": [
+      {
+       "task": "7730b6cf8e134052cee57b31e3cd4170",
+       "title": "Fixture task",
+       "status": "proposal",
+       "target": "local",
+       "run": false,
+       "round": 1,
+       "seq": 3,
+       "proposal": "550b621732cdc44cffbd5d882bc74edb4bbf9660",
+       "question": false,
+       "updated": 1795256090104
+      }
+     ]
+    }
+   }
+  },
+  {
+   "method": "tasks.get",
+   "params": {
+    "task": "7730b6cf8e134052cee57b31e3cd4170",
+    "after": 0
+   },
+   "answer": {
+    "jsonrpc": "2.0",
+    "id": "p4",
+    "result": {
+     "task": {
+      "task": "7730b6cf8e134052cee57b31e3cd4170",
+      "title": "Fixture task",
+      "status": "proposal",
+      "target": "local",
+      "run": false,
+      "round": 1,
+      "seq": 3,
+      "proposal": "550b621732cdc44cffbd5d882bc74edb4bbf9660",
+      "question": false,
+      "updated": 1795256090104
+     },
+     "events": [
+      {
+       "seq": 1,
+       "event": {
+        "type": "task_status",
+        "status": "working"
+       }
+      },
+      {
+       "seq": 2,
+       "event": {
+        "type": "proposal",
+        "round": 1,
+        "base": "9a1a0ffca680afbfb4cfb6f148a078480a35ab28",
+        "commit": "550b621732cdc44cffbd5d882bc74edb4bbf9660",
+        "files": [
+         {
+          "path": "work/a.ipynb",
+          "kind": "notebook",
+          "change": "modified",
+          "base_blob": "afb68f544fc0992da51e89a079034cf34654a91e",
+          "blob": "2daac236ce37d24f15e9c1618dd2c564fdb8a8e8"
+         },
+         {
+          "path": "work/notes.txt",
+          "kind": "file",
+          "change": "modified",
+          "base_blob": "5626abf0f72e58d7a153368ba57db4c673c0e171",
+          "blob": "18fb355729608108683542bdea908dd4d0f0f471"
+         }
+        ]
+       }
+      },
+      {
+       "seq": 3,
+       "event": {
+        "type": "task_status",
+        "status": "proposal"
+       }
+      }
+     ],
+     "last": 3,
+     "reset": false
+    }
+   }
+  },
+  {
+   "method": "tasks.list",
+   "params": {},
+   "answer": {
+    "jsonrpc": "2.0",
+    "id": "p5",
+    "result": {
+     "tasks": [
+      {
+       "task": "7730b6cf8e134052cee57b31e3cd4170",
+       "title": "Fixture task",
+       "status": "proposal",
+       "target": "local",
+       "run": false,
+       "round": 1,
+       "seq": 3,
+       "proposal": "550b621732cdc44cffbd5d882bc74edb4bbf9660",
+       "question": false,
+       "updated": 1795256090104
+      }
+     ]
+    }
+   }
+  },
+  {
+   "method": "tasks.diff",
+   "params": {
+    "task": "7730b6cf8e134052cee57b31e3cd4170",
+    "commit": "550b621732cdc44cffbd5d882bc74edb4bbf9660"
+   },
+   "answer": {
+    "jsonrpc": "2.0",
+    "id": "p6",
+    "result": {
+     "task": "7730b6cf8e134052cee57b31e3cd4170",
+     "base": "9a1a0ffca680afbfb4cfb6f148a078480a35ab28",
+     "commit": "550b621732cdc44cffbd5d882bc74edb4bbf9660",
+     "round": 1,
+     "seq": 3,
+     "files": [
+      {
+       "path": "work/a.ipynb",
+       "kind": "notebook",
+       "change": "modified",
+       "base_blob": "afb68f544fc0992da51e89a079034cf34654a91e",
+       "blob": "2daac236ce37d24f15e9c1618dd2c564fdb8a8e8"
+      },
+      {
+       "path": "work/notes.txt",
+       "kind": "file",
+       "change": "modified",
+       "base_blob": "5626abf0f72e58d7a153368ba57db4c673c0e171",
+       "blob": "18fb355729608108683542bdea908dd4d0f0f471"
+      }
+     ]
+    }
+   }
+  },
+  {
+   "method": "tasks.file",
+   "params": {
+    "task": "7730b6cf8e134052cee57b31e3cd4170",
+    "commit": "9a1a0ffca680afbfb4cfb6f148a078480a35ab28",
+    "path": "work/a.ipynb"
+   },
+   "answer": {
+    "jsonrpc": "2.0",
+    "id": "p7",
+    "result": {
+     "blob": "afb68f544fc0992da51e89a079034cf34654a91e",
+     "content": "{\"nbformat\":4,\"nbformat_minor\":5,\"metadata\":{\"sagebrush\":{\"seed\":7}},\"cells\":[{\"id\":\"c1\",\"cell_type\":\"code\",\"source\":\"x = 1\",\"metadata\":{},\"outputs\":[],\"execution_count\":null}]}"
+    }
+   }
+  },
+  {
+   "method": "tasks.file",
+   "params": {
+    "task": "7730b6cf8e134052cee57b31e3cd4170",
+    "commit": "550b621732cdc44cffbd5d882bc74edb4bbf9660",
+    "path": "work/a.ipynb"
+   },
+   "answer": {
+    "jsonrpc": "2.0",
+    "id": "p8",
+    "result": {
+     "blob": "2daac236ce37d24f15e9c1618dd2c564fdb8a8e8",
+     "content": "{\n \"nbformat\": 4,\n \"nbformat_minor\": 5,\n \"metadata\": {\n  \"sagebrush\": {\n   \"seed\": 7\n  }\n },\n \"cells\": [\n  {\n   \"id\": \"c1\",\n   \"cell_type\": \"code\",\n   \"source\": \"x = 1\",\n   \"metadata\": {},\n   \"outputs\": [],\n   \"execution_count\": null\n  },\n  {\n   \"cell_type\": \"markdown\",\n   \"id\": \"fake1\",\n   \"metadata\": {},\n   \"source\": \"Proposed by the stand-in agent.\"\n  }\n ]\n}"
+    }
+   }
+  },
+  {
+   "method": "tasks.file",
+   "params": {
+    "task": "7730b6cf8e134052cee57b31e3cd4170",
+    "commit": "9a1a0ffca680afbfb4cfb6f148a078480a35ab28",
+    "path": "work/notes.txt"
+   },
+   "answer": {
+    "jsonrpc": "2.0",
+    "id": "p9",
+    "result": {
+     "blob": "5626abf0f72e58d7a153368ba57db4c673c0e171",
+     "content": "one\n"
+    }
+   }
+  },
+  {
+   "method": "tasks.file",
+   "params": {
+    "task": "7730b6cf8e134052cee57b31e3cd4170",
+    "commit": "550b621732cdc44cffbd5d882bc74edb4bbf9660",
+    "path": "work/notes.txt"
+   },
+   "answer": {
+    "jsonrpc": "2.0",
+    "id": "p10",
+    "result": {
+     "blob": "18fb355729608108683542bdea908dd4d0f0f471",
+     "content": "one\n# proposed by the stand-in agent\n"
+    }
+   }
+  },
+  {
+   "method": "tasks.ask",
+   "params": "(omitted)",
+   "answer": {
+    "jsonrpc": "2.0",
+    "id": "p11",
+    "result": {
+     "status": "working",
+     "round": 1
+    }
+   }
+  },
+  {
+   "method": "tasks.list",
+   "params": {},
+   "answer": {
+    "jsonrpc": "2.0",
+    "id": "p12",
+    "result": {
+     "tasks": [
+      {
+       "task": "7730b6cf8e134052cee57b31e3cd4170",
+       "title": "Fixture task",
+       "status": "proposal",
+       "target": "local",
+       "run": false,
+       "round": 2,
+       "seq": 7,
+       "proposal": "5f4cf4a6e9677226e5eb39e8dbe49aece8860c46",
+       "question": false,
+       "updated": 1795256090154
+      }
+     ]
+    }
+   }
+  },
+  {
+   "method": "tasks.diff",
+   "params": {
+    "task": "7730b6cf8e134052cee57b31e3cd4170",
+    "commit": "5f4cf4a6e9677226e5eb39e8dbe49aece8860c46"
+   },
+   "answer": {
+    "jsonrpc": "2.0",
+    "id": "p13",
+    "result": {
+     "task": "7730b6cf8e134052cee57b31e3cd4170",
+     "base": "9a1a0ffca680afbfb4cfb6f148a078480a35ab28",
+     "commit": "5f4cf4a6e9677226e5eb39e8dbe49aece8860c46",
+     "round": 2,
+     "seq": 7,
+     "files": [
+      {
+       "path": "work/a.ipynb",
+       "kind": "notebook",
+       "change": "modified",
+       "base_blob": "afb68f544fc0992da51e89a079034cf34654a91e",
+       "blob": "07b2f223bd516c459bb1acd21cca93ae50b31b9a"
+      },
+      {
+       "path": "work/notes.txt",
+       "kind": "file",
+       "change": "modified",
+       "base_blob": "5626abf0f72e58d7a153368ba57db4c673c0e171",
+       "blob": "dd62f0713f2c498870750932e4046aee3adcb176"
+      }
+     ]
+    }
+   }
+  },
+  {
+   "method": "tasks.merged",
+   "params": "(omitted)",
+   "answer": {
+    "jsonrpc": "2.0",
+    "id": "p14",
+    "result": {
+     "recorded": "receipt",
+     "commit": null
+    }
+   }
+  },
+  {
+   "method": "tasks.get",
+   "params": {
+    "task": "7730b6cf8e134052cee57b31e3cd4170",
+    "after": 0
+   },
+   "answer": {
+    "jsonrpc": "2.0",
+    "id": "p15",
+    "result": {
+     "task": {
+      "task": "7730b6cf8e134052cee57b31e3cd4170",
+      "title": "Fixture task",
+      "status": "merged",
+      "target": "local",
+      "run": false,
+      "round": 2,
+      "seq": 9,
+      "proposal": "5f4cf4a6e9677226e5eb39e8dbe49aece8860c46",
+      "question": false,
+      "updated": 1795256090163
+     },
+     "events": [
+      {
+       "seq": 1,
+       "event": {
+        "type": "task_status",
+        "status": "working"
+       }
+      },
+      {
+       "seq": 2,
+       "event": {
+        "type": "proposal",
+        "round": 1,
+        "base": "9a1a0ffca680afbfb4cfb6f148a078480a35ab28",
+        "commit": "550b621732cdc44cffbd5d882bc74edb4bbf9660",
+        "files": [
+         {
+          "path": "work/a.ipynb",
+          "kind": "notebook",
+          "change": "modified",
+          "base_blob": "afb68f544fc0992da51e89a079034cf34654a91e",
+          "blob": "2daac236ce37d24f15e9c1618dd2c564fdb8a8e8"
+         },
+         {
+          "path": "work/notes.txt",
+          "kind": "file",
+          "change": "modified",
+          "base_blob": "5626abf0f72e58d7a153368ba57db4c673c0e171",
+          "blob": "18fb355729608108683542bdea908dd4d0f0f471"
+         }
+        ]
+       }
+      },
+      {
+       "seq": 3,
+       "event": {
+        "type": "task_status",
+        "status": "proposal"
+       }
+      },
+      {
+       "seq": 4,
+       "event": {
+        "type": "ask",
+        "round": 1,
+        "note": "Also a line at the top.",
+        "mine": "98066a6bba0ca36d81e7c8e017d6f1f2c8157ac3"
+       }
+      },
+      {
+       "seq": 5,
+       "event": {
+        "type": "task_status",
+        "status": "working"
+       }
+      },
+      {
+       "seq": 6,
+       "event": {
+        "type": "proposal",
+        "round": 2,
+        "base": "9a1a0ffca680afbfb4cfb6f148a078480a35ab28",
+        "commit": "5f4cf4a6e9677226e5eb39e8dbe49aece8860c46",
+        "files": [
+         {
+          "path": "work/a.ipynb",
+          "kind": "notebook",
+          "change": "modified",
+          "base_blob": "afb68f544fc0992da51e89a079034cf34654a91e",
+          "blob": "07b2f223bd516c459bb1acd21cca93ae50b31b9a"
+         },
+         {
+          "path": "work/notes.txt",
+          "kind": "file",
+          "change": "modified",
+          "base_blob": "5626abf0f72e58d7a153368ba57db4c673c0e171",
+          "blob": "dd62f0713f2c498870750932e4046aee3adcb176"
+         }
+        ]
+       }
+      },
+      {
+       "seq": 7,
+       "event": {
+        "type": "task_status",
+        "status": "proposal"
+       }
+      },
+      {
+       "seq": 8,
+       "event": {
+        "type": "merge_receipt",
+        "proposal": "5f4cf4a6e9677226e5eb39e8dbe49aece8860c46",
+        "merge_id": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+        "files": [
+         {
+          "path": "work/a.ipynb",
+          "proposal_blob": "07b2f223bd516c459bb1acd21cca93ae50b31b9a",
+          "mine": "not sent",
+          "merged": "not sent"
+         },
+         {
+          "path": "work/notes.txt",
+          "proposal_blob": "dd62f0713f2c498870750932e4046aee3adcb176",
+          "mine": "not sent",
+          "merged": "not sent"
+         }
+        ]
+       }
+      },
+      {
+       "seq": 9,
+       "event": {
+        "type": "task_status",
+        "status": "merged"
+       }
+      }
+     ],
+     "last": 9,
+     "reset": false
+    }
+   }
+  },
+  {
+   "method": "tasks.start",
+   "params": "(omitted)",
+   "answer": {
+    "jsonrpc": "2.0",
+    "id": "p16",
+    "result": {
+     "task": "fada25b06099743cd30d40c1a1446c52",
+     "base": "80707f4a517ff5fe39976399ff5e155f8e1f2e94",
+     "seq": 1
+    }
+   }
+  },
+  {
+   "method": "tasks.stop",
+   "params": {
+    "task": "fada25b06099743cd30d40c1a1446c52"
+   },
+   "answer": {
+    "jsonrpc": "2.0",
+    "id": "p17",
+    "result": {
+     "status": "proposal"
+    }
+   }
+  },
+  {
+   "method": "tasks.resume",
+   "params": {
+    "task": "fada25b06099743cd30d40c1a1446c52"
+   },
+   "answer": {
+    "jsonrpc": "2.0",
+    "id": "p18",
+    "error": {
+     "code": -32000,
+     "message": "only an interrupted task resumes",
+     "data": {
+      "code": "stale"
+     }
+    }
+   }
+  },
+  {
+   "method": "tasks.revoke",
+   "params": {
+    "task": "fada25b06099743cd30d40c1a1446c52"
+   },
+   "answer": {
+    "jsonrpc": "2.0",
+    "id": "p19",
+    "result": {
+     "status": "closed"
+    }
+   }
+  },
+  {
+   "method": "tasks.close",
+   "params": {
+    "task": "7730b6cf8e134052cee57b31e3cd4170",
+    "proposal": null,
+    "seq": 0
+   },
+   "answer": {
+    "jsonrpc": "2.0",
+    "id": "p20",
+    "error": {
+     "code": -32000,
+     "message": "the task is merged",
+     "data": {
+      "code": "final"
+     }
+    }
+   }
+  },
+  {
+   "method": "tasks.get",
+   "params": {
+    "task": "ffffffffffffffffffffffffffffffff",
+    "after": 0
+   },
+   "answer": {
+    "jsonrpc": "2.0",
+    "id": "p21",
+    "error": {
+     "code": -32000,
+     "message": "no such task",
+     "data": {
+      "code": "not_found"
+     }
+    }
+   }
+  }
+ ],
+ "notifications": [
+  {
+   "task": "7730b6cf8e134052cee57b31e3cd4170",
+   "seq": 1,
+   "event": {
+    "type": "task_status",
+    "status": "working"
+   }
+  },
+  {
+   "task": "7730b6cf8e134052cee57b31e3cd4170",
+   "seq": 2,
+   "event": {
+    "type": "proposal",
+    "round": 1,
+    "base": "9a1a0ffca680afbfb4cfb6f148a078480a35ab28",
+    "commit": "550b621732cdc44cffbd5d882bc74edb4bbf9660",
+    "files": [
+     {
+      "path": "work/a.ipynb",
+      "kind": "notebook",
+      "change": "modified",
+      "base_blob": "afb68f544fc0992da51e89a079034cf34654a91e",
+      "blob": "2daac236ce37d24f15e9c1618dd2c564fdb8a8e8"
+     },
+     {
+      "path": "work/notes.txt",
+      "kind": "file",
+      "change": "modified",
+      "base_blob": "5626abf0f72e58d7a153368ba57db4c673c0e171",
+      "blob": "18fb355729608108683542bdea908dd4d0f0f471"
+     }
+    ]
+   }
+  },
+  {
+   "task": "7730b6cf8e134052cee57b31e3cd4170",
+   "seq": 3,
+   "event": {
+    "type": "task_status",
+    "status": "proposal"
+   }
+  },
+  {
+   "task": "7730b6cf8e134052cee57b31e3cd4170",
+   "seq": 4,
+   "event": {
+    "type": "ask",
+    "round": 1,
+    "note": "Also a line at the top.",
+    "mine": "98066a6bba0ca36d81e7c8e017d6f1f2c8157ac3"
+   }
+  },
+  {
+   "task": "7730b6cf8e134052cee57b31e3cd4170",
+   "seq": 5,
+   "event": {
+    "type": "task_status",
+    "status": "working"
+   }
+  },
+  {
+   "task": "7730b6cf8e134052cee57b31e3cd4170",
+   "seq": 6,
+   "event": {
+    "type": "proposal",
+    "round": 2,
+    "base": "9a1a0ffca680afbfb4cfb6f148a078480a35ab28",
+    "commit": "5f4cf4a6e9677226e5eb39e8dbe49aece8860c46",
+    "files": [
+     {
+      "path": "work/a.ipynb",
+      "kind": "notebook",
+      "change": "modified",
+      "base_blob": "afb68f544fc0992da51e89a079034cf34654a91e",
+      "blob": "07b2f223bd516c459bb1acd21cca93ae50b31b9a"
+     },
+     {
+      "path": "work/notes.txt",
+      "kind": "file",
+      "change": "modified",
+      "base_blob": "5626abf0f72e58d7a153368ba57db4c673c0e171",
+      "blob": "dd62f0713f2c498870750932e4046aee3adcb176"
+     }
+    ]
+   }
+  },
+  {
+   "task": "7730b6cf8e134052cee57b31e3cd4170",
+   "seq": 7,
+   "event": {
+    "type": "task_status",
+    "status": "proposal"
+   }
+  },
+  {
+   "task": "7730b6cf8e134052cee57b31e3cd4170",
+   "seq": 8,
+   "event": {
+    "type": "merge_receipt",
+    "proposal": "5f4cf4a6e9677226e5eb39e8dbe49aece8860c46",
+    "merge_id": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+    "files": [
+     {
+      "path": "work/a.ipynb",
+      "proposal_blob": "07b2f223bd516c459bb1acd21cca93ae50b31b9a",
+      "mine": "not sent",
+      "merged": "not sent"
+     },
+     {
+      "path": "work/notes.txt",
+      "proposal_blob": "dd62f0713f2c498870750932e4046aee3adcb176",
+      "mine": "not sent",
+      "merged": "not sent"
+     }
+    ]
+   }
+  },
+  {
+   "task": "7730b6cf8e134052cee57b31e3cd4170",
+   "seq": 9,
+   "event": {
+    "type": "task_status",
+    "status": "merged"
+   }
+  },
+  {
+   "task": "fada25b06099743cd30d40c1a1446c52",
+   "seq": 1,
+   "event": {
+    "type": "task_status",
+    "status": "working"
+   }
+  },
+  {
+   "task": "fada25b06099743cd30d40c1a1446c52",
+   "seq": 2,
+   "event": {
+    "type": "proposal",
+    "round": 1,
+    "base": "80707f4a517ff5fe39976399ff5e155f8e1f2e94",
+    "commit": "b2927c48c1df7d687b5bb36588748da78df9e021",
+    "files": [
+     {
+      "path": "work/notes.txt",
+      "kind": "file",
+      "change": "modified",
+      "base_blob": "5626abf0f72e58d7a153368ba57db4c673c0e171",
+      "blob": "18fb355729608108683542bdea908dd4d0f0f471"
+     }
+    ]
+   }
+  },
+  {
+   "task": "fada25b06099743cd30d40c1a1446c52",
+   "seq": 3,
+   "event": {
+    "type": "task_status",
+    "status": "proposal"
+   }
+  },
+  {
+   "task": "fada25b06099743cd30d40c1a1446c52",
+   "seq": 4,
+   "event": {
+    "type": "task_status",
+    "status": "closed",
+    "reason": "revoked by the person"
+   }
+  }
+ ]
+}
