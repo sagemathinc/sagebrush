@@ -3393,64 +3393,23 @@ def _smith_field_shapes(m, n):
 
 def _smith_uv(a, n=None):
     """Smith form with transforms over ZZ: (D, U, V), U a V = D (a has n
-    columns)."""
+    columns), by the engine (sagebrush.linalg; the transforms come from one
+    exact inverse when the matrix is square and nonsingular, and from the
+    classical elimination otherwise)."""
     m, n = len(a), (len(a[0]) if a else 0) if n is None else n
     # (the transforms are m x m and n x n: a 2^22 x 1 matrix would ask
     # for 2^44 entries)
     _shape(m, m)
     _shape(n, n)
-    A = [list(r) for r in a]
-    U = [[int(i == j) for j in range(m)] for i in range(m)]
-    V = [[int(i == j) for j in range(n)] for i in range(n)]
-
-    def rowop(M, i, j, q):  # row_i -= q row_j
-        M[i] = [x - q * y for x, y in zip(M[i], M[j])]
-
-    def colop(M, i, j, q):  # col_i -= q col_j
-        for r in M:
-            r[i] -= q * r[j]
-
-    for t in range(min(m, n)):
-        while True:
-            nz = [(abs(A[i][j]), i, j) for i in range(t, m) for j in range(t, n) if A[i][j]]
-            if not nz:
-                break
-            _, i, j = min(nz)
-            A[t], A[i] = A[i], A[t]
-            U[t], U[i] = U[i], U[t]
-            for r in A:
-                r[t], r[j] = r[j], r[t]
-            for r in V:
-                r[t], r[j] = r[j], r[t]
-            done = True
-            for i in range(t + 1, m):
-                q = A[i][t] // A[t][t]
-                if q:
-                    rowop(A, i, t, q)
-                    rowop(U, i, t, q)
-                if A[i][t]:
-                    done = False
-            for j in range(t + 1, n):
-                q = A[t][j] // A[t][t]
-                if q:
-                    colop(A, j, t, q)
-                    colop(V, j, t, q)
-                if A[t][j]:
-                    done = False
-            if not done:
-                continue
-            bad = next(((i, j) for i in range(t + 1, m) for j in range(t + 1, n) if A[i][j] % A[t][t]), None)
-            if bad:
-                i, _ = bad
-                A[t] = [x + y for x, y in zip(A[t], A[i])]
-                U[t] = [x + y for x, y in zip(U[t], U[i])]
-                continue
-            if A[t][t] < 0:
-                A[t] = [-x for x in A[t]]
-                U[t] = [-x for x in U[t]]
-            break
     ZZ = _sa().ZZ
-    return Matrix(ZZ, A, n), Matrix(ZZ, U, m), Matrix(ZZ, V, n)
+    if m == 0 or n == 0:
+        D = [[0] * n for _ in range(m)]
+        U = [[int(i == j) for j in range(m)] for i in range(m)]
+        V = [[int(i == j) for j in range(n)] for i in range(n)]
+    else:
+        from sagebrush import linalg
+        D, U, V, _ = linalg._smith_form([[int(x) for x in r] for r in a])
+    return Matrix(ZZ, D, n), Matrix(ZZ, U, m), Matrix(ZZ, V, n)
 
 
 def _is_padic(R):

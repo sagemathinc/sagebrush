@@ -716,6 +716,13 @@
    "owner": "linear algebra"
   },
   {
+   "id": "engineCall:mat_smith_form",
+   "transport": "engineCall:mat_smith_form",
+   "status": "planned",
+   "family": "E3 dense linear algebra",
+   "owner": "linear algebra"
+  },
+  {
    "id": "engineCall:mat_solve",
    "transport": "engineCall:mat_solve",
    "status": "planned",

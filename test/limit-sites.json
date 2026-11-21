@@ -1766,6 +1766,46 @@
   "owner": "qpoly_mul",
   "reason": "qpoly_mul's derived bounds, plumbing (the meter's limit, the plan's sizes) or a test assertion: refuses nothing itself"
  },
+ "engine/arith/src/smith.rs :: floor_bytes :: pub const K_MAX: usize = 8; #0": {
+  "class": "none",
+  "owner": "engine arithmetic (exact linear algebra)",
+  "reason": "a route threshold (route 2 up to K_MAX nontrivial invariant factors, else the classical elimination): a measured crossover, refuses nothing"
+ },
+ "engine/arith/src/smith.rs :: smith_form :: smith_form_k(a, K_MAX) #0": {
+  "class": "none",
+  "owner": "engine arithmetic (exact linear algebra)",
+  "reason": "a route threshold (route 2 up to K_MAX nontrivial invariant factors, else the classical elimination): a measured crossover, refuses nothing"
+ },
+ "engine/arith/src/smith.rs :: smith_form_k :: if k <= k_max { #0": {
+  "class": "none",
+  "owner": "engine arithmetic (exact linear algebra)",
+  "reason": "a route threshold (route 2 up to K_MAX nontrivial invariant factors, else the classical elimination): a measured crossover, refuses nothing"
+ },
+ "engine/arith/src/smith.rs :: smith_form_k :: pub fn smith_form_k(a: &ZMat, k_max: usize) -> SmithForm { #0": {
+  "class": "none",
+  "owner": "engine arithmetic (exact linear algebra)",
+  "reason": "a route threshold (route 2 up to K_MAX nontrivial invariant factors, else the classical elimination): a measured crossover, refuses nothing"
+ },
+ "engine/arith/src/smith/tests.rs :: more_than_k_max_takes_the_classical_route :: fn more_than_k_max_takes_the_classical_route() { #0": {
+  "class": "none",
+  "owner": "engine arithmetic (exact linear algebra)",
+  "reason": "test code: the Smith form with transforms' route, floor and metering tests (route thresholds, the floor's saturation at the extremes, an accounting meter with no upper bound); refuses nothing"
+ },
+ "engine/arith/src/smith/tests.rs :: more_than_k_max_takes_the_classical_route :: let s: Vec<i64> = (0..K_MAX + 1).map(|_| 2).collect(); #0": {
+  "class": "none",
+  "owner": "engine arithmetic (exact linear algebra)",
+  "reason": "test code: the Smith form with transforms' route, floor and metering tests (route thresholds, the floor's saturation at the extremes, an accounting meter with no upper bound); refuses nothing"
+ },
+ "engine/arith/src/smith/tests.rs :: the_floor_is_checked :: assert_eq!(floor_bytes(usize::MAX, 1), None); #0": {
+  "class": "none",
+  "owner": "engine arithmetic (exact linear algebra)",
+  "reason": "test code: the Smith form with transforms' route, floor and metering tests (route thresholds, the floor's saturation at the extremes, an accounting meter with no upper bound); refuses nothing"
+ },
+ "engine/arith/src/smith/tests.rs :: the_floor_is_checked :: assert_eq!(floor_bytes(usize::MAX, usize::MAX), None); #0": {
+  "class": "none",
+  "owner": "engine arithmetic (exact linear algebra)",
+  "reason": "test code: the Smith form with transforms' route, floor and metering tests (route thresholds, the floor's saturation at the extremes, an accounting meter with no upper bound); refuses nothing"
+ },
  "engine/arith/src/wire_decode.rs :: check_mqr :: None => ws.insert(workspace(q.max_limbs)?), #0": {
   "class": "none",
   "owner": "engine arith (big-integer wire decoder)",
@@ -2489,6 +2529,11 @@
   "class": "none",
   "owner": "qpoly_mul",
   "reason": "qpoly_mul's derived bounds, plumbing (the meter's limit, the plan's sizes) or a test assertion: refuses nothing itself"
+ },
+ "engine/arith/tests/smith_meter.rs :: smith_units_and_stop_checks :: let mut meter = Meter::accounting(u64::MAX); #0": {
+  "class": "none",
+  "owner": "engine arithmetic (exact linear algebra)",
+  "reason": "test code: the Smith form with transforms' route, floor and metering tests (route thresholds, the floor's saturation at the extremes, an accounting meter with no upper bound); refuses nothing"
  },
  "engine/arith/tests/wire_decode_alloc.rs :: admit :: return Err(WireError { code: Code::Cap, offset: 0, what: \"over the grant\" }); #0": {
   "class": "none",

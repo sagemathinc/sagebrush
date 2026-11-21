@@ -47,6 +47,8 @@ fn requests() -> Vec<Value> {
         json!({"fn": "nf_gcd", "t": [-5, 0, 1], "f": {"num": [[0, -1], [1, 0]], "den": 1}, "g": {"num": [[-5, 0], [0, 0], [1, 0]], "den": 2}}),
         json!({"fn": "mat_det", "m": [[1, 2], [3, 4]]}),
         json!({"fn": "mat_rank", "m": [[1, 2], [3, 4]]}),
+        json!({"fn": "mat_smith_form", "m": [[2, 4], [6, 8]]}),
+        json!({"fn": "mat_smith_form", "m": [], "cols": 2}),
         json!({"fn": "mat_rref", "m": [[1, 2], [3, 4]]}),
         json!({"fn": "mat_solve", "a": [[1, 2], [3, 4]], "b": [[1], [2]]}),
         json!({"fn": "mat_inverse", "m": [[1, 2], [3, 4]]}),
