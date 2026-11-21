@@ -1463,7 +1463,7 @@ export function toPyExc(e: any): any {
   // (JavaScriptCore sizes a result before it computes or allocates it, so
   // nothing is spent first) It says which limit: the JavaScript engine's own,
   // a hard limit and no cap of ours, or memory the computer couldn't give.
-  if (e instanceof RangeError && /Invalid string length|Invalid array length|Array buffer allocation failed|Invalid typed array length|Maximum BigInt size exceeded|BigInt generated from this operation is too big|(Map|Set) maximum size exceeded|WebAssembly\.Memory\.grow\(\): Unable to grow instance memory/.test(e.message)) {
+  if (e instanceof RangeError && /Invalid string length|Invalid array length|Array buffer allocation failed|Invalid typed array length|Maximum BigInt size exceeded|BigInt generated from this operation is too big|(Map|Set) maximum size exceeded|WebAssembly\.Memory\.grow/.test(e.message)) {
     const why = engineLimit(e.message);
     const r = why === undefined ? T.MemoryError() : T.MemoryError(why);
     Object.defineProperty(r, "$tb", { value: e, writable: true, enumerable: false });
@@ -1479,16 +1479,18 @@ export function toPyExc(e: any): any {
   return markRaised(r);
 }
 
-// The JavaScript engine's limit a RangeError hit, in words (V8's figures: JavaScriptCore's are its own, and its messages
-// mostly the same), for its MemoryError; none for one it doesn't name.
+// The JavaScript engine's limit a RangeError hit, in words (V8's figures, and JavaScriptCore's where its message is its
+// own), for its MemoryError; none for one it doesn't name.
 const ENGINE_LIMITS: [RegExp, string][] = [
-  [/Invalid array length/, "a list, tuple or other array past the JavaScript engine's largest (2**27 = 134,217,728 items in V8, the app's and the CLI's)"],
-  [/(Map|Set) maximum size exceeded/, "a dict or set past the JavaScript engine's largest (2**24 = 16,777,216 entries in V8, the app's and the CLI's)"],
-  [/Invalid string length/, "a string past the JavaScript engine's largest (2**29 - 24 = 536,870,888 characters in V8, the app's and the CLI's)"],
-  [/Maximum BigInt size exceeded|BigInt generated from this operation is too big/, "an int past the JavaScript engine's largest (2**30 bits in V8, the app's and the CLI's)"],
+  [/Invalid array length/, "a list, tuple or other array past the JavaScript engine's largest (about 2**27 = 134,217,728 items in V8: Chrome, Edge, the app, the CLI on Node)"],
+  [/(Map|Set) maximum size exceeded/, "a dict or set past the JavaScript engine's largest (2**24 = 16,777,216 entries in V8: Chrome, Edge, the app, the CLI on Node)"],
+  [/Invalid string length/, "a string past the JavaScript engine's largest (2**29 - 24 = 536,870,888 characters in V8: Chrome, Edge, the app, the CLI on Node)"],
+  [/Maximum BigInt size exceeded/, "an int past the JavaScript engine's largest (2**30 bits in V8: Chrome, Edge, the app, the CLI on Node)"],
+  [/BigInt generated from this operation is too big/, "an int past the JavaScript engine's largest (2**20 bits in JavaScriptCore: Safari, Bun)"],
   [/Invalid typed array length/, "an array buffer past the JavaScript engine's length limit"],
   [/Array buffer allocation failed/, "the computer couldn't give the memory an array buffer needed"],
-  [/WebAssembly\.Memory\.grow/, "a WebAssembly module's memory past its limit of 4 GiB (wasm32), or more than the computer could give"],
+  [/WebAssembly\.Memory\.grow\(\): Maximum memory size exceeded/, "a WebAssembly module's memory past its limit of 4 GiB (wasm32)"],
+  [/WebAssembly\.Memory\.grow|Unable to grow instance memory/, "a WebAssembly module's memory: more than the computer could give"],
 ];
 function engineLimit(message: string): string | undefined {
   return ENGINE_LIMITS.find(([re]) => re.test(message))?.[1];

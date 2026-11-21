@@ -35,13 +35,15 @@ test("a JavaScript engine limit hit is a MemoryError naming it; a dict or set pa
   const { R } = require("../src/compile");
   const F = require("../src/runtime/format");
   for (const [message, says] of [
-    ["Invalid array length", /a list, tuple or other array past the JavaScript engine's largest \(2\*\*27 = 134,217,728 items in V8/],
+    ["Invalid array length", /a list, tuple or other array past the JavaScript engine's largest \(about 2\*\*27 = 134,217,728 items in V8/],
     ["Map maximum size exceeded", /a dict or set past the JavaScript engine's largest \(2\*\*24 = 16,777,216 entries in V8/],
     ["Set maximum size exceeded", /a dict or set past/],
     ["Invalid string length", /a string past the JavaScript engine's largest \(2\*\*29 - 24 = 536,870,888 characters in V8/],
-    ["Maximum BigInt size exceeded", /an int past the JavaScript engine's largest/],
+    ["Maximum BigInt size exceeded", /an int past the JavaScript engine's largest \(2\*\*30 bits in V8/],
+    ["BigInt generated from this operation is too big", /an int past the JavaScript engine's largest \(2\*\*20 bits in JavaScriptCore/],
     ["Array buffer allocation failed", /the computer couldn't give the memory an array buffer needed/],
-    ["WebAssembly.Memory.grow(): Unable to grow instance memory", /a WebAssembly module's memory past its limit of 4 GiB \(wasm32\)/],
+    ["WebAssembly.Memory.grow(): Maximum memory size exceeded", /a WebAssembly module's memory past its limit of 4 GiB \(wasm32\)/],
+    ["WebAssembly.Memory.grow(): Unable to grow instance memory", /a WebAssembly module's memory: more than the computer could give/],
   ] as [string, RegExp][]) {
     const exc = R.toPyExc(new RangeError(message));
     assert.ok(R.typeOf(exc) === R.T.MemoryError, `${message}: ${R.typeOf(exc).$name}`);
@@ -54,5 +56,5 @@ test("a JavaScript engine limit hit is a MemoryError naming it; a dict or set pa
 test("a real dict past 2**24 entries: a named MemoryError (V8's Map limit)", () => {
   // (the CLI, a fresh process: 2**24 + 1 int keys, about 1 GiB of heap at most, refused at the limit with its name)
   const out = execFileSync(process.execPath, ["--max-old-space-size=8192", require.resolve("../src/cli.js"), "-c", "d = {}\ntry:\n    for i in range(2**24 + 1):\n        d[i] = None\n    print('made', len(d))\nexcept MemoryError as e:\n    print(len(d), e)"], { encoding: "utf8", timeout: 600000 });
-  assert.match(out.trim(), /^16777216 a dict or set past the JavaScript engine's largest \(2\*\*24 = 16,777,216 entries in V8, the app's and the CLI's\)$/);
+  assert.match(out.trim(), /^16777216 a dict or set past the JavaScript engine's largest \(2\*\*24 = 16,777,216 entries in V8: Chrome, Edge, the app, the CLI on Node\)$/);
 });

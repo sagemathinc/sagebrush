@@ -55,7 +55,9 @@ export function serve({ root, memory, input, write, queued, exit, outMax = OUT_M
   // Memory: each interpreter's heap may grow to all of this computer's memory, as a program's does in Sage or Magma:
   // the person's own computer and their own computation, with no cap of ours, the operating system the limit. Two notebooks running at once may together ask for more than the computer has, as two programs may.
   // (`memory` MB: the tests' own setting, smaller; not a person's.)
-  const heapMb = Number.isFinite(memory) && memory > 0 ? Math.floor(memory) : Math.max(1024, Math.floor(totalmem() / 2 ** 20));
+  // (the computer's memory as this process may have it: a container's limit (constrainedMemory) where there is one)
+  const cap = Number(process.constrainedMemory?.() || 0), mine = cap > 0 ? Math.min(totalmem(), cap) : totalmem();
+  const heapMb = Number.isFinite(memory) && memory > 0 ? Math.floor(memory) : Math.max(1024, Math.floor(mine / 2 ** 20));
   const sessions = new Map();
   let greeted = false, ended = false;
   const send = (msg) => {

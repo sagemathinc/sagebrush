@@ -152,9 +152,11 @@ if (!runsProgram(argv)) {
   // (the program's heap: all of the computer's memory, the person's own computer with no cap of ours, the operating
   // system the limit; on Node, as Bun and Deno take no resourceLimits; and not where the person set
   // --max-old-space-size, which the worker then takes as Node gives it)
-  const heapFlag = [...process.execArgv, ...String(process.env.NODE_OPTIONS ?? "").split(/\s+/)].some((a) => /^--max[-_]old[-_]space[-_]size/.test(a));
+  const heapFlag = [...process.execArgv, ...String(process.env.NODE_OPTIONS ?? "").split(/\s+/)].some((a) => /^--max[-_](old[-_]space|heap)[-_]size/.test(a));
   const onNode = !!process.versions.node && !process.versions.bun && !process.versions.deno;
-  const heap = onNode && !heapFlag ? { resourceLimits: { maxOldGenerationSizeMb: Math.max(1024, Math.floor(require("node:os").totalmem() / 2 ** 20)) } } : {};
+  // (the computer's memory as this process may have it: a container's limit (constrainedMemory) where there is one)
+  const total = require("node:os").totalmem(), cap = Number(process.constrainedMemory?.() || 0), mine = cap > 0 ? Math.min(total, cap) : total;
+  const heap = onNode && !heapFlag ? { resourceLimits: { maxOldGenerationSizeMb: Math.max(1024, Math.floor(mine / 2 ** 20)) } } : {};
   const worker = new Worker(boot, { eval: true, stdout: true, stderr: true, workerData: { sagebrushCli: { argv, limits, entry: bundle } }, ...heap });
   worker.on("message", (m) => {
     if (m && m.interrupt) intr = new Int32Array(m.interrupt);

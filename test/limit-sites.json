@@ -13665,7 +13665,7 @@
   "owner": "pyjs runtime",
   "reason": "translates the JavaScript engine's own allocation failure into a MemoryError naming that engine limit; no limit of ours"
  },
- "src/runtime/object.ts :: toPyExc :: [/(Map|Set) maximum size exceeded/, \"a dict or set past the JavaScript engine's largest (2**24 = 16,777,216 entries in V8, the app's and the CLI's)\"], #0": {
+ "src/runtime/object.ts :: toPyExc :: [/(Map|Set) maximum size exceeded/, \"a dict or set past the JavaScript engine's largest (2**24 = 16,777,216 entries in V8: Chrome, Edge, the app, the CLI on Node)\"], #0": {
   "class": "none",
   "owner": "pyjs runtime",
   "reason": "translates the JavaScript engine's own allocation failure into a MemoryError naming that engine limit; no limit of ours"
@@ -13675,12 +13675,12 @@
   "owner": "pyjs runtime",
   "reason": "translates the JavaScript engine's own allocation failure into a MemoryError naming that engine limit; no limit of ours"
  },
- "src/runtime/object.ts :: toPyExc :: [/Maximum BigInt size exceeded|BigInt generated from this operation is too big/, \"an int past the JavaScript engine's largest (2**30 bits in V8, the app's and the CLI's)\"], #0": {
+ "src/runtime/object.ts :: toPyExc :: [/Maximum BigInt size exceeded/, \"an int past the JavaScript engine's largest (2**30 bits in V8: Chrome, Edge, the app, the CLI on Node)\"], #0": {
   "class": "none",
   "owner": "pyjs runtime",
   "reason": "translates the JavaScript engine's own allocation failure into a MemoryError naming that engine limit; no limit of ours"
  },
- "src/runtime/object.ts :: toPyExc :: [/WebAssembly\\.Memory\\.grow/, \"a WebAssembly module's memory past its limit of 4 GiB (wasm32), or more than the computer could give\"], #0": {
+ "src/runtime/object.ts :: toPyExc :: [/WebAssembly\\.Memory\\.grow\\(\\): Maximum memory size exceeded/, \"a WebAssembly module's memory past its limit of 4 GiB (wasm32)\"], #0": {
   "class": "none",
   "owner": "pyjs runtime",
   "reason": "translates the JavaScript engine's own allocation failure into a MemoryError naming that engine limit; no limit of ours"
@@ -13695,7 +13695,7 @@
   "owner": "pyjs runtime",
   "reason": "translates the JavaScript engine's own allocation failure into a MemoryError naming that engine limit; no limit of ours"
  },
- "src/runtime/object.ts :: toPyExc :: if (e instanceof RangeError && /Invalid string length|Invalid array length|Array buffer allocation failed|Invalid typed array length|Maximum BigInt size exceeded|BigInt generated from this operation is too big|(Map|Set) maximum size exceeded|WebAssembly\\.Memory\\.grow\\(\\): Unable to grow instance memory/.test(e.message)) { #0": {
+ "src/runtime/object.ts :: toPyExc :: if (e instanceof RangeError && /Invalid string length|Invalid array length|Array buffer allocation failed|Invalid typed array length|Maximum BigInt size exceeded|BigInt generated from this operation is too big|(Map|Set) maximum size exceeded|WebAssembly\\.Memory\\.grow/.test(e.message)) { #0": {
   "class": "none",
   "owner": "pyjs runtime",
   "reason": "translates the JavaScript engine's own allocation failure into a MemoryError naming that engine limit; no limit of ours"
