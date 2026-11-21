@@ -13698,13 +13698,23 @@
   "owner": "pyjs containers/runtime memory",
   "row": "src-4"
  },
- "src/runtime/types.ts :: toBytes :: if (n > 9007199254740991n) raise(T.MemoryError, `${what}: past the JavaScript engine's limit of 2**53 - 1 bytes`); #0": {
-  "class": "coverage",
+ "src/runtime/types.ts :: toBytes :: if (n > 9007199254740991n) raise(T.MemoryError, `${what}: past JavaScript's limit of 2**53 - 1 bytes`); #0": {
+  "class": "2",
+  "disposition": {
+   "2": {
+    "route": "bytes-count-bound"
+   }
+  },
   "owner": "python (@sagebrush-python)",
-  "reason": "2**53 - 1, the largest count a JavaScript number holds exactly, checked as the upper bound of a byte array's length: past it a MemoryError without trying to allocate (an engine may refuse a smaller allocation, which the RangeError path reports as a MemoryError too); not a cap of ours"
+  "reason": "2**53 - 1, JavaScript's limit on a typed array's length (ECMAScript ToIndex), checked before allocating: past it a MemoryError, a physical limit of the host (an engine may stop lower, its RangeError then a MemoryError too); not a cap of ours"
  },
  "src/runtime/types.ts :: toBytes :: if (!array && n > 9223372036854775807n - 33n) raise(T.OverflowError, \"byte string is too large\"); #0": {
-  "class": "none",
+  "class": "2",
+  "disposition": {
+   "2": {
+    "route": "bytes-count-bound"
+   }
+  },
   "owner": "python (@sagebrush-python)",
   "reason": "64-bit CPython's own bound for bytes(n), PY_SSIZE_T_MAX (2**63 - 1) less a bytes object's header, refused with its OverflowError and message; not a cap of ours"
  },

@@ -28,6 +28,9 @@ for f in (bytes, bytearray):
     t(name + " True", lambda: f(True) == f(1) and len(f(True)))
     for label, n in (("-1", -1), ("-2**70", -2**70), ("2**63", 2**63), ("2**63 - 1", 2**63 - 1), ("2**63 - 33", 2**63 - 33), ("2**53", 2**53)):
         t(name + " " + label, lambda: f(n))
+class C:
+    def __index__(self): return 2**64
+t("bytes C", lambda: bytes(C()))
 print(json.dumps(res))
 `);
   const r = JSON.parse(out);
@@ -36,13 +39,15 @@ print(json.dumps(res))
     assert.deepEqual(r[`${name} True`], ["ok", 1], name);
     assert.deepEqual(r[`${name} -1`], ["ValueError", "negative count"], name);
     for (const k of ["-2**70", "2**63"]) assert.deepEqual(r[`${name} ${k}`], ["OverflowError", "cannot fit 'int' into an index-sized integer"], `${name} ${k}`);
-    assert.deepEqual(r[`${name} 2**53`], ["MemoryError", `${name}(9007199254740992): past the JavaScript engine's limit of 2**53 - 1 bytes`], name);
+    assert.deepEqual(r[`${name} 2**53`], ["MemoryError", `${name}(9007199254740992): past JavaScript's limit of 2**53 - 1 bytes`], name);
   }
   // (CPython's bytes refuses its last 33 sizes for its header; bytearray has none: a MemoryError there)
   assert.deepEqual(r["bytes 2**63 - 1"], ["OverflowError", "byte string is too large"]);
   assert.deepEqual(r["bytes 2**63 - 33"], ["OverflowError", "byte string is too large"]);
-  assert.deepEqual(r["bytearray 2**63 - 1"], ["MemoryError", "bytearray(9223372036854775807): past the JavaScript engine's limit of 2**53 - 1 bytes"]);
+  assert.deepEqual(r["bytearray 2**63 - 1"], ["MemoryError", "bytearray(9223372036854775807): past JavaScript's limit of 2**53 - 1 bytes"]);
   assert.deepEqual(r["bytearray 2**63 - 33"][0], "MemoryError");
+  // (named by the object's own type, as CPython's PyNumber_AsSsize_t)
+  assert.deepEqual(r["bytes C"], ["OverflowError", "cannot fit 'C' into an index-sized integer"]);
 });
 
 // (the host's refusal, made deterministic: Uint8Array throws the engine's RangeError at one length, and
@@ -56,6 +61,8 @@ globalThis.Uint8Array = class extends Real {
   constructor(...a) {
     if (a[0] === ${N}) throw new RangeError("Array buffer allocation failed");
     if (a[0] === ${N + 1}) throw new TypeError("not an allocation failure");
+    if (a[0] === ${N + 2}) throw new RangeError("Invalid typed array length: ${N + 2}");
+    if (a[0] === ${N + 3}) throw new RangeError("Maximum call stack size exceeded");
     super(...a);
   }
 };
@@ -63,7 +70,7 @@ const c = require(${JSON.stringify(DIST + "/src/compile.js")});
 Promise.resolve(c.initParser && c.initParser()).then(() => c.execModule(\`
 import sys
 for f in (bytes, bytearray):
-    for n in (${N}, ${N + 1}):
+    for n in (${N}, ${N + 1}, ${N + 2}, ${N + 3}):
         try:
             f(n)
             print(f.__name__, n, "made")
@@ -76,5 +83,8 @@ sys.stdout.flush()
   for (const name of ["bytes", "bytearray"]) {
     assert.ok(out.includes(`${name} ${N} MemoryError ${name}(${N}): the computer couldn't give the ${N} bytes it needed`), out.join("\n"));
     assert.ok(out.some((l) => l.startsWith(`${name} ${N + 1} `) && !l.includes("MemoryError")), out.join("\n"));
+    // (the engine's own largest array is no shortage of memory; a call stack's RangeError is not renamed a MemoryError)
+    assert.ok(out.includes(`${name} ${N + 2} MemoryError ${name}(${N + 2}): past the largest byte array this JavaScript engine makes`), out.join("\n"));
+    assert.ok(out.some((l) => l.startsWith(`${name} ${N + 3} `) && !l.includes("MemoryError")), out.join("\n"));
   }
 });
