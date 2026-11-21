@@ -113,13 +113,7 @@ export const TASK_RESULTS = {
     if (!Array.isArray(o.tasks) || o.tasks.length > TASK_LIMITS.list) return bad(`tasks isn't a list of at most ${TASK_LIMITS.list}`);
     return { tasks: o.tasks.map((t, i) => taskEntry(t, `tasks[${i}]`)) };
   },
-  "tasks.get": (v: unknown) => {
-    const o = keys(v, ["task", "events", "last", "reset"], "result");
-    if (!Array.isArray(o.events)) return bad("events isn't a list");
-    const events = o.events.map((e, i) => { const x = keys(e, ["seq", "event"], `events[${i}]`); return { seq: int(x.seq, 1, `events[${i}].seq`), event: taskEvent(x.event, `events[${i}].event`) }; });
-    for (let i = 1; i < events.length; i++) if (events[i].seq <= events[i - 1].seq) bad("events aren't in increasing seq");
-    return { task: taskEntry(o.task), events, last: int(o.last, 0, "last"), reset: bool(o.reset, "reset") };
-  },
+  "tasks.get": (v: unknown) => getResult(v, false),
   "tasks.diff": (v: unknown) => { const o = keys(v, ["task", "base", "commit", "round", "seq", "files"], "result"); return { task: task(o.task), base: oid(o.base, "base"), commit: oid(o.commit, "commit"), round: int(o.round, 0, "round"), seq: int(o.seq, 0, "seq"), files: diffFiles(o.files, "files") }; },
   "tasks.file": (v: unknown) => {
     const o = keys(v, ["blob", "content"], "result");
@@ -231,6 +225,28 @@ export function taskEvent(v: unknown, what = "event"): TaskEvent {
 export function taskNotification(v: unknown): { task: string; seq: number; event: TaskEvent } {
   const o = keys(v, ["task", "seq", "event"], "task.event");
   return { task: task(o.task), seq: int(o.seq, 1, "seq"), event: taskEvent(o.event) };
+}
+
+// (a task's log as the page shows it: everything around each event checked closed as above, and each event alone, so
+//  an event this page refuses is kept as `refused` (its seq and why) and the rest of the log still shows)
+export type TaskLogEntry = { seq: number; event: TaskEvent } | { seq: number; refused: string };
+function eventOrRefused(seq: number, v: unknown, what: string, lenient: boolean): TaskLogEntry {
+  if (!lenient) return { seq, event: taskEvent(v, what) };
+  try { return { seq, event: taskEvent(v, what) }; } catch (e) { if (e instanceof TaskShapeError) return { seq, refused: e.message }; throw e; }
+}
+function getResult(v: unknown, lenient: boolean) {
+  const o = keys(v, ["task", "events", "last", "reset"], "result");
+  if (!Array.isArray(o.events)) return bad("events isn't a list");
+  const events = o.events.map((e, i) => { const x = keys(e, ["seq", "event"], `events[${i}]`); return eventOrRefused(int(x.seq, 1, `events[${i}].seq`), x.event, `events[${i}].event`, lenient); });
+  for (let i = 1; i < events.length; i++) if (events[i].seq <= events[i - 1].seq) bad("events aren't in increasing seq");
+  return { task: taskEntry(o.task), events, last: int(o.last, 0, "last"), reset: bool(o.reset, "reset") };
+}
+/** tasks.get's result as the page shows it (above): each event checked alone. */
+export const taskLog = (v: unknown): { task: TaskEntry; events: TaskLogEntry[]; last: number; reset: boolean } => getResult(v, true);
+/** A task.event notification as the page shows it: its task and seq checked, and its event alone (above). */
+export function taskNotice(v: unknown): { task: string } & TaskLogEntry {
+  const o = keys(v, ["task", "seq", "event"], "task.event");
+  return { task: task(o.task), ...eventOrRefused(int(o.seq, 1, "seq"), o.event, "event", true) };
 }
 
 /** A git blob id (SHA-1 of "blob <n>\0" + the bytes), for the page's check of what tasks.file gives. */

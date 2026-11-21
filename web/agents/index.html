@@ -295,6 +295,34 @@
      height it took its content's, tens of thousands of px, the pane scrolled it whole, and every preview render moved
      the source under the person typing. Only for the SHOWN host: the pane keeps every artifact's host, the others
      [hidden], and a display here would show them. Its own element: test-agents-artifacts.mjs measures with it disabled) -->
+<style id="delegate-styles">
+  /* Delegate (delegate-ui.ts): the switch, the Tasks list and its chips, a task's view in place of the chat, the sheet */
+  body.task-shown #log, body.task-shown .composer-wrap .composer { display: none; }
+  #task-view { flex: 1; overflow-y: auto; padding: 16px 24px; }
+  #task-view > * { max-width: 760px; margin-left: auto; margin-right: auto; }
+  #task-view .task-head { display: flex; align-items: center; gap: 10px; flex-wrap: wrap; }
+  #task-view .task-head h2 { font-size: 18px; margin: 0; }
+  #task-view .task-head .link, #task-view .proposal-card { border: 0; background: none; color: var(--accent2); text-decoration: underline; cursor: pointer; padding: 0; }
+  #task-view .proposal-card { display: block; margin: 16px auto; padding: 10px 12px; border: 1px solid var(--line); border-radius: 10px; background: var(--card); text-decoration: none; text-align: left; width: 100%; }
+  #task-view .reason, #task-view .skipped { color: var(--muted); font-size: 13px; }
+  #task-view .msg, .delegate-dlg .msg { color: var(--bad); }
+  #tasks { display: flex; flex-direction: column; gap: 2px; margin-top: 10px; }
+  #tasks .tasks-h { font-size: 12px; color: var(--muted); padding: 4px 9px; text-transform: uppercase; letter-spacing: .04em; }
+  #tasks .task { min-width: 0; max-width: 100%; gap: 6px; }
+  #tasks .task .t { min-width: 0; overflow: hidden; text-overflow: ellipsis; }
+  .chip { font-size: 11px; border-radius: 9px; padding: 1px 7px; background: #e8e5db; color: var(--ink); margin-left: auto; flex: none; font-weight: 400; }
+  .chip.proposal, .chip.question { background: #f3dcc9; color: #7a2d07; }
+  .chip.merged { background: #d8e8d6; color: #24502a; }
+  .chip.failed { background: #f2d6d0; color: #7a2418; }
+  .delegate-dlg { border: 1px solid var(--line); border-radius: 12px; max-width: min(560px, 95vw); }
+  .delegate-dlg.proposal { width: min(900px, 95vw); max-width: 95vw; max-height: 90vh; overflow: auto; }
+  .delegate-dlg .x { float: right; border: 0; background: none; font-size: 20px; cursor: pointer; }
+  .delegate-dlg.sheet form > label, .delegate-dlg .field { display: flex; flex-direction: column; gap: 4px; margin: 10px 0; }
+  .delegate-dlg textarea, .delegate-dlg input:not([type]) { font: inherit; padding: 6px 8px; border: 1px solid #d5d1c4; border-radius: 8px; }
+  .delegate-dlg .docs { margin: 0; padding-left: 18px; }
+  .delegate-dlg small { color: var(--muted); }
+  .delegate-dlg menu { display: flex; justify-content: flex-end; gap: 8px; padding: 0; }
+</style>
 <style id="tex-host-layout">
   #artifacts .pane-body:has(> .pane-host:not([hidden]) .tex-host) { display: flex; flex-direction: column; }
   #artifacts .pane-body > .pane-host:not([hidden]):has(.tex-host) { flex: 1; min-height: 0; display: flex; flex-direction: column; }
