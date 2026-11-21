@@ -756,8 +756,9 @@ export class AgentPairing {
 export const RELOAD_KEY = "sb-agent-reload-v1";
 // (the newest pairing's number on this page: only the newest writes or drops the record, A14 r3.1 §3)
 let pairingGen = 0;
-/** At most this long between the page leaving (pagehide) and its reload for the restore to be silent (R1-b). */
-export const RELOAD_FRESH_MS = 30_000;
+/** At most this long between the page leaving (pagehide) and its return, a reload or a navigation back to the same page
+ * in this browsing context, for the reconnect to be silent (R1-b; A5 item 2, ruled Nov 20 2026: one constant). */
+export const RETURN_MS = 10 * 60 * 1000;
 const RELOAD_MAX = 4096;
 
 export type ReloadRecord = {
@@ -807,18 +808,21 @@ export function parseReloadRecord(raw: string | null): ReloadRecord | null {
 }
 
 /** What a page may do with a parsed record:
- *  - "silent": reconnect now, with no gesture (a reload, fresh, same scope, not expired: R1-a..e);
- *  - "click": keep it in memory for one [Reconnect] (a reload of this tab, the same scope, not expired; only its
- *    freshness failed);
- *  - "discard": never usable: another workspace or page, the grant over, or no proof of a reload of this tab (a
- *    navigation, or a record with no leftAt, as a copy in a new tab has): those need a new Allow unless the grant
- *    was remembered (decided Nov 19 2026: fail closed). */
+ *  - "silent": reconnect now, with no gesture: a reload, or a navigation back to the same page in this browsing context
+ *    (leaving for Files and coming back), within RETURN_MS of leaving, the same scope, the grant not expired (R1-a..e;
+ *    A5 item 2, design r3, SEC-cleared Nov 20 2026). A copy of the record in a duplicated, restored or window.open tab is
+ *    taken once there too: the agent's one live page decides between them;
+ *  - "click": keep it in memory for one [Reconnect]: a reload, the same scope, not expired, only older than RETURN_MS;
+ *  - "discard": never usable: another workspace or page, the grant over, a record with no leftAt (as a copy taken
+ *    while its page lived has), any other navigation type, or a navigation back older than RETURN_MS: those need a new
+ *    Allow unless the grant was remembered. */
 export function reloadDecision(r: ReloadRecord, o: { scope: ReloadScope; navType: string; now: number }): "silent" | "click" | "discard" {
   if (r.workspace !== o.scope.workspace || r.page !== o.scope.page) return "discard";
   if (r.grant.expires !== null && !(o.now < r.grant.expires)) return "discard";
-  if (o.navType !== "reload" || r.leftAt === undefined) return "discard";
+  if (r.leftAt === undefined || !(o.navType === "reload" || o.navType === "navigate" || o.navType === "back_forward")) return "discard";
   const age = o.now - r.leftAt;
-  return age >= 0 && age <= RELOAD_FRESH_MS ? "silent" : "click";
+  if (age >= 0 && age <= RETURN_MS) return "silent";
+  return o.navType === "reload" ? "click" : "discard";
 }
 
 /** What taking the record found (S1): "none", no storage or no entry (genuinely absent); "bad", an entry this page
