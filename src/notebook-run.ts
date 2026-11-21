@@ -32,7 +32,7 @@ import { startInterpreter, runCells, type Mode } from "./reactive-session";
 import { collect, interactError, outputLine } from "./board-run";
 import { oneLine, textLines } from "./terminal-text";
 import { writeReplacing } from "./fs-write";
-import { confinedPath } from "./runtime/modules";
+import { confinedPath, setConfine } from "./runtime/modules";
 
 const USAGE = `usage: sagebrush notebook run FILE.ipynb [--json] [--timeout S] [--write] [--confine DIR]...
   run every code cell of a notebook as the reactive notebook runs it (its
@@ -145,6 +145,9 @@ export async function notebookRun(argv: string[]): Promise<number> {
 
   // (the library on disk, in a build that doesn't embed it, is read by the importer through the same checks)
   if (roots) { const lib = libOnDisk(); if (lib) roots = [...roots, lib]; }
+  // (this process confined too: it runs no Python, but its host hooks (the compile cache, a precompile recording at
+  //  exit, pinned zone data, a package folder) are then off here as in the interpreter's worker)
+  if (roots) setConfine(roots);
   const run = await runNotebook(cells, { mode, seed, timeout, dir: dirname(resolve(file)), confine: roots });
 
   // the file, with this run's outputs, if asked: only if it is still as it was read

@@ -248,6 +248,23 @@ test("--confine: a descriptor the program inherited is refused at every entry po
   rmSync(root, { recursive: true, force: true });
 });
 
+test("--confine: the host's own path hooks (pinned zone data, the package folder, the precompile recording) are off: no raw read or write outside", () => {
+  const root = folder(), work = join(root, "work"), zones = join(root, "zones");
+  mkdirSync(work); mkdirSync(zones);
+  writeFileSync(join(zones, "Secret"), "DUMMY-ZONE-SENTINEL");
+  writeFileSync(join(work, "z.ipynb"), nb([
+    { id: "a", src: "import _time\ntry:\n    print('pinned', _time._pinned('Secret'))\nexcept BaseException as e:\n    print('pinned DENIED')" },
+    { id: "b", src: "import _time\ntry:\n    print('zones', _time._pinned_zones())\nexcept BaseException as e:\n    print('zones DENIED')" },
+  ]));
+  const out = join(root, "precompile.json");
+  const r = spawnSync(process.execPath, [CLI, "notebook", "run", "z.ipynb", "--json", "--confine", work], { cwd: work, encoding: "utf8", timeout: 120_000, env: { ...process.env, SAGEBRUSH_TIME_PINNED_DIR: zones, SAGEBRUSH_PRECOMPILE_OUT: out } });
+  const got = lines(json(r));
+  assert.ok(got.includes("pinned DENIED") && got.includes("zones DENIED"), JSON.stringify(got));
+  assert.ok(!got.some((l: string) => l.includes("SENTINEL")));
+  assert.ok(!existsSync(out), "no precompile recording written by a confined run");
+  rmSync(root, { recursive: true, force: true });
+});
+
 test("--confine: a notebook outside the folders named, or reached through a link, is refused before anything runs", () => {
   const p = planted();
   const r = run(p.work, ["p.ipynb", "--confine", p.outside]);

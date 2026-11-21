@@ -169,6 +169,8 @@ function precompiled(source: string, filename: string, name: string, sage: boole
 const recording: Record<string, Compiled & { path: string }> | null = process.versions?.node && process.env.SAGEBRUSH_PRECOMPILE_OUT ? {} : null;
 if (recording !== null) {
   process.on("exit", () => {
+    // (a build step's recording, written with raw fs: never by a confined run)
+    if (isConfined()) return;
     const out = process.env.SAGEBRUSH_PRECOMPILE_OUT!;
     let prev: Precompiled | null = null;
     try { prev = JSON.parse(readFileSync(out, "utf8")); } catch {}
@@ -557,7 +559,8 @@ function packageRegistry(): Registry | null {
   return (registry = r);
 }
 function packagesDir(): string {
-  const env = process.env.SAGEBRUSH_PACKAGES;
+  // (a host's package folder, read with raw fs: never while confined; the bundle's own copies then)
+  const env = isConfined() ? undefined : process.env.SAGEBRUSH_PACKAGES;
   if (env) return resolvePath(env);
   return embeddedPackages !== undefined ? PKG_VIRTUAL : resolvePath(__dirname, "../../packages");
 }

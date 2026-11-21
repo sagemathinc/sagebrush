@@ -747,7 +747,9 @@ newBuiltinModule("_time", (m) => {
   // SAGEBRUSH_TIME_PINNED_DIR in the tests of that way under Node)
   fn(m, "_pinned_zones", () => {
     const hook = (globalThis as any).__SAGEBRUSH_TZDATA_ZONES__;
-    const dir = typeof process !== "undefined" ? process.env?.SAGEBRUSH_TIME_PINNED_DIR : undefined;
+    // (a host test hook, read with raw fs: never while confined, `notebook run --confine`, whose program may use no
+    //  folder but its own)
+    const dir = typeof process !== "undefined" && !isConfined() ? process.env?.SAGEBRUSH_TIME_PINNED_DIR : undefined;
     try {
       if (typeof hook === "function") return tuple((hook() as string[]).map((z) => z));
       if (typeof dir === "string") {
@@ -778,7 +780,9 @@ newBuiltinModule("_time", (m) => {
   fn(m, "_pinned", (zone: any) => {
     const name = String(zone);
     const hook = (globalThis as any).__SAGEBRUSH_TZDATA__;
-    const dir = typeof process !== "undefined" ? process.env?.SAGEBRUSH_TIME_PINNED_DIR : undefined;
+    // (a host test hook, read with raw fs: never while confined, `notebook run --confine`, whose program may use no
+    //  folder but its own)
+    const dir = typeof process !== "undefined" && !isConfined() ? process.env?.SAGEBRUSH_TIME_PINNED_DIR : undefined;
     try {
       if (typeof hook === "function") {
         const b = hook(name);
