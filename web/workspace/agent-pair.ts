@@ -855,10 +855,12 @@ export function putReloadRecord(s: ReloadStorage | null, r: ReloadRecord | null)
   const fits = raw !== null && parseReloadRecord(raw) !== null;
   try { if (fits) s.setItem(RELOAD_KEY, raw!); else s.removeItem(RELOAD_KEY); } catch { /* (no storage: no restore) */ }
 }
-/** On pagehide: the time the page left, on the record it holds (if it holds a valid one). */
-export function markReloadLeft(s: ReloadStorage | null, now: number): void {
+/** On pagehide: the time the page left, on the record it holds: a valid record of this page's own scope (workspace and
+ * page) only. Another page's record (the Agents page's, while the person is on a board) is left byte for byte as it
+ * is: a page passed through on the way never renews another page's window (A5). */
+export function markReloadLeft(s: ReloadStorage | null, now: number, scope: ReloadScope): void {
   if (!s) return;
   let r: ReloadRecord | null = null;
   try { r = parseReloadRecord(s.getItem(RELOAD_KEY)); } catch { return; }
-  if (r) putReloadRecord(s, { ...r, leftAt: now });
+  if (r && r.workspace === scope.workspace && r.page === scope.page) putReloadRecord(s, { ...r, leftAt: now });
 }

@@ -177,7 +177,10 @@ export const LATEX_LAZY_CAPS = {
   //  code said as spent, a same-tab return within 10 min reconnects, another page's record is left alone, and a ?pair= link drops the page's own
   //  (agent-ui.ts, agent-pair.ts), measured on the shipped build of the head on master ddafeb50 with bun 1.4.4 and node
   //  24.21.0: 63,673 / 21,769, + 64)
-  AGENT: { label: "the LaTeX agent pairing's chunk", raw: 63737, gzip: 21833 },
+  // (63,833 / 21,862: Nov 21 2026, A5 review: the pagehide mark scoped to this page's own record, and the page-duration
+  //  choice's words (agent-ui.ts, agent-pair.ts), measured on the shipped build of the head on master ddafeb50 with bun
+  //  1.4.4 and node 24.21.0: 63,769 / 21,798, + 64)
+  AGENT: { label: "the LaTeX agent pairing's chunk", raw: 63833, gzip: 21862 },
   // (the agent tools' work: web/latex/tools.ts, latex_check's report and latex_render's pictures, on an agent's first call)
   // (16,546 / 6,950: Nov 11 2026: latex_build's own code (build.ts, the
   //  engine driven from a snapshot, and the pages' fit) here, out of the eager group, its shared rules handed in by the

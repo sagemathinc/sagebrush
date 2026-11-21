@@ -177,7 +177,7 @@ export function mountAgentPairing(ws: PairingWorkspace, o: { button?: HTMLElemen
   if (o.reload) { try { storage = o.reload.storage === undefined ? sessionStorage : o.reload.storage; } catch { storage = null; } }
   let leaving = false;
   if (o.reload) {
-    addEventListener("pagehide", () => { leaving = true; markReloadLeft(storage, Date.now()); });
+    addEventListener("pagehide", () => { leaving = true; markReloadLeft(storage, Date.now(), o.reload!.scope); });
     addEventListener("pageshow", (e) => { if ((e as PageTransitionEvent).persisted) leaving = false; });
   }
   // (an agent's runs of code (chat plan PR 4a): the page's run-holder.ts, only where the page offers them)
@@ -360,7 +360,7 @@ export function mountAgentPairing(ws: PairingWorkspace, o: { button?: HTMLElemen
       const run = h("input", { type: "checkbox" });
       run.checked = true;
       // (over a runner nothing is kept in B: no reload record, no remembered grant)
-      const how = h("select", {}, h("option", { value: "3600000", textContent: "for 1 hour" }), h("option", { value: "page", textContent: o.reload && !p.link ? "while this page is open (a reload keeps it)" : "until I close this page" }), h("option", { value: "86400000", textContent: "for 1 day" }));
+      const how = h("select", {}, h("option", { value: "3600000", textContent: "for 1 hour" }), h("option", { value: "page", textContent: o.reload && !p.link ? "while this page is open (a reload, or coming back within 10 minutes, keeps it)" : "until I close this page" }), h("option", { value: "86400000", textContent: "for 1 day" }));
       const remember = h("input", { type: "checkbox" });
       const syncRemember = () => { remember.disabled = how.value === "page"; if (remember.disabled) remember.checked = false; };
       how.onchange = syncRemember;

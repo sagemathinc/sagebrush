@@ -388,7 +388,7 @@ export async function runA14({ site, ok, want = () => true }) {
     const conv = await chat(P, A);
     const g1 = A.grants().at(-1);
     const pre = await recordFacts(P);
-    ok(label === "while this page is open (a reload keeps it)" && g1?.write === false && pre && pre.write === false && pre.keys === RECORD_KEYS.replace("leftAt,", "") && pre.leftAt === null, "A14-1 precondition: the grant chosen explicitly ('while this page is open (a reload keeps it)'); the record is written, exactly its keys, no leftAt while the page lives", { label, pre });
+    ok(label === "while this page is open (a reload, or coming back within 10 minutes, keeps it)" && g1?.write === false && pre && pre.write === false && pre.keys === RECORD_KEYS.replace("leftAt,", "") && pre.leftAt === null, "A14-1 precondition: the grant chosen explicitly ('while this page is open (a reload, or coming back within 10 minutes, keeps it)'); the record is written, exactly its keys, no leftAt while the page lives", { label, pre });
     const inputs = B.inputs, grants = A.grants().length, resume = A.resume.get(conv);
     const seen = { demo: false, other: [], status: new Set() };
     const t0 = Date.now();
@@ -754,6 +754,31 @@ export async function runA14({ site, ok, want = () => true }) {
     ok(A.hellos > h0 && A.grants().length === n0 + 1, "A14-11c: back from the board, it reconnects by itself, the same grant", { hellos: A.hellos - h0 });
   });
 
+  // A14-11e (A5, SEC): out through a board page, staying there past RETURN_MS (fixed clock), then back: the board's
+  // pagehide never renews the Agents page's record, so the return is 10 min and 1 ms after the Agents page left and is
+  // discarded: no attempt, nothing kept, Connect
+  await run("A14-11e", async (B, A) => {
+    const T = 1_900_000_000_000;
+    const P = await B.tab({ clock: true });
+    await P.clock(site, T);
+    await pair(P, A, site, "page");
+    await chat(P, A);
+    await P.send("Page.navigate", { url: `${site}/board/` });
+    await P.until(`location.pathname === '/board/' && document.readyState === 'complete'`);
+    await sleep(2500);
+    const onBoard = await P.ev(`(() => { const r = JSON.parse(sessionStorage.getItem(${JSON.stringify(KEY)}) ?? "null"); return r && { leftAt: r.leftAt, page: r.page }; })()`);
+    ok(onBoard?.leftAt === T && onBoard.page === new URL(site).origin + "/agents/", "A14-11e precondition: on the board, the Agents page's record, left at T", { onBoard });
+    await P.ev(`(localStorage.setItem('__sbclock', '${T + 600001}'), true)`);
+    const h0 = A.hellos;
+    await P.navigate(`${site}/agents/`);
+    const seen = await P.seen(), nav = await P.nav();
+    ok(seen.present && seen.keys === RECORD_KEYS && seen.leftAt === T && seen.now - seen.leftAt === 600001 && nav === "navigate", "A14-11e: leaving the board left the record's leftAt as it was (T, not renewed): 10 min and 1 ms old on return", { leftAt: seen.leftAt === null ? null : seen.leftAt - T, age: seen.now - seen.leftAt, nav });
+    await P.until(`document.querySelector('#conn-status').textContent !== ''`);
+    const quiet = await A.quiet(3000), bar = await P.bar();
+    const rec = await P.ev(`sessionStorage.getItem(${JSON.stringify(KEY)})`);
+    ok(quiet && A.hellos === h0 && rec === null && bar.act === "Connect" && !(await P.connected()), "A14-11e: through the board past 10 min: discarded: no attempt, the record gone, the bar offers Connect", { quiet, bar, rec: !!rec });
+  });
+
   // A14-11b: a navigation back older than RETURN_MS (fixed clock): the record is discarded: no attempt, and the bar
   // offers Connect (a new Allow), never a Reconnect with the old grant
   await run("A14-11b", async (B, A) => {
@@ -874,7 +899,7 @@ export async function runA14({ site, ok, want = () => true }) {
     const quiet = await A.quiet(3000);
     const after = await P.ev(`sessionStorage.getItem(${JSON.stringify(KEY)})`);
     const bar = await P.bar();
-    ok(quiet && A.hellos === h0 && JSON.parse(after ?? "{}").page === other && JSON.parse(after).session === JSON.parse(before).session && bar.status !== COPY.discarded && !(await P.connected()), "A14-15.page: another page's record: no attempt, left where it is (its page and session untouched), nothing said of it here", { quiet, hellos: A.hellos - h0, bar, kept: !!after });
+    ok(quiet && A.hellos === h0 && after === before && JSON.parse(after ?? "{}").page === other && bar.status !== COPY.discarded && !(await P.connected()), "A14-15.page: another page's record: no attempt, left byte for byte through this page's pagehide and load (leftAt not renewed), nothing said of it here", { quiet, hellos: A.hellos - h0, bar, kept: !!after });
     await P.ev(`(document.querySelector('#connect').click(), true)`);
     await P.until(`[...document.querySelectorAll('.sbag-dlg h2')].some((h) => h.textContent === 'Connect an agent')`);
     const offered = await P.ev(`!!document.querySelector('.sbag-box .earlier:not([hidden]) button')`);
