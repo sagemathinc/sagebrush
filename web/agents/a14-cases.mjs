@@ -868,7 +868,9 @@ export async function runA14({ site, ok, want = () => true }) {
       const P = await B.tab();
       await pair(P, A, site, "page");
       await chat(P, A);
-      await P.ev(`(() => { const r = JSON.parse(sessionStorage.getItem(${JSON.stringify(KEY)})); r.${field} = ${JSON.stringify(value)}; sessionStorage.setItem(${JSON.stringify(KEY)}, JSON.stringify(r)); return true; })()`);
+      // (leftAt set here, fresh: this page's pagehide marks only its own scope's record, so it no longer stamps one of
+      //  another workspace; only the workspace differs)
+      await P.ev(`(() => { const r = JSON.parse(sessionStorage.getItem(${JSON.stringify(KEY)})); r.${field} = ${JSON.stringify(value)}; r.leftAt = Date.now(); sessionStorage.setItem(${JSON.stringify(KEY)}, JSON.stringify(r)); return true; })()`);
       const h0 = A.hellos;
       await P.reload();
       const seen = await P.seen(), nav = await P.nav();
