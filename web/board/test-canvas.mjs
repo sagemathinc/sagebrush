@@ -16,7 +16,7 @@ import { canvasLeftOut, fromCanvas, isCanvas, toCanvas } from "./canvas.ts";
 import { formatError, layout, pageCount, pageView } from "./doc.ts";
 import { boardFromText } from "./mermaid.ts";
 // (the example boards are the corpus's, examples/board/<slug>/: file name -> path)
-import { boardFiles } from "../examples/legacy.ts";
+import { boardFiles } from "../examples/boards.ts";
 const EXAMPLES = new Map(boardFiles());
 
 const here = dirname(fileURLToPath(import.meta.url));

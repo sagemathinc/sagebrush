@@ -14,7 +14,7 @@ import { cleanDoc, pageCount } from "./doc.ts";
 import { boardSvg } from "./svg.ts";
 import { texSvg } from "../../src/board-math.ts";
 // (the example boards are the corpus's, examples/board/<slug>/: file name -> path)
-import { boardFiles } from "../examples/legacy.ts";
+import { boardFiles } from "../examples/boards.ts";
 const EXAMPLES = new Map(boardFiles());
 
 const fails = [];
