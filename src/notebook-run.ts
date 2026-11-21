@@ -47,9 +47,15 @@ const USAGE = `usage: sagebrush notebook run FILE.ipynb [--json] [--timeout S] [
   --write        put this run's outputs into FILE (each cell's outputs, run
                  time and count; the notebook's seed), only if FILE is still
                  as it was read
-  --confine DIR  the program may use files only where DIR really is (each
-                 path resolved through any link, and refused outside); give
-                 it once per folder (FILE's must be one of them)
+  --confine DIR  the program may use files only inside DIR (give it once
+                 per folder; FILE's must be one of them): a path is refused
+                 unless it ends inside one, and inside them no link is
+                 followed, even one pointing inside, nor a FIFO, device or
+                 file with more than one hard link opened; the folders above
+                 them may be links (on macOS, /var is), and are resolved.
+                 Kept: standard input, output and error; any other inherited
+                 descriptor is refused. A build that reads its Python library
+                 from disk admits the library's folder too
   The code runs here, as you, as \`sagebrush -c\` runs it: run notebooks you trust.
 `;
 
