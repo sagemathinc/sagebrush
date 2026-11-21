@@ -33,6 +33,14 @@ function hasCommit(commit) {
 // select nothing)
 function changedFiles() {
   if (event === "workflow_dispatch" || event === "schedule") return [];
+  if (event === "merge_group") {
+    const ev = JSON.parse(readFileSync(process.env.GITHUB_EVENT_PATH, "utf8"));
+    const { base_sha: base, head_sha: groupHead } = ev.merge_group ?? {};
+    if (!/^[0-9a-f]{40}$/.test(base ?? "") || !/^[0-9a-f]{40}$/.test(groupHead ?? "") || base === groupHead || git("rev-parse", head) !== groupHead)
+      throw new Error("merge_group needs its exact base_sha and checked-out head_sha");
+    git("merge-base", "--is-ancestor", base, groupHead);
+    return git("diff", "--name-only", "--no-renames", base, groupHead).split("\n").filter(Boolean);
+  }
   if (event === "pull_request") {
     const base = `origin/${process.env.GITHUB_BASE_REF}`;
     const mergeBase = git("merge-base", base, head);
@@ -97,15 +105,14 @@ const fullTierPaths = [
   // web/latex's own sources (not its suites), core/ and engine/, web/workspace/paths.ts; and the group's measure.
   // That suite checks every input of the two bundles is matched here)
   /^web\/latex\/(?!test-)[^/]+\.(?:ts|mts|js|mjs)$/, /^web\/latex\/(?:core|engine)\//, /^web\/workspace\/paths\.ts$/, /^scripts\/latex-group\.mjs$/,
-  // (and the LaTeX editor's example list, web/examples/legacy.ts (#543). The build fills it from the corpus's LaTeX
-  // examples, but a change to one of them selects that example, not the full tier: its own run checks it)
-  /^web\/examples\/legacy\.ts$/,
   // (and the lazy chunks' inputs outside web/latex, each chunk under its own cap in the same check: the agent
   // pairing's modules (its doc-protocol.ts is above, with sync), the mode registry, which verbs.ts reads, and the view
   // chunk's kept views (view-state.ts, design/view-state.md); and an entry's page address, which the pairing adds to
   // its answers (entry-url.ts, with the code page's languages and address))
   /^web\/workspace\/(?:agent-ui|agent-pair|agent-made-tex|pair-link|notebook-edit|notebook-form|agent-grant|agent-schema|verbs|verbs-page|branch-rules|git-branch|view-state|entry-url)\.ts$/, /^src\/modes\.ts$/,
   /^web\/code\/(?:langs|url)\.ts$/,
+  // (and the highlighting chunk's highlighter, the notebook's)
+  /^web\/notebook\/highlight\.js$/,
   // (and what makes those bundles from them, which no metafile lists: the build and its helpers and the dependencies;
   // @sagebrush's ruling, Nov 4. Not .github/workflows/ci.yml, which pins bun and node but changes in about one pull
   // request in six: a bun or node bump carries the full-ci label instead)
@@ -149,7 +156,8 @@ const fullTier = event === "pull_request" &&
   (labels.includes("full-ci") || matches(fullTierPaths) || fullOnlyJobs.some((job) => suiteJobs.has(job)));
 const integrationPush = event === "push" &&
   (ref === "refs/heads/master" || ref.startsWith("refs/heads/track/"));
-const full = event === "workflow_dispatch" || event === "schedule" ||
+// Queue payloads carry no PR labels: a merge group runs the full tier, including every full-ci request.
+const full = event === "merge_group" || event === "workflow_dispatch" || event === "schedule" ||
   integrationPush || fullTier;
 // The long tier (the test audit's option (a), decided Nov 17 2026): the second, slower passes of suites the full tier
 // already runs once (the engine's full passes off master and engine-building pull requests, mpmath's Python backend,
@@ -290,7 +298,7 @@ const engineSmoke = full || workflowOrBuild || engineChange || fallback;
 // (scripts/pin-policy.mjs), so the published modules its pins name may not be its engine)
 const wasmBuild = event !== "pull_request" || fallback || onTrack(runRefs(process.env)) || files.some((file) => wasmBuildPaths.some((p) => p.test(file)));
 const engineCpython = full || workflowOrBuild || matches(cpythonPaths) || fallback;
-const webkit = event === "workflow_dispatch" || event === "schedule" ||
+const webkit = event === "merge_group" || event === "workflow_dispatch" || event === "schedule" ||
   (event === "pull_request" && (fullTier || matches(webkitPaths) || fallback));
 // The limits census (test/limit_sites.py --check, also asserted by
 // test/limits.test.ts) scans lib/, engine/ and src/.  Its own light job runs
@@ -330,15 +338,15 @@ const unsafeSweep = full || matches(unsafeSweepPaths);
 // changes, the full tier and a pull request touching the engine's runtime, src/runtime/); a pull request's passes only
 // where it runs (the CPython package's own Python sets wasm_build, but builds no engine engine-wasm would test).
 const engineRuntime = full || matches([/^src\/runtime\//]);
-const engineFull = long || integrationPush || (event === "pull_request" && wasmBuild && (engineSmoke || engineRuntime));
+const engineFull = event === "merge_group" || long || integrationPush || (event === "pull_request" && wasmBuild && (engineSmoke || engineRuntime));
 
 // The web jobs by area (CI speed plan option 7): a pull request whose web changes are all inside one area's
 // directories runs that area's suites, not every web job.  Anything else under web/ (web/index.html, the build, the
 // worker, the shims, the runner, ...) is the core every page depends on: it runs them all, as do the full tier, a
 // workflow or build change, the runtime (src/, lib/, the engine artifacts, ...) and an unknown path.  The runtime
 // alone skips the export and lookalike jobs, which test the workspace's files, not what the engine computes.
-// (the corpus's boards are the board page's examples; its notebooks and LaTeX documents are inlined in the notebook
-// page and the LaTeX editor, web/examples/legacy.ts, so they are the core, until the old menus go: U7 PR 6)
+// (the corpus's boards are the board page's documents (dist/board/examples/, web/examples/boards.ts); its Welcome and
+// Sage notebooks are the notebook page's first visit, inlined by web/examples/welcome.ts, so they are the core)
 const webAreas = {
   board: [/^web\/board\//, /^web\/graph\//, /^web\/board-[^/]+$/, /^examples\/board\//, /^packages\/sagebrush-board\//],
   shell: [/^web\/shell\//],

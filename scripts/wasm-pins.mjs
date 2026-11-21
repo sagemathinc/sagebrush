@@ -344,6 +344,12 @@ async function selfTest() {
     for (const ev of ["push", "workflow_dispatch", "schedule"]) {
       await expect(`a stale pin is an error on ${ev}, even for an engine test job`, async () => policy(freshMods, { root: r1, allowFresh: true, env: { GITHUB_EVENT_NAME: ev } }), /the pin is stale: commit these wasm\/pins\.json lines/);
     }
+    // a merge queue group is what lands on its target: strict into master, even for an engine test job; fresh into a track
+    await expect("a stale pin is an error in a queue group into master, even for an engine test job", async () => policy(freshMods, { root: r1, allowFresh: true, env: { GITHUB_EVENT_NAME: "merge_group", GITHUB_REF_NAME: "gh-readonly-queue/master/pr-7-cccccccccccccccccccccccccccccccccccccccc" } }), /the pin is stale: commit these wasm\/pins\.json lines/);
+    await pass("a stale pin in a queue group into a track: fresh, labelled", async () => {
+      const r = policy(freshMods, { root: r1, env: { GITHUB_EVENT_NAME: "merge_group", GITHUB_REF_NAME: "gh-readonly-queue/track/math/pr-7-cccccccccccccccccccccccccccccccccccccccc" } });
+      if (r.mode !== "fresh") throw new Error(`mode ${r.mode}`);
+    });
     await expect("a stale pin is an error for every other reader on a pull request", async () => policy(freshMods, { root: r1, env: { GITHUB_EVENT_NAME: "pull_request" } }), /the pin is stale/);
     await pass("...and a labelled fresh run for a pull request's engine test job", async () => {
       const r = policy(freshMods, { root: r1, allowFresh: true, env: { GITHUB_EVENT_NAME: "pull_request" } });

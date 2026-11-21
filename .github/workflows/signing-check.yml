@@ -13,6 +13,8 @@ permissions:
 
 jobs:
   check:
+    # (only from master, on this repository: the sagebrush-signing environment's own branch limit enforces the same)
+    if: github.repository == 'sagemathinc/sagebrush' && github.ref == 'refs/heads/master'
     runs-on: macos-15
     environment: sagebrush-signing
     timeout-minutes: 10
