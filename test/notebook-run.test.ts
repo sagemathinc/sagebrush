@@ -1,6 +1,6 @@
 import test from "node:test";
 import assert from "node:assert/strict";
-import { spawnSync } from "node:child_process";
+import { spawn, spawnSync } from "node:child_process";
 import { existsSync, linkSync, mkdirSync, mkdtempSync, readFileSync, realpathSync, rmSync, symlinkSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
@@ -343,4 +343,30 @@ test("Deno: no network, no subprocess, no foreign code, and none of the parent's
   const path = got.find((l: string) => l.startsWith("path "))!;
   assert.equal(path, `path ${join(runTmp, "deno", "node_compat_bin")} 1`, "PATH is Deno's own shim folder in the run's tmp, never the parent's");
   rmSync(root, { recursive: true, force: true });
+});
+
+test("--until-stdin-ends: a run stops at once when its standard input ends (the program that started it gone); held open, a run that finishes exits as usual; without it, a closed input changes nothing", async () => {
+  const dir = folder();
+  writeFileSync(join(dir, "loop.ipynb"), nb([{ id: "a", src: "print('started', flush=True)\nwhile True:\n    pass" }]));
+  const p = spawn(process.execPath, [CLI, "notebook", "run", "loop.ipynb", "--json", "--timeout", "120", "--until-stdin-ends"], { cwd: dir, stdio: ["pipe", "pipe", "pipe"] });
+  let err = "";
+  p.stderr.on("data", (d) => { err += d; });
+  const exited = new Promise<number | null>((r) => p.on("exit", (c) => r(c)));
+  await new Promise((r) => setTimeout(r, 4000));
+  assert.equal(p.exitCode, null, "still running while its input is open");
+  const t = Date.now();
+  p.stdin!.end();
+  assert.equal(await exited, 3);
+  assert.ok(Date.now() - t < 5000, `stopped in ${Date.now() - t} ms`);
+  assert.match(err, /standard input ended: stopped/);
+  writeFileSync(join(dir, "quick.ipynb"), nb([{ id: "q", src: "print(1)" }]));
+  const q = spawn(process.execPath, [CLI, "notebook", "run", "quick.ipynb", "--json", "--until-stdin-ends"], { cwd: dir, stdio: ["pipe", "pipe", "pipe"] });
+  let out = "";
+  q.stdout.on("data", (d) => { out += d; });
+  const code = await Promise.race([new Promise((r) => q.on("exit", (c) => r(c))), new Promise((r) => setTimeout(() => r("hung"), 60000))]);
+  q.stdin!.end();
+  assert.equal(code, 0, "a finished run exits with its input still open");
+  assert.equal(json({ stdout: out }).cells[0].stdout, "1\n");
+  assert.equal(run(dir, ["quick.ipynb", "--json"]).status, 0, "without the flag, the closed input spawnSync gives changes nothing");
+  rmSync(dir, { recursive: true, force: true });
 });

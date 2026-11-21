@@ -34,7 +34,7 @@ import { oneLine, textLines } from "./terminal-text";
 import { writeReplacing } from "./fs-write";
 import { confinedPath, setConfine } from "./runtime/modules";
 
-const USAGE = `usage: sagebrush notebook run FILE.ipynb [--json] [--timeout S] [--write] [--confine DIR]...
+const USAGE = `usage: sagebrush notebook run FILE.ipynb [--json] [--timeout S] [--write] [--confine DIR]... [--until-stdin-ends]
   run every code cell of a notebook as the reactive notebook runs it (its
   language, its order by what each cell reads, and its seeds), in the
   notebook's folder, and report each cell's output, or its error; the exit
@@ -56,6 +56,9 @@ const USAGE = `usage: sagebrush notebook run FILE.ipynb [--json] [--timeout S] [
                  Kept: standard input, output and error; any other inherited
                  descriptor is refused. A build that reads its Python library
                  from disk admits the library's folder too
+  --until-stdin-ends  stop at once, writing nothing more, when standard input
+                 ends: a program that starts the run holds a pipe open, so
+                 the run ends when that program does, however it ends
   The code runs here, as you, as \`sagebrush -c\` runs it: run notebooks you trust.
 `;
 
@@ -112,12 +115,13 @@ export function readNotebook(text: string): { nb: any; mode: Mode; seed: string;
 /** The `notebook run` command; returns the exit code. */
 export async function notebookRun(argv: string[]): Promise<number> {
   if (argv.includes("-h") || argv.includes("--help")) { process.stdout.write(USAGE); return 0; }
-  let file: string | null = null, json = false, write = false, timeout = 60;
+  let file: string | null = null, json = false, write = false, timeout = 60, untilStdinEnds = false;
   const confine: string[] = [];
   for (let i = 0; i < argv.length; i++) {
     const a = argv[i];
     if (a === "--json") json = true;
     else if (a === "--write") write = true;
+    else if (a === "--until-stdin-ends") untilStdinEnds = true;
     else if (a === "--timeout") timeout = Number(argv[++i]);
     else if (a === "--confine") { const d = argv[++i]; if (d === undefined || d === "") { say("--confine takes a folder"); return 2; } confine.push(d); }
     else if (a.startsWith("-")) { say(`unknown option ${a}`); process.stderr.write(USAGE); return 2; }
@@ -127,6 +131,18 @@ export async function notebookRun(argv: string[]): Promise<number> {
   if (file === null) { process.stderr.write(USAGE); return 2; }
   if (!/\.ipynb$/i.test(file)) { say(`${file}: a notebook is an .ipynb file`); return 2; }
   if (!Number.isFinite(timeout) || timeout <= 0 || timeout > MAX_TIMEOUT) { say(`--timeout takes a number of seconds, more than 0 and at most ${MAX_TIMEOUT}`); return 2; }
+  // (the Delegate runner's lifeline: the agent holds this pipe open and never writes to it; when it ends (the agent
+  //  gone, however it went), this process ends at once, its interpreter with it, before anything more is read or
+  //  written.  Unref'd: it never keeps the process alive after the run itself is done)
+  if (untilStdinEnds) {
+    const gone = () => { say("standard input ended: stopped"); process.exit(3); };
+    process.stdin.on("end", gone);
+    process.stdin.on("close", gone);
+    process.stdin.on("error", gone);
+    process.stdin.on("data", () => {});
+    process.stdin.resume();
+    (process.stdin as any).unref?.();
+  }
 
   // (confined: the roots as real paths; the notebook itself is read and written only through the same check its
   // program's paths get: within a root, no link on the way, a regular file with one link)
