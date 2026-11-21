@@ -10,6 +10,7 @@ import { join } from "node:path";
 import { fileURLToPath } from "node:url";
 import { encode, decode, frame, frameReader, FRAME_MAX } from "../app/engine/frames.mjs";
 import { engineRoot, localFile } from "../app/engine/files.mjs";
+import { defaultHeapMb } from "../app/engine/serve.mjs";
 import { mkdtempSync, mkdirSync, writeFileSync, symlinkSync, rmSync } from "node:fs";
 import { tmpdir } from "node:os";
 
@@ -25,6 +26,15 @@ const throws = (f, re, what) => {
     ok(re.test(String(e?.message ?? e)), `${what}: ${e?.message}`);
   }
 };
+
+// ---- an interpreter's heap by default: the computer's memory, a container's limit where there is one, never past it
+{
+  const G = 2 ** 30, M = 2 ** 20;
+  ok(defaultHeapMb(16 * G, 0) === 16384, "heap: all of the computer's memory, with no container limit");
+  ok(defaultHeapMb(16 * G, 2 * G) === 2048, "heap: a 2 GiB container on a 16 GiB computer gets 2 GiB");
+  ok(defaultHeapMb(16 * G, 512 * M) === 512, "heap: a 512 MiB container gets 512 MiB, never past its limit");
+  ok(defaultHeapMb(512 * M, 0) === 1024, "heap: at least 1 GiB where there is no container limit");
+}
 
 // ---- frames
 {

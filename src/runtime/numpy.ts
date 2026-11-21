@@ -20,7 +20,7 @@ import * as Ty from "./types";
 import { PyComplex } from "./complex";
 import { newBuiltinModule } from "./modules";
 import { glibcLog, glibcExp, glibcExp2, glibcLog1p, EXP_TABLES, LOG_TABLES, glibcPow, glibcPowf } from "./libm";
-import { gemmBuffers, wasmUnary, wasmSinCos, wasmSort, wasmArgsort } from "./kernels";
+import { gemmBuffers, noRoom, wasmUnary, wasmSinCos, wasmSort, wasmArgsort } from "./kernels";
 import { ND_MATMUL_MIN, ndMatmul, useNd } from "./nd";
 import * as FD from "./fdlibm";
 import { nativeHost } from "./heap";
@@ -281,7 +281,7 @@ const prod = (a: number[]) => a.reduce((x, y) => x * y, 1);
 // overflows. Past intp it is NumPy's own ValueError, as NumPy refuses on any
 // machine; past the caps, NumPy's MemoryError wording (_ArrayMemoryError).
 // (one object, so a test can lower the caps to check the boundary cheaply)
-// The bytes cap is a browser's: 4 GiB, as a tab really has; the element cap is this file's own index arithmetic's,
+// The bytes cap is a browser's: the browser byte cap remains 4 GiB; the element cap is this file's own index arithmetic's,
 // everywhere, until that is audited.
 export const ARRAY_LIMITS = { elements: 2 ** 32, bytes: 2 ** 32 };
 // (on the person's own computer, heap.ts nativeHost: the desktop app's engine and the CLI, no byte cap, as in Sage or
@@ -2486,18 +2486,24 @@ function matmul(x: any, y: any): any {
   // engine/nd's GEMM, on its thread pool where that is ready (src/runtime/nd.ts): every dimension at least
   // ND_MATMUL_MIN, where the module runs this session; by size alone, so that a product's bits never depend on
   // whether the pool is up (the module's sums are in blocks of k, so not the bits of the paths below)
+  // (no room in the module's memory for the operands: the paths below compute it, never refused for the module's sake;
+  // its last bits are then theirs, so under memory pressure they can depend on the memory the machine could give)
   if (Math.min(n, m, p) >= ND_MATMUL_MIN && useNd()) {
-    const wa = new Float64Array(n * m), wb = new Float64Array(m * p), f64out = ct === D.float64;
-    loop2(batch, Ab, A.offset, Bb, B.offset, (pa, pb, bk) => {
-      if (as1 === 1 && as0 === m) wa.set(ad.subarray(pa, pa + n * m) as any);
-      else for (let i = 0, t = 0; i < n; i++) for (let k = 0, x = pa + i * as0; k < m; k++, x += as1) wa[t++] = ad[x];
-      if (bs1 === 1 && bs0 === p) wb.set(bd.subarray(pb, pb + m * p) as any);
-      else for (let k = 0, t = 0; k < m; k++) for (let j = 0, y = pb + k * bs0; j < p; j++, y += bs1) wb[t++] = bd[y];
-      const wc = ndMatmul(wa, wb, n, m, p), ob = bk * n * p;
-      if (f64out) (od as Float64Array).set(wc, ob);
-      else for (let t = 0; t < n * p; t++) od[ob + t] = castNum(ct, wc[t]);
-    });
-    return squeezeMatmul(out, a, b, ct);
+    try {
+      const wa = new Float64Array(n * m), wb = new Float64Array(m * p), f64out = ct === D.float64;
+      loop2(batch, Ab, A.offset, Bb, B.offset, (pa, pb, bk) => {
+        if (as1 === 1 && as0 === m) wa.set(ad.subarray(pa, pa + n * m) as any);
+        else for (let i = 0, t = 0; i < n; i++) for (let k = 0, x = pa + i * as0; k < m; k++, x += as1) wa[t++] = ad[x];
+        if (bs1 === 1 && bs0 === p) wb.set(bd.subarray(pb, pb + m * p) as any);
+        else for (let k = 0, t = 0; k < m; k++) for (let j = 0, y = pb + k * bs0; j < p; j++, y += bs1) wb[t++] = bd[y];
+        const wc = ndMatmul(wa, wb, n, m, p), ob = bk * n * p;
+        if (f64out) (od as Float64Array).set(wc, ob);
+        else for (let t = 0; t < n * p; t++) od[ob + t] = castNum(ct, wc[t]);
+      });
+      return squeezeMatmul(out, a, b, ct);
+    } catch (e) {
+      if (!noRoom(e)) throw e;
+    }
   }
   // WebAssembly SIMD (kernels/src/lib.rs), same sums in the same order
   const W = gemmBuffers(n, p, m);

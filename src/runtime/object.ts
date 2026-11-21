@@ -1463,7 +1463,7 @@ export function toPyExc(e: any): any {
   // (JavaScriptCore sizes a result before it computes or allocates it, so
   // nothing is spent first) It says which limit: the JavaScript engine's own,
   // a hard limit and no cap of ours, or memory the computer couldn't give.
-  if (e instanceof RangeError && /Invalid string length|Invalid array length|Array buffer allocation failed|Invalid typed array length|Maximum BigInt size exceeded|BigInt generated from this operation is too big|(Map|Set) maximum size exceeded|WebAssembly\.Memory\.grow/.test(e.message)) {
+  if (e instanceof RangeError && /Invalid string length|Invalid array length|Array buffer allocation failed|Invalid typed array length|Maximum BigInt size exceeded|BigInt generated from this operation is too big|(Map|Set) maximum size exceeded|WebAssembly\.Memory\.grow|failed to grow memory/.test(e.message)) {
     const why = engineLimit(e.message);
     const r = why === undefined ? T.MemoryError() : T.MemoryError(why);
     Object.defineProperty(r, "$tb", { value: e, writable: true, enumerable: false });
@@ -1489,8 +1489,9 @@ const ENGINE_LIMITS: [RegExp, string][] = [
   [/BigInt generated from this operation is too big/, "an int past the JavaScript engine's largest (2**20 bits in JavaScriptCore: Safari, Bun)"],
   [/Invalid typed array length/, "an array buffer past the JavaScript engine's length limit"],
   [/Array buffer allocation failed/, "the computer couldn't give the memory an array buffer needed"],
-  [/WebAssembly\.Memory\.grow\(\): Maximum memory size exceeded/, "a WebAssembly module's memory past its limit of 4 GiB (wasm32)"],
-  [/WebAssembly\.Memory\.grow|Unable to grow instance memory/, "a WebAssembly module's memory: more than the computer could give"],
+  [/WebAssembly\.Memory\.grow\(\): Maximum memory size exceeded|would exceed the memory's declared maximum size|expects the delta to be a valid page count/, "a WebAssembly module's memory past its maximum (4 GiB at most: wasm32)"],
+  // (Firefox's "failed to grow memory" doesn't say which: taken as the computer's)
+  [/WebAssembly\.Memory\.grow|Unable to grow instance memory|failed to grow memory/, "a WebAssembly module's memory: more than the computer could give"],
 ];
 function engineLimit(message: string): string | undefined {
   return ENGINE_LIMITS.find(([re]) => re.test(message))?.[1];

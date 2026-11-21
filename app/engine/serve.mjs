@@ -45,6 +45,13 @@ const LIVE_BYTES = 8 + (8 << 20);
 // Room for the largest frame, and more.
 export const OUT_MAX = 1024 * 1024 * 1024;
 
+// An interpreter's heap, in MiB, by default: the computer's memory as this process may have it, a container's limit
+// (constrainedMemory, bytes; 0 for none) where there is one, and never past it; at least 1 GiB where there is none.
+export function defaultHeapMb(total, cap) {
+  const mine = Math.floor((cap > 0 ? Math.min(total, cap) : total) / 2 ** 20);
+  return cap > 0 ? Math.max(1, mine) : Math.max(1024, mine);
+}
+
 /** The engine on a pair of streams: `input` (frames in), `write(bytes)` (frames out), `queued()` (the bytes written
  * and not yet taken by the reader), `exit(code, now)` (`now`: at once, without waiting for what is queued). */
 export function serve({ root, memory, input, write, queued, exit, outMax = OUT_MAX }) {
@@ -55,9 +62,7 @@ export function serve({ root, memory, input, write, queued, exit, outMax = OUT_M
   // Memory: each interpreter's heap may grow to all of this computer's memory, as a program's does in Sage or Magma:
   // the person's own computer and their own computation, with no cap of ours, the operating system the limit. Two notebooks running at once may together ask for more than the computer has, as two programs may.
   // (`memory` MB: the tests' own setting, smaller; not a person's.)
-  // (the computer's memory as this process may have it: a container's limit (constrainedMemory) where there is one)
-  const cap = Number(process.constrainedMemory?.() || 0), mine = cap > 0 ? Math.min(totalmem(), cap) : totalmem();
-  const heapMb = Number.isFinite(memory) && memory > 0 ? Math.floor(memory) : Math.max(1024, Math.floor(mine / 2 ** 20));
+  const heapMb = Number.isFinite(memory) && memory > 0 ? Math.floor(memory) : defaultHeapMb(totalmem(), Number(process.constrainedMemory?.() || 0));
   const sessions = new Map();
   let greeted = false, ended = false;
   const send = (msg) => {

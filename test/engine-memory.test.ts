@@ -1,7 +1,7 @@
 // Memory on the person's own computer: no cap of ours, as in Sage or Magma (numpy.ts ARRAY_LIMITS, heap.ts). The desktop
 // app's engine tells its interpreter its heap (app/engine/thread.mjs sets __SAGEBRUSH_MEMORY__, all of the computer's
 // memory by default), and the interpreter's heap guards take it; arrays have no byte cap there or in the CLI (Node
-// itself); a browser keeps 4 GiB, as a tab really has.
+// itself); the browser byte cap remains 4 GiB.
 import { test } from "node:test";
 import assert from "node:assert/strict";
 import { execFileSync } from "node:child_process";
@@ -42,7 +42,10 @@ test("a JavaScript engine limit hit is a MemoryError naming it; a dict or set pa
     ["Maximum BigInt size exceeded", /an int past the JavaScript engine's largest \(2\*\*30 bits in V8/],
     ["BigInt generated from this operation is too big", /an int past the JavaScript engine's largest \(2\*\*20 bits in JavaScriptCore/],
     ["Array buffer allocation failed", /the computer couldn't give the memory an array buffer needed/],
-    ["WebAssembly.Memory.grow(): Maximum memory size exceeded", /a WebAssembly module's memory past its limit of 4 GiB \(wasm32\)/],
+    ["WebAssembly.Memory.grow(): Maximum memory size exceeded", /a WebAssembly module's memory past its maximum \(4 GiB at most: wasm32\)/],
+    ["WebAssembly.Memory.grow would exceed the memory's declared maximum size", /a WebAssembly module's memory past its maximum \(4 GiB at most: wasm32\)/],
+    ["WebAssembly.Memory.grow expects the delta to be a valid page count", /a WebAssembly module's memory past its maximum \(4 GiB at most: wasm32\)/],
+    ["failed to grow memory", /a WebAssembly module's memory: more than the computer could give/],
     ["WebAssembly.Memory.grow(): Unable to grow instance memory", /a WebAssembly module's memory: more than the computer could give/],
   ] as [string, RegExp][]) {
     const exc = R.toPyExc(new RangeError(message));

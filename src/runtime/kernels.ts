@@ -72,8 +72,9 @@ let resident = "";
 //  below answers "use JavaScript" (null or false), as it does below its size, and its caller computes in JavaScript; a
 //  computation the JavaScript path can make is never refused for a kernel's sake: engine cost policy r2. Not argsort,
 //  whose JavaScript path keeps its indices in a JavaScript array, past V8's largest a crash rather than an error: its
-//  MemoryError stays)
-const noRoom = (e: unknown) => e instanceof RangeError && /WebAssembly\.Memory\.grow/.test(e.message);
+//  MemoryError stays; engine/nd's products and factorizations, src/runtime/nd.ts, too: their callers take the same
+//  test)
+export const noRoom = (e: unknown) => e instanceof RangeError && /WebAssembly\.Memory\.grow|failed to grow memory/.test(e.message);
 // Make room for `doubles` float64s at the scratch base; returns the views
 // (valid until the next reserve).
 function reserve(doubles: number): void {
