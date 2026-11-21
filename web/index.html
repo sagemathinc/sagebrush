@@ -4943,11 +4943,20 @@ function diskBlocked(why) {
   shade.append(box);
   document.body.append(shade);
 }
-// (the desktop app: this page is left only once its changes are on disk, the notebook's own save first)
+// (the desktop app: this page is left only once its changes are on disk, the notebook's own save first; the LaTeX
+// editor's page over this one: its edit written before that (web/latex/page.ts leaveThen), and the editor let go again
+// if the page stays. Every way out of the LaTeX page comes here (__sbLeaveTo: its File menu, its home link, a notebook
+// or board from the files beside it, Agents…, Open as board))
 async function leaveTo(url) {
-  if (diskMirror && !(await (await desktopModule()).beforeLeave(diskMirror, () => nb.saved()))) return;
-  location.assign(url);
+  const go = async () => {
+    if (diskMirror && !(await (await desktopModule()).beforeLeave(diskMirror, () => nb.saved()))) return false;
+    location.assign(url);
+    return true;
+  };
+  if (globalThis.__sbTexLeave) return void globalThis.__sbTexLeave(go);
+  return go();
 }
+globalThis.__sbLeaveTo = leaveTo;
 const wsReady = (async () => {
   try {
     const w = await Workspace.open();
@@ -5397,6 +5406,7 @@ function wsShowFiles(on) {
             if (matchMedia("(max-width: 640px)").matches) wsShowFiles(false);
           }, sayNotLeft);
         }
+        // (by this page's way out: the LaTeX editor's edit written first, if its page is up; the disk in the app)
         else { saveNow(); void leaveTo(url); }
       },
       upload: (files, folder) => uploadHere(files, folder),

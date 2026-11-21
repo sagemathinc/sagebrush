@@ -99,7 +99,10 @@ export const LATEX_LAZY = {
 // (254,591 raw / 85,107 gzip: Nov 21 2026, a sageblock's code coloured in the preview (the page's hook for the lazy
 //  highlighting chunk, and a Magma block's marker): 254,527 / 85,043 measured on the shipped build of its merge with
 //  master 6fae0a88, with bun 1.4.4 and node 24.21.0 (+265 / +92 over master's 254,262 / 84,951), + 64)
-export const LATEX_CAPS = { raw: 254591, gzip: 85107 };
+// (254,814 raw / 85,192 gzip: Nov 21 2026, every way out of the LaTeX page by the hosting page's leaveTo, the edit
+//  written first (leaveThen with or without the Navigation API, the home link's handler): 254,750 / 85,128 measured on
+//  the shipped build of its merge with master 97da53af, with bun 1.4.4 and node 24.21.0, + 64)
+export const LATEX_CAPS = { raw: 254814, gzip: 85192 };
 export const gz = (b) => gzipSync(b, { level: 9 }).length;
 
 // Each lazy chunk's own cap (raw, gzip), fetched only on its own use, so outside the group:

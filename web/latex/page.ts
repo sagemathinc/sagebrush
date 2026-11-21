@@ -301,9 +301,9 @@ const onNavigate = (e: any) => {
 // Leaving the page, not only the file: a notebook, a board or a code file opened from here, a link. With an
 // edit not yet in the file, the navigation waits for it, as a switch to another file does (leave.ts): held, the edit
 // written, then made again; with nothing pending it goes at once. (Its write would otherwise be cut off with the page,
-// and the edit would be in neither the file nor any other device.) Where the browser has no Navigation API, only a
-// notebook opened from the files beside the page (__sbTexOpen) waits the same way, through leaveThen; the other ways out
-// (a board, a code file, the File menu's links, a reload) go at once there, as before.
+// and the edit would be in neither the file nor any other device.) Where the browser has no Navigation API, the page's
+// own ways out wait the same way through leaveThen (globalThis.__sbTexLeave for the hosting page's: a notebook or a
+// board from the files beside it, the File menu's, Back); a reload there goes at once, as before.
 let leavingTo = "";
 const onLeave = (e: any) => {
   if (e.navigationType === "traverse" || !e.cancelable || e.destination?.sameDocument || e.downloadRequest) return;
@@ -314,11 +314,20 @@ const onLeave = (e: any) => {
   // (a reload made again as a load of the same URL)
   void leaveOk().then((ok) => { if (ok) { leavingTo = url; replace ? location.replace(url) : location.assign(url); } });
 };
-/** Go elsewhere once the editor shown has settled (its edit written, or asked about): `go` at once where the Navigation
- *  API's navigate event (onLeave) does the waiting. */
-export const leaveThen = (go: () => void): void => {
-  if (navApi() || !current?.pending()) { go(); return; }
-  void leaveOk().then((ok) => { if (ok) go(); });
+/** Go elsewhere once the editor shown has settled (its edit written, or asked about), with or without the Navigation
+ *  API (its navigate event, onLeave, then finds nothing pending): so a host's own wait after it (the desktop app's
+ *  disk, index.html leaveTo) comes after the edit is written. `go` may say the page stays (false, or a promise of it):
+ *  the editor, held read-only while it settled, is let go again. */
+export const leaveThen = (go: () => unknown): void => {
+  if (!current?.pending()) { void go(); return; }
+  void leaveOk().then(async (ok) => { if (ok && (await go()) === false) current?.hold(false); });
+};
+/** To another page by the hosting page's way out (index.html leaveTo: this editor's edit written, then the desktop app's
+ *  disk), or, without one, once the edit is written. */
+const leaveBy = (url: string): void => {
+  const host = (globalThis as any).__sbLeaveTo;
+  if (host) void host(url);
+  else leaveThen(() => location.assign(url));
 };
 const fenceDone = () => { fenceTok = 0; if (fencing) { fencing = false; fenceEnd(); } };
 const fenceStale = (ev: PopStateEvent) => {
@@ -418,6 +427,8 @@ export async function mount(root: HTMLElement, host: Host): Promise<void> {
   const title = el("span", "tex-title");
   // (Sagebrush, then the file's name, beside the corner Files button, as on the notebook and board pages)
   const home = el("a", "tex-home", "Sagebrush") as HTMLAnchorElement; home.href = "/?home"; home.title = "About Sagebrush, and where to start";
+  // (a plain click: by the page's way out, the edit written first; a new tab or window as the browser makes it)
+  home.onclick = (ev) => { if (ev.button || ev.metaKey || ev.ctrlKey || ev.shiftKey || ev.altKey) return; ev.preventDefault(); leaveBy(home.href); };
   // (the save state, as Google Docs shows it: Saving…, Saved ✓; a failed write stays shown, with its reason)
   const saveState = el("span", "tex-savestate"); saveState.setAttribute("role", "status"); saveState.setAttribute("aria-live", "polite");
   // (what the page shows: the source, both, or the document alone; one click each, see the view below)
@@ -526,7 +537,8 @@ export async function mount(root: HTMLElement, host: Host): Promise<void> {
   // ---- a notebook opened while this page is up (from the files beside it, a row's menu, Open as a notebook, an
   // upload): the notebook page's openId() asks here first (index.html, in a LaTeX build only) and its page is opened
   // by URL instead, as a board's is; without this it would be loaded unseen under the editor
-  (globalThis as any).__sbTexOpen = (id: string) => { leaveThen(() => location.assign("/?nb=" + encodeURIComponent(id))); return true; };
+  (globalThis as any).__sbTexOpen = (id: string) => { leaveBy("/?nb=" + encodeURIComponent(id)); return true; };
+  (globalThis as any).__sbTexLeave = leaveThen;
   // another .tex (from the files beside this page, New, an example): opened here, in place, its URL pushed; a new tab
   // as before (boot.ts's hook); unsaved changes asked about first
   const g: any = globalThis, bootHook = (g.__sbTexBoot ??= g.__sbTex);
