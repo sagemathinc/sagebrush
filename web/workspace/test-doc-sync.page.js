@@ -336,6 +336,22 @@ T.edPush = (cells) => {
   T.edStore.push({ ...structuredClone(T.edStore.doc), cells: cells.map(([id, code, outputs]) => ({ id, code, ...(outputs ? { outputs } : {}) })) });
   return true;
 };
+/** The page asked to go away the moment after typing (a simulated beforeunload, as a reload or a closed tab sends it):
+ * whether the page asked to stay (the browser's leave prompt); the person then declines, and the page stays. */
+T.leaveAsked = () => {
+  const e = new Event("beforeunload", { cancelable: true });
+  window.dispatchEvent(e);
+  return e.defaultPrevented;
+};
+/** A cell of the mounted notebook focused and its text selected, for the person's own typing (CDP Input.insertText,
+ * a trusted input: what the notebook's leave prompt waits for). */
+T.focus = (cid) => {
+  const cell = cellsOf(T.nbDiv).find((c) => c?.id === cid);
+  if (!cell) return false;
+  cell.ta.focus();
+  cell.ta.select();
+  return true;
+};
 /** Typing in a cell of the mounted notebook: its text set, and the editor told (as a keystroke tells it). */
 T.type = (cid, text) => {
   // (the notebook mounted last: earlier cases' notebooks stay on the page, with the same cell ids)

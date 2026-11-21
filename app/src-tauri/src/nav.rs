@@ -29,6 +29,12 @@ pub fn page_capability(port: u16) -> String {
     c["identifier"] = "page".into();
     c["local"] = false.into();
     c["remote"] = serde_json::json!({ "urls": [format!("http://127.0.0.1:{port}")] });
+    // (a phone's page opens and saves files through the dialog and fs plugins, whose pickers hand over what only the
+    // fs plugin reads; the desktop page has neither, and reaches the person's files by the app's grants, disk.rs)
+    #[cfg(mobile)]
+    if let Some(p) = c["permissions"].as_array_mut() {
+        p.extend(serde_json::json!(["dialog:default", "fs:allow-read-text-file", "fs:allow-write-text-file", "fs:allow-read-file", "fs:allow-write-file", "fs:allow-read-dir", "fs:allow-stat", "fs:allow-exists", { "identifier": "fs:scope", "allow": [{ "path": "**" }, { "path": "/**" }] }]).as_array().unwrap().iter().cloned());
+    }
     c.as_object_mut().map(|o| o.remove("$schema"));
     c.to_string()
 }
@@ -86,6 +92,19 @@ mod tests {
         // (the template alone grants nothing)
         assert_eq!(t["remote"]["urls"], serde_json::json!([]));
         assert_eq!(t["local"], false);
+    }
+
+    #[test]
+    fn the_desktop_page_has_no_file_system_plugin() {
+        // (no fs: or dialog: permission at all, so no path the page names reaches the computer's files: the person's
+        // files only by the app's grants, disk.rs)
+        let c: serde_json::Value = serde_json::from_str(&super::page_capability(49214)).unwrap();
+        let ps = c["permissions"].as_array().unwrap();
+        let named = |p: &serde_json::Value| p.as_str().or_else(|| p["identifier"].as_str()).unwrap_or("").to_string();
+        assert!(!ps.iter().any(|p| named(p).starts_with("fs:") || named(p).starts_with("dialog:")), "{ps:?}");
+        for cmd in ["allow-file-open-dialog", "allow-file-save-dialog", "allow-file-read-text", "allow-file-write-text", "allow-folder-list", "allow-folder-read", "allow-folder-write", "allow-selftest-open"] {
+            assert!(ps.iter().any(|p| p == cmd), "{cmd}");
+        }
     }
 
     #[test]

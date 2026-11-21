@@ -1,9 +1,10 @@
 // Sagebrush as an app (desktop, and Android/iOS from the same code): the sagebrush.space notebook (../dist, from
 // app/build-frontend.mjs) in the system's web view, where Python and the
 // engines run as WebAssembly, as on the site.  This shell adds what a page
-// cannot do: open and save files on the computer (the dialog and fs plugins,
-// used by the page in "app mode"), and open the files the system hands it
-// (double-clicked .ipynb files, or paths on the command line).
+// cannot do: open and save files on the computer (on the desktop, its own
+// dialogs and commands, by grants for the files the person picks, disk.rs;
+// on a phone, the dialog and fs plugins), and open the files the system hands
+// it (double-clicked .ipynb files, or paths on the command line).
 //
 // The page is served from http://127.0.0.1:<a free port> (serve_page, below,
 // on a listener the app holds before its window exists) with COOP/COEP
@@ -33,9 +34,25 @@ const SHELL_WORKER_CSP: &str = "default-src 'none'; script-src 'self' blob:; con
 // files to open, until the page asks for them
 struct Pending(Mutex<Vec<String>>);
 
+// (on the desktop, each granted (disk.rs grant): the page gets {grant, name, path}, never a path it can use; a file
+// that can't be granted is said and left out)
+#[cfg(desktop)]
+#[tauri::command]
+fn startup_files(app: tauri::AppHandle, state: tauri::State<Pending>) -> Vec<serde_json::Value> {
+    let files: Vec<String> = state.0.lock().unwrap().drain(..).collect();
+    files.iter().filter_map(|p| disk::grant(&app, std::path::Path::new(p)).map_err(|e| eprintln!("[app] {p}: {e}")).ok()).collect()
+}
+#[cfg(mobile)]
 #[tauri::command]
 fn startup_files(state: tauri::State<Pending>) -> Vec<String> {
     state.0.lock().unwrap().drain(..).collect()
+}
+
+/// The self-test's notebook (SAGEBRUSH_APP_SELFTEST), granted as a picked one would be.
+#[cfg(desktop)]
+#[tauri::command]
+fn selftest_open(app: tauri::AppHandle) -> Result<Option<serde_json::Value>, String> {
+    selftest_file(app.clone()).map(|p| disk::grant(&app, std::path::Path::new(&p))).transpose()
 }
 
 #[tauri::command]
@@ -296,7 +313,7 @@ fn app_quit_now(app: tauri::AppHandle) {
 // the page's commands: the engine's on the desktop too
 #[cfg(desktop)]
 fn handlers() -> impl Fn(tauri::ipc::Invoke<tauri::Wry>) -> bool + Send + Sync + 'static {
-    tauri::generate_handler![startup_files, selftest_file, selftest_persist, selftest_report, app_log, engine::engine_start, engine::engine_send, engine::engine_ack, engine::engine_stop, disk::disk_list, disk::disk_stat, disk::disk_read, disk::disk_write, disk::disk_mkdir, disk::disk_rename, disk::disk_remove, disk::disk_where, disk::settings_write, app_quit_hold, app_quit_now]
+    tauri::generate_handler![startup_files, selftest_file, selftest_open, selftest_persist, selftest_report, app_log, disk::file_open_dialog, disk::file_save_dialog, disk::file_read_text, disk::file_write_text, disk::folder_list, disk::folder_read, disk::folder_write, engine::engine_start, engine::engine_send, engine::engine_ack, engine::engine_stop, disk::disk_list, disk::disk_stat, disk::disk_read, disk::disk_write, disk::disk_mkdir, disk::disk_rename, disk::disk_remove, disk::disk_where, disk::settings_write, app_quit_hold, app_quit_now]
 }
 #[cfg(mobile)]
 fn handlers() -> impl Fn(tauri::ipc::Invoke<tauri::Wry>) -> bool + Send + Sync + 'static {
@@ -316,11 +333,13 @@ pub fn run() {
     if std::env::var_os("JSC_useSharedArrayBuffer").is_none() {
         std::env::set_var("JSC_useSharedArrayBuffer", "1");
     }
-    let builder = tauri::Builder::default()
-        .plugin(tauri_plugin_dialog::init())
-        .plugin(tauri_plugin_fs::init())
-        .manage(Pending(Mutex::new(args)))
-        .invoke_handler(handlers());
+    let builder = tauri::Builder::default().plugin(tauri_plugin_dialog::init());
+    // (the fs plugin on a phone only, whose pickers hand over what only it reads; the desktop page has none, disk.rs)
+    #[cfg(mobile)]
+    let builder = builder.plugin(tauri_plugin_fs::init());
+    let builder = builder.manage(Pending(Mutex::new(args))).invoke_handler(handlers());
+    #[cfg(desktop)]
+    let builder = builder.manage(disk::Grants::default());
     // (the engine subprocess, on the desktop only: phones run the page's own worker, design/native-desktop.md §5)
     #[cfg(desktop)]
     let builder = builder.manage(engine::Engine::default());
@@ -409,7 +428,8 @@ pub fn run() {
             if let tauri::RunEvent::Exit = _event {
                 _app.state::<engine::Engine>().stop();
             }
-            // macOS hands over files (Finder, `open -a Sagebrush f.ipynb`) as an event
+            // macOS hands over files (Finder, `open -a Sagebrush f.ipynb`) as an event: kept for startup_files, and
+            // sent to a page already there (granted, on macOS, as startup_files grants them)
             #[cfg(any(target_os = "macos", target_os = "ios"))]
             if let tauri::RunEvent::Opened { urls } = _event {
                 let files: Vec<String> = urls
@@ -417,8 +437,12 @@ pub fn run() {
                     .filter_map(|u| u.to_file_path().ok())
                     .map(|p| p.to_string_lossy().into_owned())
                     .collect();
+                #[cfg(target_os = "macos")]
+                let sent: Vec<serde_json::Value> = files.iter().filter_map(|p| disk::grant(_app, std::path::Path::new(p)).ok()).collect();
+                #[cfg(target_os = "ios")]
+                let sent = files.clone();
                 _app.state::<Pending>().0.lock().unwrap().extend(files.iter().cloned());
-                let _ = _app.emit("open-files", files);
+                let _ = _app.emit("open-files", sent);
             }
         });
 }

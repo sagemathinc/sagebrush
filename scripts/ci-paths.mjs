@@ -105,15 +105,14 @@ const fullTierPaths = [
   // web/latex's own sources (not its suites), core/ and engine/, web/workspace/paths.ts; and the group's measure.
   // That suite checks every input of the two bundles is matched here)
   /^web\/latex\/(?!test-)[^/]+\.(?:ts|mts|js|mjs)$/, /^web\/latex\/(?:core|engine)\//, /^web\/workspace\/paths\.ts$/, /^scripts\/latex-group\.mjs$/,
-  // (and the LaTeX editor's example list, web/examples/legacy.ts (#543). The build fills it from the corpus's LaTeX
-  // examples, but a change to one of them selects that example, not the full tier: its own run checks it)
-  /^web\/examples\/legacy\.ts$/,
   // (and the lazy chunks' inputs outside web/latex, each chunk under its own cap in the same check: the agent
   // pairing's modules (its doc-protocol.ts is above, with sync), the mode registry, which verbs.ts reads, and the view
   // chunk's kept views (view-state.ts, design/view-state.md); and an entry's page address, which the pairing adds to
   // its answers (entry-url.ts, with the code page's languages and address))
   /^web\/workspace\/(?:agent-ui|agent-pair|agent-made-tex|pair-link|notebook-edit|notebook-form|agent-grant|agent-schema|verbs|verbs-page|branch-rules|git-branch|view-state|entry-url)\.ts$/, /^src\/modes\.ts$/,
   /^web\/code\/(?:langs|url)\.ts$/,
+  // (and the highlighting chunk's highlighter, the notebook's)
+  /^web\/notebook\/highlight\.js$/,
   // (and what makes those bundles from them, which no metafile lists: the build and its helpers and the dependencies;
   // @sagebrush's ruling, Nov 4. Not .github/workflows/ci.yml, which pins bun and node but changes in about one pull
   // request in six: a bun or node bump carries the full-ci label instead)
@@ -346,8 +345,8 @@ const engineFull = event === "merge_group" || long || integrationPush || (event 
 // worker, the shims, the runner, ...) is the core every page depends on: it runs them all, as do the full tier, a
 // workflow or build change, the runtime (src/, lib/, the engine artifacts, ...) and an unknown path.  The runtime
 // alone skips the export and lookalike jobs, which test the workspace's files, not what the engine computes.
-// (the corpus's boards are the board page's examples; its notebooks and LaTeX documents are inlined in the notebook
-// page and the LaTeX editor, web/examples/legacy.ts, so they are the core, until the old menus go: U7 PR 6)
+// (the corpus's boards are the board page's documents (dist/board/examples/, web/examples/boards.ts); its Welcome and
+// Sage notebooks are the notebook page's first visit, inlined by web/examples/welcome.ts, so they are the core)
 const webAreas = {
   board: [/^web\/board\//, /^web\/graph\//, /^web\/board-[^/]+$/, /^examples\/board\//, /^packages\/sagebrush-board\//],
   shell: [/^web\/shell\//],
