@@ -2299,9 +2299,11 @@ export function createNotebook(root, opts = {}) {
   // to make, is the page's to ask about (its "left" listener))
   // (and only once the person has typed here since everything was last saved (`typed`: a trusted input event, or a
   // Markdown cell's block editor's change); while this notebook's saves fail or are busy, any of the person's own
-  // keys, clicks, pastes or drops too, as a cell moved, deleted or retyped then can't be saved either. So a run's
-  // output, a change from elsewhere or one a script made, waiting to be saved, never asks: this prompt never holds a
-  // page a script drives (a test, an automation). Notebooks left are the page's own prompt's, as before)
+  // keys, clicks, pastes or drops too, as a cell moved, deleted or retyped then can't be saved either. A run's output,
+  // a change from elsewhere or one a script made do not arm it by themselves; once `typed` is set, though, any work
+  // still to save keeps it armed. So a script that hasn't set `typed` (a test, an automation) isn't held by the
+  // prompt; one that sends trusted input (CDP Input.*, as a person types) sets it, and must answer the prompt or let
+  // its saves finish first. Notebooks left are the page's own prompt's, as before)
   const unsaved = (dirty) => typed && !!store && !store.readOnly && !!(savesPending || failed.has(shown) || busy.size || dirty());
   root.addEventListener("input", (e) => { if (e.isTrusted) typed = true; }, true);
   for (const t of ["keydown", "pointerdown", "paste", "drop"]) root.addEventListener(t, (e) => { if (e.isTrusted && store && (failed.has(shown) || busy.size)) typed = true; }, true);
