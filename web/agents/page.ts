@@ -12,6 +12,7 @@
 import "../workspace/pair-link";
 import { BlockEditor } from "../board/blocks";
 import { render as markdown } from "../markdown";
+import { colorBlock } from "./code-color";
 import { runningTurn, type Artifact, type Thread, type Turn, type UserEntry } from "../workspace/agent-chat/events";
 import { ChatSession } from "../workspace/agent-chat/session";
 import { userNode as viewUserNode, turnNode as viewTurnNode, artifactIcon, diffHtml } from "../workspace/agent-chat/view";
@@ -161,8 +162,11 @@ function typeset(el: Element) {
   mathModule.then((m) => m.typeset(el)).catch(() => {});
 }
 
+// (a message's code blocks in colour, up to CODE_COLOR_MAX characters each: a longer one, re-rendered as it streams,
+//  stays plain)
+const CODE_COLOR_MAX = 64 * 1024;
 function md(src: string): string {
-  return markdown(src, { remote: "click" });
+  return markdown(src, { remote: "click", highlight: (code, lang) => (code.length <= CODE_COLOR_MAX ? colorBlock(code, lang) : null) });
 }
 
 function renderAll() {

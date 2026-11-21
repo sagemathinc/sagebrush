@@ -127,6 +127,9 @@
   .msg code, .doc code, .user code { background: var(--code); padding: 1px 4px; border-radius: 4px; }
   .msg pre, .doc pre { background: var(--code); padding: 10px 12px; border-radius: 8px; overflow-x: auto; }
   .msg pre code, .doc pre code { background: none; padding: 0; }
+  /* a code block's colours (web/agents/code-color.ts), the notebook's: keyword, builtin, string, number, comment, decorator, a name defined */
+  pre.code .hk { color: #8a3b8f; } pre.code .hb { color: #2a6fb0; } pre.code .hs { color: #975200; } pre.code .hn { color: #0b7a52; }
+  pre.code .hc { color: #5f665f; font-style: italic; } pre.code .hp { color: #5f665f; } pre.code .hd { color: #7f5800; } pre.code .hf { color: #2350a8; }
   .math.display { display: block; overflow-x: auto; margin: 8px 0; }
 
   details.thinking { color: var(--muted); font-size: 14px; margin: 4px 0 8px; }

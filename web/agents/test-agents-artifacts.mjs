@@ -521,6 +521,38 @@ try {
   }
 
   // ======================================================================== saved, with its base; reopened
+  // ======================================================================== a message's code blocks, in colour
+  // (each fenced block coloured by its fence's language, or a guess without one; the text exactly as written)
+  if (want("codecolor")) {
+    const blocks = [
+      ["python", "def f(x):\n    # square it\n    return x ** 2  # done\nprint(f(3), 'ok')"],
+      ["", "x = var('x')\nprint(factor(2^64 - 1))"],
+      ["matlab", "% a sine\nx = linspace(0, 3, 200);\nplot(x, sin(x.^2))"],
+      ["js", "const n = 42; // the answer\nconsole.log(`n is ${n}`);"],
+      ["text", "plain words, if 1 else 2"],
+      ["js", "const s = '<img src=x onerror=\"window.__cc=1\">' + \"</code></pre><b>bold</b> & more\";"],
+    ];
+    const text = "Here:\n\n" + blocks.map(([l, c]) => "```" + l + "\n" + c + "\n```").join("\n\n") + "\n";
+    const t = `t${++turnN}`;
+    event(t, { type: "turn_started" });
+    event(t, { type: "message_revised", message: "mc", revision: 1 });
+    event(t, { type: "text_delta", message: "mc", revision: 1, text });
+    event(t, { type: "turn_finished", outcome: "completed" });
+    await until(`[...document.querySelectorAll('.msg pre.code')].length >= ${blocks.length}`, 15000);
+    const got = await ev(`[...document.querySelectorAll('.msg pre.code code')].slice(-${blocks.length}).map((c) => ({ text: c.textContent, spans: [...c.querySelectorAll('span')].map((s) => [s.className, s.textContent]), color: (() => { const s = c.querySelector('.hk, .hb'); return s ? getComputedStyle(s).color : null; })() }))`);
+    const has = (i, cls, txt) => got[i]?.spans.some(([c, x]) => c === cls && x === txt);
+    ok(got.length === blocks.length && got.every((g, i) => g.text === blocks[i][1]), "a message's code blocks keep their text exactly, coloured or not", got.map((g) => g.text));
+    ok(has(0, "hk", "def") && has(0, "hf", "f") && has(0, "hc", "# square it") && has(0, "hs", "'ok'") && has(0, "hb", "print") && has(0, "hn", "2"),
+      "a python block: keywords, the name defined, comments, strings, builtins and numbers in colour", got[0]?.spans);
+    ok(has(1, "hb", "factor") && has(1, "hs", "'x'"), "a block without a language is guessed (here Sage: factor is one of its builtins)", got[1]?.spans);
+    ok(got[2]?.spans.some(([c, x]) => c === "hc" && x.startsWith("% a sine")) && has(2, "hn", "200"), "a matlab block: its % comment and numbers", got[2]?.spans);
+    ok(has(3, "hk", "const") && has(3, "hc", "// the answer") && has(3, "hn", "42"), "a js block: keywords, comments and numbers", got[3]?.spans);
+    ok(got[4]?.spans.length === 0, "a text block stays plain", got[4]?.spans);
+    const inj = await ev(`(() => { const c = [...document.querySelectorAll('.msg pre.code code')].at(-1); return { tags: [...c.querySelectorAll('*')].map((e) => e.tagName), cc: window.__cc ?? null }; })()`);
+    ok(inj.tags.every((t) => t === "SPAN") && inj.cc === null, "markup in a code block stays text: no element but the colour spans, nothing run", inj);
+    ok(got[0]?.color && got[0].color !== "rgb(36, 35, 31)", "the colours are the page's own (not the text colour)", got[0]?.color);
+  }
+
   // ======================================================================== the way to the files: Files… and the switch
   if (want("filesbtn")) {
     // (a text file's edit typed just now (its 700 ms save still pending), then Files… at once: the page leaves only after
