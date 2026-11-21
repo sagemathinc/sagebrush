@@ -917,6 +917,13 @@ def _rcond_estimate(A):
     return (1.0 / est) / anorm
 
 
+def _rcond_warn(rc):
+    """MATLAB's warning for an estimated rcond between 0 and eps (mldivide's page: "When rcond is between 0
+    and eps, MATLAB issues a nearly singular warning")"""
+    if 0 < rc < 2.220446049250313e-16:
+        warning_("Matrix is close to singular or badly scaled. Results may be inaccurate. RCOND =  %e." % rc, "MATLAB:nearlySingularMatrix")
+
+
 def _rcond_warning(A, Ainv=None):
     """the warning when A is close to singular: the estimated rcond
     (_rcond_estimate) between 0 and eps, the threshold MATLAB's mldivide
@@ -925,9 +932,7 @@ def _rcond_warning(A, Ainv=None):
     n = A.shape[0]
     if n == 0 or n > 500:
         return
-    rc = _rcond_estimate(A)
-    if 0 < rc < 2.220446049250313e-16:
-        warning_("Matrix is close to singular or badly scaled. Results may be inaccurate. RCOND =  %e." % rc, "MATLAB:nearlySingularMatrix")
+    _rcond_warn(_rcond_estimate(A))
 
 
 def _lu_solve_through(A, B, report=False):
@@ -973,7 +978,11 @@ def _solve(A, B):
         if np.any(d == 0):
             warning_("Matrix is singular to working precision.", "MATLAB:singularMatrix")
         else:
-            _rcond_warning(A)
+            # (a diagonal A's rcond exactly, as engine/nd's diagcon and the estimate both give it: ||A||_1 is the
+            # largest |d_i|, ||A^-1||_1 the reciprocal of the smallest)
+            ad = np.abs(d)
+            with np.errstate(all="ignore"):
+                _rcond_warn(float(np.min(ad) / np.max(ad)))
         return X
     if m == n:
         if A.dtype.kind == "c" or B.dtype.kind == "c":
@@ -987,6 +996,25 @@ def _solve(A, B):
             else:
                 _rcond_warning(A)
             return X
+        if A.dtype == np.float64 and B.dtype == np.float64:
+            # (mldivide's own solve (src/runtime/numpy_linalg.ts mldivide): on engine/nd, nd_solve's MATLAB mode,
+            # its structure pass, and rcond from the factors it solved with, at every size; elsewhere LU and the
+            # same estimate)
+            import _nplinalg
+            B2 = B.reshape((m, -1))
+            X, code, _col, _shape, rc = _nplinalg.mldivide(A, B2)
+            if code == 1 or code == 4:
+                if code == 4:
+                    _rcond_warn(rc)
+                return X.reshape(B.shape)
+            if code == 2:
+                # (MATLAB's result for a singular A is its LU's, with the Inf and NaN division by the zero pivot
+                # gives: computed here as before, not taken from the module, whose triangular solves skip a zero
+                # entry's division as the reference BLAS does, so a consistent singular system's 0/0 stays 0:
+                # [1 2; 3 6] \ [1; 3] gave [1; 0] where MATLAB gives [NaN; NaN]. Until engine/nd's fix.)
+                warning_("Matrix is singular to working precision.", "MATLAB:singularMatrix")
+                return _lu_solve_through(A, B2).reshape(B.shape)
+            # (code 3, an Inf or NaN in A or B: nothing computed there; as before, below)
         try:
             X = np.linalg.solve(A, B)
         except np.linalg.LinAlgError:

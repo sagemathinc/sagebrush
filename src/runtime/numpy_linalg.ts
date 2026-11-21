@@ -12,7 +12,7 @@ import { NDArray, empty, toDtype, ascontig, copy as npcopy, admitWork } from "./
 import { glibcLog, glibcExp } from "./libm";
 import { gemmBuffers, noRoom, wasmFusedFMA, wasmKernels, wasmLU, wasmLuSolve, wasmQR, wasmQRQtb, wasmSymEig, wasmGenEig, wasmSVD } from "./kernels";
 import * as FD from "./fdlibm";
-import { useNd, ndCholesky, ndLu, ndPath, ndRequestWarm, ndScratch, ndWarmState } from "./nd";
+import { useNd, ndCholesky, ndLu, ndMatlabSolve, ndPath, ndRequestWarm, ndScratch, ndWarmState } from "./nd";
 import { pollInterrupt } from "./ops";
 
 const { T, raise, tuple } = Obj;
@@ -203,6 +203,86 @@ function luSolve(L: { lu: Float64Array; piv: number[] }, n: number, B: Float64Ar
     }
   }
   return x;
+}
+
+// rcond of the n x n A from lu()'s nonsingular factors (row-major: L unit lower below the diagonal, U on and
+// above it), as engine/nd's gecon (engine/nd/src/cond.rs): 1 / (||A||_1 est), est Higham's estimate of
+// ||A^-1||_1 (ACM TOMS 14, 1988, Algorithm 674; LAPACK's dlacn2), the same steps; the solves here are row
+// dot products in one running sum, so the rounding is this backend's own. 0 if anorm is 0 or the estimate is
+// not finite or 0. The TypeScript path of mldivide, where engine/nd doesn't run.
+function gecon(L: Float64Array, n: number, anorm: number): number {
+  if (n === 0) return Infinity;
+  if (anorm === 0) return 0;
+  const B = (x: Float64Array, t: boolean) => {
+    if (!t) {
+      // x := U^-1 L^-1 x
+      for (let i = 0; i < n; i++) {
+        let s = x[i];
+        for (let k = 0; k < i; k++) s -= L[i * n + k] * x[k];
+        x[i] = s;
+      }
+      for (let i = n - 1; i >= 0; i--) {
+        let s = x[i];
+        for (let j = i + 1; j < n; j++) s -= L[i * n + j] * x[j];
+        x[i] = s / L[i * n + i];
+      }
+    } else {
+      // x := L^-T U^-T x
+      for (let i = 0; i < n; i++) {
+        let s = x[i];
+        for (let k = 0; k < i; k++) s -= L[k * n + i] * x[k];
+        x[i] = s / L[i * n + i];
+      }
+      for (let i = n - 1; i >= 0; i--) {
+        let s = x[i];
+        for (let k = i + 1; k < n; k++) s -= L[k * n + i] * x[k];
+        x[i] = s;
+      }
+    }
+  };
+  const asum = (x: Float64Array) => { let s = 0; for (let i = 0; i < n; i++) s += Math.abs(x[i]); return s; };
+  const sgn = (v: number) => (v >= 0 ? 1 : -1);
+  const firstLargest = (x: Float64Array) => {
+    let best = 0, big = Math.abs(x[0]);
+    if (big !== big) return 0;
+    for (let i = 1; i < n; i++) {
+      const v = Math.abs(x[i]);
+      if (v !== v) return i;
+      if (v > big) { best = i; big = v; }
+    }
+    return best;
+  };
+  const x = new Float64Array(n).fill(1 / n), xi = new Float64Array(n);
+  B(x, false);
+  let est = asum(x);
+  if (n > 1 && isFinite(est)) {
+    for (let i = 0; i < n; i++) xi[i] = sgn(x[i]);
+    x.set(xi);
+    B(x, true);
+    let j = firstLargest(x), it = 2;
+    for (;;) {
+      x.fill(0);
+      x[j] = 1;
+      B(x, false);
+      const old = est;
+      est = asum(x);
+      let same = true;
+      for (let i = 0; i < n; i++) if (sgn(x[i]) !== xi[i]) { same = false; break; }
+      if (same || est <= old) break;
+      for (let i = 0; i < n; i++) xi[i] = sgn(x[i]);
+      x.set(xi);
+      B(x, true);
+      const last = j;
+      j = firstLargest(x);
+      if (x[last] === Math.abs(x[j]) || it >= 5) break;
+      it++;
+    }
+    for (let i = 0; i < n; i++) { const m = 1 + i / (n - 1); x[i] = i % 2 === 0 ? m : -m; }
+    B(x, false);
+    const t = (2 * asum(x)) / (3 * n);
+    if (t > est) est = t;
+  }
+  return !isFinite(est) || est === 0 ? 0 : 1 / est / anorm;
 }
 
 // ------------------------------------------------------------------ QR (Householder)
@@ -1350,6 +1430,47 @@ newBuiltinModule("_nplinalg", (m) => {
     if (L.singular) linalgError("Singular matrix");
     const X = luSolve(L, n, B, bc);
     return out(X, vec ? [n] : [n, bc]);
+  });
+  fn("mldivide", (a: NDArray, b: NDArray) => {
+    // MATLAB's A \ B for the real square A and the 2-D B (lib/_matlab.py _solve): (X, code, column, structure,
+    // rcond) with code 1 solved, 2 singular (X None on the TypeScript path, which leaves it to the caller), 3 an
+    // Inf or NaN in A or B (nothing computed, X None), 4 nearly singular (0 < rcond < eps). On engine/nd at every
+    // size (nd_solve's MATLAB mode: the structure pass, then rcond from its own factors); elsewhere LU and the
+    // same estimate (gecon above), structure 0. (Memory: as solve's, and on engine/nd the MATLAB mode's work,
+    // n^2 + max(n^2 + 2nr + scratch, 2n))
+    const [r0, c0] = dims(a);
+    if (a.ndim !== 2 || r0 !== c0 || b.ndim !== 2 || b.shape[0] !== r0) raise(T.ValueError, "mldivide: A must be square and B have as many rows");
+    const n = r0, bc = b.shape[1];
+    const nd = useNd();
+    work(5 * n * n + 6 * b.size + (nd ? 2 * n * n + 2 * n * bc + ndScratch() + b.size : 0), "mldivide");
+    const A = view(a), Bv = view(b);
+    if (nd) {
+      let N: ReturnType<typeof ndMatlabSolve> = null, refused = false;
+      try {
+        N = ndMatlabSolve(A, n, Bv, bc);
+      } catch (e) {
+        // (no room in the module's memory: the TypeScript path below, never refused for the module's sake)
+        if (!noRoom(e)) throw e;
+        refused = true;
+      }
+      if (!refused) {
+        if (!N) return tuple([null, 3, 0, 0, NaN]);
+        return tuple([out(N.x, [n, bc]), N.code, N.col, N.structure, N.rcond]);
+      }
+    }
+    for (let i = 0; i < n * n; i++) if (!isFinite(A[i])) return tuple([null, 3, 0, 0, NaN]);
+    for (let i = 0; i < n * bc; i++) if (!isFinite(Bv[i])) return tuple([null, 3, 0, 0, NaN]);
+    const L = lu(A, n);
+    if (L.singular) return tuple([null, 2, 0, 0, 0]);
+    let anorm = 0;
+    for (let j = 0; j < n; j++) {
+      let s = 0;
+      for (let i = 0; i < n; i++) s += Math.abs(A[i * n + j]);
+      if (s > anorm || s !== s) anorm = s;
+    }
+    const rc = gecon(L.lu, n, anorm);
+    const X = luSolve(L, n, Bv, bc);
+    return tuple([out(X, [n, bc]), rc > 0 && rc < 2.220446049250313e-16 ? 4 : 1, 0, 0, rc]);
   });
   fn("inv", (a: NDArray) => {
     // (as det's, and the identity, the solution and the output)

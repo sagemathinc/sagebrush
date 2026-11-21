@@ -281,6 +281,36 @@ export function ndLu(A: Float64Array, n: number, B: Float64Array | null, r: numb
   return { diag, sign, x, singular: code === 2 };
 }
 
+/** X = A \ B as MATLAB's mldivide, by nd_solve's MATLAB mode (engine/nd/src/solve.rs, numerics P2b-2): the
+ *  structure pass (diagonal, triangular, symmetric with a positive diagonal: Cholesky, else LU), then rcond from
+ *  the factors (dgecon, dtrcon, dpocon). A is n x n and B n x r, row-major. `code`: 1 solved, 2 singular (an
+ *  exactly zero diagonal element or pivot; X holds what division by it gives, rcond 0), 4 nearly singular
+ *  (0 < rcond < eps); null where A or B has an Inf or NaN (the module computes nothing then). `structure`:
+ *  0 general (LU), 1 diagonal, 2 upper, 3 lower, 4 Cholesky, 5 Cholesky failed then LU. Only when useNd().
+ *  A RangeError if the module's memory can't hold the work. */
+export function ndMatlabSolve(A: Float64Array, n: number, B: Float64Array, r: number): { x: Float64Array; code: number; col: number; structure: number; rcond: number } | null {
+  // (the layout as ndLu's; the work as solve_work_len(Matlab, n, r): n^2 for A's copy, then the largest of the
+  // pieces', Cholesky's solve the largest: n^2 + 2nr + scratch, or the estimate's 2n)
+  live();
+  const SCRATCH = ex!.nd_info(0);
+  const up = (x: number) => Math.ceil(x / 64) * 64;
+  const desc = base, lo = desc + 64;
+  const wl = n * n + Math.max(n * n + 2 * n * r + SCRATCH, 2 * n);
+  const a = lo, b = up(a + 8 * n * n), ipiv = up(b + 8 * n * r), work = up(ipiv + 4 * n), report = up(work + 8 * wl), hi = report + 32;
+  reserve(hi);
+  const f64 = new Float64Array(mem!.buffer), u32 = new Uint32Array(mem!.buffer);
+  for (let i = 0, p = a / 8; i < n; i++) for (let j = 0; j < n; j++) f64[p + i + j * n] = A[i * n + j];
+  for (let i = 0, p = b / 8; i < n; i++) for (let j = 0; j < r; j++) f64[p + i + j * n] = B[i * r + j];
+  u32.set([a, b, ipiv, work, report, n, r, Math.max(n, 1), Math.max(n, 1), wl, lo, hi, 2], desc / 4);
+  if (ex!.nd_solve(desc) !== 1) throw new Error("the numerics module refused a solve layout");
+  const code = u32[report / 4];
+  if (code === 3) return null;
+  const x = new Float64Array(n * r);
+  for (let i = 0, p = b / 8; i < n; i++) for (let j = 0; j < r; j++) x[i * r + j] = f64[p + i + j * n];
+  const rc = new Float64Array(new Uint32Array([u32[report / 4 + 5], u32[report / 4 + 6]]).buffer)[0];
+  return { x, code, col: u32[report / 4 + 1], structure: u32[report / 4 + 4], rcond: rc };
+}
+
 // The thread pool (threads r2, PR (1)): large matrix products (ndMatmul) run on engine/nd's GEMM, its columns
 // dealt out to the calling thread and up to min(cores - 1, 8) helper threads, with the same bits as on one thread
 // (numerics-core r4.2 §7: every element summed in the same order whatever the thread count). So whether a product
