@@ -117,6 +117,14 @@ ok(refused(() => taskEvent({ ...q, text: LONE })), "question: text with a lone s
 ok(refused(() => taskEvent({ ...q, choices: ["ok", LONE] })), "question: a choice with a lone surrogate: refused");
 ok(refused(() => taskEvent({ type: "task_status", status: "failed", reason: LONE })), "task_status: a reason with a lone surrogate: refused");
 ok(refused(() => taskEvent({ type: "text_delta", message: "m", revision: 1, text: LONE })), "a turn event's text with a lone surrogate: refused");
+// (and no NUL in any text field; binary documents come as base64)
+const NUL = "a\u0000b";
+ok(refused(() => TASK_RESULTS["tasks.file"](fileWith(NUL))) && !refused(() => TASK_RESULTS["tasks.file"](fileWith({ base64: "YQBi" }))), "tasks.file: content with a NUL: refused as text, accepted as base64");
+alter("tasks.list", "a title with a NUL", (v) => { v.tasks[0].title = NUL; });
+ok(refused(() => taskEvent({ ...q, text: NUL })), "question: text with a NUL: refused");
+ok(refused(() => taskEvent({ ...q, choices: ["ok", NUL] })), "question: a choice with a NUL: refused");
+ok(refused(() => taskEvent({ type: "task_status", status: "failed", reason: NUL })), "task_status: a reason with a NUL: refused");
+ok(refused(() => taskEvent({ type: "text_delta", message: "m", revision: 1, text: NUL })), "a turn event's text with a NUL: refused");
 
 // (chat turn events: each kind closed)
 const GOOD_TURN = [

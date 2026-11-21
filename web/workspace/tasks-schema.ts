@@ -29,9 +29,10 @@ const oid = (v: unknown, what: string) => (typeof v === "string" && HEX40.test(v
 const oidOrNull = (v: unknown, what: string) => (v === null ? null : oid(v, what));
 const int = (v: unknown, min: number, what: string) => (typeof v === "number" && Number.isSafeInteger(v) && v >= min ? v : bad(`${what} isn't an integer of at least ${min}`));
 const bool = (v: unknown, what: string) => (typeof v === "boolean" ? v : bad(`${what} isn't true or false`));
-// (§2: text is well formed, no lone surrogate; one check for every text field)
+// (§2 and §3: text is well formed, with no lone surrogate and no NUL; one check for every text field. Binary documents
+//  come as {base64})
 const LONE_SURROGATE = /[\ud800-\udbff](?![\udc00-\udfff])|(?<![\ud800-\udbff])[\udc00-\udfff]/;
-const wellFormed = (v: string, what: string) => (LONE_SURROGATE.test(v) ? bad(`${what} isn't well-formed text`) : v);
+const wellFormed = (v: string, what: string) => (LONE_SURROGATE.test(v) || v.includes("\u0000") ? bad(`${what} isn't well-formed text`) : v);
 const text = (v: unknown, max: number, what: string) => (typeof v === "string" && enc.encode(v).length <= max ? wellFormed(v, what) : bad(`${what} isn't text of at most ${max} bytes`));
 const status = (v: unknown, what = "status") => ((TASK_STATUSES as readonly unknown[]).includes(v) ? (v as TaskStatus) : bad(`${what} isn't a task status`));
 // (§6.1's path rules, as the host's own checker has them (sagebrush-agent lib/task-paths.mjs pathProblem), and §2's
