@@ -247,7 +247,7 @@ fn setups_mod_in<S: Sink>(n: u64, k: usize, eps: &Character, res: &NewspaceOrbit
                 count::n(cnt, Family::ModArith, 2 * (w * w * func.len()) as u64);
                 (0..w).map(|a| (0..w).map(|bb| func.iter().fold(0u64, |acc, &(t, at)| (acc + mul(at, vs[a + bb][t], ell)) % ell)).collect()).collect()
             };
-            let setup = |func: Vec<(usize, u64)>, cnt: &mut Units| -> Result<Option<OrbitSetup>, String> {
+            let setup = |func: Vec<(usize, u64)>, combined: bool, cnt: &mut Units| -> Result<Option<OrbitSetup>, String> {
                 let Some(ginv) = invert_mod_c(&gram(&func, cnt), ell, cnt) else {
                     return Ok(None);
                 };
@@ -265,10 +265,10 @@ fn setups_mod_in<S: Sink>(n: u64, k: usize, eps: &Character, res: &NewspaceOrbit
                 if one[0] != 1 % ell || one[1..].iter().any(|&x| x != 0) {
                     return Err("trace setup self-check failed".into());
                 }
-                Ok(Some(OrbitSetup { s: power_sums(&uj, ell, cnt), u: uj.clone(), q: q.clone(), combined: func.len() > 1, seeded, func, psi }))
+                Ok(Some(OrbitSetup { s: power_sums(&uj, ell, cnt), u: uj.clone(), q: q.clone(), combined, seeded, func, psi }))
             };
-            for t in 0..d {
-                if let Some(st) = setup(vec![(t, 1)], cnt)? {
+            for t in (0..d).filter(|_| !tests::single_coordinates_skipped()) {
+                if let Some(st) = setup(vec![(t, 1)], false, cnt)? {
                     found = Some(st);
                     break;
                 }
@@ -286,7 +286,7 @@ fn setups_mod_in<S: Sink>(n: u64, k: usize, eps: &Character, res: &NewspaceOrbit
                 let a = if seeded { rng.vector(d, ell) } else { powers_mod(y, d, ell) };
                 count::n(cnt, Family::ModArith, d as u64);
                 y += 1;
-                found = setup(a.into_iter().enumerate().filter(|&(_, a)| a != 0).collect(), cnt)?;
+                found = setup(a.into_iter().enumerate().filter(|&(_, a)| a != 0).collect(), true, cnt)?;
             }
         }
         setups.extend(found);
@@ -935,3 +935,12 @@ pub mod pins {
 
 #[cfg(test)]
 mod tests;
+
+/// (outside the tests, the setup always tries the single coordinates first)
+#[cfg(not(test))]
+mod tests {
+    #[inline(always)]
+    pub(super) fn single_coordinates_skipped() -> bool {
+        false
+    }
+}

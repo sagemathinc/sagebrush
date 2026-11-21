@@ -200,6 +200,7 @@
    "status": "open",
    "owner": "modular symbols",
    "keys": [
+    "engine/modsym/src/hecke_q.rs :: cusp_hecke_matrix :: if p >= crate::linalg::MAX_HECKE_PRIME || !is_prime(p) { #0",
     "engine/modsym/src/traces.rs :: orbit_hecke_traces_from :: if len as u64 >= crate::linalg::MAX_HECKE_PRIME || q >= crate::linalg::MAX_HECKE_PRIME { #0",
     "engine/web/src/lib.rs :: dispatch :: let prec = size(v, \"prec\", None, sagebrush_modsym::linalg::MAX_HECKE_PRIME)?; #0"
    ],

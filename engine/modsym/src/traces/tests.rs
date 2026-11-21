@@ -5,6 +5,17 @@
 //! independence of the threads in tests/hecke_q.rs.)
 
 use super::*;
+use std::cell::Cell;
+
+thread_local! {
+    // (the setups on this thread skip the single coordinates, so the
+    // combined functionals, which no golden needs, are exercised)
+    static SKIP_SINGLE: Cell<bool> = const { Cell::new(false) };
+}
+
+pub(super) fn single_coordinates_skipped() -> bool {
+    SKIP_SINGLE.with(|c| c.get())
+}
 
 fn factor(f: &[BigInt]) -> Vec<(Vec<BigInt>, u32)> {
     sagebrush_poly::factor(f).1
@@ -109,5 +120,46 @@ fn a_polynomial_not_squarefree_on_the_deterministic_route() {
         }
         let r = at(n, k, &res, ell, sturm_len(n, k), &mut Local::new());
         assert!(matches!(r, Ok(Err(Reject::Separation))), "N={} k={} ell={}: {:?}", n, k, ell, r.map(|x| x.map(|_| ())));
+    }
+}
+
+/// The seeded candidates (w (d - 1) + 1 > ell) find a setup, counted in
+/// the statistics, and the traces are the same as without that prime.
+#[test]
+fn the_seeded_candidates_give_the_same_traces() {
+    for (n, k, ell) in [(23u64, 2usize, 3u64), (13, 4, 3), (67, 2, 7)] {
+        let res = space(n, k);
+        let eps = Character::trivial(n);
+        let primes = std::iter::once(ell).chain(hecke_primes(1));
+        let (tr, st) = orbit_hecke_traces_from(n, k, &eps, &res, sturm_len(n, k), 2, primes).unwrap();
+        let (tr0, st0) = orbit_hecke_traces(n, k, &eps, &res, sturm_len(n, k), 2).unwrap();
+        assert!(st.seeded > 0 && st0.seeded == 0, "N={} k={} ell={}: {:?}", n, k, ell, st);
+        assert_eq!(st.rejected_total(), 0);
+        for (a, b) in tr.iter().zip(&tr0) {
+            assert_eq!((&a.sel, &a.r, &a.s), (&b.sel, &b.r, &b.s), "N={} k={} ell={}", n, k, ell);
+        }
+    }
+}
+
+/// The combined functionals phi_y = sum_t y^t e_t (taken when no single
+/// coordinate works, which no golden needs: forced here by skipping the
+/// single coordinates) give a setup, counted, and the same traces; also
+/// with the seeded candidates (23.2 mod 3).
+#[test]
+fn the_combined_functionals_give_the_same_traces() {
+    for (n, k, small) in [(37u64, 2usize, None), (43, 2, None), (13, 4, None), (23, 2, Some(3u64))] {
+        let res = space(n, k);
+        let eps = Character::trivial(n);
+        let (tr0, _) = orbit_hecke_traces(n, k, &eps, &res, sturm_len(n, k), 2).unwrap();
+        SKIP_SINGLE.with(|c| c.set(true));
+        let primes = small.into_iter().chain(hecke_primes(1));
+        let r = orbit_hecke_traces_from(n, k, &eps, &res, sturm_len(n, k), 2, primes);
+        SKIP_SINGLE.with(|c| c.set(false));
+        let (tr, st) = r.unwrap();
+        assert_eq!(st.combined, st.primes * res.orbits.len() as u64, "N={} k={}: every setup combined: {:?}", n, k, st);
+        assert_eq!(small.is_some(), st.seeded > 0);
+        for (a, b) in tr.iter().zip(&tr0) {
+            assert_eq!((&a.sel, &a.r, &a.s), (&b.sel, &b.r, &b.s), "N={} k={}", n, k);
+        }
     }
 }

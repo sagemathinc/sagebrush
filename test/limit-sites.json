@@ -3637,6 +3637,61 @@
   "owner": "the L-function engine (lfun)",
   "reason": "a unit test's inputs; refuses nothing"
  },
+ "engine/modsym/examples/hecke_prime_supply.rs ::  :: const SIGMA0_MAX: f64 = 1344.0; // max sigma0(n) for n < 2^30 #0": {
+  "class": "none",
+  "owner": "modular symbols",
+  "reason": "a check-only example (the twisted traces' prime supply against L): its max is the largest sigma0 below 2^30 and its loops a level range; it refuses nothing"
+ },
+ "engine/modsym/examples/hecke_prime_supply.rs :: crt_count :: let up = 1.0 + ld + (1.0 + h * lq + 1.0) + 2.0 * (h * ll + 1.0 + SIGMA0_MAX.log2()); #0": {
+  "class": "none",
+  "owner": "modular symbols",
+  "reason": "a check-only example (the twisted traces' prime supply against L): its max is the largest sigma0 below 2^30 and its loops a level range; it refuses nothing"
+ },
+ "engine/modsym/examples/hecke_prime_supply.rs :: main :: for n in 1..=nmax { #0": {
+  "class": "none",
+  "owner": "modular symbols",
+  "reason": "a check-only example (the twisted traces' prime supply against L): its max is the largest sigma0 below 2^30 and its loops a level range; it refuses nothing"
+ },
+ "engine/modsym/examples/hecke_prime_supply.rs :: main :: let mut es: Vec<u64> = (1..=nmax).map(eisenstein_exponent).collect(); #0": {
+  "class": "none",
+  "owner": "modular symbols",
+  "reason": "a check-only example (the twisted traces' prime supply against L): its max is the largest sigma0 below 2^30 and its loops a level range; it refuses nothing"
+ },
+ "engine/modsym/examples/hecke_prime_supply.rs :: main :: let nmax: u64 = std::env::args().nth(1).map_or(200, |s| s.parse().unwrap()); #0": {
+  "class": "none",
+  "owner": "modular symbols",
+  "reason": "a check-only example (the twisted traces' prime supply against L): its max is the largest sigma0 below 2^30 and its loops a level range; it refuses nothing"
+ },
+ "engine/modsym/examples/hecke_prime_supply.rs :: main :: println!(\"worst: N={} k={} new_only={}: ledger threshold {:.3e} bytes = {:.2} PiB (bracket up to {:.3e})\", w.1, w.2, w.3, w.0 as f64, w.0 as f64 / 2f64.powi(50), w.4 as f64); #0": {
+  "class": "none",
+  "owner": "modular symbols",
+  "reason": "a check-only example (the twisted traces' prime supply against L): its max is the largest sigma0 below 2^30 and its loops a level range; it refuses nothing"
+ },
+ "engine/modsym/src/hecke_q.rs :: cusp_dim :: let Some(d) = gamma0_cusp_dim(m, k) else { return u64::MAX }; #0": {
+  "class": "none",
+  "owner": "cusp_hecke_matrix",
+  "reason": "saturation, not a cap: a dimension that overflows u64 becomes u64::MAX, so L's admission refuses it as it would the true value (r4: L refuses)"
+ },
+ "engine/modsym/src/hecke_q.rs :: cusp_dim :: return gamma0_cusp_dim(n, k).unwrap_or(u64::MAX); #0": {
+  "class": "none",
+  "owner": "cusp_hecke_matrix",
+  "reason": "saturation, not a cap: a dimension that overflows u64 becomes u64::MAX, so L's admission refuses it as it would the true value (r4: L refuses)"
+ },
+ "engine/modsym/src/hecke_q.rs :: cusp_dim :: u64::try_from(total.max(0)).unwrap_or(u64::MAX) #0": {
+  "class": "none",
+  "owner": "cusp_hecke_matrix",
+  "reason": "saturation, not a cap: a dimension that overflows u64 becomes u64::MAX, so L's admission refuses it as it would the true value (r4: L refuses)"
+ },
+ "engine/modsym/src/hecke_q.rs :: cusp_hecke_matrix :: if p >= crate::linalg::MAX_HECKE_PRIME || !is_prime(p) { #0": {
+  "class": "3",
+  "disposition": {
+   "3": {
+    "followup": "FU-B5-3"
+   }
+  },
+  "owner": "cusp_hecke_matrix",
+  "reason": "the input domain of the Heilbronn matrices and mod-ell kernels: the prime q below 2^30, refused up front naming the bound (FU-B5-3)"
+ },
  "engine/modsym/src/linalg.rs :: sparse_echelon :: pub const MAX_HECKE_PRIME: u64 = 1 << 30; #0": {
   "class": "3",
   "owner": "modular symbols",
@@ -3691,6 +3746,26 @@
   },
   "owner": "newforms traces",
   "reason": "the newforms trace route's fixed cap of 16 bad primes, kept as is; to move to the twisted traces' uncounted per-site loop (FU-B5-2)"
+ },
+ "engine/modsym/tests/hecke_q.rs :: the_bounds_at_extreme_inputs :: assert!(bytes >= work.min(u64::MAX / 16), \"{} {}\", n, k); #0": {
+  "class": "none",
+  "owner": "cusp_hecke_matrix",
+  "reason": "test assertions on the admission's saturating bounds at extreme inputs; refuse nothing"
+ },
+ "engine/modsym/tests/hecke_q.rs :: the_bounds_at_extreme_inputs :: assert_eq!(cusp_hecke_lower(1u64 << 31, big_k, usize::MAX, false).1, u64::MAX, \"saturated\"); #0": {
+  "class": "none",
+  "owner": "cusp_hecke_matrix",
+  "reason": "test assertions on the admission's saturating bounds at extreme inputs; refuse nothing"
+ },
+ "engine/modsym/tests/hecke_q.rs :: the_bounds_at_extreme_inputs :: for (n, k, prec, new_only) in [(1u64 << 31, big_k, usize::MAX, false), (2147483647, big_k, usize::MAX, true), (1, 2, 0, false), (1u64 << 31, 2, wide, true)] { #0": {
+  "class": "none",
+  "owner": "cusp_hecke_matrix",
+  "reason": "test assertions on the admission's saturating bounds at extreme inputs; refuse nothing"
+ },
+ "engine/modsym/tests/hecke_q.rs :: the_bounds_at_extreme_inputs :: let wide = usize::try_from(1u64 << 40).unwrap_or(usize::MAX); #0": {
+  "class": "none",
+  "owner": "cusp_hecke_matrix",
+  "reason": "test assertions on the admission's saturating bounds at extreme inputs; refuse nothing"
  },
  "engine/modsym/tests/newforms_poll_gap.rs :: trace_coefficient_bound_poll_gap :: let (gap, poll) = (hooks::max_gap_ns(), hooks::max_poll_gap_ns()); #0": {
   "class": "none",
