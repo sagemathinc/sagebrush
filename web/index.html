@@ -106,8 +106,9 @@
   /* until the notebook is read from IndexedDB, nothing below it shows (no layout shift) */
   body.opening .about, body.opening footer { display: none; }
   /* (while the page opens its document, not the placeholder notebook it starts with ("Untitled", an empty cell): the
-     document appears in place, with nothing before it to flash) */
-  body.opening #nbname, body.opening #cells { visibility: hidden; }
+     document appears in place, with nothing before it to flash; shown after 4 s if the page is still opening it
+     (opening-late), and body.opening's own rules as they were: the LaTeX and code pages keep it) */
+  body.opening:not(.opening-late) #nbname, body.opening:not(.opening-late) #cells { visibility: hidden; }
   #nbline { display: flex; gap: 10px; align-items: center; margin-top: 4px; }
   /* the notebook view and the landing view (/?home): the brief, Nov 2: "There is way way too much on this page. The
      whiteboard page is much cleaner. We need a landing page that has all that marketing/positioning, and remove it all
@@ -494,7 +495,7 @@
 <div id="wssidebar" hidden></div>
 <!-- (the files shown before the page draws, as they were left (wsShowFiles keeps the choice), so the first paint has
 its final layout and the files never arrive a moment later; not on a phone, where they would cover the page) -->
-<script>try { if (localStorage.getItem("sagebrush-files-sidebar") === "1" && !matchMedia("(max-width: 640px)").matches) { document.body.classList.add("wsfiles"); document.getElementById("wssidebar").hidden = false; } } catch {} setTimeout(() => document.body.classList.remove("opening"), 4000);</script>
+<script>try { if (localStorage.getItem("sagebrush-files-sidebar") === "1" && !matchMedia("(max-width: 640px)").matches) { document.body.classList.add("wsfiles"); document.getElementById("wssidebar").hidden = false; } } catch {} setTimeout(() => document.body.classList.add("opening-late"), 4000);</script>
 <!-- (the bottom panels' one host: the Python console, the browser terminal and the remote terminal, beside the files
      while they show, as the LaTeX editor is, never over or under them (decided Nov 12), and above the alpha notice) -->
 <div id="sbpanels"></div>
