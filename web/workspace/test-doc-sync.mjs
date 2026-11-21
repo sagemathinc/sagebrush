@@ -1258,7 +1258,7 @@ try {
       await settle();
       await B.call("mount", NK);
       // (typed as a person types: the notebook asks only after the person's own input)
-      await A.call("focus", "ka");
+      if (!(await A.call("focus", "ka"))) throw new Error("no cell ka on A to type in");
       await A.input("k1 typed, then a reload asked");
       const asked = await A.call("leaveAsked");
       await sleep(900);

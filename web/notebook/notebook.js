@@ -1897,7 +1897,9 @@ export function createNotebook(root, opts = {}) {
       highlight: (src) => highlightMarkdown(src, isSage()),
       placeholder: "Text: Markdown, with math: $x^2$",
       tabIndents: true,
-      onChange: (v) => { cell.blocksText = v; setText(cell, v); cell.ta.dispatchEvent(new Event("input")); },
+      // (the person's own edit: the block editor's paste, a block split or joined, has no input event of its own, so it
+      // counts as typed here, for the leave prompt)
+      onChange: (v) => { typed = true; cell.blocksText = v; setText(cell, v); cell.ta.dispatchEvent(new Event("input")); },
       onKey: (e) => mdKey(cell, e),
       onEdge: (up) => { const to = up ? prevCell(cell) : nextCell(cell); if (!to) return false; edit(to, up ? "end" : "start"); return true; },
     });
@@ -2295,11 +2297,14 @@ export function createNotebook(root, opts = {}) {
   // (unsaved: a save running, the last one failed or was busy (kept to send again), or a change waiting that differs
   // from what was last saved (typed and undone before its save asks nothing); a notebook left, with its saves still
   // to make, is the page's to ask about (its "left" listener))
-  // (and only once the person has typed here since everything was last saved (`typed`, a trusted input event): a
-  // run's output, a change from elsewhere or one a script made, waiting to be saved, never asks, and a page driven
-  // by a script (a test, an automation) is never held by a prompt nobody answers)
+  // (and only once the person has typed here since everything was last saved (`typed`: a trusted input event, or a
+  // Markdown cell's block editor's change); while this notebook's saves fail or are busy, any of the person's own
+  // keys, clicks, pastes or drops too, as a cell moved, deleted or retyped then can't be saved either. So a run's
+  // output, a change from elsewhere or one a script made, waiting to be saved, never asks: this prompt never holds a
+  // page a script drives (a test, an automation). Notebooks left are the page's own prompt's, as before)
   const unsaved = (dirty) => typed && !!store && !store.readOnly && !!(savesPending || failed.has(shown) || busy.size || dirty());
   root.addEventListener("input", (e) => { if (e.isTrusted) typed = true; }, true);
+  for (const t of ["keydown", "pointerdown", "paste", "drop"]) root.addEventListener(t, (e) => { if (e.isTrusted && store && (failed.has(shown) || busy.size)) typed = true; }, true);
   function onBeforeUnload(ev) {
     if (!unsaved(() => timer && JSON.stringify(snapshot()) !== lastJson)) return;
     if (timer) flush();
@@ -2352,7 +2357,8 @@ export function createNotebook(root, opts = {}) {
     shown.synced = { ...syncedOf(rev, snap.cells, snap.mode), doc: baseOf(snap.mode, list ?? []) };
     Promise.resolve().then(() => { loading = false; showParked(); }); // after the observer's records for this
     reactiveLoad();
-    guard(); // (another document shown: its own failed save, or none)
+    typed = false; // (another document shown: nothing typed in it yet; one left with saves to make is the page's to ask)
+    guard(); // (its own failed save, or none)
   }
   // (the runs of this notebook that ended while it wasn't shown (execCell's done): their output, prompt number and
   // time put in their cells, once loaded, as a change of the document, so it is saved)

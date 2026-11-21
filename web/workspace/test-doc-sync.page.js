@@ -343,7 +343,6 @@ T.leaveAsked = () => {
   window.dispatchEvent(e);
   return e.defaultPrevented;
 };
-/** Typing in a cell of the mounted notebook: its text set, and the editor told (as a keystroke tells it). */
 /** A cell of the mounted notebook focused and its text selected, for the person's own typing (CDP Input.insertText,
  * a trusted input: what the notebook's leave prompt waits for). */
 T.focus = (cid) => {
@@ -353,6 +352,7 @@ T.focus = (cid) => {
   cell.ta.select();
   return true;
 };
+/** Typing in a cell of the mounted notebook: its text set, and the editor told (as a keystroke tells it). */
 T.type = (cid, text) => {
   // (the notebook mounted last: earlier cases' notebooks stay on the page, with the same cell ids)
   const cell = cellsOf(T.nbDiv).find((c) => c?.id === cid);
