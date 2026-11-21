@@ -16,19 +16,19 @@ The direction, Nov 21, 2026, about 11:28 AM PST (verbatim): "for windows I think
 - runs Claude through Anthropic's Claude Agent SDK, with the person's own Claude login (`~/.claude`);
 - runs Codex through `codex app-server`, with the person's own Codex login;
 - uses its own pinned, hash-checked Claude Code (an exact dependency) and Codex (fetched from upstream on first use), never the ones on PATH;
-- pairs with one page origin, using a one-time code that it generates and prints.
+- pairs with one page origin, using a one-time code that it generates and puts in a pairing link it prints, which the person opens.
 
 **What the app adds.** Everything in this list is proposed; none of it exists yet.
 - **Bundling.** The app packs the exact `sagebrush-agent` tarball, its shrinkwrapped dependencies, its pinned Claude Code and, for Connect Codex, its pinned Codex binary for that platform, beside the engine as a resource. Bundling Codex is what lets Connect Codex work with no download at run time. The release's sha256 is pinned in the app's build, the same rule as the agents site's `RELEASE_SHA256`, and a mismatch fails the build. The build also writes a manifest of every file the agent will load. At run time the app checks the files actually loaded against it before starting the agent (§5). If a Store build can't bundle Codex for a platform, Connect Codex is unavailable in that build; it never falls back to a download.
 - **The Connect button.** It goes in the app's agents page; it needs that page to ship in the app (the app shows a short "not in the app" page for /agents/ today). The app starts the agent on its Node sidecar as a child process, with:
   - `--origin` set to the app page's exact origin, `http://127.0.0.1:<the port the app holds>`, and no other origin;
-  - a one-time pairing code that the app generates and hands to both the agent (on its stdin) and its own page (over a Tauri command). Nothing is typed or shown. This needs new agent support: today the agent generates the code and prints it for the person to type;
+  - a one-time pairing code that the app generates and hands to both the agent (on its stdin) and its own page (over a Tauri command). Nothing is typed or shown. This needs new agent support: today the agent generates the code and prints a pairing link for the person to open;
   - the agent's working folder: the selected workspace on disk, shown to the person; when there is none, the app asks for a folder and never falls back to the home folder.
 
   The app stops the agent, and the work it started, when the app quits (§5).
 - **Sign-in.** It is the agent's own: Claude's and Codex's login flows open the browser. The app never sees a password or a token; the logins live where the CLIs keep them, in `~/.claude` and `~/.codex`. *To verify before building:* how Claude Code's and Codex's logins can be started without a terminal. Both open a browser URL today, but the CLI front ends expect a TTY. The app may need to run them in a hidden pseudo-terminal and open the URL, or use the SDK's own login entry if it has one.
 - **The version shown.** The app's About box and the agents page show the bundled `sagebrush-agent`, Claude Code and Codex versions.
-- **Updates.** A new agent release reaches app users in the next app release, through the app's normal update. There are no downloads at run time in the Store builds (§2). The direct-download builds may keep the agent's own first-use fetch of the pinned Codex, which is hash-checked as in the CLI.
+- **Updates.** A new agent release reaches app users in the next app release, through the app's normal update. There are no executable downloads at run time in the Store builds (§2). The direct-download builds may keep the agent's own first-use fetch of the pinned Codex, which is hash-checked as in the CLI.
 
 **What the agent may touch.**
 - **Today, with the CLI:** a local `sagebrush-agent` paired with a page reaches only the workspace tools that page's grant allows (writing a notebook, its own git branch, and so on); it has no shell or files on the computer. Shell and files on a computer come only through `sagebrush remote` and that computer's explicit grant ("Allow shell and files on <computer>").
