@@ -340,14 +340,32 @@ pub fn invariants_nonsingular(a: &ZMat, d: &BigInt, solved: Option<(ZMat, BigInt
 }
 
 /// Steps 3 and 4 for a given e with t_1 ... t_(n-1) | e (module docs).
+/// Factors that do not multiply into d could only come from a bug: a
+/// debug build stops there, a release one takes the classical route e = d
+/// instead (its n entries are gcd(t_i, d) = t_i), so a bug costs time, not
+/// a wrong answer or a trap.
 fn invariants_with(a: &ZMat, d: &BigInt, e: &BigInt) -> Vec<BigInt> {
     let n = a.rows;
     let mut t = if e.is_one() { vec![BigInt::one(); n - 1] } else { smith_mod(a, e)[..n - 1].to_vec() };
+    #[cfg(test)]
+    let forced = tests::CORRUPT_STEP4.with(|c| c.replace(false));
+    #[cfg(test)]
+    if forced {
+        // (tests: a factor that cannot divide d, as a bug would give)
+        t[0] = d + BigInt::one();
+    }
     let prod: BigInt = t.iter().product();
     let (last, rem) = d.div_rem(&prod);
-    assert!(rem.is_zero() && t.iter().all(|x| x.is_positive()), "invariant factors that do not divide the determinant");
-    t.push(last);
-    t
+    if rem.is_zero() && t.iter().all(|x| x.is_positive()) {
+        t.push(last);
+        return t;
+    }
+    #[cfg(test)]
+    let expected = forced;
+    #[cfg(not(test))]
+    let expected = false;
+    debug_assert!(expected, "invariant factors that do not divide the determinant (e = {e})");
+    smith_mod(a, d)
 }
 
 /// The invariant factors of a square diagonal matrix, by pairs: (x, y) ->

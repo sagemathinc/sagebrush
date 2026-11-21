@@ -1,5 +1,11 @@
 use super::*;
 
+thread_local! {
+    /// Tests: corrupt the next step 4's first factor, as a bug would, to
+    /// reach invariants_with's fallback.
+    pub(super) static CORRUPT_STEP4: std::cell::Cell<bool> = const { std::cell::Cell::new(false) };
+}
+
 fn rng(seed: &mut u64) -> u64 {
     *seed ^= *seed << 13;
     *seed ^= *seed >> 7;
@@ -325,4 +331,19 @@ fn invariants_reuse_det_solve_on_large_matrices() {
     assert_eq!(got, invariants_with(&a, &d, &d));
     assert_eq!(got.iter().product::<BigInt>(), d);
     assert!(got.windows(2).all(|w| (&w[1] % &w[0]).is_zero()), "each divides the next");
+}
+
+/// A step 4 whose factors do not multiply into d (only a bug could give
+/// that) is caught: the classical route e = d gives the right factors, in
+/// release and in debug builds alike, instead of a trap.
+#[test]
+fn a_failed_check_falls_back_to_e_equals_d() {
+    let mut s = 0x6a09_e667_f3bc_c908u64;
+    let inv = vec![big(1), big(2), big(6), big(12)];
+    let a = structured(4, 4, &inv, &mut s);
+    let d: BigInt = inv.iter().product();
+    CORRUPT_STEP4.with(|c| c.set(true));
+    let got = invariants_with(&a, &d, &big(12));
+    assert!(!CORRUPT_STEP4.with(|c| c.get()), "the hook was reached");
+    assert_eq!(got, inv);
 }
