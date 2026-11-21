@@ -1,6 +1,6 @@
 # The numeric track
 
-*November 21, 2026, r4.* track/numeric is where MATLAB mode's numerical
+*November 21, 2026, r5.* track/numeric is where MATLAB mode's numerical
 side grows: the functions an agent reaches for when it writes MATLAB, and a
 subset of the Symbolic Toolbox. It works like track/math: PRs go into
 track/numeric, and the track is pulled into master. This note settles what
@@ -19,19 +19,37 @@ Two kinds of behaviour, held to two standards.
 - **Shapes and classes:** `size`, the class (`double`, `single`, integer classes, `logical`, `char`, `string`, `cell`, `struct`), complexity (`isreal`), and sparsity (`issparse`).
 - **Errors:** which inputs raise, and the identifier. Identifiers come only from a MATLAB-printed source (an observed MATLAB run, or the documentation's text); otherwise the identifier is empty, never guessed. The message keeps Sagebrush's wording unless a test pins MATLAB's.
 - **Warnings:** which inputs warn (singular matrix, nearly singular with the RCOND value's form, iteration limits), and the identifier where MATLAB prints one.
-- **Edge cases:** empty inputs and their shapes (`sum(zeros(0,3))` is `zeros(1,3)`), `NaN` and `Inf` propagation, `-0` where MATLAB's documentation says so, dimension arguments, `'omitnan'`, integer saturation and rounding, and implicit expansion's rules.
-- **Exact values:** results whose value is defined exactly. These are integer-valued results (`rank` and other tolerance decisions only away from the tolerance: near it, §2), sorting and set results with their index outputs, `find`, logical results, the order of `eig`'s values where it is documented, and display formatting (`disp`, `format`, `mat2str`, `num2str`), which scripts parse.
+- **Edge cases:** empty inputs and their shapes (`sum(zeros(0,3))` is `zeros(1,3)`), `-0` where MATLAB's documentation says so, dimension arguments, `'omitnan'`, integer saturation and rounding, and implicit expansion's rules.
+- **NaN and Inf:** "exact" covers NaN and Inf that come from the inputs. Intermediate overflow is exact as §2's canonical order produces it, which differs from MATLAB's and Octave's order by design:
+  - `sum([1e308 1e308 -1e308])` is `1e308` here, where Octave gives `Inf`;
+  - `sum([1 1e100 1 -1e100])` is 2 here and 0 in Octave, which is within the accuracy contract.
+
+  Tests of overflow-dependent results say so. Reductions start their accumulators at $+0$, so `sum([-0 -0])` is $+0$, as in Octave; that's pinned.
+- **Exact values:** results whose value is defined exactly. These are integer-valued results (`rank` and other tolerance decisions only away from the tolerance: near it, §2), sorting and set results with their index outputs, `find`, logical results, the order of `eig`'s values where it is documented, and display formatting (`disp`, `format`, `mat2str`, `num2str`), which scripts parse. Display is exact as a function of the double printed, not a claim that a computed value prints as MATLAB's does, so display tests use exactly representable or exact-result inputs.
 - **Random numbers:** `rand`, `randn` and `randi` after `rng(seed)` give MATLAB's numbers (already so: design/matlab.md).
 
 **Matched within a stated accuracy.** Floating-point values from an algorithm:
 - linear algebra, eigen- and singular values, FFTs, ODE solutions, quadrature, optimizers, interpolation and special functions.
 
-Each function states its bound in its catalog entry: `accuracy`, in ulps or as a relative or residual bound. Some examples:
+Each function states its bound in its catalog entry's `accuracy` field. Each entry has five parts; without the constant and the domain, a bound can't fail a test:
+- (a) **kind:** ulp, normwise backward, componentwise backward, residual, or forward-relative;
+- (b) **norm:** 1, 2, $\infty$ or Frobenius, normwise or per component;
+- (c) **constant $c$:** a number, with its source. It is either an a-priori bound from the literature, or measured once with a stated margin and recorded. It is never adjusted to make a failing test pass;
+- (d) **domain:** overflow and underflow ranges excluded, and how subnormals, NaN, $\pm$Inf and $-0$ behave;
+- (e) **scope:** per target only, or also a cross-target forward comparison, which is allowed only for well-conditioned outputs (§2).
 
-- `A\b`: normwise backward error at most $c \cdot n \cdot \varepsilon$, checked as $\|Ax - b\| / (\|A\|\|x\| + \|b\|)$;
-- `eig` of a symmetric matrix: each value within $c \cdot n \varepsilon \|A\|$;
-- `exp`, `sin` and the like: within 1 ulp of the correctly rounded value, checked against mpmath;
-- `ode45`: the documented RelTol/AbsTol contract against a high-precision reference solution, not MATLAB's step sequence.
+Examples:
+- **`A\b`, square and nonsingular:** normwise backward error $\|Ax - b\| / (\|A\|\|x\| + \|b\|) \le c\,n\,\varepsilon$.
+- **`A\b`, least squares (non-square A):** a least-squares backward error, such as $\|A^T r\| / (\|A\|\,\|r\|)$ with $r = b - Ax$, or the Waldén–Karlson–Sun bound. The residual itself isn't small.
+- **`A\b`, rank-deficient A:** MATLAB's warning `Rank deficient, rank = r, tol = …` is a §1 exact-match item, in its structure and form and in its tolerance rule, with Octave as the oracle where MATLAB's documentation is silent.
+- **`eig` of a symmetric matrix:** each value within $c\,n\,\varepsilon\|A\|_2$ (Weyl), forward and cross-target.
+- **`[V, D] = eig(A)` in general:** the residual $\|AV - VD\| \le c\,n\,\varepsilon\|A\|\|V\|$, per target.
+- **`svd`:** $\|A - U\Sigma V^T\| \le c\,n\,\varepsilon\|A\|$ per target, and singular values forward within $c\,n\,\varepsilon\|A\|_2$.
+- **The FFT:** per variant. Relative $\ell_2$ error at most $c\,\varepsilon\log_2 n$ for powers of 2, and a larger stated $c$ for Bluestein.
+- **`exp`, `sin`, `pow`, `gamma`, `erf` and the like:** a bound per function, in ulps, measured against mpmath across the function's whole domain. The sweep includes huge arguments (trigonometric argument reduction), subnormals, and arguments near zero crossings and in the tails. Sagebrush's own Rust implementations make a claim per function with its sweep, never a blanket "1 ulp", and the entry flags when a platform libm is used instead.
+- **`ode45` and the other ODE solvers:** MATLAB documents RelTol and AbsTol as a local, per-step test (odeset: at each step the solver estimates the local error in each component, and the step must have acceptable error). The contract is that acceptance test, checked on the solver's own error estimate. Plus a global-error check on named test problems, $\|y - y_{\mathrm{ref}}\| \le C \cdot \mathrm{tol}$, with $C$ measured and recorded per problem, not tuned. Global error can exceed the tolerances by the problem's stability factor, and that isn't a defect.
+
+**mpmath as the reference** computes at a working precision high enough to round correctly to double: at least twice the bits, re-evaluated at higher precision (Ziv-style) when the result is close to a rounding boundary, and higher still for ill-conditioned inputs.
 
 **Never bitwise against MATLAB.** MATLAB's own results change across versions, BLAS libraries and CPUs. A test that pins MATLAB's last digits pins an accident.
 - Where a published MATLAB example prints values, the comparison is at the digits displayed: `format short` rounds, so a match there means agreement to that display.
@@ -41,7 +59,7 @@ Each function states its bound in its catalog entry: `accuracy`, in ulps or as a
 
 ## 2. Determinism: native and wasm
 
-These rules apply to engine/nd (numerics-core r4.2 §7) and everything built on it. Throughout, $\varepsilon = 2^{-53}$ and $\gamma_k = k\varepsilon/(1-k\varepsilon)$, for $k\varepsilon < 1$.
+These rules apply to engine/nd (numerics-core r4.2 §7) and everything built on it. Throughout, $\varepsilon = 2^{-53}$, $K$ is a product's inner dimension, and $\gamma_K = K\varepsilon/(1-K\varepsilon)$, for $K\varepsilon < 1$. ($k$ alone is E's error factor, §3.)
 
 **Bitwise:**
 - **Thread counts and partitions.** Each reduction's order doesn't depend on the thread count, the partition or the tile shape. One backend and kernel gives the same bits on 1 thread and 16.
@@ -51,9 +69,9 @@ These rules apply to engine/nd (numerics-core r4.2 §7) and everything built on 
 
 - **Products (GEMM and everything blocked on it: LU, Cholesky, triangular solves with many right-hand sides).**
   - SIMD runs across output elements, never along a dot product.
-  - Each element of C is summed over $k$ in order: the KC blocks in order, and within a block $p = 0, 1, \ldots$; each block's partial sum is then added into C.
+  - Each element of C is summed over its inner index in order: the KC blocks in order, and within a block $p = 0, 1, \ldots$; each block's partial sum is then added into C.
   - That's engine/nd's rule today, and it holds for any vector width.
-  - Consequence, accepted: the inner dimension $k$ is never split across threads. That costs parallelism for tall-skinny products (small $m n$, large $k$), which run on fewer threads than cores.
+  - Consequence, accepted: the inner dimension $K$ is never split across threads. That costs parallelism for tall-skinny products (small $m n$, large $K$), which run on fewer threads than cores.
 - **Reductions along one vector** (sum, dot, norm, `A'*x` by columns, the mean in `std` and `var`).
   - A **canonical 8 accumulators**: element $i$ goes to partial sum $s_{i \bmod 8}$, in order of $i$.
   - The partial sums combine in a fixed tree, $\big((s_0+s_4)+(s_2+s_6)\big)+\big((s_1+s_5)+(s_3+s_7)\big)$. Elements that don't fill a full group of 8 just continue the round robin.
@@ -63,23 +81,25 @@ These rules apply to engine/nd (numerics-core r4.2 §7) and everything built on 
 **Across targets, the only difference is FMA**, and only in kernels whose multiply-adds may fuse (GEMM's microkernels, as selected per target).
 - Kernels without FMA give the scalar reference's bits.
 - FMA kernels give the scalar `mul_add` reference's bits.
-- For a length-$k$ product, the two references differ by at most $2\gamma_k\sum_i|a_ib_i|$, since each is within $\gamma_k\sum|a_ib_i|$ of the exact value.
+- For a length-$K$ product, the two references differ by at most $2\gamma_K\sum_i|a_ib_i|$, since each is within $\gamma_K\sum|a_ib_i|$ of the exact value.
 - Reductions never fuse: each accumulator adds products rounded separately, so reductions are bitwise across targets.
 
 **Element-wise functions** (`exp`, `sin`, `log`, `gamma`, ...), where Sagebrush computes them itself in Rust:
-- No `mul_add` in their code, and no floating-point contraction. Rust doesn't contract unless asked, and a test checks that the generated wasm has no `fma` calls in these functions.
+- No `mul_add` in their code, and no floating-point contraction. Rust doesn't contract unless asked.
+- A test checks that the generated code has no fused multiply-adds in these functions: the wasm, and the native builds' disassembly (x86-64 with `+fma`, aarch64). Any third-party libm crate they call is audited for internal `fma`.
 - So they're bitwise across targets.
 - (The other choice, `mul_add` everywhere, would be correct everywhere but slow in wasm, where FMA is in software.)
-- Where a target uses the platform's libm instead, the bound is 1 ulp, and the test says which.
+- Where a target uses the platform's libm instead, the bound is the per-function bound measured for it (§1), and the catalog entry flags it.
 
 **Iterative dense algorithms and anything that decides by comparison** branch on comparisons. That covers QR iteration for `eig` and `svd`, Jacobi sweeps, partial pivoting in LU, column pivoting in QR, and the tolerance tests in `rank`, `null`, `orth` and `pinv` (convergence tests, deflation, shift choices, pivot choices, rank decisions).
 - An FMA difference in their inner products can change an iteration count or a deflation point.
 - Discrete outputs can differ across targets near a tie or the tolerance: the pivot vector P, `rank`'s integer, the dimension of `null`'s basis.
-- So across targets, their results agree within the algorithm's backward-stability bound, stated per function (for example, `eig`'s computed values are exact for $A + E$ with $\|E\| \le c\,n\,\varepsilon\|A\|$), not within the dot-product bound.
+- So each target's result meets the algorithm's backward or residual bound on its own: it is the exact result for a nearby input. Two backward-stable results can still be far apart in forward terms. Near a Jordan block of size $m$, eigenvalues move by about $\varepsilon^{1/m}$; `null` and `orth` bases rotate; eigenvectors of close eigenvalues mix.
+- So their cross-target tests check each target's residual or backward bound separately, never the distance between targets' outputs. A forward comparison across targets is made only for well-conditioned outputs, such as symmetric eigenvalues (Weyl) and singular values, and the `accuracy` field's scope says which.
 - **Their metered units are bitwise per target, and across targets only for non-iterative kernels.** So E is calibrated per target (§3).
 - (Unlike the Smith and Hecke work, which reproduces units across native and wasm.)
 
-**Tests:** each function's test runs the same inputs on every target CI executes, and checks bitwise where this section says bitwise, otherwise the stated bound. The 8-accumulator order is tested against the scalar reference on lengths 0 to 33 and on large lengths.
+**Tests:** each function's test runs the same inputs on every target CI executes. It checks bitwise where this section says bitwise, otherwise each target against the stated bound, per the `accuracy` field's scope. The 8-accumulator order is tested against the scalar reference on lengths 0 to 33 and on large lengths, with NaN, $\pm$Inf, $-0$ and subnormals placed in each accumulator lane.
 
 ## 3. Cost
 
@@ -277,7 +297,10 @@ The goal (Nov 21): "a drop in replacement for a subset of this, based on what's 
 Display uses MATLAB's documented form for `sym` (`ans =` then the expression); `pretty` and `latex(s)` come later.
 
 **The oracle is the documented behaviour, compared up to mathematical equivalence, never against MATLAB's text.**
-- **How two answers are compared:** `simplify(a - b) == 0`. Where the symbolic engine can't decide that, numerical agreement at several random points to 30 digits by mpmath, and the test says which was used.
+- **How two answers are compared:** `simplify(a - b) == 0`. Where the symbolic engine can't decide that, numerical agreement at several random points, and the test says which was used.
+  - The points are drawn from the declared assumptions' domain (real, positive, ...), away from branch cuts.
+  - The comparison is to 30 digits, with both sides evaluated by mpmath at higher precision (50 digits), using a relative tolerance and allowing for cancellation.
+- **`double(s)`** promises the correctly rounded double. **`vpa(s, d)`** promises $d$ correct significant digits, computed with guard digits.
 - **Output normalization, stated per function and pinned in tests:**
   - polynomials in expanded form, in descending powers of the first variable;
   - rationals in lowest terms, sign in the numerator;
@@ -337,3 +360,11 @@ Direction, Nov 21: "keep: multithreaded and accelerated, and possible GPU use on
   - It's a separate determinism class: never bitwise, values within the op's stated accuracy.
   - It's opt-in, and never required for correctness: every op keeps a CPU route.
   - It's metered with its own families, under the meter Family list's owner, and E is calibrated per device like any other target.
+
+**Obligations of a backend.** Every future backend PR is held to these:
+1. **f64 on GPUs.** WGSL (WebGPU) and Metal have no f64, so those routes either serve only single-precision work, with single-precision accuracy statements, or emulate double (for example double-single arithmetic) with its own measured bound. The PR says which. A double op computed in f32 can't meet a double's stated accuracy.
+2. **GPU reductions.** Reductions that use atomics or schedule order aren't bitwise even run to run, or across launch configurations. §2's "one target, run to run" holds on a GPU only where a deterministic reduction is chosen, and the class says which.
+3. **Vendor BLAS/LAPACK** (MKL, OpenBLAS, Accelerate). Results generally vary with the thread count and the detected CPU unless a reproducibility mode is set (for example MKL's CNR). The backend's class either states that variability, as an explicit exception to §2's bitwise-across-threads rule, or requires the mode.
+4. **Subnormals.** Each backend states its subnormal handling (flush-to-zero, denormals-are-zero, or full), and the special-value tests run per backend.
+5. **Metering an opaque backend.** The wrapper meters it: the textbook flop formula for the call, charged after it returns, to the same families, with the backend recorded. Large calls are tiled (GEMM by panels, GPU launches likewise), so Stop answers within the coarse-check budget.
+6. **Units, E and L per backend.** Units and E are per backend. A GPU's L counts device memory as well as host memory.
