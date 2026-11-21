@@ -819,6 +819,9 @@
     }
     const canvas = document.createElement("canvas");
     const opts = { antialias: true, alpha: true, premultipliedAlpha: false, preserveDrawingBuffer: true };
+    // (made ready for a headset from the start once entering VR has cost a view its context: a browser may move it
+    //  to another GPU then, web/xr-input.js startSession)
+    if (window.SagebrushViewer3d && window.SagebrushViewer3d.xrCompatible) opts.xrCompatible = true;
     let gl = canvas.getContext("webgl2", opts);
     const gl2 = !!gl;
     if (!gl) gl = canvas.getContext("webgl", opts);
@@ -999,7 +1002,10 @@
     // The browser may take the context back (Chrome keeps about 16, and
     // fewer when GPU memory is short): the static picture again, with a
     // button to show the 3D view anew, not silently.
+    // (its headset session while in VR, web/viewer3d-xr.js: ended with the view; starting while one is being asked for)
+    let xr = null, starting = false;
     const restore = () => {
+      if (xr) xr.end();
       wrap.remove();
       live.delete(entry);
       if (!container.isConnected) return;
@@ -1017,7 +1023,8 @@
     // released when the view leaves the page (a cell run again, its output
     // replaced): its context and GPU memory are not kept until garbage
     // collection, which the observers above would delay forever
-    const entry = { canvas, release: () => { canvas.removeEventListener("webglcontextlost", restore); gl.getExtension("WEBGL_lose_context")?.loseContext(); } };
+    // (on the page while its wrap is: the wrap holds the canvas, which a headset emulator moves out while a session runs)
+    const entry = { canvas, node: wrap, release: () => { if (xr) xr.end(); canvas.removeEventListener("webglcontextlost", restore); gl.getExtension("WEBGL_lose_context")?.loseContext(); } };
     live.add(entry);
     sweepSoon();
 
@@ -1097,15 +1104,30 @@
         canvas.style.height = h + "px";
       }
       if (!fitted && scene.fit !== false) fit();
+      gl.bindFramebuffer(gl.FRAMEBUFFER, null);
       gl.viewport(0, 0, canvas.width, canvas.height);
       gl.clearColor(0, 0, 0, 0);
       gl.clear(gl.COLOR_BUFFER_BIT | gl.DEPTH_BUFFER_BIT);
+      const { eye, M, d } = camera(), P = projection();
+      drawWith({ M, P, eye, height: canvas.height, dir: d });
+      placeLabels(M, P);
+      snapshot();
+    }
+
+    // The scene's draws for one view: M (display coordinates to the view's), P (its projection), eye (the eye, in
+    // display coordinates: the volumes' rays start there), height (the viewport's, in pixels: world-sized points scale
+    // with it), dir (towards the eye, unit: which walls a MATLAB box draws), and, from a headset, dpr (pixels per CSS
+    // pixel for fixed-size points) and ink (the frame's colour, [r, g, b], instead of the page's), into whatever
+    // framebuffer and viewport are bound. The page's view (draw, above) and a headset's two eyes (web/viewer3d-xr.js)
+    // both come here.
+    function drawWith({ M, P, eye, height, dir, dpr = window.devicePixelRatio || 1, ink: inkRGB = null }) {
       gl.enable(gl.DEPTH_TEST);
-      const { eye, M } = camera(), P = projection();
       gl.useProgram(prog.p);
       gl.uniformMatrix4fv(prog.M, false, new Float32Array(M));
       gl.uniformMatrix4fv(prog.P, false, new Float32Array(P));
-      const pixPerUnit = ortho ? (canvas.height / 2) / halfH() : (canvas.height / 2) / Math.tan(fov / 2);
+      // (pixels per display unit at distance 1: P[5] is 1/tan(fov/2) for the perspective, 1/halfH for the orthographic;
+      //  times M's scale, 1 for the page's view, the plot's size in a headset)
+      const pixPerUnit = (height / 2) * P[5] * Math.hypot(M[0], M[1], M[2]);
       const run = (d) => {
         gl.bindBuffer(gl.ARRAY_BUFFER, d.p);
         gl.vertexAttribPointer(prog.ap, 3, gl.FLOAT, false, 0, 0);
@@ -1141,14 +1163,14 @@
       gl.depthMask(true);
       for (const d of draws) if (d.alpha >= 1) run(d);
       if (mbox) {
-        const { pos, col } = boxLines(camera().d, pickEdges(M, P).best.map((e) => e.edge));
+        const { pos, col } = boxLines(dir, pickEdges(M, P).best.map((e) => e.edge));
         gl.bindBuffer(gl.ARRAY_BUFFER, boxBuf);
         gl.bufferData(gl.ARRAY_BUFFER, new Float32Array(pos), gl.DYNAMIC_DRAW);
         gl.bindBuffer(gl.ARRAY_BUFFER, boxColBuf);
         gl.bufferData(gl.ARRAY_BUFFER, new Float32Array(col), gl.DYNAMIC_DRAW);
         run({ mode: gl.LINES, n: pos.length / 3, p: boxBuf, nn: null, c: boxColBuf, lit: 0, alpha: 1 });
       } else if (scene.frame !== false) {
-        const c = ink(), col = [];
+        const c = inkRGB || ink(), col = [];
         for (let i = 0; i < framePos.length / 3; i++) col.push(...c);
         gl.bindBuffer(gl.ARRAY_BUFFER, frameCol);
         gl.bufferData(gl.ARRAY_BUFFER, new Float32Array(col), gl.DYNAMIC_DRAW);
@@ -1189,8 +1211,6 @@
         gl.useProgram(prog.p);
       }
       gl.depthMask(true);
-      placeLabels(M, P);
-      snapshot();
     }
 
     // screen position (CSS pixels) of a display point
@@ -1408,6 +1428,32 @@
     if (wrap.requestFullscreen) mk("Full screen", "Full screen (Esc leaves)", () => {
       if (document.fullscreenElement) document.exitFullscreen(); else wrap.requestFullscreen().catch(() => {});
     });
+    // (a headset: "Enter VR", where the page offers the headset module (SagebrushViewer3d.xrModule, web/viewer3d-xr.js:
+    //  the site's pages set it; a Jupyter export or a snapshot never does) and the browser has immersive VR; scenes of
+    //  version 1 (Graphics3d) for now. The module loads only when pressed.)
+    const xrModule = window.SagebrushViewer3d && window.SagebrushViewer3d.xrModule;
+    if (xrModule && (scene.version ?? 1) === 1 && typeof navigator !== "undefined" && navigator.xr && navigator.xr.isSessionSupported) {
+      navigator.xr.isSessionSupported("immersive-vr").then((ok) => {
+        if (!ok) return;
+        const vrB = mk("Enter VR", "This plot in your headset: hold a grip to move and turn it, thumbstick to scale and turn it, B or Y to leave", () => {
+          if (xr) return xr.end();
+          if (starting) return;
+          starting = true;
+          vrB.textContent = "Starting VR…";
+          import(xrModule)
+            .then((m) => m.enter({ gl, drawWith, half: hx, onEnd: () => { xr = null; vrB.textContent = "Enter VR"; redraw(); } }))
+            .then((h) => { xr = h; vrB.textContent = "Exit VR"; })
+            .catch((e) => {
+              // (said on the button itself: a headset's browser shows no tooltips)
+              if (e && e.code === "context-lost") window.SagebrushViewer3d.xrCompatible = true;
+              vrB.textContent = "VR didn't start";
+              vrB.title = "Couldn't start VR: " + ((e && e.message) || e);
+              setTimeout(() => { if (!xr && vrB.isConnected) vrB.textContent = "Enter VR"; }, 4000);
+            })
+            .finally(() => { starting = false; });
+        });
+      }, () => {});
+    }
     const help = document.createElement("div");
     help.style.cssText = "position:absolute;left:6px;bottom:34px;max-width:300px;padding:6px 9px;border-radius:6px;display:none;" +
       "background:rgba(20,20,24,.86);color:#eee;font:11px/1.45 system-ui,sans-serif;pointer-events:none";
@@ -1551,7 +1597,7 @@
     canvas.addEventListener("keyup", (e) => { keys.delete(e.code); });
     window.addEventListener("gamepadconnected", () => { if (fly) redraw(); });
     // for tests and embedding pages: the camera state and the modes
-    canvas.sagebrush = { get view() { return { ...view, t: [...view.t] }; }, get fly() { return fly; }, setFly, home, focus, pick };
+    canvas.sagebrush = { get view() { return { ...view, t: [...view.t] }; }, get fly() { return fly; }, setFly, home, focus, pick, get xr() { return xr; } };
     if (typeof ResizeObserver !== "undefined") new ResizeObserver(redraw).observe(container);
     if (scene.fill) window.addEventListener("resize", redraw);
     document.addEventListener("fullscreenchange", redraw);
@@ -1569,7 +1615,7 @@
     if (sweepTimer) return;
     sweepTimer = setInterval(() => {
       for (const v of live) {
-        if (v.canvas.isConnected) { v.gone = false; continue; }
+        if (v.node.isConnected) { v.gone = false; continue; }
         if (!v.gone) { v.gone = true; continue; }
         live.delete(v);
         v.release();
