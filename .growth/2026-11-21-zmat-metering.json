@@ -1,0 +1,8 @@
+{
+ "v": 1,
+ "reason": "zmat's and the Smith form's metering (engine/arith zmat, snf, crt: each function counts its own work by family in a local accumulator, flushed at its existing Stop checks), with the speedups that pay for it (the Hadamard norm in u128, column norms read in place, gcd folds that stop at 1, word residues through the i64 path): the engine module grows 32156 B (CI's size row at 4a632781). cli/pyjs.cjs embeds the engine module in base64, so it grows by 4/3 of that, 42872 B, with no other change: generated, not new library code. Each marked +64 over the measured growth; the engine module's ceiling is renewed to its measured size + 64.",
+ "bytes": {
+  "cli/pyjs.cjs": 42936,
+  "engine/sagebrush-engine.wasm": 32220
+ }
+}
