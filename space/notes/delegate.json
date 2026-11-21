@@ -1,0 +1,97 @@
+{
+ "summaries": {
+  "page:web/agents/delegate-ui.ts": "The Agents page's Delegate controls, built by `mountDelegate`: the header switch (`switchOn`, `switchOff`), the 'Delegate…' button that opens the `sheet` (task text, title, documents, 'This computer', and a 'May run code' box that is only enabled when the grant may run code), the Tasks list with each task's chip (`chipOf`), and a task's view (`show`, `render`) whose proposal card calls `openProposal`. In this version the proposal dialog's only action is the text `laterActions` ('Merge, Close and Ask for changes come in a later update.'): no Merge, Close or Ask button is wired.",
+  "page:web/agents/delegate.ts": "The page's model of the paired installation's tasks, with no DOM. Its class is `DelegateTasks`: `start` sends tasks.start, `refresh` reads tasks.list, `open` pages through tasks.get, `heard` takes each task.event, `turnOn` and `turnOff` work the switch, and `source` gives the proposal view a checked tasks.diff/tasks.file reader. A task's chip only moves forward (`chip`, `chipOfEvent`), and turn events go into an ordinary chat thread in seq order (`take`). Nothing about a task is stored on the page. In this version it never sends tasks.merged, tasks.close, tasks.ask, tasks.stop or tasks.resume; it sends tasks.revoke only when the switch is turned off.",
+  "page:web/workspace/agent-grant.ts": "Defines the person's `Grant` for a paired agent and the checks (`authorize`, `grantFolders`, `grantProblem`) that every Pair workspace verb passes. For Delegate, its job is the optional `delegate` field: it is true only while the person has 'Allow Delegate tasks on this computer' on, and it is never kept with a remembered grant, so a new pairing starts with the switch off.",
+  "page:web/workspace/agent-pair.ts": "The page's side of the loopback WebSocket pairing (`AgentPairing`). For Delegate it provides `setDelegate` (the switch: the grant replaced through `regrant` and sent as grant.changed with or without `delegate: true`), `own` (the channel tasks-client uses to send its own requests and get the answers matched to them), and `onNotification` (where task.event arrives). It also defines `AgentError` and lists `delegate.1` in `FEATURES`.",
+  "page:web/workspace/tasks-client.ts": "The page's JSON-RPC client for tasks.* requests (`TaskClient`). It gives ids 'p<n>'. Before each `request` it checks that the pairing is on the loopback and granted, that the hello offers `DELEGATE_FEATURE`, that `delegate` is true in the grant, that the method is one of `TASK_METHODS`, and that fewer than 8 requests are pending. `TASK_REQUESTS` holds the limits: 4 MiB per frame, 30 s timeouts, and 120 s for tasks.start and tasks.merged. `answered` matches the agent's replies to requests, and `endAll` rejects every pending request when the pairing closes.",
+  "page:web/workspace/tasks-schema.ts": "The page's closed check of everything a Delegate host sends back: `TASK_RESULTS` for each method's result, `taskLog` for a tasks.get page, `taskNotice` and `taskEvent` for task.event, and a bounded `TURN` table for the chat turn events. Anything else throws `TaskShapeError`. `blobId` and `contentBytes` let the page recompute a file's git blob id and check it against the id the agent gave.",
+  "agent:bin/sagebrush-agent.mjs": "The agent's command. In `listenLoopback` it creates the Delegate host if the tasks folder can be used: a `TaskStore`, a `TaskTurns` given a `TaskRunner`, and a `TaskRpc`, passed to the server with `setTasks`. If that fails it prints 'Delegate tasks are off on this computer'. It does not do this in --stdio (runner) mode, so Delegate is loopback only.",
+  "agent:lib/server.mjs": "The agent's WebSocket server (`AgentServer`). It adds `delegate.1` to the hello's `features` only when a task host is present and the connection isn't --stdio. `taskRequest` takes each tasks.* frame and refuses it (`forbidden`, `too_large`, `busy`, `unavailable`) unless it comes from the paired page whose grant holds `delegate: true`, fits the 4 MiB frame and is within the 8-pending limit; it then passes it to `rpc.call`. `setTasks` connects the store's `onEvent` to `notify` as task.event, and `notification` calls `switchedOff` when grant.changed drops `delegate` or revokes the pairing.",
+  "agent:lib/task-rpc.mjs": "What an admitted tasks.* request does (`TaskRpc`). `call` checks the params with `checkRequest`, then sends the request to the store, and for close, stop and revoke it first stops the task's turn. tasks.start, tasks.ask and tasks.resume go through `#withPlace`: disk space and a turn place are checked and held before anything is recorded, and afterwards a turn is begun. `switchedOff` stops every turn and marks working tasks interrupted, not closed. `answer` and `refusal` build the reply frames.",
+  "agent:lib/tasks-schema.mjs": "The agent's closed check of the page's tasks.* params (`checkRequest`, one rule per method in `METHODS`). It decodes document content to bytes and enforces `LIMITS` (4 MiB per document and per request, title 200 characters, prompt 64 KB). It also defines `TaskError` with the protocol's `ERRORS` codes, `STATUSES`, and `FEATURE` = 'delegate.1'. For tasks.start it only requires `run` to be a boolean: it does not refuse `run: true`.",
+  "agent:lib/tasks.mjs": "The task store (`TaskStore`). Each task is a private folder holding task.json (control state and the frozen grant), log.jsonl (events with a growing seq), git/ (a bare repository) and work/ (the agent's copy). `start` builds a task in a staging folder and renames it into place whole. `propose` commits work/ as the next round, `record` and `interrupt` serve the turns, and `get`, `diff`, `file`, `merged`, `close`, `ask`, `stop`, `revoke` and `resume` answer the requests. Every state change is written as an intent first (`buildIntent`, `#commitIntent`, `#finish`), so recovery after a crash can finish or undo it, and the store emits its events to `onEvent` listeners. It never writes the person's workspace: `merged` only records what the page reports, and `answer` is refused ('questions come in a later version').",
+  "agent:lib/task-git.mjs": "A small git writer for one task's bare repository, with no git binary, configs or hooks. `initRepo`, `writeObject`, `writeTree` and `writeCommit` write loose objects with git's own SHA-1 ids, authored as `AUTHOR`. `casRef` moves refs/heads/base, refs/heads/proposal, refs/tags/round-<n> and the other refs only by compare-and-swap under a lock file, throwing `RefConflict` if the ref isn't as expected. `readTree`, `readCommit` and `blobId` serve diffs and file reads.",
+  "agent:lib/task-paths.mjs": "The protocol's path rules and the host's safe file access to a task's copy. `pathProblem` and `pathSetProblem` check paths and sets of paths (no '..', no .git, no case collisions, at most 2,000 files). `readTaskFile`, `writeTaskFile` and `removeTaskFile` walk each path one component at a time with lstat and never follow a link. `scanTree` lists work/ and reports anything that isn't a plain file or folder. `privateDirProblem` requires the tasks folder to be private, which also turns Delegate off on Windows.",
+  "agent:lib/task-runner.mjs": "The sandboxed notebook runner (`TaskRunner`). Its `run` would run one notebook of work/ under pinned Deno (`runArgv`, `runEnv`, `copyZones`) as its own process group, snapshotting work/ before the run and undoing it if the run is cut off. `RUNS_ENABLED` is false in this version, so `problem` always answers 'runs are turned off in this version' and no notebook is ever run.",
+  "agent:lib/proc-start.mjs": "Reads a process's start time and process group (`procInfo`, `procStart`), plus `alive` and `groupAlive`, so a recorded run is tied to the exact process that started it. This guards against a reused pid when the agent restarts after dying mid-run. Because runs are off in this version, it matters only as part of the run record and recovery code.",
+  "agent:lib/task-turns.mjs": "Claude's turns on a task (`TaskTurns`). There are at most 4 running and 16 waiting (`reserve`, `begin`, `TURN_LIMITS`). `#turn` runs the Agent SDK `query` with `TASK_SYSTEM`, no native tools, no setting sources, and only the task's own MCP server `TASK_SERVER`; `canUseTool` refuses everything else. The tools from `#tools` are `workspace_list`, `workspace_read`, `workspace_write`, `workspace_write_notebook`, `notebook_run` (refused in this version) and `propose`. A turn ends when Claude proposes; otherwise the task is set to interrupted with a reason. Every 500 ms a watch checks the transcript size, the task's storage budget and free disk space, and stops the turn if a limit is passed.",
+  "agent:lib/turn-bounds.mjs": "Fits each turn event to the page's bounds before the store records it (`conformTurnEvent`, using `PAGE_BOUNDS`). Long text is split into several deltas (`split`), free text is shortened with '…' (`cut`), ids the page wouldn't accept are replaced by stable hashes (`pageId`), and artifacts of kinds the page doesn't show are dropped. This way the host never records an event the page will refuse.",
+  "page:web/workspace/review/proposal-view.ts": "The read-only proposal view (`openProposal`). It reads only from a `ProposalSource`, never from the workspace: the file list from its `diff`, and both sides of the opened file from its `file`. It draws each change with the shared `notebookDiff` or `textDiff`, and shows a notebook as proposed, read only, with outputs passed through `filterOutputs`. Size limits are in `PROPOSAL_LIMITS`. It runs no code and makes no decision: the host page's `actions` go at its foot.",
+  "page:web/workspace/review/diff-render.ts": "The diff drawing shared by the branch review page and the proposal view: the DOM helper `h`, the views' CSS (`style`), `textDiff` (a line diff with three lines of context and unchanged runs folded) and `notebookDiff` (notebook cells compared base to head, within a budget), with wording in `DIFF_TEXT`.",
+  "page:web/workspace/review/merge3.ts": "The pure three-way merge meant for Delegate's Merge: base (the task's snapshot), mine (the person's current version) and theirs (the proposal). `mergeNotebooks` merges by cell id and keeps the person's cell order; `mergeText` merges text by lines (diff3). Each returns its conflicts for the person to pick, and `resolveNotebook` and `resolveText` apply the picks. Nothing in the page imports it yet in this version, so no merge is ever made or reported.",
+  "page:web/workspace/review/review-page.ts": "The review page for an agent's git branch (`openReview`, with per-file Accept, Reject and Ask for changes), loaded as the lazy chunk sagebrush-review.js. For Delegate its only role is to re-export `openProposal` (and `PROPOSAL_TEXT`, `PROPOSAL_LIMITS`), so delegate-ui.ts gets the proposal view from the same chunk. It does not use merge3.ts."
+ },
+ "tours": [
+  {
+   "id": "flow",
+   "title": "One Delegate task, end to end",
+   "steps": [
+    {
+     "node": "page:web/agents/delegate-ui.ts",
+     "text": "The person clicks 'Delegate…' beside Send. If the switch is off, `switchOn` first asks them to confirm what it allows. `sheet` opens with the composer's text as the task, its first line as the title, and the file open in the pane as the first document. 'May run code' is only enabled if the Pair grant may run code. On Start, the sheet reads each document through the host's `readDoc` and passes them to `DelegateTasks` `start`; when the answer comes back it calls `show` with the new task id."
+    },
+    {
+     "node": "page:web/agents/delegate.ts",
+     "text": "`start` refuses unless `state` is 'on' (it never starts while the switch is turning off). It then sends tasks.start with `{title, prompt, target: \"local\", run, docs}` and checks the reply with `TASK_RESULTS`. Next it calls `refresh` (tasks.list) so the new task gets a list entry, and returns the task id; `open` then pages the task's log with tasks.get."
+    },
+    {
+     "node": "page:web/workspace/tasks-client.ts",
+     "text": "`TaskClient` `request` checks everything again before sending: loopback only (not over a runner `link`), the pairing granted, `DELEGATE_FEATURE` in the hello, `delegate` true in the grant, the method in `TASK_METHODS`, fewer than 8 pending, and the frame within 4 MiB. It sends `{jsonrpc: \"2.0\", id: \"p<n>\", method, params}` through the pairing's `own` channel and waits up to 120 s, the longer timeout `TASK_REQUESTS` gives tasks.start."
+    },
+    {
+     "node": "wire:start",
+     "text": "The tasks.start frame travels over the loopback WebSocket. It is one of the few requests that go from the page to the agent. It can work only because the person turned the switch on earlier: `setDelegate(true)` sent grant.changed carrying `delegate: true`, and the agent checks that grant on every tasks.* call."
+    },
+    {
+     "node": "agent:lib/server.mjs",
+     "text": "`AgentServer` sees a tasks.* method with an id and passes it to `taskRequest`. That refuses `forbidden` unless the frame came on the paired socket whose grant holds `delegate: true`, `too_large` over `TASK_LIMITS.frame`, and `busy` past 8 pending. Otherwise it awaits `rpc.call` and sends `taskAnswer` or `taskRefusal`; any error that isn't a `TaskError` is logged and reported only as `unavailable`."
+    },
+    {
+     "node": "agent:lib/task-rpc.mjs",
+     "text": "`call` runs `checkRequest` (tasks-schema.mjs), which refuses unknown keys, bad paths, more than 4 MiB of documents and a target other than 'local'. It accepts `run: true` without refusing it. tasks.start goes through `#withPlace`: `admit` checks free disk space and `reserve` holds a turn place, both before anything is written. Then `store.start` records the task, and `begin` starts its first turn with kind 'start'."
+    },
+    {
+     "node": "agent:lib/tasks.mjs",
+     "text": "`TaskStore` `start` creates a random 32-hex task id and builds the task in `.staging`. It writes each document into work/ with `writeTaskFile`, writes a task.json whose `grant` freezes `{docs, run, scope, created, revoked}`, and starts log.jsonl at seq 1 with `{type: \"task_status\", status: \"working\"}`. It then renames the folder into place in one step and `#emit`s that first event. Its answer `{task, base, seq}` goes back to the page as the tasks.start result."
+    },
+    {
+     "node": "agent:lib/task-git.mjs",
+     "text": "During `start`, the task's history is set up: `initRepo` makes a bare repository, `writeObject` stores each document as a blob, `writeTree` and `writeCommit` make the base commit, whose message ends with the grant line, and `casRef` creates refs/heads/base. The base commit can't change, so if task.json's grant ever disagrees with it, the task is failed. Proposals become later commits on refs/heads/proposal, each tagged round-<n>."
+    },
+    {
+     "node": "agent:lib/task-turns.mjs",
+     "text": "`begin` runs the turn now, or queues it if 4 are already running. `#turn` checks disk space and the private sdk/ folder, emits turn_started, and calls the SDK `query`. The prompt comes from `#prompt` (the title, the task text and the list of files in the copy), the system prompt is `TASK_SYSTEM`, the cwd is the task's sdk/ folder, there are no native tools, and `canUseTool` allows only `mcp__sagebrush_task__*`. Each SDK message becomes events through `turn.feed`, which go to `send` and then `store.record`. A watch checks the limits every 500 ms."
+    },
+    {
+     "node": "agent:lib/task-paths.mjs",
+     "text": "Claude's tools (defined in task-turns.mjs, its `#tools`) act only on work/, through the store and these helpers. `workspace_read` uses `readTaskFile`, `workspace_write` and `workspace_write_notebook` end in `writeTaskFile` (a temporary file, fsync, then rename, never through a link), and `workspace_list` uses `scanTree`. A path that fails `pathProblem` is refused, and Claude sees the tool result as 'refused: …'."
+    },
+    {
+     "node": "agent:lib/task-runner.mjs",
+     "text": "If Claude calls `notebook_run`, the turn asks the runner's `problem`, which answers 'runs are turned off in this version' because `RUNS_ENABLED` is false. So the call is refused and Claude is told to check its work by reading it, even when the task was started with run true. The sandboxed path (`run`, `runArgv`, `snapshotWork`/`restoreWork`, and the pid start time from `procStart` that lets a run be recovered) exists in the code but never runs in 0.8.0."
+    },
+    {
+     "node": "agent:lib/turn-bounds.mjs",
+     "text": "Before any turn event is recorded, `conformTurnEvent` fits it to the page's bounds: text deltas over 192 KiB are split, names and summaries are shortened, ids are replaced with `pageId` where needed, and artifacts of kinds the page doesn't show are dropped. Only then does `store.record` append the events to log.jsonl with the next seq numbers."
+    },
+    {
+     "node": "wire:event",
+     "text": "Each recorded event becomes a task.event notification `{task, seq, event}`: the store's listener calls `notify`, but only while the paired page's grant still holds `delegate: true`. When Claude calls the propose tool, the store commits work/ as the next round, moves refs/heads/proposal, tags round-<n>, and emits a `proposal` event (round, base, commit, files) followed by `task_status` 'proposal'. The turn sees the task is no longer working and ends. If a turn ends without proposing, the task becomes 'interrupted', with a reason."
+    },
+    {
+     "node": "page:web/agents/delegate-ui.ts",
+     "text": "On the page, the task.event is checked and applied in seq order, and `render` redraws: the task's chip in the Tasks list (`chipOf`: Working, Proposal ready, Interrupted…), the agent's turns in the task's view, and a proposal card ('Proposal: n files changed · base … · proposal …'). Clicking the card calls `openProposal`, which loads the review chunk and opens the proposal view in a dialog, with `D.source` as its reader."
+    },
+    {
+     "node": "page:web/workspace/review/proposal-view.ts",
+     "text": "`openProposal` calls the `ProposalSource`'s `diff`, which sends tasks.diff for that exact commit, and lists the changed files. Opening a file reads both sides with `source.file` (tasks.file); delegate.ts checks each file's recomputed git blob id against the id tasks.diff gave. The view draws a notebook cell by cell or text line by line, and shows the notebook as proposed, read only. Its foot holds only the `actions` element, which here is the text 'Merge, Close and Ask for changes come in a later update.'"
+    },
+    {
+     "node": "page:web/workspace/review/merge3.ts",
+     "text": "Merge is meant to work like this: `mergeNotebooks` or `mergeText` combine base, the person's current version and the proposal, every conflict is picked by the person, `resolveNotebook` or `resolveText` give the final file, the page writes the workspace itself, and it reports the result to the agent with tasks.merged. In this version that last part isn't wired: nothing imports this module, and the page sends no tasks.merged, tasks.close or tasks.ask. A task stops at 'Proposal ready', and the agent's store, which never writes the person's documents, waits for a decision that this version of the page can't send yet."
+    }
+   ]
+  }
+ ]
+}

@@ -566,6 +566,12 @@ function homeView(P) {
   ds.sort((a, b) => a - b);
   // (a room is seen whole: it is laid out to be)
   const r = Math.max(ds[space?.room ? ds.length - 1 : Math.floor(ds.length * 0.8)] ?? 6, 6) * (space?.room ? 0.95 : 1);
+  // (a space can say where it is seen from as a whole: `view: {from, to}`)
+  const v = space?.view;
+  if (!space?.room && Array.isArray(v?.from) && Array.isArray(v?.to)) {
+    const to = new THREE.Vector3(...v.to), from = new THREE.Vector3(...v.from), fit = camera.aspect < 1 ? Math.min(2.2, 1 / camera.aspect) : 1;
+    return { to: to.clone().add(from.clone().sub(to).multiplyScalar(fit)), toT: to, r: Math.max(r, from.distanceTo(to) / 2.2) };
+  }
   // (a tall, narrow screen (a phone held upright) sees less across: further back, so the width fits too)
   const fit = camera.aspect < 1 ? Math.min(2.2, 1 / camera.aspect) : 1;
   return { to: c.clone().add(new THREE.Vector3(0.35, 0.25, 1).normalize().multiplyScalar(r * 2.2 * fit)), toT: c, r };
