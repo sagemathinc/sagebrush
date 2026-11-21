@@ -230,6 +230,8 @@ export class AgentPairing {
   private readonly gen = ++pairingGen;
   lostRecord: ReloadRecord | null = null;
   private revoked = false;
+  // (the page's own requests (Delegate's, tasks-client.ts): who hears their answers)
+  private ownAnswers: ((msg: any) => boolean) | null = null;
 
   /** Over a runner: the leg, the computer's name, and why the leg ended (for the page's words). */
   readonly link: AgentLink | null = null;
@@ -314,6 +316,8 @@ export class AgentPairing {
           return;
         }
         if (typeof msg.method === "string" && typeof msg.id === "string") return void this.call(msg.id, msg.method, msg.params);
+        // (an answer to one of the page's own requests, if its client knows the id; any other answer is dropped)
+        if (msg.method === undefined && typeof msg.id === "string" && this.ownAnswers?.(msg)) return;
         // (an answer: the page sends no requests after the hello)
       };
     });
@@ -339,6 +343,12 @@ export class AgentPairing {
     return this.sendBounded({ jsonrpc: "2.0", method, params }) ? "ok" : "over";
   }
   private emit() { for (const cb of this.listeners) cb(); }
+  /** For the page's own requests (tasks-client.ts, its only user): send one message, while granted and on the loopback
+   * pairing only, within the frame bound; and hear the answers (`hear` returns true for an id it knows). */
+  own(hear: (msg: any) => boolean): { send(m: unknown): "ok" | "closed" | "over" | "link" } {
+    this.ownAnswers = hear;
+    return { send: (m) => (this.link ? "link" : this.state !== "granted" ? "closed" : this.sendBounded(m) ? "ok" : "over") };
+  }
 
   /** The person's grant: sent to the server, kept (with the session secret if `remember`), and in force from now.
    * `id`: the id of the grant this resumes (a remembered one, or the reload record's); else this pairing's grant's,

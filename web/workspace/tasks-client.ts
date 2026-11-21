@@ -1,0 +1,77 @@
+// Delegate's requests from the page to the agent (pair-delegate-plan-r3.1 §2.5, P0): JSON-RPC requests over the
+// pairing (AgentPairing.own), with ids "p<n>" (the hello is "p1"), only to an agent whose hello lists DELEGATE_FEATURE,
+// only these methods, at most TASK_REQUESTS.pending at once, each message at most TASK_REQUESTS.frameBytes, each
+// answered within its timeout or refused; every pending one ends with the pairing. Its own module, so the pages that
+// don't offer Delegate (the LaTeX editor's pairing) carry none of it. What a request returns is the agent's data, for
+// the caller to check against §2.5's schema before any use.
+import { AgentError, type AgentPairing } from "./agent-pair";
+
+export const DELEGATE_FEATURE = "delegate.1";
+export const TASK_METHODS: readonly string[] = ["tasks.start", "tasks.list", "tasks.get", "tasks.diff", "tasks.file", "tasks.merged", "tasks.close", "tasks.ask", "tasks.stop", "tasks.revoke", "tasks.resume", "tasks.answer"];
+export const TASK_REQUESTS = Object.freeze({ pending: 8, frameBytes: 4 * 2 ** 20, timeoutMs: 30_000, longMs: 120_000, long: ["tasks.start", "tasks.merged"] as readonly string[] });
+
+const enc = new TextEncoder();
+// (one client per pairing: its ids are the pairing's)
+const clients = new WeakMap<AgentPairing, TaskClient>();
+
+export class TaskClient {
+  private next = 1;
+  private pending = new Map<string, { resolve: (r: unknown) => void; reject: (e: AgentError) => void; timer: ReturnType<typeof setTimeout> }>();
+  private out: { send(m: unknown): "ok" | "closed" | "over" | "link" };
+  private unwatch: () => void;
+
+  /** The pairing's client (made on first use). */
+  static of(p: AgentPairing): TaskClient {
+    let c = clients.get(p);
+    if (!c) { c = new TaskClient(p); clients.set(p, c); }
+    return c;
+  }
+  private constructor(private p: AgentPairing) {
+    this.out = p.own((msg) => this.answered(msg));
+    // (the pairing's end ends every pending request)
+    this.unwatch = p.onChange(() => { if (p.state === "closed") this.endAll(p.closeReason || "the agent isn't connected"); });
+  }
+
+  /** Whether this pairing's agent offers Delegate. */
+  offered(): boolean { return !!this.p.hello?.features?.includes(DELEGATE_FEATURE); }
+
+  /** One request: its result, or an AgentError whose code is the agent's (data.code), or the page's own:
+   * "unavailable" (over a runner: M1 is loopback only), "closed" (not granted, or the pairing ended), "forbidden" (the
+   * agent doesn't offer delegate.1), "bad_request" (not one of TASK_METHODS), "busy" (TASK_REQUESTS.pending already),
+   * "too_large" (the message over TASK_REQUESTS.frameBytes or the connection's bound), "timeout". */
+  request(method: string, params: Record<string, unknown>, o: { timeoutMs?: number } = {}): Promise<unknown> {
+    const no = (code: string, why: string) => Promise.reject(new AgentError(code, why));
+    if (this.p.link) return no("unavailable", "Delegate works only with an agent on this computer for now");
+    if (this.p.state !== "granted") return no("closed", "the agent isn't connected");
+    if (!this.offered()) return no("forbidden", "this agent doesn't offer Delegate");
+    if (!TASK_METHODS.includes(method)) return no("bad_request", "not a Delegate request");
+    if (this.pending.size >= TASK_REQUESTS.pending) return no("busy", "too many requests to the agent at once");
+    const id = "p" + ++this.next;
+    const m = { jsonrpc: "2.0", id, method, params };
+    const text = JSON.stringify(m);
+    if (text.length > TASK_REQUESTS.frameBytes || enc.encode(text).length > TASK_REQUESTS.frameBytes) return no("too_large", "the request is over the connection's limit");
+    const sent = this.out.send(m);
+    if (sent !== "ok") return sent === "over" ? no("too_large", "the request is over the connection's limit") : sent === "link" ? no("unavailable", "Delegate works only with an agent on this computer for now") : no("closed", "the agent isn't connected");
+    const ms = o.timeoutMs ?? (TASK_REQUESTS.long.includes(method) ? TASK_REQUESTS.longMs : TASK_REQUESTS.timeoutMs);
+    return new Promise((resolve, reject) => {
+      const timer = setTimeout(() => { if (this.pending.delete(id)) reject(new AgentError("timeout", "the agent didn't answer in time")); }, ms);
+      this.pending.set(id, { resolve, reject, timer });
+    });
+  }
+
+  private answered(msg: any): boolean {
+    const r = this.pending.get(msg.id);
+    if (!r) return false;
+    this.pending.delete(msg.id);
+    clearTimeout(r.timer);
+    if (msg.error !== undefined) {
+      const code = typeof msg.error?.data?.code === "string" ? msg.error.data.code.slice(0, 40) : "error";
+      r.reject(new AgentError(code, String(msg.error?.message ?? "refused").slice(0, 300)));
+    } else r.resolve(msg.result);
+    return true;
+  }
+  private endAll(why: string) {
+    for (const [id, r] of [...this.pending]) { clearTimeout(r.timer); this.pending.delete(id); r.reject(new AgentError("closed", why)); }
+    this.unwatch();
+  }
+}

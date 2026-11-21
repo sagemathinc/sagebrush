@@ -25,6 +25,7 @@ function server(answerHello) {
         const m = JSON.parse(String(data));
         S.got.push(m);
         if (m.method === "hello") return void answerHello(ws, m);
+        if (typeof m.method === "string" && m.method.startsWith("tasks.") && S.onTask) return void S.onTask(ws, m);
         if (m.id && S.pending.has(m.id)) { S.pending.get(m.id)(m); S.pending.delete(m.id); }
       },
       close(ws, code, reason) { S.closed = { code, reason }; },
@@ -1117,4 +1118,62 @@ for (const [what, grant] of [["a folder, not Everything", { folders: ["/A"], wri
   S.srv.stop(true);
 }
 console.log(failures ? `${failures} failed` : "all passed");
+// ---- Delegate's requests (tasks-client.ts, pair-delegate-plan-r3.1 §2.5, over AgentPairing.own): the page asks, the agent answers by id; only with delegate.1,
+// once granted, only tasks.*; at most TASK_REQUESTS.pending, each within its timeout; all ended with the pairing
+{
+  const { TASK_REQUESTS, DELEGATE_FEATURE, TaskClient } = await import("./tasks-client.ts");
+  const S = server(pairOk), W = fakeWs();
+  const heard = [];
+  let answer = (ws, m) => ws.send(JSON.stringify({ jsonrpc: "2.0", id: m.id, result: { tasks: [], echo: m.method } }));
+  S.onTask = (ws, m) => { heard.push(m); answer(ws, m); };
+  const P = mk(S, W);
+  await P.paired();
+  const why = async (p) => { try { await p; return "resolved"; } catch (e) { return e?.code ?? String(e); } };
+  ok((await why(TaskClient.of(P).request("tasks.list", {}))) === "closed" && heard.length === 0, "before the grant: refused (closed), nothing sent");
+  await P.allow({ folders: ["/"], write: true, expires: null }, false);
+  ok((await why(TaskClient.of(P).request("tasks.list", {}))) === "forbidden" && heard.length === 0, "an agent whose hello doesn't list delegate.1: refused (forbidden), nothing sent");
+  P.hello.features = [DELEGATE_FEATURE];
+  const r1 = await TaskClient.of(P).request("tasks.list", {});
+  const r2 = await TaskClient.of(P).request("tasks.get", { task: "a".repeat(32), after: 0 });
+  ok(r1?.echo === "tasks.list" && r2?.echo === "tasks.get" && heard.map((m) => m.id).join() === "p2,p3", "with delegate.1: answered by id, the page's ids p2, p3, ... (the hello was p1)", heard.map((m) => m.id));
+  ok(heard.every((m) => m.jsonrpc === "2.0" && typeof m.params === "object"), "each a JSON-RPC 2.0 request with its params");
+  ok((await why(TaskClient.of(P).request("workspace.read", { path: "/A/x.txt" }))) === "bad_request" && heard.length === 2, "a method not in TASK_METHODS: refused (bad_request), nothing sent");
+  answer = (ws, m) => ws.send(JSON.stringify({ jsonrpc: "2.0", id: m.id, error: { code: -32000, message: "the task moved on", data: { code: "stale" } } }));
+  ok((await why(TaskClient.of(P).request("tasks.close", { task: "a".repeat(32), proposal: null, seq: 1 }))) === "stale", "an error answer: rejected with the agent's code (data.code)");
+  // (over the frame bound: refused before sending)
+  const big = await why(TaskClient.of(P).request("tasks.start", { title: "t", prompt: "x".repeat(TASK_REQUESTS.frameBytes), target: "local", run: false, docs: [] }));
+  ok(big === "too_large" && heard.length === 3, "a request over TASK_REQUESTS.frameBytes (4 MB, under the connection's own 12 MB): refused (too_large), nothing sent");
+  // (the limit: at most TASK_REQUESTS.pending at once; unanswered ones end with the pairing)
+  answer = () => {};
+  const held = Array.from({ length: TASK_REQUESTS.pending }, () => why(TaskClient.of(P).request("tasks.list", {})));
+  await until(() => heard.length === 3 + TASK_REQUESTS.pending);
+  ok((await why(TaskClient.of(P).request("tasks.list", {}))) === "busy" && heard.length === 3 + TASK_REQUESTS.pending, `at most ${TASK_REQUESTS.pending} pending: the next is refused (busy), not sent`);
+  // (an answer to an id the page never used, or no longer waits for: dropped, the connection kept)
+  S.sock.send(JSON.stringify({ jsonrpc: "2.0", id: "p999", result: { tasks: [] } }));
+  await sleep(100);
+  ok(P.state === "granted" && S.closed === null, "an answer to an unknown id: dropped, the connection kept");
+  await P.revoke();
+  const ended = await Promise.all(held);
+  ok(ended.every((c) => c === "closed"), "the pairing ended: every pending request rejected (closed)", ended);
+  S.srv.stop(true);
+}
+{
+  // (a timeout: rejected; its late answer dropped)
+  const { DELEGATE_FEATURE, TaskClient } = await import("./tasks-client.ts");
+  const S = server(pairOk), W = fakeWs();
+  let late = null;
+  S.onTask = (ws, m) => { late = () => ws.send(JSON.stringify({ jsonrpc: "2.0", id: m.id, result: { tasks: [] } })); };
+  const P = mk(S, W);
+  await P.paired();
+  await P.allow({ folders: ["/"], write: true, expires: null }, false);
+  P.hello.features = [DELEGATE_FEATURE];
+  let code = null;
+  try { await TaskClient.of(P).request("tasks.list", {}, { timeoutMs: 150 }); } catch (e) { code = e.code; }
+  late?.();
+  await sleep(100);
+  ok(code === "timeout" && P.state === "granted", "no answer in time: rejected (timeout); its late answer is dropped, the connection kept", { code, state: P.state });
+  await P.revoke();
+  S.srv.stop(true);
+}
+
 process.exit(failures ? 1 : 0);
