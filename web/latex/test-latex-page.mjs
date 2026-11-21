@@ -26,6 +26,7 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { devtoolsPort } from "../test-port.mjs";
 import { boxClass } from "./boxclass.mjs";
+import { EXAMPLES } from "../../scripts/latex-examples.mjs";
 import * as C from "./comments-core.mjs";
 
 const here = new URL(".", import.meta.url).pathname;
@@ -163,72 +164,34 @@ try {
       "phone: File > New offers LaTeX document, in the file panel's order (U0), File and the item in view and not covered", { fb, items, mr });
     await mark(); await ev(`([...document.querySelectorAll('.fmgroup[aria-label="New"] button')].find((b) => b.textContent === "LaTeX document").click(), true)`);
     check(await madeAs("/Untitled (2).tex"), "phone: File > New > LaTeX document: /Untitled (2).tex made and opened in the editor");
-    // the editor's File > New > From an example… (U0: "Examples…" replaces "LaTeX example", William Nov 2), on
-    // a site without the examples gallery (this test's server: web/examples/open.ts finds no catalog): the LaTeX
-    // examples' own list fits the phone (10 large buttons, the dialog within the width, each button reachable), and the
-    // figure example opens with its image (a folder of its own, plot.png beside it)
+    // the editor's File > New > From an example… on a phone, on a site without the examples gallery (this test's
+    // server: web/examples/open.ts finds no catalog): the item fits and is reachable; chosen, an alert says the examples
+    // aren't available here, and no list of the editor's own is shown (the gallery's panel is the only one)
     await ev(`(document.querySelector(".tex-filebtn").click(), true)`);
     await until(`!!document.querySelector('.tex-filemenu .fmgroup[aria-label="New"]')`, 10000);
     await ev(`(document.querySelector('.tex-filemenu button[data-group="new"]').click(), true)`);
     const exItem = await reach('.tex-filemenu .fmgroup[aria-label="New"] button', "Examples…");
-    // (the examples are a chunk of their own, sagebrush-latex-examples.js: not fetched before their list is asked for)
-    const exAsks = () => requests.filter((u) => /sagebrush-latex-examples\.js/.test(u)).length, exBefore = exAsks();
+    const d0 = dialogText.length;
     await ev(`(document.querySelector('.tex-filemenu [data-item="fromExample"]').click(), true)`);
-    const listed2 = await until(`document.querySelectorAll("dialog.sb-tex-examples[open] button[data-example]").length === 10`, 20000);
-    check(exBefore === 0 && exAsks() === 1, "phone: the examples' chunk fetched once, by their list, and not before", { exBefore, after: exAsks() });
-    const dlg = listed2 && await ev(`(() => { const d = document.querySelector("dialog.sb-tex-examples"), r = d.getBoundingClientRect(), bs = [...d.querySelectorAll("button[data-example]")];
-      const last = bs[bs.length - 1]; last.scrollIntoView({ block: "center" }); const lr = last.getBoundingClientRect(), at = document.elementFromPoint(lr.left + lr.width / 2, lr.top + lr.height / 2);
-      return { menuHidden: document.querySelector(".tex-filemenu").hidden, left: r.left, right: r.right, w: innerWidth, n: bs.length, minH: Math.min(...bs.map((b) => b.getBoundingClientRect().height)), lastReach: at === last || last.contains(at) }; })()`);
-    check(exItem.found && exItem.inView && exItem.top && listed2 && dlg.menuHidden && dlg.left >= 0 && dlg.right <= dlg.w && dlg.n === 10 && dlg.minH >= 44 && dlg.lastReach,
-      "phone: the editor's File > New > From an example…: the File menu closed, the list of 10 fits the screen, every button at least 44 px and reachable", { exItem, dlg });
-    // (in the editor, another .tex opens in place, its URL pushed: no new document)
-    await ev(`(document.querySelector('dialog.sb-tex-examples button[data-example="figure"]').click(), true)`);
-    const figOk = await until(`${W}.stat("/LaTeX examples/Figure with an image/figure.tex").then((e) => !!e?.fid && new URLSearchParams(location.search).get("tex") === e.fid && !!document.querySelector(".tex-page .tex-src"))`, 20000);
-    const figImg = figOk && await until(`[...document.querySelectorAll(".tex-preview img.graphic")].some((i) => i.src.startsWith("blob:"))`, 20000);
-    check(figOk && figImg && await ev(`${W}.stat("/LaTeX examples/Figure with an image/plot.png").then((e) => e?.kind === "file")`), "phone: the figure example: its folder made, figure.tex opened, plot.png beside it and shown in the preview");
+    const said = await (async () => { for (let i = 0; i < 100 && dialogText.length === d0; i++) await sleep(100); return dialogText.slice(d0); })();
+    check(exItem.found && exItem.inView && exItem.top && said.length === 1 && said[0] === "The examples aren't available here." && !(await ev(`!!document.querySelector("dialog.sb-tex-examples, dialog.sb-examples[open]")`)),
+      "phone: the editor's File > New > From an example… without the gallery: the item reachable; an alert says the examples aren't available here, no list", { exItem, said });
     await ev(`localStorage.removeItem("sagebrush-files-sidebar"); true`);
     await send("Emulation.clearDeviceMetricsOverride");
   }
-  // ---- the examples' chunk fails to load (grader #685 E1, E2, E4): the first request for it refused (the Fetch
-  // domain), the editor's File > New > From an example… says so in an alert, and the list isn't shown; asked again, the
-  // list loads, by a new URL (?try=2: the browser keeps a failed module import for its URL), so a failure is never cached
+  // ---- the examples gallery from the LaTeX editor
   {
     await go(base + "?latex=1"); await until(`!!${W}`, 60000);
     await open(await ev(`${W}.stat("/Untitled.tex").then((e) => e.fid)`));
-    let refused = 0;
-    onPaused = (p) => { if (!refused++) send("Fetch.failRequest", { requestId: p.requestId, errorReason: "ConnectionFailed" }); else send("Fetch.continueRequest", { requestId: p.requestId }); };
-    await send("Fetch.enable", { patterns: [{ urlPattern: "*sagebrush-latex-examples.js*" }] });
-    const exUrls = () => requests.filter((u) => /sagebrush-latex-examples\.js/.test(u));
     const askExamples = async () => {
       await ev(`(document.querySelector(".tex-filebtn").click(), true)`);
       await until(`!!document.querySelector('.tex-filemenu .fmgroup[aria-label="New"]')`, 10000);
       await ev(`(document.querySelector('.tex-filemenu button[data-group="new"]').click(), true)`);
       await ev(`(document.querySelector('.tex-filemenu [data-item="fromExample"]').click(), true)`);
     };
-    const r0 = exUrls().length, d0 = dialogText.length;
-    await askExamples();
-    const said = await (async () => { for (let i = 0; i < 100 && dialogText.length === d0; i++) await sleep(100); return dialogText.slice(d0); })();
-    const fail = { refused, said, listed: await ev(`!!document.querySelector("dialog.sb-tex-examples[open]")`), urls: exUrls().slice(r0) };
-    check(refused === 1 && said.length === 1 && said[0] === "The examples couldn't be loaded. Check the network, then try again." && !fail.listed && fail.urls.length === 1 && !/\?try=/.test(fail.urls[0]),
-      "the examples' chunk refused: an alert says so (check the network, try again), no list", fail);
-    await askExamples();
-    const again = { listed: await until(`document.querySelectorAll("dialog.sb-tex-examples[open] button[data-example]").length === 10`, 20000), urls: exUrls().slice(r0), alerts: dialogText.length - d0 };
-    check(again.listed && again.urls.length === 2 && /sagebrush-latex-examples\.js\?try=2$/.test(again.urls[1]) && again.alerts === 1,
-      "…asked again: the list of 10, loaded by a new URL (?try=2), no second alert", again);
-    // (and once loaded, kept: asked a third time, the same 10 with no new request for the chunk; grader #685 E3,
-    //  loadExamples() not memoized would ask by ?try=3)
-    await ev(`(document.querySelector("dialog.sb-tex-examples[open]")?.close(), true)`);
-    await askExamples();
-    const kept = { listed: await until(`document.querySelectorAll("dialog.sb-tex-examples[open] button[data-example]").length === 10`, 20000) };
-    await sleep(300);
-    Object.assign(kept, { urls: exUrls().slice(r0), ids: await ev(`[...document.querySelectorAll("dialog.sb-tex-examples[open] button[data-example]")].map((b) => b.dataset.example).join()`) });
-    check(kept.listed && kept.urls.length === 2 && !kept.urls.some((u) => /\?try=3/.test(u)) && kept.ids.split(",").length === 10,
-      "…asked a third time, once loaded: the same 10, the chunk not fetched again", kept);
-    await send("Fetch.disable"); onPaused = null;
-    await ev(`(document.querySelector("dialog.sb-tex-examples[open]")?.close(), true)`);
     // a site with the examples gallery (its catalog stubbed: one LaTeX document, one notebook): the editor's File ▸
     // Examples… and New ▸ From an example… open the gallery's panel, on LaTeX first, as the notebook and board pages
-    // open it on theirs (#759), not the LaTeX examples' own list
+    // open it on theirs
     await ev(`(() => { const f0 = window.__sbFetch0 ??= window.fetch; window.fetch = (u, o) => new URL(String(u?.url ?? u), location.href).pathname === "/examples/index.json" ? Promise.resolve(new Response(JSON.stringify({ examples: [{ id: "latex/stub", kind: "latex", title: "Stub LaTeX", summary: "" }, { id: "notebook/stub", kind: "notebook", title: "Stub notebook", summary: "" }] }), { headers: { "content-type": "application/json" } })) : f0(u, o); return 1; })()`);
     const galleryOn = `!!document.querySelector("dialog.sb-examples[open]") && !document.querySelector("dialog.sb-tex-examples[open]") && (() => { const t = [...document.querySelectorAll("dialog.sb-examples [role=option]")].map((b) => b.textContent); return t.some((x) => x.includes("Stub LaTeX")) && !t.some((x) => x.includes("Stub notebook")); })()`;
     const closeGallery = `(() => { [...document.querySelectorAll("dialog.sb-examples button")].find((b) => b.textContent === "Close")?.click(); return 1; })()`;
@@ -268,15 +231,20 @@ try {
     const at = await ev(`(async () => { const fid = new URLSearchParams(location.search).get("tex"); return { url: location.pathname + location.search, path: (await ${W}.list("/", { recursive: true })).find((e) => e.fid === fid)?.path ?? null }; })()`).catch((e) => String(e));
     check(listed && opened && at?.path === "/Examples/Stub LaTeX/stub.tex", "the notebook page's File ▸ Examples…, a LaTeX example's Open a copy: the copy opens in the LaTeX editor", at);
   }
-  // ---- every example opened in the editor (made by the page module's makeExample, as the list does; the test's
-  // workspace handle has create, not the page's createByPerson): each renders in the preview,
+  // ---- every LaTeX example of the corpus opened in the editor (its files made in a folder of its own, as a copy from the
+  // gallery is: scripts/latex-examples.mjs reads them): each renders in the preview,
   // with nothing shown as unsupported (gray tags; the SageTeX and PythonTeX "not run" chips are expected), recorded
   {
     await go(base + "?latex=1"); await until(`!!${W}`, 60000);
-    const ids = await ev(`import("/sagebrush-latex.js").then(async (x) => (await x.loadExamples()).map((e) => e.id))`);
+    const ids = EXAMPLES.map((e) => e.id);
     const rec = [];
-    for (const id of ids) {
-      const fidEx = await ev(`import("/sagebrush-latex.js").then(async (x) => (await x.makeExample({ stat: (p) => ${W}.stat(p), mkdir: (p) => ${W}.mkdir(p), createByPerson: (p, o) => ${W}.create(p, o) }, (await x.loadExamples()).find((e) => e.id === ${JSON.stringify(id)}))).fid)`);
+    for (const ex of EXAMPLES) {
+      const id = ex.id;
+      let fidEx = null;
+      for (const [name, text, b64] of ex.files) {
+        const fid = await mk(`/LaTeX examples/${ex.title}/${name}`, Array.from(b64 ? Buffer.from(text, "base64") : new TextEncoder().encode(text)));
+        fidEx ??= fid;
+      }
       await open(fidEx);
       const shown = await until(`(() => { const P = document.querySelector(".tex-preview"); return !!P && P.textContent.length > 80; })()`, 30000);
       await sleep(400);
@@ -300,8 +268,9 @@ try {
     const nm = await ev(`(async () => { document.querySelector(".tex-filebtn").click(); await new Promise((r) => setTimeout(r, 50)); document.querySelector('.tex-filemenu button[data-group="new"]').click();
       const items = [...document.querySelectorAll('.tex-filemenu .fmgroup[aria-label="New"] button')].map((b) => b.dataset.item);
       document.querySelector('.tex-filemenu [data-item="fromExample"]').click(); await new Promise((r) => setTimeout(r, 300));
-      const n = document.querySelectorAll("dialog.sb-tex-examples[open] button[data-example]").length; document.querySelector("dialog.sb-tex-examples")?.close(); return { items, n, closed: document.querySelector(".tex-filemenu").hidden }; })()`);
-    check(JSON.stringify(nm.items) === JSON.stringify(["newNotebook", "newBoard", "newLatex", "newFolder", "fromExample"]) && nm.n === 10 && nm.closed, "B1 + U0: from a LaTeX file, File > New has every editor's items in the file panel's order, and From an example… opens the LaTeX examples", nm);
+      return { items, closed: document.querySelector(".tex-filemenu").hidden }; })()`);
+    nm.said = dialogText.at(-1);
+    check(JSON.stringify(nm.items) === JSON.stringify(["newNotebook", "newBoard", "newLatex", "newFolder", "fromExample"]) && nm.said === "The examples aren't available here." && nm.closed, "B1 + U0: from a LaTeX file, File > New has every editor's items in the file panel's order, and From an example… goes to the gallery (here, without one: said)", nm);
     const sel = (p) => JSON.stringify(`.frow[data-path="${p}"]`);
     await until(`!!document.querySelector(${sel("/sw/b.tex")}) || (document.querySelector('.frow[data-path="/sw"]')?.click(), false)`, 20000);
     const sw = await ev(`(async () => {
@@ -1778,7 +1747,6 @@ try {
   check(latexFetches().some((u) => /sagebrush-latex\.js/.test(u)) && latexFetches().some((u) => /sagebrush-latex-worker\.js/.test(u)), "the page and its worker fetched now", latexFetches());
   // (grader's #966 TESTS966-1: a browser without WebMCP (navigator.modelContext) never fetches the agent tools' chunk)
   check(!(await ev(`"modelContext" in navigator`)) && !latexFetches().some((u) => /sagebrush-latex-tools\.js/.test(u)), "…and not the agent tools' chunk: this browser has no WebMCP", latexFetches());
-  check(!latexFetches().some((u) => /sagebrush-latex-examples\.js/.test(u)), "…and not the examples' chunk: opening a .tex doesn't fetch it", latexFetches());
   const rev0 = await ev(`${W}.stat("/t/doc.tex").then((e) => e.rev ?? 0)`);
   await send("Runtime.evaluate", { expression: `document.querySelector(".tex-src").focus()` });
   await ctrlS();
