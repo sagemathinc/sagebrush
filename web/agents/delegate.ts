@@ -16,7 +16,7 @@
 //   the blob id tasks.diff gave for that path at that commit (its git blob id, recomputed here).
 import { AgentError, type AgentPairing } from "../workspace/agent-pair";
 import { DELEGATE_FEATURE, TaskClient } from "../workspace/tasks-client";
-import { TASK_RESULTS, blobId, contentBytes, taskLog, taskNotice, type DiffFile, type TaskEntry, type TaskLogEntry } from "../workspace/tasks-schema";
+import { TASK_RESULTS, blobId, contentBytes, taskLog, taskNotice, type DiffFile, type TaskEntry, type TaskEvent, type TaskLogEntry } from "../workspace/tasks-schema";
 import { apply, newThread, type Thread, type TurnEvent } from "../workspace/agent-chat/events";
 import type { ProposalDiff, ProposalSource } from "../workspace/review/proposal-view";
 
@@ -60,7 +60,7 @@ export class DelegateTasks {
   private wasOn = false;
   private loading = new Map<string, Promise<void>>();
 
-  constructor(private o: { changed: () => void }) {}
+  constructor(private o: { changed: () => void; closeMs?: number }) {}
 
   /** Follow this pairing (or none): its switch, and its task.event notifications. */
   attach(p: AgentPairing | null) {
@@ -154,7 +154,7 @@ export class DelegateTasks {
     const t = this.task(n.task);
     if (!t) { void this.refresh().catch(() => {}); return; }
     if (!t.loaded) {
-      if ("event" in n) chip(t, n.event as any, n.seq);
+      if ("event" in n) chip(t, n.event, n.seq);
       this.o.changed();
       return;
     }
@@ -186,7 +186,7 @@ export class DelegateTasks {
       const left = [...close];
       const one = async () => {
         for (let id = left.shift(); id !== undefined; id = left.shift()) {
-          try { TASK_RESULTS["tasks.revoke"](await TaskClient.of(p).request("tasks.revoke", { task: id }, { timeoutMs: DELEGATE_LIMITS.closeMs })); } catch { failed.push(id); }
+          try { TASK_RESULTS["tasks.revoke"](await TaskClient.of(p).request("tasks.revoke", { task: id }, { timeoutMs: this.o.closeMs ?? DELEGATE_LIMITS.closeMs })); } catch { failed.push(id); }
         }
       };
       await Promise.all(Array.from({ length: Math.min(DELEGATE_LIMITS.closing, left.length) }, one));
@@ -229,7 +229,7 @@ function fresh(entry: TaskEntry): DelegateTask {
 }
 
 // (a task's own event on its entry: its chip and its proposal)
-function chip(t: DelegateTask, e: TaskLogEntry extends infer _ ? any : never, seq: number) {
+function chip(t: DelegateTask, e: TaskEvent, seq: number) {
   if (e.type === "task_status") {
     t.entry = { ...t.entry, status: e.status, seq: Math.max(t.entry.seq, seq), ...(e.status === "working" ? {} : { question: false }) };
     t.reason = e.reason;
