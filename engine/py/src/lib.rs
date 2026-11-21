@@ -358,13 +358,28 @@ fn charpoly<'py>(py: Python<'py>, n: u64, k: usize, q: u64, chi: Option<(u64, Ve
 
 fn python_factorer(factor: Py<PyAny>) -> impl Fn(&[BigInt]) -> Vec<(Vec<BigInt>, u32)> + Sync {
     move |f: &[BigInt]| {
-        Python::attach(|py| {
+        let r = Python::attach(|py| {
             factor
                 .call1(py, (py1(f),))
                 .and_then(|r| r.extract::<Vec<(Vec<PyInt>, u32)>>(py))
-                .map(|v| v.into_iter().map(|(g, e)| (g.iter().map(sagebrush_bigint::from_num).collect(), e)).collect())
-                .unwrap_or_default()
-        })
+                .map(|v| v.into_iter().map(|(g, e)| (g.iter().map(sagebrush_bigint::from_num).collect(), e)).collect::<Vec<_>>())
+                .map_err(|e| e.is_instance_of::<PyKeyboardInterrupt>(py))
+        });
+        match r {
+            Ok(v) => v,
+            // (a Ctrl-C while the callback ran, Python's own or a nested
+            // engine call's KeyboardInterrupt: this call's Stop, unwound
+            // here with the Stop's own payload, which guarded's catch
+            // reports as KeyboardInterrupt, at once and not as an empty
+            // factorization the op would report as a bad callback.  No
+            // global request is set, so no other call, on this thread or
+            // another, is stopped by it; the callers of the factorer run
+            // on the calling thread, outside any parallel job)
+            Err(true) => std::panic::panic_any(sagebrush_interrupt::Interrupted),
+            // (any other error: an empty factorization, which the op
+            // refuses as not irreducible, as before)
+            Err(false) => Vec::new(),
+        }
     }
 }
 

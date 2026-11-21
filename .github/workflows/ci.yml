@@ -1784,6 +1784,7 @@ jobs:
           python3 engine/py/test_series_ops.py
           python3 engine/py/test_poly_mul.py
           python3 engine/py/test_modular_forms.py
+          python3 engine/py/test_factor_callback.py
           python3 engine/py/test_memguard.py
           python3 engine/py/test_capacity.py
           python3 engine/py/test_session_ctrl.py
