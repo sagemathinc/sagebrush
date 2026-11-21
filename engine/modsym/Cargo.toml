@@ -7,6 +7,10 @@ license = "MIT OR Apache-2.0"
 [features]
 default = ["parallel"]
 parallel = ["sagebrush-par/parallel"]
+# (tests only, never in a release: traces::pins, the Stop-prefix pins'
+# entry to the twisted traces' kernels, tests/hecke_stop.rs; turned on by
+# the dev-dependency on this crate below)
+test-pins = []
 
 [dependencies]
 sagebrush-arith = { path = "../arith" }
@@ -24,6 +28,8 @@ rayon = "1.10"
 sagebrush-interrupt = { path = "../interrupt", features = ["test-hooks"] }
 sagebrush-ap = { path = "../ap" }
 serde_json = "1"
+# (tests only: this crate with test-pins, for tests/hecke_stop.rs)
+sagebrush-modsym = { path = ".", features = ["test-pins"] }
 
 [lints]
 workspace = true

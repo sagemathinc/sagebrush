@@ -9,6 +9,7 @@
 //! reason.  Native only: a Stop unwinds, and wasm32 aborts on a panic.)
 
 #![cfg(not(target_arch = "wasm32"))]
+// (traces::pins: the test-pins feature, on through the dev-dependency)
 
 use sagebrush_arith::cost::{tallied, Family, Units, FAMILIES};
 use sagebrush_bigint::BigInt;

@@ -865,7 +865,9 @@ pub fn orbit_traces(n: u64, k: usize, eps: &Character, res: &NewspaceOrbits, bou
 /// For the Stop-prefix pins (tests/hecke_stop.rs, a binary of its own: the
 /// Stop hooks are global): one level's setup at the source's first prime,
 /// and its kernels run charging the thread's tally (a `Local`) or counting
-/// into `Units`.
+/// into `Units`.  Compiled only with the test-pins feature (the crate's
+/// dev-dependency on itself), never in a library build.
+#[cfg(feature = "test-pins")]
 #[doc(hidden)]
 pub mod pins {
     use super::*;

@@ -874,6 +874,7 @@ dependencies = [
  "sagebrush-arith",
  "sagebrush-bigint",
  "sagebrush-interrupt",
+ "sagebrush-modsym",
  "sagebrush-par",
  "sagebrush-poly",
  "serde_json",
