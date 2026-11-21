@@ -11,15 +11,19 @@ const EXT = { py: "python", sage: "sage", pyx: "python", ts: "typescript", mts: 
 export const langOfPath = (p) => EXT[/\.([a-z0-9]+)$/i.exec(p)?.[1]?.toLowerCase()] ?? "";
 
 export function treeRoom(tree, dir = "") {
+  linkImports(tree);
   const files = tree.files, prefix = dir ? dir + "/" : "";
   // (which of this room's objects holds file k: the file itself, or the subdirectory it is under)
   const holder = new Array(files.length).fill(null);
   const nodes = [], byId = new Map();
-  files.forEach(([path, lines], k) => {
+  files.forEach(([path, lines, doc], k) => {
     if (!path.startsWith(prefix)) return;
     const rest = path.slice(prefix.length), slash = rest.indexOf("/");
     if (slash < 0) {
-      const nd = { id: "p:" + path, kind: "file", title: path, path, group: dir || "(top)", lang: langOfPath(path), lines, text: "", src: tree.base + path.split("/").map(encodeURIComponent).join("/") };
+      // (doc: a workspace's notebook or board, which is a document rather than a file of text)
+      const isDoc = doc === "notebook" || doc === "board";
+      const nd = { id: "p:" + path, kind: "file", title: path, path, group: dir || "(top)", lang: isDoc ? doc : langOfPath(path), lines, text: "",
+        src: tree.base + path.split("/").map(encodeURIComponent).join("/"), ...(isDoc ? { doc } : {}) };
       nodes.push(nd); byId.set(nd.id, nd); holder[k] = nd.id;
     } else {
       const sub = prefix + rest.slice(0, slash), id = "d:" + sub;
@@ -111,4 +115,25 @@ export function resolveImport(tree, from, mod, names = []) {
   if (names.length === 1 && names[0] !== "*") { const sub = pick(mod + "." + names[0]); if (sub) return { path: sub, sub: true }; }
   const p = pick(mod);
   return p ? { path: p, sub: false } : null;
+}
+
+// (a tree whose Python imports are given as written (`pyimports`: a path -> [module, ...names taken]): resolved to its
+//  files once, into `imports`, as gen-repo.mjs resolves a repository's)
+function linkImports(tree) {
+  if (!tree.pyimports || tree._linked) return;
+  tree._linked = true;
+  const index = new Map(tree.files.map((f, k) => [f[0], k]));
+  const seen = new Set((tree.imports ?? []).map((p) => p.join(",")));
+  tree.imports = tree.imports ?? [];
+  for (const [from, list] of Object.entries(tree.pyimports)) {
+    const a = index.get(from);
+    if (a === undefined || !Array.isArray(list)) continue;
+    for (const [mod, ...names] of list) {
+      const r = typeof mod === "string" ? resolveImport(tree, from, mod, names) : null;
+      const b = r ? index.get(r.path) : undefined;
+      if (b === undefined || b === a || seen.has(a + "," + b)) continue;
+      seen.add(a + "," + b);
+      tree.imports.push([a, b]);
+    }
+  }
 }

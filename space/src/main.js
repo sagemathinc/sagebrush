@@ -554,7 +554,7 @@ function homeView(P) {
   for (let i = 0; i < n; i++) ds.push(c.distanceTo(new THREE.Vector3(P[3 * i], P[3 * i + 1], P[3 * i + 2])));
   ds.sort((a, b) => a - b);
   // (a room is seen whole: it is laid out to be)
-  const r = Math.max(ds[space?.room ? ds.length - 1 : Math.floor(ds.length * 0.8)] ?? 6, 6) * (space?.room ? 0.75 : 1);
+  const r = Math.max(ds[space?.room ? ds.length - 1 : Math.floor(ds.length * 0.8)] ?? 6, 6) * (space?.room ? 0.95 : 1);
   // (a tall, narrow screen (a phone held upright) sees less across: further back, so the width fits too)
   const fit = camera.aspect < 1 ? Math.min(2.2, 1 / camera.aspect) : 1;
   return { to: c.clone().add(new THREE.Vector3(0.35, 0.25, 1).normalize().multiplyScalar(r * 2.2 * fit)), toT: c, r };
@@ -724,9 +724,10 @@ function openOverlay(nd) {
   showOverlay(nd);
   flyTo(space.nodes.indexOf(nd), undefined, false);
 }
-const linkLabels = (nd) => (space.room && ROOM_KINDS.has(nd.kind) ? ["Calls and uses", "Called or used by"] : nd.kind === "file" || nd.kind === "dir" ? ["Imports", "Imported by"] : ["Links to", "Linked from"]);
+const linkLabels = (nd) => (space.room?.kind === "notebook" ? (nd.kind === "note" ? ["Explains", "Explained by"] : ["Read by", "Uses names from"]) : space.room && ROOM_KINDS.has(nd.kind) ? ["Calls and uses", "Called or used by"] : nd.kind === "file" || nd.kind === "dir" ? ["Imports", "Imported by"] : ["Links to", "Linked from"]);
 const RUNS = ["python", "sage", "matlab", "magma"];
-const runnable = (nd) => nd.kind === "code" || nd.kind === "plot3d";
+// (a notebook's cell in its room is read, not run here: it ran in its notebook, with the cells before it)
+const runnable = (nd) => (nd.kind === "code" || nd.kind === "plot3d") && !nd.cell;
 function showOverlay(nd) {
   let body = "";
   // (a guided tour's stop: its narration first, with Back, Next and End)
@@ -746,6 +747,10 @@ function showOverlay(nd) {
     body += `<div class="meta">${esc([nd.lang, nd.start ? `lines ${nd.start}–${nd.end}` : "", space.room?.path].filter(Boolean).join(" · "))}</div>` +
       `<pre class="code hljs"><code>${highlight(String(nd.text ?? ""), nd.lang ?? "")}</code></pre>` +
       (nd.kind === "import" && nd.names?.length ? `<div class="hint">Names it brings in: ${esc(nd.names.join(", "))}</div>` : "");
+  } else if (nd.cell) {
+    body += `<div class="meta">${esc([nd.lang, space.room?.path].filter(Boolean).join(" · "))}</div>` +
+      `<pre class="code hljs"><code>${highlight(String(nd.text ?? ""), nd.lang ?? "")}</code></pre>` +
+      `<div class="label">Output, as the notebook last showed it</div><div class="output">${outputHtml(nd)}</div>`;
   } else if (nd.kind === "note") body += `<div class="md">${markdown(String(nd.text ?? ""), { remote: false })}</div>`;
   else if (runnable(nd)) {
     const mode = RUNS.includes(nd.lang) ? nd.lang : nd.kind === "plot3d" ? "sage" : "python";
@@ -864,7 +869,7 @@ const scopes = [];
 let spaceName = "", entering = false, focusNode = null; // (focusNode: what an import named, arrived at)
 const MAX_SHOWN = 4000; // (lines of a file the drawer highlights)
 const ENTER_HINT = { dir: "Its folders and files, and what imports what", python: "Its functions and classes, and what calls what",
-  import: "Through to the file it imports",
+  import: "Through to the file it imports", notebook: "Its cells, and the names that flow from one to another",
   class: "Its methods, and which calls which", space: "The space it holds" };
 // (an import in a file's room, when the space knows the repository: the file it leads to, or null)
 function importTarget(nd) {
@@ -874,6 +879,7 @@ function importTarget(nd) {
 // (why a file has no room: its language has no parser here yet)
 function noRoomWhy(nd) {
   if (nd?.kind !== "file" || enterKind(nd)) return null;
+  if (nd.doc === "board") return "No room for boards yet: open it in the board editor.";
   const lang = nd.lang || "";
   const NAMES = { rust: "Rust", typescript: "TypeScript", javascript: "JavaScript", matlab: "MATLAB", magma: "Magma" };
   const name = /\.(pyx|pxd|pxi)$/.test(String(nd.path ?? nd.title ?? "")) ? "Cython" : NAMES[lang];
@@ -891,12 +897,24 @@ function enterKind(nd) {
   // (by its name; by its language only when its title isn't a file name: a .pyx is Cython, which Python's grammar refuses)
   if ((/\.(py|sage)$/.test(p) || (!/\.\w+$/.test(p) && (nd.lang === "python" || nd.lang === "sage"))) && whole) return "python";
   if (/\.space\.json$/.test(p) && whole) return "space";
+  if (nd.doc === "notebook" && nd.src) return "notebook";
   return null;
 }
 // (a file's whole text: from its `src` (https, or this site), once; the faces drawn again with it)
 const fetched = new Map();
 async function fullText(nd) {
   if (!nd.src || nd._full) return String(nd.text ?? "");
+  // (a file of the person's own workspace: asked of the page that showed this space (web/workspace/space3d.ts))
+  if (String(nd.src).startsWith("workspace:")) {
+    const key = String(nd.src);
+    if (!fetched.has(key)) fetched.set(key, askPage(decodeURIComponent(key.slice("workspace:".length))));
+    let text;
+    try { text = await fetched.get(key); } catch (e) { fetched.delete(key); throw e; }
+    nd.text = text; nd._full = true;
+    const o = objects[space.nodes.indexOf(nd)];
+    if (o) { for (const t of o.userData.tex) t?.dispose(); o.userData.tex = []; o.userData.level = -1; }
+    return text;
+  }
   const url = new URL(nd.src, location.href);
   if (url.protocol !== "https:" && url.origin !== location.origin) throw new Error("only https sources are fetched");
   if (!fetched.has(url.href)) fetched.set(url.href, fetch(url.href).then((r) => { if (!r.ok) throw new Error(`${r.status} ${r.statusText}`); return r.text(); }));
@@ -906,6 +924,18 @@ async function fullText(nd) {
   const o = objects[space.nodes.indexOf(nd)];
   if (o) { for (const t of o.userData.tex) t?.dispose(); o.userData.tex = []; o.userData.level = -1; }
   return text;
+}
+// (asking the page around: a file's text, by its path in the tree it sent; its answer is a "space-file")
+const asked = new Map();
+let askSeq = 0;
+function askPage(path) {
+  if (!embedded) return Promise.reject(new Error("only the page that opened this space can read your files"));
+  return new Promise((resolve, reject) => {
+    const id = ++askSeq;
+    asked.set(id, { resolve, reject });
+    window.parent.postMessage({ sagebrush: "space-read", version: 1, id, path }, location.origin);
+    setTimeout(() => { if (asked.delete(id)) reject(new Error("the page didn't answer")); }, 60000);
+  });
 }
 async function roomFor(nd, k) {
   if (k === "dir") return treeRoom(space.tree, nd.enter.path);
@@ -919,6 +949,14 @@ async function roomFor(nd, k) {
     r._text = text; r.tree = tree;
     // (one name taken from a module (not a submodule of it): arriving at it)
     if (!sub && (nd.imported ?? []).length === 1) r._focus = nd.imported[0];
+    return r;
+  }
+  if (k === "notebook") {
+    const nb = JSON.parse(await fullText(nd));
+    if (nb?.format !== "sagebrush-notebook-cells") throw new Error("it isn't a notebook");
+    const { notebookRoom } = await import("./nbroom.js");
+    const r = notebookRoom(nb, { path: String(nd.path ?? nd.title) });
+    if (space.tree) r.tree = space.tree;
     return r;
   }
   if (k === "space") {
@@ -999,6 +1037,7 @@ function labelOf(s) {
   if (r.kind === "dir") return r.path ? r.path.split("/").pop() + "/" : s.tree?.name ?? s.title ?? "the top";
   if (r.kind === "file") return String(r.path).split("/").pop();
   if (r.kind === "class") return "class " + r.name;
+  if (r.kind === "notebook") return String(r.path).split("/").pop();
   return s.title ?? "";
 }
 const roomPath = () => [...scopes.map((s) => labelOf(s.space)), labelOf(space)].join(" › ");
@@ -1280,7 +1319,9 @@ addEventListener("keydown", (e) => {
   if (typing()) { if (e.key === "Escape") document.activeElement.blur(); return; }
   const k = e.key.toLowerCase();
   if (!e.altKey && !e.ctrlKey && !e.metaKey && (FLY[k] || k === "shift")) { held.add(k); if (FLY[k]) e.preventDefault(); return; }
-  if (e.key === "Escape") closeOverlay();
+  // (Esc with nothing open, in a frame the page opened over itself (Open in 3D): the page closes it)
+  if (e.key === "Escape" && $("#overlay").hidden && embedded) window.parent.postMessage({ sagebrush: "space-close", version: 1 }, location.origin);
+  else if (e.key === "Escape") closeOverlay();
   else if (e.key === "Enter" && selected !== null && !$("#overlay").hidden && !/^(A|BUTTON)$/.test(document.activeElement?.tagName ?? "")) { const nd = space.nodes.find((n) => n.id === selected); if (enterKind(nd)) enterRoom(nd); }
   else if (e.key === "/") { e.preventDefault(); $("#q").focus(); }
   else if (e.key === "b" || e.key === "B" || e.key === "Backspace" || (e.altKey && e.key === "ArrowLeft")) back();
@@ -1324,7 +1365,15 @@ function embed() {
   let current = null;
   addEventListener("message", (e) => {
     const m = e.data;
-    if (e.source !== window.parent || e.origin !== location.origin || m?.sagebrush !== "space-load" || m.version !== 1) return;
+    if (e.source !== window.parent || e.origin !== location.origin || m?.version !== 1) return;
+    if (m.sagebrush === "space-file") {
+      const a = asked.get(m.id);
+      if (!a) return;
+      asked.delete(m.id);
+      if (typeof m.text === "string") a.resolve(m.text); else a.reject(new Error(String(m.error ?? "couldn't read it")));
+      return;
+    }
+    if (m.sagebrush !== "space-load") return;
     const name = String(m.name ?? "space");
     const again = name === current;
     if (!again) $("#space").innerHTML = `<option selected>${esc(name)}</option>`;

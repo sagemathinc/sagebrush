@@ -18,6 +18,7 @@ import { rowIcons, ROWICON } from "./sync-rows";
 import { fileRowMeta, fileRowTitle, fmtSize, isElsewhere } from "./row-meta";
 import { fileLabel, NEW_ITEMS } from "./filemenu";
 import { agentsIcon, modeSwitch } from "./mode-switch";
+import { openIn3D } from "./space3d";
 // (built with __SB_NO_SYNC__ (the board frame and exports, web/build.ts): no sync owner, panel or client is in that
 // copy; elsewhere the define is absent or false, and everything is as before)
 declare const __SB_NO_SYNC__: boolean | undefined;
@@ -725,6 +726,8 @@ export function mountBrowser(container: HTMLElement, host: BrowserHost): Browser
     if (e.kind !== "folder") items.push(["Duplicate", () => w.duplicate(e.path).then((x) => say(`Copied as ${nameOf(x.path)}`)).catch(fail).then(refresh)]);
     if (e.kind === "file") items.push(["Download", () => download(e)]);
     if (e.kind === "folder" && host.shareFolder) items.push(["Share folder…", () => host.shareFolder!(e)]);
+    // (the whitespace prototype: the folder as rooms to walk through, space3d.ts)
+    if (e.kind === "folder") items.push(["Open in 3D", () => void openIn3D(w, e.path).catch(fail)]);
     items.push(["Copy path name", () => navigator.clipboard?.writeText(e.path).then(() => say(`Copied path '${e.path}'`), () => say(e.path))]);
     // (only a person deletes old versions, §2.5)
     if (e.kind === "folder" && w.actor === "person") items.push(["Delete older versions in this folder…", () => dropFolderVersions(w, e.path, { say, fail }).then(meter)]);
@@ -1034,7 +1037,7 @@ export function mountBrowser(container: HTMLElement, host: BrowserHost): Browser
   }));
   upBtn.onclick = () => pick("/");
   // (Download everything: the Storage panel's export, offered here too, where a person looks for it)
-  moreBtn.onclick = () => popup(moreBtn, [[trashView ? "All files" : "Trash", () => { trashView = !trashView; refresh(); }], [sortBy() === "modified" ? "Sort by name" : "Sort by last modified", () => { setSortBy(sortBy() === "modified" ? "name" : "modified"); refresh(); }], ["Storage…", () => storage()], ...(host.exportUrl ? [["Download everything (.zip)…", () => storage(true)] as [string, () => unknown]] : [])]);
+  moreBtn.onclick = () => popup(moreBtn, [["Open all files in 3D", () => void openIn3D(w, "/").catch(fail)], "-", [trashView ? "All files" : "Trash", () => { trashView = !trashView; refresh(); }], [sortBy() === "modified" ? "Sort by name" : "Sort by last modified", () => { setSortBy(sortBy() === "modified" ? "name" : "modified"); refresh(); }], ["Storage…", () => storage()], ...(host.exportUrl ? [["Download everything (.zip)…", () => storage(true)] as [string, () => unknown]] : [])]);
   // (the search drawn once typing pauses: LIMIT-0B0-2)
   let searchTimer: ReturnType<typeof setTimeout> | null = null;
   search.oninput = () => {

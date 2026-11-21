@@ -272,3 +272,36 @@ function finish({ title, summary, room, nodes, edges }) {
   for (const nd of nodes) if (nd.shelf) nd.group = "not linked here";
   return { format: "sagebrush-space", version: 1, title, summary, room, directed: true, nodes, edges };
 }
+
+// A notebook cell's names (nbroom.js): what it defines at its top level (assignments, loops' and with's targets,
+// imports, functions and classes; not what is local to a function in it), and what it reads (anywhere in it, its
+// functions' bodies too: a function reading a name needs it when it runs).  null if the cell doesn't parse.
+export function cellNames(code, { sage = false } = {}) {
+  let tree;
+  try { tree = parsePython(code, { sage }); } catch { return null; }
+  const INNER = new Set(["Lambda", "ListComp", "SetComp", "DictComp", "GeneratorExp"]);
+  // (one statement's reads and bindings at the cell's level; a function's, lambda's or comprehension's own names
+  //  (its parameters, locals, loop variables) are its own, and what else it reads is the cell's)
+  const scan = (st, loads, binds) => walk(st, (n) => {
+    if (isDef(n) || n._type === "ClassDef" || INNER.has(n._type)) {
+      if (n.name) binds.add(n.name);
+      const r = refsOf(isDef(n) ? [...(n.decorator_list ?? []), n.args, ...n.body] : n._type === "ClassDef" ? [...(n.decorator_list ?? []), ...(n.bases ?? []), ...n.body] : [n]);
+      for (const x of r.loads) if (!r.binds.has(x)) loads.add(x);
+      return false;
+    }
+    if (n._type === "Name") (n.ctx?._type === "Store" || n.ctx?._type === "Del" ? binds : loads).add(n.id);
+    if (n._type === "Import" || n._type === "ImportFrom") for (const al of n.names) if (al.name !== "*") binds.add(al.asname ?? al.name.split(".")[0]);
+    if (n._type === "ExceptHandler" && n.name) binds.add(n.name);
+    if (n._type === "AugAssign" && n.target?._type === "Name") loads.add(n.target.id); // (x += 1 reads x)
+  });
+  // (statement by statement: a read is the cell's use unless an earlier statement of the cell bound it, so
+  //  `df = df.dropna()` uses the df from before)
+  const defs = new Set(), uses = new Set();
+  for (const st of tree.body) {
+    const loads = new Set(), binds = new Set();
+    scan(st, loads, binds);
+    for (const x of loads) if (!defs.has(x)) uses.add(x);
+    for (const b of binds) defs.add(b);
+  }
+  return { defs: [...defs], uses: [...uses] };
+}
