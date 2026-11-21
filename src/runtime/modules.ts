@@ -747,7 +747,9 @@ newBuiltinModule("_time", (m) => {
   // SAGEBRUSH_TIME_PINNED_DIR in the tests of that way under Node)
   fn(m, "_pinned_zones", () => {
     const hook = (globalThis as any).__SAGEBRUSH_TZDATA_ZONES__;
-    const dir = typeof process !== "undefined" ? process.env?.SAGEBRUSH_TIME_PINNED_DIR : undefined;
+    // (a host test hook, read with raw fs: never while confined, `notebook run --confine`, whose program may use no
+    //  folder but its own)
+    const dir = typeof process !== "undefined" && !isConfined() ? process.env?.SAGEBRUSH_TIME_PINNED_DIR : undefined;
     try {
       if (typeof hook === "function") return tuple((hook() as string[]).map((z) => z));
       if (typeof dir === "string") {
@@ -778,7 +780,9 @@ newBuiltinModule("_time", (m) => {
   fn(m, "_pinned", (zone: any) => {
     const name = String(zone);
     const hook = (globalThis as any).__SAGEBRUSH_TZDATA__;
-    const dir = typeof process !== "undefined" ? process.env?.SAGEBRUSH_TIME_PINNED_DIR : undefined;
+    // (a host test hook, read with raw fs: never while confined, `notebook run --confine`, whose program may use no
+    //  folder but its own)
+    const dir = typeof process !== "undefined" && !isConfined() ? process.env?.SAGEBRUSH_TIME_PINNED_DIR : undefined;
     try {
       if (typeof hook === "function") {
         const b = hook(name);
@@ -1939,7 +1943,77 @@ newBuiltinModule("gc", (m) => {
 // resolve against.
 let virtualCwd: string | null = null;
 const cwd = (): string => virtualCwd ?? process.cwd();
-const at = (p: any): any => (virtualCwd !== null && typeof p === "string" && !p.startsWith("/") ? (p === "." || p === "" ? virtualCwd : virtualCwd.replace(/\/$/, "") + "/" + p) : p);
+const atCwd = (p: any): any => (virtualCwd !== null && typeof p === "string" && !p.startsWith("/") ? (p === "." || p === "" ? virtualCwd : virtualCwd.replace(/\/$/, "") + "/" + p) : p);
+const at = (p: any): any => (confineRoots === null ? atCwd(p) : confined(atCwd(p)));
+
+// ------------------------------------------------------------------ confinement (`notebook run --confine`)
+// A run confined to its roots (an agent's Delegate task: its work folder and its run's temporary folder).  Every path
+// the program names (open(), os, the importer, file-once writes, zoneinfo's reads: all of them come through at()) is
+// walked one component at a time from "/", by lstat, before anything is opened, created or removed:
+//   - inside a root, a symbolic link anywhere in the path is refused (the program can't make one, so one there was
+//     planted), and so is a last component that is neither a directory nor a regular file (a FIFO, a device), or a
+//     regular file with more than one link (a hard link may be the same file as one outside);
+//   - outside the roots (the folders above them, as /var is a link on macOS) a link is followed, by realpath;
+//   - the path's end, existing or not, must lie within a root, compared by whole components (a root /a/work holds
+//     /a/work/x, never /a/work2).
+// A path that doesn't exist yet is checked against its deepest existing ancestor.  Refused: a PermissionError.  The
+// roots are set once, by the host, before any Python runs (setConfine: the first setting wins, and none can be
+// removed); with none set nothing here runs, as everywhere else.  While confined, the per-user compile cache is off
+// (src/compile.ts isConfined): it would be a module cache the program can write.
+let confineRoots: string[] | null = null;
+export function setConfine(roots: string[]): void {
+  if (confineRoots !== null) return; // (the first host setting wins)
+  const fs = require("fs");
+  // (a root that can't be resolved, or "/", confines to nothing: every path refused)
+  confineRoots = roots.flatMap((r) => { try { const q = fs.realpathSync(r); return q === "/" ? [] : [q.replace(/\/+$/, "")]; } catch { return []; } });
+}
+export const isConfined = (): boolean => confineRoots !== null;
+const refuse = (p: string): never => { throw Object.assign(new Error(`Requires access to "${p}", outside the folders this run may use`), { code: "ERR_ACCESS_DENIED" }); };
+// (the descriptors a confined program may use: the standard three, and those os.open opened here through a checked
+// path; one admission for every entry point that takes a descriptor (_fs, open(), os.read and the rest): any other
+// number the process holds, inherited or the runtime's own, is refused, and so is anything else that isn't a path)
+const checkedFds = new Set<number>();
+export const fdAdmitted = (fd: number): boolean => Number.isInteger(fd) && fd >= 0 && (fd <= 2 || checkedFds.has(fd));
+function confined(p: any): any {
+  if (typeof p === "number") return fdAdmitted(p) ? p : refuse(`descriptor ${p}`);
+  if (typeof p !== "string") return refuse(String(p).slice(0, 80));
+  return confinedPath(confineRoots!, cwd(), p);
+}
+/** `p` (relative to `base`) as the path to use, or a refusal (an Error with code ERR_ACCESS_DENIED), under `roots`
+ * (real paths): the check above, also the host's own for the notebook file `notebook run --confine` reads and writes. */
+export function confinedPath(roots: string[], base: string, p: string): string {
+  const fs = require("fs"), path = require("path");
+  const inRoot = (x: string) => roots.some((r) => x === r || x.startsWith(r + "/"));
+  const comps = path.resolve(base, p).split("/").filter(Boolean);
+  let cur = "", follows = 0;
+  for (let i = 0; i < comps.length; i++) {
+    const next = cur + "/" + comps[i];
+    // (a folder above a root, on the root's own path: real by construction, a root being a realpath; not looked at,
+    // since a sandbox around this process may not let it be: Deno allows only the roots themselves)
+    if (roots.some((r) => r.startsWith(next + "/"))) { cur = next; continue; }
+    let st: any;
+    try { st = fs.lstatSync(next); } catch (e: any) {
+      if (e?.code !== "ENOENT") return refuse(p);
+      // (the rest doesn't exist: no link can be in it; its deepest existing ancestor, cur, was checked)
+      const end = [next, ...comps.slice(i + 1)].join("/");
+      return inRoot(end) ? end : refuse(p);
+    }
+    if (st.isSymbolicLink()) {
+      if (inRoot(next) || ++follows > 40) return refuse(p);
+      let real: string;
+      try { real = fs.realpathSync(next); } catch { return refuse(p); }
+      cur = real === "/" ? "" : real;
+      continue;
+    }
+    if (inRoot(next) && !st.isDirectory()) {
+      if (!st.isFile() || st.nlink > 1) return refuse(p);
+      if (i < comps.length - 1) return refuse(p); // (a file in the middle of a path)
+    }
+    cur = next;
+  }
+  const end = cur || "/";
+  return inRoot(end) ? end : refuse(p);
+}
 // (open(F, M).write(S)'s native step, file-once.ts, opens the path _fs would)
 export const hostPath = (p: string): string => at(p);
 // (a path as this working directory resolves it: the importer's too,
@@ -2311,8 +2385,10 @@ newBuiltinModule("os", (m) => {
   };
   // (a descriptor converted as a C int with the other arguments, in signature order, then their checks; a negative
   // one is EBADF only then, just before the host call, where the kernel's would be: CPython's order of errors)
+  // (confined, `notebook run --confine`: only the standard three and the descriptors os.open opened here, through a
+  // checked path; any other number the process has, inherited or the runtime's own, is EBADF, never reached)
   const fdOpen = (fd: number): number => {
-    if (fd < 0) throw Object.assign(new Error("EBADF"), { code: "EBADF", errno: -9 });
+    if (fd < 0 || (isConfined() && !fdAdmitted(fd))) throw Object.assign(new Error("EBADF"), { code: "EBADF", errno: -9 });
     return fd;
   };
   const cWide = (x: any, c: string): bigint => {
@@ -2336,6 +2412,7 @@ newBuiltinModule("os", (m) => {
     }
     const fd = fs.openSync(at(q), fl, md);
     cliPos.set(fd, { pos: 0, append: (fl & 1024) !== 0 });
+    checkedFds.add(fd);
     return fd;
   });
   m.open.$sig = { args: ["path", "flags", "mode"], posonly: 0, vararg: null, kwonly: ["dir_fd"], kwarg: null, defaults: [0o777], kwdefaults: { dir_fd: null } };
@@ -2343,6 +2420,7 @@ newBuiltinModule("os", (m) => {
     const n = cInt(fd);
     fs.closeSync(fdOpen(n));
     cliPos.delete(n);
+    checkedFds.delete(n);
     return null;
   }));
   fn(m, "read", (fd: any, n: any) => fdCall(() => {
