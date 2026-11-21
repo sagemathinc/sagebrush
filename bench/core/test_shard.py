@@ -357,12 +357,131 @@ class Acceptance(unittest.TestCase):
             self.accept(row(status="timeout"))
         self.assertEqual(len(list((self.d / "rows/x86/.conflict").iterdir())), 1)
 
-    def test_identity_must_match_within_a_type(self):
-        self.accept()
+    def test_points_with_their_own_results_share_the_identity(self):
+        # (a real point's backends hold its own timings and signatures)
+        first = row(
+            backends={
+                "native": {"status": "ok", "time": {"seconds": 1.0}},
+                "magma": {"status": "ok"},
+            }
+        )
+        self.accept(first)
+        other = row(
+            backends={
+                "native": {"status": "ok", "time": {"seconds": 2.5}},
+                "magma": {"status": "timeout"},
+            }
+        )
+        self.rows.check_identity("x86", other)
         with self.assertRaisesRegex(shard.Fatal, "identity"):
+            self.rows.check_identity("x86", row(backends={"native": {"status": "ok"}}))
+
+    def test_identity_must_match_within_a_type(self):
+        # (another toolchain, from another VM of the type: the message says
+        # what differs)
+        self.accept()
+        with self.assertRaisesRegex(shard.Fatal, r"identity.*differs in build\.rustc"):
+            self.rows.check_identity("x86", row(build={"rustc": "1.99.2"}), "bc-vm-2")
+
+    def test_two_vms_of_a_type_may_have_their_own_builds(self):
+        # (each VM builds the payload: its wheels' and binaries' sha256s and
+        # its memory cap are its own, recorded once per VM)
+        self.accept()
+        other = row(artifacts={"native": "d" * 64, "engine-wasm": "a" * 64}, mem_cap=2)
+        self.rows.check_identity("x86", other, "bc-vm-2")
+        self.rows.check_identity("x86", other, "bc-vm-2")
+        evs = [e for e in self.rows.ledger.events if e["ev"] == "vm-identity"]
+        self.assertEqual(
+            [
+                (
+                    e["name"],
+                    e["identity"]["artifacts"]["native"],
+                    e["identity"]["mem_cap"],
+                )
+                for e in evs
+            ],
+            [("bc-vm", "c" * 64, 1), ("bc-vm-2", "d" * 64, 2)],
+        )
+        # (and a restarted driver knows them from the ledger)
+        again = shard.Rows(self.d, self.rows.ledger, self.plan)
+        self.assertEqual(sorted(again.vms), ["bc-vm", "bc-vm-2"])
+
+    def test_a_vms_build_may_not_change_between_its_points(self):
+        self.accept()
+        with self.assertRaisesRegex(
+            shard.Fatal, r"bc-vm's build changed.*differs in artifacts\.native"
+        ):
             self.rows.check_identity(
-                "x86", row(artifacts={"native": "d" * 64, "engine-wasm": "a" * 64})
+                "x86",
+                row(artifacts={"native": "d" * 64, "engine-wasm": "a" * 64}),
+                "bc-vm",
             )
+
+    def test_a_rejected_point_records_no_vm_identity(self):
+        self.rows.check_identity("x86", row(build={"rustc": "1.99.2"}), "bc-vm-0")
+        with self.assertRaises(shard.Fatal):
+            self.rows.check_identity("x86", row(), "bc-vm-1")
+        self.assertEqual(
+            [e["name"] for e in self.led.events if e["ev"] == "vm-identity"],
+            ["bc-vm-0"],
+        )
+        self.assertNotIn("bc-vm-1", self.rows.vms)
+
+    def test_a_real_point_from_a_run_is_accepted(self):
+        # (an accepted point of a full run on an arm VM, byte for byte: the
+        # schema, the engine pin under "track", and both identities)
+        data = (
+            Path(__file__).parent / "testdata" / "shard-point-arm.json"
+        ).read_bytes()
+        rec = json.loads(data)
+        key = f"{rec['row']}:{rec['size']}"
+        self.rows.plan = self.plan = plan(
+            commit=rec["commit"],
+            pin_policy="track",
+            points=[key],
+            expected_inputs={
+                key: {
+                    "n": rec["n"],
+                    "variants": rec["variants"],
+                    "input_hash": rec["expected_input_hash"],
+                }
+            },
+        )
+        sha, got = shard.check_row(
+            data, hashlib.sha256(data).hexdigest().encode(), key, self.plan, rec["n"]
+        )
+        self.assertEqual(got["status"], "ok")
+        self.rows.check_identity("arm", got, "bc-run-arm-2")
+        ident = json.loads((self.d / "rows/arm/identity.json").read_text())
+        self.assertEqual(
+            sorted(ident),
+            [
+                "backends",
+                "build",
+                "machine",
+                "pin_policy",
+                "protocol",
+                "threads",
+                "versions",
+            ],
+        )
+        self.assertNotIn("label", ident["machine"])
+        self.assertEqual(ident["pin_policy"], "track")
+        # (another VM of the type, with its own build of the same payload)
+        other = dict(got, artifacts=dict(got["artifacts"], native="0" * 64), mem_cap=1)
+        other["engine_pin"] = dict(got["engine_pin"])
+        self.rows.check_identity("arm", other, "bc-run-arm-7")
+        self.assertEqual(sorted(self.rows.vms), ["bc-run-arm-2", "bc-run-arm-7"])
+
+    def test_a_rejected_point_is_kept_for_diagnosis(self):
+        self.rows.check_identity("x86", row(build={"rustc": "1.99.2"}), "bc-vm-0")
+        with self.assertRaisesRegex(shard.Fatal, "differs in build.rustc"):
+            self.accept()
+        kept = list((self.d / "rows/x86/.rejected").iterdir())
+        self.assertEqual(len(kept), 1)
+        self.assertFalse((self.d / "rows/x86/poly_fp_mul-s.json").exists())
+        # (and a rejected point is never read as one)
+        self.assertEqual(self.rows.recover({"poly_fp_mul:s": 1000}), 0)
 
     def test_an_unpinned_engine_is_refused(self):
         stale = {
@@ -414,21 +533,25 @@ class Acceptance(unittest.TestCase):
         self.rows.plan = self.plan = plan(pin_policy="track")
 
     def test_on_a_track_tip_the_fresh_engine_is_recorded(self):
-        # (the pin lags the source there: not ok, but its sha256 is the
-        # identity's, so a second point with another fresh build is refused)
+        # (the pin lags the source there: not ok, but its sha256 is the VM's
+        # identity's, so a second point of that VM with another fresh build
+        # is refused)
         self.track()
         fresh = {"ok": False, "policy": "track", "sha256": "e" * 64, "pinned": "f" * 64}
         arts = {"native": "c" * 64, "engine-wasm": "e" * 64}
         self.accept(row(engine_pin=fresh, artifacts=arts))
         ident = json.loads((self.d / "rows/x86/identity.json").read_text())
-        self.assertEqual(ident["engine_pin"]["sha256"], "e" * 64)
-        with self.assertRaisesRegex(shard.Fatal, "identity"):
+        self.assertEqual(ident["pin_policy"], "track")
+        [ev] = [e for e in self.rows.ledger.events if e["ev"] == "vm-identity"]
+        self.assertEqual(ev["identity"]["engine_pin"]["sha256"], "e" * 64)
+        with self.assertRaisesRegex(shard.Fatal, "engine_pin.sha256"):
             self.rows.check_identity(
                 "x86",
                 row(
                     engine_pin=dict(fresh, sha256="d" * 64),
                     artifacts=dict(arts, **{"engine-wasm": "d" * 64}),
                 ),
+                "bc-vm",
             )
 
     def test_a_track_plan_needs_a_recorded_fresh_sha(self):
@@ -649,6 +772,11 @@ class FakeRemote:
 
     def __init__(self, provider, plan):
         self.provider, self.plan, self.fs, self.log = provider, plan, {}, []
+        self.unready = {}
+        # (VMs whose host key the client refuses: what ssh says, every time)
+        self.refuse = {}
+        # (VMs whose build command's connection drops, that many times)
+        self.build_exit_255 = {}
         self.build_fails, self.preempt_on, self.fetch_fails, self.corrupt = (
             False,
             set(),
@@ -661,18 +789,33 @@ class FakeRemote:
 
     on_push = on_setup = on_run = on_fetch = None
 
-    def push(self, ip, local, remote, timeout):
+    def push(self, vm, local, remote, timeout):
+        ip = vm["ip"]
         if not self.vm_of(ip):
             raise shard.TransferError("gone")
+        if self.unready.get(self.vm_of(ip), 0) > 0:
+            self.unready[self.vm_of(ip)] -= 1
+            raise shard.TransferError("scp exit 255")
+        if self.vm_of(ip) in self.refuse:
+            raise shard.TransferError("scp exit 255")
         data = Path(local).read_bytes()
         if self.on_push:
             data = self.on_push(data)
         self.fs[(self.vm_of(ip), remote)] = data
 
-    def run(self, ip, words, timeout):
-        name = self.vm_of(ip)
+    def run(self, vm, words, timeout):
+        name = self.vm_of(vm["ip"])
         if not name:
             return {"status": "error", "output": "ssh: no route"}
+        if name in self.refuse:
+            return {"status": "error", "exit": 255, "output": self.refuse[name]}
+        # (a VM just booted refuses ssh: every ssh or scp attempt counts
+        # down its unready answers, as a real one's sshd comes up)
+        if self.unready.get(name, 0) > 0:
+            self.unready[name] -= 1
+            return {"status": "error", "output": "ssh: connection refused"}
+        if words == ["true"]:
+            return {"status": "ok", "output": ""}
         if words[0] == "sha256sum":
             data = self.fs.get((name, words[-1]), b"")
             return {
@@ -683,6 +826,10 @@ class FakeRemote:
             self.log.append(("setup", name))
             if self.on_setup:
                 self.on_setup(name)
+            if self.build_exit_255.get(name, 0) > 0:
+                # (the connection dropped under the build: ssh's own 255)
+                self.build_exit_255[name] -= 1
+                return {"status": "error", "exit": 255, "output": "Connection reset"}
             return {"status": "error" if self.build_fails else "ok", "output": "build"}
         if self.on_run:
             self.on_run(name)
@@ -715,7 +862,8 @@ class FakeRemote:
         self.fs[(name, path)], self.fs[(name, path + ".sha256")] = data, side
         return {"status": "ok", "output": ""}
 
-    def fetch(self, ip, path, max_bytes, timeout):
+    def fetch(self, vm, path, max_bytes, timeout):
+        ip = vm["ip"]
         if self.on_fetch:
             self.on_fetch(path)
         if self.fetch_fails:
@@ -857,6 +1005,124 @@ class Drivers(unittest.TestCase):
         self.assertEqual(self.events("accepted"), [])
         self.assertEqual(len([x for x in self.remote.log if x[0] == "run"]), 1)
         self.assertEqual(self.prov.vms, {})
+
+    def test_setup_waits_for_ssh(self):
+        # (each new VM refuses ssh 3 times, as one just booted does)
+        orig = self.prov.inst
+
+        def inst(name, *a):
+            self.remote.unready[name] = 3
+            return orig(name, *a)
+
+        self.prov.inst = inst
+        rep = self.driver().run()
+        self.assertEqual(
+            (rep["accepted"], rep["stopped_types"], rep["fatal"]), (3, {}, [])
+        )
+        self.assertEqual(len(self.events("reserve")), 1)
+
+    def test_an_unreachable_vm_is_retired_not_the_type(self):
+        # (the first VM never answers ssh; the second does)
+        first = "bc-0123456789abcdef-x86-0"
+        orig = self.prov.inst
+
+        def inst(name, *a):
+            if name == first:
+                self.remote.unready[name] = 10**6
+            return orig(name, *a)
+
+        self.prov.inst = inst
+        rep = self.driver().run()
+        self.assertEqual((rep["accepted"], rep["stopped_types"]), (3, {}))
+        self.assertEqual(
+            [(e["name"], e["detail"]) for e in self.events("retired")],
+            [(first, "unreachable")],
+        )
+        self.assertNotIn(first, self.prov.vms)
+
+    def test_a_refused_host_key_is_logged_without_key_material(self):
+        # (the first VM's key is refused, as ssh refuses a changed key for a
+        # known address: the ledger says why, with the key material removed)
+        first = "bc-0123456789abcdef-x86-0"
+        # (the padding comes first, so the key lines are inside the kept
+        # tail and only the scrub can remove them)
+        said = (
+            "x " * 2000 + "\n@@@ WARNING: REMOTE HOST IDENTIFICATION HAS CHANGED! @@@\n"
+            "The fingerprint for the ED25519 key sent by the remote host is\n"
+            "SHA256:Qm9ndXNGaW5nZXJwcmludEZvclRoZVRlc3RPbmx5MDAw.\n"
+            "ssh-ed25519 AAAAC3NzaC1lZDI1NTE5AAAAIBogusKeyMaterialForTheTestOnly00000\n"
+            "Host key verification failed.\n"
+        )
+        orig = self.prov.inst
+
+        def inst(name, *a):
+            if name == first:
+                self.remote.refuse[name] = said
+            return orig(name, *a)
+
+        self.prov.inst = inst
+        rep = self.driver().run()
+        self.assertEqual((rep["accepted"], rep["stopped_types"]), (3, {}))
+        [ev] = [e for e in self.events("build") if not e["ok"]]
+        self.assertEqual((ev["name"], ev["why"]), (first, "unreachable"))
+        self.assertLessEqual(len(ev["ssh"]), shard.SSH_DETAIL)
+        self.assertIn("Host key verification failed.", ev["ssh"])
+        self.assertIn("REMOTE HOST IDENTIFICATION HAS CHANGED", ev["ssh"])
+        self.assertEqual(ev["ssh"].count("[key]"), 2)
+        self.assertNotIn("Qm9ndXNG", ev["ssh"])
+        self.assertNotIn("AAAAC3Nza", ev["ssh"])
+        self.assertNotIn("Bogus", ev["ssh"])
+
+    def test_ssh_detail_scrubs_keys_and_bounds_its_text(self):
+        out = shard.ssh_detail(
+            "SHA256:abc+/def MD5:aa:bb:cc ssh-rsa " + "A" * 40 + " \x1b[31mx\x00"
+        )
+        self.assertEqual(out, "[key] [key] ssh-rsa [key] ?[31mx?")
+        self.assertEqual(len(shard.ssh_detail("y. " * 5000)), shard.SSH_DETAIL)
+
+    def test_a_dropped_build_connection_retires_the_vm_not_the_type(self):
+        first = "bc-0123456789abcdef-x86-0"
+        orig = self.prov.inst
+
+        def inst(name, *a):
+            if name == first:
+                self.remote.build_exit_255[name] = 1
+            return orig(name, *a)
+
+        self.prov.inst = inst
+        rep = self.driver().run()
+        self.assertEqual((rep["accepted"], rep["stopped_types"]), (3, {}))
+        self.assertEqual(
+            [(e["name"], e["detail"]) for e in self.events("retired")],
+            [(first, "transfer")],
+        )
+        self.assertEqual(rep["retired"], {"x86": 1})
+
+    def test_the_report_counts_retired_vms_by_type(self):
+        rep = self.driver().run()
+        self.assertEqual(rep["retired"], {})
+        evs = [
+            {"ev": "reserve", "name": "a", "type": "x86"},
+            {"ev": "reserve", "name": "b", "type": "arm"},
+            {"ev": "retired", "name": "a"},
+            {"ev": "retired", "name": "b"},
+            {"ev": "retired", "name": "a"},
+        ]
+        self.assertEqual(shard.retired_by_type(evs), {"arm": 1, "x86": 2})
+
+    def test_three_unreachable_vms_stop_the_type(self):
+        orig = self.prov.inst
+
+        def inst(name, *a):
+            self.remote.unready[name] = 10**6
+            return orig(name, *a)
+
+        self.prov.inst = inst
+        rep = self.driver().run()
+        self.assertIn("could not be set up", rep["stopped_types"]["x86"])
+        self.assertEqual(len(self.events("reserve")), shard.SETUP_TRIES)
+        self.assertEqual(self.prov.vms, {})
+        self.assertEqual(rep["accepted"], 0)
 
     def test_a_failed_build_stops_the_type(self):
         self.remote.build_fails = True
@@ -1224,6 +1490,9 @@ class Drivers(unittest.TestCase):
         self.assertNotIn(key, [x[1] for x in self.remote.log])
 
 
+VM1 = {"name": "bc-0123456789abcdef-arm-0", "ip": "10.0.0.1"}
+
+
 class Transport(unittest.TestCase):
     """Ssh and Sbvm against stub executables on PATH (no network)."""
 
@@ -1247,20 +1516,20 @@ class Transport(unittest.TestCase):
         (self.d / "f").write_bytes(b"x" * 100)
         # (the stub "ssh" ignores its options and runs the remote words)
         self.stub("ssh", f'cd {self.d}; for a; do last="$a"; done; sh -c "$last"\n')
-        self.assertEqual(shard.Ssh(self.d).fetch("10.0.0.1", "f", 1000, 10), b"x" * 100)
+        self.assertEqual(shard.Ssh(self.d).fetch(VM1, "f", 1000, 10), b"x" * 100)
 
     def test_fetch_cuts_an_oversized_stream(self):
         self.stub("ssh", "exec yes\n")
         t0 = time.monotonic()
         with self.assertRaisesRegex(shard.TransferError, "more than"):
-            shard.Ssh(self.d).fetch("10.0.0.1", "f", 1 << 16, 10)
+            shard.Ssh(self.d).fetch(VM1, "f", 1 << 16, 10)
         self.assertLess(time.monotonic() - t0, 5)
 
     def test_fetch_times_out_and_leaves_nothing(self):
         pidfile = self.d / "pid"
         self.stub("ssh", f"echo $$ > {pidfile}; exec sleep 600\n")
         with self.assertRaisesRegex(shard.TransferError, "timed out"):
-            shard.Ssh(self.d).fetch("10.0.0.1", "f", 100, 1.0)
+            shard.Ssh(self.d).fetch(VM1, "f", 100, 1.0)
         time.sleep(0.2)
         pid = int(pidfile.read_text())
         self.assertFalse(
@@ -1280,7 +1549,7 @@ class Transport(unittest.TestCase):
 
         with mock.patch.object(shard.os, "read", spy):
             with self.assertRaisesRegex(shard.TransferError, "more than"):
-                shard.Ssh(self.d).fetch("10.0.0.1", "f", shard.MAX_SIDECAR, 10)
+                shard.Ssh(self.d).fetch(VM1, "f", shard.MAX_SIDECAR, 10)
         # (50000: subprocess's own read of its exec-error pipe)
         self.assertLessEqual(max(n for n in sizes if n != 50000), shard.MAX_SIDECAR + 1)
 
@@ -1292,7 +1561,7 @@ class Transport(unittest.TestCase):
         stop = threading.Event()
         threading.Timer(0.5, stop.set).start()
         t0 = time.monotonic()
-        r = shard.Ssh(self.d, stop).run("10.0.0.1", ["true"], 60)
+        r = shard.Ssh(self.d, stop).run(VM1, ["true"], 60)
         self.assertEqual(r["status"], "cancelled")
         self.assertLess(time.monotonic() - t0, 5)
         time.sleep(0.2)
@@ -1305,12 +1574,62 @@ class Transport(unittest.TestCase):
     def test_an_option_like_path_stays_a_path(self):
         log = self.d / "argv"
         self.stub("ssh", f'for a; do last="$a"; done; printf "%s" "$last" > {log}\n')
-        shard.Ssh(self.d).fetch("10.0.0.1", "-rf x;y", 100, 10)
+        shard.Ssh(self.d).fetch(VM1, "-rf x;y", 100, 10)
         self.assertEqual(log.read_text(), "cat -- '-rf x;y'")
+
+    def accept_new_ssh(self):
+        """A stub ssh that keeps accept-new's rule: a host's key is the one
+        in keys/<ip>; an unknown host is added to UserKnownHostsFile, a
+        changed key is refused (exit 255), a known one runs the command."""
+        (self.d / "keys").mkdir(exist_ok=True)
+        self.stub(
+            "ssh",
+            f"""kh=; host=
+while [ $# -gt 1 ]; do
+  case "$1" in
+    -o) case "$2" in UserKnownHostsFile=*) kh="${{2#UserKnownHostsFile=}}";; esac; shift 2;;
+    *) host="${{1#user@}}"; shift;;
+  esac
+done
+key=$(cat "{self.d}/keys/$host")
+old=$(grep "^$host " "$kh" 2>/dev/null | cut -d' ' -f2)
+if [ -z "$old" ]; then echo "$host $key" >> "$kh"
+elif [ "$old" != "$key" ]; then echo "Host key verification failed." >&2; exit 255
+fi
+exit 0
+""",
+        )
+
+    def test_a_new_vm_on_a_reused_address_is_trusted_on_first_use(self):
+        # (the provider gives a later VM an earlier one's address: its own
+        # known_hosts makes it a new host, not a changed key)
+        self.accept_new_ssh()
+        a = {"name": "bc-0123456789abcdef-arm-3", "ip": "10.0.0.1"}
+        b = {"name": "bc-0123456789abcdef-arm-4", "ip": "10.0.0.1"}
+        (self.d / "keys" / "10.0.0.1").write_text("KEY-A")
+        self.assertEqual(shard.Ssh(self.d).run(a, ["true"], 10)["status"], "ok")
+        (self.d / "keys" / "10.0.0.1").write_text("KEY-B")
+        self.assertEqual(shard.Ssh(self.d).run(b, ["true"], 10)["status"], "ok")
+        hosts = self.d / "known_hosts.d"
+        self.assertEqual(
+            sorted(x.name for x in hosts.iterdir()), [a["name"], b["name"]]
+        )
+        self.assertEqual((hosts / b["name"]).read_text(), "10.0.0.1 KEY-B\n")
+        # (and the same VM's key still may not change)
+        r = shard.Ssh(self.d).run(a, ["true"], 10)
+        self.assertEqual((r["status"], r["exit"]), ("error", 255))
+        self.assertIn("Host key verification failed", r["output"])
+
+    def test_a_bad_vm_name_is_refused(self):
+        for name in ("../known_hosts", "", "a/b", None):
+            with self.assertRaises(shard.TransferError):
+                shard.Ssh(self.d).run({"name": name, "ip": "10.0.0.1"}, ["true"], 10)
 
     def test_a_bad_address_is_refused(self):
         with self.assertRaises(shard.TransferError):
-            shard.Ssh(self.d).fetch("10.0.0.1; rm -rf ~", "f", 10, 10)
+            shard.Ssh(self.d).fetch(
+                {"name": "bc-x-arm-0", "ip": "10.0.0.1; rm -rf ~"}, "f", 10, 10
+            )
 
     def sbvm(self, body):
         tool = self.d / "sbvm.py"
