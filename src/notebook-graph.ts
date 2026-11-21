@@ -202,6 +202,7 @@ export class NotebookGraph {
   private providers: ReadonlyMap<string, string> = new Map<string, string>();
   // (from the last build(): the cells in page order, and the places of those reading an output name)
   private order_: string[] = [];
+  private buildsNow = 0;
   private readerAt: number[] = [];
   private readonly strict: boolean;
   private readonly analyze?: (code: string, id: string) => CellAnalysis;
@@ -269,6 +270,10 @@ export class NotebookGraph {
   get deletersOf(): MapView<string, string[]> {
     return this.deleters;
   }
+  /** how many times the graph has been built (each set, setFiles, and setShown that moved a reader's sources) */
+  get builds(): number {
+    return this.buildsNow;
+  }
   /** a new frozen object whenever anything in the graph changed (every change ends in build()) */
   get version(): object {
     return this.versionNow;
@@ -277,6 +282,7 @@ export class NotebookGraph {
   // Everything is computed in local collections, then published as read-only views, and the version
   // replaced: the one place the graph changes.
   private build(): void {
+    this.buildsNow++;
     const ids = this.ids;
     const parentsOf = new Map<string, Set<string>>(ids.map((id) => [id, new Set<string>()]));
     const childrenOf = new Map<string, Set<string>>(ids.map((id) => [id, new Set<string>()]));

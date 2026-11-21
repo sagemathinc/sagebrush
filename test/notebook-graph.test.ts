@@ -134,35 +134,89 @@ test("output names: a cell reading _, __, ___ runs after the 1st, 2nd, 3rd neare
 });
 
 
-test("output names: after any sequence of setShown calls, the graph is the one a full build gives for the last (its edges, its providers, its errors); a change no reader sees keeps the version", () => {
-  // (a seeded generator: the same cases every run)
-  let seed = 1473;
-  const rnd = (n: number) => { seed = (seed * 1103515245 + 12345) % 2147483648; return seed % n; };
-  const kinds = ["10", "_", "__ + 1", "(_, __, ___)", "x = 1", "y = x + _", "print(1)", "___", "z = y", "del x"];
-  const state = (g: NotebookGraph) => JSON.stringify({
-    parents: g.ids.map((id) => [id, [...g.parents(id)].sort()]),
-    children: g.ids.map((id) => [id, [...g.children(id)].sort()]),
-    providers: [...g.outputProviders()].sort(),
-    errors: [...g.errors].map(([id, es]) => [id, es.map((e) => e.kind)]),
-  });
-  for (let c = 0; c < 60; c++) {
+// (the graph's state as these rows compare it: parents, children, output providers and error kinds)
+const graphState = (g: NotebookGraph) => JSON.stringify({
+  parents: g.ids.map((id) => [id, [...g.parents(id)].sort()]),
+  children: g.ids.map((id) => [id, [...g.children(id)].sort()]),
+  providers: [...g.outputProviders()].sort(),
+  errors: [...g.errors].map(([id, es]) => [id, es.map((e) => e.kind)]),
+});
+// (a fresh graph with the same cells and shown cells, built in full: the reference)
+const fullBuild = (cells: string[], shown: string[]) => {
+  const ref = build(cells, false);
+  ref.setShown(shown);
+  ref.set(cells.map((code, i) => ({ id: `c${i}`, code })));
+  return ref;
+};
+// (each reader's source per output name, from outputProviders()'s "_=c0 ___=c2")
+const sources = (g: NotebookGraph) => new Map([...g.outputProviders()].map(([c, f]) => [c, Object.fromEntries(f.split(" ").filter(Boolean).map((x) => x.split("=")))] as const));
+
+test("output names: after any sequence of setShown calls, the graph is the one a full build gives for the last (its edges, providers and error kinds); a change no reader sees keeps the version; every name is seen acquired, lost and moved", () => {
+  // (xorshift32, seeded: the same cases every run)
+  let x = 1473;
+  const rnd = (n: number) => { x ^= x << 13; x >>>= 0; x ^= x >>> 17; x ^= x << 5; x >>>= 0; return x % n; };
+  const kinds = ["10", "20", "30", "_", "__ + 1", "(_, __, ___)", "x = 1", "y = x + _", "print(1)", "___", "z = y", "del x", "__"];
+  const seen: Record<string, { acquired: number; lost: number; moved: number }> = { _: { acquired: 0, lost: 0, moved: 0 }, __: { acquired: 0, lost: 0, moved: 0 }, ___: { acquired: 0, lost: 0, moved: 0 } };
+  let mixed = 0, empty = 0, full = 0, partial = 0;
+  for (let c = 0; c < 80; c++) {
     const cells = Array.from({ length: 3 + rnd(12) }, () => kinds[rnd(kinds.length)]);
     const g = build(cells, false);
-    for (let step = 0; step < 12; step++) {
-      const shown = g.ids.filter(() => rnd(2) === 0);
-      const before = state(g), v = g.version;
+    for (let step = 0; step < 15; step++) {
+      // (sets of every density: none, some, all)
+      const d = rnd(5);
+      const shown = d === 0 ? [] : g.ids.filter(() => rnd(d + 1) !== 0);
+      if (!shown.length) empty++;
+      else if (shown.length === g.ids.length) full++;
+      else partial++;
+      const before = graphState(g), v = g.version, was = sources(g);
       g.setShown(shown);
-      // (the reference: a fresh graph with the same facts, built in full)
-      const ref = build(cells, false);
-      ref.setShown(shown);
-      ref.set(cells.map((code, i) => ({ id: `c${i}`, code })));
-      assert.equal(state(g), state(ref), `case ${c}, step ${step}: ${JSON.stringify(cells)} shown ${JSON.stringify(shown)}`);
-      if (state(g) === before) assert.equal(g.version, v, "nothing a reader sees changed: the same version");
+      assert.equal(graphState(g), graphState(fullBuild(cells, shown)), `case ${c}, step ${step}: ${JSON.stringify(cells)} shown ${JSON.stringify(shown)}`);
+      if (graphState(g) === before) assert.equal(g.version, v, "nothing a reader sees changed: the same version");
+      let changed = 0, same = 0;
+      for (const [r, now] of sources(g)) {
+        const old = was.get(r) ?? {};
+        let moved = false;
+        for (const name of ["_", "__", "___"]) {
+          if (!(name in now)) continue;
+          const a = old[name] ?? "", b = now[name];
+          if (a === b) continue;
+          moved = true;
+          seen[name][!a ? "acquired" : !b ? "lost" : "moved"]++;
+        }
+        if (moved) changed++;
+        else same++;
+      }
+      if (changed && same) mixed++;
     }
   }
+  for (const name of ["_", "__", "___"]) for (const k of ["acquired", "lost", "moved"] as const) assert.ok(seen[name][k] > 0, `${name} ${k}: ${JSON.stringify(seen)}`);
+  assert.ok(mixed > 0 && empty > 0 && full > 0 && partial > 0, JSON.stringify({ mixed, empty, full, partial }));
   // (a notebook no cell of which reads _, __ or ___: showing values never builds it again)
   const big = build(Array.from({ length: 300 }, (_, i) => `v${i} = ${i}`), false);
   const v = big.version;
   for (let i = 0; i < 300; i++) big.setShown(big.ids.slice(0, i + 1));
   assert.equal(big.version, v);
+});
+
+test("output names, each of _, __ and ___: acquired, moved and lost as shown cells come and go above its reader, each as a full build has it", () => {
+  for (const [k, name] of ["_", "__", "___"].entries()) {
+    const cells = ["1", "2", "3", "4", name];
+    const g = build(cells, false);
+    const step = (shown: string[], want: string) => {
+      const v = g.version, before = g.outputProviders().get("c4");
+      g.setShown(shown);
+      assert.equal(graphState(g), graphState(fullBuild(cells, shown)), `${name} after ${JSON.stringify(shown)}`);
+      assert.equal(sources(g).get("c4")![name], want, `${name} after ${JSON.stringify(shown)}`);
+      assert.equal(g.version === v, before === g.outputProviders().get("c4"), "a new version exactly when the reader's source changed");
+    };
+    step(["c0", "c1", "c2"], ["c2", "c1", "c0"][k]); // (acquired)
+    step(["c1", "c2", "c3"], ["c3", "c2", "c1"][k]); // (moved)
+    step(["c0", "c1", "c2", "c3"], ["c3", "c2", "c1"][k]); // (more shown, the same source: kept)
+    step(k === 0 ? [] : ["c3"].concat(k === 2 ? ["c2"] : []), ""); // (lost)
+  }
+  // (a ___ reader below exactly three shown cells: its source is the third, c0)
+  const g = build(["1", "2", "3", "___"], false);
+  g.setShown(["c0", "c1", "c2"]);
+  assert.deepEqual([...g.parents("c3")], ["c0"]);
+  assert.equal(graphState(g), graphState(fullBuild(["1", "2", "3", "___"], ["c0", "c1", "c2"])));
 });
