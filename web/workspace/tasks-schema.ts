@@ -4,8 +4,9 @@
 // same rules on its side (sagebrush-agent lib/tasks-schema.mjs).
 //
 // One reading of §6.1 where it is open: a list entry's and a diff's `round` may be 0 (no proposal yet; the base), as the
-// host gives them. A chat turn event inside a task (§6.1 "the chat turn events") is checked here only for its kind and
-// form; its fields are checked where it is applied (agent-chat/events.ts), as a Pair turn's are.
+// host gives them. A chat turn event inside a task (§6.1 "the chat turn events", the kinds of agent-chat/events.ts) is
+// checked here closed too: each kind's fields exactly, each bounded. All text, every field, must be well formed (no lone
+// surrogate: §2's common rule).
 
 export class TaskShapeError extends Error {}
 const bad = (m: string): never => { throw new TaskShapeError(m); };
@@ -28,7 +29,10 @@ const oid = (v: unknown, what: string) => (typeof v === "string" && HEX40.test(v
 const oidOrNull = (v: unknown, what: string) => (v === null ? null : oid(v, what));
 const int = (v: unknown, min: number, what: string) => (typeof v === "number" && Number.isSafeInteger(v) && v >= min ? v : bad(`${what} isn't an integer of at least ${min}`));
 const bool = (v: unknown, what: string) => (typeof v === "boolean" ? v : bad(`${what} isn't true or false`));
-const text = (v: unknown, max: number, what: string) => (typeof v === "string" && enc.encode(v).length <= max ? v : bad(`${what} isn't text of at most ${max} bytes`));
+// (§2: text is well formed, no lone surrogate; one check for every text field)
+const LONE_SURROGATE = /[\ud800-\udbff](?![\udc00-\udfff])|(?<![\ud800-\udbff])[\udc00-\udfff]/;
+const wellFormed = (v: string, what: string) => (LONE_SURROGATE.test(v) ? bad(`${what} isn't well-formed text`) : v);
+const text = (v: unknown, max: number, what: string) => (typeof v === "string" && enc.encode(v).length <= max ? wellFormed(v, what) : bad(`${what} isn't text of at most ${max} bytes`));
 const status = (v: unknown, what = "status") => ((TASK_STATUSES as readonly unknown[]).includes(v) ? (v as TaskStatus) : bad(`${what} isn't a task status`));
 // (§6.1's path rules, as the host's own checker has them (sagebrush-agent lib/task-paths.mjs pathProblem), and §2's
 //  common rule that text is well formed: relative and normalized, no empty, "." or ".." component, no backslash,
@@ -36,10 +40,9 @@ const status = (v: unknown, what = "status") => ((TASK_STATUSES as readonly unkn
 //  any extension), no component ending in a space or dot, no .git (any case) or .sagebrush component, each component at
 //  most 255 bytes and the path at most 1,024)
 const RESERVED = /^(con|prn|aux|nul|com[0-9\u00b9\u00b2\u00b3]|lpt[0-9\u00b9\u00b2\u00b3])(\..*)?$/i;
-const LONE_SURROGATE = /[\ud800-\udbff](?![\udc00-\udfff])|(?<![\ud800-\udbff])[\udc00-\udfff]/;
 function path(v: unknown, what: string): string {
   if (typeof v !== "string" || v === "" || enc.encode(v).length > TASK_LIMITS.path) return bad(`${what} isn't a path of 1 to ${TASK_LIMITS.path} bytes`);
-  if (LONE_SURROGATE.test(v)) bad(`${what} isn't well-formed text`);
+  wellFormed(v, what);
   if (v.startsWith("/") || /[\\:\x00-\x1f\x7f]/.test(v)) bad(`${what} isn't relative, or has a backslash, colon or control character`);
   for (const c of v.split("/")) {
     if (c === "" || c === "." || c === "..") bad(`${what} has an empty, . or .. component`);
@@ -59,6 +62,7 @@ export type TaskEntry = { task: string; title: string; status: TaskStatus; targe
 export function taskEntry(v: unknown, what = "task"): TaskEntry {
   const o = keys(v, ["task", "title", "status", "target", "run", "round", "seq", "proposal", "question", "updated"], what);
   if (typeof o.title !== "string" || [...o.title].length > TASK_LIMITS.title) bad(`${what}.title isn't text of at most ${TASK_LIMITS.title} characters`);
+  wellFormed(o.title as string, `${what}.title`);
   if (o.target !== "local") bad(`${what}.target isn't "local"`);
   return { task: task(o.task, `${what}.task`), title: o.title as string, status: status(o.status, `${what}.status`), target: "local", run: bool(o.run, `${what}.run`), round: int(o.round, 0, `${what}.round`), seq: int(o.seq, 0, `${what}.seq`), proposal: oidOrNull(o.proposal, `${what}.proposal`), question: bool(o.question, `${what}.question`), updated: int(o.updated, 0, `${what}.updated`) };
 }
@@ -90,7 +94,7 @@ function content(v: unknown, what: string): TaskContent {
   if (typeof v === "string") {
     // (counted without encoding when it can't be under: 4 MiB of UTF-8 is at least 4 Mi / 3 UTF-16 units, at most 4 Mi)
     if (v.length > TASK_LIMITS.doc || enc.encode(v).length > TASK_LIMITS.doc) bad(`${what} is over ${TASK_LIMITS.doc} bytes`);
-    return v;
+    return wellFormed(v, what);
   }
   if (isObj(v) && Object.keys(v).length === 1 && typeof v.base64 === "string" && /^[A-Za-z0-9+/]*={0,2}$/.test(v.base64) && v.base64.length % 4 === 0) {
     const pad = v.base64.endsWith("==") ? 2 : v.base64.endsWith("=") ? 1 : 0;
@@ -134,8 +138,47 @@ export const TASK_RESULTS = {
 export type TaskMethod = keyof typeof TASK_RESULTS;
 export type TaskResult<M extends TaskMethod> = ReturnType<(typeof TASK_RESULTS)[M]>;
 
-// (the chat turn events, by kind: their fields are agent-chat/events.ts's to check)
-const TURN_KINDS = new Set(["turn_started", "turn_state", "message_revised", "text_delta", "message_truncated", "thinking_delta", "tool_call_started", "tool_output", "tool_call_finished", "attention", "artifact", "turn_usage", "turn_info", "turn_error", "turn_finished"]);
+// (the chat turn events (agent-chat/events.ts's kinds), closed: per kind its required and optional fields, each checked;
+//  `turn_id` may come with any of them)
+const SHORT = 400, ID = 128, BIG = 4 * 2 ** 20, TEXT = 192 * 1024;
+const idStr = (v: unknown, what: string) => (typeof v === "string" && v.length >= 1 && v.length <= ID && /^[\x21-\x7e]+$/.test(v) ? v : bad(`${what} isn't an id`));
+const oneOf = <T extends string>(v: unknown, set: readonly T[], what: string): T => ((set as readonly unknown[]).includes(v) ? (v as T) : bad(`${what} isn't one of ${set.join(", ")}`));
+type Field = (v: unknown, what: string) => unknown;
+const T = (max: number): Field => (v, what) => text(v, max, what);
+const N: Field = (v, what) => int(v, 0, what);
+const I: Field = idStr;
+const TURN: Record<string, [Record<string, Field>, Record<string, Field>]> = {
+  turn_started: [{}, {}],
+  turn_state: [{ state: T(SHORT) }, {}],
+  message_revised: [{ message: I, revision: N }, {}],
+  text_delta: [{ message: I, revision: N, text: T(TEXT) }, {}],
+  message_truncated: [{ message: I, revision: N }, {}],
+  thinking_delta: [{ text: T(TEXT) }, {}],
+  tool_call_started: [{ call: I, tool: T(SHORT) }, { name: T(SHORT), summary: T(SHORT) }],
+  tool_output: [{ call: I, text: T(TEXT) }, {}],
+  tool_call_finished: [
+    { call: I, status: T(SHORT), duration_ms: N },
+    {
+      summary: T(SHORT), body: T(BIG), body_cut: (v, w) => (v === true ? v : bad(`${w} isn't true`)),
+      diff: (v, w) => { const o = keys(v, ["path", "before", "after"], w); return { path: text(o.path, 1024, `${w}.path`), before: text(o.before, BIG, `${w}.before`), after: text(o.after, BIG, `${w}.after`) }; },
+    },
+  ],
+  attention: [{ id: I, kind: T(SHORT), state: (v, w) => oneOf(v, ["open", "approved", "denied"] as const, w), title: T(SHORT) }, { summary: T(SHORT), detail: T(64 * 1024), instance: I }],
+  artifact: [{ id: I, kind: (v, w) => oneOf(v, ["markdown", "code", "diff", "notebook", "board"] as const, w), title: T(SHORT), body: T(BIG) }, { lang: T(64), path: T(1024) }],
+  turn_usage: [{ usage: (v, w) => { const o = keys(v, ["input_tokens", "output_tokens"], w); return { input_tokens: int(o.input_tokens, 0, `${w}.input_tokens`), output_tokens: int(o.output_tokens, 0, `${w}.output_tokens`) }; } }, {}],
+  turn_info: [{}, { model: T(SHORT), effort: T(64) }],
+  turn_error: [{ code: T(64), message: T(64 * 1024) }, {}],
+  turn_finished: [{ outcome: (v, w) => oneOf(v, ["completed", "interrupted", "error"] as const, w) }, { code: T(64) }],
+};
+function turnEvent(v: Record<string, unknown>, what: string): Record<string, unknown> {
+  const [req, opt] = TURN[v.type as string];
+  const o = keys(v, ["type", ...Object.keys(req)], what, [...Object.keys(opt), "turn_id"]);
+  const out: Record<string, unknown> = { type: o.type };
+  for (const [k, f] of Object.entries(req)) out[k] = f(o[k], `${what}.${k}`);
+  for (const [k, f] of Object.entries(opt)) if (o[k] !== undefined) out[k] = f(o[k], `${what}.${k}`);
+  if (o.turn_id !== undefined) out.turn_id = idStr(o.turn_id, `${what}.turn_id`);
+  return out;
+}
 
 export type TaskEvent =
   | { type: "task_status"; status: TaskStatus; reason?: string }
@@ -175,7 +218,7 @@ export function taskEvent(v: unknown, what = "event"): TaskEvent {
       return { type: "question_answered", qid: int(o.qid, 1, `${what}.qid`), revision: int(o.revision, 1, `${what}.revision`), answer_id: task(o.answer_id, `${what}.answer_id`), current: bool(o.current, `${what}.current`) };
     }
     default:
-      if (TURN_KINDS.has(v.type)) return { type: "turn", event: v };
+      if (Object.hasOwn(TURN, v.type)) return { type: "turn", event: turnEvent(v, what) };
       return bad(`${what}: not a task event (${JSON.stringify(v.type.slice(0, 40))})`);
   }
 }

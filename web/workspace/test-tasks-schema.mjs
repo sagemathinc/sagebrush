@@ -109,7 +109,45 @@ ok(!refused(() => taskEvent({ type: "task_status", status: "failed", reason: "x"
 const q = { type: "question", qid: 1, revision: 2, text: "Which?", blocking: true, choices: ["a", "b"] };
 ok(!refused(() => taskEvent(q)) && refused(() => taskEvent({ ...q, revision: 0 })) && refused(() => taskEvent({ ...q, choices: Array(17).fill("c") })) && refused(() => taskEvent({ ...q, blocking: "yes" })), "question: accepted; revision 0, 17 choices, or a blocking that isn't a boolean refused");
 ok(!refused(() => taskEvent({ type: "question_answered", qid: 1, revision: 2, answer_id: "b".repeat(32), current: false })) && refused(() => taskEvent({ type: "question_answered", qid: 1, revision: 2, answer_id: "B".repeat(32), current: false })), "question_answered: accepted; an answer_id not lowercase hex refused");
-ok(!refused(() => taskEvent({ type: "text_delta", message: "m", revision: 1, text: "hi", turn_id: "t" })) && taskEvent({ type: "text_delta", message: "m", revision: 1, text: "hi", turn_id: "t" }).type === "turn", "a chat turn event: accepted by kind, handed on as a turn event");
+// (every text field well formed: a lone surrogate refused in each)
+const LONE = "a\ud800b";
+ok(refused(() => TASK_RESULTS["tasks.file"](fileWith(LONE))), "tasks.file: content with a lone surrogate: refused");
+alter("tasks.list", "a title with a lone surrogate", (v) => { v.tasks[0].title = LONE; });
+ok(refused(() => taskEvent({ ...q, text: LONE })), "question: text with a lone surrogate: refused");
+ok(refused(() => taskEvent({ ...q, choices: ["ok", LONE] })), "question: a choice with a lone surrogate: refused");
+ok(refused(() => taskEvent({ type: "task_status", status: "failed", reason: LONE })), "task_status: a reason with a lone surrogate: refused");
+ok(refused(() => taskEvent({ type: "text_delta", message: "m", revision: 1, text: LONE })), "a turn event's text with a lone surrogate: refused");
+
+// (chat turn events: each kind closed)
+const GOOD_TURN = [
+  { type: "turn_started", turn_id: "t1" }, { type: "turn_state", state: "running" }, { type: "message_revised", message: "m1", revision: 1 },
+  { type: "text_delta", message: "m1", revision: 1, text: "hi" }, { type: "message_truncated", message: "m1", revision: 2 }, { type: "thinking_delta", text: "hmm" },
+  { type: "tool_call_started", call: "c1", tool: "edit", name: "workspace_write", summary: "a.ipynb" }, { type: "tool_output", call: "c1", text: "ok" },
+  { type: "tool_call_finished", call: "c1", status: "ok", duration_ms: 12, body: "done", body_cut: true, diff: { path: "a.txt", before: "x", after: "y" } },
+  { type: "attention", id: "q1", kind: "approval", state: "open", title: "Allow?", summary: "s", detail: "d", instance: "i1" },
+  { type: "artifact", id: "a1", kind: "notebook", title: "plot", body: "notebook", path: "work/a.ipynb", lang: "python" },
+  { type: "turn_usage", usage: { input_tokens: 1, output_tokens: 2 } }, { type: "turn_info", model: "claude-opus-5-5", effort: "medium" },
+  { type: "turn_error", code: "limit", message: "too long" }, { type: "turn_finished", outcome: "completed", code: "ok" },
+];
+for (const e of GOOD_TURN) ok(!refused(() => taskEvent(e)) && taskEvent(e).type === "turn", `a well-formed ${e.type} turn event: accepted`);
+const BAD_TURN = [
+  ["an artifact with a field more (astra4's probe)", { type: "artifact", id: "a1", kind: "code", title: "t", body: "b", surprise: { x: 1 } }],
+  ["a text_delta whose text isn't text (astra4's probe)", { type: "text_delta", message: "m", revision: 1, text: { unexpected: true } }],
+  ["a text_delta without its message", { type: "text_delta", revision: 1, text: "hi" }],
+  ["a revision that isn't an integer", { type: "message_revised", message: "m", revision: "1" }],
+  ["an id with a space", { type: "tool_output", call: "c 1", text: "x" }],
+  ["an id over 128 characters", { type: "tool_output", call: "c".repeat(129), text: "x" }],
+  ["an attention state not open, approved or denied", { type: "attention", id: "q", kind: "k", state: "maybe", title: "t" }],
+  ["an artifact kind not listed", { type: "artifact", id: "a", kind: "html", title: "t", body: "b" }],
+  ["body_cut other than true", { type: "tool_call_finished", call: "c", status: "ok", duration_ms: 1, body_cut: false }],
+  ["a diff with a field more", { type: "tool_call_finished", call: "c", status: "ok", duration_ms: 1, diff: { path: "a", before: "", after: "", extra: 1 } }],
+  ["usage with a field more", { type: "turn_usage", usage: { input_tokens: 1, output_tokens: 2, cost: 9 } }],
+  ["an outcome not listed", { type: "turn_finished", outcome: "exploded" }],
+  ["a summary over its bound", { type: "tool_call_started", call: "c", tool: "t", summary: "s".repeat(401) }],
+  ["a text_delta over its bound", { type: "text_delta", message: "m", revision: 1, text: "x".repeat(192 * 1024 + 1) }],
+  ["a turn_id that isn't an id", { type: "turn_started", turn_id: { x: 1 } }],
+];
+for (const [what, e] of BAD_TURN) ok(refused(() => taskEvent(e)), `a turn event: ${what}: refused`);
 ok(refused(() => taskNotification({ task: "c".repeat(32), seq: 0, event: prop })), "a task.event with seq 0: refused");
 
 console.log(fails.length ? `FAIL: ${fails.length} of ${checks}\n  ${fails.join("\n  ")}` : `ok: tasks-schema, ${checks} checks (fixture from sagebrush-agent ${F.agent.head.slice(0, 10)})`);
