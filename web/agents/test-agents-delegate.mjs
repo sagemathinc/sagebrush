@@ -77,6 +77,8 @@ try {
   u = await ui();
   const bText = await P.ev(`document.querySelector('#task-view').textContent`);
   ok(u.view && !u.log && /Plotting the first terms\./.test(bText), "a task opened: its view in place of the chat, its thread from the host", { u, bText: bText.slice(0, 200) });
+  const tags = await P.ev(`[...document.querySelectorAll('#task-view .turn .demo')].map((e) => e.textContent)`);
+  ok(tags.length > 0 && tags.every((t) => t === "on your computer"), "a task's turns are the agent's on this computer, never labelled demo", tags);
   H.emit(B.task, { type: "text_delta", message: "m1", revision: 1, text: " Done." });
   await P.until(`document.querySelector('#task-view').textContent.includes('first terms. Done.')`);
   ok(true, "the open task's next event (task.event) shown at once");

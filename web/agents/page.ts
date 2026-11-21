@@ -1080,7 +1080,8 @@ const delegateUi = mountDelegate({
     if (r.content instanceof Uint8Array) return { path, kind: "file", content: new TextDecoder("utf-8", { fatal: true }).decode(r.content) };
     throw new Error(`${path} isn't a notebook or a text file`);
   },
-  turnNode: (thread, turn) => viewTurnNode(thread, turn, { answer: () => {}, openArtifact: () => {}, md }),
+  // (a task's turns are the paired agent's, on this computer: never shown as the scripted demo's)
+  turnNode: (thread, turn) => viewTurnNode(thread, { ...turn, agent: turn.agent ?? agentName() }, { answer: () => {}, openArtifact: () => {}, md }),
   shown: (on) => { document.body.classList.toggle("task-shown", on); if (!on) renderAll(); },
   site: new URL("../", import.meta.url),
   toast,
