@@ -691,13 +691,42 @@ def _cpow_int(A, B, r):
     return np.where(m, acc, r), m
 
 
+def _negfrac_pow(A, B):
+    """a negative real base to a non-integer real power: |a|^b (cos(pi b) + i sin(pi b)), with cos(pi b) exactly 0
+    at the half-integers, so (-1)^0.5 is exactly 0 + 1i and (-Inf)^0.5 is 0 + Inf i, as MATLAB's (observed MATLAB
+    R2026b, 2026-11-21: (-1)^0.5 is 0 + 1i, power(-2, 0.5) is 0 + 1.4142135623730951i, power(-Inf, 0.5) is
+    0 + Inf i), where exp(b log a) leaves cos(pi/2)'s rounding, 6.1e-17, in the real part"""
+    m = np.abs(A) ** B
+    h = _fmod(B, 2.0)
+    half = _fmod(2.0 * h, 2.0) != 0
+    c = np.where(half & (2.0 * h == np.floor(2.0 * h)), 0.0, np.cos(np.pi * h))
+    s = np.sin(np.pi * h)
+    re = np.where(c == 0, 0.0, m * c)
+    # (built from its parts: re + 1j * im would multiply an infinite im by 1j and make 0 * Inf, NaN, the real part)
+    return _cplx(re, m * s)
+
+
 def _pow(A, B):
+    neg = None
     if A.dtype.kind != "c" and B.dtype.kind != "c":
-        # a negative base to a fractional power is complex
-        if np.any((A < 0) & (B != np.floor(B))):
+        # a negative base to a fractional power is complex (a NaN exponent stays real: power(-1, NaN) is a real
+        # NaN in MATLAB)
+        neg = (A < 0) & (B != np.floor(B)) & ~np.isnan(B)
+        if np.any(neg):
             A = A.astype(np.complex128)
+        else:
+            neg = None
     with np.errstate(divide="ignore", invalid="ignore", over="ignore"):
-        r = A ** B
+        if neg is not None:
+            Ab, Bb = np.broadcast_arrays(A, B)
+            r = Ab ** Bb
+            r = np.where(neg, _negfrac_pow(Ab.real, Bb), r)
+        else:
+            r = A ** B
+        if r.dtype.kind != "c":
+            # (a zero result of a power that is not an odd integer is +0, as IEEE's pow and MATLAB give it:
+            # power(-0, 0.5) is 0)
+            r = np.where((r == 0) & ~((B == np.floor(B)) & (_fmod(B, 2.0) != 0)), 0.0, r)
         if A.dtype.kind == "c" or B.dtype.kind == "c":
             r, ints = _cpow_int(A, B, r)
             if np.any((A == 0) | ~np.isfinite(r) | (np.abs(r) >= 2.0 ** 1000)):
@@ -765,12 +794,18 @@ def power(a, b):
     if type(a) is float and type(b) is float:
         if (a == 1 and b != b) or (a != a and b == 0):
             return _math.nan
+        if a < 0 and b == b and b != _math.floor(b) and a == a:
+            r = complex(_negfrac_pow(np.array(a), np.array(b)))
+            return r if r.imag != 0 else r.real
         try:
             r = a ** b
         except ZeroDivisionError:
             return _math.inf
         except OverflowError:
             return _math.inf if a > 0 or b == _math.floor(b) and b % 2 == 0 else -_math.inf
+        if type(r) is float and r == 0 and not (b == _math.floor(b) and _math.fmod(b, 2.0) != 0):
+            # (+0 for a zero result of a power that is not an odd integer: power(-0, 0.5) is 0)
+            return 0.0
         if type(r) is complex:
             return r if r.imag != 0 else r.real
         return r
@@ -969,7 +1004,9 @@ def _solve(A, B):
     m, n = A.shape
     if B.shape[0] != m:
         raise _err("Matrix dimensions must agree.", "MATLAB:dimagree")
-    if m == n and A.dtype == np.float64 and B.dtype == np.float64:
+    if m == n and n > 0 and A.dtype == np.float64 and B.dtype == np.float64:
+        # (an empty A keeps the path below: zeros(0,0) \ zeros(0,5) is 0x5, and B's reshape to (0, -1) has no
+        # column count to infer)
         # (mldivide's own solve (src/runtime/numpy_linalg.ts mldivide): on engine/nd, nd_solve's MATLAB mode, its
         # structure pass (diagonal, triangular, Cholesky or LU) and rcond from the factors it solved with, at every
         # size; elsewhere the same dispatch for a singular A and LU with the same estimate. A singular A's X is
@@ -5079,16 +5116,14 @@ for _n in ("asin", "acos", "atan", "asec", "acsc", "acot"):
 
 def _gamma(x):
     """MATLAB's gamma: exact (x-1)! at the integers up to 171, Inf at the negative integers (as
-    MathWorks' gamma page has it), and at 0 the infinity of the zero's sign (-Inf at -0, as the C
-    library's tgamma and Octave give); gamma(-Inf), which the page does not give, is refused"""
+    MathWorks' gamma page has it), and Inf at 0 of either sign and at -Inf (observed MATLAB R2026b,
+    2026-11-21: gamma(-0) is Inf, where the C library's tgamma gives -Inf, and gamma(-Inf) is Inf)"""
     if x != x:
         return _math.nan
     if x == -_math.inf:
-        raise _err("gamma of -Inf is not supported in Sagebrush: it has no limit there.")
+        return _math.inf
     if x == _math.floor(x):
-        if x == 0:
-            return _math.copysign(_math.inf, x)
-        if x < 0:
+        if x <= 0:
             return _math.inf
         return float(_math.factorial(int(x) - 1)) if x <= 171 else _math.inf
     # (the C library's, as Octave's; math.gamma is CPython's own)
@@ -5098,7 +5133,11 @@ def _gamma(x):
 def _lgamma(x):
     if x != x:
         return _math.nan
-    if x <= 0 and x == _math.floor(x):
+    if x < 0:
+        # (gammaln is defined for nonnegative x only: a negative one is MATLAB's error, observed MATLAB R2026b,
+        # 2026-11-21, for -1, -Inf and -5e-324 alike)
+        raise _err("gammaln: the input must be nonnegative.", "MATLAB:gammaln:negativeVal")
+    if x == 0:
         return _math.inf
     return _math._libm_lgamma(x)
 
@@ -5273,11 +5312,17 @@ def _binary_fn(name, f):
 
 
 def _mod(A, B):
+    """mod as MATLAB's (observed MATLAB R2026b, 2026-11-21): mod(a, 0) is a; an infinite divisor gives a when a and
+    it have the same sign, else the divisor; an infinite a gives NaN; a zero result takes the divisor's sign"""
     with np.errstate(divide="ignore", invalid="ignore"):
-        q = np.where(B == 0, 1.0, B)
+        inf = np.isinf(B) & np.isfinite(A)
+        q = np.where((B == 0) | np.isinf(B), 1.0, B)
         r = _fmod(A, q)
         r = np.where((r != 0) & ((r < 0) != (q < 0)), r + q, r)
+        r = np.where(inf, np.where((A == 0) | ((A < 0) == (B < 0)), A, B), r)
+        r = np.where(np.isinf(B) & ~np.isfinite(A), np.nan, r)
         r = np.where(B == 0, A, r)
+        r = np.where(r == 0, np.copysign(0.0, B), r)
     return r
 
 
@@ -5291,35 +5336,37 @@ def _rem(A, B):
 def mod_(nargout, a, b):
     if type(a) is float and type(b) is float:
         if b == 0:
-            return a
+            # (mod(a, 0) is a; a zero a takes the divisor's sign, as MATLAB's mod(0, -0) is -0)
+            return _math.copysign(0.0, b) if a == 0 else a
         if a != a or b != b or a in (_math.inf, -_math.inf):
             return _math.nan
         if b in (_math.inf, -_math.inf):
-            # (mod's page gives mod(a, 0) but not an infinite divisor, where its formula
-            # a - m.*floor(a./m) is NaN: refused, not guessed)
-            raise _err("mod with an infinite divisor is not supported in Sagebrush.")
+            # (an infinite divisor, as MATLAB gives it (observed MATLAB R2026b, 2026-11-21): a itself when a and the
+            # divisor have the same sign or a is 0, else the divisor: mod(5, Inf) is 5, mod(-5, Inf) is Inf,
+            # mod(1, -Inf) is -Inf)
+            if a == 0:
+                return _math.copysign(0.0, b)
+            return a if (a < 0) == (b < 0) else b
         r = _math.fmod(a, b)
         if r != 0 and (r < 0) != (b < 0):
             r += b
-        return r
+        # (a zero result takes the divisor's sign, as MATLAB's: mod(-2, 2) is 0, mod(2, -2) is -0)
+        return _math.copysign(0.0, b) if r == 0 else r
     if not isreal_(a) or not isreal_(b):
         raise _err("mod: complex arguments are not supported; the arguments must be real.")
-    if np.any(np.isinf(_farr(b))):
-        raise _err("mod with an infinite divisor is not supported in Sagebrush.")
     return _elementwise(a, b, _mod, "mod")
 
 
 @_bi("rem")
 def rem_(nargout, a, b):
-    # (rem's page: rem(a, 0) is NaN; an infinite divisor, which the page leaves open, is refused)
+    # (rem's page: rem(a, 0) is NaN; an infinite divisor gives a finite a itself and an infinite one NaN,
+    # observed MATLAB R2026b, 2026-11-21: rem(0, Inf) is 0, rem(Inf, Inf) is NaN)
     if type(a) is float and type(b) is float:
-        if b in (_math.inf, -_math.inf):
-            raise _err("rem with an infinite divisor is not supported in Sagebrush.")
         if b == 0 or a != a or b != b or a in (_math.inf, -_math.inf):
             return _math.nan
+        # (a finite a over an infinite divisor is a itself, C's fmod and MATLAB's: rem(0, Inf) is 0, observed
+        # MATLAB R2026b, 2026-11-21)
         return _math.fmod(a, b)
-    if isreal_(b) and np.any(np.isinf(_farr(b))):
-        raise _err("rem with an infinite divisor is not supported in Sagebrush.")
     if not isreal_(a) or not isreal_(b):
         raise _err("rem: complex arguments are not supported; the arguments must be real.")
     return _elementwise(a, b, _rem, "rem")
@@ -5327,8 +5374,12 @@ def rem_(nargout, a, b):
 
 # (MathWorks' atan2 page, IEEE compliance: atan2(0, -0) and atan2(-0, -0) are 0, where IEEE
 # arithmetic gives pi and -pi)
-_binary_fn("atan2", lambda A, B: np.where((A == 0) & (B == 0) & np.signbit(B), 0.0, np.arctan2(A, B)))
-_binary_fn("hypot", lambda A, B: np.hypot(A, B))
+# (and atan2(-0, 0) is 0 in MATLAB too, observed MATLAB R2026b, 2026-11-21: two zero arguments give +0 whatever
+# their signs)
+_binary_fn("atan2", lambda A, B: np.where((A == 0) & (B == 0), 0.0, np.arctan2(A, B)))
+# (a NaN argument gives NaN even with an infinite one, observed MATLAB R2026b, 2026-11-21: hypot(Inf, NaN) and
+# hypot(NaN, -Inf) are NaN, where IEEE's hypot gives Inf)
+_binary_fn("hypot", lambda A, B: np.where(np.isnan(A) | np.isnan(B), np.nan, np.hypot(A, B)))
 _binary_fn("power", _pow)
 _binary_fn("plus", _add)
 _binary_fn("minus", _sub)
@@ -6078,7 +6129,13 @@ def _cum(x, args, f, name):
     if cls == "single":
         # (running sums and products of single accumulate in single, as sum and prod do)
         A = _single_work(A)
-    if "omitnan" in flags:
+    if name in ("cummax", "cummin"):
+        # (cummax and cummin skip NaN unless 'includenan' is given, as MATLAB's do: a NaN carries the running
+        # maximum or minimum on, and a leading NaN stays until the first number, cummax([NaN 1 2]) is [NaN 1 2];
+        # observed MATLAB R2026b, cummax([1 3 NaN 2]) is [1 3 3 3]. numpy's fmax and fmin are that accumulation)
+        if "includenan" not in flags:
+            f = (lambda A, ax: np.fmax.accumulate(A, axis=ax)) if name == "cummax" else (lambda A, ax: np.fmin.accumulate(A, axis=ax))
+    elif "omitnan" in flags:
         A = np.where(np.isnan(A), 1.0 if name == "cumprod" else 0.0, A)
     if dim > A.ndim:
         return _finish(A.copy(), oc)
@@ -10225,6 +10282,13 @@ def nthroot_(x, n):
         if np.any((X < 0) & (np.mod(N, 2) != 1)):
             raise _err("If X is negative, N must be an odd integer.", "MATLAB:nthroot:NegXNotOddIntegerN")
         r = np.abs(X) ** (1.0 / N)
+        # (one Newton step on y^n = |x| corrects the rounding of 1/n and of the power: nthroot(64, 3) is 4, and
+        # nthroot(1e-300, 3) within 0.1 ulp of 1e-100, as MATLAB's (observed MATLAB R2026b, 2026-11-21), where
+        # |x|^(1/n) alone is 3.9999999999999996 and 101 ulp off)
+        ok = np.isfinite(r) & (r != 0) & np.isfinite(N) & (N != 0)
+        rs = np.where(ok, r, 1.0)
+        step = (rs ** N - np.abs(X)) / (N * rs ** (N - 1))
+        r = np.where(ok & np.isfinite(step), r - step, r)
         r = np.where(X < 0, -r, r)
     return _finish(r, _float_class(x, n))
 

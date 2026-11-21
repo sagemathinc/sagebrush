@@ -2406,10 +2406,12 @@ test("edge values from the catalog probe: rem(x, 0), prod of complex, polyval wi
     tryIt("interp1([1 2 3], [10 20 30], 1 + 2i)"), tryIt("cumsum([1 2; 3 4], 'all')"), tryIt("sum([1 2; 3 4], [])"),
     tryIt("mod(5, Inf)"), tryIt("mod([1 2], [Inf 1])"),
   ].join("\n")), [
-    "refused", "refused", "refused", "refused", "refused", "refused", "refused", "refused", "refused", "refused", "refused", "refused", "refused", "refused",
+    // (rem(5, Inf), mod(5, Inf) and mod([1 2], [Inf 1]) run: MATLAB gives their values, observed MATLAB R2026b,
+    // 2026-11-21; test/matlab-elementwise-corpus.test.ts pins them)
+    "ran", "refused", "refused", "refused", "refused", "refused", "refused", "refused", "refused", "refused", "refused", "refused", "refused", "refused",
     "refused", "refused", "refused", "refused", "refused", "refused", "refused", "refused", "refused", "refused", "refused", "refused", "refused",
     "refused", "refused", "refused", "refused", "refused", "refused", "refused", "refused", "ran",
-    "refused", "refused", "refused", "refused", "refused", "refused", "refused", "refused", "refused",
+    "refused", "refused", "refused", "refused", "refused", "refused", "refused", "ran", "ran",
   ]);
   assert.deepEqual(run([
     "disp(isfield(5, 'a'))", "disp(isfield(struct('a', 1), 5))", show("sprintf('%d', 1 + 2i)"), show("sprintf('')"), show("linspace(0, 1, NaN)"),
@@ -2588,7 +2590,7 @@ test("spline and interp1's spline solve their tridiagonal system in its band, wi
     "interp1's 'spline' method with 100001 sample points for 2 columns of values is not supported in Sagebrush: too much work.", "[2.5 7]"]);
 });
 
-test("atan2 at signed zeros as MathWorks documents (0 for (0,-0) and (-0,-0), unlike IEEE and Octave); deconv and gamma(-Inf) refused in words", () => {
+test("atan2 at signed zeros as MATLAB gives them (0 for every pair of zeros, unlike IEEE and Octave; observed MATLAB R2026b, 2026-11-21, for (-0, 0)); deconv refused in words; gamma(-Inf) is Inf", () => {
   const { execFileSync } = require("node:child_process");
   const out = execFileSync(process.execPath, [require("node:path").join(__dirname, "..", "src", "cli.js"), "--matlab", "-c", [
     "disp([atan2(0, -0), atan2(-0, -0), 1 / atan2(0, -0), 1 / atan2(-0, -0)])",
@@ -2597,13 +2599,13 @@ test("atan2 at signed zeros as MathWorks documents (0 for (0,-0) and (-0,-0), un
     "try, [q, r] = deconv([Inf 2 3], [1 2]); catch e, disp(e.message), end",
     "try, q = deconv([1 2 3], [NaN 2]); catch e, disp(e.message), end",
     "[q, r] = deconv([1 2 3], [1 2]); disp(mat2str([q r]))",
-    "try, y = gamma([1 -Inf]); catch e, disp(e.message), end",
+    "y = gamma([1 -Inf]); disp(y)",
     "disp([gamma(Inf), 1 / gamma(0)])",
   ].join("\n")], { encoding: "utf8" });
   const refused = "deconv of values that include Inf or NaN is not supported in Sagebrush: its result for them is not certified. Divide finite values.";
   assert.deepEqual(out.trim().split("\n").map((s: string) => s.trim()).filter((s: string) => s !== ""), [
-    "0     0   Inf   Inf", "0      -Inf    1.5708   -1.5708", "single", "0", refused, refused, "[1 0 0 0 3]",
-    "gamma of -Inf is not supported in Sagebrush: it has no limit there.", "Inf     0"]);
+    "0     0   Inf   Inf", "0       Inf    1.5708   -1.5708", "single", "0", refused, refused, "[1 0 0 0 3]",
+    "1   Inf", "Inf     0"]);
 });
 
 test("trapz with a scalar spacing X is X*trapz(Y), as MathWorks documents, where X/2 or half a pair sum is subnormal (Octave departs there)", () => {

@@ -40,7 +40,8 @@ show(isnan(imag(acos(single([NaN 2])))))
 show(isnan(imag(log10([NaN -10]))))
 show(imag(sqrt([NaN -4])))
 
-% gamma: the pole at -0 is -Inf; negative integers are Inf
+% gamma: the pole at -0 is Inf in MATLAB (observed MATLAB R2026b, 2026-11-21; Octave and C's tgamma give -Inf,
+% hence test_sweep50.matlab.out); negative integers are Inf
 show(gamma(-0))
 show(gamma(single(-0)))
 show(gamma([0 -1 -2]))

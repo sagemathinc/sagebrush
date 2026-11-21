@@ -24,7 +24,7 @@ Two kinds of behaviour, held to two standards.
   - `sum([1e308 1e308 -1e308])` is `1e308` here, where Octave gives `Inf`;
   - `sum([1 1e100 1 -1e100])` is 2 here and 0 in Octave, which is within the accuracy contract.
 
-  Tests of overflow-dependent results say so. Reductions start their accumulators at $+0$, so `sum([-0 -0])` is $+0$, as in Octave; that's pinned.
+  Tests of overflow-dependent results say so. A sum is $-0$ exactly when every input is $-0$, and the empty sum is $+0$, as MATLAB gives them (observed MATLAB R2026b, 2026-11-21, at 2, 9 and $10^5$ elements, double and single; Octave gives $+0$): each of the 8 accumulators starts at $-0$, the IEEE additive identity, and the empty case returns $+0$. The 8-accumulator PR pins it.
 - **Exact values:** results whose value is defined exactly. These are integer-valued results (`rank` and other tolerance decisions only away from the tolerance: near it, §2), sorting and set results with their index outputs, `find`, logical results, the order of `eig`'s values where it is documented, and display formatting (`disp`, `format`, `mat2str`, `num2str`), which scripts parse. Display is exact as a function of the double printed, not a claim that a computed value prints as MATLAB's does, so display tests use exactly representable or exact-result inputs.
 - **Random numbers:** `rand`, `randn` and `randi` after `rng(seed)` give MATLAB's numbers (already so: design/matlab.md).
 
@@ -50,6 +50,10 @@ Examples:
 - **`ode45` and the other ODE solvers:** MATLAB documents RelTol and AbsTol as a local, per-step test (odeset: at each step the solver estimates the local error in each component, and the step must have acceptable error). The contract is that acceptance test, checked on the solver's own error estimate. Plus a global-error check on named test problems, $\|y - y_{\mathrm{ref}}\| \le C \cdot \mathrm{tol}$, with $C$ measured and recorded per problem, not tuned. Global error can exceed the tolerances by the problem's stability factor, and that isn't a defect.
 
 **mpmath as the reference** computes at a working precision high enough to round correctly to double: at least twice the bits, re-evaluated at higher precision (Ziv-style) when the result is close to a rounding boundary, and higher still for ill-conditioned inputs.
+
+**Documented differences, where MATLAB is the less accurate one.** Sagebrush keeps the correct value, not MATLAB's (observed MATLAB R2026b, 2026-11-21):
+- `gamma(realmin)` and `gamma(-171.5)` are Inf in MATLAB, which overflows early; Sagebrush gives the true values, about $4.49 \times 10^{307}$ and $1.93 \times 10^{-310}$.
+- `erfcinv(5e-324)` is about $9 \times 10^{11}$ ulp off in MATLAB; Sagebrush's is correctly rounded there.
 
 **Never bitwise against MATLAB.** MATLAB's own results change across versions, BLAS libraries and CPUs. A test that pins MATLAB's last digits pins an accident.
 - Where a published MATLAB example prints values, the comparison is at the digits displayed: `format short` rounds, so a match there means agreement to that display.
