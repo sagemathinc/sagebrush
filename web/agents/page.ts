@@ -42,6 +42,11 @@ import { threadMarkdown, turnMarkdown, userMarkdown } from "../workspace/agent-c
 import { DelegateTasks } from "./delegate";
 import { mountDelegate } from "./delegate-ui";
 import { toIpynb } from "../notebook/ipynb.js";
+import { mountVersionStamp } from "../version";
+
+// (the build this site serves, under the chat list, for whoever tests it: web/version.ts; first, before anything that
+// waits, so it shows even while the workspace opens; nothing where the site doesn't say)
+void mountVersionStamp(document.getElementById("sbversion"));
 
 // (the LaTeX editor, in builds that have it: web/build.ts's define)
 declare const __SB_LATEX__: boolean | undefined;

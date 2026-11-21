@@ -48,6 +48,7 @@
   .thread.on { background: #e2ded2; font-weight: 550; }
   .thread .dot { width: 7px; height: 7px; border-radius: 50%; background: var(--accent); margin-left: auto; flex: none; animation: pulse 1.2s infinite; }
   nav.side .foot { font-size: 12px; color: var(--muted); padding: 6px; }
+  nav.side .sbver { font-family: ui-monospace, SFMono-Regular, Menlo, monospace; padding-top: 0; user-select: all; }
   /* (the files, one big button at the foot of the chat list: a person who came here from an agent's link finds them
      without knowing the small switch at the top) */
   nav.side #files-big { margin-top: auto; display: flex; align-items: center; gap: 10px; width: 100%; padding: 11px 12px; border: 1px solid var(--line); border-radius: 10px; background: var(--card); color: inherit; font: inherit; font-size: 15px; font-weight: 600; text-align: left; cursor: pointer; }
@@ -362,6 +363,7 @@
     <button id="files-big" type="button" title="Your files and notebooks, in the file browser">Files…</button>
     <button id="mirror-btn" type="button" hidden>Mirror…</button>
     <div class="foot">Shift+Enter sends (queues while the agent works) · Alt+Enter queues · Ctrl+Enter posts a note</div>
+    <div class="foot sbver" id="sbversion" hidden></div>
   </nav>
   <div class="sep" id="sep-side" role="separator" tabindex="0" aria-orientation="vertical" aria-label="Resize the chat list" aria-controls="chats"></div>
   <main>
