@@ -2293,9 +2293,11 @@ export function createNotebook(root, opts = {}) {
   // leave prompt requested, since a save can't finish once the page is gone; if the person leaves anyway, the last
   // edit may not be kept)
   // (unsaved: a save running, the last one failed or was busy (kept to send again), or a change waiting that differs
-  // from what was last saved (typed and undone before its save asks nothing))
+  // from what was last saved (typed and undone before its save asks nothing); a notebook left, with its saves still
+  // to make, is the page's to ask about (its "left" listener))
+  const unsaved = (dirty) => !!store && !store.readOnly && !!(savesPending || failed.has(shown) || busy.size || dirty());
   function onBeforeUnload(ev) {
-    if (!store || store.readOnly || !(savesPending || failed.has(shown) || busy.size || (timer && JSON.stringify(snapshot()) !== lastJson))) return;
+    if (!unsaved(() => timer && JSON.stringify(snapshot()) !== lastJson)) return;
     if (timer) flush();
     ev.preventDefault();
     ev.returnValue = "";
@@ -2303,7 +2305,7 @@ export function createNotebook(root, opts = {}) {
   // (the listener there only while something may be unsaved, and taken away once nothing is: a page with any
   // beforeunload listener is navigated away from more slowly, so a clean notebook's page reloads exactly as before)
   function guard() {
-    const want = !!store && !store.readOnly && !!(savesPending || failed.has(shown) || busy.size || timer);
+    const want = unsaved(() => timer);
     if (want === guarded) return;
     guarded = want;
     (want ? addEventListener : removeEventListener)("beforeunload", onBeforeUnload);
@@ -2345,6 +2347,7 @@ export function createNotebook(root, opts = {}) {
     shown.synced = { ...syncedOf(rev, snap.cells, snap.mode), doc: baseOf(snap.mode, list ?? []) };
     Promise.resolve().then(() => { loading = false; showParked(); }); // after the observer's records for this
     reactiveLoad();
+    guard(); // (another document shown: its own failed save, or none)
   }
   // (the runs of this notebook that ended while it wasn't shown (execCell's done): their output, prompt number and
   // time put in their cells, once loaded, as a change of the document, so it is saved)
@@ -2811,6 +2814,7 @@ export function createNotebook(root, opts = {}) {
       const doc = await s.load();
       load(doc);
       store = s;
+      guard();
       unsubscribe = s.subscribe?.((d) => applyRemote(d)) ?? null;
       // (2c-3: another device's changes reached this notebook's history: merged with the record by the store, then with
       // what this page shows, its unsaved edits merged cell by cell (applyRemote), and saved.  Every edit is kept, as in

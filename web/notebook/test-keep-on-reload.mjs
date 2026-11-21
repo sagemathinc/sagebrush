@@ -138,6 +138,26 @@ try {
   await settled();
   check((await unloadListeners()) === n0, "7: the listeners as many after opening notebooks in turn", { n0, n1: await unloadListeners() });
 
+  // 9. typed, then another notebook opened at once, its save still running (held behind the workspace's lock): a
+  // reload asks (the notebook left is the page's to ask about); declined, the page stays, and once the lock is let go
+  // that edit is saved
+  await settled();
+  await ev(`(() => { navigator.locks.request("sagebrush-workspace", () => new Promise((r) => (window.__release = r))); return 1; })()`);
+  await sleep(300);
+  await type(0, "a6 typed, then another notebook opened");
+  await sleep(1200);
+  await ev(`(window.__opening = window.sagebrush.open(${J(ref2)}), 1)`);
+  await sleep(300);
+  const asked10 = await reloadNow();
+  check(J(asked10) === J(["beforeunload"]), "9: another notebook opened with a save still running: a reload asks to confirm leaving", asked10);
+  check((await ev("window.__old === 1").catch(() => false)) === true, "9: declined, the page stays");
+  await ev("(window.__release(), window.__opening.then(() => 1))");
+  check(await opened(ref2), "9: the other notebook opens");
+  await settled();
+  await ev(`window.sagebrush.open(${J(ref)}).then(() => 1)`);
+  check(await opened(ref), "9: the first notebook opens again");
+  check((await codes())[0] === "a6 typed, then another notebook opened", "9: the edit was saved once the lock was let go", await codes());
+
   // 8. the notebook's listener is there only while something is unsaved: none on a clean notebook (its page reloads
   // exactly as one without it), one once something is typed, none again once it is saved
   await settled();
