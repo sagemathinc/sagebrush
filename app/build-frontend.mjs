@@ -128,7 +128,6 @@ for (const r of [...relRefs].sort()) if (!existsSync(join(out, r))) bad.push(`./
 // back to the files; before, it was the notebook at that path, broken until a restart.  A new one fails here.
 const NOT_IN_APP = new Map([
   ["agents", "the Agents switch (web/workspace/mode-switch.ts, and the board's): to be hidden in the app; meanwhile the server's short page, with a way back"],
-  ["examples", "the Examples gallery's catalog (/examples/index.json): not in the app yet"],
   ["blog", "the landing page's links to the site: the server's short page, with a way back"],
   ["articles", "the landing page's links to the site: the server's short page, with a way back"],
   ["atlas", "the landing page's links to the site: the server's short page, with a way back"],

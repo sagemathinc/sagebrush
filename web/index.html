@@ -5350,7 +5350,8 @@ function wsShowFiles(on) {
       openAs: (e, as) => openAs(e, as),
       // (New ▸ LaTeX document and From an example…, as the File menu has them: filemenu.ts NEW_ITEMS, U0)
       ...(latexHere ? { newLatex: (folder) => { saveNow(); void texNew(ws, folder); } } : {}),
-      fromExample: () => fileMenu.querySelector('[data-f="examples"]:not([disabled])')?.click(),
+      // (the CLI's page has no gallery: no From an example there, rather than a button that does nothing)
+      fromExample: LOCAL ? undefined : () => fileMenu.querySelector('[data-f="examples"]:not([disabled])')?.click(),
       close: () => wsShowFiles(false),
       // (the Storage panel's export: its lazy chunk beside this page; the open notebook saved first)
       exportUrl: (f) => new URL(f, location.href).href,
