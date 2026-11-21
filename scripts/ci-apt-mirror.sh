@@ -22,6 +22,8 @@ if ! curl -fsS --connect-timeout 5 --max-time 10 -o /dev/null \
   exit 0
 fi
 rest=$(grep -v -e 'azure\.archive\.ubuntu\.com' -e 'mirrors\.edge\.kernel\.org' "$f" || true)
-printf 'http://mirrors.edge.kernel.org/ubuntu/\tpriority:1\n%s\n' "$rest" | sudo tee "$f" > /dev/null
+# Hosted images can give an EC2 mirror priority 1 too. APT spreads downloads
+# across equal-priority mirrors, so the checked mirror must rank ahead of it.
+printf 'http://mirrors.edge.kernel.org/ubuntu/\tpriority:0\n%s\n' "$rest" | sudo tee "$f" > /dev/null
 echo "apt mirrors:"
 cat "$f"

@@ -634,13 +634,18 @@ try {
     const E = await tab(url);
     tabs.push(E);
     const followsE = await E.until(follows, 30000);
+    // (E, opened while D's first load is held, must load and follow D: said by name if it doesn't, rather than a click on
+    // a cell that isn't there)
+    check(followsE, "9c. …E, opened while D's first load was held, loads and follows D within 30 s", { e: await st(E).catch(() => null) });
     const before = followsE ? await code(E) : "";
-    await E.clickCell();
-    await E.type("e9");
+    if (followsE) {
+      await E.clickCell();
+      await E.type("e9");
+    }
     await sleep(400);
     await D.send("Debugger.resume");
     await D.send("Debugger.disable");
-    const t9 = Date.now(), tookE = await E.until(writes(E), 5000), ms = Date.now() - t9;
+    const t9 = Date.now(), tookE = followsE && (await E.until(writes(E), 5000)), ms = Date.now() - t9;
     await sleep(300);
     // (only a load really held counts: the place found in the bundle, the breakpoint set there, and D stopped at it)
     check(at >= 0 && !!bp?.breakpointId && caught, "9c. D held in its first load: the place found in the bundle, a breakpoint set there, and D stopped at it", { at, bp, caught });

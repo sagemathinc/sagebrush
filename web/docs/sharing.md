@@ -16,7 +16,9 @@ On the **Link** tab, **Publish link** puts this notebook on a page of its own at
 - Each publish is a version. The window says which version the link shows and whether you've changed the notebook since; when you have, **Publish version 2** (and so on) puts the new version at the same link, with the title and byline you gave last time unless you change them. Someone who opens the link sees the newest version.
 - Every version also has a link of its own that never changes: **Copy a link to this version only** in the link's **⋯** menu, or under **Your shares ▸ Versions**.
 - **Include edit history (TimeTravel)** publishes the notebook's history up to this version, so readers can play it back with **▶ History**. It's off unless you check it, and it can contain text you later deleted.
-- Shared pages are kept out of search engines: they're found only through their links.
+- Anyone who has the link can open the page, run it and copy it, and can pass the link on. A published link isn't private: what keeps it from strangers is only that they don't have it.
+- Shared pages ask search engines not to list them. Search engines may ignore that request; anyone with the link can still open the page.
+- Before you publish, check everything that goes with it: the code and text, the outputs, the data files you chose (for a folder or a talk, the files left ticked), and the edit history if you include it.
 - Nothing runs on its own: a visitor's browser runs the notebook's code only when they run it (with **Run all**, for example), in a sandboxed frame apart from the page.
 
 ## Copy to my workspace {#copy}
@@ -27,7 +29,7 @@ Code brought in from a link can't change your files until you allow it.
 
 ## Share a talk {#talk}
 
-In the LaTeX editor, **File ▸ Share…** shares a talk with its folder, because the talk's code can read the folder's files. The dialog lists them all, ticked, except any that look like they hold a key or password; untick any you don't want to publish. Each talk in the folder gets its own link, and the one you shared from is listed first. A talk at the top of your files can't be shared: move it, and the files it uses, into a folder first.
+In the LaTeX editor, **File ▸ Share…** shares a talk with the files it uses, because the talk's code can read them. The dialog lists the files it uses, ticked, and the other files in its folder, unticked; a file that looks like it holds a key or password is never ticked for you. Tick any the talk needs that weren't found, and untick any you don't want to publish. Each talk or notebook left ticked gets its own link, and the one you shared from is listed first.
 
 On the shared page, a visitor sees the slides with your results. **Run** runs the talk's code in their own browser, and **Copy to my workspace** copies the talk's folder into their files.
 

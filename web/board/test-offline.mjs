@@ -67,6 +67,9 @@ ws.onmessage = (ev) => {
 const send = (method, params = {}, ms = 120000) => new Promise((resolve, reject) => { const id = ++n, timer = setTimeout(() => { waiting.delete(id); reject(new Error(`${method}: no answer within ${ms / 1000} s`)); }, ms); waiting.set(id, (r) => { clearTimeout(timer); resolve(r); }); ws.send(JSON.stringify({ id, method, params })); });
 const ev = async (expression) => { const r = await send("Runtime.evaluate", { expression, awaitPromise: true, returnByValue: true }); if (r.exceptionDetails) throw new Error(JSON.stringify(r.exceptionDetails).slice(0, 400)); return r.result.value; };
 const until = async (expr, ms = 30000) => { const t = Date.now(); while (Date.now() - t < ms) { if (await ev(expr).catch(() => false)) return true; await sleep(100); } return false; };
+// (a file and its export again are compared without the day of export its generator line names: a run that crosses
+// midnight UTC exports them on two days, and nothing else may differ)
+const undated = (html) => html.replace(/(<meta name="generator" content="[^"]*, exported )\d{4}-\d{2}-\d{2}"/, '$1(day)"');
 const fails = [];
 let checks = 0;
 const check = (ok, what) => { checks++; if (!ok) fails.push(what); };
@@ -124,7 +127,7 @@ try {
   check(!errors.length, "...without errors: " + errors.slice(0, 3).join(" | "));
   check(await ev("(() => { const f = [...document.querySelectorAll('iframe')]; return f.length === 1 && f[0].getAttribute('sandbox') === 'allow-scripts' && f[0].hasAttribute('srcdoc'); })()"), "...Python running in the runner's sandboxed frame (allow-scripts only), not in the file's page");
   // exported again from that file, with Python: the same file
-  check((await ev("window.sagebrush.board.exportHtml({ python: true })")) === withPy, "exported again from the file with Python: the same file");
+  check(undated((await ev("window.sagebrush.board.exportHtml({ python: true })"))) === undated(withPy), "exported again from the file with Python: the same file");
   // offline, its board made a Sage board and the page reloaded: its code
   // runs, in Sage, from what the file carries (William's report); and a
   // module no mode's start loads (heapq: its chunk read when it is imported,

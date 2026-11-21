@@ -227,7 +227,13 @@ test("3-D figures: the interactive view's scene (MATLAB's axes, colors and view)
   // (view(v): [x y z] toward the camera, as the documented example's angles; [caz, cel] = view(...); view(ax, 2);
   // one output, not the documented [caz, cel], refused)
   assert.equal(msgs.filter((m) => m.id === 10 && m.stream).map((m) => m.text).join(""), "135.0000 35.2644\n-68.1986 42.8760\n0 90\n" + "view: one output is not supported; use [caz, cel] = view.\n".repeat(2));
-  for (const id of [4, 5, 6, 7, 8, 9, 10]) {
+  // (cells 6 and 9, too big for the view, have SVGs over 1 MB: shown as a PNG instead, said under it,
+  // lib/_graphics.py figures' "auto")
+  for (const id of [6, 9]) {
+    assert.ok(shown(id)["image/png"] && !shown(id)["image/svg+xml"] && !scene(id), "cell " + id + ": a PNG, its SVG being over 1 MB");
+    assert.match(msgs.filter((m) => m.id === id && m.stream).map((m) => m.text).join(""), /^Shown as a PNG: its SVG would be [\d.]+ MB\./);
+  }
+  for (const id of [4, 5, 7, 8, 10]) {
     assert.ok(shown(id)["image/svg+xml"] && !scene(id), "cell " + id + ": the SVG only");
   }
   // (the figure's Color behind the SVG; MATLAB's dark gray, not the page's color)

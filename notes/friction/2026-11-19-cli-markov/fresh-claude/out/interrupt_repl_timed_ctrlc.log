@@ -1,0 +1,32 @@
+sage:
+[[SEND "P = matrix(QQ, [[1/2,1/4,1/4,0],[1/5,1/2,1/10,1/5],[0,0,1,0],[0,0,0,1]]); keep = P^5; print('SET', keep[0,0])" at 16:23:54]]
+P = matrix(QQ, [[1/2,1/4,1/4,0],[1/5,1/2,1/10,1/5],[0,0,1,0],[0,0,0,1]]); keep = P^5; print('SET', keep[0,0])
+SET 1/10
+sage:
+[[SEND 'import time; s = 0; i = -1; T0 = time.time()' at 16:23:58]]
+
+[[SEND 'for i in range(10^8): s += i' at 16:23:58]]
+
+[[SEND '' at 16:23:58]]
+import time; s = 0; i = -1; T0 = time.time()
+sage: for i in range(10^8): s += i
+
+[[SEND Ctrl-C (\x03) to pty]]
+sage:
+sage:
+KeyboardInterrupt
+sage:
+[[20.08s after Ctrl-C]]
+
+[[SEND "print('AFTER', keep[0,0], P.nrows(), 'i=', i, 'elapsed=', round(time.time()-T0,1))" at 16:24:21]]
+print('AFTER', keep[0,0], P.nrows(), 'i=', i, 'elapsed=', round(time.time()-T0,1))
+AFTER 1/10 4 i= 99999999 elapsed= 23.1
+sage:
+[[SEND "print('NEWCALC', (identity_matrix(QQ,2) - P[0:2,0:2]).inverse())" at 16:24:41]]
+print('NEWCALC', (identity_matrix(QQ,2) - P[0:2,0:2]).inverse())
+NEWCALC [5/2 5/4]
+[  1 5/2]
+sage:
+[[child alive before cleanup: True]]
+
+SUMMARY {'mode': 'ctrlc', 'loop': '10^8', 'seconds_to_prompt_or_wait': 45.2, 'keyboardinterrupt_shown': True, 'state_kept': True, 'new_calc_ok': True, 'child_alive_after': True}
