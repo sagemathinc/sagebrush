@@ -156,13 +156,36 @@ impl ZMat {
     }
 
     fn col_norm_log2(&self) -> Vec<f64> {
-        self.transpose().row_norm_log2()
+        (0..self.cols).map(|j| norm_log2_of((0..self.rows).map(|i| self.get(i, j)))).collect()
     }
 }
 
 /// log2 ||v||_2, rounded up generously (0 for the zero vector).
 fn norm_log2(v: &[BigInt]) -> f64 {
-    let s: BigInt = v.iter().map(|x| x * x).sum();
+    norm_log2_of(v.iter())
+}
+
+fn norm_log2_of<'a>(v: impl Iterator<Item = &'a BigInt>) -> f64 {
+    let mut s = BigInt::zero();
+    let mut w = 0u128;
+    for x in v {
+        match x.to_i64() {
+            Some(y) => {
+                let sq = (y.unsigned_abs() as u128) * (y.unsigned_abs() as u128);
+                match w.checked_add(sq) {
+                    Some(t) => w = t,
+                    None => {
+                        s += BigInt::from(w);
+                        w = sq;
+                    }
+                }
+            }
+            None => s += x * x,
+        }
+    }
+    if w != 0 {
+        s += BigInt::from(w);
+    }
     if s.is_zero() {
         return f64::NEG_INFINITY;
     }

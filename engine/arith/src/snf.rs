@@ -279,7 +279,7 @@ pub fn smith_mod(a: &ZMat, e: &BigInt) -> Vec<BigInt> {
     match e.to_u64().filter(|&w| w < WORD_E) {
         Some(w) => {
             let r = Word(w);
-            let m = a.d.iter().map(|x| r.residue(x)).collect();
+            let m = a.d.iter().map(|x| match x.to_i64() { Some(v) => v.rem_euclid(w as i64) as u64, None => r.residue(x) }).collect();
             smith_in(&r, a.rows, a.cols, m).iter().map(Word::integer).collect()
         }
         None => {
@@ -294,7 +294,13 @@ pub fn smith_mod(a: &ZMat, e: &BigInt) -> Vec<BigInt> {
 /// least common denominator, reduced here; d itself (the classical route)
 /// if delta does not divide d, which a correct solve never gives.
 fn modulus_from(d: &BigInt, n: &ZMat, den: &BigInt) -> BigInt {
-    let g = n.d.iter().fold(den.clone(), |g, v| g.gcd(v));
+    let mut g = den.clone();
+    for v in &n.d {
+        if g.is_one() {
+            break;
+        }
+        g = g.gcd(v);
+    }
     let delta = den / g;
     if !delta.is_zero() && (d % &delta).is_zero() {
         d / delta
@@ -320,7 +326,13 @@ pub fn invariants_nonsingular(a: &ZMat, d: &BigInt, solved: Option<(ZMat, BigInt
     // times those of a / g, whose e is smaller by g^(n-1) at least (a
     // common factor would otherwise make every invariant, and e, large:
     // p I, or p U for a unimodular U)
-    let g = a.d.iter().fold(BigInt::zero(), |g, v| g.gcd(v));
+    let mut g = BigInt::zero();
+    for v in &a.d {
+        g = g.gcd(v);
+        if g.is_one() {
+            break;
+        }
+    }
     if !g.is_one() {
         let ag = ZMat { rows: n, cols: n, d: a.d.iter().map(|v| v / &g).collect() };
         let dg = d / g.pow(n as u32);
