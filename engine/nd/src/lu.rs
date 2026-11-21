@@ -58,7 +58,7 @@ fn swap_rows(a: &mut [f64], lda: usize, cols: usize, i: usize, p: usize) {
 
 /// Apply interchanges `ipiv[k0..k1]` (row k with row ipiv[k], in order) to `cols` columns (dlaswp): column by
 /// column, so each column's swaps touch contiguous memory; the same result as swapping whole rows in order.
-fn laswp(a: &mut [f64], lda: usize, cols: usize, ipiv: &[usize], k0: usize, k1: usize) {
+pub(crate) fn laswp(a: &mut [f64], lda: usize, cols: usize, ipiv: &[usize], k0: usize, k1: usize) {
     for j in 0..cols {
         let col = &mut a[j * lda..];
         for k in k0..k1 {

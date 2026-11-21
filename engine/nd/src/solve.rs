@@ -15,7 +15,7 @@
 use crate::chol::{potrf, potrf_work_len, potrs, potrs_work_len};
 use crate::cond::{asum, cond_work_len, diagcon, gecon, lower_col, pocon, trcon};
 use crate::gemm::{scratch_len, span, Kernel};
-use crate::lu::{getrf, getrf_work_len, getrs, getrs_work_len, nonfinite, trsm_upper, Refused};
+use crate::lu::{getrf, getrf_work_len, getrs, getrs_work_len, laswp, nonfinite, trsm_upper, Refused};
 
 /// Which solve [`solve`] does.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -150,6 +150,36 @@ pub fn solve_work_len(mode: Mode, n: usize, r: usize) -> Option<usize> {
     n.checked_mul(n)?.checked_add(inner.into_iter().max()?)
 }
 
+/// x := L^-1 x for the lower triangle of `a` (leading dimension `lda`; unit diagonal when `unit`), by
+/// column-oriented forward substitution with no step skipped: x_k divided by its diagonal element even when
+/// x_k is 0, and x_k * l(i,k) subtracted even when x_k or l(i,k) is 0, so 0 / 0, 0 * Inf and their signs come
+/// out as IEEE arithmetic gives them. MATLAB's results for a singular A are these (the observed MATLAB R2026b
+/// corpus of 2026-11-21: [0 0; 0 0] \ [1; 1] is [Inf; NaN]); the fast routines skip a zero x_k, as the
+/// reference BLAS does, and are kept for nonsingular A, where skipping changes no value.
+fn lower_noskip(a: &[f64], lda: usize, n: usize, unit: bool, x: &mut [f64]) {
+    for k in 0..n {
+        if !unit {
+            x[k] /= a[k + k * lda];
+        }
+        let xk = x[k];
+        for i in k + 1..n {
+            x[i] -= xk * a[i + k * lda];
+        }
+    }
+}
+
+/// x := U^-1 x for the upper triangle of `a` (non-unit), by column-oriented back substitution with no step
+/// skipped, as [`lower_noskip`].
+fn upper_noskip(a: &[f64], lda: usize, n: usize, x: &mut [f64]) {
+    for k in (0..n).rev() {
+        x[k] /= a[k + k * lda];
+        let xk = x[k];
+        for i in 0..k {
+            x[i] -= xk * a[i + k * lda];
+        }
+    }
+}
+
 /// The first zero on A's diagonal.
 fn zero_diagonal(a: &[f64], n: usize, lda: usize) -> Option<usize> {
     (0..n).find(|&i| a[i + i * lda] == 0.0)
@@ -188,17 +218,34 @@ pub fn solve(kern: Kernel, mode: Mode, a: &mut [f64], n: usize, lda: usize, b: &
     }
     let (wa, rest) = work.split_at_mut(n * n);
     let (structure, singular, rcond) = if sh.upper && sh.lower {
-        // diagonal: each row divided by its element (0 / 0 is NaN here, as in MATLAB)
+        // diagonal: each row divided by its element; with a zero on the diagonal, MATLAB's forward
+        // substitution instead, where an Inf or NaN reaches the later rows through their zero off-diagonal
+        // elements (0 * Inf is NaN: [0 0; 0 0] \ [1; 1] is [Inf; NaN], not [Inf; Inf])
+        let z = zero_diagonal(a, n, lda);
         for j in 0..r {
-            for i in 0..n {
-                b[i + j * ldb] /= a[i + i * lda];
+            let col = &mut b[j * ldb..j * ldb + n];
+            if z.is_some() {
+                lower_noskip(a, lda, n, false, col);
+            } else {
+                for i in 0..n {
+                    col[i] /= a[i + i * lda];
+                }
             }
         }
-        let z = zero_diagonal(a, n, lda);
         (Structure::Diagonal, z, if z.is_some() { 0.0 } else { diagcon(a, n, lda, sh.anorm) })
     } else if sh.upper || sh.lower {
         let z = zero_diagonal(a, n, lda);
-        if sh.upper {
+        if z.is_some() {
+            // (a zero on the diagonal: substitution with no step skipped, MATLAB's Inf and NaN)
+            for j in 0..r {
+                let col = &mut b[j * ldb..j * ldb + n];
+                if sh.upper {
+                    upper_noskip(a, lda, n, col);
+                } else {
+                    lower_noskip(a, lda, n, false, col);
+                }
+            }
+        } else if sh.upper {
             let (scratch, tmp) = rest.split_at_mut(scratch_len());
             trsm_upper(kern, a, lda, n, b, ldb, r, tmp, scratch);
         } else {
@@ -223,7 +270,18 @@ pub fn solve(kern: Kernel, mode: Mode, a: &mut [f64], n: usize, lda: usize, b: &
             (Structure::Spd, None, pocon(wa, n, n, sh.anorm, rest))
         } else {
             let info = getrf(kern, a, n, n, lda, ipiv, rest)?;
-            getrs(kern, a, n, lda, ipiv, b, r, ldb, rest)?;
+            if info.is_some() {
+                // (a zero pivot: P, then L^-1 and U^-1 with no step skipped, MATLAB's Inf and NaN: getrs skips a
+                // zero x_k, so [1 2; 3 6] \ [1; 3] would give [1; 0] where MATLAB gives [NaN; NaN])
+                laswp(b, ldb, r, ipiv, 0, n);
+                for j in 0..r {
+                    let col = &mut b[j * ldb..j * ldb + n];
+                    lower_noskip(a, lda, n, true, col);
+                    upper_noskip(a, lda, n, col);
+                }
+            } else {
+                getrs(kern, a, n, lda, ipiv, b, r, ldb, rest)?;
+            }
             let rc = if info.is_some() { 0.0 } else { gecon(a, n, lda, sh.anorm, rest) };
             (if sh.spd_candidate { Structure::SpdFallback } else { Structure::General }, info, rc)
         }
@@ -612,5 +670,117 @@ mod tests {
         }
         #[cfg(target_arch = "aarch64")]
         assert_eq!(paths_fnv(Kernel::Neon), PATHS_FNV_FMA, "NEON");
+    }
+
+    /// Singular A in MATLAB mode, as MATLAB R2026b Update 2 prints them (the observed MATLAB corpus of
+    /// 2026-11-21, values and warnings only): no step of the substitutions is skipped, so 0 / 0 is NaN and
+    /// 0 * Inf is NaN where the reference BLAS's skip of a zero x_k would leave 0. Each derivation below is
+    /// partial-pivoting LU, or the triangular or diagonal route, in IEEE arithmetic. On every kernel.
+    #[test]
+    fn singular_systems_match_matlab() {
+        let nan = f64::NAN;
+        let inf = f64::INFINITY;
+        // (A row-major for reading, B, the X MATLAB printed, the structure taken)
+        let cases: [([f64; 4], [f64; 2], [f64; 2], Structure); 9] = [
+            // rows swap, U = [2 4; 0 0], y = [2; 0]: x2 = 0/0, then x1 NaN (Cholesky fails first)
+            ([1.0, 2.0, 2.0, 4.0], [1.0, 2.0], [nan, nan], Structure::SpdFallback),
+            // rows swap, y2 = 1 - (1/3) * 3 = 0 exactly: 0/0
+            ([1.0, 2.0, 3.0, 6.0], [1.0, 3.0], [nan, nan], Structure::General),
+            // no swap, y = [1; 1.5]: x2 = 1.5/0 = Inf, x1 = (1 - 4 Inf)/2 = -Inf
+            ([2.0, 4.0, 1.0, 2.0], [1.0, 2.0], [-inf, inf], Structure::General),
+            // upper: x2 = 1/0 = Inf, x1 = (1 - 2 Inf)/1 = -Inf
+            ([1.0, 2.0, 0.0, 0.0], [1.0, 1.0], [-inf, inf], Structure::Upper),
+            // upper: x2 = 0/0, x1 NaN
+            ([1.0, 2.0, 0.0, 0.0], [1.0, 0.0], [nan, nan], Structure::Upper),
+            // upper: x2 = 1/1 = 1, x1 = (1 - 1)/0 = 0/0 (the skip would give 0)
+            ([0.0, 1.0, 0.0, 1.0], [1.0, 1.0], [nan, 1.0], Structure::Upper),
+            // diagonal, forward substitution: x1 = 1/0 = Inf, x2 = (1 - 0 Inf)/0 = NaN
+            ([0.0, 0.0, 0.0, 0.0], [1.0, 1.0], [inf, nan], Structure::Diagonal),
+            ([0.0, 0.0, 0.0, 0.0], [0.0, 0.0], [nan, nan], Structure::Diagonal),
+            // upper with a -0 pivot: x2 = 1, x1 = (0 - 1)/(-0) = +Inf
+            ([-0.0, 1.0, 0.0, 1.0], [0.0, 1.0], [inf, 1.0], Structure::Upper),
+        ];
+        for k in kernels() {
+            for (a, b, want, shape) in cases {
+                let col = [a[0], a[2], a[1], a[3]];
+                let (x, rep, _) = run(k, &col, &b, 2, 1);
+                assert!(matches!(rep.status, Status::Singular(_)), "{}: {:?} {:?}", k.name(), a, rep);
+                assert_eq!(rep.structure, shape, "{}: {:?}", k.name(), a);
+                // (a NaN's sign is not meaningful: NaN compared as NaN, every other value bit for bit)
+                for (g, w) in x.iter().zip(want) {
+                    assert!(if w.is_nan() { g.is_nan() } else { g.to_bits() == w.to_bits() }, "{}: {:?} \\ {:?} gave {:?}, MATLAB {:?}", k.name(), a, b, x, want);
+                }
+            }
+        }
+    }
+
+    /// A nonsingular diagonal or identity A keeps division's exact results and signed zeros (the corpus:
+    /// [2 0; 0 3] \ [1; 1] is [0.5; 1/3], [1 0; 0 1] \ [-0; 0] is [-0; 0]).
+    #[test]
+    fn nonsingular_diagonal_exact() {
+        for k in kernels() {
+            let (x, rep, _) = run(k, &[2.0, 0.0, 0.0, 3.0], &[1.0, 1.0], 2, 1);
+            assert_eq!(rep.structure, Structure::Diagonal);
+            assert_eq!((x[0].to_bits(), x[1].to_bits()), (0x3fe0000000000000, 0x3fd5555555555555), "{}", k.name());
+            let (x, _, _) = run(k, &[1.0, 0.0, 0.0, 1.0], &[-0.0, 0.0], 2, 1);
+            assert_eq!((x[0].to_bits(), x[1].to_bits()), (0x8000000000000000, 0), "{}", k.name());
+        }
+    }
+
+    /// Large singular systems (n = 100, past the small-block sizes) take the substitution with no step
+    /// skipped too: an upper triangle with a zero at position 50 gives the trailing rows as the nonsingular
+    /// block's solve and every row from 50 up non-finite; LU of a matrix with a repeated row gives no finite
+    /// entry. The same bits on every kernel.
+    #[test]
+    fn large_singular_no_skip() {
+        let n = 100;
+        let mut u = seeded(n * n, &mut 7);
+        for j in 0..n {
+            for i in j + 1..n {
+                u[i + j * n] = 0.0;
+            }
+            u[j + j * n] = 4.0 + u[j + j * n].abs();
+        }
+        u[50 + 50 * n] = 0.0;
+        let b = seeded(n, &mut 8);
+        let mut first: Option<Vec<u64>> = None;
+        for k in kernels() {
+            let (x, rep, _) = run(k, &u, &b, n, 1);
+            assert_eq!(rep.structure, Structure::Upper);
+            assert!(matches!(rep.status, Status::Singular(50)), "{:?}", rep.status);
+            assert!(x[51..].iter().all(|v| v.is_finite()), "{}: the rows below the zero stay finite", k.name());
+            assert!(x[..=50].iter().all(|v| !v.is_finite()), "{}: the zero's row and every row above it", k.name());
+            let bits: Vec<u64> = x.iter().map(|v| v.to_bits()).collect();
+            match &first {
+                None => first = Some(bits),
+                Some(f) => assert_eq!(&bits, f, "{}: the same bits on every kernel", k.name()),
+            }
+        }
+        // (A = L U exactly: L unit lower with entries in multiples of 1/4 within [-1/2, 1/2], U upper with
+        // integers in [-4, 4] and 8 on its diagonal but a 0 at position 50. Every product and sum is exact,
+        // and partial pivoting keeps the diagonal rows (|l| 8 < 8), so getrf meets an exact zero pivot at 50)
+        let r1 = seeded(n * n, &mut 9);
+        let r2 = seeded(n * n, &mut 11);
+        let lo = |i: usize, j: usize| if i == j { 1.0 } else if i > j { (r1[i + j * n] * 4.0).round().clamp(-2.0, 2.0) / 4.0 } else { 0.0 };
+        let up = |i: usize, j: usize| if i == j { if i == 50 { 0.0 } else { 8.0 } } else if i < j { (r2[i + j * n] * 8.0).round().clamp(-4.0, 4.0) } else { 0.0 };
+        let mut g = vec![0.0; n * n];
+        for j in 0..n {
+            for i in 0..n {
+                g[i + j * n] = (0..n).map(|q| lo(i, q) * up(q, j)).sum();
+            }
+        }
+        let gb = seeded(n, &mut 10);
+        let mut first: Option<Vec<u64>> = None;
+        for k in kernels() {
+            let (x, rep, _) = run(k, &g, &gb, n, 1);
+            assert_eq!(rep.structure, Structure::General);
+            assert!(matches!(rep.status, Status::Singular(50)), "{}: {:?}", k.name(), rep.status);
+            assert!(x.iter().any(|v| !v.is_finite()), "{}: the zero pivot's Inf or NaN", k.name());
+            let bits: Vec<u64> = x.iter().map(|v| if v.is_nan() { f64::NAN.to_bits() } else { v.to_bits() }).collect();
+            match &first {
+                None => first = Some(bits),
+                Some(f) => assert_eq!(&bits, f, "{}: the same values on every kernel", k.name()),
+            }
+        }
     }
 }
