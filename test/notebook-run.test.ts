@@ -219,6 +219,35 @@ test("--confine: links planted to the outside, before and during the run, are re
   rmSync(p.root, { recursive: true, force: true });
 });
 
+test("--confine: a descriptor the program inherited is refused at every entry point (_fs, open(), os), read and write; stdio works", () => {
+  const { openSync, closeSync } = require("node:fs");
+  const root = folder(), work = join(root, "work");
+  mkdirSync(work);
+  const rd = join(root, "read-sentinel"), wr = join(root, "write-sentinel");
+  writeFileSync(rd, "DUMMY-FD-SENTINEL");
+  writeFileSync(wr, "UNCHANGED");
+  const probe = (label: string, expr: string) => `try:\n    _r = ${expr}\n    print(${JSON.stringify(label)}, 'ALLOWED', repr(_r)[:40])\nexcept BaseException as _e:\n    print(${JSON.stringify(label)}, 'DENIED')`;
+  writeFileSync(join(work, "f.ipynb"), nb([
+    { id: "a", src: probe("fs-read-3", "__import__('_fs').read(3)") },
+    { id: "b", src: probe("open-read-3", "open(3).read()") },
+    { id: "c", src: probe("os-read-3", "__import__('os').read(3, 100)") },
+    { id: "d", src: probe("fs-write-4", "__import__('_fs').write(4, b'X', False)") },
+    { id: "e", src: probe("open-write-4", "open(4, 'w').write('X')") },
+    { id: "f", src: probe("os-write-4", "__import__('os').write(4, b'X')") },
+    { id: "g", src: "import os\nfd = os.open('own.txt', os.O_WRONLY | os.O_CREAT)\nos.write(fd, b'mine')\nos.close(fd)\nprint('own-fd', open('own.txt').read())\nprint('stdout-ok')" },
+  ]));
+  const r3 = openSync(rd, "r"), w4 = openSync(wr, "r+");
+  try {
+    const fds: any[] = ["ignore", "pipe", "pipe"];
+    // (the inherited descriptors at 3 and 4: the outside files, as a careless parent would pass them)
+    const r = spawnSync(process.execPath, [CLI, "notebook", "run", "f.ipynb", "--json", "--confine", work], { cwd: work, encoding: "utf8", timeout: 120_000, stdio: [...fds, r3, w4] });
+    const got = lines(json(r));
+    for (const l of ["fs-read-3 DENIED", "open-read-3 DENIED", "os-read-3 DENIED", "fs-write-4 DENIED", "open-write-4 DENIED", "os-write-4 DENIED", "own-fd mine", "stdout-ok"]) assert.ok(got.includes(l), `${l} in ${JSON.stringify(got)}`);
+  } finally { closeSync(r3); closeSync(w4); }
+  assert.equal(readFileSync(wr, "utf8"), "UNCHANGED");
+  rmSync(root, { recursive: true, force: true });
+});
+
 test("--confine: a notebook outside the folders named, or reached through a link, is refused before anything runs", () => {
   const p = planted();
   const r = run(p.work, ["p.ipynb", "--confine", p.outside]);

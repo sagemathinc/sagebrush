@@ -1965,8 +1965,14 @@ export function setConfine(roots: string[]): void {
 }
 export const isConfined = (): boolean => confineRoots !== null;
 const refuse = (p: string): never => { throw Object.assign(new Error(`Requires access to "${p}", outside the folders this run may use`), { code: "ERR_ACCESS_DENIED" }); };
+// (the descriptors a confined program may use: the standard three, and those os.open opened here through a checked
+// path; one admission for every entry point that takes a descriptor (_fs, open(), os.read and the rest): any other
+// number the process holds, inherited or the runtime's own, is refused, and so is anything else that isn't a path)
+const checkedFds = new Set<number>();
+export const fdAdmitted = (fd: number): boolean => Number.isInteger(fd) && fd >= 0 && (fd <= 2 || checkedFds.has(fd));
 function confined(p: any): any {
-  if (typeof p !== "string") return p; // (a file descriptor: it was opened through a checked path)
+  if (typeof p === "number") return fdAdmitted(p) ? p : refuse(`descriptor ${p}`);
+  if (typeof p !== "string") return refuse(String(p).slice(0, 80));
   return confinedPath(confineRoots!, cwd(), p);
 }
 /** `p` (relative to `base`) as the path to use, or a refusal (an Error with code ERR_ACCESS_DENIED), under `roots`
@@ -2378,7 +2384,7 @@ newBuiltinModule("os", (m) => {
   // (confined, `notebook run --confine`: only the standard three and the descriptors os.open opened here, through a
   // checked path; any other number the process has, inherited or the runtime's own, is EBADF, never reached)
   const fdOpen = (fd: number): number => {
-    if (fd < 0 || (isConfined() && fd > 2 && !cliPos.has(fd))) throw Object.assign(new Error("EBADF"), { code: "EBADF", errno: -9 });
+    if (fd < 0 || (isConfined() && !fdAdmitted(fd))) throw Object.assign(new Error("EBADF"), { code: "EBADF", errno: -9 });
     return fd;
   };
   const cWide = (x: any, c: string): bigint => {
@@ -2402,6 +2408,7 @@ newBuiltinModule("os", (m) => {
     }
     const fd = fs.openSync(at(q), fl, md);
     cliPos.set(fd, { pos: 0, append: (fl & 1024) !== 0 });
+    checkedFds.add(fd);
     return fd;
   });
   m.open.$sig = { args: ["path", "flags", "mode"], posonly: 0, vararg: null, kwonly: ["dir_fd"], kwarg: null, defaults: [0o777], kwdefaults: { dir_fd: null } };
@@ -2409,6 +2416,7 @@ newBuiltinModule("os", (m) => {
     const n = cInt(fd);
     fs.closeSync(fdOpen(n));
     cliPos.delete(n);
+    checkedFds.delete(n);
     return null;
   }));
   fn(m, "read", (fd: any, n: any) => fdCall(() => {
