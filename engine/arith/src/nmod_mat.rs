@@ -821,6 +821,21 @@ fn inversions_odd(v: &[usize]) -> bool {
 mod tests {
     use super::*;
 
+    /// The delayed reductions' block: batch_len products of residues sum in
+    /// a u128 without overflow, and one more could overflow (or the block is
+    /// capped at 2^30), at every bit length of p up to nmod's largest
+    /// (modular composition's matrix product relies on it).
+    #[test]
+    fn the_accumulation_block_fits_a_u128() {
+        for p in [2u64, 3, 65537, (1 << 32) - 5, (1 << 40) + 15, (1 << 62) - 57, (1 << 63) + 29, u64::MAX - 58] {
+            let m = Modulus::new(p);
+            let b = batch_len(&m) as u128;
+            let sq = (p as u128 - 1) * (p as u128 - 1);
+            assert!(b >= 1 && b.checked_mul(sq).is_some(), "p {}", p);
+            assert!(b == 1 << 30 || (b + 1).checked_mul(sq).is_none(), "p {}", p);
+        }
+    }
+
     /// The Poll flushes its accumulator when it drops while unwinding (a
     /// panic, or a Stop raised outside its own poll).
     #[test]
