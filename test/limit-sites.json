@@ -13819,6 +13819,26 @@
   "owner": "pyjs containers/runtime memory",
   "row": "src-4"
  },
+ "src/runtime/types.ts :: toBytes :: if (n > 9007199254740991n) raise(T.MemoryError, `${what}: past JavaScript's limit of 2**53 - 1 bytes`); #0": {
+  "class": "2",
+  "disposition": {
+   "2": {
+    "route": "bytes-count-bound"
+   }
+  },
+  "owner": "python (@sagebrush-python)",
+  "reason": "2**53 - 1, JavaScript's limit on a typed array's length (ECMAScript ToIndex), checked before allocating: past it a MemoryError, a physical limit of the host (an engine may stop lower, its RangeError then a MemoryError too); not a cap of ours"
+ },
+ "src/runtime/types.ts :: toBytes :: if (!array && n > 9223372036854775807n - 33n) raise(T.OverflowError, \"byte string is too large\"); #0": {
+  "class": "2",
+  "disposition": {
+   "2": {
+    "route": "bytes-count-bound"
+   }
+  },
+  "owner": "python (@sagebrush-python)",
+  "reason": "a memory guard on bytes(n)'s count, on the bytes-count-bound route with every refusal in toBytes: past PY_SSIZE_T_MAX (2**63 - 1) less a bytes object's 33-byte header, an OverflowError, the same limit, exception and message as 64-bit CPython's own; not a cap of ours"
+ },
  "src/runtime/zlib.ts ::  :: import { ARRAY_LIMITS } from \"./numpy\"; #0": {
   "class": "2",
   "disposition": {
