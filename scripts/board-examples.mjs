@@ -11,8 +11,9 @@
 //   node scripts/board-examples.mjs OUTDIR
 import { readFileSync, writeFileSync, readdirSync, statSync, existsSync } from "node:fs";
 import { join, relative, dirname, basename, extname } from "node:path";
+import { fileURLToPath } from "node:url";
 
-const root = join(dirname(new URL(import.meta.url).pathname), "..");
+const root = join(dirname(fileURLToPath(import.meta.url)), "..");
 const out = process.argv[2] ?? join(root, "web", "dist", "board", "examples");
 
 // ---------------------------------------------------------------- integers
