@@ -450,6 +450,18 @@ def vm_identity_of(rec: dict) -> dict:
     return {k: rec.get(k) for k in VM_IDENTITY_KEYS}
 
 
+def retired_by_type(events: list[dict]) -> dict:
+    """How many VMs of each type this ledger retired (setup failures and
+    failed points alike), for the run's report."""
+    types = {e["name"]: e["type"] for e in events if e["ev"] == "reserve"}
+    out: dict[str, int] = {}
+    for e in events:
+        if e["ev"] == "retired":
+            tk = types.get(e["name"], "?")
+            out[tk] = out.get(tk, 0) + 1
+    return dict(sorted(out.items()))
+
+
 def differing(a: dict, b: dict) -> list[str]:
     """The keys where two identities differ (one level into a nested
     object), for a fatal message that says what changed."""
@@ -505,28 +517,31 @@ class Rows:
         (in the VM's identity), checked under that policy. A point recovered
         without its VM's name is checked against its type only."""
         check_engine_pin(tk, rec, self.plan["pin_policy"])
+        # (every check before anything is recorded: a rejected point leaves
+        # neither the type's identity nor its VM's)
+        path = self.run_dir / "rows" / tk / "identity.json"
+        ident = identity_of(rec)
+        have = json.loads(path.read_text()) if path.exists() else None
+        if have is not None and have != ident:
+            raise Fatal(
+                f"{tk}: a point's identity differs from the type's (another machine,"
+                f" toolchain or flags; differs in {', '.join(differing(have, ident))})"
+            )
+        mine = seen = None
         if vm and vm != "recovered":
             mine = vm_identity_of(rec)
             seen = self.vms.get(vm)
-            if seen is None:
-                self.ledger.append(
-                    {"ev": "vm-identity", "type": tk, "name": vm, "identity": mine}
-                )
-                self.vms[vm] = mine
-            elif seen != mine:
+            if seen is not None and seen != mine:
                 raise Fatal(
                     f"{tk}: {vm}'s build changed between its points"
                     f" (differs in {', '.join(differing(seen, mine))})"
                 )
-        path = self.run_dir / "rows" / tk / "identity.json"
-        ident = identity_of(rec)
-        if path.exists():
-            have = json.loads(path.read_text())
-            if have != ident:
-                raise Fatal(
-                    f"{tk}: a point's identity differs from the type's (another machine,"
-                    f" toolchain or flags; differs in {', '.join(differing(have, ident))})"
-                )
+        if mine is not None and seen is None:
+            self.ledger.append(
+                {"ev": "vm-identity", "type": tk, "name": vm, "identity": mine}
+            )
+            self.vms[vm] = mine
+        if have is not None:
             return
         make_dirs(path.parent)
         tmp = path.with_name(".identity.json.tmp")
@@ -1339,7 +1354,14 @@ class Driver:
         ledger. "ok"; "failed" when vm-setup.sh ran and failed, which stops
         the type (the same commit fails the same way); "unreachable" or
         "transfer" when ssh never answered or a copy failed, which only
-        retires that VM."""
+        retires that VM.
+
+        A TransferError raised here (the payload's copy, or its checksum
+        read back) is "transfer". So is ssh's own exit status, 255, from the
+        build command: the connection failed or dropped, and nothing says
+        the build itself did. A build that really exits 255 is retried on
+        another VM and stops the type after SETUP_TRIES in a row, like any
+        other setup failure."""
         t0 = self.clock()
         want = self.plan["archive_sha256"]
         up, detail = self.wait_ssh(vm)
@@ -1381,6 +1403,8 @@ class Driver:
                 self.plan["types"][vm["type"]]["expected_build_hours"] * 3600 * 2 + 600,
             )
             ok, ran = r["status"] == "ok", True
+            if r["status"] == "error" and r.get("exit") == 255:
+                ran = False
         except TransferError as e:
             ok, r = False, {"output": str(e)}
         self.ledger.append(
@@ -1474,8 +1498,10 @@ class Driver:
                                     "detail": state,
                                 }
                             )
-                            n = self.setup_failures.get(tk, 0) + 1
-                            self.setup_failures[tk] = n
+                            # (under the lock: a type's workers share it)
+                            with self.spend:
+                                n = self.setup_failures.get(tk, 0) + 1
+                                self.setup_failures[tk] = n
                             if n >= SETUP_TRIES:
                                 self.stopped[tk] = (
                                     f"{n} VMs in a row could not be set up (last: {state})"
@@ -1490,7 +1516,8 @@ class Driver:
                             self.reconcile()
                         vm = None
                         continue
-                    self.setup_failures[tk] = 0
+                    with self.spend:
+                        self.setup_failures[tk] = 0
                 with self.spend:
                     if not queue or self.stop.is_set():
                         return
@@ -1636,6 +1663,7 @@ class Driver:
             "charged_hours": round(charged_hours(self.ledger.events, self.clock()), 3),
             "envelope_hours": self.plan["envelope_hours"],
             "stopped_types": self.stopped,
+            "retired": retired_by_type(self.ledger.events),
             "fatal": self.fatal,
         }
 

@@ -417,6 +417,62 @@ class Acceptance(unittest.TestCase):
                 "bc-vm",
             )
 
+    def test_a_rejected_point_records_no_vm_identity(self):
+        self.rows.check_identity("x86", row(build={"rustc": "1.99.2"}), "bc-vm-0")
+        with self.assertRaises(shard.Fatal):
+            self.rows.check_identity("x86", row(), "bc-vm-1")
+        self.assertEqual(
+            [e["name"] for e in self.led.events if e["ev"] == "vm-identity"],
+            ["bc-vm-0"],
+        )
+        self.assertNotIn("bc-vm-1", self.rows.vms)
+
+    def test_a_real_point_from_a_run_is_accepted(self):
+        # (an accepted point of a full run on an arm VM, byte for byte: the
+        # schema, the engine pin under "track", and both identities)
+        data = (
+            Path(__file__).parent / "testdata" / "shard-point-arm.json"
+        ).read_bytes()
+        rec = json.loads(data)
+        key = f"{rec['row']}:{rec['size']}"
+        self.rows.plan = self.plan = plan(
+            commit=rec["commit"],
+            pin_policy="track",
+            points=[key],
+            expected_inputs={
+                key: {
+                    "n": rec["n"],
+                    "variants": rec["variants"],
+                    "input_hash": rec["expected_input_hash"],
+                }
+            },
+        )
+        sha, got = shard.check_row(
+            data, hashlib.sha256(data).hexdigest().encode(), key, self.plan, rec["n"]
+        )
+        self.assertEqual(got["status"], "ok")
+        self.rows.check_identity("arm", got, "bc-run-arm-2")
+        ident = json.loads((self.d / "rows/arm/identity.json").read_text())
+        self.assertEqual(
+            sorted(ident),
+            [
+                "backends",
+                "build",
+                "machine",
+                "pin_policy",
+                "protocol",
+                "threads",
+                "versions",
+            ],
+        )
+        self.assertNotIn("label", ident["machine"])
+        self.assertEqual(ident["pin_policy"], "track")
+        # (another VM of the type, with its own build of the same payload)
+        other = dict(got, artifacts=dict(got["artifacts"], native="0" * 64), mem_cap=1)
+        other["engine_pin"] = dict(got["engine_pin"])
+        self.rows.check_identity("arm", other, "bc-run-arm-7")
+        self.assertEqual(sorted(self.rows.vms), ["bc-run-arm-2", "bc-run-arm-7"])
+
     def test_a_rejected_point_is_kept_for_diagnosis(self):
         self.rows.check_identity("x86", row(build={"rustc": "1.99.2"}), "bc-vm-0")
         with self.assertRaisesRegex(shard.Fatal, "differs in build.rustc"):
@@ -719,6 +775,8 @@ class FakeRemote:
         self.unready = {}
         # (VMs whose host key the client refuses: what ssh says, every time)
         self.refuse = {}
+        # (VMs whose build command's connection drops, that many times)
+        self.build_exit_255 = {}
         self.build_fails, self.preempt_on, self.fetch_fails, self.corrupt = (
             False,
             set(),
@@ -768,6 +826,10 @@ class FakeRemote:
             self.log.append(("setup", name))
             if self.on_setup:
                 self.on_setup(name)
+            if self.build_exit_255.get(name, 0) > 0:
+                # (the connection dropped under the build: ssh's own 255)
+                self.build_exit_255[name] -= 1
+                return {"status": "error", "exit": 255, "output": "Connection reset"}
             return {"status": "error" if self.build_fails else "ok", "output": "build"}
         if self.on_run:
             self.on_run(name)
@@ -1017,6 +1079,36 @@ class Drivers(unittest.TestCase):
         )
         self.assertEqual(out, "[key] [key] ssh-rsa [key] ?[31mx?")
         self.assertEqual(len(shard.ssh_detail("y. " * 5000)), shard.SSH_DETAIL)
+
+    def test_a_dropped_build_connection_retires_the_vm_not_the_type(self):
+        first = "bc-0123456789abcdef-x86-0"
+        orig = self.prov.inst
+
+        def inst(name, *a):
+            if name == first:
+                self.remote.build_exit_255[name] = 1
+            return orig(name, *a)
+
+        self.prov.inst = inst
+        rep = self.driver().run()
+        self.assertEqual((rep["accepted"], rep["stopped_types"]), (3, {}))
+        self.assertEqual(
+            [(e["name"], e["detail"]) for e in self.events("retired")],
+            [(first, "transfer")],
+        )
+        self.assertEqual(rep["retired"], {"x86": 1})
+
+    def test_the_report_counts_retired_vms_by_type(self):
+        rep = self.driver().run()
+        self.assertEqual(rep["retired"], {})
+        evs = [
+            {"ev": "reserve", "name": "a", "type": "x86"},
+            {"ev": "reserve", "name": "b", "type": "arm"},
+            {"ev": "retired", "name": "a"},
+            {"ev": "retired", "name": "b"},
+            {"ev": "retired", "name": "a"},
+        ]
+        self.assertEqual(shard.retired_by_type(evs), {"arm": 1, "x86": 2})
 
     def test_three_unreachable_vms_stop_the_type(self):
         orig = self.prov.inst
