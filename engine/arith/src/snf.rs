@@ -24,7 +24,7 @@
 //! than the last are (random matrices), and large when they are not
 //! (p I, repeated prime powers): e >= t_1 ... t_(n-1).
 //!
-//! Units (`cost::tally`), counted here in a local `zmat::Acc` and flushed
+//! Units (`cost::tally`), counted here in a `cost::Local` and flushed
 //! once per pass of the elimination: on the word path every operation
 //! reduces modulo e, so each is ModArith, one unit (a row or column
 //! update entry, a quotient or divisibility test, a quotient step of the
@@ -34,9 +34,9 @@
 //! e through the Gcd units.  The determinant and the solve count
 //! themselves.
 
-use crate::cost::{bigdiv_units, bigmul_units, publish_progress, tally_all, Family, Units, FAMILIES};
+use crate::cost::{bigdiv_units, biggcd_units, bigmul_units, Family, Local, Units, FAMILIES};
 use std::cell::Cell;
-use crate::zmat::{self, biggcd_units, limbs, Acc, ZMat};
+use crate::zmat::{self, limbs, ZMat};
 use num_integer::Integer;
 use num_traits::{One, Signed, ToPrimitive, Zero};
 use sagebrush_bigint::BigInt;
@@ -190,7 +190,7 @@ impl Big {
     fn count(&self, u: Units) {
         let mut v = self.units.get();
         for (a, &x) in v.iter_mut().zip(&u.0) {
-            *a += x;
+            *a = a.saturating_add(x);
         }
         self.units.set(v);
     }
@@ -263,8 +263,9 @@ impl Zn for Big {
 
 /// The elimination's count: the word path's bulk count of entry
 /// operations, added with the ring's own counts to the thread's tally
-/// about every 2^16 units (at the existing Stop checks, as nmod's kernels
-/// do) and when dropped, also while unwinding from a Stop, so none is lost.
+/// through a [`Local`] about every 2^16 units (at the existing Stop checks,
+/// as nmod's kernels do) and when dropped, also while unwinding from a
+/// Stop, so none is lost.
 struct Count<'a, R: Zn> {
     r: &'a R,
     bulk: u64,
@@ -279,14 +280,12 @@ impl<R: Zn> Count<'_, R> {
         }
     }
     fn flush(&mut self) {
-        let mut u = self.r.take();
+        let mut l = Local::new();
+        l.add(Units(self.r.take()));
         if R::WORD {
-            u[Family::ModArith as usize] += std::mem::take(&mut self.bulk);
+            l.n(Family::ModArith, std::mem::take(&mut self.bulk));
         }
-        if u.iter().any(|&x| x != 0) {
-            tally_all(&u);
-            publish_progress();
-        }
+        l.flush();
     }
 }
 
@@ -451,12 +450,12 @@ pub fn smith_mod(a: &ZMat, e: &BigInt) -> Vec<BigInt> {
                     }
                 })
                 .collect();
-            Acc::new().n(Family::ModArith, units);
+            Local::new().n(Family::ModArith, units);
             smith_in(&r, a.rows, a.cols, m).iter().map(Word::integer).collect()
         }
         None => {
             let r = Big::new(e);
-            Acc::new().add(r.residue_units(a));
+            Local::new().add(r.residue_units(a));
             let m = a.d.iter().map(|x| r.residue(x)).collect();
             smith_in(&r, a.rows, a.cols, m)
         }
@@ -467,7 +466,7 @@ pub fn smith_mod(a: &ZMat, e: &BigInt) -> Vec<BigInt> {
 /// least common denominator, reduced here; d itself (the classical route)
 /// if delta does not divide d, which a correct solve never gives.
 fn modulus_from(d: &BigInt, n: &ZMat, den: &BigInt) -> BigInt {
-    let mut acc = Acc::new();
+    let mut acc = Local::new();
     // (the fold stops at 1)
     let mut g = den.clone();
     for v in &n.d {
@@ -506,7 +505,7 @@ pub fn invariants_nonsingular(a: &ZMat, d: &BigInt, solved: Option<(ZMat, BigInt
     // times those of a / g, whose e is smaller by g^(n-1) at least (a
     // common factor would otherwise make every invariant, and e, large:
     // p I, or p U for a unimodular U)
-    let mut acc = Acc::new();
+    let mut acc = Local::new();
     // (the fold stops at 1, where nearly every matrix gets within a few
     // entries)
     let mut g = BigInt::zero();
@@ -552,7 +551,7 @@ pub fn invariants_nonsingular(a: &ZMat, d: &BigInt, solved: Option<(ZMat, BigInt
 fn invariants_with(a: &ZMat, d: &BigInt, e: &BigInt) -> Vec<BigInt> {
     let n = a.rows;
     let mut t = if e.is_one() { vec![BigInt::one(); n - 1] } else { smith_mod(a, e)[..n - 1].to_vec() };
-    let mut acc = Acc::new();
+    let mut acc = Local::new();
     let mut lp = 1;
     for x in &t {
         acc.add(bigmul_units(lp, limbs(x)));
@@ -586,7 +585,7 @@ fn invariants_diagonal(a: &ZMat) -> Option<Vec<BigInt>> {
     if (0..n).any(|i| (0..n).any(|j| i != j && !a.d[i * n + j].is_zero())) {
         return None;
     }
-    let mut acc = Acc::new();
+    let mut acc = Local::new();
     let mut v: Vec<BigInt> = (0..n).map(|i| a.d[i * n + i].abs()).collect();
     for i in 0..n {
         for j in i + 1..n {

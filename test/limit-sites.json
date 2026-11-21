@@ -304,6 +304,46 @@
   "owner": "engine arith (kernel metering)",
   "reason": "the BigInt unit helpers' saturating arithmetic: a count that overflows u64 saturates (an accounting figure, never a refusal)"
  },
+ "engine/arith/src/cost/tally.rs :: biggcd_units :: let n = bigeuclid_units(la, lb).total().unwrap_or(u64::MAX).saturating_mul(lb as u64); #0": {
+  "class": "none",
+  "owner": "engine arith (kernel metering)",
+  "reason": "the BigInt unit helpers' saturating arithmetic: a count that overflows u64 saturates (an accounting figure, never a refusal)"
+ },
+ "engine/arith/src/cost/tally.rs :: bigsqrt_units :: let l = usize::try_from(bits.div_ceil(64)).unwrap_or(usize::MAX).max(1); #0": {
+  "class": "none",
+  "owner": "engine arith (kernel metering)",
+  "reason": "the BigInt unit helpers' saturating arithmetic: a count that overflows u64 saturates (an accounting figure, never a refusal)"
+ },
+ "engine/arith/src/cost/tally.rs :: bigsqrt_units :: let n = bigdiv_units(l, l.div_ceil(2)).total().unwrap_or(u64::MAX).saturating_mul(steps); #0": {
+  "class": "none",
+  "owner": "engine arith (kernel metering)",
+  "reason": "the BigInt unit helpers' saturating arithmetic: a count that overflows u64 saturates (an accounting figure, never a refusal)"
+ },
+ "engine/arith/src/cost/tally/tests.rs :: a_local_saturates :: assert_eq!((held.get(Family::Gcd), held.get(MulSchool), held.get(Family::Div)), (u64::MAX, u64::MAX, u64::MAX)); #0": {
+  "class": "none",
+  "owner": "engine arith (kernel metering)",
+  "reason": "test code: the kernel metering's pinned units, Stop poll counts and unwinding tests (an accounting meter with no bound, saturation checks of the unit helpers); refuses nothing itself"
+ },
+ "engine/arith/src/cost/tally/tests.rs :: a_local_saturates :: l.add(biggcd_units(usize::MAX, usize::MAX)); #0": {
+  "class": "none",
+  "owner": "engine arith (kernel metering)",
+  "reason": "test code: the kernel metering's pinned units, Stop poll counts and unwinding tests (an accounting meter with no bound, saturation checks of the unit helpers); refuses nothing itself"
+ },
+ "engine/arith/src/cost/tally/tests.rs :: a_local_saturates :: l.n(Family::Gcd, u64::MAX); #0": {
+  "class": "none",
+  "owner": "engine arith (kernel metering)",
+  "reason": "test code: the kernel metering's pinned units, Stop poll counts and unwinding tests (an accounting meter with no bound, saturation checks of the unit helpers); refuses nothing itself"
+ },
+ "engine/arith/src/cost/tally/tests.rs :: a_local_saturates :: l.times(2, bigsqrt_units(u64::MAX)); #0": {
+  "class": "none",
+  "owner": "engine arith (kernel metering)",
+  "reason": "test code: the kernel metering's pinned units, Stop poll counts and unwinding tests (an accounting meter with no bound, saturation checks of the unit helpers); refuses nothing itself"
+ },
+ "engine/arith/src/cost/tally/tests.rs :: a_local_saturates :: l.times(u64::MAX, bigmul_units(2, 2)); #0": {
+  "class": "none",
+  "owner": "engine arith (kernel metering)",
+  "reason": "test code: the kernel metering's pinned units, Stop poll counts and unwinding tests (an accounting meter with no bound, saturation checks of the unit helpers); refuses nothing itself"
+ },
  "engine/arith/src/cost/tally/tests.rs :: acct :: Meter::accounting(u64::MAX) #0": {
   "class": "none",
   "owner": "engine arith (kernel metering)",
@@ -324,12 +364,22 @@
   "owner": "engine arith (kernel metering)",
   "reason": "test code: the kernel metering's pinned units, Stop poll counts and unwinding tests (an accounting meter with no bound, saturation checks of the unit helpers); refuses nothing itself"
  },
+ "engine/arith/src/cost/tally/tests.rs :: bigint_helpers_pinned :: assert_eq!(only(biggcd_units(usize::MAX, usize::MAX), Family::Gcd), cap(cap(2 * big) as u128 * big)); #0": {
+  "class": "none",
+  "owner": "engine arith (kernel metering)",
+  "reason": "test code: the kernel metering's pinned units, Stop poll counts and unwinding tests (an accounting meter with no bound, saturation checks of the unit helpers); refuses nothing itself"
+ },
  "engine/arith/src/cost/tally/tests.rs :: bigint_helpers_pinned :: assert_eq!(only(bigmul_units(usize::MAX, 0), Family::MulSchool), 0); #0": {
   "class": "none",
   "owner": "engine arith (kernel metering)",
   "reason": "test code: the kernel metering's pinned units, Stop poll counts and unwinding tests (an accounting meter with no bound, saturation checks of the unit helpers); refuses nothing itself"
  },
  "engine/arith/src/cost/tally/tests.rs :: bigint_helpers_pinned :: assert_eq!(only(bigmul_units(usize::MAX, usize::MAX), Family::MulSchool), cap(big * big)); #0": {
+  "class": "none",
+  "owner": "engine arith (kernel metering)",
+  "reason": "test code: the kernel metering's pinned units, Stop poll counts and unwinding tests (an accounting meter with no bound, saturation checks of the unit helpers); refuses nothing itself"
+ },
+ "engine/arith/src/cost/tally/tests.rs :: bigint_helpers_pinned :: assert_eq!(only(bigsqrt_units(u64::MAX), Family::Div), u64::MAX); #0": {
   "class": "none",
   "owner": "engine arith (kernel metering)",
   "reason": "test code: the kernel metering's pinned units, Stop poll counts and unwinding tests (an accounting meter with no bound, saturation checks of the unit helpers); refuses nothing itself"

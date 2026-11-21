@@ -262,6 +262,20 @@ fn bigint_helpers_pinned() {
     assert_eq!(only(bigdiv_units(0, 0), Family::Div), 1);
     assert_eq!(only(bigeuclid_units(0, 0), Family::Gcd), 1);
     assert_eq!(only(bigmul_units(usize::MAX, 0), Family::MulSchool), 0);
+    // a full gcd: bigeuclid_units at the operands' sizes, times the smaller
+    assert_eq!(only(biggcd_units(10, 4), Family::Gcd), 224);
+    assert_eq!(only(biggcd_units(4, 10), Family::Gcd), 224);
+    assert_eq!(only(biggcd_units(4, 4), Family::Gcd), 32);
+    assert_eq!(only(biggcd_units(1, 1), Family::Gcd), 2);
+    assert_eq!(only(biggcd_units(5, 0), Family::Gcd), 0);
+    assert_eq!(only(biggcd_units(usize::MAX, usize::MAX), Family::Gcd), cap(cap(2 * big) as u128 * big));
+    // a square root: bitlen(bits) divisions of l limbs by ceil(l / 2)
+    assert_eq!(only(bigsqrt_units(1000), Family::Div), 720);
+    assert_eq!(only(bigsqrt_units(64), Family::Div), 7);
+    assert_eq!(only(bigsqrt_units(0), Family::Div), 1);
+    // (2^58 limbs on a 64-bit usize, usize::MAX on a 32-bit one: capped
+    // either way)
+    assert_eq!(only(bigsqrt_units(u64::MAX), Family::Div), u64::MAX);
     // through a region, charged to the meter
     let mut meter = acct();
     metered(&mut meter, || {
@@ -371,4 +385,64 @@ fn a_poll_flushes_when_unwinding() {
     let now = tallied();
     assert_eq!(now.get(Family::MulSchool).wrapping_sub(before.get(Family::MulSchool)), 1000);
     assert_eq!(now.get(Family::ModArith).wrapping_sub(before.get(Family::ModArith)), 3);
+}
+
+/// A Local holds its counts until flushed: when it drops while unwinding
+/// (a panic with counts held), they reach the tally.
+#[test]
+fn a_local_flushes_when_unwinding() {
+    let before = tallied();
+    let r = std::panic::catch_unwind(|| {
+        let mut l = Local::new();
+        l.n(Family::Gcd, 5);
+        l.times(3, bigmul_units(2, 2));
+        assert_eq!(tallied().get(Family::Gcd), before.get(Family::Gcd), "held, not tallied yet");
+        panic!("mid-function");
+    });
+    assert!(r.is_err());
+    let now = tallied();
+    assert_eq!(now.get(Family::Gcd).wrapping_sub(before.get(Family::Gcd)), 5);
+    assert_eq!(now.get(MulSchool).wrapping_sub(before.get(MulSchool)), 12);
+}
+
+/// A Local's flush tallies, then publishes to the outermost region's
+/// progress (a nested region's cell is set only at its end), then zeroes.
+#[test]
+fn a_local_flush_publishes_to_the_outermost_progress() {
+    let (outer_p, inner_p) = (Progress::new(), Progress::new());
+    let (mut outer, mut inner) = (acct(), acct());
+    metered_with(&mut outer, Some(outer_p.clone()), || {
+        metered_with(&mut inner, Some(inner_p.clone()), || {
+            let mut l = Local::new();
+            l.n(Family::Div, 9);
+            assert_eq!(outer_p.units().get(Family::Div), 0, "nothing published before the flush");
+            l.flush();
+            assert_eq!(l.held(), Units::default(), "zeroed");
+            assert_eq!(outer_p.units().get(Family::Div), 9);
+            assert_eq!(inner_p.units().get(Family::Div), 0);
+        });
+    });
+    assert_eq!(inner_p.units().get(Family::Div), 9);
+    assert_eq!((outer.units().get(Family::Div), inner.units().get(Family::Div)), (9, 9));
+    // without a region, a flush only tallies
+    let before = tallied();
+    let mut l = Local::new();
+    l.n(Family::Div, 4);
+    drop(l);
+    assert_eq!(tallied().get(Family::Div).wrapping_sub(before.get(Family::Div)), 4);
+}
+
+/// A Local saturates: no count panics, whatever its size.
+#[test]
+fn a_local_saturates() {
+    let mut l = Local::new();
+    l.n(Family::Gcd, u64::MAX);
+    l.n(Family::Gcd, 1);
+    l.add(biggcd_units(usize::MAX, usize::MAX));
+    l.times(u64::MAX, bigmul_units(2, 2));
+    l.times(2, bigsqrt_units(u64::MAX));
+    let held = l.held();
+    assert_eq!((held.get(Family::Gcd), held.get(MulSchool), held.get(Family::Div)), (u64::MAX, u64::MAX, u64::MAX));
+    // (not flushed: the tally is wrapping, and these counts would wrap it)
+    std::mem::forget(l);
 }
