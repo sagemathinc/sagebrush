@@ -39,15 +39,20 @@ export interface Interpreter {
   close(): Promise<void>;
 }
 
-/** The interpreter in a worker thread of this process's own bundle (`entry`: by default the script running), in a
- * directory of its own, warmed up. `label` names a cell in what it says when one is stopped. */
-export async function startInterpreter(o: { mode: Mode; entry?: string; label?: (cell: string) => string }): Promise<Interpreter> {
-  const dir = mkdtempSync(join(tmpdir(), "sagebrush-run-"));
+/** The interpreter in a worker thread of this process's own bundle (the script running, exactly), in a
+ * directory of its own, warmed up. `label` names a cell in what it says when one is stopped. `dir`: its working
+ * directory instead (`notebook run`: the notebook's folder, also on sys.path, so the files beside it are there and
+ * import), which is the caller's and is never removed. `confine`: the only folders its program may use
+ * (src/runtime/modules.ts setConfine). */
+export async function startInterpreter(o: { mode: Mode; label?: (cell: string) => string; dir?: string; confine?: string[] }): Promise<Interpreter> {
+  const own = o.dir === undefined;
+  const dir = o.dir ?? mkdtempSync(join(tmpdir(), "sagebrush-run-"));
   const label = o.label ?? ((c: string) => c);
   const sinks = new Map<number, (m: any) => void>();
   const err: string[] = [];
   let dead: string | null = null, intr: Int32Array | null = null, nextId = 1;
-  const worker = new Worker(o.entry ?? require.main?.filename ?? process.argv[1], { workerData: { sagebrushBoardRun: { dir }, sagebrushLimits: sessionLimits() }, stdout: true, stderr: true });
+  // (the CLI's own entry, exactly: no caller chooses what the interpreter's worker runs)
+  const worker = new Worker(require.main?.filename ?? process.argv[1], { workerData: { sagebrushBoardRun: { dir, importable: !own, ...(o.confine ? { confine: o.confine } : {}) }, sagebrushLimits: sessionLimits() }, stdout: true, stderr: true });
   worker.stdout?.resume();
   worker.stderr?.on("data", (b) => { if (err.length < 100) err.push(String(b)); });
   await new Promise<void>((resolve) => {
@@ -83,7 +88,7 @@ export async function startInterpreter(o: { mode: Mode; entry?: string; label?: 
   if (!dead) await send({ cell: "warm-up", code: "" }, () => {}, START_GRACE_MS, true);
   return {
     send, dead: () => dead, err,
-    close: async () => { await worker.terminate(); rmSync(dir, { recursive: true, force: true }); },
+    close: async () => { await worker.terminate(); if (own) rmSync(dir, { recursive: true, force: true }); },
   };
 }
 
