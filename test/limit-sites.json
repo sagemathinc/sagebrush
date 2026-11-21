@@ -12091,7 +12091,7 @@
   "owner": "notebook run (@sagebrush-remote-compute)",
   "reason": "the plain-text report shows at most 40 lines of a cell's output (display protection; --json and --write keep all)"
  },
- "src/notebook-run.ts :: notebookRun :: if (!Number.isFinite(timeout) || timeout <= 0 || timeout > MAX_TIMEOUT) { say(`--timeout takes a number of seconds, more than 0 and at most ${MAX_TIMEOUT}`); return 2; } #0": {
+ "src/notebook-run.ts :: notebookRunInner :: if (!Number.isFinite(timeout) || timeout <= 0 || timeout > MAX_TIMEOUT) { say(`--timeout takes a number of seconds, more than 0 and at most ${MAX_TIMEOUT}`); return 2; } #0": {
   "class": "1",
   "disposition": {
    "1": "shared"
@@ -12293,7 +12293,7 @@
   "owner": "the reactive session (@sagebrush-latex)",
   "reason": "an item's time limit (the caller's --timeout), interrupted when over it: board-run's reviewed interpreter rules, the same lines registered there (limit-sweep manifest B17)"
  },
- "src/reactive-session.ts :: startInterpreter :: const worker = new Worker(o.entry ?? require.main?.filename ?? process.argv[1], { workerData: { sagebrushBoardRun: { dir, importable: !own, ...(o.confine ? { confine: o.confine } : {}) }, sagebrushLimits: sessionLimits() }, stdout: true, stderr: true }); #0": {
+ "src/reactive-session.ts :: startInterpreter :: const worker = new Worker(require.main?.filename ?? process.argv[1], { workerData: { sagebrushBoardRun: { dir, importable: !own, ...(o.confine ? { confine: o.confine } : {}) }, sagebrushLimits: sessionLimits() }, stdout: true, stderr: true }); #0": {
   "class": "none",
   "owner": "the reactive session (@sagebrush-latex)",
   "reason": "the session's limits handed to the interpreter's worker, now with notebook run's working folder, importability and --confine roots: board-run's reviewed interpreter rules (limit-sweep manifest B17)"
