@@ -1,7 +1,7 @@
 // Compile and run Python modules.
 
 import { readFileSync, existsSync, mkdirSync, writeFileSync, renameSync, readdirSync, rmSync } from "fs";
-import { join, resolve as resolvePath, dirname } from "path";
+import { join, posix, sep, resolve as resolvePath, dirname } from "path";
 import { runInThisContext, Script } from "vm";
 import { createHash } from "crypto";
 import { homedir } from "os";
@@ -366,6 +366,17 @@ R.loader.exec = (src: string, ns: any, mode: string, filename: string, opts: Com
 // the bundler defines globalThis.__PYJS_LIB__ (relative path -> source),
 // served under the virtual directory LIB_VIRTUAL.
 export const LIB_VIRTUAL = "/$pyjs/lib";
+// Paths under the virtual root (the embedded library, the bundled and optional packages' mounts) are POSIX paths on
+// every system; only a real file's path is the system's (path.win32 on Windows, whose join would turn
+// "/$pyjs/lib" + "fractions.py" into "\$pyjs\lib\fractions.py", a file no lookup finds).
+const VIRTUAL_ROOT = "/$pyjs";
+const isVirtual = (p: string) => p === VIRTUAL_ROOT || p.startsWith(VIRTUAL_ROOT + "/");
+/** `base` joined with `parts`: POSIX for a virtual path, the system's join for a real one. */
+export function pathJoin(base: string, ...parts: string[]): string {
+  return isVirtual(base) ? posix.join(base, ...parts) : join(base, ...parts);
+}
+// (whether path `p` is in directory `base`, either separator: a mounted package's folder may be a real one)
+const within = (p: string, base: string) => p.startsWith(base + "/") || (sep !== "/" && p.startsWith(base + sep));
 const embedded: Record<string, string> | undefined = (globalThis as any).__PYJS_LIB__;
 // A sandboxed runtime may refuse to look at a path: then it is not there.
 const safeExists = (p: string) => {
@@ -379,7 +390,7 @@ const safeExists = (p: string) => {
 // reading one fetches its part of the library, web/lib-lazy.ts)
 const fileExists = (p: string) => {
   // (a mounted package's directory holds exactly its checked files)
-  if (mountedBases.length && mountedBases.some((b) => p.startsWith(b + "/"))) return mounted.has(p);
+  if (mountedBases.length && mountedBases.some((b) => within(p, b))) return mounted.has(p);
   // (a relative path, from a relative sys.path entry, against os.chdir's
   // directory: a worker thread's is virtual, modules.ts)
   return embedded !== undefined && p.startsWith(LIB_VIRTUAL + "/") ? Object.hasOwn(embedded, p.slice(LIB_VIRTUAL.length + 1)) : safeExists(cwdPath(p));
@@ -387,7 +398,7 @@ const fileExists = (p: string) => {
 // A directory of the user's files, as a namespace package's portion (PEP 420): never the embedded library's nor a
 // mounted package's, which hold only their checked files
 const dirExists = (p: string) => {
-  if (mountedBases.some((b) => p === b || p.startsWith(b + "/"))) return false;
+  if (mountedBases.some((b) => p === b || within(p, b))) return false;
   if (embedded !== undefined && (p === LIB_VIRTUAL || p.startsWith(LIB_VIRTUAL + "/"))) return false;
   // (only a directory can be listed: a file, or nothing, throws)
   try {
@@ -444,26 +455,26 @@ R.loader.load = (name: string) => {
   const leaf = parts[parts.length - 1];
   const portions: string[] = [];
   for (const d of dirs) {
-    const pkg = join(d, leaf, "__init__.py");
+    const pkg = pathJoin(d, leaf, "__init__.py");
     if (fileExists(pkg)) return execFile(fileRead(pkg), pkg, name, true);
-    const file = join(d, leaf + ".py");
+    const file = pathJoin(d, leaf + ".py");
     if (fileExists(file)) return execFile(fileRead(file), file, name, false);
     // (absolute, as CPython's: a relative sys.path entry against the current directory)
-    if (dirExists(join(d, leaf))) portions.push(resolvePath(cwdPath(join(d, leaf))));
+    if (dirExists(pathJoin(d, leaf))) portions.push(resolvePath(cwdPath(pathJoin(d, leaf))));
   }
   // (not on sys.path: a package's, if the registry names one for it; then
   // this session's optional package set's)
   const found = packageModule(name, false) ?? optionalModule(name, false);
-  if (found !== null) return execFile(found[0], found[1], name, found[1].endsWith("/__init__.py"));
+  if (found !== null) return execFile(found[0], found[1], name, /[\\/]__init__\.py$/.test(found[1]));
   return portions.length ? namespacePackage(name, portions) : null;
 };
 // The portions of namespace package `leaf` in `dirs`, or null if a module or package of the name is there
 function nsPortions(dirs: string[], leaf: string): string[] | null {
   const portions: string[] = [];
   for (const d of dirs) {
-    if (fileExists(join(d, leaf, "__init__.py")) || fileExists(join(d, leaf + ".py"))) return null;
+    if (fileExists(pathJoin(d, leaf, "__init__.py")) || fileExists(pathJoin(d, leaf + ".py"))) return null;
     // (absolute, as CPython's: a relative sys.path entry against the current directory)
-    if (dirExists(join(d, leaf))) portions.push(resolvePath(cwdPath(join(d, leaf))));
+    if (dirExists(pathJoin(d, leaf))) portions.push(resolvePath(cwdPath(pathJoin(d, leaf))));
   }
   return portions;
 }
@@ -602,8 +613,8 @@ function mountPackage(id: string, name: string): string {
   if (done !== undefined) return done;
   const pkg = packageRegistry()!.packages[id];
   if (!pkg) throw (R.T as any).ImportError(`the registry names ${id} for '${name}' but has no entry for it`);
-  const dir = packagesDir(), base = join(dir, pkg.dir);
-  const got = new Map<string, string>();
+  const dir = packagesDir(), base = pathJoin(dir, pkg.dir);
+  const got = new Map<string, { text: string; path: string }>();
   for (const path of Object.keys(pkg.files).sort()) {
     const f = readPackageFile(dir, pkg, path);
     if (f === null) {
@@ -612,15 +623,15 @@ function mountPackage(id: string, name: string): string {
       throw e;
     }
     if (sha256Hex(f.bytes) !== pkg.files[path]) throw (R.T as any).ImportError(`${packageName(id)}: ${path} is not the file this build pinned`);
-    if (path.endsWith(".py")) got.set(join(base, path), f.text);
+    if (path.endsWith(".py")) got.set(pathJoin(base, path), { text: f.text, path });
   }
-  for (const [p, text] of got) {
+  for (const [p, { text, path }] of got) {
     mounted.set(p, text);
-    repoPaths.set(p, "packages/" + pkg.dir + "/" + p.slice(base.length + 1));
-    pkgKeys.set(p, pkg.dir + "/" + p.slice(base.length + 1));
+    repoPaths.set(p, "packages/" + pkg.dir + "/" + path);
+    pkgKeys.set(p, pkg.dir + "/" + path);
   }
   mountedBases.push(base);
-  const root = join(base, pkg.root);
+  const root = pathJoin(base, pkg.root);
   mountedRoots.set(id, root);
   return root;
 }
@@ -638,8 +649,8 @@ function packageModule(name: string, main: boolean): [string, string] | null {
     if (parent === undefined || parent === null || parent.__path__ === undefined) return null;
   }
   const id = reg.modules[name];
-  const at = join(mountPackage(id, name), ...name.split("."));
-  for (const p of [join(at, main ? "__main__.py" : "__init__.py"), at + ".py"]) {
+  const at = pathJoin(mountPackage(id, name), ...name.split("."));
+  for (const p of [pathJoin(at, main ? "__main__.py" : "__init__.py"), at + ".py"]) {
     const text = mounted.get(p);
     if (text !== undefined) return [text, p];
   }
@@ -680,8 +691,8 @@ export function findModuleSource(name: string): [string, string] | null {
   const leaf = parts[parts.length - 1];
   let found: [string, string] | null = null;
   for (const d of dirs) {
-    const main = join(d, leaf, "__main__.py");
-    const file = join(d, leaf + ".py");
+    const main = pathJoin(d, leaf, "__main__.py");
+    const file = pathJoin(d, leaf + ".py");
     if (fileExists(main)) found = [fileRead(main), main];
     else if (fileExists(file)) found = [fileRead(file), file];
     if (found !== null) break;
@@ -734,7 +745,7 @@ export function reservedNames() {
       if (isBuiltinModule(name)) return true;
       if (reg !== null && Object.hasOwn(reg.modules, name)) return true;
       const rel = name.split(".").join("/");
-      return fileExists(join(lib, rel + ".py")) || fileExists(join(lib, rel, "__init__.py"));
+      return fileExists(pathJoin(lib, rel + ".py")) || fileExists(pathJoin(lib, rel, "__init__.py"));
     },
     bundledDirs: new Set(reg === null ? [] : Object.values(reg.packages).map((p) => p.dir)),
   };
@@ -795,15 +806,15 @@ function mountOptional(id: string, name: string): string {
       err.name = name;
       throw err;
     }
-    const base = join(OPT_VIRTUAL, plan.S, p.dir);
+    const base = pathJoin(OPT_VIRTUAL, plan.S, p.dir);
     for (const [path, text] of src.files) {
-      const f = join(base, path);
+      const f = pathJoin(base, path);
       mounted.set(f, text);
       optKeys.set(f, { id: dep, path });
     }
-    if (pre !== null) for (const e of pre.entries) optPre.set(join(base, e.path) + (e.sage ? "\0sage" : "\0py"), { module: e.module, code: e.code, lineMap: e.lineMap });
+    if (pre !== null) for (const e of pre.entries) optPre.set(pathJoin(base, e.path) + (e.sage ? "\0sage" : "\0py"), { module: e.module, code: e.code, lineMap: e.lineMap });
     mountedBases.push(base);
-    optMounted.set(dep, join(base, p.root));
+    optMounted.set(dep, pathJoin(base, p.root));
   }
   if (!useSaid) {
     useSaid = true;
@@ -820,8 +831,8 @@ function optionalModule(name: string, main: boolean): [string, string] | null {
     if (parent === undefined || parent === null || parent.__path__ === undefined) return null;
   }
   const id = optional.plan.modules.get(name)!;
-  const at = join(mountOptional(id, name), ...name.split("."));
-  for (const p of [join(at, main ? "__main__.py" : "__init__.py"), at + ".py"]) {
+  const at = pathJoin(mountOptional(id, name), ...name.split("."));
+  for (const p of [pathJoin(at, main ? "__main__.py" : "__init__.py"), at + ".py"]) {
     const text = mounted.get(p);
     if (text !== undefined) return [text, p];
   }
