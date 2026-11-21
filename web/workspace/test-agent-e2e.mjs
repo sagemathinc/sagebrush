@@ -641,7 +641,7 @@ try {
   ok(await tryingSeen, "Connect says Connecting… while it tries");
   ok(await until(`(document.querySelector(".sbag-box .err")?.textContent ?? "").length > 0`, 15000), "a spent code: an answer in the dialog");
   const spent = await ev(`({ err: document.querySelector(".sbag-box .err").textContent, field: document.querySelector(".sbag-box input").value, btn: [...document.querySelectorAll(".sbag-box button.primary")].pop().textContent })`);
-  ok(spent.err === "This code was already used or has expired: ask your agent for a new link." && !/reach apps/.test(spent.err) && spent.field === "" && spent.btn === "Connect", `a spent code: said as spent, never the local-network advice; the field emptied, Connect again (${JSON.stringify(spent)})`);
+  ok(spent.err === "That code didn't work: it was already used, has expired or was mistyped. Ask your agent for a new link." && !/reach apps/.test(spent.err) && spent.field === "" && spent.btn === "Connect", `a spent code: said as spent, never the local-network advice; the field emptied, Connect again (${JSON.stringify(spent)})`);
 } finally {
   try { py.kill(); } catch {}
   try { chrome.kill(); } catch {}

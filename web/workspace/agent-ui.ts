@@ -39,8 +39,8 @@ export const OTHER_FAIL = "This browser couldn't reach the agent on this compute
 /** A code the agent refused (already used, or past its 5 minutes): never the local-network advice, which is for a
  *  connection that got no answer at all. */
 export const SPENT_CODE = (program?: string) => program === "sagebrush-agent"
-  ? "This code was already used or has expired. Use the newest link sagebrush-agent printed. Version 0.7.8 and later print a new one when the page goes away, or when you press Enter in its terminal; an earlier version needs a restart."
-  : "This code was already used or has expired: ask your agent for a new link.";
+  ? "That code didn't work: it was already used, has expired or was mistyped. Use the newest link sagebrush-agent printed (version 0.7.8 and later print a new one each time the page goes away; an earlier version needs a restart)."
+  : "That code didn't work: it was already used, has expired or was mistyped. Ask your agent for a new link.";
 export const ONLY_CODE = "That's only the code: ask your agent for its link (sagebrush.space/board/?pair=…), and open it.";
 
 /** What the person put in the Connect dialog: the agent's link (?pair=CODE&port=N, as pasted, with or without its

@@ -717,6 +717,25 @@ export async function runA14({ site, ok, want = () => true }) {
     ok(A.hellos > h0 && canon(g2) === canon(g1) && A.grants().length === n0 + 1 && (await P.ev(`document.querySelectorAll('.sbag-dlg').length`)) === 0, "A14-11: a navigation back within 10 min reconnects by itself, with the same grant (given again exactly, never widened), and no dialog", { hellos: A.hellos - h0, g1: canon(g1), g2: canon(g2) });
   });
 
+  // A14-11d: out to the Files page and back with the browser's Back (a back_forward navigation): reconnects by itself
+  await run("A14-11d", async (B, A) => {
+    const P = await B.tab();
+    await pair(P, A, site, "page");
+    await chat(P, A);
+    const n0 = A.grants().length;
+    await P.send("Page.navigate", { url: `${site}/` });
+    await P.until(`location.pathname === '/' && document.readyState === 'complete'`);
+    await sleep(1500);
+    const h0 = A.hellos;
+    const r0 = await P.send("Page.getNavigationHistory");
+    const hist = r0?.result ?? r0;
+    const back = hist.entries[hist.currentIndex - 1];
+    await P.load(() => P.send("Page.navigateToHistoryEntry", { entryId: back.id }));
+    const nav = await P.nav();
+    await P.until(`document.querySelector('#connect').textContent === 'Connected'`);
+    ok(nav === "back_forward" && A.hellos > h0 && A.grants().length === n0 + 1, "A14-11d: Back from the Files page (back_forward) reconnects by itself, the same grant", { nav, hellos: A.hellos - h0 });
+  });
+
   // A14-11c: out through a board page, which takes only its own record (takeReloadRecord's scope), then back: the
   // record is still there, and the return reconnects by itself
   await run("A14-11c", async (B, A) => {

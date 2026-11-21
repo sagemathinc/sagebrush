@@ -173,11 +173,11 @@ export const LATEX_LAZY_CAPS = {
   // (62,408 / 21,455: Nov 20 2026, the agent's bar as a compact chip with its menu (keyboard, focus kept across updates,
   //  controls only for the pairing shown; agent-ui.ts), measured on the shipped build of the head on master 300519cb with
   //  bun 1.4.4 and node 24.21.0: 62,344 / 21,391, + 64)
-  // (63,712 / 21,829: Nov 20 2026, A5 (reconnect): the Connect dialog offers Reconnect or remembered access first, a spent
+  // (63,737 / 21,833: Nov 20 2026, A5 (reconnect): the Connect dialog offers Reconnect or remembered access first, a spent
   //  code said as spent, a same-tab return within 10 min reconnects, another page's record is left alone, and a ?pair= link drops the page's own
   //  (agent-ui.ts, agent-pair.ts), measured on the shipped build of the head on master ddafeb50 with bun 1.4.4 and node
-  //  24.21.0: 63,648 / 21,765, + 64)
-  AGENT: { label: "the LaTeX agent pairing's chunk", raw: 63712, gzip: 21829 },
+  //  24.21.0: 63,673 / 21,769, + 64)
+  AGENT: { label: "the LaTeX agent pairing's chunk", raw: 63737, gzip: 21833 },
   // (the agent tools' work: web/latex/tools.ts, latex_check's report and latex_render's pictures, on an agent's first call)
   // (16,546 / 6,950: Nov 11 2026: latex_build's own code (build.ts, the
   //  engine driven from a snapshot, and the pages' fit) here, out of the eager group, its shared rules handed in by the
