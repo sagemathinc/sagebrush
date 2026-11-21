@@ -1,6 +1,6 @@
 # The numeric track
 
-*November 21, 2026, r3.* track/numeric is where MATLAB mode's numerical
+*November 21, 2026, r4.* track/numeric is where MATLAB mode's numerical
 side grows: the functions an agent reaches for when it writes MATLAB, and a
 subset of the Symbolic Toolbox. It works like track/math: PRs go into
 track/numeric, and the track is pulled into master. This note settles what
@@ -320,3 +320,20 @@ The main job keeps today's fast MATLAB tests (pinned outputs, no oracle at run t
 2. A measurement PR: §3's table, measured on a spot VM, and the `A\b` fix (rcond from the solve's own factors by `gecon`, for every size).
 3. The §4 gaps in order, each PR a gap or two with its oracle tests.
 4. The symbolic subset begins once the table/missing-data PRs are in. Its first PR is `sym`/`syms`/`subs`/`diff`/`double` over the Sage-mode objects.
+
+## 8. Roadmap: threads, accelerated backends, GPU
+
+Direction, Nov 21: "keep: multithreaded and accelerated, and possible GPU use on the roadmap". Nothing here is a design commitment beyond this: the interfaces must not preclude any of it.
+
+- **Multithreaded is a first-class target, not an afterthought.**
+  - §2 already makes results bitwise across thread counts.
+  - The all-cores column of §3's performance table stands, and kernels must scale with cores.
+  - E takes the thread count as an input (policy r4), so an agent sees what more cores buy.
+- **Accelerated backends sit behind the same catalog op.**
+  - The kernel interface stays pluggable: today's per-target SIMD microkernels, and later, optionally, a vendor BLAS/LAPACK or Apple's Accelerate on native.
+  - Each backend states its own accuracy and determinism class (§2): bitwise, FMA-only difference, or within the op's stated accuracy.
+  - The backend a result came from is recorded with it, as engine/nd records its kernel today.
+- **GPU is on the roadmap:** WebGPU in the browser, CUDA or Metal on native. When it lands:
+  - It's a separate determinism class: never bitwise, values within the op's stated accuracy.
+  - It's opt-in, and never required for correctness: every op keeps a CPU route.
+  - It's metered with its own families, under the meter Family list's owner, and E is calibrated per device like any other target.
