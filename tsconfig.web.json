@@ -25,6 +25,7 @@
     "web/workspace/agent-cards.ts",
     "web/preload.ts",
     "web/notebook/gradescope/dialog.ts",
-    "web/zip/read.ts"
+    "web/zip/read.ts",
+    "web/pageviews.ts"
   ]
 }
