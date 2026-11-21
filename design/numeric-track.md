@@ -1,6 +1,6 @@
 # The numeric track
 
-*November 21, 2026, r1.* track/numeric is where MATLAB mode's numerical
+*November 21, 2026, r2.* track/numeric is where MATLAB mode's numerical
 side grows: the functions an agent reaches for when it writes MATLAB, and a
 subset of the Symbolic Toolbox. It works like track/math: PRs go into
 track/numeric, and the track is pulled into master. This note settles what
@@ -41,17 +41,44 @@ Each function states its bound in its catalog entry: `accuracy`, in ulps or as a
 
 ## 2. Determinism: native and wasm
 
-Rules for engine/nd (numerics-core r4.2 §7) and everything built on it:
+These rules apply to engine/nd (numerics-core r4.2 §7) and everything built on it. Throughout, $\varepsilon = 2^{-53}$ and $\gamma_k = k\varepsilon/(1-k\varepsilon)$, for $k\varepsilon < 1$.
 
-- **Thread counts and partitions:** bitwise. Every reduction (a GEMM's dot products, a sum, a norm) has a fixed order that doesn't depend on the thread count, the column partition or the tile shape. One backend and kernel gives the same bits on 1 thread and 16.
-- **One target, run to run:** bitwise. No data-dependent scheduling and no atomics in a sum.
-- **Across targets** (portable scalar, wasm SIMD128, AVX2+FMA, NEON): within a bound stated per function, in the same `accuracy` field as §1.
-  - Kernels without FMA reproduce the portable scalar kernel's bits.
-  - FMA kernels reproduce the scalar `mul_add` kernel's bits.
-  - So the difference between two targets is exactly the FMA/non-FMA difference. Its bound for a length-$k$ dot product is that of the two summations, at most $2k\varepsilon\sum|a_ib_i|$ apart.
-- **SIMD reduction order is part of the kernel's definition:** lane-wise partial sums combined in a fixed order. It's the same order in every SIMD kernel of a given width, and a scalar kernel of that width reproduces it. A new kernel that changes the order is a new kernel, with its own test against the scalar reference.
-- **Element-wise functions** (`exp`, `sin`, ...): bitwise across targets wherever Sagebrush computes them itself, as one Rust implementation. Where a target uses the platform's libm, the bound is 1 ulp, and the test says which.
-- **Tests:** a per-function test runs the same inputs on every target CI executes, and checks bitwise where this section says bitwise, otherwise the stated bound.
+**Bitwise:**
+- **Thread counts and partitions.** Each reduction's order doesn't depend on the thread count, the partition or the tile shape. One backend and kernel gives the same bits on 1 thread and 16.
+- **One target, run to run.** No data-dependent scheduling and no atomics in a sum.
+
+**One summation order on every target.** Two kinds of kernel, each with an order fixed independently of the hardware's SIMD width:
+
+- **Products (GEMM and everything blocked on it: LU, Cholesky, triangular solves with many right-hand sides).**
+  - SIMD runs across output elements, never along a dot product.
+  - Each element of C is summed over $k$ in order: the KC blocks in order, and within a block $p = 0, 1, \ldots$; each block's partial sum is then added into C.
+  - That's engine/nd's rule today, and it holds for any vector width.
+  - Consequence, accepted: the inner dimension $k$ is never split across threads. That costs parallelism for tall-skinny products (small $m n$, large $k$), which run on fewer threads than cores.
+- **Reductions along one vector** (sum, dot, norm, `A'*x` by columns, the mean in `std` and `var`).
+  - A **canonical 8 accumulators**: element $i$ goes to partial sum $s_{i \bmod 8}$, in order of $i$.
+  - The partial sums combine in a fixed tree, $\big((s_0+s_4)+(s_2+s_6)\big)+\big((s_1+s_5)+(s_3+s_7)\big)$. Elements that don't fill a full group of 8 just continue the round robin.
+  - Every target emulates exactly this. The scalar reference keeps 8 scalars, wasm SIMD128 and NEON keep four 2-lane vectors, and AVX2 keeps two 4-lane vectors (AVX-512 later: one 8-lane vector).
+  - So there is one reduction order and one scalar reference for every target.
+
+**Across targets, the only difference is FMA**, and only in kernels whose multiply-adds may fuse (GEMM's microkernels, as selected per target).
+- Kernels without FMA give the scalar reference's bits.
+- FMA kernels give the scalar `mul_add` reference's bits.
+- For a length-$k$ product, the two references differ by at most $2\gamma_k\sum_i|a_ib_i|$, since each is within $\gamma_k\sum|a_ib_i|$ of the exact value.
+- Reductions never fuse: each accumulator adds products rounded separately, so reductions are bitwise across targets.
+
+**Element-wise functions** (`exp`, `sin`, `log`, `gamma`, ...), where Sagebrush computes them itself in Rust:
+- No `mul_add` in their code, and no floating-point contraction. Rust doesn't contract unless asked, and a test checks that the generated wasm has no `fma` calls in these functions.
+- So they're bitwise across targets.
+- (The other choice, `mul_add` everywhere, would be correct everywhere but slow in wasm, where FMA is in software.)
+- Where a target uses the platform's libm instead, the bound is 1 ulp, and the test says which.
+
+**Iterative dense algorithms** (QR iteration for `eig` and `svd`, Jacobi sweeps, and the like) branch on comparisons: convergence tests, deflation, shift choices.
+- An FMA difference in their inner products can change an iteration count or a deflation point.
+- So across targets, their results agree within the algorithm's backward-stability bound, stated per function (for example, `eig`'s computed values are exact for $A + E$ with $\|E\| \le c\,n\,\varepsilon\|A\|$), not within the dot-product bound.
+- **Their metered units are bitwise per target, and across targets only for non-iterative kernels.** So E is calibrated per target (§3).
+- (Unlike the Smith and Hecke work, which reproduces units across native and wasm.)
+
+**Tests:** each function's test runs the same inputs on every target CI executes, and checks bitwise where this section says bitwise, otherwise the stated bound. The 8-accumulator order is tested against the scalar reference on lengths 0 to 33 and on large lengths.
 
 ## 3. Cost
 
@@ -62,17 +89,71 @@ The engine cost policy r4 applies unchanged:
 - **U:** an optional promise, never a refusal.
 - **TimeError:** raised above the notebook budget. Refusing work that would have finished is a defect.
 
-Dense kernels are where E can be tight, because their work is known exactly:
-- GEMM: $2mnk$ flops;
-- LU: $\frac{2}{3}n^3$;
-- Cholesky: $\frac{1}{3}n^3$;
-- QR: $\frac{4}{3}n^3$ for square input;
-- the symmetric eigenproblem: about $\frac{4}{3}n^3$ for values alone, and about $9n^3$ with vectors;
-- the FFT: $5n\log_2 n$.
+**Metering** (the Family list's owner ruled on this, Nov 21). Three families, appended after Other so that existing indices and every integer-side pin keep their meaning:
+- **FlopBlocked:** flops of cache-blocked, compute-bound kernels. That's GEMM and the Level-3 parts of LU, Cholesky, QR, and the Hessenberg and tridiagonal reductions.
+- **FlopStream:** flops of memory-bound kernels: dot, axpy, gemv, triangular solves with one right-hand side, unblocked panel work, element-wise `+ - .* ./ sqrt`, and FFT butterflies.
+- **FlopFn:** one unit per call of a library elementary function (`exp`, `log`, `sin`, `power`, ...), which costs tens of flops and isn't flop-counted.
 
-So E for these is flops divided by the calibrated flop rate for that kernel, target and thread count. The rate comes from the same calibration harness as the other families: 20 or more rows over 5 sizes spanning two decades. Iterative routines (eigs, ode45, fzero, fminsearch, integral) get no time estimate up front. They meter through their pieces, with progress and ETA, and E is "unknown" until calibrated, said honestly.
+How they're charged:
+- **The unit is one flop:** a multiply or an add is 1, an FMA is 2. That matches the textbook counts below, so the model's terms are the published formulas, and the counts don't depend on whether a target fuses.
+- **Memory traffic** stays on Move: one unit per 8-byte word copied without arithmetic.
+- **Leaf rules unchanged:** charge after the work, at the kernel that does it, with Stop-prefix pins and moved-charge mutants. Never charge work not done: an early exit charges its actual iterations.
+- The PR that adds the families updates every pin that prints the full Units vector, mechanically.
 
-**Performance target, against a native BLAS.** Each kernel's speed is reported as a fraction of OpenBLAS's speed on the same machine and thread count (NumPy 2.5.1's scipy-openblas), measured on a quiet spot VM, not a shared one. Targets for r1, to be re-set once measured there:
+**The model.** For each kernel, target and thread count:
+
+$$E = c_0 + \sum_{f} \frac{\text{units}_f}{r_f(n)}$$
+
+for the families $f$ the kernel charges (for most kernels, one Flop family dominates).
+
+- $c_0$ is the call and dispatch overhead.
+- $r_f(n)$ is the calibrated rate, piecewise over the calibrated sizes, which captures cache effects.
+- The calibration is as on track/math: at least 20 rows over at least 5 sizes spanning two decades, including $n$ in 10 to 50, where agents' calls mostly are. Each kernel reports its $k$, the p90 over rows of $\max(\text{actual}/E,\ E/\text{actual})$.
+- Beyond the calibrated range, $k$ widens and `cost()` says "extrapolated".
+
+**Flop counts, and how each kernel is treated:**
+
+| kernel | flops (leading term) | treatment |
+|---|---|---|
+| GEMM $m\times k$ by $k\times n$ | $2mnk$ | direct: E from flops |
+| LU, square | $\frac{2}{3}n^3$ | direct |
+| Cholesky | $\frac{1}{3}n^3$ | direct |
+| QR (Householder), $m\ge n$ | $2mn^2 - \frac{2}{3}n^3$ | direct |
+| triangular solve, $r$ right-hand sides | $n^2 r$ | direct |
+| Hessenberg reduction | $\frac{10}{3}n^3$ | direct |
+| tridiagonal reduction (symmetric) | $\frac{4}{3}n^3$ | direct |
+| symmetric eig, values / with vectors | $\frac{4}{3}n^3$ / about $9n^3$ | direct-like (see below) |
+| nonsymmetric eig, values / with vectors | about $10n^3$ / about $25n^3$ | direct-like |
+| SVD (Golub–Kahan bidiagonalization, then implicit QR), $m\ge n$, values / with vectors | $4mn^2-\frac{4}{3}n^3$ / about $4m^2n+8mn^2+9n^3$ | direct-like |
+| FFT, power of 2 / other lengths (Bluestein) / real input | $5n\log_2 n$ / about $3\times$ that at the padded length / about $\frac12\times$ | direct |
+| `eigs`, `ode*`, `fzero`, `fmin*`, `integral*`, `lsq*` | depends on the problem | iterative: no E up front; metered through their pieces with progress and ETA; E "unknown" until calibrated |
+
+**Direct-like.** The dense eigensolvers and SVD iterate, but their iteration counts are nearly constant per size in practice. So E uses the leading-term counts above, and the reduction phase dominates. That's stated as a model, not a bound: their $k$ is measured like any other kernel's. Inputs where the iterations run unusually long show up as rows with large actual/E, and are reported, not hidden.
+
+**L per kernel**, the rigorous lower bound and the only refusal. It's the output plus the workspace that can't be avoided, in bytes for real f64 input, doubled for complex:
+
+| kernel | L |
+|---|---|
+| GEMM | $8mn$ (C) |
+| LU in place | $8n^2$ + pivots $8n$ |
+| QR, economy / full | $8mn + 8n$ / $8m^2 + 8mn$ |
+| Cholesky | $8n^2$ |
+| eig, values / with vectors | $8n^2 + 16n$ / $3\cdot 8n^2$ (complex: $3\cdot16n^2$) |
+| SVD, values / economy vectors | $8mn + 8n$ / $8(mn + n^2 + n) + 8mn$ |
+| FFT of length $n$ | $16n$ out, $+16n'$ for Bluestein's padded length $n'$ |
+
+- Each L is computed with checked arithmetic. An overflow refuses as "out of memory", and an extremes test covers sizes near `usize::MAX` and the wasm32 4 GiB limit.
+- **Outputs of unknown size** (ode45 with a 2-element tspan, whose output grows per step; `find`; `unique`) can't be refused up front. The ledger charges as the output grows, and refuses only at the step that exceeds memory.
+
+**Performance target, against a native BLAS.** Each kernel's speed is reported as a fraction of OpenBLAS's on the same machine and thread count (NumPy 2.5.1's scipy-openblas).
+- The targets are **tracked, never gated**: CI never fails on wall-clock time.
+- **Measurement hygiene:**
+  - a quiet spot VM;
+  - the same thread count on both sides (`OPENBLAS_NUM_THREADS` set, engine/nd's thread count set);
+  - column-major input on both sides (Fortran-ordered NumPy arrays);
+  - warm-up runs, then the median of at least 7.
+
+Targets for r1, re-set once measured:
 
 | kernel, $n = 1000$ | native (AVX2+FMA), 1 thread | native, all cores | browser wasm SIMD, 1 thread |
 |---|---|---|---|
@@ -82,11 +163,13 @@ So E for these is flops divided by the calibrated flop rate for that kernel, tar
 | symmetric eig | at least 25% | none yet | at least 5% |
 
 An indicative run today, on a shared 16-core host with other jobs running, so it's noisy:
-- Sagebrush's MATLAB mode under node ran `A*B` at $n=1000$ at 26 GF/s; NumPy/OpenBLAS ran at 170 GF/s on all cores.
-- At $n = 1000$, `eig` of a general matrix took 4.2 s, against NumPy's 1.0 s.
-- At $n = 500$, `A\b` was far off in one run (1.8 s, against 0.05 s), which needs looking into first.
-
-The first track PR measures all of these properly and records them in the note's r2.
+- `A*B` at $n=1000$ ran at 26 GF/s against OpenBLAS's 170 GF/s on all cores.
+- `eig` at $n = 1000$ (nonsymmetric) took 4.2 s against NumPy's 1.0 s.
+- **The `A\b` outlier is explained.** `A\b` took 1.6 s at $n = 500$ and 0.03 s at $n = 501$. The solve itself is fast; the time goes to the "nearly singular" check after it.
+  - lib/_matlab.py `_rcond_warning` estimates rcond only for $n \le 500$.
+  - It refactors A with a Python loop of unblocked rank-1 updates (`_lu_factors`) and runs the estimator's triangular solves row by row in Python (`_tri_solve`).
+  - So every solve up to 500 rows paid for a second, slow LU. Above 500 rows the check was skipped, and a nearly singular matrix bigger than that never warned, which breaks §1's contract.
+  - The fix, in the measurement PR: estimate rcond from the factors the solve already computed, with engine/nd's `gecon` (the same Higham/dlacn2 algorithm, already tested against the Python one), for every $n$. That removes both the cost and the 500-row cap.
 
 ## 4. Where we start
 
@@ -223,13 +306,13 @@ The main job keeps today's fast MATLAB tests (pinned outputs, no oracle at run t
 
 **Lanes:**
 - **NUMERIC:** the numeric reviewer. Owns §1's contract and each function's accuracy statement.
-- **ENGINE:** the engine reviewers, only for PRs that touch engine Rust (engine/nd, engine/sym) or metering. Owns §2 and §3.
+- **ENGINE:** the engine reviewers, only for PRs that touch engine Rust (engine/nd, engine/sym) or metering. Owns §2 and §3; the Flop families belong to the meter Family list's owner.
 - **TESTS:** owns oracle coverage, cross-target checks and E drift.
 
 **Merging:** the track's maintainer merges into track/numeric on the coordinator's GO.
 
 **Order:**
 1. This note, cleared by NUMERIC and ENGINE.
-2. A measurement PR: §3's table, measured on a spot VM, and the `A\b` outlier explained.
+2. A measurement PR: §3's table, measured on a spot VM, and the `A\b` fix (rcond from the solve's own factors by `gecon`, for every size).
 3. The §4 gaps in order, each PR a gap or two with its oracle tests.
 4. The symbolic subset begins once the table/missing-data PRs are in. Its first PR is `sym`/`syms`/`subs`/`diff`/`double` over the Sage-mode objects.
