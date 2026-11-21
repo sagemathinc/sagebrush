@@ -6,7 +6,7 @@
 use sagebrush_modsym::exact::Exact;
 use pyo3::exceptions::{PyKeyboardInterrupt, PyValueError};
 use pyo3::prelude::*;
-use pyo3::types::{PyDict, PyList};
+use pyo3::types::PyDict;
 
 mod mp;
 mod remote;
