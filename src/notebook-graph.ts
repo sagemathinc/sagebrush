@@ -200,6 +200,9 @@ export class NotebookGraph {
   private shown: ReadonlySet<string> = new Set<string>();
   // each reader of an output name: the cells its names come from ("_=c0 ___=c2", one empty when there's none)
   private providers: ReadonlyMap<string, string> = new Map<string, string>();
+  // (from the last build(): the cells in page order, and the places of those reading an output name)
+  private order_: string[] = [];
+  private readerAt: number[] = [];
   private readonly strict: boolean;
   private readonly analyze?: (code: string, id: string) => CellAnalysis;
 
@@ -353,9 +356,11 @@ export class NotebookGraph {
     // Found by running too, so, as for files, one that would close a cycle is
     // left out.
     const providers = new Map<string, string>();
+    const readerAt: number[] = [];
     for (let i = 0; i < ids.length; i++) {
       const outs = this.nodes.get(ids[i])!.analysis?.outputs;
       if (!outs || !outs.size) continue;
+      readerAt.push(i);
       const above: string[] = [];
       for (let j = i - 1; j >= 0 && above.length < 3; j--) if (this.shown.has(ids[j])) above.push(ids[j]);
       const from: string[] = [];
@@ -368,6 +373,8 @@ export class NotebookGraph {
       providers.set(ids[i], from.join(" "));
     }
     this.providers = providers;
+    this.order_ = ids;
+    this.readerAt = readerAt;
     // published: read-only views, the lists frozen
     this.parentsOf = new Map(ids.map((id) => [id, new SetView(parentsOf.get(id)!)]));
     this.childrenOf = new Map(ids.map((id) => [id, new SetView(childrenOf.get(id)!)]));
@@ -388,7 +395,25 @@ export class NotebookGraph {
     const next = new Set(ids);
     if (next.size === this.shown.size && [...next].every((id) => this.shown.has(id))) return;
     this.shown = next;
+    // (the output names' edges are a function of the rest of the graph and each reader's sources: while no reader's
+    // sources change, neither does the graph, and it isn't built again; a run notifies this once per cell, and a full
+    // build per cell made a large notebook's run cost its size times its cells)
+    const now = this.providersUnder(next);
+    if (now.size === this.providers.size && [...now].every(([c, f]) => this.providers.get(c) === f)) return;
     this.build();
+  }
+  // Each reader's output-name sources under `shown`, exactly as build() records them.
+  private providersUnder(shown: ReadonlySet<string>): Map<string, string> {
+    const providers = new Map<string, string>();
+    for (const i of this.readerAt) {
+      const outs = this.nodes.get(this.order_[i])!.analysis!.outputs!;
+      const above: string[] = [];
+      for (let j = i - 1; j >= 0 && above.length < 3; j--) if (shown.has(this.order_[j])) above.push(this.order_[j]);
+      const from: string[] = [];
+      for (const [k, name] of ["_", "__", "___"].entries()) if (outs.has(name)) from.push(`${name}=${above[k] ?? ""}`);
+      providers.set(this.order_[i], from.join(" "));
+    }
+    return providers;
   }
   /** The cells reading `_`, `__` or `___`, each with the cells those names come from now (compare two to find the readers whose values moved). */
   outputProviders(): ReadonlyMap<string, string> {

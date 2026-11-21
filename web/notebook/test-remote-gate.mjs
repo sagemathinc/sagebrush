@@ -886,10 +886,15 @@ export async function runGateTests(check) {
     const p = await page(ids.map((id, i) => [id, `v${i} = ${i}`]), { keepBodies: false });
     p.fake.kernel = async () => ({ events: [], outcome: { status: "ok", ms: 1 } });
     let most = 0;
+    const t0 = Date.now();
     for (let i = 0; i < ids.length; i += 1000) {
       await p.gesture(ids.slice(i, i + 1000));
       most = Math.max(most, p.r().outputsSize(), p.gate.specs.size, p.gate.parentsMemo.size);
     }
+    // (a run's cost stays linear in its cells: once, each cell showing a value rebuilt the whole graph, and these
+    // 5,200 cells took 77 s of the file's 120; about 13 s on a slow machine now)
+    const ms = Date.now() - t0;
+    check(ms < 40_000, `the 5,200 cells in five gestures within 40 s (${ms} ms)`);
     const lastChunk = ids.slice(5000);
     check(most <= 5000 && p.r().outputsSize() <= 5000, `the run outputs (and the adapter's specs and parents) never exceed 5,000 (${most})`);
     check(p.runPosts().length === 5000 && lastChunk.every((id) => p.results.get(id)?.notRun === "skip"), `the chunk past 5,000 live attempts: no POST, not run (${p.runPosts().length})`);

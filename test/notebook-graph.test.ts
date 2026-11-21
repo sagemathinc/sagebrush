@@ -133,3 +133,36 @@ test("output names: a cell reading _, __, ___ runs after the 1st, 2nd, 3rd neare
   assert.equal(h.version, v);
 });
 
+
+test("output names: after any sequence of setShown calls, the graph is the one a full build gives for the last (its edges, its providers, its errors); a change no reader sees keeps the version", () => {
+  // (a seeded generator: the same cases every run)
+  let seed = 1473;
+  const rnd = (n: number) => { seed = (seed * 1103515245 + 12345) % 2147483648; return seed % n; };
+  const kinds = ["10", "_", "__ + 1", "(_, __, ___)", "x = 1", "y = x + _", "print(1)", "___", "z = y", "del x"];
+  const state = (g: NotebookGraph) => JSON.stringify({
+    parents: g.ids.map((id) => [id, [...g.parents(id)].sort()]),
+    children: g.ids.map((id) => [id, [...g.children(id)].sort()]),
+    providers: [...g.outputProviders()].sort(),
+    errors: [...g.errors].map(([id, es]) => [id, es.map((e) => e.kind)]),
+  });
+  for (let c = 0; c < 60; c++) {
+    const cells = Array.from({ length: 3 + rnd(12) }, () => kinds[rnd(kinds.length)]);
+    const g = build(cells, false);
+    for (let step = 0; step < 12; step++) {
+      const shown = g.ids.filter(() => rnd(2) === 0);
+      const before = state(g), v = g.version;
+      g.setShown(shown);
+      // (the reference: a fresh graph with the same facts, built in full)
+      const ref = build(cells, false);
+      ref.setShown(shown);
+      ref.set(cells.map((code, i) => ({ id: `c${i}`, code })));
+      assert.equal(state(g), state(ref), `case ${c}, step ${step}: ${JSON.stringify(cells)} shown ${JSON.stringify(shown)}`);
+      if (state(g) === before) assert.equal(g.version, v, "nothing a reader sees changed: the same version");
+    }
+  }
+  // (a notebook no cell of which reads _, __ or ___: showing values never builds it again)
+  const big = build(Array.from({ length: 300 }, (_, i) => `v${i} = ${i}`), false);
+  const v = big.version;
+  for (let i = 0; i < 300; i++) big.setShown(big.ids.slice(0, i + 1));
+  assert.equal(big.version, v);
+});
