@@ -1,8 +1,0 @@
-{
- "v": 1,
- "reason": "The big-integer decoder under the engine cost policy (no size cap, Cost with per-family units, Meter::accounting, Admit(bytes, cost)): the engine module and the CLI that embeds it. CI's size row at 2e506e62 (run 44836988944): engine/sagebrush-engine.wasm +3054 (7916697 bytes), cli/pyjs.cjs +4072; each marked +64. The engine module's ceiling is renewed to the measured size + 64.",
- "bytes": {
-  "cli/pyjs.cjs": 4136,
-  "engine/sagebrush-engine.wasm": 3118
- }
-}

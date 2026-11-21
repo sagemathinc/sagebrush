@@ -1,7 +1,0 @@
-{
-  "v": 1,
-  "reason": "Sync owner retry: a page that couldn't ask whose session it has (offline, or the request hung, given up after 15 s) asks again, 2 s doubling to 60 s and at once when the browser is back online, instead of staying without sync until the next load (web/workspace/sync-owner.ts), which the board frame and the notebook page carry into cli/pyjs.cjs. cli/pyjs.cjs grows +1088 bytes, exact, base master 2efcf950, measured with the pinned node 24.21.0 and bun 1.4.4 on the exact two-parent merge probe of this PR's head; the bound adds 64 bytes of slack.",
-  "bytes": {
-    "cli/pyjs.cjs": 1152
-  }
-}

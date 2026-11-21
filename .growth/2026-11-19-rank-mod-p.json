@@ -1,8 +1,0 @@
-{
- "v": 1,
- "reason": "Rank over QQ (mat_rank, M.rank() for QQ and ZZ matrices): the rank modulo the word prime the rref starts from (nmod_mat) is the rank, proven, when it equals min(rows, cols); otherwise the exact rref, as before. Wide full-row-rank matrices at n = 100 go from 134 ms to 9.8 ms; other shapes are unchanged within noise. Engine built by CI with its path mapping: the base's fresh build 7640188 bytes (sha256 51502210..., track/math 654db097) -> the merge's 7640954 bytes (sha256 99eac329..., merge cc697768) = +766, marked exactly (PRs into the track no longer move wasm/pins.json). The command line: an ESTIMATE, the engine's growth as base64 (4 * ceil(766 / 3) = 1024), awaiting this head's CI size table.",
- "bytes": {
-  "engine/sagebrush-engine.wasm": 766,
-  "cli/pyjs.cjs": 1024
- }
-}

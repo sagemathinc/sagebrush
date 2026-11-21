@@ -1,7 +1,0 @@
-{
-  "v": 1,
-  "reason": "The LLL article series (articles/lll) and its wiring into the site: the articles order in web/build-articles.ts, the link in web/index.html and the entry in web/llms.txt; the CLI's bundle carries part of that wiring. cli/pyjs.cjs grows +96 bytes, exact, CI's governed measurement on the tested merge with base 2844c5b0, pinned node and bun; the bound adds 64 bytes of slack.",
-  "bytes": {
-    "cli/pyjs.cjs": 160
-  }
-}
