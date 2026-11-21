@@ -41,6 +41,7 @@ import { threadMarkdown, turnMarkdown, userMarkdown } from "../workspace/agent-c
 import { DelegateTasks } from "./delegate";
 import { mountDelegate } from "./delegate-ui";
 import { toIpynb } from "../notebook/ipynb.js";
+import { mountVersionStamp } from "../version";
 
 // (the LaTeX editor, in builds that have it: web/build.ts's define)
 declare const __SB_LATEX__: boolean | undefined;
@@ -1552,3 +1553,5 @@ mountLayout();
 renderAll();
 scrollToEnd(true);
 editor.focus();
+// (the build this site serves, under the chat list, for whoever tests it: web/version.ts; nothing where the site doesn't say)
+void mountVersionStamp(document.getElementById("sbversion"));

@@ -319,6 +319,7 @@
   .about code, .tag code, footer code { background: var(--code); padding: 1px 5px; border-radius: 4px; font-size: 13px; }
   a { color: var(--accent); }
   footer { color: var(--muted); font-size: 13px; padding-top: 6px; padding-bottom: 40px; text-align: center; }
+  footer .sbver { font: 12px/1.4 ui-monospace, SFMono-Regular, Menlo, monospace; margin-top: 4px; user-select: all; }
   /* (the lower-left corner: the theme and full screen, small and quiet until pointed at) */
   #sbcorner { position: fixed; left: 8px; bottom: 6px; z-index: 25; display: flex; gap: 2px; }
   #sbcorner .cbtn { position: relative; display: inline-grid; place-items: center; width: 26px; height: 26px; padding: 0; border: 0; border-radius: 6px; background: none; color: var(--muted); cursor: pointer; }
@@ -571,6 +572,7 @@ its final layout and the files never arrive a moment later; not on a phone, wher
   </div>
   <footer>
   <p>Developed on <a href="https://cocalc.ai">CoCalc.ai</a> · a project of <a href="https://sagemath.com">SageMath, Inc.</a> · <a href="https://github.com/sagemathinc/sagebrush">GitHub</a> · <a href="/blog/">Blog</a> · <a href="/articles/">Articles</a> · <a href="/llms.txt">llms.txt</a> · <a href="/THIRD-PARTY-NOTICES.txt">Licenses</a></p>
+  <p class="sbver" id="sbversion" hidden></p>
   </footer>
 </section>
 <main>
@@ -784,6 +786,10 @@ import { keepView, viewToRestore } from "./workspace/view-state.ts";
 import { DOC_INDEX, DOC_UPSTREAM, STATUS_WORDS, docHead, docStatus, docWords, entryExamples, findArea, prepareIndex, prepareUpstream, requestUrl, searchIndexes, searchWithUpstream } from "./docsearch.ts";
 // (first-party active-user counts, signed-out browsers: after the first idle callback, through consent.ts)
 import "./active.ts";
+// (the build this site serves, in the footer, for whoever tests it (web/version.ts): after the first idle moment,
+// never before the first paint; a site that doesn't answer /api/version shows nothing)
+import { mountVersionStamp } from "./version.ts";
+(window.requestIdleCallback ?? ((f) => setTimeout(f, 1)))(() => void mountVersionStamp(document.getElementById("sbversion")));
 import { WorkerKernel } from "./notebook/worker-kernel.js";
 import { RunnerWorker } from "./notebook/runner-worker.js";
 import { NativeWorker } from "./notebook/native-worker.js";
