@@ -926,3 +926,73 @@ mod oracle {
         (out, rng.0)
     }
 }
+
+#[test]
+fn modp_edf_routes_agree() {
+    // the equal-degree splitting by the power and by the norm (the trace
+    // for p = 2) compute the same s for each candidate: the same factors
+    // from the same draws, on every distinct-degree piece of random and
+    // x^n - 1 inputs, at every test prime, including p = 2 and p near 2^32
+    use modp::EdfRoute;
+    for p in MODP_PRIMES {
+        let mut rng = Rng(p ^ 0xD1B5_4A32_D192_ED03);
+        let mut cases = vec![rand_monic(&mut rng, 40, p), rand_monic(&mut rng, 97, p), xn1(60)];
+        if p == 65537 {
+            cases.push(xn1(500));
+        }
+        if p == 2 {
+            cases.push(rand_monic(&mut rng, 300, p));
+        }
+        let mut pieces = 0;
+        for f in cases {
+            let b = Budget::unlimited();
+            let f = fmonic(&reduce_p(&f, p), p);
+            let fp = modp::Fp::new(&b, p, f.len()).unwrap();
+            for (g, _) in modp::sqf(&fp, &f).unwrap() {
+                for (h, d) in modp::ddf(&fp, &g).unwrap() {
+                    if d < 2 || h.len() - 1 == d {
+                        continue;
+                    }
+                    pieces += 1;
+                    let mut res = vec![];
+                    for route in [EdfRoute::Direct, EdfRoute::Norm] {
+                        let mut r = Rng(0x2545_F491_4F6C_DD1D ^ p);
+                        let mut out = vec![];
+                        modp::edf_by(&b, &fp, &h, d, &mut r, &mut out, Some(route)).unwrap();
+                        out.sort();
+                        res.push((out, r.0));
+                    }
+                    assert_eq!(res[0], res[1], "p {} piece of degree {} into degree {}", p, h.len() - 1, d);
+                    assert_eq!(res[0].0.len(), (h.len() - 1) / d);
+                }
+            }
+        }
+        assert!(pieces > 0, "p {}: no piece with two or more factors of degree >= 2", p);
+    }
+}
+
+#[test]
+fn modp_ddf_routes_agree() {
+    // the distinct-degree pieces one degree at a time and by baby steps and
+    // giant steps (several step counts, also degenerate ones) are the same,
+    // in the same order, at every test prime
+    use modp::DdfRoute;
+    for p in MODP_PRIMES {
+        let mut rng = Rng(p ^ 0x94D0_49BB_1331_11EB);
+        let mut cases = vec![rand_monic(&mut rng, 30, p), rand_monic(&mut rng, 61, p), rand_monic(&mut rng, 150, p), xn1(48), xn1(120)];
+        cases.push(rand_powers(&mut rng, &[(1, 1), (2, 1), (3, 1), (4, 1), (7, 1), (9, 1), (16, 1), (17, 1)], p));
+        for f in cases {
+            let b = Budget::unlimited();
+            let f = fmonic(&reduce_p(&f, p), p);
+            let fp = modp::Fp::new(&b, p, f.len()).unwrap();
+            for (g, _) in modp::sqf(&fp, &f).unwrap() {
+                let want = modp::ddf_by(&fp, &g, DdfRoute::Linear).unwrap();
+                let n = g.len().saturating_sub(1);
+                for l in [1, 2, 3, 5, 8, (n / 2).max(1), n + 3] {
+                    assert_eq!(modp::ddf_by(&fp, &g, DdfRoute::BabyGiant(l)).unwrap(), want, "p {} deg {} l {}", p, n, l);
+                }
+                assert_eq!(modp::ddf(&fp, &g).unwrap(), want, "p {} deg {} ({:?})", p, n, DdfRoute::for_degree(n, p));
+            }
+        }
+    }
+}

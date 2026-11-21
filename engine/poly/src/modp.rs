@@ -261,6 +261,22 @@ impl<'b> Fp<'b> {
         Ok(tight(pm.powmod_in(a, e, &self.lt)))
     }
 
+    /// g(h) mod f (Brent and Kung), h shorter than f: its matrix reserved,
+    /// its work debited.
+    pub fn compose(&self, pm: &PolyModulus, g: &[u64], h: &[u64]) -> FResult<FPoly> {
+        self.fits(pm.f.len().max(g.len()).max(h.len()))?;
+        let route = np::compose_route_for(pm.f.len(), g.len());
+        let _w = self.b.reserve(np::compose_words(pm.f.len(), g.len(), route).and_then(|w| w.checked_mul(8)))?;
+        self.b.debit(np::compose_work(pm.f.len(), g.len(), h.len()))?;
+        Ok(tight(pm.compose_in(g, h, &self.lt)))
+    }
+
+    /// Reserve `count` polynomials of at most `len` coefficients held at
+    /// once (beyond the operations' own transients).
+    pub fn reserve_polys(&self, count: usize, len: usize) -> FResult<Reservation<'b>> {
+        self.b.reserve((count as u64).checked_mul(len as u64).and_then(|w| w.checked_mul(8)))
+    }
+
     /// The linear passes (copies, sums, differences, scalings, the
     /// derivative) of polynomials of these lengths.
     pub fn linear(&self, l: usize) -> FResult<()> {
@@ -308,8 +324,87 @@ pub(crate) fn sqf(fp: &Fp, f: &[u64]) -> FResult<Vec<(FPoly, u32)>> {
 }
 
 /// Distinct-degree factorization of a monic square-free f: (product of
-/// the irreducible factors of degree d, d).
+/// the irreducible factors of degree d, d), by increasing d.  Two routes,
+/// by their predicted cost ([`DdfRoute::for_degree`]):
+/// - one degree at a time: x^(p^d) by a power to p per d, and a gcd with
+///   x^(p^d) - x;
+/// - baby steps and giant steps (Kaltofen and Shoup, Subquadratic-time
+///   factoring of polynomials over finite fields, Math. Comp. 67, 1998;
+///   von zur Gathen and Shoup 1992): the baby steps h_j = x^(p^j), j < l,
+///   and the giant steps H_i = x^(p^(l i)) (by modular composition), and
+///   per giant step one gcd with the interval polynomial prod_j (H_i -
+///   h_j) mod f, which collects the factors of degree in ((i - 1) l, i l];
+///   then those are separated by degree, by gcds with H_i - h_j.
 pub(crate) fn ddf(fp: &Fp, f: &[u64]) -> FResult<Vec<(FPoly, usize)>> {
+    let n = f.len().saturating_sub(1);
+    ddf_by(fp, f, DdfRoute::for_degree(n, fp.m.n))
+}
+
+/// The route of [`ddf`].
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub(crate) enum DdfRoute {
+    /// One degree at a time.
+    Linear,
+    /// Baby steps of this many, and giant steps.
+    BabyGiant(usize),
+}
+
+impl DdfRoute {
+    /// The cheaper route for f of degree n over F_p, by predicted costs
+    /// in products mod f over the D = n / 2 degrees to test (fitted to
+    /// timings at p from 2 to 2^31 and n from 20 to 1500):
+    /// - one degree at a time: D (pow + G), with a power to p per degree
+    ///   ([`pow_cost`]) and a gcd, G = 0.3 (n / 300)^2 (the gcds' share
+    ///   grows with n);
+    /// - baby steps and giant steps: l (sigma + 2) for the baby steps (a
+    ///   Frobenius map, sigma, the cheaper of a power and a composition,
+    ///   plus their bookkeeping), D / l (C + G) for the giant steps (a
+    ///   composition, [`compose_cost`], and a gcd), and D for the interval
+    ///   polynomials; l = sqrt(D C / (sigma + 2)) minimizes it.
+    pub(crate) fn for_degree(n: usize, p: u64) -> DdfRoute {
+        if n < 4 {
+            return DdfRoute::Linear;
+        }
+        let c = compose_cost(n);
+        let pow = pow_cost(p);
+        let sigma = c.min(pow);
+        let d = (n / 2) as f64;
+        let g = 0.3 * (n as f64 / 300.0).powi(2);
+        let l = ((d * c / (sigma + 2.0)).sqrt().round() as usize).clamp(1, n / 2);
+        let bsgs = l as f64 * (sigma + 2.0) + d / l as f64 * (c + g) + d;
+        let linear = d * (pow + g);
+        if bsgs < linear {
+            DdfRoute::BabyGiant(l)
+        } else {
+            DdfRoute::Linear
+        }
+    }
+}
+
+/// The products mod f of a power to e by squarings: bitlen(e) - 1
+/// squarings and popcount(e) - 1 multiplications (at least one product).
+fn pow_cost(e: u64) -> f64 {
+    let bits = 64 - e.leading_zeros();
+    ((bits - 1 + e.count_ones() - 1) as f64).max(1.0)
+}
+
+/// A modular composition mod f of degree n, in products mod f: about 1.25
+/// (k + r - 1) + 1 (measured, [`np::compose_shape`]).
+fn compose_cost(n: usize) -> f64 {
+    let (k, r) = np::compose_shape(n);
+    1.25 * (k + r - 1) as f64 + 1.0
+}
+
+/// [`ddf`] by the given route (tests: the routes give the same pieces).
+pub(crate) fn ddf_by(fp: &Fp, f: &[u64], route: DdfRoute) -> FResult<Vec<(FPoly, usize)>> {
+    match route {
+        DdfRoute::Linear => ddf_linear(fp, f),
+        DdfRoute::BabyGiant(l) => ddf_baby_giant(fp, f, l),
+    }
+}
+
+/// [`ddf`] one degree at a time.
+fn ddf_linear(fp: &Fp, f: &[u64]) -> FResult<Vec<(FPoly, usize)>> {
     let _phase = sagebrush_interrupt::enter("ddf");
     let m = &fp.m;
     let mut out = vec![];
@@ -348,11 +443,112 @@ pub(crate) fn ddf(fp: &Fp, f: &[u64]) -> FResult<Vec<(FPoly, usize)>> {
     Ok(out)
 }
 
+/// [`ddf`] by baby steps (l of them) and giant steps.
+fn ddf_baby_giant(fp: &Fp, f: &[u64], l: usize) -> FResult<Vec<(FPoly, usize)>> {
+    let _phase = sagebrush_interrupt::enter("ddf");
+    let m = &fp.m;
+    let p = m.n;
+    let mut out = vec![];
+    if f.len() < 3 {
+        if f.len() > 1 {
+            out.push((f.to_vec(), 1));
+        }
+        return Ok(out);
+    }
+    let n = f.len() - 1;
+    // (held: the l baby steps, and x, x^p, H_1, H_i, the rest, the interval
+    // polynomial, a difference, a gcd and its cofactor)
+    let _held = fp.reserve_polys(l + 9, n + 1)?;
+    let pm = fp.modulus(f)?;
+    let x = fp.reduce(&pm, &[0, 1 % p])?;
+    // y -> y^p mod f: a power to p, or a composition with x^p, the cheaper
+    let xp = fp.powmod(&pm, &x, &[p])?;
+    let by_power = pow_cost(p) <= compose_cost(n);
+    let sigma = |y: &[u64]| -> FResult<FPoly> {
+        if by_power {
+            fp.powmod(&pm, y, &[p])
+        } else {
+            fp.compose(&pm, y, &xp)
+        }
+    };
+    // the baby steps h_j = x^(p^j), j < l, and h_l = x^(p^l) = H_1
+    let mut baby: Vec<FPoly> = Vec::with_capacity(l);
+    baby.push(x.clone());
+    let mut h = xp.clone();
+    for _ in 1..l {
+        sagebrush_interrupt::check_coarse();
+        baby.push(h.clone());
+        h = sigma(&h)?;
+    }
+    let big1 = h;
+    // the giant steps, while the rest can still split: a factor of degree
+    // at most (i - 1) l has been removed by giant step i, so the rest is
+    // irreducible once its degree is below 2 ((i - 1) l + 1)
+    let mut rest: FPoly = f.to_vec();
+    let mut big = big1.clone();
+    let mut i = 1;
+    while rest.len() > 2 * ((i - 1) * l + 1) {
+        sagebrush_interrupt::check_coarse();
+        if i > 1 {
+            big = fp.compose(&pm, &big, &big1)?;
+        }
+        // prod_j (H_i - h_j) mod f
+        let mut iv: FPoly = vec![1 % p];
+        for hj in &baby {
+            fp.linear(n)?;
+            let d = tight(np::sub(&big, hj, m));
+            iv = fp.mulmod(&pm, &iv, &d)?;
+        }
+        let mut g = fp.gcd(&rest, &iv)?;
+        drop(iv);
+        if g.len() > 1 {
+            rest = fp.quo(&rest, &g)?;
+            // separate by degree, ascending: d = i l - j for j = l - 1 .. 0
+            for j in (0..l).rev() {
+                if g.len() < 2 {
+                    break;
+                }
+                let d = i * l - j;
+                if g.len() - 1 == d {
+                    // (the rest of g is one factor of this degree)
+                    out.push((g, d));
+                    break;
+                }
+                fp.linear(n)?;
+                let diff = tight(np::sub(&big, &baby[j], m));
+                let e = fp.gcd(&g, &diff)?;
+                if e.len() > 1 {
+                    g = fp.quo(&g, &e)?;
+                    out.push((e, d));
+                }
+            }
+        }
+        i += 1;
+    }
+    if rest.len() > 1 {
+        let d = rest.len() - 1;
+        out.push((rest, d));
+    }
+    Ok(out)
+}
+
 /// Cantor-Zassenhaus: the irreducible factors (of degree d each) of a
-/// monic g, with the trace map a + a^2 + ... + a^(2^(d-1)) in
-/// characteristic 2.  The pending pieces are kept on a stack: they
-/// partition g.  Every candidate, also a rejected one, is debited before
-/// it is drawn.
+/// monic g, splitting with s = a^((p^d - 1) / 2) - 1, or in characteristic
+/// 2 with the trace a + a^2 + ... + a^(2^(d-1)).  The pending pieces are
+/// kept on a stack: they partition g.  Every candidate, also a rejected
+/// one, is debited before it is drawn.
+///
+/// Two routes to the same s, chosen per piece by their predicted cost
+/// ([`EdfRoute::for_piece`]):
+/// - direct: the power of a by squarings (d log2 p of them), or the d - 1
+///   squarings of the trace;
+/// - by the norm (von zur Gathen and Shoup, Computing Frobenius maps and
+///   factoring polynomials, Comput. Complexity 2, 1992): a^(1 + p + ... +
+///   p^(d-1)) = N(a) built by doubling over d's bits, N_2t = N_t N_t(x^(p^t))
+///   and N_(t+1) = a N_t^p, with the Frobenius powers x^(p^t) mod the piece
+///   by modular composition (once per piece, for all its candidates); then
+///   s = N(a)^((p - 1) / 2) - 1.  The trace likewise: T_2t = T_t + T_t(x^(2^t)),
+///   T_(t+1) = a + T_t^2.
 ///
 /// The splitting is randomized: each candidate splits a piece of two or
 /// more factors with probability bounded below by a positive constant
@@ -363,19 +559,19 @@ pub(crate) fn ddf(fp: &Fp, f: &[u64]) -> FResult<Vec<(FPoly, usize)>> {
 /// Budget::unlimited() (factor_mod's) nothing caps it, as with the
 /// schoolbook splitting it replaced.
 pub(crate) fn edf(b: &Budget, fp: &Fp, g: &[u64], d: usize, rng: &mut Rng, out: &mut Vec<FPoly>) -> FResult<()> {
+    edf_by(b, fp, g, d, rng, out, None)
+}
+
+/// [`edf`], with every piece by the given route (tests: the two routes
+/// give the same factors from the same candidates).
+pub(crate) fn edf_by(b: &Budget, fp: &Fp, g: &[u64], d: usize, rng: &mut Rng, out: &mut Vec<FPoly>, force: Option<EdfRoute>) -> FResult<()> {
     let _phase = sagebrush_interrupt::enter("edf");
     let (m, p) = (&fp.m, fp.m.n);
-    // (p^d - 1) / 2 as words: d bitlen(p) bits, reserved with its
-    // transients; its computation, by squarings, debited
+    // (p^d - 1) / 2 as words, for the direct route (computed on its first
+    // use): d bitlen(p) bits, reserved with its transients; its
+    // computation, by squarings, debited
     let ebits = (d as u64).saturating_mul(64 - p.leading_zeros() as u64);
-    let _e = b.reserve(big_bytes(ebits).and_then(|x| x.checked_mul(4)))?;
-    let e: Vec<u64> = if p == 2 {
-        vec![]
-    } else {
-        let l = limbs(ebits);
-        b.debit(l.checked_mul(l).and_then(|x| x.checked_mul(clog2(d as u64) + 1)))?;
-        ((BigUint::from(p).pow(d as u32) - 1u32) / 2u32).to_u64_digits()
-    };
+    let mut direct_e: Option<(Vec<u64>, Reservation)> = None;
     let mut stack: Vec<FPoly> = vec![g.to_vec()];
     while let Some(g) = stack.pop() {
         let n = g.len() - 1;
@@ -384,6 +580,19 @@ pub(crate) fn edf(b: &Budget, fp: &Fp, g: &[u64], d: usize, rng: &mut Rng, out: 
             continue;
         }
         let pm = fp.modulus(&g)?;
+        let route = force.unwrap_or_else(|| EdfRoute::for_piece(n, d, p));
+        let chain = match route {
+            EdfRoute::Norm => Some(Frobenius::new(fp, &pm, d)?),
+            EdfRoute::Direct => {
+                if p != 2 && direct_e.is_none() {
+                    let r = b.reserve(big_bytes(ebits).and_then(|x| x.checked_mul(4)))?;
+                    let l = limbs(ebits);
+                    b.debit(l.checked_mul(l).and_then(|x| x.checked_mul(clog2(d as u64) + 1)))?;
+                    direct_e = Some((((BigUint::from(p).pow(d as u32) - 1u32) / 2u32).to_u64_digits(), r));
+                }
+                None
+            }
+        };
         loop {
             sagebrush_interrupt::check_coarse();
             fp.linear(n)?;
@@ -391,19 +600,24 @@ pub(crate) fn edf(b: &Budget, fp: &Fp, g: &[u64], d: usize, rng: &mut Rng, out: 
             if a.len() < 2 {
                 continue;
             }
-            let s = if p == 2 {
-                let mut t = a.clone();
-                let mut s = a;
-                for _ in 1..d {
-                    t = fp.mulmod(&pm, &t, &t)?;
-                    fp.linear(n)?;
-                    s = tight(np::add(&s, &t, m));
+            let s = match &chain {
+                Some(chain) => chain.split_value(fp, &pm, &a)?,
+                None if p == 2 => {
+                    let mut t = a.clone();
+                    let mut s = a;
+                    for _ in 1..d {
+                        t = fp.mulmod(&pm, &t, &t)?;
+                        fp.linear(n)?;
+                        s = tight(np::add(&s, &t, m));
+                    }
+                    s
                 }
-                s
-            } else {
-                let s = fp.powmod(&pm, &a, &e)?;
-                fp.linear(n)?;
-                tight(np::sub(&s, &[1], m))
+                None => {
+                    let e = &direct_e.as_ref().expect("the direct route's exponent").0;
+                    let s = fp.powmod(&pm, &a, e)?;
+                    fp.linear(n)?;
+                    tight(np::sub(&s, &[1], m))
+                }
             };
             let h = fp.gcd(&g, &s)?;
             if h.len() > 1 && h.len() < g.len() {
@@ -416,4 +630,131 @@ pub(crate) fn edf(b: &Budget, fp: &Fp, g: &[u64], d: usize, rng: &mut Rng, out: 
         }
     }
     Ok(())
+}
+
+/// The route of [`edf`] for a piece.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub(crate) enum EdfRoute {
+    Direct,
+    Norm,
+}
+
+impl EdfRoute {
+    /// The cheaper route for a piece of degree n splitting into factors of
+    /// degree d over F_p, by their counts of products mod the piece
+    /// ([`compose_cost`], [`pow_cost`]).  The norm's chain (built once) is
+    /// charged half against each of the about two candidates a piece takes.
+    pub(crate) fn for_piece(n: usize, d: usize, p: u64) -> EdfRoute {
+        if d < 2 {
+            return EdfRoute::Direct;
+        }
+        let c = compose_cost(n);
+        let pow_p = pow_cost(p);
+        let sigma = c.min(pow_p);
+        let doublings = (usize::BITS - 1 - d.leading_zeros()) as f64;
+        let incs = (d.count_ones() - 1) as f64;
+        let (direct, norm_each) = if p == 2 {
+            ((d - 1) as f64, doublings * (c + 1.0) + incs * (sigma + 1.0))
+        } else {
+            // ((p^d - 1) / 2 has about d log2 p bits, half of them set)
+            (1.5 * d as f64 * (p as f64).log2(), doublings * (c + 1.0) + incs * (sigma + 1.0) + pow_cost((p - 1) / 2))
+        };
+        let setup = pow_p + doublings * c + incs * sigma;
+        if norm_each + setup / 2.0 < direct {
+            EdfRoute::Norm
+        } else {
+            EdfRoute::Direct
+        }
+    }
+}
+
+/// The Frobenius powers of a piece for [`edf`]'s norm route: x^p mod the
+/// piece, and x^(p^t) mod the piece at each doubling of the chain over
+/// d's bits (from the highest down: t -> 2t, then t -> t + 1 where the bit
+/// is set).
+struct Frobenius<'b> {
+    p: u64,
+    /// x^p mod the piece.
+    xi1: FPoly,
+    /// The chain: Some(x^(p^t)) for a doubling at t, None for t -> t + 1.
+    steps: Vec<Option<FPoly>>,
+    /// Whether y -> y^p is cheaper as a power than as a composition.
+    pow_sigma: bool,
+    /// The chain's polynomials and a candidate's running values.
+    _held: Reservation<'b>,
+}
+
+impl<'b> Frobenius<'b> {
+    fn new(fp: &Fp<'b>, pm: &PolyModulus, d: usize) -> FResult<Frobenius<'b>> {
+        let p = fp.m.n;
+        let n = pm.f.len() - 1;
+        let top = usize::BITS - 1 - d.leading_zeros();
+        // (x^p, one power per doubling, the running x^(p^t), and a
+        // candidate's value, its image and their product)
+        let held = fp.reserve_polys(top as usize + 6, n + 1)?;
+        let x: FPoly = vec![0, 1 % p];
+        let xi1 = fp.powmod(pm, &fp.reduce(pm, &x)?, &[p])?;
+        let pow_sigma = pow_cost(p) <= compose_cost(n);
+        let mut fr = Frobenius { p, xi1, steps: vec![], pow_sigma, _held: held };
+        let mut xi_t = fr.xi1.clone();
+        for i in (0..top).rev() {
+            let last = i == 0;
+            fr.steps.push(Some(xi_t.clone()));
+            // (x^(p^2t) = x^(p^t) composed with itself, needed by a later step)
+            if !last {
+                xi_t = fp.compose(pm, &xi_t, &xi_t)?;
+            }
+            if (d >> i) & 1 == 1 {
+                fr.steps.push(None);
+                if !last {
+                    xi_t = fr.sigma(fp, pm, &xi_t)?;
+                }
+            }
+        }
+        Ok(fr)
+    }
+
+    /// y^p mod the piece: a power or a composition with x^p.
+    fn sigma(&self, fp: &Fp, pm: &PolyModulus, y: &[u64]) -> FResult<FPoly> {
+        if self.pow_sigma {
+            fp.powmod(pm, y, &[self.p])
+        } else {
+            fp.compose(pm, y, &self.xi1)
+        }
+    }
+
+    /// s for the candidate a: N(a)^((p - 1) / 2) - 1, or the trace for p = 2.
+    fn split_value(&self, fp: &Fp, pm: &PolyModulus, a: &[u64]) -> FResult<FPoly> {
+        let m = &fp.m;
+        let mut v: FPoly = a.to_vec();
+        for step in &self.steps {
+            let n = pm.f.len();
+            v = match step {
+                Some(xi_t) => {
+                    let w = fp.compose(pm, &v, xi_t)?;
+                    if self.p == 2 {
+                        fp.linear(n)?;
+                        tight(np::add(&v, &w, m))
+                    } else {
+                        fp.mulmod(pm, &v, &w)?
+                    }
+                }
+                None => {
+                    let w = self.sigma(fp, pm, &v)?;
+                    if self.p == 2 {
+                        fp.linear(n)?;
+                        tight(np::add(a, &w, m))
+                    } else {
+                        fp.mulmod(pm, a, &w)?
+                    }
+                }
+            };
+        }
+        if self.p == 2 {
+            return Ok(v);
+        }
+        let s = fp.powmod(pm, &v, &[(self.p - 1) / 2])?;
+        fp.linear(pm.f.len())?;
+        Ok(tight(np::sub(&s, &[1], m)))
+    }
 }
