@@ -90,7 +90,16 @@ const LATEX_FIRST_USE = ["sagebrush-agent-run.js", "sagebrush-latex.js", "sagebr
 // (161,208 / 58,523: Nov 20 2026, a page's run_notebook handed to today's run when the page takes it and then can't
 //  (PageRun.inputs()'s "fallback", run-verbs.ts, in the run's chunk), master 595eb958: 161,144 / 58,459 measured on the
 //  shipped build, + 64)
-const AGG_RAW = 161208, AGG_GZIP = 58523;
+// (161,425 / 58,588: Nov 20 2026, A5 (reconnect): the pagehide mark scoped to its page's record and the page-duration
+//  choice's words, in the pairing chunk the LaTeX page module carries (agent-ui.ts, agent-pair.ts), merged with master
+//  7b77c654: 161,361 / 58,524 measured on the shipped build (bun 1.4.4, node 24.21.0), + 64)
+// (161,703 / 58,685: Nov 21 2026, a sageblock's code coloured in the LaTeX preview (the page module's hook for the lazy
+//  highlighting chunk; the engine's Magma marker), on its merge with master 6fae0a88: 161,639 / 58,621 measured on the
+//  shipped build (bun 1.4.4, node 24.21.0), + 64)
+// (161,926 / 58,770: Nov 21 2026, every way out of the LaTeX page by the hosting page's leaveTo (the page module's
+//  leaveThen and home link), on its merge with master 97da53af: 161,862 / 58,706 measured on the shipped build (bun
+//  1.4.4, node 24.21.0), + 64)
+const AGG_RAW = 161926, AGG_GZIP = 58770;
 // (the reviewed inputs, relative to web/: the entry and what it imports)
 // (the review page's run line: a finished run's note in its branch, canon-doc.ts's canonical bytes and blob id, and branch-wake.ts's
 //  wake, which needs sha256-hex.ts for the branch store's name)

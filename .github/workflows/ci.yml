@@ -14,6 +14,8 @@ on:
   pull_request:
     # (labeled: adding the full-ci label reruns the pull request on the full tier)
     types: [opened, synchronize, reopened, labeled]
+  merge_group:
+    types: [checks_requested]
   workflow_dispatch:
     inputs:
       long:
@@ -152,7 +154,7 @@ jobs:
       - uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020 # v4.4.0
         with:
           node-version: 24
-          cache: pnpm
+          cache: ${{ github.event_name != 'merge_group' && 'pnpm' || '' }}
       # (the four modules: this run's wasm-modules artifact when it built them, else the published pins)
       - uses: ./.github/actions/wasm-modules
         with:
@@ -165,7 +167,7 @@ jobs:
       - uses: actions/setup-python@a26af69be951a213d495a4c3e4e4022e16d87065 # v5.6.0
         with:
           python-version: "3.14"
-          cache: pip
+          cache: ${{ github.event_name != 'merge_group' && 'pip' || '' }}
           cache-dependency-path: .github/requirements-ci.txt
       - run: python3 -m pip install -r .github/requirements-ci.txt
       - run: pnpm install --frozen-lockfile
@@ -215,7 +217,7 @@ jobs:
       - uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020 # v4.4.0
         with:
           node-version: 24
-          cache: pnpm
+          cache: ${{ github.event_name != 'merge_group' && 'pnpm' || '' }}
       # (the four modules: this run's wasm-modules artifact when it built them, else the published pins)
       - uses: ./.github/actions/wasm-modules
         with:
@@ -226,7 +228,7 @@ jobs:
       - uses: actions/setup-python@a26af69be951a213d495a4c3e4e4022e16d87065 # v5.6.0
         with:
           python-version: "3.14"
-          cache: pip
+          cache: ${{ github.event_name != 'merge_group' && 'pip' || '' }}
           cache-dependency-path: .github/requirements-ci.txt
       - run: python3 -m pip install -r .github/requirements-ci.txt
       - run: pnpm install --frozen-lockfile && pnpm run build && node scripts/build-cli.mjs
@@ -258,7 +260,7 @@ jobs:
       - uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020 # v4.4.0
         with:
           node-version: 24
-          cache: pnpm
+          cache: ${{ github.event_name != 'merge_group' && 'pnpm' || '' }}
       # (the four modules: this run's wasm-modules artifact when it built them, else the published pins)
       - uses: ./.github/actions/wasm-modules
         with:
@@ -266,7 +268,7 @@ jobs:
       - uses: actions/setup-python@a26af69be951a213d495a4c3e4e4022e16d87065 # v5.6.0
         with:
           python-version: "3.14"
-          cache: pip
+          cache: ${{ github.event_name != 'merge_group' && 'pip' || '' }}
           cache-dependency-path: .github/requirements-ci.txt
       - run: python3 -m pip install scipy==1.18.1 numpy==2.5.1
       - run: pnpm install --frozen-lockfile && pnpm run build
@@ -296,7 +298,7 @@ jobs:
       - uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020 # v4.4.0
         with:
           node-version: "24.21.0"
-          cache: pnpm
+          cache: ${{ github.event_name != 'merge_group' && 'pnpm' || '' }}
       # (the four modules: this run's wasm-modules artifact when it built them, else the published pins)
       - uses: ./.github/actions/wasm-modules
         with:
@@ -561,7 +563,7 @@ jobs:
       - uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020 # v4.4.0
         with:
           node-version: 24
-          cache: pnpm
+          cache: ${{ github.event_name != 'merge_group' && 'pnpm' || '' }}
       # (the four modules: this run's wasm-modules artifact when it built them, else the published pins)
       - uses: ./.github/actions/wasm-modules
         with:
@@ -652,7 +654,7 @@ jobs:
       - uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020 # v4.4.0
         with:
           node-version: 24
-          cache: pnpm
+          cache: ${{ github.event_name != 'merge_group' && 'pnpm' || '' }}
       # (the four modules: this run's wasm-modules artifact when it built them, else the published pins)
       - uses: ./.github/actions/wasm-modules
         with:
@@ -702,7 +704,7 @@ jobs:
       - uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020 # v4.4.0
         with:
           node-version: 24
-          cache: pnpm
+          cache: ${{ github.event_name != 'merge_group' && 'pnpm' || '' }}
       # (the four modules: this run's wasm-modules artifact when it built them, else the published pins)
       - uses: ./.github/actions/wasm-modules
         with:
@@ -759,7 +761,7 @@ jobs:
       - uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020 # v4.4.0
         with:
           node-version: 24
-          cache: pnpm
+          cache: ${{ github.event_name != 'merge_group' && 'pnpm' || '' }}
       # (the four modules: this run's wasm-modules artifact when it built them, else the published pins)
       - uses: ./.github/actions/wasm-modules
         with:
@@ -805,7 +807,7 @@ jobs:
       - uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020 # v4.4.0
         with:
           node-version: 24
-          cache: pnpm
+          cache: ${{ github.event_name != 'merge_group' && 'pnpm' || '' }}
       # (the four modules: this run's wasm-modules artifact when it built them, else the published pins)
       - uses: ./.github/actions/wasm-modules
         with:
@@ -854,7 +856,7 @@ jobs:
       - uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020 # v4.4.0
         with:
           node-version: 24
-          cache: pnpm
+          cache: ${{ github.event_name != 'merge_group' && 'pnpm' || '' }}
       # (the four modules: this run's wasm-modules artifact when it built them, else the published pins)
       - uses: ./.github/actions/wasm-modules
         with:
@@ -905,7 +907,7 @@ jobs:
       - uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020 # v4.4.0
         with:
           node-version: 24
-          cache: pnpm
+          cache: ${{ github.event_name != 'merge_group' && 'pnpm' || '' }}
       # (the four modules: this run's wasm-modules artifact when it built them, else the published pins)
       - uses: ./.github/actions/wasm-modules
         with:
@@ -958,7 +960,7 @@ jobs:
       - uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020 # v4.4.0
         with:
           node-version: 24
-          cache: pnpm
+          cache: ${{ github.event_name != 'merge_group' && 'pnpm' || '' }}
       # (the four modules: this run's wasm-modules artifact when it built them, else the published pins)
       - uses: ./.github/actions/wasm-modules
         with:
@@ -1024,7 +1026,7 @@ jobs:
       - uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020 # v4.4.0
         with:
           node-version: 24
-          cache: pnpm
+          cache: ${{ github.event_name != 'merge_group' && 'pnpm' || '' }}
       # (the four modules: this run's wasm-modules artifact when it built them, else the published pins)
       - uses: ./.github/actions/wasm-modules
         with:
@@ -1092,7 +1094,7 @@ jobs:
           echo "$(wc -l < "$RUNNER_TEMP/debs-now") .debs now, $added new"
           if [ "$added" -gt 0 ]; then echo save=true >> "$GITHUB_OUTPUT"; fi
       - name: WebKit's apt packages, saved
-        if: ${{ !cancelled() && steps.debs-new.outputs.save == 'true' }}
+        if: ${{ !cancelled() && steps.debs-new.outputs.save == 'true' && github.event_name != 'merge_group' }}
         uses: actions/cache/save@0057852bfaa89a56745cba8c7296529d2fc39830 # v4.3.0
         with:
           path: ~/sb-webkit-debs
@@ -1139,7 +1141,7 @@ jobs:
       - uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020 # v4.4.0
         with:
           node-version: 24
-          cache: pnpm
+          cache: ${{ github.event_name != 'merge_group' && 'pnpm' || '' }}
       # (the four modules: this run's wasm-modules artifact when it built them, else the published pins)
       - uses: ./.github/actions/wasm-modules
         with:
@@ -1247,7 +1249,7 @@ jobs:
       - uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020 # v4.4.0
         with:
           node-version: 24
-          cache: pnpm
+          cache: ${{ github.event_name != 'merge_group' && 'pnpm' || '' }}
       # (the four modules: this run's wasm-modules artifact when it built them, else the published pins)
       - uses: ./.github/actions/wasm-modules
         with:
@@ -1288,7 +1290,7 @@ jobs:
       - uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020 # v4.4.0
         with:
           node-version: 24
-          cache: pnpm
+          cache: ${{ github.event_name != 'merge_group' && 'pnpm' || '' }}
       # (the four modules: this run's wasm-modules artifact when it built them, else the published pins)
       - uses: ./.github/actions/wasm-modules
         with:
@@ -1299,7 +1301,7 @@ jobs:
       - uses: actions/setup-python@a26af69be951a213d495a4c3e4e4022e16d87065 # v5.6.0
         with:
           python-version: "3.14"
-          cache: pip
+          cache: ${{ github.event_name != 'merge_group' && 'pip' || '' }}
           cache-dependency-path: .github/requirements-ci.txt
       - run: python3 -m pip install scipy==1.18.1 numpy==2.5.1 mpmath==1.3.0
       - run: pnpm install --frozen-lockfile && pnpm run build && node scripts/build-cli.mjs
@@ -1350,7 +1352,7 @@ jobs:
       - uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020 # v4.4.0
         with:
           node-version: 24
-          cache: pnpm
+          cache: ${{ github.event_name != 'merge_group' && 'pnpm' || '' }}
       # (the four modules: this run's wasm-modules artifact when it built them, else the published pins)
       - uses: ./.github/actions/wasm-modules
         with:
@@ -1358,7 +1360,7 @@ jobs:
       - uses: actions/setup-python@a26af69be951a213d495a4c3e4e4022e16d87065 # v5.6.0
         with:
           python-version: "3.14"
-          cache: pip
+          cache: ${{ github.event_name != 'merge_group' && 'pip' || '' }}
           cache-dependency-path: .github/requirements-ci.txt
       - run: python3 -m pip install mpmath==1.3.0
       - run: pnpm install --frozen-lockfile && pnpm run build
@@ -1387,6 +1389,7 @@ jobs:
       - uses: Swatinem/rust-cache@d1527c8f67ef9af357290475d4af4b0fab8f12e0 # v2.9.3
         with:
           workspaces: engine
+          save-if: ${{ github.event_name != 'merge_group' }}
       - working-directory: engine
         run: cargo test --workspace --exclude sagebrush-flint --exclude sagebrush-oracle
 
@@ -1404,6 +1407,7 @@ jobs:
       - uses: Swatinem/rust-cache@d1527c8f67ef9af357290475d4af4b0fab8f12e0 # v2.9.3
         with:
           workspaces: engine
+          save-if: ${{ github.event_name != 'merge_group' }}
           shared-key: nd-neon
       - name: "engine/nd on aarch64: the NEON kernel's oracle, thread determinism and FMA-family bits"
         working-directory: engine
@@ -1430,6 +1434,7 @@ jobs:
       - uses: Swatinem/rust-cache@d1527c8f67ef9af357290475d4af4b0fab8f12e0 # v2.9.3
         with:
           workspaces: engine
+          save-if: ${{ github.event_name != 'merge_group' }}
           shared-key: unsafe-sweep
       - uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020 # v4.4.0
         with:
@@ -1459,6 +1464,7 @@ jobs:
       - uses: Swatinem/rust-cache@d1527c8f67ef9af357290475d4af4b0fab8f12e0 # v2.9.3
         with:
           workspaces: engine
+          save-if: ${{ github.event_name != 'merge_group' }}
       - uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020 # v4.4.0
         with:
           node-version: 24
@@ -1526,13 +1532,14 @@ jobs:
       - uses: Swatinem/rust-cache@d1527c8f67ef9af357290475d4af4b0fab8f12e0 # v2.9.3
         with:
           workspaces: engine
+          save-if: ${{ github.event_name != 'merge_group' }}
       - uses: pnpm/action-setup@b906affcce14559ad1aafd4ab0e942779e9f58b1 # v4.3.0
         with:
           version: 11
       - uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020 # v4.4.0
         with:
           node-version: 24
-          cache: pnpm
+          cache: ${{ github.event_name != 'merge_group' && 'pnpm' || '' }}
       # (the producer's four modules, checked, when it ran: built once per run; labelled fresh on a pull request whose
       # pins are stale, so this job still smoke-tests the change)
       - if: needs.wasm-modules.result == 'success'
@@ -1546,7 +1553,7 @@ jobs:
       - uses: actions/setup-python@a26af69be951a213d495a4c3e4e4022e16d87065 # v5.6.0
         with:
           python-version: "3.14"
-          cache: pip
+          cache: ${{ github.event_name != 'merge_group' && 'pip' || '' }}
           cache-dependency-path: .github/requirements-ci.txt
       - run: python3 -m pip install scipy==1.18.1 numpy==2.5.1
       - run: pnpm install --frozen-lockfile
@@ -1591,7 +1598,7 @@ jobs:
       - uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020 # v4.4.0
         with:
           node-version: 24
-          cache: pnpm
+          cache: ${{ github.event_name != 'merge_group' && 'pnpm' || '' }}
       # (the four modules: this run's wasm-modules artifact when it built them, else the published pins)
       - uses: ./.github/actions/wasm-modules
         with:
@@ -1605,7 +1612,7 @@ jobs:
       - uses: actions/setup-python@a26af69be951a213d495a4c3e4e4022e16d87065 # v5.6.0
         with:
           python-version: "3.14"
-          cache: pip
+          cache: ${{ github.event_name != 'merge_group' && 'pip' || '' }}
           cache-dependency-path: .github/requirements-ci.txt
       - run: python3 -m pip install -r .github/requirements-ci.txt
       - run: pnpm install --frozen-lockfile && pnpm run build && node scripts/build-cli.mjs
@@ -1636,7 +1643,7 @@ jobs:
       - uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020 # v4.4.0
         with:
           node-version: 24
-          cache: pnpm
+          cache: ${{ github.event_name != 'merge_group' && 'pnpm' || '' }}
       # (the four modules: this run's wasm-modules artifact when it built them, else the published pins)
       - uses: ./.github/actions/wasm-modules
         with:
@@ -1648,7 +1655,7 @@ jobs:
       - uses: actions/setup-python@a26af69be951a213d495a4c3e4e4022e16d87065 # v5.6.0
         with:
           python-version: "3.14"
-          cache: pip
+          cache: ${{ github.event_name != 'merge_group' && 'pip' || '' }}
           cache-dependency-path: .github/requirements-ci.txt
       - run: python3 -m pip install scipy==1.18.1 numpy==2.5.1
       - run: pnpm install --frozen-lockfile && pnpm run build && node scripts/build-cli.mjs
@@ -1675,7 +1682,7 @@ jobs:
       - uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020 # v4.4.0
         with:
           node-version: 24
-          cache: pnpm
+          cache: ${{ github.event_name != 'merge_group' && 'pnpm' || '' }}
       # (the four modules: this run's wasm-modules artifact when it built them, else the published pins)
       - uses: ./.github/actions/wasm-modules
         with:
@@ -1687,7 +1694,7 @@ jobs:
       - uses: actions/setup-python@a26af69be951a213d495a4c3e4e4022e16d87065 # v5.6.0
         with:
           python-version: "3.14"
-          cache: pip
+          cache: ${{ github.event_name != 'merge_group' && 'pip' || '' }}
           cache-dependency-path: .github/requirements-ci.txt
       - run: python3 -m pip install scipy==1.18.1 numpy==2.5.1
       - run: pnpm install --frozen-lockfile && pnpm run build && node scripts/build-cli.mjs
@@ -1714,6 +1721,7 @@ jobs:
       - uses: Swatinem/rust-cache@d1527c8f67ef9af357290475d4af4b0fab8f12e0 # v2.9.3
         with:
           workspaces: engine
+          save-if: ${{ github.event_name != 'merge_group' }}
       - uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020 # v4.4.0
         with:
           node-version: 24
@@ -1785,6 +1793,7 @@ jobs:
       - uses: Swatinem/rust-cache@d1527c8f67ef9af357290475d4af4b0fab8f12e0 # v2.9.3
         with:
           workspaces: engine
+          save-if: ${{ github.event_name != 'merge_group' }}
           shared-key: clippy
       - uses: actions/setup-python@a26af69be951a213d495a4c3e4e4022e16d87065 # v5.6.0
         with:
@@ -1837,7 +1846,7 @@ jobs:
       - uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020 # v4.4.0
         with:
           node-version: "24.21.0"
-          cache: pnpm
+          cache: ${{ github.event_name != 'merge_group' && 'pnpm' || '' }}
       # (the four modules: this run's wasm-modules artifact when it built them, else the published pins)
       - uses: ./.github/actions/wasm-modules
         with:
@@ -1895,7 +1904,7 @@ jobs:
       - uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020 # v4.4.0
         with:
           node-version: 24
-          cache: pnpm
+          cache: ${{ github.event_name != 'merge_group' && 'pnpm' || '' }}
       # (the four modules: this run's wasm-modules artifact when it built them, else the published pins)
       - uses: ./.github/actions/wasm-modules
         with:
@@ -1940,7 +1949,7 @@ jobs:
       - uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020 # v4.4.0
         with:
           node-version: 24
-          cache: pnpm
+          cache: ${{ github.event_name != 'merge_group' && 'pnpm' || '' }}
       # (the four modules: this run's wasm-modules artifact when it built them, else the published pins)
       - uses: ./.github/actions/wasm-modules
         with:
@@ -1990,6 +1999,7 @@ jobs:
       - modes
       - mpmath-suite
       - engine-rust
+      - engine-nd-neon
       - wasm-modules
       - wasm-publish
       - engine-wasm
@@ -2008,6 +2018,7 @@ jobs:
     steps:
       - name: require every selected job to pass
         env:
+          CHANGES: ${{ needs.changes.result }}
           RESULTS: >-
             ${{ needs.changes.result }} ${{ needs.census.result }}
             ${{ needs.node-tests.result }}
@@ -2020,7 +2031,7 @@ jobs:
             ${{ needs.web-browser.result }}
             ${{ needs.interrupt-matrix.result }}
             ${{ needs.conformance.result }} ${{ needs.modes.result }} ${{ needs.mpmath-suite.result }}
-            ${{ needs.engine-rust.result }} ${{ needs.wasm-modules.result }} ${{ needs.wasm-publish.result }} ${{ needs.engine-wasm.result }}
+            ${{ needs.engine-rust.result }} ${{ needs.engine-nd-neon.result }} ${{ needs.wasm-modules.result }} ${{ needs.wasm-publish.result }} ${{ needs.engine-wasm.result }}
             ${{ needs.engine-node.result }} ${{ needs.engine-language.result }}
             ${{ needs.engine-modes.result }}
             ${{ needs.engine-cpython.result }}
@@ -2029,6 +2040,7 @@ jobs:
             ${{ needs.webkit.result }}
             ${{ needs.export-controls.result }} ${{ needs.lookalike-controls.result }}
         run: |
+          [ "$CHANGES" = success ] || { echo "changes did not succeed: $CHANGES"; exit 1; }
           echo "$RESULTS"
           case " $RESULTS " in
             *" failure "*|*" cancelled "*) exit 1 ;;

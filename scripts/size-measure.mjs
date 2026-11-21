@@ -323,8 +323,13 @@ export function testedTransition({ cwd = root, name = process.env.GITHUB_EVENT_N
     return { mode: "transition", merge, base: parents[0], head: parents[1] };
   }
   if (name === "merge_group") {
-    if (!parents[0] || ev.merge_group?.base_sha !== parents[0]) throw new Error("merge_group base is not HEAD^1");
-    return { mode: "transition", merge, base: parents[0], head: parents[1] ?? null };
+    // A cumulative queue head can contain earlier entries, so its base need not be HEAD^1:
+    // measure the whole group, from the queue's base to the tested commit, as one transition.
+    const { base_sha: base, head_sha: groupHead } = ev.merge_group ?? {};
+    if (!/^[0-9a-f]{40}$/.test(base ?? "") || groupHead !== merge) throw new Error("merge_group needs base_sha and a head_sha equal to the tested commit");
+    if (base === merge) throw new Error("merge_group base_sha is the tested commit");
+    g("merge-base", "--is-ancestor", base, merge);
+    return { mode: "transition", merge, base, head: merge };
   }
   if (name === "push" && ev.before && !/^0{40}$/.test(ev.before)) {
     g("merge-base", "--is-ancestor", ev.before, merge);
