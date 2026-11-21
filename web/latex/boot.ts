@@ -39,8 +39,6 @@ const isTex = (e: Entry) => /\.tex$/i.test(e.path);
 const leave = (url: string) => (g.__sbLeaveTo ? void g.__sbLeaveTo(url) : (g.__sbTexLeave ?? ((go: () => void) => go()))(() => location.assign(url)));
 /** New ▸ LaTeX document in `folder`: "Untitled.tex" (or "Untitled (2).tex", ...) there, opened in the editor. */
 export const texNew = (ws: Workspace, folder = "/") => import(PAGE).then((x) => x.newTex(ws, g.__sbTex, folder), (r) => alert(r));
-/** The LaTeX examples' list (the editor's "From an example…"; examples.ts). */
-export const texExamplesOpen = (ws: Workspace) => import(PAGE).then((x) => x.texExamples(ws, g.__sbTex), (r) => alert(r));
 /** The editor's File menu, drawn by the one File menu (filemenu.ts, as on the notebook and board pages: the same items
  * in the same order, U0) from this page's script, so the editor's chunk carries no copy of it: handed to the editor
  * at mount (its host's `fileMenu`). `print`: the editor's own Print or save as PDF; `close`: the menu closed. */
@@ -55,9 +53,9 @@ function texFileMenu(ws: Workspace, menu: HTMLElement, o: { print(): void; close
     texboard: () => leave("/board/?new=python"),
     texnew: () => texNew(ws),
     texfolder: async () => { const n = prompt("A new folder, at the top of your files: its name", "New folder"); if (n?.trim()) await ws.mkdir("/" + safeName(n.trim())); },
-    // (the examples gallery, LaTeX first, as the notebook and board pages have it (web/examples/open.ts); where the site
-    // has none, the LaTeX examples' own list)
-    texexamples: async () => { if (!(await openGallery(ws, go, "latex"))) await texExamplesOpen(ws); },
+    // (the examples gallery, LaTeX first, as the notebook and board pages have it (web/examples/open.ts), the only list
+    // of examples; where this page can't reach it, said)
+    texexamples: async () => { if (!(await openGallery(ws, go, "latex"))) alert("The examples aren't available here."); },
     texopen: () => openFilesDialog(ws, go),
     texprint: () => o.print(),
     // (Share…: the page's Share dialog for this .tex (latexBoot's `share`), its path as it is now; the dialog saves it
@@ -138,7 +136,7 @@ export async function latexBoot(ws: Workspace | null, sandbox: { WorkerKernel: u
     else { b.disabled = true; box.append(el("div", "This file can't open in the LaTeX editor yet: it hasn't been given a stable id.")); }
     box.append(b);
   };
-  // (a new LaTeX document and the LaTeX examples: texNew and texExamplesOpen above, which the page's File ▸ New, file
+  // (a new LaTeX document: texNew above, which the page's File ▸ New, file
   // panel and folder menus call (filemenu.ts NEW_ITEMS, browser.ts: U0); never a URL that makes a file)
   // a published document, read only (?tex-doc=/articles/<series>/<name>.tex; the page module's openDoc checks the path)
   const doc = p.get("tex-doc");

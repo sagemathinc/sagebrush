@@ -18,6 +18,7 @@
 //   node app/build-frontend.mjs --check DIR  check DIR only (web/test-app-frontend.mjs)
 import { cpSync, mkdirSync, rmSync, existsSync, readFileSync, readdirSync, statSync } from "node:fs";
 import { createHash } from "node:crypto";
+import { spawnSync } from "node:child_process";
 import { join } from "node:path";
 
 const here = new URL(".", import.meta.url).pathname;
@@ -28,7 +29,7 @@ const out = checkOnly ? process.argv[3] : join(here, "dist");
 if (!checkOnly) {
   // (everything below comes from a complete `bun web/build.ts`: it can stop part way, with index.html written but
   // not the notices or the icons, when web/js-dependencies.json changed; scripts/build-all.sh handles that)
-  const FILES = ["index.html", "sagebrush-app.js", "sagebrush-worker.js", "sagebrush-engine.wasm", "sagebrush-raster.wasm", "sagebrush-nd.wasm", "sagebrush-mp.wasm", "sagebrush-console.js", "sagebrush-math.js", "sagebrush-myst.js", "sagebrush-viewer3d.js", "sagebrush-history.js", "sagebrush-analyze.js", "sagebrush-remote.js", "sagebrush-remote-terminal.js", "sagebrush-export.js", "sagebrush-export-worker.js", "sagebrush-gitpush-panel.js", "sagebrush-examples-panel.js", "sagebrush-gradescope.js", "sagebrush-code.js", "sagebrush-gitpush-worker.js", "sagebrush-latex.js", "sagebrush-latex-worker.js", "sagebrush-latex-comments.js", "sagebrush-latex-comments-doc.js", "sagebrush-latex-agent.js", "sagebrush-latex-tools.js", "sagebrush-latex-present.js", "sagebrush-latex-interact.js", "sagebrush-latex-hl.js", "sagebrush-latex-view.js", "sagebrush-latex-run.js", "sagebrush-latex-doc.js", "sagebrush-latex-share.js", "sagebrush-latex-examples.js", "sagebrush-latex-beamer.js", "sagebrush-latex-pythontex.js", "sagebrush-graphview.js", "sagebrush-selftest.js", "sagebrush-desktop.js", "sagebrush-share-deps.js", "sagebrush-share-folder.js", "sagebrush-share-mine.js", "docs-index.json", "THIRD-PARTY-NOTICES.txt", "katex", "icons", "lib"];
+  const FILES = ["index.html", "sagebrush-app.js", "sagebrush-worker.js", "sagebrush-engine.wasm", "sagebrush-raster.wasm", "sagebrush-nd.wasm", "sagebrush-mp.wasm", "sagebrush-console.js", "sagebrush-math.js", "sagebrush-myst.js", "sagebrush-viewer3d.js", "sagebrush-history.js", "sagebrush-analyze.js", "sagebrush-remote.js", "sagebrush-remote-terminal.js", "sagebrush-export.js", "sagebrush-export-worker.js", "sagebrush-gitpush-panel.js", "sagebrush-examples-panel.js", "sagebrush-gradescope.js", "sagebrush-code.js", "sagebrush-gitpush-worker.js", "sagebrush-latex.js", "sagebrush-latex-worker.js", "sagebrush-latex-comments.js", "sagebrush-latex-comments-doc.js", "sagebrush-latex-agent.js", "sagebrush-latex-tools.js", "sagebrush-latex-present.js", "sagebrush-latex-interact.js", "sagebrush-latex-hl.js", "sagebrush-latex-view.js", "sagebrush-latex-run.js", "sagebrush-latex-doc.js", "sagebrush-latex-share.js", "sagebrush-latex-beamer.js", "sagebrush-latex-pythontex.js", "sagebrush-graphview.js", "sagebrush-selftest.js", "sagebrush-desktop.js", "sagebrush-share-deps.js", "sagebrush-share-folder.js", "sagebrush-share-mine.js", "docs-index.json", "THIRD-PARTY-NOTICES.txt", "katex", "icons", "lib"];
   const missing = [...FILES, "shell", "pkg", "pkgset", "pkgmeta", "board", "sagebrush-notebook.js"].filter((f) => !existsSync(join(src, f)));
   if (missing.length) throw new Error(`web/dist is missing ${missing.join(", ")}: run \`bun web/build.ts\` to the end (if it stops with "web/js-dependencies.json changed", run node scripts/third-party-notices.mjs and build again), or scripts/build-all.sh, which does both`);
   if (!existsSync(join(here, "THIRD-PARTY-NOTICES-native.txt"))) throw new Error("app/THIRD-PARTY-NOTICES-native.txt is missing: run node scripts/third-party-notices.mjs (or git checkout -- app/THIRD-PARTY-NOTICES-native.txt)");
@@ -47,6 +48,10 @@ if (!checkOnly) {
   cpSync(join(src, "sagebrush-notebook.js"), join(out, "sagebrush-notebook.js"));
   // (the other modes' documentation indexes, for the notebook's search box, where built)
   for (const f of ["docs-index-python.json", "docs-index-matlab.json", "docs-index-magma.json"]) if (existsSync(join(src, f))) cpSync(join(src, f), join(out, f));
+  // the examples gallery (app/build-examples.ts: its pages and catalog, as the site's, in app/dist/examples/), so
+  // File > Examples… opens the gallery's panel here too: the only list of examples, in every context
+  const ex = spawnSync("bun", [join(here, "build-examples.ts"), out], { stdio: "inherit" });
+  if (ex.status !== 0) throw new Error(`app/build-examples.ts failed (${ex.error?.message ?? "exit " + ex.status}): the gallery isn't in app/dist`);
   // the app's native code's notices (scripts/third-party-notices.mjs), beside the page's
   cpSync(join(here, "THIRD-PARTY-NOTICES-native.txt"), join(out, "THIRD-PARTY-NOTICES-native.txt"));
 }
@@ -123,7 +128,6 @@ for (const r of [...relRefs].sort()) if (!existsSync(join(out, r))) bad.push(`./
 // back to the files; before, it was the notebook at that path, broken until a restart.  A new one fails here.
 const NOT_IN_APP = new Map([
   ["agents", "the Agents switch (web/workspace/mode-switch.ts, and the board's): to be hidden in the app; meanwhile the server's short page, with a way back"],
-  ["examples", "the Examples gallery's catalog (/examples/index.json): not in the app yet"],
   ["blog", "the landing page's links to the site: the server's short page, with a way back"],
   ["articles", "the landing page's links to the site: the server's short page, with a way back"],
   ["atlas", "the landing page's links to the site: the server's short page, with a way back"],
@@ -159,8 +163,16 @@ if (set) {
   }
   if (!shellPkgs) bad.push(`pkgset/${S}.json: the Terminal's set names no package`);
 }
+// The examples gallery (app/build-examples.ts): its catalog, and each example's files.json beside its page, as the
+// panel (web/examples/panel.ts, copy.ts) reads them; without it, File > Examples… says the examples aren't available
+let examples = 0;
+try {
+  const cat = JSON.parse(readFileSync(join(out, "examples", "index.json"), "utf8"));
+  if (!Array.isArray(cat?.examples) || !cat.examples.length) bad.push("examples/index.json: no examples in the catalog");
+  else for (const e of cat.examples) { examples++; if (!existsSync(join(out, "examples", e.id, "files.json"))) bad.push(`examples/${e.id}/files.json: missing from app/dist`); }
+} catch { bad.push("examples/index.json: missing from app/dist, or not JSON (the examples gallery: app/build-examples.ts)"); }
 if (bad.length) {
   console.error(`${checkOnly ? out : "app/dist"}: the worker and its library chunks do not match:\n  ` + bad.join("\n  "));
   process.exit(1);
 }
-console.log(`${checkOnly ? out : "app/dist"}: the notebook page for the app (the worker's ${named.size} library chunks, ${tzRef ? `its zone data's index and ${tzFiles.size - 1} zone files for ${zones} zones` : "no zone data"}, and the ${refs.size} files the page names checked, ${relRefs.size} by a relative path; the Terminal's set with ${shellPkgs} package${shellPkgs === 1 ? "" : "s"})`);
+console.log(`${checkOnly ? out : "app/dist"}: the notebook page for the app (the worker's ${named.size} library chunks, ${tzRef ? `its zone data's index and ${tzFiles.size - 1} zone files for ${zones} zones` : "no zone data"}, and the ${refs.size} files the page names checked, ${relRefs.size} by a relative path; the Terminal's set with ${shellPkgs} package${shellPkgs === 1 ? "" : "s"}; the examples gallery with ${examples})`);

@@ -14,7 +14,6 @@ export const LATEX_LAZY = {
   TOOLS: "dist/sagebrush-latex-tools.js",
   PRESENT: "dist/sagebrush-latex-present.js",
   DOC: "dist/sagebrush-latex-doc.js",
-  EXAMPLES: "dist/sagebrush-latex-examples.js",
   BEAMER: "dist/sagebrush-latex-beamer.js",
   PYTHONTEX: "dist/sagebrush-latex-pythontex.js",
   RUN: "dist/sagebrush-latex-run.js",
@@ -102,7 +101,10 @@ export const LATEX_LAZY = {
 // (254,814 raw / 85,192 gzip: Nov 21 2026, every way out of the LaTeX page by the hosting page's leaveTo, the edit
 //  written first (leaveThen with or without the Navigation API, the home link's handler): 254,750 / 85,128 measured on
 //  the shipped build of its merge with master 97da53af, with bun 1.4.4 and node 24.21.0, + 64)
-export const LATEX_CAPS = { raw: 254814, gzip: 85192 };
+// (252,517 raw / 84,516 gzip: Nov 21 2026, the editor's own list of examples gone (the gallery's panel the only one):
+//  252,453 / 84,452 measured on the shipped build of its merge with master 68280840, with bun 1.4.4 and node 24.21.0,
+//  + 64)
+export const LATEX_CAPS = { raw: 252517, gzip: 84516 };
 export const gz = (b) => gzipSync(b, { level: 9 }).length;
 
 // Each lazy chunk's own cap (raw, gzip), fetched only on its own use, so outside the group:
@@ -207,9 +209,6 @@ export const LATEX_LAZY_CAPS = {
   // (a published document opened read only, doc.ts: fetched only for a /?tex-doc= link, the articles';
   //  2026-11-05: 3.5 / 1.75 KiB, about 340 / 165 B over its first build's 3,246 / 1,627, as the beamer chunk's margin)
   DOC: { label: "the LaTeX read-only document's chunk", raw: 3.5 * 1024, gzip: 1.75 * 1024 },
-  // (the ten examples, examples.ts: fetched when their list opens, out of the group (2026-11-05, the group near
-  //  its cap: a lazy split, not another raise); its cap approved Nov 5)
-  EXAMPLES: { label: "the LaTeX examples' chunk", raw: 13 * 1024, gzip: 6 * 1024 },
   // (beamer's frames, blocks and overlays: engine/beamer.mjs, the worker's, fetched when a document first needs it (the
   //  class beamer, or an overlay command). 2026-11-04: make room for beamer's page furniture by moving
   //  beamer's code out of the group, its own cap line; 8 KiB / 3 KiB: 3,161 / 1,426 moved, and the furniture to come.
