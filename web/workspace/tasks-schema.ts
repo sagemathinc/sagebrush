@@ -12,7 +12,7 @@ const bad = (m: string): never => { throw new TaskShapeError(m); };
 
 export const TASK_STATUSES = ["working", "proposal", "merged", "closed", "failed", "interrupted"] as const;
 export type TaskStatus = (typeof TASK_STATUSES)[number];
-export const TASK_LIMITS = Object.freeze({ list: 64, title: 200, text: 64 * 1024, reason: 1024, files: 2000, path: 1024, component: 255 });
+export const TASK_LIMITS = Object.freeze({ list: 64, title: 200, text: 64 * 1024, reason: 1024, files: 2000, path: 1024, component: 255, doc: 4 * 2 ** 20 });
 
 const HEX32 = /^[0-9a-f]{32}$/, HEX40 = /^[0-9a-f]{40}$/;
 const enc = new TextEncoder();
@@ -83,11 +83,20 @@ function diffFiles(v: unknown, what: string): DiffFile[] {
   return out;
 }
 
-/** A document's content as the host sends it: UTF-8 text, or {base64}. */
+/** A document's content as the host sends it: UTF-8 text, or {base64}; at most 4 MiB of bytes (§6.1: the text's UTF-8
+ * bytes, or the base64's decoded bytes). */
 export type TaskContent = string | { base64: string };
 function content(v: unknown, what: string): TaskContent {
-  if (typeof v === "string") return v;
-  if (isObj(v) && Object.keys(v).length === 1 && typeof v.base64 === "string" && /^[A-Za-z0-9+/]*={0,2}$/.test(v.base64) && v.base64.length % 4 === 0) return { base64: v.base64 };
+  if (typeof v === "string") {
+    // (counted without encoding when it can't be under: 4 MiB of UTF-8 is at least 4 Mi / 3 UTF-16 units, at most 4 Mi)
+    if (v.length > TASK_LIMITS.doc || enc.encode(v).length > TASK_LIMITS.doc) bad(`${what} is over ${TASK_LIMITS.doc} bytes`);
+    return v;
+  }
+  if (isObj(v) && Object.keys(v).length === 1 && typeof v.base64 === "string" && /^[A-Za-z0-9+/]*={0,2}$/.test(v.base64) && v.base64.length % 4 === 0) {
+    const pad = v.base64.endsWith("==") ? 2 : v.base64.endsWith("=") ? 1 : 0;
+    if ((v.base64.length / 4) * 3 - pad > TASK_LIMITS.doc) bad(`${what} is over ${TASK_LIMITS.doc} bytes decoded`);
+    return { base64: v.base64 };
+  }
   return bad(`${what} isn't text or {base64}`);
 }
 

@@ -78,6 +78,15 @@ alter("tasks.diff", "a path that is also another's folder", (v) => { const f = v
 alter("tasks.diff", "a notebook kind on a .txt", (v) => { const f = v.files.find((x) => x.kind === "file"); f.kind = "notebook"; });
 alter("tasks.diff", "a change whose blobs don't match it (added with a base)", (v) => { v.files[0].change = "added"; });
 alter("tasks.diff", "a path twice (case aside)", (v) => { v.files.push({ ...v.files[0], path: v.files[0].path.toUpperCase().replace(".IPYNB", ".ipynb").replace(".TXT", ".txt") }); });
+// (the 4 MiB content bound: text by its UTF-8 bytes, base64 by its decoded bytes, at the boundary)
+const D = 4 * 2 ** 20;
+const fileWith = (c) => ({ ...pick("tasks.file"), content: c });
+ok(!refused(() => TASK_RESULTS["tasks.file"](fileWith("x".repeat(D)))), "tasks.file: text of exactly 4 MiB: accepted");
+ok(refused(() => TASK_RESULTS["tasks.file"](fileWith("x".repeat(D + 1)))), "tasks.file: text one byte over 4 MiB: refused");
+ok(refused(() => TASK_RESULTS["tasks.file"](fileWith("\u00e9".repeat(D / 2 + 1)))), "tasks.file: text under 4 Mi characters but over 4 MiB in UTF-8 (é): refused");
+const b64 = (n) => { const full = Math.floor(n / 3), rem = n % 3; return "A".repeat(full * 4) + (rem === 1 ? "AA==" : rem === 2 ? "AAA=" : ""); };
+ok(!refused(() => TASK_RESULTS["tasks.file"](fileWith({ base64: b64(D) }))), "tasks.file: base64 of exactly 4 MiB decoded: accepted");
+ok(refused(() => TASK_RESULTS["tasks.file"](fileWith({ base64: b64(D + 1) }))), "tasks.file: base64 of 4 MiB + 1 decoded: refused");
 alter("tasks.file", "content neither text nor {base64}", (v) => { v.content = { bytes: [1, 2] }; });
 alter("tasks.file", "base64 that isn't", (v) => { v.content = { base64: "@@@=" }; });
 alter("tasks.merged", "a merge without its commit", (v) => { v.recorded = "merge"; v.commit = null; });
