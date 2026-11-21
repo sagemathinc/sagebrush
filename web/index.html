@@ -12,6 +12,10 @@
 <link rel="apple-touch-icon" href="icons/apple-touch-icon.png">
 <link rel="icon" href="data:image/svg+xml,%3Csvg xmlns=%22http://www.w3.org/2000/svg%22 viewBox=%220 0 32 32%22%3E%3Crect width=%2232%22 height=%2232%22 fill=%22%23AE472A%22/%3E%3Cpath fill=%22%23FADEB6%22 d=%22M4.4 30.8 L7.4 30.8 L10.6 30.6 L13.7 30.2 L16.7 29.6 L19.3 28.8 L21.6 27.7 L23.3 25.9 L23.9 23.4 L22.9 21.3 L21.2 20.1 L19.5 19.4 L17.7 18.9 L16.1 18.4 L14.9 18.0 L14.4 17.6 L14.2 17.1 L14.3 16.8 L14.5 16.4 L14.8 16.1 L15.4 15.6 L16.0 15.2 L16.7 14.8 L17.4 14.3 L18.0 13.7 L18.3 13.3 L18.4 12.8 L18.3 12.4 L18.1 12.0 L17.7 11.7 L17.2 11.6 L16.8 11.7 L16.4 11.9 L15.9 12.3 L15.4 12.6 L14.7 13.0 L13.9 13.5 L13.1 14.0 L12.3 14.8 L11.7 15.8 L11.4 17.3 L11.9 19.2 L13.3 20.5 L14.9 21.4 L16.6 22.0 L18.3 22.6 L19.5 23.2 L20.1 23.7 L20.1 23.8 L20.1 23.9 L19.5 24.3 L18.0 24.9 L15.8 25.4 L13.2 25.7 L10.3 25.8 L7.4 25.8 L4.6 25.6 L3.6 25.8 L2.7 26.3 L2.1 27.1 L1.9 28.1 L2.1 29.1 L2.6 30.0 L3.4 30.6 Z%22/%3E%3Cpath fill=%22%23BAC49E%22 d=%22M16.4 13.8C13.6 8.6 17.6 4.2 28.4 3C28.2 10.4 24 15 16.4 13.8Z%22/%3E%3C/svg%3E">
 <script>try { const t = localStorage.getItem("sagebrush-theme"); if (t === "light" || t === "dark") document.documentElement.dataset.theme = t; } catch {}</script>
+<script>/* (the cross-document view transition only between the pages that ask for it, this one and the board's (/ and
+  /board/): to any other page (one without the rule, /agents/, a share) it is skipped here, before the page goes, or the
+  page that comes rejects it unhandled; and a transition skipped (another navigation, a hidden page) rejects its
+  promises: handled, so a skipped fade is never an error) */ for (const t of ["pageswap", "pagereveal"]) addEventListener(t, (e) => { const v = e.viewTransition; if (!v) return; for (const p of [v.ready, v.finished, v.updateCallbackDone]) p?.catch(() => {}); if (t === "pageswap") { let to = null; try { to = new URL(e.activation.entry.url).pathname; } catch {} if (to !== "/" && to !== "/board/") v.skipTransition(); } });</script>
 <!-- the phone layout (a flag while it is new): ?phone=1 turns it on in this browser, ?phone=0 off -->
 <script>/* the landing view (/?home): set before the page draws, so the notebook never flashes there */ try { if (new URLSearchParams(location.search).has("home")) document.documentElement.classList.add("landing"); } catch {}</script>
 <!-- (the phone layout: on for a phone, a touch screen whose shorter side is at most 640px, whichever way it is held;
@@ -19,6 +23,9 @@
 <script>try { const s = new URLSearchParams(location.search), q = s.get("phone"); if (q === "1" || q === "0") localStorage.setItem("sagebrush-phone", q); const v = localStorage.getItem("sagebrush-phone"); if (v === "1" || (v !== "0" && matchMedia("(pointer: coarse)").matches && Math.min(screen.width, screen.height) <= 640)) document.documentElement.classList.add("phone"); if (s.has("tex") || s.has("code")) document.documentElement.classList.add("overpage"); } catch {}</script>
 <!-- (html.overpage: the LaTeX or code page (/?tex=, /?code=) is open over this one, with its own toolbar) -->
 <style>
+  /* (a same-origin page opened from here (a notebook, a .tex, a board) replaces this one with a cross-fade, not a
+     blank page in between: the browser's cross-document view transition; one without it just navigates) */
+  @view-transition { navigation: auto; }
   :root {
     --scheme: light; color-scheme: light;
     --bg: #fbfaf7; --fg: #1f2421; --muted: #5d645f; --line: #d4d4cb; --cell: #ffffff;
@@ -98,6 +105,10 @@
   .sr { position: absolute; width: 1px; height: 1px; overflow: hidden; clip-path: inset(50%); white-space: nowrap; }
   /* until the notebook is read from IndexedDB, nothing below it shows (no layout shift) */
   body.opening .about, body.opening footer { display: none; }
+  /* (while the page opens its document, not the placeholder notebook it starts with ("Untitled", an empty cell): the
+     document appears in place, with nothing before it to flash; shown after 4 s if the page is still opening it
+     (opening-late), and body.opening's own rules as they were: the LaTeX and code pages keep it) */
+  body.opening:not(.opening-late) #nbname, body.opening:not(.opening-late) #cells { visibility: hidden; }
   #nbline { display: flex; gap: 10px; align-items: center; margin-top: 4px; }
   /* the notebook view and the landing view (/?home): the brief, Nov 2: "There is way way too much on this page. The
      whiteboard page is much cleaner. We need a landing page that has all that marketing/positioning, and remove it all
@@ -273,13 +284,6 @@
   .sharesr { position: absolute; width: 1px; height: 1px; margin: -1px; overflow: hidden; clip: rect(0 0 0 0); white-space: nowrap; }
   .sharefoot { margin: 12px 0 0; padding-top: 8px; border-top: 1px solid var(--line); font-size: 13px; }
   @media (max-width: 480px) { .sharetabs button { padding: 6px 8px; } #sharecardlink { font-size: 14px; } .sharestaterow { flex-direction: column; align-items: stretch; } .sharestate { flex: none; } .shareaction { align-self: flex-start; } }
-  #exdlg { border: 1px solid var(--line); border-radius: 10px; background: var(--cell); color: var(--fg); padding: 14px 16px; width: min(560px, 92vw); }
-  #exdlg::backdrop { background: rgba(0,0,0,.35); }
-  #exdlg .exnote { color: var(--muted); font-size: 13px; margin: 4px 0 8px; }
-  #exdlg h4 { margin: 10px 0 4px; font-size: 13px; color: var(--muted); font-weight: 600; }
-  #exlist { max-height: 62vh; overflow: auto; }
-  #exlist button { display: block; width: 100%; text-align: left; border: 0; background: none; padding: 4px 8px; }
-  #exlist button:hover, #exlist button:focus { background: var(--code); outline: none; }
   #filesbar, #runbar { margin: 6px 0; padding: 6px 10px; border: 1px solid var(--line); border-radius: 6px; background: var(--code); font-size: 14px; }
   #filesbar[hidden], #runbar[hidden] { display: none; }
   /* (the sentence, then the button on a row of its own, then the note: each on its own line) */
@@ -482,6 +486,9 @@
 </head>
 <body class="opening">
 <div id="wssidebar" hidden></div>
+<!-- (the files shown before the page draws, as they were left (wsShowFiles keeps the choice), so the first paint has
+its final layout and the files never arrive a moment later; not on a phone, where they would cover the page) -->
+<script>try { if (localStorage.getItem("sagebrush-files-sidebar") === "1" && !matchMedia("(max-width: 640px)").matches) { document.body.classList.add("wsfiles"); document.getElementById("wssidebar").hidden = false; } } catch {} setTimeout(() => document.body.classList.add("opening-late"), 4000);</script>
 <!-- (the bottom panels' one host: the Python console, the browser terminal and the remote terminal, beside the files
      while they show, as the LaTeX editor is, never over or under them (decided Nov 12), and above the alpha notice) -->
 <div id="sbpanels"></div>
@@ -650,11 +657,6 @@
   <a role="menuitem" id="llmslink" href="/llms.txt" target="_blank" rel="noopener" title="For agents: what Sagebrush is and how to drive it">llms.txt (for agents) <span aria-hidden="true">↗</span></a>
   <a role="menuitem" id="supportlink" href="https://cocalc.ai/support/new" target="_blank" rel="noopener noreferrer" title="Ask for help: CoCalc's support form, in a new tab">Support <span aria-hidden="true">↗</span><span class="sr"> (opens in a new tab)</span></a>
 </div>
-<dialog id="exdlg" aria-labelledby="extitle">
-  <form method="dialog" style="display:flex;justify-content:space-between;align-items:center"><b id="extitle">Examples</b><button aria-label="Close">✕</button></form>
-  <p class="exnote">Each opens as a new notebook; yours stays saved.</p>
-  <div id="exlist"></div>
-</dialog>
 <!-- What this notebook's code may do (web/notebook/permissions.js): drawn by the page, only the person's own clicks
      change it. Named for what it does, never "trust". Each section appears in the phase that enforces it (the
      confinement spec r3.1, its phases 2-4): today, File writes. -->
@@ -857,12 +859,10 @@ const session = pageSession({
   get docSwitch() { return docSwitch; }, set docSwitch(v) { docSwitch = v; },
   get docSyncNeedsReload() { return docSyncNeedsReload; }, set docSyncNeedsReload(v) { docSyncNeedsReload = v; },
 });
-// File > Examples…'s notebooks, from the corpus in examples/notebook/ (as literals in the bundle: web/examples/legacy.ts)
-import { notebookExamples } from "./examples/legacy.ts";
-const { cells: EXAMPLES, sage: SAGE_TITLES, magma: MAGMA_TITLES, matlab: MATLAB_TITLES } = notebookExamples();
-const SAGE_EXAMPLES = new Set(SAGE_TITLES);
-const MAGMA_EXAMPLES = new Set(MAGMA_TITLES);
-const MATLAB_EXAMPLES = new Set(MATLAB_TITLES);
+// The first visit's notebook, Welcome or Sage, from the corpus in examples/notebook/ (as literals in the bundle:
+// web/examples/welcome.ts). The examples themselves are the gallery's (File > Examples…).
+import { welcomeNotebooks } from "./examples/welcome.ts";
+const WELCOME = welcomeNotebooks();
 const $ = (s) => document.querySelector(s);
 const statusEl = $("#status"), modeEl = $("#mode"), themeEl = $("#theme");
 // (the language menu's tooltip says what the selected language does: sage's n8 walkthrough found the Sage line shown
@@ -1216,7 +1216,7 @@ function makeKernel(owner) {
         const out = all.find((p) => !admit(sender, p));
         if (out) { refusedAt(out); return true; }
         const may = () => all.every((p) => admit(sender, p));
-        if (diskFile) for (const [p, d] of ch) if (d && /^\/[^/]+$/.test(p)) writeDisk(diskFile.dir + diskFile.sep + p.slice(1), d, may);
+        if (diskFile) for (const [p, d] of ch) if (d && /^\/[^/]+$/.test(p)) writeDisk(p.slice(1), d, may);
         fileBatch(ch, owner, may, k);
         return true;
       }
@@ -1224,7 +1224,7 @@ function makeKernel(owner) {
       if (owner !== null && !admit(sender, m.fsChanged)) { refusedAt(m.fsChanged); return true; }
       // in the app, a file Python wrote in its top folder goes to the notebook's folder
       const may = () => admit(sender, m.fsChanged);
-      if (diskFile && m.data && /^\/[^/]+$/.test(m.fsChanged)) writeDisk(diskFile.dir + diskFile.sep + m.fsChanged.slice(1), m.data, may);
+      if (diskFile && m.data && /^\/[^/]+$/.test(m.fsChanged)) writeDisk(m.fsChanged.slice(1), m.data, may);
       // (the other interpreters see it once it is kept: the queue's drain, after its final admission)
       fileChanged(m.fsChanged, m.data, owner, may, k);
       return true;
@@ -1322,9 +1322,11 @@ function useKernel(id) {
 const diskWrites = new Map();
 // (`may`: the change's authority, asked again as the write starts: a write queued behind others isn't made once its
 // document can't change files, or its interpreter isn't the document's now)
-function writeDisk(path, data, may = () => true) {
-  const next = (diskWrites.get(path) ?? Promise.resolve()).then(() => (may() ? TAURI.fs.writeFile(path, data) : undefined)).catch((e) => console.warn(e));
-  diskWrites.set(path, next);
+// (`name`: a file beside the notebook opened from the computer, in its folder, the one it was opened as when queued)
+function writeDisk(name, data, may = () => true) {
+  const io = hostFile(diskFile), key = diskFile.path + "\n" + name;
+  const next = (diskWrites.get(key) ?? Promise.resolve()).then(() => (may() ? io.write(name, data) : undefined)).catch((e) => console.warn(e));
+  diskWrites.set(key, next);
 }
 // The notebook is reactive (design/reactive-notebook.md).  ?reactive=0 in
 // the address turns that off in this browser (kept in localStorage
@@ -1619,6 +1621,8 @@ nb.on("saved", (text) => {
 const TOUCH_MS = 30_000, touchedAt = new Map();
 nb.on("saved", (text) => {
   const id = current.kind === "browser" ? current.id : null, now = Date.now();
+  // (the desktop app: the notebook's file written at once, every save)
+  if (id && diskMirror && !/^not saved/.test(String(text))) diskMirror.docSaved(id);
   if (!id || !ws || /^not saved/.test(String(text)) || now - (touchedAt.get(id) ?? 0) < TOUCH_MS) return;
   touchedAt.set(id, now);
   void ws.touch(id, now).catch(() => {});
@@ -2064,30 +2068,6 @@ modeEl.onchange = (e) => {
   docInput.value = "";
   hideDocList();
 };
-// File > Examples…: by language; each opens as a new notebook (yours stays saved)
-const exDlg = $("#exdlg");
-{
-  // (a group's name, lowercased, is its notebooks' language)
-  const groups = { Python: [], Sage: [], Magma: [], MATLAB: [] };
-  for (const k of Object.keys(EXAMPLES)) groups[SAGE_EXAMPLES.has(k) ? "Sage" : MAGMA_EXAMPLES.has(k) ? "Magma" : MATLAB_EXAMPLES.has(k) ? "MATLAB" : "Python"].push(k);
-  for (const [g, ks] of Object.entries(groups)) {
-    if (!ks.length) continue;
-    const h = document.createElement("h4");
-    h.textContent = g;
-    $("#exlist").append(h);
-    for (const k of ks) {
-      const b = document.createElement("button");
-      b.textContent = k;
-      b.onclick = () => {
-        exDlg.close();
-        // (Sagebrush's own example: it may change files, as the person's own notebooks may: permissions.js)
-        openHostMade(k, g.toLowerCase(), EXAMPLES[k]);
-        history.replaceState(null, "", location.pathname + flagQuery);
-      };
-      $("#exlist").append(b);
-    }
-  }
-}
 // Run all and Stop: one shows, by whether a cell is running or waiting to
 const runallBtn = $("#runall"), stopBtn = $("#stop");
 const showBusy = () => {
@@ -2690,12 +2670,32 @@ window.__sagebrushMystBook = () => bookAcc.mystBook();
 // writes goes back there)
 let diskFile = null, diskFiles = [];
 const splitPath = (p) => { const i = Math.max(p.lastIndexOf("/"), p.lastIndexOf("\\")); return { dir: p.slice(0, i), sep: p[i] || "/", name: p.slice(i + 1) }; };
-async function bindDiskFile(path, doc = null) {
+// The computer's files, the notebook's own and the ones beside it in its folder.  The desktop app: through its own
+// commands, by a grant it made for a file the person picked in its Open or Save dialog (or the system handed it), the
+// files beside it by name only (app/src-tauri/src/folder_fs.rs): this page names no path there.  A phone: through the
+// fs plugin, by path.
+// (a path (a phone's), a grant the app made (the desktop's), or either of these already made: never a path taken for a
+// grant, as String(undefined) is no grant but reads as one)
+const asDiskFile = (o) => (typeof o === "string" ? { path: o, ...splitPath(o) } : o.grant ? { grant: String(o.grant), path: String(o.path), name: String(o.name) } : asDiskFile(String(o.path)));
+const hostFile = (f) => (f.grant ? {
+  readText: () => TAURI.core.invoke("file_read_text", { grant: f.grant }),
+  writeText: (text) => TAURI.core.invoke("file_write_text", { grant: f.grant, text }),
+  list: () => TAURI.core.invoke("folder_list", { grant: f.grant }),
+  read: async (name) => new Uint8Array(await TAURI.core.invoke("folder_read", { grant: f.grant, name })),
+  write: (name, data) => TAURI.core.invoke("folder_write", data, { headers: { "Sagebrush-Grant": f.grant, "Sagebrush-Name": encodeURIComponent(name) } }),
+} : {
+  readText: () => TAURI.fs.readTextFile(f.path),
+  writeText: (text) => TAURI.fs.writeTextFile(f.path, text),
+  list: async () => { const out = []; for (const e of await TAURI.fs.readDir(f.dir)) if (e.isFile) out.push({ name: e.name, size: (await TAURI.fs.stat(f.dir + f.sep + e.name)).size }); return out; },
+  read: (name) => TAURI.fs.readFile(f.dir + f.sep + name),
+  write: (name, data) => TAURI.fs.writeFile(f.dir + f.sep + name, data),
+});
+async function bindDiskFile(o, doc = null) {
   const end = await navLease();
   try {
-    const { dir, sep, name } = splitPath(path);
-    diskFile = { path, dir, sep, name };
-    const store = new TextFileStore(name, () => TAURI.fs.readTextFile(path), (text) => TAURI.fs.writeTextFile(path, text), name);
+    const f = asDiskFile(o), { path, name } = f, io = hostFile(f);
+    diskFile = f;
+    const store = new TextFileStore(name, () => io.readText(), (text) => io.writeText(text), name);
     if (doc) { for (const f of beforeSwitch) await f(); await nb.mayLeave(); nb.detach(); current = { id: "file:" + path, kind: "file" }; await store.save({ ...nb.snapshot(), name: name.replace(/\.ipynb$/i, "") }); }
     await open(store, "file:" + path, "file");
     try { await TAURI.window.getCurrentWindow().setTitle(name + " — Sagebrush"); } catch {}
@@ -2703,22 +2703,21 @@ async function bindDiskFile(path, doc = null) {
     end();
   }
 }
-async function openDiskFile(path) {
+async function openDiskFile(o) {
+  const f = asDiskFile(o), { path, name } = f, io = hostFile(f);
   try {
-    const { dir, sep, name } = splitPath(path);
     nb.flush();
-    if (/\.ipynb$/i.test(name)) await bindDiskFile(path);
-    else { diskFile = null; await openDocument(fromFile(name, await TAURI.fs.readTextFile(path), nb.mode), false, "person"); }
+    if (/\.ipynb$/i.test(name)) await bindDiskFile(f);
+    else { diskFile = null; await openDocument(fromFile(name, await io.readText(), nb.mode), false, "person"); }
     // the folder's files (not hidden; up to 64 MB each, 256 MB in all) for Python
     diskFiles = [];
     let total = 0;
-    for (const e of await TAURI.fs.readDir(dir)) {
-      if (!e.isFile || e.name.startsWith(".") || e.name === name) continue;
-      const p = dir + sep + e.name;
-      const size = (await TAURI.fs.stat(p)).size;
+    for (const e of await io.list()) {
+      if (e.name.startsWith(".") || e.name === name) continue;
+      const size = e.size;
       if (size > 64e6 || total + size > 256e6) continue;
       total += size;
-      diskFiles.push(["/" + e.name, await TAURI.fs.readFile(p)]);
+      diskFiles.push(["/" + e.name, await io.read(e.name)]);
     }
     const toks = diskFiles.map(() => fileTok());
     for (const k of liveKernels()) k.post({ files: diskFiles.map(([p, d], i) => [p, d, toks[i]]) });
@@ -3582,7 +3581,9 @@ function drawFileMenu() {
     attr: "data-f",
     latex: latexHere,
     keys: { newNotebook: "new", newBoard: "whiteboard", newLatex: "newlatex", newFolder: "newfolder", fromExample: "examples", open: "open", upload: "import", saveCopy: "duplicate", rename: "rename", print: "print", share: "share", delete: "delete" },
-    disabled: { newFolder: none },
+    // (the examples are the gallery's, which `sagebrush notebook`'s page doesn't carry: disabled there, saying where they are)
+    disabled: { newFolder: none, fromExample: none || !!LOCAL },
+    why: LOCAL ? { fromExample: "The examples are on sagebrush.space and in the Sagebrush app" } : undefined,
     downloads: [
       { key: "ipynb", label: ".ipynb" },
       { key: "py", label: ".py" },
@@ -3965,7 +3966,7 @@ async function toBoard(url, what = "the whiteboard") {
     savedEl.textContent = "not saved: " + (e?.message ?? e) + notLeft;
     return;
   }
-  location.assign(url);
+  await leaveTo(url);
 }
 fileMenu.addEventListener("click", async (e) => {
   const b = e.target.closest("button");
@@ -3992,10 +3993,8 @@ fileMenu.addEventListener("click", async (e) => {
     }
     case "rename": nbName.focus(); nbName.select(); break;
     case "examples":
-      // (the gallery's panel where this site has it (U7); else this page's own list, as before)
-      if (await openGallery(ws, (e) => openEntry(e), "notebook")) break;
-      exDlg.showModal();
-      exDlg.querySelector("#exlist button")?.focus();
+      // (the gallery's panel, the only list of examples; where this page can't reach it, said)
+      if (!(await openGallery(ws, (e) => openEntry(e), "notebook"))) announce(statusEl.textContent = "The examples aren't available here.");
       break;
     case "new": saveNow(); await openNew("Untitled", nb.mode, [""], true); cells()[0].ta.focus(); break;
     case "newlatex": if (ws) { saveNow(); await texNew(ws); } break;
@@ -4033,13 +4032,14 @@ fileMenu.addEventListener("click", async (e) => {
     case "bundle": saveNow(); download(fileBase() + ".sbreplay", await makeBundle(), "application/gzip"); break;
     case "import": { const inp = $("#importinput"); inp.multiple = !!ws; inp.accept = ws ? "" : ".ipynb,.py,.sage,.m,.mag,.sbreplay"; inp.click(); break; }
     case "openfile": {
-      const p = await TAURI.dialog.open({ multiple: false, filters: [{ name: "Notebooks", extensions: ["ipynb", "sage", "py", "m"] }] });
-      if (p) await openDiskFile(String(p));
+      // (the desktop app: its own dialog, which grants the file picked; a phone: the dialog plugin's path)
+      const p = desktopApp() ? await TAURI.core.invoke("file_open_dialog") : await TAURI.dialog.open({ multiple: false, filters: [{ name: "Notebooks", extensions: ["ipynb", "sage", "py", "m"] }] });
+      if (p) await openDiskFile(p);
       break;
     }
     case "saveas": {
-      const p = await TAURI.dialog.save({ defaultPath: fileBase() + ".ipynb", filters: [{ name: "Jupyter notebook", extensions: ["ipynb"] }] });
-      if (p) await bindDiskFile(String(p), true);
+      const p = desktopApp() ? await TAURI.core.invoke("file_save_dialog", { name: fileBase() + ".ipynb" }).catch((e) => { statusEl.textContent = `not saved: ${e?.message ?? e}`; return null; }) : await TAURI.dialog.save({ defaultPath: fileBase() + ".ipynb", filters: [{ name: "Jupyter notebook", extensions: ["ipynb"] }] });
+      if (p) await bindDiskFile(p, true);
       break;
     }
     case "print": window.print(); break;
@@ -4798,8 +4798,9 @@ async function selftest(path) {
     } catch (e) {
       console.log("diagnose import: " + e);
     }
-    await openDiskFile(path);
-    check("opened the notebook from disk", current.id === "file:" + path && cells().length > 0, statusEl.textContent);
+    // (the desktop app grants the self-test's notebook as it would a picked one; a phone opens it by path)
+    await openDiskFile(desktopApp() ? await TAURI.core.invoke("selftest_open") : path);
+    check("opened the notebook from disk", !!diskFile && current.id === "file:" + diskFile.path && cells().length > 0, statusEl.textContent);
     // (every notebook starts with file changes off (confinement 1b), and the app has no sandbox, so it runs none that
     // isn't allowed: the app's own self-test allows its notebook, as the person's click would, and waits for the
     // page's own interpreter. No check line of its own: the judges' list of checks is closed, and if this fails, "ran
@@ -4818,8 +4819,23 @@ async function selftest(path) {
     check("3D graphics", !!document.querySelector("figure.plot3d"));
     // (written back asynchronously: slower machines take more than a second)
     let written = null;
-    await until(async () => (written = await TAURI.fs.readTextFile(diskFile.dir + diskFile.sep + "written-by-python.txt").catch(() => null)) === "hello from Python", 20000);
+    await until(async () => (written = await hostFile(diskFile).read("written-by-python.txt").then((b) => new TextDecoder().decode(b)).catch(() => null)) === "hello from Python", 20000);
     check("what Python wrote is in the notebook's folder", written === "hello from Python", JSON.stringify(written));
+    // (the desktop app: the person's files only by the grants it made; never one it didn't, nor a name outside the folder)
+    if (desktopApp()) {
+      const no = (cmd, args) => TAURI.core.invoke(cmd, args).then(() => false, () => true);
+      check("a grant the app didn't make reaches nothing", await no("folder_list", { grant: "0123456789abcdef0123456789abcdef" }) && await no("file_read_text", { grant: "nope" }));
+      const put = (name) => TAURI.core.invoke("folder_write", new TextEncoder().encode("x"), { headers: { "Sagebrush-Grant": diskFile.grant, "Sagebrush-Name": encodeURIComponent(name) } }).then(() => false, () => true);
+      check("a name outside the notebook's folder is refused", await no("folder_read", { grant: diskFile.grant, name: "../" + diskFile.name }) && await put("sub/x") && await put("../x") && await put(".bashrc") && await no("folder_read", { grant: diskFile.grant, name: ".bashrc" }));
+      // (neither the plugin's API on the page nor its commands: each found on its own, never one cut short by the other,
+      // and both said. Only the ACL's refusal passes, the command never run: "Command plugin:fs|… not allowed by ACL" in a
+      // release build, "fs.… not allowed. Plugin not found" (or another of its reasons) in a debug one; a reached plugin's
+      // own refusal ("forbidden path", outside its scope) fails)
+      const facade = typeof TAURI.fs;
+      const native = await Promise.all([["plugin:fs|exists", { path: "/" }], ["plugin:fs|read_dir", { path: "/" }]].map(([c, a]) => TAURI.core.invoke(c, a).then(() => `${c} REACHED`, (e) => `${c} refused: ${String(e?.message ?? e).slice(0, 120)}`)));
+      const aclRefused = (r) => / refused: (Command plugin:fs\|\w+ not allowed by ACL|fs\.\w+ not allowed\. (Plugin not found|Command not found|Permissions associated)|fs\.\w+ not allowed on origin)/.test(r);
+      check("the page has no fs plugin", facade === "undefined" && native.every(aclRefused), JSON.stringify({ facade, native }));
+    }
     // Stop: KeyboardInterrupt in a running loop, keeping the variables
     const exec = (code) => new Promise((resolve) => {
       let text = "";
@@ -4836,7 +4852,7 @@ async function selftest(path) {
     for (const [n, o, d] of st ? await st.terminalChecks((c, a) => TAURI.core.invoke(c, a)) : [["the Terminal's checks", false, "no self-test module"]]) check(n, o, d);
     nb.flush();
     await new Promise((r) => setTimeout(r, 500));
-    const saved = JSON.parse(await TAURI.fs.readTextFile(path));
+    const saved = JSON.parse(await hostFile(diskFile).readText());
     check("saved the notebook with its outputs", saved.cells.some((c) => (c.outputs ?? []).some((o) => JSON.stringify(o).includes("274177"))));
     // (the board page, and the app's 404 for a page or module it doesn't have, in the desktop app only:
     //  web/notebook/selftest-board.js)
@@ -4874,10 +4890,41 @@ addEventListener("appinstalled", () => { installPrompt = null; document.querySel
 // sees it (§8.2), its changes credited to agent:page.
 let ws = null;
 let wsSettled = false;
+// (the desktop app: the workspace's files on disk, web/workspace/disk-mirror.ts; null elsewhere) and its own module,
+// the app's only (web/workspace/desktop-entry.ts: sagebrush-desktop.js, which neither the site nor the CLI serves)
+let diskMirror = null, diskFailed = null;
+const desktopModule = () => import(new URL("sagebrush-desktop.js", location.href).href);
+// (the disk can't be read: nothing done here would be kept, so nothing can be done: said over the whole page, the
+// notebook read-only, every save refused by the save gate)
+function diskBlocked(why) {
+  nb.setReadOnly(true);
+  const shade = Object.assign(document.createElement("div"), { id: "sb-disk-blocked", role: "alertdialog" });
+  shade.style.cssText = "position:fixed;inset:0;z-index:2147483002;background:rgba(0,0,0,.45);display:flex;align-items:center;justify-content:center;font:15px system-ui,sans-serif";
+  const box = Object.assign(document.createElement("div"), { textContent: `Sagebrush couldn't open its folder of your files (${why}). Nothing you do now would be kept, so editing is off. Quit Sagebrush and open it again.` });
+  box.style.cssText = "background:#fff;color:#222;padding:16px 20px;border-radius:8px;max-width:32em";
+  shade.append(box);
+  document.body.append(shade);
+}
+// (the desktop app: this page is left only once its changes are on disk, the notebook's own save first; the LaTeX
+// editor's page over this one: its edit written before that (web/latex/page.ts leaveThen), and the editor let go again
+// if the page stays. Every way out of the LaTeX page comes here (__sbLeaveTo: its File menu, its home link, a notebook
+// or board from the files beside it, Agents…, Open as board))
+async function leaveTo(url) {
+  const go = async () => {
+    if (diskMirror && !(await (await desktopModule()).beforeLeave(diskMirror, () => nb.saved()))) return false;
+    location.assign(url);
+    return true;
+  };
+  if (globalThis.__sbTexLeave) return void globalThis.__sbTexLeave(go);
+  return go();
+}
+globalThis.__sbLeaveTo = leaveTo;
 const wsReady = (async () => {
   try {
     const w = await Workspace.open();
     try { await migrate(w, localStorage); } catch (e) { console.warn("workspace: bringing in what was kept before:", e); }
+    // (the desktop app: its files are on disk, this workspace their copy for this launch)
+    if (TAURI && desktopApp()) try { diskMirror = await (await desktopModule()).diskWorkspace(w, (c, a, o) => TAURI.core.invoke(c, a, o)); } catch (e) { console.warn("disk workspace:", e); diskFailed = String(e?.message ?? e); diskBlocked(diskFailed); }
     ws = w;
     window.sagebrush.workspace = w.forAgent("agent:page");
     // (tests: the workspace itself, its verbs with a check of the test's own (admit): loopback pages only)
@@ -4889,7 +4936,7 @@ const wsReady = (async () => {
     // written until then, the notebook's own saves included; said again when that changes, another tab's say)
     showLossNotice(w);
     w.onDurability(() => showLossNotice(w));
-    setSaveGate(() => (w.quarantined ? "this browser's copy of your workspace was lost or is missing changes: choose what to do first" : w.closed ? "the workspace was reset or upgraded in another tab: reload this page" : w.fenceBlocked.length ? "this browser's record of the workspace couldn't be written: reload this page" : null));
+    setSaveGate(() => (w.quarantined ? "this browser's copy of your workspace was lost or is missing changes: choose what to do first" : w.closed ? "the workspace was reset or upgraded in another tab: reload this page" : w.fenceBlocked.length ? "this browser's record of the workspace couldn't be written: reload this page" : diskFailed ? `Sagebrush couldn't open its folder of your files (${diskFailed}): quit Sagebrush and open it again` : null));
     // (and the notebook read-only meanwhile, now and when another tab finds the loss)
     const readOnlyIfQuarantined = () => { if (w.quarantined || nb.store?.viewOnly) nb.setReadOnly(true); };
     readOnlyIfQuarantined();
@@ -5307,10 +5354,11 @@ const agentFailed = () => { statusEl.textContent = "Couldn't load the agent conn
 const agentHere = !LOCAL && !window.__TAURI__;
 // (a ?pair= link, an agent this tab had before its reload (its reload record, agent-pair.ts's RELOAD_KEY), or an agent this
 // browser remembers: the chunk mounted now, to connect or reconnect)
-// (only on a reload of this tab: after any other navigation the record is dropped here, unread, as the pairing module
-//  would discard it (reloadDecision), and nothing is fetched for it; a page in a frame (the Agents page's .tex pane) leaves
-//  the record alone: it shares the tab's sessionStorage, and the record is the top page's)
-const reloadRecorded = () => { try { if (window.top !== window || sessionStorage.getItem("sb-agent-reload-v1") === null) return false; if (performance.getEntriesByType("navigation")[0]?.type === "reload") return true; sessionStorage.removeItem("sb-agent-reload-v1"); return false; } catch { return false; } };
+// (another page's record (the Agents page's, kept while the person is on Files or here): left alone, unread past its
+//  page, for that page to take when they go back to it (A5); this page's own, on a reload or a navigation back: the
+//  pairing module decides (reloadDecision: fresh, the same scope); anything else is dropped here; a page in a frame (the
+//  Agents page's .tex pane) leaves the record alone: it shares the tab's sessionStorage, and the record is the top page's)
+const reloadRecorded = () => { try { if (window.top !== window) return false; const raw = sessionStorage.getItem("sb-agent-reload-v1"); if (raw === null) return false; let page = null; try { page = JSON.parse(raw)?.page ?? null; } catch {} if (typeof page === "string" && page !== location.origin + location.pathname) return false; const nav = (performance.getEntriesByType("navigation")[0])?.type; if (nav === "reload" || (typeof page === "string" && (nav === "navigate" || nav === "back_forward"))) return true; sessionStorage.removeItem("sb-agent-reload-v1"); return false; } catch { return false; } };
 // (decided once, at load, before anything else is looked at: a ?pair= link or another way in never skips the drop)
 const reloadNow = reloadRecorded();
 const restoreAgent = (w, failed) => {
@@ -5359,13 +5407,15 @@ function wsShowFiles(on) {
             if (matchMedia("(max-width: 640px)").matches) wsShowFiles(false);
           }, sayNotLeft);
         }
-        else { saveNow(); location.assign(url); }
+        // (by this page's way out: the LaTeX editor's edit written first, if its page is up; the disk in the app)
+        else { saveNow(); void leaveTo(url); }
       },
       upload: (files, folder) => uploadHere(files, folder),
       openAs: (e, as) => openAs(e, as),
       // (New ▸ LaTeX document and From an example…, as the File menu has them: filemenu.ts NEW_ITEMS, U0)
       ...(latexHere ? { newLatex: (folder) => { saveNow(); void texNew(ws, folder); } } : {}),
-      fromExample: () => fileMenu.querySelector('[data-f="examples"]:not([disabled])')?.click(),
+      // (the CLI's page has no gallery: no From an example there, rather than a button that does nothing)
+      fromExample: LOCAL ? undefined : () => fileMenu.querySelector('[data-f="examples"]:not([disabled])')?.click(),
       close: () => wsShowFiles(false),
       // (the Storage panel's export: its lazy chunk beside this page; the open notebook saved first)
       exportUrl: (f) => new URL(f, location.href).href,
@@ -5469,7 +5519,8 @@ drawFileMenu();
 wsReady.then(() => drawFileMenu());
 $("#installbtn").onclick = () => installPrompt?.prompt();
 wsReady.then(async (w) => {
-  if (!w) return;
+  // (no workspace: no files to show, so the space kept for them before the page drew goes)
+  if (!w) { document.body.classList.remove("wsfiles"); wsSidebar.hidden = true; return; }
   wsFilesBtn.hidden = false;
   let pref = null;
   try { pref = localStorage.getItem("sagebrush-files-sidebar"); } catch {}
@@ -5587,7 +5638,7 @@ const historyDbReady = openHistoryDb({ onVersionChange: () => { nbHistory?.close
   else if (shared) await openNew("Shared notebook", linkMode(location.hash), shared);
   else if (!(last && (await openId(last)))) {
     // (the first visit's Welcome: Sagebrush's own, which may change files: permissions.js)
-    await openHostMade(mode === "sage" ? "Sage" : "Welcome", mode, mode === "sage" ? EXAMPLES.Sage : EXAMPLES.Welcome);
+    await openHostMade(mode === "sage" ? "Sage" : "Welcome", mode, mode === "sage" ? WELCOME.Sage : WELCOME.Welcome);
   }
   booted();
   // a share link opened in this tab while the page is already open (pasted into the address bar, or a link followed
@@ -5691,7 +5742,11 @@ const historyDbReady = openHistoryDb({ onVersionChange: () => { nbHistory?.close
     TAURI.event.listen("open-files", (ev) => { for (const p of ev.payload ?? []) openDiskFile(p); });
     for (const p of await TAURI.core.invoke("startup_files")) await openDiskFile(p);
     const st = await TAURI.core.invoke("selftest_file");
-    if (st) selftest(st);
+    // (a quit, or the window closed: the notebook's save, the settings and every change on disk first)
+    if (desktopApp()) desktopModule().then((d) => d.drainOnQuit({ mirror: () => diskMirror, invoke: (c, a) => TAURI.core.invoke(c, a), listen: (ev, f) => TAURI.event.listen(ev, f), freeze: () => nb.setReadOnly(true), flushEditor: () => nb.saved() })).catch((e) => console.warn("quit:", e));
+    const persist = st && desktopApp() && await TAURI.core.invoke("selftest_persist");
+    if (persist) desktopModule().then((d) => d.persistProbe(persist, { ws: () => wsReady.then(() => ws), mirror: () => diskMirror, invoke: (c, a) => TAURI.core.invoke(c, a) }));
+    else if (st) selftest(st);
   }
   // (however the start ends, an error included, Share stops waiting for it)
 })().finally(() => booted());

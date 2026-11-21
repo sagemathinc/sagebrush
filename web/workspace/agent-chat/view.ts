@@ -82,7 +82,12 @@ export function turnNode(thread: Thread, turn: Turn, h: TurnHooks): HTMLElement 
           ? `<div class="status done">${((turn.finished ?? 0) - turn.started) / 1000 > 0 ? (((turn.finished ?? 0) - turn.started) / 1000).toFixed(1) + " s · " : ""}${count(turn.usage.output_tokens) ?? 0} tokens</div>`
           : "";
   const tag = turn.agent ? `<span class="demo live">on your computer</span>` : `<span class="demo">demo</span>`;
-  div.innerHTML = `<div class="who"><span class="avatar">✳</span>${esc(turn.agent ?? "Claude")} ${tag}</div>${parts.join("")}${status}`;
+  // (W3: the model and thinking level this turn runs with, quietly under the name, only as the agent reported them)
+  //  (checked again here, as a thread kept from before may hold anything)
+  const model = typeof turn.info?.model === "string" && /^[A-Za-z0-9._:\/@[\]-]{1,128}$/.test(turn.info.model) ? turn.info.model : undefined;
+  const effort = typeof turn.info?.effort === "string" && /^[a-z0-9]{1,16}$/.test(turn.info.effort) ? turn.info.effort : undefined;
+  const info = [model, effort ? `thinking: ${effort}` : undefined].filter(Boolean).join(" · ");
+  div.innerHTML = `<div class="who"><span class="avatar">✳</span>${esc(turn.agent ?? "Claude")} ${tag}</div>${info ? `<div class="who-info">${esc(info)}</div>` : ""}${parts.join("")}${status}`;
   for (const b of div.querySelectorAll<HTMLButtonElement>("[data-approve]")) {
     b.onclick = () => {
       const card = b.closest<HTMLElement>("[data-attention]")!;

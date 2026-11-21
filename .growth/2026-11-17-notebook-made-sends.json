@@ -1,7 +1,0 @@
-{
- "v": 1,
- "reason": "A notebook made while the notebook page is open (Duplicate, an upload, an agent's create) has its synced history started a moment later: only the notebooks just made, by the ids their creates name (a rename meanwhile followed), walked on one tracked timer debounced from the last create (web/index.html), the walk saying how many candidates it was given (web/notebook/start-all.js); not only at the next load. The CLI embeds the page (cli/pyjs.cjs). Measured by the exact size gate on the merge with master 4bcb3192; marked +64 B over its growth.",
- "bytes": {
-  "cli/pyjs.cjs": 1000
- }
-}

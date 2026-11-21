@@ -102,13 +102,29 @@ try {
   assert.deepEqual(t, { mode: "transition", base, head, merge });
   assert.throws(() => testedTransition({ cwd: dir, name: "pull_request", ev: { pull_request: { head: { sha: base } } } }));
   assert.equal(testedTransition({ cwd: dir, name: "push", ev: { before: base } }).base, base);
-  assert.equal(testedTransition({ cwd: dir, name: "merge_group", ev: { merge_group: { base_sha: base } } }).base, base);
-  assert.throws(() => testedTransition({ cwd: dir, name: "merge_group", ev: { merge_group: { base_sha: head } } }));
+  // a queue group: head_sha is the tested commit, base_sha the queue's base, a different commit
+  assert.deepEqual(testedTransition({ cwd: dir, name: "merge_group", ev: { merge_group: { base_sha: base, head_sha: merge } } }),
+    { mode: "transition", merge, base, head: merge });
+  assert.throws(() => testedTransition({ cwd: dir, name: "merge_group", ev: { merge_group: { base_sha: base } } }), /head_sha/);
+  assert.throws(() => testedTransition({ cwd: dir, name: "merge_group", ev: { merge_group: { base_sha: base, head_sha: head } } }), /head_sha/);
+  assert.throws(() => testedTransition({ cwd: dir, name: "merge_group", ev: { merge_group: { base_sha: merge, head_sha: merge } } }));
+  // a later entry of a cumulative queue: HEAD^1 is the earlier entry, and the whole group is one transition from the base
+  git("checkout", "-qb", "feature2", base);
+  writeFileSync(join(dir, "feature2"), "feature2"); git("add", "."); git("commit", "-qm", "feature2");
+  const head2 = git("rev-parse", "HEAD");
+  git("checkout", "-qb", "queue", merge); git("merge", "--no-ff", "-qm", "second queue entry", head2);
+  const merge2 = git("rev-parse", "HEAD");
+  assert.equal(git("rev-parse", "HEAD^1"), merge);
+  assert.deepEqual(testedTransition({ cwd: dir, name: "merge_group", ev: { merge_group: { base_sha: base, head_sha: merge2 } } }),
+    { mode: "transition", merge: merge2, base, head: merge2 });
   assert.equal(testedTransition({ cwd: dir, name: "schedule" }).mode, "absolute");
   git("checkout", "-qb", "new-master", base);
   writeFileSync(join(dir, "unrelated"), "master moved"); git("add", "."); git("commit", "-qm", "master move");
   const tip = git("rev-parse", "HEAD"); git("checkout", "-q", "feature");
   assert.equal(testedTransition({ cwd: dir, name: "workflow_dispatch", master: tip }).base, base, "no forced master merge");
+  git("checkout", "-q", "queue");
+  assert.throws(() => testedTransition({ cwd: dir, name: "merge_group", ev: { merge_group: { base_sha: tip, head_sha: merge2 } } }), /merge-base|ancestor|Command failed/, "a base that isn't an ancestor");
+  git("checkout", "-q", "feature");
 
   // Exercise the actual CLI, record admission, exit status and summary output.
   git("checkout", "-q", "integration");

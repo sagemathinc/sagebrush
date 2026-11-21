@@ -370,6 +370,42 @@ try {
     const kept = await ev(`T.ws.agentGrants().then((g) => Object.values(g).map((k) => k.session))`);
     ok(kept.length === 1 && kept[0] === kept0[0], `reload ${n}: the kept session is still the one in force (${kept[0] === undefined ? "lost" : kept[0] === kept0[0] ? "same" : "changed"})`);
   }
+  // (W4, the chip: a newer pairing started while one is shown (the remembered grant's reconnect, asked again while the
+  //  agent is still connected; its hello answered 1 s late, so the newer pairing says nothing meanwhile): the old chip
+  //  goes at once, and its Revoke and Turn off running code, pressed after, act on nothing, neither pairing)
+  {
+    const shown = await ev(`(() => { window.__w4a = T.ui.pairing; const items = [...document.querySelectorAll(".sbag-bar [role=menuitem]")];
+      window.__w4rev = items.find((b) => b.textContent === "Revoke"); window.__w4off = items.find((b) => b.textContent === "Turn off running code");
+      return { granted: window.__w4a?.state === "granted", rev: !!window.__w4rev, off: !!window.__w4off }; })()`);
+    ok(shown.granted && shown.rev && shown.off, "W4 stale chip: the chip shows Revoke and Turn off running code " + JSON.stringify(shown));
+    await drive({ op: "helloslow", s: 1.0 });
+    const pressed = await ev(`(async () => { void T.ui.useRemembered();
+      for (let i = 0; i < 500 && T.ui.pairing === window.__w4a; i++) await new Promise((r) => setTimeout(r, 2));
+      const b = window.__w4b = T.ui.pairing;
+      const r = { replaced: b !== window.__w4a, quiet: b?.state === "connecting", bar: !!document.querySelector(".sbag-bar"), attached: window.__w4rev.isConnected || window.__w4off.isConnected };
+      window.__w4rev.click(); window.__w4off.click(); await new Promise((r) => setTimeout(r, 50));
+      return { ...r, after: b?.state, why: b?.closeReason ?? "" }; })()`);
+    ok(pressed.replaced && pressed.quiet && !pressed.bar && !pressed.attached && pressed.why !== "revoked by the person",
+      "W4 stale chip: a newer pairing, not yet heard from: the old chip is gone at once, and its Revoke and Turn off pressed then touch neither " + JSON.stringify(pressed));
+    ok((await drive({ op: "grant" })).ok?.run === true && (await ev(`T.ws.agentGrants().then((g) => Object.values(g).map((k) => k.session))`))[0] === kept0[0],
+      "W4 stale chip: the connected agent keeps May run code, and the remembered grant is kept");
+    await until(`T.ui.pairing !== window.__w4b || T.ui.pairing.state !== "connecting"`, 8000);
+    await drive({ op: "helloslow", s: 0 });
+    await sleep(2500); // (the reconnect's tries over: BUSY_FOR_MS)
+    // (and pressed again after a newer pairing is granted and shown: the old agent's connection let go, the remembered
+    //  grant reconnects, its chip drawn; the old chip's controls still act on nothing)
+    await ev(`(window.__w4a.drop(), 1)`);
+    await sleep(500);
+    await ev(`(void T.ui.useRemembered(), 1)`);
+    ok(await until(`T.ui.pairing !== window.__w4a && T.ui.pairing !== window.__w4b && T.ui.pairing?.state === "granted" && !!document.querySelector(".sbag-bar")`, 15000) && await grantedAtServer(),
+      "W4 stale chip: a newer pairing, granted, its chip shown");
+    const late = await ev(`(async () => { const c = T.ui.pairing; window.__w4rev.click(); window.__w4off.click(); await new Promise((r) => setTimeout(r, 300));
+      return { same: T.ui.pairing === c, state: c.state, run: !!c.grant?.run, why: c.closeReason ?? "", turnOff: [...document.querySelectorAll(".sbag-bar [role=menuitem]")].some((b) => b.textContent === "Turn off running code") }; })()`);
+    ok(late.same && late.state === "granted" && late.run && late.turnOff && (await drive({ op: "grant" })).ok?.run === true,
+      "W4 stale chip: the old chip's Revoke and Turn off, pressed after the newer pairing is granted, touch it neither " + JSON.stringify(late));
+    ok(await open(""), "W4 stale chip: reload");
+    ok(await until(`!!document.querySelector(".sbag-bar")`, 15000) && await grantedAtServer(), "W4 stale chip: after a reload the remembered agent reconnects, the bar shows it, its server has the grant");
+  }
   // ("May run code" given again only as kept (chat plan PR 4a, Q5): this grant was made with it; one kept before it
   //  existed has none, and a reconnect never promotes it)
   ok((await drive({ op: "grant" })).ok?.run === true, "a remembered grant made with May run code: given again with it");
@@ -594,6 +630,18 @@ try {
   const g13 = ((await drive({ op: "grants" })).ok ?? []).filter(([port]) => port === sixth.port);
   ok(h13.length >= 1 && h13.length <= 2 && g13.length === 0, `reload 13: the reload record's grant expired during the window: no further attempt, and it isn't given again (${h13.length} hellos, ${g13.length} grants)`);
   await drive({ op: "slow", s: 0 });
+
+  // ---- a spent code (A5): the agent refuses it, and the dialog says so, with no local-network advice; Connect shows
+  // that it is trying
+  ok(await open(""), "a spent code: a fresh page");
+  await sleep(500);
+  ok(await openConnect(CODE, PORT), "a spent code: the Connect dialog opens with the first link's code, long used");
+  const tryingSeen = ev(`new Promise((res) => { const b = [...document.querySelectorAll(".sbag-box button.primary")].pop(); const mo = new MutationObserver(() => { if (b.textContent === "Connecting…") { mo.disconnect(); res(true); } }); mo.observe(b, { childList: true, characterData: true, subtree: true }); setTimeout(() => res(b.textContent === "Connecting…"), 15000); })`);
+  await click(".sbag-box button.primary");
+  ok(await tryingSeen, "Connect says Connecting… while it tries");
+  ok(await until(`(document.querySelector(".sbag-box .err")?.textContent ?? "").length > 0`, 15000), "a spent code: an answer in the dialog");
+  const spent = await ev(`({ err: document.querySelector(".sbag-box .err").textContent, field: document.querySelector(".sbag-box input").value, btn: [...document.querySelectorAll(".sbag-box button.primary")].pop().textContent })`);
+  ok(spent.err === "That code didn't work: it was already used, has expired or was mistyped. Ask your agent for a new link." && !/reach apps/.test(spent.err) && spent.field === "" && spent.btn === "Connect", `a spent code: said as spent, never the local-network advice; the field emptied, Connect again (${JSON.stringify(spent)})`);
 } finally {
   try { py.kill(); } catch {}
   try { chrome.kill(); } catch {}

@@ -40,8 +40,9 @@ function served(path) {
   if (p === "/atlas" || p.startsWith("/atlas/")) return existsSync(join(pub, "atlas", "llms.txt"));
   if (p === "" || p === "/") return existsSync(join(pub, "index.html"));
   if (p.endsWith("/")) return existsSync(join(pub, p, "index.html"));
-  // (an article's page is served at its name without .html, as the articles link it: web/build-articles.ts's url)
-  return existsSync(join(pub, p)) || existsSync(join(pub, p, "index.html")) || (p.startsWith("/articles/") && existsSync(join(pub, p + ".html")));
+  // (an article's page, and a docs topic's, is served at its name without .html, as they are linked: web/build-articles.ts's
+  // url, and learnMore's /docs/<topic>#<section>)
+  return existsSync(join(pub, p)) || existsSync(join(pub, p, "index.html")) || (/^\/(articles|docs)\//.test(p) && existsSync(join(pub, p + ".html")));
 }
 
 if (!hasSite) console.log("site absent: llms.txt and board-format.md are not checked in the site");
@@ -62,7 +63,8 @@ else for (const file of ["llms.txt", "board-format.md"]) {
     // a fragment on an HTML page must name an element there (not #c=... share links on the notebook)
     const frag = path.match(/^([^#?]*)#([A-Za-z][\w-]*)$/);
     if (ok && frag) {
-      const f = join(pub, decodeURIComponent(frag[1]), frag[1].endsWith("/") || frag[1] === "" ? "index.html" : "");
+      const d = join(pub, decodeURIComponent(frag[1]), frag[1].endsWith("/") || frag[1] === "" ? "index.html" : "");
+      const f = existsSync(d) || !/^\/(articles|docs)\//.test(frag[1]) ? d : d + ".html";
       ok = existsSync(f) && new RegExp(`id=["']${frag[2]}["']`).test(readFileSync(f, "utf8"));
     }
     check(ok, `${file}: ${path}`);
