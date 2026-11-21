@@ -19,7 +19,7 @@ export const DELEGATE_UI_TEXT = {
   onTitle: "Allow Delegate tasks on this computer?",
   onBody: (agent: string) => `${agent} works on its own copy of the documents you choose, on this computer, and proposes the changes back to you. Turning this on lets this page start tasks, and read every existing Delegate task of this agent installation. You can turn it off at any time.`,
   offTitle: "Turn off Delegate tasks?",
-  offBody: "This page will no longer start or read tasks. Running turns stop; tasks stay available unless you also choose to close them below.",
+  offBody: "This page will no longer start or read tasks. Running turns stop; your tasks stay available.",
   alsoClose: (n: number) => `Also close ${n === 1 ? "my running task" : `my ${n} running tasks`} for good`,
   closeFailed: (n: number) => `Delegate is off. ${n === 1 ? "One task" : `${n} tasks`} couldn't be closed.`,
   sheetTitle: "Delegate a task",
