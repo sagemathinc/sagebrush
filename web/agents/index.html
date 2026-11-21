@@ -118,6 +118,7 @@
 
   .turn { margin-bottom: 26px; }
   .who { display: flex; align-items: center; gap: 7px; font-weight: 600; font-size: 14px; margin-bottom: 6px; }
+  .who-info { font-size: 12px; color: var(--muted); margin: -4px 0 6px 31px; }
   .avatar { color: var(--accent); font-size: 16px; }
   .demo { font-weight: 400; font-size: 11px; color: var(--muted); border: 1px solid var(--line); border-radius: 8px; padding: 0 6px; }
   .msg { margin: 6px 0 10px; }
@@ -126,6 +127,9 @@
   .msg code, .doc code, .user code { background: var(--code); padding: 1px 4px; border-radius: 4px; }
   .msg pre, .doc pre { background: var(--code); padding: 10px 12px; border-radius: 8px; overflow-x: auto; }
   .msg pre code, .doc pre code { background: none; padding: 0; }
+  /* a code block's colours (web/agents/code-color.ts), the notebook's: keyword, builtin, string, number, comment, decorator, a name defined */
+  pre.code .hk { color: #8a3b8f; } pre.code .hb { color: #2a6fb0; } pre.code .hs { color: #975200; } pre.code .hn { color: #0b7a52; }
+  pre.code .hc { color: #5f665f; font-style: italic; } pre.code .hp { color: #5f665f; } pre.code .hd { color: #7f5800; } pre.code .hf { color: #2350a8; }
   .math.display { display: block; overflow-x: auto; margin: 8px 0; }
 
   details.thinking { color: var(--muted); font-size: 14px; margin: 4px 0 8px; }
@@ -323,7 +327,7 @@
     </div>
     <div id="help" hidden>
       <b>Run this on your computer</b>, then open the link it prints. <a href="/agents/connect/">Learn more</a>
-      <pre>npx -y https://agents.sagebrush.cloud/agents/sagebrush-agent-0.7.6.tgz</pre>
+      <pre>npx -y https://agents.sagebrush.cloud/agents/sagebrush-agent-0.7.8.tgz</pre>
     </div>
     <div id="log">
       <div id="log-tools" hidden><button id="copychat" type="button" title="This chat as Markdown: what you wrote, the agent's answers, a line for each thing it did, and links to its files">⧉ Copy chat</button></div>

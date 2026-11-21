@@ -74,14 +74,18 @@ export async function persistProbe(spec: string, host: { ws: () => Promise<any>;
       //     and on Windows the app's invoke bootstrap is in it too): a harmless command of the app's (disk_where)
       //     and the fs plugin's exists, through every way it has (window.__TAURI__, __TAURI_INTERNALS__, a request
       //     of its own to the IPC endpoints): each must be refused;
-      //  2. the same from this page, the control: both must succeed;
+      //  2. the same from this page: its own command must succeed (the control), and the fs plugin must be refused there
+      //     too, as it isn't the page's (the person's files reach it only by the app's grants, disk.rs);
       //  3. a frame and a window of the other origin, then this window sent there: the window must stay on this
       //     page (app/src-tauri/src/nav.rs), its commands still working.  What the other origin's pages reached is
       //     run.mjs's to judge, from its server.
       const other = token;
       const where = await host.invoke("disk_where");
-      const fsOk = await (window as any).__TAURI__.fs.exists(where).then((x: any) => `ok ${x}`, (e: any) => `refused: ${e?.message ?? e}`);
-      const mainOk = typeof where === "string" && where.length > 0 && fsOk === "ok true";
+      // (this page's own: its commands work (disk_where), and the fs plugin isn't its: no __TAURI__.fs, and plugin:fs
+      // refused when asked directly (app/src-tauri/capabilities/default.json; the person's files by the app's grants)
+      const fsOk = await (window as any).__TAURI_INTERNALS__.invoke("plugin:fs|exists", { path: where }).then((x: any) => `REACHED ${x}`, (e: any) => `refused: ${e?.message ?? e}`);
+      const fsGlobal = typeof (window as any).__TAURI__?.fs;
+      const mainOk = typeof where === "string" && where.length > 0 && fsOk.startsWith("refused") && fsGlobal === "undefined";
       const probe = `<script>(async () => {
         const out = {}, say = () => parent.postMessage({ sbIpcProbe: out }, "*");
         const tryIt = async (k, f) => { try { const v = await f(); out[k] = "REACHED " + String(v).slice(0, 40); } catch (e) { out[k] = "refused: " + String(e && e.message || e).slice(0, 80); } };
@@ -119,7 +123,7 @@ export async function persistProbe(spec: string, host: { ws: () => Promise<any>;
       const stayed = location.href === here;
       const stillOk = await host.invoke("disk_where").then((w: any) => w === where, () => false);
       ok = mainOk && !!frameOut && !reached.length && stayed && stillOk;
-      line = `nav at ${location.origin}: this page's commands ${mainOk ? "work" : `FAIL (disk_where ${JSON.stringify(where)}, fs ${fsOk})`}; an output frame (bootstrap ${frameOut?.bootstrap ?? "?"}): ${reached.length ? `REACHED ${reached.join(", ")}` : "every way refused"} ${JSON.stringify(frameOut)}; sent to ${other}: ${stayed ? "stayed on this page" : "LEFT this page"}, its commands ${stillOk ? "still work" : "FAIL"}`;
+      line = `nav at ${location.origin}: this page's commands ${mainOk ? "work" : `FAIL (disk_where ${JSON.stringify(where)}, the page's plugin:fs ${fsOk}, __TAURI__.fs ${fsGlobal})`}; an output frame (bootstrap ${frameOut?.bootstrap ?? "?"}): ${reached.length ? `REACHED ${reached.join(", ")}` : "every way refused"} ${JSON.stringify(frameOut)}; sent to ${other}: ${stayed ? "stayed on this page" : "LEFT this page"}, its commands ${stillOk ? "still work" : "FAIL"}`;
     } else line = `no such mode ${JSON.stringify(mode)}`;
   } catch (e: any) { line = `${mode} at ${location.origin}: ${e?.message ?? e}`; }
   await host.invoke("selftest_report", { report: `${ok ? "ok" : "FAIL"} persist: ${line}`, ok });
