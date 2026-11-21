@@ -1,8 +1,0 @@
-{
- "v": 1,
- "reason": "The certified logarithms of a number field's relation elements (class groups) work at the precision their error bounds need, from the field's roots and coefficients, instead of a fixed 64 (n + 2) guard bits: a small helper for that precision and a test-facing variant taking the guard.",
- "bytes": {
-  "engine/sagebrush-engine.wasm": 696,
-  "cli/pyjs.cjs": 904
- }
-}

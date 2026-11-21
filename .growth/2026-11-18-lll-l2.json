@@ -1,8 +1,0 @@
-{
- "v": 1,
- "reason": "Floating-point LLL in engine/poly (L^2 with proved output, an exact certificate, a work budget and a memory bound), with no production caller yet. The engine module is lazy, loaded only by Sage mode. Its build with CI's path mapping (the pin in wasm/pins.json, run 44290022505): 7353751 -> 7354255 bytes (+504), marked +64 over that. The command line embeds the engine as base64: about 4/3 of the delta, 672 B, marked 700, pending CI's size row.",
- "bytes": {
-  "engine/sagebrush-engine.wasm": 568,
-  "cli/pyjs.cjs": 700
- }
-}
