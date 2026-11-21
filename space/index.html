@@ -78,6 +78,19 @@
   #overlay .tourbar button { background: var(--ctl2); color: var(--ov-fg); border: 1px solid var(--ctl-line); padding: 4px 10px; }
   #overlay .tourbar button.next { background: #1f6feb; color: #fff; border-color: #1f6feb; font-weight: 600; }
   #tour { width: 100%; }
+  #chat { position: fixed; left: 50%; bottom: 12px; transform: translateX(-50%); width: min(620px, 94vw); z-index: 5; display: flex; flex-direction: column; gap: 6px;
+    background: var(--panel); border: 1px solid var(--line); border-radius: 12px; padding: 10px; backdrop-filter: blur(6px); box-shadow: var(--ov-shadow); }
+  #chatlog { max-height: 26vh; overflow: auto; display: flex; flex-direction: column; gap: 6px; font-size: 13.5px; }
+  #chatlog .msg { padding: 5px 9px; border-radius: 8px; background: var(--ctl2); } #chatlog .msg.you { align-self: flex-end; background: color-mix(in srgb, #1f6feb 14%, var(--ctl)); }
+  #chatlog .msg b { font-size: 11.5px; color: var(--muted); margin-right: 4px; } #chatlog .md p { display: inline; margin: 0; }
+  #chatchips { display: flex; gap: 6px; flex-wrap: wrap; } #chatchips button { font-size: 12.5px; padding: 4px 10px; border-radius: 999px; }
+  #chatform { display: flex; gap: 6px; } #chatin { flex: 1; } #chatform button:first-of-type { background: #1f6feb; color: #fff; border-color: #1f6feb; }
+  #chatmic.on { background: #b42318; color: #fff; }
+  body.chatting #help { display: none; }
+  @media (max-width: 700px) { #chat { bottom: 6px; padding: 8px; } #chatlog { max-height: 18vh; } body.chatting.reading #chat { display: none; } }
+  #tourpill { position: fixed; top: 12px; left: 50%; transform: translateX(-50%); z-index: 6; display: flex; gap: 8px; align-items: center; padding: 6px 8px 6px 14px;
+    border-radius: 999px; background: color-mix(in srgb, #e3a008 18%, var(--ov)); color: var(--ov-fg); border: 1px solid var(--line); box-shadow: var(--ov-shadow); font-size: 13px; }
+  #tourpill button { padding: 3px 10px; font-size: 12.5px; } #tourpill button[data-t="1"] { background: #1f6feb; color: #fff; border-color: #1f6feb; }
   #overlay .enterbar { display: flex; gap: 10px; align-items: center; margin: 2px 0 10px; }
   #overlay .enterbar button { background: #1f6feb; color: #fff; border-color: #1f6feb; font-weight: 600; padding: 5px 14px; }
   #overlay .noroom { margin: 2px 0 10px; padding: 6px 10px; border-radius: 6px; background: var(--ctl2); }
@@ -134,6 +147,12 @@
   <div id="status"></div>
 </div>
 <div id="overlay" hidden></div>
+<div id="tourpill" hidden></div>
+<div id="chat" hidden>
+  <div id="chatlog"></div>
+  <div id="chatchips"></div>
+  <form id="chatform"><input id="chatin" autocomplete="off" placeholder="Ask the agent"><button>Send</button><button type="button" id="chatmic" hidden title="Speak to the agent">🎤</button></form>
+</div>
 <div id="alpha" title="A quick prototype: not reviewed, and it will change. Spaces you make may not open in a later version.">Whitespace · rough alpha</div>
 <div id="help">Drag to turn · scroll to move closer · right-drag to pan · W A S D / arrows, E Q: fly (Shift: faster) · click an object to read it · Enter: into a directory, file or class · B / F: back, forward · H: see all · /: search</div>
 <script type="module" src="space.js"></script>

@@ -222,6 +222,27 @@ for (let i = 0; i < 8 && (await ev(`whitespace.room`)) !== null; i++) {
 ok((await ev(`whitespace.room`)) === null && (await ev(`whitespace.space.nodes.some((n) => n.id === 'd:lib')`)), "Back (wrist menu) brings you out room by room, to the top", { room: await ev(`whitespace.room`) });
 await ev(`whitespace.xr.menuPress('exit'), true`);
 ok(await until(`!whitespace.xr.presenting`), "and Exit VR leaves");
+
+// ---- an agent in the space (the demo): its chat panel in the headset, a suggestion pointed at, the keyboard typing
+await send("Page.navigate", { url: `http://127.0.0.1:${port}/space/?space=agent-lab.space.json` });
+ok(await until(`!!whitespace.agent && whitespace.agent.messages.length > 0 && !document.querySelector('#vr').hidden`, 30000), "the agent lab loads, and the agent greets");
+await ev(`document.querySelector('#vr').click(), true`);
+ok(await until(`whitespace.xr.presenting && !!whitespace.xr.chat`, 10000), "in VR the chat panel is there", await ev(`whitespace.xr.chat`));
+const sugg = await ev(`whitespace.xr.chat.buttons`);
+ok(sugg.length >= 1 && /plot/i.test(sugg[0]), "it offers a suggestion to point at", sugg);
+await ev(`whitespace.xr.chatSend(whitespace.xr.chat.buttons[0]), true`);
+ok(await until(`whitespace.agent.messages.some((m) => /conductor is 389 and its rank is 2/.test(m.text)) && !whitespace.agent.busy`, 90000), "pointing at it: the agent plots 389a, computed by the engine", await ev(`whitespace.agent.messages.slice(-1)[0]`));
+ok(await ev(`!!whitespace.space.nodes.find((n) => n.id === 'agent:plot')?.svg`), "the plot is an object in the space, with its figure");
+// (typing on the keyboard, as a Bluetooth one does in a headset)
+for (const ch of "show its complex points in 3d") await send("Input.dispatchKeyEvent", { type: "keyDown", key: ch, text: ch });
+ok((await ev(`whitespace.xr.chat.typed`)) === "show its complex points in 3d", "the keyboard types into the chat", await ev(`whitespace.xr.chat.typed`));
+await send("Input.dispatchKeyEvent", { type: "keyDown", key: "Enter", code: "Enter", windowsVirtualKeyCode: 13 });
+ok(await until(`whitespace.agent.messages.some((m) => /two square roots/.test(m.text)) && !whitespace.agent.busy`, 120000), "Enter sends it: the complex points in 3D", await ev(`whitespace.agent.messages.slice(-1)[0]`));
+ok(await ev(`!!whitespace.space.nodes.find((n) => n.id === 'agent:complex')?.scene`), "a 3D object, to take in your hands");
+await sleep(800);
+await shot("vr-agent");
+await ev(`whitespace.xr.menuPress('exit'), true`);
+ok(await until(`!whitespace.xr.presenting`), "and Exit VR");
 ok(errors.length === 0, "no page errors", errors.slice(0, 3));
 console.log(failures ? `${failures} FAILED` : "all passed");
 process.exit(failures ? 1 : 0);

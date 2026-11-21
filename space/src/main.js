@@ -123,7 +123,7 @@ function titleTexture(nd) {
 
 // near: the title and the first lines (still small: the overlay gives the sharp text)
 function faceTexture(nd) {
-  const c = canvasFor(nd, nd.kind === "file" ? 160 : 140), g = c.getContext("2d");
+  const c = canvasFor(nd, nd.figure ? 220 : nd.kind === "file" ? 160 : 140), g = c.getContext("2d");
   g.fillStyle = bgOf(nd); g.fillRect(0, 0, c.width, c.height);
   g.fillStyle = "#" + groupColor(nd).getHexString(); g.fillRect(0, 0, c.width, Math.max(6, c.height * 0.04));
   const pad = c.width * 0.05, fg = fgOf(nd);
@@ -152,6 +152,26 @@ function faceTexture(nd) {
   }
   const mono = nd.kind !== "note";
   const fs = mono ? c.height * (nd.kind === "file" ? 0.05 : 0.04) : c.height * 0.045;
+  // (a figure's face (`figure`: an agent's plot): the picture, as large as it fits; its code is in the drawer)
+  if (nd.figure) {
+    if (!nd.svg) {
+      g.font = `italic ${c.height * 0.05}px system-ui, sans-serif`; g.globalAlpha = 0.6;
+      g.fillText(nd.outputError ? "it failed: open it to see why" : "working…", pad, y + c.height * 0.05); g.globalAlpha = 1;
+      return texture(c);
+    }
+    const img = new Image(), top = y, tex = { ref: null };
+    img.onload = () => {
+      const hh = c.height - top - pad, ww = c.width - 2 * pad, k = Math.min(ww / img.width, hh / img.height), w = img.width * k, h = img.height * k;
+      g.fillStyle = "#ffffff"; g.fillRect(pad, top, ww, hh);
+      g.drawImage(img, pad + (ww - w) / 2, top + (hh - h) / 2, w, h);
+      // (not if the texture was let go meanwhile: it would be uploaded again, with no owner)
+      if (tex.ref && !tex.ref.userData.gone) tex.ref.needsUpdate = true;
+    };
+    img.src = "data:image/svg+xml;base64," + btoa(unescape(encodeURIComponent(nd.svg)));
+    const t = texture(c);
+    tex.ref = t;
+    return t;
+  }
   for (const raw of String(nd.kind === "plot3d" ? "" : nd.kind === "note" ? texToText(nd.text).replace(/\n\s*\n(\s*\n)+/g, "\n\n") : nd.text ?? "").split("\n")) {
     if (y > c.height - pad) break;
     let line = raw, size = fs, weight = "";
@@ -273,6 +293,7 @@ function setPlot(group, obj) {
   const nd = group.userData.node, [, , d] = sizeOf(nd);
   if (group.userData.plot) {
     group.remove(group.userData.plot);
+    dispose(group.userData.plot);
     group.userData.plot.traverse((m) => { const k = pickables.indexOf(m); if (k >= 0) pickables.splice(k, 1); });
   }
   obj.position.z = d / 2;
@@ -289,7 +310,7 @@ const eye = () => camera.getWorldPosition(eyeV);
 function stepZoom() {
   const cam = eye().clone(), pending = [];
   for (const o of objects) {
-    const nd = o.userData.node, [nearD, midD] = LEVEL_DIST[nd.kind] ?? LEVEL_DIST.file;
+    const nd = o.userData.node, [nearD, midD] = nd.figure ? [120, 240] : LEVEL_DIST[nd.kind] ?? LEVEL_DIST.file;
     const d = cam.distanceTo(o.position);
     const want = d < nearD ? 2 : d < midD ? 1 : 0;
     if (want === o.userData.level) continue;
@@ -397,9 +418,9 @@ function dispose(obj) {
   const shared = new Set(glyphGeo.values()).add(HEAD);
   obj.traverse((m) => {
     if (m.geometry && !shared.has(m.geometry) && !m.isSprite) m.geometry.dispose(); // (sprites share three's one quad)
-    for (const mat of [].concat(m.material ?? [])) { mat.map?.dispose(); mat.dispose(); }
+    for (const mat of [].concat(m.material ?? [])) { if (mat.map) { mat.map.userData.gone = true; mat.map.dispose(); } mat.dispose(); }
   });
-  for (const t of obj.userData?.tex ?? []) t?.dispose();
+  for (const t of obj.userData?.tex ?? []) if (t) { t.userData.gone = true; t.dispose(); }
 }
 function clear() {
   for (const o of objects) { scene.remove(o); dispose(o); }
@@ -498,12 +519,18 @@ async function load(name, data = null, again = false, opts = {}) {
   if (next?.format !== "sagebrush-space" || !Array.isArray(next.nodes)) throw new Error(name + " is not a sagebrush-space");
   // (the file written again while you are inside one of its rooms: it is what you'll come back out to)
   if (again && scopes.length && !opts.room) {
+    if (tour && tour.space === scopes[0].space) { const t = toursOf(next).find((x) => x.title === tour.t.title); if (t) { tour.space = next; tour.t = t; } else tour = null; }
     scopes[0].space = next; scopes[0].P = null;
     $("#status").textContent = "the space was written again: Back out of the rooms to see it";
     return;
   }
   const view = again && space ? { pos: camera.position.clone(), target: controls.target.clone(), sel: selected } : null;
   if (!opts.room) { scopes.length = 0; spaceName = name; }
+  // (the same space written again, on a tour of it: the tour goes on in the new copy, if it is still there)
+  if (view && tour && tour.space === space) {
+    const t = toursOf(next).find((x) => x.title === tour.t.title);
+    if (t) { tour.space = next; tour.t = t; } else tour = null;
+  }
   space = next;
   clear();
   const nodes = space.nodes, index = new Map(nodes.map((n, i) => [n.id, i]));
@@ -546,13 +573,17 @@ async function load(name, data = null, again = false, opts = {}) {
   }
   navButtons();
   buildIndex();
-  if (!view) tour = null;
+  // (a tour belongs to its space: entering a room and leaving it keep it; another space ends it)
+  if (!view && !opts.room) tour = null;
   renderTours();
   document.title = (space.title ?? name) + " · whitespace";
   crumbs();
   $("#status").textContent = `${nodes.length} objects, ${pairs.length} links · ${r3.laid ? "laid out in " + Math.round(performance.now() - t0) + " ms" : "at their saved places"}`;
   if (!view || selected === null) closeOverlay();
   else if (!$("#overlay").hidden) showOverlay(nodes.find((n) => n.id === selected));
+  // (a space with an agent (`agent: "demo"`): it comes in; another space: it goes)
+  if (opts.room && !scopes.length && space.agent === "demo" && !agent) startAgent().catch(() => {});
+  if (!opts.room && !view) { if (space.agent === "demo") startAgent().catch((e) => ($("#status").textContent = "the agent didn't start: " + (e?.message ?? e))); else stopAgent(); }
 }
 
 // the camera: everything in view
@@ -610,7 +641,7 @@ function flyToView(to, toT, ms = 900) {
 function viewOf(i, dist) {
   const nd = space.nodes[i];
   const p = new THREE.Vector3(positions[3 * i], positions[3 * i + 1], positions[3 * i + 2]);
-  const d = dist ?? (nd.kind === "file" ? 5 : 9);
+  const d = dist ?? (Array.isArray(nd.size) ? Math.max(9, nd.size[1] * 1.7) : nd.kind === "file" ? 5 : 9);
   if (nd.kind === "plot3d" || nd.scene) {
     const t = p.clone().add(new THREE.Vector3(0, 0, 1.4));
     return { to: t.clone().add(new THREE.Vector3(0, -8.5, 7.5)), toT: t };
@@ -724,6 +755,7 @@ function setSelected(id) {
     if (nd) setGlow(nd, x === id ? 0.4 : 0);
   }
   edgeColors();
+  tourPill();
   window.history.replaceState(null, "", location.pathname + location.search + (id === null ? "" : "#sel=" + encodeURIComponent(id)));
   const detail = selectionOf(id);
   dispatchEvent(new CustomEvent("whitespace:select", { detail }));
@@ -811,19 +843,27 @@ function showOverlay(nd) {
 }
 // ---------------------------------------------------------------- guided tours (the space's `tours`): a path through
 // objects, each stop with its narration; the drawer shows the stop, Next flies on (N and P too)
-let tour = null; // ({ t: the tour, i: the stop shown })
-const toursOf = () => (Array.isArray(space?.tours) ? space.tours.filter((t) => t && Array.isArray(t.steps) && t.steps.length) : []);
+let tour = null; // ({ t: the tour, i: the stop shown, space: the space it is a tour of })
+const toursOf = (s = space) => (Array.isArray(s?.tours) ? s.tours.filter((t) => t && Array.isArray(t.steps) && t.steps.length) : []);
 function tourStop(nd) {
-  if (!tour) return null;
+  if (!tour || space !== tour.space) return null;
   const st = tour.t.steps[tour.i];
   return st && st.node === nd.id ? { title: tour.t.title ?? "Tour", i: tour.i, n: tour.t.steps.length, text: st.text ?? "" } : null;
 }
 function startTour(t) {
-  tour = { t, i: -1 };
+  tour = { t, i: -1, space };
   tourStep(1);
 }
+// (delta 0: back to the stop shown, from wherever you went meanwhile)
 function tourStep(delta) {
   if (!tour) return null;
+  // (in a room entered during the tour: out to the tour's space first)
+  if (space !== tour.space) {
+    const k = scopes.findIndex((s) => s.space === tour.space);
+    if (k < 0) { endTour(); return null; }
+    leaveTo(k);
+    if (space !== tour.space) return null; // (still entering a room: try again then)
+  }
   const steps = tour.t.steps;
   let i = tour.i + delta;
   // (stops whose object isn't in the space are passed over)
@@ -839,19 +879,33 @@ function tourStep(delta) {
 function endTour() {
   tour = null;
   renderTours();
+  tourPill();
   if (selected !== null && !$("#overlay").hidden) showOverlay(space.nodes.find((n) => n.id === selected));
 }
 function renderTours() {
-  const sel = $("#tour"), ts = toursOf();
+  tourPill();
+  const sel = $("#tour"), ts = toursOf(tour ? tour.space : space);
   sel.hidden = !ts.length;
   sel.innerHTML = `<option value="">${tour ? "On a tour: " + esc(tour.t.title ?? "") : "Guided tours…"}</option>` +
     ts.map((t, k) => `<option value="${k}">${esc(t.title ?? "Tour " + (k + 1))} (${t.steps.length} stops)</option>`).join("") +
     (tour ? `<option value="end">End the tour</option>` : "");
 }
+// (while on a tour, away from its stop (another object, a room): a pill says where the tour is, and goes back to it)
+function tourPill() {
+  const el = $("#tourpill");
+  if (!el) return;
+  const st = tour && tour.t.steps[tour.i];
+  const atStop = !!st && space === tour.space && selected === st.node && !$("#overlay").hidden;
+  el.hidden = !tour || atStop || tour.i < 0;
+  if (el.hidden) return;
+  el.innerHTML = `<span>On a tour: ${esc(tour.t.title ?? "Tour")} · stop ${tour.i + 1} of ${tour.t.steps.length}</span>` +
+    `<button data-t="0" title="Back to the tour's stop">Back to the tour</button><button data-t="1" title="The next stop (N)">Next ▶</button><button data-t="end" title="End the tour">✕</button>`;
+  for (const b of el.querySelectorAll("button")) b.onclick = () => (b.dataset.t === "end" ? endTour() : tourStep(+b.dataset.t));
+}
 $("#tour").onchange = () => {
   const v = $("#tour").value;
   if (v === "end") endTour();
-  else if (v !== "") startTour(toursOf()[+v]);
+  else if (v !== "") startTour(toursOf(tour ? tour.space : space)[+v]);
   else renderTours();
 };
 
@@ -865,7 +919,7 @@ function typeset(el) {
 }
 const shownLines = (nd) => String(nd.text ?? "").split("\n").length;
 const isBase64 = (s) => typeof s === "string" && /^[A-Za-z0-9+/]*={0,2}$/.test(s);
-function closeOverlay() { $("#overlay").hidden = true; document.body.classList.remove("reading"); viewOffset(); if (space) setSelected(null); }
+function closeOverlay() { $("#overlay").hidden = true; document.body.classList.remove("reading"); viewOffset(); if (space) setSelected(null); tourPill(); }
 // (while the overlay covers the right of the screen, the view is shifted so what it is about stays in the free part)
 // (on a phone the overlay is a sheet along the bottom: the view is shifted up instead)
 const phone = matchMedia("(max-width: 700px)");
@@ -1113,6 +1167,120 @@ function linkNames(code, nd) {
   }
 }
 
+// ---------------------------------------------------------------- an agent in the space (a demo: src/demo-agent.js)
+// The figure (src/agent.js) stands in the space; you talk to it in the chat (here a box at the bottom, in a headset a
+// panel below your view, src/xr.js); what it makes appears as objects, growing in where it works, each with its code.
+let agent = null; // ({ figure, demo, off })
+const appearing = [];
+function placeNode(nd) {
+  nd._out = []; nd._in = []; nd._file = { text: String(nd.text ?? "") };
+  space.nodes.push(nd);
+  const o = makeObject(nd);
+  o.scale.setScalar(0.01);
+  scene.add(o);
+  objects.push(o);
+  // (its place in the 3D layout, and on the plane if there is one; a morph between them finished first)
+  if (morph) { place(morph.to); morph = null; }
+  const P = new Float64Array(P3.length + 3);
+  P.set(P3); P.set(nd.position, P3.length);
+  P3 = P;
+  if (P2) { const Q = new Float64Array(P2.length + 3); Q.set(P2); Q.set([nd.position[0], nd.position[1], 0], P2.length); P2 = Q; }
+  place(dims === 3 ? P3 : P2);
+  appearing.push({ o, t0: performance.now() });
+  buildIndex();
+  $("#status").textContent = `${space.nodes.length} objects`;
+  return nd;
+}
+function updateNode(nd) {
+  const o = objects[space.nodes.indexOf(nd)];
+  if (!o) return;
+  if (nd.scene) setPlot(o, sceneObject(nd.scene));
+  for (const t of o.userData.tex) if (t) { t.userData.gone = true; t.dispose(); }
+  o.userData.tex = []; o.userData.level = -1;
+  nd._file = { text: String(nd.text ?? "") };
+  if (selected === nd.id && !$("#overlay").hidden && runningNode !== nd) showOverlay(nd);
+}
+function stepAppear(now) {
+  for (let k = appearing.length - 1; k >= 0; k--) {
+    const a = appearing[k], u = Math.min(1, (now - a.t0) / 700), e = 1 - Math.pow(1 - u, 3);
+    a.o.scale.setScalar(Math.max(0.01, e));
+    if (u >= 1) appearing.splice(k, 1);
+  }
+}
+const positionOf = (nd) => { const i = space.nodes.indexOf(nd); return i >= 0 ? new THREE.Vector3(positions[3 * i], positions[3 * i + 1], positions[3 * i + 2]) : new THREE.Vector3(...(nd.position ?? [0, 0, 0])); };
+async function startAgent() {
+  stopAgent();
+  const owner = space;
+  const [{ createAgent }, { startDemoAgent }] = await Promise.all([import("./agent.js"), import("./demo-agent.js")]);
+  if (space !== owner) return;
+  const figure = createAgent(THREE);
+  figure.group.scale.setScalar(1.15);
+  const h = homeView(positions);
+  figure.group.position.set(h.toT.x - 6, h.toT.y - 1, h.toT.z + 7);
+  scene.add(figure.group);
+  // (everything it does is in its own space: once that space is gone (another loaded) or another is shown (a room),
+  //  it does nothing more there)
+  let demo = null;
+  const mine = () => { if (agent?.demo !== demo || space !== owner) throw new Error("stopped"); };
+  demo = startDemoAgent({
+    figure, SCENE,
+    nodes: () => (mine(), space.nodes),
+    place: (nd) => (mine(), placeNode(nd)), update: (nd) => { if (agent?.demo === demo && space === owner) updateNode(nd); }, positionOf: (nd) => (mine(), positionOf(nd)),
+    eye: () => eye().clone(),
+    run: (code) => run(code, "sage", {}),
+    // (where its work is: flown to on the screen; in a headset, flown to as well)
+    focus: (nd, dist) => { if (!nd || agent?.demo !== demo || space !== owner || !space.nodes.includes(nd)) return; if (xr.presenting) xr.look(nd, dist); else flyTo(space.nodes.indexOf(nd), dist); },
+  });
+  const off = demo.onChange(() => { renderChat(); xr.chatChanged(); });
+  agent = { figure, demo, off };
+  $("#chat").hidden = false;
+  document.body.classList.add("chatting");
+  renderChat();
+  setTimeout(() => agent?.demo === demo && demo.greet(), 900);
+}
+function stopAgent() {
+  if (!agent) return;
+  agent.demo.stop();
+  scene.remove(agent.figure.group);
+  dispose(agent.figure.group);
+  agent = null;
+  $("#chat").hidden = true;
+  document.body.classList.remove("chatting");
+  xr.chatChanged();
+}
+// the chat box: the conversation's last messages, the next things to try, and a line to type in (or a microphone)
+function renderChat() {
+  if (!agent) return;
+  const d = agent.demo, log = $("#chatlog");
+  log.innerHTML = d.messages.slice(-8).map((m) => `<div class="msg ${m.from}"><b>${m.from === "you" ? "You" : "Agent"}</b> <span class="md">${markdown(String(m.text), { remote: false })}</span></div>`).join("");
+  typeset(log);
+  log.scrollTop = log.scrollHeight;
+  $("#chatchips").innerHTML = d.suggestions.slice(0, 3).map((s, k) => `<button type="button" data-k="${k}">${esc(s)}</button>`).join("");
+  for (const b of $("#chatchips").querySelectorAll("button")) b.onclick = () => d.send(d.suggestions[+b.dataset.k]);
+  $("#chatin").placeholder = d.busy ? "The agent is working…" : "Ask the agent (try a suggestion below)";
+}
+$("#chatform").onsubmit = (e) => {
+  e.preventDefault();
+  const v = $("#chatin").value.trim();
+  if (!v || !agent) return;
+  $("#chatin").value = "";
+  agent.demo.send(v);
+};
+// (speaking instead of typing, where the browser can: the Web Speech API)
+const Speech = window.SpeechRecognition || window.webkitSpeechRecognition;
+if (Speech) {
+  $("#chatmic").hidden = false;
+  $("#chatmic").onclick = () => {
+    const r = new Speech();
+    r.lang = "en-US"; r.interimResults = false;
+    $("#chatmic").classList.add("on");
+    r.onresult = (ev) => { const t = ev.results[0]?.[0]?.transcript; if (t && agent) agent.demo.send(t); };
+    r.onend = () => $("#chatmic").classList.remove("on");
+    r.onerror = () => $("#chatmic").classList.remove("on");
+    r.start();
+  };
+}
+
 // ---------------------------------------------------------------- running code: edit, Run, and the space follows
 // (an object's output: its text, its figure (SVG), and, for a 3D plot, a note that the object in the space is it)
 function outputHtml(nd) {
@@ -1346,6 +1514,8 @@ function stepFly(now) {
   flight = null;
 }
 addEventListener("keydown", (e) => {
+  // (in a headset with an agent here, the keyboard types to it: xr.js)
+  if (xr.presenting && agent && !e.altKey && !e.ctrlKey && !e.metaKey && !typing()) return;
   if (typing()) { if (e.key === "Escape") document.activeElement.blur(); return; }
   const k = e.key.toLowerCase();
   if (!e.altKey && !e.ctrlKey && !e.metaKey && (FLY[k] || k === "shift")) { held.add(k); if (FLY[k]) e.preventDefault(); return; }
@@ -1435,7 +1605,7 @@ const xr = setupXR({
   pickables: () => pickables,
   select: (nd) => setSelected(nd ? nd.id : null),
   // (the views the desktop flies to: an object's, and everything's)
-  viewOf: (nd) => viewOf(space.nodes.indexOf(nd)),
+  viewOf: (nd, dist) => viewOf(space.nodes.indexOf(nd), dist),
   // (a room's view of everything level with its middle: a headset turns you about the vertical only, so from above
   //  the room would sit low in your view)
   home: () => { if (!space) return null; const h = homeView(positions); return space.room ? { ...h, to: h.to.clone().setY(h.toT.y) } : h; },
@@ -1443,7 +1613,7 @@ const xr = setupXR({
   // (tours in a headset: the stop to show, and its narration)
   tours: () => toursOf(),
   tourNow: () => (tour ? { title: tour.t.title ?? "Tour", i: tour.i, n: tour.t.steps.length } : null),
-  startTour: (k) => { const t = toursOf()[k]; if (!t) return null; tour = { t, i: -1 }; return tourStep(1); },
+  startTour: (k) => { const t = toursOf()[k]; if (!t) return null; tour = { t, i: -1, space }; return tourStep(1); },
   tourStep: (d) => tourStep(d),
   endTour: () => endTour(),
   run: (nd) => runNode(nd),
@@ -1451,6 +1621,8 @@ const xr = setupXR({
   canEnter: (nd) => !!enterKind(nd),
   noRoomWhy: (nd) => noRoomWhy(nd),
   focus: () => focusNode,
+  // (the agent's chat, in a headset: null without one)
+  chat: () => (agent ? agent.demo : null),
   fullText: (nd) => fullText(nd),
   linkLabels: (nd) => linkLabels(nd),
   enter: (nd) => enterRoom(nd),
@@ -1482,7 +1654,8 @@ function tick(now) {
     controls.update();
   }
   stepMorph(now);
-  if (space) { stepZoom(); stepLandmarks(); stepGlyphs(dt); }
+  if (space) { stepZoom(); stepLandmarks(); stepGlyphs(dt); stepAppear(now); }
+  if (agent) agent.figure.step(dt, eye());
   renderer.render(scene, camera);
 }
 // (the renderer's loop: the browser's frames, or the headset's while in VR)
@@ -1499,5 +1672,7 @@ window.whitespace = {
   enter(id) { const nd = space?.nodes.find((n) => n.id === id); return nd ? enterRoom(nd) : Promise.resolve(false); },
   leave() { const v = leaveRoom(); if (v) flyToView(v.pos, v.target); return !!v; },
   get room() { return scopes.length ? roomPath() : null; },
+  // (the agent here, if any: its chat)
+  get agent() { return agent ? agent.demo : null; },
   xr,
 };

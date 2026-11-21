@@ -280,7 +280,7 @@ export function setupXR(api) {
     menuButtons = [];
     const tours = api.tours().length, now = api.tourNow();
     const items = [["← Back", "back", backStack.length > 0 || api.inRoom()], ["Forward →", "forward", fwdStack.length > 0], ["See all", "home", true], ["Run all", "runall", true],
-      [now ? "Next stop ▶" : "Tour", "tour", tours > 0], ["Exit VR", "exit", true]];
+      [now ? "Next stop ▶" : "Tour", "tour", tours > 0 || !!now], ["Exit VR", "exit", true]];
     const bw = (MW - 3 * 20) / 2, bh = 96;
     items.forEach(([label, act, on], k) => {
       const x = 20 + (k % 2) * (bw + 20), y = 20 + Math.floor(k / 2) * (bh + 20), w = bw;
@@ -297,14 +297,99 @@ export function setupXR(api) {
     else if (act === "forward") goForward();
     else if (act === "home") seeAll();
     else if (act === "runall") api.runAll();
-    else if (act === "tour" && api.tours().length) tour(1);
+    else if (act === "tour" && (api.tours().length || api.tourNow())) tour(1);
     else if (act === "exit") session?.end();
   }
+
+  // ---------------------------------------------------------------- the agent's chat (a space with an agent)
+  // A panel below your view, turned to you, following your head slowly: the conversation's last messages, the line
+  // you are typing (a Bluetooth keyboard types into it), and the next things to try as buttons to point at.
+  const CW = 1024, CH = 600;
+  const ccanvas = Object.assign(document.createElement("canvas"), { width: CW, height: CH });
+  const ctex = new THREE.CanvasTexture(ccanvas);
+  ctex.colorSpace = THREE.SRGBColorSpace;
+  const chatPanel = new THREE.Mesh(new THREE.PlaneGeometry(0.9 * SCALE, (0.9 * SCALE * CH) / CW), new THREE.MeshBasicMaterial({ map: ctex, side: THREE.DoubleSide, transparent: true }));
+  chatPanel.renderOrder = 19;
+  chatPanel.visible = false;
+  scene.add(chatPanel);
+  let typed = "", chatButtons = [], chatPlaced = false;
+  function drawChat() {
+    const chat = api.chat();
+    chatPanel.visible = !!(session && chat);
+    if (!chatPanel.visible) return;
+    const g = ccanvas.getContext("2d"), T = api.theme(), dark = T.fg !== "#1f2328";
+    const C = dark ? { bg: "rgba(22,27,34,0.94)", fg: "#e6edf3", muted: "#8d96a0", you: "#1d3557", btn: "#21262d" } : { bg: "rgba(255,255,255,0.95)", fg: "#1f2328", muted: "#57606a", you: "#dbe8fd", btn: "#eef1f5" };
+    g.clearRect(0, 0, CW, CH);
+    g.fillStyle = C.bg; g.beginPath(); g.roundRect(0, 0, CW, CH, 30); g.fill();
+    const pad = 32;
+    // (the last messages, the newest at the bottom)
+    g.font = "28px system-ui, sans-serif";
+    const rows = [];
+    for (const m of chat.messages.slice(-4)) {
+      const text = texToText(String(m.text)).replace(/\*\*|`/g, "");
+      const words = text.split(/\s+/);
+      let row = (m.from === "you" ? "You: " : "Agent: ");
+      const mine = [];
+      for (const w of words) { const t = row + w + " "; if (g.measureText(t).width > CW - 2 * pad && row.trim()) { mine.push(row); row = w + " "; } else row = t; }
+      mine.push(row);
+      rows.push(...mine.map((r) => ({ r, you: m.from === "you" })));
+    }
+    let y = pad + 26;
+    for (const { r, you } of rows.slice(-9)) { g.fillStyle = you ? "#1f6feb" : C.fg; g.fillText(r, pad, y); y += 36; }
+    // (the line being typed)
+    const lineY = CH - 190;
+    g.fillStyle = C.btn; g.beginPath(); g.roundRect(pad - 8, lineY - 34, CW - 2 * pad + 16, 52, 12); g.fill();
+    g.fillStyle = typed ? C.fg : C.muted; g.font = "28px system-ui, sans-serif";
+    g.fillText(typed ? typed + "▏" : chat.busy ? "The agent is working…" : "Type on your keyboard, or point at a suggestion", pad, lineY);
+    // (the suggestions, and Send)
+    chatButtons = [];
+    let x = pad, by = CH - 120;
+    const button = (label, act, primary = false) => {
+      g.font = "600 26px system-ui, sans-serif";
+      const w = Math.min(CW - 2 * pad, g.measureText(label).width + 40);
+      if (x + w > CW - pad) { x = pad; by += 62; }
+      if (by > CH - 50) return;
+      g.fillStyle = primary ? "#1f6feb" : C.btn; g.beginPath(); g.roundRect(x, by, w, 50, 14); g.fill();
+      g.fillStyle = primary ? "#ffffff" : C.fg; g.fillText(label, x + 20, by + 34, w - 40);
+      chatButtons.push({ x, y: by, w, h: 50, act });
+      x += w + 12;
+    };
+    if (typed) button("Send ▶", { send: typed }, true);
+    for (const s of chat.suggestions.slice(0, typed ? 1 : 2)) button(s.length > 46 ? s.slice(0, 44) + "…" : s, { send: s });
+    ctex.needsUpdate = true;
+  }
+  function placeChat(snap = false) {
+    // (below and in front of your head; it follows your turns, gently)
+    const head = camera.getWorldPosition(new THREE.Vector3());
+    const dir = camera.getWorldDirection(new THREE.Vector3()).setY(0);
+    if (dir.lengthSq() < 1e-6) dir.set(0, 0, -1);
+    dir.normalize();
+    const want = head.clone().addScaledVector(dir, 0.75 * SCALE).add(new THREE.Vector3(0, -0.42 * SCALE, 0));
+    // (gently when near; quickly when far behind, after a flight)
+    if (snap || !chatPlaced) chatPanel.position.copy(want); else chatPanel.position.lerp(want, chatPanel.position.distanceTo(want) > 0.5 * SCALE ? 0.2 : 0.04);
+    chatPlaced = true;
+    chatPanel.lookAt(head);
+  }
+  function chatSend(text) {
+    const chat = api.chat();
+    if (!chat || !text.trim()) return;
+    chat.send(text);
+    typed = "";
+    drawChat();
+  }
+  // (the keyboard, in a headset with an agent: printable keys, Backspace, Enter)
+  addEventListener("keydown", (e) => {
+    if (!session || !api.chat() || e.altKey || e.ctrlKey || e.metaKey || e.isComposing || /^(INPUT|TEXTAREA|SELECT)$/.test(document.activeElement?.tagName ?? "")) return;
+    if (e.key === "Enter") { chatSend(typed); e.preventDefault(); return; }
+    if (e.key === "Backspace") { typed = typed.slice(0, -1); drawChat(); e.preventDefault(); return; }
+    if (e.key === "Escape") { typed = ""; drawChat(); return; }
+    if (e.key.length === 1 && !e.ctrlKey && !e.metaKey && typed.length < 500) { typed += e.key; drawChat(); e.preventDefault(); }
+  });
 
   // ---------------------------------------------------------------- pointing and selecting
   function hit(c) {
     ray.setFromXRController(c);
-    const targets = [...(panel.visible ? [panel] : []), ...(menu.parent && menu.parent !== c ? [menu] : []), ...api.pickables()];
+    const targets = [...(panel.visible ? [panel] : []), ...(chatPanel.visible ? [chatPanel] : []), ...(menu.parent && menu.parent !== c ? [menu] : []), ...api.pickables()];
     return ray.intersectObjects(targets, false)[0] ?? null;
   }
   function onSelect(c) {
@@ -314,6 +399,12 @@ export function setupXR(api) {
       const px = h.uv.x * MW, py = (1 - h.uv.y) * MH;
       const b = menuButtons.find((b) => px >= b.x && px <= b.x + b.w && py >= b.y && py <= b.y + b.h);
       if (b) menuPress(b.act);
+      return;
+    }
+    if (h.object === chatPanel) {
+      const px = h.uv.x * CW, py = (1 - h.uv.y) * CH;
+      const b = chatButtons.find((b) => px >= b.x && px <= b.x + b.w && py >= b.y && py <= b.y + b.h);
+      if (b?.act.send) chatSend(b.act.send);
       return;
     }
     if (h.object === panel) {
@@ -331,11 +422,12 @@ export function setupXR(api) {
   function step(dt) {
     if (!session) return;
     stepFlight();
+    if (chatPanel.visible) placeChat();
     backHeld = false;
     for (const c of controllers) {
       const h = c.userData.source ? hit(c) : null;
       c.userData.line.scale.z = h ? h.distance / SCALE : 30;
-      const nd = h && h.object !== panel ? h.object.userData.node ?? null : null;
+      const nd = h && h.object !== panel && h.object !== chatPanel ? h.object.userData.node ?? null : null;
       if (nd !== c.userData.hovered) {
         if (c.userData.hovered) api.glow(c.userData.hovered, 0);
         c.userData.hovered = nd;
@@ -393,9 +485,12 @@ export function setupXR(api) {
     await renderer.xr.setSession(s);
     session = s; mode = m;
     api.changed(true, m);
+    chatPlaced = false;
+    drawChat();
   }
   function leave() {
     session = null; mode = null; flight = null; backStack.length = 0; fwdStack.length = 0;
+    chatPanel.visible = false; typed = "";
     close();
     for (const c of controllers) { if (c.userData.hovered) api.glow(c.userData.hovered, 0); c.userData.hovered = null; }
     rig.position.set(0, 0, 0); rig.rotation.set(0, 0, 0); rig.scale.setScalar(1);
@@ -412,6 +507,11 @@ export function setupXR(api) {
     get mode() { return mode; },
     get panel() { return shown ? { id: shown.id, state, buttons: buttons.map((b) => b.act) } : null; },
     press, open: (nd) => open(nd), rig, menuPress, tour, roomChanged,
+    // (the agent's chat: redrawn when it changes; and a flight to what the agent made)
+    chatChanged: () => drawChat(),
+    look(nd, dist) { if (!session) return; const v = api.viewOf(nd, dist); flyRig(v.to, v.toT, 700); },
+    chatSend: (t) => chatSend(t),
+    get chat() { return chatPanel.visible ? { typed, buttons: chatButtons.map((b) => b.act.send) } : null; },
     get history() { return { back: backStack.length, forward: fwdStack.length, flying: !!flight }; },
   };
 }

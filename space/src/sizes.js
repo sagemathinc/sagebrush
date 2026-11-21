@@ -9,6 +9,8 @@ const SIZE = {
 const USUAL = { file: 120, fn: 25, block: 25, class: 80 };
 const clampK = (k) => Math.min(2.4, Math.max(0.7, k));
 export function sizeOf(nd) {
+  // (an object can say its own size: an agent's plot, say)
+  if (Array.isArray(nd.size) && nd.size.length >= 2 && nd.size.every((v) => Number.isFinite(v) && v > 0 && v < 100)) return [nd.size[0], nd.size[1], nd.size[2] ?? 0.2];
   const s = SIZE[nd.kind] ?? SIZE.file;
   let k = null;
   if (nd.kind === "dir" && Number(nd.files) > 0) k = clampK(Math.sqrt(Number(nd.files) / 10));
