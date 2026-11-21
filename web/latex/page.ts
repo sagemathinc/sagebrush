@@ -85,10 +85,11 @@ let runGen = 0;
 // (a failed fetch is forgotten, so the next try fetches again, by a URL of its own: a browser may keep a failed
 // module's result for its URL; each caller says the failure)
 // (an agent this tab had before its reload: its reload record (agent-pair.ts's RELOAD_KEY), resumed by the pairing module)
-// (only on a reload of this tab: after any other navigation the record is dropped here, unread, as the pairing module
-//  would discard it (reloadDecision), and nothing is fetched for it; a page in a frame (the Agents page's .tex pane) leaves
-//  the record alone: it shares the tab's sessionStorage, and the record is the top page's)
-const reloadRecorded = () => { try { if (window.top !== window || sessionStorage.getItem("sb-agent-reload-v1") === null) return false; if ((performance.getEntriesByType("navigation")[0] as PerformanceNavigationTiming | undefined)?.type === "reload") return true; sessionStorage.removeItem("sb-agent-reload-v1"); return false; } catch { return false; } };
+// (another page's record (the Agents page's, kept while the person is on Files or here): left alone, unread past its
+//  page, for that page to take when they go back to it (A5); this page's own, on a reload or a navigation back: the
+//  pairing module decides (reloadDecision: fresh, the same scope); anything else is dropped here; a page in a frame (the
+//  Agents page's .tex pane) leaves the record alone: it shares the tab's sessionStorage, and the record is the top page's)
+const reloadRecorded = () => { try { if (window.top !== window) return false; const raw = sessionStorage.getItem("sb-agent-reload-v1"); if (raw === null) return false; let page: unknown = null; try { page = JSON.parse(raw)?.page ?? null; } catch {} if (typeof page === "string" && page !== location.origin + location.pathname) return false; const nav = (performance.getEntriesByType("navigation")[0] as PerformanceNavigationTiming | undefined)?.type; if (nav === "reload" || (typeof page === "string" && (nav === "navigate" || nav === "back_forward"))) return true; sessionStorage.removeItem("sb-agent-reload-v1"); return false; } catch { return false; } };
 // (decided once, at load, before anything else is looked at: a ?pair= link or the desktop app never skips the drop)
 const reloadNow = reloadRecorded();
 let agentPairing: Promise<{ connect(): unknown }> | null = null, agentTries = 0;

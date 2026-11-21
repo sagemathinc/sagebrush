@@ -6,7 +6,7 @@
 //   bun web/workspace/test-agent-pair.mjs
 import { failHint, agentSays, onlyCurrent, readConnect, ONLY_CODE, SAFARI, CHROME_ALLOW, OTHER_FAIL } from "./agent-ui.ts";
 import { handOver, takeHandoff, HANDOFF_KEY, HANDOFF_MS } from "./pair-handoff.ts";
-import { AgentPairing, AgentError, CHANGED_WHILE_RUNNING, parseStrict, actorOf, parseReloadRecord, reloadDecision, takeReloadRecord, putReloadRecord, markReloadLeft, RELOAD_KEY, RELOAD_FRESH_MS } from "./agent-pair.ts";
+import { AgentPairing, AgentError, CHANGED_WHILE_RUNNING, parseStrict, actorOf, parseReloadRecord, reloadDecision, takeReloadRecord, putReloadRecord, markReloadLeft, RELOAD_KEY, RETURN_MS } from "./agent-pair.ts";
 
 let failures = 0;
 const ok = (c, msg) => { console.log((c ? "ok   " : "FAIL ") + msg); if (!c) failures++; };
@@ -429,10 +429,16 @@ ok(actorOf("Claude Code", "claude-code") === "agent:Claude-Code" && actorOf("", 
   for (const [id, raw] of Object.entries(bad)) ok(parseReloadRecord(raw) === null, `U-3.${id}: malformed, so no record`);
   ok(parseReloadRecord(null) === null, "U-3.null: no stored value, no record");
   const d = (r, navType, now) => reloadDecision(r, { scope, navType, now });
-  ok(d(good, "reload", 1000 + RELOAD_FRESH_MS) === "silent", "U-7.silent: a reload, fresh (age = 30 s), same scope: silent");
-  ok(d(good, "reload", 1000 + RELOAD_FRESH_MS + 1) === "click", "U-7.stale: older than 30 s: kept for one click");
+  ok(RETURN_MS === 10 * 60 * 1000, "U-7.window: one constant, 10 minutes (A5 item 2)");
+  ok(d(good, "reload", 1000 + RETURN_MS) === "silent", "U-7.silent: a reload, fresh (age = 10 min), same scope: silent");
+  ok(d(good, "reload", 1000 + RETURN_MS + 1) === "click", "U-7.stale: older than 10 min: kept for one click");
   ok(d(good, "reload", 999) === "click", "U-7.future: a leftAt in the future fails freshness: kept for one click");
-  ok(d(good, "navigate", 1500) === "discard", "U-7.nav: not a reload: discarded, nothing kept for a click (a new Allow, unless remembered)");
+  ok(d(good, "navigate", 1500) === "silent" && d(good, "back_forward", 1000 + RETURN_MS) === "silent", "U-7.return: a navigation back (Files and back, or Back) within 10 min, same scope: silent (A5 item 2)");
+  ok(d(good, "navigate", 1000 + RETURN_MS + 1) === "discard" && d(good, "back_forward", 1000 + RETURN_MS + 1) === "discard", "U-7.return-stale: a navigation back older than 10 min: discarded, nothing kept for a click");
+  ok(d(good, "navigate", 999) === "discard", "U-7.return-future: a navigation with a leftAt in the future: discarded");
+  ok(d(good, "prerender", 1500) === "discard" && d(good, "", 1500) === "discard", "U-7.other-nav: any other navigation type: discarded");
+  ok(d(noLeft, "navigate", 1500) === "discard", "U-7.return-noleft: a navigation with no leftAt: discarded");
+  ok(d({ ...good, page: "http://127.0.0.1:1/other/" }, "navigate", 1500) === "discard", "U-7.return-scope: a navigation to another page: discarded");
   ok(d(noLeft, "reload", 1500) === "discard", "U-7.noleft: no leftAt (a copy taken while the original lived, as a new tab's): discarded");
   ok(d({ ...good, workspace: "other" }, "reload", 1500) === "discard", "U-7.scope-ws: another workspace: discarded, nothing kept for a click (R1-d)");
   ok(d({ ...good, page: "http://127.0.0.1:1/other/" }, "reload", 1500) === "discard", "U-7.scope-page: another page: discarded (R1-d)");
@@ -441,17 +447,46 @@ ok(actorOf("Claude Code", "claude-code") === "agent:Claude-Code" && actorOf("", 
   ok(d({ ...timed, leftAt: 4990 }, "reload", 5000) === "discard", "U-8.at: now = expires: discarded (R1-e)");
   ok(d({ ...timed, leftAt: 4990 }, "reload", 5001) === "discard", "U-8.after: now = expires + 1: discarded");
   ok(d({ ...timed, leftAt: 4990 }, "navigate", 5000) === "discard", "U-8.click: an expired record is never kept for a click");
+  // take with this page's scope (A5): another page's record is left where it is; this page's own, or one that can't be
+  // read, is taken as before
+  {
+    const m = new Map();
+    const st = { getItem: (k) => (m.has(k) ? m.get(k) : null), setItem: (k, v) => void m.set(k, String(v)), removeItem: (k) => void m.delete(k) };
+    m.set(RELOAD_KEY, js(good));
+    const other = takeReloadRecord(st, { workspace: scope.workspace, page: "http://127.0.0.1:1/" });
+    ok(other.kind === "none" && m.has(RELOAD_KEY), "U-9.other-page: another page's record, taken with this page's scope: left where it is", other);
+    const mine = takeReloadRecord(st, scope);
+    ok(mine.kind === "ok" && !m.has(RELOAD_KEY), "U-9.own: this page's record: taken and removed");
+    m.set(RELOAD_KEY, "{not json");
+    const bad = takeReloadRecord(st, scope);
+    ok(bad.kind === "bad" && !m.has(RELOAD_KEY), "U-9.bad: a record that can't be read: taken (removed), as before");
+    m.set(RELOAD_KEY, js({ ...good, workspace: "other" }));
+    const ws2 = takeReloadRecord(st, scope);
+    ok(ws2.kind === "ok" && !m.has(RELOAD_KEY), "U-9.workspace: this page's address, another workspace: taken (the decision discards it)");
+  }
   // take/put/markLeft over a Storage-like map; and storage that throws
   const store = () => { const m = new Map(); return { m, getItem: (k) => (m.has(k) ? m.get(k) : null), setItem: (k, v) => void m.set(k, String(v)), removeItem: (k) => void m.delete(k) }; };
-  const s1 = store(); putReloadRecord(s1, noLeft); markReloadLeft(s1, 777);
+  const own = { workspace: noLeft.workspace, page: noLeft.page };
+  const s1 = store(); putReloadRecord(s1, noLeft); markReloadLeft(s1, 777, own);
   ok(parseReloadRecord(s1.getItem(RELOAD_KEY))?.leftAt === 777, "U-1.leftAt: pagehide writes leftAt onto the held record");
+  // (A5: another page's pagehide (a board passed through on the way) leaves the record byte for byte; so does this
+  //  page's address in another workspace)
+  {
+    const sx = store(); putReloadRecord(sx, { ...noLeft, leftAt: 5 }); const raw0 = sx.getItem(RELOAD_KEY);
+    markReloadLeft(sx, 999, { ...own, page: own.page + "board/" });
+    ok(sx.getItem(RELOAD_KEY) === raw0, "U-1.other-page: another page's pagehide leaves the record byte for byte (its leftAt never renewed)");
+    markReloadLeft(sx, 999, { ...own, workspace: own.workspace + "-other" });
+    ok(sx.getItem(RELOAD_KEY) === raw0, "U-1.other-workspace: the same page in another workspace leaves it byte for byte too");
+    markReloadLeft(sx, 999, own);
+    ok(parseReloadRecord(sx.getItem(RELOAD_KEY))?.leftAt === 999, "U-1.own-again: its own page's pagehide renews it");
+  }
   const taken = takeReloadRecord(s1);
   ok(taken.kind === "ok" && taken.record.leftAt === 777 && s1.getItem(RELOAD_KEY) === null, "R1-c: take returns the record and removes it before any attempt");
   ok(takeReloadRecord(s1).kind === "none", "R1-c: a second take finds nothing (this page's next reload makes no attempt)");
   const s2 = store(); s2.setItem(RELOAD_KEY, "{bad"); ok(takeReloadRecord(s2).kind === "bad" && s2.getItem(RELOAD_KEY) === null, "U-3.take-bad: a malformed stored record is removed and is \"bad\" (not absent: no silent fallback)");
   const thrower = { getItem() { throw new Error("denied"); }, setItem() { throw new Error("denied"); }, removeItem() { throw new Error("denied"); } };
   ok(takeReloadRecord(thrower).kind === "bad" && takeReloadRecord(null).kind === "none", "U-3.storage: storage that throws on read is \"bad\"; no storage is \"none\"");
-  putReloadRecord(thrower, good); markReloadLeft(thrower, 1); ok(true, "U-3.storage-write: writing to storage that throws doesn't throw");
+  putReloadRecord(thrower, good); markReloadLeft(thrower, 1, own); ok(true, "U-3.storage-write: writing to storage that throws doesn't throw");
   // S1: a record that reads but can't be removed is never used (consumed before any attempt, or not at all)
   const s3 = store(); s3.setItem(RELOAD_KEY, JSON.stringify(good)); s3.removeItem = () => { throw new Error("denied"); };
   const t3 = takeReloadRecord(s3);

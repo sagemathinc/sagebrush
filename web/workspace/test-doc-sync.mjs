@@ -317,7 +317,8 @@ try {
     };
     for (let i = 0; i < 200 && !(await ev("window.ready === true").catch(() => false)); i++) await sleep(50);
     await ev(`T.init(${J(dev)})`);
-    return { dev, ev, call: (f, ...args) => { progress(`${dev}.${f}`); return ev(`T.${f}(${args.map((a) => J(a)).join(", ")})`); } };
+    // (`input`: text typed as a person types it, into the focused element: real input, CDP Input.insertText)
+    return { dev, ev, input: (text) => send("Input.insertText", { text }, sessionId), call: (f, ...args) => { progress(`${dev}.${f}`); return ev(`T.${f}(${args.map((a) => J(a)).join(", ")})`); } };
   }
   progress("devices");
   const A = await device("A"), B = await device("B");
@@ -1240,6 +1241,35 @@ try {
         check(false, "X: the case stopped: " + String(e?.message ?? e).slice(0, 300));
       }
       while (results.length < before + XCHECKS) check(false, "X: not reached");
+    }
+  }
+
+  // X13. Typed on A and A's page asked to go away at once (a simulated beforeunload, as a reload within the save's half
+  // second sends it): the page asks to confirm leaving; declined, it stays, and the edit is saved on A and reaches B
+  {
+    const NK = "33333333-2222-4333-8444-5555555555e9";
+    try {
+      await A.call("open", NK, [["ka", "k0"], ["kb", "kb0"]]);
+      await A.call("kick", NK);
+      await settle();
+      await A.call("close", NK);
+      await A.call("mount", NK);
+      await B.call("kick", NK, true);
+      await settle();
+      await B.call("mount", NK);
+      // (typed as a person types: the notebook asks only after the person's own input)
+      if (!(await A.call("focus", "ka"))) throw new Error("no cell ka on A to type in");
+      await A.input("k1 typed, then a reload asked");
+      const asked = await A.call("leaveAsked");
+      await sleep(900);
+      await A.call("kick", NK);
+      for (let i = 0; i < 3; i++) await settle();
+      const [ra, eb, ha, hb, again] = [await A.call("record", NK), await B.call("editor"), await A.call("head", NK), await B.call("head", NK), await A.call("leaveAsked")];
+      const want = [["ka", "k1 typed, then a reload asked"], ["kb", "kb0"]];
+      check(asked === true && again === false && ra.codes === J(want) && J(eb.texts) === J(want) && ha !== null && ha === hb,
+        "X13: typed and a reload asked at once (simulated): the page asks to stay; declined, the edit saved on A and on B, and then nothing to ask: " + J({ asked, again, A: ra.codes, B: eb.texts, heads: [ha, hb] }));
+    } catch (e) {
+      check(false, "X13: the case stopped: " + String(e?.message ?? e).slice(0, 300));
     }
   }
 

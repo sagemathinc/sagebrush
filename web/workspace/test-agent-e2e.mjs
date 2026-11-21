@@ -630,6 +630,18 @@ try {
   const g13 = ((await drive({ op: "grants" })).ok ?? []).filter(([port]) => port === sixth.port);
   ok(h13.length >= 1 && h13.length <= 2 && g13.length === 0, `reload 13: the reload record's grant expired during the window: no further attempt, and it isn't given again (${h13.length} hellos, ${g13.length} grants)`);
   await drive({ op: "slow", s: 0 });
+
+  // ---- a spent code (A5): the agent refuses it, and the dialog says so, with no local-network advice; Connect shows
+  // that it is trying
+  ok(await open(""), "a spent code: a fresh page");
+  await sleep(500);
+  ok(await openConnect(CODE, PORT), "a spent code: the Connect dialog opens with the first link's code, long used");
+  const tryingSeen = ev(`new Promise((res) => { const b = [...document.querySelectorAll(".sbag-box button.primary")].pop(); const mo = new MutationObserver(() => { if (b.textContent === "Connecting…") { mo.disconnect(); res(true); } }); mo.observe(b, { childList: true, characterData: true, subtree: true }); setTimeout(() => res(b.textContent === "Connecting…"), 15000); })`);
+  await click(".sbag-box button.primary");
+  ok(await tryingSeen, "Connect says Connecting… while it tries");
+  ok(await until(`(document.querySelector(".sbag-box .err")?.textContent ?? "").length > 0`, 15000), "a spent code: an answer in the dialog");
+  const spent = await ev(`({ err: document.querySelector(".sbag-box .err").textContent, field: document.querySelector(".sbag-box input").value, btn: [...document.querySelectorAll(".sbag-box button.primary")].pop().textContent })`);
+  ok(spent.err === "That code didn't work: it was already used, has expired or was mistyped. Ask your agent for a new link." && !/reach apps/.test(spent.err) && spent.field === "" && spent.btn === "Connect", `a spent code: said as spent, never the local-network advice; the field emptied, Connect again (${JSON.stringify(spent)})`);
 } finally {
   try { py.kill(); } catch {}
   try { chrome.kill(); } catch {}

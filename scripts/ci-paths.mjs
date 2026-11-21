@@ -33,6 +33,14 @@ function hasCommit(commit) {
 // select nothing)
 function changedFiles() {
   if (event === "workflow_dispatch" || event === "schedule") return [];
+  if (event === "merge_group") {
+    const ev = JSON.parse(readFileSync(process.env.GITHUB_EVENT_PATH, "utf8"));
+    const { base_sha: base, head_sha: groupHead } = ev.merge_group ?? {};
+    if (!/^[0-9a-f]{40}$/.test(base ?? "") || !/^[0-9a-f]{40}$/.test(groupHead ?? "") || base === groupHead || git("rev-parse", head) !== groupHead)
+      throw new Error("merge_group needs its exact base_sha and checked-out head_sha");
+    git("merge-base", "--is-ancestor", base, groupHead);
+    return git("diff", "--name-only", "--no-renames", base, groupHead).split("\n").filter(Boolean);
+  }
   if (event === "pull_request") {
     const base = `origin/${process.env.GITHUB_BASE_REF}`;
     const mergeBase = git("merge-base", base, head);
@@ -149,7 +157,8 @@ const fullTier = event === "pull_request" &&
   (labels.includes("full-ci") || matches(fullTierPaths) || fullOnlyJobs.some((job) => suiteJobs.has(job)));
 const integrationPush = event === "push" &&
   (ref === "refs/heads/master" || ref.startsWith("refs/heads/track/"));
-const full = event === "workflow_dispatch" || event === "schedule" ||
+// Queue payloads carry no PR labels: a merge group runs the full tier, including every full-ci request.
+const full = event === "merge_group" || event === "workflow_dispatch" || event === "schedule" ||
   integrationPush || fullTier;
 // The long tier (the test audit's option (a), decided Nov 17 2026): the second, slower passes of suites the full tier
 // already runs once (the engine's full passes off master and engine-building pull requests, mpmath's Python backend,
@@ -290,7 +299,7 @@ const engineSmoke = full || workflowOrBuild || engineChange || fallback;
 // (scripts/pin-policy.mjs), so the published modules its pins name may not be its engine)
 const wasmBuild = event !== "pull_request" || fallback || onTrack(runRefs(process.env)) || files.some((file) => wasmBuildPaths.some((p) => p.test(file)));
 const engineCpython = full || workflowOrBuild || matches(cpythonPaths) || fallback;
-const webkit = event === "workflow_dispatch" || event === "schedule" ||
+const webkit = event === "merge_group" || event === "workflow_dispatch" || event === "schedule" ||
   (event === "pull_request" && (fullTier || matches(webkitPaths) || fallback));
 // The limits census (test/limit_sites.py --check, also asserted by
 // test/limits.test.ts) scans lib/, engine/ and src/.  Its own light job runs
@@ -330,7 +339,7 @@ const unsafeSweep = full || matches(unsafeSweepPaths);
 // changes, the full tier and a pull request touching the engine's runtime, src/runtime/); a pull request's passes only
 // where it runs (the CPython package's own Python sets wasm_build, but builds no engine engine-wasm would test).
 const engineRuntime = full || matches([/^src\/runtime\//]);
-const engineFull = long || integrationPush || (event === "pull_request" && wasmBuild && (engineSmoke || engineRuntime));
+const engineFull = event === "merge_group" || long || integrationPush || (event === "pull_request" && wasmBuild && (engineSmoke || engineRuntime));
 
 // The web jobs by area (CI speed plan option 7): a pull request whose web changes are all inside one area's
 // directories runs that area's suites, not every web job.  Anything else under web/ (web/index.html, the build, the

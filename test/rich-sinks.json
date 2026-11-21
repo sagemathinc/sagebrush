@@ -171,7 +171,7 @@
    "kind": "host",
    "owner": "host"
   },
-  "web/workspace/agent-chat/view.ts :: turnNode :: div.innerHTML = `<div class=\"who\"><span class=\"avatar\">✳</span>${esc(turn.agent ?? \"Claude\")} ${tag}</div>${parts.join(\"\")}${status}`; #0": {
+  "web/workspace/agent-chat/view.ts :: turnNode :: div.innerHTML = `<div class=\"who\"><span class=\"avatar\">✳</span>${esc(turn.agent ?? \"Claude\")} ${tag}</div>${info ? `<div class=\"who-info\">${esc(info)}</div>` : \"\"}${parts.join(\"\")}${status}`; #0": {
    "kind": "host",
    "owner": "host"
   },
