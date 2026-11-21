@@ -69,6 +69,7 @@ fn requests() -> Vec<Value> {
         json!({"fn": "poly_divexact", "a": [-1, 0, 1], "b": [1, 1]}),
         json!({"fn": "newspace", "n": 11, "k": 2}),
         json!({"fn": "newforms", "n": 11, "k": 2, "bound": 10}),
+        json!({"fn": "cusp_hecke_matrix", "n": 11, "k": 2, "q": 2, "prec": 4}),
         json!({"fn": "ap", "a": [0, -1, 1, -10, -20], "p": 5}),
         json!({"fn": "aplist", "a": [0, -1, 1, -10, -20], "n": 30}),
         json!({"fn": "ec_point_search", "b": ["-4", "-40", "-79"], "rmax": 10, "smax": 4}),

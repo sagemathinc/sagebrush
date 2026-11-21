@@ -845,14 +845,14 @@
   },
   "engine/lib/sage.pre": {
    "exact": false,
-   "ceiling": 13897127,
+   "ceiling": 13915220,
    "noise_bytes": 0,
    "noise_total": 0,
    "marker_slack": 1024
   },
   "engine/lib/sage.src": {
    "exact": false,
-   "ceiling": 2980789,
+   "ceiling": 2984277,
    "noise_bytes": 0,
    "noise_total": 0,
    "marker_slack": 1024
@@ -908,7 +908,7 @@
   },
   "engine/sagebrush-engine.wasm": {
    "exact": false,
-   "ceiling": 8015465,
+   "ceiling": 8125271,
    "noise_bytes": 0,
    "noise_total": 0,
    "marker_slack": 1024

@@ -1280,6 +1280,48 @@ def _rref_exact(rows):
     return [[_Fr(x) for x in R[i]] for i in range(len(piv))]
 
 
+# The primes the engine's cusp_hecke_matrix takes (its domain: below 2^30);
+# for a larger prime factor of n, hecke_matrix takes the q-expansion route.
+_CUSP_HECKE_PRIME_BELOW = 2 ** 30
+
+
+def _cusp_hecke(N, k, n, s, new_only):
+    """T_n on S_k(Gamma0(N)) (or its new subspace) in its reduced echelon
+    basis, as an integer matrix B over a denominator: the engine's T_p for
+    each prime p | n (twisted traces, sagebrush.mf.cusp_hecke_matrix, at
+    precision s), then T_(p^r) by T_(p^(r+1)) = T_p T_(p^r) - p^(k-1)
+    T_(p^(r-1)) (U_p^r for p | N) and the product over the primes, the
+    products of integer matrices in the engine (zmat, metered)."""
+    from sagebrush.linalg import matmul
+    from sage_all import ZZ
+    d = None
+    out, out_den = None, 1
+    for p, r in ZZ(n).factor():
+        p, r = int(p), int(r)
+        h = _mf.cusp_hecke_matrix(N, k, p, s, new_only=new_only)
+        a, den = h["matrix"], h["den"]
+        d = h["dim"]
+        if d == 0:
+            return [], 1
+        # B_j / den^j = T_(p^j)
+        prev, cur = [[int(i == j) for j in range(d)] for i in range(d)], a
+        for _ in range(r - 1):
+            nxt = matmul(a, cur)
+            if N % p != 0:
+                c = p ** (k - 1) * den * den
+                nxt = [[x - c * y for x, y in zip(rx, ry)] for rx, ry in zip(nxt, prev)]
+            prev, cur = cur, nxt
+        if out is None:
+            out, out_den = cur, den ** r
+        else:
+            out, out_den = matmul(out, cur), out_den * den ** r
+    if out is None:
+        # (n = 1: the identity)
+        d = _part_dim(N, k, "cusp_new" if new_only else "cusp")
+        return [[int(i == j) for j in range(d)] for i in range(d)], 1
+    return out, out_den
+
+
 def _solve_rows(B, V):
     """X with X B = V exactly (B: independent rows), so X[j] are the
     coordinates of V[j] in B; ValueError if a row of V is not in B's span."""
@@ -1895,6 +1937,24 @@ class _QSpace:
         n = int(ZZ(n))
         if n < 1:
             raise ValueError("n must be positive")
+        A = self._amb()
+        s = self.sturm_bound() + 2
+        parts = self._parts()
+        if parts in (["cusp"], ["cusp_new"]) and all(int(p) < _CUSP_HECKE_PRIME_BELOW for p, _ in ZZ(n).factor()):
+            # (the cusp forms, or the new ones: T_n from the engine's twisted
+            # traces, to precision s whatever n; a prime of n past the
+            # engine's domain takes the q-expansion route below instead, a
+            # route choice, so no T_n is refused)
+            self._check_trivial()
+            B, den = _cusp_hecke(A._N, A._k, n, s, parts == ["cusp_new"])
+            d = len(B)
+            return matrix(QQ, d, d, [QQ(x) / den for r in B for x in r])
+        return self._hecke_matrix_qexp(n)
+
+    def _hecke_matrix_qexp(self, n):
+        # T_n from the basis's q-expansions to (s - 1) n + 1 (the Eisenstein
+        # parts, and the cusp forms' check in the tests)
+        from sage_all import QQ, matrix
         A = self._amb()
         s = self.sturm_bound() + 2
         rows = self._qrows((s - 1) * n + 1)

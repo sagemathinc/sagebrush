@@ -64,3 +64,16 @@ def estimate(n, k=2, bound=100):
     'seconds_high' (the 10%-90% range of the actual time), 'bytes',
     'dim_new', 'levels', 'primes', 'trace_primes', ...}.  Trivial character."""
     return call("estimate_newforms", n=int(n), k=int(k), bound=int(bound))
+
+
+def cusp_hecke_matrix(n, k, q, prec, new_only=False, factor=None, threads=0):
+    """T_q (q prime) on S_k(Gamma0(n)), or its new subspace, in the reduced
+    echelon q-expansion basis: "dim", "pivots", "basis" (rows a_0..a_(prec-1))
+    and "matrix" (rows: the images of the basis elements), both integer rows
+    over the denominator "den".  prec must exceed the Sturm bound."""
+    d = dict(call("cusp_hecke_matrix", n=int(n), k=int(k), q=int(q), prec=int(prec), new_only=bool(new_only)))
+    d["basis"] = [[int(x) for x in r] for r in d["basis"]]
+    d["matrix"] = [[int(x) for x in r] for r in d["matrix"]]
+    d["den"] = int(d["den"])
+    d["pivots"] = [int(j) for j in d["pivots"]]
+    return d

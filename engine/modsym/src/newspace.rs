@@ -29,8 +29,10 @@ use crate::exact::{factor, is_prime};
 use crate::general::{mul, powmod, primes_one_mod, root_of_unity, Character, GeneralSpace};
 use crate::general_exact::{crt, embedding_bounds};
 use crate::orbits::Factorer;
+use crate::count;
 use crate::p1::gcd;
 use crate::par;
+use sagebrush_arith::cost::{Family, Units};
 use sagebrush_bigint::{BigInt, BigUint};
 use num_traits::{One, Zero};
 
@@ -63,35 +65,56 @@ pub(crate) fn trim(mut f: Vec<u64>) -> Vec<u64> {
 }
 
 pub(crate) fn pmul(a: &[u64], b: &[u64], p: u64) -> Vec<u64> {
+    pmul_c(a, b, p, &mut Units::default())
+}
+
+/// pmul, counting its units (crate::count): two ModArith per term.
+pub(crate) fn pmul_c(a: &[u64], b: &[u64], p: u64, u: &mut Units) -> Vec<u64> {
     let mut out = vec![0u64; a.len() + b.len() - 1];
+    let mut terms = 0u64;
     for (i, &x) in a.iter().enumerate() {
         if x != 0 {
             for (j, &y) in b.iter().enumerate() {
                 out[i + j] = (out[i + j] + mul(x, y, p)) % p;
             }
+            terms += b.len() as u64;
         }
     }
+    count::n(u, Family::ModArith, 2 * terms);
     trim(out)
 }
 
 /// (quotient, remainder) of a by b (b nonzero).
 pub(crate) fn pdivrem(a: &[u64], b: &[u64], p: u64) -> (Vec<u64>, Vec<u64>) {
+    pdivrem_c(a, b, p, &mut Units::default())
+}
+
+/// pdivrem, counting its units (crate::count): the copy of a (Move), the
+/// inverse, and per quotient term one product and two ModArith per term of
+/// b.
+pub(crate) fn pdivrem_c(a: &[u64], b: &[u64], p: u64, u: &mut Units) -> (Vec<u64>, Vec<u64>) {
     let mut r = a.to_vec();
+    count::n(u, Family::Move, a.len() as u64);
     let db = b.len() - 1;
     if a.len() < b.len() {
         return (vec![0], trim(r));
     }
     let inv = powmod(b[db], p - 2, p);
+    count::pow(u, p - 2);
     let mut q = vec![0u64; a.len() - db];
+    let mut ops = 0u64;
     for i in (0..q.len()).rev() {
         let c = mul(r[i + db], inv, p);
         q[i] = c;
+        ops += 1;
         if c != 0 {
             for (t, &bt) in b.iter().enumerate() {
                 r[i + t] = (r[i + t] + p - mul(c, bt, p)) % p;
             }
+            ops += 2 * b.len() as u64;
         }
     }
+    count::n(u, Family::ModArith, ops);
     r.truncate(db.max(1));
     (trim(q), trim(r))
 }
@@ -102,16 +125,25 @@ pub(crate) fn monic(f: Vec<u64>, p: u64) -> Vec<u64> {
 }
 
 pub(crate) fn pgcd(a: &[u64], b: &[u64], p: u64) -> Vec<u64> {
+    pgcd_c(a, b, p, &mut Units::default())
+}
+
+/// pgcd, counting its units (crate::count): the copies, the divisions and
+/// the final scaling.
+pub(crate) fn pgcd_c(a: &[u64], b: &[u64], p: u64, u: &mut Units) -> Vec<u64> {
     let (mut a, mut b) = (trim(a.to_vec()), trim(b.to_vec()));
+    count::n(u, Family::Move, (a.len() + b.len()) as u64);
     while !(b.len() == 1 && b[0] == 0) {
-        let r = pdivrem(&a, &b, p).1;
+        let r = pdivrem_c(&a, &b, p, u).1;
         a = b;
         b = r;
     }
+    count::pow(u, p - 2);
+    count::n(u, Family::ModArith, a.len() as u64);
     monic(a, p)
 }
 
-fn deriv(f: &[u64], p: u64) -> Vec<u64> {
+pub(crate) fn deriv(f: &[u64], p: u64) -> Vec<u64> {
     if f.len() == 1 {
         return vec![0];
     }
@@ -197,9 +229,70 @@ pub(crate) fn levels(n: u64, k: usize, eps: &Character, units: &[u64], qs: &[u64
     Ok(out)
 }
 
-/// g_new(N) mod ell for the embedding with zeta_ord = zm, or None if ell is
-/// bad for this embedding (a degree or divisibility check failed).
-pub(crate) fn new_poly_mod(levels: &[Level], k: usize, ops: &[(u64, i64)], ell: u64, z_e: u64, e_top: u64, jdx: usize, j: u64, dims_plus: &[usize]) -> Result<Option<(Vec<u64>, bool)>, String> {
+/// zeta_ex^a mod ell, from z_e of order e_top: z_e^(a e_top / ex).  e_top
+/// need not be a multiple of ex, only of the order of zeta_ex^a (the
+/// Eisenstein characters of the trivial character have orders dividing
+/// eisenstein_exponent); otherwise an internal error.
+fn root_pow(z_e: u64, e_top: u64, ex: u64, a: u64, ell: u64) -> Result<u64, String> {
+    let num = u128::from(a) * u128::from(e_top);
+    if num % u128::from(ex) != 0 {
+        return Err(format!("internal error: a root of unity of order {} does not give zeta_{}^{}", e_top, ex, a));
+    }
+    Ok(powmod(z_e, ((num / u128::from(ex)) % u128::from(e_top.max(1))) as u64, ell))
+}
+
+/// The order of the roots of unity the Eisenstein eigenvalues of
+/// M_k(Gamma0(M)), M | n, take: for the trivial character the series are
+/// E(psi, psi^-1) with cond(psi)^2 | M, so psi is a character mod c, c^2 the
+/// largest square dividing n, and its order divides the exponent of (Z/c)^*.
+/// So phi(e) < c <= sqrt(n), and e = 1 for squarefree n.
+pub fn eisenstein_exponent(n: u64) -> u64 {
+    let c = crate::exact::factor(n).iter().fold(1u64, |acc, &(p, e)| acc * p.pow(e / 2));
+    crate::dirichlet::DirichletGroup::new(c).exponent.max(1)
+}
+
+/// Why a prime ell is set aside: a check mod ell that holds over Q failed.
+/// Each is ell dividing a fixed nonzero integer of the space, so only
+/// finitely many primes are ever set aside.
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Hash)]
+pub enum Reject {
+    /// The modular symbols space mod ell has the wrong dimension at some
+    /// level M | N: ell divides the torsion of the integral Manin-symbol
+    /// relations there.
+    Dimension,
+    /// Removing the Eisenstein eigenvalues or the old parts leaves the
+    /// wrong degree, or a new eigenvalue meets an old or Eisenstein one:
+    /// ell divides a resultant of the cuspidal charpoly with the
+    /// Eisenstein or old factors.
+    Degree,
+    /// An orbit's polynomial meets the new part in the wrong degree, is not
+    /// squarefree, or is not separated from its cofactor: ell divides a
+    /// discriminant or resultant of the new part's factorization.
+    Separation,
+    /// The twisted traces' selection minor vanishes mod ell: ell divides
+    /// that minor over Q, a nonzero integer.
+    Minor,
+}
+
+impl Reject {
+    /// Every reason, in the order of the statistics' counters.
+    pub const ALL: [Reject; 4] = [Reject::Dimension, Reject::Degree, Reject::Separation, Reject::Minor];
+
+    /// The reason's name in the statistics.
+    pub fn name(self) -> &'static str {
+        match self {
+            Reject::Dimension => "dimension",
+            Reject::Degree => "degree",
+            Reject::Separation => "separation",
+            Reject::Minor => "minor",
+        }
+    }
+}
+
+/// g_new(N) mod ell for the embedding with zeta_ord = zm (and whether the
+/// new eigenvalues are separated from the old and Eisenstein ones), or why
+/// ell is bad for this embedding (Dimension or Degree).
+pub(crate) fn new_poly_mod(levels: &[Level], k: usize, ops: &[(u64, i64)], ell: u64, z_e: u64, e_top: u64, jdx: usize, j: u64, dims_plus: &[usize]) -> Result<Result<(Vec<u64>, bool), Reject>, String> {
     let mut news: Vec<Vec<u64>> = vec![];
     let mut full = vec![];
     for (li, lv) in levels.iter().enumerate() {
@@ -207,18 +300,18 @@ pub(crate) fn new_poly_mod(levels: &[Level], k: usize, ops: &[(u64, i64)], ell: 
         let zm = powmod(z_e, e_top / ord * j, ell);
         let sp = GeneralSpace::new_mod(lv.m, k, &lv.eps, 1, ell, zm)?;
         if sp.dimension() != dims_plus[li] {
-            return Ok(None);
+            return Ok(Err(Reject::Dimension));
         }
         let mut f = sp.hecke_combo_charpoly(ops)?;
         full = f.clone();
         // Eisenstein eigenvalues of T for eps^j.
-        let ze = powmod(z_e, e_top / lv.group.exponent.max(1), ell);
+        let ex = lv.group.exponent.max(1);
         let mut e = vec![1u64];
         for (psi, phi) in &lv.eis[jdx] {
             let mut lam = 0u64;
             for (i, &(q, r)) in ops.iter().enumerate() {
                 let qk = powmod(q, k as u64 - 1, ell);
-                let a = (powmod(ze, psi[i], ell) + mul(powmod(ze, phi[i], ell), qk, ell)) % ell;
+                let a = (root_pow(z_e, e_top, ex, psi[i], ell)? + mul(root_pow(z_e, e_top, ex, phi[i], ell)?, qk, ell)) % ell;
                 lam = (lam + mul(a, r.rem_euclid(ell as i64) as u64, ell)) % ell;
             }
             e = pmul(&e, &[(ell - lam) % ell, 1], ell);
@@ -232,19 +325,19 @@ pub(crate) fn new_poly_mod(levels: &[Level], k: usize, ops: &[(u64, i64)], ell: 
             f = pdivrem(&f, &g, ell).0;
         }
         if deg(&f) != lv.dim_s {
-            return Ok(None);
+            return Ok(Err(Reject::Degree));
         }
         for &(i, s) in &lv.below {
             for _ in 0..s {
                 let (q, r) = pdivrem(&f, &news[i], ell);
                 if !(r.len() == 1 && r[0] == 0) {
-                    return Ok(None);
+                    return Ok(Err(Reject::Degree));
                 }
                 f = q;
             }
         }
         if deg(&f) != lv.dim_new {
-            return Ok(None);
+            return Ok(Err(Reject::Degree));
         }
         news.push(f);
     }
@@ -253,7 +346,7 @@ pub(crate) fn new_poly_mod(levels: &[Level], k: usize, ops: &[(u64, i64)], ell: 
     let g = news.pop().unwrap();
     let cof = pdivrem(&full, &g, ell).0;
     let separated = deg(&pgcd(&g, &cof, ell)) == 0;
-    Ok(Some((g, separated)))
+    Ok(Ok((g, separated)))
 }
 
 /// Primes not dividing N: the two smallest plus the least further primes
@@ -393,11 +486,11 @@ pub fn newspace_orbits(n: u64, k: usize, eps: &Character, factor_fn: Factorer) -
         let mut separated = true;
         for p in parts {
             match p? {
-                Some((g, s)) => {
+                Ok((g, s)) => {
                     h = pmul(&h, &g, ell);
                     separated &= s;
                 }
-                None => return Ok(None),
+                Err(_) => return Ok(None),
             }
         }
         Ok(Some((h, separated)))
