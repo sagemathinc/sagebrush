@@ -34,6 +34,8 @@ export type EditorOpts = {
   // the code items' saved results (`sagebrush latex run`'s file, page.ts): the same object is sent with every request;
   // the host fills it and calls request(); the worker checks its wrapper version, the renderer each result
   sage?: { wrapper: string | null; saved: unknown[] };
+  /** The page can run the document's code (Run): a code item not run yet says how */
+  run?: boolean;
   onEdit?(): void;                // after each edit by the person (not setText), once the request for it is made
 };
 
@@ -106,7 +108,7 @@ export function createEditor(o: EditorOpts) {
     mark("tex-request", { rev: t.rev });
     const inputs = o.inputs && o.inputs.version !== inputsSent ? { docPath: o.inputs.docPath, known: [...o.inputs.known], version: o.inputs.version } : undefined;
     if (o.inputs) inputsSent = o.inputs.version;
-    worker.postMessage({ doc: t.doc, rev: t.rev, text: src.value, images, ...(inputs ? { inputs } : {}), ...(o.sage?.saved.length ? { sage: { wrapper: o.sage.wrapper, saved: o.sage.saved } } : {}) });
+    worker.postMessage({ doc: t.doc, rev: t.rev, text: src.value, images, ...(inputs ? { inputs } : {}), ...(o.sage?.saved.length ? { sage: { wrapper: o.sage.wrapper, saved: o.sage.saved } } : {}), ...(o.run ? { run: 1 } : {}) });
   };
   // (the latest current reply's check data, check.ts, and the source it is of: latex_check's, agent-tools.ts)
   let lastCheck: { text: string; rev: number; check: any } | null = null;

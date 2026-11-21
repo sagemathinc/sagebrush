@@ -76,6 +76,11 @@ let runMod: Promise<typeof import("./run-core.mjs")> | null = null, runTries = 0
 //  /sagebrush-latex-interact.js, fetched only once a preview or a Run has one; a failed fetch is tried again by a URL of
 //  its own)
 const interactUrl = new URL("sagebrush-latex-interact.js", import.meta.url).href;
+// (the preview's code blocks coloured: hl.ts, its own chunk, /sagebrush-latex-hl.js, fetched once a preview has one;
+//  one import for the page; not fetched, the code stays plain: a failed import isn't tried again, as the browser keeps
+//  it for its URL)
+const hlUrl = new URL("sagebrush-latex-hl.js", import.meta.url).href;
+let hlMod: Promise<typeof import("./hl") | null> | null = null;
 // (where you were in the file: view.ts, its own chunk, /sagebrush-latex-view.js (design/view-state.md))
 const viewUrl = new URL("sagebrush-latex-view.js", import.meta.url).href;
 let interactMod: Promise<typeof import("./interact")> | null = null, interactTries = 0;
@@ -85,10 +90,11 @@ let runGen = 0;
 // (a failed fetch is forgotten, so the next try fetches again, by a URL of its own: a browser may keep a failed
 // module's result for its URL; each caller says the failure)
 // (an agent this tab had before its reload: its reload record (agent-pair.ts's RELOAD_KEY), resumed by the pairing module)
-// (only on a reload of this tab: after any other navigation the record is dropped here, unread, as the pairing module
-//  would discard it (reloadDecision), and nothing is fetched for it; a page in a frame (the Agents page's .tex pane) leaves
-//  the record alone: it shares the tab's sessionStorage, and the record is the top page's)
-const reloadRecorded = () => { try { if (window.top !== window || sessionStorage.getItem("sb-agent-reload-v1") === null) return false; if ((performance.getEntriesByType("navigation")[0] as PerformanceNavigationTiming | undefined)?.type === "reload") return true; sessionStorage.removeItem("sb-agent-reload-v1"); return false; } catch { return false; } };
+// (another page's record (the Agents page's, kept while the person is on Files or here): left alone, unread past its
+//  page, for that page to take when they go back to it (A5); this page's own, on a reload or a navigation back: the
+//  pairing module decides (reloadDecision: fresh, the same scope); anything else is dropped here; a page in a frame (the
+//  Agents page's .tex pane) leaves the record alone: it shares the tab's sessionStorage, and the record is the top page's)
+const reloadRecorded = () => { try { if (window.top !== window) return false; const raw = sessionStorage.getItem("sb-agent-reload-v1"); if (raw === null) return false; let page: unknown = null; try { page = JSON.parse(raw)?.page ?? null; } catch {} if (typeof page === "string" && page !== location.origin + location.pathname) return false; const nav = (performance.getEntriesByType("navigation")[0] as PerformanceNavigationTiming | undefined)?.type; if (nav === "reload" || (typeof page === "string" && (nav === "navigate" || nav === "back_forward"))) return true; sessionStorage.removeItem("sb-agent-reload-v1"); return false; } catch { return false; } };
 // (decided once, at load, before anything else is looked at: a ?pair= link or the desktop app never skips the drop)
 const reloadNow = reloadRecorded();
 let agentPairing: Promise<{ connect(): unknown }> | null = null, agentTries = 0;
@@ -774,7 +780,7 @@ export async function mount(root: HTMLElement, host: Host): Promise<void> {
   });
   life.signal.addEventListener("abort", () => unwatchInputs());
   const E = createEditor({
-    left, right, preview, text: opened.text, large: read.content.length > 2 ** 20, say, images, sage: results,
+    left, right, preview, text: opened.text, large: read.content.length > 2 ** 20, say, images, sage: results, run: !!host.sandbox,
     workerUrl: new URL("sagebrush-latex-worker.js", location.href),
     onImageRefs: (refs, tok) => void resolveImages(refs, tok),
     inputs, onInputRefs: (refs, tok) => void readInputs(refs, tok),
@@ -878,6 +884,10 @@ export async function mount(root: HTMLElement, host: Host): Promise<void> {
     if (running) presenting.running(true);
   }, () => say("Couldn't load the presenter. Check the network, then click Present to try again."));
   E.onRendered(() => { presentBtn.hidden = slidesNow().length === 0; });
+  // (one wait for the chunk per page at most: renders while it comes add none, and once it comes the preview as it is
+  //  then is coloured; astra's SEC on #1009)
+  let hlWait = false;
+  E.onRendered(() => { if (!hlWait && preview.querySelector("pre.sageblock:not([data-hl])")) { hlWait = true; (hlMod ??= import(hlUrl).catch(() => null)).then((m) => { hlWait = false; if (m && live()) m.colour(preview, life.signal); }); } });
   // (the preview's interacts, drawn after each render that has one not drawn yet; the slide being presented shown again,
   //  so its copy has them)
   E.onRendered(() => {

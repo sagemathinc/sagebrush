@@ -5339,10 +5339,11 @@ const agentFailed = () => { statusEl.textContent = "Couldn't load the agent conn
 const agentHere = !LOCAL && !window.__TAURI__;
 // (a ?pair= link, an agent this tab had before its reload (its reload record, agent-pair.ts's RELOAD_KEY), or an agent this
 // browser remembers: the chunk mounted now, to connect or reconnect)
-// (only on a reload of this tab: after any other navigation the record is dropped here, unread, as the pairing module
-//  would discard it (reloadDecision), and nothing is fetched for it; a page in a frame (the Agents page's .tex pane) leaves
-//  the record alone: it shares the tab's sessionStorage, and the record is the top page's)
-const reloadRecorded = () => { try { if (window.top !== window || sessionStorage.getItem("sb-agent-reload-v1") === null) return false; if (performance.getEntriesByType("navigation")[0]?.type === "reload") return true; sessionStorage.removeItem("sb-agent-reload-v1"); return false; } catch { return false; } };
+// (another page's record (the Agents page's, kept while the person is on Files or here): left alone, unread past its
+//  page, for that page to take when they go back to it (A5); this page's own, on a reload or a navigation back: the
+//  pairing module decides (reloadDecision: fresh, the same scope); anything else is dropped here; a page in a frame (the
+//  Agents page's .tex pane) leaves the record alone: it shares the tab's sessionStorage, and the record is the top page's)
+const reloadRecorded = () => { try { if (window.top !== window) return false; const raw = sessionStorage.getItem("sb-agent-reload-v1"); if (raw === null) return false; let page = null; try { page = JSON.parse(raw)?.page ?? null; } catch {} if (typeof page === "string" && page !== location.origin + location.pathname) return false; const nav = (performance.getEntriesByType("navigation")[0])?.type; if (nav === "reload" || (typeof page === "string" && (nav === "navigate" || nav === "back_forward"))) return true; sessionStorage.removeItem("sb-agent-reload-v1"); return false; } catch { return false; } };
 // (decided once, at load, before anything else is looked at: a ?pair= link or another way in never skips the drop)
 const reloadNow = reloadRecorded();
 const restoreAgent = (w, failed) => {

@@ -429,7 +429,8 @@ try {
   ok(!!(await make("Reloaded first", [RELOAD])).ok && await until(`window.__held === "/Reloaded first.ipynb"`, 15000), "(another, held before its run, then the page reloads)");
   const RELOADED = true;
 
-  // a grant "until the page closes" ends with the page
+  // a grant "until the page closes": the page left and came back to (a navigation back, within 10 minutes) reconnects
+  // by itself (A5 item 2, ruled Nov 20 2026; it used to end with the page)
   ok(await go(""), "the page again");
   if (RELOADED) {
     // (directly: after the reload, no creation was announced to this page at all, whatever the grant)
@@ -439,7 +440,7 @@ try {
     ok(!(await ev(outOf(RELOAD))).includes("reloaded ran") && await ev(nOf(RELOAD)) === null, "nothing replays after a reload: it never ran");
   }
   const st = await drive({ op: "status" });
-  ok(st.ok?.paired === false || st.ok?.granted === false, "the grant ended with the page", st);
+  ok(st.ok?.paired === true && st.ok?.granted === true, "the page came back to within 10 minutes: the agent reconnected, its grant given again (A5)", st);
 
   // a reload of the same tab keeps the agent (decided Nov 19 2026): its reload record resumes the pairing, with no new
   // Allow, while the grant lasts, and the agent's next call works; a navigation to the page (above) doesn't
