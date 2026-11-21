@@ -112,8 +112,24 @@ export function readNotebook(text: string): { nb: any; mode: Mode; seed: string;
   return { nb, mode: modeOf(nb.metadata), seed: newSeed ? randomBytes(32).toString("hex") : given, newSeed, cells };
 }
 
-/** The `notebook run` command; returns the exit code. */
+/** The `notebook run` command; returns the exit code.  With --until-stdin-ends it ends the process itself once its
+ * report is out: the held-open input would keep a Deno process alive (its stdin isn't released by unref). */
 export async function notebookRun(argv: string[]): Promise<number> {
+  const life = { held: false };
+  const code = await notebookRunInner(argv, life);
+  if (life.held) {
+    process.stdin.removeAllListeners("end");
+    process.stdin.removeAllListeners("close");
+    process.stdin.removeAllListeners("error");
+    process.stdin.destroy();
+    await new Promise<void>((r) => process.stdout.write("", () => r()));
+    await new Promise<void>((r) => process.stderr.write("", () => r()));
+    process.exit(code);
+  }
+  return code;
+}
+
+async function notebookRunInner(argv: string[], life: { held: boolean }): Promise<number> {
   if (argv.includes("-h") || argv.includes("--help")) { process.stdout.write(USAGE); return 0; }
   let file: string | null = null, json = false, write = false, timeout = 60, untilStdinEnds = false;
   const confine: string[] = [];
@@ -142,6 +158,7 @@ export async function notebookRun(argv: string[]): Promise<number> {
     process.stdin.on("data", () => {});
     process.stdin.resume();
     (process.stdin as any).unref?.();
+    life.held = true;
   }
 
   // (confined: the roots as real paths; the notebook itself is read and written only through the same check its

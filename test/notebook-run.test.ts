@@ -384,3 +384,46 @@ test("os.open's flags (Linux's numbers, as the os module names them) reach the h
   if (process.platform === "linux") for (const f of [0, 1, 2, 65, 193, 577, 1089, 2048, 65536, 131072]) assert.equal(hostOpenFlags(f, host), f, String(f));
   for (const bad of [4, 8, 0x40000000]) assert.throws(() => hostOpenFlags(bad, mac), (e: any) => e.code === "EINVAL", String(bad));
 });
+
+test("Deno, the runner's flags with --until-stdin-ends, its input held open: a run that completes exits 0 (notebook written), one that fails exits 1, and an endless one stops (exit 3) when the input ends", { skip: skipDeno }, async () => {
+  const { spawn } = require("node:child_process");
+  const root = folder(), work = join(root, "work"), runTmp = join(root, "tmp");
+  mkdirSync(work);
+  mkdirSync(runTmp);
+  writeFileSync(join(work, "ok.ipynb"), nb([{ id: "a", src: "print(42)" }]));
+  writeFileSync(join(work, "bad.ipynb"), nb([{ id: "a", src: "raise ValueError('no')" }]));
+  writeFileSync(join(work, "loop.ipynb"), nb([{ id: "a", src: "open('started.txt', 'w').write('x')\nwhile True:\n    pass" }]));
+  // (started as the agent starts it: standard input a pipe it holds open; the exit, or "held" if none within `ms`)
+  const kids: any[] = [];
+  const start = (file: string) => {
+    const c = spawn(deno!, [...denoArgs(work, runTmp, [file, "--json", "--write"]), "--until-stdin-ends"], { cwd: work, env: denoEnv(work, runTmp), stdio: ["pipe", "pipe", "pipe"] });
+    let stdout = "", stderr = "";
+    c.stdout.on("data", (b: Buffer) => (stdout += b));
+    c.stderr.on("data", (b: Buffer) => (stderr += b));
+    kids.push(c);
+    const exit = new Promise<number | null>((r) => c.on("close", (code: number | null) => r(code)));
+    const within = (ms: number) => Promise.race([exit, new Promise((r) => setTimeout(() => r("held"), ms))]);
+    return { c, exit, within, out: () => stdout, err: () => stderr };
+  };
+  try {
+    const ok = start("ok.ipynb");
+    assert.equal(await ok.within(60_000), 0, `completed: exits with its input still open (${ok.err().slice(-500)})`);
+    assert.equal(json({ stdout: ok.out() }).cells[0].stdout, "42\n");
+    assert.match(readFileSync(join(work, "ok.ipynb"), "utf8"), /"42\\n"/, "the notebook written");
+    ok.c.stdin.end();
+    const bad = start("bad.ipynb");
+    assert.equal(await bad.within(60_000), 1, `failed: exits 1 with its input still open (${bad.err().slice(-500)})`);
+    bad.c.stdin.end();
+    const loop = start("loop.ipynb");
+    const t = Date.now();
+    while (!existsSync(join(work, "started.txt")) && Date.now() - t < 60_000) await new Promise((r) => setTimeout(r, 50));
+    assert.equal(await loop.within(1000), "held", "an endless run goes on while its input is open");
+    loop.c.stdin.end();
+    assert.equal(await loop.within(10_000), 3);
+    assert.match(loop.err(), /standard input ended: stopped/);
+  } finally {
+    // (this row's own children only, if a failed assertion left one running)
+    for (const c of kids) { c.stdin.destroy(); if (c.exitCode === null && c.signalCode === null) c.kill("SIGKILL"); }
+    rmSync(root, { recursive: true, force: true });
+  }
+});
