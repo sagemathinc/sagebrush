@@ -130,7 +130,7 @@ fn route_one_is_exact_on_cyclic_inputs() {
     // (k = 1 at these: bench n = 12 v = 3, n = 24 v = 0; random 10, 16
     // (6 attempts) and 20 (the first attempt, r = 0))
     for a in [bench(12, 3), bench(24, 0), rand(10, 3), rand(16, 6), rand(20, 9)] {
-        let s = smith_form(&a);
+        let s = smith_form(&a).unwrap();
         assert_eq!(s.route, Route::Cyclic);
         assert!(s.attempts >= 1);
         assert_smith(&a, &s);
@@ -142,20 +142,20 @@ fn route_one_is_exact_on_cyclic_inputs() {
 fn route_one_edge_cases() {
     // n = 1, negative
     let a = z(&[&[-7]]);
-    let s = smith_form(&a);
+    let s = smith_form(&a).unwrap();
     assert_eq!((s.route, s.d.d.clone()), (Route::Cyclic, vec![BigInt::from(7)]));
     assert_smith(&a, &s);
     // unimodular (k = 0): D = I and U = a^-1
     let a = z(&[&[2, 3, 1], &[1, 2, 1], &[0, 0, 1]]);
     assert!(zmat::det(&a).abs().is_one());
-    let s = smith_form(&a);
+    let s = smith_form(&a).unwrap();
     assert_eq!(s.route, Route::Cyclic);
     assert_smith(&a, &s);
     assert_eq!(s.d.d, ZMat::identity(3).d);
     // k = 2 (bench n = 12 v = 0) and k = 3 (random 16): not this route,
     // still exact
     for a in [bench(12, 0), rand(16, 5)] {
-        let s = smith_form(&a);
+        let s = smith_form(&a).unwrap();
         assert_ne!(s.route, Route::Cyclic);
         assert_smith(&a, &s);
     }
@@ -164,7 +164,7 @@ fn route_one_edge_cases() {
 #[test]
 fn route_one_is_deterministic() {
     let a = rand(14, 7);
-    let (s, t) = (smith_form(&a), smith_form(&a));
+    let (s, t) = (smith_form(&a).unwrap(), smith_form(&a).unwrap());
     assert_eq!((s.u.d, s.v.d, s.attempts), (t.u.d, t.v.d, t.attempts));
 }
 
@@ -205,7 +205,7 @@ pub(crate) fn structured(s: &[i64], seed: u64) -> ZMat {
 fn route_two_is_exact() {
     // k = 2: bench n = 12 v = 0 and n = 24 v = 2; k = 3: random 16
     for a in [bench(12, 0), bench(24, 2), rand(16, 5)] {
-        let s = smith_form(&a);
+        let s = smith_form(&a).unwrap();
         assert_eq!(s.route, Route::Trailing);
         assert_smith(&a, &s);
         assert_eq!((0..a.rows).map(|i| s.d.get(i, i).clone()).collect::<Vec<_>>(), crate::snf::invariants_square(&a).unwrap());
@@ -216,7 +216,7 @@ fn route_two_is_exact() {
         (structured(&[1, 1, 2, 6, 12, 36], 3), vec![1, 1, 2, 6, 12, 36]),
         (structured(&[3, 3, 3, 3, 3], 5), vec![3, 3, 3, 3, 3]),
     ] {
-        let s = smith_form(&a);
+        let s = smith_form(&a).unwrap();
         assert_eq!(s.route, Route::Trailing);
         assert_smith(&a, &s);
         assert_eq!((0..a.rows).map(|i| s.d.get(i, i).clone()).collect::<Vec<_>>(), want.into_iter().map(BigInt::from).collect::<Vec<_>>());
@@ -227,7 +227,7 @@ fn route_two_is_exact() {
         let x = a.get(4, j) * &big;
         a.d[4 * a.cols + j] = x;
     }
-    let s = smith_form(&a);
+    let s = smith_form(&a).unwrap();
     assert_eq!(s.route, Route::Trailing);
     assert_smith(&a, &s);
     assert_eq!((0..a.rows).map(|i| s.d.get(i, i).clone()).collect::<Vec<_>>(), crate::snf::invariants_square(&a).unwrap());
@@ -238,7 +238,7 @@ fn route_two_is_exact() {
 fn more_than_k_max_takes_the_classical_route() {
     let s: Vec<i64> = (0..K_MAX + 1).map(|_| 2).collect();
     let a = structured(&s, 11);
-    let f = smith_form(&a);
+    let f = smith_form(&a).unwrap();
     assert_eq!(f.route, Route::Classical);
     assert_smith(&a, &f);
     assert!((0..a.rows).all(|i| f.d.get(i, i) == &BigInt::from(2)));
@@ -247,7 +247,7 @@ fn more_than_k_max_takes_the_classical_route() {
 #[test]
 fn route_two_is_deterministic() {
     let a = bench(12, 1);
-    let (s, t) = (smith_form(&a), smith_form(&a));
+    let (s, t) = (smith_form(&a).unwrap(), smith_form(&a).unwrap());
     assert_eq!((s.route, s.u.d, s.v.d, s.attempts), (t.route, t.u.d, t.v.d, t.attempts));
 }
 
@@ -259,7 +259,7 @@ fn route_two_is_deterministic() {
 #[test]
 fn route_one_ranges_grow_past_a_covered_box() {
     let a = z(&[&[3, 8], &[6, 1]]);
-    let s = smith_form(&a);
+    let s = smith_form(&a).unwrap();
     assert_eq!(s.route, Route::Cyclic);
     assert!(s.attempts >= 3, "attempts {}", s.attempts);
     assert_smith(&a, &s);
@@ -293,7 +293,7 @@ fn outputs_are_pinned() {
     let got: Vec<(Route, u64, u64)> = [bench(12, 3), bench(12, 0), z(&[&[3, 8], &[6, 1]]), z(&[&[1, 2, 3], &[2, 4, 6], &[1, 0, 1]])]
         .iter()
         .map(|a| {
-            let s = smith_form(a);
+            let s = smith_form(a).unwrap();
             (s.route, s.attempts, digest(&s))
         })
         .collect();

@@ -1602,7 +1602,7 @@ fn dispatch(v: &Value) -> Result<Value, String> {
             // D's, 8 bytes each at least, admitted by the memory ledger)
             let need = sagebrush_arith::smith::floor_bytes(a.rows, a.cols).ok_or("mat_smith_form: the transforms' size overflows")?;
             let _held = sagebrush_ledger::reserve("the Smith form's transforms", need).map_err(|e| e.to_string())?;
-            let s = sagebrush_arith::smith::smith_form(&a);
+            let s = sagebrush_arith::smith::smith_form(&a)?;
             let route = match s.route {
                 sagebrush_arith::smith::Route::Cyclic => "cyclic",
                 sagebrush_arith::smith::Route::Trailing => "trailing",

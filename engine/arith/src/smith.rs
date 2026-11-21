@@ -2,8 +2,15 @@
 //! V unimodular, D diagonal with the invariant factors t_1 | t_2 | ... in
 //! order (zeros last).
 //!
+//! Cost (policy r4): L is [`floor_bytes`] (admitted before anything is
+//! allocated); E is None, never 0 and never a partial figure: no
+//! estimate until the matrix operations' calibration wires one (when a
+//! cost() lands here it reports work_estimate = None until then); U is
+//! None (the classical elimination's entries grow without bound, and the
+//! routes' attempts are uncapped).
+//!
 //! Units (`cost::tally`), counted in a `cost::Local` after the work and
-//! flushed at the existing Stop checks: BigInt products through
+//! flushed at the Stop checks (coarse: an attempt or a pass each): BigInt products through
 //! `bigmul_units` (a product's accumulation into its row is part of its
 //! units), quotients and divisibility tests through `bigdiv_units`, the
 //! pivot search's absolute values, the swaps and negations as Move.
@@ -99,7 +106,7 @@ pub fn smith_classical(a: &ZMat) -> SmithForm {
     for t in 0..m.min(n) {
         loop {
             acc.flush();
-            sagebrush_interrupt::check();
+            sagebrush_interrupt::check_coarse();
             // the smallest nonzero entry at or after (t, t): absolute value,
             // then row, then column
             let mut best: Option<(BigInt, usize, usize)> = None;
@@ -272,7 +279,7 @@ impl Retry {
 /// integer rows of W and V through `bigmul_units` and `bigdiv_units`.
 // (the loops index several matrices by the same row and column at once)
 #[allow(clippy::needless_range_loop)]
-fn cyclic<R: Zn>(ring: &R, nm: &ZMat, delta: &BigInt, acc: &mut Local) -> Option<SmithForm> {
+fn cyclic<R: Zn>(ring: &R, nm: &ZMat, delta: &BigInt, acc: &mut Local) -> Result<SmithForm, String> {
     let n = nm.rows;
     let res: Vec<R::T> = nm.d.iter().map(|x| ring.residue(x)).collect();
     acc.add(ring.residue_units(nm));
@@ -282,7 +289,7 @@ fn cyclic<R: Zn>(ring: &R, nm: &ZMat, delta: &BigInt, acc: &mut Local) -> Option
     let mut attempt = 0u64;
     let (r, mu) = loop {
         acc.flush();
-        sagebrush_interrupt::check();
+        sagebrush_interrupt::check_coarse();
         let r: Vec<BigInt> = if attempt == 0 {
             vec![BigInt::zero(); n - 1]
         } else {
@@ -360,9 +367,9 @@ fn cyclic<R: Zn>(ring: &R, nm: &ZMat, delta: &BigInt, acc: &mut Local) -> Option
             div = div.saturating_add(bigdiv_units(limbs(&num), ld).get(Family::Div));
             let (q, rem) = num.div_rem(delta);
             if !rem.is_zero() {
-                // (impossible when y generates G: a guard, not a route)
-                debug_assert!(false, "W is integral");
-                return None;
+                // (impossible when y generates G: an internal error, never
+                // a silent change of route)
+                return Err(not_integral("route 1"));
             }
             w.d[i * n + j] = q;
         }
@@ -390,7 +397,7 @@ fn cyclic<R: Zn>(ring: &R, nm: &ZMat, delta: &BigInt, acc: &mut Local) -> Option
     v.d[n * n - 1] = rh;
     let mut d = ZMat::identity(n);
     d.d[n * n - 1] = delta.clone();
-    Some(SmithForm { d, u: w, v, route: Route::Cyclic, attempts: attempt })
+    Ok(SmithForm { d, u: w, v, route: Route::Cyclic, attempts: attempt })
 }
 
 /// Column operation on columns (r, j) of every row of `m`: (x_r, x_j) ->
@@ -450,7 +457,7 @@ fn row2<R: Zn>(ring: &R, m: &mut [Vec<R::T>], r: usize, i: usize, b: &(R::T, R::
 /// itself.
 // (the loops index several matrices by the same row and column at once)
 #[allow(clippy::needless_range_loop)]
-fn trailing<R: Zn>(ring: &R, nm: &ZMat, delta: &BigInt, d: &BigInt, k: usize, acc: &mut Local) -> Option<SmithForm> {
+fn trailing<R: Zn>(ring: &R, nm: &ZMat, delta: &BigInt, d: &BigInt, k: usize, acc: &mut Local) -> Result<SmithForm, String> {
     let n = nm.rows;
     let top = n - k;
     let res: Vec<R::T> = nm.d.iter().map(|x| ring.residue(x)).collect();
@@ -462,7 +469,7 @@ fn trailing<R: Zn>(ring: &R, nm: &ZMat, delta: &BigInt, d: &BigInt, k: usize, ac
     let mut attempt = 0u64;
     let (rr, p, q) = loop {
         acc.flush();
-        sagebrush_interrupt::check();
+        sagebrush_interrupt::check_coarse();
         let mut rr: Vec<Vec<BigInt>> = vec![vec![BigInt::zero(); top]; k];
         if attempt > 0 {
             for x in rr.iter_mut().flatten() {
@@ -784,9 +791,9 @@ fn trailing<R: Zn>(ring: &R, nm: &ZMat, delta: &BigInt, d: &BigInt, k: usize, ac
     acc.n(Family::MulSchool, mul);
     acc.n(Family::Div, div);
     if !exact {
-        // (impossible when Y generates G: a guard, not a route)
-        debug_assert!(false, "W is integral");
-        return None;
+        // (impossible when Y generates G: an internal error, never a silent
+        // change of route)
+        return Err(not_integral("route 2"));
     }
     // V = [[I, c V_2], [-R, (I - R c) V_2]]
     let v2 = &small.v;
@@ -836,7 +843,7 @@ fn trailing<R: Zn>(ring: &R, nm: &ZMat, delta: &BigInt, d: &BigInt, k: usize, ac
     for t in 0..k {
         d.d[(top + t) * n + top + t] = small.d.get(t, t).clone();
     }
-    Some(SmithForm { d, u: w, v, route: Route::Trailing, attempts: attempt })
+    Ok(SmithForm { d, u: w, v, route: Route::Trailing, attempts: attempt })
 }
 
 /// [`trailing`] with delta's ring (route 2 alone, from a^-1 = nm / delta
@@ -844,15 +851,26 @@ fn trailing<R: Zn>(ring: &R, nm: &ZMat, delta: &BigInt, d: &BigInt, k: usize, ac
 /// of nontrivial invariant factors: with a smaller k no attempt
 /// generates, and the uncapped attempts never end (Stop ends them).
 #[doc(hidden)]
-pub fn trailing_route(nm: &ZMat, delta: &BigInt, d: &BigInt, k: usize) -> Option<SmithForm> {
+pub fn trailing_route(nm: &ZMat, delta: &BigInt, d: &BigInt, k: usize) -> Result<SmithForm, String> {
     if k == 0 || k > nm.rows || nm.rows != nm.cols {
-        return None;
+        return Err("route 2 needs a square inverse and 1 <= k <= n".into());
     }
+    trailing_ring(nm, delta, d, k)
+}
+
+fn trailing_ring(nm: &ZMat, delta: &BigInt, d: &BigInt, k: usize) -> Result<SmithForm, String> {
     let mut acc = Local::new();
     match delta.to_u64() {
         Some(e) if e < WORD_E => trailing(&Word { e }, nm, delta, d, k, &mut acc),
         _ => trailing(&Big::new(delta), nm, delta, d, k, &mut acc),
     }
+}
+
+/// The internal error of a route whose W is not integral: impossible when
+/// the generation test passed (the route's construction proves it), so a
+/// bug, reported as one rather than taken as a reason to change routes.
+fn not_integral(route: &str) -> String {
+    format!("smith_form: internal error: {route}'s U is not integral (a proven invariant failed; please report it)")
 }
 
 /// A column operation of route 2's elimination, replayed on X.
@@ -868,10 +886,14 @@ enum ColOp<T> {
 /// [`cyclic`] with delta's ring: words below 2^62, BigInts above (route 1
 /// alone, from a^-1 = nm / delta: for the metering tests).
 #[doc(hidden)]
-pub fn cyclic_route(nm: &ZMat, delta: &BigInt) -> Option<SmithForm> {
+pub fn cyclic_route(nm: &ZMat, delta: &BigInt) -> Result<SmithForm, String> {
     if nm.rows == 0 || nm.rows != nm.cols {
-        return None;
+        return Err("route 1 needs a square, nonempty inverse".into());
     }
+    cyclic_ring(nm, delta)
+}
+
+fn cyclic_ring(nm: &ZMat, delta: &BigInt) -> Result<SmithForm, String> {
     let mut acc = Local::new();
     match delta.to_u64() {
         Some(e) if e < WORD_E => cyclic(&Word { e }, nm, delta, &mut acc),
@@ -883,33 +905,34 @@ pub fn cyclic_route(nm: &ZMat, delta: &BigInt) -> Option<SmithForm> {
 /// square and nonsingular with k <= 1 nontrivial invariant factors, route
 /// 2 when 2 <= k <= K_MAX (both from one exact inverse), else the
 /// classical elimination (by shape).
-pub fn smith_form(a: &ZMat) -> SmithForm {
+///
+/// An error only for an internal failure (a route's proven invariant not
+/// holding): a bug, never a property of the input.
+pub fn smith_form(a: &ZMat) -> Result<SmithForm, String> {
     smith_form_k(a, K_MAX)
 }
 
 /// [`smith_form`] with route 2's threshold given (for its measurement).
 #[doc(hidden)]
-pub fn smith_form_k(a: &ZMat, k_max: usize) -> SmithForm {
+pub fn smith_form_k(a: &ZMat, k_max: usize) -> Result<SmithForm, String> {
     if a.rows == a.cols && a.rows > 0 {
         if let Some((nm, den, det)) = crate::zmat::inverse_det(a) {
             if den == det.abs() {
-                if let Some(s) = cyclic_route(&nm, &den) {
-                    return s;
-                }
+                return cyclic_ring(&nm, &den);
             } else {
-                // (part A, its determinant known: the invariants from d and
-                // one solve)
-                let inv = crate::snf::invariants_nonsingular(a, &det.abs(), None);
+                // (part A, its determinant and inverse known: the invariants
+                // from d and the solve x = N b / delta that the inverse
+                // already holds, b the fixed right-hand side)
+                let b = crate::zmat::det_rhs(a.rows);
+                let inv = crate::snf::invariants_nonsingular(a, &det.abs(), Some((nm.mul(&b), den.clone())));
                 let k = inv.iter().filter(|x| !x.is_one()).count();
                 if k <= k_max {
-                    if let Some(s) = trailing_route(&nm, &den, &det.abs(), k) {
-                        return s;
-                    }
+                    return trailing_ring(&nm, &den, &det.abs(), k);
                 }
             }
         }
     }
-    smith_classical(a)
+    Ok(smith_classical(a))
 }
 
 /// L, the floor a Smith form with transforms of an m x n matrix needs

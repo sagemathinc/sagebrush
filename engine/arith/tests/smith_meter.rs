@@ -90,7 +90,7 @@ fn smith_units_and_stop_checks() {
     let rows: Vec<(&str, [u64; FAMILIES], u64)> = inputs
         .iter()
         .map(|(name, a, route)| {
-            let (u, c, s) = measure(|| smith::smith_form(a));
+            let (u, c, s) = measure(|| smith::smith_form(a).unwrap());
             assert_eq!(s.route, *route, "{name}");
             (*name, u, c)
         })
@@ -98,8 +98,8 @@ fn smith_units_and_stop_checks() {
     let pins: &[(&str, [u64; FAMILIES], u64)] = &[
         ("route 1, word delta", [44, 0, 2, 0, 2, 24, 55, 0, 0, 0], 3),
         ("route 1, big delta", [17580, 0, 4772, 0, 280, 3386, 5052, 0, 0, 0], 5),
-        ("route 2, word delta", [140, 0, 39, 0, 30, 121, 177, 0, 0, 0], 10),
-        ("route 2, big delta", [39004, 0, 37184, 0, 3564, 4130, 7121, 0, 0, 0], 52),
+        ("route 2, word delta", [149, 0, 39, 0, 30, 121, 177, 0, 0, 0], 10),
+        ("route 2, big delta", [34733, 0, 36000, 0, 1582, 3727, 6314, 0, 0, 0], 44),
         ("classical, singular", [111, 0, 11, 0, 0, 182, 119, 0, 0, 0], 3),
         ("classical, wide", [29, 0, 12, 0, 0, 55, 0, 0, 0, 0], 4),
     ];
@@ -139,22 +139,23 @@ fn smith_units_and_stop_checks() {
     // the leaf rule: smith_form is exactly the inverse and the route (route
     // 1), the inverse, part A and the route (route 2)
     for a in [&cyc_word, &cyc_big] {
-        let (whole, _, _) = measure(|| smith::smith_form(a));
+        let (whole, _, _) = measure(|| smith::smith_form(a).unwrap());
         let (inv, _, r) = measure(|| zmat::inverse_det(a).unwrap());
         let (route, _, _) = measure(|| smith::cyclic_route(&r.0, &r.1));
         assert_eq!(whole, sum(&inv, &route), "smith_form = inverse_det + route 1");
     }
     for a in [&tr_word, &tr_big] {
-        let (whole, _, _) = measure(|| smith::smith_form(a));
+        let (whole, _, _) = measure(|| smith::smith_form(a).unwrap());
         let (inv, _, r) = measure(|| zmat::inverse_det(a).unwrap());
-        let (part_a, _, t) = measure(|| snf::invariants_nonsingular(a, &r.2.abs(), None));
+        // (part A from the inverse's own solve: x = N b / delta)
+        let (part_a, _, t) = measure(|| snf::invariants_nonsingular(a, &r.2.abs(), Some((r.0.mul(&zmat::det_rhs(a.rows)), r.1.clone()))));
         let k = t.iter().filter(|x| !x.is_one()).count();
         let (route, _, _) = measure(|| smith::trailing_route(&r.0, &r.1, &r.2.abs(), k));
-        assert_eq!(whole, sum(&sum(&inv, &part_a), &route), "smith_form = inverse_det + invariants_nonsingular (given d) + route 2");
+        assert_eq!(whole, sum(&sum(&inv, &part_a), &route), "smith_form = inverse_det + invariants_nonsingular (given d and the solve) + route 2");
     }
     // a forced fallback: the same D, valid transforms, different units
     let (forced, _, f) = measure(|| smith::smith_classical(&cyc_big));
-    let (route1, _, s) = measure(|| smith::smith_form(&cyc_big));
+    let (route1, _, s) = measure(|| smith::smith_form(&cyc_big).unwrap());
     assert_eq!(f.d.d, s.d.d);
     assert_eq!(f.u.mul(&cyc_big).mul(&f.v).d, f.d.d);
     assert_ne!(forced, route1);
@@ -162,7 +163,7 @@ fn smith_units_and_stop_checks() {
     // a metered region charges exactly what was tallied inside it
     let mut meter = Meter::accounting(u64::MAX);
     let before = tallied();
-    metered(&mut meter, || smith::smith_form(&tr_big));
+    metered(&mut meter, || smith::smith_form(&tr_big).unwrap());
     assert_eq!(meter.units().0, delta(tallied(), before));
     assert!(meter.used() > 0);
 }
