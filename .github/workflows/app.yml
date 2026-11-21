@@ -6,14 +6,19 @@
 # environment's credentials) and checks it as a person's Mac will.
 name: app
 
+permissions:
+  contents: read
+
 on:
   push:
-    branches: [master]
+    branches: [master, "track/**"]
     # (a signed and notarized Mac app: mac-release below)
     tags: ["app-v*"]
     paths: ["app/**", "web/**", "src/**", "lib/**", "wasm/pins.json", ".github/workflows/app.yml"]
+  # Required checks must also be reported for prose-only pull requests.
   pull_request:
-    paths: ["app/**", "web/**", "src/**", "lib/**", "wasm/pins.json", ".github/workflows/app.yml"]
+  merge_group:
+    types: [checks_requested]
   workflow_dispatch:
     inputs:
       sign:
@@ -23,15 +28,17 @@ on:
 
 concurrency:
   group: app-${{ github.event.pull_request.number || github.ref }}
-  cancel-in-progress: ${{ github.ref != 'refs/heads/master' }}
+  cancel-in-progress: ${{ github.ref != 'refs/heads/master' && !startsWith(github.ref, 'refs/heads/track/') }}
 
 jobs:
-  # On a pull request, whether it changes what the four WebAssembly modules are built from or how they're handled
-  # (scripts/ci-paths.mjs, wasm_build, the same rule as ci.yml's): if so, the page is built with this run's own build
-  # of them (wasm-modules below), since the modules its wasm/pins.json names aren't published until it merges.  On
-  # every other event the page uses the published modules.
+  # On a pull request, a queue group or a track ref, determine whether to build the four WebAssembly modules.  A pull
+  # request builds when it changes their inputs (scripts/ci-paths.mjs, wasm_build, the same rule as ci.yml's), since
+  # the modules its wasm/pins.json names aren't published until it merges.  A queue group, a track push and a
+  # dispatch always build (ci-paths.mjs's non-PR rule), so app.yml's integration and queue runs never depend on an
+  # unpublished pin.  Master keeps its existing published-module path and timing; tracks never receive the
+  # publishing credential.
   wasm-changes:
-    if: github.repository == 'sagemathinc/sagebrush' && github.event_name == 'pull_request'
+    if: github.repository == 'sagemathinc/sagebrush' && (github.event_name == 'pull_request' || github.event_name == 'merge_group' || startsWith(github.ref, 'refs/heads/track/'))
     runs-on: ubuntu-latest
     timeout-minutes: 5
     outputs:
@@ -46,14 +53,14 @@ jobs:
       - id: paths
         name: classify changed paths
         env:
-          CI_PR_LABELS: ${{ join(github.event.pull_request.labels.*.name, ',') }}
+          CI_PR_LABELS: ${{ github.event_name == 'pull_request' && join(github.event.pull_request.labels.*.name, ',') || '' }}
         run: node scripts/ci-paths.mjs >> "$GITHUB_OUTPUT"
 
   # (ci.yml's wasm-modules job, the same steps: the modules built, their pins checked, packed as wasm-modules-<sha>
   # for this run's page job, which checks the artifact and the pin policy as it installs it)
   wasm-modules:
     needs: wasm-changes
-    if: github.repository == 'sagemathinc/sagebrush' && github.event_name == 'pull_request' && needs.wasm-changes.outputs.wasm_build == 'true'
+    if: github.repository == 'sagemathinc/sagebrush' && (github.event_name == 'pull_request' || github.event_name == 'merge_group' || startsWith(github.ref, 'refs/heads/track/')) && needs.wasm-changes.outputs.wasm_build == 'true'
     runs-on: ubuntu-latest
     timeout-minutes: 15
     steps:
@@ -64,6 +71,7 @@ jobs:
       - uses: Swatinem/rust-cache@d1527c8f67ef9af357290475d4af4b0fab8f12e0 # v2.9.3
         with:
           workspaces: engine
+          save-if: ${{ github.event_name != 'merge_group' }}
       - uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020 # v4.4.0
         with:
           node-version: 24
@@ -82,8 +90,7 @@ jobs:
 
   page:
     needs: [wasm-changes, wasm-modules]
-    # (after them when they run, without them when they're skipped: every event but a pull request, or a pull request
-    # that doesn't change the modules; never when either failed)
+    # (after them when they run, without them when they're skipped; never when either failed)
     if: ${{ !cancelled() && github.repository == 'sagemathinc/sagebrush' && contains(fromJSON('["success", "skipped"]'), needs.wasm-changes.result) && contains(fromJSON('["success", "skipped"]'), needs.wasm-modules.result) }}
     runs-on: ubuntu-latest
     timeout-minutes: 20
@@ -95,9 +102,9 @@ jobs:
       - uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020 # v4.4.0
         with:
           node-version: 24
-          cache: pnpm
-      # (the four WebAssembly modules wasm/pins.json names: this run's build of them when it made one, a pull request's
-      # that changes them, else the published ones: design/wasm-artifacts.md sections 4 and 6)
+          cache: ${{ github.event_name != 'merge_group' && 'pnpm' || '' }}
+      # (the four WebAssembly modules wasm/pins.json names: this run's build on a track ref or an engine-changing pull
+      # request, else the published ones: design/wasm-artifacts.md sections 4 and 6)
       - uses: ./.github/actions/wasm-modules
         with:
           artifact: ${{ needs.wasm-modules.result == 'success' }}
@@ -143,6 +150,7 @@ jobs:
       - uses: Swatinem/rust-cache@d1527c8f67ef9af357290475d4af4b0fab8f12e0 # v2.9.3
         with:
           workspaces: app/src-tauri
+          save-if: ${{ github.event_name != 'merge_group' }}
       # (`apt-get update` has hung silently: on Nov 1 and twice on Nov 10 it
       # printed nothing after "Get:5 ... jammy-security InRelease" until the
       # job's 40-minute timeout. On a passing run it takes 8-26 s (30 passes,
@@ -278,12 +286,31 @@ jobs:
             app/src-tauri/target/release/bundle/nsis/*.exe
           if-no-files-found: warn
 
+  app-ci:
+    if: always() && github.repository == 'sagemathinc/sagebrush'
+    needs: [wasm-changes, wasm-modules, page, app]
+    runs-on: ubuntu-latest
+    steps:
+      - name: require the page and every desktop platform to pass
+        env:
+          PAGE: ${{ needs.page.result }}
+          APP: ${{ needs.app.result }}
+          WASM_CHANGES: ${{ needs.wasm-changes.result }}
+          WASM: ${{ needs.wasm-modules.result }}
+          EVENT: ${{ github.event_name }}
+        run: |
+          [ "$PAGE" = success ] && [ "$APP" = success ] || exit 1
+          case "$WASM" in success|skipped) ;; *) exit 1 ;; esac
+          case "$EVENT" in
+            pull_request|merge_group) [ "$WASM_CHANGES" = success ] || exit 1 ;;
+          esac
+
   mac-release:
     # (only on this repository, and only for a push of a tag app-v* or a dispatch that asks to sign: never on a pull
     # request, so no pull request's code ever runs with the signing environment's secrets, and a dispatch without
     # `sign` never signs, even on an app-v* tag; scripts/test-app-release-guard.mjs pins the cases; and explicitly on
     # page's result, as the app job: a job after a skipped one is otherwise skipped too)
-    if: ${{ !cancelled() && needs.page.result == 'success' && github.repository == 'sagemathinc/sagebrush' && ((github.event_name == 'push' && startsWith(github.ref, 'refs/tags/app-v')) || (github.event_name == 'workflow_dispatch' && inputs.sign)) }}
+    if: ${{ !cancelled() && needs.page.result == 'success' && github.repository == 'sagemathinc/sagebrush' && ((github.event_name == 'push' && startsWith(github.ref, 'refs/tags/app-v')) || (github.event_name == 'workflow_dispatch' && github.ref == 'refs/heads/master' && inputs.sign)) }}
     needs: page
     runs-on: macos-15
     timeout-minutes: 60

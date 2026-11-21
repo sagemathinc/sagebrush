@@ -335,7 +335,7 @@ export async function applyOps(
   w: Workspace,
   ns: string,
   ops: SyncOp[],
-  opts: { prefix?: string; cursorAt?: string; stores?: string[]; onPage?: (tx: IDBTransaction, changed: string[], prefix: string, large?: LargeApplied) => Promise<void>; locked?: <T>(f: () => Promise<T>) => Promise<T>; afterLarge?: (gen: string) => Promise<void> } = {},
+  opts: { prefix?: string; cursorAt?: string; stores?: string[]; onPage?: (tx: IDBTransaction, changed: string[], prefix: string, large?: LargeApplied, taken?: SyncOp[]) => Promise<void>; locked?: <T>(f: () => Promise<T>) => Promise<T>; afterLarge?: (gen: string) => Promise<void> } = {},
 ): Promise<Applied> {
   const stores = [...new Set(["syncIndex", META, ...(opts.stores ?? [])])];
   let at = 0, pages = 0, carry = 0, cursor = 0;
@@ -399,7 +399,7 @@ export async function applyOps(
         }
       }
       const changed = [...page.changed];
-      if (opts.onPage) await opts.onPage(tx, changed, prefix, large);
+      if (opts.onPage) await opts.onPage(tx, changed, prefix, large, ops.slice(at, at + taken));
       for (const id of changed) changedAll.push(id);
       at += taken;
       carry = page.carry;
@@ -445,6 +445,12 @@ export async function applyConfirmed(w: Workspace, ns: string, ops: SyncOp[], ho
       const id = o.kind === "file" || o.kind === "folder" ? o.fid : o.ref;
       if (typeof id === "string") ownPlaced.set(id, o.path);
     }
+    // (this device's own writes in a page: each one's identity recomputed too (its record was decided when its echo
+    // came, before the view runs).  A write that lost to another device's is a conflict copy, and the page deciding
+    // it changes only the copy; the other's write, come down while this one was undecided, left this device's own
+    // bytes under the name: recomputed now, it takes the confirmed state, the other's bytes queued for their fetch,
+    // as on every device)
+    const own = (taken: SyncOp[] = []) => taken.filter((o) => o.device === w.device && o.op === "write" && typeof o.fid === "string").map((o) => o.fid as string);
     let r: Applied;
     try {
       r = await applyOps(w, ns, ops, {
@@ -452,13 +458,14 @@ export async function applyConfirmed(w: Workspace, ns: string, ops: SyncOp[], ho
         // (each page holding the workspace's lock: an ordinary change's hold, refused while quarantined or after a
         // reset elsewhere, the durability witness brought up to its commit; never across a large move's own pages)
         locked: (f) => w.locked(f),
-        onPage: async (tx, changed, prefix, large) => {
+        onPage: async (tx, changed, prefix, large, taken) => {
           keep();
           // (a large move's view: its tops and everything under their new places are the replay's (D11 r4 §3), the
           // rest of the page's view applied as usual)
           if (large && hooks.onLarge) await hooks.onLarge(tx, large);
           const skip = new Set(large?.replay ?? []);
-          last = await applyView({ w, tx, ns, store: idbStore(tx, prefix), cap, ownPlaced }, changed.filter((id) => !skip.has(id)));
+          const ids = [...new Set([...changed, ...own(taken)])];
+          last = await applyView({ w, tx, ns, store: idbStore(tx, prefix), cap, ownPlaced }, ids.filter((id) => !skip.has(id)));
         },
         afterLarge: hooks.afterLarge,
       });

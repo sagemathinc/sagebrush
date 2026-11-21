@@ -54,8 +54,10 @@ export async function checkNoticeBrowser() {
       res.end(file.bytes);
     });
     await new Promise(resolve => server.listen(0, '127.0.0.1', resolve));
-    chrome = spawn(process.env.CHROME ?? 'chromium', ['--headless', '--no-sandbox', '--disable-gpu', '--disable-background-networking', '--host-resolver-rules=MAP * ~NOTFOUND, EXCLUDE 127.0.0.1, EXCLUDE localhost', '--remote-debugging-port=0', `--user-data-dir=${profile}`, 'about:blank'], { stdio: 'ignore' });
-    const port = await devtoolsPort(profile, 15000);
+    chrome = spawn(process.env.CHROME ?? 'chromium', ['--headless', '--no-sandbox', '--disable-gpu', '--disable-background-networking', '--host-resolver-rules=MAP * ~NOTFOUND, EXCLUDE 127.0.0.1, EXCLUDE localhost', '--remote-debugging-port=0', `--user-data-dir=${profile}`, 'about:blank'], { stdio: ['ignore', 'ignore', 'pipe'] });
+    // Hosted runners can start Chrome slowly under load; use the shared startup wait
+    // and retain stderr so a failed or stalled launch explains itself.
+    const port = await devtoolsPort(profile, undefined, { child: chrome });
     const targets = await (await fetch(`http://127.0.0.1:${port}/json`, { signal: AbortSignal.timeout(5000) })).json();
     ws = new WebSocket(targets.find(t => t.type === 'page').webSocketDebuggerUrl);
     await new Promise((resolve, reject) => { const t = setTimeout(() => reject(new Error('CDP socket deadline')), 5000); ws.onopen = () => { clearTimeout(t); resolve(); }; ws.onerror = reject; });

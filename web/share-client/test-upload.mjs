@@ -4,7 +4,7 @@
 // max(batchBytes, the largest file) is held (#172 r2's review: daybreak3's LIMIT-SHAREB-1, astra3's
 // observation).  A fake share API records the order of reads and requests, and the bytes held.
 //   bun web/share-client/test-upload.mjs
-import { uploadCollection, AttemptError } from "./upload.ts";
+import { uploadCollection, AttemptError, signInUrl } from "./upload.ts";
 
 let checks = 0;
 const fails = [];
@@ -150,5 +150,14 @@ const run = async (files, limit) => {
   ok(called === 1 && e?.message === "the notebook's share changed" && !events.some((x) => x.startsWith("new ")), `U6 beforeCommit refuses: no first-upload request (${JSON.stringify(events)})`);
 }
 
+// Sign in's return never carries a quick link's cells (they'd reach the server, and its sign-in cookie): the fragment
+// that holds them is dropped, wherever the link was made (z= deflated, c= plain, after a mode); another fragment stays
+{
+  const ret = (u) => decodeURIComponent(u.slice("/auth/login?return=".length));
+  ok(ret(signInUrl("/?share#z=abc-_123")) === "/?share", "Sign in: a quick link's z= cells are dropped from the return");
+  ok(ret(signInUrl("/nb/x/?a=1#m=sage&c=eyJ4")) === "/nb/x/?a=1", "Sign in: a quick link's c= cells, after its mode, are dropped");
+  ok(ret(signInUrl("/docs/storage#leaves")) === "/docs/storage#leaves", "Sign in: another fragment (a docs anchor) stays");
+  ok(ret(signInUrl("/board/?doc=a.json")) === "/board/?doc=a.json", "Sign in: a return with no fragment is unchanged");
+}
 console.log(`${checks - fails.length}/${checks} passed`);
 process.exit(fails.length ? 1 : 0);

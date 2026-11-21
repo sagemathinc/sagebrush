@@ -33,6 +33,17 @@ def _norm(c):
     return _sa().Rational._from_coprime_ints(f.numerator, f.denominator)
 
 
+def _exact_entry(base, x):
+    """x as an entry of a matrix or vector over base (ZZ or QQ), for the
+    entries a constructor converts itself: a string as QQ(s) or ZZ(s) read
+    it (their TypeError if not), None as 0, anything else as it is."""
+    if x is None:
+        return 0
+    if isinstance(x, str):
+        return base(x)
+    return x
+
+
 def _sr_rational(x):
     """x, or the int or Rational it is when x is an exact rational of SR
     (SR(2), SR(3)/4: the engine's n<p>/<q>; encoding)."""
@@ -200,7 +211,7 @@ class Vector(list):
         if isinstance(other, Matrix):
             # the vector-matrix product
             if len(self) != other.nrows():
-                raise ArithmeticError("vector and matrix of incompatible sizes")
+                raise TypeError("unsupported operand parent(s) for *: '%s' and '%s'" % (self.parent(), other.parent()))
             sv = _raw_entries(self)
             w = Vector(_norm(sum((a * b for a, b in zip(sv, c)), 0)) for c in other._raw_columns())
             # (over QQ when either factor is, integral entries too, as in
@@ -890,6 +901,61 @@ class Matrix:
         [  -2    1]      [ 7 10]
         [ 3/2 -1/2], -2, [15 22]
         )
+
+    Shapes must agree, and powers must be integral, as in Sage::
+
+        sage: A + matrix(QQ, 3, 3, range(9))
+        Traceback (most recent call last):
+        ...
+        TypeError: unsupported operand parent(s) for +: 'Full MatrixSpace of 2 by 2 dense matrices over Rational Field' and 'Full MatrixSpace of 3 by 3 dense matrices over Rational Field'
+        sage: identity_matrix(QQ, 2) * vector(QQ, [1, 2, 3])
+        Traceback (most recent call last):
+        ...
+        TypeError: unsupported operand parent(s) for *: 'Full MatrixSpace of 2 by 2 dense matrices over Rational Field' and 'Vector space of dimension 3 over Rational Field'
+        sage: vector(QQ, [1, 2, 3]) * identity_matrix(QQ, 2)
+        Traceback (most recent call last):
+        ...
+        TypeError: unsupported operand parent(s) for *: 'Vector space of dimension 3 over Rational Field' and 'Full MatrixSpace of 2 by 2 dense matrices over Rational Field'
+        sage: A * [1, 2]
+        Traceback (most recent call last):
+        ...
+        TypeError: can't multiply sequence by non-int of type 'sage.matrix.matrix_rational_dense.Matrix_rational_dense'
+        sage: A^(4/2) == A^2
+        True
+        sage: A^(1/2)
+        Traceback (most recent call last):
+        ...
+        NotImplementedError: non-integral exponents not supported
+        sage: A^2.0
+        Traceback (most recent call last):
+        ...
+        NotImplementedError: non-integral exponents not supported
+        sage: matrix(ZZ, [[1, 2], [3, 4]])^(1/2)
+        Traceback (most recent call last):
+        ...
+        NotImplementedError: the given exponent is not supported
+
+    Entries convert into the base ring, strings as QQ(s) and ZZ(s) read them::
+
+        sage: matrix(QQ, [[1, "1/2"], [" 3 ", None]])
+        [  1 1/2]
+        [  3   0]
+        sage: matrix(QQ, [[1, "a"]])
+        Traceback (most recent call last):
+        ...
+        TypeError: unable to convert 'a' to a rational
+        sage: matrix(QQ, [[1, "0.5"]])
+        Traceback (most recent call last):
+        ...
+        TypeError: unable to convert '0.5' to a rational
+        sage: matrix(ZZ, [[1, "3/1"]])
+        Traceback (most recent call last):
+        ...
+        TypeError: unable to convert '3/1' to an integer
+        sage: matrix([[1, "a"]])
+        Traceback (most recent call last):
+        ...
+        TypeError: no common canonical parent for objects with parents: 'Integer Ring' and '<class 'str'>'
     """
     __slots__ = ("_base", "_rows", "_subdiv", "_nc", "_immutable")
 
@@ -903,6 +969,11 @@ class Matrix:
         # any entry is converted
         if any(len(r) != width for r in rows):
             raise ValueError("the rows of a matrix must have the same length")
+        if base is _sa().QQ or base is _sa().ZZ:
+            # (a string entry converts as QQ(s) or ZZ(s) do, '1/2' in QQ, and
+            # an unconvertible one is Sage's TypeError; it was kept as a
+            # string entry.  None is 0, as in Sage)
+            rows = [[_exact_entry(base, x) for x in r] for r in rows]
         self._rows = [[_norm(x) for x in r] for r in rows]
         if base is _sa().QQ or base is _sa().ZZ:
             # (entries in QQ: SR(2) is 2 there, as Sage converts it; kept
@@ -913,7 +984,7 @@ class Matrix:
         # matrix was 0 x 0: the systematic review's LIN-F4)
         self._nc = width
         if base is _sa().ZZ and any(not isinstance(x, int) for r in self._rows for x in r):
-            raise TypeError("matrix entries are not all integers")
+            raise TypeError("no conversion of this rational to integer")
         self._base = base
         self._subdiv = None
 
@@ -1516,6 +1587,21 @@ class Matrix:
         I = Matrix(self._base, [[int(i == j) for j in range(n)] for i in range(n)])
         return I * c
 
+    def _sage_class(self):
+        """The class Sage gives this matrix, for its messages."""
+        sa = _sa()
+        kind = {id(sa.ZZ): "integer", id(sa.QQ): "rational", id(sa.SR): "symbolic"}.get(id(self._base))
+        if kind is None:
+            return "sage.matrix.matrix_generic_dense.Matrix_generic_dense"
+        return "sage.matrix.matrix_%s_dense.Matrix_%s_dense" % (kind, kind)
+
+    def _same_shape(self, other, op):
+        """Sage's TypeError for the sum or difference of matrices of
+        different shapes (they were zipped: a 2 x 2 plus a 3 x 3 matrix was
+        a 2 x 2 matrix)."""
+        if self.dimensions() != other.dimensions():
+            raise TypeError("unsupported operand parent(s) for %s: '%s' and '%s'" % (op, self.parent(), other.parent()))
+
     def __add__(self, other):
         """Entrywise sum; a scalar is that multiple of the identity.
 
@@ -1539,6 +1625,7 @@ class Matrix:
             return self + self._scalar_matrix(int(other) if isinstance(other, bool) else other, "+")
         if not isinstance(other, Matrix):
             return NotImplemented
+        self._same_shape(other, "+")
         return Matrix(self._same(other), [[a + b for a, b in zip(r, s)] for r, s in zip(self._rows, other._rows)], self.ncols())
 
     def __radd__(self, other):
@@ -1560,6 +1647,7 @@ class Matrix:
             return self - self._scalar_matrix(int(other) if isinstance(other, bool) else other, "-")
         if not isinstance(other, Matrix):
             return NotImplemented
+        self._same_shape(other, "-")
         return Matrix(self._same(other), [[a - b for a, b in zip(r, s)] for r, s in zip(self._rows, other._rows)], self.ncols())
 
     def __rsub__(self, other):
@@ -1582,7 +1670,7 @@ class Matrix:
             return g * other
         if isinstance(other, Matrix):
             if self.ncols() != other.nrows():
-                raise TypeError("unsupported operand parent(s) for *: matrices of incompatible sizes")
+                raise TypeError("unsupported operand parent(s) for *: '%s' and '%s'" % (self.parent(), other.parent()))
             # the product's shape before it is built (4096 x 1 times
             # 1 x 4096 has 2^24 entries)
             _shape(self.nrows(), other.ncols())
@@ -1602,11 +1690,16 @@ class Matrix:
                 return _sage_ffmat.matrix(other._base, self.nrows(), self.ncols(), [x for r in self._rows for x in r]) * other
             raise TypeError("unsupported operand parent(s) for *: '%s' and '%s'" % (self.parent(), other.parent()))
         if isinstance(other, Vector):
+            if self.ncols() != len(other):
+                # (the product was taken over the shorter of the two: Sage's TypeError)
+                raise TypeError("unsupported operand parent(s) for *: '%s' and '%s'" % (self.parent(), other.parent()))
             ov = _raw_entries(other)
             v = Vector(_norm(sum((a * b for a, b in zip(r, ov)), 0)) for r in self._rows)
             return _over_qq(v, other) if self._base is not _sa().QQ else self._vector(v)
         if isinstance(other, (list, tuple)):
-            return [sum((a * b for a, b in zip(r, other)), 0) for r in self._rows]
+            # (Sage multiplies no sequence by a matrix; this was a list
+            # product, truncated to the shorter length)
+            raise TypeError("can't multiply sequence by non-int of type '%s'" % self._sage_class())
         base = self._base if isinstance(other, int) else _sa().SR if self._base is _sa().SR or hasattr(other, "_s") else _sa().QQ
         return Matrix(base, [[a * other for a in r] for r in self._rows], self.ncols())
 
@@ -1615,7 +1708,7 @@ class Matrix:
         if L is not None:
             return other * L
         if isinstance(other, (list, tuple)):
-            return [sum((other[i] * self._rows[i][j] for i in range(self.nrows())), 0) for j in range(self.ncols())]
+            raise TypeError("can't multiply sequence by non-int of type '%s'" % self._sage_class())
         base = self._base if isinstance(other, int) else _sa().SR if self._base is _sa().SR or hasattr(other, "_s") else _sa().QQ
         return Matrix(base, [[other * a for a in r] for r in self._rows], self.ncols())
 
@@ -1652,8 +1745,32 @@ class Matrix:
             raise NotImplementedError("a power of a %d by %d matrix whose entries could have more than %d bits (%d in all)"
                                       % (d, d, _POW_ENTRY_BITS, _POW_TOTAL_BITS))
 
+    def _integral_exponent(self, e):
+        """e as an int, for a power: an exact integer, or a rational that is
+        one (4/2); anything else is refused, as in Sage (int(e) made A^(1/2)
+        the identity and A^2.5 the square)."""
+        if isinstance(e, int):
+            return int(e)
+        if isinstance(e, _F) or type(e).__name__ in ("Rational", "Integer"):
+            q = _F(e)
+            if q.denominator == 1:
+                return int(q.numerator)
+        elif type(e).__name__ == "Expression":
+            # (a symbolic exponent: as before, its integer value or its error)
+            return int(e)
+        if self._base is _sa().ZZ:
+            # (over ZZ, Sage takes an integral real number: Z^2.0 is Z^2)
+            try:
+                if _sa()._real_kind(e) is not None and e == int(e):
+                    return int(e)
+            except (TypeError, ValueError, OverflowError):
+                pass
+            raise NotImplementedError("the given exponent is not supported")
+        raise NotImplementedError("non-integral exponents not supported")
+
     def __pow__(self, e):
-        e = int(e)
+        # (an integral exponent; negative: a power of the inverse; examples in the class)
+        e = self._integral_exponent(e)
         self._pow_admit(e)
         if e < 0:
             return self.inverse() ** (-e)
@@ -2150,10 +2267,17 @@ class Matrix:
         return [list(r[:n]) for r in rows], [list(r[n:]) for r in rows]
 
     def LLL(self, delta=None, **kwds):
-        """The LLL-reduced basis of the lattice spanned by the rows, with
-        delta = 99/100 (so also reduced for any smaller delta); a delta
-        above 99/100 is NotImplementedError, one outside (1/4, 1] a
-        ValueError (it was ignored: the systematic review's LIN-F3).
+        """An LLL-reduced basis of the lattice spanned by the rows,
+        (eta, delta) = (0.51, 0.99)-reduced and proved so (so also reduced
+        for any smaller delta); a delta above 99/100 is
+        NotImplementedError, one outside (1/4, 1] a ValueError (it was
+        ignored: the systematic review's LIN-F3).
+
+        This diverges from SageMath: Sagebrush reduces with its own
+        floating-point L^2 algorithm (an exact LLL as its fallback), and a
+        lattice has many LLL-reduced bases, so the basis returned can
+        differ from SageMath's for the same matrix. Both are reduced bases
+        of the same lattice.
 
         EXAMPLES::
 
@@ -3089,8 +3213,18 @@ def vector(*args):
 
     EXAMPLES::
 
-        sage: vector([1, 2/3]), vector(QQ, [1, 2])
-        ((1, 2/3), (1, 2))
+        sage: vector([1, 2/3]), vector(QQ, [1, 2]), vector(QQ, ["1/2", 3])
+        ((1, 2/3), (1, 2), (1/2, 3))
+        sage: vector(QQ, [1, None]), vector(ZZ, [None, 2])
+        ((1, 0), (0, 2))
+        sage: vector(QQ, [1, "a"])
+        Traceback (most recent call last):
+        ...
+        TypeError: unable to convert a to an element of Rational Field
+        sage: vector([1, "a"])
+        Traceback (most recent call last):
+        ...
+        TypeError: unable to find a common ring for all elements
     """
     import _sage_ffmat
     if len(args) == 2 and _sage_ffmat._is_ff(args[0]):
@@ -3113,6 +3247,20 @@ def vector(*args):
         # a vector of power series (the D_p-valued p-adic L-series): the
         # entries in the ring, the ring kept through arithmetic
         return SeriesVector(ring, entries)
+    if any(isinstance(x, str) or x is None for x in entries):
+        if ring is sa.QQ or ring is sa.ZZ:
+            # (converted as QQ(s) and ZZ(s) do, None as 0, else Sage's
+            # TypeError; a string or None was kept as an entry)
+            conv = []
+            for x in entries:
+                try:
+                    conv.append(_exact_entry(ring, x) if isinstance(x, str) or x is None else x)
+                except TypeError:
+                    raise TypeError("unable to convert %s to an element of %r"
+                                    % (_sa()._str_preview(x, quote=False) if isinstance(x, str) else x, ring))
+            entries = conv
+        elif ring is None:
+            raise TypeError("unable to find a common ring for all elements")
     ff = _ff_base_of(entries)
     if ff is not None:
         return _sage_ffmat.vector(ff, entries)
@@ -3752,7 +3900,7 @@ def matrix(*args, **kwds):
                     if base is sa.ZZ or base is sa.QQ:
                         q = _F(v)
                         if base is sa.ZZ and q.denominator != 1:
-                            raise TypeError("matrix entries are not all integers")
+                            raise TypeError("no conversion of this rational to integer")
                         x = _norm(q)
                     else:
                         x = _norm(v)
@@ -3796,6 +3944,16 @@ def matrix(*args, **kwds):
         import _sage_padic
         return _sage_padic.padic_matrix(pb, rows)
     if base is None:
+        for r in rows:
+            for x in r:
+                if x is None:
+                    # (Sage's error: None was kept as an entry, over SR)
+                    raise TypeError("NoneType takes no arguments")
+                if isinstance(x, str):
+                    # (Sage finds no common parent; the string was kept, over SR)
+                    others = [y for rr in rows for y in rr if not isinstance(y, str)]
+                    raise TypeError("no common canonical parent for objects with parents: '%s' and '<class 'str'>'"
+                                    % (_sa().parent(others[0]) if others else "<class 'str'>"))
         def kind(x):
             try:
                 return 0 if _F(x).denominator == 1 else 1

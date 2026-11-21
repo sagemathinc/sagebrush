@@ -1,6 +1,6 @@
 // ci: web-browser/terminal.4 order=60 chrome
 // The app's self-test logs its page's response headers (web/index.html, the block after "selftest_file") from a fetch
-// of the page itself, and must not leave that body unread.  The app's server (tauri-plugin-localhost, tiny_http)
+// of the page itself, and must not leave that body unread.  The app's server (lib.rs serve_page, tiny_http)
 // answers one request at a time and writes each body in full before the next: a body the page never reads stops
 // being taken in once the loopback buffers are full, and the server waits there, holding every later request.  On
 // Windows, whose buffers are small, the 940 KB page was enough: the self-test module's import timed out at 15 s

@@ -5,6 +5,8 @@
 // built CLI and committed; src/pkgset.ts carries CORE_API and CORE_API_LEVEL.
 //
 //   node scripts/core-api-surface.mjs --check    (the default tier: fixed work, §6.3)
+//   node scripts/core-api-surface.mjs --check --base REF   also: nothing recorded at a level the base has reported
+//                                                that the base's surface lacks (baseErrors)
 //   node scripts/core-api-surface.mjs --update   record additions at level + 1
 //
 // Public modules: the library's and bundled packages' modules with no part
@@ -33,7 +35,9 @@ import { tmpdir } from "node:os";
 import { dirname, join } from "node:path";
 import { fileURLToPath } from "node:url";
 
-const root = join(dirname(fileURLToPath(import.meta.url)), "..");
+// (CORE_API_ROOT and CORE_API_GENERATED, a folder holding core-api-surface.json and src/pkgset.ts and a generated
+// surface's JSON in place of the built CLI's, are for the script's own tests: scripts/test-core-api-surface.mjs)
+const root = process.env.CORE_API_ROOT ?? join(dirname(fileURLToPath(import.meta.url)), "..");
 const FILE = join(root, "core-api-surface.json");
 const CHANGES = join(root, "core-api-changes.json");
 const LIMITS = { bytes: 2 * 1024 * 1024, entries: 50_000 };
@@ -306,6 +310,55 @@ function recordedEntry(api, name) {
   return e;
 }
 
+// Every level a surface records, by key: "module mod", "mod:Name", "mod:Name.member", "mod:f(p)" for a parameter,
+// "mod:f(p)=" for a parameter's default_since, and "removed where (kind)" for a recorded removal.  (A module's
+// own name has dots, so ":" separates it from its names: module "a.b" and module a's name b stay two keys.  *args
+// and **kwargs are keyed by kind, "mod:f(*)" and "mod:f(**)", as widenParams matches them: renaming one is
+// compatible and keeps its level.)
+function levelsByPath(api) {
+  const out = new Map();
+  const params = (path, e) => {
+    if (!Array.isArray(e.params)) return;
+    for (const p of e.params) {
+      const key = `${path}(${p.kind === "varargs" ? "*" : p.kind === "varkw" ? "**" : p.name})`;
+      out.set(key, p.since);
+      if (p.default_since !== undefined) out.set(`${key}=`, p.default_since);
+    }
+  };
+  const entry = (path, e) => {
+    out.set(path, e.since);
+    params(path, e);
+    for (const [k, m] of Object.entries(e.members ?? {})) entry(`${path}.${k}`, m);
+  };
+  for (const [mod, m] of Object.entries(api.modules ?? {})) {
+    out.set(`module ${mod}`, m.since);
+    for (const [k, e] of Object.entries(m.names ?? {})) entry(`${mod}:${k}`, e);
+  }
+  for (const [where, r] of Object.entries(api.removed ?? {})) out.set(`removed ${where} (${r.kind})`, r.level);
+  return out;
+}
+
+// The base branch's surface (--check --base REF): once the base branch reports a level, that level's surface is
+// fixed.  A merge can still carry an entry at that level the base never had (a branch recorded its additions at
+// "the next level", the base got there first, and the text merge kept one level line), and comparing with the
+// generated surface can't see that.  So: the level can't fall below the base's, and every entry recorded at a
+// level at or below the base's (a recorded removal too) must be in the base's surface at the same level.  The fix
+// starts from the base's file: --update on the merged file keeps every level it already records, so it would move
+// nothing; on the base's file it records the branch's additions (and re-applies a reviewed removal) at level + 1.  (An
+// entry the base has and this surface lacks is not reported here: the comparison with the generated surface,
+// checkErrors, already fails on it as a removal.)
+export function baseErrors(recorded, base, ref = "BASE") {
+  const errs = [];
+  if (recorded.level < base.level) errs.push(`core-api-surface.json is at level ${recorded.level}, below the base branch's ${base.level}`);
+  const had = levelsByPath(base);
+  for (const [path, since] of levelsByPath(recorded)) {
+    if (since > base.level) continue;
+    if (!had.has(path)) errs.push(`${path} is recorded at level ${since}, but the base branch's level ${base.level} surface doesn't have it: record the branch's additions again on the base's surface, with the base merged in: \`git checkout ${ref} -- core-api-surface.json && node scripts/core-api-surface.mjs --update\` (they move to the next free level), then set CORE_API_LEVEL`);
+    else if (had.get(path) !== since) errs.push(`${path} is recorded at level ${since}, the base branch's surface has it at level ${had.get(path)}`);
+  }
+  return errs;
+}
+
 // Entries the recorded surface no longer needs: their function's signature isn't the entry's new one
 export function staleChanges(recorded, changes) {
   const out = [];
@@ -414,11 +467,26 @@ function pkgsetConstants() {
   return { api: Number(/export const CORE_API = (\d+);/.exec(src)[1]), level: Number(/export const CORE_API_LEVEL = (\d+);/.exec(src)[1]) };
 }
 
+function usage() {
+  console.error("usage: core-api-surface.mjs --check [--base REF] | --update");
+  process.exit(2);
+}
+
 if (process.argv[1] === fileURLToPath(import.meta.url)) {
   const mode = process.argv[2];
+  // (the arguments, before any work: --update takes none; --check only `--base REF` or `--base=REF`, the base
+  // branch's surface from git, e.g. the pull request's base commit.  Anything else is a usage error, so a misspelled
+  // guard never passes silently, and a ref like an option never reaches git.)
+  const args = process.argv.slice(3);
+  let ref;
+  if (mode !== "--check" && mode !== "--update") usage();
+  if (mode === "--check" && args.length === 1 && args[0].startsWith("--base=")) ref = args[0].slice("--base=".length);
+  else if (mode === "--check" && args.length === 2 && args[0] === "--base") ref = args[1];
+  else if (args.length) usage();
+  if (ref !== undefined && (!ref || ref.startsWith("-"))) usage();
   const recorded = existsSync(FILE) ? JSON.parse(readFileSync(FILE, "utf8")) : null;
   const consts = pkgsetConstants();
-  const gen = generate();
+  const gen = process.env.CORE_API_GENERATED ? JSON.parse(readFileSync(process.env.CORE_API_GENERATED, "utf8")) : generate();
   const changes = existsSync(CHANGES) ? readChanges(readFileSync(CHANGES, "utf8")) : [];
   if (mode === "--update") {
     const level = recorded ? recorded.level + 1 : 1;
@@ -440,13 +508,20 @@ if (process.argv[1] === fileURLToPath(import.meta.url)) {
   } else if (mode === "--check") {
     if (!recorded) throw new Error("core-api-surface.json is missing (node scripts/core-api-surface.mjs --update)");
     const errs = checkErrors(recorded, gen, changes, consts, readFileSync(FILE, "utf8").length);
+    if (ref !== undefined) {
+      let base;
+      try {
+        base = JSON.parse(execFileSync("git", ["show", `${ref}:core-api-surface.json`], { cwd: root, encoding: "utf8", maxBuffer: 2 * LIMITS.bytes, stdio: ["ignore", "pipe", "pipe"] }));
+      } catch (e) {
+        const why = String(e.stderr || e.message || e).trim().split("\n")[0].slice(0, 300);
+        errs.push(`the base branch's core-api-surface.json at ${ref} can't be read (${why}): fetch the base commit first`);
+      }
+      if (base) errs.push(...baseErrors(recorded, base, ref));
+    }
     if (errs.length) {
       console.error("the Core API contract check failed:\n  " + errs.join("\n  "));
       process.exit(1);
     }
     console.log(`Core API ${recorded.api} level ${recorded.level}: ${countEntries(recorded)} entries, unchanged`);
-  } else {
-    console.error("usage: core-api-surface.mjs --check | --update");
-    process.exit(2);
-  }
+  } else usage();
 }

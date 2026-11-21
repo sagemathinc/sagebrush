@@ -375,7 +375,7 @@ fn relations_weighted(field: &Field, ib: &ZMat, budget: usize, s_log: &[f64], se
     found
 }
 
-/// The norms of the prime ideals below a bound, from the splitting data.
+/// The norms p^f of the prime ideals above the rational primes p below a bound (a norm can exceed it).
 fn prime_norms(split: &[(u64, Vec<(u32, u32)>)], bound: f64) -> Vec<u64> {
     split.iter().take_while(|s| (s.0 as f64) < bound).flat_map(|(p, degs)| degs.iter().filter_map(move |&(f, _)| p.checked_pow(f))).collect()
 }

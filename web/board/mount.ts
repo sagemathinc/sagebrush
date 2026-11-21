@@ -86,8 +86,11 @@ export interface BoardStore {
   /** The document as it is elsewhere, when it changes there (another person;
    * or newer than the copy load() gave at once: cached.ts), with a notice
    * for the caption (a merge's); shown in place, `f` resolving once it is
-   * (edits made before were made from the one before).  Returns: stop. */
-  subscribe?(f: (doc: BoardDoc, notice?: string) => void | Promise<void>): () => void;
+   * (edits made before were made from the one before).  `held`: its new and changed code waits for the person's Run
+   * (a write made elsewhere, whoever wrote it: write access isn't leave to run code).  `fenced`: shown only if the
+   * board still shows what it showed when this came (no edit meanwhile, while its pictures were read); `f` resolves
+   * to false when it stood down.  Returns: stop. */
+  subscribe?(f: (doc: BoardDoc, notice?: string, from?: { held?: true; fenced?: true }) => unknown): () => void;
   /** Whether Edit is offered (`hidden`: not at all) and allowed now (not: left, with `why` said), as it
    * changes, the current state at once.  None: always.  Returns: stop. */
   editing?(f: (s: { allowed: boolean; hidden?: boolean; why?: string }) => void): () => void;
@@ -225,7 +228,7 @@ function addStyle() {
 // (the toolbar's Code: a note with code in the board's language)
 const LANGUAGE_NAMES: Record<string, string> = { python: "Python", sage: "Sage", magma: "Magma", matlab: "MATLAB" };
 const codeTitle = (mode: string) => `Add a note with ${LANGUAGE_NAMES[mode] ?? "Python"} code (any note can have code: + Code in its editor)`;
-const CHROME = `<div data-sbb="top"><a data-sbb="home" href="/">Sagebrush</a><span data-sbb="title"></span><button data-sbb="runpaused" hidden title="This board came from a file you brought in: its code hasn't run yet">▶ Run this board's code</button><span data-sbb="pages" hidden><button data-sbb="pgprev" title="Previous page (PageUp)" aria-label="Previous page">‹</button><select data-sbb="pgsel" title="Page"></select><button data-sbb="pgnext" title="Next page (PageDown)" aria-label="Next page">›</button></span><button data-sbb="submitbtn" hidden title="Send your answers to whoever made this board" aria-haspopup="dialog">Submit</button><button data-sbb="help" title="Help: what the keys and gestures do (?)" aria-label="Help">?</button><button data-sbb="edit" aria-pressed="false" aria-label="Edit" title="Move, write, add and connect notes">✎<span class="lbl"> Edit</span></button><button data-sbb="fit" title="Show everything (0)" aria-label="Show everything">⤢</button><span class="menuwrap"><button data-sbb="filebtn" title="New, open, download" aria-haspopup="menu">File<span class="caret sb-caret" aria-hidden="true"></span></button><div data-sbb="filemenu" class="menu" role="menu" aria-label="File" hidden></div></span><span class="menuwrap"><button data-sbb="menubtn" title="Pages, layout, language, Present, TimeTravel" aria-label="More" aria-haspopup="menu">⋯</button><div data-sbb="menu" class="menu" hidden><button data-sbb="addpage">Add a page</button><button data-sbb="pageprops">Page…</button><button data-sbb="rmpage" hidden>Delete this page</button><button data-sbb="tidy">Tidy (automatic layout)</button><button data-sbb="mermaid">Import Mermaid…</button><button data-sbb="revert" hidden>Revert to the original</button><div data-sbb="lang" role="group" aria-label="The language of this board's code">Code: <button data-mode="python" aria-pressed="true">Python</button><button data-mode="sage" aria-pressed="false">Sage</button><button data-mode="magma" aria-pressed="false">Magma</button><button data-mode="matlab" aria-pressed="false">MATLAB</button></div><hr><button data-sbb="present">Present (a slideshow)</button><button data-sbb="timetravel">TimeTravel…</button><button data-sbb="term" hidden title="A bash shell on your workspace's files">Terminal</button><button data-sbb="termend" hidden title="Stop the shell and clear its output and command history">End terminal session…</button><button data-sbb="agent" hidden title="Connect an agent on this computer (Claude Code, Codex, …) to files you choose">Connect an agent…</button><button data-sbb="review" hidden title="Review what an agent changed in its branches">Review changes…</button><hr><button data-sbb="helpitem">Help: keys and gestures…</button></div></span><button data-sbb="sharebtn" title="Share this board" aria-haspopup="dialog" hidden><svg viewBox="0 0 16 16" aria-hidden="true"><path d="M8 10.5V2.2M4.9 5.1 8 2l3.1 3.1" fill="none" stroke="currentColor" stroke-width="1.4" stroke-linecap="round" stroke-linejoin="round"/><path d="M3 8.5v4.3c0 .4.3.7.7.7h8.6c.4 0 .7-.3.7-.7V8.5" fill="none" stroke="currentColor" stroke-width="1.4" stroke-linecap="round"/></svg>Share</button><input data-sbb="openfile" type="file" accept=".json,.html,.htm,.canvas,.mmd,.mermaid,.md,.board,.slides,application/json,text/html,text/markdown,text/plain" hidden></div>
+const CHROME = `<div data-sbb="top"><a data-sbb="home" href="/">Sagebrush</a><span data-sbb="title"></span><span data-sbag-slot="1" data-sbag-inline style="display:flex;min-width:0;flex:0 1 auto"></span><button data-sbb="runpaused" hidden title="This board came from a file you brought in: its code hasn't run yet">▶ Run this board's code</button><span data-sbb="pages" hidden><button data-sbb="pgprev" title="Previous page (PageUp)" aria-label="Previous page">‹</button><select data-sbb="pgsel" title="Page"></select><button data-sbb="pgnext" title="Next page (PageDown)" aria-label="Next page">›</button></span><button data-sbb="submitbtn" hidden title="Send your answers to whoever made this board" aria-haspopup="dialog">Submit</button><button data-sbb="help" title="Help: what the keys and gestures do (?)" aria-label="Help">?</button><button data-sbb="edit" aria-pressed="false" aria-label="Edit" title="Move, write, add and connect notes">✎<span class="lbl"> Edit</span></button><button data-sbb="fit" title="Show everything (0)" aria-label="Show everything">⤢</button><span class="menuwrap"><button data-sbb="filebtn" title="New, open, download" aria-haspopup="menu">File<span class="caret sb-caret" aria-hidden="true"></span></button><div data-sbb="filemenu" class="menu" role="menu" aria-label="File" hidden></div></span><span class="menuwrap"><button data-sbb="menubtn" title="Pages, layout, language, Present, TimeTravel" aria-label="More" aria-haspopup="menu">⋯</button><div data-sbb="menu" class="menu" hidden><button data-sbb="addpage">Add a page</button><button data-sbb="pageprops">Page…</button><button data-sbb="rmpage" hidden>Delete this page</button><button data-sbb="tidy">Tidy (automatic layout)</button><button data-sbb="mermaid">Import Mermaid…</button><button data-sbb="revert" hidden>Revert to the original</button><div data-sbb="lang" role="group" aria-label="The language of this board's code">Code: <button data-mode="python" aria-pressed="true">Python</button><button data-mode="sage" aria-pressed="false">Sage</button><button data-mode="magma" aria-pressed="false">Magma</button><button data-mode="matlab" aria-pressed="false">MATLAB</button></div><hr><button data-sbb="present">Present (a slideshow)</button><button data-sbb="timetravel">TimeTravel…</button><button data-sbb="term" hidden title="A bash shell on your workspace's files">Terminal</button><button data-sbb="termend" hidden title="Stop the shell and clear its output and command history">End terminal session…</button><button data-sbb="agent" hidden title="Connect an agent on this computer (Claude Code, Codex, …) to files you choose">Connect an agent…</button><button data-sbb="review" hidden title="Review what an agent changed in its branches">Review changes…</button><hr><button data-sbb="helpitem">Help: keys and gestures…</button></div></span><button data-sbb="sharebtn" title="Share this board" aria-haspopup="dialog" hidden><svg viewBox="0 0 16 16" aria-hidden="true"><path d="M8 10.5V2.2M4.9 5.1 8 2l3.1 3.1" fill="none" stroke="currentColor" stroke-width="1.4" stroke-linecap="round" stroke-linejoin="round"/><path d="M3 8.5v4.3c0 .4.3.7.7.7h8.6c.4 0 .7-.3.7-.7V8.5" fill="none" stroke="currentColor" stroke-width="1.4" stroke-linecap="round"/></svg>Share</button><span data-sbb="acct"></span><input data-sbb="openfile" type="file" accept=".json,.html,.htm,.canvas,.mmd,.mermaid,.md,.board,.slides,application/json,text/html,text/markdown,text/plain" hidden></div>
 <div data-sbb="pr-mask" hidden></div><div data-sbb="pr-say" hidden></div><div data-sbb="pr-bar" hidden><button data-sbb="pr-prev" title="Back (←)" aria-label="Back">‹</button><span data-sbb="pr-where"></span><button data-sbb="pr-next" title="Next (→, Space)" aria-label="Next">›</button><button data-sbb="pr-exit" title="Stop (Esc)" aria-label="Stop presenting">✕</button></div>
 <div data-sbb="tour" hidden><div data-sbb="say"></div><div data-sbb="nav"><div><button data-sbb="prev" title="Back (←)" aria-label="Back" disabled>←</button><button data-sbb="next" title="Next (→)" aria-label="Next">→</button></div><span data-sbb="where"></span></div></div>
 <div data-sbb="find" hidden role="search" aria-label="Find in this board"><input data-sbb="findq" type="text" placeholder="Find in this board" aria-label="Find in this board" spellcheck="false" autocomplete="off"><span data-sbb="findn" aria-live="polite"></span><button data-sbb="findprev" title="Previous (Shift+Enter)" aria-label="Previous match">↑</button><button data-sbb="findnext" title="Next (Enter)" aria-label="Next match">↓</button><button data-sbb="findx" title="Close (Esc)" aria-label="Close Find">✕</button></div>
@@ -472,7 +475,7 @@ export function mountBoard(root: HTMLElement, host: BoardHost) {
    * destroyed) and drew nothing. */
   // (the board's language, as the toolbar's Code says it)
   let codeMode = "python";
-  async function show(d: BoardDoc, view = false): Promise<boolean> {
+  async function show(d: BoardDoc, view = false, ifStill?: BoardDoc): Promise<boolean> {
     const g = loadGen, over = () => destroyed || g !== loadGen;
     if (over()) return false;
     // (another document than the one shown, during a drag or resize: the
@@ -493,7 +496,18 @@ export function mountBoard(root: HTMLElement, host: BoardHost) {
     if (over()) return false;
     await images.ensure(Object.keys(d.images ?? {}));
     if (over()) return false;
+    // (KaTeX: the host's, loaded the first time a board has math; awaited here, with the pictures, before anything
+    //  of this document is committed: nothing awaited follows the checks below)
+    let math: { typeset: (el: Element) => void } | null = null;
+    if (host.math && hasMath(JSON.stringify(d))) {
+      mathModule ??= host.math();
+      math = await mathModule;
+      if (over()) return false;
+    }
     if (!view && !replacing && doc !== again) return false;
+    // (a document from elsewhere, fenced: an edit made here while it awaited its pictures or KaTeX wins; it stands
+    //  down.  From here to the end, nothing is awaited)
+    if (ifStill && doc !== ifStill) return false;
     if (!view) {
       // (each decision, pending or done, kept only while its page's
       // question, as defined, has the words it was asked about: any other
@@ -521,13 +535,7 @@ export function mountBoard(root: HTMLElement, host: BoardHost) {
     board.askScope = askKey(pageIx + 1, "");
     const v = flipped.size ? flip(pageView(d, pageIx)) : pageView(d, pageIx);
     board.markdown = (s) => markdown(s, { pixels: docPixels, remote: writtenHere ? true : "click" });
-    if (host.math && hasMath(JSON.stringify(d))) {
-      // KaTeX: the host's, loaded the first time a board has math
-      mathModule ??= host.math();
-      const m = await mathModule;
-      if (over()) return false;
-      board.typeset = (el) => m.typeset(el);
-    }
+    if (math) { const m = math; board.typeset = (el) => m.typeset(el); }
     // (edges' routes are found between frames: large boards show at once,
     // their edges straight until routed)
     const laid = premeasure(v);
@@ -1327,15 +1335,27 @@ export function mountBoard(root: HTMLElement, host: BoardHost) {
   // document back over it
   // (one after another: an older one never drawn over a newer; resolved once shown, for the store)
   let elsewhere: Promise<unknown> = opened ?? Promise.resolve();
-  const unsubscribe = host.store?.subscribe?.((d, note) => {
+  const unsubscribe = host.store?.subscribe?.((d, note, from) => {
     const shown = elsewhere.then(async () => {
-      if (destroyed || !doc) return;
+      if (destroyed || !doc) return false;
       closeTimeTravel(false);
       const prev = doc;
+      // (written elsewhere: shown, its new and changed code not run until the person runs it, with "Run this board's
+      //  code"; what didn't change keeps its outputs.  Set before it is drawn, and put back if it stands down)
+      const wasPaused = paused, wasTitle = $("runpaused").title;
+      if (from?.held) {
+        paused = true;
+        $("runpaused").title = "This board was changed elsewhere: its new and changed code hasn't run yet";
+      }
+      if (!(await show(d, false, from?.fenced ? prev : undefined))) {
+        paused = wasPaused;
+        $("runpaused").title = wasTitle;
+        return false;
+      }
       editor.forget();
-      if (!(await show(d))) return;
       remember(prev);
       if (note) say(note);
+      return true;
     });
     elsewhere = shown.catch(fail);
     return shown;
