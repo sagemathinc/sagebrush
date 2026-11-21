@@ -368,14 +368,14 @@ fn python_factorer(factor: Py<PyAny>) -> impl Fn(&[BigInt]) -> Vec<(Vec<BigInt>,
         match r {
             Ok(v) => v,
             // (a Ctrl-C while the callback ran, Python's own or a nested
-            // engine call's KeyboardInterrupt: the op's Stop, so the call
-            // ends as KeyboardInterrupt here, at once, and not as an empty
-            // factorization the op would report as a bad callback)
-            Err(true) => {
-                sagebrush_interrupt::request();
-                sagebrush_interrupt::check();
-                Vec::new()
-            }
+            // engine call's KeyboardInterrupt: this call's Stop, unwound
+            // here with the Stop's own payload, which guarded's catch
+            // reports as KeyboardInterrupt, at once and not as an empty
+            // factorization the op would report as a bad callback.  No
+            // global request is set, so no other call, on this thread or
+            // another, is stopped by it; the callers of the factorer run
+            // on the calling thread, outside any parallel job)
+            Err(true) => std::panic::panic_any(sagebrush_interrupt::Interrupted),
             // (any other error: an empty factorization, which the op
             // refuses as not irreducible, as before)
             Err(false) => Vec::new(),

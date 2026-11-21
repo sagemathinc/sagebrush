@@ -1,8 +1,9 @@
 """The Python factor callback of the modular-forms ops (sagebrush.mf: newspace,
 newforms; their factor= argument): a KeyboardInterrupt raised in it ends
 the engine call as KeyboardInterrupt, not as "the factor callback did not
-return an irreducible factorization", and the interpreter stays usable;
-any other error in it is still that error.  Then Ctrl-C during newforms
+return an irreducible factorization", and the interpreter stays usable,
+on the main thread and on others, with no other call stopped by it; any
+other error in it is still that error.  Then Ctrl-C during newforms
 with the default callback (a child process, SIGINT at several moments):
 KeyboardInterrupt or a finished call, never the callback error.
 
@@ -39,6 +40,57 @@ def main():
         except ValueError as e:
             assert "did not return an irreducible factorization" in str(e), e
     print("the callback's KeyboardInterrupt: ok")
+    # from a thread that isn't the main one (guarded installs no SIGINT
+    # guard there): the callback's KeyboardInterrupt sets no global request,
+    # so that thread's next call completes
+    import threading
+    out = {}
+
+    def worker():
+        try:
+            mf.newspace(37, 2, factor=interrupting)
+            out["first"] = "not interrupted"
+        except KeyboardInterrupt:
+            out["first"] = "interrupted"
+        out["next"] = mf.newspace(11, 2)["dim"]
+
+    t = threading.Thread(target=worker)
+    t.start()
+    t.join()
+    assert out == {"first": "interrupted", "next": 1}, out
+
+    # and an unrelated call on another thread, paused in its own callback
+    # while this one's raises KeyboardInterrupt, is not stopped by it
+    paused, resume = threading.Event(), threading.Event()
+
+    def pausing(f):
+        paused.set()
+        resume.wait(60)
+        return mf._factor(f)
+
+    def unrelated():
+        try:
+            out["unrelated"] = mf.newspace(37, 2, factor=pausing)["dim"]
+        except KeyboardInterrupt:
+            out["unrelated"] = "interrupted"
+
+    def interrupted():
+        try:
+            mf.newspace(11, 2, factor=interrupting)
+            out["other"] = "not interrupted"
+        except KeyboardInterrupt:
+            out["other"] = "interrupted"
+
+    u = threading.Thread(target=unrelated)
+    u.start()
+    assert paused.wait(60)
+    i = threading.Thread(target=interrupted)
+    i.start()
+    i.join()
+    resume.set()
+    u.join()
+    assert (out["other"], out["unrelated"]) == ("interrupted", 2), out
+    print("threads: ok")
     if sys.platform == "win32":
         print("Ctrl-C during the callback: skipped on Windows")
         return
