@@ -4,7 +4,8 @@
 // (page.ts) draws it.
 //
 // - Nothing about a task is kept on the page: the list comes from tasks.list on every connect and switch-on, a task's
-//   thread from tasks.get (paged by `after`) when it is opened, and both move on with task.event while connected.
+//   thread from tasks.get (paged by `after`) when it is opened, and both move on with task.event while connected. Of
+//   two views of a task, the one with the higher seq wins: an answer made before a newer event never moves it back.
 // - Every answer and event is checked first (tasks-schema.ts). One event this page refuses is skipped and counted
 //   (`skipped`), and the rest of the thread still shows.
 // - A task's chat turn events go into an ordinary chat thread (agent-chat/events.ts apply), numbered by the task's seq.
@@ -104,15 +105,17 @@ export class DelegateTasks {
     const { tasks } = TASK_RESULTS["tasks.list"](await this.client().request("tasks.list", {}));
     if (p !== this.p || this.state() !== "on") return;
     const next: DelegateTask[] = [];
-    for (const entry of [...tasks].sort((a, b) => b.updated - a.updated)) {
+    for (const entry of tasks) {
       const t = this.task(entry.task);
       if (t) {
-        t.entry = { ...entry, seq: Math.max(entry.seq, t.thread.applied_seq) };
+        // (an answer older than what this page has (a task.event came after it was made) never moves a task back: only a
+        //  higher seq replaces the entry; an equal one keeps it)
+        if (entry.seq > t.entry.seq) t.entry = { ...entry };
         if (t.loaded && entry.seq > t.thread.applied_seq) void this.open(entry.task).catch(() => {});
         next.push(t);
       } else next.push(fresh(entry));
     }
-    this.tasks = next;
+    this.tasks = next.sort((a, b) => b.entry.updated - a.entry.updated);
     this.o.changed();
   }
 
@@ -135,7 +138,8 @@ export class DelegateTasks {
           this.tasks = this.tasks.map((x) => (x === t ? cur : x));
         }
         for (const e of r.events) if (!take(cur, e)) break;
-        cur.entry = { ...r.task, seq: Math.max(r.task.seq, cur.thread.applied_seq) };
+        // (the same rule for tasks.get's entry: only a higher seq replaces it)
+        if (cur !== t || r.task.seq > cur.entry.seq) cur.entry = { ...r.task, seq: Math.max(r.task.seq, cur.thread.applied_seq) };
         cur.loaded = true;
         this.o.changed();
         if (r.last >= r.task.seq || !r.events.length) return;

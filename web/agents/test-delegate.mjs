@@ -166,6 +166,35 @@ H.stop();
   H2.stop();
 }
 
+// ---- a list answer older than an event (made before it, delivered after it): the higher seq wins, the task never
+//      goes back
+for (const [what, event, chip] of [["failed", { type: "task_status", status: "failed", reason: "new failure" }, "Failed"], ["closed", { type: "task_status", status: "closed" }, "Closed"]]) {
+  const H5 = delegateHost();
+  const T = await H5.addTask({ title: "x" });
+  const D5 = new DelegateTasks({ changed: () => {} });
+  const P5 = pairWith(H5);
+  D5.attach(P5);
+  await P5.paired();
+  await P5.allow({ folders: ["/"], write: true, expires: null }, false);
+  D5.turnOn();
+  await until(() => D5.tasks.length === 1);
+  // (the next tasks.list answer held back, as made, while a newer event goes out)
+  const send = H5.sock.send.bind(H5.sock);
+  let held = null;
+  H5.sock.send = (data, ...a) => { if (!held && JSON.parse(data).result?.tasks) { held = data; return data.length; } return send(data, ...a); };
+  const r = D5.refresh();
+  await until(() => held !== null);
+  const seq0 = JSON.parse(held).result.tasks[0].seq;
+  H5.emit(T.task, event);
+  await until(() => D5.task(T.task).entry.status === event.status);
+  send(held);
+  await r;
+  const e = D5.task(T.task).entry;
+  ok(seq0 === 1 && e.status === event.status && e.seq === 2 && chipOf(e) === chip, `a stale list (seq 1) after a newer event (seq 2, ${what}): the task stays ${chip}, seq 2`, { seq0, status: e.status, seq: e.seq });
+  P5.revoke();
+  H5.stop();
+}
+
 // ---- an agent that doesn't offer Delegate: no switch
 {
   const H3 = delegateHost({ features: ["chat.resume"] });
