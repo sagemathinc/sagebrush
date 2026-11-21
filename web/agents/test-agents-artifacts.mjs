@@ -523,6 +523,43 @@ try {
   // ======================================================================== saved, with its base; reopened
   // ======================================================================== the way to the files: Files… and the switch
   if (want("filesbtn")) {
+    const BIG = `document.getElementById('files-big').click()`, SWITCH = `document.querySelector('nav.side .sb-mode [data-mode="files"]').click()`;
+    // (with the agent connected, Files… and the switch open the files in a new tab: this page, its connection and a
+    //  running turn stay (leaving would lose the connection, and a page come back by navigating can't take it up again).
+    //  window.open stubbed: what it was asked, and a tab given or refused)
+    const besideTab = async (click, give) => {
+      await ev(`(() => { window.__opened = []; window.open = (...a) => { window.__opened.push(a); return ${give ? "{ opener: 1 }" : "null"}; }; })()`);
+      await ev(`localStorage.setItem("sagebrush-files-sidebar", "0")`);
+      const tB = `t${++turnN}`;
+      event(tB, { type: "turn_started" });
+      event(tB, { type: "message_revised", message: "mb", revision: 1 });
+      event(tB, { type: "text_delta", message: "mb", revision: 1, text: "still at it" });
+      await until(`[...document.querySelectorAll('.turn')].some((d) => /still at it/.test(d.textContent))`);
+      await ev(click);
+      await sleep(1000);
+      await until(`document.readyState === "complete"`, 30000).catch(() => {}); // (a page that left: read where it is)
+      const st = await ev(`({ path: location.pathname, opened: window.__opened, pref: localStorage.getItem("sagebrush-files-sidebar"), toast: document.getElementById('toast')?.hidden === false ? document.getElementById('toast').textContent : null, stop: document.querySelector('#stop')?.hidden === false, connect: document.querySelector('#connect')?.textContent ?? null })`);
+      const r = await call("workspace.list", { folder: "/" }).then(() => "answered", (e) => e.message);
+      // (a page that left lost its agent (what these rows guard against): paired again, so the rows after it run)
+      if (sock) event(tB, { type: "turn_finished", outcome: "completed" });
+      if (st.path !== "/agents/") { await pair(); await converse(); }
+      return { ...st, r };
+    };
+    const tabBig = await besideTab(BIG, true);
+    ok(tabBig.path === "/agents/" && JSON.stringify(tabBig.opened) === JSON.stringify([["/", "_blank"]]) && tabBig.pref === "1" && tabBig.stop && tabBig.connect === "Connected" && tabBig.r === "answered" && tabBig.toast === null,
+      "with the agent connected, Files… opens the files in a new tab: this page stays, the turn still running, the agent still answered", tabBig);
+    const tabSwitch = await besideTab(SWITCH, true);
+    ok(tabSwitch.path === "/agents/" && JSON.stringify(tabSwitch.opened) === JSON.stringify([["/", "_blank"]]) && tabSwitch.stop && tabSwitch.r === "answered",
+      "with the agent connected, the switch's Files opens a new tab the same way", tabSwitch);
+    const blocked = await besideTab(BIG, false);
+    ok(blocked.path === "/agents/" && blocked.r === "answered" && /blocked the new tab for Files/.test(blocked.toast ?? ""),
+      "a new tab the browser refuses: this page stays, connected, and says how to get to the files", blocked);
+    await ev(`delete window.open`);
+    // (no agent connected (its connection closed): Files leaves this page, as before)
+    const unpair = async () => {
+      sock.close();
+      await until(`document.querySelector('#connect').textContent !== 'Connected'`, 15000);
+    };
     // (a text file's edit typed just now (its 700 ms save still pending), then Files… at once: the page leaves only after
     //  the edit is saved; read back through the agent once paired again)
     const quick = async (path, click, word) => {
@@ -532,6 +569,7 @@ try {
       await ev(`(() => { const t = document.querySelector('${PANE} .file-body textarea'); t.focus(); t.setSelectionRange(t.value.length, t.value.length); })()`);
       await send("Input.insertText", { text: word });
       await ev(`localStorage.setItem("sagebrush-files-sidebar", "0")`);
+      await unpair();
       await ev(click);
       await until(`location.pathname === "/" && document.readyState === "complete"`, 30000);
       const pref = await ev(`localStorage.getItem("sagebrush-files-sidebar")`);
@@ -540,9 +578,9 @@ try {
       const r = await call("workspace.read", { path });
       return { pref, text: typeof r.content === "string" ? r.content : r.content?.text ?? JSON.stringify(r.content) };
     };
-    const big = await quick("/notes/quick.txt", `document.getElementById('files-big').click()`, "NEW-BIG");
+    const big = await quick("/notes/quick.txt", BIG, "NEW-BIG");
     ok(big.text.includes("NEW-BIG") && big.pref === "1", "an edit typed just before Files… is saved before the page leaves, and the files are set to show", big);
-    const small = await quick("/notes/quick2.txt", `document.querySelector('nav.side .sb-mode [data-mode="files"]').click()`, "NEW-SMALL");
+    const small = await quick("/notes/quick2.txt", SWITCH, "NEW-SMALL");
     ok(small.text.includes("NEW-SMALL") && small.pref === "1", "the switch's Files leaves the same way: the edit saved, the files set to show", small);
     // (a cell running: Files… asks first, as closing the pane does; Cancel keeps this page, the cell running, nothing set)
     const path = "/notes/slow-files.ipynb";
@@ -551,7 +589,8 @@ try {
     await ev(`${cellJs(0)}.querySelector('.runb').click()`);
     await until(`/· running/.test([...document.querySelectorAll('#artifacts .tab')].map((t) => t.textContent).join())`, 120000);
     await ev(`localStorage.setItem("sagebrush-files-sidebar", "0")`);
-    await ev(`document.getElementById('files-big').click()`);
+    await unpair();
+    await ev(BIG);
     await until(`document.querySelector('#close-running').open`);
     await ev(`document.querySelector('#close-running').close('')`);
     await sleep(500);
@@ -561,6 +600,8 @@ try {
     await until(`document.querySelector('#close-running').open`);
     await ev(`document.querySelector('#close-running').close('stop')`);
     await until(`!document.body.classList.contains('has-artifact')`, 10000);
+    await pair();
+    await converse();
   }
 
   // ======================================================================== Open in Sagebrush: the file's own page
