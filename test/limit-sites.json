@@ -1824,6 +1824,11 @@
   "owner": "engine arithmetic (exact linear algebra)",
   "reason": "the determinant's route choice (Bareiss for small or very wide-entry matrices, else multimodular): a crossover on the size and the entries' bits, not a cap; refuses nothing"
  },
+ "engine/arith/src/zmat.rs :: mul :: let (abits, obits) = (self.max_bits(), o.max_bits()); #0": {
+  "class": "none",
+  "owner": "engine arithmetic (exact linear algebra)",
+  "reason": "the operands' largest entry sizes, for the product's i128 route and its unit count: sizes, not a cap; refuses nothing"
+ },
  "engine/arith/src/zmat.rs :: rref_multimodular :: let amax = a.max_bits() as f64; #0": {
   "class": "none",
   "owner": "exact linear algebra (engine/arith)",
@@ -2449,6 +2454,16 @@
   "class": "none",
   "owner": "engine arith (big-integer wire decoder)",
   "reason": "test code: the big-integer decoder's correctness, allocation and Stop tests; refuses nothing itself"
+ },
+ "engine/arith/tests/zmat_meter.rs :: zmat_units_and_stop_checks :: let mut meter = Meter::accounting(u64::MAX); #0": {
+  "class": "none",
+  "owner": "engine arithmetic (exact linear algebra)",
+  "reason": "test code: the metering test's accounting meter with no upper bound; refuses nothing"
+ },
+ "engine/arith/tests/zmat_progress.rs :: seen_mid :: let mut meter = Meter::accounting(u64::MAX); #0": {
+  "class": "none",
+  "owner": "engine arithmetic (exact linear algebra)",
+  "reason": "test code: the progress test's accounting meter with no upper bound; refuses nothing"
  },
  "engine/arith/tests/zmul_admission_targets.rs :: points :: let plan = zmul::admit(&c, &c, 2 * a.len() as u64 + 20, &Caps { n: u64::MAX, o: u64::MAX, peak: u64::MAX, work: u64::MAX, ..CAPS }).unwrap().unwrap(); #0": {
   "class": "none",
@@ -5113,6 +5128,11 @@
   "owner": "lattice reduction (engine/poly l2)",
   "reason": "the memory bound's arithmetic (l2_bytes): sizes a reservation; refuses nothing"
  },
+ "engine/poly/src/l2.rs :: l2_bytes_fails_closed :: assert!(l2_bytes(1, usize::MAX, 1).is_some()); #0": {
+  "class": "none",
+  "owner": "lattice reduction (engine/poly l2)",
+  "reason": "test code (and the tests-only entry that forces a proof path): exercises the budget, the cap and l2_bytes; refuses nothing itself"
+ },
  "engine/poly/src/l2.rs :: l2_bytes_fails_closed :: assert_eq!(l2_bytes(1, 1, u64::MAX), None); #0": {
   "class": "none",
   "owner": "lattice reduction (engine/poly l2)",
@@ -5129,6 +5149,11 @@
   "reason": "test code (and the tests-only entry that forces a proof path): exercises the budget, the cap and l2_bytes; refuses nothing itself"
  },
  "engine/poly/src/l2.rs :: l2_bytes_fails_closed :: assert_eq!(l2_bytes(usize::MAX, usize::MAX, u64::MAX), None); #0": {
+  "class": "none",
+  "owner": "lattice reduction (engine/poly l2)",
+  "reason": "test code (and the tests-only entry that forces a proof path): exercises the budget, the cap and l2_bytes; refuses nothing itself"
+ },
+ "engine/poly/src/l2.rs :: l2_bytes_fails_closed :: const WIDE: &[(usize, usize, u64)] = &[(usize::MAX, 2, 64), (3, usize::MAX, 1 << 24)]; #0": {
   "class": "none",
   "owner": "lattice reduction (engine/poly l2)",
   "reason": "test code (and the tests-only entry that forces a proof path): exercises the budget, the cap and l2_bytes; refuses nothing itself"
@@ -6180,7 +6205,12 @@
   "owner": "lattice reduction (engine/poly lll)",
   "reason": "test code: exercises the routes, the cut, the budget and the census; refuses nothing itself"
  },
- "engine/poly/src/lll.rs :: the_route_sizes_fail_closed :: for (d, w, c) in [(usize::MAX, 1, 1), (1, 1, u64::MAX), (1 << 32, 1 << 32, 64), (1 << 20, 1, u64::MAX / 4)] { #0": {
+ "engine/poly/src/lll.rs :: the_route_sizes_fail_closed :: const WIDE: &[(usize, usize, u64)] = &[(usize::MAX, usize::MAX, 64)]; #0": {
+  "class": "none",
+  "owner": "lattice reduction (engine/poly lll)",
+  "reason": "test code: exercises the routes, the cut, the budget and the census; refuses nothing itself"
+ },
+ "engine/poly/src/lll.rs :: the_route_sizes_fail_closed :: for &(d, w, c) in [(usize::MAX, 1, 1), (1, 1, u64::MAX), (1 << 20, 1, u64::MAX / 4)].iter().chain(WIDE) { #0": {
   "class": "none",
   "owner": "lattice reduction (engine/poly lll)",
   "reason": "test code: exercises the routes, the cut, the budget and the census; refuses nothing itself"

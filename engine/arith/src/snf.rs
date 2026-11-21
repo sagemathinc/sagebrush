@@ -23,8 +23,20 @@
 //! (Iliopoulos; Hafner and McCurley).  e is small when the invariants other
 //! than the last are (random matrices), and large when they are not
 //! (p I, repeated prime powers): e >= t_1 ... t_(n-1).
+//!
+//! Units (`cost::tally`), counted here in a local `zmat::Acc` and flushed
+//! once per pass of the elimination: on the word path every operation
+//! reduces modulo e, so each is ModArith, one unit (a row or column
+//! update entry, a quotient or divisibility test, a quotient step of the
+//! u64 extended Euclid, a gcd with e); on the big path the products go
+//! through `bigmul_units`, the reductions modulo e and the divisibility
+//! tests through `bigdiv_units`, and the Bezout coefficients and gcds with
+//! e through the Gcd units.  The determinant and the solve count
+//! themselves.
 
-use crate::zmat::{self, ZMat};
+use crate::cost::{bigdiv_units, bigmul_units, publish_progress, tally_all, Family, Units, FAMILIES};
+use std::cell::Cell;
+use crate::zmat::{self, biggcd_units, limbs, Acc, ZMat};
 use num_integer::Integer;
 use num_traits::{One, Signed, ToPrimitive, Zero};
 use sagebrush_bigint::BigInt;
@@ -35,9 +47,17 @@ use sagebrush_bigint::BigInt;
 const WORD_E: u64 = 1 << 62;
 
 /// Z/eZ for [`smith_mod`]'s elimination: residues in [0, e), compared and
-/// divided as the integers they are.
+/// divided as the integers they are.  A ring counts the work its own
+/// operations do by their sizes, in a `Cell` it hands over at [`Zn::take`]
+/// (the big path), or leaves its entry operations, which all cost one unit,
+/// to the elimination's bulk count ([`Zn::WORD`], the word path); so the
+/// elimination's inner loops carry no counter of their own.
 trait Zn {
     type T: Clone + PartialEq;
+    /// Whether every entry operation (`lin`, `sub_mul`, `add`, `quotient`,
+    /// `divides`, `gcd_e`) costs one ModArith unit, counted in bulk by the
+    /// elimination rather than by the ring.
+    const WORD: bool;
     fn residue(&self, x: &BigInt) -> Self::T;
     fn integer(x: &Self::T) -> BigInt;
     fn is_zero(x: &Self::T) -> bool;
@@ -48,24 +68,37 @@ trait Zn {
     fn add(&self, x: &Self::T, y: &Self::T) -> Self::T;
     fn neg(&self, x: &Self::T) -> Self::T;
     /// x / y when y > 0 divides x as integers.
-    fn quotient(x: &Self::T, y: &Self::T) -> Option<Self::T>;
+    fn quotient(&self, x: &Self::T, y: &Self::T) -> Option<Self::T>;
     /// For p > 0 and a as integers, g = gcd(p, a) and residues s, u with
     /// s p + u a = g over Z: (s, u, a / g, p / g).  The matrix
     /// [[s, u], [-a/g, p/g]] has determinant 1.
-    fn bezout(&self, p: &Self::T, a: &Self::T) -> (Self::T, Self::T, Self::T, Self::T);
-    /// gcd(x, e); e for x = 0.
-    fn gcd_e(&self, x: &Self::T) -> Self::T;
+    /// `steps` gets the word path's quotient steps (one ModArith unit
+    /// each); the big path counts its own.
+    fn bezout(&self, p: &Self::T, a: &Self::T, steps: &mut u64) -> (Self::T, Self::T, Self::T, Self::T);
+    /// gcd(x, e); e for x = 0.  `steps` gets the word path's quotient
+    /// steps (one ModArith unit each); the big path counts its own.
+    fn gcd_e(&self, x: &Self::T, steps: &mut u64) -> Self::T;
     fn is_one(x: &Self::T) -> bool;
     /// Whether g > 0 divides x as integers.
-    fn divides(g: &Self::T, x: &Self::T) -> bool;
+    fn divides(&self, g: &Self::T, x: &Self::T) -> bool;
+    /// The units of reducing the residues from the integers.
+    fn residue_units(&self, a: &ZMat) -> Units;
+    /// The units the ring's own operations counted since the last take.
+    fn take(&self) -> [u64; FAMILIES];
 }
 
-struct Word(u64);
+/// The word path: e < 2^62 (all its operations counted in bulk by the
+/// elimination, its Bezout steps included; nothing here is mutable, so the
+/// modulus stays in a register through the inner loops).
+struct Word {
+    e: u64,
+}
 
 impl Zn for Word {
     type T = u64;
+    const WORD: bool = true;
     fn residue(&self, x: &BigInt) -> u64 {
-        x.mod_floor(&BigInt::from(self.0)).to_u64().expect("a residue below e")
+        x.mod_floor(&BigInt::from(self.e)).to_u64().expect("a residue below e")
     }
     fn integer(x: &u64) -> BigInt {
         BigInt::from(*x)
@@ -73,62 +106,101 @@ impl Zn for Word {
     fn is_zero(x: &u64) -> bool {
         *x == 0
     }
+    #[inline]
     fn lin(&self, s: &u64, x: &u64, u: &u64, y: &u64) -> u64 {
-        ((*s as u128 * *x as u128 + *u as u128 * *y as u128) % self.0 as u128) as u64
+        ((*s as u128 * *x as u128 + *u as u128 * *y as u128) % self.e as u128) as u64
     }
+    #[inline]
     fn sub_mul(&self, x: &u64, q: &u64, y: &u64) -> u64 {
-        let qy = (*q as u128 * *y as u128 % self.0 as u128) as u64;
+        let qy = (*q as u128 * *y as u128 % self.e as u128) as u64;
         if *x >= qy {
             x - qy
         } else {
-            x + (self.0 - qy)
+            x + (self.e - qy)
         }
     }
+    #[inline]
     fn add(&self, x: &u64, y: &u64) -> u64 {
         // (both below 2^62: no overflow)
-        (x + y) % self.0
+        (x + y) % self.e
     }
     fn neg(&self, x: &u64) -> u64 {
         if *x == 0 {
             0
         } else {
-            self.0 - x
+            self.e - x
         }
     }
-    fn quotient(x: &u64, y: &u64) -> Option<u64> {
+    #[inline]
+    fn quotient(&self, x: &u64, y: &u64) -> Option<u64> {
         x.is_multiple_of(y).then(|| x / y)
     }
-    fn bezout(&self, p: &u64, a: &u64) -> (u64, u64, u64, u64) {
+    fn bezout(&self, p: &u64, a: &u64, steps: &mut u64) -> (u64, u64, u64, u64) {
         // the extended Euclidean algorithm on i128: |cofactors| <= max(p, a) < 2^62
         let (mut r0, mut r1) = (*p as i128, *a as i128);
         let (mut s0, mut s1, mut u0, mut u1) = (1i128, 0i128, 0i128, 1i128);
         while r1 != 0 {
+            *steps += 1;
             let q = r0 / r1;
             (r0, r1) = (r1, r0 - q * r1);
             (s0, s1) = (s1, s0 - q * s1);
             (u0, u1) = (u1, u0 - q * u1);
         }
-        let e = self.0 as i128;
+        let e = self.e as i128;
         let g = r0 as u64;
         (s0.rem_euclid(e) as u64, u0.rem_euclid(e) as u64, a / g, p / g)
     }
-    fn gcd_e(&self, x: &u64) -> u64 {
-        x.gcd(&self.0)
+    fn gcd_e(&self, x: &u64, steps: &mut u64) -> u64 {
+        // (Euclid, so that its quotient steps are what is counted)
+        let (mut a, mut b) = (self.e, *x);
+        while b != 0 {
+            *steps += 1;
+            (a, b) = (b, a % b);
+        }
+        a
     }
     fn is_one(x: &u64) -> bool {
         *x == 1
     }
-    fn divides(g: &u64, x: &u64) -> bool {
+    #[inline]
+    fn divides(&self, g: &u64, x: &u64) -> bool {
         x.is_multiple_of(g)
+    }
+    fn residue_units(&self, a: &ZMat) -> Units {
+        let mut u = Units::default();
+        u.0[Family::ModArith as usize] = a.d.iter().map(zmat::reduce_units).sum();
+        u
+    }
+    fn take(&self) -> [u64; FAMILIES] {
+        [0; FAMILIES]
     }
 }
 
-struct Big(BigInt);
+/// The big path: e >= 2^62 (every operation counted here by its sizes).
+struct Big {
+    e: BigInt,
+    le: usize,
+    units: Cell<[u64; FAMILIES]>,
+}
+
+impl Big {
+    fn new(e: &BigInt) -> Big {
+        Big { e: e.clone(), le: limbs(e), units: Cell::new([0; FAMILIES]) }
+    }
+    fn count(&self, u: Units) {
+        let mut v = self.units.get();
+        for (a, &x) in v.iter_mut().zip(&u.0) {
+            *a += x;
+        }
+        self.units.set(v);
+    }
+}
 
 impl Zn for Big {
     type T = BigInt;
+    const WORD: bool = false;
     fn residue(&self, x: &BigInt) -> BigInt {
-        x.mod_floor(&self.0)
+        x.mod_floor(&self.e)
     }
     fn integer(x: &BigInt) -> BigInt {
         x.clone()
@@ -137,33 +209,90 @@ impl Zn for Big {
         x.is_zero()
     }
     fn lin(&self, s: &BigInt, x: &BigInt, u: &BigInt, y: &BigInt) -> BigInt {
-        (s * x + u * y).mod_floor(&self.0)
+        self.count(bigmul_units(limbs(s), limbs(x)));
+        self.count(bigmul_units(limbs(u), limbs(y)));
+        self.count(bigdiv_units(2 * self.le + 1, self.le));
+        (s * x + u * y).mod_floor(&self.e)
     }
     fn sub_mul(&self, x: &BigInt, q: &BigInt, y: &BigInt) -> BigInt {
-        (x - q * y).mod_floor(&self.0)
+        self.count(bigmul_units(limbs(q), limbs(y)));
+        self.count(bigdiv_units(2 * self.le + 1, self.le));
+        (x - q * y).mod_floor(&self.e)
     }
     fn add(&self, x: &BigInt, y: &BigInt) -> BigInt {
-        (x + y).mod_floor(&self.0)
+        self.count(bigdiv_units(self.le + 1, self.le));
+        (x + y).mod_floor(&self.e)
     }
     fn neg(&self, x: &BigInt) -> BigInt {
-        (-x).mod_floor(&self.0)
+        (-x).mod_floor(&self.e)
     }
-    fn quotient(x: &BigInt, y: &BigInt) -> Option<BigInt> {
+    fn quotient(&self, x: &BigInt, y: &BigInt) -> Option<BigInt> {
+        self.count(bigdiv_units(limbs(x), limbs(y)));
         let (q, r) = x.div_rem(y);
         r.is_zero().then_some(q)
     }
-    fn bezout(&self, p: &BigInt, a: &BigInt) -> (BigInt, BigInt, BigInt, BigInt) {
+    fn bezout(&self, p: &BigInt, a: &BigInt, _: &mut u64) -> (BigInt, BigInt, BigInt, BigInt) {
+        self.count(biggcd_units(limbs(p), limbs(a)));
+        self.count(bigdiv_units(2 * self.le, self.le));
+        self.count(bigdiv_units(2 * self.le, self.le));
         let eg = p.extended_gcd(a);
-        (eg.x.mod_floor(&self.0), eg.y.mod_floor(&self.0), a / &eg.gcd, p / &eg.gcd)
+        (eg.x.mod_floor(&self.e), eg.y.mod_floor(&self.e), a / &eg.gcd, p / &eg.gcd)
     }
-    fn gcd_e(&self, x: &BigInt) -> BigInt {
-        x.gcd(&self.0)
+    fn gcd_e(&self, x: &BigInt, _: &mut u64) -> BigInt {
+        self.count(biggcd_units(self.le, limbs(x)));
+        x.gcd(&self.e)
     }
     fn is_one(x: &BigInt) -> bool {
         x.is_one()
     }
-    fn divides(g: &BigInt, x: &BigInt) -> bool {
+    fn divides(&self, g: &BigInt, x: &BigInt) -> bool {
+        self.count(bigdiv_units(limbs(x), limbs(g)));
         (x % g).is_zero()
+    }
+    fn residue_units(&self, a: &ZMat) -> Units {
+        let mut u = Units::default();
+        for x in &a.d {
+            u.add(&bigdiv_units(limbs(x), self.le));
+        }
+        u
+    }
+    fn take(&self) -> [u64; FAMILIES] {
+        self.units.replace([0; FAMILIES])
+    }
+}
+
+/// The elimination's count: the word path's bulk count of entry
+/// operations, added with the ring's own counts to the thread's tally
+/// about every 2^16 units (at the existing Stop checks, as nmod's kernels
+/// do) and when dropped, also while unwinding from a Stop, so none is lost.
+struct Count<'a, R: Zn> {
+    r: &'a R,
+    bulk: u64,
+}
+
+impl<R: Zn> Count<'_, R> {
+    /// At a Stop check: flush once enough has been counted.
+    #[inline]
+    fn poll(&mut self) {
+        if self.bulk >= 1 << 16 || !R::WORD {
+            self.flush();
+        }
+    }
+    fn flush(&mut self) {
+        let mut u = self.r.take();
+        if R::WORD {
+            u[Family::ModArith as usize] += std::mem::take(&mut self.bulk);
+        }
+        if u.iter().any(|&x| x != 0) {
+            tally_all(&u);
+            publish_progress();
+        }
+    }
+}
+
+impl<R: Zn> Drop for Count<'_, R> {
+    fn drop(&mut self) {
+        self.flush();
     }
 }
 
@@ -183,10 +312,15 @@ fn smith_in<R: Zn>(r: &R, rows: usize, cols: usize, mut a: Vec<R::T>) -> Vec<R::
     let k = rows.min(cols);
     let at = |i: usize, j: usize| i * cols + j;
     let mut out = Vec::with_capacity(k);
+    // the word path's entry operations, counted per loop (one unit each)
+    let mut c = Count { r, bulk: 0 };
     for t in 0..k {
         let pivot = (t..cols).flat_map(|j| (t..rows).map(move |i| (i, j))).find(|&(i, j)| !R::is_zero(&a[at(i, j)]));
         let Some((pi, pj)) = pivot else {
-            let e = r.gcd_e(&r.residue(&BigInt::zero()));
+            // (gcd_e(0) = e takes no quotient step; the call itself is one
+            // unit)
+            c.bulk += 1;
+            let e = r.gcd_e(&r.residue(&BigInt::zero()), &mut c.bulk);
             out.extend((t..k).map(|_| e.clone()));
             break;
         };
@@ -197,6 +331,7 @@ fn smith_in<R: Zn>(r: &R, rows: usize, cols: usize, mut a: Vec<R::T>) -> Vec<R::
             a.swap(at(i, t), at(i, pj));
         }
         loop {
+            c.poll();
             sagebrush_interrupt::check();
             let mut bezout = false;
             for i in t + 1..rows {
@@ -205,13 +340,16 @@ fn smith_in<R: Zn>(r: &R, rows: usize, cols: usize, mut a: Vec<R::T>) -> Vec<R::
                     continue;
                 }
                 let p = a[at(t, t)].clone();
-                if let Some(q) = R::quotient(&x, &p) {
+                c.bulk += 1;
+                if let Some(q) = r.quotient(&x, &p) {
+                    c.bulk += (cols - t) as u64;
                     for j in t..cols {
                         a[at(i, j)] = r.sub_mul(&a[at(i, j)], &q, &a[at(t, j)]);
                     }
                 } else {
-                    let (s, u, xg, pg) = r.bezout(&p, &x);
+                    let (s, u, xg, pg) = r.bezout(&p, &x, &mut c.bulk);
                     let nxg = r.neg(&xg);
+                    c.bulk += 2 * (cols - t) as u64;
                     for j in t..cols {
                         let (y, z) = (a[at(t, j)].clone(), a[at(i, j)].clone());
                         a[at(t, j)] = r.lin(&s, &y, &u, &z);
@@ -225,15 +363,18 @@ fn smith_in<R: Zn>(r: &R, rows: usize, cols: usize, mut a: Vec<R::T>) -> Vec<R::
                     continue;
                 }
                 let p = a[at(t, t)].clone();
-                if let Some(q) = R::quotient(&x, &p) {
+                c.bulk += 1;
+                if let Some(q) = r.quotient(&x, &p) {
+                    c.bulk += (rows - t) as u64;
                     for i in t..rows {
                         a[at(i, j)] = r.sub_mul(&a[at(i, j)], &q, &a[at(i, t)]);
                     }
                 } else {
                     // (refills the column below the pivot: another pass)
                     bezout = true;
-                    let (s, u, xg, pg) = r.bezout(&p, &x);
+                    let (s, u, xg, pg) = r.bezout(&p, &x, &mut c.bulk);
                     let nxg = r.neg(&xg);
+                    c.bulk += 2 * (rows - t) as u64;
                     for i in t..rows {
                         let (y, z) = (a[at(i, t)].clone(), a[at(i, j)].clone());
                         a[at(i, t)] = r.lin(&s, &y, &u, &z);
@@ -244,14 +385,27 @@ fn smith_in<R: Zn>(r: &R, rows: usize, cols: usize, mut a: Vec<R::T>) -> Vec<R::
             if bezout {
                 continue;
             }
-            let g = r.gcd_e(&a[at(t, t)]);
+            let g = r.gcd_e(&a[at(t, t)], &mut c.bulk);
             let bad = if R::is_one(&g) {
                 None
             } else {
-                (t + 1..rows).find(|&i| (t + 1..cols).any(|j| !R::divides(&g, &a[at(i, j)])))
+                let mut bad = None;
+                let mut tested = 0u64;
+                'rows: for i in t + 1..rows {
+                    for j in t + 1..cols {
+                        tested += 1;
+                        if !r.divides(&g, &a[at(i, j)]) {
+                            bad = Some(i);
+                            break 'rows;
+                        }
+                    }
+                }
+                c.bulk += tested;
+                bad
             };
             match bad {
                 Some(i) => {
+                    c.bulk += (cols - t) as u64;
                     for j in t..cols {
                         a[at(t, j)] = r.add(&a[at(t, j)], &a[at(i, j)]);
                     }
@@ -263,6 +417,7 @@ fn smith_in<R: Zn>(r: &R, rows: usize, cols: usize, mut a: Vec<R::T>) -> Vec<R::
             }
         }
     }
+    drop(c);
     out
 }
 
@@ -278,12 +433,30 @@ pub fn smith_mod(a: &ZMat, e: &BigInt) -> Vec<BigInt> {
     }
     match e.to_u64().filter(|&w| w < WORD_E) {
         Some(w) => {
-            let r = Word(w);
-            let m = a.d.iter().map(|x| r.residue(x)).collect();
+            let r = Word { e: w };
+            // (one-word entries reduced directly, and counted in the same
+            // test: a ModArith unit per limb)
+            let mut units = 0u64;
+            let m = a
+                .d
+                .iter()
+                .map(|x| match x.to_i64() {
+                    Some(v) => {
+                        units += 1;
+                        v.rem_euclid(w as i64) as u64
+                    }
+                    None => {
+                        units += zmat::reduce_units(x);
+                        r.residue(x)
+                    }
+                })
+                .collect();
+            Acc::new().n(Family::ModArith, units);
             smith_in(&r, a.rows, a.cols, m).iter().map(Word::integer).collect()
         }
         None => {
-            let r = Big(e.clone());
+            let r = Big::new(e);
+            Acc::new().add(r.residue_units(a));
             let m = a.d.iter().map(|x| r.residue(x)).collect();
             smith_in(&r, a.rows, a.cols, m)
         }
@@ -294,7 +467,20 @@ pub fn smith_mod(a: &ZMat, e: &BigInt) -> Vec<BigInt> {
 /// least common denominator, reduced here; d itself (the classical route)
 /// if delta does not divide d, which a correct solve never gives.
 fn modulus_from(d: &BigInt, n: &ZMat, den: &BigInt) -> BigInt {
-    let g = n.d.iter().fold(den.clone(), |g, v| g.gcd(v));
+    let mut acc = Acc::new();
+    // (the fold stops at 1)
+    let mut g = den.clone();
+    for v in &n.d {
+        if g.is_one() {
+            break;
+        }
+        acc.add(biggcd_units(limbs(v), limbs(&g)));
+        g = g.gcd(v);
+    }
+    let ld = limbs(den);
+    acc.add(bigdiv_units(ld, 1));
+    acc.add(bigdiv_units(limbs(d), ld));
+    acc.add(bigdiv_units(limbs(d), ld));
     let delta = den / g;
     if !delta.is_zero() && (d % &delta).is_zero() {
         d / delta
@@ -320,12 +506,31 @@ pub fn invariants_nonsingular(a: &ZMat, d: &BigInt, solved: Option<(ZMat, BigInt
     // times those of a / g, whose e is smaller by g^(n-1) at least (a
     // common factor would otherwise make every invariant, and e, large:
     // p I, or p U for a unimodular U)
-    let g = a.d.iter().fold(BigInt::zero(), |g, v| g.gcd(v));
+    let mut acc = Acc::new();
+    // (the fold stops at 1, where nearly every matrix gets within a few
+    // entries)
+    let mut g = BigInt::zero();
+    for v in &a.d {
+        acc.add(biggcd_units(limbs(v), limbs(&g)));
+        g = g.gcd(v);
+        if g.is_one() {
+            break;
+        }
+    }
     if !g.is_one() {
+        let lg = limbs(&g);
+        for v in &a.d {
+            acc.add(bigdiv_units(limbs(v), lg));
+        }
+        acc.times(n as u64, bigmul_units(n * lg, lg));
+        acc.add(bigdiv_units(limbs(d), n * lg));
         let ag = ZMat { rows: n, cols: n, d: a.d.iter().map(|v| v / &g).collect() };
         let dg = d / g.pow(n as u32);
         // a x = b gives (a / g)(g x) = b: the same denominator, numerators times g
         let sg = solved.map(|(x, den)| (x.scale(&g), den));
+        // (x.scale counts its own products)
+        acc.times(n as u64, bigmul_units(limbs(d), lg));
+        acc.flush();
         return invariants_nonsingular(&ag, &dg, sg).into_iter().map(|t| t * &g).collect();
     }
     let e = if d.bits() <= 62 {
@@ -347,6 +552,13 @@ pub fn invariants_nonsingular(a: &ZMat, d: &BigInt, solved: Option<(ZMat, BigInt
 fn invariants_with(a: &ZMat, d: &BigInt, e: &BigInt) -> Vec<BigInt> {
     let n = a.rows;
     let mut t = if e.is_one() { vec![BigInt::one(); n - 1] } else { smith_mod(a, e)[..n - 1].to_vec() };
+    let mut acc = Acc::new();
+    let mut lp = 1;
+    for x in &t {
+        acc.add(bigmul_units(lp, limbs(x)));
+        lp += limbs(x);
+    }
+    acc.add(bigdiv_units(limbs(d), lp));
     #[cfg(test)]
     let forced = tests::CORRUPT_STEP4.with(|c| c.borrow_mut().take()).inspect(|bad| t[0] = bad.clone()).is_some();
     // (every factor positive first: a zero one must not reach the division)
@@ -374,10 +586,17 @@ fn invariants_diagonal(a: &ZMat) -> Option<Vec<BigInt>> {
     if (0..n).any(|i| (0..n).any(|j| i != j && !a.d[i * n + j].is_zero())) {
         return None;
     }
+    let mut acc = Acc::new();
     let mut v: Vec<BigInt> = (0..n).map(|i| a.d[i * n + i].abs()).collect();
     for i in 0..n {
         for j in i + 1..n {
+            if !v[i].is_zero() && !v[j].is_zero() {
+                acc.add(bigdiv_units(limbs(&v[j]), limbs(&v[i])));
+            }
             if v[i].is_zero() || (!v[j].is_zero() && !(&v[j] % &v[i]).is_zero()) {
+                acc.add(biggcd_units(limbs(&v[i]), limbs(&v[j])));
+                acc.add(bigdiv_units(limbs(&v[i]), limbs(&v[j]).min(limbs(&v[i]))));
+                acc.add(bigmul_units(limbs(&v[i]), limbs(&v[j])));
                 let g = v[i].gcd(&v[j]);
                 let l = if g.is_zero() { BigInt::zero() } else { &v[i] / &g * &v[j] };
                 v[i] = g;
