@@ -10,6 +10,13 @@ The direction, Nov 21, 2026, about 11:28 AM PST (verbatim): "for windows I think
 - **The same agent as the command-line path.** The app bundles the same reviewed `sagebrush-agent` release tarball that the CLI path runs (`npx -y <the reviewed tarball's URL>`; the release is a tarball download, not an npm registry package), pinned by hash. It runs on the Node the app already ships. The CLI path stays as it is, and both are supported.
 - **Order:** first the agent and the Connect button inside the apps we already sign and ship (macOS, then Linux and Windows). Store packaging comes after that.
 
+## Principle: install channels
+
+Nothing in Sagebrush's design may make it hard to install later through the channels people already use: the platform stores, Homebrew, winget, Flathub, pip and npm. Every artifact stays packageable by them:
+- **relocatable:** no absolute paths fixed at build time;
+- **no network fetches after install,** except pinned, hash-checked ones that are declared;
+- **versions that a machine can read.**
+
 ## 1. The app as the agent host
 
 **What exists.** The macOS and Linux apps ship a pinned Node 24.21.0 sidecar (`binaries/sagebrush-node`, hash-checked against nodejs.org's SHASUMS256 in `app/engine/bundle.mjs`) to run the engine. The Windows app doesn't ship it yet; it comes with the Windows engine work. `sagebrush-agent` is a Node package (Node 20 or later) that:
@@ -54,7 +61,7 @@ The direction, Nov 21, 2026, about 11:28 AM PST (verbatim): "for windows I think
 - The Azure signing profile and the CI signing identity also stay the company's steps.
 
 **macOS.**
-- The notarized Developer ID DMG works today and needs nothing new from Apple.
+- The notarized Developer ID DMG works today and needs nothing new from Apple. A Homebrew cask for it, in our own tap, comes later (§4).
 - The Mac App Store requires the App Sandbox. A sandboxed app's child processes inherit its sandbox, and no dynamic sandbox extension grants executable access outside its static sandbox ([Apple forums](https://developer.apple.com/forums/thread/746478)). Review guideline 2.5.2 also says apps may not download, install or execute code that changes their features, with a limited exception for educational apps that teach or let students test code ([App Review Guidelines, 2.5.2](https://developer.apple.com/app-store/review/guidelines/#software-requirements)).
   - An agent host fits these badly. Claude Code keeps its login in `~/.claude`, outside the app's container. A Pair or Delegate agent works in the person's folders. Codex is a separate binary from upstream.
   - **This design's recommendation: no Mac App Store for the agent-hosting app.** That is our reading of the rules for this design, not an Apple ruling on an app that hasn't been submitted. A Mac App Store build without the agent would be a different, lesser product.
@@ -75,13 +82,14 @@ Open items that could still need one, to settle while building:
 
 1. **Ship the agents page in the app** (it is "not in the app" today), served by the app's own server. SEC: what the page may do in the app.
 2. **Bundle `sagebrush-agent` in the macOS and Linux apps** (Node is already there), hash-pinned in the build, with the version in About.
-3. **The Connect Claude button:** the app starts the agent with the app's exact origin and an automatic pairing code; the agent's own sign-in. A self-test launches the bundled agent, pairs it, and checks that a second origin is refused.
-4. **Connect Codex,** the same way.
-5. **Windows:** the Node sidecar (with the Windows engine work), the agent bundled, and the Connect buttons; the NSIS/MSI signed with Azure Artifact Signing (the company's signing profile and identity first).
-6. **The Microsoft Store listing** of the signed installer: SageMath, Inc.'s Partner Center account, then the listing.
-7. **Optional, later:** MSIX; Flathub.
+3. **A Homebrew tap, low priority:** `sagemathinc/homebrew-sagebrush`, with a cask for the notarized DMG that the app release job updates. A formula for the CLI can come later, and homebrew-cask's core repository once the app is popular enough. The tap repository is created when this step is reached, not before.
+4. **The Connect Claude button:** the app starts the agent with the app's exact origin and an automatic pairing code; the agent's own sign-in. A self-test launches the bundled agent, pairs it, and checks that a second origin is refused.
+5. **Connect Codex,** the same way.
+6. **Windows:** the Node sidecar (with the Windows engine work), the agent bundled, and the Connect buttons; the NSIS/MSI signed with Azure Artifact Signing (the company's signing profile and identity first).
+7. **The Microsoft Store listing** of the signed installer: SageMath, Inc.'s Partner Center account, then the listing.
+8. **Optional, later:** MSIX; Flathub.
 
-Steps 1–4 are the app lane's; step 5 follows the Windows engine; steps 6–7 wait on the company's accounts.
+Steps 1–5 are the app lane's (step 3 when it is worth doing); step 6 follows the Windows engine; steps 7–8 wait on the company's accounts.
 
 ## 5. Security requirements
 
