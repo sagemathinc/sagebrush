@@ -37,6 +37,10 @@
 //     after them (src/notebook-graph.ts).
 //   - Files: the files each run read and wrote give writer-to-reader edges;
 //     readers of a file just written, or changed outside (filesChanged), rerun.
+//   - Output names: a cell reading `_`, `__` or `___` follows the 1st, 2nd or
+//     3rd nearest cell above it that showed a value in its last run (the
+//     graph's setShown); a cell that starts showing one reruns the readers
+//     below that didn't run after it.
 //   - Page-order scoping (with host.rename): a name defined by several cells
 //     and read is, for each cell, its nearest definition above it, as when a
 //     Jupyter notebook is read from the top.  The code that runs is renamed
@@ -181,6 +185,8 @@ export interface ExecResult {
   stopped?: boolean;
   interrupted?: boolean;
   files?: { reads: string[]; writes: string[] };
+  /** whether it showed a value (its last expression's): undefined when the kernel doesn't say (a remote one) */
+  shown?: boolean;
   notRun?: "skip" | "wait";
   note?: string;
 }
@@ -229,6 +235,8 @@ export class Reactive {
   private scoped = new Map<string, string>();
   /** the files each cell read and wrote in its last run */
   files = new Map<string, { reads: string[]; writes: string[] }>();
+  /** the cells that showed a value in their last run (the output names' edges) */
+  shown = new Set<string>();
   /** ms of automatic runs allowed after an action; Infinity = autorun, 0 = lazy */
   budget = 2000;
   /** cells run because a widget moved, and what depends on them: their
@@ -383,6 +391,7 @@ export class Reactive {
       this.stale.clear();
       this.outcome.clear();
       this.files.clear();
+      this.shown.clear();
       this.widgetDriven.clear();
       this.graph = new NotebookGraph();
       this.scoped = new Map();
@@ -743,6 +752,7 @@ export class Reactive {
       this.times.delete(id);
       this.outcome.delete(id);
       this.files.delete(id);
+      this.shown.delete(id);
     }
     for (const id of ids) if (!this.registered.has(id)) changed.add(id);
     await this.registerAll(sources, cells.filter((c) => present.has(c.id)), eff, versions);
@@ -965,6 +975,7 @@ export class Reactive {
           if (reader !== id && (!order.includes(reader) || ran.includes(reader)) && !this.errors.has(reader)) followUp.add(reader);
         }
       }
+      this.noteShown(id, r, order, ran, followUp);
       this.times.set(id, r.ms);
       if (isAuto) autoMs += r.ms;
       if (r.stopped) {
@@ -1093,6 +1104,7 @@ export class Reactive {
           if (reader !== id && (!order.includes(reader) || ran.includes(reader)) && !this.errors.has(reader)) followUp.add(reader);
         }
       }
+      this.noteShown(id, r, order, ran, followUp);
       this.times.set(id, r.ms);
       if (isAuto) autoMs += r.ms;
       if (r.stopped) {
@@ -1163,5 +1175,19 @@ export class Reactive {
 
   private cancelDescendants(id: string, block: { by: string; why: "exception" | "error" | "interrupted" }, blockedBy: Map<string, typeof block>, order: string[]): void {
     for (const d of this.graph.closure([id], { inclusive: false })) if (order.includes(d) && !blockedBy.has(d)) blockedBy.set(d, block);
+  }
+
+  // Whether the cell showed a value this time (a kernel that doesn't say: one that completed may have), in the graph's
+  // facts; a cell that starts showing one gives the readers of `_`, `__`, `___` below it a new value: those that
+  // didn't run after it in this action rerun (a follow-up, as the readers of a file written).
+  private noteShown(id: string, r: ExecResult, order: string[], ran: string[], followUp: Set<string>): void {
+    const now = r.shown ?? (r.ok && !r.stopped);
+    if (now === this.shown.has(id)) return;
+    if (now) this.shown.add(id);
+    else this.shown.delete(id);
+    this.graph.setShown(this.shown);
+    if (now) for (const c of this.graph.children(id)) {
+      if (this.graph.analysis(c)?.outputs?.size && (!order.includes(c) || ran.includes(c)) && !this.errors.has(c)) followUp.add(c);
+    }
   }
 }

@@ -686,3 +686,64 @@ test("forget: the host is told which cells defined the names", async () => {
   await h.r.run(["c0"]);
   assert.ok(h.forgot.some((f) => f.names.includes("a") && f.cells?.includes("c0")));
 });
+
+// (a notebook whose host says whether each run showed a value: a cell whose last line is an expression, not an
+// assignment or a call of print, as the interpreter's display hook would)
+function showingNotebook(codes: string[], sayShown = true) {
+  const cells: CellInfo[] = codes.map((code, i) => ({ id: `c${i}`, code }));
+  const log: string[] = [];
+  const r = new Reactive({
+    cells: () => cells,
+    analyze: async (code) => analyzeCell(code),
+    execute: async (id, code) => {
+      log.push(id);
+      const last = code.trim().split("\n").pop() ?? "";
+      const shown = !/(^|[^=!<>])=($|[^=])/.test(last) && !/^print\(/.test(last);
+      return { ok: true, ms: 1, ...(sayShown ? { shown } : {}) };
+    },
+    forget: async () => {},
+    status: () => {},
+  });
+  return { r, log, set(i: number, code: string) { cells[i] = { ...cells[i], code }; } };
+}
+
+test("output names: William's repro, `_` below `10` reruns when it changes to `5`", async () => {
+  const nb = showingNotebook(["10", "_"]);
+  nb.r.budget = Infinity;
+  await nb.r.load();
+  assert.deepEqual((await nb.r.run(["c0", "c1"])).ran, ["c0", "c1"]);
+  assert.deepEqual([...nb.r.graph.parents("c1")], ["c0"]);
+  nb.set(0, "5");
+  nb.log.length = 0;
+  // (Shift+Enter on cell 1: it and what reads its value)
+  assert.deepEqual((await nb.r.run(["c0"])).ran, ["c0", "c1"]);
+});
+
+test("output names: a cell that starts showing a value reruns the readers below it; one that stops hands them on", async () => {
+  const nb = showingNotebook(["1", "x = 2", "_"]);
+  nb.r.budget = Infinity;
+  await nb.r.load();
+  await nb.r.run(["c0", "c1", "c2"]);
+  assert.deepEqual([...nb.r.graph.parents("c2")], ["c0"]);
+  // c1 now shows a value: c2's _ is c1's (it wasn't c1's child before the run: a follow-up)
+  nb.set(1, "2");
+  nb.log.length = 0;
+  const rep = await nb.r.run(["c1"]);
+  assert.deepEqual(rep.ran, ["c1", "c2"]);
+  assert.deepEqual([...nb.r.graph.parents("c2")], ["c1"]);
+  // c1 stops showing one: c2 is its child, so it runs after it (and the worker binds c0's value)
+  nb.set(1, "x = 3");
+  assert.deepEqual((await nb.r.run(["c1"])).ran, ["c1", "c2"]);
+  assert.deepEqual([...nb.r.graph.parents("c2")], ["c0"]);
+});
+
+test("output names: a kernel that doesn't say what was shown (a remote one): a run that completed counts as showing", async () => {
+  const nb = showingNotebook(["x = 1", "_"], false);
+  nb.r.budget = Infinity;
+  await nb.r.load();
+  await nb.r.run(["c0", "c1"]);
+  assert.deepEqual([...nb.r.graph.parents("c1")], ["c0"]);
+  nb.set(0, "x = 2");
+  assert.deepEqual((await nb.r.run(["c0"])).ran, ["c0", "c1"]);
+});
+

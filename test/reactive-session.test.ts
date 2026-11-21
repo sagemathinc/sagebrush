@@ -222,3 +222,28 @@ test("reactive-session: the editor's Run matches the reference model on 1000 ran
     assert.deepEqual(got, want, JSON.stringify({ run, parents, pred, script, budget, log }));
   }
 });
+
+// The output names in a reactive notebook: _, __ and ___ are the values shown by the 1st, 2nd and 3rd nearest cells
+// above that showed one, in page order, whatever ran in between (@sagebrush's ruling B).
+test("output names: _, __, ___ follow the cells above, not the run order", async () => {
+  const interp = await startInterpreter({ mode: "python", entry: CLI });
+  try {
+    const run = async (cells: string[]) => {
+      const out = new Map<string, string>();
+      await runCells(interp, cells.map((code, i) => ({ key: "u" + i, code })), {
+        mode: "python", seedOf: () => "0".repeat(64), timeoutMs: 20_000,
+        onMessage: (k, m) => { if (m.stream === "stdout") out.set(k, (out.get(k) ?? "") + m.text); },
+      });
+      return cells.map((_, i) => (out.get("u" + i) ?? "").trim());
+    };
+    // A, B, D: B reads D's z, so D runs before B and shows 3; B's _ is still A's 1 (run order would give 3 + 3)
+    assert.deepEqual(await run(["1", "_ + z", "z = 3\nz"]), ["1", "4", "3"]);
+    // a cell showing nothing is skipped; ___ with only two above that showed one: ''
+    assert.deepEqual(await run(["10", "20", "x = 1", "(_, __, ___)"]), ["10", "20", "", "(20, 10, '')"]);
+    // a value shown by a cell's own last line isn't seen inside it: the cells above are
+    assert.deepEqual(await run(["7", "y = _ * 2\ny"]), ["7", "14"]);
+  } finally {
+    await interp.close();
+  }
+});
+

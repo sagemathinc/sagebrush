@@ -46,6 +46,9 @@ export const MAGIC_POST = "_a = _s.modules.get('_pyjs_magic')\nif _a is not None
 // and Out[N] (Out, also _oh).  As IPython's displayhook: None and Out itself are not recorded, and once the user
 // assigns _, __ or ___ (or a builtin _ exists, as gettext.install makes) the namespace's three are left alone.
 // The displayhooks call builtins.__pyjs_record_output__(value[, count]).
+// A reactive notebook's run (src/notebook-session.ts) also calls begin(above) and end(key): each cell's last shown
+// value is kept by its key, and before a run _, __ and ___ are the values shown by the 1st, 2nd and 3rd nearest
+// cells above it that showed one (`above`: the keys of the cells above, nearest first), whatever ran in between.
 export const outputHistory = (counted: boolean) =>
   [
     "import builtins as _b, __main__ as _m",
@@ -56,12 +59,16 @@ export const outputHistory = (counted: boolean) =>
     "    cull_fraction = 0.2",
     "    def __init__(self, ns, counted):",
     "        self.ns, self.counted, self.shown = ns, counted, ['', '', '']",
+    "        self.by_cell, self.run_shown = {}, None",
     "        ns['_'] = ns['__'] = ns['___'] = ''",
     "        if counted:",
     "            ns['Out'] = ns['_oh'] = {}",
     "    def __call__(self, value, count=None):",
     "        ns, shown = self.ns, self.shown",
-    "        if value is None or not self.cache_size or (self.counted and value is ns.get('_oh')):",
+    "        if value is None or (self.counted and value is ns.get('_oh')):",
+    "            return",
+    "        self.run_shown = [value]",
+    "        if not self.cache_size:",
     "            return",
     "        if count is not None and len(ns.get('_oh', ())) >= self.cache_size:",
     "            self.cull_cache()",
@@ -72,6 +79,23 @@ export const outputHistory = (counted: boolean) =>
     "        if count is not None:",
     "            ns['_%d' % count] = value",
     "            ns.setdefault('_oh', {})[count] = value",
+    "    def begin(self, above):",
+    "        self.run_shown = None",
+    "        if above is None or not self.cache_size or '_' in __import__('builtins').__dict__:",
+    "            return",
+    "        ns, by = self.ns, self.by_cell",
+    "        if not all(ns.get(u, s) is s for u, s in zip(('_', '__', '___'), self.shown)):",
+    "            return",
+    "        vals = [by[k] for k in above if k in by][:3]",
+    "        self.shown[:] = vals + [''] * (3 - len(vals))",
+    "        ns['_'], ns['__'], ns['___'] = self.shown",
+    "    def end(self, key):",
+    "        r, self.run_shown = self.run_shown, None",
+    "        if r is None:",
+    "            self.by_cell.pop(key, None)",
+    "            return False",
+    "        self.by_cell[key] = r[0]",
+    "        return True",
     "    def cull_cache(self):",
     "        oh = self.ns.get('_oh', {})",
     "        sz = len(oh)",

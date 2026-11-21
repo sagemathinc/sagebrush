@@ -26,6 +26,9 @@
 //     multiple definition: it defines the same thing.
 //   - Files (setFiles): a cell that wrote a file in its last run runs before
 //     the cells that read it.
+//   - Output names (setShown): a cell reading `_`, `__` or `___` runs after
+//     the 1st, 2nd or 3rd nearest cell above it (page order) that showed a
+//     value in its last run: the value the name has in a reactive notebook.
 //   - A cycle error goes to every cell in a strongly connected component:
 //     every cell on a cycle.  marimo records, for each edge added, one path
 //     closing a cycle, and so misses some cells (in 70 of the oracle's 3,198
@@ -141,6 +144,7 @@ export interface AnalysisView {
   readonly mutations?: SetView<string>;
   readonly imports?: MapView<string, string>;
   readonly unbinds?: SetView<string>;
+  readonly outputs?: SetView<string>;
 }
 const analysisViews = new WeakSet<object>();
 /** A private, read-only copy of an analysis (one already made is itself). */
@@ -153,6 +157,7 @@ export function analysisView(a: CellAnalysis | AnalysisView): AnalysisView {
     ...(a.mutations ? { mutations: new SetView(a.mutations) } : {}),
     ...(a.imports ? { imports: new MapView<string, string>(a.imports) } : {}),
     ...(a.unbinds ? { unbinds: new SetView(a.unbinds) } : {}),
+    ...(a.outputs ? { outputs: new SetView(a.outputs) } : {}),
   });
   analysisViews.add(v);
   return v;
@@ -191,6 +196,8 @@ export class NotebookGraph {
   /** replaced by a new frozen object at the end of every build(): while it is the same object, so is everything in the graph */
   private versionNow: object = Object.freeze({});
   private files = new Map<string, { reads: string[]; writes: string[] }>();
+  /** the cells that showed a value in their last run (setShown) */
+  private shown: ReadonlySet<string> = new Set<string>();
   private readonly strict: boolean;
   private readonly analyze?: (code: string, id: string) => CellAnalysis;
 
@@ -339,6 +346,20 @@ export class NotebookGraph {
         if (r !== id && !childrenOf.get(id)!.has(r) && !reaches(childrenOf, r, id)) edge(id, r);
       }
     }
+    // Output names (ours): a cell reading `_`, `__` or `___` after the 1st,
+    // 2nd or 3rd nearest cell above it that showed a value in its last run.
+    // Found by running too, so, as for files, one that would close a cycle is
+    // left out.
+    for (let i = 0; i < ids.length; i++) {
+      const outs = this.nodes.get(ids[i])!.analysis?.outputs;
+      if (!outs || !outs.size) continue;
+      const above: string[] = [];
+      for (let j = i - 1; j >= 0 && above.length < 3; j--) if (this.shown.has(ids[j])) above.push(ids[j]);
+      for (const [k, name] of ["_", "__", "___"].entries()) {
+        const p = above[k];
+        if (p !== undefined && outs.has(name) && !childrenOf.get(p)!.has(ids[i]) && !reaches(childrenOf, ids[i], p)) edge(p, ids[i]);
+      }
+    }
     // published: read-only views, the lists frozen
     this.parentsOf = new Map(ids.map((id) => [id, new SetView(parentsOf.get(id)!)]));
     this.childrenOf = new Map(ids.map((id) => [id, new SetView(childrenOf.get(id)!)]));
@@ -353,6 +374,17 @@ export class NotebookGraph {
   setFiles(files: Map<string, { reads: string[]; writes: string[] }>): void {
     this.files = new Map([...files].map(([id, io]) => [id, Object.freeze({ reads: Object.freeze([...io.reads]) as string[], writes: Object.freeze([...io.writes]) as string[] })]));
     this.build();
+  }
+  /** The cells that showed a value in their last run (the output names' edges): copied. */
+  setShown(ids: Iterable<string>): void {
+    const next = new Set(ids);
+    if (next.size === this.shown.size && [...next].every((id) => this.shown.has(id))) return;
+    this.shown = next;
+    this.build();
+  }
+  /** Whether a cell showed a value in its last run. */
+  showed(id: string): boolean {
+    return this.shown.has(id);
   }
   /** The cells that read a file in their last run. */
   readersOf(path: string): string[] {
