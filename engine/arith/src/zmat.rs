@@ -29,7 +29,7 @@
 //! product; copies of entries are Move, a unit per limb.  Scans that only
 //! read sizes or signs (max_bits, the zero tests) are not counted.
 
-use crate::cost::{bigdiv_units, bigeuclid_units, biggcd_units, bigmul_units, bigsqrt_units, Family, Local};
+use crate::cost::{bigdiv_units, bigeuclid_units, biggcd_units, bigmul_units, bigsqrt_units, Family, Local, Units};
 use crate::nmod::{Modulus, Primes};
 use crate::nmod_mat::{Lu, Mat};
 use num_integer::Integer;
@@ -1417,6 +1417,97 @@ pub fn hermite_cyclic_holds(a: &ZMat, h: &[BigInt], d: &BigInt) -> bool {
         }
     }
     true
+}
+
+/// The units [`inverse_det`] charges on a square input, predicted from the
+/// input alone (the work estimate's model, stage 1): the prime count from
+/// the Hadamard bound and the prime list, exactly; per prime, the
+/// reduction (by the entries' sizes), the identity and the augment, the
+/// echelon of [a | I] by its data-free count
+/// ([`crate::nmod_mat::echelon_units_dense`], exact unless a factor is
+/// zero), the adjugate's scaling; the CRT of the n^2 + 1 values by the
+/// reconstruction's closed form; the determinant's copy; and the
+/// lowest-terms pass.  With `le = None` (the cyclic case: the gcd reaches
+/// 1) the fold is `fold` entries of `lx` limbs; with `le = Some(limbs of
+/// e)`, e = |det a| / delta > 1, it runs over all n^2 entries (the running
+/// gcd at e's size after the first) and the n^2 + 1 divisions by e follow.
+/// Assumes no prime divides det a (probability about 2^-62 each; when one
+/// does, the run pays one more prime than this count, so the model
+/// underestimates, never refuses) and no zero row.
+#[doc(hidden)]
+pub fn inverse_model(a: &ZMat, lx: usize, fold: u64, le: Option<usize>) -> Units {
+    let n = a.rows;
+    let mut u = Units::default();
+    if n == 0 {
+        return u;
+    }
+    let target = hadamard_log2(a).max(0.0) + 2.0;
+    let mut primes: Vec<u64> = vec![];
+    let mut bits = 0.0f64;
+    for p in Primes::new() {
+        primes.push(p);
+        bits += (p as f64).log2();
+        if bits > target {
+            break;
+        }
+    }
+    let pc = primes.len() as u64;
+    let n2 = (n * n) as u64;
+    let red: u64 = a.d.iter().map(|x| if x.to_i64().is_some() { 1 } else { reduce_units(x) }).sum();
+    // (the echelon's count depends on the prime only through its batch
+    // length: one count per distinct batch, times its primes)
+    let mut batches: Vec<(usize, u64)> = vec![];
+    for &p in &primes {
+        let b = crate::nmod_mat::batch_of(&Modulus::new(p));
+        match batches.iter_mut().find(|(x, _)| *x == b) {
+            Some((_, c)) => *c += 1,
+            None => batches.push((b, 1)),
+        }
+    }
+    for (b, c) in batches {
+        let e = crate::nmod_mat::echelon_units_dense(n, 2 * n, b);
+        for (x, y) in u.0.iter_mut().zip(e) {
+            *x = x.saturating_add(y.saturating_mul(c));
+        }
+    }
+    u.0[Family::ModArith as usize] += pc * (red + n2);
+    // the identity (a zero matrix, n^2) and the augment (n 2n)
+    u.0[Family::Move as usize] += pc * (n2 + 2 * n2);
+    // the CRT: n^2 + 1 reconstructions over qlen-word quotients
+    let mut prod = BigInt::one();
+    for &p in &primes {
+        prod *= BigInt::from(p);
+    }
+    // (MultiCrt's quotients are the product's words plus one)
+    let qlen = (prod.bits() as usize).div_ceil(64) + 1;
+    let rec = crate::crt::MultiCrt::units_for(primes.len(), qlen);
+    for (x, y) in u.0.iter_mut().zip(&rec.0) {
+        *x = x.saturating_add(y.saturating_mul(n2 + 1));
+    }
+    // the determinant's copy, and the fold
+    u.0[Family::Move as usize] += lx as u64;
+    match le {
+        None => {
+            for _ in 0..fold {
+                u.add(&biggcd_units(lx, lx));
+            }
+        }
+        Some(le) => {
+            u.add(&biggcd_units(lx, lx));
+            let (g, d) = (biggcd_units(lx, le), bigdiv_units(lx, le));
+            for (x, (y, z)) in u.0.iter_mut().zip(g.0.iter().zip(&d.0)) {
+                *x = x.saturating_add(y.saturating_mul(n2.saturating_sub(1))).saturating_add(z.saturating_mul(n2 + 1));
+            }
+        }
+    }
+    u
+}
+
+/// log2 of the Hadamard bound the inverse uses (for the work estimate's
+/// stage 1 and its tests).
+#[doc(hidden)]
+pub fn hadamard_bits(a: &ZMat) -> f64 {
+    hadamard_log2(a)
 }
 
 /// (N, den) with a^-1 = N / den in lowest terms, or None if a is

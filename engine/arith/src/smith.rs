@@ -400,6 +400,19 @@ fn cyclic<R: Zn>(ring: &R, nm: &ZMat, delta: &BigInt, acc: &mut Local) -> Result
     Ok(SmithForm { d, u: w, v, route: Route::Cyclic, attempts: attempt })
 }
 
+thread_local! {
+    /// The last small Smith form's transforms, in limbs (V_2, V_2^-1): for
+    /// the work estimate's fit of V_2^-1's size (a test reads it).
+    static SMALL_SIZES: std::cell::Cell<(usize, usize)> = const { std::cell::Cell::new((0, 0)) };
+}
+
+/// The last route 2 run's small Smith transforms on this thread, in limbs
+/// (V_2, V_2^-1): the estimate's fit reads them.
+#[doc(hidden)]
+pub fn last_small_smith_sizes() -> (usize, usize) {
+    SMALL_SIZES.with(|c| c.get())
+}
+
 /// Column operation on columns (r, j) of every row of `m`: (x_r, x_j) ->
 /// (s x_r + u x_j, -a x_r + p x_j) for a Bezout matrix [[s, u], [-a, p]]
 /// (determinant 1).  Returns the operations' count (two each).
@@ -1241,6 +1254,7 @@ fn trailing<R: Zn>(ring: &R, nm: &ZMat, delta: &BigInt, d: &BigInt, k: usize, ac
     acc.n(Family::ModArith, wops);
     acc.flush();
     let (db, v2, v2inv, _) = small_smith(ring, rel, delta, acc);
+    SMALL_SIZES.with(|c| c.set((v2.d.iter().map(limbs).max().unwrap_or(1), v2inv.d.iter().map(limbs).max().unwrap_or(1))));
     // B = D_B V_2^-1
     let mut mul = 0u64;
     let b: Vec<Vec<BigInt>> = (0..k)
@@ -1473,6 +1487,9 @@ pub fn floor_bytes(m: usize, n: usize) -> Option<u64> {
 /// faster than the classical elimination up to k = 8; at k = 16 its small
 /// k x k Smith form's transforms grow and the classical route is faster.
 pub const K_MAX: usize = 8;
+
+/// The work estimate: units models of the routes and the fitted constants.
+pub mod estimate;
 
 #[cfg(test)]
 mod tests;
