@@ -1973,6 +1973,24 @@ const refuse = (p: string): never => { throw Object.assign(new Error(`Requires a
 // path; one admission for every entry point that takes a descriptor (_fs, open(), os.read and the rest): any other
 // number the process holds, inherited or the runtime's own, is refused, and so is anything else that isn't a path)
 const checkedFds = new Set<number>();
+// (os.open's flags are Linux's numbers, as this os module names them (O_CREAT is 64), CPython's on Linux; a host
+// whose own numbers differ (on macOS O_CREAT is 0x200, and 64 is O_ASYNC there) gets its own number for each bit, and a
+// bit this module doesn't name is EINVAL, never passed on.  O_CLOEXEC has no number in node's table: node's descriptors
+// are close-on-exec already)
+const LINUX_OPEN_FLAGS: [number, string][] = [[1, "O_WRONLY"], [2, "O_RDWR"], [64, "O_CREAT"], [128, "O_EXCL"], [512, "O_TRUNC"], [1024, "O_APPEND"], [2048, "O_NONBLOCK"], [65536, "O_DIRECTORY"], [131072, "O_NOFOLLOW"], [524288, "O_CLOEXEC"]];
+export function hostOpenFlags(fl: number, c: Record<string, number | undefined>): number {
+  let out = 0, rest = fl;
+  for (const [bit, name] of LINUX_OPEN_FLAGS) {
+    if (!(fl & bit)) continue;
+    rest &= ~bit;
+    if (name === "O_CLOEXEC") continue;
+    const v = c[name];
+    if (typeof v !== "number") throw Object.assign(new Error("EINVAL"), { code: "EINVAL", errno: -22 });
+    out |= v;
+  }
+  if (rest) throw Object.assign(new Error("EINVAL"), { code: "EINVAL", errno: -22 });
+  return out;
+}
 export const fdAdmitted = (fd: number): boolean => Number.isInteger(fd) && fd >= 0 && (fd <= 2 || checkedFds.has(fd));
 function confined(p: any): any {
   if (typeof p === "number") return fdAdmitted(p) ? p : refuse(`descriptor ${p}`);
@@ -2410,7 +2428,7 @@ newBuiltinModule("os", (m) => {
         throw e;
       }
     }
-    const fd = fs.openSync(at(q), fl, md);
+    const fd = fs.openSync(at(q), hostOpenFlags(fl, fs.constants), md);
     cliPos.set(fd, { pos: 0, append: (fl & 1024) !== 0 });
     checkedFds.add(fd);
     return fd;

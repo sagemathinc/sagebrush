@@ -5,6 +5,7 @@ import { existsSync, linkSync, mkdirSync, mkdtempSync, readFileSync, realpathSyn
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { readNotebook } from "../src/notebook-run";
+import { hostOpenFlags } from "../src/runtime/modules";
 
 // `sagebrush notebook run` (src/notebook-run.ts): a notebook's code cells run as the reactive notebook runs them,
 // in the notebook's folder, here; --write keeps the outputs and the seed; --confine keeps the program inside its
@@ -243,7 +244,8 @@ test("--confine: a descriptor the program inherited is refused at every entry po
     // (the inherited descriptors at 3 and 4: the outside files, as a careless parent would pass them)
     const r = spawnSync(process.execPath, [CLI, "notebook", "run", "f.ipynb", "--json", "--confine", work], { cwd: work, encoding: "utf8", timeout: 120_000, stdio: [...fds, r3, w4] });
     const got = lines(json(r));
-    for (const l of ["fs-read-3 DENIED", "open-read-3 DENIED", "os-read-3 DENIED", "fs-write-4 DENIED", "open-write-4 DENIED", "os-write-4 DENIED", "own-fd mine", "stdout-ok"]) assert.ok(got.includes(l), `${l} in ${JSON.stringify(got)}`);
+    // (on a failure, the whole report and the stderr: a cell that raised shows its error there, not in its output lines)
+    for (const l of ["fs-read-3 DENIED", "open-read-3 DENIED", "os-read-3 DENIED", "fs-write-4 DENIED", "open-write-4 DENIED", "os-write-4 DENIED", "own-fd mine", "stdout-ok"]) assert.ok(got.includes(l), `${l} in ${JSON.stringify(got)}; report ${r.stdout.slice(0, 4000)}; stderr ${r.stderr.slice(-2000)}`);
   } finally { closeSync(r3); closeSync(w4); }
   assert.equal(readFileSync(wr, "utf8"), "UNCHANGED");
   rmSync(root, { recursive: true, force: true });
@@ -369,4 +371,16 @@ test("--until-stdin-ends: a run stops at once when its standard input ends (the 
   assert.equal(json({ stdout: out }).cells[0].stdout, "1\n");
   assert.equal(run(dir, ["quick.ipynb", "--json"]).status, 0, "without the flag, the closed input spawnSync gives changes nothing");
   rmSync(dir, { recursive: true, force: true });
+});
+
+test("os.open's flags (Linux's numbers, as the os module names them) reach the host as its own numbers: macOS's table, Linux's as they are; an unknown bit is EINVAL", () => {
+  const mac = { O_RDONLY: 0, O_WRONLY: 1, O_RDWR: 2, O_NONBLOCK: 0x4, O_APPEND: 0x8, O_CREAT: 0x200, O_TRUNC: 0x400, O_EXCL: 0x800, O_NOFOLLOW: 0x100, O_DIRECTORY: 0x100000 };
+  assert.equal(hostOpenFlags(1 | 64, mac), 0x1 | 0x200, "O_WRONLY | O_CREAT");
+  assert.equal(hostOpenFlags(2 | 64 | 128 | 512 | 1024 | 2048 | 65536 | 131072 | 524288, mac), 0x2 | 0x200 | 0x800 | 0x400 | 0x8 | 0x4 | 0x100000 | 0x100);
+  assert.equal(hostOpenFlags(0, mac), 0);
+  const host = require("node:fs").constants;
+  // (on every platform, each named flag reaches this host as its own constant)
+  for (const [bit, name] of [[64, "O_CREAT"], [512, "O_TRUNC"], [1024, "O_APPEND"], [128, "O_EXCL"], [1, "O_WRONLY"], [2, "O_RDWR"]] as [number, string][]) assert.equal(hostOpenFlags(bit, host), host[name], name);
+  if (process.platform === "linux") for (const f of [0, 1, 2, 65, 193, 577, 1089, 2048, 65536, 131072]) assert.equal(hostOpenFlags(f, host), f, String(f));
+  for (const bad of [4, 8, 0x40000000]) assert.throws(() => hostOpenFlags(bad, mac), (e: any) => e.code === "EINVAL", String(bad));
 });
