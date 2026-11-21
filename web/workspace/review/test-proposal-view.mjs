@@ -54,12 +54,24 @@ const FILES = ${safe(FILES)}, LIST = ${safe(LIST)};
 const commitSide = (c) => (c === LIST.base ? "base" : c === LIST.proposal ? "proposal" : null);
 window.T = PROPOSAL_TEXT; window.L = PROPOSAL_LIMITS;
 window.reads = [];
+window.calls = { fromFile: 0, mount: 0 };
+// (a notebook's .ipynb text padded with trailing spaces (JSON allows them) to exactly n UTF-8 bytes; with fill, a
+//  multibyte character repeated in a cell first, so its length in UTF-16 units is far under its bytes)
+window.padded = (n, fill) => {
+  const head = JSON.parse(FILES.proposal["nb.ipynb"]);
+  if (fill) head.cells[0].source = fill;
+  const t = JSON.stringify(head), bytes = new TextEncoder().encode(t).length;
+  return bytes > n ? t : t + " ".repeat(n - bytes);
+};
 window.make = (o = {}) => ({
   diff: async () => { if (o.failDiff) throw new Error("no"); return o.list ?? LIST; },
   file: async (path, commit) => {
     window.reads.push(path + "@" + commit.slice(0, 7));
     if (o.slow?.[path]) await new Promise((r) => setTimeout(r, o.slow[path]));
     if (o.big === path) return "x".repeat(PROPOSAL_LIMITS.bytes + 1);
+    if ((o.nbBytes || o.nbFill) && path === "nb.ipynb") return window.padded(o.nbBytes ?? 0, o.nbFill);
+    // (under the bound in UTF-16 units, over it in UTF-8 bytes: 3 bytes each)
+    if (o.wide === path) return "\u4e00".repeat(Math.floor(PROPOSAL_LIMITS.bytes / 2));
     const side = commitSide(commit);
     return side ? FILES[side][path] ?? null : null;
   },
@@ -68,7 +80,7 @@ window.open1 = (o, withActions) => {
   const p = document.getElementById("p");
   const actions = withActions ? Object.assign(document.createElement("div"), { id: "acts", textContent: "ACTIONS" }) : undefined;
   window.view?.close();
-  window.view = openProposal(window.make(o), p, { notebook: () => import("./nb.js"), actions });
+  window.view = openProposal(window.make(o), p, { notebook: () => import("./nb.js").then((m) => ({ ...m, fromFile: (...a) => { window.calls.fromFile++; return m.fromFile(...a); }, createNotebook: (...a) => { window.calls.mount++; return m.createNotebook(...a); } })), actions });
   return true;
 };
 window.clickFile = (path) => { [...document.querySelectorAll("#p .file .path")].find((b) => b.textContent === path).click(); return true; };
@@ -159,6 +171,27 @@ try {
   await ev("window.clickFile('notes.txt')");
   await until("[...document.querySelectorAll('#p .file')][1].querySelector('p')");
   ok((await ev(`[...document.querySelectorAll('#p .file')][1].querySelector('p').textContent`)) === "Too large to show here.", "a side past PROPOSAL_LIMITS.bytes: not shown, said so");
+  await ev("window.open1({ wide: 'notes.txt' })");
+  await until("document.querySelectorAll('#p .file').length === 5");
+  await ev("window.clickFile('notes.txt')");
+  await until("[...document.querySelectorAll('#p .file')][1].querySelector('p')", 15000);
+  ok((await ev(`[...document.querySelectorAll('#p .file')][1].querySelector('p')?.textContent`)) === "Too large to show here.", "the bound is UTF-8 bytes: a side under it in characters, over it in bytes, isn't shown");
+  // (a notebook at the bound, one byte over, and over only in UTF-8: fromFile and the component never see one past it)
+  const nbAt = async (o) => {
+    await ev(`window.calls = { fromFile: 0, mount: 0 }; window.open1(${JSON.stringify(o)})`);
+    await until("document.querySelectorAll('#p .file').length === 5");
+    await ev("window.clickFile('nb.ipynb')");
+    await until("!!document.querySelector('#p .file p, #p .file .cell, #p .file details')", 30000);
+    await sleep(500);
+    return ev(`({ calls: window.calls, msg: [...document.querySelectorAll('#p .file')][0].querySelector('p')?.textContent ?? null, cells: [...document.querySelectorAll('#p .file')][0].querySelectorAll('.cell').length })`);
+  };
+  const L = await ev("window.L.bytes");
+  const at = await nbAt({ nbBytes: L });
+  ok(at.calls.fromFile === 2 && at.cells > 0 && at.msg !== "Too large to show here.", "an ASCII notebook of exactly PROPOSAL_LIMITS.bytes: admitted, read and diffed", at);
+  const over = await nbAt({ nbBytes: L + 1 });
+  ok(over.calls.fromFile === 0 && over.calls.mount === 0 && over.msg === "Too large to show here.", "an ASCII notebook one byte over: neither fromFile nor the component sees it", over);
+  const wide = await nbAt({ nbFill: "\u6f22".repeat(1398102) });
+  ok(wide.calls.fromFile === 0 && wide.calls.mount === 0 && wide.msg === "Too large to show here.", "a notebook under the bound in characters, over it in UTF-8 (1,398,102 of 漢): neither fromFile nor the component sees it", wide);
   await ev("window.open1({ failDiff: true })");
   await until("!!document.querySelector('#p .msg')");
   ok((await ev("document.querySelector('#p .msg').textContent")) === "Couldn't load the proposal.", "a source that fails: said so");

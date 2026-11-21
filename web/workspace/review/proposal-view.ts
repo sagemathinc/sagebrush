@@ -5,12 +5,13 @@
 //
 // From a ProposalSource (the page's view of the host: tasks.diff and tasks.file), never from the workspace:
 //   - the list, from source.diff(): the base and proposal commits, the round, and each file with its change;
-//   - a file's diff when its row is opened: both sides read (source.file, at most PROPOSAL_LIMITS.bytes each); a notebook
-//     (.ipynb text, read by the notebook module's fromFile) cell by cell, any other text line by line, the rest by
-//     size; and a notebook's proposed document, read only and not reactive, with outputs.ts's filter, under a details;
+//   - a file's diff when its row is opened (a proposal of one file: opened at once): both sides read (source.file),
+//     then admitted to the preview only if each is at most PROPOSAL_LIMITS.bytes of UTF-8; a notebook (.ipynb text,
+//     read by the notebook module's fromFile) cell by cell, any other text line by line, anything else "No preview";
+//     and a notebook's proposed document, read only and not reactive, with outputs.ts's filter, under a details;
 //   - one file open at a time; a newer open, a refresh or a close drops what an older one read (its generation).
 import { h, notebookDiff, style, textDiff } from "./diff-render";
-import { reviewLineDiff } from "./line-diff";
+import { reviewLineDiff, utf8Length } from "./line-diff";
 import { CELL_LIMITS, type CellKey } from "./cells";
 import { filterOutputs } from "./outputs";
 
@@ -99,7 +100,8 @@ export function openProposal(source: ProposalSource, panel: HTMLElement, o: { no
       [a, b] = await Promise.all([f.change === "added" ? null : source.file(f.path, d.base), f.change === "deleted" ? null : source.file(f.path, d.proposal)]);
     } catch { if (!stale()) say(PROPOSAL_TEXT.unreadable, "msg"); return; }
     if (stale()) return;
-    if ((a?.length ?? 0) > PROPOSAL_LIMITS.bytes || (b?.length ?? 0) > PROPOSAL_LIMITS.bytes) return say(PROPOSAL_TEXT.tooLarge);
+    // (admitted to the preview by each side's UTF-8 bytes, after the read: the read itself is the host's bound)
+    if (utf8Length(a ?? "") > PROPOSAL_LIMITS.bytes || utf8Length(b ?? "") > PROPOSAL_LIMITS.bytes) return say(PROPOSAL_TEXT.tooLarge);
     if (isNotebook(f)) {
       let mod: ProposalNotebookModule;
       try { mod = await o.notebook(); } catch { if (!stale()) say(PROPOSAL_TEXT.unreadable, "msg"); return; }
