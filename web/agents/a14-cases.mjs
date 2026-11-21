@@ -388,7 +388,7 @@ export async function runA14({ site, ok, want = () => true }) {
     const conv = await chat(P, A);
     const g1 = A.grants().at(-1);
     const pre = await recordFacts(P);
-    ok(label === "while this page is open (a reload keeps it)" && g1?.write === false && pre && pre.write === false && pre.keys === RECORD_KEYS.replace("leftAt,", "") && pre.leftAt === null, "A14-1 precondition: the grant chosen explicitly ('while this page is open (a reload keeps it)'); the record is written, exactly its keys, no leftAt while the page lives", { label, pre });
+    ok(label === "while this page is open (a reload, or coming back within 10 minutes, keeps it)" && g1?.write === false && pre && pre.write === false && pre.keys === RECORD_KEYS.replace("leftAt,", "") && pre.leftAt === null, "A14-1 precondition: the grant chosen explicitly ('while this page is open (a reload, or coming back within 10 minutes, keeps it)'); the record is written, exactly its keys, no leftAt while the page lives", { label, pre });
     const inputs = B.inputs, grants = A.grants().length, resume = A.resume.get(conv);
     const seen = { demo: false, other: [], status: new Set() };
     const t0 = Date.now();
@@ -605,6 +605,26 @@ export async function runA14({ site, ok, want = () => true }) {
     ok(bar.status === COPY.merged && ms >= 9500 && ms < 15000 && A.hellos >= 2, "A14-7.timeout: an agent that never answers the hello: after the 10 s bound, the merged copy", { ms, bar });
   });
 
+  // A5 item 4: a connection lost, then "Connect Claude" (the header's button): the dialog offers Reconnect, with no
+  // code, first; it reconnects
+  await run("A5.connect-reconnect", async (B, A) => {
+    const P = await B.tab();
+    await pair(P, A, site, "page");
+    await chat(P, A);
+    A.silent = true; // (the page's own retry gets no answer: the connection stays lost)
+    await A.kick();
+    await P.until(`document.querySelector('#conn-alert').textContent === ${JSON.stringify(COPY.lost)}`);
+    A.silent = false;
+    await P.ev(`(document.querySelector('#connect').click(), true)`);
+    await P.until(`!!document.querySelector('.sbag-box .earlier:not([hidden]) button')`);
+    const d = await P.ev(`(() => { const e = document.querySelector('.sbag-box .earlier'); return { text: e.querySelector('span')?.textContent, btn: e.querySelector('button')?.textContent, first: document.querySelector('.sbag-box').children[1] === e }; })()`);
+    ok(d.text === "Claude was connected to this page earlier." && d.btn === "Reconnect" && d.first, "A5.connect-reconnect: the Connect dialog, after a lost connection, offers Reconnect first, with no code", d);
+    const h0 = A.hellos;
+    await P.ev(`(document.querySelector('.sbag-box .earlier button').click(), true)`);
+    await P.until(`document.querySelector('#connect').textContent === 'Connected'`);
+    ok(A.hellos > h0 && (await P.ev(`document.querySelectorAll('.sbag-dlg').length`)) === 0, "A5.connect-reconnect: Reconnect from the dialog reconnects, with no new Allow", { hellos: A.hellos - h0 });
+  });
+
   // A14-8: focus after a successful Reconnect goes to the composer; a Connect dialog closed without connecting gives
   // it back to the bar's button
   await run("A14-8", async (B, A) => {
@@ -655,44 +675,133 @@ export async function runA14({ site, ok, want = () => true }) {
     ok(st3.active === "editor", "A14-8.connect-focus: after [Connect] from the bar succeeds (a new code, Allow), focus is in the composer (never body)", st3);
   });
 
-  // A14-9: the record's leftAt more than 30 s old (fixed clock), then a reload: no silent attempt; [Reconnect]
+  // A14-9: the record's leftAt more than RETURN_MS (10 min, A5 item 2) old (fixed clock), then a reload: no silent
+  // attempt; [Reconnect]
   await run("A14-9", async (B, A) => {
     const T = 1_900_000_000_000;
     const P = await B.tab({ clock: true });
     await P.clock(site, T);
     await pair(P, A, site, "page");
     await chat(P, A);
-    await P.ev(`(localStorage.setItem('__sbclockNext', '${T + 30001}'), true)`);
+    await P.ev(`(localStorage.setItem('__sbclockNext', '${T + 600001}'), true)`);
     const h0 = A.hellos;
     await P.reload();
     const seen = await P.seen(), nav = await P.nav();
-    ok(seen.present && seen.keys === RECORD_KEYS && seen.leftAt === T && seen.now - seen.leftAt === 30001 && nav === "reload" && seen.workspace?.startsWith("sagebrush-workspace/") && seen.page === new URL(site).origin + "/agents/", "A14-9 precondition: the record present and exact, a reload, the same scope, and leftAt deliberately 30 001 ms old", { keys: seen.keys, age: seen.now - seen.leftAt, nav, page: seen.page });
+    ok(seen.present && seen.keys === RECORD_KEYS && seen.leftAt === T && seen.now - seen.leftAt === 600001 && nav === "reload" && seen.workspace?.startsWith("sagebrush-workspace/") && seen.page === new URL(site).origin + "/agents/", "A14-9 precondition: the record present and exact, a reload, the same scope, and leftAt deliberately 600 001 ms (10 min and 1 ms) old", { keys: seen.keys, age: seen.now - seen.leftAt, nav, page: seen.page });
     await P.until(`document.querySelector('#conn-status').textContent !== ''`);
     const quiet = await A.quiet(3000), bar = await P.bar();
     ok(quiet && A.hellos === h0 && bar.status === COPY.kept && bar.act === "Reconnect", "A14-9: no silent attempt; the not-restored bar offers [Reconnect]", { quiet, bar });
   });
 
-  // A14-11: the navigation gate alone: an exact, fresh record that isn't a reload is discarded: no attempt, and the bar
-  // offers Connect (a new Allow), never a Reconnect with the old grant (decided Nov 19 2026: fail closed)
+  // A14-11 (A5 item 2, design r3, SEC-cleared Nov 20 2026): leaving the page by a navigation (Files) and coming back to
+  // it in this tab within RETURN_MS reconnects by itself, with the same grant: no new Allow, no code
   await run("A14-11", async (B, A) => {
     const P = await B.tab();
     await pair(P, A, site, "page");
     await chat(P, A);
     const g1 = A.grants().at(-1);
+    const n0 = A.grants().length;
+    // (out through the Files page itself, "/", which loads its own pairing code (index.html's reloadRecorded) and must
+    //  leave this page's record alone, then back)
+    await P.send("Page.navigate", { url: `${site}/` });
+    await P.until(`location.pathname === '/' && document.readyState === 'complete'`);
+    await sleep(1500);
+    const kept = await P.ev(`sessionStorage.getItem('sb-agent-reload-v1') !== null`);
+    ok(kept, "A14-11: the Files page (/) leaves the Agents page's record where it is");
+    const h0 = A.hellos;
+    await P.navigate(`${site}/agents/`);
+    const seen = await P.seen(), nav = await P.nav();
+    ok(seen.present && seen.keys === RECORD_KEYS && seen.now - seen.leftAt >= 0 && seen.now - seen.leftAt <= 600000 && nav === "navigate" && seen.page === new URL(site).origin + "/agents/", "A14-11 precondition: the record present, exact, fresh (within 10 min), the same scope; the navigation is 'navigate'", { keys: seen.keys, age: seen.now - seen.leftAt, nav });
+    await P.until(`document.querySelector('#connect').textContent === 'Connected'`);
+    const g2 = A.grants().at(-1);
+    ok(A.hellos > h0 && canon(g2) === canon(g1) && A.grants().length === n0 + 1 && (await P.ev(`document.querySelectorAll('.sbag-dlg').length`)) === 0, "A14-11: a navigation back within 10 min reconnects by itself, with the same grant (given again exactly, never widened), and no dialog", { hellos: A.hellos - h0, g1: canon(g1), g2: canon(g2) });
+  });
+
+  // A14-11d: out to the Files page and back with the browser's Back (a back_forward navigation): reconnects by itself
+  await run("A14-11d", async (B, A) => {
+    const P = await B.tab();
+    await pair(P, A, site, "page");
+    await chat(P, A);
+    const n0 = A.grants().length;
+    await P.send("Page.navigate", { url: `${site}/` });
+    await P.until(`location.pathname === '/' && document.readyState === 'complete'`);
+    await sleep(1500);
+    const h0 = A.hellos;
+    const r0 = await P.send("Page.getNavigationHistory");
+    const hist = r0?.result ?? r0;
+    const back = hist.entries[hist.currentIndex - 1];
+    await P.load(() => P.send("Page.navigateToHistoryEntry", { entryId: back.id }));
+    const nav = await P.nav();
+    await P.until(`document.querySelector('#connect').textContent === 'Connected'`);
+    ok(nav === "back_forward" && A.hellos > h0 && A.grants().length === n0 + 1, "A14-11d: Back from the Files page (back_forward) reconnects by itself, the same grant", { nav, hellos: A.hellos - h0 });
+  });
+
+  // A14-11c: out through a board page, which takes only its own record (takeReloadRecord's scope), then back: the
+  // record is still there, and the return reconnects by itself
+  await run("A14-11c", async (B, A) => {
+    const P = await B.tab();
+    await pair(P, A, site, "page");
+    await chat(P, A);
+    const n0 = A.grants().length;
+    await P.send("Page.navigate", { url: `${site}/board/` });
+    await P.until(`location.pathname === '/board/' && document.readyState === 'complete'`);
+    await sleep(2500);
+    const kept = await P.ev(`sessionStorage.getItem('sb-agent-reload-v1') !== null`);
+    ok(kept, "A14-11c: a board page leaves the Agents page's record where it is");
+    const h0 = A.hellos;
+    await P.navigate(`${site}/agents/`);
+    await P.until(`document.querySelector('#connect').textContent === 'Connected'`);
+    ok(A.hellos > h0 && A.grants().length === n0 + 1, "A14-11c: back from the board, it reconnects by itself, the same grant", { hellos: A.hellos - h0 });
+  });
+
+  // A14-11e (A5, SEC): out through a board page, staying there past RETURN_MS (fixed clock), then back: the board's
+  // pagehide never renews the Agents page's record, so the return is 10 min and 1 ms after the Agents page left and is
+  // discarded: no attempt, nothing kept, Connect
+  await run("A14-11e", async (B, A) => {
+    const T = 1_900_000_000_000;
+    const P = await B.tab({ clock: true });
+    await P.clock(site, T);
+    await pair(P, A, site, "page");
+    await chat(P, A);
+    await P.send("Page.navigate", { url: `${site}/board/` });
+    await P.until(`location.pathname === '/board/' && document.readyState === 'complete'`);
+    await sleep(2500);
+    const onBoard = await P.ev(`(() => { const r = JSON.parse(sessionStorage.getItem(${JSON.stringify(KEY)}) ?? "null"); return r && { leftAt: r.leftAt, page: r.page }; })()`);
+    ok(onBoard?.leftAt === T && onBoard.page === new URL(site).origin + "/agents/", "A14-11e precondition: on the board, the Agents page's record, left at T", { onBoard });
+    await P.ev(`(localStorage.setItem('__sbclock', '${T + 600001}'), true)`);
+    const h0 = A.hellos;
+    await P.navigate(`${site}/agents/`);
+    const seen = await P.seen(), nav = await P.nav();
+    ok(seen.present && seen.keys === RECORD_KEYS && seen.leftAt === T && seen.now - seen.leftAt === 600001 && nav === "navigate", "A14-11e: leaving the board left the record's leftAt as it was (T, not renewed): 10 min and 1 ms old on return", { leftAt: seen.leftAt === null ? null : seen.leftAt - T, age: seen.now - seen.leftAt, nav });
+    await P.until(`document.querySelector('#conn-status').textContent !== ''`);
+    const quiet = await A.quiet(3000), bar = await P.bar();
+    const rec = await P.ev(`sessionStorage.getItem(${JSON.stringify(KEY)})`);
+    ok(quiet && A.hellos === h0 && rec === null && bar.act === "Connect" && !(await P.connected()), "A14-11e: through the board past 10 min: discarded: no attempt, the record gone, the bar offers Connect", { quiet, bar, rec: !!rec });
+  });
+
+  // A14-11b: a navigation back older than RETURN_MS (fixed clock): the record is discarded: no attempt, and the bar
+  // offers Connect (a new Allow), never a Reconnect with the old grant
+  await run("A14-11b", async (B, A) => {
+    const T = 1_900_000_000_000;
+    const P = await B.tab({ clock: true });
+    await P.clock(site, T);
+    await pair(P, A, site, "page");
+    await chat(P, A);
+    await P.ev(`(localStorage.setItem('__sbclockNext', '${T + 600001}'), true)`);
     await P.send("Page.navigate", { url: "about:blank" });
     await sleep(500);
     const h0 = A.hellos;
     await P.navigate(`${site}/agents/`);
     const seen = await P.seen(), nav = await P.nav();
-    ok(seen.present && seen.keys === RECORD_KEYS && seen.now - seen.leftAt >= 0 && seen.now - seen.leftAt <= 30000 && nav === "navigate" && seen.page === new URL(site).origin + "/agents/", "A14-11 precondition: the record present, exact, fresh (leftAt within 30 s), the same scope; the navigation is 'navigate' (only R1-a stands)", { keys: seen.keys, age: seen.now - seen.leftAt, nav });
+    ok(seen.present && seen.keys === RECORD_KEYS && seen.now - seen.leftAt === 600001 && nav === "navigate", "A14-11b precondition: the record present, 10 min and 1 ms old; the navigation is 'navigate'", { keys: seen.keys, age: seen.now - seen.leftAt, nav });
     await P.until(`document.querySelector('#conn-status').textContent !== ''`);
     const quiet = await A.quiet(3000), bar = await P.bar();
-    ok(quiet && A.hellos === h0 && bar.status === COPY.kept && bar.act === "Connect", "A14-11: no silent attempt; the not-restored bar offers Connect, not Reconnect", { quiet, bar });
+    ok(quiet && A.hellos === h0 && bar.status === COPY.kept && bar.act === "Connect", "A14-11b: no silent attempt; the not-restored bar offers Connect, not Reconnect", { quiet, bar });
     const n11 = A.grants().length;
     await P.ev(`document.querySelector('#conn-act').click()`);
     await P.until(`[...document.querySelectorAll('.sbag-dlg h2')].some((h) => h.textContent === 'Connect an agent')`);
     await sleep(500);
-    ok(A.hellos === h0 && A.grants().length === n11 && !(await P.connected()), "A14-11: its Connect opens the Connect dialog: no hello and no grant from the old record", { hellos: A.hellos - h0, grants: A.grants().length - n11 });
+    ok(A.hellos === h0 && A.grants().length === n11 && !(await P.connected()), "A14-11b: its Connect opens the Connect dialog: no hello and no grant from the old record", { hellos: A.hellos - h0, grants: A.grants().length - n11 });
   });
 
   // A14-12: the no-demo marker: a failed restore, then a second reload: Send inert with the hint; nothing reaches the demo
@@ -752,13 +861,16 @@ export async function runA14({ site, ok, want = () => true }) {
     ok(during.visible && during.before === "Reconnect" && during.act === "Reconnecting…" && during.busy === "true" && during.ariaDisabled === "true" && !during.disabled && after.status === COPY.merged && active === "conn-act", "A14-14.hint-act: after ×, the hint's own [Reconnect] runs the bar's action (Reconnecting…, aria-busy, never disabled); its outcome brings the bar back with focus on the bar's button", { during, after, active });
   });
 
-  // A14-15 (R1-d): a valid, fresh, reload-type record for another workspace (or page): no attempt, gone, [Connect]
-  for (const [id, field, value] of [["A14-15.workspace", "workspace", "sagebrush-workspace/ffffffffffffffff"], ["A14-15.page", "page", new URL(site).origin + "/other/"]]) {
+  // A14-15 (R1-d): a valid, fresh, reload-type record for another workspace of this page: no attempt, gone, [Connect].
+  // (Another page's record: A14-15.page below, left alone for that page, A5)
+  for (const [id, field, value] of [["A14-15.workspace", "workspace", "sagebrush-workspace/ffffffffffffffff"]]) {
     await run(id, async (B, A) => {
       const P = await B.tab();
       await pair(P, A, site, "page");
       await chat(P, A);
-      await P.ev(`(() => { const r = JSON.parse(sessionStorage.getItem(${JSON.stringify(KEY)})); r.${field} = ${JSON.stringify(value)}; sessionStorage.setItem(${JSON.stringify(KEY)}, JSON.stringify(r)); return true; })()`);
+      // (leftAt set here, fresh: this page's pagehide marks only its own scope's record, so it no longer stamps one of
+      //  another workspace; only the workspace differs)
+      await P.ev(`(() => { const r = JSON.parse(sessionStorage.getItem(${JSON.stringify(KEY)})); r.${field} = ${JSON.stringify(value)}; r.leftAt = Date.now(); sessionStorage.setItem(${JSON.stringify(KEY)}, JSON.stringify(r)); return true; })()`);
       const h0 = A.hellos;
       await P.reload();
       const seen = await P.seen(), nav = await P.nav();
@@ -772,6 +884,29 @@ export async function runA14({ site, ok, want = () => true }) {
       ok(quiet && A.hellos === h0 && rec === null && bar.status === COPY.discarded && bar.act === "Connect" && dialog === "Connect an agent" && quiet2, `${id}: no attempt; the record gone; nothing kept for a click: the bar offers [Connect], which opens the Connect dialog and tries nothing`, { quiet, bar, rec: !!rec, dialog });
     });
   }
+
+  // A14-15.page (A5): a valid, fresh record of another page of this site, in this tab's storage: not this page's. No
+  // attempt, and it is left where it is, untouched, for that page to take when the person goes back to it; this page
+  // shows nothing of it and offers Connect
+  await run("A14-15.page", async (B, A) => {
+    const P = await B.tab();
+    await pair(P, A, site, "page");
+    await chat(P, A);
+    const other = new URL(site).origin + "/other/";
+    await P.ev(`(() => { const r = JSON.parse(sessionStorage.getItem(${JSON.stringify(KEY)})); r.page = ${JSON.stringify(other)}; sessionStorage.setItem(${JSON.stringify(KEY)}, JSON.stringify(r)); return true; })()`);
+    const before = await P.ev(`sessionStorage.getItem(${JSON.stringify(KEY)})`);
+    const h0 = A.hellos;
+    await P.reload();
+    await sleep(1500);
+    const quiet = await A.quiet(3000);
+    const after = await P.ev(`sessionStorage.getItem(${JSON.stringify(KEY)})`);
+    const bar = await P.bar();
+    ok(quiet && A.hellos === h0 && after === before && JSON.parse(after ?? "{}").page === other && bar.status !== COPY.discarded && !(await P.connected()), "A14-15.page: another page's record: no attempt, left byte for byte through this page's pagehide and load (leftAt not renewed), nothing said of it here", { quiet, hellos: A.hellos - h0, bar, kept: !!after });
+    await P.ev(`(document.querySelector('#connect').click(), true)`);
+    await P.until(`[...document.querySelectorAll('.sbag-dlg h2')].some((h) => h.textContent === 'Connect an agent')`);
+    const offered = await P.ev(`!!document.querySelector('.sbag-box .earlier:not([hidden]) button')`);
+    ok(!offered && A.hellos === h0, "A14-15.page: Connect asks for a code: another page's record is never offered as a Reconnect here", { offered });
+  });
 
   // A14-16 (r3.2): a timed restore on the fixed clock; the original expiry stands and its timer fires at it
   await run("A14-16", async (B, A) => {

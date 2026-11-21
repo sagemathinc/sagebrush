@@ -70,6 +70,11 @@ let runMod: Promise<typeof import("./run-core.mjs")> | null = null, runTries = 0
 //  /sagebrush-latex-interact.js, fetched only once a preview or a Run has one; a failed fetch is tried again by a URL of
 //  its own)
 const interactUrl = new URL("sagebrush-latex-interact.js", import.meta.url).href;
+// (the preview's code blocks coloured: hl.ts, its own chunk, /sagebrush-latex-hl.js, fetched once a preview has one;
+//  one import for the page; not fetched, the code stays plain: a failed import isn't tried again, as the browser keeps
+//  it for its URL)
+const hlUrl = new URL("sagebrush-latex-hl.js", import.meta.url).href;
+let hlMod: Promise<typeof import("./hl") | null> | null = null;
 // (where you were in the file: view.ts, its own chunk, /sagebrush-latex-view.js (design/view-state.md))
 const viewUrl = new URL("sagebrush-latex-view.js", import.meta.url).href;
 let interactMod: Promise<typeof import("./interact")> | null = null, interactTries = 0;
@@ -79,10 +84,11 @@ let runGen = 0;
 // (a failed fetch is forgotten, so the next try fetches again, by a URL of its own: a browser may keep a failed
 // module's result for its URL; each caller says the failure)
 // (an agent this tab had before its reload: its reload record (agent-pair.ts's RELOAD_KEY), resumed by the pairing module)
-// (only on a reload of this tab: after any other navigation the record is dropped here, unread, as the pairing module
-//  would discard it (reloadDecision), and nothing is fetched for it; a page in a frame (the Agents page's .tex pane) leaves
-//  the record alone: it shares the tab's sessionStorage, and the record is the top page's)
-const reloadRecorded = () => { try { if (window.top !== window || sessionStorage.getItem("sb-agent-reload-v1") === null) return false; if ((performance.getEntriesByType("navigation")[0] as PerformanceNavigationTiming | undefined)?.type === "reload") return true; sessionStorage.removeItem("sb-agent-reload-v1"); return false; } catch { return false; } };
+// (another page's record (the Agents page's, kept while the person is on Files or here): left alone, unread past its
+//  page, for that page to take when they go back to it (A5); this page's own, on a reload or a navigation back: the
+//  pairing module decides (reloadDecision: fresh, the same scope); anything else is dropped here; a page in a frame (the
+//  Agents page's .tex pane) leaves the record alone: it shares the tab's sessionStorage, and the record is the top page's)
+const reloadRecorded = () => { try { if (window.top !== window) return false; const raw = sessionStorage.getItem("sb-agent-reload-v1"); if (raw === null) return false; let page: unknown = null; try { page = JSON.parse(raw)?.page ?? null; } catch {} if (typeof page === "string" && page !== location.origin + location.pathname) return false; const nav = (performance.getEntriesByType("navigation")[0] as PerformanceNavigationTiming | undefined)?.type; if (nav === "reload" || (typeof page === "string" && (nav === "navigate" || nav === "back_forward"))) return true; sessionStorage.removeItem("sb-agent-reload-v1"); return false; } catch { return false; } };
 // (decided once, at load, before anything else is looked at: a ?pair= link or the desktop app never skips the drop)
 const reloadNow = reloadRecorded();
 let agentPairing: Promise<{ connect(): unknown }> | null = null, agentTries = 0;
@@ -233,9 +239,9 @@ const onNavigate = (e: any) => {
 // Leaving the page, not only the file: a notebook, a board or a code file opened from here, a link. With an
 // edit not yet in the file, the navigation waits for it, as a switch to another file does (leave.ts): held, the edit
 // written, then made again; with nothing pending it goes at once. (Its write would otherwise be cut off with the page,
-// and the edit would be in neither the file nor any other device.) Where the browser has no Navigation API, only a
-// notebook opened from the files beside the page (__sbTexOpen) waits the same way, through leaveThen; the other ways out
-// (a board, a code file, the File menu's links, a reload) go at once there, as before.
+// and the edit would be in neither the file nor any other device.) Where the browser has no Navigation API, the page's
+// own ways out wait the same way through leaveThen (globalThis.__sbTexLeave for the hosting page's: a notebook or a
+// board from the files beside it, the File menu's, Back); a reload there goes at once, as before.
 let leavingTo = "";
 const onLeave = (e: any) => {
   if (e.navigationType === "traverse" || !e.cancelable || e.destination?.sameDocument || e.downloadRequest) return;
@@ -246,11 +252,20 @@ const onLeave = (e: any) => {
   // (a reload made again as a load of the same URL)
   void leaveOk().then((ok) => { if (ok) { leavingTo = url; replace ? location.replace(url) : location.assign(url); } });
 };
-/** Go elsewhere once the editor shown has settled (its edit written, or asked about): `go` at once where the Navigation
- *  API's navigate event (onLeave) does the waiting. */
-export const leaveThen = (go: () => void): void => {
-  if (navApi() || !current?.pending()) { go(); return; }
-  void leaveOk().then((ok) => { if (ok) go(); });
+/** Go elsewhere once the editor shown has settled (its edit written, or asked about), with or without the Navigation
+ *  API (its navigate event, onLeave, then finds nothing pending): so a host's own wait after it (the desktop app's
+ *  disk, index.html leaveTo) comes after the edit is written. `go` may say the page stays (false, or a promise of it):
+ *  the editor, held read-only while it settled, is let go again. */
+export const leaveThen = (go: () => unknown): void => {
+  if (!current?.pending()) { void go(); return; }
+  void leaveOk().then(async (ok) => { if (ok && (await go()) === false) current?.hold(false); });
+};
+/** To another page by the hosting page's way out (index.html leaveTo: this editor's edit written, then the desktop app's
+ *  disk), or, without one, once the edit is written. */
+const leaveBy = (url: string): void => {
+  const host = (globalThis as any).__sbLeaveTo;
+  if (host) void host(url);
+  else leaveThen(() => location.assign(url));
 };
 const fenceDone = () => { fenceTok = 0; if (fencing) { fencing = false; fenceEnd(); } };
 const fenceStale = (ev: PopStateEvent) => {
@@ -350,6 +365,8 @@ export async function mount(root: HTMLElement, host: Host): Promise<void> {
   const title = el("span", "tex-title");
   // (Sagebrush, then the file's name, beside the corner Files button, as on the notebook and board pages)
   const home = el("a", "tex-home", "Sagebrush") as HTMLAnchorElement; home.href = "/?home"; home.title = "About Sagebrush, and where to start";
+  // (a plain click: by the page's way out, the edit written first; a new tab or window as the browser makes it)
+  home.onclick = (ev) => { if (ev.button || ev.metaKey || ev.ctrlKey || ev.shiftKey || ev.altKey) return; ev.preventDefault(); leaveBy(home.href); };
   // (the save state, as Google Docs shows it: Saving…, Saved ✓; a failed write stays shown, with its reason)
   const saveState = el("span", "tex-savestate"); saveState.setAttribute("role", "status"); saveState.setAttribute("aria-live", "polite");
   // (what the page shows: the source, both, or the document alone; one click each, see the view below)
@@ -458,7 +475,8 @@ export async function mount(root: HTMLElement, host: Host): Promise<void> {
   // ---- a notebook opened while this page is up (from the files beside it, a row's menu, Open as a notebook, an
   // upload): the notebook page's openId() asks here first (index.html, in a LaTeX build only) and its page is opened
   // by URL instead, as a board's is; without this it would be loaded unseen under the editor
-  (globalThis as any).__sbTexOpen = (id: string) => { leaveThen(() => location.assign("/?nb=" + encodeURIComponent(id))); return true; };
+  (globalThis as any).__sbTexOpen = (id: string) => { leaveBy("/?nb=" + encodeURIComponent(id)); return true; };
+  (globalThis as any).__sbTexLeave = leaveThen;
   // another .tex (from the files beside this page, New, an example): opened here, in place, its URL pushed; a new tab
   // as before (boot.ts's hook); unsaved changes asked about first
   const g: any = globalThis, bootHook = (g.__sbTexBoot ??= g.__sbTex);
@@ -700,7 +718,7 @@ export async function mount(root: HTMLElement, host: Host): Promise<void> {
   });
   life.signal.addEventListener("abort", () => unwatchInputs());
   const E = createEditor({
-    left, right, preview, text: opened.text, large: read.content.length > 2 ** 20, say, images, sage: results,
+    left, right, preview, text: opened.text, large: read.content.length > 2 ** 20, say, images, sage: results, run: !!host.sandbox,
     workerUrl: new URL("sagebrush-latex-worker.js", location.href),
     onImageRefs: (refs, tok) => void resolveImages(refs, tok),
     inputs, onInputRefs: (refs, tok) => void readInputs(refs, tok),
@@ -804,6 +822,10 @@ export async function mount(root: HTMLElement, host: Host): Promise<void> {
     if (running) presenting.running(true);
   }, () => say("Couldn't load the presenter. Check the network, then click Present to try again."));
   E.onRendered(() => { presentBtn.hidden = slidesNow().length === 0; });
+  // (one wait for the chunk per page at most: renders while it comes add none, and once it comes the preview as it is
+  //  then is coloured; astra's SEC on #1009)
+  let hlWait = false;
+  E.onRendered(() => { if (!hlWait && preview.querySelector("pre.sageblock:not([data-hl])")) { hlWait = true; (hlMod ??= import(hlUrl).catch(() => null)).then((m) => { hlWait = false; if (m && live()) m.colour(preview, life.signal); }); } });
   // (the preview's interacts, drawn after each render that has one not drawn yet; the slide being presented shown again,
   //  so its copy has them)
   E.onRendered(() => {

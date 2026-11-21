@@ -129,13 +129,16 @@ try {
   // centre is the button itself), and each makes a .tex and opens it in the editor
   {
     await send("Emulation.setDeviceMetricsOverride", { width: 390, height: 844, deviceScaleFactor: 2, mobile: true });
-    const reach = (sel, text) => ev(`(() => {
+    // (measured once the cross-document view transition a navigation starts has ended: while it runs, the page under it
+    // takes no input and elementFromPoint finds the root)
+    const settled = () => until(`(() => { try { return !document.documentElement.matches(":active-view-transition"); } catch { return true; } })()`, 3000);
+    const reach = async (sel, text) => (await settled(), ev(`(() => {
       const b = [...document.querySelectorAll(${JSON.stringify(sel)})].find((x) => x.firstChild?.textContent === ${JSON.stringify(text)});
       if (!b) return { found: false, items: [...document.querySelectorAll(${JSON.stringify(sel)})].map((x) => x.textContent) };
       b.scrollIntoView({ block: "center" });
       const r = b.getBoundingClientRect(), at = document.elementFromPoint(r.left + r.width / 2, r.top + r.height / 2);
       return { found: true, inView: r.top >= 0 && r.bottom <= innerHeight && r.left >= 0 && r.right <= innerWidth, top: at === b || b.contains(at), at: at ? at.tagName + "#" + at.id + "." + at.className + " " + (at.textContent ?? "").slice(0, 40) : null, w: innerWidth, h: innerHeight };
-    })()`);
+    })()`));
     const madeAs = async (p) => (await fresh(`!!document.querySelector(".tex-page .tex-src") && !!${W}`, 20000)) && ev(`${W}.stat(${JSON.stringify(p)}).then((e) => !!e?.fid && new URLSearchParams(location.search).get("tex") === e.fid)`);
     await ev(`localStorage.setItem("sagebrush-files-sidebar", "1"); true`);
     await go(base + "?latex=1"); await until(`!!${W}`, 60000);
@@ -2580,7 +2583,8 @@ try {
   // A7: leaving the page right after an edit, within its save delay (the two-device audit: the edit was in neither the
   // file nor the other device): a notebook clicked in the files waits for the edit's write, held here, and goes once it
   // is written, the edit in the file; a write that fails asks first, and No keeps the page and the text
-  const readUx = () => ev(`${W}.read("/t/ux.tex").then((r) => new TextDecoder().decode(r.content), (e) => "ERR " + (e?.message ?? e))`);
+  // (the workspace of the page shown: the notebook page's, or the LaTeX page's own (__sbTexWs, the test build's))
+  const readUx = async () => { await until(`!!(window.sagebrush?.workspace ?? window.__sbTexWs)`, 15000); return ev(`(window.sagebrush?.workspace ?? window.__sbTexWs)?.read("/t/ux.tex").then((r) => new TextDecoder().decode(r.content), (e) => "ERR " + (e?.message ?? e)) ?? "no workspace"`); };
   const typeEnd = async (text) => { await ev(`(() => { const t = document.querySelector(".tex-src"); t.focus(); t.setSelectionRange(t.value.length, t.value.length); return 1; })()`); await send("Input.insertText", { text }); };
   {
     await open(fu); await until(`!!${rowOf("/uxnb.ipynb")}`, 15000);
@@ -2608,6 +2612,44 @@ try {
     // (the write let succeed again and saved, so nothing is left to ask about)
     await ev(`(delete window.__sbTexSaveWrite, true)`); await ctrlS(); await savedNow();
     check((await readUx()).endsWith("% refused leave"), "A7: …then saved with Ctrl+S: the edit in the file");
+  }
+  // A7: every way out of the page waits for an edit's write, held here, and goes once it is written, the edit in the
+  // file: with the Navigation API, the page's own reload and replace; without it (a browser that has none, as Safari
+  // before it, or a WebView), a notebook and a board from the files beside it, and the File menu's New notebook and New
+  // board. (A code file clicked there opens its preview, in place: no way out) (A reload by the browser itself can't be held by a page: not here)
+  {
+    const nbRef7 = await ev(`${W}.list("/").then((l) => l.find((e) => e.path === "/uxnb.ipynb")?.ref ?? null)`);
+    await ev(`${W}.create("/uxboard.board.json").then(() => 1)`);
+    const heldExit = async (what, act, gone, noNav, readFrom = null) => {
+      await open(fu); await until(`!!${rowOf("/uxnb.ipynb")} && !!${rowOf("/uxboard.board.json")}`, 15000);
+      const api = await ev(`!!window.navigation`);
+      await ev(`(() => { window.__heldW = 0; window.__hold = new Promise((r) => (window.__rel = r)); window.__sbTexSaveWrite = () => (window.__heldW++, window.__hold); return true; })()`);
+      const tag = "% " + what;
+      await typeEnd(tag);
+      await mark();
+      await ev(act);
+      await sleep(1500);
+      const waiting = await ev(`({ page: !!document.querySelector(".tex-page"), url: location.search, held: window.__heldW, ro: document.querySelector(".tex-src")?.readOnly })`).catch((e) => ({ gone: String(e).slice(0, 80) }));
+      check(api === !noNav && waiting.page === true && /tex=/.test(waiting.url) && waiting.held >= 1 && waiting.ro === true, `A7${noNav ? " (no Navigation API)" : ""}: ${what} right after an edit, its write held: the page waits, held read-only`, { api, ...waiting });
+      await ev(`(window.__rel?.(), true)`).catch(() => {});
+      const went = await fresh(gone, 30000).catch(() => false);
+      // (a page with no workspace of its own, the agents page: the file read back from the editor's page)
+      if (went && readFrom) await go(readFrom);
+      const bytes = went ? await readUx() : "";
+      check(went && bytes.endsWith(tag), `A7${noNav ? " (no Navigation API)" : ""}: …${what}, the write let go: gone, and the edit is in the file`, { went, url: went ? await ev(`location.pathname + location.search`) : null, tail: bytes.slice(-40) });
+    };
+    const notTex = `!document.querySelector(".tex-page") && !!${W}`;
+    await heldExit("the page's own reload", `(location.reload(), true)`, `!!document.querySelector(".tex-page .tex-src") && !!window.__sbTexWs`, false);
+    await heldExit("the page's own replace", `(location.replace("/?nb=" + ${JSON.stringify(nbRef7)}), true)`, notTex, false);
+    const hide = await send("Page.addScriptToEvaluateOnNewDocument", { source: "try { Object.defineProperty(window, 'navigation', { value: undefined, configurable: true }); } catch {}" });
+    await heldExit("a notebook clicked in the files", `(${rowOf("/uxnb.ipynb")}.click(), true)`, notTex, true);
+    await heldExit("a board clicked in the files", `(${rowOf("/uxboard.board.json")}.click(), true)`, `/board/.test(location.pathname)`, true);
+    await heldExit("the File menu's New notebook", `(document.querySelector('.tex-filemenu [data-f="texnb"]').click(), true)`, notTex, true);
+    await heldExit("the File menu's New board", `(document.querySelector('.tex-filemenu [data-f="texboard"]').click(), true)`, `/board/.test(location.pathname)`, true);
+    // (the page's home link, a plain click; and the files' Agents… (the hosting page's way out by its board path))
+    await heldExit("the Sagebrush home link", `(document.querySelector(".tex-page .tex-home").click(), true)`, `location.search.startsWith("?home") && !document.querySelector(".tex-page")`, true);
+    await heldExit("the files' Agents…", `(document.querySelector("#wssidebar .sbfiles .fagents").click(), true)`, `/agents/.test(location.pathname)`, true, base + "?latex=1");
+    await send("Page.removeScriptToEvaluateOnNewDocument", { identifier: hide.identifier });
   }
   await ev(`localStorage.removeItem("sagebrush-files-sidebar"); true`);
   // A2: an unclosed formula ends at a blank line: shown with a note, the rest of the document rendered as text
@@ -3048,6 +3090,10 @@ try {
     await sleep(1500);
     const onOpen = { runner: requests.slice(n0).filter((u) => /\/runner\/|sagebrush-worker\.js/.test(u)), frames: await ev(`document.querySelectorAll("iframe[sandbox]").length`), results: await resultsOf("/t/run.tex"), chips: await ev(`document.querySelectorAll(".tex-preview .sagechip").length`) };
     check(onOpen.runner.length === 0 && onOpen.frames === 0 && onOpen.results === null && onOpen.chips >= 2, "Run: nothing runs on open (no runner, no worker, no results file; the items show as not run)", onOpen);
+    // (in the editor, where Run is, a code item not run yet says how to run it; the published page,
+    //  examples and the CLI, with no Run, keep "not run": sagetex.mjs RUN_HINT)
+    const hint = await ev(`[...document.querySelectorAll(".tex-preview .sagechip.s-notrun")].map((c) => c.textContent)`);
+    check(hint.some((t) => /^(Sage|Python|Magma) item \d+: not run yet \(press Run or Shift\+Enter\)$/.test(t)) && !hint.some((t) => /item \d+: not run$/.test(t)), "Run: an item not run yet says \"not run yet (press Run or Shift+Enter)\" in the editor", hint);
     // embedded (?embed=1: the Agents page's pane frames the editor; the page's frame-ancestors 'self' admits this site's
     // own frames only): the document alone, no Files, home, title, File menu, Agent or Share, no pairing of its own (the
     // agent chunk never fetched, though this browser remembers a grant), and the pane's may-close answered by the
@@ -3227,6 +3273,97 @@ try {
       check(title === "Run the document's Python code in this browser: Shift+Enter" && ranPy && shown,
         "PythonTeX: Run runs \\py and pycode; their results read back where they stand (pycode's \\textbf bold), no item left not run; the Run button says it runs PythonTeX",
         { title, ranPy, shown, html: await ev(`document.querySelector(".tex-preview").innerHTML.slice(0, 1500)`) });
+      // (L5, Nov 10: the code a sageblock shows is coloured as the notebook colours it: hl.ts, its own chunk,
+      //  fetched only once a preview has such a block; drawn as text and fixed-class spans, never as HTML; refused, the
+      //  code stays plain; a render while it is on its way is coloured once it comes; many blocks, a few at a time)
+      {
+        const blockDoc = (b) => "\\documentclass{article}\n\\usepackage{sagetex}\n\\begin{document}\n" + b + "\\end{document}\n";
+        const block = (code) => "\\begin{sageblock}\n" + code + "\n\\end{sageblock}\n";
+        const CODE = "for k in range(3):\n    s = '<b>&amp;</b>' < 2  # not HTML";
+        const hlFetched = () => requests.filter((u) => /sagebrush-latex-hl\.js/.test(u)).length;
+        const PRE = `document.querySelector(".tex-preview .ch:not([hidden]) pre.sageblock")`;
+        // (no block: never fetched)
+        requests.length = 0;
+        await open(await mk("/t/hl-none.tex", enc(blockDoc("No block here: $\\sage{1+1}$.\n"))));
+        await until(`(document.querySelector(".tex-preview")?.textContent ?? "").includes("No block here")`, 20000);
+        await sleep(800);
+        check(hlFetched() === 0, "L5: a preview without a code block never fetches the highlighting chunk", { fetched: hlFetched() });
+        // (a block: coloured, its text the same, nothing in it parsed as HTML; the chunk fetched once)
+        const fhl = await mk("/t/hl.tex", enc(blockDoc(block(CODE))));
+        requests.length = 0;
+        await open(fhl);
+        const coloured = await until(`!!${PRE}?.matches("[data-hl]") && !!${PRE}.querySelector(".hk")`, 20000);
+        const shown = await ev(`(() => { const p = ${PRE}; return { text: p?.textContent, tags: [...new Set([...(p?.querySelectorAll("*") ?? [])].map((e) => e.tagName + "." + e.className))] }; })()`);
+        check(coloured && shown.text?.trim() === CODE && shown.tags.length > 0 && shown.tags.every((t) => /^SPAN\.h[a-z]$/.test(t)) && hlFetched() === 1,
+          "L5: a sageblock's code is coloured, its text the same and none of it HTML (no <b> from '<b>&amp;</b>'); the chunk fetched once", { coloured, shown, fetched: hlFetched() });
+        // (a Magma block beside a Sage one: the Sage one coloured, the Magma one left plain, as its comments and strings
+        //  aren't Sage's)
+        await open(await mk("/t/hl-magma.tex", enc(blockDoc(block("x = 1  # sage") + "\\begin{magmablock}\nx := 'a'; // it's Magma\n\\end{magmablock}\n"))));
+        const bothShown = await until(`!!document.querySelector(".tex-preview .ch:not([hidden]) pre.sageblock[data-hl]") && !!document.querySelector(".tex-preview .ch:not([hidden]) pre.sageblock.magma")`, 20000);
+        await sleep(800);
+        const magmaPre = await ev(`(() => { const p = document.querySelector(".tex-preview .ch:not([hidden]) pre.sageblock.magma"); return p && { hl: p.hasAttribute("data-hl"), spans: p.querySelectorAll("span").length, text: p.textContent }; })()`);
+        check(bothShown && magmaPre && !magmaPre.hl && magmaPre.spans === 0 && magmaPre.text.includes("// it's Magma"), "L5: a Magma block stays plain beside a coloured Sage block", magmaPre);
+        // (many blocks: all coloured, a few at a time: no long task on a timing box; reported on a build box)
+        await ev(watchLt);
+        await typeInto(blockDoc(Array.from({ length: 300 }, (_, k) => block("for i in range(" + k + "):\n    x = i * " + k + "  # block " + k)).join("\n")));
+        const allDone = await until(`document.querySelectorAll(".tex-preview .ch:not([hidden]) pre.sageblock").length === 300 && document.querySelectorAll(".tex-preview .ch:not([hidden]) pre.sageblock:not([data-hl])").length === 0`, 30000);
+        const ltHl = await ev(`window.__lt`);
+        check(allDone, "L5: 300 blocks: all coloured", { allDone, n: await ev(`document.querySelectorAll(".tex-preview .ch:not([hidden]) pre.sageblock[data-hl]").length`) });
+        if (BOX === "timing") check(ltHl.every((d) => d <= 50), "L5: 300 blocks coloured with no long task over 50 ms (a timing box)", ltHl);
+        else console.log("timing, reported, not gated (a build box): long tasks while 300 blocks were coloured (ms):", JSON.stringify(ltHl));
+        await typeInto(blockDoc(block(CODE)));
+        await savedNow(10000);
+        // (refused: the code stays plain, with no error. The cache off for this and the next row, so the chunk is asked
+        //  for over the network each time, where the Fetch domain sees it, not taken from the memory cache)
+        await send("Network.setCacheDisabled", { cacheDisabled: true });
+        const e0 = errors.length;
+        onPaused = (p) => { send("Fetch.failRequest", { requestId: p.requestId, errorReason: "ConnectionFailed" }); };
+        await send("Fetch.enable", { patterns: [{ urlPattern: "*sagebrush-latex-hl.js*" }] });
+        await open(fhl);
+        await until(`!!${PRE}`, 20000);
+        await sleep(1500);
+        const plain = await ev(`(() => { const p = ${PRE}; return { spans: p.querySelectorAll("span").length, text: p.textContent }; })()`);
+        await send("Fetch.disable"); onPaused = null;
+        check(plain.spans === 0 && plain.text.trim() === CODE && errors.length === e0, "L5: the highlighting chunk refused: the code stays plain, and no error", { plain, errors: errors.slice(e0) });
+        // (renders while the chunk is on its way (astra's SEC on #1009): 20 of them make one wait and one queue, and once
+        //  it comes the newest render's block is the one coloured)
+        let held = null;
+        onPaused = (p) => { held = p.requestId; };
+        await send("Fetch.enable", { patterns: [{ urlPattern: "*sagebrush-latex-hl.js*" }] });
+        await open(fhl);
+        await until(`!!${PRE}`, 20000);
+        for (let i = 0; i < 100 && !held; i++) await sleep(100);
+        for (let i = 1; i <= 20; i++) { await typeInto(blockDoc(block(CODE + "\nn = " + i))); await sleep(60); }
+        const rerendered = await until(`(${PRE}?.textContent ?? "").includes("n = 20")`, 20000);
+        if (held) await send("Fetch.continueRequest", { requestId: held });
+        const late = await until(`(() => { const p = ${PRE}; return !!p && p.textContent.includes("n = 20") && !!p.querySelector(".hn"); })()`, 20000);
+        await sleep(300);
+        const queues = await ev(`window.__sbHlCalls ?? 0`);
+        await send("Fetch.disable"); onPaused = null;
+        check(!!held && rerendered && late && queues === 1 && errors.length === e0, "L5: 20 renders while the chunk is on its way: one call to colour once it comes, and the newest block coloured", { held: !!held, rerendered, late, queues, errors: errors.slice(e0) });
+        await typeInto(blockDoc(block(CODE)));
+        await savedNow(10000);
+        // (the page goes to another file while the chunk is on its way: the first file's wait colours nothing; the other's
+        //  block is coloured by its own)
+        const fother = await mk("/t/hl-other.tex", enc(blockDoc(block("OTHER = 1"))));
+        held = null;
+        onPaused = (p) => { held = p.requestId; };
+        await send("Fetch.enable", { patterns: [{ urlPattern: "*sagebrush-latex-hl.js*" }] });
+        await open(fhl);
+        await until(`!!${PRE}`, 20000);
+        for (let i = 0; i < 100 && !held; i++) await sleep(100);
+        await ev(`(window.__sbTex({ path: "/t/hl-other.tex", fid: ${JSON.stringify(fother)} }), 1)`);
+        await until(`(${PRE}?.textContent ?? "").includes("OTHER")`, 20000);
+        if (held) await send("Fetch.continueRequest", { requestId: held });
+        const otherDone = await until(`!!${PRE}?.querySelector(".hn")`, 20000);
+        await sleep(300);
+        const queues2 = await ev(`window.__sbHlCalls ?? 0`);
+        await send("Fetch.disable"); onPaused = null;
+        await send("Network.setCacheDisabled", { cacheDisabled: false });
+        check(!!held && otherDone && queues2 === 1 && errors.length === e0, "L5: the page leaves a file while the chunk is on its way: the left file's wait colours nothing, the new one's block is coloured", { held: !!held, otherDone, queues2, errors: errors.slice(e0) });
+        await typeInto(blockDoc(block(CODE)));
+        await savedNow(10000);
+      }
       // (William's L3, Nov 10: Shift+Enter moved the preview by a page, Follow off: the place the person looks at keeps its
       //  place. Twelve sageblocks, each losing its "not run" chip as the Run's results come; the person looks at the
       //  seventh's code, near the top of the preview, so the groups replaced are the ones in view, which the browser's

@@ -35,6 +35,8 @@ export const APP_NO_RUN = "Run isn't available in the desktop app: to run this d
 const PAGE = "/sagebrush-latex.js";
 const g: any = globalThis;
 const isTex = (e: Entry) => /\.tex$/i.test(e.path);
+// (to another page once the editor's edit is written: page.ts's leaveThen, once the editor is up)
+const leave = (url: string) => (g.__sbLeaveTo ? void g.__sbLeaveTo(url) : (g.__sbTexLeave ?? ((go: () => void) => go()))(() => location.assign(url)));
 /** New ▸ LaTeX document in `folder`: "Untitled.tex" (or "Untitled (2).tex", ...) there, opened in the editor. */
 export const texNew = (ws: Workspace, folder = "/") => import(PAGE).then((x) => x.newTex(ws, g.__sbTex, folder), (r) => alert(r));
 /** The editor's File menu, drawn by the one File menu (filemenu.ts, as on the notebook and board pages: the same items
@@ -43,12 +45,12 @@ export const texNew = (ws: Workspace, folder = "/") => import(PAGE).then((x) => 
 function texFileMenu(ws: Workspace, menu: HTMLElement, o: { print(): void; close(): void; fid: string; text?(): string | null; save?(): Promise<void>; share?: TexShare | null }) {
   const go = (e: Entry, how: "here" | "tab" = "here") => {
     const url = e.kind === "board" ? "/board/?doc=local:" + e.ref : e.kind === "notebook" ? "/?nb=" + encodeURIComponent(e.ref!) : isTex(e) && e.fid ? "/?tex=" + e.fid : null;
-    if (url) how === "tab" ? open(url, "_blank", "noopener") : location.assign(url);
+    if (url) how === "tab" ? open(url, "_blank", "noopener") : leave(url);
   };
   const top = async (base: string, ext: string) => { const at = new Set((await ws.list("/")).map((e) => e.path)); const p = freePath("/", base, ext, (x) => at.has(x)); if (!p) throw new Error("no free name"); return p; };
   const act: Record<string, () => unknown> = {
     texnb: async () => go(await ws.createByPerson(await top("Untitled", ".ipynb"), { mode: "python" })),
-    texboard: () => location.assign("/board/?new=python"),
+    texboard: () => leave("/board/?new=python"),
     texnew: () => texNew(ws),
     texfolder: async () => { const n = prompt("A new folder, at the top of your files: its name", "New folder"); if (n?.trim()) await ws.mkdir("/" + safeName(n.trim())); },
     // (the examples gallery, LaTeX first, as the notebook and board pages have it (web/examples/open.ts), the only list
@@ -120,7 +122,10 @@ export async function latexBoot(ws: Workspace | null, sandbox: { WorkerKernel: u
     // (a fid is hex: nothing to encode)
     if (!isTex(e) || !e.fid) return false;
     const url = "/?tex=" + e.fid;
-    tab ? open(url, "_blank", "noopener") : location.assign(url);
+    // (in this tab by the page's way out: the notebook's save, the disk in the app, index.html leaveTo)
+    if (tab) open(url, "_blank", "noopener");
+    else if (g.__sbLeaveTo) void g.__sbLeaveTo(url);
+    else location.assign(url);
     return true;
   };
   // a .tex file's preview: the editor's button; disabled, saying why, for a file without a stable id
@@ -151,5 +156,5 @@ export async function latexBoot(ws: Workspace | null, sandbox: { WorkerKernel: u
  * way (web/notebook/selftest-latex.js). In the desktop app (`app`): no Agent, as on its notebook page, and Run says why
  * it doesn't run (it has no sandbox: `sandbox` is null there, index.html's RUNNER). */
 export async function mountTex(root: HTMLElement, ws: Workspace, fid: string, sandbox: { WorkerKernel: unknown; RunnerWorker: unknown } | null, share: TexShare | null | undefined, embed = false) {
-  await (await import(PAGE)).mount(root, { ws, fid, back: () => location.assign("/"), sandbox, site: siteHref(""), ...(desktopApp() ? { app: APP_NO_RUN } : {}), ...(embed ? { embed: true } : {}), fileMenu: (menu: HTMLElement, o: { print(): void; close(): void; text(): string | null; save(): Promise<void> }) => texFileMenu(ws, menu, { ...o, fid, share }), markdown: commentMarkdown });
+  await (await import(PAGE)).mount(root, { ws, fid, back: () => leave("/"), sandbox, site: siteHref(""), ...(desktopApp() ? { app: APP_NO_RUN } : {}), ...(embed ? { embed: true } : {}), fileMenu: (menu: HTMLElement, o: { print(): void; close(): void; text(): string | null; save(): Promise<void> }) => texFileMenu(ws, menu, { ...o, fid, share }), markdown: commentMarkdown });
 }

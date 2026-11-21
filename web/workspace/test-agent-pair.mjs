@@ -6,7 +6,7 @@
 //   bun web/workspace/test-agent-pair.mjs
 import { failHint, agentSays, onlyCurrent, readConnect, ONLY_CODE, SAFARI, CHROME_ALLOW, OTHER_FAIL } from "./agent-ui.ts";
 import { handOver, takeHandoff, HANDOFF_KEY, HANDOFF_MS } from "./pair-handoff.ts";
-import { AgentPairing, AgentError, CHANGED_WHILE_RUNNING, parseStrict, actorOf, parseReloadRecord, reloadDecision, takeReloadRecord, putReloadRecord, markReloadLeft, RELOAD_KEY, RELOAD_FRESH_MS } from "./agent-pair.ts";
+import { AgentPairing, AgentError, CHANGED_WHILE_RUNNING, parseStrict, actorOf, parseReloadRecord, reloadDecision, takeReloadRecord, putReloadRecord, markReloadLeft, RELOAD_KEY, RETURN_MS } from "./agent-pair.ts";
 
 let failures = 0;
 const ok = (c, msg) => { console.log((c ? "ok   " : "FAIL ") + msg); if (!c) failures++; };
@@ -25,6 +25,7 @@ function server(answerHello) {
         const m = JSON.parse(String(data));
         S.got.push(m);
         if (m.method === "hello") return void answerHello(ws, m);
+        if (typeof m.method === "string" && m.method.startsWith("tasks.") && S.onTask) return void S.onTask(ws, m);
         if (m.id && S.pending.has(m.id)) { S.pending.get(m.id)(m); S.pending.delete(m.id); }
       },
       close(ws, code, reason) { S.closed = { code, reason }; },
@@ -429,10 +430,16 @@ ok(actorOf("Claude Code", "claude-code") === "agent:Claude-Code" && actorOf("", 
   for (const [id, raw] of Object.entries(bad)) ok(parseReloadRecord(raw) === null, `U-3.${id}: malformed, so no record`);
   ok(parseReloadRecord(null) === null, "U-3.null: no stored value, no record");
   const d = (r, navType, now) => reloadDecision(r, { scope, navType, now });
-  ok(d(good, "reload", 1000 + RELOAD_FRESH_MS) === "silent", "U-7.silent: a reload, fresh (age = 30 s), same scope: silent");
-  ok(d(good, "reload", 1000 + RELOAD_FRESH_MS + 1) === "click", "U-7.stale: older than 30 s: kept for one click");
+  ok(RETURN_MS === 10 * 60 * 1000, "U-7.window: one constant, 10 minutes (A5 item 2)");
+  ok(d(good, "reload", 1000 + RETURN_MS) === "silent", "U-7.silent: a reload, fresh (age = 10 min), same scope: silent");
+  ok(d(good, "reload", 1000 + RETURN_MS + 1) === "click", "U-7.stale: older than 10 min: kept for one click");
   ok(d(good, "reload", 999) === "click", "U-7.future: a leftAt in the future fails freshness: kept for one click");
-  ok(d(good, "navigate", 1500) === "discard", "U-7.nav: not a reload: discarded, nothing kept for a click (a new Allow, unless remembered)");
+  ok(d(good, "navigate", 1500) === "silent" && d(good, "back_forward", 1000 + RETURN_MS) === "silent", "U-7.return: a navigation back (Files and back, or Back) within 10 min, same scope: silent (A5 item 2)");
+  ok(d(good, "navigate", 1000 + RETURN_MS + 1) === "discard" && d(good, "back_forward", 1000 + RETURN_MS + 1) === "discard", "U-7.return-stale: a navigation back older than 10 min: discarded, nothing kept for a click");
+  ok(d(good, "navigate", 999) === "discard", "U-7.return-future: a navigation with a leftAt in the future: discarded");
+  ok(d(good, "prerender", 1500) === "discard" && d(good, "", 1500) === "discard", "U-7.other-nav: any other navigation type: discarded");
+  ok(d(noLeft, "navigate", 1500) === "discard", "U-7.return-noleft: a navigation with no leftAt: discarded");
+  ok(d({ ...good, page: "http://127.0.0.1:1/other/" }, "navigate", 1500) === "discard", "U-7.return-scope: a navigation to another page: discarded");
   ok(d(noLeft, "reload", 1500) === "discard", "U-7.noleft: no leftAt (a copy taken while the original lived, as a new tab's): discarded");
   ok(d({ ...good, workspace: "other" }, "reload", 1500) === "discard", "U-7.scope-ws: another workspace: discarded, nothing kept for a click (R1-d)");
   ok(d({ ...good, page: "http://127.0.0.1:1/other/" }, "reload", 1500) === "discard", "U-7.scope-page: another page: discarded (R1-d)");
@@ -441,17 +448,46 @@ ok(actorOf("Claude Code", "claude-code") === "agent:Claude-Code" && actorOf("", 
   ok(d({ ...timed, leftAt: 4990 }, "reload", 5000) === "discard", "U-8.at: now = expires: discarded (R1-e)");
   ok(d({ ...timed, leftAt: 4990 }, "reload", 5001) === "discard", "U-8.after: now = expires + 1: discarded");
   ok(d({ ...timed, leftAt: 4990 }, "navigate", 5000) === "discard", "U-8.click: an expired record is never kept for a click");
+  // take with this page's scope (A5): another page's record is left where it is; this page's own, or one that can't be
+  // read, is taken as before
+  {
+    const m = new Map();
+    const st = { getItem: (k) => (m.has(k) ? m.get(k) : null), setItem: (k, v) => void m.set(k, String(v)), removeItem: (k) => void m.delete(k) };
+    m.set(RELOAD_KEY, js(good));
+    const other = takeReloadRecord(st, { workspace: scope.workspace, page: "http://127.0.0.1:1/" });
+    ok(other.kind === "none" && m.has(RELOAD_KEY), "U-9.other-page: another page's record, taken with this page's scope: left where it is", other);
+    const mine = takeReloadRecord(st, scope);
+    ok(mine.kind === "ok" && !m.has(RELOAD_KEY), "U-9.own: this page's record: taken and removed");
+    m.set(RELOAD_KEY, "{not json");
+    const bad = takeReloadRecord(st, scope);
+    ok(bad.kind === "bad" && !m.has(RELOAD_KEY), "U-9.bad: a record that can't be read: taken (removed), as before");
+    m.set(RELOAD_KEY, js({ ...good, workspace: "other" }));
+    const ws2 = takeReloadRecord(st, scope);
+    ok(ws2.kind === "ok" && !m.has(RELOAD_KEY), "U-9.workspace: this page's address, another workspace: taken (the decision discards it)");
+  }
   // take/put/markLeft over a Storage-like map; and storage that throws
   const store = () => { const m = new Map(); return { m, getItem: (k) => (m.has(k) ? m.get(k) : null), setItem: (k, v) => void m.set(k, String(v)), removeItem: (k) => void m.delete(k) }; };
-  const s1 = store(); putReloadRecord(s1, noLeft); markReloadLeft(s1, 777);
+  const own = { workspace: noLeft.workspace, page: noLeft.page };
+  const s1 = store(); putReloadRecord(s1, noLeft); markReloadLeft(s1, 777, own);
   ok(parseReloadRecord(s1.getItem(RELOAD_KEY))?.leftAt === 777, "U-1.leftAt: pagehide writes leftAt onto the held record");
+  // (A5: another page's pagehide (a board passed through on the way) leaves the record byte for byte; so does this
+  //  page's address in another workspace)
+  {
+    const sx = store(); putReloadRecord(sx, { ...noLeft, leftAt: 5 }); const raw0 = sx.getItem(RELOAD_KEY);
+    markReloadLeft(sx, 999, { ...own, page: own.page + "board/" });
+    ok(sx.getItem(RELOAD_KEY) === raw0, "U-1.other-page: another page's pagehide leaves the record byte for byte (its leftAt never renewed)");
+    markReloadLeft(sx, 999, { ...own, workspace: own.workspace + "-other" });
+    ok(sx.getItem(RELOAD_KEY) === raw0, "U-1.other-workspace: the same page in another workspace leaves it byte for byte too");
+    markReloadLeft(sx, 999, own);
+    ok(parseReloadRecord(sx.getItem(RELOAD_KEY))?.leftAt === 999, "U-1.own-again: its own page's pagehide renews it");
+  }
   const taken = takeReloadRecord(s1);
   ok(taken.kind === "ok" && taken.record.leftAt === 777 && s1.getItem(RELOAD_KEY) === null, "R1-c: take returns the record and removes it before any attempt");
   ok(takeReloadRecord(s1).kind === "none", "R1-c: a second take finds nothing (this page's next reload makes no attempt)");
   const s2 = store(); s2.setItem(RELOAD_KEY, "{bad"); ok(takeReloadRecord(s2).kind === "bad" && s2.getItem(RELOAD_KEY) === null, "U-3.take-bad: a malformed stored record is removed and is \"bad\" (not absent: no silent fallback)");
   const thrower = { getItem() { throw new Error("denied"); }, setItem() { throw new Error("denied"); }, removeItem() { throw new Error("denied"); } };
   ok(takeReloadRecord(thrower).kind === "bad" && takeReloadRecord(null).kind === "none", "U-3.storage: storage that throws on read is \"bad\"; no storage is \"none\"");
-  putReloadRecord(thrower, good); markReloadLeft(thrower, 1); ok(true, "U-3.storage-write: writing to storage that throws doesn't throw");
+  putReloadRecord(thrower, good); markReloadLeft(thrower, 1, own); ok(true, "U-3.storage-write: writing to storage that throws doesn't throw");
   // S1: a record that reads but can't be removed is never used (consumed before any attempt, or not at all)
   const s3 = store(); s3.setItem(RELOAD_KEY, JSON.stringify(good)); s3.removeItem = () => { throw new Error("denied"); };
   const t3 = takeReloadRecord(s3);
@@ -1082,4 +1118,100 @@ for (const [what, grant] of [["a folder, not Everything", { folders: ["/A"], wri
   S.srv.stop(true);
 }
 console.log(failures ? `${failures} failed` : "all passed");
+// ---- Delegate's requests (tasks-client.ts, pair-delegate-plan-r3.3 §2.5, over AgentPairing.own): the page asks, the
+// agent answers by id; only with a negotiated hello that lists delegate.1 (the agent's hello over the wire, never set by
+// hand), once granted, only tasks.*; at most TASK_REQUESTS.pending; each request, and each answer's raw frame, at most
+// TASK_REQUESTS.frameBytes; each within its timeout; all ended with the pairing
+{
+  const { TASK_REQUESTS, DELEGATE_FEATURE, TaskClient } = await import("./tasks-client.ts");
+  // (an agent whose hello offers Delegate, and one whose hello doesn't)
+  const pairDelegate = (ws, m) => ws.send(JSON.stringify({ jsonrpc: "2.0", id: m.id, result: { protocol: 1, agent: { name: "Claude Code", client: "claude-code", version: "2.0" }, wants: { write: true, run: false }, session: "SECRET", features: [DELEGATE_FEATURE, "chat.resume"] } }));
+  const why = async (p) => { try { await p; return "resolved"; } catch (e) { return e?.code ?? String(e); } };
+  {
+    const S = server(pairOk), W = fakeWs();
+    const heard = [];
+    S.onTask = (ws, m) => heard.push(m);
+    const P = mk(S, W);
+    await P.paired();
+    await P.allow({ folders: ["/"], write: true, expires: null }, false);
+    ok((await why(TaskClient.of(P).request("tasks.list", {}))) === "forbidden" && heard.length === 0 && !(P.hello.features ?? []).includes(DELEGATE_FEATURE), "an agent whose negotiated hello doesn't list delegate.1: refused (forbidden), nothing sent");
+    await P.revoke();
+    S.srv.stop(true);
+  }
+  const S = server(pairDelegate), W = fakeWs();
+  const heard = [];
+  let answer = (ws, m) => ws.send(JSON.stringify({ jsonrpc: "2.0", id: m.id, result: { tasks: [], echo: m.method } }));
+  S.onTask = (ws, m) => { heard.push(m); answer(ws, m); };
+  const P = mk(S, W);
+  await P.paired();
+  ok(P.hello.features.includes(DELEGATE_FEATURE) && TaskClient.of(P).offered(), "a hello that lists delegate.1 keeps it through the page's negotiation (FEATURES), and the client sees it offered", P.hello.features);
+  ok((await why(TaskClient.of(P).request("tasks.list", {}))) === "closed" && heard.length === 0, "before the grant: refused (closed), nothing sent");
+  await P.allow({ folders: ["/"], write: true, expires: null }, false);
+  const r1 = await TaskClient.of(P).request("tasks.list", {});
+  const r2 = await TaskClient.of(P).request("tasks.get", { task: "a".repeat(32), after: 0 });
+  ok(r1?.echo === "tasks.list" && r2?.echo === "tasks.get" && heard.map((m) => m.id).join() === "p2,p3", "negotiated delegate.1, granted: answered by id, the page's ids p2, p3, ... (the hello was p1)", heard.map((m) => m.id));
+  ok(heard.every((m) => m.jsonrpc === "2.0" && typeof m.params === "object"), "each a JSON-RPC 2.0 request with its params");
+  ok((await why(TaskClient.of(P).request("workspace.read", { path: "/A/x.txt" }))) === "bad_request" && heard.length === 2, "a method not in TASK_METHODS: refused (bad_request), nothing sent");
+  answer = (ws, m) => ws.send(JSON.stringify({ jsonrpc: "2.0", id: m.id, error: { code: -32000, message: "the task moved on", data: { code: "stale" } } }));
+  ok((await why(TaskClient.of(P).request("tasks.close", { task: "a".repeat(32), proposal: null, seq: 1 }))) === "stale", "an error answer: rejected with the agent's code (data.code)");
+  // (an outgoing request over TASK_REQUESTS.frameBytes: refused before sending)
+  const big = await why(TaskClient.of(P).request("tasks.start", { title: "t", prompt: "x".repeat(TASK_REQUESTS.frameBytes), target: "local", run: false, docs: [] }));
+  ok(big === "too_large" && heard.length === 3, "a request over TASK_REQUESTS.frameBytes (4 MiB, under the connection's own 12 MiB): refused (too_large), nothing sent");
+  // (an incoming answer: its raw frame, as received, at most TASK_REQUESTS.frameBytes, else refused before its result or
+  //  error reaches the caller; the envelope, whitespace and multibyte characters all counted)
+  const L = TASK_REQUESTS.frameBytes, enc = new TextEncoder();
+  const frameOf = (id, n, { error = false, ch = "x", pad = 0 } = {}) => {
+    const shell = (fill) => JSON.stringify(error ? { jsonrpc: "2.0", id, error: { code: -32000, message: fill, data: { code: "stale" } } } : { jsonrpc: "2.0", id, result: { tasks: [], fill } });
+    const base = enc.encode(shell("")).length + pad;
+    const per = enc.encode(ch).length, k = Math.floor((n - base) / per);
+    let t = shell(ch.repeat(k)) + " ".repeat(pad);
+    const got = enc.encode(t).length;
+    return got < n ? t + " ".repeat(n - got) : t;
+  };
+  const sizes = [];
+  const sendSized = (n, o) => { answer = (ws, m) => { const t = frameOf(m.id, n, o); sizes.push(enc.encode(t).length); ws.send(t); }; };
+  sendSized(L);
+  ok((await why(TaskClient.of(P).request("tasks.list", {}))) === "resolved" && sizes.at(-1) === L, "an answer whose raw frame is exactly 4 MiB (all of it JSON): taken", sizes.at(-1));
+  // (the JSON itself exactly 4 MiB, then one space: only the raw frame as received is over, not the message re-encoded)
+  sendSized(L + 1, { pad: 1 });
+  ok((await why(TaskClient.of(P).request("tasks.list", {}))) === "too_large" && sizes.at(-1) === L + 1, "an answer whose JSON is exactly 4 MiB, plus one space after it: refused (too_large), the raw frame is what counts", sizes.at(-1));
+  sendSized(L + 40, { ch: "漢" });
+  ok((await why(TaskClient.of(P).request("tasks.list", {}))) === "too_large", "a result over 4 MiB in UTF-8 but under it in characters (漢): refused (too_large)");
+  sendSized(L + 40, { error: true });
+  ok((await why(TaskClient.of(P).request("tasks.list", {}))) === "too_large", "an error over 4 MiB (ASCII): refused (too_large), its code not handed on");
+  sendSized(L + 40, { error: true, ch: "é" });
+  ok((await why(TaskClient.of(P).request("tasks.list", {}))) === "too_large", "an error over 4 MiB in UTF-8 (é): refused (too_large)");
+  ok(P.state === "granted", "after the over-limit answers the pairing is still up (its own 12 MiB frames unchanged)");
+  // (the limit: at most TASK_REQUESTS.pending at once; unanswered ones end with the pairing)
+  answer = () => {};
+  const before = heard.length;
+  const held = Array.from({ length: TASK_REQUESTS.pending }, () => why(TaskClient.of(P).request("tasks.list", {})));
+  await until(() => heard.length === before + TASK_REQUESTS.pending);
+  ok((await why(TaskClient.of(P).request("tasks.list", {}))) === "busy" && heard.length === before + TASK_REQUESTS.pending, `at most ${TASK_REQUESTS.pending} pending: the next is refused (busy), not sent`);
+  // (an answer to an id the page never used, or no longer waits for: dropped, the connection kept)
+  S.sock.send(JSON.stringify({ jsonrpc: "2.0", id: "p999", result: { tasks: [] } }));
+  await sleep(100);
+  ok(P.state === "granted" && S.closed === null, "an answer to an unknown id: dropped, the connection kept");
+  await P.revoke();
+  const ended = await Promise.all(held);
+  ok(ended.every((c) => c === "closed"), "the pairing ended: every pending request rejected (closed)", ended);
+  S.srv.stop(true);
+  {
+    // (a timeout: rejected; its late answer dropped)
+    const S2 = server(pairDelegate), W2 = fakeWs();
+    let late = null;
+    S2.onTask = (ws, m) => { late = () => ws.send(JSON.stringify({ jsonrpc: "2.0", id: m.id, result: { tasks: [] } })); };
+    const P2 = mk(S2, W2);
+    await P2.paired();
+    await P2.allow({ folders: ["/"], write: true, expires: null }, false);
+    let code = null;
+    try { await TaskClient.of(P2).request("tasks.list", {}, { timeoutMs: 150 }); } catch (e) { code = e.code; }
+    late?.();
+    await sleep(100);
+    ok(code === "timeout" && P2.state === "granted", "no answer in time: rejected (timeout); its late answer is dropped, the connection kept", { code, state: P2.state });
+    await P2.revoke();
+    S2.srv.stop(true);
+  }
+}
+
 process.exit(failures ? 1 : 0);

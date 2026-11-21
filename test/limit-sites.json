@@ -13605,6 +13605,11 @@
   "owner": "NumPy shim/runtime memory",
   "row": "src-10"
  },
+ "src/runtime/numpy.ts :: prod :: if (nativeHost()) ARRAY_LIMITS.bytes = Number.MAX_SAFE_INTEGER; #0": {
+  "class": "none",
+  "owner": "NumPy shim/runtime memory",
+  "reason": "lifts the browser's array byte cap on the person's own computer (the desktop app's engine, the CLI); refuses nothing"
+ },
  "src/runtime/numpy.ts :: prodOrder :: raise(T.NotImplementedError, `${rt.name} prod over several axes or a non-contiguous view is not supported yet`); #0": {
   "class": "3",
   "owner": "NumPy shim",
@@ -13630,10 +13635,70 @@
   "owner": "NumPy shim",
   "row": "src-11"
  },
- "src/runtime/object.ts :: toPyExc :: if (e instanceof RangeError && /Invalid string length|Invalid array length|Array buffer allocation failed|Invalid typed array length|Maximum BigInt size exceeded|BigInt generated from this operation is too big/.test(e.message)) { #0": {
-  "class": "2",
+ "src/runtime/numpy_fft.ts :: cacheBound :: const cacheBound = () => Math.min(fftCacheMax, ARRAY_LIMITS.bytes); #0": {
+  "class": "none",
+  "owner": "NumPy shim/runtime memory",
+  "reason": "the FFT table cache's retention bound (and its test hook): evicts or skips caching a table, refuses nothing"
+ },
+ "src/runtime/numpy_fft.ts :: cs2pi :: let fftCacheMax = 2 ** 32; #0": {
+  "class": "none",
+  "owner": "NumPy shim/runtime memory",
+  "reason": "the FFT table cache's retention bound (and its test hook): evicts or skips caching a table, refuses nothing"
+ },
+ "src/runtime/numpy_fft.ts :: setFftCacheBytes :: const was = fftCacheMax; #0": {
+  "class": "none",
+  "owner": "NumPy shim/runtime memory",
+  "reason": "the FFT table cache's retention bound (and its test hook): evicts or skips caching a table, refuses nothing"
+ },
+ "src/runtime/numpy_fft.ts :: setFftCacheBytes :: fftCacheMax = n; #0": {
+  "class": "none",
+  "owner": "NumPy shim/runtime memory",
+  "reason": "the FFT table cache's retention bound (and its test hook): evicts or skips caching a table, refuses nothing"
+ },
+ "src/runtime/object.ts :: engineLimit :: function engineLimit(message: string): string | undefined { #0": {
+  "class": "none",
   "owner": "pyjs runtime",
-  "row": "src-5"
+  "reason": "translates the JavaScript engine's own allocation failure into a MemoryError naming that engine limit; no limit of ours"
+ },
+ "src/runtime/object.ts :: engineLimit :: return ENGINE_LIMITS.find(([re]) => re.test(message))?.[1]; #0": {
+  "class": "none",
+  "owner": "pyjs runtime",
+  "reason": "translates the JavaScript engine's own allocation failure into a MemoryError naming that engine limit; no limit of ours"
+ },
+ "src/runtime/object.ts :: toPyExc :: [/(Map|Set) maximum size exceeded/, \"a dict or set past the JavaScript engine's largest (2**24 = 16,777,216 entries in V8: Chrome, Edge, the app, the CLI on Node)\"], #0": {
+  "class": "none",
+  "owner": "pyjs runtime",
+  "reason": "translates the JavaScript engine's own allocation failure into a MemoryError naming that engine limit; no limit of ours"
+ },
+ "src/runtime/object.ts :: toPyExc :: [/Invalid typed array length/, \"an array buffer past the JavaScript engine's length limit\"], #0": {
+  "class": "none",
+  "owner": "pyjs runtime",
+  "reason": "translates the JavaScript engine's own allocation failure into a MemoryError naming that engine limit; no limit of ours"
+ },
+ "src/runtime/object.ts :: toPyExc :: [/Maximum BigInt size exceeded/, \"an int past the JavaScript engine's largest (2**30 bits in V8: Chrome, Edge, the app, the CLI on Node)\"], #0": {
+  "class": "none",
+  "owner": "pyjs runtime",
+  "reason": "translates the JavaScript engine's own allocation failure into a MemoryError naming that engine limit; no limit of ours"
+ },
+ "src/runtime/object.ts :: toPyExc :: [/WebAssembly\\.Memory\\.grow\\(\\): Maximum memory size exceeded|would exceed the memory's declared maximum size|expects the delta to be a valid page count/, \"a WebAssembly module's memory past its maximum (4 GiB at most: wasm32)\"], #0": {
+  "class": "none",
+  "owner": "pyjs runtime",
+  "reason": "translates the JavaScript engine's own allocation failure into a MemoryError naming that engine limit; no limit of ours"
+ },
+ "src/runtime/object.ts :: toPyExc :: const ENGINE_LIMITS: [RegExp, string][] = [ #0": {
+  "class": "none",
+  "owner": "pyjs runtime",
+  "reason": "translates the JavaScript engine's own allocation failure into a MemoryError naming that engine limit; no limit of ours"
+ },
+ "src/runtime/object.ts :: toPyExc :: const why = engineLimit(e.message); #0": {
+  "class": "none",
+  "owner": "pyjs runtime",
+  "reason": "translates the JavaScript engine's own allocation failure into a MemoryError naming that engine limit; no limit of ours"
+ },
+ "src/runtime/object.ts :: toPyExc :: if (e instanceof RangeError && /Invalid string length|Invalid array length|Array buffer allocation failed|Invalid typed array length|Maximum BigInt size exceeded|BigInt generated from this operation is too big|(Map|Set) maximum size exceeded|WebAssembly\\.Memory\\.grow|failed to grow memory/.test(e.message)) { #0": {
+  "class": "none",
+  "owner": "pyjs runtime",
+  "reason": "translates the JavaScript engine's own allocation failure into a MemoryError naming that engine limit; no limit of ours"
  },
  "src/runtime/ops.ts :: bytearrayInplaceRepeat :: if (size > SSIZE_MAX) raise(T.MemoryError); #0": {
   "class": "2",

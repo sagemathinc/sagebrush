@@ -45,6 +45,13 @@ const LIVE_BYTES = 8 + (8 << 20);
 // Room for the largest frame, and more.
 export const OUT_MAX = 1024 * 1024 * 1024;
 
+// An interpreter's heap, in MiB, by default: the computer's memory as this process may have it, a container's limit
+// (constrainedMemory, bytes; 0 for none) where there is one, and never past it; at least 1 GiB where there is none.
+export function defaultHeapMb(total, cap) {
+  const mine = Math.floor((cap > 0 ? Math.min(total, cap) : total) / 2 ** 20);
+  return cap > 0 ? Math.max(1, mine) : Math.max(1024, mine);
+}
+
 /** The engine on a pair of streams: `input` (frames in), `write(bytes)` (frames out), `queued()` (the bytes written
  * and not yet taken by the reader), `exit(code, now)` (`now`: at once, without waiting for what is queued). */
 export function serve({ root, memory, input, write, queued, exit, outMax = OUT_MAX }) {
@@ -52,12 +59,10 @@ export function serve({ root, memory, input, write, queued, exit, outMax = OUT_M
   if (!existsSync(worker)) throw new Error(`no sagebrush-worker.js in ${root} (build it: bun web/build.ts)`);
   root = realpathSync(root);
   const build = createHash("sha256").update(readFileSync(worker)).digest("hex").slice(0, 16);
-  // Memory: each interpreter's heap may grow to `memory` MB, by default three quarters of this computer's memory,
-  // not a browser tab's.  That is a limit per interpreter, not for the engine: two notebooks running at once may
-  // together ask for more than the computer has, as two programs may, and the operating system decides then.  It is
-  // the person's own computer and their own computation (no default limits on it); the interpreter's own memory
-  // guards (src/limits.ts) still apply within each.
-  const heapMb = Number.isFinite(memory) && memory > 0 ? Math.floor(memory) : Math.max(1024, Math.floor((totalmem() / 2 ** 20) * 0.75));
+  // Memory: each interpreter's heap may grow to all of this computer's memory, as a program's does in Sage or Magma:
+  // the person's own computer and their own computation, with no cap of ours, the operating system the limit. Two notebooks running at once may together ask for more than the computer has, as two programs may.
+  // (`memory` MB: the tests' own setting, smaller; not a person's.)
+  const heapMb = Number.isFinite(memory) && memory > 0 ? Math.floor(memory) : defaultHeapMb(totalmem(), Number(process.constrainedMemory?.() || 0));
   const sessions = new Map();
   let greeted = false, ended = false;
   const send = (msg) => {
@@ -89,7 +94,7 @@ export function serve({ root, memory, input, write, queued, exit, outMax = OUT_M
   function open(sid, name) {
     // (the runner frame's state, per interpreter: web/runner/index.html)
     const s = { thread: null, flag: null, epoch: null, inputs: new Map(), lives: new Map() };
-    s.thread = new Worker(new URL("./thread.mjs", import.meta.url), { workerData: { root, name }, resourceLimits: { maxOldGenerationSizeMb: heapMb }, stdout: false, stderr: false });
+    s.thread = new Worker(new URL("./thread.mjs", import.meta.url), { workerData: { root, name, memory: heapMb }, resourceLimits: { maxOldGenerationSizeMb: heapMb }, stdout: false, stderr: false });
     const retire = (map, id) => { for (const [k, e] of map) if (id === undefined || e.id === id) map.delete(k); };
     s.retire = (id) => { retire(s.inputs, id); retire(s.lives, id); };
     s.thread.on("message", (d) => {
