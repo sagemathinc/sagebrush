@@ -1,5 +1,5 @@
 {
- "note": "Input hashes every backend present agreed on, per point, in the protocol-2 run on n2-standard-16 (commit 0f6931b5cedb plus the K-variant drivers, Nov 18 2026). expected_inputs.py must reproduce every one (test_expected_inputs.py). Change this file only in a reviewed commit.",
+ "note": "Input hashes every backend present agreed on, per point, in the protocol-2 run on n2-standard-16 (commit 0f6931b5cedb plus the K-variant drivers, Nov 18 2026). expected_inputs.py must reproduce every one (test_expected_inputs.py). Change this file only in a reviewed commit. The rank rows (mat_q_rank_* and mat_z_rank_* beyond the square ones) were added from the first sharded VM run where every backend agreed on them: n2-standard-16, n2d-standard-16 and c4a-standard-16, commit c194d692c64b, Nov 21 2026.",
  "points": {
   "bigint_gcd:l": {
    "n": 1048576,
@@ -211,6 +211,51 @@
    "variants": 8,
    "input_hash": "852039582"
   },
+  "mat_q_rank_def:l": {
+   "n": 100,
+   "variants": 8,
+   "input_hash": "484319063"
+  },
+  "mat_q_rank_def:m": {
+   "n": 50,
+   "variants": 8,
+   "input_hash": "152189598"
+  },
+  "mat_q_rank_def:s": {
+   "n": 20,
+   "variants": 8,
+   "input_hash": "981058961"
+  },
+  "mat_q_rank_def_p:l": {
+   "n": 100,
+   "variants": 8,
+   "input_hash": "26764711"
+  },
+  "mat_q_rank_def_p:m": {
+   "n": 50,
+   "variants": 8,
+   "input_hash": "666162778"
+  },
+  "mat_q_rank_def_p:s": {
+   "n": 20,
+   "variants": 8,
+   "input_hash": "863468751"
+  },
+  "mat_q_rank_wide:l": {
+   "n": 100,
+   "variants": 8,
+   "input_hash": "802950855"
+  },
+  "mat_q_rank_wide:m": {
+   "n": 50,
+   "variants": 8,
+   "input_hash": "828929415"
+  },
+  "mat_q_rank_wide:s": {
+   "n": 20,
+   "variants": 8,
+   "input_hash": "789751417"
+  },
   "mat_q_solve:l": {
    "n": 80,
    "variants": 8,
@@ -285,6 +330,51 @@
    "n": 50,
    "variants": 8,
    "input_hash": "147711879"
+  },
+  "mat_z_rank_def:l": {
+   "n": 250,
+   "variants": 8,
+   "input_hash": "381355646"
+  },
+  "mat_z_rank_def:m": {
+   "n": 100,
+   "variants": 8,
+   "input_hash": "677254309"
+  },
+  "mat_z_rank_def:s": {
+   "n": 50,
+   "variants": 8,
+   "input_hash": "692691202"
+  },
+  "mat_z_rank_def_p:l": {
+   "n": 250,
+   "variants": 8,
+   "input_hash": "184965647"
+  },
+  "mat_z_rank_def_p:m": {
+   "n": 100,
+   "variants": 8,
+   "input_hash": "468013936"
+  },
+  "mat_z_rank_def_p:s": {
+   "n": 50,
+   "variants": 8,
+   "input_hash": "993862392"
+  },
+  "mat_z_rank_wide:l": {
+   "n": 250,
+   "variants": 8,
+   "input_hash": "175066323"
+  },
+  "mat_z_rank_wide:m": {
+   "n": 100,
+   "variants": 8,
+   "input_hash": "501507904"
+  },
+  "mat_z_rank_wide:s": {
+   "n": 50,
+   "variants": 8,
+   "input_hash": "18381310"
   },
   "mat_z_smith:l": {
    "n": 60,
@@ -437,97 +527,6 @@
    "input_hash": "134140893"
   }
  },
- "pending_note": "Points not yet confirmed by every backend in a VM run: here expected_inputs.py's hashes, matched at size s by the python-flint and Magma drivers in the project and by the Rust formulas (the native and flint-rust drivers' helper) at s and l. The first VM run that agrees on them moves each into points, in a reviewed commit.",
- "pending": {
-  "mat_q_rank_def:l": {
-   "n": 100,
-   "variants": 8,
-   "input_hash": "484319063"
-  },
-  "mat_q_rank_def:m": {
-   "n": 50,
-   "variants": 8,
-   "input_hash": "152189598"
-  },
-  "mat_q_rank_def:s": {
-   "n": 20,
-   "variants": 8,
-   "input_hash": "981058961"
-  },
-  "mat_q_rank_def_p:l": {
-   "n": 100,
-   "variants": 8,
-   "input_hash": "26764711"
-  },
-  "mat_q_rank_def_p:m": {
-   "n": 50,
-   "variants": 8,
-   "input_hash": "666162778"
-  },
-  "mat_q_rank_def_p:s": {
-   "n": 20,
-   "variants": 8,
-   "input_hash": "863468751"
-  },
-  "mat_q_rank_wide:l": {
-   "n": 100,
-   "variants": 8,
-   "input_hash": "802950855"
-  },
-  "mat_q_rank_wide:m": {
-   "n": 50,
-   "variants": 8,
-   "input_hash": "828929415"
-  },
-  "mat_q_rank_wide:s": {
-   "n": 20,
-   "variants": 8,
-   "input_hash": "789751417"
-  },
-  "mat_z_rank_def:l": {
-   "n": 250,
-   "variants": 8,
-   "input_hash": "381355646"
-  },
-  "mat_z_rank_def:m": {
-   "n": 100,
-   "variants": 8,
-   "input_hash": "677254309"
-  },
-  "mat_z_rank_def:s": {
-   "n": 50,
-   "variants": 8,
-   "input_hash": "692691202"
-  },
-  "mat_z_rank_def_p:l": {
-   "n": 250,
-   "variants": 8,
-   "input_hash": "184965647"
-  },
-  "mat_z_rank_def_p:m": {
-   "n": 100,
-   "variants": 8,
-   "input_hash": "468013936"
-  },
-  "mat_z_rank_def_p:s": {
-   "n": 50,
-   "variants": 8,
-   "input_hash": "993862392"
-  },
-  "mat_z_rank_wide:l": {
-   "n": 250,
-   "variants": 8,
-   "input_hash": "175066323"
-  },
-  "mat_z_rank_wide:m": {
-   "n": 100,
-   "variants": 8,
-   "input_hash": "501507904"
-  },
-  "mat_z_rank_wide:s": {
-   "n": 50,
-   "variants": 8,
-   "input_hash": "18381310"
-  }
- }
+ "pending_note": "Points not yet confirmed by every backend in a VM run (none at present): expected_inputs.py's hashes, matched at size s by the python-flint and Magma drivers in the project and by the Rust formulas (the native and flint-rust drivers' helper) at s and l. The first VM run that agrees on them moves each into points, in a reviewed commit.",
+ "pending": {}
 }

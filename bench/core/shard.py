@@ -17,6 +17,8 @@ State lives in a run directory:
   rows/<type>/     accepted points (authoritative for "done"), and the
                    type's identity.json
   incoming/<type>/ partial transfers (never read as results)
+  known_hosts.d/   one known_hosts per VM (trust on first use per VM: the
+                   provider reuses addresses)
   lock             held (flock) for the driver's whole life
 
   python3 bench/core/shard.py plan RUN_DIR --types TYPES.json [--envelope H]
@@ -55,6 +57,12 @@ MAX_ROW = 1 << 20
 MAX_SIDECAR = 66
 TRANSFER_TIMEOUT = 60.0
 TRANSFER_TRIES = 3
+# A new VM's ssh comes up some seconds after the provider reports it: setup
+# waits for it this long (polling every poll_s); and after SETUP_TRIES VMs of
+# a type in a row could not be set up (unreachable, or a copy failed), that
+# type stops
+SSH_READY_S = 600.0
+SETUP_TRIES = 3
 # The statuses a point's file may end with (terminal records: only "ok"
 # yields timings)
 TERMINAL = {"ok", "mismatch", "input mismatch", "no answer", "timeout", "oom", "error"}
@@ -406,23 +414,66 @@ def check_engine_pin(tk: str, rec: dict, policy: str) -> None:
 IDENTITY_KEYS = (
     "machine",
     "versions",
-    "artifacts",
     "build",
-    "engine_pin",
     "threads",
-    "mem_cap",
     "backends",
     "protocol",
 )
+# What one VM's build and memory decide: each VM builds the (approved,
+# checksummed) payload itself, and neither its wheels nor MemTotal are the
+# same from one VM to the next, so these are compared only between points of
+# one VM
+VM_IDENTITY_KEYS = ("artifacts", "mem_cap", "engine_pin")
 
 
 def identity_of(rec: dict) -> dict:
-    """What every point of one machine type must share (the machine label
-    and kernel included; the point's own fields excluded)."""
+    """What every point of one machine type must share, from any of its VMs:
+    the machine (its label excepted), the toolchain and its flags, the
+    versions, the backends measured and the engine pin policy. The same
+    source on every VM is the plan's payload sha256, checked on each before
+    extraction."""
     out = {k: rec.get(k) for k in IDENTITY_KEYS}
     out["machine"] = {
         k: v for k, v in (rec.get("machine") or {}).items() if k != "label"
     }
+    # (a point's "backends" holds its own results, per backend: only which
+    # backends the run measured belongs to the type's identity; the
+    # executables themselves are in "artifacts", per VM)
+    out["backends"] = sorted(rec.get("backends") or {})
+    out["pin_policy"] = (rec.get("engine_pin") or {}).get("policy")
+    return out
+
+
+def vm_identity_of(rec: dict) -> dict:
+    """What every point measured on one VM must share: its build's
+    artifacts (the engine pin's sha256 among them) and its memory cap."""
+    return {k: rec.get(k) for k in VM_IDENTITY_KEYS}
+
+
+def retired_by_type(events: list[dict]) -> dict:
+    """How many VMs of each type this ledger retired (setup failures and
+    failed points alike), for the run's report."""
+    types = {e["name"]: e["type"] for e in events if e["ev"] == "reserve"}
+    out: dict[str, int] = {}
+    for e in events:
+        if e["ev"] == "retired":
+            tk = types.get(e["name"], "?")
+            out[tk] = out.get(tk, 0) + 1
+    return dict(sorted(out.items()))
+
+
+def differing(a: dict, b: dict) -> list[str]:
+    """The keys where two identities differ (one level into a nested
+    object), for a fatal message that says what changed."""
+    out = []
+    for k in sorted(set(a) | set(b)):
+        x, y = a.get(k), b.get(k)
+        if x == y:
+            continue
+        if isinstance(x, dict) and isinstance(y, dict):
+            out += [f"{k}.{j}" for j in sorted(set(x) | set(y)) if x.get(j) != y.get(j)]
+        else:
+            out.append(k)
     return out
 
 
@@ -432,6 +483,10 @@ class Rows:
     def __init__(self, run_dir: Path, ledger: Ledger, plan: dict):
         self.run_dir, self.ledger, self.plan = run_dir, ledger, plan
         self.lock = threading.Lock()
+        # (each VM's identity: its first point's, from the ledger)
+        self.vms = {
+            e["name"]: e["identity"] for e in ledger.events if e["ev"] == "vm-identity"
+        }
 
     def paths(self, tk: str, key: str) -> tuple[Path, Path]:
         row, _, size = key.partition(":")
@@ -452,20 +507,41 @@ class Rows:
             (e["type"], e["key"]) for e in self.ledger.events if e["ev"] == "accepted"
         }
 
-    def check_identity(self, tk: str, rec: dict) -> None:
+    def check_identity(self, tk: str, rec: dict, vm: str | None = None) -> None:
         """The first accepted point of a type sets its identity; every later
-        one, from any VM of the type, must equal it. The user column's
-        engine: under the plan's "strict" pin policy, the pinned one; under
-        "track", a fresh build recorded by its sha256 (in the identity, so
-        every point of the type shares it), checked under that policy."""
+        one, from any VM of the type, must equal it. The first point of a VM
+        sets that VM's identity (its build's artifacts and its memory cap: a
+        "vm-identity" ledger line); every later point of the VM must equal
+        it. The user column's engine: under the plan's "strict" pin policy,
+        the pinned one; under "track", a fresh build recorded by its sha256
+        (in the VM's identity), checked under that policy. A point recovered
+        without its VM's name is checked against its type only."""
         check_engine_pin(tk, rec, self.plan["pin_policy"])
+        # (every check before anything is recorded: a rejected point leaves
+        # neither the type's identity nor its VM's)
         path = self.run_dir / "rows" / tk / "identity.json"
         ident = identity_of(rec)
-        if path.exists():
-            if json.loads(path.read_text()) != ident:
+        have = json.loads(path.read_text()) if path.exists() else None
+        if have is not None and have != ident:
+            raise Fatal(
+                f"{tk}: a point's identity differs from the type's (another machine,"
+                f" toolchain or flags; differs in {', '.join(differing(have, ident))})"
+            )
+        mine = seen = None
+        if vm and vm != "recovered":
+            mine = vm_identity_of(rec)
+            seen = self.vms.get(vm)
+            if seen is not None and seen != mine:
                 raise Fatal(
-                    f"{tk}: a point's identity differs from the type's (another machine, toolchain or binary)"
+                    f"{tk}: {vm}'s build changed between its points"
+                    f" (differs in {', '.join(differing(seen, mine))})"
                 )
+        if mine is not None and seen is None:
+            self.ledger.append(
+                {"ev": "vm-identity", "type": tk, "name": vm, "identity": mine}
+            )
+            self.vms[vm] = mine
+        if have is not None:
             return
         make_dirs(path.parent)
         tmp = path.with_name(".identity.json.tmp")
@@ -505,7 +581,12 @@ class Rows:
                 raise Fatal(
                     f"{tk}/{key}: a different file is already accepted; the new one is quarantined"
                 )
-            self.check_identity(tk, rec)
+            try:
+                self.check_identity(tk, rec, vm)
+            except Fatal:
+                # (kept for diagnosis, never read as a point)
+                self.quarantine(tk, key, data, sha, ".rejected")
+                raise
             make_dirs(part.parent)
             make_dirs(dest.parent)
             if part.exists() or part.is_symlink():
@@ -524,8 +605,10 @@ class Rows:
             )
         return sha
 
-    def quarantine(self, tk: str, key: str, data: bytes, sha: str) -> None:
-        q = self.run_dir / "rows" / tk / ".conflict"
+    def quarantine(
+        self, tk: str, key: str, data: bytes, sha: str, where: str = ".conflict"
+    ) -> None:
+        q = self.run_dir / "rows" / tk / where
         make_dirs(q)
         p = q / f"{key.replace(':', '-')}-{sha[:16]}.json"
         if not p.exists():
@@ -545,10 +628,11 @@ class Rows:
         accepted line goes through the same checks and is adopted (its key
         and sha256), never measured again; one that fails them is
         quarantined and fatal. Partial .part files are removed."""
-        acks = {}
+        acks, names = {}, {}
         for e in self.ledger.events:
             if e["ev"] == "accepted":
                 acks[(e["type"], e["key"])] = e["sha256"]
+                names.setdefault((e["type"], e["key"]), e.get("name"))
         for (tk, key), sha in sorted(acks.items()):
             dest, _ = self.paths(tk, key)
             if dest.is_symlink() or not dest.is_file():
@@ -561,7 +645,7 @@ class Rows:
                 raise Fatal(f"recovery: {tk}/{key} changed after it was acknowledged")
             try:
                 _, rec = check_row(data, sha.encode(), key, self.plan, sizes[key])
-                self.check_identity(tk, rec)
+                self.check_identity(tk, rec, names.get((tk, key)))
             except (Fatal, KeyError) as e:
                 raise Fatal(
                     f"recovery: acknowledged {tk}/{key} fails its checks ({e})"
@@ -781,24 +865,39 @@ class TransferError(Exception):
 
 
 class Ssh:
-    """Commands and bounded transfers to a VM, by its IP. Remote commands are
-    fixed words, each shell-quoted; remote paths come from the requested
-    point, never from the VM."""
+    """Commands and bounded transfers to a VM (its name and IP). Remote
+    commands are fixed words, each shell-quoted; remote paths come from the
+    requested point, never from the VM.
+
+    Each VM has its own known_hosts (known_hosts.d/<name>): its key is
+    trusted on first use for that VM only. The provider reuses ephemeral IPs,
+    and one file shared by IP would refuse a new VM's key on an old VM's
+    address, every time, which looks just like an ssh that is not up yet."""
 
     def __init__(self, run_dir: Path, cancel: threading.Event | None = None):
         self.cancel = cancel or threading.Event()
-        self.opts = [
+        self.hosts = run_dir / "known_hosts.d"
+        self.hosts.mkdir(mode=0o700, exist_ok=True)
+
+    def _opts(self, vm: dict) -> list[str]:
+        name = str(vm.get("name") or "")
+        if not NAME_RE.match(name):
+            raise TransferError(f"bad VM name {name!r}")
+        return [
             "-o",
             "BatchMode=yes",
             "-o",
             "StrictHostKeyChecking=accept-new",
             "-o",
-            f"UserKnownHostsFile={run_dir / 'known_hosts'}",
+            f"UserKnownHostsFile={self.hosts / name}",
+            "-o",
+            "GlobalKnownHostsFile=/dev/null",
             "-o",
             "ConnectTimeout=20",
         ]
 
-    def _target(self, ip: str) -> str:
+    def _target(self, vm: dict) -> str:
+        ip = vm.get("ip")
         if not re.match(r"^\d{1,3}(\.\d{1,3}){3}$", ip or ""):
             raise TransferError(f"bad address {ip!r}")
         return f"user@{ip}"
@@ -844,32 +943,38 @@ class Ssh:
             status = "ok" if p.returncode == 0 else "error"
         return {"status": status, "exit": p.returncode, "output": text}
 
-    def run(self, ip: str, words: list[str], timeout: float) -> dict:
+    def run(self, vm: dict, words: list[str], timeout: float) -> dict:
         cmd = [
             "ssh",
-            *self.opts,
-            self._target(ip),
+            *self._opts(vm),
+            self._target(vm),
             " ".join(shlex.quote(w) for w in words),
         ]
         return self._call(cmd, timeout)
 
-    def push(self, ip: str, local: Path, remote_name: str, timeout: float) -> None:
+    def push(self, vm: dict, local: Path, remote_name: str, timeout: float) -> None:
         if not TOKEN_RE.match(remote_name.replace(".", "_").replace("-", "_")):
             raise TransferError(f"bad remote name {remote_name!r}")
         r = self._call(
-            ["scp", "-q", *self.opts, str(local), f"{self._target(ip)}:{remote_name}"],
+            [
+                "scp",
+                "-q",
+                *self._opts(vm),
+                str(local),
+                f"{self._target(vm)}:{remote_name}",
+            ],
             timeout,
         )
         if r["status"] != "ok":
             raise TransferError(f"scp {r['status']} (exit {r['exit']})")
 
-    def fetch(self, ip: str, path: str, max_bytes: int, timeout: float) -> bytes:
+    def fetch(self, vm: dict, path: str, max_bytes: int, timeout: float) -> bytes:
         """At most max_bytes from `cat -- path` on the VM; more is an error,
         and the transfer is cut at max_bytes + 1."""
         import select
         import signal
 
-        cmd = ["ssh", *self.opts, self._target(ip), "cat -- " + shlex.quote(path)]
+        cmd = ["ssh", *self._opts(vm), self._target(vm), "cat -- " + shlex.quote(path)]
         p = subprocess.Popen(
             cmd,
             stdin=subprocess.DEVNULL,
@@ -908,6 +1013,19 @@ class Ssh:
 
 
 # ------------------------------------------------------------------ the driver
+
+
+# What an unreachable VM's last ssh attempt said, for the ledger: the last
+# SSH_DETAIL bytes, printable ASCII, with key material removed (fingerprints,
+# and any long base64 run such as a key line)
+SSH_DETAIL = 2048
+_KEYISH = re.compile(r"(SHA256|MD5):[A-Za-z0-9+/=:]+|[A-Za-z0-9+/=]{32,}")
+
+
+def ssh_detail(text: str) -> str:
+    text = _KEYISH.sub("[key]", text or "")
+    text = "".join(c if c == "\n" or " " <= c <= "~" else "?" for c in text)
+    return text[-SSH_DETAIL:]
 
 
 def point_sizes(plan: dict) -> dict:
@@ -951,6 +1069,7 @@ class Driver:
         self.clock, self.sleep, self.poll_s = clock, sleep, poll_s
         self.spend = threading.Lock()
         self.stopped: dict[str, str] = {}
+        self.setup_failures: dict[str, int] = {}
         self.fatal: list[str] = []
         # (set by anything fatal and by SIGINT/SIGTERM: no new reservation,
         # setup or point after it; the remote's commands in flight are cut)
@@ -1213,19 +1332,59 @@ class Driver:
             return True
 
     # -- per VM
-    def setup(self, vm: dict) -> bool:
+    def wait_ssh(self, vm: dict) -> tuple[bool, str]:
+        """Whether the VM answers ssh (`true`) within SSH_READY_S, and the
+        last attempt's output (scrubbed: see ssh_detail)."""
+        deadline, last = self.clock() + SSH_READY_S, ""
+        while not self.stop.is_set():
+            try:
+                r = self.remote.run(vm, ["true"], 30)
+                if r["status"] == "ok":
+                    return True, ""
+                last = f"{r['status']} (exit {r.get('exit')}): {r.get('output') or ''}"
+            except TransferError as e:
+                last = str(e)
+            if self.clock() > deadline:
+                return False, ssh_detail(last)
+            self.sleep(self.poll_s)
+        return False, ssh_detail(last)
+
+    def setup(self, vm: dict) -> str:
         """The payload and the build, once per VM; its wall time goes in the
-        ledger. A failed build stops the type (the same commit fails the
-        same way)."""
+        ledger. "ok"; "failed" when vm-setup.sh ran and failed, which stops
+        the type (the same commit fails the same way); "unreachable" or
+        "transfer" when ssh never answered or a copy failed, which only
+        retires that VM.
+
+        A TransferError raised here (the payload's copy, or its checksum
+        read back) is "transfer". So is ssh's own exit status, 255, from the
+        build command: the connection failed or dropped, and nothing says
+        the build itself did. A build that really exits 255 is retried on
+        another VM and stops the type after SETUP_TRIES in a row, like any
+        other setup failure."""
         t0 = self.clock()
         want = self.plan["archive_sha256"]
+        up, detail = self.wait_ssh(vm)
+        if not up:
+            self.ledger.append(
+                {
+                    "ev": "build",
+                    "name": vm["name"],
+                    "seconds": round(self.clock() - t0, 1),
+                    "ok": False,
+                    "why": "unreachable",
+                    "ssh": detail,
+                }
+            )
+            return "unreachable"
+        ran = False
         try:
             # (the approved bytes: checked here just before the copy, and on
             # the VM after it, before anything is extracted)
             if hashlib.sha256(self.archive.read_bytes()).hexdigest() != want:
                 raise Fatal("payload.tar changed after its approval")
-            self.remote.push(vm["ip"], self.archive, "payload.tar", 600)
-            r = self.remote.run(vm["ip"], ["sha256sum", "--", "payload.tar"], 300)
+            self.remote.push(vm, self.archive, "payload.tar", 600)
+            r = self.remote.run(vm, ["sha256sum", "--", "payload.tar"], 300)
             got = (r.get("output") or "").split()[:1]
             if r["status"] == "ok" and got != [want]:
                 raise Fatal(
@@ -1234,7 +1393,7 @@ class Driver:
             if r["status"] != "ok":
                 raise TransferError(f"sha256sum {r['status']}")
             r = self.remote.run(
-                vm["ip"],
+                vm,
                 [
                     "bash",
                     "-c",
@@ -1243,7 +1402,9 @@ class Driver:
                 ],
                 self.plan["types"][vm["type"]]["expected_build_hours"] * 3600 * 2 + 600,
             )
-            ok = r["status"] == "ok"
+            ok, ran = r["status"] == "ok", True
+            if r["status"] == "error" and r.get("exit") == 255:
+                ran = False
         except TransferError as e:
             ok, r = False, {"output": str(e)}
         self.ledger.append(
@@ -1254,11 +1415,15 @@ class Driver:
                 "ok": ok,
             }
         )
-        if not ok and not self.stop.is_set() and self.alive(vm):
+        if ok:
+            return "ok"
+        if not ran:
+            return "transfer"
+        if not self.stop.is_set() and self.alive(vm):
             self.stopped[vm["type"]] = (
                 f"the build failed on {vm['name']}: {str(r.get('output', ''))[-300:]}"
             )
-        return ok
+        return "failed"
 
     def measure(self, vm: dict, key: str) -> None:
         """One point on one VM, then its file fetched (bounded), checked and
@@ -1267,7 +1432,7 @@ class Driver:
         tk = vm["type"]
         timeout = expected_seconds(key) * 12 + 600
         r = self.remote.run(
-            vm["ip"],
+            vm,
             [
                 "bash",
                 "sb/bench/core/cgroup-setup.sh",
@@ -1293,9 +1458,9 @@ class Driver:
         name = f"out/rows/{row}-{size}.json"
         for attempt in range(TRANSFER_TRIES):
             try:
-                data = self.remote.fetch(vm["ip"], name, MAX_ROW, TRANSFER_TIMEOUT)
+                data = self.remote.fetch(vm, name, MAX_ROW, TRANSFER_TIMEOUT)
                 side = self.remote.fetch(
-                    vm["ip"], name + ".sha256", MAX_SIDECAR, TRANSFER_TIMEOUT
+                    vm, name + ".sha256", MAX_SIDECAR, TRANSFER_TIMEOUT
                 )
                 break
             except TransferError:
@@ -1316,16 +1481,43 @@ class Driver:
                         return
                     if self.stop.is_set():
                         continue
-                    if not self.setup(vm):
+                    state = self.setup(vm)
+                    if state != "ok":
                         if tk in self.stopped or self.stop.is_set():
                             return
-                        # (the VM went away during its build: a new one)
-                        self.ledger.append(
-                            {"ev": "lost", "name": vm["name"], "point": None}
-                        )
-                        self.reconcile()
+                        if self.alive(vm):
+                            # (unreachable, or a copy failed: this VM is
+                            # retired, and the type tries another, up to
+                            # SETUP_TRIES in a row)
+                            self.delete(vm["name"])
+                            self.ledger.append(
+                                {
+                                    "ev": "retired",
+                                    "name": vm["name"],
+                                    "point": None,
+                                    "detail": state,
+                                }
+                            )
+                            # (under the lock: a type's workers share it)
+                            with self.spend:
+                                n = self.setup_failures.get(tk, 0) + 1
+                                self.setup_failures[tk] = n
+                            if n >= SETUP_TRIES:
+                                self.stopped[tk] = (
+                                    f"{n} VMs in a row could not be set up (last: {state})"
+                                )
+                                vm = None
+                                return
+                        else:
+                            # (the VM went away during its build: a new one)
+                            self.ledger.append(
+                                {"ev": "lost", "name": vm["name"], "point": None}
+                            )
+                            self.reconcile()
                         vm = None
                         continue
+                    with self.spend:
+                        self.setup_failures[tk] = 0
                 with self.spend:
                     if not queue or self.stop.is_set():
                         return
@@ -1471,6 +1663,7 @@ class Driver:
             "charged_hours": round(charged_hours(self.ledger.events, self.clock()), 3),
             "envelope_hours": self.plan["envelope_hours"],
             "stopped_types": self.stopped,
+            "retired": retired_by_type(self.ledger.events),
             "fatal": self.fatal,
         }
 
