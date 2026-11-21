@@ -1,8 +1,0 @@
-{
- "v": 1,
- "reason": "A notebook asks the browser to confirm leaving while it has unsaved work (a save waiting, running, failed or refused as busy), its beforeunload listener there only then, so a clean page reloads as before (web/notebook/notebook.js); the notebook engine bundle and the CLI, which embeds the page, carry it. Measured by the exact size gate on the merge with master 0dea99d9 (CLI +520, engine +396); marked +64 B over each growth.",
- "bytes": {
-  "cli/pyjs.cjs": 584,
-  "engine/sagebrush-notebook.js": 460
- }
-}

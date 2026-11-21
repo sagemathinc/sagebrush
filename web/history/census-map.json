@@ -21,6 +21,10 @@
    "class": "TOKEN",
    "why": "write of an entry: log()"
   },
+  "workspace/api.ts|2|const entry = await inTx(this.ws, withSync(\"entries\", \"ops\"), \"readwrite\", async (tx) => {": {
+   "class": "TOKEN",
+   "why": "write of an entry: log() (a notebook's whole write under the journal, once its record is read back as the write)"
+  },
   "workspace/api.ts|1|const r = await inTx(this.ws, withBoard(\"meta\"), \"readwrite\", async (tx) => {": {
    "class": "TOKEN",
    "why": "a board's journal T2: boardRowWrite (its markOnly stamp: metadata only, value and rev kept)"

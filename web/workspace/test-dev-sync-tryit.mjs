@@ -235,10 +235,13 @@ try {
   // ---- 2a. before any reload: each page's notebook sync turns on by itself once sync is on and its client runs (it
   // isn't decided only at the page's load), so a notebook made and typed in A reaches B
   const nbsA = () => A.ev(`${W}.list("/", { recursive: true }).then((l) => l.filter((e) => e.kind === "notebook").map((e) => ({ path: e.path, ref: e.ref })))`);
+  // (the notebook File, New just made: a new one named Untitled, as File, New names it, not just the first new one:
+  // the other browser's own Welcome may reach this list through sync during the wait)
+  const madeNew = (l, before) => l.find((x) => /^\/Untitled( \(\d+\))?\.ipynb$/.test(x.path) && !before.some((y) => y.ref === x.ref))?.ref ?? null;
   const nbPre = await nbsA();
   await A.ev(`document.querySelector('[data-f="new"]').click()`);
   let refPre = null;
-  for (let i = 0; i < 60 && !refPre; i++) { const l = await nbsA(); refPre = l.find((x) => !nbPre.some((y) => y.ref === x.ref))?.ref ?? null; if (!refPre) await sleep(250); }
+  for (let i = 0; i < 60 && !refPre; i++) { const l = await nbsA(); refPre = madeNew(l, nbPre); if (!refPre) await sleep(250); }
   const typedPre = refPre ? await A.type(0, "before_reload = 1") : "no notebook";
   await sleep(1500);
   const pathPre = refPre ? (await nbsA()).find((x) => x.ref === refPre)?.path : null;
@@ -302,7 +305,7 @@ try {
   // (the notebook page's File, New: a new notebook, opened here, typed into, then named SyncTest)
   await A.ev(`document.querySelector('[data-f="new"]').click()`);
   let ref3 = null;
-  for (let i = 0; i < 60 && !ref3; i++) { const l = await notebooks(); ref3 = l.find((x) => !nb1.some((y) => y.ref === x.ref))?.ref ?? null; if (!ref3) await sleep(250); }
+  for (let i = 0; i < 60 && !ref3; i++) { const l = await notebooks(); ref3 = madeNew(l, nb1); if (!ref3) await sleep(250); }
   check(!!ref3, `A: File, New makes a notebook with sync on (${J(await A.ev(`document.querySelector("#saved")?.textContent ?? ""`))})`);
   if (!ref3) throw new Error("no notebook to sync: File, New made none");
   check((await A.type(0, "x = 1")) === "typed", "A types x = 1");
@@ -382,6 +385,25 @@ try {
   obs("B back online: its edit reached A after (ms)", took);
   check(reached && took < 10_000, `B back online after 35 s offline: its edit reaches A within 10 s (${reached ? took + " ms" : "not within 45 s"})`);
   check(await B.until(`/^Synced/.test(document.querySelector("#wssidebar .fsync")?.textContent ?? "")`, 45_000), `…and B says Synced again (${J(await B.syncLine())})`);
+  // ---- 6b. both offline, B's page loaded while it couldn't reach the server (the front refuses its requests, as in an
+  // outage; then its network off too), an edit on each, both back: the page that couldn't ask whose session it has
+  // asks again by itself (no tab switch, no reload), and both end with both edits.  Before, it never synced until a
+  // tab switch or a reload, and the two differed for good.
+  for (const b of [A, B]) { cut.add(b.session); for (const ws of sockets) if (ws.data.session === b.session) ws.close(1001, "offline"); }
+  await A.offline(true);
+  check(await A.until(`/^Offline/.test(document.querySelector("#wssidebar .fsync")?.textContent ?? "")`, 30_000), `6b. A offline (${J(await A.syncLine())})`);
+  check(await B.go(), "6b. B reloaded while it can't reach the server");
+  await B.offline(true);
+  check(await B.until(B.has("x = offline"), 20_000), `6b. …B shows the notebook it had (${J(await B.codes())})`);
+  check((await A.type(0, "x = 6b_a")) === "typed" && (await B.type(1, "y = 6b_b")) === "typed", "6b. each types in a different cell while offline");
+  await sleep(3000);
+  for (const b of [A, B]) { cut.delete(b.session); await b.offline(false); }
+  const back6b = Date.now();
+  const met = await A.until(`${A.has("x = 6b_a")} && ${A.has("y = 6b_b")}`, 45_000) && await B.until(`${B.has("x = 6b_a")} && ${B.has("y = 6b_b")}`, 45_000);
+  const took6b = Date.now() - back6b;
+  obs("6b. both back: both had both edits after (ms)", took6b);
+  check(met && took6b < 10_000, `6b. both back online: both show both edits within 10 s, with no tab switch (${met ? took6b + " ms" : "not within 45 s"}; A ${J(await A.codes())}, B ${J(await B.codes())})`);
+  check(await B.until(`/^Synced/.test(document.querySelector("#wssidebar .fsync")?.textContent ?? "")`, 30_000), `6b. …and B says Synced (${J(await B.syncLine())})`);
   // ---- 7. a second tab of B (B's first tab holds the account connection) clicking a notebook still arriving: said,
   // then, with nothing more from A, opened once its history is here (a regression guard of today's behaviour:
   // sync-docs' N-2C3-2 asked whether a second tab gets its pull; it does)
@@ -392,7 +414,7 @@ try {
   const nb7 = await notebooks();
   await A.ev(`document.querySelector('[data-f="new"]').click()`);
   let ref7 = null;
-  for (let i = 0; i < 60 && !ref7; i++) { const l = await notebooks(); ref7 = l.find((x) => !nb7.some((y) => y.ref === x.ref))?.ref ?? null; if (!ref7) await sleep(250); }
+  for (let i = 0; i < 60 && !ref7; i++) { const l = await notebooks(); ref7 = madeNew(l, nb7); if (!ref7) await sleep(250); }
   check(!!ref7 && (await A.type(0, "w = 7")) === "typed", "A: another notebook, made with File, New and typed into");
   await sleep(1500);
   const path7 = (await notebooks()).find((x) => x.ref === ref7)?.path;
@@ -427,7 +449,7 @@ try {
   const nb8 = await notebooks();
   await A2.ev(`document.querySelector('[data-f="new"]').click()`);
   let ref8 = null;
-  for (let i = 0; i < 60 && !ref8; i++) { const l = await notebooks(); ref8 = l.find((x) => !nb8.some((y) => y.ref === x.ref))?.ref ?? null; if (!ref8) await sleep(250); }
+  for (let i = 0; i < 60 && !ref8; i++) { const l = await notebooks(); ref8 = madeNew(l, nb8); if (!ref8) await sleep(250); }
   const typed8 = ref8 ? await A2.type(0, "v = 8") : "no notebook";
   await sleep(1500);
   const path8 = ref8 ? (await notebooks()).find((x) => x.ref === ref8)?.path : null;

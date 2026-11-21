@@ -1117,6 +1117,13 @@ def test_windows_refusal_and_python_m():
         sys.stderr = old_err
     r = subprocess.run([sys.executable, "-m", "sagebrush", "remote", "--loopback", "--port", "99999"], capture_output=True, text=True, timeout=60)
     assert r.returncode == 2 and "--port takes a port number" in r.stderr and "Traceback" not in r.stderr, (r.returncode, r.stderr)
+    # (`python -m sagebrush --help` points to the npm command for MATLAB and Magma, and --matlab or --magma here says
+    # so rather than failing to open a file of that name: the wheel puts no `sagebrush` that runs code on PATH)
+    r = subprocess.run([sys.executable, "-m", "sagebrush", "--help"], capture_output=True, text=True, timeout=60)
+    assert r.returncode == 0 and "npx sagebrush --matlab FILE.m" in r.stdout and "--magma" in r.stdout, (r.returncode, r.stdout)
+    for flag in ("--matlab", "--magma"):
+        r = subprocess.run([sys.executable, "-m", "sagebrush", flag, "f.m"], capture_output=True, text=True, timeout=60)
+        assert r.returncode == 2 and f"npx sagebrush {flag} FILE.m" in r.stderr and "Traceback" not in r.stderr, (flag, r.returncode, r.stderr)
 
 
 def test_help():

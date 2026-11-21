@@ -9,16 +9,20 @@
 // own, it says what it is for.  The site's _headers give /frame/* one rule
 // with all its headers (Cloudflare keeps only the last of a path's rules).
 // Build web/dist first, then
-//   python3 web/serve.py 8765 &   node web/board/test-frame.mjs
+//   node web/board/test-frame.mjs          (or SB_URL=http://127.0.0.1:8765/ for a site already served)
 import { spawn } from "node:child_process";
 import { createServer } from "node:http";
 import { mkdtempSync, readFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { dirname, join } from "node:path";
 import { fileURLToPath } from "node:url";
-import { devtoolsPort } from "../test-port.mjs";
+import { devtoolsPort, startServe } from "../test-port.mjs";
 
-const site = process.env.SB_URL ?? "http://127.0.0.1:8765/";
+// (without SB_URL, a server of its own on the port the system picks, used once it says it is listening: its first
+//  request comes at once, before a server started just ahead of it may be listening)
+let server = null;
+process.on("exit", () => server?.kill("SIGKILL"));
+const site = process.env.SB_URL ?? `http://127.0.0.1:${await startServe(() => (server = spawn("python3", [join(dirname(fileURLToPath(import.meta.url)), "..", "serve.py"), "0"], { stdio: ["ignore", "pipe", "pipe"] }))).port}/`;
 const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
 let failed = 0;
 const check = (ok, what) => { console.log((ok ? "ok   " : "FAIL ") + what); if (!ok) failed++; };
