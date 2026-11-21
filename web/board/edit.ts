@@ -101,6 +101,14 @@ export class Editor {
   images: ImageStore | null = null;
   /** choose pictures to add (mount.ts): "Picture…" in the sticker picker, a note that is only a picture */
   onPickPicture: (() => void) | null = null;
+  /** the selection changed (mount.ts: an open drawer follows one note selected) */
+  onSelect: ((ids: readonly string[]) => void) | null = null;
+  /** open a note's drawer (mount.ts): O with one note selected, and the in-place toolbar's button; null: none */
+  onOpenDrawer: ((id: string, keyboard: boolean) => void) | null = null;
+  /** whether this item has a drawer (a note: not a group, a question, a shape...) */
+  canOpenDrawer: ((id: string) => boolean) | null = null;
+  /** whether the focus, or the text selected, is in the drawer (its keys and clipboard aren't the board's) */
+  inDrawer: () => boolean = () => false;
 
   // (edits are to the page shown: pg(d) is it, within the whole document d)
   constructor(private board: Board, private doc: () => BoardDoc | null, private change: (d: BoardDoc) => Promise<void>,
@@ -292,6 +300,7 @@ export class Editor {
   private select(ids: string | string[] | null) {
     this.selected = ids === null ? [] : typeof ids === "string" ? [ids] : [...new Set(ids)];
     this.board.select(this.selected);
+    this.onSelect?.(this.selected);
     // (one note or sticker selected, in Edit: its corner resizes it)
     this.board.handle = this.on && !this.inplace && this.selected.length === 1 && sized(this.board.item(this.selected[0])) ? this.selected[0] : null;
     // (and its grip, at its top left, which drags it: also while it is being written, William's B2)
@@ -747,7 +756,7 @@ export class Editor {
     return JSON.stringify({ "sagebrush-board": 1, nodes, edges, at, ...(pics.size ? { images } : {}) });
   }
   private clip(e: ClipboardEvent, cut: boolean) {
-    if (!this.isActive()) return;
+    if (!this.isActive() || this.inDrawer()) return;
     if (!this.on || this.panel || this.typing()) return;
     const text = this.copied();
     if (!text) return;
@@ -756,7 +765,8 @@ export class Editor {
     if (cut) this.deleteSelected();
   }
   private paste(e: ClipboardEvent) {
-    if (!this.isActive()) return;
+    // (as copy and cut: not with the focus, or the text selected, in the drawer)
+    if (!this.isActive() || this.inDrawer()) return;
     if (!this.on || this.panel || this.typing()) return;
     // a picture (a screenshot, say): a note that is it, in the middle of the view
     const pics = [...(e.clipboardData?.files ?? [])].filter((f) => f.type.startsWith("image/"));
@@ -1195,6 +1205,9 @@ export class Editor {
       complete: (mode, before) => this.complete?.(mode, before) ?? Promise.resolve(null),
       docs: this.docs ? (lang) => this.docs!(lang) : null,
       addSame: (id) => this.addSame(id),
+      // (from its toolbar: the focus stays in what is being written)
+      openDrawer: this.onOpenDrawer ? (id) => this.onOpenDrawer?.(id, false) : null,
+      canOpenDrawer: (id) => !!this.onOpenDrawer && (this.canOpenDrawer?.(id) ?? false),
       get images() { return ed.images; },
     };
   }
@@ -1306,7 +1319,9 @@ export class Editor {
     const mod = e.metaKey || e.ctrlKey;
     if (mod && e.key.toLowerCase() === "z") { e.shiftKey ? this.redo() : this.undo(); }
     else if (mod && e.key.toLowerCase() === "y") this.redo();
-    else if (!this.on) return;
+    // (the rest are the selection's: not with the focus, or the text selected, in the drawer, whose keys they aren't;
+    // undo and redo, above, are the board's wherever the focus is)
+    else if (!this.on || this.inDrawer()) return;
     else if ((e.key === "Delete" || e.key === "Backspace") && this.edgeSel !== null) this.deleteEdge(this.edgeSel);
     else if (e.key === "Enter" && this.edgeSel !== null) this.openEdge(this.edgeSel);
     else if (e.key === "Escape" && this.edgeSel !== null) this.selectEdge(null);
@@ -1315,6 +1330,8 @@ export class Editor {
     // (a key held down adds one: its repeats are not more, INPUT-AS-2)
     else if (this.selected.length === 1 && ((e.key === "Enter" && e.altKey && !mod && !e.shiftKey) || (e.key.toLowerCase() === "b" && !mod && !e.altKey && !e.shiftKey))) { if (!e.repeat) void this.addSame(this.selected[0]); }
     else if (e.key === "Enter" && this.selected.length === 1) this.open(this.selected[0]);
+    // (O: the selected note's drawer, its whole content beside the board)
+    else if (e.key.toLowerCase() === "o" && !mod && !e.altKey && !e.shiftKey && this.selected.length === 1 && this.onOpenDrawer) this.onOpenDrawer(this.selected[0], true);
     else if (mod && e.key.toLowerCase() === "d" && this.selected.length) { const t = this.copied(); if (t) this.insert(t); }
     else if (mod && e.key.toLowerCase() === "a") this.select(this.board.itemsIn(-1e9, -1e9, 1e9, 1e9).filter((it) => !it.parent).map((it) => it.id));
     else if (e.key.startsWith("Arrow") && this.selected.length) { const k = e.shiftKey ? 10 : 1; this.nudge(e.key === "ArrowLeft" ? -k : e.key === "ArrowRight" ? k : 0, e.key === "ArrowUp" ? -k : e.key === "ArrowDown" ? k : 0); }

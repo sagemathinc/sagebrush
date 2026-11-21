@@ -143,7 +143,7 @@ try {
   await dblAt("plain");
   check(await until("!!document.querySelector('.board-editing .be-title')", 5000), "a note is being edited where it is");
   const partNames = await ev("[...document.querySelectorAll('.board-editing .be-title, .board-editing .be-text, .board-editing .be-codepart, .board-editing .be-detail, .board-editing .be-ref, .ip-bar > button')].filter((e) => e.offsetParent).map((e) => e.classList[0])");
-  check(JSON.stringify(partNames) === JSON.stringify(["be-title", "mb", "ip-image", "ip-code", "ip-detail", "ip-link", "ip-color", "ip-delete"]), "a plain note: its title and text, and a toolbar with + image, + code, + detail, + link, color and delete: " + JSON.stringify(partNames));
+  check(JSON.stringify(partNames) === JSON.stringify(["be-title", "mb", "ip-image", "ip-code", "ip-detail", "ip-link", "ip-drawer", "ip-color", "ip-delete"]), "a plain note: its title and text, and a toolbar with + image, + code, + detail, + link, the drawer, color and delete: " + JSON.stringify(partNames));
   // its text is Markdown, highlighted as in the notebook (headings, math, emphasis), under a clear textarea
   // (its text is blocks: a click on one writes in it)
   await ev("document.querySelector('.board-editing .mb-block').click(), 1");

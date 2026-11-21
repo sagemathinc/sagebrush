@@ -64,6 +64,11 @@ const CODE = /^[a-z0-9_.-]{1,64}$/;
 const TOOL = /^[A-Za-z0-9_.:-]{1,128}$/;
 const STATUS = /^[a-z_]{1,32}$/;
 export const LOG_INSTANCE = /^[A-Za-z0-9_-]{1,64}$/;
+/** Why a page marked a stream stale (S6d): its entries differ from the runner's, the runner doesn't have them, they are
+ *  from a run the live runner isn't, or another page holds the same range with other entries. One list for the page and
+ *  the Worker (here, not in the Durable Object's module, which the share test's bundle can't load). */
+export const STALE_REASONS = ["differs", "missing_on_runner", "other_run", "conflict"] as const;
+export type StaleReason = (typeof STALE_REASONS)[number];
 const isNat = (v: unknown): v is number => Number.isSafeInteger(v) && (v as number) >= 0;
 const isPos = (v: unknown): v is number => Number.isSafeInteger(v) && (v as number) >= 1;
 /** Well-formed (no lone surrogate) and without control characters but tab, newline and carriage return. */
