@@ -3083,6 +3083,10 @@ try {
     await sleep(1500);
     const onOpen = { runner: requests.slice(n0).filter((u) => /\/runner\/|sagebrush-worker\.js/.test(u)), frames: await ev(`document.querySelectorAll("iframe[sandbox]").length`), results: await resultsOf("/t/run.tex"), chips: await ev(`document.querySelectorAll(".tex-preview .sagechip").length`) };
     check(onOpen.runner.length === 0 && onOpen.frames === 0 && onOpen.results === null && onOpen.chips >= 2, "Run: nothing runs on open (no runner, no worker, no results file; the items show as not run)", onOpen);
+    // (in the editor, where Run is, a code item not run yet says how to run it; the published page,
+    //  examples and the CLI, with no Run, keep "not run": sagetex.mjs RUN_HINT)
+    const hint = await ev(`[...document.querySelectorAll(".tex-preview .sagechip.s-notrun")].map((c) => c.textContent)`);
+    check(hint.some((t) => /^(Sage|Python|Magma) item \d+: not run yet \(press Run or Shift\+Enter\)$/.test(t)) && !hint.some((t) => /item \d+: not run$/.test(t)), "Run: an item not run yet says \"not run yet (press Run or Shift+Enter)\" in the editor", hint);
     // embedded (?embed=1: the Agents page's pane frames the editor; the page's frame-ancestors 'self' admits this site's
     // own frames only): the document alone, no Files, home, title, File menu, Agent or Share, no pairing of its own (the
     // agent chunk never fetched, though this browser remembers a grant), and the pane's may-close answered by the
