@@ -364,6 +364,62 @@ try {
   check(await B.until(`${row("/numbers.csv")} && !${row("/data.csv")}`, 20_000), "renamed in A: renamed in B");
   await A.ev(`${W}.remove("/numbers.csv")`);
   check(await B.until(`!${row("/numbers.csv")}`, 20_000), "moved to Trash in A: gone from B's Files");
+  // ---- 5b. cells without ids.  (a) A notebook made through the workspace API with a cell that has no id (as an agent
+  // or an upload may make one) is stored with an id; A types in it at /?nb=, and the text is kept, one cell, and
+  // reaches B.  (b) A notebook stored without cell ids (as an older version left one), opened in two tabs of A at once:
+  // both show the same ids as stored, exactly one tab is editable (the writer), the other read-only; one cell per stored
+  // cell, no duplicate; typed in, kept, and B opens it with the text.  (Before: each load gave such a cell a random id, which
+  // the history matches cells by, so a typed edit became a second cell and the shown one stayed empty.)
+  const nbAt = (b, ref) => b.send("Page.navigate", { url: ORIGIN + "/?nb=" + encodeURIComponent(ref) }).then(() => sleep(300)).then(() => b.until("!!window.sagebrush?.workspace && document.querySelectorAll('#cells .cell').length > 0", 45_000));
+  const recordOf = (b, ref) => b.ev(`new Promise((ok) => { const r = indexedDB.open("sagebrush"); r.onsuccess = () => { const g = r.result.transaction("notebooks").objectStore("notebooks").get(${J(ref)}); g.onsuccess = () => { ok(g.result ? { rev: g.result.rev ?? null, cells: (g.result.cells ?? []).map((c) => ({ id: c.id ?? null, code: c.code ?? "" })) } : null); r.result.close(); }; g.onerror = () => ok(null); }; r.onerror = () => ok(null); })`);
+  const shownCells = (b) => b.ev(`[...document.querySelectorAll("#cells .cell")].map((el) => ({ id: el.cell?.id ?? null, code: el.querySelector("textarea")?.value ?? "" }))`);
+  const opensWith = async (b, p, text) => {
+    for (let i = 0; i < 12; i++) {
+      await b.ev(`[...document.querySelectorAll("#wssidebar .frow")].find((r) => r.dataset.path === ${J(p)})?.click()`);
+      if (await b.until(`document.querySelector("#nbname")?.value === ${J(p.slice(1, -6))} && [...document.querySelectorAll("#cells textarea")].map((t) => t.value).join("|") === ${J(text)}`, 2500)) return true;
+    }
+    return false;
+  };
+  {
+    const p = "/IdlessApi.ipynb", text = "made_by_api = 1";
+    const ref = await A.ev(`${W}.create(${J(p)}, { mode: "python", content: { cells: [{ code: "" }] } }).then((e) => e.ref)`);
+    const stored = await recordOf(A, ref);
+    check(stored?.cells.length === 1 && /^[0-9a-f]{12}$/.test(stored.cells[0].id ?? ""), `5b(a). a notebook made through the API with a cell without an id is stored with one (${J(stored)})`);
+    check(await nbAt(A, ref), "5b(a). A opens it at /?nb=");
+    await sleep(3000);
+    check((await A.type(0, text)) === "typed", "5b(a). A types in its cell");
+    await sleep(3000);
+    const after = await recordOf(A, ref);
+    check(J(await shownCells(A)) === J([{ id: stored.cells[0].id, code: text }]) && J(after?.cells) === J([{ id: stored.cells[0].id, code: text }]), `5b(a). …kept 3 s later: one cell, its id, shown and stored (shown ${J(await shownCells(A))}, stored ${J(after?.cells)})`);
+    check(await opensWith(B, p, text), `5b(a). B opens it from Files with A's text (${J(await B.codes())})`);
+  }
+  {
+    const p = "/IdlessStored.ipynb", text = "stored_without_ids = 2";
+    const ref = await A.ev(`${W}.create(${J(p)}, { mode: "python", content: { cells: [{ id: "x", code: "first = 1" }, { id: "y", code: "" }] } }).then((e) => e.ref)`);
+    // (as an older version stored one: its cells' ids taken out of the record, before it was ever opened)
+    const stripped = await A.ev(`new Promise((ok) => { const r = indexedDB.open("sagebrush"); r.onsuccess = () => { const st = r.result.transaction("notebooks", "readwrite").objectStore("notebooks"); const g = st.get(${J(ref)}); g.onsuccess = () => { const rec = g.result; rec.cells = rec.cells.map(({ id: _id, ...c }) => c); const put = st.put(rec); put.onsuccess = () => { ok(rec.cells.every((c) => !("id" in c))); r.result.close(); }; put.onerror = () => ok(false); }; }; r.onerror = () => ok(false); })`);
+    check(stripped, "5b(b). a notebook stored without cell ids (as an older version left one)");
+    const A3 = await A.newTab("A3");
+    // (both tabs open it at once: one is its writer, the other shows it read-only)
+    const [o1, o2] = await Promise.all([nbAt(A, ref), nbAt(A3, ref)]);
+    check(o1 && o2, "5b(b). two tabs of A open it at once");
+    await sleep(4000);
+    const [s1, s3, rec] = [await shownCells(A), await shownCells(A3), await recordOf(A, ref)];
+    const ids = rec?.cells.map((c) => c.id) ?? [];
+    check(rec?.cells.length === 2 && ids.every((id) => /^[0-9a-f]{12}$/.test(id ?? "")) && new Set(ids).size === 2 && J(rec.cells.map((c) => c.code)) === J(["first = 1", ""]), `5b(b). the writer stored ids: one cell per stored cell, no duplicate (${J(rec)})`);
+    check(J(s1) === J(rec?.cells) && J(s3) === J(rec?.cells), `5b(b). both tabs show the same cells with the same ids as stored (A ${J(s1)}, A3 ${J(s3)})`);
+    const editable = (b) => b.ev(`[...document.querySelectorAll("#cells textarea")].some((t) => !t.readOnly)`);
+    const [e1, e3] = [await editable(A), await editable(A3)];
+    check(e1 !== e3, `5b(b). exactly one tab is editable (the notebook's writer); the other shows it read-only (A editable ${e1}, A3 editable ${e3})`);
+    // (typed in the writer: kept, one cell each, and B opens it with the text)
+    const writer = (await A.ev(`!!document.querySelector("#cells textarea") && !document.querySelector("#cells textarea").readOnly`)) ? A : A3;
+    check((await writer.ev(`(() => { const t = document.querySelectorAll("#cells textarea")[1]; if (!t || t.readOnly) return "read-only"; t.focus(); t.value = ${J(text)}; t.dispatchEvent(new Event("input", { bubbles: true })); return "typed"; })()`)) === "typed", `5b(b). its writer (${writer.name}) types in the second cell`);
+    await sleep(3000);
+    const rec2 = await recordOf(A, ref);
+    check(J(rec2?.cells) === J([{ id: ids[0], code: "first = 1" }, { id: ids[1], code: text }]), `5b(b). …kept: the same two cells and ids, the text in the second (${J(rec2?.cells)})`);
+    check(await opensWith(B, p, "first = 1|" + text), `5b(b). B opens it from Files with both cells (${J(await B.codes())})`);
+    await A3.stop();
+  }
   // ---- 6. B offline, an edit there, B back: it reaches A, and B says Synced
   cut.add(B.session);
   for (const ws of sockets) if (ws.data.session === B.session) ws.close(1001, "offline");
