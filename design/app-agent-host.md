@@ -1,6 +1,6 @@
 # The desktop app as the agent host
 
-*Status: r2, a design note; nothing is built. r2 answers r1's COPY review (the CLI's real form, what exists versus what is proposed, Apple's rules as cited) and its SEC review (§5, the security requirements). Author: @sagebrush-macapp. Lanes: SEC (launching agents from the app, and the agent's file access), COPY. Steps that need William (store accounts, signing identities) stay his.*
+*Status: r2, a design note; nothing is built. r2 answers r1's COPY review (the CLI's real form, what exists versus what is proposed, Apple's rules as cited) and its SEC review (§5, the security requirements). Owner: the app lane. Lanes: SEC (launching agents from the app, and the agent's file access), COPY. Steps that need SageMath, Inc., the account holder (store accounts, signing identities), stay the company's.*
 
 The direction, Nov 21, 2026, about 11:28 AM PST (verbatim): "for windows I think the sagebrush instructions should not require using a terminal, if possible. I think windows users in particular would be most comfortable getting a signed official sagebrush app from the windows app store, then install it. It would: provide of course our native tauri app; ALSO provide a way to launch claude (etc) sessions. The same argument should also apply to MacOS and maybe even linux. This doesn't at all mean we don't also offer the cli options. it's just that we should have both."
 
@@ -47,11 +47,11 @@ The direction, Nov 21, 2026, about 11:28 AM PST (verbatim): "for windows I think
 **Windows.**
 - The Store accepts plain Win32 MSI and EXE installers. The installer must be Authenticode-signed by us with a certificate from a trusted CA; the Store doesn't re-sign it, so it needs the Azure signing first. It must be hosted at a stable URL, with the binary at that URL unchanged after submission. ([Microsoft: get started with the Store](https://learn.microsoft.com/en-us/windows/apps/publish/faq/get-started-with-the-microsoft-store))
 - MSIX packaging is the alternative: the Store signs MSIX itself. A full-trust MSIX app may start child processes. But MSIX virtualizes some file and registry writes, which matters for an agent writing `~/.claude` and working in user folders. So the signed MSI/NSIS listing is the smaller step.
-- **What the Store needs from William:**
+- **What the Store needs from SageMath, Inc.:**
   - a Partner Center developer account for SageMath, Inc. Registration is now free for companies as well as individuals (Microsoft, [May 2026](https://blogs.windows.com/windowsdeveloper/2026/05/07/publish-to-microsoft-store-as-a-company-now-with-free-registration-and-faster-onboarding/)); older pages still say $99, so confirm at signup;
   - the company's identity verification;
   - the app's Store listing: its name, privacy-policy link (cocalc.ai/policies/privacy) and age rating.
-- The Azure signing profile and the CI signing identity also stay his steps.
+- The Azure signing profile and the CI signing identity also stay the company's steps.
 
 **macOS.**
 - The notarized Developer ID DMG works today and needs nothing new from Apple.
@@ -77,11 +77,11 @@ Open items that could still need one, to settle while building:
 2. **Bundle `sagebrush-agent` in the macOS and Linux apps** (Node is already there), hash-pinned in the build, with the version in About.
 3. **The Connect Claude button:** the app starts the agent with the app's exact origin and an automatic pairing code; the agent's own sign-in. A self-test launches the bundled agent, pairs it, and checks that a second origin is refused.
 4. **Connect Codex,** the same way.
-5. **Windows:** the Node sidecar (with the Windows engine work), the agent bundled, and the Connect buttons; the NSIS/MSI signed with Azure Artifact Signing (William's profile and identity first).
-6. **The Microsoft Store listing** of the signed installer: William's Partner Center account, then the listing.
+5. **Windows:** the Node sidecar (with the Windows engine work), the agent bundled, and the Connect buttons; the NSIS/MSI signed with Azure Artifact Signing (the company's signing profile and identity first).
+6. **The Microsoft Store listing** of the signed installer: SageMath, Inc.'s Partner Center account, then the listing.
 7. **Optional, later:** MSIX; Flathub.
 
-Steps 1–4 are mine; step 5 follows the Windows engine; steps 6–7 wait on William's accounts.
+Steps 1–4 are the app lane's; step 5 follows the Windows engine; steps 6–7 wait on the company's accounts.
 
 ## 5. Security requirements
 
