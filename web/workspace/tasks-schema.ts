@@ -121,7 +121,10 @@ export const TASK_RESULTS = {
     return { task: taskEntry(o.task), events, last: int(o.last, 0, "last"), reset: bool(o.reset, "reset") };
   },
   "tasks.diff": (v: unknown) => { const o = keys(v, ["task", "base", "commit", "round", "seq", "files"], "result"); return { task: task(o.task), base: oid(o.base, "base"), commit: oid(o.commit, "commit"), round: int(o.round, 0, "round"), seq: int(o.seq, 0, "seq"), files: diffFiles(o.files, "files") }; },
-  "tasks.file": (v: unknown) => { const o = keys(v, ["blob", "content"], "result"); return { blob: oid(o.blob, "blob"), content: content(o.content, "content") }; },
+  "tasks.file": (v: unknown) => {
+    const o = keys(v, ["blob", "content"], "result");
+    return { blob: oid(o.blob, "blob"), content: content(o.content, "content") };
+  },
   "tasks.merged": (v: unknown) => {
     const o = keys(v, ["recorded", "commit"], "result");
     if (o.recorded !== "merge" && o.recorded !== "receipt") bad('recorded isn\'t "merge" or "receipt"');

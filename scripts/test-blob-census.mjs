@@ -18,8 +18,8 @@
 //      ELSEWHERE by their exact line, with why.
 // And blobs.ts itself (rule 5): every store write in it (put, add, delete, clear, update) is in one of its helpers
 // (HELPERS), and but for the total's own write to meta, inside inHelper(...), which the test build's guard reads.
-// Two existing `blob` keys that aren't references are listed in UNRELATED by their exact line, with why; any other,
-// or either changed, is flagged.
+// The existing `blob` keys that aren't references are listed in UNRELATED by their exact lines, with why; any other,
+// or any of them changed, is flagged.
 // Planted controls run the same rules over sources that break each one, and must be flagged.
 //   node scripts/test-blob-census.mjs
 import { execFileSync } from "node:child_process";
@@ -45,9 +45,11 @@ const ELSEWHERE = new Map([
 ]);
 const UNRELATED = new Map([
   // (a history checkpoint's own encoded bytes, in the notebooks' history database, not a workspace reference)
-  ["web/workspace/checkpoint.ts", "  return { record, blob, sha256: await sha256Hex(blob), bytes: blob.length };"],
+  ["web/workspace/checkpoint.ts", ["  return { record, blob, sha256: await sha256Hex(blob), bytes: blob.length };"]],
   // (the export's in-memory Blob sink's size bound)
-  ["web/workspace/export/run.ts", "  blob: 256 * 2 ** 20,"],
+  ["web/workspace/export/run.ts", ["  blob: 256 * 2 ** 20,"]],
+  // (a Delegate task host's answers as the page checks them: a git blob id on the wire, not a store reference)
+  ["web/workspace/tasks-schema.ts", ["  return { path: p, kind: kindFor(p, o.kind, `${what}.kind`), change, base_blob, blob };", '    return { blob: oid(o.blob, "blob"), content: content(o.content, "content") };']],
 ]);
 const TEST = /(^|\/)(test-[^/]*|[^/]*-cases\.js|[^/]*-check\.js|[^/]*guard[^/]*\.(js|mjs)|[^/]*-entry\.ts)$/;
 
@@ -120,7 +122,7 @@ export function census(file, text) {
     if (ts.isPropertyAssignment(n) || ts.isShorthandPropertyAssignment(n)) {
       const key = n.name && ts.isComputedPropertyName(n.name) ? n.name.expression : n.name;
       const name = key && (ts.isIdentifier(key) || ts.isStringLiteral(key) || ts.isNoSubstitutionTemplateLiteral(key)) && !(ts.isIdentifier(key) && n.name !== key) ? key.text : null;
-      if (name === "blob" && ts.isObjectLiteralExpression(n.parent) && UNRELATED.get(file) !== lineOf(n)) found.push(`${at(n)}: an object written with a \`blob\` reference outside blobs.ts`);
+      if (name === "blob" && ts.isObjectLiteralExpression(n.parent) && !(UNRELATED.get(file) ?? []).includes(lineOf(n))) found.push(`${at(n)}: an object written with a \`blob\` reference outside blobs.ts`);
     }
     // (.blob, and ["blob"] or [`blob`]: a member named so, whichever way it is written)
     const isBlobMember = (x) => (ts.isPropertyAccessExpression(x) && x.name.text === "blob") || (ts.isElementAccessExpression(x) && (ts.isStringLiteral(x.argumentExpression) || ts.isNoSubstitutionTemplateLiteral(x.argumentExpression)) && x.argumentExpression.text === "blob");
@@ -185,6 +187,8 @@ if (process.argv[1] && import.meta.url === new URL(process.argv[1], "file://").h
     ["the workspace's database named elsewhere (rule 4)", 'const db = indexedDB.open("sagebrush-workspace");', "web/board/planted.ts"],
     ["openWorkspaceDb used elsewhere (rule 4)", "const db = await openWorkspaceDb();", "web/board/planted.ts"],
     ["an unrelated line's allowance used elsewhere", "  return { record, blob, sha256: await sha256Hex(blob), bytes: blob.length };"],
+    ["another line in a file with allowed lines", "st.put({ ...e, blob: sha });", "web/workspace/tasks-schema.ts"],
+    ["an allowed line's allowance used in another file", '    return { blob: oid(o.blob, "blob"), content: content(o.content, "content") };'],
   ];
   for (const [what, src, at] of planted) ok(census(at ?? "web/workspace/planted.ts", src).length > 0, `control: ${what} is flagged`);
   // (rule 5's controls: blobs.ts writing a store outside its helpers, or outside inHelper)
