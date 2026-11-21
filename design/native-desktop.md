@@ -52,7 +52,7 @@ recorded the §7 answers, is part of r12.*
 10. **LaTeX to PDF** (about 2:31 PM PST): "Both: user's TeX if present, else offer the Tectonic download" (§4.1). Its Tectonic half is **superseded** by item 11.
 11. **LaTeX to PDF, revised** (about 2:57 PM PST): "To keep scope focused, it sounds like we should just suggest to users "install latex" and leave it to them. We will use installed latex, but otherwise it is their responsibility." (§4.1).
 12. **Test keys** (about 2:49 PM PST): "(b) Tests may generate a throwaway in-memory keypair each run (never saved, never trusted by any shipped engine)" (§4.4).
-13. **Signing only in CI** (Nov 13, 2026): Apple signing and notarization happen only in CI jobs, with the keys kept as secrets of a GitHub environment, as in the sagejs project. It is William's standing rule, and §6 applies it to every key.
+13. **Signing only in CI** (Nov 13, 2026): "We could do the apple keys in probably minutes. I setup exactly this for sagejs on github". Apple signing and notarization happen only in CI jobs, with the keys kept as secrets of a GitHub environment, as William set up for sagejs. It is his standing rule, and §6 applies it to every key.
 
 r12's lead question ("decide after the prototype's side-by-side measurements") was about where pyjs runs inside the app. The architecture decision answers it: pyjs and the native engine run in the engine process. N1 still measures, but now only to choose the engine's runtime (§7).
 
@@ -265,7 +265,7 @@ r4's A-vs-B timings stay withdrawn: the PyPI wheel came from a different commit.
 
 Today this rests on each job's `if:`.
 - `mac-release` runs only for a push of an `app-v*` tag, or for a dispatch from master that asks to sign. It never runs on a pull request; `scripts/test-app-release-guard.mjs` pins the cases.
-- `signing-check` (`.github/workflows/signing-check.yml`) is dispatch-only, but nothing checks which branch it runs from.
+- `signing-check` (`.github/workflows/signing-check.yml`), run by hand, checks the secrets: it signs only throwaway probes (a copied executable and a throwaway installer package), and prints PASS/FAIL checks and non-secret counts, never secret values. It is dispatch-only, but nothing checks which branch it runs from.
 
 A job's `if:` is in a workflow file, and any branch pushed to this repository can carry a changed one. A run from that branch (a push, or a pull request from it) could then name the environment and receive its secrets. So the controls that count are the environment's own settings, which only a repository admin can change. Each signing environment (§6.1) must have:
 
@@ -288,7 +288,7 @@ Changing these settings needs an admin, so William applies them. They are listed
 - `mac-release` keeps the signed, notarized disk image as an Actions artifact (`sagebrush-app-macos-signed`, for 14 days).
 - In a public repository, anyone with read access can download an artifact, which means any signed-in GitHub user. So a signed run publishes that build, in practice, whether or not a release is made.
 - Therefore:
-  - Ask for a signed run (a tag push, or a dispatch with `sign`) only for a build William means to publish. To test signing, use `signing-check`, which signs only a throwaway file.
+  - Ask for a signed run (a tag push, or a dispatch with `sign`) only for a build William means to publish. To test signing, use `signing-check`, which signs only throwaway probes.
   - A signed artifact is kept for at most 1 day, long enough to move it to the release. A later workflow change sets this, and William merges it.
   - Unsigned builds stay as artifacts, as now. Nothing in them carries William's signature.
 - Making a release (a release page, a download link, an update) stays William's decision.
