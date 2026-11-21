@@ -1602,6 +1602,26 @@ fn dispatch(v: &Value) -> Result<Value, String> {
             Ok(json!(sagebrush_arith::zmat::det(&a).to_string()))
         }
         "mat_rank" => Ok(json!(sagebrush_arith::zmat::rank(&zmat(v.get("m"))?))),
+        "mat_smith_form" => {
+            // (D, U, V) with U m V = D; "cols" gives the width of a matrix
+            // with no rows
+            let mut a = zmat(v.get("m"))?;
+            if a.rows == 0 {
+                let c = v.get("cols").map_or(Some(0), Value::as_u64).ok_or("'cols' must be a nonnegative integer")?;
+                a.cols = usize::try_from(c).map_err(|_| "'cols' does not fit this target's index size")?;
+            }
+            // (L, before the transforms are allocated: their entries and
+            // D's, 8 bytes each at least, admitted by the memory ledger)
+            let need = sagebrush_arith::smith::floor_bytes(a.rows, a.cols).ok_or("mat_smith_form: the transforms' size overflows")?;
+            let _held = sagebrush_ledger::reserve("the Smith form's transforms", need).map_err(|e| e.to_string())?;
+            let s = sagebrush_arith::smith::smith_form(&a)?;
+            let route = match s.route {
+                sagebrush_arith::smith::Route::Cyclic => "cyclic",
+                sagebrush_arith::smith::Route::Trailing => "trailing",
+                sagebrush_arith::smith::Route::Classical => "classical",
+            };
+            Ok(json!({ "d": zrows(&s.d, v), "u": zrows(&s.u, v), "v": zrows(&s.v, v), "route": route, "attempts": s.attempts }))
+        }
         "mat_rref" => {
             let (n, den, piv) = sagebrush_arith::zmat::rref(&zmat(v.get("m"))?);
             Ok(json!({ "rows": zrows(&n, v), "den": den.to_string(), "pivots": piv }))

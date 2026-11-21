@@ -44,7 +44,7 @@ use sagebrush_bigint::BigInt;
 /// Moduli below this take [`smith_mod`]'s word path: two residues' product
 /// is below 2^124, and a sum of two such below 2^125, in a u128.  (2^63
 /// would still fit; 2^62 is a deliberate margin.)
-const WORD_E: u64 = 1 << 62;
+pub(crate) const WORD_E: u64 = 1 << 62;
 
 /// Z/eZ for [`smith_mod`]'s elimination: residues in [0, e), compared and
 /// divided as the integers they are.  A ring counts the work its own
@@ -52,7 +52,7 @@ const WORD_E: u64 = 1 << 62;
 /// (the big path), or leaves its entry operations, which all cost one unit,
 /// to the elimination's bulk count ([`Zn::WORD`], the word path); so the
 /// elimination's inner loops carry no counter of their own.
-trait Zn {
+pub(crate) trait Zn {
     type T: Clone + PartialEq;
     /// Whether every entry operation (`lin`, `sub_mul`, `add`, `quotient`,
     /// `divides`, `gcd_e`) costs one ModArith unit, counted in bulk by the
@@ -85,13 +85,19 @@ trait Zn {
     fn residue_units(&self, a: &ZMat) -> Units;
     /// The units the ring's own operations counted since the last take.
     fn take(&self) -> [u64; FAMILIES];
+    /// Residues mu_j with sum_j mu_j y_j = 1 (mod e) and their indices
+    /// (the y_j with mu_j != 0), or None when gcd(y_1, .., y_n, e) > 1: an
+    /// extended-gcd fold from g = e, stopped as soon as g = 1.  `steps`
+    /// gets the word path's units (quotient steps and the multipliers'
+    /// updates, one ModArith unit each); the big path counts its own.
+    fn unit_combination(&self, y: &[Self::T], steps: &mut u64) -> Option<Vec<(usize, Self::T)>>;
 }
 
 /// The word path: e < 2^62 (all its operations counted in bulk by the
 /// elimination, its Bezout steps included; nothing here is mutable, so the
 /// modulus stays in a register through the inner loops).
-struct Word {
-    e: u64,
+pub(crate) struct Word {
+    pub(crate) e: u64,
 }
 
 impl Zn for Word {
@@ -174,17 +180,46 @@ impl Zn for Word {
     fn take(&self) -> [u64; FAMILIES] {
         [0; FAMILIES]
     }
+    fn unit_combination(&self, y: &[u64], steps: &mut u64) -> Option<Vec<(usize, u64)>> {
+        let e = self.e as i128;
+        let mut g = e;
+        let mut mu: Vec<(usize, i128)> = vec![];
+        for (j, &yj) in y.iter().enumerate() {
+            if g == 1 {
+                break;
+            }
+            if yj == 0 {
+                continue;
+            }
+            // s g + u y_j = g' (residues below 2^62: the cofactors are too)
+            let (mut r0, mut r1, mut s0, mut s1, mut u0, mut u1) = (g, yj as i128, 1i128, 0i128, 0i128, 1i128);
+            while r1 != 0 {
+                *steps += 1;
+                let q = r0 / r1;
+                (r0, r1) = (r1, r0 - q * r1);
+                (s0, s1) = (s1, s0 - q * s1);
+                (u0, u1) = (u1, u0 - q * u1);
+            }
+            for (_, m) in mu.iter_mut() {
+                *m = (*m * s0.rem_euclid(e)).rem_euclid(e);
+            }
+            *steps += mu.len() as u64;
+            mu.push((j, u0.rem_euclid(e)));
+            g = r0;
+        }
+        (g == 1).then(|| mu.into_iter().filter(|&(_, m)| m != 0).map(|(j, m)| (j, m as u64)).collect())
+    }
 }
 
 /// The big path: e >= 2^62 (every operation counted here by its sizes).
-struct Big {
+pub(crate) struct Big {
     e: BigInt,
     le: usize,
     units: Cell<[u64; FAMILIES]>,
 }
 
 impl Big {
-    fn new(e: &BigInt) -> Big {
+    pub(crate) fn new(e: &BigInt) -> Big {
         Big { e: e.clone(), le: limbs(e), units: Cell::new([0; FAMILIES]) }
     }
     fn count(&self, u: Units) {
@@ -258,6 +293,31 @@ impl Zn for Big {
     }
     fn take(&self) -> [u64; FAMILIES] {
         self.units.replace([0; FAMILIES])
+    }
+    fn unit_combination(&self, y: &[BigInt], _: &mut u64) -> Option<Vec<(usize, BigInt)>> {
+        let mut g = self.e.clone();
+        let mut mu: Vec<(usize, BigInt)> = vec![];
+        for (j, yj) in y.iter().enumerate() {
+            if g.is_one() {
+                break;
+            }
+            if yj.is_zero() {
+                continue;
+            }
+            self.count(biggcd_units(limbs(&g), limbs(yj)));
+            let eg = g.extended_gcd(yj);
+            let s = eg.x.mod_floor(&self.e);
+            let ls = limbs(&s);
+            for (_, m) in mu.iter_mut() {
+                self.count(bigmul_units(limbs(m), ls));
+                self.count(bigdiv_units(limbs(m) + ls, self.le));
+                *m = (&*m * &s).mod_floor(&self.e);
+            }
+            self.count(bigdiv_units(limbs(&eg.y), self.le));
+            mu.push((j, eg.y.mod_floor(&self.e)));
+            g = eg.gcd;
+        }
+        g.is_one().then(|| mu.into_iter().filter(|(_, m)| !m.is_zero()).collect())
     }
 }
 

@@ -29,6 +29,7 @@ pub mod nmod_mat;
 pub mod spelim;
 mod series_primes;
 pub mod wire_decode;
+pub mod smith;
 pub mod snf;
 pub mod zmat;
 pub mod zpoly;

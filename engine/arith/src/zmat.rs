@@ -1424,10 +1424,22 @@ pub fn hermite_cyclic_holds(a: &ZMat, h: &[BigInt], d: &BigInt) -> bool {
 /// gives det a and a^-1, so the adjugate det(a) a^-1; both are (n-1)- or
 /// n-minors, below the Hadamard bound, which fixes the number of primes.
 pub fn inverse(a: &ZMat) -> Option<(ZMat, BigInt)> {
+    inverse_impl(a, false).map(|(nm, den, _)| (nm, den))
+}
+
+/// [`inverse`] and det a (signed): (N, den, det) with a^-1 = N / den in
+/// lowest terms, so den = t_n, the last invariant factor, and |det a| =
+/// den exactly when a's Smith form is diag(1, .., 1, den).  (Counted as
+/// `inverse`, plus det's copy, Move.)
+pub fn inverse_det(a: &ZMat) -> Option<(ZMat, BigInt, BigInt)> {
+    inverse_impl(a, true).map(|(nm, den, det)| (nm, den, det.expect("kept")))
+}
+
+fn inverse_impl(a: &ZMat, keep_det: bool) -> Option<(ZMat, BigInt, Option<BigInt>)> {
     assert_eq!(a.rows, a.cols, "inverse of a non-square matrix");
     let n = a.rows;
     if n == 0 {
-        return Some((ZMat::zero(0, 0), BigInt::one()));
+        return Some((ZMat::zero(0, 0), BigInt::one(), keep_det.then(BigInt::one)));
     }
     let h = hadamard_log2(a);
     if h == f64::NEG_INFINITY {
@@ -1472,6 +1484,10 @@ pub fn inverse(a: &ZMat) -> Option<(ZMat, BigInt)> {
     }
     let mut all = crt_all(&primes, &res);
     let mut den = all.pop().unwrap();
+    let det = keep_det.then(|| {
+        acc.n(Family::Move, limbs(&den) as u64);
+        den.clone()
+    });
     let mut adj = ZMat { rows: n, cols: n, d: all };
     // (the fold charged at the running gcd's size, and stopped at 1)
     let mut g = den.clone();
@@ -1499,7 +1515,7 @@ pub fn inverse(a: &ZMat) -> Option<(ZMat, BigInt)> {
             *x = &*x / &g;
         }
     }
-    Some((adj, den))
+    Some((adj, den, det))
 }
 
 /// The characteristic polynomial det(x I - a), constant term first.

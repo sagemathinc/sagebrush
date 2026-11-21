@@ -198,6 +198,14 @@ def kernel(m):
     return _dec(call("mat_kernel", m=_scaled_rows(m)[0], wire="csv"))
 
 
+def _smith_form(m):
+    """(D, U, V, route): integer rows with U m V = D, the Smith form with
+    its transforms, by the engine (route: "cyclic", "trailing" or
+    "classical"); m has at least one row and one column."""
+    r = call("mat_smith_form", m=_enc(m), wire="csv")
+    return _dec(r["d"]), _dec(r["u"]), _dec(r["v"]), r["route"]
+
+
 def matmul(a, b):
     """The product of integer matrices."""
     a, b = _check(a), _check(b)
