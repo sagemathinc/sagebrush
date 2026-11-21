@@ -1171,9 +1171,10 @@ console.log(failures ? `${failures} failed` : "all passed");
   const sizes = [];
   const sendSized = (n, o) => { answer = (ws, m) => { const t = frameOf(m.id, n, o); sizes.push(enc.encode(t).length); ws.send(t); }; };
   sendSized(L);
-  ok((await why(TaskClient.of(P).request("tasks.list", {}))) === "resolved" && sizes.at(-1) === L, "an answer of exactly 4 MiB (its raw frame, padded with whitespace): taken", sizes.at(-1));
-  sendSized(L + 1);
-  ok((await why(TaskClient.of(P).request("tasks.list", {}))) === "too_large" && sizes.at(-1) === L + 1, "an answer one byte over 4 MiB (the extra byte whitespace after the JSON): refused (too_large)", sizes.at(-1));
+  ok((await why(TaskClient.of(P).request("tasks.list", {}))) === "resolved" && sizes.at(-1) === L, "an answer whose raw frame is exactly 4 MiB (all of it JSON): taken", sizes.at(-1));
+  // (the JSON itself exactly 4 MiB, then one space: only the raw frame as received is over, not the message re-encoded)
+  sendSized(L + 1, { pad: 1 });
+  ok((await why(TaskClient.of(P).request("tasks.list", {}))) === "too_large" && sizes.at(-1) === L + 1, "an answer whose JSON is exactly 4 MiB, plus one space after it: refused (too_large), the raw frame is what counts", sizes.at(-1));
   sendSized(L + 40, { ch: "漢" });
   ok((await why(TaskClient.of(P).request("tasks.list", {}))) === "too_large", "a result over 4 MiB in UTF-8 but under it in characters (漢): refused (too_large)");
   sendSized(L + 40, { error: true });
