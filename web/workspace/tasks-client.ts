@@ -1,9 +1,14 @@
-// Delegate's requests from the page to the agent (pair-delegate-plan-r3.1 §2.5, P0): JSON-RPC requests over the
-// pairing (AgentPairing.own), with ids "p<n>" (the hello is "p1"), only to an agent whose hello lists DELEGATE_FEATURE,
-// only these methods, at most TASK_REQUESTS.pending at once, each message at most TASK_REQUESTS.frameBytes, each
-// answered within its timeout or refused; every pending one ends with the pairing. Its own module, so the pages that
-// don't offer Delegate (the LaTeX editor's pairing) carry none of it. What a request returns is the agent's data, for
-// the caller to check against §2.5's schema before any use.
+// Delegate's requests from the page to the agent: the transport of pair-delegate-plan-r3.3 §2.5 (P0, frozen), groundwork
+// rather than all of its enforcement. JSON-RPC requests over the pairing (AgentPairing.own), with ids "p<n>" (the hello is
+// "p1"), only to an agent whose negotiated hello lists DELEGATE_FEATURE, only these methods, at most
+// TASK_REQUESTS.pending at once. Each request the page sends, and each answer's raw frame as received (its envelope,
+// whitespace and multibyte characters counted), at most TASK_REQUESTS.frameBytes; an answer over it is refused
+// ("too_large") before its result or error reaches the caller (the pairing's own frames keep their own bound). Each is
+// rejected with "timeout" if no answer comes within its time: a bound on waiting, not a promise that the agent answers.
+// Every pending one ends with the pairing. Its own module, so the pages that don't offer Delegate (the LaTeX editor's
+// pairing) carry none of it.
+// Not here: the grant's delegate:true (the Agents page's switch: checked by the page from UI-3 on, and by the agent
+// always), and §2.5's schema of each result, which every caller checks before any use.
 import { AgentError, type AgentPairing } from "./agent-pair";
 
 export const DELEGATE_FEATURE = "delegate.1";
@@ -27,7 +32,7 @@ export class TaskClient {
     return c;
   }
   private constructor(private p: AgentPairing) {
-    this.out = p.own((msg) => this.answered(msg));
+    this.out = p.own((msg, bytes) => this.answered(msg, bytes));
     // (the pairing's end ends every pending request)
     this.unwatch = p.onChange(() => { if (p.state === "closed") this.endAll(p.closeReason || "the agent isn't connected"); });
   }
@@ -59,11 +64,13 @@ export class TaskClient {
     });
   }
 
-  private answered(msg: any): boolean {
+  private answered(msg: any, bytes: number): boolean {
     const r = this.pending.get(msg.id);
     if (!r) return false;
     this.pending.delete(msg.id);
     clearTimeout(r.timer);
+    // (an answer's raw frame over §2.5's bound: refused, its result or error never handed on)
+    if (bytes > TASK_REQUESTS.frameBytes) { r.reject(new AgentError("too_large", "the agent's answer is over the limit")); return true; }
     if (msg.error !== undefined) {
       const code = typeof msg.error?.data?.code === "string" ? msg.error.data.code.slice(0, 40) : "error";
       r.reject(new AgentError(code, String(msg.error?.message ?? "refused").slice(0, 300)));

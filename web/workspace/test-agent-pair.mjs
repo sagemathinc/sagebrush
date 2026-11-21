@@ -1118,36 +1118,75 @@ for (const [what, grant] of [["a folder, not Everything", { folders: ["/A"], wri
   S.srv.stop(true);
 }
 console.log(failures ? `${failures} failed` : "all passed");
-// ---- Delegate's requests (tasks-client.ts, pair-delegate-plan-r3.1 §2.5, over AgentPairing.own): the page asks, the agent answers by id; only with delegate.1,
-// once granted, only tasks.*; at most TASK_REQUESTS.pending, each within its timeout; all ended with the pairing
+// ---- Delegate's requests (tasks-client.ts, pair-delegate-plan-r3.3 §2.5, over AgentPairing.own): the page asks, the
+// agent answers by id; only with a negotiated hello that lists delegate.1 (the agent's hello over the wire, never set by
+// hand), once granted, only tasks.*; at most TASK_REQUESTS.pending; each request, and each answer's raw frame, at most
+// TASK_REQUESTS.frameBytes; each within its timeout; all ended with the pairing
 {
   const { TASK_REQUESTS, DELEGATE_FEATURE, TaskClient } = await import("./tasks-client.ts");
-  const S = server(pairOk), W = fakeWs();
+  // (an agent whose hello offers Delegate, and one whose hello doesn't)
+  const pairDelegate = (ws, m) => ws.send(JSON.stringify({ jsonrpc: "2.0", id: m.id, result: { protocol: 1, agent: { name: "Claude Code", client: "claude-code", version: "2.0" }, wants: { write: true, run: false }, session: "SECRET", features: [DELEGATE_FEATURE, "chat.resume"] } }));
+  const why = async (p) => { try { await p; return "resolved"; } catch (e) { return e?.code ?? String(e); } };
+  {
+    const S = server(pairOk), W = fakeWs();
+    const heard = [];
+    S.onTask = (ws, m) => heard.push(m);
+    const P = mk(S, W);
+    await P.paired();
+    await P.allow({ folders: ["/"], write: true, expires: null }, false);
+    ok((await why(TaskClient.of(P).request("tasks.list", {}))) === "forbidden" && heard.length === 0 && !(P.hello.features ?? []).includes(DELEGATE_FEATURE), "an agent whose negotiated hello doesn't list delegate.1: refused (forbidden), nothing sent");
+    await P.revoke();
+    S.srv.stop(true);
+  }
+  const S = server(pairDelegate), W = fakeWs();
   const heard = [];
   let answer = (ws, m) => ws.send(JSON.stringify({ jsonrpc: "2.0", id: m.id, result: { tasks: [], echo: m.method } }));
   S.onTask = (ws, m) => { heard.push(m); answer(ws, m); };
   const P = mk(S, W);
   await P.paired();
-  const why = async (p) => { try { await p; return "resolved"; } catch (e) { return e?.code ?? String(e); } };
+  ok(P.hello.features.includes(DELEGATE_FEATURE) && TaskClient.of(P).offered(), "a hello that lists delegate.1 keeps it through the page's negotiation (FEATURES), and the client sees it offered", P.hello.features);
   ok((await why(TaskClient.of(P).request("tasks.list", {}))) === "closed" && heard.length === 0, "before the grant: refused (closed), nothing sent");
   await P.allow({ folders: ["/"], write: true, expires: null }, false);
-  ok((await why(TaskClient.of(P).request("tasks.list", {}))) === "forbidden" && heard.length === 0, "an agent whose hello doesn't list delegate.1: refused (forbidden), nothing sent");
-  P.hello.features = [DELEGATE_FEATURE];
   const r1 = await TaskClient.of(P).request("tasks.list", {});
   const r2 = await TaskClient.of(P).request("tasks.get", { task: "a".repeat(32), after: 0 });
-  ok(r1?.echo === "tasks.list" && r2?.echo === "tasks.get" && heard.map((m) => m.id).join() === "p2,p3", "with delegate.1: answered by id, the page's ids p2, p3, ... (the hello was p1)", heard.map((m) => m.id));
+  ok(r1?.echo === "tasks.list" && r2?.echo === "tasks.get" && heard.map((m) => m.id).join() === "p2,p3", "negotiated delegate.1, granted: answered by id, the page's ids p2, p3, ... (the hello was p1)", heard.map((m) => m.id));
   ok(heard.every((m) => m.jsonrpc === "2.0" && typeof m.params === "object"), "each a JSON-RPC 2.0 request with its params");
   ok((await why(TaskClient.of(P).request("workspace.read", { path: "/A/x.txt" }))) === "bad_request" && heard.length === 2, "a method not in TASK_METHODS: refused (bad_request), nothing sent");
   answer = (ws, m) => ws.send(JSON.stringify({ jsonrpc: "2.0", id: m.id, error: { code: -32000, message: "the task moved on", data: { code: "stale" } } }));
   ok((await why(TaskClient.of(P).request("tasks.close", { task: "a".repeat(32), proposal: null, seq: 1 }))) === "stale", "an error answer: rejected with the agent's code (data.code)");
-  // (over the frame bound: refused before sending)
+  // (an outgoing request over TASK_REQUESTS.frameBytes: refused before sending)
   const big = await why(TaskClient.of(P).request("tasks.start", { title: "t", prompt: "x".repeat(TASK_REQUESTS.frameBytes), target: "local", run: false, docs: [] }));
-  ok(big === "too_large" && heard.length === 3, "a request over TASK_REQUESTS.frameBytes (4 MB, under the connection's own 12 MB): refused (too_large), nothing sent");
+  ok(big === "too_large" && heard.length === 3, "a request over TASK_REQUESTS.frameBytes (4 MiB, under the connection's own 12 MiB): refused (too_large), nothing sent");
+  // (an incoming answer: its raw frame, as received, at most TASK_REQUESTS.frameBytes, else refused before its result or
+  //  error reaches the caller; the envelope, whitespace and multibyte characters all counted)
+  const L = TASK_REQUESTS.frameBytes, enc = new TextEncoder();
+  const frameOf = (id, n, { error = false, ch = "x", pad = 0 } = {}) => {
+    const shell = (fill) => JSON.stringify(error ? { jsonrpc: "2.0", id, error: { code: -32000, message: fill, data: { code: "stale" } } } : { jsonrpc: "2.0", id, result: { tasks: [], fill } });
+    const base = enc.encode(shell("")).length + pad;
+    const per = enc.encode(ch).length, k = Math.floor((n - base) / per);
+    let t = shell(ch.repeat(k)) + " ".repeat(pad);
+    const got = enc.encode(t).length;
+    return got < n ? t + " ".repeat(n - got) : t;
+  };
+  const sizes = [];
+  const sendSized = (n, o) => { answer = (ws, m) => { const t = frameOf(m.id, n, o); sizes.push(enc.encode(t).length); ws.send(t); }; };
+  sendSized(L);
+  ok((await why(TaskClient.of(P).request("tasks.list", {}))) === "resolved" && sizes.at(-1) === L, "an answer of exactly 4 MiB (its raw frame, padded with whitespace): taken", sizes.at(-1));
+  sendSized(L + 1);
+  ok((await why(TaskClient.of(P).request("tasks.list", {}))) === "too_large" && sizes.at(-1) === L + 1, "an answer one byte over 4 MiB (the extra byte whitespace after the JSON): refused (too_large)", sizes.at(-1));
+  sendSized(L + 40, { ch: "漢" });
+  ok((await why(TaskClient.of(P).request("tasks.list", {}))) === "too_large", "a result over 4 MiB in UTF-8 but under it in characters (漢): refused (too_large)");
+  sendSized(L + 40, { error: true });
+  ok((await why(TaskClient.of(P).request("tasks.list", {}))) === "too_large", "an error over 4 MiB (ASCII): refused (too_large), its code not handed on");
+  sendSized(L + 40, { error: true, ch: "é" });
+  ok((await why(TaskClient.of(P).request("tasks.list", {}))) === "too_large", "an error over 4 MiB in UTF-8 (é): refused (too_large)");
+  ok(P.state === "granted", "after the over-limit answers the pairing is still up (its own 12 MiB frames unchanged)");
   // (the limit: at most TASK_REQUESTS.pending at once; unanswered ones end with the pairing)
   answer = () => {};
+  const before = heard.length;
   const held = Array.from({ length: TASK_REQUESTS.pending }, () => why(TaskClient.of(P).request("tasks.list", {})));
-  await until(() => heard.length === 3 + TASK_REQUESTS.pending);
-  ok((await why(TaskClient.of(P).request("tasks.list", {}))) === "busy" && heard.length === 3 + TASK_REQUESTS.pending, `at most ${TASK_REQUESTS.pending} pending: the next is refused (busy), not sent`);
+  await until(() => heard.length === before + TASK_REQUESTS.pending);
+  ok((await why(TaskClient.of(P).request("tasks.list", {}))) === "busy" && heard.length === before + TASK_REQUESTS.pending, `at most ${TASK_REQUESTS.pending} pending: the next is refused (busy), not sent`);
   // (an answer to an id the page never used, or no longer waits for: dropped, the connection kept)
   S.sock.send(JSON.stringify({ jsonrpc: "2.0", id: "p999", result: { tasks: [] } }));
   await sleep(100);
@@ -1156,24 +1195,22 @@ console.log(failures ? `${failures} failed` : "all passed");
   const ended = await Promise.all(held);
   ok(ended.every((c) => c === "closed"), "the pairing ended: every pending request rejected (closed)", ended);
   S.srv.stop(true);
-}
-{
-  // (a timeout: rejected; its late answer dropped)
-  const { DELEGATE_FEATURE, TaskClient } = await import("./tasks-client.ts");
-  const S = server(pairOk), W = fakeWs();
-  let late = null;
-  S.onTask = (ws, m) => { late = () => ws.send(JSON.stringify({ jsonrpc: "2.0", id: m.id, result: { tasks: [] } })); };
-  const P = mk(S, W);
-  await P.paired();
-  await P.allow({ folders: ["/"], write: true, expires: null }, false);
-  P.hello.features = [DELEGATE_FEATURE];
-  let code = null;
-  try { await TaskClient.of(P).request("tasks.list", {}, { timeoutMs: 150 }); } catch (e) { code = e.code; }
-  late?.();
-  await sleep(100);
-  ok(code === "timeout" && P.state === "granted", "no answer in time: rejected (timeout); its late answer is dropped, the connection kept", { code, state: P.state });
-  await P.revoke();
-  S.srv.stop(true);
+  {
+    // (a timeout: rejected; its late answer dropped)
+    const S2 = server(pairDelegate), W2 = fakeWs();
+    let late = null;
+    S2.onTask = (ws, m) => { late = () => ws.send(JSON.stringify({ jsonrpc: "2.0", id: m.id, result: { tasks: [] } })); };
+    const P2 = mk(S2, W2);
+    await P2.paired();
+    await P2.allow({ folders: ["/"], write: true, expires: null }, false);
+    let code = null;
+    try { await TaskClient.of(P2).request("tasks.list", {}, { timeoutMs: 150 }); } catch (e) { code = e.code; }
+    late?.();
+    await sleep(100);
+    ok(code === "timeout" && P2.state === "granted", "no answer in time: rejected (timeout); its late answer is dropped, the connection kept", { code, state: P2.state });
+    await P2.revoke();
+    S2.srv.stop(true);
+  }
 }
 
 process.exit(failures ? 1 : 0);
