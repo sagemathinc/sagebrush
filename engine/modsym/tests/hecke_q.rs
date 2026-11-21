@@ -121,7 +121,9 @@ fn the_units_are_pinned() {
 fn the_bounds_at_extreme_inputs() {
     use sagebrush_modsym::hecke_q::{cusp_hecke_cost, cusp_hecke_lower};
     let big_k = (1usize << 31) - 2;
-    for (n, k, prec, new_only) in [(1u64 << 31, big_k, usize::MAX, false), (2147483647, big_k, usize::MAX, true), (1, 2, 0, false), (1u64 << 31, 2, 1 << 40, true)] {
+    // (2^40 where usize holds it, else the widest a 32-bit usize has)
+    let wide = usize::try_from(1u64 << 40).unwrap_or(usize::MAX);
+    for (n, k, prec, new_only) in [(1u64 << 31, big_k, usize::MAX, false), (2147483647, big_k, usize::MAX, true), (1, 2, 0, false), (1u64 << 31, 2, wide, true)] {
         let (work, bytes) = cusp_hecke_lower(n, k, prec, new_only);
         assert!(bytes >= work.min(u64::MAX / 16), "{} {}", n, k);
         let c = cusp_hecke_cost(n, k, prec, new_only);
@@ -140,8 +142,11 @@ fn the_bounds_at_extreme_inputs() {
     let (n, k) = (1_000_003u64, 2usize);
     let prec = sturm_bound(n, k).unwrap() as usize + 2;
     let mut r = Refuse(0);
+    #[cfg(not(target_family = "wasm"))]
     let t = std::time::Instant::now();
     assert_eq!(cusp_hecke_matrix(n, k, 2, prec, false, &factor, &mut r).err().unwrap(), "refused");
+    // (the timing natively only: wasm32-wasip1's clock is the host's)
+    #[cfg(not(target_family = "wasm"))]
     assert!(t.elapsed().as_secs_f64() < 1.0);
     assert_eq!(r.0, cusp_hecke_lower(n, k, prec, false).1);
 }
@@ -164,7 +169,9 @@ fn the_closed_form_dimension_agrees() {
 }
 
 /// The units do not depend on the threads: the parallel jobs' units are
-/// added at their joins, on the caller's thread.
+/// added at their joins, on the caller's thread.  (Native only: wasm32 has
+/// no thread pools; the WebAssembly test pins the same units.)
+#[cfg(not(target_family = "wasm"))]
 #[test]
 fn the_units_are_the_same_on_one_thread_and_many() {
     use sagebrush_modsym::general::Character;

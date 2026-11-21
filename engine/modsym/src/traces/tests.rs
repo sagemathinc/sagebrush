@@ -71,6 +71,8 @@ fn each_site_fires_at_a_small_prime() {
 /// squarefree check the setup's search ran on without end (mod 3 its
 /// candidates are the seeded ones, which have no bound).  It is set aside
 /// as Separation, promptly: a watchdog fails the test after 20 seconds.
+// (native only: the watchdog is a thread, which wasm32 doesn't have)
+#[cfg(not(target_family = "wasm"))]
 #[test]
 fn a_polynomial_not_squarefree_mod_ell_is_set_aside() {
     let res = space(11, 4);
