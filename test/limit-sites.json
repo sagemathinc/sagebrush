@@ -1774,6 +1774,11 @@
   "owner": "engine arithmetic (exact linear algebra)",
   "reason": "the determinant's route choice (Bareiss for small or very wide-entry matrices, else multimodular): a crossover on the size and the entries' bits, not a cap; refuses nothing"
  },
+ "engine/arith/src/zmat.rs :: mul :: let (abits, obits) = (self.max_bits(), o.max_bits()); #0": {
+  "class": "none",
+  "owner": "engine arithmetic (exact linear algebra)",
+  "reason": "the operands' largest entry sizes, for the product's i128 route and its unit count: sizes, not a cap; refuses nothing"
+ },
  "engine/arith/src/zmat.rs :: rref_multimodular :: let amax = a.max_bits() as f64; #0": {
   "class": "none",
   "owner": "exact linear algebra (engine/arith)",
@@ -2389,6 +2394,16 @@
   "class": "none",
   "owner": "engine arith (big-integer wire decoder)",
   "reason": "test code: the big-integer decoder's correctness, allocation and Stop tests; refuses nothing itself"
+ },
+ "engine/arith/tests/zmat_meter.rs :: zmat_units_and_stop_checks :: let mut meter = Meter::accounting(u64::MAX); #0": {
+  "class": "none",
+  "owner": "engine arithmetic (exact linear algebra)",
+  "reason": "test code: the metering test's accounting meter with no upper bound; refuses nothing"
+ },
+ "engine/arith/tests/zmat_progress.rs :: seen_mid :: let mut meter = Meter::accounting(u64::MAX); #0": {
+  "class": "none",
+  "owner": "engine arithmetic (exact linear algebra)",
+  "reason": "test code: the progress test's accounting meter with no upper bound; refuses nothing"
  },
  "engine/arith/tests/zmul_admission_targets.rs :: points :: let plan = zmul::admit(&c, &c, 2 * a.len() as u64 + 20, &Caps { n: u64::MAX, o: u64::MAX, peak: u64::MAX, work: u64::MAX, ..CAPS }).unwrap().unwrap(); #0": {
   "class": "none",

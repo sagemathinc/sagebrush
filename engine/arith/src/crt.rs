@@ -132,6 +132,18 @@ fn to_big(w: &[u64], neg: bool) -> BigInt {
 }
 
 impl MultiCrt {
+    /// The units of one [`MultiCrt::reconstruct`], for its callers to
+    /// count (it counts nothing itself, being called once per entry): k
+    /// rows of n word products summed in u128 and the carry pass
+    /// (MulSchool, 1 x 1 limb products), and k word steps, a product
+    /// reduced modulo p_j each (ModArith).
+    pub(crate) fn units(&self) -> crate::cost::Units {
+        let (k, n) = (self.mods.len(), self.q.first().map_or(0, |q| q.len()));
+        let mut u = crate::cost::bigmul_units(k * n + n + 1, 1);
+        u.0[crate::cost::Family::ModArith as usize] += 2 * k as u64;
+        u
+    }
+
     pub fn new(primes: &[u64]) -> MultiCrt {
         let mods: Vec<Modulus> = primes.iter().map(|&p| Modulus::new(p)).collect();
         let k = primes.len();
