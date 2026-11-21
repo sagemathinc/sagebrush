@@ -12,13 +12,14 @@
 // lib/ become globalThis.__PYJS_LIB__ (see libDir() in src/compile.ts).
 import { execFileSync } from "node:child_process";
 import { readFileSync, writeFileSync, mkdirSync, readdirSync, statSync } from "node:fs";
-import { join, relative } from "node:path";
+import { join, relative, sep } from "node:path";
 import { tmpdir } from "node:os";
 import { gzipSync } from "node:zlib";
 import { buildId as computeBuildId, libFiles } from "./build-id.mjs";
 import { mkdtempSync, copyFileSync, existsSync } from "node:fs";
 import { sandboxEntry } from "./sandbox-env.mjs";
 import { assertNoCloudInputs } from "./check-no-server-imports.mjs";
+import { fileURLToPath } from "node:url";
 
 // deno compile embeds node_modules when it finds a package.json above the
 // entry point; compile a copy of the bundle from an empty directory.  With
@@ -39,7 +40,7 @@ function denoCompile(flags, exe, launcher = false, entryText = null) {
   return existsSync(exe) ? exe : exe + ".exe";
 }
 
-const root = new URL("..", import.meta.url).pathname;
+const root = fileURLToPath(new URL("..", import.meta.url));
 const out = join(root, "build", "cli");
 mkdirSync(out, { recursive: true });
 const run = (cmd, args, opts = {}) => execFileSync(cmd, args, { stdio: "inherit", cwd: root, ...opts });
@@ -139,7 +140,8 @@ const walkKatex = (dir) => {
   for (const f of existsSync(dir) ? readdirSync(dir) : []) {
     const p = join(dir, f);
     if (statSync(p).isDirectory()) walkKatex(p);
-    else web[relative(webDir, p)] = readFileSync(p).toString("base64");
+    // (keyed with "/" on every system, as the page asks for them)
+    else web[relative(webDir, p).split(sep).join("/")] = readFileSync(p).toString("base64");
   }
 };
 walkKatex(katexDir);

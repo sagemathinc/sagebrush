@@ -11,6 +11,7 @@ import { existsSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from "no
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { APP_TAG, inlinePage, readPage } from "./notebook-page.mjs";
+import { fileURLToPath } from "node:url";
 
 let n = 0;
 const fails = [];
@@ -48,7 +49,7 @@ try {
 }
 
 // (the built page, where there is one: its script named once by its hash, and, back inline, held once and whole)
-const dist = new URL("../web/dist/", import.meta.url).pathname;
+const dist = fileURLToPath(new URL("../web/dist/", import.meta.url));
 if (existsSync(join(dist, "sagebrush-app.js"))) {
   const html = readFileSync(join(dist, "index.html"), "latin1"), js = readFileSync(join(dist, "sagebrush-app.js"));
   const m = APP_TAG.exec(html);

@@ -18,8 +18,9 @@ import { join, dirname } from "node:path";
 import { execSync } from "node:child_process";
 import { createHash } from "node:crypto";
 import { spaceFromEngine, derive, primesUpTo, BOUND, RANGES } from "../web/atlas/model.ts";
+import { fileURLToPath } from "node:url";
 
-const root = join(dirname(new URL(import.meta.url).pathname), "..");
+const root = join(dirname(fileURLToPath(import.meta.url)), "..");
 // --ranges SPEC: the spaces that must all be present, once each (the
 // producer's argument; default the published atlas's)
 const argv = process.argv.slice(2);
