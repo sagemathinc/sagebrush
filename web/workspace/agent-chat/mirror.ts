@@ -15,7 +15,7 @@
 // runner wins: a stream of another run, or one that differs from it, is marked stale in the account's object from the
 // first position that isn't confirmed. The marks only widen; the reconcile reads the runner, never writes to it.
 import type { AgentPairing } from "../agent-pair";
-import { LOG_INSTANCE, canonical, normalize, segments, type LogEntry, type MirrorBody, type MirrorDraft, type MirrorEntry } from "./mirror-format";
+import { LOG_INSTANCE, STALE_REASONS, canonical, normalize, segments, type LogEntry, type MirrorBody, type MirrorDraft, type MirrorEntry, type StaleReason } from "./mirror-format";
 
 /** Every mirror request's tag starts with this; the rest is 10 random lowercase letters, one tag per request, so a
  *  replay is matched to the exact request it answers (agent 0.7.6+ gives a tag back as it came: 1 to 16 of a-z). */
@@ -32,8 +32,7 @@ export function requestTag(): string {
   return t;
 }
 export const MIRROR_FEATURE = "chat.resume.tag";
-export const STALE_REASONS = ["differs", "missing_on_runner", "other_run", "conflict"] as const;
-export type StaleReason = (typeof STALE_REASONS)[number];
+export { STALE_REASONS, type StaleReason };
 const MIRROR_TYPE = "application/vnd.sagebrush.mirror+json";
 const API = "/api/mirror/v1";
 /** a tagged replay's wait for its next part (each part restarts it) */

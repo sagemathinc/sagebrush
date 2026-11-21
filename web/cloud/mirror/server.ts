@@ -32,9 +32,9 @@
 //
 // Bodies, plaintext and keys are never logged; the stale mark's audit line has positions and a reason only.
 import { accountHash, authTier, claimsWritable, limits, sessionResult, same, type Ctx, type ShareEnv } from "../share/server.ts";
-import { MIRROR_CAPS, MIRROR_SCHEMA, canonical, parseBody, LOG_INSTANCE, entryOk, type MirrorEntry } from "../../workspace/agent-chat/mirror-format.ts";
+import { MIRROR_CAPS, MIRROR_SCHEMA, canonical, parseBody, LOG_INSTANCE, entryOk, STALE_REASONS, type MirrorEntry } from "../../workspace/agent-chat/mirror-format.ts";
 import { ALG, ENVELOPE, LOCATOR, OVERHEAD, b64url, currentKek, hex, newWrappedDek, nonceOf, open, openDek, seal, sha256Hex, type Header, type KekEnv } from "./crypto.ts";
-import { STALE_REASONS, type MirrorAccount, type MirrorCode, type R } from "./account.ts";
+import type { MirrorAccount, MirrorCode, R } from "./account.ts";
 
 export const MIRROR_TYPE = "application/vnd.sagebrush.mirror+json";
 /** How long before its reservation ends the Worker stops writing an object (the object's late deletion waits longer). */

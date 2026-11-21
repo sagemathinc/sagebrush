@@ -24,7 +24,8 @@
 import { DurableObject } from "cloudflare:workers";
 import { SHARING_USED, budgetClaims, claimsWritable } from "../share/server.ts";
 import { KEY_ID, LOCATOR, NONCE_MAX, WRAPPED, ZERO_DIGEST, locatorOf, type Wrapped } from "./crypto.ts";
-import { LOG_INSTANCE, MIRROR_CAPS } from "../../workspace/agent-chat/mirror-format.ts";
+import { LOG_INSTANCE, MIRROR_CAPS, STALE_REASONS, type StaleReason } from "../../workspace/agent-chat/mirror-format.ts";
+export { STALE_REASONS, type StaleReason };
 
 export const MIRROR_LIMITS = Object.freeze({
   conversations: 500,
@@ -56,10 +57,6 @@ export interface MirrorEnv {
   BUDGET_CLAIMS?: string;
 }
 
-/** Why a page marked a stream stale (S6d): its entries differ from the runner's, the runner doesn't have them, they are
- *  from a run the live runner isn't, or another page holds the same range with other entries. */
-export const STALE_REASONS = ["differs", "missing_on_runner", "other_run", "conflict"] as const;
-export type StaleReason = (typeof STALE_REASONS)[number];
 export interface Stale {
   stale_from: number | null;
   stale_reason: StaleReason | null;
