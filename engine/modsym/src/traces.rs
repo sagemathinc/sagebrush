@@ -22,7 +22,7 @@ pub use crate::newspace::Reject;
 use crate::general_exact::{crt, crt_units, invert_mod_c};
 use crate::linalg;
 use crate::count::{self, Sink};
-use crate::newspace::{deg, deriv, eisenstein_exponent, levels, new_poly_mod, pdivrem_c, pgcd, pgcd_c, pmul_c, Level, NewspaceOrbits};
+use crate::newspace::{deg, deriv, eisenstein_exponent, levels, new_poly_mod, pdivrem_c, pgcd_c, pmul_c, Level, NewspaceOrbits};
 use sagebrush_arith::cost::{Family, Local, Units};
 use crate::p1::gcd;
 use crate::par;
@@ -162,29 +162,29 @@ fn setups_mod_in<S: Sink>(n: u64, k: usize, eps: &Character, res: &NewspaceOrbit
     let mut setups = vec![];
     for (u, &w) in polys.iter().zip(rel_deg) {
         let uj = pgcd_c(u, &g_new, ell, cnt);
-        let debug = std::env::var("TRACES_DEBUG").is_ok();
+        // (with new_poly_mod passed, the space mod ell is the reduction of
+        // the integral one (its dimension is), so f is the reduction of the
+        // charpoly over Q, and removing the Eisenstein and old factors (each
+        // of its degree) leaves g_new = the reduction of the product of the
+        // orbit polynomials, a divisor of f: so u divides g_new, and u_j = u
+        // divides f; otherwise a bug)
         if deg(&uj) != w {
-            if debug {
-                eprintln!("N={} ell={}: deg u_j {} != {}", n, ell, deg(&uj), w);
-            }
-            return Ok(Err(Reject::Separation));
+            return Err(format!("internal error: an orbit polynomial meets the new part mod {} in degree {}, not {}", ell, deg(&uj), w));
         }
         let (cof, r) = pdivrem_c(&f, &uj, ell, cnt);
+        if !(r.len() == 1 && r[0] == 0) {
+            return Err(format!("internal error: an orbit polynomial does not divide the charpoly mod {}", ell));
+        }
         // (u_j squarefree and prime to its cofactor: then T on W = ker
         // u_j(T) has w distinct eigenvalues and u_j as its minimal
         // polynomial, so a cyclic vector exists; without the first, T on W
         // can be scalar, and no candidate is cyclic)
         count::n(cnt, Family::ModArith, uj.len() as u64);
         if deg(&pgcd_c(&uj, &deriv(&uj, ell), ell, cnt)) != 0 {
-            if debug {
-                eprintln!("N={} ell={}: u_j not squarefree", n, ell);
-            }
             return Ok(Err(Reject::Separation));
         }
-        if !(r.len() == 1 && r[0] == 0) || deg(&pgcd_c(&uj, &cof, ell, cnt)) != 0 {
-            if debug {
-                eprintln!("N={} ell={}: u_j not separated (deg gcd {})", n, ell, deg(&pgcd(&uj, &cof, ell)));
-            }
+        // (an eigenvalue of the orbit shared with another of the space)
+        if deg(&pgcd_c(&uj, &cof, ell, cnt)) != 0 {
             return Ok(Err(Reject::Separation));
         }
         let mut q = pdivrem_c(&cof, &uj, ell, cnt).1;
@@ -217,6 +217,8 @@ fn setups_mod_in<S: Sink>(n: u64, k: usize, eps: &Character, res: &NewspaceOrbit
         let mut rng = Seeded::new(ell);
         let mut found: Option<OrbitSetup> = None;
         let mut x: u64 = 0;
+        // (named for the Stop-prefix pins, tests/hecke_stop.rs)
+        sagebrush_interrupt::phase("twisted setup: candidates");
         while found.is_none() {
             sink.put(std::mem::take(cnt));
             sagebrush_interrupt::check();
@@ -266,7 +268,9 @@ fn setups_mod_in<S: Sink>(n: u64, k: usize, eps: &Character, res: &NewspaceOrbit
                 }
                 Ok(Some(OrbitSetup { s: power_sums(&uj, ell, cnt), u: uj.clone(), q: q.clone(), combined, seeded, func, psi }))
             };
-            for t in (0..d).filter(|_| !tests::single_coordinates_skipped()) {
+            for t in (0..d).filter(|_| !single_coordinates_skipped()) {
+                sink.put(std::mem::take(cnt));
+                sagebrush_interrupt::check();
                 if let Some(st) = setup(vec![(t, 1)], false, cnt)? {
                     found = Some(st);
                     break;
@@ -275,6 +279,9 @@ fn setups_mod_in<S: Sink>(n: u64, k: usize, eps: &Character, res: &NewspaceOrbit
             // (no single generator's coordinate works: a combination, which
             // the statistics count)
             let mut y: u64 = 0;
+            if found.is_none() {
+                sagebrush_interrupt::phase("twisted setup: functionals");
+            }
             while found.is_none() {
                 sink.put(std::mem::take(cnt));
                 sagebrush_interrupt::check();
@@ -938,6 +945,90 @@ pub mod pins {
         }
     }
 
+    /// The setups on this thread skip (or try) the single coordinates.
+    pub fn skip_single_coordinates(on: bool) {
+        SKIP_SINGLE.with(|c| c.set(on));
+    }
+
+    /// One level's setups mod the first source prime, as the loop runs
+    /// them (a Local, charging the tally), and the prefix the Stop pins
+    /// rebuild: the first orbit's units before its first candidate (its
+    /// gcds and divisions), and with the candidate x = 0's up to its
+    /// functionals (its powers, Krylov vectors and rank).
+    pub struct Setup {
+        n: u64,
+        k: usize,
+        eps: Character,
+        res: NewspaceOrbits,
+        lv: Vec<Level>,
+        polys: Vec<Vec<u64>>,
+        ell: u64,
+    }
+
+    pub fn setup(n: u64, k: usize, factor: Factorer) -> Setup {
+        let res = crate::newspace::newspace_orbits(n, k, &Character::trivial(n), factor).unwrap();
+        let eps = Character::trivial(n).minimal();
+        let ell = hecke_primes(1).next().unwrap();
+        let qs: Vec<u64> = res.ops.iter().map(|o| o.0).collect();
+        let lv = levels(n, k, &eps, &[0], &qs).unwrap();
+        let polys: Vec<Vec<u64>> = res.orbits.iter().map(|u| u.iter().map(|c| {
+            let r = c % BigInt::from(ell);
+            let r = if r < BigInt::from(0) { r + BigInt::from(ell) } else { r };
+            r.try_into().unwrap()
+        }).collect()).collect();
+        Setup { n, k, eps, res, lv, polys, ell }
+    }
+
+    impl Setup {
+        pub fn run(&self) {
+            setups_mod(self.n, self.k, &self.eps, &self.res, &self.lv, &self.polys, &self.res.dims, self.ell, root_of_unity(1, self.ell), 1, 0, 0, &mut Local::new()).unwrap().unwrap();
+        }
+
+        /// (the first orbit's units before its first candidate check, and
+        /// before its first functional check when the single coordinates
+        /// are skipped, and the candidates tried until then)
+        pub fn prefix(&self) -> (Units, Units, u64) {
+            let (ell, d_ops) = (self.ell, &self.res.ops);
+            let Ok((g_new, true)) = new_poly_mod(&self.lv, self.k, d_ops, ell, 1, 1, 0, 0, &self.res.dims_plus).unwrap() else { panic!("a good prime") };
+            let sp = GeneralSpace::new_mod(self.n, self.k, &self.eps, 1, ell, 1).unwrap();
+            let d = sp.dimension();
+            let tm = sp.hecke_combo_matrix(d_ops).unwrap();
+            let f = linalg::charpoly(tm.clone(), ell);
+            let (u, w) = (&self.polys[0], self.res.dims[0]);
+            let mut a = Units::default();
+            let uj = pgcd_c(u, &g_new, ell, &mut a);
+            let (cof, _) = pdivrem_c(&f, &uj, ell, &mut a);
+            count::n(&mut a, Family::ModArith, uj.len() as u64);
+            pgcd_c(&uj, &deriv(&uj, ell), ell, &mut a);
+            pgcd_c(&uj, &cof, ell, &mut a);
+            pdivrem_c(&cof, &uj, ell, &mut a);
+            // (the candidates c_x, x = 0, 1, ..., each after a check, until
+            // the first cyclic one, then its Gram vectors)
+            let mut b = a;
+            let mut tried = 0u64;
+            loop {
+                let c = powers_mod(tried, d, ell);
+                tried += 1;
+                count::n(&mut b, Family::ModArith, d as u64);
+                let mut zs = vec![poly_apply(&cof, &tm, &c, false, ell, &mut b)];
+                for i in 1..w {
+                    let next = matvec(&tm, &zs[i - 1], ell, &mut b);
+                    zs.push(next);
+                }
+                if rank_mod(&zs, ell, &mut b) < w {
+                    continue;
+                }
+                let mut vs = vec![poly_apply(&cof, &tm, &zs[0], false, ell, &mut b)];
+                for i in 1..2 * w - 1 {
+                    let next = matvec(&tm, &vs[i - 1], ell, &mut b);
+                    vs.push(next);
+                }
+                break;
+            }
+            (a, b, tried)
+        }
+    }
+
     /// The CRT's units (general_exact::crt_units).
     pub fn crt_units(ls: &[u64], entries: usize) -> Units {
         super::crt_units(ls, entries)
@@ -947,11 +1038,22 @@ pub mod pins {
 #[cfg(test)]
 mod tests;
 
+#[cfg(any(test, feature = "test-pins"))]
+thread_local! {
+    // (the setups on this thread skip the single coordinates, so the
+    // combined functionals, which no golden needs, are exercised: the tests
+    // and the Stop pins only)
+    static SKIP_SINGLE: std::cell::Cell<bool> = const { std::cell::Cell::new(false) };
+}
+
+#[cfg(any(test, feature = "test-pins"))]
+fn single_coordinates_skipped() -> bool {
+    SKIP_SINGLE.with(|c| c.get())
+}
+
 /// (outside the tests, the setup always tries the single coordinates first)
-#[cfg(not(test))]
-mod tests {
-    #[inline(always)]
-    pub(super) fn single_coordinates_skipped() -> bool {
-        false
-    }
+#[cfg(not(any(test, feature = "test-pins")))]
+#[inline(always)]
+fn single_coordinates_skipped() -> bool {
+    false
 }

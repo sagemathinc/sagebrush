@@ -11,6 +11,8 @@ prime set aside on any of these.
 
     python engine/py/test_cusp_hecke.py
 """
+import sys
+
 from sagebrush import mf
 from sagebrush.sage import CuspForms, ModularForms
 
@@ -44,6 +46,27 @@ def main():
             h = mf.cusp_hecke_matrix(N, k, 2, s)
             st = h["stats"]
             assert sum(st["rejected"].values()) == 0, (N, k, st)
+    # a prime of n past the engine's domain (2^30; here a threshold of 5)
+    # takes the q-expansion route, never a refusal: the engine is not asked
+    # (the module CuspForms comes from: the Sage layer's own loader)
+    sm = sys.modules[type(CuspForms(37, 2)).__module__]
+    calls = []
+    real = sm._mf.cusp_hecke_matrix
+
+    def spy(N, k, q, prec, **kw):
+        calls.append(q)
+        assert q < sm._CUSP_HECKE_PRIME_BELOW, q
+        return real(N, k, q, prec, **kw)
+
+    saved = sm._CUSP_HECKE_PRIME_BELOW
+    sm._CUSP_HECKE_PRIME_BELOW, sm._mf.cusp_hecke_matrix = 5, spy
+    try:
+        S = CuspForms(37, 2)
+        for n in (2, 6, 7, 14):
+            assert S.hecke_matrix(n) == S._hecke_matrix_qexp(n), n
+        assert calls == [2, 2, 3], calls
+    finally:
+        sm._CUSP_HECKE_PRIME_BELOW, sm._mf.cusp_hecke_matrix = saved, real
     # ModularForms keeps the q-expansion route (its Eisenstein part)
     M = ModularForms(37, 2)
     assert M.hecke_matrix(2) == M._hecke_matrix_qexp(2)

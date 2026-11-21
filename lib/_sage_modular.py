@@ -1280,6 +1280,11 @@ def _rref_exact(rows):
     return [[_Fr(x) for x in R[i]] for i in range(len(piv))]
 
 
+# The primes the engine's cusp_hecke_matrix takes (its domain: below 2^30);
+# for a larger prime factor of n, hecke_matrix takes the q-expansion route.
+_CUSP_HECKE_PRIME_BELOW = 2 ** 30
+
+
 def _cusp_hecke(N, k, n, s, new_only):
     """T_n on S_k(Gamma0(N)) (or its new subspace) in its reduced echelon
     basis, as an integer matrix B over a denominator: the engine's T_p for
@@ -1935,9 +1940,11 @@ class _QSpace:
         A = self._amb()
         s = self.sturm_bound() + 2
         parts = self._parts()
-        if parts in (["cusp"], ["cusp_new"]):
+        if parts in (["cusp"], ["cusp_new"]) and all(int(p) < _CUSP_HECKE_PRIME_BELOW for p, _ in ZZ(n).factor()):
             # (the cusp forms, or the new ones: T_n from the engine's twisted
-            # traces, to precision s whatever n)
+            # traces, to precision s whatever n; a prime of n past the
+            # engine's domain takes the q-expansion route below instead, a
+            # route choice, so no T_n is refused)
             self._check_trivial()
             B, den = _cusp_hecke(A._N, A._k, n, s, parts == ["cusp_new"])
             d = len(B)

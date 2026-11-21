@@ -5,17 +5,7 @@
 //! independence of the threads in tests/hecke_q.rs.)
 
 use super::*;
-use std::cell::Cell;
-
-thread_local! {
-    // (the setups on this thread skip the single coordinates, so the
-    // combined functionals, which no golden needs, are exercised)
-    static SKIP_SINGLE: Cell<bool> = const { Cell::new(false) };
-}
-
-pub(super) fn single_coordinates_skipped() -> bool {
-    SKIP_SINGLE.with(|c| c.get())
-}
+use crate::newspace::pgcd;
 
 fn factor(f: &[BigInt]) -> Vec<(Vec<BigInt>, u32)> {
     sagebrush_poly::factor(f).1
@@ -58,7 +48,11 @@ fn the_rejection_sites_are_these() {
 fn each_site_fires_at_a_small_prime() {
     // a small bad prime first, then the source: set aside, counted, and the
     // result still computed
-    for (n, k, ell, want) in [(37u64, 2usize, 3u64, [1, 0, 0, 0]), (11, 2, 5, [0, 1, 0, 0]), (11, 4, 3, [0, 0, 1, 0])] {
+    // (Separation by both of its exits: 11.4 mod 3, an orbit polynomial
+    // not squarefree; 19.6 mod 13, one sharing a root with its cofactor;
+    // its other two conditions are internal errors, unreachable once
+    // new_poly_mod has passed)
+    for (n, k, ell, want) in [(37u64, 2usize, 3u64, [1, 0, 0, 0]), (11, 2, 5, [0, 1, 0, 0]), (11, 4, 3, [0, 0, 1, 0]), (19, 6, 13, [0, 0, 1, 0])] {
         let res = space(n, k);
         let e = eisenstein_exponent(n);
         let primes = std::iter::once(ell).chain(hecke_primes(e));

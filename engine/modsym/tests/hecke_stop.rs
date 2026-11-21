@@ -120,6 +120,83 @@ fn a_stop_charges_only_the_work_before_it() {
     horner.add(&sagebrush_arith::cost::bigmul_units(1, 1));
     assert_eq!(u.get(Family::MulSchool), 10 * horner.get(Family::MulSchool));
 
+    // the setups: a Stop at the first candidate's check has charged the
+    // first orbit's gcds and divisions, and (the single coordinates
+    // skipped) one at the first functional's check, those and the
+    // candidates' powers, Krylov vectors and ranks up to the first cyclic
+    // one's Gram vectors, rebuilt here (pins::Setup)
+    for (n, k) in [(23u64, 2usize), (37, 2), (13, 4)] {
+        let st = pins::setup(n, k, &factor);
+        let (a, b, tried) = st.prefix();
+        pins::skip_single_coordinates(true);
+        sagebrush_interrupt::clear();
+        hooks::reset();
+        hooks::trace();
+        st.run();
+        let x1 = hooks::traced("twisted setup: candidates")[0];
+        let y1 = hooks::traced("twisted setup: functionals")[0];
+        hooks::reset();
+        assert_eq!(y1, x1 + tried, "{}.{}: a check per candidate before the functionals", n, k);
+        let (got, stopped) = stopped_at(x1, || st.run());
+        assert!(stopped);
+        assert_eq!(got, a.0, "{}.{}: stopped at the first candidate", n, k);
+        let (got, stopped) = stopped_at(y1, || st.run());
+        assert!(stopped);
+        assert_eq!(got, b.0, "{}.{}: stopped at the first functional", n, k);
+        pins::skip_single_coordinates(false);
+    }
+
+    // solve: a Stop at the first scaling check has charged everything but
+    // the products (to_rows's copies included), on multi-limb entries
+    {
+        use sagebrush_arith::cost::bigmul_units;
+        use sagebrush_arith::zmat::limbs;
+        use sagebrush_modsym::hecke_q::solve_pin;
+        let dd = BigInt::from(1) << 130u32;
+        let w = vec![vec![dd.clone(), BigInt::from(1)], vec![BigInt::from(3), dd.clone() + 5]];
+        let tw = vec![vec![BigInt::from(1), BigInt::from(1)], vec![dd.clone(), BigInt::from(7)]];
+        sagebrush_interrupt::clear();
+        hooks::reset();
+        hooks::trace();
+        let before = tallied();
+        let h = solve_pin(&w, &tw).unwrap();
+        let all = delta(tallied(), before);
+        let first = hooks::traced("hecke solve: scaling")[0];
+        hooks::reset();
+        // the products: one per entry of E (scaled by den / den_e) and C,
+        // whose scaled values are h's rows
+        let mut products = [0u64; FAMILIES];
+        let (got, stopped) = stopped_at(first, || solve_pin(&w, &tw));
+        assert!(stopped);
+        for f in 0..FAMILIES {
+            products[f] = all[f] - got[f];
+        }
+        // what the Stop saved, rebuilt: E's products (to_rows copied E
+        // before the check), then C's copy and products, each product at
+        // its entry's and factor's sizes (E and C from zmat directly)
+        use sagebrush_arith::zmat::{self, copy_units, ZMat};
+        let wm = ZMat::from_rows(w.clone());
+        let (e, den_e, piv) = zmat::rref(&wm);
+        let rows: Vec<usize> = (0..w.len()).collect();
+        let (c, den_c) = zmat::solve(&wm.select(&rows, &piv), &ZMat::from_rows(tw.clone()).select(&rows, &piv)).unwrap();
+        let (fe, fc) = (&h.den / &den_e, &h.den / &den_c);
+        let mut want = Units::default();
+        for r in e.to_rows().into_iter().take(w.len()) {
+            for x in &r {
+                want.add(&bigmul_units(limbs(x), limbs(&fe)));
+            }
+        }
+        let crows = c.to_rows();
+        want.0[Family::Move as usize] += crows.iter().map(|r| copy_units(r)).sum::<u64>();
+        for r in &crows {
+            for x in r {
+                want.add(&bigmul_units(limbs(x), limbs(&fc)));
+            }
+        }
+        assert_eq!(products, want.0, "solve stopped at its first scaling check: all but E's products and C");
+        assert!(want.get(Family::MulSchool) > 0 && limbs(&dd) == 3);
+    }
+
     // a Stop at every check of a whole op (every phase: the newspaces, the
     // setups, the Heilbronn batches, the CRTs, W, the solve) ends it, and
     // charges part of the whole

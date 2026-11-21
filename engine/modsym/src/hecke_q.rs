@@ -336,18 +336,20 @@ fn solve(w: &[Vec<BigInt>], tw: &[Vec<BigInt>]) -> Result<CuspHecke, String> {
     let g = den_e.gcd(&den_c);
     local.add(biggcd_units(le, lc));
     local.add(bigdiv_units(le, limbs(&g)));
-    local.add(bigmul_units(le, lc));
-    let den = &den_e / &g * &den_c;
+    let eg = &den_e / &g;
+    local.add(bigmul_units(limbs(&eg), lc));
+    let den = eg * &den_c;
     let ld = limbs(&den);
     local.add(bigdiv_units(ld, le));
     local.add(bigdiv_units(ld, lc));
     let (fe, fc) = (&den / &den_e, &den / &den_c);
+    // (to_rows copies every row before the first scaled one: charged there)
     let scale = |m: Vec<Vec<BigInt>>, f: &BigInt, local: &mut Local| -> Vec<Vec<BigInt>> {
         let lf = limbs(f);
+        local.n(Family::Move, m.iter().map(|r| copy_units(r)).sum());
         m.into_iter().map(|r| {
             local.flush();
             sagebrush_interrupt::check();
-            local.n(Family::Move, copy_units(&r));
             let out: Vec<BigInt> = r.into_iter().map(|x| {
                 local.add(bigmul_units(limbs(&x), lf));
                 x * f
@@ -355,9 +357,19 @@ fn solve(w: &[Vec<BigInt>], tw: &[Vec<BigInt>]) -> Result<CuspHecke, String> {
             out
         }).collect()
     };
+    // (named for the Stop-prefix pins, tests/hecke_stop.rs)
+    sagebrush_interrupt::phase("hecke solve: scaling");
     let basis = scale(e.to_rows().into_iter().take(d).collect(), &fe, &mut local);
     let matrix = scale(c.to_rows(), &fc, &mut local);
     Ok(CuspHecke { dim: d, basis, pivots: piv, matrix, den, stats: HeckeTraceStats::default() })
+}
+
+/// solve, for the Stop-prefix pins (tests/hecke_stop.rs): only with the
+/// test-pins feature, never in a library build.
+#[cfg(feature = "test-pins")]
+#[doc(hidden)]
+pub fn solve_pin(w: &[Vec<BigInt>], tw: &[Vec<BigInt>]) -> Result<CuspHecke, String> {
+    solve(w, tw)
 }
 
 #[cfg(test)]
@@ -409,5 +421,52 @@ mod tests {
         assert_eq!(mine.get(Family::Div), 3 * bigdiv_units(1, 1).get(Family::Div));
         assert_eq!(mine.get(Family::MulSchool), 13 * bigmul_units(1, 1).get(Family::MulSchool));
         assert_eq!(mine.get(Family::ModArith), 0);
+    }
+
+    /// With multi-limb denominators equal (W = [D, 1], T_p W = [1, 1], D =
+    /// 2^130: both denominators D), the lcm's product is (D / gcd) D = 1
+    /// times D's limbs, not D's limbs squared.
+    #[test]
+    fn solve_counts_the_lcm_at_its_operands_sizes() {
+        use sagebrush_arith::zmat::limbs;
+        let dd = BigInt::from(1) << 130u32;
+        let w = vec![vec![dd.clone(), BigInt::from(1)]];
+        let tw = vec![vec![BigInt::from(1), BigInt::from(1)]];
+        let before = tallied();
+        let h = solve(&w, &tw).unwrap();
+        let all = delta(tallied(), before);
+        let before = tallied();
+        let wm = ZMat::from_rows(w.clone());
+        let (e, den_e, piv) = zmat::rref(&wm);
+        let wj = wm.select(&[0], &piv);
+        let twj = ZMat::from_rows(tw.clone()).select(&[0], &piv);
+        let (c, den_c) = zmat::solve(&wj, &twj).unwrap();
+        let theirs = delta(tallied(), before);
+        assert_eq!((den_e.clone(), den_c.clone()), (dd.clone(), dd.clone()), "both denominators D");
+        let l = limbs(&dd);
+        assert_eq!(l, 3);
+        // the lcm: the gcd (D, D), the quotient D / D, the product 1 * D
+        let mut want = biggcd_units(l, l);
+        want.add(&bigdiv_units(l, l));
+        want.add(&bigmul_units(1, l));
+        // the scale factors den / den_e and den / den_c
+        want.add(&bigdiv_units(l, l));
+        want.add(&bigdiv_units(l, l));
+        // E's row and C's, copied and scaled by 1
+        let erow = e.to_rows().into_iter().next().unwrap();
+        let crow = c.to_rows().into_iter().next().unwrap();
+        for x in erow.iter().chain(&crow) {
+            want.add(&bigmul_units(limbs(x), 1));
+        }
+        let mut moves = Units::default();
+        // (W's row is D and 1: 3 + 1 limbs; T_p W's 1 + 1)
+        moves.0[Family::Move as usize] = (3 + 1) + (1 + 1) + erow.iter().chain(&crow).map(|x| limbs(x) as u64).sum::<u64>();
+        want.add(&moves);
+        let mut mine = Units::default();
+        for (a, b) in mine.0.iter_mut().zip(all.0.iter().zip(theirs.0)) {
+            *a = b.0 - b.1;
+        }
+        assert_eq!(mine, want);
+        assert_eq!(h.den, dd);
     }
 }
