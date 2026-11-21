@@ -25,6 +25,7 @@ import secrets
 import signal
 import stat
 import sys
+import shutil
 import tempfile
 import time
 
@@ -63,6 +64,38 @@ class Clock:
         return int(time.time() * 1000) + self.off
 
 
+def read_bytes(path):
+    try:
+        with open(path, "rb") as f:
+            return f.read()
+    except FileNotFoundError:
+        return b""
+
+
+def complete_lines(path):
+    """The lines a fake has written in full so far, each without its newline. A line still being written (no newline
+    yet) is not one: read mid-write, it would be a partial payload, taken for a whole message with its last byte cut."""
+    try:
+        with open(path) as f:
+            text = f.read()
+    except FileNotFoundError:
+        return []
+    return text.split("\n")[:-1]
+
+
+
+def test_a_line_still_being_written_is_not_read():
+    # (a fake's log read mid-write: only whole lines count; the line without its newline yet is left for the next read)
+    d = tempfile.mkdtemp(dir=TMP)
+    path = os.path.join(d, "fake.log")
+    assert complete_lines(path) == []
+    with open(path, "w") as f:
+        f.write('READY\n{"n":1}\n{"f":"fff')
+    assert complete_lines(path) == ["READY", '{"n":1}']
+    with open(path, "a") as f:
+        f.write('f"}\n')
+    assert complete_lines(path) == ["READY", '{"n":1}', '{"f":"ffff"}']
+    shutil.rmtree(d)
 class Run:
     """A runner serving agent pages, against a fake relay, in this process."""
 
@@ -93,35 +126,19 @@ class Run:
         return self
 
     def fake_lines(self):
-        try:
-            with open(self.fake_log) as f:
-                return [line[:-1] for line in f if line != "READY\n" and not line.startswith("RELAY ")]
-        except FileNotFoundError:
-            return []
+        return [line for line in complete_lines(self.fake_log) if line != "READY" and not line.startswith("RELAY ")]
 
     def relay_lines(self):
         """The runner's own lines the child got, in order, parsed."""
-        try:
-            with open(self.fake_log) as f:
-                return [json.loads(line[6:]) for line in f if line.startswith("RELAY ")]
-        except FileNotFoundError:
-            return []
+        return [json.loads(line[6:]) for line in complete_lines(self.fake_log) if line.startswith("RELAY ")]
 
     def child_lines(self):
         """Everything the child got, in order: the runner's lines as dicts, the page's messages as text."""
-        try:
-            with open(self.fake_log) as f:
-                return [json.loads(line[6:-1]) if line.startswith("RELAY ") else line[:-1] for line in f if line != "READY\n"]
-        except FileNotFoundError:
-            return []
+        return [json.loads(line[6:]) if line.startswith("RELAY ") else line for line in complete_lines(self.fake_log) if line != "READY"]
 
     def kind_lines(self, name):
         """The page messages one kind's fake got, in order."""
-        try:
-            with open(self.kind_logs[name]) as f:
-                return [line[:-1] for line in f if line != "READY\n" and not line.startswith("RELAY ")]
-        except FileNotFoundError:
-            return []
+        return [line for line in complete_lines(self.kind_logs[name]) if line != "READY" and not line.startswith("RELAY ")]
 
     def kind_ready(self, name):
         try:
@@ -839,8 +856,9 @@ async def test_line_split_across_writes_and_a_last_line_without_newline():
             m = await run.leg.json()
             if m.get("method") == "agent.ended":
                 break
-        await asyncio.sleep(0.2)
-        assert b"a last line with no newline was dropped" in open(run.log.path, "rb").read()
+        # (the runner's pump logs the dropped tail when it reads EOF, and the reaper tells the page the agent ended:
+        #  two tasks, in either order, so the line is waited for, not assumed written 0.2 s after agent.ended)
+        await until(lambda: b"a last line with no newline was dropped" in read_bytes(run.log.path), what="the dropped tail in the agent's log")
     finally:
         sg.close()
         await run.end()
@@ -915,11 +933,7 @@ def fake_child(*args, grace_ms=60_000):
 
 
 def lines(log):
-    try:
-        with open(log) as f:
-            return [x[:-1] for x in f]
-    except FileNotFoundError:
-        return []
+    return complete_lines(log)
 
 
 def pid_gone(pid):
