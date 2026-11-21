@@ -417,11 +417,7 @@ export class AgentPairing {
   async noRun() {
     const g = this.grant;
     if (this.state !== "granted" || !g || !g.run) return;
-    const next: Grant = { ...g, run: false };
-    this.grant = next;
-    this.verbs = this.opts.verbsFor(actorOf(this.hello!.agent.name, this.hello!.agent.client), { owner: () => next.id });
-    this.send({ jsonrpc: "2.0", method: "grant.changed", params: changed(next) });
-    this.emit();
+    const next = this.regrant({ ...g, run: false });
     await this.keep();
     if (this.grant === next) this.keepForReload();
   }
@@ -431,15 +427,18 @@ export class AgentPairing {
    * turns there). On only for an agent on this computer whose hello offers delegate.1. False if nothing was sent. */
   setDelegate(on: boolean): boolean {
     const g = this.grant;
-    if (this.state !== "granted" || !g || !!g.delegate === on) return false;
-    if (on && (this.link || !this.hello?.features?.includes("delegate.1"))) return false;
+    if (this.state !== "granted" || !g || !!g.delegate === on || (on && (this.link || !this.hello?.features?.includes("delegate.1")))) return false;
     const { delegate: _, ...rest } = g;
-    const next: Grant = on ? { ...rest, delegate: true } : rest;
+    this.regrant(on ? { ...rest, delegate: true } : rest);
+    return true;
+  }
+  // (the grant in force replaced by `next`: a call or run made under the old one finds it changed (current()) and ends)
+  private regrant(next: Grant): Grant {
     this.grant = next;
     this.verbs = this.opts.verbsFor(actorOf(this.hello!.agent.name, this.hello!.agent.client), { owner: () => next.id });
     this.send({ jsonrpc: "2.0", method: "grant.changed", params: changed(next) });
     this.emit();
-    return true;
+    return next;
   }
 
   /** Dropped: the socket closed and nothing else (no grant change sent, nothing forgotten): an attempt another pairing
