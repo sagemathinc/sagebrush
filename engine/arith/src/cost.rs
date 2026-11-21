@@ -72,6 +72,13 @@ impl Units {
             *x = x.wrapping_add(y);
         }
     }
+    /// Adds `o`, family by family, saturating (for the work estimates: a
+    /// wrapped estimate would read as small).
+    pub fn add_saturating(&mut self, o: &Units) {
+        for (x, &y) in self.0.iter_mut().zip(&o.0) {
+            *x = x.saturating_add(y);
+        }
+    }
     /// The total, or `None` if it overflows u64.
     pub fn total(&self) -> Option<u64> {
         self.0.iter().try_fold(0u64, |t, &u| t.checked_add(u))

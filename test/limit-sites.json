@@ -2575,7 +2575,12 @@
   "owner": "engine arithmetic (exact linear algebra)",
   "reason": "test code: the work estimate's evidence by k up to the route threshold K_MAX, and the classical runs' worst ratio (a report, not a cap)"
  },
- "engine/arith/tests/smith_estimate.rs :: the_estimate_is_fitted_and_scores_within_its_ceilings :: let k_op_max = routed.iter().map(|r| sym(r.actual, r.stage1.unwrap())).fold(0.0, f64::max); #0": {
+ "engine/arith/tests/smith_estimate.rs :: the_estimate_is_fitted_and_scores_within_its_ceilings :: let counts: Vec<usize> = (0..=K_MAX).map(|kk| train.iter().filter(|r| r.route == Route::Trailing && r.k == kk).count()).collect(); #0": {
+  "class": "none",
+  "owner": "engine arithmetic (exact linear algebra)",
+  "reason": "test code: the training corpus's route 2 rows counted by k up to the route threshold K_MAX (the training floor, a report and a test check, not a cap)"
+ },
+ "engine/arith/tests/smith_estimate.rs :: the_estimate_is_fitted_and_scores_within_its_ceilings :: let k_op_max = shown.iter().cloned().fold(0.0, f64::max); #0": {
   "class": "none",
   "owner": "engine arithmetic (exact linear algebra)",
   "reason": "test code: the work estimate's scores against their ceilings (k's p90 and its maximum, printed), and the route threshold K_MAX; not caps"
@@ -2585,12 +2590,17 @@
   "owner": "engine arithmetic (exact linear algebra)",
   "reason": "test code: the work estimate's scores against their ceilings (k's p90 regression bounds) and the route threshold K_MAX; not caps"
  },
+ "engine/arith/tests/smith_estimate.rs :: the_estimate_is_fitted_and_scores_within_its_ceilings :: println!(\"base-train seed 1: route 2 rows by k = 2..={K_MAX}: {:?}\", &counts[2..]); #0": {
+  "class": "none",
+  "owner": "engine arithmetic (exact linear algebra)",
+  "reason": "test code: the training corpus's route 2 rows counted by k up to the route threshold K_MAX (the training floor, a report and a test check, not a cap)"
+ },
  "engine/arith/tests/smith_estimate.rs :: the_estimate_is_fitted_and_scores_within_its_ceilings :: println!(\"{set} seed {seed}: rows {} (classical {}), k: stage 1 per op {k_op:.2} (max {k_op_max:.2}), route 1 stage 1 {k1s1:.2} stage 2 {k1s2:.2}, route 2 stage 2 {k2s2:.2} (k <= {kmax}), beside {kb:.2}\", rows.len(), rows.len() - routed.len()); #0": {
   "class": "none",
   "owner": "engine arithmetic (exact linear algebra)",
   "reason": "test code: the work estimate's scores against their ceilings (k's p90 and its maximum, printed), and the route threshold K_MAX; not caps"
  },
- "engine/arith/tests/smith_estimate.rs :: the_estimate_is_fitted_and_scores_within_its_ceilings :: println!(\"{set} seed {seed}: {} classical runs had a stage 1 estimate (unscored; worst ratio {:.1})\", surprised.len(), surprised.iter().cloned().fold(0.0, f64::max)); #0": {
+ "engine/arith/tests/smith_estimate.rs :: the_estimate_is_fitted_and_scores_within_its_ceilings :: println!(\"{set} seed {seed}: {} classical runs had a stage 1 estimate (worst ratio {:.1})\", surprised.len(), surprised.iter().cloned().fold(0.0, f64::max)); #0": {
   "class": "none",
   "owner": "engine arithmetic (exact linear algebra)",
   "reason": "test code: the work estimate's evidence by k up to the route threshold K_MAX, and the classical runs' worst ratio (a report, not a cap)"

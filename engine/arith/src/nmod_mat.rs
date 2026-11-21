@@ -165,20 +165,20 @@ pub(crate) fn echelon_units_dense(rows: usize, cols: usize, batch: usize) -> [u6
     let mut u = [0u64; FAMILIES];
     let (ms, ma, mv) = (Family::MulSchool as usize, Family::ModArith as usize, Family::Move as usize);
     let upd = |u: &mut [u64; FAMILIES], len: usize, factors: usize| {
-        u[ms] += (factors * len) as u64;
-        u[ma] += (len * (factors / batch + 1)) as u64;
-        u[mv] += len as u64;
+        u[ms] = u[ms].saturating_add((factors * len) as u64);
+        u[ma] = u[ma].saturating_add((len * (factors / batch + 1)) as u64);
+        u[mv] = u[mv].saturating_add(len as u64);
     };
     let mut block_start = 0;
     for r in 0..rows {
         let col = r;
         let blk = r - block_start;
         if blk > 0 {
-            u[ms] += ((rows - r) * blk) as u64;
-            u[ma] += reductions(rows - r, blk, batch) as u64;
+            u[ms] = u[ms].saturating_add(((rows - r) * blk) as u64);
+            u[ma] = u[ma].saturating_add(reductions(rows - r, blk, batch) as u64);
             upd(&mut u, cols - (col + 1), blk);
         }
-        u[ma] += (cols - col) as u64 + 1;
+        u[ma] = u[ma].saturating_add((cols - col) as u64 + 1);
         let (r1, col1) = (r + 1, col + 1);
         if r1 - block_start == BLOCK {
             for _ in r1..rows {

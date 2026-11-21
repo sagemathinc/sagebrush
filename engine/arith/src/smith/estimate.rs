@@ -62,12 +62,12 @@ pub struct Constants {
 /// recorded again.
 pub const FITTED: Constants = Constants {
     attempts_cyclic: 2.255,
-    attempts_trailing: 2.392,
+    attempts_trailing: 2.214,
     hadamard_gap: 0.648,
-    part_a_cubic: 0.835,
+    part_a_cubic: 0.84,
     multiplier: 0.92,
-    vinv_of_delta: 1.87,
-    scale: [0.548, 0.717, 0.874, 0.532],
+    vinv_of_delta: 1.5,
+    scale: [0.548, 0.717, 0.872, 0.47],
     fit_head: "f7c3c93cd71f4d73df5e30851e2d30feb71226bc",
     fit_from: "the estimate test's training corpus (seed 1); the multiplier from route 2's phase data",
 };
@@ -141,8 +141,8 @@ pub fn stage1_with(a: &ZMat, c: &Constants) -> Estimate {
     add_scaled(&mut e, &route, c.scale[if word { 0 } else { 1 }]);
     let beside = (n > 2).then(|| {
         let mut b = zmat::inverse_model(a, lh, 2, Some(1));
-        b.add(&at_attempts(c.attempts_trailing, |t| trailing_model(n, 2, lh, lh, t, word, dh, &[1, lh], c.vinv_of_delta, c.multiplier)));
-        b.add(&part_a_model(n, 1, lh, lh, lh, 1, true, c.part_a_cubic));
+        b.add_saturating(&at_attempts(c.attempts_trailing, |t| trailing_model(n, 2, lh, lh, t, word, dh, &[1, lh], c.vinv_of_delta, c.multiplier)));
+        b.add_saturating(&part_a_model(n, 1, lh, lh, lh, 1, true, c.part_a_cubic));
         b
     });
     Estimate { units: Some(e), beside_route2: beside }
@@ -180,7 +180,7 @@ pub fn stage2_with(a: &ZMat, nm: &ZMat, delta: &BigInt, det: &BigInt, invariants
     let dls: Vec<usize> = nontrivial.iter().map(|x| limbs(x)).collect();
     let mut u = zmat::inverse_model(a, ld, 2, (!e.is_one()).then(|| limbs(&e)));
     let mut rest = part_a_model(n, mean_limbs(a), ln, ld, limbs(&dabs), limbs(&e), e.bits() < 62, c.part_a_cubic);
-    rest.add(&at_attempts(c.attempts_trailing, |t| trailing_model(n, k, ld, ln, t, word, delta.bits(), &dls, c.vinv_of_delta, c.multiplier)));
+    rest.add_saturating(&at_attempts(c.attempts_trailing, |t| trailing_model(n, k, ld, ln, t, word, delta.bits(), &dls, c.vinv_of_delta, c.multiplier)));
     add_scaled(&mut u, &rest, c.scale[if word { 2 } else { 3 }]);
     Some(u)
 }
@@ -208,18 +208,18 @@ pub fn cyclic_model(n: usize, ld: usize, ln: usize, attempts: u64, fold: usize, 
     let ma = Family::ModArith as usize;
     // the residues of N
     if word {
-        u.0[ma] += n64 * n64 * ln as u64;
+        u.0[ma] = u.0[ma].saturating_add(n64 * n64 * ln as u64);
     } else {
         {
             let mut one1 = Units::default();
-            one1.add(&bigdiv_units(ln, ld));
+            one1.add_saturating(&bigdiv_units(ln, ld));
             times(&mut u, (n * n) as u64, &one1);
         }
     }
     let lin_big = |u: &mut Units, la: usize, lb: usize, lc: usize, ld2: usize| {
-        u.add(&bigmul_units(1, la));
-        u.add(&bigmul_units(lb, lc));
-        u.add(&bigdiv_units(2 * ld2 + 1, ld2));
+        u.add_saturating(&bigmul_units(1, la));
+        u.add_saturating(&bigmul_units(lb, lc));
+        u.add_saturating(&bigdiv_units(2 * ld2 + 1, ld2));
     };
     let full = delta_bits.saturating_sub(1);
     let mut lr = 0usize;
@@ -228,20 +228,20 @@ pub fn cyclic_model(n: usize, ld: usize, ln: usize, attempts: u64, fold: usize, 
         if t > 0 {
             for _ in 0..n - 1 {
                 if t < full {
-                    u.0[Family::Move as usize] += t.div_ceil(64);
+                    u.0[Family::Move as usize] = u.0[Family::Move as usize].saturating_add(t.div_ceil(64));
                     lr = t.div_ceil(64) as usize;
                 } else {
-                    u.0[Family::Move as usize] += (delta_bits + 64).div_ceil(64);
-                    u.add(&bigdiv_units(ld + 1, ld));
+                    u.0[Family::Move as usize] = u.0[Family::Move as usize].saturating_add((delta_bits + 64).div_ceil(64));
+                    u.add_saturating(&bigdiv_units(ld + 1, ld));
                     lr = ld;
                 }
             }
             // y += r_i N_i: n - 1 rows of n operations
             if word {
-                u.0[ma] += (n64 - 1) * (n64 + 1);
+                u.0[ma] = u.0[ma].saturating_add((n64 - 1) * (n64 + 1));
             } else {
                 for _ in 0..n - 1 {
-                    u.add(&bigdiv_units(lr, ld));
+                    u.add_saturating(&bigdiv_units(lr, ld));
                     {
                         let mut one2 = Units::default();
                         lin_big(&mut one2, ld, ld.min(lr.max(1)), ld, ld);
@@ -256,26 +256,26 @@ pub fn cyclic_model(n: usize, ld: usize, ln: usize, attempts: u64, fold: usize, 
         // then small, so the later ones take a few steps each)
         if word {
             if entries > 0 {
-                u.0[ma] += delta_bits * 6 / 10 + 1 + (entries as u64 - 1) * 3 + (entries * entries.saturating_sub(1) / 2) as u64;
+                u.0[ma] = u.0[ma].saturating_add(delta_bits * 6 / 10 + 1 + (entries as u64 - 1) * 3 + (entries * entries.saturating_sub(1) / 2) as u64);
             }
         } else {
             for e in 0..entries {
-                u.add(&biggcd_units(if e == 0 { ld } else { 1 }, ld));
+                u.add_saturating(&biggcd_units(if e == 0 { ld } else { 1 }, ld));
                 if e + 1 == entries && t + 1 == attempts {
                     {
                         let mut one3 = Units::default();
-                        one3.add(&bigmul_units(ld, ld));
-                        one3.add(&bigdiv_units(2 * ld, ld));
+                        one3.add_saturating(&bigmul_units(ld, ld));
+                        one3.add_saturating(&bigdiv_units(2 * ld, ld));
                         times(&mut u, (e) as u64, &one3);
                     }
                 }
-                u.add(&bigdiv_units(1, ld));
+                u.add_saturating(&bigdiv_units(1, ld));
             }
         }
     }
     // h: n - 1 combinations of one term
     if word {
-        u.0[ma] += (n64 - 1) * 2;
+        u.0[ma] = u.0[ma].saturating_add((n64 - 1) * 2);
     } else {
         {
             let mut one4 = Units::default();
@@ -288,25 +288,25 @@ pub fn cyclic_model(n: usize, ld: usize, ln: usize, attempts: u64, fold: usize, 
     if lr > 0 {
         {
             let mut one5 = Units::default();
-            one5.add(&bigmul_units(lr, ln));
+            one5.add_saturating(&bigmul_units(lr, ln));
             times(&mut u, ((n - 1) * n) as u64, &one5);
         }
     }
     {
         let mut one6 = Units::default();
-        one6.add(&bigmul_units(ld, ly));
-        one6.add(&bigdiv_units(ld + ly, ld));
+        one6.add_saturating(&bigmul_units(ld, ly));
+        one6.add_saturating(&bigdiv_units(ld + ly, ld));
         times(&mut u, ((n - 1) * n) as u64, &one6);
     }
-    u.0[Family::Move as usize] += (n * ly) as u64;
+    u.0[Family::Move as usize] = u.0[Family::Move as usize].saturating_add((n * ly) as u64);
     if lr > 0 {
         {
             let mut one7 = Units::default();
-            one7.add(&bigmul_units(lr, ld));
+            one7.add_saturating(&bigmul_units(lr, ld));
             times(&mut u, (n - 1) as u64, &one7);
         }
     }
-    u.0[Family::Move as usize] += ((n - 1) * (ld + lr)) as u64;
+    u.0[Family::Move as usize] = u.0[Family::Move as usize].saturating_add(((n - 1) * (ld + lr)) as u64);
     u
 }
 
@@ -328,13 +328,13 @@ pub fn trailing_model(n: usize, k: usize, ld: usize, ln: usize, attempts: u64, w
     let lc = ((multiplier * (ld as f64).sqrt()).round() as usize).clamp(1, ld.max(1));
     let op_c = |u: &mut Units, count: u64, lco: usize| {
         if word {
-            u.0[ma] += count;
+            u.0[ma] = u.0[ma].saturating_add(count);
         } else {
             {
                 let mut one8 = Units::default();
-                one8.add(&bigmul_units(lco, ld));
-                one8.add(&bigmul_units(lco, ld));
-                one8.add(&bigdiv_units(2 * ld + 1, ld));
+                one8.add_saturating(&bigmul_units(lco, ld));
+                one8.add_saturating(&bigmul_units(lco, ld));
+                one8.add_saturating(&bigdiv_units(2 * ld + 1, ld));
                 times(u, count, &one8);
             }
         }
@@ -342,18 +342,18 @@ pub fn trailing_model(n: usize, k: usize, ld: usize, ln: usize, attempts: u64, w
     let op = |u: &mut Units, count: u64| op_c(u, count, lc);
     let gcd = |u: &mut Units| {
         if word {
-            u.0[ma] += delta_bits * 6 / 10 + 1;
+            u.0[ma] = u.0[ma].saturating_add(delta_bits * 6 / 10 + 1);
         } else {
-            u.add(&biggcd_units(ld, ld));
+            u.add_saturating(&biggcd_units(ld, ld));
         }
     };
     // the residues of N
     if word {
-        u.0[ma] += (n * n * ln) as u64;
+        u.0[ma] = u.0[ma].saturating_add((n * n * ln) as u64);
     } else {
         {
             let mut one9 = Units::default();
-            one9.add(&bigdiv_units(ln, ld));
+            one9.add_saturating(&bigdiv_units(ln, ld));
             times(&mut u, (n * n) as u64, &one9);
         }
     }
@@ -366,23 +366,23 @@ pub fn trailing_model(n: usize, k: usize, ld: usize, ln: usize, attempts: u64, w
         if t > 0 {
             for _ in 0..k * top {
                 if t < full {
-                    u.0[Family::Move as usize] += t.div_ceil(64);
+                    u.0[Family::Move as usize] = u.0[Family::Move as usize].saturating_add(t.div_ceil(64));
                     lr = t.div_ceil(64) as usize;
                 } else {
-                    u.0[Family::Move as usize] += (delta_bits + 64).div_ceil(64);
-                    u.add(&bigdiv_units(ld + 1, ld));
+                    u.0[Family::Move as usize] = u.0[Family::Move as usize].saturating_add((delta_bits + 64).div_ceil(64));
+                    u.add_saturating(&bigdiv_units(ld + 1, ld));
                     lr = ld;
                 }
             }
             // (y += r N: one product by a word, one by r's entry)
             if word {
-                u.0[ma] += (k * top * (n + 1)) as u64;
+                u.0[ma] = u.0[ma].saturating_add((k * top * (n + 1)) as u64);
             } else {
                 {
                     let mut one10 = Units::default();
-                    one10.add(&bigmul_units(1, ld));
-                    one10.add(&bigmul_units(lr.max(1), ld));
-                    one10.add(&bigdiv_units(2 * ld + 1, ld));
+                    one10.add_saturating(&bigmul_units(1, ld));
+                    one10.add_saturating(&bigmul_units(lr.max(1), ld));
+                    one10.add_saturating(&bigdiv_units(2 * ld + 1, ld));
                     times(&mut u, (k * top * n) as u64, &one10);
                 }
             }
@@ -399,8 +399,8 @@ pub fn trailing_model(n: usize, k: usize, ld: usize, ln: usize, attempts: u64, w
         // the order test
         {
             let mut one12 = Units::default();
-            one12.add(&bigdiv_units(ld, 1));
-            one12.add(&bigmul_units(ld, ld));
+            one12.add_saturating(&bigdiv_units(ld, 1));
+            one12.add_saturating(&bigmul_units(ld, ld));
             times(&mut u, k as u64, &one12);
         }
         if t + 1 == attempts {
@@ -410,7 +410,7 @@ pub fn trailing_model(n: usize, k: usize, ld: usize, ln: usize, attempts: u64, w
             if !word {
                 {
                     let mut one13 = Units::default();
-                    one13.add(&bigdiv_units(ld, 1));
+                    one13.add_saturating(&bigdiv_units(ld, 1));
                     times(&mut u, (top * k) as u64, &one13);
                 }
             }
@@ -428,23 +428,23 @@ pub fn trailing_model(n: usize, k: usize, ld: usize, ln: usize, attempts: u64, w
     for _ in 0..top {
         for j in 0..k {
             if word {
-                u.0[ma] += 3;
+                u.0[ma] = u.0[ma].saturating_add(3);
             } else {
-                u.add(&bigdiv_units(ld, ld.saturating_sub(dl(j)).max(1)));
-                u.add(&bigmul_units(dl(j), dl(j)));
-                u.add(&bigdiv_units(2 * dl(j), dl(j)));
+                u.add_saturating(&bigdiv_units(ld, ld.saturating_sub(dl(j)).max(1)));
+                u.add_saturating(&bigmul_units(dl(j), dl(j)));
+                u.add_saturating(&bigdiv_units(2 * dl(j), dl(j)));
             }
         }
     }
     for _ in 0..top {
         for _ in 0..k {
             for j in 0..k {
-                u.add(&bigmul_units(dl(j), ld));
+                u.add_saturating(&bigmul_units(dl(j), ld));
             }
             if word {
-                u.0[ma] += 1;
+                u.0[ma] = u.0[ma].saturating_add(1);
             } else {
-                u.add(&bigdiv_units(2 * ld, ld));
+                u.add_saturating(&bigdiv_units(2 * ld, ld));
             }
         }
     }
@@ -463,7 +463,7 @@ pub fn trailing_model(n: usize, k: usize, ld: usize, ln: usize, attempts: u64, w
     let lvi = if k <= 2 || ld <= 1 { lv } else { ((f_vinv * ld as f64).round() as usize).max(lv) }.min(bound.max(lv));
     {
         let mut one15 = Units::default();
-        one15.add(&bigmul_units(ld, lvi));
+        one15.add_saturating(&bigmul_units(ld, lvi));
         times(&mut u, (k * k) as u64, &one15);
     }
     // the integer rows: N_bottom + R N_top, W and V
@@ -471,51 +471,51 @@ pub fn trailing_model(n: usize, k: usize, ld: usize, ln: usize, attempts: u64, w
     if lr > 0 {
         {
             let mut one16 = Units::default();
-            one16.add(&bigmul_units(lr, ln));
+            one16.add_saturating(&bigmul_units(lr, ln));
             times(&mut u, (k * top * n) as u64, &one16);
         }
     }
     {
         let mut one17 = Units::default();
-        one17.add(&bigmul_units(ld, ly));
+        one17.add_saturating(&bigmul_units(ld, ly));
         times(&mut u, (top * n * k) as u64, &one17);
     }
     {
         let mut one18 = Units::default();
-        one18.add(&bigmul_units(ld + lvi, ly));
+        one18.add_saturating(&bigmul_units(ld + lvi, ly));
         times(&mut u, (k * n * k) as u64, &one18);
     }
     // (W's exact divisions by delta: the top rows' numerators N_i - c_i Y
     // are about ld + ly limbs; only the bottom k rows carry B)
     {
         let mut one19 = Units::default();
-        one19.add(&bigdiv_units(ld + ly, ld));
+        one19.add_saturating(&bigdiv_units(ld + ly, ld));
         times(&mut u, (top * n) as u64, &one19);
     }
     {
         let mut one20 = Units::default();
-        one20.add(&bigdiv_units(ld + lvi + ly, ld));
+        one20.add_saturating(&bigdiv_units(ld + lvi + ly, ld));
         times(&mut u, (k * n) as u64, &one20);
     }
     // V: c V_2 (top x k by k), I - R c (k x k by top), and (I - R c) V_2
     {
         let mut one21 = Units::default();
-        one21.add(&bigmul_units(ld, lv));
+        one21.add_saturating(&bigmul_units(ld, lv));
         times(&mut u, (top * k * k) as u64, &one21);
     }
     if lr > 0 {
         {
             let mut one22 = Units::default();
-            one22.add(&bigmul_units(lr, ld));
+            one22.add_saturating(&bigmul_units(lr, ld));
             times(&mut u, (k * top * k) as u64, &one22);
         }
     }
     {
         let mut one23 = Units::default();
-        one23.add(&bigmul_units(lr + ld, lv));
+        one23.add_saturating(&bigmul_units(lr + ld, lv));
         times(&mut u, (k * k * k) as u64, &one23);
     }
-    u.0[Family::Move as usize] += (n * n) as u64;
+    u.0[Family::Move as usize] = u.0[Family::Move as usize].saturating_add((n * n) as u64);
     u
 }
 
@@ -529,42 +529,42 @@ pub fn trailing_model(n: usize, k: usize, ld: usize, ln: usize, attempts: u64, w
 pub fn part_a_model(n: usize, la: usize, ln: usize, ld: usize, ldet: usize, le: usize, e_word: bool, c_a: f64) -> Units {
     let mut u = Units::default();
     let n2 = (n * n) as u64;
-    u.add(&biggcd_units(la, 1));
-    u.add(&biggcd_units(la, la));
+    u.add_saturating(&biggcd_units(la, 1));
+    u.add_saturating(&biggcd_units(la, la));
     {
         let mut one24 = Units::default();
-        one24.add(&bigmul_units(ln, 1));
+        one24.add_saturating(&bigmul_units(ln, 1));
         times(&mut u, (n * n) as u64, &one24);
     }
     if ldet > 1 {
-        u.add(&biggcd_units(ln, ld));
-        u.add(&biggcd_units(ln, 1));
-        u.add(&bigdiv_units(ld, 1));
-        u.add(&bigdiv_units(ldet, ld));
-        u.add(&bigdiv_units(ldet, ld));
+        u.add_saturating(&biggcd_units(ln, ld));
+        u.add_saturating(&biggcd_units(ln, 1));
+        u.add_saturating(&bigdiv_units(ld, 1));
+        u.add_saturating(&bigdiv_units(ldet, ld));
+        u.add_saturating(&bigdiv_units(ldet, ld));
     }
     let steps = (c_a * (n as f64).powi(3)).round() as u64;
     if e_word {
-        u.0[Family::ModArith as usize] += n2 * la as u64 + steps;
+        u.0[Family::ModArith as usize] = u.0[Family::ModArith as usize].saturating_add(n2 * la as u64 + steps);
     } else {
         {
             let mut one25 = Units::default();
-            one25.add(&bigdiv_units(la, le));
+            one25.add_saturating(&bigdiv_units(la, le));
             times(&mut u, (n * n) as u64, &one25);
         }
         {
             let mut one26 = Units::default();
-            one26.add(&bigmul_units(le, le));
-            one26.add(&bigmul_units(le, le));
-            one26.add(&bigdiv_units(2 * le + 1, le));
+            one26.add_saturating(&bigmul_units(le, le));
+            one26.add_saturating(&bigmul_units(le, le));
+            one26.add_saturating(&bigdiv_units(2 * le + 1, le));
             times(&mut u, (steps) as u64, &one26);
         }
     }
     {
         let mut one27 = Units::default();
-        one27.add(&bigmul_units(le, le));
+        one27.add_saturating(&bigmul_units(le, le));
         times(&mut u, n as u64, &one27);
     }
-    u.add(&bigdiv_units(ldet, le));
+    u.add_saturating(&bigdiv_units(ldet, le));
     u
 }

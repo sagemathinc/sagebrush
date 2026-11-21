@@ -1470,9 +1470,9 @@ pub fn inverse_model(a: &ZMat, lx: usize, fold: u64, le: Option<usize>) -> Units
             *x = x.saturating_add(y.saturating_mul(c));
         }
     }
-    u.0[Family::ModArith as usize] += pc * (red + n2);
+    u.0[Family::ModArith as usize] = u.0[Family::ModArith as usize].saturating_add(pc * (red + n2));
     // the identity (a zero matrix, n^2) and the augment (n 2n)
-    u.0[Family::Move as usize] += pc * (n2 + 2 * n2);
+    u.0[Family::Move as usize] = u.0[Family::Move as usize].saturating_add(pc * (n2 + 2 * n2));
     // the CRT: n^2 + 1 reconstructions over qlen-word quotients
     let mut prod = BigInt::one();
     for &p in &primes {
@@ -1485,15 +1485,15 @@ pub fn inverse_model(a: &ZMat, lx: usize, fold: u64, le: Option<usize>) -> Units
         *x = x.saturating_add(y.saturating_mul(n2 + 1));
     }
     // the determinant's copy, and the fold
-    u.0[Family::Move as usize] += lx as u64;
+    u.0[Family::Move as usize] = u.0[Family::Move as usize].saturating_add(lx as u64);
     match le {
         None => {
             for _ in 0..fold {
-                u.add(&biggcd_units(lx, lx));
+                u.add_saturating(&biggcd_units(lx, lx));
             }
         }
         Some(le) => {
-            u.add(&biggcd_units(lx, lx));
+            u.add_saturating(&biggcd_units(lx, lx));
             let (g, d) = (biggcd_units(lx, le), bigdiv_units(lx, le));
             for (x, (y, z)) in u.0.iter_mut().zip(g.0.iter().zip(&d.0)) {
                 *x = x.saturating_add(y.saturating_mul(n2.saturating_sub(1))).saturating_add(z.saturating_mul(n2 + 1));

@@ -1,14 +1,17 @@
 //! The work estimate of the Smith form with transforms (issue #1481),
 //! measured: corpora are generated here, the models' constants refitted on
-//! the training corpus (and required to equal `estimate::FITTED`: a code
-//! change that moves them must refit and record them), and the held-out
-//! corpora scored against ceilings on k, the p90 over rows of max(actual /
-//! E, E / actual) on total units.  Also: the work L holds on every row, and
-//! the classical route has no stage 2 estimate.  Every row is written with
-//! the tested tree's head (git rev-parse HEAD, else GITHUB_SHA) to a
-//! report in the test's target directory, each corpus before anything
-//! about it is asserted (the training rows before the refit's check).  (A
-//! file of its own: it is the slowest of the Smith tests.)
+//! the training corpus (with at least 10 route 2 rows at each k >= 6) and
+//! required to equal `estimate::FITTED` (a code change that moves them must
+//! refit and record them), and the held-out corpora scored against ceilings
+//! on k, the p90 over rows of max(actual / E, E / actual) on total units;
+//! stage 1's per-op k counts every row it gave an estimate for, classical
+//! surprises included.  Also, on every row of every corpus: the work L
+//! holds, a non-square input has no estimate, and the classical route has
+//! no stage 2 estimate.  Every row is written with the tested tree's head
+//! (git rev-parse HEAD, else GITHUB_SHA) to a report in the test's target
+//! directory, each corpus before anything about it is asserted (the
+//! training rows before the refit's check).  (A file of its own: it is the
+//! slowest of the Smith tests.)
 
 use num_traits::{One, Signed};
 use sagebrush_arith::cost::{tallied, Units, FAMILIES};
@@ -66,6 +69,10 @@ struct Row {
     stage1: Option<u64>,
     beside: Option<u64>,
     stage2: Option<u64>,
+    // the shape contracts, checked after the report is written: a
+    // non-square input's stage 1 and a classical run's stage 2 are None
+    stage1_none_ok: bool,
+    stage2_none_ok: bool,
     // for the scales' refit: the remaining work's model and the inverse's
     a: ZMat,
     nm: Option<(ZMat, BigInt, BigInt, Vec<BigInt>)>,
@@ -94,10 +101,13 @@ fn corpus(set: &str, seed: u64) -> Vec<ZMat> {
     let mut rng = Rng(seed.wrapping_mul(0x9e3779b97f4a7c15));
     let fams: &[&str] = if set == "base" { &["random", "kstruct", "sparse", "diagdom", "khigh"] } else { &["banded", "block", "unimod", "mixed", "large", "k8", "singular", "rect", "k9"] };
     let mut out = vec![];
+    // k = 6..8 cycles, two inputs per size up to n = 32: the training
+    // floor's 10 rows a k
+    let mut khigh = 0usize;
     for &fam in fams {
         let ns: &[usize] = if fam == "large" { &[64, 80, 96] } else { &[3, 4, 6, 8, 12, 16, 24, 32, 48] };
         for &n in ns {
-            for &bits in &[2u32, 4, 16, 64, 128] {
+            for bits in [2u32, 4, 16, 64, 128].into_iter().flat_map(|b| std::iter::repeat_n(b, if fam == "khigh" && n <= 32 { 2 } else { 1 })) {
                 if (n >= 48 && bits >= 128) || (fam == "large" && bits > 16) || (fam == "khigh" && n < 12) {
                     continue;
                 }
@@ -139,7 +149,10 @@ fn corpus(set: &str, seed: u64) -> Vec<ZMat> {
                 let kk = match fam {
                     "kstruct" => 2 + (rng.next() % 3) as usize,
                     "k8" => 2 + (rng.next() % 7) as usize,
-                    "khigh" => 6 + (rng.next() % 3) as usize,
+                    "khigh" => {
+                        khigh += 1;
+                        6 + khigh % 3
+                    }
                     "k9" => 9 + (rng.next() % 3) as usize,
                     _ => 0,
                 };
@@ -185,6 +198,8 @@ fn measure(a: ZMat, c: &Constants) -> Row {
         stage1: None,
         beside: None,
         stage2: None,
+        stage1_none_ok: true,
+        stage2_none_ok: true,
         a: ZMat::zero(0, 0),
         nm: None,
     };
@@ -193,12 +208,10 @@ fn measure(a: ZMat, c: &Constants) -> Row {
     if f.route == Route::Classical || cols != n {
         // (no estimate for the classical route: stage 1 reports none on a
         // shape it can see; stage 2 below on the rest)
-        if cols != n {
-            assert!(s1.units.is_none(), "a non-square input has no estimate");
-        }
+        row.stage1_none_ok = cols == n || s1.units.is_none();
         if let Some((nm, den, det)) = (cols == n).then(|| zmat::inverse_det(&a)).flatten() {
             let inv = invariants_nonsingular(&a, &det.abs(), Some((nm.mul(&zmat::det_rhs(n)), den.clone())));
-            assert!(estimate::stage2_with(&a, &nm, &den, &det, Some(&inv), c).is_none(), "the classical route has no stage 2 estimate");
+            row.stage2_none_ok = estimate::stage2_with(&a, &nm, &den, &det, Some(&inv), c).is_none();
         }
         return row;
     }
@@ -302,11 +315,21 @@ fn refit(train: &[Row]) -> Constants {
 fn log_rows(report: &mut String, path: &std::path::Path, head: &str, set: &str, seed: u64, rows: &[Row]) {
     for r in rows {
         report.push_str(&format!(
-            "{head} {set} {seed} n={} route={:?} k={} attempts={} delta_bits={} actual={} L={} stage1={:?} beside={:?} stage2={:?} vinv={}\n",
-            r.n, r.route, r.k, r.attempts, r.delta_bits, r.actual, r.lower, r.stage1, r.beside, r.stage2, r.vinv
+            "{head} {set} {seed} n={} route={:?} k={} attempts={} delta_bits={} actual={} L={} stage1={:?} beside={:?} stage2={:?} vinv={} stage1_none_ok={} stage2_none_ok={}\n",
+            r.n, r.route, r.k, r.attempts, r.delta_bits, r.actual, r.lower, r.stage1, r.beside, r.stage2, r.vinv, r.stage1_none_ok, r.stage2_none_ok
         ));
     }
     std::fs::write(path, report.as_bytes()).expect("the report");
+}
+
+/// The checks every row of every corpus meets, asserted after its report:
+/// L holds, and the shape contracts.
+fn check_rows(set: &str, seed: u64, rows: &[Row]) {
+    for r in rows {
+        assert!(r.actual >= r.lower, "{set} {seed}: L = {} above the run's {} units", r.lower, r.actual);
+        assert!(r.stage1_none_ok, "{set} {seed}: a non-square input has no estimate (n = {})", r.n);
+        assert!(r.stage2_none_ok, "{set} {seed}: the classical route has no stage 2 estimate (n = {})", r.n);
+    }
 }
 
 #[test]
@@ -334,6 +357,14 @@ fn the_estimate_is_fitted_and_scores_within_its_ceilings() {
     unit.scale = [1.0; 4];
     let train: Vec<Row> = corpus("base", 1).into_iter().map(|a| measure(a, &unit)).collect();
     log_rows(&mut report, &report_path, &head, "base-train", 1, &train);
+    check_rows("base-train", 1, &train);
+    // the training floor: route 2's constants are fitted with at least 10
+    // rows at each of k = 6, 7, 8
+    let counts: Vec<usize> = (0..=K_MAX).map(|kk| train.iter().filter(|r| r.route == Route::Trailing && r.k == kk).count()).collect();
+    println!("base-train seed 1: route 2 rows by k = 2..={K_MAX}: {:?}", &counts[2..]);
+    for (kk, &count) in counts.iter().enumerate().skip(6) {
+        assert!(count >= 10, "the training corpus has {count} route 2 rows at k = {kk}, fewer than 10");
+    }
     let fitted = refit(&train);
     assert_eq!(fitted, estimate::FITTED, "the constants refit at this head differ from estimate::FITTED: refit and record them");
     // the held-out corpora under the recorded constants
@@ -341,14 +372,13 @@ fn the_estimate_is_fitted_and_scores_within_its_ceilings() {
     for (set, seed) in [("base", 2u64), ("base", 3), ("shift", 4)] {
         let rows: Vec<Row> = corpus(set, seed).into_iter().map(|a| measure(a, &c)).collect();
         log_rows(&mut report, &report_path, &head, set, seed, &rows);
-        for r in &rows {
-            assert!(r.actual >= r.lower, "{set} {seed}: L = {} above the run's {} units", r.lower, r.actual);
-        }
+        check_rows(set, seed, &rows);
         // classical runs stage 1 gave an estimate for (square inputs that
-        // turned out singular or with k > K_MAX: unknown before the run)
+        // turned out singular or with k > K_MAX: unknown before the run);
+        // the user saw that estimate, so they are in stage 1's per-op k
         let surprised: Vec<f64> = rows.iter().filter(|r| r.route == Route::Classical && r.stage1.is_some()).map(|r| sym(r.actual, r.stage1.unwrap())).collect();
         if !surprised.is_empty() {
-            println!("{set} seed {seed}: {} classical runs had a stage 1 estimate (unscored; worst ratio {:.1})", surprised.len(), surprised.iter().cloned().fold(0.0, f64::max));
+            println!("{set} seed {seed}: {} classical runs had a stage 1 estimate (worst ratio {:.1})", surprised.len(), surprised.iter().cloned().fold(0.0, f64::max));
         }
         // route 2 by k: V_2^-1 as run against the model's size, both in
         // delta's limbs, and stage 2's k
@@ -377,8 +407,9 @@ fn the_estimate_is_fitted_and_scores_within_its_ceilings() {
             println!("    k={kk}: {} rows, stage 2 k {:.2}; V_2^-1 in delta's limbs: run {run:.2}, model {model:.2}", rk.len(), p90(rk.iter().map(|r| sym(r.actual, r.stage2.unwrap())).collect()));
         }
         let routed: Vec<&Row> = rows.iter().filter(|r| r.route != Route::Classical).collect();
-        let k_op = p90(routed.iter().map(|r| sym(r.actual, r.stage1.unwrap())).collect());
-        let k_op_max = routed.iter().map(|r| sym(r.actual, r.stage1.unwrap())).fold(0.0, f64::max);
+        let shown: Vec<f64> = rows.iter().filter_map(|r| r.stage1.map(|e| sym(r.actual, e))).collect();
+        let k_op_max = shown.iter().cloned().fold(0.0, f64::max);
+        let k_op = p90(shown);
         let r1: Vec<&&Row> = routed.iter().filter(|r| r.route == Route::Cyclic).collect();
         let r2: Vec<&&Row> = routed.iter().filter(|r| r.route == Route::Trailing).collect();
         let k1s1 = p90(r1.iter().map(|r| sym(r.actual, r.stage1.unwrap())).collect());
