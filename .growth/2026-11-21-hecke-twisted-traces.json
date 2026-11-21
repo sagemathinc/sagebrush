@@ -1,0 +1,11 @@
+{
+ "v": 1,
+ "reason": "CuspForms.hecke_matrix by twisted traces (engine/modsym hecke_q, traces: the twisted traces' prime loop, setups, metering and the CRT; the cusp_hecke_matrix op in the engine and the Python binding; Sage mode's route in lib/_sage_modular.py): the engine module grows 109806 B, lib/sage's sources 3484 B (sage.src) and their preparsed form 18093 B (sage.pre), and cli/lib.gen.js 1544 B (CI's size row at 60eb27c0). cli/pyjs.cjs embeds the engine module in base64 and the library, so it grows 147980 B with no other change: generated, not new library code. Each marked +64 over the measured growth; the ceilings of the engine module, sage.src and sage.pre are renewed to their measured sizes + 64.",
+ "bytes": {
+  "cli/lib.gen.js": 1608,
+  "cli/pyjs.cjs": 148044,
+  "engine/lib/sage.pre": 18157,
+  "engine/lib/sage.src": 3548,
+  "engine/sagebrush-engine.wasm": 109870
+ }
+}
