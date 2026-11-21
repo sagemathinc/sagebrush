@@ -507,22 +507,14 @@ fn det_multimodular(a: &ZMat) -> BigInt {
 
 /// The determinant of a square integer matrix.
 pub fn det(a: &ZMat) -> BigInt {
-    assert_eq!(a.rows, a.cols, "determinant of a non-square matrix");
-    let n = a.rows;
-    if n <= 6 || (n <= 12 && a.max_bits() > 200) {
-        return det_bareiss(a);
-    }
-    let h = hadamard_log2(a);
-    if h == f64::NEG_INFINITY {
-        return BigInt::zero();
-    }
-    // few primes, or a small matrix: plain multimodular
-    if h < 62.0 * 4.0 || n < 40 {
-        return det_crt(a, &BigInt::one(), h);
-    }
-    // a random right-hand side gives a large divisor of det a
+    det_with_solve(a).0
+}
+
+/// The fixed right-hand side of [`det_with_solve`]'s solve: n entries in
+/// [-100, 100] from a fixed sequence, so results are reproducible.
+pub fn det_rhs(n: usize) -> ZMat {
     let mut seed = 0x2545f4914f6cdd1du64;
-    let b = ZMat {
+    ZMat {
         rows: n,
         cols: 1,
         d: (0..n)
@@ -533,10 +525,33 @@ pub fn det(a: &ZMat) -> BigInt {
                 BigInt::from((seed % 201) as i64 - 100)
             })
             .collect(),
-    };
-    match solve(a, &b) {
-        None => BigInt::zero(),
-        Some((_, den)) => det_crt(a, &den, h - den.bits() as f64 + 1.0),
+    }
+}
+
+/// [`det`], and the solve a x = b (b = [`det_rhs`]) it made on the way when
+/// it made one: on large matrices the solve's denominator, a large divisor
+/// of det a, leaves few primes for the rest.  The Smith form reuses it.
+pub fn det_with_solve(a: &ZMat) -> (BigInt, Option<(ZMat, BigInt)>) {
+    assert_eq!(a.rows, a.cols, "determinant of a non-square matrix");
+    let n = a.rows;
+    if n <= 6 || (n <= 12 && a.max_bits() > 200) {
+        return (det_bareiss(a), None);
+    }
+    let h = hadamard_log2(a);
+    if h == f64::NEG_INFINITY {
+        return (BigInt::zero(), None);
+    }
+    // few primes, or a small matrix: plain multimodular
+    if h < 62.0 * 4.0 || n < 40 {
+        return (det_crt(a, &BigInt::one(), h), None);
+    }
+    // a random right-hand side gives a large divisor of det a
+    match solve(a, &det_rhs(n)) {
+        None => (BigInt::zero(), None),
+        Some((x, den)) => {
+            let d = det_crt(a, &den, h - den.bits() as f64 + 1.0);
+            (d, Some((x, den)))
+        }
     }
 }
 
