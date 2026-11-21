@@ -969,6 +969,23 @@ def _solve(A, B):
     m, n = A.shape
     if B.shape[0] != m:
         raise _err("Matrix dimensions must agree.", "MATLAB:dimagree")
+    if m == n and A.dtype == np.float64 and B.dtype == np.float64:
+        # (mldivide's own solve (src/runtime/numpy_linalg.ts mldivide): on engine/nd, nd_solve's MATLAB mode, its
+        # structure pass (diagonal, triangular, Cholesky or LU) and rcond from the factors it solved with, at every
+        # size; elsewhere the same dispatch for a singular A and LU with the same estimate. A singular A's X is
+        # MATLAB's, Inf and NaN included: substitution with no step skipped, and a diagonal A by forward
+        # substitution ([0 0; 0 0] \ [1; 1] is [Inf; NaN], [1 0; 0 0] \ [1; 1] is [1; Inf]))
+        import _nplinalg
+        B2 = B.reshape((m, -1))
+        X, code, _col, _shape, rc = _nplinalg.mldivide(A, B2)
+        if code == 1 or code == 4:
+            if code == 4:
+                _rcond_warn(rc)
+            return X.reshape(B.shape)
+        if code == 2:
+            warning_("Matrix is singular to working precision.", "MATLAB:singularMatrix")
+            return X.reshape(B.shape)
+        # (code 3, an Inf or NaN in A or B: nothing computed there; the paths below, as before)
     if m == n and n > 1 and not np.any(A - np.diag(np.diag(A))):
         # (a diagonal A: each row divided by its diagonal element, singular or not, as mldivide's
         # page shows: [1 0; 0 0] \ [1; 1] is [1; Inf], where elimination would give NaN for 1)
@@ -996,26 +1013,6 @@ def _solve(A, B):
             else:
                 _rcond_warning(A)
             return X
-        if A.dtype == np.float64 and B.dtype == np.float64:
-            # (mldivide's own solve (src/runtime/numpy_linalg.ts mldivide): on engine/nd, nd_solve's MATLAB mode,
-            # its structure pass, and rcond from the factors it solved with, at every size; elsewhere LU and the
-            # same estimate)
-            import _nplinalg
-            B2 = B.reshape((m, -1))
-            X, code, _col, _shape, rc = _nplinalg.mldivide(A, B2)
-            if code == 1 or code == 4:
-                if code == 4:
-                    _rcond_warn(rc)
-                return X.reshape(B.shape)
-            if code == 2:
-                # (MATLAB's result for a singular A is its LU's, with the Inf and NaN division by the zero pivot
-                # gives: computed here as before, not taken from the module, whose triangular solves skip a zero
-                # entry's division as the reference BLAS does, so a consistent singular system's 0/0 stays 0:
-                # [1 2; 3 6] \ [1; 3] gave [1; 0] where MATLAB gives [NaN; NaN]. Until engine/nd's fix;
-                # meanwhile a large exactly singular system pays for this interpreted O(n^3) LU.)
-                warning_("Matrix is singular to working precision.", "MATLAB:singularMatrix")
-                return _lu_solve_through(A, B2).reshape(B.shape)
-            # (code 3, an Inf or NaN in A or B: nothing computed there; as before, below)
         try:
             X = np.linalg.solve(A, B)
         except np.linalg.LinAlgError:

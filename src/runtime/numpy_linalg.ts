@@ -1433,7 +1433,7 @@ newBuiltinModule("_nplinalg", (m) => {
   });
   fn("mldivide", (a: NDArray, b: NDArray) => {
     // MATLAB's A \ B for the real square A and the 2-D B (lib/_matlab.py _solve): (X, code, column, structure,
-    // rcond) with code 1 solved, 2 singular (X None on the TypeScript path, which leaves it to the caller), 3 an
+    // rcond) with code 1 solved, 2 singular (X holds MATLAB's Inf and NaN), 3 an
     // Inf or NaN in A or B (nothing computed, X None), 4 nearly singular (0 < rcond < eps). On engine/nd at every
     // size (nd_solve's MATLAB mode: the structure pass, then rcond from its own factors); elsewhere LU and the
     // same estimate (gecon above), structure 0. (Memory: as solve's, and on engine/nd the MATLAB mode's work,
@@ -1460,8 +1460,68 @@ newBuiltinModule("_nplinalg", (m) => {
     }
     for (let i = 0; i < n * n; i++) if (!isFinite(A[i])) return tuple([null, 3, 0, 0, NaN]);
     for (let i = 0; i < n * bc; i++) if (!isFinite(Bv[i])) return tuple([null, 3, 0, 0, NaN]);
+    // (a diagonal or triangular A, as nd_solve's structure pass sees it: a zero on its diagonal is solved by
+    // substitution with no step skipped, MATLAB's Inf and NaN; a nonsingular diagonal by division, with its rcond
+    // exactly. Other triangles go to LU below: the same values within the accuracy contract)
+    let upper = true, lower = true;
+    for (let i = 0; i < n && (upper || lower); i++) for (let j = 0; j < n; j++) {
+      if (j < i && A[i * n + j] !== 0) upper = false;
+      if (j > i && A[i * n + j] !== 0) lower = false;
+    }
+    let zeroDiag = false;
+    for (let i = 0; i < n; i++) if (A[i * n + i] === 0) zeroDiag = true;
+    if ((upper || lower) && zeroDiag) {
+      const X = Float64Array.from(Bv);
+      for (let j = 0; j < bc; j++) {
+        if (lower) {
+          // (a diagonal A too: forward substitution, so 0 * Inf reaches the later rows)
+          for (let k = 0; k < n; k++) {
+            X[k * bc + j] /= A[k * n + k];
+            const xk = X[k * bc + j];
+            for (let i = k + 1; i < n; i++) X[i * bc + j] -= xk * A[i * n + k];
+          }
+        } else {
+          for (let k = n - 1; k >= 0; k--) {
+            X[k * bc + j] /= A[k * n + k];
+            const xk = X[k * bc + j];
+            for (let i = 0; i < k; i++) X[i * bc + j] -= xk * A[i * n + k];
+          }
+        }
+      }
+      return tuple([out(X, [n, bc]), 2, 0, upper && lower ? 1 : upper ? 2 : 3, 0]);
+    }
+    if (upper && lower) {
+      let lo = Infinity, hi = 0;
+      for (let i = 0; i < n; i++) {
+        const v = Math.abs(A[i * n + i]);
+        if (v < lo) lo = v;
+        if (v > hi) hi = v;
+      }
+      const X = new Float64Array(n * bc);
+      for (let i = 0; i < n; i++) for (let j = 0; j < bc; j++) X[i * bc + j] = Bv[i * bc + j] / A[i * n + i];
+      const rc = lo / hi;
+      return tuple([out(X, [n, bc]), rc > 0 && rc < 2.220446049250313e-16 ? 4 : 1, 0, 1, rc]);
+    }
     const L = lu(A, n);
-    if (L.singular) return tuple([null, 2, 0, 0, 0]);
+    if (L.singular) {
+      // (a zero pivot: P, then L^-1 and U^-1 by column-oriented substitution with no step skipped, MATLAB's Inf and
+      // NaN; luSolve skips a zero x_k's update, so [1 2; 3 6] \ [1; 3] would give [1; 0] where MATLAB gives
+      // [NaN; NaN])
+      const a = L.lu, X = new Float64Array(n * bc);
+      for (let i = 0; i < n; i++) for (let j = 0; j < bc; j++) X[i * bc + j] = Bv[L.piv[i] * bc + j];
+      for (let j = 0; j < bc; j++) {
+        for (let k = 0; k < n; k++) {
+          const xk = X[k * bc + j];
+          for (let i = k + 1; i < n; i++) X[i * bc + j] -= xk * a[i * n + k];
+        }
+        for (let k = n - 1; k >= 0; k--) {
+          X[k * bc + j] /= a[k * n + k];
+          const xk = X[k * bc + j];
+          for (let i = 0; i < k; i++) X[i * bc + j] -= xk * a[i * n + k];
+        }
+      }
+      return tuple([out(X, [n, bc]), 2, 0, 0, 0]);
+    }
     let anorm = 0;
     for (let j = 0; j < n; j++) {
       let s = 0;
