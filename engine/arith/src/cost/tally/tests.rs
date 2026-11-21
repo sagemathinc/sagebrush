@@ -246,12 +246,19 @@ fn bigint_helpers_pinned() {
     assert_eq!(only(bigdiv_units(2, 4), Family::Div), 4);
     assert_eq!(only(bigeuclid_units(10, 4), Family::Gcd), 56);
     assert_eq!(only(bigeuclid_units(4, 4), Family::Gcd), 8);
-    assert_eq!(only(bigmul_units(usize::MAX, usize::MAX), Family::MulSchool), u64::MAX);
-    assert_eq!(only(bigeuclid_units(usize::MAX, 2), Family::Gcd), u64::MAX);
+    // (the extremes' values, computed in u128 from usize::MAX and capped at
+    // u64::MAX, so they hold for a 32-bit usize as for a 64-bit one)
+    let big = usize::MAX as u128;
+    let cap = |x: u128| x.min(u64::MAX as u128) as u64;
+    assert_eq!(only(bigmul_units(usize::MAX, usize::MAX), Family::MulSchool), cap(big * big));
+    // (la = MAX, lb = 2: a quotient of MAX - 1 limbs, twice by 2)
+    assert_eq!(only(bigeuclid_units(usize::MAX, 2), Family::Gcd), cap(cap(2 * (big - 1)) as u128 + cap(2 * (big - 1)) as u128));
     // the extremes: saturated, never a panic (a zero divisor length counts
     // as one limb)
-    assert_eq!(only(bigdiv_units(usize::MAX, 0), Family::Div), u64::MAX);
-    assert_eq!(only(bigeuclid_units(usize::MAX, 0), Family::Gcd), u64::MAX);
+    assert_eq!(only(bigdiv_units(usize::MAX, 0), Family::Div), cap(big + 1));
+    // (the quotient's usize length saturates at MAX; the product by 0 limbs
+    // is 0: the division's count alone)
+    assert_eq!(only(bigeuclid_units(usize::MAX, 0), Family::Gcd), cap(big + 1));
     assert_eq!(only(bigdiv_units(0, 0), Family::Div), 1);
     assert_eq!(only(bigeuclid_units(0, 0), Family::Gcd), 1);
     assert_eq!(only(bigmul_units(usize::MAX, 0), Family::MulSchool), 0);
