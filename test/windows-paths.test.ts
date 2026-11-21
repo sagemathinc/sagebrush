@@ -12,10 +12,11 @@ import { pathJoin } from "../src/compile";
 // import from the embedded library failed, a folder of the user's with a library package's name was taken for a
 // namespace package instead, and --sage's startup import raised as an unhandled rejection.
 
-// (path.join as Windows' acts on the runtime's paths, on this host: a virtual path it joins with backslashes, as
-// path.win32.join does; a real one (this host's) correctly, as Windows' join does Windows paths.  path.posix stays
-// POSIX; on a POSIX host it is path itself, so it is copied first.  The library embedded as the single-file build
-// embeds it, globalThis.__PYJS_LIB__, its files read from lib/; SB_DROP leaves one out)
+// (path.join as Windows' acts on the runtime's paths, on any host: a virtual path it joins with backslashes, as
+// path.win32.join does; a real one with this host's own join, as Windows' join does Windows paths (on Windows they are
+// the same function).  path.posix is kept as the host has it, copied first: on a POSIX host it is path itself, whose
+// join is replaced.  The library embedded as the single-file build embeds it, globalThis.__PYJS_LIB__, its files read
+// from lib/; SB_DROP leaves one out)
 const PRELOAD = `
 const fs = require("fs"), path = require("path");
 const lib = {};
@@ -23,9 +24,9 @@ const walk = (d, rel) => { for (const e of fs.readdirSync(d, { withFileTypes: tr
 walk(process.env.SB_LIB, "");
 if (process.env.SB_DROP) delete lib[process.env.SB_DROP];
 globalThis.__PYJS_LIB__ = lib;
-const posix = Object.freeze({ ...path });
-path.posix = posix;
-path.join = (...parts) => (typeof parts[0] === "string" && parts[0].startsWith("/$pyjs") ? path.win32.join(...parts) : posix.join(...parts));
+const hostJoin = path.join;
+path.posix = Object.freeze({ ...path.posix });
+path.join = (...parts) => (typeof parts[0] === "string" && parts[0].startsWith("/$pyjs") ? path.win32.join(...parts) : hostJoin(...parts));
 `;
 const CLI = path.join(__dirname, "../src/cli.js");
 const LIB = path.join(__dirname, "../../lib");
@@ -48,7 +49,8 @@ test("pathJoin: a virtual path is joined as POSIX, a real one by the system's jo
   const p = require("node:path");
   const saved = { join: p.join, posix: p.posix, sep: p.sep };
   try {
-    p.posix = Object.freeze({ ...p });
+    // (path.posix as the host has it, copied first: on a POSIX host it is path itself, whose join is replaced)
+    p.posix = Object.freeze({ ...p.posix });
     p.join = p.win32.join;
     p.sep = p.win32.sep;
     // (an embedded module, a package's __init__, an optional set's mount)

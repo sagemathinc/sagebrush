@@ -1447,6 +1447,8 @@ jobs:
           bun-version: "1.4.4"
       - run: pnpm install --frozen-lockfile
       - run: pnpm run build
+      # (the Windows paths rows, here on Windows itself: not only under the test's own simulation)
+      - run: node --test --test-timeout=300000 dist/test/windows-paths.test.js
       - run: node scripts/build-cli.mjs
       - name: "an import from the embedded library, a namespace package of the user's, --sage"
         run: |
