@@ -37,11 +37,11 @@ test("cusp_hecke_matrix in WebAssembly: matrices, units and statistics", () => {
   // T_2 = -2 on S_2(11)
   const h = hecke(e, 37, 2, 3, 8);
   assert.equal(h.dim, 2);
-  assert.deepEqual(h.units.map(Number), [577, 0, 79, 0, 112, 709, 3922, 0, 0, 0]);
+  assert.deepEqual(h.units.map(Number), [598, 0, 82, 0, 114, 761, 3922, 0, 0, 0]);
   assert.equal(h.stats.e, 1);
   assert.deepEqual(h.stats.rejected, { dimension: 0, degree: 0, separation: 0, minor: 0 });
   const h11 = hecke(e, 11, 2, 2, 4);
-  assert.deepEqual(h11.units.map(Number), [90, 0, 44, 0, 10, 133, 1194, 0, 0, 0]);
+  assert.deepEqual(h11.units.map(Number), [96, 0, 47, 0, 12, 146, 1194, 0, 0, 0]);
   assert.deepEqual([h11.matrix, h11.den], [[["-2"]], "1"]);
   // a square factor: 36 = 6^2, e = lambda(6) = 2
   const h36 = hecke(e, 36, 2, 5, 14);

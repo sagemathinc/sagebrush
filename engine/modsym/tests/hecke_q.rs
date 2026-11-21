@@ -105,9 +105,9 @@ fn the_units_are_pinned() {
     let fam = [MulSchool, MulNtt, Div, DivNewton, Gcd, Move, ModArith, AddSub, Walk, Other];
     assert!(fam.iter().enumerate().all(|(i, &f)| f as usize == i));
     for (n, k, p, want) in [
-        (11u64, 2usize, 2u64, [90u64, 0, 44, 0, 10, 133, 1194, 0, 0, 0]),
-        (37, 2, 3, [577, 0, 79, 0, 112, 709, 3922, 0, 0, 0]),
-        (60, 4, 5, [932551, 0, 11822, 0, 17743, 98980, 438616, 294, 0, 0]),
+        (11u64, 2usize, 2u64, [96u64, 0, 47, 0, 12, 146, 1194, 0, 0, 0]),
+        (37, 2, 3, [598, 0, 82, 0, 114, 761, 3922, 0, 0, 0]),
+        (60, 4, 5, [934952, 0, 11825, 0, 17745, 104380, 438616, 294, 0, 0]),
     ] {
         let prec = sturm_bound(n, k).unwrap() as usize + 2;
         let got = units_of(|| cusp_hecke_matrix(n, k, p, prec, false, &factor, &mut Free).unwrap());
@@ -195,4 +195,35 @@ fn the_units_are_the_same_on_one_thread_and_many() {
     assert_eq!(one, four);
     assert_eq!(s1, s4);
     assert!(one.iter().sum::<u64>() > 0);
+}
+
+/// The new subspace's dimension (the admission's closed form, through the
+/// old forms' multiplicities beta) against the newspace computation's.
+#[test]
+fn the_new_dimension_agrees_with_the_newspace() {
+    use sagebrush_modsym::general::Character;
+    use sagebrush_modsym::hecke_q::cusp_dim;
+    use sagebrush_modsym::newspace::newspace_orbits;
+    let factor = |f: &[BigInt]| sagebrush_poly::factor(f).1;
+    for n in 1..=72u64 {
+        for k in [2usize, 4, 6] {
+            let res = newspace_orbits(n, k, &Character::trivial(n), &factor).unwrap();
+            assert_eq!(cusp_dim(n, k, true), res.dim as u64, "N={} k={}", n, k);
+        }
+    }
+}
+
+/// L from its definition at known dimensions: work d^2, bytes 16 d^2 (C's
+/// rationals, two integers of 8 bytes) + 8 d prec (W).
+#[test]
+fn the_lower_bound_is_its_definition() {
+    use sagebrush_modsym::hecke_q::cusp_hecke_lower;
+    // 389.2: d = 32, the Sturm bound 65, prec 67; S_2(389) is all new
+    assert_eq!(cusp_hecke_lower(389, 2, 67, false), (32 * 32, 16 * 32 * 32 + 8 * 32 * 67));
+    assert_eq!(cusp_hecke_lower(389, 2, 67, true), (32 * 32, 16 * 32 * 32 + 8 * 32 * 67));
+    // 60.4: d = 30, of which 2 new
+    assert_eq!(cusp_hecke_lower(60, 4, 50, false), (30 * 30, 16 * 30 * 30 + 8 * 30 * 50));
+    assert_eq!(cusp_hecke_lower(60, 4, 50, true), (2 * 2, 16 * 2 * 2 + 8 * 2 * 50));
+    // 11.2: d = 1
+    assert_eq!(cusp_hecke_lower(11, 2, 4, false), (1, 16 + 8 * 4));
 }

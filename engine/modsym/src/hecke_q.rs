@@ -93,7 +93,7 @@ type Rows = (Vec<Vec<BigInt>>, Vec<Vec<BigInt>>, HeckeTraceStats);
 fn rows(n: u64, k: usize, p: u64, prec: usize, new_only: bool, levels: &[(u64, NewspaceOrbits)]) -> Result<Rows, String> {
     use sagebrush_arith::cost::{bigmul_units, Family, Local};
     use sagebrush_arith::zmat::{copy_units, limbs};
-    let pk = BigInt::from(p).pow(k as u32 - 1);
+    let pk = BigInt::from(p).pow(u32::try_from(k - 1).map_err(|_| "the weight must be below 2^31")?);
     let lpk = limbs(&pk);
     let mut stats = HeckeTraceStats::default();
     let mut local = Local::new();
@@ -269,6 +269,8 @@ pub fn cusp_hecke_matrix(n: u64, k: usize, p: u64, prec: usize, new_only: bool, 
     if p >= crate::linalg::MAX_HECKE_PRIME || !is_prime(p) {
         return Err(format!("{} must be a prime below 2^30", p));
     }
+    // (k < 2^31, so k - 1 is a u32 exponent below)
+    crate::check_weight(k)?;
     let empty = CuspHecke { dim: 0, basis: vec![], pivots: vec![], matrix: vec![], den: BigInt::from(1), stats: HeckeTraceStats::default() };
     if k < 2 || k % 2 == 1 {
         // (no cusp forms of odd weight for the trivial character)
@@ -309,8 +311,15 @@ pub fn cusp_hecke_matrix(n: u64, k: usize, p: u64, prec: usize, new_only: bool, 
 /// solve (zmat).  Both over one positive common denominator.
 fn solve(w: &[Vec<BigInt>], tw: &[Vec<BigInt>]) -> Result<CuspHecke, String> {
     use num_integer::Integer;
-    use sagebrush_arith::zmat::{self, ZMat};
+    use sagebrush_arith::cost::{bigdiv_units, biggcd_units, bigmul_units, Family, Local};
+    use sagebrush_arith::zmat::{self, copy_units, limbs, ZMat};
+    // (its own work, in a Local flushed at its Stop checks: the copies into
+    // and out of zmat (Move, a unit per limb), the lcm of the denominators
+    // (their gcd, the quotient and the product), the two quotients, and a
+    // product per entry scaled; zmat counts its rref, select and solve)
+    let mut local = Local::new();
     let d = w.len();
+    local.n(Family::Move, w.iter().map(|r| copy_units(r)).sum());
     let wm = ZMat::from_rows(w.to_vec());
     let (e, den_e, piv) = zmat::rref(&wm);
     if piv.len() != d {
@@ -320,14 +329,85 @@ fn solve(w: &[Vec<BigInt>], tw: &[Vec<BigInt>]) -> Result<CuspHecke, String> {
     }
     let all: Vec<usize> = (0..d).collect();
     let wj = wm.select(&all, &piv);
+    local.n(Family::Move, tw.iter().map(|r| copy_units(r)).sum());
     let twj = ZMat::from_rows(tw.to_vec()).select(&all, &piv);
     let (c, den_c) = zmat::solve(&wj, &twj).ok_or("internal error: W_J is singular at its own pivots")?;
-    let den = den_e.lcm(&den_c);
+    let (le, lc) = (limbs(&den_e), limbs(&den_c));
+    let g = den_e.gcd(&den_c);
+    local.add(biggcd_units(le, lc));
+    local.add(bigdiv_units(le, limbs(&g)));
+    local.add(bigmul_units(le, lc));
+    let den = &den_e / &g * &den_c;
+    let ld = limbs(&den);
+    local.add(bigdiv_units(ld, le));
+    local.add(bigdiv_units(ld, lc));
     let (fe, fc) = (&den / &den_e, &den / &den_c);
-    let scale = |m: Vec<Vec<BigInt>>, f: &BigInt| -> Vec<Vec<BigInt>> {
-        m.into_iter().map(|r| r.into_iter().map(|x| x * f).collect()).collect()
+    let scale = |m: Vec<Vec<BigInt>>, f: &BigInt, local: &mut Local| -> Vec<Vec<BigInt>> {
+        let lf = limbs(f);
+        m.into_iter().map(|r| {
+            local.flush();
+            sagebrush_interrupt::check();
+            local.n(Family::Move, copy_units(&r));
+            let out: Vec<BigInt> = r.into_iter().map(|x| {
+                local.add(bigmul_units(limbs(&x), lf));
+                x * f
+            }).collect();
+            out
+        }).collect()
     };
-    let basis = scale(e.to_rows().into_iter().take(d).collect(), &fe);
-    let matrix = scale(c.to_rows(), &fc);
+    let basis = scale(e.to_rows().into_iter().take(d).collect(), &fe, &mut local);
+    let matrix = scale(c.to_rows(), &fc, &mut local);
     Ok(CuspHecke { dim: d, basis, pivots: piv, matrix, den, stats: HeckeTraceStats::default() })
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use sagebrush_arith::cost::{bigdiv_units, biggcd_units, bigmul_units, tallied, Family, Units};
+    use sagebrush_arith::zmat::{self, ZMat};
+
+    fn delta(after: Units, before: Units) -> Units {
+        let mut d = Units::default();
+        for (i, x) in d.0.iter_mut().enumerate() {
+            *x = after.0[i].wrapping_sub(before.0[i]);
+        }
+        d
+    }
+
+    /// solve's own units, pinned: all of its units less zmat's (the same
+    /// rref, selects and solve, measured apart) are its copies, its lcm and
+    /// quotients, and a product per entry scaled, counted here by hand on
+    /// one-limb entries.
+    #[test]
+    fn solve_counts_its_own_work() {
+        let big = |v: &[i64]| v.iter().map(|&x| BigInt::from(x)).collect::<Vec<_>>();
+        // W: 2 rows of 4 (rank 2, pivots 0 and 1, rref denominator 2), and
+        // T W, whose solve has denominator 2 too
+        let w = vec![big(&[2, 1, 3, 1]), big(&[0, 2, 1, 5])];
+        let tw = vec![big(&[1, 0, 2, 4]), big(&[3, 1, 0, 1])];
+        let before = tallied();
+        let h = solve(&w, &tw).unwrap();
+        let all = delta(tallied(), before);
+        let before = tallied();
+        let wm = ZMat::from_rows(w.clone());
+        let (_, den_e, piv) = zmat::rref(&wm);
+        let rows: Vec<usize> = (0..2).collect();
+        let wj = wm.select(&rows, &piv);
+        let twj = ZMat::from_rows(tw.clone()).select(&rows, &piv);
+        let (_, den_c) = zmat::solve(&wj, &twj).unwrap();
+        let theirs = delta(tallied(), before);
+        let mut mine = Units::default();
+        for (a, b) in mine.0.iter_mut().zip(all.0.iter().zip(theirs.0)) {
+            *a = b.0 - b.1;
+        }
+        assert!(den_e.bits() < 64 && den_c.bits() < 64 && h.den.bits() < 64, "one-limb denominators");
+        // the copies in (8 + 8 limbs) and out (E's 8 entries, C's 4)
+        assert_eq!(mine.get(Family::Move), 8 + 8 + 8 + 4);
+        // the lcm's gcd; its quotient and the two scale factors; its product
+        // and a product per entry (12)
+        assert_eq!(mine.get(Family::Gcd), biggcd_units(1, 1).get(Family::Gcd));
+        assert_eq!(mine.get(Family::Div), 3 * bigdiv_units(1, 1).get(Family::Div));
+        assert_eq!(mine.get(Family::MulSchool), 13 * bigmul_units(1, 1).get(Family::MulSchool));
+        assert_eq!(mine.get(Family::ModArith), 0);
+    }
 }

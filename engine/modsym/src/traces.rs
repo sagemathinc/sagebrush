@@ -17,7 +17,6 @@
 
 use crate::dirichlet::DirichletGroup;
 use crate::exact::{factor, is_prime};
-use crate::orbits::Factorer;
 use crate::general::{heilbronn_for, mul, powmod, primes_one_mod, root_of_unity, Character, GeneralSpace};
 pub use crate::newspace::Reject;
 use crate::general_exact::{crt, crt_units, invert_mod_c};
@@ -517,11 +516,18 @@ fn twisted_mod(n: u64, k: usize, eps: &Character, res: &NewspaceOrbits, lv: &[Le
     Ok(Ok((out, combined, seeded)))
 }
 
+/// k - 1 as a power's exponent, for 2 <= k < 2^31 (check_weight, which
+/// orbit_hecke_traces and orbit_traces check first; the bounds' own callers
+/// pass a checked weight).
+fn weight_exponent(k: usize) -> u32 {
+    u32::try_from(k - 1).expect("the weight is checked below 2^31")
+}
+
 /// floor(sqrt(n^(k-1))) + 1, times sigma0(n): above |a_n| for a newform of
 /// weight k (Deligne).
-pub fn coefficient_bound(n: u64, k: usize) -> BigUint {
+pub(crate) fn coefficient_bound(n: u64, k: usize) -> BigUint {
     let s0: u64 = factor(n).iter().map(|&(_, e)| u64::from(e) + 1).product();
-    (BigUint::from(n).pow(k as u32 - 1).sqrt() + 1u32) * s0
+    (BigUint::from(n).pow(weight_exponent(k)).sqrt() + 1u32) * s0
 }
 
 /// The bound on |twisted traces| for orbits of dimension at most `dim`:
@@ -529,7 +535,7 @@ pub fn coefficient_bound(n: u64, k: usize) -> BigUint {
 /// (|Tr(a_m a_q a_n)| <= dim A_m A_q A_n, and so for R without A_q, as
 /// A_q >= 1),
 /// and the number of CRT primes it takes (each prime is above 2^30).
-pub fn hecke_traces_primes(k: usize, dim: usize, len: usize, q: u64) -> (BigUint, u64) {
+pub(crate) fn hecke_traces_primes(k: usize, dim: usize, len: usize, q: u64) -> (BigUint, u64) {
     // A bounds every coefficient_bound(n, k), n <= len: floor(sqrt(len^(k-1)))
     // + 1 times the largest sigma0(n), n <= len, from a sieve polled for
     // Stop (each n's own bound, by trial, took O(len^2) with no check)
@@ -543,7 +549,7 @@ pub fn hecke_traces_primes(k: usize, dim: usize, len: usize, q: u64) -> (BigUint
         }
     }
     let s0 = u64::from(sigma0.iter().copied().max().unwrap_or(0).max(1));
-    let a = (BigUint::from(len.max(1) as u64).pow(k as u32 - 1).sqrt() + 1u32) * s0;
+    let a = (BigUint::from(len.max(1) as u64).pow(weight_exponent(k)).sqrt() + 1u32) * s0;
     let need = &a * &a * coefficient_bound(q, k) * (dim as u64) * 2u32;
     let c = need.bits().div_ceil(30).max(1);
     (need, c)
@@ -643,6 +649,7 @@ pub(crate) fn orbit_hecke_traces_from(n: u64, k: usize, eps: &Character, res: &N
     if !is_prime(q) {
         return Err(format!("{} is not prime", q));
     }
+    crate::check_weight(k)?;
     if eps.order != 1 {
         return Err("twisted traces: trivial character only".into());
     }
@@ -778,7 +785,7 @@ pub fn trace_coefficient_bound(k: usize, dim: usize, bound: usize) -> BigUint {
             sagebrush_interrupt::check_coarse();
         }
         let s0 = u64::from(sigma0[nn as usize]);
-        let b = (BigUint::from(nn).pow(k as u32 - 1)).sqrt() + 1u32;
+        let b = (BigUint::from(nn).pow(weight_exponent(k))).sqrt() + 1u32;
         let x = b * s0 * (dim as u64) * 2u32;
         if x > need {
             need = x;
@@ -792,6 +799,7 @@ pub fn orbit_traces(n: u64, k: usize, eps: &Character, res: &NewspaceOrbits, bou
     if bound as u64 >= crate::linalg::MAX_HECKE_PRIME {
         return Err(format!("trace bound {} must be below 2^30", bound));
     }
+    crate::check_weight(k)?;
     if res.orbits.is_empty() {
         return Ok(vec![]);
     }
@@ -871,6 +879,7 @@ pub fn orbit_traces(n: u64, k: usize, eps: &Character, res: &NewspaceOrbits, bou
 #[doc(hidden)]
 pub mod pins {
     use super::*;
+    use crate::orbits::Factorer;
 
     pub struct Fixture {
         n: u64,
