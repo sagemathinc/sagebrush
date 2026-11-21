@@ -26,6 +26,13 @@ declare const __SB_NO_SYNC__: boolean | undefined;
 declare const __SB_LATEX__: boolean | undefined;
 const NO_SYNC = typeof __SB_NO_SYNC__ !== "undefined" && __SB_NO_SYNC__;
 
+/** Empty Trash's question.  In the desktop app, whose Trash is a folder on the computer (.Trash in Sagebrush's
+ * folder), it says that everything in it goes, a file changed by another program while it was there too. */
+export const emptyTrashQuestion = (desktop: boolean) =>
+  desktop
+    ? "Delete everything in Trash for good, including files changed outside Sagebrush while they were in Trash? This can't be undone: their histories and old versions go too."
+    : "Delete everything in Trash for good? This can't be undone: their histories and old versions go too.";
+
 export type BrowserHost = {
   ws: Workspace;
   /** The document open in the page, if any: known by its id, wherever it is
@@ -683,7 +690,7 @@ export function mountBrowser(container: HTMLElement, host: BrowserHost): Browser
     paintSel();
   }
   async function emptyAll() {
-    if (!confirm("Delete everything in Trash for good? This can't be undone: their histories and old versions go too.")) return;
+    if (!confirm(emptyTrashQuestion((window as any).__SB_DESKTOP_APP__ === true))) return;
     try { const n = await w.emptyTrash(); say(`${n} item${n === 1 ? "" : "s"} deleted for good`); } catch (e) { fail(e); }
     refresh();
   }
