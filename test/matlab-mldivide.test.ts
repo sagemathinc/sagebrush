@@ -68,6 +68,9 @@ for (const [name, noWasm] of BACKENDS) {
       ["[1 2;2 4]", "[1;2]", "[NaN NaN]"], ["[1 2;3 6]", "[1;3]", "[NaN NaN]"], ["[2 4;1 2]", "[1;2]", "[-Inf Inf]"],
       ["[1 2;0 0]", "[1;1]", "[-Inf Inf]"], ["[1 2;0 0]", "[1;0]", "[NaN NaN]"], ["[0 1;0 1]", "[1;1]", "[NaN 1]"],
       ["[0 0;0 0]", "[1;1]", "[Inf NaN]"], ["[0 0;0 0]", "[0;0]", "[NaN NaN]"], ["[-0 1;0 1]", "[0;1]", "[Inf 1]"],
+      // (lower triangles, the corpus addendum of the same day: no zero step is skipped there either)
+      ["[0 0;1 1]", "[0;1]", "[NaN NaN]"], ["[0 0;1 1]", "[1;1]", "[Inf -Inf]"], ["[1 0;1 0]", "[1;1]", "[1 NaN]"],
+      ["[0 0 0;1 1 0;1 1 1]", "[0;1;1]", "[NaN NaN NaN]"],
     ];
     const src = rows.map(([a, b]) => `lastwarn(''); x = ${a} \\ ${b}; [~, id] = lastwarn(); fprintf('%s %s\\n', mat2str(x'), id);`).join("\n");
     const r = run(src, noWasm);

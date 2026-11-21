@@ -673,7 +673,7 @@ mod tests {
     }
 
     /// Singular A in MATLAB mode, as MATLAB R2026b Update 2 prints them (the observed MATLAB corpus of
-    /// 2026-11-21, values and warnings only): no step of the substitutions is skipped, so 0 / 0 is NaN and
+    /// 2026-11-21 and its addendum, values and warnings only): no step of the substitutions is skipped, so 0 / 0 is NaN and
     /// 0 * Inf is NaN where the reference BLAS's skip of a zero x_k would leave 0. Each derivation below is
     /// partial-pivoting LU, or the triangular or diagonal route, in IEEE arithmetic. On every kernel.
     #[test]
@@ -681,7 +681,7 @@ mod tests {
         let nan = f64::NAN;
         let inf = f64::INFINITY;
         // (A row-major for reading, B, the X MATLAB printed, the structure taken)
-        let cases: [([f64; 4], [f64; 2], [f64; 2], Structure); 9] = [
+        let cases: [([f64; 4], [f64; 2], [f64; 2], Structure); 12] = [
             // rows swap, U = [2 4; 0 0], y = [2; 0]: x2 = 0/0, then x1 NaN (Cholesky fails first)
             ([1.0, 2.0, 2.0, 4.0], [1.0, 2.0], [nan, nan], Structure::SpdFallback),
             // rows swap, y2 = 1 - (1/3) * 3 = 0 exactly: 0/0
@@ -699,6 +699,12 @@ mod tests {
             ([0.0, 0.0, 0.0, 0.0], [0.0, 0.0], [nan, nan], Structure::Diagonal),
             // upper with a -0 pivot: x2 = 1, x1 = (0 - 1)/(-0) = +Inf
             ([-0.0, 1.0, 0.0, 1.0], [0.0, 1.0], [inf, 1.0], Structure::Upper),
+            // lower: x1 = 0/0 = NaN, x2 = (1 - 1 NaN)/1 = NaN (the skip of a zero x1 would give [0; 1])
+            ([0.0, 0.0, 1.0, 1.0], [0.0, 1.0], [nan, nan], Structure::Lower),
+            // lower: x1 = 1/0 = Inf, x2 = (1 - 1 Inf)/1 = -Inf
+            ([0.0, 0.0, 1.0, 1.0], [1.0, 1.0], [inf, -inf], Structure::Lower),
+            // lower with its zero last: x1 = 1/1 = 1, x2 = (1 - 1)/0 = 0/0 = NaN
+            ([1.0, 0.0, 1.0, 0.0], [1.0, 1.0], [1.0, nan], Structure::Lower),
         ];
         for k in kernels() {
             for (a, b, want, shape) in cases {
@@ -711,6 +717,20 @@ mod tests {
                     assert!(if w.is_nan() { g.is_nan() } else { g.to_bits() == w.to_bits() }, "{}: {:?} \\ {:?} gave {:?}, MATLAB {:?}", k.name(), a, b, x, want);
                 }
             }
+        }
+    }
+
+    /// A 3 x 3 lower triangle with a zero first pivot (the same corpus addendum): x1 = 0/0 = NaN reaches every
+    /// later row, [NaN; NaN; NaN].
+    #[test]
+    fn singular_lower_3x3_matches_matlab() {
+        // ([0 0 0; 1 1 0; 1 1 1], column by column)
+        let a = [0.0, 1.0, 1.0, 0.0, 1.0, 1.0, 0.0, 0.0, 1.0];
+        for k in kernels() {
+            let (x, rep, _) = run(k, &a, &[0.0, 1.0, 1.0], 3, 1);
+            assert_eq!(rep.structure, Structure::Lower, "{}", k.name());
+            assert!(matches!(rep.status, Status::Singular(0)), "{}: {:?}", k.name(), rep.status);
+            assert!(x.iter().all(|v| v.is_nan()), "{}: {:?}", k.name(), x);
         }
     }
 
