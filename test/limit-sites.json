@@ -384,6 +384,41 @@
   "owner": "zpoly_divrem",
   "reason": "zpoly_divrem's derived sizes, plumbing (the ledger's and meter's limits, the plan's sizes) or a test assertion: refuses nothing itself"
  },
+ "engine/arith/src/ledger.rs :: ledger_charges_are_tagged :: let led = Words::new(u64::MAX); #0": {
+  "class": "none",
+  "owner": "engine arith (big-integer wire decoder)",
+  "reason": "test code: the ledger's charges land in their meter families; refuses nothing itself"
+ },
+ "engine/arith/src/ledger.rs :: ledger_charges_are_tagged :: let mut m = Meter::new(u64::MAX); #0": {
+  "class": "none",
+  "owner": "engine arith (big-integer wire decoder)",
+  "reason": "test code: the ledger's charges land in their meter families; refuses nothing itself"
+ },
+ "engine/arith/src/ledger.rs :: ledger_charges_are_tagged :: let mut m = Meter::new(u64::MAX); #1": {
+  "class": "none",
+  "owner": "engine arith (big-integer wire decoder)",
+  "reason": "test code: the ledger's charges land in their meter families; refuses nothing itself"
+ },
+ "engine/arith/src/ledger.rs :: ledger_charges_are_tagged :: let mut m = Meter::new(u64::MAX); #2": {
+  "class": "none",
+  "owner": "engine arith (big-integer wire decoder)",
+  "reason": "test code: the ledger's charges land in their meter families; refuses nothing itself"
+ },
+ "engine/arith/src/ledger.rs :: ledger_charges_are_tagged :: let mut m = Meter::new(u64::MAX); #3": {
+  "class": "none",
+  "owner": "engine arith (big-integer wire decoder)",
+  "reason": "test code: the ledger's charges land in their meter families; refuses nothing itself"
+ },
+ "engine/arith/src/ledger.rs :: ledger_charges_are_tagged :: let mut m = Meter::new(u64::MAX); #4": {
+  "class": "none",
+  "owner": "engine arith (big-integer wire decoder)",
+  "reason": "test code: the ledger's charges land in their meter families; refuses nothing itself"
+ },
+ "engine/arith/src/ledger.rs :: ledger_charges_are_tagged :: let mut m = Meter::new(u64::MAX); #5": {
+  "class": "none",
+  "owner": "engine arith (big-integer wire decoder)",
+  "reason": "test code: the ledger's charges land in their meter families; refuses nothing itself"
+ },
  "engine/arith/src/ledger.rs :: limit :: pub fn limit(&self) -> u64 { #0": {
   "class": "none",
   "owner": "zpoly_divrem",
@@ -419,7 +454,7 @@
   "owner": "zpoly_divrem",
   "reason": "zpoly_divrem's derived sizes, plumbing (the ledger's and meter's limits, the plan's sizes) or a test assertion: refuses nothing itself"
  },
- "engine/arith/src/ledger.rs :: new :: m.add(cap + 1)?; #0": {
+ "engine/arith/src/ledger.rs :: new :: m.add_in(Family::Move, cap + 1)?; #0": {
   "class": "none",
   "owner": "zpoly_divrem",
   "reason": "zpoly_divrem's derived sizes, plumbing (the ledger's and meter's limits, the plan's sizes) or a test assertion: refuses nothing itself"

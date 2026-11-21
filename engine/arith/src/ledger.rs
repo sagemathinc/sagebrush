@@ -5,6 +5,7 @@
 //! dropped; `fixed_words` and `fixed_vec` allocate the fixed rows fallibly.
 
 use crate::coprime::{Fault, Meter};
+use crate::cost::Family;
 #[cfg(test)]
 use crate::qpoly::bits;
 use crate::qpoly::{norm, parse_hex};
@@ -130,7 +131,7 @@ impl<'l> Buf<'l> {
     /// `cap` words, reserved before they are allocated.  Charges cap + 1
     /// (the fill).
     pub(crate) fn new(led: &'l Words, cap: usize, tag: &'static str, m: &mut Meter) -> Result<Buf<'l>, DivFault> {
-        m.add(cap + 1)?;
+        m.add_in(Family::Move, cap + 1)?;
         led.note(tag, cap as u64);
         led.reserve(cap as u64)?;
         let b = Buf { v: alloc(led, cap)?, led, tag };
@@ -159,7 +160,7 @@ impl<'l> Buf<'l> {
         #[cfg(test)]
         let c2 = if EXACT.with(|e| e.get()) { need } else { c2 };
         self.led.note(self.tag, c2 as u64);
-        m.add(c2 + keep + 1)?;
+        m.add_in(Family::Move, c2 + keep + 1)?;
         self.led.reserve(c2 as u64)?;
         let mut v = alloc(self.led, c2)?;
         v[..keep].copy_from_slice(&self.v[..keep]);
@@ -245,7 +246,7 @@ impl<'l> Coef<'l> {
     /// Set from a magnitude and a sign.  Charges the growth and the copy.
     pub(crate) fn set(&mut self, mag: &[u64], neg: bool, m: &mut Meter) -> Result<(), DivFault> {
         self.buf.grow(mag.len(), 0, m)?;
-        m.add(mag.len() + 1)?;
+        m.add_in(Family::Move, mag.len() + 1)?;
         self.buf.v[..mag.len()].copy_from_slice(mag);
         self.len = mag.len();
         self.neg = neg && self.len > 0;
@@ -279,7 +280,7 @@ impl<'l> Coef<'l> {
         let term_neg = !p_neg;
         let top = self.len.max(lp);
         self.buf.grow(top + 1, self.len, m)?;
-        m.add(top + 1)?;
+        m.add_in(Family::AddSub, top + 1)?;
         let len = self.len;
         let v = &mut self.buf.v;
         if len == 0 || self.neg == term_neg {
@@ -361,7 +362,7 @@ impl<'l> Arena<'l> {
         let nw2 = self.nw.checked_add(mag.len()).ok_or(DivFault::Memory)?;
         self.words.grow(nw2, self.nw, m)?;
         self.meta.grow(self.nt + 1, self.nt, m)?;
-        m.add(mag.len() + 1)?;
+        m.add_in(Family::Move, mag.len() + 1)?;
         self.words.v[self.nw..nw2].copy_from_slice(mag);
         self.meta.v[self.nt] = ((mag.len() as u64) << 1) | u64::from(neg && !mag.is_empty());
         self.nw = nw2;
@@ -402,7 +403,7 @@ impl<'l> Arena<'l> {
 pub(crate) fn walk_charge(i: usize, total: usize, m: &mut Meter) -> Result<(), DivFault> {
     if i & 0xfff == 0 {
         sagebrush_interrupt::check_coarse();
-        m.add(total.saturating_sub(i).min(0x1000))?;
+        m.add_in(Family::Walk, total.saturating_sub(i).min(0x1000))?;
     }
     Ok(())
 }
@@ -455,5 +456,51 @@ mod tests {
         }
         assert_eq!(token_end_polled("", 1), 0);
         assert_eq!(token_end_polled("ab", 1), 2);
+    }
+}
+
+#[cfg(test)]
+mod family_tests {
+    use super::*;
+    use crate::cost::Units;
+
+    fn only(u: Units, f: Family, n: u64) {
+        assert_eq!(u.get(f), n, "{:?}", f);
+        assert_eq!(u.total(), Some(n), "only {:?} charged", f);
+    }
+
+    /// Each ledger operation's units land in its family, none in Other.
+    #[test]
+    fn ledger_charges_are_tagged() {
+        let led = Words::new(u64::MAX);
+        let mut m = Meter::new(u64::MAX);
+        let mut b = Buf::new(&led, 4, "t", &mut m).unwrap();
+        only(m.units(), Family::Move, 5);
+        let mut m = Meter::new(u64::MAX);
+        b.grow(10, 3, &mut m).unwrap();
+        only(m.units(), Family::Move, 10 + 3 + 1);
+        let mut m = Meter::new(u64::MAX);
+        let mut c = Coef::new(&led, 2, &mut m).unwrap();
+        let built = m.units().total().unwrap();
+        c.set(&[5, 7], false, &mut m).unwrap();
+        only(m.units(), Family::Move, built + 3);
+        let mut m = Meter::new(u64::MAX);
+        c.sub_signed(&[1, 2, 3], false, &mut m).unwrap();
+        let u = m.units();
+        assert_eq!(u.get(Family::AddSub), 4, "the carry chain is AddSub");
+        assert_eq!(u.get(Family::Other), 0);
+        assert_eq!(u.total(), Some(m.used()));
+        let mut m = Meter::new(u64::MAX);
+        let mut a = Arena::new(&led, "t", &mut m).unwrap();
+        let built = m.units();
+        a.push(&[9, 9, 9], true, &mut m).unwrap();
+        // the words' and the signs' growth (3 + 1, 1 + 1) and the copy (3 + 1)
+        assert_eq!(m.units().get(Family::Move) - built.get(Family::Move), 10);
+        assert_eq!(m.units().get(Family::Other), 0);
+        let mut m = Meter::new(u64::MAX);
+        for i in 0..5000 {
+            walk_charge(i, 5000, &mut m).unwrap();
+        }
+        only(m.units(), Family::Walk, 5000);
     }
 }
