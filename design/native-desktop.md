@@ -246,7 +246,7 @@ r4's A-vs-B timings stay withdrawn: the PyPI wheel came from a different commit.
   - This covers Apple notarization, Windows Authenticode and the update signing key.
 - **Where the keys are used:** CI jobs, and nowhere else. The keys are secrets of a GitHub environment that William creates and fills himself (`sagebrush-signing` for Apple). Two jobs use it today:
   - `mac-release` (`.github/workflows/app.yml`) builds the signed and notarized Mac app. It runs only for a push of an `app-v*` tag or a dispatch that asks to sign, never on a pull request (`scripts/test-app-release-guard.mjs` pins the cases).
-  - `signing-check` (`.github/workflows/signing-check.yml`), run by hand, checks the secrets: it signs only a throwaway file and prints only PASS or FAIL.
+  - `signing-check` (`.github/workflows/signing-check.yml`), run by hand, checks the secrets: it signs only throwaway probes (a copied executable and a throwaway installer package), and prints PASS/FAIL checks and non-secret counts, never secret values.
   - Agents may write such jobs; each lands through a pull request that a person merges, since agents don't push workflow files. Their secret handling gets a security review.
   - Agents never see, hold, copy or print a key, a certificate, its password or an account login, and never sign anything outside that job.
   - A signed build is an artifact of the job. Publishing it (a release, a download link) is William's decision.
