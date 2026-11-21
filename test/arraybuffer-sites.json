@@ -1799,7 +1799,7 @@
   "2087a05bc65625d9": {"decl":"src/runtime/object.ts :: selfChecked","class":"allocates","via":"web/worker.ts :: obligation: ... ( sources . size ? { sources : [ ... sources ] } : { } ) #0"},
   "f4aa7cd904ed2993": {"decl":"src/runtime/object.ts :: subclassInit","class":"allocates","via":"src/runtime/object.ts :: tpNew"},
   "47ce9222f6ade8bb": {"decl":"src/runtime/object.ts :: table","class":"allocates","via":"web/worker.ts :: obligation: ... ( sources . size ? { sources : [ ... sources ] } : { } ) #0"},
-  "0deae72216b5ed1e": {"decl":"src/runtime/object.ts :: toPyExc","class":"allocates","via":"web/worker.ts :: obligation: ... ( sources . size ? { sources : [ ... sources ] } : { } ) #0"},
+  "dc57b3006db8c899": {"decl":"src/runtime/object.ts :: toPyExc","class":"allocates","via":"web/worker.ts :: obligation: ... ( sources . size ? { sources : [ ... sources ] } : { } ) #0"},
   "e6fddb0114c06c95": {"decl":"src/runtime/object.ts :: tpNew","class":"allocates","via":"web/lib-lazy.ts :: get"},
   "2bd9c10f4d889f13": {"decl":"src/runtime/object.ts :: tuple","class":"allocates","via":"web/lib-lazy.ts :: get"},
   "a12e722f03e58902": {"decl":"src/runtime/object.ts :: typeGetattr","class":"allocates","via":"web/lib-lazy.ts :: get"},
