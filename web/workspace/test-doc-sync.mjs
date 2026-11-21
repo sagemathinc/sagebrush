@@ -317,7 +317,8 @@ try {
     };
     for (let i = 0; i < 200 && !(await ev("window.ready === true").catch(() => false)); i++) await sleep(50);
     await ev(`T.init(${J(dev)})`);
-    return { dev, ev, call: (f, ...args) => { progress(`${dev}.${f}`); return ev(`T.${f}(${args.map((a) => J(a)).join(", ")})`); } };
+    // (`input`: text typed as a person types it, into the focused element: real input, CDP Input.insertText)
+    return { dev, ev, input: (text) => send("Input.insertText", { text }, sessionId), call: (f, ...args) => { progress(`${dev}.${f}`); return ev(`T.${f}(${args.map((a) => J(a)).join(", ")})`); } };
   }
   progress("devices");
   const A = await device("A"), B = await device("B");
@@ -1256,7 +1257,9 @@ try {
       await B.call("kick", NK, true);
       await settle();
       await B.call("mount", NK);
-      await A.call("type", "ka", "k1 typed, then a reload asked");
+      // (typed as a person types: the notebook asks only after the person's own input)
+      await A.call("focus", "ka");
+      await A.input("k1 typed, then a reload asked");
       const asked = await A.call("leaveAsked");
       await sleep(900);
       await A.call("kick", NK);

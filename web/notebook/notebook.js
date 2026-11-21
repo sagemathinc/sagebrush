@@ -2032,7 +2032,7 @@ export function createNotebook(root, opts = {}) {
   // ---------------------------------------------------------- the document
   // A document is {mode, cells: [{id, type?, code, outputs?, n?, attachments?, metadata?}], ...meta}.
   // A cell's metadata (nbformat's: tags, ...) is kept as it is.
-  let loading = false, timer = null, lastJson = null, store = null, unsubscribe = null, saveChain = Promise.resolve(), savesPending = 0, guarded = false;
+  let loading = false, timer = null, lastJson = null, store = null, unsubscribe = null, saveChain = Promise.resolve(), savesPending = 0, guarded = false, typed = false;
   // The document shown, from when it is loaded until another is (or it is
   // detached): what is known of it, which its saves keep to, even one still
   // waiting its turn when another document is shown (CORR-989-1).
@@ -2295,7 +2295,11 @@ export function createNotebook(root, opts = {}) {
   // (unsaved: a save running, the last one failed or was busy (kept to send again), or a change waiting that differs
   // from what was last saved (typed and undone before its save asks nothing); a notebook left, with its saves still
   // to make, is the page's to ask about (its "left" listener))
-  const unsaved = (dirty) => !!store && !store.readOnly && !!(savesPending || failed.has(shown) || busy.size || dirty());
+  // (and only once the person has typed here since everything was last saved (`typed`, a trusted input event): a
+  // run's output, a change from elsewhere or one a script made, waiting to be saved, never asks, and a page driven
+  // by a script (a test, an automation) is never held by a prompt nobody answers)
+  const unsaved = (dirty) => typed && !!store && !store.readOnly && !!(savesPending || failed.has(shown) || busy.size || dirty());
+  root.addEventListener("input", (e) => { if (e.isTrusted) typed = true; }, true);
   function onBeforeUnload(ev) {
     if (!unsaved(() => timer && JSON.stringify(snapshot()) !== lastJson)) return;
     if (timer) flush();
@@ -2305,6 +2309,7 @@ export function createNotebook(root, opts = {}) {
   // (the listener there only while something may be unsaved, and taken away once nothing is: a page with any
   // beforeunload listener is navigated away from more slowly, so a clean notebook's page reloads exactly as before)
   function guard() {
+    if (!(savesPending || failed.has(shown) || busy.size || timer)) typed = false; // (all saved: the person's typing kept)
     const want = unsaved(() => timer);
     if (want === guarded) return;
     guarded = want;
