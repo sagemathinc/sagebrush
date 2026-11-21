@@ -12,7 +12,7 @@
   page that comes rejects it unhandled; and a transition skipped (another navigation, a hidden page) rejects its
   promises: handled, so a skipped fade is never an error) */ for (const t of ["pageswap", "pagereveal"]) addEventListener(t, (e) => { const v = e.viewTransition; if (!v) return; for (const p of [v.ready, v.finished, v.updateCallbackDone]) p?.catch(() => {}); if (t === "pageswap") { let to = null; try { to = new URL(e.activation.entry.url).pathname; } catch {} if (to !== "/" && to !== "/board/") v.skipTransition(); } });</script>
 <style>
-  /* (a same-site page opened from here (a notebook, a .tex, a board) replaces this one with a cross-fade, not a
+  /* (a same-origin page opened from here (a notebook, a .tex, a board) replaces this one with a cross-fade, not a
      blank page in between: the browser's cross-document view transition; one without it just navigates) */
   @view-transition { navigation: auto; }
   /* the page; the board's own rules come with its script (board.css, put in by mount.ts) */

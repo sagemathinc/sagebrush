@@ -23,7 +23,7 @@
 <script>try { const s = new URLSearchParams(location.search), q = s.get("phone"); if (q === "1" || q === "0") localStorage.setItem("sagebrush-phone", q); const v = localStorage.getItem("sagebrush-phone"); if (v === "1" || (v !== "0" && matchMedia("(pointer: coarse)").matches && Math.min(screen.width, screen.height) <= 640)) document.documentElement.classList.add("phone"); if (s.has("tex") || s.has("code")) document.documentElement.classList.add("overpage"); } catch {}</script>
 <!-- (html.overpage: the LaTeX or code page (/?tex=, /?code=) is open over this one, with its own toolbar) -->
 <style>
-  /* (a same-site page opened from here (a notebook, a .tex, a board) replaces this one with a cross-fade, not a
+  /* (a same-origin page opened from here (a notebook, a .tex, a board) replaces this one with a cross-fade, not a
      blank page in between: the browser's cross-document view transition; one without it just navigates) */
   @view-transition { navigation: auto; }
   :root {
