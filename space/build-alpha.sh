@@ -13,7 +13,9 @@ node scripts/wasm-fetch.mjs          # the engine's WebAssembly, by its pins
 pnpm run build                       # dist/ (TypeScript), which the CLI's bundle and the site need
 node scripts/build-cli.mjs           # build/cli, which web/build.ts checks it is current
 rm -rf web/dist                      # (from clean: nothing of an older build is deployed)
-bun web/build.ts                     # the site, into web/dist
+# (the LaTeX editor runs only on the hosts its build names: sagebrush.space and dev.sagebrush.space, and this one
+#  preview host, web/latex/preview-host.mjs; without it the alpha had no LaTeX)
+SAGEBRUSH_PREVIEW_HOST=space.sagebrush.cloud bun web/build.ts   # the site, into web/dist
 (cd space && npm ci && node build.mjs --site ../web/dist)
 bun web/csp.ts                       # web/dist/_headers: COOP/COEP everywhere, each page's CSP, /space/ included
 
@@ -27,6 +29,8 @@ bun web/csp.ts                       # (again: the 404 page gets its rule)
 # checks: the parts the alpha needs, and a static host's limits (Cloudflare Pages: 25 MiB a file, 20,000 files)
 fail() { echo "build-alpha: $*" >&2; exit 1; }
 grep -q space-frame web/dist/agents/agents.js || fail "the Agents page was built without the space"
+grep -q '"latex": *true' web/dist/version.json || fail "the site was built without the LaTeX editor"
+grep -q 'space.sagebrush.cloud' web/dist/sagebrush-app.js || fail "the LaTeX editor isn't on for space.sagebrush.cloud"
 [ -f web/dist/space/index.html ] && [ -f web/dist/space/space.js ] && [ -f web/dist/space/format.md ] || fail "web/dist/space is incomplete"
 [ -f web/dist/sagebrush-worker.js ] && [ -f web/dist/sagebrush-notebook.js ] && [ -f web/dist/sagebrush-math.js ] || fail "the engine's scripts are missing"
 ls web/dist/engine/*/ >/dev/null 2>&1 || fail "web/dist/engine has no engine"
