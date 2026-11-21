@@ -195,6 +195,59 @@ for (const [what, event, chip] of [["failed", { type: "task_status", status: "fa
   H5.stop();
 }
 
+// ---- a tasks.get answer older than an event (made before it, delivered after it): its older events go into the
+//      thread, never back into the chip; a fresh list at the same seq then keeps the newer status
+for (const [what, event, chip] of [["failed", { type: "task_status", status: "failed", reason: "new failure" }, "Failed"], ["closed", { type: "task_status", status: "closed" }, "Closed"]]) {
+  const H6 = delegateHost();
+  const T = await H6.addTask({ title: "x" });
+  const D6 = new DelegateTasks({ changed: () => {} });
+  const P6 = pairWith(H6);
+  D6.attach(P6);
+  await P6.paired();
+  await P6.allow({ folders: ["/"], write: true, expires: null }, false);
+  D6.turnOn();
+  await until(() => D6.tasks.length === 1);
+  const send = H6.sock.send.bind(H6.sock);
+  let held = null;
+  H6.sock.send = (data, ...a) => { if (!held && JSON.parse(data).result?.events) { held = data; return data.length; } return send(data, ...a); };
+  const r = D6.open(T.task);
+  await until(() => held !== null);
+  const seq0 = JSON.parse(held).result.task.seq;
+  H6.emit(T.task, event);
+  await until(() => D6.task(T.task).entry.status === event.status);
+  send(held);
+  await r.catch(() => {});
+  const e1 = D6.task(T.task).entry;
+  ok(seq0 === 1 && e1.status === event.status && e1.seq === 2 && D6.task(T.task).thread.applied_seq >= 1, `a stale tasks.get (seq 1) after a newer event (seq 2, ${what}): its events go into the thread, the task stays ${chip}, seq 2`, { seq0, status: e1.status, seq: e1.seq });
+  H6.sock.send = send;
+  await D6.refresh();
+  const e2 = D6.task(T.task).entry;
+  ok(e2.status === event.status && e2.seq === 2 && chipOf(e2) === chip, `then a fresh list at the same seq (2): still ${chip}, seq 2`, { status: e2.status, seq: e2.seq });
+  P6.revoke();
+  H6.stop();
+}
+// (a replay at the chip's own seq fills in what is missing: the proposal's files, when the list named only its commit)
+{
+  const H7 = delegateHost();
+  const T = await H7.addTask({ title: "x" });
+  const commit = "c".repeat(40);
+  H7.emit(T.task, { type: "proposal", round: 1, base: T.base, commit, files: [] });
+  const D7 = new DelegateTasks({ changed: () => {} });
+  const P7 = pairWith(H7);
+  D7.attach(P7);
+  await P7.paired();
+  await P7.allow({ folders: ["/"], write: true, expires: null }, false);
+  D7.turnOn();
+  await until(() => D7.tasks.length === 1);
+  const t0 = D7.task(T.task);
+  const before = { proposal: t0.proposal, entry: t0.entry.proposal, seq: t0.entry.seq };
+  await D7.open(T.task);
+  const t1 = D7.task(T.task);
+  ok(before.proposal === null && before.entry === commit && before.seq === 2 && t1.proposal?.commit === commit && t1.entry.seq === 2 && t1.entry.status === "working", "a replay at the chip's seq (the proposal event, seq 2): the proposal's details filled in, the status and seq kept", { before, after: { proposal: t1.proposal?.commit, seq: t1.entry.seq, status: t1.entry.status } });
+  P7.revoke();
+  H7.stop();
+}
+
 // ---- an agent that doesn't offer Delegate: no switch
 {
   const H3 = delegateHost({ features: ["chat.resume"] });

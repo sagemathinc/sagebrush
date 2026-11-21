@@ -4,8 +4,8 @@
 // (page.ts) draws it.
 //
 // - Nothing about a task is kept on the page: the list comes from tasks.list on every connect and switch-on, a task's
-//   thread from tasks.get (paged by `after`) when it is opened, and both move on with task.event while connected. Of
-//   two views of a task, the one with the higher seq wins: an answer made before a newer event never moves it back.
+//   thread from tasks.get (paged by `after`) when it is opened, and both move on with task.event while connected. A
+//   task's chip moves only forward (chip()): an event or answer older than what the page has never moves it back.
 // - Every answer and event is checked first (tasks-schema.ts). One event this page refuses is skipped and counted
 //   (`skipped`), and the rest of the thread still shows.
 // - A task's chat turn events go into an ordinary chat thread (agent-chat/events.ts apply), numbered by the task's seq.
@@ -108,9 +108,8 @@ export class DelegateTasks {
     for (const entry of tasks) {
       const t = this.task(entry.task);
       if (t) {
-        // (an answer older than what this page has (a task.event came after it was made) never moves a task back: only a
-        //  higher seq replaces the entry; an equal one keeps it)
-        if (entry.seq > t.entry.seq) t.entry = { ...entry };
+        // (an answer older than what this page has (a task.event came after it was made) never moves a task back: chip())
+        chip(t, entry.seq, entry);
         if (t.loaded && entry.seq > t.thread.applied_seq) void this.open(entry.task).catch(() => {});
         next.push(t);
       } else next.push(fresh(entry));
@@ -138,8 +137,8 @@ export class DelegateTasks {
           this.tasks = this.tasks.map((x) => (x === t ? cur : x));
         }
         for (const e of r.events) if (!take(cur, e)) break;
-        // (the same rule for tasks.get's entry: only a higher seq replaces it)
-        if (cur !== t || r.task.seq > cur.entry.seq) cur.entry = { ...r.task, seq: Math.max(r.task.seq, cur.thread.applied_seq) };
+        // (the same rule for tasks.get's entry, unless the log was read again from its start)
+        if (cur === t) chip(cur, r.task.seq, r.task);
         cur.loaded = true;
         this.o.changed();
         if (r.last >= r.task.seq || !r.events.length) return;
@@ -158,7 +157,7 @@ export class DelegateTasks {
     const t = this.task(n.task);
     if (!t) { void this.refresh().catch(() => {}); return; }
     if (!t.loaded) {
-      if ("event" in n) chip(t, n.event, n.seq);
+      if ("event" in n) chipOfEvent(t, n.event, n.seq);
       this.o.changed();
       return;
     }
@@ -232,15 +231,28 @@ function fresh(entry: TaskEntry): DelegateTask {
   return { entry: { ...entry }, thread: newThread("task:" + entry.task, entry.title), proposal: null, skipped: 0, loaded: false, turn: null };
 }
 
-// (a task's own event on its entry: its chip and its proposal)
-function chip(t: DelegateTask, e: TaskEvent, seq: number) {
-  if (e.type === "task_status") {
-    t.entry = { ...t.entry, status: e.status, seq: Math.max(t.entry.seq, seq), ...(e.status === "working" ? {} : { question: false }) };
-    t.reason = e.reason;
-  } else if (e.type === "proposal") {
-    t.proposal = { round: e.round, base: e.base, commit: e.commit, files: e.files };
-    t.entry = { ...t.entry, round: e.round, proposal: e.commit, seq: Math.max(t.entry.seq, seq) };
+// (a task's chip, its entry, moves only forward: one rule for its events, tasks.list and tasks.get. The entry's seq is
+//  the seq of what the chip says. Above it, `next` replaces the status and the rest; at it, only what is missing is
+//  filled in; below it, the chip doesn't change. A status's reason and a proposal's files are filled in from an older
+//  event too, when it names what the chip already says: the log read when a task is opened, after its list entry)
+type Extra = { reason?: string; proposal?: DelegateTask["proposal"] };
+function chip(t: DelegateTask, seq: number, next: Partial<TaskEntry>, more: Extra = {}) {
+  const was = t.entry;
+  if (seq > was.seq) {
+    t.entry = { ...was, ...next, seq };
+    if (next.status !== undefined && next.status !== was.status) t.reason = more.reason;
+    else if (more.reason !== undefined) t.reason = more.reason;
+    if (more.proposal) t.proposal = more.proposal;
+    return;
   }
+  if (seq === was.seq && was.proposal === null && next.proposal) t.entry = { ...was, proposal: next.proposal, round: next.round ?? was.round };
+  if (more.reason !== undefined && t.reason === undefined && next.status === t.entry.status) t.reason = more.reason;
+  if (more.proposal && more.proposal.commit === t.entry.proposal && t.proposal?.commit !== more.proposal.commit) t.proposal = more.proposal;
+}
+// (a task's own event on its chip: task_status and proposal)
+function chipOfEvent(t: DelegateTask, e: TaskEvent, seq: number) {
+  if (e.type === "task_status") chip(t, seq, { status: e.status, ...(e.status === "working" ? {} : { question: false }) }, { reason: e.reason });
+  else if (e.type === "proposal") chip(t, seq, { round: e.round, proposal: e.commit }, { proposal: { round: e.round, base: e.base, commit: e.commit, files: e.files } });
 }
 
 /** One event of a task's log, in seq order: false if it doesn't follow on (a gap: read the log again). */
@@ -256,7 +268,7 @@ function take(t: DelegateTask, e: TaskLogEntry): boolean {
   const ev = e.event;
   if (ev.type !== "turn") {
     // (task_status and proposal move the chip; the question events are M2's, not shown yet)
-    chip(t, ev, e.seq);
+    chipOfEvent(t, ev, e.seq);
     th.applied_seq = e.seq;
     return true;
   }
