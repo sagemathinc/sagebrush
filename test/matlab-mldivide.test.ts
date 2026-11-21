@@ -37,7 +37,8 @@ for (const [name, noWasm] of BACKENDS) {
 
   test(`${name}: singular, diagonal, triangular, symmetric positive definite and general solves`, () => {
     const r = run([
-      // (singular: MATLAB's warning and the Inf and NaN its elimination gives, as real MATLAB printed for magic(8))
+      // (singular: MATLAB's warning and the Inf and NaN its elimination gives, as an observed MATLAB run printed
+      // magic(8) \\ ones(8, 1) on Nov 4 2026: the oracle engine/nd's magic(8) fixture pins, numerics P2b-2)
       "x = magic(8) \\ ones(8, 1); disp(isnan(x(1:5))'), disp(x(6:7)')",
       // (consistent singular systems, symmetric and not: LU's own result, as MATLAB prints it, NaN NaN)
       "x = [1 2; 2 4] \\ [1; 2]; disp(x')",
@@ -60,7 +61,9 @@ for (const [name, noWasm] of BACKENDS) {
     ].join("\n"));
   });
 
-  test(`${name}: an Inf or NaN in A or B is still refused before the solve`, () => {
+  // (a known gap against design §1, not the contract: MATLAB computes with an Inf or NaN and warns, RCOND = NaN;
+  // Sagebrush refuses, as before this change. Pinned so the gap stays visible until it is closed: issue #1500.)
+  test(`${name}: an Inf or NaN in A or B is still refused before the solve (a known gap)`, () => {
     const r = run("x = [1 2; 3 NaN] \\ [1; 1];", noWasm);
     assert.notEqual(r.status, 0);
     assert.ok((r.out + r.err).includes("of values that include Inf or NaN is not supported in Sagebrush"), r.out + r.err);

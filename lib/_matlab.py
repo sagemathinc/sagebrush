@@ -1011,7 +1011,8 @@ def _solve(A, B):
                 # (MATLAB's result for a singular A is its LU's, with the Inf and NaN division by the zero pivot
                 # gives: computed here as before, not taken from the module, whose triangular solves skip a zero
                 # entry's division as the reference BLAS does, so a consistent singular system's 0/0 stays 0:
-                # [1 2; 3 6] \ [1; 3] gave [1; 0] where MATLAB gives [NaN; NaN]. Until engine/nd's fix.)
+                # [1 2; 3 6] \ [1; 3] gave [1; 0] where MATLAB gives [NaN; NaN]. Until engine/nd's fix;
+                # meanwhile a large exactly singular system pays for this interpreted O(n^3) LU.)
                 warning_("Matrix is singular to working precision.", "MATLAB:singularMatrix")
                 return _lu_solve_through(A, B2).reshape(B.shape)
             # (code 3, an Inf or NaN in A or B: nothing computed there; as before, below)

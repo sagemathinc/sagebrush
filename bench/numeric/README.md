@@ -4,7 +4,8 @@ The numeric track reports each dense kernel's speed as a fraction of OpenBLAS's 
 count. These are tracked, never gated.
 
 **How to run.** `run-vm.sh` runs on a spot VM, from the public repository and a git bundle of the commit (no
-credentials). It times three things, each with warm-up runs and then the median of 7:
+credentials). It times three things, each with warm-up runs and then the median of 7 (except `eig` and
+`eig` symmetric at $n = 1000$ in MATLAB mode: the median of 3, to keep the run short):
 - **MATLAB mode under node**: `bench_matlab.m`, engine/nd's wasm module, on one core (`taskset -c 0`, so no
   helper threads) and on all cores;
 - **NumPy 2.5.1 with scipy-openblas**: `bench_numpy.py`, column-major inputs, `OPENBLAS_NUM_THREADS` 1 and 16;
@@ -30,14 +31,15 @@ Native engine/nd on the same machine, with the AVX2+FMA kernel:
 | kernel, $n = 1000$ | engine/nd | OpenBLAS | % |
 |---|---|---|---|
 | GEMM, 1 thread | 49.3 ms (40.6 GF/s) | 29.6 ms (67.6 GF/s) | 60% |
-| GEMM, 8 threads (the physical cores) | 7.9 ms (254 GF/s) | 4.2 ms on 16 threads (480 GF/s) | 53% |
+| GEMM, 8 threads (the physical cores) | 7.9 ms (254 GF/s) | 4.2 ms on **16** threads (480 GF/s): OpenBLAS on 8 threads wasn't measured | 53% of OpenBLAS's 16-thread time |
 | GEMM, 16 threads | 9.6 ms (209 GF/s) | 4.2 ms | 44% |
 | `A\b`, MATLAB mode (structure pass and rcond included), 1 thread | 26.4 ms | 21.9 ms (gesv, no rcond) | 83% |
 
 ## What this says
 
-- **Native engine/nd meets §3's targets.** GEMM reaches 60% of OpenBLAS on one thread (the target is 50%) and 53%
-  on all cores (35%). The solve reaches 83% (40%). GEMM is slower on 16 threads than on 8: the extra 8 are SMT
+- **Native engine/nd meets §3's targets, with one caveat.** GEMM reaches 60% of OpenBLAS on one thread (the target is
+  50%). On all cores it reaches 53% (35%), but against OpenBLAS on 16 threads, while engine/nd ran on 8: the
+  equal-thread comparison §3 asks for (OpenBLAS with `OPENBLAS_NUM_THREADS=8`) is for the next run. The solve reaches 83% (40%). GEMM is slower on 16 threads than on 8: the extra 8 are SMT
   siblings.
 - **MATLAB mode is far from the targets**, for three reasons to work on:
   1. **A fixed cost per call** of about 0.3 to 1 ms: interpretation, the copies in and out of the wasm module.

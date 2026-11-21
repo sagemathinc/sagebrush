@@ -196,7 +196,7 @@ An indicative run today, on a shared 16-core host with other jobs running, so it
   - The fix, in the measurement PR: estimate rcond from the factors the solve already computed, with engine/nd's `gecon` (the same Higham/dlacn2 algorithm, already tested against the Python one), for every $n$. That removes both the cost and the 500-row cap, and a test pins that a nearly singular $n = 600$ matrix warns.
 
 **Measured, Nov 21** (a quiet n2-standard-16: 8 cores, AVX2+FMA; bench/numeric/README.md has the method, the tables and the raw output):
-- **Native engine/nd meets the targets:** GEMM reaches 60% of OpenBLAS on one thread and 53% on the 8 physical cores. The MATLAB-mode solve, with its structure pass and rcond, reaches 83% of OpenBLAS's plain solve.
+- **Native engine/nd meets the targets:** GEMM reaches 60% of OpenBLAS on one thread, and on all cores 53% (engine/nd on 8 threads against OpenBLAS on 16; the equal-thread comparison is for the next run). The MATLAB-mode solve, with its structure pass and rcond, reaches 83% of OpenBLAS's plain solve.
 - **MATLAB mode is far from them.** At $n = 1000$, it reaches 14% of OpenBLAS for `A*B` on one core, 12% for `A\b`, 9% for `chol`, and 6% and 15% for symmetric and general `eig`. Three causes, each a follow-up:
   - a fixed cost per call of 0.3 to 1 ms ($c_0$), which dominates $n \le 100$;
   - wasm SIMD128 against native: 9 GF/s against 41 for GEMM;
