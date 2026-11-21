@@ -244,11 +244,13 @@ r4's A-vs-B timings stay withdrawn: the PyPI wheel came from a different commit.
 
 - Engine binaries and app installers are signed and notarized **only with William's keys.**
   - This covers Apple notarization, Windows Authenticode and the update signing key.
-- **Where the keys are used:** a CI job, and nowhere else. The keys are secrets of a GitHub environment that William creates and fills himself (`sagebrush-signing` for Apple). The job runs only for a release tag or a dispatch that asks for it, never on a pull request.
-  - Agents may write that job; a person commits it, since agents don't push workflow files. Its secret handling gets a security review.
+- **Where the keys are used:** CI jobs, and nowhere else. The keys are secrets of a GitHub environment that William creates and fills himself (`sagebrush-signing` for Apple). Two jobs use it today:
+  - `mac-release` (`.github/workflows/app.yml`) builds the signed and notarized Mac app. It runs only for a push of an `app-v*` tag or a dispatch that asks to sign, never on a pull request (`scripts/test-app-release-guard.mjs` pins the cases).
+  - `signing-check` (`.github/workflows/signing-check.yml`), run by hand, checks the secrets: it signs only a throwaway file and prints only PASS or FAIL.
+  - Agents may write such jobs; each lands through a pull request that a person merges, since agents don't push workflow files. Their secret handling gets a security review.
   - Agents never see, hold, copy or print a key, a certificate, its password or an account login, and never sign anything outside that job.
   - A signed build is an artifact of the job. Publishing it (a release, a download link) is William's decision.
-- Every build an agent makes on its own machine is an unsigned local build, and nothing is published.
+- Every build an agent makes on its own machine is an unsigned local build, and nothing is published. CI's other app jobs keep their installers as artifacts, unsigned.
 
 ## 7. N1, narrowed
 
