@@ -82,7 +82,7 @@ export const agentSays = (name: string, client: string) => `${name} (as it says$
 export const onlyCurrent = (current: () => AgentPairing | null, f: (c: Created, p: AgentPairing) => void) => (c: Created, p: AgentPairing) => { if (current() === p) f(c, p); };
 
 // (the box's children never wider than it: a grid item's min-width is its content's by default, so the "Allow it" select,
-//  as wide as its longest option, pushed the whole dialog out of the box; William's QA, Nov 21)
+//  as wide as its longest option, pushed the whole dialog out of the box; found in testing, Nov 21)
 const CSS = `
 .sbag-dlg { position: fixed; inset: 0; background: rgba(20,25,18,.35); display: grid; place-items: center; z-index: 1000; font: 14px/1.45 system-ui, sans-serif; color: #1d241a; }
 .sbag-box { background: #fff; border-radius: 10px; padding: 18px 20px; width: min(440px, 92vw); box-shadow: 0 10px 40px rgba(0,0,0,.25); display: grid; gap: 10px; }

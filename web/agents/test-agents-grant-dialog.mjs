@@ -1,5 +1,5 @@
 // ci: web-artifacts.1 order=40 runner=bun chrome
-// The grant dialog ("Allow this agent?") fits its box on the Agents page (William's QA, Nov 21 2026): at 100%, 125% and
+// The grant dialog ("Allow this agent?") fits its box on the Agents page (found in testing, Nov 21 2026): at 100%, 125% and
 // 150% zoom, and on a phone's width (360 CSS px), with the "Allow it" select's longest option (the page's "while this page is open (…)"), every part of the
 // dialog (the folders, the checkboxes, the note, the select, Cancel and Allow) stays inside the white box. The built
 // page (SAGEBRUSH_AGENTS=1), served by web/serve.py, paired as a person pairs it with the stand-in agent
