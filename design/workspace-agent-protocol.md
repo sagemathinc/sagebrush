@@ -234,7 +234,7 @@ Every method, field, bound and error below is closed: anything not listed is ref
 - **Answer:** `{jsonrpc: "2.0", id, result}` or `{jsonrpc: "2.0", id, error: {code: -32000, message, data: {code: <one of the errors below>}}}`.
 - **Bounds and failures:**
   - at most 8 pending page requests;
-  - every frame at most 4 MB;
+  - each `tasks.*` request, and each answer's raw frame as sent or received (UTF-8 bytes, the envelope and whitespace included), at most 4 MiB (4,194,304 bytes); over it, the receiver refuses it `too_large` before any of it is used. The pairing's other frames keep their own bound;
   - an answer to an unknown id is dropped;
   - every pending request is rejected when the socket closes;
   - the page's timeout is 30 s (120 s for `tasks.start` and `tasks.merged`).
@@ -251,7 +251,7 @@ Every method, field, bound and error below is closed: anything not listed is ref
 | `blob` | 40 lowercase hex. **A stored blob** (`base_blob`, `proposal_blob`, and `tasks.file`'s answer) must be exactly the blob at that path in that named base or proposal commit of this task. **A fresh blob** (`mine.blob`, `merged.blob` in `tasks.merged`) needs no reachability at all: the host checks `content`'s bounds, recomputes the hash of its bytes, and refuses unless they are equal (`bad_request`). A fresh hash is a check on the bytes sent with it, never a way to name or read any stored object |
 | `path` | the path rules below; at most 2,000 per task |
 | `kind` | `"notebook"` (path ends `.ipynb`) or `"file"` |
-| `content` | a notebook: its `.ipynb` text (the page's `toIpynb`, with `metadata.sagebrush.seed`); a file: UTF-8 text, or `{base64}` for other bytes. A document is at most 4 MB, all of a request's documents together at most 4 MB. A document's `blob` is always the git blob id (SHA-1 of `blob <n>\0` + the bytes) of the UTF-8 bytes of `content`, or of the decoded bytes for `{base64}`; both sides check exactly that |
+| `content` | a notebook: its `.ipynb` text (the page's `toIpynb`, with `metadata.sagebrush.seed`); a file: UTF-8 text, or `{base64}` for other bytes. A document is at most 4 MiB, all of a request's documents together at most 4 MiB. A document's `blob` is always the git blob id (SHA-1 of `blob <n>\0` + the bytes) of the UTF-8 bytes of `content`, or of the decoded bytes for `{base64}`; both sides check exactly that |
 | `seq`, `round`, `qid`, `revision` | safe integers ≥ 0 (seq) or ≥ 1 (the others), only increasing |
 | `merge_id`, `answer_id` | 32 lowercase hex, made by the page, kept across retries |
 | `title` | ≤ 200 chars |
@@ -282,9 +282,9 @@ Every method, field, bound and error below is closed: anything not listed is ref
 
 | Method | params | result | Checks |
 |---|---|---|---|
-| `tasks.start` | `{title, prompt, target: "local", run: bool, docs: [{path, kind, content}]}` | `{task, base, seq}` | `run` is frozen into the grant (§6.2); `run: true` is refused `unavailable` when the runner is |
+| `tasks.start` | `{title, prompt, target: "local", run: bool, docs: [{path, kind, content}]}` | `{task, base, seq}` | `run` is frozen into the grant (§6.2); `run: true` is refused as `unavailable` when the runner is unavailable |
 | `tasks.list` | `{}` | `{tasks: [{task, title, status, target, run, round, seq, proposal: commit\|null, question: bool, updated}]}` | at most 64 entries |
-| `tasks.get` | `{task, after: seq}` | `{task: <list entry>, events: [{seq, event}], last: seq, reset: bool}` | events after `after`, at most 4 MB per answer, so `last` may be short of the task's `seq`: a long log is read by repeating with `after = last` until `last` equals `task.seq`; `reset` when `after` is unknown |
+| `tasks.get` | `{task, after: seq}` | `{task: <list entry>, events: [{seq, event}], last: seq, reset: bool}` | events after `after`, at most 4 MiB per answer, so `last` may be short of the task's `seq`: a long log is read by repeating with `after = last` until `last` equals `task.seq`; `reset` when `after` is unknown |
 | `tasks.diff` | `{task, commit}` | `{task, base, commit, round, seq, files: [{path, kind, change: "added"\|"modified"\|"deleted", base_blob: blob\|null, blob: blob\|null}]}` | `commit` is a proposal commit of this task, pinned by the caller; never "the latest" |
 | `tasks.file` | `{task, commit, path}` | `{blob, content}` | the page checks that the git blob id of `content`'s bytes equals `blob` |
 | `tasks.merged` | `{task, proposal: commit, seq, merge_id, files: [{path, kind, proposal_blob: blob\|null, mine: {blob, content}\|{absent: true}\|null, merged: {blob, content}\|{absent: true}\|null}]}` | `{recorded: "merge"\|"receipt", commit: commit\|null}` | `proposal` and `seq` current, or `stale`; `files` names exactly the paths the proposal changed (`tasks.diff` of that commit), each `proposal_blob` as there: `null` exactly for a path the proposal deletes; idempotent by the exact request (below); the outcomes below |
