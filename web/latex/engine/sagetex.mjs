@@ -360,7 +360,8 @@ export function inlineHtml(st, it, esc, math, n) {
 // a code block: sageblock shows its code (as SageTeX typesets it), sagesilent nothing; both show a failed or
 // not-yet-run state (a stale one, which ran, none: it has no value to keep), and the @interacts it made
 export function blockHtml(st, it, esc, n) {
-  let h = it.shown !== undefined ? '<pre class="verbatim code sageblock">' + esc(it.shown) + "</pre>" : "";
+  // (a Magma block marked: the preview colours Sage and Python code only, latex/hl.ts)
+  let h = it.shown !== undefined ? '<pre class="verbatim code sageblock' + (isMagma(it) ? " magma" : "") + '">' + esc(it.shown) + "</pre>" : "";
   if (st.s !== "ok" && st.s !== "stale") h += '<div class="sagestate">' + chip(st, esc, false, n, langOf(it)) + "</div>";
   else if (isNonSage(it) && pyBig(st, it)) h += '<div class="sagestate">' + chip(pyBig(st, it), esc, false, n, langOf(it)) + "</div>";
   // (magmablock: what Magma printed, under its code, as text)

@@ -50,7 +50,7 @@ const checked = (src, vals = []) => {
   const src = doc("A \\magma{2+3}. M $n = \\magma{n}$.\n\\begin{magmablock}\nM := Matrix(2, [1,2,3,4]);\nM;\n\\end{magmablock}\n\\begin{magmasilent}\nn := 7;\n\\end{magmasilent}\nTwo: \\magma{M}. Odd: \\magma{\"$x_1 & {y}\"}.");
   const r = show(src, ["5\n", "7\n", "[1 2]\n[3 4]\n", "", "[1 2]\n[3 4]\n", "$x_1 & {y}\n"]), h = html(r);
   check("show: \\magma{} inline, as Magma printed it, in monospace", h.includes('<code class="magmaout">5</code>'), h.slice(0, 600));
-  check("show: magmablock's code, then what Magma printed, as text", h.includes('<pre class="verbatim code sageblock">M := Matrix(2, [1,2,3,4]);\nM;</pre><pre class="verbatim code magmaout">[1 2]\n[3 4]</pre>'), h);
+  check("show: magmablock's code, then what Magma printed, as text", h.includes('<pre class="verbatim code sageblock magma">M := Matrix(2, [1,2,3,4]);\nM;</pre><pre class="verbatim code magmaout">[1 2]\n[3 4]</pre>'), h);
   check("show: magmasilent shows nothing", !/y := 1|n := 7/.test(unesc(h.replace(/<[^>]+>/g, ""))), h);
   check("show: \\magma{} of a value printing on several lines is an error saying to use magmablock", unesc(h).includes("Magma item 5: error: " + ONE_LINE), h);
   check("show: Magma's text with TeX's specials stays text (no math, no command)", h.includes('<code class="magmaout">$x_1 &amp; {y}</code>'), h);

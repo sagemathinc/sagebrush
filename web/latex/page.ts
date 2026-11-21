@@ -76,6 +76,11 @@ let runMod: Promise<typeof import("./run-core.mjs")> | null = null, runTries = 0
 //  /sagebrush-latex-interact.js, fetched only once a preview or a Run has one; a failed fetch is tried again by a URL of
 //  its own)
 const interactUrl = new URL("sagebrush-latex-interact.js", import.meta.url).href;
+// (the preview's code blocks coloured: hl.ts, its own chunk, /sagebrush-latex-hl.js, fetched once a preview has one;
+//  one import for the page; not fetched, the code stays plain: a failed import isn't tried again, as the browser keeps
+//  it for its URL)
+const hlUrl = new URL("sagebrush-latex-hl.js", import.meta.url).href;
+let hlMod: Promise<typeof import("./hl") | null> | null = null;
 // (where you were in the file: view.ts, its own chunk, /sagebrush-latex-view.js (design/view-state.md))
 const viewUrl = new URL("sagebrush-latex-view.js", import.meta.url).href;
 let interactMod: Promise<typeof import("./interact")> | null = null, interactTries = 0;
@@ -867,6 +872,10 @@ export async function mount(root: HTMLElement, host: Host): Promise<void> {
     if (running) presenting.running(true);
   }, () => say("Couldn't load the presenter. Check the network, then click Present to try again."));
   E.onRendered(() => { presentBtn.hidden = slidesNow().length === 0; });
+  // (one wait for the chunk per page at most: renders while it comes add none, and once it comes the preview as it is
+  //  then is coloured; astra's SEC on #1009)
+  let hlWait = false;
+  E.onRendered(() => { if (!hlWait && preview.querySelector("pre.sageblock:not([data-hl])")) { hlWait = true; (hlMod ??= import(hlUrl).catch(() => null)).then((m) => { hlWait = false; if (m && live()) m.colour(preview, life.signal); }); } });
   // (the preview's interacts, drawn after each render that has one not drawn yet; the slide being presented shown again,
   //  so its copy has them)
   E.onRendered(() => {
