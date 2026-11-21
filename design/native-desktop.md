@@ -27,7 +27,7 @@ recorded the §7 answers, is part of r12.*
   - File and network permissions are enforced in the engine.
   - There is still no OS sandbox.
 - **Which JavaScript runtime the engine uses is a packaging choice, not architecture.** The options are Bun, Deno and Node's single executable (SEA). V8 against JSC is part of that choice. N1 measures it (§7).
-- **Signing and notarizing engine binaries:** William's keys only. Agents never touch them (§6).
+- **Signing and notarizing engine binaries and the app:** William's keys only, used only by a CI job, from a GitHub environment he fills. Agents never see or handle them (§6).
 - **Nothing ships, is signed, tagged, renamed or relicensed without William.**
 
 ## 1. William's decisions
@@ -242,10 +242,15 @@ r4's A-vs-B timings stay withdrawn: the PyPI wheel came from a different commit.
 
 ## 6. Signing and notarization
 
-- Engine binaries and app installers are signed and notarized **only with William's keys, by William.**
+- Engine binaries and app installers are signed and notarized **only with William's keys.**
   - This covers Apple notarization, Windows Authenticode and the update signing key.
-  - Agents never touch the keys, accounts, certificates or signing steps.
-- Until then, every build an agent makes is an unsigned local build, and nothing is published.
+- **Where the keys are used:** CI jobs, and nowhere else. The keys are secrets of a GitHub environment that William creates and fills himself (`sagebrush-signing` for Apple). Two jobs use it today:
+  - `mac-release` (`.github/workflows/app.yml`) builds the signed and notarized Mac app. It runs only for a push of an `app-v*` tag or a dispatch that asks to sign, never on a pull request (`scripts/test-app-release-guard.mjs` pins the cases).
+  - `signing-check` (`.github/workflows/signing-check.yml`), run by hand, checks the secrets: it signs only throwaway probes (a copied executable and a throwaway installer package), and prints PASS/FAIL checks and non-secret counts, never secret values.
+  - Agents may write such jobs; each lands through a pull request that a person merges, since agents don't push workflow files. Their secret handling gets a security review.
+  - Agents never see, hold, copy or print a key, a certificate, its password or an account login, and never sign anything outside that job.
+  - A signed build is an artifact of the job. Publishing it (a release, a download link) is William's decision.
+- Every build an agent makes on its own machine is an unsigned local build, and nothing is published. CI's other app jobs keep their installers as artifacts, unsigned.
 
 ## 7. N1, narrowed
 

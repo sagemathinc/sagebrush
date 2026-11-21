@@ -89,7 +89,10 @@ export const LATEX_LAZY = {
 //  (+768 / +314), + 64)
 // (253,962 raw / 84,895 gzip: Nov 19 2026, the reload record on the LaTeX page with the run of a .tex the agent made,
 //  master a3f1e30b: 253,898 / 84,831 measured, + 64)
-export const LATEX_CAPS = { raw: 253962, gzip: 84895 };
+// (254,169 raw / 84,955 gzip: Nov 20 2026, A5: the LaTeX page leaves another page's reconnect record alone and takes its
+//  own on a navigation back as on a reload (latex/page.ts), measured on the shipped build of the head on master ddafeb50
+//  with bun 1.4.4 and node 24.21.0: 254,105 / 84,891, + 64)
+export const LATEX_CAPS = { raw: 254169, gzip: 84955 };
 export const gz = (b) => gzipSync(b, { level: 9 }).length;
 
 // Each lazy chunk's own cap (raw, gzip), fetched only on its own use, so outside the group:
@@ -170,7 +173,14 @@ export const LATEX_LAZY_CAPS = {
   // (62,408 / 21,455: Nov 20 2026, the agent's bar as a compact chip with its menu (keyboard, focus kept across updates,
   //  controls only for the pairing shown; agent-ui.ts), measured on the shipped build of the head on master 300519cb with
   //  bun 1.4.4 and node 24.21.0: 62,344 / 21,391, + 64)
-  AGENT: { label: "the LaTeX agent pairing's chunk", raw: 62408, gzip: 21455 },
+  // (63,737 / 21,833: Nov 20 2026, A5 (reconnect): the Connect dialog offers Reconnect or remembered access first, a spent
+  //  code said as spent, a same-tab return within 10 min reconnects, another page's record is left alone, and a ?pair= link drops the page's own
+  //  (agent-ui.ts, agent-pair.ts), measured on the shipped build of the head on master ddafeb50 with bun 1.4.4 and node
+  //  24.21.0: 63,673 / 21,769, + 64)
+  // (63,833 / 21,862: Nov 21 2026, A5 review: the pagehide mark scoped to this page's own record, and the page-duration
+  //  choice's words (agent-ui.ts, agent-pair.ts), measured on the shipped build of the head on master ddafeb50 with bun
+  //  1.4.4 and node 24.21.0: 63,769 / 21,798, + 64)
+  AGENT: { label: "the LaTeX agent pairing's chunk", raw: 63833, gzip: 21862 },
   // (the agent tools' work: web/latex/tools.ts, latex_check's report and latex_render's pictures, on an agent's first call)
   // (16,546 / 6,950: Nov 11 2026: latex_build's own code (build.ts, the
   //  engine driven from a snapshot, and the pages' fit) here, out of the eager group, its shared rules handed in by the

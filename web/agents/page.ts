@@ -1059,11 +1059,22 @@ const editor = mountComposer({ submit, stop: () => interrupt(current()), render:
 // (the Files | Agents switch at the right of the chat list's header, Agents pressed: Files opens the notebook page with
 //  its files, as the file panel's switch opens this page; William, Nov 12)
 { const sw = modeSwitch("agents"), brand = document.querySelector<HTMLElement>("nav.side .brand"); sw.style.marginLeft = "auto"; if (brand) { brand.style.whiteSpace = "nowrap"; brand.append(sw); } const f = sw.querySelector<HTMLButtonElement>('[data-mode="files"]'); if (f) f.onclick = () => void toFiles(); }
-// (to the files: the notebook page with its file browser shown.  The thread is left as New chat leaves it
-//  (mayLeaveThread): its files' pending edits saved, a running cell stopped only if the person says so; refused, this
-//  page stays and nothing is changed.  Admitted, the browser's own choice to show the files is set, then the page left)
+// (to the files: the notebook page with its file browser shown.  With an agent connected or connecting, in a new tab:
+//  leaving would end this page's connection, and a page that comes back by navigating can't take it up again (only a
+//  reload can), so the agent's turn would be lost.  This page, its chat and the agent stay as they are.  Else the
+//  thread is left as New chat leaves it (mayLeaveThread): its files' pending edits saved, a running cell stopped only
+//  if the person says so; refused, this page stays and nothing is changed.  Admitted, the browser's own choice to show
+//  the files is set, then the page left)
 let leaving = false;
 async function toFiles() {
+  if (pairing && pairing.state !== "closed") {
+    try { localStorage.setItem("sagebrush-files-sidebar", "1"); } catch {}
+    // (opened in the click itself, so the browser allows it; refused anyway, this page stays and says so)
+    const w = window.open("/", "_blank");
+    if (w) w.opener = null;
+    else toast("Your browser blocked the new tab for Files. Allow pop-ups for this site, or open it in a new tab yourself.", 6000);
+    return;
+  }
   if (leaving) return;
   leaving = true;
   try {
@@ -1126,10 +1137,14 @@ addEventListener("keydown", (e) => {
 
 // (a turn that was running when the page closed can't go on: it ends interrupted)
 session.endInterrupted();
-// (A14: a reload record waiting for its restore says this page was connected: no demo, even before the workspace is
-// open and the restore decided; only its presence is read here)
+// (A14: a reload record of this page waiting for its restore says this page was connected: no demo, even before the
+// workspace is open and the restore decided; only its page is read here (another page's record, left in the tab for that
+// page, A5, says nothing about this one))
 try {
-  if (sessionStorage.getItem(RELOAD_KEY) !== null) connectedHere = true;
+  const raw = sessionStorage.getItem(RELOAD_KEY);
+  let page: unknown = null;
+  try { page = raw === null ? null : JSON.parse(raw)?.page ?? null; } catch {}
+  if (raw !== null && (typeof page !== "string" || page === location.origin + location.pathname)) connectedHere = true;
 } catch {
   // (no sessionStorage: no record)
 }
