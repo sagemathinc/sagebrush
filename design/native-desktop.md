@@ -1,6 +1,6 @@
 # Native engines in the desktop app
 
-*Status: plan r19: r11 (the architecture revision, its tests and the page items) with William's answers to every §9 question recorded (Nov 7, about 2:26–2:31 PM PST), and (r14–r17) the licence invariant, the support-window clock and the PDF milestone N6 with its tests (T6) and measurements (§7.1), and (r18) William's revised PDF decision (installed TeX only) and his test-key choice, and (r19) the signing policy (§1 item 13, §6): the environment settings that keep the keys away from pull requests, where each key lives, and that a signed build kept as an Actions artifact is public; docs only, nothing is built. It replaces r12 (merged at 2999416e) with William's architecture decision of
+*Status: plan r20: r11 (the architecture revision, its tests and the page items) with William's answers to every §9 question recorded (Nov 7, about 2:26–2:31 PM PST), and (r14–r17) the licence invariant, the support-window clock and the PDF milestone N6 with its tests (T6) and measurements (§7.1), and (r18) William's revised PDF decision (installed TeX only) and his test-key choice, and (r19) the signing policy (§1 item 13, §6): the environment settings that keep the keys away from pull requests, where each key lives, and that a signed build kept as an Actions artifact is public, and (r20) those settings as audited in force on Nov 21, 2026; docs only, nothing is built. It replaces r12 (merged at 2999416e) with William's architecture decision of
 Nov 7, 2026, about 12:15–12:30 PM PST.
 
 Owner and sole author: @sagebrush-remote-compute. Reviewers: astra (SEC), daybreak3 (ENGINE), daybreak4 (PERF),
@@ -263,41 +263,33 @@ r4's A-vs-B timings stay withdrawn: the PyPI wheel came from a different commit.
 
 ### 6.2 What keeps the keys away from pull requests
 
-Today this rests on each job's `if:`.
+Each job's `if:` is the first guard:
 - `mac-release` runs only for a push of an `app-v*` tag, or for a dispatch from master that asks to sign. It never runs on a pull request; `scripts/test-app-release-guard.mjs` pins the cases.
-- `signing-check` (`.github/workflows/signing-check.yml`), run by hand, checks the secrets: it signs only throwaway probes (a copied executable and a throwaway installer package), and prints PASS/FAIL checks and non-secret counts, never secret values. It is dispatch-only, but nothing checks which branch it runs from.
+- `signing-check` (`.github/workflows/signing-check.yml`), run by hand, checks the secrets: it signs only throwaway probes (a copied executable and a throwaway installer package), and prints PASS/FAIL checks and non-secret counts, never secret values. It runs only by dispatch from master in this repository; the same test pins that.
 
-A job's `if:` is in a workflow file, and any branch or tag pushed to this repository can carry a changed one. A run from that branch (a push, or a pull request from it) could then name the environment and receive its secrets. So the controls that count are the environment's own settings, which only a repository admin can change.
+A job's `if:` is in a workflow file, and any branch or tag pushed to this repository can carry a changed one. A run from that branch (a push, or a pull request from it) could then name the environment and receive its secrets. So the controls that count are the environment's own settings and the repository's rulesets, which only a repository admin can change.
 
-**These settings are proposed, not yet in force.** `sagebrush-signing` as it stands (read through GitHub's API on Nov 21, 2026):
-- its deployment rules admit the branch `master` and the tag pattern `v*`, not `app-v*`;
-- it has no required reviewer;
-- administrators may bypass it;
-- the repository has no tag ruleset.
+**In force,** as read through GitHub's API on Nov 21, 2026:
 
-So today a changed workflow on a pushed `v*` tag would be admitted with no approval. Until William applies the settings below and they are checked again through the API, only the jobs' `if:` lines stand in the way. Each signing environment (§6.1) must have:
+- **`sagebrush-signing`:**
+  - **Deployment branches and tags:** only the branch `master` and the tag pattern `app-v*`. A job from any other branch or tag can't use the environment's secrets, whatever its `if:` says.
+  - **Required reviewer:** William. Every job that uses the environment waits until he approves that run.
+    - "Prevent self-review" is off: William is the one reviewer, and he also pushes the tags.
+  - **Administrator bypass: off,** so no one, an admin included, can skip the approval.
+- **The tag ruleset "app-v tags"** is active on `refs/tags/app-v*` and restricts creating, moving and deleting those tags.
+  - Its only bypass is the repository's Admin role, which today is William alone. The agents' account has the Maintain role and can't bypass it.
+- **The `master` ruleset** requires a pull request, the `ci` and `app-ci` checks, and a merge queue in which every entry must pass, with a 120-minute timeout. So a changed workflow reaches master only through a pull request that passes those checks.
+- **No `pull_request_target` workflows:** they run with the base repository's secrets on a pull request's event. There are none; a new one needs William's OK.
 
-- **Deployment branches and tags: "Selected branches and tags"**, with only the branch `master` and the tag pattern `app-v*` (today's `v*` rule is removed). A job from any other branch or tag can't use the environment's secrets, whatever its `if:` says.
-- **Required reviewers:** William. Every job that uses the environment waits until he approves that run.
-  - "Prevent self-review" stays off: William is the one reviewer, and he also pushes the tags.
-- **"Allow administrators to bypass configured protection rules": off**, so no one, an admin included, can skip the approval.
-
-And the repository must have:
-
-- **A tag ruleset for `app-v*`:** only William may create, move or delete those tags.
-  - Its bypass list holds William alone, never the agents' account. Without it, anyone who can push a tag could start a signing run, which would then wait for William's approval.
-- **No `pull_request_target` workflows:** they run with the base repository's secrets on a pull request's event. There are none today; a new one needs William's OK.
-- **`signing-check` from master only:** its job gets `if: github.ref == 'refs/heads/master'`, so it is dispatch-only from master, like `mac-release`'s dispatch. The environment's branch limit enforces the same thing.
-
-Changing these settings needs an admin, so William applies them. They are listed exactly in the proposed settings that come with this revision. Once they are applied and the API shows them in force, this section's "proposed" note goes.
+The other signing environments of §6.1 must get the same three environment settings before any job uses them. Changing any of these settings needs an admin, so William makes the changes.
 
 ### 6.3 A signed build kept as an artifact is public
 
-- `mac-release` keeps the signed, notarized disk image as an Actions artifact (`sagebrush-app-macos-signed`, for 14 days).
+- `mac-release` keeps the signed, notarized disk image as an Actions artifact (`sagebrush-app-macos-signed`, for 1 day).
 - In a public repository, anyone with read access can download an artifact, which means any signed-in GitHub user. So a signed run publishes that build, in practice, whether or not a release is made.
 - Therefore:
   - Ask for a signed run (a tag push, or a dispatch with `sign`) only for a build William means to publish. To test signing, use `signing-check`, which signs only throwaway probes.
-  - A signed artifact is kept for at most 1 day, long enough to move it to the release. A later workflow change sets this, and William merges it.
+  - A signed artifact is kept for 1 day, long enough to move it to the release. `scripts/test-app-release-guard.mjs` pins this.
   - Unsigned builds stay as artifacts, as now. Nothing in them carries William's signature.
 - Making a release (a release page, a download link, an update) stays William's decision.
 
@@ -464,3 +456,4 @@ All five were answered on Nov 7, 2026, between about 2:26 and 2:31 PM PST. They 
 - **Evidence:** the §3 packets.
 - **External, checked Nov 7, 2026:** bun.com/docs/project/licensing.
 - **Signing (r19):** `.github/workflows/app.yml` (`mac-release`), `.github/workflows/signing-check.yml` and `scripts/test-app-release-guard.mjs`, at 9215a0f0. GitHub's documentation on deployment environments and on downloading workflow artifacts, checked Nov 21, 2026.
+- **Signing settings (r20):** the environment `sagebrush-signing`, the repository's rulesets and roles, read through GitHub's API in the security review of Nov 21, 2026.

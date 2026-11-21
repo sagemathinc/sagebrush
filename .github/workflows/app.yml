@@ -485,7 +485,9 @@ jobs:
             app/src-tauri/target/release/bundle/dmg/*.dmg
             app/src-tauri/target/release/bundle/dmg/*.dmg.sha256
           if-no-files-found: error
-          retention-days: 14
+          # (a signed artifact is public in practice: any signed-in GitHub user can download it; one day is enough to move
+          #  it to the release)
+          retention-days: 1
       # (the keychain, the certificate file and the key file go, whatever happened above: their paths were fixed first)
       - name: Remove the credentials
         if: always()
