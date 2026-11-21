@@ -211,7 +211,8 @@ fn invariants_of_random_and_structured_square_matrices() {
     }
 }
 
-/// p I with a large prime p: e = p^(n-1), on the big-integer path.
+/// p I and p U (U unimodular) with a large prime p: the content p is
+/// divided out first, so these are as fast as I and U.
 #[test]
 fn invariants_of_p_times_identity() {
     let p = BigInt::from((1u64 << 61) - 1);
@@ -222,6 +223,47 @@ fn invariants_of_p_times_identity() {
         }
         let a = zm(n, n, d);
         assert_eq!(invariants_square(&a), Some(vec![p.clone(); n]));
+    }
+    let mut s = 0x3141_5926_5358_9793u64;
+    for n in [4usize, 7] {
+        let u = unimodular(n, 4 * n, &mut s).scale(&p);
+        assert_eq!(invariants_square(&u), Some(vec![p.clone(); n]));
+    }
+}
+
+/// Diagonal matrices take the gcd/lcm shortcut: against the reference,
+/// with negative entries, repeated primes, and zeros (singular: None).
+#[test]
+fn invariants_of_diagonal_matrices() {
+    let mut s = 0x1618_0339_8874_9894u64;
+    let p = BigInt::from((1u64 << 61) - 1);
+    let picks = [big(1), big(-2), big(3), big(4), big(-6), big(9), big(10), big(12), p.clone(), &p * big(6), big(0)];
+    for n in [1usize, 2, 3, 5, 8] {
+        for _ in 0..30 {
+            let mut a = ZMat::zero(n, n);
+            for i in 0..n {
+                a.d[i * n + i] = picks[(rng(&mut s) % picks.len() as u64) as usize].clone();
+            }
+            assert_eq!(invariants_diagonal(&a), Some(reference(&a)), "{:?}", a.d);
+            check_square(&a);
+        }
+    }
+    assert_eq!(invariants_diagonal(&zm(2, 2, vec![big(1), big(1), big(0), big(1)])), None, "not diagonal");
+}
+
+/// Content 1 but large invariants other than the last: e >= p^2 > 2^62,
+/// the big-integer path on natural data.
+#[test]
+fn invariants_with_a_large_e_take_the_big_path() {
+    let mut s = 0x2718_2818_2845_9045u64;
+    let p = BigInt::from((1u64 << 61) - 1);
+    let q = BigInt::from(1_000_003);
+    for inv in [vec![big(1), p.clone(), p.clone(), p.clone()], vec![big(1), big(3) * &p, big(3) * &p, big(3) * &p * &q]] {
+        let a = structured(4, 4, &inv, &mut s);
+        let d: BigInt = inv.iter().product();
+        let (x, den) = zmat::solve(&a, &zmat::det_rhs(4)).expect("nonsingular");
+        assert!(modulus_from(&d, &x, &den) >= BigInt::from(1u64 << 62), "the big path is reached");
+        assert_eq!(invariants_square(&a), Some(inv));
     }
 }
 

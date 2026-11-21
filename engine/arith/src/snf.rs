@@ -15,6 +15,9 @@
 //!    so its first n - 1 entries are t_1, ..., t_(n-1); then t_n = d / their
 //!    product.  e = 1 needs no elimination: t_1 = ... = t_(n-1) = 1.
 //!
+//! The content (the gcd of the entries, which is t_1) is divided out
+//! first, so a common factor of every entry never makes e large.
+//!
 //! The solve's right-hand side affects only how small e is, never the
 //! answer: delta = 1 is the classical Smith form modulo the determinant
 //! (Iliopoulos; Hafner and McCurley).  e is small when the invariants other
@@ -27,7 +30,8 @@ use num_traits::{One, Signed, ToPrimitive, Zero};
 use sagebrush_bigint::BigInt;
 
 /// Moduli below this take [`smith_mod`]'s word path: two residues' product
-/// is below 2^124, and a sum of two such below 2^125, in a u128.
+/// is below 2^124, and a sum of two such below 2^125, in a u128.  (2^63
+/// would still fit; 2^62 is a deliberate margin.)
 const WORD_E: u64 = 1 << 62;
 
 /// Z/eZ for [`smith_mod`]'s elimination: residues in [0, e), compared and
@@ -312,6 +316,18 @@ pub fn invariants_nonsingular(a: &ZMat, d: &BigInt, solved: Option<(ZMat, BigInt
     if n == 1 {
         return vec![d.clone()];
     }
+    // t_1 is the content g (the gcd of the entries): the invariants are g
+    // times those of a / g, whose e is smaller by g^(n-1) at least (a
+    // common factor would otherwise make every invariant, and e, large:
+    // p I, or p U for a unimodular U)
+    let g = a.d.iter().fold(BigInt::zero(), |g, v| g.gcd(v));
+    if !g.is_one() {
+        let ag = ZMat { rows: n, cols: n, d: a.d.iter().map(|v| v / &g).collect() };
+        let dg = d / g.pow(n as u32);
+        // a x = b gives (a / g)(g x) = b: the same denominator, numerators times g
+        let sg = solved.map(|(x, den)| (x.scale(&g), den));
+        return invariants_nonsingular(&ag, &dg, sg).into_iter().map(|t| t * &g).collect();
+    }
     let e = if d.bits() <= 62 {
         d.clone()
     } else {
@@ -334,12 +350,37 @@ fn invariants_with(a: &ZMat, d: &BigInt, e: &BigInt) -> Vec<BigInt> {
     t
 }
 
+/// The invariant factors of a square diagonal matrix, by pairs: (x, y) ->
+/// (gcd, lcm) for each i < j leaves each entry dividing the next (zeros
+/// last).  None if `a` is not diagonal.
+fn invariants_diagonal(a: &ZMat) -> Option<Vec<BigInt>> {
+    let n = a.rows;
+    if (0..n).any(|i| (0..n).any(|j| i != j && !a.d[i * n + j].is_zero())) {
+        return None;
+    }
+    let mut v: Vec<BigInt> = (0..n).map(|i| a.d[i * n + i].abs()).collect();
+    for i in 0..n {
+        for j in i + 1..n {
+            if v[i].is_zero() || (!v[j].is_zero() && !(&v[j] % &v[i]).is_zero()) {
+                let g = v[i].gcd(&v[j]);
+                let l = if g.is_zero() { BigInt::zero() } else { &v[i] / &g * &v[j] };
+                v[i] = g;
+                v[j] = l;
+            }
+        }
+    }
+    Some(v)
+}
+
 /// The invariant factors of a square matrix, or None when it is singular
 /// (the caller compresses those first).
 pub fn invariants_square(a: &ZMat) -> Option<Vec<BigInt>> {
     assert_eq!(a.rows, a.cols, "invariants_square needs a square matrix");
     if a.rows == 0 {
         return Some(vec![]);
+    }
+    if let Some(t) = invariants_diagonal(a) {
+        return (!t.iter().any(|x| x.is_zero())).then_some(t);
     }
     let (det, solved) = zmat::det_with_solve(a);
     let d = det.abs();
