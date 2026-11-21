@@ -4,6 +4,7 @@
 //   1. William's report: cell 1 `10`, cell 2 `_`, both show 10; cell 1 changed to `5`, Shift+Enter: cell 2 shows 5;
 //   2. __ and ___ are the 2nd and 3rd nearest cells above that showed a value; a cell showing none is skipped;
 //   3. the value is the cell above's, not the last one run: a cell below that runs first doesn't change it.
+//   4. a cell that stops or starts showing a value moves ___ for a reader below it that it doesn't supply: it reruns.
 // Serve web/dist first:
 //   bun web/build.ts && bash web/run-tests.sh reactive-outputs
 import { spawn } from "node:child_process";
@@ -91,6 +92,24 @@ try {
   await settled();
   await until(`sagebrush.notebook.cells()[${at + 1}].out.textContent.trim() === '31'`, 15000).catch(() => {});
   ok((await out(at + 1)) === "31", `changing D reruns B with A's value still: 1 + 30 = 31 (${await out(at + 1)})`);
+
+  // 4. a cell that stops or starts showing a value moves ___ for a reader below it that it doesn't supply.
+  // Stops: below D (showing 30), P `100`, Q `200`, S `300`, R `___` (100); Q to `y = 0`: R's ___ is D's 30.
+  const p = at + 3;
+  for (const [i, code] of [[p, "100"], [p + 1, "200"], [p + 2, "300"], [p + 3, "___"]]) { await typeAndRun(i, code); await settled(); }
+  ok((await out(p + 3)) === "100", `\`___\` below \`100\`, \`200\`, \`300\`: 100 (${await out(p + 3)})`);
+  await typeAndRun(p + 1, "y = 0");
+  await settled();
+  await until(`sagebrush.notebook.cells()[${p + 3}].out.textContent.trim() === '30'`, 15000).catch(() => {});
+  ok((await out(p + 3)) === "30", `the 2nd of them stops showing a value: \`___\` reruns, now D's 30 (${await out(p + 3)})`);
+  // Starts: below R (showing 30), P2 `1000`, Q2 `y = 0`, S2 `3000`, R2 `___` (R's 30); Q2 to `2000`: R2's ___ is P2's 1000.
+  const q = p + 4;
+  for (const [i, code] of [[q, "1000"], [q + 1, "y = 0"], [q + 2, "3000"], [q + 3, "___"]]) { await typeAndRun(i, code); await settled(); }
+  ok((await out(q + 3)) === "30", `\`___\` below \`1000\`, \`y = 0\`, \`3000\`: the 3rd cell above showing one, 30 (${await out(q + 3)})`);
+  await typeAndRun(q + 1, "2000");
+  await settled();
+  await until(`sagebrush.notebook.cells()[${q + 3}].out.textContent.trim() === '1000'`, 15000).catch(() => {});
+  ok((await out(q + 3)) === "1000", `the middle one starts showing a value: \`___\` reruns, now 1000 (${await out(q + 3)})`);
 } catch (e) {
   ok(false, "threw: " + (e?.stack ?? e));
 } finally {

@@ -1,7 +1,8 @@
 import test from "node:test";
 import assert from "node:assert/strict";
-import { Reactive, SCOPE_SEP, setTestHooks, type CellInfo, type CellState } from "../src/notebook-reactive";
+import { Reactive, SCOPE_SEP, setTestHooks, type CellInfo, type CellState, type ExecResult, type WavePlan } from "../src/notebook-reactive";
 import type { CellError } from "../src/notebook-graph";
+import type { WaveDecision } from "../src/wave-policy";
 import { Budget, BUDGET } from "../src/remote-approval";
 import { analyzeCell } from "../src/dataflow";
 import { renameRedefinitions } from "../src/rename";
@@ -689,22 +690,40 @@ test("forget: the host is told which cells defined the names", async () => {
 
 // (a notebook whose host says whether each run showed a value: a cell whose last line is an expression, not an
 // assignment or a call of print, as the interpreter's display hook would)
-function showingNotebook(codes: string[], sayShown = true) {
+// (`waves`: the host sends each action as one wave, running every entry with code)
+function showingNotebook(codes: string[], sayShown = true, waves = false) {
   const cells: CellInfo[] = codes.map((code, i) => ({ id: `c${i}`, code }));
   const log: string[] = [];
+  const execute = async (id: string, code: string) => {
+    log.push(id);
+    const last = code.trim().split("\n").pop() ?? "";
+    const shown = !/(^|[^=!<>])=($|[^=])/.test(last) && !/^print\(/.test(last);
+    return { ok: true, ms: 1, ...(sayShown ? { shown } : {}) };
+  };
   const r = new Reactive({
     cells: () => cells,
     analyze: async (code) => analyzeCell(code),
-    execute: async (id, code) => {
-      log.push(id);
-      const last = code.trim().split("\n").pop() ?? "";
-      const shown = !/(^|[^=!<>])=($|[^=])/.test(last) && !/^print\(/.test(last);
-      return { ok: true, ms: 1, ...(sayShown ? { shown } : {}) };
-    },
+    execute,
     forget: async () => {},
     status: () => {},
+    ...(waves ? {
+      executeWave: async (w: WavePlan) => {
+        const decisions: WaveDecision[] = [], results: (ExecResult | undefined)[] = [];
+        for (const e of w.entries) {
+          if (!e.run) { decisions.push({ kind: "gone" }); results.push(undefined); continue; }
+          decisions.push({ kind: "run" });
+          results.push(await execute(e.cell, e.run.code));
+        }
+        return { decisions, results };
+      },
+    } : {}),
   });
-  return { r, log, set(i: number, code: string) { cells[i] = { ...cells[i], code }; } };
+  return {
+    r, log, cells,
+    set(i: number, code: string) { cells[i] = { ...cells[i], code }; },
+    // (the page's cells and the reactive run state: every cell run once, from the top)
+    async start() { r.budget = Infinity; await r.load(); await r.run(cells.map((c) => c.id)); log.length = 0; },
+  };
 }
 
 test("output names: William's repro, `_` below `10` reruns when it changes to `5`", async () => {
@@ -747,3 +766,71 @@ test("output names: a kernel that doesn't say what was shown (a remote one): a r
   assert.deepEqual((await nb.r.run(["c0"])).ran, ["c0", "c1"]);
 });
 
+// A cell that starts or stops showing a value moves `_`, `__`, `___` for every reader below it whose names now come
+// from other cells, its children or not: each such reader reruns, once; the others don't.  Both ways of running.
+for (const waves of [false, true]) {
+  const how = waves ? " (in waves)" : "";
+  const changed = async (codes: string[], i: number, code: string) => {
+    const nb = showingNotebook(codes, true, waves);
+    await nb.start();
+    nb.set(i, code);
+    const rep = await nb.r.run([`c${i}`]);
+    return { nb, ran: rep.ran };
+  };
+  const once = (ran: string[], id: string) => ran.filter((x) => x === id).length === 1;
+
+  test(`output names${how}: a cell that starts showing shifts a \`___\` reader it doesn't supply: [1, 2, x = 0, 3, ___], the 3rd cell to 4`, async () => {
+    const { nb, ran } = await changed(["1", "2", "x = 0", "3", "___"], 2, "4");
+    assert.deepEqual(ran, ["c2", "c4"]);
+    assert.deepEqual([...nb.r.graph.parents("c4")], ["c1"]);
+  });
+  test(`output names${how}: a cell that stops showing leaves a \`___\` reader with none: [1, 2, 3, ___], the 2nd cell to x = 0`, async () => {
+    const { nb, ran } = await changed(["1", "2", "3", "___"], 1, "x = 0");
+    assert.deepEqual(ran, ["c1", "c3"]);
+    assert.deepEqual([...nb.r.graph.parents("c3")], []);
+  });
+  for (const [name, codes] of [["__", ["1", "2", "__"]], ["___", ["1", "2", "3", "___"]]] as const) {
+    const n = codes.length, near = n - 2, reader = `c${n - 1}`;
+    test(`output names${how}: \`${name}\` reruns when the nearest cell above stops showing a value`, async () => {
+      const { ran } = await changed([...codes], near, "x = 0");
+      assert.deepEqual(ran, [`c${near}`, reader]);
+    });
+    test(`output names${how}: \`${name}\` reruns when the nearest cell above starts showing a value`, async () => {
+      const start: string[] = [...codes];
+      start[near] = "x = 0";
+      const nb = showingNotebook(start, true, waves);
+      await nb.start();
+      nb.set(near, "7");
+      const rep = await nb.r.run([`c${near}`]);
+      assert.deepEqual(rep.ran, [`c${near}`, reader]);
+      assert.ok(once(rep.ran, reader));
+    });
+  }
+  test(`output names${how}: a reader above the cell, or one whose cells don't move, doesn't rerun`, async () => {
+    const { ran } = await changed(["1", "2", "_", "x = 0", "_ + 1"], 3, "4");
+    // (c2 is above c3; c4's _ moves from c2 to c3, so it reruns, once)
+    assert.deepEqual(ran, ["c3", "c4"]);
+    const b = await changed(["1", "x = 0", "2", "_"], 1, "5");
+    // (c3's _ is still c2's)
+    assert.deepEqual(b.ran, ["c1"]);
+  });
+  test(`output names${how}: a deleted cell that showed a value moves the readers below it`, async () => {
+    const nb = showingNotebook(["1", "2", "__"], true, waves);
+    await nb.start();
+    nb.cells.splice(1, 1);
+    const rep = await nb.r.remove(["c1"]);
+    assert.deepEqual(rep.ran, ["c2"]);
+    assert.deepEqual([...nb.r.graph.parents("c2")], []);
+  });
+  test(`output names${how}: moving a cell that showed a value moves the readers' cells`, async () => {
+    const nb = showingNotebook(["1", "2", "__"], true, waves);
+    await nb.start();
+    assert.deepEqual([...nb.r.graph.parents("c2")], ["c0"]);
+    // c0 below c1: c2's __ is now c1's
+    const [a, b] = [nb.cells[0], nb.cells[1]];
+    nb.cells[0] = b; nb.cells[1] = a;
+    const rep = await nb.r.reordered();
+    assert.deepEqual(rep.ran, ["c2"]);
+    assert.deepEqual([...nb.r.graph.parents("c2")], ["c1"]);
+  });
+}

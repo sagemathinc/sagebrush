@@ -198,6 +198,8 @@ export class NotebookGraph {
   private files = new Map<string, { reads: string[]; writes: string[] }>();
   /** the cells that showed a value in their last run (setShown) */
   private shown: ReadonlySet<string> = new Set<string>();
+  // each reader of an output name: the cells its names come from ("_=c0 ___=c2", one empty when there's none)
+  private providers: ReadonlyMap<string, string> = new Map<string, string>();
   private readonly strict: boolean;
   private readonly analyze?: (code: string, id: string) => CellAnalysis;
 
@@ -350,16 +352,22 @@ export class NotebookGraph {
     // 2nd or 3rd nearest cell above it that showed a value in its last run.
     // Found by running too, so, as for files, one that would close a cycle is
     // left out.
+    const providers = new Map<string, string>();
     for (let i = 0; i < ids.length; i++) {
       const outs = this.nodes.get(ids[i])!.analysis?.outputs;
       if (!outs || !outs.size) continue;
       const above: string[] = [];
       for (let j = i - 1; j >= 0 && above.length < 3; j--) if (this.shown.has(ids[j])) above.push(ids[j]);
+      const from: string[] = [];
       for (const [k, name] of ["_", "__", "___"].entries()) {
+        if (!outs.has(name)) continue;
         const p = above[k];
-        if (p !== undefined && outs.has(name) && !childrenOf.get(p)!.has(ids[i]) && !reaches(childrenOf, ids[i], p)) edge(p, ids[i]);
+        from.push(`${name}=${p ?? ""}`);
+        if (p !== undefined && !childrenOf.get(p)!.has(ids[i]) && !reaches(childrenOf, ids[i], p)) edge(p, ids[i]);
       }
+      providers.set(ids[i], from.join(" "));
     }
+    this.providers = providers;
     // published: read-only views, the lists frozen
     this.parentsOf = new Map(ids.map((id) => [id, new SetView(parentsOf.get(id)!)]));
     this.childrenOf = new Map(ids.map((id) => [id, new SetView(childrenOf.get(id)!)]));
@@ -381,6 +389,10 @@ export class NotebookGraph {
     if (next.size === this.shown.size && [...next].every((id) => this.shown.has(id))) return;
     this.shown = next;
     this.build();
+  }
+  /** The cells reading `_`, `__` or `___`, each with the cells those names come from now (compare two to find the readers whose values moved). */
+  outputProviders(): ReadonlyMap<string, string> {
+    return this.providers;
   }
   /** Whether a cell showed a value in its last run. */
   showed(id: string): boolean {
