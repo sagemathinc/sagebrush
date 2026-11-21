@@ -72,8 +72,12 @@ fn hermite_units_and_stop_checks() {
     let tall = rand(20, 6, 50, 7);
     let def = rand(9, 7, 20, 11);
     let m12 = rand(12, 12, 100, 13);
-    let m48 = rand(48, 48, 100, 17);
-    let (b10, b12, b48) = (big(&m10), big(&m12), big(&m48));
+    // (56: the cyclic route on every target, at or above its threshold and
+    // below the modular one, native and WebAssembly alike)
+    assert!(api::HERMITE_CYCLIC_MIN_N_NATIVE.max(api::HERMITE_CYCLIC_MIN_N_WASM) <= 56);
+    assert!(api::HERMITE_MODULAR_MIN_N_NATIVE.min(api::HERMITE_MODULAR_MIN_N_WASM) > 56);
+    let m56 = rand(56, 56, 100, 17);
+    let (b10, b12, b56) = (big(&m10), big(&m12), big(&m56));
     // d for the tall input: |det| of its first 6 rows, a multiple of the
     // lattice's determinant (the lattice contains those rows)
     let d6 = linalg::det_crt(&tall[..6]).abs();
@@ -99,7 +103,7 @@ fn hermite_units_and_stop_checks() {
         ("hermite_modular 10", measure(|| api::hermite_modular(&b10))),
         ("zlin hnf 9 x 7", measure(|| zlin::hnf(&big(&def)))),
         ("hermite 12 (elimination)", measure(|| api::hermite(&b12))),
-        ("hermite 48 (cyclic)", measure(|| api::hermite(&b48))),
+        ("hermite 56 (cyclic)", measure(|| api::hermite(&b56))),
     ]
     .into_iter()
     .map(|(n, (u, c))| (n, u, c))
@@ -117,10 +121,11 @@ fn hermite_units_and_stop_checks() {
         ("hermite_modular 10", [6634, 0, 4681, 0, 280, 2110, 2957, 10, 0, 0], 64),
         ("zlin hnf 9 x 7", [826, 0, 22, 0, 224, 1321, 0, 0, 0, 0], 34),
         ("hermite 12 (elimination)", [6380, 0, 211, 0, 780, 6702, 0, 0, 0, 0], 112),
-        ("hermite 48 (cyclic)", [199087, 0, 14854, 0, 8726, 15670, 21652, 0, 0, 0], 112),
+        ("hermite 56 (cyclic)", [646072, 0, 51916, 0, 21604, 32528, 56327, 0, 0, 0], 203),
     ];
     // (the Stop checks before metering, at the same inputs: 10, 44, 108,
-    // 33, 27, 8, 6, 64, 34, 112, 112, the same as pinned)
+    // 33, 27, 8, 6, 64, 34, 112, 203, the same as pinned; the inputs take
+    // the same routes on every target, so the pins hold under WebAssembly)
     if print {
         for (n, u, c) in &rows {
             println!("        (\"{n}\", {u:?}, {c}),");
@@ -147,15 +152,16 @@ fn hermite_units_and_stop_checks() {
     assert_eq!(whole, route, "hermite = zlin::hnf below the cyclic size");
     // and the cyclic wrapper adds only its two copies (Move) to zmat's work
     let mut h = None;
-    let (wrapped, _) = measure(|| h = api::hermite_cyclic(&b48));
+    let (wrapped, _) = measure(|| h = api::hermite_cyclic(&b56));
     let h = h.expect("the cyclic form");
-    let a = zmat::ZMat::from_rows(b48.clone());
+    let a = zmat::ZMat::from_rows(b56.clone());
     let (inner, _) = measure(|| zmat::hermite_cyclic(&a));
     let mut copies = [0; FAMILIES];
-    copies[Family::Move as usize] = b48.iter().chain(&h).map(|r| copy_units(r)).sum();
+    copies[Family::Move as usize] = b56.iter().chain(&h).map(|r| copy_units(r)).sum();
     assert_eq!(wrapped, sum(&inner, &copies), "hermite_cyclic = zmat's + the copies in and out");
-    // and hermite at that size takes the cyclic route: the same units
-    let (via, _) = measure(|| api::hermite(&b48));
+    // and hermite at that size takes the cyclic route (on every target):
+    // the same units
+    let (via, _) = measure(|| api::hermite(&b56));
     assert_eq!(via, wrapped);
 
     // hermite_modular counts its determinant and its hnf_mod once: what it
