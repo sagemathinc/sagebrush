@@ -550,6 +550,11 @@
   "owner": "zpoly_divrem",
   "reason": "zpoly_divrem's derived sizes, plumbing (the ledger's and meter's limits, the plan's sizes) or a test assertion: refuses nothing itself"
  },
+ "engine/arith/src/nmod_mat.rs :: the_accumulation_block_fits_a_u128 :: for p in [2u64, 3, 65537, (1 << 32) - 5, (1 << 40) + 15, (1 << 62) - 57, (1 << 63) + 29, u64::MAX - 58] { #0": {
+  "class": "none",
+  "owner": "engine arith (modular composition)",
+  "reason": "test code: modular composition against Horner at nmod's word sizes up to the largest modulus, its work bound's overflow refusals, and the matrix product's accumulation block; refuses nothing itself"
+ },
  "engine/arith/src/nmod_poly.rs :: barrett_reduction_edges :: let mut xs: Vec<u64> = vec![0, 1, n - 1, n, n + 1, 2 * n - 1, u64::MAX, u64::MAX - 1, u64::MAX - n]; #0": {
   "class": "none",
   "owner": "exact linear algebra (engine/arith)",
@@ -559,6 +564,51 @@
   "class": "none",
   "owner": "exact linear algebra (engine/arith)",
   "reason": "test code: the Barrett reduction's edge inputs (u64::MAX and the largest multiples of n); refuses nothing itself"
+ },
+ "engine/arith/src/nmod_poly.rs :: compose_matches_horner :: for &p in &[2u64, 3, 65537, (1 << 32) - 5, (1 << 62) - 57, u64::MAX - 58] { #0": {
+  "class": "none",
+  "owner": "engine arith (modular composition)",
+  "reason": "test code: modular composition against Horner at nmod's word sizes up to the largest modulus, its work bound's overflow refusals, and the matrix product's accumulation block; refuses nothing itself"
+ },
+ "engine/arith/src/nmod_poly.rs :: compose_work_bounds_the_units :: assert_eq!(compose_words(usize::MAX, lg, ComposeRoute::Streamed), None); #0": {
+  "class": "none",
+  "owner": "engine arith (modular composition)",
+  "reason": "test code: modular composition against Horner at nmod's word sizes up to the largest modulus, its work bound's overflow refusals, and the matrix product's accumulation block; refuses nothing itself"
+ },
+ "engine/arith/src/nmod_poly.rs :: compose_work_bounds_the_units :: assert_eq!(compose_words(usize::MAX, usize::MAX, ComposeRoute::Blocked), None); #0": {
+  "class": "none",
+  "owner": "engine arith (modular composition)",
+  "reason": "test code: modular composition against Horner at nmod's word sizes up to the largest modulus, its work bound's overflow refusals, and the matrix product's accumulation block; refuses nothing itself"
+ },
+ "engine/arith/src/nmod_poly.rs :: compose_work_bounds_the_units :: assert_eq!(compose_work(usize::MAX / 2 + 1, 0, 0), None); #0": {
+  "class": "none",
+  "owner": "engine arith (modular composition)",
+  "reason": "test code: modular composition against Horner at nmod's word sizes up to the largest modulus, its work bound's overflow refusals, and the matrix product's accumulation block; refuses nothing itself"
+ },
+ "engine/arith/src/nmod_poly.rs :: compose_work_bounds_the_units :: assert_eq!(compose_work(usize::MAX / 2, usize::MAX / 2, 3), None); #0": {
+  "class": "none",
+  "owner": "engine arith (modular composition)",
+  "reason": "test code: modular composition against Horner at nmod's word sizes up to the largest modulus, its work bound's overflow refusals, and the matrix product's accumulation block; refuses nothing itself"
+ },
+ "engine/arith/src/nmod_poly.rs :: compose_work_bounds_the_units :: assert_eq!(compose_work(usize::MAX, lg, 0), None); #0": {
+  "class": "none",
+  "owner": "engine arith (modular composition)",
+  "reason": "test code: modular composition against Horner at nmod's word sizes up to the largest modulus, its work bound's overflow refusals, and the matrix product's accumulation block; refuses nothing itself"
+ },
+ "engine/arith/src/nmod_poly.rs :: compose_work_bounds_the_units :: for lg in [0, 1, 2, usize::MAX / 2, usize::MAX] { #0": {
+  "class": "none",
+  "owner": "engine arith (modular composition)",
+  "reason": "test code: modular composition against Horner at nmod's word sizes up to the largest modulus, its work bound's overflow refusals, and the matrix product's accumulation block; refuses nothing itself"
+ },
+ "engine/arith/src/nmod_poly.rs :: compose_work_bounds_the_units :: let big = [0, 1, 2, usize::MAX / 2, usize::MAX / 2 + 1, usize::MAX - 1, usize::MAX]; #0": {
+  "class": "none",
+  "owner": "engine arith (modular composition)",
+  "reason": "test code: modular composition against Horner at nmod's word sizes up to the largest modulus, its work bound's overflow refusals, and the matrix product's accumulation block; refuses nothing itself"
+ },
+ "engine/arith/src/nmod_poly.rs :: compose_work_bounds_the_units :: let mut meter = Meter::accounting(u64::MAX); #0": {
+  "class": "none",
+  "owner": "engine arith (modular composition)",
+  "reason": "test code: modular composition against Horner at nmod's word sizes up to the largest modulus, its work bound's overflow refusals, and the matrix product's accumulation block; refuses nothing itself"
  },
  "engine/arith/src/nmod_poly.rs :: work_bounds_refuse_instead_of_panicking :: assert_eq!(divrem_work(usize::MAX, 1), None); #0": {
   "class": "none",
@@ -2355,7 +2405,17 @@
   "owner": "engine arith (kernel metering)",
   "reason": "test code: the kernel metering's pinned units, Stop poll counts and unwinding tests (an accounting meter with no bound, saturation checks of the unit helpers); refuses nothing itself"
  },
+ "engine/arith/tests/nmod_poll_count.rs :: metering_polls_stop_at_least_as_often :: let mut meter = Meter::accounting(u64::MAX); #2": {
+  "class": "none",
+  "owner": "engine arith (kernel metering)",
+  "reason": "test code: the kernel metering's pinned units, Stop poll counts and unwinding tests (an accounting meter with no bound, saturation checks of the unit helpers); refuses nothing itself"
+ },
  "engine/arith/tests/nmod_poll_count.rs :: metering_polls_stop_at_least_as_often :: let mut whole = Meter::accounting(u64::MAX); #0": {
+  "class": "none",
+  "owner": "engine arith (kernel metering)",
+  "reason": "test code: the kernel metering's pinned units, Stop poll counts and unwinding tests (an accounting meter with no bound, saturation checks of the unit helpers); refuses nothing itself"
+ },
+ "engine/arith/tests/nmod_poll_count.rs :: metering_polls_stop_at_least_as_often :: let mut whole = Meter::accounting(u64::MAX); #1": {
   "class": "none",
   "owner": "engine arith (kernel metering)",
   "reason": "test code: the kernel metering's pinned units, Stop poll counts and unwinding tests (an accounting meter with no bound, saturation checks of the unit helpers); refuses nothing itself"
@@ -6205,6 +6265,11 @@
   "owner": "polynomial factorization",
   "reason": "the modular phase's budget parameter, imports and work bounds; its reservations and debits refuse through the engine Budget's own sites; refuses nothing itself"
  },
+ "engine/poly/src/modp.rs :: edf_by :: pub(crate) fn edf_by(b: &Budget, fp: &Fp, g: &[u64], d: usize, rng: &mut Rng, out: &mut Vec<FPoly>, force: Option<EdfRoute>) -> FResult<()> { #0": {
+  "class": "none",
+  "owner": "polynomial factorization",
+  "reason": "the modular phase's budget parameter, imports and work bounds; its reservations and debits refuse through the engine Budget's own sites; refuses nothing itself"
+ },
  "engine/poly/src/modp.rs :: new :: let tl = table_len(len).ok_or_else(|| b.refuse(\"memory (overflow)\", u64::MAX, 0))?; #0": {
   "class": "2",
   "disposition": {
@@ -6310,6 +6375,11 @@
   "owner": "polynomial factorization",
   "reason": "test code: the modular phase's oracle equivalence, memory, work-refusal and Stop tests; refuses nothing itself"
  },
+ "engine/poly/src/tests.rs :: modp_ddf_routes_agree :: let b = Budget::unlimited(); #0": {
+  "class": "none",
+  "owner": "polynomial factorization",
+  "reason": "test code: the modular phase's route equivalence tests (distinct-degree and equal-degree routes give the same pieces and draws); refuses nothing itself"
+ },
  "engine/poly/src/tests.rs :: modp_edf_is_bounded_by_its_work :: assert!(e.kind == Kind::Resource && e.what == \"work\", \"{e}\"); #0": {
   "class": "none",
   "owner": "polynomial factorization",
@@ -6334,6 +6404,11 @@
   "class": "none",
   "owner": "polynomial factorization",
   "reason": "test code: the modular phase's oracle equivalence, memory, work-refusal and Stop tests; refuses nothing itself"
+ },
+ "engine/poly/src/tests.rs :: modp_edf_routes_agree :: let b = Budget::unlimited(); #0": {
+  "class": "none",
+  "owner": "polynomial factorization",
+  "reason": "test code: the modular phase's route equivalence tests (distinct-degree and equal-degree routes give the same pieces and draws); refuses nothing itself"
  },
  "engine/poly/src/tests.rs :: modp_every_operation_debits_before_it_allocates :: assert!(e.kind == Kind::Resource && e.what == \"work\", \"{name}: {e}\"); #0": {
   "class": "none",
