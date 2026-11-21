@@ -1,0 +1,5 @@
+CPU(s):                                  16
+Model name:                              Intel(R) Xeon(R) CPU @ 2.80GHz
+Thread(s) per core:                      2
+Core(s) per socket:                      8
+Flags:                                   fpu vme de pse tsc msr pae mce cx8 apic sep mtrr pge mca cmov pat pse36 clflush

@@ -195,6 +195,14 @@ An indicative run today, on a shared 16-core host with other jobs running, so it
   - So every solve up to 500 rows paid for a second, slow LU. Above 500 rows the check was skipped, and a nearly singular matrix bigger than that never warned, which breaks §1's contract.
   - The fix, in the measurement PR: estimate rcond from the factors the solve already computed, with engine/nd's `gecon` (the same Higham/dlacn2 algorithm, already tested against the Python one), for every $n$. That removes both the cost and the 500-row cap, and a test pins that a nearly singular $n = 600$ matrix warns.
 
+**Measured, Nov 21** (a quiet n2-standard-16: 8 cores, AVX2+FMA; bench/numeric/README.md has the method, the tables and the raw output):
+- **Native engine/nd meets the targets:** GEMM reaches 60% of OpenBLAS on one thread and 53% on the 8 physical cores. The MATLAB-mode solve, with its structure pass and rcond, reaches 83% of OpenBLAS's plain solve.
+- **MATLAB mode is far from them.** At $n = 1000$, it reaches 14% of OpenBLAS for `A*B` on one core, 12% for `A\b`, 9% for `chol`, and 6% and 15% for symmetric and general `eig`. Three causes, each a follow-up:
+  - a fixed cost per call of 0.3 to 1 ms ($c_0$), which dominates $n \le 100$;
+  - wasm SIMD128 against native: 9 GF/s against 41 for GEMM;
+  - threads that didn't engage in this run (`A*B` took the same time on 1 core and 16, though the same build uses them on a shared host).
+- **`A\b` has no step at 500 rows any more:** 11 ms at 300 rows, 182 ms at 1000.
+
 ## 4. Where we start
 
 **The two top-20 lists.** One list, from Claude asked as an agent writing MATLAB, is functions:
