@@ -299,9 +299,74 @@ fn outputs_are_pinned() {
         .collect();
     let want: Vec<(Route, u64, u64)> = vec![
         (Route::Cyclic, 2, 1276465326252702338),
-        (Route::Trailing, 5, 1921181787596805843),
+        (Route::Trailing, 5, 767491620189235518),
         (Route::Cyclic, 3, 2239573289118338536),
         (Route::Classical, 0, 2007014360717136981),
     ];
     assert_eq!(got, want);
+}
+
+/// The small Smith form of route 2's relations: d_1 | .. | d_k | delta, V
+/// unimodular with V V^-1 = I, L V in D Z^k for the generators and delta
+/// Z^k, the invariants those of the classical elimination of [rel; delta
+/// I], and the transforms within the proved bound; word and big delta.
+#[test]
+fn the_small_smith_form_is_exact_and_bounded() {
+    let mut s: u64 = 0x2545f4914f6cdd1d;
+    let mut next = move || {
+        s ^= s << 13;
+        s ^= s >> 7;
+        s ^= s << 17;
+        s
+    };
+    let deltas: Vec<BigInt> = vec![
+        BigInt::from(12),
+        BigInt::from(2 * 3 * 5 * 7 * 11 * 13),
+        BigInt::from(1u64 << 40) * BigInt::from(9),
+        // big delta: (2^61 - 1) * 2^70 * 45
+        (BigInt::from((1u64 << 61) - 1) << 70usize) * BigInt::from(45),
+    ];
+    for delta in &deltas {
+        for k in 1..=6usize {
+            for _ in 0..6 {
+                let mut rel = ZMat::zero(k, k);
+                for x in rel.d.iter_mut() {
+                    // small primes' multiples often: nontrivial invariants
+                    let r = BigInt::from(next() >> 3);
+                    let f = [1u64, 2, 3, 4, 6, 9][(next() % 6) as usize];
+                    *x = (r * BigInt::from(f)).mod_floor(delta);
+                }
+                let (d, v, vinv) = small_smith_route(&rel, delta);
+                assert_eq!(v.mul(&vinv).d, ZMat::identity(k).d, "V V^-1 = I");
+                assert!(zmat::det(&v).abs().is_one(), "V unimodular");
+                for w in d.windows(2) {
+                    assert!(w[1].is_multiple_of(&w[0]), "d_i | d_(i+1)");
+                }
+                assert!(delta.is_multiple_of(d.last().unwrap()), "d_k | delta");
+                // the generators and delta e_i map into D Z^k
+                let lv = rel.mul(&v);
+                for i in 0..k {
+                    for j in 0..k {
+                        assert!(lv.get(i, j).is_multiple_of(&d[j]), "generator {i} column {j}");
+                        assert!((delta * v.get(i, j)).is_multiple_of(&d[j]), "delta e_{i} column {j}");
+                    }
+                }
+                // the invariants: the classical elimination of [rel; delta I]
+                let mut m = ZMat::zero(2 * k, k);
+                for i in 0..k {
+                    for j in 0..k {
+                        m.d[i * k + j] = rel.get(i, j).clone();
+                    }
+                    m.d[(k + i) * k + i] = delta.clone();
+                }
+                let c = smith_classical(&m);
+                let want: Vec<BigInt> = (0..k).map(|i| c.d.get(i, i).clone()).collect();
+                assert_eq!(d, want, "invariants, delta {delta}, k {k}");
+                // the bound: 3 (k - 1) (bits(delta) + 1) + 2 bits(k) + 2
+                let kb = (usize::BITS - k.leading_zeros()) as u64;
+                let bound = 3 * (k as u64 - 1) * (delta.bits() + 1) + 2 * kb + 2;
+                assert!(v.max_bits() <= bound && vinv.max_bits() <= bound, "bounded transforms");
+            }
+        }
+    }
 }

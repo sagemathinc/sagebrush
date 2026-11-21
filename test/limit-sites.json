@@ -1771,6 +1771,16 @@
   "owner": "engine arithmetic (exact linear algebra)",
   "reason": "a route threshold (route 2 up to K_MAX nontrivial invariant factors, else the classical elimination): a measured crossover, refuses nothing"
  },
+ "engine/arith/src/smith.rs :: small_smith :: debug_assert!(v.max_bits() <= growth && vinv.max_bits() <= growth, \"the transforms' proved bound\"); #0": {
+  "class": "none",
+  "owner": "engine arithmetic (exact linear algebra)",
+  "reason": "max_bits is an entry's size, not a cap: route 2's small Smith form checks its proved transform bound (a debug assertion, never a refusal) and picks the smaller of its two valid transforms by the outputs' sizes"
+ },
+ "engine/arith/src/smith.rs :: small_smith :: let size = |a: &ZMat, b: &ZMat| (a.max_bits() + delta.bits()).max(b.max_bits() + dk); #0": {
+  "class": "none",
+  "owner": "engine arithmetic (exact linear algebra)",
+  "reason": "max_bits is an entry's size, not a cap: route 2's small Smith form checks its proved transform bound (a debug assertion, never a refusal) and picks the smaller of its two valid transforms by the outputs' sizes"
+ },
  "engine/arith/src/smith.rs :: smith_form :: smith_form_k(a, K_MAX) #0": {
   "class": "none",
   "owner": "engine arithmetic (exact linear algebra)",
@@ -1805,6 +1815,11 @@
   "class": "none",
   "owner": "engine arithmetic (exact linear algebra)",
   "reason": "test code: the Smith form with transforms' route, floor and metering tests (route thresholds, the floor's saturation at the extremes, an accounting meter with no upper bound); refuses nothing"
+ },
+ "engine/arith/src/smith/tests.rs :: the_small_smith_form_is_exact_and_bounded :: assert!(v.max_bits() <= bound && vinv.max_bits() <= bound, \"bounded transforms\"); #0": {
+  "class": "none",
+  "owner": "engine arithmetic (exact linear algebra)",
+  "reason": "test code: route 2's small Smith form, its transforms' sizes checked against the proved bound and a regression bound (entry sizes, not caps)"
  },
  "engine/arith/src/wire_decode.rs :: check_mqr :: None => ws.insert(workspace(q.max_limbs)?), #0": {
   "class": "none",
@@ -2534,6 +2549,11 @@
   "class": "none",
   "owner": "engine arithmetic (exact linear algebra)",
   "reason": "test code: the Smith form with transforms' route, floor and metering tests (route thresholds, the floor's saturation at the extremes, an accounting meter with no upper bound); refuses nothing"
+ },
+ "engine/arith/tests/smith_route2.rs :: route_two_transforms_and_units_are_bounded :: let top = s.u.max_bits().max(s.v.max_bits()); #0": {
+  "class": "none",
+  "owner": "engine arithmetic (exact linear algebra)",
+  "reason": "test code: route 2's small Smith form, its transforms' sizes checked against the proved bound and a regression bound (entry sizes, not caps)"
  },
  "engine/arith/tests/wire_decode_alloc.rs :: admit :: return Err(WireError { code: Code::Cap, offset: 0, what: \"over the grant\" }); #0": {
   "class": "none",

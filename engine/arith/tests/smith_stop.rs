@@ -11,7 +11,7 @@
 #![cfg(not(target_arch = "wasm32"))]
 
 use num_integer::Integer;
-use sagebrush_arith::cost::{tallied, Family, FAMILIES};
+use sagebrush_arith::cost::{bigmul_units, tallied, Family, FAMILIES};
 use sagebrush_arith::smith;
 use sagebrush_arith::zmat::{self, ZMat};
 use sagebrush_bigint::BigInt;
@@ -148,4 +148,37 @@ fn a_stop_charges_only_the_work_before_it() {
     want[Family::Div as usize] = 3;
     want[Family::MulSchool as usize] = 2 + 1 + 1 + 1;
     assert_eq!(got, want, "the classical elimination stopped at pass 2: its setup and pass 1");
+
+    // route 2's small Smith form: generators [[4, 6], [6, 9]] modulo
+    // delta = 12.  The first check opens pivot 0's first pass (nothing
+    // before it); the second opens pivot 1, after pivot 0's pass: column 1
+    // by a Bezout step on (4, 6) over Z (x 4 + y 6 = 2 with x = -1, y = 1:
+    // Euclid's 3 quotient steps and the 2 divisions by g; the test of 6 by
+    // 4, and the 2 x 2 update
+    // of the working rows and of V', 2 operations a row: ModArith), the
+    // exact transform's update (4 two-term products a row on V and V^-1,
+    // MulSchool by the operands' limbs); then column 0 by a row step on (2,
+    // 3) (3 quotient steps, the test, 2 operations on each of the 2
+    // columns); then gcd(1, 12) in one step and the divisibility test of
+    // the 1 x 1 rest (ModArith).  Pivot 0 is then 1 = d_1.  (The pass's
+    // word operations are counted locally and charged at the next check:
+    // that check moved ahead of the charge loses them, and this pin fails;
+    // pivot 1's work charged before it would show here too.  Charges
+    // already in the accumulator are flushed by its Drop when the Stop
+    // unwinds, so their order against the check is not observable.)
+    let got = stopped_at_second_check(|| smith::small_smith_route(&z(&[&[4, 6], &[6, 9]]), &BigInt::from(12)));
+    let mut want = [0; FAMILIES];
+    want[Family::ModArith as usize] = (euclid_steps(4, 6) + 2) + (1 + 4 + 4) + euclid_steps(2, 3) + (1 + 4) + euclid_steps(12, 1) + 1;
+    // (x, y, -a/g, p/g) = (-1, 1, -3, 2) on V = I's rows, and (p/g, a/g,
+    // -y, x) = (2, 3, -1, -1) on V^-1 = I's columns
+    let (x, y, na, p, a, ny) = (-1i64, 1i64, -3i64, 2i64, 3i64, -1i64);
+    let mut mul = 0u64;
+    for (ct, cj) in [(1i64, 0i64), (0, 1)] {
+        for (s, w) in [(x, y), (na, p), (p, a), (ny, x)] {
+            let l = |v: i64| zmat::limbs(&BigInt::from(v));
+            mul += bigmul_units(l(s), l(ct)).get(Family::MulSchool) + bigmul_units(l(w), l(cj)).get(Family::MulSchool);
+        }
+    }
+    want[Family::MulSchool as usize] = mul;
+    assert_eq!(got, want, "the small Smith form stopped at pivot 1: pivot 0's pass");
 }
