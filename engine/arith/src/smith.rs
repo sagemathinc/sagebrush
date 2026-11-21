@@ -424,6 +424,498 @@ fn row2<R: Zn>(ring: &R, m: &mut [Vec<R::T>], r: usize, i: usize, b: &(R::T, R::
     2 * xr.len() as u64
 }
 
+/// The Smith form of a relation lattice L in Z^k that contains delta Z^k,
+/// given by k generators modulo delta, with bounded transforms: (d, V,
+/// V^-1), d_1 | .. | d_k dividing delta, V unimodular and L V = D Z^k.
+///
+/// Over R = Z/delta, an elimination with recorded column operations and
+/// free row operations (only L's image matters) gives V' in GL_k(R) with
+/// column t of L V' in a_t R, d_t = gcd(a_t, delta); the divisibility pass
+/// makes d_1 | .. | d_k.  Any unimodular V with V = V' Delta^-1 (mod
+/// delta), Delta diagonal of units, then has L V in D Z^k (a unit times a
+/// column keeps it in d_t R, and every d_t divides delta), with equality
+/// by the index, prod d_t = [Z^k : L].  Column j of V matters modulo d_j
+/// only, by the same argument.
+///
+/// V is the smaller (by the outputs' sizes) of two such:
+/// - the construction ([`unipotent_factors`]): R has stable range 1, so a
+///   row permutation P and a unipotent upper U_1 give U_1 P V' unit
+///   leading minors, and V' = P^-1 U_1^-1 L_1 U_2 Delta with L_1 unipotent
+///   lower and U_2 unipotent upper; V = P^-1 U_1^-1 L_1 U_2, the factors
+///   lifted to (-delta/2, delta/2] and U_2's column j reduced modulo d_j
+///   (V = G U_2 with G unimodular, and G d_j Z^k = d_j Z^k).  Proved: |V|
+///   <= (1 + (k - 1) delta / 2)^3 and |V^-1| <= k^2 (1 + delta / 2)^(3 (k -
+///   1)), about 3 bits(delta) and 3 (k - 1) bits(delta) bits;
+/// - the elimination's own transform, exactly over Z (its cofactors are
+///   below delta, the working matrix staying reduced), kept only while its
+///   entries stay below the construction's bound (`growth`).
+///
+/// So both V and V^-1 have at most 3 (k - 1) (bits(delta) + 1) + 2
+/// bits(k) + 2 bits, whatever the elimination's path: the classical
+/// elimination's transforms, which this replaces, had no such bound.
+fn small_smith<R: Zn>(ring: &R, rel: Vec<Vec<R::T>>, delta: &BigInt, acc: &mut Local) -> (Vec<BigInt>, ZMat, ZMat, Pick) {
+    let k = rel.len();
+    let one = ring.residue(&BigInt::one());
+    let zero = ring.residue(&BigInt::zero());
+    let mut a = rel;
+    let mut vb: Vec<Vec<R::T>> = (0..k).map(|i| (0..k).map(|j| if i == j { one.clone() } else { zero.clone() }).collect()).collect();
+    let (mut ops, mut steps) = (0u64, 0u64);
+    let mut d: Vec<BigInt> = Vec::with_capacity(k);
+    // the elimination's own transform, exactly over Z (its cofactors are
+    // below delta: the working matrix stays reduced), with its inverse;
+    // dropped once it outgrows the construction's bound (growth bits)
+    let kb = (usize::BITS - k.leading_zeros()) as u64;
+    let growth = 3 * (k as u64 - 1) * (delta.bits() + 1) + 2 * kb + 2;
+    let mut ex: Option<(ZMat, ZMat)> = Some((ZMat::identity(k), ZMat::identity(k)));
+    'pivots: for t in 0..k {
+        loop {
+            if R::WORD {
+                acc.n(Family::ModArith, std::mem::take(&mut ops).saturating_add(std::mem::take(&mut steps)));
+            }
+            acc.add(Units(ring.take()));
+            acc.flush();
+            sagebrush_interrupt::check_coarse();
+            if R::is_zero(&a[t][t]) {
+                let found = (t..k).flat_map(|i| (t..k).map(move |j| (i, j))).find(|&(i, j)| !R::is_zero(&a[i][j]));
+                acc.n(Family::Move, found.map_or(((k - t) * (k - t)) as u64, |(i, j)| ((i - t) * (k - t) + (j - t) + 1) as u64));
+                let Some((i, j)) = found else {
+                    // (the rest of L is delta Z^(k - t))
+                    d.resize(k, delta.clone());
+                    break 'pivots;
+                };
+                a.swap(t, i);
+                for row in a.iter_mut().chain(vb.iter_mut()) {
+                    row.swap(t, j);
+                }
+                if let Some((v, vi)) = ex.as_mut() {
+                    for r in 0..k {
+                        v.d.swap(r * k + t, r * k + j);
+                        vi.d.swap(t * k + r, j * k + r);
+                    }
+                }
+                acc.n(Family::Move, (4 * k + 2) as u64);
+            }
+            // row t by column operations (recorded in V'), column t by row
+            // operations (free); a Bezout step strictly lowers the pivot
+            for j in t + 1..k {
+                if R::is_zero(&a[t][j]) {
+                    continue;
+                }
+                ops = ops.saturating_add(1);
+                if let Some(q) = ring.quotient(&a[t][j], &a[t][t]) {
+                    for row in a.iter_mut().chain(vb.iter_mut()) {
+                        row[j] = ring.sub_mul(&row[j], &q, &row[t]);
+                    }
+                    ops = ops.saturating_add(2 * k as u64);
+                    // (col_j -= q col_t; the inverse's row_t += q row_j)
+                    let qi = R::integer(&q);
+                    exact_op(&mut ex, k, t, j, (BigInt::one(), BigInt::zero(), qi, BigInt::one()), growth, acc);
+                } else {
+                    // the cofactors over Z, so that the exact transform and
+                    // the residues take the same step
+                    let (x, y, ag, pg) = int_bezout(&R::integer(&a[t][t]), &R::integer(&a[t][j]), R::WORD, &mut steps, acc);
+                    let b = (ring.residue(&x), ring.residue(&y), ring.residue(&ag), ring.residue(&pg));
+                    ops = ops.saturating_add(col2(ring, &mut a, t, j, &b)).saturating_add(col2(ring, &mut vb, t, j, &b));
+                    exact_op(&mut ex, k, t, j, (x, y, ag, pg), growth, acc);
+                }
+            }
+            for i in t + 1..k {
+                if R::is_zero(&a[i][t]) {
+                    continue;
+                }
+                ops = ops.saturating_add(1);
+                if let Some(q) = ring.quotient(&a[i][t], &a[t][t]) {
+                    let at = a[t].clone();
+                    for (x, y) in a[i].iter_mut().zip(&at) {
+                        *x = ring.sub_mul(x, &q, y);
+                    }
+                    ops = ops.saturating_add(k as u64);
+                } else {
+                    let b = ring.bezout(&a[t][t], &a[i][t], &mut steps);
+                    ops = ops.saturating_add(row2(ring, &mut a, t, i, &b));
+                }
+            }
+            if !(t + 1..k).all(|j| R::is_zero(&a[t][j])) {
+                continue;
+            }
+            // divisibility: gcd(a_tt, delta) must divide the rest (else a
+            // row added to row t lowers that gcd on the next pass)
+            let g = ring.gcd_e(&a[t][t], &mut steps);
+            // (one unit per test made: the scan stops at the first failure)
+            let mut bad = None;
+            'scan: for i in t + 1..k {
+                for j in t + 1..k {
+                    ops = ops.saturating_add(1);
+                    if !ring.divides(&g, &a[i][j]) {
+                        bad = Some(i);
+                        break 'scan;
+                    }
+                }
+            }
+            match bad {
+                Some(i) => {
+                    let ai = a[i].clone();
+                    for (x, y) in a[t].iter_mut().zip(&ai) {
+                        *x = ring.add(x, y);
+                    }
+                    ops = ops.saturating_add(k as u64);
+                }
+                None => {
+                    d.push(R::integer(&g));
+                    break;
+                }
+            }
+        }
+    }
+    if R::WORD {
+        acc.n(Family::ModArith, ops.saturating_add(steps));
+    }
+    acc.add(Units(ring.take()));
+    let (v, vinv) = unipotent_factors(ring, vb, delta, &d, acc);
+    // (the outputs' sizes: V's columns c V_2 and W's rows B = D V^-1)
+    let dk = d.last().map_or(0, |x| x.bits());
+    let size = |a: &ZMat, b: &ZMat| (a.max_bits() + delta.bits()).max(b.max_bits() + dk);
+    let (v, vinv, pick) = match ex {
+        Some((ve, vie)) if size(&ve, &vie) <= size(&v, &vinv) => (ve, vie, Pick::Exact),
+        Some(_) => (v, vinv, Pick::Construction),
+        None => (v, vinv, Pick::Dropped),
+    };
+    debug_assert!(v.max_bits() <= growth && vinv.max_bits() <= growth, "the transforms' proved bound");
+    (d, v, vinv, pick)
+}
+
+/// Which transform [`small_smith`] returned (for its tests).
+#[doc(hidden)]
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum Pick {
+    /// the elimination's own exact transform (no larger)
+    Exact,
+    /// the construction (smaller than the exact transform)
+    Construction,
+    /// the construction, the exact transform having passed the bound
+    /// and been dropped (its tracking stopped there)
+    Dropped,
+}
+
+/// [`small_smith`] with delta's ring, from k generators of the relations
+/// (any integers; reduced modulo delta), for its tests: (d, V, V^-1).
+#[doc(hidden)]
+pub fn small_smith_route(rel: &ZMat, delta: &BigInt) -> (Vec<BigInt>, ZMat, ZMat) {
+    let (d, v, vinv, _) = small_smith_pick(rel, delta);
+    (d, v, vinv)
+}
+
+/// [`small_smith_route`] and which transform it returned.
+#[doc(hidden)]
+pub fn small_smith_pick(rel: &ZMat, delta: &BigInt) -> (Vec<BigInt>, ZMat, ZMat, Pick) {
+    assert!(rel.rows == rel.cols && rel.rows > 0 && delta > &BigInt::one(), "k x k generators and delta > 1");
+    let mut acc = Local::new();
+    match delta.to_u64() {
+        Some(e) if e < WORD_E => {
+            let ring = Word { e };
+            let rel = (0..rel.rows).map(|i| rel.row(i).iter().map(|x| ring.residue(x)).collect()).collect();
+            small_smith(&ring, rel, delta, &mut acc)
+        }
+        _ => {
+            let ring = Big::new(delta);
+            let rel = (0..rel.rows).map(|i| rel.row(i).iter().map(|x| ring.residue(x)).collect()).collect();
+            small_smith(&ring, rel, delta, &mut acc)
+        }
+    }
+}
+
+/// x p + y a = g over Z (p > 0), with (x, y, a / g, p / g): the matrix
+/// [[x, y], [-a/g, p/g]] has determinant 1 and |x| <= a / g, |y| <= p / g.
+/// Counted after the work: on the word path one ModArith unit per quotient
+/// step and per division by g (into `steps`); on the big path as the big
+/// ring's Bezout, `biggcd_units` and the two divisions by g.
+fn int_bezout(p: &BigInt, a: &BigInt, word: bool, steps: &mut u64, acc: &mut Local) -> (BigInt, BigInt, BigInt, BigInt) {
+    let (mut r0, mut r1) = (p.clone(), a.clone());
+    let (mut x0, mut x1, mut y0, mut y1) = (BigInt::one(), BigInt::zero(), BigInt::zero(), BigInt::one());
+    let mut quotients = 0u64;
+    while !r1.is_zero() {
+        let (q, r) = r0.div_rem(&r1);
+        (r0, r1) = (r1, r);
+        let x2 = &x0 - &q * &x1;
+        (x0, x1) = (x1, x2);
+        let y2 = &y0 - &q * &y1;
+        (y0, y1) = (y1, y2);
+        quotients += 1;
+    }
+    let (ag, pg) = (a / &r0, p / &r0);
+    if word {
+        *steps += quotients + 2;
+    } else {
+        acc.add(crate::cost::biggcd_units(limbs(p), limbs(a)));
+        acc.add(bigdiv_units(limbs(a), limbs(&r0)));
+        acc.add(bigdiv_units(limbs(p), limbs(&r0)));
+    }
+    (x0, y0, ag, pg)
+}
+
+/// Column operation (col_t, col_j) -> (x col_t + y col_j, -a col_t + p
+/// col_j) on the exact transform V, and its inverse (row_t, row_j) -> (p
+/// row_t + a row_j, -y row_t + x row_j) on V^-1 (counted: `bigmul_units`
+/// per product); the pair is dropped once an entry passes `growth` bits.
+fn exact_op(ex: &mut Option<(ZMat, ZMat)>, k: usize, t: usize, j: usize, (x, y, a, p): (BigInt, BigInt, BigInt, BigInt), growth: u64, acc: &mut Local) {
+    let Some((v, vi)) = ex.as_mut() else {
+        return;
+    };
+    let mut top = 0u64;
+    let lin = |s: &BigInt, u: &BigInt, w: &BigInt, z: &BigInt, acc: &mut Local| -> BigInt {
+        acc.add(bigmul_units(limbs(s), limbs(u)));
+        acc.add(bigmul_units(limbs(w), limbs(z)));
+        s * u + w * z
+    };
+    let na = -&a;
+    let ny = -&y;
+    for r in 0..k {
+        let (ct, cj) = (v.d[r * k + t].clone(), v.d[r * k + j].clone());
+        v.d[r * k + t] = lin(&x, &ct, &y, &cj, acc);
+        v.d[r * k + j] = lin(&na, &ct, &p, &cj, acc);
+        let (rt, rj) = (vi.d[t * k + r].clone(), vi.d[j * k + r].clone());
+        vi.d[t * k + r] = lin(&p, &rt, &a, &rj, acc);
+        vi.d[j * k + r] = lin(&ny, &rt, &x, &rj, acc);
+        top = top.max(v.d[r * k + t].bits()).max(v.d[r * k + j].bits()).max(vi.d[t * k + r].bits()).max(vi.d[j * k + r].bits());
+    }
+    if top > growth {
+        *ex = None;
+    }
+}
+
+/// For V' in GL_k(Z/delta): V unimodular with V = V' Delta^-1 (mod delta),
+/// Delta diagonal of units, up to column j modulo d_j, and V^-1 exactly:
+/// V = P^-1 U_1^-1 L_1 U_2 from U_1 P V' = L_1 Delta' U' (unit leading
+/// minors, no pivoting), the factors lifted to (-delta/2, delta/2].  See
+/// [`small_smith`] for the bounds.
+fn unipotent_factors<R: Zn>(ring: &R, vb: Vec<Vec<R::T>>, delta: &BigInt, d: &[BigInt], acc: &mut Local) -> (ZMat, ZMat) {
+    let k = vb.len();
+    let one = ring.residue(&BigInt::one());
+    let zero = ring.residue(&BigInt::zero());
+    let (mut ops, mut steps) = (0u64, 0u64);
+    let ident = || -> Vec<Vec<R::T>> { (0..k).map(|i| (0..k).map(|j| if i == j { one.clone() } else { zero.clone() }).collect()).collect() };
+    // U_1: row j gets a combination of the rows below making the pivot of
+    // the Schur complement a unit (its column is unimodular, and Z/delta
+    // has stable range 1); the eliminations below the pivot follow
+    let mut x = vb.clone();
+    let mut u1 = ident();
+    // (row swaps first: a unit in the column below needs no U_1 entry; P
+    // records them, and a swap conjugates the U_1 built so far, which only
+    // touches rows above)
+    let mut perm: Vec<usize> = (0..k).collect();
+    for j in 0..k {
+        if !R::is_one(&ring.gcd_e(&x[j][j], &mut steps)) {
+            if let Some(i) = (j + 1..k).find(|&i| R::is_one(&ring.gcd_e(&x[i][j], &mut steps))) {
+                x.swap(j, i);
+                perm.swap(j, i);
+                u1.swap(j, i);
+                for row in u1.iter_mut() {
+                    row.swap(j, i);
+                }
+                acc.n(Family::Move, (4 * k) as u64);
+            }
+        }
+        if !R::is_one(&ring.gcd_e(&x[j][j], &mut steps)) {
+            // c = sum_i coef_i x_ij (i > j) with gcd(c, delta) that of the
+            // column below j
+            let mut c = zero.clone();
+            let mut coef: Vec<(usize, R::T)> = vec![];
+            for i in j + 1..k {
+                if R::is_zero(&x[i][j]) {
+                    continue;
+                }
+                if R::is_zero(&c) {
+                    c = x[i][j].clone();
+                    coef.push((i, one.clone()));
+                } else {
+                    let (s, u, _, _) = ring.bezout(&c, &x[i][j], &mut steps);
+                    c = ring.lin(&s, &c, &u, &x[i][j]);
+                    for (_, m) in coef.iter_mut() {
+                        *m = ring.lin(&s, m, &zero, &zero);
+                    }
+                    coef.push((i, u));
+                    ops = ops.saturating_add(coef.len() as u64 + 1);
+                }
+            }
+            // t = the largest divisor of delta prime to x_jj: x_jj + t c is
+            // a unit (a prime of delta divides x_jj or t, not both, and not
+            // c when it divides x_jj)
+            let t = ring.residue(&coprime_part(delta, &R::integer(&x[j][j]), R::WORD, &mut steps, acc));
+            for (i, m) in &coef {
+                let f = ring.lin(&t, m, &zero, &zero);
+                let (xi, ui) = (x[*i].clone(), u1[*i].clone());
+                for (y, z) in x[j].iter_mut().zip(&xi) {
+                    *y = ring.lin(&one, y, &f, z);
+                }
+                for (y, z) in u1[j].iter_mut().zip(&ui) {
+                    *y = ring.lin(&one, y, &f, z);
+                }
+                ops = ops.saturating_add(2 * k as u64 + 1);
+            }
+        }
+        let inv = unit_inverse(ring, &x[j][j], &mut steps);
+        for i in j + 1..k {
+            if R::is_zero(&x[i][j]) {
+                continue;
+            }
+            let l = ring.lin(&inv, &x[i][j], &zero, &zero);
+            let xj = x[j].clone();
+            for (y, z) in x[i].iter_mut().zip(&xj) {
+                *y = ring.sub_mul(y, &l, z);
+            }
+            ops = ops.saturating_add(k as u64 + 1);
+        }
+    }
+    // X = U_1 P V' = L_1 U_full, U_full = Delta' U': no pivoting
+    let pv: Vec<&Vec<R::T>> = perm.iter().map(|&i| &vb[i]).collect();
+    let mut xx: Vec<Vec<R::T>> = (0..k)
+        .map(|i| (0..k).map(|j| (0..k).fold(zero.clone(), |s, l| ring.lin(&one, &s, &u1[i][l], &pv[l][j]))).collect())
+        .collect();
+    ops = ops.saturating_add((k * k * k) as u64);
+    let mut l1 = ident();
+    for j in 0..k {
+        let inv = unit_inverse(ring, &xx[j][j], &mut steps);
+        for i in j + 1..k {
+            let l = ring.lin(&inv, &xx[i][j], &zero, &zero);
+            let xj = xx[j].clone();
+            for (y, z) in xx[i].iter_mut().zip(&xj) {
+                *y = ring.sub_mul(y, &l, z);
+            }
+            l1[i][j] = l;
+            ops = ops.saturating_add(k as u64 + 1);
+        }
+    }
+    // U_2 = Delta' U' Delta'^-1: column j of U_full times u_jj^-1
+    let mut u2 = ident();
+    for j in 0..k {
+        let inv = unit_inverse(ring, &xx[j][j], &mut steps);
+        for i in 0..j {
+            u2[i][j] = ring.lin(&inv, &xx[i][j], &zero, &zero);
+        }
+        ops = ops.saturating_add(j as u64);
+    }
+    // U_1^-1, unipotent upper, by back substitution
+    let mut u1i = ident();
+    for j in 0..k {
+        for i in (0..j).rev() {
+            // (U_1 U_1^-1)_ij = 0: u1i_ij = -sum_{i < l <= j} u1_il u1i_lj
+            let mut s = zero.clone();
+            for l in i + 1..=j {
+                s = ring.lin(&one, &s, &u1[i][l], &u1i[l][j]);
+            }
+            u1i[i][j] = ring.neg(&s);
+            ops = ops.saturating_add((j - i) as u64);
+        }
+    }
+    if R::WORD {
+        acc.n(Family::ModArith, ops.saturating_add(steps));
+    }
+    acc.add(Units(ring.take()));
+    acc.flush();
+    let half = delta >> 1usize;
+    let lift = |m: &[Vec<R::T>]| -> ZMat {
+        let rows: Vec<Vec<BigInt>> = m.iter().map(|row| row.iter().map(|x| {
+            let y = R::integer(x);
+            if y > half { y - delta } else { y }
+        }).collect()).collect();
+        ZMat::from_rows(rows)
+    };
+    acc.n(Family::Move, (3 * k * k) as u64);
+    // (column j of the last factor matters modulo d_j only: V = G U_2
+    // with G unimodular, and G d_j Z^k = d_j Z^k; so U_2's entries above
+    // the diagonal are reduced into (-d_j/2, d_j/2], still unipotent)
+    let mut f3 = lift(&u2);
+    for j in 0..k {
+        let hj = &d[j] >> 1usize;
+        for i in 0..j {
+            let x = f3.d[i * k + j].mod_floor(&d[j]);
+            acc.add(bigdiv_units(limbs(&f3.d[i * k + j]), limbs(&d[j])));
+            f3.d[i * k + j] = if x > hj { x - &d[j] } else { x };
+        }
+    }
+    let (f1, f2) = (lift(&u1i), lift(&l1));
+    // V = P^-1 U_1^-1 L_1 U_2 (row perm[i] of V is row i of the product),
+    // V^-1 = U_2^-1 L_1^-1 U_1 P (column perm[i] of V^-1 is its column i)
+    let prod = f1.mul(&f2).mul(&f3);
+    let pinv = unipotent_inverse(&f3, true, acc).mul(&unipotent_inverse(&f2, false, acc)).mul(&unipotent_inverse(&f1, true, acc));
+    let mut v = ZMat::zero(k, k);
+    let mut vinv = ZMat::zero(k, k);
+    for (i, &pi) in perm.iter().enumerate() {
+        for j in 0..k {
+            v.d[pi * k + j] = prod.get(i, j).clone();
+            vinv.d[j * k + pi] = pinv.get(j, i).clone();
+        }
+    }
+    acc.n(Family::Move, (2 * k * k) as u64);
+    (v, vinv)
+}
+
+/// The inverse over Z of a unipotent triangular matrix (upper or lower),
+/// by substitution (counted: `bigmul_units` per nonzero product).
+fn unipotent_inverse(t: &ZMat, upper: bool, acc: &mut Local) -> ZMat {
+    let k = t.rows;
+    let mut inv = ZMat::identity(k);
+    for j in 0..k {
+        // column j of the inverse: (T X)_ij = [i == j]
+        let order: Vec<usize> = if upper { (0..j).rev().collect() } else { (j + 1..k).collect() };
+        for i in order {
+            let mut s = BigInt::zero();
+            let range: Vec<usize> = if upper { (i + 1..=j).collect() } else { (j..i).collect() };
+            for l in range {
+                let (a, b) = (t.get(i, l), inv.get(l, j));
+                if !a.is_zero() && !b.is_zero() {
+                    acc.add(bigmul_units(limbs(a), limbs(b)));
+                    s += a * b;
+                }
+            }
+            inv.d[i * k + j] = -s;
+        }
+    }
+    acc.flush();
+    inv
+}
+
+/// The largest divisor of e prime to x (repeatedly dividing out
+/// gcd(c, x)): x + c y is a unit mod e whenever gcd(x, y, e) = 1.
+/// Counted after the work: on the word path one ModArith unit per
+/// reduction, Euclid quotient step and division (into `steps`), else
+/// `biggcd_units` and `bigdiv_units`.
+fn coprime_part(e: &BigInt, x: &BigInt, word: bool, steps: &mut u64, acc: &mut Local) -> BigInt {
+    let mut c = e.clone();
+    loop {
+        let h = if word {
+            let (mut a, mut b) = (c.clone(), x.mod_floor(&c));
+            *steps += 1;
+            while !b.is_zero() {
+                let r = a.mod_floor(&b);
+                (a, b) = (b, r);
+                *steps += 1;
+            }
+            a
+        } else {
+            let h = c.gcd(x);
+            acc.add(crate::cost::biggcd_units(limbs(&c), limbs(x)));
+            h
+        };
+        if h.is_one() {
+            return c;
+        }
+        let next = &c / &h;
+        if word {
+            *steps += 1;
+        } else {
+            acc.add(bigdiv_units(limbs(&c), limbs(&h)));
+        }
+        c = next;
+    }
+}
+
+/// The inverse of a unit modulo the ring's modulus.
+fn unit_inverse<R: Zn>(ring: &R, u: &R::T, steps: &mut u64) -> R::T {
+    let mu = ring.unit_combination(std::slice::from_ref(u), steps).expect("a unit");
+    mu.into_iter().next().map(|(_, m)| m).expect("a unit's inverse")
+}
+
 /// Route 2 (2 <= k nontrivial invariant factors), for a square
 /// nonsingular matrix with a^-1 = N / delta in lowest terms.
 ///
@@ -434,9 +926,10 @@ fn row2<R: Zn>(ring: &R, m: &mut [Vec<R::T>], r: usize, i: usize, b: &(R::T, R::
 /// when every row of X Q is zero past column k and divisible by g_j =
 /// gcd(s_j, delta) at j < k; then N_i = c_i Y with c_i = q P, q_j = (w_j /
 /// g_j) (s_j / g_j)^-1 (mod delta / g_j).  The relations Lambda = {z : z Y
-/// = 0} are generated by the rows (delta / g_j) P_j and delta e_j; the
-/// classical Smith form of that 2k x k matrix M gives U_2 M V_2 = [D_B; 0]
-/// and a basis B = the first k rows of U_2 M, with B V_2 = D_B.  So the row
+/// = 0} are generated by the rows (delta / g_j) P_j and delta e_j; its
+/// Smith form with bounded transforms ([`small_smith`], over Z/delta since
+/// Lambda holds delta Z^k) gives V_2 unimodular with Lambda V_2 = D_B Z^k,
+/// and the basis B = D_B V_2^-1 of Lambda, with B V_2 = D_B.  So the row
 /// lattice of a C has the basis H = [[I, -c], [0, B]], W = H (C^-1 N) /
 /// delta is integral, and with V = C [[I, c], [0, I]] diag(I, V_2) =
 /// [[I, c V_2], [-R, (I - R c) V_2]], U = W: U a V = diag(I, D_B) = D.
@@ -453,8 +946,8 @@ fn row2<R: Zn>(ring: &R, m: &mut [Vec<R::T>], r: usize, i: usize, b: &(R::T, R::
 ///
 /// Units: the modular steps by the ring (word delta: ModArith, one unit
 /// each; big delta: the helpers at the operands' sizes); the integer rows
-/// through `bigmul_units` and `bigdiv_units`; the small Smith form counts
-/// itself.
+/// through `bigmul_units` and `bigdiv_units`; the small Smith form the
+/// same way.
 // (the loops index several matrices by the same row and column at once)
 #[allow(clippy::needless_range_loop)]
 fn trailing<R: Zn>(ring: &R, nm: &ZMat, delta: &BigInt, d: &BigInt, k: usize, acc: &mut Local) -> Result<SmithForm, String> {
@@ -715,29 +1208,56 @@ fn trailing<R: Zn>(ring: &R, nm: &ZMat, delta: &BigInt, d: &BigInt, k: usize, ac
     acc.n(Family::MulSchool, mul);
     acc.n(Family::Div, div);
     acc.n(Family::ModArith, wops);
-    // the relations' generators M (2k x k) and their Smith form
-    let mut m = ZMat::zero(2 * k, k);
-    let mut mul = 0u64;
+    // the relations' generators (delta / g_j) P_j modulo delta (the
+    // relation lattice also holds delta Z^k), then its Smith form with
+    // bounded transforms: B V_2 = D_B
+    let mut rel: Vec<Vec<R::T>> = Vec::with_capacity(k);
+    let (mut mul, mut div, mut wops) = (0u64, 0u64, 0u64);
     for j in 0..k {
         let f = delta / &g[j];
         if R::WORD {
-            acc.n(Family::ModArith, 1);
+            wops = wops.saturating_add(1);
         } else {
-            acc.add(bigdiv_units(ld, limbs(&g[j])));
+            div = div.saturating_add(bigdiv_units(ld, limbs(&g[j])).get(Family::Div));
         }
         let lf = limbs(&f);
-        for l in 0..k {
-            m.d[j * k + l] = &f * &p[j][l];
-            mul = mul.saturating_add(bigmul_units(lf, limbs(&p[j][l])).get(Family::MulSchool));
-        }
-        m.d[(k + j) * k + j] = delta.clone();
+        rel.push(
+            (0..k)
+                .map(|l| {
+                    let x = &f * &p[j][l];
+                    if R::WORD {
+                        wops = wops.saturating_add(2);
+                    } else {
+                        mul = mul.saturating_add(bigmul_units(lf, limbs(&p[j][l])).get(Family::MulSchool));
+                        div = div.saturating_add(bigdiv_units(limbs(&x), ld).get(Family::Div));
+                    }
+                    ring.residue(&x)
+                })
+                .collect(),
+        );
     }
     acc.n(Family::MulSchool, mul);
-    acc.n(Family::Move, (k * ld) as u64);
+    acc.n(Family::Div, div);
+    acc.n(Family::ModArith, wops);
     acc.flush();
-    let small = smith_classical(&m);
-    let um = small.u.mul(&m);
-    let b: Vec<Vec<BigInt>> = (0..k).map(|i| um.d[i * k..(i + 1) * k].to_vec()).collect();
+    let (db, v2, v2inv, _) = small_smith(ring, rel, delta, acc);
+    // B = D_B V_2^-1
+    let mut mul = 0u64;
+    let b: Vec<Vec<BigInt>> = (0..k)
+        .map(|i| {
+            let li = limbs(&db[i]);
+            (0..k)
+                .map(|j| {
+                    let x = v2inv.get(i, j);
+                    if !x.is_zero() {
+                        mul = mul.saturating_add(bigmul_units(li, limbs(x)).get(Family::MulSchool));
+                    }
+                    &db[i] * x
+                })
+                .collect()
+        })
+        .collect();
+    acc.n(Family::MulSchool, mul);
     // the last k rows of C^-1 N over Z: N_bottom + R N_<top
     let mut yfull: Vec<Vec<BigInt>> = (0..k).map(|t| nm.d[(top + t) * n..(top + t + 1) * n].to_vec()).collect();
     let mut mul = 0u64;
@@ -796,7 +1316,7 @@ fn trailing<R: Zn>(ring: &R, nm: &ZMat, delta: &BigInt, d: &BigInt, k: usize, ac
         return Err(not_integral("route 2"));
     }
     // V = [[I, c V_2], [-R, (I - R c) V_2]]
-    let v2 = &small.v;
+    let v2 = &v2;
     let mut mul = 0u64;
     let prod = |a: &[BigInt], col: usize, mul: &mut u64| -> BigInt {
         let mut t = BigInt::zero();
@@ -841,7 +1361,7 @@ fn trailing<R: Zn>(ring: &R, nm: &ZMat, delta: &BigInt, d: &BigInt, k: usize, ac
     acc.n(Family::Move, (n * n) as u64);
     let mut d = ZMat::identity(n);
     for t in 0..k {
-        d.d[(top + t) * n + top + t] = small.d.get(t, t).clone();
+        d.d[(top + t) * n + top + t] = db[t].clone();
     }
     Ok(SmithForm { d, u: w, v, route: Route::Trailing, attempts: attempt })
 }

@@ -98,8 +98,8 @@ fn smith_units_and_stop_checks() {
     let pins: &[(&str, [u64; FAMILIES], u64)] = &[
         ("route 1, word delta", [44, 0, 2, 0, 2, 24, 55, 0, 0, 0], 3),
         ("route 1, big delta", [17580, 0, 4772, 0, 280, 3386, 5052, 0, 0, 0], 5),
-        ("route 2, word delta", [149, 0, 39, 0, 30, 121, 177, 0, 0, 0], 10),
-        ("route 2, big delta", [34733, 0, 36000, 0, 1582, 3727, 6314, 0, 0, 0], 44),
+        ("route 2, word delta", [143, 0, 31, 0, 30, 97, 208, 0, 0, 0], 9),
+        ("route 2, big delta", [34470, 0, 36537, 0, 1678, 3574, 6314, 0, 0, 0], 46),
         ("classical, singular", [111, 0, 11, 0, 0, 182, 119, 0, 0, 0], 3),
         ("classical, wide", [29, 0, 12, 0, 0, 55, 0, 0, 0, 0], 4),
     ];
@@ -135,6 +135,40 @@ fn smith_units_and_stop_checks() {
     let (nm, den, det) = zmat::inverse_det(&tr_big).unwrap();
     let (big2, _, _) = measure(|| smith::trailing_route(&nm, &den, &det.abs(), 2));
     assert!(big2[Family::ModArith as usize] == 0 && big2[Family::Gcd as usize] > 0, "route 2, big delta: {big2:?}");
+
+    // route 2's small Smith form: word delta (30030: units are scarce, so
+    // the unit-leading-minor step's combinations run too) counts ModArith
+    // and no Gcd (its integer parts, the lifts' reductions modulo d_j, are
+    // one-limb divisions: Div); big delta counts no ModArith of its own
+    let mut seed: u64 = 0x9e3779b97f4a7c15;
+    for delta in [BigInt::from(30030), (BigInt::from(30030) << 70usize) + BigInt::from(30030)] {
+        let word = delta.bits() < 62;
+        for k in 2..=5usize {
+            for _ in 0..4 {
+                let rel = ZMat::from_rows(
+                    (0..k)
+                        .map(|_| {
+                            (0..k)
+                                .map(|_| {
+                                    seed ^= seed << 13;
+                                    seed ^= seed >> 7;
+                                    seed ^= seed << 17;
+                                    BigInt::from(seed >> 2) * BigInt::from([2u64, 3, 5, 6][(seed % 4) as usize])
+                                })
+                                .collect()
+                        })
+                        .collect(),
+                );
+                let (u, _, _) = measure(|| smith::small_smith_route(&rel, &delta));
+                if word {
+                    assert!(u[Family::ModArith as usize] > 0 && u[Family::Gcd as usize] == 0 && u[Family::Div as usize] > 0, "small Smith, word delta: {u:?}");
+                } else {
+                    assert!(u[Family::ModArith as usize] == 0 && u[Family::Gcd as usize] > 0, "small Smith, big delta: {u:?}");
+                }
+                assert_eq!(u[Family::Other as usize], 0);
+            }
+        }
+    }
 
     // the leaf rule: smith_form is exactly the inverse and the route (route
     // 1), the inverse, part A and the route (route 2)
