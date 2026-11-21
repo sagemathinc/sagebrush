@@ -791,6 +791,90 @@ try {
     const f5 = await call("workspace.read", { path: P5 });
     ok(held && closed5 && r5?.ended === "stopped" && !JSON.stringify(f5.content.json.cells[0].outputs ?? []).includes("CLOSED 5"), "PR5: the pane closed while the run waits: the run ends, stopped, nothing saved", { held, closed5, r5 });
     event(t5, { type: "turn_finished", outcome: "completed" });
+    // (PR-SELF: a notebook the agent creates in its turn runs once by itself in the pane; the agent's own run of it,
+    //  asked at once while that run still holds the cell, runs it and answers with what it ran: done, its output,
+    //  saved; never the cell "skipped" and the run "error", which the agent reads as its run not allowed)
+    {
+      const PS = "/notes/pr-self.ipynb";
+      const tS = `t${++turnN}`;
+      event(tS, { type: "turn_started" });
+      await sleep(300);
+      await call("workspace.create", { path: PS, content: docFor(PS, [{ code: "import time\ntime.sleep(1.5)\nprint('SELF', 7)" }]), mode: "python" });
+      const rS = await runIn(PS, tS);
+      await until(`document.querySelector('${PANE} .saved')?.textContent === 'Saved'`, 10000).catch(() => {});
+      const fS = await call("workspace.read", { path: PS });
+      ok(rS?.ended === "done" && rS.cells?.[0]?.status === "ok" && rS.cells?.[0]?.out === "SELF 7\n" && JSON.stringify(fS.content.json.cells[0].outputs ?? []).includes("SELF 7"),
+        "PR-SELF: the agent's run of a notebook it just created, while its run once by itself still holds the cell: done, its output, saved (not stopped)", { rS });
+      event(tS, { type: "turn_finished", outcome: "completed" });
+    }
+    // (PR-SELF-STOP: the agent's run stopped (run_stop) while it still waits for the run once by itself: its cell never
+    //  starts after the call ended, and the run it waited for isn't interrupted: the cell ran exactly once, to its end)
+    {
+      const PT = "/notes/pr-self-stop.ipynb";
+      const tT = `t${++turnN}`;
+      event(tT, { type: "turn_started" });
+      await sleep(300);
+      await call("workspace.create", { path: PT, content: docFor(PT, [{ code: "try:\n    n += 1\nexcept NameError:\n    n = 1\nimport time\ntime.sleep(3)\nprint('RUNS', n)" }]), mode: "python" });
+      const pT = runIn(PT, tT);
+      const waiting = await until(`/running|queued/.test(document.querySelector('${PANE} .nb-root .cell')?.className ?? '')`, 60000).catch(() => false);
+      await sleep(500);
+      const st = await call("workspace.run_stop", {});
+      const rT = await pT;
+      // (until the cell is idle and stays so: a late run would start only as the run it waited for ends)
+      for (let quiet = 0, t0 = Date.now(); quiet < 4000 && Date.now() - t0 < 30000; ) { await sleep(250); quiet = /running|queued/.test(await ev(`document.querySelector('${PANE} .nb-root .cell')?.className ?? ''`)) ? 0 : quiet + 250; }
+      await until(`document.querySelector('${PANE} .saved')?.textContent === 'Saved'`, 10000).catch(() => {});
+      const outT = await ev(`document.querySelector('${PANE} .nb-root .cell .out')?.textContent ?? ''`);
+      const fileT = JSON.stringify((await call("workspace.read", { path: PT })).content.json.cells[0].outputs ?? []);
+      ok(waiting && st?.stopped === true && rT?.ended === "stopped" && /RUNS 1/.test(outT) && !/RUNS 2|Interrupt/.test(outT) && /RUNS 1/.test(fileT) && !/RUNS 2/.test(fileT),
+        "PR-SELF-STOP: the agent's run stopped while it waits for the run once by itself: it never starts the cell after, and doesn't interrupt that run (the cell ran once, to its end)", { waiting, st, rT, outT, fileT });
+      event(tT, { type: "turn_finished", outcome: "completed" });
+      // (the same with the call's own deadline (timeout_s 1) ending it while it waits)
+      const PU = "/notes/pr-self-timeout.ipynb";
+      const tU = `t${++turnN}`;
+      event(tU, { type: "turn_started" });
+      await sleep(300);
+      await call("workspace.create", { path: PU, content: docFor(PU, [{ code: "try:\n    m += 1\nexcept NameError:\n    m = 1\nimport time\ntime.sleep(3)\nprint('TRIES', m)" }]), mode: "python" });
+      await until(`/running|queued/.test(document.querySelector('${PANE} .nb-root .cell')?.className ?? '')`, 60000).catch(() => false);
+      const rU = await call("workspace.run_notebook", { path: PU, timeout_s: 1, conversation: conv, turn_id: tU }).catch((e) => ({ error: e.message }));
+      // (until the cell is idle and stays so: a late run would start only as the run it waited for ends)
+      for (let quiet = 0, t0 = Date.now(); quiet < 4000 && Date.now() - t0 < 30000; ) { await sleep(250); quiet = /running|queued/.test(await ev(`document.querySelector('${PANE} .nb-root .cell')?.className ?? ''`)) ? 0 : quiet + 250; }
+      await until(`document.querySelector('${PANE} .saved')?.textContent === 'Saved'`, 10000).catch(() => {});
+      const outU = await ev(`document.querySelector('${PANE} .nb-root .cell .out')?.textContent ?? ''`);
+      const fileU = JSON.stringify((await call("workspace.read", { path: PU })).content.json.cells[0].outputs ?? []);
+      ok(rU?.ended !== "done" && /TRIES 1/.test(outU) && !/TRIES 2|Interrupt/.test(outU) && /TRIES 1/.test(fileU) && !/TRIES 2/.test(fileU),
+        "PR-SELF-STOP: the same when the call's deadline ends it while it waits: no late run of the cell, and the run it waited for not interrupted", { rU, outU, fileU });
+      event(tU, { type: "turn_finished", outcome: "completed" });
+    }
+    // (PR-LATE: the cell busy with the person's own Run; the agent's call on it ends while it waits, by its deadline
+    //  (timeout_s 1) or by run_stop: it answers at once, and never runs the cell afterwards. The cell counts its runs in
+    //  the kernel, so the person's run says 1 and a late one would say 2, shown or saved. The ended call's last stage
+    //  (deliver) held 2.5 s: the person's run ends inside it, the moment a wait that only the call's close ended would
+    //  start the cell)
+    for (const how of ["timeout", "run_stop"]) {
+      const PX = `/notes/pr-late-${how}.ipynb`, word = `LATE-AFTER-${how.toUpperCase()}`;
+      await call("workspace.create", { path: PX, content: docFor(PX, [{ code: `try:\n    k += 1\nexcept NameError:\n    k = 1\nimport time\ntime.sleep(2)\nprint('${word}', k)` }]), mode: "python" });
+      const tx = `t${++turnN}`;
+      event(tx, { type: "turn_started" });
+      await sleep(200);
+      await openNotebook(PX, { turn: tx, finish: false });
+      await ev(`document.querySelector('${PANE} .cell .runb').click()`);
+      const busy = await until(`!!document.querySelector('${PANE} .cell.running, ${PANE} .cell.queued')`).catch(() => false);
+      await ev(`(window.__runHold = (st) => st === "deliver" ? new Promise((r) => setTimeout(r, 2500)) : undefined, true)`);
+      const t0 = Date.now();
+      const px = call("workspace.run_notebook", { path: PX, timeout_s: how === "timeout" ? 1 : 120, conversation: conv, turn_id: tx });
+      if (how === "run_stop") { await sleep(500); await call("workspace.run_stop", {}); }
+      const result = await px.catch((e) => ({ error: e.message }));
+      const returned = Date.now() - t0;
+      await ev(`(window.__runHold = () => undefined, true)`);
+      await sleep(5500);
+      await until(`document.querySelector('${PANE} .saved')?.textContent === 'Saved'`, 10000).catch(() => {});
+      const f = await call("workspace.read", { path: PX });
+      const saved = JSON.stringify(f.content.json.cells[0].outputs ?? []), shown = await ev(`document.querySelector('${PANE} .cell .out')?.textContent ?? ''`);
+      const late = saved.includes(`${word} 2`) || shown.includes(`${word} 2`);
+      ok(busy && result?.ended === (how === "timeout" ? "timeout" : "stopped") && returned < 4500 && shown.includes(`${word} 1`) && !late,
+        `PR-LATE: an agent's call waiting on the person's busy cell, ended by ${how === "timeout" ? "its deadline" : "run_stop"}: it answers (its last stage held 2.5 s) and never runs or saves the cell afterwards`, { how, busy, result, returned, late, shown, saved: saved.slice(0, 200) });
+      event(tx, { type: "turn_finished", outcome: "completed" });
+    }
     // (the call's chat and turn (run.context): the pane runs only for the shown chat's running turn that made the call;
     //  anything else is today's run, nothing opened, nothing saved)
     const today = (r, f, out) => r?.ended === "done" && r.saved === "not saved: main" && r.cells?.[0]?.out === out && !JSON.stringify(f.content.json.cells[0].outputs ?? []).includes(out.trim());
