@@ -297,7 +297,7 @@ The menu downloads or opens JSON (a file can also be dropped on the page),
 and starts a new board. Agents have `edit(f)` and `editing(on)`.
 test-board.mjs drives all of it with the mouse, at desktop and phone sizes.
 
-**Examples** (the menu's Examples…, dist/board/examples/index.json, written from examples/board/ by web/examples/legacy.ts):
+**Examples** (the menu's Examples…: the gallery's panel, boards first; the corpus's boards are also copied into dist/board/examples/ by web/build.ts, web/examples/boards.ts, and these two are generated there by scripts/board-examples.mjs):
 - the architecture tour;
 - *Sagebrush's source, file by file*: 301 files, 26 directories, 586 edges;
 - *The integers to 10,000*: 10,000 notes, each with LaTeX.

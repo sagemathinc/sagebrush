@@ -50,7 +50,7 @@ async function pinned(id, url, want) {
   return b;
 }
 // The document's folder and its main file. Forms (corpus.json): url (one file), files (several, each pinned), archive
-// (a .tar.gz, pinned; arXiv's sources), example (one of web/latex/examples.ts's), gen; and `write`, files written into
+// (a .tar.gz, pinned; arXiv's sources), example (one of scripts/latex-examples.mjs's, the corpus's), gen; and `write`, files written into
 // the folder (a wrapper). transcode "latin1": the main file as UTF-8, its inputenc option too, for every part alike
 // (the editor opens only UTF-8).
 async function source(d) {
@@ -73,10 +73,7 @@ async function source(d) {
     if (x.status !== 0) fail(`${d.id}: tar: ${x.stderr}`);
   }
   if (d.example) {
-    // (as a .mts copy: node strips its types, and loads it as an ES module whatever the nearest package.json says)
-    const mts = join(CACHE, "examples.mts");
-    copyFileSync(join(root, "web", "latex", "examples.ts"), mts);
-    const { EXAMPLES } = await import(mts);
+    const { EXAMPLES } = await import(join(root, "scripts", "latex-examples.mjs"));
     const ex = EXAMPLES.find((e) => e.id === d.example) ?? fail(`${d.id}: no example ${d.example}`);
     for (const [name, text, b64] of ex.files) put(name, b64 ? Buffer.from(text, "base64") : text);
     main = ex.files[0][0];

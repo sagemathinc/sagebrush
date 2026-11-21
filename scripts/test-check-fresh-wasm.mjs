@@ -80,6 +80,10 @@ try {
   ok(!isStrict({ event: "push", ref: "track/x" }) && isStrict({ event: "push", ref: "trackx" }), "isStrict: only the track/ prefix makes a push lenient");
   ok(!isStrict({ event: "pull_request", baseRef: "track/math", headRef: "track/math" }), "isStrict: a pull request between tracks is lenient");
   ok(!isStrict({ event: "local" }), "isStrict: a local run is lenient");
+  // a merge queue group lands on its target: strict into master (whatever the PR's branch), on a track into track/*
+  ok(isStrict({ event: "merge_group", ref: "refs/heads/gh-readonly-queue/master/pr-1306-aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa" }) && isStrict({ event: "merge_group", ref: "gh-readonly-queue/master/pr-7-aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa" }), "isStrict: a queue group into master is strict");
+  ok(!isStrict({ event: "merge_group", ref: "refs/heads/gh-readonly-queue/track/math/pr-7-aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa" }) && onTrack({ event: "merge_group", ref: "refs/heads/gh-readonly-queue/track/math/pr-7-aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa" }), "isStrict: a queue group into a track is on the track");
+  ok(isStrict({ event: "merge_group", ref: "refs/heads/something-else" }) && isStrict({ event: "merge_group", ref: "" }) && !onTrack({ event: "merge_group", ref: "refs/heads/gh-readonly-queue/master/pr-7-aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa" }), "isStrict: a queue group whose ref has another shape is strict, never on a track");
   ok(isStrict({ event: "pull_request_target", baseRef: "master", headRef: "track/math" }) && !isStrict({ event: "pull_request_target", baseRef: "track/math", headRef: "x" }), "isStrict: pull_request_target follows pull_request");
   ok(onTrack({ event: "pull_request_target", baseRef: "track/math" }) && onTrack({ event: "push", ref: "refs/heads/track/math" }) && !onTrack({ event: "schedule", ref: "track/math" }) && !onTrack({ event: "pull_request", baseRef: "master", headRef: "track/math" }), "onTrack: a track's pushes and pull requests into it, never the pull into master or the schedule");
   ok(runRefs({ GITHUB_EVENT_NAME: "push", GITHUB_REF: "refs/heads/track/math" }).ref === "track/math", "runRefs: the branch from GITHUB_REF when GITHUB_REF_NAME is absent");
@@ -98,6 +102,8 @@ try {
   ok(cli("push", { ...none, GITHUB_REF_NAME: "master" }) === 1 && cli("pull_request", none) === 0, "the script's exit status: 1 on a master push, 0 on a pull request");
   ok(cli("push", { ...none, GITHUB_REF_NAME: "track/math" }) === 0, "the script's exit status: 0 on a track/math push");
   ok(cli("pull_request", { ...none, GITHUB_BASE_REF: "master", GITHUB_HEAD_REF: "track/math" }) === 1, "the script's exit status: 1 on track/math's pull into master");
+  ok(cli("merge_group", { ...none, GITHUB_REF_NAME: "gh-readonly-queue/master/pr-1306-bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb" }) === 1, "the script's exit status: 1 on a queue group into master");
+  ok(cli("merge_group", { ...none, GITHUB_REF_NAME: "gh-readonly-queue/track/math/pr-7-bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb" }) === 0, "the script's exit status: 0 on a queue group into track/math");
 } finally {
   rmSync(dir, { recursive: true, force: true });
 }

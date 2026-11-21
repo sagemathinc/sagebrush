@@ -262,7 +262,8 @@ test("a non-contiguous view or an integer matrix gives its contiguous float64 co
   assert.deepEqual(run(code), ["False True True True", "True True", "engine/nd"]);
 });
 
-test("a module memory that can't grow is a MemoryError with its message, and the session goes on", async () => {
+// (engine cost policy r2: no room in the module's memory is not a refusal; the TypeScript LU computes it)
+test("a module memory that can't grow: inv, det and solve are computed in JavaScript, and the session goes on", async () => {
   const { notebookSession } = require("../src/notebook-session");
   const Obj = require("../src/runtime/object");
   const s = notebookSession(() => {}, { captureStreams: true });
@@ -273,14 +274,14 @@ test("a module memory that can't grow is a MemoryError with its message, and the
     proto.grow = () => {
       throw new RangeError("WebAssembly.Memory.grow(): Maximum memory size exceeded");
     };
-    await s.handle({ id: 2, code: "R = []\nfor f in (np.linalg.inv, np.linalg.det, lambda M: np.linalg.solve(M, np.ones(700))):\n    try:\n        f(B)\n        R.append('ran')\n    except MemoryError as e:\n        R.append(str(e))" });
+    await s.handle({ id: 2, code: "R = []\nfor f in (lambda M: np.linalg.inv(M)[699, 699], lambda M: bool(np.isclose(np.linalg.det(M), 2.0 ** 700, rtol=1e-9)), lambda M: np.linalg.solve(M, np.ones(700))[699]):\n    try:\n        R.append(str(f(B)))\n    except MemoryError as e:\n        R.append(str(e))" });
   } finally {
     proto.grow = grow;
   }
   await s.handle({ id: 3, code: "OK = float(np.linalg.inv(B)[0, 0])" });
   const main = Obj.getattr(require("../src/runtime").R.importModule("__main__"), "__dict__");
   const v = (name: string) => Obj.callObj(Obj.getattr(main, "__getitem__"), [name]);
-  assert.deepEqual(require("../src/runtime").R.toArray(v("R")), ["inv", "det", "solve"].map((w) => `${w} of a 700 x 700 matrix needs more working memory than WebAssembly can have here`));
+  assert.deepEqual(require("../src/runtime").R.toArray(v("R")), ["0.5", "True", "0.5"]);
   assert.equal(v("OK"), 0.5);
 });
 

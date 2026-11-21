@@ -25,6 +25,7 @@ import { listedSummary } from "./sync-view";
 import { OLD_SYNC_REASON, UNREADABLE_MESSAGE, UNREADABLE_REASON, OldSyncError } from "./sync-old";
 import { learnMore } from "../docs-link";
 import { signInUrl } from "../share-client/upload";
+import { syncConfirmDocs } from "./doc-sync-switch";
 
 export const PANEL = {
   /** the server's delay, clamped to this range */
@@ -296,7 +297,7 @@ export function syncSection(w: Workspace, into: HTMLElement, host: SectionHost, 
     const on = st.state !== "off";
     const here = owner.client !== null || v.s.state !== "off";
     if (!on || !here) {
-      sec.append(btn("Turn on sync…", () => void enable()));
+      sec.append(btn("Turn on sync…", () => void enableOnce()));
       line(on ? "Sync is on for your account, not in this browser." : "Sync your notebooks between your own devices.", "storage#sync");
     } else {
       // (the foot: its count of refused changes not yet looked at is added by the details' read, below; what sync does
@@ -385,6 +386,13 @@ export function syncSection(w: Workspace, into: HTMLElement, host: SectionHost, 
     return applied;
   }
 
+  // (one Turn on at a time: a click while one is asking (its status request, its confirm) does nothing)
+  let enabling = false;
+  async function enableOnce() {
+    if (enabling) return;
+    enabling = true;
+    try { await enable(); } finally { enabling = false; }
+  }
   async function enable() {
     const st = last?.status, bound = last?.account ?? null;
     if (!st) return;
@@ -400,7 +408,8 @@ export function syncSection(w: Workspace, into: HTMLElement, host: SectionHost, 
     // are uploaded again as they are (sync-docs' ruling (5)); said, not counted: @sagebrush's ruling (b); not beside
     // "0 data files")
     const fetched = owner.view().s.used && use.files.count > 0 ? " (files fetched from your other devices included)" : "";
-    if (!confirmFn(`Turn on sync?\n${use.files.count} data file${use.files.count === 1 ? "" : "s"} (${fmt(use.files.bytes)}) will be uploaded${fetched}. Your notebooks and boards are listed; their contents sync in a later step.${lim}${warn}`)) return;
+    const docs = await syncConfirmDocs(location.origin, f);
+    if (!confirmFn(`Turn on sync?\n${use.files.count} data file${use.files.count === 1 ? "" : "s"} (${fmt(use.files.bytes)}) will be uploaded${fetched}. ${docs}${lim}${warn}`)) return;
     // (without the server's precondition: the account read again just before, and the enable not sent if it moved)
     if (!supported) {
       const again = await askStatus(f, new AbortController().signal);

@@ -366,7 +366,7 @@ export class WorkerKernel {
         const interrupted = this.interrupted.has(m.id) && !!m.error;
         if (r) this.finishRun(m, r);
         else this.interrupted.delete(m.id);
-        p.done(m.ms, { error: !!m.error, ...(interrupted ? { interrupted: true } : {}), ...(m.exited === true ? { exited: true } : {}), ...(m.files ? { files: m.files } : {}), ...(m.names ? { names: m.names } : {}), ...(typeof m.evaluated === "string" ? { evaluated: m.evaluated } : {}) });
+        p.done(m.ms, { error: !!m.error, ...(interrupted ? { interrupted: true } : {}), ...(m.exited === true ? { exited: true } : {}), ...(m.files ? { files: m.files } : {}), ...(m.names ? { names: m.names } : {}), ...(typeof m.evaluated === "string" ? { evaluated: m.evaluated } : {}), ...(typeof m.shown === "boolean" ? { shown: m.shown } : {}) });
       }
     };
     // (while a hold is pending, holdMessages, this worker's messages wait behind it, in order: a run's
@@ -402,7 +402,7 @@ export class WorkerKernel {
     this.retryStart();
     const id = this.nextId++;
     this.pending.set(id, sink);
-    const forget = { ...(opts.forget?.length ? { forget: [...opts.forget] } : {}), ...(opts.mangle && opts.cell ? { mangle: String(opts.cell).replace(/[^A-Za-z0-9]/g, "") } : {}), ...(opts.seed ? { seed: opts.seed } : {}), ...(opts.scoped && Object.keys(opts.scoped).length ? { scoped: { ...opts.scoped } } : {}) };
+    const forget = { ...(opts.forget?.length ? { forget: [...opts.forget] } : {}), ...(opts.mangle && opts.cell ? { mangle: String(opts.cell).replace(/[^A-Za-z0-9]/g, "") } : {}), ...(opts.seed ? { seed: opts.seed } : {}), ...(opts.scoped && Object.keys(opts.scoped).length ? { scoped: { ...opts.scoped } } : {}), ...(Array.isArray(opts.above) ? { above: [...opts.above] } : {}) };
     const run = { kind: "code", code, mode: opts.mode, ...(opts.repl ? { repl: true } : {}), ...(opts.cell ? { cell: opts.cell } : {}), ...(opts.figures ? { figures: opts.figures } : {}), ...forget };
     // (what the run is, and the document version its code is from, are taken
     // now ("execute"); it goes to the worker once the start is done, and into
