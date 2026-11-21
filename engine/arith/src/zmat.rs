@@ -128,6 +128,19 @@ pub(crate) fn reduce_units(x: &BigInt) -> u64 {
     limbs(x) as u64
 }
 
+/// The units of an integer square root of x (Newton's iteration): about
+/// log2 of its bits steps, each a division of x by a root of half its limbs
+/// (Div, through `bigdiv_units`).
+pub(crate) fn bigsqrt_units(x: &BigInt) -> Units {
+    let l = limbs_big(x);
+    let steps = (64 - (x.bits().max(1)).leading_zeros()) as u64;
+    let mut u = bigdiv_units(l, l.div_ceil(2));
+    for v in u.0.iter_mut() {
+        *v = v.saturating_mul(steps);
+    }
+    u
+}
+
 /// The units of a full gcd of BigInts of `la` and `lb` limbs (la >= lb), as
 /// about lb Euclid steps on those sizes (a word of the quotient sequence
 /// per limb of the smaller): `bigeuclid_units` lb times.
@@ -658,7 +671,7 @@ pub fn solve(a: &ZMat, b: &ZMat) -> Option<(ZMat, BigInt)> {
         sagebrush_interrupt::check();
         if iter == check {
             // N, D with 2 N D < p^iter
-            acc.add(biggcd_units(limbs(&pk), limbs(&pk)));
+            acc.add(bigsqrt_units(&pk));
             let half = (&pk / 2u32).sqrt();
             if let Some((nums, den)) = ratrecon_vec(&x, &pk, &half, &half) {
                 let nm = ZMat { rows: n, cols: k, d: nums };
@@ -750,6 +763,7 @@ fn det_crt(a: &ZMat, divisor: &BigInt, bound_log2: f64) -> BigInt {
         if crt.m.bits() as f64 > target {
             break;
         }
+        acc.flush();
         sagebrush_interrupt::check();
     }
     acc.add(bigmul_units(limbs(&crt.m), limbs(divisor)));
@@ -889,6 +903,9 @@ fn rref_dixon(a: &ZMat, piv: &[usize], m: &Modulus) -> Option<(ZMat, BigInt, Vec
     }
     let free: Vec<usize> = (0..cols).filter(|c| !piv.contains(c)).collect();
     let (x, den) = solve(&a.select(&srows, piv), &a.select(&srows, &free))?;
+    // (counted: the copies of den and X into the form)
+    let mut acc = Acc::new();
+    acc.n(Family::Move, k as u64 * limbs(&den) as u64 + copy_units(&x.d));
     let mut nm = ZMat::zero(k, cols);
     for i in 0..k {
         nm.d[i * cols + piv[i]] = den.clone();
@@ -1126,7 +1143,7 @@ fn sentinel_rational(primes: &[u64], res: &[Vec<u64>], free: &[usize]) -> Option
         })
         .collect();
     let m = product(primes);
-    acc.add(biggcd_units(limbs(&m), limbs(&m)));
+    acc.add(bigsqrt_units(&m));
     let half = (&m / 2u32).sqrt();
     ratrecon(&crt_all(primes, &raw)[0], &m, &half, &half)
 }
@@ -1177,7 +1194,7 @@ fn rref_rational(primes: &[u64], res: &[Vec<u64>]) -> Option<Vec<BigInt>> {
             body.iter().map(|&x| md.mul(x, inv)).collect()
         })
         .collect();
-    acc.add(biggcd_units(limbs(m), limbs(m)));
+    acc.add(bigsqrt_units(m));
     let half = (m / 2u32).sqrt();
     let (mut nm, den) = ratrecon_vec(&crt_all(primes, &raw), m, &half, &half)?;
     nm.push(den);

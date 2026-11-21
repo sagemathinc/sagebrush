@@ -519,11 +519,7 @@ pub fn invariants_nonsingular(a: &ZMat, d: &BigInt, solved: Option<(ZMat, BigInt
         let dg = d / g.pow(n as u32);
         // a x = b gives (a / g)(g x) = b: the same denominator, numerators times g
         let sg = solved.map(|(x, den)| (x.scale(&g), den));
-        if let Some((x, _)) = &sg {
-            for v in &x.d {
-                acc.add(bigmul_units(limbs(v), lg));
-            }
-        }
+        // (x.scale counts its own products)
         acc.times(n as u64, bigmul_units(limbs(d), lg));
         acc.flush();
         return invariants_nonsingular(&ag, &dg, sg).into_iter().map(|t| t * &g).collect();
