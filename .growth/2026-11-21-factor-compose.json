@@ -1,0 +1,8 @@
+{
+ "v": 1,
+ "reason": "Factoring mod p: modular composition (Brent-Kung), distinct-degree factorization by baby steps and giant steps, equal-degree splitting by the norm. CI's size row at 7c424a41 (run 44869021356, base 0f8464cf): the engine module grows 21009 B; cli/pyjs.cjs embeds it in base64, +28004 B. Each marked +64 over the measured growth. The engine module's ceiling is renewed to its measured size + 64.",
+ "bytes": {
+  "cli/pyjs.cjs": 28068,
+  "engine/sagebrush-engine.wasm": 21073
+ }
+}
