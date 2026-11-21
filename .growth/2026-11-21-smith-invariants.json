@@ -1,0 +1,8 @@
+{
+ "v": 1,
+ "reason": "The elementary divisors from the determinant, one solve and a Smith form modulo the determinant over the solve's denominator (engine/arith snf: the elimination over Z/eZ for word and big-integer moduli, the content and diagonal steps, the Hermite compressions' route): the engine module grows 19908 B (CI's size row at 0b3b23bf). cli/pyjs.cjs embeds the engine module in base64, so it grows by 4/3 of that, 26552 B, with no other change: generated, not new library code. Each marked +64 over the measured growth; the engine module's ceiling is renewed to its measured size plus the rank change already on the track (+210 B) + 64.",
+ "bytes": {
+  "cli/pyjs.cjs": 26616,
+  "engine/sagebrush-engine.wasm": 19972
+ }
+}
