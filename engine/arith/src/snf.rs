@@ -34,7 +34,7 @@
 //! e through the Gcd units.  The determinant and the solve count
 //! themselves.
 
-use crate::cost::{bigdiv_units, bigmul_units, tally_all, Family, Units, FAMILIES};
+use crate::cost::{bigdiv_units, bigmul_units, publish_progress, tally_all, Family, Units, FAMILIES};
 use std::cell::Cell;
 use crate::zmat::{self, biggcd_units, limbs, Acc, ZMat};
 use num_integer::Integer;
@@ -75,8 +75,9 @@ trait Zn {
     /// `steps` gets the word path's quotient steps (one ModArith unit
     /// each); the big path counts its own.
     fn bezout(&self, p: &Self::T, a: &Self::T, steps: &mut u64) -> (Self::T, Self::T, Self::T, Self::T);
-    /// gcd(x, e); e for x = 0.
-    fn gcd_e(&self, x: &Self::T) -> Self::T;
+    /// gcd(x, e); e for x = 0.  `steps` gets the word path's quotient
+    /// steps (one ModArith unit each); the big path counts its own.
+    fn gcd_e(&self, x: &Self::T, steps: &mut u64) -> Self::T;
     fn is_one(x: &Self::T) -> bool;
     /// Whether g > 0 divides x as integers.
     fn divides(&self, g: &Self::T, x: &Self::T) -> bool;
@@ -149,8 +150,14 @@ impl Zn for Word {
         let g = r0 as u64;
         (s0.rem_euclid(e) as u64, u0.rem_euclid(e) as u64, a / g, p / g)
     }
-    fn gcd_e(&self, x: &u64) -> u64 {
-        x.gcd(&self.e)
+    fn gcd_e(&self, x: &u64, steps: &mut u64) -> u64 {
+        // (Euclid, so that its quotient steps are what is counted)
+        let (mut a, mut b) = (self.e, *x);
+        while b != 0 {
+            *steps += 1;
+            (a, b) = (b, a % b);
+        }
+        a
     }
     fn is_one(x: &u64) -> bool {
         *x == 1
@@ -231,7 +238,7 @@ impl Zn for Big {
         let eg = p.extended_gcd(a);
         (eg.x.mod_floor(&self.e), eg.y.mod_floor(&self.e), a / &eg.gcd, p / &eg.gcd)
     }
-    fn gcd_e(&self, x: &BigInt) -> BigInt {
+    fn gcd_e(&self, x: &BigInt, _: &mut u64) -> BigInt {
         self.count(biggcd_units(self.le, limbs(x)));
         x.gcd(&self.e)
     }
@@ -278,6 +285,7 @@ impl<R: Zn> Count<'_, R> {
         }
         if u.iter().any(|&x| x != 0) {
             tally_all(&u);
+            publish_progress();
         }
     }
 }
@@ -309,8 +317,10 @@ fn smith_in<R: Zn>(r: &R, rows: usize, cols: usize, mut a: Vec<R::T>) -> Vec<R::
     for t in 0..k {
         let pivot = (t..cols).flat_map(|j| (t..rows).map(move |i| (i, j))).find(|&(i, j)| !R::is_zero(&a[at(i, j)]));
         let Some((pi, pj)) = pivot else {
+            // (gcd_e(0) = e takes no quotient step; the call itself is one
+            // unit)
             c.bulk += 1;
-            let e = r.gcd_e(&r.residue(&BigInt::zero()));
+            let e = r.gcd_e(&r.residue(&BigInt::zero()), &mut c.bulk);
             out.extend((t..k).map(|_| e.clone()));
             break;
         };
@@ -375,8 +385,7 @@ fn smith_in<R: Zn>(r: &R, rows: usize, cols: usize, mut a: Vec<R::T>) -> Vec<R::
             if bezout {
                 continue;
             }
-            c.bulk += 1;
-            let g = r.gcd_e(&a[at(t, t)]);
+            let g = r.gcd_e(&a[at(t, t)], &mut c.bulk);
             let bad = if R::is_one(&g) {
                 None
             } else {

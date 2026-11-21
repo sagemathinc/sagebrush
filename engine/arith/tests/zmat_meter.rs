@@ -141,7 +141,7 @@ fn zmat_units_and_stop_checks() {
         ("rank deficient 12", [2639, 0, 73, 0, 144, 826, 1605, 0, 0, 0], 0),
         ("rref wide 6x14", [1257, 0, 85, 0, 168, 210, 809, 0, 0, 0], 0),
         ("kernel 12", [1737, 0, 73, 0, 144, 536, 961, 0, 0, 0], 0),
-        ("inverse 10", [4150, 0, 0, 0, 800, 1122, 1746, 0, 0, 0], 1),
+        ("inverse 10", [4150, 0, 0, 0, 12, 1122, 1746, 0, 0, 0], 1),
         ("charpoly 10", [3630, 0, 0, 0, 0, 638, 902, 0, 0, 0], 1),
         ("mul 10", [1000, 0, 0, 0, 0, 0, 0, 0, 0, 0], 0),
         ("smith bench 12 (word e = 6)", [7243, 0, 1208, 0, 2106, 1199, 3531, 0, 0, 0], 39),
@@ -183,6 +183,19 @@ fn zmat_units_and_stop_checks() {
         parts[i] = reduce[i] + elim[i];
     }
     assert_eq!(whole, parts, "rank = its reduction + its elimination, counted once");
+
+    // the word path's gcd with e counts one ModArith unit per quotient
+    // step: [7] mod 360 is the residue (1) and gcd(360, 7)'s three steps
+    // (360 = 51 * 7 + 3, 7 = 2 * 3 + 1, 3 = 3 * 1); [0] mod 360 the residue
+    // and the all-zero block's one call to gcd(360, 0), which takes no step
+    let one = |x: i64| ZMat { rows: 1, cols: 1, d: vec![BigInt::from(x)] };
+    let (u7, _) = measure(|| snf::smith_mod(&one(7), &BigInt::from(360)));
+    let (u0, _) = measure(|| snf::smith_mod(&one(0), &BigInt::from(360)));
+    let mut want = [0; FAMILIES];
+    want[Family::ModArith as usize] = 4;
+    assert_eq!(u7, want, "[7] mod 360");
+    want[Family::ModArith as usize] = 2;
+    assert_eq!(u0, want, "[0] mod 360");
 
     // one level up: the Smith form of a square matrix counts exactly its
     // determinant (with the solve it made) and the invariants from them,

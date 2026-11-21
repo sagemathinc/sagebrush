@@ -29,7 +29,7 @@
 //! product; copies of entries are Move, a unit per limb.  Scans that only
 //! read sizes or signs (max_bits, the zero tests) are not counted.
 
-use crate::cost::{bigdiv_units, bigeuclid_units, bigmul_units, tally_all, Family, Units, FAMILIES};
+use crate::cost::{bigdiv_units, bigeuclid_units, bigmul_units, publish_progress, tally_all, Family, Units, FAMILIES};
 use crate::nmod::{Modulus, Primes};
 use crate::nmod_mat::{Lu, Mat};
 use num_integer::Integer;
@@ -76,8 +76,9 @@ pub(crate) fn limbs_big(x: &BigInt) -> usize {
 }
 
 /// A local per-family count of the work a function does itself, added to
-/// the thread's tally at [`Acc::flush`] (called next to the function's
-/// existing Stop checks) and when dropped (on return, and while
+/// the thread's tally (and published to a metered region's progress) at
+/// [`Acc::flush`] (called next to the function's existing Stop checks) and
+/// when dropped (on return, and while
 /// unwinding), so that a loop pays one thread-local access per flush, not
 /// one per entry.
 pub(crate) struct Acc([u64; FAMILIES]);
@@ -103,10 +104,13 @@ impl Acc {
             *a += n * x;
         }
     }
+    /// Adds the count to the thread's tally and publishes a metered
+    /// region's running units to its progress cell (as nmod's polls do).
     pub(crate) fn flush(&mut self) {
         if self.0.iter().any(|&x| x != 0) {
             tally_all(&self.0);
             self.0 = [0; FAMILIES];
+            publish_progress();
         }
     }
 }
@@ -254,7 +258,6 @@ impl ZMat {
         let small = abits + obits + (64 - (k as u64).leading_zeros() as u64) < 126;
         if small {
             if let (Some(a), Some(b)) = (self.as_i64(), o.as_i64()) {
-                acc.times((r * c * k) as u64, bigmul_units(1, 1));
                 let mut d = Vec::with_capacity(r * c);
                 for i in 0..r {
                     for j in 0..c {
@@ -265,6 +268,8 @@ impl ZMat {
                         d.push(BigInt::from(s));
                     }
                 }
+                // (charged for the work done: r c sums of k i128 products)
+                acc.times((r * c * k) as u64, bigmul_units(1, 1));
                 return ZMat { rows: r, cols: c, d };
             }
         }
@@ -406,19 +411,21 @@ impl Default for Crt {
 fn crt_all(primes: &[u64], res: &[Vec<u64>]) -> Vec<BigInt> {
     let crt = crate::crt::MultiCrt::new(primes);
     let n = res.first().map_or(0, |r| r.len());
-    // (MultiCrt counts nothing itself: n reconstructions, each k rows of
-    // product limbs summed in u128 and k word steps)
-    let mut acc = Acc::new();
-    acc.times(n as u64, crt.units());
     let mut r = vec![0u64; primes.len()];
-    (0..n)
+    let out = (0..n)
         .map(|i| {
             for (rj, v) in r.iter_mut().zip(res) {
                 *rj = v[i];
             }
             crt.reconstruct(&r)
         })
-        .collect()
+        .collect();
+    // (charged for the work done: MultiCrt counts nothing itself; n
+    // reconstructions, each k rows of product limbs summed in u128 and k
+    // word steps)
+    let mut acc = Acc::new();
+    acc.times(n as u64, crt.units());
+    out
 }
 
 /// Rational reconstruction: (a, b) with a = b u mod m, |a| <= nb,
@@ -611,9 +618,6 @@ pub fn solve(a: &ZMat, b: &ZMat) -> Option<(ZMat, BigInt)> {
         // r = (r - a digit) / p
         match (&mut r128, &a64) {
             (Some(rv), Some(a64)) => {
-                // n k sums of n i128 products, then an exact division by p
-                // (a product by its inverse mod 2^128)
-                acc.times((n * k * (n + 1)) as u64, bigmul_units(1, 1));
                 for i in 0..n {
                     for j in 0..k {
                         let mut s = 0i128;
@@ -624,6 +628,10 @@ pub fn solve(a: &ZMat, b: &ZMat) -> Option<(ZMat, BigInt)> {
                         rv[i * k + j] = (v as u128).wrapping_mul(pinv) as i128;
                     }
                 }
+                // (charged for the work done: n k sums of n i128 products,
+                // each then divided by p exactly, a product by its inverse
+                // mod 2^128)
+                acc.times((n * k * (n + 1)) as u64, bigmul_units(1, 1));
             }
             _ => {
                 for i in 0..n {
@@ -1066,12 +1074,16 @@ pub fn rref_multimodular(a: &ZMat) -> (ZMat, BigInt, Vec<usize>) {
     let mut all = early.unwrap_or_else(|| crt_all(&primes, &res));
     let mut den = all.pop().unwrap();
     let mut nm = ZMat { rows: k, cols, d: all };
-    // lowest terms, positive denominator
-    let lden = limbs(&den);
+    // lowest terms, positive denominator (the fold charged at the running
+    // gcd's size, and stopped at 1)
+    let mut g = den.clone();
     for x in &nm.d {
-        acc.add(biggcd_units(limbs(x), lden));
+        if g.is_one() {
+            break;
+        }
+        acc.add(biggcd_units(limbs(x), limbs(&g)));
+        g = g.gcd(x);
     }
-    let g = nm.d.iter().fold(den.clone(), |g, x| g.gcd(x));
     if den.is_negative() {
         den = -den;
         for x in nm.d.iter_mut() {
@@ -1532,11 +1544,15 @@ pub fn inverse(a: &ZMat) -> Option<(ZMat, BigInt)> {
     let mut all = crt_all(&primes, &res);
     let mut den = all.pop().unwrap();
     let mut adj = ZMat { rows: n, cols: n, d: all };
-    let lden = limbs(&den);
+    // (the fold charged at the running gcd's size, and stopped at 1)
+    let mut g = den.clone();
     for x in &adj.d {
-        acc.add(biggcd_units(limbs(x), lden));
+        if g.is_one() {
+            break;
+        }
+        acc.add(biggcd_units(limbs(x), limbs(&g)));
+        g = g.gcd(x);
     }
-    let g = adj.d.iter().fold(den.clone(), |g, x| g.gcd(x));
     if den.is_negative() {
         den = -den;
         for x in adj.d.iter_mut() {

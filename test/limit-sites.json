@@ -2400,6 +2400,11 @@
   "owner": "engine arithmetic (exact linear algebra)",
   "reason": "test code: the metering test's accounting meter with no upper bound; refuses nothing"
  },
+ "engine/arith/tests/zmat_progress.rs :: seen_mid :: let mut meter = Meter::accounting(u64::MAX); #0": {
+  "class": "none",
+  "owner": "engine arithmetic (exact linear algebra)",
+  "reason": "test code: the progress test's accounting meter with no upper bound; refuses nothing"
+ },
  "engine/arith/tests/zmul_admission_targets.rs :: points :: let plan = zmul::admit(&c, &c, 2 * a.len() as u64 + 20, &Caps { n: u64::MAX, o: u64::MAX, peak: u64::MAX, work: u64::MAX, ..CAPS }).unwrap().unwrap(); #0": {
   "class": "none",
   "owner": "poly_mul",
