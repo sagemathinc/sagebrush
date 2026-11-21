@@ -39,9 +39,9 @@ fn big(rows: usize, cols: usize, bits: u32, seed: u64) -> ZMat {
     ZMat { rows, cols, d }
 }
 
-/// Whether a watcher saw progress strictly inside (0, total) during `f`,
-/// trying up to 200 times (a loaded machine may delay the watcher).
-fn seen_mid(mut f: impl FnMut()) -> bool {
+/// Whether a watcher saw progress strictly inside (floor, total) during
+/// `f`, trying up to 200 times (a loaded machine may delay the watcher).
+fn seen_mid(floor: u64, mut f: impl FnMut()) -> bool {
     for _ in 0..200 {
         let progress = Progress::new();
         let seen = Arc::new(Mutex::new(Vec::new()));
@@ -61,7 +61,7 @@ fn seen_mid(mut f: impl FnMut()) -> bool {
         watcher.join().unwrap();
         let total = meter.used();
         assert_eq!(progress.units().total(), Some(total), "the final publish equals the charge");
-        if seen.lock().unwrap().iter().any(|&t| 0 < t && t < total) {
+        if seen.lock().unwrap().iter().any(|&t| floor < t && t < total) {
             return true;
         }
     }
@@ -73,9 +73,12 @@ fn progress_moves_during_bareiss_and_the_smith_big_path() {
     // det's Bareiss route (n <= 12 with entries over 200 bits): zmat's own
     // products and divisions, flushed at each elimination step
     let a = big(12, 12, 300, 3);
-    assert!(seen_mid(|| drop(zmat::det(&a))), "Bareiss: progress seen mid-call");
-    // the Smith form's big path (e above 2^62), flushed at each pass
+    assert!(seen_mid(0, || drop(zmat::det(&a))), "Bareiss: progress seen mid-call");
+    // the Smith form's big path (e above 2^62), flushed at each pass: above
+    // the setup's residue charge (16 x 16 reductions of one limb modulo a
+    // four-limb e, 4 units each, published before the elimination starts),
+    // so the elimination's own publishing is what is seen
     let b = big(16, 16, 40, 5);
     let e = (BigInt::from(1) << 200) + BigInt::from(3);
-    assert!(seen_mid(|| drop(snf::smith_mod(&b, &e))), "the Smith big path: progress seen mid-call");
+    assert!(seen_mid(16 * 16 * 4, || drop(snf::smith_mod(&b, &e))), "the Smith big path: progress seen mid-elimination");
 }
