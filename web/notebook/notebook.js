@@ -1036,7 +1036,7 @@ export function createNotebook(root, opts = {}) {
     let waited = 0, waitFrom = null;
     const k = kernel;
     const send = viaWave ?? ((c, o, sink) => k.execute(c, o, sink));
-    return cellSeed(cell).then((seed) => new Promise((resolve) => send(code, { mode, cell: cell.id, forget, mangle: reactive(), figures: figures(), ...(seed ? { seed } : {}), ...(scoped ? { scoped } : {}), ...(extra ?? {}) }, {
+    return cellSeed(cell).then((seed) => new Promise((resolve) => send(code, { mode, cell: cell.id, forget, mangle: reactive(), ...(reactive() ? { above: cellsAbove(cell) } : {}), figures: figures(), ...(seed ? { seed } : {}), ...(scoped ? { scoped } : {}), ...(extra ?? {}) }, {
       start() {
         clear();
         cell.el.classList.replace("queued", "running");
@@ -1074,7 +1074,7 @@ export function createNotebook(root, opts = {}) {
             const n = ++k.execCount;
             k.ran?.add(cell.id);
             (k.parked ??= new Map()).set(cell.id, { nodes: [...cell.out.childNodes], n, ms, interrupted: !!info?.interrupted });
-            return resolve({ ok: !info?.error, ms, ...(info?.interrupted ? { stopped: true, interrupted: true } : {}), ...(info?.files ? { files: info.files } : {}) });
+            return resolve({ ok: !info?.error, ms, ...(info?.interrupted ? { stopped: true, interrupted: true } : {}), ...(info?.files ? { files: info.files } : {}), ...(typeof info?.shown === "boolean" ? { shown: info.shown } : {}) });
           }
           if (!live) return resolve({ ok: false, ms, stopped: true });
           forgetInteracts(live.out);
@@ -1090,7 +1090,7 @@ export function createNotebook(root, opts = {}) {
         if (!info?.interrupted) rememberTime(cell, ms);
         cell.time.textContent = `${ms < 10 ? ms.toFixed(1) : Math.round(ms)} ms`;
         announce(`Cell ${index(cell) + 1} ${failed || info?.error ? "raised an error" : "finished"}`);
-        resolve({ ok: !info?.error, ms, ...(info?.interrupted ? { stopped: true, interrupted: true } : {}), ...(info?.files ? { files: info.files } : {}) });
+        resolve({ ok: !info?.error, ms, ...(info?.interrupted ? { stopped: true, interrupted: true } : {}), ...(info?.files ? { files: info.files } : {}), ...(typeof info?.shown === "boolean" ? { shown: info.shown } : {}) });
       },
       stopped(message) {
         // (a running cell whose interpreter was ended, Stop's last resort:
@@ -1122,6 +1122,13 @@ export function createNotebook(root, opts = {}) {
         resolve({ ok: false, ms: 0, stopped: true });
       },
     })));
+  }
+  // (a reactive cell's `above`: the keys of the code cells above it, nearest first, as the worker keys each cell's
+  // shown value; _, __ and ___ in it are the values shown by the nearest of them that showed one)
+  function cellsAbove(cell) {
+    const code = cells().filter((c) => c.type === "code");
+    const i = code.findIndex((c) => c.id === cell.id);
+    return i < 0 ? [] : code.slice(0, i).reverse().map((c) => String(c.id).replace(/[^A-Za-z0-9]/g, ""));
   }
   // The reactive notebook's per-cell seed: SHA-256 of the notebook's seed (made
   // once, kept in the document) and the cell's id, so a cell draws the same
@@ -1170,7 +1177,7 @@ export function createNotebook(root, opts = {}) {
             analyses.set(key, opts.analyzer.analyze(code, mode).then((a) => {
               // (the analyzer failed, not the code: not kept, so that the next run asks again)
               if (a.error?.kind === "analyzer") analyses.delete(key);
-              return a.error ? a : { defs: new Set(a.defs), refs: new Set(a.refs), deleted: new Set(a.deleted), mutations: new Set(a.mutations ?? []), imports: new Map(a.imports ?? []) };
+              return a.error ? a : { defs: new Set(a.defs), refs: new Set(a.refs), deleted: new Set(a.deleted), mutations: new Set(a.mutations ?? []), imports: new Map(a.imports ?? []), outputs: new Set(a.outputs ?? []) };
             }));
           }
           return analyses.get(key);

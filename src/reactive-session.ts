@@ -24,7 +24,7 @@ import { modeFlags, type DocumentMode } from "./modes";
 
 export type Mode = DocumentMode;
 /** what one run sent back: its time, whether it raised, ran out of time, or found the interpreter stopped */
-export interface Sent { ms: number; error: boolean; timedOut: boolean; dead: boolean; evaluated?: string }
+export interface Sent { ms: number; error: boolean; timedOut: boolean; dead: boolean; evaluated?: string; shown?: boolean }
 
 const START_GRACE_MS = 60_000;
 const clamp = (ms: number) => Math.min(ms, 2 ** 31 - 1);
@@ -73,7 +73,7 @@ export async function startInterpreter(o: { mode: Mode; entry?: string; label?: 
       sinks.delete(id);
       clearTimeout(timer);
       clearTimeout(kill);
-      resolve({ ms: m.ms ?? 0, error: !!m.error || !!m.skipped, timedOut, dead: !!m.dead, ...(typeof m.evaluated === "string" ? { evaluated: m.evaluated } : {}) });
+      resolve({ ms: m.ms ?? 0, error: !!m.error || !!m.skipped, timedOut, dead: !!m.dead, ...(typeof m.evaluated === "string" ? { evaluated: m.evaluated } : {}), ...(typeof m.shown === "boolean" ? { shown: m.shown } : {}) });
     });
     const over = () => {
       timedOut = true;
@@ -126,9 +126,12 @@ export async function runCells(interp: Interpreter, cells: Cell[], o: { mode: Mo
       return analyses.get(code)!;
     },
     async execute(id, code, forget, scoped) {
-      const r = await interp.send({ cell: id, code, opts: { forget, mangle: mangle(id), seed: o.seedOf(id), ...(scoped && Object.keys(scoped).length ? { scoped } : {}) } }, (m) => o.onMessage(id, m), o.timeoutMs);
+      // (above: the cells above it, nearest first, for _, __ and ___, as the notebook page sends them)
+      const at = cells.findIndex((c) => c.key === id);
+      const above = at < 0 ? [] : cells.slice(0, at).reverse().map((c) => mangle(c.key));
+      const r = await interp.send({ cell: id, code, opts: { forget, mangle: mangle(id), above, seed: o.seedOf(id), ...(scoped && Object.keys(scoped).length ? { scoped } : {}) } }, (m) => o.onMessage(id, m), o.timeoutMs);
       if (r.timedOut) timedOut.add(id);
-      return { ok: !r.error, ms: r.ms, ...(r.timedOut ? { stopped: true, interrupted: true } : r.dead ? { stopped: true } : {}) };
+      return { ok: !r.error, ms: r.ms, ...(r.timedOut ? { stopped: true, interrupted: true } : r.dead ? { stopped: true } : {}), ...(typeof r.shown === "boolean" ? { shown: r.shown } : {}) };
     },
     forget: (names) => interp.send({ cell: "forget", code: "", opts: { forget: names } }, () => {}).then(() => {}),
     rename: async (q) => {

@@ -10,6 +10,7 @@ import { join } from "node:path";
 import { fileURLToPath } from "node:url";
 import { encode, decode, frame, frameReader, FRAME_MAX } from "../app/engine/frames.mjs";
 import { engineRoot, localFile } from "../app/engine/files.mjs";
+import { defaultHeapMb } from "../app/engine/serve.mjs";
 import { mkdtempSync, mkdirSync, writeFileSync, symlinkSync, rmSync } from "node:fs";
 import { tmpdir } from "node:os";
 
@@ -25,6 +26,15 @@ const throws = (f, re, what) => {
     ok(re.test(String(e?.message ?? e)), `${what}: ${e?.message}`);
   }
 };
+
+// ---- an interpreter's heap by default: the computer's memory, a container's limit where there is one, never past it
+{
+  const G = 2 ** 30, M = 2 ** 20;
+  ok(defaultHeapMb(16 * G, 0) === 16384, "heap: all of the computer's memory, with no container limit");
+  ok(defaultHeapMb(16 * G, 2 * G) === 2048, "heap: a 2 GiB container on a 16 GiB computer gets 2 GiB");
+  ok(defaultHeapMb(16 * G, 512 * M) === 512, "heap: a 512 MiB container gets 512 MiB, never past its limit");
+  ok(defaultHeapMb(512 * M, 0) === 1024, "heap: at least 1 GiB where there is no container limit");
+}
 
 // ---- frames
 {
@@ -272,6 +282,12 @@ try {
     e.send({ to: "nb2", m: { id: 1, code: "print('x' in globals())" } });
     await e.wait(from("nb2", (m) => m.id === 1 && m.done), 30000, "nb2 run");
     ok(e.msgs.filter((x) => x.from === "nb2" && x.m.stream).map((x) => x.m.text).join("").trim() === "False", "a second interpreter has its own variables");
+    // (the memory the engine gives an interpreter (--memory 2048 here) is what its heap guards see: the old space it may
+    // grow to, read by sys's size budgets; not the browser's nominal 1 GiB, which the interpreter takes when it can't ask)
+    e.send({ to: "nb2", m: { id: 2, code: "import sys\nprint(sys._sagebrush_heap_limit)" } });
+    await e.wait(from("nb2", (m) => m.id === 2 && m.done), 30000, "nb2 heap limit");
+    const heapSeen = e.msgs.filter((x) => x.from === "nb2" && x.m.id === 2 && x.m.stream).map((x) => x.m.text).join("").trim();
+    ok(heapSeen === String(2048 * 2 ** 20), `an interpreter's heap limit is the engine's --memory (${heapSeen})`);
     e.send({ close: "nb2" });
     await e.wait((m) => m.closed === "nb2", 10000, "closed");
     ok(true, "close: the interpreter stops, {closed}");

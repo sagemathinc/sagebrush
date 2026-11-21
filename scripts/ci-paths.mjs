@@ -114,6 +114,8 @@ const fullTierPaths = [
   // its answers (entry-url.ts, with the code page's languages and address))
   /^web\/workspace\/(?:agent-ui|agent-pair|agent-made-tex|pair-link|notebook-edit|notebook-form|agent-grant|agent-schema|verbs|verbs-page|branch-rules|git-branch|view-state|entry-url)\.ts$/, /^src\/modes\.ts$/,
   /^web\/code\/(?:langs|url)\.ts$/,
+  // (and the highlighting chunk's highlighter, the notebook's)
+  /^web\/notebook\/highlight\.js$/,
   // (and what makes those bundles from them, which no metafile lists: the build and its helpers and the dependencies;
   // @sagebrush's ruling, Nov 4. Not .github/workflows/ci.yml, which pins bun and node but changes in about one pull
   // request in six: a bun or node bump carries the full-ci label instead)
