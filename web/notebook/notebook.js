@@ -2306,7 +2306,8 @@ export function createNotebook(root, opts = {}) {
   // its saves finish first. Notebooks left are the page's own prompt's, as before)
   const unsaved = (dirty) => typed && !!store && !store.readOnly && !!(savesPending || failed.has(shown) || busy.size || dirty());
   root.addEventListener("input", (e) => { if (e.isTrusted) typed = true; }, true);
-  for (const t of ["keydown", "pointerdown", "paste", "drop"]) root.addEventListener(t, (e) => { if (e.isTrusted && store && (failed.has(shown) || busy.size)) typed = true; }, true);
+  // (armed at once: such a key or click may change nothing that schedules a save, so nothing else would call guard())
+  for (const t of ["keydown", "pointerdown", "paste", "drop"]) root.addEventListener(t, (e) => { if (e.isTrusted && store && (failed.has(shown) || busy.size)) { typed = true; guard(); } }, true);
   function onBeforeUnload(ev) {
     if (!unsaved(() => timer && JSON.stringify(snapshot()) !== lastJson)) return;
     if (timer) flush();

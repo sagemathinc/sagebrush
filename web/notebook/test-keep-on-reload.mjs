@@ -170,6 +170,27 @@ try {
   const saved = await unloadKeys();
   check(!saved.includes(mine[0]) && saved.length === clean.length, "8: saved, the listener is taken away again", { clean, saved });
 
+  // 10. a save that failed with nothing typed (a script's change: an untrusted input event), then a key of the person's
+  // own: the failed save alone asks nothing, and the key arms the prompt at once (a cell moved, deleted or retyped then
+  // can't be saved either); once a later save succeeds, nothing is asked again
+  await settled();
+  const clean10 = await unloadKeys();
+  await ev("(window.__save = window.sagebrush.notebook.store.save, window.sagebrush.notebook.store.save = () => Promise.reject(new Error('refused for the test')), 1)");
+  await ev(`(() => { const t = document.querySelectorAll("#cells textarea")[1]; t.value = "b9 a script's change"; t.dispatchEvent(new Event("input", { bubbles: true })); return 1; })()`);
+  check((await ev("window.sagebrush.notebook.saved().then(() => false, () => true)")) === true, "10: the script's change: its save fails");
+  await sleep(300);
+  check(J(await unloadKeys()) === J(clean10), "10: a failed save with nothing typed: the notebook adds no listener", { clean10, now: await unloadKeys() });
+  await ev(`(document.querySelectorAll("#cells textarea")[1].focus(), 1)`);
+  for (const type of ["keyDown", "keyUp"]) await send("Input.dispatchKeyEvent", { type, key: "ArrowLeft", code: "ArrowLeft", windowsVirtualKeyCode: 37 });
+  await sleep(100);
+  const keyed = await unloadKeys();
+  check(keyed.length === clean10.length + 1, "10: then a key of the person's own while it is failed: the listener at once", { clean10, keyed });
+  check((await ev("(() => { const e = new Event('beforeunload', { cancelable: true }); window.dispatchEvent(e); return e.defaultPrevented; })()")) === true, "10: ...and leaving is asked about");
+  await ev("(window.sagebrush.notebook.store.save = window.__save, 1)");
+  await type(1, "b10 saved again");
+  await sleep(2000);
+  check(J(await unloadKeys()) === J(clean10), "10: a later save that succeeds: the listener goes", { clean10, now: await unloadKeys() });
+
   // 4. the notebook destroyed with an edit unsaved (as a page tearing it down does): its listener goes with it, and a
   // reload then asks nothing
   await type(0, "a5 typed, then the notebook destroyed");
