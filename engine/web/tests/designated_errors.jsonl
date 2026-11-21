@@ -123,3 +123,8 @@
 {"fn":"zpoly_fdiv","a":"1,2","b":"2,3"}
 {"fn":"zpoly_fdiv","a":"1/2,2","b":"3"}
 {"fn":"zpoly_fdiv","a":"1","b":""}
+{"fn":"cusp_hecke_matrix","n":11,"k":4294967296,"q":2,"prec":4}
+{"fn":"cusp_hecke_matrix","n":11,"k":2,"q":2,"prec":2}
+{"fn":"cusp_hecke_matrix","n":11,"k":2,"q":4,"prec":4}
+{"fn":"cusp_hecke_matrix","n":11,"k":2,"q":2147483659,"prec":4}
+{"fn":"cusp_hecke_matrix","n":0,"k":2,"q":2,"prec":4}

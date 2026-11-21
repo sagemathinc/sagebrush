@@ -777,6 +777,18 @@ fn u(v: &Value, k: &str) -> Result<u64, String> {
     v.get(k).and_then(Value::as_u64).ok_or_else(|| format!("missing integer argument '{}'", k))
 }
 
+/// cusp_hecke_matrix's admission: its L bytes reserved in the ledger, held
+/// until the op returns.
+struct HeckeAdmit(Option<sagebrush_ledger::Reservation>);
+
+impl sagebrush_modsym::hecke_q::Admit for HeckeAdmit {
+    fn admit(&mut self, _work: u64, bytes: u64) -> Result<(), String> {
+        let r = sagebrush_ledger::reserve("cusp_hecke_matrix", bytes).map_err(|e| format!("cusp_hecke_matrix: {} bytes refused: {:?}", bytes, e))?;
+        self.0 = Some(r);
+        Ok(())
+    }
+}
+
 /// A size argument (a count, a bound, a weight, a number of points) at most
 /// `max`, so that it means the same on every target: usize is 32 bits in
 /// WebAssembly, and an unchecked cast changed 2^32 to 0 there.
@@ -1714,6 +1726,27 @@ fn dispatch(v: &Value) -> Result<Value, String> {
                 }).collect::<Vec<_>>());
             }
             Ok(out)
+        }
+        // ---- sagebrush.mf: T_q on S_k(Gamma0(N)) in its echelon basis ----
+        "cusp_hecke_matrix" => {
+            let (n, k) = (level(v)?, weight(v)?);
+            let q = u(v, "q")?;
+            // (a domain bound, prec - 1 below 2^30, not a cost cap: the op's
+            // admission refuses by its lower bound L)
+            let prec = size(v, "prec", None, sagebrush_modsym::linalg::MAX_HECKE_PRIME)?;
+            let new_only = v.get("new_only").and_then(Value::as_bool).unwrap_or(false);
+            let factor = |f: &[BigInt]| sagebrush_poly::try_factor(f).map(|r| r.1);
+            let mut admit = HeckeAdmit(None);
+            // (the units the op tallied, per family: the same on every
+            // target, the kernels' parallel jobs added at their joins)
+            let before = sagebrush_arith::cost::tallied();
+            let h = keeping_internal(&factor, |fac| sagebrush_modsym::hecke_q::cusp_hecke_matrix(n, k, q, prec, new_only, fac, &mut admit))?;
+            let after = sagebrush_arith::cost::tallied();
+            let units: Vec<String> = after.0.iter().zip(before.0).map(|(a, b)| a.wrapping_sub(b).to_string()).collect();
+            Ok(json!({ "dim": h.dim, "pivots": h.pivots, "basis": h.basis.iter().map(|r| big(r)).collect::<Vec<_>>(),
+                       "matrix": h.matrix.iter().map(|r| big(r)).collect::<Vec<_>>(), "den": big(std::slice::from_ref(&h.den))[0], "units": units,
+                       "stats": { "e": h.stats.e, "primes": h.stats.primes, "seeded": h.stats.seeded, "combined": h.stats.combined,
+                                  "rejected": sagebrush_modsym::traces::Reject::ALL.iter().zip(h.stats.rejected).map(|(r, c)| (r.name().to_string(), json!(c))).collect::<serde_json::Map<_, _>>() } }))
         }
         // ---- sagebrush.ap: traces of Frobenius of elliptic curves ----
         "ap" => {

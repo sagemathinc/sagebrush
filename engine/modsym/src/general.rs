@@ -22,7 +22,9 @@
 use crate::exact::is_prime;
 use crate::linalg;
 use crate::p1::{gcd, P1List};
+use crate::count;
 use crate::par;
+use sagebrush_arith::cost::{Family, Units};
 
 /// Direction of the character relation: -1 means [P, (l c, l d)] =
 /// eps(l) [P, (c, d)], Sage's convention (+1 disagrees with Sage on 664 of
@@ -160,6 +162,13 @@ pub fn root_of_unity(order: u64, ell: u64) -> u64 {
 /// Coefficients over X^r Y^(k-2-r), r = 0..=k-2, of P(aX + bY, cX + dY)
 /// for P = X^i Y^(k-2-i), mod p.
 fn transform(k: usize, i: usize, h: [i64; 4], binom: &[Vec<u64>], p: u64) -> Vec<u64> {
+    transform_c(k, i, h, binom, p, &mut Units::default())
+}
+
+/// transform, counting its units (crate::count): the four reductions, the
+/// powers and binomial terms (two ModArith each but the powers' one), and
+/// two ModArith per term of the product.
+fn transform_c(k: usize, i: usize, h: [i64; 4], binom: &[Vec<u64>], p: u64, u: &mut Units) -> Vec<u64> {
     let w = k - 2;
     let red = |x: i64| x.rem_euclid(p as i64) as u64;
     let (a, b, c, d) = (red(h[0]), red(h[1]), red(h[2]), red(h[3]));
@@ -180,13 +189,16 @@ fn transform(k: usize, i: usize, h: [i64; 4], binom: &[Vec<u64>], p: u64) -> Vec
     let (pc, pd) = (pows(c, j), pows(d, j));
     let second: Vec<u64> = (0..=j).map(|t| mul(binom[j][t], mul(pc[t], pd[j - t], p), p)).collect();
     let mut out = vec![0u64; w + 1];
+    let mut ops = 4 + 4 * (i as u64 + 1) + 4 * (j as u64 + 1);
     for (s, &x) in first.iter().enumerate() {
         if x != 0 {
             for (t, &y) in second.iter().enumerate() {
                 out[s + t] = (out[s + t] + mul(x, y, p)) % p;
             }
+            ops += 2 * second.len() as u64;
         }
     }
+    count::n(u, Family::ModArith, ops);
     out
 }
 
@@ -458,20 +470,41 @@ impl GeneralSpace {
 
     /// A functional on the quotient (given on the basis) on every generator.
     pub fn extend(&self, phi: &[u64]) -> Vec<u64> {
+        self.extend_c(phi, &mut Units::default())
+    }
+
+    /// extend, counting its units (crate::count): the generators' values
+    /// written (Move), and per pivot one delayed-reduction multiply-add per
+    /// term (MulSchool) and two ModArith.
+    pub(crate) fn extend_c(&self, phi: &[u64], u: &mut Units) -> Vec<u64> {
         let p = self.p;
         let mut psi = vec![0u64; self.m];
         for (t, &g) in self.basis_gen.iter().enumerate() {
             psi[g as usize] = phi[t];
         }
+        let mut terms = 0u64;
         for (pc, rest) in self.pivots.iter().rev() {
             let s = rest.iter().fold(0u128, |acc, &(k, v)| acc + v as u128 * psi[k as usize] as u128) % p as u128;
             psi[*pc as usize] = (p - s as u64) % p;
+            terms += rest.len() as u64;
         }
+        count::n(u, Family::Move, (self.m + self.basis_gen.len()) as u64);
+        count::n(u, Family::MulSchool, terms);
+        count::n(u, Family::ModArith, 2 * self.pivots.len() as u64);
         psi
     }
 
     /// T_p(x_g) for a free generator g as a sparse combination of generators.
     pub(crate) fn hecke_image(&self, hs: &[[i64; 4]], g: u32) -> Vec<(u32, u64)> {
+        self.hecke_image_c(hs, g, &mut Units::default())
+    }
+
+    /// hecke_image, counting its units (crate::count): per Heilbronn
+    /// matrix the gcd test (Gcd, one), the P^1 lookup (Move, one), the
+    /// character value (a powmod) and scale (ModArith), the transform, and
+    /// two ModArith per term kept; then the sort and merge (Move per term,
+    /// ModArith per term merged).
+    pub(crate) fn hecke_image_c(&self, hs: &[[i64; 4]], g: u32, u: &mut Units) -> Vec<(u32, u64)> {
         let p = self.p;
         let (a, wa) = self.gen_sym[g as usize];
         // x_a = wa x_g, so x_g = wa^{-1} x_a.
@@ -485,23 +518,32 @@ impl GeneralSpace {
             powmod(self.zeta, e, p)
         };
         let mut acc: Vec<(u32, u64)> = vec![];
+        let (mut gcds, mut lookups, mut ops) = (0u64, 0u64, 0u64);
         for h in hs {
             let (c2, d2) = (c * h[0] + d * h[2], c * h[1] + d * h[3]);
             let nn = self.n as i64;
+            gcds += 1;
             if gcd(gcd(c2.rem_euclid(nn) as u64, d2.rem_euclid(nn) as u64), self.n) != 1 {
                 continue; // only when q | N: the term is absent from U_q
             }
             let (j2, lam) = self.p1.index_scalar(c2, d2);
+            lookups += 1;
             let f = mul(zpow(lam), scale, p);
-            let tr = transform(self.k, i, *h, &self.binom, p);
+            count::pow(u, self.eps.order);
+            ops += 1;
+            let tr = transform_c(self.k, i, *h, &self.binom, p, u);
             for (r, &coef) in tr.iter().enumerate() {
                 if coef != 0 {
                     if let Some((g2, w2)) = self.rep[r * self.l + j2] {
                         acc.push((g2, mul(coef, mul(f, w2, p), p)));
+                        ops += 2;
                     }
                 }
             }
         }
+        count::n(u, Family::Gcd, gcds);
+        count::n(u, Family::Move, lookups + acc.len() as u64);
+        let kept = acc.len() as u64;
         acc.sort_unstable_by_key(|e| e.0);
         let mut merged: Vec<(u32, u64)> = vec![];
         for (g2, v) in acc {
@@ -510,6 +552,7 @@ impl GeneralSpace {
                 _ => merged.push((g2, v)),
             }
         }
+        count::n(u, Family::ModArith, ops + kept - merged.len() as u64);
         merged.retain(|e| e.1 != 0);
         merged
     }
