@@ -1133,10 +1133,14 @@ addEventListener("keydown", (e) => {
 
 // (a turn that was running when the page closed can't go on: it ends interrupted)
 session.endInterrupted();
-// (A14: a reload record waiting for its restore says this page was connected: no demo, even before the workspace is
-// open and the restore decided; only its presence is read here)
+// (A14: a reload record of this page waiting for its restore says this page was connected: no demo, even before the
+// workspace is open and the restore decided; only its page is read here (another page's record, left in the tab for that
+// page, A5, says nothing about this one))
 try {
-  if (sessionStorage.getItem(RELOAD_KEY) !== null) connectedHere = true;
+  const raw = sessionStorage.getItem(RELOAD_KEY);
+  let page: unknown = null;
+  try { page = raw === null ? null : JSON.parse(raw)?.page ?? null; } catch {}
+  if (raw !== null && (typeof page !== "string" || page === location.origin + location.pathname)) connectedHere = true;
 } catch {
   // (no sessionStorage: no record)
 }
