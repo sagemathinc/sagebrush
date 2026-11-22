@@ -10,6 +10,8 @@ export interface ComposerHooks {
   stop(): void;
   render(src: string): string;
   typeset(el: Element): void;
+  /** after every change of the text the person makes (not one set by the page) */
+  changed?(value: string): void;
 }
 
 // (whether the thread shown has a turn running, as last rendered: then the primary action steers it where its agent
@@ -25,6 +27,7 @@ export function mountComposer(h: ComposerHooks): BlockEditor {
     render: h.render,
     typeset: h.typeset,
     placeholder: "Message Claude…  (Shift+Enter to send)",
+    onChange: (v) => h.changed?.(v),
     onKey(e) {
       if (e.key !== "Enter") return false;
       if (e.shiftKey && !e.altKey && !e.ctrlKey && !e.metaKey) return (e.preventDefault(), primary(), true);

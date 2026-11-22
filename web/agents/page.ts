@@ -67,6 +67,75 @@ function openFull(path: string): HTMLAnchorElement {
   }, () => {});
   return a;
 }
+// The composer's draft, by chat, in this browser (as CoCalc keeps one, #1615): kept as it is typed, back when its chat is
+// shown again (after another chat, Files or a reload), gone once sent. One localStorage record; each chat's draft is
+// written alone into the record as read then, so another tab's drafts of other chats stay. Bounded, so the chats' own
+// record always has room: a draft over DRAFT_MAX isn't kept, a chat no longer stored loses its draft, and over
+// DRAFTS_MAX in all the other chats' longest drafts go first.
+const DRAFTS = "sagebrush-agents-drafts-v1";
+const DRAFT_MAX = 64 * 1024;
+const DRAFTS_MAX = 512 * 1024;
+function readDrafts(): Record<string, string> {
+  const d: Record<string, string> = Object.create(null);
+  try {
+    const v = JSON.parse(localStorage.getItem(DRAFTS) ?? "{}");
+    if (v && typeof v === "object" && !Array.isArray(v)) for (const [k, t] of Object.entries(v)) if (typeof t === "string") d[k] = t;
+  } catch {}
+  return d;
+}
+const draftsPending = new Map<string, string>();
+let draftTimer = 0;
+function flushDrafts() {
+  clearTimeout(draftTimer);
+  draftTimer = 0;
+  if (!draftsPending.size) return;
+  const d = readDrafts();
+  for (const [id, t] of draftsPending) {
+    if (!t.trim()) delete d[id];
+    else if (t.length <= DRAFT_MAX) d[id] = t;
+    // (over the limit: the last copy within it stays)
+  }
+  // (the chats as stored (another tab's newer ones too), and this tab's)
+  let stored: Set<string> | null = null;
+  let record: { threads: Thread[] } | null = null;
+  try {
+    const v = JSON.parse(localStorage.getItem(STORE) ?? "null");
+    if (v && Array.isArray(v.threads)) record = v;
+    stored = new Set(record ? record.threads.map((t) => t?.id) : []);
+  } catch {}
+  // (a chat with a draft is stored too: a first visit's chat isn't until something happens in it, and its draft would
+  //  come back to no chat. Added to the record as stored, not this tab's chats written over it, which would undo
+  //  another tab's newer)
+  const missing = stored ? state.threads.filter((t) => draftsPending.has(t.id) && !stored!.has(t.id)) : [];
+  if (missing.length) {
+    try {
+      localStorage.setItem(STORE, JSON.stringify(record ? { ...record, threads: [...record.threads, ...missing] } : state));
+      for (const t of missing) stored!.add(t.id);
+    } catch {}
+  }
+  if (stored) for (const id of Object.keys(d)) if (!stored.has(id) && !state.threads.some((t) => t.id === id)) delete d[id];
+  let total = Object.values(d).reduce((n, t) => n + t.length, 0);
+  for (const id of Object.keys(d).sort((a, b) => d[b].length - d[a].length)) {
+    if (total <= DRAFTS_MAX) break;
+    if (draftsPending.has(id)) continue;
+    total -= d[id].length;
+    delete d[id];
+  }
+  draftsPending.clear();
+  try {
+    localStorage.setItem(DRAFTS, JSON.stringify(d));
+  } catch {}
+}
+// (here, before anything the page waits for: a page left while it still opens keeps its draft too)
+addEventListener("pagehide", flushDrafts);
+function putDraft(id: string, text: string, now = false) {
+  draftsPending.set(id, text);
+  if (now) return flushDrafts();
+  clearTimeout(draftTimer);
+  draftTimer = window.setTimeout(flushDrafts, 300);
+}
+/** The chat whose draft the composer holds (null until the composer is up). */
+let draftOf: string | null = null;
 const esc = (s: string) => s.replace(/&/g, "&amp;").replace(/</g, "&lt;").replace(/>/g, "&gt;").replace(/"/g, "&quot;");
 const $ = <T extends HTMLElement = HTMLElement>(sel: string, root: ParentNode = document) => root.querySelector(sel) as T;
 
@@ -93,7 +162,11 @@ const session = new ChatSession({
   },
   store(s) {
     clearTimeout(saveTimer);
-    saveTimer = window.setTimeout(() => localStorage.setItem(STORE, JSON.stringify(s)), 300);
+    saveTimer = window.setTimeout(() => {
+      try {
+        localStorage.setItem(STORE, JSON.stringify(s));
+      } catch {} // (storage full: the chats stay here, kept at the next save that fits)
+    }, 300);
   },
   pairing: () => pairing,
   demo: (prompt, emit) => startFakeTurn(prompt, emit, speed()),
@@ -202,6 +275,7 @@ function submit(mode: UserEntry["mode"]) {
   if (!session.submit(editor.value, mode)) return;
   if (mode !== "note") void mirror.kick(current().id);
   editor.value = "";
+  putDraft(draftOf || current().id, "", true);
   renderAll();
   scrollToEnd(true);
 }
@@ -774,12 +848,14 @@ function mountFile(a: Artifact, box: HTMLElement, saved: HTMLElement): FileHost 
     clearTimeout(timer);
     const value = latest(); // (the text as it is now: what this write writes, whenever its turn comes)
     inflight = inflight.then(async () => {
-      if (!open || stopped || rev < 0 || value === savedText) return;
+      if (!open || stopped || rev < 0) return;
+      // (nothing new to write: said as saved once the text shown is the file's, so no "Saving…" stays, #1617)
+      if (value === savedText) return void (latest() === savedText && guard === "open" && say("Saved"));
       try {
         const r = await workspace!.write(path, value, { base: rev, ...(fid ? { fid } : {}), admit });
         rev = r.rev;
         savedText = value;
-        say(latest() === value ? "Saved" : "Editing…");
+        if (guard === "open") say(latest() === value ? "Saved" : "Saving…");
       } catch (e) {
         if (!open) return; // (closed meanwhile: refused by design)
         stopped = true;
@@ -792,7 +868,8 @@ function mountFile(a: Artifact, box: HTMLElement, saved: HTMLElement): FileHost 
   const changed = (value: string) => {
     if (!alive) return;
     text = value;
-    say("Editing…");
+    // (not over why a write failed (nothing more is written from here), nor over Closing…)
+    if (!stopped && guard === "open") say("Saving…");
     clearTimeout(timer);
     timer = window.setTimeout(() => void write(), 700);
   };
@@ -979,6 +1056,7 @@ function mountTexFrame(path: string, box: HTMLElement): FileHost {
 }
 
 function renderComposer() {
+  showDraft();
   renderComposerState(isRunning(current()), queues.get(current().id)?.length ?? 0, session.isAway(current()), session.canSteer(current()));
   renderConn();
 }
@@ -1161,7 +1239,24 @@ function toast(text: string, ms = 1500) {
 // ---------------------------------------------------------------------------
 // The page
 
-const editor = mountComposer({ submit, stop: () => interrupt(current()), render: md, typeset: (el) => typeset(el) });
+const editor = mountComposer({
+  submit,
+  stop: () => interrupt(current()),
+  render: md,
+  typeset: (el) => typeset(el),
+  changed: (v) => { if (draftOf) putDraft(draftOf, v); },
+});
+/** The chat shown's draft in the composer, when another chat's was there. */
+function showDraft() {
+  const id = current().id;
+  if (draftOf === null || draftOf === id) return;
+  draftOf = id;
+  editor.value = draftsPending.get(id) ?? readDrafts()[id] ?? "";
+}
+// (the chat shown's draft at once, as the composer comes up: the page's first render waits for the workspace, and by
+//  then the person may have typed)
+draftOf = "";
+showDraft();
 // (Delegate, for an agent on this computer that offers it: delegate.ts's tasks, drawn by delegate-ui.ts)
 const delegateTasks = new DelegateTasks({ changed: () => delegateUi?.render() });
 const delegateUi = mountDelegate({
@@ -1172,7 +1267,7 @@ const delegateUi = mountDelegate({
   draft: () => editor.value,
   // (the Pair chat shown, once something has been said in it: a brief is drafted from it, the agent saying if it can't)
   conversation: () => { const t = current(); return t.entries.some((e) => e.kind === "turn" || e.kind === "user") ? t.id : null; },
-  clearDraft: () => { editor.value = ""; },
+  clearDraft: () => { editor.value = ""; putDraft(draftOf || current().id, "", true); },
   // (a workspace document as the task's copy starts from it: a notebook's .ipynb text, a text file's text; its path as
   //  the protocol has it, relative)
   async readDoc(path) {

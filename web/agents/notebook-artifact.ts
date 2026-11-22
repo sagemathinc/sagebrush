@@ -719,15 +719,34 @@ export function mountNotebook(ws: Workspace, path: string, box: HTMLElement, ui:
     const owned = () => alive && nb === comp && comp.store === mine;
     ui.saved("Saved");
     if (jstore) showWriter(comp);
-    comp.on("dirty", () => owned() && ui.saved("Editing…"));
+    // (Saving… from the first touch until its change is saved. "dirty" comes with any touch, a change or not, and
+    //  nothing follows one that changed nothing: with no "change" past the component's half second, the pane says
+    //  again what it said last (Saved, or why the last save was refused: that save is still to make). It said
+    //  "Editing…", for good, #1617. Never over Closing…)
+    let idle = 0, last = "Saved";
+    const say = (t: string) => owned() && !frozen && ui.saved(t);
+    comp.on("dirty", () => {
+      if (!owned() || frozen) return;
+      ui.saved("Saving…");
+      clearTimeout(idle);
+      idle = window.setTimeout(() => say(last), 900);
+    });
+    comp.on("change", () => {
+      clearTimeout(idle);
+      say("Saving…");
+    });
     // (a save the store refused: shown as it says; if the workspace's fence moved (a reset, sync), the pane lets go)
     comp.on("saved", (t: unknown) => {
       if (!owned()) return;
       const refused = typeof t === "string" && t.startsWith("not saved");
-      ui.saved(refused ? (t as string) : "Saved");
+      last = refused ? (t as string) : "Saved";
+      ui.saved(last);
       if (refused) void check();
     });
-    comp.on("remote", () => owned() && ui.saved("Updated from elsewhere"));
+    comp.on("remote", () => {
+      last = "Saved";
+      if (owned()) ui.saved("Updated from elsewhere");
+    });
     // (a save of this notebook made after it was let go met a change made elsewhere: what it had is kept as a copy)
     // (or, `why`, a save refused or failed when sent again: said as that, not as a change made elsewhere)
     comp.onDetachedConflict(async (doc: any, _theirs: unknown, _key: unknown, why?: { refused: boolean; message: string } | null) => {
