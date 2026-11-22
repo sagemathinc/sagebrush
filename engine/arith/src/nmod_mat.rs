@@ -152,6 +152,61 @@ fn batch_len(m: &Modulus) -> usize {
     }
 }
 
+/// The units [`Mat::echelon`] charges for a reduced echelon form (with the
+/// determinant) of a `rows` x `cols` matrix whose first `rows` columns
+/// are a nonsingular block that meets no zero factor on the way (the
+/// generic case of [a | I] modulo a large prime): its block updates,
+/// pivot scalings, flushes and back substitution, by the same loop bounds
+/// and with no data.  Off that case the real count differs: a zero factor
+/// skips its products (MulSchool and ModArith lower), a zero pivot's row
+/// swap adds 2 cols moves (Move higher).
+pub(crate) fn echelon_units_dense(rows: usize, cols: usize, batch: usize) -> [u64; FAMILIES] {
+    const BLOCK: usize = 16;
+    let mut u = [0u64; FAMILIES];
+    let (ms, ma, mv) = (Family::MulSchool as usize, Family::ModArith as usize, Family::Move as usize);
+    let upd = |u: &mut [u64; FAMILIES], len: usize, factors: usize| {
+        u[ms] = u[ms].saturating_add((factors * len) as u64);
+        u[ma] = u[ma].saturating_add((len * (factors / batch + 1)) as u64);
+        u[mv] = u[mv].saturating_add(len as u64);
+    };
+    let mut block_start = 0;
+    for r in 0..rows {
+        let col = r;
+        let blk = r - block_start;
+        if blk > 0 {
+            u[ms] = u[ms].saturating_add(((rows - r) * blk) as u64);
+            u[ma] = u[ma].saturating_add(reductions(rows - r, blk, batch) as u64);
+            upd(&mut u, cols - (col + 1), blk);
+        }
+        u[ma] = u[ma].saturating_add((cols - col) as u64 + 1);
+        let (r1, col1) = (r + 1, col + 1);
+        if r1 - block_start == BLOCK {
+            for _ in r1..rows {
+                upd(&mut u, cols - col1, BLOCK);
+            }
+            block_start = r1;
+        }
+    }
+    // back substitution, bottom up: row i against the later pivots, in
+    // chunks of about 2^16 multiply-adds
+    let step = ((1usize << 16) / cols.max(1)).max(1);
+    for i in (0..rows).rev() {
+        let later = rows - 1 - i;
+        let mut left = later;
+        while left > 0 {
+            let c = left.min(step);
+            upd(&mut u, cols - (i + 1), c);
+            left -= c;
+        }
+    }
+    u
+}
+
+/// [`batch_len`] for the models.
+pub(crate) fn batch_of(m: &Modulus) -> usize {
+    batch_len(m)
+}
+
 /// row[j] -= sum_t row[blk[t]] * src(t)[j] for j >= from: the products
 /// summed in u128 (`batch` at a time), one reduction per entry.
 #[inline]
@@ -1047,5 +1102,50 @@ mod tests {
         for i in 3..6 {
             assert!(r.row(i).iter().all(|&x| x == 0));
         }
+    }
+}
+
+#[cfg(test)]
+mod echelon_units_twin {
+    use super::*;
+    use crate::cost::tallied;
+    use crate::nmod::Primes;
+
+    /// The data-free count equals the echelon's own tally, every family,
+    /// on [a | I] modulo a 62-bit prime with dense residues, n = 1..128.
+    #[test]
+    fn the_twin_counts_what_echelon_charges() {
+        let p = Primes::new().next().unwrap();
+        let m = Modulus::new(p);
+        let mut s: u64 = 0x9e3779b97f4a7c15;
+        let mut compared = 0;
+        for n in 1..=128usize {
+            let rows: Vec<Vec<u64>> = (0..n)
+                .map(|_| {
+                    (0..n)
+                        .map(|_| {
+                            s ^= s << 13;
+                            s ^= s >> 7;
+                            s ^= s << 17;
+                            1 + s % (p - 1)
+                        })
+                        .collect()
+                })
+                .collect();
+            let mut aug = Mat::from_rows(&rows, m).augment(&Mat::identity(n, m));
+            let before = tallied();
+            let (piv, _) = aug.echelon(true, true);
+            let after = tallied();
+            // (the residues are nonzero, but the block may still be singular
+            // modulo p: such an n is skipped and counted)
+            if piv.len() < n || piv[n - 1] != n - 1 {
+                continue;
+            }
+            compared += 1;
+            let got: Vec<u64> = (0..FAMILIES).map(|i| after.0[i].wrapping_sub(before.0[i])).collect();
+            let want = echelon_units_dense(n, 2 * n, batch_of(&m));
+            assert_eq!(got, want.to_vec(), "n = {n}");
+        }
+        assert_eq!(compared, 128, "every n compared");
     }
 }

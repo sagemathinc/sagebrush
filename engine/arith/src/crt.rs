@@ -138,8 +138,13 @@ impl MultiCrt {
     /// (MulSchool, 1 x 1 limb products), and k word steps, a product
     /// reduced modulo p_j each (ModArith).
     pub(crate) fn units(&self) -> crate::cost::Units {
-        let (k, n) = (self.mods.len(), self.q.first().map_or(0, |q| q.len()));
-        let mut u = crate::cost::bigmul_units(k * n + n + 1, 1);
+        Self::units_for(self.mods.len(), self.q.first().map_or(0, |q| q.len()))
+    }
+
+    /// [`MultiCrt::units`] for k primes whose quotients are `qlen` words
+    /// (the work estimate's model calls it without building the CRT).
+    pub(crate) fn units_for(k: usize, qlen: usize) -> crate::cost::Units {
+        let mut u = crate::cost::bigmul_units(k * qlen + qlen + 1, 1);
         u.0[crate::cost::Family::ModArith as usize] += 2 * k as u64;
         u
     }

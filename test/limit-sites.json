@@ -1796,6 +1796,16 @@
   "owner": "engine arithmetic (exact linear algebra)",
   "reason": "a route threshold (route 2 up to K_MAX nontrivial invariant factors, else the classical elimination): a measured crossover, refuses nothing"
  },
+ "engine/arith/src/smith/estimate.rs :: cost :: Cost { mem_lower: super::floor_bytes(a.rows, a.cols).unwrap_or(u64::MAX), work_lower, work_estimate: None, work_upper: None } #0": {
+  "class": "none",
+  "owner": "engine arithmetic (exact linear algebra)",
+  "reason": "the work estimate's cost(): L's memory floor, u64::MAX when it overflows (the existing floor's memory refusal, not a new cap)"
+ },
+ "engine/arith/src/smith/estimate.rs :: stage2_with :: if k < 2 || k > super::K_MAX || delta.is_zero() { #0": {
+  "class": "none",
+  "owner": "engine arithmetic (exact linear algebra)",
+  "reason": "route 2's threshold K_MAX in the work estimate's stage 2: more nontrivial invariant factors take the classical route, which has no estimate (E None); not a cap"
+ },
  "engine/arith/src/smith/tests.rs :: more_than_k_max_takes_the_classical_route :: fn more_than_k_max_takes_the_classical_route() { #0": {
   "class": "none",
   "owner": "engine arithmetic (exact linear algebra)",
@@ -2549,6 +2559,51 @@
   "class": "none",
   "owner": "qpoly_mul",
   "reason": "qpoly_mul's derived bounds, plumbing (the meter's limit, the plan's sizes) or a test assertion: refuses nothing itself"
+ },
+ "engine/arith/tests/smith_estimate.rs ::  :: use sagebrush_arith::smith::{last_small_smith_sizes, smith_form, Route, K_MAX}; #0": {
+  "class": "none",
+  "owner": "engine arithmetic (exact linear algebra)",
+  "reason": "test code: the work estimate's scores against their ceilings (k's p90 regression bounds) and the route threshold K_MAX; not caps"
+ },
+ "engine/arith/tests/smith_estimate.rs :: the_estimate_is_fitted_and_scores_within_its_ceilings :: assert!(kmax <= K_MAX); #0": {
+  "class": "none",
+  "owner": "engine arithmetic (exact linear algebra)",
+  "reason": "test code: the work estimate's scores against their ceilings (k's p90 regression bounds) and the route threshold K_MAX; not caps"
+ },
+ "engine/arith/tests/smith_estimate.rs :: the_estimate_is_fitted_and_scores_within_its_ceilings :: for kk in 2..=K_MAX { #0": {
+  "class": "none",
+  "owner": "engine arithmetic (exact linear algebra)",
+  "reason": "test code: the work estimate's evidence by k up to the route threshold K_MAX, and the classical runs' worst ratio (a report, not a cap)"
+ },
+ "engine/arith/tests/smith_estimate.rs :: the_estimate_is_fitted_and_scores_within_its_ceilings :: let counts: Vec<usize> = (0..=K_MAX).map(|kk| train.iter().filter(|r| r.route == Route::Trailing && r.k == kk).count()).collect(); #0": {
+  "class": "none",
+  "owner": "engine arithmetic (exact linear algebra)",
+  "reason": "test code: the training corpus's route 2 rows counted by k up to the route threshold K_MAX (the training floor, a report and a test check, not a cap)"
+ },
+ "engine/arith/tests/smith_estimate.rs :: the_estimate_is_fitted_and_scores_within_its_ceilings :: let k_op_max = shown.iter().cloned().fold(0.0, f64::max); #0": {
+  "class": "none",
+  "owner": "engine arithmetic (exact linear algebra)",
+  "reason": "test code: the work estimate's scores against their ceilings (k's p90 and its maximum, printed), and the route threshold K_MAX; not caps"
+ },
+ "engine/arith/tests/smith_estimate.rs :: the_estimate_is_fitted_and_scores_within_its_ceilings :: let kmax = r2.iter().map(|r| r.k).max().unwrap_or(0); #0": {
+  "class": "none",
+  "owner": "engine arithmetic (exact linear algebra)",
+  "reason": "test code: the work estimate's scores against their ceilings (k's p90 regression bounds) and the route threshold K_MAX; not caps"
+ },
+ "engine/arith/tests/smith_estimate.rs :: the_estimate_is_fitted_and_scores_within_its_ceilings :: println!(\"base-train seed 1: route 2 rows by k = 2..={K_MAX}: {:?}\", &counts[2..]); #0": {
+  "class": "none",
+  "owner": "engine arithmetic (exact linear algebra)",
+  "reason": "test code: the training corpus's route 2 rows counted by k up to the route threshold K_MAX (the training floor, a report and a test check, not a cap)"
+ },
+ "engine/arith/tests/smith_estimate.rs :: the_estimate_is_fitted_and_scores_within_its_ceilings :: println!(\"{set} seed {seed}: rows {} (classical {}), k: stage 1 per op {k_op:.2} (max {k_op_max:.2}), route 1 stage 1 {k1s1:.2} stage 2 {k1s2:.2}, route 2 stage 2 {k2s2:.2} (k <= {kmax}), beside {kb:.2}\", rows.len(), rows.len() - routed.len()); #0": {
+  "class": "none",
+  "owner": "engine arithmetic (exact linear algebra)",
+  "reason": "test code: the work estimate's scores against their ceilings (k's p90 and its maximum, printed), and the route threshold K_MAX; not caps"
+ },
+ "engine/arith/tests/smith_estimate.rs :: the_estimate_is_fitted_and_scores_within_its_ceilings :: println!(\"{set} seed {seed}: {} classical runs had a stage 1 estimate (worst ratio {:.1})\", surprised.len(), surprised.iter().cloned().fold(0.0, f64::max)); #0": {
+  "class": "none",
+  "owner": "engine arithmetic (exact linear algebra)",
+  "reason": "test code: the work estimate's evidence by k up to the route threshold K_MAX, and the classical runs' worst ratio (a report, not a cap)"
  },
  "engine/arith/tests/smith_meter.rs :: smith_units_and_stop_checks :: let mut meter = Meter::accounting(u64::MAX); #0": {
   "class": "none",

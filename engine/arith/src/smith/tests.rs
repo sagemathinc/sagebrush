@@ -402,3 +402,24 @@ fn the_exact_transform_is_dropped_past_the_bound() {
     let bound = 3 * 2 * (delta.bits() + 1) + 2 * 2 + 2;
     assert!(v.max_bits() <= bound && vinv.max_bits() <= bound);
 }
+
+/// The cost before the run: L's floor and work (m n + m^2 + n^2 Move, the
+/// least any route charges), no E until the calibration, no U; and stage 1
+/// has no estimate where the classical route follows (a non-square input,
+/// a zero row, the empty matrix).
+#[test]
+fn the_cost_and_the_estimate_before_the_run() {
+    let a = z(&[&[3, 8], &[6, 1]]);
+    let c = estimate::cost(&a);
+    assert_eq!((c.mem_lower, c.work_lower, c.work_estimate, c.work_upper), (floor_bytes(2, 2).unwrap(), 12, None, None));
+    let wide = z(&[&[6, 10, 15], &[4, 8, 12]]);
+    assert_eq!(estimate::cost(&wide).work_lower, 6 + 4 + 9);
+    let s = estimate::stage1(&a);
+    assert!(s.units.is_some_and(|u| u.0.iter().sum::<u64>() > 0));
+    assert!(s.beside_route2.is_none(), "route 2 needs n > 2");
+    let b = z(&[&[3, 8, 1], &[6, 1, 2], &[1, 1, 7]]);
+    assert!(estimate::stage1(&b).beside_route2.is_some());
+    for x in [wide, z(&[&[0, 0], &[1, 2]]), ZMat::zero(0, 0)] {
+        assert_eq!(estimate::stage1(&x), estimate::Estimate { units: None, beside_route2: None });
+    }
+}
