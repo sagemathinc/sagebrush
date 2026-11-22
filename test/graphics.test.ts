@@ -194,6 +194,98 @@ print(latex(ModularSymbols(11, 2).hecke_operator(2).charpoly().factor()))
   ]);
 });
 
+test("matrix_plot: Sage's primitive, options and box, and each cell's color as Sage's matplotlib draws it", () => {
+  const out = cli("--sage", "-c", `
+import base64, zlib
+def cells(g):
+    # (the picture's pixels, decoded from its PNG: one pixel a cell, a row a matrix row)
+    png = base64.b64decode(g[0]._inner.href.split(",")[1])
+    w, h = int.from_bytes(png[16:20], "big"), int.from_bytes(png[20:24], "big")
+    i, data = 8, b""
+    while i < len(png):
+        n, t = int.from_bytes(png[i:i + 4], "big"), png[i + 4:i + 8]
+        if t == b"IDAT":
+            data += png[i + 8:i + 8 + n]
+        i += 12 + n
+    raw = zlib.decompress(data)
+    return [[tuple(raw[r * (4 * w + 1) + 1 + 4 * c:r * (4 * w + 1) + 5 + 4 * c]) for c in range(w)] for r in range(h)]
+M = matrix([[1, 3, 5, 1], [2, 4, 5, 6], [1, 3, 5, 7]])
+g = matrix_plot(M)
+print(repr(g)); print(repr(g[0])); print(sorted(g[0].options().items())); print(g.get_minmax_data())
+print(cells(g))
+print(cells(matrix_plot(M, cmap='jet', vmin=0, vmax=10)))
+print(cells(matrix_plot([[1, 3, 5, 1], [2, 4, 5, 6], [1, 3, 5, 7]], cmap='viridis')))
+print(matrix_plot([[1, 2], [3, 4]]).get_minmax_data(), matrix_plot(M, xrange=(0, 4), yrange=(0, 3)).get_minmax_data())
+g = matrix_plot(matrix(ZZ, 0, 0)); print(repr(g[0]), g.get_minmax_data())
+for bad in ([1, 2, 3], matrix(CC, 2, 2, [1, I, 2, 3])):
+    try:
+        matrix_plot(bad)
+    except TypeError as e:
+        print(e)
+s = matrix_plot(M)._svg()
+print(s.count('preserveAspectRatio="none"'), '>0<' in s, '>3<' in s, '>2<' in s)
+s = matrix_plot(M, cmap='jet', colorbar=True)._svg()
+print(s.count('preserveAspectRatio="none"'), '>7<' in s)
+print(matrix_plot(M) + point((1, 1), color='red'))
+# the orientation: flip_y (the default) inverts the y axis, row 0 at the top, the picture as stored; flip_y=False,
+# row 0 at the bottom, the picture drawn flipped; and integer ticks
+# constant data (vmin = vmax): the colormap's first color, as matplotlib's Normalize (all white in Greys); vmin
+# above vmax refused, as matplotlib does; and pyplot's imshow (the shared lookup) likewise
+print(cells(matrix_plot(matrix(ZZ, 2, 3))), cells(matrix_plot([[5, 5]], cmap='viridis')))
+try:
+    matrix_plot(M, vmin=5, vmax=1)
+except ValueError as e:
+    print(e)
+# a list of colors (a ListedColormap in Sage) is refused, not drawn with another map
+try:
+    matrix_plot([[0, 1]], cmap=['red', 'blue'])
+except NotImplementedError as e:
+    print(e)
+# explicit equal vmin and vmax: constant too, the first color
+print(cells(matrix_plot([[1, 3]], vmin=2, vmax=2)))
+import matplotlib.pyplot as plt
+class _I:
+    pass
+im = _I(); im._inner = plt.imshow([[2.0, 2.0], [2.0, 2.0]])._prim
+print(cells([im]))
+for fy in (True, False):
+    P = matrix_plot(M, flip_y=fy)._panel()[0].options
+    print(fy, bool(P.get('yinvert')), P.get('xticks'), P.get('yticks'), 'transform="matrix(' in matrix_plot(M, flip_y=fy)._svg())
+`);
+  const lines = out.trim().split("\n");
+  // (Sage 10.9's matrix_plot of the same input, observed; the colors are its matplotlib's cmap(norm(v), bytes=True))
+  assert.deepEqual(lines.slice(0, 4), [
+    "Graphics object consisting of 1 graphics primitive",
+    "MatrixPlot defined by a 3 x 4 data grid",
+    "[('cmap', 'Greys'), ('colorbar', False), ('colorbar_options', {'orientation': 'vertical', 'format': None}), ('flip_y', True), ('marker', '.'), ('norm', None), ('subdivision_options', {'boundaries': None, 'style': None}), ('subdivisions', False), ('vmax', None), ('vmin', None)]",
+    "{'xmin': -0.5, 'xmax': 3.5, 'ymin': -0.5, 'ymax': 2.5}",
+  ]);
+  assert.equal(lines[4], "[[(255, 255, 255, 255), (198, 198, 198, 255), (104, 104, 104, 255), (255, 255, 255, 255)], [(232, 232, 232, 255), (149, 149, 149, 255), (104, 104, 104, 255), (51, 51, 51, 255)], [(255, 255, 255, 255), (198, 198, 198, 255), (104, 104, 104, 255), (0, 0, 0, 255)]]");
+  assert.equal(lines[5], "[[(0, 0, 241, 255), (0, 176, 255, 255), (124, 255, 121, 255), (0, 0, 241, 255)], [(0, 76, 255, 255), (41, 255, 205, 255), (124, 255, 121, 255), (205, 255, 41, 255)], [(0, 0, 241, 255), (0, 176, 255, 255), (124, 255, 121, 255), (255, 196, 0, 255)]]");
+  assert.equal(lines[6], "[[(68, 1, 84, 255), (48, 103, 141, 255), (53, 183, 120, 255), (68, 1, 84, 255)], [(68, 57, 130, 255), (32, 144, 140, 255), (53, 183, 120, 255), (144, 214, 67, 255)], [(68, 1, 84, 255), (48, 103, 141, 255), (53, 183, 120, 255), (253, 231, 36, 255)]]");
+  assert.equal(lines[7], "{'xmin': -0.5, 'xmax': 1.5, 'ymin': -0.5, 'ymax': 1.5} {'xmin': 0.0, 'xmax': 4.0, 'ymin': 0.0, 'ymax': 3.0}");
+  assert.equal(lines[8], "MatrixPlot defined by a 0 x 0 data grid {'xmin': -1.5, 'xmax': 0.5, 'ymin': -1.5, 'ymax': 0.5}");
+  assert.equal(lines[9], "mat must be a Matrix or a two dimensional array");
+  assert.equal(lines[10], "unable to convert 1.00000000000000*I to float; use abs() or real_part() as desired");
+  // the picture in a frame with integer tick labels (axes=False keeps the frame's ticks), and with colorbar=True a second picture, the bar
+  assert.equal(lines[11], "1 True True True");
+  assert.equal(lines[12], "2 True");
+  assert.equal(lines[13], "Graphics object consisting of 2 graphics primitives");
+  assert.equal(lines[14], "[[(255, 255, 255, 255), (255, 255, 255, 255), (255, 255, 255, 255)], [(255, 255, 255, 255), (255, 255, 255, 255), (255, 255, 255, 255)]] [[(68, 1, 84, 255), (68, 1, 84, 255)]]");
+  assert.equal(lines[15], "minvalue must be less than or equal to maxvalue");
+  assert.equal(lines[16], "matrix_plot's cmap as a list of colors is not implemented in Sagebrush: use a colormap's name");
+  // (matplotlib's Normalize(2, 2): every value 0, Greys' first color)
+  assert.equal(lines[17], "[[(255, 255, 255, 255), (255, 255, 255, 255)]]");
+  assert.equal(lines[18], "[[(68, 1, 84, 255), (68, 1, 84, 255)], [(68, 1, 84, 255), (68, 1, 84, 255)]]");
+  assert.equal(lines[19], "True True [0.0, 1.0, 2.0, 3.0] [0.0, 1.0, 2.0] False");
+  assert.equal(lines[20], "False False [0.0, 1.0, 2.0, 3.0] [0.0, 1.0, 2.0] True");
+});
+
+test("a framed plot with axes=False keeps its tick labels, as Sage draws it", () => {
+  const out = cli("--sage", "-c", "s = plot(x, (x, 0, 1), frame=True, axes=False)._svg(); print(s.count('<text') > 4, '>0.4<' in s or '>0.5<' in s)");
+  assert.equal(out.trim(), "True True");
+});
+
 test("contour, density, implicit, region, vector and slope field plots", () => {
   const out = cli("--sage", "-c", `
 y = var('y')

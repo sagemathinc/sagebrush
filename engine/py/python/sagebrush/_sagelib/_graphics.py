@@ -80,6 +80,68 @@ def colormap(t, name="viridis"):
     return "#%02x%02x%02x" % (round(r * 255), round(g * 255), round(b * 255))
 
 
+def rgb_bytes(c):
+    """A color's (r, g, b) bytes (black for one it can't read)."""
+    c = to_color(c) or "#000000"
+    if c.startswith("#") and len(c) >= 7:
+        return (int(c[1:3], 16), int(c[3:5], 16), int(c[5:7], 16))
+    if c.startswith("rgb"):
+        v = [int(float(t)) for t in c[c.index("(") + 1:c.index(")")].split(",")[:3]]
+        return tuple(v)
+    return (0, 0, 0)
+
+
+def image_rgba(F, cmap, lo, hi):
+    """The colors of a grid F of reals (a 2D numpy array) as matplotlib's imshow
+    draws them, an (h, w, 4) uint8 array: each value through the colormap's N
+    colors between lo and hi (index floor(N t), t clipped to [0, 1]; constant
+    data, lo = hi, the first color), NaN (the "bad" color) transparent.  pyplot's imshow and Sage's matrix_plot share it."""
+    import numpy as np
+    name = cmap or "viridis"
+    tab = cmap_table(name) if isinstance(name, str) else None
+    if tab is not None:
+        # (matplotlib's table of N colors, each value times 255 truncated to a byte, as it renders)
+        n = len(tab)
+        lut = np.zeros((n + 1, 4), dtype=np.uint8)
+        for i in range(n):
+            lut[i] = tuple(int(v * 255) for v in tab[i]) + (255,)
+    else:
+        n = 256
+        lut = np.zeros((257, 4), dtype=np.uint8)
+        for i in range(256):
+            r, g, b = rgb_bytes(colormap(i / 255, name))
+            lut[i] = (r, g, b, 255)
+    # (matplotlib's Normalize: vmin above vmax refused, and constant data, vmin
+    # equal to vmax, all 0, the colormap's first color)
+    if lo > hi:
+        raise ValueError("minvalue must be less than or equal to maxvalue")
+    t = (F - lo) / (hi - lo) if hi > lo else np.zeros(F.shape)
+    idx = np.clip(np.floor(np.where(np.isfinite(t), t, 0.0) * n), 0, n - 1).astype(int)
+    idx = np.where(np.isnan(F), n, idx)
+    return lut[idx]
+
+
+def png_url(pixels, palette=None):
+    """A data: URL of a PNG: an (h, w, 4) uint8 array of colors, or an (h, w)
+    uint8 array of indices into `palette` [(r, g, b, a), ...]."""
+    import zlib, struct, base64
+    h, w = int(pixels.shape[0]), int(pixels.shape[1])
+    bpp = 1 if palette is not None else 4
+    raw, row = pixels.tobytes(), w * bpp
+    data = b"".join(b"\x00" + raw[i * row:(i + 1) * row] for i in range(h))
+
+    def chunk(t, d):
+        return struct.pack(">I", len(d)) + t + d + struct.pack(">I", zlib.crc32(t + d) & 0xFFFFFFFF)
+    if palette is not None:
+        head = chunk(b"IHDR", struct.pack(">IIBBBBB", w, h, 8, 3, 0, 0, 0))
+        head += chunk(b"PLTE", bytes([v for c in palette for v in c[:3]]))
+        head += chunk(b"tRNS", bytes([c[3] for c in palette]))
+    else:
+        head = chunk(b"IHDR", struct.pack(">IIBBBBB", w, h, 8, 6, 0, 0, 0))
+    png = b"\x89PNG\r\n\x1a\n" + head + chunk(b"IDAT", zlib.compress(data, 9)) + chunk(b"IEND", b"")
+    return "data:image/png;base64," + base64.b64encode(png).decode("ascii")
+
+
 # (matplotlib's legend locations, by their codes)
 LEGEND_LOCS = ("best", "upper right", "upper left", "lower left", "lower right", "right", "center left", "center right",
                "lower center", "upper center", "center")
