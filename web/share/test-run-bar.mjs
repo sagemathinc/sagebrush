@@ -1,40 +1,19 @@
 // ci: web-sync.2 order=62 chrome
-// The run bar (index.html's) where Sagebrush's sandbox doesn't start, in headless Chromium whose runner page (/runner/) is
-// answered by a page that never answers (as a sandbox that didn't start), against the share API in Miniflare
-// (web/share/serve-dev.mjs) and web/dist:
-//   the notebook page:
-//   0. Run all before the page gives the sandbox up: the held run is answered as not run, nothing granted;
-//   1. once given up, a notebook whose code may not change files, Run all: one bar says why and asks, "Allow file changes and run",
-//      and no cell gets a message (each left as it was, not run);
-//   2. a script's click on the button grants nothing; nor does a trusted press before the bar arms;
-//   3. a bar left open while another notebook is shown is closed, unanswered;
-//   4. a trusted press once armed: the notebook's files permission (File > Permissions…'s), then its refused cells run;
-//   5. taken back (File > Permissions…, Don't allow file changes): runs are refused again, the bar again;
-//   6. a browser that can't keep the choice: it holds in this page, says so, and the cells run;
-//   and Chromium with a working sandbox (control):
-//   8. a notebook whose code may not change files runs in the sandbox; no bar;
-//   9. the share page whose runner never answers: within seconds the page says the sandbox didn't start,
-//      the held run is answered as not run, and no cell is left running; restarted, it says so at once, no runner
-//      tried again;
-//   and with the sandbox silent again:
-//   10. three refused cells, one deleted before the press: the other two run, in their order, and the press reads the
-//      notebook's cells once (not once per refused cell);
-//   11. a reactive notebook reverted to an earlier version (TimeTravel), its recompute refused: it ends, no error thrown,
-//      the status not left at "computing…", and the bar asks;
-//   6b. after 6's note (no button), the next notebook's bar has its button and note again;
-//   12. a press that loses focus before its release grants nothing; nor does a repeating Enter; a plain Enter does;
-//   13. a second refused run of the same notebook while its bar is armed keeps the bar armed: a press at once allows;
-//   14. the notebook allowed through File > Permissions… while its bar is open: the bar closes, unanswered, nothing run;
-//   15. a script's own events on the armed button (pointerdown then click; Enter then click) allow nothing;
-//   16. a trusted press, then the window losing focus (the button keeping it, as Safari's does), then the release: nothing;
-//   and as Safari (its user agent, and no navigator.userAgentData, read before any of the page's own scripts), whose
-//   sandbox runs too (its frame starts a data: worker; real WebKit is web/share/test-runner-engines.mjs):
-//   17. the notebook page: a notebook whose code may not change files runs in the sandbox; no bar;
-//   18. the share page: Run all runs it in the sandbox, and never says the browser can't run it;
-//   and a session resumed from TimeTravel where the sandbox doesn't start:
-//   19. a notebook (not reactive) whose cell 1 ran in the sandbox, resumed from that version with the sandbox silent: its
-//      replay is refused by the interpreter itself, so the bar asks and no cell gets a message; Allow runs the replayed
-//      cell only, never the one that hadn't run.
+// No run gate (William, Nov 21 2026: "only ask for read/write approval if there's an actual read/write attempt"): where
+// Sagebrush's sandbox doesn't start, a notebook runs anyway, in the page's own interpreter, and only a write it may not
+// make is asked about, at the write, in a modal. In headless Chromium whose runner page (/runner/) never answers (a
+// sandbox that didn't start), against the share API in Miniflare (web/share/serve-dev.mjs) and web/dist:
+//   1. a new notebook (its file changes off) runs: Run all prints 42 and two; there's no run bar; nothing is granted;
+//   2. a write into a folder it may not change is refused, and the prompt asks: a modal dialog (:modal, the notebook not
+//      moved, the dialog itself focused, not a button), one plain sentence naming the file and the folder and saying to
+//      run the cell again; "Allow in /sub", "Allow once", "Don't allow";
+//   3. Tab and Shift+Tab keep the focus in it, never on the page behind; Esc closes it unanswered, nothing allowed;
+//   4. asked again, a script's click on Allow does nothing; the person's press, once armed, allows /sub, and the cell
+//      run again writes /sub/out.txt;
+//   5. a write at the top of the workspace: the prompt offers File > Permissions… and Don't allow, never Allow;
+//   5b. a delete and a new folder are said as what they are ("delete", "create the folder"), never "save";
+//   and as Safari (its user agent, whose sandbox doesn't run here: no runner page answers):
+//   6. a notebook runs, no run bar, and its write is asked about in the same modal.
 //   bun web/build.ts && node web/share/test-run-bar.mjs
 import { spawn } from "node:child_process";
 import { createHash, randomBytes } from "node:crypto";
@@ -120,325 +99,94 @@ async function twoCells(p) {
   await sleep(300);
   return p.ev("window.sagebrush.notebook.snapshot().id ?? localStorage.getItem('sagebrush-current')");
 }
-const state = (p) => p.ev("({ bar: !document.querySelector('#runbar').hidden, text: document.querySelector('#rbtext').textContent, files: window.sagebrush.permissions?.()?.files, outs: [...document.querySelectorAll('.cell')].map((c) => (c.querySelector('.out')?.textContent ?? '').trim()), ns: [...document.querySelectorAll('.cell .n')].map((x) => x.textContent), status: document.querySelector('#status')?.textContent ?? '' })");
-// (with the sandbox silent, Run all once the page has given it up: a run asked before that is answered as not run
-// (runner-worker.js's NOT_RUN), never refused, so it brings no bar)
-// (once given up, the page's later interpreters are the refusal itself, not a runner that waits again)
-const givenUp = "((w) => (w?.inner ?? w)?.why === 'gave-up')(window.sagebrush.kernel?.worker)";
-const runAll = async (p) => { if (p.silent) await p.until(givenUp, 30000); return p.press("#runall"); };
+const state = (p) => p.ev("({ runbar: !!document.querySelector('#runbar'), prompt: !document.querySelector('#filesbar').hidden, modal: document.querySelector('#filesbar').matches(':modal'), text: document.querySelector('#fbtext').textContent, buttons: [...document.querySelectorAll('#filesbar .fbbtns button')].filter((b) => !b.hidden).map((b) => b.textContent), focus: document.activeElement?.id || document.activeElement?.tagName, files: window.sagebrush.permissions?.()?.files, outs: [...document.querySelectorAll('.cell')].map((c) => (c.querySelector('.out')?.textContent ?? '').trim()) })");
+const outsAre = (want) => `JSON.stringify([...document.querySelectorAll('.cell')].map((c) => (c.querySelector('.out')?.textContent ?? '').trim())) === ${JSON.stringify(JSON.stringify(want))}`;
+// (Run all until the cells show `want`: a run asked before the page gives a silent sandbox up is answered as not run
+// (runner-worker.js's NOT_RUN); the next one runs in the page's own interpreter)
+const ranAll = async (p, want, ms = 90000) => { const t = Date.now(); while (Date.now() - t < ms) { await p.press("#runall"); if (await p.until(outsAre(want), 10000).then(() => true, () => false)) return true; } return false; };
+const setCode = (p, code) => p.ev(`(async () => { const nb = window.sagebrush.notebook; await nb.applyEdits({ set: [{ id: nb.cells()[0].id, code: ${JSON.stringify(code)} }] }, { run: false }); return 1; })()`);
+const W = "window.sagebrush.workspace";
+const key = (p, k, shift = false) => Promise.all(["keyDown", "keyUp"].map((type) => p.send("Input.dispatchKeyEvent", { type, key: k, code: k, windowsVirtualKeyCode: k === "Tab" ? 9 : 27, modifiers: shift ? 8 : 0 })));
+const promptOpen = (p) => p.until("!document.querySelector('#filesbar').hidden && document.querySelector('#filesbar').matches(':modal')", 30000).then(() => true, () => false);
+const WRITE = "try:\n    open('/sub/out.txt', 'w').write('hi')\n    print('wrote')\nexcept PermissionError as e:\n    print('refused', type(e).__name__, e)";
 
 try {
-  // ---- 0. the notebook page, its sandbox silent, Run all before the page gives it up: the held run is answered as not
-  // run (runner-worker.js's NOT_RUN), nothing runs and nothing is granted; the runs after the give-up are refused (row 1)
-  const H = await profilePage(false, "", { runner: false });
-  await H.go(dev.site + "/");
-  await appReady(H);
-  await twoCells(H);
-  await H.press("#runall");
-  await H.until(givenUp, 30000).catch(() => {});
-  await H.until("/wasn't run/.test(document.querySelector('.cell .out')?.textContent ?? '')", 15000).catch(() => {});
-  const s0 = await state(H);
-  ok(/^This code wasn't run: the sandboxed runner didn't start/.test(s0.outs[0]) && !s0.outs.includes("42") && s0.files === false && (await H.ev(givenUp)), "0. Run all before the page gives the sandbox up: the held cell says it wasn't run, nothing ran, nothing granted: " + J({ outs: s0.outs, files: s0.files, bar: s0.bar }));
-
-  // ---- the notebook page, its sandbox silent
+  // ---- 1. the sandbox silent: a notebook runs anyway
   const S = await profilePage(false, "", { runner: false });
   await S.go(dev.site + "/");
   await appReady(S);
+  // (the folder it will write to, before its notebook's interpreter starts: an interpreter gets the files at its start)
+  await S.ev(`${W}.create("/sub/keep.txt", { content: new TextEncoder().encode("k") }).then(() => 1)`);
+  await S.ev(`${W}.create("/sub2/keep.txt", { content: new TextEncoder().encode("k") }).then(() => 1)`);
   await twoCells(S);
-  await runAll(S);
-  await S.until("!document.querySelector('#runbar').hidden", 30000).catch(() => {});
-  await sleep(700);
+  const ran = await ranAll(S, ["42", "two"]);
   const s1 = await state(S);
-  ok(s1.bar && s1.text === "Sagebrush's sandbox didn't start in this browser. To run in this page, this notebook needs permission to change files in your browser workspace.", "1. Run all: one bar, saying why and asking: " + J(s1.text));
-  ok((await S.ev("document.querySelector('#rballow').textContent")) === "Allow file changes and run" && (await S.ev("document.querySelector('#runbar .note').textContent")) === "Remembered for this notebook; change it in File > Permissions…", "...its button, \"Allow file changes and run\", and that it's remembered, and where to change it");
-  ok(s1.outs.every((o) => o === "") && !s1.outs.some((o) => /can't run here/.test(o)) && s1.files === false, "...and no cell gets a message, each left as it was; nothing granted: " + J({ outs: s1.outs, files: s1.files }));
-  ok((await S.ev("document.querySelectorAll('#runbar').length")) === 1 && (await S.ev(givenUp)), "...one bar, and the sandbox given up for a refusal, never a plain worker");
+  ok(ran && !s1.runbar && s1.files === false && !s1.prompt, "1. no run gate: a notebook whose file changes are off runs where the sandbox doesn't start (42, two), no run bar, nothing granted: " + J(s1));
 
-  // 2. a script's click; a trusted press before the bar arms
-  await S.ev("(() => { document.querySelector('#rballow').click(); return 1; })()");
+  // ---- 2. a write it may not make: refused, and the prompt asks, in a modal
+  await setCode(S, WRITE);
+  const top0 = await S.ev("Math.round(window.sagebrush.notebook.cells()[0].ta.getBoundingClientRect().top)");
+  await S.press("#runall");
+  await S.until("/refused/.test(document.querySelector('.cell .out')?.textContent ?? '')", 60000).catch(() => {});
+  const open2 = await promptOpen(S);
+  const s2 = await state(S);
+  const top1 = await S.ev("Math.round(window.sagebrush.notebook.cells()[0].ta.getBoundingClientRect().top)");
+  ok(open2 && s2.modal && s2.outs[0].startsWith("refused PermissionError") && !(await S.ev(`${W}.stat("/sub/out.txt").then((e) => !!e, () => false)`)), "2. the write is refused, nothing written, and a modal asks: " + J({ modal: s2.modal, out: s2.outs[0] }));
+  ok(s2.text === "This notebook is trying to save out.txt in /sub in this browser's Sagebrush workspace. If you allow it, run the cell again to save it." && J(s2.buttons) === J(["Don't allow", "Allow once", "Allow in /sub"]), "...one plain sentence naming the file and the folder, and its three answers: " + J({ text: s2.text, buttons: s2.buttons }));
+  ok(s2.focus === "filesbar" && top1 === top0, "...the dialog itself focused (an Enter answers nothing), the notebook not moved: " + J({ focus: s2.focus, top0, top1 }));
+
+  // ---- 3. the focus stays in it; Esc closes it unanswered
+  const seen = [];
+  for (const shift of [true, true, true, false, false, false, false, false]) { await key(S, "Tab", shift); seen.push(await S.ev("(() => { const a = document.activeElement; return a === document.body || a === null ? 'body' : document.querySelector('#filesbar').contains(a) ? 'dialog:' + (a.id || a.tagName) : 'behind:' + (a.id || a.tagName); })()")); }
+  ok(!seen.some((w) => w.startsWith("behind:")) && seen.some((w) => w === "dialog:fballow"), "3. Tab and Shift+Tab keep the focus in the dialog: " + J(seen));
+  await key(S, "Escape");
   await sleep(300);
-  ok((await state(S)).files === false && (await state(S)).bar, "2. a script's click on the button grants nothing; the bar stays");
-  await S.ev("(() => { window.sagebrush.notebook.runAll(); return 1; })()");
-  // (a fresh bar for this notebook? the open one stays, so close it the way a switch does, then press at once)
-  await newNotebook(S);
-  await S.until("document.querySelector('#runbar').hidden", 10000).catch(() => {});
-  ok(await S.ev("document.querySelector('#runbar').hidden") && (await S.ev("window.sagebrush.permissions?.()?.files")) === false, "3. another notebook shown: the bar closes, unanswered");
-  await S.ev(`(async () => { const nb = window.sagebrush.notebook; await nb.applyEdits({ set: [{ id: nb.cells()[0].id, code: "print(6 * 7)" }] }, { run: false }); return 1; })()`);
-  await S.until("window.sagebrush.notebook.cells()[0].ta.value === 'print(6 * 7)'", 10000);
-  await sleep(300);
-  await runAll(S);
-  await S.until("!document.querySelector('#runbar').hidden", 30000);
   const s3 = await state(S);
-  ok(s3.bar && s3.files === false && !s3.outs.includes("42") && (await S.ev(givenUp)) && !(await S.ev("!!window.sagebrush.kernel?.worker?.frame")), "...a second notebook, its file changes off, after the give-up: refused with the bar, nothing ran, and no runner made again: " + J({ outs: s3.outs, files: s3.files }));
-  await S.ev("(window.__rb4 = [{ at: 'bar', code: window.sagebrush.notebook.cells().map((c) => c.ta?.value), doc: window.sagebrush.notebook.snapshot().id }], 1)");
-  await S.press("#rballow");
-  await sleep(200);
-  ok((await S.ev("window.sagebrush.permissions?.()?.files")) === false, "...and a trusted press before the bar arms grants nothing");
+  ok(!s3.prompt && s3.files === false && (await S.ev("window.sagebrush.permissions().grants.write.stored.length + window.sagebrush.permissions().grants.write.once.length")) === 0, "...Esc closes it, unanswered: nothing allowed: " + J({ prompt: s3.prompt, grants: await S.ev("window.sagebrush.permissions().grants") }));
 
-  // 4. a trusted press once armed: the permission, then the refused cells run
+  // ---- 4. asked again: a script's click allows nothing; the person's press, once armed, allows /sub; run again: saved
+  await S.press("#runall");
+  await promptOpen(S);
   await sleep(700);
-  await S.ev("(window.__rb4.push({ at: 'press', code: window.sagebrush.notebook.cells().map((c) => c.ta?.value), doc: window.sagebrush.notebook.snapshot().id }), 1)");
-  await S.press("#rballow");
-  await S.until("(document.querySelector('.cell .out')?.textContent ?? '').trim() === '42'", 90000).catch(() => {});
-  const s4 = await state(S);
-  ok(s4.files === true && !s4.bar && s4.outs[0] === "42", "4. a trusted press once armed: the notebook may change files (File > Permissions…'s grant), the bar closes, and the refused cell runs: " + J({ files: s4.files, outs: s4.outs, ...(s4.outs[0] === "42" ? {} : await S.ev("({ status: document.querySelector('#status').textContent, n: [...document.querySelectorAll('.cell .n')].map((n) => n.textContent), worker: (window.sagebrush.kernel?.worker?.inner ?? window.sagebrush.kernel?.worker)?.constructor?.name ?? null, ready: !!window.sagebrush.kernel?.ready, reactive: !!window.sagebrush.notebook.reactiveOn, code: window.sagebrush.notebook.cells().map((c) => c.ta?.value ?? null), doc: window.sagebrush.notebook.snapshot().id ?? null, log: window.__rb4 ?? null })")) }));
-
-  // 5. taken back: refused again, the bar again
-  await S.press("#filebtn");
-  await S.press("#permsmenu");
-  await S.press("#filesperm");
-  await S.send("Input.dispatchKeyEvent", { type: "keyDown", key: "Escape", code: "Escape", windowsVirtualKeyCode: 27 });
-  await S.send("Input.dispatchKeyEvent", { type: "keyUp", key: "Escape", code: "Escape", windowsVirtualKeyCode: 27 });
-  await S.until("window.sagebrush.permissions?.()?.files === false", 10000).catch(() => {});
-  await S.ev(`(async () => { const nb = window.sagebrush.notebook; await nb.applyEdits({ set: [{ id: nb.cells()[0].id, code: "print('again')" }] }, { run: false }); return 1; })()`);
+  await S.ev("(document.querySelector('#fballow').click(), 1)");
   await sleep(300);
-  await runAll(S);
-  await S.until("!document.querySelector('#runbar').hidden", 30000).catch(() => {});
-  await sleep(500);
-  const s5 = await state(S);
-  ok(s5.files === false && s5.bar && s5.outs[0] !== "again" && (await S.ev(givenUp)), "5. taken back in File > Permissions…: the plain worker it was allowed is gone (the refusal again, no runner), runs are refused, with the bar: " + J({ files: s5.files, bar: s5.bar, outs: s5.outs }));
+  const s4a = await state(S);
+  ok(s4a.prompt && !/\/sub/.test(await S.ev("JSON.stringify(window.sagebrush.permissions().grants.write)")), "4. a script's click on Allow allows nothing; the prompt still asks");
+  await S.press("#fballow");
+  await sleep(300);
+  const trees = await S.ev("JSON.stringify(window.sagebrush.permissions().grants.write)");
+  ok(!(await state(S)).prompt && /\/sub/.test(trees), "...the person's press, once armed, allows /sub: " + trees.slice(0, 200));
+  await S.press("#runall");
+  const saved = await S.until(`${W}.stat("/sub/out.txt").then((e) => !!e, () => false)`, 30000).then(() => true, () => false);
+  ok(saved && /wrote/.test((await state(S)).outs[0]), "...and the cell run again saves /sub/out.txt: " + (await state(S)).outs[0]);
 
-  // ---- 6. a browser that can't keep the choice (its record refused): it holds in this page, says so, and runs
-  const F = await profilePage(false, "(() => { const set = Storage.prototype.setItem; Storage.prototype.setItem = function (k, v) { if (k === 'sagebrush-grants') throw new DOMException('full', 'QuotaExceededError'); return set.call(this, k, v); }; })();", { runner: false });
+  // ---- 5. a write at the top of the workspace: File > Permissions… and Don't allow, never Allow
+  await setCode(S, "try:\n    open('/top.txt', 'w').write('hi')\n    print('wrote')\nexcept PermissionError as e:\n    print('refused', type(e).__name__, e)");
+  await S.press("#runall");
+  await promptOpen(S);
+  const s5 = await state(S);
+  ok(s5.text === "This notebook is trying to save top.txt at the top of your Sagebrush workspace. To allow that, use File > Permissions…" && J(s5.buttons) === J(["Don't allow", "File > Permissions…"]), "5. a write at the top: File > Permissions… and Don't allow, never Allow: " + J({ text: s5.text, buttons: s5.buttons }));
+  await key(S, "Escape");
+  await sleep(300);
+
+  // ---- 5b. not a save: a delete and a new folder are said as what they are, never "save"
+  const said = async (code) => { await setCode(S, code); await S.press("#runall"); await promptOpen(S); const t = (await state(S)).text; await key(S, "Escape"); await sleep(300); return t; };
+  const del = await said("import os\ntry:\n    os.remove('/sub2/keep.txt')\nexcept PermissionError:\n    print('refused')");
+  const mk = await said("import os\ntry:\n    os.mkdir('/sub2/new')\nexcept PermissionError:\n    print('refused')");
+  ok(del === "This notebook is trying to delete keep.txt in /sub2 in this browser's Sagebrush workspace. If you allow it, run the cell again to delete it." && mk === "This notebook is trying to create the folder new in /sub2 in this browser's Sagebrush workspace. If you allow it, run the cell again to create it.", "5b. a delete and a new folder are said as what they are: " + J({ del, mk }));
+
+  // ---- 6. as Safari: runs, no run bar, its write asked about in the same modal
+  const F = await profilePage(true, "", { runner: false });
   await F.go(dev.site + "/");
   await appReady(F);
+  await F.ev(`${W}.create("/sub/keep.txt", { content: new TextEncoder().encode("k") }).then(() => 1)`);
   await twoCells(F);
-  await runAll(F);
-  await F.until("!document.querySelector('#runbar').hidden", 30000);
-  await sleep(700);
-  await F.press("#rballow");
-  await F.until("[...document.querySelectorAll('.cell .out')].map((o) => o.textContent.trim()).join('|') === '42|two'", 90000).catch(() => {});
+  const ran6 = await ranAll(F, ["42", "two"]);
+  await setCode(F, WRITE);
+  await F.press("#runall");
+  const open6 = await promptOpen(F);
   const s6 = await state(F);
-  ok(s6.files === true && J(s6.outs) === J(["42", "two"]) && s6.bar && /couldn't keep the choice, so a reload forgets it/.test(s6.text) && (await F.ev("document.querySelector('#rballow').hidden")), "6. the choice can't be kept: it holds in this page, the bar says so (no button), and both refused cells run: " + J({ files: s6.files, outs: s6.outs, text: s6.text }));
-
-  // ---- 6b. after the note with no button, another notebook's bar: its button and note shown again
-  await twoCells(F);
-  await runAll(F);
-  await F.until("!document.querySelector('#runbar').hidden && /To run in this page/.test(document.querySelector('#rbtext').textContent)", 30000).catch(() => {});
-  ok(await F.ev("!document.querySelector('#runbar').hidden && !document.querySelector('#rballow').hidden && !document.querySelector('#runbar .note').hidden"), "6b. after a note with no button, the next notebook's bar has its button and note again");
-
-  // ---- 12. the press: one that loses focus before its release grants nothing; a repeating Enter grants nothing; Enter does
-  const K = await profilePage(false, "", { runner: false });
-  await K.go(dev.site + "/");
-  await appReady(K);
-  await twoCells(K);
-  await runAll(K);
-  await K.until("!document.querySelector('#runbar').hidden", 30000);
-  await sleep(700);
-  const at = await K.ev("(() => { const b = document.querySelector('#rballow').getBoundingClientRect(); return { x: b.x + b.width / 2, y: b.y + b.height / 2 }; })()");
-  await K.send("Input.dispatchMouseEvent", { type: "mousePressed", x: at.x, y: at.y, button: "left", clickCount: 1 });
-  await K.ev("(document.querySelector('.cell textarea').focus(), 1)");
-  await K.send("Input.dispatchMouseEvent", { type: "mouseReleased", x: at.x, y: at.y, button: "left", clickCount: 1 });
-  await sleep(300);
-  ok((await K.ev("window.sagebrush.permissions?.()?.files")) === false && (await K.ev("!document.querySelector('#runbar').hidden")), "12. a press that lost focus before its release: nothing allowed, the bar stays");
-  await K.ev("(document.querySelector('#rballow').focus(), 1)");
-  const key = (type, autoRepeat) => K.send("Input.dispatchKeyEvent", { type, key: "Enter", code: "Enter", windowsVirtualKeyCode: 13, autoRepeat, ...(type === "keyDown" ? { text: "\r" } : {}) });
-  for (let i = 0; i < 3; i++) await key("keyDown", true);
-  await key("keyUp", false);
-  await sleep(300);
-  ok((await K.ev("window.sagebrush.permissions?.()?.files")) === false && (await K.ev("!document.querySelector('#runbar').hidden")), "...a repeating Enter: nothing allowed, the bar stays");
-  await key("keyDown", false);
-  await key("keyUp", false);
-  await K.until("window.sagebrush.permissions?.()?.files === true", 5000).catch(() => {});
-  ok((await K.ev("window.sagebrush.permissions?.()?.files")) === true, "...and a plain Enter on the armed button allows it (the keyboard's way works)");
-
-  // ---- 13. the bar armed, then the same notebook refused again: the bar stays as it was, armed, so a press at once allows
-  const Q = await profilePage(false, "", { runner: false });
-  await Q.go(dev.site + "/");
-  await appReady(Q);
-  await twoCells(Q);
-  await runAll(Q);
-  await Q.until("!document.querySelector('#runbar').hidden", 30000);
-  await sleep(700);
-  await runAll(Q);
-  await Q.press("#rballow");
-  await Q.until("window.sagebrush.permissions?.()?.files === true", 5000).catch(() => {});
-  ok((await Q.ev("window.sagebrush.permissions?.()?.files")) === true, "13. a second refusal of the same notebook while its bar is armed: the bar keeps its arming, and a press at once allows");
-
-  // ---- 14. the bar open, then the notebook allowed in File > Permissions…: the bar closes, unanswered, and nothing runs
-  const G = await profilePage(false, "", { runner: false });
-  await G.go(dev.site + "/");
-  await appReady(G);
-  await twoCells(G);
-  await runAll(G);
-  await G.until("!document.querySelector('#runbar').hidden", 30000);
-  await G.press("#filebtn");
-  await G.press("#permsmenu");
-  await G.press("#filesperm");
-  await G.send("Input.dispatchKeyEvent", { type: "keyDown", key: "Escape", code: "Escape", windowsVirtualKeyCode: 27 });
-  await G.send("Input.dispatchKeyEvent", { type: "keyUp", key: "Escape", code: "Escape", windowsVirtualKeyCode: 27 });
-  await G.until("window.sagebrush.permissions?.()?.files === true", 10000).catch(() => {});
-  await sleep(1500);
-  const s14 = await state(G);
-  ok(s14.files === true && !s14.bar && s14.outs.every((o) => o === ""), "14. allowed in File > Permissions… while the bar is open: the bar closes, unanswered, and nothing ran: " + J({ files: s14.files, bar: s14.bar, outs: s14.outs }));
-
-  // ---- 15. a script's events on the armed button (made, not the person's): nothing allowed
-  const E = await profilePage(false, "", { runner: false });
-  await E.go(dev.site + "/");
-  await appReady(E);
-  await twoCells(E);
-  await runAll(E);
-  await E.until("!document.querySelector('#runbar').hidden", 30000);
-  await sleep(700);
-  await E.ev("(() => { const b = document.querySelector('#rballow'); b.dispatchEvent(new PointerEvent('pointerdown', { bubbles: true, isPrimary: true })); b.dispatchEvent(new MouseEvent('click', { bubbles: true })); return 1; })()");
-  await sleep(300);
-  // (the bar as it was: still asking, its button there; never a note that something was allowed)
-  const asked = () => E.ev("(window.sagebrush.permissions?.()?.files === false && !document.querySelector('#runbar').hidden && !document.querySelector('#rballow').hidden && /To run in this page/.test(document.querySelector('#rbtext').textContent))");
-  ok(await asked(), "15. a script's pointerdown then click on the armed button: nothing allowed, the bar still asking: " + (await E.ev("document.querySelector('#rbtext').textContent")));
-  await E.ev("(() => { const b = document.querySelector('#rballow'); b.dispatchEvent(new KeyboardEvent('keydown', { key: 'Enter', bubbles: true })); b.dispatchEvent(new MouseEvent('click', { bubbles: true })); return 1; })()");
-  await sleep(300);
-  ok(await asked(), "...nor a script's Enter then click: " + (await E.ev("document.querySelector('#rbtext').textContent")));
-
-  // ---- 16. a trusted press, then the window loses focus while the button keeps it (Safari doesn't focus a clicked
-  // button, so the window's blur is the release there), then the release: nothing allowed
-  const B = await profilePage(false, "", { runner: false });
-  await B.go(dev.site + "/");
-  await appReady(B);
-  await twoCells(B);
-  await runAll(B);
-  await B.until("!document.querySelector('#runbar').hidden", 30000);
-  await sleep(700);
-  const bat = await B.ev("(() => { const b = document.querySelector('#rballow').getBoundingClientRect(); return { x: b.x + b.width / 2, y: b.y + b.height / 2 }; })()");
-  await B.send("Input.dispatchMouseEvent", { type: "mousePressed", x: bat.x, y: bat.y, button: "left", clickCount: 1 });
-  await B.ev("(window.dispatchEvent(new Event('blur')), 1)");
-  await B.send("Input.dispatchMouseEvent", { type: "mouseReleased", x: bat.x, y: bat.y, button: "left", clickCount: 1 });
-  await sleep(300);
-  ok((await B.ev("window.sagebrush.permissions?.()?.files")) === false && (await B.ev("!document.querySelector('#runbar').hidden")), "16. a press, the window's focus lost before the release: nothing allowed, the bar stays");
-
-  // ---- 10. three refused cells, the middle one deleted before the press: the press reads the cells once, and runs the
-  // two still there, in their order
-  const T = await profilePage(false, "", { runner: false });
-  await T.go(dev.site + "/");
-  await appReady(T);
-  await twoCells(T);
-  await T.ev(`(async () => { const nb = window.sagebrush.notebook; await nb.applyEdits({ insert: [{ code: "print('three')" }] }, { run: false }); return 1; })()`);
-  await sleep(300);
-  await runAll(T);
-  await T.until("!document.querySelector('#runbar').hidden", 30000);
-  const ids10 = await T.ev("window.sagebrush.notebook.cells().map((c) => c.id)");
-  await T.ev(`(async () => { await window.sagebrush.notebook.applyEdits({ remove: [${J(ids10[1])}] }, { run: false }); return 1; })()`);
-  await T.ev("(() => { const nb = window.sagebrush.notebook, cells = nb.cells, runCells = nb.runCells; window.__cells = 0; window.__ran = null; nb.cells = (...a) => (window.__cells++, cells(...a)); nb.runCells = (ids, ...a) => (window.__ran ??= { ids: [...ids], calls: window.__cells }, runCells(ids, ...a)); return 1; })()");
-  await sleep(700);
-  await T.ev("window.__cells = 0");
-  await T.press("#rballow");
-  await T.until("!!window.__ran", 10000).catch(() => {});
-  const s10 = await T.ev("window.__ran");
-  ok(!!s10 && J(s10.ids) === J([ids10[0], ids10[2]]) && s10.calls === 1, "10. three refused cells, the middle one deleted: the two still there run, in their order, and the press read the cells once: " + J({ ran: s10, ids: ids10 }));
-
-  // ---- 11. TimeTravel's revert in a reactive notebook, its recompute refused: no error, the bar
-  const V = await profilePage(false, "", { runner: false });
-  await V.go(dev.site + "/");
-  await appReady(V);
-  await twoCells(V);
-  await V.ev("window.sagebrush.notebook.flush(); 1");
-  await sleep(1200);
-  await V.ev(`(async () => { const nb = window.sagebrush.notebook; await nb.applyEdits({ set: [{ id: nb.cells()[0].id, code: "print(7)" }] }, { run: false }); nb.flush(); return 1; })()`);
-  await sleep(1200);
-  await V.until(givenUp, 30000);
-  await V.ev("(() => { window.__rejected = []; addEventListener('unhandledrejection', (e) => window.__rejected.push(String(e.reason))); addEventListener('error', (e) => window.__rejected.push(String(e.message))); return 1; })()");
-  await V.ev("document.querySelector('#ttbtn').click(); 1");
-  await V.until("!document.querySelector('#timetravel').hidden && window.sagebrush.history?.versions().length > 1", 10000);
-  await V.ev("(() => { const s = document.querySelector('#ttslider'); s.value = 0; s.dispatchEvent(new Event('input')); return 1; })()");
-  await V.ev("document.querySelector('#ttrevert').click(); 1");
-  await V.until("!document.querySelector('#runbar').hidden", 15000).catch(() => {});
-  await sleep(1500);
-  const s11 = await V.ev("({ reactive: !!window.sagebrush.notebook.reactiveOn, rejected: window.__rejected, status: document.querySelector('#status').textContent, bar: !document.querySelector('#runbar').hidden })");
-  ok(s11.reactive && s11.rejected.length === 0 && !/^computing/.test(s11.status) && s11.bar, "11. a reactive notebook reverted in TimeTravel, its recompute refused: no error, the status not stuck at computing, the bar asks: " + J(s11));
-
-  // (a shared notebook, its output as shared)
-  const signed = await fetch(dev.site + "/auth/dev", { method: "POST", headers: { origin: dev.site, "content-type": "application/json" }, body: J({ token: "dev-token", account_id: A }) });
-  const cookie = signed.headers.getSetCookie().map((c) => c.split(";")[0]).join("; ");
-  const api = (p, m, b, t = "application/json") => fetch(dev.site + p, { method: m, headers: { origin: dev.site, cookie, "content-type": t }, body: b });
-  const nb = Buffer.from(J({ nbformat: 4, nbformat_minor: 5, metadata: { kernelspec: { name: "python3", display_name: "Python 3", language: "python" } }, cells: [{ cell_type: "code", id: "c1", metadata: {}, execution_count: 1, outputs: [{ output_type: "stream", name: "stdout", text: "as shared\n" }], source: "print(6 * 7)" }] }));
-  await api("/api/share/check", "POST", J({ blobs: [{ sha256: sha(nb), size: nb.length }] }));
-  await api(`/api/share/blob/${sha(nb)}`, "PUT", nb, "application/octet-stream");
-  const id = (await (await api("/api/share/first-upload", "POST", J({ title: "Run bar", license: "MIT", files: [{ path: "n.ipynb", sha256: sha(nb), size: nb.length }], attempt: randomBytes(16).toString("hex") }))).json()).collection;
-  // ---- 8. Chromium with a working sandbox (control): the sandbox runs it; no bar
-  const C = await profilePage(false);
-  await C.go(dev.site + "/");
-  await appReady(C);
-  await twoCells(C);
-  await runAll(C);
-  // (both cells' outputs: the second may still be running when the first has printed)
-  await C.until("JSON.stringify([...document.querySelectorAll('.cell')].map((c) => (c.querySelector('.out')?.textContent ?? '').trim())) === JSON.stringify(['42', 'two'])", 90000).catch(() => {});
-  const s8 = await state(C);
-  ok(s8.outs[0] === "42" && s8.outs[1] === "two" && !s8.bar && s8.files === false && (await C.ev("document.querySelectorAll('iframe[sandbox]').length")) >= 1, "8. Chromium: the notebook runs in the sandbox, its file changes still off; no bar: " + J({ outs: s8.outs, bar: s8.bar }));
-
-  // ---- 9. Chromium, the share page, its runner a page that never answers: said, never a run left spinning
-  const R = await profilePage(false, "", { runner: false });
-  await R.go(`${dev.site}/s/${id}`);
-  await R.until("!!window.shared && !!document.querySelector('#nb .cell')", 60000);
-  const t9 = Date.now();
-  await R.press("#runall");
-  await R.until("/didn't start/.test(document.querySelector('#status').textContent)", 20000).catch(() => {});
-  await sleep(500);
-  const s9 = await R.ev("({ status: document.querySelector('#status').textContent, out: (document.querySelector('#nb .cell .out')?.textContent ?? '').trim(), running: document.querySelectorAll('#nb .cell.running, #nb .cell.queued').length })");
-  ok(/sandbox didn't start in this browser/.test(s9.status) && /Reload the page/.test(s9.status) && Date.now() - t9 < 20000, `9. the share page, its runner silent: the page says the sandbox didn't start (${Date.now() - t9} ms): ` + J(s9.status));
-  ok(s9.running === 0 && /didn't start/.test(s9.out) && /Reload the page/.test(s9.out), "...the held run is answered as not run, with the share page's words, and no cell is left running: " + J(s9));
-  // (a Run after the give-up: said again, by the stand-in itself)
-  await R.ev("(document.querySelector('#status').textContent = '', 1)");
-  await R.press("#runall");
-  await R.until("/sandbox didn't start in this browser/.test(document.querySelector('#status').textContent) && document.querySelectorAll('#nb .cell.running, #nb .cell.queued').length === 0", 3000).catch(() => {});
-  ok(/sandbox didn't start in this browser/.test(await R.ev("document.querySelector('#status').textContent")) && (await R.ev("document.querySelectorAll('#nb .cell.running, #nb .cell.queued').length")) === 0, "...and a Run after it is said again at once, nothing left running: " + J(await R.ev("({ status: document.querySelector('#status').textContent, running: document.querySelectorAll('#nb .cell.running, #nb .cell.queued').length, out: (document.querySelector('#nb .cell .out')?.textContent ?? '').trim().slice(0, 120), inner: window.shared?.kernel?.worker?.inner?.constructor?.name ?? null })")));
-  // (and once given up, a restart doesn't wait for a runner again: the refusal at once, no new runner frame)
-  await R.ev("(async () => { await window.shared.kernel.restart(); document.querySelector('#status').textContent = ''; return 1; })()");
-  const t9b = Date.now();
-  await R.press("#runall");
-  await R.until("/didn't start/.test(document.querySelector('#status').textContent)", 20000).catch(() => {});
-  const ms9b = Date.now() - t9b;
-  await R.until("document.querySelectorAll('#nb .cell.running, #nb .cell.queued').length === 0", 5000).catch(() => {});
-  const s9b = await R.ev("({ status: document.querySelector('#status').textContent, out: (document.querySelector('#nb .cell .out')?.textContent ?? '').trim(), frame: !!window.shared.kernel.worker?.frame, refusal: typeof window.shared.kernel.worker?.text === 'string' && !window.shared.kernel.worker?.inner && !(window.shared.kernel.worker instanceof Worker), running: document.querySelectorAll('#nb .cell.running, #nb .cell.queued').length })");
-  ok(/sandbox didn't start in this browser/.test(s9b.status) && ms9b < 3000 && !s9b.frame && s9b.refusal && s9b.running === 0 && s9b.out !== "42", `...restarted after that, Run all says so at once (${ms9b} ms): the refusal, no runner tried again, never a plain worker, nothing ran: ` + J(s9b));
-
-  // ---- 17. the notebook page as Safari: its sandbox runs the notebook; no bar
-  const X = await profilePage(true);
-  await X.go(dev.site + "/");
-  await appReady(X);
-  ok((await X.ev("navigator.userAgent")) === SAFARI && !(await X.ev("'userAgentData' in navigator")), "(Chromium as Safari: its user agent, and no userAgentData)");
-  await twoCells(X);
-  await runAll(X);
-  await X.until("[...document.querySelectorAll('.cell .out')].map((o) => o.textContent.trim()).join('|') === '42|two'", 90000).catch(() => {});
-  const s12 = await state(X);
-  const w12 = await X.ev("(() => { const w = window.sagebrush.kernel?.worker, fs = [...document.querySelectorAll('iframe[sandbox]')]; return { runner: !!w?.frame && fs.includes(w.frame), plain: !!w?.inner }; })()");
-  ok(J(s12.outs) === J(["42", "two"]) && !s12.bar && s12.files === false && w12.runner && !w12.plain, "17. as Safari, the notebook page: a notebook whose code may not change files runs in the sandbox, its file changes still off; no bar: " + J({ outs: s12.outs, bar: s12.bar, files: s12.files, ...w12 }));
-
-  // ---- 18. the share page as Safari: Run all runs it in the sandbox
-  const W = await profilePage(true);
-  await W.go(`${dev.site}/s/${id}`);
-  await W.until("!!window.shared && !!document.querySelector('#nb .cell')", 60000);
-  await W.press("#runall");
-  await W.until("(document.querySelector('#nb .cell .out')?.textContent ?? '').trim() === '42'", 60000).catch(() => {});
-  const s13 = await W.ev("({ status: document.querySelector('#status').textContent, out: (document.querySelector('#nb .cell .out')?.textContent ?? '').trim(), frames: [...document.querySelectorAll('iframe[sandbox]')].map((f) => f.getAttribute('sandbox')), runner: window.shared.kernel.worker?.frame === document.querySelector('iframe[sandbox]'), plain: !!window.shared.kernel.worker?.inner })");
-  ok(s13.out === "42" && J(s13.frames) === J(["allow-scripts"]) && s13.runner && !s13.plain && !/can't run in this browser/.test(s13.status), "18. as Safari, the share page: Run all runs it in the sandbox, and never says the browser can't run it: " + J(s13));
-
-  // ---- 19. TimeTravel's resume of a session where the sandbox doesn't start: the replay is refused by the interpreter
-  // (it doesn't pass the page's own refusal), so the bar asks, no cell gets a message, and Allow runs what was replayed
-  const P = await profilePage(false);
-  await P.go(dev.site + "/?reactive=0");
-  await appReady(P);
-  await twoCells(P);
-  const rid = await P.ev("window.sagebrush.notebook.snapshot().id");
-  await P.ev("(() => { const nb = window.sagebrush.notebook; nb.runCells([nb.cells()[0].id]); return 1; })()");
-  await P.until("(document.querySelector('.cell .out')?.textContent ?? '').trim() === '42'", 90000);
-  await P.ev("(window.sagebrush.notebook.flush(), 1)");
-  await sleep(1500);
-  const head = await P.ev("window.sagebrush.history.head()");
-  const ran19 = await P.ev("window.sagebrush.history.records('run').length");
-  await P.silence();
-  await P.go(`${dev.site}/?reactive=0&resume=${encodeURIComponent(rid)}&at=${encodeURIComponent(head)}`);
-  await appReady(P);
-  await P.until(givenUp, 30000).catch(() => {});
-  await P.until("!document.querySelector('#runbar').hidden", 30000).catch(() => {});
-  const s19 = await P.ev("({ bar: !document.querySelector('#runbar').hidden, text: document.querySelector('#rbtext').textContent, copy: window.sagebrush.notebook.snapshot().id, cells: window.sagebrush.notebook.cells().map((c) => c.ta.value), outs: [...document.querySelectorAll('.cell')].map((c) => (c.querySelector('.out')?.textContent ?? '').trim()) })");
-  ok(ran19 >= 1 && s19.copy !== rid && J(s19.cells) === J(["print(6 * 7)", "print('two')"]) && s19.bar && /To run in this page/.test(s19.text) && !s19.outs.some((o) => /run|sandbox/i.test(o)), "19. a session resumed where the sandbox doesn't start: its replay refused by the interpreter, the bar asks, and no cell gets a message: " + J({ ran19, ...s19 }));
-  await P.ev("(() => { const nb = window.sagebrush.notebook, runCells = nb.runCells, runAll = nb.runAll; window.__allow = null; nb.runCells = (ids, ...a) => ((window.__allow ??= { ids: [...ids] }), runCells(ids, ...a)); nb.runAll = (...a) => ((window.__allow ??= { all: true }), runAll(...a)); return 1; })()");
-  await sleep(700);
-  await P.press("#rballow");
-  await P.until("!!window.__allow", 10000).catch(() => {});
-  await P.until("(document.querySelector('.cell .n')?.textContent ?? '').includes('[') && !document.querySelector('.cell.running, .cell.queued')", 60000).catch(() => {});
-  await sleep(500);
-  const a19 = await P.ev("({ allow: window.__allow, first: window.sagebrush.notebook.cells()[0].id, outs: [...document.querySelectorAll('.cell')].map((c) => (c.querySelector('.out')?.textContent ?? '').trim()) })");
-  ok(J(a19.allow) === J({ ids: [a19.first] }) && a19.outs[0] === "42" && a19.outs[1] === "", "...and Allow runs the replayed cell only, never the one that hadn't run: " + J(a19));
+  ok(ran6 && open6 && !s6.runbar && s6.files === false && /is trying to save out\.txt in \/sub/.test(s6.text), "6. as Safari: the notebook runs, no run bar, and its write is asked about in the modal: " + J({ ran6, text: s6.text }));
 } catch (e) {
   failures++;
   console.log("FAIL", e.message);

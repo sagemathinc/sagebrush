@@ -28,7 +28,7 @@
    "owner": "phase-2",
    "role": "agent-text"
   },
-  "web/index.html :: until :: const out = cells().map((c) => c.out.textContent).join(\"\\n\"); #0": {
+  "web/index.html :: run :: const out = cells().map((c) => c.out.textContent).join(\"\\n\"); #0": {
    "owner": "phase-2",
    "role": "selftest"
   },

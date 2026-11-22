@@ -1,6 +1,7 @@
 ok   ready: ready (sagebrush 0.6.4, 300 ms)
 ok   cross-origin isolated (Stop keeps variables)
 ok   opened the notebook from disk: ready
+ok   a notebook runs before it may change files, its write refused: {"ran":"42","wrote":"refused"}
 ok   a grant the app didn't make reaches nothing
 ok   a name outside the notebook's folder is refused
 ok   the page has no fs plugin: {"facade":"undefined","native":["plugin:fs|exists refused: Command plugin:fs|exists not allowed by ACL","plugin:fs|read_dir refused: Command plugin:fs|read_dir not allowed by ACL"]}
