@@ -6,7 +6,9 @@
 //     pane, editable), where it runs (this computer), and May run code (only if the grant may, frozen at Start);
 //   - the Tasks list under the chats, each with its chip;
 //   - a task's view in place of the chat: its status, its thread (the agent's turns), and its proposal's card, which
-//     opens the proposal view (the review chunk's) in a dialog. Merge, Close and Ask for changes come with UI-4.
+//     opens the proposal view (the review chunk's) in a dialog, with its actions: Close, and Ask for changes (S3 P2: a
+//     note, with the person's current versions of the task's own files, back to the same task; its next round replaces
+//     the one shown, in place). Merge comes with P3.
 // Shown only for an agent on this computer whose hello offers delegate.1: nothing changes for any other.
 import type { Thread, Turn } from "../workspace/agent-chat/events";
 import { AgentError } from "../workspace/agent-pair";

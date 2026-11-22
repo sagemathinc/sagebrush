@@ -4,6 +4,8 @@
 // with the stand-in Delegate host (test-delegate-host.mjs). What it shows: nothing of Delegate until the agent offers
 // it; the switch on only after its confirmation, and the host told; the Tasks list with chips; a task's view (its
 // thread, its proposal's card) in place of the chat, and back; the proposal view from the host, each file checked;
+// its actions: a newer round in place, Ask for changes (the note kept per task, sent with the current versions, then
+// the next round replacing it) and Close;
 // Delegate… (the sheet: the composer's text, the documents, May run code) and Start; the switch off, with the running
 // tasks closed first when ticked, Delegate… disabled while it turns off, then the host told.
 //   SAGEBRUSH_AGENTS=1 bun web/build.ts && CHROME=google-chrome bun web/agents/test-agents-delegate.mjs
@@ -96,14 +98,51 @@ try {
   await P.until(`document.querySelector('dialog.proposal[open]').textContent.includes('two')`, 20000).catch(() => {});
   ok(fileAsks().includes("work/notes.txt@base") && fileAsks().includes("work/notes.txt@proposal") && (await P.ev(`document.querySelector('dialog.proposal[open]').textContent.includes('two')`)), "a file opened: both sides read (tasks.file, base and proposal), its diff shown", fileAsks());
   await shot("4-proposal");
-  // (its actions: Close now; Merge and Ask for changes not yet, and said so)
+  // (its actions: Close and Ask for changes now; Merge not yet, and said so)
   const acts = await P.ev(`[...document.querySelectorAll('dialog.proposal[open] button[data-act]')].map((b) => [b.dataset.act, b.textContent, b.getAttribute('aria-disabled')])`);
-  ok(JSON.stringify(acts) === JSON.stringify([["merge", "Merge", "true"], ["ask", "Ask for changes", "true"], ["close", "Close", null]]) && /Merge and Ask for changes come in the next update\./.test(await P.ev(`document.querySelector('dialog.proposal[open]').textContent`)), "the proposal's actions: Close; Merge and Ask for changes not yet, said so", acts);
+  ok(JSON.stringify(acts) === JSON.stringify([["merge", "Merge", "true"], ["ask", "Ask for changes", null], ["close", "Close", null]]) && /Merge comes in the next update\./.test(await P.ev(`document.querySelector('dialog.proposal[open]').textContent`)), "the proposal's actions: Close; Merge and Ask for changes not yet, said so", acts);
   // (a newer round of the task, while its proposal is open: it replaces the one shown, in place)
   const r2 = await H.propose(A.task, { "work/notes.txt": "one\ntwo\nthree\n" });
   await P.until(`document.querySelector('dialog.proposal[open] .sbpv h3')?.textContent === 'Proposal, round 2'`, 20000);
   const round2 = await P.ev(`({ status: document.querySelector('dialog.proposal[open] .proposal-actions [role=status]').textContent, files: [...document.querySelectorAll('dialog.proposal[open] .sbpv .file')].map((r) => r.querySelector('.path').textContent) })`);
   ok(/round 2/.test(round2.status) && round2.files.join() === "work/notes.txt" && H.got.some((m) => m.method === "tasks.diff" && m.params.commit === r2), "a new round while the proposal is open: it replaces the one shown, in the same dialog, said so", round2);
+  // ---- Ask for changes (S3 P2): the note, with the person's current versions of the task's own files, to the same task
+  await H.call("workspace.create", { path: "/work/notes.txt", content: { text: "alpha\n" } });
+  const KEY = `sb-delegate-ask-v1:${A.task}`;
+  const askBtn = `document.querySelector('dialog.proposal[open] button[data-act="ask"]')`;
+  const block = `document.querySelector('dialog.proposal[open] .ask-slot .ask-block')`;
+  await P.ev(`${askBtn}.click()`);
+  await P.until(`!!${block} && !${block}.hidden`);
+  const ask0 = await P.ev(`({ files: ${block}.querySelector('.ask-files').textContent, focused: document.activeElement?.id })`);
+  ok(ask0.files === "Your current versions of these files go with your note: work/notes.txt" && ask0.focused === "delegate-note", "Ask for changes: its block under the actions, the note focused, naming the files whose current versions go with it", ask0);
+  // (the unsent note kept per task: the dialog closed and the proposal opened again, it's still there)
+  await P.ev(`(() => { const t = document.querySelector('#delegate-note'); t.value = 'Also number the lines.'; t.dispatchEvent(new Event('input')); })()`);
+  ok((await P.ev(`localStorage.getItem(${JSON.stringify(KEY)})`)) === "Also number the lines.", "the unsent note is kept in this browser, per task");
+  await P.ev(`document.querySelector('dialog.proposal[open] .x').click()`);
+  await P.ev(`document.querySelector('#task-view .proposal-card').click()`);
+  await P.until(`!!${askBtn} && !!document.querySelector('dialog.proposal[open] .sbpv .file')`, 20000);
+  await P.ev(`${askBtn}.click()`);
+  await P.until(`!!${block} && !${block}.hidden`);
+  ok((await P.ev(`document.querySelector('#delegate-note').value`)) === "Also number the lines.", "the proposal opened again: the note is still there");
+  // (an empty note: said so, nothing sent)
+  await P.ev(`(() => { const t = document.querySelector('#delegate-note'); t.value = '   '; t.dispatchEvent(new Event('input')); ${block}.querySelector('button.primary').click(); })()`);
+  await sleep(200);
+  ok((await P.ev(`${block}.querySelector('.msg').textContent`)) === "Write what you'd like changed first" && !H.got.some((m) => m.method === "tasks.ask"), "an empty note: said so, nothing sent");
+  // (sent: the note trimmed, the round shown and the seq it was read at, the current version of work/notes.txt)
+  const seqShown = A.log.length;
+  await P.ev(`(() => { const t = document.querySelector('#delegate-note'); t.value = '  Also number the lines.\\n'; t.dispatchEvent(new Event('input')); ${block}.querySelector('button.primary').click(); })()`);
+  await hostUntil(() => H.asks.length === 1);
+  const asked = H.asks[0], askSent = H.got.find((m) => m.method === "tasks.ask")?.params;
+  ok(asked?.note === "Also number the lines." && askSent?.proposal === r2 && askSent?.seq === seqShown && JSON.stringify(asked.current) === JSON.stringify([{ path: "work/notes.txt", kind: "file", content: "alpha\n" }]), "Ask for changes sent: tasks.ask for the round shown, at the seq it was read at, the note trimmed, the current version of the task's file", { askSent, asked });
+  await P.until(`${block}?.textContent.startsWith('Asked.') || !!document.querySelector('dialog.proposal[open] .ask-slot .asked')`);
+  await P.until(`document.querySelector('#tasks .task[data-task="${A.task}"] .chip')?.textContent === 'Working'`);
+  const after = await P.ev(`({ text: document.querySelector('dialog.proposal[open] .ask-slot').textContent, ask: ${askBtn}.getAttribute('aria-disabled'), close: document.querySelector('dialog.proposal[open] button[data-act="close"]').getAttribute('aria-disabled'), kept: localStorage.getItem(${JSON.stringify(KEY)}) })`);
+  ok(/^Asked\. The task is working on round 3/.test(after.text) && after.ask === "true" && after.close === "true" && after.kept === null, "after it: \"Asked\", the chip back to Working, Ask and Close disabled while the task works, the kept note gone", after);
+  // (round 3, from the agent: it replaces round 2 in the same dialog; the old round's Ask block goes)
+  const r3 = await H.propose(A.task, { "work/notes.txt": "1 one\n2 two\n3 three\n" });
+  await P.until(`document.querySelector('dialog.proposal[open] .sbpv h3')?.textContent === 'Proposal, round 3'`, 20000);
+  const round3 = await P.ev(`({ slot: document.querySelector('dialog.proposal[open] .ask-slot').children.length, ask: ${askBtn}.getAttribute('aria-disabled') })`);
+  ok(round3.slot === 0 && round3.ask === null, "round 3 replaces round 2 in the same dialog: the Ask block gone, Ask for changes offered again", round3);
   // (Close: asked first, then the task closed at the host with the proposal shown and its seq; the dialog goes)
   await P.ev(`document.querySelector('dialog.proposal[open] button[data-act="close"]').click()`);
   await P.until(`[...document.querySelectorAll('dialog.delegate-dlg[open] h3')].some((h) => h.textContent === 'Close this proposal?')`);
@@ -111,7 +150,7 @@ try {
   await P.ev(`[...document.querySelectorAll('dialog.delegate-dlg[open] button')].find((b) => b.textContent === 'Close the task').click()`);
   await hostUntil(() => H.tasks.get(A.task).status === "closed");
   const closeSent = H.got.find((m) => m.method === "tasks.close")?.params;
-  ok(closeSent?.proposal === r2 && closeSent?.seq === A.log.length - 1, "Close: tasks.close for the round shown, at the seq it was read at", { closeSent, log: A.log.length });
+  ok(closeSent?.proposal === r3 && closeSent?.seq === A.log.length - 1, "Close: tasks.close for the round shown, at the seq it was read at", { closeSent, log: A.log.length });
   await P.until(`!document.querySelector('dialog.proposal[open]') && document.querySelector('#tasks .task[data-task="${A.task}"] .chip')?.textContent === 'Closed'`);
   ok(true, "closed: the dialog goes, and the task's chip says Closed");
   await P.ev(`document.querySelector('#task-view .task-head .link').click()`);
