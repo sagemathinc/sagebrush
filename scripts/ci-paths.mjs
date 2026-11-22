@@ -256,6 +256,8 @@ const webkitPaths = [
   // (which browsers run code in the sandboxed runner, and the headers that let Firefox load it: its Firefox leg,
   // web/share/test-runner-engines.mjs)
   /^web\/notebook\/runner-(?:browser|worker)\.js$/, /^web\/csp(?:-policy)?\.m?ts$/, /^web\/share\/test-runner-engines\.mjs$/,
+  // (the LaTeX source pane's textarea and the lines behind it, wrapping alike in WebKit)
+  /^web\/latex\/(?:editor|style|highlight|component)\.ts$/, /^web\/latex\/test-latex-webkit-wrap\.mjs$/,
 ];
 const appPaths = [/^app\//, /^\.github\/workflows\/app\.yml$/];
 // Optional packages (optional/<name>/, plan-modular-packages-r4 §7): their
