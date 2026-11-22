@@ -106,10 +106,29 @@ def _absent_alternative(name):
     return _ABSENT[0].get(name)
 
 
+def _written(text):
+    """text with a reactive notebook's page-order names as written: xʹ2 (U+02B9 and digits, a later definition of x,
+    src/rename-matlab.ts) is x"""
+    if "\u02b9" not in text:
+        return text
+    out, i, n = [], 0, len(text)
+    while i < n:
+        c = text[i]
+        if c == "\u02b9" and i + 1 < n and text[i + 1].isdigit() and i > 0 and (text[i - 1].isalnum() or text[i - 1] == "_"):
+            i += 1
+            while i < n and text[i].isdigit():
+                i += 1
+            continue
+        out.append(c)
+        i += 1
+    return "".join(out)
+
+
 def _undefined_message(name):
     """MATLAB's message for a name that is no variable or function, with the catalog's
     alternative when the name is a MATLAB function Sagebrush lacks: an agent reads the
     error, so the error says what to use"""
+    name = _written(name)
     msg = "Unrecognized function or variable '%s'." % name
     alt = _absent_alternative(name)
     if alt is not None:
@@ -257,7 +276,7 @@ def report_cell(e, line):
         out.append("Error in %s (line %d)" % (_src[0], line))
         if 0 < line <= len(lines):
             out.append(lines[line - 1].strip())
-    text = "\n".join(out) + "\n"
+    text = _written("\n".join(out) + "\n")
     if _cell_error[1]:
         _cell_error[0] = text
     else:
@@ -3999,6 +4018,7 @@ def _is_nd(v):
 
 
 def display(name, v):
+    name = _written(name)
     if _is_nd(v):
         # A(:,:,1) = ... page by page (logical and integer arrays: their class first)
         cls = class_(v)

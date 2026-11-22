@@ -2,6 +2,7 @@
 // nodes, its tool calls, permission prompts and artifact cards, as the Agents page has always drawn them. What a click
 // does (answering a prompt, opening an artifact) and how Markdown is rendered are the caller's, passed in.
 import { ATTENTION_STATES, TOOL_STATUSES, count, langOf, own, type Artifact, type Attention, type Thread, type ToolCall, type Turn, type UserEntry } from "./events";
+import { MIRROR_COPY, present, reasonText, type InertBlock, type InertPart, type Section } from "./mirror";
 
 // (a class name from a known set only, whatever the thread holds: a stored thread from before apply checked it included)
 const cls = (v: unknown, xs: readonly string[]) => (typeof v === "string" && xs.includes(v) ? v : "other");
@@ -144,4 +145,65 @@ export function diffHtml(before: string, after: string): string {
     else rows.push(`<div class="dl add">+${esc(b[j++])}</div>`);
   }
   return `<div class="diff">${rows.join("")}</div>`;
+}
+
+// ---- a conversation read back from the account's mirror (M2): inert, text only
+
+const el = (tag: string, className: string, text?: string) => {
+  const e = document.createElement(tag);
+  e.className = className;
+  if (text !== undefined) e.textContent = text;
+  return e;
+};
+const ARTIFACT_WORD: Record<string, string> = { markdown: "Document", code: "Code", diff: "Changes", notebook: "Notebook", board: "Board" };
+
+function inertPart(p: InertPart): HTMLElement {
+  if (p.k === "text") {
+    const d = el("div", "msg mirror-text", p.text);
+    if (p.truncated) d.append(el("div", "tag", "(cut at 256 KiB)"));
+    return d;
+  }
+  if (p.k === "tool") {
+    const meta = [p.status === "running" ? "" : p.status, count(p.duration_ms) !== undefined ? `${(count(p.duration_ms)! / 1000).toFixed(1)} s` : ""].filter(Boolean).join(" · ");
+    return el("div", "mirror-tool", `${p.tool}${p.summary ? " " + p.summary : ""}${meta ? " · " + meta : ""}`);
+  }
+  if (p.k === "approval") return el("div", "mirror-approval", `⚠ ${p.title ?? p.kind}: ${p.state === "approved" ? "Allowed" : p.state === "denied" ? "Denied" : "No answer"}`);
+  if (p.k === "artifact") return el("div", "mirror-artifact", `${p.title ?? ARTIFACT_WORD[p.kind] ?? "Artifact"} · ${ARTIFACT_WORD[p.kind] ?? "Artifact"}`);
+  return el("div", "turn-error", `Error: ${p.code}`);
+}
+
+function inertBlock(b: InertBlock, agent: string): HTMLElement {
+  let node: HTMLElement;
+  if (b.k === "gap") node = el("div", "mirror-gap", MIRROR_COPY.gap);
+  else if (b.k === "user") {
+    node = el("div", "user sent mirror");
+    node.append(el("div", "bubble mirror-text", b.text));
+  } else {
+    node = el("div", "turn mirror");
+    const who = el("div", "who");
+    who.append(el("span", "avatar", "✳"), document.createTextNode(agent));
+    node.append(who, ...b.parts.map(inertPart));
+    if (b.outcome === "interrupted") node.append(el("div", "status", "Interrupted"));
+    else if (b.outcome === "error") node.append(el("div", "status", "Ended with an error"));
+  }
+  if (b.unconfirmed) node.classList.add("unconfirmed");
+  return node;
+}
+
+/** One stream read back from the mirror, as its own labeled section: its blocks, its gaps, what isn't confirmed. Drawn
+ *  from text only; it has no buttons, nothing to answer, open or send. */
+export function mirrorSectionNode(sec: Section, agent = "Agent"): HTMLElement {
+  const box = el("section", "mirror-section");
+  const otherRun = sec.stale_reason === "other_run" && sec.stale_from === 1;
+  box.append(el("div", "mirror-label", otherRun ? MIRROR_COPY.otherRun : MIRROR_COPY.section));
+  let said = otherRun;
+  for (const b of present(sec)) {
+    if (b.unconfirmed && !said) {
+      const why = reasonText(sec.stale_reason);
+      box.append(el("div", "mirror-unconfirmed", why ? `${MIRROR_COPY.unconfirmed}: ${why}` : MIRROR_COPY.unconfirmed));
+      said = true;
+    }
+    box.append(inertBlock(b, agent));
+  }
+  return box;
 }

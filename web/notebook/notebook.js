@@ -239,7 +239,14 @@ export function createNotebook(root, opts = {}) {
   // use) over the SVG, which stays for saving, agents and when WebGL fails.
   let viewer3d = null;
   function mount3d(fig, sceneText) {
-    viewer3d ??= import(asset("sagebrush-viewer3d.js")).then(() => window.SagebrushViewer3d);
+    viewer3d ??= import(asset("sagebrush-viewer3d.js")).then(() => {
+      // (its headset mode, web/viewer3d-xr.js, where this page has it: a host that maps its own assets (a downloaded
+      //  board's) offers it only if it maps that file too; the viewer shows "Enter VR" only with it)
+      const v = window.SagebrushViewer3d;
+      const xr = opts.assetUrl ? opts.assetUrl("sagebrush-viewer3d-xr.js") : asset("sagebrush-viewer3d-xr.js");
+      if (v && xr && !v.xrModule) v.xrModule = xr;
+      return v;
+    });
     viewer3d.then((v) => v?.mount(fig, JSON.parse(sceneText))).catch(() => {});
   }
   // A graph's picture (Graph.plot): a canvas whose vertices can be dragged

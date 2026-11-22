@@ -248,6 +248,37 @@ for (const [what, event, chip] of [["failed", { type: "task_status", status: "fa
   H7.stop();
 }
 
+// ---- Close (tasks.close {proposal, seq}): the proposal as it was read; a task that moved on since is refused (stale)
+{
+  const H8 = delegateHost();
+  const T1 = await H8.addTask({ title: "one", base: { "a.txt": "x\n" }, proposal: { "a.txt": "y\n" } });
+  const T2 = await H8.addTask({ title: "two", base: { "a.txt": "x\n" }, proposal: { "a.txt": "z\n" } });
+  const D8 = new DelegateTasks({ changed: () => {} });
+  const P8 = pairWith(H8);
+  D8.attach(P8);
+  await P8.paired();
+  await P8.allow({ folders: ["/"], write: true, expires: null }, false);
+  ok((await why(D8.close(T1.task, T1.proposal, 1))) === "forbidden" && !H8.got.some((m) => m.method === "tasks.close"), "Close with the switch off: refused here, nothing sent");
+  D8.turnOn();
+  await until(() => D8.tasks.length === 2);
+  const s1 = D8.source(T1.task, T1.proposal);
+  ok(s1.seen() === null, "a proposal not read yet has no seq to close it with");
+  await s1.diff();
+  ok(s1.seen()?.seq === T1.log.length, "read: the seq it was read at, the task's", { seen: s1.seen(), log: T1.log.length });
+  ok((await D8.close(T1.task, T1.proposal, s1.seen().seq)) === "closed", "Close: tasks.close answered closed");
+  const sent = H8.got.findLast((m) => m.method === "tasks.close")?.params;
+  ok(sent && sent.task === T1.task && sent.proposal === T1.proposal && sent.seq === s1.seen().seq && Object.keys(sent).length === 3, "it names the task, the proposal commit and the seq it was read at, nothing else", sent);
+  await until(() => D8.task(T1.task)?.entry.status === "closed");
+  ok(chipOf(D8.task(T1.task).entry) === "Closed", "its chip: Closed");
+  // (the task moves on after the proposal was read: Close refused, nothing closed)
+  const s2 = D8.source(T2.task, T2.proposal);
+  await s2.diff();
+  H8.emit(T2.task, { type: "turn_started" });
+  ok((await why(D8.close(T2.task, T2.proposal, s2.seen().seq))) === "stale" && H8.tasks.get(T2.task).status === "proposal", "a task that moved on since it was read: refused (stale), not closed");
+  P8.revoke();
+  H8.stop();
+}
+
 // ---- an agent that doesn't offer Delegate: no switch
 {
   const H3 = delegateHost({ features: ["chat.resume"] });

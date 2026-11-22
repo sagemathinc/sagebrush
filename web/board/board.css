@@ -462,3 +462,32 @@
 /* (on a phone, the top bar's one line with room for its title: no Share button, since what it offers is File ▸ Download
    ▸ HTML, there too; the name a size down) */
 @media (max-width: 600px) { :where(.sbb, .sbb-layer) [data-sbb=sharebtn] { display: none; } [data-sbb=home] { font-size: 17px; } }
+/* The drawer (drawer.ts): a note's whole content beside the board, its card keeping its size; its left edge resizes
+   it.  On a board under 600 px wide, a sheet at the bottom, its top edge resizing it.  The tour's caption and the Edit
+   toolbar are centered in the board's clear part beside it, or above the sheet. */
+.sbb-drawer { position: absolute; top: 44px; right: 0; bottom: 0; z-index: 3; box-sizing: border-box; display: flex; flex-direction: column; width: 480px; max-width: 80%; background: var(--board-surface); color: var(--board-ink); border-left: 1px solid var(--board-border-strong); box-shadow: -6px 0 18px var(--board-shadow-soft); }
+.sbb-drawer[hidden] { display: none; }
+.sbb-drawer-grip { position: absolute; left: -5px; top: 0; bottom: 0; width: 10px; z-index: 1; cursor: ew-resize; touch-action: none; }
+.sbb-drawer-grip:hover, .sbb-drawer-grip:focus-visible, .sbb-drawer-resizing .sbb-drawer-grip { background: var(--board-accent); opacity: .45; outline: none; }
+.sbb-drawer-head { display: flex; align-items: center; gap: 8px; padding: 8px 10px 8px 14px; border-bottom: 1px solid var(--board-hairline-soft); }
+.sbb-drawer-head h2 { flex: 1; min-width: 0; margin: 0; font-size: 16px; font-weight: 600; overflow-wrap: anywhere; }
+.sbb-drawer-head h2:focus { outline: none; }
+.sbb-drawer-head h2:focus-visible { outline: 2px solid var(--board-accent); outline-offset: 2px; }
+:where(.sbb) .sbb-drawer-close { border: 0; background: none; font-size: 22px; line-height: 1; padding: 2px 8px; }
+.sbb-drawer-body { flex: 1; min-height: 0; overflow: auto; overscroll-behavior: contain; padding: 12px 14px 24px; user-select: text; -webkit-user-select: text; }
+.sbb-drawer-body:focus { outline: none; }
+.sbb-drawer-body > .board-item { position: static; width: auto; height: auto; overflow: visible; contain: none; padding: 0; border: 0; border-radius: 0; background: none; box-shadow: none; font-size: 15px; }
+.sbb-drawer-body > .board-item::before, .sbb-drawer-body > .board-item::after { display: none; }
+.sbb-drawer-body > .board-shape { text-align: start; }
+.sbb-drawer-body .board-detail { opacity: 1; font-size: 13px; }
+.sbb-drawer-body .board-code-out { margin: 0; }
+.sbb-drawer-body .board-img { display: block; max-width: 100%; height: auto; }
+.sbb-drawer-gone { margin: 0; font-style: italic; color: var(--board-detail-ink); }
+.sbb.sbb-drawer-open:not(.sbb-sheet-open) [data-sbb=tour] { left: calc((100% - var(--sbb-drawer-w, 0px)) / 2); width: min(720px, calc(100% - var(--sbb-drawer-w, 0px) - 24px)); }
+.sbb.sbb-drawer-open:not(.sbb-sheet-open) .board-toolbar { left: calc((100% - var(--sbb-drawer-w, 0px)) / 2); }
+.sbb-drawer.sbb-sheet { top: auto; left: 0; width: auto; max-width: none; height: 45%; border-left: 0; border-top: 1px solid var(--board-border-strong); border-radius: 12px 12px 0 0; box-shadow: 0 -6px 18px var(--board-shadow-popover); }
+.sbb-drawer.sbb-sheet .sbb-drawer-grip { left: 0; right: 0; top: 0; bottom: auto; width: auto; height: 18px; cursor: ns-resize; background: none; }
+.sbb-drawer.sbb-sheet .sbb-drawer-grip::after { content: ""; position: absolute; left: 50%; top: 6px; width: 40px; height: 4px; margin-left: -20px; border-radius: 2px; background: var(--board-border-strong); }
+.sbb-drawer.sbb-sheet .sbb-drawer-head { padding-top: 16px; }
+.sbb.sbb-sheet-open [data-sbb=tour] { bottom: calc(var(--sbb-sheet-h, 0px) + 8px); }
+.sbb-sr { position: absolute; width: 1px; height: 1px; overflow: hidden; clip-path: inset(50%); white-space: nowrap; }

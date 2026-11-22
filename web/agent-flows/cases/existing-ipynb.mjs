@@ -89,7 +89,7 @@ export default {
       const edited = src(c).replace("args=(0.3,)", "args=(0.5,)");
       return "source" in c ? { ...c, source: lines(edited) } : { ...c, code: edited };
     });
-    // (on the Agents page, as sagebrush-agent 0.8.0 does where the page edits notebooks by cell: that one cell set, from
+    // (on the Agents page, as sagebrush-agent 0.8.1 does where the page edits notebooks by cell: that one cell set, from
     //  the read, its outputs and every other cell kept; with sagebrush-mcp, the whole notebook written on the revision)
     const id = json.cells?.[SOLVE]?.id;
     const wrote = onPage

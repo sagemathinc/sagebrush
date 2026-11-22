@@ -10,10 +10,12 @@
 // are comprehension variables and parameters; attributes and keyword
 // arguments are not names.  Sage cells are analyzed after preparsing and
 // mapped back by the order of the name's occurrences on each line (refused if
-// they do not correspond); Magma cells are not renamed.
+// they do not correspond); MATLAB cells in the MATLAB lexer's tokens
+// (src/rename-matlab.ts); Magma cells are not renamed.
 import { parse } from "../pyparse/src/index";
 import { preparse } from "./sagepre";
 import { isTranslated, type ModeName } from "./modes";
+import { renameMatlabCell } from "./rename-matlab";
 
 type Mode = ModeName;
 
@@ -1181,7 +1183,8 @@ export function forwardRefers(code: string, name: string, mode: Mode = "python")
  * every occurrence (a cell reading the renamed definition); "definition"
  * keeps the occurrences before the cell first binds the name, and the reads
  * in the statement that binds it (`x = x + 1` -> `x_2 = x + 1`).  Returns the
- * new source, or null if it cannot be done reliably (Magma, MATLAB; a Sage cell
+ * new source, or null if it cannot be done reliably (Magma; a MATLAB cell
+ * src/rename-matlab.ts refuses; a Sage cell
  * whose occurrences do not correspond after preparsing; a syntax error).
  */
 // IPython's line magics and shell lines (`%autoreload 2`, `!pip install x`), as a notebook runs them: kept as written;
@@ -1201,6 +1204,8 @@ function maskMagics(source: string, name: string | null): string | null {
 }
 
 export function renameInCell(source: string, name: string, to: string, opts: { mode?: Mode; from?: "all" | "definition"; before?: string } = {}): string | null {
+  // (MATLAB in its own tokens: src/rename-matlab.ts; Magma is not renamed yet)
+  if (opts.mode === "matlab") return renameMatlabCell(source, name, to, opts);
   if (isTranslated(opts.mode)) return null;
   const masked = maskMagics(source, name);
   if (masked === null) return null;

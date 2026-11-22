@@ -1092,23 +1092,26 @@ async function main(argv = process.argv.slice(2), preset?: LimitsText) {
   if (!giveLimits(lim)) return;
   let code: number | null = null;
   let main: any = null;
-  if (cmd !== null && sprig) {
-    main = mainModule("<string>");
+  // (the __main__ of a -c program or of one on stdin, made first: with --sage, its `from sage_all import *` may
+  // raise, and that is reported as a program's own exception is, a traceback and exit status 1, never an
+  // unhandled rejection; nothing else runs then)
+  const named = cmd !== null ? "<string>" : mod === null && (file === null || file === "-") && !interactive ? "<stdin>" : null;
+  if (named !== null) code = guarded(() => void (main = mainModule(named)));
+  const started = code === null;
+  if (!started) {
+    // (the startup raised: reported, and the program doesn't run)
+  } else if (cmd !== null && sprig) {
     code = guarded(() => R.loader.exec(sprigSource(cmd!), main, "exec", "<string>", opts()));
   } else if (cmd !== null && rill) {
-    main = mainModule("<string>");
     code = guarded(() => R.loader.exec(rillSource(cmd!), main, "exec", "<string>", opts()));
   } else if (cmd !== null && isMatlab(null)) {
-    main = mainModule("<string>");
     const py = matlabSource(cmd, "<string>");
     // (a syntax error, reported: exit status 1)
     code = py === null ? 1 : guarded(() => R.loader.exec(py, main, "exec", "<string>", opts()));
   } else if (cmd !== null && isMagma(null)) {
-    main = mainModule("<string>");
     const py = magmaSource(cmd, "<string>");
     if (py !== null) code = guarded(() => R.loader.exec(py, main, "exec", "<string>", opts()));
   } else if (cmd !== null) {
-    main = mainModule("<string>");
     code = guarded(() => R.loader.exec(helpSyntax(cmd!), main, "exec", "<string>", opts()));
   } else if (mod !== null) {
     code = guarded(() => {
@@ -1133,13 +1136,11 @@ async function main(argv = process.argv.slice(2), preset?: LimitsText) {
   } else if (!interactive && isMatlab(null)) {
     // MATLAB on stdin (or `--matlab -`): a program, run as a file of it is, up to its first
     // error, which gives exit status 1, as `matlab -batch` does
-    main = mainModule("<stdin>");
     const src = readStdin();
     const py = src === null ? null : matlabSource(src, "<stdin>");
     code = py === null ? 1 : guarded(() => R.loader.exec(py, main, "exec", "<stdin>", opts()));
   } else if (!interactive && isMagma(null)) {
     // Magma on stdin: a session, as `magma < file` is
-    main = mainModule("<stdin>");
     const src = readStdin();
     const py = src === null ? null : magmaSource(src, "<stdin>", "session");
     if (src === null) code = 1;
@@ -1147,17 +1148,19 @@ async function main(argv = process.argv.slice(2), preset?: LimitsText) {
   } else if (!interactive) {
     // program on stdin
     const source = readStdin();
-    main = mainModule("<stdin>");
     code = source === null ? 1 : guarded(() => R.loader.exec(source, main, "exec", "<stdin>", opts()));
   }
   flushFiles();
   R.stdout.flush();
   R.stderr.flush();
-  if (interactive && (code === null || inspect)) {
-    main ??= mainModule("<stdin>");
-    // (the prompt speaks the program's language: --magma or --matlab, or that of the file -i ran)
-    const mode: ReplMode = isMagma(file) ? "magma" : isMatlab(file) ? "matlab" : "python";
-    code = await (promptHost ? promptBack(main, quiet || inspect, mode) : repl(main, quiet || inspect, mode));
+  if (interactive && started && (code === null || inspect)) {
+    // (the prompt's __main__ if no program made one, made as a program's is: a --sage startup that raises ends here)
+    if (main === null) code = guarded(() => void (main = mainModule("<stdin>")));
+    if (main !== null) {
+      // (the prompt speaks the program's language: --magma or --matlab, or that of the file -i ran)
+      const mode: ReplMode = isMagma(file) ? "magma" : isMatlab(file) ? "matlab" : "python";
+      code = await (promptHost ? promptBack(main, quiet || inspect, mode) : repl(main, quiet || inspect, mode));
+    }
   }
   flushFiles();
   R.stdout.flush();
