@@ -65,6 +65,31 @@ test("maxk and mink: in order, ties in their order in A, k past the length sorts
   ].join("\n"));
 });
 
+// (each row as MATLAB R2026b printed it, observed 2026-11-21: maxk puts NaN last, as mink does; 'ComparisonMethod',
+// 'abs' orders real values by magnitude, then by angle, so 3 comes before -3 ascending; 'MissingPlacement' both ways)
+const ORDER: [string, string][] = [
+  ["[b,i] = maxk([1 NaN 3],2)", "3 1 3 1"],
+  ["b = maxk([NaN NaN 1],3)", "1 NaN NaN"],
+  ["[b,i] = maxk([NaN 2; 1 NaN; 3 4],2)", "3 1 4 2 3 2 3 1"],
+  ["[b,i] = maxk([1+1i 2 NaN -3],2); b = real(b)", "-3 2 4 2"],
+  ["[b,i] = mink([1 NaN 3],2)", "1 3 1 3"],
+  ["b = maxk([-3 2 -5],2,'ComparisonMethod','abs')", "-5 -3"],
+  ["[b,i] = maxk([-3 2 -5 3],2,'ComparisonMethod','abs')", "-5 -3 3 1"],
+  ["[b,i] = mink([-3 2 -5 3 NaN],3,'ComparisonMethod','abs')", "2 3 -3 2 4 1"],
+  ["[b,i] = sort([-3 2 -5],'descend','ComparisonMethod','abs')", "-5 -3 2 3 1 2"],
+  ["[b,i] = sort([-3 2 -5 3],'ComparisonMethod','abs')", "2 3 -3 -5 2 4 1 3"],
+  ["[b,i] = sort([NaN 1 3],'descend','MissingPlacement','last')", "3 1 NaN 3 2 1"],
+  ["[b,i] = sort([NaN 1 3],'MissingPlacement','first')", "NaN 1 3 1 2 3"],
+];
+
+test("maxk's NaN last, 'ComparisonMethod' 'abs' for real input, 'MissingPlacement': as MATLAB orders them", () => {
+  const show = (e: string) => `${e}; if exist('i', 'var'), v = [b(:); i(:)]; clear i, else, v = b(:); end, fprintf('%s\\n', strjoin(arrayfun(@(x) sprintf('%g', x), v', 'UniformOutput', false), ' '));`;
+  const r = run(ORDER.map(([e]) => show(e)).join("\n"));
+  assert.equal(r.status, 0, r.err);
+  const got = r.out.trim().split("\n");
+  assert.deepEqual(ORDER.map(([e], k) => `${e} -> ${got[k]}`), ORDER.map(([e, w]) => `${e} -> ${w}`));
+});
+
 test("divergence and curl: 2-D and 3-D, with coordinates or the default grid, uneven spacing; one output of curl is cav", () => {
   const r = run([
     "[X, Y] = meshgrid([0 1 3 6], [0 2 3]);",
@@ -101,6 +126,11 @@ test("writematrix: comma-separated long g, NaN empty, a delimiter, append, no ex
     "writematrix([true false], 'i.txt', 'WriteMode', 'append')",
     "writematrix(single(1/3), 'noext')",
     "writematrix(reshape(1:8, 2, 2, 2), 'nd.dat', 'Delimiter', ';')",
+    // (empty arrays, N-d too, are empty files)
+    "writematrix(zeros(0, 2, 3), 'e1.csv'), writematrix(zeros(2, 0), 'e2.csv')",
+    // (NaN and -0 as written, and long g's rounding, as MATLAB R2026b wrote them, observed 2026-11-21)
+    "writematrix([pi 1e20 -0; NaN Inf -Inf; 1/3 123456789012345678 1e-5], 'o.csv')",
+    "writematrix(single([NaN -0 1]), 'os.csv')",
     "try, writematrix(1, 'x.xlsx'), catch e, disp(e.message), end",
     "try, writematrix('ab', 'c.csv'), catch e, disp(e.message), end",
   ].join("\n"));
@@ -108,8 +138,11 @@ test("writematrix: comma-separated long g, NaN empty, a delimiter, append, no ex
   assert.equal(r.out, "writematrix: spreadsheet files are not supported in Sagebrush; write a .csv file instead.\n" +
     "writematrix: only numeric and logical arrays are supported in Sagebrush, not char.\n");
   const f = (n: string) => readFileSync(join(r.dir, n), "utf8");
-  assert.equal(f("m.csv"), "1,2.5,\n-Inf,3.14159265358979,1e+20\n");
+  assert.equal(f("m.csv"), "1,2.5,NaN\n-Inf,3.14159265358979,1e+20\n");
   assert.equal(f("i.txt"), "1\t-2\n3\t4\n1,0\n");
   assert.equal(f("noext.txt"), "0.3333333\n");
   assert.equal(f("nd.dat"), "1;3;5;7\n2;4;6;8\n");
+  assert.equal(f("e1.csv") + f("e2.csv"), "");
+  assert.equal(f("o.csv"), "3.14159265358979,1e+20,-0\nNaN,Inf,-Inf\n0.333333333333333,1.23456789012346e+17,1e-05\n");
+  assert.equal(f("os.csv"), "NaN,-0,1\n");
 });

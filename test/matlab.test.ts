@@ -430,7 +430,7 @@ test("what is not implemented is refused, never answered approximately: linsolve
     "interp2([1 3 2], 1:3, magic(3), 2, 2)",
     "interp2(magic(3), 2, 2, 'makima')",
     "median([1 2], 'foo')", "sum([1 2], 'foo')", "mode([1 2], 'omitnan')", "any([1 0], 'omitnan')", "max([1 2], [], 'foo')",
-    "diff([1 2 4], 1, 'foo')", "sort([1 2], 'foo')", "sort([3 NaN 1], 'MissingPlacement', 'first')",
+    "diff([1 2 4], 1, 'foo')", "sort([1 2], 'foo')", "sort([3 NaN 1], 'MissingPlacement', 'middle')",
     "histcounts([1 2 3], 'foo')", "histcounts([1 2 3], 'BinMethod', 'nosuchmethod')",
   ];
   // (funm's @exp is the local exp below, not the built-in)

@@ -6607,9 +6607,10 @@ def sort_(nargout, x, *args):
                 raise _err("sort: the option '%s' is not supported in Sagebrush." % _text(a))
         else:
             dim = _int_arg(a)
-    # (NaN go last ascending and first descending: the other placement is not implemented)
-    if placement not in ("auto", "last" if not desc else "first"):
-        raise _err("sort: 'MissingPlacement', '%s' is not supported in Sagebrush." % placement)
+    # (NaN go last ascending and first descending, unless 'MissingPlacement' says 'first' or 'last')
+    if placement not in ("auto", "first", "last"):
+        raise _err("sort: 'MissingPlacement' must be 'auto', 'first' or 'last'.")
+    nan_last = placement == "last" or (placement == "auto" and not desc)
     if method == "real" and _isnumlike(x) and _arr(x).dtype.kind == "c" and not _isvec(x):
         raise _err("sort: 'ComparisonMethod', 'real' is supported only for vectors in Sagebrush.")
     if method == "real" and _isnumlike(x) and _arr(x).dtype.kind == "c" and _isvec(x):
@@ -6657,6 +6658,15 @@ def sort_(nargout, x, *args):
         pre = np.argsort(-ph if desc else ph, axis=ax, kind="stable")
         A = _take_along(A, pre, axis=ax)
         key = np.abs(A)
+    elif method == "abs":
+        # (real numbers by magnitude too, then by angle: 0 for the nonnegative, pi for the negative, so 3 comes
+        # before -3 ascending; observed MATLAB R2026b, 2026-11-21: sort([-3 2 -5 3], 'ComparisonMethod', 'abs') is
+        # [2 3 -3 -5], where the option used to be ignored for real input)
+        Af = A.astype(np.float64)
+        ph = np.where(Af < 0, np.pi, 0.0)
+        pre = np.argsort(-ph if desc else ph, axis=ax, kind="stable")
+        A = _take_along(A, pre, axis=ax)
+        key = np.abs(A.astype(np.float64))
     elif A.dtype.kind in "b":
         key = A.astype(np.float64)
     else:
@@ -6668,7 +6678,7 @@ def sort_(nargout, x, *args):
         order = np.argsort(k2, axis=ax, kind="stable")
         if np.any(nanmask):
             nn = _take_along(nanmask, order, axis=ax).astype(np.float64)
-            o2 = np.argsort(-nn if desc else nn, axis=ax, kind="stable")
+            o2 = np.argsort(nn if nan_last else -nn, axis=ax, kind="stable")
             order = _take_along(order, o2, axis=ax)
     else:
         order = np.argsort(-key.astype(np.float64) if desc else key, axis=ax, kind="stable")

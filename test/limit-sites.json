@@ -5680,7 +5680,7 @@
   "owner": "matlab (@sagebrush-matlab)",
   "reason": "refuses nothing: the census matches 'max' in the name maxk; the line names or documents maxk and mink, which take the k largest or smallest elements, not a limit on a computation"
  },
- "lib/_matlab_data.py :: _topk.f :: sargs = [float(axis + 1), _m.Char(\"descend\" if which == \"maxk\" else \"ascend\")] + [o if not isinstance(o, str) else _m.Char(o) for o in opts] #0": {
+ "lib/_matlab_data.py :: _topk.f :: sargs = [float(axis + 1), _m.Char(\"descend\" if which == \"maxk\" else \"ascend\"), _m.Char(\"MissingPlacement\"), _m.Char(\"last\")] #0": {
   "class": "none",
   "owner": "matlab (@sagebrush-matlab)",
   "reason": "refuses nothing: the census matches 'max' in the name maxk; the line names or documents maxk and mink, which take the k largest or smallest elements, not a limit on a computation"

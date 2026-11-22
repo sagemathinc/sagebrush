@@ -702,7 +702,7 @@ def _topk(which):
     def f(nargout, A, k, *args):
         """[B, I] = maxk(A, k, dim, 'ComparisonMethod', c): the k largest (mink: smallest) elements along dim, in order,
         equal elements in their order in A; k past the dimension's length sorts it all (MATLAB's maxk page); by
-        sort's order: sort(A, dim, 'descend') and its first k"""
+        sort's order with NaN last: sort(A, dim, 'descend', 'MissingPlacement', 'last') and its first k"""
         if _istext(k) or _m._numel(k) != 1:
             raise _err("%s: k must be a nonnegative integer scalar." % which)
         kv = _scalar(k)
@@ -720,7 +720,10 @@ def _topk(which):
             opts += ["ComparisonMethod", args.pop(0)]
         M = _md(A)
         axis = _first_dim(M.shape) if dim is None else _dim_value(dim)
-        sargs = [float(axis + 1), _m.Char("descend" if which == "maxk" else "ascend")] + [o if not isinstance(o, str) else _m.Char(o) for o in opts]
+        # (NaN last in both, observed MATLAB R2026b, 2026-11-21: maxk([1 NaN 3], 2) is [3 1], where a descending sort
+        # puts NaN first)
+        sargs = [float(axis + 1), _m.Char("descend" if which == "maxk" else "ascend"), _m.Char("MissingPlacement"), _m.Char("last")]
+        sargs += [o if not isinstance(o, str) else _m.Char(o) for o in opts]
         S, I = _m._B["sort"].f(2, A, *sargs)
         SM, IM = np.transpose(_m._arr(S)), np.transpose(_m._farr(I))
         while SM.ndim <= axis:
@@ -824,19 +827,19 @@ _DELIMS = {"comma": ",", ",": ",", "space": " ", " ": " ", "tab": "\t", "\\t": "
 
 
 def _wm_number(v, fmt):
-    """one number as writematrix writes it: long g (15 significant digits; single 7), NaN an empty field"""
+    """one number as writematrix writes it: long g (15 significant digits; single 7), and NaN, Inf, -Inf and -0 as
+    written, observed MATLAB R2026b, 2026-11-21 (writematrix([-0 NaN]) writes -0,NaN), not NaN as an empty field"""
     if v != v:
-        return ""
+        return "NaN"
     if v in (_math.inf, -_math.inf):
         return "Inf" if v > 0 else "-Inf"
-    s = fmt % v
-    return "0" if s == "-0" else s
+    return fmt % v
 
 
 @_bs("writematrix")
 def writematrix_(A, *args):
     """writematrix(A, filename, 'Delimiter', d, 'WriteMode', m, 'FileType', 'text'): a delimited text file (.txt, .dat
-    or .csv; no extension adds .txt), comma-separated by default, numbers in long g format and NaN as an empty field,
+    or .csv; no extension adds .txt), comma-separated by default, numbers in long g format (NaN and -0 as written),
     an N-d array's trailing dimensions collapsed into columns (MATLAB's writematrix page)"""
     import os
     args = list(args)
@@ -874,10 +877,12 @@ def writematrix_(A, *args):
         raise _err("writematrix: complex values are not supported in Sagebrush.")
     if M.ndim > 2:
         # (column-major: A(:, :, 1)'s columns, then A(:, :, 2)'s, ...; the trailing axes reversed, then row-major)
-        M = np.transpose(M, [0] + list(range(M.ndim - 1, 0, -1))).reshape((M.shape[0], -1))
+        # (the column count written out: an empty array's -1 has nothing to infer it from)
+        M = np.transpose(M, [0] + list(range(M.ndim - 1, 0, -1))).reshape((M.shape[0], _m._prod(M.shape[1:])))
     fmt = "%.7g" if cls == "single" else ("%d" if cls.startswith(("int", "uint")) or cls == "logical" else "%.15g")
     d = "," if delim is None else delim
-    text = "".join(d.join(_wm_number(float(v), fmt) for v in row) + "\n" for row in M)
+    # (an empty array, of no rows or no columns, is an empty file)
+    text = "".join(d.join(_wm_number(float(v), fmt) for v in row) + "\n" for row in M) if M.size else ""
     try:
         with open(fname, "a" if mode == "append" else "w") as fh:
             fh.write(text)

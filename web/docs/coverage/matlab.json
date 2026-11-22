@@ -95,8 +95,8 @@
     },
     {
       "id": "numerical",
-      "title": "Integration, interpolation, polynomials and differential equations",
-      "catalog": { "files": [], "tags": ["integration", "interpolation", "polynomials", "differential equations", "numbers"] },
+      "title": "Integration, interpolation, polynomials, differential equations and vector calculus",
+      "catalog": { "files": [], "tags": ["integration", "interpolation", "polynomials", "differential equations", "numbers", "calculus"] },
       "suites": ["matlab-tests/test_funfun.m", "matlab-tests/test_ode.m", "matlab-tests/test_polyinterp.m"],
       "search": "integral interp1 ode45"
     },
