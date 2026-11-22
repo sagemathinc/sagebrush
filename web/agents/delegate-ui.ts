@@ -57,6 +57,8 @@ export type DelegateHost = {
   /** the task view shown (true) or gone (false): the page hides or shows its chat */
   shown: (on: boolean) => void;
   site: URL;
+  /** the LaTeX page module, where this page has the LaTeX editor: a proposal's .tex shown rendered (none: its diff only) */
+  latex?: (() => Promise<any>) | null;
   toast: (text: string, ms?: number) => void;
 };
 
@@ -198,7 +200,7 @@ export function mountDelegate(h: DelegateHost) {
     const mod = (await import(new URL("sagebrush-review.js", h.site).href)) as typeof import("../workspace/review/review-page");
     if (!dlg.isConnected) return;
     const actions = el("p", { className: "st", textContent: T.laterActions });
-    pv = mod.openProposal(D.source(id, commit), panel, { notebook: () => import(new URL("sagebrush-notebook.js", h.site).href), actions });
+    pv = mod.openProposal(D.source(id, commit), panel, { notebook: () => import(new URL("sagebrush-notebook.js", h.site).href), latex: h.latex ?? null, actions });
   }
 
   function render() {

@@ -1,11 +1,14 @@
 // ci: web-artifacts.1 order=30 runner=bun chrome
+// ci: web-artifacts.2 order=20 runner=bun chrome env=AGENTS_LATEX=1
 // Delegate on the Agents page (Pair and Delegate plan, UI-3), end to end in headless Chromium: the built page
 // (SAGEBRUSH_AGENTS=1), served by web/serve.py, paired as a person pairs it (a ?pair= link, Connect, the grant dialog)
 // with the stand-in Delegate host (test-delegate-host.mjs). What it shows: nothing of Delegate until the agent offers
 // it; the switch on only after its confirmation, and the host told; the Tasks list with chips; a task's view (its
 // thread, its proposal's card) in place of the chat, and back; the proposal view from the host, each file checked;
 // Delegate… (the sheet: the composer's text, the documents, May run code) and Start; the switch off, with the running
-// tasks closed first when ticked, Delegate… disabled while it turns off, then the host told.
+// tasks closed first when ticked, Delegate… disabled while it turns off, then the host told. A proposal's .tex: its
+// diff, and (AGENTS_LATEX=1, the LaTeX test build) the document rendered read only beside Before; without the LaTeX
+// editor on this host, its diff only.
 //   SAGEBRUSH_AGENTS=1 bun web/build.ts && CHROME=google-chrome bun web/agents/test-agents-delegate.mjs
 import { spawn } from "node:child_process";
 import { writeFileSync } from "node:fs";
@@ -101,6 +104,32 @@ try {
   await P.ev(`document.querySelector('#task-view .task-head .link').click()`);
   u = await ui();
   ok(!u.view && u.log, "Back to chats: the chat shown again", u);
+
+  // ---- a proposal's .tex: its diff, and the document rendered (the LaTeX page module's read-only preview), As proposed
+  //  and Before; on a host without the LaTeX editor, its diff only
+  const TEX0 = "\\documentclass{article}\n\\begin{document}\n\\section{Introduction}\nHello.\n\\end{document}\n";
+  const C = await H.addTask({ title: "Add a results section", status: "proposal", base: { "work/paper.tex": TEX0 }, proposal: { "work/paper.tex": TEX0.replace("\\end{document}", "\\section{Results}\nIt works.\n\\end{document}") } });
+  await P.until(`!!document.querySelector('#tasks .task[data-task="${C.task}"]')`);
+  await P.ev(`document.querySelector('#tasks .task[data-task="${C.task}"]').click()`);
+  await P.until(`!!document.querySelector('#task-view .proposal-card')`);
+  await P.ev(`document.querySelector('#task-view .proposal-card').click()`);
+  await P.until(`!!document.querySelector('dialog.proposal[open] .sbpv pre.diff')`, 20000);
+  const latexHere = process.env.AGENTS_LATEX === "1";
+  if (latexHere) {
+    const drawn = await P.until(`/Results/.test(document.querySelector('dialog.proposal[open] .tex-rendered .tex-preview')?.textContent ?? '')`, 60000);
+    await shot("4b-proposal-tex");
+    const tv = await P.ev(`(() => { const r = document.querySelector('dialog.proposal[open] .tex-rendered'); const run = r?.querySelector('.tex-run'); return { buttons: [...r.querySelectorAll(':scope > p button')].map((b) => b.textContent + ":" + b.getAttribute('aria-pressed')), plus: [...document.querySelectorAll('dialog.proposal[open] .l\\\\+')].map((x) => x.textContent), run: !!run && !run.hidden && !!run.offsetParent, typing: [...r.querySelectorAll('textarea')].filter((t) => !t.readOnly && t.offsetParent).length }; })()`);
+    ok(drawn && tv.plus.includes("+ \\section{Results}") && JSON.stringify(tv.buttons) === JSON.stringify(["As proposed:true", "Before:false"]), "a proposal's .tex: its line diff, and the document as proposed rendered under it (its new section), Before offered", { drawn, tv });
+    ok(!tv.run && tv.typing === 0, "the rendered document is read only: no Run, nothing to type in", tv);
+    await P.ev(`[...document.querySelectorAll('dialog.proposal[open] .tex-rendered button')].find((b) => b.textContent === 'Before').click()`);
+    const before = await P.until(`(() => { const t = document.querySelector('dialog.proposal[open] .tex-rendered .tex-preview')?.textContent ?? ''; return /Introduction/.test(t) && !/Results/.test(t); })()`, 60000);
+    ok(before, "Before: the document as it was rendered in its place (no Results section)");
+  } else {
+    await sleep(500);
+    ok(await P.ev(`!document.querySelector('dialog.proposal[open] .tex-rendered') && !document.querySelector('dialog.proposal[open] .file .msg')`), "a proposal's .tex where this host has no LaTeX editor: its diff only, nothing said");
+  }
+  await P.ev(`document.querySelector('dialog.proposal[open] .x').click()`);
+  await P.ev(`document.querySelector('#task-view .task-head .link').click()`);
 
   // ---- Delegate…: the sheet, from the composer's text and the documents; Start
   await H.call("workspace.create", { path: "/work/notes.txt", content: { text: "alpha\n" } });
