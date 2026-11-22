@@ -119,10 +119,11 @@ const CSS = `
 [data-sbag-inline] > .sbag-bar.docked > button:not(.chip), [data-sbag-inline] > .sbag-bar.docked .made-slot > button { flex: none; white-space: nowrap; }
 /* (A1: in a composer's footer row, an icon; its words for a screen reader and its title) */
 .sbag-bar .ico{display:none}
-[data-sbag-footer]{display:inline-flex;align-items:center}
-[data-sbag-footer]>.sbag-bar.docked{margin:0;padding:0;background:none;border:0;box-shadow:none}
+[data-sbag-footer]{display:inline-flex;align-items:center;min-width:0;flex:0 1 auto}
+[data-sbag-footer]>.sbag-bar.docked{margin:0;padding:0;background:none;border:0;box-shadow:none;flex-wrap:nowrap;min-width:0;max-width:100%}
+[data-sbag-footer] .made{max-width:min(480px,45vw);overflow:hidden}
 [data-sbag-footer] .chip{padding:2px 5px;border-radius:8px}
-[data-sbag-footer] .ico{display:block;width:16px;height:16px;background:#4f8a3c;mask:url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 24 24' fill='none' stroke='%23000' stroke-width='2' stroke-linejoin='round' stroke-linecap='round'%3E%3Cpath d='M12 3l7 3v5c0 4.5-3 8.4-7 10-4-1.6-7-5.5-7-10V6z'/%3E%3Cpath d='M9 12l2 2 4-4'/%3E%3C/svg%3E") center/contain no-repeat}
+[data-sbag-footer] .ico{display:block;flex:none;width:16px;height:16px;background:#4f8a3c;mask:url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 24 24' fill='none' stroke='%23000' stroke-width='2' stroke-linejoin='round' stroke-linecap='round'%3E%3Cpath d='M12 3l7 3v5c0 4.5-3 8.4-7 10-4-1.6-7-5.5-7-10V6z'/%3E%3Cpath d='M9 12l2 2 4-4'/%3E%3C/svg%3E") center/contain no-repeat}
 [data-sbag-footer] .chip>.dot,[data-sbag-footer] .chip>.arr{display:none}
 [data-sbag-footer] .chip>.words{position:absolute;width:1px;height:1px;overflow:hidden;clip:rect(0 0 0 0)}
 .sbag-bar button { font: inherit; border: 0; border-radius: 12px; padding: 3px 10px; background: #fff; color: #24231f; cursor: pointer; }

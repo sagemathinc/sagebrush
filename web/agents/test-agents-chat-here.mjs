@@ -177,19 +177,32 @@ try {
     return { inRow: !!b?.parentElement?.matches('.composer .row > [data-sbag-footer]'), first: b?.parentElement === document.querySelector('.composer .row').firstElementChild,
       w: Math.round(r?.width ?? 0), h: Math.round(r?.height ?? 0), ico: !!ico && ico.getBoundingClientRect().width === 16 && getComputedStyle(ico).maskImage.startsWith('url('),
       wordsW: Math.round(words?.getBoundingClientRect().width ?? -1), words: words?.textContent ?? '', title: chip?.title ?? '',
-      above: !document.querySelector('.composer-wrap > [data-sbag-slot]') };
+      above: (() => { const f = document.querySelector('.composer-wrap > [data-sbag-slot]'); return !!f && f.childElementCount === 0 && f.getBoundingClientRect().height === 0; })() };
   })()`);
-  ok(foot.inRow && foot.first && foot.above && foot.ico && foot.w <= 32 && foot.h <= 28 && foot.wordsW <= 1 && /^Claude · /.test(foot.words) && /^Claude on laptop: /.test(foot.title), "A1: the agent's access is a small icon at the start of the composer's footer row (no box above the composer); its words kept for a screen reader and as its title", foot);
+  ok(foot.inRow && foot.first && foot.above && foot.ico && foot.w <= 32 && foot.h <= 28 && foot.wordsW <= 1 && /^Claude · /.test(foot.words) && /^Claude on laptop: /.test(foot.title), "A1: the agent's access is a small icon at the start of the composer's footer row (the row above the composer empty, of no height); its words kept for a screen reader and as its title", foot);
   await ev(`document.querySelector('.sbag-bar button.chip').click()`);
   await until(`document.querySelector('.sbag-bar').classList.contains('open')`, 3000);
   const menu = await ev(`(() => { const m = document.querySelector('.sbag-bar .menu').getBoundingClientRect(), c = document.querySelector('.sbag-bar button.chip').getBoundingClientRect();
     return { items: [...document.querySelectorAll('.sbag-bar .menu [role=menuitem]')].map((b) => b.textContent), full: document.querySelector('.sbag-bar .menu .full').textContent,
-      above: m.bottom <= c.top, inside: m.left >= 0 && m.right <= innerWidth && m.top >= 0, focus: document.activeElement?.textContent }; })()`);
+      above: m.bottom <= c.top, inside: m.left >= 0 && m.right <= innerWidth && m.top >= 0 && m.bottom <= innerHeight, focus: document.activeElement?.textContent }; })()`);
   ok(menu.items.includes("Disconnect") && /^Claude on laptop: /.test(menu.full) && menu.above && menu.inside && menu.focus === menu.items[0], "A1: a click on the icon opens its menu above it, inside the window: the whole access sentence and its controls, the first focused", menu);
   if (process.env.SHOTS) { const r = await send("Page.captureScreenshot", { format: "png" }); (await import("node:fs")).writeFileSync(process.env.SHOTS + "/a1-menu.png", Buffer.from(r.result.data, "base64")); }
   await ev(`document.querySelector('.sbag-bar .menu [role=menuitem]').dispatchEvent(new KeyboardEvent('keydown', { key: 'Escape', bubbles: true }))`);
   ok(await until(`!document.querySelector('.sbag-bar').classList.contains('open') && document.activeElement === document.querySelector('.sbag-bar button.chip')`, 3000), "A1: Escape closes it, back on the icon");
   if (process.env.SHOTS) { const r = await send("Page.captureScreenshot", { format: "png" }); (await import("node:fs")).writeFileSync(process.env.SHOTS + "/a1-footer.png", Buffer.from(r.result.data, "base64")); }
+  // (by keyboard: ArrowDown on the icon opens the menu on its first control; Escape closes it back on the icon)
+  await ev(`(() => { const c = document.querySelector('.sbag-bar button.chip'); c.focus(); c.dispatchEvent(new KeyboardEvent('keydown', { key: 'ArrowDown', bubbles: true })); return true; })()`);
+  const kb = await until(`document.querySelector('.sbag-bar').classList.contains('open') && document.activeElement?.getAttribute('role') === 'menuitem'`, 3000);
+  await ev(`document.activeElement.dispatchEvent(new KeyboardEvent('keydown', { key: 'Escape', bubbles: true }))`);
+  ok(kb && await until(`!document.querySelector('.sbag-bar').classList.contains('open')`, 3000), "A1: by keyboard too: ArrowDown on the icon opens its menu on the first control, Escape closes it");
+  // (a phone's width: the icon stays in the row, inside the composer, and Send stays in view)
+  await send("Emulation.setDeviceMetricsOverride", { width: 390, height: 800, deviceScaleFactor: 1, mobile: true });
+  await sleep(300);
+  const phone = await ev(`(() => { const c = document.querySelector('.composer').getBoundingClientRect(), i = document.querySelector('.sbag-bar button.chip').getBoundingClientRect(), s = document.querySelector('#send').getBoundingClientRect();
+    return { icon: i.width > 0 && i.left >= c.left && i.right <= c.right, send: s.width > 0 && s.right <= innerWidth && s.left >= 0 }; })()`);
+  ok(phone.icon && phone.send, "A1: at a phone's width the icon stays inside the composer's row, and Send stays in view", phone);
+  await send("Emulation.clearDeviceMetricsOverride");
+  await sleep(300);
   const title = await ev(`[...document.querySelectorAll('.sbag-bar button')].find((b) => b.textContent === 'Disconnect')?.title ?? null`);
   ok(title === "Disconnect and stop the agent on laptop", "the bar's Disconnect: \"Disconnect and stop the agent on laptop\"", title);
 
