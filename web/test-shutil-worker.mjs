@@ -88,8 +88,6 @@ const start = (name, dir, writable, files = []) => ev(`(() => {
     const m = e.data;
     if (m?.fsChanged !== undefined) s.changed.push(m.fsChanged);
     if (m?.fsRefused !== undefined) s.refused.push(m.fsRefused);
-    // (a refused change the run would wait on (web/worker.ts fsAsk): refused, as a page answers it no)
-    if (m?.fsAsk !== undefined) { s.refused.push(m.fsAsk.path); const c = new Int32Array(m.buffer, 0, 2); Atomics.store(c, 0, 2); Atomics.notify(c, 0); }
     const r = s.runs.get(m?.id);
     if (!r) return;
     if (m.stream) r.out[m.stream] += m.text;

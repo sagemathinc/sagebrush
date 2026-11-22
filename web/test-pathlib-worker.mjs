@@ -66,8 +66,6 @@ const runIn = (dir, writable, code, files = []) => ev(`new Promise((res) => {
   w.onmessage = (e) => {
     const m = e.data;
     if (m?.fsRefused !== undefined) out.refused.push(m.fsRefused);
-    // (a refused change the run would wait on (web/worker.ts fsAsk): refused, as a page answers it no)
-    if (m?.fsAsk !== undefined) { out.refused.push(m.fsAsk.path); const c = new Int32Array(m.buffer, 0, 2); Atomics.store(c, 0, 2); Atomics.notify(c, 0); }
     if (m?.id !== 1) return;
     if (m.stream) out[m.stream] += m.text;
     if (m.done) { clearTimeout(t); w.terminate(); res({ ...out, error: m.error ?? null }); }

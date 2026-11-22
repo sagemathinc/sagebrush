@@ -8,7 +8,9 @@
 //   - a stale answer (an old epoch), a torn one (the word's epoch not the policy's), one for another key, and Stop while
 //     it waits: the change refused, nothing written;
 //   - the control: a widened policy posted the ordinary way ({fsWrite}) while the run waits reaches nothing (the run
-//     stays blocked, nothing written) until the request is answered, here with no: refused.
+//     stays blocked, nothing written) until the request is answered, here with no: refused;
+//   - a holder that never said it answers ({fsAskable}: an agent's run, say): no request, the change refused at once and
+//     reported ({fsRefused}), as before the design.
 //   node web/test-app-engine-ask.mjs [DIR]     DIR: the worker's folder (default web/dist, from bun web/build.ts)
 import { spawn } from "node:child_process";
 import { join } from "node:path";
@@ -52,7 +54,7 @@ const POLICY = (epoch) => ({ epoch, state: "scoped", trees: ["/ok", "/x.txt"] })
 
 // One case: a fresh engine whose interpreter may change /ok only (epoch 1); the cell writes /x.txt, and `answer(e, ask)`
 // does what the page would with its {fsAsk}. What the run printed, and whether /x.txt reached the page.
-async function run(answer) {
+async function run(answer, askable = true) {
   const e = engine();
   const from = (test) => (m) => m.from === "nb1" && test(m.m);
   try {
@@ -61,8 +63,16 @@ async function run(answer) {
     e.send({ open: "nb1", name: "" });
     e.send({ to: "nb1", m: { init: { limits: null } } });
     e.send({ to: "nb1", m: { fsWrite: { epoch: 1, state: "scoped", trees: ["/ok"] } } });
+    if (askable) e.send({ to: "nb1", m: { fsAskable: true } });
     await e.wait(from((m) => m.ready), 60000, "ready");
     e.send({ to: "nb1", m: { id: 1, code: CODE } });
+    if (!askable) {
+      await e.wait(from((m) => m.id === 1 && m.done), 60000, "the run's end");
+      const text = e.msgs.filter((x) => x.from === "nb1" && x.m.id === 1 && x.m.stream).map((x) => x.m.text).join("").trim();
+      const asked = e.msgs.some((x) => x.from === "nb1" && x.m.fsAsk !== undefined);
+      const refused = e.msgs.find((x) => x.from === "nb1" && x.m.fsRefused !== undefined)?.m.fsRefused ?? null;
+      return { text, asked, refused };
+    }
     const ask = (await e.wait(from((m) => m.fsAsk !== undefined), 60000, "the request")).m;
     const extra = await answer(e, ask);
     await e.wait(from((m) => m.id === 1 && m.done), 60000, "the run's end");
@@ -95,6 +105,9 @@ try {
     reply(e, m.fsAsk.key, null, null);
     return { during };
   });
+  // (no {fsAskable}: refused at once, and reported)
+  const n = await run(null, false);
+  ok(n.text === "refused" && !n.asked && n.refused === "/x.txt", `a holder that never said it answers: no request, refused at once and reported (${JSON.stringify(n)})`);
   ok(!c.during && c.text === "refused" && !c.told, `the control: a policy posted as {fsWrite} while the run waits reaches nothing (blocked: ${!c.during}); answered no: refused (${c.text})`);
 } catch (e) {
   ok(false, String(e?.stack ?? e));

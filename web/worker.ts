@@ -6,6 +6,7 @@
 // Also in:  {files: [[path, bytes]]}   the page's saved files, as the worker starts
 //           {fsPut: path, data, tok?}  a file uploaded (data) or deleted (null) in the page (tok: its version's, the journal's)
 //           {fsWrite: {epoch, state, trees}}  what this document may change (confinement phase 2: below)
+//           {fsAskable: true}          the page answers a change a run waits on ({fsAsk} below); else refused at once
 //           {mount: [[path, {url, sha256, size}]]}  a shared collection's files,
 //                                       fetched when Python first reads them (web/shims/fs.ts)
 //           {init: {limits}}          the engine's limits (src/limits.ts), the
@@ -172,12 +173,12 @@ __hooks.refused = (path, what, why) => postMessage({ fsRefused: path, what, why 
 // and the shared word holds exactly its epoch (a torn or stale answer: no). Anything else, end of input, or a Stop:
 // not allowed. One request at a time, and only from a run, whose id it carries (the page answers only a request of the
 // run in flight, never one of a run stopped or over); none without shared memory or outside a run (the refusal and the
-// prompt go on as before).
+// prompt go on as before), nor before the holder says it answers them ({fsAskable: true}: the notebook page only).
 const ASK_MAX = 96 * 1024;
 const ASK_TAG = Math.random().toString(36).slice(2, 10);
-let askCount = 0, asking = false, askRun: number | null = null;
+let askCount = 0, asking = false, askRun: number | null = null, askable = false;
 __hooks.ask = (path, what) => {
-  if (!epochWord || !policySet || asking || askRun === null || !(R.INTR.buffer instanceof SharedArrayBuffer)) return "unavailable";
+  if (!askable || !epochWord || !policySet || asking || askRun === null || !(R.INTR.buffer instanceof SharedArrayBuffer)) return "unavailable";
   asking = true;
   try {
     const buffer = new SharedArrayBuffer(8 + ASK_MAX);
@@ -359,6 +360,12 @@ self.onmessage = async (ev: MessageEvent) => {
   }
   // (the older form, {fsWritable: boolean}, still sent where nothing is scoped (the LaTeX editor's Run keeps its session
   // read-only with it): a policy of off or on, at the next epoch, taken as {fsWrite} is)
+  // (the page can answer a change a run waits on (the notebook page's prompt): asked only once it says so; any other
+  // holder (an agent's run, the LaTeX editor's) never answers one, and its refusals go on as before, at once)
+  if (m.fsAskable === true) {
+    askable = true;
+    return;
+  }
   if (typeof m.fsWritable === "boolean") {
     const next = Math.max(held?.epoch ?? 0, pending?.epoch ?? 0, epochWord ? Atomics.load(epochWord, 0) : delivered) + 1;
     m = { fsWrite: { epoch: next, state: m.fsWritable ? "on" : "off", trees: m.fsWritable ? ["/"] : [] } };

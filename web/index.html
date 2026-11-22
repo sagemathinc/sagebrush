@@ -1142,6 +1142,9 @@ function makeKernel(owner) {
       epoch = 1;
       sentTrees = cap;
       if (!LOCAL) w.postMessage({ fsWrite: { epoch, state: stateOf(cap), trees: cap } });
+      // (this page answers a change a run waits on, with its prompt (the write-wait design): the interpreter asks only once
+      // told so; the tests' refuse-at-once switch (ASK_WAIT) keeps it from asking at all)
+      if (!LOCAL && owner !== null && ASK_WAIT) w.postMessage({ fsAskable: true });
       // (its own folder: the working folder and sys.path[0], as Jupyter runs a notebook, so it opens and imports the
       // files beside it (Nov 4 ruling); read at each start, so a rename or a move takes effect at the next one. A
       // notebook kept only in this browser, as a link (?open=) opens one, is in no folder: it starts at the top of the
