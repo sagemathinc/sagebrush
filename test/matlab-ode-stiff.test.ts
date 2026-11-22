@@ -262,3 +262,20 @@ test("a singular Newton matrix at the starting step: the step shrinks and the ze
   assert.equal(r.status, 0, r.err);
   assert.equal(r.out, "0 118.5 0 118.5\n0 118.5 0 118.5\n");
 });
+
+test("a complex Mass or Jacobian is refused, never its real part; real, singular and nonsymmetric ones work", () => {
+  const r = run([
+    "for s = {@ode15s, @ode23s}",
+    "  try, s{1}(@(t, y) -y, [0 1], 1, odeset('Mass', 1 + 1i)), catch e, disp(e.message), end",
+    "  try, s{1}(@(t, y) -y, [0 1], 1, odeset('Jacobian', -1i)), catch e, disp(e.message), end",
+    "  try, s{1}(@(t, y) -y, [0 1], 1, odeset('Jacobian', @(t, y) -1 + 1i)), catch e, disp(e.message), end",
+    "  [~, y] = s{1}(@(t, y) [-y(1) + y(2); -2*y(2)], [0 1], [1; 1], odeset('Mass', [2 1; 0 1], 'Jacobian', [-1 1; 0 -2]));",
+    "  fprintf('%d\\n', all(isfinite(y(:))) && isreal(y))",
+    "end",
+  ].join("\n"));
+  assert.equal(r.status, 0, r.err);
+  const block = (name: string) => `${name}: The mass matrix is complex: complex values are not supported in Sagebrush.\n` +
+    `${name}: The Jacobian is complex: complex values are not supported in Sagebrush.\n` +
+    `${name}: The Jacobian is complex: complex values are not supported in Sagebrush.\n1\n`;
+  assert.equal(r.out, block("ode15s") + block("ode23s"));
+});

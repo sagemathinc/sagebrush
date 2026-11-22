@@ -62,6 +62,19 @@ def interp(solver, step, s):
     return y, yp / h
 
 
+def _real_matrix(v, solver, what):
+    """a real numeric matrix in MATLAB's orientation; complex values are refused, never their real part (the
+    solvers integrate real systems)"""
+    if _m._istext(v) or not _m._isnumlike(v):
+        raise _err("%s: %s must be a numeric matrix." % (solver, what.lower()))
+    A = np.array(_m._farr(v)).T
+    if np.iscomplexobj(A):
+        if np.any(A.imag != 0):
+            raise _err("%s: %s is complex: complex values are not supported in Sagebrush." % (solver, what))
+        A = A.real
+    return A.astype(float)
+
+
 def _solve(solver, nargout, args):
     if len(args) < 3:
         raise _err("Not enough input arguments.")
@@ -115,7 +128,7 @@ def _solve(solver, nargout, args):
     Mv = o("Mass")
     if Mv is not None and _m._iscallable(Mv):
         raise _err("%s: a mass matrix function is not supported in Sagebrush: give a constant matrix." % solver)
-    M = np.eye(n) if Mv is None else np.array(_m._farr(Mv)).T.astype(float)
+    M = np.eye(n) if Mv is None else _real_matrix(Mv, solver, "The mass matrix")
     if M.shape != (n, n):
         raise _err("%s: the mass matrix must be %d by %d." % (solver, n, n))
     events = o("Events")
@@ -143,7 +156,10 @@ def _solve(solver, nargout, args):
         njac[0] += 1
         if jopt is not None:
             Jm = _m._call(jopt, [float(t), _m._unmat(y.reshape((-1, 1)))]) if _m._iscallable(jopt) else jopt
-            return np.array(_m._farr(Jm)).T.astype(float).reshape((n, n))
+            J = _real_matrix(Jm, solver, "The Jacobian")
+            if J.shape != (n, n):
+                raise _err("%s: the Jacobian must be %d by %d." % (solver, n, n))
+            return J
         J = np.zeros((n, n))
         for j in range(n):
             hj = _math.sqrt(_EPS) * max(abs(y[j]), atol[j] / rtol if rtol > 0 else 1.0, 1e-8)

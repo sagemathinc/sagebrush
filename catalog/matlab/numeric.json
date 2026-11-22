@@ -320,7 +320,8 @@
     ],
     "differs": [
       "A mass matrix that depends on t or y, and the NonNegative, Vectorized, JPattern, MvPattern, InitialSlope and OutputFcn options, are refused.",
-      "The steps, order changes and statistics are Sagebrush's own: the solution agrees with MATLAB's within the tolerances, the step points of a two-element tspan do not."
+      "The steps, order changes and statistics are Sagebrush's own: the solution agrees with MATLAB's within the tolerances, the step points of a two-element tspan do not.",
+      "Complex systems are not supported: a complex y0, f, Mass or Jacobian is refused with an error."
     ],
     "status": "partial",
     "see_also": [
@@ -347,7 +348,8 @@
     ],
     "differs": [
       "A mass matrix that depends on t or y, and the NonNegative, Vectorized, JPattern, MvPattern and OutputFcn options, are refused.",
-      "The steps and statistics are Sagebrush's own; the solution agrees with MATLAB's within the tolerances."
+      "The steps and statistics are Sagebrush's own; the solution agrees with MATLAB's within the tolerances.",
+      "Complex systems are not supported: a complex y0, f, Mass or Jacobian is refused with an error."
     ],
     "status": "partial",
     "see_also": [
