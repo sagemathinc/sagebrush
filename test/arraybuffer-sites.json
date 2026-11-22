@@ -1730,6 +1730,7 @@
   "a0cd55ebb3e4f62e": {"decl":"src/runtime/numpy_fft.ts :: twiddle","class":"allocates","via":"lib:lib.es5.d.ts :: Float64ArrayConstructor.new(source)"},
   "35aeb47546da103f": {"decl":"src/runtime/numpy_linalg.ts :: F64","class":"allocates","via":"src/runtime/numpy.ts :: toDtype"},
   "40341d4ae1779db9": {"decl":"src/runtime/numpy_linalg.ts :: balance","class":"allocates","via":"lib:lib.es2015.iterable.d.ts :: Float64ArrayConstructor.from"},
+  "b4e1ad5b1595accc": {"decl":"src/runtime/numpy_linalg.ts :: cholUpper","class":"allocates","via":"lib:lib.es5.d.ts :: Float64ArrayConstructor.new(source)"},
   "fee5417cfa4b61db": {"decl":"src/runtime/numpy_linalg.ts :: complete","class":"allocates","via":"lib:lib.es5.d.ts :: Float64ArrayConstructor.new(source)"},
   "0167c9521d64c0d2": {"decl":"src/runtime/numpy_linalg.ts :: detLU","class":"allocates","via":"web/worker.ts :: obligation: ... ( sources . size ? { sources : [ ... sources ] } : { } ) #0"},
   "b2145e7afffbd09e": {"decl":"src/runtime/numpy_linalg.ts :: eigNormalize","class":"allocates","via":"lib:lib.es2015.iterable.d.ts :: Float64ArrayConstructor.from"},
