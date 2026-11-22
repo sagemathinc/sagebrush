@@ -34,6 +34,10 @@
     "allow-settings-write",
     "allow-app-quit-hold",
     "allow-app-quit-now",
+    "allow-agent-status",
+    "allow-agent-connect",
+    "allow-agent-pair-code",
+    "allow-agent-disconnect",
     "core:default",
     "core:window:allow-set-title"
   ],

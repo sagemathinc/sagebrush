@@ -46,7 +46,7 @@
 //
 //   node app/selftest/run.mjs <the app's executable>
 import { spawn } from "node:child_process";
-import { mkdtempSync, copyFileSync, existsSync, writeFileSync, readFileSync, chmodSync } from "node:fs";
+import { mkdtempSync, copyFileSync, existsSync, writeFileSync, readFileSync, readdirSync, chmodSync } from "node:fs";
 import { createServer } from "node:net";
 import { createServer as httpCreateServer } from "node:http";
 import { fileURLToPath } from "node:url";
@@ -215,6 +215,59 @@ if (passed) {
     const topReached = c.reached.some((s) => s.startsWith("top: REACHED"));
     const why = control === "open" ? c.topLoaded && !c.reached.length : c.topLoaded && topReached;
     console.log(why ? `the control ${control === "open" ? "showed the exact-origin grant holding on its own" : "failed, for its reason, as it must: the other origin's page reached the commands"}` : `FAIL the control didn't show its reason (${control === "open" ? "the other origin's page loaded, refused the commands" : "the other origin's page loaded and reached the commands"}): ${c.line}`);
+    passed &&= why;
+  }
+}
+// The agents page in the app (web/agents/app-selftest.ts; design/app-agent-host.md, step 1): the app starts on
+// /agents/ with a pairing link in its address (?pair=CODE&port=N and a #pair= fragment), port N being a listener of
+// this test's. The page must drop the link, open no connection but to its own files (no WebSocket, no other origin),
+// show Connect Claude as "Not in this build yet", and have agent_connect refused from itself and from an output frame.
+// Besides, the app's server must never be asked for the chunks that hold the site's pairing, Chat here and the
+// computer relay (found in app/dist/agents by text only they contain), and the listener must see no connection. The
+// control (SAGEBRUSH_APP_AGENTS_CONTROL=off-app): the same page off the app's mode, where the site's pairing takes
+// the link and connects to port N: the check must fail, for that reason.
+function agentsChunks() {
+  const dir = fileURLToPath(new URL("../dist/agents", here));
+  const marks = { pairing: "Remember this agent (reconnect without a new code)", "chat here": "Or chat with an agent on one of your computers:", relay: "the computer refused the connection" };
+  const found = {};
+  for (const f of existsSync(dir) ? readdirSync(dir).filter((f) => /^agents-[A-Za-z0-9]+\.js$/.test(f)) : []) {
+    const t = readFileSync(join(dir, f), "utf8");
+    for (const [k, m] of Object.entries(marks)) if (t.includes(m)) found[k] = f;
+  }
+  return found;
+}
+async function agentsLaunch(control) {
+  const hits = [];
+  const listener = createServer((c) => { hits.push(Date.now()); c.destroy(); });
+  const port = await new Promise((ok) => listener.listen(0, "127.0.0.1", () => ok(listener.address().port)));
+  const code = "A".repeat(43);
+  const res = await launch({ SAGEBRUSH_APP_PERSIST: "agents:1", SAGEBRUSH_APP_START_PATH: `/agents/?pair=${code}&port=${port}#pair=${code}`, SAGEBRUSH_APP_DATA_DIR: mkdtempSync(join(tmpdir(), "sagebrush-app-data-")), ...(control ? { SAGEBRUSH_APP_AGENTS_CONTROL: control } : {}) }, control ? 60000 : 120000);
+  await new Promise((r) => setTimeout(r, 500));
+  listener.close();
+  const asked = [...res.err.matchAll(/\[localhost\] #\d+ url="([^"]*)"/g)].map((m) => m[1].replace(/[?#].*$/, ""));
+  const capped = /\[localhost\] cap reached/.test(res.err);
+  const line = persistLine(res);
+  console.log(`launch${control ? " (off the app's mode)" : ""}: ${line} (exit ${res.code})`);
+  console.log(`  the listener on ${port} saw ${hits.length} connection(s); the app's server was asked for ${asked.length} path(s)${capped ? " (its log's cap reached)" : ""}`);
+  return { line, code: res.code, hits: hits.length, asked, capped, port };
+}
+if (passed) {
+  console.log("\nthe agents page in the app: the pairing link dropped, no connection but its own files, Connect Claude unavailable");
+  const chunks = agentsChunks();
+  const missing = ["pairing", "chat here", "relay"].filter((k) => !chunks[k]);
+  if (missing.length) console.log(`FAIL app/dist/agents has no chunk of its own for: ${missing.join(", ")} (the page loads them with itself, or the marks changed)`);
+  const r = await agentsLaunch(null);
+  const fetched = Object.entries(chunks).filter(([, f]) => r.asked.includes(`/agents/${f}`)).map(([k, f]) => `${k} (${f})`);
+  if (fetched.length) console.log(`FAIL the app fetched what it never loads: ${fetched.join(", ")}`);
+  if (r.capped) console.log("FAIL the server's request log reached its cap: which chunks were fetched can't be told");
+  const good = !missing.length && r.code === 0 && /^ok persist: agents at /m.test(r.line) && r.hits === 0 && !fetched.length && !r.capped && r.asked.includes("/agents/agents.js");
+  console.log(good ? "the agents page in the app connects nowhere but the app's own commands" : "FAIL the agents page in the app (above)");
+  passed = good;
+  if (passed) {
+    console.log("\nthe control: the same, off the app's mode (the site's pairing takes the link: must fail, for that reason)");
+    const c = await agentsLaunch("off-app");
+    const why = c.hits > 0 || new RegExp(`ws ws://127\\.0\\.0\\.1:${c.port}`).test(c.line);
+    console.log(why ? "the control failed, for its reason, as it must: the site's pairing connected to the link's port" : `FAIL the control didn't fail for its reason (a connection to the link's port): ${c.line}`);
     passed &&= why;
   }
 }

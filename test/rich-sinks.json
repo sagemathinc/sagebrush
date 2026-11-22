@@ -114,6 +114,10 @@
   }
  },
  "sinks": {
+  "web/agents/app-selftest.ts :: on :: f.srcdoc = probe; #0": {
+   "kind": "host",
+   "owner": "host"
+  },
   "web/agents/page.ts :: keepFocus :: h.el.innerHTML = `<div class=\"file-path\">${esc(a.path)} <span class=\"saved\"></span> </div><div class=\"file-body\"></div>`; #0": {
    "kind": "host",
    "owner": "host"

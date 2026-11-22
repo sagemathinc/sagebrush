@@ -13,6 +13,7 @@ const fails = [];
 const ok = (c, what) => (console.log(`${c ? "ok  " : "FAIL"} ${what}`), c || fails.push(what));
 
 const FILES = ["agents.js", "connect.md", "connect/copy.js", "connect/index.html", "index.html"];
+const CHUNK = /^agents-[a-z0-9]+\.js$/; // (the script's split chunks: web/build.ts names them agents-[hash].js)
 // (a directory's files, as paths under it, sorted)
 const walk = (dir, rel = "") => existsSync(join(dir, rel)) ? readdirSync(join(dir, rel), { withFileTypes: true }).flatMap((e) => e.isDirectory() ? walk(dir, rel + e.name + "/") : [rel + e.name]).sort() : [];
 const dist = join(web, "dist", "agents");
@@ -113,8 +114,10 @@ ok(JSON.stringify(cmds) === JSON.stringify([`npx -y ${tgz}`, `SAGEBRUSH_AGENT_PA
   const marks = ["sb-agent-hello:", "sb-agent-permission/1"];
   const js = walk(join(web, "dist")).filter((f) => /\.(m?js|cjs)$/.test(f) && !f.startsWith("agents/"));
   const carriers = js.filter((f) => { const t = readFileSync(join(web, "dist", f), "utf8"); return marks.some((m) => t.includes(m)); });
-  const agents = existsSync(join(dist, "agents.js")) ? readFileSync(join(dist, "agents.js"), "utf8") : "";
-  ok(marks.every((m) => agents.includes(m)) && carriers.length === 0, `the agent leg and the canon are in agents.js only (${js.length} other scripts in dist checked; carrying them: ${JSON.stringify(carriers)})`);
+  // (agents.js and its split chunks, agents-<hash>.js, all under dist/agents: the app build leaves the site-only legs to chunks it never loads)
+  const own = existsSync(dist) ? readdirSync(dist).filter((f) => f === "agents.js" || CHUNK.test(f)) : [];
+  const agents = own.map((f) => readFileSync(join(dist, f), "utf8")).join("\n");
+  ok(marks.every((m) => agents.includes(m)) && carriers.length === 0, `the agent leg and the canon are in agents.js and its chunks only (${js.length} other scripts in dist checked; carrying them: ${JSON.stringify(carriers)})`);
 }
 // (and its policy reaches the relay's agent leg on the page's own origin through 'self' (CSP Level 3 matches ws:/wss:
 //  of the same host), with no wss: source of any other host added)
@@ -129,7 +132,9 @@ const site = join(web, "site");
 if (process.env.SAGEBRUSH_NO_SITE !== "1" && existsSync(site)) {
   const pub = join(site, "public", "agents");
   const have = walk(pub);
-  ok(JSON.stringify(have) === JSON.stringify(FILES), `the site serves exactly the pages and the script at /agents: ${JSON.stringify(have)}`);
+  const chunks = have.filter((f) => CHUNK.test(f));
+  ok(JSON.stringify(have.filter((f) => !CHUNK.test(f))) === JSON.stringify(FILES) && chunks.length > 0, `the site serves exactly the pages, the script and its chunks at /agents: ${JSON.stringify(have)}`);
+  ok(JSON.stringify(chunks) === JSON.stringify(readdirSync(dist).filter((f) => CHUNK.test(f)).sort()) && chunks.every((f) => readFileSync(join(pub, f)).equals(readFileSync(join(dist, f)))), `…the same chunks as built in dist/agents, byte for byte: ${JSON.stringify(chunks)}`);
   ok(FILES.every((f) => existsSync(join(pub, f)) && existsSync(join(dist, f)) && readFileSync(join(pub, f)).equals(readFileSync(join(dist, f)))), "…byte for byte as built in dist/agents");
   ok(!have.some((f) => f.endsWith(".tgz")), "…and no sagebrush-agent tarball from the site");
   const headers = existsSync(join(site, "public", "_headers")) ? readFileSync(join(site, "public", "_headers"), "utf8") : "";

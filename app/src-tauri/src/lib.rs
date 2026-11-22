@@ -26,6 +26,8 @@ mod disk;
 #[cfg(desktop)]
 mod engine;
 mod nav;
+#[cfg(desktop)]
+mod agent_cmds;
 use tauri::{Emitter, Manager, WebviewUrl, WebviewWindowBuilder};
 
 // the Terminal's shell worker's Content-Security-Policy (shell/worker-boot.js), the site's own
@@ -271,6 +273,20 @@ fn selftest_persist() -> Option<String> {
 // asking the person if that takes long.  A page that doesn't answer within QUIT_ANSWER (app_quit_hold: it's
 // draining) is taken to have nothing it can write, and the app quits.  The self-test's own exits (app.exit with a
 // code) aren't held.
+/// The agents page's self-test: a record of every connection the page opens (its URL and kind), for it to report.
+#[cfg(desktop)]
+const AGENTS_NET_RECORDER: &str = r#"(() => {
+  const log = (window.__sbNet = []);
+  const url = (u) => { try { return new URL(String(u && u.url ? u.url : u), location.href).href; } catch { return String(u); } };
+  const f = window.fetch;
+  window.fetch = function (input, init) { log.push({ kind: "fetch", url: url(input) }); return f.apply(this, arguments); };
+  const W = window.WebSocket;
+  window.WebSocket = function (u, p) { log.push({ kind: "ws", url: url(u) }); return p === undefined ? new W(u) : new W(u, p); };
+  window.WebSocket.prototype = W.prototype;
+  const E = window.EventSource;
+  if (E) { window.EventSource = function (u, o) { log.push({ kind: "es", url: url(u) }); return new E(u, o); }; window.EventSource.prototype = E.prototype; }
+})();"#;
+
 #[cfg(desktop)]
 static QUIT_OK: std::sync::atomic::AtomicBool = std::sync::atomic::AtomicBool::new(false);
 #[cfg(desktop)]
@@ -313,7 +329,7 @@ fn app_quit_now(app: tauri::AppHandle) {
 // the page's commands: the engine's on the desktop too
 #[cfg(desktop)]
 fn handlers() -> impl Fn(tauri::ipc::Invoke<tauri::Wry>) -> bool + Send + Sync + 'static {
-    tauri::generate_handler![startup_files, selftest_file, selftest_open, selftest_persist, selftest_report, app_log, disk::file_open_dialog, disk::file_save_dialog, disk::file_read_text, disk::file_write_text, disk::folder_list, disk::folder_read, disk::folder_write, engine::engine_start, engine::engine_send, engine::engine_ack, engine::engine_stop, disk::disk_list, disk::disk_stat, disk::disk_read, disk::disk_write, disk::disk_mkdir, disk::disk_rename, disk::disk_remove, disk::disk_where, disk::settings_write, app_quit_hold, app_quit_now]
+    tauri::generate_handler![startup_files, selftest_file, selftest_open, selftest_persist, selftest_report, app_log, disk::file_open_dialog, disk::file_save_dialog, disk::file_read_text, disk::file_write_text, disk::folder_list, disk::folder_read, disk::folder_write, engine::engine_start, engine::engine_send, engine::engine_ack, engine::engine_stop, disk::disk_list, disk::disk_stat, disk::disk_read, disk::disk_write, disk::disk_mkdir, disk::disk_rename, disk::disk_remove, disk::disk_where, disk::settings_write, app_quit_hold, app_quit_now, agent_cmds::agent_status, agent_cmds::agent_connect, agent_cmds::agent_pair_code, agent_cmds::agent_disconnect]
 }
 #[cfg(mobile)]
 fn handlers() -> impl Fn(tauri::ipc::Invoke<tauri::Wry>) -> bool + Send + Sync + 'static {
@@ -375,7 +391,10 @@ pub fn run() {
             let open = matches!(control.as_deref(), Some("open" | "wide"));
             // (the app's commands for this page's exact origin only, nav.rs page_capability; before the window exists)
             app.add_capability(if control.as_deref() == Some("wide") { nav::page_capability(port).replace(&format!("\"http://127.0.0.1:{port}\""), "\"http://127.0.0.1:*\"") } else { nav::page_capability(port) })?;
-            let url = format!("http://127.0.0.1:{port}/").parse().unwrap();
+            // (a self-test may start on another of the app's own pages, by a path on this origin only: the agents page's
+            // check opens /agents/ with a pairing link in the address, run.mjs)
+            let start = std::env::var("SAGEBRUSH_APP_START_PATH").ok().filter(|p| p.starts_with('/') && !p.starts_with("//") && std::env::var_os("SAGEBRUSH_APP_SELFTEST").is_some()).unwrap_or_else(|| "/".into());
+            let url = format!("http://127.0.0.1:{port}{start}").parse().unwrap();
             // (the window loads only this page's origin, the port just bound, and its own frames: nav.rs)
             let window = WebviewWindowBuilder::new(app, "main", WebviewUrl::External(url)).on_navigation(move |u| {
                 let yes = open || nav::may_load(u, port);
@@ -403,6 +422,15 @@ pub fn run() {
             let window = match std::env::var("SAGEBRUSH_APP_DISK_CONTROL").ok().filter(|_| std::env::var_os("SAGEBRUSH_APP_SELFTEST").is_some()).as_deref() {
                 Some(c @ ("no-import" | "no-write")) => window.initialization_script(&format!("window.__SB_DISK_CONTROL__ = {c:?};")),
                 _ => window,
+            };
+            // (the agents page's self-test, run.mjs: every connection the page opens is recorded before its own scripts run
+            // (fetch, WebSocket, EventSource), for the page to report; its control takes the page off the app's mode)
+            #[cfg(desktop)]
+            let window = if std::env::var_os("SAGEBRUSH_APP_SELFTEST").is_some() && std::env::var("SAGEBRUSH_APP_PERSIST").is_ok_and(|p| p.starts_with("agents:")) {
+                let w = window.initialization_script(AGENTS_NET_RECORDER);
+                if std::env::var("SAGEBRUSH_APP_AGENTS_CONTROL").is_ok_and(|c| c == "off-app") { w.initialization_script("window.__SB_DESKTOP_APP__ = false;") } else { w }
+            } else {
+                window
             };
             window.build()?;
             Ok(())

@@ -8,7 +8,9 @@
 // files (this browser's workspace), shown and edited beside the chat.
 // Threads are kept in this browser's localStorage.
 
-// (first: the pairing code leaves the address bar before anything else runs)
+// (first: in the desktop app, any pairing link leaves the address bar and is dropped (app-mode.ts); then, off the app,
+// the pairing code leaves the address bar before anything else runs)
+import { inApp } from "./app-mode";
 import "../workspace/pair-link";
 import { BlockEditor } from "../board/blocks";
 import { render as markdown } from "../markdown";
@@ -20,7 +22,7 @@ import { Mirror, MIRROR_COPY, mirrorTitle, type RemoteConversation, type Section
 import { startFakeTurn } from "./fake-agent";
 import { AgentError, RELOAD_KEY, type AgentPairing, type Created, type Kept } from "../workspace/agent-pair";
 import type { NotebookEdit } from "../workspace/notebook-edit";
-import { mountAgentPairing, type RestoreState } from "../workspace/agent-ui";
+import type { mountAgentPairing, RestoreState } from "../workspace/agent-ui";
 import { createdRunner } from "../workspace/agent-made";
 import { runVerbsFor } from "../workspace/run-holder";
 import { agentRunsFor } from "../workspace/agent-runs";
@@ -33,8 +35,7 @@ import { WS_DB } from "../workspace/db";
 import { guardGestures, mountNotebook, type AgentCells, type Guard, type NotebookHost, type NotebookUi } from "./notebook-artifact";
 import { mountComposer, renderComposerState, stopLabel } from "../workspace/agent-chat/composer";
 import { applyPaneClasses, mountLayout, relayout } from "./layout";
-import { AgentLeg, legKey, listComputers, pageLegUrl, type LegEnd } from "../workspace/agent-relay";
-import { chatHere } from "./chat-here";
+import type { LegEnd } from "../workspace/agent-relay";
 import { filesIcon, modeSwitch } from "../workspace/mode-switch";
 import { icon as panelIcon } from "../workspace/files-toggle";
 import { entryUrl } from "../workspace/entry-url";
@@ -1436,20 +1437,24 @@ function hiddenHost(threadId: string, a: Artifact) {
   mountHost(threadId, a, h);
 }
 
-// (Chat here's section of the Connect dialog: your computers; its attempts adopt their pairing into agentUi)
-const chatHereSection = chatHere({
-  list: () => listComputers(),
-  async open(r) {
-    const leg = new AgentLeg({ remoteId: r.remote_id, url: pageLegUrl(r.remote_id, "agent"), key: await legKey() }).start();
-    const ended = await new Promise<LegEnd | null>((res) => { leg.on("open", () => res(null)); leg.on("end", (e) => res(e)); });
-    // (the runner's notices: its words, as they are)
-    leg.on("notice", (t) => toast(t, 6000));
-    return { link: leg, ended };
-  },
-  onConnecting(r) { connectingTo = r.name; waitingFor = false; setConn(null); renderHeader(); },
-  onWaiting(r) { connectingTo = r.name; waitingFor = true; renderHeader(); },
-  onFailed(r, e) { connectingTo = null; waitingFor = false; setConn(runnerBar(r.name, e)); renderHeader(); },
-}, () => agentUi);
+// (Chat here's section of the Connect dialog: your computers; its attempts adopt their pairing into agentUi. Made with
+//  the pairing (mountPairing), off the app only: in the desktop app neither it nor the relay is loaded)
+async function makeChatHereSection() {
+  const [{ chatHere }, { AgentLeg, legKey, listComputers, pageLegUrl }] = await Promise.all([import("./chat-here"), import("../workspace/agent-relay")]);
+  return chatHere({
+    list: () => listComputers(),
+    async open(r) {
+      const leg = new AgentLeg({ remoteId: r.remote_id, url: pageLegUrl(r.remote_id, "agent"), key: await legKey() }).start();
+      const ended = await new Promise<LegEnd | null>((res) => { leg.on("open", () => res(null)); leg.on("end", (e) => res(e)); });
+      // (the runner's notices: its words, as they are)
+      leg.on("notice", (t) => toast(t, 6000));
+      return { link: leg, ended };
+    },
+    onConnecting(r) { connectingTo = r.name; waitingFor = false; setConn(null); renderHeader(); },
+    onWaiting(r) { connectingTo = r.name; waitingFor = true; renderHeader(); },
+    onFailed(r, e) { connectingTo = null; waitingFor = false; setConn(runnerBar(r.name, e)); renderHeader(); },
+  }, () => agentUi);
+}
 
 // A notebook the agent created (the pairing's onCreated): taken at once, as it is created, into the pane of the chat
 // whose turn made it (its artifact), then run there once by itself under the notebook page's rule
@@ -1509,7 +1514,11 @@ const agentRuns = (ws: Workspace) => agentRunsFor(ws as any, {
 
 // (the current pairing's listener for the agent's messages, removed when another pairing replaces it)
 let offAgent: (() => void) | null = null;
-function mountPairing(ws: Workspace) {
+async function mountPairing(ws: Workspace) {
+  // (the desktop app connects only through its own commands (mountAppConnect): the page's pairing, with its remembered
+  //  access, reload restore, manual code and reconnect, isn't loaded there at all)
+  if (inApp) return;
+  const [{ mountAgentPairing }, chatHereSection] = await Promise.all([import("../workspace/agent-ui"), makeChatHereSection()]);
   agentUi = mountAgentPairing(ws, {
     program: "sagebrush-agent",
     runVerbs: runVerbsFor(agentRuns(ws)),
@@ -1589,7 +1598,39 @@ function mountPairing(ws: Workspace) {
     },
   });
 }
-if (workspace) mountPairing(workspace);
+// The desktop app's Connect Claude (design/app-agent-host.md, interfaces r5 §2): the app's own commands are the only
+// way to connect there. Every failure is one of a fixed set of codes, each shown in this page's own words; nothing the
+// app or the agent returns is shown as it is.
+const APP_CONNECT_TEXT: Record<string, string> = {
+  not_bundled: "Not in this build yet",
+  no_workspace: "Choose a folder for your files first",
+  bundle_check_failed: "Sagebrush's copy of the agent didn't pass its check; reinstall Sagebrush",
+};
+function mountAppConnect() {
+  const b = $("#connect") as HTMLButtonElement;
+  const core = (window as any).__TAURI__?.core;
+  const note = document.createElement("small");
+  note.id = "connect-note";
+  b.after(note);
+  const say = (code: unknown) => setText(note, APP_CONNECT_TEXT[typeof code === "string" ? code : ""] ?? "Couldn't connect Claude");
+  const unavailable = () => { b.setAttribute("aria-disabled", "true"); say("not_bundled"); };
+  b.hidden = false;
+  b.onclick = async () => {
+    if (b.getAttribute("aria-disabled") === "true" || !core) return;
+    try { await core.invoke("agent_connect", { kind: "claude" }); } catch (e) { say(e); }
+  };
+  if (!core) { unavailable(); return; }
+  core.invoke("agent_status").then((s: any) => { if (!s || !s.versions) unavailable(); }, unavailable);
+}
+if (inApp) mountAppConnect();
+else if (workspace) void mountPairing(workspace);
+// (the desktop app's self-test of this page, app/selftest/run.mjs: only when the app was started for it)
+{
+  const core = (window as any).__TAURI__?.core;
+  if (core) core.invoke("selftest_persist").then((spec: unknown) => {
+    if (typeof spec === "string" && spec.startsWith("agents:")) void import("./app-selftest").then((m) => m.agentsSelftest(core));
+  }, () => {});
+}
 // (the person's review of an agent's branches: in a dialog, its chunk fetched at the first click)
 $("#review").onclick = () => { if (workspace) void openReviewDialog(workspace.reviewHost(), new URL("../", import.meta.url)); };
 // (the storage message's [Retry]: the open again, then the pairing, as a load would; never `disabled` while it runs)
@@ -1602,7 +1643,7 @@ $("#ws-retry").onclick = async () => {
   setText(b, "Retrying…");
   try {
     if ((await openWorkspace(true)) && workspace) {
-      mountPairing(workspace);
+      if (!inApp) await mountPairing(workspace);
       // (the focused [Retry] was inside the message that just hid: focus goes to the next step, Connect Claude, unless
       // a dialog (the pairing link's) has taken it)
       if (document.activeElement === b || document.activeElement === document.body) $("#connect").focus();

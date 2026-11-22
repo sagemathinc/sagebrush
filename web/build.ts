@@ -772,7 +772,9 @@ rmSync(join(here, "dist", "shell", "preview-set.json"), { force: true });
 rmSync(join(here, "dist", "agents"), { recursive: true, force: true });
 if (hasSite) rmSync(join(siteDir, "public", "agents"), { recursive: true, force: true });
 {
-  const r = await Bun.build(<any>{ metafile: true, entrypoints: [join(here, "agents", "page.ts")], outdir: join(here, "dist", "agents"), naming: "agents.js", target: "browser", format: "esm", minify: true, define: LATEX_DEFINE });
+  // (split: what only the site's pairing uses, its pairing UI, Chat here and the computer relay, is a chunk of its own,
+  //  imported only off the desktop app, so the app never fetches or runs it (design/app-agent-host.md))
+  const r = await Bun.build(<any>{ metafile: true, entrypoints: [join(here, "agents", "page.ts")], outdir: join(here, "dist", "agents"), naming: { entry: "agents.js", chunk: "agents-[hash].js" }, splitting: true, target: "browser", format: "esm", minify: true, define: LATEX_DEFINE });
   if (!r.success) {
     for (const l of r.logs) console.error(l);
     process.exit(1);
@@ -791,6 +793,8 @@ if (hasSite) rmSync(join(siteDir, "public", "agents"), { recursive: true, force:
     mkdirSync(join(siteDir, "public", "agents"), { recursive: true });
     mkdirSync(join(siteDir, "public", "agents", "connect"), { recursive: true });
     for (const f of ["index.html", "agents.js", "connect/index.html", "connect/copy.js", "connect.md"]) copyFileSync(join(here, "dist", "agents", f), join(siteDir, "public", "agents", f));
+    // (and the page's chunks: agents-<hash>.js, fetched by agents.js on first use)
+    for (const f of readdirSync(join(here, "dist", "agents"))) if (/^agents-[A-Za-z0-9]+\.js$/.test(f)) copyFileSync(join(here, "dist", "agents", f), join(siteDir, "public", "agents", f));
   }
 }
 // the numerics core's browser-threads demo (web/threads, numerics-core r4.2 milestone M0): a dense product on 1 and N

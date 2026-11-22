@@ -30,7 +30,7 @@ if (!checkOnly) {
   // (everything below comes from a complete `bun web/build.ts`: it can stop part way, with index.html written but
   // not the notices or the icons, when web/js-dependencies.json changed; scripts/build-all.sh handles that)
   const FILES = ["index.html", "sagebrush-app.js", "sagebrush-worker.js", "sagebrush-engine.wasm", "sagebrush-raster.wasm", "sagebrush-nd.wasm", "sagebrush-mp.wasm", "sagebrush-console.js", "sagebrush-math.js", "sagebrush-myst.js", "sagebrush-viewer3d.js", "sagebrush-viewer3d-xr.js", "sagebrush-history.js", "sagebrush-analyze.js", "sagebrush-remote.js", "sagebrush-remote-terminal.js", "sagebrush-export.js", "sagebrush-export-worker.js", "sagebrush-gitpush-panel.js", "sagebrush-examples-panel.js", "sagebrush-gradescope.js", "sagebrush-code.js", "sagebrush-gitpush-worker.js", "sagebrush-latex.js", "sagebrush-latex-worker.js", "sagebrush-latex-comments.js", "sagebrush-latex-comments-doc.js", "sagebrush-latex-agent.js", "sagebrush-latex-tools.js", "sagebrush-latex-present.js", "sagebrush-latex-interact.js", "sagebrush-latex-hl.js", "sagebrush-latex-view.js", "sagebrush-latex-run.js", "sagebrush-latex-doc.js", "sagebrush-latex-share.js", "sagebrush-latex-beamer.js", "sagebrush-latex-pythontex.js", "sagebrush-graphview.js", "sagebrush-selftest.js", "sagebrush-desktop.js", "sagebrush-share-deps.js", "sagebrush-share-folder.js", "sagebrush-share-mine.js", "docs-index.json", "THIRD-PARTY-NOTICES.txt", "katex", "icons", "lib"];
-  const missing = [...FILES, "shell", "pkg", "pkgset", "pkgmeta", "board", "sagebrush-notebook.js"].filter((f) => !existsSync(join(src, f)));
+  const missing = [...FILES, "shell", "pkg", "pkgset", "pkgmeta", "board", "agents", "sagebrush-notebook.js"].filter((f) => !existsSync(join(src, f)));
   if (missing.length) throw new Error(`web/dist is missing ${missing.join(", ")}: run \`bun web/build.ts\` to the end (if it stops with "web/js-dependencies.json changed", run node scripts/third-party-notices.mjs and build again), or scripts/build-all.sh, which does both`);
   if (!existsSync(join(here, "THIRD-PARTY-NOTICES-native.txt"))) throw new Error("app/THIRD-PARTY-NOTICES-native.txt is missing: run node scripts/third-party-notices.mjs (or git checkout -- app/THIRD-PARTY-NOTICES-native.txt)");
   rmSync(out, { recursive: true, force: true });
@@ -46,6 +46,9 @@ if (!checkOnly) {
   // analyzer and KaTeX from there, so every cell said the analyzer failed until the app was restarted
   cpSync(join(src, "board"), join(out, "board"), { recursive: true });
   cpSync(join(src, "sagebrush-notebook.js"), join(out, "sagebrush-notebook.js"));
+  // the agents page (the Agents switch, design/app-agent-host.md): agents/ with its chunks. In the app it connects only
+  // through the app's own commands; its site-only pairing, Chat here and relay are chunks it never fetches there
+  cpSync(join(src, "agents"), join(out, "agents"), { recursive: true });
   // (the other modes' documentation indexes, for the notebook's search box, where built)
   for (const f of ["docs-index-python.json", "docs-index-matlab.json", "docs-index-magma.json"]) if (existsSync(join(src, f))) cpSync(join(src, f), join(out, f));
   // the examples gallery (app/build-examples.ts: its pages and catalog, as the site's, in app/dist/examples/), so
@@ -127,7 +130,6 @@ for (const r of [...relRefs].sort()) if (!existsSync(join(out, r))) bad.push(`./
 // app's server answers no other path (lib.rs serve_page): a page the app doesn't have gets a short one with a way
 // back to the files; before, it was the notebook at that path, broken until a restart.  A new one fails here.
 const NOT_IN_APP = new Map([
-  ["agents", "the Agents switch (web/workspace/mode-switch.ts, and the board's): to be hidden in the app; meanwhile the server's short page, with a way back"],
   ["blog", "the landing page's links to the site: the server's short page, with a way back"],
   ["articles", "the landing page's links to the site: the server's short page, with a way back"],
   ["atlas", "the landing page's links to the site: the server's short page, with a way back"],
@@ -135,9 +137,13 @@ const NOT_IN_APP = new Map([
   ["gh", "a GitHub notebook's address: the site's"],
   ["nb", "the local server's notebook addresses (sagebrush notebook), not the app's"],
   ["tmp", "a path in the interpreter's own file system, not a page"],
+  ["conversations", "not a page: the agents chat's account log mirror's API path (agent-chat/mirror.ts), the cloud's; the app's page makes no such call"],
 ]);
 const goesTo = new Set();
-for (const f of pageFiles) for (const m of readFileSync(join(out, f), "utf8").matchAll(/["'`]\/([a-z][a-z0-9-]*)\/(?:\?|["'`])/g)) goesTo.add(m[1]);
+// (the agents page's scripts too: their own "./agents-<hash>.js" chunks resolve from agents/, so they're scanned only
+//  for the pages they go to)
+const agentsFiles = existsSync(join(out, "agents")) ? readdirSync(join(out, "agents")).filter((f) => /\.m?js$/.test(f)).map((f) => join("agents", f)) : [];
+for (const f of [...pageFiles, ...agentsFiles]) for (const m of readFileSync(join(out, f), "utf8").matchAll(/["'`]\/([a-z][a-z0-9-]*)\/(?:\?|["'`])/g)) goesTo.add(m[1]);
 for (const p of [...goesTo].sort()) if (!existsSync(join(out, p, "index.html")) && !NOT_IN_APP.has(p)) bad.push(`/${p}/: the page goes there, but app/dist has no ${p}/index.html (ship it, or hide what goes there and list it in NOT_IN_APP)`);
 for (const p of NOT_IN_APP.keys()) if (existsSync(join(out, p, "index.html"))) bad.push(`/${p}/: listed as not in the app, but app/dist has ${p}/index.html`);
 // The Terminal's shell (web/shell/loader.ts): its worker, and the package set
