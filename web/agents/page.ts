@@ -111,7 +111,9 @@ function flushDrafts() {
   const missing = stored ? state.threads.filter((t) => draftsPending.has(t.id) && !stored!.has(t.id)) : [];
   if (missing.length) {
     try {
-      localStorage.setItem(STORE, JSON.stringify(record ? { ...record, threads: [...record.threads, ...missing] } : state));
+      // (and the chat shown here as the one shown: the person is in this tab; the record's own would undo a switch
+      //  whose save comes before this write)
+      localStorage.setItem(STORE, JSON.stringify(record ? { ...record, threads: [...record.threads, ...missing], current: state.current } : state));
       for (const t of missing) stored!.add(t.id);
     } catch {}
   }
@@ -127,8 +129,18 @@ function flushDrafts() {
     draftsPending.clear();
   } catch {} // (refused: still waiting, in draftsPending, written with the next draft's write)
 }
-// (here, before anything the page waits for: a page left while it still opens keeps its draft too)
-addEventListener("pagehide", flushDrafts);
+// (here, before anything the page waits for: a page left, even while it still opens, keeps its draft, and the chats and
+//  the no-demo marker if their save is still waiting (a reload within save()'s 300 ms would lose them); only then, so
+//  a tab left idle never writes its chats over another tab's newer ones)
+addEventListener("pagehide", () => {
+  flushDrafts();
+  if (storeWaiting) {
+    try {
+      localStorage.setItem(STORE, JSON.stringify(state));
+    } catch {}
+  }
+});
+let storeWaiting = false;
 function putDraft(id: string, text: string, now = false) {
   draftsPending.set(id, text);
   if (now) return flushDrafts();
@@ -163,7 +175,9 @@ const session = new ChatSession({
   },
   store(s) {
     clearTimeout(saveTimer);
+    storeWaiting = true;
     saveTimer = window.setTimeout(() => {
+      storeWaiting = false;
       try {
         localStorage.setItem(STORE, JSON.stringify(s));
       } catch {} // (storage full: the chats stay here, kept at the next save that fits)
@@ -1719,10 +1733,6 @@ $("#ws-retry").onclick = async () => {
     renderHeader();
   }
 };
-addEventListener("pagehide", () => {
-  // (the chats, and the no-demo marker, kept now: a reload within save()'s 300 ms would lose them)
-  if (saveTimer) localStorage.setItem(STORE, JSON.stringify(state));
-});
 $("#howto").onclick = () => ($("#help").hidden = !$("#help").hidden);
 
 // ---- the log mirror's settings (design §5): the switch, what it means, the storage line; turning it off deletes
