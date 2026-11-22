@@ -3,8 +3,8 @@
 //! (`smith_route3_bar`, ignored: run it in release with --nocapture).
 
 use num_traits::{One, Signed, Zero};
-use sagebrush_arith::cost::tallied;
-use sagebrush_arith::smith::route3::{compress, pivot_columns};
+use sagebrush_arith::cost::{tallied, Local};
+use sagebrush_arith::smith::route3::{compress, hnf_modulus, pivot_columns};
 use sagebrush_arith::smith::{smith_classical, smith_form};
 use sagebrush_arith::zmat::{self, ZMat};
 use sagebrush_bigint::BigInt;
@@ -181,5 +181,93 @@ fn smith_route3_bar() {
             println!("    {m}x{n} r8 {w}: {u} units {s:.4} s");
         }
         println!("THIN {m}x{n} r8: route 3 {} units {:.4} s (core {tu}); classical {cu} units {cs:.4} s; ratio {:.2}x units", sum.0, sum.1, sum.0 as f64 / cu as f64);
+    }
+}
+
+/// The gcd of B's r x r minors (all column subsets), for small B.
+fn minors_gcd(b: &ZMat) -> BigInt {
+    let (r, n) = (b.rows, b.cols);
+    let mut g = BigInt::zero();
+    let mut pick: Vec<usize> = (0..r).collect();
+    loop {
+        let m = ZMat::from_rows((0..r).map(|i| pick.iter().map(|&c| b.get(i, c).clone()).collect()).collect());
+        g = num_integer::Integer::gcd(&g, &zmat::det(&m));
+        // the next r-subset of 0..n
+        let Some(t) = (0..r).rev().find(|&t| pick[t] < n - r + t) else { break };
+        pick[t] += 1;
+        for u in t + 1..r {
+            pick[u] = pick[u - 1] + 1;
+        }
+    }
+    g
+}
+
+/// G = (Delta / delta) gcd(delta, Q's entries) is a multiple of the index
+/// [Z^r : Lambda] (the gcd of all r-minors; G reads only the minors one
+/// column away from B_J, so it can be a proper multiple, on one row here
+/// 3 times it), equal to it on most rows; and C's determinant is the index.
+#[test]
+fn hnf_modulus_is_the_index_on_small_rows() {
+    let mut rg = Rng(13);
+    let (mut rows, mut equal) = (0, 0);
+    for &(r, n, rank_bits, plain) in &[(2usize, 4usize, 8u32, true), (3, 5, 6, true), (3, 6, 12, false), (4, 7, 10, false), (2, 2, 9, true), (3, 3, 9, false)] {
+        for _ in 0..4 {
+            // plain: random rows; else X Y (an index of about |det X|)
+            let b = if plain {
+                ZMat::from_rows((0..r).map(|_| (0..n).map(|_| e(&mut rg, rank_bits)).collect()).collect())
+            } else {
+                product(&mut rg, r, n, r, rank_bits)
+            };
+            let j = pivot_columns(&b);
+            if j.len() < r {
+                continue;
+            }
+            let bj = ZMat::from_rows((0..r).map(|i| j.iter().map(|&c| b.get(i, c).clone()).collect()).collect());
+            let (nm, delta, det) = zmat::inverse_det(&bj).unwrap();
+            let jp: Vec<usize> = (0..n).filter(|c| !j.contains(c)).collect();
+            let q = nm.mul(&ZMat::from_rows((0..r).map(|i| jp.iter().map(|&c| b.get(i, c).clone()).collect()).collect()));
+            let g = hnf_modulus(&q, &delta, &det, &mut Local::new());
+            let index = minors_gcd(&b);
+            assert!((&g % &index).is_zero(), "G a multiple of the index");
+            rows += 1;
+            equal += (g == index) as usize;
+            let (_, c) = check(&b, &j);
+            assert_eq!(zmat::det(&c), index, "det C = the index");
+        }
+    }
+    eprintln!("G = the index on {equal} of {rows} rows");
+    assert!(rows >= 20 && 4 * equal >= 3 * rows, "G = the index on most rows ({equal} of {rows})");
+}
+
+/// Compress's units, per family, pinned on four rows: the HNF and the
+/// kernel each on the word ring and on the multi-limb ring (G and delta
+/// word-sized; G word and delta not; both multi-limb).  Moves when a leaf
+/// charge goes (gcd_cofactor_e's on either ring among them) or when C's
+/// modulus becomes delta again.
+#[test]
+fn compress_units_pins() {
+    let mut out = vec![];
+    for &(r, n, bits, seed, plain, rings) in &[(3usize, 6usize, 8u32, 1u64, false, (true, true)), (4, 7, 30, 2, true, (true, false)), (4, 7, 40, 3, false, (false, false))] {
+        let mut rg = Rng(seed);
+        let b = if plain { ZMat::from_rows((0..r).map(|_| (0..n).map(|_| e(&mut rg, bits)).collect()).collect()) } else { product(&mut rg, r, n, r, bits) };
+        let j = pivot_columns(&b);
+        {
+            let bj = ZMat::from_rows((0..r).map(|i| j.iter().map(|&c| b.get(i, c).clone()).collect()).collect());
+            let (nm, delta, det) = zmat::inverse_det(&bj).unwrap();
+            let jp: Vec<usize> = (0..n).filter(|c| !j.contains(c)).collect();
+            let q = nm.mul(&ZMat::from_rows((0..r).map(|i| jp.iter().map(|&c| b.get(i, c).clone()).collect()).collect()));
+            let g = hnf_modulus(&q, &delta, &det, &mut Local::new());
+            let word = |x: &BigInt| x.bits() < 62;
+            assert_eq!((word(&g), word(&delta)), rings, "the rings reached");
+        }
+        let t0 = tallied();
+        let (_, _) = compress(&b, &j).unwrap();
+        let t1 = tallied();
+        let d: Vec<u64> = (0..t0.0.len()).map(|i| t1.0[i].wrapping_sub(t0.0[i])).collect();
+        out.push(d);
+    }
+    let pins: [[u64; 10]; 3] = [[242, 0, 22, 0, 28, 154, 305, 0, 0, 0], [1628, 0, 698, 0, 100, 333, 387, 13, 0, 0], [3011, 0, 4359, 0, 544, 428, 458, 110, 0, 0]];
+    for (i, (d, p)) in out.iter().zip(&pins).enumerate() {
+        assert_eq!(d[..], p[..], "Compress's units on row {i}");
     }
 }

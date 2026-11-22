@@ -1,10 +1,11 @@
 //! Route 3's Compress, for singular and rectangular input: for B (r x n,
 //! full row rank) and r independent columns J, a unimodular V0 = [X | K]
-//! with B V0 = [C | 0], everything modulo delta (B_J^-1 = N / delta), no
-//! elimination over Z:
+//! with B V0 = [C | 0], all modular work modulo G or delta (B_J^-1 = N /
+//! delta), no elimination over Z:
 //!
-//! - C = HNF(Lambda), Lambda = B Z^n, which contains delta Z^r (B_J N =
-//!   delta I), from a column Howell echelon of B modulo delta, lifted;
+//! - C = HNF(Lambda), Lambda = B Z^n, which contains G Z^r for G = (Delta /
+//!   delta) gcd(delta, N B_J''s entries), a multiple of the index (see
+//!   [`hnf_modulus`]), from a column Howell echelon of B modulo G, lifted;
 //! - K: the projection of ker_Z B onto J' = the other columns is L' = {y :
 //!   N B_J' y = 0 (mod delta)} (injective, as B_J is nonsingular); a row
 //!   Howell form of [N B_J' | N C] modulo delta gives L''s triangular basis
@@ -17,22 +18,22 @@
 //!
 //! [X | K] is unimodular: for v in Z^n, B v = C y = B X y, so v - X y is in
 //! ker_Z B = K Z^(n-r).  The lifted column echelon spans Lambda: its columns
-//! are in Lambda (residues of lattice vectors modulo delta Z^r), and
-//! delta e_i is a combination of them, by induction from the last row: (delta
-//! / g_i) col_i is zero at rows <= i modulo delta, so by the Howell property
-//! a combination of the later columns modulo delta Z^r.
+//! are in Lambda (residues of lattice vectors modulo G Z^r), and G e_i is a
+//! combination of them, by induction from the last row: (G / g_i) col_i is
+//! zero at rows <= i modulo G, so by the Howell property a combination of
+//! the later columns modulo G Z^r.
 //!
-//! Units: the modular work by the ring (word delta: ModArith in bulk; big
-//! delta: the ring's own counts), each echelon pivot and each solved column
+//! Units: the modular work by the ring (a word modulus: ModArith in bulk; a
+//! multi-limb one: the ring's own counts), each echelon pivot and each solved column
 //! a Stop check after the counts held so far; the exact integer products
 //! and divisions by delta at their running sizes.
 
 use super::ring_check;
-use crate::cost::{bigdiv_units, bigmul_units, Family, Local};
+use crate::cost::{bigdiv_units, biggcd_units, bigmul_units, Family, Local};
 use crate::snf::{Big, Word, Zn, WORD_E};
 use crate::zmat::{limbs, ZMat};
 use num_integer::Integer;
-use num_traits::{ToPrimitive, Zero};
+use num_traits::{One, Signed, ToPrimitive, Zero};
 use sagebrush_bigint::BigInt;
 
 /// An internal error of route 3: a proven invariant not holding.
@@ -261,28 +262,69 @@ pub fn compress(b: &ZMat, j: &[usize]) -> Result<(ZMat, ZMat), String> {
         return Err(internal("pivot count"));
     }
     let bj = ZMat::from_rows((0..r).map(|i| j.iter().map(|&c| b.get(i, c).clone()).collect()).collect());
-    let (nm, delta, _) = crate::zmat::inverse_det(&bj).ok_or_else(|| internal("pivot columns (B_J singular)"))?;
+    let (nm, delta, det) = crate::zmat::inverse_det(&bj).ok_or_else(|| internal("pivot columns (B_J singular)"))?;
+    let n = b.cols;
+    let jp: Vec<usize> = (0..n).filter(|c| !j.contains(c)).collect();
+    let bjp = ZMat::from_rows((0..r).map(|i| jp.iter().map(|&cc| b.get(i, cc).clone()).collect()).collect());
+    let q = nm.mul(&bjp);
     let mut acc = Local::new();
+    let g = hnf_modulus(&q, &delta, &det, &mut acc);
+    acc.flush();
+    let c = match g.to_u64() {
+        Some(e) if e < WORD_E => hnf_ring(&Word { e }, b, &g, &mut acc),
+        _ => hnf_ring(&Big::new(&g), b, &g, &mut acc),
+    };
     match delta.to_u64() {
-        Some(e) if e < WORD_E => compress_ring(&Word { e }, b, j, &nm, &delta, &mut acc),
-        _ => compress_ring(&Big::new(&delta), b, j, &nm, &delta, &mut acc),
+        Some(e) if e < WORD_E => kernel_ring(&Word { e }, b, j, &jp, &bjp, &nm, &q, &delta, c, &mut acc),
+        _ => kernel_ring(&Big::new(&delta), b, j, &jp, &bjp, &nm, &q, &delta, c, &mut acc),
     }
 }
 
-fn compress_ring<R: Zn>(ring: &R, b: &ZMat, j: &[usize], nm: &ZMat, delta: &BigInt, acc: &mut Local) -> Result<(ZMat, ZMat), String> {
+/// C's modulus G = (Delta / delta) gcd(delta, Q's entries), Delta = det
+/// B_J: by Cramer the r-minor of B with B_J's column i replaced by b_j (j
+/// in J') is Delta (B_J^-1 b_j)_i = (Delta / delta) Q_ij, and Delta = (Delta
+/// / delta) delta is one too, so the index [Z^r : Lambda] (the gcd of B's
+/// r-minors) divides G, and G Z^r is in Lambda.  Units: the gcd fold at its
+/// running sizes (stopped at 1), the division and the product.
+#[doc(hidden)]
+pub fn hnf_modulus(q: &ZMat, delta: &BigInt, det: &BigInt, acc: &mut Local) -> BigInt {
+    let mut g = delta.clone();
+    for x in q.d.iter() {
+        if g.is_one() {
+            break;
+        }
+        if !x.is_zero() {
+            acc.add(biggcd_units(limbs(&g), limbs(x)));
+            g = g.gcd(x);
+        }
+    }
+    let ad = det.abs();
+    acc.add(bigdiv_units(limbs(&ad), limbs(delta)));
+    let f = &ad / delta;
+    acc.add(bigmul_units(limbs(&f), limbs(&g)));
+    f * g
+}
+
+/// C = HNF(Lambda): the column Howell echelon of B's columns modulo G,
+/// lifted.
+fn hnf_ring<R: Zn>(ring: &R, b: &ZMat, g: &BigInt, acc: &mut Local) -> ZMat {
     let (r, n) = (b.rows, b.cols);
-    let jp: Vec<usize> = (0..n).filter(|c| !j.contains(c)).collect();
-    let k = jp.len();
     let (mut ops, mut steps) = (0u64, 0u64);
-    // C: the column Howell echelon of B's columns modulo delta, lifted
     acc.add(ring.residue_units(b));
     let pool: Vec<Vec<R::T>> = (0..n).map(|c| (0..r).map(|i| ring.residue(b.get(i, c))).collect()).collect();
-    let ech = col_howell(ring, pool, r, delta, &mut ops, &mut steps, acc);
+    let ech = col_howell(ring, pool, r, g, &mut ops, &mut steps, acc);
     let c = lift_hnf::<R>(&ech, r, acc);
     acc.flush();
-    // [Q | N C] modulo delta, Q = N B_J', then its row Howell form
-    let bjp = ZMat::from_rows((0..r).map(|i| jp.iter().map(|&cc| b.get(i, cc).clone()).collect()).collect());
-    let q = nm.mul(&bjp);
+    c
+}
+
+/// K and X modulo delta, from Q = N B_J' and C.
+#[allow(clippy::too_many_arguments)]
+fn kernel_ring<R: Zn>(ring: &R, b: &ZMat, j: &[usize], jp: &[usize], bjp: &ZMat, nm: &ZMat, q: &ZMat, delta: &BigInt, c: ZMat, acc: &mut Local) -> Result<(ZMat, ZMat), String> {
+    let (r, n) = (b.rows, b.cols);
+    let k = jp.len();
+    let (mut ops, mut steps) = (0u64, 0u64);
+    // [Q | N C] modulo delta, then its row Howell form
     let nc = nm.mul(&c);
     acc.add(ring.residue_units(&q));
     acc.add(ring.residue_units(&nc));
