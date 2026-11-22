@@ -236,20 +236,6 @@
     ]
   },
   {
-    "name": "freqz",
-    "kind": "function",
-    "signature": "[h, w] = freqz(b, a, n)",
-    "summary": "The frequency response of a digital filter at n points of the upper unit circle.",
-    "examples": [],
-    "differs": [],
-    "status": "absent",
-    "alternative": "Evaluate the transfer function on the unit circle: w = linspace(0, pi, n); z = exp(-1i*w); h = polyval(fliplr(b), z) ./ polyval(fliplr(a), z).",
-    "upstream": "Signal Processing Toolbox",
-    "tags": [
-      "signal processing"
-    ]
-  },
-  {
     "name": "fscanf",
     "kind": "function",
     "signature": "A = fscanf(fileID, formatSpec)",
@@ -526,20 +512,6 @@
     ]
   },
   {
-    "name": "pwelch",
-    "kind": "function",
-    "signature": "[pxx, f] = pwelch(x, window, noverlap, nfft, fs)",
-    "summary": "The power spectral density of a signal by Welch's averaged, windowed periodogram.",
-    "examples": [],
-    "differs": [],
-    "status": "absent",
-    "alternative": "Average abs(fft(segment .* w)).^2 over windowed, overlapping segments of x; for one segment, abs(fft(x)).^2 / (fs * numel(x)).",
-    "upstream": "Signal Processing Toolbox",
-    "tags": [
-      "signal processing"
-    ]
-  },
-  {
     "name": "quadprog",
     "kind": "function",
     "signature": "x = quadprog(H, f, A, b)",
@@ -656,20 +628,6 @@
     "tags": [
       "symbolic",
       "roots"
-    ]
-  },
-  {
-    "name": "spectrogram",
-    "kind": "function",
-    "signature": "[s, f, t] = spectrogram(x, window, noverlap, nfft, fs)",
-    "summary": "The short-time Fourier transform of a signal: the spectra of windowed, overlapping segments.",
-    "examples": [],
-    "differs": [],
-    "status": "absent",
-    "alternative": "fft of windowed, overlapping segments, one column per segment: S(:, k) = fft(x(seg_k) .* w).",
-    "upstream": "Signal Processing Toolbox",
-    "tags": [
-      "signal processing"
     ]
   },
   {
