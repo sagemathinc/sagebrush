@@ -445,8 +445,9 @@ fn the_estimate_is_fitted_and_scores_within_its_ceilings() {
         // route 2 by k (bands past 8): stage 2's k; V_2^-1 as run against
         // the model's size, both in delta's limbs; the rows where the proved
         // bound caps the model's size; the attempts; and the transforms'
-        // largest entry over delta's bits (the output's size against the
-        // bound's 3 (k - 1) delta)
+        // largest entry over delta's bits, at least one limb's 64 (the
+        // output's size against the bound's 3 (k - 1) delta; a tiny delta
+        // does not inflate it)
         for b in BANDS {
             let rk: Vec<&Row> = rows.iter().filter(|r| r.route == Route::Trailing && band(r.k) == b).collect();
             if rk.is_empty() {
@@ -469,9 +470,9 @@ fn the_estimate_is_fitted_and_scores_within_its_ceilings() {
                     .collect();
                 (median(sizes.iter().map(|x| x.0).collect()), sizes.iter().filter(|x| x.1).count())
             };
-            let out: Vec<f64> = rk.iter().filter(|r| r.delta_bits > 0).map(|r| r.uv_bits as f64 / r.delta_bits as f64).collect();
+            let out: Vec<f64> = rk.iter().map(|r| r.uv_bits as f64 / r.delta_bits.max(64) as f64).collect();
             println!(
-                "    k={b}: {} rows, stage 2 k {:.2}; V_2^-1 in delta's limbs: run {run:.2}, model {model:.2} (capped by the bound on {capped}); attempts max {}; U, V entries over delta's bits: median {:.2}, max {:.2}",
+                "    k={b}: {} rows, stage 2 k {:.2}; V_2^-1 in delta's limbs: run {run:.2}, model {model:.2} (capped by the bound on {capped}); attempts max {}; U, V entries over delta's bits (64 at least): median {:.2}, max {:.2}",
                 rk.len(),
                 p90(rk.iter().map(|r| sym(r.actual, r.stage2.unwrap())).collect()),
                 rk.iter().map(|r| r.attempts).max().unwrap_or(0),

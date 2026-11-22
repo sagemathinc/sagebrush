@@ -196,9 +196,13 @@ impl ZMat {
                         }
                         d.push(BigInt::from(s));
                     }
+                    // (charged for the work done, a row at a time: c sums
+                    // of k i128 products; then the row's check, as on the
+                    // multi-limb path below)
+                    acc.times((c * k) as u64, bigmul_units(1, 1));
+                    acc.flush();
+                    sagebrush_interrupt::check();
                 }
-                // (charged for the work done: r c sums of k i128 products)
-                acc.times((r * c * k) as u64, bigmul_units(1, 1));
                 return ZMat { rows: r, cols: c, d };
             }
         }

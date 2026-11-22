@@ -230,18 +230,20 @@ fn a_stop_charges_only_the_work_before_it() {
     want[Family::ModArith as usize] += 3 * euclid_steps(4, 1);
     assert_eq!(got, want, "route 2 at k = n stopped inside its transforms' factors: column 0's held work");
     // W's bottom row 0 between its check and the next: checks 10 to 17 are
-    // the factors' four passes (k each), 18 to 23 the three unipotent
-    // inverses (k each), 24 and 25 the rows of R N_top (k), 26 and 27 W's
-    // bottom rows (no top rows).  B = D_B V_2^-1 = diag(2, 4) (V_2 = I),
+    // the factors' four passes (k each); then a check a row of each k x k
+    // product and unipotent inverse, in their order: V's two products (18
+    // to 21), V^-1's inverses of f3 and f2 (22 to 25), a product (26, 27),
+    // the inverse of f1 (28, 29) and a product (30, 31); 32 and 33 the rows
+    // of R N_top (k), 34 and 35 W's bottom rows (no top rows).  B = D_B V_2^-1 = diag(2, 4) (V_2 = I),
     // the rows of C^-1 N those of N, diag(2, 1); row 0 of W: 2 * 2 and 2 *
     // 0 (the products with B's one nonzero entry, MulSchool) and their
-    // divisions by delta (Div), charged at check 27, none of row 1's
-    let (at26, at27) = (stopped_at_check(26, || smith::trailing_route(&nm, &den, &det, 2)), stopped_at_check(27, || smith::trailing_route(&nm, &den, &det, 2)));
+    // divisions by delta (Div), charged at check 35, none of row 1's
+    let (at34, at35) = (stopped_at_check(34, || smith::trailing_route(&nm, &den, &det, 2)), stopped_at_check(35, || smith::trailing_route(&nm, &den, &det, 2)));
     let l = |v: i64| zmat::limbs(&BigInt::from(v));
     let mut row0 = [0; FAMILIES];
     row0[Family::MulSchool as usize] = bigmul_units(l(2), l(2)).get(Family::MulSchool) + bigmul_units(l(2), l(0)).get(Family::MulSchool);
     row0[Family::Div as usize] = bigdiv_units(l(4), l(4)).get(Family::Div) + bigdiv_units(l(0), l(4)).get(Family::Div);
-    let step: Vec<u64> = (0..FAMILIES).map(|i| at27[i] - at26[i]).collect();
+    let step: Vec<u64> = (0..FAMILIES).map(|i| at35[i] - at34[i]).collect();
     assert_eq!(step, row0.to_vec(), "route 2 at k = n: one row of W between two checks");
 
     // route 2 with top rows and a multi-limb delta (the big ring, every
@@ -300,12 +302,22 @@ fn a_stop_charges_only_the_work_before_it() {
     assert_eq!(got, want.0, "route 2, multi-limb delta: stopped at pivot 1, the big ring's tally of pivot 0 charged before the check");
     // W's top rows: X = N's top rows mod delta = 0, so q = 0 and c = 0, and
     // W's top row 0 is N's row 0 divided by delta: four divisions (Div), no
-    // product.  Its checks are the 41st and 42nd of this run (counted from
+    // product.  Its checks are the 43rd and 44th of this run (counted from
     // the run's checks; the step's value is derived above from the code):
     // between them, exactly row 0's work.
-    let (at41, at42) = (stopped_at_check(41, || smith::trailing_route(&nm, &den, &det, 2)), stopped_at_check(42, || smith::trailing_route(&nm, &den, &det, 2)));
+    let (at43, at44) = (stopped_at_check(43, || smith::trailing_route(&nm, &den, &det, 2)), stopped_at_check(44, || smith::trailing_route(&nm, &den, &det, 2)));
     let mut top0 = [0; FAMILIES];
     top0[Family::Div as usize] = bigdiv_units(lb(&delta), ld).get(Family::Div) + 3 * bigdiv_units(l0, ld).get(Family::Div);
-    let step: Vec<u64> = (0..FAMILIES).map(|i| at42[i] - at41[i]).collect();
+    let step: Vec<u64> = (0..FAMILIES).map(|i| at44[i] - at43[i]).collect();
     assert_eq!(step, top0.to_vec(), "route 2, multi-limb delta: one top row of W between two checks");
+
+    // a product of one-word entries (the transforms' k x k products take
+    // this path): a check at the end of each row, after its charge, c sums
+    // of k one-limb products; stopped at the second, rows 0 and 1, 2 x 3 x
+    // 3 products, and nothing of row 2's
+    let m = z(&[&[1, 2, 3], &[4, 5, 6], &[7, 8, 9]]);
+    let got = stopped_at_check(2, || m.mul(&m));
+    let mut want = [0; FAMILIES];
+    want[Family::MulSchool as usize] = 2 * 3 * 3 * bigmul_units(1, 1).get(Family::MulSchool);
+    assert_eq!(got, want, "a one-word product stopped at its second row's check: rows 0 and 1");
 }

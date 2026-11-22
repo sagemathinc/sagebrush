@@ -204,10 +204,16 @@ pub fn k_lower_bound(a: &ZMat) -> usize {
     let mut col = vec![BigInt::zero(); a.cols];
     for (i, ri) in row.iter_mut().enumerate() {
         for (j, cj) in col.iter_mut().enumerate() {
+            // (a content of 1 stays 1: its gcds stop there, so random
+            // rows cost little past their first few entries)
             let x = a.get(i, j);
             if !x.is_zero() {
-                *ri = ri.gcd(x);
-                *cj = cj.gcd(x);
+                if !ri.is_one() {
+                    *ri = ri.gcd(x);
+                }
+                if !cj.is_one() {
+                    *cj = cj.gcd(x);
+                }
             }
         }
     }

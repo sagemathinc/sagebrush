@@ -110,8 +110,11 @@ fn smith_units_and_stop_checks() {
         // Word input: top 1, 3 attempts, 2 column operations, 9 + (4 + 4 +
         // 7) + 3 + 22 = 49; big input: top 10, 5 attempts, 25 column
         // operations, its last attempt's pivot 0 in two passes, 46 + (4 * 4
-        // + 50) + 12 + 40 = 164)
-        ("route 2, word delta", [143, 0, 31, 0, 30, 97, 208, 0, 0, 0], 49),
+        // + 50) + 12 + 40 = 164.  And a check a row of each product of
+        // one-word entries: for the word input the transforms' 4 k x k
+        // products (4 k) and part A's N b (n = 3), 49 + 8 + 3 = 60; the big
+        // input's products have multi-limb entries, checked already)
+        ("route 2, word delta", [143, 0, 31, 0, 30, 97, 208, 0, 0, 0], 60),
         ("route 2, big delta", [34470, 0, 36537, 0, 1678, 3574, 6314, 0, 0, 0], 164),
         ("classical, singular", [111, 0, 11, 0, 0, 182, 119, 0, 0, 0], 3),
         ("classical, wide", [29, 0, 12, 0, 0, 55, 0, 0, 0, 0], 4),

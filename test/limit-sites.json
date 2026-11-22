@@ -2575,7 +2575,7 @@
   "owner": "engine arithmetic (exact linear algebra)",
   "reason": "test code: the transforms' largest entry in bits, reported against delta (not a cap)"
  },
- "engine/arith/tests/smith_estimate.rs :: the_estimate_is_fitted_and_scores_within_its_ceilings :: \"    k={b}: {} rows, stage 2 k {:.2}; V_2^-1 in delta's limbs: run {run:.2}, model {model:.2} (capped by the bound on {capped}); attempts max {}; U, V entries over delta's bits: median {:.2}, max {:.2}\", #0": {
+ "engine/arith/tests/smith_estimate.rs :: the_estimate_is_fitted_and_scores_within_its_ceilings :: \"    k={b}: {} rows, stage 2 k {:.2}; V_2^-1 in delta's limbs: run {run:.2}, model {model:.2} (capped by the bound on {capped}); attempts max {}; U, V entries over delta's bits (64 at least): median {:.2}, max {:.2}\", #0": {
   "class": "none",
   "owner": "engine arithmetic (exact linear algebra)",
   "reason": "test code: the work estimate's evidence by k band and the worst ratios, printed (a report, not a cap)"
