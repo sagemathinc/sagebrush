@@ -6,7 +6,9 @@
 //   0. Run all before the page gives the sandbox up: the held run is answered as not run, nothing granted;
 //   1. once given up, a notebook whose code may not change files, Run all: one bar says why and asks, "Allow file changes and run",
 //      and no cell gets a message (each left as it was, not run);
+//   1b. the bar is a modal: fixed over the window, the notebook not moved, Cancel focused (not Allow);
 //   2. a script's click on the button grants nothing; nor does a trusted press before the bar arms;
+//   2b. Esc, and Cancel, close it unanswered (nothing granted, no cell run); the next refused run asks again;
 //   3. a bar left open while another notebook is shown is closed, unanswered;
 //   4. a trusted press once armed: the notebook's files permission (File > Permissions…'s), then its refused cells run;
 //   5. taken back (File > Permissions…, Don't allow file changes): runs are refused again, the bar again;
@@ -24,7 +26,9 @@
 //   6b. after 6's note (no button), the next notebook's bar has its button and note again;
 //   12. a press that loses focus before its release grants nothing; nor does a repeating Enter; a plain Enter does;
 //   13. a second refused run of the same notebook while its bar is armed keeps the bar armed: a press at once allows;
-//   14. the notebook allowed through File > Permissions… while its bar is open: the bar closes, unanswered, nothing run;
+//   14. while the bar (a modal) is open, File can't be reached behind it: a press on File lands on the bar, no menu opens;
+//   14b. this browser's permissions changed elsewhere while the bar is open (another tab's storage event): the bar
+//      closes, unanswered, nothing run;
 //   15. a script's own events on the armed button (pointerdown then click; Enter then click) allow nothing;
 //   16. a trusted press, then the window losing focus (the button keeping it, as Safari's does), then the release: nothing;
 //   and as Safari (its user agent, and no navigator.userAgentData, read before any of the page's own scripts), whose
@@ -145,10 +149,15 @@ try {
   await S.go(dev.site + "/");
   await appReady(S);
   await twoCells(S);
+  const cellTop = () => S.ev("Math.round(window.sagebrush.notebook.cells()[0].ta.getBoundingClientRect().top)");
+  const top0 = await cellTop();
   await runAll(S);
   await S.until("!document.querySelector('#runbar').hidden", 30000).catch(() => {});
   await sleep(700);
   const s1 = await state(S);
+  const modal = await S.ev("(() => { const r = document.querySelector('#runbar'), b = r.getBoundingClientRect(); return { position: getComputedStyle(r).position, covers: b.left <= 0 && b.top <= 0 && b.right >= innerWidth && b.bottom >= innerHeight, role: r.getAttribute('role'), focus: document.activeElement?.id }; })()");
+  const top1 = await cellTop();
+  ok(modal.position === "fixed" && modal.covers && modal.role === "dialog" && modal.focus === "rbcancel" && top1 === top0, "1b. the bar is a modal over the window, the notebook not moved, Cancel focused: " + J({ ...modal, top0, top1 }));
   ok(s1.bar && s1.text === "Sagebrush's sandbox didn't start in this browser. To run in this page, this notebook needs permission to change files in your browser workspace.", "1. Run all: one bar, saying why and asking: " + J(s1.text));
   ok((await S.ev("document.querySelector('#rballow').textContent")) === "Allow file changes and run" && (await S.ev("document.querySelector('#runbar .note').textContent")) === "Remembered for this notebook; change it in File > Permissions…", "...its button, \"Allow file changes and run\", and that it's remembered, and where to change it");
   ok(s1.outs.every((o) => o === "") && !s1.outs.some((o) => /can't run here/.test(o)) && s1.files === false, "...and no cell gets a message, each left as it was; nothing granted: " + J({ outs: s1.outs, files: s1.files }));
@@ -158,7 +167,20 @@ try {
   await S.ev("(() => { document.querySelector('#rballow').click(); return 1; })()");
   await sleep(300);
   ok((await state(S)).files === false && (await state(S)).bar, "2. a script's click on the button grants nothing; the bar stays");
+  // 2b. Esc, then Cancel: closed unanswered, and the next refused run asks again
+  await S.ev("(document.querySelector('#rbcancel').focus(), 1)");
+  for (const type of ["keyDown", "keyUp"]) await S.send("Input.dispatchKeyEvent", { type, key: "Escape", code: "Escape", windowsVirtualKeyCode: 27 });
+  await sleep(300);
+  const esc = await state(S);
   await S.ev("(() => { window.sagebrush.notebook.runAll(); return 1; })()");
+  await S.until("!document.querySelector('#runbar').hidden", 30000).catch(() => {});
+  const again = await state(S);
+  await S.ev("(() => { document.querySelector('#rbcancel').click(); return 1; })()");
+  await sleep(300);
+  const cancel = await state(S);
+  ok(!esc.bar && esc.files === false && again.bar && !cancel.bar && cancel.files === false && cancel.outs.every((o) => o === ""), "2b. Esc and Cancel close it unanswered, nothing granted or run; a refused run asks again: " + J({ esc: esc.bar, again: again.bar, cancel: cancel.bar, outs: cancel.outs }));
+  await S.ev("(() => { window.sagebrush.notebook.runAll(); return 1; })()");
+  await S.until("!document.querySelector('#runbar').hidden", 30000).catch(() => {});
   // (a fresh bar for this notebook? the open one stays, so close it the way a switch does, then press at once)
   await newNotebook(S);
   await S.until("document.querySelector('#runbar').hidden", 10000).catch(() => {});
@@ -255,7 +277,7 @@ try {
   await Q.until("window.sagebrush.permissions?.()?.files === true", 5000).catch(() => {});
   ok((await Q.ev("window.sagebrush.permissions?.()?.files")) === true, "13. a second refusal of the same notebook while its bar is armed: the bar keeps its arming, and a press at once allows");
 
-  // ---- 14. the bar open, then the notebook allowed in File > Permissions…: the bar closes, unanswered, and nothing runs
+  // ---- 14. the bar open (a modal): File can't be reached behind it; 14b. permissions changed elsewhere: it closes
   const G = await profilePage(false, "", { runner: false });
   await G.go(dev.site + "/");
   await appReady(G);
@@ -263,14 +285,16 @@ try {
   await runAll(G);
   await G.until("!document.querySelector('#runbar').hidden", 30000);
   await G.press("#filebtn");
-  await G.press("#permsmenu");
-  await G.press("#filesperm");
-  await G.send("Input.dispatchKeyEvent", { type: "keyDown", key: "Escape", code: "Escape", windowsVirtualKeyCode: 27 });
-  await G.send("Input.dispatchKeyEvent", { type: "keyUp", key: "Escape", code: "Escape", windowsVirtualKeyCode: 27 });
-  await G.until("window.sagebrush.permissions?.()?.files === true", 10000).catch(() => {});
-  await sleep(1500);
+  await sleep(300);
   const s14 = await state(G);
-  ok(s14.files === true && !s14.bar && s14.outs.every((o) => o === ""), "14. allowed in File > Permissions… while the bar is open: the bar closes, unanswered, and nothing ran: " + J({ files: s14.files, bar: s14.bar, outs: s14.outs }));
+  const menu = await G.ev("(() => { const m = document.querySelector('#permsmenu'); return !!m && !m.hidden && !!m.offsetParent; })()");
+  ok(s14.bar && !menu && s14.files === false, "14. the bar a modal: a press on File lands on it, no menu opens, nothing granted: " + J({ bar: s14.bar, menu, files: s14.files }));
+  // (another document of this origin rewrites the grants: an iframe's write is another tab's, a storage event here)
+  await G.ev("(() => { const f = document.createElement('iframe'); document.body.append(f); const ls = f.contentWindow.localStorage; ls.setItem('sagebrush-grants', JSON.stringify(JSON.parse(ls.getItem('sagebrush-grants') ?? '{}'), null, 1)); f.remove(); return 1; })()");
+  await G.until("document.querySelector('#runbar').hidden", 10000).catch(() => {});
+  await sleep(1000);
+  const s14b = await state(G);
+  ok(!s14b.bar && s14b.files === false && s14b.outs.every((o) => o === ""), "14b. permissions changed elsewhere while the bar is open: it closes, unanswered, nothing ran: " + J({ files: s14b.files, bar: s14b.bar, outs: s14b.outs }));
 
   // ---- 15. a script's events on the armed button (made, not the person's): nothing allowed
   const E = await profilePage(false, "", { runner: false });

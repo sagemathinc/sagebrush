@@ -284,12 +284,15 @@
   .sharesr { position: absolute; width: 1px; height: 1px; margin: -1px; overflow: hidden; clip: rect(0 0 0 0); white-space: nowrap; }
   .sharefoot { margin: 12px 0 0; padding-top: 8px; border-top: 1px solid var(--line); font-size: 13px; }
   @media (max-width: 480px) { .sharetabs button { padding: 6px 8px; } #sharecardlink { font-size: 14px; } .sharestaterow { flex-direction: column; align-items: stretch; } .sharestate { flex: none; } .shareaction { align-self: flex-start; } }
-  #filesbar, #runbar { margin: 6px 0; padding: 6px 10px; border: 1px solid var(--line); border-radius: 6px; background: var(--code); font-size: 14px; }
+  #filesbar { margin: 6px 0; padding: 6px 10px; border: 1px solid var(--line); border-radius: 6px; background: var(--code); font-size: 14px; }
   #filesbar[hidden], #runbar[hidden] { display: none; }
+  /* (the run bar is a modal, over the window when a run is refused: it never pushes the notebook down) */
+  #runbar { position: fixed; inset: 0; z-index: 2147482500; display: flex; align-items: center; justify-content: center; background: rgba(0, 0, 0, .35); }
+  #runbar .rbbox { box-sizing: border-box; width: min(460px, calc(100vw - 32px)); padding: 16px 18px; border: 1px solid var(--line); border-radius: 8px; background: var(--bg); color: var(--fg); font-size: 14px; box-shadow: 0 12px 32px rgba(0, 0, 0, .3); }
+  #runbar .rbbtns { display: flex; justify-content: flex-end; gap: 8px; margin-top: 12px; }
   /* (the sentence, then the button on a row of its own, then the note: each on its own line) */
   #runbar #rbtext, #runbar .note { display: block; }
   #runbar .note { color: var(--muted); font-size: 13px; }
-  #runbar #rballow { margin: 8px 0 6px; }
   #runbar [hidden] { display: none; }
   /* the console, docked at the bottom */
   #console { position: fixed; left: 0; right: 0; bottom: 0; height: 38vh; min-height: 120px; display: flex; flex-direction: column; background: var(--code); border-top: 1px solid var(--line); box-shadow: 0 -4px 18px rgba(0,0,0,.12); z-index: 5; }
@@ -605,7 +608,7 @@ its final layout and the files never arrive a moment later; not on a phone, wher
     <button id="morebtn" aria-haspopup="menu" aria-expanded="false" aria-controls="moremenu" title="Text cells, the interpreter, files, console, TimeTravel, keys" aria-label="More">⋯</button>
   </div>
   <div id="filesbar" role="status" hidden><span id="fbtext"></span> <button id="fballow" hidden></button> <button id="fbonce" hidden>Allow once</button> <button id="fbdeny" hidden>Don't allow</button> <button id="fbperms" hidden>File &gt; Permissions…</button></div>
-  <div id="runbar" role="status" hidden><span id="rbtext"></span> <button id="rballow" class="primary">Allow file changes and run</button> <span class="note">Remembered for this notebook; change it in File &gt; Permissions…</span></div>
+  <div id="runbar" role="dialog" aria-modal="true" aria-labelledby="rbtext" hidden><div class="rbbox"><span id="rbtext"></span> <span class="note">Remembered for this notebook; change it in File &gt; Permissions…</span><div class="rbbtns"><button id="rbcancel">Cancel</button> <button id="rballow" class="primary">Allow file changes and run</button></div></div></div>
   <!-- (the agent's bar, when one is connected: a row here, never over a cell or a plot; workspace/agent-ui.ts) -->
   <div data-sbag-slot="1"></div>
   <section id="files" aria-label="Files" hidden>
@@ -2447,7 +2450,9 @@ perms.onChange((doc) => {
 });
 // The run bar: a notebook whose code may not change your files runs only in Sagebrush's
 // sandbox; where that can't run (the app; a sandbox that didn't start), its runs
-// are refused, each cell left as it was, and this one bar says why, with the one way to run it in this page: the
+// are refused, each cell left as it was, and this one bar (a modal over the window, shown when the person runs code:
+// Cancel has the focus, so an Enter just after the run's grants nothing; Cancel or Esc closes it unanswered) says why,
+// with the one way to run it in this page: the
 // notebook's files permission, the very one File > Permissions… gives, which covers your whole browser workspace (the
 // button says so). Only the person's fresh trusted press on the button, begun after the bar arms, grants it: nothing
 // else (a refusal, a timeout, Run all, a share's copy) ever does. The bar belongs to the notebook shown and to its
@@ -2468,6 +2473,7 @@ function runBar(doc, why) {
   rbReq = { open: true, id: ++rbSeq, doc, rev: revOf(doc), armedAt: performance.now() + FB_ARM, pressed: null, cells: new Set(rbReq?.doc === doc ? rbReq.cells : []) };
   $("#rbtext").textContent = `${RB_WHY[why] ?? RB_WHY.browser} ${window.__TAURI__ ? "To run it, this notebook needs permission to change your files." : RB_ASK}`;
   runBarEl.hidden = false;
+  $("#rbcancel").focus();
 }
 // (the cells a refused run asked for, for the bar's "and run": collected for the notebook shown, even before the bar opens)
 function runBarCell(doc, cell) {
@@ -2489,6 +2495,7 @@ function runBarClose() {
   rbReq = null;
   runBarEl.hidden = true;
   $("#rballow").hidden = false;
+  $("#rbcancel").textContent = "Cancel";
   runBarEl.querySelector(".note").hidden = false;
 }
 // (a note in the bar's place, with no button: closed as the bar is, by another notebook shown or its permissions changed)
@@ -2497,9 +2504,14 @@ function runBarNote(doc, text) {
   rbReq = { open: false, id: ++rbSeq, doc, rev: revOf(doc), armedAt: Infinity, pressed: null, cells: new Set() };
   $("#rbtext").textContent = text;
   $("#rballow").hidden = true;
+  $("#rbcancel").textContent = "OK";
   runBarEl.querySelector(".note").hidden = true;
   runBarEl.hidden = false;
+  $("#rbcancel").focus();
 }
+// (Cancel, or Esc: closed unanswered, the refused cells left as they were; the next refused run asks again)
+$("#rbcancel").addEventListener("click", () => runBarClose());
+runBarEl.addEventListener("keydown", (e) => { if (e.key === "Escape" && !runBarEl.hidden) { e.preventDefault(); runBarClose(); } });
 {
   const b = $("#rballow");
   const press = () => { if (rbReq?.open) rbReq.pressed = { req: rbReq.id, rev: revOf(rbReq.doc) }; };
