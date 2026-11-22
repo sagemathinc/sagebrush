@@ -344,6 +344,16 @@
   .delegate-dlg .docs { margin: 0; padding-left: 18px; }
   .delegate-dlg small { color: var(--muted); }
   .delegate-dlg menu { display: flex; justify-content: flex-end; gap: 8px; padding: 0; }
+  .proposal-actions { margin-top: 14px; border-top: 1px solid var(--line); padding-top: 10px; }
+  .proposal-actions .row { display: flex; justify-content: flex-end; gap: 8px; }
+  .proposal-actions button[aria-disabled="true"] { opacity: .5; cursor: not-allowed; }
+  .merge-slot .conflicts h4 { margin: 10px 0 4px; font-size: 13px; }
+  .merge-slot .conflict > p { margin: 6px 0 4px; color: var(--muted); }
+  .merge-slot .sides { display: grid; grid-template-columns: 1fr 1fr; gap: 8px; }
+  .merge-slot .sides > * { min-width: 0; }
+  .merge-slot pre { margin: 0 0 4px; max-height: 160px; overflow: auto; white-space: pre-wrap; font-size: 12px; border: 1px solid var(--line); border-radius: 6px; padding: 6px; }
+  .merge-slot button[aria-pressed="true"] { outline: 2px solid var(--accent); }
+  .merge-slot .incomplete { margin: 8px 0; }
 </style>
 <style id="tex-host-layout">
   #artifacts .pane-body:has(> .pane-host:not([hidden]) .tex-host) { display: flex; flex-direction: column; }
@@ -379,7 +389,7 @@
     </div>
     <div id="help" hidden>
       <b>Run this on your computer</b>, then open the link it prints. <a href="/agents/connect/">Learn more</a>
-      <pre>npx -y https://agents.sagebrush.cloud/agents/sagebrush-agent-0.8.1.tgz</pre>
+      <pre>npx -y https://agents.sagebrush.cloud/agents/sagebrush-agent-0.8.7.tgz</pre>
     </div>
     <div id="log">
       <div id="log-tools" hidden><button id="mirror-copy" type="button" hidden></button><button id="copychat" type="button" title="This chat as Markdown: what you wrote, the agent's answers, a line for each thing it did, and links to its files">⧉ Copy chat</button></div>
@@ -397,11 +407,15 @@
     <div id="mirror-log" hidden></div>
     <div id="mirror-readonly" hidden><span id="mirror-readonly-text"></span> <button id="mirror-delete-one" type="button"></button></div>
     <div class="composer-wrap">
-      <!-- (the agent's bar: a row above the composer, never over it; workspace/agent-ui.ts) -->
+      <!-- (the agent's bar, where the composer's footer row isn't shown (a task's view): a row above the composer; empty,
+           and so of no height, otherwise. The footer's slot is numbered higher, so it wins wherever it shows) -->
       <div data-sbag-slot="1"></div>
       <div class="composer">
         <div id="editor"></div>
         <div class="row">
+          <!-- (the agent's access, an icon at the start of the composer's footer row: click it for the details, Turn off
+               running code and Revoke; workspace/agent-ui.ts, [data-sbag-footer]. A1, #1546) -->
+          <span data-sbag-slot="2" data-sbag-footer></span>
           <span class="hint"><kbd>Shift</kbd>+<kbd>Enter</kbd> <span id="keys">send</span> · <kbd>Alt</kbd>+<kbd>Enter</kbd> queue · <kbd>Ctrl</kbd>+<kbd>Enter</kbd> note</span>
           <span id="queued"></span>
           <button id="note" title="Post a note, not sent to the agent (Ctrl+Enter)">Note</button>

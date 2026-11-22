@@ -636,6 +636,10 @@ try {
   ok(rep.recomputed && rep.ran.length === 3 && (await out(2)) === x0 && /random\.random/.test(await ev("sagebrush.notebook.cells()[0].ta.value")), `reverting computes the version again: the same random number through the file (${await out(2)} = ${x0}; ${await ev("document.querySelector('#status').textContent")})`);
   // an old Resume link still works
   await send("Page.navigate", { url: base.replace("?reactive", "") + `?resume=${encodeURIComponent(target.id)}&at=${encodeURIComponent(target.time)}` });
+  // (the replay's write, which the new notebook may not make, waits on its prompt (the write-wait design): the person
+  // closes it unanswered (Escape), so it is refused, and the replay ends)
+  await until("window.sagebrush?.replayReport || !!document.querySelector('#filesbar')?.open", 30000);
+  if (await ev("!window.sagebrush?.replayReport && !!document.querySelector('#filesbar')?.open")) for (const type of ["keyDown", "keyUp"]) await send("Input.dispatchKeyEvent", { type, key: "Escape", code: "Escape", windowsVirtualKeyCode: 27 });
   await until("window.sagebrush?.replayReport", 30000);
   // (the new notebook starts with file changes off, like every notebook (confinement 1b): the person allows them, as
   // a person does, and runs it again, so the version's file is written and read)

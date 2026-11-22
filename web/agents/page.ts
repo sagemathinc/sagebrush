@@ -41,6 +41,8 @@ import { entryUrl } from "../workspace/entry-url";
 import { threadMarkdown, turnMarkdown, userMarkdown } from "../workspace/agent-chat/transcript";
 import { DelegateTasks } from "./delegate";
 import { mountDelegate } from "./delegate-ui";
+import { ownClaudeCommand } from "./own-claude";
+import { workspaceIO } from "./delegate-merge";
 import { toIpynb } from "../notebook/ipynb.js";
 import { mountVersionStamp } from "../version";
 
@@ -1169,6 +1171,8 @@ const delegateUi = mountDelegate({
   mayRun: () => pairing?.grant?.run === true,
   openPath: () => current().artifacts.find((x) => x.id === openArtifact)?.path ?? null,
   draft: () => editor.value,
+  // (the Pair chat shown, once something has been said in it: a brief is drafted from it, the agent saying if it can't)
+  conversation: () => { const t = current(); return t.entries.some((e) => e.kind === "turn" || e.kind === "user") ? t.id : null; },
   clearDraft: () => { editor.value = ""; },
   // (a workspace document as the task's copy starts from it: a notebook's .ipynb text, a text file's text; its path as
   //  the protocol has it, relative)
@@ -1189,7 +1193,12 @@ const delegateUi = mountDelegate({
     if (!on) renderAll();
   },
   site: new URL("../", import.meta.url),
+  // (a proposal's .tex rendered under its diff, where this page has the LaTeX editor, as an artifact's .tex is)
+  latex: __SB_LATEX__ && __SB_LATEX_HOSTS__.includes(location.hostname) ? () => import(/* @vite-ignore */ LATEX_URL) : null,
   toast,
+  // (Merge: this browser's workspace, and the agent's record of it)
+  merge: workspaceIO(() => workspace, (task, params) => delegateTasks.merged(task, params), /^(localhost|127\.0\.0\.1)$/.test(location.hostname) ? async (op, path) => { if (typeof (window as any).__mergeSeam === "function") await (window as any).__mergeSeam(op, path); } : undefined),
+  session: sessionStorage,
 });
 // (the Files | Agents switch at the right of the chat list's header, Agents pressed: Files opens the notebook page with
 //  its files, as the file panel's switch opens this page; William, Nov 12)
@@ -1620,6 +1629,9 @@ addEventListener("pagehide", () => {
   if (saveTimer) localStorage.setItem(STORE, JSON.stringify(state));
 });
 $("#howto").onclick = () => ($("#help").hidden = !$("#help").hidden);
+// (the help box's command for this site: the release's line, with --origin where the agent doesn't trust this page's
+//  origin by default, as on a DEV or preview site (#1604))
+{ const pre = document.querySelector<HTMLElement>("#help pre"); if (pre) pre.textContent = ownClaudeCommand(pre.textContent?.trim() ?? "", location.origin); }
 
 // ---- the log mirror's settings (design §5): the switch, what it means, the storage line; turning it off deletes
 let mirrorConfirm = false;

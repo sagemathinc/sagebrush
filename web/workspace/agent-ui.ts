@@ -117,6 +117,15 @@ const CSS = `
 [data-sbag-inline] > .sbag-bar.docked { margin: 0; padding: 3px 6px 3px 12px; flex-wrap: nowrap; min-width: 0; max-width: 100%; }
 [data-sbag-inline] > .sbag-bar.docked > button.chip { min-width: 0; flex: 0 1 auto; }
 [data-sbag-inline] > .sbag-bar.docked > button:not(.chip), [data-sbag-inline] > .sbag-bar.docked .made-slot > button { flex: none; white-space: nowrap; }
+/* (A1: in a composer's footer row, an icon; its words for a screen reader and its title) */
+.sbag-bar .ico{display:none}
+[data-sbag-footer]{display:inline-flex;align-items:center;min-width:0;flex:0 1 auto}
+[data-sbag-footer]>.sbag-bar.docked{margin:0;padding:0;background:none;border:0;box-shadow:none;flex-wrap:nowrap;min-width:0;max-width:100%}
+[data-sbag-footer] .made{min-width:0}
+[data-sbag-footer] .sbag-bar button.chip{padding:2px 5px;border-radius:8px}
+[data-sbag-footer] .ico{display:block;flex:none;width:16px;height:16px;background:#4f8a3c;mask:url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 24 24' fill='none' stroke='%23000' stroke-width='2' stroke-linejoin='round' stroke-linecap='round'%3E%3Cpath d='M12 3l7 3v5c0 4.5-3 8.4-7 10-4-1.6-7-5.5-7-10V6z'/%3E%3Cpath d='M9 12l2 2 4-4'/%3E%3C/svg%3E") center/contain no-repeat}
+[data-sbag-footer] .chip>.dot,[data-sbag-footer] .chip>.arr{display:none}
+[data-sbag-footer] .chip>.words{position:absolute;width:1px;height:1px;overflow:hidden;clip:rect(0 0 0 0)}
 .sbag-bar button { font: inherit; border: 0; border-radius: 12px; padding: 3px 10px; background: #fff; color: #24231f; cursor: pointer; }
 .sbag-bar button.open { max-width: 240px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .sbag-bar .made-slot { display: contents; }
@@ -274,10 +283,13 @@ export function mountAgentPairing(ws: PairingWorkspace, o: { button?: HTMLElemen
     // (the chip, and its menu: what the agent may do, Turn off running code, and Revoke one click away; by keyboard too:
     //  Enter, Space or ↓ opens it on its first control, ↑ ↓ Home End move, Escape closes it back on the chip, Tab closes it)
     const n = ++menuSeq;
-    const chipWords = h("span", { textContent: short });
-    const arrow = h("span", { textContent: "▾" });
+    const chipWords = h("span", { className: "words", textContent: short });
+    const arrow = h("span", { className: "arr", textContent: "▾" });
     arrow.setAttribute("aria-hidden", "true");
-    const chip = h("button", { className: "chip", title: full }, h("span", { className: "dot" }), chipWords, arrow);
+    // (the icon, shown only in a composer's footer row (A1, #1546): a shield, drawn by its CSS)
+    const ico = h("span", { className: "ico" });
+    ico.setAttribute("aria-hidden", "true");
+    const chip = h("button", { className: "chip", title: full }, ico, h("span", { className: "dot" }), chipWords, arrow);
     const items = [...(noRun ? [noRun] : []), revoke];
     const fullEl = h("div", { className: "full", id: `sbag-menu-desc-${n}`, textContent: full });
     const list = h("div", { className: "items", id: `sbag-menu-${n}` }, ...items);

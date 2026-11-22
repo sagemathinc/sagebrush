@@ -83,9 +83,9 @@ const fullTierPaths = [
   /^web\/share\//, /^web\/share-client\//, /^web\/csp(?:-policy)?\.m?ts$/, /^web\/safe-html\.ts$/,
   // (the account at the top right, which reads the share dialog's first check: the share dialog's suite, below)
   /^web\/workspace\/account\.ts$/,
-  // (the hosted service's sharing, remotes, log mirror and LTI tool, MS-RSL: their suites run only in web-sync's
-  // full-tier shards; and the mirror's format, which its Worker validates uploads with)
-  /^web\/cloud\/share\//, /^web\/cloud\/remote\//, /^web\/cloud\/mirror\//, /^web\/cloud\/lti\//,
+  // (the hosted service's sharing, remotes, log mirror, LTI tool and support Worker, MS-RSL: their suites run only in
+  // web-sync's full-tier shards; and the mirror's format, which its Worker validates uploads with)
+  /^web\/cloud\/share\//, /^web\/cloud\/remote\//, /^web\/cloud\/mirror\//, /^web\/cloud\/lti\//, /^web\/cloud\/support\//,
   /^web\/workspace\/agent-chat\/mirror-format\.ts$/,
   // data loss: save, Trash, export, purge, and the workspace's store and its migrations
   /^web\/workspace\/[^/]*(?:trash|export|purge|save)[^/]*$/, /^web\/workspace\/export\//,
@@ -257,6 +257,8 @@ const webkitPaths = [
   // (which browsers run code in the sandboxed runner, and the headers that let Firefox load it: its Firefox leg,
   // web/share/test-runner-engines.mjs)
   /^web\/notebook\/runner-(?:browser|worker)\.js$/, /^web\/csp(?:-policy)?\.m?ts$/, /^web\/share\/test-runner-engines\.mjs$/,
+  // (the LaTeX source pane's textarea and the lines behind it, wrapping alike in WebKit)
+  /^web\/latex\/(?:editor|style|highlight|component)\.ts$/, /^web\/latex\/test-latex-webkit-wrap\.mjs$/,
 ];
 const appPaths = [/^app\//, /^\.github\/workflows\/app\.yml$/];
 // Optional packages (optional/<name>/, plan-modular-packages-r4 §7): their

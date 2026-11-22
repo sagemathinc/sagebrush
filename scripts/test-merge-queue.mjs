@@ -46,8 +46,9 @@ for (const w of [ci, app]) {
   assert.deepEqual(w.permissions, { contents: 'read' }, 'queue code gets only a read-only repository token');
   for (const [name, job] of Object.entries(w.jobs)) {
     if (job.permissions) {
-      assert.ok(w === ci && ['size-base', 'wasm-publish'].includes(name), 'no unexpected token override');
-      assert.deepEqual(job.permissions, { contents: 'read', actions: 'read' });
+      assert.ok(w === ci && ['size-base', 'wasm-publish', 'size-gate'].includes(name), 'no unexpected token override');
+      // (size-gate reads only the queued pull request's labels, for the track-pull label: design/size-gate.md)
+      assert.deepEqual(job.permissions, name === 'size-gate' ? { contents: 'read', 'pull-requests': 'read' } : { contents: 'read', actions: 'read' });
     }
     for (const step of job.steps ?? []) {
       if (step.uses?.startsWith('actions/download-artifact@')) {
