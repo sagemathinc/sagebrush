@@ -5665,6 +5665,221 @@
   "owner": "matlab (@sagebrush-matlab)",
   "reason": "refuses nothing: the census matches 'max' in the names cummax and cummin and in numpy's fmax; the line picks MATLAB's NaN-omitting accumulation for cummax and cummin, not a limit on a computation"
  },
+ "lib/_matlab_optim.py ::  :: \"FunctionTolerance\": 1e-6, \"MaxFunctionEvaluations\": \"100*numberOfVariables\", \"MaxIterations\": 400.0, #0": {
+  "class": "none",
+  "owner": "matlab (@sagebrush-matlab)",
+  "reason": "refuses nothing: the census matches 'limit' or 'max' in the documentation of MATLAB's MaxIterations, MaxFunctionEvaluations and older optimset option names; not a limit on a computation"
+ },
+ "lib/_matlab_optim.py ::  :: \"FunctionTolerance\": 1e-6, \"MaxFunctionEvaluations\": \"100*numberOfVariables\", \"MaxIterations\": 400.0, #1": {
+  "class": "none",
+  "owner": "matlab (@sagebrush-matlab)",
+  "reason": "refuses nothing: the census matches 'limit' or 'max' in the documentation of MATLAB's MaxIterations, MaxFunctionEvaluations and older optimset option names; not a limit on a computation"
+ },
+ "lib/_matlab_optim.py ::  :: \"FunctionTolerance\": 1e-6, \"MaxFunctionEvaluations\": \"100*numberOfVariables\", #0": {
+  "class": "none",
+  "owner": "matlab (@sagebrush-matlab)",
+  "reason": "refuses nothing: the census matches 'limit' or 'max' in the documentation of MATLAB's MaxIterations, MaxFunctionEvaluations and older optimset option names; not a limit on a computation"
+ },
+ "lib/_matlab_optim.py ::  :: \"MaxIterations\": \"10*(numberOfEqualities+numberOfInequalities+numberOfVariables)\", #0": {
+  "class": "none",
+  "owner": "matlab (@sagebrush-matlab)",
+  "reason": "refuses nothing: the census matches 'limit' or 'max' in the documentation of MATLAB's MaxIterations, MaxFunctionEvaluations and older optimset option names; not a limit on a computation"
+ },
+ "lib/_matlab_optim.py ::  :: \"MaxIterations\": 400.0, \"OptimalityTolerance\": 1e-6, \"SpecifyObjectiveGradient\": False, #0": {
+  "class": "none",
+  "owner": "matlab (@sagebrush-matlab)",
+  "reason": "refuses nothing: the census matches 'limit' or 'max' in the documentation of MATLAB's MaxIterations, MaxFunctionEvaluations and older optimset option names; not a limit on a computation"
+ },
+ "lib/_matlab_optim.py ::  :: \"evaluation limit.\\n\\n<stopping criteria details>\\n\") #0": {
+  "class": "none",
+  "owner": "matlab (@sagebrush-matlab)",
+  "reason": "refuses nothing beyond MATLAB: the line is MATLAB's own MaxIterations or MaxFunctionEvaluations option (its documented default, set by the user, and the exit flag 0 and message at it); not a limit Sagebrush adds"
+ },
+ "lib/_matlab_optim.py ::  :: \"evaluation limit.\\n\\n<stopping criteria details>\\n\") #1": {
+  "class": "none",
+  "owner": "matlab (@sagebrush-matlab)",
+  "reason": "refuses nothing beyond MATLAB: the line is MATLAB's own MaxIterations or MaxFunctionEvaluations option (its documented default, set by the user, and the exit flag 0 and message at it); not a limit Sagebrush adds"
+ },
+ "lib/_matlab_optim.py ::  :: \"evaluation limit.\\n\\n<stopping criteria details>\\n\") #2": {
+  "class": "none",
+  "owner": "matlab (@sagebrush-matlab)",
+  "reason": "refuses nothing beyond MATLAB: the line is MATLAB's own MaxIterations or MaxFunctionEvaluations option (its documented default, set by the user, and the exit flag 0 and message at it); not a limit Sagebrush adds"
+ },
+ "lib/_matlab_optim.py ::  :: \"maxfunevals\": \"MaxFunctionEvaluations\", \"gradobj\": \"SpecifyObjectiveGradient\", #0": {
+  "class": "none",
+  "owner": "matlab (@sagebrush-matlab)",
+  "reason": "refuses nothing: the census matches 'limit' or 'max' in the documentation of MATLAB's MaxIterations, MaxFunctionEvaluations and older optimset option names; not a limit on a computation"
+ },
+ "lib/_matlab_optim.py ::  :: _ALIASES = {\"tolfun\": \"FunctionTolerance\", \"tolx\": \"StepTolerance\", \"maxiter\": \"MaxIterations\", #0": {
+  "class": "none",
+  "owner": "matlab (@sagebrush-matlab)",
+  "reason": "refuses nothing: the census matches 'limit' or 'max' in the documentation of MATLAB's MaxIterations, MaxFunctionEvaluations and older optimset option names; not a limit on a computation"
+ },
+ "lib/_matlab_optim.py ::  :: _FMINUNC_MAX = (\"\\nSolver stopped prematurely.\\n\\nfminunc stopped because it exceeded the iteration or function \" #0": {
+  "class": "none",
+  "owner": "matlab (@sagebrush-matlab)",
+  "reason": "refuses nothing beyond MATLAB: the line is MATLAB's own MaxIterations or MaxFunctionEvaluations option (its documented default, set by the user, and the exit flag 0 and message at it); not a limit Sagebrush adds"
+ },
+ "lib/_matlab_optim.py ::  :: _FSOLVE_MAX = (\"\\nSolver stopped prematurely.\\n\\nfsolve stopped because it exceeded the iteration or function \" #0": {
+  "class": "none",
+  "owner": "matlab (@sagebrush-matlab)",
+  "reason": "refuses nothing beyond MATLAB: the line is MATLAB's own MaxIterations or MaxFunctionEvaluations option (its documented default, set by the user, and the exit flag 0 and message at it); not a limit Sagebrush adds"
+ },
+ "lib/_matlab_optim.py ::  :: _LP_MAX = \"\\nSolver stopped prematurely.\\n\\nlinprog stopped because it exceeded the iteration limit.\\n\\n\" #0": {
+  "class": "none",
+  "owner": "matlab (@sagebrush-matlab)",
+  "reason": "refuses nothing beyond MATLAB: the line is MATLAB's own MaxIterations or MaxFunctionEvaluations option (its documented default, set by the user, and the exit flag 0 and message at it); not a limit Sagebrush adds"
+ },
+ "lib/_matlab_optim.py ::  :: _LSQ_MAX = (\"\\nSolver stopped prematurely.\\n\\nlsqcurvefit stopped because it exceeded the iteration or function \" #0": {
+  "class": "none",
+  "owner": "matlab (@sagebrush-matlab)",
+  "reason": "refuses nothing beyond MATLAB: the line is MATLAB's own MaxIterations or MaxFunctionEvaluations option (its documented default, set by the user, and the exit flag 0 and message at it); not a limit Sagebrush adds"
+ },
+ "lib/_matlab_optim.py :: _pivot_loop :: \"\"\"the simplex iterations on the tableau for the costs: 0 optimal, 2 unbounded, 3 at the MaxIterations option's #0": {
+  "class": "none",
+  "owner": "matlab (@sagebrush-matlab)",
+  "reason": "refuses nothing: the census matches 'limit' or 'max' in the documentation of MATLAB's MaxIterations, MaxFunctionEvaluations and older optimset option names; not a limit on a computation"
+ },
+ "lib/_matlab_optim.py :: _pivot_loop :: def _pivot_loop(tab, basis, cost, ncols, it, maxit): #0": {
+  "class": "none",
+  "owner": "matlab (@sagebrush-matlab)",
+  "reason": "refuses nothing beyond MATLAB: the line is MATLAB's own MaxIterations or MaxFunctionEvaluations option (its documented default, set by the user, and the exit flag 0 and message at it); not a limit Sagebrush adds"
+ },
+ "lib/_matlab_optim.py :: _pivot_loop :: if it[0] >= maxit: #0": {
+  "class": "none",
+  "owner": "matlab (@sagebrush-matlab)",
+  "reason": "refuses nothing beyond MATLAB: the line is MATLAB's own MaxIterations or MaxFunctionEvaluations option (its documented default, set by the user, and the exit flag 0 and message at it); not a limit Sagebrush adds"
+ },
+ "lib/_matlab_optim.py :: _simplex :: def _simplex(c, Ai, bi, Ae, be, lo, hi, maxit): #0": {
+  "class": "none",
+  "owner": "matlab (@sagebrush-matlab)",
+  "reason": "refuses nothing beyond MATLAB: the line is MATLAB's own MaxIterations or MaxFunctionEvaluations option (its documented default, set by the user, and the exit flag 0 and message at it); not a limit Sagebrush adds"
+ },
+ "lib/_matlab_optim.py :: _simplex :: status 0 optimal, 1 infeasible, 2 unbounded, 3 stopped at MaxIterations pivots. Each variable becomes nonnegative ones (x = lo + z, x = hi - z, or #0": {
+  "class": "none",
+  "owner": "matlab (@sagebrush-matlab)",
+  "reason": "refuses nothing: the census matches 'limit' or 'max' in the documentation of MATLAB's MaxIterations, MaxFunctionEvaluations and older optimset option names; not a limit on a computation"
+ },
+ "lib/_matlab_optim.py :: _simplex :: status = _pivot_loop(tab, basis, cost1, N + m, it, maxit) #0": {
+  "class": "none",
+  "owner": "matlab (@sagebrush-matlab)",
+  "reason": "refuses nothing beyond MATLAB: the line is MATLAB's own MaxIterations or MaxFunctionEvaluations option (its documented default, set by the user, and the exit flag 0 and message at it); not a limit Sagebrush adds"
+ },
+ "lib/_matlab_optim.py :: _simplex :: status = _pivot_loop(tab2, basis2, cost2, N, it, maxit) #0": {
+  "class": "none",
+  "owner": "matlab (@sagebrush-matlab)",
+  "reason": "refuses nothing beyond MATLAB: the line is MATLAB's own MaxIterations or MaxFunctionEvaluations option (its documented default, set by the user, and the exit flag 0 and message at it); not a limit Sagebrush adds"
+ },
+ "lib/_matlab_optim.py :: fminunc_ :: OptimalityTolerance (relative to the first); 2: the step is below StepTolerance; 0: the limits.\"\"\" #0": {
+  "class": "none",
+  "owner": "matlab (@sagebrush-matlab)",
+  "reason": "refuses nothing: the census matches 'limit' or 'max' in the documentation of MATLAB's MaxIterations, MaxFunctionEvaluations and older optimset option names; not a limit on a computation"
+ },
+ "lib/_matlab_optim.py :: fminunc_ :: if it >= maxit or count.n >= maxfev: #0": {
+  "class": "none",
+  "owner": "matlab (@sagebrush-matlab)",
+  "reason": "refuses nothing beyond MATLAB: the line is MATLAB's own MaxIterations or MaxFunctionEvaluations option (its documented default, set by the user, and the exit flag 0 and message at it); not a limit Sagebrush adds"
+ },
+ "lib/_matlab_optim.py :: fminunc_ :: maxit, maxfev = _num(d, \"MaxIterations\"), _num(d, \"MaxFunctionEvaluations\", n) #0": {
+  "class": "none",
+  "owner": "matlab (@sagebrush-matlab)",
+  "reason": "refuses nothing beyond MATLAB: the line is MATLAB's own MaxIterations or MaxFunctionEvaluations option (its documented default, set by the user, and the exit flag 0 and message at it); not a limit Sagebrush adds"
+ },
+ "lib/_matlab_optim.py :: fminunc_ :: msg = _LOCAL_MIN if flag == 1 else (_FMINUNC_MAX if flag == 0 else _FMINUNC_POSSIBLE) #0": {
+  "class": "none",
+  "owner": "matlab (@sagebrush-matlab)",
+  "reason": "refuses nothing beyond MATLAB: the line is MATLAB's own MaxIterations or MaxFunctionEvaluations option (its documented default, set by the user, and the exit flag 0 and message at it); not a limit Sagebrush adds"
+ },
+ "lib/_matlab_optim.py :: fsolve_ :: if it >= maxit or count.n >= maxfev: #0": {
+  "class": "none",
+  "owner": "matlab (@sagebrush-matlab)",
+  "reason": "refuses nothing beyond MATLAB: the line is MATLAB's own MaxIterations or MaxFunctionEvaluations option (its documented default, set by the user, and the exit flag 0 and message at it); not a limit Sagebrush adds"
+ },
+ "lib/_matlab_optim.py :: fsolve_ :: maxit, maxfev = _num(d, \"MaxIterations\"), _num(d, \"MaxFunctionEvaluations\", n) #0": {
+  "class": "none",
+  "owner": "matlab (@sagebrush-matlab)",
+  "reason": "refuses nothing beyond MATLAB: the line is MATLAB's own MaxIterations or MaxFunctionEvaluations option (its documented default, set by the user, and the exit flag 0 and message at it); not a limit Sagebrush adds"
+ },
+ "lib/_matlab_optim.py :: fsolve_ :: msg = {1: _FSOLVE_SOLVED, -2: _FSOLVE_NOT_SOLVED, 0: _FSOLVE_MAX}[flag] #0": {
+  "class": "none",
+  "owner": "matlab (@sagebrush-matlab)",
+  "reason": "refuses nothing beyond MATLAB: the line is MATLAB's own MaxIterations or MaxFunctionEvaluations option (its documented default, set by the user, and the exit flag 0 and message at it); not a limit Sagebrush adds"
+ },
+ "lib/_matlab_optim.py :: fsolve_ :: stopped at a point that is not a root; 0: the iteration or evaluation limit. With Display 'final' (the #0": {
+  "class": "none",
+  "owner": "matlab (@sagebrush-matlab)",
+  "reason": "refuses nothing beyond MATLAB: the line is MATLAB's own MaxIterations or MaxFunctionEvaluations option (its documented default, set by the user, and the exit flag 0 and message at it); not a limit Sagebrush adds"
+ },
+ "lib/_matlab_optim.py :: linprog_ :: maxit = _num(d, \"MaxIterations\", Ai.shape[0] + Ae.shape[0] + n) #0": {
+  "class": "none",
+  "owner": "matlab (@sagebrush-matlab)",
+  "reason": "refuses nothing beyond MATLAB: the line is MATLAB's own MaxIterations or MaxFunctionEvaluations option (its documented default, set by the user, and the exit flag 0 and message at it); not a limit Sagebrush adds"
+ },
+ "lib/_matlab_optim.py :: linprog_ :: msg, flag = _LP_MAX, 0.0 #0": {
+  "class": "none",
+  "owner": "matlab (@sagebrush-matlab)",
+  "reason": "refuses nothing beyond MATLAB: the line is MATLAB's own MaxIterations or MaxFunctionEvaluations option (its documented default, set by the user, and the exit flag 0 and message at it); not a limit Sagebrush adds"
+ },
+ "lib/_matlab_optim.py :: linprog_ :: status, x, y_ineq, y_eq, red, it = _simplex(c, Ai, bi, Ae, be, lo, hi, maxit) #0": {
+  "class": "none",
+  "owner": "matlab (@sagebrush-matlab)",
+  "reason": "refuses nothing beyond MATLAB: the line is MATLAB's own MaxIterations or MaxFunctionEvaluations option (its documented default, set by the user, and the exit flag 0 and message at it); not a limit Sagebrush adds"
+ },
+ "lib/_matlab_optim.py :: lsqcurvefit_ :: flag = 2 if count.n < maxfev else 0 #0": {
+  "class": "none",
+  "owner": "matlab (@sagebrush-matlab)",
+  "reason": "refuses nothing beyond MATLAB: the line is MATLAB's own MaxIterations or MaxFunctionEvaluations option (its documented default, set by the user, and the exit flag 0 and message at it); not a limit Sagebrush adds"
+ },
+ "lib/_matlab_optim.py :: lsqcurvefit_ :: if count.n >= maxfev: #0": {
+  "class": "none",
+  "owner": "matlab (@sagebrush-matlab)",
+  "reason": "refuses nothing beyond MATLAB: the line is MATLAB's own MaxIterations or MaxFunctionEvaluations option (its documented default, set by the user, and the exit flag 0 and message at it); not a limit Sagebrush adds"
+ },
+ "lib/_matlab_optim.py :: lsqcurvefit_ :: if it >= maxit or count.n >= maxfev: #0": {
+  "class": "none",
+  "owner": "matlab (@sagebrush-matlab)",
+  "reason": "refuses nothing beyond MATLAB: the line is MATLAB's own MaxIterations or MaxFunctionEvaluations option (its documented default, set by the user, and the exit flag 0 and message at it); not a limit Sagebrush adds"
+ },
+ "lib/_matlab_optim.py :: lsqcurvefit_ :: limits.\"\"\" #0": {
+  "class": "none",
+  "owner": "matlab (@sagebrush-matlab)",
+  "reason": "refuses nothing: the census matches 'limit' or 'max' in the documentation of MATLAB's MaxIterations, MaxFunctionEvaluations and older optimset option names; not a limit on a computation"
+ },
+ "lib/_matlab_optim.py :: lsqcurvefit_ :: maxit, maxfev = _num(d, \"MaxIterations\"), _num(d, \"MaxFunctionEvaluations\", n) #0": {
+  "class": "none",
+  "owner": "matlab (@sagebrush-matlab)",
+  "reason": "refuses nothing beyond MATLAB: the line is MATLAB's own MaxIterations or MaxFunctionEvaluations option (its documented default, set by the user, and the exit flag 0 and message at it); not a limit Sagebrush adds"
+ },
+ "lib/_matlab_optim.py :: lsqcurvefit_ :: msg = {1: _LOCAL_MIN, 2: _LSQ_STEP, 3: _LSQ_POSSIBLE, 0: _LSQ_MAX}[flag] #0": {
+  "class": "none",
+  "owner": "matlab (@sagebrush-matlab)",
+  "reason": "refuses nothing beyond MATLAB: the line is MATLAB's own MaxIterations or MaxFunctionEvaluations option (its documented default, set by the user, and the exit flag 0 and message at it); not a limit Sagebrush adds"
+ },
+ "lib/_matlab_optim.py :: lsqcurvefit_ :: p[free] = np.linalg.solve(A + mu * np.diag(np.maximum(np.diag(A), 1e-12)), -gf) #0": {
+  "class": "none",
+  "owner": "matlab (@sagebrush-matlab)",
+  "reason": "refuses nothing: the census matches numpy's maximum, a floor of 1e-12 on the Levenberg-Marquardt damping's diagonal scaling so that a zero column of the Jacobian is still damped; not a limit on a computation"
+ },
+ "lib/_matlab_optim.py :: lsqcurvefit_ :: x = np.minimum(np.maximum(x, lo), hi) #0": {
+  "class": "none",
+  "owner": "matlab (@sagebrush-matlab)",
+  "reason": "refuses nothing: the census matches numpy's minimum and maximum, which hold the iterate within the user's lb and ub, as lsqcurvefit's bounds require; not a limit on a computation"
+ },
+ "lib/_matlab_optim.py :: lsqcurvefit_ :: xn = np.minimum(np.maximum(x + p, lo), hi) #0": {
+  "class": "none",
+  "owner": "matlab (@sagebrush-matlab)",
+  "reason": "refuses nothing: the census matches numpy's minimum and maximum, which hold the iterate within the user's lb and ub, as lsqcurvefit's bounds require; not a limit on a computation"
+ },
+ "lib/_matlab_optim.py :: optimoptions_ :: MaxFunEvals, GradObj, Jacobian) are accepted for the current ones\"\"\" #0": {
+  "class": "none",
+  "owner": "matlab (@sagebrush-matlab)",
+  "reason": "refuses nothing: the census matches 'limit' or 'max' in the documentation of MATLAB's MaxIterations, MaxFunctionEvaluations and older optimset option names; not a limit on a computation"
+ },
+ "lib/_matlab_optim.py :: optimoptions_ :: the solver's defaults with the options given set; the older optimset names (TolFun, TolX, MaxIter, #0": {
+  "class": "none",
+  "owner": "matlab (@sagebrush-matlab)",
+  "reason": "refuses nothing: the census matches 'limit' or 'max' in the documentation of MATLAB's MaxIterations, MaxFunctionEvaluations and older optimset option names; not a limit on a computation"
+ },
  "lib/_matlab_extra.py :: readmatrix_.split :: \"\"\"the line's fields: double-quoted fields may hold the delimiter (a doubled quote is a quote in one)\"\"\" #0": {
   "class": "none",
   "owner": "matlab (@sagebrush-matlab)",

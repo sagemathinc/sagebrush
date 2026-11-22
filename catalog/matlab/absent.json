@@ -223,19 +223,6 @@
     ]
   },
   {
-    "name": "fminunc",
-    "kind": "function",
-    "signature": "x = fminunc(fun, x0)",
-    "summary": "Finds an unconstrained minimum by a gradient method (Optimization Toolbox).",
-    "examples": [],
-    "differs": [],
-    "status": "absent",
-    "alternative": "fminsearch (Nelder-Mead, without gradients).",
-    "tags": [
-      "optimization"
-    ]
-  },
-  {
     "name": "fscanf",
     "kind": "function",
     "signature": "A = fscanf(fileID, formatSpec)",
@@ -246,19 +233,6 @@
     "alternative": "load for a numeric file; fgetl with str2double(strsplit(line)) for others.",
     "tags": [
       "files"
-    ]
-  },
-  {
-    "name": "fsolve",
-    "kind": "function",
-    "signature": "x = fsolve(fun, x0)",
-    "summary": "Solves a system of nonlinear equations (Optimization Toolbox).",
-    "examples": [],
-    "differs": [],
-    "status": "absent",
-    "alternative": "fzero for one equation in one unknown; for a system, fminsearch on the sum of the squared residuals (a local minimum of 0 is a solution).",
-    "tags": [
-      "optimization"
     ]
   },
   {
@@ -404,33 +378,6 @@
     "alternative": "remove it (there is no debugger)",
     "tags": [
       "language-dynamic"
-    ]
-  },
-  {
-    "name": "linprog",
-    "kind": "function",
-    "signature": "x = linprog(f, A, b)",
-    "summary": "Solves a linear program (Optimization Toolbox).",
-    "examples": [],
-    "differs": [],
-    "status": "absent",
-    "alternative": "Sage mode's MixedIntegerLinearProgram, which solves linear and mixed-integer programs.",
-    "tags": [
-      "optimization"
-    ]
-  },
-  {
-    "name": "lsqcurvefit",
-    "kind": "function",
-    "signature": "x = lsqcurvefit(fun, x0, xdata, ydata)",
-    "summary": "Fits a nonlinear model to data by least squares (Optimization Toolbox).",
-    "examples": [],
-    "differs": [],
-    "status": "absent",
-    "alternative": "polyfit for a polynomial; mldivide for a model linear in its parameters; fminsearch on the sum of squared residuals otherwise.",
-    "tags": [
-      "optimization",
-      "curve fitting"
     ]
   },
   {
