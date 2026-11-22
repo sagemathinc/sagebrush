@@ -2240,6 +2240,19 @@ async function navLease() {
 // count when it was asked for) attaches only if none was since, checked holding the navigation lease before anything
 // is detached, so a notebook the person opened meanwhile always wins)
 let arrivalWait = null, attachSeq = 0;
+// (the file's name wins on open: a stored title that a rename didn't follow (older data, a sync's rename) is replaced
+// by the file's name, shown, and kept as a typed title is; only for this notebook while it is still the one open, and
+// never while its title is being typed)
+async function fileNameWins(id) {
+  try {
+    const p = ws ? await ws.pathOf("notebook", id) : null;
+    if (!p || current.id !== id || document.activeElement === nbName) return;
+    const base = splitExt(nameOf(p))[0];
+    if (!base || base === docName()) return;
+    showName(base);
+    if (pageMay().rename) nb.setMeta({ name: base });
+  } catch {}
+}
 async function open(store, id, kind = "browser", guard = null, intent = null) {
   const endSwitch = await navLease();
   try {
@@ -2299,7 +2312,7 @@ async function open(store, id, kind = "browser", guard = null, intent = null) {
   // (the reactive notebook: random numbers are reproducible per cell, always)
   $("#ttreprolabel").hidden = REACTIVE;
   if (kind === "browser") try { localStorage.setItem("sagebrush-current", id); } catch {}
-  if (kind === "browser") wsListNotebook(id, doc.name, nb.mode).then(wsTrackCurrent);
+  if (kind === "browser") wsListNotebook(id, doc.name, nb.mode).then(() => fileNameWins(id)).then(wsTrackCurrent);
   if (kind === "browser") recordOpened({ kind: "notebook", ref: id });
   startHistory(id);
   presence.open(id);
