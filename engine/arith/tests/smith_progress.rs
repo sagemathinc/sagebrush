@@ -9,7 +9,7 @@
 
 #![cfg(not(target_arch = "wasm32"))]
 
-use num_traits::One;
+use num_traits::{One, Signed};
 use sagebrush_arith::cost::{tallied, FAMILIES};
 use sagebrush_arith::smith::estimate;
 use sagebrush_arith::smith::progress::{self, testing, BEFORE_DONE, THRESHOLD};
@@ -682,9 +682,11 @@ fn stage2_terms(a: &ZMat) -> (Vec<(String, u64)>, &'static str) {
 fn route3_reforecasts_against_the_named_model() {
     let _l = lock();
     for (name, a, _) in inputs().into_iter().filter(|x| x.0.starts_with("route 3")) {
-        let _ = testing::reforecasts();
+        testing::observe(true);
         let (ev, ..) = traced(&a);
         let log = testing::reforecasts();
+        let t = testing::core_t().expect("the core's T");
+        testing::observe(false);
         let (terms, side) = stage2_terms(&a);
         let order = progress::ROUTE3_ORDER;
         let pos = |n: &str| order.iter().position(|o| *o == n);
@@ -703,6 +705,16 @@ fn route3_reforecasts_against_the_named_model() {
         assert!((rg - after as f64).abs() <= 1e-9 * after as f64 + 2.0, "{name}: R after G {rg} against the model's {after}");
         let m = (core + comb) as f64;
         assert!((rc / m - 1.0).abs() <= 0.05, "{name}: R at the core {rc} against the model's core and combine {m}");
+        // the core's budget from T's own stage 2, by the existing models (as
+        // route 1's attempts: stage 2 less the inverse's model): R at the
+        // core's re-budget is that budget and the model's combine
+        let (nm, den, det) = zmat::inverse_det(&t).unwrap();
+        assert_eq!(den, det.abs(), "{name}: T's core takes route 1 (k <= 1)");
+        let s2 = estimate::stage2(&t, &nm, &den, &det, None).unwrap();
+        let inv = zmat::inverse_model(&t, zmat::limbs(&den), 2, None);
+        let budget: u64 = (0..FAMILIES).map(|i| s2.0[i] - inv.0[i]).sum();
+        let want = (budget + comb) as f64;
+        assert!((rc - want).abs() <= 1e-9 * want + 2.0, "{name}: R at the core {rc} against T's stage 2 ({budget}) and combine ({comb})");
         // (the core's stage stays "core", and its re-forecast is the core's)
         let e = ev.iter().rev().find(|e| e.written && e.report.done == log.iter().find(|x| x.0 == "core").unwrap().1).unwrap();
         assert_eq!(stage_name(e.report.stage), "core", "{name}");
@@ -719,6 +731,7 @@ fn a_crossing_at_the_success_flush_is_reported() {
     let _l = lock();
     let (_, a, _) = inputs().remove(1);
     let run = |f: f64| {
+        testing::observe(true);
         testing::scale_forecast(f);
         sagebrush_interrupt::clear();
         testing::set_threshold(Some(64));
@@ -727,7 +740,9 @@ fn a_crossing_at_the_success_flush_is_reported() {
         let ev = record::take();
         testing::set_threshold(None);
         testing::scale_forecast(1.0);
-        (ev, testing::first_forecast().unwrap())
+        let first = testing::first_forecast().unwrap();
+        testing::observe(false);
+        (ev, first)
     };
     // at scale 1: the first forecast's units, and where the last refresh
     // before the success flush sits
@@ -749,3 +764,17 @@ fn a_crossing_at_the_success_flush_is_reported() {
     assert!(last.report.beyond_forecast, "the success frame missed the crossing");
 }
 
+
+/// The tests' observations are inert unless a test turns them on: runs
+/// with them off record no re-forecast, no first forecast and no T.
+#[test]
+fn observations_are_off_by_default() {
+    let _l = lock();
+    testing::observe(false);
+    for (_, a, _) in inputs().into_iter().filter(|x| x.0.starts_with("route 3")) {
+        let _ = traced(&a);
+    }
+    assert!(testing::reforecasts().is_empty());
+    assert!(testing::first_forecast().is_none());
+    assert!(testing::core_t().is_none());
+}

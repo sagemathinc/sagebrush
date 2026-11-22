@@ -78,18 +78,46 @@ thread_local! {
     static THRESHOLD_TEST: std::cell::Cell<Option<u64>> = const { std::cell::Cell::new(None) };
     static CLOCK_TEST: std::cell::Cell<Option<u64>> = const { std::cell::Cell::new(None) };
     static FORECAST_SCALE: std::cell::Cell<f64> = const { std::cell::Cell::new(1.0) };
-    /// The tests' record of the first total forecast of the last call.
+    /// The tests' observations, kept only while a test turns them on
+    /// ([`testing::observe`]): the first total forecast of the last call,
+    /// route 3's re-forecasts (which, done at it), and the last core's T.
+    static OBSERVE: std::cell::Cell<bool> = const { std::cell::Cell::new(false) };
     static FIRST_SEEN: std::cell::Cell<Option<u64>> = const { std::cell::Cell::new(None) };
-    /// The tests' log of route 3's re-forecasts: (which, done at it).
     static REFORECASTS: RefCell<Vec<(&'static str, u64)>> = const { RefCell::new(Vec::new()) };
+    static CORE_T: RefCell<Option<ZMat>> = const { RefCell::new(None) };
+}
+
+fn observing() -> bool {
+    OBSERVE.with(|o| o.get())
+}
+
+fn note_first(first: Option<u64>) {
+    if observing() {
+        FIRST_SEEN.with(|f| f.set(first));
+    }
 }
 
 fn log_reforecast(what: &'static str, done: u64) {
+    if !observing() {
+        return;
+    }
     REFORECASTS.with(|r| {
         if let Ok(mut r) = r.try_borrow_mut() {
             r.push((what, done));
         }
     });
+}
+
+/// Route 3's core matrix T, kept for the tests while they observe (a copy:
+/// nothing otherwise).
+pub(crate) fn observe_core(t: &ZMat) {
+    if observing() && active() {
+        CORE_T.with(|c| {
+            if let Ok(mut c) = c.try_borrow_mut() {
+                *c = Some(t.clone());
+            }
+        });
+    }
 }
 
 /// Whether A is large enough for a progress call: m n entries of at least
@@ -167,6 +195,20 @@ pub mod testing {
     /// restores the production one.
     pub fn set_clock_every(t: Option<u64>) {
         CLOCK_TEST.with(|x| x.set(t));
+    }
+
+    /// Keeps the tests' observations on this thread (on), or stops and
+    /// clears them (off).
+    pub fn observe(on: bool) {
+        OBSERVE.with(|o| o.set(on));
+        FIRST_SEEN.with(|f| f.set(None));
+        REFORECASTS.with(|r| r.borrow_mut().clear());
+        CORE_T.with(|c| *c.borrow_mut() = None);
+    }
+
+    /// The last route 3 core's T, taken.
+    pub fn core_t() -> Option<ZMat> {
+        CORE_T.with(|c| c.borrow_mut().take())
     }
 
     /// The last call's first total forecast (done at its first phase plus
@@ -414,7 +456,7 @@ pub(crate) fn phase(stage: &str, index: u64, count: Option<u64>, budget: u64, fu
         st.future = scaled(future);
         if st.first.is_none() {
             st.first = Some(done.saturating_add(st.budget).saturating_add(st.future));
-            FIRST_SEEN.with(|f| f.set(st.first));
+            note_first(st.first);
         }
         let r = st.call.report();
         r.stage = progress::table_index(progress::STAGES, stage);
@@ -496,7 +538,7 @@ fn route3_active(st: &mut State) {
     st.future = all.saturating_sub(budget);
     if st.first.is_none() {
         st.first = Some(done.saturating_add(all));
-        FIRST_SEEN.with(|f| f.set(st.first));
+        note_first(st.first);
     }
     let (stage, index) = route3_stage(active.as_deref().unwrap_or("combine"));
     let r = st.call.report();

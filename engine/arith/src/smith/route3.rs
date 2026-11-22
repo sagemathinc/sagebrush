@@ -990,6 +990,7 @@ pub(super) fn smith_route3(a: &ZMat) -> Result<super::SmithForm, String> {
     };
     acc.flush();
     // (T's own phases are not this run's)
+    super::progress::observe_core(&t);
     let core = {
         let _p = super::progress::inner();
         super::nonsingular(&t, usize::MAX)?

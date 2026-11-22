@@ -2820,6 +2820,21 @@
   "owner": "engine arithmetic (exact linear algebra)",
   "reason": "a test of the Smith form's live progress (its forecast's budgets, its size gate, its fraction cap): refuses nothing"
  },
+ "engine/arith/tests/smith_progress.rs :: route3_reforecasts_against_the_named_model :: assert!((rc - want).abs() <= 1e-9 * want + 2.0, \"{name}: R at the core {rc} against T's stage 2 ({budget}) and combine ({comb})\"); #0": {
+  "class": "none",
+  "owner": "engine arithmetic (exact linear algebra)",
+  "reason": "a test of the Smith form's live progress (its forecast's budgets, its size gate, its fraction cap): refuses nothing"
+ },
+ "engine/arith/tests/smith_progress.rs :: route3_reforecasts_against_the_named_model :: let budget: u64 = (0..FAMILIES).map(|i| s2.0[i] - inv.0[i]).sum(); #0": {
+  "class": "none",
+  "owner": "engine arithmetic (exact linear algebra)",
+  "reason": "a test of the Smith form's live progress (its forecast's budgets, its size gate, its fraction cap): refuses nothing"
+ },
+ "engine/arith/tests/smith_progress.rs :: route3_reforecasts_against_the_named_model :: let want = (budget + comb) as f64; #0": {
+  "class": "none",
+  "owner": "engine arithmetic (exact linear algebra)",
+  "reason": "a test of the Smith form's live progress (its forecast's budgets, its size gate, its fraction cap): refuses nothing"
+ },
  "engine/arith/tests/smith_progress.rs :: the_gate_and_re_entry :: let t = THRESHOLD as usize; #0": {
   "class": "none",
   "owner": "engine arithmetic (exact linear algebra)",
