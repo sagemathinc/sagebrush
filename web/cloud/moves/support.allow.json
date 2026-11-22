@@ -48,5 +48,60 @@
   "file": "web/cloud/support/test-support.mjs",
   "from": "// web/support/test-support-page.mjs, run from here so it is part of this suite (scripts/ci-suites.txt)",
   "to": "// web/cloud/support/test-support-page.mjs, run from here so it is part of this suite (its ci: header)"
+ },
+ {
+  "file": "web/cloud/support/README.md",
+  "from": "`support.sagebrush.space` (production) and `support-dev.sagebrush.space` (`--mode dev`). The plan is",
+  "to": "`support.sagebrush.space` (production) and `support-dev.sagebrush.space` (`--mode dev`)."
+ },
+ {
+  "file": "web/cloud/support/README.md",
+  "from": "plan-support-requests r12.",
+  "to": ""
+ },
+ {
+  "file": "web/cloud/support/README.md",
+  "from": "to CoCalc's support system, `POST <CoCalc>/api/v2/support/sagebrush-intake` (cocalc-ai#1548, docs/sagebrush.md",
+  "to": "to CoCalc's support intake, `POST <CoCalc>/api/v2/support/sagebrush-intake`, which creates the Zendesk ticket as CoCalc's own support form does."
+ },
+ {
+  "file": "web/cloud/support/README.md",
+  "from": "section 6 there). CoCalc creates the Zendesk ticket exactly as its own support form does. The Worker keeps no copy",
+  "to": "**That endpoint isn't in CoCalc yet** (it was proposed in cocalc-ai#1548, which closed without merging), so until it is, the Worker can't pass a request on. The Worker keeps no copy"
+ },
+ {
+  "file": "web/cloud/support/README.md",
+  "from": "**The per-person limits are CoCalc's:** per email, per IP and per email and IP, in their own namespace (see",
+  "to": "**The per-person limits are to be CoCalc's:** per email, per IP and per email and IP, in their own namespace, in that intake."
+ },
+ {
+  "file": "web/cloud/support/README.md",
+  "from": "docs/sagebrush.md section 6 in cocalc-ai). `SUPPORT_IP` only stops floods cheaply, before Turnstile.",
+  "to": "`SUPPORT_IP` only stops floods cheaply, before Turnstile."
+ },
+ {
+  "file": "web/cloud/support/README.md",
+  "from": "**An agent's draft** (the addendum to plan-support-requests r12): `https://support.sagebrush.space/#draft=<base64url",
+  "to": "**An agent's draft:** `https://support.sagebrush.space/#draft=<base64url"
+ },
+ {
+  "file": "web/cloud/support/README.md",
+  "from": "  listener, for a trusted click on Send itself (the mouse, or Enter or Space with Send focused) with user activation.",
+  "to": "  listener, for a real click on Send itself (the event's `isTrusted` is true: the mouse, or Enter or Space with Send focused) with user activation."
+ },
+ {
+  "file": "web/cloud/support/README.md",
+  "from": "  A script's `send.click()` isn't trusted, even after the person has clicked elsewhere on the page.",
+  "to": "  A script's `send.click()` doesn't count (its `isTrusted` is false), even after the person has clicked elsewhere on the page."
+ },
+ {
+  "file": "web/cloud/support/README.md",
+  "from": "## Setup (William or @sagebrush; nothing secret is in this repository)",
+  "to": "## Setup (by the maintainers; nothing secret is in this repository)"
+ },
+ {
+  "file": "web/cloud/support/README.md",
+  "from": "## Deploy (by @sagebrush; this Worker isn't in the automatic DEV deploy)",
+  "to": "## Deploy (by the maintainers; this Worker isn't in the automatic DEV deploy)"
  }
 ]

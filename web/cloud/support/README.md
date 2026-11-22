@@ -1,12 +1,12 @@
 # web/cloud/support: the support Worker
 
 The "Report an issue / request support" page for Sagebrush and its one API, on a domain of its own:
-`support.sagebrush.space` (production) and `support-dev.sagebrush.space` (`--mode dev`). The plan is
-plan-support-requests r12.
+`support.sagebrush.space` (production) and `support-dev.sagebrush.space` (`--mode dev`).
+
 
 The page (`page.ts`) sends a request to `POST /api/v1/requests` (`support.ts`). The Worker checks it and passes it
-to CoCalc's support system, `POST <CoCalc>/api/v2/support/sagebrush-intake` (cocalc-ai#1548, docs/sagebrush.md
-section 6 there). CoCalc creates the Zendesk ticket exactly as its own support form does. The Worker keeps no copy
+to CoCalc's support intake, `POST <CoCalc>/api/v2/support/sagebrush-intake`, which creates the Zendesk ticket as CoCalc's own support form does.
+**That endpoint isn't in CoCalc yet** (it was proposed in cocalc-ai#1548, which closed without merging), so until it is, the Worker can't pass a request on. The Worker keeps no copy
 of a request; its only storage is the backstop's counters.
 
 **What the API checks, in order** (each fails closed; `support.ts`'s header has the details):
@@ -43,12 +43,12 @@ of a request; its only storage is the backstop's counters.
    | 401 | 503, logged as `intake-key-rejected` |
    | anything else, including a redirect or a timeout | 503 |
 
-**The per-person limits are CoCalc's:** per email, per IP and per email and IP, in their own namespace (see
-docs/sagebrush.md section 6 in cocalc-ai). `SUPPORT_IP` only stops floods cheaply, before Turnstile.
+**The per-person limits are to be CoCalc's:** per email, per IP and per email and IP, in their own namespace, in that intake.
+`SUPPORT_IP` only stops floods cheaply, before Turnstile.
 
 **Logs** carry fixed codes and CoCalc's HTTP status only.
 
-**An agent's draft** (the addendum to plan-support-requests r12): `https://support.sagebrush.space/#draft=<base64url
+**An agent's draft:** `https://support.sagebrush.space/#draft=<base64url
 of the UTF-8 JSON {"v":1,"kind","title","description"}>` fills the form, for the person to review and send.
 - The page reads the fragment once and clears it with `history.replaceState`. A fragment never reaches a server or
   a log.
@@ -56,10 +56,10 @@ of the UTF-8 JSON {"v":1,"kind","title","description"}>` fills the form, for the
   empty. Every other key (`send`, `submit`, `email`) is ignored.
 - Only the person's own activation of Send sends. Send is a `type="button"`, so there is no form submission path: a
   submit (`requestSubmit()`, Enter in a field) is cancelled and sends nothing. The one POST is in Send's own click
-  listener, for a trusted click on Send itself (the mouse, or Enter or Space with Send focused) with user activation.
-  A script's `send.click()` isn't trusted, even after the person has clicked elsewhere on the page.
+  listener, for a real click on Send itself (the event's `isTrusted` is true: the mouse, or Enter or Space with Send focused) with user activation.
+  A script's `send.click()` doesn't count (its `isTrusted` is false), even after the person has clicked elsewhere on the page.
 
-## Setup (William or @sagebrush; nothing secret is in this repository)
+## Setup (by the maintainers; nothing secret is in this repository)
 
 - **Replace before deploy** (placeholders in `cloudflare.config.ts`): the two D1 ids and the two Turnstile site keys
   (empty: the page answers 503 until set).
@@ -73,7 +73,7 @@ of the UTF-8 JSON {"v":1,"kind","title","description"}>` fills the form, for the
   exactly the intake path.
 - **Production** is `SUPPORT_OPEN` "0" until William's go.
 
-## Deploy (by @sagebrush; this Worker isn't in the automatic DEV deploy)
+## Deploy (by the maintainers; this Worker isn't in the automatic DEV deploy)
 
 ```sh
 cd web/cloud/support && npm install
