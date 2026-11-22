@@ -1,0 +1,16 @@
+{
+ "title": "Spectral analysis (MATLAB)",
+ "summary": "A filter's frequency response with freqz, windows, Welch's power spectral density with pwelch, and a chirp's spectrogram.",
+ "tags": [
+  "data",
+  "plots"
+ ],
+ "level": "course",
+ "main": "main.ipynb",
+ "files": [
+  "main.ipynb"
+ ],
+ "mode": "matlab",
+ "author": "Sagebrush",
+ "license": "MIT"
+}
