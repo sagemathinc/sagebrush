@@ -1191,6 +1191,9 @@ const delegateUi = mountDelegate({
   site: new URL("../", import.meta.url),
   // (a proposal's .tex rendered under its diff, where this page has the LaTeX editor, as an artifact's .tex is)
   latex: __SB_LATEX__ && __SB_LATEX_HOSTS__.includes(location.hostname) ? () => import(/* @vite-ignore */ LATEX_URL) : null,
+  // (a proposal's .md rendered under its diff with this page's own Markdown renderer, the chat's: safe HTML, remote
+  //  pictures click-to-load)
+  markdown: md,
   toast,
 });
 // (the Files | Agents switch at the right of the chat list's header, Agents pressed: Files opens the notebook page with

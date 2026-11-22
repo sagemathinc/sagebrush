@@ -59,6 +59,9 @@ export type DelegateHost = {
   site: URL;
   /** the LaTeX page module, where this page has the LaTeX editor: a proposal's .tex shown rendered (none: its diff only) */
   latex?: (() => Promise<any>) | null;
+  /** the page's Markdown renderer (the chat's: safe HTML, remote pictures click-to-load): a proposal's .md shown
+   *  rendered (none: its diff only) */
+  markdown?: ((src: string) => string) | null;
   toast: (text: string, ms?: number) => void;
 };
 
@@ -200,7 +203,7 @@ export function mountDelegate(h: DelegateHost) {
     const mod = (await import(new URL("sagebrush-review.js", h.site).href)) as typeof import("../workspace/review/review-page");
     if (!dlg.isConnected) return;
     const actions = el("p", { className: "st", textContent: T.laterActions });
-    pv = mod.openProposal(D.source(id, commit), panel, { notebook: () => import(new URL("sagebrush-notebook.js", h.site).href), latex: h.latex ?? null, actions });
+    pv = mod.openProposal(D.source(id, commit), panel, { notebook: () => import(new URL("sagebrush-notebook.js", h.site).href), latex: h.latex ?? null, markdown: h.markdown ?? null, actions });
   }
 
   function render() {

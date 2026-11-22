@@ -8,7 +8,8 @@
 // Delegate… (the sheet: the composer's text, the documents, May run code) and Start; the switch off, with the running
 // tasks closed first when ticked, Delegate… disabled while it turns off, then the host told. A proposal's .tex: its
 // diff, and (AGENTS_LATEX=1, the LaTeX test build) the document rendered read only beside Before; without the LaTeX
-// editor on this host, its diff only.
+// editor on this host, its diff only. A proposal's .md: its diff, and the text rendered by the page's own Markdown
+// renderer (a remote picture click-to-load), As proposed and Before.
 //   SAGEBRUSH_AGENTS=1 bun web/build.ts && CHROME=google-chrome bun web/agents/test-agents-delegate.mjs
 import { spawn } from "node:child_process";
 import { writeFileSync } from "node:fs";
@@ -128,6 +129,24 @@ try {
     await sleep(500);
     ok(await P.ev(`!document.querySelector('dialog.proposal[open] .tex-rendered') && !document.querySelector('dialog.proposal[open] .file .msg')`), "a proposal's .tex where this host has no LaTeX editor: its diff only, nothing said");
   }
+  await P.ev(`document.querySelector('dialog.proposal[open] .x').click()`);
+  await P.ev(`document.querySelector('#task-view .task-head .link').click()`);
+
+  // ---- a proposal's .md: its diff, and the text rendered by this page's own Markdown renderer (the chat's: a remote
+  //  picture is click-to-load, never fetched), As proposed and Before
+  const MD0 = "# Notes\n\nOld text.\n";
+  const M = await H.addTask({ title: "Write up the results", status: "proposal", base: { "work/notes.md": MD0 }, proposal: { "work/notes.md": "# Results\n\nIt **works**.\n\n![plot](https://example.com/plot.png)\n" } });
+  await P.until(`!!document.querySelector('#tasks .task[data-task="${M.task}"]')`);
+  await P.ev(`document.querySelector('#tasks .task[data-task="${M.task}"]').click()`);
+  await P.until(`!!document.querySelector('#task-view .proposal-card')`);
+  await P.ev(`document.querySelector('#task-view .proposal-card').click()`);
+  const mdDrawn = await P.until(`document.querySelector('dialog.proposal[open] .md-rendered h1')?.textContent === 'Results'`, 20000);
+  await shot("4c-proposal-md");
+  const mv = await P.ev(`(() => { const r = document.querySelector('dialog.proposal[open] .md-rendered'); return { buttons: [...r.querySelectorAll(':scope > p button')].map((b) => b.textContent + ":" + b.getAttribute('aria-pressed')), strong: r.querySelector(':scope > div strong')?.textContent ?? null, remote: [...r.querySelectorAll('img')].filter((i) => /example\\.com/.test(i.getAttribute('src') ?? '')).length, plus: [...document.querySelectorAll('dialog.proposal[open] .l\\\\+')].map((x) => x.textContent) }; })()`);
+  ok(mdDrawn && mv.strong === "works" && mv.plus.includes("+ # Results") && JSON.stringify(mv.buttons) === JSON.stringify(["As proposed:true", "Before:false"]), "a proposal's .md: its line diff, and under it the text as proposed, rendered by the page's Markdown renderer (heading, bold), Before offered", { mdDrawn, mv });
+  ok(mv.remote === 0, "a remote picture in the proposed Markdown isn't fetched (the chat's click-to-load)", mv);
+  await P.ev(`[...document.querySelectorAll('dialog.proposal[open] .md-rendered button')].find((b) => b.textContent === 'Before').click()`);
+  ok(await P.until(`document.querySelector('dialog.proposal[open] .md-rendered h1')?.textContent === 'Notes'`, 10000), "Before: the text as it was, rendered in its place");
   await P.ev(`document.querySelector('dialog.proposal[open] .x').click()`);
   await P.ev(`document.querySelector('#task-view .task-head .link').click()`);
 
