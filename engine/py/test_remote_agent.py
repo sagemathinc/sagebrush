@@ -1299,8 +1299,8 @@ async def test_cycles_ending_in_a_detach_leave_no_attached_line_behind():
 
 # ================= the reviewed sagebrush-agent, vendored: its version, and its clamp against the runner's frame
 
-VENDORED = os.path.join(HERE, "fixtures", "sagebrush-agent-0.8.13.tgz")
-VENDORED_SHA256 = "ce3d166ca956b2c740bfb3379ca82fda8382a1bd33e01ce2bfc121c4cf11b919"
+VENDORED = os.path.join(HERE, "fixtures", "sagebrush-agent-0.8.14.tgz")
+VENDORED_SHA256 = "73052fd1620bef59120c997327e8876461d719d5b2cad6651db8bd5a603301dd"
 STUB_DEPS = os.path.join(HERE, "remote_agent_stub_deps.mjs")
 
 
