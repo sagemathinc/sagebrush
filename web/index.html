@@ -1087,6 +1087,8 @@ function makeKernel(owner) {
   // and ends with that interpreter: each once scope is bound to the first generation that starts with it, and expires
   // at any later start; the document closed ends them all, with its session's denials)
   const onceAt = new Map(); // once scope -> the generation it took effect in
+  // (the grant an Allow at a waiting change's prompt is making, during it: policyChanged doesn't end that request for it)
+  let ownGrant = false;
   // (whether sender `w` may change `path` now: the document's current interpreter, of that generation, and both its
   // ceiling and the document's trees now cover it; asked as a change arrives and again at its final admission)
   const admit = (w, path) => {
@@ -1140,6 +1142,9 @@ function makeKernel(owner) {
       epoch = 1;
       sentTrees = cap;
       if (!LOCAL) w.postMessage({ fsWrite: { epoch, state: stateOf(cap), trees: cap } });
+      // (this page answers a change a run waits on, with its prompt (the write-wait design): the interpreter asks only once
+      // told so; the tests' refuse-at-once switch (ASK_WAIT) keeps it from asking at all)
+      if (!LOCAL && owner !== null && ASK_WAIT) w.postMessage({ fsAskable: true });
       // (its own folder: the working folder and sys.path[0], as Jupyter runs a notebook, so it opens and imports the
       // files beside it (Nov 4 ruling); read at each start, so a rename or a move takes effect at the next one. A
       // notebook kept only in this browser, as a link (?open=) opens one, is in no folder: it starts at the top of the
@@ -1172,6 +1177,23 @@ function makeKernel(owner) {
           unpinned.delete(sender);
           k.holdMessages(pinUsedPkgset(owner, S));
         }
+        return true;
+      }
+      // (a change the interpreter asks about while its run waits (web/worker.ts fsAsk), which the kernel admitted as a
+      // request of the run in flight (WorkerKernel.takeAsk): the prompt for that path, bound to this request, this
+      // interpreter and the policy it was asked under; the answer (k.answerAsk) allows only by an Allow there, widening
+      // this generation's ceiling (widenFor). `live`, asked now and again before anything is granted or widened: still
+      // that run's open request (no Stop, not over), this document's current interpreter, and the epoch the request was
+      // made at still this page's (a permission change since: no). Anything else is answered no at once)
+      if (m.fsAsk !== undefined) {
+        const a = m.fsAsk, sender_ = sender, g = gens.get(sender);
+        let settled = false;
+        const reply = (policy) => { if (settled) return; settled = true; k.answerAsk(m, sender_, policy); };
+        const live = () => owner !== null && owner === current.id && sender_ === k.worker && g === gen && a.epoch === epoch && k.askLive(m);
+        if (!live() || !fsCanon(a.path) || /^\/(tmp|\$pyjs)(\/|$)/.test(a.path)) { reply(null); return true; }
+        // (the tests' switch: refused at once, the prompt saying to run again, as where the run can't wait)
+        if (!ASK_WAIT) { reply(null); filesPrompt(owner, g, a.path, false, a.what); return true; }
+        filesPrompt(owner, g, a.path, false, a.what, { key: a.key, live, reply, widen: (folder, once) => (live() ? widenFor(sender_, folder, once) : null), grant: (f) => { ownGrant = true; try { return f(); } finally { ownGrant = false; } } });
         return true;
       }
       // (a change the interpreter refused: the prompt for that path, for the document shown)
@@ -1223,6 +1245,8 @@ function makeKernel(owner) {
   k.on("status", (text) => { if (k === kernel) statusEl.textContent = text; });
   // (a Stop, by any route (WorkerKernel.interrupt): this document's open prompt closes unanswered: PROMPT934-3)
   k.on("interrupt", () => { if (owner !== null && fbReq?.doc === owner) filesBar(false); });
+  // (a waiting change retired by the kernel (its run's Stop or end, a new interpreter): its prompt closes, unanswered)
+  k.on("ask-retired", (key) => { if (fbReq?.ask?.key === key) filesBar(false); });
   // (background loading, web/preload.ts: a Run starts no further prefetch; one in flight finishes)
   k.on("execute", preloadStop);
   if (owner !== null) {
@@ -1244,8 +1268,22 @@ function makeKernel(owner) {
   // epoch's end); a widening waits for the person's next Run (rotateIfWidened); nothing else changes here)
   function policyChanged() {
     if (owner === null || !k.worker) return;
-    const next = meetTrees(cap, perms.writeTrees(owner));
-    if (sameTrees(next, sentTrees)) return;
+    const now = perms.writeTrees(owner), next = meetTrees(cap, now);
+    // (the generation's own ceiling narrowed too, never widened here: what admit() and an Allow's widening (widenFor)
+    // build on, so a permission taken away stays away in this generation, whatever is granted again before a Run)
+    if (ceilings.has(gen)) ceilings.set(gen, meetTrees(ceilings.get(gen), now));
+    // (a change that leaves this interpreter's trees as they are (a grant elsewhere, one undone): the epoch moves all the
+    // same, the same trees at the next one, so a change asked about before it, perhaps still in delivery, is over (its
+    // epoch isn't the page's: live() below) and a run in flight refuses its next change as "changed"; but not for the
+    // grant an Allow at the prompt makes for the change it answers (ownGrant), which widenFor's epoch then follows)
+    if (sameTrees(next, sentTrees)) {
+      // (no shared epoch word: no change waits, none asks; the epoch's end: a new interpreter, as for a narrowing there)
+      if (ownGrant || !k.sharesEpoch) return;
+      if (epoch >= EPOCH_MAX) return k.restart(PERM_RESTARTED);
+      epoch++;
+      k.setPolicy({ epoch, state: stateOf(sentTrees), trees: sentTrees });
+      return;
+    }
     cap = next;
     // (a restart where the epoch can't do it: a plain worker of the page, which a document that may not change
     // everything never keeps (scoped runs only in the sandboxed runner); no shared epoch word; the epoch's end)
@@ -1254,6 +1292,28 @@ function makeKernel(owner) {
     epoch++;
     sentTrees = next;
     k.setPolicy({ epoch, state: stateOf(next), trees: next });
+  }
+  // (an Allow at the prompt of a change this interpreter waits on (the write-wait design, SEC ruling of Nov 22, 2026):
+  // its ceiling widened, for its own generation only, to that folder (never "/", which the prompt never offers): the
+  // policy at the next epoch, for the answer, whose holder stores the epoch before writing it; null where it can't be
+  // (another interpreter or generation now, no shared epoch word, the epoch's end, a policy past the answer's bound).
+  // Every other widening still waits for the next Run (rotateIfWidened); an Allow once ends with this generation)
+  function widenFor(w, folder, once) {
+    const g = gens.get(w);
+    if (owner === null || folder === "/" || !fsCanon(folder) || g === undefined || g !== gen || k.worker !== w || !k.sharesEpoch || epoch >= EPOCH_MAX) return null;
+    // (from what this generation may change now, its ceiling as narrowed since it started and what is allowed now, and
+    // that one folder, which must be allowed now: nothing taken away since comes back with it)
+    const now = perms.writeTrees(owner);
+    if (!now.some((t) => coversW(t, folder))) return null;
+    const wide = meetTrees([...meetTrees(ceilings.get(g) ?? [], now), folder], now);
+    const pol = { epoch: epoch + 1, state: stateOf(wide), trees: wide };
+    if (JSON.stringify(pol).length > 64 * 1024) return null;
+    epoch = pol.epoch;
+    cap = wide;
+    sentTrees = wide;
+    ceilings.set(g, wide);
+    if (once) onceAt.set(folder, g);
+    return pol;
   }
   // (an explicit run (notebook.js onExplicitRun: the person's Run, or the page's own run()/runAll(), which the document's
   // code can't reach), before anything is asked: a permission widened beyond this
@@ -2332,6 +2392,9 @@ const filesBarEl = $("#filesbar");
 let fbReq = null, fbSeq = 0;
 function filesBar(on) {
   if (on) return; // (a refusal without a path: nothing more to say than the refusal itself)
+  // (a change waiting on this prompt, not answered by one of its buttons: no. Every way the prompt closes comes here:
+  // Esc, OK, another notebook shown, a new interpreter, a Stop, any change of the permissions)
+  if (fbReq?.ask && !fbReq.ask.claimed) { fbReq.ask.claimed = true; fbReq.ask.reply(null); }
   fbReq = null;
   if (filesBarEl.open) filesBarEl.close();
   filesBarEl.hidden = true;
@@ -2356,6 +2419,11 @@ const whereIs = (folder) => {
 // takes only a fresh trusted press that begins after that (a press begun before, a held or repeating key, an
 // untrusted event: nothing); an answer is bound to the request, and any change of context closes it unanswered.
 const FB_ARM = 500;
+// (a change the run waits on (the write-wait design) is asked about while it waits; on the loopback only, tests may keep
+// it refused at once instead, the prompt saying to run the cell again, as where the run can't wait (no shared memory):
+// "sagebrush-ask" "0" in localStorage, for the suites of that path (web/test-confine-writes.mjs,
+// web/test-file-permissions.mjs), as ?runner=0 is for the sandbox)
+const ASK_WAIT = !(/^(localhost|127\.0\.0\.1|\[::1\])$/.test(location.hostname) && (() => { try { return localStorage.getItem("sagebrush-ask") === "0"; } catch { return false; } })());
 // (a path an interpreter sends, in its one canonical form: a write grant's (canonicalScope) and, as the same string, within
 // the workspace's own path rules (normPath: its depth, name and character bounds); not "/")
 const fsCanon = (p) => { try { return typeof p === "string" && p !== "/" && canonicalScope("write", p) === p && normPath(p) === p; } catch { return false; } };
@@ -2370,9 +2438,13 @@ const FS_DOING = {
   mkdir: ["create the folder", "create it"], unlink: ["delete", "delete it"], rmdir: ["delete the folder", "delete it"],
   rename: ["move or rename", "make the change"],
 };
-function filesPrompt(doc, generation, path, changed, what) {
+// (`ask`: the change waits on this prompt (web/worker.ts fsAsk): {key, live(), reply(policy | null), widen(folder, once),
+// grant(f): f, the Allow's own grant, made without ending this request}; answered
+// once, by an Allow there (the policy widenFor gives) or no, and the change then goes ahead or is refused in that run.
+// Without it the change was refused already, and the prompt says to run the cell again)
+function filesPrompt(doc, generation, path, changed, what, ask = null) {
   const [doing, done] = Object.hasOwn(FS_DOING, what) ? FS_DOING[what] : ["change", "make the change"];
-  if (doc !== current.id || fbReq?.open) return; // (one at a time: further refusals only error)
+  if (doc !== current.id || fbReq?.open) { ask?.reply(null); return; } // (one at a time: further refusals only error)
   const now = perms.writeTrees(doc);
   const folder = path.slice(0, path.lastIndexOf("/")) || "/";
   const shown = (t) => (t.length > 120 ? "…" + t.slice(-119) : t);
@@ -2387,18 +2459,27 @@ function filesPrompt(doc, generation, path, changed, what) {
   const name = path.slice(path.lastIndexOf("/") + 1);
   // (allowed now, but not for this interpreter: a widening waits for the next Run, which restarts it)
   if (changed || now.some((t) => coversW(t, path))) {
+    // (allowed already, but not in this interpreter: that widening waits for the next Run, as every other)
+    ask?.reply(null);
     fbReq = { open: false };
     return say(changed ? "This notebook's permissions changed while it ran. Run the cell again." : `This change to ${shown(name)} is allowed now. Run the cell again to ${done} (the notebook's variables are cleared).`, ["fbok"]);
   }
-  if (perms.deniedWrite(doc, path)) return; // (Don't allow: silent for the rest of the session)
-  const req = { open: true, id: ++fbSeq, doc, generation, path, folder, trees: now.join("\n"), rev: revOf(doc), armedAt: performance.now() + FB_ARM, pressed: null };
+  if (perms.deniedWrite(doc, path)) { ask?.reply(null); return; } // (Don't allow: silent for the rest of the session)
+  const req = { open: true, id: ++fbSeq, doc, generation, path, folder, trees: now.join("\n"), rev: revOf(doc), armedAt: performance.now() + FB_ARM, pressed: null, ask: ask ? { ...ask, claimed: false } : null };
   fbReq = req;
   if (folder === "/") return say(`This notebook is trying to ${doing} ${shown(name)} at the top of ${whereIs("/")}. To allow that, use File > Permissions…`, ["fbperms", "fbdeny"]);
   $("#fballow").textContent = `Allow in ${shown(folder)}`;
-  say(`This notebook is trying to ${doing} ${shown(name)} in ${shown(whereIs(folder))}. If you allow it, run the cell again to ${done}.`, ["fballow", "fbonce", "fbdeny"]);
+  // (waiting: an Allow lets this run go on; refused already: the cell runs again to make the change)
+  say(`This notebook is trying to ${doing} ${shown(name)} in ${shown(whereIs(folder))}.${ask ? "" : ` If you allow it, run the cell again to ${done}.`}`, ["fballow", "fbonce", "fbdeny"]);
 }
 // (an answer: only for the open request, still the current document's and interpreter's, the trees unchanged since it
 // opened, from a fresh trusted press on this same button that began after arming)
+// (after this request's own grant: the same document shown, the same interpreter and generation, and its folder now
+// allowed; the revision moved by that grant alone)
+function fbCurrentAfterGrant(req) {
+  const e = kernels.get(req.doc);
+  return req.doc === current.id && e?.generation?.() === req.generation && revOf(req.doc) === req.rev + 1 && perms.writeTrees(req.doc).some((t) => coversW(t, req.path));
+}
 function fbCurrent(req) {
   const e = kernels.get(req.doc);
   return req === fbReq && req.open && req.doc === current.id && e?.generation?.() === req.generation && revOf(req.doc) === req.rev && perms.writeTrees(req.doc).join("\n") === req.trees;
@@ -2418,8 +2499,24 @@ for (const id of ["fballow", "fbonce", "fbdeny", "fbperms"]) {
     if (!fbCurrent(req)) { filesBar(false); return; }
     req.open = false;
     if (id === "fbperms") { filesBar(false); showPerms(); return; }
-    const ok = id === "fbdeny" ? perms.deny(req.doc, "write", req.folder) : perms.grant(req.doc, "write", req.folder, { once: id === "fbonce" }).ok;
+    // (a waiting change: this press answers it, after the grant is made; the grant's own change of the permissions
+    // closes the prompt without answering it no)
+    const ask = req.ask;
+    if (ask) ask.claimed = true;
+    // (a waiting change no longer that run's open request, or asked under permissions since changed: answered no, and
+    // nothing granted for it)
+    if (ask && !ask.live()) { ask.reply(null); filesBar(false); return; }
+    const give = () => perms.grant(req.doc, "write", req.folder, { once: id === "fbonce" }).ok;
+    const ok = id === "fbdeny" ? perms.deny(req.doc, "write", req.folder) : ask ? ask.grant(give) : give();
     filesBar(false);
+    if (ask) {
+      // (still this request's interpreter and generation, its permissions as just given: widened, and answered with that)
+      const pol = ok && id !== "fbdeny" && fbCurrentAfterGrant(req) ? ask.widen(req.folder, id === "fbonce") : null;
+      ask.reply(pol);
+      if (!ok) statusEl.textContent = "This browser couldn't keep that choice";
+      else if (id !== "fbdeny" && !pol) statusEl.textContent = `Allowed in ${req.folder}: run the cell again to make the change`;
+      return;
+    }
     if (!ok) statusEl.textContent = "This browser couldn't keep that choice";
     else if (id !== "fbdeny") statusEl.textContent = `Allowed in ${req.folder}: run the cell again to make the change`;
   });
@@ -4760,8 +4857,15 @@ async function selftest(path) {
       await until(() => kernel.ready, 60000);
       const run = (code) => new Promise((resolve) => { let t = ""; kernel.execute(code, { mode: nb.mode }, { start() {}, out(x) { t += x; }, display() {}, interact() {}, clear() {}, done() { resolve(t); }, stopped(m) { resolve(t + (m || "")); }, skipped() { resolve(t + "(not run)"); } }); });
       const ran = (await run("print(6 * 7)")).trim();
-      const wrote = (await run("try:\n    open('not-allowed.txt', 'w').write('x')\n    print('wrote')\nexcept PermissionError:\n    print('refused')")).trim();
-      check("a notebook runs before it may change files, its write refused", ran === "42" && wrote === "refused", JSON.stringify({ ran, wrote }));
+      // (the write waits while its prompt asks (the write-wait design), where the engine's memory is shared; the prompt
+      // closed unanswered, as Esc would, refuses it in that run. Without shared memory it was refused at once)
+      let over = false;
+      const writing = run("try:\n    open('not-allowed.txt', 'w').write('x')\n    print('wrote')\nexcept PermissionError:\n    print('refused')").then((t) => ((over = true), t));
+      await until(() => over || !!fbReq?.open, 30000);
+      const waited = !over && !!fbReq?.ask;
+      filesBar(false);
+      const wrote = (await writing).trim();
+      check("a notebook runs before it may change files, its write refused", ran === "42" && wrote === "refused", JSON.stringify({ ran, wrote, waited }));
       filesBar(false);
     }
     // (the rest of the self-test's notebook writes files: the app's own self-test allows it, as the person's click would)

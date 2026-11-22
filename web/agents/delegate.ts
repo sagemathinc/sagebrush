@@ -16,8 +16,8 @@
 // - A proposal's files (ProposalSource): only the proposal commit named and its base, each file's bytes checked against
 //   the blob id tasks.diff gave for that path at that commit (its git blob id, recomputed here).
 import { AgentError, type AgentPairing } from "../workspace/agent-pair";
-import { DELEGATE_FEATURE, TaskClient } from "../workspace/tasks-client";
-import { TASK_LIMITS, TASK_RESULTS, blobId, contentBytes, taskLog, taskNotice, type DiffFile, type TaskEntry, type TaskEvent, type TaskLogEntry, type TaskResult } from "../workspace/tasks-schema";
+import { BRIEF_FEATURE, DELEGATE_FEATURE, TaskClient } from "../workspace/tasks-client";
+import { TASK_LIMITS, TASK_RESULTS, blobId, briefResult, contentBytes, taskLog, taskNotice, type DiffFile, type TaskEntry, type TaskEvent, type TaskLogEntry, type TaskResult } from "../workspace/tasks-schema";
 import type { MergedParams } from "./delegate-merge";
 import { apply, newThread, type Thread, type TurnEvent } from "../workspace/agent-chat/events";
 import type { ProposalDiff, ProposalSource } from "../workspace/review/proposal-view";
@@ -40,7 +40,7 @@ export type DelegateTask = {
 };
 
 // (noteBytes: Ask for changes' note, UTF-8 bytes; the agent takes up to 64 KiB, the page asks for less)
-export const DELEGATE_LIMITS = Object.freeze({ pages: 1000, closing: 4, closeMs: 10_000, noteBytes: 16 * 1024 });
+export const DELEGATE_LIMITS = Object.freeze({ briefMs: 70_000, pages: 1000, closing: 4, closeMs: 10_000, noteBytes: 16 * 1024 });
 
 export const DELEGATE_TEXT = {
   chip: { working: "Working", question: "Question", proposal: "Proposal ready", merged: "Merged", closed: "Closed", failed: "Failed", interrupted: "Interrupted" } as Record<string, string>,
@@ -202,6 +202,20 @@ export class DelegateTasks {
     await this.refresh().catch(() => {});
     return r;
   }
+
+  /** Whether this agent drafts briefs (its hello lists chat.brief), with the switch on. */
+  briefOffered(): boolean { return this.state() === "on" && !!this.p?.hello?.features?.includes(BRIEF_FEATURE); }
+
+  /** A Delegate brief drafted by the agent from a Pair chat (chat.brief {conversation}): {title, brief, cut}, or an
+   * AgentError with the agent's code (not_found, busy, unavailable, stopped, failed) or the page's own (timeout after
+   * the agent's own 60 s bound and a margin). Only when briefOffered(). */
+  async brief(conversation: string): Promise<{ title: string; brief: string; cut: boolean }> {
+    if (!this.briefOffered()) throw new AgentError("unavailable", "this agent doesn't draft briefs");
+    const r = briefResult(await this.client().request(BRIEF_FEATURE, { conversation }, { timeoutMs: DELEGATE_LIMITS.briefMs }));
+    return { title: r.title, brief: r.brief, cut: r.cut };
+  }
+  /** The draft for this chat stopped (chat.brief_cancel): its request then ends, refused as stopped. */
+  cancelBrief(conversation: string) { this.p?.notify("chat.brief_cancel", { conversation }); }
 
   /** Start a task (tasks.start): only with the switch on, never while it turns off. */
   async start(o: { title: string; prompt: string; docs: DelegateDoc[]; run: boolean }): Promise<string> {

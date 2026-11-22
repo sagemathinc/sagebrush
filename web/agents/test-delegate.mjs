@@ -354,6 +354,52 @@ for (const [what, event, chip] of [["failed", { type: "task_status", status: "fa
   H9.stop();
 }
 
+// ---- Delegate briefs (chat.brief): only to an agent that lists it, with the switch on; its answer checked; cancel
+{
+  const conv = "c".repeat(32);
+  const brief = { title: "Plot sin(x)", brief: "Goal\nPlot sin(x)", bytes: 17, cut: false };
+  // (an agent without chat.brief: not offered, nothing sent)
+  const H0 = delegateHost();
+  const D0 = new DelegateTasks({ changed: () => {} });
+  const P0 = pairWith(H0);
+  D0.attach(P0);
+  await P0.paired();
+  await P0.allow({ folders: ["/"], write: true, expires: null }, false);
+  D0.turnOn();
+  await until(() => H0.grant?.delegate === true);
+  ok(!D0.briefOffered() && (await why(D0.brief(conv))) === "unavailable" && !H0.got.some((m) => m.method === "chat.brief"), "an agent without chat.brief: briefs not offered, refused here, nothing sent");
+  P0.revoke();
+  H0.stop();
+  const HB = delegateHost({ features: ["delegate.1", "chat.resume", "chat.brief"] });
+  const DB = new DelegateTasks({ changed: () => {} });
+  const PB = pairWith(HB);
+  DB.attach(PB);
+  await PB.paired();
+  await PB.allow({ folders: ["/"], write: true, expires: null }, false);
+  ok(!DB.briefOffered() && (await why(DB.brief(conv))) === "unavailable", "chat.brief listed but the switch off: not offered");
+  DB.turnOn();
+  await until(() => HB.grant?.delegate === true);
+  HB.briefs.set(conv, brief);
+  const r = await DB.brief(conv);
+  const sent = HB.got.findLast((m) => m.method === "chat.brief")?.params;
+  ok(DB.briefOffered() && JSON.stringify(r) === JSON.stringify({ title: brief.title, brief: brief.brief, cut: false }) && JSON.stringify(sent) === JSON.stringify({ conversation: conv }), "chat.brief {conversation}: its title, brief and cut", { r, sent });
+  for (const [bad, what] of [[{ ...brief, title: "" }, "an empty title"], [{ ...brief, title: "t".repeat(201) }, "a title over 200 characters"], [{ ...brief, extra: 1 }, "an unknown field"], [{ ...brief, brief: "x\u0000" }, "a NUL in the brief"], [{ ...brief, cut: "no" }, "cut not true or false"]]) {
+    HB.briefs.set(conv, bad);
+    ok((await why(DB.brief(conv))) !== "resolved", `an answer with ${what}: refused`);
+  }
+  HB.briefs.set(conv, { error: "busy" });
+  ok((await why(DB.brief(conv))) === "busy", "the agent's refusal (busy): its code");
+  HB.briefs.set(conv, brief);
+  HB.hold.add("chat.brief");
+  const held = why(DB.brief(conv));
+  await until(() => HB.held.some((m) => m.method === "chat.brief"));
+  DB.cancelBrief(conv);
+  ok((await held) === "stopped" && JSON.stringify(HB.got.findLast((m) => m.method === "chat.brief_cancel")?.params) === JSON.stringify({ conversation: conv }), "cancelBrief: chat.brief_cancel {conversation}; the held draft answered stopped");
+  HB.hold.clear();
+  PB.revoke();
+  HB.stop();
+}
+
 // ---- an agent that doesn't offer Delegate: no switch
 {
   const H3 = delegateHost({ features: ["chat.resume"] });

@@ -1170,6 +1170,8 @@ const delegateUi = mountDelegate({
   mayRun: () => pairing?.grant?.run === true,
   openPath: () => current().artifacts.find((x) => x.id === openArtifact)?.path ?? null,
   draft: () => editor.value,
+  // (the Pair chat shown, once something has been said in it: a brief is drafted from it, the agent saying if it can't)
+  conversation: () => { const t = current(); return t.entries.some((e) => e.kind === "turn" || e.kind === "user") ? t.id : null; },
   clearDraft: () => { editor.value = ""; },
   // (a workspace document as the task's copy starts from it: a notebook's .ipynb text, a text file's text; its path as
   //  the protocol has it, relative)

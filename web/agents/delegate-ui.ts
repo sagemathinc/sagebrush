@@ -27,6 +27,12 @@ export const DELEGATE_UI_TEXT = {
   alsoClose: (n: number) => `Also close ${n === 1 ? "my running task" : `my ${n} running tasks`} for good`,
   closeFailed: (n: number) => `Delegate is off. ${n === 1 ? "One task" : `${n} tasks`} couldn't be closed.`,
   sheetTitle: "Delegate a task",
+  drafting: "Drafting a brief from this chat…",
+  stopDrafting: "Stop drafting",
+  briefBusy: "The agent is busy: wait a moment and open Delegate… again, or write the task yourself.",
+  briefUnavailable: "This chat can't draft a brief: write the task yourself.",
+  briefStopped: "Drafting stopped: write the task yourself.",
+  briefFailed: "Couldn't draft a brief: write the task yourself.",
   where: "This computer",
   whereNote: "The task's copy and its runs stay on this computer.",
   run: "May run code",
@@ -88,6 +94,8 @@ export type DelegateHost = {
   draft: () => string;
   clearDraft: () => void;
   readDoc: (path: string) => Promise<DelegateDoc>;
+  /** the Pair chat shown, as the agent knows it (its conversation id), if it has one: what a brief is drafted from */
+  conversation?: () => string | null;
   turnNode: (thread: Thread, turn: Turn) => HTMLElement;
   /** the task view shown (true) or gone (false): the page hides or shows its chat */
   shown: (on: boolean) => void;
@@ -242,12 +250,43 @@ export function mountDelegate(h: DelegateHost) {
       el("div", { className: "field" }, el("label", {}, run, " ", T.run), el("small", { textContent: h.mayRun() ? T.runNote : T.runNotGranted })),
       msg,
       el("menu", {}, el("button", { type: "button", value: "cancel", textContent: "Cancel", onclick: () => dlg.close() }), " ", start));
+    // (a brief drafted by the agent from the Pair chat shown (chat.brief): only when it drafts them, there is such a
+    //  chat, and nothing was typed in the composer, which stays the task as before. While it drafts, the task and its
+    //  title wait, read only, and Start is off; Stop drafting, or closing the sheet, cancels it, and a late result is
+    //  dropped. A refusal says so in words of the page's own, and the box is left to the person)
+    const conv = h.conversation?.() ?? null;
+    let drafting = false;
+    const stop = el("button", { type: "button", className: "link", textContent: T.stopDrafting });
+    const draftLine = el("p", { className: "st brief-drafting", hidden: true, role: "status" }, el("span", { textContent: T.drafting }), " ", stop);
+    form.insertBefore(draftLine, form.querySelector("label"));
+    const drafted = (on: boolean) => {
+      drafting = on;
+      prompt.readOnly = title.readOnly = on;
+      on ? start.setAttribute("aria-disabled", "true") : start.removeAttribute("aria-disabled");
+      draftLine.hidden = !on;
+    };
+    stop.onclick = () => { if (!drafting || !conv) return; D.cancelBrief(conv); drafted(false); msg.textContent = T.briefStopped; };
+    if (conv && !h.draft().trim() && D.briefOffered()) {
+      drafted(true);
+      D.brief(conv).then((r) => {
+        if (!drafting || !dlg.isConnected) return;
+        prompt.value = r.brief;
+        title.value = r.title;
+        drafted(false);
+      }, (err) => {
+        if (!drafting || !dlg.isConnected) return;
+        drafted(false);
+        const code = (err as AgentError)?.code;
+        msg.textContent = code === "busy" ? T.briefBusy : code === "unavailable" || code === "not_found" ? T.briefUnavailable : code === "stopped" ? T.briefStopped : T.briefFailed;
+      });
+    }
     dlg.append(form);
     document.body.append(dlg);
-    dlg.addEventListener("close", () => dlg.remove(), { once: true });
+    dlg.addEventListener("close", () => { if (drafting && conv) D.cancelBrief(conv); drafting = false; dlg.remove(); }, { once: true });
     dlg.showModal();
     form.onsubmit = async (e) => {
       e.preventDefault();
+      if (drafting) return;
       if (more.value.trim()) { addDoc(more.value); more.value = ""; }
       const paths = [...docs.querySelectorAll("li")].map((li) => li.dataset.path!);
       if (D.state() !== "on") { msg.textContent = D.state() === "turning-off" ? "Delegate is turning off." : "Delegate is off."; return; }
