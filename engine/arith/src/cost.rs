@@ -19,7 +19,7 @@
 //! must reserve that overflows means it cannot fit (a memory refusal).
 
 pub use crate::coprime::{accounting_overruns, Meter};
-pub use tally::{bigdiv_units, bigeuclid_units, biggcd_units, bigmul_units, bigsqrt_units, metered, metered_with, publish_progress, tally, tally_all, tallied, Local, Progress};
+pub use tally::{bigdiv_units, bigeuclid_units, biggcd_units, bigmul_units, bigsqrt_units, bigxgcd_units, metered, metered_with, publish_progress, tally, tally_all, tallied, xgcd_check_units, xgcd_fallback_units, Local, Progress};
 
 mod tally;
 

@@ -3,7 +3,7 @@
 //! determinant, and the Smith normal form (the group structure).
 
 use crate::relations::Relation;
-use sagebrush_arith::cost::{bigdiv_units, biggcd_units, bigmul_units, Family, Local};
+use sagebrush_arith::cost::{bigdiv_units, bigmul_units, bigxgcd_units, xgcd_fallback_units, Family, Local};
 use sagebrush_arith::zmat::limbs;
 use sagebrush_bigint::BigInt;
 use num_integer::Integer;
@@ -553,7 +553,8 @@ pub fn independent_rows(rows: &[Vec<i64>], n: usize) -> Result<Vec<usize>, Vec<u
 ///
 /// Units (`cost::tally`), per row after its work, flushed at the row's
 /// check: the reductions mod d through `bigdiv_units`; per pivot, the
-/// extended gcd as a full gcd at the operands' sizes (`biggcd_units`), the
+/// extended gcd as a full gcd at the operands' sizes with the check on its
+/// coefficients (`bigxgcd_units`; its fallback's steps when it ran), the
 /// two exact divisions by it, and the row combinations' four products and
 /// two reductions mod d per entry (`bigmul_units`, `bigdiv_units`; the
 /// products' sums are part of their units, as in zmat); every
@@ -614,11 +615,12 @@ pub fn hnf_mod(rows: &[Vec<i64>], n: usize, d0: &BigInt) -> Vec<Vec<BigInt>> {
             if v[i].is_zero() {
                 continue;
             }
-            let e = w[i][i].extended_gcd(&v[i]); // x w_ii + y v_i = g
+            let (e, fallback) = sagebrush_bigint::extended_gcd_metered(&w[i][i], &v[i]); // x w_ii + y v_i = g
             let g = e.gcd.clone();
             let (wi, vi) = (&w[i][i] / &g, &v[i] / &g);
             let (lw, lv, lg) = (limbs(&w[i][i]), limbs(&v[i]), limbs(&g));
-            acc.add(biggcd_units(lw, lv));
+            acc.add(bigxgcd_units(lw, lv));
+            acc.add(xgcd_fallback_units(fallback.as_ref()));
             acc.add(bigdiv_units(lw, lg));
             acc.add(bigdiv_units(lv, lg));
             let (lx, ly, lwi, lvi) = (limbs(&e.x), limbs(&e.y), limbs(&wi), limbs(&vi));

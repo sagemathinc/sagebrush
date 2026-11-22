@@ -12,9 +12,11 @@ sagebrush-par = { path = "../par" }
 sagebrush-wire = { path = "../wire" }
 num-integer = "0.1"
 num-traits = "0.2"
-dashu-int = { git = "https://github.com/sagemathinc/dashu", rev = "2ebb9357c86b14e6d0a7a8e6d4d3c5f162ed164f" }
+dashu-int = { git = "https://github.com/sagemathinc/dashu", rev = "36ff7ad5b9225198bf6a322a70f0947e9376cece" }
 
 [dev-dependencies]
+# (tests only: the checked extended gcd's fallback forced, tests/xgcd_charge.rs)
+sagebrush-bigint = { path = "../bigint", features = ["test-hooks"] }
 sagebrush-interrupt = { path = "../interrupt", features = ["test-hooks"] }
 
 [lints]

@@ -10,7 +10,7 @@
 #![cfg(not(target_arch = "wasm32"))]
 
 use num_integer::Integer;
-use sagebrush_arith::cost::{bigdiv_units, biggcd_units, bigmul_units, tallied, Family, Units, FAMILIES};
+use sagebrush_arith::cost::{bigdiv_units, bigmul_units, bigxgcd_units, tallied, Family, Units, FAMILIES};
 use sagebrush_arith::zmat::limbs;
 use sagebrush_bigint::BigInt;
 use sagebrush_classgroup::linalg;
@@ -120,7 +120,8 @@ fn a_stop_charges_only_the_work_before_it() {
     assert!(e.gcd == BigInt::from(1));
     let (lx, ly, lg) = (limbs(&e.x), limbs(&e.y), limbs(&e.gcd));
     let (lwi, lvi) = (limbs(&(&d / &e.gcd)), limbs(&(&x / &e.gcd)));
-    add(&mut want, biggcd_units(ld, limbs(&x)));
+    // (the extended gcd, checked on its coefficients)
+    add(&mut want, bigxgcd_units(ld, limbs(&x)));
     add(&mut want, bigdiv_units(ld, lg));
     add(&mut want, bigdiv_units(limbs(&x), lg));
     want[Family::Move as usize] += 2 * n as u64;

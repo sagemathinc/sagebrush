@@ -152,7 +152,7 @@ fn zmat_units_and_stop_checks() {
         ("mul 10", [1000, 0, 0, 0, 0, 0, 0, 0, 0, 0], 10),
         ("smith bench 12 (word e = 6)", [7243, 0, 1208, 0, 2106, 1199, 3531, 0, 0, 0], 39),
         ("smith content 6 x 44", [338442, 0, 49400, 0, 50798, 17776, 35823, 0, 0, 0], 78),
-        ("smith hard 8 (big e)", [2743, 0, 3320, 0, 240, 497, 971, 0, 0, 0], 24),
+        ("smith hard 8 (big e)", [2797, 0, 3320, 0, 240, 497, 971, 33, 0, 0], 24),
         ("smith_mod 12 mod 360", [0, 0, 0, 0, 0, 0, 1361, 0, 0, 0], 6),
     ];
     // (the Stop checks before metering, at the same inputs: 4, 1, 76, 14,

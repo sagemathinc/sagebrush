@@ -334,6 +334,11 @@
   "owner": "engine arith (kernel metering)",
   "reason": "the BigInt unit helpers' saturating arithmetic: a count that overflows u64 saturates (an accounting figure, never a refusal)"
  },
+ "engine/arith/src/cost/tally.rs :: xgcd_fallback_units :: u.add(&one(Family::Gcd, bigmul_units(q, ls).total().unwrap_or(u64::MAX).saturating_add(bigmul_units(q, lt).total().unwrap_or(u64::MAX)))); #0": {
+  "class": "none",
+  "owner": "engine arith (kernel metering)",
+  "reason": "the BigInt unit helpers' saturating arithmetic: a count that overflows u64 saturates (an accounting figure, never a refusal)"
+ },
  "engine/arith/src/cost/tally/tests.rs :: a_local_saturates :: assert_eq!((held.get(Family::Gcd), held.get(MulSchool), held.get(Family::Div)), (u64::MAX, u64::MAX, u64::MAX)); #0": {
   "class": "none",
   "owner": "engine arith (kernel metering)",
