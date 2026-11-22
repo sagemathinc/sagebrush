@@ -316,6 +316,8 @@ export function mountDelegate(h: DelegateHost) {
       if (!on.may()) { msg.textContent = DELEGATE_TEXT.askMoved; return; }
       send.setAttribute("aria-disabled", "true");
       send.textContent = T.askSending;
+      // (the note can't change while it is being sent: what was sent is what was there)
+      box.readOnly = true;
       on.busy(true);
       try {
         const at = seen();
@@ -329,6 +331,7 @@ export function mountDelegate(h: DelegateHost) {
         msg.textContent = e instanceof AgentError || e instanceof Error ? e.message : String(e);
         send.removeAttribute("aria-disabled");
         send.textContent = T.askSend;
+        box.readOnly = false;
       } finally {
         on.busy(false);
       }

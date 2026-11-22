@@ -138,14 +138,17 @@ try {
   // (and the page has the re-read: the view drawn again, its actions back under it)
   await P.until(`!!document.querySelector('dialog.proposal[open] .sbpv .file') && !!document.querySelector('dialog.proposal[open] .proposal-actions')?.isConnected`, 10000).catch(() => {});
   await sleep(100);
-  const st = await P.ev(`({ said: ${JSON.stringify(said)}, reread: ${JSON.stringify(reread)}, note: document.querySelector('#delegate-note')?.value, send: ${block}.querySelector('button.primary').getAttribute('aria-disabled') })`);
-  ok(st.said && st.reread && H.asks.length === 0 && st.note === "  Also number the lines.\n" && st.send === null, "the task moved on since it was read: refused (stale), said so, the proposal read again, the note kept to send again", st);
+  const st = await P.ev(`({ said: ${JSON.stringify(said)}, reread: ${JSON.stringify(reread)}, note: document.querySelector('#delegate-note')?.value, ro: document.querySelector('#delegate-note')?.readOnly, send: ${block}.querySelector('button.primary').getAttribute('aria-disabled') })`);
+  ok(st.said && st.reread && H.asks.length === 0 && st.note === "  Also number the lines.\n" && st.ro === false && st.send === null, "the task moved on since it was read: refused (stale), said so, the proposal read again, the note kept to send again", st);
   // (sent while held at the host: Close can't be pressed meanwhile)
   H.hold.add("tasks.ask");
   const seqShown = A.log.length;
   await P.ev(`${block}.querySelector('button.primary').click()`);
   await hostUntil(() => H.held.some((m) => m.method === "tasks.ask"));
   ok((await P.ev(`document.querySelector('dialog.proposal[open] button[data-act="close"]').getAttribute('aria-disabled')`)) === "true", "while Ask for changes is being sent: Close disabled");
+  // (and the note can't be edited meanwhile: typing changes nothing, so nothing typed after Send is lost)
+  const pend = await P.ev(`(() => { const t = document.querySelector('#delegate-note'); const before = t.value; t.focus(); document.execCommand('insertText', false, ' extra'); return { ro: t.readOnly, same: t.value === before, label: ${block}.querySelector('button.primary').textContent }; })()`);
+  ok(pend.ro && pend.same && pend.label === "Sending…", "while it is being sent: the note is read only (typing changes nothing), Send says Sending…", pend);
   H.hold.clear();
   H.release();
   await hostUntil(() => H.asks.length === 1);
