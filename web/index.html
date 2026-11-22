@@ -5605,9 +5605,13 @@ wsFilesBtn.onclick = () => wsShowFiles(wsSidebar.hidden);
 drawFileMenu();
 wsReady.then(() => drawFileMenu());
 $("#installbtn").onclick = () => installPrompt?.prompt();
+// (the LaTeX editor's page in the Agents page's pane, /?tex=<fid>&embed=1 in a frame of its own (web/latex/boot.ts): the
+// editor alone, so no files beside it, however the person keeps them on this page; their choice stays theirs, unwritten.
+// A pane narrower than 641 px had them over the whole editor)
+const texEmbedded = (() => { const q = new URLSearchParams(location.search); return q.has("tex") && q.get("embed") === "1" && parent !== window; })();
 wsReady.then(async (w) => {
   // (no workspace: no files to show, so the space kept for them before the page drew goes)
-  if (!w) { document.body.classList.remove("wsfiles"); wsSidebar.hidden = true; return; }
+  if (!w || texEmbedded) { document.body.classList.remove("wsfiles"); wsSidebar.hidden = true; return; }
   wsFilesBtn.hidden = false;
   let pref = null;
   try { pref = localStorage.getItem("sagebrush-files-sidebar"); } catch {}

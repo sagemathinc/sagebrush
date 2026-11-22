@@ -1545,6 +1545,33 @@ try {
     }
   }
 
+  // ======================================================================== LaTeX: the framed editor, not the files
+  // (TF6, QA on DEV: a .tex artifact showed the workspace's Files sidebar instead of the editor. The framed page is the
+  //  notebook page, which shows its files where the person keeps them shown (or has more than one notebook or board),
+  //  and in a pane narrower than 641 px they cover the page. Embedded, the frame is the editor alone: with the files
+  //  kept shown, the sidebar stays hidden, the point at the frame's middle is the editor's, and the person's own
+  //  choice (shown) is kept for the notebook page)
+  if (want("texfiles") && TEXFRAME) {
+    const T = "/notes/files-kept.tex";
+    const FR = `document.querySelector('${PANE} iframe.tex-frame')`;
+    const FD = `${FR}.contentDocument`;
+    await ev(`(localStorage.setItem('sagebrush-files-sidebar', '1'), true)`);
+    for (const n of ["a", "b"]) await call("workspace.create", { path: `/notes/kept-${n}.ipynb`, content: docFor(`/notes/kept-${n}.ipynb`, [{ code: "x = 1" }]), mode: "python" });
+    await call("workspace.create", { path: T, content: { text: "\\documentclass{article}\n\\begin{document}\nKept in view.\n\\end{document}\n" } });
+    await artifactTurn(T);
+    await until(`!!${FD}?.querySelector('.tex-page .tex-preview')?.textContent.includes('Kept in view')`, 60000).catch(() => {});
+    // (the notebook page's files are drawn once its workspace is open: time for them to have come, if they would)
+    await sleep(2500);
+    const tf6 = await ev(`(() => { const f = ${FR}, d = f?.contentDocument; if (!d) return null; const sb = d.getElementById('wssidebar'), r = f.getBoundingClientRect();
+      const at = d.elementFromPoint(r.width / 2, r.height / 2);
+      return { width: Math.round(r.width), sidebar: !!sb && !sb.hidden && getComputedStyle(sb).display !== 'none', wsfiles: d.body.classList.contains('wsfiles'), atEditor: !!at?.closest('.tex-page'), at: at ? at.tagName + '.' + at.className : null, pref: localStorage.getItem('sagebrush-files-sidebar') }; })()`);
+    ok(tf6 && !tf6.sidebar && !tf6.wsfiles && tf6.atEditor && tf6.pref === "1",
+      "TF6: a .tex artifact is the editor, not the workspace's files: with the files kept shown (and more than one notebook), the framed page shows no Files sidebar, the frame's middle is the editor, and the person's choice to show them is kept", tf6);
+    await ev(`(localStorage.removeItem('sagebrush-files-sidebar'), true)`);
+    await ev(`document.querySelector('#close').click()`);
+    await until(`!document.body.classList.contains('has-artifact')`, 15000).catch(() => {});
+  }
+
   // ======================================================================== LaTeX: the editor fills its pane (A4, A8)
   // (William, Oct 31: typing at the bottom moved the source and its cursor out of view; the source couldn't be
   // scrolled to its top. The editor had no height in the pane: it took its content's, and each preview render moved
