@@ -146,7 +146,7 @@ export interface BoardHost {
   /** the board as one HTML file (Download as HTML); with `python`, the file
    * carries the code's engine, so its code runs without the network; with
    * `outputs`, the slow items' outputs computed here (BoardCode.carry()) */
-  exportHtml?(d: BoardDoc, o?: { python?: boolean; outputs?: CachedOutputs[] }): Promise<string>;
+  exportHtml?(d: BoardDoc, o?: { python?: boolean; outputs?: CachedOutputs[]; carried?: () => void }): Promise<string>;
   /** an edit made on this page changed the board's title (never a change from elsewhere, nor a load): the board page
    * renames its file to follow (William's B2) */
   titleEdited?(title: string): void;
@@ -1424,11 +1424,17 @@ export function mountBoard(root: HTMLElement, host: BoardHost) {
   const editBtn = $("edit");
   // (the person's own toggle, by the button or the shortcut: kept by the host; Present, TimeTravel and a dropped
   // picture change the mode for their own reasons, and aren't kept)
+  // (an exported file, edited: where the changes go, said the first time Edit is turned on)
+  let toldWhereEdits = false;
   const toggle = (on: boolean) => {
     if (on && !editor.allowed) return;
     if (on) closeTimeTravel();
     editor.setOn(on);
     if (editor.on === on) host.mode?.toggled(on);
+    if (on && editor.on && host.saveKey === false && !toldWhereEdits) {
+      toldWhereEdits = true;
+      say("**Changes to this file are kept in this browser, not in the file.** To keep them in a file, download it again (File ▸ Download ▸ HTML).");
+    }
   };
   editBtn.onclick = () => toggle(!editor.on);
   // (an edit chosen from a menu in View (Add page, Tidy, a version restored): the board goes to Edit first, as a
@@ -1814,9 +1820,12 @@ export function mountBoard(root: HTMLElement, host: BoardHost) {
       const a = document.createElement("a");
       const x = await toExport(outputs);
       const d = engine === undefined ? x.d : engine ? { ...x.d, engine } : (({ engine: _e, ...rest }) => rest)(x.d);
-      a.href = URL.createObjectURL(new Blob([await host.exportHtml!(await images.inline(d as BoardDoc), { python, outputs: x.outputs })], { type: "text/html" }));
+      let carried = false;
+      a.href = URL.createObjectURL(new Blob([await host.exportHtml!(await images.inline(d as BoardDoc), { python, outputs: x.outputs, carried: () => { carried = true; } })], { type: "text/html" }));
       a.download = fileName().replace(/\.board\.json$/, ".html");
       a.click();
+      // (the app's engine isn't on sagebrush.space yet: the file carries it, larger, so that its code runs)
+      if (carried) { const size = host.exportPython?.(d as BoardDoc); say(`**Downloaded in offline mode${size ? ` (about ${size} larger)` : ""}:** this app's version of Sagebrush isn't on sagebrush.space yet, so the file carries it, and its code runs.`); }
       setTimeout(() => URL.revokeObjectURL(a.href), 1000);
     } catch (e) {
       fail(e);
