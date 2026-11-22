@@ -11,7 +11,7 @@ import { render as markdown } from "../../web/markdown.ts";
 import { layout } from "./layout.js";
 import { texToText } from "./tex.js";
 import { setupXR } from "./xr.js";
-import { highlight, editor } from "./code.js";
+import { highlight, editor, codeRuns } from "./code.js";
 import { run, interrupt, sceneObject, SCENE } from "./run.js";
 import { sizeOf } from "./sizes.js";
 import { treeRoom, resolveImport } from "./treeroom.js";
@@ -204,7 +204,21 @@ function faceTexture(nd) {
     tex.ref = t;
     return t;
   }
-  for (const raw of String(nd.kind === "plot3d" ? "" : nd.kind === "note" ? texToText(nd.text).replace(/\n\s*\n(\s*\n)+/g, "\n\n") : nd.text ?? "").split("\n")) {
+  // (code: highlighted, in the theme's colours, line by line as it fits)
+  if (mono && nd.kind !== "plot3d" && nd.text) {
+    g.font = `${fs}px ui-monospace, Menlo, monospace`;
+    for (const runs of codeRuns(nd.text, nd.lang ?? "", T.fg !== "#1f2328", 120)) {
+      if (y > c.height - pad) break;
+      let x = pad;
+      for (const r of runs) {
+        if (x > c.width - pad) break;
+        g.fillStyle = r.color ?? fg;
+        g.fillText(r.text, x, y);
+        x += g.measureText(r.text).width;
+      }
+      y += fs * 1.35;
+    }
+  } else for (const raw of String(nd.kind === "plot3d" ? "" : nd.kind === "note" ? texToText(nd.text).replace(/\n\s*\n(\s*\n)+/g, "\n\n") : nd.text ?? "").split("\n")) {
     if (y > c.height - pad) break;
     let line = raw, size = fs, weight = "";
     if (!mono && /^#+\s/.test(raw)) { line = raw.replace(/^#+\s/, ""); size = fs * 1.3; weight = "600 "; }
@@ -598,6 +612,7 @@ async function load(name, data = null, again = false, opts = {}) {
     flight = null;
     camera.position.copy(view.pos);
     controls.target.copy(view.target);
+    if (deskWalk) land(); // (standing where you were, not falling)
     const nd = view.sel === null ? null : nodes.find((n) => n.id === view.sel);
     if (nd) { selected = nd.id; setGlow(nd, 0.4); edgeColors(); }
   } else {
@@ -711,11 +726,18 @@ function stepFlight(now) {
   // (clamped below too: a frame's time can be a little before the flight's start, which flung the camera far out for
   //  that frame)
   const u = Math.max(0, Math.min(1, (now - flight.t0) / flight.ms)), e = u < 0.5 ? 2 * u * u : 1 - Math.pow(-2 * u + 2, 2) / 2;
+  // (walking: a blink: dark, there, light again; then standing where it left you)
+  if (deskWalk && flight.ms > 1) {
+    $("#fade").style.opacity = String(u < 0.5 ? u * 2 : (1 - u) * 2);
+    if (u >= 0.5 && !flight.jumped) { camera.position.copy(flight.to); controls.target.copy(flight.toT); flight.jumped = true; land(); }
+    if (u >= 1) { $("#fade").style.opacity = "0"; flight = null; }
+    return;
+  }
   // (an arc: up and over, so a long flight passes above the space instead of through it)
   const lift = Math.sin(Math.PI * u) * flight.from.distanceTo(flight.to) * 0.25;
   camera.position.lerpVectors(flight.from, flight.to, e).add(new THREE.Vector3(0, lift, 0));
   controls.target.lerpVectors(flight.fromT, flight.toT, e);
-  if (u >= 1) flight = null;
+  if (u >= 1) { flight = null; if (deskWalk) land(); }
 }
 $("#back").onclick = back;
 $("#fwd").onclick = forward;
@@ -751,6 +773,10 @@ function pick(ev) {
 }
 renderer.domElement.addEventListener("pointermove", (ev) => {
   const nd = pick(ev);
+  // (over the floor, with no button held: where a click would take you)
+  const fp = !nd && !ev.buttons && deskWalk ? floorAt(ev) : null;
+  floorMark.visible = !!fp;
+  if (fp) floorMark.position.copy(fp).setY(floorY + 0.05);
   if (nd !== hovered) {
     if (hovered) setGlow(hovered, 0);
     hovered = nd;
@@ -772,7 +798,12 @@ renderer.domElement.addEventListener("pointerup", (ev) => {
     if (ha && (!ho || ha.distance < ho.distance)) { setChat(!chatOpen); return; }
   }
   const nd = pick(ev);
-  if (nd) openOverlay(nd); else closeOverlay();
+  if (nd) { openOverlay(nd); return; }
+  // (a click beside the open drawer closes it, and only that; walking, a click on the floor goes there)
+  if (!$("#overlay").hidden) { closeOverlay(); return; }
+  closeOverlay();
+  const p = deskWalk && !xr.presenting && floorAt(ev);
+  if (p) goToFloor(p);
 });
 function setGlow(nd, v) {
   const o = objects[space.nodes.indexOf(nd)];
@@ -1578,7 +1609,8 @@ addEventListener("keydown", (e) => {
   const k = e.key.toLowerCase();
   if (!e.altKey && !e.ctrlKey && !e.metaKey && (FLY[k] || k === "shift")) { held.add(k); if (FLY[k]) e.preventDefault(); return; }
   // (Esc with nothing open, in a frame the page opened over itself (Open in 3D): the page closes it)
-  if (e.key === "Escape" && $("#overlay").hidden && embedded) window.parent.postMessage({ sagebrush: "space-close", version: 1 }, location.origin);
+  if (e.key === "Escape" && helpShown) showHelp(false);
+  else if (e.key === "Escape" && $("#overlay").hidden && embedded) window.parent.postMessage({ sagebrush: "space-close", version: 1 }, location.origin);
   else if (e.key === "Escape") closeOverlay();
   else if (e.key === "Enter" && selected !== null && !$("#overlay").hidden && !/^(A|BUTTON)$/.test(document.activeElement?.tagName ?? "")) { const nd = space.nodes.find((n) => n.id === selected); if (enterKind(nd)) enterRoom(nd); }
   else if (e.key === "/") { e.preventDefault(); $("#q").focus(); }
@@ -1586,9 +1618,112 @@ addEventListener("keydown", (e) => {
   else if (e.key === "b" || e.key === "B" || e.key === "Backspace" || (e.altKey && e.key === "ArrowLeft")) back();
   else if (e.key === "f" || e.key === "F" || (e.altKey && e.key === "ArrowRight")) forward();
   else if (e.key === "h" || e.key === "H") space && frame(positions, true);
+  else if (e.key === "g" || e.key === "G") setDeskWalk(!deskWalk);
+  else if (e.key === " " && deskWalk && !xr.presenting) { e.preventDefault(); if (vy === 0 && Math.abs(feetY() - supportAt()) < 0.05) vy = 26; }
+  else if (e.key === "?") showHelp(!helpShown);
   else if ((e.key === "n" || e.key === "N") && tour) tourStep(1);
   else if ((e.key === "p" || e.key === "P") && tour) tourStep(-1);
 });
+
+
+// ---------------------------------------------------------------- walking (with a mouse, the default)
+// You stand on the floor, your eye EYE_H above your feet (1.6 m at the headset's scale). Drag to look around; W A S D
+// or the arrows walk (Shift: faster); Space jumps; gravity brings you down. A move to an object, Back, See all: a blink
+// (a quick fade); where it leaves you above the floor, you stand on a small platform there until you step off it.
+// Click the floor to go there. G, or the Walk button: flying instead (drag to orbit, scroll to zoom, E and Q up and
+// down), as on a phone, where flying is the default.
+const EYE_H = 8;
+let deskWalk = (() => { try { const v = localStorage.getItem("whitespace:move"); if (v) return v === "walk"; } catch {} return matchMedia("(pointer: fine)").matches; })();
+let vy = 0, platform = null; // (vy: falling or jumping; platform: { x, z, y (feet), r } where a blink left you)
+const feetY = () => camera.position.y - EYE_H;
+function supportAt() {
+  if (platform && feetY() >= platform.y - 0.05 && Math.hypot(camera.position.x - platform.x, camera.position.z - platform.z) < platform.r) return platform.y;
+  return floorY;
+}
+// (after a blink: you stand where it left you: on a platform above the floor, or on the floor (raised to it if below))
+function land() {
+  const f = feetY();
+  if (f > floorY + 0.5) platform = { x: camera.position.x, z: camera.position.z, y: f, r: 7 };
+  else { platform = null; camera.position.y += floorY - f; controls.target.y += floorY - f; }
+  vy = 0;
+}
+function setDeskWalk(on) {
+  deskWalk = !!on;
+  try { localStorage.setItem("whitespace:move", deskWalk ? "walk" : "fly"); } catch {}
+  controls.enabled = !deskWalk && !xr.presenting;
+  controls.enableDamping = !deskWalk; // (no orbit left drifting while you look around)
+  floorMark.visible = false;
+  $("#move").textContent = deskWalk ? "Walking (G)" : "Flying (G)";
+  $("#move").title = deskWalk ? "Walking on the floor: drag to look, W A S D to walk, Space to jump, click the floor to go there. G: fly instead" : "Flying: drag to turn around, scroll to zoom, W A S D and E Q to fly. G: walk instead";
+  if (deskWalk) land();
+}
+// (looking around: a drag turns your head, about where you stand)
+function look(dx, dy) {
+  const dir = new THREE.Vector3().subVectors(controls.target, camera.position);
+  const sph = new THREE.Spherical().setFromVector3(dir);
+  sph.radius = Math.max(4, Math.min(30, sph.radius));
+  sph.theta -= dx * 0.005;
+  sph.phi = Math.max(0.12, Math.min(Math.PI - 0.12, sph.phi + dy * 0.005));
+  controls.target.copy(camera.position).add(new THREE.Vector3().setFromSpherical(sph));
+  flight = null;
+}
+renderer.domElement.addEventListener("pointermove", (ev) => {
+  if (deskWalk && !xr.presenting && (ev.buttons & 1) && ev.pointerType === "mouse") look(ev.movementX, ev.movementY);
+});
+// (a touch while walking: flying, which is how touch moves (drag to turn, pinch to zoom))
+renderer.domElement.addEventListener("pointerdown", (ev) => { if (deskWalk && ev.pointerType === "touch") setDeskWalk(false); });
+renderer.domElement.addEventListener("wheel", (ev) => {
+  if (!deskWalk || xr.presenting) return;
+  ev.preventDefault();
+  walkBy(-Math.sign(ev.deltaY) * 3, 0);
+}, { passive: false });
+function walkBy(forward, sideways) {
+  const fwd = new THREE.Vector3().subVectors(controls.target, camera.position).setY(0);
+  if (fwd.lengthSq() < 1e-6) fwd.set(0, 0, -1);
+  fwd.normalize();
+  const right = new THREE.Vector3().crossVectors(fwd, new THREE.Vector3(0, 1, 0));
+  const m = fwd.multiplyScalar(forward).addScaledVector(right, sideways);
+  camera.position.add(m);
+  controls.target.add(m);
+  flight = null;
+}
+function stepWalk(dt) {
+  if (!typing()) {
+    let f = 0, r = 0;
+    for (const k of held) { const v = FLY[k]; if (v) { f += v[2]; r += v[0]; } }
+    if (f || r) {
+      const n = Math.hypot(f, r), speed = 18 * (held.has("shift") ? 3 : 1) * dt;
+      walkBy((f / n) * speed, (r / n) * speed);
+    }
+  }
+  // (gravity: down to what is under you; up onto the floor if it came up)
+  const sup = supportAt(), f0 = feetY();
+  if (f0 > sup + 1e-3 || vy > 0) {
+    vy -= 70 * dt;
+    let f1 = f0 + vy * dt;
+    if (f1 <= sup) { f1 = sup; vy = 0; }
+    camera.position.y += f1 - f0; controls.target.y += f1 - f0;
+  } else if (f0 < sup - 1e-3) {
+    camera.position.y += sup - f0; controls.target.y += sup - f0; vy = 0;
+  }
+}
+// (clicking the floor: going there, facing as you were; the ring shows where)
+const floorMark = new THREE.Mesh(new THREE.RingGeometry(0.9, 1.3, 32).rotateX(-Math.PI / 2), new THREE.MeshBasicMaterial({ color: 0x1f6feb, transparent: true, opacity: 0.75, depthWrite: false }));
+floorMark.visible = false;
+scene.add(floorMark);
+function floorAt(ev) {
+  mouse.set((ev.clientX / innerWidth) * 2 - 1, -(ev.clientY / innerHeight) * 2 + 1);
+  ray.setFromCamera(mouse, camera);
+  const h = ray.intersectObject(ground, false)[0];
+  return h && h.distance < 600 ? h.point : null;
+}
+function goToFloor(p) {
+  pushView();
+  const dir = new THREE.Vector3().subVectors(controls.target, camera.position).setY(0);
+  if (dir.lengthSq() < 1e-6) dir.set(0, 0, -1);
+  const to = new THREE.Vector3(p.x, floorY + EYE_H, p.z);
+  flyToView(to, to.clone().add(dir.normalize().multiplyScalar(10)), 600);
+}
 
 // ---------------------------------------------------------------- search: full text, click to fly there
 let docs = [];
@@ -1698,8 +1833,17 @@ const xr = setupXR({
   changed(on, mode) {
     $("#vr").textContent = on && mode === "immersive-vr" ? "Exit VR" : "Enter VR";
     $("#ar").textContent = on && mode === "immersive-ar" ? "Exit AR" : "Enter AR";
+    if (!on) setDeskWalk(deskWalk); else floorMark.visible = false;
   },
 });
+// (walking or flying, as kept: after the headset's code, which it consults)
+setDeskWalk(deskWalk);
+$("#move").onclick = () => setDeskWalk(!deskWalk);
+// (the help card: how to move, and the keys)
+let helpShown = false;
+function showHelp(on) { helpShown = !!on; $("#helpcard").hidden = !helpShown; }
+$("#helpbtn").onclick = () => showHelp(!helpShown);
+$("#helpcard .close").onclick = () => showHelp(false);
 const xrFail = (e) => ($("#status").textContent = "couldn't start: " + (e?.message ?? e));
 $("#vr").onclick = () => xr.enter("immersive-vr").catch(xrFail);
 $("#ar").onclick = () => xr.enter("immersive-ar").catch(xrFail);
@@ -1713,7 +1857,9 @@ function tick(now) {
   if (xr.presenting) xr.step(dt);
   else {
     stepFlight(now);
-    stepFly(now);
+    if (deskWalk) { if (!flight && !morph) stepWalk(dt); lastFly = now; } else stepFly(now);
+    // (no blink under way (cancelled by a look, a step, a switch): no darkness either)
+    if (!(deskWalk && flight?.ms > 1)) $("#fade").style.opacity = "0";
     controls.update();
   }
   stepMorph(now);
@@ -1739,5 +1885,7 @@ window.whitespace = {
   get agent() { return agent ? agent.demo : null; },
   get agentFigure() { return agent ? agent.figure.group : null; },
   get floorY() { return floorY; },
+  get walking() { return deskWalk; },
+  get feet() { return feetY(); },
   xr,
 };

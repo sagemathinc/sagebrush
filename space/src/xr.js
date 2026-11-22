@@ -11,6 +11,7 @@
 // entered from its panel (Enter): its room replaces the space around you, and Back past it brings you out again.
 import * as THREE from "three";
 import { texToText } from "./tex.js";
+import { codeRuns } from "./code.js";
 
 const SCALE = 5; // (world units per metre: a slab, 5 units wide, is a metre across)
 const EYE = 1.6; // (where the floor is, below the eye, in metres: the space starts where the camera was)
@@ -91,6 +92,8 @@ export function setupXR(api) {
   }
   function flyPose(target, ms = 450) {
     settle();
+    // (walking: never below the floor (a view from below, such as a 3D plot's, is taken from the floor instead))
+    if (walk && target.pos.y < api.floorY()) target = { ...target, pos: target.pos.clone().setY(api.floorY()) };
     let dy = target.yaw - rig.rotation.y;
     dy = Math.atan2(Math.sin(dy), Math.cos(dy)); // (the short way round)
     // (walking: a blink, there in the dark; flying: a glide)
@@ -188,8 +191,9 @@ export function setupXR(api) {
     if (nd.kind === "note") add(texToText(nd.text).replace(/^#+\s*/gm, "").replace(/\*\*|`/g, ""), "prose");
     else {
       // (a long file: its first lines here; the drawer on a screen has more)
+      // (highlighted: each line as its coloured runs)
       const ls = String(nd.text ?? "").split("\n");
-      add(ls.slice(0, PANEL_LINES).join("\n"), "code");
+      for (const runs of codeRuns(nd.text ?? "", nd.lang ?? "", api.theme().fg !== "#1f2328", PANEL_LINES)) out.push({ style: "code", runs, text: runs.map((r) => r.text).join("") });
       if (ls.length > PANEL_LINES) add(`(its first ${PANEL_LINES} lines of ${ls.length})`, "hint");
     }
     if (nd.output) { out.push({ text: "", style: "prose" }); out.push({ text: "OUTPUT", style: "label" }); add(nd.output, nd.outputError ? "error" : "output"); }
@@ -224,6 +228,21 @@ export function setupXR(api) {
     for (const l of lines(nd)) {
       const mono = l.style === "code" || l.style === "output" || l.style === "error";
       g.font = mono ? "30px ui-monospace, Menlo, monospace" : l.style === "label" ? "600 24px system-ui, sans-serif" : l.style === "summary" || l.style === "tour" ? "italic 32px system-ui, sans-serif" : "34px Georgia, serif";
+      if (l.runs) {
+        // (a line of code: wrapped at the column the panel fits, its runs kept with their colours)
+        const cols = Math.max(20, Math.floor((PW - 2 * pad - 24) / g.measureText("M").width));
+        let row = [], n = 0;
+        for (const run of l.runs) {
+          let t = run.text;
+          while (t.length) {
+            const take = t.slice(0, cols - n);
+            row.push({ text: take, color: run.color }); n += take.length; t = t.slice(take.length);
+            if (n >= cols) { rows.push({ ...l, runs: row, mono }); row = []; n = 0; }
+          }
+        }
+        if (row.length || !l.runs.length) rows.push({ ...l, runs: row, mono });
+        continue;
+      }
       for (const r of wrap(g, l.text, PW - 2 * pad - 24)) rows.push({ ...l, text: r, mono });
     }
     const top = y + 20, bottom = PH - 150, rowH = 42, fit = Math.floor((bottom - top) / rowH);
@@ -236,7 +255,10 @@ export function setupXR(api) {
       }
       g.font = r.mono ? "30px ui-monospace, Menlo, monospace" : r.style === "label" ? "600 24px system-ui, sans-serif" : r.style === "hint" || r.style === "summary" || r.style === "tour" ? "italic 32px system-ui, sans-serif" : "34px Georgia, serif";
       g.fillStyle = r.style === "label" || r.style === "hint" ? C.muted : C.fg;
-      g.fillText(r.text, pad + (r.mono ? 4 : 0), y + 26);
+      if (r.runs) {
+        let x = pad + 4;
+        for (const run of r.runs) { g.fillStyle = run.color ?? C.fg; g.fillText(run.text, x, y + 26); x += g.measureText(run.text).width; }
+      } else g.fillText(r.text, pad + (r.mono ? 4 : 0), y + 26);
       y += rowH;
     }
     // (the buttons, along the bottom)
@@ -343,7 +365,7 @@ export function setupXR(api) {
     const tours = api.tours().length, now = api.tourNow();
     const items = [["← Back", "back", backStack.length > 0 || api.inRoom()], ["Forward →", "forward", fwdStack.length > 0], ["See all", "home", true], ["Run all", "runall", true],
       [now ? "Next stop ▶" : "Tour", "tour", tours > 0 || !!now], [chatOpen ? "Chat ✕" : "Chat", "chat", !!api.chat()],
-      [walk ? "Fly: off" : "Fly: on", "fly", true], ["Exit VR", "exit", true]];
+      [walk ? "Fly: off" : "Fly: on", "fly", true], [mode === "immersive-ar" ? "Exit AR" : "Exit VR", "exit", true]];
     const bw = (MW - 3 * 20) / 2, bh = 96;
     items.forEach(([label, act, on], k) => {
       const x = 20 + (k % 2) * (bw + 20), y = 20 + Math.floor(k / 2) * (bh + 20), w = bw;
@@ -392,6 +414,10 @@ export function setupXR(api) {
   let typed = "", chatButtons = [], chatOpen = false;
   field.addEventListener("input", () => { typed = field.value.slice(0, 500); drawChat(); });
   field.addEventListener("keydown", (e) => { if (e.key === "Enter") { e.preventDefault(); chatSend(field.value); } });
+  // (the Quest's keyboard put away (its ✕, Done) with something typed or dictated: that is sending it, as elsewhere
+  //  on the Quest)
+  let refocusing = false; // (the ⌨ button's blur and focus, to bring the keyboard back: not a send)
+  field.addEventListener("blur", () => { if (!refocusing && chatOpen && session && field.value.trim()) chatSend(field.value); });
   const systemKeyboard = () => !!session?.isSystemKeyboardSupported;
   function openChat(on) {
     chatOpen = !!on && !!api.chat() && !!session;
@@ -497,7 +523,7 @@ export function setupXR(api) {
       const px = h.uv.x * CW, py = (1 - h.uv.y) * CH;
       const b = chatButtons.find((b) => px >= b.x && px <= b.x + b.w && py >= b.y && py <= b.y + b.h);
       if (b?.act.send) chatSend(b.act.send);
-      else if (b?.act.keyboard) { field.blur(); field.focus(); } // (again, after the keyboard was put away)
+      else if (b?.act.keyboard) { refocusing = true; field.blur(); field.focus(); refocusing = false; } // (again, after the keyboard was put away)
       else if (b?.act.close) openChat(false);
       return;
     }

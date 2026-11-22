@@ -101,6 +101,15 @@ Over this connection Claude has the web and your Sagebrush files, not your disk.
 
 The chat stays out of the way. On the desktop it is a **Talk to the agent** button (or T, or click the agent); it folds away while the agent works, and its answers are in its speech bubble. In a headset, it is on your left wrist above the menu (the menu's **Chat**, or point at the agent and pull the trigger). Typing goes into a text field of the page, so the Quest's own keyboard comes up with its microphone for dictation, and a Bluetooth keyboard types there too.
 
+**Walking on the desktop** is the default with a mouse:
+- Drag to look around; W A S D or the arrows walk (Shift is faster); Space jumps; gravity brings you down.
+- Click the floor to go there (a ring shows where).
+- Clicking an object, Back and See all are a blink.
+- **G** (or the Walking button) switches to flying, the orbit navigation. A phone or tablet starts flying, which is how touch moves.
+- **?** shows every key and control, desktop and headset.
+
+Code is highlighted wherever it is read: in the drawer, on an object's face, and in the headset's reading panel.
+
 **Comfort in a headset:**
 - Walking is the default. There's a floor in every space; the left thumbstick walks and the right turns in steps.
 - Going to an object, Back and See all are a blink (a quick fade), never a glide.

@@ -78,6 +78,15 @@
   #overlay .tourbar button { background: var(--ctl2); color: var(--ov-fg); border: 1px solid var(--ctl-line); padding: 4px 10px; }
   #overlay .tourbar button.next { background: #1f6feb; color: #fff; border-color: #1f6feb; font-weight: 600; }
   #tour { width: 100%; }
+  #fade { position: fixed; inset: 0; background: #000; opacity: 0; pointer-events: none; z-index: 3; }
+  #helpbtn { padding: 2px 9px; font-size: 13px; font-weight: 700; }
+  #helpcard { position: fixed; left: 50%; top: 50%; transform: translate(-50%, -50%); z-index: 8; width: min(520px, 92vw); max-height: 86vh; overflow: auto;
+    background: var(--ov); color: var(--ov-fg); border: 1px solid var(--line); border-radius: 12px; padding: 16px 20px; box-shadow: var(--ov-shadow); font-size: 13.5px; }
+  #helpcard[hidden] { display: none; }
+  #helpcard h3 { margin: 0 0 8px; } #helpcard table { border-collapse: collapse; width: 100%; }
+  #helpcard th { text-align: left; padding: 10px 0 4px; color: var(--ov-muted); font-size: 12px; text-transform: uppercase; letter-spacing: 0.04em; }
+  #helpcard td { padding: 3px 8px 3px 0; vertical-align: top; } #helpcard td:first-child { white-space: nowrap; font-weight: 600; width: 38%; }
+  #helpcard .close { position: absolute; top: 8px; right: 10px; background: none; border: 0; font-size: 22px; color: var(--ov-muted); }
   /* (these use display: flex, which would override the hidden attribute) */
   #chat[hidden], #chatfab[hidden], #tourpill[hidden] { display: none; }
   #chat { position: fixed; left: 50%; bottom: 12px; transform: translateX(-50%); width: min(620px, 94vw); z-index: 5; display: flex; flex-direction: column; gap: 6px;
@@ -133,12 +142,14 @@
   <div class="head">
     <button id="back" title="Back to where you were (B); out of a room, past where you entered it" disabled>←</button>
     <div id="title">Whitespace</div>
+    <button id="helpbtn" title="How to move, and the keys (?)">?</button>
     <button id="fold" title="Hide the controls (show them again with this button)" aria-expanded="true">▴</button>
   </div>
   <div class="row"><select id="space" title="The space shown"></select></div>
   <div class="row">
     <button id="fwd" title="Forward again (F)" disabled>Forward →</button>
     <button id="home" title="See everything (H)">See all</button>
+    <button id="move" title="Walking or flying (G)">Walking (G)</button>
     <button id="dims" title="The same space laid out on a plane, to compare">Flatten to 2D</button>
     <button id="fs" title="Full screen">Full screen</button>
     <button id="vr" hidden title="Into the space, in a headset (Meta Quest and others)">Enter VR</button>
@@ -162,7 +173,38 @@
   <form id="chatform"><input id="chatin" autocomplete="off" placeholder="Ask the agent"><button>Send</button><button type="button" id="chatmic" hidden title="Speak to the agent">🎤</button></form>
 </div>
 <div id="alpha" title="A quick prototype: not reviewed, and it will change. Spaces you make may not open in a later version.">Whitespace · rough alpha</div>
-<div id="help">Drag to turn · scroll to move closer · right-drag to pan · W A S D / arrows, E Q: fly (Shift: faster) · click an object to read it · Enter: into a directory, file or class · B / F: back, forward · H: see all · /: search</div>
+<div id="fade"></div>
+<div id="helpcard" hidden role="dialog" aria-label="Help">
+  <button type="button" class="close" title="Close (Esc)">×</button>
+  <h3>Moving around</h3>
+  <table>
+    <tr><th colspan="2">Walking (the default with a mouse)</th></tr>
+    <tr><td>Drag</td><td>look around</td></tr>
+    <tr><td>W A S D, arrows</td><td>walk (Shift: faster)</td></tr>
+    <tr><td>Space</td><td>jump</td></tr>
+    <tr><td>Click the floor</td><td>go there</td></tr>
+    <tr><td>Scroll</td><td>step forward or back</td></tr>
+    <tr><th colspan="2">Flying (G switches; the default on a phone)</th></tr>
+    <tr><td>Drag, pinch</td><td>turn around what you look at; zoom</td></tr>
+    <tr><td>Right-drag</td><td>pan</td></tr>
+    <tr><td>W A S D, E Q</td><td>fly; up and down</td></tr>
+    <tr><th colspan="2">Everywhere</th></tr>
+    <tr><td>Click an object</td><td>read it (Esc closes)</td></tr>
+    <tr><td>Enter</td><td>into a folder, file, class or notebook</td></tr>
+    <tr><td>B, F</td><td>back, forward (Back also leaves a room)</td></tr>
+    <tr><td>H</td><td>see everything</td></tr>
+    <tr><td>/</td><td>search</td></tr>
+    <tr><td>N, P</td><td>a tour's next and previous stop</td></tr>
+    <tr><td>T</td><td>talk to the agent (where there is one)</td></tr>
+    <tr><td>G</td><td>walking or flying</td></tr>
+    <tr><td>?</td><td>this help</td></tr>
+    <tr><th colspan="2">In a headset (Enter VR)</th></tr>
+    <tr><td>Left stick</td><td>walk; right stick: turn in steps</td></tr>
+    <tr><td>Trigger</td><td>on an object: read it; on the floor: step there; on the agent: talk</td></tr>
+    <tr><td>A or X, B or Y</td><td>close the panel; back</td></tr>
+    <tr><td>Left wrist</td><td>the menu: Back, Forward, See all, Run all, Tour, Chat, Fly, Exit</td></tr>
+  </table>
+</div>
 <script type="module" src="space.js"></script>
 </body>
 </html>

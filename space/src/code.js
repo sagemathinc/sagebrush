@@ -57,3 +57,31 @@ export function editor(el, { value, lang, onRun, onChange }) {
     focus() { ta.focus(); },
   };
 }
+
+// A text's lines as coloured runs, for a canvas (an object's face, the headset's reading panel): highlight.js's
+// classes in GitHub's colours (as the page's CSS has them), light or dark. Read from an inert parse of its output.
+const PALETTE = {
+  light: { keyword: "#cf222e", built_in: "#cf222e", type: "#cf222e", title: "#8250df", string: "#0a3069", regexp: "#0a3069", number: "#0550ae",
+    literal: "#0550ae", attr: "#0550ae", symbol: "#0550ae", variable: "#0550ae", comment: "#6e7781", quote: "#6e7781", meta: "#953800" },
+  dark: { keyword: "#ff7b72", built_in: "#ff7b72", type: "#ff7b72", title: "#d2a8ff", string: "#a5d6ff", regexp: "#a5d6ff", number: "#79c0ff",
+    literal: "#79c0ff", attr: "#79c0ff", symbol: "#79c0ff", variable: "#79c0ff", comment: "#8b949e", quote: "#8b949e", meta: "#ffa657" },
+};
+export function codeRuns(code, lang, dark = false, maxLines = 400) {
+  const text = String(code ?? "").split("\n").slice(0, maxLines).join("\n");
+  const pal = PALETTE[dark ? "dark" : "light"];
+  // (in a div: a <pre> would drop a newline right after its start, and with it a leading blank line)
+  const doc = new DOMParser().parseFromString(`<div>${highlight(text, lang)}</div>`, "text/html");
+  const lines = [[]];
+  const walk = (node, color) => {
+    for (const ch of node.childNodes) {
+      if (ch.nodeType === 3) {
+        ch.nodeValue.split("\n").forEach((part, i) => { if (i) lines.push([]); if (part) lines[lines.length - 1].push({ text: part, color }); });
+      } else if (ch.nodeType === 1) {
+        const cls = [...ch.classList].map((c) => c.replace(/^hljs-/, "")).find((c) => pal[c]);
+        walk(ch, cls ? pal[cls] : color);
+      }
+    }
+  };
+  walk(doc.body.firstElementChild, null);
+  return lines;
+}
