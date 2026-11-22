@@ -268,7 +268,11 @@ try {
       if (i) await sleep(1000);
       const back = await H.call("workspace.read", { path: "/" + path }, 30000).catch((e) => ({ error: String(e) }));
       after = back.result ?? null;
-      if (!after) console.log(`  ${path} read back (try ${i + 1}):`, JSON.stringify(back.error ?? back).slice(0, 300));
+      if (!after) {
+        // (why: the host's connection to the page, the page's Web Locks, its errors)
+        const locks = await P.ev(`navigator.locks.query().then((q) => JSON.stringify({ held: q.held.map((l) => l.name + ":" + l.mode), pending: q.pending.map((l) => l.name + ":" + l.mode) }))`).catch((e) => String(e));
+        console.log(`  ${path} read back (try ${i + 1}):`, JSON.stringify(back.error ?? back).slice(0, 300), `host socket: ${H.sock ? "readyState " + H.sock.readyState : "none"}, closed ${H.closed}, late closes ${H.staleCloses}; locks ${locks}; page errors ${JSON.stringify(P.errors).slice(0, 300)}`);
+      }
     }
     ok(after && JSON.stringify(after.content).includes(label) && (await status()) === "Merge incomplete" && (await chip(T)) === "Merge incomplete", `${path}: an edit after Merge checked it, before its removal: not removed, the edit kept, Merge incomplete`, { after: JSON.stringify(after?.content ?? null).slice(0, 200), status: await status(), chip: await chip(T) });
     await sleep(300);
@@ -299,6 +303,7 @@ try {
   })()`);
   ok(on && journaled, "the notebook row ran under sync's journal (its late edit saved through it)", { on, journaled });
   ok(P.errors.length === 0, "no page errors", P.errors);
+  console.log(`  (the host saw ${H.staleCloses} late close(s) of a connection already replaced by a newer one, ignored)`);
 } catch (e) {
   ok(false, "the test ran to its end: " + (e?.stack ?? e));
 } finally {

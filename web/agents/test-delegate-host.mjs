@@ -12,7 +12,7 @@ const enc = new TextEncoder();
 const hex = (n) => Array.from(crypto.getRandomValues(new Uint8Array(n)), (b) => b.toString(16).padStart(2, "0")).join("");
 
 export function delegateHost({ features = ["delegate.1", "chat.resume"], pageSize = 50 } = {}) {
-  const H = { got: [], grant: null, sock: null, closed: false, tasks: new Map(), hold: new Set(), fail: new Map(), held: [], pageSize, changes: [], asks: [] };
+  const H = { staleCloses: 0, got: [], grant: null, sock: null, closed: false, tasks: new Map(), hold: new Set(), fail: new Map(), held: [], pageSize, changes: [], asks: [] };
   const send = (m) => H.sock?.send(JSON.stringify(m));
   const entryOf = (t) => ({ task: t.task, title: t.title, status: t.status, target: "local", run: t.run, round: t.round, seq: t.log.length, proposal: t.proposal, question: false, updated: t.updated });
   H.emit = (id, event) => {
@@ -163,7 +163,9 @@ export function delegateHost({ features = ["delegate.1", "chat.resume"], pageSiz
         if (H.grant?.delegate !== true) return refuse(m.id, "forbidden");
         task(m);
       },
-      close() { H.closed = true; H.sock = null; },
+      // (only the current connection's close ends it: a page reloaded opens a new one, and the old one's close can come
+      //  after it (a slow runner), which must not cut the new one off; such late closes are counted, to be reported)
+      close(ws) { if (H.sock === ws) { H.closed = true; H.sock = null; } else H.staleCloses++; },
     },
   });
   H.port = H.srv.port;
