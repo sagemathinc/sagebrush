@@ -26,7 +26,8 @@ ok(ownClaudeCommand(base, "https://[2001:db8::1]") === base + " --origin 'https:
 ok(ownClaudeCommand(base, "https://xn--bcher-kva.example") === base + " --origin https://xn--bcher-kva.example", "a punycode host: --origin, as it is");
 // (every line read back by a real POSIX shell: its words exactly npx, -y, the tarball, --origin and the origin, for
 //  origins that hold every character a shell reads specially that a canonical origin can hold)
-const argv = (line) => execFileSync("sh", ["-c", `printf '%s\\0' ${line}`], { encoding: "utf8" }).split("\0").slice(0, -1);
+// (a line the shell can't read, or reads as other words, is a failed row, not a crash)
+const argv = (line) => { try { return execFileSync("sh", ["-c", `printf '%s\\0' ${line}`], { encoding: "utf8", stdio: ["ignore", "pipe", "ignore"] }).split("\0").slice(0, -1); } catch (e) { return "the shell refused it: " + String(e.message).slice(0, 80); } };
 const hosts = ["dev.sagebrush.space", "127.0.0.1:8765", "[::1]:8765", "[2001:db8::1]", "a'b.example", "a$b.example", "a;b.example", "a&b.example", "a(b).example", "a*b.example", "a`b.example", "a!b.example", 'a"b.example', "a{b}.example", "a~b.example", "it's'.example"];
 const trips = hosts.map((h) => { const o = new URL(`https://${h}`).origin; const words = argv(ownClaudeCommand(base, o)); return { o, ok: JSON.stringify(words) === JSON.stringify(["npx", "-y", base.split(" ")[2], "--origin", o]), words }; });
 ok(trips.every((t) => t.ok), "through a real shell, every command's words are exactly npx -y <tarball> --origin <origin>, for origins with ' $ ; & ( ) * ` ! \" { } ~ and IPv6 brackets", trips.filter((t) => !t.ok));
