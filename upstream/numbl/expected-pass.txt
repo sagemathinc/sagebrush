@@ -32,6 +32,7 @@ arrays/complex_operations.m
 arrays/complex_reductions.m
 arrays/complex_tensors.m
 arrays/concat_empty.m
+arrays/concat_empty_shaped.m
 arrays/cumulative_diff.m
 arrays/diag_offset.m
 arrays/end_in_matrix_index.m
@@ -101,6 +102,7 @@ builtins/complex_repelem.m
 builtins/ifft_symmetric.m
 builtins/isa_complex.m
 builtins/isinf_isnan_logical.m
+builtins/jsonencode_basic.m
 builtins/max_min_logical_flag.m
 builtins/nan_lowercase.m
 builtins/nan_stays_real.m
@@ -135,6 +137,7 @@ builtins/test_conv.m
 builtins/test_conv2.m
 builtins/test_conv_column_vector.m
 builtins/test_cov_corrcoef.m
+builtins/test_cumtrapz.m
 builtins/test_deal.m
 builtins/test_dec2hex_bin_negative.m
 builtins/test_deconv_column_vector.m
@@ -148,7 +151,9 @@ builtins/test_find_last.m
 builtins/test_flip_cell.m
 builtins/test_fprintf_extended.m
 builtins/test_fprintf_stderr.m
+builtins/test_gammaln.m
 builtins/test_gradient_func.m
+builtins/test_histc.m
 builtins/test_idivide_rounding_modes.m
 builtins/test_indexing_fast_paths.m
 builtins/test_int_types_idivide.m
@@ -306,6 +311,8 @@ functions/local_function_shadowing/local_function_shadowing.m
 functions/multiple_returns.m
 functions/prototype_name_functions.m
 functions/recursion.m
+functions/script_shares_caller_workspace.m
+functions/script_with_local_functions.m
 functions/space_separated_multi_assign.m
 functions/space_separated_outputs.m
 functions/test_anon_func_too_many_outputs.m
@@ -367,6 +374,8 @@ linear_algebra/matrix_ops.m
 linear_algebra/null_space.m
 linear_algebra/sparse_blkdiag_broadcast.m
 linear_algebra/test_blkdiag.m
+linear_algebra/test_cross_dim.m
+linear_algebra/test_cross_matrix.m
 linear_algebra/test_dot_dim.m
 linear_algebra/test_dot_matrix.m
 linear_algebra/test_eig.m
@@ -414,6 +423,8 @@ math/test_inv_hyp.m
 math/test_log2_frexp.m
 math/test_log_large_negative.m
 math/test_max_elementwise.m
+math/test_mod_inf_large.m
+math/test_power_negative_real_exact.m
 math/test_reciprocal_inverse_trig_complex.m
 math/test_round_n.m
 math/test_sqrt_negative_real.m
@@ -432,6 +443,15 @@ memory/test_persistent_lifecycle.m
 memory/test_pool_aliasing_correctness.m
 memory/test_recursion.m
 memory/test_self_referencing_assign.m
+namespaces/basic_package.m
+namespaces/import_explicit.m
+namespaces/import_in_function.m
+namespaces/import_multiple.m
+namespaces/import_precedence.m
+namespaces/import_wildcard.m
+namespaces/nested_packages.m
+namespaces/package_function_handle.m
+namespaces/test_loop_namespace_call.m
 plotting/colorbar_locations.m
 plotting/contour_output.m
 plotting/imagesc_axis_limits.m
@@ -443,7 +463,6 @@ plotting/pcolor_xy.m
 plotting/quiver_basic.m
 plotting/set_handle_update.m
 plotting/tiledlayout_basic.m
-reduction/jit_cummax_cummin.m
 reduction/jit_diff.m
 reduction/test_any_all_empty.m
 reduction/test_cumsum_nd.m
@@ -467,6 +486,7 @@ sorting/sort_logical.m
 sorting/sort_nan.m
 sorting/test_sort_nd.m
 sorting/test_sortrows.m
+sparse/test_sparse_direct_acceptance.m
 sparse/test_sparse_mldivide.m
 sparse/test_sprand.m
 strings/char_vs_string_01_class.m
@@ -512,6 +532,7 @@ strings/test_sprintf_width_flags.m
 strings/test_sprintf_width_padding.m
 strings/test_str2double_cell.m
 strings/test_str2double_empty.m
+strings/test_str2num_expr.m
 strings/test_strcmp_nonstring.m
 strings/test_string_array_ops.m
 strings/test_string_empty.m

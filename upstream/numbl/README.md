@@ -30,6 +30,7 @@ These are vendored and run unchanged, but they are not held against Sagebrush: `
 | script | why |
 |---|---|
 | `functions/test_ans.m`, `control_flow/for_loop_nested_funcall.m`, `control_flow/test_elseif_char_condition.m`, `functions/test_no_output_function.m`, `indexing/cell_member_chain_assign.m` | **Not valid MATLAB.** Each puts its local functions first and its script code after them. A file whose first code is `function` is a function file, and in a script MATLAB requires the local functions at the end ("Add Functions to Scripts"). Sagebrush runs them anyway (a leniency) and Octave rejects them; neither result says anything about MATLAB. |
+| `reduction/jit_cummax_cummin.m` | **Asserts against MATLAB's behaviour.** Its own comment says its NaN rule is numbl's, "NOT MATLAB's NaN-skip": it asserts that `cummax([1 3 NaN 2])` and `cummax([NaN 1 2])` turn NaN for good. MATLAB's `cummax` and `cummin` omit NaN by default (`'omitnan'`; observed in MATLAB R2026b, 2026-11-21: `cummax([1 3 NaN 2])` is `[1 3 3 3]`, `cummin([5 NaN 1 2])` is `[5 5 1 1]`). |
 | `arithmetic/test_power_inf_exponent.m` | **Asserts against MATLAB's documentation.** It asserts `1 .^ Inf` and `1 ^ Inf` are NaN. MathWorks' `power` page ("IEEE Compliance") lists the only cases where MATLAB departs from IEEE-754, `power(1,NaN)` and `power(NaN,0)` (both NaN); `1^Inf` isn't one, so it is IEEE's 1, as in Sagebrush and Octave. |
 
 ## The ratchet

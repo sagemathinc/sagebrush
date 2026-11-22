@@ -6,3 +6,4 @@ control_flow/test_elseif_char_condition.m
 functions/test_ans.m
 functions/test_no_output_function.m
 indexing/cell_member_chain_assign.m
+reduction/jit_cummax_cummin.m

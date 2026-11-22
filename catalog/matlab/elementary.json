@@ -115,7 +115,7 @@
     "kind": "function",
     "signature": "b = mod(a, m)",
     "summary": "The remainder after division, with the sign of the divisor: a - m*floor(a/m).",
-    "doc": "`mod(a, 0)` is a. Integer classes and doubles mix as in arithmetic.",
+    "doc": "`mod(a, 0)` is a. Integer classes and doubles mix as in arithmetic. With an infinite divisor, as MATLAB gives it: a itself when a and the divisor have the same sign or a is 0, else the divisor (`mod(5, Inf)` is 5, `mod(-5, Inf)` is Inf); an infinite a gives NaN. A zero result takes the divisor's sign: `mod(-2, 2)` is 0, `mod(2, -2)` is -0.",
     "examples": [
       {
         "code": "mod([7 -7], 3)",
@@ -128,9 +128,7 @@
     ],
     "differs": [
       "Complex arguments give an unclear error rather than MATLAB's message.",
-      "An infinite divisor, mod(a, Inf), is refused: mod's page does not give its value.",
       "On some inputs its answer differs from Octave's: mod([7 -7], uint8(200)) gives uint8 1x2 [7 193] where Octave gives uint8 1x2 [7 0].",
-      "It refuses some inputs Octave accepts, e.g. mod([7 -7], Inf).",
       "It accepts some inputs Octave refuses: mod(true, 3) gives double 1x1 1.",
       "Found by a probe of edge values against GNU Octave 8.4.0 (scripts/catalog-probe-matlab.py; catalog/matlab/probes/octave.json)."
     ],
@@ -148,7 +146,7 @@
     "kind": "function",
     "signature": "r = rem(a, b)",
     "summary": "The remainder after division, with the sign of the dividend: a - b*fix(a/b).",
-    "doc": "`rem(a, 0)` is NaN, as rem's page says.",
+    "doc": "`rem(a, 0)` is NaN, as rem's page says. With an infinite divisor a finite a is itself (`rem(5, Inf)` is 5) and an infinite one NaN.",
     "examples": [
       {
         "code": "rem([7 -7], 3)",
@@ -156,8 +154,6 @@
       }
     ],
     "differs": [
-      "An infinite divisor, rem(a, Inf), is refused: rem's page does not give its value.",
-      "It refuses some inputs Octave accepts, e.g. rem([7 -7], Inf).",
       "It accepts some inputs Octave refuses: rem(true, 3) gives double 1x1 1.",
       "Found by a probe of edge values against GNU Octave 8.4.0 (scripts/catalog-probe-matlab.py; catalog/matlab/probes/octave.json)."
     ],

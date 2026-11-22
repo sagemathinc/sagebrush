@@ -83,6 +83,15 @@ for (const [name, noWasm] of BACKENDS) {
     assert.equal(s.out, "   1\n   1   1\n  -Inf   Inf\n");
   });
 
+  // (an empty A: 0x0 \ 0x0 is 0x0 and 0x0 \ 0x5 is 0x5, with no warning; the square route once reshaped B to
+  // (0, -1) and failed. The numbl corpus's linear_algebra/test_mldivide_empty.m checks the non-square cases too)
+  test(`${name}: an empty square A gives an empty X of B's column count`, () => {
+    const r = run("lastwarn(''); X = zeros(0,0) \\ zeros(0,0); Y = zeros(0,0) \\ zeros(0,5); [~, id] = lastwarn();\ndisp([size(X), size(Y), isempty(id)])", noWasm);
+    assert.equal(r.status, 0, r.err);
+    assert.equal(r.out, "     0     0     0     5     1\n");
+    assert.equal(r.err, "");
+  });
+
   // (a known gap against design §1, not the contract: MATLAB computes with an Inf or NaN and warns, RCOND = NaN;
   // Sagebrush refuses, as before this change. Pinned so the gap stays visible until it is closed: issue #1500.)
   test(`${name}: an Inf or NaN in A or B is still refused before the solve (a known gap)`, () => {
