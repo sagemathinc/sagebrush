@@ -100,8 +100,24 @@ try {
   await P.until(`document.querySelector('dialog.proposal[open]').textContent.includes('two')`, 20000).catch(() => {});
   ok(fileAsks().includes("work/notes.txt@base") && fileAsks().includes("work/notes.txt@proposal") && (await P.ev(`document.querySelector('dialog.proposal[open]').textContent.includes('two')`)), "a file opened: both sides read (tasks.file, base and proposal), its diff shown", fileAsks());
   await shot("4-proposal");
-  ok(/Merge, Close and Ask for changes come in a later update\./.test(await P.ev(`document.querySelector('dialog.proposal[open]').textContent`)), "no decisions offered yet: the view says they come later");
-  await P.ev(`document.querySelector('dialog.proposal[open] .x').click()`);
+  // (its actions: Close now; Merge and Ask for changes not yet, and said so)
+  const acts = await P.ev(`[...document.querySelectorAll('dialog.proposal[open] button[data-act]')].map((b) => [b.dataset.act, b.textContent, b.getAttribute('aria-disabled')])`);
+  ok(JSON.stringify(acts) === JSON.stringify([["merge", "Merge", "true"], ["ask", "Ask for changes", "true"], ["close", "Close", null]]) && /Merge and Ask for changes come in the next update\./.test(await P.ev(`document.querySelector('dialog.proposal[open]').textContent`)), "the proposal's actions: Close; Merge and Ask for changes not yet, said so", acts);
+  // (a newer round of the task, while its proposal is open: it replaces the one shown, in place)
+  const r2 = await H.propose(A.task, { "work/notes.txt": "one\ntwo\nthree\n" });
+  await P.until(`document.querySelector('dialog.proposal[open] .sbpv h3')?.textContent === 'Proposal, round 2'`, 20000);
+  const round2 = await P.ev(`({ status: document.querySelector('dialog.proposal[open] .proposal-actions [role=status]').textContent, files: [...document.querySelectorAll('dialog.proposal[open] .sbpv .file')].map((r) => r.querySelector('.path').textContent) })`);
+  ok(/round 2/.test(round2.status) && round2.files.join() === "work/notes.txt" && H.got.some((m) => m.method === "tasks.diff" && m.params.commit === r2), "a new round while the proposal is open: it replaces the one shown, in the same dialog, said so", round2);
+  // (Close: asked first, then the task closed at the host with the proposal shown and its seq; the dialog goes)
+  await P.ev(`document.querySelector('dialog.proposal[open] button[data-act="close"]').click()`);
+  await P.until(`[...document.querySelectorAll('dialog.delegate-dlg[open] h3')].some((h) => h.textContent === 'Close this proposal?')`);
+  ok(!H.got.some((m) => m.method === "tasks.close"), "Close asks first: nothing sent yet");
+  await P.ev(`[...document.querySelectorAll('dialog.delegate-dlg[open] button')].find((b) => b.textContent === 'Close the task').click()`);
+  await hostUntil(() => H.tasks.get(A.task).status === "closed");
+  const closeSent = H.got.find((m) => m.method === "tasks.close")?.params;
+  ok(closeSent?.proposal === r2 && closeSent?.seq === A.log.length - 1, "Close: tasks.close for the round shown, at the seq it was read at", { closeSent, log: A.log.length });
+  await P.until(`!document.querySelector('dialog.proposal[open]') && document.querySelector('#tasks .task[data-task="${A.task}"] .chip')?.textContent === 'Closed'`);
+  ok(true, "closed: the dialog goes, and the task's chip says Closed");
   await P.ev(`document.querySelector('#task-view .task-head .link').click()`);
   u = await ui();
   ok(!u.view && u.log, "Back to chats: the chat shown again", u);
