@@ -59,6 +59,19 @@ pub fn xgcd_euclid(a: &IBig, b: &IBig, steps: &mut Vec<[usize; 4]>) -> (IBig, IB
 #[cfg(feature = "test-hooks")]
 thread_local! {
     static FORCE_FALLBACK: std::cell::Cell<bool> = const { std::cell::Cell::new(false) };
+    /// The fallbacks taken while recording (tests: the exact charge).
+    static RECORDED: std::cell::RefCell<Option<Vec<XgcdFallback>>> = const { std::cell::RefCell::new(None) };
+}
+
+/// Tests: notes a fallback taken, when recording (nothing otherwise).
+fn record(f: &XgcdFallback) {
+    #[cfg(feature = "test-hooks")]
+    RECORDED.with(|r| {
+        if let Some(v) = r.borrow_mut().as_mut() {
+            v.push(f.clone());
+        }
+    });
+    let _ = f;
 }
 
 /// Whether a test forces the fallback (always false without the test hooks).
@@ -87,6 +100,26 @@ pub fn with_xgcd_fallback_forced<T>(f: impl FnOnce() -> T) -> T {
     }
     let _reset = Reset(FORCE_FALLBACK.with(|c| c.replace(true)));
     f()
+}
+
+/// Tests (feature `test-hooks`): [`with_xgcd_fallback_forced`], and every
+/// fallback taken in `f`, in order (to price each site's charge exactly).
+#[cfg(feature = "test-hooks")]
+#[doc(hidden)]
+pub fn with_xgcd_fallback_recorded<T>(f: impl FnOnce() -> T) -> (T, Vec<XgcdFallback>) {
+    struct Reset(Option<Vec<XgcdFallback>>);
+    impl Drop for Reset {
+        fn drop(&mut self) {
+            let prev = self.0.take();
+            RECORDED.with(|r| *r.borrow_mut() = prev);
+        }
+    }
+    let prev = RECORDED.with(|r| r.borrow_mut().replace(vec![]));
+    let reset = Reset(prev);
+    let x = with_xgcd_fallback_forced(f);
+    let taken = RECORDED.with(|r| r.borrow_mut().take()).unwrap_or_default();
+    drop(reset);
+    (x, taken)
 }
 
 // ---- formatting and parsing
@@ -1067,6 +1100,7 @@ impl BigInt {
         debug_assert!(fallback_forced(), "dashu's gcd_ext gave wrong Bezout coefficients for {:?}, {:?}", self.0, other.0);
         let mut f = XgcdFallback::default();
         let (g, x, y) = xgcd_euclid(&self.0, &other.0, &mut f.steps);
+        record(&f);
         (num_integer::ExtendedGcd { gcd: BigInt(g), x: BigInt(x), y: BigInt(y) }, Some(f))
     }
 
@@ -1097,6 +1131,7 @@ impl BigInt {
             debug_assert!(fallback_forced(), "dashu's gcd_ext gave a wrong inverse of {:?} mod {:?}", a, mm);
             let mut f = XgcdFallback::default();
             let (g, x, _) = xgcd_euclid(&a, &mm, &mut f.steps);
+            record(&f);
             fallback = Some(f);
             if !g.is_one() {
                 return (None, fallback);
