@@ -297,7 +297,7 @@ try {
   check(res === "NM:read:ok,write:refused,append:refused,mkdir:refused,remove:refused,rename:refused,move:refused,tmp:ok", "…it reads the person's files; its write, append, mkdir, remove, rename and replace are each refused with PermissionError; /tmp's write isn't: " + res);
   await sleep(1500);
   check((await stat("/keep.txt")) && !(await stat("/nm-w.txt")) && !(await stat("/nm-dir")) && !(await stat("/keep2.txt")) && !(await stat("/moved.txt")) && !(await stat("/tmp/nm-t.txt")), "…and the workspace is unchanged (/tmp kept nowhere)");
-  check(await ev("!document.querySelector('#filesbar').hidden && /wants to change \\/nm-w\\.txt, at the top of your files/.test(document.querySelector('#filesbar').textContent) && !document.querySelector('#fbperms').hidden && document.querySelector('#fballow').hidden"), "…the page asks about its first refused change, at the top of the files: no Allow there, only File > Permissions… (confinement phase 2: anywhere is never a prompt's default)");
+  check(await ev("!document.querySelector('#filesbar').hidden && /is trying to save nm-w\\.txt at the top of your Sagebrush workspace\\. To allow that, use File > Permissions/.test(document.querySelector('#filesbar').textContent) && document.querySelector('#filesbar').matches(':modal') && !document.querySelector('#fbperms').hidden && document.querySelector('#fballow').hidden"), "…the page asks about its first refused change, at the top of the files: no Allow there, only File > Permissions… (confinement phase 2: anywhere is never a prompt's default)");
   // (a forged change, as if from its interpreter: kept nowhere)
   await ev(`(() => { sagebrush.kernel.worker.onmessage?.({ data: { fsChanged: "/forged.txt", data: new Uint8Array([1, 2]) } }); return 1; })()`);
   await sleep(1500);
@@ -319,12 +319,12 @@ try {
   await go(base + "?open=" + encodeURIComponent(base + "remote2.ipynb"));
   check((await files()) === false, "a second notebook from elsewhere can't change files: the first's Allow is the first's alone");
 
-  // ---- a notebook that can't change files never runs in a plain worker
+  // ---- no run gate: a notebook that can't change files runs in this page's own worker where the sandbox isn't
+  //      (?runner=0), its permission still off (its writes are refused there: test-confine-writes.mjs)
   const remoteId = await ev("localStorage.getItem('sagebrush-current')");
   await go(base + "?open=" + encodeURIComponent(base + "remote.ipynb") + "&runner=0");
   await runAll();
-  // (it says why in the run bar, above the notebook, with its one way to run it; its cells untouched)
-  check(await until(`!document.querySelector('#runbar').hidden && /To run in this page, this notebook needs permission to change files/.test(document.querySelector('#rbtext').textContent)`, 30000) && !/can't run here/.test(await out()), "?runner=0: a notebook from elsewhere doesn't run in the page's own interpreter, and the run bar says why: " + (await ev("document.querySelector('#rbtext').textContent")).slice(0, 160));
+  check(await until(`(document.querySelector('#cells .cell .out')?.textContent ?? '').trim().length > 0`, 60000) && !/can't run here/.test(await out()) && !(await ev("!!document.querySelector('#runbar')")) && (await files()) === false, "?runner=0: a notebook from elsewhere runs in the page's own worker, no run bar, its file changes still off: " + JSON.stringify((await out()).slice(0, 120)));
 
   // ---- the person's own notebook: writes; Don't allow file changes; a run in flight; reopen; Allow again
   await go(base + "?runner=1");
@@ -339,7 +339,9 @@ try {
   await runAll();
   check(await until("/REFUSED/.test(document.querySelector('#cells .cell .out')?.textContent ?? '')", 60000), "…its first write is refused: " + (await out()).trim().slice(0, 160));
   console.log(`(the own notebook's first run, in the sandbox frame: ${Date.now() - tFirst} ms)`);
-  check(!(await stat("/own-1.txt")) && (await ev("!document.querySelector('#filesbar').hidden && /wants to change \\/own-1\\.txt/.test(document.querySelector('#filesbar').textContent)")), "…nothing is written, and the bar asks about it");
+  check(!(await stat("/own-1.txt")) && (await ev("!document.querySelector('#filesbar').hidden && /is trying to save own-1\\.txt at the top of your Sagebrush workspace/.test(document.querySelector('#filesbar').textContent)")), "…nothing is written, and the prompt asks about it");
+  // (the prompt is a modal: File is behind it, so it's closed first (Esc), unanswered, as a person would)
+  await closePerms();
   await filesSwitch();
   check((await files()) === true && (await ev("document.querySelector('#filesbar').hidden")), "…the person's own click on File > Permissions…'s switch: it may change files now, the bar gone");
   await setCode("open('own-1.txt', 'w').write('x'); print('W1')");
@@ -493,7 +495,7 @@ try {
   check(idA && idB && idA !== idB && (await files()) === false, "(two notebooks of the person's: A, then B, which isn't allowed)");
   await setCode("print('B ran')");
   await runAll();
-  check(await until(`!document.querySelector('#runbar').hidden && /To run in this page, this notebook needs permission to change files/.test(document.querySelector('#rbtext').textContent)`, 30000) && !/B ran/.test(await out()), "?runner=0: the person's own notebook not allowed to change files doesn't run in the page's own interpreter, and the run bar says why");
+  check(await until(`/B ran/.test(document.querySelector('#cells .cell .out')?.textContent ?? '')`, 60000) && (await files()) === false, "?runner=0: the person's own notebook not allowed to change files runs anyway (no run gate), its file changes still off");
   const { identifier: statusLog } = await send("Page.addScriptToEvaluateOnNewDocument", { source: `window.__statuses = []; new MutationObserver((ms) => { for (const m of ms) if (m.target.id === "status" || m.target.parentElement?.id === "status") for (const n of m.addedNodes) window.__statuses.push(n.textContent); }).observe(document, { childList: true, subtree: true });` });
   await go(base + "?runner=0");
   check((await ev("localStorage.getItem('sagebrush-current')")) === idB, "(reloaded into B; A has no interpreter in this page)");

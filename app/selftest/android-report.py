@@ -63,6 +63,7 @@ DESKTOP_BOARD = [
 ]
 # (the desktop app's files from the computer by its grants only, web/index.html selftest: required with --desktop only)
 DESKTOP_FILES = [
+    "a notebook runs before it may change files, its write refused",
     "a grant the app didn't make reaches nothing",
     "a name outside the notebook's folder is refused",
     "the page has no fs plugin",
