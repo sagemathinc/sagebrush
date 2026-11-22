@@ -2372,19 +2372,39 @@ try {
       const later = await rec(path);
       ok(!res.ok && /nothing changed/.test(res.msg) && same(now, before) && same(later, before) && (await shown())[0] === "x = 1", "E18: an apply that throws midway is put back: nothing saved, no version, during or after", { res, rev: [before.rev, now.rev, later.rev] });
     }
-    // E16b (closing): refused, nothing changed (under sync's journal an edit is applied: the "journal-live" section)
+    // E16b (closing): refused, nothing changed (under sync's journal an edit is applied: the "journal-live" section).
+    // (the person's own change, not yet saved (the workspace held), so the close has something to keep and waits for
+    //  the workspace: an edit then comes while the pane closes. A close with nothing unsaved goes at once: E16c)
     {
       const { path, ids } = await mk();
       await open(path);
       const r = await readOf(path);
       const before = await rec(path);
       await lockWorkspace();
+      await typeInto(1, "  # mine");
       await ev(`document.querySelector('#close').click()`);
       await sleep(300);
       const res = await edit(path, r, { set: [{ id: ids[0], source: "x = 9" }] });
       await ev(`window.__release()`);
       await sleep(500);
-      ok(!res.ok && /closing|isn't saved here/.test(res.msg) && same(await rec(path), before), "E16b: an edit of a notebook while its pane closes is refused, nothing changed", res);
+      // (the edit refused and nothing of it saved; the person's own change, saved by the close once the workspace is
+      //  free, is theirs)
+      const after16 = await rec(path);
+      ok(!res.ok && /closing|isn't saved here/.test(res.msg) && after16.cells[0].code === before.cells[0].code && after16.cells[0].code !== "x = 9", "E16b: an edit of a notebook while its pane closes is refused, nothing of it saved", { res, cell0: after16.cells[0].code });
+      await until(`!document.body.classList.contains('has-artifact')`, 15000).catch(() => {});
+    }
+    // E16c (#1611): a notebook the agent wrote (in its own form: each cell's type, its count as a number), shown and
+    // closed with nothing changed: it closes at once, and nothing is kept as a copy beside it
+    {
+      const { path } = await mk();
+      await open(path);
+      await sleep(1000);
+      const t0 = Date.now();
+      await ev(`document.querySelector('#close').click()`);
+      const gone = await until(`!document.body.classList.contains('has-artifact')`, 15000).then(() => true, () => false);
+      const ms = Date.now() - t0;
+      const names = await call("workspace.list", { folder: "/notes" }).then((x) => (x.entries ?? x).map((e) => e.path), (e) => ["list: " + e.message]);
+      ok(gone && ms < 3000 && !names.some((p) => p.startsWith(path.replace(/\.ipynb$/, " (copy")) ), "E16c: a notebook the agent wrote, closed with nothing changed: it closes at once, no copy kept beside it", { gone, ms, copies: names.filter((p) => p.includes("(copy")) });
     }
     // E30, E31 (#957 r2, E2 / P3-SEC-3): a notebook in the agent's own branch. The branches' check is taken after the
     // pane's waits and its lock held through the apply (seen held there), then let go for the save; outside /Branches no
