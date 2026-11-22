@@ -347,6 +347,13 @@
   .proposal-actions { margin-top: 14px; border-top: 1px solid var(--line); padding-top: 10px; }
   .proposal-actions .row { display: flex; justify-content: flex-end; gap: 8px; }
   .proposal-actions button[aria-disabled="true"] { opacity: .5; cursor: not-allowed; }
+  .merge-slot .conflicts h4 { margin: 10px 0 4px; font-size: 13px; }
+  .merge-slot .conflict > p { margin: 6px 0 4px; color: var(--muted); }
+  .merge-slot .sides { display: grid; grid-template-columns: 1fr 1fr; gap: 8px; }
+  .merge-slot .sides > * { min-width: 0; }
+  .merge-slot pre { margin: 0 0 4px; max-height: 160px; overflow: auto; white-space: pre-wrap; font-size: 12px; border: 1px solid var(--line); border-radius: 6px; padding: 6px; }
+  .merge-slot button[aria-pressed="true"] { outline: 2px solid var(--accent); }
+  .merge-slot .incomplete { margin: 8px 0; }
 </style>
 <style id="tex-host-layout">
   #artifacts .pane-body:has(> .pane-host:not([hidden]) .tex-host) { display: flex; flex-direction: column; }
