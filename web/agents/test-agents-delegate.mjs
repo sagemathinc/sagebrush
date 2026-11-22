@@ -53,6 +53,8 @@ try {
   await P.ev(`(() => { const d = [...document.querySelectorAll('.sbag-dlg')].at(-1); const all = [...d.querySelectorAll('label')].find((l) => l.textContent.startsWith('Everything')).querySelector('input'); all.checked = true; all.dispatchEvent(new Event('change')); [...d.querySelectorAll('button')].find((b) => b.textContent === 'Allow').click(); })()`);
   await P.until(`document.querySelector('#connect').textContent === 'Connected'`);
   await P.until(`!!document.querySelector('#delegate-switch')?.offsetParent`);
+  // (the grant reaches the host on its own message, which can come after the page shows the switch)
+  await hostUntil(() => !!H.grant);
   let u = await ui();
   ok(u.sw === "Delegate: off" && u.btn && u.tasks === null && H.grant && !H.grant.delegate, "granted, an agent that offers Delegate: the switch shown, off; Delegate… shown; no tasks; the grant has no delegate", u);
   ok(H.got.filter((m) => m.method?.startsWith("tasks.")).length === 0, "nothing asked of the host's tasks while the switch is off");
@@ -107,9 +109,9 @@ try {
   await P.until(`document.querySelector('dialog.proposal[open]').textContent.includes('two')`, 20000).catch(() => {});
   ok(fileAsks().includes("work/notes.txt@base") && fileAsks().includes("work/notes.txt@proposal") && (await P.ev(`document.querySelector('dialog.proposal[open]').textContent.includes('two')`)), "a file opened: both sides read (tasks.file, base and proposal), its diff shown", fileAsks());
   await shot("4-proposal");
-  // (its actions: Close and Ask for changes now; Merge not yet, and said so)
+  // (its actions: Merge, Ask for changes and Close, all on)
   const acts = await P.ev(`[...document.querySelectorAll('dialog.proposal[open] button[data-act]')].map((b) => [b.dataset.act, b.textContent, b.getAttribute('aria-disabled')])`);
-  ok(JSON.stringify(acts) === JSON.stringify([["merge", "Merge", "true"], ["ask", "Ask for changes", null], ["close", "Close", null]]) && /Merge comes in the next update\./.test(await P.ev(`document.querySelector('dialog.proposal[open]').textContent`)), "the proposal's actions: Close and Ask for changes on; Merge not yet, said so", acts);
+  ok(JSON.stringify(acts) === JSON.stringify([["merge", "Merge", null], ["ask", "Ask for changes", null], ["close", "Close", null]]) && !/comes in the next update/.test(await P.ev(`document.querySelector('dialog.proposal[open]').textContent`)), "the proposal's actions: Merge, Ask for changes and Close, none said to come later", acts);
   // (a newer round of the task, while its proposal is open: it replaces the one shown, in place)
   const r2 = await H.propose(A.task, { "work/notes.txt": "one\ntwo\nthree\n" });
   await P.until(`document.querySelector('dialog.proposal[open] .sbpv h3')?.textContent === 'Proposal, round 2'`, 20000);
@@ -172,8 +174,10 @@ try {
   await P.until(`document.querySelector('dialog.proposal[open] .sbpv h3')?.textContent === 'Proposal, round 3'`, 20000);
   const round3 = await P.ev(`({ slot: document.querySelector('dialog.proposal[open] .ask-slot').children.length, ask: ${askBtn}.getAttribute('aria-disabled') })`);
   ok(round3.slot === 0 && round3.ask === null, "round 3 replaces round 2 in the same dialog: the Ask block gone, Ask for changes offered again", round3);
-  // (a newer draft written while an older note is still being sent, in the proposal closed and opened again: the
-  //  older send's success doesn't remove it, and it stays across the next round replacing this one)
+  // (while an older note is still being sent, the proposal closed and opened again: every action stays off there,
+  //  Ask for changes included, as the send is under way for the task, not for one dialog. A newer draft written
+  //  meanwhile elsewhere (another tab of this browser, which keeps its own drafts in the same storage): the older
+  //  send's success doesn't remove it, and it stays across the next round replacing this one)
   H.hold.add("tasks.ask");
   await P.ev(`${askBtn}.click()`);
   await P.until(`!!${block} && !${block}.hidden`);
@@ -182,15 +186,18 @@ try {
   await P.ev(`document.querySelector('dialog.proposal[open] .x').click()`);
   await P.ev(`document.querySelector('#task-view .proposal-card').click()`);
   await P.until(`!!${askBtn} && !!document.querySelector('dialog.proposal[open] .sbpv .file')`, 20000);
+  await sleep(300);
+  const reopened = await P.ev(`[...document.querySelectorAll('dialog.proposal[open] button[data-act]')].map((b) => b.getAttribute('aria-disabled'))`);
   await P.ev(`${askBtn}.click()`);
-  await P.until(`!!${block} && !${block}.hidden`);
-  await P.ev(`(() => { const t = document.querySelector('dialog.proposal[open] #delegate-note'); t.value = 'A newer draft'; t.dispatchEvent(new Event('input')); })()`);
+  await sleep(200);
+  ok(reopened.every((a) => a === "true") && !(await P.ev(`!!${block}`)), "the proposal opened again while the note is sent: Merge, Ask for changes and Close all off, Ask opens nothing", reopened);
+  await P.ev(`localStorage.setItem(${JSON.stringify(KEY)}, "A newer draft")`);
   H.hold.clear();
   H.release();
   await hostUntil(() => H.asks.length === 2);
   await P.until(`document.querySelector('#tasks .task[data-task="${A.task}"] .chip')?.textContent === 'Working'`);
   await sleep(300);
-  ok(H.asks[1]?.note === "Round 3 note" && (await P.ev(`localStorage.getItem(${JSON.stringify(KEY)})`)) === "A newer draft", "a newer draft, written in the proposal opened again while the older note was being sent: the older send's success leaves it kept", { sent: H.asks[1]?.note, kept: await P.ev(`localStorage.getItem(${JSON.stringify(KEY)})`) });
+  ok(H.asks[1]?.note === "Round 3 note" && (await P.ev(`localStorage.getItem(${JSON.stringify(KEY)})`)) === "A newer draft", "a newer draft, written elsewhere while the older note was being sent: the older send's success leaves it kept", { sent: H.asks[1]?.note, kept: await P.ev(`localStorage.getItem(${JSON.stringify(KEY)})`) });
   const r4 = await H.propose(A.task, { "work/notes.txt": "1 one\n2 two\n3 three\n4 four\n" });
   await P.until(`document.querySelector('dialog.proposal[open] .sbpv h3')?.textContent === 'Proposal, round 4'`, 20000);
   await P.ev(`${askBtn}.click()`);
