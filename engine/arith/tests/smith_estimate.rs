@@ -16,7 +16,7 @@
 use num_traits::{One, Signed};
 use sagebrush_arith::cost::{tallied, Units, FAMILIES};
 use sagebrush_arith::smith::estimate::{self, part_a_model, trailing_model, Constants};
-use sagebrush_arith::smith::{last_small_smith_sizes, smith_form, Route, K_MAX};
+use sagebrush_arith::smith::{last_small_smith_sizes, smith_form, Route};
 use sagebrush_arith::snf::invariants_nonsingular;
 use sagebrush_arith::zmat::{self, limbs, ZMat};
 use sagebrush_bigint::BigInt;
@@ -73,6 +73,10 @@ struct Row {
     // non-square input's stage 1 and a classical run's stage 2 are None
     stage1_none_ok: bool,
     stage2_none_ok: bool,
+    // the transforms' largest entry, in bits (the output's size)
+    uv_bits: u64,
+    // stage 1's proved lower bound on k
+    k_hat: usize,
     // for the scales' refit: the remaining work's model and the inverse's
     a: ZMat,
     nm: Option<(ZMat, BigInt, BigInt, Vec<BigInt>)>,
@@ -94,24 +98,31 @@ fn entry(rng: &mut Rng, bits: u32) -> BigInt {
 }
 
 /// The corpus of one seed: "base" (random, k-structured with one shared
-/// prime, sparse, diagonally dominant, and k = 6..8) or "shift" (banded,
-/// block, near-unimodular, mixed sizes, larger n, k = 2..8, and classical
-/// inputs: k >= 9, singular, rectangular).
+/// prime, sparse, diagonally dominant, k = 6..8, and k in 9..=16 and in
+/// 17..n) or "shift" (banded, block, near-unimodular, mixed sizes, larger
+/// n, k = 2..8, k = 9..11, k = n - 1 and n, k = 2..n hidden from the
+/// contents, and classical inputs: singular, rectangular).
 fn corpus(set: &str, seed: u64) -> Vec<ZMat> {
     let mut rng = Rng(seed.wrapping_mul(0x9e3779b97f4a7c15));
-    let fams: &[&str] = if set == "base" { &["random", "kstruct", "sparse", "diagdom", "khigh"] } else { &["banded", "block", "unimod", "mixed", "large", "k8", "singular", "rect", "k9"] };
+    let fams: &[&str] = if set == "base" { &["random", "kstruct", "sparse", "diagdom", "khigh", "kbig"] } else { &["banded", "block", "unimod", "mixed", "large", "k8", "singular", "rect", "k9", "kfull", "khidden"] };
     let mut out = vec![];
     // k = 6..8 cycles, two inputs per size up to n = 32: the training
     // floor's 10 rows a k
     let mut khigh = 0usize;
+    // k past 8 alternates its bands, 9..=16 and (from n = 24) 17..=n - 1,
+    // two inputs per size up to n = 32: the training floor's 10 rows a band
+    let mut kbig = 0usize;
     for &fam in fams {
         let ns: &[usize] = if fam == "large" { &[64, 80, 96] } else { &[3, 4, 6, 8, 12, 16, 24, 32, 48] };
         for &n in ns {
-            for bits in [2u32, 4, 16, 64, 128].into_iter().flat_map(|b| std::iter::repeat_n(b, if fam == "khigh" && n <= 32 { 2 } else { 1 })) {
-                if (n >= 48 && bits >= 128) || (fam == "large" && bits > 16) || (fam == "khigh" && n < 12) {
+            for bits in [2u32, 4, 16, 64, 128].into_iter().flat_map(|b| std::iter::repeat_n(b, if matches!(fam, "khigh" | "kbig") && n <= 32 { 2 } else { 1 })) {
+                if (n >= 48 && bits >= 128) || (fam == "large" && bits > 16) || (matches!(fam, "khigh" | "kbig") && n < 12) {
                     continue;
                 }
                 if matches!(fam, "singular" | "rect" | "k9") && (n > 16 || bits > 16) {
+                    continue;
+                }
+                if matches!(fam, "kfull" | "khidden") && (!(6..=32).contains(&n) || bits > 64) {
                     continue;
                 }
                 let cols = if fam == "rect" { n + 2 } else { n };
@@ -154,16 +165,51 @@ fn corpus(set: &str, seed: u64) -> Vec<ZMat> {
                         6 + khigh % 3
                     }
                     "k9" => 9 + (rng.next() % 3) as usize,
+                    "kbig" => {
+                        kbig += 1;
+                        let (lo, hi) = if n >= 24 && kbig.is_multiple_of(2) { (17, n - 1) } else { (9, 16.min(n - 1)) };
+                        lo + (rng.next() % (hi - lo + 1) as u64) as usize
+                    }
+                    "kfull" => n - (rng.next() % 2) as usize,
                     _ => 0,
                 };
                 let p = [2i64, 3, 5][(rng.next() % 3) as usize];
-                for row in rows.iter_mut().take(kk.min(n.saturating_sub(1))) {
+                // (every row scaled only for k = n: the other families keep
+                // a row unscaled)
+                let cap = if fam == "kfull" { n } else { n.saturating_sub(1) };
+                for row in rows.iter_mut().take(kk.min(cap)) {
                     for v in row.iter_mut() {
                         *v = &*v * BigInt::from(p);
                     }
                 }
                 if fam == "singular" && n >= 2 {
                     rows[n - 1] = rows[0].iter().zip(&rows[1]).map(|(x, y)| x + y).collect();
+                }
+                if fam == "khidden" {
+                    // k invisible in the contents: L diag(1, .., 1, p, .., p) U,
+                    // L unit lower (entries of 2 bits) and U unit upper (of
+                    // `bits` bits), both unimodular; k = 2..n
+                    let kh = 2 + (rng.next() % (n as u64 - 1)) as usize;
+                    let mut l = ZMat::zero(n, n);
+                    let mut u = ZMat::zero(n, n);
+                    for i in 0..n {
+                        for j in 0..n {
+                            if i == j {
+                                l.d[i * n + j] = BigInt::one();
+                                u.d[i * n + j] = BigInt::one();
+                            } else if j < i {
+                                l.d[i * n + j] = entry(&mut rng, 2);
+                            } else {
+                                u.d[i * n + j] = entry(&mut rng, bits.min(32));
+                            }
+                        }
+                    }
+                    let mut dm = ZMat::zero(n, n);
+                    for i in 0..n {
+                        dm.d[i * n + i] = BigInt::from(if i >= n - kh { p } else { 1 });
+                    }
+                    out.push(l.mul(&dm).mul(&u));
+                    continue;
                 }
                 out.push(ZMat::from_rows(rows));
             }
@@ -200,6 +246,8 @@ fn measure(a: ZMat, c: &Constants) -> Row {
         stage2: None,
         stage1_none_ok: true,
         stage2_none_ok: true,
+        uv_bits: f.u.max_bits().max(f.v.max_bits()),
+        k_hat: if n == cols { estimate::k_lower_bound(&a) } else { 0 },
         a: ZMat::zero(0, 0),
         nm: None,
     };
@@ -243,6 +291,18 @@ fn measure(a: ZMat, c: &Constants) -> Row {
     row.a = a;
     row.nm = Some((nm, den, det, invariants));
     row
+}
+
+/// The k bands of the report and the training floor: each k up to 8, then
+/// 9..=16 and 17 and up.
+const BANDS: [&str; 9] = ["2", "3", "4", "5", "6", "7", "8", "9-16", "17+"];
+
+fn band(k: usize) -> &'static str {
+    match k {
+        0..=8 => BANDS[k.saturating_sub(2).min(6)],
+        9..=16 => BANDS[7],
+        _ => BANDS[8],
+    }
 }
 
 fn median(mut v: Vec<f64>) -> f64 {
@@ -315,8 +375,8 @@ fn refit(train: &[Row]) -> Constants {
 fn log_rows(report: &mut String, path: &std::path::Path, head: &str, set: &str, seed: u64, rows: &[Row]) {
     for r in rows {
         report.push_str(&format!(
-            "{head} {set} {seed} n={} route={:?} k={} attempts={} delta_bits={} actual={} L={} stage1={:?} beside={:?} stage2={:?} vinv={} stage1_none_ok={} stage2_none_ok={}\n",
-            r.n, r.route, r.k, r.attempts, r.delta_bits, r.actual, r.lower, r.stage1, r.beside, r.stage2, r.vinv, r.stage1_none_ok, r.stage2_none_ok
+            "{head} {set} {seed} n={} route={:?} k={} attempts={} delta_bits={} actual={} L={} stage1={:?} beside={:?} stage2={:?} vinv={} uv_bits={} k_hat={} stage1_none_ok={} stage2_none_ok={}\n",
+            r.n, r.route, r.k, r.attempts, r.delta_bits, r.actual, r.lower, r.stage1, r.beside, r.stage2, r.vinv, r.uv_bits, r.k_hat, r.stage1_none_ok, r.stage2_none_ok
         ));
     }
     std::fs::write(path, report.as_bytes()).expect("the report");
@@ -329,6 +389,7 @@ fn check_rows(set: &str, seed: u64, rows: &[Row]) {
         assert!(r.actual >= r.lower, "{set} {seed}: L = {} above the run's {} units", r.lower, r.actual);
         assert!(r.stage1_none_ok, "{set} {seed}: a non-square input has no estimate (n = {})", r.n);
         assert!(r.stage2_none_ok, "{set} {seed}: the classical route has no stage 2 estimate (n = {})", r.n);
+        assert!(r.k_hat <= r.k || r.route == Route::Classical, "{set} {seed}: k^ = {} above k = {} (n = {})", r.k_hat, r.k, r.n);
     }
 }
 
@@ -359,11 +420,12 @@ fn the_estimate_is_fitted_and_scores_within_its_ceilings() {
     log_rows(&mut report, &report_path, &head, "base-train", 1, &train);
     check_rows("base-train", 1, &train);
     // the training floor: route 2's constants are fitted with at least 10
-    // rows at each of k = 6, 7, 8
-    let counts: Vec<usize> = (0..=K_MAX).map(|kk| train.iter().filter(|r| r.route == Route::Trailing && r.k == kk).count()).collect();
-    println!("base-train seed 1: route 2 rows by k = 2..={K_MAX}: {:?}", &counts[2..]);
-    for (kk, &count) in counts.iter().enumerate().skip(6) {
-        assert!(count >= 10, "the training corpus has {count} route 2 rows at k = {kk}, fewer than 10");
+    // rows at each of k = 6, 7, 8 and in each band past 8
+    let count = |b: &str| train.iter().filter(|r| r.route == Route::Trailing && band(r.k) == b).count();
+    let floor: Vec<(String, usize)> = BANDS.iter().map(|b| (b.to_string(), count(b))).collect();
+    println!("base-train seed 1: route 2 rows by k: {floor:?}");
+    for (b, n) in floor.iter().filter(|(b, _)| ["6", "7", "8", "9-16", "17+"].contains(&b.as_str())) {
+        assert!(*n >= 10, "the training corpus has {n} route 2 rows at k = {b}, fewer than 10");
     }
     let fitted = refit(&train);
     assert_eq!(fitted, estimate::FITTED, "the constants refit at this head differ from estimate::FITTED: refit and record them");
@@ -374,42 +436,64 @@ fn the_estimate_is_fitted_and_scores_within_its_ceilings() {
         log_rows(&mut report, &report_path, &head, set, seed, &rows);
         check_rows(set, seed, &rows);
         // classical runs stage 1 gave an estimate for (square inputs that
-        // turned out singular or with k > K_MAX: unknown before the run);
-        // the user saw that estimate, so they are in stage 1's per-op k
+        // turned out singular: unknown before the run); the user saw that
+        // estimate, so they are in stage 1's per-op k
         let surprised: Vec<f64> = rows.iter().filter(|r| r.route == Route::Classical && r.stage1.is_some()).map(|r| sym(r.actual, r.stage1.unwrap())).collect();
         if !surprised.is_empty() {
             println!("{set} seed {seed}: {} classical runs had a stage 1 estimate (worst ratio {:.1})", surprised.len(), surprised.iter().cloned().fold(0.0, f64::max));
         }
-        // route 2 by k: V_2^-1 as run against the model's size, both in
-        // delta's limbs, and stage 2's k
-        for kk in 2..=K_MAX {
-            let rk: Vec<&Row> = rows.iter().filter(|r| r.route == Route::Trailing && r.k == kk).collect();
+        // route 2 by k (bands past 8): stage 2's k; V_2^-1 as run against
+        // the model's size, both in delta's limbs; the rows where the proved
+        // bound caps the model's size; the attempts; and the transforms'
+        // largest entry over delta's bits (the output's size against the
+        // bound's 3 (k - 1) delta)
+        for b in BANDS {
+            let rk: Vec<&Row> = rows.iter().filter(|r| r.route == Route::Trailing && band(r.k) == b).collect();
             if rk.is_empty() {
                 continue;
             }
             let big: Vec<&&Row> = rk.iter().filter(|r| r.delta_bits > 64).collect();
             let run = if big.is_empty() { f64::NAN } else { median(big.iter().map(|r| r.vinv as f64 / r.delta_bits.div_ceil(64) as f64).collect()) };
-            let model = if big.is_empty() {
-                f64::NAN
+            let (model, capped) = if big.is_empty() {
+                (f64::NAN, 0)
             } else {
-                median(
-                    big.iter()
-                        .map(|r| {
-                            let ld = r.delta_bits.div_ceil(64);
-                            let kb = (usize::BITS - kk.leading_zeros()) as u64;
-                            let bound = (3 * (kk as u64 - 1) * (r.delta_bits + 1) + 2 * kb + 2).div_ceil(64);
-                            let lvi = if kk <= 2 { ld } else { ((c.vinv_of_delta * ld as f64).round() as u64).max(ld) };
-                            lvi.min(bound.max(ld)) as f64 / ld as f64
-                        })
-                        .collect(),
-                )
+                let sizes: Vec<(f64, bool)> = big
+                    .iter()
+                    .map(|r| {
+                        let ld = r.delta_bits.div_ceil(64);
+                        let kb = (usize::BITS - r.k.leading_zeros()) as u64;
+                        let bound = (3 * (r.k as u64 - 1) * (r.delta_bits + 1) + 2 * kb + 2).div_ceil(64).max(ld);
+                        let lvi = if r.k <= 2 { ld } else { ((c.vinv_of_delta * ld as f64).round() as u64).max(ld) };
+                        (lvi.min(bound) as f64 / ld as f64, bound < lvi)
+                    })
+                    .collect();
+                (median(sizes.iter().map(|x| x.0).collect()), sizes.iter().filter(|x| x.1).count())
             };
-            println!("    k={kk}: {} rows, stage 2 k {:.2}; V_2^-1 in delta's limbs: run {run:.2}, model {model:.2}", rk.len(), p90(rk.iter().map(|r| sym(r.actual, r.stage2.unwrap())).collect()));
+            let out: Vec<f64> = rk.iter().filter(|r| r.delta_bits > 0).map(|r| r.uv_bits as f64 / r.delta_bits as f64).collect();
+            println!(
+                "    k={b}: {} rows, stage 2 k {:.2}; V_2^-1 in delta's limbs: run {run:.2}, model {model:.2} (capped by the bound on {capped}); attempts max {}; U, V entries over delta's bits: median {:.2}, max {:.2}",
+                rk.len(),
+                p90(rk.iter().map(|r| sym(r.actual, r.stage2.unwrap())).collect()),
+                rk.iter().map(|r| r.attempts).max().unwrap_or(0),
+                median(out.clone()),
+                out.iter().cloned().fold(0.0, f64::max)
+            );
         }
         let routed: Vec<&Row> = rows.iter().filter(|r| r.route != Route::Classical).collect();
         let shown: Vec<f64> = rows.iter().filter_map(|r| r.stage1.map(|e| sym(r.actual, e))).collect();
         let k_op_max = shown.iter().cloned().fold(0.0, f64::max);
         let k_op = p90(shown);
+        // (the route 2 rows whose k stage 1 could not see: k^ < 2)
+        let hidden: Vec<f64> = rows.iter().filter(|r| r.route == Route::Trailing && r.k_hat < 2).map(|r| sym(r.actual, r.stage1.unwrap())).collect();
+        let k2h: Vec<f64> = rows.iter().filter(|r| r.route == Route::Trailing && r.k_hat >= 2).map(|r| sym(r.actual, r.stage1.unwrap())).collect();
+        println!(
+            "{set} seed {seed}: stage 1 on route 2 rows: k^ >= 2 ({} rows) p90 {:.2}; k hidden, k^ < 2 ({} rows) p90 {:.2}, max {:.2}",
+            k2h.len(),
+            if k2h.is_empty() { f64::NAN } else { p90(k2h.clone()) },
+            hidden.len(),
+            if hidden.is_empty() { f64::NAN } else { p90(hidden.clone()) },
+            hidden.iter().cloned().fold(0.0, f64::max)
+        );
         let r1: Vec<&&Row> = routed.iter().filter(|r| r.route == Route::Cyclic).collect();
         let r2: Vec<&&Row> = routed.iter().filter(|r| r.route == Route::Trailing).collect();
         let k1s1 = p90(r1.iter().map(|r| sym(r.actual, r.stage1.unwrap())).collect());
@@ -418,7 +502,6 @@ fn the_estimate_is_fitted_and_scores_within_its_ceilings() {
         let kb = p90(r2.iter().map(|r| sym(r.actual, r.beside.unwrap())).collect());
         let kmax = r2.iter().map(|r| r.k).max().unwrap_or(0);
         println!("{set} seed {seed}: rows {} (classical {}), k: stage 1 per op {k_op:.2} (max {k_op_max:.2}), route 1 stage 1 {k1s1:.2} stage 2 {k1s2:.2}, route 2 stage 2 {k2s2:.2} (k <= {kmax}), beside {kb:.2}", rows.len(), rows.len() - routed.len());
-        assert!(kmax <= K_MAX);
         assert!(k_op <= 3.5, "{set} {seed}: stage 1 per op k {k_op:.2} > 3.5");
         assert!(k1s1 <= 2.5, "{set} {seed}: route 1 stage 1 k {k1s1:.2} > 2.5");
         assert!(k1s2 <= 2.0, "{set} {seed}: route 1 stage 2 k {k1s2:.2} > 2.0");
@@ -426,4 +509,24 @@ fn the_estimate_is_fitted_and_scores_within_its_ceilings() {
         assert!(kb <= 2.5, "{set} {seed}: the beside line's k {kb:.2} > 2.5");
     }
     let _ = trailing_model;
+}
+
+#[test]
+fn the_models_cost_does_not_grow_with_n_times_k() {
+    // trailing_model's own steps (each `times` and each loop over the
+    // factors) at synthetic sizes: O(k) for fixed attempts, nothing in n
+    // or in top k^2 (the factors' charges are summed once and multiplied)
+    let steps = |n: usize, k: usize| {
+        let mut dls = vec![1; k - 1];
+        dls.push(4);
+        let s0 = estimate::model_steps();
+        let u = trailing_model(n, k, 4, 4, 3, false, 250, &dls, 1.5, 0.92);
+        assert!(u.0.iter().any(|&x| x > 0));
+        estimate::model_steps() - s0
+    };
+    let (a, b, c) = (steps(200, 199), steps(2000, 199), steps(400, 399));
+    println!("trailing_model steps: n = 200, k = 199: {a}; n = 2000, k = 199: {b}; n = 400, k = 399: {c}");
+    assert_eq!(a, b, "the model's steps do not depend on n");
+    assert!(c <= 2 * a + 64, "the model's steps grow at most linearly in k: {a} at k = 199, {c} at k = 399");
+    assert!(a <= 3 * 199 + 64, "{a} steps at k = 199: O(k)");
 }

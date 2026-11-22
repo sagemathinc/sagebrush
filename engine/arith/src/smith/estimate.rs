@@ -9,11 +9,13 @@
 //! measured on route 2's runs, capped by its proved bound).
 //!
 //! Stage 1 ([`stage1`]) is before the run, from the input: the inverse
-//! plus route 1 at delta^ (the E route rule: the cheaper plausible route),
-//! with route 2 at k = 2 beside it; none where it sees the classical
+//! plus the cheaper plausible route (the E route rule) at delta^, which is
+//! route 1 unless the rows' and columns' contents prove k >= 2
+//! ([`k_lower_bound`]), then route 2 at that bound; route 2 at the bound
+//! (at least 2) is beside it; none where it sees the classical
 //! elimination follows (a non-square input, a zero row or column), while a
-//! square input that turns out singular or with k > K_MAX gets one, since
-//! stage 1 cannot know.  Stage 2 ([`stage2`]) is after the inverse and part
+//! square input that turns out singular gets one, since stage 1 cannot
+//! know.  Stage 2 ([`stage2`]) is after the inverse and part
 //! A, at the actual sizes, and has none for the classical route.
 //!
 //! The constants ([`FITTED`]) are units-model constants, the same on every
@@ -62,12 +64,12 @@ pub struct Constants {
 /// recorded again.
 pub const FITTED: Constants = Constants {
     attempts_cyclic: 2.255,
-    attempts_trailing: 2.214,
+    attempts_trailing: 2.137,
     hadamard_gap: 0.648,
-    part_a_cubic: 0.84,
+    part_a_cubic: 0.927,
     multiplier: 0.92,
     vinv_of_delta: 1.5,
-    scale: [0.548, 0.717, 0.872, 0.47],
+    scale: [0.548, 0.717, 0.837, 0.436],
     fit_head: "f7c3c93cd71f4d73df5e30851e2d30feb71226bc",
     fit_from: "the estimate test's training corpus (seed 1); the multiplier from route 2's phase data",
 };
@@ -78,7 +80,8 @@ pub struct Estimate {
     /// E: the route 1 estimate (the cheaper plausible route), or None where
     /// stage 1 sees the classical elimination follows (no estimate).
     pub units: Option<Units>,
-    /// Route 2's own estimate at k = 2, reported beside E.
+    /// Route 2's own estimate at the proved lower bound on k (at least 2),
+    /// reported beside E.
     pub beside_route2: Option<Units>,
 }
 
@@ -88,8 +91,26 @@ fn add_scaled(u: &mut Units, v: &Units, s: f64) {
     }
 }
 
+thread_local! {
+    static STEPS: std::cell::Cell<u64> = const { std::cell::Cell::new(0) };
+}
+
+/// Counts the models' own work: every `times` and every iteration of a
+/// loop over the factors (read by the test that the models' cost does
+/// not grow with the matrix's size times k).
+fn steps(s: u64) {
+    STEPS.with(|c| c.set(c.get().saturating_add(s)));
+}
+
+/// The models' steps so far on this thread (see `steps`).
+#[doc(hidden)]
+pub fn model_steps() -> u64 {
+    STEPS.with(|c| c.get())
+}
+
 /// u += count times one.
 fn times(u: &mut Units, count: u64, one: &Units) {
+    steps(1);
     for (x, y) in u.0.iter_mut().zip(&one.0) {
         *x = x.saturating_add(y.saturating_mul(count));
     }
@@ -136,22 +157,77 @@ pub fn stage1_with(a: &ZMat, c: &Constants) -> Estimate {
     let dh = (h - c.hadamard_gap * n as f64).max(1.0).ceil() as u64;
     let lh = (dh as usize).div_ceil(64).max(1);
     let word = dh < 62;
-    let mut e = zmat::inverse_model(a, lh, 2, None);
-    let route = at_attempts(c.attempts_cyclic, |t| cyclic_model(n, lh, lh, t, 2, word, dh));
-    add_scaled(&mut e, &route, c.scale[if word { 0 } else { 1 }]);
-    let beside = (n > 2).then(|| {
+    // route 2 at kk factors: kk - 1 small ones (a word each, and e taken
+    // as one word) and delta^
+    let route2 = |kk: usize, scale: f64| {
+        let mut dls = vec![1; kk - 1];
+        dls.push(lh);
         let mut b = zmat::inverse_model(a, lh, 2, Some(1));
-        b.add_saturating(&at_attempts(c.attempts_trailing, |t| trailing_model(n, 2, lh, lh, t, word, dh, &[1, lh], c.vinv_of_delta, c.multiplier)));
-        b.add_saturating(&part_a_model(n, 1, lh, lh, lh, 1, true, c.part_a_cubic));
+        let mut rest = at_attempts(c.attempts_trailing, |t| trailing_model(n, kk, lh, lh, t, word, dh, &dls, c.vinv_of_delta, c.multiplier));
+        rest.add_saturating(&part_a_model(n, 1, lh, lh, lh, 1, true, c.part_a_cubic));
+        add_scaled(&mut b, &rest, scale);
         b
-    });
+    };
+    // (k >= k^, proved from the rows' and columns' contents: with k^ >= 2
+    // route 1 cannot follow, and route 2 at k^ is the cheaper plausible
+    // route)
+    let kh = k_lower_bound(a);
+    let scale2 = c.scale[if word { 2 } else { 3 }];
+    let beside = (n > 2 || kh >= 2).then(|| route2(kh.max(2), scale2));
+    let e = match &beside {
+        Some(b) if kh >= 2 => *b,
+        _ => {
+            let mut e = zmat::inverse_model(a, lh, 2, None);
+            let route = at_attempts(c.attempts_cyclic, |t| cyclic_model(n, lh, lh, t, 2, word, dh));
+            add_scaled(&mut e, &route, c.scale[if word { 0 } else { 1 }]);
+            e
+        }
+    };
+    let beside = beside.filter(|_| n > 2);
     Estimate { units: Some(e), beside_route2: beside }
 }
 
+/// The primes the contents are tested by (k^'s lower bound).
+const SMALL_PRIMES: [u64; 25] = [2, 3, 5, 7, 11, 13, 17, 19, 23, 29, 31, 37, 41, 43, 47, 53, 59, 61, 67, 71, 73, 79, 83, 89, 97];
+
+/// A proved lower bound on k, the number of nontrivial invariant factors
+/// of a square a, from the input alone in O(n^2) gcds: a = D_c a' with D_c
+/// the diagonal of the rows' contents, so a's rank modulo a prime p is at
+/// most D_c's, and at least as many invariant factors as rows with p
+/// dividing their content are divisible by p; the same for the columns.
+/// k^ = the largest such count over the primes below 100.
+#[doc(hidden)]
+pub fn k_lower_bound(a: &ZMat) -> usize {
+    use num_integer::Integer;
+    let n = a.rows;
+    let mut row = vec![BigInt::zero(); n];
+    let mut col = vec![BigInt::zero(); a.cols];
+    for (i, ri) in row.iter_mut().enumerate() {
+        for (j, cj) in col.iter_mut().enumerate() {
+            let x = a.get(i, j);
+            if !x.is_zero() {
+                *ri = ri.gcd(x);
+                *cj = cj.gcd(x);
+            }
+        }
+    }
+    steps(1);
+    SMALL_PRIMES
+        .iter()
+        .map(|&p| {
+            let p = BigInt::from(p);
+            let count = |cs: &[BigInt]| cs.iter().filter(|c| !c.is_zero() && (*c % &p).is_zero()).count();
+            count(&row).max(count(&col))
+        })
+        .max()
+        .unwrap_or(0)
+}
+
 /// Stage 2: after the inverse (N / delta, det) and, for route 2, part A's
-/// invariant factors; at the actual sizes.  None for the classical route
-/// (more than K_MAX nontrivial factors: `smith_form`'s threshold; the
-/// threshold `smith_form_k` takes is a measurement hook).
+/// invariant factors; at the actual sizes, for any k (route 2 has no
+/// threshold).  None without the invariant factors when det a != delta.
+/// (The classical route, singular or rectangular input, has no inverse to
+/// call this with.)
 pub fn stage2(a: &ZMat, nm: &ZMat, delta: &BigInt, det: &BigInt, invariants: Option<&[BigInt]>) -> Option<Units> {
     stage2_with(a, nm, delta, det, invariants, &FITTED)
 }
@@ -173,7 +249,7 @@ pub fn stage2_with(a: &ZMat, nm: &ZMat, delta: &BigInt, det: &BigInt, invariants
     let inv = invariants?;
     let nontrivial: Vec<&BigInt> = inv.iter().filter(|x| !x.is_one()).collect();
     let k = nontrivial.len();
-    if k < 2 || k > super::K_MAX || delta.is_zero() {
+    if k < 2 || delta.is_zero() {
         return None;
     }
     let e = &dabs / delta;
@@ -359,17 +435,22 @@ pub fn trailing_model(n: usize, k: usize, ld: usize, ln: usize, attempts: u64, w
     let full = delta_bits.saturating_sub(1);
     let mut lr = 0usize;
     // the column operations of one elimination of Y (k x n)
-    let colops: u64 = (0..k).map(|r| (n - r - 1) as u64).sum();
-    let rowops: u64 = (0..k).map(|r| (k - r - 1) as u64).sum();
+    // (sum over r < k of n - r - 1, and of k - r - 1)
+    let pairs = size_product(&[k, k.saturating_sub(1)]) / 2;
+    let colops = size_product(&[k, n.saturating_sub(1)]).saturating_sub(pairs);
+    let rowops = pairs;
     for t in 0..attempts {
+        steps(1);
         if t > 0 {
-            for _ in 0..k * top {
+            // R's k top entries per row: the same charge each, multiplied
+            let entries = size_product(&[k, top]);
+            if entries > 0 {
                 if t < full {
-                    u.0[Family::Move as usize] = u.0[Family::Move as usize].saturating_add(t.div_ceil(64));
+                    u.0[Family::Move as usize] = u.0[Family::Move as usize].saturating_add(entries.saturating_mul(t.div_ceil(64)));
                     lr = t.div_ceil(64) as usize;
                 } else {
-                    u.0[Family::Move as usize] = u.0[Family::Move as usize].saturating_add((delta_bits + 64).div_ceil(64));
-                    u.add_saturating(&bigdiv_units(ld + 1, ld));
+                    u.0[Family::Move as usize] = u.0[Family::Move as usize].saturating_add(entries.saturating_mul((delta_bits + 64).div_ceil(64)));
+                    times(&mut u, entries, &bigdiv_units(ld + 1, ld));
                     lr = ld;
                 }
             }
@@ -423,37 +504,36 @@ pub fn trailing_model(n: usize, k: usize, ld: usize, ln: usize, attempts: u64, w
     }
     // (q_ij lives modulo delta / g_j, which is the invariant factor d_j:
     // usually a small factor, one limb, for all but one j)
+    // (the per-factor charges are summed once over j, O(k), then
+    // multiplied by their row counts: the model's own cost stays O(n + k))
     let dl = |j: usize| d_limbs.get(j).copied().unwrap_or(ld).clamp(1, ld.max(1));
-    for _ in 0..top {
-        for j in 0..k {
-            if word {
-                u.0[ma] = u.0[ma].saturating_add(3);
-            } else {
-                u.add_saturating(&bigdiv_units(ld, ld.saturating_sub(dl(j)).max(1)));
-                u.add_saturating(&bigmul_units(dl(j), dl(j)));
-                u.add_saturating(&bigdiv_units(2 * dl(j), dl(j)));
-            }
+    let (mut q_row, mut c_entry) = (Units::default(), Units::default());
+    for j in 0..k {
+        steps(1);
+        if word {
+            q_row.0[ma] = q_row.0[ma].saturating_add(3);
+        } else {
+            q_row.add_saturating(&bigdiv_units(ld, ld.saturating_sub(dl(j)).max(1)));
+            q_row.add_saturating(&bigmul_units(dl(j), dl(j)));
+            q_row.add_saturating(&bigdiv_units(2 * dl(j), dl(j)));
         }
+        c_entry.add_saturating(&bigmul_units(dl(j), ld));
     }
-    for _ in 0..top {
-        for _ in 0..k {
-            for j in 0..k {
-                u.add_saturating(&bigmul_units(dl(j), ld));
-            }
-            if word {
-                u.0[ma] = u.0[ma].saturating_add(1);
-            } else {
-                u.add_saturating(&bigdiv_units(2 * ld, ld));
-            }
-        }
+    if word {
+        c_entry.0[ma] = c_entry.0[ma].saturating_add(1);
+    } else {
+        c_entry.add_saturating(&bigdiv_units(2 * ld, ld));
     }
+    times(&mut u, top as u64, &q_row);
+    times(&mut u, size_product(&[top, k]), &c_entry);
     op(&mut u, size_product(&[k, k, k, 4]));
     // the small Smith form's transforms, as measured on route 2's own runs:
     // V_2 at delta's size; V_2^-1 at delta's size for k = 2 (and for a
     // one-limb delta) and f_vinv times it for k >= 3; each capped by the
-    // proved bound (the route's bound as a
-    // model term, never in L; at these sizes the cap does not bind); B = D
-    // V_2^-1 at ld + lvi
+    // proved bound (the route's bound as a model term, never in L; on the
+    // estimate test's corpora, k up to n, it caps no row: the bound grows
+    // as 3 (k - 1) delta, the measured size stays about 1 to 2 delta; the
+    // test prints the count); B = D V_2^-1 at ld + lvi
     let kb = (usize::BITS - k.leading_zeros()) as u64;
     let bound = usize::try_from((3 * (k as u64 - 1)).saturating_mul(delta_bits.saturating_add(1)).saturating_add(2 * kb + 2).div_ceil(64)).unwrap_or(usize::MAX).max(1);
     let lv = ld.max(1);

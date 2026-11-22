@@ -11,7 +11,7 @@
 #![cfg(not(target_arch = "wasm32"))]
 
 use num_integer::Integer;
-use sagebrush_arith::cost::{bigmul_units, tallied, Family, FAMILIES};
+use sagebrush_arith::cost::{bigdiv_units, biggcd_units, bigmul_units, tallied, Family, Units, FAMILIES};
 use sagebrush_arith::smith;
 use sagebrush_arith::zmat::{self, ZMat};
 use sagebrush_bigint::BigInt;
@@ -110,7 +110,8 @@ fn a_stop_charges_only_the_work_before_it() {
 
     // route 2, word delta: a = [[2, 0, 0], [0, 2, -1], [0, 0, 1]], a^-1 =
     // [[1, 0, 0], [0, 1, 1], [0, 0, 2]] / 2 (k = 2, |det| = 4).  The first
-    // check follows the residues of N (9); the second opens attempt 1,
+    // check follows the residues of N (9); attempt 0 then checks once a row
+    // of Y (k = 2) and a pivot (2); the sixth check opens attempt 1,
     // after attempt 0 (R = 0): Y = the last two rows of N mod 2 =
     // [[0, 1, 1], [0, 0, 0]].  Its pivot needs a column swap (Move: the two
     // columns of Y's k = 2 rows), then one plain elimination of column 2 by
@@ -126,7 +127,7 @@ fn a_stop_charges_only_the_work_before_it() {
     let a = z(&[&[2, 0, 0], &[0, 2, -1], &[0, 0, 1]]);
     let (nm, den, det) = zmat::inverse_det(&a).unwrap();
     assert_eq!((nm.d.clone(), den.clone(), det.clone()), ([1i64, 0, 0, 0, 1, 1, 0, 0, 2].map(BigInt::from).to_vec(), BigInt::from(2), BigInt::from(4)));
-    let got = stopped_at_second_check(|| smith::trailing_route(&nm, &den, &det, 2));
+    let got = stopped_at_check(6, || smith::trailing_route(&nm, &den, &det, 2));
     let mut want = [0; FAMILIES];
     want[Family::ModArith as usize] = 9 + (1 + 2) + euclid_steps(2, 1) + euclid_steps(2, 0) + 2;
     want[Family::Move as usize] = (2 + 2) + (2 + 2);
@@ -191,4 +192,120 @@ fn a_stop_charges_only_the_work_before_it() {
     let mut want = [0; FAMILIES];
     want[Family::ModArith as usize] = euclid_steps(12, 2) + 1 + 3;
     assert_eq!(got, want, "the small Smith form's divisibility scan: the tests made only");
+
+    // route 2 at k = n, stopped inside its k x k small Smith form: a =
+    // diag(2, 4), a^-1 = diag(2, 1) / 4, |det| = 8, invariants (2, 4), so
+    // k = n = 2 and no top rows.  The first check opens attempt 0, after
+    // N's residues (4); the attempt checks at each of Y's 2 rows and 2
+    // pivots, and generates with nothing to eliminate
+    // (Y = N mod 4 = diag(2, 1)): gcd(2, 4) and gcd(1, 4), a Euclid step
+    // each, and the order test (2 word divisions, ModArith; 2 products,
+    // MulSchool); then the inverses of s_j / g_j modulo delta / g_j (1 mod 2
+    // and 1 mod 4: 2 + 2 Euclid steps each, ModArith) and the relations
+    // (delta / g_j) P_j mod delta, P = I (a division and 2 x 2 products and
+    // reductions: 1 + 4 per j, ModArith), checking at each of their 2 rows.
+    // The eighth check opens the small Smith form's pivot 0 on [[2, 0], [0,
+    // 0]]: nothing to eliminate, gcd(2, 4) in one step and the scan's one
+    // test; pivot 0 is d_1 = 2.  The ninth opens pivot 1: the Stop there
+    // charges pivot 0's pass (counted locally, charged at this check) and
+    // nothing of pivot 1's.
+    let a = z(&[&[2, 0], &[0, 4]]);
+    let (nm, den, det) = zmat::inverse_det(&a).unwrap();
+    assert_eq!((nm.d.clone(), den.clone(), det.clone()), ([2i64, 0, 0, 1].map(BigInt::from).to_vec(), BigInt::from(4), BigInt::from(8)));
+    let got = stopped_at_check(9, || smith::trailing_route(&nm, &den, &det, 2));
+    let mut want = [0; FAMILIES];
+    want[Family::ModArith as usize] = 4 + (euclid_steps(4, 2) + euclid_steps(4, 1)) + 2 + (2 + euclid_steps(1, 2)) + (2 + euclid_steps(1, 4)) + 2 * (1 + 4) + (euclid_steps(4, 2) + 1);
+    want[Family::MulSchool as usize] = 2;
+    assert_eq!(got, want, "route 2 at k = n stopped at the small Smith form's pivot 1: everything before it and pivot 0's pass");
+    // the tenth check is the first of the transforms' factors (one a
+    // column of each O(k^3) pass, k reaching n): pivot 1's pass found the
+    // 1 x 1 rest zero (one entry read, Move) and ended the pivots
+    let got = stopped_at_check(10, || smith::trailing_route(&nm, &den, &det, 2));
+    want[Family::Move as usize] += 1;
+    assert_eq!(got, want, "route 2 at k = n stopped at its transforms' first check: the whole small Smith form");
+    // the eleventh, at column 1, charges column 0's work, held locally until
+    // then: V' = I (no column operations), so gcd(1, 4) twice and the
+    // inverse of 1 mod 4, a Euclid step each (ModArith), nothing below it
+    let got = stopped_at_check(11, || smith::trailing_route(&nm, &den, &det, 2));
+    want[Family::ModArith as usize] += 3 * euclid_steps(4, 1);
+    assert_eq!(got, want, "route 2 at k = n stopped inside its transforms' factors: column 0's held work");
+    // W's bottom row 0 between its check and the next: checks 10 to 17 are
+    // the factors' four passes (k each), 18 to 23 the three unipotent
+    // inverses (k each), 24 and 25 the rows of R N_top (k), 26 and 27 W's
+    // bottom rows (no top rows).  B = D_B V_2^-1 = diag(2, 4) (V_2 = I),
+    // the rows of C^-1 N those of N, diag(2, 1); row 0 of W: 2 * 2 and 2 *
+    // 0 (the products with B's one nonzero entry, MulSchool) and their
+    // divisions by delta (Div), charged at check 27, none of row 1's
+    let (at26, at27) = (stopped_at_check(26, || smith::trailing_route(&nm, &den, &det, 2)), stopped_at_check(27, || smith::trailing_route(&nm, &den, &det, 2)));
+    let l = |v: i64| zmat::limbs(&BigInt::from(v));
+    let mut row0 = [0; FAMILIES];
+    row0[Family::MulSchool as usize] = bigmul_units(l(2), l(2)).get(Family::MulSchool) + bigmul_units(l(2), l(0)).get(Family::MulSchool);
+    row0[Family::Div as usize] = bigdiv_units(l(4), l(4)).get(Family::Div) + bigdiv_units(l(0), l(4)).get(Family::Div);
+    let step: Vec<u64> = (0..FAMILIES).map(|i| at27[i] - at26[i]).collect();
+    assert_eq!(step, row0.to_vec(), "route 2 at k = n: one row of W between two checks");
+
+    // route 2 with top rows and a multi-limb delta (the big ring, every
+    // operation counted by its operands' sizes): a = diag(1, 1, B), B =
+    // [[3, -3], [0, 3 q]], q = 2^70 + 1, so B's entries have gcd 3 and the
+    // invariants are (1, 1, 3, 3 q): k = 2, top = 2, delta = 3 q (2 limbs).
+    // N = delta a^-1 = diag(3 q, 3 q, [[q, 1], [0, 1]]).
+    let q = (BigInt::from(1) << 70usize) + BigInt::from(1);
+    let mut a = ZMat::zero(4, 4);
+    for (i, j, x) in [(0, 0, BigInt::from(1)), (1, 1, BigInt::from(1)), (2, 2, BigInt::from(3)), (2, 3, BigInt::from(-3)), (3, 3, &q * BigInt::from(3))] {
+        a.d[i * 4 + j] = x;
+    }
+    let (nm, den, det) = zmat::inverse_det(&a).unwrap();
+    let delta = &q * BigInt::from(3);
+    let n_want: Vec<BigInt> = [[&delta, &BigInt::from(0), &BigInt::from(0), &BigInt::from(0)], [&BigInt::from(0), &delta, &BigInt::from(0), &BigInt::from(0)], [&BigInt::from(0), &BigInt::from(0), &q, &BigInt::from(1)], [&BigInt::from(0), &BigInt::from(0), &BigInt::from(0), &BigInt::from(1)]].iter().flatten().map(|x| (*x).clone()).collect();
+    assert_eq!((nm.d.clone(), den.clone(), det.clone()), (n_want, delta.clone(), &delta * BigInt::from(3)));
+    let lb = |x: &BigInt| zmat::limbs(x);
+    let (l0, l1, lq, ld) = (lb(&BigInt::from(0)), lb(&BigInt::from(1)), lb(&q), lb(&delta));
+    let lneg1 = lb(&(&delta - BigInt::from(1)));
+    let red = bigdiv_units(2 * ld + 1, ld);
+    let mut want = Units::default();
+    // N's residues, one division by delta an entry
+    for x in &nm.d {
+        want.add(&bigdiv_units(lb(x), ld));
+    }
+    // attempt 0 (R = 0) checks at its opening, at Y's 2 rows and at pivot
+    // 0's pass; that pass, on Y = [[0, 0, q, 1], [0, 0, 0, 1]]: the search
+    // reads 3 entries and swaps columns 0 and 2 (2 + k, Move); then column
+    // 3: 1 is not a multiple of q (a division), so a Bezout step on (q, 1)
+    // (a gcd and two reductions), giving (s, u, a / g, p / g) = (0, 1, 1,
+    // q), applied to both rows (two lin's a row: two products and a
+    // reduction each), Y = [[1, 0, 0, 0], [1, 0, 0, q]]; then row 1 by row
+    // 0: the quotient 1 / 1 and 1 times row 0 off Y's row 1 (4 entries)
+    // and P's (2), a product and a reduction each.  Row 0 is then clear:
+    // the fifth check opens pivot 1 and charges the ring's tally, held
+    // since the fourth.
+    want.0[Family::Move as usize] += 3 + (2 + 2);
+    want.add(&bigdiv_units(l1, lq));
+    want.add(&biggcd_units(lq, l1));
+    want.add(&bigdiv_units(2 * ld, ld));
+    want.add(&bigdiv_units(2 * ld, ld));
+    for (xr, xj) in [(&q, &BigInt::from(1)), (&BigInt::from(0), &BigInt::from(1))] {
+        want.add(&bigmul_units(l0, lb(xr)));
+        want.add(&bigmul_units(l1, lb(xj)));
+        want.add(&red);
+        want.add(&bigmul_units(lneg1, lb(xr)));
+        want.add(&bigmul_units(lq, lb(xj)));
+        want.add(&red);
+    }
+    want.add(&bigdiv_units(l1, l1));
+    for y in [l1, l0, l0, l0, l1, l0] {
+        want.add(&bigmul_units(l1, y));
+        want.add(&red);
+    }
+    let got = stopped_at_check(5, || smith::trailing_route(&nm, &den, &det, 2));
+    assert_eq!(got, want.0, "route 2, multi-limb delta: stopped at pivot 1, the big ring's tally of pivot 0 charged before the check");
+    // W's top rows: X = N's top rows mod delta = 0, so q = 0 and c = 0, and
+    // W's top row 0 is N's row 0 divided by delta: four divisions (Div), no
+    // product.  Its checks are the 41st and 42nd of this run (counted from
+    // the run's checks; the step's value is derived above from the code):
+    // between them, exactly row 0's work.
+    let (at41, at42) = (stopped_at_check(41, || smith::trailing_route(&nm, &den, &det, 2)), stopped_at_check(42, || smith::trailing_route(&nm, &den, &det, 2)));
+    let mut top0 = [0; FAMILIES];
+    top0[Family::Div as usize] = bigdiv_units(lb(&delta), ld).get(Family::Div) + 3 * bigdiv_units(l0, ld).get(Family::Div);
+    let step: Vec<u64> = (0..FAMILIES).map(|i| at42[i] - at41[i]).collect();
+    assert_eq!(step, top0.to_vec(), "route 2, multi-limb delta: one top row of W between two checks");
 }
