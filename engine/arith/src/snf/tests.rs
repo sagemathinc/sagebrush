@@ -383,7 +383,9 @@ fn gcd_cofactor_e_values_and_units() {
     want.add(&bigdiv_units(2 * le, le));
     assert_eq!((b.take(), want.0), (pin, pin), "the big path's charge");
     assert_eq!(b.take(), [0; FAMILIES], "taken");
-    // x = 0: e and 0, with the same leaf charge at x's (zero) limbs
+    // x = 0: e and 0, no gcd and no reduction run; e's copy (Move, its
+    // limbs)
     assert_eq!(b.gcd_cofactor_e(&BigInt::zero(), &mut none), (e.clone(), BigInt::zero()));
-    assert_eq!(b.take(), [0, 0, 30, 0, 10, 0, 0, 0, 0, 0], "x = 0's charge");
+    assert_eq!(le, 5);
+    assert_eq!(b.take(), [0, 0, 0, 0, 0, 5, 0, 0, 0, 0], "x = 0's charge");
 }
