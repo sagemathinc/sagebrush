@@ -305,5 +305,59 @@
     "tags": [
       "calculus"
     ]
+  },
+  {
+    "name": "ode15s",
+    "kind": "function",
+    "signature": "[t, y] = ode15s(odefun, tspan, y0)\n[t, y] = ode15s(odefun, tspan, y0, options)\n[t, y, te, ye, ie] = ode15s(odefun, tspan, y0, options)\nsol = ode15s(___)",
+    "summary": "Solves a stiff system of ODEs, or an index-1 differential-algebraic system, by variable-order numerical differentiation formulas.",
+    "doc": "The variable-order (1 to `MaxOrder`, 5 by default) numerical differentiation formulas of Shampine and Reichelt, the backward differentiation formulas with `'BDF', 'on'`. The implicit equation is solved by a simplified Newton iteration with the Jacobian from the `Jacobian` option (a matrix or a function of t and y) or by forward differences. A constant `Mass` matrix M solves $M y' = f(t, y)$, a singular one an index-1 differential-algebraic system from consistent initial values. With a two-element tspan the solver's own steps are returned (Refine 1); `sol` with `deval` evaluates the solution anywhere; `Events` locate zeros as for ode45. A wrong-size f is the error `MATLAB:odearguments:SizeIC`, as MATLAB's.",
+    "examples": [
+      {
+        "code": "rob = @(t, y) [-0.04*y(1) + 1e4*y(2)*y(3); 0.04*y(1) - 1e4*y(2)*y(3) - 3e7*y(2)^2; 3e7*y(2)^2];\n[t, y] = ode15s(rob, [0 40], [1; 0; 0]);\nround(y(end, [1 3]) * 1e3) / 1e3",
+        "expected": "\nans =\n\n    0.7160    0.2840\n\n"
+      }
+    ],
+    "differs": [
+      "A mass matrix that depends on t or y, and the NonNegative, Vectorized, JPattern, MvPattern, InitialSlope and OutputFcn options, are refused.",
+      "The steps, order changes and statistics are Sagebrush's own: the solution agrees with MATLAB's within the tolerances, the step points of a two-element tspan do not."
+    ],
+    "status": "partial",
+    "see_also": [
+      "ode23s",
+      "ode45",
+      "odeset",
+      "deval"
+    ],
+    "tags": [
+      "differential equations"
+    ]
+  },
+  {
+    "name": "ode23s",
+    "kind": "function",
+    "signature": "[t, y] = ode23s(odefun, tspan, y0)\n[t, y] = ode23s(odefun, tspan, y0, options)\n[t, y, te, ye, ie] = ode23s(odefun, tspan, y0, options)\nsol = ode23s(___)",
+    "summary": "Solves a stiff system of ordinary differential equations by a modified Rosenbrock formula of order 2.",
+    "doc": "The modified Rosenbrock triple of Shampine and Reichelt: a second-order formula with a third-order error estimate and a continuous extension for output between steps, the Jacobian (from the `Jacobian` option or by forward differences) at the start of every step. A constant `Mass` matrix is allowed, singular too. The interface, outputs and `Events` are ode15s's.",
+    "examples": [
+      {
+        "code": "[t, y] = ode23s(@(t, y) [-1000 1; 0 -1]*y, [0 2], [1; 1]);\nround(y(end, 2) * 1e3) / 1e3",
+        "expected": "\nans =\n\n    0.1350\n\n"
+      }
+    ],
+    "differs": [
+      "A mass matrix that depends on t or y, and the NonNegative, Vectorized, JPattern, MvPattern and OutputFcn options, are refused.",
+      "The steps and statistics are Sagebrush's own; the solution agrees with MATLAB's within the tolerances."
+    ],
+    "status": "partial",
+    "see_also": [
+      "ode15s",
+      "ode45",
+      "odeset",
+      "deval"
+    ],
+    "tags": [
+      "differential equations"
+    ]
   }
 ]

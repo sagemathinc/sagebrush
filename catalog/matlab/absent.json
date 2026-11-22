@@ -420,32 +420,6 @@
     ]
   },
   {
-    "name": "ode15s",
-    "kind": "function",
-    "signature": "[t, y] = ode15s(odefun, tspan, y0)",
-    "summary": "Solves a stiff system of ordinary differential equations by an implicit method.",
-    "examples": [],
-    "differs": [],
-    "status": "absent",
-    "alternative": "No implicit (stiff) solver in any mode: ode45 or ode23 handle mildly stiff problems with small steps.",
-    "tags": [
-      "differential equations"
-    ]
-  },
-  {
-    "name": "ode23s",
-    "kind": "function",
-    "signature": "[t, y] = ode23s(odefun, tspan, y0)",
-    "summary": "Solves a stiff system of ordinary differential equations (Rosenbrock method).",
-    "examples": [],
-    "differs": [],
-    "status": "absent",
-    "alternative": "No implicit (stiff) solver in any mode: ode45 or ode23 for mildly stiff problems.",
-    "tags": [
-      "differential equations"
-    ]
-  },
-  {
     "name": "parpool",
     "kind": "function",
     "signature": "parpool",
