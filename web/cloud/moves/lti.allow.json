@@ -8,5 +8,10 @@
   "file": "web/cloud/lti/grading/test-gradebook.mjs",
   "from": "// Needs core's web/site dependencies (Miniflare), so it runs under scripts/with-core.sh, as CI",
   "to": "// Needs web/site's dependencies (Miniflare): `cd web/site && npm ci` first, as CI"
+ },
+ {
+  "file": "web/cloud/lti/README.md",
+  "from": "Cloud-only: this lives in sagebrush-cloud-private, never in the public core or in sagebrush-cloud.",
+  "to": "Hosted-service code: it lives in this repository under `web/cloud/`, MS-RSL (`web/cloud/LICENSE.md`), and no MIT code imports it (`scripts/check-no-server-imports.mjs`)."
  }
 ]

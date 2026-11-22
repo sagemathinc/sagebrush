@@ -1,6 +1,6 @@
 # web/cloud/lti: the LTI 1.3 tool
 
-Cloud-only: this lives in sagebrush-cloud-private, never in the public core or in sagebrush-cloud.
+Hosted-service code: it lives in this repository under `web/cloud/`, MS-RSL (`web/cloud/LICENSE.md`), and no MIT code imports it (`scripts/check-no-server-imports.mjs`).
 
 **Spec:** `plan-lti-r5.md` (sha256 bf45075f…), approved Oct 23, 2026. This directory is stage A (r5 §13), arriving in three PRs:
 1. launch, registration and sessions;
