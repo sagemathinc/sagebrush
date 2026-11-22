@@ -156,13 +156,17 @@ try {
   await P.ev(`document.querySelector('#tasks .task[data-task="${M.task}"]').click()`);
   await P.until(`!!document.querySelector('#task-view .proposal-card')`);
   await P.ev(`document.querySelector('#task-view .proposal-card').click()`);
-  const mdDrawn = await P.until(`document.querySelector('dialog.proposal[open] .md-rendered h1')?.textContent === 'Results'`, 20000);
+  // (P.until gives the time it waited, 0 when already true: the verdict is the page's, read below)
+  await P.until(`document.querySelector('dialog.proposal[open] .md-rendered h1')?.textContent === 'Results'`, 20000).catch(() => {});
+  const mdDrawn = await P.ev(`document.querySelector('dialog.proposal[open] .md-rendered h1')?.textContent === 'Results'`);
   await shot("4c-proposal-md");
   const mv = await P.ev(`(() => { const r = document.querySelector('dialog.proposal[open] .md-rendered'); return { buttons: [...r.querySelectorAll(':scope > p button')].map((b) => b.textContent + ":" + b.getAttribute('aria-pressed')), strong: r.querySelector(':scope > div strong')?.textContent ?? null, remote: [...r.querySelectorAll('img')].filter((i) => /example\\.com/.test(i.getAttribute('src') ?? '')).length, plus: [...document.querySelectorAll('dialog.proposal[open] .l\\\\+')].map((x) => x.textContent) }; })()`);
   ok(mdDrawn && mv.strong === "works" && mv.plus.includes("+ # Results") && JSON.stringify(mv.buttons) === JSON.stringify(["As proposed:true", "Before:false"]), "a proposal's .md: its line diff, and under it the text as proposed, rendered by the page's Markdown renderer (heading, bold), Before offered", { mdDrawn, mv });
   ok(mv.remote === 0, "a remote picture in the proposed Markdown isn't fetched (the chat's click-to-load)", mv);
   await P.ev(`[...document.querySelectorAll('dialog.proposal[open] .md-rendered button')].find((b) => b.textContent === 'Before').click()`);
-  ok(await P.until(`document.querySelector('dialog.proposal[open] .md-rendered h1')?.textContent === 'Notes'`, 10000), "Before: the text as it was, rendered in its place");
+  await P.until(`document.querySelector('dialog.proposal[open] .md-rendered h1')?.textContent === 'Notes'`, 10000).catch(() => {});
+  const mb = await P.ev(`(() => { const r = document.querySelector('dialog.proposal[open] .md-rendered'); return { h1: [...r.querySelectorAll(':scope > div h1')].map((x) => x.textContent), buttons: [...r.querySelectorAll(':scope > p button')].map((b) => b.textContent + ":" + b.getAttribute('aria-pressed')) }; })()`);
+  ok(JSON.stringify(mb.h1) === JSON.stringify(["Notes"]) && JSON.stringify(mb.buttons) === JSON.stringify(["As proposed:false", "Before:true"]), "Before: the text as it was, rendered in its place", mb);
   await P.ev(`document.querySelector('dialog.proposal[open] .x').click()`);
   await P.ev(`document.querySelector('#task-view .task-head .link').click()`);
 
