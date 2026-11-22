@@ -141,8 +141,9 @@ pub unsafe extern "C" fn nd_gemm_part(desc: u32, id: u32) -> u32 {
 /// element or pivot's column, kernel name address, kernel name length, structure, rcond's f64 bits (low word,
 /// high word)]: status 1 solved, 2 solved with an exactly zero diagonal element or pivot (Inf/NaN in X; rcond
 /// 0), 3 not computed (A or B has an Inf or NaN; rcond NaN), 4 solved but nearly singular (0 < rcond < eps);
-/// structure 0 general (LU), 1 diagonal, 2 upper triangular, 3 lower triangular, 4 symmetric positive definite
-/// (Cholesky), 5 symmetric with a positive diagonal but not positive definite (Cholesky failed, then LU).
+/// structure 0 general (LU; also a symmetric A with a positive diagonal below n = 17, as MATLAB solves it), 1
+/// diagonal, 2 upper triangular, 3 lower triangular, 4 symmetric positive definite (Cholesky, n >= 17), 5
+/// symmetric with a positive diagonal but not positive definite (Cholesky failed, then LU).
 /// Returns 1, or 0 if the job was refused, having written nothing.
 ///
 /// Checked here, before any pointer is read or slice made ([`check_solve`]): the descriptor is 4-aligned and

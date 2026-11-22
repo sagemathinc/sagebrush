@@ -61,6 +61,17 @@ for (const [name, noWasm] of BACKENDS) {
     ].join("\n"));
   });
 
+  test(`${name}: small symmetric positive definite systems are solved by LU, exactly as MATLAB prints them`, () => {
+    // (observed MATLAB R2026b, 2026-11-22, values only: MATLAB takes Cholesky only from n = 17, so these come out
+    // exact, where Cholesky gives 0.99999999999999978, -2.0000000000000004, 3.0000000000000004)
+    const r = run([
+      "x = [4 -2 1; -2 4 -2; 1 -2 4] \\ [11; -16; 17]; fprintf('%.17g ', x); disp(isequal(x, [1; -2; 3]))",
+      "x = [2 1; 1 2] \\ [3; 3]; fprintf('%.17g ', x); disp(isequal(x, [1; 1]))",
+    ].join("\n"), noWasm);
+    assert.equal(r.status, 0, r.err);
+    assert.equal(r.out, "1 -2 3    1\n1 1    1\n");
+  });
+
   test(`${name}: singular systems as an observed MATLAB run prints them, Inf, NaN and signs`, () => {
     // (MATLAB R2026b Update 2, MATLAB Online, 2026-11-21: values and warnings only. No step of the substitution
     // is skipped, so 0/0 and 0 * Inf are NaN; a diagonal A is forward-substituted; a -0 pivot flips the sign)
