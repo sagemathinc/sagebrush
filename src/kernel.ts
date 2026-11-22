@@ -665,7 +665,7 @@ export function kernelWorker(mode: Mode) {
       }
     } else {
       run(MAGIC_PRE, host, "exec", "<autoreload>");
-      run(ipythonSyntax(m.code) + "\n", main, "cell", "<cell>", { sage: mode === "sage", transform: magicTransform(mode === "sage") });
+      run(ipythonSyntax(m.code, mode === "sage") + "\n", main, "cell", "<cell>", { sage: mode === "sage", transform: magicTransform(mode === "sage") });
     }
     run(FLUSH, host, "exec", "<figures>");
     flush();

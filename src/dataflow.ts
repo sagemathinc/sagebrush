@@ -482,7 +482,7 @@ export function analyzeCell(source: string, cellId = "c", opts: { mode?: Documen
   // (IPython's obj? help lines and magics, as the notebook runs them: the
   // code %time and %timeit run is in the tree, %timeit's in its own function)
   const ipython = !isTranslated(opts.mode);
-  if (ipython) source = ipythonSyntax(source);
+  if (ipython) source = ipythonSyntax(source, opts.mode === "sage");
   if (opts.mode === "sage") source = preparse(source);
   // (the translation's `from _magma import *` brings Magma's functions, not the notebook's names)
   else if (opts.mode === "magma") source = magmaToPython(source, "<cell>").replace(/^from _magma import \*\n/, "");

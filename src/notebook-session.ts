@@ -639,7 +639,7 @@ export function notebookSession(post: (m: any) => void, opts: { captureStreams?:
         const transform = (t: any) => { magics(t); if (inits.length) initialize(t); if (mangle) mangleLocals(t, mangle, { sage: !!m.sage }); if (scopedNames.length) restoreDefNames(t, scoped); };
         run(MAGIC_PRE, host, "exec", "<autoreload>");
         if (m.repl && !quitters) quitters = run(QUITTERS, host, "exec", "<site>");
-        ok = run(ipythonSyntax(code) + "\n", main, m.repl ? "single" : "cell", m.repl ? "<stdin>" : "<cell>", { sage: !!m.sage, transform });
+        ok = run(ipythonSyntax(code, !!m.sage) + "\n", main, m.repl ? "single" : "cell", m.repl ? "<stdin>" : "<cell>", { sage: !!m.sage, transform });
       }
       if (modeReady) run(FLUSH_FIGURES, host, "exec", "<figures>");
     }

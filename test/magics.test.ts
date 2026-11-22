@@ -57,6 +57,8 @@ test("magic syntax never changes valid Python: 400 generated cells with %, %% an
   // (test/magic_syntax_gen.py: each case compiled by CPython, with its output)
   const corpus: [string, string][] = JSON.parse(readFileSync(__dirname + "/../../test/magic-syntax-corpus.json", "utf8"));
   for (const [src] of corpus) assert.equal(magicSyntax(src), src);
+  // (and in Sage mode, whose `time STATEMENT` is never valid Python)
+  for (const [src] of corpus) assert.equal(magicSyntax(src, true), src);
   // and running them in a notebook prints what CPython printed
   const s = await session();
   for (const [src, want] of corpus.slice(0, 120)) {
@@ -133,6 +135,40 @@ test("notebook session: %time and %timeit run in the cell: renamed names, a func
   assert.equal((await s.run("%%timeit -q -n 2 -r 1 a = 3^2\nassert a == 9", { sage: true })).failed, false);
   // code that does not parse: Python's SyntaxError
   assert.match((await s.run("%time 1 +")).err, /SyntaxError/);
+});
+
+test("Sage mode: `time STATEMENT` at a statement's start is %time, as in Sage; every valid use of the name stays", async () => {
+  // the syntax: statements after `time` (a name, a number, a string), indented too
+  for (const [src, want] of [
+    ["time t = f(2)", '__pyjs_magic__("time", "t = f(2)")'],
+    ["time 2^10", '__pyjs_magic__("time", "2^10")'],
+    ["time\tm.hecke_operator(2)", '__pyjs_magic__("time", "m.hecke_operator(2)")'],
+    ['time "abc"', '__pyjs_magic__("time", "\\"abc\\"")'],
+    ["time for i in range(2): print(i)", '__pyjs_magic__("time", "for i in range(2): print(i)")'],
+    ["time note = 1", '__pyjs_magic__("time", "note = 1")'],
+    ["time isprime(7)", '__pyjs_magic__("time", "isprime(7)")'],
+    ["for i in range(3):\n    time f(i)", 'for i in range(3):\n    __pyjs_magic__("time", "f(i)")'],
+  ]) assert.equal(magicSyntax(src, true), want, src);
+  // Python mode: never (with a % or ! elsewhere in the cell too, past the quick exit)
+  for (const src of ["time t = f(2)", "time 2", "x = 5 % 2\ntime t = f(2)", "%time 1\ntime 2"]) assert.equal(magicSyntax(src), src.replace("%time 1", '__pyjs_magic__("time", "1")'));
+  // in a %%time cell's body too
+  assert.equal(magicSyntax("%%time\ntime t = 1", true), '__pyjs_cell_magic__("time", "")\n__pyjs_magic__("time", "t = 1")');
+  // the name `time` in valid Python, strings, brackets and continuations: unchanged
+  for (const src of [
+    "time = 3", "time(1)", "time.sleep(0)", "time[0]", "time - 1", "time -1", "time (1)", "time += 1", "time, x = 1, 2",
+    "time in s", "time is None", "time and x", "time or x", "time not in s", "time if c else d", "import time", "timer x",
+    "x = time", "s = '''\ntime x\n'''", "f(1,\n  time x)", "y = 1 + \\\ntime",
+  ]) assert.equal(magicSyntax(src, true), src, src);
+  // run, in a notebook's Sage cells
+  const s = await session();
+  assert.deepEqual(await s.run("time t = 2^10\nt + 1", { sage: true }), { out: "WALL\n1025\n", err: "", failed: false });
+  assert.equal((await s.run("time 6 * 7", { sage: true })).out, "WALL\n42\n");
+  assert.equal((await s.run("time = 5\nprint(time + 1)", { sage: true })).out, "6\n");
+  assert.equal((await s.run("import time\nprint(type(time.time()).__name__)", { sage: true })).out, "float\n");
+  // the prompt: such a line is complete input, in Sage mode only
+  assert.equal(needsMore("time t = 1", { sage: true }), false);
+  // the reactive notebook's analysis: the timed statement's names are the cell's
+  assert.deepEqual([...analyzeCell("time y = f(x)", "c", { mode: "sage" }).defs], ["y"]);
 });
 
 test("notebook session: the supported magics run; every other is an error", async () => {

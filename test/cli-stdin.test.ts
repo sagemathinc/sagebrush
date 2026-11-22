@@ -26,6 +26,13 @@ test("a program on stdin runs in each mode: Python, Sage, Magma and MATLAB", () 
   }
 });
 
+test("the --sage prompt (-i): `time STATEMENT` times it, as Sage's prompt does; the name time stays usable", () => {
+  const r = run(["--sage", "-i"], "time t = 2^10\nprint(t)\ntime = 5\nprint(time + 1)\n");
+  assert.equal(r.stdout.replace(/Wall time: [\d.]+ (s|ms|µs|ns)/, "WALL"), "sage: WALL\nsage: 1024\nsage: sage: 6\nsage: ", r.stderr);
+  // a Python prompt keeps Python's syntax
+  assert.match(run(["-i"], "time t = 1\n").stderr, /SyntaxError/);
+});
+
 test("MATLAB on stdin stops at its first error with exit status 1, and reports a syntax error with its line", () => {
   const r = run(["--matlab"], "disp(1)\nerror('boom')\ndisp(2)\n");
   assert.equal(r.status, 1);
