@@ -6,11 +6,13 @@
 //     pane, editable), where it runs (this computer), and May run code (only if the grant may, frozen at Start);
 //   - the Tasks list under the chats, each with its chip;
 //   - a task's view in place of the chat: its status, its thread (the agent's turns), and its proposal's card, which
-//     opens the proposal view (the review chunk's) in a dialog. Merge, Close and Ask for changes come with UI-4.
+//     opens the proposal view (the review chunk's) in a dialog, with its actions: Close, and Ask for changes (S3 P2: a
+//     note, with the person's current versions of the task's own files, back to the same task; its next round replaces
+//     the one shown, in place). Merge comes with P3.
 // Shown only for an agent on this computer whose hello offers delegate.1: nothing changes for any other.
 import type { Thread, Turn } from "../workspace/agent-chat/events";
 import { AgentError } from "../workspace/agent-pair";
-import { chipOf, type DelegateDoc, type DelegateTasks } from "./delegate";
+import { chipOf, currentOf, DELEGATE_LIMITS, DELEGATE_TEXT, type DelegateDoc, type DelegateTasks } from "./delegate";
 
 export const DELEGATE_UI_TEXT = {
   switchOn: "Delegate: on",
@@ -34,7 +36,7 @@ export const DELEGATE_UI_TEXT = {
   tasks: "Tasks",
   skipped: (n: number) => (n === 1 ? "One event of this task couldn't be shown here." : `${n} events of this task couldn't be shown here.`),
   proposal: (n: number, base: string, commit: string) => `Proposal: ${n === 1 ? "1 file" : `${n} files`} changed · base ${base.slice(0, 7)} · proposal ${commit.slice(0, 7)}`,
-  laterActions: "Merge and Ask for changes come in the next update.",
+  laterActions: "Merge comes in the next update.",
   merge: "Merge",
   ask: "Ask for changes",
   closeTask: "Close",
@@ -45,6 +47,14 @@ export const DELEGATE_UI_TEXT = {
   closeTaskFailed: "Couldn't close the task.",
   stale: "The task moved on since you opened this: here it is as it is now.",
   newRound: (n: number) => `A new proposal (round ${n}) replaces the one you were reading.`,
+  askLabel: "What should change?",
+  askPlaceholder: "For example: call the section Findings, and keep the plot's colors.",
+  askFiles: (paths: string[]) => (paths.length ? `When available, your current versions of these files go with your note: ${paths.join(", ")}. A file that can't be read here is left out, and the task uses its own copy of it.` : "No current versions go with your note: the task works from its own copy."),
+  askSend: "Send to the task",
+  askSending: "Sending…",
+  askLoading: "The proposal is still being read: try again in a moment.",
+  askStale: "The task moved on since you opened this: it's read again, and your note is kept to send again.",
+  askSent: (round: number) => `Asked. The task is working on round ${round + 1}; it appears here when it's ready.`,
   unreadable: "Couldn't read this task from the agent.",
   back: "← Back to chats",
 } as const;
@@ -85,6 +95,9 @@ export function mountDelegate(h: DelegateHost) {
   document.querySelector("#threads")?.after(side);
   const view = el("section", { id: "task-view", hidden: true, ariaLabel: "Task" });
   document.querySelector("main .composer-wrap")?.before(view);
+
+  // (Ask for changes' unsent note, kept per task in this browser)
+  const noteKey = (task: string) => `sb-delegate-ask-v1:${task}`;
 
   function confirmDialog(title: string, body: string, ok: string, extra?: HTMLElement): Promise<boolean> {
     const dlg = el("dialog", { className: "delegate-dlg" });
@@ -205,7 +218,7 @@ export function mountDelegate(h: DelegateHost) {
     dlg.append(el("button", { type: "button", className: "x", ariaLabel: "Close", textContent: "×", onclick: () => dlg.close() }), panel);
     document.body.append(dlg);
     dlg.showModal();
-    let pv: { close(): void; refresh(): void } | null = null, src: ReturnType<typeof D.source> | null = null, busy = false;
+    let pv: { close(): void; refresh(): void } | null = null, src: ReturnType<typeof D.source> | null = null, busy = false, asking = false;
     // (its actions, at the proposal's foot: Close now; Merge and Ask for changes in the next steps)
     const act = (key: string, label: string) => { const b = el("button", { type: "button", textContent: label }); b.dataset.act = key; return b; };
     const merge = act("merge", T.merge), ask = act("ask", T.ask), closeBtn = act("close", T.closeTask);
@@ -215,7 +228,8 @@ export function mountDelegate(h: DelegateHost) {
     //  (src.seen().files))
     const askSlot = el("div", { className: "ask-slot" });
     const bar = el("div", { className: "proposal-actions" }, el("div", { className: "row" }, merge, ask, closeBtn), status, askSlot, later);
-    for (const b of [merge, ask]) { b.setAttribute("aria-disabled", "true"); b.title = T.laterActions; }
+    merge.setAttribute("aria-disabled", "true");
+    merge.title = T.laterActions;
     const me = { id, commit, sync: () => {} };
     shown = me;
     dlg.addEventListener("close", () => { pv?.close(); dlg.remove(); if (shown === me) shown = null; }, { once: true });
@@ -224,6 +238,8 @@ export function mountDelegate(h: DelegateHost) {
     const mount = (c: string) => {
       pv?.close();
       me.commit = c;
+      // (a new round: any Ask for changes block was the old round's)
+      askSlot.replaceChildren();
       src = D.source(id, c);
       pv = mod.openProposal(src, panel, { notebook: () => import(new URL("sagebrush-notebook.js", h.site).href), actions: bar });
     };
@@ -232,8 +248,27 @@ export function mountDelegate(h: DelegateHost) {
       const t = D.task(id);
       const next = t?.proposal?.commit;
       if (next && next !== me.commit && t?.entry.status === "proposal") { mount(next); status.textContent = T.newRound(t.entry.round); }
-      const can = !busy && D.state() === "on" && t?.entry.status === "proposal" && t.proposal?.commit === me.commit;
-      can ? closeBtn.removeAttribute("aria-disabled") : closeBtn.setAttribute("aria-disabled", "true");
+      // (busy: a Close in flight; asking: an Ask for changes in flight; either keeps both actions off)
+      const can = !busy && !asking && D.state() === "on" && t?.entry.status === "proposal" && t.proposal?.commit === me.commit;
+      for (const b of [closeBtn, ask]) can ? b.removeAttribute("aria-disabled") : b.setAttribute("aria-disabled", "true");
+    };
+    // (Ask for changes: its block opens under the actions, for the commit shown; pressed again, it closes, the note kept)
+    ask.onclick = () => {
+      if (ask.getAttribute("aria-disabled") === "true") return;
+      // (only once the proposal has been read: its files say what goes with the note)
+      if (!src?.seen()) { status.textContent = T.askLoading; return; }
+      const b = askSlot.querySelector<HTMLElement>(".ask-block");
+      if (b) { b.hidden = !b.hidden; if (!b.hidden) b.querySelector("textarea")?.focus(); return; }
+      const block = askBlock(id, me.commit, () => src?.seen() ?? null, {
+        busy: (on) => { asking = on; me.sync(); },
+        // (Send only while Ask for changes is: not during a Close, nor once the task has moved on)
+        may: () => ask.getAttribute("aria-disabled") !== "true",
+        // (the task moved on since the proposal was read: read again (a new seq), the note kept, to send again)
+        stale: () => { status.textContent = T.askStale; pv?.refresh(); },
+      });
+      askSlot.replaceChildren(block);
+      block.hidden = false;
+      block.querySelector("textarea")?.focus();
     };
     closeBtn.onclick = async () => {
       if (closeBtn.getAttribute("aria-disabled") === "true") return;
@@ -259,6 +294,54 @@ export function mountDelegate(h: DelegateHost) {
     me.sync();
   }
 
+  // (Ask for changes, S3 P2: under the proposal's actions, the note and what goes with it; the unsent note kept per task
+  //  in this browser (UI r3.2 §2), cleared once sent. `files` is the proposal's diff, read by the view)
+  function askBlock(task: string, commit: string, seen: () => { seq: number; files: readonly { path: string; change: string }[] } | null, on: { busy(b: boolean): void; may(): boolean; stale(): void }): HTMLElement {
+    const files = () => seen()?.files ?? [];
+    const box = el("textarea", { id: "delegate-note", rows: 4, placeholder: T.askPlaceholder, ariaLabel: T.askLabel });
+    try { box.value = localStorage.getItem(noteKey(task)) ?? ""; } catch { /* (no storage: nothing kept) */ }
+    box.oninput = () => { try { box.value.trim() ? localStorage.setItem(noteKey(task), box.value) : localStorage.removeItem(noteKey(task)); } catch { /* (no storage) */ } };
+    const own = () => files().filter((f) => f.change !== "added").map((f) => f.path);
+    const which = el("p", { className: "st ask-files", textContent: T.askFiles(own()) });
+    const msg = el("p", { className: "msg", role: "alert" });
+    const send = el("button", { type: "button", className: "primary", textContent: T.askSend });
+    const block = el("div", { className: "ask-block", hidden: true }, el("label", { htmlFor: "delegate-note", textContent: T.askLabel }), box, which, msg, send);
+    send.onclick = async () => {
+      if (send.getAttribute("aria-disabled") === "true") return;
+      msg.textContent = "";
+      if (new TextEncoder().encode(box.value.trim()).length > DELEGATE_LIMITS.noteBytes || !box.value.trim()) {
+        msg.textContent = box.value.trim() ? DELEGATE_TEXT.noteLong : DELEGATE_TEXT.noteEmpty;
+        return;
+      }
+      if (!on.may()) { msg.textContent = DELEGATE_TEXT.askMoved; return; }
+      send.setAttribute("aria-disabled", "true");
+      send.textContent = T.askSending;
+      // (the note can't change while it is being sent: what was sent is what was there)
+      box.readOnly = true;
+      // (what is sent: the kept note goes after it only if it is still this, never a newer draft written meanwhile, in a
+      //  dialog opened again)
+      const sent = box.value;
+      on.busy(true);
+      try {
+        const at = seen();
+        if (!at) throw new AgentError("stale", DELEGATE_TEXT.askMoved);
+        const current: DelegateDoc[] = await currentOf(at.files, h.readDoc);
+        const r = await D.ask(task, { proposal: commit, seq: at.seq, note: box.value, current });
+        try { if (localStorage.getItem(noteKey(task)) === sent) localStorage.removeItem(noteKey(task)); } catch { /* (no storage) */ }
+        block.replaceChildren(el("p", { className: "st asked", textContent: T.askSent(r.round) }));
+      } catch (e) {
+        if (e instanceof AgentError && e.code === "stale") on.stale();
+        msg.textContent = e instanceof AgentError || e instanceof Error ? e.message : String(e);
+        send.removeAttribute("aria-disabled");
+        send.textContent = T.askSend;
+        box.readOnly = false;
+      } finally {
+        on.busy(false);
+      }
+    };
+    return block;
+  }
+
   function render() {
     shown?.sync();
     const s = D.state(), offered = s !== "unoffered";
@@ -268,6 +351,8 @@ export function mountDelegate(h: DelegateHost) {
     btn.hidden = !offered;
     s === "turning-off" ? btn.setAttribute("aria-disabled", "true") : btn.removeAttribute("aria-disabled");
     side.hidden = !(s === "on" || s === "turning-off") || !D.tasks.length;
+    // (a task that's done can't be asked again: its kept note goes)
+    for (const t of D.tasks) if (t.entry.status === "closed" || t.entry.status === "merged") { try { if (localStorage.getItem(noteKey(t.entry.task)) !== null) localStorage.removeItem(noteKey(t.entry.task)); } catch { /* (no storage) */ } }
     list.replaceChildren(...D.tasks.map((t) => {
       const b = el("button", { type: "button", className: "thread task" + (t.entry.task === open ? " on" : "") }, el("span", { className: "t", textContent: t.entry.title }), el("span", { className: `chip ${t.entry.status}${t.entry.question ? " question" : ""}`, textContent: chipOf(t.entry) }));
       b.dataset.task = t.entry.task;
