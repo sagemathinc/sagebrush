@@ -209,6 +209,80 @@ fn dropping_without_stop_kills_at_once_and_an_exited_child_has_no_code() {
     assert_eq!(take_pair_code(&mut a, 7).unwrap_err(), HostError::ChildExited);
 }
 
+// The leader's state without reaping it: Some(true) exited (a zombie, still ours), Some(false) running, None no such
+// child (reaped: its pid and group id are free for reuse).
+fn leader_state(pid: u32) -> Option<bool> {
+    let mut info: libc::siginfo_t = unsafe { std::mem::zeroed() };
+    let r = unsafe { libc::waitid(libc::P_PID, pid as libc::id_t, &mut info, libc::WEXITED | libc::WNOHANG | libc::WNOWAIT) };
+    if r != 0 {
+        return None;
+    }
+    Some(info.si_signo == libc::SIGCHLD)
+}
+
+// A leader that exits by itself, leaving a process it started running in its group: the group's id must stay ours
+// (the leader unreaped) until the group is killed, and only then is the leader reaped.
+fn kills_traced() -> Vec<bool> {
+    KILL_TRACE.with(|t| std::mem::take(&mut *t.borrow_mut()))
+}
+
+fn exiting_leader(tag: &str) -> (Tmp, OwnedAgent, u32, i32) {
+    let t = Tmp::new(tag);
+    let args = script(&t, r#"IFS= read -r line; sleep 300 & echo $! > "$DIR/gc"; echo '{"v":1,"listening":5}'; exit 0"#);
+    let env = env_for(&t);
+    let mut a = spawn_owned(&launch(&t, &args, &env, 5000), PairCode::generate().unwrap()).unwrap();
+    let pid = a.child.as_ref().unwrap().id();
+    assert!(wait_until(|| t.0.join("gc").exists() && a.exited(), 5000), "the leader exited");
+    let gc: i32 = fs::read_to_string(t.0.join("gc")).unwrap().trim().parse().unwrap();
+    (t, a, pid, gc)
+}
+
+#[test]
+fn an_exited_leader_is_observed_not_reaped_so_its_group_id_stays_ours() {
+    let (_t, mut a, pid, gc) = exiting_leader("zombie");
+    // (asked again and again, as the page's status and take_pair_code do: still a zombie each time, never reaped)
+    for _ in 0..5 {
+        assert!(a.exited());
+        assert_eq!(leader_state(pid), Some(true), "the exited leader is still unreaped: its pid and group id can't be reused");
+    }
+    assert_eq!(take_pair_code(&mut a, 7).unwrap_err(), HostError::ChildExited);
+    assert_eq!(leader_state(pid), Some(true), "take_pair_code doesn't reap it either");
+    assert!(alive(gc), "what it left running is still in its group");
+    assert_eq!(a.group, pid as i32, "the group kill is armed only while the leader holds the id");
+    kills_traced();
+    drop(a);
+    assert_eq!(kills_traced(), [true], "the one group kill came while the leader still held the group id");
+    assert!(wait_until(|| !alive(gc), 3000), "dropping it kills what the leader left running");
+    assert_eq!(leader_state(pid), None, "and only then reaps the leader: nothing of ours is left to signal");
+}
+
+#[test]
+fn stop_after_the_leader_exited_kills_the_group_then_reaps() {
+    let (_t, a, pid, gc) = exiting_leader("zombie-stop");
+    let t0 = Instant::now();
+    kills_traced();
+    stop(a, Duration::from_secs(5));
+    assert_eq!(kills_traced(), [true], "stop's group kill came while the leader still held the group id");
+    assert!(t0.elapsed() < Duration::from_secs(2), "an exited leader doesn't make stop wait out the grace");
+    assert!(wait_until(|| !alive(gc), 3000), "the descendants are cleaned up");
+    assert_eq!(leader_state(pid), None, "the leader is reaped after the group kill");
+}
+
+#[test]
+fn a_running_leader_is_never_reaped_by_the_status_checks() {
+    let t = Tmp::new("running");
+    let args = script(&t, r#"IFS= read -r line; echo '{"v":1,"listening":5}'; while read x; do :; done"#);
+    let env = env_for(&t);
+    let mut a = spawn_owned(&launch(&t, &args, &env, 5000), PairCode::generate().unwrap()).unwrap();
+    let pid = a.child.as_ref().unwrap().id();
+    assert!(!a.exited());
+    assert_eq!(leader_state(pid), Some(false));
+    kills_traced();
+    stop(a, Duration::from_secs(5));
+    assert_eq!(kills_traced(), [true]);
+    assert_eq!(leader_state(pid), None);
+}
+
 #[test]
 fn error_codes_are_r5s() {
     let all = [HostError::SpawnFailed, HostError::NoPortLine, HostError::BadPortLine, HostError::ChildExited, HostError::PairCodeUsed, HostError::StaleGeneration];

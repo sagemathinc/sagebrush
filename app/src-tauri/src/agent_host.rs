@@ -18,6 +18,10 @@
 // - Stopping: the end of stdin is the agent's signal to clean up and exit (lib/pair-stdin.mjs). stop() closes it,
 //   waits up to the grace for the agent to exit, then kills the whole group (whatever the agent left running too);
 //   it never signals any other process. Dropping an OwnedAgent without stop() kills the group at once.
+// - The group's id stays ours until it is killed: the leader (the agent) is never reaped before the group kill. Its
+//   exit is only observed (waitid with WNOWAIT), so a dead leader stays a zombie, and a zombie keeps its pid and its
+//   process-group id from being reused; the kill can therefore reach only this agent's own group. The reap comes
+//   after it, and with it the group id is given up (`group` 0: nothing left armed).
 //
 // C, verify_bundle(): before each start, the files the app will run (r5 §3): <resources>/agent/MANIFEST.json, whose
 // sha256 must be the one compiled into the app, then every file it lists (size, sha256, mode), the Node sidecar, and
@@ -166,8 +170,28 @@ impl OwnedAgent {
     pub fn port(&self) -> u16 {
         self.port
     }
-    /// Whether the child has exited (its code is then no good to anyone).
+    /// Whether the child has exited (its code is then no good to anyone). It is not reaped here: see leader_exited.
     pub fn exited(&mut self) -> bool {
+        self.leader_exited()
+    }
+
+    // The leader's exit, observed without reaping it (waitid WNOWAIT): an exited leader stays a zombie, holding its pid
+    // and the group id until Drop has killed the group and then reaps it. Never try_wait() or wait() before that.
+    #[cfg(unix)]
+    fn leader_exited(&mut self) -> bool {
+        let Some(c) = self.child.as_ref() else { return true };
+        let mut info: libc::siginfo_t = unsafe { std::mem::zeroed() };
+        let r = unsafe { libc::waitid(libc::P_PID, c.id() as libc::id_t, &mut info, libc::WEXITED | libc::WNOHANG | libc::WNOWAIT) };
+        if r != 0 {
+            // (no such child to wait for: reaped some other way, so its ids may already be reused; disarm the group)
+            self.group = 0;
+            return true;
+        }
+        // (WNOHANG with nothing to report leaves the zeroed siginfo as it was; an exit reports SIGCHLD)
+        info.si_signo == libc::SIGCHLD
+    }
+    #[cfg(not(unix))]
+    fn leader_exited(&mut self) -> bool {
         match self.child.as_mut() {
             Some(c) => !matches!(c.try_wait(), Ok(None)),
             None => true,
@@ -308,12 +332,17 @@ pub fn stop(mut agent: OwnedAgent, grace: Duration) {
     agent.code = None;
     drop(agent.stdin.take());
     let t0 = Instant::now();
-    if let Some(c) = agent.child.as_mut() {
-        while matches!(c.try_wait(), Ok(None)) && t0.elapsed() < grace {
-            std::thread::sleep(Duration::from_millis(20));
-        }
+    while !agent.leader_exited() && t0.elapsed() < grace {
+        std::thread::sleep(Duration::from_millis(20));
     }
-    // (the drop kills the group, reaps the child and joins the drains)
+    // (the drop kills the group while the leader still holds its id, then reaps the leader)
+}
+
+// (tests only, compiled out of the app: at each group kill, whether the leader was still unreaped, so a test can tell
+//  a kill made while the group id was ours from one made after it was given up)
+#[cfg(all(test, unix))]
+thread_local! {
+    static KILL_TRACE: std::cell::RefCell<Vec<bool>> = const { std::cell::RefCell::new(Vec::new()) };
 }
 
 impl Drop for OwnedAgent {
@@ -322,12 +351,26 @@ impl Drop for OwnedAgent {
         drop(self.stdin.take());
         #[cfg(unix)]
         if self.group > 0 {
-            // (the group this child leads: the agent and everything it started that stayed in it; never any other pid)
+            // (the group this child leads: the agent and everything it started that stayed in it; never any other pid.
+            //  The leader is unreaped here, alive or a zombie, so the group id can't have been reused)
+            #[cfg(test)]
+            {
+                let held = self.child.as_ref().is_some_and(|c| {
+                    let mut info: libc::siginfo_t = unsafe { std::mem::zeroed() };
+                    unsafe { libc::waitid(libc::P_PID, c.id() as libc::id_t, &mut info, libc::WEXITED | libc::WNOHANG | libc::WNOWAIT) == 0 }
+                });
+                KILL_TRACE.with(|t| t.borrow_mut().push(held));
+            }
             unsafe { libc::kill(-self.group, libc::SIGKILL) };
         }
         if let Some(mut c) = self.child.take() {
             let _ = c.kill();
             let _ = c.wait();
+        }
+        // (reaped: the group id is no longer ours)
+        #[cfg(unix)]
+        {
+            self.group = 0;
         }
         // (the drains are not joined: each ends when its pipe closes, and a process outside the group still holding
         //  a pipe must never hold up the app's quit)
