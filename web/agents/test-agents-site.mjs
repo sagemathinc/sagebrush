@@ -48,7 +48,6 @@ const RELEASE_SHA256 = {
   "0.8.8": "30f3bc2a87d46925bb5adf062b7a17c8ead923da9663e1d25fae1eb4bda59dc5",
   "0.8.9": "ad534c4501d54a96206adc36419a905c86b0e60fee951fa417aa01819a230cb1",
   "0.8.10": "92b64a4c5e267df47160c643ce201af923bccfda0fb73189377e966216e22e67",
-  "0.8.11": "33d0b71dfe6f7fd8adb381cf019e1549536d9523dc2165159e3bd07b8eabc980",
   "0.8.12": "3e7fe8d17ef8ff1080b1354bb5130af332d9adb349c044e6f39c6a8efcab7dfb",
 };
 const tgzVersions = [...new Set([...(html + conn0).matchAll(/sagebrush-agent-([^/"<\s]*)\.tgz/g)].map((m) => m[1]))];
