@@ -16,8 +16,10 @@
 // compared inside the lock, so no tab puts an older one back.
 //
 // What can't be detected: the site's data cleared completely (every witness
-// with it) looks exactly like a first visit; a witness that can't be read
-// (private browsing, storage denied) is "unknown", never "first visit".
+// with it) looks exactly like a first visit; when no witness can be read
+// (private browsing, storage denied) it is "unknown", never "first visit". One
+// witness read with nothing there decides, the other unreadable (WebKit's OPFS
+// throws "an unknown transient reason" and never holds one).
 
 export type Witness = { v: 1; workspace: string; generation: number; seq: number; entries: number; sampled: number; reset?: { to: number; kind: ResetKind; at: number } };
 export type ResetKind = "new" | "delete" | "import" | "keep";

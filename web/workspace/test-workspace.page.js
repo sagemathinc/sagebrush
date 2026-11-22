@@ -1592,7 +1592,8 @@ async function durabilityDecide() {
   check(W.decide(held({ generation: 1 }), [R(wit({ generation: 2, seq: 1 })), none]).state === "suspected", "decide: below a committed witness generation: suspected");
   check(W.decide(held({ generation: 3, seq: 0 }), [R(wit({ generation: 2 })), none]).state === "ok", "decide: a higher generation than the witnesses: ok");
   check(W.decide(held({ workspace: "b".repeat(16), seq: 0 }), [R(wit({})), none]).state === "ok", "decide: another workspace's witness: not compared");
-  check(W.decide(held({ fresh: true, workspace: undefined, seq: 0 }), [bad, none]).state === "unknown", "decide: a new database and an unreadable witness: unknown, never a first visit");
+  check(W.decide(held({ fresh: true, workspace: undefined, seq: 0 }), [bad, none]).state === "first", "decide: a new database, one witness unreadable and the other read with none there (WebKit's OPFS): a first visit, the readable one decides");
+  check(W.decide(held({ fresh: true, workspace: undefined, seq: 0 }), [bad, bad]).state === "unknown", "decide: a new database and no witness readable: unknown, never a first visit");
   const okU = W.decide(held({}), [bad, bad]);
   check(okU.state === "ok" && !!okU.unavailable, "decide: a workspace whose witnesses can't be read: ok, detection unavailable said");
   check(W.decide(held({ seq: 15 }), [R(wit({ seq: 20 })), R(wit({ seq: 12 }))]).state === "suspected", "decide: two witnesses disagreeing: the newer counts");
@@ -2034,7 +2035,8 @@ async function durabilityNotices() {
   check(box({ state: "suspected", why: "x" }).b.join() === "loss-keep,loss-new", "…for missing changes: Keep, or Start new");
   const u = box({ state: "ok", unavailable: "denied" });
   check(/can't be detected/.test(u.t) && u.b.join() === "loss-close", "unreadable witnesses: said, and closable");
-  check(/can't be detected/.test(box({ state: "ok" }, { witnessDown: { local: "quota" } }).t), "a witness that can't be written: said");
+  check(/can't be detected/.test(box({ state: "ok" }, { witnessDown: { local: "quota", opfs: "denied" } }).t), "neither witness can be written: said");
+  check(box({ state: "ok" }, { witnessDown: { opfs: "UnknownError: The operation failed for an unknown transient reason (e.g., out of memory)." } }).t === "" && box({ state: "ok" }, { witnessDown: { local: "quota" } }).t === "", "one witness that can't be written (WebKit's OPFS; or localStorage alone): not said, the other still tells");
   check(/can't be opened/.test(box({ state: "unknown", why: "this browser's storage can't be opened: x" }).t), "an open that failed: said, never taken for a first visit");
   check(box({ state: "ok" }).t === "", "nothing to say: nothing shown");
 }
