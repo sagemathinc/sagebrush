@@ -49,7 +49,7 @@ export const DELEGATE_UI_TEXT = {
   newRound: (n: number) => `A new proposal (round ${n}) replaces the one you were reading.`,
   askLabel: "What should change?",
   askPlaceholder: "For example: call the section Findings, and keep the plot's colors.",
-  askFiles: (paths: string[]) => (paths.length ? `Your current versions of these files go with your note: ${paths.join(", ")}` : "No current versions go with your note: the task works from its own copy."),
+  askFiles: (paths: string[]) => (paths.length ? `When available, your current versions of these files go with your note: ${paths.join(", ")}. A file that can't be read here is left out, and the task uses its own copy of it.` : "No current versions go with your note: the task works from its own copy."),
   askSend: "Send to the task",
   askSending: "Sending…",
   askLoading: "The proposal is still being read: try again in a moment.",

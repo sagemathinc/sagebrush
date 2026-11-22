@@ -114,7 +114,7 @@ try {
   await P.ev(`${askBtn}.click()`);
   await P.until(`!!${block} && !${block}.hidden`);
   const ask0 = await P.ev(`({ files: ${block}.querySelector('.ask-files').textContent, focused: document.activeElement?.id })`);
-  ok(ask0.files === "Your current versions of these files go with your note: work/notes.txt" && ask0.focused === "delegate-note", "Ask for changes: its block under the actions, the note focused, naming the files whose current versions go with it", ask0);
+  ok(ask0.files === "When available, your current versions of these files go with your note: work/notes.txt. A file that can't be read here is left out, and the task uses its own copy of it." && ask0.focused === "delegate-note", "Ask for changes: its block under the actions, the note focused, naming the files whose current versions go with it", ask0);
   // (the unsent note kept per task: the dialog closed and the proposal opened again, it's still there)
   await P.ev(`(() => { const t = document.querySelector('#delegate-note'); t.value = 'Also number the lines.'; t.dispatchEvent(new Event('input')); })()`);
   ok((await P.ev(`localStorage.getItem(${JSON.stringify(KEY)})`)) === "Also number the lines.", "the unsent note is kept in this browser, per task");
