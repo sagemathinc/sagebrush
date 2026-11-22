@@ -189,6 +189,12 @@ export class WorkerKernel {
     this.readyInfo = null; // the worker's ready message (seeded, startup clock)
     // input() questions shown and not yet answered: reply -> its run's id
     this.inputs = new Map();
+    // changes a run waits on (web/worker.ts fsAsk), each admitted here only as a request of the run in flight in the
+    // current worker: key -> {m, id, w, gen}; retired, answered no, at a Stop, the run's end or a new interpreter. The
+    // keys this interpreter has asked with (answered once, never again) and the last run a Stop reached
+    this.asks = new Map();
+    this.askKeys = new Set();
+    this.stoppedThrough = 0;
     // live data's admission (web/notebook/live-data.js): one for every worker this kernel starts
     this.live = live ?? NO_LIVE_DATA;
     // where output addressed to an @interact goes (set by the notebook)
@@ -257,6 +263,8 @@ export class WorkerKernel {
     });
     const handle = (ev) => {
       const m = ev.data;
+      // (a change a run waits on: admitted here, before the page sees it, or answered no)
+      if (m && m.fsAsk !== undefined) return this.takeAsk(m, w);
       if (this.onMessage?.(m, w)) return;
       if (m.initFailed !== undefined) {
         this.emit("status", `error: This engine's settings are invalid: ${String(m.initFailed).slice(0, 300)}; ask the site's administrator.`);
@@ -360,6 +368,7 @@ export class WorkerKernel {
       }
       if (m.done) {
         this.retireInputs(m.id);
+        this.retireAsks((e) => e.id === m.id);
         this.live.abort((c) => c.id === m.id);
         this.pending.delete(m.id);
         // (Stop: it ended with the KeyboardInterrupt it was sent)
@@ -570,8 +579,46 @@ export class WorkerKernel {
    * answer written, and only for the current worker; a runner's or the engine's buffer is with its holder, which does
    * the same on {runnerAsk} (web/runner/index.html, app/engine/serve.mjs). Answered once per request. */
   answerAsk(m, w, policy) {
+    const key = m?.fsAsk?.key, e = typeof key === "string" ? this.asks.get(key) : undefined;
+    if (!e || e.m !== m || e.w !== w) return;
+    const live = this.askLive(m);
+    this.asks.delete(key);
+    this.answerRaw(m, w, live ? policy : null);
+  }
+  /** Whether `m`, an {fsAsk} this kernel admitted, is still a request of the run in flight in the current worker: not
+   * answered, not retired, its run neither stopped nor over, the same interpreter. The page asks it when the request
+   * arrives and again before it grants or widens anything for it. */
+  askLive(m) {
+    const key = m?.fsAsk?.key, e = typeof key === "string" ? this.asks.get(key) : undefined;
+    return !!e && e.m === m && e.w === this.worker && e.gen === this.generation && e.id > this.stoppedThrough && !!this.pending.get(e.id) && !this.pending.get(e.id).reply;
+  }
+  // (an {fsAsk} arriving: its fields checked and bounded, then admitted only as the one open request of the run in
+  // flight in the current worker, one no Stop reached and with a key never seen; anything else, and one the page
+  // doesn't take, answered no at once)
+  takeAsk(m, w) {
+    const a = m.fsAsk;
+    const valid = !!a && typeof a === "object" && typeof a.key === "string" && a.key.length >= 1 && a.key.length <= 64 && Number.isInteger(a.id) && a.id >= 1
+      && typeof a.path === "string" && a.path.length <= 4096 && (a.what === undefined || (typeof a.what === "string" && a.what.length <= 32))
+      && Number.isInteger(a.epoch) && a.epoch >= 1 && a.epoch <= 2 ** 31 - 2;
+    const fresh = valid && w === this.worker && !this.askKeys.has(a.key) && this.askKeys.size < 1 << 20;
+    if (fresh) this.askKeys.add(a.key);
+    const p = fresh ? this.pending.get(a.id) : undefined;
+    if (!p || p.reply || a.id <= this.stoppedThrough || this.asks.size) return this.answerRaw(m, w, null);
+    this.asks.set(a.key, { m, id: a.id, w, gen: this.generation });
+    if (!this.onMessage?.(m, w)) this.retireAsks((e) => e.m === m);
+  }
+  // (requests waiting, those `which` picks or all: retired, answered no; the page's prompt for one closes)
+  retireAsks(which = () => true) {
+    for (const [key, e] of [...this.asks]) {
+      if (!which(e)) continue;
+      this.asks.delete(key);
+      this.answerRaw(e.m, e.w, null);
+      this.emit("ask-retired", key);
+    }
+  }
+  answerRaw(m, w, policy) {
     const key = m?.fsAsk?.key;
-    if (typeof key !== "string") return;
+    if (typeof key !== "string") { if (typeof SharedArrayBuffer === "function" && m?.buffer instanceof SharedArrayBuffer) answerInput(m.buffer, () => {})(null); return; }
     const answer = policy ? JSON.stringify({ key, policy }) : null;
     if (typeof SharedArrayBuffer === "function" && m.buffer instanceof SharedArrayBuffer) {
       const allow = !!answer && w === this.worker && !!this.epochWord;
@@ -597,6 +644,9 @@ export class WorkerKernel {
     this.retireInputs();
     // (live data asked for before the Stop: aborted, never answered)
     this.live.abort();
+    // (a change asked about by a run the Stop reaches, now or arriving later: answered no)
+    this.stoppedThrough = Math.max(this.stoppedThrough, this.nextId - 1);
+    this.retireAsks();
     if ((!this.interruptFlag && !this.worker.interrupt) || this.pending.size === 0) return this.restart(message);
     const waiting = [...this.pending.keys()];
     for (const id of waiting) if (this.runs.has(id)) this.interrupted.add(id); // (the journal: not exactly replayable)
@@ -633,6 +683,8 @@ export class WorkerKernel {
     this.live.abort();
     this.worker?.terminate();
     this.retireInputs();
+    this.retireAsks();
+    this.askKeys.clear();
     const pending = [...this.pending.values()];
     this.pending.clear();
     this.runs.clear();
@@ -649,6 +701,8 @@ export class WorkerKernel {
     this.worker?.terminate();
     this.worker = null;
     this.retireInputs();
+    this.retireAsks();
+    this.askKeys.clear();
     pkgPins.delete(this.uid);
     const pending = [...this.pending.values()];
     this.pending.clear();

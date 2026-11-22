@@ -1174,19 +1174,21 @@ function makeKernel(owner) {
         }
         return true;
       }
-      // (a change the interpreter asks about while its run waits (web/worker.ts fsAsk): the prompt for that path, bound to
-      // this request and this interpreter; the answer (k.answerAsk) allows only by an Allow there, widening this
-      // generation's ceiling (widenFor); anything not this document's current interpreter's, or not a canonical path of
-      // its files, is answered no at once)
+      // (a change the interpreter asks about while its run waits (web/worker.ts fsAsk), which the kernel admitted as a
+      // request of the run in flight (WorkerKernel.takeAsk): the prompt for that path, bound to this request, this
+      // interpreter and the policy it was asked under; the answer (k.answerAsk) allows only by an Allow there, widening
+      // this generation's ceiling (widenFor). `live`, asked now and again before anything is granted or widened: still
+      // that run's open request (no Stop, not over), this document's current interpreter, and the epoch the request was
+      // made at still this page's (a permission change since: no). Anything else is answered no at once)
       if (m.fsAsk !== undefined) {
-        const a = m.fsAsk, sender_ = sender;
+        const a = m.fsAsk, sender_ = sender, g = gens.get(sender);
         let settled = false;
         const reply = (policy) => { if (settled) return; settled = true; k.answerAsk(m, sender_, policy); };
-        const current_ = owner !== null && owner === current.id && sender === k.worker && gens.get(sender) === gen;
-        if (!current_ || !a || typeof a !== "object" || typeof a.key !== "string" || !fsCanon(a.path) || /^\/(tmp|\$pyjs)(\/|$)/.test(a.path)) { reply(null); return true; }
+        const live = () => owner !== null && owner === current.id && sender_ === k.worker && g === gen && a.epoch === epoch && k.askLive(m);
+        if (!live() || !fsCanon(a.path) || /^\/(tmp|\$pyjs)(\/|$)/.test(a.path)) { reply(null); return true; }
         // (the tests' switch: refused at once, the prompt saying to run again, as where the run can't wait)
-        if (!ASK_WAIT) { reply(null); filesPrompt(owner, gens.get(sender), a.path, false, a.what); return true; }
-        filesPrompt(owner, gens.get(sender), a.path, false, a.what, { reply, widen: (folder, once) => widenFor(sender_, folder, once) });
+        if (!ASK_WAIT) { reply(null); filesPrompt(owner, g, a.path, false, a.what); return true; }
+        filesPrompt(owner, g, a.path, false, a.what, { key: a.key, live, reply, widen: (folder, once) => (live() ? widenFor(sender_, folder, once) : null) });
         return true;
       }
       // (a change the interpreter refused: the prompt for that path, for the document shown)
@@ -1238,6 +1240,8 @@ function makeKernel(owner) {
   k.on("status", (text) => { if (k === kernel) statusEl.textContent = text; });
   // (a Stop, by any route (WorkerKernel.interrupt): this document's open prompt closes unanswered: PROMPT934-3)
   k.on("interrupt", () => { if (owner !== null && fbReq?.doc === owner) filesBar(false); });
+  // (a waiting change retired by the kernel (its run's Stop or end, a new interpreter): its prompt closes, unanswered)
+  k.on("ask-retired", (key) => { if (fbReq?.ask?.key === key) filesBar(false); });
   // (background loading, web/preload.ts: a Run starts no further prefetch; one in flight finishes)
   k.on("execute", preloadStop);
   if (owner !== null) {
@@ -1259,7 +1263,10 @@ function makeKernel(owner) {
   // epoch's end); a widening waits for the person's next Run (rotateIfWidened); nothing else changes here)
   function policyChanged() {
     if (owner === null || !k.worker) return;
-    const next = meetTrees(cap, perms.writeTrees(owner));
+    const now = perms.writeTrees(owner), next = meetTrees(cap, now);
+    // (the generation's own ceiling narrowed too, never widened here: what admit() and an Allow's widening (widenFor)
+    // build on, so a permission taken away stays away in this generation, whatever is granted again before a Run)
+    if (ceilings.has(gen)) ceilings.set(gen, meetTrees(ceilings.get(gen), now));
     if (sameTrees(next, sentTrees)) return;
     cap = next;
     // (a restart where the epoch can't do it: a plain worker of the page, which a document that may not change
@@ -1278,7 +1285,11 @@ function makeKernel(owner) {
   function widenFor(w, folder, once) {
     const g = gens.get(w);
     if (owner === null || folder === "/" || !fsCanon(folder) || g === undefined || g !== gen || k.worker !== w || !k.sharesEpoch || epoch >= EPOCH_MAX) return null;
-    const wide = meetTrees([...(ceilings.get(g) ?? []), folder], [...(ceilings.get(g) ?? []), folder]);
+    // (from what this generation may change now, its ceiling as narrowed since it started and what is allowed now, and
+    // that one folder, which must be allowed now: nothing taken away since comes back with it)
+    const now = perms.writeTrees(owner);
+    if (!now.some((t) => coversW(t, folder))) return null;
+    const wide = meetTrees([...meetTrees(ceilings.get(g) ?? [], now), folder], now);
     const pol = { epoch: epoch + 1, state: stateOf(wide), trees: wide };
     if (JSON.stringify(pol).length > 64 * 1024) return null;
     epoch = pol.epoch;
@@ -2411,7 +2422,7 @@ const FS_DOING = {
   mkdir: ["create the folder", "create it"], unlink: ["delete", "delete it"], rmdir: ["delete the folder", "delete it"],
   rename: ["move or rename", "make the change"],
 };
-// (`ask`: the change waits on this prompt (web/worker.ts fsAsk): {reply(policy | null), widen(folder, once)}; answered
+// (`ask`: the change waits on this prompt (web/worker.ts fsAsk): {key, live(), reply(policy | null), widen(folder, once)}; answered
 // once, by an Allow there (the policy widenFor gives) or no, and the change then goes ahead or is refused in that run.
 // Without it the change was refused already, and the prompt says to run the cell again)
 function filesPrompt(doc, generation, path, changed, what, ask = null) {
@@ -2475,6 +2486,9 @@ for (const id of ["fballow", "fbonce", "fbdeny", "fbperms"]) {
     // closes the prompt without answering it no)
     const ask = req.ask;
     if (ask) ask.claimed = true;
+    // (a waiting change no longer that run's open request, or asked under permissions since changed: answered no, and
+    // nothing granted for it)
+    if (ask && !ask.live()) { ask.reply(null); filesBar(false); return; }
     const ok = id === "fbdeny" ? perms.deny(req.doc, "write", req.folder) : perms.grant(req.doc, "write", req.folder, { once: id === "fbonce" }).ok;
     filesBar(false);
     if (ask) {

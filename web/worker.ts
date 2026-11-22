@@ -15,7 +15,7 @@
 //                                       or user code (plan-ff-limits r3)
 // Also out: {fsChanged: path, data}   Python wrote (data) or deleted (null) a file
 //           {fsRefused: path, what, why}  a change refused (why: "refused", or "changed"; ready's `epoch`: its shared word)
-//           {fsAsk: {key, path, what, epoch}, buffer}  a change refused, asked while the run waits on buffer (below)
+//           {fsAsk: {key, id, path, what, epoch}, buffer}  a change refused, asked while the run waits on buffer (below)
 //           {fsRename: {from, to, changes}}  a rename, every path it moves, as one change
 //           {id, target, input: {prompt, max, key}, buffer}  input() waits for a line
 //                                       (stdin below: the page answers in `buffer`)
@@ -140,6 +140,7 @@ const session = notebookSession((m) => postMessage(m), {
     begin: (m) => {
       adopt();
       running = true;
+      askRun = Number.isInteger(m.id) ? m.id : null;
       reads = new Set();
       writes = new Set();
       sources = new Set();
@@ -147,6 +148,7 @@ const session = notebookSession((m) => postMessage(m), {
     },
     end: () => {
       running = false;
+      askRun = null;
       adopt();
       return { ...(replayEnv.end() as any), ...(reads.size || writes.size || sources.size ? { files: { reads: [...reads], writes: [...writes], ...(sources.size ? { sources: [...sources] } : {}) } } : {}) };
     },
@@ -162,24 +164,26 @@ __hooks.changed = (path, data) => {
 // (a change refused: the page shows its prompt for that path; `why` "changed": the permissions changed meanwhile)
 __hooks.refused = (path, what, why) => postMessage({ fsRefused: path, what, why });
 // A change outside what this document may change, asked of the person while the run waits (the write-wait design, SEC
-// ruling of Nov 22, 2026): {fsAsk: {key, path, what, epoch}, buffer}, and the run waits on its own buffer as input()
+// ruling of Nov 22, 2026): {fsAsk: {key, id, path, what, epoch}, buffer}, and the run waits on its own buffer as input()
 // does (src/stdin-wait.ts: in slices, a Stop wins). A blocked worker takes no message, so the answer itself carries the
 // whole new policy: the buffer holds {key, policy: {epoch, state, trees}}, and its holder (the page, or the runner's
 // frame, or the engine) stores that epoch in the shared word BEFORE it writes the answer. It is adopted here, at once,
 // only if it names this request, is a policy, is newer than both the one held and the epoch the request was made at,
 // and the shared word holds exactly its epoch (a torn or stale answer: no). Anything else, end of input, or a Stop:
-// not allowed. One request at a time; none without shared memory (the refusal and the prompt go on as before).
+// not allowed. One request at a time, and only from a run, whose id it carries (the page answers only a request of the
+// run in flight, never one of a run stopped or over); none without shared memory or outside a run (the refusal and the
+// prompt go on as before).
 const ASK_MAX = 96 * 1024;
 const ASK_TAG = Math.random().toString(36).slice(2, 10);
-let askCount = 0, asking = false;
+let askCount = 0, asking = false, askRun: number | null = null;
 __hooks.ask = (path, what) => {
-  if (!epochWord || !policySet || asking || !(R.INTR.buffer instanceof SharedArrayBuffer)) return "unavailable";
+  if (!epochWord || !policySet || asking || askRun === null || !(R.INTR.buffer instanceof SharedArrayBuffer)) return "unavailable";
   asking = true;
   try {
     const buffer = new SharedArrayBuffer(8 + ASK_MAX);
     const key = `${ASK_TAG}.${++askCount}`;
     const from = Atomics.load(epochWord, 0);
-    postMessage({ fsAsk: { key, path, what, epoch: from }, buffer });
+    postMessage({ fsAsk: { key, id: askRun, path, what, epoch: from }, buffer });
     const got = waitForLine(buffer, R.INTR);
     if (typeof got !== "string") return "denied";
     let a: any = null;

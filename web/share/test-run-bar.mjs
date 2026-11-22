@@ -10,14 +10,18 @@
 //   3. Tab and Shift+Tab keep the focus in it, never on the page behind; Esc closes it unanswered, nothing allowed;
 //   4. asked again, a script's click on Allow does nothing; the person's press, once armed, allows /sub, and the cell
 //      run again writes /sub/out.txt;
-//   4b-4f. Allow once (the same run saves, nothing kept); Stop while it waits; a rename's second folder refused (nothing
-//      moves); the permissions changed while it waits, and another notebook shown: refused, nothing written;
+//   4b-4h. Allow once (the same run saves, nothing kept); Stop while it waits; a rename's second folder refused (nothing
+//      moves); the permissions changed while it waits, and another notebook shown: refused, nothing written; a folder
+//      taken away stays away in that interpreter, whatever is allowed or granted again before the next Run; an ask held
+//      in delivery while a Stop comes is answered no when it arrives (no prompt);
 //   5. a write at the top of the workspace: the prompt offers File > Permissions… and Don't allow, never Allow;
 //   5b. a delete and a new folder are said as what they are ("delete", "create the folder"), never "save";
 //   and as Safari (its user agent, whose sandbox doesn't run here: no runner page answers):
 //   6. a notebook runs, no run bar, and its write is asked about in the same modal;
 //   and with the sandboxed runner working (Chromium's):
-//   7. the same wait relayed by the runner's frame: an Allow lets the same run save; Don't allow refuses it in that run.
+//   7. the same wait relayed by the runner's frame: an Allow lets the same run save; Don't allow refuses it in that run;
+//   7b. there too, a folder taken away stays away in that interpreter (the same one, its variable kept);
+//   7c. an ask held in delivery while the permissions narrow is answered no when it arrives (no prompt).
 //   bun web/build.ts && node web/share/test-run-bar.mjs
 import { spawn } from "node:child_process";
 import { createHash, randomBytes } from "node:crypto";
@@ -72,7 +76,9 @@ async function profilePage(safari, init = "", { runner = true } = {}) {
   const until = async (expr, ms = 30000) => { const t = Date.now(); while (Date.now() - t < ms) { if (await ev(expr).catch(() => false)) return true; await sleep(100); } throw new Error("timeout: " + expr); };
   const go = async (url) => { await send("Page.navigate", { url }); await sleep(300); await until("document.readyState === 'complete'"); };
   // (a person's press and release, at the element's middle: a trusted click)
+  // (a button the page shows only once it is idle, Run all after a run's done: waited for, a few seconds)
   const press = async (sel) => {
+    await until(`(() => { const e = document.querySelector(${JSON.stringify(sel)}); return !!e && !e.hidden && !!e.offsetParent; })()`, 10000).catch(() => {});
     const r = await ev(`(() => { const e = document.querySelector(${JSON.stringify(sel)}); if (!e || e.hidden || !e.offsetParent) return null; e.scrollIntoView({ block: "center" }); const b = e.getBoundingClientRect(); return { x: b.x + b.width / 2, y: b.y + b.height / 2 }; })()`);
     if (!r) throw new Error("no " + sel + " to press");
     for (const type of ["mousePressed", "mouseReleased"]) await send("Input.dispatchMouseEvent", { type, x: r.x, y: r.y, button: "left", clickCount: 1 });
@@ -114,6 +120,43 @@ const key = (p, k, shift = false) => Promise.all(["keyDown", "keyUp"].map((type)
 const promptOpen = (p) => p.until("!document.querySelector('#filesbar').hidden && document.querySelector('#filesbar').matches(':modal')", 30000).then(() => true, () => false);
 const WRITE = "try:\n    open('/sub/out.txt', 'w').write('hi')\n    print('wrote')\nexcept PermissionError as e:\n    print('refused', type(e).__name__, e)";
 
+// (SEC H1: `A` allowed, then taken away (another tab's change); a run's write to `B` waits and is allowed; while that
+// same run sleeps, `A` is granted again outside the prompt: the run writes `B` but not `A`; only the next Run, a new
+// interpreter, may write `A`. `kept`: where a narrowing keeps the interpreter (the runner's, with its shared epoch), the
+// same one throughout (its generation, and a value it kept from before the narrowing); the page's own worker is
+// restarted by it instead)
+const grantsEdit = (P, fn) => P.ev(`(() => { const f = document.createElement('iframe'); document.body.append(f); const ls = f.contentWindow.localStorage; const r = JSON.parse(ls.getItem('sagebrush-grants')); const d = r.docs[window.sagebrush.notebook.snapshot().id ?? localStorage.getItem('sagebrush-current')]; d.write = (${fn})(d.write); ls.setItem('sagebrush-grants', JSON.stringify(r)); f.remove(); return JSON.stringify(d.write); })()`);
+const genOf = (P) => P.ev("window.sagebrush.kernels.get(window.sagebrush.notebook.snapshot().id ?? localStorage.getItem('sagebrush-current'))?.generation?.() ?? null");
+async function revokedStaysAway(P, A, B, label, kept) {
+  const q = JSON.stringify;
+  await setCode(P, "import builtins\nbuiltins._sb_mark = 'same'\nprint('set')");
+  await P.press("#runall");
+  await P.until("/set/.test(document.querySelector('.cell .out')?.textContent ?? '')", 20000).catch(() => {});
+  const g0 = await genOf(P);
+  const revoked = await grantsEdit(P, `(w) => w.filter((t) => t !== ${q(A)})`);
+  await sleep(300);
+  const g1 = await genOf(P);
+  await setCode(P, `import time\ntry:\n    open('${B}/b.txt', 'w').write('b')\n    print('b-wrote')\nexcept PermissionError:\n    print('b-refused')\ntime.sleep(4)\ntry:\n    open('${A}/revived.txt', 'w').write('a')\n    print('a-wrote')\nexcept PermissionError:\n    print('a-refused')\nimport builtins\nprint(getattr(builtins, '_sb_mark', 'gone'))`);
+  await P.press("#runall");
+  const asked = await promptOpen(P);
+  const askText = (await state(P)).text;
+  const g2 = await genOf(P);
+  await sleep(700);
+  await P.press("#fballow");
+  await P.until(`${W}.stat(${q(B + "/b.txt")}).then((e) => !!e, () => false)`, 30000).catch(() => {});
+  const regranted = await grantsEdit(P, `(w) => [...w, ${q(A)}]`);
+  await P.until("/a-wrote|a-refused/.test(document.querySelector('.cell .out')?.textContent ?? '')", 20000).catch(() => {});
+  if ((await state(P)).prompt) await key(P, "Escape");
+  await sleep(300);
+  const out = (await state(P)).outs[0];
+  const revived = await P.ev(`${W}.stat(${q(A + "/revived.txt")}).then((e) => !!e, () => false)`);
+  ok(asked && askText.includes(B) && !revoked.includes(q(A)) && regranted.includes(q(A)) && /b-wrote/.test(out) && /a-refused/.test(out) && (!kept || (/same/.test(out) && g0 === g1 && g1 === g2)) && !revived, `${label}. ${A} taken away, ${B} allowed while the run waits, ${A} granted again elsewhere: the same interpreter writes ${B}, not ${A}: ` + J({ askText, revoked, regranted, out, revived, gens: [g0, g1, g2] }));
+  await setCode(P, `try:\n    open('${A}/after.txt', 'w').write('a')\n    print('a-wrote')\nexcept PermissionError:\n    print('a-refused')`);
+  await P.press("#runall");
+  const after = await P.until(`${W}.stat(${q(A + "/after.txt")}).then((e) => !!e, () => false)`, 30000).then(() => true, () => false);
+  ok(after, `...and the next Run, a new interpreter, may write ${A}`);
+}
+
 try {
   // ---- 1. the sandbox silent: a notebook runs anyway
   const S = await profilePage(false, "", { runner: false });
@@ -122,7 +165,7 @@ try {
   // (the folder it will write to, before its notebook's interpreter starts: an interpreter gets the files at its start)
   await S.ev(`${W}.create("/sub/keep.txt", { content: new TextEncoder().encode("k") }).then(() => 1)`);
   await S.ev(`${W}.create("/sub2/keep.txt", { content: new TextEncoder().encode("k") }).then(() => 1)`);
-  for (const f of ["/once/k.txt", "/stopped/k.txt", "/rn1/keep.txt", "/rn2/k.txt", "/chg/k.txt", "/sw/k.txt"]) await S.ev(`${W}.create(${JSON.stringify(f)}, { content: new TextEncoder().encode("k") }).then(() => 1)`);
+  for (const f of ["/once/k.txt", "/stopped/k.txt", "/rn1/keep.txt", "/rn2/k.txt", "/chg/k.txt", "/sw/k.txt", "/rr/k.txt", "/rv/k.txt"]) await S.ev(`${W}.create(${JSON.stringify(f)}, { content: new TextEncoder().encode("k") }).then(() => 1)`);
   await twoCells(S);
   const ran = await ranAll(S, ["42", "two"]);
   const s1 = await state(S);
@@ -224,6 +267,21 @@ try {
   const alive = await S.until("/alive/.test(document.querySelector('.cell .out')?.textContent ?? '')", 20000).then(() => true, () => false);
   ok(gone && alive && !(await S.ev(`${W}.stat("/sw/a.txt").then((e) => !!e, () => false)`)), "4f. another notebook shown while the run waits: the prompt goes, nothing written, and back there its interpreter runs the next cell at once (the wait was answered no): " + J({ gone, alive }));
 
+  // ---- 4g. a folder taken away stays away in that interpreter (SEC H1)
+  await revokedStaysAway(S, "/sub", "/rr", "4g", false);
+
+  // ---- 4h. held in delivery, and a Stop before it arrives: answered no, no prompt, nothing written (SEC H2)
+  await setCode(S, "try:\n    open('/rv/b.txt', 'w').write('hi')\n    print('wrote')\nexcept BaseException as e:\n    print('refused', type(e).__name__)");
+  await S.ev("(window.sagebrush.kernel.holdMessages(new Promise((r) => (window.__release = r))), 1)");
+  await S.press("#runall");
+  await sleep(2500);
+  await S.ev("(window.sagebrush.kernel.interrupt(), 1)");
+  await S.ev("(window.__release(), 1)");
+  await S.until("/refused|wrote|Stopped|Interrupt/.test(document.querySelector('.cell .out')?.textContent ?? '')", 20000).catch(() => {});
+  await sleep(500);
+  const s4h = await state(S);
+  ok(!s4h.prompt && !/wrote/.test(s4h.outs[0]) && !(await S.ev(`${W}.stat("/rv/b.txt").then((e) => !!e, () => false)`)), "4h. an ask held in delivery, a Stop before it arrives: no prompt, nothing written: " + J({ prompt: s4h.prompt, out: s4h.outs[0] }));
+
   // ---- 5. a write at the top of the workspace: File > Permissions… and Don't allow, never Allow
   await setCode(S, "try:\n    open('/top.txt', 'w').write('hi')\n    print('wrote')\nexcept PermissionError as e:\n    print('refused', type(e).__name__, e)");
   await S.press("#runall");
@@ -257,7 +315,7 @@ try {
   const R = await profilePage(false, "", { runner: true });
   await R.go(dev.site + "/");
   await appReady(R);
-  for (const f of ["/rsub/k.txt", "/rno/k.txt"]) await R.ev(`${W}.create(${JSON.stringify(f)}, { content: new TextEncoder().encode("k") }).then(() => 1)`);
+  for (const f of ["/rsub/k.txt", "/rno/k.txt", "/rr2/k.txt", "/rv2/k.txt", "/rkeep/k.txt"]) await R.ev(`${W}.create(${JSON.stringify(f)}, { content: new TextEncoder().encode("k") }).then(() => 1)`);
   await twoCells(R);
   await setCode(R, "try:\n    open('/rsub/out.txt', 'w').write('hi')\n    print('wrote')\nexcept PermissionError as e:\n    print('refused', type(e).__name__)");
   await R.press("#runall");
@@ -277,6 +335,28 @@ try {
   await R.until("/refused|wrote/.test(document.querySelector('.cell .out')?.textContent ?? '')", 15000).catch(() => {});
   const s7b = await state(R);
   ok(/refused PermissionError/.test(s7b.outs[0]) && !(await R.ev(`${W}.stat("/rno/out.txt").then((e) => !!e, () => false)`)), "...Don't allow: refused in that same run, nothing written: " + J(s7b.outs[0]));
+  // (SEC H1 in the runner, where a narrowing keeps the same interpreter: /rkeep allowed in it first, so taking /rsub away
+  // leaves it scoped, not off, which would end it)
+  await setCode(R, "open('/rkeep/a.txt', 'w').write('k')\nprint('kept')");
+  await R.press("#runall");
+  await promptOpen(R);
+  await sleep(700);
+  await R.press("#fballow");
+  await R.until("/kept/.test(document.querySelector('.cell .out')?.textContent ?? '')", 20000).catch(() => {});
+  await revokedStaysAway(R, "/rsub", "/rr2", "7b", true);
+  // (SEC H2 in the runner, where a narrowing keeps the interpreter and moves the epoch: an ask held in delivery while the
+  // permissions narrow arrives asked under an epoch that's over: answered no, no prompt, nothing written)
+  await setCode(R, "try:\n    open('/rv2/a.txt', 'w').write('hi')\n    print('wrote')\nexcept PermissionError as e:\n    print('refused', type(e).__name__)");
+  await R.ev("(window.sagebrush.kernel.holdMessages(new Promise((r) => (window.__release = r))), 1)");
+  await R.press("#runall");
+  await sleep(2500);
+  const narrowed7c = await grantsEdit(R, "(w) => w.filter((t) => t !== '/rr2')");
+  await sleep(300);
+  await R.ev("(window.__release(), 1)");
+  await R.until("/refused|wrote|restarted/.test(document.querySelector('.cell .out')?.textContent ?? '')", 20000).catch(() => {});
+  await sleep(500);
+  const s7c = await state(R);
+  ok(!/\/rr2"/.test(narrowed7c) && !s7c.prompt && /refused PermissionError/.test(s7c.outs[0]) && !(await R.ev(`${W}.stat("/rv2/a.txt").then((e) => !!e, () => false)`)), "7c. in the runner, an ask held in delivery while the permissions narrow: on arrival answered no, no prompt, the same run refused, nothing written: " + J({ prompt: s7c.prompt, out: s7c.outs[0] }));
 } catch (e) {
   failures++;
   console.log("FAIL", e.message);
