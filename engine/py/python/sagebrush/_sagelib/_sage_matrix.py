@@ -3394,8 +3394,11 @@ def _smith_field_shapes(m, n):
 def _smith_uv(a, n=None):
     """Smith form with transforms over ZZ: (D, U, V), U a V = D (a has n
     columns), by the engine (sagebrush.linalg; the transforms come from one
-    exact inverse when the matrix is square and nonsingular, and from the
-    classical elimination otherwise)."""
+    exact inverse when the matrix is square and nonsingular, and otherwise,
+    singular or rectangular, from Hermite forms of both sides around a
+    nonsingular core: valid transforms, but not the ones the classical
+    elimination gave before, and much smaller).  D does not depend on the
+    route."""
     m, n = len(a), (len(a[0]) if a else 0) if n is None else n
     # (the transforms are m x m and n x n: a 2^22 x 1 matrix would ask
     # for 2^44 entries)

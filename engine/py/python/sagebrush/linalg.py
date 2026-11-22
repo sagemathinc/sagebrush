@@ -201,7 +201,8 @@ def kernel(m):
 def _smith_form(m):
     """(D, U, V, route): integer rows with U m V = D, the Smith form with
     its transforms, by the engine (route: "cyclic", "trailing" or
-    "classical"); m has at least one row and one column."""
+    "hermite", singular or rectangular input); m has at least one row and
+    one column."""
     r = call("mat_smith_form", m=_enc(m), wire="csv")
     return _dec(r["d"]), _dec(r["u"]), _dec(r["v"]), r["route"]
 

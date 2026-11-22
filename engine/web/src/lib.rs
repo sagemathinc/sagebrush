@@ -1619,6 +1619,7 @@ fn dispatch(v: &Value) -> Result<Value, String> {
                 sagebrush_arith::smith::Route::Cyclic => "cyclic",
                 sagebrush_arith::smith::Route::Trailing => "trailing",
                 sagebrush_arith::smith::Route::Classical => "classical",
+                sagebrush_arith::smith::Route::Hermite => "hermite",
             };
             Ok(json!({ "d": zrows(&s.d, v), "u": zrows(&s.u, v), "v": zrows(&s.v, v), "route": route, "attempts": s.attempts }))
         }

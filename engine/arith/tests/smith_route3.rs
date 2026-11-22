@@ -417,3 +417,38 @@ fn route3_rank_retry_on_a_bad_prime() {
         assert_eq!((f.d.get(0, 0), f.d.get(1, 1)), (&BigInt::from(1), &pb), "the full rank found");
     }
 }
+
+/// Route 3's units ceilings (regressions): each row's metered units at most
+/// 1.1 times those recorded when route 3 landed (the bars' rows: 8 x 8
+/// rank 7, 48 x 48 rank 47, 48 x 50, the thin shapes, and plain random
+/// rows, delta = Delta).  A dense n x n product in the block combination
+/// would add about n^2 r products: 8 x 2000's ceiling fails on it.
+#[test]
+fn route3_units_ceilings() {
+    let print = std::env::var("PRINT_CEILINGS").is_ok();
+    // (m, n, rank, bits, plain, seed, recorded units)
+    let rows: &[(usize, usize, usize, u32, bool, u64, u64)] = &[
+        (8, 8, 7, 16, false, 1, 31580),
+        (48, 48, 47, 16, false, 2, 62045054),
+        (48, 50, 48, 16, false, 3, 63794109),
+        (200, 8, 8, 16, false, 4, 482519),
+        (8, 200, 8, 16, false, 5, 604604),
+        (1000, 8, 8, 16, false, 6, 4077496),
+        (8, 1000, 8, 16, false, 7, 4807519),
+        (8, 2000, 8, 16, false, 8, 13603045),
+        (16, 18, 16, 16, true, 9, 273770),
+        (18, 16, 16, 16, true, 10, 270382),
+        (24, 26, 24, 16, true, 11, 1368983),
+    ];
+    for &(m, n, rank, bits, plain, seed, recorded) in rows {
+        let mut rg = Rng(seed);
+        let a = if plain { ZMat::from_rows((0..m).map(|_| (0..n).map(|_| e(&mut rg, bits)).collect()).collect()) } else { product(&mut rg, m, n, rank, bits) };
+        let (f, units, _) = timed(|| smith_form(&a).unwrap());
+        assert_eq!(f.route, sagebrush_arith::smith::Route::Hermite);
+        if print {
+            println!("        ({m}, {n}, {rank}, {bits}, {plain}, {seed}, {units}),");
+            continue;
+        }
+        assert!(units * 10 <= recorded * 11, "{m} x {n} rank {rank}: {units} units, above 1.1 times the {recorded} recorded");
+    }
+}
