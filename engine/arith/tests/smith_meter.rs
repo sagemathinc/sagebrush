@@ -96,8 +96,11 @@ fn smith_units_and_stop_checks() {
         })
         .collect();
     let pins: &[(&str, [u64; FAMILIES], u64)] = &[
-        ("route 1, word delta", [44, 0, 2, 0, 2, 24, 55, 0, 0, 0], 3),
-        ("route 1, big delta", [17580, 0, 4772, 0, 280, 3386, 5052, 0, 0, 0], 5),
+        // (the inverse's CRT setup is charged: one prime on the word
+        // inputs, [1, 0, 0, 0, 0, 3, 4, ..], four on the big ones, [23, 0, 0,
+        // 0, 0, 16, 95, ..]; MultiCrt::setup_units)
+        ("route 1, word delta", [45, 0, 2, 0, 2, 27, 59, 0, 0, 0], 3),
+        ("route 1, big delta", [17603, 0, 4772, 0, 280, 3402, 5147, 0, 0, 0], 5),
         // (route 2's checks beyond one an attempt and one a pass of the
         // small Smith form, k = 2 here: in each attempt one a row of Y (k)
         // and a pass of each pivot it reaches (one pass a pivot here, and k
@@ -114,8 +117,8 @@ fn smith_units_and_stop_checks() {
         // one-word entries: for the word input the transforms' 4 k x k
         // products (4 k) and part A's N b (n = 3), 49 + 8 + 3 = 60; the big
         // input's products have multi-limb entries, checked already)
-        ("route 2, word delta", [143, 0, 31, 0, 30, 97, 208, 0, 0, 0], 60),
-        ("route 2, big delta", [34470, 0, 36537, 0, 1678, 3574, 6314, 0, 0, 0], 164),
+        ("route 2, word delta", [144, 0, 31, 0, 30, 100, 212, 0, 0, 0], 60),
+        ("route 2, big delta", [34493, 0, 36537, 0, 1678, 3590, 6409, 0, 0, 0], 164),
         ("classical, singular", [111, 0, 11, 0, 0, 182, 119, 0, 0, 0], 3),
         ("classical, wide", [29, 0, 12, 0, 0, 55, 0, 0, 0, 0], 4),
     ];

@@ -33,6 +33,19 @@ fn mul_small_add(x: &mut Vec<u64>, m: u64, a: u64) {
     }
 }
 
+/// The quotient steps of `Modulus::inv`'s Euclid on (n, a mod n), counted
+/// for the setup's charge (the same loop, on the remainders only).
+fn euclid_steps(n: u64, a: u64) -> u64 {
+    let (mut r0, mut r1) = (n, a % n);
+    let mut steps = 0;
+    while r1 != 0 {
+        (r0, r1) = (r1, r0 % r1);
+        steps += 1;
+    }
+    let _ = r0;
+    steps
+}
+
 fn cmp(a: &[u64], b: &[u64]) -> std::cmp::Ordering {
     let la = a.iter().rposition(|&w| w != 0).map_or(0, |i| i + 1);
     let lb = b.iter().rposition(|&w| w != 0).map_or(0, |i| i + 1);
@@ -149,7 +162,75 @@ impl MultiCrt {
         u
     }
 
+    /// The units [`MultiCrt::new`] charges for these primes, from the
+    /// primes alone in O(k^2) word operations (the work estimate's twin of
+    /// the setup, pinned equal to its charge): the prefix products' word
+    /// lengths, computed once; Q_j's partial products are the prefixes
+    /// before p_j and P_i / p_j after it, one word shorter exactly when
+    /// P_i's top word is below p_j; the inverses' Euclid steps from the
+    /// residues.  For distinct primes, as `new` requires.
+    pub fn setup_units(primes: &[u64]) -> crate::cost::Units {
+        use crate::cost::{bigmul_units, Family, Units};
+        let k = primes.len();
+        let mods: Vec<Modulus> = primes.iter().map(|&p| Modulus::new(p)).collect();
+        let (ma, mv) = (Family::ModArith as usize, Family::Move as usize);
+        let mut u = Units::default();
+        // pm and c: j reductions and j products, and the inverse
+        for j in 0..k {
+            let mj = &mods[j];
+            let mut prod = 1 % mj.n;
+            for &p in &primes[..j] {
+                prod = mj.mul(prod, mj.reduce(p));
+            }
+            u.0[ma] = u.0[ma].saturating_add(2 * j as u64 + euclid_steps(mj.n, prod));
+        }
+        // the prefix products P_i (after i + 1 primes): lengths and top words
+        let mut pre = vec![1u64];
+        let mut lens = Vec::with_capacity(k);
+        let mut tops = Vec::with_capacity(k);
+        for &p in primes {
+            u.add_saturating(&bigmul_units(pre.len(), 1));
+            mul_small_add(&mut pre, p, 0);
+            lens.push(pre.len());
+            tops.push(*pre.last().unwrap());
+        }
+        let len = pre.len();
+        // half: the copy and the shift
+        u.0[mv] = u.0[mv].saturating_add(2 * len as u64);
+        let qlen = len + 1;
+        for j in 0..k {
+            // Q_j's k - 1 products, each by the length before it
+            let mut cur = 1usize;
+            for i in 0..k {
+                if i == j {
+                    continue;
+                }
+                u.add_saturating(&bigmul_units(cur, 1));
+                cur = if i < j { lens[i] } else { lens[i] - usize::from(tops[i] < primes[j]) };
+            }
+            // its reduction modulo p_j, a word each, and the inverse; then
+            // its zero fill to qlen words
+            let mj = &mods[j];
+            let mut r = 1 % mj.n;
+            for (i, &p) in primes.iter().enumerate() {
+                if i != j {
+                    r = mj.mul(r, mj.reduce(p));
+                }
+            }
+            u.0[ma] = u.0[ma].saturating_add(cur as u64 + euclid_steps(mj.n, r));
+            u.0[mv] = u.0[mv].saturating_add((qlen - cur) as u64);
+        }
+        // the reciprocals for the reconstruction's quotient estimates
+        u.0[ma] = u.0[ma].saturating_add(k as u64);
+        u
+    }
+
     pub fn new(primes: &[u64]) -> MultiCrt {
+        use crate::cost::{bigmul_units, Family};
+        // (the setup's units, counted after the work and charged when this
+        // returns; a single call with no Stop poll inside, so they land
+        // with the caller's next check)
+        let mut acc = crate::cost::Local::new();
         let mods: Vec<Modulus> = primes.iter().map(|&p| Modulus::new(p)).collect();
         let k = primes.len();
         // (the tests' count of the loops below: the reductions and
@@ -167,9 +248,12 @@ impl MultiCrt {
                 prod = mj.mul(prod, x);
             }
             c[j] = mj.inv(prod).expect("primes not distinct");
+            // (j reductions, j products, the inverse's Euclid steps)
+            acc.n(Family::ModArith, 2 * j as u64 + euclid_steps(mj.n, prod));
         }
         let mut prod = vec![1u64];
         for &p in primes {
+            acc.add(bigmul_units(prod.len(), 1));
             mul_small_add(&mut prod, p, 0);
         }
         // half = floor(prod / 2)
@@ -180,6 +264,7 @@ impl MultiCrt {
             carry = *w & 1;
             *w = nw;
         }
+        acc.n(Family::Move, 2 * prod.len() as u64);
         let qlen = prod.len() + 1;
         let mut q = vec![];
         let mut w = vec![];
@@ -187,6 +272,7 @@ impl MultiCrt {
             let mut qj = vec![1u64];
             for (i, &p) in primes.iter().enumerate() {
                 if i != j {
+                    acc.add(bigmul_units(qj.len(), 1));
                     mul_small_add(&mut qj, p, 0);
                 }
             }
@@ -196,10 +282,14 @@ impl MultiCrt {
                 r = mj.reduce_wide(r, d);
             }
             w.push(mj.inv(r).unwrap());
+            // (a reduction a word, the inverse's steps; the zero fill)
+            acc.n(Family::ModArith, qj.len() as u64 + euclid_steps(mj.n, r));
+            acc.n(Family::Move, (qlen - qj.len()) as u64);
             qj.resize(qlen, 0);
             q.push(qj);
         }
         let finv = primes.iter().map(|&p| 1.0 / p as f64).collect();
+        acc.n(Family::ModArith, k as u64);
         MultiCrt { mods, q, w, finv, pm, c, prod, half }
     }
 
@@ -385,6 +475,46 @@ impl MultiCrt {
 mod tests {
     use super::*;
     use crate::nmod::Primes;
+
+    /// The setup's charge, tallied, equals its data-free twin, for word
+    /// primes from 1 to 160 of them and for small primes (other word-length
+    /// steps and carries).
+    #[test]
+    fn the_setup_charges_its_twin() {
+        let delta = |f: &dyn Fn()| {
+            let t0 = crate::cost::tallied();
+            f();
+            let t1 = crate::cost::tallied();
+            (0..t0.0.len()).map(|i| t1.0[i].wrapping_sub(t0.0[i])).collect::<Vec<u64>>()
+        };
+        let word: Vec<u64> = crate::nmod::Primes::new().take(160).collect();
+        let small: Vec<u64> = (3u64..20_000).filter(|&p| (2..p).take_while(|d| d * d <= p).all(|d| p % d != 0)).collect();
+        let mut compared = 0;
+        for set in [&word[..], &small[..160]] {
+            for k in (1..=160).filter(|k| *k <= 40 || k % 13 == 0) {
+                let primes = &set[..k];
+                let got = delta(&|| {
+                    let _ = MultiCrt::new(primes);
+                });
+                assert_eq!(got, MultiCrt::setup_units(primes).0.to_vec(), "{k} primes from {}", set[0]);
+                compared += 1;
+            }
+        }
+        assert_eq!(compared, 2 * (40 + (41..=160).filter(|k| k % 13 == 0).count()));
+        // one prime p, by hand: the product 1 * p (MulSchool, a word by a
+        // word); half's copy and shift of its word and Q_0's zero fill to
+        // two words (Move 2 + 1); c_0 = 1 / 1 and w_0 = 1 / 1 (a Euclid step
+        // each), Q_0 = 1's reduction (a word) and the reciprocal (ModArith
+        // 1 + 1 + 1 + 1)
+        let mut one = [0u64; crate::cost::FAMILIES];
+        one[crate::cost::Family::MulSchool as usize] = crate::cost::bigmul_units(1, 1).get(crate::cost::Family::MulSchool);
+        one[crate::cost::Family::Move as usize] = 3;
+        one[crate::cost::Family::ModArith as usize] = 4;
+        assert_eq!(MultiCrt::setup_units(&word[..1]).0, one);
+        // the charge grows as k^3: k products of up to k + 1 words, k times
+        let mul = |k: usize| MultiCrt::setup_units(&word[..k]).0[crate::cost::Family::MulSchool as usize];
+        assert!(mul(160) > 7 * mul(80) && mul(160) < 9 * mul(80), "{} {}", mul(80), mul(160));
+    }
 
     #[test]
     fn round_trip() {

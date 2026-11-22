@@ -105,9 +105,12 @@ fn the_units_are_pinned() {
     let fam = [MulSchool, MulNtt, Div, DivNewton, Gcd, Move, ModArith, AddSub, Walk, Other];
     assert!(fam.iter().enumerate().all(|(i, &f)| f as usize == i));
     for (n, k, p, want) in [
-        (11u64, 2usize, 2u64, [96u64, 0, 47, 0, 12, 146, 1194, 0, 0, 0]),
-        (37, 2, 3, [598, 0, 82, 0, 114, 761, 3922, 0, 0, 0]),
-        (60, 4, 5, [934952, 0, 11825, 0, 17745, 104380, 438616, 294, 0, 0]),
+        // (each includes its CRT's setup: one prime for 11.2 and 37.2,
+        // [1, 0, 0, 0, 0, 3, 4, ..], four for 60.4, [23, 0, 0, 0, 0, 16, 95,
+        // ..]; sagebrush_arith::crt::MultiCrt::setup_units)
+        (11u64, 2usize, 2u64, [97u64, 0, 47, 0, 12, 149, 1198, 0, 0, 0]),
+        (37, 2, 3, [599, 0, 82, 0, 114, 764, 3926, 0, 0, 0]),
+        (60, 4, 5, [934975, 0, 11825, 0, 17745, 104396, 438711, 294, 0, 0]),
     ] {
         let prec = sturm_bound(n, k).unwrap() as usize + 2;
         let got = units_of(|| cusp_hecke_matrix(n, k, p, prec, false, &factor, &mut Free).unwrap());
