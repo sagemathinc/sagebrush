@@ -828,7 +828,7 @@ import { mountBrowser } from "./workspace/browser.ts";
 import { mountAccount } from "./workspace/account.ts";
 // (the LaTeX editor's entry; a build without it takes this line out before bundling: web/build.ts)
 import { latexBoot, latexHereFor, desktopApp, mountTex, texNew } from "./latex/boot.ts";
-import { codeBoot } from "./code/boot.ts";
+import { codeBoot, codeHooks } from "./code/boot.ts";
 import { createPermissions, hostMade, canonicalScope } from "./notebook/permissions.js";
 import { covers, stateOf, meetTrees, sameTrees, EPOCH_MAX } from "./notebook/confine.js";
 import { renderFileMenu, fileMenuKey, menuGroup } from "./workspace/filemenu.ts";
@@ -5604,6 +5604,9 @@ const historyDbReady = openHistoryDb({ onVersionChange: () => { nbHistory?.close
   // (the LaTeX editor: in a build with it, and on, its hooks are installed, and /?tex=<fid> is its page; a build
   // without it has none of this: web/latex/boot.ts, web/build.ts SAGEBRUSH_LATEX_PREVIEW)
   // (either editor's page up: its Terminal button's pressed state set at once, as the Terminal's changes set it after)
+  // (the code page's hooks for the file panel and the preview first: on the LaTeX editor's page too, a code file opens
+  //  on its own page (/?code=) as from a notebook, by this page's way out, which has the editor write its edit first)
+  codeHooks((url, fromCodePage) => leaveTo(url, !fromCodePage));
   if (typeof __SB_LATEX__ !== "undefined" && __SB_LATEX__ && (await latexBoot(ws, texSandbox(), { share: texShare }))) return void dispatchEvent(new Event("sb-term-place"));
   // (a code or text file's own page, /?code=<fid> (1a): web/code/boot.ts; its hooks for the file browser and the preview either way)
   if (await codeBoot(ws, (e, how) => openEntry(e, how), agentHere && ws ? codeAgent(ws) : null, (url, fromCodePage) => leaveTo(url, !fromCodePage))) {
