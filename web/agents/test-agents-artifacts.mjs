@@ -286,6 +286,15 @@ const putRecord = (rec) => ev(`${IDB}.put(${JSON.stringify(rec)})`);
 const refOf = (path, salt = "") => ev(`${IDB}.byCell(${JSON.stringify(tagOf(path + salt) + "0")})`);
 
 const PANE = "#artifacts .pane-host:not([hidden])";
+// (the pane's head: its tabs, Open, Copy, full screen, Close)
+const HEAD = "#artifacts .pane-head";
+// (a code or text file opens in View, in colour: ✎ Edit makes it the textarea it is edited in, as the person clicks it,
+//  #1618)
+async function editHere() {
+  await until(`!!document.querySelector('${PANE} .file-path .mode-toggle:not([hidden])')`, 30000);
+  await ev(`(() => { const b = document.querySelector('${PANE} .file-path .mode-toggle'); if (b.getAttribute('aria-pressed') !== 'true') b.click(); return true; })()`);
+  await until(`!!document.querySelector('${PANE} textarea.code-edit')`);
+}
 const cellJs = (i) => `document.querySelectorAll('${PANE} .nb-root .cell')[${i}]`;
 const shown = () => ev(`[...document.querySelectorAll('${PANE} .nb-root .cell textarea')].map((t) => t.value)`);
 const outs = () => ev(`[...document.querySelectorAll('#artifacts .nb-root .cell .out')].map((o) => o.textContent).join('|')`);
@@ -597,7 +606,8 @@ try {
     const quick = async (path, click, word) => {
       await call("workspace.create", { path, content: { text: "old\n" } });
       await artifactTurn(path);
-      await until(`document.querySelector('${PANE} .file-path')?.textContent.startsWith(${JSON.stringify(path + " ")}) && !!document.querySelector('${PANE} .file-body textarea')`, 30000);
+      await until(`document.querySelector('${PANE} .file-path')?.textContent.startsWith(${JSON.stringify(path + " ")})`, 30000);
+      await editHere();
       await ev(`(() => { const t = document.querySelector('${PANE} .file-body textarea'); t.focus(); t.setSelectionRange(t.value.length, t.value.length); })()`);
       await send("Input.insertText", { text: word });
       await ev(`localStorage.setItem("sagebrush-files-sidebar", "0")`);
@@ -643,8 +653,8 @@ try {
     const path = "/notes/linked.ipynb";
     await call("workspace.create", { path, content: docFor(path, [{ code: "print('LINKED-CELL')" }]), mode: "python" });
     await openNotebook(path);
-    await until(`!!document.querySelector('${PANE} .file-path .open-full:not([hidden])')`);
-    const ref = await refOf(path), href = await ev(`document.querySelector('${PANE} .file-path .open-full').getAttribute('href')`);
+    await until(`!!document.querySelector('${HEAD} a.open-full:not([hidden])')`);
+    const ref = await refOf(path), href = await ev(`document.querySelector('${HEAD} a.open-full').getAttribute('href')`);
     ok(href === "/?nb=" + encodeURIComponent(ref), "Open in Sagebrush names the notebook's own page, /?nb=<its id>", { href, ref });
     const status = await ev(`fetch(${JSON.stringify(href)}).then((r) => r.status)`);
     ok(status === 200, "that address answers 200", status);
@@ -656,8 +666,8 @@ try {
     // (a code file the agent wrote: its link is its own page, /?code=<fid>, and that page shows the file)
     await call("workspace.create", { path: "/notes/linked.py", content: { text: "print('LINKED-CODE')\n" } });
     await artifactTurn("/notes/linked.py");
-    await until(`document.querySelector('${PANE} .file-path')?.textContent.startsWith("/notes/linked.py ") && !!document.querySelector('${PANE} .file-path .open-full:not([hidden])')`, 30000);
-    const codeHref = await ev(`document.querySelector('${PANE} .file-path .open-full').getAttribute('href')`);
+    await until(`document.querySelector('${PANE} .file-path')?.textContent.startsWith("/notes/linked.py ") && !!document.querySelector('${HEAD} a.open-full:not([hidden])')`, 30000);
+    const codeHref = await ev(`document.querySelector('${HEAD} a.open-full').getAttribute('href')`);
     ok(/^\/\?code=[0-9a-f]+$/.test(codeHref), "a code file's Open in Sagebrush names its own page, /?code=<its id>", codeHref);
     await send("Page.navigate", { url: site + codeHref });
     await until(`document.body.innerText.includes("LINKED-CODE")`, 30000);
@@ -737,6 +747,7 @@ try {
     const draft = "/notes/selfrun-draft.txt";
     await call("workspace.create", { path: draft, content: { text: "mine" } });
     await artifactTurn(draft, { finish: false, turn: t3 });
+    await editHere();
     // (the person in it: they type in its text; found and focused in one step, retried, as the pane may render it
     //  again between a look and a focus)
     await until(`(() => { const t = document.querySelector('${PANE} textarea'); t?.focus(); return !!t && document.activeElement === t; })()`);
@@ -784,7 +795,7 @@ try {
     const draft = "/notes/pr-draft.txt";
     await call("workspace.create", { path: draft, content: { text: "mine" } });
     await artifactTurn(draft, { finish: false, turn: t1 });
-    const drafted = await until(`document.querySelector('#artifacts .tab.on')?.dataset.tab === ${JSON.stringify(draft)} && !!document.querySelector('${PANE} textarea')`, 15000).catch(() => false);
+    const drafted = await until(`document.querySelector('#artifacts .tab.on')?.dataset.tab === ${JSON.stringify(draft)}`, 15000).then(editHere).then(() => true, () => false);
     ok(drafted, "(PR3: the agent's draft shown in the pane)", await ev(`document.querySelector('#artifacts .tab.on')?.dataset.tab ?? null`));
     await ev(`(document.querySelector('${PANE} textarea')?.focus(), true)`);
     await send("Input.insertText", { text: " typed" });
@@ -1468,7 +1479,7 @@ try {
     await artifactTurn(path);
     await until(`!!document.querySelector('${PANE} .file-body')`, 10000);
     await sleep(2500);
-    const got = await ev(`({ editor: !!document.querySelector('${PANE} .tex-embed') || !!document.querySelector('${PANE} iframe.tex-frame')?.contentDocument?.querySelector('.tex-page'), text: !!document.querySelector('${PANE} textarea.code-edit'), open: !!document.querySelector('${PANE} a.open-full') })`);
+    const got = await ev(`({ editor: !!document.querySelector('${PANE} .tex-embed') || !!document.querySelector('${PANE} iframe.tex-frame')?.contentDocument?.querySelector('.tex-page'), text: !!document.querySelector('${PANE} textarea.code-edit, ${PANE} pre.code-view'), open: !!document.querySelector('${HEAD} a.open-full:not([hidden])') })`);
     const asked = requested.slice(before).some((u) => u.includes("sagebrush-latex.js"));
     if (LATEX) ok(got.editor && !got.text && asked, `a .tex artifact opens in the LaTeX editor (this build has it${TEXFRAME ? ": its own page, framed" : ""})`, { got, asked });
     else ok(!got.editor && got.text && got.open && !asked, "a .tex artifact is its source, with Open in Sagebrush, and no LaTeX module is asked for (this build has none)", { got, asked });
@@ -1497,7 +1508,7 @@ try {
     const tf1 = await ev(`(() => { const f = ${FR}, d = f.contentDocument, pg = d.querySelector('.tex-page'), gone = (c) => { const e = d.querySelector(c); return !e || e.hidden || getComputedStyle(e).display === 'none'; };
       return { src: f.getAttribute('src'), frames: document.querySelectorAll('#artifacts iframe.tex-frame').length, view: pg.dataset.view, back: gone('.tex-back'), home: gone('.tex-home'), file: gone('.tex-filebtn'), agent: gone('.tex-agent'), share: gone('.tex-sharebtn'),
         focusKept: document.activeElement === window.__fe && document.activeElement !== f, box: Math.round(f.getBoundingClientRect().height),
-        full: document.querySelector('${PANE} a.open-full')?.getAttribute('href') ?? null }; })()`);
+        full: document.querySelector('${HEAD} a.open-full')?.getAttribute('href') ?? null }; })()`);
     const agentChunk = requested.slice(n0).filter((u) => /sagebrush-latex-agent/.test(u));
     ok(before === 0 && /^\/\?tex=[^&]+&latex=1&embed=1$/.test(tf1.src) && tf1.frames === 1 && tf1.view === "pdf" && tf1.back && tf1.home && tf1.file && tf1.agent && tf1.share && tf1.focusKept && tf1.box > 200 && agentChunk.length === 0 && tf1.full === tf1.src.replace("&latex=1&embed=1", ""),
       "TF1: a .tex artifact is the LaTeX editor's page framed (embed=1), made when its tab is shown: the PDF alone, no bar, Agent or pairing of its own (its chunk never fetched), the composer's focus kept; Open in Sagebrush is the editor's own page", { before, tf1, agentChunk });
@@ -1920,6 +1931,7 @@ try {
     const P = "/notes/f.py";
     await call("workspace.create", { path: P, content: { text: "a = 1\n" } });
     await artifactTurn(P);
+    await editHere();
     await until(`!!document.querySelector('${PANE} textarea.code-edit') && document.querySelector('${PANE} .saved').textContent === 'Saved'`);
     await ev(`(() => { const t = document.querySelector('${PANE} textarea.code-edit'); t.focus(); t.setSelectionRange(t.value.length, t.value.length); })()`);
     await send("Input.insertText", { text: "# mine\n" });
@@ -1941,6 +1953,7 @@ try {
     const R = "/notes/r.py";
     await call("workspace.create", { path: R, content: { text: "old\n" } });
     await artifactTurn(R);
+    await editHere();
     await until(`!!document.querySelector('${PANE} textarea.code-edit') && document.querySelector('${PANE} .saved').textContent === 'Saved'`);
     const revOld = (await call("workspace.read", { path: R })).rev;
     await call("workspace.rename", { from: R, to: "/notes/r-old.py" });
@@ -1961,6 +1974,7 @@ try {
       await call("workspace.create", { path: Q, content: { text: "q = 1\n" } });
       await artifactTurn(Q);
       const box = latex ? `${PANE} .tex-left textarea` : `${PANE} textarea.code-edit`;
+      if (!latex) await editHere();
       await until(`!!document.querySelector('${box}') && document.querySelector('${PANE} .saved').textContent === 'Saved'`, 20000);
       await lockWorkspace();
       const type = async (t) => {
@@ -1995,6 +2009,7 @@ try {
       await call("workspace.create", { path: Q, content: { text: "f = 1\n" } });
       await artifactTurn(Q);
       const box = latex ? `${PANE} .tex-left textarea` : `${PANE} textarea.code-edit`;
+      if (!latex) await editHere();
       await until(`!!document.querySelector('${box}') && document.querySelector('${PANE} .saved').textContent === 'Saved'`, 20000);
       await lockWorkspace();
       const type = async (t) => {
@@ -2539,7 +2554,7 @@ try {
       const draft = "/notes/draft.txt";
       await call("workspace.create", { path: draft, content: { text: "abcdef" } }).catch(() => null);
       await artifactTurn(draft, { finish: false, turn });
-      await until(`!!document.querySelector('${PANE} textarea')`);
+      await editHere();
       // (A, the draft's textarea, tagged when focused: E28's person moves A's caret in A itself, wherever the pane is)
       const focusDraft = () => ev(`(() => { const t = document.querySelector('${PANE} textarea'); t.dataset.sbA = "1"; t.focus(); t.setSelectionRange(3, 3); return true; })()`);
       const state = () => ev(`(() => { const t = document.activeElement; return { tab: document.querySelector('#artifacts .tab.on')?.dataset.tab, tag: t?.tagName, inDraft: !!t?.closest('${PANE}') && t?.tagName === 'TEXTAREA', caret: t?.selectionStart }; })()`);
