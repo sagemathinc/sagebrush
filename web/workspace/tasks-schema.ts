@@ -13,7 +13,8 @@ const bad = (m: string): never => { throw new TaskShapeError(m); };
 
 export const TASK_STATUSES = ["working", "proposal", "merged", "closed", "failed", "interrupted"] as const;
 export type TaskStatus = (typeof TASK_STATUSES)[number];
-export const TASK_LIMITS = Object.freeze({ list: 64, title: 200, text: 64 * 1024, reason: 1024, files: 2000, path: 1024, component: 255, doc: 4 * 2 ** 20 });
+// (reason: UTF-8 bytes, the agent's own bound on a task's reason in its state and log: 500 characters, up to 2000 bytes)
+export const TASK_LIMITS = Object.freeze({ list: 64, title: 200, text: 64 * 1024, reason: 2000, files: 2000, path: 1024, component: 255, doc: 4 * 2 ** 20 });
 
 const HEX32 = /^[0-9a-f]{32}$/, HEX40 = /^[0-9a-f]{40}$/;
 const enc = new TextEncoder();

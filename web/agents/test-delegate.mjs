@@ -89,11 +89,20 @@ for (const [code, want] of [["stopped", "Stopped"], ["switched_off", "Stopped: D
   ok(chipOf({ status: "interrupted", question: false }, code) === want, `an interrupted task with code ${code}: ${want}`);
 }
 ok(chipOf({ status: "interrupted", question: false }) === "Interrupted" && chipOf({ status: "working", question: false }, "stopped") === "Working", "no code: Interrupted; a code on a task not interrupted changes nothing");
+// (a reason as long as the agent allows, in characters of three UTF-8 bytes each: 380 characters, 1080 bytes, past the
+//  page's old 1024-byte bound; on its event here, and from tasks.list and tasks.get below)
+const LONG = "the copy cannot be proposed (" + "界".repeat(350) + ")";
+H.emit(C.task, { type: "task_status", status: "working" });
+H.emit(C.task, { type: "task_status", status: "interrupted", reason: LONG, code: "unproposable" });
+await until(() => D.task(C.task).reason === LONG);
+ok(D.task(C.task).reason === LONG && chipOf(D.task(C.task).entry, D.task(C.task).code) === "Couldn't propose" && new TextEncoder().encode(LONG).length === 1080, "a multibyte reason within the agent's bound (380 characters, 1080 bytes) on its event: kept whole", { bytes: new TextEncoder().encode(LONG).length, reason: (D.task(C.task).reason ?? "").length });
 {
   // (the schema: the fields only in their shapes; a code that isn't one is refused, as any malformed answer)
   const e = { task: "a".repeat(32), title: "t", status: "interrupted", target: "local", run: false, round: 0, seq: 1, proposal: null, question: false, updated: 1 };
   const parse = (x) => { try { return TASK_RESULTS["tasks.list"]({ tasks: [x] }).tasks[0]; } catch (err) { return "refused"; } };
   ok(parse({ ...e, reason: "r", reason_code: "no_proposal" })?.reason_code === "no_proposal" && parse({ ...e, reason_code: "NO!" }) === "refused" && parse({ ...e, reason: 7 }) === "refused" && parse(e)?.reason_code === undefined, "the schema: reason and reason_code taken in their shapes, a malformed code refused, an entry without them as before");
+  // (the bound, in UTF-8 bytes: the agent's 500 characters of up to 4 bytes, 2000; one byte past it refused)
+  ok(parse({ ...e, reason: "𝔼".repeat(500) })?.reason?.length === 1000 && parse({ ...e, reason: "𝔼".repeat(500) + "x" }) === "refused", "the schema's reason bound is the agent's: 500 four-byte characters (2000 bytes) taken, one byte more refused");
 }
 H.sock.send(JSON.stringify({ jsonrpc: "2.0", method: "task.event", params: { task: A.task, seq: A.log.length + 1, event: { type: "ask", note: "x" } } }));
 A.log.push({ seq: A.log.length + 1, event: { type: "ask", note: "x" } });
@@ -438,6 +447,10 @@ ok(DELEGATE_TEXT.chip.question === "Question" && chipOf({ status: "working", que
   const H5 = delegateHost();
   const T5 = await H5.addTask({ title: "Stopped earlier" });
   H5.emit(T5.task, { type: "task_status", status: "interrupted", reason: "the agent's turn ended without a proposal", code: "no_proposal" });
+  // (and one whose reason is as long as the agent allows, in multibyte characters: the list keeps it, it isn't refused)
+  const T6 = await H5.addTask({ title: "Stopped with a long reason" });
+  const LONG6 = "the copy cannot be proposed (" + "界".repeat(350) + ")";
+  H5.emit(T6.task, { type: "task_status", status: "interrupted", reason: LONG6, code: "unproposable" });
   const D5 = new DelegateTasks({ changed: () => {} });
   const P5 = pairWith(H5);
   D5.attach(P5);
@@ -447,6 +460,11 @@ ok(DELEGATE_TEXT.chip.question === "Question" && chipOf({ status: "working", que
   await until(() => D5.task(T5.task) !== undefined);
   const t5 = D5.task(T5.task);
   ok(t5 && chipOf(t5.entry, t5.code) === "Ended without a proposal" && t5.reason === "the agent's turn ended without a proposal" && !("reason_code" in t5.entry) && !("reason" in t5.entry), "from tasks.list alone: the chip and the reason from the entry's reason_code and reason", t5 && { chip: chipOf(t5.entry, t5.code), reason: t5.reason, entry: t5.entry });
+  const t6 = D5.task(T6.task);
+  ok(t6 && t6.reason === LONG6 && chipOf(t6.entry, t6.code) === "Couldn't propose", "a multibyte reason within the agent's bound (1080 bytes) in tasks.list: the list taken whole, the reason kept", t6 && { reason: t6.reason.length, chip: chipOf(t6.entry, t6.code) });
+  // (tasks.get: its task entry, with the same long reason, taken as the list's is)
+  await D5.open(T6.task);
+  ok(D5.task(T6.task).loaded && D5.task(T6.task).reason === LONG6, "a multibyte reason within the agent's bound in tasks.get: the task read, the reason kept", { loaded: D5.task(T6.task).loaded });
   const listed = H5.got.filter((m) => m.method === "tasks.list").length;
   H5.pageFeatures = [];
   await D5.refresh();
