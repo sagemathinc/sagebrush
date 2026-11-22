@@ -1824,8 +1824,9 @@ export function mountBoard(root: HTMLElement, host: BoardHost) {
       a.href = URL.createObjectURL(new Blob([await host.exportHtml!(await images.inline(d as BoardDoc), { python, outputs: x.outputs, carried: () => { carried = true; } })], { type: "text/html" }));
       a.download = fileName().replace(/\.board\.json$/, ".html");
       a.click();
-      // (the app's engine isn't on sagebrush.space yet: the file carries it, larger, so that its code runs)
-      if (carried) { const size = host.exportPython?.(d as BoardDoc); say(`**Downloaded in offline mode${size ? ` (about ${size} larger)` : ""}:** this app's version of Sagebrush isn't on sagebrush.space yet, so the file carries it, and its code runs.`); }
+      // (the app's engine not confirmed on sagebrush.space, unpublished or not checkable alike: the file carries it,
+      // larger, so that its code runs)
+      if (carried) { const size = host.exportPython?.(d as BoardDoc); say(`**Downloaded in offline mode${size ? ` (about ${size} larger)` : ""}:** this app couldn't confirm that sagebrush.space has its version of Sagebrush, so the file carries it, and its code runs.`); }
       setTimeout(() => URL.revokeObjectURL(a.href), 1000);
     } catch (e) {
       fail(e);

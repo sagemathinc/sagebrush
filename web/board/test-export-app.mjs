@@ -101,7 +101,13 @@ try {
   await until("document.querySelector('[data-sbb=htmldlg]').open", 5000);
   await ev("(() => { const p = document.querySelector('[data-sbb=html-py]'); p.checked = false; document.querySelector('[data-sbb=html-go]').click(); return 1; })()");
   check(await until("window.__got.length === 1", 60000), "Download as HTML downloads the file");
-  check(await until("/offline mode/.test(document.querySelector('[data-sbb=say]').textContent) && /isn't on sagebrush\\.space yet/.test(document.querySelector('[data-sbb=say]').textContent)", 10000), "...and says it carries Sagebrush, in offline mode, as the app's version isn't on sagebrush.space yet: " + await caption());
+  check(await until("/offline mode/.test(document.querySelector('[data-sbb=say]').textContent) && /couldn't confirm that sagebrush\\.space has its version of Sagebrush/.test(document.querySelector('[data-sbb=say]').textContent)", 10000), "...and says it carries Sagebrush, in offline mode, as the app couldn't confirm sagebrush.space has its version: " + await caption());
+  await clearBefore();
+  // (the public site not answering at all (offline, a blocked request): the same, carried, with the same words)
+  await before("window.__SB_DESKTOP_APP__ = true;");
+  await before(`(() => { const f = window.fetch; window.fetch = (u, o) => String(u instanceof Request ? u.url : u).startsWith("https://sagebrush.space/") ? Promise.reject(new TypeError("Failed to fetch")) : f(u, o); })();`);
+  await page();
+  check(carries(await ev("window.sagebrush.board.exportHtml()")), "in the app, the public site not answering: the file carries the engine too");
   await clearBefore();
 
   // ---- a file whose engine can't be had says why

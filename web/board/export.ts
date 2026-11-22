@@ -22,7 +22,8 @@ import { OWN_ENGINE, checked, embeddedText, engineFiles, fetched, pack, type Eng
 export const PUBLIC_ENGINE_SITE = "https://sagebrush.space/";
 const inDesktopApp = () => (globalThis as { __SB_DESKTOP_APP__?: unknown }).__SB_DESKTOP_APP__ === true;
 
-/** Whether the public site has engine `id` (its manifest answers): a file that names it can fetch it there. */
+/** Whether the public site is known to have engine `id` (its manifest answers), so that a file naming it can fetch it
+ * there.  False for a 404 and for any failure to tell (no network, another error) alike. */
 async function published(id: string): Promise<boolean> {
   try {
     return (await fetch(new URL(`engine/${id}/manifest.json`, PUBLIC_ENGINE_SITE), { cache: "no-store" })).ok;
@@ -117,8 +118,8 @@ export async function exportHtml(doc: BoardDoc, o: { python?: boolean; outputs?:
   // the desktop app the public site; else this page's site, the engine beside it)
   const named = engineRef();
   const ref: EngineRef | null = ex ? named : named ?? (OWN_ENGINE ? { site: inDesktopApp() ? PUBLIC_ENGINE_SITE : site.href, id: OWN_ENGINE.id } : null);
-  // (the desktop app's engine not on the public site yet, or that can't be asked: a board with code carries it, so
-  // that its code runs, and the caller says so (`carried`))
+  // (the desktop app's engine not known to be on the public site, unpublished or not checkable: a board with code
+  // carries it, so that its code runs, and the caller says so (`carried`))
   if (!o.python && !ex && ref && OWN_ENGINE && ref.site === PUBLIC_ENGINE_SITE && inDesktopApp() && /"code"\s*:/.test(JSON.stringify(doc)) && !(await published(OWN_ENGINE.id))) {
     o = { ...o, python: true };
     o.carried?.();
