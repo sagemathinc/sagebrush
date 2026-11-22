@@ -200,7 +200,8 @@ try {
   await sleep(300);
   const phone = await ev(`(() => { const c = document.querySelector('.composer').getBoundingClientRect(), i = document.querySelector('.sbag-bar button.chip').getBoundingClientRect(), s = document.querySelector('#send').getBoundingClientRect();
     return { icon: i.width > 0 && i.left >= c.left && i.right <= c.right, send: s.width > 0 && s.right <= innerWidth && s.left >= 0 }; })()`);
-  ok(phone.icon && phone.send, "A1: at a phone's width the icon stays inside the composer's row, and Send stays in view", phone);
+  const clear = await ev(BAR_CLEAR);
+  ok(phone.icon && phone.send && clear === true, "A1: at a phone's width the icon stays inside the composer's row, over nothing the person types in, and Send stays in view", { phone, clear });
   await send("Emulation.clearDeviceMetricsOverride");
   await sleep(300);
   const title = await ev(`[...document.querySelectorAll('.sbag-bar button')].find((b) => b.textContent === 'Disconnect')?.title ?? null`);

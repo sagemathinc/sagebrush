@@ -199,10 +199,10 @@ export const LATEX_LAZY_CAPS = {
   // (64,345 / 22,064: Nov 21 2026, the Delegate switch (protocol §6.2: the grant's delegate, sent with every grant
   //  change, setDelegate, a kept grant stored without it; agent-pair.ts), measured on the shipped build of the head,
   //  on master c411fca4, bun 1.4.4 and node 24.21.0: 64,281 / 22,000, + 64)
-  // (65,580 / 22,537: Nov 22 2026, A1 (#1546): the agent's access as an icon in the composer's footer row, its CSS (a
+  // (65,566 / 22,526: Nov 22 2026, A1 (#1546): the agent's access as an icon in the composer's footer row, its CSS (a
   //  masked shield and the footer rules) in the pairing's chunk (agent-ui.ts), measured on the shipped build of the head
-  //  on master e4c0b8c0 with bun 1.4.4 and node 24.21.0: 65,516 / 22,473, + 64)
-  AGENT: { label: "the LaTeX agent pairing's chunk", raw: 65580, gzip: 22537 },
+  //  on master e4c0b8c0 with bun 1.4.4 and node 24.21.0: 65,502 / 22,462, + 64)
+  AGENT: { label: "the LaTeX agent pairing's chunk", raw: 65566, gzip: 22526 },
   // (the agent tools' work: web/latex/tools.ts, latex_check's report and latex_render's pictures, on an agent's first call)
   // (16,546 / 6,950: Nov 11 2026: latex_build's own code (build.ts, the
   //  engine driven from a snapshot, and the pages' fit) here, out of the eager group, its shared rules handed in by the
