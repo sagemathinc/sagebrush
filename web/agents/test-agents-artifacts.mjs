@@ -2424,19 +2424,39 @@ try {
       const later = await rec(path);
       ok(!res.ok && /nothing changed/.test(res.msg) && same(now, before) && same(later, before) && (await shown())[0] === "x = 1", "E18: an apply that throws midway is put back: nothing saved, no version, during or after", { res, rev: [before.rev, now.rev, later.rev] });
     }
-    // E16b (closing): refused, nothing changed (under sync's journal an edit is applied: the "journal-live" section)
+    // E16b (closing): refused, nothing changed (under sync's journal an edit is applied: the "journal-live" section).
+    // (the person's own change, not yet saved (the workspace held), so the close has something to keep and waits for
+    //  the workspace: an edit then comes while the pane closes. A close with nothing unsaved goes at once: E16c)
     {
       const { path, ids } = await mk();
       await open(path);
       const r = await readOf(path);
       const before = await rec(path);
       await lockWorkspace();
+      await typeInto(1, "  # mine");
       await ev(`document.querySelector('#close').click()`);
       await sleep(300);
       const res = await edit(path, r, { set: [{ id: ids[0], source: "x = 9" }] });
       await ev(`window.__release()`);
       await sleep(500);
-      ok(!res.ok && /closing|isn't saved here/.test(res.msg) && same(await rec(path), before), "E16b: an edit of a notebook while its pane closes is refused, nothing changed", res);
+      // (the edit refused and nothing of it saved; the person's own change, saved by the close once the workspace is
+      //  free, is theirs)
+      const after16 = await rec(path);
+      ok(!res.ok && /closing|isn't saved here/.test(res.msg) && after16.cells[0].code === before.cells[0].code && after16.cells[0].code !== "x = 9", "E16b: an edit of a notebook while its pane closes is refused, nothing of it saved", { res, cell0: after16.cells[0].code });
+      await until(`!document.body.classList.contains('has-artifact')`, 15000).catch(() => {});
+    }
+    // E16c (#1611): a notebook the agent wrote (in its own form: each cell's type, its count as a number), shown and
+    // closed with nothing changed: it closes at once, and nothing is kept as a copy beside it
+    {
+      const { path } = await mk();
+      await open(path);
+      await sleep(1000);
+      const t0 = Date.now();
+      await ev(`document.querySelector('#close').click()`);
+      const gone = await until(`!document.body.classList.contains('has-artifact')`, 15000).then(() => true, () => false);
+      const ms = Date.now() - t0;
+      const names = await call("workspace.list", { folder: "/notes" }).then((x) => (x.entries ?? x).map((e) => e.path), (e) => ["list: " + e.message]);
+      ok(gone && ms < 3000 && !names.some((p) => p.startsWith(path.replace(/\.ipynb$/, " (copy")) ), "E16c: a notebook the agent wrote, closed with nothing changed: it closes at once, no copy kept beside it", { gone, ms, copies: names.filter((p) => p.includes("(copy")) });
     }
     // E30, E31 (#957 r2, E2 / P3-SEC-3): a notebook in the agent's own branch. The branches' check is taken after the
     // pane's waits and its lock held through the apply (seen held there), then let go for the save; outside /Branches no
@@ -2905,6 +2925,36 @@ try {
           "J11: with a notebook tab the journal's writer, the pane follows it, and the agent's run from the chat is today's run: its result, not stopped", { ready, follows, bar, r, writer0, pane: await ev(`[document.querySelector('#artifacts .tab.on')?.dataset.tab ?? null, document.querySelector('${PANE} .nb-root .cell textarea')?.readOnly ?? null, document.querySelector('${PANE} .nb-root .cell .out')?.textContent ?? null]`), tab: await P.ev(`[${NB}.store.readOnly ?? null, !!${NB}.store.ready, document.querySelector("#cells .cell .out")?.textContent ?? null]`) });
         event(tj, { type: "turn_finished", outcome: "completed" });
         await P.close();
+      }
+      // J12: a notebook the agent made in its turn (run once by itself, a plot in it), a cell added and run in its next
+      // turn, then its chat left: the pane closes with nothing unsaved, so nothing is kept as a copy beside it, though
+      // the journal's record carries what the pane's content hasn't (the versions it is: at, from, proof)
+      {
+        await converse();
+        const path = "/notes/live-plots.ipynb";
+        const plot = (ys) => `import matplotlib.pyplot as plt\nplt.plot([1, 2, 3], ${ys})\nplt.show()`;
+        const t1 = `t${++turnN}`;
+        event(t1, { type: "turn_started" });
+        await sleep(300);
+        await call("workspace.create", { path, content: docFor(path, [{ code: "print('J12', 12)" }, { code: plot("[1, 4, 9]") }]), mode: "python" });
+        const ran = await until(`!!document.querySelector('${PANE} .nb-root .cell .out img, ${PANE} .nb-root .cell .out svg')`, 180000).catch(() => false);
+        await until(`document.querySelector('${PANE} .saved')?.textContent === 'Saved'`, 10000).catch(() => {});
+        await sleep(1500);
+        event(t1, { type: "turn_finished", outcome: "completed" });
+        const t2 = `t${++turnN}`;
+        event(t2, { type: "turn_started" });
+        const r = await readOf(path);
+        const added = await call("notebook.edit", { conversation: conv, path, ref: r.ref, base: r.base, was: r.was, turn_id: t2, insert: [{ source: plot("[9, 4, 1]"), after: r.cells.at(-1).id }] }).then(() => true, (e) => e.code ?? e.message);
+        const run2 = await runIn(path, t2).then((x) => x?.ended, (e) => "refused: " + (e.code ?? e.message));
+        await until(`document.querySelector('${PANE} .saved')?.textContent === 'Saved'`, 10000).catch(() => {});
+        await sleep(1500);
+        event(t2, { type: "turn_finished", outcome: "completed" });
+        const rec = await record(await refOf(path));
+        const versions = !!(rec?.at || rec?.from);
+        await converse();
+        await sleep(2500);
+        const names = await call("workspace.list", { folder: "/notes" }).then((x) => (x.entries ?? x).map((e) => e.path), (e) => ["list: " + e.message]);
+        ok(ran && added === true && run2 === "done" && versions && names.includes(path) && !names.some((p) => p.startsWith("/notes/live-plots (copy")), "J12: under sync's journal, a notebook the agent made and ran (a plot, then a next turn's cell and run), its chat left: no copy kept beside it", { ran, added, run2, versions, cells: rec?.cells?.length, names: names.filter((p) => p.includes("live-plots")) });
       }
     } finally {
       for (const x of tabs) await x.close().catch(() => {});
