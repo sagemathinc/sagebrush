@@ -17,7 +17,7 @@
 //   the blob id tasks.diff gave for that path at that commit (its git blob id, recomputed here).
 import { AgentError, type AgentPairing } from "../workspace/agent-pair";
 import { DELEGATE_FEATURE, TaskClient } from "../workspace/tasks-client";
-import { TASK_RESULTS, blobId, contentBytes, taskLog, taskNotice, type DiffFile, type TaskEntry, type TaskEvent, type TaskLogEntry, type TaskResult } from "../workspace/tasks-schema";
+import { TASK_LIMITS, TASK_RESULTS, blobId, contentBytes, taskLog, taskNotice, type DiffFile, type TaskEntry, type TaskEvent, type TaskLogEntry, type TaskResult } from "../workspace/tasks-schema";
 import type { MergedParams } from "./delegate-merge";
 import { apply, newThread, type Thread, type TurnEvent } from "../workspace/agent-chat/events";
 import type { ProposalDiff, ProposalSource } from "../workspace/review/proposal-view";
@@ -39,7 +39,8 @@ export type DelegateTask = {
   turn: string | null;
 };
 
-export const DELEGATE_LIMITS = Object.freeze({ pages: 1000, closing: 4, closeMs: 10_000 });
+// (noteBytes: Ask for changes' note, UTF-8 bytes; the agent takes up to 64 KiB, the page asks for less)
+export const DELEGATE_LIMITS = Object.freeze({ pages: 1000, closing: 4, closeMs: 10_000, noteBytes: 16 * 1024 });
 
 export const DELEGATE_TEXT = {
   chip: { working: "Working", question: "Question", proposal: "Proposal ready", merged: "Merged", closed: "Closed", failed: "Failed", interrupted: "Interrupted" } as Record<string, string>,
@@ -48,7 +49,23 @@ export const DELEGATE_TEXT = {
   changed: "The proposal changed while you were reading it",
   binary: "This file isn't text",
   notThis: "That file isn't part of this proposal",
+  noteEmpty: "Write what you'd like changed first",
+  noteLong: "The note is too long: at most 16 KB",
+  askMoved: "The task has moved on since this proposal: open its latest proposal",
+  docLong: (path: string) => `${path} is too large to send with your note (at most 4 MB)`,
 } as const;
+
+/** For Ask for changes: the person's current versions of a proposal's files that are the task's own (a file the agent
+ * added isn't: the agent takes only the task's documents), each as the workspace has it now; one gone from the
+ * workspace, or that can't be read, is left out (the agent then works from its copy of it). */
+export async function currentOf(files: readonly { path: string; change: string }[], read: (path: string) => Promise<DelegateDoc>): Promise<DelegateDoc[]> {
+  const out: DelegateDoc[] = [];
+  for (const f of files) {
+    if (f.change === "added") continue;
+    try { out.push(await read(f.path)); } catch { /* (gone or unreadable: not sent) */ }
+  }
+  return out;
+}
 
 /** A task's chip: its status, or Question while it works waiting for an answer. */
 export const chipOf = (e: TaskEntry) => DELEGATE_TEXT.chip[e.status === "working" && e.question ? "question" : e.status];
@@ -193,6 +210,37 @@ export class DelegateTasks {
     const r = TASK_RESULTS["tasks.start"](await this.client().request("tasks.start", { title: o.title, prompt: o.prompt, target: "local", run: o.run, docs: o.docs }));
     await this.refresh().catch(() => {});
     return r.task;
+  }
+
+  /** Ask for changes (tasks.ask): the person's note, with their current versions of the task's own files (`current`),
+   * goes back to the same task, which works again toward its next round. Only with the switch on, only on the task's
+   * latest proposal, named with the seq it was read at (`seq`: the proposal view's tasks.diff, as Close sends; the
+   * agent answers `stale` if the task moved on since, said as askMoved); the note is trimmed, not empty and at most
+   * noteBytes. The task's chip goes back to Working at once. */
+  async ask(id: string, o: { proposal: string; seq: number; note: string; current: DelegateDoc[] }): Promise<{ status: string; round: number }> {
+    const s = this.state();
+    if (s !== "on") throw new AgentError("forbidden", s === "turning-off" ? DELEGATE_TEXT.turningOff : DELEGATE_TEXT.off);
+    const t = this.task(id);
+    if (!t) throw new AgentError("not_found", DELEGATE_TEXT.askMoved);
+    const note = o.note.trim();
+    if (!note) throw new AgentError("bad_request", DELEGATE_TEXT.noteEmpty);
+    if (new TextEncoder().encode(note).length > DELEGATE_LIMITS.noteBytes) throw new AgentError("too_large", DELEGATE_TEXT.noteLong);
+    // (only a proposal the task still waits on: a task already working again (asked) or done has moved on)
+    if (t.entry.status !== "proposal" || t.entry.proposal !== o.proposal) throw new AgentError("stale", DELEGATE_TEXT.askMoved);
+    // (each current version within what the agent takes, said by name)
+    for (const d of o.current) if (new TextEncoder().encode(d.content).length > TASK_LIMITS.doc) throw new AgentError("too_large", DELEGATE_TEXT.docLong(d.path));
+    let r: { status: string; round: number };
+    try {
+      r = TASK_RESULTS["tasks.ask"](await this.client().request("tasks.ask", { task: id, proposal: o.proposal, seq: o.seq, note, current: o.current }));
+    } catch (e) {
+      if (e instanceof AgentError && e.code === "stale") throw new AgentError("stale", DELEGATE_TEXT.askMoved);
+      throw e;
+    }
+    // (the chip at once, as the agent's own task_status will say: its event moves it on from there)
+    const now = this.task(id);
+    if (now && now.entry.status === "proposal") { now.entry = { ...now.entry, status: r.status as TaskEntry["status"], question: false }; this.o.changed(); }
+    void this.refresh().catch(() => {});
+    return r;
   }
 
   /** The switch turned on (AgentPairing.setDelegate). */
