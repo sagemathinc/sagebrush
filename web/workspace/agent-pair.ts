@@ -35,8 +35,8 @@ export type Hello = { protocol: 1; agent: { name: string; client: string; versio
  * offers "for this turn", its own action and digest (agent-egress.ts); "chat.resume.tag", an agent that gives a
  * chat.resume's tag back on its chat.replay, so the log mirror reads the agent's log apart from the display (mirror.ts);
  * "delegate.1", an agent that takes Delegate's tasks.* requests (pair-delegate-plan-r3.3 §2.5; the page's side is
- * tasks-client.ts). */
-export const FEATURES = ["notebook.edit", "permission.digest", "run.context", "chat.resume", "edit.turn", "chat.steer", "egress.turn", "chat.resume.tag", "delegate.1"] as const;
+ * tasks-client.ts); "chat.brief", an agent that drafts a Delegate task's brief from a Pair chat (Delegate briefs). */
+export const FEATURES = ["notebook.edit", "permission.digest", "run.context", "chat.resume", "edit.turn", "chat.steer", "egress.turn", "chat.resume.tag", "delegate.1", "chat.brief"] as const;
 /** The `log` an agent's hello or agent.ready names: its run, as the agent's random hex id; anything else, none. */
 export const logOf = (v: unknown): { instance: string } | undefined => {
   const i = (v as { instance?: unknown } | null)?.instance;
