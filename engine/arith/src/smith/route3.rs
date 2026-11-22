@@ -610,13 +610,16 @@ fn contents(a: &ZMat, acc: &mut Local) -> (Vec<BigInt>, Vec<BigInt>) {
         for (j, cj) in col.iter_mut().enumerate() {
             let x = a.get(i, j);
             if !x.is_zero() {
+                // (each gcd charged at its operands' sizes, after it runs)
                 if !ri.is_one() {
-                    acc.add(biggcd_units(limbs(ri), limbs(x)));
+                    let u = biggcd_units(limbs(ri), limbs(x));
                     *ri = ri.gcd(x);
+                    acc.add(u);
                 }
                 if !cj.is_one() {
-                    acc.add(biggcd_units(limbs(cj), limbs(x)));
+                    let u = biggcd_units(limbs(cj), limbs(x));
                     *cj = cj.gcd(x);
+                    acc.add(u);
                 }
             }
         }
