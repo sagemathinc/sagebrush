@@ -1,20 +1,25 @@
 //! The work estimate of the Smith form with transforms (issue #1481),
 //! measured: corpora are generated here, the models' constants refitted on
-//! the training corpus (with at least 10 route 2 rows at each k >= 6) and
-//! required to equal `estimate::FITTED` (a code change that moves them must
-//! refit and record them), and the held-out corpora scored against ceilings
-//! on k, the p90 over rows of max(actual / E, E / actual) on total units;
-//! stage 1's per-op k counts every row it gave an estimate for, classical
-//! surprises included.  Also, on every row of every corpus: the work L
-//! holds, a non-square input has no estimate, and the classical route has
-//! no stage 2 estimate.  Every row is written with the tested tree's head
+//! the training corpus (with at least 10 route 2 rows at each k >= 6, and
+//! 10 route 3 rows of each shape: wide, tall, square of corank 1 and of
+//! more) and required to equal `estimate::FITTED` (a code change that
+//! moves them must refit and record them), and the held-out corpora scored
+//! against ceilings on k, the p90 over rows of max(actual / E, E / actual)
+//! on total units; stage 1's per-op k counts every row it gave an estimate
+//! for, singular square inputs (route 1's estimate, route 3's run)
+//! included.  Also, on every row of every corpus: the work L holds, stage
+//! 1 has an estimate for every nonempty input, and k^ is a lower bound on
+//! k (route 3: the nonzero nontrivial factors, k^ in the r form; stage 1's
+//! min(m, n) form within the corank).  Every row is written with the tested tree's head
 //! (git rev-parse HEAD, else GITHUB_SHA) to a report in the test's target
 //! directory, each corpus before anything about it is asserted (the
 //! training rows before the refit's check).  (A file of its own: it is the
 //! slowest of the Smith tests.)
 
-use num_traits::{One, Signed};
-use sagebrush_arith::cost::{tallied, Units, FAMILIES};
+use num_traits::{One, Signed, Zero};
+use sagebrush_arith::cost::{tallied, Local, Units, FAMILIES};
+use sagebrush_arith::nmod::{Modulus, Primes};
+use sagebrush_arith::smith::route3;
 use sagebrush_arith::smith::estimate::{self, part_a_model, trailing_model, Constants};
 use sagebrush_arith::smith::{last_small_smith_sizes, smith_form, Route};
 use sagebrush_arith::snf::invariants_nonsingular;
@@ -80,6 +85,43 @@ struct Row {
     // for the scales' refit: the remaining work's model and the inverse's
     a: ZMat,
     nm: Option<(ZMat, BigInt, BigInt, Vec<BigInt>)>,
+    // route 3: m, the rank, k^ in the min(m, n) form (stage 1's), and stage
+    // 2's inputs (the profile, the first side's inverse and G)
+    m: usize,
+    rank: usize,
+    k_hat_min: usize,
+    r3: Option<R3>,
+}
+
+/// Route 3's stage 2 inputs.
+struct R3 {
+    is: Vec<usize>,
+    js: Vec<usize>,
+    nm: ZMat,
+    delta: BigInt,
+    det: BigInt,
+    g: BigInt,
+}
+
+impl R3 {
+    /// The profile modulo the route's first prime, the first side's B_J
+    /// inverse and G, as the route computes them.
+    fn of(a: &ZMat) -> R3 {
+        let p = Primes::new().next().unwrap();
+        let (js, is, _) = a.reduce(&Modulus::new(p)).rref_rows();
+        let (r, n) = (is.len(), a.cols);
+        let first = if r < n { ZMat::from_rows(is.iter().map(|&i| (0..n).map(|j| a.get(i, j).clone()).collect()).collect()) } else { a.transpose() };
+        let fj = if r < n { js.clone() } else { is.clone() };
+        let bj = ZMat::from_rows((0..r).map(|i| fj.iter().map(|&j| first.get(i, j).clone()).collect()).collect());
+        let (nm, delta, det) = zmat::inverse_det(&bj).unwrap();
+        let jp: Vec<usize> = (0..first.cols).filter(|x| !fj.contains(x)).collect();
+        let q = nm.mul(&ZMat::from_rows((0..r).map(|i| jp.iter().map(|&j| first.get(i, j).clone()).collect()).collect()));
+        let g = route3::hnf_modulus(&q, &delta, &det, &mut Local::new());
+        R3 { is, js, nm, delta, det, g }
+    }
+    fn stage2(&self, a: &ZMat, c: &Constants) -> u64 {
+        total(&estimate::stage2_route3(a, &self.is, &self.js, &self.nm, &self.delta, &self.det, &self.g, c))
+    }
 }
 
 fn entry(rng: &mut Rng, bits: u32) -> BigInt {
@@ -104,7 +146,9 @@ fn entry(rng: &mut Rng, bits: u32) -> BigInt {
 /// contents, and classical inputs: singular, rectangular).
 fn corpus(set: &str, seed: u64) -> Vec<ZMat> {
     let mut rng = Rng(seed.wrapping_mul(0x9e3779b97f4a7c15));
-    let fams: &[&str] = if set == "base" { &["random", "kstruct", "sparse", "diagdom", "khigh", "kbig"] } else { &["banded", "block", "unimod", "mixed", "large", "k8", "singular", "rect", "k9", "kfull", "khidden"] };
+    // (route 3's families last: the rows before them are those of the
+    // corpus before it)
+    let fams: &[&str] = if set == "base" { &["random", "kstruct", "sparse", "diagdom", "khigh", "kbig", "wide", "tall", "sing1", "singk"] } else { &["banded", "block", "unimod", "mixed", "large", "k8", "singular", "rect", "k9", "kfull", "khidden", "wide", "tall", "sing1", "singk"] };
     let mut out = vec![];
     // k = 6..8 cycles, two inputs per size up to n = 32: the training
     // floor's 10 rows a k
@@ -123,6 +167,31 @@ fn corpus(set: &str, seed: u64) -> Vec<ZMat> {
                     continue;
                 }
                 if matches!(fam, "kfull" | "khidden") && (!(6..=32).contains(&n) || bits > 64) {
+                    continue;
+                }
+                if matches!(fam, "wide" | "tall" | "sing1" | "singk") {
+                    // route 3: plain wide (n x (3 n / 2 + 1)) and tall (2 n x
+                    // n), square of corank 1 (the last row the sum of the
+                    // first two) and of corank n / 2 (X Y, X of `bits`-bit
+                    // entries, Y of 4-bit)
+                    if !(4..=32).contains(&n) || bits > 64 {
+                        continue;
+                    }
+                    let plain = |rng: &mut Rng, m: usize, c: usize, b: u32| -> Vec<Vec<BigInt>> { (0..m).map(|_| (0..c).map(|_| entry(rng, b)).collect()).collect() };
+                    let a = match fam {
+                        "wide" => ZMat::from_rows(plain(&mut rng, n, 3 * n / 2 + 1, bits)),
+                        "tall" => ZMat::from_rows(plain(&mut rng, 2 * n, n, bits)),
+                        "sing1" => {
+                            let mut x = plain(&mut rng, n, n, bits);
+                            x[n - 1] = x[0].iter().zip(&x[1]).map(|(p, q)| p + q).collect();
+                            ZMat::from_rows(x)
+                        }
+                        _ => {
+                            let h = n / 2;
+                            ZMat::from_rows(plain(&mut rng, n, h, bits)).mul(&ZMat::from_rows(plain(&mut rng, h, n, 4)))
+                        }
+                    };
+                    out.push(a);
                     continue;
                 }
                 let cols = if fam == "rect" { n + 2 } else { n };
@@ -250,17 +319,29 @@ fn measure(a: ZMat, c: &Constants) -> Row {
         k_hat: if n == cols { estimate::k_lower_bound(&a) } else { 0 },
         a: ZMat::zero(0, 0),
         nm: None,
+        m: n,
+        rank: n.min(cols),
+        k_hat_min: 0,
+        r3: None,
     };
     let s1 = estimate::stage1_with(&a, c);
     row.stage1 = s1.units.as_ref().map(total);
-    if f.route == Route::Classical || cols != n {
-        // (no estimate for the classical route: stage 1 reports none on a
-        // shape it can see; stage 2 below on the rest)
-        row.stage1_none_ok = cols == n || s1.units.is_none();
-        if let Some((nm, den, det)) = (cols == n).then(|| zmat::inverse_det(&a)).flatten() {
-            let inv = invariants_nonsingular(&a, &det.abs(), Some((nm.mul(&zmat::det_rhs(n)), den.clone())));
-            row.stage2_none_ok = estimate::stage2_with(&a, &nm, &den, &det, Some(&inv), c).is_none();
+    // (stage 1 has an estimate for every nonempty input)
+    row.stage1_none_ok = s1.units.is_some() || n == 0 || cols == 0;
+    if f.route == Route::Hermite {
+        // route 3: k counts the nonzero nontrivial factors, k^ in both forms
+        let r = (0..n.min(cols)).take_while(|&i| !f.d.get(i, i).is_zero()).count();
+        row.rank = r;
+        row.n = cols;
+        row.k = (0..r).filter(|&i| !f.d.get(i, i).is_one()).count();
+        row.k_hat = estimate::k_lower_bound_rect(&a, r);
+        row.k_hat_min = estimate::k_lower_bound_rect(&a, n.min(cols));
+        if r > 0 {
+            let r3 = R3::of(&a);
+            row.stage2 = Some(r3.stage2(&a, c));
+            row.r3 = Some(r3);
         }
+        row.a = a;
         return row;
     }
     row.beside = s1.beside_route2.as_ref().map(total);
@@ -292,6 +373,15 @@ fn measure(a: ZMat, c: &Constants) -> Row {
     row.nm = Some((nm, den, det, invariants));
     row
 }
+
+/// Route 3's shapes: wide, tall, square of corank 1, square of corank 2 or
+/// more.
+const R3_CLASSES: [(&str, fn(&Row) -> bool); 4] = [
+    ("wide", |r| r.m < r.n),
+    ("tall", |r| r.m > r.n),
+    ("corank 1", |r| r.m == r.n && r.rank + 1 == r.n),
+    ("corank 2+", |r| r.m == r.n && r.rank + 2 <= r.n),
+];
 
 /// The k bands of the report and the training floor: each k up to 8, then
 /// 9..=16 and 17 and up.
@@ -330,7 +420,7 @@ fn sym(a: u64, e: u64) -> f64 {
 /// part A's cubic term, V_2^-1 for k >= 3 over delta's limbs), then the scales, the
 /// geometric mean of the remaining work's actual over its unscaled model.
 fn refit(train: &[Row]) -> Constants {
-    let routed = |r: &&Row| r.route != Route::Classical;
+    let routed = |r: &&Row| matches!(r.route, Route::Cyclic | Route::Trailing);
     let mean = |v: Vec<f64>| v.iter().sum::<f64>() / v.len() as f64;
     let a1 = mean(train.iter().filter(routed).filter(|r| r.route == Route::Cyclic).map(|r| r.attempts as f64).collect());
     let a2 = mean(train.iter().filter(routed).filter(|r| r.route == Route::Trailing).map(|r| r.attempts as f64).collect());
@@ -346,6 +436,7 @@ fn refit(train: &[Row]) -> Constants {
         multiplier: estimate::FITTED.multiplier,
         vinv_of_delta: round3(fv),
         scale: [1.0; 4],
+        scale_route3: [1.0; 2],
         fit_head: estimate::FITTED.fit_head,
         fit_from: estimate::FITTED.fit_from,
     };
@@ -368,6 +459,21 @@ fn refit(train: &[Row]) -> Constants {
     for (i, l) in logs.iter().enumerate() {
         c.scale[i] = round3((l.iter().sum::<f64>() / l.len().max(1) as f64).exp());
     }
+    // route 3's: its stage 2's scaled part, actual less the unscaled part,
+    // by the first side's G ring
+    let mut logs3: [Vec<f64>; 2] = Default::default();
+    for r in train.iter().filter(|r| r.route == Route::Hermite) {
+        let Some(r3) = &r.r3 else { continue };
+        let (mut one, mut zero) = (c, c);
+        one.scale_route3 = [1.0; 2];
+        zero.scale_route3 = [0.0; 2];
+        let (s1, s0) = (r3.stage2(&r.a, &one), r3.stage2(&r.a, &zero));
+        let slot = (r3.g.bits() >= 62) as usize;
+        logs3[slot].push((r.actual.saturating_sub(s0).max(1) as f64 / s1.saturating_sub(s0).max(1) as f64).ln());
+    }
+    for (i, l) in logs3.iter().enumerate() {
+        c.scale_route3[i] = round3((l.iter().sum::<f64>() / l.len().max(1) as f64).exp());
+    }
     c
 }
 
@@ -387,9 +493,13 @@ fn log_rows(report: &mut String, path: &std::path::Path, head: &str, set: &str, 
 fn check_rows(set: &str, seed: u64, rows: &[Row]) {
     for r in rows {
         assert!(r.actual >= r.lower, "{set} {seed}: L = {} above the run's {} units", r.lower, r.actual);
-        assert!(r.stage1_none_ok, "{set} {seed}: a non-square input has no estimate (n = {})", r.n);
-        assert!(r.stage2_none_ok, "{set} {seed}: the classical route has no stage 2 estimate (n = {})", r.n);
-        assert!(r.k_hat <= r.k || r.route == Route::Classical, "{set} {seed}: k^ = {} above k = {} (n = {})", r.k_hat, r.k, r.n);
+        assert!(r.stage1_none_ok, "{set} {seed}: stage 1 has an estimate for every nonempty input (n = {})", r.n);
+        assert!(r.stage2_none_ok, "{set} {seed}: stage 2 (n = {})", r.n);
+        assert!(r.k_hat <= r.k, "{set} {seed}: k^ = {} above k = {} (m = {}, n = {}, {:?})", r.k_hat, r.k, r.m, r.n, r.route);
+        if r.route == Route::Hermite {
+            // (stage 1's min(m, n) form: at most k + min(m, n) - r)
+            assert!(r.k_hat_min <= r.k + r.m.min(r.n) - r.rank, "{set} {seed}: stage 1's k^ = {} above k + corank (k = {}, m = {}, n = {}, r = {})", r.k_hat_min, r.k, r.m, r.n, r.rank);
+        }
     }
 }
 
@@ -427,6 +537,13 @@ fn the_estimate_is_fitted_and_scores_within_its_ceilings() {
     for (b, n) in floor.iter().filter(|(b, _)| ["6", "7", "8", "9-16", "17+"].contains(&b.as_str())) {
         assert!(*n >= 10, "the training corpus has {n} route 2 rows at k = {b}, fewer than 10");
     }
+    // route 3's training families: at least 10 rows each (wide, tall,
+    // square of corank 1 and of higher corank)
+    for (name, class) in R3_CLASSES {
+        let count = train.iter().filter(|r| r.route == Route::Hermite && r.stage2.is_some() && class(r)).count();
+        println!("base-train seed 1: route 3 {name}: {count} rows");
+        assert!(count >= 10, "the training corpus has {count} route 3 rows {name}, fewer than 10");
+    }
     let fitted = refit(&train);
     assert_eq!(fitted, estimate::FITTED, "the constants refit at this head differ from estimate::FITTED: refit and record them");
     // the held-out corpora under the recorded constants
@@ -438,10 +555,26 @@ fn the_estimate_is_fitted_and_scores_within_its_ceilings() {
         // classical runs stage 1 gave an estimate for (square inputs that
         // turned out singular: unknown before the run); the user saw that
         // estimate, so they are in stage 1's per-op k
-        let surprised: Vec<f64> = rows.iter().filter(|r| r.route == Route::Classical && r.stage1.is_some()).map(|r| sym(r.actual, r.stage1.unwrap())).collect();
+        let surprised: Vec<f64> = rows.iter().filter(|r| r.route == Route::Hermite && r.m == r.n && r.stage1.is_some()).map(|r| sym(r.actual, r.stage1.unwrap())).collect();
         if !surprised.is_empty() {
-            println!("{set} seed {seed}: {} classical runs had a stage 1 estimate (worst ratio {:.1})", surprised.len(), surprised.iter().cloned().fold(0.0, f64::max));
+            println!("{set} seed {seed}: {} singular square runs had a stage 1 estimate (route 1's; worst ratio {:.1})", surprised.len(), surprised.iter().cloned().fold(0.0, f64::max));
         }
+        // route 3 by shape: stage 1 and stage 2
+        for (name, class) in R3_CLASSES {
+            let rs: Vec<&Row> = rows.iter().filter(|r| r.route == Route::Hermite && r.stage2.is_some() && class(r)).collect();
+            if rs.is_empty() {
+                continue;
+            }
+            println!(
+                "    route 3, {name}: {} rows, stage 1 {:.2}, stage 2 {:.2} (max {:.2})",
+                rs.len(),
+                p90(rs.iter().map(|r| sym(r.actual, r.stage1.unwrap())).collect()),
+                p90(rs.iter().map(|r| sym(r.actual, r.stage2.unwrap())).collect()),
+                rs.iter().map(|r| sym(r.actual, r.stage2.unwrap())).fold(0.0, f64::max)
+            );
+        }
+        let r3: Vec<&Row> = rows.iter().filter(|r| r.route == Route::Hermite && r.stage2.is_some()).collect();
+        let k3s2 = p90(r3.iter().map(|r| sym(r.actual, r.stage2.unwrap())).collect());
         // route 2 by k (bands past 8): stage 2's k; V_2^-1 as run against
         // the model's size, both in delta's limbs; the rows where the proved
         // bound caps the model's size; the attempts; and the transforms'
@@ -480,7 +613,7 @@ fn the_estimate_is_fitted_and_scores_within_its_ceilings() {
                 out.iter().cloned().fold(0.0, f64::max)
             );
         }
-        let routed: Vec<&Row> = rows.iter().filter(|r| r.route != Route::Classical).collect();
+        let routed: Vec<&Row> = rows.iter().filter(|r| matches!(r.route, Route::Cyclic | Route::Trailing)).collect();
         let shown: Vec<f64> = rows.iter().filter_map(|r| r.stage1.map(|e| sym(r.actual, e))).collect();
         let k_op_max = shown.iter().cloned().fold(0.0, f64::max);
         let k_op = p90(shown);
@@ -502,12 +635,13 @@ fn the_estimate_is_fitted_and_scores_within_its_ceilings() {
         let k2s2 = p90(r2.iter().map(|r| sym(r.actual, r.stage2.unwrap())).collect());
         let kb = p90(r2.iter().map(|r| sym(r.actual, r.beside.unwrap())).collect());
         let kmax = r2.iter().map(|r| r.k).max().unwrap_or(0);
-        println!("{set} seed {seed}: rows {} (classical {}), k: stage 1 per op {k_op:.2} (max {k_op_max:.2}), route 1 stage 1 {k1s1:.2} stage 2 {k1s2:.2}, route 2 stage 2 {k2s2:.2} (k <= {kmax}), beside {kb:.2}", rows.len(), rows.len() - routed.len());
+        println!("{set} seed {seed}: rows {} (route 3 {}), k: stage 1 per op {k_op:.2} (max {k_op_max:.2}), route 1 stage 1 {k1s1:.2} stage 2 {k1s2:.2}, route 2 stage 2 {k2s2:.2} (k <= {kmax}), beside {kb:.2}, route 3 stage 2 {k3s2:.2}", rows.len(), rows.len() - routed.len());
         assert!(k_op <= 3.5, "{set} {seed}: stage 1 per op k {k_op:.2} > 3.5");
         assert!(k1s1 <= 2.5, "{set} {seed}: route 1 stage 1 k {k1s1:.2} > 2.5");
         assert!(k1s2 <= 2.0, "{set} {seed}: route 1 stage 2 k {k1s2:.2} > 2.0");
         assert!(k2s2 <= 2.5, "{set} {seed}: route 2 stage 2 k {k2s2:.2} > 2.5");
         assert!(kb <= 2.5, "{set} {seed}: the beside line's k {kb:.2} > 2.5");
+        assert!(k3s2 <= 2.5, "{set} {seed}: route 3 stage 2 k {k3s2:.2} > 2.5");
     }
     let _ = trailing_model;
 }

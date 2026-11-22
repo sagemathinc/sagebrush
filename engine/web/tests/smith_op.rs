@@ -1,5 +1,6 @@
 //! The mat_smith_form op of the JSON dispatcher: (D, U, V) with U m V = D,
-//! the route taken, a row-less matrix's width from "cols", and its floor
+//! the route taken (route 3, "hermite", for singular and rectangular
+//! input), a row-less matrix's width from "cols", and its floor
 //! L (the transforms' entries) admitted by the memory ledger before
 //! anything is allocated.
 use serde_json::{json, Value};
@@ -23,6 +24,11 @@ fn mat_smith_form_answers_and_admits_its_floor() {
     let ua: Vec<Vec<i64>> = (0..2).map(|i| (0..2).map(|j| (0..2).map(|t| u[i][t] * a[t][j]).sum()).collect()).collect();
     let uav: Vec<Vec<i64>> = (0..2).map(|i| (0..2).map(|j| (0..2).map(|t| ua[i][t] * v[t][j]).sum()).collect()).collect();
     assert_eq!(uav, vec![vec![2, 0], vec![0, 4]]);
+    // singular and rectangular input: route 3
+    for m in [json!([[2, 4], [1, 2]]), json!([[6, 10, 15], [4, 8, 12]])] {
+        let r = call(json!({"fn": "mat_smith_form", "m": m}));
+        assert_eq!(r["ok"]["route"], json!("hermite"), "{r}");
+    }
     // a matrix with no rows: its width from "cols"
     let r = call(json!({"fn": "mat_smith_form", "m": [], "cols": 3}));
     assert_eq!(r["ok"]["v"].as_array().unwrap().len(), 3);

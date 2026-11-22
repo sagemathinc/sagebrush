@@ -6,17 +6,21 @@
 //! ([`crate::zmat::inverse_model`]: an exact count on dense input), part A
 //! ([`part_a_model`]), route 1 ([`cyclic_model`]) and route 2
 //! ([`trailing_model`], whose small Smith form's transform sizes are as
-//! measured on route 2's runs, capped by its proved bound).
+//! measured on route 2's runs, capped by its proved bound), and route 3
+//! ([`route3_terms`], a term a part, the three inverses each their own).
 //!
 //! Stage 1 ([`stage1`]) is before the run, from the input: the inverse
 //! plus the cheaper plausible route (the E route rule) at delta^, which is
 //! route 1 unless the rows' and columns' contents prove k >= 2
 //! ([`k_lower_bound`]), then route 2 at that bound; route 2 at the bound
-//! (at least 2) is beside it; none where it sees the classical
-//! elimination follows (a non-square input, a zero row or column), while a
-//! square input that turns out singular gets one, since stage 1 cannot
-//! know.  Stage 2 ([`stage2`]) is after the inverse and part
-//! A, at the actual sizes, and has none for the classical route.
+//! (at least 2) is beside it.  Where it sees route 3 follows (a non-square
+//! input, a zero row or column) it is route 3's generic case
+//! ([`stage1_route3`]: full rank, index 1), while a square input that
+//! turns out singular gets route 1's, since stage 1 cannot know.  Stage 2
+//! ([`stage2`]) is after the inverse and part A, at the actual sizes; for
+//! route 3 ([`stage2_route3`]) after the rank profile and the first side's
+//! inverse and G, the failed inverse pass of a singular square input
+//! included.
 //!
 //! The constants ([`FITTED`]) are units-model constants, the same on every
 //! target (meter units are integers): fitted on a training corpus, and
@@ -50,6 +54,9 @@ pub struct Constants {
     /// The remaining work's scale (actual over model, the geometric mean):
     /// route 1 word delta, route 1 big, route 2 word, route 2 big.
     pub scale: [f64; 4],
+    /// Route 3's remaining work's scale: its first side's G word, or
+    /// multi-limb.
+    pub scale_route3: [f64; 2],
     /// The head of the run path the constants model (40 characters): the
     /// routes as landed; the models are this file's.
     pub fit_head: &'static str,
@@ -69,7 +76,8 @@ pub const FITTED: Constants = Constants {
     part_a_cubic: 0.927,
     multiplier: 0.92,
     vinv_of_delta: 1.5,
-    scale: [0.548, 0.712, 0.837, 0.439],
+    scale: [0.548, 0.711, 0.837, 0.44],
+    scale_route3: [0.568, 0.58],
     fit_head: "f7c3c93cd71f4d73df5e30851e2d30feb71226bc",
     fit_from: "the estimate test's training corpus (seed 1); the multiplier from route 2's phase data",
 };
@@ -77,13 +85,16 @@ pub const FITTED: Constants = Constants {
 /// An estimate before the run.
 #[derive(Clone, Debug, PartialEq)]
 pub struct Estimate {
-    /// E: the route 1 estimate (the cheaper plausible route), or None where
-    /// stage 1 sees the classical elimination follows (no estimate).
+    /// E: the route 1 estimate (the cheaper plausible route), route 3's
+    /// where it sees route 3 follows, None for an empty input.
     pub units: Option<Units>,
     /// Route 2's own estimate at the proved lower bound on k (at least 2),
     /// reported beside E.
     pub beside_route2: Option<Units>,
 }
+
+mod route3;
+pub use route3::{failed_pass_model, k_lower_bound_rect, route3_model, route3_terms, stage1_route3, stage2_route3, stage2_route3_terms, Route3Sizes, Side};
 
 fn add_scaled(u: &mut Units, v: &Units, s: f64) {
     for (x, y) in u.0.iter_mut().zip(&v.0) {
@@ -135,8 +146,9 @@ fn mean_limbs(m: &ZMat) -> usize {
     ((m.d.iter().map(limbs).sum::<usize>() as f64) / m.d.len() as f64).round().max(1.0) as usize
 }
 
-/// Stage 1: before the run, from the input alone.  None where the
-/// classical route visibly follows (non-square input, a zero row or column).
+/// Stage 1: before the run, from the input alone (route 3's generic case
+/// on non-square input and on a zero row or column; None for an empty
+/// input).
 pub fn stage1(a: &ZMat) -> Estimate {
     stage1_with(a, &FITTED)
 }
@@ -145,14 +157,14 @@ pub fn stage1(a: &ZMat) -> Estimate {
 #[doc(hidden)]
 pub fn stage1_with(a: &ZMat, c: &Constants) -> Estimate {
     let n = a.rows;
-    let none = Estimate { units: None, beside_route2: None };
+    // (non-square input, and a zero row or column: route 3 follows)
+    let route3 = || Estimate { units: stage1_route3(a, c), beside_route2: None };
     if a.rows != a.cols || n == 0 {
-        return none;
+        return route3();
     }
-    // (a zero row or column sends the inverse to the classical route)
     let h = zmat::hadamard_bits(a);
     if !h.is_finite() {
-        return none;
+        return route3();
     }
     let dh = (h - c.hadamard_gap * n as f64).max(1.0).ceil() as u64;
     let lh = (dh as usize).div_ceil(64).max(1);
@@ -232,8 +244,7 @@ pub fn k_lower_bound(a: &ZMat) -> usize {
 /// Stage 2: after the inverse (N / delta, det) and, for route 2, part A's
 /// invariant factors; at the actual sizes, for any k (route 2 has no
 /// threshold).  None without the invariant factors when det a != delta.
-/// (The classical route, singular or rectangular input, has no inverse to
-/// call this with.)
+/// (Route 3's is [`stage2_route3`].)
 pub fn stage2(a: &ZMat, nm: &ZMat, delta: &BigInt, det: &BigInt, invariants: Option<&[BigInt]>) -> Option<Units> {
     stage2_with(a, nm, delta, det, invariants, &FITTED)
 }
@@ -343,7 +354,7 @@ pub fn cyclic_model(n: usize, ld: usize, ln: usize, attempts: u64, fold: usize, 
             for e in 0..entries {
                 // (the unit combination's extended gcd, checked on its
                 // coefficients)
-                u.add_saturating(&bigxgcd_units(if e == 0 { ld } else { 1 }, ld));
+                u.add_saturating(&bigxgcd_units(if e == 0 { ld } else { 1 }, ld, 1));
                 if e + 1 == entries && t + 1 == attempts {
                     {
                         let mut one3 = Units::default();
@@ -536,7 +547,7 @@ pub fn trailing_model(n: usize, k: usize, ld: usize, ln: usize, attempts: u64, w
     // (the k inverses of s_j / g_j modulo d_j: their extended gcds' check,
     // on either path)
     for j in 0..k {
-        u.add_saturating(&xgcd_check_units(dl(j), dl(j)));
+        u.add_saturating(&xgcd_check_units(dl(j), dl(j), 1));
     }
     times(&mut u, size_product(&[top, k]), &c_entry);
     op(&mut u, size_product(&[k, k, k, 4]));

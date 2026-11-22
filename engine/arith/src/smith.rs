@@ -6,8 +6,8 @@
 //! allocated); E is None, never 0 and never a partial figure: no
 //! estimate until the matrix operations' calibration wires one (when a
 //! cost() lands here it reports work_estimate = None until then); U is
-//! None (the classical elimination's entries grow without bound, and the
-//! routes' attempts are uncapped).
+//! None (the routes' attempts are uncapped, and route 3's rank profile
+//! retries are bounded by the input's minors, not by a fixed count).
 //!
 //! Units (`cost::tally`), counted in a `cost::Local` after the work and
 //! flushed at the Stop checks (coarse: an attempt or a pass each): BigInt products through
@@ -29,10 +29,13 @@ pub enum Route {
     Cyclic,
     /// k >= 2: k trailing generators, from the same inverse.
     Trailing,
-    /// The classical elimination over Z (by shape: singular or
-    /// rectangular input; or, through the measurement hook
-    /// [`smith_form_k`], more nontrivial invariants than its threshold).
+    /// The classical elimination over Z ([`smith_classical`], a test oracle;
+    /// or, through the measurement hook [`smith_form_k`], more nontrivial
+    /// invariants than its threshold).
     Classical,
+    /// Route 3, singular or rectangular input: both sides compressed by
+    /// Hermite forms to a nonsingular core, which route 1 or 2 takes.
+    Hermite,
 }
 
 /// A Smith form with its transforms: `u * a * v == d`, the route taken
@@ -92,11 +95,13 @@ fn col_sub(m: &mut [Vec<BigInt>], i: usize, j: usize, q: &BigInt, acc: &mut Loca
 
 /// The classical Smith form with transforms of any m x n integer matrix:
 /// the smallest-pivot elimination over Z, carrying U and V.  Always
-/// correct, but its entries can grow exponentially in n (r2's fallback,
-/// chosen by shape: singular or rectangular input).  The same pivots, in
-/// the same order, as the Python elimination it replaces (smallest
-/// absolute value, then row, then column), so its transforms are the ones
-/// Sage mode returned before.
+/// correct, but its entries can grow exponentially in n: a test oracle
+/// for D on small inputs, outside routing (route 3 takes singular and
+/// rectangular input; the measurement hook [`smith_form_k`] still reaches
+/// it).  The same pivots, in the same order, as the Python elimination
+/// Sage mode used before route 3 (smallest absolute value, then row, then
+/// column).
+#[doc(hidden)]
 pub fn smith_classical(a: &ZMat) -> SmithForm {
     let (m, n) = (a.rows, a.cols);
     let mut acc = Local::new();
@@ -1180,7 +1185,7 @@ fn trailing<R: Zn>(ring: &R, nm: &ZMat, delta: &BigInt, d: &BigInt, k: usize, ac
                 let (e, fallback) = sagebrush_bigint::extended_gcd_metered(&sj, &m);
                 // (the check on its coefficients, and the fallback when it
                 // ran, on either path)
-                acc.add(crate::cost::xgcd_check_units(limbs(&sj), limbs(&m)));
+                acc.add(crate::cost::xgcd_check_units(limbs(&sj), limbs(&m), limbs(&e.gcd)));
                 acc.add(crate::cost::xgcd_fallback_units(fallback.as_ref()));
                 if R::WORD {
                     let (mut a, mut b) = (sj.to_i128().unwrap_or(0), m.to_i128().unwrap_or(1));
@@ -1507,7 +1512,17 @@ fn cyclic_ring(nm: &ZMat, delta: &BigInt) -> Result<SmithForm, String> {
 /// The Smith form with transforms of any integer matrix: route 1 when a is
 /// square and nonsingular with k <= 1 nontrivial invariant factors, route
 /// 2 for every k >= 2 (both from one exact inverse), else (singular or
-/// rectangular input) the classical elimination.
+/// rectangular input, the empty and zero matrices included) route 3, which
+/// compresses both sides by Hermite forms modulo the lattice's moduli to a
+/// nonsingular core that route 1 or 2 takes (see [`route3`]).
+///
+/// Route 3 against the classical elimination it replaces (metered units):
+/// at 48 x 48 of rank 47 (16-bit entries times 4-bit) 0.012 times its
+/// units, with transforms of about 800 bits against about 145,000; below
+/// the classical units on every corpus row of size 16 or more, but the
+/// rows whose classical run takes under 1e5 units (tiny entries), where
+/// route 3's fixed overhead is about 6e4 to 8e4; within 3 times on 8 x 8
+/// and on thin shapes (8 x 200 up to 8 x 2000 and their transposes).
 ///
 /// Route 2 has no threshold on k.  Measured against the classical
 /// elimination on nonsingular input (n = 12 to 48, entries of 8 to 64
@@ -1524,28 +1539,45 @@ pub fn smith_form(a: &ZMat) -> Result<SmithForm, String> {
 }
 
 /// [`smith_form`] with a threshold on route 2's k (a measurement hook:
-/// more nontrivial invariants than `k_max` take the classical
-/// elimination).
+/// nonsingular input with more nontrivial invariants than `k_max` takes
+/// the classical elimination).
 #[doc(hidden)]
 pub fn smith_form_k(a: &ZMat, k_max: usize) -> Result<SmithForm, String> {
     if a.rows == a.cols && a.rows > 0 {
-        if let Some((nm, den, det)) = crate::zmat::inverse_det(a) {
-            if den == det.abs() {
-                return cyclic_ring(&nm, &den);
-            } else {
-                // (part A, its determinant and inverse known: the invariants
-                // from d and the solve x = N b / delta that the inverse
-                // already holds, b the fixed right-hand side)
-                let b = crate::zmat::det_rhs(a.rows);
-                let inv = crate::snf::invariants_nonsingular(a, &det.abs(), Some((nm.mul(&b), den.clone())));
-                let k = inv.iter().filter(|x| !x.is_one()).count();
-                if k <= k_max {
-                    return trailing_ring(&nm, &den, &det.abs(), k);
-                }
-            }
+        match nonsingular(a, k_max)? {
+            Square::Done(f) => return Ok(f),
+            Square::Singular => {}
+            // (the measurement hook)
+            Square::PastK => return Ok(smith_classical(a)),
         }
     }
-    Ok(smith_classical(a))
+    route3::smith_route3(a)
+}
+
+/// What routes 1 and 2 made of a square input.
+enum Square {
+    Done(SmithForm),
+    Singular,
+    /// Nonsingular, with more nontrivial invariants than the hook's k_max.
+    PastK,
+}
+
+/// Routes 1 and 2 on square A.
+fn nonsingular(a: &ZMat, k_max: usize) -> Result<Square, String> {
+    let Some((nm, den, det)) = crate::zmat::inverse_det(a) else { return Ok(Square::Singular) };
+    if den == det.abs() {
+        return cyclic_ring(&nm, &den).map(Square::Done);
+    }
+    // (part A, its determinant and inverse known: the invariants from d
+    // and the solve x = N b / delta that the inverse already holds, b the
+    // fixed right-hand side)
+    let b = crate::zmat::det_rhs(a.rows);
+    let inv = crate::snf::invariants_nonsingular(a, &det.abs(), Some((nm.mul(&b), den.clone())));
+    let k = inv.iter().filter(|x| !x.is_one()).count();
+    if k <= k_max {
+        return trailing_ring(&nm, &den, &det.abs(), k).map(Square::Done);
+    }
+    Ok(Square::PastK)
 }
 
 /// L, the floor a Smith form with transforms of an m x n matrix needs
@@ -1562,6 +1594,10 @@ pub fn floor_bytes(m: usize, n: usize) -> Option<u64> {
 
 /// The work estimate: units models of the routes and the fitted constants.
 pub mod estimate;
+
+/// Route 3, for singular and rectangular input.
+#[doc(hidden)]
+pub mod route3;
 
 #[cfg(test)]
 mod tests;

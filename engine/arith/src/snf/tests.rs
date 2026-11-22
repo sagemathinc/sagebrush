@@ -351,3 +351,39 @@ fn a_failed_check_falls_back_to_e_equals_d() {
         assert_eq!(got, inv, "corrupted to {bad}");
     }
 }
+
+/// gcd_cofactor_e: g = gcd(x, e) and s x = g (mod e), s not always a unit;
+/// its charge pinned on both rings (word: the quotient steps into
+/// `steps`; big: the gcd and the cofactor's reduction, counted by the
+/// ring).
+#[test]
+fn gcd_cofactor_e_values_and_units() {
+    let w = Word { e: 1000 };
+    let mut steps = 0;
+    let (g, s) = w.gcd_cofactor_e(&378, &mut steps);
+    assert_eq!((g, s * 378 % 1000), (big(2), 2));
+    // (1000, 378) -> (378, 244) -> .. -> (2, 0): 9 quotient steps
+    assert_eq!(steps, 9, "the word path's steps");
+    let (g, s) = w.gcd_cofactor_e(&0, &mut steps);
+    assert_eq!((g, s, steps), (big(1000), 0, 9), "x = 0: e, no step");
+    assert_eq!(w.take(), [0; FAMILIES]);
+    let e = (BigInt::from(1u64) << 300usize) * big(3);
+    let b = Big::new(&e);
+    let x = BigInt::from(6u64) << 120usize;
+    let mut none = 0;
+    let (g, s) = b.gcd_cofactor_e(&x, &mut none);
+    assert_eq!(g, BigInt::from(3u64) << 121usize);
+    assert_eq!((&s * &x).mod_floor(&e), g);
+    assert_eq!(none, 0, "the big path counts its own");
+    // (the extended gcd at e's and x's limbs with the check on its
+    // coefficients, the cofactor's reduction modulo e)
+    let pin = [20, 0, 40, 0, 32, 0, 0, 7, 0, 0];
+    let (le, lx) = (limbs(&e), limbs(&x));
+    let mut want = crate::cost::bigxgcd_units(le, lx, limbs(&g));
+    want.add(&bigdiv_units(2 * le, le));
+    assert_eq!((b.take(), want.0), (pin, pin), "the big path's charge");
+    assert_eq!(b.take(), [0; FAMILIES], "taken");
+    // x = 0: e and 0, with the same leaf charge at x's (zero) limbs
+    assert_eq!(b.gcd_cofactor_e(&BigInt::zero(), &mut none), (e.clone(), BigInt::zero()));
+    assert_eq!(b.take(), [0, 0, 30, 0, 10, 0, 0, 0, 0, 0], "x = 0's charge");
+}

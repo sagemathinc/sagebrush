@@ -36,9 +36,9 @@ pub(crate) fn check_interrupt() {
     sagebrush_interrupt::check();
 }
 #[cfg(not(feature = "num-backend"))]
-pub use dashu_impl::{xgcd_euclid, BigInt, BigUint, Sign};
+pub use dashu_impl::{modinv_certified, xgcd_certified, xgcd_euclid, BigInt, BigUint, Sign};
 #[cfg(all(not(feature = "num-backend"), feature = "test-hooks"))]
-pub use dashu_impl::with_xgcd_fallback_forced;
+pub use dashu_impl::{with_xgcd_fallback_forced, with_xgcd_fallback_recorded};
 
 /// An extended gcd's fallback, when the backend's coefficients failed their
 /// check: the plain extended Euclid's steps, each the 64-bit limbs of its

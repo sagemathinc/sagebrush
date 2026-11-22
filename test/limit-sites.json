@@ -1786,6 +1786,16 @@
   "owner": "qpoly_mul",
   "reason": "qpoly_mul's derived bounds, plumbing (the meter's limit, the plan's sizes) or a test assertion: refuses nothing itself"
  },
+ "engine/arith/src/smith.rs :: nonsingular :: fn nonsingular(a: &ZMat, k_max: usize) -> Result<Square, String> { #0": {
+  "class": "none",
+  "owner": "engine arithmetic (exact linear algebra)",
+  "reason": "routes 1 and 2 on square input, with the measurement hook's threshold on k (smith_form passes usize::MAX: no threshold; past it, nonsingular input takes the classical elimination): refuses nothing"
+ },
+ "engine/arith/src/smith.rs :: nonsingular :: if k <= k_max { #0": {
+  "class": "none",
+  "owner": "engine arithmetic (exact linear algebra)",
+  "reason": "routes 1 and 2 on square input, with the measurement hook's threshold on k (smith_form passes usize::MAX: no threshold; past it, nonsingular input takes the classical elimination): refuses nothing"
+ },
  "engine/arith/src/smith.rs :: small_smith :: debug_assert!(v.max_bits() <= growth && vinv.max_bits() <= growth, \"the transforms' proved bound\"); #0": {
   "class": "none",
   "owner": "engine arithmetic (exact linear algebra)",
@@ -1801,10 +1811,10 @@
   "owner": "engine arithmetic (exact linear algebra)",
   "reason": "no threshold: route 2 for every k >= 2 nontrivial invariant factors (usize::MAX passed to the measurement hook smith_form_k); refuses nothing"
  },
- "engine/arith/src/smith.rs :: smith_form_k :: if k <= k_max { #0": {
+ "engine/arith/src/smith.rs :: smith_form_k :: match nonsingular(a, k_max)? { #0": {
   "class": "none",
   "owner": "engine arithmetic (exact linear algebra)",
-  "reason": "a route threshold (route 2 up to K_MAX nontrivial invariant factors, else the classical elimination): a measured crossover, refuses nothing"
+  "reason": "routes 1 and 2 on square input, with the measurement hook's threshold on k (smith_form passes usize::MAX: no threshold; past it, nonsingular input takes the classical elimination): refuses nothing"
  },
  "engine/arith/src/smith.rs :: smith_form_k :: pub fn smith_form_k(a: &ZMat, k_max: usize) -> Result<SmithForm, String> { #0": {
   "class": "none",
@@ -1820,6 +1830,11 @@
   "class": "none",
   "owner": "engine arithmetic (exact linear algebra)",
   "reason": "the work estimate's model: the proved transform bound used as a cap on a modelled size, saturating to usize::MAX when it does not fit (an estimate term, never a refusal or a cap on input)"
+ },
+ "engine/arith/src/smith/route3.rs :: smith_route3 :: let super::Square::Done(f) = super::nonsingular(&t, usize::MAX)? else { return Err(internal(\"core (T singular)\")) }; #0": {
+  "class": "none",
+  "owner": "engine arithmetic (exact linear algebra)",
+  "reason": "route 3's core: route 1 or 2 on the nonsingular r x r core, with no threshold (usize::MAX); refuses nothing"
  },
  "engine/arith/src/smith/tests.rs :: the_exact_transform_is_dropped_past_the_bound :: assert!(v.max_bits() <= bound && vinv.max_bits() <= bound); #0": {
   "class": "none",
@@ -2585,6 +2600,11 @@
   "owner": "engine arithmetic (exact linear algebra)",
   "reason": "test code: the work estimate's evidence by k band and the worst ratios, printed (a report, not a cap)"
  },
+ "engine/arith/tests/smith_estimate.rs :: the_estimate_is_fitted_and_scores_within_its_ceilings :: \"    route 3, {name}: {} rows, stage 1 {:.2}, stage 2 {:.2} (max {:.2})\", #0": {
+  "class": "none",
+  "owner": "engine arithmetic (exact linear algebra)",
+  "reason": "the estimate test's report: the worst ratio printed (max is a fold, not a cap); refuses nothing"
+ },
  "engine/arith/tests/smith_estimate.rs :: the_estimate_is_fitted_and_scores_within_its_ceilings :: \"{set} seed {seed}: stage 1 on route 2 rows: k^ >= 2 ({} rows) p90 {:.2}; k hidden, k^ < 2 ({} rows) p90 {:.2}, max {:.2}\", #0": {
   "class": "none",
   "owner": "engine arithmetic (exact linear algebra)",
@@ -2610,15 +2630,20 @@
   "owner": "engine arithmetic (exact linear algebra)",
   "reason": "test code: the work estimate's evidence by k band and the worst ratios, printed (a report, not a cap)"
  },
- "engine/arith/tests/smith_estimate.rs :: the_estimate_is_fitted_and_scores_within_its_ceilings :: println!(\"{set} seed {seed}: rows {} (classical {}), k: stage 1 per op {k_op:.2} (max {k_op_max:.2}), route 1 stage 1 {k1s1:.2} stage 2 {k1s2:.2}, route 2 stage 2 {k2s2:.2} (k <= {kmax}), beside {kb:.2}\", rows.len(), rows.len() - routed.len()); #0": {
+ "engine/arith/tests/smith_estimate.rs :: the_estimate_is_fitted_and_scores_within_its_ceilings :: println!(\"{set} seed {seed}: rows {} (route 3 {}), k: stage 1 per op {k_op:.2} (max {k_op_max:.2}), route 1 stage 1 {k1s1:.2} stage 2 {k1s2:.2}, route 2 stage 2 {k2s2:.2} (k <= {kmax}), beside {kb:.2}, route 3 stage 2 {k3s2:.2}\", rows.len(), rows.len() - routed.len()); #0": {
   "class": "none",
   "owner": "engine arithmetic (exact linear algebra)",
-  "reason": "test code: the work estimate's scores against their ceilings (k's p90 and its maximum, printed), and the route threshold K_MAX; not caps"
+  "reason": "the estimate test's report: the worst ratio printed (max is a fold, not a cap); refuses nothing"
  },
- "engine/arith/tests/smith_estimate.rs :: the_estimate_is_fitted_and_scores_within_its_ceilings :: println!(\"{set} seed {seed}: {} classical runs had a stage 1 estimate (worst ratio {:.1})\", surprised.len(), surprised.iter().cloned().fold(0.0, f64::max)); #0": {
+ "engine/arith/tests/smith_estimate.rs :: the_estimate_is_fitted_and_scores_within_its_ceilings :: println!(\"{set} seed {seed}: {} singular square runs had a stage 1 estimate (route 1's; worst ratio {:.1})\", surprised.len(), surprised.iter().cloned().fold(0.0, f64::max)); #0": {
   "class": "none",
   "owner": "engine arithmetic (exact linear algebra)",
-  "reason": "test code: the work estimate's evidence by k up to the route threshold K_MAX, and the classical runs' worst ratio (a report, not a cap)"
+  "reason": "the estimate test's report: the worst ratio printed (max is a fold, not a cap); refuses nothing"
+ },
+ "engine/arith/tests/smith_estimate.rs :: the_estimate_is_fitted_and_scores_within_its_ceilings :: rs.iter().map(|r| sym(r.actual, r.stage2.unwrap())).fold(0.0, f64::max) #0": {
+  "class": "none",
+  "owner": "engine arithmetic (exact linear algebra)",
+  "reason": "the estimate test's report: the worst ratio printed (max is a fold, not a cap); refuses nothing"
  },
  "engine/arith/tests/smith_meter.rs :: smith_units_and_stop_checks :: let mut meter = Meter::accounting(u64::MAX); #0": {
   "class": "none",
