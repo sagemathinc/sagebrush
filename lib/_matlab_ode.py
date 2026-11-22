@@ -462,7 +462,9 @@ def _solve(solver, nargout, args):
             d["xe"] = num(np.array(te).reshape((1, -1)))
             d["ye"] = num(np.array(ye).T if ye else np.zeros((n, 0)))
             d["ie"] = num(np.array(ie, dtype=float).reshape((1, -1)))
-        d["stats"] = _m._struct1({"nsteps": float(nsteps), "nfailed": float(nfailed), "nfevals": float(nfev[0])})
+        # (tfinal: where the solution ends, as MATLAB's stats give it)
+        d["stats"] = _m._struct1({"nsteps": float(nsteps), "nfailed": float(nfailed), "nfevals": float(nfev[0]),
+                                  "tfinal": float(steps_x[-1])})
         d["idata"] = _m._struct1({"_steps": _StepData(solver, steps_data, steps_x[-1])})
         return _m._struct1(d)
     T = np.array(tout).reshape((-1, 1))

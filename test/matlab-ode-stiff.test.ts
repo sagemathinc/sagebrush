@@ -279,3 +279,14 @@ test("a complex Mass or Jacobian is refused, never its real part; real, singular
     `${name}: The Jacobian is complex: complex values are not supported in Sagebrush.\n1\n`;
   assert.equal(r.out, block("ode15s") + block("ode23s"));
 });
+
+test("ode45's and ode23's solution structures: stats with tfinal, as MATLAB's", () => {
+  // (MATLAB R2026b, observed 2026-11-22: nsteps, nfailed, nfevals, tfinal)
+  const r = run([
+    "for s = {@ode45, @ode23}",
+    "  sol = s{1}(@(t, y) -y, [0 2], 1); fprintf('%s %g\\n', strjoin(fieldnames(sol.stats)', ','), sol.stats.tfinal)",
+    "end",
+  ].join("\n"));
+  assert.equal(r.status, 0, r.err);
+  assert.equal(r.out, "nsteps,nfailed,nfevals,tfinal 2\nnsteps,nfailed,nfevals,tfinal 2\n");
+});

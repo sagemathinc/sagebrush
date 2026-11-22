@@ -114,7 +114,8 @@
     ],
     "differs": [
       "The 'Mass' and 'NonNegative' options are refused.",
-      "The solver's own step points can differ from MATLAB's, so outputs with a two-element tspan differ in their times, though not in accuracy."
+      "The solver's own step points can differ from MATLAB's, so outputs with a two-element tspan differ in their times, though not in accuracy.",
+      "Event functions are not checked for the number of outputs: one that returns its outputs with deal(...) works in Sagebrush, where MATLAB errors with MATLAB:deal:narginNargoutMismatch."
     ],
     "status": "partial",
     "see_also": [
@@ -321,7 +322,8 @@
     "differs": [
       "A mass matrix that depends on t or y, and the NonNegative, Vectorized, JPattern, MvPattern, InitialSlope and OutputFcn options, are refused.",
       "The steps, order changes and statistics are Sagebrush's own: the solution agrees with MATLAB's within the tolerances, the step points of a two-element tspan do not.",
-      "Complex systems are not supported: a complex y0, f, Mass or Jacobian is refused with an error."
+      "MATLAB accepts a complex y0, Mass and Jacobian and integrates in complex arithmetic; Sagebrush refuses them with an error.",
+      "Event functions are not checked for the number of outputs: one that returns its outputs with deal(...) works in Sagebrush, where MATLAB errors with MATLAB:deal:narginNargoutMismatch."
     ],
     "status": "partial",
     "see_also": [
@@ -349,7 +351,8 @@
     "differs": [
       "A mass matrix that depends on t or y, and the NonNegative, Vectorized, JPattern, MvPattern and OutputFcn options, are refused.",
       "The steps and statistics are Sagebrush's own; the solution agrees with MATLAB's within the tolerances.",
-      "Complex systems are not supported: a complex y0, f, Mass or Jacobian is refused with an error."
+      "MATLAB accepts a complex y0, Mass and Jacobian and integrates in complex arithmetic; Sagebrush refuses them with an error.",
+      "Event functions are not checked for the number of outputs: one that returns its outputs with deal(...) works in Sagebrush, where MATLAB errors with MATLAB:deal:narginNargoutMismatch."
     ],
     "status": "partial",
     "see_also": [
