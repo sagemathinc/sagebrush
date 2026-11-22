@@ -292,7 +292,7 @@ const HEAD = "#artifacts .pane-head";
 //  #1618)
 async function editHere() {
   await until(`!!document.querySelector('${PANE} .file-path .mode-toggle:not([hidden])')`, 30000);
-  await ev(`(() => { const b = document.querySelector('${PANE} .file-path .mode-toggle'); if (b.getAttribute('aria-pressed') !== 'true') b.click(); return true; })()`);
+  await ev(`(() => { const b = document.querySelector('${PANE} .file-path .mode-toggle'); if (b.textContent !== 'View') b.click(); return true; })()`);
   await until(`!!document.querySelector('${PANE} textarea.code-edit')`);
 }
 const cellJs = (i) => `document.querySelectorAll('${PANE} .nb-root .cell')[${i}]`;

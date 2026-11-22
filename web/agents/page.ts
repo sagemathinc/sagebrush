@@ -659,7 +659,10 @@ function renderArtifacts() {
     if (a.path && workspace)
       void workspace.stat(a.path).then((e) => {
         const url = e && entryUrl(e);
-        if (url && open.isConnected) Object.assign(open, { href: url, hidden: false });
+        if (url && open.isConnected) {
+          Object.assign(open, { href: url, hidden: false });
+          open.setAttribute("aria-label", `Open ${a.title} in Sagebrush (a new tab)`);
+        }
       }, () => {});
     $("#full", head).onclick = () => ((fullscreen = !fullscreen), renderArtifacts());
     $("#close", head).onclick = async () => {
@@ -929,22 +932,28 @@ function mountFile(a: Artifact, box: HTMLElement, saved: HTMLElement): FileHost 
         const ta = Object.assign(document.createElement("textarea"), { className: "code-edit", spellcheck: false, wrap: "off" });
         ta.setAttribute("aria-label", path);
         wrap.append(hl, ta);
-        ta.oninput = () => {
-          paint(hl, ta.value + "\n");
-          changed(ta.value);
-        };
-        ta.onscroll = () => {
+        // (the colours end where the field's text does, short of its scrollbars, and scroll with it)
+        const fit = () => {
+          hl.style.right = `${ta.offsetWidth - ta.clientWidth}px`;
+          hl.style.bottom = `${ta.offsetHeight - ta.clientHeight}px`;
           hl.scrollTop = ta.scrollTop;
           hl.scrollLeft = ta.scrollLeft;
         };
+        ta.oninput = () => {
+          paint(hl, ta.value + "\n");
+          fit();
+          changed(ta.value);
+        };
+        ta.onscroll = fit;
         const show = () => {
+          // (its label says what it does: no aria-pressed beside it, which would say the opposite)
           toggle.textContent = mode === "edit" ? "View" : "✎ Edit";
           toggle.title = mode === "edit" ? "Back to reading it" : "Edit it here (saved as you type)";
-          toggle.setAttribute("aria-pressed", String(mode === "edit"));
           if (mode === "edit") {
             ta.value = text;
             paint(hl, text + "\n");
             box.replaceChildren(wrap);
+            fit();
           } else {
             paint(view, text);
             box.replaceChildren(view);

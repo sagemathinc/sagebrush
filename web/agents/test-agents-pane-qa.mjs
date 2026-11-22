@@ -151,25 +151,27 @@ try {
 
   // ======================================================================== #1618: a code file in colour, ✎ Edit
   const HOST = "#artifacts .pane-host:not([hidden])";
-  made = await H.call("workspace.create", { path: "/mandel.py", content: { text: "def f(z):\n    return z * z + 1  # step\n" } });
+  made = await H.call("workspace.create", { path: "/mandel.py", content: { text: "def f(z):\n    return z * z + 1  # step\n# <img src=x onerror=\"window.__xss = 1\">\n" } });
   ok(!made.error, "the agent wrote /mandel.py", made.error);
   show("t-mandel", "/mandel.py", "code");
   await P.until(`document.querySelector('${HOST} .file-path')?.textContent.startsWith('/mandel.py') && !!document.querySelector('${HOST} pre.code-view .hk')`, 30000);
-  const v = await P.ev(`(() => { const h = document.querySelector('${HOST}'), b = h.querySelector('.mode-toggle'); return { text: h.querySelector('pre.code-view').textContent, kw: [...h.querySelectorAll('pre.code-view .hk')].map((e) => e.textContent), comment: h.querySelector('pre.code-view .hc')?.textContent, ta: !!h.querySelector('textarea'), label: b.textContent, pressed: b.getAttribute('aria-pressed') }; })()`);
-  ok(v.text === "def f(z):\n    return z * z + 1  # step\n" && v.kw.includes("def") && v.kw.includes("return") && v.comment === "# step", "C1: a .py artifact is shown in colour (keywords, comment), its text exactly", v);
-  ok(!v.ta && v.label === "✎ Edit" && v.pressed === "false", "C1: read only (no field), with ✎ Edit", v);
+  const v = await P.ev(`(() => { const h = document.querySelector('${HOST}'), b = h.querySelector('.mode-toggle'); return { text: h.querySelector('pre.code-view').textContent, kw: [...h.querySelectorAll('pre.code-view .hk')].map((e) => e.textContent), comment: h.querySelector('pre.code-view .hc')?.textContent, ta: !!h.querySelector('textarea'), label: b.textContent, img: !!h.querySelector('img'), xss: !!window.__xss }; })()`);
+  ok(v.text === "def f(z):\n    return z * z + 1  # step\n# <img src=x onerror=\"window.__xss = 1\">\n" && v.kw.includes("def") && v.kw.includes("return") && v.comment === "# step", "C1: a .py artifact is shown in colour (keywords, comment), its text exactly", v);
+  ok(!v.ta && v.label === "✎ Edit", "C1: read only (no field), with ✎ Edit", v);
+  ok(!v.img && !v.xss, "C1: markup in the file is text, never an element (no <img>, its onerror never runs)", v);
   await P.ev(`(document.querySelector('${HOST} .mode-toggle').click(), true)`);
   await P.until(`!!document.querySelector('${HOST} textarea.code-edit')`);
   const e = await P.ev(`(() => { const h = document.querySelector('${HOST}'), ta = h.querySelector('textarea.code-edit'), hl = h.querySelector('pre.code-hl'), b = h.querySelector('.mode-toggle'), r1 = ta.getBoundingClientRect(), r2 = hl.getBoundingClientRect(), s1 = getComputedStyle(ta), s2 = getComputedStyle(hl);
-    return { value: ta.value, focused: document.activeElement === ta, hlKw: [...hl.querySelectorAll('.hk')].map((x) => x.textContent), label: b.textContent, pressed: b.getAttribute('aria-pressed'), same: r1.left === r2.left && r1.top === r2.top && s1.font === s2.font && s1.paddingLeft === s2.paddingLeft && s1.paddingTop === s2.paddingTop && s1.lineHeight === s2.lineHeight, color: s1.color,
+    return { value: ta.value, focused: document.activeElement === ta, hlKw: [...hl.querySelectorAll('.hk')].map((x) => x.textContent), label: b.textContent, same: r1.left === r2.left && r1.top === r2.top && s1.font === s2.font && s1.paddingLeft === s2.paddingLeft && s1.paddingTop === s2.paddingTop && s1.lineHeight === s2.lineHeight, color: s1.color,
       d: [r1.left, r2.left, r1.top, r2.top, s1.font, s2.font, s1.paddingLeft, s2.paddingLeft, s1.paddingTop, s2.paddingTop, s1.lineHeight, s2.lineHeight] }; })()`);
-  ok(e.value === "def f(z):\n    return z * z + 1  # step\n" && e.focused && e.label === "View" && e.pressed === "true", "C2: ✎ Edit makes it a field, with its text, focused; the switch says View", e);
+  ok(e.value.startsWith("def f(z):\n    return z * z + 1  # step\n") && e.focused && e.label === "View", "C2: ✎ Edit makes it a field, with its text, focused; the switch says View", e);
   ok(e.hlKw.includes("def") && e.same && e.color === "rgba(0, 0, 0, 0)", "C2: the colours are behind the field's (transparent) text, in the same font, place and padding", e);
   await P.ev(`(() => { const t = document.querySelector('${HOST} textarea.code-edit'); t.setSelectionRange(t.value.length, t.value.length); return true; })()`);
   await P.send("Input.insertText", { text: "while True:\n" });
   await P.until(`document.querySelector('${HOST} .saved')?.textContent === 'Saved' && [...document.querySelectorAll('${HOST} pre.code-hl .hk')].some((x) => x.textContent === 'while')`, 10000).catch(() => {});
   const r = await H.call("workspace.read", { path: "/mandel.py" });
-  ok(JSON.stringify(r.result ?? r).includes("while True:"), "C2: typed text is saved to the file, and coloured as it is typed", r);
+  ok(JSON.stringify(r.result ?? r).includes("while True:"), "C2: typed text is saved to the file", r);
+  ok(await P.ev(`[...document.querySelectorAll('${HOST} pre.code-hl .hk')].some((x) => x.textContent === 'while')`), "C2: and coloured as it is typed (the new keyword)");
   await P.ev(`(document.querySelector('${HOST} .mode-toggle').click(), true)`);
   const back = await P.ev(`(() => { const h = document.querySelector('${HOST}'); return { ta: !!h.querySelector('textarea'), text: h.querySelector('pre.code-view')?.textContent ?? null }; })()`);
   ok(!back.ta && back.text?.endsWith("while True:\n"), "C3: View again shows the text as edited, read only", back);
