@@ -10,10 +10,11 @@
 //   3. Tab and Shift+Tab keep the focus in it, never on the page behind; Esc closes it unanswered, nothing allowed;
 //   4. asked again, a script's click on Allow does nothing; the person's press, once armed, allows /sub, and the cell
 //      run again writes /sub/out.txt;
-//   4b-4h. Allow once (the same run saves, nothing kept); Stop while it waits; a rename's second folder refused (nothing
+//   4b-4i. Allow once (the same run saves, nothing kept); Stop while it waits; a rename's second folder refused (nothing
 //      moves); the permissions changed while it waits, and another notebook shown: refused, nothing written; a folder
 //      taken away stays away in that interpreter, whatever is allowed or granted again before the next Run; an ask held
-//      in delivery while a Stop comes is answered no when it arrives (no prompt);
+//      in delivery while a Stop comes, or while a folder elsewhere is granted and taken away again, is answered no when
+//      it arrives (no prompt);
 //   5. a write at the top of the workspace: the prompt offers File > Permissions… and Don't allow, never Allow;
 //   5b. a delete and a new folder are said as what they are ("delete", "create the folder"), never "save";
 //   and as Safari (its user agent, whose sandbox doesn't run here: no runner page answers):
@@ -21,7 +22,8 @@
 //   and with the sandboxed runner working (Chromium's):
 //   7. the same wait relayed by the runner's frame: an Allow lets the same run save; Don't allow refuses it in that run;
 //   7b. there too, a folder taken away stays away in that interpreter (the same one, its variable kept);
-//   7c. an ask held in delivery while the permissions narrow is answered no when it arrives (no prompt).
+//   7c-7d. an ask held in delivery while the permissions narrow, or while a folder elsewhere is granted and taken away
+//      again, is answered no when it arrives (no prompt).
 //   bun web/build.ts && node web/share/test-run-bar.mjs
 import { spawn } from "node:child_process";
 import { createHash, randomBytes } from "node:crypto";
@@ -128,6 +130,25 @@ const WRITE = "try:\n    open('/sub/out.txt', 'w').write('hi')\n    print('wrote
 const grantsEdit = (P, fn) => P.ev(`(() => { const f = document.createElement('iframe'); document.body.append(f); const ls = f.contentWindow.localStorage; const r = JSON.parse(ls.getItem('sagebrush-grants')); const d = r.docs[window.sagebrush.notebook.snapshot().id ?? localStorage.getItem('sagebrush-current')]; d.write = (${fn})(d.write); ls.setItem('sagebrush-grants', JSON.stringify(r)); f.remove(); return JSON.stringify(d.write); })()`);
 const countPrompts = (P) => P.ev("(() => { window.__opened = 0; const d = document.querySelector('#filesbar'); if (!d.__counted) { const o = d.showModal.bind(d); d.showModal = () => { window.__opened++; o(); }; d.__counted = true; } return 1; })()");
 const genOf = (P) => P.ev("window.sagebrush.kernels.get(window.sagebrush.notebook.snapshot().id ?? localStorage.getItem('sagebrush-current'))?.generation?.() ?? null");
+// (SEC H2: a change asked about, the ask held in delivery, while a permission that doesn't touch this interpreter's
+// trees is granted and then taken away again (another tab): when the ask arrives it predates a permission change, so
+// it is answered no: no prompt ever opens, the run is refused, nothing written)
+async function heldAcrossUndo(P, path, label) {
+  await setCode(P, `try:\n    open('${path}', 'w').write('hi')\n    print('wrote')\nexcept PermissionError as e:\n    print('refused', type(e).__name__)`);
+  await countPrompts(P);
+  await P.ev("(window.sagebrush.kernel.holdMessages(new Promise((r) => (window.__release = r))), 1)");
+  await P.press("#runall");
+  await sleep(2500);
+  const granted = await grantsEdit(P, "(w) => [...w, '/unrelated']");
+  const undone = await grantsEdit(P, "(w) => w.filter((t) => t !== '/unrelated')");
+  await sleep(300);
+  await P.ev("(window.__release(), 1)");
+  await P.until("/refused|wrote|restarted/.test(document.querySelector('.cell .out')?.textContent ?? '')", 20000).catch(() => {});
+  await sleep(500);
+  const st = { ...(await state(P)), opened: await P.ev("window.__opened") };
+  const wrote = await P.ev(`${W}.stat(${JSON.stringify(path)}).then((e) => !!e, () => false)`);
+  ok(granted.includes('"/unrelated"') && !undone.includes('"/unrelated"') && st.opened === 0 && !st.prompt && /refused PermissionError/.test(st.outs[0]) && !wrote, `${label}. an ask held in delivery while an unrelated folder is granted and taken away again: on arrival answered no, no prompt ever opened, the run refused, nothing written: ` + J({ opened: st.opened, prompt: st.prompt, out: st.outs[0], wrote }));
+}
 async function revokedStaysAway(P, A, B, label, kept) {
   const q = JSON.stringify;
   await setCode(P, "import builtins\nbuiltins._sb_mark = 'same'\nprint('set')");
@@ -284,6 +305,9 @@ try {
   const s4h = { ...(await state(S)), opened: await S.ev("window.__opened") };
   ok(s4h.opened === 0 && !s4h.prompt && !/wrote/.test(s4h.outs[0]) && !(await S.ev(`${W}.stat("/rv/b.txt").then((e) => !!e, () => false)`)), "4h. an ask held in delivery, a Stop before it arrives: no prompt ever opened, nothing written: " + J({ opened: s4h.opened, prompt: s4h.prompt, out: s4h.outs[0] }));
 
+  // ---- 4i. held in delivery across a grant elsewhere and its undoing (SEC H2)
+  await heldAcrossUndo(S, "/rv/c.txt", "4i");
+
   // ---- 5. a write at the top of the workspace: File > Permissions… and Don't allow, never Allow
   await setCode(S, "try:\n    open('/top.txt', 'w').write('hi')\n    print('wrote')\nexcept PermissionError as e:\n    print('refused', type(e).__name__, e)");
   await S.press("#runall");
@@ -360,6 +384,8 @@ try {
   await sleep(500);
   const s7c = { ...(await state(R)), opened: await R.ev("window.__opened") };
   ok(!/\/rr2"/.test(narrowed7c) && s7c.opened === 0 && !s7c.prompt && /refused PermissionError/.test(s7c.outs[0]) && !(await R.ev(`${W}.stat("/rv2/a.txt").then((e) => !!e, () => false)`)), "7c. in the runner, an ask held in delivery while the permissions narrow: on arrival answered no, no prompt ever opened, the same run refused, nothing written: " + J({ opened: s7c.opened, prompt: s7c.prompt, out: s7c.outs[0] }));
+  // (7d: the same in the runner)
+  await heldAcrossUndo(R, "/rv2/d.txt", "7d");
 } catch (e) {
   failures++;
   console.log("FAIL", e.message);
