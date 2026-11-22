@@ -11,6 +11,7 @@
 //   4. asked again, a script's click on Allow does nothing; the person's press, once armed, allows /sub, and the cell
 //      run again writes /sub/out.txt;
 //   5. a write at the top of the workspace: the prompt offers File > Permissions… and Don't allow, never Allow;
+//   5b. a delete and a new folder are said as what they are ("delete", "create the folder"), never "save";
 //   and as Safari (its user agent, whose sandbox doesn't run here: no runner page answers):
 //   6. a notebook runs, no run bar, and its write is asked about in the same modal.
 //   bun web/build.ts && node web/share/test-run-bar.mjs
@@ -116,6 +117,7 @@ try {
   await appReady(S);
   // (the folder it will write to, before its notebook's interpreter starts: an interpreter gets the files at its start)
   await S.ev(`${W}.create("/sub/keep.txt", { content: new TextEncoder().encode("k") }).then(() => 1)`);
+  await S.ev(`${W}.create("/sub2/keep.txt", { content: new TextEncoder().encode("k") }).then(() => 1)`);
   await twoCells(S);
   const ran = await ranAll(S, ["42", "two"]);
   const s1 = await state(S);
@@ -165,6 +167,13 @@ try {
   const s5 = await state(S);
   ok(s5.text === "This notebook is trying to save top.txt at the top of your Sagebrush workspace. To allow that, use File > Permissions…" && J(s5.buttons) === J(["Don't allow", "File > Permissions…"]), "5. a write at the top: File > Permissions… and Don't allow, never Allow: " + J({ text: s5.text, buttons: s5.buttons }));
   await key(S, "Escape");
+  await sleep(300);
+
+  // ---- 5b. not a save: a delete and a new folder are said as what they are, never "save"
+  const said = async (code) => { await setCode(S, code); await S.press("#runall"); await promptOpen(S); const t = (await state(S)).text; await key(S, "Escape"); await sleep(300); return t; };
+  const del = await said("import os\ntry:\n    os.remove('/sub2/keep.txt')\nexcept PermissionError:\n    print('refused')");
+  const mk = await said("import os\ntry:\n    os.mkdir('/sub2/new')\nexcept PermissionError:\n    print('refused')");
+  ok(del === "This notebook is trying to delete keep.txt in /sub2 in this browser's Sagebrush workspace. If you allow it, run the cell again to delete it." && mk === "This notebook is trying to create the folder new in /sub2 in this browser's Sagebrush workspace. If you allow it, run the cell again to create it.", "5b. a delete and a new folder are said as what they are: " + J({ del, mk }));
 
   // ---- 6. as Safari: runs, no run bar, its write asked about in the same modal
   const F = await profilePage(true, "", { runner: false });

@@ -1177,7 +1177,7 @@ function makeKernel(owner) {
       // (a change the interpreter refused: the prompt for that path, for the document shown)
       if (m.fsRefused !== undefined) {
         // (a refusal the interpreter reports: a prompt only for a canonical path of this document's current interpreter)
-        if (owner !== null && owner === current.id && sender === k.worker && fsCanon(m.fsRefused)) filesPrompt(owner, gens.get(sender), m.fsRefused, m.why === "changed");
+        if (owner !== null && owner === current.id && sender === k.worker && fsCanon(m.fsRefused)) filesPrompt(owner, gens.get(sender), m.fsRefused, m.why === "changed", m.what);
         return true;
       }
       if (m.fsChanged === undefined && m.fsRename === undefined) return false;
@@ -2348,7 +2348,15 @@ const fsCanon = (p) => { try { return typeof p === "string" && p !== "/" && cano
 // made before one, even a change and its undoing, answers nothing: PROMPT934-3)
 const permRev = new Map();
 const revOf = (doc) => permRev.get(doc) ?? 0;
-function filesPrompt(doc, generation, path, changed) {
+// (what the refused change was, as the interpreter's file layer names it (web/shims/fs.ts mayChange), said as it is: a
+// save, a new folder, a delete, a move; anything else, or a name it doesn't send, "change")
+const FS_DOING = {
+  write: ["save", "save it"], append: ["save", "save it"], open: ["save", "save it"],
+  mkdir: ["create the folder", "create it"], unlink: ["delete", "delete it"], rmdir: ["delete the folder", "delete it"],
+  rename: ["move or rename", "make the change"],
+};
+function filesPrompt(doc, generation, path, changed, what) {
+  const [doing, done] = Object.hasOwn(FS_DOING, what) ? FS_DOING[what] : ["change", "make the change"];
   if (doc !== current.id || fbReq?.open) return; // (one at a time: further refusals only error)
   const now = perms.writeTrees(doc);
   const folder = path.slice(0, path.lastIndexOf("/")) || "/";
@@ -2365,14 +2373,14 @@ function filesPrompt(doc, generation, path, changed) {
   // (allowed now, but not for this interpreter: a widening waits for the next Run, which restarts it)
   if (changed || now.some((t) => coversW(t, path))) {
     fbReq = { open: false };
-    return say(changed ? "This notebook's permissions changed while it ran. Run the cell again." : `Saving ${name} is allowed now. Run the cell again to save it (the notebook's variables are cleared).`, ["fbok"]);
+    return say(changed ? "This notebook's permissions changed while it ran. Run the cell again." : `This change to ${shown(name)} is allowed now. Run the cell again to ${done} (the notebook's variables are cleared).`, ["fbok"]);
   }
   if (perms.deniedWrite(doc, path)) return; // (Don't allow: silent for the rest of the session)
   const req = { open: true, id: ++fbSeq, doc, generation, path, folder, trees: now.join("\n"), rev: revOf(doc), armedAt: performance.now() + FB_ARM, pressed: null };
   fbReq = req;
-  if (folder === "/") return say(`This notebook is trying to save ${shown(name)} at the top of ${whereIs("/")}. To allow that, use File > Permissions…`, ["fbperms", "fbdeny"]);
+  if (folder === "/") return say(`This notebook is trying to ${doing} ${shown(name)} at the top of ${whereIs("/")}. To allow that, use File > Permissions…`, ["fbperms", "fbdeny"]);
   $("#fballow").textContent = `Allow in ${shown(folder)}`;
-  say(`This notebook is trying to save ${shown(name)} in ${shown(whereIs(folder))}. If you allow it, run the cell again to save it.`, ["fballow", "fbonce", "fbdeny"]);
+  say(`This notebook is trying to ${doing} ${shown(name)} in ${shown(whereIs(folder))}. If you allow it, run the cell again to ${done}.`, ["fballow", "fbonce", "fbdeny"]);
 }
 // (an answer: only for the open request, still the current document's and interpreter's, the trees unchanged since it
 // opened, from a fresh trusted press on this same button that began after arming)
@@ -2398,7 +2406,7 @@ for (const id of ["fballow", "fbonce", "fbdeny", "fbperms"]) {
     const ok = id === "fbdeny" ? perms.deny(req.doc, "write", req.folder) : perms.grant(req.doc, "write", req.folder, { once: id === "fbonce" }).ok;
     filesBar(false);
     if (!ok) statusEl.textContent = "This browser couldn't keep that choice";
-    else if (id !== "fbdeny") statusEl.textContent = `Allowed in ${req.folder}: run the cell again to save it`;
+    else if (id !== "fbdeny") statusEl.textContent = `Allowed in ${req.folder}: run the cell again to make the change`;
   });
 }
 function filesShown() {
