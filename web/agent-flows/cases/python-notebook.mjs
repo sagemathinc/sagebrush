@@ -39,7 +39,7 @@ export default {
     const rd = await h.tool("workspace_read", { path: PATH });
     const doc = rd.structured?.result?.content?.json;
     h.ok(!rd.isError && Array.isArray(doc?.cells) && doc.cells.length === 2, "the agent reads its notebook back", rd.text);
-    // (on the Agents page, as sagebrush-agent 0.8.1 does where the page edits notebooks by cell: the cell inserted after
+    // (on the Agents page, as sagebrush-agent 0.8.2 does where the page edits notebooks by cell: the cell inserted after
     //  the last, from the read, the others and their outputs kept; with sagebrush-mcp, the whole notebook written)
     const wr = h.surface === "chat"
       ? await h.tool("workspace_edit_notebook", { path: PATH, base: rd.structured?.result?.rev, insert: [{ source: HIST, after: doc.cells.at(-1)?.id ?? null }] })
