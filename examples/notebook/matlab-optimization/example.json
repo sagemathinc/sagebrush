@@ -1,0 +1,17 @@
+{
+ "title": "Optimization (MATLAB)",
+ "summary": "Nonlinear equations with fsolve, unconstrained minimization with fminunc, curve fitting with lsqcurvefit, and a linear program with linprog.",
+ "tags": [
+  "calculus",
+  "data",
+  "plots"
+ ],
+ "level": "course",
+ "main": "main.ipynb",
+ "files": [
+  "main.ipynb"
+ ],
+ "mode": "matlab",
+ "author": "Sagebrush",
+ "license": "MIT"
+}

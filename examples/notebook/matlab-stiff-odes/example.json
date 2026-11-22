@@ -1,0 +1,16 @@
+{
+ "title": "Stiff differential equations (MATLAB)",
+ "summary": "Robertson's chemical kinetics and the van der Pol oscillator with ode15s and ode23s, and a differential-algebraic system with a mass matrix.",
+ "tags": [
+  "differential equations",
+  "plots"
+ ],
+ "level": "course",
+ "main": "main.ipynb",
+ "files": [
+  "main.ipynb"
+ ],
+ "mode": "matlab",
+ "author": "Sagebrush",
+ "license": "MIT"
+}
