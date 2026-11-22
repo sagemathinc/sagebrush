@@ -10,10 +10,14 @@
 //   3. Tab and Shift+Tab keep the focus in it, never on the page behind; Esc closes it unanswered, nothing allowed;
 //   4. asked again, a script's click on Allow does nothing; the person's press, once armed, allows /sub, and the cell
 //      run again writes /sub/out.txt;
+//   4b-4f. Allow once (the same run saves, nothing kept); Stop while it waits; a rename's second folder refused (nothing
+//      moves); the permissions changed while it waits, and another notebook shown: refused, nothing written;
 //   5. a write at the top of the workspace: the prompt offers File > Permissions… and Don't allow, never Allow;
 //   5b. a delete and a new folder are said as what they are ("delete", "create the folder"), never "save";
 //   and as Safari (its user agent, whose sandbox doesn't run here: no runner page answers):
-//   6. a notebook runs, no run bar, and its write is asked about in the same modal.
+//   6. a notebook runs, no run bar, and its write is asked about in the same modal;
+//   and with the sandboxed runner working (Chromium's):
+//   7. the same wait relayed by the runner's frame: an Allow lets the same run save; Don't allow refuses it in that run.
 //   bun web/build.ts && node web/share/test-run-bar.mjs
 import { spawn } from "node:child_process";
 import { createHash, randomBytes } from "node:crypto";
@@ -118,47 +122,107 @@ try {
   // (the folder it will write to, before its notebook's interpreter starts: an interpreter gets the files at its start)
   await S.ev(`${W}.create("/sub/keep.txt", { content: new TextEncoder().encode("k") }).then(() => 1)`);
   await S.ev(`${W}.create("/sub2/keep.txt", { content: new TextEncoder().encode("k") }).then(() => 1)`);
+  for (const f of ["/once/k.txt", "/stopped/k.txt", "/rn1/keep.txt", "/rn2/k.txt", "/chg/k.txt", "/sw/k.txt"]) await S.ev(`${W}.create(${JSON.stringify(f)}, { content: new TextEncoder().encode("k") }).then(() => 1)`);
   await twoCells(S);
   const ran = await ranAll(S, ["42", "two"]);
   const s1 = await state(S);
   ok(ran && !s1.runbar && s1.files === false && !s1.prompt, "1. no run gate: a notebook whose file changes are off runs where the sandbox doesn't start (42, two), no run bar, nothing granted: " + J(s1));
 
-  // ---- 2. a write it may not make: refused, and the prompt asks, in a modal
+  // ---- 2. a write it may not make: the run waits on it, and the prompt asks, in a modal (the write-wait design)
   await setCode(S, WRITE);
   const top0 = await S.ev("Math.round(window.sagebrush.notebook.cells()[0].ta.getBoundingClientRect().top)");
   await S.press("#runall");
-  await S.until("/refused/.test(document.querySelector('.cell .out')?.textContent ?? '')", 60000).catch(() => {});
   const open2 = await promptOpen(S);
+  await sleep(500);
   const s2 = await state(S);
   const top1 = await S.ev("Math.round(window.sagebrush.notebook.cells()[0].ta.getBoundingClientRect().top)");
-  ok(open2 && s2.modal && s2.outs[0].startsWith("refused PermissionError") && !(await S.ev(`${W}.stat("/sub/out.txt").then((e) => !!e, () => false)`)), "2. the write is refused, nothing written, and a modal asks: " + J({ modal: s2.modal, out: s2.outs[0] }));
-  ok(s2.text === "This notebook is trying to save out.txt in /sub in this browser's Sagebrush workspace. If you allow it, run the cell again to save it." && J(s2.buttons) === J(["Don't allow", "Allow once", "Allow in /sub"]), "...one plain sentence naming the file and the folder, and its three answers: " + J({ text: s2.text, buttons: s2.buttons }));
+  ok(open2 && s2.modal && s2.outs[0] === "" && !(await S.ev(`${W}.stat("/sub/out.txt").then((e) => !!e, () => false)`)), "2. the write waits, nothing written, nothing printed yet, and a modal asks: " + J({ modal: s2.modal, out: s2.outs[0] }));
+  ok(s2.text === "This notebook is trying to save out.txt in /sub in this browser's Sagebrush workspace." && J(s2.buttons) === J(["Don't allow", "Allow once", "Allow in /sub"]), "...one plain sentence naming the file and the folder (no running again: the run goes on), and its three answers: " + J({ text: s2.text, buttons: s2.buttons }));
   ok(s2.focus === "filesbar" && top1 === top0, "...the dialog itself focused (an Enter answers nothing), the notebook not moved: " + J({ focus: s2.focus, top0, top1 }));
 
-  // ---- 3. the focus stays in it; Esc closes it unanswered
+  // ---- 3. the focus stays in it; Esc: not allowed, and the same run is refused at once
   const seen = [];
   for (const shift of [true, true, true, false, false, false, false, false]) { await key(S, "Tab", shift); seen.push(await S.ev("(() => { const a = document.activeElement; return a === document.body || a === null ? 'body' : document.querySelector('#filesbar').contains(a) ? 'dialog:' + (a.id || a.tagName) : 'behind:' + (a.id || a.tagName); })()")); }
   ok(!seen.some((w) => w.startsWith("behind:")) && seen.some((w) => w === "dialog:fballow"), "3. Tab and Shift+Tab keep the focus in the dialog: " + J(seen));
   await key(S, "Escape");
-  await sleep(300);
+  await S.until("/refused/.test(document.querySelector('.cell .out')?.textContent ?? '')", 15000).catch(() => {});
   const s3 = await state(S);
-  ok(!s3.prompt && s3.files === false && (await S.ev("window.sagebrush.permissions().grants.write.stored.length + window.sagebrush.permissions().grants.write.once.length")) === 0, "...Esc closes it, unanswered: nothing allowed: " + J({ prompt: s3.prompt, grants: await S.ev("window.sagebrush.permissions().grants") }));
+  ok(!s3.prompt && s3.outs[0].startsWith("refused PermissionError") && (await S.ev("window.sagebrush.permissions().grants.write.stored.length + window.sagebrush.permissions().grants.write.once.length")) === 0 && !(await S.ev(`${W}.stat("/sub/out.txt").then((e) => !!e, () => false)`)), "...Esc: nothing allowed, and that same run's write is refused (PermissionError), nothing written: " + J({ prompt: s3.prompt, out: s3.outs[0] }));
 
-  // ---- 4. asked again: a script's click allows nothing; the person's press, once armed, allows /sub; run again: saved
+  // ---- 4. asked again: a script's click allows nothing; the person's press, once armed, allows /sub, and the SAME run
+  //      saves it, with no second run
   await S.press("#runall");
   await promptOpen(S);
   await sleep(700);
   await S.ev("(document.querySelector('#fballow').click(), 1)");
   await sleep(300);
   const s4a = await state(S);
-  ok(s4a.prompt && !/\/sub/.test(await S.ev("JSON.stringify(window.sagebrush.permissions().grants.write)")), "4. a script's click on Allow allows nothing; the prompt still asks");
+  ok(s4a.prompt && s4a.outs[0] === "" && !/\/sub/.test(await S.ev("JSON.stringify(window.sagebrush.permissions().grants.write)")), "4. a script's click on Allow allows nothing; the prompt still asks, the run still waits");
   await S.press("#fballow");
-  await sleep(300);
-  const trees = await S.ev("JSON.stringify(window.sagebrush.permissions().grants.write)");
-  ok(!(await state(S)).prompt && /\/sub/.test(trees), "...the person's press, once armed, allows /sub: " + trees.slice(0, 200));
-  await S.press("#runall");
   const saved = await S.until(`${W}.stat("/sub/out.txt").then((e) => !!e, () => false)`, 30000).then(() => true, () => false);
-  ok(saved && /wrote/.test((await state(S)).outs[0]), "...and the cell run again saves /sub/out.txt: " + (await state(S)).outs[0]);
+  await S.until("/wrote/.test(document.querySelector('.cell .out')?.textContent ?? '')", 10000).catch(() => {});
+  const trees = await S.ev("JSON.stringify(window.sagebrush.permissions().grants.write)");
+  ok(saved && /wrote/.test((await state(S)).outs[0]) && !(await state(S)).prompt && /"stored":\["\/sub"\]/.test(trees), "...the person's press, once armed, allows /sub (kept), and the same run saves /sub/out.txt: " + J({ out: (await state(S)).outs[0], trees }));
+
+  // ---- 4b. Allow once: the same run saves; nothing kept
+  await setCode(S, "try:\n    open('/once/a.txt', 'w').write('hi')\n    print('wrote')\nexcept PermissionError as e:\n    print('refused', type(e).__name__, e)");
+  await S.press("#runall");
+  await promptOpen(S);
+  await sleep(700);
+  await S.press("#fbonce");
+  const onceSaved = await S.until(`${W}.stat("/once/a.txt").then((e) => !!e, () => false)`, 30000).then(() => true, () => false);
+  const g4b = await S.ev("JSON.stringify(window.sagebrush.permissions().grants.write)");
+  ok(onceSaved && !/"stored":\[[^\]]*\/once/.test(g4b), "4b. Allow once: the same run saves /once/a.txt, and nothing is kept for /once: " + g4b);
+
+  // ---- 4c. Stop while the prompt waits: the run ends, nothing written; the prompt closes
+  await setCode(S, "try:\n    open('/stopped/a.txt', 'w').write('hi')\n    print('wrote')\nexcept PermissionError as e:\n    print('refused', type(e).__name__, e)");
+  await S.press("#runall");
+  await promptOpen(S);
+  await S.ev("(window.sagebrush.kernel.interrupt?.(), 1)");
+  await sleep(1500);
+  const s4c = await state(S);
+  ok(!s4c.prompt && !/wrote/.test(s4c.outs[0]) && !(await S.ev(`${W}.stat("/stopped/a.txt").then((e) => !!e, () => false)`)), "4c. Stop while the prompt waits: the run ends, nothing written, the prompt closed: " + J({ prompt: s4c.prompt, out: s4c.outs[0] }));
+
+  // ---- 4d. a rename across two folders: its first folder allowed, its second refused: nothing moves
+  await setCode(S, "import os\ntry:\n    os.rename('/rn1/keep.txt', '/rn2/keep.txt')\n    print('moved')\nexcept PermissionError as e:\n    print('refused', type(e).__name__)");
+  await S.press("#runall");
+  await promptOpen(S);
+  await sleep(700);
+  const first = (await state(S)).text;
+  await S.press("#fballow");
+  await sleep(500);
+  await promptOpen(S);
+  const second = (await state(S)).text;
+  await sleep(700);
+  await S.press("#fbdeny");
+  await S.until("/refused|moved/.test(document.querySelector('.cell .out')?.textContent ?? '')", 15000).catch(() => {});
+  const rn = { out: (await state(S)).outs[0], src: await S.ev(`${W}.stat("/rn1/keep.txt").then((e) => !!e, () => false)`), dst: await S.ev(`${W}.stat("/rn2/keep.txt").then((e) => !!e, () => false)`) };
+  ok(/rn1/.test(first) && /rn2/.test(second) && /refused PermissionError/.test(rn.out) && rn.src && !rn.dst, "4d. a rename's first folder allowed, its second refused: asked for each, refused, nothing moved: " + J({ first, second, ...rn }));
+
+  // ---- 4e. the permissions changed while the run waits (another tab's, a storage event): the prompt closes, unanswered,
+  //      and the run is refused (its request is over; a later press answers nothing)
+  await setCode(S, "try:\n    open('/chg/a.txt', 'w').write('hi')\n    print('wrote')\nexcept PermissionError as e:\n    print('refused', type(e).__name__)");
+  await S.press("#runall");
+  await promptOpen(S);
+  await S.ev("(() => { const f = document.createElement('iframe'); document.body.append(f); const ls = f.contentWindow.localStorage; ls.setItem('sagebrush-grants', JSON.stringify(JSON.parse(ls.getItem('sagebrush-grants') ?? '{}'), null, 1)); f.remove(); return 1; })()");
+  await S.until("/refused|wrote/.test(document.querySelector('.cell .out')?.textContent ?? '')", 15000).catch(() => {});
+  const s4e = await state(S);
+  ok(!s4e.prompt && /refused PermissionError/.test(s4e.outs[0]) && !(await S.ev(`${W}.stat("/chg/a.txt").then((e) => !!e, () => false)`)), "4e. the permissions changed while the run waits: the prompt closes, the run is refused, nothing written: " + J({ prompt: s4e.prompt, out: s4e.outs[0] }));
+
+  // ---- 4f. another notebook shown while the run waits: answered no; back in the first, its cell says it was refused
+  await setCode(S, "try:\n    open('/sw/a.txt', 'w').write('hi')\n    print('wrote')\nexcept PermissionError as e:\n    print('refused', type(e).__name__)");
+  const firstId = await S.ev("window.sagebrush.notebook.snapshot().id ?? localStorage.getItem('sagebrush-current')");
+  await S.press("#runall");
+  await promptOpen(S);
+  await newNotebook(S);
+  const gone = await S.ev("document.querySelector('#filesbar').hidden && !window.sagebrush.filesPrompt()");
+  await S.ev(`window.sagebrush.open(${JSON.stringify(firstId)}).then(() => 1)`);
+  await S.until(`(window.sagebrush.notebook.snapshot().id ?? localStorage.getItem('sagebrush-current')) === ${JSON.stringify(firstId)}`, 20000).catch(() => {});
+  // (its interpreter isn't left waiting: the wait was answered no, so the next run goes at once)
+  await setCode(S, "print('alive')");
+  await S.press("#runall");
+  const alive = await S.until("/alive/.test(document.querySelector('.cell .out')?.textContent ?? '')", 20000).then(() => true, () => false);
+  ok(gone && alive && !(await S.ev(`${W}.stat("/sw/a.txt").then((e) => !!e, () => false)`)), "4f. another notebook shown while the run waits: the prompt goes, nothing written, and back there its interpreter runs the next cell at once (the wait was answered no): " + J({ gone, alive }));
 
   // ---- 5. a write at the top of the workspace: File > Permissions… and Don't allow, never Allow
   await setCode(S, "try:\n    open('/top.txt', 'w').write('hi')\n    print('wrote')\nexcept PermissionError as e:\n    print('refused', type(e).__name__, e)");
@@ -173,7 +237,7 @@ try {
   const said = async (code) => { await setCode(S, code); await S.press("#runall"); await promptOpen(S); const t = (await state(S)).text; await key(S, "Escape"); await sleep(300); return t; };
   const del = await said("import os\ntry:\n    os.remove('/sub2/keep.txt')\nexcept PermissionError:\n    print('refused')");
   const mk = await said("import os\ntry:\n    os.mkdir('/sub2/new')\nexcept PermissionError:\n    print('refused')");
-  ok(del === "This notebook is trying to delete keep.txt in /sub2 in this browser's Sagebrush workspace. If you allow it, run the cell again to delete it." && mk === "This notebook is trying to create the folder new in /sub2 in this browser's Sagebrush workspace. If you allow it, run the cell again to create it.", "5b. a delete and a new folder are said as what they are: " + J({ del, mk }));
+  ok(del === "This notebook is trying to delete keep.txt in /sub2 in this browser's Sagebrush workspace." && mk === "This notebook is trying to create the folder new in /sub2 in this browser's Sagebrush workspace.", "5b. a delete and a new folder are said as what they are: " + J({ del, mk }));
 
   // ---- 6. as Safari: runs, no run bar, its write asked about in the same modal
   const F = await profilePage(true, "", { runner: false });
@@ -187,6 +251,32 @@ try {
   const open6 = await promptOpen(F);
   const s6 = await state(F);
   ok(ran6 && open6 && !s6.runbar && s6.files === false && /is trying to save out\.txt in \/sub/.test(s6.text), "6. as Safari: the notebook runs, no run bar, and its write is asked about in the modal: " + J({ ran6, text: s6.text }));
+
+  // ---- 7. the sandboxed runner (Chromium's, working): the same wait, relayed by its frame (web/runner/index.html):
+  //      the write waits, an Allow lets the same run save; another write, Don't allow: refused in that run
+  const R = await profilePage(false, "", { runner: true });
+  await R.go(dev.site + "/");
+  await appReady(R);
+  for (const f of ["/rsub/k.txt", "/rno/k.txt"]) await R.ev(`${W}.create(${JSON.stringify(f)}, { content: new TextEncoder().encode("k") }).then(() => 1)`);
+  await twoCells(R);
+  await setCode(R, "try:\n    open('/rsub/out.txt', 'w').write('hi')\n    print('wrote')\nexcept PermissionError as e:\n    print('refused', type(e).__name__)");
+  await R.press("#runall");
+  const open7 = await promptOpen(R);
+  await sleep(700);
+  const w7 = await R.ev("({ runner: !!window.sagebrush.kernel?.worker?.frame, out: document.querySelector('.cell .out')?.textContent ?? '' })");
+  await R.press("#fballow");
+  const saved7 = await R.until(`${W}.stat("/rsub/out.txt").then((e) => !!e, () => false)`, 30000).then(() => true, () => false);
+  await R.until("/wrote/.test(document.querySelector('.cell .out')?.textContent ?? '')", 10000).catch(() => {});
+  const s7 = await state(R);
+  ok(open7 && w7.runner && w7.out.trim() === "" && saved7 && /wrote/.test(s7.outs[0]), "7. in the sandboxed runner: the write waits (nothing printed), an Allow lets the same run save /rsub/out.txt: " + J({ runner: w7.runner, out: s7.outs[0] }));
+  await setCode(R, "try:\n    open('/rno/out.txt', 'w').write('hi')\n    print('wrote')\nexcept PermissionError as e:\n    print('refused', type(e).__name__)");
+  await R.press("#runall");
+  await promptOpen(R);
+  await sleep(700);
+  await R.press("#fbdeny");
+  await R.until("/refused|wrote/.test(document.querySelector('.cell .out')?.textContent ?? '')", 15000).catch(() => {});
+  const s7b = await state(R);
+  ok(/refused PermissionError/.test(s7b.outs[0]) && !(await R.ev(`${W}.stat("/rno/out.txt").then((e) => !!e, () => false)`)), "...Don't allow: refused in that same run, nothing written: " + J(s7b.outs[0]));
 } catch (e) {
   failures++;
   console.log("FAIL", e.message);

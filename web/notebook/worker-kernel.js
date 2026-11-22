@@ -565,6 +565,20 @@ export class WorkerKernel {
     if (this.epochWord) Atomics.store(this.epochWord, 0, p.epoch);
     this.post({ fsWrite: p });
   }
+  /** The answer to a worker's {fsAsk, buffer} (web/worker.ts: a change it waits on): `policy` ({epoch, state, trees})
+   * allows it, null doesn't. A plain worker's buffer is here: the epoch stored in this page's word FIRST, then the
+   * answer written, and only for the current worker; a runner's or the engine's buffer is with its holder, which does
+   * the same on {runnerAsk} (web/runner/index.html, app/engine/serve.mjs). Answered once per request. */
+  answerAsk(m, w, policy) {
+    const key = m?.fsAsk?.key;
+    if (typeof key !== "string") return;
+    const answer = policy ? JSON.stringify({ key, policy }) : null;
+    if (typeof SharedArrayBuffer === "function" && m.buffer instanceof SharedArrayBuffer) {
+      const allow = !!answer && w === this.worker && !!this.epochWord;
+      if (allow) Atomics.store(this.epochWord, 0, policy.epoch);
+      answerInput(m.buffer, () => {})(allow ? answer : null);
+    } else w?.postMessage({ runnerAsk: key, epoch: policy ? policy.epoch : null, answer });
+  }
   /** Whether a run in flight sees a new epoch at once (a word shared with this page, or with the runner's frame); false
    * without SharedArrayBuffer, where only ending the interpreter stops a run's changes at once. */
   get sharesEpoch() { return !!this.epochShared; }

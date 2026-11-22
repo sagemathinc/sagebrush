@@ -125,6 +125,9 @@ try {
   const until = async (expr, ms = 20000) => { const t = Date.now(); while (Date.now() - t < ms) { if (await ev(expr).catch(() => false)) return true; await sleep(100); } return false; };
   const go = async (q) => { await ev("window.__old = 1").catch(() => {}); await send("Page.navigate", { url: origin + "/" + q }); await sleep(300); return until("!window.__old && !!window.sagebrush?.workspace", 60000); };
   for (const m of ["Page.enable", "Runtime.enable", "Network.enable", "Log.enable"]) await send(m);
+  // (the agent's notebook's writes it may not make are refused at once here, as where a run can't wait for the person's
+  // answer: the page's loopback switch (web/index.html ASK_WAIT); a run that waits on its prompt is test-run-bar's)
+  await send("Page.addScriptToEvaluateOnNewDocument", { source: "try { localStorage.setItem('sagebrush-ask', '0'); } catch {}" });
   const W = "window.sagebrush.workspace";
   const chunk = (u) => /sagebrush-agent\.js/.test(u);
   // (SHOT_DIR: screenshots for a review, at the moments below)
