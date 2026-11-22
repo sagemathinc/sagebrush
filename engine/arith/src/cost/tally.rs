@@ -218,25 +218,28 @@ pub fn biggcd_units(la: usize, lb: usize) -> Units {
     one(Family::Gcd, n)
 }
 
-/// Units of the check on a BigInt extended gcd's coefficients, x a + y b
-/// = g, for operands of `la` and `lb` limbs: the two products (x has about
-/// `lb` limbs and multiplies a, y about `la` and multiplies b:
-/// `bigmul_units(la, lb)` each, MulSchool) and the sum's compare with g
-/// (AddSub, `la + lb`).
-pub fn xgcd_check_units(la: usize, lb: usize) -> Units {
+/// Units of the certificate on a BigInt extended gcd's result, for
+/// operands of `la` and `lb` limbs and a gcd g of `lg`: x a + y b = g (the
+/// two products, x of about `lb` limbs by a and y of about `la` by b:
+/// `bigmul_units(la, lb)` each, MulSchool; the sum's compare with g,
+/// AddSub, `la + lb`), and g dividing a and b (two exact divisions,
+/// `bigdiv_units(la, lg)` and `bigdiv_units(lb, lg)`, Div).
+pub fn xgcd_check_units(la: usize, lb: usize, lg: usize) -> Units {
     let mut u = bigmul_units(la, lb);
     u.add(&bigmul_units(la, lb));
     u.add(&one(Family::AddSub, la.saturating_add(lb) as u64));
+    u.add(&bigdiv_units(la, lg));
+    u.add(&bigdiv_units(lb, lg));
     u
 }
 
 /// Units of a checked BigInt extended gcd (`extended_gcd_metered`): the gcd
-/// ([`biggcd_units`]) and the check on its coefficients
-/// ([`xgcd_check_units`]).  Plain gcds, which do no check, keep
-/// `biggcd_units`.
-pub fn bigxgcd_units(la: usize, lb: usize) -> Units {
+/// ([`biggcd_units`]) and the certificate on its result
+/// ([`xgcd_check_units`], with the gcd's limbs: charged after the call).
+/// Plain gcds, which do no check, keep `biggcd_units`.
+pub fn bigxgcd_units(la: usize, lb: usize, lg: usize) -> Units {
     let mut u = biggcd_units(la, lb);
-    u.add(&xgcd_check_units(la, lb));
+    u.add(&xgcd_check_units(la, lb, lg));
     u
 }
 

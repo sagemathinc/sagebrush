@@ -619,7 +619,7 @@ pub fn hnf_mod(rows: &[Vec<i64>], n: usize, d0: &BigInt) -> Vec<Vec<BigInt>> {
             let g = e.gcd.clone();
             let (wi, vi) = (&w[i][i] / &g, &v[i] / &g);
             let (lw, lv, lg) = (limbs(&w[i][i]), limbs(&v[i]), limbs(&g));
-            acc.add(bigxgcd_units(lw, lv));
+            acc.add(bigxgcd_units(lw, lv, lg));
             acc.add(xgcd_fallback_units(fallback.as_ref()));
             acc.add(bigdiv_units(lw, lg));
             acc.add(bigdiv_units(lv, lg));

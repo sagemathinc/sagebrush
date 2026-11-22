@@ -1185,7 +1185,7 @@ fn trailing<R: Zn>(ring: &R, nm: &ZMat, delta: &BigInt, d: &BigInt, k: usize, ac
                 let (e, fallback) = sagebrush_bigint::extended_gcd_metered(&sj, &m);
                 // (the check on its coefficients, and the fallback when it
                 // ran, on either path)
-                acc.add(crate::cost::xgcd_check_units(limbs(&sj), limbs(&m)));
+                acc.add(crate::cost::xgcd_check_units(limbs(&sj), limbs(&m), limbs(&e.gcd)));
                 acc.add(crate::cost::xgcd_fallback_units(fallback.as_ref()));
                 if R::WORD {
                     let (mut a, mut b) = (sj.to_i128().unwrap_or(0), m.to_i128().unwrap_or(1));

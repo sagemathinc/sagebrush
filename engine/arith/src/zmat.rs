@@ -1346,8 +1346,8 @@ pub fn hermite_cyclic(a: &ZMat) -> Option<ZMat> {
     let mut g = d.clone();
     let mut mu = vec![BigInt::zero(); xs.len()];
     for (j, x) in xs.iter().enumerate() {
-        acc.add(crate::cost::bigxgcd_units(limbs(&g), limbs(&x[n - 1])));
         let (e, fallback) = sagebrush_bigint::extended_gcd_metered(&g, &x[n - 1]);
+        acc.add(crate::cost::bigxgcd_units(limbs(&g), limbs(&x[n - 1]), limbs(&e.gcd)));
         acc.add(crate::cost::xgcd_fallback_units(fallback.as_ref()));
         for m in mu.iter() {
             acc.add(bigmul_units(limbs(m), limbs(&e.x)));

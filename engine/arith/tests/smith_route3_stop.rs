@@ -141,7 +141,7 @@ fn row0(want: &mut [u64; FAMILIES], g: &BigInt) {
         let le = limbs(g);
         // (gcd_cofactor_e: the extended gcd with the check on its
         // coefficients)
-        units(want, bigxgcd_units(le, 1));
+        units(want, bigxgcd_units(le, 1, 1));
         units(want, bigdiv_units(2 * le, le));
         let half = g / b(2);
         for _ in 0..2 {

@@ -377,9 +377,9 @@ fn gcd_cofactor_e_values_and_units() {
     assert_eq!(none, 0, "the big path counts its own");
     // (the extended gcd at e's and x's limbs with the check on its
     // coefficients, the cofactor's reduction modulo e)
-    let pin = [20, 0, 30, 0, 32, 0, 0, 7, 0, 0];
+    let pin = [20, 0, 40, 0, 32, 0, 0, 7, 0, 0];
     let (le, lx) = (limbs(&e), limbs(&x));
-    let mut want = crate::cost::bigxgcd_units(le, lx);
+    let mut want = crate::cost::bigxgcd_units(le, lx, limbs(&g));
     want.add(&bigdiv_units(2 * le, le));
     assert_eq!((b.take(), want.0), (pin, pin), "the big path's charge");
     assert_eq!(b.take(), [0; FAMILIES], "taken");

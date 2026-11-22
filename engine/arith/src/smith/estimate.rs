@@ -76,8 +76,8 @@ pub const FITTED: Constants = Constants {
     part_a_cubic: 0.927,
     multiplier: 0.92,
     vinv_of_delta: 1.5,
-    scale: [0.548, 0.712, 0.837, 0.439],
-    scale_route3: [0.567, 0.579],
+    scale: [0.548, 0.711, 0.837, 0.44],
+    scale_route3: [0.568, 0.58],
     fit_head: "f7c3c93cd71f4d73df5e30851e2d30feb71226bc",
     fit_from: "the estimate test's training corpus (seed 1); the multiplier from route 2's phase data",
 };
@@ -354,7 +354,7 @@ pub fn cyclic_model(n: usize, ld: usize, ln: usize, attempts: u64, fold: usize, 
             for e in 0..entries {
                 // (the unit combination's extended gcd, checked on its
                 // coefficients)
-                u.add_saturating(&bigxgcd_units(if e == 0 { ld } else { 1 }, ld));
+                u.add_saturating(&bigxgcd_units(if e == 0 { ld } else { 1 }, ld, 1));
                 if e + 1 == entries && t + 1 == attempts {
                     {
                         let mut one3 = Units::default();
@@ -547,7 +547,7 @@ pub fn trailing_model(n: usize, k: usize, ld: usize, ln: usize, attempts: u64, w
     // (the k inverses of s_j / g_j modulo d_j: their extended gcds' check,
     // on either path)
     for j in 0..k {
-        u.add_saturating(&xgcd_check_units(dl(j), dl(j)));
+        u.add_saturating(&xgcd_check_units(dl(j), dl(j), 1));
     }
     times(&mut u, size_product(&[top, k]), &c_entry);
     op(&mut u, size_product(&[k, k, k, 4]));

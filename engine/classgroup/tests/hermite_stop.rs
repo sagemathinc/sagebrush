@@ -121,7 +121,7 @@ fn a_stop_charges_only_the_work_before_it() {
     let (lx, ly, lg) = (limbs(&e.x), limbs(&e.y), limbs(&e.gcd));
     let (lwi, lvi) = (limbs(&(&d / &e.gcd)), limbs(&(&x / &e.gcd)));
     // (the extended gcd, checked on its coefficients)
-    add(&mut want, bigxgcd_units(ld, limbs(&x)));
+    add(&mut want, bigxgcd_units(ld, limbs(&x), lg));
     add(&mut want, bigdiv_units(ld, lg));
     add(&mut want, bigdiv_units(limbs(&x), lg));
     want[Family::Move as usize] += 2 * n as u64;

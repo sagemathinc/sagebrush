@@ -136,3 +136,30 @@ fn the_checked_extended_gcd_matches_the_reference() {
     }
     println!("{cases} cases in {:.2} s", t0.elapsed().as_secs_f64());
 }
+
+/// The certificates themselves: the identity alone would pass a multiple of
+/// the gcd with scaled coefficients (2 g, 2 x, 2 y); divisibility rejects
+/// it, and the sign a negated gcd. An inverse's absence needs g > 1
+/// dividing a and m (each check a row of its own).
+#[test]
+fn the_certificates_reject_a_wrong_gcd() {
+    use dashu_int::IBig;
+    use sagebrush_bigint::{modinv_certified, xgcd_certified};
+    let (p, a) = pair();
+    let (pi, ai) = (p.0.clone(), a.0.clone());
+    let (g, x, y) = sagebrush_bigint::xgcd_euclid(&pi, &ai, &mut vec![]);
+    assert!(xgcd_certified(&pi, &ai, &g, &x, &y));
+    let two = IBig::from(2);
+    assert!(!xgcd_certified(&pi, &ai, &(&g * &two), &(&x * &two), &(&y * &two)), "a multiple of the gcd");
+    assert!(!xgcd_certified(&pi, &ai, &g, &(&x + IBig::ONE), &y), "a wrong coefficient");
+    assert!(!xgcd_certified(&IBig::from(6), &IBig::from(4), &IBig::from(4), &IBig::from(2), &IBig::from(-2)), "g = 4 fails to divide 6");
+    // inverses: 3 mod 7 is 5; 6 mod 9 has none (g = 3); g = 3 claimed for 4 mod 9
+    assert!(modinv_certified(&IBig::from(3), &IBig::from(7), &IBig::ONE, &IBig::from(5)));
+    assert!(!modinv_certified(&IBig::from(3), &IBig::from(7), &IBig::ONE, &IBig::from(4)));
+    assert!(modinv_certified(&IBig::from(6), &IBig::from(9), &IBig::from(3), &IBig::ZERO));
+    assert!(!modinv_certified(&IBig::from(4), &IBig::from(9), &IBig::from(3), &IBig::ZERO), "a claimed gcd that does not divide a");
+    assert!(!modinv_certified(&IBig::from(3), &IBig::from(10), &IBig::from(3), &IBig::ZERO), "a claimed gcd that does not divide m");
+    // a negative g (the negated gcd with negated coefficients) is not
+    // certified: the gcd is positive
+    assert!(!xgcd_certified(&pi, &ai, &-&g, &-&x, &-&y), "a negative gcd");
+}

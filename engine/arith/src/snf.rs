@@ -284,10 +284,10 @@ impl Zn for Big {
         r.is_zero().then_some(q)
     }
     fn bezout(&self, p: &BigInt, a: &BigInt, _: &mut u64) -> (BigInt, BigInt, BigInt, BigInt) {
-        self.count(bigxgcd_units(limbs(p), limbs(a)));
-        self.count(bigdiv_units(2 * self.le, self.le));
-        self.count(bigdiv_units(2 * self.le, self.le));
         let (eg, fallback) = sagebrush_bigint::extended_gcd_metered(p, a);
+        self.count(bigxgcd_units(limbs(p), limbs(a), limbs(&eg.gcd)));
+        self.count(bigdiv_units(2 * self.le, self.le));
+        self.count(bigdiv_units(2 * self.le, self.le));
         self.count(xgcd_fallback_units(fallback.as_ref()));
         (eg.x.mod_floor(&self.e), eg.y.mod_floor(&self.e), a / &eg.gcd, p / &eg.gcd)
     }
@@ -304,9 +304,9 @@ impl Zn for Big {
             self.count(bigdiv_units(2 * self.le, self.le));
             return (self.e.clone(), BigInt::zero());
         }
-        self.count(bigxgcd_units(self.le, limbs(x)));
-        self.count(bigdiv_units(2 * self.le, self.le));
         let (eg, fallback) = sagebrush_bigint::extended_gcd_metered(x, &self.e);
+        self.count(bigxgcd_units(self.le, limbs(x), limbs(&eg.gcd)));
+        self.count(bigdiv_units(2 * self.le, self.le));
         self.count(xgcd_fallback_units(fallback.as_ref()));
         (eg.gcd, eg.x.mod_floor(&self.e))
     }
@@ -337,8 +337,8 @@ impl Zn for Big {
             if yj.is_zero() {
                 continue;
             }
-            self.count(bigxgcd_units(limbs(&g), limbs(yj)));
             let (eg, fallback) = sagebrush_bigint::extended_gcd_metered(&g, yj);
+            self.count(bigxgcd_units(limbs(&g), limbs(yj), limbs(&eg.gcd)));
             self.count(xgcd_fallback_units(fallback.as_ref()));
             let s = eg.x.mod_floor(&self.e);
             let ls = limbs(&s);

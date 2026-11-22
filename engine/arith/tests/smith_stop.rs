@@ -219,7 +219,7 @@ fn a_stop_charges_only_the_work_before_it() {
     // (each inverse's extended gcd checked on its coefficients: one-limb
     // operands)
     for _ in 0..2 {
-        for (x, y) in want.iter_mut().zip(xgcd_check_units(1, 1).0) {
+        for (x, y) in want.iter_mut().zip(xgcd_check_units(1, 1, 1).0) {
             *x += y;
         }
     }
@@ -290,7 +290,7 @@ fn a_stop_charges_only_the_work_before_it() {
     want.0[Family::Move as usize] += 3 + (2 + 2);
     want.add(&bigdiv_units(l1, lq));
     // (the bezout's extended gcd, checked on its coefficients)
-    want.add(&bigxgcd_units(lq, l1));
+    want.add(&bigxgcd_units(lq, l1, 1));
     want.add(&bigdiv_units(2 * ld, ld));
     want.add(&bigdiv_units(2 * ld, ld));
     for (xr, xj) in [(&q, &BigInt::from(1)), (&BigInt::from(0), &BigInt::from(1))] {

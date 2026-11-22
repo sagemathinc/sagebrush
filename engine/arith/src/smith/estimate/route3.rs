@@ -167,13 +167,13 @@ fn compress(s: &Side, side: &str, out: &mut Vec<(String, Units)>) {
             ech.0[ma] = ech.0[ma].saturating_add(eu + others * 2 * r as u64 + 1 + r as u64);
         } else {
             let mut step = Units::default();
-            step.add_saturating(&bigxgcd_units(1, s.lg));
+            step.add_saturating(&bigxgcd_units(1, s.lg, 1));
             step.add_saturating(&bigdiv_units(2 * s.lg, s.lg));
             step.add_saturating(&bigdiv_units(2 * s.lg, s.lg));
             times(&mut step, 2 * i as u64, &lin(false, s.lg, 1));
             times(&mut step, 2 * (r - i) as u64, &lin(false, s.lg, s.lg));
             times(&mut ech, others, &step);
-            ech.add_saturating(&bigxgcd_units(s.lg, 1));
+            ech.add_saturating(&bigxgcd_units(s.lg, 1, 1));
             ech.add_saturating(&bigdiv_units(2 * s.lg, s.lg));
             times(&mut ech, i as u64, &lin(false, s.lg, 1));
             times(&mut ech, (r - i) as u64, &lin(false, s.lg, s.lg));
@@ -229,12 +229,12 @@ fn compress(s: &Side, side: &str, out: &mut Vec<(String, Units)>) {
             rows.0[ma] = rows.0[ma].saturating_add(eu + others * 2 * w as u64 + 1 + w as u64);
         } else {
             let mut step = Units::default();
-            step.add_saturating(&bigxgcd_units(1, s.ld));
+            step.add_saturating(&bigxgcd_units(1, s.ld, 1));
             step.add_saturating(&bigdiv_units(2 * s.ld, s.ld));
             step.add_saturating(&bigdiv_units(2 * s.ld, s.ld));
             times(&mut step, 2 * w as u64, &lin(false, s.ld, s.ld));
             times(&mut rows, others, &step);
-            rows.add_saturating(&bigxgcd_units(s.ld, 1));
+            rows.add_saturating(&bigxgcd_units(s.ld, 1, 1));
             rows.add_saturating(&bigdiv_units(2 * s.ld, s.ld));
             times(&mut rows, w as u64, &lin(false, s.ld, s.ld));
         }
