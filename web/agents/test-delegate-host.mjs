@@ -11,7 +11,7 @@ import { blobId } from "../workspace/tasks-schema.ts";
 const enc = new TextEncoder();
 const hex = (n) => Array.from(crypto.getRandomValues(new Uint8Array(n)), (b) => b.toString(16).padStart(2, "0")).join("");
 
-export function delegateHost({ features = ["delegate.1", "chat.resume"], pageSize = 50 } = {}) {
+export function delegateHost({ features = ["delegate.1", "chat.resume"], pageSize = 50, session = "SECRET" } = {}) {
   const H = { staleCloses: 0, got: [], grant: null, sock: null, closed: false, tasks: new Map(), hold: new Set(), fail: new Map(), held: [], pageSize, changes: [], asks: [] };
   const send = (m) => H.sock?.send(JSON.stringify(m));
   const entryOf = (t) => ({ task: t.task, title: t.title, status: t.status, target: "local", run: t.run, round: t.round, seq: t.log.length, proposal: t.proposal, question: false, updated: t.updated });
@@ -157,7 +157,7 @@ export function delegateHost({ features = ["delegate.1", "chat.resume"], pageSiz
         const m = JSON.parse(String(data));
         H.got.push(m);
         if (m.method === undefined && calls.has(m.id)) { calls.get(m.id)(m); calls.delete(m.id); return; }
-        if (m.method === "hello") return answer(m.id, { protocol: 1, agent: { name: "Claude Code", client: "claude-code", version: "2.0" }, wants: { write: true, run: false }, session: "SECRET", features });
+        if (m.method === "hello") return answer(m.id, { protocol: 1, agent: { name: "Claude Code", client: "claude-code", version: "2.0" }, wants: { write: true, run: false }, session, features });
         if (m.method === "grant.changed") {
           const g = Array.isArray(m.params?.folders) ? m.params : null;
           // (the switch off: the tasks' turns end, interrupted, not closed)

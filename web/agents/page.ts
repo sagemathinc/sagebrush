@@ -35,7 +35,7 @@ import { mountComposer, renderComposerState, stopLabel } from "../workspace/agen
 import { applyPaneClasses, mountLayout, relayout } from "./layout";
 import { AgentLeg, legKey, listComputers, pageLegUrl, type LegEnd } from "../workspace/agent-relay";
 import { chatHere } from "./chat-here";
-import { filesIcon, modeSwitch } from "../workspace/mode-switch";
+import { filesIcon, modeSwitch, answerAgentsLive, FILES_TAB } from "../workspace/mode-switch";
 import { icon as panelIcon } from "../workspace/files-toggle";
 import { entryUrl } from "../workspace/entry-url";
 import { threadMarkdown, turnMarkdown, userMarkdown } from "../workspace/agent-chat/transcript";
@@ -1108,6 +1108,7 @@ const CONN = {
   discarded: "Claude's earlier connection was for another page or workspace, so it needs a new code.",
   unusable: "This page's earlier connection to Claude couldn't be used, so it needs a new code.",
   kept: "Claude was connected to this page earlier.",
+  elsewhere: "Claude is connected to another page. Use that page, or close it and Reconnect here.",
 };
 let connBar: ConnBar | null = null;
 let connShown = false; // (the bar's ×: hidden until the next change)
@@ -1299,19 +1300,20 @@ const delegateUi = mountDelegate({
 // (the Files | Agents switch at the right of the chat list's header, Agents pressed: Files opens the notebook page with
 //  its files, as the file panel's switch opens this page; William, Nov 12)
 { const sw = modeSwitch("agents"), brand = document.querySelector<HTMLElement>("nav.side .brand"); sw.style.marginLeft = "auto"; if (brand) { brand.style.whiteSpace = "nowrap"; brand.append(sw); } const f = sw.querySelector<HTMLButtonElement>('[data-mode="files"]'); if (f) f.onclick = () => void toFiles(); }
-// (to the files: the notebook page with its file browser shown.  With an agent connected or connecting, in a new tab:
-//  leaving would end this page's connection, and a page that comes back by navigating can't take it up again (only a
-//  reload can), so the agent's turn would be lost.  This page, its chat and the agent stay as they are.  Else the
-//  thread is left as New chat leaves it (mayLeaveThread): its files' pending edits saved, a running cell stopped only
-//  if the person says so; refused, this page stays and nothing is changed.  Admitted, the browser's own choice to show
-//  the files is set, then the page left)
+// (to the files: the notebook page with its file browser shown, in this tab: coming back reconnects the agent by itself
+//  while its grant lasts (#1620, agent-pair.ts reloadDecision).  Only while an agent's turn runs here, in a new tab, so
+//  the turn's work in this page goes on; that tab is named so its way back to Agents returns here (mode-switch.ts
+//  backToAgentsTab) rather than opening a second Agents page the agent would refuse.  Else the thread is left as New
+//  chat leaves it (mayLeaveThread): its files' pending edits saved, a running cell stopped only if the person says so;
+//  refused, this page stays and nothing is changed.  Admitted, the browser's own choice to show the files is set, then
+//  the page left)
 let leaving = false;
 async function toFiles() {
-  if (pairing && pairing.state !== "closed") {
+  if (pairing && pairing.state !== "closed" && state.threads.some((t) => isRunning(t))) {
     try { localStorage.setItem("sagebrush-files-sidebar", "1"); } catch {}
     // (opened in the click itself, so the browser allows it; refused anyway, this page stays and says so)
     const w = window.open("/", "_blank");
-    if (w) w.opener = null;
+    if (w) { w.name = FILES_TAB; w.opener = null; }
     else toast("Your browser blocked the new tab for Files. Allow pop-ups for this site, or open it in a new tab yourself.", 6000);
     return;
   }
@@ -1615,6 +1617,10 @@ const agentRuns = (ws: Workspace) => agentRunsFor(ws as any, {
 // (the current pairing's listener for the agent's messages, removed when another pairing replaces it)
 let offAgent: (() => void) | null = null;
 function mountPairing(ws: Workspace) {
+  // (Delegate's last task list, kept in this browser for this workspace: shown while the agent isn't connected, #1622)
+  let kept: Storage | null = null;
+  try { kept = localStorage; } catch { kept = null; }
+  delegateTasks.keepIn(kept, `sb-delegate-tasks-v1:${ws.identity.workspace}`);
   agentUi = mountAgentPairing(ws, {
     program: "sagebrush-agent",
     runVerbs: runVerbsFor(agentRuns(ws)),
@@ -1695,6 +1701,8 @@ function mountPairing(ws: Workspace) {
   });
 }
 if (workspace) mountPairing(workspace);
+// (a Files tab this page opened asks whether its agent is still connected here, to come back to this tab: #1620)
+answerAgentsLive(() => pairing?.state === "granted");
 // (the person's review of an agent's branches: in a dialog, its chunk fetched at the first click)
 $("#review").onclick = () => { if (workspace) void openReviewDialog(workspace.reviewHost(), new URL("../", import.meta.url)); };
 // (the storage message's [Retry]: the open again, then the pairing, as a load would; never `disabled` while it runs)
