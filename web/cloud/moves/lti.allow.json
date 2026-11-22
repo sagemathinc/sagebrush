@@ -1,0 +1,12 @@
+[
+ {
+  "file": "web/cloud/lti/README.md",
+  "from": "**Tests:** `node web/lti/test-lti.mjs`, run inside a core checkout (`scripts/with-core.sh`). It uses Miniflare from web/site's",
+  "to": "**Tests:** `node web/cloud/lti/test-lti.mjs`, run from the repository's root after `cd web/site && npm ci`. It uses Miniflare from web/site's"
+ },
+ {
+  "file": "web/cloud/lti/grading/test-gradebook.mjs",
+  "from": "// Needs core's web/site dependencies (Miniflare), so it runs under scripts/with-core.sh, as CI",
+  "to": "// Needs web/site's dependencies (Miniflare): `cd web/site && npm ci` first, as CI"
+ }
+]

@@ -83,9 +83,10 @@ const fullTierPaths = [
   /^web\/share\//, /^web\/share-client\//, /^web\/csp(?:-policy)?\.m?ts$/, /^web\/safe-html\.ts$/,
   // (the account at the top right, which reads the share dialog's first check: the share dialog's suite, below)
   /^web\/workspace\/account\.ts$/,
-  // (the hosted service's sharing, remotes and log mirror, MS-RSL: their suites run only in web-sync's full-tier shards;
-  // and the mirror's format, which its Worker validates uploads with)
-  /^web\/cloud\/share\//, /^web\/cloud\/remote\//, /^web\/cloud\/mirror\//, /^web\/workspace\/agent-chat\/mirror-format\.ts$/,
+  // (the hosted service's sharing, remotes, log mirror and LTI tool, MS-RSL: their suites run only in web-sync's
+  // full-tier shards; and the mirror's format, which its Worker validates uploads with)
+  /^web\/cloud\/share\//, /^web\/cloud\/remote\//, /^web\/cloud\/mirror\//, /^web\/cloud\/lti\//,
+  /^web\/workspace\/agent-chat\/mirror-format\.ts$/,
   // data loss: save, Trash, export, purge, and the workspace's store and its migrations
   /^web\/workspace\/[^/]*(?:trash|export|purge|save)[^/]*$/, /^web\/workspace\/export\//,
   /^web\/workspace\/(?:db|migrate|migrator|file-bytes)\.ts$/,
@@ -423,8 +424,9 @@ const outputs = {
   long,
   // (mpmath's suite: the core backend always; the Python backend, a rollback path, the long tier's)
   mpmath_backends: JSON.stringify(long ? ["sagebrush", "python"] : ["sagebrush"]),
-  // (web-sync's shards: the share dialog's part 2, its big listing and upload leaks, the long tier's)
-  web_sync_shards: JSON.stringify(["core", "client", "moves", "pwa", "share-dialog", ...(long ? ["share-dialog-2"] : [])]),
+  // (web-sync's shards: lti and lti-b, the hosted LTI tool's suites, web-sync.8 and .9; the share dialog's part 2, its
+  // big listing and upload leaks, the long tier's)
+  web_sync_shards: JSON.stringify(["core", "client", "moves", "pwa", "share-dialog", "lti", "lti-b", ...(long ? ["share-dialog-2"] : [])]),
   wasm_build: wasmBuild,
   engine_cpython: engineCpython,
   webkit,

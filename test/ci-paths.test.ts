@@ -351,14 +351,14 @@ test("the long tier: the nightly schedule and a dispatch with long set; never a 
   for (const o of longRuns) {
     assert.equal(o.long, "true");
     assert.deepEqual(JSON.parse(o.mpmath_backends), ["sagebrush", "python"]);
-    assert.deepEqual(JSON.parse(o.web_sync_shards), ["core", "client", "moves", "pwa", "share-dialog", "share-dialog-2"]);
+    assert.deepEqual(JSON.parse(o.web_sync_shards), ["core", "client", "moves", "pwa", "share-dialog", "lti", "lti-b", "share-dialog-2"]);
     assert.equal(o.slow_tests, "true");
     assert.equal(o.slow_scope, "1");
   }
   for (const o of notLong) {
     assert.equal(o.long, "false", JSON.stringify(o));
     assert.deepEqual(JSON.parse(o.mpmath_backends), ["sagebrush"]);
-    assert.deepEqual(JSON.parse(o.web_sync_shards), ["core", "client", "moves", "pwa", "share-dialog"]);
+    assert.deepEqual(JSON.parse(o.web_sync_shards), ["core", "client", "moves", "pwa", "share-dialog", "lti", "lti-b"]);
     assert.equal(o.slow_tests, "false");
     assert.equal(o.slow_scope, "");
   }
@@ -487,7 +487,7 @@ test("the full tier on a pull request: the full-ci label, or a sync, sharing, se
     "web/workspace/doc-sync.ts", "web/notebook/sync-rows.js", "web/notebook/db-merge3.ts", "web/board/syncdb.ts",
     "web/share/files.ts", "web/share-client/upload.ts", "web/csp.ts", "web/csp-policy.mts", "web/safe-html.ts",
     "web/cloud/share/server.ts", "web/cloud/share/migrations/0009_remotes.sql", "web/cloud/remote/relay.ts",
-    "web/cloud/mirror/account.ts", "web/workspace/agent-chat/mirror-format.ts",
+    "web/cloud/mirror/account.ts", "web/cloud/lti/launch.ts", "web/workspace/agent-chat/mirror-format.ts",
     "web/workspace/export/run.ts", "web/workspace/db.ts", "web/workspace/api.ts", "web/workspace/migrate.ts", "web/board/export.ts",
     "web/latex/save.ts", "scripts/check-export-size.mjs",
     // (the LaTeX group's inputs: its ceiling is checked only in the full tier's web-artifacts)
