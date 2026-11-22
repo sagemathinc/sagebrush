@@ -4854,8 +4854,15 @@ async function selftest(path) {
       await until(() => kernel.ready, 60000);
       const run = (code) => new Promise((resolve) => { let t = ""; kernel.execute(code, { mode: nb.mode }, { start() {}, out(x) { t += x; }, display() {}, interact() {}, clear() {}, done() { resolve(t); }, stopped(m) { resolve(t + (m || "")); }, skipped() { resolve(t + "(not run)"); } }); });
       const ran = (await run("print(6 * 7)")).trim();
-      const wrote = (await run("try:\n    open('not-allowed.txt', 'w').write('x')\n    print('wrote')\nexcept PermissionError:\n    print('refused')")).trim();
-      check("a notebook runs before it may change files, its write refused", ran === "42" && wrote === "refused", JSON.stringify({ ran, wrote }));
+      // (the write waits while its prompt asks (the write-wait design), where the engine's memory is shared; the prompt
+      // closed unanswered, as Esc would, refuses it in that run. Without shared memory it was refused at once)
+      let over = false;
+      const writing = run("try:\n    open('not-allowed.txt', 'w').write('x')\n    print('wrote')\nexcept PermissionError:\n    print('refused')").then((t) => ((over = true), t));
+      await until(() => over || !!fbReq?.open, 30000);
+      const waited = !over && !!fbReq?.ask;
+      filesBar(false);
+      const wrote = (await writing).trim();
+      check("a notebook runs before it may change files, its write refused", ran === "42" && wrote === "refused", JSON.stringify({ ran, wrote, waited }));
       filesBar(false);
     }
     // (the rest of the self-test's notebook writes files: the app's own self-test allows it, as the person's click would)
