@@ -131,7 +131,10 @@ fn zmat_units_and_stop_checks() {
     .map(|(n, (u, c))| (n, u, c))
     .collect();
     // pinned: the per-family units, and the Stop checks (equal to the code
-    // before metering: no check was added or moved)
+    // before metering, no check added or moved, except a product's: mul
+    // checks once a row on its i128 path too, as on its multi-limb one,
+    // so mul 10 makes 10, and smith hard 8 makes 8 more, for its solve's
+    // check a x of 8 rows)
     let pins: &[(&str, [u64; FAMILIES], u64)] = &[
         ("det bareiss 5", [60, 0, 60, 0, 0, 25, 0, 0, 0, 0], 4),
         ("det crt 10", [776, 0, 0, 0, 0, 272, 510, 0, 0, 0], 1),
@@ -143,14 +146,15 @@ fn zmat_units_and_stop_checks() {
         ("kernel 12", [1737, 0, 73, 0, 144, 536, 961, 0, 0, 0], 0),
         ("inverse 10", [4150, 0, 0, 0, 12, 1122, 1746, 0, 0, 0], 1),
         ("charpoly 10", [3630, 0, 0, 0, 0, 638, 902, 0, 0, 0], 1),
-        ("mul 10", [1000, 0, 0, 0, 0, 0, 0, 0, 0, 0], 0),
+        ("mul 10", [1000, 0, 0, 0, 0, 0, 0, 0, 0, 0], 10),
         ("smith bench 12 (word e = 6)", [7243, 0, 1208, 0, 2106, 1199, 3531, 0, 0, 0], 39),
         ("smith content 6 x 44", [338442, 0, 49400, 0, 50798, 17776, 35823, 0, 0, 0], 78),
-        ("smith hard 8 (big e)", [2743, 0, 3320, 0, 240, 497, 971, 0, 0, 0], 16),
+        ("smith hard 8 (big e)", [2743, 0, 3320, 0, 240, 497, 971, 0, 0, 0], 24),
         ("smith_mod 12 mod 360", [0, 0, 0, 0, 0, 0, 1361, 0, 0, 0], 6),
     ];
     // (the Stop checks before metering, at the same inputs: 4, 1, 76, 14,
-    // 0, 0, 0, 0, 1, 1, 0, 39, 78, 16, 6, the same as pinned)
+    // 0, 0, 0, 0, 1, 1, 0, 39, 78, 16, 6, the same as pinned but for the
+    // products' rows above)
     if print {
         for (n, u, c) in &rows {
             println!("        (\"{n}\", {u:?}, {c}),");
