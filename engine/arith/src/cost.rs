@@ -85,6 +85,13 @@ impl Units {
     }
 }
 
+/// The product of sizes in u64, saturating: for the work estimates'
+/// models, where a usize product could wrap (on 32-bit targets first)
+/// and a wrapped estimate would read as small.
+pub fn size_product(xs: &[usize]) -> u64 {
+    xs.iter().fold(1u64, |p, &x| p.saturating_mul(x as u64))
+}
+
 /// What is known about an operation's cost before it runs.
 #[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
 pub struct Cost {
@@ -97,4 +104,20 @@ pub struct Cost {
     pub work_estimate: Option<Units>,
     /// $U$: a proven upper bound on the work in meter units, where cheap.
     pub work_upper: Option<u64>,
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn the_estimates_sums_and_products_saturate() {
+        // past usize on 32-bit targets, exact in u64
+        assert_eq!(size_product(&[1 << 20, 1 << 20, 3]), 3 << 40);
+        assert_eq!(size_product(&[]), 1);
+        assert_eq!(size_product(&[usize::MAX, usize::MAX, 2]), u64::MAX);
+        let mut u = Units([u64::MAX - 1; FAMILIES]);
+        u.add_saturating(&Units([2; FAMILIES]));
+        assert_eq!(u, Units([u64::MAX; FAMILIES]));
+    }
 }

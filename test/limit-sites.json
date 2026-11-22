@@ -299,6 +299,21 @@
   "owner": "engine arithmetic (division) tests",
   "reason": "test code (the invariant-division and differential tests): u64::MAX as a limb value, the meter limits probed by the Overrun sweep; no cap, refuses nothing"
  },
+ "engine/arith/src/cost.rs :: the_estimates_sums_and_products_saturate :: assert_eq!(size_product(&[usize::MAX, usize::MAX, 2]), u64::MAX); #0": {
+  "class": "none",
+  "owner": "engine arithmetic (exact linear algebra)",
+  "reason": "test code: the work estimates' saturating sum and size product checked at the integer limits (not caps)"
+ },
+ "engine/arith/src/cost.rs :: the_estimates_sums_and_products_saturate :: assert_eq!(u, Units([u64::MAX; FAMILIES])); #0": {
+  "class": "none",
+  "owner": "engine arithmetic (exact linear algebra)",
+  "reason": "test code: the work estimates' saturating sum and size product checked at the integer limits (not caps)"
+ },
+ "engine/arith/src/cost.rs :: the_estimates_sums_and_products_saturate :: let mut u = Units([u64::MAX - 1; FAMILIES]); #0": {
+  "class": "none",
+  "owner": "engine arithmetic (exact linear algebra)",
+  "reason": "test code: the work estimates' saturating sum and size product checked at the integer limits (not caps)"
+ },
  "engine/arith/src/cost/tally.rs :: bigeuclid_units :: let n = bigdiv_units(la, lb).total().unwrap_or(u64::MAX).saturating_add(bigmul_units(q, lb).total().unwrap_or(u64::MAX)); #0": {
   "class": "none",
   "owner": "engine arith (kernel metering)",
@@ -1805,6 +1820,11 @@
   "class": "none",
   "owner": "engine arithmetic (exact linear algebra)",
   "reason": "route 2's threshold K_MAX in the work estimate's stage 2: more nontrivial invariant factors take the classical route, which has no estimate (E None); not a cap"
+ },
+ "engine/arith/src/smith/estimate.rs :: trailing_model :: let bound = usize::try_from((3 * (k as u64 - 1)).saturating_mul(delta_bits.saturating_add(1)).saturating_add(2 * kb + 2).div_ceil(64)).unwrap_or(usize::MAX).max(1); #0": {
+  "class": "none",
+  "owner": "engine arithmetic (exact linear algebra)",
+  "reason": "the work estimate's model: the proved transform bound used as a cap on a modelled size, saturating to usize::MAX when it does not fit (an estimate term, never a refusal or a cap on input)"
  },
  "engine/arith/src/smith/tests.rs :: more_than_k_max_takes_the_classical_route :: fn more_than_k_max_takes_the_classical_route() { #0": {
   "class": "none",
