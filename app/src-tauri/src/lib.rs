@@ -25,6 +25,11 @@ use std::sync::Mutex;
 mod disk;
 #[cfg(desktop)]
 mod engine;
+// (the agent the app hosts, desktop only: its owned child and bundle check, for the agents page's launcher, which
+//  comes next; until then nothing calls it but its tests)
+#[cfg(desktop)]
+#[allow(dead_code)]
+mod agent_host;
 mod nav;
 mod version;
 use tauri::{Emitter, Manager, WebviewUrl, WebviewWindowBuilder};
