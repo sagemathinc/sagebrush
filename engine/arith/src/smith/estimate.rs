@@ -77,7 +77,7 @@ pub const FITTED: Constants = Constants {
     multiplier: 0.92,
     vinv_of_delta: 1.5,
     scale: [0.548, 0.711, 0.829, 0.45],
-    scale_route3: [0.544, 0.576],
+    scale_route3: [0.514, 0.56],
     fit_head: "f7c3c93cd71f4d73df5e30851e2d30feb71226bc",
     fit_from: "the estimate test's training corpus (seed 1); the multiplier from route 2's phase data",
 };

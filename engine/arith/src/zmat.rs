@@ -1454,14 +1454,21 @@ pub fn inverse_model(a: &ZMat, lx: usize, fold: u64, le: Option<usize>) -> Units
         return Units::default();
     }
     let red: u64 = a.d.iter().map(|x| if x.to_i64().is_some() { 1 } else { reduce_units(x) }).fold(0, u64::saturating_add);
+    inverse_model_sizes(a.rows, hadamard_log2(a), red, &hadamard_units(a), lx, fold, le)
+}
+
+/// The units one Hadamard bound of `a` charges: each entry squared in the
+/// row norm and in the column norm (a one-word product for an entry that
+/// fits an i64, an l x l one otherwise).
+#[doc(hidden)]
+pub fn hadamard_units(a: &ZMat) -> Units {
     let mut norms = Units::default();
     for x in &a.d {
         let l = if x.to_i64().is_some() { 1 } else { limbs(x) };
-        // (in the row norm and in the column norm)
         norms.add_saturating(&bigmul_units(l, l));
         norms.add_saturating(&bigmul_units(l, l));
     }
-    inverse_model_sizes(a.rows, hadamard_log2(a), red, &norms, lx, fold, le)
+    norms
 }
 
 /// [`inverse_model`] from sizes alone (route 3's model of an inverse it
