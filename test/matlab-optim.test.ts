@@ -344,7 +344,15 @@ test("linprog with bounds only, no constraint rows: upper-only, lower-only, free
     "[x, f, flag] = linprog(1, [], [], [], [], 0, [], o); fprintf('%g %g %g\\n', x, f, flag)",
     "[x, f, flag] = linprog(1, [], [], [], [], [], [], o); fprintf('%s %s %g\\n', mat2str(size(x)), mat2str(size(f)), flag)",
     "[x, f, flag, ~, lam] = linprog([1; -1], [], [], [], [], [0; -1], [3; 2], o); fprintf('%g ', x, f, flag, lam.lower, lam.upper); fprintf('\\n')",
+    // (and MATLAB R2026b's own answers, observed 2026-11-22: upper bounds only with x2 unbounded below is -3 with
+    // x = []; a zero objective with no bounds is x = 0; an equality row with free variables can be unbounded; a
+    // tiny row within the tolerances is no obstacle)
+    "[x, f, flag] = linprog([-1; 1], [], [], [], [], [], [3; 4], o); fprintf('%s %g\\n', mat2str(size(x)), flag)",
+    "[x, f, flag] = linprog(0, [], [], [], [], [], [], o); fprintf('%g %g %g\\n', x, f, flag)",
+    "[x, f, flag] = linprog([2; -3], [], [], [], [], [-1; -1], [4; 5], o); fprintf('%g %g %g %g\\n', x, f, flag)",
+    "[x, f, flag] = linprog([1; 1], [], [], [1 -1], 0, [], [], o); fprintf('%s %g\\n', mat2str(size(x)), flag)",
+    "[x, f, flag] = linprog(1, -1e-13, -1e-13, [], [], 0, 2, o); fprintf('%g %g %g\\n', x, f, flag)",
   ].join("\n"));
   assert.equal(r.status, 0, r.err);
-  assert.equal(r.out, "2 -2 1\n0 0 1\n[0 0] [0 0] -3\n0 2 -2 1 1 0 0 1 \n");
+  assert.equal(r.out, "2 -2 1\n0 0 1\n[0 0] [0 0] -3\n0 2 -2 1 1 0 0 1 \n[0 0] -3\n0 0 1\n-1 5 -17 1\n[0 0] -3\n0 0 1\n");
 });
