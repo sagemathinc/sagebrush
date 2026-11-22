@@ -213,7 +213,7 @@ function luSolve(L: { lu: Float64Array; piv: number[] }, n: number, B: Float64Ar
 function gecon(L: Float64Array, n: number, anorm: number): number {
   if (n === 0) return Infinity;
   if (anorm === 0) return 0;
-  const B = (x: Float64Array, t: boolean) => {
+  return invNormEst(n, (x: Float64Array, t: boolean) => {
     if (!t) {
       // x := U^-1 L^-1 x
       for (let i = 0; i < n; i++) {
@@ -239,7 +239,20 @@ function gecon(L: Float64Array, n: number, anorm: number): number {
         x[i] = s;
       }
     }
-  };
+  }, anorm);
+}
+
+// rcond of the n x n symmetric positive definite A from cholUpper()'s factor R (row-major, A = R'R), as
+// engine/nd's pocon: the same estimate, with A^-1 x = R^-1 R^-T x for both of its solves (A is symmetric)
+function pocon(R: Float64Array, n: number, anorm: number): number {
+  if (n === 0) return Infinity;
+  if (anorm === 0) return 0;
+  return invNormEst(n, (x: Float64Array) => cholSolve1(R, n, x), anorm);
+}
+
+// 1 / (anorm est), est Higham's estimate of ||A^-1||_1 (ACM TOMS 14, 1988, Algorithm 674; LAPACK's dlacn2) from
+// B(x, t), which overwrites x by A^-1 x (t false) or A^-T x (t true); 0 if the estimate is not finite or 0
+function invNormEst(n: number, B: (x: Float64Array, t: boolean) => void, anorm: number): number {
   const asum = (x: Float64Array) => { let s = 0; for (let i = 0; i < n; i++) s += Math.abs(x[i]); return s; };
   const sgn = (v: number) => (v >= 0 ? 1 : -1);
   const firstLargest = (x: Float64Array) => {
@@ -283,6 +296,53 @@ function gecon(L: Float64Array, n: number, anorm: number): number {
     if (t > est) est = t;
   }
   return !isFinite(est) || est === 0 ? 0 : 1 / est / anorm;
+}
+
+// The dot product of x[xo..xo+n] and y[yo..yo+n] as engine/nd's (engine/nd/src/cond.rs dot): four partial sums
+// of the terms i = 0, 1, 2, 3 mod 4, the last n mod 4 terms added to the first partial sums, combined as
+// (s0 + s1) + (s2 + s3). The order of engine/nd's unblocked Cholesky, so the bits below are its own.
+function ndDot(x: Float64Array, xo: number, y: Float64Array, yo: number, n: number): number {
+  let s0 = 0, s1 = 0, s2 = 0, s3 = 0, i = 0;
+  for (; i + 4 <= n; i += 4) {
+    s0 += x[xo + i] * y[yo + i];
+    s1 += x[xo + i + 1] * y[yo + i + 1];
+    s2 += x[xo + i + 2] * y[yo + i + 2];
+    s3 += x[xo + i + 3] * y[yo + i + 3];
+  }
+  if (i < n) s0 += x[xo + i] * y[yo + i];
+  if (i + 1 < n) s1 += x[xo + i + 1] * y[yo + i + 1];
+  if (i + 2 < n) s2 += x[xo + i + 2] * y[yo + i + 2];
+  return s0 + s1 + (s2 + s3);
+}
+
+// The upper Cholesky factor R of the n x n symmetric A (row-major; A = R'R), stored by columns (R(k, j) at
+// j * n + k, k <= j), as engine/nd's unblocked dpotf2 (engine/nd/src/chol.rs potf2, which it uses up to 64
+// columns): r_jj = sqrt(a_jj - r_.j' r_.j), then r_jc = (a_jc - r_.j' r_.c) * (1 / r_jj) to its right, in its
+// dot product's order, so these are its bits at those sizes. null when a pivot is not positive (not positive
+// definite). mldivide's TypeScript path, for a symmetric A with n >= 17.
+function cholUpper(A: Float64Array, n: number): Float64Array | null {
+  const R = new Float64Array(n * n);
+  for (let j = 0; j < n; j++) for (let k = 0; k <= j; k++) R[j * n + k] = A[k * n + j];
+  for (let j = 0; j < n; j++) {
+    const d = R[j * n + j] - ndDot(R, j * n, R, j * n, j);
+    if (!(d > 0)) return null;
+    const r = Math.sqrt(d), inv = 1 / r;
+    R[j * n + j] = r;
+    for (let c = j + 1; c < n; c++) R[c * n + j] = (R[c * n + j] - ndDot(R, j * n, R, c * n, j)) * inv;
+  }
+  return R;
+}
+
+// x := A^-1 x for A = R'R (cholUpper's R, by columns), as engine/nd's dpotrs for one column: R' y = x by
+// rows (the dot product, then the division), then R x = y by plain column-oriented back substitution
+function cholSolve1(R: Float64Array, n: number, x: Float64Array): void {
+  for (let i = 0; i < n; i++) x[i] = (x[i] - ndDot(R, i * n, x, 0, i)) / R[i * n + i];
+  for (let k = n - 1; k >= 0; k--) {
+    if (x[k] === 0) continue;
+    x[k] /= R[k * n + k];
+    const xk = x[k];
+    for (let i = 0; i < k; i++) x[i] -= xk * R[k * n + i];
+  }
 }
 
 // ------------------------------------------------------------------ QR (Householder)
@@ -1502,6 +1562,34 @@ newBuiltinModule("_nplinalg", (m) => {
       const rc = lo / hi;
       return tuple([out(X, [n, bc]), rc > 0 && rc < 2.220446049250313e-16 ? 4 : 1, 0, 1, rc]);
     }
+    // (symmetric with a positive diagonal and n >= 17: Cholesky, as engine/nd's MATLAB mode and MATLAB itself take
+    // it (MATLAB R2026b, observed 2026-11-22: LU for n <= 16, Cholesky from n = 17); if it fails, LU as below,
+    // structure 5)
+    let candidate = n >= 17;
+    for (let i = 0; i < n && candidate; i++) {
+      if (!(A[i * n + i] > 0)) candidate = false;
+      for (let j = i + 1; j < n && candidate; j++) if (A[i * n + j] !== A[j * n + i]) candidate = false;
+    }
+    let anorm = 0;
+    for (let j = 0; j < n; j++) {
+      let s = 0;
+      for (let i = 0; i < n; i++) s += Math.abs(A[i * n + j]);
+      if (s > anorm || s !== s) anorm = s;
+    }
+    if (candidate) {
+      const R = cholUpper(A, n);
+      if (R) {
+        const X = new Float64Array(n * bc), col = new Float64Array(n);
+        for (let j = 0; j < bc; j++) {
+          for (let i = 0; i < n; i++) col[i] = Bv[i * bc + j];
+          cholSolve1(R, n, col);
+          for (let i = 0; i < n; i++) X[i * bc + j] = col[i];
+        }
+        const rc = pocon(R, n, anorm);
+        return tuple([out(X, [n, bc]), rc > 0 && rc < 2.220446049250313e-16 ? 4 : 1, 0, 4, rc]);
+      }
+    }
+    const structure = candidate ? 5 : 0;
     const L = lu(A, n);
     if (L.singular) {
       // (a zero pivot: P, then L^-1 and U^-1 by column-oriented substitution with no step skipped, MATLAB's Inf and
@@ -1520,17 +1608,11 @@ newBuiltinModule("_nplinalg", (m) => {
           for (let i = 0; i < k; i++) X[i * bc + j] -= xk * a[i * n + k];
         }
       }
-      return tuple([out(X, [n, bc]), 2, 0, 0, 0]);
-    }
-    let anorm = 0;
-    for (let j = 0; j < n; j++) {
-      let s = 0;
-      for (let i = 0; i < n; i++) s += Math.abs(A[i * n + j]);
-      if (s > anorm || s !== s) anorm = s;
+      return tuple([out(X, [n, bc]), 2, 0, structure, 0]);
     }
     const rc = gecon(L.lu, n, anorm);
     const X = luSolve(L, n, Bv, bc);
-    return tuple([out(X, [n, bc]), rc > 0 && rc < 2.220446049250313e-16 ? 4 : 1, 0, 0, rc]);
+    return tuple([out(X, [n, bc]), rc > 0 && rc < 2.220446049250313e-16 ? 4 : 1, 0, structure, rc]);
   });
   fn("inv", (a: NDArray) => {
     // (as det's, and the identity, the solution and the output)
