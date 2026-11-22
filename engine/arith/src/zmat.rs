@@ -1429,8 +1429,9 @@ pub fn hermite_cyclic_holds(a: &ZMat, h: &[BigInt], d: &BigInt) -> bool {
 /// reduction (by the entries' sizes), the identity and the augment, the
 /// echelon of [a | I] by its data-free count
 /// ([`crate::nmod_mat::echelon_units_dense`], exact unless a factor is
-/// zero), the adjugate's scaling; the CRT of the n^2 + 1 values by the
-/// reconstruction's closed form; the determinant's copy; and the
+/// zero), the adjugate's scaling; the CRT's setup by its data-free twin
+/// ([`crate::crt::MultiCrt::setup_units`]); the CRT of the n^2 + 1 values
+/// by the reconstruction's closed form; the determinant's copy; and the
 /// lowest-terms pass.  With `le = None` (the cyclic case: the gcd reaches
 /// 1) the fold is `fold` entries of `lx` limbs; with `le = Some(limbs of
 /// e)`, e = |det a| / delta > 1, it runs over all n^2 entries (the running
@@ -1482,6 +1483,8 @@ pub fn inverse_model(a: &ZMat, lx: usize, fold: u64, le: Option<usize>) -> Units
     for &p in &primes {
         prod *= BigInt::from(p);
     }
+    // the CRT's setup, from the primes (its data-free twin)
+    u.add_saturating(&crate::crt::MultiCrt::setup_units(&primes));
     // (MultiCrt's quotients are the product's words plus one)
     let qlen = (prod.bits() as usize).div_ceil(64) + 1;
     let rec = crate::crt::MultiCrt::units_for(primes.len(), qlen);
