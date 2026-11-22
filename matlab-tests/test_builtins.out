@@ -152,7 +152,7 @@ double 1x1 1.5
 char 1x6 ['single']
 double 1x1 25
 double 1x3 [2 0 1]
-double 1x7 [-1 -0 -1 0 1 0 1]
+double 1x7 [-1 0 -1 0 1 0 1] (-0 at 2)
 double 1x1 -1
 double 1x1 1234.5699999999999
 double 1x2 [2 -2]

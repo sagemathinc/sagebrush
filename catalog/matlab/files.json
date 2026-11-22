@@ -25,5 +25,79 @@
     "tags": [
       "files"
     ]
+  },
+  {
+    "name": "readmatrix",
+    "kind": "function",
+    "signature": "A = readmatrix(filename)\nA = readmatrix(filename, Name, Value)",
+    "summary": "Reads the numbers of a delimited text file as a matrix.",
+    "doc": "The delimiter (comma, tab, semicolon, bar or spaces) and the header lines (leading lines that are not mostly numbers) are found when not given. An empty or non-numeric field is NaN (a comma inside a number is not a thousands separator: `1,5` is NaN), double-quoted fields may hold the delimiter, and a short row is padded with NaN. Options: `'Delimiter'`, `'NumHeaderLines'` and `'OutputType'` (numeric classes; NaN is 0 in an integer class).",
+    "examples": [
+      {
+        "code": "writematrix([1 2; 3 4], 'r.csv')\nreadmatrix('r.csv')",
+        "expected": "\nans =\n\n     1     2\n     3     4\n\n"
+      }
+    ],
+    "differs": [
+      "Spreadsheet files are refused; save the sheet as a .csv file.",
+      "Of the options, only Delimiter, NumHeaderLines and OutputType (numeric classes) are supported.",
+      "The header and delimiter detection is a simple heuristic, not MATLAB's."
+    ],
+    "status": "partial",
+    "see_also": [
+      "writematrix",
+      "load"
+    ],
+    "tags": [
+      "files"
+    ]
+  },
+  {
+    "name": "fread",
+    "kind": "function",
+    "signature": "A = fread(fileID)\nA = fread(fileID, sizeA, precision, skip, machinefmt)\n[A, count] = fread(___)",
+    "summary": "Reads binary data from a file opened with fopen.",
+    "doc": "`sizeA` is `Inf` (a column of all that is left, the default), `n`, `[m n]` or `[m Inf]`; a partial last column is padded with zeros. `precision` is `'uint8'` (the default), `'int16'`, `'double'`, ...: it reads into double, `'*int16'` keeps the class, and `'int16=>single'` converts. `'char'` reads UTF-8 characters. The machine format (or fopen's) can be `'ieee-be'`.",
+    "examples": [
+      {
+        "code": "f = fopen('b.bin', 'w'); fwrite(f, [1 2 300], 'uint16'); fclose(f);\nf = fopen('b.bin'); [A, n] = fread(f, Inf, 'uint16'), fclose(f);",
+        "expected": "\nA =\n\n     1\n     2\n   300\n\n\nn =\n\n     3\n\n"
+      }
+    ],
+    "differs": [
+      "Bit precisions ('ubit3', 'bit4') are refused."
+    ],
+    "status": "partial",
+    "see_also": [
+      "fwrite",
+      "fopen"
+    ],
+    "tags": [
+      "files"
+    ]
+  },
+  {
+    "name": "fwrite",
+    "kind": "function",
+    "signature": "count = fwrite(fileID, A)\ncount = fwrite(fileID, A, precision, skip, machinefmt)",
+    "summary": "Writes an array's elements to a file in binary, in column order.",
+    "doc": "`precision` is `'uint8'` by default; an integer precision rounds and saturates, as MATLAB's does. The machine format (or fopen's) can be `'ieee-be'`.",
+    "examples": [
+      {
+        "code": "f = fopen('w.bin', 'w'); n = fwrite(f, [1.5 300 -2], 'uint8'), fclose(f);\nf = fopen('w.bin'); fread(f)', fclose(f);",
+        "expected": "\nn =\n\n     3\n\n\nans =\n\n     2   255     0\n\n"
+      }
+    ],
+    "differs": [
+      "Bit precisions are refused."
+    ],
+    "status": "partial",
+    "see_also": [
+      "fread",
+      "fopen"
+    ],
+    "tags": [
+      "files"
+    ]
   }
 ]

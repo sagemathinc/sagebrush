@@ -47,7 +47,25 @@ elseif islogical(x) || isnumeric(x)
   else
     v = x;
   end
-  s = sprintf('%s %s %s', class(x), dimstr(size(x)), mat2str(v, 17));
+  % (a zero's sign: MATLAB's mat2str drops it and Octave's keeps it, so the zeros are written 0 and the
+  % negative ones listed after, by linear index: the same line in all three, the sign still compared)
+  m = mat2str(v, 17);
+  m = regexprep(m, '(^|[\s;\[])-0(?=$|[\s;\]+-])', '$10');
+  m = regexprep(m, '-0i', '+0i');
+  s = sprintf('%s %s %s', class(x), dimstr(size(x)), m);
+  if isfloat(x)
+    nr = find(real(v) == 0 & 1 ./ real(v) < 0);
+    ni = [];
+    if ~isreal(v)
+      ni = find(imag(v) == 0 & 1 ./ imag(v) < 0);
+    end
+    if ~isempty(nr)
+      s = [s sprintf(' (-0 at %s)', strtrim(sprintf('%d ', nr)))];
+    end
+    if ~isempty(ni)
+      s = [s sprintf(' (-0i at %s)', strtrim(sprintf('%d ', ni)))];
+    end
+  end
 else
   s = class(x);
 end

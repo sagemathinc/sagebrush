@@ -2278,10 +2278,11 @@ test("a MATLAB function Sagebrush lacks is refused with the catalog's alternativ
   const run = (code: string) => execFileSync(process.execPath, [require("node:path").join(__dirname, "..", "src", "cli.js"), "--matlab", "-c", code],
     { encoding: "utf8" }).split("\n").map((s: string) => s.trim()).filter((s: string) => s !== "");
   const msg = (e: string) => `try, ${e}; disp('ran'), catch err, disp(err.message), end`;
-  const out = run([msg("s = sym(1/4)"), msg("g = graph([1 2], [2 3])"), msg("m = containers.Map()"), msg("y = rats"), msg("z = not_a_function_at_all(2)")].join("\n"));
+  const out = run([msg("s = sym(1/4)"), msg("g = graph([1 2], [2 3])"), msg("d = datenum(2026, 11, 21)"), msg("y = rats"), msg("z = not_a_function_at_all(2)")].join("\n"));
   assert.match(out[0], /^Unrecognized function or variable 'sym'\. sym is not in Sagebrush; instead: Sage mode .*rat\(X\)/);
   assert.match(out[1], /^Unrecognized function or variable 'graph'\. graph is not in Sagebrush; instead: Sage mode's Graph/);
-  assert.match(out[2], /^Unrecognized function or variable 'containers'\. containers\.Map is not in Sagebrush; instead: A struct with dynamic field names/);
+  // (containers.Map was the example of a dotted name; Sagebrush has it now)
+  assert.match(out[2], /^Unrecognized function or variable 'datenum'\. datenum is not in Sagebrush; instead: No serial dates/);
   assert.match(out[3], /^Unrecognized function or variable 'rats'\. rats is not in Sagebrush; instead: \[N, D\] = rat\(X\)/);
   assert.equal(out[4], "Unrecognized function or variable 'not_a_function_at_all'.");
   const show = (e: string) => `x = ${e}; disp([class(x) ' ' mat2str(x, 6)])`;

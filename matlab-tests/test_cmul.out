@@ -15,56 +15,56 @@ double 1x49 [-Inf -Inf -Inf -Inf -Inf -Inf -Inf NaN -Inf -Inf -Inf -Inf NaN -Inf
 double 1x49 [Inf NaN NaN NaN NaN -Inf NaN Inf Inf NaN NaN -Inf -Inf NaN Inf Inf NaN NaN -Inf -Inf NaN Inf Inf NaN NaN -Inf -Inf NaN Inf Inf NaN NaN -Inf -Inf NaN Inf NaN NaN NaN NaN -Inf NaN Inf Inf NaN NaN -Inf -Inf NaN]
 double 1x49 [NaN NaN NaN NaN -Inf -Inf NaN Inf Inf NaN NaN -Inf -Inf NaN Inf Inf NaN NaN -Inf -Inf NaN Inf Inf NaN NaN -Inf -Inf NaN Inf Inf NaN NaN -Inf -Inf NaN Inf Inf NaN NaN NaN NaN NaN Inf Inf NaN NaN -Inf -Inf NaN]
 double 1x49 [Inf Inf Inf Inf Inf NaN Inf Inf Inf Inf Inf Inf NaN Inf NaN NaN NaN NaN NaN NaN NaN NaN NaN NaN NaN NaN NaN NaN NaN -Inf -Inf -Inf -Inf -Inf -Inf NaN -Inf -Inf -Inf -Inf -Inf -Inf NaN NaN NaN NaN NaN NaN NaN]
-double 1x49 [NaN -Inf -Inf -Inf -Inf -Inf -Inf Inf 0 -1 -1 -2 -Inf NaN Inf 1 0 -0 -1 -Inf NaN Inf 1 0 0 -1 -Inf NaN Inf 2 1 1 0 -Inf NaN Inf Inf Inf Inf Inf NaN Inf Inf NaN NaN NaN NaN -Inf NaN]
-double 1x49 [Inf Inf Inf Inf Inf NaN Inf Inf 2 1 1 0 -Inf NaN Inf 1 0 0 -1 -Inf NaN Inf 1 0 -0 -1 -Inf NaN Inf 0 -1 -1 -2 -Inf NaN NaN -Inf -Inf -Inf -Inf -Inf -Inf Inf NaN NaN NaN NaN -Inf NaN]
-double 1x49 [-Inf -Inf -Inf -Inf -Inf -Inf -Inf NaN -1 -1 -1 -1 NaN NaN NaN 0 0 -0 -0 NaN NaN NaN 0 0 0 0 NaN NaN NaN 1 1 1 1 NaN NaN Inf Inf Inf Inf Inf Inf Inf NaN NaN NaN NaN NaN NaN NaN]
-double 1x49 [Inf NaN NaN NaN NaN -Inf NaN Inf 1 0 0 -1 -Inf NaN Inf 1 0 0 -1 -Inf NaN Inf 1 0 -0 -1 -Inf NaN Inf 1 0 -0 -1 -Inf NaN Inf NaN NaN NaN NaN -Inf NaN Inf NaN NaN NaN NaN -Inf NaN]
-double 1x49 [-Inf -Inf -Inf -Inf -Inf -Inf -Inf NaN -1 -1 -1 -1 NaN NaN NaN -0 -0 0 0 NaN NaN NaN 0 0 0 0 NaN NaN NaN 1 1 1 1 NaN NaN Inf Inf Inf Inf Inf Inf Inf NaN NaN NaN NaN NaN NaN NaN]
-double 1x49 [Inf NaN NaN NaN NaN -Inf NaN Inf 1 0 -0 -1 -Inf NaN Inf 1 0 -0 -1 -Inf NaN Inf 1 0 0 -1 -Inf NaN Inf 1 0 0 -1 -Inf NaN Inf NaN NaN NaN NaN -Inf NaN Inf NaN NaN NaN NaN -Inf NaN]
-double 1x49 [-Inf -Inf -Inf -Inf -Inf NaN -Inf -Inf -2 -1 -1 0 Inf NaN -Inf -1 -0 0 1 Inf NaN -Inf -1 0 0 1 Inf NaN -Inf 0 1 1 2 Inf NaN NaN Inf Inf Inf Inf Inf Inf -Inf NaN NaN NaN NaN Inf NaN]
-double 1x49 [NaN -Inf -Inf -Inf -Inf -Inf -Inf Inf 0 -1 -1 -2 -Inf NaN Inf 1 0 -0 -1 -Inf NaN Inf 1 0 0 -1 -Inf NaN Inf 2 1 1 0 -Inf NaN Inf Inf Inf Inf Inf NaN Inf Inf NaN NaN NaN NaN -Inf NaN]
+double 1x49 [NaN -Inf -Inf -Inf -Inf -Inf -Inf Inf 0 -1 -1 -2 -Inf NaN Inf 1 0 0 -1 -Inf NaN Inf 1 0 0 -1 -Inf NaN Inf 2 1 1 0 -Inf NaN Inf Inf Inf Inf Inf NaN Inf Inf NaN NaN NaN NaN -Inf NaN] (-0 at 18)
+double 1x49 [Inf Inf Inf Inf Inf NaN Inf Inf 2 1 1 0 -Inf NaN Inf 1 0 0 -1 -Inf NaN Inf 1 0 0 -1 -Inf NaN Inf 0 -1 -1 -2 -Inf NaN NaN -Inf -Inf -Inf -Inf -Inf -Inf Inf NaN NaN NaN NaN -Inf NaN] (-0 at 25)
+double 1x49 [-Inf -Inf -Inf -Inf -Inf -Inf -Inf NaN -1 -1 -1 -1 NaN NaN NaN 0 0 0 0 NaN NaN NaN 0 0 0 0 NaN NaN NaN 1 1 1 1 NaN NaN Inf Inf Inf Inf Inf Inf Inf NaN NaN NaN NaN NaN NaN NaN] (-0 at 18 19)
+double 1x49 [Inf NaN NaN NaN NaN -Inf NaN Inf 1 0 0 -1 -Inf NaN Inf 1 0 0 -1 -Inf NaN Inf 1 0 0 -1 -Inf NaN Inf 1 0 0 -1 -Inf NaN Inf NaN NaN NaN NaN -Inf NaN Inf NaN NaN NaN NaN -Inf NaN] (-0 at 25 32)
+double 1x49 [-Inf -Inf -Inf -Inf -Inf -Inf -Inf NaN -1 -1 -1 -1 NaN NaN NaN 0 0 0 0 NaN NaN NaN 0 0 0 0 NaN NaN NaN 1 1 1 1 NaN NaN Inf Inf Inf Inf Inf Inf Inf NaN NaN NaN NaN NaN NaN NaN] (-0 at 16 17)
+double 1x49 [Inf NaN NaN NaN NaN -Inf NaN Inf 1 0 0 -1 -Inf NaN Inf 1 0 0 -1 -Inf NaN Inf 1 0 0 -1 -Inf NaN Inf 1 0 0 -1 -Inf NaN Inf NaN NaN NaN NaN -Inf NaN Inf NaN NaN NaN NaN -Inf NaN] (-0 at 11 18)
+double 1x49 [-Inf -Inf -Inf -Inf -Inf NaN -Inf -Inf -2 -1 -1 0 Inf NaN -Inf -1 0 0 1 Inf NaN -Inf -1 0 0 1 Inf NaN -Inf 0 1 1 2 Inf NaN NaN Inf Inf Inf Inf Inf Inf -Inf NaN NaN NaN NaN Inf NaN] (-0 at 17)
+double 1x49 [NaN -Inf -Inf -Inf -Inf -Inf -Inf Inf 0 -1 -1 -2 -Inf NaN Inf 1 0 0 -1 -Inf NaN Inf 1 0 0 -1 -Inf NaN Inf 2 1 1 0 -Inf NaN Inf Inf Inf Inf Inf NaN Inf Inf NaN NaN NaN NaN -Inf NaN] (-0 at 18)
 double 1x49 [-Inf -Inf NaN NaN NaN NaN NaN -Inf -Inf NaN NaN Inf Inf NaN -Inf -Inf NaN NaN Inf Inf NaN -Inf -Inf NaN NaN Inf Inf NaN -Inf -Inf NaN NaN Inf Inf NaN NaN NaN NaN NaN Inf Inf NaN -Inf -Inf NaN NaN Inf Inf NaN]
 double 1x49 [NaN -Inf -Inf -Inf -Inf -Inf -Inf NaN -Inf -Inf -Inf -Inf -Inf -Inf NaN NaN NaN NaN NaN NaN NaN NaN NaN NaN NaN NaN NaN NaN Inf Inf Inf Inf Inf NaN Inf Inf Inf Inf Inf Inf NaN Inf NaN NaN NaN NaN NaN NaN NaN]
 double 1x49 [-Inf -Inf -Inf -Inf -Inf -Inf -Inf NaN NaN NaN NaN NaN NaN NaN NaN NaN NaN NaN NaN NaN NaN NaN NaN NaN NaN NaN NaN NaN NaN NaN NaN NaN NaN NaN NaN Inf Inf Inf Inf Inf Inf Inf NaN NaN NaN NaN NaN NaN NaN]
 double 1x49 [Inf NaN NaN NaN NaN -Inf NaN Inf NaN NaN NaN NaN -Inf NaN Inf NaN NaN NaN NaN -Inf NaN Inf NaN NaN NaN NaN -Inf NaN Inf NaN NaN NaN NaN -Inf NaN Inf NaN NaN NaN NaN -Inf NaN Inf NaN NaN NaN NaN -Inf NaN]
 double 1x49 [Inf NaN NaN NaN NaN -Inf NaN Inf Inf NaN NaN -Inf -Inf NaN Inf Inf NaN NaN -Inf -Inf NaN Inf Inf NaN NaN -Inf -Inf NaN Inf Inf NaN NaN -Inf -Inf NaN Inf NaN NaN NaN NaN -Inf NaN Inf Inf NaN NaN -Inf -Inf NaN]
 double 1x49 [Inf Inf Inf Inf Inf Inf Inf NaN Inf Inf Inf Inf NaN Inf NaN NaN NaN NaN NaN NaN NaN NaN NaN NaN NaN NaN NaN NaN NaN -Inf -Inf -Inf -Inf NaN -Inf -Inf -Inf -Inf -Inf -Inf -Inf -Inf NaN NaN NaN NaN NaN NaN NaN]
-double 1x49 [Inf NaN NaN NaN NaN -Inf NaN Inf 1 0 -0 -1 -Inf NaN Inf 1 0 -0 -1 -Inf NaN Inf 1 0 0 -1 -Inf NaN Inf 1 0 0 -1 -Inf NaN Inf NaN NaN NaN NaN -Inf NaN Inf NaN NaN NaN NaN -Inf NaN]
-double 1x49 [Inf Inf Inf Inf Inf Inf Inf NaN 1 1 1 1 NaN NaN NaN 0 0 0 0 NaN NaN NaN 0 0 -0 -0 NaN NaN NaN -1 -1 -1 -1 NaN NaN -Inf -Inf -Inf -Inf -Inf -Inf -Inf NaN NaN NaN NaN NaN NaN NaN]
-double 1x49 [NaN NaN NaN NaN NaN NaN NaN NaN 0 0 -0 -0 NaN NaN NaN 0 0 -0 -0 NaN NaN NaN 0 0 0 0 NaN NaN NaN 0 0 0 0 NaN NaN NaN NaN NaN NaN NaN NaN NaN NaN NaN NaN NaN NaN NaN NaN]
-double 1x49 [NaN NaN NaN NaN NaN NaN NaN NaN 0 0 0 0 NaN NaN NaN 0 0 0 0 NaN NaN NaN 0 0 -0 -0 NaN NaN NaN 0 0 -0 -0 NaN NaN NaN NaN NaN NaN NaN NaN NaN NaN NaN NaN NaN NaN NaN NaN]
-double 1x49 [NaN NaN NaN NaN NaN NaN NaN NaN -0 -0 0 0 NaN NaN NaN -0 -0 0 0 NaN NaN NaN 0 0 0 0 NaN NaN NaN 0 0 0 0 NaN NaN NaN NaN NaN NaN NaN NaN NaN NaN NaN NaN NaN NaN NaN NaN]
-double 1x49 [NaN NaN NaN NaN NaN NaN NaN NaN 0 0 -0 -0 NaN NaN NaN 0 0 -0 -0 NaN NaN NaN 0 0 0 0 NaN NaN NaN 0 0 0 0 NaN NaN NaN NaN NaN NaN NaN NaN NaN NaN NaN NaN NaN NaN NaN NaN]
-double 1x49 [-Inf NaN NaN NaN NaN Inf NaN -Inf -1 -0 0 1 Inf NaN -Inf -1 -0 0 1 Inf NaN -Inf -1 0 0 1 Inf NaN -Inf -1 0 0 1 Inf NaN -Inf NaN NaN NaN NaN Inf NaN -Inf NaN NaN NaN NaN Inf NaN]
-double 1x49 [-Inf -Inf -Inf -Inf -Inf -Inf -Inf NaN -1 -1 -1 -1 NaN NaN NaN 0 0 -0 -0 NaN NaN NaN 0 0 0 0 NaN NaN NaN 1 1 1 1 NaN NaN Inf Inf Inf Inf Inf Inf Inf NaN NaN NaN NaN NaN NaN NaN]
+double 1x49 [Inf NaN NaN NaN NaN -Inf NaN Inf 1 0 0 -1 -Inf NaN Inf 1 0 0 -1 -Inf NaN Inf 1 0 0 -1 -Inf NaN Inf 1 0 0 -1 -Inf NaN Inf NaN NaN NaN NaN -Inf NaN Inf NaN NaN NaN NaN -Inf NaN] (-0 at 11 18)
+double 1x49 [Inf Inf Inf Inf Inf Inf Inf NaN 1 1 1 1 NaN NaN NaN 0 0 0 0 NaN NaN NaN 0 0 0 0 NaN NaN NaN -1 -1 -1 -1 NaN NaN -Inf -Inf -Inf -Inf -Inf -Inf -Inf NaN NaN NaN NaN NaN NaN NaN] (-0 at 25 26)
+double 1x49 [NaN NaN NaN NaN NaN NaN NaN NaN 0 0 0 0 NaN NaN NaN 0 0 0 0 NaN NaN NaN 0 0 0 0 NaN NaN NaN 0 0 0 0 NaN NaN NaN NaN NaN NaN NaN NaN NaN NaN NaN NaN NaN NaN NaN NaN] (-0 at 11 12 18 19)
+double 1x49 [NaN NaN NaN NaN NaN NaN NaN NaN 0 0 0 0 NaN NaN NaN 0 0 0 0 NaN NaN NaN 0 0 0 0 NaN NaN NaN 0 0 0 0 NaN NaN NaN NaN NaN NaN NaN NaN NaN NaN NaN NaN NaN NaN NaN NaN] (-0 at 25 26 32 33)
+double 1x49 [NaN NaN NaN NaN NaN NaN NaN NaN 0 0 0 0 NaN NaN NaN 0 0 0 0 NaN NaN NaN 0 0 0 0 NaN NaN NaN 0 0 0 0 NaN NaN NaN NaN NaN NaN NaN NaN NaN NaN NaN NaN NaN NaN NaN NaN] (-0 at 9 10 16 17)
+double 1x49 [NaN NaN NaN NaN NaN NaN NaN NaN 0 0 0 0 NaN NaN NaN 0 0 0 0 NaN NaN NaN 0 0 0 0 NaN NaN NaN 0 0 0 0 NaN NaN NaN NaN NaN NaN NaN NaN NaN NaN NaN NaN NaN NaN NaN NaN] (-0 at 11 12 18 19)
+double 1x49 [-Inf NaN NaN NaN NaN Inf NaN -Inf -1 0 0 1 Inf NaN -Inf -1 0 0 1 Inf NaN -Inf -1 0 0 1 Inf NaN -Inf -1 0 0 1 Inf NaN -Inf NaN NaN NaN NaN Inf NaN -Inf NaN NaN NaN NaN Inf NaN] (-0 at 10 17)
+double 1x49 [-Inf -Inf -Inf -Inf -Inf -Inf -Inf NaN -1 -1 -1 -1 NaN NaN NaN 0 0 0 0 NaN NaN NaN 0 0 0 0 NaN NaN NaN 1 1 1 1 NaN NaN Inf Inf Inf Inf Inf Inf Inf NaN NaN NaN NaN NaN NaN NaN] (-0 at 18 19)
 double 1x49 [-Inf NaN NaN NaN NaN Inf NaN -Inf -Inf NaN NaN Inf Inf NaN -Inf -Inf NaN NaN Inf Inf NaN -Inf -Inf NaN NaN Inf Inf NaN -Inf -Inf NaN NaN Inf Inf NaN -Inf NaN NaN NaN NaN Inf NaN -Inf -Inf NaN NaN Inf Inf NaN]
 double 1x49 [-Inf -Inf -Inf -Inf -Inf -Inf -Inf NaN -Inf -Inf -Inf -Inf NaN -Inf NaN NaN NaN NaN NaN NaN NaN NaN NaN NaN NaN NaN NaN NaN NaN Inf Inf Inf Inf NaN Inf Inf Inf Inf Inf Inf Inf Inf NaN NaN NaN NaN NaN NaN NaN]
 double 1x49 [NaN NaN NaN NaN NaN NaN NaN NaN NaN NaN NaN NaN NaN NaN NaN NaN NaN NaN NaN NaN NaN NaN NaN NaN NaN NaN NaN NaN NaN NaN NaN NaN NaN NaN NaN NaN NaN NaN NaN NaN NaN NaN NaN NaN NaN NaN NaN NaN NaN]
 double 1x49 [NaN NaN NaN NaN NaN NaN NaN NaN NaN NaN NaN NaN NaN NaN NaN NaN NaN NaN NaN NaN NaN NaN NaN NaN NaN NaN NaN NaN NaN NaN NaN NaN NaN NaN NaN NaN NaN NaN NaN NaN NaN NaN NaN NaN NaN NaN NaN NaN NaN]
 double 1x49 [Inf NaN NaN NaN NaN -Inf NaN Inf Inf NaN NaN -Inf -Inf NaN Inf Inf NaN NaN -Inf -Inf NaN Inf Inf NaN NaN -Inf -Inf NaN Inf Inf NaN NaN -Inf -Inf NaN Inf NaN NaN NaN NaN -Inf NaN Inf Inf NaN NaN -Inf -Inf NaN]
 double 1x49 [Inf Inf Inf Inf Inf Inf Inf NaN Inf Inf Inf Inf NaN Inf NaN NaN NaN NaN NaN NaN NaN NaN NaN NaN NaN NaN NaN NaN NaN -Inf -Inf -Inf -Inf NaN -Inf -Inf -Inf -Inf -Inf -Inf -Inf -Inf NaN NaN NaN NaN NaN NaN NaN]
-double 1x49 [Inf NaN NaN NaN NaN -Inf NaN Inf 1 0 0 -1 -Inf NaN Inf 1 0 0 -1 -Inf NaN Inf 1 0 -0 -1 -Inf NaN Inf 1 0 -0 -1 -Inf NaN Inf NaN NaN NaN NaN -Inf NaN Inf NaN NaN NaN NaN -Inf NaN]
-double 1x49 [Inf Inf Inf Inf Inf Inf Inf NaN 1 1 1 1 NaN NaN NaN 0 0 0 0 NaN NaN NaN -0 -0 0 0 NaN NaN NaN -1 -1 -1 -1 NaN NaN -Inf -Inf -Inf -Inf -Inf -Inf -Inf NaN NaN NaN NaN NaN NaN NaN]
-double 1x49 [NaN NaN NaN NaN NaN NaN NaN NaN 0 0 0 0 NaN NaN NaN 0 0 0 0 NaN NaN NaN 0 0 -0 -0 NaN NaN NaN 0 0 -0 -0 NaN NaN NaN NaN NaN NaN NaN NaN NaN NaN NaN NaN NaN NaN NaN NaN]
-double 1x49 [NaN NaN NaN NaN NaN NaN NaN NaN 0 0 0 0 NaN NaN NaN 0 0 0 0 NaN NaN NaN -0 -0 0 0 NaN NaN NaN -0 -0 0 0 NaN NaN NaN NaN NaN NaN NaN NaN NaN NaN NaN NaN NaN NaN NaN NaN]
-double 1x49 [NaN NaN NaN NaN NaN NaN NaN NaN 0 0 0 0 NaN NaN NaN 0 0 0 0 NaN NaN NaN -0 -0 0 0 NaN NaN NaN -0 -0 0 0 NaN NaN NaN NaN NaN NaN NaN NaN NaN NaN NaN NaN NaN NaN NaN NaN]
-double 1x49 [NaN NaN NaN NaN NaN NaN NaN NaN -0 -0 0 0 NaN NaN NaN -0 -0 0 0 NaN NaN NaN 0 0 0 0 NaN NaN NaN 0 0 0 0 NaN NaN NaN NaN NaN NaN NaN NaN NaN NaN NaN NaN NaN NaN NaN NaN]
-double 1x49 [-Inf NaN NaN NaN NaN Inf NaN -Inf -1 0 0 1 Inf NaN -Inf -1 0 0 1 Inf NaN -Inf -1 -0 0 1 Inf NaN -Inf -1 -0 0 1 Inf NaN -Inf NaN NaN NaN NaN Inf NaN -Inf NaN NaN NaN NaN Inf NaN]
-double 1x49 [-Inf -Inf -Inf -Inf -Inf -Inf -Inf NaN -1 -1 -1 -1 NaN NaN NaN -0 -0 0 0 NaN NaN NaN 0 0 0 0 NaN NaN NaN 1 1 1 1 NaN NaN Inf Inf Inf Inf Inf Inf Inf NaN NaN NaN NaN NaN NaN NaN]
+double 1x49 [Inf NaN NaN NaN NaN -Inf NaN Inf 1 0 0 -1 -Inf NaN Inf 1 0 0 -1 -Inf NaN Inf 1 0 0 -1 -Inf NaN Inf 1 0 0 -1 -Inf NaN Inf NaN NaN NaN NaN -Inf NaN Inf NaN NaN NaN NaN -Inf NaN] (-0 at 25 32)
+double 1x49 [Inf Inf Inf Inf Inf Inf Inf NaN 1 1 1 1 NaN NaN NaN 0 0 0 0 NaN NaN NaN 0 0 0 0 NaN NaN NaN -1 -1 -1 -1 NaN NaN -Inf -Inf -Inf -Inf -Inf -Inf -Inf NaN NaN NaN NaN NaN NaN NaN] (-0 at 23 24)
+double 1x49 [NaN NaN NaN NaN NaN NaN NaN NaN 0 0 0 0 NaN NaN NaN 0 0 0 0 NaN NaN NaN 0 0 0 0 NaN NaN NaN 0 0 0 0 NaN NaN NaN NaN NaN NaN NaN NaN NaN NaN NaN NaN NaN NaN NaN NaN] (-0 at 25 26 32 33)
+double 1x49 [NaN NaN NaN NaN NaN NaN NaN NaN 0 0 0 0 NaN NaN NaN 0 0 0 0 NaN NaN NaN 0 0 0 0 NaN NaN NaN 0 0 0 0 NaN NaN NaN NaN NaN NaN NaN NaN NaN NaN NaN NaN NaN NaN NaN NaN] (-0 at 23 24 30 31)
+double 1x49 [NaN NaN NaN NaN NaN NaN NaN NaN 0 0 0 0 NaN NaN NaN 0 0 0 0 NaN NaN NaN 0 0 0 0 NaN NaN NaN 0 0 0 0 NaN NaN NaN NaN NaN NaN NaN NaN NaN NaN NaN NaN NaN NaN NaN NaN] (-0 at 23 24 30 31)
+double 1x49 [NaN NaN NaN NaN NaN NaN NaN NaN 0 0 0 0 NaN NaN NaN 0 0 0 0 NaN NaN NaN 0 0 0 0 NaN NaN NaN 0 0 0 0 NaN NaN NaN NaN NaN NaN NaN NaN NaN NaN NaN NaN NaN NaN NaN NaN] (-0 at 9 10 16 17)
+double 1x49 [-Inf NaN NaN NaN NaN Inf NaN -Inf -1 0 0 1 Inf NaN -Inf -1 0 0 1 Inf NaN -Inf -1 0 0 1 Inf NaN -Inf -1 0 0 1 Inf NaN -Inf NaN NaN NaN NaN Inf NaN -Inf NaN NaN NaN NaN Inf NaN] (-0 at 24 31)
+double 1x49 [-Inf -Inf -Inf -Inf -Inf -Inf -Inf NaN -1 -1 -1 -1 NaN NaN NaN 0 0 0 0 NaN NaN NaN 0 0 0 0 NaN NaN NaN 1 1 1 1 NaN NaN Inf Inf Inf Inf Inf Inf Inf NaN NaN NaN NaN NaN NaN NaN] (-0 at 16 17)
 double 1x49 [-Inf NaN NaN NaN NaN Inf NaN -Inf -Inf NaN NaN Inf Inf NaN -Inf -Inf NaN NaN Inf Inf NaN -Inf -Inf NaN NaN Inf Inf NaN -Inf -Inf NaN NaN Inf Inf NaN -Inf NaN NaN NaN NaN Inf NaN -Inf -Inf NaN NaN Inf Inf NaN]
 double 1x49 [-Inf -Inf -Inf -Inf -Inf -Inf -Inf NaN -Inf -Inf -Inf -Inf NaN -Inf NaN NaN NaN NaN NaN NaN NaN NaN NaN NaN NaN NaN NaN NaN NaN Inf Inf Inf Inf NaN Inf Inf Inf Inf Inf Inf Inf Inf NaN NaN NaN NaN NaN NaN NaN]
 double 1x49 [NaN NaN NaN NaN NaN NaN NaN NaN NaN NaN NaN NaN NaN NaN NaN NaN NaN NaN NaN NaN NaN NaN NaN NaN NaN NaN NaN NaN NaN NaN NaN NaN NaN NaN NaN NaN NaN NaN NaN NaN NaN NaN NaN NaN NaN NaN NaN NaN NaN]
 double 1x49 [NaN NaN NaN NaN NaN NaN NaN NaN NaN NaN NaN NaN NaN NaN NaN NaN NaN NaN NaN NaN NaN NaN NaN NaN NaN NaN NaN NaN NaN NaN NaN NaN NaN NaN NaN NaN NaN NaN NaN NaN NaN NaN NaN NaN NaN NaN NaN NaN NaN]
 double 1x49 [Inf Inf NaN NaN NaN NaN NaN Inf Inf NaN NaN -Inf -Inf NaN Inf Inf NaN NaN -Inf -Inf NaN Inf Inf NaN NaN -Inf -Inf NaN Inf Inf NaN NaN -Inf -Inf NaN NaN NaN NaN NaN -Inf -Inf NaN Inf Inf NaN NaN -Inf -Inf NaN]
 double 1x49 [NaN Inf Inf Inf Inf Inf Inf NaN Inf Inf Inf Inf Inf Inf NaN NaN NaN NaN NaN NaN NaN NaN NaN NaN NaN NaN NaN NaN -Inf -Inf -Inf -Inf -Inf NaN -Inf -Inf -Inf -Inf -Inf -Inf NaN -Inf NaN NaN NaN NaN NaN NaN NaN]
-double 1x49 [Inf Inf Inf Inf Inf NaN Inf Inf 2 1 1 0 -Inf NaN Inf 1 0 0 -1 -Inf NaN Inf 1 0 -0 -1 -Inf NaN Inf 0 -1 -1 -2 -Inf NaN NaN -Inf -Inf -Inf -Inf -Inf -Inf Inf NaN NaN NaN NaN -Inf NaN]
-double 1x49 [NaN Inf Inf Inf Inf Inf Inf -Inf 0 1 1 2 Inf NaN -Inf -1 0 0 1 Inf NaN -Inf -1 -0 0 1 Inf NaN -Inf -2 -1 -1 0 Inf NaN -Inf -Inf -Inf -Inf -Inf NaN -Inf -Inf NaN NaN NaN NaN Inf NaN]
-double 1x49 [Inf Inf Inf Inf Inf Inf Inf NaN 1 1 1 1 NaN NaN NaN 0 0 0 0 NaN NaN NaN 0 0 -0 -0 NaN NaN NaN -1 -1 -1 -1 NaN NaN -Inf -Inf -Inf -Inf -Inf -Inf -Inf NaN NaN NaN NaN NaN NaN NaN]
-double 1x49 [-Inf NaN NaN NaN NaN Inf NaN -Inf -1 0 0 1 Inf NaN -Inf -1 0 0 1 Inf NaN -Inf -1 -0 0 1 Inf NaN -Inf -1 -0 0 1 Inf NaN -Inf NaN NaN NaN NaN Inf NaN -Inf NaN NaN NaN NaN Inf NaN]
-double 1x49 [Inf Inf Inf Inf Inf Inf Inf NaN 1 1 1 1 NaN NaN NaN 0 0 0 0 NaN NaN NaN -0 -0 0 0 NaN NaN NaN -1 -1 -1 -1 NaN NaN -Inf -Inf -Inf -Inf -Inf -Inf -Inf NaN NaN NaN NaN NaN NaN NaN]
-double 1x49 [-Inf NaN NaN NaN NaN Inf NaN -Inf -1 -0 0 1 Inf NaN -Inf -1 -0 0 1 Inf NaN -Inf -1 0 0 1 Inf NaN -Inf -1 0 0 1 Inf NaN -Inf NaN NaN NaN NaN Inf NaN -Inf NaN NaN NaN NaN Inf NaN]
-double 1x49 [NaN Inf Inf Inf Inf Inf Inf -Inf 0 1 1 2 Inf NaN -Inf -1 0 0 1 Inf NaN -Inf -1 -0 0 1 Inf NaN -Inf -2 -1 -1 0 Inf NaN -Inf -Inf -Inf -Inf -Inf NaN -Inf -Inf NaN NaN NaN NaN Inf NaN]
-double 1x49 [-Inf -Inf -Inf -Inf -Inf NaN -Inf -Inf -2 -1 -1 0 Inf NaN -Inf -1 -0 0 1 Inf NaN -Inf -1 0 0 1 Inf NaN -Inf 0 1 1 2 Inf NaN NaN Inf Inf Inf Inf Inf Inf -Inf NaN NaN NaN NaN Inf NaN]
+double 1x49 [Inf Inf Inf Inf Inf NaN Inf Inf 2 1 1 0 -Inf NaN Inf 1 0 0 -1 -Inf NaN Inf 1 0 0 -1 -Inf NaN Inf 0 -1 -1 -2 -Inf NaN NaN -Inf -Inf -Inf -Inf -Inf -Inf Inf NaN NaN NaN NaN -Inf NaN] (-0 at 25)
+double 1x49 [NaN Inf Inf Inf Inf Inf Inf -Inf 0 1 1 2 Inf NaN -Inf -1 0 0 1 Inf NaN -Inf -1 0 0 1 Inf NaN -Inf -2 -1 -1 0 Inf NaN -Inf -Inf -Inf -Inf -Inf NaN -Inf -Inf NaN NaN NaN NaN Inf NaN] (-0 at 24)
+double 1x49 [Inf Inf Inf Inf Inf Inf Inf NaN 1 1 1 1 NaN NaN NaN 0 0 0 0 NaN NaN NaN 0 0 0 0 NaN NaN NaN -1 -1 -1 -1 NaN NaN -Inf -Inf -Inf -Inf -Inf -Inf -Inf NaN NaN NaN NaN NaN NaN NaN] (-0 at 25 26)
+double 1x49 [-Inf NaN NaN NaN NaN Inf NaN -Inf -1 0 0 1 Inf NaN -Inf -1 0 0 1 Inf NaN -Inf -1 0 0 1 Inf NaN -Inf -1 0 0 1 Inf NaN -Inf NaN NaN NaN NaN Inf NaN -Inf NaN NaN NaN NaN Inf NaN] (-0 at 24 31)
+double 1x49 [Inf Inf Inf Inf Inf Inf Inf NaN 1 1 1 1 NaN NaN NaN 0 0 0 0 NaN NaN NaN 0 0 0 0 NaN NaN NaN -1 -1 -1 -1 NaN NaN -Inf -Inf -Inf -Inf -Inf -Inf -Inf NaN NaN NaN NaN NaN NaN NaN] (-0 at 23 24)
+double 1x49 [-Inf NaN NaN NaN NaN Inf NaN -Inf -1 0 0 1 Inf NaN -Inf -1 0 0 1 Inf NaN -Inf -1 0 0 1 Inf NaN -Inf -1 0 0 1 Inf NaN -Inf NaN NaN NaN NaN Inf NaN -Inf NaN NaN NaN NaN Inf NaN] (-0 at 10 17)
+double 1x49 [NaN Inf Inf Inf Inf Inf Inf -Inf 0 1 1 2 Inf NaN -Inf -1 0 0 1 Inf NaN -Inf -1 0 0 1 Inf NaN -Inf -2 -1 -1 0 Inf NaN -Inf -Inf -Inf -Inf -Inf NaN -Inf -Inf NaN NaN NaN NaN Inf NaN] (-0 at 24)
+double 1x49 [-Inf -Inf -Inf -Inf -Inf NaN -Inf -Inf -2 -1 -1 0 Inf NaN -Inf -1 0 0 1 Inf NaN -Inf -1 0 0 1 Inf NaN -Inf 0 1 1 2 Inf NaN NaN Inf Inf Inf Inf Inf Inf -Inf NaN NaN NaN NaN Inf NaN] (-0 at 17)
 double 1x49 [NaN NaN NaN NaN Inf Inf NaN -Inf -Inf NaN NaN Inf Inf NaN -Inf -Inf NaN NaN Inf Inf NaN -Inf -Inf NaN NaN Inf Inf NaN -Inf -Inf NaN NaN Inf Inf NaN -Inf -Inf NaN NaN NaN NaN NaN -Inf -Inf NaN NaN Inf Inf NaN]
 double 1x49 [-Inf -Inf -Inf -Inf -Inf NaN -Inf -Inf -Inf -Inf -Inf -Inf NaN -Inf NaN NaN NaN NaN NaN NaN NaN NaN NaN NaN NaN NaN NaN NaN NaN Inf Inf Inf Inf Inf Inf NaN Inf Inf Inf Inf Inf Inf NaN NaN NaN NaN NaN NaN NaN]
 double 1x49 [Inf Inf Inf Inf Inf Inf Inf NaN NaN NaN NaN NaN NaN NaN NaN NaN NaN NaN NaN NaN NaN NaN NaN NaN NaN NaN NaN NaN NaN NaN NaN NaN NaN NaN NaN -Inf -Inf -Inf -Inf -Inf -Inf -Inf NaN NaN NaN NaN NaN NaN NaN]
@@ -98,104 +98,104 @@ double 1x49 [-Inf -Inf -Inf -Inf -Inf -Inf -Inf NaN -Inf -Inf -Inf -Inf NaN -Inf
 double 1x49 [NaN NaN NaN NaN NaN NaN NaN NaN NaN NaN NaN NaN NaN NaN NaN NaN NaN NaN NaN NaN NaN NaN NaN NaN NaN NaN NaN NaN NaN NaN NaN NaN NaN NaN NaN NaN NaN NaN NaN NaN NaN NaN NaN NaN NaN NaN NaN NaN NaN]
 double 1x49 [NaN NaN NaN NaN NaN NaN NaN NaN NaN NaN NaN NaN NaN NaN NaN NaN NaN NaN NaN NaN NaN NaN NaN NaN NaN NaN NaN NaN NaN NaN NaN NaN NaN NaN NaN NaN NaN NaN NaN NaN NaN NaN NaN NaN NaN NaN NaN NaN NaN]
 double 2 double
-double 1x49 [-Inf -Inf -Inf -Inf -Inf -Inf -Inf NaN -1 -1 -1 -1 NaN NaN NaN 0 0 -0 -0 NaN NaN NaN 0 0 0 0 NaN NaN NaN 1 1 1 1 NaN NaN Inf Inf Inf Inf Inf Inf Inf NaN NaN NaN NaN NaN NaN NaN]
-double 1x49 [Inf NaN NaN NaN NaN -Inf NaN Inf 1 0 0 -1 -Inf NaN Inf 1 0 0 -1 -Inf NaN Inf 1 0 -0 -1 -Inf NaN Inf 1 0 -0 -1 -Inf NaN Inf NaN NaN NaN NaN -Inf NaN Inf NaN NaN NaN NaN -Inf NaN]
-double 1x49 [-Inf -Inf -Inf -Inf -Inf -Inf -Inf NaN -1 -1 -1 -1 NaN NaN NaN 0 0 -0 -0 NaN NaN NaN 0 0 0 0 NaN NaN NaN 1 1 1 1 NaN NaN Inf Inf Inf Inf Inf Inf Inf NaN NaN NaN NaN NaN NaN NaN]
-double 1x49 [Inf NaN NaN NaN NaN -Inf NaN Inf 1 0 0 -1 -Inf NaN Inf 1 0 0 -1 -Inf NaN Inf 1 0 -0 -1 -Inf NaN Inf 1 0 -0 -1 -Inf NaN Inf NaN NaN NaN NaN -Inf NaN Inf NaN NaN NaN NaN -Inf NaN]
-double 1x49 [-Inf -Inf -Inf -Inf -Inf -Inf -Inf NaN -1 -1 -1 -1 NaN NaN NaN 0 0 -0 -0 NaN NaN NaN 0 0 0 0 NaN NaN NaN 1 1 1 1 NaN NaN Inf Inf Inf Inf Inf Inf Inf NaN NaN NaN NaN NaN NaN NaN]
-double 1x49 [Inf NaN NaN NaN NaN -Inf NaN Inf 1 0 0 -1 -Inf NaN Inf 1 0 0 -1 -Inf NaN Inf 1 0 -0 -1 -Inf NaN Inf 1 0 -0 -1 -Inf NaN Inf NaN NaN NaN NaN -Inf NaN Inf NaN NaN NaN NaN -Inf NaN]
-double 1x49 [-Inf -Inf -Inf -Inf -Inf -Inf -Inf NaN -1 -1 -1 -1 NaN NaN NaN 0 0 -0 -0 NaN NaN NaN 0 0 0 0 NaN NaN NaN 1 1 1 1 NaN NaN Inf Inf Inf Inf Inf Inf Inf NaN NaN NaN NaN NaN NaN NaN]
-double 1x49 [Inf NaN NaN NaN NaN -Inf NaN Inf 1 0 0 -1 -Inf NaN Inf 1 0 0 -1 -Inf NaN Inf 1 0 -0 -1 -Inf NaN Inf 1 0 -0 -1 -Inf NaN Inf NaN NaN NaN NaN -Inf NaN Inf NaN NaN NaN NaN -Inf NaN]
-double 1x49 [-Inf -Inf -Inf -Inf -Inf -Inf -Inf NaN -1 -1 -1 -1 NaN NaN NaN 0 0 -0 -0 NaN NaN NaN 0 0 0 0 NaN NaN NaN 1 1 1 1 NaN NaN Inf Inf Inf Inf Inf Inf Inf NaN NaN NaN NaN NaN NaN NaN]
-double 1x49 [Inf NaN NaN NaN NaN -Inf NaN Inf 1 0 0 -1 -Inf NaN Inf 1 0 0 -1 -Inf NaN Inf 1 0 -0 -1 -Inf NaN Inf 1 0 -0 -1 -Inf NaN Inf NaN NaN NaN NaN -Inf NaN Inf NaN NaN NaN NaN -Inf NaN]
-double 1x49 [-Inf -Inf -Inf -Inf -Inf -Inf -Inf NaN -1 -1 -1 -1 NaN NaN NaN 0 0 -0 -0 NaN NaN NaN 0 0 0 0 NaN NaN NaN 1 1 1 1 NaN NaN Inf Inf Inf Inf Inf Inf Inf NaN NaN NaN NaN NaN NaN NaN]
-double 1x49 [Inf NaN NaN NaN NaN -Inf NaN Inf 1 0 0 -1 -Inf NaN Inf 1 0 0 -1 -Inf NaN Inf 1 0 -0 -1 -Inf NaN Inf 1 0 -0 -1 -Inf NaN Inf NaN NaN NaN NaN -Inf NaN Inf NaN NaN NaN NaN -Inf NaN]
-double 1x49 [-Inf -Inf -Inf -Inf -Inf -Inf -Inf NaN -1 -1 -1 -1 NaN NaN NaN 0 0 -0 -0 NaN NaN NaN 0 0 0 0 NaN NaN NaN 1 1 1 1 NaN NaN Inf Inf Inf Inf Inf Inf Inf NaN NaN NaN NaN NaN NaN NaN]
-double 1x49 [Inf NaN NaN NaN NaN -Inf NaN Inf 1 0 0 -1 -Inf NaN Inf 1 0 0 -1 -Inf NaN Inf 1 0 -0 -1 -Inf NaN Inf 1 0 -0 -1 -Inf NaN Inf NaN NaN NaN NaN -Inf NaN Inf NaN NaN NaN NaN -Inf NaN]
-double 1x49 [-Inf -Inf -Inf -Inf -Inf -Inf -Inf NaN -1 -1 -1 -1 NaN NaN NaN 0 0 -0 -0 NaN NaN NaN 0 0 0 0 NaN NaN NaN 1 1 1 1 NaN NaN Inf Inf Inf Inf Inf Inf Inf NaN NaN NaN NaN NaN NaN NaN]
-double 1x49 [Inf NaN NaN NaN NaN -Inf NaN Inf 1 0 0 -1 -Inf NaN Inf 1 0 0 -1 -Inf NaN Inf 1 0 -0 -1 -Inf NaN Inf 1 0 -0 -1 -Inf NaN Inf NaN NaN NaN NaN -Inf NaN Inf NaN NaN NaN NaN -Inf NaN]
-double 1x49 [-Inf -Inf -Inf -Inf -Inf -Inf -Inf NaN -1 -1 -1 -1 NaN NaN NaN 0 0 -0 -0 NaN NaN NaN 0 0 0 0 NaN NaN NaN 1 1 1 1 NaN NaN Inf Inf Inf Inf Inf Inf Inf NaN NaN NaN NaN NaN NaN NaN]
-double 1x49 [Inf NaN NaN NaN NaN -Inf NaN Inf 1 0 0 -1 -Inf NaN Inf 1 0 0 -1 -Inf NaN Inf 1 0 -0 -1 -Inf NaN Inf 1 0 -0 -1 -Inf NaN Inf NaN NaN NaN NaN -Inf NaN Inf NaN NaN NaN NaN -Inf NaN]
-double 1x49 [-Inf -Inf -Inf -Inf -Inf -Inf -Inf NaN -1 -1 -1 -1 NaN NaN NaN 0 0 -0 -0 NaN NaN NaN 0 0 0 0 NaN NaN NaN 1 1 1 1 NaN NaN Inf Inf Inf Inf Inf Inf Inf NaN NaN NaN NaN NaN NaN NaN]
-double 1x49 [Inf NaN NaN NaN NaN -Inf NaN Inf 1 0 0 -1 -Inf NaN Inf 1 0 0 -1 -Inf NaN Inf 1 0 -0 -1 -Inf NaN Inf 1 0 -0 -1 -Inf NaN Inf NaN NaN NaN NaN -Inf NaN Inf NaN NaN NaN NaN -Inf NaN]
-double 1x49 [-Inf -Inf -Inf -Inf -Inf -Inf -Inf NaN -1 -1 -1 -1 NaN NaN NaN 0 0 -0 -0 NaN NaN NaN 0 0 0 0 NaN NaN NaN 1 1 1 1 NaN NaN Inf Inf Inf Inf Inf Inf Inf NaN NaN NaN NaN NaN NaN NaN]
-double 1x49 [Inf NaN NaN NaN NaN -Inf NaN Inf 1 0 0 -1 -Inf NaN Inf 1 0 0 -1 -Inf NaN Inf 1 0 -0 -1 -Inf NaN Inf 1 0 -0 -1 -Inf NaN Inf NaN NaN NaN NaN -Inf NaN Inf NaN NaN NaN NaN -Inf NaN]
-double 1x49 [-Inf -Inf -Inf -Inf -Inf -Inf -Inf NaN -1 -1 -1 -1 NaN NaN NaN 0 0 -0 -0 NaN NaN NaN 0 0 0 0 NaN NaN NaN 1 1 1 1 NaN NaN Inf Inf Inf Inf Inf Inf Inf NaN NaN NaN NaN NaN NaN NaN]
-double 1x49 [Inf NaN NaN NaN NaN -Inf NaN Inf 1 0 0 -1 -Inf NaN Inf 1 0 0 -1 -Inf NaN Inf 1 0 -0 -1 -Inf NaN Inf 1 0 -0 -1 -Inf NaN Inf NaN NaN NaN NaN -Inf NaN Inf NaN NaN NaN NaN -Inf NaN]
-double 1x49 [-Inf -Inf -Inf -Inf -Inf -Inf -Inf NaN -1 -1 -1 -1 NaN NaN NaN 0 0 -0 -0 NaN NaN NaN 0 0 0 0 NaN NaN NaN 1 1 1 1 NaN NaN Inf Inf Inf Inf Inf Inf Inf NaN NaN NaN NaN NaN NaN NaN]
-double 1x49 [Inf NaN NaN NaN NaN -Inf NaN Inf 1 0 0 -1 -Inf NaN Inf 1 0 0 -1 -Inf NaN Inf 1 0 -0 -1 -Inf NaN Inf 1 0 -0 -1 -Inf NaN Inf NaN NaN NaN NaN -Inf NaN Inf NaN NaN NaN NaN -Inf NaN]
-double 1x49 [-Inf -Inf -Inf -Inf -Inf -Inf -Inf NaN -1 -1 -1 -1 NaN NaN NaN 0 0 -0 -0 NaN NaN NaN 0 0 0 0 NaN NaN NaN 1 1 1 1 NaN NaN Inf Inf Inf Inf Inf Inf Inf NaN NaN NaN NaN NaN NaN NaN]
-double 1x49 [Inf NaN NaN NaN NaN -Inf NaN Inf 1 0 0 -1 -Inf NaN Inf 1 0 0 -1 -Inf NaN Inf 1 0 -0 -1 -Inf NaN Inf 1 0 -0 -1 -Inf NaN Inf NaN NaN NaN NaN -Inf NaN Inf NaN NaN NaN NaN -Inf NaN]
-double 1x49 [-Inf -Inf -Inf -Inf -Inf -Inf -Inf NaN -1 -1 -1 -1 NaN NaN NaN 0 0 -0 -0 NaN NaN NaN 0 0 0 0 NaN NaN NaN 1 1 1 1 NaN NaN Inf Inf Inf Inf Inf Inf Inf NaN NaN NaN NaN NaN NaN NaN]
-double 1x49 [Inf NaN NaN NaN NaN -Inf NaN Inf 1 0 0 -1 -Inf NaN Inf 1 0 0 -1 -Inf NaN Inf 1 0 -0 -1 -Inf NaN Inf 1 0 -0 -1 -Inf NaN Inf NaN NaN NaN NaN -Inf NaN Inf NaN NaN NaN NaN -Inf NaN]
-double 1x49 [-Inf -Inf -Inf -Inf -Inf -Inf -Inf NaN -1 -1 -1 -1 NaN NaN NaN 0 0 -0 -0 NaN NaN NaN 0 0 0 0 NaN NaN NaN 1 1 1 1 NaN NaN Inf Inf Inf Inf Inf Inf Inf NaN NaN NaN NaN NaN NaN NaN]
-double 1x49 [Inf NaN NaN NaN NaN -Inf NaN Inf 1 0 0 -1 -Inf NaN Inf 1 0 0 -1 -Inf NaN Inf 1 0 -0 -1 -Inf NaN Inf 1 0 -0 -1 -Inf NaN Inf NaN NaN NaN NaN -Inf NaN Inf NaN NaN NaN NaN -Inf NaN]
-double 1x49 [-Inf -Inf -Inf -Inf -Inf -Inf -Inf NaN -1 -1 -1 -1 NaN NaN NaN 0 0 -0 -0 NaN NaN NaN 0 0 0 0 NaN NaN NaN 1 1 1 1 NaN NaN Inf Inf Inf Inf Inf Inf Inf NaN NaN NaN NaN NaN NaN NaN]
-double 1x49 [Inf NaN NaN NaN NaN -Inf NaN Inf 1 0 0 -1 -Inf NaN Inf 1 0 0 -1 -Inf NaN Inf 1 0 -0 -1 -Inf NaN Inf 1 0 -0 -1 -Inf NaN Inf NaN NaN NaN NaN -Inf NaN Inf NaN NaN NaN NaN -Inf NaN]
-double 1x49 [-Inf -Inf -Inf -Inf -Inf -Inf -Inf NaN -1 -1 -1 -1 NaN NaN NaN 0 0 -0 -0 NaN NaN NaN 0 0 0 0 NaN NaN NaN 1 1 1 1 NaN NaN Inf Inf Inf Inf Inf Inf Inf NaN NaN NaN NaN NaN NaN NaN]
-double 1x49 [Inf NaN NaN NaN NaN -Inf NaN Inf 1 0 0 -1 -Inf NaN Inf 1 0 0 -1 -Inf NaN Inf 1 0 -0 -1 -Inf NaN Inf 1 0 -0 -1 -Inf NaN Inf NaN NaN NaN NaN -Inf NaN Inf NaN NaN NaN NaN -Inf NaN]
-double 1x49 [-Inf -Inf -Inf -Inf -Inf -Inf -Inf NaN -1 -1 -1 -1 NaN NaN NaN 0 0 -0 -0 NaN NaN NaN 0 0 0 0 NaN NaN NaN 1 1 1 1 NaN NaN Inf Inf Inf Inf Inf Inf Inf NaN NaN NaN NaN NaN NaN NaN]
-double 1x49 [Inf NaN NaN NaN NaN -Inf NaN Inf 1 0 0 -1 -Inf NaN Inf 1 0 0 -1 -Inf NaN Inf 1 0 -0 -1 -Inf NaN Inf 1 0 -0 -1 -Inf NaN Inf NaN NaN NaN NaN -Inf NaN Inf NaN NaN NaN NaN -Inf NaN]
-double 1x49 [-Inf -Inf -Inf -Inf -Inf -Inf -Inf NaN -1 -1 -1 -1 NaN NaN NaN 0 0 -0 -0 NaN NaN NaN 0 0 0 0 NaN NaN NaN 1 1 1 1 NaN NaN Inf Inf Inf Inf Inf Inf Inf NaN NaN NaN NaN NaN NaN NaN]
-double 1x49 [Inf NaN NaN NaN NaN -Inf NaN Inf 1 0 0 -1 -Inf NaN Inf 1 0 0 -1 -Inf NaN Inf 1 0 -0 -1 -Inf NaN Inf 1 0 -0 -1 -Inf NaN Inf NaN NaN NaN NaN -Inf NaN Inf NaN NaN NaN NaN -Inf NaN]
-double 1x49 [-Inf -Inf -Inf -Inf -Inf -Inf -Inf NaN -1 -1 -1 -1 NaN NaN NaN 0 0 -0 -0 NaN NaN NaN 0 0 0 0 NaN NaN NaN 1 1 1 1 NaN NaN Inf Inf Inf Inf Inf Inf Inf NaN NaN NaN NaN NaN NaN NaN]
-double 1x49 [Inf NaN NaN NaN NaN -Inf NaN Inf 1 0 0 -1 -Inf NaN Inf 1 0 0 -1 -Inf NaN Inf 1 0 -0 -1 -Inf NaN Inf 1 0 -0 -1 -Inf NaN Inf NaN NaN NaN NaN -Inf NaN Inf NaN NaN NaN NaN -Inf NaN]
-double 1x49 [-Inf -Inf -Inf -Inf -Inf -Inf -Inf NaN -1 -1 -1 -1 NaN NaN NaN 0 0 -0 -0 NaN NaN NaN 0 0 0 0 NaN NaN NaN 1 1 1 1 NaN NaN Inf Inf Inf Inf Inf Inf Inf NaN NaN NaN NaN NaN NaN NaN]
-double 1x49 [Inf NaN NaN NaN NaN -Inf NaN Inf 1 0 0 -1 -Inf NaN Inf 1 0 0 -1 -Inf NaN Inf 1 0 -0 -1 -Inf NaN Inf 1 0 -0 -1 -Inf NaN Inf NaN NaN NaN NaN -Inf NaN Inf NaN NaN NaN NaN -Inf NaN]
-double 1x49 [-Inf -Inf -Inf -Inf -Inf -Inf -Inf NaN -1 -1 -1 -1 NaN NaN NaN 0 0 -0 -0 NaN NaN NaN 0 0 0 0 NaN NaN NaN 1 1 1 1 NaN NaN Inf Inf Inf Inf Inf Inf Inf NaN NaN NaN NaN NaN NaN NaN]
-double 1x49 [Inf NaN NaN NaN NaN -Inf NaN Inf 1 0 0 -1 -Inf NaN Inf 1 0 0 -1 -Inf NaN Inf 1 0 -0 -1 -Inf NaN Inf 1 0 -0 -1 -Inf NaN Inf NaN NaN NaN NaN -Inf NaN Inf NaN NaN NaN NaN -Inf NaN]
-double 1x49 [-Inf -Inf -Inf -Inf -Inf -Inf -Inf NaN -1 -1 -1 -1 NaN NaN NaN 0 0 -0 -0 NaN NaN NaN 0 0 0 0 NaN NaN NaN 1 1 1 1 NaN NaN Inf Inf Inf Inf Inf Inf Inf NaN NaN NaN NaN NaN NaN NaN]
-double 1x49 [Inf NaN NaN NaN NaN -Inf NaN Inf 1 0 0 -1 -Inf NaN Inf 1 0 0 -1 -Inf NaN Inf 1 0 -0 -1 -Inf NaN Inf 1 0 -0 -1 -Inf NaN Inf NaN NaN NaN NaN -Inf NaN Inf NaN NaN NaN NaN -Inf NaN]
-double 1x49 [-Inf -Inf -Inf -Inf -Inf -Inf -Inf NaN -1 -1 -1 -1 NaN NaN NaN 0 0 -0 -0 NaN NaN NaN 0 0 0 0 NaN NaN NaN 1 1 1 1 NaN NaN Inf Inf Inf Inf Inf Inf Inf NaN NaN NaN NaN NaN NaN NaN]
-double 1x49 [Inf NaN NaN NaN NaN -Inf NaN Inf 1 0 0 -1 -Inf NaN Inf 1 0 0 -1 -Inf NaN Inf 1 0 -0 -1 -Inf NaN Inf 1 0 -0 -1 -Inf NaN Inf NaN NaN NaN NaN -Inf NaN Inf NaN NaN NaN NaN -Inf NaN]
-double 1x49 [-Inf -Inf -Inf -Inf -Inf -Inf -Inf NaN -1 -1 -1 -1 NaN NaN NaN 0 0 -0 -0 NaN NaN NaN 0 0 0 0 NaN NaN NaN 1 1 1 1 NaN NaN Inf Inf Inf Inf Inf Inf Inf NaN NaN NaN NaN NaN NaN NaN]
-double 1x49 [Inf NaN NaN NaN NaN -Inf NaN Inf 1 0 0 -1 -Inf NaN Inf 1 0 0 -1 -Inf NaN Inf 1 0 -0 -1 -Inf NaN Inf 1 0 -0 -1 -Inf NaN Inf NaN NaN NaN NaN -Inf NaN Inf NaN NaN NaN NaN -Inf NaN]
-double 1x49 [-Inf -Inf -Inf -Inf -Inf -Inf -Inf NaN -1 -1 -1 -1 NaN NaN NaN 0 0 -0 -0 NaN NaN NaN 0 0 0 0 NaN NaN NaN 1 1 1 1 NaN NaN Inf Inf Inf Inf Inf Inf Inf NaN NaN NaN NaN NaN NaN NaN]
-double 1x49 [Inf NaN NaN NaN NaN -Inf NaN Inf 1 0 0 -1 -Inf NaN Inf 1 0 0 -1 -Inf NaN Inf 1 0 -0 -1 -Inf NaN Inf 1 0 -0 -1 -Inf NaN Inf NaN NaN NaN NaN -Inf NaN Inf NaN NaN NaN NaN -Inf NaN]
-double 1x49 [-Inf -Inf -Inf -Inf -Inf -Inf -Inf NaN -1 -1 -1 -1 NaN NaN NaN 0 0 -0 -0 NaN NaN NaN 0 0 0 0 NaN NaN NaN 1 1 1 1 NaN NaN Inf Inf Inf Inf Inf Inf Inf NaN NaN NaN NaN NaN NaN NaN]
-double 1x49 [Inf NaN NaN NaN NaN -Inf NaN Inf 1 0 0 -1 -Inf NaN Inf 1 0 0 -1 -Inf NaN Inf 1 0 -0 -1 -Inf NaN Inf 1 0 -0 -1 -Inf NaN Inf NaN NaN NaN NaN -Inf NaN Inf NaN NaN NaN NaN -Inf NaN]
-double 1x49 [-Inf -Inf -Inf -Inf -Inf -Inf -Inf NaN -1 -1 -1 -1 NaN NaN NaN 0 0 -0 -0 NaN NaN NaN 0 0 0 0 NaN NaN NaN 1 1 1 1 NaN NaN Inf Inf Inf Inf Inf Inf Inf NaN NaN NaN NaN NaN NaN NaN]
-double 1x49 [Inf NaN NaN NaN NaN -Inf NaN Inf 1 0 0 -1 -Inf NaN Inf 1 0 0 -1 -Inf NaN Inf 1 0 -0 -1 -Inf NaN Inf 1 0 -0 -1 -Inf NaN Inf NaN NaN NaN NaN -Inf NaN Inf NaN NaN NaN NaN -Inf NaN]
-double 1x49 [-Inf -Inf -Inf -Inf -Inf -Inf -Inf NaN -1 -1 -1 -1 NaN NaN NaN 0 0 -0 -0 NaN NaN NaN 0 0 0 0 NaN NaN NaN 1 1 1 1 NaN NaN Inf Inf Inf Inf Inf Inf Inf NaN NaN NaN NaN NaN NaN NaN]
-double 1x49 [Inf NaN NaN NaN NaN -Inf NaN Inf 1 0 0 -1 -Inf NaN Inf 1 0 0 -1 -Inf NaN Inf 1 0 -0 -1 -Inf NaN Inf 1 0 -0 -1 -Inf NaN Inf NaN NaN NaN NaN -Inf NaN Inf NaN NaN NaN NaN -Inf NaN]
-double 1x49 [-Inf -Inf -Inf -Inf -Inf -Inf -Inf NaN -1 -1 -1 -1 NaN NaN NaN 0 0 -0 -0 NaN NaN NaN 0 0 0 0 NaN NaN NaN 1 1 1 1 NaN NaN Inf Inf Inf Inf Inf Inf Inf NaN NaN NaN NaN NaN NaN NaN]
-double 1x49 [Inf NaN NaN NaN NaN -Inf NaN Inf 1 0 0 -1 -Inf NaN Inf 1 0 0 -1 -Inf NaN Inf 1 0 -0 -1 -Inf NaN Inf 1 0 -0 -1 -Inf NaN Inf NaN NaN NaN NaN -Inf NaN Inf NaN NaN NaN NaN -Inf NaN]
-double 1x49 [-Inf -Inf -Inf -Inf -Inf -Inf -Inf NaN -1 -1 -1 -1 NaN NaN NaN 0 0 -0 -0 NaN NaN NaN 0 0 0 0 NaN NaN NaN 1 1 1 1 NaN NaN Inf Inf Inf Inf Inf Inf Inf NaN NaN NaN NaN NaN NaN NaN]
-double 1x49 [Inf NaN NaN NaN NaN -Inf NaN Inf 1 0 0 -1 -Inf NaN Inf 1 0 0 -1 -Inf NaN Inf 1 0 -0 -1 -Inf NaN Inf 1 0 -0 -1 -Inf NaN Inf NaN NaN NaN NaN -Inf NaN Inf NaN NaN NaN NaN -Inf NaN]
-double 1x49 [-Inf -Inf -Inf -Inf -Inf -Inf -Inf NaN -1 -1 -1 -1 NaN NaN NaN 0 0 -0 -0 NaN NaN NaN 0 0 0 0 NaN NaN NaN 1 1 1 1 NaN NaN Inf Inf Inf Inf Inf Inf Inf NaN NaN NaN NaN NaN NaN NaN]
-double 1x49 [Inf NaN NaN NaN NaN -Inf NaN Inf 1 0 0 -1 -Inf NaN Inf 1 0 0 -1 -Inf NaN Inf 1 0 -0 -1 -Inf NaN Inf 1 0 -0 -1 -Inf NaN Inf NaN NaN NaN NaN -Inf NaN Inf NaN NaN NaN NaN -Inf NaN]
-double 1x49 [-Inf -Inf -Inf -Inf -Inf -Inf -Inf NaN -1 -1 -1 -1 NaN NaN NaN 0 0 -0 -0 NaN NaN NaN 0 0 0 0 NaN NaN NaN 1 1 1 1 NaN NaN Inf Inf Inf Inf Inf Inf Inf NaN NaN NaN NaN NaN NaN NaN]
-double 1x49 [Inf NaN NaN NaN NaN -Inf NaN Inf 1 0 0 -1 -Inf NaN Inf 1 0 0 -1 -Inf NaN Inf 1 0 -0 -1 -Inf NaN Inf 1 0 -0 -1 -Inf NaN Inf NaN NaN NaN NaN -Inf NaN Inf NaN NaN NaN NaN -Inf NaN]
-double 1x49 [-Inf -Inf -Inf -Inf -Inf -Inf -Inf NaN -1 -1 -1 -1 NaN NaN NaN 0 0 -0 -0 NaN NaN NaN 0 0 0 0 NaN NaN NaN 1 1 1 1 NaN NaN Inf Inf Inf Inf Inf Inf Inf NaN NaN NaN NaN NaN NaN NaN]
-double 1x49 [Inf NaN NaN NaN NaN -Inf NaN Inf 1 0 0 -1 -Inf NaN Inf 1 0 0 -1 -Inf NaN Inf 1 0 -0 -1 -Inf NaN Inf 1 0 -0 -1 -Inf NaN Inf NaN NaN NaN NaN -Inf NaN Inf NaN NaN NaN NaN -Inf NaN]
-double 1x49 [-Inf -Inf -Inf -Inf -Inf -Inf -Inf NaN -1 -1 -1 -1 NaN NaN NaN 0 0 -0 -0 NaN NaN NaN 0 0 0 0 NaN NaN NaN 1 1 1 1 NaN NaN Inf Inf Inf Inf Inf Inf Inf NaN NaN NaN NaN NaN NaN NaN]
-double 1x49 [Inf NaN NaN NaN NaN -Inf NaN Inf 1 0 0 -1 -Inf NaN Inf 1 0 0 -1 -Inf NaN Inf 1 0 -0 -1 -Inf NaN Inf 1 0 -0 -1 -Inf NaN Inf NaN NaN NaN NaN -Inf NaN Inf NaN NaN NaN NaN -Inf NaN]
-double 1x49 [-Inf -Inf -Inf -Inf -Inf -Inf -Inf NaN -1 -1 -1 -1 NaN NaN NaN 0 0 -0 -0 NaN NaN NaN 0 0 0 0 NaN NaN NaN 1 1 1 1 NaN NaN Inf Inf Inf Inf Inf Inf Inf NaN NaN NaN NaN NaN NaN NaN]
-double 1x49 [Inf NaN NaN NaN NaN -Inf NaN Inf 1 0 0 -1 -Inf NaN Inf 1 0 0 -1 -Inf NaN Inf 1 0 -0 -1 -Inf NaN Inf 1 0 -0 -1 -Inf NaN Inf NaN NaN NaN NaN -Inf NaN Inf NaN NaN NaN NaN -Inf NaN]
-double 1x49 [-Inf -Inf -Inf -Inf -Inf -Inf -Inf NaN -1 -1 -1 -1 NaN NaN NaN 0 0 -0 -0 NaN NaN NaN 0 0 0 0 NaN NaN NaN 1 1 1 1 NaN NaN Inf Inf Inf Inf Inf Inf Inf NaN NaN NaN NaN NaN NaN NaN]
-double 1x49 [Inf NaN NaN NaN NaN -Inf NaN Inf 1 0 0 -1 -Inf NaN Inf 1 0 0 -1 -Inf NaN Inf 1 0 -0 -1 -Inf NaN Inf 1 0 -0 -1 -Inf NaN Inf NaN NaN NaN NaN -Inf NaN Inf NaN NaN NaN NaN -Inf NaN]
-double 1x49 [-Inf -Inf -Inf -Inf -Inf -Inf -Inf NaN -1 -1 -1 -1 NaN NaN NaN 0 0 -0 -0 NaN NaN NaN 0 0 0 0 NaN NaN NaN 1 1 1 1 NaN NaN Inf Inf Inf Inf Inf Inf Inf NaN NaN NaN NaN NaN NaN NaN]
-double 1x49 [Inf NaN NaN NaN NaN -Inf NaN Inf 1 0 0 -1 -Inf NaN Inf 1 0 0 -1 -Inf NaN Inf 1 0 -0 -1 -Inf NaN Inf 1 0 -0 -1 -Inf NaN Inf NaN NaN NaN NaN -Inf NaN Inf NaN NaN NaN NaN -Inf NaN]
-double 1x49 [-Inf -Inf -Inf -Inf -Inf -Inf -Inf NaN -1 -1 -1 -1 NaN NaN NaN 0 0 -0 -0 NaN NaN NaN 0 0 0 0 NaN NaN NaN 1 1 1 1 NaN NaN Inf Inf Inf Inf Inf Inf Inf NaN NaN NaN NaN NaN NaN NaN]
-double 1x49 [Inf NaN NaN NaN NaN -Inf NaN Inf 1 0 0 -1 -Inf NaN Inf 1 0 0 -1 -Inf NaN Inf 1 0 -0 -1 -Inf NaN Inf 1 0 -0 -1 -Inf NaN Inf NaN NaN NaN NaN -Inf NaN Inf NaN NaN NaN NaN -Inf NaN]
-double 1x49 [-Inf -Inf -Inf -Inf -Inf -Inf -Inf NaN -1 -1 -1 -1 NaN NaN NaN 0 0 -0 -0 NaN NaN NaN 0 0 0 0 NaN NaN NaN 1 1 1 1 NaN NaN Inf Inf Inf Inf Inf Inf Inf NaN NaN NaN NaN NaN NaN NaN]
-double 1x49 [Inf NaN NaN NaN NaN -Inf NaN Inf 1 0 0 -1 -Inf NaN Inf 1 0 0 -1 -Inf NaN Inf 1 0 -0 -1 -Inf NaN Inf 1 0 -0 -1 -Inf NaN Inf NaN NaN NaN NaN -Inf NaN Inf NaN NaN NaN NaN -Inf NaN]
-double 1x49 [-Inf -Inf -Inf -Inf -Inf -Inf -Inf NaN -1 -1 -1 -1 NaN NaN NaN 0 0 -0 -0 NaN NaN NaN 0 0 0 0 NaN NaN NaN 1 1 1 1 NaN NaN Inf Inf Inf Inf Inf Inf Inf NaN NaN NaN NaN NaN NaN NaN]
-double 1x49 [Inf NaN NaN NaN NaN -Inf NaN Inf 1 0 0 -1 -Inf NaN Inf 1 0 0 -1 -Inf NaN Inf 1 0 -0 -1 -Inf NaN Inf 1 0 -0 -1 -Inf NaN Inf NaN NaN NaN NaN -Inf NaN Inf NaN NaN NaN NaN -Inf NaN]
-double 1x49 [-Inf -Inf -Inf -Inf -Inf -Inf -Inf NaN -1 -1 -1 -1 NaN NaN NaN 0 0 -0 -0 NaN NaN NaN 0 0 0 0 NaN NaN NaN 1 1 1 1 NaN NaN Inf Inf Inf Inf Inf Inf Inf NaN NaN NaN NaN NaN NaN NaN]
-double 1x49 [Inf NaN NaN NaN NaN -Inf NaN Inf 1 0 0 -1 -Inf NaN Inf 1 0 0 -1 -Inf NaN Inf 1 0 -0 -1 -Inf NaN Inf 1 0 -0 -1 -Inf NaN Inf NaN NaN NaN NaN -Inf NaN Inf NaN NaN NaN NaN -Inf NaN]
-double 1x49 [-Inf -Inf -Inf -Inf -Inf -Inf -Inf NaN -1 -1 -1 -1 NaN NaN NaN 0 0 -0 -0 NaN NaN NaN 0 0 0 0 NaN NaN NaN 1 1 1 1 NaN NaN Inf Inf Inf Inf Inf Inf Inf NaN NaN NaN NaN NaN NaN NaN]
-double 1x49 [Inf NaN NaN NaN NaN -Inf NaN Inf 1 0 0 -1 -Inf NaN Inf 1 0 0 -1 -Inf NaN Inf 1 0 -0 -1 -Inf NaN Inf 1 0 -0 -1 -Inf NaN Inf NaN NaN NaN NaN -Inf NaN Inf NaN NaN NaN NaN -Inf NaN]
-double 1x49 [-Inf -Inf -Inf -Inf -Inf -Inf -Inf NaN -1 -1 -1 -1 NaN NaN NaN 0 0 -0 -0 NaN NaN NaN 0 0 0 0 NaN NaN NaN 1 1 1 1 NaN NaN Inf Inf Inf Inf Inf Inf Inf NaN NaN NaN NaN NaN NaN NaN]
-double 1x49 [Inf NaN NaN NaN NaN -Inf NaN Inf 1 0 0 -1 -Inf NaN Inf 1 0 0 -1 -Inf NaN Inf 1 0 -0 -1 -Inf NaN Inf 1 0 -0 -1 -Inf NaN Inf NaN NaN NaN NaN -Inf NaN Inf NaN NaN NaN NaN -Inf NaN]
-double 1x49 [-Inf -Inf -Inf -Inf -Inf -Inf -Inf NaN -1 -1 -1 -1 NaN NaN NaN 0 0 -0 -0 NaN NaN NaN 0 0 0 0 NaN NaN NaN 1 1 1 1 NaN NaN Inf Inf Inf Inf Inf Inf Inf NaN NaN NaN NaN NaN NaN NaN]
-double 1x49 [Inf NaN NaN NaN NaN -Inf NaN Inf 1 0 0 -1 -Inf NaN Inf 1 0 0 -1 -Inf NaN Inf 1 0 -0 -1 -Inf NaN Inf 1 0 -0 -1 -Inf NaN Inf NaN NaN NaN NaN -Inf NaN Inf NaN NaN NaN NaN -Inf NaN]
-double 1x49 [-Inf -Inf -Inf -Inf -Inf -Inf -Inf NaN -1 -1 -1 -1 NaN NaN NaN 0 0 -0 -0 NaN NaN NaN 0 0 0 0 NaN NaN NaN 1 1 1 1 NaN NaN Inf Inf Inf Inf Inf Inf Inf NaN NaN NaN NaN NaN NaN NaN]
-double 1x49 [Inf NaN NaN NaN NaN -Inf NaN Inf 1 0 0 -1 -Inf NaN Inf 1 0 0 -1 -Inf NaN Inf 1 0 -0 -1 -Inf NaN Inf 1 0 -0 -1 -Inf NaN Inf NaN NaN NaN NaN -Inf NaN Inf NaN NaN NaN NaN -Inf NaN]
-double 1x49 [-Inf -Inf -Inf -Inf -Inf -Inf -Inf NaN -1 -1 -1 -1 NaN NaN NaN 0 0 -0 -0 NaN NaN NaN 0 0 0 0 NaN NaN NaN 1 1 1 1 NaN NaN Inf Inf Inf Inf Inf Inf Inf NaN NaN NaN NaN NaN NaN NaN]
-double 1x49 [Inf NaN NaN NaN NaN -Inf NaN Inf 1 0 0 -1 -Inf NaN Inf 1 0 0 -1 -Inf NaN Inf 1 0 -0 -1 -Inf NaN Inf 1 0 -0 -1 -Inf NaN Inf NaN NaN NaN NaN -Inf NaN Inf NaN NaN NaN NaN -Inf NaN]
-double 1x49 [-Inf -Inf -Inf -Inf -Inf -Inf -Inf NaN -1 -1 -1 -1 NaN NaN NaN 0 0 -0 -0 NaN NaN NaN 0 0 0 0 NaN NaN NaN 1 1 1 1 NaN NaN Inf Inf Inf Inf Inf Inf Inf NaN NaN NaN NaN NaN NaN NaN]
-double 1x49 [Inf NaN NaN NaN NaN -Inf NaN Inf 1 0 0 -1 -Inf NaN Inf 1 0 0 -1 -Inf NaN Inf 1 0 -0 -1 -Inf NaN Inf 1 0 -0 -1 -Inf NaN Inf NaN NaN NaN NaN -Inf NaN Inf NaN NaN NaN NaN -Inf NaN]
+double 1x49 [-Inf -Inf -Inf -Inf -Inf -Inf -Inf NaN -1 -1 -1 -1 NaN NaN NaN 0 0 0 0 NaN NaN NaN 0 0 0 0 NaN NaN NaN 1 1 1 1 NaN NaN Inf Inf Inf Inf Inf Inf Inf NaN NaN NaN NaN NaN NaN NaN] (-0 at 18 19)
+double 1x49 [Inf NaN NaN NaN NaN -Inf NaN Inf 1 0 0 -1 -Inf NaN Inf 1 0 0 -1 -Inf NaN Inf 1 0 0 -1 -Inf NaN Inf 1 0 0 -1 -Inf NaN Inf NaN NaN NaN NaN -Inf NaN Inf NaN NaN NaN NaN -Inf NaN] (-0 at 25 32)
+double 1x49 [-Inf -Inf -Inf -Inf -Inf -Inf -Inf NaN -1 -1 -1 -1 NaN NaN NaN 0 0 0 0 NaN NaN NaN 0 0 0 0 NaN NaN NaN 1 1 1 1 NaN NaN Inf Inf Inf Inf Inf Inf Inf NaN NaN NaN NaN NaN NaN NaN] (-0 at 18 19)
+double 1x49 [Inf NaN NaN NaN NaN -Inf NaN Inf 1 0 0 -1 -Inf NaN Inf 1 0 0 -1 -Inf NaN Inf 1 0 0 -1 -Inf NaN Inf 1 0 0 -1 -Inf NaN Inf NaN NaN NaN NaN -Inf NaN Inf NaN NaN NaN NaN -Inf NaN] (-0 at 25 32)
+double 1x49 [-Inf -Inf -Inf -Inf -Inf -Inf -Inf NaN -1 -1 -1 -1 NaN NaN NaN 0 0 0 0 NaN NaN NaN 0 0 0 0 NaN NaN NaN 1 1 1 1 NaN NaN Inf Inf Inf Inf Inf Inf Inf NaN NaN NaN NaN NaN NaN NaN] (-0 at 18 19)
+double 1x49 [Inf NaN NaN NaN NaN -Inf NaN Inf 1 0 0 -1 -Inf NaN Inf 1 0 0 -1 -Inf NaN Inf 1 0 0 -1 -Inf NaN Inf 1 0 0 -1 -Inf NaN Inf NaN NaN NaN NaN -Inf NaN Inf NaN NaN NaN NaN -Inf NaN] (-0 at 25 32)
+double 1x49 [-Inf -Inf -Inf -Inf -Inf -Inf -Inf NaN -1 -1 -1 -1 NaN NaN NaN 0 0 0 0 NaN NaN NaN 0 0 0 0 NaN NaN NaN 1 1 1 1 NaN NaN Inf Inf Inf Inf Inf Inf Inf NaN NaN NaN NaN NaN NaN NaN] (-0 at 18 19)
+double 1x49 [Inf NaN NaN NaN NaN -Inf NaN Inf 1 0 0 -1 -Inf NaN Inf 1 0 0 -1 -Inf NaN Inf 1 0 0 -1 -Inf NaN Inf 1 0 0 -1 -Inf NaN Inf NaN NaN NaN NaN -Inf NaN Inf NaN NaN NaN NaN -Inf NaN] (-0 at 25 32)
+double 1x49 [-Inf -Inf -Inf -Inf -Inf -Inf -Inf NaN -1 -1 -1 -1 NaN NaN NaN 0 0 0 0 NaN NaN NaN 0 0 0 0 NaN NaN NaN 1 1 1 1 NaN NaN Inf Inf Inf Inf Inf Inf Inf NaN NaN NaN NaN NaN NaN NaN] (-0 at 18 19)
+double 1x49 [Inf NaN NaN NaN NaN -Inf NaN Inf 1 0 0 -1 -Inf NaN Inf 1 0 0 -1 -Inf NaN Inf 1 0 0 -1 -Inf NaN Inf 1 0 0 -1 -Inf NaN Inf NaN NaN NaN NaN -Inf NaN Inf NaN NaN NaN NaN -Inf NaN] (-0 at 25 32)
+double 1x49 [-Inf -Inf -Inf -Inf -Inf -Inf -Inf NaN -1 -1 -1 -1 NaN NaN NaN 0 0 0 0 NaN NaN NaN 0 0 0 0 NaN NaN NaN 1 1 1 1 NaN NaN Inf Inf Inf Inf Inf Inf Inf NaN NaN NaN NaN NaN NaN NaN] (-0 at 18 19)
+double 1x49 [Inf NaN NaN NaN NaN -Inf NaN Inf 1 0 0 -1 -Inf NaN Inf 1 0 0 -1 -Inf NaN Inf 1 0 0 -1 -Inf NaN Inf 1 0 0 -1 -Inf NaN Inf NaN NaN NaN NaN -Inf NaN Inf NaN NaN NaN NaN -Inf NaN] (-0 at 25 32)
+double 1x49 [-Inf -Inf -Inf -Inf -Inf -Inf -Inf NaN -1 -1 -1 -1 NaN NaN NaN 0 0 0 0 NaN NaN NaN 0 0 0 0 NaN NaN NaN 1 1 1 1 NaN NaN Inf Inf Inf Inf Inf Inf Inf NaN NaN NaN NaN NaN NaN NaN] (-0 at 18 19)
+double 1x49 [Inf NaN NaN NaN NaN -Inf NaN Inf 1 0 0 -1 -Inf NaN Inf 1 0 0 -1 -Inf NaN Inf 1 0 0 -1 -Inf NaN Inf 1 0 0 -1 -Inf NaN Inf NaN NaN NaN NaN -Inf NaN Inf NaN NaN NaN NaN -Inf NaN] (-0 at 25 32)
+double 1x49 [-Inf -Inf -Inf -Inf -Inf -Inf -Inf NaN -1 -1 -1 -1 NaN NaN NaN 0 0 0 0 NaN NaN NaN 0 0 0 0 NaN NaN NaN 1 1 1 1 NaN NaN Inf Inf Inf Inf Inf Inf Inf NaN NaN NaN NaN NaN NaN NaN] (-0 at 18 19)
+double 1x49 [Inf NaN NaN NaN NaN -Inf NaN Inf 1 0 0 -1 -Inf NaN Inf 1 0 0 -1 -Inf NaN Inf 1 0 0 -1 -Inf NaN Inf 1 0 0 -1 -Inf NaN Inf NaN NaN NaN NaN -Inf NaN Inf NaN NaN NaN NaN -Inf NaN] (-0 at 25 32)
+double 1x49 [-Inf -Inf -Inf -Inf -Inf -Inf -Inf NaN -1 -1 -1 -1 NaN NaN NaN 0 0 0 0 NaN NaN NaN 0 0 0 0 NaN NaN NaN 1 1 1 1 NaN NaN Inf Inf Inf Inf Inf Inf Inf NaN NaN NaN NaN NaN NaN NaN] (-0 at 18 19)
+double 1x49 [Inf NaN NaN NaN NaN -Inf NaN Inf 1 0 0 -1 -Inf NaN Inf 1 0 0 -1 -Inf NaN Inf 1 0 0 -1 -Inf NaN Inf 1 0 0 -1 -Inf NaN Inf NaN NaN NaN NaN -Inf NaN Inf NaN NaN NaN NaN -Inf NaN] (-0 at 25 32)
+double 1x49 [-Inf -Inf -Inf -Inf -Inf -Inf -Inf NaN -1 -1 -1 -1 NaN NaN NaN 0 0 0 0 NaN NaN NaN 0 0 0 0 NaN NaN NaN 1 1 1 1 NaN NaN Inf Inf Inf Inf Inf Inf Inf NaN NaN NaN NaN NaN NaN NaN] (-0 at 18 19)
+double 1x49 [Inf NaN NaN NaN NaN -Inf NaN Inf 1 0 0 -1 -Inf NaN Inf 1 0 0 -1 -Inf NaN Inf 1 0 0 -1 -Inf NaN Inf 1 0 0 -1 -Inf NaN Inf NaN NaN NaN NaN -Inf NaN Inf NaN NaN NaN NaN -Inf NaN] (-0 at 25 32)
+double 1x49 [-Inf -Inf -Inf -Inf -Inf -Inf -Inf NaN -1 -1 -1 -1 NaN NaN NaN 0 0 0 0 NaN NaN NaN 0 0 0 0 NaN NaN NaN 1 1 1 1 NaN NaN Inf Inf Inf Inf Inf Inf Inf NaN NaN NaN NaN NaN NaN NaN] (-0 at 18 19)
+double 1x49 [Inf NaN NaN NaN NaN -Inf NaN Inf 1 0 0 -1 -Inf NaN Inf 1 0 0 -1 -Inf NaN Inf 1 0 0 -1 -Inf NaN Inf 1 0 0 -1 -Inf NaN Inf NaN NaN NaN NaN -Inf NaN Inf NaN NaN NaN NaN -Inf NaN] (-0 at 25 32)
+double 1x49 [-Inf -Inf -Inf -Inf -Inf -Inf -Inf NaN -1 -1 -1 -1 NaN NaN NaN 0 0 0 0 NaN NaN NaN 0 0 0 0 NaN NaN NaN 1 1 1 1 NaN NaN Inf Inf Inf Inf Inf Inf Inf NaN NaN NaN NaN NaN NaN NaN] (-0 at 18 19)
+double 1x49 [Inf NaN NaN NaN NaN -Inf NaN Inf 1 0 0 -1 -Inf NaN Inf 1 0 0 -1 -Inf NaN Inf 1 0 0 -1 -Inf NaN Inf 1 0 0 -1 -Inf NaN Inf NaN NaN NaN NaN -Inf NaN Inf NaN NaN NaN NaN -Inf NaN] (-0 at 25 32)
+double 1x49 [-Inf -Inf -Inf -Inf -Inf -Inf -Inf NaN -1 -1 -1 -1 NaN NaN NaN 0 0 0 0 NaN NaN NaN 0 0 0 0 NaN NaN NaN 1 1 1 1 NaN NaN Inf Inf Inf Inf Inf Inf Inf NaN NaN NaN NaN NaN NaN NaN] (-0 at 18 19)
+double 1x49 [Inf NaN NaN NaN NaN -Inf NaN Inf 1 0 0 -1 -Inf NaN Inf 1 0 0 -1 -Inf NaN Inf 1 0 0 -1 -Inf NaN Inf 1 0 0 -1 -Inf NaN Inf NaN NaN NaN NaN -Inf NaN Inf NaN NaN NaN NaN -Inf NaN] (-0 at 25 32)
+double 1x49 [-Inf -Inf -Inf -Inf -Inf -Inf -Inf NaN -1 -1 -1 -1 NaN NaN NaN 0 0 0 0 NaN NaN NaN 0 0 0 0 NaN NaN NaN 1 1 1 1 NaN NaN Inf Inf Inf Inf Inf Inf Inf NaN NaN NaN NaN NaN NaN NaN] (-0 at 18 19)
+double 1x49 [Inf NaN NaN NaN NaN -Inf NaN Inf 1 0 0 -1 -Inf NaN Inf 1 0 0 -1 -Inf NaN Inf 1 0 0 -1 -Inf NaN Inf 1 0 0 -1 -Inf NaN Inf NaN NaN NaN NaN -Inf NaN Inf NaN NaN NaN NaN -Inf NaN] (-0 at 25 32)
+double 1x49 [-Inf -Inf -Inf -Inf -Inf -Inf -Inf NaN -1 -1 -1 -1 NaN NaN NaN 0 0 0 0 NaN NaN NaN 0 0 0 0 NaN NaN NaN 1 1 1 1 NaN NaN Inf Inf Inf Inf Inf Inf Inf NaN NaN NaN NaN NaN NaN NaN] (-0 at 18 19)
+double 1x49 [Inf NaN NaN NaN NaN -Inf NaN Inf 1 0 0 -1 -Inf NaN Inf 1 0 0 -1 -Inf NaN Inf 1 0 0 -1 -Inf NaN Inf 1 0 0 -1 -Inf NaN Inf NaN NaN NaN NaN -Inf NaN Inf NaN NaN NaN NaN -Inf NaN] (-0 at 25 32)
+double 1x49 [-Inf -Inf -Inf -Inf -Inf -Inf -Inf NaN -1 -1 -1 -1 NaN NaN NaN 0 0 0 0 NaN NaN NaN 0 0 0 0 NaN NaN NaN 1 1 1 1 NaN NaN Inf Inf Inf Inf Inf Inf Inf NaN NaN NaN NaN NaN NaN NaN] (-0 at 18 19)
+double 1x49 [Inf NaN NaN NaN NaN -Inf NaN Inf 1 0 0 -1 -Inf NaN Inf 1 0 0 -1 -Inf NaN Inf 1 0 0 -1 -Inf NaN Inf 1 0 0 -1 -Inf NaN Inf NaN NaN NaN NaN -Inf NaN Inf NaN NaN NaN NaN -Inf NaN] (-0 at 25 32)
+double 1x49 [-Inf -Inf -Inf -Inf -Inf -Inf -Inf NaN -1 -1 -1 -1 NaN NaN NaN 0 0 0 0 NaN NaN NaN 0 0 0 0 NaN NaN NaN 1 1 1 1 NaN NaN Inf Inf Inf Inf Inf Inf Inf NaN NaN NaN NaN NaN NaN NaN] (-0 at 18 19)
+double 1x49 [Inf NaN NaN NaN NaN -Inf NaN Inf 1 0 0 -1 -Inf NaN Inf 1 0 0 -1 -Inf NaN Inf 1 0 0 -1 -Inf NaN Inf 1 0 0 -1 -Inf NaN Inf NaN NaN NaN NaN -Inf NaN Inf NaN NaN NaN NaN -Inf NaN] (-0 at 25 32)
+double 1x49 [-Inf -Inf -Inf -Inf -Inf -Inf -Inf NaN -1 -1 -1 -1 NaN NaN NaN 0 0 0 0 NaN NaN NaN 0 0 0 0 NaN NaN NaN 1 1 1 1 NaN NaN Inf Inf Inf Inf Inf Inf Inf NaN NaN NaN NaN NaN NaN NaN] (-0 at 18 19)
+double 1x49 [Inf NaN NaN NaN NaN -Inf NaN Inf 1 0 0 -1 -Inf NaN Inf 1 0 0 -1 -Inf NaN Inf 1 0 0 -1 -Inf NaN Inf 1 0 0 -1 -Inf NaN Inf NaN NaN NaN NaN -Inf NaN Inf NaN NaN NaN NaN -Inf NaN] (-0 at 25 32)
+double 1x49 [-Inf -Inf -Inf -Inf -Inf -Inf -Inf NaN -1 -1 -1 -1 NaN NaN NaN 0 0 0 0 NaN NaN NaN 0 0 0 0 NaN NaN NaN 1 1 1 1 NaN NaN Inf Inf Inf Inf Inf Inf Inf NaN NaN NaN NaN NaN NaN NaN] (-0 at 18 19)
+double 1x49 [Inf NaN NaN NaN NaN -Inf NaN Inf 1 0 0 -1 -Inf NaN Inf 1 0 0 -1 -Inf NaN Inf 1 0 0 -1 -Inf NaN Inf 1 0 0 -1 -Inf NaN Inf NaN NaN NaN NaN -Inf NaN Inf NaN NaN NaN NaN -Inf NaN] (-0 at 25 32)
+double 1x49 [-Inf -Inf -Inf -Inf -Inf -Inf -Inf NaN -1 -1 -1 -1 NaN NaN NaN 0 0 0 0 NaN NaN NaN 0 0 0 0 NaN NaN NaN 1 1 1 1 NaN NaN Inf Inf Inf Inf Inf Inf Inf NaN NaN NaN NaN NaN NaN NaN] (-0 at 18 19)
+double 1x49 [Inf NaN NaN NaN NaN -Inf NaN Inf 1 0 0 -1 -Inf NaN Inf 1 0 0 -1 -Inf NaN Inf 1 0 0 -1 -Inf NaN Inf 1 0 0 -1 -Inf NaN Inf NaN NaN NaN NaN -Inf NaN Inf NaN NaN NaN NaN -Inf NaN] (-0 at 25 32)
+double 1x49 [-Inf -Inf -Inf -Inf -Inf -Inf -Inf NaN -1 -1 -1 -1 NaN NaN NaN 0 0 0 0 NaN NaN NaN 0 0 0 0 NaN NaN NaN 1 1 1 1 NaN NaN Inf Inf Inf Inf Inf Inf Inf NaN NaN NaN NaN NaN NaN NaN] (-0 at 18 19)
+double 1x49 [Inf NaN NaN NaN NaN -Inf NaN Inf 1 0 0 -1 -Inf NaN Inf 1 0 0 -1 -Inf NaN Inf 1 0 0 -1 -Inf NaN Inf 1 0 0 -1 -Inf NaN Inf NaN NaN NaN NaN -Inf NaN Inf NaN NaN NaN NaN -Inf NaN] (-0 at 25 32)
+double 1x49 [-Inf -Inf -Inf -Inf -Inf -Inf -Inf NaN -1 -1 -1 -1 NaN NaN NaN 0 0 0 0 NaN NaN NaN 0 0 0 0 NaN NaN NaN 1 1 1 1 NaN NaN Inf Inf Inf Inf Inf Inf Inf NaN NaN NaN NaN NaN NaN NaN] (-0 at 18 19)
+double 1x49 [Inf NaN NaN NaN NaN -Inf NaN Inf 1 0 0 -1 -Inf NaN Inf 1 0 0 -1 -Inf NaN Inf 1 0 0 -1 -Inf NaN Inf 1 0 0 -1 -Inf NaN Inf NaN NaN NaN NaN -Inf NaN Inf NaN NaN NaN NaN -Inf NaN] (-0 at 25 32)
+double 1x49 [-Inf -Inf -Inf -Inf -Inf -Inf -Inf NaN -1 -1 -1 -1 NaN NaN NaN 0 0 0 0 NaN NaN NaN 0 0 0 0 NaN NaN NaN 1 1 1 1 NaN NaN Inf Inf Inf Inf Inf Inf Inf NaN NaN NaN NaN NaN NaN NaN] (-0 at 18 19)
+double 1x49 [Inf NaN NaN NaN NaN -Inf NaN Inf 1 0 0 -1 -Inf NaN Inf 1 0 0 -1 -Inf NaN Inf 1 0 0 -1 -Inf NaN Inf 1 0 0 -1 -Inf NaN Inf NaN NaN NaN NaN -Inf NaN Inf NaN NaN NaN NaN -Inf NaN] (-0 at 25 32)
+double 1x49 [-Inf -Inf -Inf -Inf -Inf -Inf -Inf NaN -1 -1 -1 -1 NaN NaN NaN 0 0 0 0 NaN NaN NaN 0 0 0 0 NaN NaN NaN 1 1 1 1 NaN NaN Inf Inf Inf Inf Inf Inf Inf NaN NaN NaN NaN NaN NaN NaN] (-0 at 18 19)
+double 1x49 [Inf NaN NaN NaN NaN -Inf NaN Inf 1 0 0 -1 -Inf NaN Inf 1 0 0 -1 -Inf NaN Inf 1 0 0 -1 -Inf NaN Inf 1 0 0 -1 -Inf NaN Inf NaN NaN NaN NaN -Inf NaN Inf NaN NaN NaN NaN -Inf NaN] (-0 at 25 32)
+double 1x49 [-Inf -Inf -Inf -Inf -Inf -Inf -Inf NaN -1 -1 -1 -1 NaN NaN NaN 0 0 0 0 NaN NaN NaN 0 0 0 0 NaN NaN NaN 1 1 1 1 NaN NaN Inf Inf Inf Inf Inf Inf Inf NaN NaN NaN NaN NaN NaN NaN] (-0 at 18 19)
+double 1x49 [Inf NaN NaN NaN NaN -Inf NaN Inf 1 0 0 -1 -Inf NaN Inf 1 0 0 -1 -Inf NaN Inf 1 0 0 -1 -Inf NaN Inf 1 0 0 -1 -Inf NaN Inf NaN NaN NaN NaN -Inf NaN Inf NaN NaN NaN NaN -Inf NaN] (-0 at 25 32)
+double 1x49 [-Inf -Inf -Inf -Inf -Inf -Inf -Inf NaN -1 -1 -1 -1 NaN NaN NaN 0 0 0 0 NaN NaN NaN 0 0 0 0 NaN NaN NaN 1 1 1 1 NaN NaN Inf Inf Inf Inf Inf Inf Inf NaN NaN NaN NaN NaN NaN NaN] (-0 at 18 19)
+double 1x49 [Inf NaN NaN NaN NaN -Inf NaN Inf 1 0 0 -1 -Inf NaN Inf 1 0 0 -1 -Inf NaN Inf 1 0 0 -1 -Inf NaN Inf 1 0 0 -1 -Inf NaN Inf NaN NaN NaN NaN -Inf NaN Inf NaN NaN NaN NaN -Inf NaN] (-0 at 25 32)
+double 1x49 [-Inf -Inf -Inf -Inf -Inf -Inf -Inf NaN -1 -1 -1 -1 NaN NaN NaN 0 0 0 0 NaN NaN NaN 0 0 0 0 NaN NaN NaN 1 1 1 1 NaN NaN Inf Inf Inf Inf Inf Inf Inf NaN NaN NaN NaN NaN NaN NaN] (-0 at 18 19)
+double 1x49 [Inf NaN NaN NaN NaN -Inf NaN Inf 1 0 0 -1 -Inf NaN Inf 1 0 0 -1 -Inf NaN Inf 1 0 0 -1 -Inf NaN Inf 1 0 0 -1 -Inf NaN Inf NaN NaN NaN NaN -Inf NaN Inf NaN NaN NaN NaN -Inf NaN] (-0 at 25 32)
+double 1x49 [-Inf -Inf -Inf -Inf -Inf -Inf -Inf NaN -1 -1 -1 -1 NaN NaN NaN 0 0 0 0 NaN NaN NaN 0 0 0 0 NaN NaN NaN 1 1 1 1 NaN NaN Inf Inf Inf Inf Inf Inf Inf NaN NaN NaN NaN NaN NaN NaN] (-0 at 18 19)
+double 1x49 [Inf NaN NaN NaN NaN -Inf NaN Inf 1 0 0 -1 -Inf NaN Inf 1 0 0 -1 -Inf NaN Inf 1 0 0 -1 -Inf NaN Inf 1 0 0 -1 -Inf NaN Inf NaN NaN NaN NaN -Inf NaN Inf NaN NaN NaN NaN -Inf NaN] (-0 at 25 32)
+double 1x49 [-Inf -Inf -Inf -Inf -Inf -Inf -Inf NaN -1 -1 -1 -1 NaN NaN NaN 0 0 0 0 NaN NaN NaN 0 0 0 0 NaN NaN NaN 1 1 1 1 NaN NaN Inf Inf Inf Inf Inf Inf Inf NaN NaN NaN NaN NaN NaN NaN] (-0 at 18 19)
+double 1x49 [Inf NaN NaN NaN NaN -Inf NaN Inf 1 0 0 -1 -Inf NaN Inf 1 0 0 -1 -Inf NaN Inf 1 0 0 -1 -Inf NaN Inf 1 0 0 -1 -Inf NaN Inf NaN NaN NaN NaN -Inf NaN Inf NaN NaN NaN NaN -Inf NaN] (-0 at 25 32)
+double 1x49 [-Inf -Inf -Inf -Inf -Inf -Inf -Inf NaN -1 -1 -1 -1 NaN NaN NaN 0 0 0 0 NaN NaN NaN 0 0 0 0 NaN NaN NaN 1 1 1 1 NaN NaN Inf Inf Inf Inf Inf Inf Inf NaN NaN NaN NaN NaN NaN NaN] (-0 at 18 19)
+double 1x49 [Inf NaN NaN NaN NaN -Inf NaN Inf 1 0 0 -1 -Inf NaN Inf 1 0 0 -1 -Inf NaN Inf 1 0 0 -1 -Inf NaN Inf 1 0 0 -1 -Inf NaN Inf NaN NaN NaN NaN -Inf NaN Inf NaN NaN NaN NaN -Inf NaN] (-0 at 25 32)
+double 1x49 [-Inf -Inf -Inf -Inf -Inf -Inf -Inf NaN -1 -1 -1 -1 NaN NaN NaN 0 0 0 0 NaN NaN NaN 0 0 0 0 NaN NaN NaN 1 1 1 1 NaN NaN Inf Inf Inf Inf Inf Inf Inf NaN NaN NaN NaN NaN NaN NaN] (-0 at 18 19)
+double 1x49 [Inf NaN NaN NaN NaN -Inf NaN Inf 1 0 0 -1 -Inf NaN Inf 1 0 0 -1 -Inf NaN Inf 1 0 0 -1 -Inf NaN Inf 1 0 0 -1 -Inf NaN Inf NaN NaN NaN NaN -Inf NaN Inf NaN NaN NaN NaN -Inf NaN] (-0 at 25 32)
+double 1x49 [-Inf -Inf -Inf -Inf -Inf -Inf -Inf NaN -1 -1 -1 -1 NaN NaN NaN 0 0 0 0 NaN NaN NaN 0 0 0 0 NaN NaN NaN 1 1 1 1 NaN NaN Inf Inf Inf Inf Inf Inf Inf NaN NaN NaN NaN NaN NaN NaN] (-0 at 18 19)
+double 1x49 [Inf NaN NaN NaN NaN -Inf NaN Inf 1 0 0 -1 -Inf NaN Inf 1 0 0 -1 -Inf NaN Inf 1 0 0 -1 -Inf NaN Inf 1 0 0 -1 -Inf NaN Inf NaN NaN NaN NaN -Inf NaN Inf NaN NaN NaN NaN -Inf NaN] (-0 at 25 32)
+double 1x49 [-Inf -Inf -Inf -Inf -Inf -Inf -Inf NaN -1 -1 -1 -1 NaN NaN NaN 0 0 0 0 NaN NaN NaN 0 0 0 0 NaN NaN NaN 1 1 1 1 NaN NaN Inf Inf Inf Inf Inf Inf Inf NaN NaN NaN NaN NaN NaN NaN] (-0 at 18 19)
+double 1x49 [Inf NaN NaN NaN NaN -Inf NaN Inf 1 0 0 -1 -Inf NaN Inf 1 0 0 -1 -Inf NaN Inf 1 0 0 -1 -Inf NaN Inf 1 0 0 -1 -Inf NaN Inf NaN NaN NaN NaN -Inf NaN Inf NaN NaN NaN NaN -Inf NaN] (-0 at 25 32)
+double 1x49 [-Inf -Inf -Inf -Inf -Inf -Inf -Inf NaN -1 -1 -1 -1 NaN NaN NaN 0 0 0 0 NaN NaN NaN 0 0 0 0 NaN NaN NaN 1 1 1 1 NaN NaN Inf Inf Inf Inf Inf Inf Inf NaN NaN NaN NaN NaN NaN NaN] (-0 at 18 19)
+double 1x49 [Inf NaN NaN NaN NaN -Inf NaN Inf 1 0 0 -1 -Inf NaN Inf 1 0 0 -1 -Inf NaN Inf 1 0 0 -1 -Inf NaN Inf 1 0 0 -1 -Inf NaN Inf NaN NaN NaN NaN -Inf NaN Inf NaN NaN NaN NaN -Inf NaN] (-0 at 25 32)
+double 1x49 [-Inf -Inf -Inf -Inf -Inf -Inf -Inf NaN -1 -1 -1 -1 NaN NaN NaN 0 0 0 0 NaN NaN NaN 0 0 0 0 NaN NaN NaN 1 1 1 1 NaN NaN Inf Inf Inf Inf Inf Inf Inf NaN NaN NaN NaN NaN NaN NaN] (-0 at 18 19)
+double 1x49 [Inf NaN NaN NaN NaN -Inf NaN Inf 1 0 0 -1 -Inf NaN Inf 1 0 0 -1 -Inf NaN Inf 1 0 0 -1 -Inf NaN Inf 1 0 0 -1 -Inf NaN Inf NaN NaN NaN NaN -Inf NaN Inf NaN NaN NaN NaN -Inf NaN] (-0 at 25 32)
+double 1x49 [-Inf -Inf -Inf -Inf -Inf -Inf -Inf NaN -1 -1 -1 -1 NaN NaN NaN 0 0 0 0 NaN NaN NaN 0 0 0 0 NaN NaN NaN 1 1 1 1 NaN NaN Inf Inf Inf Inf Inf Inf Inf NaN NaN NaN NaN NaN NaN NaN] (-0 at 18 19)
+double 1x49 [Inf NaN NaN NaN NaN -Inf NaN Inf 1 0 0 -1 -Inf NaN Inf 1 0 0 -1 -Inf NaN Inf 1 0 0 -1 -Inf NaN Inf 1 0 0 -1 -Inf NaN Inf NaN NaN NaN NaN -Inf NaN Inf NaN NaN NaN NaN -Inf NaN] (-0 at 25 32)
+double 1x49 [-Inf -Inf -Inf -Inf -Inf -Inf -Inf NaN -1 -1 -1 -1 NaN NaN NaN 0 0 0 0 NaN NaN NaN 0 0 0 0 NaN NaN NaN 1 1 1 1 NaN NaN Inf Inf Inf Inf Inf Inf Inf NaN NaN NaN NaN NaN NaN NaN] (-0 at 18 19)
+double 1x49 [Inf NaN NaN NaN NaN -Inf NaN Inf 1 0 0 -1 -Inf NaN Inf 1 0 0 -1 -Inf NaN Inf 1 0 0 -1 -Inf NaN Inf 1 0 0 -1 -Inf NaN Inf NaN NaN NaN NaN -Inf NaN Inf NaN NaN NaN NaN -Inf NaN] (-0 at 25 32)
+double 1x49 [-Inf -Inf -Inf -Inf -Inf -Inf -Inf NaN -1 -1 -1 -1 NaN NaN NaN 0 0 0 0 NaN NaN NaN 0 0 0 0 NaN NaN NaN 1 1 1 1 NaN NaN Inf Inf Inf Inf Inf Inf Inf NaN NaN NaN NaN NaN NaN NaN] (-0 at 18 19)
+double 1x49 [Inf NaN NaN NaN NaN -Inf NaN Inf 1 0 0 -1 -Inf NaN Inf 1 0 0 -1 -Inf NaN Inf 1 0 0 -1 -Inf NaN Inf 1 0 0 -1 -Inf NaN Inf NaN NaN NaN NaN -Inf NaN Inf NaN NaN NaN NaN -Inf NaN] (-0 at 25 32)
+double 1x49 [-Inf -Inf -Inf -Inf -Inf -Inf -Inf NaN -1 -1 -1 -1 NaN NaN NaN 0 0 0 0 NaN NaN NaN 0 0 0 0 NaN NaN NaN 1 1 1 1 NaN NaN Inf Inf Inf Inf Inf Inf Inf NaN NaN NaN NaN NaN NaN NaN] (-0 at 18 19)
+double 1x49 [Inf NaN NaN NaN NaN -Inf NaN Inf 1 0 0 -1 -Inf NaN Inf 1 0 0 -1 -Inf NaN Inf 1 0 0 -1 -Inf NaN Inf 1 0 0 -1 -Inf NaN Inf NaN NaN NaN NaN -Inf NaN Inf NaN NaN NaN NaN -Inf NaN] (-0 at 25 32)
+double 1x49 [-Inf -Inf -Inf -Inf -Inf -Inf -Inf NaN -1 -1 -1 -1 NaN NaN NaN 0 0 0 0 NaN NaN NaN 0 0 0 0 NaN NaN NaN 1 1 1 1 NaN NaN Inf Inf Inf Inf Inf Inf Inf NaN NaN NaN NaN NaN NaN NaN] (-0 at 18 19)
+double 1x49 [Inf NaN NaN NaN NaN -Inf NaN Inf 1 0 0 -1 -Inf NaN Inf 1 0 0 -1 -Inf NaN Inf 1 0 0 -1 -Inf NaN Inf 1 0 0 -1 -Inf NaN Inf NaN NaN NaN NaN -Inf NaN Inf NaN NaN NaN NaN -Inf NaN] (-0 at 25 32)
+double 1x49 [-Inf -Inf -Inf -Inf -Inf -Inf -Inf NaN -1 -1 -1 -1 NaN NaN NaN 0 0 0 0 NaN NaN NaN 0 0 0 0 NaN NaN NaN 1 1 1 1 NaN NaN Inf Inf Inf Inf Inf Inf Inf NaN NaN NaN NaN NaN NaN NaN] (-0 at 18 19)
+double 1x49 [Inf NaN NaN NaN NaN -Inf NaN Inf 1 0 0 -1 -Inf NaN Inf 1 0 0 -1 -Inf NaN Inf 1 0 0 -1 -Inf NaN Inf 1 0 0 -1 -Inf NaN Inf NaN NaN NaN NaN -Inf NaN Inf NaN NaN NaN NaN -Inf NaN] (-0 at 25 32)
+double 1x49 [-Inf -Inf -Inf -Inf -Inf -Inf -Inf NaN -1 -1 -1 -1 NaN NaN NaN 0 0 0 0 NaN NaN NaN 0 0 0 0 NaN NaN NaN 1 1 1 1 NaN NaN Inf Inf Inf Inf Inf Inf Inf NaN NaN NaN NaN NaN NaN NaN] (-0 at 18 19)
+double 1x49 [Inf NaN NaN NaN NaN -Inf NaN Inf 1 0 0 -1 -Inf NaN Inf 1 0 0 -1 -Inf NaN Inf 1 0 0 -1 -Inf NaN Inf 1 0 0 -1 -Inf NaN Inf NaN NaN NaN NaN -Inf NaN Inf NaN NaN NaN NaN -Inf NaN] (-0 at 25 32)
+double 1x49 [-Inf -Inf -Inf -Inf -Inf -Inf -Inf NaN -1 -1 -1 -1 NaN NaN NaN 0 0 0 0 NaN NaN NaN 0 0 0 0 NaN NaN NaN 1 1 1 1 NaN NaN Inf Inf Inf Inf Inf Inf Inf NaN NaN NaN NaN NaN NaN NaN] (-0 at 18 19)
+double 1x49 [Inf NaN NaN NaN NaN -Inf NaN Inf 1 0 0 -1 -Inf NaN Inf 1 0 0 -1 -Inf NaN Inf 1 0 0 -1 -Inf NaN Inf 1 0 0 -1 -Inf NaN Inf NaN NaN NaN NaN -Inf NaN Inf NaN NaN NaN NaN -Inf NaN] (-0 at 25 32)
+double 1x49 [-Inf -Inf -Inf -Inf -Inf -Inf -Inf NaN -1 -1 -1 -1 NaN NaN NaN 0 0 0 0 NaN NaN NaN 0 0 0 0 NaN NaN NaN 1 1 1 1 NaN NaN Inf Inf Inf Inf Inf Inf Inf NaN NaN NaN NaN NaN NaN NaN] (-0 at 18 19)
+double 1x49 [Inf NaN NaN NaN NaN -Inf NaN Inf 1 0 0 -1 -Inf NaN Inf 1 0 0 -1 -Inf NaN Inf 1 0 0 -1 -Inf NaN Inf 1 0 0 -1 -Inf NaN Inf NaN NaN NaN NaN -Inf NaN Inf NaN NaN NaN NaN -Inf NaN] (-0 at 25 32)
+double 1x49 [-Inf -Inf -Inf -Inf -Inf -Inf -Inf NaN -1 -1 -1 -1 NaN NaN NaN 0 0 0 0 NaN NaN NaN 0 0 0 0 NaN NaN NaN 1 1 1 1 NaN NaN Inf Inf Inf Inf Inf Inf Inf NaN NaN NaN NaN NaN NaN NaN] (-0 at 18 19)
+double 1x49 [Inf NaN NaN NaN NaN -Inf NaN Inf 1 0 0 -1 -Inf NaN Inf 1 0 0 -1 -Inf NaN Inf 1 0 0 -1 -Inf NaN Inf 1 0 0 -1 -Inf NaN Inf NaN NaN NaN NaN -Inf NaN Inf NaN NaN NaN NaN -Inf NaN] (-0 at 25 32)
+double 1x49 [-Inf -Inf -Inf -Inf -Inf -Inf -Inf NaN -1 -1 -1 -1 NaN NaN NaN 0 0 0 0 NaN NaN NaN 0 0 0 0 NaN NaN NaN 1 1 1 1 NaN NaN Inf Inf Inf Inf Inf Inf Inf NaN NaN NaN NaN NaN NaN NaN] (-0 at 18 19)
+double 1x49 [Inf NaN NaN NaN NaN -Inf NaN Inf 1 0 0 -1 -Inf NaN Inf 1 0 0 -1 -Inf NaN Inf 1 0 0 -1 -Inf NaN Inf 1 0 0 -1 -Inf NaN Inf NaN NaN NaN NaN -Inf NaN Inf NaN NaN NaN NaN -Inf NaN] (-0 at 25 32)
+double 1x49 [-Inf -Inf -Inf -Inf -Inf -Inf -Inf NaN -1 -1 -1 -1 NaN NaN NaN 0 0 0 0 NaN NaN NaN 0 0 0 0 NaN NaN NaN 1 1 1 1 NaN NaN Inf Inf Inf Inf Inf Inf Inf NaN NaN NaN NaN NaN NaN NaN] (-0 at 18 19)
+double 1x49 [Inf NaN NaN NaN NaN -Inf NaN Inf 1 0 0 -1 -Inf NaN Inf 1 0 0 -1 -Inf NaN Inf 1 0 0 -1 -Inf NaN Inf 1 0 0 -1 -Inf NaN Inf NaN NaN NaN NaN -Inf NaN Inf NaN NaN NaN NaN -Inf NaN] (-0 at 25 32)
+double 1x49 [-Inf -Inf -Inf -Inf -Inf -Inf -Inf NaN -1 -1 -1 -1 NaN NaN NaN 0 0 0 0 NaN NaN NaN 0 0 0 0 NaN NaN NaN 1 1 1 1 NaN NaN Inf Inf Inf Inf Inf Inf Inf NaN NaN NaN NaN NaN NaN NaN] (-0 at 18 19)
+double 1x49 [Inf NaN NaN NaN NaN -Inf NaN Inf 1 0 0 -1 -Inf NaN Inf 1 0 0 -1 -Inf NaN Inf 1 0 0 -1 -Inf NaN Inf 1 0 0 -1 -Inf NaN Inf NaN NaN NaN NaN -Inf NaN Inf NaN NaN NaN NaN -Inf NaN] (-0 at 25 32)
+double 1x49 [-Inf -Inf -Inf -Inf -Inf -Inf -Inf NaN -1 -1 -1 -1 NaN NaN NaN 0 0 0 0 NaN NaN NaN 0 0 0 0 NaN NaN NaN 1 1 1 1 NaN NaN Inf Inf Inf Inf Inf Inf Inf NaN NaN NaN NaN NaN NaN NaN] (-0 at 18 19)
+double 1x49 [Inf NaN NaN NaN NaN -Inf NaN Inf 1 0 0 -1 -Inf NaN Inf 1 0 0 -1 -Inf NaN Inf 1 0 0 -1 -Inf NaN Inf 1 0 0 -1 -Inf NaN Inf NaN NaN NaN NaN -Inf NaN Inf NaN NaN NaN NaN -Inf NaN] (-0 at 25 32)
 double 3 double
 double 1x49 [NaN NaN -Inf -Inf -Inf -Inf -Inf NaN NaN -Inf -Inf -Inf -Inf -Inf Inf Inf NaN NaN -Inf -Inf NaN Inf Inf NaN NaN -Inf -Inf NaN Inf Inf Inf Inf NaN NaN Inf Inf Inf Inf Inf NaN NaN Inf Inf Inf NaN NaN -Inf -Inf NaN]
 double 1x49 [Inf Inf Inf Inf NaN NaN Inf Inf Inf Inf Inf NaN NaN Inf Inf Inf NaN NaN -Inf -Inf NaN Inf Inf NaN NaN -Inf -Inf NaN NaN NaN -Inf -Inf -Inf -Inf -Inf NaN NaN -Inf -Inf -Inf -Inf -Inf Inf Inf NaN NaN -Inf -Inf NaN]
@@ -213,56 +213,56 @@ double 1x49 [-Inf -Inf -Inf -Inf -Inf -Inf -Inf NaN -Inf -Inf -Inf -Inf NaN -Inf
 double 1x49 [Inf NaN NaN NaN NaN -Inf NaN Inf Inf NaN NaN -Inf -Inf NaN Inf Inf NaN NaN -Inf -Inf NaN Inf Inf NaN NaN -Inf -Inf NaN Inf Inf NaN NaN -Inf -Inf NaN Inf NaN NaN NaN NaN -Inf NaN Inf Inf NaN NaN -Inf -Inf NaN]
 double 1x49 [Inf NaN NaN NaN NaN -Inf NaN Inf Inf NaN NaN -Inf -Inf NaN Inf Inf NaN NaN -Inf -Inf NaN Inf Inf NaN NaN -Inf -Inf NaN Inf Inf NaN NaN -Inf -Inf NaN Inf NaN NaN NaN NaN -Inf NaN Inf Inf NaN NaN -Inf -Inf NaN]
 double 1x49 [Inf Inf Inf Inf Inf Inf Inf NaN Inf Inf Inf Inf NaN Inf NaN NaN NaN NaN NaN NaN NaN NaN NaN NaN NaN NaN NaN NaN NaN -Inf -Inf -Inf -Inf NaN -Inf -Inf -Inf -Inf -Inf -Inf -Inf -Inf NaN NaN NaN NaN NaN NaN NaN]
-double 1x49 [NaN -Inf -Inf -Inf -Inf -Inf -Inf Inf 0 -1 -1 -2 -Inf NaN Inf 1 0 -0 -1 -Inf NaN Inf 1 0 0 -1 -Inf NaN Inf 2 1 1 0 -Inf NaN Inf Inf Inf Inf Inf NaN Inf Inf NaN NaN NaN NaN -Inf NaN]
-double 1x49 [Inf Inf Inf Inf Inf NaN Inf Inf 2 1 1 0 -Inf NaN Inf 1 0 0 -1 -Inf NaN Inf 1 0 -0 -1 -Inf NaN Inf 0 -1 -1 -2 -Inf NaN NaN -Inf -Inf -Inf -Inf -Inf -Inf Inf NaN NaN NaN NaN -Inf NaN]
-double 1x49 [-Inf -Inf -Inf -Inf -Inf -Inf -Inf NaN -1 -1 -1 -1 NaN NaN NaN -0 -0 0 0 NaN NaN NaN 0 0 0 0 NaN NaN NaN 1 1 1 1 NaN NaN Inf Inf Inf Inf Inf Inf Inf NaN NaN NaN NaN NaN NaN NaN]
-double 1x49 [Inf NaN NaN NaN NaN -Inf NaN Inf 1 0 -0 -1 -Inf NaN Inf 1 0 -0 -1 -Inf NaN Inf 1 0 0 -1 -Inf NaN Inf 1 0 0 -1 -Inf NaN Inf NaN NaN NaN NaN -Inf NaN Inf NaN NaN NaN NaN -Inf NaN]
-double 1x49 [-Inf -Inf -Inf -Inf -Inf -Inf -Inf NaN -1 -1 -1 -1 NaN NaN NaN -0 -0 0 0 NaN NaN NaN 0 0 0 0 NaN NaN NaN 1 1 1 1 NaN NaN Inf Inf Inf Inf Inf Inf Inf NaN NaN NaN NaN NaN NaN NaN]
-double 1x49 [Inf NaN NaN NaN NaN -Inf NaN Inf 1 0 -0 -1 -Inf NaN Inf 1 0 -0 -1 -Inf NaN Inf 1 0 0 -1 -Inf NaN Inf 1 0 0 -1 -Inf NaN Inf NaN NaN NaN NaN -Inf NaN Inf NaN NaN NaN NaN -Inf NaN]
-double 1x49 [-Inf -Inf -Inf -Inf -Inf NaN -Inf -Inf -2 -1 -1 0 Inf NaN -Inf -1 -0 0 1 Inf NaN -Inf -1 0 0 1 Inf NaN -Inf 0 1 1 2 Inf NaN NaN Inf Inf Inf Inf Inf Inf -Inf NaN NaN NaN NaN Inf NaN]
-double 1x49 [NaN -Inf -Inf -Inf -Inf -Inf -Inf Inf 0 -1 -1 -2 -Inf NaN Inf 1 0 -0 -1 -Inf NaN Inf 1 0 0 -1 -Inf NaN Inf 2 1 1 0 -Inf NaN Inf Inf Inf Inf Inf NaN Inf Inf NaN NaN NaN NaN -Inf NaN]
+double 1x49 [NaN -Inf -Inf -Inf -Inf -Inf -Inf Inf 0 -1 -1 -2 -Inf NaN Inf 1 0 0 -1 -Inf NaN Inf 1 0 0 -1 -Inf NaN Inf 2 1 1 0 -Inf NaN Inf Inf Inf Inf Inf NaN Inf Inf NaN NaN NaN NaN -Inf NaN] (-0 at 18)
+double 1x49 [Inf Inf Inf Inf Inf NaN Inf Inf 2 1 1 0 -Inf NaN Inf 1 0 0 -1 -Inf NaN Inf 1 0 0 -1 -Inf NaN Inf 0 -1 -1 -2 -Inf NaN NaN -Inf -Inf -Inf -Inf -Inf -Inf Inf NaN NaN NaN NaN -Inf NaN] (-0 at 25)
+double 1x49 [-Inf -Inf -Inf -Inf -Inf -Inf -Inf NaN -1 -1 -1 -1 NaN NaN NaN 0 0 0 0 NaN NaN NaN 0 0 0 0 NaN NaN NaN 1 1 1 1 NaN NaN Inf Inf Inf Inf Inf Inf Inf NaN NaN NaN NaN NaN NaN NaN] (-0 at 16 17)
+double 1x49 [Inf NaN NaN NaN NaN -Inf NaN Inf 1 0 0 -1 -Inf NaN Inf 1 0 0 -1 -Inf NaN Inf 1 0 0 -1 -Inf NaN Inf 1 0 0 -1 -Inf NaN Inf NaN NaN NaN NaN -Inf NaN Inf NaN NaN NaN NaN -Inf NaN] (-0 at 11 18)
+double 1x49 [-Inf -Inf -Inf -Inf -Inf -Inf -Inf NaN -1 -1 -1 -1 NaN NaN NaN 0 0 0 0 NaN NaN NaN 0 0 0 0 NaN NaN NaN 1 1 1 1 NaN NaN Inf Inf Inf Inf Inf Inf Inf NaN NaN NaN NaN NaN NaN NaN] (-0 at 16 17)
+double 1x49 [Inf NaN NaN NaN NaN -Inf NaN Inf 1 0 0 -1 -Inf NaN Inf 1 0 0 -1 -Inf NaN Inf 1 0 0 -1 -Inf NaN Inf 1 0 0 -1 -Inf NaN Inf NaN NaN NaN NaN -Inf NaN Inf NaN NaN NaN NaN -Inf NaN] (-0 at 11 18)
+double 1x49 [-Inf -Inf -Inf -Inf -Inf NaN -Inf -Inf -2 -1 -1 0 Inf NaN -Inf -1 0 0 1 Inf NaN -Inf -1 0 0 1 Inf NaN -Inf 0 1 1 2 Inf NaN NaN Inf Inf Inf Inf Inf Inf -Inf NaN NaN NaN NaN Inf NaN] (-0 at 17)
+double 1x49 [NaN -Inf -Inf -Inf -Inf -Inf -Inf Inf 0 -1 -1 -2 -Inf NaN Inf 1 0 0 -1 -Inf NaN Inf 1 0 0 -1 -Inf NaN Inf 2 1 1 0 -Inf NaN Inf Inf Inf Inf Inf NaN Inf Inf NaN NaN NaN NaN -Inf NaN] (-0 at 18)
 double 1x49 [-Inf NaN NaN NaN NaN Inf NaN -Inf -Inf NaN NaN Inf Inf NaN -Inf -Inf NaN NaN Inf Inf NaN -Inf -Inf NaN NaN Inf Inf NaN -Inf -Inf NaN NaN Inf Inf NaN -Inf NaN NaN NaN NaN Inf NaN -Inf -Inf NaN NaN Inf Inf NaN]
 double 1x49 [-Inf -Inf -Inf -Inf -Inf -Inf -Inf NaN -Inf -Inf -Inf -Inf NaN -Inf NaN NaN NaN NaN NaN NaN NaN NaN NaN NaN NaN NaN NaN NaN NaN Inf Inf Inf Inf NaN Inf Inf Inf Inf Inf Inf Inf Inf NaN NaN NaN NaN NaN NaN NaN]
 double 1x49 [NaN NaN NaN NaN NaN NaN NaN NaN NaN NaN NaN NaN NaN NaN NaN NaN NaN NaN NaN NaN NaN NaN NaN NaN NaN NaN NaN NaN NaN NaN NaN NaN NaN NaN NaN NaN NaN NaN NaN NaN NaN NaN NaN NaN NaN NaN NaN NaN NaN]
 double 1x49 [NaN NaN NaN NaN NaN NaN NaN NaN NaN NaN NaN NaN NaN NaN NaN NaN NaN NaN NaN NaN NaN NaN NaN NaN NaN NaN NaN NaN NaN NaN NaN NaN NaN NaN NaN NaN NaN NaN NaN NaN NaN NaN NaN NaN NaN NaN NaN NaN NaN]
 double 1x49 [Inf NaN NaN NaN NaN -Inf NaN Inf Inf NaN NaN -Inf -Inf NaN Inf Inf NaN NaN -Inf -Inf NaN Inf Inf NaN NaN -Inf -Inf NaN Inf Inf NaN NaN -Inf -Inf NaN Inf NaN NaN NaN NaN -Inf NaN Inf Inf NaN NaN -Inf -Inf NaN]
 double 1x49 [Inf Inf Inf Inf Inf Inf Inf NaN Inf Inf Inf Inf NaN Inf NaN NaN NaN NaN NaN NaN NaN NaN NaN NaN NaN NaN NaN NaN NaN -Inf -Inf -Inf -Inf NaN -Inf -Inf -Inf -Inf -Inf -Inf -Inf -Inf NaN NaN NaN NaN NaN NaN NaN]
-double 1x49 [Inf NaN NaN NaN NaN -Inf NaN Inf 1 0 -0 -1 -Inf NaN Inf 1 0 -0 -1 -Inf NaN Inf 1 0 0 -1 -Inf NaN Inf 1 0 0 -1 -Inf NaN Inf NaN NaN NaN NaN -Inf NaN Inf NaN NaN NaN NaN -Inf NaN]
-double 1x49 [Inf Inf Inf Inf Inf Inf Inf NaN 1 1 1 1 NaN NaN NaN 0 0 0 0 NaN NaN NaN 0 0 -0 -0 NaN NaN NaN -1 -1 -1 -1 NaN NaN -Inf -Inf -Inf -Inf -Inf -Inf -Inf NaN NaN NaN NaN NaN NaN NaN]
-double 1x49 [NaN NaN NaN NaN NaN NaN NaN NaN -0 -0 0 0 NaN NaN NaN -0 -0 0 0 NaN NaN NaN 0 0 0 0 NaN NaN NaN 0 0 0 0 NaN NaN NaN NaN NaN NaN NaN NaN NaN NaN NaN NaN NaN NaN NaN NaN]
-double 1x49 [NaN NaN NaN NaN NaN NaN NaN NaN 0 0 -0 -0 NaN NaN NaN 0 0 -0 -0 NaN NaN NaN 0 0 0 0 NaN NaN NaN 0 0 0 0 NaN NaN NaN NaN NaN NaN NaN NaN NaN NaN NaN NaN NaN NaN NaN NaN]
-double 1x49 [NaN NaN NaN NaN NaN NaN NaN NaN 0 0 0 0 NaN NaN NaN 0 0 0 0 NaN NaN NaN -0 -0 0 0 NaN NaN NaN -0 -0 0 0 NaN NaN NaN NaN NaN NaN NaN NaN NaN NaN NaN NaN NaN NaN NaN NaN]
-double 1x49 [NaN NaN NaN NaN NaN NaN NaN NaN -0 -0 0 0 NaN NaN NaN -0 -0 0 0 NaN NaN NaN 0 0 0 0 NaN NaN NaN 0 0 0 0 NaN NaN NaN NaN NaN NaN NaN NaN NaN NaN NaN NaN NaN NaN NaN NaN]
-double 1x49 [-Inf NaN NaN NaN NaN Inf NaN -Inf -1 0 0 1 Inf NaN -Inf -1 0 0 1 Inf NaN -Inf -1 -0 0 1 Inf NaN -Inf -1 -0 0 1 Inf NaN -Inf NaN NaN NaN NaN Inf NaN -Inf NaN NaN NaN NaN Inf NaN]
-double 1x49 [-Inf -Inf -Inf -Inf -Inf -Inf -Inf NaN -1 -1 -1 -1 NaN NaN NaN -0 -0 0 0 NaN NaN NaN 0 0 0 0 NaN NaN NaN 1 1 1 1 NaN NaN Inf Inf Inf Inf Inf Inf Inf NaN NaN NaN NaN NaN NaN NaN]
+double 1x49 [Inf NaN NaN NaN NaN -Inf NaN Inf 1 0 0 -1 -Inf NaN Inf 1 0 0 -1 -Inf NaN Inf 1 0 0 -1 -Inf NaN Inf 1 0 0 -1 -Inf NaN Inf NaN NaN NaN NaN -Inf NaN Inf NaN NaN NaN NaN -Inf NaN] (-0 at 11 18)
+double 1x49 [Inf Inf Inf Inf Inf Inf Inf NaN 1 1 1 1 NaN NaN NaN 0 0 0 0 NaN NaN NaN 0 0 0 0 NaN NaN NaN -1 -1 -1 -1 NaN NaN -Inf -Inf -Inf -Inf -Inf -Inf -Inf NaN NaN NaN NaN NaN NaN NaN] (-0 at 25 26)
+double 1x49 [NaN NaN NaN NaN NaN NaN NaN NaN 0 0 0 0 NaN NaN NaN 0 0 0 0 NaN NaN NaN 0 0 0 0 NaN NaN NaN 0 0 0 0 NaN NaN NaN NaN NaN NaN NaN NaN NaN NaN NaN NaN NaN NaN NaN NaN] (-0 at 9 10 16 17)
+double 1x49 [NaN NaN NaN NaN NaN NaN NaN NaN 0 0 0 0 NaN NaN NaN 0 0 0 0 NaN NaN NaN 0 0 0 0 NaN NaN NaN 0 0 0 0 NaN NaN NaN NaN NaN NaN NaN NaN NaN NaN NaN NaN NaN NaN NaN NaN] (-0 at 11 12 18 19)
+double 1x49 [NaN NaN NaN NaN NaN NaN NaN NaN 0 0 0 0 NaN NaN NaN 0 0 0 0 NaN NaN NaN 0 0 0 0 NaN NaN NaN 0 0 0 0 NaN NaN NaN NaN NaN NaN NaN NaN NaN NaN NaN NaN NaN NaN NaN NaN] (-0 at 23 24 30 31)
+double 1x49 [NaN NaN NaN NaN NaN NaN NaN NaN 0 0 0 0 NaN NaN NaN 0 0 0 0 NaN NaN NaN 0 0 0 0 NaN NaN NaN 0 0 0 0 NaN NaN NaN NaN NaN NaN NaN NaN NaN NaN NaN NaN NaN NaN NaN NaN] (-0 at 9 10 16 17)
+double 1x49 [-Inf NaN NaN NaN NaN Inf NaN -Inf -1 0 0 1 Inf NaN -Inf -1 0 0 1 Inf NaN -Inf -1 0 0 1 Inf NaN -Inf -1 0 0 1 Inf NaN -Inf NaN NaN NaN NaN Inf NaN -Inf NaN NaN NaN NaN Inf NaN] (-0 at 24 31)
+double 1x49 [-Inf -Inf -Inf -Inf -Inf -Inf -Inf NaN -1 -1 -1 -1 NaN NaN NaN 0 0 0 0 NaN NaN NaN 0 0 0 0 NaN NaN NaN 1 1 1 1 NaN NaN Inf Inf Inf Inf Inf Inf Inf NaN NaN NaN NaN NaN NaN NaN] (-0 at 16 17)
 double 1x49 [-Inf NaN NaN NaN NaN Inf NaN -Inf -Inf NaN NaN Inf Inf NaN -Inf -Inf NaN NaN Inf Inf NaN -Inf -Inf NaN NaN Inf Inf NaN -Inf -Inf NaN NaN Inf Inf NaN -Inf NaN NaN NaN NaN Inf NaN -Inf -Inf NaN NaN Inf Inf NaN]
 double 1x49 [-Inf -Inf -Inf -Inf -Inf -Inf -Inf NaN -Inf -Inf -Inf -Inf NaN -Inf NaN NaN NaN NaN NaN NaN NaN NaN NaN NaN NaN NaN NaN NaN NaN Inf Inf Inf Inf NaN Inf Inf Inf Inf Inf Inf Inf Inf NaN NaN NaN NaN NaN NaN NaN]
 double 1x49 [NaN NaN NaN NaN NaN NaN NaN NaN NaN NaN NaN NaN NaN NaN NaN NaN NaN NaN NaN NaN NaN NaN NaN NaN NaN NaN NaN NaN NaN NaN NaN NaN NaN NaN NaN NaN NaN NaN NaN NaN NaN NaN NaN NaN NaN NaN NaN NaN NaN]
 double 1x49 [NaN NaN NaN NaN NaN NaN NaN NaN NaN NaN NaN NaN NaN NaN NaN NaN NaN NaN NaN NaN NaN NaN NaN NaN NaN NaN NaN NaN NaN NaN NaN NaN NaN NaN NaN NaN NaN NaN NaN NaN NaN NaN NaN NaN NaN NaN NaN NaN NaN]
 double 1x49 [Inf NaN NaN NaN NaN -Inf NaN Inf Inf NaN NaN -Inf -Inf NaN Inf Inf NaN NaN -Inf -Inf NaN Inf Inf NaN NaN -Inf -Inf NaN Inf Inf NaN NaN -Inf -Inf NaN Inf NaN NaN NaN NaN -Inf NaN Inf Inf NaN NaN -Inf -Inf NaN]
 double 1x49 [Inf Inf Inf Inf Inf Inf Inf NaN Inf Inf Inf Inf NaN Inf NaN NaN NaN NaN NaN NaN NaN NaN NaN NaN NaN NaN NaN NaN NaN -Inf -Inf -Inf -Inf NaN -Inf -Inf -Inf -Inf -Inf -Inf -Inf -Inf NaN NaN NaN NaN NaN NaN NaN]
-double 1x49 [Inf NaN NaN NaN NaN -Inf NaN Inf 1 0 0 -1 -Inf NaN Inf 1 0 0 -1 -Inf NaN Inf 1 0 -0 -1 -Inf NaN Inf 1 0 -0 -1 -Inf NaN Inf NaN NaN NaN NaN -Inf NaN Inf NaN NaN NaN NaN -Inf NaN]
-double 1x49 [Inf Inf Inf Inf Inf Inf Inf NaN 1 1 1 1 NaN NaN NaN 0 0 0 0 NaN NaN NaN -0 -0 0 0 NaN NaN NaN -1 -1 -1 -1 NaN NaN -Inf -Inf -Inf -Inf -Inf -Inf -Inf NaN NaN NaN NaN NaN NaN NaN]
-double 1x49 [NaN NaN NaN NaN NaN NaN NaN NaN 0 0 0 0 NaN NaN NaN 0 0 0 0 NaN NaN NaN 0 0 -0 -0 NaN NaN NaN 0 0 -0 -0 NaN NaN NaN NaN NaN NaN NaN NaN NaN NaN NaN NaN NaN NaN NaN NaN]
-double 1x49 [NaN NaN NaN NaN NaN NaN NaN NaN 0 0 0 0 NaN NaN NaN 0 0 0 0 NaN NaN NaN -0 -0 0 0 NaN NaN NaN -0 -0 0 0 NaN NaN NaN NaN NaN NaN NaN NaN NaN NaN NaN NaN NaN NaN NaN NaN]
-double 1x49 [NaN NaN NaN NaN NaN NaN NaN NaN 0 0 0 0 NaN NaN NaN 0 0 0 0 NaN NaN NaN -0 -0 0 0 NaN NaN NaN -0 -0 0 0 NaN NaN NaN NaN NaN NaN NaN NaN NaN NaN NaN NaN NaN NaN NaN NaN]
-double 1x49 [NaN NaN NaN NaN NaN NaN NaN NaN -0 -0 0 0 NaN NaN NaN -0 -0 0 0 NaN NaN NaN 0 0 0 0 NaN NaN NaN 0 0 0 0 NaN NaN NaN NaN NaN NaN NaN NaN NaN NaN NaN NaN NaN NaN NaN NaN]
-double 1x49 [-Inf NaN NaN NaN NaN Inf NaN -Inf -1 0 0 1 Inf NaN -Inf -1 0 0 1 Inf NaN -Inf -1 -0 0 1 Inf NaN -Inf -1 -0 0 1 Inf NaN -Inf NaN NaN NaN NaN Inf NaN -Inf NaN NaN NaN NaN Inf NaN]
-double 1x49 [-Inf -Inf -Inf -Inf -Inf -Inf -Inf NaN -1 -1 -1 -1 NaN NaN NaN -0 -0 0 0 NaN NaN NaN 0 0 0 0 NaN NaN NaN 1 1 1 1 NaN NaN Inf Inf Inf Inf Inf Inf Inf NaN NaN NaN NaN NaN NaN NaN]
+double 1x49 [Inf NaN NaN NaN NaN -Inf NaN Inf 1 0 0 -1 -Inf NaN Inf 1 0 0 -1 -Inf NaN Inf 1 0 0 -1 -Inf NaN Inf 1 0 0 -1 -Inf NaN Inf NaN NaN NaN NaN -Inf NaN Inf NaN NaN NaN NaN -Inf NaN] (-0 at 25 32)
+double 1x49 [Inf Inf Inf Inf Inf Inf Inf NaN 1 1 1 1 NaN NaN NaN 0 0 0 0 NaN NaN NaN 0 0 0 0 NaN NaN NaN -1 -1 -1 -1 NaN NaN -Inf -Inf -Inf -Inf -Inf -Inf -Inf NaN NaN NaN NaN NaN NaN NaN] (-0 at 23 24)
+double 1x49 [NaN NaN NaN NaN NaN NaN NaN NaN 0 0 0 0 NaN NaN NaN 0 0 0 0 NaN NaN NaN 0 0 0 0 NaN NaN NaN 0 0 0 0 NaN NaN NaN NaN NaN NaN NaN NaN NaN NaN NaN NaN NaN NaN NaN NaN] (-0 at 25 26 32 33)
+double 1x49 [NaN NaN NaN NaN NaN NaN NaN NaN 0 0 0 0 NaN NaN NaN 0 0 0 0 NaN NaN NaN 0 0 0 0 NaN NaN NaN 0 0 0 0 NaN NaN NaN NaN NaN NaN NaN NaN NaN NaN NaN NaN NaN NaN NaN NaN] (-0 at 23 24 30 31)
+double 1x49 [NaN NaN NaN NaN NaN NaN NaN NaN 0 0 0 0 NaN NaN NaN 0 0 0 0 NaN NaN NaN 0 0 0 0 NaN NaN NaN 0 0 0 0 NaN NaN NaN NaN NaN NaN NaN NaN NaN NaN NaN NaN NaN NaN NaN NaN] (-0 at 23 24 30 31)
+double 1x49 [NaN NaN NaN NaN NaN NaN NaN NaN 0 0 0 0 NaN NaN NaN 0 0 0 0 NaN NaN NaN 0 0 0 0 NaN NaN NaN 0 0 0 0 NaN NaN NaN NaN NaN NaN NaN NaN NaN NaN NaN NaN NaN NaN NaN NaN] (-0 at 9 10 16 17)
+double 1x49 [-Inf NaN NaN NaN NaN Inf NaN -Inf -1 0 0 1 Inf NaN -Inf -1 0 0 1 Inf NaN -Inf -1 0 0 1 Inf NaN -Inf -1 0 0 1 Inf NaN -Inf NaN NaN NaN NaN Inf NaN -Inf NaN NaN NaN NaN Inf NaN] (-0 at 24 31)
+double 1x49 [-Inf -Inf -Inf -Inf -Inf -Inf -Inf NaN -1 -1 -1 -1 NaN NaN NaN 0 0 0 0 NaN NaN NaN 0 0 0 0 NaN NaN NaN 1 1 1 1 NaN NaN Inf Inf Inf Inf Inf Inf Inf NaN NaN NaN NaN NaN NaN NaN] (-0 at 16 17)
 double 1x49 [-Inf NaN NaN NaN NaN Inf NaN -Inf -Inf NaN NaN Inf Inf NaN -Inf -Inf NaN NaN Inf Inf NaN -Inf -Inf NaN NaN Inf Inf NaN -Inf -Inf NaN NaN Inf Inf NaN -Inf NaN NaN NaN NaN Inf NaN -Inf -Inf NaN NaN Inf Inf NaN]
 double 1x49 [-Inf -Inf -Inf -Inf -Inf -Inf -Inf NaN -Inf -Inf -Inf -Inf NaN -Inf NaN NaN NaN NaN NaN NaN NaN NaN NaN NaN NaN NaN NaN NaN NaN Inf Inf Inf Inf NaN Inf Inf Inf Inf Inf Inf Inf Inf NaN NaN NaN NaN NaN NaN NaN]
 double 1x49 [NaN NaN NaN NaN NaN NaN NaN NaN NaN NaN NaN NaN NaN NaN NaN NaN NaN NaN NaN NaN NaN NaN NaN NaN NaN NaN NaN NaN NaN NaN NaN NaN NaN NaN NaN NaN NaN NaN NaN NaN NaN NaN NaN NaN NaN NaN NaN NaN NaN]
 double 1x49 [NaN NaN NaN NaN NaN NaN NaN NaN NaN NaN NaN NaN NaN NaN NaN NaN NaN NaN NaN NaN NaN NaN NaN NaN NaN NaN NaN NaN NaN NaN NaN NaN NaN NaN NaN NaN NaN NaN NaN NaN NaN NaN NaN NaN NaN NaN NaN NaN NaN]
 double 1x49 [Inf NaN NaN NaN NaN -Inf NaN Inf Inf NaN NaN -Inf -Inf NaN Inf Inf NaN NaN -Inf -Inf NaN Inf Inf NaN NaN -Inf -Inf NaN Inf Inf NaN NaN -Inf -Inf NaN Inf NaN NaN NaN NaN -Inf NaN Inf Inf NaN NaN -Inf -Inf NaN]
 double 1x49 [Inf Inf Inf Inf Inf Inf Inf NaN Inf Inf Inf Inf NaN Inf NaN NaN NaN NaN NaN NaN NaN NaN NaN NaN NaN NaN NaN NaN NaN -Inf -Inf -Inf -Inf NaN -Inf -Inf -Inf -Inf -Inf -Inf -Inf -Inf NaN NaN NaN NaN NaN NaN NaN]
-double 1x49 [Inf Inf Inf Inf Inf NaN Inf Inf 2 1 1 0 -Inf NaN Inf 1 0 0 -1 -Inf NaN Inf 1 0 -0 -1 -Inf NaN Inf 0 -1 -1 -2 -Inf NaN NaN -Inf -Inf -Inf -Inf -Inf -Inf Inf NaN NaN NaN NaN -Inf NaN]
-double 1x49 [NaN Inf Inf Inf Inf Inf Inf -Inf 0 1 1 2 Inf NaN -Inf -1 0 0 1 Inf NaN -Inf -1 -0 0 1 Inf NaN -Inf -2 -1 -1 0 Inf NaN -Inf -Inf -Inf -Inf -Inf NaN -Inf -Inf NaN NaN NaN NaN Inf NaN]
-double 1x49 [Inf Inf Inf Inf Inf Inf Inf NaN 1 1 1 1 NaN NaN NaN 0 0 0 0 NaN NaN NaN 0 0 -0 -0 NaN NaN NaN -1 -1 -1 -1 NaN NaN -Inf -Inf -Inf -Inf -Inf -Inf -Inf NaN NaN NaN NaN NaN NaN NaN]
-double 1x49 [-Inf NaN NaN NaN NaN Inf NaN -Inf -1 0 0 1 Inf NaN -Inf -1 0 0 1 Inf NaN -Inf -1 -0 0 1 Inf NaN -Inf -1 -0 0 1 Inf NaN -Inf NaN NaN NaN NaN Inf NaN -Inf NaN NaN NaN NaN Inf NaN]
-double 1x49 [Inf Inf Inf Inf Inf Inf Inf NaN 1 1 1 1 NaN NaN NaN 0 0 0 0 NaN NaN NaN -0 -0 0 0 NaN NaN NaN -1 -1 -1 -1 NaN NaN -Inf -Inf -Inf -Inf -Inf -Inf -Inf NaN NaN NaN NaN NaN NaN NaN]
-double 1x49 [-Inf NaN NaN NaN NaN Inf NaN -Inf -1 -0 0 1 Inf NaN -Inf -1 -0 0 1 Inf NaN -Inf -1 0 0 1 Inf NaN -Inf -1 0 0 1 Inf NaN -Inf NaN NaN NaN NaN Inf NaN -Inf NaN NaN NaN NaN Inf NaN]
-double 1x49 [NaN Inf Inf Inf Inf Inf Inf -Inf 0 1 1 2 Inf NaN -Inf -1 0 0 1 Inf NaN -Inf -1 -0 0 1 Inf NaN -Inf -2 -1 -1 0 Inf NaN -Inf -Inf -Inf -Inf -Inf NaN -Inf -Inf NaN NaN NaN NaN Inf NaN]
-double 1x49 [-Inf -Inf -Inf -Inf -Inf NaN -Inf -Inf -2 -1 -1 0 Inf NaN -Inf -1 -0 0 1 Inf NaN -Inf -1 0 0 1 Inf NaN -Inf 0 1 1 2 Inf NaN NaN Inf Inf Inf Inf Inf Inf -Inf NaN NaN NaN NaN Inf NaN]
+double 1x49 [Inf Inf Inf Inf Inf NaN Inf Inf 2 1 1 0 -Inf NaN Inf 1 0 0 -1 -Inf NaN Inf 1 0 0 -1 -Inf NaN Inf 0 -1 -1 -2 -Inf NaN NaN -Inf -Inf -Inf -Inf -Inf -Inf Inf NaN NaN NaN NaN -Inf NaN] (-0 at 25)
+double 1x49 [NaN Inf Inf Inf Inf Inf Inf -Inf 0 1 1 2 Inf NaN -Inf -1 0 0 1 Inf NaN -Inf -1 0 0 1 Inf NaN -Inf -2 -1 -1 0 Inf NaN -Inf -Inf -Inf -Inf -Inf NaN -Inf -Inf NaN NaN NaN NaN Inf NaN] (-0 at 24)
+double 1x49 [Inf Inf Inf Inf Inf Inf Inf NaN 1 1 1 1 NaN NaN NaN 0 0 0 0 NaN NaN NaN 0 0 0 0 NaN NaN NaN -1 -1 -1 -1 NaN NaN -Inf -Inf -Inf -Inf -Inf -Inf -Inf NaN NaN NaN NaN NaN NaN NaN] (-0 at 25 26)
+double 1x49 [-Inf NaN NaN NaN NaN Inf NaN -Inf -1 0 0 1 Inf NaN -Inf -1 0 0 1 Inf NaN -Inf -1 0 0 1 Inf NaN -Inf -1 0 0 1 Inf NaN -Inf NaN NaN NaN NaN Inf NaN -Inf NaN NaN NaN NaN Inf NaN] (-0 at 24 31)
+double 1x49 [Inf Inf Inf Inf Inf Inf Inf NaN 1 1 1 1 NaN NaN NaN 0 0 0 0 NaN NaN NaN 0 0 0 0 NaN NaN NaN -1 -1 -1 -1 NaN NaN -Inf -Inf -Inf -Inf -Inf -Inf -Inf NaN NaN NaN NaN NaN NaN NaN] (-0 at 23 24)
+double 1x49 [-Inf NaN NaN NaN NaN Inf NaN -Inf -1 0 0 1 Inf NaN -Inf -1 0 0 1 Inf NaN -Inf -1 0 0 1 Inf NaN -Inf -1 0 0 1 Inf NaN -Inf NaN NaN NaN NaN Inf NaN -Inf NaN NaN NaN NaN Inf NaN] (-0 at 10 17)
+double 1x49 [NaN Inf Inf Inf Inf Inf Inf -Inf 0 1 1 2 Inf NaN -Inf -1 0 0 1 Inf NaN -Inf -1 0 0 1 Inf NaN -Inf -2 -1 -1 0 Inf NaN -Inf -Inf -Inf -Inf -Inf NaN -Inf -Inf NaN NaN NaN NaN Inf NaN] (-0 at 24)
+double 1x49 [-Inf -Inf -Inf -Inf -Inf NaN -Inf -Inf -2 -1 -1 0 Inf NaN -Inf -1 0 0 1 Inf NaN -Inf -1 0 0 1 Inf NaN -Inf 0 1 1 2 Inf NaN NaN Inf Inf Inf Inf Inf Inf -Inf NaN NaN NaN NaN Inf NaN] (-0 at 17)
 double 1x49 [-Inf NaN NaN NaN NaN Inf NaN -Inf -Inf NaN NaN Inf Inf NaN -Inf -Inf NaN NaN Inf Inf NaN -Inf -Inf NaN NaN Inf Inf NaN -Inf -Inf NaN NaN Inf Inf NaN -Inf NaN NaN NaN NaN Inf NaN -Inf -Inf NaN NaN Inf Inf NaN]
 double 1x49 [-Inf -Inf -Inf -Inf -Inf -Inf -Inf NaN -Inf -Inf -Inf -Inf NaN -Inf NaN NaN NaN NaN NaN NaN NaN NaN NaN NaN NaN NaN NaN NaN NaN Inf Inf Inf Inf NaN Inf Inf Inf Inf Inf Inf Inf Inf NaN NaN NaN NaN NaN NaN NaN]
 double 1x49 [NaN NaN NaN NaN NaN NaN NaN NaN NaN NaN NaN NaN NaN NaN NaN NaN NaN NaN NaN NaN NaN NaN NaN NaN NaN NaN NaN NaN NaN NaN NaN NaN NaN NaN NaN NaN NaN NaN NaN NaN NaN NaN NaN NaN NaN NaN NaN NaN NaN]
@@ -312,56 +312,56 @@ double 1x49 [-Inf -Inf -Inf -Inf -Inf -Inf -Inf NaN -Inf -Inf -Inf -Inf NaN -Inf
 double 1x49 [Inf NaN NaN NaN NaN -Inf NaN Inf Inf NaN NaN -Inf -Inf NaN Inf Inf NaN NaN -Inf -Inf NaN Inf Inf NaN NaN -Inf -Inf NaN Inf Inf NaN NaN -Inf -Inf NaN Inf NaN NaN NaN NaN -Inf NaN Inf Inf NaN NaN -Inf -Inf NaN]
 double 1x49 [NaN NaN NaN NaN -Inf -Inf NaN Inf Inf NaN NaN -Inf -Inf NaN Inf Inf NaN NaN -Inf -Inf NaN Inf Inf NaN NaN -Inf -Inf NaN Inf Inf NaN NaN -Inf -Inf NaN Inf Inf NaN NaN NaN NaN NaN Inf Inf NaN NaN -Inf -Inf NaN]
 double 1x49 [Inf Inf Inf Inf Inf NaN Inf Inf Inf Inf Inf Inf NaN Inf NaN NaN NaN NaN NaN NaN NaN NaN NaN NaN NaN NaN NaN NaN NaN -Inf -Inf -Inf -Inf -Inf -Inf NaN -Inf -Inf -Inf -Inf -Inf -Inf NaN NaN NaN NaN NaN NaN NaN]
-double 1x49 [NaN -Inf -Inf -Inf -Inf -Inf -Inf Inf 0 -1 -1 -2 -Inf NaN Inf 1 0 -0 -1 -Inf NaN Inf 1 0 0 -1 -Inf NaN Inf 2 1 1 0 -Inf NaN Inf Inf Inf Inf Inf NaN Inf Inf NaN NaN NaN NaN -Inf NaN]
-double 1x49 [Inf Inf Inf Inf Inf NaN Inf Inf 2 1 1 0 -Inf NaN Inf 1 0 0 -1 -Inf NaN Inf 1 0 -0 -1 -Inf NaN Inf 0 -1 -1 -2 -Inf NaN NaN -Inf -Inf -Inf -Inf -Inf -Inf Inf NaN NaN NaN NaN -Inf NaN]
-double 1x49 [-Inf -Inf -Inf -Inf -Inf -Inf -Inf NaN -1 -1 -1 -1 NaN NaN NaN 0 0 -0 -0 NaN NaN NaN 0 0 0 0 NaN NaN NaN 1 1 1 1 NaN NaN Inf Inf Inf Inf Inf Inf Inf NaN NaN NaN NaN NaN NaN NaN]
-double 1x49 [Inf NaN NaN NaN NaN -Inf NaN Inf 1 0 0 -1 -Inf NaN Inf 1 0 0 -1 -Inf NaN Inf 1 0 -0 -1 -Inf NaN Inf 1 0 -0 -1 -Inf NaN Inf NaN NaN NaN NaN -Inf NaN Inf NaN NaN NaN NaN -Inf NaN]
-double 1x49 [-Inf -Inf -Inf -Inf -Inf -Inf -Inf NaN -1 -1 -1 -1 NaN NaN NaN -0 -0 0 0 NaN NaN NaN 0 0 0 0 NaN NaN NaN 1 1 1 1 NaN NaN Inf Inf Inf Inf Inf Inf Inf NaN NaN NaN NaN NaN NaN NaN]
-double 1x49 [Inf NaN NaN NaN NaN -Inf NaN Inf 1 0 -0 -1 -Inf NaN Inf 1 0 -0 -1 -Inf NaN Inf 1 0 0 -1 -Inf NaN Inf 1 0 0 -1 -Inf NaN Inf NaN NaN NaN NaN -Inf NaN Inf NaN NaN NaN NaN -Inf NaN]
-double 1x49 [-Inf -Inf -Inf -Inf -Inf NaN -Inf -Inf -2 -1 -1 0 Inf NaN -Inf -1 -0 0 1 Inf NaN -Inf -1 0 0 1 Inf NaN -Inf 0 1 1 2 Inf NaN NaN Inf Inf Inf Inf Inf Inf -Inf NaN NaN NaN NaN Inf NaN]
-double 1x49 [NaN -Inf -Inf -Inf -Inf -Inf -Inf Inf 0 -1 -1 -2 -Inf NaN Inf 1 0 -0 -1 -Inf NaN Inf 1 0 0 -1 -Inf NaN Inf 2 1 1 0 -Inf NaN Inf Inf Inf Inf Inf NaN Inf Inf NaN NaN NaN NaN -Inf NaN]
+double 1x49 [NaN -Inf -Inf -Inf -Inf -Inf -Inf Inf 0 -1 -1 -2 -Inf NaN Inf 1 0 0 -1 -Inf NaN Inf 1 0 0 -1 -Inf NaN Inf 2 1 1 0 -Inf NaN Inf Inf Inf Inf Inf NaN Inf Inf NaN NaN NaN NaN -Inf NaN] (-0 at 18)
+double 1x49 [Inf Inf Inf Inf Inf NaN Inf Inf 2 1 1 0 -Inf NaN Inf 1 0 0 -1 -Inf NaN Inf 1 0 0 -1 -Inf NaN Inf 0 -1 -1 -2 -Inf NaN NaN -Inf -Inf -Inf -Inf -Inf -Inf Inf NaN NaN NaN NaN -Inf NaN] (-0 at 25)
+double 1x49 [-Inf -Inf -Inf -Inf -Inf -Inf -Inf NaN -1 -1 -1 -1 NaN NaN NaN 0 0 0 0 NaN NaN NaN 0 0 0 0 NaN NaN NaN 1 1 1 1 NaN NaN Inf Inf Inf Inf Inf Inf Inf NaN NaN NaN NaN NaN NaN NaN] (-0 at 18 19)
+double 1x49 [Inf NaN NaN NaN NaN -Inf NaN Inf 1 0 0 -1 -Inf NaN Inf 1 0 0 -1 -Inf NaN Inf 1 0 0 -1 -Inf NaN Inf 1 0 0 -1 -Inf NaN Inf NaN NaN NaN NaN -Inf NaN Inf NaN NaN NaN NaN -Inf NaN] (-0 at 25 32)
+double 1x49 [-Inf -Inf -Inf -Inf -Inf -Inf -Inf NaN -1 -1 -1 -1 NaN NaN NaN 0 0 0 0 NaN NaN NaN 0 0 0 0 NaN NaN NaN 1 1 1 1 NaN NaN Inf Inf Inf Inf Inf Inf Inf NaN NaN NaN NaN NaN NaN NaN] (-0 at 16 17)
+double 1x49 [Inf NaN NaN NaN NaN -Inf NaN Inf 1 0 0 -1 -Inf NaN Inf 1 0 0 -1 -Inf NaN Inf 1 0 0 -1 -Inf NaN Inf 1 0 0 -1 -Inf NaN Inf NaN NaN NaN NaN -Inf NaN Inf NaN NaN NaN NaN -Inf NaN] (-0 at 11 18)
+double 1x49 [-Inf -Inf -Inf -Inf -Inf NaN -Inf -Inf -2 -1 -1 0 Inf NaN -Inf -1 0 0 1 Inf NaN -Inf -1 0 0 1 Inf NaN -Inf 0 1 1 2 Inf NaN NaN Inf Inf Inf Inf Inf Inf -Inf NaN NaN NaN NaN Inf NaN] (-0 at 17)
+double 1x49 [NaN -Inf -Inf -Inf -Inf -Inf -Inf Inf 0 -1 -1 -2 -Inf NaN Inf 1 0 0 -1 -Inf NaN Inf 1 0 0 -1 -Inf NaN Inf 2 1 1 0 -Inf NaN Inf Inf Inf Inf Inf NaN Inf Inf NaN NaN NaN NaN -Inf NaN] (-0 at 18)
 double 1x49 [-Inf -Inf NaN NaN NaN NaN NaN -Inf -Inf NaN NaN Inf Inf NaN -Inf -Inf NaN NaN Inf Inf NaN -Inf -Inf NaN NaN Inf Inf NaN -Inf -Inf NaN NaN Inf Inf NaN NaN NaN NaN NaN Inf Inf NaN -Inf -Inf NaN NaN Inf Inf NaN]
 double 1x49 [NaN -Inf -Inf -Inf -Inf -Inf -Inf NaN -Inf -Inf -Inf -Inf -Inf -Inf NaN NaN NaN NaN NaN NaN NaN NaN NaN NaN NaN NaN NaN NaN Inf Inf Inf Inf Inf NaN Inf Inf Inf Inf Inf Inf NaN Inf NaN NaN NaN NaN NaN NaN NaN]
 double 1x49 [-Inf -Inf -Inf -Inf -Inf -Inf -Inf NaN NaN NaN NaN NaN NaN NaN NaN NaN NaN NaN NaN NaN NaN NaN NaN NaN NaN NaN NaN NaN NaN NaN NaN NaN NaN NaN NaN Inf Inf Inf Inf Inf Inf Inf NaN NaN NaN NaN NaN NaN NaN]
 double 1x49 [Inf NaN NaN NaN NaN -Inf NaN Inf NaN NaN NaN NaN -Inf NaN Inf NaN NaN NaN NaN -Inf NaN Inf NaN NaN NaN NaN -Inf NaN Inf NaN NaN NaN NaN -Inf NaN Inf NaN NaN NaN NaN -Inf NaN Inf NaN NaN NaN NaN -Inf NaN]
 double 1x49 [Inf NaN NaN NaN NaN -Inf NaN Inf Inf NaN NaN -Inf -Inf NaN Inf Inf NaN NaN -Inf -Inf NaN Inf Inf NaN NaN -Inf -Inf NaN Inf Inf NaN NaN -Inf -Inf NaN Inf NaN NaN NaN NaN -Inf NaN Inf Inf NaN NaN -Inf -Inf NaN]
 double 1x49 [Inf Inf Inf Inf Inf Inf Inf NaN Inf Inf Inf Inf NaN Inf NaN NaN NaN NaN NaN NaN NaN NaN NaN NaN NaN NaN NaN NaN NaN -Inf -Inf -Inf -Inf NaN -Inf -Inf -Inf -Inf -Inf -Inf -Inf -Inf NaN NaN NaN NaN NaN NaN NaN]
-double 1x49 [Inf NaN NaN NaN NaN -Inf NaN Inf 1 0 -0 -1 -Inf NaN Inf 1 0 -0 -1 -Inf NaN Inf 1 0 0 -1 -Inf NaN Inf 1 0 0 -1 -Inf NaN Inf NaN NaN NaN NaN -Inf NaN Inf NaN NaN NaN NaN -Inf NaN]
-double 1x49 [Inf Inf Inf Inf Inf Inf Inf NaN 1 1 1 1 NaN NaN NaN 0 0 0 0 NaN NaN NaN 0 0 -0 -0 NaN NaN NaN -1 -1 -1 -1 NaN NaN -Inf -Inf -Inf -Inf -Inf -Inf -Inf NaN NaN NaN NaN NaN NaN NaN]
-double 1x49 [NaN NaN NaN NaN NaN NaN NaN NaN 0 0 -0 -0 NaN NaN NaN 0 0 -0 -0 NaN NaN NaN 0 0 0 0 NaN NaN NaN 0 0 0 0 NaN NaN NaN NaN NaN NaN NaN NaN NaN NaN NaN NaN NaN NaN NaN NaN]
-double 1x49 [NaN NaN NaN NaN NaN NaN NaN NaN 0 0 0 0 NaN NaN NaN 0 0 0 0 NaN NaN NaN 0 0 -0 -0 NaN NaN NaN 0 0 -0 -0 NaN NaN NaN NaN NaN NaN NaN NaN NaN NaN NaN NaN NaN NaN NaN NaN]
-double 1x49 [NaN NaN NaN NaN NaN NaN NaN NaN -0 -0 0 0 NaN NaN NaN -0 -0 0 0 NaN NaN NaN 0 0 0 0 NaN NaN NaN 0 0 0 0 NaN NaN NaN NaN NaN NaN NaN NaN NaN NaN NaN NaN NaN NaN NaN NaN]
-double 1x49 [NaN NaN NaN NaN NaN NaN NaN NaN 0 0 -0 -0 NaN NaN NaN 0 0 -0 -0 NaN NaN NaN 0 0 0 0 NaN NaN NaN 0 0 0 0 NaN NaN NaN NaN NaN NaN NaN NaN NaN NaN NaN NaN NaN NaN NaN NaN]
-double 1x49 [-Inf NaN NaN NaN NaN Inf NaN -Inf -1 -0 0 1 Inf NaN -Inf -1 -0 0 1 Inf NaN -Inf -1 0 0 1 Inf NaN -Inf -1 0 0 1 Inf NaN -Inf NaN NaN NaN NaN Inf NaN -Inf NaN NaN NaN NaN Inf NaN]
-double 1x49 [-Inf -Inf -Inf -Inf -Inf -Inf -Inf NaN -1 -1 -1 -1 NaN NaN NaN 0 0 -0 -0 NaN NaN NaN 0 0 0 0 NaN NaN NaN 1 1 1 1 NaN NaN Inf Inf Inf Inf Inf Inf Inf NaN NaN NaN NaN NaN NaN NaN]
+double 1x49 [Inf NaN NaN NaN NaN -Inf NaN Inf 1 0 0 -1 -Inf NaN Inf 1 0 0 -1 -Inf NaN Inf 1 0 0 -1 -Inf NaN Inf 1 0 0 -1 -Inf NaN Inf NaN NaN NaN NaN -Inf NaN Inf NaN NaN NaN NaN -Inf NaN] (-0 at 11 18)
+double 1x49 [Inf Inf Inf Inf Inf Inf Inf NaN 1 1 1 1 NaN NaN NaN 0 0 0 0 NaN NaN NaN 0 0 0 0 NaN NaN NaN -1 -1 -1 -1 NaN NaN -Inf -Inf -Inf -Inf -Inf -Inf -Inf NaN NaN NaN NaN NaN NaN NaN] (-0 at 25 26)
+double 1x49 [NaN NaN NaN NaN NaN NaN NaN NaN 0 0 0 0 NaN NaN NaN 0 0 0 0 NaN NaN NaN 0 0 0 0 NaN NaN NaN 0 0 0 0 NaN NaN NaN NaN NaN NaN NaN NaN NaN NaN NaN NaN NaN NaN NaN NaN] (-0 at 11 12 18 19)
+double 1x49 [NaN NaN NaN NaN NaN NaN NaN NaN 0 0 0 0 NaN NaN NaN 0 0 0 0 NaN NaN NaN 0 0 0 0 NaN NaN NaN 0 0 0 0 NaN NaN NaN NaN NaN NaN NaN NaN NaN NaN NaN NaN NaN NaN NaN NaN] (-0 at 25 26 32 33)
+double 1x49 [NaN NaN NaN NaN NaN NaN NaN NaN 0 0 0 0 NaN NaN NaN 0 0 0 0 NaN NaN NaN 0 0 0 0 NaN NaN NaN 0 0 0 0 NaN NaN NaN NaN NaN NaN NaN NaN NaN NaN NaN NaN NaN NaN NaN NaN] (-0 at 9 10 16 17)
+double 1x49 [NaN NaN NaN NaN NaN NaN NaN NaN 0 0 0 0 NaN NaN NaN 0 0 0 0 NaN NaN NaN 0 0 0 0 NaN NaN NaN 0 0 0 0 NaN NaN NaN NaN NaN NaN NaN NaN NaN NaN NaN NaN NaN NaN NaN NaN] (-0 at 11 12 18 19)
+double 1x49 [-Inf NaN NaN NaN NaN Inf NaN -Inf -1 0 0 1 Inf NaN -Inf -1 0 0 1 Inf NaN -Inf -1 0 0 1 Inf NaN -Inf -1 0 0 1 Inf NaN -Inf NaN NaN NaN NaN Inf NaN -Inf NaN NaN NaN NaN Inf NaN] (-0 at 10 17)
+double 1x49 [-Inf -Inf -Inf -Inf -Inf -Inf -Inf NaN -1 -1 -1 -1 NaN NaN NaN 0 0 0 0 NaN NaN NaN 0 0 0 0 NaN NaN NaN 1 1 1 1 NaN NaN Inf Inf Inf Inf Inf Inf Inf NaN NaN NaN NaN NaN NaN NaN] (-0 at 18 19)
 double 1x49 [-Inf NaN NaN NaN NaN Inf NaN -Inf -Inf NaN NaN Inf Inf NaN -Inf -Inf NaN NaN Inf Inf NaN -Inf -Inf NaN NaN Inf Inf NaN -Inf -Inf NaN NaN Inf Inf NaN -Inf NaN NaN NaN NaN Inf NaN -Inf -Inf NaN NaN Inf Inf NaN]
 double 1x49 [-Inf -Inf -Inf -Inf -Inf -Inf -Inf NaN -Inf -Inf -Inf -Inf NaN -Inf NaN NaN NaN NaN NaN NaN NaN NaN NaN NaN NaN NaN NaN NaN NaN Inf Inf Inf Inf NaN Inf Inf Inf Inf Inf Inf Inf Inf NaN NaN NaN NaN NaN NaN NaN]
 double 1x49 [NaN NaN NaN NaN NaN NaN NaN NaN NaN NaN NaN NaN NaN NaN NaN NaN NaN NaN NaN NaN NaN NaN NaN NaN NaN NaN NaN NaN NaN NaN NaN NaN NaN NaN NaN NaN NaN NaN NaN NaN NaN NaN NaN NaN NaN NaN NaN NaN NaN]
 double 1x49 [NaN NaN NaN NaN NaN NaN NaN NaN NaN NaN NaN NaN NaN NaN NaN NaN NaN NaN NaN NaN NaN NaN NaN NaN NaN NaN NaN NaN NaN NaN NaN NaN NaN NaN NaN NaN NaN NaN NaN NaN NaN NaN NaN NaN NaN NaN NaN NaN NaN]
 double 1x49 [Inf NaN NaN NaN NaN -Inf NaN Inf Inf NaN NaN -Inf -Inf NaN Inf Inf NaN NaN -Inf -Inf NaN Inf Inf NaN NaN -Inf -Inf NaN Inf Inf NaN NaN -Inf -Inf NaN Inf NaN NaN NaN NaN -Inf NaN Inf Inf NaN NaN -Inf -Inf NaN]
 double 1x49 [Inf Inf Inf Inf Inf Inf Inf NaN Inf Inf Inf Inf NaN Inf NaN NaN NaN NaN NaN NaN NaN NaN NaN NaN NaN NaN NaN NaN NaN -Inf -Inf -Inf -Inf NaN -Inf -Inf -Inf -Inf -Inf -Inf -Inf -Inf NaN NaN NaN NaN NaN NaN NaN]
-double 1x49 [Inf NaN NaN NaN NaN -Inf NaN Inf 1 0 0 -1 -Inf NaN Inf 1 0 0 -1 -Inf NaN Inf 1 0 -0 -1 -Inf NaN Inf 1 0 -0 -1 -Inf NaN Inf NaN NaN NaN NaN -Inf NaN Inf NaN NaN NaN NaN -Inf NaN]
-double 1x49 [Inf Inf Inf Inf Inf Inf Inf NaN 1 1 1 1 NaN NaN NaN 0 0 0 0 NaN NaN NaN -0 -0 0 0 NaN NaN NaN -1 -1 -1 -1 NaN NaN -Inf -Inf -Inf -Inf -Inf -Inf -Inf NaN NaN NaN NaN NaN NaN NaN]
-double 1x49 [NaN NaN NaN NaN NaN NaN NaN NaN 0 0 0 0 NaN NaN NaN 0 0 0 0 NaN NaN NaN 0 0 -0 -0 NaN NaN NaN 0 0 -0 -0 NaN NaN NaN NaN NaN NaN NaN NaN NaN NaN NaN NaN NaN NaN NaN NaN]
-double 1x49 [NaN NaN NaN NaN NaN NaN NaN NaN 0 0 0 0 NaN NaN NaN 0 0 0 0 NaN NaN NaN -0 -0 0 0 NaN NaN NaN -0 -0 0 0 NaN NaN NaN NaN NaN NaN NaN NaN NaN NaN NaN NaN NaN NaN NaN NaN]
-double 1x49 [NaN NaN NaN NaN NaN NaN NaN NaN 0 0 0 0 NaN NaN NaN 0 0 0 0 NaN NaN NaN -0 -0 0 0 NaN NaN NaN -0 -0 0 0 NaN NaN NaN NaN NaN NaN NaN NaN NaN NaN NaN NaN NaN NaN NaN NaN]
-double 1x49 [NaN NaN NaN NaN NaN NaN NaN NaN -0 -0 0 0 NaN NaN NaN -0 -0 0 0 NaN NaN NaN 0 0 0 0 NaN NaN NaN 0 0 0 0 NaN NaN NaN NaN NaN NaN NaN NaN NaN NaN NaN NaN NaN NaN NaN NaN]
-double 1x49 [-Inf NaN NaN NaN NaN Inf NaN -Inf -1 0 0 1 Inf NaN -Inf -1 0 0 1 Inf NaN -Inf -1 -0 0 1 Inf NaN -Inf -1 -0 0 1 Inf NaN -Inf NaN NaN NaN NaN Inf NaN -Inf NaN NaN NaN NaN Inf NaN]
-double 1x49 [-Inf -Inf -Inf -Inf -Inf -Inf -Inf NaN -1 -1 -1 -1 NaN NaN NaN -0 -0 0 0 NaN NaN NaN 0 0 0 0 NaN NaN NaN 1 1 1 1 NaN NaN Inf Inf Inf Inf Inf Inf Inf NaN NaN NaN NaN NaN NaN NaN]
+double 1x49 [Inf NaN NaN NaN NaN -Inf NaN Inf 1 0 0 -1 -Inf NaN Inf 1 0 0 -1 -Inf NaN Inf 1 0 0 -1 -Inf NaN Inf 1 0 0 -1 -Inf NaN Inf NaN NaN NaN NaN -Inf NaN Inf NaN NaN NaN NaN -Inf NaN] (-0 at 25 32)
+double 1x49 [Inf Inf Inf Inf Inf Inf Inf NaN 1 1 1 1 NaN NaN NaN 0 0 0 0 NaN NaN NaN 0 0 0 0 NaN NaN NaN -1 -1 -1 -1 NaN NaN -Inf -Inf -Inf -Inf -Inf -Inf -Inf NaN NaN NaN NaN NaN NaN NaN] (-0 at 23 24)
+double 1x49 [NaN NaN NaN NaN NaN NaN NaN NaN 0 0 0 0 NaN NaN NaN 0 0 0 0 NaN NaN NaN 0 0 0 0 NaN NaN NaN 0 0 0 0 NaN NaN NaN NaN NaN NaN NaN NaN NaN NaN NaN NaN NaN NaN NaN NaN] (-0 at 25 26 32 33)
+double 1x49 [NaN NaN NaN NaN NaN NaN NaN NaN 0 0 0 0 NaN NaN NaN 0 0 0 0 NaN NaN NaN 0 0 0 0 NaN NaN NaN 0 0 0 0 NaN NaN NaN NaN NaN NaN NaN NaN NaN NaN NaN NaN NaN NaN NaN NaN] (-0 at 23 24 30 31)
+double 1x49 [NaN NaN NaN NaN NaN NaN NaN NaN 0 0 0 0 NaN NaN NaN 0 0 0 0 NaN NaN NaN 0 0 0 0 NaN NaN NaN 0 0 0 0 NaN NaN NaN NaN NaN NaN NaN NaN NaN NaN NaN NaN NaN NaN NaN NaN] (-0 at 23 24 30 31)
+double 1x49 [NaN NaN NaN NaN NaN NaN NaN NaN 0 0 0 0 NaN NaN NaN 0 0 0 0 NaN NaN NaN 0 0 0 0 NaN NaN NaN 0 0 0 0 NaN NaN NaN NaN NaN NaN NaN NaN NaN NaN NaN NaN NaN NaN NaN NaN] (-0 at 9 10 16 17)
+double 1x49 [-Inf NaN NaN NaN NaN Inf NaN -Inf -1 0 0 1 Inf NaN -Inf -1 0 0 1 Inf NaN -Inf -1 0 0 1 Inf NaN -Inf -1 0 0 1 Inf NaN -Inf NaN NaN NaN NaN Inf NaN -Inf NaN NaN NaN NaN Inf NaN] (-0 at 24 31)
+double 1x49 [-Inf -Inf -Inf -Inf -Inf -Inf -Inf NaN -1 -1 -1 -1 NaN NaN NaN 0 0 0 0 NaN NaN NaN 0 0 0 0 NaN NaN NaN 1 1 1 1 NaN NaN Inf Inf Inf Inf Inf Inf Inf NaN NaN NaN NaN NaN NaN NaN] (-0 at 16 17)
 double 1x49 [-Inf NaN NaN NaN NaN Inf NaN -Inf -Inf NaN NaN Inf Inf NaN -Inf -Inf NaN NaN Inf Inf NaN -Inf -Inf NaN NaN Inf Inf NaN -Inf -Inf NaN NaN Inf Inf NaN -Inf NaN NaN NaN NaN Inf NaN -Inf -Inf NaN NaN Inf Inf NaN]
 double 1x49 [-Inf -Inf -Inf -Inf -Inf -Inf -Inf NaN -Inf -Inf -Inf -Inf NaN -Inf NaN NaN NaN NaN NaN NaN NaN NaN NaN NaN NaN NaN NaN NaN NaN Inf Inf Inf Inf NaN Inf Inf Inf Inf Inf Inf Inf Inf NaN NaN NaN NaN NaN NaN NaN]
 double 1x49 [NaN NaN NaN NaN NaN NaN NaN NaN NaN NaN NaN NaN NaN NaN NaN NaN NaN NaN NaN NaN NaN NaN NaN NaN NaN NaN NaN NaN NaN NaN NaN NaN NaN NaN NaN NaN NaN NaN NaN NaN NaN NaN NaN NaN NaN NaN NaN NaN NaN]
 double 1x49 [NaN NaN NaN NaN NaN NaN NaN NaN NaN NaN NaN NaN NaN NaN NaN NaN NaN NaN NaN NaN NaN NaN NaN NaN NaN NaN NaN NaN NaN NaN NaN NaN NaN NaN NaN NaN NaN NaN NaN NaN NaN NaN NaN NaN NaN NaN NaN NaN NaN]
 double 1x49 [Inf Inf NaN NaN NaN NaN NaN Inf Inf NaN NaN -Inf -Inf NaN Inf Inf NaN NaN -Inf -Inf NaN Inf Inf NaN NaN -Inf -Inf NaN Inf Inf NaN NaN -Inf -Inf NaN NaN NaN NaN NaN -Inf -Inf NaN Inf Inf NaN NaN -Inf -Inf NaN]
 double 1x49 [NaN Inf Inf Inf Inf Inf Inf NaN Inf Inf Inf Inf Inf Inf NaN NaN NaN NaN NaN NaN NaN NaN NaN NaN NaN NaN NaN NaN -Inf -Inf -Inf -Inf -Inf NaN -Inf -Inf -Inf -Inf -Inf -Inf NaN -Inf NaN NaN NaN NaN NaN NaN NaN]
-double 1x49 [Inf Inf Inf Inf Inf NaN Inf Inf 2 1 1 0 -Inf NaN Inf 1 0 0 -1 -Inf NaN Inf 1 0 -0 -1 -Inf NaN Inf 0 -1 -1 -2 -Inf NaN NaN -Inf -Inf -Inf -Inf -Inf -Inf Inf NaN NaN NaN NaN -Inf NaN]
-double 1x49 [NaN Inf Inf Inf Inf Inf Inf -Inf 0 1 1 2 Inf NaN -Inf -1 0 0 1 Inf NaN -Inf -1 -0 0 1 Inf NaN -Inf -2 -1 -1 0 Inf NaN -Inf -Inf -Inf -Inf -Inf NaN -Inf -Inf NaN NaN NaN NaN Inf NaN]
-double 1x49 [Inf Inf Inf Inf Inf Inf Inf NaN 1 1 1 1 NaN NaN NaN 0 0 0 0 NaN NaN NaN 0 0 -0 -0 NaN NaN NaN -1 -1 -1 -1 NaN NaN -Inf -Inf -Inf -Inf -Inf -Inf -Inf NaN NaN NaN NaN NaN NaN NaN]
-double 1x49 [-Inf NaN NaN NaN NaN Inf NaN -Inf -1 0 0 1 Inf NaN -Inf -1 0 0 1 Inf NaN -Inf -1 -0 0 1 Inf NaN -Inf -1 -0 0 1 Inf NaN -Inf NaN NaN NaN NaN Inf NaN -Inf NaN NaN NaN NaN Inf NaN]
-double 1x49 [Inf Inf Inf Inf Inf Inf Inf NaN 1 1 1 1 NaN NaN NaN 0 0 0 0 NaN NaN NaN -0 -0 0 0 NaN NaN NaN -1 -1 -1 -1 NaN NaN -Inf -Inf -Inf -Inf -Inf -Inf -Inf NaN NaN NaN NaN NaN NaN NaN]
-double 1x49 [-Inf NaN NaN NaN NaN Inf NaN -Inf -1 -0 0 1 Inf NaN -Inf -1 -0 0 1 Inf NaN -Inf -1 0 0 1 Inf NaN -Inf -1 0 0 1 Inf NaN -Inf NaN NaN NaN NaN Inf NaN -Inf NaN NaN NaN NaN Inf NaN]
-double 1x49 [NaN Inf Inf Inf Inf Inf Inf -Inf 0 1 1 2 Inf NaN -Inf -1 0 0 1 Inf NaN -Inf -1 -0 0 1 Inf NaN -Inf -2 -1 -1 0 Inf NaN -Inf -Inf -Inf -Inf -Inf NaN -Inf -Inf NaN NaN NaN NaN Inf NaN]
-double 1x49 [-Inf -Inf -Inf -Inf -Inf NaN -Inf -Inf -2 -1 -1 0 Inf NaN -Inf -1 -0 0 1 Inf NaN -Inf -1 0 0 1 Inf NaN -Inf 0 1 1 2 Inf NaN NaN Inf Inf Inf Inf Inf Inf -Inf NaN NaN NaN NaN Inf NaN]
+double 1x49 [Inf Inf Inf Inf Inf NaN Inf Inf 2 1 1 0 -Inf NaN Inf 1 0 0 -1 -Inf NaN Inf 1 0 0 -1 -Inf NaN Inf 0 -1 -1 -2 -Inf NaN NaN -Inf -Inf -Inf -Inf -Inf -Inf Inf NaN NaN NaN NaN -Inf NaN] (-0 at 25)
+double 1x49 [NaN Inf Inf Inf Inf Inf Inf -Inf 0 1 1 2 Inf NaN -Inf -1 0 0 1 Inf NaN -Inf -1 0 0 1 Inf NaN -Inf -2 -1 -1 0 Inf NaN -Inf -Inf -Inf -Inf -Inf NaN -Inf -Inf NaN NaN NaN NaN Inf NaN] (-0 at 24)
+double 1x49 [Inf Inf Inf Inf Inf Inf Inf NaN 1 1 1 1 NaN NaN NaN 0 0 0 0 NaN NaN NaN 0 0 0 0 NaN NaN NaN -1 -1 -1 -1 NaN NaN -Inf -Inf -Inf -Inf -Inf -Inf -Inf NaN NaN NaN NaN NaN NaN NaN] (-0 at 25 26)
+double 1x49 [-Inf NaN NaN NaN NaN Inf NaN -Inf -1 0 0 1 Inf NaN -Inf -1 0 0 1 Inf NaN -Inf -1 0 0 1 Inf NaN -Inf -1 0 0 1 Inf NaN -Inf NaN NaN NaN NaN Inf NaN -Inf NaN NaN NaN NaN Inf NaN] (-0 at 24 31)
+double 1x49 [Inf Inf Inf Inf Inf Inf Inf NaN 1 1 1 1 NaN NaN NaN 0 0 0 0 NaN NaN NaN 0 0 0 0 NaN NaN NaN -1 -1 -1 -1 NaN NaN -Inf -Inf -Inf -Inf -Inf -Inf -Inf NaN NaN NaN NaN NaN NaN NaN] (-0 at 23 24)
+double 1x49 [-Inf NaN NaN NaN NaN Inf NaN -Inf -1 0 0 1 Inf NaN -Inf -1 0 0 1 Inf NaN -Inf -1 0 0 1 Inf NaN -Inf -1 0 0 1 Inf NaN -Inf NaN NaN NaN NaN Inf NaN -Inf NaN NaN NaN NaN Inf NaN] (-0 at 10 17)
+double 1x49 [NaN Inf Inf Inf Inf Inf Inf -Inf 0 1 1 2 Inf NaN -Inf -1 0 0 1 Inf NaN -Inf -1 0 0 1 Inf NaN -Inf -2 -1 -1 0 Inf NaN -Inf -Inf -Inf -Inf -Inf NaN -Inf -Inf NaN NaN NaN NaN Inf NaN] (-0 at 24)
+double 1x49 [-Inf -Inf -Inf -Inf -Inf NaN -Inf -Inf -2 -1 -1 0 Inf NaN -Inf -1 0 0 1 Inf NaN -Inf -1 0 0 1 Inf NaN -Inf 0 1 1 2 Inf NaN NaN Inf Inf Inf Inf Inf Inf -Inf NaN NaN NaN NaN Inf NaN] (-0 at 17)
 double 1x49 [NaN NaN NaN NaN Inf Inf NaN -Inf -Inf NaN NaN Inf Inf NaN -Inf -Inf NaN NaN Inf Inf NaN -Inf -Inf NaN NaN Inf Inf NaN -Inf -Inf NaN NaN Inf Inf NaN -Inf -Inf NaN NaN NaN NaN NaN -Inf -Inf NaN NaN Inf Inf NaN]
 double 1x49 [-Inf -Inf -Inf -Inf -Inf NaN -Inf -Inf -Inf -Inf -Inf -Inf NaN -Inf NaN NaN NaN NaN NaN NaN NaN NaN NaN NaN NaN NaN NaN NaN NaN Inf Inf Inf Inf Inf Inf NaN Inf Inf Inf Inf Inf Inf NaN NaN NaN NaN NaN NaN NaN]
 double 1x49 [Inf Inf Inf Inf Inf Inf Inf NaN NaN NaN NaN NaN NaN NaN NaN NaN NaN NaN NaN NaN NaN NaN NaN NaN NaN NaN NaN NaN NaN NaN NaN NaN NaN NaN NaN -Inf -Inf -Inf -Inf -Inf -Inf -Inf NaN NaN NaN NaN NaN NaN NaN]
@@ -411,56 +411,56 @@ single 1x49 [-Inf -Inf -Inf -Inf -Inf -Inf -Inf NaN -Inf -Inf -Inf -Inf NaN -Inf
 single 1x49 [Inf NaN NaN NaN NaN -Inf NaN Inf Inf NaN NaN -Inf -Inf NaN Inf Inf NaN NaN -Inf -Inf NaN Inf Inf NaN NaN -Inf -Inf NaN Inf Inf NaN NaN -Inf -Inf NaN Inf NaN NaN NaN NaN -Inf NaN Inf Inf NaN NaN -Inf -Inf NaN]
 single 1x49 [NaN NaN NaN NaN -Inf -Inf NaN Inf Inf NaN NaN -Inf -Inf NaN Inf Inf NaN NaN -Inf -Inf NaN Inf Inf NaN NaN -Inf -Inf NaN Inf Inf NaN NaN -Inf -Inf NaN Inf Inf NaN NaN NaN NaN NaN Inf Inf NaN NaN -Inf -Inf NaN]
 single 1x49 [Inf Inf Inf Inf Inf NaN Inf Inf Inf Inf Inf Inf NaN Inf NaN NaN NaN NaN NaN NaN NaN NaN NaN NaN NaN NaN NaN NaN NaN -Inf -Inf -Inf -Inf -Inf -Inf NaN -Inf -Inf -Inf -Inf -Inf -Inf NaN NaN NaN NaN NaN NaN NaN]
-single 1x49 [NaN -Inf -Inf -Inf -Inf -Inf -Inf Inf 0 -1 -1 -2 -Inf NaN Inf 1 0 -0 -1 -Inf NaN Inf 1 0 0 -1 -Inf NaN Inf 2 1 1 0 -Inf NaN Inf Inf Inf Inf Inf NaN Inf Inf NaN NaN NaN NaN -Inf NaN]
-single 1x49 [Inf Inf Inf Inf Inf NaN Inf Inf 2 1 1 0 -Inf NaN Inf 1 0 0 -1 -Inf NaN Inf 1 0 -0 -1 -Inf NaN Inf 0 -1 -1 -2 -Inf NaN NaN -Inf -Inf -Inf -Inf -Inf -Inf Inf NaN NaN NaN NaN -Inf NaN]
-single 1x49 [-Inf -Inf -Inf -Inf -Inf -Inf -Inf NaN -1 -1 -1 -1 NaN NaN NaN 0 0 -0 -0 NaN NaN NaN 0 0 0 0 NaN NaN NaN 1 1 1 1 NaN NaN Inf Inf Inf Inf Inf Inf Inf NaN NaN NaN NaN NaN NaN NaN]
-single 1x49 [Inf NaN NaN NaN NaN -Inf NaN Inf 1 0 0 -1 -Inf NaN Inf 1 0 0 -1 -Inf NaN Inf 1 0 -0 -1 -Inf NaN Inf 1 0 -0 -1 -Inf NaN Inf NaN NaN NaN NaN -Inf NaN Inf NaN NaN NaN NaN -Inf NaN]
-single 1x49 [-Inf -Inf -Inf -Inf -Inf -Inf -Inf NaN -1 -1 -1 -1 NaN NaN NaN -0 -0 0 0 NaN NaN NaN 0 0 0 0 NaN NaN NaN 1 1 1 1 NaN NaN Inf Inf Inf Inf Inf Inf Inf NaN NaN NaN NaN NaN NaN NaN]
-single 1x49 [Inf NaN NaN NaN NaN -Inf NaN Inf 1 0 -0 -1 -Inf NaN Inf 1 0 -0 -1 -Inf NaN Inf 1 0 0 -1 -Inf NaN Inf 1 0 0 -1 -Inf NaN Inf NaN NaN NaN NaN -Inf NaN Inf NaN NaN NaN NaN -Inf NaN]
-single 1x49 [-Inf -Inf -Inf -Inf -Inf NaN -Inf -Inf -2 -1 -1 0 Inf NaN -Inf -1 -0 0 1 Inf NaN -Inf -1 0 0 1 Inf NaN -Inf 0 1 1 2 Inf NaN NaN Inf Inf Inf Inf Inf Inf -Inf NaN NaN NaN NaN Inf NaN]
-single 1x49 [NaN -Inf -Inf -Inf -Inf -Inf -Inf Inf 0 -1 -1 -2 -Inf NaN Inf 1 0 -0 -1 -Inf NaN Inf 1 0 0 -1 -Inf NaN Inf 2 1 1 0 -Inf NaN Inf Inf Inf Inf Inf NaN Inf Inf NaN NaN NaN NaN -Inf NaN]
+single 1x49 [NaN -Inf -Inf -Inf -Inf -Inf -Inf Inf 0 -1 -1 -2 -Inf NaN Inf 1 0 0 -1 -Inf NaN Inf 1 0 0 -1 -Inf NaN Inf 2 1 1 0 -Inf NaN Inf Inf Inf Inf Inf NaN Inf Inf NaN NaN NaN NaN -Inf NaN] (-0 at 18)
+single 1x49 [Inf Inf Inf Inf Inf NaN Inf Inf 2 1 1 0 -Inf NaN Inf 1 0 0 -1 -Inf NaN Inf 1 0 0 -1 -Inf NaN Inf 0 -1 -1 -2 -Inf NaN NaN -Inf -Inf -Inf -Inf -Inf -Inf Inf NaN NaN NaN NaN -Inf NaN] (-0 at 25)
+single 1x49 [-Inf -Inf -Inf -Inf -Inf -Inf -Inf NaN -1 -1 -1 -1 NaN NaN NaN 0 0 0 0 NaN NaN NaN 0 0 0 0 NaN NaN NaN 1 1 1 1 NaN NaN Inf Inf Inf Inf Inf Inf Inf NaN NaN NaN NaN NaN NaN NaN] (-0 at 18 19)
+single 1x49 [Inf NaN NaN NaN NaN -Inf NaN Inf 1 0 0 -1 -Inf NaN Inf 1 0 0 -1 -Inf NaN Inf 1 0 0 -1 -Inf NaN Inf 1 0 0 -1 -Inf NaN Inf NaN NaN NaN NaN -Inf NaN Inf NaN NaN NaN NaN -Inf NaN] (-0 at 25 32)
+single 1x49 [-Inf -Inf -Inf -Inf -Inf -Inf -Inf NaN -1 -1 -1 -1 NaN NaN NaN 0 0 0 0 NaN NaN NaN 0 0 0 0 NaN NaN NaN 1 1 1 1 NaN NaN Inf Inf Inf Inf Inf Inf Inf NaN NaN NaN NaN NaN NaN NaN] (-0 at 16 17)
+single 1x49 [Inf NaN NaN NaN NaN -Inf NaN Inf 1 0 0 -1 -Inf NaN Inf 1 0 0 -1 -Inf NaN Inf 1 0 0 -1 -Inf NaN Inf 1 0 0 -1 -Inf NaN Inf NaN NaN NaN NaN -Inf NaN Inf NaN NaN NaN NaN -Inf NaN] (-0 at 11 18)
+single 1x49 [-Inf -Inf -Inf -Inf -Inf NaN -Inf -Inf -2 -1 -1 0 Inf NaN -Inf -1 0 0 1 Inf NaN -Inf -1 0 0 1 Inf NaN -Inf 0 1 1 2 Inf NaN NaN Inf Inf Inf Inf Inf Inf -Inf NaN NaN NaN NaN Inf NaN] (-0 at 17)
+single 1x49 [NaN -Inf -Inf -Inf -Inf -Inf -Inf Inf 0 -1 -1 -2 -Inf NaN Inf 1 0 0 -1 -Inf NaN Inf 1 0 0 -1 -Inf NaN Inf 2 1 1 0 -Inf NaN Inf Inf Inf Inf Inf NaN Inf Inf NaN NaN NaN NaN -Inf NaN] (-0 at 18)
 single 1x49 [-Inf -Inf NaN NaN NaN NaN NaN -Inf -Inf NaN NaN Inf Inf NaN -Inf -Inf NaN NaN Inf Inf NaN -Inf -Inf NaN NaN Inf Inf NaN -Inf -Inf NaN NaN Inf Inf NaN NaN NaN NaN NaN Inf Inf NaN -Inf -Inf NaN NaN Inf Inf NaN]
 single 1x49 [NaN -Inf -Inf -Inf -Inf -Inf -Inf NaN -Inf -Inf -Inf -Inf -Inf -Inf NaN NaN NaN NaN NaN NaN NaN NaN NaN NaN NaN NaN NaN NaN Inf Inf Inf Inf Inf NaN Inf Inf Inf Inf Inf Inf NaN Inf NaN NaN NaN NaN NaN NaN NaN]
 single 1x49 [-Inf -Inf -Inf -Inf -Inf -Inf -Inf NaN NaN NaN NaN NaN NaN NaN NaN NaN NaN NaN NaN NaN NaN NaN NaN NaN NaN NaN NaN NaN NaN NaN NaN NaN NaN NaN NaN Inf Inf Inf Inf Inf Inf Inf NaN NaN NaN NaN NaN NaN NaN]
 single 1x49 [Inf NaN NaN NaN NaN -Inf NaN Inf NaN NaN NaN NaN -Inf NaN Inf NaN NaN NaN NaN -Inf NaN Inf NaN NaN NaN NaN -Inf NaN Inf NaN NaN NaN NaN -Inf NaN Inf NaN NaN NaN NaN -Inf NaN Inf NaN NaN NaN NaN -Inf NaN]
 single 1x49 [Inf NaN NaN NaN NaN -Inf NaN Inf Inf NaN NaN -Inf -Inf NaN Inf Inf NaN NaN -Inf -Inf NaN Inf Inf NaN NaN -Inf -Inf NaN Inf Inf NaN NaN -Inf -Inf NaN Inf NaN NaN NaN NaN -Inf NaN Inf Inf NaN NaN -Inf -Inf NaN]
 single 1x49 [Inf Inf Inf Inf Inf Inf Inf NaN Inf Inf Inf Inf NaN Inf NaN NaN NaN NaN NaN NaN NaN NaN NaN NaN NaN NaN NaN NaN NaN -Inf -Inf -Inf -Inf NaN -Inf -Inf -Inf -Inf -Inf -Inf -Inf -Inf NaN NaN NaN NaN NaN NaN NaN]
-single 1x49 [Inf NaN NaN NaN NaN -Inf NaN Inf 1 0 -0 -1 -Inf NaN Inf 1 0 -0 -1 -Inf NaN Inf 1 0 0 -1 -Inf NaN Inf 1 0 0 -1 -Inf NaN Inf NaN NaN NaN NaN -Inf NaN Inf NaN NaN NaN NaN -Inf NaN]
-single 1x49 [Inf Inf Inf Inf Inf Inf Inf NaN 1 1 1 1 NaN NaN NaN 0 0 0 0 NaN NaN NaN 0 0 -0 -0 NaN NaN NaN -1 -1 -1 -1 NaN NaN -Inf -Inf -Inf -Inf -Inf -Inf -Inf NaN NaN NaN NaN NaN NaN NaN]
-single 1x49 [NaN NaN NaN NaN NaN NaN NaN NaN 0 0 -0 -0 NaN NaN NaN 0 0 -0 -0 NaN NaN NaN 0 0 0 0 NaN NaN NaN 0 0 0 0 NaN NaN NaN NaN NaN NaN NaN NaN NaN NaN NaN NaN NaN NaN NaN NaN]
-single 1x49 [NaN NaN NaN NaN NaN NaN NaN NaN 0 0 0 0 NaN NaN NaN 0 0 0 0 NaN NaN NaN 0 0 -0 -0 NaN NaN NaN 0 0 -0 -0 NaN NaN NaN NaN NaN NaN NaN NaN NaN NaN NaN NaN NaN NaN NaN NaN]
-single 1x49 [NaN NaN NaN NaN NaN NaN NaN NaN -0 -0 0 0 NaN NaN NaN -0 -0 0 0 NaN NaN NaN 0 0 0 0 NaN NaN NaN 0 0 0 0 NaN NaN NaN NaN NaN NaN NaN NaN NaN NaN NaN NaN NaN NaN NaN NaN]
-single 1x49 [NaN NaN NaN NaN NaN NaN NaN NaN 0 0 -0 -0 NaN NaN NaN 0 0 -0 -0 NaN NaN NaN 0 0 0 0 NaN NaN NaN 0 0 0 0 NaN NaN NaN NaN NaN NaN NaN NaN NaN NaN NaN NaN NaN NaN NaN NaN]
-single 1x49 [-Inf NaN NaN NaN NaN Inf NaN -Inf -1 -0 0 1 Inf NaN -Inf -1 -0 0 1 Inf NaN -Inf -1 0 0 1 Inf NaN -Inf -1 0 0 1 Inf NaN -Inf NaN NaN NaN NaN Inf NaN -Inf NaN NaN NaN NaN Inf NaN]
-single 1x49 [-Inf -Inf -Inf -Inf -Inf -Inf -Inf NaN -1 -1 -1 -1 NaN NaN NaN 0 0 -0 -0 NaN NaN NaN 0 0 0 0 NaN NaN NaN 1 1 1 1 NaN NaN Inf Inf Inf Inf Inf Inf Inf NaN NaN NaN NaN NaN NaN NaN]
+single 1x49 [Inf NaN NaN NaN NaN -Inf NaN Inf 1 0 0 -1 -Inf NaN Inf 1 0 0 -1 -Inf NaN Inf 1 0 0 -1 -Inf NaN Inf 1 0 0 -1 -Inf NaN Inf NaN NaN NaN NaN -Inf NaN Inf NaN NaN NaN NaN -Inf NaN] (-0 at 11 18)
+single 1x49 [Inf Inf Inf Inf Inf Inf Inf NaN 1 1 1 1 NaN NaN NaN 0 0 0 0 NaN NaN NaN 0 0 0 0 NaN NaN NaN -1 -1 -1 -1 NaN NaN -Inf -Inf -Inf -Inf -Inf -Inf -Inf NaN NaN NaN NaN NaN NaN NaN] (-0 at 25 26)
+single 1x49 [NaN NaN NaN NaN NaN NaN NaN NaN 0 0 0 0 NaN NaN NaN 0 0 0 0 NaN NaN NaN 0 0 0 0 NaN NaN NaN 0 0 0 0 NaN NaN NaN NaN NaN NaN NaN NaN NaN NaN NaN NaN NaN NaN NaN NaN] (-0 at 11 12 18 19)
+single 1x49 [NaN NaN NaN NaN NaN NaN NaN NaN 0 0 0 0 NaN NaN NaN 0 0 0 0 NaN NaN NaN 0 0 0 0 NaN NaN NaN 0 0 0 0 NaN NaN NaN NaN NaN NaN NaN NaN NaN NaN NaN NaN NaN NaN NaN NaN] (-0 at 25 26 32 33)
+single 1x49 [NaN NaN NaN NaN NaN NaN NaN NaN 0 0 0 0 NaN NaN NaN 0 0 0 0 NaN NaN NaN 0 0 0 0 NaN NaN NaN 0 0 0 0 NaN NaN NaN NaN NaN NaN NaN NaN NaN NaN NaN NaN NaN NaN NaN NaN] (-0 at 9 10 16 17)
+single 1x49 [NaN NaN NaN NaN NaN NaN NaN NaN 0 0 0 0 NaN NaN NaN 0 0 0 0 NaN NaN NaN 0 0 0 0 NaN NaN NaN 0 0 0 0 NaN NaN NaN NaN NaN NaN NaN NaN NaN NaN NaN NaN NaN NaN NaN NaN] (-0 at 11 12 18 19)
+single 1x49 [-Inf NaN NaN NaN NaN Inf NaN -Inf -1 0 0 1 Inf NaN -Inf -1 0 0 1 Inf NaN -Inf -1 0 0 1 Inf NaN -Inf -1 0 0 1 Inf NaN -Inf NaN NaN NaN NaN Inf NaN -Inf NaN NaN NaN NaN Inf NaN] (-0 at 10 17)
+single 1x49 [-Inf -Inf -Inf -Inf -Inf -Inf -Inf NaN -1 -1 -1 -1 NaN NaN NaN 0 0 0 0 NaN NaN NaN 0 0 0 0 NaN NaN NaN 1 1 1 1 NaN NaN Inf Inf Inf Inf Inf Inf Inf NaN NaN NaN NaN NaN NaN NaN] (-0 at 18 19)
 single 1x49 [-Inf NaN NaN NaN NaN Inf NaN -Inf -Inf NaN NaN Inf Inf NaN -Inf -Inf NaN NaN Inf Inf NaN -Inf -Inf NaN NaN Inf Inf NaN -Inf -Inf NaN NaN Inf Inf NaN -Inf NaN NaN NaN NaN Inf NaN -Inf -Inf NaN NaN Inf Inf NaN]
 single 1x49 [-Inf -Inf -Inf -Inf -Inf -Inf -Inf NaN -Inf -Inf -Inf -Inf NaN -Inf NaN NaN NaN NaN NaN NaN NaN NaN NaN NaN NaN NaN NaN NaN NaN Inf Inf Inf Inf NaN Inf Inf Inf Inf Inf Inf Inf Inf NaN NaN NaN NaN NaN NaN NaN]
 single 1x49 [NaN NaN NaN NaN NaN NaN NaN NaN NaN NaN NaN NaN NaN NaN NaN NaN NaN NaN NaN NaN NaN NaN NaN NaN NaN NaN NaN NaN NaN NaN NaN NaN NaN NaN NaN NaN NaN NaN NaN NaN NaN NaN NaN NaN NaN NaN NaN NaN NaN]
 single 1x49 [NaN NaN NaN NaN NaN NaN NaN NaN NaN NaN NaN NaN NaN NaN NaN NaN NaN NaN NaN NaN NaN NaN NaN NaN NaN NaN NaN NaN NaN NaN NaN NaN NaN NaN NaN NaN NaN NaN NaN NaN NaN NaN NaN NaN NaN NaN NaN NaN NaN]
 single 1x49 [Inf NaN NaN NaN NaN -Inf NaN Inf Inf NaN NaN -Inf -Inf NaN Inf Inf NaN NaN -Inf -Inf NaN Inf Inf NaN NaN -Inf -Inf NaN Inf Inf NaN NaN -Inf -Inf NaN Inf NaN NaN NaN NaN -Inf NaN Inf Inf NaN NaN -Inf -Inf NaN]
 single 1x49 [Inf Inf Inf Inf Inf Inf Inf NaN Inf Inf Inf Inf NaN Inf NaN NaN NaN NaN NaN NaN NaN NaN NaN NaN NaN NaN NaN NaN NaN -Inf -Inf -Inf -Inf NaN -Inf -Inf -Inf -Inf -Inf -Inf -Inf -Inf NaN NaN NaN NaN NaN NaN NaN]
-single 1x49 [Inf NaN NaN NaN NaN -Inf NaN Inf 1 0 0 -1 -Inf NaN Inf 1 0 0 -1 -Inf NaN Inf 1 0 -0 -1 -Inf NaN Inf 1 0 -0 -1 -Inf NaN Inf NaN NaN NaN NaN -Inf NaN Inf NaN NaN NaN NaN -Inf NaN]
-single 1x49 [Inf Inf Inf Inf Inf Inf Inf NaN 1 1 1 1 NaN NaN NaN 0 0 0 0 NaN NaN NaN -0 -0 0 0 NaN NaN NaN -1 -1 -1 -1 NaN NaN -Inf -Inf -Inf -Inf -Inf -Inf -Inf NaN NaN NaN NaN NaN NaN NaN]
-single 1x49 [NaN NaN NaN NaN NaN NaN NaN NaN 0 0 0 0 NaN NaN NaN 0 0 0 0 NaN NaN NaN 0 0 -0 -0 NaN NaN NaN 0 0 -0 -0 NaN NaN NaN NaN NaN NaN NaN NaN NaN NaN NaN NaN NaN NaN NaN NaN]
-single 1x49 [NaN NaN NaN NaN NaN NaN NaN NaN 0 0 0 0 NaN NaN NaN 0 0 0 0 NaN NaN NaN -0 -0 0 0 NaN NaN NaN -0 -0 0 0 NaN NaN NaN NaN NaN NaN NaN NaN NaN NaN NaN NaN NaN NaN NaN NaN]
-single 1x49 [NaN NaN NaN NaN NaN NaN NaN NaN 0 0 0 0 NaN NaN NaN 0 0 0 0 NaN NaN NaN -0 -0 0 0 NaN NaN NaN -0 -0 0 0 NaN NaN NaN NaN NaN NaN NaN NaN NaN NaN NaN NaN NaN NaN NaN NaN]
-single 1x49 [NaN NaN NaN NaN NaN NaN NaN NaN -0 -0 0 0 NaN NaN NaN -0 -0 0 0 NaN NaN NaN 0 0 0 0 NaN NaN NaN 0 0 0 0 NaN NaN NaN NaN NaN NaN NaN NaN NaN NaN NaN NaN NaN NaN NaN NaN]
-single 1x49 [-Inf NaN NaN NaN NaN Inf NaN -Inf -1 0 0 1 Inf NaN -Inf -1 0 0 1 Inf NaN -Inf -1 -0 0 1 Inf NaN -Inf -1 -0 0 1 Inf NaN -Inf NaN NaN NaN NaN Inf NaN -Inf NaN NaN NaN NaN Inf NaN]
-single 1x49 [-Inf -Inf -Inf -Inf -Inf -Inf -Inf NaN -1 -1 -1 -1 NaN NaN NaN -0 -0 0 0 NaN NaN NaN 0 0 0 0 NaN NaN NaN 1 1 1 1 NaN NaN Inf Inf Inf Inf Inf Inf Inf NaN NaN NaN NaN NaN NaN NaN]
+single 1x49 [Inf NaN NaN NaN NaN -Inf NaN Inf 1 0 0 -1 -Inf NaN Inf 1 0 0 -1 -Inf NaN Inf 1 0 0 -1 -Inf NaN Inf 1 0 0 -1 -Inf NaN Inf NaN NaN NaN NaN -Inf NaN Inf NaN NaN NaN NaN -Inf NaN] (-0 at 25 32)
+single 1x49 [Inf Inf Inf Inf Inf Inf Inf NaN 1 1 1 1 NaN NaN NaN 0 0 0 0 NaN NaN NaN 0 0 0 0 NaN NaN NaN -1 -1 -1 -1 NaN NaN -Inf -Inf -Inf -Inf -Inf -Inf -Inf NaN NaN NaN NaN NaN NaN NaN] (-0 at 23 24)
+single 1x49 [NaN NaN NaN NaN NaN NaN NaN NaN 0 0 0 0 NaN NaN NaN 0 0 0 0 NaN NaN NaN 0 0 0 0 NaN NaN NaN 0 0 0 0 NaN NaN NaN NaN NaN NaN NaN NaN NaN NaN NaN NaN NaN NaN NaN NaN] (-0 at 25 26 32 33)
+single 1x49 [NaN NaN NaN NaN NaN NaN NaN NaN 0 0 0 0 NaN NaN NaN 0 0 0 0 NaN NaN NaN 0 0 0 0 NaN NaN NaN 0 0 0 0 NaN NaN NaN NaN NaN NaN NaN NaN NaN NaN NaN NaN NaN NaN NaN NaN] (-0 at 23 24 30 31)
+single 1x49 [NaN NaN NaN NaN NaN NaN NaN NaN 0 0 0 0 NaN NaN NaN 0 0 0 0 NaN NaN NaN 0 0 0 0 NaN NaN NaN 0 0 0 0 NaN NaN NaN NaN NaN NaN NaN NaN NaN NaN NaN NaN NaN NaN NaN NaN] (-0 at 23 24 30 31)
+single 1x49 [NaN NaN NaN NaN NaN NaN NaN NaN 0 0 0 0 NaN NaN NaN 0 0 0 0 NaN NaN NaN 0 0 0 0 NaN NaN NaN 0 0 0 0 NaN NaN NaN NaN NaN NaN NaN NaN NaN NaN NaN NaN NaN NaN NaN NaN] (-0 at 9 10 16 17)
+single 1x49 [-Inf NaN NaN NaN NaN Inf NaN -Inf -1 0 0 1 Inf NaN -Inf -1 0 0 1 Inf NaN -Inf -1 0 0 1 Inf NaN -Inf -1 0 0 1 Inf NaN -Inf NaN NaN NaN NaN Inf NaN -Inf NaN NaN NaN NaN Inf NaN] (-0 at 24 31)
+single 1x49 [-Inf -Inf -Inf -Inf -Inf -Inf -Inf NaN -1 -1 -1 -1 NaN NaN NaN 0 0 0 0 NaN NaN NaN 0 0 0 0 NaN NaN NaN 1 1 1 1 NaN NaN Inf Inf Inf Inf Inf Inf Inf NaN NaN NaN NaN NaN NaN NaN] (-0 at 16 17)
 single 1x49 [-Inf NaN NaN NaN NaN Inf NaN -Inf -Inf NaN NaN Inf Inf NaN -Inf -Inf NaN NaN Inf Inf NaN -Inf -Inf NaN NaN Inf Inf NaN -Inf -Inf NaN NaN Inf Inf NaN -Inf NaN NaN NaN NaN Inf NaN -Inf -Inf NaN NaN Inf Inf NaN]
 single 1x49 [-Inf -Inf -Inf -Inf -Inf -Inf -Inf NaN -Inf -Inf -Inf -Inf NaN -Inf NaN NaN NaN NaN NaN NaN NaN NaN NaN NaN NaN NaN NaN NaN NaN Inf Inf Inf Inf NaN Inf Inf Inf Inf Inf Inf Inf Inf NaN NaN NaN NaN NaN NaN NaN]
 single 1x49 [NaN NaN NaN NaN NaN NaN NaN NaN NaN NaN NaN NaN NaN NaN NaN NaN NaN NaN NaN NaN NaN NaN NaN NaN NaN NaN NaN NaN NaN NaN NaN NaN NaN NaN NaN NaN NaN NaN NaN NaN NaN NaN NaN NaN NaN NaN NaN NaN NaN]
 single 1x49 [NaN NaN NaN NaN NaN NaN NaN NaN NaN NaN NaN NaN NaN NaN NaN NaN NaN NaN NaN NaN NaN NaN NaN NaN NaN NaN NaN NaN NaN NaN NaN NaN NaN NaN NaN NaN NaN NaN NaN NaN NaN NaN NaN NaN NaN NaN NaN NaN NaN]
 single 1x49 [Inf Inf NaN NaN NaN NaN NaN Inf Inf NaN NaN -Inf -Inf NaN Inf Inf NaN NaN -Inf -Inf NaN Inf Inf NaN NaN -Inf -Inf NaN Inf Inf NaN NaN -Inf -Inf NaN NaN NaN NaN NaN -Inf -Inf NaN Inf Inf NaN NaN -Inf -Inf NaN]
 single 1x49 [NaN Inf Inf Inf Inf Inf Inf NaN Inf Inf Inf Inf Inf Inf NaN NaN NaN NaN NaN NaN NaN NaN NaN NaN NaN NaN NaN NaN -Inf -Inf -Inf -Inf -Inf NaN -Inf -Inf -Inf -Inf -Inf -Inf NaN -Inf NaN NaN NaN NaN NaN NaN NaN]
-single 1x49 [Inf Inf Inf Inf Inf NaN Inf Inf 2 1 1 0 -Inf NaN Inf 1 0 0 -1 -Inf NaN Inf 1 0 -0 -1 -Inf NaN Inf 0 -1 -1 -2 -Inf NaN NaN -Inf -Inf -Inf -Inf -Inf -Inf Inf NaN NaN NaN NaN -Inf NaN]
-single 1x49 [NaN Inf Inf Inf Inf Inf Inf -Inf 0 1 1 2 Inf NaN -Inf -1 0 0 1 Inf NaN -Inf -1 -0 0 1 Inf NaN -Inf -2 -1 -1 0 Inf NaN -Inf -Inf -Inf -Inf -Inf NaN -Inf -Inf NaN NaN NaN NaN Inf NaN]
-single 1x49 [Inf Inf Inf Inf Inf Inf Inf NaN 1 1 1 1 NaN NaN NaN 0 0 0 0 NaN NaN NaN 0 0 -0 -0 NaN NaN NaN -1 -1 -1 -1 NaN NaN -Inf -Inf -Inf -Inf -Inf -Inf -Inf NaN NaN NaN NaN NaN NaN NaN]
-single 1x49 [-Inf NaN NaN NaN NaN Inf NaN -Inf -1 0 0 1 Inf NaN -Inf -1 0 0 1 Inf NaN -Inf -1 -0 0 1 Inf NaN -Inf -1 -0 0 1 Inf NaN -Inf NaN NaN NaN NaN Inf NaN -Inf NaN NaN NaN NaN Inf NaN]
-single 1x49 [Inf Inf Inf Inf Inf Inf Inf NaN 1 1 1 1 NaN NaN NaN 0 0 0 0 NaN NaN NaN -0 -0 0 0 NaN NaN NaN -1 -1 -1 -1 NaN NaN -Inf -Inf -Inf -Inf -Inf -Inf -Inf NaN NaN NaN NaN NaN NaN NaN]
-single 1x49 [-Inf NaN NaN NaN NaN Inf NaN -Inf -1 -0 0 1 Inf NaN -Inf -1 -0 0 1 Inf NaN -Inf -1 0 0 1 Inf NaN -Inf -1 0 0 1 Inf NaN -Inf NaN NaN NaN NaN Inf NaN -Inf NaN NaN NaN NaN Inf NaN]
-single 1x49 [NaN Inf Inf Inf Inf Inf Inf -Inf 0 1 1 2 Inf NaN -Inf -1 0 0 1 Inf NaN -Inf -1 -0 0 1 Inf NaN -Inf -2 -1 -1 0 Inf NaN -Inf -Inf -Inf -Inf -Inf NaN -Inf -Inf NaN NaN NaN NaN Inf NaN]
-single 1x49 [-Inf -Inf -Inf -Inf -Inf NaN -Inf -Inf -2 -1 -1 0 Inf NaN -Inf -1 -0 0 1 Inf NaN -Inf -1 0 0 1 Inf NaN -Inf 0 1 1 2 Inf NaN NaN Inf Inf Inf Inf Inf Inf -Inf NaN NaN NaN NaN Inf NaN]
+single 1x49 [Inf Inf Inf Inf Inf NaN Inf Inf 2 1 1 0 -Inf NaN Inf 1 0 0 -1 -Inf NaN Inf 1 0 0 -1 -Inf NaN Inf 0 -1 -1 -2 -Inf NaN NaN -Inf -Inf -Inf -Inf -Inf -Inf Inf NaN NaN NaN NaN -Inf NaN] (-0 at 25)
+single 1x49 [NaN Inf Inf Inf Inf Inf Inf -Inf 0 1 1 2 Inf NaN -Inf -1 0 0 1 Inf NaN -Inf -1 0 0 1 Inf NaN -Inf -2 -1 -1 0 Inf NaN -Inf -Inf -Inf -Inf -Inf NaN -Inf -Inf NaN NaN NaN NaN Inf NaN] (-0 at 24)
+single 1x49 [Inf Inf Inf Inf Inf Inf Inf NaN 1 1 1 1 NaN NaN NaN 0 0 0 0 NaN NaN NaN 0 0 0 0 NaN NaN NaN -1 -1 -1 -1 NaN NaN -Inf -Inf -Inf -Inf -Inf -Inf -Inf NaN NaN NaN NaN NaN NaN NaN] (-0 at 25 26)
+single 1x49 [-Inf NaN NaN NaN NaN Inf NaN -Inf -1 0 0 1 Inf NaN -Inf -1 0 0 1 Inf NaN -Inf -1 0 0 1 Inf NaN -Inf -1 0 0 1 Inf NaN -Inf NaN NaN NaN NaN Inf NaN -Inf NaN NaN NaN NaN Inf NaN] (-0 at 24 31)
+single 1x49 [Inf Inf Inf Inf Inf Inf Inf NaN 1 1 1 1 NaN NaN NaN 0 0 0 0 NaN NaN NaN 0 0 0 0 NaN NaN NaN -1 -1 -1 -1 NaN NaN -Inf -Inf -Inf -Inf -Inf -Inf -Inf NaN NaN NaN NaN NaN NaN NaN] (-0 at 23 24)
+single 1x49 [-Inf NaN NaN NaN NaN Inf NaN -Inf -1 0 0 1 Inf NaN -Inf -1 0 0 1 Inf NaN -Inf -1 0 0 1 Inf NaN -Inf -1 0 0 1 Inf NaN -Inf NaN NaN NaN NaN Inf NaN -Inf NaN NaN NaN NaN Inf NaN] (-0 at 10 17)
+single 1x49 [NaN Inf Inf Inf Inf Inf Inf -Inf 0 1 1 2 Inf NaN -Inf -1 0 0 1 Inf NaN -Inf -1 0 0 1 Inf NaN -Inf -2 -1 -1 0 Inf NaN -Inf -Inf -Inf -Inf -Inf NaN -Inf -Inf NaN NaN NaN NaN Inf NaN] (-0 at 24)
+single 1x49 [-Inf -Inf -Inf -Inf -Inf NaN -Inf -Inf -2 -1 -1 0 Inf NaN -Inf -1 0 0 1 Inf NaN -Inf -1 0 0 1 Inf NaN -Inf 0 1 1 2 Inf NaN NaN Inf Inf Inf Inf Inf Inf -Inf NaN NaN NaN NaN Inf NaN] (-0 at 17)
 single 1x49 [NaN NaN NaN NaN Inf Inf NaN -Inf -Inf NaN NaN Inf Inf NaN -Inf -Inf NaN NaN Inf Inf NaN -Inf -Inf NaN NaN Inf Inf NaN -Inf -Inf NaN NaN Inf Inf NaN -Inf -Inf NaN NaN NaN NaN NaN -Inf -Inf NaN NaN Inf Inf NaN]
 single 1x49 [-Inf -Inf -Inf -Inf -Inf NaN -Inf -Inf -Inf -Inf -Inf -Inf NaN -Inf NaN NaN NaN NaN NaN NaN NaN NaN NaN NaN NaN NaN NaN NaN NaN Inf Inf Inf Inf Inf Inf NaN Inf Inf Inf Inf Inf Inf NaN NaN NaN NaN NaN NaN NaN]
 single 1x49 [Inf Inf Inf Inf Inf Inf Inf NaN NaN NaN NaN NaN NaN NaN NaN NaN NaN NaN NaN NaN NaN NaN NaN NaN NaN NaN NaN NaN NaN NaN NaN NaN NaN NaN NaN -Inf -Inf -Inf -Inf -Inf -Inf -Inf NaN NaN NaN NaN NaN NaN NaN]
@@ -494,104 +494,104 @@ single 1x49 [-Inf -Inf -Inf -Inf -Inf -Inf -Inf NaN -Inf -Inf -Inf -Inf NaN -Inf
 single 1x49 [NaN NaN NaN NaN NaN NaN NaN NaN NaN NaN NaN NaN NaN NaN NaN NaN NaN NaN NaN NaN NaN NaN NaN NaN NaN NaN NaN NaN NaN NaN NaN NaN NaN NaN NaN NaN NaN NaN NaN NaN NaN NaN NaN NaN NaN NaN NaN NaN NaN]
 single 1x49 [NaN NaN NaN NaN NaN NaN NaN NaN NaN NaN NaN NaN NaN NaN NaN NaN NaN NaN NaN NaN NaN NaN NaN NaN NaN NaN NaN NaN NaN NaN NaN NaN NaN NaN NaN NaN NaN NaN NaN NaN NaN NaN NaN NaN NaN NaN NaN NaN NaN]
 single 2 single
-single 1x49 [-Inf -Inf -Inf -Inf -Inf -Inf -Inf NaN -1 -1 -1 -1 NaN NaN NaN 0 0 -0 -0 NaN NaN NaN 0 0 0 0 NaN NaN NaN 1 1 1 1 NaN NaN Inf Inf Inf Inf Inf Inf Inf NaN NaN NaN NaN NaN NaN NaN]
-single 1x49 [Inf NaN NaN NaN NaN -Inf NaN Inf 1 0 0 -1 -Inf NaN Inf 1 0 0 -1 -Inf NaN Inf 1 0 -0 -1 -Inf NaN Inf 1 0 -0 -1 -Inf NaN Inf NaN NaN NaN NaN -Inf NaN Inf NaN NaN NaN NaN -Inf NaN]
-single 1x49 [-Inf -Inf -Inf -Inf -Inf -Inf -Inf NaN -1 -1 -1 -1 NaN NaN NaN 0 0 -0 -0 NaN NaN NaN 0 0 0 0 NaN NaN NaN 1 1 1 1 NaN NaN Inf Inf Inf Inf Inf Inf Inf NaN NaN NaN NaN NaN NaN NaN]
-single 1x49 [Inf NaN NaN NaN NaN -Inf NaN Inf 1 0 0 -1 -Inf NaN Inf 1 0 0 -1 -Inf NaN Inf 1 0 -0 -1 -Inf NaN Inf 1 0 -0 -1 -Inf NaN Inf NaN NaN NaN NaN -Inf NaN Inf NaN NaN NaN NaN -Inf NaN]
-single 1x49 [-Inf -Inf -Inf -Inf -Inf -Inf -Inf NaN -1 -1 -1 -1 NaN NaN NaN 0 0 -0 -0 NaN NaN NaN 0 0 0 0 NaN NaN NaN 1 1 1 1 NaN NaN Inf Inf Inf Inf Inf Inf Inf NaN NaN NaN NaN NaN NaN NaN]
-single 1x49 [Inf NaN NaN NaN NaN -Inf NaN Inf 1 0 0 -1 -Inf NaN Inf 1 0 0 -1 -Inf NaN Inf 1 0 -0 -1 -Inf NaN Inf 1 0 -0 -1 -Inf NaN Inf NaN NaN NaN NaN -Inf NaN Inf NaN NaN NaN NaN -Inf NaN]
-single 1x49 [-Inf -Inf -Inf -Inf -Inf -Inf -Inf NaN -1 -1 -1 -1 NaN NaN NaN 0 0 -0 -0 NaN NaN NaN 0 0 0 0 NaN NaN NaN 1 1 1 1 NaN NaN Inf Inf Inf Inf Inf Inf Inf NaN NaN NaN NaN NaN NaN NaN]
-single 1x49 [Inf NaN NaN NaN NaN -Inf NaN Inf 1 0 0 -1 -Inf NaN Inf 1 0 0 -1 -Inf NaN Inf 1 0 -0 -1 -Inf NaN Inf 1 0 -0 -1 -Inf NaN Inf NaN NaN NaN NaN -Inf NaN Inf NaN NaN NaN NaN -Inf NaN]
-single 1x49 [-Inf -Inf -Inf -Inf -Inf -Inf -Inf NaN -1 -1 -1 -1 NaN NaN NaN 0 0 -0 -0 NaN NaN NaN 0 0 0 0 NaN NaN NaN 1 1 1 1 NaN NaN Inf Inf Inf Inf Inf Inf Inf NaN NaN NaN NaN NaN NaN NaN]
-single 1x49 [Inf NaN NaN NaN NaN -Inf NaN Inf 1 0 0 -1 -Inf NaN Inf 1 0 0 -1 -Inf NaN Inf 1 0 -0 -1 -Inf NaN Inf 1 0 -0 -1 -Inf NaN Inf NaN NaN NaN NaN -Inf NaN Inf NaN NaN NaN NaN -Inf NaN]
-single 1x49 [-Inf -Inf -Inf -Inf -Inf -Inf -Inf NaN -1 -1 -1 -1 NaN NaN NaN 0 0 -0 -0 NaN NaN NaN 0 0 0 0 NaN NaN NaN 1 1 1 1 NaN NaN Inf Inf Inf Inf Inf Inf Inf NaN NaN NaN NaN NaN NaN NaN]
-single 1x49 [Inf NaN NaN NaN NaN -Inf NaN Inf 1 0 0 -1 -Inf NaN Inf 1 0 0 -1 -Inf NaN Inf 1 0 -0 -1 -Inf NaN Inf 1 0 -0 -1 -Inf NaN Inf NaN NaN NaN NaN -Inf NaN Inf NaN NaN NaN NaN -Inf NaN]
-single 1x49 [-Inf -Inf -Inf -Inf -Inf -Inf -Inf NaN -1 -1 -1 -1 NaN NaN NaN 0 0 -0 -0 NaN NaN NaN 0 0 0 0 NaN NaN NaN 1 1 1 1 NaN NaN Inf Inf Inf Inf Inf Inf Inf NaN NaN NaN NaN NaN NaN NaN]
-single 1x49 [Inf NaN NaN NaN NaN -Inf NaN Inf 1 0 0 -1 -Inf NaN Inf 1 0 0 -1 -Inf NaN Inf 1 0 -0 -1 -Inf NaN Inf 1 0 -0 -1 -Inf NaN Inf NaN NaN NaN NaN -Inf NaN Inf NaN NaN NaN NaN -Inf NaN]
-single 1x49 [-Inf -Inf -Inf -Inf -Inf -Inf -Inf NaN -1 -1 -1 -1 NaN NaN NaN 0 0 -0 -0 NaN NaN NaN 0 0 0 0 NaN NaN NaN 1 1 1 1 NaN NaN Inf Inf Inf Inf Inf Inf Inf NaN NaN NaN NaN NaN NaN NaN]
-single 1x49 [Inf NaN NaN NaN NaN -Inf NaN Inf 1 0 0 -1 -Inf NaN Inf 1 0 0 -1 -Inf NaN Inf 1 0 -0 -1 -Inf NaN Inf 1 0 -0 -1 -Inf NaN Inf NaN NaN NaN NaN -Inf NaN Inf NaN NaN NaN NaN -Inf NaN]
-single 1x49 [-Inf -Inf -Inf -Inf -Inf -Inf -Inf NaN -1 -1 -1 -1 NaN NaN NaN 0 0 -0 -0 NaN NaN NaN 0 0 0 0 NaN NaN NaN 1 1 1 1 NaN NaN Inf Inf Inf Inf Inf Inf Inf NaN NaN NaN NaN NaN NaN NaN]
-single 1x49 [Inf NaN NaN NaN NaN -Inf NaN Inf 1 0 0 -1 -Inf NaN Inf 1 0 0 -1 -Inf NaN Inf 1 0 -0 -1 -Inf NaN Inf 1 0 -0 -1 -Inf NaN Inf NaN NaN NaN NaN -Inf NaN Inf NaN NaN NaN NaN -Inf NaN]
-single 1x49 [-Inf -Inf -Inf -Inf -Inf -Inf -Inf NaN -1 -1 -1 -1 NaN NaN NaN 0 0 -0 -0 NaN NaN NaN 0 0 0 0 NaN NaN NaN 1 1 1 1 NaN NaN Inf Inf Inf Inf Inf Inf Inf NaN NaN NaN NaN NaN NaN NaN]
-single 1x49 [Inf NaN NaN NaN NaN -Inf NaN Inf 1 0 0 -1 -Inf NaN Inf 1 0 0 -1 -Inf NaN Inf 1 0 -0 -1 -Inf NaN Inf 1 0 -0 -1 -Inf NaN Inf NaN NaN NaN NaN -Inf NaN Inf NaN NaN NaN NaN -Inf NaN]
-single 1x49 [-Inf -Inf -Inf -Inf -Inf -Inf -Inf NaN -1 -1 -1 -1 NaN NaN NaN 0 0 -0 -0 NaN NaN NaN 0 0 0 0 NaN NaN NaN 1 1 1 1 NaN NaN Inf Inf Inf Inf Inf Inf Inf NaN NaN NaN NaN NaN NaN NaN]
-single 1x49 [Inf NaN NaN NaN NaN -Inf NaN Inf 1 0 0 -1 -Inf NaN Inf 1 0 0 -1 -Inf NaN Inf 1 0 -0 -1 -Inf NaN Inf 1 0 -0 -1 -Inf NaN Inf NaN NaN NaN NaN -Inf NaN Inf NaN NaN NaN NaN -Inf NaN]
-single 1x49 [-Inf -Inf -Inf -Inf -Inf -Inf -Inf NaN -1 -1 -1 -1 NaN NaN NaN 0 0 -0 -0 NaN NaN NaN 0 0 0 0 NaN NaN NaN 1 1 1 1 NaN NaN Inf Inf Inf Inf Inf Inf Inf NaN NaN NaN NaN NaN NaN NaN]
-single 1x49 [Inf NaN NaN NaN NaN -Inf NaN Inf 1 0 0 -1 -Inf NaN Inf 1 0 0 -1 -Inf NaN Inf 1 0 -0 -1 -Inf NaN Inf 1 0 -0 -1 -Inf NaN Inf NaN NaN NaN NaN -Inf NaN Inf NaN NaN NaN NaN -Inf NaN]
-single 1x49 [-Inf -Inf -Inf -Inf -Inf -Inf -Inf NaN -1 -1 -1 -1 NaN NaN NaN 0 0 -0 -0 NaN NaN NaN 0 0 0 0 NaN NaN NaN 1 1 1 1 NaN NaN Inf Inf Inf Inf Inf Inf Inf NaN NaN NaN NaN NaN NaN NaN]
-single 1x49 [Inf NaN NaN NaN NaN -Inf NaN Inf 1 0 0 -1 -Inf NaN Inf 1 0 0 -1 -Inf NaN Inf 1 0 -0 -1 -Inf NaN Inf 1 0 -0 -1 -Inf NaN Inf NaN NaN NaN NaN -Inf NaN Inf NaN NaN NaN NaN -Inf NaN]
-single 1x49 [-Inf -Inf -Inf -Inf -Inf -Inf -Inf NaN -1 -1 -1 -1 NaN NaN NaN 0 0 -0 -0 NaN NaN NaN 0 0 0 0 NaN NaN NaN 1 1 1 1 NaN NaN Inf Inf Inf Inf Inf Inf Inf NaN NaN NaN NaN NaN NaN NaN]
-single 1x49 [Inf NaN NaN NaN NaN -Inf NaN Inf 1 0 0 -1 -Inf NaN Inf 1 0 0 -1 -Inf NaN Inf 1 0 -0 -1 -Inf NaN Inf 1 0 -0 -1 -Inf NaN Inf NaN NaN NaN NaN -Inf NaN Inf NaN NaN NaN NaN -Inf NaN]
-single 1x49 [-Inf -Inf -Inf -Inf -Inf -Inf -Inf NaN -1 -1 -1 -1 NaN NaN NaN 0 0 -0 -0 NaN NaN NaN 0 0 0 0 NaN NaN NaN 1 1 1 1 NaN NaN Inf Inf Inf Inf Inf Inf Inf NaN NaN NaN NaN NaN NaN NaN]
-single 1x49 [Inf NaN NaN NaN NaN -Inf NaN Inf 1 0 0 -1 -Inf NaN Inf 1 0 0 -1 -Inf NaN Inf 1 0 -0 -1 -Inf NaN Inf 1 0 -0 -1 -Inf NaN Inf NaN NaN NaN NaN -Inf NaN Inf NaN NaN NaN NaN -Inf NaN]
-single 1x49 [-Inf -Inf -Inf -Inf -Inf -Inf -Inf NaN -1 -1 -1 -1 NaN NaN NaN 0 0 -0 -0 NaN NaN NaN 0 0 0 0 NaN NaN NaN 1 1 1 1 NaN NaN Inf Inf Inf Inf Inf Inf Inf NaN NaN NaN NaN NaN NaN NaN]
-single 1x49 [Inf NaN NaN NaN NaN -Inf NaN Inf 1 0 0 -1 -Inf NaN Inf 1 0 0 -1 -Inf NaN Inf 1 0 -0 -1 -Inf NaN Inf 1 0 -0 -1 -Inf NaN Inf NaN NaN NaN NaN -Inf NaN Inf NaN NaN NaN NaN -Inf NaN]
-single 1x49 [-Inf -Inf -Inf -Inf -Inf -Inf -Inf NaN -1 -1 -1 -1 NaN NaN NaN 0 0 -0 -0 NaN NaN NaN 0 0 0 0 NaN NaN NaN 1 1 1 1 NaN NaN Inf Inf Inf Inf Inf Inf Inf NaN NaN NaN NaN NaN NaN NaN]
-single 1x49 [Inf NaN NaN NaN NaN -Inf NaN Inf 1 0 0 -1 -Inf NaN Inf 1 0 0 -1 -Inf NaN Inf 1 0 -0 -1 -Inf NaN Inf 1 0 -0 -1 -Inf NaN Inf NaN NaN NaN NaN -Inf NaN Inf NaN NaN NaN NaN -Inf NaN]
-single 1x49 [-Inf -Inf -Inf -Inf -Inf -Inf -Inf NaN -1 -1 -1 -1 NaN NaN NaN 0 0 -0 -0 NaN NaN NaN 0 0 0 0 NaN NaN NaN 1 1 1 1 NaN NaN Inf Inf Inf Inf Inf Inf Inf NaN NaN NaN NaN NaN NaN NaN]
-single 1x49 [Inf NaN NaN NaN NaN -Inf NaN Inf 1 0 0 -1 -Inf NaN Inf 1 0 0 -1 -Inf NaN Inf 1 0 -0 -1 -Inf NaN Inf 1 0 -0 -1 -Inf NaN Inf NaN NaN NaN NaN -Inf NaN Inf NaN NaN NaN NaN -Inf NaN]
-single 1x49 [-Inf -Inf -Inf -Inf -Inf -Inf -Inf NaN -1 -1 -1 -1 NaN NaN NaN 0 0 -0 -0 NaN NaN NaN 0 0 0 0 NaN NaN NaN 1 1 1 1 NaN NaN Inf Inf Inf Inf Inf Inf Inf NaN NaN NaN NaN NaN NaN NaN]
-single 1x49 [Inf NaN NaN NaN NaN -Inf NaN Inf 1 0 0 -1 -Inf NaN Inf 1 0 0 -1 -Inf NaN Inf 1 0 -0 -1 -Inf NaN Inf 1 0 -0 -1 -Inf NaN Inf NaN NaN NaN NaN -Inf NaN Inf NaN NaN NaN NaN -Inf NaN]
-single 1x49 [-Inf -Inf -Inf -Inf -Inf -Inf -Inf NaN -1 -1 -1 -1 NaN NaN NaN 0 0 -0 -0 NaN NaN NaN 0 0 0 0 NaN NaN NaN 1 1 1 1 NaN NaN Inf Inf Inf Inf Inf Inf Inf NaN NaN NaN NaN NaN NaN NaN]
-single 1x49 [Inf NaN NaN NaN NaN -Inf NaN Inf 1 0 0 -1 -Inf NaN Inf 1 0 0 -1 -Inf NaN Inf 1 0 -0 -1 -Inf NaN Inf 1 0 -0 -1 -Inf NaN Inf NaN NaN NaN NaN -Inf NaN Inf NaN NaN NaN NaN -Inf NaN]
-single 1x49 [-Inf -Inf -Inf -Inf -Inf -Inf -Inf NaN -1 -1 -1 -1 NaN NaN NaN 0 0 -0 -0 NaN NaN NaN 0 0 0 0 NaN NaN NaN 1 1 1 1 NaN NaN Inf Inf Inf Inf Inf Inf Inf NaN NaN NaN NaN NaN NaN NaN]
-single 1x49 [Inf NaN NaN NaN NaN -Inf NaN Inf 1 0 0 -1 -Inf NaN Inf 1 0 0 -1 -Inf NaN Inf 1 0 -0 -1 -Inf NaN Inf 1 0 -0 -1 -Inf NaN Inf NaN NaN NaN NaN -Inf NaN Inf NaN NaN NaN NaN -Inf NaN]
-single 1x49 [-Inf -Inf -Inf -Inf -Inf -Inf -Inf NaN -1 -1 -1 -1 NaN NaN NaN 0 0 -0 -0 NaN NaN NaN 0 0 0 0 NaN NaN NaN 1 1 1 1 NaN NaN Inf Inf Inf Inf Inf Inf Inf NaN NaN NaN NaN NaN NaN NaN]
-single 1x49 [Inf NaN NaN NaN NaN -Inf NaN Inf 1 0 0 -1 -Inf NaN Inf 1 0 0 -1 -Inf NaN Inf 1 0 -0 -1 -Inf NaN Inf 1 0 -0 -1 -Inf NaN Inf NaN NaN NaN NaN -Inf NaN Inf NaN NaN NaN NaN -Inf NaN]
-single 1x49 [-Inf -Inf -Inf -Inf -Inf -Inf -Inf NaN -1 -1 -1 -1 NaN NaN NaN 0 0 -0 -0 NaN NaN NaN 0 0 0 0 NaN NaN NaN 1 1 1 1 NaN NaN Inf Inf Inf Inf Inf Inf Inf NaN NaN NaN NaN NaN NaN NaN]
-single 1x49 [Inf NaN NaN NaN NaN -Inf NaN Inf 1 0 0 -1 -Inf NaN Inf 1 0 0 -1 -Inf NaN Inf 1 0 -0 -1 -Inf NaN Inf 1 0 -0 -1 -Inf NaN Inf NaN NaN NaN NaN -Inf NaN Inf NaN NaN NaN NaN -Inf NaN]
-single 1x49 [-Inf -Inf -Inf -Inf -Inf -Inf -Inf NaN -1 -1 -1 -1 NaN NaN NaN 0 0 -0 -0 NaN NaN NaN 0 0 0 0 NaN NaN NaN 1 1 1 1 NaN NaN Inf Inf Inf Inf Inf Inf Inf NaN NaN NaN NaN NaN NaN NaN]
-single 1x49 [Inf NaN NaN NaN NaN -Inf NaN Inf 1 0 0 -1 -Inf NaN Inf 1 0 0 -1 -Inf NaN Inf 1 0 -0 -1 -Inf NaN Inf 1 0 -0 -1 -Inf NaN Inf NaN NaN NaN NaN -Inf NaN Inf NaN NaN NaN NaN -Inf NaN]
-single 1x49 [-Inf -Inf -Inf -Inf -Inf -Inf -Inf NaN -1 -1 -1 -1 NaN NaN NaN 0 0 -0 -0 NaN NaN NaN 0 0 0 0 NaN NaN NaN 1 1 1 1 NaN NaN Inf Inf Inf Inf Inf Inf Inf NaN NaN NaN NaN NaN NaN NaN]
-single 1x49 [Inf NaN NaN NaN NaN -Inf NaN Inf 1 0 0 -1 -Inf NaN Inf 1 0 0 -1 -Inf NaN Inf 1 0 -0 -1 -Inf NaN Inf 1 0 -0 -1 -Inf NaN Inf NaN NaN NaN NaN -Inf NaN Inf NaN NaN NaN NaN -Inf NaN]
-single 1x49 [-Inf -Inf -Inf -Inf -Inf -Inf -Inf NaN -1 -1 -1 -1 NaN NaN NaN 0 0 -0 -0 NaN NaN NaN 0 0 0 0 NaN NaN NaN 1 1 1 1 NaN NaN Inf Inf Inf Inf Inf Inf Inf NaN NaN NaN NaN NaN NaN NaN]
-single 1x49 [Inf NaN NaN NaN NaN -Inf NaN Inf 1 0 0 -1 -Inf NaN Inf 1 0 0 -1 -Inf NaN Inf 1 0 -0 -1 -Inf NaN Inf 1 0 -0 -1 -Inf NaN Inf NaN NaN NaN NaN -Inf NaN Inf NaN NaN NaN NaN -Inf NaN]
-single 1x49 [-Inf -Inf -Inf -Inf -Inf -Inf -Inf NaN -1 -1 -1 -1 NaN NaN NaN 0 0 -0 -0 NaN NaN NaN 0 0 0 0 NaN NaN NaN 1 1 1 1 NaN NaN Inf Inf Inf Inf Inf Inf Inf NaN NaN NaN NaN NaN NaN NaN]
-single 1x49 [Inf NaN NaN NaN NaN -Inf NaN Inf 1 0 0 -1 -Inf NaN Inf 1 0 0 -1 -Inf NaN Inf 1 0 -0 -1 -Inf NaN Inf 1 0 -0 -1 -Inf NaN Inf NaN NaN NaN NaN -Inf NaN Inf NaN NaN NaN NaN -Inf NaN]
-single 1x49 [-Inf -Inf -Inf -Inf -Inf -Inf -Inf NaN -1 -1 -1 -1 NaN NaN NaN 0 0 -0 -0 NaN NaN NaN 0 0 0 0 NaN NaN NaN 1 1 1 1 NaN NaN Inf Inf Inf Inf Inf Inf Inf NaN NaN NaN NaN NaN NaN NaN]
-single 1x49 [Inf NaN NaN NaN NaN -Inf NaN Inf 1 0 0 -1 -Inf NaN Inf 1 0 0 -1 -Inf NaN Inf 1 0 -0 -1 -Inf NaN Inf 1 0 -0 -1 -Inf NaN Inf NaN NaN NaN NaN -Inf NaN Inf NaN NaN NaN NaN -Inf NaN]
-single 1x49 [-Inf -Inf -Inf -Inf -Inf -Inf -Inf NaN -1 -1 -1 -1 NaN NaN NaN 0 0 -0 -0 NaN NaN NaN 0 0 0 0 NaN NaN NaN 1 1 1 1 NaN NaN Inf Inf Inf Inf Inf Inf Inf NaN NaN NaN NaN NaN NaN NaN]
-single 1x49 [Inf NaN NaN NaN NaN -Inf NaN Inf 1 0 0 -1 -Inf NaN Inf 1 0 0 -1 -Inf NaN Inf 1 0 -0 -1 -Inf NaN Inf 1 0 -0 -1 -Inf NaN Inf NaN NaN NaN NaN -Inf NaN Inf NaN NaN NaN NaN -Inf NaN]
-single 1x49 [-Inf -Inf -Inf -Inf -Inf -Inf -Inf NaN -1 -1 -1 -1 NaN NaN NaN 0 0 -0 -0 NaN NaN NaN 0 0 0 0 NaN NaN NaN 1 1 1 1 NaN NaN Inf Inf Inf Inf Inf Inf Inf NaN NaN NaN NaN NaN NaN NaN]
-single 1x49 [Inf NaN NaN NaN NaN -Inf NaN Inf 1 0 0 -1 -Inf NaN Inf 1 0 0 -1 -Inf NaN Inf 1 0 -0 -1 -Inf NaN Inf 1 0 -0 -1 -Inf NaN Inf NaN NaN NaN NaN -Inf NaN Inf NaN NaN NaN NaN -Inf NaN]
-single 1x49 [-Inf -Inf -Inf -Inf -Inf -Inf -Inf NaN -1 -1 -1 -1 NaN NaN NaN 0 0 -0 -0 NaN NaN NaN 0 0 0 0 NaN NaN NaN 1 1 1 1 NaN NaN Inf Inf Inf Inf Inf Inf Inf NaN NaN NaN NaN NaN NaN NaN]
-single 1x49 [Inf NaN NaN NaN NaN -Inf NaN Inf 1 0 0 -1 -Inf NaN Inf 1 0 0 -1 -Inf NaN Inf 1 0 -0 -1 -Inf NaN Inf 1 0 -0 -1 -Inf NaN Inf NaN NaN NaN NaN -Inf NaN Inf NaN NaN NaN NaN -Inf NaN]
-single 1x49 [-Inf -Inf -Inf -Inf -Inf -Inf -Inf NaN -1 -1 -1 -1 NaN NaN NaN 0 0 -0 -0 NaN NaN NaN 0 0 0 0 NaN NaN NaN 1 1 1 1 NaN NaN Inf Inf Inf Inf Inf Inf Inf NaN NaN NaN NaN NaN NaN NaN]
-single 1x49 [Inf NaN NaN NaN NaN -Inf NaN Inf 1 0 0 -1 -Inf NaN Inf 1 0 0 -1 -Inf NaN Inf 1 0 -0 -1 -Inf NaN Inf 1 0 -0 -1 -Inf NaN Inf NaN NaN NaN NaN -Inf NaN Inf NaN NaN NaN NaN -Inf NaN]
-single 1x49 [-Inf -Inf -Inf -Inf -Inf -Inf -Inf NaN -1 -1 -1 -1 NaN NaN NaN 0 0 -0 -0 NaN NaN NaN 0 0 0 0 NaN NaN NaN 1 1 1 1 NaN NaN Inf Inf Inf Inf Inf Inf Inf NaN NaN NaN NaN NaN NaN NaN]
-single 1x49 [Inf NaN NaN NaN NaN -Inf NaN Inf 1 0 0 -1 -Inf NaN Inf 1 0 0 -1 -Inf NaN Inf 1 0 -0 -1 -Inf NaN Inf 1 0 -0 -1 -Inf NaN Inf NaN NaN NaN NaN -Inf NaN Inf NaN NaN NaN NaN -Inf NaN]
-single 1x49 [-Inf -Inf -Inf -Inf -Inf -Inf -Inf NaN -1 -1 -1 -1 NaN NaN NaN 0 0 -0 -0 NaN NaN NaN 0 0 0 0 NaN NaN NaN 1 1 1 1 NaN NaN Inf Inf Inf Inf Inf Inf Inf NaN NaN NaN NaN NaN NaN NaN]
-single 1x49 [Inf NaN NaN NaN NaN -Inf NaN Inf 1 0 0 -1 -Inf NaN Inf 1 0 0 -1 -Inf NaN Inf 1 0 -0 -1 -Inf NaN Inf 1 0 -0 -1 -Inf NaN Inf NaN NaN NaN NaN -Inf NaN Inf NaN NaN NaN NaN -Inf NaN]
-single 1x49 [-Inf -Inf -Inf -Inf -Inf -Inf -Inf NaN -1 -1 -1 -1 NaN NaN NaN 0 0 -0 -0 NaN NaN NaN 0 0 0 0 NaN NaN NaN 1 1 1 1 NaN NaN Inf Inf Inf Inf Inf Inf Inf NaN NaN NaN NaN NaN NaN NaN]
-single 1x49 [Inf NaN NaN NaN NaN -Inf NaN Inf 1 0 0 -1 -Inf NaN Inf 1 0 0 -1 -Inf NaN Inf 1 0 -0 -1 -Inf NaN Inf 1 0 -0 -1 -Inf NaN Inf NaN NaN NaN NaN -Inf NaN Inf NaN NaN NaN NaN -Inf NaN]
-single 1x49 [-Inf -Inf -Inf -Inf -Inf -Inf -Inf NaN -1 -1 -1 -1 NaN NaN NaN 0 0 -0 -0 NaN NaN NaN 0 0 0 0 NaN NaN NaN 1 1 1 1 NaN NaN Inf Inf Inf Inf Inf Inf Inf NaN NaN NaN NaN NaN NaN NaN]
-single 1x49 [Inf NaN NaN NaN NaN -Inf NaN Inf 1 0 0 -1 -Inf NaN Inf 1 0 0 -1 -Inf NaN Inf 1 0 -0 -1 -Inf NaN Inf 1 0 -0 -1 -Inf NaN Inf NaN NaN NaN NaN -Inf NaN Inf NaN NaN NaN NaN -Inf NaN]
-single 1x49 [-Inf -Inf -Inf -Inf -Inf -Inf -Inf NaN -1 -1 -1 -1 NaN NaN NaN 0 0 -0 -0 NaN NaN NaN 0 0 0 0 NaN NaN NaN 1 1 1 1 NaN NaN Inf Inf Inf Inf Inf Inf Inf NaN NaN NaN NaN NaN NaN NaN]
-single 1x49 [Inf NaN NaN NaN NaN -Inf NaN Inf 1 0 0 -1 -Inf NaN Inf 1 0 0 -1 -Inf NaN Inf 1 0 -0 -1 -Inf NaN Inf 1 0 -0 -1 -Inf NaN Inf NaN NaN NaN NaN -Inf NaN Inf NaN NaN NaN NaN -Inf NaN]
-single 1x49 [-Inf -Inf -Inf -Inf -Inf -Inf -Inf NaN -1 -1 -1 -1 NaN NaN NaN 0 0 -0 -0 NaN NaN NaN 0 0 0 0 NaN NaN NaN 1 1 1 1 NaN NaN Inf Inf Inf Inf Inf Inf Inf NaN NaN NaN NaN NaN NaN NaN]
-single 1x49 [Inf NaN NaN NaN NaN -Inf NaN Inf 1 0 0 -1 -Inf NaN Inf 1 0 0 -1 -Inf NaN Inf 1 0 -0 -1 -Inf NaN Inf 1 0 -0 -1 -Inf NaN Inf NaN NaN NaN NaN -Inf NaN Inf NaN NaN NaN NaN -Inf NaN]
-single 1x49 [-Inf -Inf -Inf -Inf -Inf -Inf -Inf NaN -1 -1 -1 -1 NaN NaN NaN 0 0 -0 -0 NaN NaN NaN 0 0 0 0 NaN NaN NaN 1 1 1 1 NaN NaN Inf Inf Inf Inf Inf Inf Inf NaN NaN NaN NaN NaN NaN NaN]
-single 1x49 [Inf NaN NaN NaN NaN -Inf NaN Inf 1 0 0 -1 -Inf NaN Inf 1 0 0 -1 -Inf NaN Inf 1 0 -0 -1 -Inf NaN Inf 1 0 -0 -1 -Inf NaN Inf NaN NaN NaN NaN -Inf NaN Inf NaN NaN NaN NaN -Inf NaN]
-single 1x49 [-Inf -Inf -Inf -Inf -Inf -Inf -Inf NaN -1 -1 -1 -1 NaN NaN NaN 0 0 -0 -0 NaN NaN NaN 0 0 0 0 NaN NaN NaN 1 1 1 1 NaN NaN Inf Inf Inf Inf Inf Inf Inf NaN NaN NaN NaN NaN NaN NaN]
-single 1x49 [Inf NaN NaN NaN NaN -Inf NaN Inf 1 0 0 -1 -Inf NaN Inf 1 0 0 -1 -Inf NaN Inf 1 0 -0 -1 -Inf NaN Inf 1 0 -0 -1 -Inf NaN Inf NaN NaN NaN NaN -Inf NaN Inf NaN NaN NaN NaN -Inf NaN]
-single 1x49 [-Inf -Inf -Inf -Inf -Inf -Inf -Inf NaN -1 -1 -1 -1 NaN NaN NaN 0 0 -0 -0 NaN NaN NaN 0 0 0 0 NaN NaN NaN 1 1 1 1 NaN NaN Inf Inf Inf Inf Inf Inf Inf NaN NaN NaN NaN NaN NaN NaN]
-single 1x49 [Inf NaN NaN NaN NaN -Inf NaN Inf 1 0 0 -1 -Inf NaN Inf 1 0 0 -1 -Inf NaN Inf 1 0 -0 -1 -Inf NaN Inf 1 0 -0 -1 -Inf NaN Inf NaN NaN NaN NaN -Inf NaN Inf NaN NaN NaN NaN -Inf NaN]
-single 1x49 [-Inf -Inf -Inf -Inf -Inf -Inf -Inf NaN -1 -1 -1 -1 NaN NaN NaN 0 0 -0 -0 NaN NaN NaN 0 0 0 0 NaN NaN NaN 1 1 1 1 NaN NaN Inf Inf Inf Inf Inf Inf Inf NaN NaN NaN NaN NaN NaN NaN]
-single 1x49 [Inf NaN NaN NaN NaN -Inf NaN Inf 1 0 0 -1 -Inf NaN Inf 1 0 0 -1 -Inf NaN Inf 1 0 -0 -1 -Inf NaN Inf 1 0 -0 -1 -Inf NaN Inf NaN NaN NaN NaN -Inf NaN Inf NaN NaN NaN NaN -Inf NaN]
-single 1x49 [-Inf -Inf -Inf -Inf -Inf -Inf -Inf NaN -1 -1 -1 -1 NaN NaN NaN 0 0 -0 -0 NaN NaN NaN 0 0 0 0 NaN NaN NaN 1 1 1 1 NaN NaN Inf Inf Inf Inf Inf Inf Inf NaN NaN NaN NaN NaN NaN NaN]
-single 1x49 [Inf NaN NaN NaN NaN -Inf NaN Inf 1 0 0 -1 -Inf NaN Inf 1 0 0 -1 -Inf NaN Inf 1 0 -0 -1 -Inf NaN Inf 1 0 -0 -1 -Inf NaN Inf NaN NaN NaN NaN -Inf NaN Inf NaN NaN NaN NaN -Inf NaN]
-single 1x49 [-Inf -Inf -Inf -Inf -Inf -Inf -Inf NaN -1 -1 -1 -1 NaN NaN NaN 0 0 -0 -0 NaN NaN NaN 0 0 0 0 NaN NaN NaN 1 1 1 1 NaN NaN Inf Inf Inf Inf Inf Inf Inf NaN NaN NaN NaN NaN NaN NaN]
-single 1x49 [Inf NaN NaN NaN NaN -Inf NaN Inf 1 0 0 -1 -Inf NaN Inf 1 0 0 -1 -Inf NaN Inf 1 0 -0 -1 -Inf NaN Inf 1 0 -0 -1 -Inf NaN Inf NaN NaN NaN NaN -Inf NaN Inf NaN NaN NaN NaN -Inf NaN]
-single 1x49 [-Inf -Inf -Inf -Inf -Inf -Inf -Inf NaN -1 -1 -1 -1 NaN NaN NaN 0 0 -0 -0 NaN NaN NaN 0 0 0 0 NaN NaN NaN 1 1 1 1 NaN NaN Inf Inf Inf Inf Inf Inf Inf NaN NaN NaN NaN NaN NaN NaN]
-single 1x49 [Inf NaN NaN NaN NaN -Inf NaN Inf 1 0 0 -1 -Inf NaN Inf 1 0 0 -1 -Inf NaN Inf 1 0 -0 -1 -Inf NaN Inf 1 0 -0 -1 -Inf NaN Inf NaN NaN NaN NaN -Inf NaN Inf NaN NaN NaN NaN -Inf NaN]
-single 1x49 [-Inf -Inf -Inf -Inf -Inf -Inf -Inf NaN -1 -1 -1 -1 NaN NaN NaN 0 0 -0 -0 NaN NaN NaN 0 0 0 0 NaN NaN NaN 1 1 1 1 NaN NaN Inf Inf Inf Inf Inf Inf Inf NaN NaN NaN NaN NaN NaN NaN]
-single 1x49 [Inf NaN NaN NaN NaN -Inf NaN Inf 1 0 0 -1 -Inf NaN Inf 1 0 0 -1 -Inf NaN Inf 1 0 -0 -1 -Inf NaN Inf 1 0 -0 -1 -Inf NaN Inf NaN NaN NaN NaN -Inf NaN Inf NaN NaN NaN NaN -Inf NaN]
-single 1x49 [-Inf -Inf -Inf -Inf -Inf -Inf -Inf NaN -1 -1 -1 -1 NaN NaN NaN 0 0 -0 -0 NaN NaN NaN 0 0 0 0 NaN NaN NaN 1 1 1 1 NaN NaN Inf Inf Inf Inf Inf Inf Inf NaN NaN NaN NaN NaN NaN NaN]
-single 1x49 [Inf NaN NaN NaN NaN -Inf NaN Inf 1 0 0 -1 -Inf NaN Inf 1 0 0 -1 -Inf NaN Inf 1 0 -0 -1 -Inf NaN Inf 1 0 -0 -1 -Inf NaN Inf NaN NaN NaN NaN -Inf NaN Inf NaN NaN NaN NaN -Inf NaN]
-single 1x49 [-Inf -Inf -Inf -Inf -Inf -Inf -Inf NaN -1 -1 -1 -1 NaN NaN NaN 0 0 -0 -0 NaN NaN NaN 0 0 0 0 NaN NaN NaN 1 1 1 1 NaN NaN Inf Inf Inf Inf Inf Inf Inf NaN NaN NaN NaN NaN NaN NaN]
-single 1x49 [Inf NaN NaN NaN NaN -Inf NaN Inf 1 0 0 -1 -Inf NaN Inf 1 0 0 -1 -Inf NaN Inf 1 0 -0 -1 -Inf NaN Inf 1 0 -0 -1 -Inf NaN Inf NaN NaN NaN NaN -Inf NaN Inf NaN NaN NaN NaN -Inf NaN]
-single 1x49 [-Inf -Inf -Inf -Inf -Inf -Inf -Inf NaN -1 -1 -1 -1 NaN NaN NaN 0 0 -0 -0 NaN NaN NaN 0 0 0 0 NaN NaN NaN 1 1 1 1 NaN NaN Inf Inf Inf Inf Inf Inf Inf NaN NaN NaN NaN NaN NaN NaN]
-single 1x49 [Inf NaN NaN NaN NaN -Inf NaN Inf 1 0 0 -1 -Inf NaN Inf 1 0 0 -1 -Inf NaN Inf 1 0 -0 -1 -Inf NaN Inf 1 0 -0 -1 -Inf NaN Inf NaN NaN NaN NaN -Inf NaN Inf NaN NaN NaN NaN -Inf NaN]
+single 1x49 [-Inf -Inf -Inf -Inf -Inf -Inf -Inf NaN -1 -1 -1 -1 NaN NaN NaN 0 0 0 0 NaN NaN NaN 0 0 0 0 NaN NaN NaN 1 1 1 1 NaN NaN Inf Inf Inf Inf Inf Inf Inf NaN NaN NaN NaN NaN NaN NaN] (-0 at 18 19)
+single 1x49 [Inf NaN NaN NaN NaN -Inf NaN Inf 1 0 0 -1 -Inf NaN Inf 1 0 0 -1 -Inf NaN Inf 1 0 0 -1 -Inf NaN Inf 1 0 0 -1 -Inf NaN Inf NaN NaN NaN NaN -Inf NaN Inf NaN NaN NaN NaN -Inf NaN] (-0 at 25 32)
+single 1x49 [-Inf -Inf -Inf -Inf -Inf -Inf -Inf NaN -1 -1 -1 -1 NaN NaN NaN 0 0 0 0 NaN NaN NaN 0 0 0 0 NaN NaN NaN 1 1 1 1 NaN NaN Inf Inf Inf Inf Inf Inf Inf NaN NaN NaN NaN NaN NaN NaN] (-0 at 18 19)
+single 1x49 [Inf NaN NaN NaN NaN -Inf NaN Inf 1 0 0 -1 -Inf NaN Inf 1 0 0 -1 -Inf NaN Inf 1 0 0 -1 -Inf NaN Inf 1 0 0 -1 -Inf NaN Inf NaN NaN NaN NaN -Inf NaN Inf NaN NaN NaN NaN -Inf NaN] (-0 at 25 32)
+single 1x49 [-Inf -Inf -Inf -Inf -Inf -Inf -Inf NaN -1 -1 -1 -1 NaN NaN NaN 0 0 0 0 NaN NaN NaN 0 0 0 0 NaN NaN NaN 1 1 1 1 NaN NaN Inf Inf Inf Inf Inf Inf Inf NaN NaN NaN NaN NaN NaN NaN] (-0 at 18 19)
+single 1x49 [Inf NaN NaN NaN NaN -Inf NaN Inf 1 0 0 -1 -Inf NaN Inf 1 0 0 -1 -Inf NaN Inf 1 0 0 -1 -Inf NaN Inf 1 0 0 -1 -Inf NaN Inf NaN NaN NaN NaN -Inf NaN Inf NaN NaN NaN NaN -Inf NaN] (-0 at 25 32)
+single 1x49 [-Inf -Inf -Inf -Inf -Inf -Inf -Inf NaN -1 -1 -1 -1 NaN NaN NaN 0 0 0 0 NaN NaN NaN 0 0 0 0 NaN NaN NaN 1 1 1 1 NaN NaN Inf Inf Inf Inf Inf Inf Inf NaN NaN NaN NaN NaN NaN NaN] (-0 at 18 19)
+single 1x49 [Inf NaN NaN NaN NaN -Inf NaN Inf 1 0 0 -1 -Inf NaN Inf 1 0 0 -1 -Inf NaN Inf 1 0 0 -1 -Inf NaN Inf 1 0 0 -1 -Inf NaN Inf NaN NaN NaN NaN -Inf NaN Inf NaN NaN NaN NaN -Inf NaN] (-0 at 25 32)
+single 1x49 [-Inf -Inf -Inf -Inf -Inf -Inf -Inf NaN -1 -1 -1 -1 NaN NaN NaN 0 0 0 0 NaN NaN NaN 0 0 0 0 NaN NaN NaN 1 1 1 1 NaN NaN Inf Inf Inf Inf Inf Inf Inf NaN NaN NaN NaN NaN NaN NaN] (-0 at 18 19)
+single 1x49 [Inf NaN NaN NaN NaN -Inf NaN Inf 1 0 0 -1 -Inf NaN Inf 1 0 0 -1 -Inf NaN Inf 1 0 0 -1 -Inf NaN Inf 1 0 0 -1 -Inf NaN Inf NaN NaN NaN NaN -Inf NaN Inf NaN NaN NaN NaN -Inf NaN] (-0 at 25 32)
+single 1x49 [-Inf -Inf -Inf -Inf -Inf -Inf -Inf NaN -1 -1 -1 -1 NaN NaN NaN 0 0 0 0 NaN NaN NaN 0 0 0 0 NaN NaN NaN 1 1 1 1 NaN NaN Inf Inf Inf Inf Inf Inf Inf NaN NaN NaN NaN NaN NaN NaN] (-0 at 18 19)
+single 1x49 [Inf NaN NaN NaN NaN -Inf NaN Inf 1 0 0 -1 -Inf NaN Inf 1 0 0 -1 -Inf NaN Inf 1 0 0 -1 -Inf NaN Inf 1 0 0 -1 -Inf NaN Inf NaN NaN NaN NaN -Inf NaN Inf NaN NaN NaN NaN -Inf NaN] (-0 at 25 32)
+single 1x49 [-Inf -Inf -Inf -Inf -Inf -Inf -Inf NaN -1 -1 -1 -1 NaN NaN NaN 0 0 0 0 NaN NaN NaN 0 0 0 0 NaN NaN NaN 1 1 1 1 NaN NaN Inf Inf Inf Inf Inf Inf Inf NaN NaN NaN NaN NaN NaN NaN] (-0 at 18 19)
+single 1x49 [Inf NaN NaN NaN NaN -Inf NaN Inf 1 0 0 -1 -Inf NaN Inf 1 0 0 -1 -Inf NaN Inf 1 0 0 -1 -Inf NaN Inf 1 0 0 -1 -Inf NaN Inf NaN NaN NaN NaN -Inf NaN Inf NaN NaN NaN NaN -Inf NaN] (-0 at 25 32)
+single 1x49 [-Inf -Inf -Inf -Inf -Inf -Inf -Inf NaN -1 -1 -1 -1 NaN NaN NaN 0 0 0 0 NaN NaN NaN 0 0 0 0 NaN NaN NaN 1 1 1 1 NaN NaN Inf Inf Inf Inf Inf Inf Inf NaN NaN NaN NaN NaN NaN NaN] (-0 at 18 19)
+single 1x49 [Inf NaN NaN NaN NaN -Inf NaN Inf 1 0 0 -1 -Inf NaN Inf 1 0 0 -1 -Inf NaN Inf 1 0 0 -1 -Inf NaN Inf 1 0 0 -1 -Inf NaN Inf NaN NaN NaN NaN -Inf NaN Inf NaN NaN NaN NaN -Inf NaN] (-0 at 25 32)
+single 1x49 [-Inf -Inf -Inf -Inf -Inf -Inf -Inf NaN -1 -1 -1 -1 NaN NaN NaN 0 0 0 0 NaN NaN NaN 0 0 0 0 NaN NaN NaN 1 1 1 1 NaN NaN Inf Inf Inf Inf Inf Inf Inf NaN NaN NaN NaN NaN NaN NaN] (-0 at 18 19)
+single 1x49 [Inf NaN NaN NaN NaN -Inf NaN Inf 1 0 0 -1 -Inf NaN Inf 1 0 0 -1 -Inf NaN Inf 1 0 0 -1 -Inf NaN Inf 1 0 0 -1 -Inf NaN Inf NaN NaN NaN NaN -Inf NaN Inf NaN NaN NaN NaN -Inf NaN] (-0 at 25 32)
+single 1x49 [-Inf -Inf -Inf -Inf -Inf -Inf -Inf NaN -1 -1 -1 -1 NaN NaN NaN 0 0 0 0 NaN NaN NaN 0 0 0 0 NaN NaN NaN 1 1 1 1 NaN NaN Inf Inf Inf Inf Inf Inf Inf NaN NaN NaN NaN NaN NaN NaN] (-0 at 18 19)
+single 1x49 [Inf NaN NaN NaN NaN -Inf NaN Inf 1 0 0 -1 -Inf NaN Inf 1 0 0 -1 -Inf NaN Inf 1 0 0 -1 -Inf NaN Inf 1 0 0 -1 -Inf NaN Inf NaN NaN NaN NaN -Inf NaN Inf NaN NaN NaN NaN -Inf NaN] (-0 at 25 32)
+single 1x49 [-Inf -Inf -Inf -Inf -Inf -Inf -Inf NaN -1 -1 -1 -1 NaN NaN NaN 0 0 0 0 NaN NaN NaN 0 0 0 0 NaN NaN NaN 1 1 1 1 NaN NaN Inf Inf Inf Inf Inf Inf Inf NaN NaN NaN NaN NaN NaN NaN] (-0 at 18 19)
+single 1x49 [Inf NaN NaN NaN NaN -Inf NaN Inf 1 0 0 -1 -Inf NaN Inf 1 0 0 -1 -Inf NaN Inf 1 0 0 -1 -Inf NaN Inf 1 0 0 -1 -Inf NaN Inf NaN NaN NaN NaN -Inf NaN Inf NaN NaN NaN NaN -Inf NaN] (-0 at 25 32)
+single 1x49 [-Inf -Inf -Inf -Inf -Inf -Inf -Inf NaN -1 -1 -1 -1 NaN NaN NaN 0 0 0 0 NaN NaN NaN 0 0 0 0 NaN NaN NaN 1 1 1 1 NaN NaN Inf Inf Inf Inf Inf Inf Inf NaN NaN NaN NaN NaN NaN NaN] (-0 at 18 19)
+single 1x49 [Inf NaN NaN NaN NaN -Inf NaN Inf 1 0 0 -1 -Inf NaN Inf 1 0 0 -1 -Inf NaN Inf 1 0 0 -1 -Inf NaN Inf 1 0 0 -1 -Inf NaN Inf NaN NaN NaN NaN -Inf NaN Inf NaN NaN NaN NaN -Inf NaN] (-0 at 25 32)
+single 1x49 [-Inf -Inf -Inf -Inf -Inf -Inf -Inf NaN -1 -1 -1 -1 NaN NaN NaN 0 0 0 0 NaN NaN NaN 0 0 0 0 NaN NaN NaN 1 1 1 1 NaN NaN Inf Inf Inf Inf Inf Inf Inf NaN NaN NaN NaN NaN NaN NaN] (-0 at 18 19)
+single 1x49 [Inf NaN NaN NaN NaN -Inf NaN Inf 1 0 0 -1 -Inf NaN Inf 1 0 0 -1 -Inf NaN Inf 1 0 0 -1 -Inf NaN Inf 1 0 0 -1 -Inf NaN Inf NaN NaN NaN NaN -Inf NaN Inf NaN NaN NaN NaN -Inf NaN] (-0 at 25 32)
+single 1x49 [-Inf -Inf -Inf -Inf -Inf -Inf -Inf NaN -1 -1 -1 -1 NaN NaN NaN 0 0 0 0 NaN NaN NaN 0 0 0 0 NaN NaN NaN 1 1 1 1 NaN NaN Inf Inf Inf Inf Inf Inf Inf NaN NaN NaN NaN NaN NaN NaN] (-0 at 18 19)
+single 1x49 [Inf NaN NaN NaN NaN -Inf NaN Inf 1 0 0 -1 -Inf NaN Inf 1 0 0 -1 -Inf NaN Inf 1 0 0 -1 -Inf NaN Inf 1 0 0 -1 -Inf NaN Inf NaN NaN NaN NaN -Inf NaN Inf NaN NaN NaN NaN -Inf NaN] (-0 at 25 32)
+single 1x49 [-Inf -Inf -Inf -Inf -Inf -Inf -Inf NaN -1 -1 -1 -1 NaN NaN NaN 0 0 0 0 NaN NaN NaN 0 0 0 0 NaN NaN NaN 1 1 1 1 NaN NaN Inf Inf Inf Inf Inf Inf Inf NaN NaN NaN NaN NaN NaN NaN] (-0 at 18 19)
+single 1x49 [Inf NaN NaN NaN NaN -Inf NaN Inf 1 0 0 -1 -Inf NaN Inf 1 0 0 -1 -Inf NaN Inf 1 0 0 -1 -Inf NaN Inf 1 0 0 -1 -Inf NaN Inf NaN NaN NaN NaN -Inf NaN Inf NaN NaN NaN NaN -Inf NaN] (-0 at 25 32)
+single 1x49 [-Inf -Inf -Inf -Inf -Inf -Inf -Inf NaN -1 -1 -1 -1 NaN NaN NaN 0 0 0 0 NaN NaN NaN 0 0 0 0 NaN NaN NaN 1 1 1 1 NaN NaN Inf Inf Inf Inf Inf Inf Inf NaN NaN NaN NaN NaN NaN NaN] (-0 at 18 19)
+single 1x49 [Inf NaN NaN NaN NaN -Inf NaN Inf 1 0 0 -1 -Inf NaN Inf 1 0 0 -1 -Inf NaN Inf 1 0 0 -1 -Inf NaN Inf 1 0 0 -1 -Inf NaN Inf NaN NaN NaN NaN -Inf NaN Inf NaN NaN NaN NaN -Inf NaN] (-0 at 25 32)
+single 1x49 [-Inf -Inf -Inf -Inf -Inf -Inf -Inf NaN -1 -1 -1 -1 NaN NaN NaN 0 0 0 0 NaN NaN NaN 0 0 0 0 NaN NaN NaN 1 1 1 1 NaN NaN Inf Inf Inf Inf Inf Inf Inf NaN NaN NaN NaN NaN NaN NaN] (-0 at 18 19)
+single 1x49 [Inf NaN NaN NaN NaN -Inf NaN Inf 1 0 0 -1 -Inf NaN Inf 1 0 0 -1 -Inf NaN Inf 1 0 0 -1 -Inf NaN Inf 1 0 0 -1 -Inf NaN Inf NaN NaN NaN NaN -Inf NaN Inf NaN NaN NaN NaN -Inf NaN] (-0 at 25 32)
+single 1x49 [-Inf -Inf -Inf -Inf -Inf -Inf -Inf NaN -1 -1 -1 -1 NaN NaN NaN 0 0 0 0 NaN NaN NaN 0 0 0 0 NaN NaN NaN 1 1 1 1 NaN NaN Inf Inf Inf Inf Inf Inf Inf NaN NaN NaN NaN NaN NaN NaN] (-0 at 18 19)
+single 1x49 [Inf NaN NaN NaN NaN -Inf NaN Inf 1 0 0 -1 -Inf NaN Inf 1 0 0 -1 -Inf NaN Inf 1 0 0 -1 -Inf NaN Inf 1 0 0 -1 -Inf NaN Inf NaN NaN NaN NaN -Inf NaN Inf NaN NaN NaN NaN -Inf NaN] (-0 at 25 32)
+single 1x49 [-Inf -Inf -Inf -Inf -Inf -Inf -Inf NaN -1 -1 -1 -1 NaN NaN NaN 0 0 0 0 NaN NaN NaN 0 0 0 0 NaN NaN NaN 1 1 1 1 NaN NaN Inf Inf Inf Inf Inf Inf Inf NaN NaN NaN NaN NaN NaN NaN] (-0 at 18 19)
+single 1x49 [Inf NaN NaN NaN NaN -Inf NaN Inf 1 0 0 -1 -Inf NaN Inf 1 0 0 -1 -Inf NaN Inf 1 0 0 -1 -Inf NaN Inf 1 0 0 -1 -Inf NaN Inf NaN NaN NaN NaN -Inf NaN Inf NaN NaN NaN NaN -Inf NaN] (-0 at 25 32)
+single 1x49 [-Inf -Inf -Inf -Inf -Inf -Inf -Inf NaN -1 -1 -1 -1 NaN NaN NaN 0 0 0 0 NaN NaN NaN 0 0 0 0 NaN NaN NaN 1 1 1 1 NaN NaN Inf Inf Inf Inf Inf Inf Inf NaN NaN NaN NaN NaN NaN NaN] (-0 at 18 19)
+single 1x49 [Inf NaN NaN NaN NaN -Inf NaN Inf 1 0 0 -1 -Inf NaN Inf 1 0 0 -1 -Inf NaN Inf 1 0 0 -1 -Inf NaN Inf 1 0 0 -1 -Inf NaN Inf NaN NaN NaN NaN -Inf NaN Inf NaN NaN NaN NaN -Inf NaN] (-0 at 25 32)
+single 1x49 [-Inf -Inf -Inf -Inf -Inf -Inf -Inf NaN -1 -1 -1 -1 NaN NaN NaN 0 0 0 0 NaN NaN NaN 0 0 0 0 NaN NaN NaN 1 1 1 1 NaN NaN Inf Inf Inf Inf Inf Inf Inf NaN NaN NaN NaN NaN NaN NaN] (-0 at 18 19)
+single 1x49 [Inf NaN NaN NaN NaN -Inf NaN Inf 1 0 0 -1 -Inf NaN Inf 1 0 0 -1 -Inf NaN Inf 1 0 0 -1 -Inf NaN Inf 1 0 0 -1 -Inf NaN Inf NaN NaN NaN NaN -Inf NaN Inf NaN NaN NaN NaN -Inf NaN] (-0 at 25 32)
+single 1x49 [-Inf -Inf -Inf -Inf -Inf -Inf -Inf NaN -1 -1 -1 -1 NaN NaN NaN 0 0 0 0 NaN NaN NaN 0 0 0 0 NaN NaN NaN 1 1 1 1 NaN NaN Inf Inf Inf Inf Inf Inf Inf NaN NaN NaN NaN NaN NaN NaN] (-0 at 18 19)
+single 1x49 [Inf NaN NaN NaN NaN -Inf NaN Inf 1 0 0 -1 -Inf NaN Inf 1 0 0 -1 -Inf NaN Inf 1 0 0 -1 -Inf NaN Inf 1 0 0 -1 -Inf NaN Inf NaN NaN NaN NaN -Inf NaN Inf NaN NaN NaN NaN -Inf NaN] (-0 at 25 32)
+single 1x49 [-Inf -Inf -Inf -Inf -Inf -Inf -Inf NaN -1 -1 -1 -1 NaN NaN NaN 0 0 0 0 NaN NaN NaN 0 0 0 0 NaN NaN NaN 1 1 1 1 NaN NaN Inf Inf Inf Inf Inf Inf Inf NaN NaN NaN NaN NaN NaN NaN] (-0 at 18 19)
+single 1x49 [Inf NaN NaN NaN NaN -Inf NaN Inf 1 0 0 -1 -Inf NaN Inf 1 0 0 -1 -Inf NaN Inf 1 0 0 -1 -Inf NaN Inf 1 0 0 -1 -Inf NaN Inf NaN NaN NaN NaN -Inf NaN Inf NaN NaN NaN NaN -Inf NaN] (-0 at 25 32)
+single 1x49 [-Inf -Inf -Inf -Inf -Inf -Inf -Inf NaN -1 -1 -1 -1 NaN NaN NaN 0 0 0 0 NaN NaN NaN 0 0 0 0 NaN NaN NaN 1 1 1 1 NaN NaN Inf Inf Inf Inf Inf Inf Inf NaN NaN NaN NaN NaN NaN NaN] (-0 at 18 19)
+single 1x49 [Inf NaN NaN NaN NaN -Inf NaN Inf 1 0 0 -1 -Inf NaN Inf 1 0 0 -1 -Inf NaN Inf 1 0 0 -1 -Inf NaN Inf 1 0 0 -1 -Inf NaN Inf NaN NaN NaN NaN -Inf NaN Inf NaN NaN NaN NaN -Inf NaN] (-0 at 25 32)
+single 1x49 [-Inf -Inf -Inf -Inf -Inf -Inf -Inf NaN -1 -1 -1 -1 NaN NaN NaN 0 0 0 0 NaN NaN NaN 0 0 0 0 NaN NaN NaN 1 1 1 1 NaN NaN Inf Inf Inf Inf Inf Inf Inf NaN NaN NaN NaN NaN NaN NaN] (-0 at 18 19)
+single 1x49 [Inf NaN NaN NaN NaN -Inf NaN Inf 1 0 0 -1 -Inf NaN Inf 1 0 0 -1 -Inf NaN Inf 1 0 0 -1 -Inf NaN Inf 1 0 0 -1 -Inf NaN Inf NaN NaN NaN NaN -Inf NaN Inf NaN NaN NaN NaN -Inf NaN] (-0 at 25 32)
+single 1x49 [-Inf -Inf -Inf -Inf -Inf -Inf -Inf NaN -1 -1 -1 -1 NaN NaN NaN 0 0 0 0 NaN NaN NaN 0 0 0 0 NaN NaN NaN 1 1 1 1 NaN NaN Inf Inf Inf Inf Inf Inf Inf NaN NaN NaN NaN NaN NaN NaN] (-0 at 18 19)
+single 1x49 [Inf NaN NaN NaN NaN -Inf NaN Inf 1 0 0 -1 -Inf NaN Inf 1 0 0 -1 -Inf NaN Inf 1 0 0 -1 -Inf NaN Inf 1 0 0 -1 -Inf NaN Inf NaN NaN NaN NaN -Inf NaN Inf NaN NaN NaN NaN -Inf NaN] (-0 at 25 32)
+single 1x49 [-Inf -Inf -Inf -Inf -Inf -Inf -Inf NaN -1 -1 -1 -1 NaN NaN NaN 0 0 0 0 NaN NaN NaN 0 0 0 0 NaN NaN NaN 1 1 1 1 NaN NaN Inf Inf Inf Inf Inf Inf Inf NaN NaN NaN NaN NaN NaN NaN] (-0 at 18 19)
+single 1x49 [Inf NaN NaN NaN NaN -Inf NaN Inf 1 0 0 -1 -Inf NaN Inf 1 0 0 -1 -Inf NaN Inf 1 0 0 -1 -Inf NaN Inf 1 0 0 -1 -Inf NaN Inf NaN NaN NaN NaN -Inf NaN Inf NaN NaN NaN NaN -Inf NaN] (-0 at 25 32)
+single 1x49 [-Inf -Inf -Inf -Inf -Inf -Inf -Inf NaN -1 -1 -1 -1 NaN NaN NaN 0 0 0 0 NaN NaN NaN 0 0 0 0 NaN NaN NaN 1 1 1 1 NaN NaN Inf Inf Inf Inf Inf Inf Inf NaN NaN NaN NaN NaN NaN NaN] (-0 at 18 19)
+single 1x49 [Inf NaN NaN NaN NaN -Inf NaN Inf 1 0 0 -1 -Inf NaN Inf 1 0 0 -1 -Inf NaN Inf 1 0 0 -1 -Inf NaN Inf 1 0 0 -1 -Inf NaN Inf NaN NaN NaN NaN -Inf NaN Inf NaN NaN NaN NaN -Inf NaN] (-0 at 25 32)
+single 1x49 [-Inf -Inf -Inf -Inf -Inf -Inf -Inf NaN -1 -1 -1 -1 NaN NaN NaN 0 0 0 0 NaN NaN NaN 0 0 0 0 NaN NaN NaN 1 1 1 1 NaN NaN Inf Inf Inf Inf Inf Inf Inf NaN NaN NaN NaN NaN NaN NaN] (-0 at 18 19)
+single 1x49 [Inf NaN NaN NaN NaN -Inf NaN Inf 1 0 0 -1 -Inf NaN Inf 1 0 0 -1 -Inf NaN Inf 1 0 0 -1 -Inf NaN Inf 1 0 0 -1 -Inf NaN Inf NaN NaN NaN NaN -Inf NaN Inf NaN NaN NaN NaN -Inf NaN] (-0 at 25 32)
+single 1x49 [-Inf -Inf -Inf -Inf -Inf -Inf -Inf NaN -1 -1 -1 -1 NaN NaN NaN 0 0 0 0 NaN NaN NaN 0 0 0 0 NaN NaN NaN 1 1 1 1 NaN NaN Inf Inf Inf Inf Inf Inf Inf NaN NaN NaN NaN NaN NaN NaN] (-0 at 18 19)
+single 1x49 [Inf NaN NaN NaN NaN -Inf NaN Inf 1 0 0 -1 -Inf NaN Inf 1 0 0 -1 -Inf NaN Inf 1 0 0 -1 -Inf NaN Inf 1 0 0 -1 -Inf NaN Inf NaN NaN NaN NaN -Inf NaN Inf NaN NaN NaN NaN -Inf NaN] (-0 at 25 32)
+single 1x49 [-Inf -Inf -Inf -Inf -Inf -Inf -Inf NaN -1 -1 -1 -1 NaN NaN NaN 0 0 0 0 NaN NaN NaN 0 0 0 0 NaN NaN NaN 1 1 1 1 NaN NaN Inf Inf Inf Inf Inf Inf Inf NaN NaN NaN NaN NaN NaN NaN] (-0 at 18 19)
+single 1x49 [Inf NaN NaN NaN NaN -Inf NaN Inf 1 0 0 -1 -Inf NaN Inf 1 0 0 -1 -Inf NaN Inf 1 0 0 -1 -Inf NaN Inf 1 0 0 -1 -Inf NaN Inf NaN NaN NaN NaN -Inf NaN Inf NaN NaN NaN NaN -Inf NaN] (-0 at 25 32)
+single 1x49 [-Inf -Inf -Inf -Inf -Inf -Inf -Inf NaN -1 -1 -1 -1 NaN NaN NaN 0 0 0 0 NaN NaN NaN 0 0 0 0 NaN NaN NaN 1 1 1 1 NaN NaN Inf Inf Inf Inf Inf Inf Inf NaN NaN NaN NaN NaN NaN NaN] (-0 at 18 19)
+single 1x49 [Inf NaN NaN NaN NaN -Inf NaN Inf 1 0 0 -1 -Inf NaN Inf 1 0 0 -1 -Inf NaN Inf 1 0 0 -1 -Inf NaN Inf 1 0 0 -1 -Inf NaN Inf NaN NaN NaN NaN -Inf NaN Inf NaN NaN NaN NaN -Inf NaN] (-0 at 25 32)
+single 1x49 [-Inf -Inf -Inf -Inf -Inf -Inf -Inf NaN -1 -1 -1 -1 NaN NaN NaN 0 0 0 0 NaN NaN NaN 0 0 0 0 NaN NaN NaN 1 1 1 1 NaN NaN Inf Inf Inf Inf Inf Inf Inf NaN NaN NaN NaN NaN NaN NaN] (-0 at 18 19)
+single 1x49 [Inf NaN NaN NaN NaN -Inf NaN Inf 1 0 0 -1 -Inf NaN Inf 1 0 0 -1 -Inf NaN Inf 1 0 0 -1 -Inf NaN Inf 1 0 0 -1 -Inf NaN Inf NaN NaN NaN NaN -Inf NaN Inf NaN NaN NaN NaN -Inf NaN] (-0 at 25 32)
+single 1x49 [-Inf -Inf -Inf -Inf -Inf -Inf -Inf NaN -1 -1 -1 -1 NaN NaN NaN 0 0 0 0 NaN NaN NaN 0 0 0 0 NaN NaN NaN 1 1 1 1 NaN NaN Inf Inf Inf Inf Inf Inf Inf NaN NaN NaN NaN NaN NaN NaN] (-0 at 18 19)
+single 1x49 [Inf NaN NaN NaN NaN -Inf NaN Inf 1 0 0 -1 -Inf NaN Inf 1 0 0 -1 -Inf NaN Inf 1 0 0 -1 -Inf NaN Inf 1 0 0 -1 -Inf NaN Inf NaN NaN NaN NaN -Inf NaN Inf NaN NaN NaN NaN -Inf NaN] (-0 at 25 32)
+single 1x49 [-Inf -Inf -Inf -Inf -Inf -Inf -Inf NaN -1 -1 -1 -1 NaN NaN NaN 0 0 0 0 NaN NaN NaN 0 0 0 0 NaN NaN NaN 1 1 1 1 NaN NaN Inf Inf Inf Inf Inf Inf Inf NaN NaN NaN NaN NaN NaN NaN] (-0 at 18 19)
+single 1x49 [Inf NaN NaN NaN NaN -Inf NaN Inf 1 0 0 -1 -Inf NaN Inf 1 0 0 -1 -Inf NaN Inf 1 0 0 -1 -Inf NaN Inf 1 0 0 -1 -Inf NaN Inf NaN NaN NaN NaN -Inf NaN Inf NaN NaN NaN NaN -Inf NaN] (-0 at 25 32)
+single 1x49 [-Inf -Inf -Inf -Inf -Inf -Inf -Inf NaN -1 -1 -1 -1 NaN NaN NaN 0 0 0 0 NaN NaN NaN 0 0 0 0 NaN NaN NaN 1 1 1 1 NaN NaN Inf Inf Inf Inf Inf Inf Inf NaN NaN NaN NaN NaN NaN NaN] (-0 at 18 19)
+single 1x49 [Inf NaN NaN NaN NaN -Inf NaN Inf 1 0 0 -1 -Inf NaN Inf 1 0 0 -1 -Inf NaN Inf 1 0 0 -1 -Inf NaN Inf 1 0 0 -1 -Inf NaN Inf NaN NaN NaN NaN -Inf NaN Inf NaN NaN NaN NaN -Inf NaN] (-0 at 25 32)
+single 1x49 [-Inf -Inf -Inf -Inf -Inf -Inf -Inf NaN -1 -1 -1 -1 NaN NaN NaN 0 0 0 0 NaN NaN NaN 0 0 0 0 NaN NaN NaN 1 1 1 1 NaN NaN Inf Inf Inf Inf Inf Inf Inf NaN NaN NaN NaN NaN NaN NaN] (-0 at 18 19)
+single 1x49 [Inf NaN NaN NaN NaN -Inf NaN Inf 1 0 0 -1 -Inf NaN Inf 1 0 0 -1 -Inf NaN Inf 1 0 0 -1 -Inf NaN Inf 1 0 0 -1 -Inf NaN Inf NaN NaN NaN NaN -Inf NaN Inf NaN NaN NaN NaN -Inf NaN] (-0 at 25 32)
+single 1x49 [-Inf -Inf -Inf -Inf -Inf -Inf -Inf NaN -1 -1 -1 -1 NaN NaN NaN 0 0 0 0 NaN NaN NaN 0 0 0 0 NaN NaN NaN 1 1 1 1 NaN NaN Inf Inf Inf Inf Inf Inf Inf NaN NaN NaN NaN NaN NaN NaN] (-0 at 18 19)
+single 1x49 [Inf NaN NaN NaN NaN -Inf NaN Inf 1 0 0 -1 -Inf NaN Inf 1 0 0 -1 -Inf NaN Inf 1 0 0 -1 -Inf NaN Inf 1 0 0 -1 -Inf NaN Inf NaN NaN NaN NaN -Inf NaN Inf NaN NaN NaN NaN -Inf NaN] (-0 at 25 32)
+single 1x49 [-Inf -Inf -Inf -Inf -Inf -Inf -Inf NaN -1 -1 -1 -1 NaN NaN NaN 0 0 0 0 NaN NaN NaN 0 0 0 0 NaN NaN NaN 1 1 1 1 NaN NaN Inf Inf Inf Inf Inf Inf Inf NaN NaN NaN NaN NaN NaN NaN] (-0 at 18 19)
+single 1x49 [Inf NaN NaN NaN NaN -Inf NaN Inf 1 0 0 -1 -Inf NaN Inf 1 0 0 -1 -Inf NaN Inf 1 0 0 -1 -Inf NaN Inf 1 0 0 -1 -Inf NaN Inf NaN NaN NaN NaN -Inf NaN Inf NaN NaN NaN NaN -Inf NaN] (-0 at 25 32)
+single 1x49 [-Inf -Inf -Inf -Inf -Inf -Inf -Inf NaN -1 -1 -1 -1 NaN NaN NaN 0 0 0 0 NaN NaN NaN 0 0 0 0 NaN NaN NaN 1 1 1 1 NaN NaN Inf Inf Inf Inf Inf Inf Inf NaN NaN NaN NaN NaN NaN NaN] (-0 at 18 19)
+single 1x49 [Inf NaN NaN NaN NaN -Inf NaN Inf 1 0 0 -1 -Inf NaN Inf 1 0 0 -1 -Inf NaN Inf 1 0 0 -1 -Inf NaN Inf 1 0 0 -1 -Inf NaN Inf NaN NaN NaN NaN -Inf NaN Inf NaN NaN NaN NaN -Inf NaN] (-0 at 25 32)
+single 1x49 [-Inf -Inf -Inf -Inf -Inf -Inf -Inf NaN -1 -1 -1 -1 NaN NaN NaN 0 0 0 0 NaN NaN NaN 0 0 0 0 NaN NaN NaN 1 1 1 1 NaN NaN Inf Inf Inf Inf Inf Inf Inf NaN NaN NaN NaN NaN NaN NaN] (-0 at 18 19)
+single 1x49 [Inf NaN NaN NaN NaN -Inf NaN Inf 1 0 0 -1 -Inf NaN Inf 1 0 0 -1 -Inf NaN Inf 1 0 0 -1 -Inf NaN Inf 1 0 0 -1 -Inf NaN Inf NaN NaN NaN NaN -Inf NaN Inf NaN NaN NaN NaN -Inf NaN] (-0 at 25 32)
+single 1x49 [-Inf -Inf -Inf -Inf -Inf -Inf -Inf NaN -1 -1 -1 -1 NaN NaN NaN 0 0 0 0 NaN NaN NaN 0 0 0 0 NaN NaN NaN 1 1 1 1 NaN NaN Inf Inf Inf Inf Inf Inf Inf NaN NaN NaN NaN NaN NaN NaN] (-0 at 18 19)
+single 1x49 [Inf NaN NaN NaN NaN -Inf NaN Inf 1 0 0 -1 -Inf NaN Inf 1 0 0 -1 -Inf NaN Inf 1 0 0 -1 -Inf NaN Inf 1 0 0 -1 -Inf NaN Inf NaN NaN NaN NaN -Inf NaN Inf NaN NaN NaN NaN -Inf NaN] (-0 at 25 32)
+single 1x49 [-Inf -Inf -Inf -Inf -Inf -Inf -Inf NaN -1 -1 -1 -1 NaN NaN NaN 0 0 0 0 NaN NaN NaN 0 0 0 0 NaN NaN NaN 1 1 1 1 NaN NaN Inf Inf Inf Inf Inf Inf Inf NaN NaN NaN NaN NaN NaN NaN] (-0 at 18 19)
+single 1x49 [Inf NaN NaN NaN NaN -Inf NaN Inf 1 0 0 -1 -Inf NaN Inf 1 0 0 -1 -Inf NaN Inf 1 0 0 -1 -Inf NaN Inf 1 0 0 -1 -Inf NaN Inf NaN NaN NaN NaN -Inf NaN Inf NaN NaN NaN NaN -Inf NaN] (-0 at 25 32)
+single 1x49 [-Inf -Inf -Inf -Inf -Inf -Inf -Inf NaN -1 -1 -1 -1 NaN NaN NaN 0 0 0 0 NaN NaN NaN 0 0 0 0 NaN NaN NaN 1 1 1 1 NaN NaN Inf Inf Inf Inf Inf Inf Inf NaN NaN NaN NaN NaN NaN NaN] (-0 at 18 19)
+single 1x49 [Inf NaN NaN NaN NaN -Inf NaN Inf 1 0 0 -1 -Inf NaN Inf 1 0 0 -1 -Inf NaN Inf 1 0 0 -1 -Inf NaN Inf 1 0 0 -1 -Inf NaN Inf NaN NaN NaN NaN -Inf NaN Inf NaN NaN NaN NaN -Inf NaN] (-0 at 25 32)
+single 1x49 [-Inf -Inf -Inf -Inf -Inf -Inf -Inf NaN -1 -1 -1 -1 NaN NaN NaN 0 0 0 0 NaN NaN NaN 0 0 0 0 NaN NaN NaN 1 1 1 1 NaN NaN Inf Inf Inf Inf Inf Inf Inf NaN NaN NaN NaN NaN NaN NaN] (-0 at 18 19)
+single 1x49 [Inf NaN NaN NaN NaN -Inf NaN Inf 1 0 0 -1 -Inf NaN Inf 1 0 0 -1 -Inf NaN Inf 1 0 0 -1 -Inf NaN Inf 1 0 0 -1 -Inf NaN Inf NaN NaN NaN NaN -Inf NaN Inf NaN NaN NaN NaN -Inf NaN] (-0 at 25 32)
+single 1x49 [-Inf -Inf -Inf -Inf -Inf -Inf -Inf NaN -1 -1 -1 -1 NaN NaN NaN 0 0 0 0 NaN NaN NaN 0 0 0 0 NaN NaN NaN 1 1 1 1 NaN NaN Inf Inf Inf Inf Inf Inf Inf NaN NaN NaN NaN NaN NaN NaN] (-0 at 18 19)
+single 1x49 [Inf NaN NaN NaN NaN -Inf NaN Inf 1 0 0 -1 -Inf NaN Inf 1 0 0 -1 -Inf NaN Inf 1 0 0 -1 -Inf NaN Inf 1 0 0 -1 -Inf NaN Inf NaN NaN NaN NaN -Inf NaN Inf NaN NaN NaN NaN -Inf NaN] (-0 at 25 32)
+single 1x49 [-Inf -Inf -Inf -Inf -Inf -Inf -Inf NaN -1 -1 -1 -1 NaN NaN NaN 0 0 0 0 NaN NaN NaN 0 0 0 0 NaN NaN NaN 1 1 1 1 NaN NaN Inf Inf Inf Inf Inf Inf Inf NaN NaN NaN NaN NaN NaN NaN] (-0 at 18 19)
+single 1x49 [Inf NaN NaN NaN NaN -Inf NaN Inf 1 0 0 -1 -Inf NaN Inf 1 0 0 -1 -Inf NaN Inf 1 0 0 -1 -Inf NaN Inf 1 0 0 -1 -Inf NaN Inf NaN NaN NaN NaN -Inf NaN Inf NaN NaN NaN NaN -Inf NaN] (-0 at 25 32)
+single 1x49 [-Inf -Inf -Inf -Inf -Inf -Inf -Inf NaN -1 -1 -1 -1 NaN NaN NaN 0 0 0 0 NaN NaN NaN 0 0 0 0 NaN NaN NaN 1 1 1 1 NaN NaN Inf Inf Inf Inf Inf Inf Inf NaN NaN NaN NaN NaN NaN NaN] (-0 at 18 19)
+single 1x49 [Inf NaN NaN NaN NaN -Inf NaN Inf 1 0 0 -1 -Inf NaN Inf 1 0 0 -1 -Inf NaN Inf 1 0 0 -1 -Inf NaN Inf 1 0 0 -1 -Inf NaN Inf NaN NaN NaN NaN -Inf NaN Inf NaN NaN NaN NaN -Inf NaN] (-0 at 25 32)
+single 1x49 [-Inf -Inf -Inf -Inf -Inf -Inf -Inf NaN -1 -1 -1 -1 NaN NaN NaN 0 0 0 0 NaN NaN NaN 0 0 0 0 NaN NaN NaN 1 1 1 1 NaN NaN Inf Inf Inf Inf Inf Inf Inf NaN NaN NaN NaN NaN NaN NaN] (-0 at 18 19)
+single 1x49 [Inf NaN NaN NaN NaN -Inf NaN Inf 1 0 0 -1 -Inf NaN Inf 1 0 0 -1 -Inf NaN Inf 1 0 0 -1 -Inf NaN Inf 1 0 0 -1 -Inf NaN Inf NaN NaN NaN NaN -Inf NaN Inf NaN NaN NaN NaN -Inf NaN] (-0 at 25 32)
 single 3 single
 single 1x49 [NaN NaN -Inf -Inf -Inf -Inf -Inf NaN NaN -Inf -Inf -Inf -Inf -Inf Inf Inf NaN NaN -Inf -Inf NaN Inf Inf NaN NaN -Inf -Inf NaN Inf Inf Inf Inf NaN NaN Inf Inf Inf Inf Inf NaN NaN Inf Inf Inf NaN NaN -Inf -Inf NaN]
 single 1x49 [Inf Inf Inf Inf NaN NaN Inf Inf Inf Inf Inf NaN NaN Inf Inf Inf NaN NaN -Inf -Inf NaN Inf Inf NaN NaN -Inf -Inf NaN NaN NaN -Inf -Inf -Inf -Inf -Inf NaN NaN -Inf -Inf -Inf -Inf -Inf Inf Inf NaN NaN -Inf -Inf NaN]
@@ -609,56 +609,56 @@ single 1x49 [-Inf -Inf -Inf -Inf -Inf -Inf -Inf NaN -Inf -Inf -Inf -Inf NaN -Inf
 single 1x49 [Inf NaN NaN NaN NaN -Inf NaN Inf Inf NaN NaN -Inf -Inf NaN Inf Inf NaN NaN -Inf -Inf NaN Inf Inf NaN NaN -Inf -Inf NaN Inf Inf NaN NaN -Inf -Inf NaN Inf NaN NaN NaN NaN -Inf NaN Inf Inf NaN NaN -Inf -Inf NaN]
 single 1x49 [Inf NaN NaN NaN NaN -Inf NaN Inf Inf NaN NaN -Inf -Inf NaN Inf Inf NaN NaN -Inf -Inf NaN Inf Inf NaN NaN -Inf -Inf NaN Inf Inf NaN NaN -Inf -Inf NaN Inf NaN NaN NaN NaN -Inf NaN Inf Inf NaN NaN -Inf -Inf NaN]
 single 1x49 [Inf Inf Inf Inf Inf Inf Inf NaN Inf Inf Inf Inf NaN Inf NaN NaN NaN NaN NaN NaN NaN NaN NaN NaN NaN NaN NaN NaN NaN -Inf -Inf -Inf -Inf NaN -Inf -Inf -Inf -Inf -Inf -Inf -Inf -Inf NaN NaN NaN NaN NaN NaN NaN]
-single 1x49 [NaN -Inf -Inf -Inf -Inf -Inf -Inf Inf 0 -1 -1 -2 -Inf NaN Inf 1 0 -0 -1 -Inf NaN Inf 1 0 0 -1 -Inf NaN Inf 2 1 1 0 -Inf NaN Inf Inf Inf Inf Inf NaN Inf Inf NaN NaN NaN NaN -Inf NaN]
-single 1x49 [Inf Inf Inf Inf Inf NaN Inf Inf 2 1 1 0 -Inf NaN Inf 1 0 0 -1 -Inf NaN Inf 1 0 -0 -1 -Inf NaN Inf 0 -1 -1 -2 -Inf NaN NaN -Inf -Inf -Inf -Inf -Inf -Inf Inf NaN NaN NaN NaN -Inf NaN]
-single 1x49 [-Inf -Inf -Inf -Inf -Inf -Inf -Inf NaN -1 -1 -1 -1 NaN NaN NaN -0 -0 0 0 NaN NaN NaN 0 0 0 0 NaN NaN NaN 1 1 1 1 NaN NaN Inf Inf Inf Inf Inf Inf Inf NaN NaN NaN NaN NaN NaN NaN]
-single 1x49 [Inf NaN NaN NaN NaN -Inf NaN Inf 1 0 -0 -1 -Inf NaN Inf 1 0 -0 -1 -Inf NaN Inf 1 0 0 -1 -Inf NaN Inf 1 0 0 -1 -Inf NaN Inf NaN NaN NaN NaN -Inf NaN Inf NaN NaN NaN NaN -Inf NaN]
-single 1x49 [-Inf -Inf -Inf -Inf -Inf -Inf -Inf NaN -1 -1 -1 -1 NaN NaN NaN -0 -0 0 0 NaN NaN NaN 0 0 0 0 NaN NaN NaN 1 1 1 1 NaN NaN Inf Inf Inf Inf Inf Inf Inf NaN NaN NaN NaN NaN NaN NaN]
-single 1x49 [Inf NaN NaN NaN NaN -Inf NaN Inf 1 0 -0 -1 -Inf NaN Inf 1 0 -0 -1 -Inf NaN Inf 1 0 0 -1 -Inf NaN Inf 1 0 0 -1 -Inf NaN Inf NaN NaN NaN NaN -Inf NaN Inf NaN NaN NaN NaN -Inf NaN]
-single 1x49 [-Inf -Inf -Inf -Inf -Inf NaN -Inf -Inf -2 -1 -1 0 Inf NaN -Inf -1 -0 0 1 Inf NaN -Inf -1 0 0 1 Inf NaN -Inf 0 1 1 2 Inf NaN NaN Inf Inf Inf Inf Inf Inf -Inf NaN NaN NaN NaN Inf NaN]
-single 1x49 [NaN -Inf -Inf -Inf -Inf -Inf -Inf Inf 0 -1 -1 -2 -Inf NaN Inf 1 0 -0 -1 -Inf NaN Inf 1 0 0 -1 -Inf NaN Inf 2 1 1 0 -Inf NaN Inf Inf Inf Inf Inf NaN Inf Inf NaN NaN NaN NaN -Inf NaN]
+single 1x49 [NaN -Inf -Inf -Inf -Inf -Inf -Inf Inf 0 -1 -1 -2 -Inf NaN Inf 1 0 0 -1 -Inf NaN Inf 1 0 0 -1 -Inf NaN Inf 2 1 1 0 -Inf NaN Inf Inf Inf Inf Inf NaN Inf Inf NaN NaN NaN NaN -Inf NaN] (-0 at 18)
+single 1x49 [Inf Inf Inf Inf Inf NaN Inf Inf 2 1 1 0 -Inf NaN Inf 1 0 0 -1 -Inf NaN Inf 1 0 0 -1 -Inf NaN Inf 0 -1 -1 -2 -Inf NaN NaN -Inf -Inf -Inf -Inf -Inf -Inf Inf NaN NaN NaN NaN -Inf NaN] (-0 at 25)
+single 1x49 [-Inf -Inf -Inf -Inf -Inf -Inf -Inf NaN -1 -1 -1 -1 NaN NaN NaN 0 0 0 0 NaN NaN NaN 0 0 0 0 NaN NaN NaN 1 1 1 1 NaN NaN Inf Inf Inf Inf Inf Inf Inf NaN NaN NaN NaN NaN NaN NaN] (-0 at 16 17)
+single 1x49 [Inf NaN NaN NaN NaN -Inf NaN Inf 1 0 0 -1 -Inf NaN Inf 1 0 0 -1 -Inf NaN Inf 1 0 0 -1 -Inf NaN Inf 1 0 0 -1 -Inf NaN Inf NaN NaN NaN NaN -Inf NaN Inf NaN NaN NaN NaN -Inf NaN] (-0 at 11 18)
+single 1x49 [-Inf -Inf -Inf -Inf -Inf -Inf -Inf NaN -1 -1 -1 -1 NaN NaN NaN 0 0 0 0 NaN NaN NaN 0 0 0 0 NaN NaN NaN 1 1 1 1 NaN NaN Inf Inf Inf Inf Inf Inf Inf NaN NaN NaN NaN NaN NaN NaN] (-0 at 16 17)
+single 1x49 [Inf NaN NaN NaN NaN -Inf NaN Inf 1 0 0 -1 -Inf NaN Inf 1 0 0 -1 -Inf NaN Inf 1 0 0 -1 -Inf NaN Inf 1 0 0 -1 -Inf NaN Inf NaN NaN NaN NaN -Inf NaN Inf NaN NaN NaN NaN -Inf NaN] (-0 at 11 18)
+single 1x49 [-Inf -Inf -Inf -Inf -Inf NaN -Inf -Inf -2 -1 -1 0 Inf NaN -Inf -1 0 0 1 Inf NaN -Inf -1 0 0 1 Inf NaN -Inf 0 1 1 2 Inf NaN NaN Inf Inf Inf Inf Inf Inf -Inf NaN NaN NaN NaN Inf NaN] (-0 at 17)
+single 1x49 [NaN -Inf -Inf -Inf -Inf -Inf -Inf Inf 0 -1 -1 -2 -Inf NaN Inf 1 0 0 -1 -Inf NaN Inf 1 0 0 -1 -Inf NaN Inf 2 1 1 0 -Inf NaN Inf Inf Inf Inf Inf NaN Inf Inf NaN NaN NaN NaN -Inf NaN] (-0 at 18)
 single 1x49 [-Inf NaN NaN NaN NaN Inf NaN -Inf -Inf NaN NaN Inf Inf NaN -Inf -Inf NaN NaN Inf Inf NaN -Inf -Inf NaN NaN Inf Inf NaN -Inf -Inf NaN NaN Inf Inf NaN -Inf NaN NaN NaN NaN Inf NaN -Inf -Inf NaN NaN Inf Inf NaN]
 single 1x49 [-Inf -Inf -Inf -Inf -Inf -Inf -Inf NaN -Inf -Inf -Inf -Inf NaN -Inf NaN NaN NaN NaN NaN NaN NaN NaN NaN NaN NaN NaN NaN NaN NaN Inf Inf Inf Inf NaN Inf Inf Inf Inf Inf Inf Inf Inf NaN NaN NaN NaN NaN NaN NaN]
 single 1x49 [NaN NaN NaN NaN NaN NaN NaN NaN NaN NaN NaN NaN NaN NaN NaN NaN NaN NaN NaN NaN NaN NaN NaN NaN NaN NaN NaN NaN NaN NaN NaN NaN NaN NaN NaN NaN NaN NaN NaN NaN NaN NaN NaN NaN NaN NaN NaN NaN NaN]
 single 1x49 [NaN NaN NaN NaN NaN NaN NaN NaN NaN NaN NaN NaN NaN NaN NaN NaN NaN NaN NaN NaN NaN NaN NaN NaN NaN NaN NaN NaN NaN NaN NaN NaN NaN NaN NaN NaN NaN NaN NaN NaN NaN NaN NaN NaN NaN NaN NaN NaN NaN]
 single 1x49 [Inf NaN NaN NaN NaN -Inf NaN Inf Inf NaN NaN -Inf -Inf NaN Inf Inf NaN NaN -Inf -Inf NaN Inf Inf NaN NaN -Inf -Inf NaN Inf Inf NaN NaN -Inf -Inf NaN Inf NaN NaN NaN NaN -Inf NaN Inf Inf NaN NaN -Inf -Inf NaN]
 single 1x49 [Inf Inf Inf Inf Inf Inf Inf NaN Inf Inf Inf Inf NaN Inf NaN NaN NaN NaN NaN NaN NaN NaN NaN NaN NaN NaN NaN NaN NaN -Inf -Inf -Inf -Inf NaN -Inf -Inf -Inf -Inf -Inf -Inf -Inf -Inf NaN NaN NaN NaN NaN NaN NaN]
-single 1x49 [Inf NaN NaN NaN NaN -Inf NaN Inf 1 0 -0 -1 -Inf NaN Inf 1 0 -0 -1 -Inf NaN Inf 1 0 0 -1 -Inf NaN Inf 1 0 0 -1 -Inf NaN Inf NaN NaN NaN NaN -Inf NaN Inf NaN NaN NaN NaN -Inf NaN]
-single 1x49 [Inf Inf Inf Inf Inf Inf Inf NaN 1 1 1 1 NaN NaN NaN 0 0 0 0 NaN NaN NaN 0 0 -0 -0 NaN NaN NaN -1 -1 -1 -1 NaN NaN -Inf -Inf -Inf -Inf -Inf -Inf -Inf NaN NaN NaN NaN NaN NaN NaN]
-single 1x49 [NaN NaN NaN NaN NaN NaN NaN NaN -0 -0 0 0 NaN NaN NaN -0 -0 0 0 NaN NaN NaN 0 0 0 0 NaN NaN NaN 0 0 0 0 NaN NaN NaN NaN NaN NaN NaN NaN NaN NaN NaN NaN NaN NaN NaN NaN]
-single 1x49 [NaN NaN NaN NaN NaN NaN NaN NaN 0 0 -0 -0 NaN NaN NaN 0 0 -0 -0 NaN NaN NaN 0 0 0 0 NaN NaN NaN 0 0 0 0 NaN NaN NaN NaN NaN NaN NaN NaN NaN NaN NaN NaN NaN NaN NaN NaN]
-single 1x49 [NaN NaN NaN NaN NaN NaN NaN NaN 0 0 0 0 NaN NaN NaN 0 0 0 0 NaN NaN NaN -0 -0 0 0 NaN NaN NaN -0 -0 0 0 NaN NaN NaN NaN NaN NaN NaN NaN NaN NaN NaN NaN NaN NaN NaN NaN]
-single 1x49 [NaN NaN NaN NaN NaN NaN NaN NaN -0 -0 0 0 NaN NaN NaN -0 -0 0 0 NaN NaN NaN 0 0 0 0 NaN NaN NaN 0 0 0 0 NaN NaN NaN NaN NaN NaN NaN NaN NaN NaN NaN NaN NaN NaN NaN NaN]
-single 1x49 [-Inf NaN NaN NaN NaN Inf NaN -Inf -1 0 0 1 Inf NaN -Inf -1 0 0 1 Inf NaN -Inf -1 -0 0 1 Inf NaN -Inf -1 -0 0 1 Inf NaN -Inf NaN NaN NaN NaN Inf NaN -Inf NaN NaN NaN NaN Inf NaN]
-single 1x49 [-Inf -Inf -Inf -Inf -Inf -Inf -Inf NaN -1 -1 -1 -1 NaN NaN NaN -0 -0 0 0 NaN NaN NaN 0 0 0 0 NaN NaN NaN 1 1 1 1 NaN NaN Inf Inf Inf Inf Inf Inf Inf NaN NaN NaN NaN NaN NaN NaN]
+single 1x49 [Inf NaN NaN NaN NaN -Inf NaN Inf 1 0 0 -1 -Inf NaN Inf 1 0 0 -1 -Inf NaN Inf 1 0 0 -1 -Inf NaN Inf 1 0 0 -1 -Inf NaN Inf NaN NaN NaN NaN -Inf NaN Inf NaN NaN NaN NaN -Inf NaN] (-0 at 11 18)
+single 1x49 [Inf Inf Inf Inf Inf Inf Inf NaN 1 1 1 1 NaN NaN NaN 0 0 0 0 NaN NaN NaN 0 0 0 0 NaN NaN NaN -1 -1 -1 -1 NaN NaN -Inf -Inf -Inf -Inf -Inf -Inf -Inf NaN NaN NaN NaN NaN NaN NaN] (-0 at 25 26)
+single 1x49 [NaN NaN NaN NaN NaN NaN NaN NaN 0 0 0 0 NaN NaN NaN 0 0 0 0 NaN NaN NaN 0 0 0 0 NaN NaN NaN 0 0 0 0 NaN NaN NaN NaN NaN NaN NaN NaN NaN NaN NaN NaN NaN NaN NaN NaN] (-0 at 9 10 16 17)
+single 1x49 [NaN NaN NaN NaN NaN NaN NaN NaN 0 0 0 0 NaN NaN NaN 0 0 0 0 NaN NaN NaN 0 0 0 0 NaN NaN NaN 0 0 0 0 NaN NaN NaN NaN NaN NaN NaN NaN NaN NaN NaN NaN NaN NaN NaN NaN] (-0 at 11 12 18 19)
+single 1x49 [NaN NaN NaN NaN NaN NaN NaN NaN 0 0 0 0 NaN NaN NaN 0 0 0 0 NaN NaN NaN 0 0 0 0 NaN NaN NaN 0 0 0 0 NaN NaN NaN NaN NaN NaN NaN NaN NaN NaN NaN NaN NaN NaN NaN NaN] (-0 at 23 24 30 31)
+single 1x49 [NaN NaN NaN NaN NaN NaN NaN NaN 0 0 0 0 NaN NaN NaN 0 0 0 0 NaN NaN NaN 0 0 0 0 NaN NaN NaN 0 0 0 0 NaN NaN NaN NaN NaN NaN NaN NaN NaN NaN NaN NaN NaN NaN NaN NaN] (-0 at 9 10 16 17)
+single 1x49 [-Inf NaN NaN NaN NaN Inf NaN -Inf -1 0 0 1 Inf NaN -Inf -1 0 0 1 Inf NaN -Inf -1 0 0 1 Inf NaN -Inf -1 0 0 1 Inf NaN -Inf NaN NaN NaN NaN Inf NaN -Inf NaN NaN NaN NaN Inf NaN] (-0 at 24 31)
+single 1x49 [-Inf -Inf -Inf -Inf -Inf -Inf -Inf NaN -1 -1 -1 -1 NaN NaN NaN 0 0 0 0 NaN NaN NaN 0 0 0 0 NaN NaN NaN 1 1 1 1 NaN NaN Inf Inf Inf Inf Inf Inf Inf NaN NaN NaN NaN NaN NaN NaN] (-0 at 16 17)
 single 1x49 [-Inf NaN NaN NaN NaN Inf NaN -Inf -Inf NaN NaN Inf Inf NaN -Inf -Inf NaN NaN Inf Inf NaN -Inf -Inf NaN NaN Inf Inf NaN -Inf -Inf NaN NaN Inf Inf NaN -Inf NaN NaN NaN NaN Inf NaN -Inf -Inf NaN NaN Inf Inf NaN]
 single 1x49 [-Inf -Inf -Inf -Inf -Inf -Inf -Inf NaN -Inf -Inf -Inf -Inf NaN -Inf NaN NaN NaN NaN NaN NaN NaN NaN NaN NaN NaN NaN NaN NaN NaN Inf Inf Inf Inf NaN Inf Inf Inf Inf Inf Inf Inf Inf NaN NaN NaN NaN NaN NaN NaN]
 single 1x49 [NaN NaN NaN NaN NaN NaN NaN NaN NaN NaN NaN NaN NaN NaN NaN NaN NaN NaN NaN NaN NaN NaN NaN NaN NaN NaN NaN NaN NaN NaN NaN NaN NaN NaN NaN NaN NaN NaN NaN NaN NaN NaN NaN NaN NaN NaN NaN NaN NaN]
 single 1x49 [NaN NaN NaN NaN NaN NaN NaN NaN NaN NaN NaN NaN NaN NaN NaN NaN NaN NaN NaN NaN NaN NaN NaN NaN NaN NaN NaN NaN NaN NaN NaN NaN NaN NaN NaN NaN NaN NaN NaN NaN NaN NaN NaN NaN NaN NaN NaN NaN NaN]
 single 1x49 [Inf NaN NaN NaN NaN -Inf NaN Inf Inf NaN NaN -Inf -Inf NaN Inf Inf NaN NaN -Inf -Inf NaN Inf Inf NaN NaN -Inf -Inf NaN Inf Inf NaN NaN -Inf -Inf NaN Inf NaN NaN NaN NaN -Inf NaN Inf Inf NaN NaN -Inf -Inf NaN]
 single 1x49 [Inf Inf Inf Inf Inf Inf Inf NaN Inf Inf Inf Inf NaN Inf NaN NaN NaN NaN NaN NaN NaN NaN NaN NaN NaN NaN NaN NaN NaN -Inf -Inf -Inf -Inf NaN -Inf -Inf -Inf -Inf -Inf -Inf -Inf -Inf NaN NaN NaN NaN NaN NaN NaN]
-single 1x49 [Inf NaN NaN NaN NaN -Inf NaN Inf 1 0 0 -1 -Inf NaN Inf 1 0 0 -1 -Inf NaN Inf 1 0 -0 -1 -Inf NaN Inf 1 0 -0 -1 -Inf NaN Inf NaN NaN NaN NaN -Inf NaN Inf NaN NaN NaN NaN -Inf NaN]
-single 1x49 [Inf Inf Inf Inf Inf Inf Inf NaN 1 1 1 1 NaN NaN NaN 0 0 0 0 NaN NaN NaN -0 -0 0 0 NaN NaN NaN -1 -1 -1 -1 NaN NaN -Inf -Inf -Inf -Inf -Inf -Inf -Inf NaN NaN NaN NaN NaN NaN NaN]
-single 1x49 [NaN NaN NaN NaN NaN NaN NaN NaN 0 0 0 0 NaN NaN NaN 0 0 0 0 NaN NaN NaN 0 0 -0 -0 NaN NaN NaN 0 0 -0 -0 NaN NaN NaN NaN NaN NaN NaN NaN NaN NaN NaN NaN NaN NaN NaN NaN]
-single 1x49 [NaN NaN NaN NaN NaN NaN NaN NaN 0 0 0 0 NaN NaN NaN 0 0 0 0 NaN NaN NaN -0 -0 0 0 NaN NaN NaN -0 -0 0 0 NaN NaN NaN NaN NaN NaN NaN NaN NaN NaN NaN NaN NaN NaN NaN NaN]
-single 1x49 [NaN NaN NaN NaN NaN NaN NaN NaN 0 0 0 0 NaN NaN NaN 0 0 0 0 NaN NaN NaN -0 -0 0 0 NaN NaN NaN -0 -0 0 0 NaN NaN NaN NaN NaN NaN NaN NaN NaN NaN NaN NaN NaN NaN NaN NaN]
-single 1x49 [NaN NaN NaN NaN NaN NaN NaN NaN -0 -0 0 0 NaN NaN NaN -0 -0 0 0 NaN NaN NaN 0 0 0 0 NaN NaN NaN 0 0 0 0 NaN NaN NaN NaN NaN NaN NaN NaN NaN NaN NaN NaN NaN NaN NaN NaN]
-single 1x49 [-Inf NaN NaN NaN NaN Inf NaN -Inf -1 0 0 1 Inf NaN -Inf -1 0 0 1 Inf NaN -Inf -1 -0 0 1 Inf NaN -Inf -1 -0 0 1 Inf NaN -Inf NaN NaN NaN NaN Inf NaN -Inf NaN NaN NaN NaN Inf NaN]
-single 1x49 [-Inf -Inf -Inf -Inf -Inf -Inf -Inf NaN -1 -1 -1 -1 NaN NaN NaN -0 -0 0 0 NaN NaN NaN 0 0 0 0 NaN NaN NaN 1 1 1 1 NaN NaN Inf Inf Inf Inf Inf Inf Inf NaN NaN NaN NaN NaN NaN NaN]
+single 1x49 [Inf NaN NaN NaN NaN -Inf NaN Inf 1 0 0 -1 -Inf NaN Inf 1 0 0 -1 -Inf NaN Inf 1 0 0 -1 -Inf NaN Inf 1 0 0 -1 -Inf NaN Inf NaN NaN NaN NaN -Inf NaN Inf NaN NaN NaN NaN -Inf NaN] (-0 at 25 32)
+single 1x49 [Inf Inf Inf Inf Inf Inf Inf NaN 1 1 1 1 NaN NaN NaN 0 0 0 0 NaN NaN NaN 0 0 0 0 NaN NaN NaN -1 -1 -1 -1 NaN NaN -Inf -Inf -Inf -Inf -Inf -Inf -Inf NaN NaN NaN NaN NaN NaN NaN] (-0 at 23 24)
+single 1x49 [NaN NaN NaN NaN NaN NaN NaN NaN 0 0 0 0 NaN NaN NaN 0 0 0 0 NaN NaN NaN 0 0 0 0 NaN NaN NaN 0 0 0 0 NaN NaN NaN NaN NaN NaN NaN NaN NaN NaN NaN NaN NaN NaN NaN NaN] (-0 at 25 26 32 33)
+single 1x49 [NaN NaN NaN NaN NaN NaN NaN NaN 0 0 0 0 NaN NaN NaN 0 0 0 0 NaN NaN NaN 0 0 0 0 NaN NaN NaN 0 0 0 0 NaN NaN NaN NaN NaN NaN NaN NaN NaN NaN NaN NaN NaN NaN NaN NaN] (-0 at 23 24 30 31)
+single 1x49 [NaN NaN NaN NaN NaN NaN NaN NaN 0 0 0 0 NaN NaN NaN 0 0 0 0 NaN NaN NaN 0 0 0 0 NaN NaN NaN 0 0 0 0 NaN NaN NaN NaN NaN NaN NaN NaN NaN NaN NaN NaN NaN NaN NaN NaN] (-0 at 23 24 30 31)
+single 1x49 [NaN NaN NaN NaN NaN NaN NaN NaN 0 0 0 0 NaN NaN NaN 0 0 0 0 NaN NaN NaN 0 0 0 0 NaN NaN NaN 0 0 0 0 NaN NaN NaN NaN NaN NaN NaN NaN NaN NaN NaN NaN NaN NaN NaN NaN] (-0 at 9 10 16 17)
+single 1x49 [-Inf NaN NaN NaN NaN Inf NaN -Inf -1 0 0 1 Inf NaN -Inf -1 0 0 1 Inf NaN -Inf -1 0 0 1 Inf NaN -Inf -1 0 0 1 Inf NaN -Inf NaN NaN NaN NaN Inf NaN -Inf NaN NaN NaN NaN Inf NaN] (-0 at 24 31)
+single 1x49 [-Inf -Inf -Inf -Inf -Inf -Inf -Inf NaN -1 -1 -1 -1 NaN NaN NaN 0 0 0 0 NaN NaN NaN 0 0 0 0 NaN NaN NaN 1 1 1 1 NaN NaN Inf Inf Inf Inf Inf Inf Inf NaN NaN NaN NaN NaN NaN NaN] (-0 at 16 17)
 single 1x49 [-Inf NaN NaN NaN NaN Inf NaN -Inf -Inf NaN NaN Inf Inf NaN -Inf -Inf NaN NaN Inf Inf NaN -Inf -Inf NaN NaN Inf Inf NaN -Inf -Inf NaN NaN Inf Inf NaN -Inf NaN NaN NaN NaN Inf NaN -Inf -Inf NaN NaN Inf Inf NaN]
 single 1x49 [-Inf -Inf -Inf -Inf -Inf -Inf -Inf NaN -Inf -Inf -Inf -Inf NaN -Inf NaN NaN NaN NaN NaN NaN NaN NaN NaN NaN NaN NaN NaN NaN NaN Inf Inf Inf Inf NaN Inf Inf Inf Inf Inf Inf Inf Inf NaN NaN NaN NaN NaN NaN NaN]
 single 1x49 [NaN NaN NaN NaN NaN NaN NaN NaN NaN NaN NaN NaN NaN NaN NaN NaN NaN NaN NaN NaN NaN NaN NaN NaN NaN NaN NaN NaN NaN NaN NaN NaN NaN NaN NaN NaN NaN NaN NaN NaN NaN NaN NaN NaN NaN NaN NaN NaN NaN]
 single 1x49 [NaN NaN NaN NaN NaN NaN NaN NaN NaN NaN NaN NaN NaN NaN NaN NaN NaN NaN NaN NaN NaN NaN NaN NaN NaN NaN NaN NaN NaN NaN NaN NaN NaN NaN NaN NaN NaN NaN NaN NaN NaN NaN NaN NaN NaN NaN NaN NaN NaN]
 single 1x49 [Inf NaN NaN NaN NaN -Inf NaN Inf Inf NaN NaN -Inf -Inf NaN Inf Inf NaN NaN -Inf -Inf NaN Inf Inf NaN NaN -Inf -Inf NaN Inf Inf NaN NaN -Inf -Inf NaN Inf NaN NaN NaN NaN -Inf NaN Inf Inf NaN NaN -Inf -Inf NaN]
 single 1x49 [Inf Inf Inf Inf Inf Inf Inf NaN Inf Inf Inf Inf NaN Inf NaN NaN NaN NaN NaN NaN NaN NaN NaN NaN NaN NaN NaN NaN NaN -Inf -Inf -Inf -Inf NaN -Inf -Inf -Inf -Inf -Inf -Inf -Inf -Inf NaN NaN NaN NaN NaN NaN NaN]
-single 1x49 [Inf Inf Inf Inf Inf NaN Inf Inf 2 1 1 0 -Inf NaN Inf 1 0 0 -1 -Inf NaN Inf 1 0 -0 -1 -Inf NaN Inf 0 -1 -1 -2 -Inf NaN NaN -Inf -Inf -Inf -Inf -Inf -Inf Inf NaN NaN NaN NaN -Inf NaN]
-single 1x49 [NaN Inf Inf Inf Inf Inf Inf -Inf 0 1 1 2 Inf NaN -Inf -1 0 0 1 Inf NaN -Inf -1 -0 0 1 Inf NaN -Inf -2 -1 -1 0 Inf NaN -Inf -Inf -Inf -Inf -Inf NaN -Inf -Inf NaN NaN NaN NaN Inf NaN]
-single 1x49 [Inf Inf Inf Inf Inf Inf Inf NaN 1 1 1 1 NaN NaN NaN 0 0 0 0 NaN NaN NaN 0 0 -0 -0 NaN NaN NaN -1 -1 -1 -1 NaN NaN -Inf -Inf -Inf -Inf -Inf -Inf -Inf NaN NaN NaN NaN NaN NaN NaN]
-single 1x49 [-Inf NaN NaN NaN NaN Inf NaN -Inf -1 0 0 1 Inf NaN -Inf -1 0 0 1 Inf NaN -Inf -1 -0 0 1 Inf NaN -Inf -1 -0 0 1 Inf NaN -Inf NaN NaN NaN NaN Inf NaN -Inf NaN NaN NaN NaN Inf NaN]
-single 1x49 [Inf Inf Inf Inf Inf Inf Inf NaN 1 1 1 1 NaN NaN NaN 0 0 0 0 NaN NaN NaN -0 -0 0 0 NaN NaN NaN -1 -1 -1 -1 NaN NaN -Inf -Inf -Inf -Inf -Inf -Inf -Inf NaN NaN NaN NaN NaN NaN NaN]
-single 1x49 [-Inf NaN NaN NaN NaN Inf NaN -Inf -1 -0 0 1 Inf NaN -Inf -1 -0 0 1 Inf NaN -Inf -1 0 0 1 Inf NaN -Inf -1 0 0 1 Inf NaN -Inf NaN NaN NaN NaN Inf NaN -Inf NaN NaN NaN NaN Inf NaN]
-single 1x49 [NaN Inf Inf Inf Inf Inf Inf -Inf 0 1 1 2 Inf NaN -Inf -1 0 0 1 Inf NaN -Inf -1 -0 0 1 Inf NaN -Inf -2 -1 -1 0 Inf NaN -Inf -Inf -Inf -Inf -Inf NaN -Inf -Inf NaN NaN NaN NaN Inf NaN]
-single 1x49 [-Inf -Inf -Inf -Inf -Inf NaN -Inf -Inf -2 -1 -1 0 Inf NaN -Inf -1 -0 0 1 Inf NaN -Inf -1 0 0 1 Inf NaN -Inf 0 1 1 2 Inf NaN NaN Inf Inf Inf Inf Inf Inf -Inf NaN NaN NaN NaN Inf NaN]
+single 1x49 [Inf Inf Inf Inf Inf NaN Inf Inf 2 1 1 0 -Inf NaN Inf 1 0 0 -1 -Inf NaN Inf 1 0 0 -1 -Inf NaN Inf 0 -1 -1 -2 -Inf NaN NaN -Inf -Inf -Inf -Inf -Inf -Inf Inf NaN NaN NaN NaN -Inf NaN] (-0 at 25)
+single 1x49 [NaN Inf Inf Inf Inf Inf Inf -Inf 0 1 1 2 Inf NaN -Inf -1 0 0 1 Inf NaN -Inf -1 0 0 1 Inf NaN -Inf -2 -1 -1 0 Inf NaN -Inf -Inf -Inf -Inf -Inf NaN -Inf -Inf NaN NaN NaN NaN Inf NaN] (-0 at 24)
+single 1x49 [Inf Inf Inf Inf Inf Inf Inf NaN 1 1 1 1 NaN NaN NaN 0 0 0 0 NaN NaN NaN 0 0 0 0 NaN NaN NaN -1 -1 -1 -1 NaN NaN -Inf -Inf -Inf -Inf -Inf -Inf -Inf NaN NaN NaN NaN NaN NaN NaN] (-0 at 25 26)
+single 1x49 [-Inf NaN NaN NaN NaN Inf NaN -Inf -1 0 0 1 Inf NaN -Inf -1 0 0 1 Inf NaN -Inf -1 0 0 1 Inf NaN -Inf -1 0 0 1 Inf NaN -Inf NaN NaN NaN NaN Inf NaN -Inf NaN NaN NaN NaN Inf NaN] (-0 at 24 31)
+single 1x49 [Inf Inf Inf Inf Inf Inf Inf NaN 1 1 1 1 NaN NaN NaN 0 0 0 0 NaN NaN NaN 0 0 0 0 NaN NaN NaN -1 -1 -1 -1 NaN NaN -Inf -Inf -Inf -Inf -Inf -Inf -Inf NaN NaN NaN NaN NaN NaN NaN] (-0 at 23 24)
+single 1x49 [-Inf NaN NaN NaN NaN Inf NaN -Inf -1 0 0 1 Inf NaN -Inf -1 0 0 1 Inf NaN -Inf -1 0 0 1 Inf NaN -Inf -1 0 0 1 Inf NaN -Inf NaN NaN NaN NaN Inf NaN -Inf NaN NaN NaN NaN Inf NaN] (-0 at 10 17)
+single 1x49 [NaN Inf Inf Inf Inf Inf Inf -Inf 0 1 1 2 Inf NaN -Inf -1 0 0 1 Inf NaN -Inf -1 0 0 1 Inf NaN -Inf -2 -1 -1 0 Inf NaN -Inf -Inf -Inf -Inf -Inf NaN -Inf -Inf NaN NaN NaN NaN Inf NaN] (-0 at 24)
+single 1x49 [-Inf -Inf -Inf -Inf -Inf NaN -Inf -Inf -2 -1 -1 0 Inf NaN -Inf -1 0 0 1 Inf NaN -Inf -1 0 0 1 Inf NaN -Inf 0 1 1 2 Inf NaN NaN Inf Inf Inf Inf Inf Inf -Inf NaN NaN NaN NaN Inf NaN] (-0 at 17)
 single 1x49 [-Inf NaN NaN NaN NaN Inf NaN -Inf -Inf NaN NaN Inf Inf NaN -Inf -Inf NaN NaN Inf Inf NaN -Inf -Inf NaN NaN Inf Inf NaN -Inf -Inf NaN NaN Inf Inf NaN -Inf NaN NaN NaN NaN Inf NaN -Inf -Inf NaN NaN Inf Inf NaN]
 single 1x49 [-Inf -Inf -Inf -Inf -Inf -Inf -Inf NaN -Inf -Inf -Inf -Inf NaN -Inf NaN NaN NaN NaN NaN NaN NaN NaN NaN NaN NaN NaN NaN NaN NaN Inf Inf Inf Inf NaN Inf Inf Inf Inf Inf Inf Inf Inf NaN NaN NaN NaN NaN NaN NaN]
 single 1x49 [NaN NaN NaN NaN NaN NaN NaN NaN NaN NaN NaN NaN NaN NaN NaN NaN NaN NaN NaN NaN NaN NaN NaN NaN NaN NaN NaN NaN NaN NaN NaN NaN NaN NaN NaN NaN NaN NaN NaN NaN NaN NaN NaN NaN NaN NaN NaN NaN NaN]
@@ -708,56 +708,56 @@ single 1x49 [-Inf -Inf -Inf -Inf -Inf -Inf -Inf NaN -Inf -Inf -Inf -Inf NaN -Inf
 single 1x49 [Inf NaN NaN NaN NaN -Inf NaN Inf Inf NaN NaN -Inf -Inf NaN Inf Inf NaN NaN -Inf -Inf NaN Inf Inf NaN NaN -Inf -Inf NaN Inf Inf NaN NaN -Inf -Inf NaN Inf NaN NaN NaN NaN -Inf NaN Inf Inf NaN NaN -Inf -Inf NaN]
 single 1x49 [NaN NaN NaN NaN -Inf -Inf NaN Inf Inf NaN NaN -Inf -Inf NaN Inf Inf NaN NaN -Inf -Inf NaN Inf Inf NaN NaN -Inf -Inf NaN Inf Inf NaN NaN -Inf -Inf NaN Inf Inf NaN NaN NaN NaN NaN Inf Inf NaN NaN -Inf -Inf NaN]
 single 1x49 [Inf Inf Inf Inf Inf NaN Inf Inf Inf Inf Inf Inf NaN Inf NaN NaN NaN NaN NaN NaN NaN NaN NaN NaN NaN NaN NaN NaN NaN -Inf -Inf -Inf -Inf -Inf -Inf NaN -Inf -Inf -Inf -Inf -Inf -Inf NaN NaN NaN NaN NaN NaN NaN]
-single 1x49 [NaN -Inf -Inf -Inf -Inf -Inf -Inf Inf 0 -1 -1 -2 -Inf NaN Inf 1 0 -0 -1 -Inf NaN Inf 1 0 0 -1 -Inf NaN Inf 2 1 1 0 -Inf NaN Inf Inf Inf Inf Inf NaN Inf Inf NaN NaN NaN NaN -Inf NaN]
-single 1x49 [Inf Inf Inf Inf Inf NaN Inf Inf 2 1 1 0 -Inf NaN Inf 1 0 0 -1 -Inf NaN Inf 1 0 -0 -1 -Inf NaN Inf 0 -1 -1 -2 -Inf NaN NaN -Inf -Inf -Inf -Inf -Inf -Inf Inf NaN NaN NaN NaN -Inf NaN]
-single 1x49 [-Inf -Inf -Inf -Inf -Inf -Inf -Inf NaN -1 -1 -1 -1 NaN NaN NaN 0 0 -0 -0 NaN NaN NaN 0 0 0 0 NaN NaN NaN 1 1 1 1 NaN NaN Inf Inf Inf Inf Inf Inf Inf NaN NaN NaN NaN NaN NaN NaN]
-single 1x49 [Inf NaN NaN NaN NaN -Inf NaN Inf 1 0 0 -1 -Inf NaN Inf 1 0 0 -1 -Inf NaN Inf 1 0 -0 -1 -Inf NaN Inf 1 0 -0 -1 -Inf NaN Inf NaN NaN NaN NaN -Inf NaN Inf NaN NaN NaN NaN -Inf NaN]
-single 1x49 [-Inf -Inf -Inf -Inf -Inf -Inf -Inf NaN -1 -1 -1 -1 NaN NaN NaN -0 -0 0 0 NaN NaN NaN 0 0 0 0 NaN NaN NaN 1 1 1 1 NaN NaN Inf Inf Inf Inf Inf Inf Inf NaN NaN NaN NaN NaN NaN NaN]
-single 1x49 [Inf NaN NaN NaN NaN -Inf NaN Inf 1 0 -0 -1 -Inf NaN Inf 1 0 -0 -1 -Inf NaN Inf 1 0 0 -1 -Inf NaN Inf 1 0 0 -1 -Inf NaN Inf NaN NaN NaN NaN -Inf NaN Inf NaN NaN NaN NaN -Inf NaN]
-single 1x49 [-Inf -Inf -Inf -Inf -Inf NaN -Inf -Inf -2 -1 -1 0 Inf NaN -Inf -1 -0 0 1 Inf NaN -Inf -1 0 0 1 Inf NaN -Inf 0 1 1 2 Inf NaN NaN Inf Inf Inf Inf Inf Inf -Inf NaN NaN NaN NaN Inf NaN]
-single 1x49 [NaN -Inf -Inf -Inf -Inf -Inf -Inf Inf 0 -1 -1 -2 -Inf NaN Inf 1 0 -0 -1 -Inf NaN Inf 1 0 0 -1 -Inf NaN Inf 2 1 1 0 -Inf NaN Inf Inf Inf Inf Inf NaN Inf Inf NaN NaN NaN NaN -Inf NaN]
+single 1x49 [NaN -Inf -Inf -Inf -Inf -Inf -Inf Inf 0 -1 -1 -2 -Inf NaN Inf 1 0 0 -1 -Inf NaN Inf 1 0 0 -1 -Inf NaN Inf 2 1 1 0 -Inf NaN Inf Inf Inf Inf Inf NaN Inf Inf NaN NaN NaN NaN -Inf NaN] (-0 at 18)
+single 1x49 [Inf Inf Inf Inf Inf NaN Inf Inf 2 1 1 0 -Inf NaN Inf 1 0 0 -1 -Inf NaN Inf 1 0 0 -1 -Inf NaN Inf 0 -1 -1 -2 -Inf NaN NaN -Inf -Inf -Inf -Inf -Inf -Inf Inf NaN NaN NaN NaN -Inf NaN] (-0 at 25)
+single 1x49 [-Inf -Inf -Inf -Inf -Inf -Inf -Inf NaN -1 -1 -1 -1 NaN NaN NaN 0 0 0 0 NaN NaN NaN 0 0 0 0 NaN NaN NaN 1 1 1 1 NaN NaN Inf Inf Inf Inf Inf Inf Inf NaN NaN NaN NaN NaN NaN NaN] (-0 at 18 19)
+single 1x49 [Inf NaN NaN NaN NaN -Inf NaN Inf 1 0 0 -1 -Inf NaN Inf 1 0 0 -1 -Inf NaN Inf 1 0 0 -1 -Inf NaN Inf 1 0 0 -1 -Inf NaN Inf NaN NaN NaN NaN -Inf NaN Inf NaN NaN NaN NaN -Inf NaN] (-0 at 25 32)
+single 1x49 [-Inf -Inf -Inf -Inf -Inf -Inf -Inf NaN -1 -1 -1 -1 NaN NaN NaN 0 0 0 0 NaN NaN NaN 0 0 0 0 NaN NaN NaN 1 1 1 1 NaN NaN Inf Inf Inf Inf Inf Inf Inf NaN NaN NaN NaN NaN NaN NaN] (-0 at 16 17)
+single 1x49 [Inf NaN NaN NaN NaN -Inf NaN Inf 1 0 0 -1 -Inf NaN Inf 1 0 0 -1 -Inf NaN Inf 1 0 0 -1 -Inf NaN Inf 1 0 0 -1 -Inf NaN Inf NaN NaN NaN NaN -Inf NaN Inf NaN NaN NaN NaN -Inf NaN] (-0 at 11 18)
+single 1x49 [-Inf -Inf -Inf -Inf -Inf NaN -Inf -Inf -2 -1 -1 0 Inf NaN -Inf -1 0 0 1 Inf NaN -Inf -1 0 0 1 Inf NaN -Inf 0 1 1 2 Inf NaN NaN Inf Inf Inf Inf Inf Inf -Inf NaN NaN NaN NaN Inf NaN] (-0 at 17)
+single 1x49 [NaN -Inf -Inf -Inf -Inf -Inf -Inf Inf 0 -1 -1 -2 -Inf NaN Inf 1 0 0 -1 -Inf NaN Inf 1 0 0 -1 -Inf NaN Inf 2 1 1 0 -Inf NaN Inf Inf Inf Inf Inf NaN Inf Inf NaN NaN NaN NaN -Inf NaN] (-0 at 18)
 single 1x49 [-Inf -Inf NaN NaN NaN NaN NaN -Inf -Inf NaN NaN Inf Inf NaN -Inf -Inf NaN NaN Inf Inf NaN -Inf -Inf NaN NaN Inf Inf NaN -Inf -Inf NaN NaN Inf Inf NaN NaN NaN NaN NaN Inf Inf NaN -Inf -Inf NaN NaN Inf Inf NaN]
 single 1x49 [NaN -Inf -Inf -Inf -Inf -Inf -Inf NaN -Inf -Inf -Inf -Inf -Inf -Inf NaN NaN NaN NaN NaN NaN NaN NaN NaN NaN NaN NaN NaN NaN Inf Inf Inf Inf Inf NaN Inf Inf Inf Inf Inf Inf NaN Inf NaN NaN NaN NaN NaN NaN NaN]
 single 1x49 [-Inf -Inf -Inf -Inf -Inf -Inf -Inf NaN NaN NaN NaN NaN NaN NaN NaN NaN NaN NaN NaN NaN NaN NaN NaN NaN NaN NaN NaN NaN NaN NaN NaN NaN NaN NaN NaN Inf Inf Inf Inf Inf Inf Inf NaN NaN NaN NaN NaN NaN NaN]
 single 1x49 [Inf NaN NaN NaN NaN -Inf NaN Inf NaN NaN NaN NaN -Inf NaN Inf NaN NaN NaN NaN -Inf NaN Inf NaN NaN NaN NaN -Inf NaN Inf NaN NaN NaN NaN -Inf NaN Inf NaN NaN NaN NaN -Inf NaN Inf NaN NaN NaN NaN -Inf NaN]
 single 1x49 [Inf NaN NaN NaN NaN -Inf NaN Inf Inf NaN NaN -Inf -Inf NaN Inf Inf NaN NaN -Inf -Inf NaN Inf Inf NaN NaN -Inf -Inf NaN Inf Inf NaN NaN -Inf -Inf NaN Inf NaN NaN NaN NaN -Inf NaN Inf Inf NaN NaN -Inf -Inf NaN]
 single 1x49 [Inf Inf Inf Inf Inf Inf Inf NaN Inf Inf Inf Inf NaN Inf NaN NaN NaN NaN NaN NaN NaN NaN NaN NaN NaN NaN NaN NaN NaN -Inf -Inf -Inf -Inf NaN -Inf -Inf -Inf -Inf -Inf -Inf -Inf -Inf NaN NaN NaN NaN NaN NaN NaN]
-single 1x49 [Inf NaN NaN NaN NaN -Inf NaN Inf 1 0 -0 -1 -Inf NaN Inf 1 0 -0 -1 -Inf NaN Inf 1 0 0 -1 -Inf NaN Inf 1 0 0 -1 -Inf NaN Inf NaN NaN NaN NaN -Inf NaN Inf NaN NaN NaN NaN -Inf NaN]
-single 1x49 [Inf Inf Inf Inf Inf Inf Inf NaN 1 1 1 1 NaN NaN NaN 0 0 0 0 NaN NaN NaN 0 0 -0 -0 NaN NaN NaN -1 -1 -1 -1 NaN NaN -Inf -Inf -Inf -Inf -Inf -Inf -Inf NaN NaN NaN NaN NaN NaN NaN]
-single 1x49 [NaN NaN NaN NaN NaN NaN NaN NaN 0 0 -0 -0 NaN NaN NaN 0 0 -0 -0 NaN NaN NaN 0 0 0 0 NaN NaN NaN 0 0 0 0 NaN NaN NaN NaN NaN NaN NaN NaN NaN NaN NaN NaN NaN NaN NaN NaN]
-single 1x49 [NaN NaN NaN NaN NaN NaN NaN NaN 0 0 0 0 NaN NaN NaN 0 0 0 0 NaN NaN NaN 0 0 -0 -0 NaN NaN NaN 0 0 -0 -0 NaN NaN NaN NaN NaN NaN NaN NaN NaN NaN NaN NaN NaN NaN NaN NaN]
-single 1x49 [NaN NaN NaN NaN NaN NaN NaN NaN -0 -0 0 0 NaN NaN NaN -0 -0 0 0 NaN NaN NaN 0 0 0 0 NaN NaN NaN 0 0 0 0 NaN NaN NaN NaN NaN NaN NaN NaN NaN NaN NaN NaN NaN NaN NaN NaN]
-single 1x49 [NaN NaN NaN NaN NaN NaN NaN NaN 0 0 -0 -0 NaN NaN NaN 0 0 -0 -0 NaN NaN NaN 0 0 0 0 NaN NaN NaN 0 0 0 0 NaN NaN NaN NaN NaN NaN NaN NaN NaN NaN NaN NaN NaN NaN NaN NaN]
-single 1x49 [-Inf NaN NaN NaN NaN Inf NaN -Inf -1 -0 0 1 Inf NaN -Inf -1 -0 0 1 Inf NaN -Inf -1 0 0 1 Inf NaN -Inf -1 0 0 1 Inf NaN -Inf NaN NaN NaN NaN Inf NaN -Inf NaN NaN NaN NaN Inf NaN]
-single 1x49 [-Inf -Inf -Inf -Inf -Inf -Inf -Inf NaN -1 -1 -1 -1 NaN NaN NaN 0 0 -0 -0 NaN NaN NaN 0 0 0 0 NaN NaN NaN 1 1 1 1 NaN NaN Inf Inf Inf Inf Inf Inf Inf NaN NaN NaN NaN NaN NaN NaN]
+single 1x49 [Inf NaN NaN NaN NaN -Inf NaN Inf 1 0 0 -1 -Inf NaN Inf 1 0 0 -1 -Inf NaN Inf 1 0 0 -1 -Inf NaN Inf 1 0 0 -1 -Inf NaN Inf NaN NaN NaN NaN -Inf NaN Inf NaN NaN NaN NaN -Inf NaN] (-0 at 11 18)
+single 1x49 [Inf Inf Inf Inf Inf Inf Inf NaN 1 1 1 1 NaN NaN NaN 0 0 0 0 NaN NaN NaN 0 0 0 0 NaN NaN NaN -1 -1 -1 -1 NaN NaN -Inf -Inf -Inf -Inf -Inf -Inf -Inf NaN NaN NaN NaN NaN NaN NaN] (-0 at 25 26)
+single 1x49 [NaN NaN NaN NaN NaN NaN NaN NaN 0 0 0 0 NaN NaN NaN 0 0 0 0 NaN NaN NaN 0 0 0 0 NaN NaN NaN 0 0 0 0 NaN NaN NaN NaN NaN NaN NaN NaN NaN NaN NaN NaN NaN NaN NaN NaN] (-0 at 11 12 18 19)
+single 1x49 [NaN NaN NaN NaN NaN NaN NaN NaN 0 0 0 0 NaN NaN NaN 0 0 0 0 NaN NaN NaN 0 0 0 0 NaN NaN NaN 0 0 0 0 NaN NaN NaN NaN NaN NaN NaN NaN NaN NaN NaN NaN NaN NaN NaN NaN] (-0 at 25 26 32 33)
+single 1x49 [NaN NaN NaN NaN NaN NaN NaN NaN 0 0 0 0 NaN NaN NaN 0 0 0 0 NaN NaN NaN 0 0 0 0 NaN NaN NaN 0 0 0 0 NaN NaN NaN NaN NaN NaN NaN NaN NaN NaN NaN NaN NaN NaN NaN NaN] (-0 at 9 10 16 17)
+single 1x49 [NaN NaN NaN NaN NaN NaN NaN NaN 0 0 0 0 NaN NaN NaN 0 0 0 0 NaN NaN NaN 0 0 0 0 NaN NaN NaN 0 0 0 0 NaN NaN NaN NaN NaN NaN NaN NaN NaN NaN NaN NaN NaN NaN NaN NaN] (-0 at 11 12 18 19)
+single 1x49 [-Inf NaN NaN NaN NaN Inf NaN -Inf -1 0 0 1 Inf NaN -Inf -1 0 0 1 Inf NaN -Inf -1 0 0 1 Inf NaN -Inf -1 0 0 1 Inf NaN -Inf NaN NaN NaN NaN Inf NaN -Inf NaN NaN NaN NaN Inf NaN] (-0 at 10 17)
+single 1x49 [-Inf -Inf -Inf -Inf -Inf -Inf -Inf NaN -1 -1 -1 -1 NaN NaN NaN 0 0 0 0 NaN NaN NaN 0 0 0 0 NaN NaN NaN 1 1 1 1 NaN NaN Inf Inf Inf Inf Inf Inf Inf NaN NaN NaN NaN NaN NaN NaN] (-0 at 18 19)
 single 1x49 [-Inf NaN NaN NaN NaN Inf NaN -Inf -Inf NaN NaN Inf Inf NaN -Inf -Inf NaN NaN Inf Inf NaN -Inf -Inf NaN NaN Inf Inf NaN -Inf -Inf NaN NaN Inf Inf NaN -Inf NaN NaN NaN NaN Inf NaN -Inf -Inf NaN NaN Inf Inf NaN]
 single 1x49 [-Inf -Inf -Inf -Inf -Inf -Inf -Inf NaN -Inf -Inf -Inf -Inf NaN -Inf NaN NaN NaN NaN NaN NaN NaN NaN NaN NaN NaN NaN NaN NaN NaN Inf Inf Inf Inf NaN Inf Inf Inf Inf Inf Inf Inf Inf NaN NaN NaN NaN NaN NaN NaN]
 single 1x49 [NaN NaN NaN NaN NaN NaN NaN NaN NaN NaN NaN NaN NaN NaN NaN NaN NaN NaN NaN NaN NaN NaN NaN NaN NaN NaN NaN NaN NaN NaN NaN NaN NaN NaN NaN NaN NaN NaN NaN NaN NaN NaN NaN NaN NaN NaN NaN NaN NaN]
 single 1x49 [NaN NaN NaN NaN NaN NaN NaN NaN NaN NaN NaN NaN NaN NaN NaN NaN NaN NaN NaN NaN NaN NaN NaN NaN NaN NaN NaN NaN NaN NaN NaN NaN NaN NaN NaN NaN NaN NaN NaN NaN NaN NaN NaN NaN NaN NaN NaN NaN NaN]
 single 1x49 [Inf NaN NaN NaN NaN -Inf NaN Inf Inf NaN NaN -Inf -Inf NaN Inf Inf NaN NaN -Inf -Inf NaN Inf Inf NaN NaN -Inf -Inf NaN Inf Inf NaN NaN -Inf -Inf NaN Inf NaN NaN NaN NaN -Inf NaN Inf Inf NaN NaN -Inf -Inf NaN]
 single 1x49 [Inf Inf Inf Inf Inf Inf Inf NaN Inf Inf Inf Inf NaN Inf NaN NaN NaN NaN NaN NaN NaN NaN NaN NaN NaN NaN NaN NaN NaN -Inf -Inf -Inf -Inf NaN -Inf -Inf -Inf -Inf -Inf -Inf -Inf -Inf NaN NaN NaN NaN NaN NaN NaN]
-single 1x49 [Inf NaN NaN NaN NaN -Inf NaN Inf 1 0 0 -1 -Inf NaN Inf 1 0 0 -1 -Inf NaN Inf 1 0 -0 -1 -Inf NaN Inf 1 0 -0 -1 -Inf NaN Inf NaN NaN NaN NaN -Inf NaN Inf NaN NaN NaN NaN -Inf NaN]
-single 1x49 [Inf Inf Inf Inf Inf Inf Inf NaN 1 1 1 1 NaN NaN NaN 0 0 0 0 NaN NaN NaN -0 -0 0 0 NaN NaN NaN -1 -1 -1 -1 NaN NaN -Inf -Inf -Inf -Inf -Inf -Inf -Inf NaN NaN NaN NaN NaN NaN NaN]
-single 1x49 [NaN NaN NaN NaN NaN NaN NaN NaN 0 0 0 0 NaN NaN NaN 0 0 0 0 NaN NaN NaN 0 0 -0 -0 NaN NaN NaN 0 0 -0 -0 NaN NaN NaN NaN NaN NaN NaN NaN NaN NaN NaN NaN NaN NaN NaN NaN]
-single 1x49 [NaN NaN NaN NaN NaN NaN NaN NaN 0 0 0 0 NaN NaN NaN 0 0 0 0 NaN NaN NaN -0 -0 0 0 NaN NaN NaN -0 -0 0 0 NaN NaN NaN NaN NaN NaN NaN NaN NaN NaN NaN NaN NaN NaN NaN NaN]
-single 1x49 [NaN NaN NaN NaN NaN NaN NaN NaN 0 0 0 0 NaN NaN NaN 0 0 0 0 NaN NaN NaN -0 -0 0 0 NaN NaN NaN -0 -0 0 0 NaN NaN NaN NaN NaN NaN NaN NaN NaN NaN NaN NaN NaN NaN NaN NaN]
-single 1x49 [NaN NaN NaN NaN NaN NaN NaN NaN -0 -0 0 0 NaN NaN NaN -0 -0 0 0 NaN NaN NaN 0 0 0 0 NaN NaN NaN 0 0 0 0 NaN NaN NaN NaN NaN NaN NaN NaN NaN NaN NaN NaN NaN NaN NaN NaN]
-single 1x49 [-Inf NaN NaN NaN NaN Inf NaN -Inf -1 0 0 1 Inf NaN -Inf -1 0 0 1 Inf NaN -Inf -1 -0 0 1 Inf NaN -Inf -1 -0 0 1 Inf NaN -Inf NaN NaN NaN NaN Inf NaN -Inf NaN NaN NaN NaN Inf NaN]
-single 1x49 [-Inf -Inf -Inf -Inf -Inf -Inf -Inf NaN -1 -1 -1 -1 NaN NaN NaN -0 -0 0 0 NaN NaN NaN 0 0 0 0 NaN NaN NaN 1 1 1 1 NaN NaN Inf Inf Inf Inf Inf Inf Inf NaN NaN NaN NaN NaN NaN NaN]
+single 1x49 [Inf NaN NaN NaN NaN -Inf NaN Inf 1 0 0 -1 -Inf NaN Inf 1 0 0 -1 -Inf NaN Inf 1 0 0 -1 -Inf NaN Inf 1 0 0 -1 -Inf NaN Inf NaN NaN NaN NaN -Inf NaN Inf NaN NaN NaN NaN -Inf NaN] (-0 at 25 32)
+single 1x49 [Inf Inf Inf Inf Inf Inf Inf NaN 1 1 1 1 NaN NaN NaN 0 0 0 0 NaN NaN NaN 0 0 0 0 NaN NaN NaN -1 -1 -1 -1 NaN NaN -Inf -Inf -Inf -Inf -Inf -Inf -Inf NaN NaN NaN NaN NaN NaN NaN] (-0 at 23 24)
+single 1x49 [NaN NaN NaN NaN NaN NaN NaN NaN 0 0 0 0 NaN NaN NaN 0 0 0 0 NaN NaN NaN 0 0 0 0 NaN NaN NaN 0 0 0 0 NaN NaN NaN NaN NaN NaN NaN NaN NaN NaN NaN NaN NaN NaN NaN NaN] (-0 at 25 26 32 33)
+single 1x49 [NaN NaN NaN NaN NaN NaN NaN NaN 0 0 0 0 NaN NaN NaN 0 0 0 0 NaN NaN NaN 0 0 0 0 NaN NaN NaN 0 0 0 0 NaN NaN NaN NaN NaN NaN NaN NaN NaN NaN NaN NaN NaN NaN NaN NaN] (-0 at 23 24 30 31)
+single 1x49 [NaN NaN NaN NaN NaN NaN NaN NaN 0 0 0 0 NaN NaN NaN 0 0 0 0 NaN NaN NaN 0 0 0 0 NaN NaN NaN 0 0 0 0 NaN NaN NaN NaN NaN NaN NaN NaN NaN NaN NaN NaN NaN NaN NaN NaN] (-0 at 23 24 30 31)
+single 1x49 [NaN NaN NaN NaN NaN NaN NaN NaN 0 0 0 0 NaN NaN NaN 0 0 0 0 NaN NaN NaN 0 0 0 0 NaN NaN NaN 0 0 0 0 NaN NaN NaN NaN NaN NaN NaN NaN NaN NaN NaN NaN NaN NaN NaN NaN] (-0 at 9 10 16 17)
+single 1x49 [-Inf NaN NaN NaN NaN Inf NaN -Inf -1 0 0 1 Inf NaN -Inf -1 0 0 1 Inf NaN -Inf -1 0 0 1 Inf NaN -Inf -1 0 0 1 Inf NaN -Inf NaN NaN NaN NaN Inf NaN -Inf NaN NaN NaN NaN Inf NaN] (-0 at 24 31)
+single 1x49 [-Inf -Inf -Inf -Inf -Inf -Inf -Inf NaN -1 -1 -1 -1 NaN NaN NaN 0 0 0 0 NaN NaN NaN 0 0 0 0 NaN NaN NaN 1 1 1 1 NaN NaN Inf Inf Inf Inf Inf Inf Inf NaN NaN NaN NaN NaN NaN NaN] (-0 at 16 17)
 single 1x49 [-Inf NaN NaN NaN NaN Inf NaN -Inf -Inf NaN NaN Inf Inf NaN -Inf -Inf NaN NaN Inf Inf NaN -Inf -Inf NaN NaN Inf Inf NaN -Inf -Inf NaN NaN Inf Inf NaN -Inf NaN NaN NaN NaN Inf NaN -Inf -Inf NaN NaN Inf Inf NaN]
 single 1x49 [-Inf -Inf -Inf -Inf -Inf -Inf -Inf NaN -Inf -Inf -Inf -Inf NaN -Inf NaN NaN NaN NaN NaN NaN NaN NaN NaN NaN NaN NaN NaN NaN NaN Inf Inf Inf Inf NaN Inf Inf Inf Inf Inf Inf Inf Inf NaN NaN NaN NaN NaN NaN NaN]
 single 1x49 [NaN NaN NaN NaN NaN NaN NaN NaN NaN NaN NaN NaN NaN NaN NaN NaN NaN NaN NaN NaN NaN NaN NaN NaN NaN NaN NaN NaN NaN NaN NaN NaN NaN NaN NaN NaN NaN NaN NaN NaN NaN NaN NaN NaN NaN NaN NaN NaN NaN]
 single 1x49 [NaN NaN NaN NaN NaN NaN NaN NaN NaN NaN NaN NaN NaN NaN NaN NaN NaN NaN NaN NaN NaN NaN NaN NaN NaN NaN NaN NaN NaN NaN NaN NaN NaN NaN NaN NaN NaN NaN NaN NaN NaN NaN NaN NaN NaN NaN NaN NaN NaN]
 single 1x49 [Inf Inf NaN NaN NaN NaN NaN Inf Inf NaN NaN -Inf -Inf NaN Inf Inf NaN NaN -Inf -Inf NaN Inf Inf NaN NaN -Inf -Inf NaN Inf Inf NaN NaN -Inf -Inf NaN NaN NaN NaN NaN -Inf -Inf NaN Inf Inf NaN NaN -Inf -Inf NaN]
 single 1x49 [NaN Inf Inf Inf Inf Inf Inf NaN Inf Inf Inf Inf Inf Inf NaN NaN NaN NaN NaN NaN NaN NaN NaN NaN NaN NaN NaN NaN -Inf -Inf -Inf -Inf -Inf NaN -Inf -Inf -Inf -Inf -Inf -Inf NaN -Inf NaN NaN NaN NaN NaN NaN NaN]
-single 1x49 [Inf Inf Inf Inf Inf NaN Inf Inf 2 1 1 0 -Inf NaN Inf 1 0 0 -1 -Inf NaN Inf 1 0 -0 -1 -Inf NaN Inf 0 -1 -1 -2 -Inf NaN NaN -Inf -Inf -Inf -Inf -Inf -Inf Inf NaN NaN NaN NaN -Inf NaN]
-single 1x49 [NaN Inf Inf Inf Inf Inf Inf -Inf 0 1 1 2 Inf NaN -Inf -1 0 0 1 Inf NaN -Inf -1 -0 0 1 Inf NaN -Inf -2 -1 -1 0 Inf NaN -Inf -Inf -Inf -Inf -Inf NaN -Inf -Inf NaN NaN NaN NaN Inf NaN]
-single 1x49 [Inf Inf Inf Inf Inf Inf Inf NaN 1 1 1 1 NaN NaN NaN 0 0 0 0 NaN NaN NaN 0 0 -0 -0 NaN NaN NaN -1 -1 -1 -1 NaN NaN -Inf -Inf -Inf -Inf -Inf -Inf -Inf NaN NaN NaN NaN NaN NaN NaN]
-single 1x49 [-Inf NaN NaN NaN NaN Inf NaN -Inf -1 0 0 1 Inf NaN -Inf -1 0 0 1 Inf NaN -Inf -1 -0 0 1 Inf NaN -Inf -1 -0 0 1 Inf NaN -Inf NaN NaN NaN NaN Inf NaN -Inf NaN NaN NaN NaN Inf NaN]
-single 1x49 [Inf Inf Inf Inf Inf Inf Inf NaN 1 1 1 1 NaN NaN NaN 0 0 0 0 NaN NaN NaN -0 -0 0 0 NaN NaN NaN -1 -1 -1 -1 NaN NaN -Inf -Inf -Inf -Inf -Inf -Inf -Inf NaN NaN NaN NaN NaN NaN NaN]
-single 1x49 [-Inf NaN NaN NaN NaN Inf NaN -Inf -1 -0 0 1 Inf NaN -Inf -1 -0 0 1 Inf NaN -Inf -1 0 0 1 Inf NaN -Inf -1 0 0 1 Inf NaN -Inf NaN NaN NaN NaN Inf NaN -Inf NaN NaN NaN NaN Inf NaN]
-single 1x49 [NaN Inf Inf Inf Inf Inf Inf -Inf 0 1 1 2 Inf NaN -Inf -1 0 0 1 Inf NaN -Inf -1 -0 0 1 Inf NaN -Inf -2 -1 -1 0 Inf NaN -Inf -Inf -Inf -Inf -Inf NaN -Inf -Inf NaN NaN NaN NaN Inf NaN]
-single 1x49 [-Inf -Inf -Inf -Inf -Inf NaN -Inf -Inf -2 -1 -1 0 Inf NaN -Inf -1 -0 0 1 Inf NaN -Inf -1 0 0 1 Inf NaN -Inf 0 1 1 2 Inf NaN NaN Inf Inf Inf Inf Inf Inf -Inf NaN NaN NaN NaN Inf NaN]
+single 1x49 [Inf Inf Inf Inf Inf NaN Inf Inf 2 1 1 0 -Inf NaN Inf 1 0 0 -1 -Inf NaN Inf 1 0 0 -1 -Inf NaN Inf 0 -1 -1 -2 -Inf NaN NaN -Inf -Inf -Inf -Inf -Inf -Inf Inf NaN NaN NaN NaN -Inf NaN] (-0 at 25)
+single 1x49 [NaN Inf Inf Inf Inf Inf Inf -Inf 0 1 1 2 Inf NaN -Inf -1 0 0 1 Inf NaN -Inf -1 0 0 1 Inf NaN -Inf -2 -1 -1 0 Inf NaN -Inf -Inf -Inf -Inf -Inf NaN -Inf -Inf NaN NaN NaN NaN Inf NaN] (-0 at 24)
+single 1x49 [Inf Inf Inf Inf Inf Inf Inf NaN 1 1 1 1 NaN NaN NaN 0 0 0 0 NaN NaN NaN 0 0 0 0 NaN NaN NaN -1 -1 -1 -1 NaN NaN -Inf -Inf -Inf -Inf -Inf -Inf -Inf NaN NaN NaN NaN NaN NaN NaN] (-0 at 25 26)
+single 1x49 [-Inf NaN NaN NaN NaN Inf NaN -Inf -1 0 0 1 Inf NaN -Inf -1 0 0 1 Inf NaN -Inf -1 0 0 1 Inf NaN -Inf -1 0 0 1 Inf NaN -Inf NaN NaN NaN NaN Inf NaN -Inf NaN NaN NaN NaN Inf NaN] (-0 at 24 31)
+single 1x49 [Inf Inf Inf Inf Inf Inf Inf NaN 1 1 1 1 NaN NaN NaN 0 0 0 0 NaN NaN NaN 0 0 0 0 NaN NaN NaN -1 -1 -1 -1 NaN NaN -Inf -Inf -Inf -Inf -Inf -Inf -Inf NaN NaN NaN NaN NaN NaN NaN] (-0 at 23 24)
+single 1x49 [-Inf NaN NaN NaN NaN Inf NaN -Inf -1 0 0 1 Inf NaN -Inf -1 0 0 1 Inf NaN -Inf -1 0 0 1 Inf NaN -Inf -1 0 0 1 Inf NaN -Inf NaN NaN NaN NaN Inf NaN -Inf NaN NaN NaN NaN Inf NaN] (-0 at 10 17)
+single 1x49 [NaN Inf Inf Inf Inf Inf Inf -Inf 0 1 1 2 Inf NaN -Inf -1 0 0 1 Inf NaN -Inf -1 0 0 1 Inf NaN -Inf -2 -1 -1 0 Inf NaN -Inf -Inf -Inf -Inf -Inf NaN -Inf -Inf NaN NaN NaN NaN Inf NaN] (-0 at 24)
+single 1x49 [-Inf -Inf -Inf -Inf -Inf NaN -Inf -Inf -2 -1 -1 0 Inf NaN -Inf -1 0 0 1 Inf NaN -Inf -1 0 0 1 Inf NaN -Inf 0 1 1 2 Inf NaN NaN Inf Inf Inf Inf Inf Inf -Inf NaN NaN NaN NaN Inf NaN] (-0 at 17)
 single 1x49 [NaN NaN NaN NaN Inf Inf NaN -Inf -Inf NaN NaN Inf Inf NaN -Inf -Inf NaN NaN Inf Inf NaN -Inf -Inf NaN NaN Inf Inf NaN -Inf -Inf NaN NaN Inf Inf NaN -Inf -Inf NaN NaN NaN NaN NaN -Inf -Inf NaN NaN Inf Inf NaN]
 single 1x49 [-Inf -Inf -Inf -Inf -Inf NaN -Inf -Inf -Inf -Inf -Inf -Inf NaN -Inf NaN NaN NaN NaN NaN NaN NaN NaN NaN NaN NaN NaN NaN NaN NaN Inf Inf Inf Inf Inf Inf NaN Inf Inf Inf Inf Inf Inf NaN NaN NaN NaN NaN NaN NaN]
 single 1x49 [Inf Inf Inf Inf Inf Inf Inf NaN NaN NaN NaN NaN NaN NaN NaN NaN NaN NaN NaN NaN NaN NaN NaN NaN NaN NaN NaN NaN NaN NaN NaN NaN NaN NaN NaN -Inf -Inf -Inf -Inf -Inf -Inf -Inf NaN NaN NaN NaN NaN NaN NaN]
@@ -796,14 +796,14 @@ single 1x3 [1.0000000200408773e+20+1.0000000200408773e+20i NaN+Infi -Inf+Infi]
 logical 1x1 false
 single 1x1 0
 single 1x2 [1.0000000031710769e-30+1.0000000031710769e-30i 0+0i]
-double 1x6 [1 -0 -1 0 0 0]
-double 1x6 [0 0 -0 -0 -0 4]
-double 1x6 [1 -0 -1 0 0 0]
-double 1x6 [0 0 -0 -0 -0 4]
-single 1x6 [1 -0 -1 0 0 0]
-single 1x6 [0 0 -0 -0 -0 4]
-double 1x6 [1 0 -1 0 -0 0]
-double 1x6 [0 0 -0 -0 0 4]
+double 1x6 [1 0 -1 0 0 0] (-0 at 2)
+double 1x6 [0 0 0 0 0 4] (-0 at 3 4 5)
+double 1x6 [1 0 -1 0 0 0] (-0 at 2)
+double 1x6 [0 0 0 0 0 4] (-0 at 3 4 5)
+single 1x6 [1 0 -1 0 0 0] (-0 at 2)
+single 1x6 [0 0 0 0 0 4] (-0 at 3 4 5)
+double 1x6 [1 0 -1 0 0 0] (-0 at 5)
+double 1x6 [0 0 0 0 0 4] (-0 at 3 4)
 logical 1x1 true
 double 1x2 [Inf Inf]
 logical 1x1 true

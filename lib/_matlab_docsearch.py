@@ -12,7 +12,7 @@ import json as _json
 import sys as _sys
 
 # (the modules whose functions are MATLAB's built-ins: _matlab imports the others)
-MODULES = ["_matlab", "_matlab_numeric", "_matlab_data", "_matlab_sparse", "_matlab_plot", "_matlab_mat", "_matlab_files"]
+MODULES = ["_matlab", "_matlab_numeric", "_matlab_data", "_matlab_sparse", "_matlab_plot", "_matlab_mat", "_matlab_files", "_matlab_extra"]
 
 
 def _clean(doc):

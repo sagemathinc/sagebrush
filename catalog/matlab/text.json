@@ -322,5 +322,34 @@
     "tags": [
       "text"
     ]
+  },
+  {
+    "name": "compose",
+    "kind": "function",
+    "signature": "str = compose(formatSpec, A1, ..., AN)\nstr = compose(txt)",
+    "summary": "Formats data into an array of strings: formatSpec applied to each row of the data.",
+    "doc": "Each row of the data (the arrays side by side) gives one output row. A row with more values than conversions adds output columns, `formatSpec` applied again; conversions left without a value stay as written. `compose(txt)` translates the escape sequences. The result is a string array for a string `formatSpec`, and a cell array of character vectors for a character vector.",
+    "examples": [
+      {
+        "code": "compose(\"%d.^2 = %d\", (1:3)', ((1:3).^2)')",
+        "expected": "\nans = \n\n  3×1 string array\n\n    \"1.^2 = 1\"\n    \"2.^2 = 4\"\n    \"3.^2 = 9\"\n\n"
+      },
+      {
+        "code": "compose(\"The time is %d:%d\", [8 15 9 30; 10 20 11 50])",
+        "expected": "\nans = \n\n  2×2 string array\n\n    \"The time is 8:15\"     \"The time is 9:30\" \n    \"The time is 10:20\"    \"The time is 11:50\"\n\n"
+      }
+    ],
+    "differs": [
+      "With several arrays, they are joined side by side before formatting: when an array other than the last has more columns than its conversions, the output differs from MATLAB's.",
+      "Cell and struct data are refused."
+    ],
+    "status": "partial",
+    "see_also": [
+      "sprintf",
+      "string"
+    ],
+    "tags": [
+      "strings"
+    ]
   }
 ]

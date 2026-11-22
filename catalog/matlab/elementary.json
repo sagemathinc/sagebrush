@@ -341,5 +341,137 @@
       "elementary math",
       "coordinates"
     ]
+  },
+  {
+    "name": "sinpi",
+    "kind": "function",
+    "signature": "Y = sinpi(X)",
+    "summary": "sin(pi*x), exact at the integers and half-integers.",
+    "doc": "Computed after reducing `x` exactly modulo 2, so `sinpi(n)` is a zero for every integer `n` (of `x`'s sign: `sinpi(-0)` is `-0`) and `sinpi(n + 1/2)` is exactly $\\pm 1$. Inf and NaN give NaN.",
+    "examples": [
+      {
+        "code": "sinpi([0 0.5 1 1.5 1/6])",
+        "expected": "\nans =\n\n         0    1.0000         0   -1.0000    0.5000\n\n"
+      }
+    ],
+    "differs": [
+      "Complex input is refused."
+    ],
+    "status": "partial",
+    "see_also": [
+      "cospi",
+      "sin"
+    ],
+    "tags": [
+      "elementary math"
+    ]
+  },
+  {
+    "name": "cospi",
+    "kind": "function",
+    "signature": "Y = cospi(X)",
+    "summary": "cos(pi*x), exact at the integers and half-integers.",
+    "doc": "Computed after reducing `x` exactly modulo 2, so `cospi(n)` is exactly $\\pm 1$ for every integer `n` and `cospi(n + 1/2)` is exactly 0. Inf and NaN give NaN.",
+    "examples": [
+      {
+        "code": "cospi([0 0.5 1 1/3])",
+        "expected": "\nans =\n\n    1.0000         0   -1.0000    0.5000\n\n"
+      }
+    ],
+    "differs": [
+      "Complex input is refused."
+    ],
+    "status": "partial",
+    "see_also": [
+      "sinpi",
+      "cos"
+    ],
+    "tags": [
+      "elementary math"
+    ]
+  },
+  {
+    "name": "reallog",
+    "kind": "function",
+    "signature": "Y = reallog(X)",
+    "summary": "The natural logarithm of a nonnegative real array; a negative element is an error.",
+    "doc": "`reallog(0)` is `-Inf`. A negative element would make the result complex, so it is MATLAB's error `MATLAB:reallog:complexResult` instead.",
+    "examples": [
+      {
+        "code": "reallog([1 exp(2) 0])",
+        "expected": "\nans =\n\n     0     2  -Inf\n\n"
+      },
+      {
+        "code": "try, reallog(-1), catch e, disp(e.identifier), end",
+        "expected": "MATLAB:reallog:complexResult\n"
+      }
+    ],
+    "differs": [
+      "Complex input is refused."
+    ],
+    "status": "partial",
+    "see_also": [
+      "log",
+      "realsqrt"
+    ],
+    "tags": [
+      "elementary math"
+    ]
+  },
+  {
+    "name": "realsqrt",
+    "kind": "function",
+    "signature": "Y = realsqrt(X)",
+    "summary": "The square root of a nonnegative real array; a negative element is an error.",
+    "doc": "`realsqrt(-0)` is `-0`. A negative element would make the result complex, so it is MATLAB's error `MATLAB:realsqrt:complexResult` instead.",
+    "examples": [
+      {
+        "code": "realsqrt([4 2 0])",
+        "expected": "\nans =\n\n    2.0000    1.4142         0\n\n"
+      },
+      {
+        "code": "try, realsqrt(-4), catch e, disp(e.identifier), end",
+        "expected": "MATLAB:realsqrt:complexResult\n"
+      }
+    ],
+    "differs": [
+      "Complex input is refused."
+    ],
+    "status": "partial",
+    "see_also": [
+      "sqrt",
+      "reallog"
+    ],
+    "tags": [
+      "elementary math"
+    ]
+  },
+  {
+    "name": "num2hex",
+    "kind": "function",
+    "signature": "S = num2hex(X)",
+    "summary": "Each element's IEEE 754 bits in hexadecimal: 16 digits for a double, 8 for a single.",
+    "doc": "One row of the char matrix per element, in column order; an empty input is 0-by-16 (0-by-8 for a single). MATLAB's NaN has its sign bit set: `num2hex(NaN)` is `fff8000000000000`.",
+    "examples": [
+      {
+        "code": "num2hex([1 -2.5])",
+        "expected": "\nans =\n\n  2×16 char array\n\n    '3ff0000000000000'\n    'c004000000000000'\n\n"
+      },
+      {
+        "code": "num2hex(single(1))",
+        "expected": "\nans =\n\n    '3f800000'\n\n"
+      }
+    ],
+    "differs": [
+      "Complex input and integer classes are refused.",
+      "The sign of a negated NaN is not always kept by this runtime, so num2hex(-NaN) can show fff8000000000000 where MATLAB shows 7ff8000000000000."
+    ],
+    "status": "partial",
+    "see_also": [
+      "sprintf"
+    ],
+    "tags": [
+      "data types"
+    ]
   }
 ]
