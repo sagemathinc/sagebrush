@@ -400,11 +400,12 @@
     <div id="mirror-log" hidden></div>
     <div id="mirror-readonly" hidden><span id="mirror-readonly-text"></span> <button id="mirror-delete-one" type="button"></button></div>
     <div class="composer-wrap">
-      <!-- (the agent's bar: a row above the composer, never over it; workspace/agent-ui.ts) -->
-      <div data-sbag-slot="1"></div>
       <div class="composer">
         <div id="editor"></div>
         <div class="row">
+          <!-- (the agent's access, an icon at the start of the composer's footer row: click it for the details, Turn off
+               running code and Revoke; workspace/agent-ui.ts, [data-sbag-footer]. A1, #1546) -->
+          <span data-sbag-slot="1" data-sbag-footer></span>
           <span class="hint"><kbd>Shift</kbd>+<kbd>Enter</kbd> <span id="keys">send</span> · <kbd>Alt</kbd>+<kbd>Enter</kbd> queue · <kbd>Ctrl</kbd>+<kbd>Enter</kbd> note</span>
           <span id="queued"></span>
           <button id="note" title="Post a note, not sent to the agent (Ctrl+Enter)">Note</button>

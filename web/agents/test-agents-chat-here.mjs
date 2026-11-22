@@ -169,6 +169,27 @@ try {
   ok(leg.data.msgs.some((m) => m.method === "grant.changed" && m.params?.folders) && leg.data.msgs.some((m) => m.method === "page.features" && m.params.features.includes("permission.digest")), "the grant is told to the agent, and permission.digest among the page's features");
   ok(violations.length === 0, "no Content Security Policy refusal: connect-src 'self' covers the page's own wss origin", violations);
   ok(await until(`${BAR_CLEAR} === true`, 5000), "the Agents page: the agent's bar is in its own row, over nothing the person types in or reads", await ev(BAR_CLEAR).catch((e) => String(e)));
+  // (A1, #1546: the agent's access is an icon at the start of the composer's footer row, not a box above it; its words
+  //  are its title and stay for a screen reader; a click opens the same menu, above it, inside the window)
+  const foot = await ev(`(() => {
+    const b = document.querySelector('.sbag-bar'), chip = b?.querySelector('button.chip'), r = chip?.getBoundingClientRect();
+    const words = chip?.querySelector('.words'), ico = chip?.querySelector('.ico svg');
+    return { inRow: !!b?.parentElement?.matches('.composer .row > [data-sbag-footer]'), first: b?.parentElement === document.querySelector('.composer .row').firstElementChild,
+      w: Math.round(r?.width ?? 0), h: Math.round(r?.height ?? 0), ico: !!ico && ico.getBoundingClientRect().width === 16,
+      wordsW: Math.round(words?.getBoundingClientRect().width ?? -1), words: words?.textContent ?? '', title: chip?.title ?? '',
+      above: !document.querySelector('.composer-wrap > [data-sbag-slot]') };
+  })()`);
+  ok(foot.inRow && foot.first && foot.above && foot.ico && foot.w <= 32 && foot.h <= 28 && foot.wordsW <= 1 && /^Claude · /.test(foot.words) && /^Claude on laptop: /.test(foot.title), "A1: the agent's access is a small icon at the start of the composer's footer row (no box above the composer); its words kept for a screen reader and as its title", foot);
+  await ev(`document.querySelector('.sbag-bar button.chip').click()`);
+  await until(`document.querySelector('.sbag-bar').classList.contains('open')`, 3000);
+  const menu = await ev(`(() => { const m = document.querySelector('.sbag-bar .menu').getBoundingClientRect(), c = document.querySelector('.sbag-bar button.chip').getBoundingClientRect();
+    return { items: [...document.querySelectorAll('.sbag-bar .menu [role=menuitem]')].map((b) => b.textContent), full: document.querySelector('.sbag-bar .menu .full').textContent,
+      above: m.bottom <= c.top, inside: m.left >= 0 && m.right <= innerWidth && m.top >= 0, focus: document.activeElement?.textContent }; })()`);
+  ok(menu.items.includes("Disconnect") && /^Claude on laptop: /.test(menu.full) && menu.above && menu.inside && menu.focus === menu.items[0], "A1: a click on the icon opens its menu above it, inside the window: the whole access sentence and its controls, the first focused", menu);
+  if (process.env.SHOTS) { const r = await send("Page.captureScreenshot", { format: "png" }); (await import("node:fs")).writeFileSync(process.env.SHOTS + "/a1-menu.png", Buffer.from(r.result.data, "base64")); }
+  await ev(`document.querySelector('.sbag-bar .menu [role=menuitem]').dispatchEvent(new KeyboardEvent('keydown', { key: 'Escape', bubbles: true }))`);
+  ok(await until(`!document.querySelector('.sbag-bar').classList.contains('open') && document.activeElement === document.querySelector('.sbag-bar button.chip')`, 3000), "A1: Escape closes it, back on the icon");
+  if (process.env.SHOTS) { const r = await send("Page.captureScreenshot", { format: "png" }); (await import("node:fs")).writeFileSync(process.env.SHOTS + "/a1-footer.png", Buffer.from(r.result.data, "base64")); }
   const title = await ev(`[...document.querySelectorAll('.sbag-bar button')].find((b) => b.textContent === 'Disconnect')?.title ?? null`);
   ok(title === "Disconnect and stop the agent on laptop", "the bar's Disconnect: \"Disconnect and stop the agent on laptop\"", title);
 

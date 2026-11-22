@@ -117,6 +117,15 @@ const CSS = `
 [data-sbag-inline] > .sbag-bar.docked { margin: 0; padding: 3px 6px 3px 12px; flex-wrap: nowrap; min-width: 0; max-width: 100%; }
 [data-sbag-inline] > .sbag-bar.docked > button.chip { min-width: 0; flex: 0 1 auto; }
 [data-sbag-inline] > .sbag-bar.docked > button:not(.chip), [data-sbag-inline] > .sbag-bar.docked .made-slot > button { flex: none; white-space: nowrap; }
+/* (in a composer's footer row, [data-sbag-footer]: an icon only, its words kept for a screen reader and in its title; a
+    click opens the same menu. A1, William Nov 20 2026: "get rid of that black box", an icon with the details on click) */
+.sbag-bar .ico { display: none; }
+[data-sbag-footer] { display: inline-flex; align-items: center; }
+[data-sbag-footer] > .sbag-bar.docked { margin: 0; padding: 0; background: none; border: 0; box-shadow: none; gap: 4px; }
+[data-sbag-footer] > .sbag-bar.docked > button.chip { padding: 2px 5px; border-radius: 8px; }
+[data-sbag-footer] .sbag-bar .ico { display: inline-flex; width: 16px; height: 16px; color: #4f8a3c; }
+[data-sbag-footer] .sbag-bar button.chip > .dot, [data-sbag-footer] .sbag-bar button.chip > .arr { display: none; }
+[data-sbag-footer] .sbag-bar button.chip > .words { position: absolute; width: 1px; height: 1px; overflow: hidden; clip: rect(0 0 0 0); white-space: nowrap; }
 .sbag-bar button { font: inherit; border: 0; border-radius: 12px; padding: 3px 10px; background: #fff; color: #24231f; cursor: pointer; }
 .sbag-bar button.open { max-width: 240px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .sbag-bar .made-slot { display: contents; }
@@ -274,10 +283,32 @@ export function mountAgentPairing(ws: PairingWorkspace, o: { button?: HTMLElemen
     // (the chip, and its menu: what the agent may do, Turn off running code, and Revoke one click away; by keyboard too:
     //  Enter, Space or ↓ opens it on its first control, ↑ ↓ Home End move, Escape closes it back on the chip, Tab closes it)
     const n = ++menuSeq;
-    const chipWords = h("span", { textContent: short });
-    const arrow = h("span", { textContent: "▾" });
+    const chipWords = h("span", { className: "words", textContent: short });
+    const arrow = h("span", { className: "arr", textContent: "▾" });
     arrow.setAttribute("aria-hidden", "true");
-    const chip = h("button", { className: "chip", title: full }, h("span", { className: "dot" }), chipWords, arrow);
+    // (the icon, shown only in a composer's footer row: a shield, the agent's access at a glance)
+    const ico = h("span", { className: "ico" });
+    ico.setAttribute("aria-hidden", "true");
+    const svg = document.createElementNS("http://www.w3.org/2000/svg", "svg");
+    svg.setAttribute("viewBox", "0 0 24 24");
+    svg.setAttribute("width", "16");
+    svg.setAttribute("height", "16");
+    const shield = document.createElementNS("http://www.w3.org/2000/svg", "path");
+    shield.setAttribute("d", "M12 3l7 3v5c0 4.5-3 8.4-7 10-4-1.6-7-5.5-7-10V6z");
+    shield.setAttribute("fill", "none");
+    shield.setAttribute("stroke", "currentColor");
+    shield.setAttribute("stroke-width", "2");
+    shield.setAttribute("stroke-linejoin", "round");
+    const mark = document.createElementNS("http://www.w3.org/2000/svg", "path");
+    mark.setAttribute("d", "M9 12l2 2 4-4");
+    mark.setAttribute("fill", "none");
+    mark.setAttribute("stroke", "currentColor");
+    mark.setAttribute("stroke-width", "2");
+    mark.setAttribute("stroke-linecap", "round");
+    mark.setAttribute("stroke-linejoin", "round");
+    svg.append(shield, mark);
+    ico.append(svg);
+    const chip = h("button", { className: "chip", title: full }, ico, h("span", { className: "dot" }), chipWords, arrow);
     const items = [...(noRun ? [noRun] : []), revoke];
     const fullEl = h("div", { className: "full", id: `sbag-menu-desc-${n}`, textContent: full });
     const list = h("div", { className: "items", id: `sbag-menu-${n}` }, ...items);
