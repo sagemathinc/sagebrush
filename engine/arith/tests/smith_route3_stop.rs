@@ -523,3 +523,44 @@ fn route3_stop_in_the_tail_solves() {
     let (_, c) = route3::compress(&a, &[0, 1]).unwrap();
     assert_eq!(c.d, vec![b(1), b(0), b(1), b(2)], "C");
 }
+
+/// k^'s contents charge each gcd after it runs: a Stop inside a gcd of
+/// operands of 2^20 bits or more (the half-gcd's own polls) has charged
+/// only the gcds that finished.  On a 1 x 2 [x, y] the Stop is inside the
+/// row's gcd(x, y), after the row's and column 0's gcd(0, x); on a 2 x 1
+/// it is inside the column's, after gcd(0, x) twice and the second row's
+/// gcd(0, y).
+#[test]
+fn a_stop_inside_a_contents_gcd_charges_only_the_finished_ones() {
+    let _h = HOOKS.lock().unwrap_or_else(|e| e.into_inner());
+    // (3^665000: just past 2^20 bits)
+    let t = BigInt::from(3).pow(665_000);
+    let (x, y) = (&t * &BigInt::from(5), &t * &BigInt::from(7));
+    assert!(x.bits() >= 1 << 20 && y.bits() >= 1 << 20);
+    let (lx, ly) = (limbs(&x), limbs(&y));
+    let wide = ZMat::from_rows(vec![vec![x.clone(), y.clone()]]);
+    let tall = ZMat::from_rows(vec![vec![x], vec![y]]);
+    for (name, a, finished) in [("1 x 2", wide, vec![lx, lx]), ("2 x 1", tall, vec![lx, lx, ly])] {
+        sagebrush_interrupt::clear();
+        hooks::reset();
+        hooks::arm_at(1);
+        let before = tallied();
+        let r = sagebrush_interrupt::catch(|| route3::k_hat(&a, 1, &mut Local::new()));
+        let after = tallied();
+        assert!(r.is_err(), "{name}: stopped inside gcd(x, y)");
+        assert_eq!(hooks::total(), 1);
+        sagebrush_interrupt::clear();
+        hooks::reset();
+        let mut d = [0u64; FAMILIES];
+        for (i, v) in d.iter_mut().enumerate() {
+            *v = after.0[i].wrapping_sub(before.0[i]);
+        }
+        let mut want = [0u64; FAMILIES];
+        for l in finished {
+            for (w, u) in want.iter_mut().zip(biggcd_units(1, l).0) {
+                *w += u;
+            }
+        }
+        assert_eq!(d, want, "{name}: a Stop inside gcd(x, y) charged only the finished gcds");
+    }
+}
