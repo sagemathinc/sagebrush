@@ -133,6 +133,13 @@ export const TASK_RESULTS = {
   "tasks.resume": (v: unknown) => { const o = keys(v, ["status"], "result"); return { status: status(o.status) }; },
   "tasks.answer": (v: unknown) => { const o = keys(v, ["accepted", "current"], "result"); return { accepted: bool(o.accepted, "accepted"), current: bool(o.current, "current") }; },
 } as const;
+/** chat.brief's result (Delegate briefs, PLAN-delegate-brief r2): a title of 1 to 200 characters, the brief (the agent cuts
+ * it at 8 KiB; taken here up to tasks.start's 64 KiB prompt), its bytes, and whether it was cut. */
+export function briefResult(v: unknown): { title: string; brief: string; bytes: number; cut: boolean } {
+  const o = keys(v, ["title", "brief", "bytes", "cut"], "result");
+  const title = typeof o.title === "string" && o.title.length >= 1 && o.title.length <= TASK_LIMITS.title ? wellFormed(o.title, "title") : bad(`title isn't 1 to ${TASK_LIMITS.title} characters`);
+  return { title, brief: text(o.brief, TASK_LIMITS.text, "brief"), bytes: int(o.bytes, 0, "bytes"), cut: bool(o.cut, "cut") };
+}
 export type TaskMethod = keyof typeof TASK_RESULTS;
 export type TaskResult<M extends TaskMethod> = ReturnType<(typeof TASK_RESULTS)[M]>;
 

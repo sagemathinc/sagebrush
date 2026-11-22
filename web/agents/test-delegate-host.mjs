@@ -128,6 +128,15 @@ export function delegateHost({ features = ["delegate.1", "chat.resume"], pageSiz
       default: return refuse(m.id, "bad_request");
     }
   }
+  // (chat.brief, for an agent whose features list it: H.briefs maps a conversation to its answer, {title, brief,
+  //  bytes, cut} or {error: code}; any other conversation is not_found. chat.brief_cancel answers a held draft of that
+  //  conversation as stopped, as the agent does)
+  H.briefs = new Map();
+  function brief(m) {
+    const a = H.briefs.get(m.params?.conversation);
+    if (!a) return refuse(m.id, "not_found", "no such conversation");
+    return a.error ? refuse(m.id, a.error, a.error) : answer(m.id, a);
+  }
   // (the agent's own requests to the page: a workspace verb, as Pair's tools call them)
   let cn = 0;
   const calls = new Map();
@@ -138,7 +147,7 @@ export function delegateHost({ features = ["delegate.1", "chat.resume"], pageSiz
     setTimeout(() => { if (calls.delete(id)) reject(new Error("no answer to " + method)); }, ms);
   });
   /** Answer the held requests now, as if they had just come. */
-  H.release = () => { for (const m of H.held.splice(0)) task(m); };
+  H.release = () => { for (const m of H.held.splice(0)) (m.method === "chat.brief" ? brief(m) : task(m)); };
   H.srv = Bun.serve({
     port: 0, hostname: "127.0.0.1",
     fetch(req, srv) { return srv.upgrade(req) ? undefined : new Response("no", { status: 400 }); },
@@ -155,6 +164,12 @@ export function delegateHost({ features = ["delegate.1", "chat.resume"], pageSiz
           if (H.grant?.delegate === true && g?.delegate !== true) for (const t of H.tasks.values()) if (t.status === "working") H.emit(t.task, { type: "task_status", status: "interrupted" });
           H.grant = g;
           H.changes.push(g);
+          return;
+        }
+        if (m.method === "chat.brief") return void (H.hold.has(m.method) ? H.held.push(m) : brief(m));
+        if (m.method === "chat.brief_cancel") {
+          const i = H.held.findIndex((x) => x.method === "chat.brief" && x.params?.conversation === m.params?.conversation);
+          if (i >= 0) refuse(H.held.splice(i, 1)[0].id, "stopped", "cancelled");
           return;
         }
         if (typeof m.method !== "string" || !m.method.startsWith("tasks.")) return;
