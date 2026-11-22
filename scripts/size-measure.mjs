@@ -201,9 +201,12 @@ export function welcomeDirs(rootDir) {
   const f = join(rootDir, "web", "examples", "welcome.ts");
   if (!existsSync(f)) return [];
   const m = /^const WELCOME: Record<string, string> = \{([^}]*)\};$/m.exec(readFileSync(f, "utf8"));
-  const slugs = m ? [...m[1].matchAll(/:\s*"([a-z0-9][a-z0-9-]*)"/g)].map((x) => x[1]) : [];
-  // (fail closed: a welcome.ts whose map can't be read never lets its notebooks fall under the content limit)
-  if (!m || !slugs.length || m[1].split(",").filter((s) => s.trim()).length !== slugs.length) throw new Error("web/examples/welcome.ts: its WELCOME map can't be read");
+  // (every entry, whole, is exactly `Name: "slug"`: a literal string, never an expression such as "a" + "b", so the
+  // slug read is the slug the bundle uses; fail closed: a map that isn't exactly that grammar never lets its notebooks
+  // fall under the content limit)
+  const entries = m ? m[1].split(",").map((s) => s.trim()).filter((s, i, a) => s || i !== a.length - 1) : [];
+  const slugs = entries.map((e) => /^[A-Za-z_$][\w$]*\s*:\s*"([a-z0-9][a-z0-9-]*)"$/.exec(e)?.[1] ?? null);
+  if (!m || !slugs.length || slugs.includes(null)) throw new Error("web/examples/welcome.ts: its WELCOME map can't be read");
   return slugs.map((s) => join(rootDir, "examples", "notebook", s));
 }
 

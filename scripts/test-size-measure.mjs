@@ -106,10 +106,21 @@ try {
   assert.deepEqual(ex["examples/welcome"].map((f) => f.slice(dir.length + 1)), ["examples/notebook/sage-first-steps/main.ipynb", "examples/notebook/welcome/main.ipynb"]);
   assert.deepEqual(ex["examples/corpus"].map((f) => f.slice(dir.length + 1)).sort(), ["examples/notebook/other/main.ipynb", "examples/notebook/welcome-extra/main.ipynb", "examples/x.txt"], "a prefix-named sibling stays in the corpus");
   // (fail closed: a map that can't be read is an error, never "no welcome notebooks")
-  for (const bad of ["const WELCOME = {};\n", 'const WELCOME: Record<string, string> = { Welcome: welcomeSlug };\n', 'const WELCOME: Record<string, string> = { Welcome: "welcome", Sage: SAGE };\n', "// nothing\n"]) {
+  for (const bad of ["const WELCOME = {};\n", 'const WELCOME: Record<string, string> = { Welcome: welcomeSlug };\n', 'const WELCOME: Record<string, string> = { Welcome: "welcome", Sage: SAGE };\n', "// nothing\n",
+    // (an expression is valid TypeScript, but names a slug the reading can't see: refused, never its literal prefix)
+    'const WELCOME: Record<string, string> = { Welcome: "welcome" + "-extra", Sage: "sage-first-steps" };\n',
+    'const WELCOME: Record<string, string> = { Welcome: `welcome`, Sage: "sage-first-steps" };\n',
+    'const WELCOME: Record<string, string> = { Welcome: "welcome".concat("-extra") };\n',
+    'const WELCOME: Record<string, string> = { Welcome: "welcome" /* x */ };\n',
+    'const WELCOME: Record<string, string> = { "Welcome": "welcome", , Sage: "sage-first-steps" };\n',
+    'const WELCOME: Record<string, string> = { ...OTHER, Sage: "sage-first-steps" };\n',
+    'const WELCOME: Record<string, string> = { Welcome: "Welcome" };\n']) {
     writeFileSync(join(dir, "web", "examples", "welcome.ts"), bad);
     assert.throws(() => welcomeDirs(dir), /WELCOME map can't be read/, bad);
   }
+  // (a trailing comma is fine)
+  writeFileSync(join(dir, "web", "examples", "welcome.ts"), 'const WELCOME: Record<string, string> = { Welcome: "welcome", Sage: "sage-first-steps", };\n');
+  assert.deepEqual(welcomeDirs(dir).map((d) => d.slice(dir.length + 1)), ["examples/notebook/welcome", "examples/notebook/sage-first-steps"]);
   // (the real welcome.ts reads, and names the corpus's own first-visit notebooks)
   assert.deepEqual(welcomeDirs(join(import.meta.dirname, "..")).map((d) => d.split("/").slice(-1)[0]), ["welcome", "sage-first-steps"]);
   const f = join(dir, "bundle.js");
