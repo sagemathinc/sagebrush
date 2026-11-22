@@ -21,6 +21,7 @@ ok(ownClaudeCommand(base, "https://sagebrush.space") === base && ownClaudeComman
 ok(ownClaudeCommand(base, "https://dev.sagebrush.space") === base + " --origin https://dev.sagebrush.space", "on DEV: --origin https://dev.sagebrush.space");
 ok(ownClaudeCommand(base, "http://127.0.0.1:8765") === base + " --origin http://127.0.0.1:8765", "on a local server: --origin with its port");
 ok(ownClaudeCommand(base, "http://[::1]:8765") === base + " --origin 'http://[::1]:8765'", "an IPv6 literal: --origin, quoted (its brackets are a shell pattern)", ownClaudeCommand(base, "http://[::1]:8765"));
+ok(ownClaudeCommand(base, "https://[2001:db8::1]") === base + " --origin 'https://[2001:db8::1]'", "an IPv6 literal on https's default port: --origin, quoted");
 ok(ownClaudeCommand(base, "https://xn--bcher-kva.example") === base + " --origin https://xn--bcher-kva.example", "a punycode host: --origin, as it is");
 ok(["null", "https://a b", "https://x.org/path", "ftp://x.org", "https://X.org", "http://x.org:80"].every((o) => ownClaudeCommand(base, o) === base), "not an origin as the URL parser gives one back (a file page's \"null\", a space, a path, another scheme, upper case, a default port): the one-liner, nothing appended");
 
