@@ -1,0 +1,29 @@
+[
+  {
+    "name": "writematrix",
+    "kind": "function",
+    "signature": "writematrix(A, filename)\nwritematrix(A, filename, Name, Value)",
+    "summary": "Writes a numeric or logical matrix to a delimited text file, one row per line.",
+    "doc": "The file is `.txt`, `.dat` or `.csv` (no extension adds `.txt`). Values are comma-separated unless `'Delimiter'` is `'space'`, `'tab'`, `'semi'` or `'bar'`. Numbers are written in long g format (15 significant digits; single, 7) and NaN as an empty field. `'WriteMode', 'append'` adds to the end of the file. An array with more than two dimensions is written with its trailing dimensions collapsed into columns.",
+    "examples": [
+      {
+        "code": "writematrix([1 2.5 NaN; -Inf pi 1e20], 'm.csv')\ntype m.csv",
+        "expected": "1,2.5,\n-Inf,3.14159265358979,1e+20\n"
+      }
+    ],
+    "differs": [
+      "The file name is required: writematrix(A), which names the file after the variable, is refused.",
+      "Spreadsheet files (.xls, .xlsx) are refused; write a .csv file.",
+      "Only numeric and logical arrays: char, string, cell and complex values are refused.",
+      "Of the options, only Delimiter, WriteMode and FileType ('text') are supported."
+    ],
+    "status": "partial",
+    "see_also": [
+      "fprintf",
+      "dlmwrite"
+    ],
+    "tags": [
+      "files"
+    ]
+  }
+]

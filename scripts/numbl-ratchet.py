@@ -24,7 +24,8 @@ its src/cli-run-tests.ts, where an error fails the script whatever it printed), 
 is set aside: lines the CLI prints after a script ends for each open figure
 ("Plot: ...", "Figure with N plots: ...", "Saved .../sagebrush-figures-...", "(figures are removed ...)").
 Each script runs with its directory as the current directory (its search path), in a copy of the corpus, with a
-throwaway TMPDIR and HOME and a 60 s timeout (a timeout fails, whatever was printed before it); scripts of one
+throwaway TMPDIR and HOME and a 60 s timeout (SLOW lists the few allowed longer, each with its reason; a timeout
+fails, whatever was printed before it); scripts of one
 directory run one at a time.
 """
 import argparse, json, os, re, shutil, subprocess, sys, tempfile, time
@@ -38,6 +39,12 @@ MANIFEST = os.path.join(CORPUS, "scripts.txt")
 EXPECTED = os.path.join(CORPUS, "expected-pass.txt")
 NOT_MATLAB = os.path.join(CORPUS, "not-matlab.txt")
 TIMEOUT = 60
+# Scripts allowed longer than TIMEOUT, each with its reason: never to hide a hang, only real work that needs the time.
+SLOW = {
+    # (its sparse direct solves take about 58 s on a loaded machine, so it flaked at 60 s;
+    # its time is a performance item for the numeric track, not this script's fault)
+    "sparse/test_sparse_direct_acceptance.m": 180,
+}
 EPILOGUE = re.compile(r"^(Plot: |Figure with \d+ plots?: |Saved .*sagebrush-figures-|\(figures are removed when sagebrush exits)")
 
 
@@ -121,7 +128,8 @@ def run_all(cli, scripts, jobs, node, timeout=TIMEOUT):
             t0 = time.time()
             try:
                 p = subprocess.run([node, cli, "--matlab", os.path.basename(path)], cwd=os.path.dirname(path), env=env,
-                                   capture_output=True, text=True, errors="replace", timeout=timeout, stdin=subprocess.DEVNULL)
+                                   capture_output=True, text=True, errors="replace", timeout=max(timeout, SLOW.get(rel, 0)),
+                                   stdin=subprocess.DEVNULL)
                 rc, out, err = p.returncode, p.stdout, p.stderr
             except subprocess.TimeoutExpired:
                 rc, out, err = "timeout", "", "TIMEOUT"

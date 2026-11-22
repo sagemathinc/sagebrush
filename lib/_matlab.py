@@ -712,15 +712,18 @@ def _pow(A, B):
         # a negative base to a fractional power is complex (a NaN exponent stays real: power(-1, NaN) is a real
         # NaN in MATLAB)
         neg = (A < 0) & (B != np.floor(B)) & ~np.isnan(B)
-        if np.any(neg):
-            A = A.astype(np.complex128)
-        else:
+        if not np.any(neg):
             neg = None
     with np.errstate(divide="ignore", invalid="ignore", over="ignore"):
         if neg is not None:
+            # (only those elements are complex: the others in real arithmetic, as MATLAB computes them, observed
+            # MATLAB R2026b, 2026-11-21: power(-Inf, [0.5 1]) is [0+Inf i, -Inf], power(-1, [0.5 Inf]) is [0+1i, 1],
+            # power([-8 0 -1], [0.5 -1 2]) is [0+2.8284271247461903i, Inf, 1], where a complex power of every
+            # element gave -Inf+NaN i, NaN+NaN i and a refused complex zero)
             Ab, Bb = np.broadcast_arrays(A, B)
-            r = Ab ** Bb
-            r = np.where(neg, _negfrac_pow(Ab.real, Bb), r)
+            rr = np.where(neg, 1.0, Ab) ** Bb
+            rr = np.where((rr == 0) & ~((Bb == np.floor(Bb)) & (_fmod(Bb, 2.0) != 0)), 0.0, rr)
+            r = np.where(neg, _negfrac_pow(Ab, Bb), rr)
         else:
             r = A ** B
         if r.dtype.kind != "c":
@@ -4149,9 +4152,10 @@ def _take_along(A, idx, axis):
 
 
 def _fmod(A, B):
-    """C's fmod (the sign of A), exactly: numpy's mod of the magnitudes"""
+    """C's fmod (the sign of A), exactly: numpy's mod of the magnitudes, with A's sign, a zero result's too
+    (rem([-0 -0 -0], [1 Inf -2]) is [-0 -0 -0], observed MATLAB R2026b, 2026-11-21; sign(A) * ... made it +0)"""
     with np.errstate(divide="ignore", invalid="ignore"):
-        return np.sign(A) * np.mod(np.abs(A), np.abs(B))
+        return np.copysign(np.mod(np.abs(A), np.abs(B)), A)
 
 import re as _re
 
@@ -6481,7 +6485,12 @@ def _minmax(nargout, args, which):
         if _farr(a).dtype.kind == "c" or _farr(b).dtype.kind == "c":
             raise _err("%s of two arrays with complex values is not supported in Sagebrush." % which)
         cls = "logical" if class_(a) == "logical" and class_(b) == "logical" else _arith_class(a, b, which)
-        f = (np.maximum if big else np.minimum) if include else (np.fmax if big else np.fmin)
+        # (a tie gives the first argument, a zero's sign included: max([-0 0], [0 -0]) is [-0 0] and min the same,
+        # observed MATLAB R2026b, 2026-11-21, where numpy's fmax and fmin may return either zero)
+        if big:
+            f = (lambda A, B: np.where((B > A) | np.isnan(B), B, A)) if include else (lambda A, B: np.where((B > A) | np.isnan(A), B, A))
+        else:
+            f = (lambda A, B: np.where((B < A) | np.isnan(B), B, A)) if include else (lambda A, B: np.where((B < A) | np.isnan(A), B, A))
         return _finish(_broadcast(f, _farr(a), _farr(b)), cls)
     x = args[0]
     d = _dims(x)

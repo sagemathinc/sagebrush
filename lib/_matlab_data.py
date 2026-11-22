@@ -654,3 +654,233 @@ movmin_ = _mov("min", "movmin")
 movmedian_ = _mov("median", "movmedian")
 movvar_ = _mov("var", "movvar", True)
 movstd_ = _mov("std", "movstd", True)
+
+
+# ------------------------------------------------------------------ zscore
+
+@_bi("zscore")
+def zscore_(nargout, X, flag=None, dim=None):
+    """[Z, mu, sigma] = zscore(X, flag, dim | vecdim | 'all'): (X - mean) / std, the standard deviation normalized by
+    n - 1 (flag 0, the default) or n (1); a sample of identical values gives zeros (sigma 0, and 1 used to divide), as
+    the Statistics and Machine Learning Toolbox's page says; a sample with a NaN gives NaN"""
+    M = _md(X)
+    w = 0
+    if flag is not None and _m._numel(flag):
+        w = _scalar(flag)
+        if w not in (0, 1):
+            raise _err("zscore: the normalization flag must be 0 or 1.")
+    if dim is None:
+        axes = [_first_dim(M.shape)]
+    elif _istext(dim):
+        if _text(dim).lower() != "all":
+            raise _err("zscore: the dimension must be a positive integer, a vector of them, or 'all'.")
+        axes = list(range(M.ndim))
+    else:
+        v = _m._farr(dim).reshape(-1)
+        if not v.size or not np.all(v == np.floor(v)) or not np.all(v >= 1):
+            raise _err("Dimension argument must be a positive integer scalar within indexing range.", "MATLAB:getdimarg:invalidDim")
+        axes = sorted(set(int(k) - 1 for k in v))
+    while M.ndim <= max(axes):
+        M = M.reshape(M.shape + (1,))
+    ax = tuple(axes)
+    n = _m._prod([M.shape[a] for a in axes])
+    with np.errstate(invalid="ignore", divide="ignore"):
+        mu = np.mean(M, axis=ax, keepdims=True) if n else np.full([1 if a in ax else s for a, s in enumerate(M.shape)], np.nan)
+        dev = M - mu
+        den = max(n - 1, 1) if w == 0 else max(n, 1)
+        sigma = np.sqrt(np.sum((dev * np.conj(dev)).real, axis=ax, keepdims=True) / den) if n else mu.real.copy()
+        Z = dev / np.where(sigma == 0, 1.0, sigma)
+    cls = _cls(X)
+    if nargout <= 1:
+        return _out(Z, cls)
+    return [_out(Z, cls), _out(mu, cls), _out(sigma, cls)]
+
+
+# ------------------------------------------------------------------ maxk, mink
+
+def _topk(which):
+    def f(nargout, A, k, *args):
+        """[B, I] = maxk(A, k, dim, 'ComparisonMethod', c): the k largest (mink: smallest) elements along dim, in order,
+        equal elements in their order in A; k past the dimension's length sorts it all (MATLAB's maxk page); by
+        sort's order: sort(A, dim, 'descend') and its first k"""
+        if _istext(k) or _m._numel(k) != 1:
+            raise _err("%s: k must be a nonnegative integer scalar." % which)
+        kv = _scalar(k)
+        if not _math.isfinite(kv) or kv != _math.floor(kv) or kv < 0:
+            raise _err("%s: k must be a nonnegative integer scalar." % which)
+        args = list(args)
+        dim = None
+        if args and not _istext(args[0]):
+            dim = args.pop(0)
+        opts = []
+        while args:
+            name = args.pop(0)
+            if not _istext(name) or _text(name).lower() != "comparisonmethod" or not args:
+                raise _err("%s: the options are a dimension and 'ComparisonMethod', c." % which)
+            opts += ["ComparisonMethod", args.pop(0)]
+        M = _md(A)
+        axis = _first_dim(M.shape) if dim is None else _dim_value(dim)
+        sargs = [float(axis + 1), _m.Char("descend" if which == "maxk" else "ascend")] + [o if not isinstance(o, str) else _m.Char(o) for o in opts]
+        S, I = _m._B["sort"].f(2, A, *sargs)
+        SM, IM = np.transpose(_m._arr(S)), np.transpose(_m._farr(I))
+        while SM.ndim <= axis:
+            SM, IM = SM.reshape(SM.shape + (1,)), IM.reshape(IM.shape + (1,))
+        take = [slice(None)] * SM.ndim
+        take[axis] = slice(0, int(min(kv, SM.shape[axis])))
+        B = _m._finish(_m._canon(_m._contig(np.transpose(SM[tuple(take)]))), _m.class_(S))
+        if nargout <= 1:
+            return B
+        return [B, _out(IM[tuple(take)])]
+    _bi(which)(f)
+    return f
+
+
+maxk_ = _topk("maxk")
+mink_ = _topk("mink")
+
+
+# ------------------------------------------------------------------ divergence, curl
+
+def _field(args, fname):
+    """the coordinates and components of curl's and divergence's arguments: (Fx, Fy[, Fz]) on meshgrid(1:n, 1:m[, 1:p]),
+    or (X, Y[, Z], Fx, Fy[, Fz]) with meshgrid-format X, Y, Z (x down the columns, y down the rows, z down the pages);
+    returns ([x, y(, z)], [Fx, Fy(, Fz)]) in MATLAB's axis order"""
+    if len(args) in (2, 3):
+        F = [_md(a) for a in args]
+        coords = None
+    elif len(args) in (4, 6):
+        d = len(args) // 2
+        coords, F = [_md(a) for a in args[:d]], [_md(a) for a in args[d:]]
+    else:
+        raise _err("%s: the arguments are (Fx, Fy), (X, Y, Fx, Fy), (Fx, Fy, Fz) or (X, Y, Z, Fx, Fy, Fz)." % fname)
+    d = len(F)
+    shape = F[0].shape
+    if any(f.shape != shape for f in F) or (coords and any(c.shape != shape for c in coords)):
+        raise _err("%s: the coordinate and component arrays must all be the same size." % fname)
+    if len(shape) != d or any(s < 2 for s in shape):
+        raise _err("%s: the arrays must be %s, at least %s." % (fname, "matrices" if d == 2 else "3-D arrays", "2-by-2" if d == 2 else "2-by-2-by-2"))
+    if any(np.iscomplexobj(f) for f in F) or (coords and any(np.iscomplexobj(c) for c in coords)):
+        raise _err("%s: complex values are not supported." % fname)
+    if coords is None:
+        xs = [np.arange(1.0, shape[1] + 1), np.arange(1.0, shape[0] + 1)] + ([np.arange(1.0, shape[2] + 1)] if d == 3 else [])
+    else:
+        X, Y = coords[0], coords[1]
+        xs = [X[(0, slice(None)) + (0,) * (d - 2)], Y[(slice(None), 0) + (0,) * (d - 2)]]
+        if d == 3:
+            xs.append(coords[2][0, 0, :])
+    for v in xs:
+        dv = np.diff(v)
+        if not (np.all(dv > 0) or np.all(dv < 0)):
+            raise _err("%s: the coordinates must be strictly monotonic, as meshgrid gives them." % fname)
+    return xs, F
+
+
+def _dd(F, axis, x):
+    """F's derivative along axis at coordinates x: central differences inside, one-sided at the ends (gradient's)"""
+    return np.moveaxis(_grad1(np.moveaxis(F, axis, 0), x), 0, axis)
+
+
+@_bs("divergence")
+def divergence_(*args):
+    """dFx/dx + dFy/dy (+ dFz/dz), by finite differences, as MATLAB's divergence page describes them"""
+    xs, F = _field(args, "divergence")
+    D = _dd(F[0], 1, xs[0]) + _dd(F[1], 0, xs[1])
+    if len(F) == 3:
+        D = D + _dd(F[2], 2, xs[2])
+    return _out(D, _cls(*args))
+
+
+@_bi("curl")
+def curl_(nargout, *args):
+    """2-D: [curlz, cav] = curl(...), curlz = dFy/dx - dFx/dy and cav = curlz / 2; 3-D: [curlx, curly, curlz, cav], cav
+    the angular velocity, half the curl's component along F; one output is cav (MATLAB's curl page)"""
+    xs, F = _field(args, "curl")
+    cls = _cls(*args)
+    if len(F) == 2:
+        cz = _dd(F[1], 1, xs[0]) - _dd(F[0], 0, xs[1])
+        cav = cz / 2
+        if nargout <= 1:
+            return _out(cav, cls)
+        if nargout > 2:
+            raise _err("Too many output arguments.")
+        return [_out(cz, cls), _out(cav, cls)]
+    u, v, w = F
+    cx = _dd(w, 0, xs[1]) - _dd(v, 2, xs[2])
+    cy = _dd(u, 2, xs[2]) - _dd(w, 1, xs[0])
+    cz = _dd(v, 1, xs[0]) - _dd(u, 0, xs[1])
+    with np.errstate(invalid="ignore", divide="ignore"):
+        cav = (cx * u + cy * v + cz * w) / np.sqrt(u * u + v * v + w * w) / 2
+    if nargout <= 1:
+        return _out(cav, cls)
+    if nargout > 4:
+        raise _err("Too many output arguments.")
+    return [_out(c, cls) for c in (cx, cy, cz, cav)][:nargout]
+
+
+# ------------------------------------------------------------------ writematrix
+
+_DELIMS = {"comma": ",", ",": ",", "space": " ", " ": " ", "tab": "\t", "\\t": "\t", "\t": "\t", "semi": ";", ";": ";",
+           "bar": "|", "|": "|"}
+
+
+def _wm_number(v, fmt):
+    """one number as writematrix writes it: long g (15 significant digits; single 7), NaN an empty field"""
+    if v != v:
+        return ""
+    if v in (_math.inf, -_math.inf):
+        return "Inf" if v > 0 else "-Inf"
+    s = fmt % v
+    return "0" if s == "-0" else s
+
+
+@_bs("writematrix")
+def writematrix_(A, *args):
+    """writematrix(A, filename, 'Delimiter', d, 'WriteMode', m, 'FileType', 'text'): a delimited text file (.txt, .dat
+    or .csv; no extension adds .txt), comma-separated by default, numbers in long g format and NaN as an empty field,
+    an N-d array's trailing dimensions collapsed into columns (MATLAB's writematrix page)"""
+    import os
+    args = list(args)
+    if not args or not _istext(args[0]):
+        raise _err("writematrix: name the file, writematrix(A, filename): taking the name from the variable's is not supported in Sagebrush.")
+    fname = _text(args.pop(0))
+    if len(args) % 2:
+        raise _err("writematrix: the options come in name, value pairs.")
+    delim, mode, ftype = None, "overwrite", None
+    for k in range(0, len(args), 2):
+        name, val = args[k], args[k + 1]
+        nm = _text(name).lower() if _istext(name) else ""
+        if nm == "delimiter" and _istext(val) and _text(val).lower() in _DELIMS:
+            delim = _DELIMS[_text(val).lower()]
+        elif nm == "writemode" and _istext(val) and _text(val).lower() in ("overwrite", "append"):
+            mode = _text(val).lower()
+        elif nm == "filetype" and _istext(val) and _text(val).lower() in ("text", "delimitedtext"):
+            ftype = "text"
+        elif nm in ("delimiter", "writemode", "filetype"):
+            raise _err("writematrix: the value of '%s' is not supported in Sagebrush." % _text(name))
+        else:
+            raise _err("writematrix: the option '%s' is not supported in Sagebrush." % (_text(name) if _istext(name) else "?"))
+    ext = os.path.splitext(fname)[1].lower()
+    if ext in (".xls", ".xlsx", ".xlsm", ".xlsb", ".ods"):
+        raise _err("writematrix: spreadsheet files are not supported in Sagebrush; write a .csv file instead.")
+    if ext == "" and ftype is None:
+        fname += ".txt"
+    elif ext not in ("", ".txt", ".dat", ".csv"):
+        raise _err("writematrix: the file extension '%s' is not supported; use .txt, .dat or .csv, or 'FileType', 'text'." % ext)
+    cls = _m.class_(A)
+    if cls in ("char", "string", "cell", "struct") or not (_m._isnumlike(A) or cls == "logical"):
+        raise _err("writematrix: only numeric and logical arrays are supported in Sagebrush, not %s." % cls)
+    M = _md(A)
+    if np.iscomplexobj(M):
+        raise _err("writematrix: complex values are not supported in Sagebrush.")
+    if M.ndim > 2:
+        # (column-major: A(:, :, 1)'s columns, then A(:, :, 2)'s, ...; the trailing axes reversed, then row-major)
+        M = np.transpose(M, [0] + list(range(M.ndim - 1, 0, -1))).reshape((M.shape[0], -1))
+    fmt = "%.7g" if cls == "single" else ("%d" if cls.startswith(("int", "uint")) or cls == "logical" else "%.15g")
+    d = "," if delim is None else delim
+    text = "".join(d.join(_wm_number(float(v), fmt) for v in row) + "\n" for row in M)
+    try:
+        with open(fname, "a" if mode == "append" else "w") as fh:
+            fh.write(text)
+    except OSError as e:
+        raise _err("writematrix: cannot write the file '%s' (%s)." % (fname, e.strerror or e))
+    return _m.NOVAL

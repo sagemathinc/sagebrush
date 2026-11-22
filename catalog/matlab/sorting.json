@@ -93,5 +93,65 @@
     "tags": [
       "sets"
     ]
+  },
+  {
+    "name": "maxk",
+    "kind": "function",
+    "signature": "B = maxk(A, k)\nB = maxk(A, k, dim)\nB = maxk(___, 'ComparisonMethod', c)\n[B, I] = maxk(___)",
+    "summary": "The k largest elements of an array along a dimension, in order, with their indices.",
+    "doc": "The result is sorted largest first; equal elements keep their order in `A`. A `k` larger than the dimension's length sorts the whole dimension. The default dimension is the first whose size isn't 1. `c` is `'auto'` (real values for real input, magnitudes for complex), `'real'` or `'abs'`.",
+    "examples": [
+      {
+        "code": "[B, I] = maxk([2 8 1 8 5], 3)",
+        "expected": "\nB =\n\n     8     8     5\n\n\nI =\n\n     2     4     5\n\n"
+      },
+      {
+        "code": "maxk([4 1 3; 9 0 2], 2, 2)",
+        "expected": "\nans =\n\n     4     3\n     9     2\n\n"
+      }
+    ],
+    "differs": [
+      "NaN is placed as sort places it (first, as the largest); MATLAB's page does not say, and this is not yet checked against MATLAB.",
+      "'ComparisonMethod', 'real' is supported only for vectors, as for sort."
+    ],
+    "status": "partial",
+    "see_also": [
+      "mink",
+      "sort",
+      "max"
+    ],
+    "tags": [
+      "sorting"
+    ]
+  },
+  {
+    "name": "mink",
+    "kind": "function",
+    "signature": "B = mink(A, k)\nB = mink(A, k, dim)\nB = mink(___, 'ComparisonMethod', c)\n[B, I] = mink(___)",
+    "summary": "The k smallest elements of an array along a dimension, in order, with their indices.",
+    "doc": "The result is sorted smallest first; equal elements keep their order in `A`. A `k` larger than the dimension's length sorts the whole dimension. The default dimension is the first whose size isn't 1. `c` is `'auto'` (real values for real input, magnitudes for complex), `'real'` or `'abs'`.",
+    "examples": [
+      {
+        "code": "[B, I] = mink([2 8 1 8 5], 3)",
+        "expected": "\nB =\n\n     1     2     5\n\n\nI =\n\n     3     1     5\n\n"
+      },
+      {
+        "code": "mink([4 1 3; 9 0 2], 2, 2)",
+        "expected": "\nans =\n\n     1     3\n     0     2\n\n"
+      }
+    ],
+    "differs": [
+      "NaN is placed as sort places it (last); MATLAB's page does not say, and this is not yet checked against MATLAB.",
+      "'ComparisonMethod', 'real' is supported only for vectors, as for sort."
+    ],
+    "status": "partial",
+    "see_also": [
+      "maxk",
+      "sort",
+      "min"
+    ],
+    "tags": [
+      "sorting"
+    ]
   }
 ]

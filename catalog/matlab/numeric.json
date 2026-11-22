@@ -260,5 +260,52 @@
     "tags": [
       "integration"
     ]
+  },
+  {
+    "name": "divergence",
+    "kind": "function",
+    "signature": "div = divergence(X, Y, Fx, Fy)\ndiv = divergence(Fx, Fy)\ndiv = divergence(X, Y, Z, Fx, Fy, Fz)\ndiv = divergence(Fx, Fy, Fz)",
+    "summary": "The divergence of a 2-D or 3-D vector field sampled on a grid, by finite differences.",
+    "doc": "$\\partial F_x/\\partial x + \\partial F_y/\\partial y$ (and $+ \\partial F_z/\\partial z$). `X`, `Y` (and `Z`) are in `meshgrid` format: $x$ varies along the columns, $y$ along the rows, $z$ along the pages. They must be monotonic but need not be evenly spaced. Without them the grid is `meshgrid(1:n, 1:m)`. Derivatives are central differences inside and one-sided at the edges, as `gradient`'s.",
+    "examples": [
+      {
+        "code": "[X, Y] = meshgrid(-1:1);\ndivergence(X, Y, X, 2*Y)",
+        "expected": "\nans =\n\n     3     3     3\n     3     3     3\n     3     3     3\n\n"
+      }
+    ],
+    "differs": [],
+    "status": "full",
+    "see_also": [
+      "curl",
+      "gradient",
+      "del2"
+    ],
+    "tags": [
+      "calculus",
+      "vector fields"
+    ]
+  },
+  {
+    "name": "curl",
+    "kind": "function",
+    "signature": "[curlz, cav] = curl(X, Y, Fx, Fy)\n[curlz, cav] = curl(Fx, Fy)\n[curlx, curly, curlz, cav] = curl(X, Y, Z, Fx, Fy, Fz)\n[curlx, curly, curlz, cav] = curl(Fx, Fy, Fz)\ncav = curl(___)",
+    "summary": "The curl and angular velocity of a 2-D or 3-D vector field sampled on a grid, by finite differences.",
+    "doc": "In 2-D, `curlz` is $\\partial F_y/\\partial x - \\partial F_x/\\partial y$ and the angular velocity `cav` is `curlz/2`. In 3-D the three components of $\\nabla \\times F$, and `cav` is half the curl's component along $F$. With one output, `curl` returns `cav`. The grid is as for `divergence`.",
+    "examples": [
+      {
+        "code": "[X, Y] = meshgrid(-1:1);\n[cz, cav] = curl(X, Y, -Y, X)",
+        "expected": "\ncz =\n\n     2     2     2\n     2     2     2\n     2     2     2\n\n\ncav =\n\n     1     1     1\n     1     1     1\n     1     1     1\n\n"
+      }
+    ],
+    "differs": [],
+    "status": "full",
+    "see_also": [
+      "divergence",
+      "gradient"
+    ],
+    "tags": [
+      "calculus",
+      "vector fields"
+    ]
   }
 ]
