@@ -59,13 +59,17 @@ function kindFor(p: string, v: unknown, what: string): "notebook" | "file" {
   return v;
 }
 
-export type TaskEntry = { task: string; title: string; status: TaskStatus; target: "local"; run: boolean; round: number; seq: number; proposal: string | null; question: boolean; updated: number };
+export type TaskEntry = { task: string; title: string; status: TaskStatus; target: "local"; run: boolean; round: number; seq: number; proposal: string | null; question: boolean; updated: number; reason?: string; reason_code?: string };
+// (why an interrupted task stopped, from an agent that says it (#1621, for a page announcing "tasks.reason"): one of
+//  REASON_CODES, or a code this page doesn't know yet, which it shows as a plain interruption)
+export const REASON_CODES = ["no_proposal", "unproposable", "stopped", "switched_off", "limit", "failed", "restarted"] as const;
+const code = (v: unknown, what: string) => (typeof v === "string" && /^[a-z_]{1,32}$/.test(v) ? v : bad(`${what} isn't a reason code`));
 export function taskEntry(v: unknown, what = "task"): TaskEntry {
-  const o = keys(v, ["task", "title", "status", "target", "run", "round", "seq", "proposal", "question", "updated"], what);
+  const o = keys(v, ["task", "title", "status", "target", "run", "round", "seq", "proposal", "question", "updated"], what, ["reason", "reason_code"]);
   if (typeof o.title !== "string" || [...o.title].length > TASK_LIMITS.title) bad(`${what}.title isn't text of at most ${TASK_LIMITS.title} characters`);
   wellFormed(o.title as string, `${what}.title`);
   if (o.target !== "local") bad(`${what}.target isn't "local"`);
-  return { task: task(o.task, `${what}.task`), title: o.title as string, status: status(o.status, `${what}.status`), target: "local", run: bool(o.run, `${what}.run`), round: int(o.round, 0, `${what}.round`), seq: int(o.seq, 0, `${what}.seq`), proposal: oidOrNull(o.proposal, `${what}.proposal`), question: bool(o.question, `${what}.question`), updated: int(o.updated, 0, `${what}.updated`) };
+  return { task: task(o.task, `${what}.task`), title: o.title as string, status: status(o.status, `${what}.status`), target: "local", run: bool(o.run, `${what}.run`), round: int(o.round, 0, `${what}.round`), seq: int(o.seq, 0, `${what}.seq`), proposal: oidOrNull(o.proposal, `${what}.proposal`), question: bool(o.question, `${what}.question`), updated: int(o.updated, 0, `${what}.updated`), ...(o.reason !== undefined ? { reason: text(o.reason, TASK_LIMITS.reason, `${what}.reason`) } : {}), ...(o.reason_code !== undefined ? { reason_code: code(o.reason_code, `${what}.reason_code`) } : {}) };
 }
 
 export type DiffFile = { path: string; kind: "notebook" | "file"; change: "added" | "modified" | "deleted"; base_blob: string | null; blob: string | null };
@@ -186,7 +190,7 @@ function turnEvent(v: Record<string, unknown>, what: string): Record<string, unk
 }
 
 export type TaskEvent =
-  | { type: "task_status"; status: TaskStatus; reason?: string }
+  | { type: "task_status"; status: TaskStatus; reason?: string; code?: string }
   | { type: "proposal"; round: number; base: string; commit: string; files: DiffFile[] }
   | { type: "question"; qid: number; revision: number; text: string; blocking: boolean; choices?: string[] }
   | { type: "question_withdrawn"; qid: number; revision: number }
@@ -198,8 +202,8 @@ export function taskEvent(v: unknown, what = "event"): TaskEvent {
   if (!isObj(v) || typeof v.type !== "string") return bad(`${what} isn't an event`);
   switch (v.type) {
     case "task_status": {
-      const o = keys(v, ["type", "status"], what, ["reason"]);
-      return { type: "task_status", status: status(o.status, `${what}.status`), ...(o.reason !== undefined ? { reason: text(o.reason, TASK_LIMITS.reason, `${what}.reason`) } : {}) };
+      const o = keys(v, ["type", "status"], what, ["reason", "code"]);
+      return { type: "task_status", status: status(o.status, `${what}.status`), ...(o.reason !== undefined ? { reason: text(o.reason, TASK_LIMITS.reason, `${what}.reason`) } : {}), ...(o.code !== undefined ? { code: code(o.code, `${what}.code`) } : {}) };
     }
     case "proposal": {
       const o = keys(v, ["type", "round", "base", "commit", "files"], what);

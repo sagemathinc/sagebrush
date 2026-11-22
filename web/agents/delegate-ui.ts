@@ -631,7 +631,7 @@ export function mountDelegate(h: DelegateHost) {
     s === "turning-off" ? btn.setAttribute("aria-disabled", "true") : btn.removeAttribute("aria-disabled");
     side.hidden = !(s === "on" || s === "turning-off") || !D.tasks.length;
     if (s === "on") for (const t of D.tasks) if (t.entry.status === "proposal") recover(t.entry.task);
-    const chipText = (t: (typeof D.tasks)[number]) => (t.entry.status === "proposal" && incomplete.has(t.entry.task) ? T.incomplete : chipOf(t.entry));
+    const chipText = (t: (typeof D.tasks)[number]) => (t.entry.status === "proposal" && incomplete.has(t.entry.task) ? T.incomplete : chipOf(t.entry, t.code));
     // (a task that's done can't be asked again: its kept note goes)
     for (const t of D.tasks) if (t.entry.status === "closed" || t.entry.status === "merged") { try { if (localStorage.getItem(noteKey(t.entry.task)) !== null) localStorage.removeItem(noteKey(t.entry.task)); } catch { /* (no storage) */ } }
     list.replaceChildren(...D.tasks.map((t) => {

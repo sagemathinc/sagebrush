@@ -312,6 +312,27 @@ try {
   ok(H.resumes[1].note === undefined && (await steerUi()).chip === "Working", "Resume: tasks.resume without a note; working again", H.resumes[1]);
   H.noNotes = false;
 
+  // ---- #1621: a task the agent left interrupted says why on its chip (its code), never "Interrupted" unless it was,
+  //      its reason a quiet line; a turn that ended with an error shows Claude's own words as a message, and only the
+  //      agent's error line as the error (sagebrush-agent's is_error turn, as 0.8.14 sends it)
+  {
+    const E = await H.addTask({ title: "More facts about E" });
+    H.emit(E.task, { type: "turn_started" });
+    H.emit(E.task, { type: "message_revised", message: "e1", revision: 1 });
+    H.emit(E.task, { type: "text_delta", message: "e1", revision: 1, text: "I've added a section, More facts about E." });
+    H.emit(E.task, { type: "turn_error", code: "is_error", message: "Claude ended the turn with an error" });
+    H.emit(E.task, { type: "turn_finished", outcome: "error" });
+    H.emit(E.task, { type: "task_status", status: "interrupted", reason: "the turn ended in an error", code: "failed" });
+    await P.until(`!!document.querySelector('#tasks .task[data-task="${E.task}"]')`, 10000).catch(async (e) => { throw new Error(e.message + " the list: " + JSON.stringify(await P.ev(`({ sw: document.querySelector('#delegate-switch')?.textContent, tasks: [...document.querySelectorAll('#tasks .task')].map((b) => (b.dataset.task ?? '').slice(0, 6) + ':' + b.textContent) })`)) + " host lists: " + H.got.filter((m) => m.method === "tasks.list").length + " tasks: " + H.tasks.size); });
+    const listChip = await P.ev(`document.querySelector('#tasks .task[data-task="${E.task}"] .chip').textContent`);
+    await P.ev(`document.querySelector('#tasks .task[data-task="${E.task}"]').click()`);
+    await P.until(`!!document.querySelector('#task-view .turn') && document.querySelector('#task-view h2')?.textContent === 'More facts about E'`, 10000);
+    const v = await P.ev(`(() => { const q = (s) => document.querySelector(s); const err = q('#task-view .turn .turn-error'); return { chip: q('#task-view .task-head .chip')?.textContent, reason: q('#task-view .reason')?.textContent, reasonRed: !!q('#task-view .reason') && getComputedStyle(q('#task-view .reason')).color === getComputedStyle(err ?? q('#task-view .reason')).color && !!err, error: err?.textContent ?? null, prose: [...document.querySelectorAll('#task-view .turn .msg')].map((m) => m.textContent).join('|'), proseInError: !!err && err.textContent.includes("I've added a section") }; })()`);
+    ok(listChip === "Ended with an error" && v.chip === "Ended with an error" && v.reason === "the turn ended in an error" && !v.reasonRed, "an interrupted task with the agent's code: its chip says what happened (in the list and its view), its reason a quiet line, not red", { listChip, ...v });
+    ok(v.prose.includes("I've added a section, More facts about E.") && !v.proseInError && v.error === "Error: Claude ended the turn with an error", "a turn that ended with an error: Claude's own words shown as a message, only the agent's error line as the error", v);
+    await P.ev(`document.querySelector('#task-view .task-head .link').click()`);
+  }
+
   // ---- the switch off: the running tasks closed first (ticked), Delegate… disabled while it turns off, then the host told
   await P.ev(`document.querySelector('#delegate-switch').click()`);
   await P.until(`!!document.querySelector('#delegate-also-close')`);

@@ -29,8 +29,9 @@ export type DelegateTask = {
   /** its chat turn events, as a chat thread; `applied_seq` is the task's seq of the last event taken */
   thread: Thread;
   proposal: { round: number; base: string; commit: string; files: DiffFile[] } | null;
-  /** the last task_status's reason, if it gave one */
+  /** the last task_status's reason, if it gave one, and its code (why it was interrupted, #1621) */
   reason?: string;
+  code?: string;
   /** events this page refused, skipped */
   skipped: number;
   /** whether its thread has been read from the agent (tasks.get); until then only its chip moves */
@@ -44,6 +45,8 @@ export const DELEGATE_LIMITS = Object.freeze({ briefMs: 70_000, pages: 1000, clo
 
 export const DELEGATE_TEXT = {
   chip: { working: "Working", question: "Question", proposal: "Proposal ready", merged: "Merged", closed: "Closed", failed: "Failed", interrupted: "Interrupted" } as Record<string, string>,
+  // (an interrupted task's chip by why it stopped, where the agent says (#1621): never "Interrupted" unless it was)
+  stopped: { no_proposal: "Ended without a proposal", unproposable: "Couldn't propose", stopped: "Stopped", switched_off: "Stopped: Delegate turned off", limit: "Stopped at a limit", failed: "Ended with an error", restarted: "Stopped: the agent restarted" } as Record<string, string>,
   turningOff: "Delegate is turning off",
   off: "Delegate tasks aren't turned on for this agent",
   changed: "The proposal changed while you were reading it",
@@ -70,8 +73,9 @@ export async function currentOf(files: readonly { path: string; change: string }
   return out;
 }
 
-/** A task's chip: its status, or Question while it works waiting for an answer. */
-export const chipOf = (e: TaskEntry) => DELEGATE_TEXT.chip[e.status === "working" && e.question ? "question" : e.status];
+/** A task's chip: its status, or Question while it works waiting for an answer; an interrupted one by why it stopped,
+ * where the agent says (`code`, else its entry's reason_code; an unknown code or none: Interrupted). */
+export const chipOf = (e: TaskEntry, code = e.reason_code) => (e.status === "interrupted" && code && Object.hasOwn(DELEGATE_TEXT.stopped, code) ? DELEGATE_TEXT.stopped[code] : DELEGATE_TEXT.chip[e.status === "working" && e.question ? "question" : e.status]);
 
 export class DelegateTasks {
   /** the tasks, newest first */
@@ -366,30 +370,39 @@ export class DelegateTasks {
 }
 
 function fresh(entry: TaskEntry): DelegateTask {
-  return { entry: { ...entry }, thread: newThread("task:" + entry.task, entry.title), proposal: null, skipped: 0, loaded: false, turn: null };
+  const { reason, reason_code, ...rest } = entry;
+  return { entry: rest, thread: newThread("task:" + entry.task, entry.title), proposal: null, skipped: 0, loaded: false, turn: null, ...(reason !== undefined ? { reason } : {}), ...(reason_code !== undefined ? { code: reason_code } : {}) };
 }
 
 // (a task's chip, its entry, moves only forward: one rule for its events, tasks.list and tasks.get. The entry's seq is
 //  the seq of what the chip says. Above it, `next` replaces the status and the rest; at it, only what is missing is
 //  filled in; below it, the chip doesn't change. A status's reason and a proposal's files are filled in from an older
 //  event too, when it names what the chip already says: the log read when a task is opened, after its list entry)
-type Extra = { reason?: string; proposal?: DelegateTask["proposal"] };
-function chip(t: DelegateTask, seq: number, next: Partial<TaskEntry>, more: Extra = {}) {
+type Extra = { reason?: string; code?: string; proposal?: DelegateTask["proposal"] };
+function chip(t: DelegateTask, seq: number, entry: Partial<TaskEntry>, more: Extra = {}) {
+  // (an entry's own reason and code (tasks.list, tasks.get) are the chip's extras, never its fields)
+  const { reason, reason_code, ...next } = entry;
+  if (reason !== undefined && more.reason === undefined) more = { ...more, reason };
+  if (reason_code !== undefined && more.code === undefined) more = { ...more, code: reason_code };
   const was = t.entry;
   if (seq > was.seq) {
     t.entry = { ...was, ...next, seq };
-    if (next.status !== undefined && next.status !== was.status) t.reason = more.reason;
-    else if (more.reason !== undefined) t.reason = more.reason;
+    if (next.status !== undefined && next.status !== was.status) { t.reason = more.reason; t.code = more.code; }
+    else {
+      if (more.reason !== undefined) t.reason = more.reason;
+      if (more.code !== undefined) t.code = more.code;
+    }
     if (more.proposal) t.proposal = more.proposal;
     return;
   }
   if (seq === was.seq && was.proposal === null && next.proposal) t.entry = { ...was, proposal: next.proposal, round: next.round ?? was.round };
   if (more.reason !== undefined && t.reason === undefined && next.status === t.entry.status) t.reason = more.reason;
+  if (more.code !== undefined && t.code === undefined && next.status === t.entry.status) t.code = more.code;
   if (more.proposal && more.proposal.commit === t.entry.proposal && t.proposal?.commit !== more.proposal.commit) t.proposal = more.proposal;
 }
 // (a task's own event on its chip: task_status and proposal)
 function chipOfEvent(t: DelegateTask, e: TaskEvent, seq: number) {
-  if (e.type === "task_status") chip(t, seq, { status: e.status, ...(e.status === "working" ? {} : { question: false }) }, { reason: e.reason });
+  if (e.type === "task_status") chip(t, seq, { status: e.status, ...(e.status === "working" ? {} : { question: false }) }, { reason: e.reason, code: e.code });
   else if (e.type === "proposal") chip(t, seq, { round: e.round, proposal: e.commit }, { proposal: { round: e.round, base: e.base, commit: e.commit, files: e.files } });
 }
 
