@@ -1393,8 +1393,39 @@ jobs:
         with:
           workspaces: engine
           save-if: ${{ github.event_name != 'merge_group' }}
+      # (the Smith form's work estimate test writes every row it scores to a report in the
+      # target directory, before asserting anything about it; a cached copy from an earlier
+      # run must not pass for this one's)
+      - name: clear the Smith estimate report
+        run: rm -f engine/target/tmp/smith-estimate-rows.txt
       - working-directory: engine
         run: cargo test --workspace --exclude sagebrush-flint --exclude sagebrush-oracle
+      # The report, pass or fail: its rows per corpus and seed in the job summary, the file
+      # itself as an artifact.  Report-only: a missing report (the test isn't on this branch)
+      # is a line in the summary, never a failure.
+      - name: the Smith estimate report
+        if: always()
+        continue-on-error: true
+        run: |
+          f=engine/target/tmp/smith-estimate-rows.txt
+          {
+            echo "### Smith form work estimate: the test's report"
+            if [ -f "$f" ]; then
+              python3 scripts/smith-estimate-summary.py "$f" || echo "(the summary failed; the report is in the artifact)"
+              echo
+              echo "Every row (the run's units and each stage's estimate) is in the artifact smith-estimate-report."
+            else
+              echo "No report in this run (the estimate test isn't on this branch, or didn't run)."
+            fi
+          } >> "$GITHUB_STEP_SUMMARY"
+      - uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4.6.2
+        if: always()
+        continue-on-error: true
+        with:
+          name: smith-estimate-report
+          path: engine/target/tmp/smith-estimate-rows.txt
+          if-no-files-found: ignore
+          retention-days: 14
 
   # (numerics-core P2a, r4.2 §12: no microkernel ships that no CI host has executed. engine/nd's NEON kernel
   # runs only on aarch64; this job executes its oracle, thread-determinism and bit-family tests on Apple
