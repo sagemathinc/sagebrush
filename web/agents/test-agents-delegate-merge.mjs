@@ -168,6 +168,22 @@ try {
   await P.until(`document.querySelector('#tasks .task[data-task="${D.task}"] .chip')?.textContent === 'Merged'`, 10000).catch(() => {});
   ok((await chip(D)) === "Merged" && H.tasks.get(D.task).log.filter((e) => e.event.status === "merged").length === 1 && (await read("/work/notes.txt")).rev === writesBefore, "both answered alike, recorded once; the chip Merged; nothing written again", await chip(D));
 
+  // ---- consolidate two files into one: the proposal deletes both starting documents and adds the new file. The view
+  //      lists each deletion; Merge removes both (to Trash, by revision) and makes the new one; recorded as absent.
+  await H.call("workspace.create", { path: "/work/tmp1.py", content: { text: "def f(): return 1\n" } });
+  await H.call("workspace.create", { path: "/work/tmp2.py", content: { text: "def g(): return 2\n" } });
+  const K = await H.addTask({ title: "Consolidate tmp1.py and tmp2.py into lib.py", base: { "work/tmp1.py": "def f(): return 1\n", "work/tmp2.py": "def g(): return 2\n" }, proposal: { "work/tmp1.py": null, "work/tmp2.py": null, "work/lib.py": "def f(): return 1\n\ndef g(): return 2\n" } });
+  await openProposal(K);
+  const krows = await P.ev(`[...document.querySelectorAll('dialog.proposal[open] .sbpv .file')].map((r) => r.textContent.replace(/\\s+/g, ' ').trim().slice(0, 40))`);
+  ok(krows.some((r) => r.startsWith("work/tmp1.py deleted")) && krows.some((r) => r.startsWith("work/tmp2.py deleted")) && krows.some((r) => r.startsWith("work/lib.py added")), "consolidate: the view lists both deletions and the new file", krows);
+  await P.ev(`document.querySelector('dialog.proposal[open] button[data-act="merge"]').click()`);
+  await hostUntil(() => H.got.some((m) => m.method === "tasks.merged" && m.params.task === K.task), 20000);
+  const gone = async (p) => (await H.call("workspace.read", { path: p })).error !== undefined;
+  ok((await gone("/work/tmp1.py")) && (await gone("/work/tmp2.py")) && (await read("/work/lib.py")).content.text === "def f(): return 1\n\ndef g(): return 2\n", "consolidate: Merge removes both starting documents and makes lib.py");
+  const kp = Object.fromEntries(H.got.find((m) => m.method === "tasks.merged" && m.params.task === K.task).params.files.map((f) => [f.path, f]));
+  ok(kp["work/tmp1.py"].merged?.absent && kp["work/tmp2.py"].merged?.absent && kp["work/tmp1.py"].mine?.content === "def f(): return 1\n" && kp["work/lib.py"].mine?.absent && kp["work/lib.py"].merged?.content?.startsWith("def f()"), "consolidate: tasks.merged reports the two removed (absent) and the one made", kp);
+  await P.until(`!document.querySelector('dialog.proposal[open]')`, 10000).catch(() => {});
+
   // ---- a removal and a late edit: the proposal deletes a file the person hasn't changed; the person edits it after
   //      Merge checked it and before it is removed (the page's seam, on this host only). The removal is refused at the
   //      workspace (its revision checked with its identity): the file stays with the edit, the merge is incomplete,
