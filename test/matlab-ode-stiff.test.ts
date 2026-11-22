@@ -249,3 +249,16 @@ test("ode15s's and ode23s's accuracy against exact solutions as RelTol tightens,
   assert.equal(r.status, 0, r.err);
   assert.equal(r.out, "1 1\n1 1\n1 1\n1\n1 1\n");
 });
+
+test("a singular Newton matrix at the starting step: the step shrinks and the zero solution comes out", () => {
+  // (y' = y from y(0) = 0 is identically 0; with the starting step h, M - (h/alpha) J can be exactly singular,
+  // which must shrink the step, with the numerical Jacobian and with a supplied one alike)
+  const r = run([
+    "for s = {@ode15s, @ode23s}",
+    "  [t, y] = s{1}(@(t, y) y, [0 118.5], 0); [u, z] = s{1}(@(t, y) y, [0 118.5], 0, odeset('Jacobian', 1));",
+    "  fprintf('%g %g %g %g\\n', max(abs(y)), t(end), max(abs(z)), u(end))",
+    "end",
+  ].join("\n"));
+  assert.equal(r.status, 0, r.err);
+  assert.equal(r.out, "0 118.5 0 118.5\n0 118.5 0 118.5\n");
+});

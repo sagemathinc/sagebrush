@@ -385,7 +385,11 @@ class _NDF:
             converged = False
             for attempt in range(2):
                 if self.LU is None or self.LU[0] != c:
-                    self._factor(c)
+                    try:
+                        self._factor(c)
+                    except np.linalg.LinAlgError:
+                        # (M - c J singular at this step size, e.g. y' = y with c = 1: a smaller step instead)
+                        break
                 Wi = self.LU[1]
                 d = np.zeros(self.n)
                 yn = ypred.copy()
@@ -414,6 +418,7 @@ class _NDF:
                 else:
                     break
             if not converged:
+                # (the Newton iteration failed or its matrix was singular: the step halved)
                 self.nfailed += 1
                 _rescale(D, k, 0.5)
                 self.h = h * 0.5
