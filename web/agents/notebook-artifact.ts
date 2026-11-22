@@ -740,12 +740,13 @@ export function mountNotebook(ws: Workspace, path: string, box: HTMLElement, ui:
       if (!owned()) return;
       const refused = typeof t === "string" && t.startsWith("not saved");
       last = refused ? (t as string) : "Saved";
-      ui.saved(last);
-      if (refused) void check();
+      say(last);
+      // (not while closing: the close says what became of it)
+      if (refused && !frozen) void check();
     });
     comp.on("remote", () => {
       last = "Saved";
-      if (owned()) ui.saved("Updated from elsewhere");
+      say("Updated from elsewhere");
     });
     // (a save of this notebook made after it was let go met a change made elsewhere: what it had is kept as a copy)
     // (or, `why`, a save refused or failed when sent again: said as that, not as a change made elsewhere)

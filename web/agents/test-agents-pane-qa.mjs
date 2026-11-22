@@ -78,6 +78,45 @@ try {
   const d5 = await P.ev(`JSON.parse(localStorage.getItem('sagebrush-agents-drafts-v1') ?? '{}')`);
   ok(!("gone" in d5) && Object.values(d5).length === 1 && Object.values(d5)[0].includes("more"), "D5: a draft of a chat no longer stored goes; the chat's own is written", d5);
 
+  // (D6: the limit in all holds when many chats' drafts wait to be written together: the page's 300 ms draft timer held
+  //  (the test's, never fired), so all ten are written only when the page is left; the composer's chat keeps its own,
+  //  astra4's SEC case)
+  await P.ev(`(() => { const st = window.setTimeout; window.setTimeout = (f, ms, ...a) => (ms === 300 ? 0 : st(f, ms, ...a)); return true; })()`);
+  const big = "x".repeat(60000);
+  for (let i = 0; i < 10; i++) {
+    const n = await P.ev(`document.querySelectorAll('#threads .thread').length`);
+    await P.ev(`(document.querySelector('#new').click(), true)`);
+    await P.until(`document.querySelectorAll('#threads .thread').length === ${n + 1}`);
+    await P.draft(big + "#" + i);
+  }
+  const pendingBefore = await P.ev(`Object.values(JSON.parse(localStorage.getItem('sagebrush-agents-drafts-v1') ?? '{}')).filter((t) => t.startsWith('xxx')).length`);
+  await P.reload();
+  const raw6 = await P.ev(`localStorage.getItem('sagebrush-agents-drafts-v1') ?? ''`);
+  const bigs = Object.values(JSON.parse(raw6 || "{}")).filter((t) => t.startsWith("xxx"));
+  ok(pendingBefore === 0 && raw6.length <= 524288 && bigs.length === 8 && bigs.some((t) => t.endsWith("#9")), "D6: ten long drafts written at once: the record stays within its limit as stored, the composer's chat's draft kept", { pendingBefore, size: raw6.length, kept: bigs.map((t) => t.slice(-2)) });
+  // (the newest chat, first in the list: the test's hold kept the chats' own save from saying which was shown)
+  await chat(0);
+  ok((await P.composer()).endsWith("#9"), "D6: and that chat has its draft after the reload");
+
+  // (D7: the browser's storage refuses the drafts' record: a draft still comes back on a switch to another chat and
+  //  back, as this page keeps it (astra2's TESTS case))
+  await P.ev(`(document.querySelector('#new').click(), true)`);
+  const n7 = await P.ev(`document.querySelectorAll('#threads .thread').length`);
+  await P.ev(`(() => { const old = Storage.prototype.setItem; window.__restoreStorage = () => (Storage.prototype.setItem = old); Storage.prototype.setItem = function (k, v) { if (k === 'sagebrush-agents-drafts-v1') throw new DOMException('fixture quota', 'QuotaExceededError'); return old.call(this, k, v); }; return true; })()`);
+  await P.draft("UNSENT_QUOTA_DRAFT");
+  await sleep(800);
+  await P.ev(`(document.querySelector('#new').click(), true)`);
+  await P.until(`document.querySelectorAll('#threads .thread').length === ${n7 + 1}`);
+  await chat(1);
+  ok((await P.composer()) === "UNSENT_QUOTA_DRAFT", "D7: storage refusing the drafts' record, a draft still comes back after a switch to another chat", await P.composer());
+  await P.ev(`(__restoreStorage(), true)`);
+  // (and once the storage takes it again, the next draft's write writes the refused one too)
+  await chat(0);
+  await P.draft("after the refusal");
+  await sleep(800);
+  const d7 = await P.ev(`Object.values(JSON.parse(localStorage.getItem('sagebrush-agents-drafts-v1') ?? '{}'))`);
+  ok(d7.includes("UNSENT_QUOTA_DRAFT") && d7.includes("after the refusal"), "D7: once storage takes writes again, the refused draft is written with the next one", d7.map((t) => t.slice(0, 30)));
+
   // ======================================================================== #1617: Saving… only while a change is saved
   // (from a page of no chats: the pairing link's dialog, as a first visit shows it)
   await P.ev(`(localStorage.clear(), sessionStorage.clear(), true)`);
@@ -132,6 +171,16 @@ try {
   await P.send("Input.insertText", { text: "w" });
   await P.until(`document.querySelector('#artifacts .pane-host:not([hidden]) .saved')?.textContent === 'Saved'`, 10000).catch(() => {});
   ok((await said()) === "Saved", "S1: and once a save goes through, Saved", await said());
+  // (S3: a notebook save that completes while its pane closes: Closing… stays, never Saved over it (astra2's TESTS
+  //  case: the save held in IndexedDB until the close has begun))
+  await P.ev(`(() => { window.__closeSaid=[];const el=document.querySelector('#artifacts .pane-host:not([hidden]) .saved');new MutationObserver(()=>__closeSaid.push(el.textContent)).observe(el,{childList:true,characterData:true,subtree:true}); const r=indexedDB.open('sagebrush');r.onsuccess=()=>{const db=r.result,t=db.transaction('notebooks','readwrite'),st=t.objectStore('notebooks'),end=Date.now()+1000;window.__holding=true;const spin=()=>{if(Date.now()<end)st.get('__hold__').onsuccess=spin;};spin();t.oncomplete=()=>db.close();};return true;})()`);
+  await P.until(`window.__holding===true`);
+  await P.ev(`(document.querySelector('#artifacts .nb-root .cell textarea').focus(),true)`);
+  await P.send('Input.insertText',{text:' # close'});
+  await P.ev(`(document.querySelector('#close').click(),true)`);
+  await P.until(`!document.body.classList.contains('has-artifact')`,10000);
+  const closingTrace=await P.ev(`__closeSaid`);
+  const ci=closingTrace.indexOf('Closing…');ok(ci>=0&&!closingTrace.slice(ci+1).includes('Saved'),'S3: a save that completes while the notebook closes never says Saved over Closing…',closingTrace);
 
   // (a script, the same way)
   made = await H.call("workspace.create", { path: "/qa.py", content: { text: "print(1)\n" } });

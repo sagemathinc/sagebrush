@@ -70,8 +70,9 @@ function openFull(path: string): HTMLAnchorElement {
 // The composer's draft, by chat, in this browser (as CoCalc keeps one, #1615): kept as it is typed, back when its chat is
 // shown again (after another chat, Files or a reload), gone once sent. One localStorage record; each chat's draft is
 // written alone into the record as read then, so another tab's drafts of other chats stay. Bounded, so the chats' own
-// record always has room: a draft over DRAFT_MAX isn't kept, a chat no longer stored loses its draft, and over
-// DRAFTS_MAX in all the other chats' longest drafts go first.
+// record has room: a draft over DRAFT_MAX isn't kept, a chat no longer stored loses its draft, and over DRAFTS_MAX in
+// all the other chats' longest drafts go first, whether written before or waiting now. Both are measured as stored
+// (JSON, its escapes counted). Best effort: storage that is full or unavailable keeps nothing new.
 const DRAFTS = "sagebrush-agents-drafts-v1";
 const DRAFT_MAX = 64 * 1024;
 const DRAFTS_MAX = 512 * 1024;
@@ -83,6 +84,7 @@ function readDrafts(): Record<string, string> {
   } catch {}
   return d;
 }
+// (drafts not written yet: a refused write keeps them here, so a chat shows its own again and the next write retries)
 const draftsPending = new Map<string, string>();
 let draftTimer = 0;
 function flushDrafts() {
@@ -92,7 +94,7 @@ function flushDrafts() {
   const d = readDrafts();
   for (const [id, t] of draftsPending) {
     if (!t.trim()) delete d[id];
-    else if (t.length <= DRAFT_MAX) d[id] = t;
+    else if (JSON.stringify(t).length <= DRAFT_MAX) d[id] = t;
     // (over the limit: the last copy within it stays)
   }
   // (the chats as stored (another tab's newer ones too), and this tab's)
@@ -114,17 +116,16 @@ function flushDrafts() {
     } catch {}
   }
   if (stored) for (const id of Object.keys(d)) if (!stored.has(id) && !state.threads.some((t) => t.id === id)) delete d[id];
-  let total = Object.values(d).reduce((n, t) => n + t.length, 0);
-  for (const id of Object.keys(d).sort((a, b) => d[b].length - d[a].length)) {
-    if (total <= DRAFTS_MAX) break;
-    if (draftsPending.has(id)) continue;
-    total -= d[id].length;
-    delete d[id];
-  }
-  draftsPending.clear();
+  // (the composer's chat keeps its draft (at most DRAFT_MAX, well under DRAFTS_MAX); the others longest first, then by
+  //  id, so the same drafts always go)
+  const others = Object.keys(d)
+    .filter((id) => id !== draftOf)
+    .sort((a, b) => d[b].length - d[a].length || (a < b ? -1 : a > b ? 1 : 0));
+  while (others.length && JSON.stringify(d).length > DRAFTS_MAX) delete d[others.shift()!];
   try {
     localStorage.setItem(DRAFTS, JSON.stringify(d));
-  } catch {}
+    draftsPending.clear();
+  } catch {} // (refused: still waiting, in draftsPending, written with the next draft's write)
 }
 // (here, before anything the page waits for: a page left while it still opens keeps its draft too)
 addEventListener("pagehide", flushDrafts);
