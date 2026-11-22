@@ -1,6 +1,6 @@
 {
  "title": "Plotting gallery (MATLAB)",
- "summary": "Subplots of bars, stairs, stems and areas, a colored scatter plot and contour lines.",
+ "summary": "Bars, stairs, stems, a filled area, a colored scatter plot and contour lines, as subplots of one figure.",
  "tags": [
   "plots",
   "figures"

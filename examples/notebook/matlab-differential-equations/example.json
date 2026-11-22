@@ -1,6 +1,6 @@
 {
  "title": "Differential equations (MATLAB)",
- "summary": "ode45 on a damped pendulum, the Lorenz attractor and the van der Pol oscillator, with phase portraits.",
+ "summary": "ode45 on a damped pendulum, the Lorenz attractor and its sensitive dependence, and the van der Pol limit cycle.",
  "tags": [
   "differential equations",
   "plots"
