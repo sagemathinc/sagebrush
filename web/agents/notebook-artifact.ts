@@ -8,6 +8,7 @@
 import { writerHandover } from "../page/handover";
 import type { Workspace } from "../workspace/api";
 import { canonical, cellForm, preflight, type NotebookEdit } from "../workspace/notebook-edit";
+import { docValue, ENVELOPE } from "../workspace/notebook-form";
 import type { Kept, PageRun } from "../workspace/run-verbs";
 
 // (stores.js's FENCE, the workspace's record in the notebooks store; test-agents-artifacts checks they're equal)
@@ -152,19 +153,13 @@ export const TAKE_MS = 10_000;
 /** A read of an agent's run that the pane's letting go cut short. */
 const GONE = Symbol("gone");
 
-// What the store keeps beside a notebook's content, for itself (ART-C2a r4): left out when "is this what the store
-// has" is asked, and when content is kept as a copy. Everything else is the content: the mode, the document's
-// metadata (seed, autorun, ...) and each cell whole (its metadata, attachments, outputs, counts and times).
-const BOOKKEEPING = ["id", "rev", "updated", "baseRev", "name", "j", "hash", "unjournaled"];
-const contentOf = (doc: any) => Object.fromEntries(Object.entries(doc ?? {}).filter(([k]) => !BOOKKEEPING.includes(k)));
-// (a stable form to compare: keys sorted at every depth, so the store's key order and the snapshot's don't matter)
-const stable = (v: unknown): string =>
-  Array.isArray(v)
-    ? `[${v.map(stable).join(",")}]`
-    : v && typeof v === "object"
-      ? `{${Object.keys(v).filter((k) => (v as any)[k] !== undefined).sort().map((k) => `${JSON.stringify(k)}:${stable((v as any)[k])}`).join(",")}}`
-      : JSON.stringify(v ?? null);
-const sameContent = (a: any, b: any) => stable(contentOf(a)) === stable(contentOf(b));
+// What the store keeps beside a notebook's content, for itself (ART-C2a r4: the workspace's own list, ENVELOPE, so a
+// field the store adds (sync's journal: the versions a record is) is never taken for an unsaved change): left out when
+// "is this what the store has" is asked, and when content is kept as a copy. Everything else is the content: the mode,
+// the document's metadata (seed, autorun, ...) and each cell whole (its metadata, attachments, outputs, counts and
+// times), compared in the form the notebook keeps it (docValue: its key order and a cell's stored form don't matter).
+const contentOf = (doc: any) => Object.fromEntries(Object.entries(doc ?? {}).filter(([k]) => !ENVELOPE.includes(k)));
+const sameContent = (a: any, b: any) => docValue(a) === docValue(b);
 
 /**
  * A notebook artifact, mounted into `box`. The handle is returned at once and owns everything the mount makes, so it
