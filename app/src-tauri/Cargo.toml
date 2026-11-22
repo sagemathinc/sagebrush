@@ -20,6 +20,11 @@ tauri-plugin-dialog = "2"
 tiny_http = "0.12"
 sha2 = "0.10"
 serde_json = "1"
+# (the agent host, src/agent_host.rs: the pairing code from the OS's CSPRNG; on Unix, the child's process group)
+getrandom = "0.3"
+
+[target.'cfg(unix)'.dependencies]
+libc = "0.2"
 
 # (the fs plugin: a phone's only, linked only there, since withGlobalTauri puts every linked plugin's
 # window.__TAURI__ API on the page, registered or not; the desktop page reaches files by grants: src/disk.rs. The cfg is
