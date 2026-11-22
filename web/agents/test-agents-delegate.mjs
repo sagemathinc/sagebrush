@@ -256,8 +256,9 @@ try {
   await P.ev(`document.querySelector('#delegate').click()`);
   await P.until(`!!document.querySelector('dialog.sheet[open]')`);
   await shot("5-sheet");
-  const sheet = await P.ev(`(() => { const d = document.querySelector('dialog.sheet[open]'); return { prompt: d.querySelector('#delegate-prompt').value, title: d.querySelector('#delegate-title').value, run: d.querySelector('#delegate-run').disabled, where: d.textContent.includes('This computer') }; })()`);
+  const sheet = await P.ev(`(() => { const d = document.querySelector('dialog.sheet[open]'), r = d.querySelector('#delegate-run'); return { prompt: d.querySelector('#delegate-prompt').value, title: d.querySelector('#delegate-title').value, runOff: r.disabled && !r.checked, runNote: r.closest('.field').querySelector('small').textContent, threadRuns: !!document.querySelector('.sbag-bar .chip')?.title.includes('may run code'), where: d.textContent.includes('This computer') }; })()`);
   ok(sheet.prompt === "Tidy these notes\nand number the sections." && sheet.title === "Tidy these notes" && sheet.where, "the sheet: the task from the composer, its title from the first line, Where: this computer", sheet);
+  ok(sheet.threadRuns && sheet.runOff && sheet.runNote === "Running code in a delegated task isn't available yet.", "the sheet's May run code, with the thread able to run code: off and disabled, and says running code in a delegated task isn't available yet (#1612)", sheet);
   await P.ev(`document.querySelector('dialog.sheet[open] button[type=submit]').click()`);
   await sleep(200);
   ok(/No documents/.test(await P.ev(`document.querySelector('dialog.sheet[open] .msg').textContent`)) && !H.got.some((m) => m.method === "tasks.start"), "Start with no documents: says so, nothing sent");
