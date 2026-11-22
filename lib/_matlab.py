@@ -4665,7 +4665,8 @@ def logspace_(a, b, n=50.0):
 
 @_bi("size")
 def size_(nargout, x, *dims):
-    d = list(_dims(x))
+    # (a containers.Map is Count-by-1 to size, as MATLAB's is; numel stays 1)
+    d = [len(x.d), 1] if type(x) is MapObj else list(_dims(x))
     if dims:
         if len(dims) == 1 and _numel(dims[0]) > 1:
             ks = [int(k) for k in _arr(dims[0]).reshape(-1)]
@@ -8230,6 +8231,11 @@ def accumarray_(subs, vals, sz=None, func=None, fill=0.0):
 
 @_bi("disp")
 def disp_(nargout, x):
+    if type(x) is MapObj:
+        # (with its header line, as MATLAB's disp shows a containers.Map)
+        h, b = _handle_blocks(x)
+        _write(h[0] + "\n\n" + b[0] + "\n\n")
+        return NOVAL
     _write(_strip_links(_disp_text(x)))
     return NOVAL
 
@@ -13159,11 +13165,9 @@ def iskey_(m, ks):
 def remove_(m, ks):
     if not isinstance(m, MapObj):
         raise _err("Undefined function 'remove' for input arguments of type '%s'." % class_(m), "MATLAB:UndefinedFunction")
+    # (a key that is not there is passed over: remove(m, 'zz') is no error, observed MATLAB R2026b, 2026-11-21)
     for k in _map_keylist(m, ks):
-        kk = m.key(k)
-        if kk not in m.d:
-            raise _err("The specified key is not present in this container.", "MATLAB:Containers:Map:NoKey")
-        del m.d[kk]
+        m.d.pop(m.key(k), None)
     return m
 
 

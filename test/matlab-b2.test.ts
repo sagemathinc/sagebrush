@@ -42,15 +42,23 @@ test("sinpi, cospi, reallog and realsqrt: exact at the integers and half-integer
     "fprintf('%g ', reallog([1 exp(2) 0]), realsqrt([4 0]), 1 / realsqrt(-0)), fprintf('\\n')",
     "try, reallog(-Inf), catch e, disp(e.identifier), end",
     "try, realsqrt([1 -4]), catch e, disp(e.identifier), end",
+    // (realsqrt(-0) is +0 and a complex input MATLAB's validator error; a single is computed in double and rounded
+    // once, so sinpi(single(1/3)) is correctly rounded, 0.86602544784545898, where MATLAB gives 0.86602538824081421,
+    // a single ulp below: a documented difference, within the accuracy contract)
+    "try, realsqrt(1+1i), catch e, disp(e.identifier), end",
+    "fprintf('%.17g\\n', sinpi(single(1/3)))",
   ].join("\n"));
   assert.equal(r.status, 0, r.err);
-  assert.equal(r.out, "-Inf Inf Inf -Inf 1 -1 1 0.5 NaN \n1 -1 1 0.5 NaN Inf Inf Inf \nsingle\n0 2 -Inf 2 0 -Inf \n" +
-    "MATLAB:reallog:complexResult\nMATLAB:realsqrt:complexResult\n");
+  assert.equal(r.out, "-Inf Inf Inf -Inf 1 -1 1 0.5 NaN \n1 -1 1 0.5 NaN Inf Inf Inf \nsingle\n0 2 -Inf 2 0 Inf \n" +
+    "MATLAB:reallog:complexResult\nMATLAB:realsqrt:complexResult\nMATLAB:validators:mustBeReal\n0.86602544784545898\n");
 });
 
 test("num2hex, bsxfun and compose as their pages show them", () => {
   const r = run([
     "disp(num2hex([1 -2.5])), disp(num2hex(single(1)))",
+    // (MATLAB's NaN has its sign bit set; an empty input is 0-by-16, 0-by-8 for a single)
+    "disp(num2hex(NaN)), disp(num2hex(single(NaN))), disp([size(num2hex([])) size(num2hex(single([])))])",
+    "c = compose('%d', []); disp(class(c)), disp(size(c))",
     "disp(bsxfun(@minus, [1 2 3], [1; 2]))",
     "try, bsxfun(@plus, [1 2], [1 2 3]), catch e, disp(e.identifier), end",
     "disp(compose(\"%.8f\", pi))",
@@ -60,7 +68,8 @@ test("num2hex, bsxfun and compose as their pages show them", () => {
     "c = compose('%d apples', [1 2]); disp(class(c)), disp(c{2})",
   ].join("\n"));
   assert.equal(r.status, 0, r.err);
-  assert.equal(r.out, "3ff0000000000000\nc004000000000000\n3f800000\n     0     1     2\n    -1     0     1\n" +
+  assert.equal(r.out, "3ff0000000000000\nc004000000000000\n3f800000\nfff8000000000000\nffc00000\n     0    16     0     8\ncell\n     0     0\n" +
+    "     0     1     2\n    -1     0     1\n" +
     "MATLAB:bsxfun:arrayDimensionsMustMatch\n3.14159265\n     5     1\n1.^2 = 1\n5.^2 = 25\n     2     2\nThe time is 9:30\n" +
     "Check-in time 12:27; Check-out time %d:%d\ncell\n2 apples\n");
 });
@@ -72,10 +81,14 @@ test("readmatrix: header lines and the delimiter found, empty and non-numeric fi
     "disp(readmatrix('r.csv', 'NumHeaderLines', 2))",
     "A = readmatrix('r.csv', 'OutputType', 'int16'); disp(class(A)), disp(A(2, :))",
     "try, readmatrix('none.csv'), catch e, disp(e.identifier), end",
-  ].join("\n"), { "r.csv": "a,b,c\n1,2,3\n4,,6\n7,x,9\n", "s.txt": "1 2\n3 4\n" });
+    // (a comma in a ;-delimited number is no thousands separator; quoted fields may hold the delimiter)
+    "disp(readmatrix('semi.csv')), disp(readmatrix('quoted.csv'))",
+  ].join("\n"), { "r.csv": "a,b,c\n1,2,3\n4,,6\n7,x,9\n", "s.txt": "1 2\n3 4\n", "semi.csv": "x;y\n1,5;2\n3;4\n",
+    "quoted.csv": '"1","2"\n"3,5",4\n' });
   assert.equal(r.status, 0, r.err);
   assert.equal(r.out, "     1     2     3\n     4   NaN     6\n     7   NaN     9\n     1     2\n     3     4\n" +
-    "     4   NaN     6\n     7   NaN     9\nint16\n   4   0   6\nMATLAB:textio:textio:FileNotFound\n");
+    "     4   NaN     6\n     7   NaN     9\nint16\n   4   0   6\nMATLAB:textio:textio:FileNotFound\n" +
+    "   NaN     2\n     3     4\n     1     2\n   NaN     4\n");
 });
 
 test("fread and fwrite: binary in column order, precisions, rounding and saturation, sizes, big-endian, UTF-8 text", () => {
@@ -108,11 +121,14 @@ test("containers.Map: keys in order, lookup and assignment, a handle shared by i
     "q = containers.Map('KeyType', 'double', 'ValueType', 'any'); q(3) = 'three'; q(1) = [1 2 3]; disp(cell2mat(keys(q))), disp(q(1))",
     "e = containers.Map(); disp([isempty(e), e.Count]), disp(e.KeyType)",
     "w = containers.Map([10 20], [1.5 2.5]); disp(w.ValueType), disp(w(20))",
+    // (Count-by-1 to size, numel 1; disp with its header; removing a key that is not there is no error)
+    "disp([size(w) numel(w)]), disp(w), remove(w, 99); disp(w.Count)",
   ].join("\n"));
   assert.equal(r.status, 0, r.err);
   assert.equal(r.out, "     3\n    {'apples'}    {'pears'}    {'plums'}\n     3     5     2\n     4     4\n   1   0\n   1   0\n" +
     "     3\n     5     3\ncontainers.Map\nchar\ndouble\nMATLAB:Containers:Map:NoKey\nMATLAB:Containers:TypeMismatch\n" +
-    "     1     3\n     1     2     3\n     1     0\nchar\ndouble\n    2.5000\n");
+    "     1     3\n     1     2     3\n     1     0\nchar\ndouble\n    2.5000\n     2     1     1\n" +
+    "  Map with properties:\n\n        Count: 2\n      KeyType: double\n    ValueType: double\n\n     2\n");
 });
 
 // (sort of a complex matrix by 'ComparisonMethod' 'real' along any dimension, NaN last, and maxk by it: m3 and m7 of

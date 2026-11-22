@@ -5665,6 +5665,11 @@
   "owner": "matlab (@sagebrush-matlab)",
   "reason": "refuses nothing: the census matches 'max' in the names cummax and cummin and in numpy's fmax; the line picks MATLAB's NaN-omitting accumulation for cummax and cummin, not a limit on a computation"
  },
+ "lib/_matlab_data.py :: readmatrix_.split :: \"\"\"the line's fields: double-quoted fields may hold the delimiter (a doubled quote is a quote in one)\"\"\" #0": {
+  "class": "none",
+  "owner": "matlab (@sagebrush-matlab)",
+  "reason": "refuses nothing: the census matches 'limit' in the word delimiter of readmatrix's field splitter's documentation; not a limit on a computation"
+ },
  "lib/_matlab.py :: _map_new :: raise _err(\"Specified KeyType is not valid.\", \"MATLAB:Containers:Map:UnsupportedKeyType\") #0": {
   "class": "none",
   "owner": "matlab (@sagebrush-matlab)",

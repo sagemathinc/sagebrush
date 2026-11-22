@@ -900,7 +900,8 @@ def _real_float(x, fname):
     M = _md(x)
     if np.iscomplexobj(M):
         raise _err("%s: complex values are not supported in Sagebrush." % fname)
-    return M
+    # (in double, rounded once at the end for a single: sinpi(single(1/3)) is single(sinpi(1/3)), as MATLAB gives it)
+    return np.asarray(M, dtype=np.float64)
 
 
 def _pi_reduce(M):
@@ -946,12 +947,15 @@ def reallog_(x):
 
 @_bs("realsqrt")
 def realsqrt_(x):
-    """the square root of a nonnegative real array; a negative element is MATLAB's error (its result would be complex)"""
+    """the square root of a nonnegative real array; a negative element is MATLAB's error (its result would be complex);
+    realsqrt(-0) is +0 and a complex input MATLAB's validator error, as an observed MATLAB R2026b run gives them"""
+    if not _istext(x) and _m._isnumlike(x) and np.iscomplexobj(_md(x)):
+        raise _err("Value must be real.", "MATLAB:validators:mustBeReal")
     M = _real_float(x, "realsqrt")
     if np.any(M < 0):
         raise _err("Realsqrt produced complex result.", "MATLAB:realsqrt:complexResult")
     with np.errstate(invalid="ignore"):
-        return _out(np.sqrt(M), _cls(x))
+        return _out(np.where(M == 0, 0.0, np.sqrt(M)), _cls(x))
 
 
 # ------------------------------------------------------------------ num2hex, bsxfun
@@ -967,13 +971,21 @@ def num2hex_(x):
     M = _md(x)
     if np.iscomplexobj(M):
         raise _err("num2hex: complex values are not supported in Sagebrush.")
-    vals = [float(v) for v in np.transpose(M).reshape(-1)]
-    if cls == "single":
-        rows = [struct.pack(">f", v).hex() for v in vals]
-    else:
-        rows = [struct.pack(">d", v).hex() for v in vals]
+    flat = np.transpose(M).reshape(-1)
+    vals = [float(v) for v in flat]
+    neg = [bool(b) for b in np.signbit(flat)]
+    # (MATLAB's NaN has its sign bit set: num2hex(NaN) is fff8000000000000 and num2hex(-NaN) 7ff8000000000000, observed
+    # MATLAB R2026b, 2026-11-21, the reverse of this runtime's, so a NaN's sign bit is the reverse of its sign here;
+    # the sign is read from the array, which keeps it, not from the Python float)
+    def bits(v, sign, fmt):
+        b = bytearray(struct.pack(fmt, abs(v) if v != v else v))
+        if v != v and not sign:
+            b[0] |= 0x80
+        return bytes(b).hex()
+    rows = [bits(v, n, ">f" if cls == "single" else ">d") for v, n in zip(vals, neg)]
     if not rows:
-        return _m.Char("")
+        # (an empty input is a 0-by-16 char, 0-by-8 for a single)
+        return _m.Char(np.zeros((8 if cls == "single" else 16, 0)))
     w = len(rows[0])
     # (a char matrix, stored transposed as every array here is: its columns are the rows' characters)
     return _m.Char(np.array([[float(ord(c)) for c in r] for r in rows]).T.copy())
@@ -1028,6 +1040,9 @@ def compose_(fmt, *arrays):
 
     if not arrays:
         texts, shape = [render([])], (1, 1)
+    elif all(_m._dims(a)[1] == 0 for a in arrays) if all(len(_m._dims(a)) == 2 for a in arrays) else False:
+        # (data with no columns: the result is as large as it, empty, as compose('%d', []) is 0-by-0)
+        texts, shape = [], tuple(_m._dims(arrays[0]))
     else:
         mats = []
         for a in arrays:
@@ -1101,7 +1116,44 @@ def readmatrix_(filename, *args):
     lines = [l for l in text.splitlines() if l.strip()]
 
     def split(l, d):
-        return l.split() if d == " " else [f.strip() for f in l.split(d)]
+        """the line's fields: double-quoted fields may hold the delimiter (a doubled quote is a quote in one)"""
+        if d == " ":
+            return l.split()
+        out, cur, q, i = [], [], False, 0
+        while i < len(l):
+            c = l[i]
+            if q:
+                if c == '"' and i + 1 < len(l) and l[i + 1] == '"':
+                    cur.append('"')
+                    i += 1
+                elif c == '"':
+                    q = False
+                else:
+                    cur.append(c)
+            elif c == '"':
+                q = True
+            elif c == d:
+                out.append("".join(cur).strip())
+                cur = []
+            else:
+                cur.append(c)
+            i += 1
+        out.append("".join(cur).strip())
+        return out
+
+    import re as _re
+    NUM = _re.compile(r"^[+-]?(\d+\.?\d*|\.\d+)([eEdD][+-]?\d+)?$")
+
+    def number(f):
+        """a field as a number: a decimal (1.5, -0, 1e3) or Inf/NaN; anything else (1,5 too: no thousands separators)
+        is not one, as MATLAB's readmatrix reads them"""
+        t = f.strip()
+        if NUM.match(t):
+            return float(t.replace("d", "e").replace("D", "e"))
+        low = t.lower().lstrip("+")
+        if low in ("inf", "-inf", "nan", "-nan"):
+            return float(low)
+        return None
 
     if delim is None:
         best = (" ", 0)
@@ -1110,7 +1162,7 @@ def readmatrix_(filename, *args):
             if n > best[1]:
                 best = (d, n)
         delim = best[0]
-    nums = lambda l: [_m._parse_number(f) if f else None for f in split(l, delim)]
+    nums = lambda l: [number(f) if f else None for f in split(l, delim)]
     if header is None:
         header = 0
         for l in lines:
@@ -1123,9 +1175,7 @@ def readmatrix_(filename, *args):
     M = np.full((len(rows), width), np.nan)
     for i, r in enumerate(rows):
         for j, x in enumerate(r):
-            if x is not None and not isinstance(x, complex):
-                M[i, j] = float(x)
-            elif isinstance(x, complex):
-                M[i, j] = x.real
+            if x is not None:
+                M[i, j] = x
     # (an integer type has no NaN: those fields are 0, as converting NaN to an integer gives)
     return _out(M if otype in ("double", "single") else np.where(np.isnan(M), 0, M), otype)

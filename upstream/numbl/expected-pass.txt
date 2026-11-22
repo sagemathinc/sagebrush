@@ -429,6 +429,7 @@ math/test_log_large_negative.m
 math/test_max_elementwise.m
 math/test_mod_inf_large.m
 math/test_power_negative_real_exact.m
+math/test_realsqrt.m
 math/test_reciprocal_inverse_trig_complex.m
 math/test_round_n.m
 math/test_sqrt_negative_real.m

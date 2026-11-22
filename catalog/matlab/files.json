@@ -31,7 +31,7 @@
     "kind": "function",
     "signature": "A = readmatrix(filename)\nA = readmatrix(filename, Name, Value)",
     "summary": "Reads the numbers of a delimited text file as a matrix.",
-    "doc": "The delimiter (comma, tab, semicolon, bar or spaces) and the header lines (leading lines that are not mostly numbers) are found when not given. An empty or non-numeric field is NaN, and a short row is padded with NaN. Options: `'Delimiter'`, `'NumHeaderLines'` and `'OutputType'` (numeric classes; NaN is 0 in an integer class).",
+    "doc": "The delimiter (comma, tab, semicolon, bar or spaces) and the header lines (leading lines that are not mostly numbers) are found when not given. An empty or non-numeric field is NaN (a comma inside a number is not a thousands separator: `1,5` is NaN), double-quoted fields may hold the delimiter, and a short row is padded with NaN. Options: `'Delimiter'`, `'NumHeaderLines'` and `'OutputType'` (numeric classes; NaN is 0 in an integer class).",
     "examples": [
       {
         "code": "writematrix([1 2; 3 4], 'r.csv')\nreadmatrix('r.csv')",
