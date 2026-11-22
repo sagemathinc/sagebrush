@@ -487,7 +487,7 @@ test("the full tier on a pull request: the full-ci label, or a sync, sharing, se
     "web/workspace/doc-sync.ts", "web/notebook/sync-rows.js", "web/notebook/db-merge3.ts", "web/board/syncdb.ts",
     "web/share/files.ts", "web/share-client/upload.ts", "web/csp.ts", "web/csp-policy.mts", "web/safe-html.ts",
     "web/cloud/share/server.ts", "web/cloud/share/migrations/0009_remotes.sql", "web/cloud/remote/relay.ts",
-    "web/cloud/mirror/account.ts", "web/workspace/agent-chat/mirror-format.ts",
+    "web/cloud/mirror/account.ts", "web/cloud/support/support.ts", "web/workspace/agent-chat/mirror-format.ts",
     "web/workspace/export/run.ts", "web/workspace/db.ts", "web/workspace/api.ts", "web/workspace/migrate.ts", "web/board/export.ts",
     "web/latex/save.ts", "scripts/check-export-size.mjs",
     // (the LaTeX group's inputs: its ceiling is checked only in the full tier's web-artifacts)
@@ -663,6 +663,8 @@ test("web_share: the share dialog's shard runs on a pull request that changes sh
   // (the hosted remotes: the full tier, but no share dialog)
   assert.equal(classify(["web/cloud/remote/relay.ts"]).full, "true");
   assert.equal(classify(["web/cloud/remote/relay.ts"]).web_share, "false");
+  assert.equal(classify(["web/cloud/support/test-support.mjs"]).full, "true");
+  assert.equal(classify(["web/cloud/support/test-support.mjs"]).web_share, "false");
   // (the licence files alone: neither)
   assert.equal(classify(["web/cloud/README.md"]).web_share, "false");
   // (the full tier for another reason: no share dialog on the pull request)

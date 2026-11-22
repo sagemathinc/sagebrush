@@ -7,6 +7,9 @@
 //   parseVersion(x) -> the answer when it has exactly that shape, else null: the page shows nothing it can't check.
 //   stampText(v) -> the stamp's one line.
 //   mountVersionStamp(el) -> the page side: fetch, check, and write the line as text into el, shown only then.
+//     In the desktop app it shows the app's own build instead, from window.__SB_APP_VERSION__ (the app sets it before
+//     the page's script runs: app/src-tauri/src/version.rs), and asks no server: "Sagebrush app 0.4.0 · 1a2b3c4d".
+//   parseAppVersion(x), appStampText(v) -> the app's version, checked as strictly, and its line.
 // The stamp names the Worker that answered; it is not an attestation of what was built.
 
 export interface SiteVersion {
@@ -59,9 +62,39 @@ export function handleVersion(request: Request, buildId: { BUILD?: unknown; RELE
   });
 }
 
-/** Fill el with this site's stamp, if the site answers /api/version with one; otherwise leave it hidden. */
-export async function mountVersionStamp(el: HTMLElement | null, fetchImpl: typeof fetch = fetch): Promise<boolean> {
+export interface AppVersion {
+  version: string;
+  commit: string;
+}
+
+/** The desktop app's {version, commit}: a version of three numbers and a commit of 40 lowercase hex digits (or
+ * "unknown", a build outside a git checkout), and nothing else; else null. */
+export function parseAppVersion(x: unknown): AppVersion | null {
+  if (x === null || typeof x !== "object" || Array.isArray(x)) return null;
+  const o = x as Record<string, unknown>;
+  if (Object.keys(o).sort().join(",") !== "commit,version") return null;
+  const { version, commit } = o;
+  if (typeof version !== "string" || !/^\d{1,6}\.\d{1,6}\.\d{1,6}$/.test(version)) return null;
+  if (typeof commit !== "string" || !(SHA.test(commit) || commit === "unknown")) return null;
+  return { version, commit };
+}
+
+export function appStampText(v: AppVersion): string {
+  return `Sagebrush app ${v.version} · ${v.commit === "unknown" ? "commit unknown" : v.commit.slice(0, 8)}`;
+}
+
+/** Fill el with this site's stamp, if the site answers /api/version with one; otherwise leave it hidden. In the
+ * desktop app (`app`, its window.__SB_APP_VERSION__), the app's build instead, and no request. */
+export async function mountVersionStamp(el: HTMLElement | null, fetchImpl: typeof fetch = fetch, app: unknown = (globalThis as any).__SB_APP_VERSION__): Promise<boolean> {
   if (!el) return false;
+  if (app !== undefined) {
+    const v = parseAppVersion(app);
+    if (!v) return false;
+    el.textContent = appStampText(v);
+    el.title = `the Sagebrush app ${v.version}, built from commit ${v.commit}`;
+    el.hidden = false;
+    return true;
+  }
   try {
     const res = await fetchImpl("/api/version", { cache: "no-store", headers: { accept: "application/json" } });
     if (!res.ok) return false;
