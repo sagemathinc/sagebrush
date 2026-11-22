@@ -72,6 +72,29 @@ for (const [name, noWasm] of BACKENDS) {
     assert.equal(r.out, "1 -2 3    1\n1 1    1\n");
   });
 
+  test(`${name}: n I + ones(n) at n = 16 (LU) and n = 17 (Cholesky), near MATLAB's answer`, () => {
+    // (MATLAB R2026b, observed 2026-11-22: x for b = A * (1:n)', exact b; its LAPACK sums in its own order, so the
+    // bits differ by a few ulps, but the route shows: the other route is 21 (n = 16) and 55 (n = 17) ulps away)
+    const matlab: Record<number, string> = {
+      16: "3ff0000000000000 4000000000000000 4008000000000000 4010000000000001 4014000000000001 4018000000000001 " +
+        "401c000000000001 4020000000000000 4022000000000001 4024000000000000 4025ffffffffffff 4027ffffffffffff " +
+        "402a000000000000 402c000000000000 402e000000000000 4030000000000000",
+      17: "3fefffffffffffef 3ffffffffffffffa 4007fffffffffffd 4010000000000003 4013ffffffffffff 4017fffffffffffd " +
+        "401c000000000006 4020000000000000 4022000000000001 4023ffffffffffff 4026000000000000 4028000000000001 " +
+        "402a000000000001 402c000000000002 402dffffffffffff 4030000000000000 4031000000000000",
+    };
+    const r = run("for n = [16 17], A = n*eye(n) + ones(n); x = A \\ (A*(1:n)'); fprintf('%d', n); " +
+      "for k = 1:n, fprintf(' %s', num2hex(x(k))); end; fprintf('\\n'); end", noWasm);
+    assert.equal(r.status, 0, r.err);
+    for (const line of r.out.trim().split("\n")) {
+      const [n, ...got] = line.split(" ");
+      const want = matlab[Number(n)].split(" ");
+      const d = got.map((h, k) => Number(BigInt("0x" + h) - BigInt("0x" + want[k]))).map(Math.abs);
+      const total = d.reduce((s, v) => s + v, 0);
+      assert.ok(total <= (n === "16" ? 1 : 6) && Math.max(...d) <= 4, `n = ${n}: ${total} ulps in all, ${Math.max(...d)} at most`);
+    }
+  });
+
   test(`${name}: singular systems as an observed MATLAB run prints them, Inf, NaN and signs`, () => {
     // (MATLAB R2026b Update 2, MATLAB Online, 2026-11-21: values and warnings only. No step of the substitution
     // is skipped, so 0/0 and 0 * Inf are NaN; a diagonal A is forward-substituted; a -0 pivot flips the sign)
@@ -111,3 +134,29 @@ for (const [name, noWasm] of BACKENDS) {
     assert.ok((r.out + r.err).includes("of values that include Inf or NaN is not supported in Sagebrush"), r.out + r.err);
   });
 }
+
+test("the TypeScript path's Cholesky gives engine/nd's bits for a symmetric positive definite A with 17 <= n <= 64", () => {
+  // (engine/nd factors up to 64 columns unblocked (dpotf2), and the TypeScript path follows its arithmetic order,
+  // so the two backends agree bit for bit there; and a matrix that is not positive definite falls back to LU on both)
+  const src = [
+    "rng(5); for n = [17 30 64], M = rand(n); A = M' * M + n * eye(n); b = rand(n, 2); x = A \\ b;",
+    "  fprintf('%s ', num2hex(x(:))'); fprintf('\\n'); end",
+    "A = ones(17) + 0.5 * eye(17); A(1, 1) = 0.5; x = A \\ (1:17)'; fprintf('%.17g ', x); fprintf('\\n');",
+    // (positive definite and exactly symmetric but nearly singular, R = triu(ones(n)) with R(n, n) = 1e-7 and
+    // A = R' R: Cholesky succeeds ([~, p] = chol(A) is 0; MATLAB's decomposition(A).Type is 'chol') and rcond from
+    // its factor is below eps, so A \\ b warns; MATLAB R2026b, observed 2026-11-22, prints the same warnings,
+    // RCOND = 1.937844e-16 at n = 20 and 6.548781e-17 at n = 40, and x(1:2) = [1 0] exactly)
+    "for n = [20 40], R = triu(ones(n)); R(n, n) = 1e-7; A = R' * R; A = (A + A') / 2;",
+    "  [~, p] = chol(A); lastwarn(''); x = A \\ ones(n, 1); [~, id] = lastwarn();",
+    "  fprintf('%d %d %s %s %s\\n', n, p, id, num2hex(x(1)), num2hex(x(2))); end",
+  ].join("\n");
+  const nd = run(src, false), ts = run(src, true);
+  assert.equal(nd.status, 0, nd.err);
+  assert.equal(ts.status, 0, ts.err);
+  assert.equal(ts.out, nd.out);
+  assert.match(nd.out, /\n20 0 MATLAB:nearlySingularMatrix 3ff0000000000000 0000000000000000\n40 0 MATLAB:nearlySingularMatrix 3ff0000000000000 0000000000000000\n$/);
+  // (MATLAB's warnings, character for character, from the Cholesky factor's rcond on each backend)
+  assert.equal(nd.err, "Warning: Matrix is close to singular or badly scaled. Results may be inaccurate. RCOND =  1.937844e-16.\n" +
+    "Warning: Matrix is close to singular or badly scaled. Results may be inaccurate. RCOND =  6.548781e-17.\n");
+  assert.equal(ts.err, nd.err);
+});
