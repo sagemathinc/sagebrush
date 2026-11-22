@@ -218,7 +218,7 @@ export function mountDelegate(h: DelegateHost) {
     dlg.append(el("button", { type: "button", className: "x", ariaLabel: "Close", textContent: "×", onclick: () => dlg.close() }), panel);
     document.body.append(dlg);
     dlg.showModal();
-    let pv: { close(): void; refresh(): void } | null = null, src: ReturnType<typeof D.source> | null = null, busy = false;
+    let pv: { close(): void; refresh(): void } | null = null, src: ReturnType<typeof D.source> | null = null, busy = false, asking = false;
     // (its actions, at the proposal's foot: Close now; Merge and Ask for changes in the next steps)
     const act = (key: string, label: string) => { const b = el("button", { type: "button", textContent: label }); b.dataset.act = key; return b; };
     const merge = act("merge", T.merge), ask = act("ask", T.ask), closeBtn = act("close", T.closeTask);
@@ -248,7 +248,8 @@ export function mountDelegate(h: DelegateHost) {
       const t = D.task(id);
       const next = t?.proposal?.commit;
       if (next && next !== me.commit && t?.entry.status === "proposal") { mount(next); status.textContent = T.newRound(t.entry.round); }
-      const can = !busy && D.state() === "on" && t?.entry.status === "proposal" && t.proposal?.commit === me.commit;
+      // (busy: a Close in flight; asking: an Ask for changes in flight; either keeps both actions off)
+      const can = !busy && !asking && D.state() === "on" && t?.entry.status === "proposal" && t.proposal?.commit === me.commit;
       for (const b of [closeBtn, ask]) can ? b.removeAttribute("aria-disabled") : b.setAttribute("aria-disabled", "true");
     };
     // (Ask for changes: its block opens under the actions, for the commit shown; pressed again, it closes, the note kept)
@@ -259,7 +260,9 @@ export function mountDelegate(h: DelegateHost) {
       const b = askSlot.querySelector<HTMLElement>(".ask-block");
       if (b) { b.hidden = !b.hidden; if (!b.hidden) b.querySelector("textarea")?.focus(); return; }
       const block = askBlock(id, me.commit, () => src?.seen() ?? null, {
-        busy: (on) => { busy = on; me.sync(); },
+        busy: (on) => { asking = on; me.sync(); },
+        // (Send only while Ask for changes is: not during a Close, nor once the task has moved on)
+        may: () => ask.getAttribute("aria-disabled") !== "true",
         // (the task moved on since the proposal was read: read again (a new seq), the note kept, to send again)
         stale: () => { status.textContent = T.askStale; pv?.refresh(); },
       });
@@ -293,7 +296,7 @@ export function mountDelegate(h: DelegateHost) {
 
   // (Ask for changes, S3 P2: under the proposal's actions, the note and what goes with it; the unsent note kept per task
   //  in this browser (UI r3.2 §2), cleared once sent. `files` is the proposal's diff, read by the view)
-  function askBlock(task: string, commit: string, seen: () => { seq: number; files: readonly { path: string; change: string }[] } | null, on: { busy(b: boolean): void; stale(): void }): HTMLElement {
+  function askBlock(task: string, commit: string, seen: () => { seq: number; files: readonly { path: string; change: string }[] } | null, on: { busy(b: boolean): void; may(): boolean; stale(): void }): HTMLElement {
     const files = () => seen()?.files ?? [];
     const box = el("textarea", { id: "delegate-note", rows: 4, placeholder: T.askPlaceholder, ariaLabel: T.askLabel });
     try { box.value = localStorage.getItem(noteKey(task)) ?? ""; } catch { /* (no storage: nothing kept) */ }
@@ -310,6 +313,7 @@ export function mountDelegate(h: DelegateHost) {
         msg.textContent = box.value.trim() ? DELEGATE_TEXT.noteLong : DELEGATE_TEXT.noteEmpty;
         return;
       }
+      if (!on.may()) { msg.textContent = DELEGATE_TEXT.askMoved; return; }
       send.setAttribute("aria-disabled", "true");
       send.textContent = T.askSending;
       on.busy(true);
@@ -342,7 +346,7 @@ export function mountDelegate(h: DelegateHost) {
     s === "turning-off" ? btn.setAttribute("aria-disabled", "true") : btn.removeAttribute("aria-disabled");
     side.hidden = !(s === "on" || s === "turning-off") || !D.tasks.length;
     // (a task that's done can't be asked again: its kept note goes)
-    for (const t of D.tasks) if (t.entry.status === "closed" || t.entry.status === "merged") { try { localStorage.removeItem(noteKey(t.entry.task)); } catch { /* (no storage) */ } }
+    for (const t of D.tasks) if (t.entry.status === "closed" || t.entry.status === "merged") { try { if (localStorage.getItem(noteKey(t.entry.task)) !== null) localStorage.removeItem(noteKey(t.entry.task)); } catch { /* (no storage) */ } }
     list.replaceChildren(...D.tasks.map((t) => {
       const b = el("button", { type: "button", className: "thread task" + (t.entry.task === open ? " on" : "") }, el("span", { className: "t", textContent: t.entry.title }), el("span", { className: `chip ${t.entry.status}${t.entry.question ? " question" : ""}`, textContent: chipOf(t.entry) }));
       b.dataset.task = t.entry.task;

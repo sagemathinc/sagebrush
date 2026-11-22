@@ -100,7 +100,7 @@ try {
   await shot("4-proposal");
   // (its actions: Close and Ask for changes now; Merge not yet, and said so)
   const acts = await P.ev(`[...document.querySelectorAll('dialog.proposal[open] button[data-act]')].map((b) => [b.dataset.act, b.textContent, b.getAttribute('aria-disabled')])`);
-  ok(JSON.stringify(acts) === JSON.stringify([["merge", "Merge", "true"], ["ask", "Ask for changes", null], ["close", "Close", null]]) && /Merge comes in the next update\./.test(await P.ev(`document.querySelector('dialog.proposal[open]').textContent`)), "the proposal's actions (Close and Ask for changes on, Merge not yet, said so): Close; Merge and Ask for changes not yet, said so", acts);
+  ok(JSON.stringify(acts) === JSON.stringify([["merge", "Merge", "true"], ["ask", "Ask for changes", null], ["close", "Close", null]]) && /Merge comes in the next update\./.test(await P.ev(`document.querySelector('dialog.proposal[open]').textContent`)), "the proposal's actions: Close and Ask for changes on; Merge not yet, said so", acts);
   // (a newer round of the task, while its proposal is open: it replaces the one shown, in place)
   const r2 = await H.propose(A.task, { "work/notes.txt": "one\ntwo\nthree\n" });
   await P.until(`document.querySelector('dialog.proposal[open] .sbpv h3')?.textContent === 'Proposal, round 2'`, 20000);
@@ -135,6 +135,9 @@ try {
   await P.ev(`(() => { const t = document.querySelector('#delegate-note'); t.value = '  Also number the lines.\\n'; t.dispatchEvent(new Event('input')); ${block}.querySelector('button.primary').click(); })()`);
   const said = await P.until(`/moved on since you opened this/.test(document.querySelector('dialog.proposal[open] .proposal-actions [role=status]').textContent)`, 5000).then(() => true, () => false);
   const reread = await hostUntil(() => H.got.filter((m) => m.method === "tasks.diff").length > diffs0, 5000);
+  // (and the page has the re-read: the view drawn again, its actions back under it)
+  await P.until(`!!document.querySelector('dialog.proposal[open] .sbpv .file') && !!document.querySelector('dialog.proposal[open] .proposal-actions')?.isConnected`, 10000).catch(() => {});
+  await sleep(100);
   const st = await P.ev(`({ said: ${JSON.stringify(said)}, reread: ${JSON.stringify(reread)}, note: document.querySelector('#delegate-note')?.value, send: ${block}.querySelector('button.primary').getAttribute('aria-disabled') })`);
   ok(st.said && st.reread && H.asks.length === 0 && st.note === "  Also number the lines.\n" && st.send === null, "the task moved on since it was read: refused (stale), said so, the proposal read again, the note kept to send again", st);
   // (sent while held at the host: Close can't be pressed meanwhile)
