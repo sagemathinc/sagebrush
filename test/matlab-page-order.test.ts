@@ -17,6 +17,18 @@ test("MATLAB page-order scoping: a redefinition and its reads (src/rename-matlab
   assert.equal(ren("x = x + 1;\ndisp(x)", "x", { from: "definition" }), `x${S}2 = x + 1;\ndisp(x${S}2)`);
   assert.equal(ren("disp(x)\nx = 3; y = x", "x", { from: "definition" }), `disp(x)\nx${S}2 = 3; y = x${S}2`);
   assert.equal(ren("[a, x] = size(x);", "x", { from: "definition" }), `[a, x${S}2] = size(x);`);
+  // (a right-hand side over several lines is still the statement that binds: its reads are of the previous x, in
+  // [ ] and { } (whose newlines separate rows), ( ) and after a continuation; the REACT review of 14073a7a)
+  assert.equal(ren("x = [\n x\n]; disp(x)", "x", { from: "definition" }), `x${S}2 = [\n x\n]; disp(x${S}2)`);
+  assert.equal(ren("x = {1\n x\n 3};\ndisp(x)", "x", { from: "definition" }), `x${S}2 = {1\n x\n 3};\ndisp(x${S}2)`);
+  // (a ; and then a newline inside the brackets)
+  assert.equal(ren("x = [1;\n x]", "x", { from: "definition" }), `x${S}2 = [1;\n x]`);
+  assert.equal(ren("x = {1;\n x}", "x", { from: "definition" }), `x${S}2 = {1;\n x}`);
+  assert.equal(ren("x = max(1, ...\n  x);\ny = x", "x", { from: "definition" }), `x${S}2 = max(1, ...\n  x);\ny = x${S}2`);
+  assert.equal(ren("x = sum(\n  x);\ny = x", "x", { from: "definition" }), `x${S}2 = sum(\n  x);\ny = x${S}2`);
+  assert.equal(ren("x = x + ...\n  x; z = x", "x", { from: "definition" }), `x${S}2 = x + ...\n  x; z = x${S}2`);
+  // (and a row of a matrix that starts a line is not a statement: [a\n x] reads x, it does not store it)
+  assert.equal(ren("m = [1\n x];\nx = 2;\nk = x", "x", { from: "definition" }), `m = [1\n x];\nx${S}2 = 2;\nk = x${S}2`);
   // (a reader: every occurrence, but fields, strings, comments and command words)
   assert.equal(ren("s.x = x; disp('x') % x\nhold on\nplot(x(end))", "x"), `s.x = x${S}2; disp('x') % x\nhold on\nplot(x${S}2(end))`);
   // (the cell's functions have their own workspace)

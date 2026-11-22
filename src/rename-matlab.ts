@@ -44,12 +44,13 @@ function occurrences(toks: Tok[], name: string): Occ[] | null {
   if (dynamic && toks.some((t) => (t.t === "str" || t.t === "dqstr") && named.test(t.v))) return null;
   const out: Occ[] = [];
   const isOp = (t: Tok | undefined, v: string) => !!t && t.t === "op" && t.v === v;
-  // (a statement's end: a newline, or a ; or , outside brackets)
+  // (a statement's end: a newline, or a ; or , outside brackets; a newline in [ ] or { } separates rows, and the
+  // lexer makes ( )'s newlines and a continuation's (...) space, the REACT review of 14073a7a)
   const stmtEnd = (from: number): number => {
     let depth = 0;
     for (let k = from; k < toks.length; k++) {
       const t = toks[k];
-      if (t.t === "eof" || t.t === "nl") return k - 1;
+      if (t.t === "eof" || (t.t === "nl" && depth <= 0)) return k - 1;
       if (t.t === "op") {
         if ("([{".includes(t.v)) depth++;
         else if (")]}".includes(t.v)) depth--;
@@ -92,7 +93,7 @@ function occurrences(toks: Tok[], name: string): Occ[] | null {
     const startsStmt = atStmt;
     if (startsStmt) stmt = [k, stmtEnd(k)];
     atStmt = false;
-    if (t.t === "nl") { atStmt = true; continue; }
+    if (t.t === "nl") { if (depth <= 0) atStmt = true; continue; }
     if (t.t === "op") {
       if ("([{".includes(t.v)) depth++;
       else if (")]}".includes(t.v)) depth--;
