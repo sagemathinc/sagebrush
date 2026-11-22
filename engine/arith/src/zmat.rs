@@ -29,7 +29,7 @@
 //! product; copies of entries are Move, a unit per limb.  Scans that only
 //! read sizes or signs (max_bits, the zero tests) are not counted.
 
-use crate::cost::{bigdiv_units, bigeuclid_units, biggcd_units, bigmul_units, bigsqrt_units, Family, Local, Units};
+use crate::cost::{bigdiv_units, bigeuclid_units, biggcd_units, bigmul_units, bigsqrt_units, size_product, Family, Local, Units};
 use crate::nmod::{Modulus, Primes};
 use crate::nmod_mat::{Lu, Mat};
 use num_integer::Integer;
@@ -1452,8 +1452,8 @@ pub fn inverse_model(a: &ZMat, lx: usize, fold: u64, le: Option<usize>) -> Units
         }
     }
     let pc = primes.len() as u64;
-    let n2 = (n * n) as u64;
-    let red: u64 = a.d.iter().map(|x| if x.to_i64().is_some() { 1 } else { reduce_units(x) }).sum();
+    let n2 = size_product(&[n, n]);
+    let red: u64 = a.d.iter().map(|x| if x.to_i64().is_some() { 1 } else { reduce_units(x) }).fold(0, u64::saturating_add);
     // (the echelon's count depends on the prime only through its batch
     // length: one count per distinct batch, times its primes)
     let mut batches: Vec<(usize, u64)> = vec![];
@@ -1470,9 +1470,9 @@ pub fn inverse_model(a: &ZMat, lx: usize, fold: u64, le: Option<usize>) -> Units
             *x = x.saturating_add(y.saturating_mul(c));
         }
     }
-    u.0[Family::ModArith as usize] = u.0[Family::ModArith as usize].saturating_add(pc * (red + n2));
+    u.0[Family::ModArith as usize] = u.0[Family::ModArith as usize].saturating_add(pc.saturating_mul(red.saturating_add(n2)));
     // the identity (a zero matrix, n^2) and the augment (n 2n)
-    u.0[Family::Move as usize] = u.0[Family::Move as usize].saturating_add(pc * (n2 + 2 * n2));
+    u.0[Family::Move as usize] = u.0[Family::Move as usize].saturating_add(pc.saturating_mul(n2.saturating_mul(3)));
     // the CRT: n^2 + 1 reconstructions over qlen-word quotients
     let mut prod = BigInt::one();
     for &p in &primes {
@@ -1482,7 +1482,7 @@ pub fn inverse_model(a: &ZMat, lx: usize, fold: u64, le: Option<usize>) -> Units
     let qlen = (prod.bits() as usize).div_ceil(64) + 1;
     let rec = crate::crt::MultiCrt::units_for(primes.len(), qlen);
     for (x, y) in u.0.iter_mut().zip(&rec.0) {
-        *x = x.saturating_add(y.saturating_mul(n2 + 1));
+        *x = x.saturating_add(y.saturating_mul(n2.saturating_add(1)));
     }
     // the determinant's copy, and the fold
     u.0[Family::Move as usize] = u.0[Family::Move as usize].saturating_add(lx as u64);
@@ -1496,7 +1496,7 @@ pub fn inverse_model(a: &ZMat, lx: usize, fold: u64, le: Option<usize>) -> Units
             u.add_saturating(&biggcd_units(lx, lx));
             let (g, d) = (biggcd_units(lx, le), bigdiv_units(lx, le));
             for (x, (y, z)) in u.0.iter_mut().zip(g.0.iter().zip(&d.0)) {
-                *x = x.saturating_add(y.saturating_mul(n2.saturating_sub(1))).saturating_add(z.saturating_mul(n2 + 1));
+                *x = x.saturating_add(y.saturating_mul(n2.saturating_sub(1))).saturating_add(z.saturating_mul(n2.saturating_add(1)));
             }
         }
     }

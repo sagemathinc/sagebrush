@@ -10,7 +10,7 @@
 //! reductions of inputs (ModArith); copies, row swaps, transposes and
 //! zero fills (Move).
 
-use crate::cost::{publish_progress, tally, tally_all, Family, FAMILIES};
+use crate::cost::{publish_progress, size_product, tally, tally_all, Family, FAMILIES};
 use crate::nmod::{mul_shoup, Modulus};
 
 /// P A = L U modulo p: L lower triangular (the pivots on its diagonal),
@@ -165,8 +165,8 @@ pub(crate) fn echelon_units_dense(rows: usize, cols: usize, batch: usize) -> [u6
     let mut u = [0u64; FAMILIES];
     let (ms, ma, mv) = (Family::MulSchool as usize, Family::ModArith as usize, Family::Move as usize);
     let upd = |u: &mut [u64; FAMILIES], len: usize, factors: usize| {
-        u[ms] = u[ms].saturating_add((factors * len) as u64);
-        u[ma] = u[ma].saturating_add((len * (factors / batch + 1)) as u64);
+        u[ms] = u[ms].saturating_add(size_product(&[factors, len]));
+        u[ma] = u[ma].saturating_add(size_product(&[len, factors / batch + 1]));
         u[mv] = u[mv].saturating_add(len as u64);
     };
     let mut block_start = 0;
@@ -174,8 +174,8 @@ pub(crate) fn echelon_units_dense(rows: usize, cols: usize, batch: usize) -> [u6
         let col = r;
         let blk = r - block_start;
         if blk > 0 {
-            u[ms] = u[ms].saturating_add(((rows - r) * blk) as u64);
-            u[ma] = u[ma].saturating_add(reductions(rows - r, blk, batch) as u64);
+            u[ms] = u[ms].saturating_add(size_product(&[rows - r, blk]));
+            u[ma] = u[ma].saturating_add(size_product(&[rows - r, blk / batch + 1]));
             upd(&mut u, cols - (col + 1), blk);
         }
         u[ma] = u[ma].saturating_add((cols - col) as u64 + 1);
