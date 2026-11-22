@@ -19,6 +19,8 @@ sagebrush-arith = { path = "../arith", default-features = false }
 sagebrush-poly = { path = "../poly", features = ["bench"] }
 # (the hermite meter test counts the Stop checks)
 sagebrush-interrupt = { path = "../interrupt", features = ["test-hooks"] }
+# (hnf_mod's extended gcd with the fallback forced, tests/hnf_mod_xgcd_charge.rs)
+sagebrush-bigint = { path = "../bigint", features = ["test-hooks"] }
 
 [lints]
 workspace = true

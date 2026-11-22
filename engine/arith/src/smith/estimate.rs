@@ -25,7 +25,7 @@
 //! ceilings.  `cost()` reports `work_estimate = None` until the
 //! calibration's $k_{\text{machine}}$ lands.
 
-use crate::cost::{bigdiv_units, biggcd_units, bigmul_units, size_product, Cost, Family, Units, FAMILIES};
+use crate::cost::{bigdiv_units, biggcd_units, bigmul_units, bigxgcd_units, size_product, xgcd_check_units, Cost, Family, Units, FAMILIES};
 use crate::zmat::{self, limbs, ZMat};
 use num_traits::{One, Signed, Zero};
 use sagebrush_bigint::BigInt;
@@ -69,7 +69,7 @@ pub const FITTED: Constants = Constants {
     part_a_cubic: 0.927,
     multiplier: 0.92,
     vinv_of_delta: 1.5,
-    scale: [0.548, 0.717, 0.837, 0.436],
+    scale: [0.548, 0.712, 0.837, 0.439],
     fit_head: "f7c3c93cd71f4d73df5e30851e2d30feb71226bc",
     fit_from: "the estimate test's training corpus (seed 1); the multiplier from route 2's phase data",
 };
@@ -341,7 +341,9 @@ pub fn cyclic_model(n: usize, ld: usize, ln: usize, attempts: u64, fold: usize, 
             }
         } else {
             for e in 0..entries {
-                u.add_saturating(&biggcd_units(if e == 0 { ld } else { 1 }, ld));
+                // (the unit combination's extended gcd, checked on its
+                // coefficients)
+                u.add_saturating(&bigxgcd_units(if e == 0 { ld } else { 1 }, ld));
                 if e + 1 == entries && t + 1 == attempts {
                     {
                         let mut one3 = Units::default();
@@ -531,6 +533,11 @@ pub fn trailing_model(n: usize, k: usize, ld: usize, ln: usize, attempts: u64, w
         c_entry.add_saturating(&bigdiv_units(2 * ld, ld));
     }
     times(&mut u, top as u64, &q_row);
+    // (the k inverses of s_j / g_j modulo d_j: their extended gcds' check,
+    // on either path)
+    for j in 0..k {
+        u.add_saturating(&xgcd_check_units(dl(j), dl(j)));
+    }
     times(&mut u, size_product(&[top, k]), &c_entry);
     op(&mut u, size_product(&[k, k, k, 4]));
     // the small Smith form's transforms, as measured on route 2's own runs:

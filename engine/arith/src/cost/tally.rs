@@ -218,6 +218,44 @@ pub fn biggcd_units(la: usize, lb: usize) -> Units {
     one(Family::Gcd, n)
 }
 
+/// Units of the check on a BigInt extended gcd's coefficients, x a + y b
+/// = g, for operands of `la` and `lb` limbs: the two products (x has about
+/// `lb` limbs and multiplies a, y about `la` and multiplies b:
+/// `bigmul_units(la, lb)` each, MulSchool) and the sum's compare with g
+/// (AddSub, `la + lb`).
+pub fn xgcd_check_units(la: usize, lb: usize) -> Units {
+    let mut u = bigmul_units(la, lb);
+    u.add(&bigmul_units(la, lb));
+    u.add(&one(Family::AddSub, la.saturating_add(lb) as u64));
+    u
+}
+
+/// Units of a checked BigInt extended gcd (`extended_gcd_metered`): the gcd
+/// ([`biggcd_units`]) and the check on its coefficients
+/// ([`xgcd_check_units`]).  Plain gcds, which do no check, keep
+/// `biggcd_units`.
+pub fn bigxgcd_units(la: usize, lb: usize) -> Units {
+    let mut u = biggcd_units(la, lb);
+    u.add(&xgcd_check_units(la, lb));
+    u
+}
+
+/// Units of the checked extended gcd's fallback, when it ran (dashu's
+/// coefficients failed their check): each plain Euclid step at its own
+/// sizes, the remainder's (`bigeuclid_units` of its dividend and divisor)
+/// and the two coefficients' updates (its quotient times each, as Gcd).
+/// Nothing when it did not run.
+pub fn xgcd_fallback_units(f: Option<&sagebrush_bigint::XgcdFallback>) -> Units {
+    let mut u = Units::default();
+    for &[la, lb, ls, lt] in f.map_or(&[][..], |f| &f.steps[..]) {
+        let (la, lb) = (la.max(lb), la.min(lb));
+        u.add(&bigeuclid_units(la, lb));
+        let q = la - lb + 1;
+        u.add(&one(Family::Gcd, bigmul_units(q, ls).total().unwrap_or(u64::MAX).saturating_add(bigmul_units(q, lt).total().unwrap_or(u64::MAX))));
+    }
+    u
+}
+
 /// Units of the integer square root of a value of `bits` bits (Newton's
 /// iteration): the bit length of `bits` steps, each a division of the
 /// value (l = ceil(bits / 64) limbs, at least 1) by a root of ceil(l / 2)

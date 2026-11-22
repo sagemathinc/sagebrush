@@ -11,7 +11,7 @@
 #![cfg(not(target_arch = "wasm32"))]
 
 use num_integer::Integer;
-use sagebrush_arith::cost::{bigdiv_units, biggcd_units, bigmul_units, tallied, Family, Units, FAMILIES};
+use sagebrush_arith::cost::{bigdiv_units, bigmul_units, bigxgcd_units, tallied, xgcd_check_units, Family, Units, FAMILIES};
 use sagebrush_arith::smith;
 use sagebrush_arith::zmat::{self, ZMat};
 use sagebrush_bigint::BigInt;
@@ -216,6 +216,13 @@ fn a_stop_charges_only_the_work_before_it() {
     let mut want = [0; FAMILIES];
     want[Family::ModArith as usize] = 4 + (euclid_steps(4, 2) + euclid_steps(4, 1)) + 2 + (2 + euclid_steps(1, 2)) + (2 + euclid_steps(1, 4)) + 2 * (1 + 4) + (euclid_steps(4, 2) + 1);
     want[Family::MulSchool as usize] = 2;
+    // (each inverse's extended gcd checked on its coefficients: one-limb
+    // operands)
+    for _ in 0..2 {
+        for (x, y) in want.iter_mut().zip(xgcd_check_units(1, 1).0) {
+            *x += y;
+        }
+    }
     assert_eq!(got, want, "route 2 at k = n stopped at the small Smith form's pivot 1: everything before it and pivot 0's pass");
     // the tenth check is the first of the transforms' factors (one a
     // column of each O(k^3) pass, k reaching n): pivot 1's pass found the
@@ -282,7 +289,8 @@ fn a_stop_charges_only_the_work_before_it() {
     // since the fourth.
     want.0[Family::Move as usize] += 3 + (2 + 2);
     want.add(&bigdiv_units(l1, lq));
-    want.add(&biggcd_units(lq, l1));
+    // (the bezout's extended gcd, checked on its coefficients)
+    want.add(&bigxgcd_units(lq, l1));
     want.add(&bigdiv_units(2 * ld, ld));
     want.add(&bigdiv_units(2 * ld, ld));
     for (xr, xj) in [(&q, &BigInt::from(1)), (&BigInt::from(0), &BigInt::from(1))] {

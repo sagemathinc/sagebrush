@@ -34,7 +34,7 @@
 //! e through the Gcd units.  The determinant and the solve count
 //! themselves.
 
-use crate::cost::{bigdiv_units, biggcd_units, bigmul_units, Family, Local, Units, FAMILIES};
+use crate::cost::{bigdiv_units, biggcd_units, bigmul_units, bigxgcd_units, xgcd_fallback_units, Family, Local, Units, FAMILIES};
 use std::cell::Cell;
 use crate::zmat::{self, limbs, ZMat};
 use num_integer::Integer;
@@ -267,10 +267,11 @@ impl Zn for Big {
         r.is_zero().then_some(q)
     }
     fn bezout(&self, p: &BigInt, a: &BigInt, _: &mut u64) -> (BigInt, BigInt, BigInt, BigInt) {
-        self.count(biggcd_units(limbs(p), limbs(a)));
+        self.count(bigxgcd_units(limbs(p), limbs(a)));
         self.count(bigdiv_units(2 * self.le, self.le));
         self.count(bigdiv_units(2 * self.le, self.le));
-        let eg = p.extended_gcd(a);
+        let (eg, fallback) = sagebrush_bigint::extended_gcd_metered(p, a);
+        self.count(xgcd_fallback_units(fallback.as_ref()));
         (eg.x.mod_floor(&self.e), eg.y.mod_floor(&self.e), a / &eg.gcd, p / &eg.gcd)
     }
     fn gcd_e(&self, x: &BigInt, _: &mut u64) -> BigInt {
@@ -304,8 +305,9 @@ impl Zn for Big {
             if yj.is_zero() {
                 continue;
             }
-            self.count(biggcd_units(limbs(&g), limbs(yj)));
-            let eg = g.extended_gcd(yj);
+            self.count(bigxgcd_units(limbs(&g), limbs(yj)));
+            let (eg, fallback) = sagebrush_bigint::extended_gcd_metered(&g, yj);
+            self.count(xgcd_fallback_units(fallback.as_ref()));
             let s = eg.x.mod_floor(&self.e);
             let ls = limbs(&s);
             for (_, m) in mu.iter_mut() {

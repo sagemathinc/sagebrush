@@ -641,8 +641,9 @@ pub fn small_smith_pick(rel: &ZMat, delta: &BigInt) -> (Vec<BigInt>, ZMat, ZMat,
 /// x p + y a = g over Z (p > 0), with (x, y, a / g, p / g): the matrix
 /// [[x, y], [-a/g, p/g]] has determinant 1 and |x| <= a / g, |y| <= p / g.
 /// Counted after the work: on the word path one ModArith unit per quotient
-/// step and per division by g (into `steps`); on the big path as the big
-/// ring's Bezout, `biggcd_units` and the two divisions by g.
+/// step and per division by g (into `steps`); on the big path
+/// `biggcd_units` and the two divisions by g (an extended Euclid of its own:
+/// no check on the coefficients, unlike the big ring's Bezout).
 fn int_bezout(p: &BigInt, a: &BigInt, word: bool, steps: &mut u64, acc: &mut Local) -> (BigInt, BigInt, BigInt, BigInt) {
     let (mut r0, mut r1) = (p.clone(), a.clone());
     let (mut x0, mut x1, mut y0, mut y1) = (BigInt::one(), BigInt::zero(), BigInt::zero(), BigInt::one());
@@ -1176,7 +1177,11 @@ fn trailing<R: Zn>(ring: &R, nm: &ZMat, delta: &BigInt, d: &BigInt, k: usize, ac
             .map(|j| {
                 let m = delta / &g[j];
                 let sj = (&s[j] / &g[j]).mod_floor(&m);
-                let e = sj.extended_gcd(&m);
+                let (e, fallback) = sagebrush_bigint::extended_gcd_metered(&sj, &m);
+                // (the check on its coefficients, and the fallback when it
+                // ran, on either path)
+                acc.add(crate::cost::xgcd_check_units(limbs(&sj), limbs(&m)));
+                acc.add(crate::cost::xgcd_fallback_units(fallback.as_ref()));
                 if R::WORD {
                     let (mut a, mut b) = (sj.to_i128().unwrap_or(0), m.to_i128().unwrap_or(1));
                     let mut steps = 2u64;
