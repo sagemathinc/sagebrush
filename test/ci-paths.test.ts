@@ -647,7 +647,7 @@ test("a changed suite runs on its own pull request: its `// ci:` job, and the fu
   // (ci.yml runs each job's groups in a loop that keeps going after a failure, and fails the step if any failed)
   const yml = readFileSync(join(__dirname, "..", "..", ".github", "workflows", "ci.yml"), "utf8");
   const browser = yml.slice(yml.indexOf("\n  web-browser:\n"), yml.indexOf("\n  conformance:\n"));
-  assert.ok(browser.includes("for GROUP in $GROUPS; do") && browser.includes('[ -z "$failed" ] || { echo "::error::failed groups:$failed"; exit 1; }'));
+  assert.ok(browser.includes("for GROUP in $WEB_GROUPS; do") && !/^ +GROUPS:/m.test(browser) && browser.includes('[ -z "$failed" ] || { echo "::error::failed groups:$failed"; exit 1; }'));
   assert.ok(!/--shard "\$\{\{ matrix\.shard \}\}/.test(browser), "no group is sharded any more");
   // a deleted suite (not in the checkout) runs nowhere
   assert.equal(classify(["web/gone/test-gone.mjs"], "", at).full, "false");

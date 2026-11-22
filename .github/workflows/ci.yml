@@ -1202,7 +1202,8 @@ jobs:
       - name: browser groups ${{ matrix.groups }}
         env:
           CHROME: google-chrome
-          GROUPS: ${{ matrix.groups }}
+          # (not GROUPS: bash's own array of the user's group ids, which an environment variable can't replace)
+          WEB_GROUPS: ${{ matrix.groups }}
         run: |
           python3 web/serve.py 8765 &
           server_pid=$!
@@ -1218,7 +1219,8 @@ jobs:
           # (every group of this job runs, in order, even after one failed; the step fails if any did.  The terminal
           # group rebuilds web/dist with the bash set, so it is last in its job: ci-paths WEB_BUCKETS)
           failed=""
-          for GROUP in $GROUPS; do
+          [ -n "$WEB_GROUPS" ] || { echo "::error::no browser groups"; exit 1; }
+          for GROUP in $WEB_GROUPS; do
           echo "::group::$GROUP"
           # (set -e holds inside the subshell only if the subshell isn't itself tested, as `( ... ) || rc=$?` would
           # be: so errexit is off around it, and each group stops at its first failing command)
@@ -1277,6 +1279,10 @@ jobs:
               node scripts/web-tests.mjs run web-browser/board-unit.1
               bun web/board/gen-merge3-board-vectors.mjs --check
               node scripts/web-tests.mjs run web-browser/board-unit.2
+              ;;
+            *)
+              echo "unknown browser group $GROUP"
+              exit 1
               ;;
           esac
           )
@@ -1370,7 +1376,8 @@ jobs:
           NPY_DISABLE_CPU_FEATURES: "X86_V4 AVX512_ICL AVX512_SPR"
         run: |
           failed=""
-          group() { echo "::group::$1"; rc=0; shift; "$@" || rc=$?; echo "::endgroup::"; return $rc; }
+          # (its own status, local: the caller's rc must keep an earlier command's failure)
+          group() { local status=0; echo "::group::$1"; shift; "$@" || status=$?; echo "::endgroup::"; return $status; }
           for GROUP in sage magma-matlab numeric aux; do
             rc=0
             case "$GROUP" in
@@ -1388,6 +1395,7 @@ jobs:
                 group pypi python3 pypi-tests/run.py || rc=$?
                 group calculus python3 sage-tests/run_calculus.py || rc=$?
                 ;;
+              *) echo "unknown mode group $GROUP"; rc=1 ;;
             esac
             [ "$rc" = 0 ] || failed="$failed $GROUP"
           done
