@@ -45,7 +45,7 @@ export const DELEGATE_UI_TEXT = {
   tasks: "Tasks",
   steer: "Stop and tell Claude…",
   steerSend: "Stop and send",
-  steerNote: "What should Claude know? It stops now, then carries on from where it was with this.",
+  steerNote: "What should Claude know? When you choose Stop and send, the task stops, then resumes with this note.",
   resume: "Resume",
   resumeNote: "Resume with a note…",
   resumeNoteHint: "What should Claude know when it carries on?",
