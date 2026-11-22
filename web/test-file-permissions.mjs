@@ -269,7 +269,8 @@ const trusted = async (sel) => {
   await sleep(200);
 };
 // (File > Permissions…, the panel with the File writes switch: opened and closed as a person does, by clicks and Escape)
-const openPerms = async () => { await trusted("#filebtn"); await trusted("#permsmenu"); };
+// (a refused write's prompt, a modal, closed first if it is open (Escape, unanswered), as the person would: File is behind it)
+const openPerms = async () => { if (await ev("!!document.querySelector('#filesbar')?.open")) await closePerms(); await trusted("#filebtn"); await trusted("#permsmenu"); };
 const closePerms = async () => { for (const type of ["keyDown", "keyUp"]) await send("Input.dispatchKeyEvent", { type, key: "Escape", code: "Escape", windowsVirtualKeyCode: 27 }); await sleep(150); };
 const filesSwitch = async () => { await openPerms(); await trusted("#filesperm"); await closePerms(); };
 const out = (i = 0) => ev(`[...document.querySelectorAll('#cells .cell')][${i}]?.querySelector('.out')?.textContent ?? ''`);
