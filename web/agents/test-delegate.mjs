@@ -6,8 +6,9 @@
 // files checked against their blob ids.
 //   bun web/agents/test-delegate.mjs
 import { AgentPairing } from "../workspace/agent-pair.ts";
-import { DelegateTasks, chipOf, DELEGATE_TEXT } from "./delegate.ts";
+import { DelegateTasks, chipOf, currentOf, DELEGATE_TEXT, DELEGATE_LIMITS } from "./delegate.ts";
 import { delegateHost } from "./test-delegate-host.mjs";
+import { isDone, mergedParams, newRecord, prepare, run } from "./delegate-merge.ts";
 
 let failures = 0;
 const ok = (c, msg, extra) => { console.log((c ? "ok   " : "FAIL ") + msg + (!c && extra !== undefined ? " " + JSON.stringify(extra).slice(0, 400) : "")); if (!c) failures++; };
@@ -101,6 +102,35 @@ ok(/^[0-9a-f]{32}$/.test(id) && D.tasks.length === before + 1 && st.params.targe
   ok((await why(src.file("work/notes.txt", d.proposal))) === "stale", "bytes whose blob id isn't the diff's: refused (stale), never shown");
   A.commits.get(d.proposal)["work/notes.txt"].blob = "0".repeat(40);
   ok((await why(src.file("work/notes.txt", d.proposal))) === "stale", "an answer naming another blob than the diff's: refused (stale)");
+}
+
+// ---- Ask for changes (S3 P2): the note and the person's current versions back to the same task; its next round
+{
+  const asks = () => sentTasks(H).filter((m) => m.method === "tasks.ask").length;
+  const commit1 = tA().proposal.commit;
+  ok((await why(D.ask(A.task, { proposal: commit1, seq: 0, note: "   ", current: [] }))) === "bad_request" && asks() === 0, "an empty note: refused here, nothing sent");
+  ok((await why(D.ask(A.task, { proposal: commit1, seq: 0, note: "x".repeat(DELEGATE_LIMITS.noteBytes + 1), current: [] }))) === "too_large" && asks() === 0, "a note over 16 KB: refused here, nothing sent");
+  ok((await why(D.ask(A.task, { proposal: "f".repeat(40), seq: 0, note: "more", current: [] }))) === "stale" && asks() === 0, "a proposal that isn't the task's latest: refused here (stale), nothing sent");
+  ok((await why(D.ask(A.task, { proposal: commit1, seq: 0, note: "more", current: [{ path: "work/notes.txt", kind: "file", content: "x".repeat(4 * 2 ** 20 + 1) }] }))) === "too_large" && asks() === 0, "a current version over 4 MB: refused here, by name, nothing sent");
+  // (the current versions: the task's own files only, as the workspace has them; one gone is left out)
+  const files = [{ path: "work/a.ipynb", change: "modified" }, { path: "work/new.txt", change: "added" }, { path: "work/notes.txt", change: "modified" }];
+  const read = async (path) => { if (path === "work/notes.txt") throw new Error("gone"); return { path, kind: path.endsWith(".ipynb") ? "notebook" : "file", content: "mine of " + path }; };
+  const current = await currentOf(files, read);
+  ok(current.map((d) => d.path).join() === "work/a.ipynb" && current[0].content === "mine of work/a.ipynb", "the current versions: the task's own files (not one the agent added), one gone from the workspace left out", current.map((d) => d.path));
+  const src = D.source(A.task, commit1);
+  await src.diff();
+  const seq = src.seen().seq;
+  const r = await D.ask(A.task, { proposal: commit1, seq, note: "  Also a line at the top.\n", current });
+  const sent = sentTasks(H).findLast((m) => m.method === "tasks.ask")?.params;
+  ok(r.status === "working" && sent?.task === A.task && sent.proposal === commit1 && sent.seq === seq && sent.note === "Also a line at the top." && sent.current.length === 1 && H.asks.length === 1, "Ask for changes: tasks.ask with the proposal, the task's seq, the note (trimmed) and the current versions", sent);
+  ok(chipOf(tA().entry) === "Working", "the chip back to Working at once", chipOf(tA().entry));
+  await until(() => tA().entry.seq > seq);
+  ok((await why(D.ask(A.task, { proposal: commit1, seq, note: "again", current: [] }))) === "stale" && asks() === 1, "asked again on the same proposal, now moved on: refused (stale), said as such", asks());
+  ok((await D.ask(A.task, { proposal: commit1, seq, note: "again", current: [] }).catch((e) => e.message)) === DELEGATE_TEXT.askMoved, "its words: open the latest proposal");
+  // (the next round, from the agent: the chip Proposal ready again, with round 2's commit)
+  const commit2 = await H.propose(A.task, { "work/notes.txt": "top\none\ntwo\n" });
+  await until(() => tA().entry.proposal === commit2 && tA().entry.status === "proposal");
+  ok(tA().entry.proposal === commit2 && tA().entry.round === 2 && chipOf(tA().entry) === "Proposal ready", "round 2: the chip Proposal ready again, the task's proposal now round 2's commit", { round: tA().entry.round, chip: chipOf(tA().entry) });
 }
 
 // ---- the switch's off: Start refused from its first moment; the chosen tasks closed first; then the capability
@@ -277,6 +307,51 @@ for (const [what, event, chip] of [["failed", { type: "task_status", status: "fa
   ok((await why(D8.close(T2.task, T2.proposal, s2.seen().seq))) === "stale" && H8.tasks.get(T2.task).status === "proposal", "a task that moved on since it was read: refused (stale), not closed");
   P8.revoke();
   H8.stop();
+}
+
+// ---- Merge's record at the agent (tasks.merged): from the proposal as read; idempotent by merge_id
+{
+  const H9 = delegateHost();
+  const T = await H9.addTask({ title: "merge", base: { "a.txt": "x\nb\nc\n" }, proposal: { "a.txt": "y\nb\nc\n" } });
+  const U = await H9.addTask({ title: "moved", base: { "a.txt": "x\nb\nc\n" }, proposal: { "a.txt": "z\nb\nc\n" } });
+  const D9 = new DelegateTasks({ changed: () => {} });
+  const P9 = pairWith(H9);
+  D9.attach(P9);
+  await P9.paired();
+  await P9.allow({ folders: ["/"], write: true, expires: null }, false);
+  const mine = { "a.txt": { id: { kind: "file", fid: "f1", created: 1, ref: null }, rev: 1, text: "x\nb\nc\nmine\n" } };
+  const io = { async mine(p) { return mine[p] ? { ...mine[p] } : null; }, async write(p, k, text, at) { mine[p] = { ...at, rev: at.rev + 1, text }; return at.id; }, async create() { throw new Error("no"); }, async remove() {}, async load() {}, async save() {}, merged: (t, p) => D9.merged(t, p) };
+  const params = { task: T.task, proposal: T.proposal, seq: 1, merge_id: "a".repeat(32), files: [] };
+  ok((await why(D9.merged(T.task, params))) === "forbidden" && !H9.got.some((m) => m.method === "tasks.merged"), "tasks.merged with the switch off: refused here, nothing sent");
+  D9.turnOn();
+  await until(() => D9.tasks.length === 2);
+  const src = D9.source(T.task, T.proposal);
+  await src.diff();
+  const seen = src.seen();
+  ok(seen.base === T.base && seen.commit === T.proposal && seen.files.length === 1, "a proposal read: its base, commit and files, for the decision", seen);
+  const pin = { task: T.task, base: seen.base, proposal: seen.commit, seq: seen.seq, files: seen.files };
+  const plans = await prepare(io, src, pin);
+  const rec = await run(io, newRecord(pin, plans, {}));
+  ok(isDone(rec) && mine["a.txt"].text === "y\nb\nc\nmine\n" && H9.got.filter((m) => m.method === "tasks.file").length === 2, "Merge through the page's source: both sides read and checked, the person's file written", mine["a.txt"]);
+  const req = await mergedParams(rec);
+  const r1 = await D9.merged(T.task, req);
+  ok(r1.recorded === "merge" && /^[0-9a-f]{40}$/.test(r1.commit), "tasks.merged with every file in full: recorded as a merge, its commit", r1);
+  await until(() => D9.task(T.task)?.entry.status === "merged");
+  ok(chipOf(D9.task(T.task).entry) === "Merged", "after it is recorded, the chip says Merged");
+  const r2 = await D9.merged(T.task, await mergedParams(rec));
+  ok(JSON.stringify(r2) === JSON.stringify(r1) && H9.tasks.get(T.task).log.filter((e) => e.event.status === "merged").length === 1, "a retry after a lost answer (the same merge_id, the same bytes): the same answer, recorded once");
+  ok((await why(D9.merged(T.task, { ...req, files: req.files.map((f) => ({ ...f, merged: { absent: true } })) }))) === "conflict", "the same merge_id with another request: refused (conflict)");
+  ok((await why(D9.merged(T.task, { ...req, merge_id: "b".repeat(32) }))) === "final", "a new merge_id for a task already merged: refused (final)");
+  // (the task moved on after its proposal was read: a decision on it refused)
+  mine["a.txt"].text = "x\nb\nc\nmine\n";
+  const su = D9.source(U.task, U.proposal);
+  await su.diff();
+  const pu = { task: U.task, base: U.base, proposal: U.proposal, seq: su.seen().seq, files: su.seen().files };
+  H9.emit(U.task, { type: "turn_started" });
+  ok((await why(D9.merged(U.task, await mergedParams(newRecord(pu, await prepare(io, su, pu), {}))))) === "stale", "a decision on a proposal the task moved on from: refused (stale)");
+  ok((await why(D9.merged(U.task, { ...req }))) === "bad_request", "a request for another task than named: refused here");
+  P9.revoke();
+  H9.stop();
 }
 
 // ---- an agent that doesn't offer Delegate: no switch

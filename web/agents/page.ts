@@ -41,6 +41,7 @@ import { entryUrl } from "../workspace/entry-url";
 import { threadMarkdown, turnMarkdown, userMarkdown } from "../workspace/agent-chat/transcript";
 import { DelegateTasks } from "./delegate";
 import { mountDelegate } from "./delegate-ui";
+import { workspaceIO } from "./delegate-merge";
 import { toIpynb } from "../notebook/ipynb.js";
 import { mountVersionStamp } from "../version";
 
@@ -1189,7 +1190,12 @@ const delegateUi = mountDelegate({
     if (!on) renderAll();
   },
   site: new URL("../", import.meta.url),
+  // (a proposal's .tex rendered under its diff, where this page has the LaTeX editor, as an artifact's .tex is)
+  latex: __SB_LATEX__ && __SB_LATEX_HOSTS__.includes(location.hostname) ? () => import(/* @vite-ignore */ LATEX_URL) : null,
   toast,
+  // (Merge: this browser's workspace, and the agent's record of it)
+  merge: workspaceIO(() => workspace, (task, params) => delegateTasks.merged(task, params), /^(localhost|127\.0\.0\.1)$/.test(location.hostname) ? async (op, path) => { if (typeof (window as any).__mergeSeam === "function") await (window as any).__mergeSeam(op, path); } : undefined),
+  session: sessionStorage,
 });
 // (the Files | Agents switch at the right of the chat list's header, Agents pressed: Files opens the notebook page with
 //  its files, as the file panel's switch opens this page; William, Nov 12)

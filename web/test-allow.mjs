@@ -12,6 +12,10 @@ export async function allowFiles(send, ev) {
     for (const type of ["mousePressed", "mouseReleased"]) await send("Input.dispatchMouseEvent", { type, x: r.x, y: r.y, button: "left", clickCount: 1 });
     await new Promise((ok) => setTimeout(ok, 200));
   };
+  // (a write the notebook already tried, refused, has its prompt open: a modal over the page, File behind it. The person
+  // closes it first (Escape), unanswered, then goes to File > Permissions…)
+  const esc = async () => { for (const type of ["keyDown", "keyUp"]) await send("Input.dispatchKeyEvent", { type, key: "Escape", code: "Escape", windowsVirtualKeyCode: 27 }); await new Promise((ok) => setTimeout(ok, 200)); };
+  if (await ev("!!document.querySelector('#filesbar')?.open")) await esc();
   await click("#filebtn");
   await click("#permsmenu");
   await click("#filesperm");

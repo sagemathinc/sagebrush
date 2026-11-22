@@ -1,7 +1,7 @@
 // ci: web-runner order=117 chrome
 // Confinement phase 2 (write trees; design PACKET-r3, astra's and daybreak3's DESIGN CLEAR), in headless Chromium,
 // on the person's own notebook in the sandboxed runner:
-//   - a write into a folder it may not change is refused; the prompt asks about that path, offering its folder, never
+//   - a write into a folder it may not change is refused; the prompt (a modal) asks about that path, offering its folder, never
 //     "/"; a synthetic click, a press begun before it arms, a repeating Enter: nothing; a fresh trusted click: allowed;
 //   - a widening doesn't reach the interpreter that is running (a forged change into the new folder from it is kept
 //     nowhere; a loop running when it's allowed stays refused there); the next explicit run starts a new interpreter,
@@ -85,7 +85,7 @@ try {
   // (a press begun before it arms, released after: nothing)
   const pa = await at("#fballow");
   await mouse("mousePressed", pa);
-  check(p0?.path === "/proj/out/a.txt" && p0.folder === "/proj/out" && /wants to change \/proj\/out\/a\.txt/.test(await barText()) && /^Allow in \/proj\/out, then run again \(restarts\)$/.test(await ev("document.querySelector('#fballow').textContent")), "…about that path, offering its folder /proj/out (never /): " + JSON.stringify(p0));
+  check(p0?.path === "/proj/out/a.txt" && p0.folder === "/proj/out" && /is trying to save a\.txt in \/proj\/out in this browser's Sagebrush workspace\. If you allow it, run the cell again to save it\./.test(await barText()) && /^Allow in \/proj\/out$/.test(await ev("document.querySelector('#fballow').textContent")) && (await ev("document.querySelector('#filesbar').matches(':modal')")), "…about that path, offering its folder /proj/out (never /): " + JSON.stringify(p0));
   check(p0.armedIn > 0, "(the press began before it armed: " + p0.armedIn + " ms to go)");
   await sleep(700);
   await mouse("mouseReleased", pa);
@@ -431,7 +431,8 @@ try {
   await sleep(800);
   check(!(await prompt()), "…and the same refusal again asks nothing, for the rest of the session");
 
-  // ---- a scoped notebook never runs in the page's own interpreter
+  // ---- no run gate: a scoped notebook where the sandbox isn't (?runner=0) runs in the page's own interpreter, its
+  //      writes still held to its folder: one outside it is refused and asked about, as in the sandbox
   await otherTab(`(e) => { e.write = ["/proj/out"]; }`);
   const sc = await trees();
   check(JSON.stringify(sc) === '["/proj/out"]', "(the notebook scoped to /proj/out: " + JSON.stringify(sc) + ")");
@@ -439,7 +440,15 @@ try {
   await go(base + "?nb=" + encodeURIComponent(own) + "&runner=0");
   await setCode("print('PLAIN')");
   await runAll();
-  check(await until(`!document.querySelector('#runbar').hidden && /To run in this page, this notebook needs permission to change files/.test(document.querySelector('#rbtext').textContent)`, 30000).catch(() => false) && !/PLAIN/.test(await out()), "?runner=0: a scoped notebook doesn't run in the page's own interpreter, and the run bar says why");
+  check(await outHas("/PLAIN/", 30000).then(() => true, () => false) && !(await ev("!!document.querySelector('#runbar')")), "?runner=0: a scoped notebook runs in the page's own interpreter, no run bar: " + JSON.stringify((await out()).slice(0, 200)));
+  await setCode("try:\n    open('/proj/other/b.txt', 'w').write('x')\n    print('B:wrote')\nexcept OSError as e:\n    print('B:refused')");
+  await runAll();
+  await outHas("/B:refused/");
+  check(/is trying to save b\.txt in \/proj\/other/.test(await barText()) && !(await trees()).includes("/proj/other"), "…and a write outside its folder is refused there too, and asked about: " + JSON.stringify(await barText()));
+  // (Esc: closed unanswered, nothing allowed)
+  for (const type of ["keyDown", "keyUp"]) await send("Input.dispatchKeyEvent", { type, key: "Escape", code: "Escape", windowsVirtualKeyCode: 27 });
+  await sleep(300);
+  check(!(await prompt()) && !(await trees()).includes("/proj/other"), "…Esc closes it, unanswered");
 
   // ---- the person's own flow, no test hook (@sagebrush, r5; grader's TESTS934-3): each step a trusted input. A cell
   // writes into /proj/flow, refused; the prompt's Allow; the person's next Run (a click into the cell, Shift+Enter)

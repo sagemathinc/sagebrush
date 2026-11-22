@@ -11,11 +11,10 @@ import { renderFileMenu } from "../workspace/filemenu";
 
 const isCode = (e: Entry) => e.kind === "file" && langOf(e.path) !== null;
 
-/** Called once by the notebook page; true if the code page took the page over. `open`: the page's own way to open a
- * notebook, a board or a file chosen from the code page (Open…, a copy). `navigate`: the page's own way to another
- * page, true once it navigates, false if it refused and stays (the desktop app: until its changes are on disk);
- * `fromCodePage` the code page's own way out, which has saved its edits first. */
-export async function codeBoot(ws: Workspace | null, open: (e: Entry, how: "here" | "tab") => void, agent: ((back: HTMLElement) => Promise<unknown>) | null, navigate: (to: string, fromCodePage: boolean) => Promise<boolean>): Promise<boolean> {
+/** The two hooks the file browser and the preview call (__sbCode, __sbCodeP), on every page that has the file panel:
+ * the notebook page, the code page, and the LaTeX editor's page (/?tex=), where a code file opens on its own page by
+ * that page's way out (its edit written first). `navigate`: as codeBoot's. */
+export function codeHooks(navigate: (to: string, fromCodePage: boolean) => Promise<boolean>) {
   const g: any = globalThis;
   g.__sbCode = (e: Entry, tab?: boolean) => {
     if (!isCode(e) || !e.fid) return false;
@@ -34,6 +33,15 @@ export async function codeBoot(ws: Workspace | null, open: (e: Entry, how: "here
     else { b.disabled = true; b.title = "This file can't open on its own page yet: it hasn't been given a stable id"; }
     box.append(b);
   };
+}
+
+/** Called once by the notebook page; true if the code page took the page over. `open`: the page's own way to open a
+ * notebook, a board or a file chosen from the code page (Open…, a copy). `navigate`: the page's own way to another
+ * page, true once it navigates, false if it refused and stays (the desktop app: until its changes are on disk);
+ * `fromCodePage` the code page's own way out, which has saved its edits first. */
+export async function codeBoot(ws: Workspace | null, open: (e: Entry, how: "here" | "tab") => void, agent: ((back: HTMLElement) => Promise<unknown>) | null, navigate: (to: string, fromCodePage: boolean) => Promise<boolean>): Promise<boolean> {
+  codeHooks(navigate);
+  const g: any = globalThis;
   const fid = new URLSearchParams(location.search).get("code");
   if (fid === null) return false;
   if (!ws || !/^[\w-]{1,128}$/.test(fid)) {

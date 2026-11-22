@@ -32,6 +32,8 @@
     "allow-disk-remove",
     "allow-disk-where",
     "allow-settings-write",
+    "allow-grants-read",
+    "allow-grants-write",
     "allow-app-quit-hold",
     "allow-app-quit-now",
     "core:default",
