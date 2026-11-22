@@ -1563,5 +1563,9 @@ pub fn floor_bytes(m: usize, n: usize) -> Option<u64> {
 /// The work estimate: units models of the routes and the fitted constants.
 pub mod estimate;
 
+/// Route 3, for singular and rectangular input (in progress: Compress).
+#[doc(hidden)]
+pub mod route3;
+
 #[cfg(test)]
 mod tests;

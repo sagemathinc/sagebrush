@@ -78,6 +78,11 @@ pub(crate) trait Zn {
     /// gcd(x, e); e for x = 0.  `steps` gets the word path's quotient
     /// steps (one ModArith unit each); the big path counts its own.
     fn gcd_e(&self, x: &Self::T, steps: &mut u64) -> Self::T;
+    /// g = gcd(x, e) as an integer (e for x = 0) and a residue s with
+    /// s x = g (mod e): the extended Euclid of (e, x).  s need not be a
+    /// unit.  `steps` gets the word path's quotient steps; the big path
+    /// counts its own.
+    fn gcd_cofactor_e(&self, x: &Self::T, steps: &mut u64) -> (BigInt, Self::T);
     fn is_one(x: &Self::T) -> bool;
     /// Whether g > 0 divides x as integers.
     fn divides(&self, g: &Self::T, x: &Self::T) -> bool;
@@ -164,6 +169,18 @@ impl Zn for Word {
             (a, b) = (b, a % b);
         }
         a
+    }
+    fn gcd_cofactor_e(&self, x: &u64, steps: &mut u64) -> (BigInt, u64) {
+        // (the extended Euclid of (e, x); x's cofactor kept)
+        let (mut r0, mut r1) = (self.e as i128, *x as i128);
+        let (mut s0, mut s1) = (0i128, 1i128);
+        while r1 != 0 {
+            *steps += 1;
+            let q = r0 / r1;
+            (r0, r1) = (r1, r0 - q * r1);
+            (s0, s1) = (s1, s0 - q * s1);
+        }
+        (BigInt::from(r0), s0.rem_euclid(self.e as i128) as u64)
     }
     fn is_one(x: &u64) -> bool {
         *x == 1
@@ -277,6 +294,21 @@ impl Zn for Big {
     fn gcd_e(&self, x: &BigInt, _: &mut u64) -> BigInt {
         self.count(biggcd_units(self.le, limbs(x)));
         x.gcd(&self.e)
+    }
+    fn gcd_cofactor_e(&self, x: &BigInt, _: &mut u64) -> (BigInt, BigInt) {
+        // (as gcd_e, with the check on the extended gcd's coefficients and
+        // its fallback's steps when it ran; and the cofactor's reduction
+        // modulo e)
+        if x.is_zero() {
+            self.count(biggcd_units(self.le, limbs(x)));
+            self.count(bigdiv_units(2 * self.le, self.le));
+            return (self.e.clone(), BigInt::zero());
+        }
+        self.count(bigxgcd_units(self.le, limbs(x)));
+        self.count(bigdiv_units(2 * self.le, self.le));
+        let (eg, fallback) = sagebrush_bigint::extended_gcd_metered(x, &self.e);
+        self.count(xgcd_fallback_units(fallback.as_ref()));
+        (eg.gcd, eg.x.mod_floor(&self.e))
     }
     fn is_one(x: &BigInt) -> bool {
         x.is_one()
