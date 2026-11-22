@@ -396,15 +396,17 @@ pub fn route3_model(z: &Route3Sizes, c: &Constants) -> Units {
 }
 
 /// The failed inverse pass on a singular square input of n rows (h the
-/// Hadamard bound's log2, `red` a reduction's units): two primes'
-/// eliminations of [a | I] that drop the rank, then the multimodular
-/// determinant (an elimination a prime, over the bound's primes).
+/// Hadamard bound's log2, `red` a reduction's units, `norms` one bound's
+/// units): the inverse's bound, two primes' eliminations of [a | I] that
+/// drop the rank, then the multimodular determinant (its own bound, and an
+/// elimination a prime over the bound's primes).
 #[doc(hidden)]
-pub fn failed_pass_model(n: usize, h: f64, red: u64) -> Units {
+pub fn failed_pass_model(n: usize, h: f64, red: u64, norms: &Units) -> Units {
     let mut u = Units::default();
     if n == 0 {
         return u;
     }
+    times(&mut u, 2, norms);
     let mut aug = Units(crate::nmod_mat::echelon_units_dense(n, 2 * n, word_batch()));
     aug.0[Family::ModArith as usize] = aug.0[Family::ModArith as usize].saturating_add(red);
     aug.0[Family::Move as usize] = aug.0[Family::Move as usize].saturating_add(size_product(&[n, n, 3]));
@@ -473,7 +475,17 @@ fn core_model(r: usize, t_bits: u64, kh: usize, c: &Constants) -> Units {
 /// An r x r inverse modeled from sizes: Hadamard's log2 `h`, entries of
 /// `le` limbs, the determinant of `lx` limbs.
 fn inverse_at(r: usize, h: f64, le: usize, lx: usize) -> Units {
-    zmat::inverse_model_sizes(r, h, size_product(&[r, r, le]), lx, 2, None)
+    zmat::inverse_model_sizes(r, h, size_product(&[r, r, le]), &norms_at(r, le), lx, 2, None)
+}
+
+/// One Hadamard bound's units on an r x r matrix of `le`-limb entries: an
+/// entry's square each, in the row norm and in the column norm (a one-word
+/// square for the entries that fit a word).
+fn norms_at(r: usize, le: usize) -> Units {
+    let sq = if le <= 1 { bigmul_units(1, 1) } else { bigmul_units(le, le) };
+    let mut norms = Units::default();
+    times(&mut norms, size_product(&[2, r, r]), &sq);
+    norms
 }
 
 /// Stage 1 for route 3 (non-square input, or a square one with a zero row
@@ -533,7 +545,7 @@ pub fn stage1_route3(a: &ZMat, c: &Constants) -> Option<Units> {
         z.left = Some(s);
     }
     if m == n {
-        z.failed_pass = failed_pass_model(n, 0.0, size_product(&[n, n, la]));
+        z.failed_pass = failed_pass_model(n, 0.0, size_product(&[n, n, la]), &norms_at(n, la));
     }
     let kh = k_lower_bound_rect(a, m.min(n));
     let mut u = route3_model(&z, c);
@@ -621,7 +633,7 @@ pub fn stage2_route3_terms(a: &ZMat, is: &[usize], js: &[usize], nm: &ZMat, delt
     }
     if m == n {
         let red = a.d.iter().map(|x| limbs(x) as u64).sum();
-        z.failed_pass = failed_pass_model(n, zmat::hadamard_bits(a), red);
+        z.failed_pass = failed_pass_model(n, zmat::hadamard_bits(a), red, &zmat::hadamard_units(a));
     }
     let kh = k_lower_bound_rect(a, r);
     let mut terms = route3_terms(&z, c);

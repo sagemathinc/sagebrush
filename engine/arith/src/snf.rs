@@ -298,10 +298,11 @@ impl Zn for Big {
     fn gcd_cofactor_e(&self, x: &BigInt, _: &mut u64) -> (BigInt, BigInt) {
         // (as gcd_e, with the check on the extended gcd's coefficients and
         // its fallback's steps when it ran; and the cofactor's reduction
-        // modulo e)
+        // modulo e.  x = 0 takes neither: gcd(0, e) = e is a copy of e)
         if x.is_zero() {
-            self.count(biggcd_units(self.le, limbs(x)));
-            self.count(bigdiv_units(2 * self.le, self.le));
+            let mut u = Units::default();
+            u.0[Family::Move as usize] = self.le as u64;
+            self.count(u);
             return (self.e.clone(), BigInt::zero());
         }
         let (eg, fallback) = sagebrush_bigint::extended_gcd_metered(x, &self.e);

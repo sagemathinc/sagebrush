@@ -71,13 +71,13 @@ pub struct Constants {
 /// recorded again.
 pub const FITTED: Constants = Constants {
     attempts_cyclic: 2.255,
-    attempts_trailing: 2.137,
+    attempts_trailing: 2.161,
     hadamard_gap: 0.648,
     part_a_cubic: 0.927,
     multiplier: 0.92,
     vinv_of_delta: 1.5,
-    scale: [0.548, 0.711, 0.837, 0.44],
-    scale_route3: [0.568, 0.58],
+    scale: [0.548, 0.711, 0.829, 0.45],
+    scale_route3: [0.514, 0.56],
     fit_head: "f7c3c93cd71f4d73df5e30851e2d30feb71226bc",
     fit_from: "the estimate test's training corpus (seed 1); the multiplier from route 2's phase data",
 };
@@ -243,8 +243,9 @@ pub fn k_lower_bound(a: &ZMat) -> usize {
 
 /// Stage 2: after the inverse (N / delta, det) and, for route 2, part A's
 /// invariant factors; at the actual sizes, for any k (route 2 has no
-/// threshold).  None without the invariant factors when det a != delta.
-/// (Route 3's is [`stage2_route3`].)
+/// threshold).  None without the invariant factors when det a != delta,
+/// and for the empty matrix (route 3 takes it).  (Route 3's is
+/// [`stage2_route3`].)
 pub fn stage2(a: &ZMat, nm: &ZMat, delta: &BigInt, det: &BigInt, invariants: Option<&[BigInt]>) -> Option<Units> {
     stage2_with(a, nm, delta, det, invariants, &FITTED)
 }
@@ -253,6 +254,9 @@ pub fn stage2(a: &ZMat, nm: &ZMat, delta: &BigInt, det: &BigInt, invariants: Opt
 #[doc(hidden)]
 pub fn stage2_with(a: &ZMat, nm: &ZMat, delta: &BigInt, det: &BigInt, invariants: Option<&[BigInt]>, c: &Constants) -> Option<Units> {
     let n = a.rows;
+    if n == 0 {
+        return None;
+    }
     let ld = limbs(delta);
     let ln = mean_limbs(nm);
     let word = delta.bits() < 62;

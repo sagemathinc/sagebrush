@@ -97,9 +97,10 @@ fn smith_units_and_stop_checks() {
     let pins: &[(&str, [u64; FAMILIES], u64)] = &[
         // (the inverse's CRT setup is charged: one prime on the word
         // inputs, [1, 0, 0, 0, 0, 3, 4, ..], four on the big ones, [23, 0, 0,
-        // 0, 0, 16, 95, ..]; MultiCrt::setup_units)
-        ("route 1, word delta", [45, 0, 2, 0, 2, 27, 59, 0, 0, 0], 3),
-        ("route 1, big delta", [17755, 0, 4843, 0, 280, 3402, 5147, 71, 0, 0], 5),
+        // 0, 0, 16, 95, ..]; MultiCrt::setup_units; and it polls Stop once
+        // a prime, in every row's checks below)
+        ("route 1, word delta", [45, 0, 2, 0, 2, 27, 59, 0, 0, 0], 4),
+        ("route 1, big delta", [17755, 0, 4843, 0, 280, 3402, 5147, 71, 0, 0], 9),
         // (route 2's checks beyond one an attempt and one a pass of the
         // small Smith form, k = 2 here: in each attempt one a row of Y (k)
         // and a pass of each pivot it reaches (one pass a pivot here, and k
@@ -115,14 +116,15 @@ fn smith_units_and_stop_checks() {
         // + 50) + 12 + 40 = 164.  And a check a row of each product of
         // one-word entries: for the word input the transforms' 4 k x k
         // products (4 k) and part A's N b (n = 3), 49 + 8 + 3 = 60; the big
-        // input's products have multi-limb entries, checked already)
-        ("route 2, word delta", [148, 0, 35, 0, 30, 100, 212, 4, 0, 0], 60),
-        ("route 2, big delta", [34719, 0, 36619, 0, 1678, 3590, 6409, 82, 0, 0], 164),
+        // input's products have multi-limb entries, checked already.  Plus
+        // the CRT setup's poll a prime: 60 + 1 = 61 and 164 + 4 = 168)
+        ("route 2, word delta", [148, 0, 35, 0, 30, 100, 212, 4, 0, 0], 61),
+        ("route 2, big delta", [34719, 0, 36619, 0, 1678, 3590, 6409, 82, 0, 0], 168),
         // (route 3's checks: the entry's, the profile's, both Compresses'
         // echelon pivots, rows and solved columns, the products' rows, and
         // the core's (route 1 here); counted by the route 3 prefix pins)
-        ("route 3, singular", [304, 0, 20, 0, 24, 365, 296, 0, 0, 0], 35),
-        ("route 3, wide", [120, 0, 20, 0, 18, 133, 127, 0, 0, 0], 17),
+        ("route 3, singular", [304, 0, 20, 0, 24, 365, 296, 0, 0, 0], 38),
+        ("route 3, wide", [120, 0, 20, 0, 18, 133, 127, 0, 0, 0], 19),
     ];
     if print {
         for (n, u, c) in &rows {

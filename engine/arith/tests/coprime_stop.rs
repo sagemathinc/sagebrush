@@ -5,8 +5,10 @@
 //! simulate them, for a pair of 24576-limb integers (Lehmer windows) and a
 //! 32768-limb integer against one of half its size (a Knuth-D remainder of
 //! 16385 quotient limbs first), all above the former 16384-limb cap; and a
-//! Stop requested in the middle of a check ends the decode.  One test: the
-//! hooks are global.
+//! Stop requested in the middle of a check ends the decode.  (One test: the
+//! hooks are global.  The integers go through little-endian bytes, so the
+//! file builds where dashu's word is 32 bits too; the Stop in the middle
+//! is native only, since a Stop unwinds and wasm32 aborts on a panic.)
 
 use dashu_int::UBig;
 use sagebrush_arith::cost::Cost;
@@ -16,15 +18,15 @@ use sagebrush_interrupt::hooks;
 use sagebrush_wire::{qv1, Arg};
 
 fn rnd(words: usize, seed: &mut u64) -> UBig {
-    let v: Vec<u64> = (0..words)
-        .map(|_| {
+    let v: Vec<u8> = (0..words)
+        .flat_map(|_| {
             *seed ^= *seed << 13;
             *seed ^= *seed >> 7;
             *seed ^= *seed << 17;
-            *seed
+            seed.to_le_bytes()
         })
         .collect();
-    UBig::from_words(&v) | (UBig::ONE << (64 * words - 1))
+    UBig::from_le_bytes(&v) | (UBig::ONE << (64 * words - 1))
 }
 
 struct Open;
@@ -40,11 +42,11 @@ fn qv_bytes(n: &UBig, d: &UBig) -> Vec<u8> {
     for x in [n, d] {
         b.extend_from_slice(b"ZV_1");
         b.extend_from_slice(&1u64.to_le_bytes());
-        let w = x.as_words();
-        b.extend_from_slice(&((w.len() as u32) << 1).to_le_bytes());
-        for l in w {
-            b.extend_from_slice(&l.to_le_bytes());
-        }
+        // (64-bit limbs, whatever dashu's word size)
+        let mut w = x.to_le_bytes().to_vec();
+        w.resize(w.len().div_ceil(8) * 8, 0);
+        b.extend_from_slice(&(((w.len() / 8) as u32) << 1).to_le_bytes());
+        b.extend_from_slice(&w);
     }
     b
 }
@@ -80,11 +82,17 @@ fn gcd_checks_above_the_old_cap_poll_stop() {
         assert!(poll <= 250_000_000, "{:.2} ms between two host polls, past the 250 ms Stop bound", poll as f64 / 1e6);
 
         // Stop in the middle: the decode unwinds, and nothing is returned
-        hooks::reset();
-        hooks::arm_after((total / 2).max(1));
-        let r = sagebrush_interrupt::catch(|| decode_qv(&q, &mut Open));
-        hooks::reset();
-        sagebrush_interrupt::clear();
-        assert!(r.is_err(), "{}: the decode finished past a Stop", what);
+        #[cfg(not(target_arch = "wasm32"))]
+        stop_in_the_middle(what, &q, total);
     }
+}
+
+#[cfg(not(target_arch = "wasm32"))]
+fn stop_in_the_middle(what: &str, q: &sagebrush_wire::Qv<'_>, total: u64) {
+    hooks::reset();
+    hooks::arm_after((total / 2).max(1));
+    let r = sagebrush_interrupt::catch(|| decode_qv(q, &mut Open));
+    hooks::reset();
+    sagebrush_interrupt::clear();
+    assert!(r.is_err(), "{}: the decode finished past a Stop", what);
 }

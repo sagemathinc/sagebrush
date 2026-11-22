@@ -134,18 +134,26 @@ impl Modulus {
 
     /// The inverse of a mod n, if gcd(a, n) = 1.
     pub fn inv(&self, a: u64) -> Option<u64> {
+        self.inv_steps(a).0
+    }
+
+    /// [`Modulus::inv`] and the number of its Euclid quotient steps (for
+    /// metered callers to charge).
+    pub fn inv_steps(&self, a: u64) -> (Option<u64>, u64) {
         // remainders as u64 (64-bit division), cofactors as i128
         let (mut r0, mut r1) = (self.n, self.reduce(a));
         let (mut s0, mut s1) = (0i128, 1i128);
+        let mut steps = 0;
         while r1 != 0 {
             let q = r0 / r1;
             (r0, r1) = (r1, r0 - q * r1);
             (s0, s1) = (s1, s0 - q as i128 * s1);
+            steps += 1;
         }
         if r0 != 1 {
-            return None;
+            return (None, steps);
         }
-        Some(s0.rem_euclid(self.n as i128) as u64)
+        (Some(s0.rem_euclid(self.n as i128) as u64), steps)
     }
 
     /// A signed integer mod n.

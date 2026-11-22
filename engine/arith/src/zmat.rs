@@ -1432,7 +1432,8 @@ pub fn hermite_cyclic_holds(a: &ZMat, h: &[BigInt], d: &BigInt) -> bool {
 }
 
 /// The units [`inverse_det`] charges on a square input, predicted from the
-/// input alone (the work estimate's model, stage 1): the prime count from
+/// input alone (the work estimate's model, stage 1): the Hadamard bound's
+/// row and column norms (an entry's square each); the prime count from
 /// the Hadamard bound and the prime list, exactly; per prime, the
 /// reduction (by the entries' sizes), the identity and the augment, the
 /// echelon of [a | I] by its data-free count
@@ -1453,18 +1454,34 @@ pub fn inverse_model(a: &ZMat, lx: usize, fold: u64, le: Option<usize>) -> Units
         return Units::default();
     }
     let red: u64 = a.d.iter().map(|x| if x.to_i64().is_some() { 1 } else { reduce_units(x) }).fold(0, u64::saturating_add);
-    inverse_model_sizes(a.rows, hadamard_log2(a), red, lx, fold, le)
+    inverse_model_sizes(a.rows, hadamard_log2(a), red, &hadamard_units(a), lx, fold, le)
+}
+
+/// The units one Hadamard bound of `a` charges: each entry squared in the
+/// row norm and in the column norm (a one-word product for an entry that
+/// fits an i64, an l x l one otherwise).
+#[doc(hidden)]
+pub fn hadamard_units(a: &ZMat) -> Units {
+    let mut norms = Units::default();
+    for x in &a.d {
+        let l = if x.to_i64().is_some() { 1 } else { limbs(x) };
+        norms.add_saturating(&bigmul_units(l, l));
+        norms.add_saturating(&bigmul_units(l, l));
+    }
+    norms
 }
 
 /// [`inverse_model`] from sizes alone (route 3's model of an inverse it
-/// does not hold yet): n, the Hadamard bound's log2 `h`, and `red`, the
-/// units of one reduction of the matrix modulo a word.
+/// does not hold yet): n, the Hadamard bound's log2 `h`, `red`, the units
+/// of one reduction of the matrix modulo a word, and `norms`, those of the
+/// bound's row and column norms.
 #[doc(hidden)]
-pub fn inverse_model_sizes(n: usize, h: f64, red: u64, lx: usize, fold: u64, le: Option<usize>) -> Units {
+pub fn inverse_model_sizes(n: usize, h: f64, red: u64, norms: &Units, lx: usize, fold: u64, le: Option<usize>) -> Units {
     let mut u = Units::default();
     if n == 0 {
         return u;
     }
+    u.add_saturating(norms);
     let target = h.max(0.0) + 2.0;
     let mut primes: Vec<u64> = vec![];
     let mut bits = 0.0f64;
