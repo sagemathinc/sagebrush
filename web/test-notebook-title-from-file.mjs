@@ -72,6 +72,17 @@ try {
   let stored = null;
   for (const t = Date.now(); Date.now() - t < 10000; await sleep(300)) { stored = await P.ev(RECORD(id)); if (stored === "real") break; }
   ok(stored === "real", "and its stored title is now real", stored);
+  // (a file named after its title with a number (the title's name was taken: File > New twice gives "Untitled" in
+  //  "Untitled (n).ipynb") keeps its title)
+  for (let k = 0; k < 2; k++) {
+    await P.ev(`(document.querySelector('#filebtn').click(), true)`);
+    await P.until(`!!document.querySelector('#filemenu [data-f="new"]')`);
+    await P.ev(`(document.querySelector('#filemenu [data-f="new"]').click(), true)`);
+    await P.until(`document.querySelector('#nbname').value.startsWith('Untitled')`);
+    await sleep(2000);
+  }
+  const t2 = await P.ev(`document.querySelector('#nbname').value`), f2 = await files();
+  ok(t2 === "Untitled" && f2.some((p) => /^\/Untitled \(\d+\)\.ipynb$/.test(p)), "a new notebook whose file got a number (\"Untitled (n).ipynb\") keeps its title \"Untitled\"", { t2, f2 });
   ok(P.errors.length === 0, "no page errors", P.errors);
 } catch (e) {
   ok(false, "the test ran to its end: " + (e?.stack ?? e));

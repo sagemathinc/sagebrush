@@ -2242,13 +2242,15 @@ async function navLease() {
 let arrivalWait = null, attachSeq = 0;
 // (the file's name wins on open: a stored title that a rename didn't follow (older data, a sync's rename) is replaced
 // by the file's name, shown, and kept as a typed title is; only for this notebook while it is still the one open, and
-// never while its title is being typed)
+// never while its title is being typed. A file named "<title> (2)" because its title's name was taken is not that)
 async function fileNameWins(id) {
   try {
     const p = ws ? await ws.pathOf("notebook", id) : null;
     if (!p || current.id !== id || document.activeElement === nbName) return;
     const base = splitExt(nameOf(p))[0];
-    if (!base || base === docName()) return;
+    const name = docName();
+    // (a file named after its title with a number added (the title's name was taken) keeps its title, as made)
+    if (!base || base === name || (base.startsWith(name + " (") && /^ \(\d+\)$/.test(base.slice(name.length)))) return;
     showName(base);
     if (pageMay().rename) nb.setMeta({ name: base });
   } catch {}
