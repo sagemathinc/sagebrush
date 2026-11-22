@@ -26,6 +26,7 @@ mod disk;
 #[cfg(desktop)]
 mod engine;
 mod nav;
+mod version;
 use tauri::{Emitter, Manager, WebviewUrl, WebviewWindowBuilder};
 
 // the Terminal's shell worker's Content-Security-Policy (shell/worker-boot.js), the site's own
@@ -350,6 +351,9 @@ pub fn run() {
         .iter()
         .map(|(k, _)| if k.starts_with('/') { k.into_owned() } else { format!("/{k}") })
         .collect();
+    // (macOS's menu bar: Tauri's default, with About naming the commit, version.rs)
+    #[cfg(target_os = "macos")]
+    let builder = builder.menu(version::menu);
     builder
         .setup(move |app| {
             // (the page's server, listening before the window exists: the window never loads a page from a port
@@ -397,6 +401,7 @@ pub fn run() {
                 // the page's IndexedDB a cache of them for one launch, disk.rs)
                 .incognito(true)
                 .initialization_script("window.__SB_DESKTOP_APP__ = true;")
+                .initialization_script(&version::page_script())
                 .initialization_script(&disk::settings_script(app.handle()));
             // (a self-test's control of the workspace on disk: its import or its write-through left out, run.mjs)
             #[cfg(desktop)]
