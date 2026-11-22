@@ -10,7 +10,7 @@
 // Shown only for an agent on this computer whose hello offers delegate.1: nothing changes for any other.
 import type { Thread, Turn } from "../workspace/agent-chat/events";
 import { AgentError } from "../workspace/agent-pair";
-import { chipOf, type DelegateDoc, type DelegateTasks } from "./delegate";
+import { chipOf, currentOf, DELEGATE_LIMITS, DELEGATE_TEXT, type DelegateDoc, type DelegateTasks } from "./delegate";
 
 export const DELEGATE_UI_TEXT = {
   switchOn: "Delegate: on",
@@ -35,6 +35,12 @@ export const DELEGATE_UI_TEXT = {
   skipped: (n: number) => (n === 1 ? "One event of this task couldn't be shown here." : `${n} events of this task couldn't be shown here.`),
   proposal: (n: number, base: string, commit: string) => `Proposal: ${n === 1 ? "1 file" : `${n} files`} changed · base ${base.slice(0, 7)} · proposal ${commit.slice(0, 7)}`,
   laterActions: "Merge, Close and Ask for changes come in a later update.",
+  askLabel: "What should change?",
+  askPlaceholder: "For example: call the section Findings, and keep the plot's colors.",
+  askFiles: (paths: string[]) => (paths.length ? `Your current versions of these files go with your note: ${paths.join(", ")}` : "No current versions go with your note: the task works from its own copy."),
+  askSend: "Send to the task",
+  askSending: "Sending…",
+  askSent: (round: number) => `Asked. The task is working on round ${round + 1}; it appears here when it's ready.`,
   unreadable: "Couldn't read this task from the agent.",
   back: "← Back to chats",
 } as const;
@@ -199,6 +205,43 @@ export function mountDelegate(h: DelegateHost) {
     if (!dlg.isConnected) return;
     const actions = el("p", { className: "st", textContent: T.laterActions });
     pv = mod.openProposal(D.source(id, commit), panel, { notebook: () => import(new URL("sagebrush-notebook.js", h.site).href), actions });
+  }
+
+  // (Ask for changes, S3 P2: under the proposal's actions, the note and what goes with it; the unsent note kept per task
+  //  in this browser (UI r3.2 §2), cleared once sent. `files` is the proposal's diff, read by the view)
+  const noteKey = (task: string) => `sb-delegate-ask-v1:${task}`;
+  function askBlock(task: string, commit: string, files: () => readonly { path: string; change: string }[]): HTMLElement {
+    const box = el("textarea", { id: "delegate-note", rows: 4, placeholder: T.askPlaceholder, ariaLabel: T.askLabel });
+    try { box.value = localStorage.getItem(noteKey(task)) ?? ""; } catch { /* (no storage: nothing kept) */ }
+    box.oninput = () => { try { box.value.trim() ? localStorage.setItem(noteKey(task), box.value) : localStorage.removeItem(noteKey(task)); } catch { /* (no storage) */ } };
+    const own = () => files().filter((f) => f.change !== "added").map((f) => f.path);
+    const which = el("p", { className: "st ask-files", textContent: T.askFiles(own()) });
+    const msg = el("p", { className: "msg", role: "alert" });
+    const send = el("button", { type: "button", className: "primary", textContent: T.askSend });
+    const block = el("div", { className: "ask-block", hidden: true }, el("label", { htmlFor: "delegate-note", textContent: T.askLabel }), box, which, msg, send);
+    send.onclick = async () => {
+      if (send.getAttribute("aria-disabled") === "true") return;
+      msg.textContent = "";
+      if (new TextEncoder().encode(box.value.trim()).length > DELEGATE_LIMITS.noteBytes || !box.value.trim()) {
+        msg.textContent = box.value.trim() ? DELEGATE_TEXT.noteLong : DELEGATE_TEXT.noteEmpty;
+        return;
+      }
+      send.setAttribute("aria-disabled", "true");
+      send.textContent = T.askSending;
+      try {
+        const current: DelegateDoc[] = await currentOf(files(), h.readDoc);
+        const r = await D.ask(task, { proposal: commit, note: box.value, current });
+        try { localStorage.removeItem(noteKey(task)); } catch { /* (no storage) */ }
+        block.replaceChildren(el("p", { className: "st asked", textContent: T.askSent(r.round) }));
+      } catch (e) {
+        msg.textContent = e instanceof AgentError || e instanceof Error ? e.message : String(e);
+        send.removeAttribute("aria-disabled");
+        send.textContent = T.askSend;
+      }
+    };
+    // (shown when the files are known: the list says what goes with the note)
+    (block as HTMLElement & { refresh?: () => void }).refresh = () => { which.textContent = T.askFiles(own()); };
+    return block;
   }
 
   function render() {

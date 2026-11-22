@@ -11,7 +11,7 @@ const enc = new TextEncoder();
 const hex = (n) => Array.from(crypto.getRandomValues(new Uint8Array(n)), (b) => b.toString(16).padStart(2, "0")).join("");
 
 export function delegateHost({ features = ["delegate.1", "chat.resume"], pageSize = 50 } = {}) {
-  const H = { got: [], grant: null, sock: null, closed: false, tasks: new Map(), hold: new Set(), fail: new Map(), held: [], pageSize, changes: [] };
+  const H = { got: [], grant: null, sock: null, closed: false, tasks: new Map(), hold: new Set(), fail: new Map(), held: [], pageSize, changes: [], asks: [] };
   const send = (m) => H.sock?.send(JSON.stringify(m));
   const entryOf = (t) => ({ task: t.task, title: t.title, status: t.status, target: "local", run: t.run, round: t.round, seq: t.log.length, proposal: t.proposal, question: false, updated: t.updated });
   H.emit = (id, event) => {
@@ -80,6 +80,17 @@ export function delegateHost({ features = ["delegate.1", "chat.resume"], pageSiz
         const f = t?.commits.get(p.commit)?.[p.path];
         if (!f) return refuse(m.id, "not_found");
         return answer(m.id, { blob: f.blob, content: f.content });
+      }
+      case "tasks.ask": {
+        // (as the agent checks: the task's latest proposal at its seq, and only the task's own documents)
+        if (!t) return refuse(m.id, "not_found");
+        if (t.status !== "proposal" || p.proposal !== t.proposal || p.seq !== t.log.length) return refuse(m.id, "stale");
+        const own = t.commits.get(t.base) ?? {};
+        if (!Array.isArray(p.current) || !p.current.every((d) => Object.hasOwn(own, d.path))) return refuse(m.id, "bad_request");
+        H.asks.push({ task: t.task, note: p.note, current: p.current });
+        answer(m.id, { status: "working", round: t.round });
+        H.emit(t.task, { type: "task_status", status: "working" });
+        return;
       }
       case "tasks.revoke": {
         if (!t) return refuse(m.id, "not_found");

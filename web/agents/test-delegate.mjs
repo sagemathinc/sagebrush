@@ -6,7 +6,7 @@
 // files checked against their blob ids.
 //   bun web/agents/test-delegate.mjs
 import { AgentPairing } from "../workspace/agent-pair.ts";
-import { DelegateTasks, chipOf, DELEGATE_TEXT } from "./delegate.ts";
+import { DelegateTasks, chipOf, currentOf, DELEGATE_TEXT, DELEGATE_LIMITS } from "./delegate.ts";
 import { delegateHost } from "./test-delegate-host.mjs";
 
 let failures = 0;
@@ -101,6 +101,32 @@ ok(/^[0-9a-f]{32}$/.test(id) && D.tasks.length === before + 1 && st.params.targe
   ok((await why(src.file("work/notes.txt", d.proposal))) === "stale", "bytes whose blob id isn't the diff's: refused (stale), never shown");
   A.commits.get(d.proposal)["work/notes.txt"].blob = "0".repeat(40);
   ok((await why(src.file("work/notes.txt", d.proposal))) === "stale", "an answer naming another blob than the diff's: refused (stale)");
+}
+
+// ---- Ask for changes (S3 P2): the note and the person's current versions back to the same task; its next round
+{
+  const asks = () => sentTasks(H).filter((m) => m.method === "tasks.ask").length;
+  const commit1 = tA().proposal.commit;
+  ok((await why(D.ask(A.task, { proposal: commit1, note: "   ", current: [] }))) === "bad_request" && asks() === 0, "an empty note: refused here, nothing sent");
+  ok((await why(D.ask(A.task, { proposal: commit1, note: "x".repeat(DELEGATE_LIMITS.noteBytes + 1), current: [] }))) === "too_large" && asks() === 0, "a note over 16 KB: refused here, nothing sent");
+  ok((await why(D.ask(A.task, { proposal: "f".repeat(40), note: "more", current: [] }))) === "stale" && asks() === 0, "a proposal that isn't the task's latest: refused here (stale), nothing sent");
+  // (the current versions: the task's own files only, as the workspace has them; one gone is left out)
+  const files = [{ path: "work/a.ipynb", change: "modified" }, { path: "work/new.txt", change: "added" }, { path: "work/notes.txt", change: "modified" }];
+  const read = async (path) => { if (path === "work/notes.txt") throw new Error("gone"); return { path, kind: path.endsWith(".ipynb") ? "notebook" : "file", content: "mine of " + path }; };
+  const current = await currentOf(files, read);
+  ok(current.map((d) => d.path).join() === "work/a.ipynb" && current[0].content === "mine of work/a.ipynb", "the current versions: the task's own files (not one the agent added), one gone from the workspace left out", current.map((d) => d.path));
+  const seq = tA().entry.seq;
+  const r = await D.ask(A.task, { proposal: commit1, note: "  Also a line at the top.\n", current });
+  const sent = sentTasks(H).findLast((m) => m.method === "tasks.ask")?.params;
+  ok(r.status === "working" && sent?.task === A.task && sent.proposal === commit1 && sent.seq === seq && sent.note === "Also a line at the top." && sent.current.length === 1 && H.asks.length === 1, "Ask for changes: tasks.ask with the proposal, the task's seq, the note (trimmed) and the current versions", sent);
+  ok(chipOf(tA().entry) === "Working", "the chip back to Working at once", chipOf(tA().entry));
+  await until(() => tA().entry.seq > seq);
+  ok((await why(D.ask(A.task, { proposal: commit1, note: "again", current: [] }))) === "stale" && asks() === 1, "asked again on the same proposal, now moved on: refused (stale), said as such", asks());
+  ok((await D.ask(A.task, { proposal: commit1, note: "again", current: [] }).catch((e) => e.message)) === DELEGATE_TEXT.askMoved, "its words: open the latest proposal");
+  // (the next round, from the agent: the chip Proposal ready again, with round 2's commit)
+  const commit2 = await H.propose(A.task, { "work/notes.txt": "top\none\ntwo\n" });
+  await until(() => tA().entry.proposal === commit2 && tA().entry.status === "proposal");
+  ok(tA().entry.proposal === commit2 && tA().entry.round === 2 && chipOf(tA().entry) === "Proposal ready", "round 2: the chip Proposal ready again, the task's proposal now round 2's commit", { round: tA().entry.round, chip: chipOf(tA().entry) });
 }
 
 // ---- the switch's off: Start refused from its first moment; the chosen tasks closed first; then the capability
