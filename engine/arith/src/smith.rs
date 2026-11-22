@@ -1590,16 +1590,21 @@ fn nonsingular(a: &ZMat, k_max: usize) -> Result<Square, String> {
     let n = a.rows;
     let c = &estimate::FITTED;
     if den == det.abs() {
-        if progress::active() {
+        // (inside route 3's core, the core's term from T's own stage 2)
+        if progress::active() || progress::in_core() {
             let b = {
                 let _u = crate::cost::unmetered();
                 estimate::forecast_cyclic(n, limbs(&den), estimate::forecast_mean_limbs(&nm), den.bits(), c)
             };
-            progress::phase("attempts", 1, Some(2), total(&b), 0);
+            if progress::active() {
+                progress::phase("attempts", 1, Some(2), total(&b), 0);
+            } else {
+                progress::core_budget(total(&b));
+            }
         }
         return cyclic_ring(&nm, &den).map(Square::Done);
     }
-    if progress::active() {
+    if progress::active() || progress::in_core() {
         let (pa, tr) = {
             let _u = crate::cost::unmetered();
             let (ln, ld) = (estimate::forecast_mean_limbs(&nm), limbs(&den));
@@ -1609,7 +1614,11 @@ fn nonsingular(a: &ZMat, k_max: usize) -> Result<Square, String> {
             let pa = estimate::forecast_part_a(n, estimate::forecast_mean_limbs(a), ln, ld, limbs(&det), le, eb < 62, den.bits(), c);
             (pa, estimate::forecast_trailing(n, ld, ln, den.bits(), &[1, ld], c))
         };
-        progress::phase("invariants", 1, Some(3), total(&pa), total(&tr));
+        if progress::active() {
+            progress::phase("invariants", 1, Some(3), total(&pa), total(&tr));
+        } else {
+            progress::core_budget(total(&pa).saturating_add(total(&tr)));
+        }
     }
     // (part A, its determinant and inverse known: the invariants from d
     // and the solve x = N b / delta that the inverse already holds, b the
@@ -1619,13 +1628,17 @@ fn nonsingular(a: &ZMat, k_max: usize) -> Result<Square, String> {
     let k = inv.iter().filter(|x| !x.is_one()).count();
     // (past the measurement hook's k_max the classical elimination runs:
     // no attempts)
-    if progress::active() && k <= k_max {
+    if (progress::active() || progress::in_core()) && k <= k_max {
         let tr = {
             let _u = crate::cost::unmetered();
             let dls: Vec<usize> = inv.iter().filter(|x| !x.is_one()).map(limbs).collect();
             estimate::forecast_trailing(n, limbs(&den), estimate::forecast_mean_limbs(&nm), den.bits(), &dls, c)
         };
-        progress::phase("attempts", 2, Some(3), total(&tr), 0);
+        if progress::active() {
+            progress::phase("attempts", 2, Some(3), total(&tr), 0);
+        } else {
+            progress::core_budget(total(&tr));
+        }
     }
     if k <= k_max {
         return trailing_ring(&nm, &den, &det.abs(), k).map(Square::Done);

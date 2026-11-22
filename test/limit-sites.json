@@ -1796,15 +1796,30 @@
   "owner": "engine arithmetic (exact linear algebra)",
   "reason": "routes 1 and 2 on square input, with the measurement hook's threshold on k (smith_form passes usize::MAX: no threshold; past it, nonsingular input takes the classical elimination): refuses nothing"
  },
+ "engine/arith/src/smith.rs :: nonsingular :: if (progress::active() || progress::in_core()) && k <= k_max { #0": {
+  "class": "none",
+  "owner": "engine arithmetic (exact linear algebra)",
+  "reason": "the live progress's attempts phase (or route 3's core budget), shown only when the measurement hook's threshold on k lets the attempts run (smith_form passes usize::MAX): observation only, refuses nothing"
+ },
  "engine/arith/src/smith.rs :: nonsingular :: if k <= k_max { #0": {
   "class": "none",
   "owner": "engine arithmetic (exact linear algebra)",
   "reason": "routes 1 and 2 on square input, with the measurement hook's threshold on k (smith_form passes usize::MAX: no threshold; past it, nonsingular input takes the classical elimination): refuses nothing"
  },
- "engine/arith/src/smith.rs :: nonsingular :: if progress::active() && k <= k_max { #0": {
+ "engine/arith/src/smith.rs :: nonsingular :: progress::core_budget(total(&b)); #0": {
   "class": "none",
   "owner": "engine arithmetic (exact linear algebra)",
-  "reason": "the live progress's attempts phase, shown only when the measurement hook's threshold on k lets the attempts run (smith_form passes usize::MAX): observation only, refuses nothing"
+  "reason": "the live progress's remaining forecast: route 3's core budget from T's own stage 2 (an estimate for the ETA): observation only, never a cap or a refusal"
+ },
+ "engine/arith/src/smith.rs :: nonsingular :: progress::core_budget(total(&pa).saturating_add(total(&tr))); #0": {
+  "class": "none",
+  "owner": "engine arithmetic (exact linear algebra)",
+  "reason": "the live progress's remaining forecast: route 3's core budget from T's own stage 2 (an estimate for the ETA): observation only, never a cap or a refusal"
+ },
+ "engine/arith/src/smith.rs :: nonsingular :: progress::core_budget(total(&tr)); #0": {
+  "class": "none",
+  "owner": "engine arithmetic (exact linear algebra)",
+  "reason": "the live progress's remaining forecast: route 3's core budget from T's own stage 2 (an estimate for the ETA): observation only, never a cap or a refusal"
  },
  "engine/arith/src/smith.rs :: small_smith :: debug_assert!(v.max_bits() <= growth && vinv.max_bits() <= growth, \"the transforms' proved bound\"); #0": {
   "class": "none",
@@ -1870,6 +1885,11 @@
   "class": "none",
   "owner": "engine arithmetic (exact linear algebra)",
   "reason": "the live progress's size gate (2^16 limb-entries, from sizes): below it no progress call is opened; observation only, refuses nothing"
+ },
+ "engine/arith/src/smith/progress.rs :: core_budget :: pub(crate) fn core_budget(units: u64) { #0": {
+  "class": "none",
+  "owner": "engine arithmetic (exact linear algebra)",
+  "reason": "the live progress's remaining forecast: route 3's core budget from T's own stage 2 (an estimate for the ETA): observation only, never a cap or a refusal"
  },
  "engine/arith/src/smith/progress.rs :: fraction :: let active = budget.saturating_sub(spent).max(spent / 4); #0": {
   "class": "none",

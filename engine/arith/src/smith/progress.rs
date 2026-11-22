@@ -78,6 +78,18 @@ thread_local! {
     static THRESHOLD_TEST: std::cell::Cell<Option<u64>> = const { std::cell::Cell::new(None) };
     static CLOCK_TEST: std::cell::Cell<Option<u64>> = const { std::cell::Cell::new(None) };
     static FORECAST_SCALE: std::cell::Cell<f64> = const { std::cell::Cell::new(1.0) };
+    /// The tests' record of the first total forecast of the last call.
+    static FIRST_SEEN: std::cell::Cell<Option<u64>> = const { std::cell::Cell::new(None) };
+    /// The tests' log of route 3's re-forecasts: (which, done at it).
+    static REFORECASTS: RefCell<Vec<(&'static str, u64)>> = const { RefCell::new(Vec::new()) };
+}
+
+fn log_reforecast(what: &'static str, done: u64) {
+    REFORECASTS.with(|r| {
+        if let Ok(mut r) = r.try_borrow_mut() {
+            r.push((what, done));
+        }
+    });
 }
 
 /// Whether A is large enough for a progress call: m n entries of at least
@@ -155,6 +167,19 @@ pub mod testing {
     /// restores the production one.
     pub fn set_clock_every(t: Option<u64>) {
         CLOCK_TEST.with(|x| x.set(t));
+    }
+
+    /// The last call's first total forecast (done at its first phase plus
+    /// that phase's forecast), taken: the reference of `beyond_forecast`.
+    pub fn first_forecast() -> Option<u64> {
+        FIRST_SEEN.with(|f| f.take())
+    }
+
+    /// Route 3's re-forecasts since the last call, in order: ("G", done)
+    /// after the first side's G, ("core", done) at the core's, from T's own
+    /// stage 2.
+    pub fn reforecasts() -> Vec<(&'static str, u64)> {
+        REFORECASTS.with(|r| std::mem::take(&mut *r.borrow_mut()))
     }
 
     /// Scales every forecast on this thread (a forced crossing, or a
@@ -266,10 +291,16 @@ impl Guard {
             STATE.with(|s| {
                 if let Some(mut st) = s.borrow_mut().take() {
                     let done = units_total().wrapping_sub(st.start);
+                    // (a crossing since the last refresh counts too)
+                    if let Some(first) = st.first {
+                        st.beyond |= done > first;
+                    }
+                    let beyond = st.beyond;
                     let r = st.call.report();
                     r.done = done;
                     r.work = done;
                     r.fraction = Some(1.0);
+                    r.beyond_forecast = beyond;
                     st.call.flush();
                 }
             });
@@ -383,6 +414,7 @@ pub(crate) fn phase(stage: &str, index: u64, count: Option<u64>, budget: u64, fu
         st.future = scaled(future);
         if st.first.is_none() {
             st.first = Some(done.saturating_add(st.budget).saturating_add(st.future));
+            FIRST_SEEN.with(|f| f.set(st.first));
         }
         let r = st.call.report();
         r.stage = progress::table_index(progress::STAGES, stage);
@@ -464,6 +496,7 @@ fn route3_active(st: &mut State) {
     st.future = all.saturating_sub(budget);
     if st.first.is_none() {
         st.first = Some(done.saturating_add(all));
+        FIRST_SEEN.with(|f| f.set(st.first));
     }
     let (stage, index) = route3_stage(active.as_deref().unwrap_or("combine"));
     let r = st.call.report();
@@ -604,4 +637,40 @@ pub(crate) fn route3_after_g(r: usize, nm: &ZMat, delta: &sagebrush_bigint::BigI
     };
     let t: Vec<(String, Units)> = terms.into_iter().filter(|(n, _)| n != "failed pass").collect();
     named(&t, ROUTE3_ORDER);
+    STATE.with(|s| {
+        if let Ok(s) = s.try_borrow() {
+            if let Some(st) = s.as_ref() {
+                log_reforecast("G", units_total().wrapping_sub(st.start));
+            }
+        }
+    });
+}
+
+/// Whether the running call is route 3's and its core (a nested route 1 or
+/// 2 on T) is running now: the core's term is re-estimated from T's own
+/// stage 2 ([`core_budget`]).
+pub(crate) fn in_core() -> bool {
+    STATE.with(|s| s.try_borrow().map(|s| s.as_ref().is_some_and(|st| st.inner == 1 && !st.order.is_empty())).unwrap_or(false))
+}
+
+/// Route 3's core: its remaining units, from T's own stage 2 (route 1's
+/// attempts; or route 2's part A and attempts, then its attempts alone).
+/// The phases before the core are behind; the stage stays "core".
+pub(crate) fn core_budget(units: u64) {
+    STATE.with(|s| {
+        let Ok(mut s) = s.try_borrow_mut() else { return };
+        let Some(st) = s.as_mut().filter(|st| st.inner == 1 && !st.order.is_empty()) else { return };
+        let Some(k) = st.order.iter().position(|o| o == "core") else { return };
+        st.retired = st.retired.max(k);
+        let behind: Vec<String> = st.order[..st.retired].to_vec();
+        st.named.retain(|(n, _)| !behind.contains(n));
+        let u = scaled(units);
+        match st.named.iter_mut().find(|(n, _)| n == "core") {
+            Some(t) => t.1 = u,
+            None => st.named.push(("core".into(), u)),
+        }
+        route3_active(st);
+        let done = units_total().wrapping_sub(st.start);
+        log_reforecast("core", done);
+    });
 }

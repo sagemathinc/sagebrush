@@ -651,3 +651,101 @@ fn route3_shows_each_side_and_a_retry() {
         assert!(w[1].report.done >= w[0].report.done);
     }
 }
+
+/// Stage 2's named route 3 terms for A, from the existing model and the
+/// inputs the run computes (as smith_route3_model rebuilds them): the
+/// first side's profile, B_J's inverse, Q and G.  Also the first side's
+/// prefix ("col: " or "left: ").
+fn stage2_terms(a: &ZMat) -> (Vec<(String, u64)>, &'static str) {
+    use sagebrush_arith::nmod::{Modulus, Primes};
+    let n = a.cols;
+    let p = Primes::new().next().unwrap();
+    let (js, is, _) = a.reduce(&Modulus::new(p)).rref_rows();
+    let r = is.len();
+    let first = if r < n { ZMat::from_rows(is.iter().map(|&i| (0..n).map(|j| a.get(i, j).clone()).collect()).collect()) } else { a.transpose() };
+    let fj = if r < n { js.clone() } else { is.clone() };
+    let bj = ZMat::from_rows((0..r).map(|i| fj.iter().map(|&j| first.get(i, j).clone()).collect()).collect());
+    let (nm, delta, det) = zmat::inverse_det(&bj).unwrap();
+    let jp: Vec<usize> = (0..first.cols).filter(|x| !fj.contains(x)).collect();
+    let q = nm.mul(&ZMat::from_rows((0..r).map(|i| jp.iter().map(|&j| first.get(i, j).clone()).collect()).collect()));
+    let g = sagebrush_arith::smith::route3::hnf_modulus(&q, &delta, &det, &mut sagebrush_arith::cost::Local::new());
+    let terms = estimate::stage2_route3_terms(a, &is, &js, &nm, &delta, &det, &g, &estimate::FITTED);
+    (terms.into_iter().map(|(k, u)| (k, u.0.iter().sum())).collect(), if r < n { "col: " } else { "left: " })
+}
+
+/// R checked against the existing named model at route 3's re-forecasts:
+/// after the first side's G, R is stage 2's terms for the phases after G;
+/// at the core's (from T's own stage 2), R's future part is stage 2's
+/// combine, and R itself within a factor of the model's core and combine
+/// (the model prices T's attempts from sizes before T exists).
+#[test]
+fn route3_reforecasts_against_the_named_model() {
+    let _l = lock();
+    for (name, a, _) in inputs().into_iter().filter(|x| x.0.starts_with("route 3")) {
+        let _ = testing::reforecasts();
+        let (ev, ..) = traced(&a);
+        let log = testing::reforecasts();
+        let (terms, side) = stage2_terms(&a);
+        let order = progress::ROUTE3_ORDER;
+        let pos = |n: &str| order.iter().position(|o| *o == n);
+        let r_at = |what: &str| {
+            let d = log.iter().find(|x| x.0 == what).unwrap_or_else(|| panic!("{name}: no {what} re-forecast")).1;
+            r_of(ev.iter().rev().find(|e| e.written && e.report.done == d).unwrap())
+        };
+        // after G: the terms after the first side's G
+        let g = pos(&format!("{side}G")).unwrap();
+        let after: u64 = terms.iter().filter(|(k, _)| pos(k).is_some_and(|p| p > g)).map(|x| x.1).sum();
+        let rg = r_at("G");
+        // the core's: R = the core's budget (at its start) + combine
+        let comb: u64 = terms.iter().filter(|(k, _)| k == "combine").map(|x| x.1).sum();
+        let core: u64 = terms.iter().filter(|(k, _)| k == "core").map(|x| x.1).sum();
+        let rc = r_at("core");
+        assert!((rg - after as f64).abs() <= 1e-9 * after as f64 + 2.0, "{name}: R after G {rg} against the model's {after}");
+        let m = (core + comb) as f64;
+        assert!((rc / m - 1.0).abs() <= 0.05, "{name}: R at the core {rc} against the model's core and combine {m}");
+        // (the core's stage stays "core", and its re-forecast is the core's)
+        let e = ev.iter().rev().find(|e| e.written && e.report.done == log.iter().find(|x| x.0 == "core").unwrap().1).unwrap();
+        assert_eq!(stage_name(e.report.stage), "core", "{name}");
+    }
+}
+
+/// The success flush counts a crossing of the first forecast since the
+/// last refresh: on route 2 at the production refresh interval (the last
+/// refresh at done 6,214,060, the final done 6,230,461), the first
+/// forecast placed between the last refresh's done and the final done (by
+/// the forecast scale), the success frame says beyond_forecast.
+#[test]
+fn a_crossing_at_the_success_flush_is_reported() {
+    let _l = lock();
+    let (_, a, _) = inputs().remove(1);
+    let run = |f: f64| {
+        testing::scale_forecast(f);
+        sagebrush_interrupt::clear();
+        testing::set_threshold(Some(64));
+        record::start();
+        smith_form(&a).unwrap();
+        let ev = record::take();
+        testing::set_threshold(None);
+        testing::scale_forecast(1.0);
+        (ev, testing::first_forecast().unwrap())
+    };
+    // at scale 1: the first forecast's units, and where the last refresh
+    // before the success flush sits
+    let (ev, first1) = run(1.0);
+    let (last, before) = ev.split_last().unwrap();
+    let prev = before.last().unwrap().report.done;
+    let fin = last.report.done;
+    // (the reported case: the last refresh at 6,214,060, the final done
+    // 6,230,461)
+    assert_eq!((prev, fin), (6_214_060, 6_230_461));
+    // the first forecast is taken at done 0 (the inverse's entry): scaled,
+    // aim it at the middle of (prev, fin)
+    let target = prev + (fin - prev) / 2;
+    let (ev, first) = run(target as f64 / first1 as f64);
+    assert!(prev < first && first < fin, "the first forecast {first} not between {prev} and {fin}");
+    let (last, before) = ev.split_last().unwrap();
+    assert!(before.iter().all(|e| !e.report.beyond_forecast), "crossed before the success flush");
+    assert_eq!((last.report.fraction, last.report.done), (Some(1.0), fin));
+    assert!(last.report.beyond_forecast, "the success frame missed the crossing");
+}
+
