@@ -6,8 +6,8 @@
 //!    diagonal, upper or lower triangular, or symmetric with a positive diagonal (a Cholesky candidate).
 //!    The first asymmetry disables only the Cholesky candidate; the other checks run to the end.
 //! 2. **Dispatch** (MATLAB's order): diagonal: each row of B divided by its diagonal element; triangular: the
-//!    triangular solve; symmetric with a positive diagonal: Cholesky ([`crate::chol`]), and if it fails, LU
-//!    on the untouched A; otherwise LU ([`crate::lu`]).
+//!    triangular solve; symmetric with a positive diagonal and n >= [`CHOL_MIN_N`]: Cholesky ([`crate::chol`]),
+//!    and if it fails, LU on the untouched A; otherwise LU ([`crate::lu`]).
 //! 3. **Report**: the status (solved, nearly singular: 0 < rcond < eps, singular: an exactly zero diagonal or
 //!    pivot, with X holding what division by it gives; or not computed: an Inf or NaN in A or B), rcond from
 //!    the factors ([`crate::cond`]) and the structure taken.
@@ -139,6 +139,12 @@ fn symmetric(a: &[f64], n: usize, lda: usize) -> bool {
 /// MATLAB's warning threshold for rcond (eps).
 const EPS: f64 = f64::EPSILON;
 
+/// The smallest n at which a Cholesky candidate is solved by Cholesky; below it, LU, as MATLAB does (observed
+/// MATLAB R2026b, 2026-11-22: for a dense symmetric positive definite A, `decomposition(A).Type` is 'lu' for
+/// n <= 16 and 'chol' for n >= 17, and A\b is bit for bit that route's answer, at every n from 2 to 32 and at
+/// 40, 64, 100 and 300; so [4 -2 1; -2 4 -2; 1 -2 4] \ [11; -16; 17] is exactly [1; -2; 3])
+pub const CHOL_MIN_N: usize = 17;
+
 /// The workspace [`solve`] needs for an n x n A and n x r B in `mode`: gesv's is [`crate::lu::solve_work_len`];
 /// MATLAB's is n * n for the Cholesky factor (A stays untouched for the LU fallback), then the most any path
 /// needs; `None` on overflow.
@@ -257,7 +263,8 @@ pub fn solve(kern: Kernel, mode: Mode, a: &mut [f64], n: usize, lda: usize, b: &
         (if sh.upper { Structure::Upper } else { Structure::Lower }, z, rc)
     } else {
         let mut chol = false;
-        if sh.spd_candidate {
+        let try_chol = sh.spd_candidate && n >= CHOL_MIN_N;
+        if try_chol {
             for j in 0..n {
                 wa[j * n..(j + 1) * n].copy_from_slice(&a[j * lda..j * lda + n]);
             }
@@ -283,7 +290,7 @@ pub fn solve(kern: Kernel, mode: Mode, a: &mut [f64], n: usize, lda: usize, b: &
                 getrs(kern, a, n, lda, ipiv, b, r, ldb, rest)?;
             }
             let rc = if info.is_some() { 0.0 } else { gecon(a, n, lda, sh.anorm, rest) };
-            (if sh.spd_candidate { Structure::SpdFallback } else { Structure::General }, info, rc)
+            (if try_chol { Structure::SpdFallback } else { Structure::General }, info, rc)
         }
     };
     let status = match singular {
@@ -358,7 +365,7 @@ mod tests {
                     (dg, Structure::Diagonal),
                     (up.clone(), if n == 1 { Structure::Diagonal } else { Structure::Upper }),
                     (transpose(&up, n), if n == 1 { Structure::Diagonal } else { Structure::Lower }),
-                    (spd(n, 9), if n == 1 { Structure::Diagonal } else { Structure::Spd }),
+                    (spd(n, 9), if n == 1 { Structure::Diagonal } else if n < CHOL_MIN_N { Structure::General } else { Structure::Spd }),
                     (g.clone(), if n == 1 { Structure::Diagonal } else { Structure::General }),
                 ];
                 for (a, want) in cases {
@@ -375,10 +382,11 @@ mod tests {
         }
     }
 
-    /// Symmetric with a positive diagonal but indefinite: Cholesky fails and LU on the untouched A solves it.
+    /// Symmetric with a positive diagonal but indefinite: Cholesky fails and LU on the untouched A solves it
+    /// (below [`CHOL_MIN_N`], LU without trying Cholesky: the same bits).
     #[test]
     fn an_indefinite_candidate_falls_back_to_lu() {
-        for n in [2usize, 40, 150] {
+        for n in [2usize, 17, 40, 150] {
             // (diagonal 1/2, off-diagonal 1 + 0.1 s_ij symmetric: eigenvalues near -1/2 and n - 1/2: indefinite)
             let s = seeded(n * n, &mut 13);
             let mut a = vec![0.0; n * n];
@@ -389,7 +397,7 @@ mod tests {
             }
             let b = seeded(n, &mut 14);
             let (x, rep, _) = run(Kernel::Scalar, &a, &b, n, 1);
-            assert_eq!(rep.structure, Structure::SpdFallback, "n={n}");
+            assert_eq!(rep.structure, if n < CHOL_MIN_N { Structure::General } else { Structure::SpdFallback }, "n={n}");
             assert!(eta(&a, &x, &b, n) <= 10.0 * n as f64 * U);
             // the same as LU alone, bit for bit (the fallback starts from A as it was)
             let mut a2 = a.clone();
@@ -558,8 +566,8 @@ mod tests {
         for mode in [Mode::Matlab, Mode::Gesv] {
             assert!(solve_work_len(mode, usize::MAX, 1).is_none() && solve_work_len(mode, 1 << 33, 1).is_none() && solve_work_len(mode, 4, usize::MAX).is_none());
         }
-        // exactly enough work, with padded leading dimensions
-        let (n, r, lda, ldb) = (5usize, 2usize, 7usize, 6usize);
+        // exactly enough work, with padded leading dimensions (n at least CHOL_MIN_N: the Cholesky path)
+        let (n, r, lda, ldb) = (17usize, 2usize, 19usize, 18usize);
         let mut a = vec![0.0; lda * n];
         let g = spd(n, 43);
         for j in 0..n {
@@ -682,8 +690,8 @@ mod tests {
         let inf = f64::INFINITY;
         // (A row-major for reading, B, the X MATLAB printed, the structure taken)
         let cases: [([f64; 4], [f64; 2], [f64; 2], Structure); 12] = [
-            // rows swap, U = [2 4; 0 0], y = [2; 0]: x2 = 0/0, then x1 NaN (Cholesky fails first)
-            ([1.0, 2.0, 2.0, 4.0], [1.0, 2.0], [nan, nan], Structure::SpdFallback),
+            // rows swap, U = [2 4; 0 0], y = [2; 0]: x2 = 0/0, then x1 NaN (a Cholesky candidate, but 2 x 2: LU)
+            ([1.0, 2.0, 2.0, 4.0], [1.0, 2.0], [nan, nan], Structure::General),
             // rows swap, y2 = 1 - (1/3) * 3 = 0 exactly: 0/0
             ([1.0, 2.0, 3.0, 6.0], [1.0, 3.0], [nan, nan], Structure::General),
             // no swap, y = [1; 1.5]: x2 = 1.5/0 = Inf, x1 = (1 - 4 Inf)/2 = -Inf
@@ -716,6 +724,73 @@ mod tests {
                 for (g, w) in x.iter().zip(want) {
                     assert!(if w.is_nan() { g.is_nan() } else { g.to_bits() == w.to_bits() }, "{}: {:?} \\ {:?} gave {:?}, MATLAB {:?}", k.name(), a, b, x, want);
                 }
+            }
+        }
+    }
+
+    /// LU's answer for the column-major A (n x n) and b, bit for bit lu::solve's.
+    fn lu_route(k: Kernel, a: &[f64], b: &[f64], n: usize) -> Vec<f64> {
+        let (mut a2, mut y, mut ipiv) = (a.to_vec(), b.to_vec(), vec![0; n]);
+        let mut work = vec![0.0; crate::lu::solve_work_len(n, 1).unwrap()];
+        crate::lu::solve(k, &mut a2, n, n, &mut y, 1, n, &mut ipiv, &mut work).unwrap();
+        y
+    }
+
+    /// Cholesky's answer for the column-major SPD A (n x n) and b: potrf, then potrs.
+    fn chol_route(k: Kernel, a: &[f64], b: &[f64], n: usize) -> Vec<f64> {
+        let (mut f, mut y) = (a.to_vec(), b.to_vec());
+        let mut work = vec![0.0; potrf_work_len(n).unwrap().max(potrs_work_len(n, 1).unwrap())];
+        assert!(potrf(k, &mut f, n, n, &mut work).unwrap().is_none());
+        potrs(k, &f, n, n, &mut y, 1, n, &mut work).unwrap();
+        y
+    }
+
+    /// A dense symmetric positive definite A is solved by LU for n < 17 and by Cholesky from n = 17, as MATLAB
+    /// R2026b does (observed 2026-11-22, values only: `decomposition(A).Type`, and A\b bit for bit that route's
+    /// answer). The small systems come out exact in MATLAB, where Cholesky is an ulp off; at the switch, matrices
+    /// whose two routes differ show which ran: Lehmer's (a_ij = min(i,j)/max(i,j)) and n I + ones(n), with
+    /// b = A (1:n)'. For n I + ones(n), b is exact, and x is nearer MATLAB's x than the other route's is. On every kernel.
+    #[test]
+    fn small_spd_is_lu_and_large_is_cholesky_as_matlab() {
+        for k in kernels() {
+            // [4 -2 1; -2 4 -2; 1 -2 4] \ [11; -16; 17] is exactly [1; -2; 3] in MATLAB (Cholesky: 3feffffffffffffe ...)
+            let (x, rep, _) = run(k, &[4.0, -2.0, 1.0, -2.0, 4.0, -2.0, 1.0, -2.0, 4.0], &[11.0, -16.0, 17.0], 3, 1);
+            assert_eq!((rep.structure, x.clone()), (Structure::General, vec![1.0, -2.0, 3.0]), "{}", k.name());
+            // [2 1; 1 2] \ [3; 3] is exactly [1; 1] in MATLAB
+            let (x, rep, _) = run(k, &[2.0, 1.0, 1.0, 2.0], &[3.0, 3.0], 2, 1);
+            assert_eq!((rep.structure, x.clone()), (Structure::General, vec![1.0, 1.0]), "{}", k.name());
+            for n in [16usize, 17] {
+                let lehmer: Vec<f64> = (0..n * n).map(|t| ((t % n).min(t / n) + 1) as f64 / ((t % n).max(t / n) + 1) as f64).collect();
+                let shift: Vec<f64> = (0..n * n).map(|t| if t % n == t / n { n as f64 + 1.0 } else { 1.0 }).collect();
+                for (name, a) in [("lehmer", lehmer), ("shift", shift)] {
+                    let b: Vec<f64> = (0..n).map(|i| (0..n).map(|j| a[i + j * n] * (j + 1) as f64).sum()).collect();
+                    let (lu, ch) = (lu_route(k, &a, &b, n), chol_route(k, &a, &b, n));
+                    assert!(lu.iter().zip(&ch).any(|(p, q)| p.to_bits() != q.to_bits()), "{} {name}{n}: the routes agree, so the row proves nothing", k.name());
+                    let (x, rep, _) = run(k, &a, &b, n, 1);
+                    let (want, route) = if n < CHOL_MIN_N { (Structure::General, &lu) } else { (Structure::Spd, &ch) };
+                    assert_eq!(rep.structure, want, "{} {name}{n}", k.name());
+                    assert!(x.iter().zip(route).all(|(p, q)| p.to_bits() == q.to_bits()), "{} {name}{n}: not {want:?}'s answer", k.name());
+                }
+            }
+            // MATLAB's x for n I + ones(n), n = 16 (LU) and n = 17 (Cholesky), as hex
+            let shift16: [u64; 16] = [0x3ff0000000000000, 0x4000000000000000, 0x4008000000000000, 0x4010000000000001, 0x4014000000000001,
+                0x4018000000000001, 0x401c000000000001, 0x4020000000000000, 0x4022000000000001, 0x4024000000000000, 0x4025ffffffffffff,
+                0x4027ffffffffffff, 0x402a000000000000, 0x402c000000000000, 0x402e000000000000, 0x4030000000000000];
+            let shift17: [u64; 17] = [0x3fefffffffffffef, 0x3ffffffffffffffa, 0x4007fffffffffffd, 0x4010000000000003, 0x4013ffffffffffff,
+                0x4017fffffffffffd, 0x401c000000000006, 0x4020000000000000, 0x4022000000000001, 0x4023ffffffffffff, 0x4026000000000000,
+                0x4028000000000001, 0x402a000000000001, 0x402c000000000002, 0x402dffffffffffff, 0x4030000000000000, 0x4031000000000000];
+            for (n, want) in [(16usize, &shift16[..]), (17, &shift17[..])] {
+                let a: Vec<f64> = (0..n * n).map(|t| if t % n == t / n { n as f64 + 1.0 } else { 1.0 }).collect();
+                let b: Vec<f64> = (0..n).map(|i| (n * (n + 1) / 2 + n * (i + 1)) as f64).collect();
+                let (x, _, _) = run(k, &a, &b, n, 1);
+                // (MATLAB's LAPACK sums in its own order, so its bits are not ours even on the same route: the total
+                // ulp distance from MATLAB's x shows the route instead. Here, n = 16: LU 1, Cholesky 21; n = 17:
+                // Cholesky 6, LU 55; and no element more than 4 ulps away)
+                let ulps = |y: &[f64]| y.iter().zip(want).map(|(v, &w)| v.to_bits().abs_diff(w)).sum::<u64>();
+                let (lu, ch) = (lu_route(k, &a, &b, n), chol_route(k, &a, &b, n));
+                let other = if n < CHOL_MIN_N { ulps(&ch) } else { ulps(&lu) };
+                assert!(ulps(&x) < other, "{}: {n} I + ones({n}) \\ b is {} ulps from MATLAB's, the other route {other}", k.name(), ulps(&x));
+                assert!(x.iter().zip(want).all(|(v, &w)| v.to_bits().abs_diff(w) <= 4), "{}: {n} I + ones({n}) \\ b: {x:?}", k.name());
             }
         }
     }

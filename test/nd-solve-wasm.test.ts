@@ -183,9 +183,21 @@ test("nd_solve: the triangular and Cholesky paths give the native scalar family'
   // diagonal (1), and its singular case: [1 0; 0 0] \ [1; 1] = [1; Inf], status 2 at column 1, rcond 0
   let o = run(Float64Array.from([1, 0, 0, 0]), Float64Array.from([1, 1]), 2, 1);
   assert.deepEqual([o.structure, o.status, o.x[0], o.x[1], o.rcond], [1, 2, 1, Infinity, 0]);
-  // symmetric with a positive diagonal but indefinite: Cholesky fails, LU (5)
+  // symmetric with a positive diagonal but indefinite, 2 x 2: below n = 17, LU without trying Cholesky (0), as
+  // MATLAB solves a small symmetric matrix
   o = run(Float64Array.from([1, 2, 2, 1]), Float64Array.from([1, 1]), 2, 1);
+  assert.deepEqual([o.structure, o.status], [0, 1]);
+  // ... and 17 x 17 (diagonal 1/2, every other element 1: indefinite): Cholesky fails, LU (5)
+  const ind = new Float64Array(17 * 17).map((_, k) => (k % 18 === 0 ? 0.5 : 1));
+  o = run(ind, new Float64Array(17).fill(1), 17, 1);
   assert.deepEqual([o.structure, o.status], [5, 1]);
+  // positive definite n I + ones(n): LU (0) at n = 16, Cholesky (4) from n = 17, MATLAB's switch (observed
+  // MATLAB R2026b, 2026-11-22: decomposition(A).Type is 'lu' for n <= 16 and 'chol' for n >= 17)
+  for (const [nn, code] of [[16, 0], [17, 4]]) {
+    const S = new Float64Array(nn * nn).map((_, k) => (k % (nn + 1) === 0 ? nn + 1 : 1));
+    o = run(S, new Float64Array(nn).fill(1), nn, 1);
+    assert.deepEqual([o.structure, o.status], [code, 1], `n = ${nn}`);
+  }
   // nearly singular (4): [1 1; 1/2 1/2 + d], rcond about d / 3 just below eps
   const d = 0.5 + 3 * 2.220446049250313e-16 * 0.9 - 0.5;
   o = run(Float64Array.from([1, 0.5, 1, 0.5 + d]), Float64Array.from([1, 1]), 2, 1);

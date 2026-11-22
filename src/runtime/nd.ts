@@ -282,8 +282,8 @@ export function ndLu(A: Float64Array, n: number, B: Float64Array | null, r: numb
 }
 
 /** X = A \ B as MATLAB's mldivide, by nd_solve's MATLAB mode (engine/nd/src/solve.rs, numerics P2b-2): the
- *  structure pass (diagonal, triangular, symmetric with a positive diagonal: Cholesky, else LU), then rcond from
- *  the factors (dgecon, dtrcon, dpocon). A is n x n and B n x r, row-major. `code`: 1 solved, 2 singular (an
+ *  structure pass (diagonal, triangular, symmetric with a positive diagonal and n >= 17: Cholesky, as MATLAB
+ *  chooses, else LU), then rcond from the factors (dgecon, dtrcon, dpocon). A is n x n and B n x r, row-major. `code`: 1 solved, 2 singular (an
  *  exactly zero diagonal element or pivot; X holds what division by it gives, rcond 0), 4 nearly singular
  *  (0 < rcond < eps); null where A or B has an Inf or NaN (the module computes nothing then). `structure`:
  *  0 general (LU), 1 diagonal, 2 upper, 3 lower, 4 Cholesky, 5 Cholesky failed then LU. Only when useNd().
