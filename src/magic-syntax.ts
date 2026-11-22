@@ -34,6 +34,10 @@ import { preparse } from "./sagepre";
 const LINE_MAGIC = /^(\s*)%([A-Za-z_][\w.]*)(.*)$/;
 const CELL_MAGIC = /^%%([A-Za-z_][\w.]*)(.*)$/;
 const SHELL = /^(\s*)!(.*)$/;
+// Sage mode's `time STATEMENT` at the start of a statement, as Sage's `%time`: only when what follows `time`
+// starts a statement (a name, a number or a string), never a use of the name `time` that is valid Python
+// (`time = 3`, `time(...)`, `time.x`, `time[0]`, `time - 1`, `time in s`, `time if c else d`, ...)
+const SAGE_TIME = /^(\s*)time[ \t]+(?!(?:in|is|and|or|not|if|else)(?![\p{L}\p{N}_]))(?=[\p{L}\p{N}_'"])(.*)$/u;
 // magics whose argument (or body) is code, expanded into the tree
 const CODE_MAGICS = new Set(["time", "timeit"]);
 
@@ -191,8 +195,8 @@ export function splitTimeit(args: string): [string, string] {
   return [opts.join(" "), words.slice(i).join(" ")];
 }
 
-export function magicSyntax(src: string): string {
-  if (!src.includes("%") && !src.includes("!")) return src;
+export function magicSyntax(src: string, sage = false): string {
+  if (!src.includes("%") && !src.includes("!") && !(sage && src.includes("time"))) return src;
   const lines = src.split("\n");
   const first = lines.findIndex((l) => l.trim() !== "");
   const before = lines.slice(0, Math.max(first, 0));
@@ -206,21 +210,23 @@ export function magicSyntax(src: string): string {
       // on their own lines (expandMagics); other cell magics' bodies are text.
       if (CODE_MAGICS.has(name) && !(name === "time" && args !== "")) {
         // (its body's own line magics too, as IPython runs them)
-        return head(`__pyjs_cell_magic__(${lit(name)}, ${lit(args)})`).concat(lineMagics(lines.slice(first + 1))).join("\n");
+        return head(`__pyjs_cell_magic__(${lit(name)}, ${lit(args)})`).concat(lineMagics(lines.slice(first + 1), sage)).join("\n");
       }
       return head(`__pyjs_cell_magic__(${lit(name)}, ${lit(args)}, ${lit(lines.slice(first + 1).join("\n"))})`).join("\n");
     }
   }
-  return lineMagics(lines).join("\n");
+  return lineMagics(lines, sage).join("\n");
 }
 
-function lineMagics(lines: string[]): string[] {
+function lineMagics(lines: string[], sage = false): string[] {
   const lex = new Lexer();
   const out: string[] = [];
   for (const line of lines) {
     if (lex.atStatement()) {
       let m = LINE_MAGIC.exec(line);
       if (m) { out.push(`${m[1]}__pyjs_magic__(${lit(m[2])}, ${lit(m[3].trim())})`); continue; }
+      m = sage ? SAGE_TIME.exec(line) : null;
+      if (m) { out.push(`${m[1]}__pyjs_magic__("time", ${lit(m[2].trim())})`); continue; }
       m = SHELL.exec(line);
       if (m && !m[2].startsWith("=")) { out.push(`${m[1]}__pyjs_magic__("system", ${lit(m[2].trim())})`); continue; }
     }

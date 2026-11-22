@@ -87,7 +87,7 @@ export class PromptSession {
       this.io.guarded(() => R.loader.exec(MAGIC_PRE, this.host, "exec", "<autoreload>"));
       code = this.io.guarded(() => {
         try {
-          R.loader.exec(ipythonSyntax(src) + "\n", this.main, "single", "<stdin>", { ...this.opts(), transform: magicTransform(this.sage) });
+          R.loader.exec(ipythonSyntax(src, this.sage) + "\n", this.main, "single", "<stdin>", { ...this.opts(), transform: magicTransform(this.sage) });
         } catch (e) {
           if (R.typeOf(R.toPyExc(e)).$mro.includes(R.T.SystemExit)) left = true;
           throw e;
