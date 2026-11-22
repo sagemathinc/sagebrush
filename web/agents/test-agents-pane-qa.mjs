@@ -254,12 +254,19 @@ try {
     return { hidden: a.hidden, href: a.getAttribute('href'), target: a.target, rel: a.rel, text: a.textContent, right: ra.left >= rt.right && ra.right <= rc.left, row: Math.abs((ra.top + ra.bottom) / 2 - (rc.top + rc.bottom) / 2) < 3, inBody: !!document.querySelector('${HOST} .file-path a') }; })()`);
   const st = await H.call("workspace.stat", { path: "/mandel.py" }).catch(() => null);
   ok(!o.hidden && /^\/\?code=[0-9a-f]+$/.test(o.href ?? "") && o.target === "_blank" && /noopener/.test(o.rel) && /^Open/.test(o.text), "O1: the head has Open, the code file's own page (/?code=<its id>), in a new tab", { o, st });
+  // (exactly the file's own page, as the workspace's stat names it to the agent, not only an address of that shape)
+  const entryOf = (r) => r?.result?.entry ?? r?.entry ?? r?.result ?? r;
+  const pageOf = (e) => { try { const u = new URL(e.url); return u.pathname + u.search; } catch { return null; } };
+  const codeEntry = entryOf(st);
+  ok(!!pageOf(codeEntry) && o.href === pageOf(codeEntry), "O1: Open is exactly this file's page, as the workspace names it", { href: o.href, entry: codeEntry });
   ok(o.right && o.row, "O1: at the head's right, after the tabs, in the row of Copy and Close", o);
   ok(!o.inBody, "O1: the small text link under the head is gone (one way, the head's)", o);
   await P.ev(`([...document.querySelectorAll('#artifacts .pane-head [data-tab]')].find((t) => /qa\.ipynb/.test(t.textContent)).click(), true)`);
   await P.until(`(document.querySelector('#artifacts .pane-head a.open-full:not([hidden])')?.getAttribute('href') ?? '').startsWith('/?nb=')`, 10000).catch(() => {});
   const onb = await P.ev(`document.querySelector('#artifacts .pane-head a.open-full:not([hidden])')?.getAttribute('href') ?? null`);
   ok((onb ?? "").startsWith("/?nb="), "O2: on the notebook's tab, Open is the notebook's page (/?nb=<its id>)", onb);
+  const nbEntry = entryOf(await H.call("workspace.stat", { path: "/qa.ipynb" }).catch(() => null));
+  ok(!!pageOf(nbEntry) && onb === pageOf(nbEntry), "O2: exactly this notebook's page, as the workspace names it", { onb, entry: nbEntry });
   const page = await P.ev(`fetch(${"document.querySelector('#artifacts .pane-head a.open-full').getAttribute('href')"}).then((r) => r.status)`);
   ok(page === 200, "O2: that address answers 200", page);
   ok(P.errors.length === 0, "no page errors", P.errors);
