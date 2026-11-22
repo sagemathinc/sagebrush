@@ -1836,6 +1836,16 @@
   "owner": "engine arithmetic (exact linear algebra)",
   "reason": "the work estimate's model: the proved transform bound used as a cap on a modelled size, saturating to usize::MAX when it does not fit (an estimate term, never a refusal or a cap on input)"
  },
+ "engine/arith/src/smith/estimate/route3.rs :: compress :: let t = u.total().unwrap_or(u64::MAX).max(1) as f64; #0": {
+  "class": "none",
+  "owner": "engine arith (kernel metering)",
+  "reason": "a model's and the switch's saturating unit arithmetic: a total that overflows u64 reads as huge (an accounting figure, never a refusal)"
+ },
+ "engine/arith/src/smith/route3.rs :: op_units :: u.total().unwrap_or(u64::MAX) #0": {
+  "class": "none",
+  "owner": "engine arith (kernel metering)",
+  "reason": "a model's and the switch's saturating unit arithmetic: a total that overflows u64 reads as huge (an accounting figure, never a refusal)"
+ },
  "engine/arith/src/smith/route3.rs :: smith_route3 :: let super::Square::Done(f) = super::nonsingular(&t, usize::MAX)? else { return Err(internal(\"core (T singular)\")) }; #0": {
   "class": "none",
   "owner": "engine arithmetic (exact linear algebra)",

@@ -11,7 +11,7 @@
 
 #![cfg(not(target_arch = "wasm32"))]
 
-use sagebrush_arith::cost::{bigdiv_units, bigmul_units, bigxgcd_units, tallied, Family, Local, Units, FAMILIES};
+use sagebrush_arith::cost::{bigdiv_units, biggcd_units, bigmul_units, bigxgcd_units, tallied, Family, Local, Units, FAMILIES};
 use sagebrush_arith::nmod::{Modulus, Primes};
 use sagebrush_arith::smith::{self, route3};
 use sagebrush_arith::zmat::{self, copy_units, limbs, ZMat};
@@ -105,8 +105,10 @@ fn before_echelon(bm: &ZMat, j: &[usize]) -> ([u64; FAMILIES], u64, ZMat, BigInt
     (want, c1 + c2 + c3, nm, delta, g)
 }
 
-/// The rank profile's pieces: the entry's charge and check, and the
-/// echelon modulo the first prime.
+/// The rank profile's pieces: the entry's charge and check, the echelon
+/// modulo the first prime, and A's row and column contents for k^ (C's
+/// switch): each a gcd fold at its running sizes, stopped at 1, then its
+/// residues modulo the 25 primes below 100 (no check among them).
 fn entry_and_profile(a: &ZMat) -> ([u64; FAMILIES], u64) {
     let (m, n) = (a.rows, a.cols);
     let mut want = [0; FAMILIES];
@@ -114,6 +116,24 @@ fn entry_and_profile(a: &ZMat) -> ([u64; FAMILIES], u64) {
     let p = Primes::new().next().unwrap();
     let (u, c, _) = piece(|| a.reduce(&Modulus::new(p)).rref_rows());
     add(&mut want, &u);
+    let fold = |xs: Vec<&BigInt>, want: &mut [u64; FAMILIES]| {
+        let mut g = b(0);
+        for x in xs {
+            if *x != b(0) && g != b(1) {
+                units(want, biggcd_units(limbs(&g), limbs(x)));
+                g = num_integer::Integer::gcd(&g, x);
+            }
+        }
+        for _ in 0..25 {
+            units(want, bigdiv_units(limbs(&g), 1));
+        }
+    };
+    for i in 0..m {
+        fold((0..n).map(|j| a.get(i, j)).collect(), &mut want);
+    }
+    for j in 0..n {
+        fold((0..m).map(|i| a.get(i, j)).collect(), &mut want);
+    }
     (want, 1 + c)
 }
 
@@ -232,6 +252,10 @@ fn route3_stop_in_the_row_echelon_and_the_solves() {
     // the lift: C's 4 entries placed, one division (1 by 2)
     fam(&mut want, Family::Move, 4);
     units(&mut want, bigdiv_units(1, 1));
+    // C's index (2 x 2 = 4) divides G = 4: two products, one division
+    units(&mut want, bigmul_units(1, 1));
+    units(&mut want, bigmul_units(1, 1));
+    units(&mut want, bigdiv_units(1, 1));
     let c_mat = z(&[&[b(2), b(0)], &[b(1), b(2)]]);
     let (u, c2, _) = piece(|| nm.mul(&c_mat));
     add(&mut want, &u);
@@ -283,9 +307,10 @@ fn route3_stop_iterations_holding_word_ops() {
     at += c;
     let (_, cmat) = route3::compress(&a, &[0, 1]).unwrap();
     let (_, c2, nc) = piece(|| nm.mul(&cmat));
-    // the column echelon's 2 rows and its last check, N C's, row echelon
-    // column 0's
-    at += 3 + c2 + 1;
+    // (G = 1 here, Delta = delta = 6 and gcd(6, Q) = 1: C = I with no
+    // echelon) N C's checks, the row echelon's column 0's
+    assert_eq!(cmat.d, vec![b(1), b(0), b(0), b(1)], "C = I");
+    at += c2 + 1;
     let first = stopped_at_check(at, || smith::smith_form(&a));
     let second = stopped_at_check(at + 1, || smith::smith_form(&a));
     let mut want = [0; FAMILIES];
@@ -382,4 +407,119 @@ fn route3_stop_iterations_holding_word_ops() {
         *x -= y;
     }
     assert_eq!(d, want, "X's second column");
+}
+
+/// The prefix at the tail path's first check (its echelon's column 0), on
+/// a wide input whose C takes the tail path: the entry, the profile with
+/// A's contents, B's copy, Compress's pieces, then the tail's residues
+/// (-Q's and N's entries modulo delta) and its rows' copy, all charged
+/// before the check.  `big`: delta = G = a 71-bit prime (the multi-limb
+/// ring), else delta = 4, G = 2 (the word ring).  (Both inputs' contents
+/// give k^ = 0, so the switch takes the tail path.)
+fn tail_first_check(a: &ZMat, big: bool) -> ([u64; FAMILIES], u64) {
+    let (mut want, mut at) = entry_and_profile(a);
+    fam(&mut want, Family::Move, copy_units(&a.d));
+    let (u, c, nm, delta, g) = before_echelon(a, &[0, 1]);
+    add(&mut want, &u);
+    at += c;
+    let all: Vec<usize> = (0..2).collect();
+    let q = nm.mul(&block(a, &all, &[2]));
+    if big {
+        assert!(delta.bits() > 62 && g == delta, "the multi-limb ring, G = delta");
+        for x in q.d.iter().chain(&nm.d) {
+            units(&mut want, bigdiv_units(limbs(x), limbs(&delta)));
+        }
+    } else {
+        assert_eq!((delta.clone(), g.clone()), (b(4), b(2)));
+        fam(&mut want, Family::ModArith, q.d.iter().chain(&nm.d).map(|x| limbs(x) as u64).sum());
+    }
+    // the rows [-Q | N reversed], r (nz + r) entries
+    fam(&mut want, Family::Move, 2 * 3);
+    (want, at + 1)
+}
+
+/// The tail path's first check, on both rings: what a Stop there charges
+/// is the work before it (its residues and rows charged before their
+/// check).  Word: A = [[4, 1, 5], [0, 1, 3]] (B_J = [[4, 1], [0, 1]], N =
+/// [[1, -1], [0, 4]], delta = 4, Q = (2, 12), G = 2).  Multi-limb: A = [[P,
+/// 0, 0], [0, 1, 5]], P a 71-bit prime (delta = G = P, Lambda's index P).
+#[test]
+fn route3_stop_in_the_tail_echelon() {
+    let _lock = HOOKS.lock().unwrap_or_else(|e| e.into_inner());
+    let p = (b(1) << 70usize) + b(37);
+    for (a, big) in [(word_tail(), false), (z(&[&[p.clone(), b(0), b(0)], &[b(0), b(1), b(5)]]), true)] {
+        let (want, at) = tail_first_check(&a, big);
+        let got = stopped_at_check(at, || smith::smith_form(&a));
+        assert_eq!(got, want, "the tail echelon's first check ({})", if big { "multi-limb" } else { "word" });
+    }
+}
+
+/// The tail echelon's column 0 (z's), on the word input, as the
+/// difference of the prefixes at its first two checks: the pool's length
+/// (2); the pivot 2's gcd with 4 (one Euclid step) and, row 1 being zero
+/// there, no clearing; the pivot kept (g = 2), its generator 2 row_0 =
+/// (0, 2, 2) (4 / 2 divided, 3 ring operations); the zero rows dropped
+/// (row 1 read through, 3; the generator to its first nonzero, 2); then
+/// the next column's stop test, the generator read again (2), before its
+/// check.
+#[test]
+fn route3_stop_in_the_tail_echelon_column() {
+    let _lock = HOOKS.lock().unwrap_or_else(|e| e.into_inner());
+    let a = word_tail();
+    let (_, first) = tail_first_check(&a, false);
+    let s0 = stopped_at_check(first, || smith::smith_form(&a));
+    let s1 = stopped_at_check(first + 1, || smith::smith_form(&a));
+    let mut want = [0; FAMILIES];
+    fam(&mut want, Family::Move, 2 + 3 + 2 + 2);
+    units(&mut want, bigdiv_units(1, 1));
+    fam(&mut want, Family::ModArith, 1 + 3);
+    let mut d = [0; FAMILIES];
+    for (i, v) in d.iter_mut().enumerate() {
+        *v = s1[i] - s0[i];
+    }
+    assert_eq!(d, want, "z's column and the stop test before the next check");
+}
+
+/// The word input of the tail path's pins.
+fn word_tail() -> ZMat {
+    z(&[&[b(4), b(1), b(5)], &[b(0), b(1), b(3)]])
+}
+
+/// The tail path's solved columns, on the word input above, as the
+/// difference of the prefixes at consecutive checks.  Its echelon modulo
+/// 4, over the rows [-Q | N reversed] = [[2, 3, 1], [0, 0, 0]]: z's column
+/// pivots on row 0 (g = 2, its generator (0, 2, 2) pushed); x_1's on the
+/// generator (g = 2, its own generator 0); the leftover rows then vanish,
+/// so k = 1 and C = [[1, 0], [1, 2]].  After the echelon's last check:
+/// C's columns placed (r^2 = 4 Move) and T's column x_1 (a pivot: its lead
+/// 4 / 2, a division; no tail pivot before it), then its check; then H's
+/// column x_0: back substitution through x_1's pivot row (one term, two
+/// ring operations; the division of -2 by 2), then its check.
+#[test]
+fn route3_stop_in_the_tail_solves() {
+    let _lock = HOOKS.lock().unwrap_or_else(|e| e.into_inner());
+    let a = word_tail();
+    let (_, first) = tail_first_check(&a, false);
+    // the echelon's checks: columns 0 (z) and 1, and its last
+    let last = first + 2;
+    let s0 = stopped_at_check(last, || smith::smith_form(&a));
+    let s1 = stopped_at_check(last + 1, || smith::smith_form(&a));
+    let s2 = stopped_at_check(last + 2, || smith::smith_form(&a));
+    let diff = |x: &[u64; FAMILIES], y: &[u64; FAMILIES]| -> [u64; FAMILIES] {
+        let mut d = [0; FAMILIES];
+        for (i, v) in d.iter_mut().enumerate() {
+            *v = x[i] - y[i];
+        }
+        d
+    };
+    let mut want = [0; FAMILIES];
+    fam(&mut want, Family::Move, 4);
+    units(&mut want, bigdiv_units(1, 1));
+    assert_eq!(diff(&s1, &s0), want, "T's column x_1");
+    let mut want = [0; FAMILIES];
+    units(&mut want, bigdiv_units(1, 1));
+    fam(&mut want, Family::ModArith, 2);
+    assert_eq!(diff(&s2, &s1), want, "H's column x_0");
+    let (_, c) = route3::compress(&a, &[0, 1]).unwrap();
+    assert_eq!(c.d, vec![b(1), b(0), b(1), b(2)], "C");
 }

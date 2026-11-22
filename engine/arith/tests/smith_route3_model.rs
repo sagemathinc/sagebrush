@@ -159,7 +159,7 @@ fn route3_model_terms_against_their_phases() {
     }
     println!("checked terms: {checked:?}; worst ratio {worst:.2}");
     for k in [
-        "entry", "profile", "col: blocks", "col: B_J inverse", "col: Q", "col: G", "col: C echelon", "col: lift", "col: N C", "col: H echelon", "col: K and X", "certificate", "A X", "left: blocks", "left: B_J inverse", "left: Q",
+        "entry", "profile", "col: blocks", "col: B_J inverse", "col: Q", "col: G", "col: C echelon", "col: C solve", "col: lift", "col: N C", "col: H echelon", "col: K and X", "certificate", "A X", "left: blocks", "left: B_J inverse", "left: Q",
         "left: G", "left: C echelon", "left: N C", "left: H echelon", "left: K and X", "core", "combine", "T inverse",
     ] {
         assert!(checked.get(k).is_some_and(|&c| c > 0), "the term {k} is checked on some row");
@@ -181,7 +181,7 @@ fn _z(x: &BigInt) -> bool {
 fn route3_models_cost_does_not_grow_with_the_input() {
     use estimate::{route3_model, Route3Sizes, Side};
     let steps = |m: usize, n: usize, r: usize| {
-        let side = |w: usize| Side { r, w, lb: 1, ld: 4, delta_bits: 250, ln: 4, lg: 3, g_bits: 190, folds: 2, nd: 1.0, piv: 3, lgq: 1, sparse_x: false };
+        let side = |w: usize| Side { r, w, lb: 1, ld: 4, delta_bits: 250, ln: 4, lg: 3, g_bits: 190, folds: 2, nd: 1.0, piv: 3, lgq: 1, sparse_x: false, khat: 1 };
         let z = Route3Sizes {
             m,
             n,
