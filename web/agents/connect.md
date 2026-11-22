@@ -58,7 +58,7 @@ On dev.sagebrush.space, the testing site (macOS or Linux terminal):
 SAGEBRUSH_AGENT_PAGE=https://dev.sagebrush.space/agents/ npx -y https://agents.sagebrush.cloud/agents/sagebrush-agent-0.8.7.tgz --origin https://dev.sagebrush.space
 ```
 
-The sha256 of that file is `075433497199e95c9ff0e5481d878ceb0d50f9feea6065bd52af887705637c7e`.
+The sha256 of that file is `b5ebc33c9fb2d1f2cae2bbdad044872b1df4cd1a4cb0c02df2ec32cd6079043e`.
 
 - It prints a link with a one-time code. Open it in Chrome or Firefox. Safari can't reach a program on your computer.
 - The browser asks once whether this site may reach apps on this computer; its wording depends on the browser's version. Click Allow, then Connect again if it asks.
