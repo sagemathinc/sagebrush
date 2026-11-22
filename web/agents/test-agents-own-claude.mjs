@@ -20,7 +20,9 @@ const base = "npx -y https://agents.sagebrush.cloud/agents/sagebrush-agent-9.9.9
 ok(ownClaudeCommand(base, "https://sagebrush.space") === base && ownClaudeCommand(base, "https://agents.sagebrush.cloud") === base, "on the origins the agent trusts by default: the one-liner as it is");
 ok(ownClaudeCommand(base, "https://dev.sagebrush.space") === base + " --origin https://dev.sagebrush.space", "on DEV: --origin https://dev.sagebrush.space");
 ok(ownClaudeCommand(base, "http://127.0.0.1:8765") === base + " --origin http://127.0.0.1:8765", "on a local server: --origin with its port");
-ok(ownClaudeCommand(base, "null") === base && ownClaudeCommand(base, "https://a b") === base && ownClaudeCommand(base, "https://x.org/path") === base, "no http(s) origin (a file page's \"null\", anything with a space or a path): the one-liner, nothing appended");
+ok(ownClaudeCommand(base, "http://[::1]:8765") === base + " --origin 'http://[::1]:8765'", "an IPv6 literal: --origin, quoted (its brackets are a shell pattern)", ownClaudeCommand(base, "http://[::1]:8765"));
+ok(ownClaudeCommand(base, "https://xn--bcher-kva.example") === base + " --origin https://xn--bcher-kva.example", "a punycode host: --origin, as it is");
+ok(["null", "https://a b", "https://x.org/path", "ftp://x.org", "https://X.org", "http://x.org:80"].every((o) => ownClaudeCommand(base, o) === base), "not an origin as the URL parser gives one back (a file page's \"null\", a space, a path, another scheme, upper case, a default port): the one-liner, nothing appended");
 
 // ---- the built page, served locally
 const html = readFileSync(join(here, "..", "dist", "agents", "index.html"), "utf8");
