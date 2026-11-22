@@ -935,6 +935,8 @@ fn latex(e: &Expr) -> (String, u8) {
             (s, P_ADD)
         }
         Kind::Mul(v) => latex_mul(v),
+        // (a negative exponent: over 1, as Sage writes it)
+        Kind::Pow(b, x) if over_one(b, x).is_some() => latex_mul(std::slice::from_ref(e)),
         Kind::Pow(b, x) => latex_pow(b, x, true),
         Kind::Fun(Fun::Abs, a) => (format!("{{\\left| {} \\right|}}", latex(&a[0]).0), P_ATOM),
         Kind::Fun(f, a) => {
@@ -1000,6 +1002,23 @@ fn latex_pow(b: &Expr, x: &Expr, alone: bool) -> (String, u8) {
     (format!("{}^{{{}}}", base, ex), P_POW)
 }
 
+/// The positive exponent of a power Sage's LaTeX writes over 1: one whose
+/// exponent prints with a leading minus, a negative real number or a product
+/// with a negative real coefficient (x^(-2), x^(-3/2), a x^(-b), 2^(-x));
+/// never a sum's (x^(-a - 1)), a complex one's (x^(-I)) or e's (e^(-x),
+/// 3 e^(-2): Sage keeps e^{\\left(-2\\right)}).
+fn over_one(b: &Expr, x: &Expr) -> Option<Expr> {
+    if b.is_const(Const::E) {
+        return None;
+    }
+    let negative = match &x.kind {
+        Kind::Num(n) => n.is_negative(),
+        Kind::Mul(_) => split_coeff(x).0.is_negative(),
+        _ => false,
+    };
+    negative.then(|| neg(x))
+}
+
 fn latex_mul(v: &[Expr]) -> (String, u8) {
     let mut coeff = Num::one();
     let mut numer: Vec<Expr> = vec![];
@@ -1010,8 +1029,8 @@ fn latex_mul(v: &[Expr]) -> (String, u8) {
             continue;
         }
         let (b, x) = base_exp(f);
-        if x.as_num().map_or(false, |n| n.is_negative()) {
-            denom.push(pow(&b, &neg(&x)));
+        if let Some(px) = over_one(&b, &x) {
+            denom.push(pow(&b, &px));
         } else {
             numer.push(f.clone());
         }
