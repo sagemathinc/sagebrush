@@ -27,7 +27,7 @@ export const COPY = {
   discarded: "Claude's earlier connection was for another page or workspace, so it needs a new code.",
   unusable: "This page's earlier connection to Claude couldn't be used, so it needs a new code.",
   kept: "Claude was connected to this page earlier.",
-  elsewhere: "Claude is connected in another tab of this browser. Use that tab, or close it and Reconnect here.",
+  elsewhere: "Claude is connected to another page. Use that page, or close it and Reconnect here.",
   hint: "Not connected: Connect Claude to send",
 };
 
@@ -1219,7 +1219,7 @@ export async function runA14({ site, ok, want = () => true }) {
     const quiet = await A.quiet(3000);
     ok(quiet && A.hellos === h1 && !(await P.connected()), "A14-R4: back as that grant ends: no attempt, nothing reconnects (never extended)", { quiet, bar: await P.bar() });
   });
-  // R5 (0.8.12's busy): another page has the agent when this one tries again: "connected in another tab", with
+  // R5 (0.8.12's busy): another page has the agent when this one tries again: "connected to another page", with
   // [Reconnect], never a request for a code
   await run("A14-R5", async (B, A) => {
     const P = await B.tab();
@@ -1235,7 +1235,7 @@ export async function runA14({ site, ok, want = () => true }) {
     await P.ev(`document.querySelector('#conn-act').click()`);
     await P.until(`document.querySelector('#conn-status').textContent !== ''`);
     const bar = await P.bar(), text = await P.ev(`document.body.innerText`);
-    ok(A.busied >= 1 && bar.status === COPY.elsewhere && bar.act === "Reconnect" && !/new code/.test(text) && other.readyState === 1, "A14-R5: refused as busy (another page paired): the page says Claude is connected in another tab, offers [Reconnect], and asks for no code; the other page keeps the agent", { busied: A.busied, bar });
+    ok(A.busied >= 1 && bar.status === COPY.elsewhere && bar.act === "Reconnect" && !/new code/.test(text) && other.readyState === 1, "A14-R5: refused as busy (another page paired): the page says Claude is connected to another page, offers [Reconnect], and asks for no code; the other page keeps the agent", { busied: A.busied, bar });
     other.close();
   });
   // R6: Files with no turn running opens in this tab, and coming back reconnects by itself

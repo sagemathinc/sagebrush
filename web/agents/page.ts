@@ -1029,7 +1029,7 @@ const CONN = {
   discarded: "Claude's earlier connection was for another page or workspace, so it needs a new code.",
   unusable: "This page's earlier connection to Claude couldn't be used, so it needs a new code.",
   kept: "Claude was connected to this page earlier.",
-  elsewhere: "Claude is connected in another tab of this browser. Use that tab, or close it and Reconnect here.",
+  elsewhere: "Claude is connected to another page. Use that page, or close it and Reconnect here.",
 };
 let connBar: ConnBar | null = null;
 let connShown = false; // (the bar's ×: hidden until the next change)

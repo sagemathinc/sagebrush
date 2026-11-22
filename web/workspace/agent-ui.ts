@@ -606,7 +606,7 @@ export function mountAgentPairing(ws: PairingWorkspace, o: { button?: HTMLElemen
     // (superseded meanwhile by a pairing the person chose: the caller's current(p) says nothing and keeps nothing)
     if (pairing !== p) { if (got === "paired") p.drop(); return { res: "unreachable", p }; }
     if (got === "timeout") { void p.revoke("no answer from the agent"); return { res: "unreachable", p }; }
-    // (still another page's after the wait: another tab of this browser has the agent; this record stays for a click,
+    // (still another page's after the wait: another page has the agent; this record stays for a click,
     //  #1620)
     if (got === "refused" && busy(p)) return { res: "elsewhere", p };
     if (got !== "paired") return { res: got, p };
@@ -624,7 +624,7 @@ export function mountAgentPairing(ws: PairingWorkspace, o: { button?: HTMLElemen
   /** B (#1620): a connection lost while the page stays, tried again by itself with its record, behind the loss the page
    * says (its [Reconnect] still there, to try at once): after RETRY_FIRST_MS, then with backoff, for as long as the
    * grant lasts (one with no end: RETURN_MS from the loss). An attempt that fails to reach the agent says nothing; it
-   * ends restored, or refused, expired or another tab's (said, as a [Reconnect]'s is), or past its window (said as an
+   * ends restored, or refused, expired or another page's (said, as a [Reconnect]'s is), or past its window (said as an
    * unreachable agent, kept for one click while the grant lasts). It stops, saying nothing, once the page is leaving, a
    * pairing is live, or the record is no longer the one kept; it waits while the person's own [Reconnect] runs. */
   async function retryLost(r: ReloadRecord) {
@@ -676,7 +676,7 @@ export function mountAgentPairing(ws: PairingWorkspace, o: { button?: HTMLElemen
     // (a late result, after a newer pairing replaced this attempt, says nothing and keeps nothing)
     if (!current(p)) return { kind: "not-restored", why: "discarded", canReconnect: false };
     if (res === "ok") { kept = null; const s: RestoreState = { kind: "restored" }; say(s); return s; }
-    kept = res === "unreachable" || res === "elsewhere" ? r : null; // (unreachable, or another tab's: the SAME record stays for the next click)
+    kept = res === "unreachable" || res === "elsewhere" ? r : null; // (unreachable, or another page's: the SAME record stays for the next click)
     const s: RestoreState = { kind: "not-restored", why: res, canReconnect: res === "unreachable" || res === "elsewhere" };
     say(s);
     return s;
