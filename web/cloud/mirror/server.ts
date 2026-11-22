@@ -3,7 +3,7 @@
 // authenticated here, by the site's session, and reaches exactly one object, the account's MirrorAccount, named by
 // the account it authenticated: the page never names an account or a storage prefix (S1).
 //
-//   GET    /api/mirror/v1/status                         -> {available, state, mode, conversations, bytes, csrf}
+//   GET    /api/mirror/v1/status                         -> {available, state, mode, conversations, bytes, pending, quota, csrf}
 //   POST   /api/mirror/v1/enable                         -> {state: "on"}
 //   POST   /api/mirror/v1/disable  {confirm: "delete"}   -> {state: "off"}   every key and index now, objects after
 //   GET    /api/mirror/v1/conversations                  -> {conversations: [{conversation, locator, mode, streams}]}
@@ -12,7 +12,8 @@
 //   POST   /api/mirror/v1/append/<locator>               one segment: the body (MIRROR_TYPE), its range in
 //                                                         x-sb-mirror-range: "<log_instance> <first_n> <last_n> <first_seq> <last_seq>"
 //   GET    /api/mirror/v1/read/<locator>/<log_instance>?after=<n>   the segment from position n + 1
-//   POST   /api/mirror/v1/audit    {locator, log_instance, n, reason}   a page found the mirror stale (S6): no bodies
+//   POST   /api/mirror/v1/stale    {locator, log_instance, from_n, reason}   a page found a stream disagrees with its runner
+//                                                         (S6d): a monotonic mark in the account's object, seen by every device
 //
 // Requests: same origin (Origin, or for a GET Sec-Fetch-Site), signed in, entitled (MIRROR_ACCOUNTS, or a CoCalc tier
 // in MIRROR_TIERS); every request but a GET also carries the CSRF token status gave (x-sb-mirror-csrf, an HMAC of the
@@ -29,9 +30,9 @@
 // later code that counts budget_claims): no Worker rollback to before it until every claim row is gone.  Unbinding
 // BUDGET_CLAIMS is safe (counting is by the table, sharingUsed; the mirror goes inert).
 //
-// Bodies, plaintext and keys are never logged; the audit line has counts and positions only.
+// Bodies, plaintext and keys are never logged; the stale mark's audit line has positions and a reason only.
 import { accountHash, authTier, claimsWritable, limits, sessionResult, same, type Ctx, type ShareEnv } from "../share/server.ts";
-import { MIRROR_CAPS, MIRROR_SCHEMA, canonical, parseBody, LOG_INSTANCE, entryOk, type MirrorEntry } from "../../workspace/agent-chat/mirror-format.ts";
+import { MIRROR_CAPS, MIRROR_SCHEMA, canonical, parseBody, LOG_INSTANCE, entryOk, STALE_REASONS, type MirrorEntry } from "../../workspace/agent-chat/mirror-format.ts";
 import { ALG, ENVELOPE, LOCATOR, OVERHEAD, b64url, currentKek, hex, newWrappedDek, nonceOf, open, openDek, seal, sha256Hex, type Header, type KekEnv } from "./crypto.ts";
 import type { MirrorAccount, MirrorCode, R } from "./account.ts";
 
@@ -164,7 +165,9 @@ export async function handleMirror(req: Request, env: MirrorSiteEnv, ctx: Ctx, h
     const hash = await accountHash(who.id);
     const st = await stubOf(env, hash).status({ account: who.id, hash });
     const csrf = await csrfOf(env, who.session);
-    return answer(st, (v) => json({ available: true, ...v, csrf, encryption: "server", uploaded_by: "page" }));
+    // (the account's storage quota, for the settings' "Mirror: <size> of your <quota>"; absent when it can't be read now)
+    const lim = await limits(env, who).catch(() => null);
+    return answer(st, (v) => json({ available: true, ...v, ...(lim ? { quota: lim.storage_bytes } : {}), csrf, encryption: "server", uploaded_by: "page" }));
   }
   if (!ok) return err(403, "forbidden", "the mirror isn't part of this account's plan");
   // (everything else but a GET: the CSRF token, then the exact content type, before any body is read)
@@ -215,14 +218,16 @@ export async function handleMirror(req: Request, env: MirrorSiteEnv, ctx: Ctx, h
     if (!/^[0-9]{1,15}$/.test(after)) return err(400, "invalid");
     return read(env, stub, base, rd[1], rd[2], Number(after), hooks);
   }
-  if (p === "/api/mirror/v1/audit" && m === "POST") {
+  if (p === "/api/mirror/v1/stale" && m === "POST") {
     if (!isJson) return err(415, "invalid", "JSON only");
     const b = await smallJson(req);
     if (b instanceof Response) return b;
-    if (typeof b.locator !== "string" || !LOCATOR.test(b.locator) || typeof b.log_instance !== "string" || !LOG_INSTANCE.test(b.log_instance) || !Number.isSafeInteger(b.n) || !["stale", "conflict", "missing"].includes(b.reason as string)) return err(400, "invalid");
+    if (Object.keys(b).sort().join(",") !== "from_n,locator,log_instance,reason" || typeof b.locator !== "string" || !LOCATOR.test(b.locator) || typeof b.log_instance !== "string" || !LOG_INSTANCE.test(b.log_instance)
+      || !Number.isSafeInteger(b.from_n) || !(STALE_REASONS as readonly string[]).includes(b.reason as string)) return err(400, "invalid");
+    const r = await stub.markStale({ ...base, locator: b.locator, log_instance: b.log_instance, from_n: b.from_n as number, reason: b.reason as string });
     // (positions and a reason only: never an entry, a text or a digest of one)
-    console.log(JSON.stringify({ mirror_audit: b.reason, account: hash.slice(0, 16), locator: b.locator, log_instance: b.log_instance, n: b.n }));
-    return json({});
+    if (!("error" in r)) console.log(JSON.stringify({ mirror_stale: b.reason, account: hash.slice(0, 16), locator: b.locator, log_instance: b.log_instance, from_n: b.from_n, stale_from: r.ok.stale_from }));
+    return answer(r, (v) => json(v));
   }
   return err(404, "not found");
 }
@@ -316,13 +321,15 @@ async function read(env: MirrorSiteEnv, stub: Stub, base: Base, locator: string,
     w.write(STATUS[plan.error.code] ?? 400, JSON.stringify({ error: plan.error.code }));
     return res();
   }
+  // (the stream's stale mark, S6d: on every answer, so every device shows what a page found)
+  const stale = { stale_from: plan.ok.stale_from, stale_reason: plan.ok.stale_reason };
   if ("end" in plan.ok) {
-    w.write(200, JSON.stringify({ end: true }));
+    w.write(200, JSON.stringify({ end: true, ...stale }));
     return res();
   }
   const { seg, key, chain, wraps, account } = plan.ok;
   const missing = (reason: string) => {
-    w.write(200, JSON.stringify({ missing: true, reason, segment: seg.segment, first_n: seg.first_n, last_n: seg.last_n }));
+    w.write(200, JSON.stringify({ missing: true, reason, segment: seg.segment, first_n: seg.first_n, last_n: seg.last_n, ...stale }));
     return res();
   };
   if (seg.prev !== chain) return missing("chain");
@@ -346,7 +353,7 @@ async function read(env: MirrorSiteEnv, stub: Stub, base: Base, locator: string,
     || parsed.body.entries.length !== seg.last_n - seg.first_n + 1 || !parsed.body.entries.every((e: MirrorEntry) => entryOk(e))) return missing("corrupt");
   w.write(200, JSON.stringify({
     segment: seg.segment, log_instance, first_n: seg.first_n, last_n: seg.last_n, first_seq: seg.first_seq, last_seq: seg.last_seq,
-    digest: seg.digest, prev: chain, encryption: "server", uploaded_by: "page", entries: parsed.body.entries,
+    digest: seg.digest, prev: chain, encryption: "server", uploaded_by: "page", ...stale, entries: parsed.body.entries,
   }));
   return res();
 }

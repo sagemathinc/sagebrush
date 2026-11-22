@@ -165,6 +165,16 @@ export class DelegateTasks {
     this.o.changed();
   }
 
+  /** Close a task's proposal for good (tasks.close {proposal, seq}): the proposal as it was read (`seq`, from its
+   * tasks.diff), so a task that moved on since is refused (stale) and nothing is closed; only with the switch on. */
+  async close(id: string, commit: string, seq: number): Promise<string> {
+    const s = this.state();
+    if (s !== "on") throw new AgentError("forbidden", s === "turning-off" ? DELEGATE_TEXT.turningOff : DELEGATE_TEXT.off);
+    const r = TASK_RESULTS["tasks.close"](await this.client().request("tasks.close", { task: id, proposal: commit, seq }));
+    await this.refresh().catch(() => {});
+    return r.status;
+  }
+
   /** Start a task (tasks.start): only with the switch on, never while it turns off. */
   async start(o: { title: string; prompt: string; docs: DelegateDoc[]; run: boolean }): Promise<string> {
     const s = this.state();
@@ -203,9 +213,11 @@ export class DelegateTasks {
   }
 
   /** A proposal's files, for the proposal view: `commit` and its base only, each file checked against its blob id. */
-  source(id: string, commit: string): ProposalSource {
-    let diff: { base: string; commit: string; files: DiffFile[] } | null = null;
+  source(id: string, commit: string): ProposalSource & { seen(): { seq: number; files: DiffFile[] } | null } {
+    let diff: { base: string; commit: string; seq: number; files: DiffFile[] } | null = null;
     return {
+      /** The task's seq when this proposal was last read (tasks.diff), and its files: what a decision on it names. */
+      seen: () => (diff ? { seq: diff.seq, files: diff.files } : null),
       diff: async (): Promise<ProposalDiff> => {
         const d = TASK_RESULTS["tasks.diff"](await this.client().request("tasks.diff", { task: id, commit }));
         if (d.task !== id || d.commit !== commit) throw new AgentError("bad_request", "the agent answered for another proposal");

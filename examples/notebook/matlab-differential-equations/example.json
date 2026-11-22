@@ -1,0 +1,16 @@
+{
+ "title": "Differential equations (MATLAB)",
+ "summary": "ode45 on a damped pendulum, the Lorenz attractor and its sensitive dependence, and the van der Pol limit cycle.",
+ "tags": [
+  "differential equations",
+  "plots"
+ ],
+ "level": "intro",
+ "main": "main.ipynb",
+ "files": [
+  "main.ipynb"
+ ],
+ "mode": "matlab",
+ "author": "Sagebrush",
+ "license": "MIT"
+}

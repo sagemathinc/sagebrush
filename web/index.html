@@ -319,6 +319,7 @@
   .about code, .tag code, footer code { background: var(--code); padding: 1px 5px; border-radius: 4px; font-size: 13px; }
   a { color: var(--accent); }
   footer { color: var(--muted); font-size: 13px; padding-top: 6px; padding-bottom: 40px; text-align: center; }
+  footer .sbver { font: 12px/1.4 ui-monospace, SFMono-Regular, Menlo, monospace; margin-top: 4px; user-select: all; }
   /* (the lower-left corner: the theme and full screen, small and quiet until pointed at) */
   #sbcorner { position: fixed; left: 8px; bottom: 6px; z-index: 25; display: flex; gap: 2px; }
   #sbcorner .cbtn { position: relative; display: inline-grid; place-items: center; width: 26px; height: 26px; padding: 0; border: 0; border-radius: 6px; background: none; color: var(--muted); cursor: pointer; }
@@ -571,6 +572,7 @@ its final layout and the files never arrive a moment later; not on a phone, wher
   </div>
   <footer>
   <p>Developed on <a href="https://cocalc.ai">CoCalc.ai</a> · a project of <a href="https://sagemath.com">SageMath, Inc.</a> · <a href="https://github.com/sagemathinc/sagebrush">GitHub</a> · <a href="/blog/">Blog</a> · <a href="/articles/">Articles</a> · <a href="/llms.txt">llms.txt</a> · <a href="/THIRD-PARTY-NOTICES.txt">Licenses</a></p>
+  <p class="sbver" id="sbversion" hidden></p>
   </footer>
 </section>
 <main>
@@ -784,6 +786,10 @@ import { keepView, viewToRestore } from "./workspace/view-state.ts";
 import { DOC_INDEX, DOC_UPSTREAM, STATUS_WORDS, docHead, docStatus, docWords, entryExamples, findArea, prepareIndex, prepareUpstream, requestUrl, searchIndexes, searchWithUpstream } from "./docsearch.ts";
 // (first-party active-user counts, signed-out browsers: after the first idle callback, through consent.ts)
 import "./active.ts";
+// (the build this site serves, in the footer, for whoever tests it (web/version.ts): after the first idle moment,
+// never before the first paint; a site that doesn't answer /api/version shows nothing)
+import { mountVersionStamp } from "./version.ts";
+(window.requestIdleCallback ?? ((f) => setTimeout(f, 1)))(() => void mountVersionStamp(document.getElementById("sbversion")));
 import { WorkerKernel } from "./notebook/worker-kernel.js";
 import { RunnerWorker } from "./notebook/runner-worker.js";
 import { NativeWorker } from "./notebook/native-worker.js";
@@ -2083,7 +2089,10 @@ new MutationObserver(showBusy).observe($("#cells"), { subtree: true, attributes:
 // in step).  Under `sagebrush notebook` the notebook is the .ipynb file on
 // disk; in the app, a file opened from the computer is.
 const nbName = $("#nbname"), savedEl = $("#saved");
-const docName = () => nbName.value.trim() || "Untitled";
+// (the title as typed, less an ".ipynb" typed with it: a notebook's name never carries its extension, so its file is
+// "matlab.ipynb", and its download too, not "matlab.ipynb.ipynb")
+const typedName = () => nbName.value.trim().replace(/\.ipynb$/i, "").trim();
+const docName = () => typedName() || "Untitled";
 function showName(name) {
   nbName.value = name || "Untitled";
   document.title = `${nbName.value} — Sagebrush`;
@@ -2231,6 +2240,21 @@ async function navLease() {
 // count when it was asked for) attaches only if none was since, checked holding the navigation lease before anything
 // is detached, so a notebook the person opened meanwhile always wins)
 let arrivalWait = null, attachSeq = 0;
+// (the file's name wins on open: a stored title that a rename didn't follow (older data, a sync's rename) is replaced
+// by the file's name, shown, and kept as a typed title is; only for this notebook while it is still the one open, and
+// never while its title is being typed. A file named "<title> (2)" because its title's name was taken is not that)
+async function fileNameWins(id) {
+  try {
+    const p = ws ? await ws.pathOf("notebook", id) : null;
+    if (!p || current.id !== id || document.activeElement === nbName) return;
+    const base = splitExt(nameOf(p))[0];
+    const name = docName();
+    // (a file named after its title with a number added (the title's name was taken) keeps its title, as made)
+    if (!base || base === name || (base.startsWith(name + " (") && /^ \(\d+\)$/.test(base.slice(name.length)))) return;
+    showName(base);
+    if (pageMay().rename) nb.setMeta({ name: base });
+  } catch {}
+}
 async function open(store, id, kind = "browser", guard = null, intent = null) {
   const endSwitch = await navLease();
   try {
@@ -2290,7 +2314,7 @@ async function open(store, id, kind = "browser", guard = null, intent = null) {
   // (the reactive notebook: random numbers are reproducible per cell, always)
   $("#ttreprolabel").hidden = REACTIVE;
   if (kind === "browser") try { localStorage.setItem("sagebrush-current", id); } catch {}
-  if (kind === "browser") wsListNotebook(id, doc.name, nb.mode).then(wsTrackCurrent);
+  if (kind === "browser") wsListNotebook(id, doc.name, nb.mode).then(() => fileNameWins(id)).then(wsTrackCurrent);
   if (kind === "browser") recordOpened({ kind: "notebook", ref: id });
   startHistory(id);
   presence.open(id);
@@ -2733,7 +2757,7 @@ function download(name, text, type = "application/json") {
   a.click();
   setTimeout(() => { URL.revokeObjectURL(a.href); a.remove(); }, 1000);
 }
-const fileBase = () => (nbName.value.trim() || "notebook").replace(/[\\/:*?"<>|]+/g, "_");
+const fileBase = () => (typedName() || "notebook").replace(/[\\/:*?"<>|]+/g, "_");
 
 // Share links: the cells, deflated, in the URL fragment (never sent to a server).
 const enc64 = (u8) => { let b = ""; for (let i = 0; i < u8.length; i += 0x8000) b += String.fromCharCode(...u8.subarray(i, i + 0x8000)); return btoa(b).replace(/\+/g, "-").replace(/\//g, "_").replace(/=+$/, ""); };
@@ -3726,6 +3750,7 @@ function openEntry(e, how = "here") {
   }
   const url = e.kind === "board" ? "/board/?doc=local:" + e.ref : "/?nb=" + encodeURIComponent(e.ref);
   if (how === "tab") return void window.open(url, "_blank", "noopener");
+  if (codePageUp) return void leaveCodePage(url);
   if (e.kind === "notebook") { saveNow(); openId(e.ref).then(wsTrackCurrent, sayNotLeft); }
   else toBoard(url);
 }
@@ -3736,6 +3761,8 @@ document.addEventListener("keydown", (e) => {
   // (the LaTeX editor's page over this one: its own File menu answers them, never both: one notebook a Ctrl+Alt+N)
   if (!it || document.querySelector(".tex-page")) return;
   e.preventDefault();
+  // (the code page over this one: its own File menu's item, which leaves it by its way out)
+  if (codePageUp) return void document.querySelector(`[data-f="${it === "open" ? "c-open" : "c-new"}"]`)?.click();
   fileMenu.querySelector(`[data-item="${it}"]:not([disabled])`)?.click();
 });
 // (the ⋯ menu's items have their own handlers; a pick closes it)
@@ -3956,6 +3983,8 @@ $("#boardbtn").onclick = () => toBoard("/board/?recent=" + encodeURIComponent(nb
 // (to the board, or another page (`what` names it), once this notebook is saved, every change of it; not saved:
 // it stays open, and says so, CORR-7F9-1)
 async function toBoard(url, what = "the whiteboard") {
+  // (from the code page: by its way out, which saves its edits first)
+  if (codePageUp) return void leaveCodePage(url);
   notLeft = "";
   try {
     await nb.saved();
@@ -4419,6 +4448,8 @@ async function uploadHere(list, folder) {
     const e = r.made[0];
     // (a board brought in from a file: its code waits for the person; what was said carried to its page)
     if (e.kind === "board") { pauseBoard(e.ref); carryNotice(refused); return openEntry(e); }
+    // (from the code page: opened on its own page, what was said carried there, as for a board)
+    if (codePageUp) { carryNotice(refused); return openEntry(e); }
     saveNow();
     return openId(e.ref).then(() => { wsTrackCurrent(); if (refused) statusEl.textContent = refused; }, sayNotLeft);
   }
@@ -4441,6 +4472,8 @@ async function openAs(e, as) {
     wsBrowser?.refresh();
     // (what was said, after the notebook opened: its own status lines come first)
     if (!said) return openEntry(made);
+    // (from the code page: opened on its own page, what was said carried there)
+    if (codePageUp) { carryNotice(said); return openEntry(made); }
     saveNow();
     await openId(made.ref).then(() => { wsTrackCurrent(); statusEl.textContent = said; }, sayNotLeft);
   } catch (err) { statusEl.textContent = `could not open ${nameOf(e.path)} as a notebook: ${err?.message ?? err}`; }
@@ -4905,13 +4938,16 @@ function diskBlocked(why) {
   shade.append(box);
   document.body.append(shade);
 }
-// (the desktop app: this page is left only once its changes are on disk, the notebook's own save first; the LaTeX
-// editor's page over this one: its edit written before that (web/latex/page.ts leaveThen), and the editor let go again
-// if the page stays. Every way out of the LaTeX page comes here (__sbLeaveTo: its File menu, its home link, a notebook
-// or board from the files beside it, Agents…, Open as board))
-async function leaveTo(url) {
+// (the desktop app: this page is left only once its changes are on disk, the notebook's own save first; true once it
+// navigates, false if it stays (said on the disk banner); the code page's every way out too, web/code/boot.ts, whose
+// own edits are saved before it asks: no notebook to save there (`notebook` false). The LaTeX editor's page over this
+// one: its edit written before that (web/latex/page.ts leaveThen), and the editor let go again if the page stays. Every
+// way out of the LaTeX page comes here (__sbLeaveTo: its File menu, its home link, a notebook or board from the files
+// beside it, Agents…, Open as board))
+async function leaveTo(url, notebook = true) {
+  leaveSeen?.({ url, notebook });
   const go = async () => {
-    if (diskMirror && !(await (await desktopModule()).beforeLeave(diskMirror, () => nb.saved()))) return false;
+    if (diskMirror && !(await (await desktopModule()).beforeLeave(diskMirror, notebook ? () => nb.saved() : undefined))) return false;
     location.assign(url);
     return true;
   };
@@ -4919,6 +4955,10 @@ async function leaveTo(url) {
   return go();
 }
 globalThis.__sbLeaveTo = leaveTo;
+// (tests, loopback pages in a browser only, never the app (whose page is on localhost too): a stand-in for the desktop
+// app's disk mirror, so the page's ways out meet its drain, and what each way out asked of leaveTo)
+let leaveSeen = null;
+if (!TAURI && /^(localhost|127\.0\.0\.1)$/.test(location.hostname)) window.__sbTestDiskMirror = (m, seen = null) => { diskMirror = m; leaveSeen = seen; };
 const wsReady = (async () => {
   try {
     const w = await Workspace.open();
@@ -5008,24 +5048,63 @@ const docSyncReady = (async () => {
 // on); said in the Files sidebar while it runs, and, kept until closed, what it couldn't start)
 let startAllLeaving = false;
 addEventListener("pagehide", () => { startAllLeaving = true; });
+// (and, while the page is open, each notebook made here since (Duplicate, an upload, an agent's create): only those, by
+// the ids their creates name (a rename or a move meanwhile followed), walked on a timer debounced by one second from the
+// last create (other changes don't move it); one walk at a time, a create meanwhile waiting for the same timer's next
+// turn; none once the page is leaving.  Made, not opened, its history would otherwise start
+// only at the next load)
 docSyncReady.then(async (on) => {
   if (!on) return;
   const w = await wsReady, hdb = await historyDbReady, mod = await loadHistory();
   if (!w || w.closed || !hdb || !db) return;
-  const r = await startAll({
-    list: async () => (await w.list("/", { recursive: true })).filter((e) => e.kind === "notebook" && e.ref && !e.remote && !e.missing && !e.trashed).map((e) => ({ ref: e.ref, path: e.path })),
-    startOf: journalStartOf((ref) => readJournal(hdb, ref)),
-    syncOn: () => !!mod.DOC_SYNC?.on,
-    storeFor: (ref) => storeFor(ref),
-    current: () => (current.kind === "browser" ? current.id : null),
-    idle: () => new Promise((ok) => (typeof requestIdleCallback === "function" ? requestIdleCallback(() => ok(), { timeout: 1000 }) : setTimeout(ok, 50))),
-    stopped: () => startAllLeaving || w.closed,
-    progress: (done, total) => { if (total > 0 && done < total) wsBrowser?.say(`Starting sync: ${done} of ${total} notebooks`); },
+  const walkOnce = async (list) => {
+    const r = await startAll({
+      list,
+      startOf: journalStartOf((ref) => readJournal(hdb, ref)),
+      syncOn: () => !!mod.DOC_SYNC?.on,
+      storeFor: (ref) => storeFor(ref),
+      current: () => (current.kind === "browser" ? current.id : null),
+      idle: () => new Promise((ok) => (typeof requestIdleCallback === "function" ? requestIdleCallback(() => ok(), { timeout: 1000 }) : setTimeout(ok, 50))),
+      stopped: () => startAllLeaving || w.closed,
+      progress: (done, total) => { if (total > 0 && done < total) wsBrowser?.say(`Starting sync: ${done} of ${total} notebooks`); },
+    });
+    const said = startAllSummary(r);
+    if (said) { console.warn("sync:", said, r); wsBrowser?.say(said, true); }
+    else if (r.started) wsBrowser?.say(`Sync started for ${r.started} notebook${r.started === 1 ? "" : "s"}`);
+    (window.sagebrush ??= {}).startAll = r;
+  };
+  const listed = (e) => e?.kind === "notebook" && e.ref && !e.remote && !e.missing && !e.trashed;
+  const made = new Set();
+  let walking = true, madeTimer = null;
+  const walkMade = async () => {
+    madeTimer = null;
+    if (startAllLeaving || w.closed) { made.clear(); return; }
+    if (walking) { madeTimer = setTimeout(walkMade, 1000); return; }
+    const refs = [...made];
+    made.clear();
+    walking = true;
+    try {
+      await walkOnce(async () => (await Promise.all(refs.map(async (ref) => { const p = await w.pathOf("notebook", ref).catch(() => undefined); return p ? w.stat(p).catch(() => null) : null; }))).filter(listed).map((e) => ({ ref: e.ref, path: e.path })));
+    } catch (e) {
+      console.warn("sync: starting notebooks' synced histories:", e);
+    } finally {
+      walking = false;
+    }
+  };
+  w.watch((c) => {
+    let added = false;
+    // (made here, or in another tab of this browser; never one the server told of (another device's: its create carries
+    // its ref, but it isn't this device's to start, and a first pull of a large library is thousands of them))
+    for (const o of c?.ops ?? []) if (o?.op === "create" && o.kind === "notebook" && o.origin !== "server" && typeof o.ref === "string" && !made.has(o.ref)) { made.add(o.ref); added = true; }
+    if (!added) return;
+    clearTimeout(madeTimer);
+    madeTimer = setTimeout(walkMade, 1000);
   });
-  const said = startAllSummary(r);
-  if (said) { console.warn("sync:", said, r); wsBrowser?.say(said, true); }
-  else if (r.started) wsBrowser?.say(`Sync started for ${r.started} notebook${r.started === 1 ? "" : "s"}`);
-  (window.sagebrush ??= {}).startAll = r;
+  try {
+    await walkOnce(async () => (await w.list("/", { recursive: true })).filter(listed).map((e) => ({ ref: e.ref, path: e.path })));
+  } finally {
+    walking = false;
+  }
 }).catch((e) => console.warn("sync: starting notebooks' synced histories:", e));
 // (once this device's journal is activated (plan-sync-slice2-client r4 §1a, web/workspace/api.ts activateJournal), every
 // notebook is written through it: T1 in its history, then T2 (notebook/journal.js); before, as before.  Told by the
@@ -5210,6 +5289,9 @@ const pairAgent = (w) => (agentPairing ??= import(new URL("sagebrush-agent.js", 
 // (a notebook an agent created, opened as an automatic open: saved first as any switch, and dropped, unsaid, if the person
 // opened another meanwhile; any other failure said as any open's)
 function agentOpen(ref, intent) {
+  // (under the code page a notebook would open hidden, and leaving would interrupt the person's editing: it stays in
+  // Files, not opened)
+  if (codePageUp) { window.sagebrush?.code?.say?.("An agent made a notebook: it's in Files, not opened or run here."); return Promise.resolve(false); }
   saveNow();
   return openId(ref, null, intent).then((ok) => { wsTrackCurrent(); return ok; }, (e) => { if (!e?.navWon) sayNotLeft(e); return false; });
 }
@@ -5359,7 +5441,7 @@ function wsShowFiles(on) {
       open(e, how) {
         const url = e.kind === "board" ? "/board/?doc=local:" + e.ref : "/?nb=" + encodeURIComponent(e.ref);
         if (how === "tab") return void window.open(url, "_blank", "noopener");
-        if (e.kind === "notebook") {
+        if (e.kind === "notebook" && !codePageUp) {
           saveNow();
           // (on a phone the files cover the page: out of the way of what was
           // opened; not opened, they stay, saying why: LIMIT-900-2)
@@ -5368,6 +5450,7 @@ function wsShowFiles(on) {
             if (matchMedia("(max-width: 640px)").matches) wsShowFiles(false);
           }, sayNotLeft);
         }
+        else if (codePageUp) leaveCodePage(url);
         // (by this page's way out: the LaTeX editor's edit written first, if its page is up; the disk in the app)
         else { saveNow(); void leaveTo(url); }
       },
@@ -5493,18 +5576,38 @@ wsReady.then(async (w) => {
 // (a newer version of the page, in another tab, needs the database: let it go)
 const updated = () => { statusEl.textContent = "Sagebrush was updated in another tab: reload this page to keep saving here"; };
 const dbReady = openDb("sagebrush", { onVersionChange: () => { db = null; updated(); } });
+// (the code page, /?code=<fid>, has this page (web/code/boot.ts): a notebook or board opened from it goes to its own
+// page (loaded here underneath, a notebook would stay hidden behind the code page), by the code page's own way out,
+// which saves its edits first and asks before dropping any it couldn't save)
+let codePageUp = false;
+const leaveCodePage = (url) => (globalThis.__sbCodeLeave ? void globalThis.__sbCodeLeave(url) : location.assign(url));
 const historyDbReady = openHistoryDb({ onVersionChange: () => { nbHistory?.close(); nbHistory = null; updated(); } });
 (async () => {
   db = await dbReady;
   // (the workspace opened first, at most a few seconds: its fence in the notebooks' store is there before any
   // notebook is loaded, so each store is bound to it: design/workspace-durability.md A.3)
   await wsNow();
+  // (an editor's own page, /?code= or /?tex=, shows nothing but its file, so it waits for the workspace however long
+  // it takes to open, rather than taking the few seconds above as "your files can't be opened here"; wsReady settles
+  // to null only when the workspace really can't be opened; it may never settle while another tab holds the
+  // workspace's lock, so the wait is said, and after a minute, why it may go on; /?tex= only where the editor is on)
+  const editorQ = new URLSearchParams(location.search);
+  if (!ws && (editorQ.has("code") || (latexHere && editorQ.has("tex")))) {
+    const opening = document.createElement("p");
+    opening.className = "sb-opening";
+    opening.setAttribute("role", "status");
+    opening.textContent = "Opening your files…";
+    document.body.prepend(opening);
+    const slow = setTimeout(() => { opening.textContent = "Still opening your files: another tab may be using them. The file opens here once they're free; closing that tab may help."; }, 60000);
+    try { await wsReady; } finally { clearTimeout(slow); opening.remove(); }
+  }
   // (the LaTeX editor: in a build with it, and on, its hooks are installed, and /?tex=<fid> is its page; a build
   // without it has none of this: web/latex/boot.ts, web/build.ts SAGEBRUSH_LATEX_PREVIEW)
   // (either editor's page up: its Terminal button's pressed state set at once, as the Terminal's changes set it after)
   if (typeof __SB_LATEX__ !== "undefined" && __SB_LATEX__ && (await latexBoot(ws, texSandbox(), { share: texShare }))) return void dispatchEvent(new Event("sb-term-place"));
   // (a code or text file's own page, /?code=<fid> (1a): web/code/boot.ts; its hooks for the file browser and the preview either way)
-  if (await codeBoot(ws, (e, how) => openEntry(e, how), agentHere && ws ? codeAgent(ws) : null)) {
+  if (await codeBoot(ws, (e, how) => openEntry(e, how), agentHere && ws ? codeAgent(ws) : null, (url, fromCodePage) => leaveTo(url, !fromCodePage))) {
+    codePageUp = true;
     dispatchEvent(new Event("sb-term-place"));
     // (a ?pair= link or a remembered agent whose chunk didn't load: said in the code page's own status line)
     if (agentHere && ws) restoreAgent(ws, () => window.sagebrush?.code?.say?.("Couldn't load the agent connection. Choose Connect an agent… again, or reload the page."));

@@ -18,4 +18,6 @@ export const resolve = (...parts: string[]) => {
 export const dirname = (p: string) => (p.includes("/") ? p.slice(0, p.lastIndexOf("/")) || "/" : ".");
 export const basename = (p: string) => p.slice(p.lastIndexOf("/") + 1);
 export const sep = "/";
-export default { normalize, join, resolve, dirname, basename, sep };
+// (these are POSIX already: path.posix is the same functions, as on a POSIX host)
+export const posix = { normalize, join, resolve, dirname, basename, sep };
+export default { normalize, join, resolve, dirname, basename, sep, posix };

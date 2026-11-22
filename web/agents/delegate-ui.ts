@@ -34,7 +34,17 @@ export const DELEGATE_UI_TEXT = {
   tasks: "Tasks",
   skipped: (n: number) => (n === 1 ? "One event of this task couldn't be shown here." : `${n} events of this task couldn't be shown here.`),
   proposal: (n: number, base: string, commit: string) => `Proposal: ${n === 1 ? "1 file" : `${n} files`} changed · base ${base.slice(0, 7)} · proposal ${commit.slice(0, 7)}`,
-  laterActions: "Merge, Close and Ask for changes come in a later update.",
+  laterActions: "Merge and Ask for changes come in the next update.",
+  merge: "Merge",
+  ask: "Ask for changes",
+  closeTask: "Close",
+  closeTitle: "Close this proposal?",
+  closeBody: "The task ends here and its proposal isn't used. Your files don't change.",
+  closeOk: "Close the task",
+  closed: "Task closed",
+  closeTaskFailed: "Couldn't close the task.",
+  stale: "The task moved on since you opened this: here it is as it is now.",
+  newRound: (n: number) => `A new proposal (round ${n}) replaces the one you were reading.`,
   unreadable: "Couldn't read this task from the agent.",
   back: "← Back to chats",
 } as const;
@@ -187,21 +197,70 @@ export function mountDelegate(h: DelegateHost) {
     h.shown(false);
     render();
   }
+  // (the proposal open in its dialog, one at a time: its task, the commit shown, and how a newer round replaces it)
+  let shown: { id: string; commit: string; sync(): void } | null = null;
   async function openProposal(id: string, commit: string) {
     const dlg = el("dialog", { className: "delegate-dlg proposal" });
     const panel = el("div");
     dlg.append(el("button", { type: "button", className: "x", ariaLabel: "Close", textContent: "×", onclick: () => dlg.close() }), panel);
     document.body.append(dlg);
     dlg.showModal();
-    let pv: { close(): void } | null = null;
-    dlg.addEventListener("close", () => { pv?.close(); dlg.remove(); }, { once: true });
+    let pv: { close(): void; refresh(): void } | null = null, src: ReturnType<typeof D.source> | null = null, busy = false;
+    // (its actions, at the proposal's foot: Close now; Merge and Ask for changes in the next steps)
+    const act = (key: string, label: string) => { const b = el("button", { type: "button", textContent: label }); b.dataset.act = key; return b; };
+    const merge = act("merge", T.merge), ask = act("ask", T.ask), closeBtn = act("close", T.closeTask);
+    const status = el("p", { className: "st", role: "status" });
+    const later = el("p", { className: "st", textContent: T.laterActions });
+    // (Ask for changes' own block goes in askSlot, under the actions, for the commit shown (me.commit) and its files
+    //  (src.seen().files))
+    const askSlot = el("div", { className: "ask-slot" });
+    const bar = el("div", { className: "proposal-actions" }, el("div", { className: "row" }, merge, ask, closeBtn), status, askSlot, later);
+    for (const b of [merge, ask]) { b.setAttribute("aria-disabled", "true"); b.title = T.laterActions; }
+    const me = { id, commit, sync: () => {} };
+    shown = me;
+    dlg.addEventListener("close", () => { pv?.close(); dlg.remove(); if (shown === me) shown = null; }, { once: true });
     const mod = (await import(new URL("sagebrush-review.js", h.site).href)) as typeof import("../workspace/review/review-page");
     if (!dlg.isConnected) return;
-    const actions = el("p", { className: "st", textContent: T.laterActions });
-    pv = mod.openProposal(D.source(id, commit), panel, { notebook: () => import(new URL("sagebrush-notebook.js", h.site).href), actions });
+    const mount = (c: string) => {
+      pv?.close();
+      me.commit = c;
+      src = D.source(id, c);
+      pv = mod.openProposal(src, panel, { notebook: () => import(new URL("sagebrush-notebook.js", h.site).href), actions: bar });
+    };
+    // (the task as it is now: a newer round replaces the one shown, in place; Close only while it is a proposal)
+    me.sync = () => {
+      const t = D.task(id);
+      const next = t?.proposal?.commit;
+      if (next && next !== me.commit && t?.entry.status === "proposal") { mount(next); status.textContent = T.newRound(t.entry.round); }
+      const can = !busy && D.state() === "on" && t?.entry.status === "proposal" && t.proposal?.commit === me.commit;
+      can ? closeBtn.removeAttribute("aria-disabled") : closeBtn.setAttribute("aria-disabled", "true");
+    };
+    closeBtn.onclick = async () => {
+      if (closeBtn.getAttribute("aria-disabled") === "true") return;
+      const seen = src?.seen();
+      if (!seen) return;
+      if (!(await confirmDialog(T.closeTitle, T.closeBody, T.closeOk))) return;
+      busy = true;
+      me.sync();
+      try {
+        await D.close(id, me.commit, seen.seq);
+        dlg.close();
+        h.toast(T.closed);
+      } catch (err) {
+        // (the task moved on since this was read: read again, nothing closed)
+        if ((err as AgentError)?.code === "stale") { status.textContent = T.stale; pv?.refresh(); }
+        else status.textContent = `${T.closeTaskFailed} ${(err as Error)?.message ?? ""}`.trim();
+      } finally {
+        busy = false;
+        me.sync();
+      }
+    };
+    mount(commit);
+    me.sync();
   }
 
   function render() {
+    shown?.sync();
     const s = D.state(), offered = s !== "unoffered";
     sw.hidden = !offered;
     sw.textContent = s === "on" ? T.switchOn : s === "turning-off" ? T.switchTurning : T.switchOff;

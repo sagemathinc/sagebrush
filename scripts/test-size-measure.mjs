@@ -7,7 +7,8 @@ import { mkdtempSync, mkdirSync, readFileSync, rmSync, writeFileSync } from "nod
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { evaluate, growthLimit, producerProblems, recordProblems, strictParse, measureFiles,
-  examplesFiles, testedTransition, gateInputs, TOOLCHAIN, MAX_DEPTH, overCap, sha256 } from "./size-measure.mjs";
+  examplesFiles, testedTransition, gateInputs, TOOLCHAIN, MAX_DEPTH, overCap, sha256,
+  CONTENT_BUNDLES, CONTENT_ALLOWANCE, limitOf, welcomeDirs } from "./size-measure.mjs";
 
 const key = { ...TOOLCHAIN, measure_sha256: "a".repeat(64) };
 const record = (sizes, commit = "merge", k = key) => ({
@@ -26,6 +27,23 @@ for (const [base, delta, ok] of [
   [10_000_049, 200000, true], [10_000_049, 200001, false],
   [100000, 0, true], [100000, -100000, true],
 ]) assert.equal(compare({ x: base }, { x: base + delta }).ok, ok, base + "/" + delta);
+// The examples gallery's content (fetched only when the gallery is opened): its own limit, 256,000 B, failing above it,
+// whatever its base; exactly these three bundles.  Every other bundle, examples/welcome included, keeps the backstop.
+assert.deepEqual(CONTENT_BUNDLES, ["examples/corpus", "site/examples", "examples/index.json"]);
+assert.equal(CONTENT_ALLOWANCE, 256000);
+for (const b of CONTENT_BUNDLES) for (const [base, delta, ok] of [[0, 256000, true], [0, 256001, false], [1_000_000, 256000, true], [1_000_000, 256001, false], [50_000_000, 256001, false], [400000, -400000, true]]) {
+  const r = compare({ [b]: base }, { [b]: base + delta });
+  assert.equal(r.ok, ok, b + " " + base + "/" + delta);
+  if (!ok) assert.match(r.problems[0], /the examples content limit, 256,000 B/);
+}
+for (const b of ["examples/welcome", "cli/pyjs.cjs", "engine/sagebrush-worker.js", "examples/corpusx", "site/examples/x"]) {
+  assert.equal(limitOf(b, 0), 50000, b);
+  assert.equal(compare({ [b]: 1000 }, { [b]: 1000 + 50001 }).ok, false, b);
+  assert.match(compare({ [b]: 1000 }, { [b]: 1000 + 50001 }).problems[0], /both 2% and 50,000 B/);
+}
+// (a gallery change and a code change in one PR: the code bundle still fails at its own limit)
+assert.equal(compare({ "examples/corpus": 100, "cli/pyjs.cjs": 1000 }, { "examples/corpus": 200100, "cli/pyjs.cjs": 52000 }).ok, false);
+assert.equal(compare({ "examples/corpus": 100, "cli/pyjs.cjs": 1000 }, { "examples/corpus": 200100, "cli/pyjs.cjs": 51000 }).ok, true);
 assert.equal(compare({ a: 1000 }, { a: 1000, added: 50000 }).ok, true);
 assert.equal(compare({ a: 1000 }, { a: 1000, added: 50001 }).ok, true);
 const split = compare({ "engine/lib/sage.pre": 1_000_000, "engine/lib/sage.src": 500_000 },
@@ -76,6 +94,35 @@ try {
   mkdirSync(join(dir, "examples"));
   writeFileSync(join(dir, "examples", "x.txt"), "x");
   assert.equal(examplesFiles(dir)["examples/corpus"].length, 1);
+  assert.equal(examplesFiles(dir)["examples/welcome"], undefined, "no welcome.ts: no welcome bundle");
+  // (the first-visit notebooks web/examples/welcome.ts names: their own bundle, out of the corpus)
+  mkdirSync(join(dir, "web", "examples"), { recursive: true });
+  for (const s of ["welcome", "sage-first-steps", "welcome-extra", "other"]) {
+    mkdirSync(join(dir, "examples", "notebook", s), { recursive: true });
+    writeFileSync(join(dir, "examples", "notebook", s, "main.ipynb"), s);
+  }
+  writeFileSync(join(dir, "web", "examples", "welcome.ts"), 'const WELCOME: Record<string, string> = { Welcome: "welcome", Sage: "sage-first-steps" };\n');
+  const ex = examplesFiles(dir);
+  assert.deepEqual(ex["examples/welcome"].map((f) => f.slice(dir.length + 1)), ["examples/notebook/sage-first-steps/main.ipynb", "examples/notebook/welcome/main.ipynb"]);
+  assert.deepEqual(ex["examples/corpus"].map((f) => f.slice(dir.length + 1)).sort(), ["examples/notebook/other/main.ipynb", "examples/notebook/welcome-extra/main.ipynb", "examples/x.txt"], "a prefix-named sibling stays in the corpus");
+  // (fail closed: a map that can't be read is an error, never "no welcome notebooks")
+  for (const bad of ["const WELCOME = {};\n", 'const WELCOME: Record<string, string> = { Welcome: welcomeSlug };\n', 'const WELCOME: Record<string, string> = { Welcome: "welcome", Sage: SAGE };\n', "// nothing\n",
+    // (an expression is valid TypeScript, but names a slug the reading can't see: refused, never its literal prefix)
+    'const WELCOME: Record<string, string> = { Welcome: "welcome" + "-extra", Sage: "sage-first-steps" };\n',
+    'const WELCOME: Record<string, string> = { Welcome: `welcome`, Sage: "sage-first-steps" };\n',
+    'const WELCOME: Record<string, string> = { Welcome: "welcome".concat("-extra") };\n',
+    'const WELCOME: Record<string, string> = { Welcome: "welcome" /* x */ };\n',
+    'const WELCOME: Record<string, string> = { "Welcome": "welcome", , Sage: "sage-first-steps" };\n',
+    'const WELCOME: Record<string, string> = { ...OTHER, Sage: "sage-first-steps" };\n',
+    'const WELCOME: Record<string, string> = { Welcome: "Welcome" };\n']) {
+    writeFileSync(join(dir, "web", "examples", "welcome.ts"), bad);
+    assert.throws(() => welcomeDirs(dir), /WELCOME map can't be read/, bad);
+  }
+  // (a trailing comma is fine)
+  writeFileSync(join(dir, "web", "examples", "welcome.ts"), 'const WELCOME: Record<string, string> = { Welcome: "welcome", Sage: "sage-first-steps", };\n');
+  assert.deepEqual(welcomeDirs(dir).map((d) => d.slice(dir.length + 1)), ["examples/notebook/welcome", "examples/notebook/sage-first-steps"]);
+  // (the real welcome.ts reads, and names the corpus's own first-visit notebooks)
+  assert.deepEqual(welcomeDirs(join(import.meta.dirname, "..")).map((d) => d.split("/").slice(-1)[0]), ["welcome", "sage-first-steps"]);
   const f = join(dir, "bundle.js");
   writeFileSync(f, 'globalThis.__SAGEBRUSH_VERSION__="1";globalThis.__SAGEBRUSH_BUILD_ID__="id";' + dir);
   const values = { VERSION: "1", BUILD_ID: "id" };

@@ -18,8 +18,9 @@ import { execFileSync } from "node:child_process";
 import { readFileSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
 import { isBuildInput } from "./build-inputs.mjs";
+import { fileURLToPath } from "node:url";
 
-const ROOT = new URL("..", import.meta.url).pathname;
+const ROOT = fileURLToPath(new URL("..", import.meta.url));
 export const INVENTORY = "test/unsafe-allow-inventory.json";
 
 // ---- a Rust tokenizer: identifiers, punctuation, literals; comments and whitespace dropped
