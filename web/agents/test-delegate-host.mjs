@@ -93,7 +93,10 @@ export function delegateHost({ features = ["delegate.1", "chat.resume"], pageSiz
         if (!t) return refuse(m.id, "not_found");
         if (t.status !== "proposal" || p.proposal !== t.proposal || p.seq !== t.log.length) return refuse(m.id, "stale");
         const own = t.commits.get(t.base) ?? {};
-        if (!Array.isArray(p.current) || !p.current.every((d) => Object.hasOwn(own, d.path))) return refuse(m.id, "bad_request");
+        // (and, as its schema checks: a note of 1 to 64 KiB; each current version a string of the task's, its kind by its path, no path twice)
+        if (typeof p.note !== "string" || !p.note || enc.encode(p.note).length > 64 * 1024) return refuse(m.id, "bad_request");
+        if (!Array.isArray(p.current) || new Set(p.current.map((d) => d.path)).size !== p.current.length) return refuse(m.id, "bad_request");
+        if (!p.current.every((d) => Object.hasOwn(own, d.path) && typeof d.content === "string" && d.kind === (d.path.endsWith(".ipynb") ? "notebook" : "file"))) return refuse(m.id, "bad_request");
         H.asks.push({ task: t.task, note: p.note, current: p.current });
         answer(m.id, { status: "working", round: t.round });
         H.emit(t.task, { type: "task_status", status: "working" });

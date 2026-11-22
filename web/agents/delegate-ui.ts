@@ -52,6 +52,8 @@ export const DELEGATE_UI_TEXT = {
   askFiles: (paths: string[]) => (paths.length ? `Your current versions of these files go with your note: ${paths.join(", ")}` : "No current versions go with your note: the task works from its own copy."),
   askSend: "Send to the task",
   askSending: "Sending…",
+  askLoading: "The proposal is still being read: try again in a moment.",
+  askStale: "The task moved on since you opened this: it's read again, and your note is kept to send again.",
   askSent: (round: number) => `Asked. The task is working on round ${round + 1}; it appears here when it's ready.`,
   unreadable: "Couldn't read this task from the agent.",
   back: "← Back to chats",
@@ -93,6 +95,9 @@ export function mountDelegate(h: DelegateHost) {
   document.querySelector("#threads")?.after(side);
   const view = el("section", { id: "task-view", hidden: true, ariaLabel: "Task" });
   document.querySelector("main .composer-wrap")?.before(view);
+
+  // (Ask for changes' unsent note, kept per task in this browser)
+  const noteKey = (task: string) => `sb-delegate-ask-v1:${task}`;
 
   function confirmDialog(title: string, body: string, ok: string, extra?: HTMLElement): Promise<boolean> {
     const dlg = el("dialog", { className: "delegate-dlg" });
@@ -249,9 +254,15 @@ export function mountDelegate(h: DelegateHost) {
     // (Ask for changes: its block opens under the actions, for the commit shown; pressed again, it closes, the note kept)
     ask.onclick = () => {
       if (ask.getAttribute("aria-disabled") === "true") return;
+      // (only once the proposal has been read: its files say what goes with the note)
+      if (!src?.seen()) { status.textContent = T.askLoading; return; }
       const b = askSlot.querySelector<HTMLElement>(".ask-block");
       if (b) { b.hidden = !b.hidden; if (!b.hidden) b.querySelector("textarea")?.focus(); return; }
-      const block = askBlock(id, me.commit, () => src?.seen() ?? null);
+      const block = askBlock(id, me.commit, () => src?.seen() ?? null, {
+        busy: (on) => { busy = on; me.sync(); },
+        // (the task moved on since the proposal was read: read again (a new seq), the note kept, to send again)
+        stale: () => { status.textContent = T.askStale; pv?.refresh(); },
+      });
       askSlot.replaceChildren(block);
       block.hidden = false;
       block.querySelector("textarea")?.focus();
@@ -282,8 +293,7 @@ export function mountDelegate(h: DelegateHost) {
 
   // (Ask for changes, S3 P2: under the proposal's actions, the note and what goes with it; the unsent note kept per task
   //  in this browser (UI r3.2 §2), cleared once sent. `files` is the proposal's diff, read by the view)
-  const noteKey = (task: string) => `sb-delegate-ask-v1:${task}`;
-  function askBlock(task: string, commit: string, seen: () => { seq: number; files: readonly { path: string; change: string }[] } | null): HTMLElement {
+  function askBlock(task: string, commit: string, seen: () => { seq: number; files: readonly { path: string; change: string }[] } | null, on: { busy(b: boolean): void; stale(): void }): HTMLElement {
     const files = () => seen()?.files ?? [];
     const box = el("textarea", { id: "delegate-note", rows: 4, placeholder: T.askPlaceholder, ariaLabel: T.askLabel });
     try { box.value = localStorage.getItem(noteKey(task)) ?? ""; } catch { /* (no storage: nothing kept) */ }
@@ -302,6 +312,7 @@ export function mountDelegate(h: DelegateHost) {
       }
       send.setAttribute("aria-disabled", "true");
       send.textContent = T.askSending;
+      on.busy(true);
       try {
         const at = seen();
         if (!at) throw new AgentError("stale", DELEGATE_TEXT.askMoved);
@@ -310,9 +321,12 @@ export function mountDelegate(h: DelegateHost) {
         try { localStorage.removeItem(noteKey(task)); } catch { /* (no storage) */ }
         block.replaceChildren(el("p", { className: "st asked", textContent: T.askSent(r.round) }));
       } catch (e) {
+        if (e instanceof AgentError && e.code === "stale") on.stale();
         msg.textContent = e instanceof AgentError || e instanceof Error ? e.message : String(e);
         send.removeAttribute("aria-disabled");
         send.textContent = T.askSend;
+      } finally {
+        on.busy(false);
       }
     };
     return block;
@@ -327,6 +341,8 @@ export function mountDelegate(h: DelegateHost) {
     btn.hidden = !offered;
     s === "turning-off" ? btn.setAttribute("aria-disabled", "true") : btn.removeAttribute("aria-disabled");
     side.hidden = !(s === "on" || s === "turning-off") || !D.tasks.length;
+    // (a task that's done can't be asked again: its kept note goes)
+    for (const t of D.tasks) if (t.entry.status === "closed" || t.entry.status === "merged") { try { localStorage.removeItem(noteKey(t.entry.task)); } catch { /* (no storage) */ } }
     list.replaceChildren(...D.tasks.map((t) => {
       const b = el("button", { type: "button", className: "thread task" + (t.entry.task === open ? " on" : "") }, el("span", { className: "t", textContent: t.entry.title }), el("span", { className: `chip ${t.entry.status}${t.entry.question ? " question" : ""}`, textContent: chipOf(t.entry) }));
       b.dataset.task = t.entry.task;

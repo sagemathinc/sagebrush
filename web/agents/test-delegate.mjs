@@ -110,6 +110,7 @@ ok(/^[0-9a-f]{32}$/.test(id) && D.tasks.length === before + 1 && st.params.targe
   ok((await why(D.ask(A.task, { proposal: commit1, seq: 0, note: "   ", current: [] }))) === "bad_request" && asks() === 0, "an empty note: refused here, nothing sent");
   ok((await why(D.ask(A.task, { proposal: commit1, seq: 0, note: "x".repeat(DELEGATE_LIMITS.noteBytes + 1), current: [] }))) === "too_large" && asks() === 0, "a note over 16 KB: refused here, nothing sent");
   ok((await why(D.ask(A.task, { proposal: "f".repeat(40), seq: 0, note: "more", current: [] }))) === "stale" && asks() === 0, "a proposal that isn't the task's latest: refused here (stale), nothing sent");
+  ok((await why(D.ask(A.task, { proposal: commit1, seq: 0, note: "more", current: [{ path: "work/notes.txt", kind: "file", content: "x".repeat(4 * 2 ** 20 + 1) }] }))) === "too_large" && asks() === 0, "a current version over 4 MB: refused here, by name, nothing sent");
   // (the current versions: the task's own files only, as the workspace has them; one gone is left out)
   const files = [{ path: "work/a.ipynb", change: "modified" }, { path: "work/new.txt", change: "added" }, { path: "work/notes.txt", change: "modified" }];
   const read = async (path) => { if (path === "work/notes.txt") throw new Error("gone"); return { path, kind: path.endsWith(".ipynb") ? "notebook" : "file", content: "mine of " + path }; };

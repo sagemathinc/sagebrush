@@ -100,7 +100,7 @@ try {
   await shot("4-proposal");
   // (its actions: Close and Ask for changes now; Merge not yet, and said so)
   const acts = await P.ev(`[...document.querySelectorAll('dialog.proposal[open] button[data-act]')].map((b) => [b.dataset.act, b.textContent, b.getAttribute('aria-disabled')])`);
-  ok(JSON.stringify(acts) === JSON.stringify([["merge", "Merge", "true"], ["ask", "Ask for changes", null], ["close", "Close", null]]) && /Merge comes in the next update\./.test(await P.ev(`document.querySelector('dialog.proposal[open]').textContent`)), "the proposal's actions: Close; Merge and Ask for changes not yet, said so", acts);
+  ok(JSON.stringify(acts) === JSON.stringify([["merge", "Merge", "true"], ["ask", "Ask for changes", null], ["close", "Close", null]]) && /Merge comes in the next update\./.test(await P.ev(`document.querySelector('dialog.proposal[open]').textContent`)), "the proposal's actions (Close and Ask for changes on, Merge not yet, said so): Close; Merge and Ask for changes not yet, said so", acts);
   // (a newer round of the task, while its proposal is open: it replaces the one shown, in place)
   const r2 = await H.propose(A.task, { "work/notes.txt": "one\ntwo\nthree\n" });
   await P.until(`document.querySelector('dialog.proposal[open] .sbpv h3')?.textContent === 'Proposal, round 2'`, 20000);
@@ -128,11 +128,25 @@ try {
   await P.ev(`(() => { const t = document.querySelector('#delegate-note'); t.value = '   '; t.dispatchEvent(new Event('input')); ${block}.querySelector('button.primary').click(); })()`);
   await sleep(200);
   ok((await P.ev(`${block}.querySelector('.msg').textContent`)) === "Write what you'd like changed first" && !H.got.some((m) => m.method === "tasks.ask"), "an empty note: said so, nothing sent");
-  // (sent: the note trimmed, the round shown and the seq it was read at, the current version of work/notes.txt)
-  const seqShown = A.log.length;
+  // (the task moved on since the proposal was read (an event of its, the proposal still the latest): the agent answers
+  //  stale; the page says so, reads the proposal again, and keeps the note to send again)
+  H.emit(A.task, { type: "turn", event: { type: "turn_started" } });
+  const diffs0 = H.got.filter((m) => m.method === "tasks.diff").length;
   await P.ev(`(() => { const t = document.querySelector('#delegate-note'); t.value = '  Also number the lines.\\n'; t.dispatchEvent(new Event('input')); ${block}.querySelector('button.primary').click(); })()`);
+  const said = await P.until(`/moved on since you opened this/.test(document.querySelector('dialog.proposal[open] .proposal-actions [role=status]').textContent)`, 5000).then(() => true, () => false);
+  const reread = await hostUntil(() => H.got.filter((m) => m.method === "tasks.diff").length > diffs0, 5000);
+  const st = await P.ev(`({ said: ${JSON.stringify(said)}, reread: ${JSON.stringify(reread)}, note: document.querySelector('#delegate-note')?.value, send: ${block}.querySelector('button.primary').getAttribute('aria-disabled') })`);
+  ok(st.said && st.reread && H.asks.length === 0 && st.note === "  Also number the lines.\n" && st.send === null, "the task moved on since it was read: refused (stale), said so, the proposal read again, the note kept to send again", st);
+  // (sent while held at the host: Close can't be pressed meanwhile)
+  H.hold.add("tasks.ask");
+  const seqShown = A.log.length;
+  await P.ev(`${block}.querySelector('button.primary').click()`);
+  await hostUntil(() => H.held.some((m) => m.method === "tasks.ask"));
+  ok((await P.ev(`document.querySelector('dialog.proposal[open] button[data-act="close"]').getAttribute('aria-disabled')`)) === "true", "while Ask for changes is being sent: Close disabled");
+  H.hold.clear();
+  H.release();
   await hostUntil(() => H.asks.length === 1);
-  const asked = H.asks[0], askSent = H.got.find((m) => m.method === "tasks.ask")?.params;
+  const asked = H.asks[0], askSent = H.got.findLast((m) => m.method === "tasks.ask")?.params;
   ok(asked?.note === "Also number the lines." && askSent?.proposal === r2 && askSent?.seq === seqShown && JSON.stringify(asked.current) === JSON.stringify([{ path: "work/notes.txt", kind: "file", content: "alpha\n" }]), "Ask for changes sent: tasks.ask for the round shown, at the seq it was read at, the note trimmed, the current version of the task's file", { askSent, asked });
   await P.until(`${block}?.textContent.startsWith('Asked.') || !!document.querySelector('dialog.proposal[open] .ask-slot .asked')`);
   await P.until(`document.querySelector('#tasks .task[data-task="${A.task}"] .chip')?.textContent === 'Working'`);

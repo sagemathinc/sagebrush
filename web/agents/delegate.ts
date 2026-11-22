@@ -17,7 +17,7 @@
 //   the blob id tasks.diff gave for that path at that commit (its git blob id, recomputed here).
 import { AgentError, type AgentPairing } from "../workspace/agent-pair";
 import { DELEGATE_FEATURE, TaskClient } from "../workspace/tasks-client";
-import { TASK_RESULTS, blobId, contentBytes, taskLog, taskNotice, type DiffFile, type TaskEntry, type TaskEvent, type TaskLogEntry } from "../workspace/tasks-schema";
+import { TASK_LIMITS, TASK_RESULTS, blobId, contentBytes, taskLog, taskNotice, type DiffFile, type TaskEntry, type TaskEvent, type TaskLogEntry } from "../workspace/tasks-schema";
 import { apply, newThread, type Thread, type TurnEvent } from "../workspace/agent-chat/events";
 import type { ProposalDiff, ProposalSource } from "../workspace/review/proposal-view";
 
@@ -51,6 +51,7 @@ export const DELEGATE_TEXT = {
   noteEmpty: "Write what you'd like changed first",
   noteLong: "The note is too long: at most 16 KB",
   askMoved: "The task has moved on since this proposal: open its latest proposal",
+  docLong: (path: string) => `${path} is too large to send with your note (at most 4 MB)`,
 } as const;
 
 /** For Ask for changes: the person's current versions of a proposal's files that are the task's own (a file the agent
@@ -215,6 +216,8 @@ export class DelegateTasks {
     if (new TextEncoder().encode(note).length > DELEGATE_LIMITS.noteBytes) throw new AgentError("too_large", DELEGATE_TEXT.noteLong);
     // (only a proposal the task still waits on: a task already working again (asked) or done has moved on)
     if (t.entry.status !== "proposal" || t.entry.proposal !== o.proposal) throw new AgentError("stale", DELEGATE_TEXT.askMoved);
+    // (each current version within what the agent takes, said by name)
+    for (const d of o.current) if (new TextEncoder().encode(d.content).length > TASK_LIMITS.doc) throw new AgentError("too_large", DELEGATE_TEXT.docLong(d.path));
     let r: { status: string; round: number };
     try {
       r = TASK_RESULTS["tasks.ask"](await this.client().request("tasks.ask", { task: id, proposal: o.proposal, seq: o.seq, note, current: o.current }));
