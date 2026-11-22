@@ -799,8 +799,8 @@ export async function diskWorkspace(ws: any, invoke: (cmd: string, args?: any, o
 }
 
 /** Everything this page hasn't kept yet, made and written, within `ms`: the editor's own save (`flushEditor`), the
- * settings, then every change on disk.  What isn't, and why (`not`: [] if all is kept), and how many unsaved items
- * that is (`count`: each change still waiting for the disk, and the editor's save or the settings if not done). */
+ * settings, the file permissions, then every change on disk.  What isn't, and why (`not`: [] if all is kept), and how many unsaved items
+ * that is (`count`: each change still waiting for the disk, and the editor's save, the settings or the file permissions if not done). */
 export async function keepAll(m: DiskMirror | null, flushEditor: (() => Promise<unknown>) | undefined, ms: number): Promise<{ not: string[]; count: number }> {
   const end = Date.now() + ms, left = () => Math.max(0, end - Date.now()), not: string[] = [];
   const step = async (what: string, f: () => unknown) => {
@@ -812,6 +812,8 @@ export async function keepAll(m: DiskMirror | null, flushEditor: (() => Promise<
   };
   if (flushEditor) await step("the open document's last change", flushEditor);
   await step("the settings", () => (window as any).__sbSettingsFlush?.());
+  // (the file permissions, kept in grants.json: web/workspace/grants-file.ts keepGrants's flush)
+  await step("the file permissions", () => (window as any).__sbGrantsFlush?.());
   let count = not.length;
   if (m && !(await m.drain(left()))) {
     not.push(`${m.pending} change${m.pending === 1 ? "" : "s"} to files${m.failing ? `: ${(m.failing[1] as any)?.message ?? m.failing[1]}` : ""}`);
