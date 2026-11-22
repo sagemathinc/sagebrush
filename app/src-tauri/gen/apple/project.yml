@@ -56,8 +56,8 @@ targets:
           - UIInterfaceOrientationPortraitUpsideDown
           - UIInterfaceOrientationLandscapeLeft
           - UIInterfaceOrientationLandscapeRight
-        CFBundleShortVersionString: 0.3.2
-        CFBundleVersion: "0.3.2"
+        CFBundleShortVersionString: 0.4.0
+        CFBundleVersion: "0.4.0"
     entitlements:
       path: sagebrush-app_iOS/sagebrush-app_iOS.entitlements
     scheme:

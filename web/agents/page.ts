@@ -41,6 +41,7 @@ import { entryUrl } from "../workspace/entry-url";
 import { threadMarkdown, turnMarkdown, userMarkdown } from "../workspace/agent-chat/transcript";
 import { DelegateTasks } from "./delegate";
 import { mountDelegate } from "./delegate-ui";
+import { ownClaudeCommand } from "./own-claude";
 import { workspaceIO } from "./delegate-merge";
 import { toIpynb } from "../notebook/ipynb.js";
 import { mountVersionStamp } from "../version";
@@ -1636,6 +1637,9 @@ addEventListener("pagehide", () => {
   if (saveTimer) localStorage.setItem(STORE, JSON.stringify(state));
 });
 $("#howto").onclick = () => ($("#help").hidden = !$("#help").hidden);
+// (the help box's command for this site: the release's line, with --origin where the agent doesn't trust this page's
+//  origin by default, as on a DEV or preview site (#1604))
+{ const pre = document.querySelector<HTMLElement>("#help pre"); if (pre) pre.textContent = ownClaudeCommand(pre.textContent?.trim() ?? "", location.origin); }
 
 // ---- the log mirror's settings (design §5): the switch, what it means, the storage line; turning it off deletes
 let mirrorConfirm = false;
