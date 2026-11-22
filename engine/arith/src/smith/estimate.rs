@@ -94,7 +94,7 @@ pub struct Estimate {
 }
 
 mod route3;
-pub use route3::{failed_pass_model, k_lower_bound_rect, route3_model, route3_terms, stage1_route3, stage2_route3, stage2_route3_terms, Route3Sizes, Side};
+pub use route3::{failed_pass_model, k_lower_bound_rect, route3_model, route3_terms, stage1_route3, stage1_route3_terms_sized, stage2_route3, stage2_route3_terms, stage2_route3_terms_known, Route3Sizes, Side, Stage2Known};
 
 fn add_scaled(u: &mut Units, v: &Units, s: f64) {
     for (x, y) in u.0.iter_mut().zip(&v.0) {
@@ -280,6 +280,84 @@ pub fn stage2_with(a: &ZMat, nm: &ZMat, delta: &BigInt, det: &BigInt, invariants
     rest.add_saturating(&at_attempts(c.attempts_trailing, |t| trailing_model(n, k, ld, ln, t, word, delta.bits(), &dls, c.vinv_of_delta, c.multiplier)));
     add_scaled(&mut u, &rest, c.scale[if word { 2 } else { 3 }]);
     Some(u)
+}
+
+/// The rows' and columns' Euclidean norms (log2) from the entries' bit
+/// lengths alone: no BigInt arithmetic, so no units and no polls (the live
+/// progress forecast's estimate of `zmat::norm_bits`).  Each norm is
+/// within half a bit a term of the exact one.
+#[doc(hidden)]
+pub fn norm_bits_from_sizes(a: &ZMat) -> (Vec<f64>, Vec<f64>) {
+    // log2 sqrt(sum 4^b), for the bit lengths b of the nonzero entries
+    let norm = |bs: &mut dyn Iterator<Item = u64>| -> f64 {
+        let v: Vec<u64> = bs.filter(|&b| b > 0).collect();
+        let Some(&top) = v.iter().max() else { return f64::NEG_INFINITY };
+        let s: f64 = v.iter().map(|&b| (2.0 * (b as f64 - top as f64)).exp2()).sum();
+        top as f64 + 0.5 * s.log2()
+    };
+    let rows = (0..a.rows).map(|i| norm(&mut (0..a.cols).map(|j| a.get(i, j).bits()))).collect();
+    let cols = (0..a.cols).map(|j| norm(&mut (0..a.rows).map(|i| a.get(i, j).bits()))).collect();
+    (rows, cols)
+}
+
+/// The live forecast's mean limbs of a matrix (as the models read them).
+#[doc(hidden)]
+pub fn forecast_mean_limbs(m: &ZMat) -> usize {
+    mean_limbs(m)
+}
+
+/// The live forecast before the inverse of square A, from sizes only: the
+/// inverse's term and route 1's (the attempts at the fitted mean, scaled),
+/// as stage 1 prices them with the Hadamard bound from bit lengths.
+#[doc(hidden)]
+pub fn forecast_square(a: &ZMat, c: &Constants) -> (Units, Units) {
+    let n = a.rows;
+    let (rows, cols) = norm_bits_from_sizes(a);
+    let h = rows.iter().sum::<f64>().min(cols.iter().sum::<f64>());
+    if n == 0 || !h.is_finite() {
+        return (Units::default(), Units::default());
+    }
+    let dh = (h - c.hadamard_gap * n as f64).max(1.0).ceil() as u64;
+    let lh = (dh as usize).div_ceil(64).max(1);
+    let word = dh < 62;
+    let red: u64 = a.d.iter().fold(0u64, |s, x| s.saturating_add(limbs(x) as u64));
+    let inv = zmat::inverse_model_sizes(n, h, red, &zmat::hadamard_units(a), lh, 2, None);
+    let mut rest = Units::default();
+    add_scaled(&mut rest, &at_attempts(c.attempts_cyclic, |t| cyclic_model(n, lh, lh, t, 2, word, dh)), c.scale[if word { 0 } else { 1 }]);
+    (inv, rest)
+}
+
+/// The live forecast of route 1 after the inverse (stage 2's term, scaled).
+#[doc(hidden)]
+pub fn forecast_cyclic(n: usize, ld: usize, ln: usize, delta_bits: u64, c: &Constants) -> Units {
+    let word = delta_bits < 62;
+    let mut u = Units::default();
+    add_scaled(&mut u, &at_attempts(c.attempts_cyclic, |t| cyclic_model(n, ld, ln, t, 2, word, delta_bits)), c.scale[if word { 0 } else { 1 }]);
+    u
+}
+
+/// The live forecast of route 2's part A after the inverse (stage 2's
+/// term, scaled), e = |det| / delta of `le` limbs.
+#[doc(hidden)]
+#[allow(clippy::too_many_arguments)]
+pub fn forecast_part_a(n: usize, la: usize, ln: usize, ld: usize, ldet: usize, le: usize, e_word: bool, delta_bits: u64, c: &Constants) -> Units {
+    let word = delta_bits < 62;
+    let mut u = Units::default();
+    add_scaled(&mut u, &part_a_model(n, la, ln, ld, ldet, le, e_word, c.part_a_cubic), c.scale[if word { 2 } else { 3 }]);
+    u
+}
+
+/// The live forecast of route 2's attempts after part A (stage 2's term,
+/// scaled), the nontrivial invariants' limbs `dls`.
+#[doc(hidden)]
+pub fn forecast_trailing(n: usize, ld: usize, ln: usize, delta_bits: u64, dls: &[usize], c: &Constants) -> Units {
+    let word = delta_bits < 62;
+    let k = dls.len();
+    let mut u = Units::default();
+    if k >= 1 {
+        add_scaled(&mut u, &at_attempts(c.attempts_trailing, |t| trailing_model(n, k, ld, ln, t, word, delta_bits, dls, c.vinv_of_delta, c.multiplier)), c.scale[if word { 2 } else { 3 }]);
+    }
+    u
 }
 
 /// What is known about the Smith form with transforms' cost before it runs:

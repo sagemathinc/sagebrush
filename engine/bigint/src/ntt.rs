@@ -15,7 +15,7 @@
 
 use crate::nmod::Modulus;
 use crate::ntt_core::{self, NttWord, Table};
-pub use crate::ntt_core::{conv_work, table_work, units};
+pub use crate::ntt_core::{conv_work, restore_units, table_work, units};
 use std::sync::atomic::{AtomicUsize, Ordering::Relaxed};
 use std::sync::{Arc, Mutex};
 

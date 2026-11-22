@@ -29,6 +29,14 @@ pub fn units() -> [u64; 3] {
     UNITS.with(|u| u.get())
 }
 
+/// Sets this thread's counters back to a value [`units`] gave: for
+/// bookkeeping that runs inside a metered computation but is not part of
+/// it (a progress forecast), restored when its scope ends.
+#[doc(hidden)]
+pub fn restore_units(v: [u64; 3]) {
+    UNITS.with(|u| u.set(v));
+}
+
 /// Records `n` reductions mod p done outside the transforms (the CRT pass).
 pub(crate) fn tally_reductions(n: u64) {
     tally(0, n, 0);

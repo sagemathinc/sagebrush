@@ -624,9 +624,26 @@ pub fn stage1_route3(a: &ZMat, c: &Constants) -> Option<Units> {
     if m == 0 || n == 0 {
         return None;
     }
-    let r = if m == n { n - 1 } else { m.min(n) };
-    let la = super::mean_limbs(a);
     let (rows, cols) = zmat::norm_bits(a);
+    let kh = k_lower_bound_rect(a, m.min(n));
+    let (z, r) = stage1_route3_sizes(m, n, super::mean_limbs(a), &rows, &cols, kh, c);
+    let mut u = route3_model(&z, c);
+    if kh >= 2 {
+        // (the core at k^ instead of route 1)
+        let mut swap = core_model(r, 1, kh, c);
+        let one = core_model(r, 1, 0, c);
+        swap.0.iter_mut().zip(&one.0).for_each(|(x, y)| *x = x.saturating_sub(*y));
+        let mut s = Units::default();
+        super::add_scaled(&mut s, &swap, c.scale_route3[0]);
+        u.add_saturating(&s);
+    }
+    Some(u)
+}
+
+/// Stage 1's route 3 sizes from A's shape, mean limbs, its rows' and
+/// columns' norms (log2) and k^; and the rank taken.
+fn stage1_route3_sizes(m: usize, n: usize, la: usize, rows: &[f64], cols: &[f64], kh: usize, c: &Constants) -> (Route3Sizes, usize) {
+    let r = if m == n { n - 1 } else { m.min(n) };
     // r of the norms (the largest: a bound on any r x r block), shrunk by
     // sqrt(r / length) for the block's share of each
     let block = |v: &[f64], len: usize| -> f64 {
@@ -635,10 +652,9 @@ pub fn stage1_route3(a: &ZMat, c: &Constants) -> Option<Units> {
         v.iter().take(r).sum::<f64>() - 0.5 * r as f64 * (len as f64 / r.max(1) as f64).log2()
     };
     let wide = m <= n;
-    let h = if wide { block(&rows, n) } else { block(&cols, m) };
+    let h = if wide { block(rows, n) } else { block(cols, m) };
     let dh = (h - c.hadamard_gap * r as f64).max(1.0).ceil() as u64;
     let ld = (dh as usize).div_ceil(64).max(1);
-    let kh = k_lower_bound_rect(a, m.min(n));
     let side = |w: usize| Side { r, w, lb: la, ld, delta_bits: dh, ln: ld, lg: 1, g_bits: 1, folds: 2, nd: 1.0, piv: 1, lgq: 1, sparse_x: false, khat: kh };
     let inv = inverse_at(r, h, la, ld);
     let mut z = Route3Sizes {
@@ -673,17 +689,28 @@ pub fn stage1_route3(a: &ZMat, c: &Constants) -> Option<Units> {
     if m == n {
         z.failed_pass = failed_pass_model(n, 0.0, size_product(&[n, n, la]), &norms_at(n, la));
     }
-    let mut u = route3_model(&z, c);
-    if kh >= 2 {
-        // (the core at k^ instead of route 1)
-        let mut swap = core_model(r, 1, kh, c);
-        let one = core_model(r, 1, 0, c);
-        swap.0.iter_mut().zip(&one.0).for_each(|(x, y)| *x = x.saturating_sub(*y));
-        let mut s = Units::default();
-        super::add_scaled(&mut s, &swap, c.scale_route3[0]);
-        u.add_saturating(&s);
+    (z, r)
+}
+
+/// The live forecast's route 3 terms before a Compress has run, from
+/// sizes only: A's shape and mean limbs, its rows' and columns' norms
+/// estimated from bit lengths ([`super::norm_bits_from_sizes`]), and k^ (0
+/// until the run has A's contents).  The core term at k^ when k^ >= 2.
+#[doc(hidden)]
+pub fn stage1_route3_terms_sized(m: usize, n: usize, la: usize, rows: &[f64], cols: &[f64], kh: usize, c: &Constants) -> Vec<(String, Units)> {
+    if m == 0 || n == 0 {
+        return vec![];
     }
-    Some(u)
+    let (z, r) = stage1_route3_sizes(m, n, la, rows, cols, kh, c);
+    let mut terms = route3_terms(&z, c);
+    if kh >= 2 {
+        let mut core = Units::default();
+        super::add_scaled(&mut core, &core_model(r, 1, kh, c), c.scale_route3[0]);
+        if let Some(t) = terms.iter_mut().find(|t| t.0 == "core") {
+            t.1 = core;
+        }
+    }
+    terms
 }
 
 /// Stage 2 for route 3: after the rank profile (rank r, rows `is`,
@@ -707,25 +734,73 @@ pub fn stage2_route3(a: &ZMat, is: &[usize], js: &[usize], nm: &ZMat, delta: &Bi
 pub fn stage2_route3_terms(a: &ZMat, is: &[usize], js: &[usize], nm: &ZMat, delta: &BigInt, det: &BigInt, g: &BigInt, c: &Constants) -> Vec<(String, Units)> {
     let (m, n) = (a.rows, a.cols);
     let r = is.len();
-    let la = super::mean_limbs(a);
-    let ld = limbs(delta);
-    let ln = super::mean_limbs(nm);
-    let lg = limbs(g);
     let e = det.abs() / delta;
-    // (G's fold reads Q until the running gcd is 1: G = (Delta / delta) gcd
-    // reaches Delta / delta)
-    let folds = if &e == g { 2 } else { size_product(&[r, n.max(m) - r]) as usize };
     let first_bj: ZMat = if r < n {
         ZMat::from_rows(is.iter().map(|&i| js.iter().map(|&j| a.get(i, j).clone()).collect()).collect())
     } else {
         ZMat::from_rows(is.iter().map(|&i| (0..n).map(|j| a.get(i, j).clone()).collect()).collect()).transpose()
     };
-    let inv = zmat::inverse_model(&first_bj, limbs(det), 2, (!e.is_one()).then(|| limbs(&e)));
-    let piv = if &det.abs() == delta { 1 } else { 3 };
-    // (gcd(delta, Q) = G / (Delta / delta))
-    let lgq = limbs(&(g / &e.max(BigInt::one())));
-    let kh = k_lower_bound_rect(a, r);
-    let first = |w: usize| Side { r, w, lb: la, ld, delta_bits: delta.bits(), ln, lg, g_bits: g.bits(), folds, nd: 1.0, piv, lgq, sparse_x: false, khat: kh };
+    let failed_pass = if m == n {
+        let red = a.d.iter().map(|x| limbs(x) as u64).sum();
+        failed_pass_model(n, zmat::hadamard_bits(a), red, &zmat::hadamard_units(a))
+    } else {
+        Units::default()
+    };
+    let k = Stage2Known {
+        m,
+        n,
+        r,
+        la: super::mean_limbs(a),
+        ld: limbs(delta),
+        delta_bits: delta.bits(),
+        ln: super::mean_limbs(nm),
+        lg: limbs(g),
+        g_bits: g.bits(),
+        e_is_g: &e == g,
+        lgq: limbs(&(g / &e.clone().max(BigInt::one()))),
+        piv: if &det.abs() == delta { 1 } else { 3 },
+        kh: k_lower_bound_rect(a, r),
+        inv_bj: zmat::inverse_model(&first_bj, limbs(det), 2, (!e.is_one()).then(|| limbs(&e))),
+        failed_pass,
+    };
+    stage2_route3_terms_known(&k, c)
+}
+
+/// What [`stage2_route3_terms`] reads, as sizes: A's shape, rank and mean
+/// limbs; the first side's delta, N, G (and whether Delta / delta = G, and
+/// gcd(delta, Q)'s limbs, and the row echelon's pivots); k^; and the two
+/// terms that need the input itself (B_J's inverse, the failed pass).  The
+/// live progress forecast fills it from the run's sizes, with those two
+/// terms zero (their phases are behind it).
+#[doc(hidden)]
+#[derive(Clone, Debug, Default)]
+pub struct Stage2Known {
+    pub m: usize,
+    pub n: usize,
+    pub r: usize,
+    pub la: usize,
+    pub ld: usize,
+    pub delta_bits: u64,
+    pub ln: usize,
+    pub lg: usize,
+    pub g_bits: u64,
+    pub e_is_g: bool,
+    pub lgq: usize,
+    pub piv: usize,
+    pub kh: usize,
+    pub inv_bj: Units,
+    pub failed_pass: Units,
+}
+
+/// [`stage2_route3_terms`] from sizes.
+#[doc(hidden)]
+pub fn stage2_route3_terms_known(k: &Stage2Known, c: &Constants) -> Vec<(String, Units)> {
+    let (m, n, r, la, ld, ln, lg, kh) = (k.m, k.n, k.r, k.la, k.ld, k.ln, k.lg, k.kh);
+    // (G's fold reads Q until the running gcd is 1: G = (Delta / delta) gcd
+    // reaches Delta / delta)
+    let folds = if k.e_is_g { 2 } else { size_product(&[r, n.max(m) - r]) as usize };
+    let (piv, lgq) = (k.piv, k.lgq);
+    let first = |w: usize| Side { r, w, lb: la, ld, delta_bits: k.delta_bits, ln, lg, g_bits: k.g_bits, folds, nd: 1.0, piv, lgq, sparse_x: false, khat: kh };
     let small = |h: f64| inverse_at(r, h + 1.0 + 0.5 * (r as f64).log2(), 1, (h as usize).div_ceil(64).max(1));
     let mut z = Route3Sizes {
         m,
@@ -742,30 +817,29 @@ pub fn stage2_route3_terms(a: &ZMat, is: &[usize], js: &[usize], nm: &ZMat, delt
     };
     if r < n {
         z.cols = Some(first(n));
-        z.inv_bj = inv;
+        z.inv_bj = k.inv_bj;
         if r < m {
             // (A' = A X: its rows I are C, the others combinations of them,
             // entries of C's size; its delta at most C's index, at most G; its
             // G a small word or 1, the rows outside I filling the lattice out:
             // g_bits 0)
-            z.left = Some(Side { r, w: m, lb: lg, ld: lg, delta_bits: g.bits(), ln: lg, lg: 1, g_bits: 0, folds: 2, nd: LEFT_DENSITY(r), piv: 1, lgq: 1, sparse_x: true, khat: kh });
-            z.inv_ct = small(g.bits() as f64);
+            z.left = Some(Side { r, w: m, lb: lg, ld: lg, delta_bits: k.g_bits, ln: lg, lg: 1, g_bits: 0, folds: 2, nd: LEFT_DENSITY(r), piv: 1, lgq: 1, sparse_x: true, khat: kh });
+            z.inv_ct = small(k.g_bits as f64);
         } else {
             // T = C: its delta at most the index, at most G
-            z.t_delta_bits = g.bits();
-            z.inv_t = small(g.bits() as f64);
+            z.t_delta_bits = k.g_bits;
+            z.inv_t = small(k.g_bits as f64);
         }
     } else if r < m {
         z.left = Some(first(m));
-        z.inv_ct = inv;
+        z.inv_ct = k.inv_bj;
     }
     if m == n {
-        let red = a.d.iter().map(|x| limbs(x) as u64).sum();
-        z.failed_pass = failed_pass_model(n, zmat::hadamard_bits(a), red, &zmat::hadamard_units(a));
+        z.failed_pass = k.failed_pass;
     }
     let mut terms = route3_terms(&z, c);
     if kh >= 2 {
-        let scale = c.scale_route3[if g.bits() < 62 { 0 } else { 1 }];
+        let scale = c.scale_route3[if k.g_bits < 62 { 0 } else { 1 }];
         let mut core = Units::default();
         super::add_scaled(&mut core, &core_model(r, z.t_delta_bits, kh, c), scale);
         if let Some(t) = terms.iter_mut().find(|t| t.0 == "core") {
