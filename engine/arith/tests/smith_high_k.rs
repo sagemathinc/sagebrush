@@ -1,10 +1,12 @@
 //! The Smith form with transforms at many nontrivial invariant factors:
 //! route 2 for every k >= 2 (issue https://github.com/sagemathinc/sagebrush/issues/1512,
 //! where a 48 x 48 input with k = 9 took the classical elimination,
-//! 2.96e11 units in about 6 minutes).  Each input checks U A V = D, the
-//! route, its units against a ceiling and its attempts.  (A file of its
+//! 2.96e11 units in about 6 minutes; that input is here exactly).  Each
+//! input checks U A V = D, the route, its units against a ceiling and its
+//! attempts.  (A file of its
 //! own: the 48 x 48 case is the slowest of the Smith tests' inputs.)
 
+use num_integer::Integer;
 use num_traits::{One, Zero};
 use sagebrush_arith::cost::tallied;
 use sagebrush_arith::smith::{smith_form, Route, SmithForm};
@@ -33,6 +35,39 @@ fn entry(rng: &mut Rng, bits: u32) -> BigInt {
     } else {
         x
     }
+}
+
+/// The issue's input exactly: the estimate test's corpus at the commit the
+/// issue names (6e46167ba9038f345c4857e73b73df3c0aec8661), its k = 6..8
+/// family doubled at every n, base seed 3, index 222.  Rebuilt here from
+/// the generator's state at that input (pinned below, with a fingerprint
+/// of its entries): 48 x 48, each entry a 60-bit and a 4-bit draw then a
+/// sign draw, then its first 8 rows (that family's k at that point) times a
+/// prime drawn from {2, 3, 5}.
+fn issue_input() -> ZMat {
+    let mut rng = Rng(0x1564_dcf7_f312_fc7e);
+    let n = 48;
+    let mut rows: Vec<Vec<BigInt>> = (0..n)
+        .map(|_| {
+            (0..n)
+                .map(|_| {
+                    let x = (BigInt::from(rng.next() >> 4) << 4usize) + BigInt::from(rng.next() >> 60);
+                    if rng.next() & 1 == 1 {
+                        -x
+                    } else {
+                        x
+                    }
+                })
+                .collect()
+        })
+        .collect();
+    let p = [2i64, 3, 5][(rng.next() % 3) as usize];
+    for row in rows.iter_mut().take(8) {
+        for v in row.iter_mut() {
+            *v = &*v * BigInt::from(p);
+        }
+    }
+    ZMat::from_rows(rows)
 }
 
 /// An n x n input of `bits`-bit entries with its first `scaled` rows times
@@ -78,8 +113,23 @@ fn run(a: &ZMat) -> (SmithForm, u64, usize) {
 
 #[test]
 fn many_invariant_factors_take_route_two() {
-    // the issue's shape: 48 x 48, 64-bit entries, nine rows times 3 (k = 9
-    // here); route 2 instead of the classical elimination's 2.96e11 units
+    // the issue's input: k = 9 (|det| of 3143 bits, delta of 3135), where
+    // the classical elimination ran 2.96e11 units in about 6 minutes
+    let a = issue_input();
+    let fp = a.d.iter().fold(BigInt::zero(), |s, x| (s * BigInt::from(1_000_003) + x).mod_floor(&BigInt::from((1u64 << 61) - 1)));
+    assert_eq!(fp, BigInt::from(79_928_650_449_187_997u64), "the issue's input, rebuilt");
+    let (f, units, k) = run(&a);
+    println!("the issue's input: k = {k}, {units} units, {} attempts", f.attempts);
+    assert_eq!(k, 9);
+    assert_eq!(f.route, Route::Trailing);
+    assert!(units <= 1_000_000_000, "{units} units: route 2's ceiling for the issue's input");
+    assert!(f.attempts <= 10, "{} attempts", f.attempts);
+    let (nm, den, det) = sagebrush_arith::zmat::inverse_det(&a).expect("nonsingular");
+    assert_eq!((det.bits(), den.bits()), (3143, 3135), "the issue's |det| and delta");
+    let _ = nm;
+
+    // the same shape seeded here: 48 x 48, 64-bit entries, nine rows times
+    // 3 (k = 9)
     let a = input(1512, 48, 64, 9, 3);
     let (f, units, k) = run(&a);
     println!("48 x 48, 64 bits: k = {k}, {units} units, {} attempts", f.attempts);
