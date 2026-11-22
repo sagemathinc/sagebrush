@@ -1192,7 +1192,7 @@ const delegateUi = mountDelegate({
   site: new URL("../", import.meta.url),
   toast,
   // (Merge: this browser's workspace, and the agent's record of it)
-  merge: workspaceIO(() => workspace, (task, params) => delegateTasks.merged(task, params)),
+  merge: workspaceIO(() => workspace, (task, params) => delegateTasks.merged(task, params), /^(localhost|127\.0\.0\.1)$/.test(location.hostname) ? async (op, path) => { if (typeof (window as any).__mergeSeam === "function") await (window as any).__mergeSeam(op, path); } : undefined),
   session: sessionStorage,
 });
 // (the Files | Agents switch at the right of the chat list's header, Agents pressed: Files opens the notebook page with

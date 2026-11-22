@@ -59,7 +59,7 @@ export interface MergeIO {
   write(path: string, kind: MergeKind, text: string, at: Omit<Mine, "hash">): Promise<Ident>;
   /** `text` as a new file at `path` (a path that's taken is refused: it throws). */
   create(path: string, kind: MergeKind, text: string): Promise<Ident>;
-  /** The file read as `at` removed (to Trash), only if it is still that entry. */
+  /** The file read as `at` removed (to Trash), only if it is still that entry at that revision (else it throws). */
   remove(path: string, at: Omit<Mine, "hash">): Promise<void>;
   /** The task's merge record, as kept (checked here: recordOf). */
   load(task: string): Promise<unknown>;
@@ -319,7 +319,8 @@ export function recordOf(v: unknown, task: string): MergeRecord | null {
 type WorkspaceLike = Pick<Workspace, "stat" | "read" | "write" | "create" | "remove" | "delegateMerge" | "setDelegateMerge">;
 const identOf = (e: Ident): Ident => ({ kind: e.kind, ...(e.fid !== undefined ? { fid: e.fid } : {}), created: e.created, ref: e.ref ?? null });
 
-export function workspaceIO(ws: () => WorkspaceLike | null, merged: MergeIO["merged"]): MergeIO {
+/** `seam` (tests on localhost only): awaited right before each write or removal, after the file was read and checked. */
+export function workspaceIO(ws: () => WorkspaceLike | null, merged: MergeIO["merged"], seam?: (op: "write" | "remove", path: string) => Promise<void>): MergeIO {
   const W = () => { const w = ws(); if (!w) throw new Error("this browser's workspace isn't open"); return w; };
   const content = (path: string, kind: MergeKind, text: string) => (kind === "notebook" ? parse(path, text) : enc.encode(text));
   return {
@@ -336,9 +337,10 @@ export function workspaceIO(ws: () => WorkspaceLike | null, merged: MergeIO["mer
       }
       return { id: identOf(r.entry), rev: r.rev, text };
     },
-    async write(path, kind, text, at) { return identOf((await W().write("/" + path, content(path, kind, text), { base: at.rev, expect: at.id })).entry); },
+    async write(path, kind, text, at) { await seam?.("write", path); return identOf((await W().write("/" + path, content(path, kind, text), { base: at.rev, expect: at.id })).entry); },
     async create(path, kind, text) { return identOf(await W().create("/" + path, { content: content(path, kind, text) })); },
-    async remove(path, at) { await W().remove("/" + path, at.id); },
+    // (only that entry, still at the revision whose text was checked: a later edit refuses it, nothing moved)
+    async remove(path, at) { await seam?.("remove", path); await W().remove("/" + path, { ...at.id, rev: at.rev }); },
     load: (task) => W().delegateMerge(task),
     save: (task, rec) => W().setDelegateMerge(task, rec),
     merged,

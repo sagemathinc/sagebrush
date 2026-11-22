@@ -51,8 +51,9 @@ function memIO() {
       return id(W.put(path, text, kind));
     },
     async remove(path, at) {
+      await W.seam?.("remove", path);
       const e = files.get(path);
-      if (!e || !same(e, at.id)) throw Object.assign(new Error("another"), { code: "conflict" });
+      if (!e || !same(e, at.id) || e.rev !== at.rev) throw Object.assign(new Error("another, or changed"), { code: "conflict" });
       W.writes.push(path);
       files.delete(path);
     },
@@ -166,6 +167,17 @@ const PNG = "iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAADUlEQVR42mP8z8BQDwA
   ok(isDone(rec) && W.textOf("gone.txt") === "changed by me\n" && !W.files.has("same.txt") && !W.files.has("back.txt") && W.textOf("new.txt") === "new\n", "run: kept, removed, skipped and made, as picked", [...W.files.keys()]);
   const p = await mergedParams(rec), f = Object.fromEntries(p.files.map((x) => [x.path, x]));
   ok(f["back.txt"].mine.absent && f["back.txt"].merged.absent && f["same.txt"].merged.absent && f["new.txt"].mine.absent && f["new.txt"].merged.content === "new\n" && f["gone.txt"].merged.content === "changed by me\n", "tasks.merged: absent where a side has no file, full bytes elsewhere", p.files);
+}
+
+// ---- a removal: an edit after the file was checked and before it is removed refuses it (the revision checked with it)
+{
+  const W = memIO();
+  W.put("old.txt", "base\n");
+  const { pin, src } = proposal({ "old.txt": ["base\n", null] });
+  const rec = newRecord(pin, await prepare(W.io, src, pin), {});
+  W.seam = async () => { W.seam = null; W.edit("old.txt", "a late edit\n"); };
+  const after = await run(W.io, rec);
+  ok(after.files[0].state === "unresolved" && W.textOf("old.txt") === "a late edit\n" && !isDone(after), "a late edit between the check and the removal: not removed, unresolved, the edit kept", { state: after.files[0].state, text: W.textOf("old.txt") });
 }
 
 // ---- refused: a board; a file that isn't the kind the agent says

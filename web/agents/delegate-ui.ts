@@ -47,11 +47,12 @@ export const DELEGATE_UI_TEXT = {
   keepMine: "Keep mine",
   take: (agent: string) => `Take ${agent}'s`,
   incomplete: "Merge incomplete",
-  incompleteBody: (paths: string[]) => `${paths.length === 1 ? "This file" : "These files"} changed while the merge was written, and ${paths.length === 1 ? "wasn't" : "weren't"} merged: ${paths.join(", ")}. Merge again to merge ${paths.length === 1 ? "it" : "them"} as ${paths.length === 1 ? "it is" : "they are"} now, or close what's left. The files already written stay as they are.`,
+  incompleteBody: (paths: string[]) => `${paths.length === 1 ? "This file" : "These files"} couldn't be merged: ${paths.join(", ")}. Each changed, or couldn't be read or written, while the merge was written. Merge again to merge ${paths.length === 1 ? "it" : "them"} as ${paths.length === 1 ? "it is" : "they are"} now, or close what's left. The files already written stay as they are.`,
   closeRest: "Close what's left",
   merged: "Merged: your files have the changes.",
-  notRecorded: (m: string) => `Your files have the merge, but the agent didn't record it: ${m}`,
-  notRecordedYet: "Your files have the merge, but the agent hasn't recorded it yet. Merge again to try again.",
+  mergedPart: (written: string[], left: string[]) => `Recorded. ${written.length ? `Merged: ${written.join(", ")}.` : "Nothing was merged."} Left as they were: ${left.join(", ")}.`,
+  notRecorded: (m: string) => `The agent didn't record this decision: ${m}. Files already written keep their changes.`,
+  notRecordedYet: "The agent hasn't recorded this decision yet. Files already written keep their changes. Merge again to try again.",
   ask: "Ask for changes",
   closeTask: "Close",
   closeTitle: "Close this proposal?",
@@ -352,7 +353,9 @@ export function mountDelegate(h: DelegateHost) {
         return;
       }
       const ok = await recordMerge(id, rec);
-      if (ok === true) { dlg.close(); h.toast(T.merged); }
+      // (what was written said as it is: all of it, or the files merged and those closed unchanged)
+      const left = rec.files.filter((f) => f.closed).map((f) => f.path);
+      if (ok === true) { dlg.close(); h.toast(left.length ? T.mergedPart(rec.files.filter((f) => f.state === "written").map((f) => f.path), left) : T.merged, left.length ? 6000 : undefined); }
       else status.textContent = ok;
     };
     merge.onclick = async () => {

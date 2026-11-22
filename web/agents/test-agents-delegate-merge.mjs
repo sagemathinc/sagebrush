@@ -137,12 +137,15 @@ try {
   await P.until(`!!document.querySelector('dialog.proposal[open] .merge-slot .incomplete')`, 20000).catch(() => {});
   await shot("merge-2-incomplete");
   const inc = await P.ev(`document.querySelector('dialog.proposal[open] .merge-slot')?.textContent ?? null`);
-  ok(/work\/x1\.txt/.test(inc ?? "") && !/x2/.test(inc ?? "") && (await status()) === "Merge incomplete" && (await chip(E)) === "Merge incomplete", "a file changed between the pin and its write: Merge incomplete, it named; the chip says so", { inc, chip: await chip(E) });
+  ok(/couldn't be merged: work\/x1\.txt\./.test(inc ?? "") && !/x2/.test(inc ?? "") && (await status()) === "Merge incomplete" && (await chip(E)) === "Merge incomplete", "a file changed between the pin and its write: Merge incomplete, it named; the chip says so", { inc, chip: await chip(E) });
   ok((await read("/work/x1.txt")).content.text === "x1 from the other tab\n" && (await read("/work/x2.txt")).content.text === "X2\n" && !H.got.some((m) => m.method === "tasks.merged" && m.params.task === E.task), "x1 left as the other tab left it, x2 written; no tasks.merged");
   await P.ev(`document.querySelector('dialog.proposal[open] button[data-act="close-rest"]').click()`);
   await hostUntil(() => H.got.some((m) => m.method === "tasks.merged" && m.params.task === E.task), 20000);
   const er = H.got.find((m) => m.method === "tasks.merged" && m.params.task === E.task)?.params;
   const ex = Object.fromEntries((er?.files ?? []).map((f) => [f.path, f]));
+  await P.until(`/^Recorded\\./.test(document.querySelector('#toast')?.textContent ?? '')`, 10000).catch(() => {});
+  const toastText = await P.ev(`document.querySelector('#toast')?.textContent ?? null`);
+  ok(toastText === "Recorded. Merged: work/x2.txt. Left as they were: work/x1.txt.", "Close what's left: the page names what it merged and what it left, never \"your files have the changes\"", toastText);
   ok(ex["work/x1.txt"]?.mine === null && ex["work/x1.txt"]?.merged === null && ex["work/x2.txt"]?.merged?.content === "X2\n", "Close what's left: tasks.merged with x1 not sent (a receipt), x2 as written", ex);
   await P.until(`!document.querySelector('dialog.proposal[open]')`, 10000).catch(() => {});
 
@@ -164,6 +167,53 @@ try {
   H.release();
   await P.until(`document.querySelector('#tasks .task[data-task="${D.task}"] .chip')?.textContent === 'Merged'`, 10000).catch(() => {});
   ok((await chip(D)) === "Merged" && H.tasks.get(D.task).log.filter((e) => e.event.status === "merged").length === 1 && (await read("/work/notes.txt")).rev === writesBefore, "both answered alike, recorded once; the chip Merged; nothing written again", await chip(D));
+
+  // ---- a removal and a late edit: the proposal deletes a file the person hasn't changed; the person edits it after
+  //      Merge checked it and before it is removed (the page's seam, on this host only). The removal is refused at the
+  //      workspace (its revision checked with its identity): the file stays with the edit, the merge is incomplete,
+  //      nothing is sent and no "Merged" is said. Then the same for a notebook saved through sync's journal.
+  const lateEdit = async (path, content, edit, label) => {
+    const base0 = await read("/" + path);
+    const baseText = path.endsWith(".ipynb") ? toIpynb(base0.content.json) : base0.content.text;
+    const T = await H.addTask({ title: "Remove " + path, base: { [path]: baseText }, proposal: { [path]: null } });
+    await openProposal(T);
+    await P.ev(`(window.__seamAt = null, window.__mergeSeam = (op, p) => op === "remove" && p === ${JSON.stringify(path)} ? new Promise((go) => { window.__seamAt = p; window.__seamGo = go; }) : undefined, 1)`);
+    await P.ev(`document.querySelector('#toast').textContent = ''`);
+    await P.ev(`document.querySelector('dialog.proposal[open] button[data-act="merge"]').click()`);
+    await P.until(`window.__seamAt === ${JSON.stringify(path)}`, 20000);
+    const now = await read("/" + path);
+    await H.call("workspace.write", { path: "/" + path, content: edit, base: now.rev });
+    await P.ev(`(window.__mergeSeam = null, window.__seamGo(), 1)`);
+    await P.until(`!!document.querySelector('dialog.proposal[open] .merge-slot .incomplete')`, 20000).catch(() => {});
+    const after = await read("/" + path).catch(() => null);
+    ok(after && JSON.stringify(after.content).includes(label) && (await status()) === "Merge incomplete" && (await chip(T)) === "Merge incomplete", `${path}: an edit after Merge checked it, before its removal: not removed, the edit kept, Merge incomplete`, { after: JSON.stringify(after?.content ?? null).slice(0, 200), status: await status(), chip: await chip(T) });
+    await sleep(300);
+    ok(!H.got.some((m) => m.method === "tasks.merged" && m.params.task === T.task) && !/Merged/.test(await P.ev(`document.querySelector('#toast').textContent`)), `${path}: no tasks.merged, and no "Merged" said`);
+    await P.ev(`document.querySelector('dialog.proposal[open] .x')?.click()`);
+  };
+  await H.call("workspace.create", { path: "/work/del.txt", content: { text: "keep\n" } });
+  await lateEdit("work/del.txt", null, { text: "keep, and a late line\n" }, "a late line");
+  // (sync's journal on in this browser, as Workspace.activateJournal leaves its fences; the page loaded again under it)
+  await H.call("workspace.create", { path: "/work/jn.ipynb", content: { json: { mode: "python", cells: [{ id: "j1", type: "code", code: "x = 1" }] } } });
+  const FENCE = "__sagebrush-workspace__";
+  const on = await P.ev(`(async () => {
+    const db = await new Promise((ok, no) => { const r = indexedDB.open("sagebrush"); r.onsuccess = () => ok(r.result); r.onerror = () => no(r.error); });
+    const f0 = await new Promise((ok) => { const r = db.transaction("notebooks").objectStore("notebooks").get(${JSON.stringify(FENCE)}); r.onsuccess = () => ok(r.result); });
+    if (!f0) return false;
+    await new Promise((ok) => { const t = db.transaction("notebooks", "readwrite"); t.objectStore("notebooks").put({ ...f0, phase: "journal", journal: 1 }); t.oncomplete = ok; });
+    db.close();
+    return true;
+  })()`);
+  await pair();
+  await lateEdit("work/jn.ipynb", null, { json: { mode: "python", cells: [{ id: "j1", type: "code", code: "x = 2  # a late edit" }] } }, "a late edit");
+  const journaled = await P.ev(`(async () => {
+    const db = await new Promise((ok, no) => { const r = indexedDB.open("sagebrush"); r.onsuccess = () => ok(r.result); r.onerror = () => no(r.error); });
+    const all = await new Promise((ok) => { const r = db.transaction("notebooks").objectStore("notebooks").getAll(); r.onsuccess = () => ok(r.result); });
+    db.close();
+    const rec = all.find((x) => JSON.stringify(x.cells ?? []).includes("a late edit"));
+    return !!rec && ("j" in rec || "unjournaled" in rec);
+  })()`);
+  ok(on && journaled, "the notebook row ran under sync's journal (its late edit saved through it)", { on, journaled });
   ok(P.errors.length === 0, "no page errors", P.errors);
 } catch (e) {
   ok(false, "the test ran to its end: " + (e?.stack ?? e));
