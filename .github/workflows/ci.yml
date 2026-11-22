@@ -484,6 +484,10 @@ jobs:
     if: always() && (github.repository == 'sagemathinc/sagebrush' || vars.CI_RUNNER != '')
     runs-on: ${{ vars.CI_RUNNER || 'ubuntu-24.04' }}
     timeout-minutes: 5
+    # (pull-requests: read, only to read the track-pull label of a queued pull request)
+    permissions:
+      contents: read
+      pull-requests: read
     steps:
       - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4.4.0
         with:
@@ -502,8 +506,30 @@ jobs:
         with:
           name: size-base-${{ github.sha }}
           path: ${{ runner.temp }}/size-records
+      # A track's pull into master (design/size-gate.md, "Track pulls"): every pull request on
+      # the track already passed this backstop against the track, and the pull sums them. With
+      # the track-pull label the table is still measured and reported, but growth over the
+      # backstop doesn't fail it; the merger reads every row. Missing records still fail closed.
+      - name: a track pull?
+        id: track
+        env:
+          GH_TOKEN: ${{ github.token }}
+          EVENT: ${{ github.event_name }}
+          LABELS: ${{ join(github.event.pull_request.labels.*.name, ',') }}
+          QUEUE_REF: ${{ github.event.merge_group.head_ref }}
+        run: |
+          pull=false
+          if [ "$EVENT" = pull_request ]; then
+            case ",$LABELS," in *,track-pull,*) pull=true ;; esac
+          elif [ "$EVENT" = merge_group ]; then
+            n=$(printf '%s' "$QUEUE_REF" | sed -n 's#^refs/heads/gh-readonly-queue/[^/]*/pr-\([0-9][0-9]*\)-.*#\1#p')
+            if [ -n "$n" ] && gh api "repos/$GITHUB_REPOSITORY/issues/$n/labels" --jq '.[].name' | grep -qx track-pull; then pull=true; fi
+          fi
+          echo "track pull: $pull"
+          echo "pull=$pull" >> "$GITHUB_OUTPUT"
       - name: the gate
         env:
+          TRACK_PULL: ${{ steps.track.outputs.pull }}
           CHANGES: ${{ needs.changes.result }}
           CHECKS: ${{ needs.checks.result }}
           BASE: ${{ needs.size-base.result }}
@@ -520,7 +546,15 @@ jobs:
             exit 1
           else
             cp "$RUNNER_TEMP/size-merge/sizes.json" "$RUNNER_TEMP/size-records/merge-record.json"
-            node scripts/size-measure.mjs --gate --records "$RUNNER_TEMP/size-records" --out "$RUNNER_TEMP/size-records/size-gate.json"
+            if ! node scripts/size-measure.mjs --gate --records "$RUNNER_TEMP/size-records" --out "$RUNNER_TEMP/size-records/size-gate.json"; then
+              # (only growth is excused: a record, recipe or toolchain problem still fails)
+              if [ "$TRACK_PULL" = true ] && node -e 'const r = JSON.parse(require("fs").readFileSync(process.argv[1], "utf8")); process.exit(r.rows.length > 0 && r.problems.length > 0 && r.problems.every((p) => /: growth \+\d+ exceeds \d+ bytes/.test(p)) ? 0 : 1)' "$RUNNER_TEMP/size-records/size-gate.json"; then
+                echo "::warning::a track pull: growth over the backstop is reported, not enforced; the merger reads every row"
+                echo "**A track pull (track-pull label): the rows above are reported, not enforced. The merger reads every row.**" >> "$GITHUB_STEP_SUMMARY"
+              else
+                exit 1
+              fi
+            fi
           fi
       # (report-only: it reads the two npm-pack records and appends a table to
       # the summary; the gate's result stays the gate step's own)
