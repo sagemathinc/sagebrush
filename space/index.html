@@ -78,6 +78,8 @@
   #overlay .tourbar button { background: var(--ctl2); color: var(--ov-fg); border: 1px solid var(--ctl-line); padding: 4px 10px; }
   #overlay .tourbar button.next { background: #1f6feb; color: #fff; border-color: #1f6feb; font-weight: 600; }
   #tour { width: 100%; }
+  /* (these use display: flex, which would override the hidden attribute) */
+  #chat[hidden], #chatfab[hidden], #tourpill[hidden] { display: none; }
   #chat { position: fixed; left: 50%; bottom: 12px; transform: translateX(-50%); width: min(620px, 94vw); z-index: 5; display: flex; flex-direction: column; gap: 6px;
     background: var(--panel); border: 1px solid var(--line); border-radius: 12px; padding: 10px; backdrop-filter: blur(6px); box-shadow: var(--ov-shadow); }
   #chatlog { max-height: 26vh; overflow: auto; display: flex; flex-direction: column; gap: 6px; font-size: 13.5px; }
@@ -86,6 +88,10 @@
   #chatchips { display: flex; gap: 6px; flex-wrap: wrap; } #chatchips button { font-size: 12.5px; padding: 4px 10px; border-radius: 999px; }
   #chatform { display: flex; gap: 6px; } #chatin { flex: 1; } #chatform button:first-of-type { background: #1f6feb; color: #fff; border-color: #1f6feb; }
   #chatmic.on { background: #b42318; color: #fff; }
+  #chathead { display: flex; align-items: center; justify-content: space-between; font-size: 12px; color: var(--muted); font-weight: 600; }
+  #chathead button { padding: 0 8px; font-size: 13px; }
+  #chatfab { position: fixed; right: 16px; bottom: 16px; z-index: 5; padding: 9px 16px; border-radius: 999px; font-weight: 600; background: #1f6feb; color: #fff; border-color: #1f6feb; box-shadow: var(--ov-shadow); }
+  #chatfab.new::after { content: ""; display: inline-block; width: 9px; height: 9px; margin-left: 8px; border-radius: 50%; background: #ffd33d; vertical-align: 1px; }
   body.chatting #help { display: none; }
   @media (max-width: 700px) { #chat { bottom: 6px; padding: 8px; } #chatlog { max-height: 18vh; } body.chatting.reading #chat { display: none; } }
   #tourpill { position: fixed; top: 12px; left: 50%; transform: translateX(-50%); z-index: 6; display: flex; gap: 8px; align-items: center; padding: 6px 8px 6px 14px;
@@ -148,7 +154,9 @@
 </div>
 <div id="overlay" hidden></div>
 <div id="tourpill" hidden></div>
+<button id="chatfab" hidden title="Talk to the agent (T); clicking the agent opens this too">💬 Talk to the agent</button>
 <div id="chat" hidden>
+  <div id="chathead"><span>The agent</span><button type="button" id="chatfold" title="Fold the chat away (T)">▾</button></div>
   <div id="chatlog"></div>
   <div id="chatchips"></div>
   <form id="chatform"><input id="chatin" autocomplete="off" placeholder="Ask the agent"><button>Send</button><button type="button" id="chatmic" hidden title="Speak to the agent">🎤</button></form>

@@ -99,6 +99,16 @@ Over this connection Claude has the web and your Sagebrush files, not your disk.
 
 `agent-lab.space.json`: a figure stands beside you (src/agent.js, made from three.js shapes), and you talk to it in the chat. On the desktop the chat is a box at the bottom, with a microphone where the browser has speech. In a headset it's a panel below your view: type on a Bluetooth keyboard, or point at a suggestion. What it understands is scripted (src/demo-agent.js): plot an elliptic curve (389a, or any of conductor under 1000 by label), draw its rational points, plot it mod every prime up to 50, and show its complex points in 3D. What it shows is computed. Each answer is Sage code run on Sagebrush's engine in the browser, and each object it makes keeps that code, so you can open it and run it again. It walks to where it works, reaches toward it while the code runs, and the object grows in.
 
+The chat stays out of the way. On the desktop it is a **Talk to the agent** button (or T, or click the agent); it folds away while the agent works, and its answers are in its speech bubble. In a headset, it is on your left wrist above the menu (the menu's **Chat**, or point at the agent and pull the trigger). Typing goes into a text field of the page, so the Quest's own keyboard comes up with its microphone for dictation, and a Bluetooth keyboard types there too.
+
+**Comfort in a headset:**
+- Walking is the default. There's a floor in every space; the left thumbstick walks and the right turns in steps.
+- Going to an object, Back and See all are a blink (a quick fade), never a glide.
+- Point at the floor and pull the trigger to step there.
+- Above the floor, a disc stands under your feet.
+- The view's edges darken while you walk.
+- **Fly** on the wrist menu brings back gliding and the right thumbstick's up and down.
+
 Tours keep their place: entering a room or going Back doesn't end one. A pill at the top says where the tour is, with **Back to the tour** and **Next**.
 
 ## The rough alpha (a static site)

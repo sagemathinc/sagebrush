@@ -1,3 +1,7 @@
+// Comfort first (walking, the default): you stand on the floor; the left thumbstick walks, the right turns in steps; a
+// move to an object or Back is a blink (a quick fade), never a glide through the air; point at the floor and pull the
+// trigger to step there; above the floor, a disc stands under your feet; the view's edges darken while you walk. Fly
+// (the wrist menu) brings back gliding flights and the right thumbstick's up and down.
 // The space in a headset (WebXR: Meta Quest's browser, and others): Enter VR (or AR, the space in your room through
 // passthrough). You stand in the space at a scale where a slab is about a metre wide. Each controller casts a ray:
 // the trigger selects what it points at: you fly to it (as the desktop does) and its reading panel opens beside it (the
@@ -19,6 +23,30 @@ export function setupXR(api) {
   scene.add(rig);
   rig.add(camera);
   let session = null, mode = null, saved = null;
+  // (walking or flying; kept for the next visit)
+  let walk = (() => { try { return localStorage.getItem("whitespace:xr-move") !== "fly"; } catch { return true; } })();
+  // (the blink: black around the eyes, faded in and out)
+  const fader = new THREE.Mesh(new THREE.SphereGeometry(0.3, 16, 12), new THREE.MeshBasicMaterial({ color: 0x000000, transparent: true, opacity: 0, side: THREE.BackSide, depthTest: false, depthWrite: false }));
+  fader.renderOrder = 1000;
+  fader.visible = false;
+  camera.add(fader);
+  // (the vignette: the view's edges darkened while walking, which eases the feeling of moving)
+  const vc = Object.assign(document.createElement("canvas"), { width: 256, height: 256 });
+  // (wide enough to cover the whole view, so it has no edge: clear in the middle, dark from about 70° out)
+  { const g = vc.getContext("2d"), gr = g.createRadialGradient(128, 128, 26, 128, 128, 64); gr.addColorStop(0, "rgba(0,0,0,0)"); gr.addColorStop(1, "rgba(0,0,0,1)"); g.fillStyle = "#000"; g.fillRect(0, 0, 256, 256); g.clearRect(0, 0, 0, 0); g.globalCompositeOperation = "copy"; g.fillStyle = gr; g.fillRect(0, 0, 256, 256); }
+  const vignette = new THREE.Mesh(new THREE.PlaneGeometry(2.4, 2.4), new THREE.MeshBasicMaterial({ map: new THREE.CanvasTexture(vc), transparent: true, opacity: 0, depthTest: false, depthWrite: false }));
+  vignette.position.z = -0.2;
+  vignette.renderOrder = 999;
+  vignette.visible = false;
+  camera.add(vignette);
+  let vig = 0, lastFloor = NaN;
+  // (the disc under your feet when you stand above the floor, and the mark where a teleport would put you)
+  const disc = new THREE.Mesh(new THREE.RingGeometry(0.12 * SCALE, 0.42 * SCALE, 40).rotateX(-Math.PI / 2), new THREE.MeshBasicMaterial({ color: 0x4a9d6f, transparent: true, opacity: 0.45, side: THREE.DoubleSide, depthWrite: false }));
+  disc.visible = false;
+  scene.add(disc);
+  const mark = new THREE.Mesh(new THREE.RingGeometry(0.18 * SCALE, 0.26 * SCALE, 32).rotateX(-Math.PI / 2), new THREE.MeshBasicMaterial({ color: 0x1f6feb, transparent: true, opacity: 0.8, side: THREE.DoubleSide, depthWrite: false }));
+  mark.visible = false;
+  scene.add(mark);
 
   // ---------------------------------------------------------------- the controllers: a ray each
   const controllers = [0, 1].map((i) => {
@@ -30,7 +58,7 @@ export function setupXR(api) {
     c.userData = { line, source: null, hovered: null };
     c.addEventListener("connected", (e) => {
       c.userData.source = e.data;
-      if (e.data?.handedness === "left") { c.add(menu); drawMenu(); }
+      if (e.data?.handedness === "left") { c.add(menu); c.add(chatPanel); drawMenu(); }
     });
     c.addEventListener("disconnected", () => (c.userData.source = null));
     c.addEventListener("select", () => onSelect(c));
@@ -46,6 +74,7 @@ export function setupXR(api) {
   // (each place remembered with how many rooms deep it was: a place in a room that has since been left is passed over)
   const pose = () => ({ pos: rig.position.clone(), yaw: rig.rotation.y, depth: api.depth() });
   function flyRig(to, toT, ms = 450, remember = true) {
+    settle();
     if (remember) { backStack.push(pose()); fwdStack.length = 0; drawMenu(); }
     const d = new THREE.Vector3().subVectors(toT, to);
     const yaw = Math.atan2(-d.x, -d.z);
@@ -53,21 +82,53 @@ export function setupXR(api) {
     const head = camera.position.clone().applyAxisAngle(new THREE.Vector3(0, 1, 0), yaw).multiplyScalar(SCALE);
     flyPose({ pos: to.clone().sub(head), yaw }, ms);
   }
+  // (a blink under way, finished at once: you are where it was taking you, the fader gone)
+  function settle() {
+    if (!flight?.blink) return;
+    rig.position.copy(flight.to.pos); rig.rotation.y = flight.to.yaw;
+    fader.visible = false; fader.material.opacity = 0;
+    flight = null;
+  }
   function flyPose(target, ms = 450) {
+    settle();
     let dy = target.yaw - rig.rotation.y;
     dy = Math.atan2(Math.sin(dy), Math.cos(dy)); // (the short way round)
-    flight = { from: pose(), to: { pos: target.pos, yaw: rig.rotation.y + dy }, t0: performance.now(), ms };
+    // (walking: a blink, there in the dark; flying: a glide)
+    flight = { from: pose(), to: { pos: target.pos, yaw: rig.rotation.y + dy }, t0: performance.now(), ms: walk ? 300 : ms, blink: walk, jumped: false };
   }
   function stepFlight() {
     if (!flight) return;
     const u = Math.max(0, Math.min(1, (performance.now() - flight.t0) / flight.ms)), e = u * u * (3 - 2 * u);
+    if (flight.blink) {
+      fader.visible = true;
+      fader.material.opacity = u < 0.5 ? u * 2 : (1 - u) * 2;
+      if (u >= 0.5 && !flight.jumped) { rig.position.copy(flight.to.pos); rig.rotation.y = flight.to.yaw; flight.jumped = true; }
+      if (u >= 1) { fader.visible = false; fader.material.opacity = 0; flight = null; }
+      return;
+    }
     rig.position.lerpVectors(flight.from.pos, flight.to.pos, e);
     rig.rotation.y = flight.from.yaw + (flight.to.yaw - flight.from.yaw) * e;
     if (u >= 1) flight = null;
   }
+  // (a step to a point of the floor: your feet there, facing as you were)
+  function teleport(p) {
+    settle();
+    backStack.push(pose()); fwdStack.length = 0;
+    const head = camera.position.clone().setY(0).applyAxisAngle(new THREE.Vector3(0, 1, 0), rig.rotation.y).multiplyScalar(SCALE);
+    flyPose({ pos: new THREE.Vector3(p.x - head.x, api.floorY(), p.z - head.z), yaw: rig.rotation.y });
+    drawMenu();
+  }
+  function setWalk(on) {
+    walk = !!on;
+    try { localStorage.setItem("whitespace:xr-move", walk ? "walk" : "fly"); } catch {}
+    // (to the floor, when walking starts: below where you are)
+    if (walk && session && rig.position.y > api.floorY() + 0.05) { settle(); backStack.push(pose()); flyPose({ pos: rig.position.clone().setY(api.floorY()), yaw: rig.rotation.y }); }
+    drawMenu();
+  }
   // (Back past where a room was entered: out of the room, to where you stood; with nothing to go back to inside a room
   //  entered before the headset, out of it to the view of everything)
   function goBack() {
+    settle();
     const cur = api.depth();
     while (backStack.length && backStack.at(-1).depth > cur) backStack.pop();
     const v = backStack.at(-1)?.depth === cur ? backStack.pop() : null;
@@ -77,6 +138,7 @@ export function setupXR(api) {
     drawMenu();
   }
   const goForward = () => {
+    settle();
     const v = fwdStack.pop();
     if (v && v.depth === api.depth()) { backStack.push(pose()); flyPose(v); } else fwdStack.length = 0;
     drawMenu();
@@ -263,11 +325,11 @@ export function setupXR(api) {
   }
 
   // ---------------------------------------------------------------- the wrist menu (left controller)
-  const MW = 512, MH = 368;
+  const MW = 512, MH = 484;
   const mcanvas = Object.assign(document.createElement("canvas"), { width: MW, height: MH });
   const mtex = new THREE.CanvasTexture(mcanvas);
   mtex.colorSpace = THREE.SRGBColorSpace;
-  const menu = new THREE.Mesh(new THREE.PlaneGeometry(0.2, 0.144), new THREE.MeshBasicMaterial({ map: mtex, side: THREE.DoubleSide, transparent: true }));
+  const menu = new THREE.Mesh(new THREE.PlaneGeometry(0.2, (0.2 * MH) / MW), new THREE.MeshBasicMaterial({ map: mtex, side: THREE.DoubleSide, transparent: true }));
   menu.position.set(0, 0.07, -0.02);
   menu.rotation.x = -Math.PI / 4;
   menu.renderOrder = 21;
@@ -280,7 +342,8 @@ export function setupXR(api) {
     menuButtons = [];
     const tours = api.tours().length, now = api.tourNow();
     const items = [["← Back", "back", backStack.length > 0 || api.inRoom()], ["Forward →", "forward", fwdStack.length > 0], ["See all", "home", true], ["Run all", "runall", true],
-      [now ? "Next stop ▶" : "Tour", "tour", tours > 0 || !!now], ["Exit VR", "exit", true]];
+      [now ? "Next stop ▶" : "Tour", "tour", tours > 0 || !!now], [chatOpen ? "Chat ✕" : "Chat", "chat", !!api.chat()],
+      [walk ? "Fly: off" : "Fly: on", "fly", true], ["Exit VR", "exit", true]];
     const bw = (MW - 3 * 20) / 2, bh = 96;
     items.forEach(([label, act, on], k) => {
       const x = 20 + (k % 2) * (bw + 20), y = 20 + Math.floor(k / 2) * (bh + 20), w = bw;
@@ -299,102 +362,131 @@ export function setupXR(api) {
     else if (act === "runall") api.runAll();
     else if (act === "tour" && (api.tours().length || api.tourNow())) tour(1);
     else if (act === "exit") session?.end();
+    else if (act === "chat" && api.chat()) openChat(!chatOpen);
+    else if (act === "fly") setWalk(!walk);
   }
 
   // ---------------------------------------------------------------- the agent's chat (a space with an agent)
-  // A panel below your view, turned to you, following your head slowly: the conversation's last messages, the line
-  // you are typing (a Bluetooth keyboard types into it), and the next things to try as buttons to point at.
-  const CW = 1024, CH = 600;
+  // On your left wrist, above the menu, while it is open (the menu's Chat, or pointing at the agent): the conversation's
+  // last messages, the line you are typing, Send, and the next things to try as buttons to point at. Lower your wrist
+  // and it is out of your way. Typing goes into a text field of the page (Meta's WebXR keyboard: focusing a text field
+  // shows the headset's own keyboard, with its microphone for dictation; a Bluetooth keyboard types into it too).
+  const CW = 1024, CH = 600, CHAT_W = 0.3, CHAT_H = (0.3 * CH) / CW;
   const ccanvas = Object.assign(document.createElement("canvas"), { width: CW, height: CH });
   const ctex = new THREE.CanvasTexture(ccanvas);
   ctex.colorSpace = THREE.SRGBColorSpace;
-  const chatPanel = new THREE.Mesh(new THREE.PlaneGeometry(0.9 * SCALE, (0.9 * SCALE * CH) / CW), new THREE.MeshBasicMaterial({ map: ctex, side: THREE.DoubleSide, transparent: true }));
-  chatPanel.renderOrder = 19;
+  const chatPanel = new THREE.Mesh(new THREE.PlaneGeometry(CHAT_W, CHAT_H), new THREE.MeshBasicMaterial({ map: ctex, side: THREE.DoubleSide, transparent: true }));
+  chatPanel.renderOrder = 22;
   chatPanel.visible = false;
-  scene.add(chatPanel);
-  let typed = "", chatButtons = [], chatPlaced = false;
+  // (above the menu, in its tilted plane)
+  {
+    const up = new THREE.Vector3(0, Math.cos(Math.PI / 4), -Math.sin(Math.PI / 4)), gap = (0.2 * MH) / MW / 2 + CHAT_H / 2 + 0.012;
+    chatPanel.position.copy(menu.position).addScaledVector(up, gap);
+    chatPanel.rotation.x = -Math.PI / 4;
+  }
+  const field = Object.assign(document.createElement("input"), { type: "text", autocomplete: "off", ariaLabel: "Your message to the agent" });
+  field.style.cssText = "position:fixed;left:0;top:0;width:2px;height:2px;opacity:0;border:0;padding:0;font-size:16px;z-index:-1";
+  field.tabIndex = -1;
+  field.maxLength = 500;
+  document.body.appendChild(field);
+  let typed = "", chatButtons = [], chatOpen = false;
+  field.addEventListener("input", () => { typed = field.value.slice(0, 500); drawChat(); });
+  field.addEventListener("keydown", (e) => { if (e.key === "Enter") { e.preventDefault(); chatSend(field.value); } });
+  const systemKeyboard = () => !!session?.isSystemKeyboardSupported;
+  function openChat(on) {
+    chatOpen = !!on && !!api.chat() && !!session;
+    typed = ""; field.value = "";
+    if (chatOpen && systemKeyboard()) field.focus(); else field.blur();
+    drawChat();
+    drawMenu();
+  }
   function drawChat() {
     const chat = api.chat();
-    chatPanel.visible = !!(session && chat);
+    if (chatOpen && (!chat || !session)) { chatOpen = false; field.blur(); }
+    chatPanel.visible = chatOpen;
     if (!chatPanel.visible) return;
     const g = ccanvas.getContext("2d"), T = api.theme(), dark = T.fg !== "#1f2328";
-    const C = dark ? { bg: "rgba(22,27,34,0.94)", fg: "#e6edf3", muted: "#8d96a0", you: "#1d3557", btn: "#21262d" } : { bg: "rgba(255,255,255,0.95)", fg: "#1f2328", muted: "#57606a", you: "#dbe8fd", btn: "#eef1f5" };
+    const C = dark ? { bg: "rgba(22,27,34,0.96)", fg: "#e6edf3", muted: "#8d96a0", btn: "#21262d" } : { bg: "rgba(255,255,255,0.97)", fg: "#1f2328", muted: "#57606a", btn: "#eef1f5" };
     g.clearRect(0, 0, CW, CH);
     g.fillStyle = C.bg; g.beginPath(); g.roundRect(0, 0, CW, CH, 30); g.fill();
     const pad = 32;
     // (the last messages, the newest at the bottom)
-    g.font = "28px system-ui, sans-serif";
+    g.font = "30px system-ui, sans-serif";
     const rows = [];
     for (const m of chat.messages.slice(-4)) {
-      const text = texToText(String(m.text)).replace(/\*\*|`/g, "");
-      const words = text.split(/\s+/);
+      const words = texToText(String(m.text)).replace(/\*\*|`/g, "").split(/\s+/);
       let row = (m.from === "you" ? "You: " : "Agent: ");
       const mine = [];
       for (const w of words) { const t = row + w + " "; if (g.measureText(t).width > CW - 2 * pad && row.trim()) { mine.push(row); row = w + " "; } else row = t; }
       mine.push(row);
       rows.push(...mine.map((r) => ({ r, you: m.from === "you" })));
     }
-    let y = pad + 26;
-    for (const { r, you } of rows.slice(-9)) { g.fillStyle = you ? "#1f6feb" : C.fg; g.fillText(r, pad, y); y += 36; }
+    let y = pad + 28;
+    for (const { r, you } of rows.slice(-7)) { g.fillStyle = you ? "#1f6feb" : C.fg; g.fillText(r, pad, y); y += 38; }
     // (the line being typed)
-    const lineY = CH - 190;
-    g.fillStyle = C.btn; g.beginPath(); g.roundRect(pad - 8, lineY - 34, CW - 2 * pad + 16, 52, 12); g.fill();
-    g.fillStyle = typed ? C.fg : C.muted; g.font = "28px system-ui, sans-serif";
-    g.fillText(typed ? typed + "▏" : chat.busy ? "The agent is working…" : "Type on your keyboard, or point at a suggestion", pad, lineY);
-    // (the suggestions, and Send)
+    const lineY = CH - 196;
+    g.fillStyle = C.btn; g.beginPath(); g.roundRect(pad - 8, lineY - 36, CW - 2 * pad + 16, 54, 12); g.fill();
+    g.fillStyle = typed ? C.fg : C.muted; g.font = "30px system-ui, sans-serif";
+    g.fillText(typed ? typed + "▏" : chat.busy ? "The agent is working…" : systemKeyboard() ? "Type or speak (the keyboard's microphone), or point at a suggestion" : "Type, or point at a suggestion", pad, lineY, CW - 2 * pad);
+    // (Send, the keyboard again, Close; and the suggestions)
     chatButtons = [];
-    let x = pad, by = CH - 120;
+    let x = pad, by = CH - 126;
     const button = (label, act, primary = false) => {
-      g.font = "600 26px system-ui, sans-serif";
+      g.font = "600 28px system-ui, sans-serif";
       const w = Math.min(CW - 2 * pad, g.measureText(label).width + 40);
       if (x + w > CW - pad) { x = pad; by += 62; }
-      if (by > CH - 50) return;
-      g.fillStyle = primary ? "#1f6feb" : C.btn; g.beginPath(); g.roundRect(x, by, w, 50, 14); g.fill();
-      g.fillStyle = primary ? "#ffffff" : C.fg; g.fillText(label, x + 20, by + 34, w - 40);
-      chatButtons.push({ x, y: by, w, h: 50, act });
+      if (by > CH - 52) return;
+      g.fillStyle = primary ? "#1f6feb" : C.btn; g.beginPath(); g.roundRect(x, by, w, 52, 14); g.fill();
+      g.fillStyle = primary ? "#ffffff" : C.fg; g.fillText(label, x + 20, by + 36, w - 40);
+      chatButtons.push({ x, y: by, w, h: 52, act });
       x += w + 12;
     };
     if (typed) button("Send ▶", { send: typed }, true);
-    for (const s of chat.suggestions.slice(0, typed ? 1 : 2)) button(s.length > 46 ? s.slice(0, 44) + "…" : s, { send: s });
+    if (systemKeyboard()) button("⌨ 🎤", { keyboard: true });
+    button("✕", { close: true });
+    for (const s of chat.suggestions.slice(0, typed ? 1 : 2)) button(s.length > 40 ? s.slice(0, 38) + "…" : s, { send: s });
     ctex.needsUpdate = true;
-  }
-  function placeChat(snap = false) {
-    // (below and in front of your head; it follows your turns, gently)
-    const head = camera.getWorldPosition(new THREE.Vector3());
-    const dir = camera.getWorldDirection(new THREE.Vector3()).setY(0);
-    if (dir.lengthSq() < 1e-6) dir.set(0, 0, -1);
-    dir.normalize();
-    const want = head.clone().addScaledVector(dir, 0.75 * SCALE).add(new THREE.Vector3(0, -0.42 * SCALE, 0));
-    // (gently when near; quickly when far behind, after a flight)
-    if (snap || !chatPlaced) chatPanel.position.copy(want); else chatPanel.position.lerp(want, chatPanel.position.distanceTo(want) > 0.5 * SCALE ? 0.2 : 0.04);
-    chatPlaced = true;
-    chatPanel.lookAt(head);
   }
   function chatSend(text) {
     const chat = api.chat();
-    if (!chat || !text.trim()) return;
-    chat.send(text);
-    typed = "";
-    drawChat();
+    if (!chat || !String(text).trim()) return;
+    chat.send(String(text));
+    // (sent: the chat folds away, the keyboard goes, and you watch the agent work; its answer is in its bubble)
+    openChat(false);
   }
-  // (the keyboard, in a headset with an agent: printable keys, Backspace, Enter)
+  // (a keyboard whose keys reach the page while the text field isn't focused (no system keyboard: an emulator, a
+  //  desktop browser's WebXR): printable keys, Backspace, Enter)
   addEventListener("keydown", (e) => {
-    if (!session || !api.chat() || e.altKey || e.ctrlKey || e.metaKey || e.isComposing || /^(INPUT|TEXTAREA|SELECT)$/.test(document.activeElement?.tagName ?? "")) return;
+    if (!session || !chatOpen || document.activeElement === field || e.altKey || e.ctrlKey || e.metaKey || e.isComposing || /^(INPUT|TEXTAREA|SELECT)$/.test(document.activeElement?.tagName ?? "")) return;
     if (e.key === "Enter") { chatSend(typed); e.preventDefault(); return; }
     if (e.key === "Backspace") { typed = typed.slice(0, -1); drawChat(); e.preventDefault(); return; }
-    if (e.key === "Escape") { typed = ""; drawChat(); return; }
-    if (e.key.length === 1 && !e.ctrlKey && !e.metaKey && typed.length < 500) { typed += e.key; drawChat(); e.preventDefault(); }
+    if (e.key === "Escape") { openChat(false); return; }
+    if (e.key.length === 1 && typed.length < 500) { typed += e.key; drawChat(); e.preventDefault(); }
   });
 
   // ---------------------------------------------------------------- pointing and selecting
+  let figOf = null, figParts = [];
   function hit(c) {
     ray.setFromXRController(c);
-    const targets = [...(panel.visible ? [panel] : []), ...(chatPanel.visible ? [chatPanel] : []), ...(menu.parent && menu.parent !== c ? [menu] : []), ...api.pickables()];
-    return ray.intersectObjects(targets, false)[0] ?? null;
+    const own = (m) => m.parent && m.parent !== c; // (the wrist's panels: pointed at by the other hand)
+    const targets = [...(panel.visible ? [panel] : []), ...(chatPanel.visible && own(chatPanel) ? [chatPanel] : []), ...(own(menu) ? [menu] : []), ...api.pickables()];
+    let h = ray.intersectObjects(targets, false)[0] ?? null;
+    // (the agent: its chat)
+    const fig = api.agentFigure();
+    // (its solid parts only: its speech bubble is a sprite, which a controller's ray can't test (no camera); listed
+    //  once per figure)
+    if (fig !== figOf) { figOf = fig; figParts = []; fig?.traverse((m) => { if (m.isMesh) figParts.push(m); }); }
+    const hf = figParts.length ? ray.intersectObjects(figParts, false)[0] : null;
+    if (hf && (!h || hf.distance < h.distance)) h = { ...hf, agent: true };
+    // (nothing else: the floor, to step to, when walking)
+    if (!h && walk && api.ground().visible) { const hg = ray.intersectObject(api.ground(), false)[0]; if (hg && hg.distance < 120 * SCALE) h = { ...hg, floor: true }; }
+    return h;
   }
   function onSelect(c) {
     const h = hit(c);
     if (!h) return;
+    if (h.agent) { openChat(!chatOpen); return; }
+    if (h.floor) { teleport(h.point); return; }
     if (h.object === menu) {
       const px = h.uv.x * MW, py = (1 - h.uv.y) * MH;
       const b = menuButtons.find((b) => px >= b.x && px <= b.x + b.w && py >= b.y && py <= b.y + b.h);
@@ -405,6 +497,8 @@ export function setupXR(api) {
       const px = h.uv.x * CW, py = (1 - h.uv.y) * CH;
       const b = chatButtons.find((b) => px >= b.x && px <= b.x + b.w && py >= b.y && py <= b.y + b.h);
       if (b?.act.send) chatSend(b.act.send);
+      else if (b?.act.keyboard) { field.blur(); field.focus(); } // (again, after the keyboard was put away)
+      else if (b?.act.close) openChat(false);
       return;
     }
     if (h.object === panel) {
@@ -422,12 +516,14 @@ export function setupXR(api) {
   function step(dt) {
     if (!session) return;
     stepFlight();
-    if (chatPanel.visible) placeChat();
     backHeld = false;
+    let marked = false;
     for (const c of controllers) {
       const h = c.userData.source ? hit(c) : null;
       c.userData.line.scale.z = h ? h.distance / SCALE : 30;
-      const nd = h && h.object !== panel && h.object !== chatPanel ? h.object.userData.node ?? null : null;
+      // (where a step would put you)
+      if (h?.floor && !marked) { mark.position.copy(h.point).setY(api.floorY() + 0.02); marked = true; }
+      const nd = h && !h.agent && !h.floor && h.object !== panel && h.object !== chatPanel ? h.object.userData.node ?? null : null;
       if (nd !== c.userData.hovered) {
         if (c.userData.hovered) api.glow(c.userData.hovered, 0);
         c.userData.hovered = nd;
@@ -438,17 +534,21 @@ export function setupXR(api) {
     const fwd = camera.getWorldDirection(new THREE.Vector3()).setY(0);
     if (fwd.lengthSq() < 1e-6) fwd.set(0, 0, -1);
     fwd.normalize();
+    mark.visible = marked;
     const right = new THREE.Vector3().crossVectors(fwd, new THREE.Vector3(0, 1, 0));
+    let moving = false;
     for (const src of session.inputSources) {
       const gp = src.gamepad;
       if (!gp || gp.axes.length < 4) continue;
       const ax = Math.abs(gp.axes[2]) > 0.15 ? gp.axes[2] : 0, ay = Math.abs(gp.axes[3]) > 0.15 ? gp.axes[3] : 0;
       const fast = gp.buttons[1]?.pressed ? 4 : 1, speed = 2.5 * SCALE * fast * dt;
-      if ((ax || ay) && flight) flight = null; // (your own move wins over a flight)
+      if ((ax || ay) && flight) { if (flight.blink) settle(); else flight = null; } // (your own move wins over a flight)
       if (src.handedness === "left") {
         rig.position.addScaledVector(fwd, -ay * speed).addScaledVector(right, ax * speed);
+        if (ax || ay) moving = true;
       } else if (src.handedness === "right") {
-        rig.position.y -= ay * speed;
+        // (up and down only when flying: walking keeps you on your floor)
+        if (!walk) rig.position.y -= ay * speed;
         // (turning in 30° steps, about where you stand)
         if (Math.abs(gp.axes[2]) > 0.7 && turnArmed) {
           turnArmed = false;
@@ -463,6 +563,17 @@ export function setupXR(api) {
     // (B or Y: back, once per press)
     if (backHeld && backArmed) goBack();
     backArmed = !backHeld;
+    // (the vignette while walking; the disc under your feet above the floor)
+    vig += ((moving && walk ? 1 : 0) - vig) * Math.min(1, dt * 8);
+    vignette.visible = vig > 0.02;
+    vignette.material.opacity = 0.8 * vig;
+    // (the floor moved (another room, a new object lower down): standing on it, you stay on it)
+    const fy = api.floorY();
+    if (walk && !flight && Math.abs(rig.position.y - lastFloor) < 1e-3 && fy !== lastFloor) rig.position.y = fy;
+    lastFloor = fy;
+    const feet = rig.position.y;
+    disc.visible = walk && feet > api.floorY() + 0.3 * SCALE;
+    if (disc.visible) disc.position.set(head.x, feet + 0.01, head.z);
   }
 
   // ---------------------------------------------------------------- entering and leaving
@@ -480,17 +591,20 @@ export function setupXR(api) {
     rig.rotation.set(0, Math.atan2(-dir.x, -dir.z), 0);
     rig.scale.setScalar(SCALE);
     controls.enabled = false;
-    if (m === "immersive-ar") { scene.background = null; scene.fog = null; }
+    if (m === "immersive-ar") { scene.background = null; scene.fog = null; api.ground().visible = false; }
     s.addEventListener("end", leave);
     await renderer.xr.setSession(s);
     session = s; mode = m;
     api.changed(true, m);
-    chatPlaced = false;
+    chatOpen = false;
     drawChat();
+    drawMenu();
   }
   function leave() {
     session = null; mode = null; flight = null; backStack.length = 0; fwdStack.length = 0;
-    chatPanel.visible = false; typed = "";
+    chatOpen = false; chatPanel.visible = false; typed = ""; field.value = ""; field.blur();
+    fader.visible = false; vignette.visible = false; disc.visible = false; mark.visible = false; vig = 0;
+    api.ground().visible = true;
     close();
     for (const c of controllers) { if (c.userData.hovered) api.glow(c.userData.hovered, 0); c.userData.hovered = null; }
     rig.position.set(0, 0, 0); rig.rotation.set(0, 0, 0); rig.scale.setScalar(1);
@@ -509,9 +623,14 @@ export function setupXR(api) {
     press, open: (nd) => open(nd), rig, menuPress, tour, roomChanged,
     // (the agent's chat: redrawn when it changes; and a flight to what the agent made)
     chatChanged: () => drawChat(),
+    openChat: (on) => openChat(on),
+    get chatOpen() { return chatOpen; },
+    get walking() { return walk; },
+    setWalk: (on) => setWalk(on),
+    teleport: (x, z) => teleport(new THREE.Vector3(x, 0, z)),
     look(nd, dist) { if (!session) return; const v = api.viewOf(nd, dist); flyRig(v.to, v.toT, 700); },
     chatSend: (t) => chatSend(t),
-    get chat() { return chatPanel.visible ? { typed, buttons: chatButtons.map((b) => b.act.send) } : null; },
+    get chat() { return chatPanel.visible ? { typed, buttons: chatButtons.filter((b) => b.act.send).map((b) => b.act.send) } : null; },
     get history() { return { back: backStack.length, forward: fwdStack.length, flying: !!flight }; },
   };
 }

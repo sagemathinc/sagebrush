@@ -227,13 +227,26 @@ ok(await until(`!whitespace.xr.presenting`), "and Exit VR leaves");
 await send("Page.navigate", { url: `http://127.0.0.1:${port}/space/?space=agent-lab.space.json` });
 ok(await until(`!!whitespace.agent && whitespace.agent.messages.length > 0 && !document.querySelector('#vr').hidden`, 30000), "the agent lab loads, and the agent greets");
 await ev(`document.querySelector('#vr').click(), true`);
-ok(await until(`whitespace.xr.presenting && !!whitespace.xr.chat`, 10000), "in VR the chat panel is there", await ev(`whitespace.xr.chat`));
+ok(await until(`whitespace.xr.presenting`, 10000) && (await ev(`whitespace.xr.chat`)) === null, "in VR the chat is folded away at first");
+// (pointing at the agent and pulling the trigger: its chat, on the left wrist)
+await ev(`(() => { const W = whitespace, rig = W.xr.rig, V = rig.position.constructor, Q = rig.quaternion.constructor;
+  const t = rig.worldToLocal(W.agentFigure.getWorldPosition(new V()).add(new V(0, 1.8, 0)));
+  const c = window.__xrDevice.controllers.right, from = new V(c.position.x, c.position.y, c.position.z);
+  const q = new Q().setFromUnitVectors(new V(0, 0, -1), t.sub(from).normalize()); c.quaternion.set(q.x, q.y, q.z, q.w); return true; })()`);
+await sleep(300);
+await ev(`window.__xrDevice.controllers.right.updateButtonValue('trigger', 1), true`);
+await sleep(200);
+await ev(`window.__xrDevice.controllers.right.updateButtonValue('trigger', 0), true`);
+ok(await until(`!!whitespace.xr.chat`, 5000), "pointing at the agent opens its chat", await ev(`whitespace.xr.chat`));
 const sugg = await ev(`whitespace.xr.chat.buttons`);
 ok(sugg.length >= 1 && /plot/i.test(sugg[0]), "it offers a suggestion to point at", sugg);
 await ev(`whitespace.xr.chatSend(whitespace.xr.chat.buttons[0]), true`);
+ok(await until(`whitespace.xr.chat === null`, 3000), "sent: the chat folds away while the agent works");
 ok(await until(`whitespace.agent.messages.some((m) => /conductor is 389 and its rank is 2/.test(m.text)) && !whitespace.agent.busy`, 90000), "pointing at it: the agent plots 389a, computed by the engine", await ev(`whitespace.agent.messages.slice(-1)[0]`));
 ok(await ev(`!!whitespace.space.nodes.find((n) => n.id === 'agent:plot')?.svg`), "the plot is an object in the space, with its figure");
-// (typing on the keyboard, as a Bluetooth one does in a headset)
+// (typing on the keyboard, as a Bluetooth one does in a headset; the chat opened from the wrist menu)
+await ev(`whitespace.xr.menuPress('chat'), true`);
+ok(await until(`!!whitespace.xr.chat`, 3000), "the wrist menu's Chat opens it");
 for (const ch of "show its complex points in 3d") await send("Input.dispatchKeyEvent", { type: "keyDown", key: ch, text: ch });
 ok((await ev(`whitespace.xr.chat.typed`)) === "show its complex points in 3d", "the keyboard types into the chat", await ev(`whitespace.xr.chat.typed`));
 await send("Input.dispatchKeyEvent", { type: "keyDown", key: "Enter", code: "Enter", windowsVirtualKeyCode: 13 });
@@ -241,6 +254,26 @@ ok(await until(`whitespace.agent.messages.some((m) => /two square roots/.test(m.
 ok(await ev(`!!whitespace.space.nodes.find((n) => n.id === 'agent:complex')?.scene`), "a 3D object, to take in your hands");
 await sleep(800);
 await shot("vr-agent");
+// ---- walking: the default; a step to the floor is a blink (a fade), and you stand on the floor
+ok(await ev(`whitespace.xr.walking`), "walking is the default");
+const floorY = await ev(`whitespace.floorY`);
+await ev(`whitespace.xr.teleport(whitespace.xr.rig.position.x + 20, whitespace.xr.rig.position.z + 5), true`);
+ok(await until(`whitespace.xr.history.flying === false`, 3000) && Math.abs((await ev(`whitespace.xr.rig.position.y`)) - floorY) < 1e-6, "a step to the floor puts your feet on it", { y: await ev(`whitespace.xr.rig.position.y`), floorY });
+await sleep(400);
+await shot("vr-floor");
+const y0 = await ev(`whitespace.xr.rig.position.y`);
+await ev(`window.__xrDevice.controllers.right.updateAxes('thumbstick', 0, -1), true`);
+await sleep(500);
+await ev(`window.__xrDevice.controllers.right.updateAxes('thumbstick', 0, 0), true`);
+ok(Math.abs((await ev(`whitespace.xr.rig.position.y`)) - y0) < 1e-6, "walking: the right thumbstick doesn't lift you off the floor");
+await ev(`whitespace.xr.menuPress('fly'), true`);
+ok((await ev(`whitespace.xr.walking`)) === false, "Fly (wrist menu) turns flying on");
+await ev(`window.__xrDevice.controllers.right.updateAxes('thumbstick', 0, -1), true`);
+await sleep(500);
+await ev(`window.__xrDevice.controllers.right.updateAxes('thumbstick', 0, 0), true`);
+ok((await ev(`whitespace.xr.rig.position.y`)) > y0 + 1, "flying: the right thumbstick lifts you");
+await ev(`whitespace.xr.menuPress('fly'), true`);
+await until(`whitespace.xr.history.flying === false`, 3000);
 await ev(`whitespace.xr.menuPress('exit'), true`);
 ok(await until(`!whitespace.xr.presenting`), "and Exit VR");
 ok(errors.length === 0, "no page errors", errors.slice(0, 3));

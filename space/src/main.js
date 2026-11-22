@@ -66,6 +66,38 @@ addEventListener("resize", () => {
   renderer.setSize(innerWidth, innerHeight);
 });
 
+// ---------------------------------------------------------------- the ground
+// A floor below everything, a little under the lowest object, reaching to the horizon (the fog fades it): something to
+// stand on, which a person needs in a headset (src/xr.js walks on it and teleports along it), and a horizon on the screen.
+const groundTex = (() => {
+  const c = document.createElement("canvas");
+  c.width = c.height = 256;
+  return texture(c);
+})();
+groundTex.wrapS = groundTex.wrapT = THREE.RepeatWrapping;
+groundTex.repeat.set(400, 400);
+const ground = new THREE.Mesh(new THREE.PlaneGeometry(4000, 4000).rotateX(-Math.PI / 2), new THREE.MeshBasicMaterial({ map: groundTex, fog: true }));
+ground.name = "ground";
+ground.renderOrder = -1;
+scene.add(ground);
+function paintGround() {
+  // (a tile of 10 units with a line at its edge: light on the light theme, dark on the dark)
+  const c = groundTex.image, g = c.getContext("2d"), dark = T.fg !== "#1f2328";
+  g.fillStyle = dark ? "#171d26" : "#e2e7ee"; g.fillRect(0, 0, 256, 256);
+  g.strokeStyle = dark ? "#2a3442" : "#c6cfdb"; g.lineWidth = 5; g.strokeRect(0, 0, 256, 256);
+  groundTex.needsUpdate = true;
+}
+let floorY = -10;
+// (the floor: under the lowest object of the space, by 1.5 units, at least; centred under it)
+function placeGround() {
+  if (!space || !positions) return;
+  let lo = Infinity, cx = 0, cz = 0;
+  space.nodes.forEach((n, i) => { const [, h] = sizeOf(n); lo = Math.min(lo, positions[3 * i + 1] - h / 2); cx += positions[3 * i]; cz += positions[3 * i + 2]; });
+  if (!Number.isFinite(lo)) lo = 0;
+  floorY = lo - 1.5;
+  ground.position.set(cx / Math.max(1, space.nodes.length), floorY, cz / Math.max(1, space.nodes.length));
+}
+
 // ---------------------------------------------------------------- objects
 const hue = (s) => { let h = 0; for (const c of String(s)) h = (h * 31 + c.charCodeAt(0)) >>> 0; return (h % 360) / 360; };
 const groupColor = (nd) => new THREE.Color().setHSL(hue(nd.group ?? nd.kind), 0.5, 0.45);
@@ -493,6 +525,7 @@ function place(P) {
     if (arrowHeads) arrowHeads.instanceMatrix.needsUpdate = true;
   }
   if (landmarks.length) placeLandmarks();
+  placeGround();
 }
 
 // the positions written in the file (position, or position2d for the plane); the layout only for those without
@@ -730,6 +763,14 @@ renderer.domElement.addEventListener("pointerdown", (ev) => (down = [ev.clientX,
 renderer.domElement.addEventListener("pointerup", (ev) => {
   // (a click, not the end of a drag)
   if (!down || Math.hypot(ev.clientX - down[0], ev.clientY - down[1]) > 4) return;
+  // (the agent, clicked: its chat)
+  if (agent) {
+    mouse.set((ev.clientX / innerWidth) * 2 - 1, -(ev.clientY / innerHeight) * 2 + 1);
+    ray.setFromCamera(mouse, camera);
+    // (only if nothing nearer is in the way)
+    const ha = ray.intersectObject(agent.figure.group, true).find((h) => h.object.isMesh), ho = ray.intersectObjects(pickables, false)[0];
+    if (ha && (!ho || ha.distance < ho.distance)) { setChat(!chatOpen); return; }
+  }
   const nd = pick(ev);
   if (nd) openOverlay(nd); else closeOverlay();
 });
@@ -1171,6 +1212,16 @@ function linkNames(code, nd) {
 // The figure (src/agent.js) stands in the space; you talk to it in the chat (here a box at the bottom, in a headset a
 // panel below your view, src/xr.js); what it makes appears as objects, growing in where it works, each with its code.
 let agent = null; // ({ figure, demo, off })
+// (the chat, open or folded to a button: folded by default and while the agent works, so it isn't in the way of what
+//  you look at; the agent's answers are in its speech bubble too)
+let chatOpen = false, chatSeen = 0;
+const agentSaid = () => (agent ? agent.demo.messages.filter((m) => m.from !== "you").length : 0); // (what's new is the agent's)
+function setChat(open) {
+  chatOpen = !!open && !!agent;
+  $("#chat").hidden = !chatOpen;
+  $("#chatfab").hidden = !agent || chatOpen;
+  if (chatOpen) { chatSeen = agentSaid(); $("#chatfab").classList.remove("new"); renderChat(); setTimeout(() => $("#chatin").focus(), 0); }
+}
 const appearing = [];
 function placeNode(nd) {
   nd._out = []; nd._in = []; nd._file = { text: String(nd.text ?? "") };
@@ -1233,9 +1284,8 @@ async function startAgent() {
   });
   const off = demo.onChange(() => { renderChat(); xr.chatChanged(); });
   agent = { figure, demo, off };
-  $("#chat").hidden = false;
   document.body.classList.add("chatting");
-  renderChat();
+  setChat(false);
   setTimeout(() => agent?.demo === demo && demo.greet(), 900);
 }
 function stopAgent() {
@@ -1244,7 +1294,7 @@ function stopAgent() {
   scene.remove(agent.figure.group);
   dispose(agent.figure.group);
   agent = null;
-  $("#chat").hidden = true;
+  setChat(false);
   document.body.classList.remove("chatting");
   xr.chatChanged();
 }
@@ -1252,11 +1302,14 @@ function stopAgent() {
 function renderChat() {
   if (!agent) return;
   const d = agent.demo, log = $("#chatlog");
+  // (folded: a dot on the button when the agent has said something new)
+  if (!chatOpen) { $("#chatfab").classList.toggle("new", agentSaid() > chatSeen); return; }
+  chatSeen = agentSaid();
   log.innerHTML = d.messages.slice(-8).map((m) => `<div class="msg ${m.from}"><b>${m.from === "you" ? "You" : "Agent"}</b> <span class="md">${markdown(String(m.text), { remote: false })}</span></div>`).join("");
   typeset(log);
   log.scrollTop = log.scrollHeight;
   $("#chatchips").innerHTML = d.suggestions.slice(0, 3).map((s, k) => `<button type="button" data-k="${k}">${esc(s)}</button>`).join("");
-  for (const b of $("#chatchips").querySelectorAll("button")) b.onclick = () => d.send(d.suggestions[+b.dataset.k]);
+  for (const b of $("#chatchips").querySelectorAll("button")) b.onclick = () => { setChat(false); d.send(d.suggestions[+b.dataset.k]); };
   $("#chatin").placeholder = d.busy ? "The agent is working…" : "Ask the agent (try a suggestion below)";
 }
 $("#chatform").onsubmit = (e) => {
@@ -1264,8 +1317,12 @@ $("#chatform").onsubmit = (e) => {
   const v = $("#chatin").value.trim();
   if (!v || !agent) return;
   $("#chatin").value = "";
+  // (folded while the agent works: you watch it; its answer is in its bubble)
+  setChat(false);
   agent.demo.send(v);
 };
+$("#chatfab").onclick = () => setChat(true);
+$("#chatfold").onclick = () => setChat(false);
 // (speaking instead of typing, where the browser can: the Web Speech API)
 const Speech = window.SpeechRecognition || window.webkitSpeechRecognition;
 if (Speech) {
@@ -1274,7 +1331,7 @@ if (Speech) {
     const r = new Speech();
     r.lang = "en-US"; r.interimResults = false;
     $("#chatmic").classList.add("on");
-    r.onresult = (ev) => { const t = ev.results[0]?.[0]?.transcript; if (t && agent) agent.demo.send(t); };
+    r.onresult = (ev) => { const t = ev.results[0]?.[0]?.transcript; if (t && agent) { setChat(false); agent.demo.send(t); } };
     r.onend = () => $("#chatmic").classList.remove("on");
     r.onerror = () => $("#chatmic").classList.remove("on");
     r.start();
@@ -1439,6 +1496,7 @@ try { const w = localStorage.getItem("whitespace:overlay-width"); if (w) $("#ove
 function applyTheme() {
   const name = themeName();
   T = THEMES[name];
+  paintGround();
   document.documentElement.dataset.theme = name;
   $("#theme").textContent = "Theme: " + themeSetting[0].toUpperCase() + themeSetting.slice(1);
   scene.background.set(T.bg);
@@ -1515,7 +1573,7 @@ function stepFly(now) {
 }
 addEventListener("keydown", (e) => {
   // (in a headset with an agent here, the keyboard types to it: xr.js)
-  if (xr.presenting && agent && !e.altKey && !e.ctrlKey && !e.metaKey && !typing()) return;
+  if (xr.presenting && agent && xr.chatOpen && !e.altKey && !e.ctrlKey && !e.metaKey && !typing()) return;
   if (typing()) { if (e.key === "Escape") document.activeElement.blur(); return; }
   const k = e.key.toLowerCase();
   if (!e.altKey && !e.ctrlKey && !e.metaKey && (FLY[k] || k === "shift")) { held.add(k); if (FLY[k]) e.preventDefault(); return; }
@@ -1524,6 +1582,7 @@ addEventListener("keydown", (e) => {
   else if (e.key === "Escape") closeOverlay();
   else if (e.key === "Enter" && selected !== null && !$("#overlay").hidden && !/^(A|BUTTON)$/.test(document.activeElement?.tagName ?? "")) { const nd = space.nodes.find((n) => n.id === selected); if (enterKind(nd)) enterRoom(nd); }
   else if (e.key === "/") { e.preventDefault(); $("#q").focus(); }
+  else if ((e.key === "t" || e.key === "T") && agent) { e.preventDefault(); setChat(!chatOpen); }
   else if (e.key === "b" || e.key === "B" || e.key === "Backspace" || (e.altKey && e.key === "ArrowLeft")) back();
   else if (e.key === "f" || e.key === "F" || (e.altKey && e.key === "ArrowRight")) forward();
   else if (e.key === "h" || e.key === "H") space && frame(positions, true);
@@ -1623,6 +1682,10 @@ const xr = setupXR({
   focus: () => focusNode,
   // (the agent's chat, in a headset: null without one)
   chat: () => (agent ? agent.demo : null),
+  agentFigure: () => (agent ? agent.figure.group : null),
+  // (the floor: its mesh, to teleport along, and its height)
+  ground: () => ground,
+  floorY: () => floorY,
   fullText: (nd) => fullText(nd),
   linkLabels: (nd) => linkLabels(nd),
   enter: (nd) => enterRoom(nd),
@@ -1674,5 +1737,7 @@ window.whitespace = {
   get room() { return scopes.length ? roomPath() : null; },
   // (the agent here, if any: its chat)
   get agent() { return agent ? agent.demo : null; },
+  get agentFigure() { return agent ? agent.figure.group : null; },
+  get floorY() { return floorY; },
   xr,
 };
