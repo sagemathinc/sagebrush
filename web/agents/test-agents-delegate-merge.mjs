@@ -261,7 +261,15 @@ try {
     await H.call("workspace.write", { path: "/" + path, content: edit, base: now.rev });
     await P.ev(`(window.__mergeSeam = null, window.__seamGo(), 1)`);
     await P.until(`!!document.querySelector('dialog.proposal[open] .merge-slot .incomplete')`, 20000).catch(() => {});
-    const after = await read("/" + path).catch(() => null);
+    // (read back as the agent reads: under sync's journal a read can wait on the notebook's writer for a moment, so
+    //  it is given the time a slow runner needs, and its error, if any, is shown)
+    let after = null;
+    for (let i = 0; i < 3 && !after; i++) {
+      if (i) await sleep(1000);
+      const back = await H.call("workspace.read", { path: "/" + path }, 30000).catch((e) => ({ error: String(e) }));
+      after = back.result ?? null;
+      if (!after) console.log(`  ${path} read back (try ${i + 1}):`, JSON.stringify(back.error ?? back).slice(0, 300));
+    }
     ok(after && JSON.stringify(after.content).includes(label) && (await status()) === "Merge incomplete" && (await chip(T)) === "Merge incomplete", `${path}: an edit after Merge checked it, before its removal: not removed, the edit kept, Merge incomplete`, { after: JSON.stringify(after?.content ?? null).slice(0, 200), status: await status(), chip: await chip(T) });
     await sleep(300);
     ok(!H.got.some((m) => m.method === "tasks.merged" && m.params.task === T.task) && !/Merged/.test(await P.ev(`document.querySelector('#toast').textContent`)), `${path}: no tasks.merged, and no "Merged" said`);
