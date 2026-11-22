@@ -1105,6 +1105,9 @@ jobs:
       - name: the terminal's long-line pages copy as one line in WebKit (board's B-LL-4)
         timeout-minutes: 3
         run: BROWSER=webkit PLAYWRIGHT="$RUNNER_TEMP/pw" node web/shell/test-panel-pages-copy.mjs
+      - name: the LaTeX source pane's textarea and the lines behind it wrap alike in WebKit (the caret where the text goes)
+        timeout-minutes: 3
+        run: BROWSER=webkit PLAYWRIGHT="$RUNNER_TEMP/pw" node web/latex/test-latex-webkit-wrap.mjs
       - name: "Playwright's Firefox, pinned"
         timeout-minutes: 10
         run: cd "$RUNNER_TEMP/pw" && npx playwright install --with-deps firefox
