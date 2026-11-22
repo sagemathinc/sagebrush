@@ -18,6 +18,7 @@ Jupyter); on the command line show() writes an SVG file and prints its path.
 
 import math
 import os
+from _graphics import image_rgba as _image_rgba, png_url as _png_url, rgb_bytes as _rgb
 from _graphics import (Panel, Line, Points, Polygon, Rects, Text, Arrow, AxLine, Image, render_svg, render_frame,
                        show as _show, save_svg, TAB10, to_color as _css, colormap, describe_svg, mpl_ticks, DASHES,
                        LEGEND_LOCS as _LEGEND_LOCS)
@@ -839,26 +840,7 @@ class Axes:
                 vmax = getattr(norm, "vmax", None) if vmax is None else vmax
             lo = float(vmin) if vmin is not None else (float(finite.min()) if finite.size else 0.0)
             hi = float(vmax) if vmax is not None else (float(finite.max()) if finite.size else 1.0)
-            name = cmap or "viridis"
-            from _graphics import cmap_table
-            tab = cmap_table(name) if isinstance(name, str) else None
-            if tab is not None:
-                # (matplotlib's table of N colors, each value times 255 truncated to a byte, as it renders)
-                n = len(tab)
-                lut = np.zeros((n + 1, 4), dtype=np.uint8)
-                for i in builtin_range(n):
-                    lut[i] = tuple(int(v * 255) for v in tab[i]) + (255,)
-            else:
-                n = 256
-                lut = np.zeros((257, 4), dtype=np.uint8)
-                for i in builtin_range(256):
-                    r, g, b = _rgb(colormap(i / 255, name))
-                    lut[i] = (r, g, b, 255)
-            # (matplotlib: index floor(N t), t clipped to [0, 1]; NaN, the "bad" color, transparent)
-            t = (F - lo) / (hi - lo) if hi > lo else np.zeros(F.shape) + 0.5
-            idx = np.clip(np.floor(np.where(np.isfinite(t), t, 0.0) * n), 0, n - 1).astype(int)
-            idx = np.where(np.isnan(F), n, idx)
-            px = lut[idx]
+            px = _image_rgba(F, cmap or "viridis", lo, hi)
         if alpha is not None:
             px[:, :, 3] = (px[:, :, 3].astype(float) * float(alpha)).astype(np.uint8)
         sharp = interpolation in (None, "nearest", "none", "antialiased", "auto")
@@ -1959,37 +1941,6 @@ class ContourSet:
 
     def get_clim(self):
         return (self.levels[0], self.levels[-1])
-
-
-def _rgb(c):
-    c = to_color(c) or "#000000"
-    if c.startswith("#") and len(c) >= 7:
-        return (int(c[1:3], 16), int(c[3:5], 16), int(c[5:7], 16))
-    if c.startswith("rgb"):
-        v = [int(float(t)) for t in c[c.index("(") + 1:c.index(")")].split(",")[:3]]
-        return tuple(v)
-    return (0, 0, 0)
-
-
-def _png_url(pixels, palette=None):
-    """A data: URL of a PNG: an (h, w, 4) uint8 array of colors, or an (h, w)
-    uint8 array of indices into `palette` [(r, g, b, a), ...]."""
-    import zlib, struct, base64
-    h, w = int(pixels.shape[0]), int(pixels.shape[1])
-    bpp = 1 if palette is not None else 4
-    raw, row = pixels.tobytes(), w * bpp
-    data = b"".join(b"\x00" + raw[i * row:(i + 1) * row] for i in builtin_range(h))
-
-    def chunk(t, d):
-        return struct.pack(">I", len(d)) + t + d + struct.pack(">I", zlib.crc32(t + d) & 0xFFFFFFFF)
-    if palette is not None:
-        head = chunk(b"IHDR", struct.pack(">IIBBBBB", w, h, 8, 3, 0, 0, 0))
-        head += chunk(b"PLTE", bytes([v for c in palette for v in c[:3]]))
-        head += chunk(b"tRNS", bytes([c[3] for c in palette]))
-    else:
-        head = chunk(b"IHDR", struct.pack(">IIBBBBB", w, h, 8, 6, 0, 0, 0))
-    png = b"\x89PNG\r\n\x1a\n" + head + chunk(b"IDAT", zlib.compress(data, 9)) + chunk(b"IEND", b"")
-    return "data:image/png;base64," + base64.b64encode(png).decode("ascii")
 
 
 class Colorbar:

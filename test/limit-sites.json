@@ -14959,10 +14959,20 @@
   "owner": "Sage graphics (@sagebrush-matlab)",
   "reason": "xmax/ymax are a figure's axis limits (the data's ranges kept for an aspect ratio), not a cap: nothing is refused"
  },
+ "lib/sage_plot.py :: Graphics._panel :: lims = [float(o[k]) if o.get(k) is not None else float(v) for k, v in zip((\"xmin\", \"xmax\", \"ymin\", \"ymax\"), bb)] #0": {
+  "class": "none",
+  "owner": "Sage graphics (@sagebrush-sage2)",
+  "reason": "vmin/vmax are the colormap's range and xmin/xmax/ymin/ymax a figure's box (matrix_plot, its colorbar and integer ticks), not caps: nothing is refused"
+ },
  "lib/sage_plot.py :: Graphics._panel :: p.update(xmin=xa, xmax=xb, ymin=ya, ymax=yb, fit_aspect=True) #0": {
   "class": "none",
   "owner": "Sage graphics (@sagebrush-matlab)",
   "reason": "xmax/ymax are a figure's axis limits (the data's ranges kept for an aspect ratio), not a cap: nothing is refused"
+ },
+ "lib/sage_plot.py :: Graphics._svg :: xmin=0.0, xmax=1.0, ymin=lo, ymax=hi, margins=0, xticks=[], yaxis_side=\"right\", frame=True) #0": {
+  "class": "none",
+  "owner": "Sage graphics (@sagebrush-sage2)",
+  "reason": "vmin/vmax are the colormap's range and xmin/xmax/ymin/ymax a figure's box (matrix_plot, its colorbar and integer ticks), not caps: nothing is refused"
  },
  "lib/sage_plot.py :: Graphics.get_minmax_data :: return {\"xmin\": -1, \"xmax\": 1, \"ymin\": -1, \"ymax\": 1} #0": {
   "class": "none",
@@ -15059,6 +15069,36 @@
   "class": "none",
   "owner": "python (@sagebrush-python)",
   "reason": "the exception a file object without a descriptor raises (Sagebrush's), which skips the fsync; matched text that bounds nothing"
+ },
+ "lib/sage_plot_fields.py ::  :: \"vmax\": \"The maximum value\", #0": {
+  "class": "none",
+  "owner": "Sage graphics (@sagebrush-sage2)",
+  "reason": "vmin/vmax are the colormap's range and xmin/xmax/ymin/ymax a figure's box (matrix_plot, its colorbar and integer ticks), not caps: nothing is refused"
+ },
+ "lib/sage_plot_fields.py :: matrix_plot :: \"subdivisions\": False, \"vmax\": None, \"vmin\": None} #0": {
+  "class": "none",
+  "owner": "Sage graphics (@sagebrush-sage2)",
+  "reason": "vmin/vmax are the colormap's range and xmin/xmax/ymin/ymax a figure's box (matrix_plot, its colorbar and integer ticks), not caps: nothing is refused"
+ },
+ "lib/sage_plot_fields.py :: matrix_plot :: hi = float(opts[\"vmax\"]) if opts[\"vmax\"] is not None else (float(finite.max()) if finite.size else 1.0) #0": {
+  "class": "none",
+  "owner": "Sage graphics (@sagebrush-sage2)",
+  "reason": "vmin/vmax are the colormap's range and xmin/xmax/ymin/ymax a figure's box (matrix_plot, its colorbar and integer ticks), not caps: nothing is refused"
+ },
+ "lib/sage_plot_fields.py :: matrix_plot :: raise NotImplementedError(\"matrix_plot's norm option is not implemented in Sagebrush: use vmin and vmax\") #0": {
+  "class": "coverage",
+  "owner": "Sage graphics (@sagebrush-sage2)",
+  "reason": "matrix_plot's norm option (a normalization function) is not implemented: an unsupported feature, not a cap"
+ },
+ "lib/sage_plot_fields.py :: matrix_plot :: sage: P.get_minmax_data() #0": {
+  "class": "none",
+  "owner": "Sage graphics (@sagebrush-sage2)",
+  "reason": "vmin/vmax are the colormap's range and xmin/xmax/ymin/ymax a figure's box (matrix_plot, its colorbar and integer ticks), not caps: nothing is refused"
+ },
+ "lib/sage_plot_fields.py :: matrix_plot :: {'xmax': 3.5, 'xmin': -0.5, 'ymax': 2.5, 'ymin': -0.5} #0": {
+  "class": "none",
+  "owner": "Sage graphics (@sagebrush-sage2)",
+  "reason": "vmin/vmax are the colormap's range and xmin/xmax/ymin/ymax a figure's box (matrix_plot, its colorbar and integer ticks), not caps: nothing is refused"
  },
  "lib/shutil.py ::  :: XXX The functions here don't copy the resource fork or other metadata on Mac. #0": {
   "class": "none",
