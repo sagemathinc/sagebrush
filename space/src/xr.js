@@ -15,6 +15,7 @@ import { codeRuns } from "./code.js";
 
 const SCALE = 5; // (world units per metre: a slab, 5 units wide, is a metre across)
 const EYE = 1.6; // (where the floor is, below the eye, in metres: the space starts where the camera was)
+const STEP_UP = 1.05; // (the highest step walked up, in the space's units: ground.js's STEP)
 
 export function setupXR(api) {
   const { renderer, scene, camera, controls } = api;
@@ -92,8 +93,10 @@ export function setupXR(api) {
   }
   function flyPose(target, ms = 450) {
     settle();
-    // (walking: never below the floor (a view from below, such as a 3D plot's, is taken from the floor instead))
-    if (walk && target.pos.y < api.floorY()) target = { ...target, pos: target.pos.clone().setY(api.floorY()) };
+    // (walking: never below the ground (a view from below, such as a 3D plot's, is taken from the floor instead), and
+    //  standing on it when the view is about at standing height there)
+    const g = api.floorY(target.pos.x, target.pos.z);
+    if (walk && target.pos.y < g + 0.5 * SCALE) target = { ...target, pos: target.pos.clone().setY(g) };
     let dy = target.yaw - rig.rotation.y;
     dy = Math.atan2(Math.sin(dy), Math.cos(dy)); // (the short way round)
     // (walking: a blink, there in the dark; flying: a glide)
@@ -118,14 +121,15 @@ export function setupXR(api) {
     settle();
     backStack.push(pose()); fwdStack.length = 0;
     const head = camera.position.clone().setY(0).applyAxisAngle(new THREE.Vector3(0, 1, 0), rig.rotation.y).multiplyScalar(SCALE);
-    flyPose({ pos: new THREE.Vector3(p.x - head.x, api.floorY(), p.z - head.z), yaw: rig.rotation.y });
+    flyPose({ pos: new THREE.Vector3(p.x - head.x, api.floorY(p.x, p.z), p.z - head.z), yaw: rig.rotation.y });
     drawMenu();
   }
   function setWalk(on) {
     walk = !!on;
     try { localStorage.setItem("whitespace:xr-move", walk ? "walk" : "fly"); } catch {}
     // (to the floor, when walking starts: below where you are)
-    if (walk && session && rig.position.y > api.floorY() + 0.05) { settle(); backStack.push(pose()); flyPose({ pos: rig.position.clone().setY(api.floorY()), yaw: rig.rotation.y }); }
+    const g = api.floorY(rig.position.x, rig.position.z);
+    if (walk && session && rig.position.y > g + 0.05) { settle(); backStack.push(pose()); flyPose({ pos: rig.position.clone().setY(g), yaw: rig.rotation.y }); }
     drawMenu();
   }
   // (Back past where a room was entered: out of the room, to where you stood; with nothing to go back to inside a room
@@ -301,7 +305,7 @@ export function setupXR(api) {
       const right = new THREE.Vector3().crossVectors(d, new THREE.Vector3(0, 1, 0));
       // (where your head will be: walking, never below standing height on the floor)
       const eyeTo = v.to.clone();
-      if (walk) eyeTo.y = Math.max(eyeTo.y, api.floorY() + 1.6 * SCALE);
+      if (walk) eyeTo.y = Math.max(eyeTo.y, api.floorY(eyeTo.x, eyeTo.z) + 1.6 * SCALE);
       panel.position.copy(eyeTo).addScaledVector(d, 1.1 * SCALE).addScaledVector(right, 0.9 * SCALE).add(new THREE.Vector3(0, -0.1 * SCALE, 0));
       panel.lookAt(eyeTo.x, panel.position.y, eyeTo.z);
     } else {
@@ -314,7 +318,7 @@ export function setupXR(api) {
       panel.lookAt(head.x, panel.position.y, head.z);
     }
     // (never into the floor: its buttons, along its bottom edge, stay where you can point at them)
-    panel.position.y = Math.max(panel.position.y, api.floorY() + PANEL_H / 2 + 0.15 * SCALE);
+    panel.position.y = Math.max(panel.position.y, api.floorY(panel.position.x, panel.position.z) + PANEL_H / 2 + 0.15 * SCALE);
     panel.visible = true;
   }
   function close() { panel.visible = false; shown = null; stop = null; api.select(null); }
@@ -517,7 +521,7 @@ export function setupXR(api) {
     const hf = figParts.length ? ray.intersectObjects(figParts, false)[0] : null;
     if (hf && (!h || hf.distance < h.distance)) h = { ...hf, agent: true };
     // (nothing else: the floor, to step to, when walking)
-    if (!h && walk && api.ground().visible) { const hg = ray.intersectObject(api.ground(), false)[0]; if (hg && hg.distance < 120 * SCALE) h = { ...hg, floor: true }; }
+    if (!h && walk && api.ground().visible) { const hg = ray.intersectObjects(api.walkable(), false)[0]; if (hg && hg.distance < 120 * SCALE) h = { ...hg, floor: true }; }
     return h;
   }
   function onSelect(c) {
@@ -560,7 +564,7 @@ export function setupXR(api) {
       const h = c.userData.source ? hit(c) : null;
       c.userData.line.scale.z = h ? h.distance / SCALE : 30;
       // (where a step would put you)
-      if (h?.floor && !marked) { mark.position.copy(h.point).setY(api.floorY() + 0.02); marked = true; }
+      if (h?.floor && !marked) { mark.position.copy(h.point).setY(api.floorY(h.point.x, h.point.z) + 0.02); marked = true; }
       const nd = h && !h.agent && !h.floor && h.object !== panel && h.object !== chatPanel ? h.object.userData.node ?? null : null;
       if (nd !== c.userData.hovered) {
         if (c.userData.hovered) api.glow(c.userData.hovered, 0);
@@ -582,7 +586,14 @@ export function setupXR(api) {
       const fast = gp.buttons[1]?.pressed ? 4 : 1, speed = 2.5 * SCALE * fast * dt;
       if ((ax || ay) && flight) { if (flight.blink) settle(); else flight = null; } // (your own move wins over a flight)
       if (src.handedness === "left") {
-        rig.position.addScaledVector(fwd, -ay * speed).addScaledVector(right, ax * speed);
+        const m = fwd.clone().multiplyScalar(-ay * speed).addScaledVector(right, ax * speed);
+        // (walking: up a step, yes; into a terrace's side, no; standing on the ground, you follow it up and down)
+        if (walk && (ax || ay)) {
+          const feet = rig.position.y, here = api.floorY(head.x, head.z), there = api.floorY(head.x + m.x, head.z + m.z);
+          if (there > feet + STEP_UP) m.set(0, 0, 0);
+          else if (Math.abs(feet - here) < 0.05 && !flight) rig.position.y = there;
+        }
+        rig.position.add(m);
         if (ax || ay) moving = true;
       } else if (src.handedness === "right") {
         // (up and down only when flying: walking keeps you on your floor)
@@ -610,7 +621,7 @@ export function setupXR(api) {
     if (walk && !flight && Math.abs(rig.position.y - lastFloor) < 1e-3 && fy !== lastFloor) rig.position.y = fy;
     lastFloor = fy;
     const feet = rig.position.y;
-    disc.visible = walk && feet > api.floorY() + 0.3 * SCALE;
+    disc.visible = walk && feet > api.floorY(head.x, head.z) + 0.3 * SCALE;
     if (disc.visible) disc.position.set(head.x, feet + 0.01, head.z);
   }
 

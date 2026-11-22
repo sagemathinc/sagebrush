@@ -69,8 +69,10 @@ export function layered(nodes, edges) {
   }
   // the places: levels from the top down; a level wider than `perRow` wraps into rows behind, each a little higher
   const perRow = Math.max(6, Math.ceil(Math.sqrt(main.length) * 1.3));
-  let y = 0, minX = 0, maxX = 0;
-  const row = (list, y0, per = perRow) => {
+  let y = 0, minX = 0, maxX = 0, rowNo = 0;
+  // (each object's row, for the ground's terraces (ground.js): which part, which row, its place along it, and whether
+  //  the row starts a level)
+  const row = (list, y0, per = perRow, part = "main") => {
     const chunks = [];
     for (let i = 0; i < list.length; i += per) chunks.push(list.slice(i, i + per));
     let h = 0;
@@ -81,8 +83,10 @@ export function layered(nodes, edges) {
         const [, hh] = sizeOf(n);
         h = Math.max(h, hh);
         n.position = [x + ws[i] / 2 + (k % 2) * 0.8, y0 - hh / 2 + k * 1.2, -k * 6];
+        n.ground = { part, row: rowNo, x: x + ws[i] / 2, level: k === 0 };
         x += ws[i];
       });
+      rowNo++;
       minX = Math.min(minX, -total / 2); maxX = Math.max(maxX, total / 2);
     });
     return h + (chunks.length - 1) * 1.2;
@@ -90,13 +94,14 @@ export function layered(nodes, edges) {
   for (const L of layers) if (L) y -= row(L, y) + 3.2;
   const shelf = nodes.filter((n) => n.shelf && n.kind !== "import");
   // (the shelf: wider than deep, so little of it hides behind the rest)
-  if (shelf.length) { y -= 2; y -= row(shelf, y, Math.max(perRow, Math.ceil(Math.sqrt(shelf.length * 3)))) + 3.2; }
+  if (shelf.length) { y -= 2; y -= row(shelf, y, Math.max(perRow, Math.ceil(Math.sqrt(shelf.length * 3))), "shelf") + 3.2; }
   // (the imports: a column on the left, beside the levels, from the top)
   const ports = nodes.filter((n) => n.kind === "import");
   const perCol = Math.max(8, Math.ceil(-y / 1.5));
   ports.forEach((n, i) => {
     const col = Math.floor(i / perCol), [w] = sizeOf(n);
     n.position = [minX - 4 - w / 2 - col * (w + 1), -(i % perCol) * 1.5, 0];
+    n.ground = { part: "import", row: i };
   });
   // (centred: the room's middle at the origin)
   const all = nodes.filter((n) => n.position);

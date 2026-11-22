@@ -15,6 +15,7 @@ import { highlight, editor, codeRuns } from "./code.js";
 import { run, interrupt, sceneObject, SCENE } from "./run.js";
 import { sizeOf } from "./sizes.js";
 import { treeRoom, resolveImport } from "./treeroom.js";
+import { groundPlan, placedOnGround, supportAt as blockAt, EYE, STEP } from "./ground.js";
 // (the languages whose files are entered: by their names)
 const CODE = { py: "python", sage: "python", rs: "rust", js: "js", mjs: "js", cjs: "js", jsx: "js", ts: "js", mts: "js", cts: "js", tsx: "js" };
 const codeOf = (p) => CODE[/\.([a-z]+)$/i.exec(String(p))?.[1]?.toLowerCase()] ?? null;
@@ -88,15 +89,39 @@ function paintGround() {
   groundTex.needsUpdate = true;
 }
 let floorY = -10;
-// (the floor: under the lowest object of the space, by 1.5 units, at least; centred under it)
+// (the floor: on the ground (ground.js), at 0; floating, under the lowest object of the space, by 1.5 units at least;
+//  centred under it)
 function placeGround() {
   if (!space || !positions) return;
   let lo = Infinity, cx = 0, cz = 0;
   space.nodes.forEach((n, i) => { const [, h] = sizeOf(n); lo = Math.min(lo, positions[3 * i + 1] - h / 2); cx += positions[3 * i]; cz += positions[3 * i + 2]; });
   if (!Number.isFinite(lo)) lo = 0;
-  floorY = lo - 1.5;
+  floorY = onGround() ? 0 : lo - 1.5;
   ground.position.set(cx / Math.max(1, space.nodes.length), floorY, cz / Math.max(1, space.nodes.length));
 }
+// On the ground (the default) or floating, as before: the Float / Ground button; a space can ask to float
+// (`layout: "floating"`), a space of 3D plots, say, which are seen from all sides.
+let groundPref = (() => { try { return localStorage.getItem("whitespace:layout") !== "float"; } catch { return true; } })();
+const onGround = () => groundPref && space?.layout !== "floating";
+// (the terraces a room's stands rise on: blocks of floor, one mesh)
+let blocks = [], terraces = null;
+const terraceMat = new THREE.MeshStandardMaterial({ roughness: 0.95 });
+function paintTerraces() { terraceMat.color.set(T.fg !== "#1f2328" ? 0x232c38 : 0xd3dae4); }
+function buildTerraces() {
+  if (terraces) { scene.remove(terraces); terraces.dispose(); terraces = null; }
+  if (!blocks.length) return;
+  terraces = new THREE.InstancedMesh(UNIT_BOX, terraceMat, blocks.length);
+  terraces.name = "terraces";
+  const m = new THREE.Matrix4(), q = new THREE.Quaternion(), v = new THREE.Vector3(), sc = new THREE.Vector3();
+  blocks.forEach((b, k) => terraces.setMatrixAt(k, m.compose(v.set((b.x0 + b.x1) / 2, b.y / 2, (b.z0 + b.z1) / 2), q, sc.set(b.x1 - b.x0, b.y, b.z1 - b.z0))));
+  terraces.computeBoundingSphere();
+  terraces.visible = onGround();
+  scene.add(terraces);
+}
+// (how high the ground is where you are: a terrace, or the floor)
+const groundAt = (x, z) => (onGround() && terraces?.visible ? blockAt(blocks, x, z, floorY) : floorY);
+// (what you can stand on, and point at to go to: the floor, and the terraces)
+const walkable = () => (terraces?.visible ? [ground, terraces] : [ground]);
 
 // ---------------------------------------------------------------- objects
 const hue = (s) => { let h = 0; for (const c of String(s)) h = (h * 31 + c.charCodeAt(0)) >>> 0; return (h % 360) / 360; };
@@ -279,7 +304,12 @@ function surfaceMesh(nd) {
   return mesh;
 }
 
-let space = null, objects = [], pickables = [], edgeLines = null, positions = null, P3 = null, P2 = null, dims = 3;
+let space = null, objects = [], pickables = [], edgeLines = null, positions = null, P3 = null, PG = null;
+// (the post each object stands on, on the ground, and its foot: shared shapes, stretched to the height)
+const UNIT_BOX = new THREE.BoxGeometry(1, 1, 1);
+const POST = new THREE.BoxGeometry(0.22, 1, 0.22).translate(0, -0.5, 0), FOOT = new THREE.BoxGeometry(1.3, 0.12, 0.8).translate(0, 0.06, 0);
+const postMat = new THREE.MeshStandardMaterial({ color: 0x8b96a5, roughness: 0.6, metalness: 0.2 });
+postMat.userData.shared = true;
 let landmarks = [];
 
 function makeObject(nd) {
@@ -293,6 +323,10 @@ function makeObject(nd) {
   group.add(slab);
   pickables.push(slab);
   group.userData = { node: nd, face, side, level: 0, tex: [], plot: null };
+  const post = new THREE.Mesh(POST, postMat), foot = new THREE.Mesh(FOOT, postMat);
+  post.visible = foot.visible = false;
+  group.add(post, foot);
+  group.userData.post = [post, foot];
   const gl = glyph(nd);
   // (in a room, small and at the top left corner: the arrows arrive at the top's middle)
   if (space?.directed) { gl.scale.setScalar(0.5); gl.position.set(-w / 2 + 0.35, h / 2 + 0.45, 0); }
@@ -461,10 +495,10 @@ function stepLandmarks() {
 // (everything a space made on the GPU is freed with it: rooms come and go with every Enter and Back. The glyphs'
 //  shared shapes and the arrows' head stay)
 function dispose(obj) {
-  const shared = new Set(glyphGeo.values()).add(HEAD);
+  const shared = new Set(glyphGeo.values()).add(HEAD).add(POST).add(FOOT).add(UNIT_BOX);
   obj.traverse((m) => {
     if (m.geometry && !shared.has(m.geometry) && !m.isSprite) m.geometry.dispose(); // (sprites share three's one quad)
-    for (const mat of [].concat(m.material ?? [])) { if (mat.map) { mat.map.userData.gone = true; mat.map.dispose(); } mat.dispose(); }
+    for (const mat of [].concat(m.material ?? [])) { if (mat.userData.shared) continue; if (mat.map) { mat.map.userData.gone = true; mat.map.dispose(); } mat.dispose(); }
   });
   for (const t of obj.userData?.tex ?? []) if (t) { t.userData.gone = true; t.dispose(); }
 }
@@ -540,6 +574,19 @@ function place(P) {
   }
   if (landmarks.length) placeLandmarks();
   placeGround();
+  placePosts();
+}
+// (on the ground, each object on its post, down to what is under it; none while it moves between layouts)
+function placePosts() {
+  const show = onGround() && !morph;
+  objects.forEach((o, i) => {
+    const [post, foot] = o.userData.post, [, h] = sizeOf(space.nodes[i]);
+    const len = show ? o.position.y - h / 2 - groundAt(o.position.x, o.position.z) : 0;
+    post.visible = foot.visible = len > 0.3;
+    if (!post.visible) return;
+    post.position.y = -h / 2; post.scale.y = len;
+    foot.position.y = -h / 2 - len;
+  });
 }
 
 // the positions written in the file (position, or position2d for the plane); the layout only for those without
@@ -601,14 +648,20 @@ async function load(name, data = null, again = false, opts = {}) {
   for (const [i, j] of pairs) (nodes[i]._out.push(nodes[j]), nodes[j]._in.push(nodes[i]));
   const t0 = performance.now();
   const r3 = opts.P && opts.P.length === nodes.length * 3 ? { P: opts.P, laid: false } : positionsOf(nodes, space.edges ?? [], 3);
-  P3 = r3.P; P2 = null; dims = 3;
-  $("#dims").textContent = "Flatten to 2D";
-  place(P3);
+  P3 = r3.P;
+  // (the ground's plan: a room's stands, or the space's plan from above (position2d; laid out if it has none))
+  const needs2d = !space.room && nodes.some((n) => !Array.isArray(n.position2d) && !Array.isArray(n.position));
+  const plan = groundPlan(nodes, { room: !!space.room, P2: needs2d ? positionsOf(nodes, space.edges ?? [], 2).P : null });
+  PG = plan.P; blocks = plan.blocks;
+  morph = null;
+  buildTerraces();
+  layoutButton();
+  place(onGround() ? PG : P3);
   buildLandmarks();
   selected = null;
   edgeColors();
   if (view) {
-    frame(P3);
+    frame(positions);
     flight = null;
     camera.position.copy(view.pos);
     controls.target.copy(view.target);
@@ -617,7 +670,7 @@ async function load(name, data = null, again = false, opts = {}) {
     if (nd) { selected = nd.id; setGlow(nd, 0.4); edgeColors(); }
   } else {
     if (!opts.room) { history.length = 0; future.length = 0; }
-    frame(P3, false, opts.room ? 900 : 1);
+    frame(positions, false, opts.room ? 900 : 1);
   }
   navButtons();
   buildIndex();
@@ -637,6 +690,7 @@ async function load(name, data = null, again = false, opts = {}) {
 // the camera: everything in view
 // (the view of everything: the centre, and a place to see most of the space from; a few outliers don't shrink the rest)
 function homeView(P) {
+  if (onGround() && P === PG) return groundView(P);
   const n = P.length / 3, c = new THREE.Vector3();
   for (let i = 0; i < n; i++) c.add(new THREE.Vector3(P[3 * i], P[3 * i + 1], P[3 * i + 2]));
   c.divideScalar(Math.max(n, 1));
@@ -654,6 +708,38 @@ function homeView(P) {
   // (a tall, narrow screen (a phone held upright) sees less across: further back, so the width fits too)
   const fit = camera.aspect < 1 ? Math.min(2.2, 1 / camera.aspect) : 1;
   return { to: c.clone().add(new THREE.Vector3(0.35, 0.25, 1).normalize().multiplyScalar(r * 2.2 * fit)), toT: c, r };
+}
+// (on the ground: a room from its door, on the floor in front of its first row, far enough back to have its stands in
+//  view; anything else from a balcony in front of it, above its middle)
+function groundView(P) {
+  const n = P.length / 3;
+  let x0 = Infinity, x1 = -Infinity, z0 = Infinity, z1 = -Infinity, top = EYE;
+  for (let i = 0; i < n; i++) {
+    const [w, h] = sizeOf(space.nodes[i]);
+    x0 = Math.min(x0, P[3 * i] - w / 2); x1 = Math.max(x1, P[3 * i] + w / 2);
+    z0 = Math.min(z0, P[3 * i + 2]); z1 = Math.max(z1, P[3 * i + 2]);
+    top = Math.max(top, P[3 * i + 1] + h / 2);
+  }
+  if (!n) { x0 = x1 = z0 = z1 = 0; }
+  const cx = (x0 + x1) / 2, cz = (z0 + z1) / 2, W = x1 - x0 + 6, D = z1 - z0 + 6;
+  const tanV = Math.tan(THREE.MathUtils.degToRad(camera.fov / 2)), tanH = tanV * camera.aspect;
+  if (space.room) {
+    const dist = Math.max(W / 2 / tanH, (top + 2) / 2 / tanV, 16) * 1.05;
+    const to = new THREE.Vector3(cx, floorY + EYE, z1 + dist);
+    return { to, toT: new THREE.Vector3(cx, Math.max(EYE, top * 0.45), cz), r: Math.max(W, D, top) / 2 };
+  }
+  // (a space can say where it is seen from on the ground: `groundView: {from, to}`)
+  const v = space.groundView;
+  if (Array.isArray(v?.from) && Array.isArray(v?.to)) {
+    const to = new THREE.Vector3(...v.to), from = new THREE.Vector3(...v.from), fit = camera.aspect < 1 ? Math.min(2.2, 1 / camera.aspect) : 1;
+    return { to: to.clone().add(from.clone().sub(to).multiplyScalar(fit)), toT: to, r: Math.max(12, from.distanceTo(to) / 2) };
+  }
+  // (a few outliers don't push the rest far off: the middle 80% framed)
+  const pct = (k, q) => { const xs = []; for (let i = 0; i < n; i++) xs.push(P[3 * i + k]); xs.sort((a, b) => a - b); return xs[Math.min(n - 1, Math.max(0, Math.round((n - 1) * q)))]; };
+  const trim = n > 12 ? 0.1 : 0, qx0 = pct(0, trim) - 3, qx1 = pct(0, 1 - trim) + 3, qz0 = pct(2, trim), qz1 = pct(2, 1 - trim);
+  const Wq = qx1 - qx0, Dq = qz1 - qz0 + 6, qx = (qx0 + qx1) / 2, qz = (qz0 + qz1) / 2;
+  const r = Math.max(Wq, Dq, 12) / 2, back = Math.max(r * 0.7, Wq / 2 / tanH * 0.8);
+  return { to: new THREE.Vector3(qx, floorY + EYE + r * 0.6, qz1 + back), toT: new THREE.Vector3(qx, floorY + EYE, qz), r };
 }
 function frame(P, remember = false, ms = remember ? 900 : 1) {
   if (remember) pushView();
@@ -689,7 +775,16 @@ function flyToView(to, toT, ms = 900) {
 function viewOf(i, dist) {
   const nd = space.nodes[i];
   const p = new THREE.Vector3(positions[3 * i], positions[3 * i + 1], positions[3 * i + 2]);
-  const d = dist ?? (Array.isArray(nd.size) ? Math.max(9, nd.size[1] * 1.7) : nd.kind === "file" ? 5 : 9);
+  let d = dist ?? (Array.isArray(nd.size) ? Math.max(9, nd.size[1] * 1.7) : nd.kind === "file" ? 5 : 9);
+  // (on the ground: standing in front of it, on whatever is there, looking at it; in a room, on the stairs before its
+  //  row, short of the row in front)
+  if (onGround() && positions === PG) {
+    const plot = nd.kind === "plot3d" || nd.scene;
+    if (plot) d = Math.max(d, 12);
+    else if (space.room && dist === undefined) d = Math.min(d, 5.5);
+    const t = plot ? p.clone().add(new THREE.Vector3(0, 0, 1.4)) : p, z = p.z + d;
+    return { to: new THREE.Vector3(p.x, groundAt(p.x, z) + EYE, z), toT: t };
+  }
   if (nd.kind === "plot3d" || nd.scene) {
     const t = p.clone().add(new THREE.Vector3(0, 0, 1.4));
     return { to: t.clone().add(new THREE.Vector3(0, -8.5, 7.5)), toT: t };
@@ -743,23 +838,39 @@ $("#back").onclick = back;
 $("#fwd").onclick = forward;
 $("#home").onclick = () => space && frame(positions, true);
 
-// 2D / 3D: the same space on a plane (its saved position2d, else laid out), animated
+// Ground / Float: the space on the ground (ground.js), or floating in the air as it was laid out; the objects move from
+// one to the other
 let morph = null;
-$("#dims").onclick = () => {
-  if (!space) return;
-  if (!P2) P2 = positionsOf(space.nodes, space.edges ?? [], 2).P;
-  const target = dims === 3 ? P2 : P3;
-  dims = dims === 3 ? 2 : 3;
-  $("#dims").textContent = dims === 3 ? "Flatten to 2D" : "Back to 3D";
-  morph = { from: Float64Array.from(positions), to: target, t0: performance.now(), ms: 1200 };
-};
+function layoutButton() {
+  $("#dims").hidden = space?.layout === "floating";
+  $("#dims").textContent = onGround() ? "Float" : "Ground";
+  $("#dims").title = onGround() ? "Float the space in the air, as laid out in 3D" : "Stand the space on the ground: a room as a grandstand, anything else on the floor";
+}
+function setGround(on) {
+  if (!space || on === onGround() || space.layout === "floating") return;
+  groundPref = on;
+  try { localStorage.setItem("whitespace:layout", on ? "ground" : "float"); } catch {}
+  if (morph) place(morph.to);
+  // (the terraces go before the objects lift off them, and come after they have landed)
+  if (terraces) terraces.visible = false;
+  morph = { from: Float64Array.from(positions), to: on ? PG : P3, t0: performance.now(), ms: 1200 };
+  layoutButton();
+  placePosts();
+}
+$("#dims").onclick = () => setGround(!onGround());
 function stepMorph(now) {
   if (!morph) return;
   const u = Math.max(0, Math.min(1, (now - morph.t0) / morph.ms)), e = u * u * (3 - 2 * u);
   const P = new Float64Array(morph.from.length);
   for (let i = 0; i < P.length; i++) P[i] = morph.from[i] + (morph.to[i] - morph.from[i]) * e;
   place(P);
-  if (u >= 1) { place(morph.to); frame(morph.to, true); morph = null; }
+  if (u >= 1) {
+    const to = morph.to;
+    morph = null;
+    if (terraces) terraces.visible = onGround();
+    place(to);
+    frame(to, true);
+  }
 }
 
 // ---------------------------------------------------------------- picking: hover, click for the sharp text
@@ -776,7 +887,7 @@ renderer.domElement.addEventListener("pointermove", (ev) => {
   // (over the floor, with no button held: where a click would take you)
   const fp = !nd && !ev.buttons && deskWalk ? floorAt(ev) : null;
   floorMark.visible = !!fp;
-  if (fp) floorMark.position.copy(fp).setY(floorY + 0.05);
+  if (fp) floorMark.position.copy(fp).setY(fp.y + 0.05);
   if (nd !== hovered) {
     if (hovered) setGlow(hovered, 0);
     hovered = nd;
@@ -1262,12 +1373,20 @@ function placeNode(nd) {
   scene.add(o);
   objects.push(o);
   // (its place in the 3D layout, and on the plane if there is one; a morph between them finished first)
-  if (morph) { place(morph.to); morph = null; }
+  if (morph) { const to = morph.to; morph = null; if (terraces) terraces.visible = onGround(); place(to); }
+  // (its position is where it is now, as positionOf gave it the agent: on the ground, its place there, kept in the
+  //  space as the floating layout's, which is what the ground's is made from)
+  if (onGround()) {
+    const [x, y, z] = nd.position;
+    nd.position = [x, y - EYE, z];
+  }
   const P = new Float64Array(P3.length + 3);
   P.set(P3); P.set(nd.position, P3.length);
   P3 = P;
-  if (P2) { const Q = new Float64Array(P2.length + 3); Q.set(P2); Q.set([nd.position[0], nd.position[1], 0], P2.length); P2 = Q; }
-  place(dims === 3 ? P3 : P2);
+  const Q = new Float64Array(PG.length + 3);
+  Q.set(PG); Q.set(placedOnGround(nd), PG.length);
+  PG = Q;
+  place(onGround() ? PG : P3);
   appearing.push({ o, t0: performance.now() });
   buildIndex();
   $("#status").textContent = `${space.nodes.length} objects`;
@@ -1528,6 +1647,7 @@ function applyTheme() {
   const name = themeName();
   T = THEMES[name];
   paintGround();
+  paintTerraces();
   document.documentElement.dataset.theme = name;
   $("#theme").textContent = "Theme: " + themeSetting[0].toUpperCase() + themeSetting.slice(1);
   scene.background.set(T.bg);
@@ -1632,19 +1752,20 @@ addEventListener("keydown", (e) => {
 // (a quick fade); where it leaves you above the floor, you stand on a small platform there until you step off it.
 // Click the floor to go there. G, or the Walk button: flying instead (drag to orbit, scroll to zoom, E and Q up and
 // down), as on a phone, where flying is the default.
-const EYE_H = 8;
+const EYE_H = EYE;
 let deskWalk = (() => { try { const v = localStorage.getItem("whitespace:move"); if (v) return v === "walk"; } catch {} return matchMedia("(pointer: fine)").matches; })();
 let vy = 0, platform = null; // (vy: falling or jumping; platform: { x, z, y (feet), r } where a blink left you)
 const feetY = () => camera.position.y - EYE_H;
 function supportAt() {
-  if (platform && feetY() >= platform.y - 0.05 && Math.hypot(camera.position.x - platform.x, camera.position.z - platform.z) < platform.r) return platform.y;
-  return floorY;
+  const g = groundAt(camera.position.x, camera.position.z);
+  if (platform && feetY() >= platform.y - 0.05 && platform.y > g && Math.hypot(camera.position.x - platform.x, camera.position.z - platform.z) < platform.r) return platform.y;
+  return g;
 }
-// (after a blink: you stand where it left you: on a platform above the floor, or on the floor (raised to it if below))
+// (after a blink: you stand where it left you: on a platform above the ground, or on the ground (raised to it if below))
 function land() {
-  const f = feetY();
-  if (f > floorY + 0.5) platform = { x: camera.position.x, z: camera.position.z, y: f, r: 7 };
-  else { platform = null; camera.position.y += floorY - f; controls.target.y += floorY - f; }
+  const f = feetY(), g = groundAt(camera.position.x, camera.position.z);
+  if (f > g + 0.5) platform = { x: camera.position.x, z: camera.position.z, y: f, r: 7 };
+  else { platform = null; camera.position.y += g - f; controls.target.y += g - f; }
   vy = 0;
 }
 function setDeskWalk(on) {
@@ -1683,6 +1804,16 @@ function walkBy(forward, sideways) {
   fwd.normalize();
   const right = new THREE.Vector3().crossVectors(fwd, new THREE.Vector3(0, 1, 0));
   const m = fwd.multiplyScalar(forward).addScaledVector(right, sideways);
+  // (up a step, yes; into a terrace's side, no: along it, if one way is open; in short steps, a stair at a time)
+  const n = Math.max(1, Math.ceil(Math.hypot(m.x, m.z) / 0.3)), x0 = camera.position.x, z0 = camera.position.z;
+  let f = feetY(), x = x0, z = z0;
+  const ok = (dx, dz) => groundAt(x + dx, z + dz) <= f + STEP + 0.05;
+  for (let k = 0; k < n; k++) {
+    let dx = m.x / n, dz = m.z / n;
+    if (!ok(dx, dz)) { if (ok(dx, 0)) dz = 0; else if (ok(0, dz)) dx = 0; else break; }
+    x += dx; z += dz; f = Math.max(f, groundAt(x, z));
+  }
+  m.set(x - x0, 0, z - z0);
   camera.position.add(m);
   controls.target.add(m);
   flight = null;
@@ -1714,14 +1845,14 @@ scene.add(floorMark);
 function floorAt(ev) {
   mouse.set((ev.clientX / innerWidth) * 2 - 1, -(ev.clientY / innerHeight) * 2 + 1);
   ray.setFromCamera(mouse, camera);
-  const h = ray.intersectObject(ground, false)[0];
-  return h && h.distance < 600 ? h.point : null;
+  const h = ray.intersectObjects(walkable(), false)[0];
+  return h && h.distance < 600 ? h.point.clone().setY(groundAt(h.point.x, h.point.z)) : null;
 }
 function goToFloor(p) {
   pushView();
   const dir = new THREE.Vector3().subVectors(controls.target, camera.position).setY(0);
   if (dir.lengthSq() < 1e-6) dir.set(0, 0, -1);
-  const to = new THREE.Vector3(p.x, floorY + EYE_H, p.z);
+  const to = new THREE.Vector3(p.x, p.y + EYE_H, p.z);
   flyToView(to, to.clone().add(dir.normalize().multiplyScalar(10)), 600);
 }
 
@@ -1802,7 +1933,7 @@ const xr = setupXR({
   viewOf: (nd, dist) => viewOf(space.nodes.indexOf(nd), dist),
   // (a room's view of everything level with its middle: a headset turns you about the vertical only, so from above
   //  the room would sit low in your view)
-  home: () => { if (!space) return null; const h = homeView(positions); return space.room ? { ...h, to: h.to.clone().setY(h.toT.y) } : h; },
+  home: () => { if (!space) return null; const h = homeView(positions); return space.room && positions !== PG ? { ...h, to: h.to.clone().setY(h.toT.y) } : h; },
   runAll: () => $("#runall").click(),
   // (tours in a headset: the stop to show, and its narration)
   tours: () => toursOf(),
@@ -1820,7 +1951,9 @@ const xr = setupXR({
   agentFigure: () => (agent ? agent.figure.group : null),
   // (the floor: its mesh, to teleport along, and its height)
   ground: () => ground,
-  floorY: () => floorY,
+  walkable: () => walkable(),
+  // (the floor's height; at a point, the ground's there: a terrace, or the floor)
+  floorY: (x, z) => (x === undefined ? floorY : groundAt(x, z)),
   fullText: (nd) => fullText(nd),
   linkLabels: (nd) => linkLabels(nd),
   enter: (nd) => enterRoom(nd),
@@ -1885,6 +2018,10 @@ window.whitespace = {
   get agent() { return agent ? agent.demo : null; },
   get agentFigure() { return agent ? agent.figure.group : null; },
   get floorY() { return floorY; },
+  groundAt: (x, z) => groundAt(x, z),
+  get grounded() { return onGround(); },
+  setGround: (on) => setGround(!!on),
+  get terraces() { return blocks.length; },
   get walking() { return deskWalk; },
   get feet() { return feetY(); },
   xr,

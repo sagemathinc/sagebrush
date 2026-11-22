@@ -33,6 +33,7 @@ A space is a board in 3D: notes, code with its output, files and 3D plots, place
 - `group`: objects of a group cluster together, in one color, with the group's name above them from afar. Use groups for directories, crates, modules or topics.
 - `near`: another object's id; this one is placed beside it (a sample beside the code it illustrates).
 - Don't give `position`: the layout is computed and is the same each time for the same file.
+- The space stands on the ground: each object on a post at eye height, where a person walks among them. A space whose objects should float in the air, seen from all sides (3D plots, say), can say so at the top level: `"layout": "floating"`.
 
 Sage 3D graphics that run in the space (checked Nov 20 2026; each becomes the object): `plot3d`, `parametric_plot3d`, `implicit_plot3d`, `spherical_plot3d`, `cylindrical_plot3d`, `revolution_plot3d`, `sphere`, `cube`, `tetrahedron`, `octahedron`, `icosahedron`, `dodecahedron`, `point3d`, `line3d`, `arrow3d`, `polygon3d`, `text3d`, sums of these (`P + Q`), and the options `color=` (names such as 'seagreen', or 'rainbow' as a colormap), `opacity=`, `mesh=`, `frame=`. Not yet: `list_plot3d`, and `polytopes.X().plot()`.
 

@@ -24,7 +24,7 @@ npm run serve        # http://127.0.0.1:8080/
 - **Keys:** `B` goes back to where you were, and `H` shows everything.
 - **Run all:** runs every object's code, one after another (the button shows which, and stops it).
 - **Theme:** light by default (a white space), dark when your system is; the Theme button switches between Auto, Light and Dark.
-- **Flatten to 2D:** the same space on a plane, for comparison.
+- **On the ground:** everything stands on the floor, each object on a post with its middle at eye height (src/ground.js). **Float** lifts the space into the air, laid out in 3D as before, and **Ground** brings it back down.
 - **Semantic zoom:** from afar you see the groups' names (directories) over colored blocks; nearer, each object's title; near, its first lines; and on a click, the sharp text.
 
 ## Something to try
@@ -33,7 +33,7 @@ In `web-tree.space.json` (Sagebrush's own web/ code: 513 files and 1,009 imports
 
 1. Find the file that saves a board page's document, and what uses it. Search "board page", or wander into the `board` cluster.
 2. Find the agents chat's code, and then the module it shares with the notebook page.
-3. Press **Flatten to 2D** and do (1) again on the plane. Which was easier, and which was faster?
+3. Press **Float** and do (1) again with the space in the air. Which was easier, and which was faster?
 
 `demo.space.json` has Markdown notes, code with its output, and two real 3D plots: turn around them.
 
@@ -89,7 +89,7 @@ Over this connection Claude has the web and your Sagebrush files, not your disk.
 
 - `sagebrush.space.json` is Sagebrush's whole repository at one commit (`node gen-repo.mjs`: paths, lengths and imports only). Each directory is a room: its folders and files, with an arrow for each import between them. **Enter** (the drawer's button, the Enter key, or the panel's button in a headset) goes into a directory, a Python or Sage file, a class, or a `.space.json`.
 - Rust files are parsed by syn, Rust's own parser, compiled to WebAssembly (`space/rustroom`, built by `build.mjs` with cargo). A Rust room holds functions, `impl` blocks and traits (each entered for its methods), types, constants, macros, and inline modules (entered for their items). `use` and `mod` are portals to the files they lead to. JavaScript and TypeScript files are parsed by Babel. Their rooms hold functions, classes (entered for their methods), types, and imports as portals. A function with inner functions can be entered too.
-- A file's room comes from a real parse (CPython's own grammar, in `pyparse/`; Sage's preparser first): its functions, classes, top-level code and imports, with an arrow for each call or use. What nothing calls stands at the top, and the arrows run down to the helpers. Imports hang on the left wall; anything unlinked sits on a shelf below. A docstring's first paragraph is the summary until someone writes a better one.
+- A file's room comes from a real parse (CPython's own grammar, in `pyparse/`; Sage's preparser first): its functions, classes, top-level code and imports, with an arrow for each call or use. A room is a grandstand. What nothing calls stands in the front row, on the floor, and each row behind it is a terrace higher, with stairs up to it, so from the door you see over the rows in front. The arrows run back and up to the helpers, and you go deeper by walking up. Imports have a smaller stand on the left, and anything unlinked has one on the right. (**Float**: the room as a wall in the air, as before.) A docstring's first paragraph is the summary until someone writes a better one.
 - Select a function: its links light up (what it calls in orange, what calls it in blue), and the drawer shows its highlighted code with each name linked to what it names.
 - **Back** past where you entered brings you out again. The title lists the rooms you are in, and each one is a link back out. A file's text is fetched from GitHub when it is opened.
 - **Your own files**: in the file browser (Files), a folder's ⋯ has **Open in 3D**, and the browser's own ⋯ has **Open all files in 3D**. The folder opens over the page as rooms: its folders and files, with an arrow for each Python import between them. A Python or Sage file is entered as above. A **notebook** is entered too: its cells, with an arrow from a cell that defines a name to each later cell that reads it, and each cell's output as the notebook last showed it. The page reads the files for the viewer, and only those in that folder. Nothing is written. **Close** or Esc goes back to the page. `node space/test-own-files.mjs` checks it end to end.
@@ -103,7 +103,7 @@ The chat stays out of the way. On the desktop it is a **Talk to the agent** butt
 
 **Walking on the desktop** is the default with a mouse:
 - Drag to look around; W A S D or the arrows walk (Shift is faster); Space jumps; gravity brings you down.
-- Click the floor to go there (a ring shows where).
+- Click the floor or a terrace to go there (a ring shows where). You walk up stairs. A terrace's side stops you, but a jump gets you up a low one.
 - Clicking an object, Back and See all are a blink.
 - **G** (or the Walking button) switches to flying, the orbit navigation. A phone or tablet starts flying, which is how touch moves.
 - **?** shows every key and control, desktop and headset.
@@ -113,7 +113,7 @@ Code is highlighted wherever it is read: in the drawer, on an object's face, and
 **Comfort in a headset:**
 - Walking is the default. There's a floor in every space; the left thumbstick walks and the right turns in steps.
 - Going to an object, Back and See all are a blink (a quick fade), never a glide.
-- Point at the floor and pull the trigger to step there.
+- Point at the floor or a terrace and pull the trigger to step there. Walking, you go up and down stairs; a terrace's side stops you.
 - Above the floor, a disc stands under your feet.
 - The view's edges darken while you walk.
 - **Fly** on the wrist menu brings back gliding and the right thumbstick's up and down.
