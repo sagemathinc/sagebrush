@@ -11,7 +11,7 @@
 #![cfg(not(target_arch = "wasm32"))]
 
 use num_integer::Integer;
-use sagebrush_arith::cost::{bigdiv_units, bigmul_units, tallied, Family, FAMILIES};
+use sagebrush_arith::cost::{bigdiv_units, biggcd_units, bigmul_units, tallied, Family, Units, FAMILIES};
 use sagebrush_arith::smith;
 use sagebrush_arith::zmat::{self, ZMat};
 use sagebrush_bigint::BigInt;
@@ -243,4 +243,69 @@ fn a_stop_charges_only_the_work_before_it() {
     row0[Family::Div as usize] = bigdiv_units(l(4), l(4)).get(Family::Div) + bigdiv_units(l(0), l(4)).get(Family::Div);
     let step: Vec<u64> = (0..FAMILIES).map(|i| at27[i] - at26[i]).collect();
     assert_eq!(step, row0.to_vec(), "route 2 at k = n: one row of W between two checks");
+
+    // route 2 with top rows and a multi-limb delta (the big ring, every
+    // operation counted by its operands' sizes): a = diag(1, 1, B), B =
+    // [[3, -3], [0, 3 q]], q = 2^70 + 1, so B's entries have gcd 3 and the
+    // invariants are (1, 1, 3, 3 q): k = 2, top = 2, delta = 3 q (2 limbs).
+    // N = delta a^-1 = diag(3 q, 3 q, [[q, 1], [0, 1]]).
+    let q = (BigInt::from(1) << 70usize) + BigInt::from(1);
+    let mut a = ZMat::zero(4, 4);
+    for (i, j, x) in [(0, 0, BigInt::from(1)), (1, 1, BigInt::from(1)), (2, 2, BigInt::from(3)), (2, 3, BigInt::from(-3)), (3, 3, &q * BigInt::from(3))] {
+        a.d[i * 4 + j] = x;
+    }
+    let (nm, den, det) = zmat::inverse_det(&a).unwrap();
+    let delta = &q * BigInt::from(3);
+    let n_want: Vec<BigInt> = [[&delta, &BigInt::from(0), &BigInt::from(0), &BigInt::from(0)], [&BigInt::from(0), &delta, &BigInt::from(0), &BigInt::from(0)], [&BigInt::from(0), &BigInt::from(0), &q, &BigInt::from(1)], [&BigInt::from(0), &BigInt::from(0), &BigInt::from(0), &BigInt::from(1)]].iter().flatten().map(|x| (*x).clone()).collect();
+    assert_eq!((nm.d.clone(), den.clone(), det.clone()), (n_want, delta.clone(), &delta * BigInt::from(3)));
+    let lb = |x: &BigInt| zmat::limbs(x);
+    let (l0, l1, lq, ld) = (lb(&BigInt::from(0)), lb(&BigInt::from(1)), lb(&q), lb(&delta));
+    let lneg1 = lb(&(&delta - BigInt::from(1)));
+    let red = bigdiv_units(2 * ld + 1, ld);
+    let mut want = Units::default();
+    // N's residues, one division by delta an entry
+    for x in &nm.d {
+        want.add(&bigdiv_units(lb(x), ld));
+    }
+    // attempt 0 (R = 0) checks at its opening, at Y's 2 rows and at pivot
+    // 0's pass; that pass, on Y = [[0, 0, q, 1], [0, 0, 0, 1]]: the search
+    // reads 3 entries and swaps columns 0 and 2 (2 + k, Move); then column
+    // 3: 1 is not a multiple of q (a division), so a Bezout step on (q, 1)
+    // (a gcd and two reductions), giving (s, u, a / g, p / g) = (0, 1, 1,
+    // q), applied to both rows (two lin's a row: two products and a
+    // reduction each), Y = [[1, 0, 0, 0], [1, 0, 0, q]]; then row 1 by row
+    // 0: the quotient 1 / 1 and 1 times row 0 off Y's row 1 (4 entries)
+    // and P's (2), a product and a reduction each.  Row 0 is then clear:
+    // the fifth check opens pivot 1 and charges the ring's tally, held
+    // since the fourth.
+    want.0[Family::Move as usize] += 3 + (2 + 2);
+    want.add(&bigdiv_units(l1, lq));
+    want.add(&biggcd_units(lq, l1));
+    want.add(&bigdiv_units(2 * ld, ld));
+    want.add(&bigdiv_units(2 * ld, ld));
+    for (xr, xj) in [(&q, &BigInt::from(1)), (&BigInt::from(0), &BigInt::from(1))] {
+        want.add(&bigmul_units(l0, lb(xr)));
+        want.add(&bigmul_units(l1, lb(xj)));
+        want.add(&red);
+        want.add(&bigmul_units(lneg1, lb(xr)));
+        want.add(&bigmul_units(lq, lb(xj)));
+        want.add(&red);
+    }
+    want.add(&bigdiv_units(l1, l1));
+    for y in [l1, l0, l0, l0, l1, l0] {
+        want.add(&bigmul_units(l1, y));
+        want.add(&red);
+    }
+    let got = stopped_at_check(5, || smith::trailing_route(&nm, &den, &det, 2));
+    assert_eq!(got, want.0, "route 2, multi-limb delta: stopped at pivot 1, the big ring's tally of pivot 0 charged before the check");
+    // W's top rows: X = N's top rows mod delta = 0, so q = 0 and c = 0, and
+    // W's top row 0 is N's row 0 divided by delta: four divisions (Div), no
+    // product.  Its checks are the 41st and 42nd of this run (counted from
+    // the run's checks; the step's value is derived above from the code):
+    // between them, exactly row 0's work.
+    let (at41, at42) = (stopped_at_check(41, || smith::trailing_route(&nm, &den, &det, 2)), stopped_at_check(42, || smith::trailing_route(&nm, &den, &det, 2)));
+    let mut top0 = [0; FAMILIES];
+    top0[Family::Div as usize] = bigdiv_units(lb(&delta), ld).get(Family::Div) + 3 * bigdiv_units(l0, ld).get(Family::Div);
+    let step: Vec<u64> = (0..FAMILIES).map(|i| at42[i] - at41[i]).collect();
+    assert_eq!(step, top0.to_vec(), "route 2, multi-limb delta: one top row of W between two checks");
 }
