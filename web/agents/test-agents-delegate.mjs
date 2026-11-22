@@ -119,29 +119,29 @@ try {
   const ask0 = await P.ev(`({ files: ${block}.querySelector('.ask-files').textContent, focused: document.activeElement?.id })`);
   ok(ask0.files === "When available, your current versions of these files go with your note: work/notes.txt. A file that can't be read here is left out, and the task uses its own copy of it." && ask0.focused === "delegate-note", "Ask for changes: its block under the actions, the note focused, naming the files whose current versions go with it", ask0);
   // (the unsent note kept per task: the dialog closed and the proposal opened again, it's still there)
-  await P.ev(`(() => { const t = document.querySelector('#delegate-note'); t.value = 'Also number the lines.'; t.dispatchEvent(new Event('input')); })()`);
+  await P.ev(`(() => { const t = document.querySelector('dialog.proposal[open] #delegate-note'); t.value = 'Also number the lines.'; t.dispatchEvent(new Event('input')); })()`);
   ok((await P.ev(`localStorage.getItem(${JSON.stringify(KEY)})`)) === "Also number the lines.", "the unsent note is kept in this browser, per task");
   await P.ev(`document.querySelector('dialog.proposal[open] .x').click()`);
   await P.ev(`document.querySelector('#task-view .proposal-card').click()`);
   await P.until(`!!${askBtn} && !!document.querySelector('dialog.proposal[open] .sbpv .file')`, 20000);
   await P.ev(`${askBtn}.click()`);
   await P.until(`!!${block} && !${block}.hidden`);
-  ok((await P.ev(`document.querySelector('#delegate-note').value`)) === "Also number the lines.", "the proposal opened again: the note is still there");
+  ok((await P.ev(`document.querySelector('dialog.proposal[open] #delegate-note').value`)) === "Also number the lines.", "the proposal opened again: the note is still there");
   // (an empty note: said so, nothing sent)
-  await P.ev(`(() => { const t = document.querySelector('#delegate-note'); t.value = '   '; t.dispatchEvent(new Event('input')); ${block}.querySelector('button.primary').click(); })()`);
+  await P.ev(`(() => { const t = document.querySelector('dialog.proposal[open] #delegate-note'); t.value = '   '; t.dispatchEvent(new Event('input')); ${block}.querySelector('button.primary').click(); })()`);
   await sleep(200);
   ok((await P.ev(`${block}.querySelector('.msg').textContent`)) === "Write what you'd like changed first" && !H.got.some((m) => m.method === "tasks.ask"), "an empty note: said so, nothing sent");
   // (the task moved on since the proposal was read (an event of its, the proposal still the latest): the agent answers
   //  stale; the page says so, reads the proposal again, and keeps the note to send again)
   H.emit(A.task, { type: "turn", event: { type: "turn_started" } });
   const diffs0 = H.got.filter((m) => m.method === "tasks.diff").length;
-  await P.ev(`(() => { const t = document.querySelector('#delegate-note'); t.value = '  Also number the lines.\\n'; t.dispatchEvent(new Event('input')); ${block}.querySelector('button.primary').click(); })()`);
+  await P.ev(`(() => { const t = document.querySelector('dialog.proposal[open] #delegate-note'); t.value = '  Also number the lines.\\n'; t.dispatchEvent(new Event('input')); ${block}.querySelector('button.primary').click(); })()`);
   const said = await P.until(`/moved on since you opened this/.test(document.querySelector('dialog.proposal[open] .proposal-actions [role=status]').textContent)`, 5000).then(() => true, () => false);
   const reread = await hostUntil(() => H.got.filter((m) => m.method === "tasks.diff").length > diffs0, 5000);
   // (and the page has the re-read: the view drawn again, its actions back under it)
   await P.until(`!!document.querySelector('dialog.proposal[open] .sbpv .file') && !!document.querySelector('dialog.proposal[open] .proposal-actions')?.isConnected`, 10000).catch(() => {});
   await sleep(100);
-  const st = await P.ev(`({ said: ${JSON.stringify(said)}, reread: ${JSON.stringify(reread)}, note: document.querySelector('#delegate-note')?.value, ro: document.querySelector('#delegate-note')?.readOnly, send: ${block}.querySelector('button.primary').getAttribute('aria-disabled') })`);
+  const st = await P.ev(`({ said: ${JSON.stringify(said)}, reread: ${JSON.stringify(reread)}, note: document.querySelector('dialog.proposal[open] #delegate-note')?.value, ro: document.querySelector('dialog.proposal[open] #delegate-note')?.readOnly, send: ${block}.querySelector('button.primary').getAttribute('aria-disabled') })`);
   ok(st.said && st.reread && H.asks.length === 0 && st.note === "  Also number the lines.\n" && st.ro === false && st.send === null, "the task moved on since it was read: refused (stale), said so, the proposal read again, the note kept to send again", st);
   // (sent while held at the host: Close can't be pressed meanwhile)
   H.hold.add("tasks.ask");
@@ -150,7 +150,7 @@ try {
   await hostUntil(() => H.held.some((m) => m.method === "tasks.ask"));
   ok((await P.ev(`document.querySelector('dialog.proposal[open] button[data-act="close"]').getAttribute('aria-disabled')`)) === "true", "while Ask for changes is being sent: Close disabled");
   // (and the note can't be edited meanwhile: typing changes nothing, so nothing typed after Send is lost)
-  const pend = await P.ev(`(() => { const t = document.querySelector('#delegate-note'); const before = t.value; t.focus(); document.execCommand('insertText', false, ' extra'); return { ro: t.readOnly, same: t.value === before, label: ${block}.querySelector('button.primary').textContent }; })()`);
+  const pend = await P.ev(`(() => { const t = document.querySelector('dialog.proposal[open] #delegate-note'); const before = t.value; t.focus(); document.execCommand('insertText', false, ' extra'); return { ro: t.readOnly, same: t.value === before, label: ${block}.querySelector('button.primary').textContent }; })()`);
   ok(pend.ro && pend.same && pend.label === "Sending…", "while it is being sent: the note is read only (typing changes nothing), Send says Sending…", pend);
   H.hold.clear();
   H.release();
@@ -171,14 +171,14 @@ try {
   H.hold.add("tasks.ask");
   await P.ev(`${askBtn}.click()`);
   await P.until(`!!${block} && !${block}.hidden`);
-  await P.ev(`(() => { const t = document.querySelector('#delegate-note'); t.value = 'Round 3 note'; t.dispatchEvent(new Event('input')); ${block}.querySelector('button.primary').click(); })()`);
+  await P.ev(`(() => { const t = document.querySelector('dialog.proposal[open] #delegate-note'); t.value = 'Round 3 note'; t.dispatchEvent(new Event('input')); ${block}.querySelector('button.primary').click(); })()`);
   await hostUntil(() => H.held.some((m) => m.method === "tasks.ask"));
   await P.ev(`document.querySelector('dialog.proposal[open] .x').click()`);
   await P.ev(`document.querySelector('#task-view .proposal-card').click()`);
   await P.until(`!!${askBtn} && !!document.querySelector('dialog.proposal[open] .sbpv .file')`, 20000);
   await P.ev(`${askBtn}.click()`);
   await P.until(`!!${block} && !${block}.hidden`);
-  await P.ev(`(() => { const t = document.querySelector('#delegate-note'); t.value = 'A newer draft'; t.dispatchEvent(new Event('input')); })()`);
+  await P.ev(`(() => { const t = document.querySelector('dialog.proposal[open] #delegate-note'); t.value = 'A newer draft'; t.dispatchEvent(new Event('input')); })()`);
   H.hold.clear();
   H.release();
   await hostUntil(() => H.asks.length === 2);
@@ -189,7 +189,7 @@ try {
   await P.until(`document.querySelector('dialog.proposal[open] .sbpv h3')?.textContent === 'Proposal, round 4'`, 20000);
   await P.ev(`${askBtn}.click()`);
   await P.until(`!!${block} && !${block}.hidden`);
-  ok((await P.ev(`document.querySelector('#delegate-note').value`)) === "A newer draft", "round 4 replaces round 3: the newer draft is still there for it");
+  ok((await P.ev(`document.querySelector('dialog.proposal[open] #delegate-note').value`)) === "A newer draft", "round 4 replaces round 3: the newer draft is still there for it");
   // (Close: asked first, then the task closed at the host with the proposal shown and its seq; the dialog goes)
   await P.ev(`document.querySelector('dialog.proposal[open] button[data-act="close"]').click()`);
   await P.until(`[...document.querySelectorAll('dialog.delegate-dlg[open] h3')].some((h) => h.textContent === 'Close this proposal?')`);
