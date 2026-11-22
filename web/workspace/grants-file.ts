@@ -68,22 +68,37 @@ export async function grantsToKeep(ws: GrantsWorkspace, storage: Store = localSt
   return out;
 }
 
-/** grants.json written at each change of the record (`onChange`), one write at a time: a change during a write
- * makes one more write after it, of the record as it is then. `save()` resolves once the writes it caused are done. */
-export function keepGrants(ws: GrantsWorkspace, invoke: Invoke, onChange: (f: () => void) => void, storage: Store = localStorage) {
-  let busy: Promise<void> | null = null, again = false;
-  const save = (): Promise<void> => {
-    if (busy) { again = true; return busy; }
-    busy = (async () => {
-      do {
-        again = false;
-        try { await invoke("grants_write", { json: JSON.stringify(await grantsToKeep(ws, storage)) }); }
-        catch (e) { console.warn("grants.json:", e); }
-      } while (again);
-      busy = null;
-    })();
-    return busy;
+/** grants.json written at each change of the record (`onChange`), one write at a time, the record as it is when each
+ * write starts; a change during a write makes one more. A write that fails keeps the latest change unwritten: tried
+ * again after `retryMs`, and at the next flush. `flush()` resolves once the latest change is in grants.json, and
+ * rejects, saying why, if it can't be written now (the quit's and the leave's barrier, disk-mirror.ts keepAll). */
+export function keepGrants(ws: GrantsWorkspace, invoke: Invoke, onChange: (f: () => void) => void, storage: Store = localStorage, retryMs = 3000) {
+  let changes = 0, written = 0, failed: unknown = null, busy: Promise<void> | null = null;
+  let timer: ReturnType<typeof setTimeout> | null = null;
+  const run = (): Promise<void> => (busy ??= (async () => {
+    try {
+      while (written < changes) {
+        const upTo = changes;
+        try {
+          await invoke("grants_write", { json: JSON.stringify(await grantsToKeep(ws, storage)) });
+          written = upTo;
+          failed = null;
+        } catch (e) {
+          failed = e;
+          console.warn("grants.json:", e);
+          if (!timer) timer = setTimeout(() => { timer = null; void run(); }, retryMs);
+          return;
+        }
+      }
+    } finally { busy = null; }
+  })());
+  onChange(() => { changes++; void run(); });
+  const flush = async (): Promise<void> => {
+    for (;;) {
+      await run();
+      if (written >= changes) return;
+      if (failed) throw new Error(`grants.json: ${(failed as any)?.message ?? failed}`);
+    }
   };
-  onChange(() => void save());
-  return { save };
+  return { flush, save: flush, get unwritten() { return written < changes; } };
 }

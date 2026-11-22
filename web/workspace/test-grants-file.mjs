@@ -48,12 +48,50 @@ for (const [bad, why] of [["", "none kept"], ["not json", "not JSON"], [J({ v: 2
 // kept at each change, one write at a time, the last one winning
 const fk = files(), sk = store({ [GRANTS_KEY]: J(rec1) });
 let changed = null;
-const k = keepGrants(w1, fk.invoke, (fn) => (changed = fn), sk);
+const k = keepGrants(w1, fk.invoke, (fn) => (changed = fn), sk, 50);
 changed();
 sk.setItem(GRANTS_KEY, J({ ...rec1, docs: { r1: { write: ["/a", "/a2"], t: 10 } } }));
 changed();
-await k.save();
+await k.flush();
 ok(fk.calls.filter((c) => c === "grants_write").length === 2 && J(parseGrants(fk.kept()).docs) === J({ "ws:/a/one.ipynb": { write: ["/a", "/a2"], t: 10 } }), "kept at each change: a change during a write makes one more, of the record as it is then: " + fk.kept());
+
+// the latest change, never lost: a write held unfinished keeps flush() waiting; a write that fails keeps it unwritten,
+// flush() rejecting with why, until a write succeeds (tried again by itself, and at the next flush)
+{
+  let release, mode = "hold", writes = 0, kept = "";
+  const invoke = async (c, a) => {
+    if (c !== "grants_write") return "";
+    writes++;
+    if (mode === "hold") await new Promise((r) => (release = r));
+    if (mode === "fail") throw new Error("disk full");
+    kept = a.json;
+  };
+  const sh = store({ [GRANTS_KEY]: J(rec1) });
+  let changed;
+  const g = keepGrants(w1, invoke, (fn) => (changed = fn), sh, 50);
+  changed();
+  let flushed = false;
+  const f1 = g.flush().then(() => (flushed = true));
+  await new Promise((r) => setTimeout(r, 100));
+  ok(!flushed && g.unwritten, "a write held unfinished: flush() still waits, the change still unwritten");
+  // (a denial made while that write is held: the record as it is then is written after it)
+  sh.setItem(GRANTS_KEY, J({ ...rec1, docs: { r1: { denied: [["write", "/a", 11]], t: 11 } } }));
+  changed();
+  mode = "ok"; release();
+  await f1;
+  ok(flushed && !g.unwritten && J(parseGrants(kept).docs) === J({ "ws:/a/one.ipynb": { denied: [["write", "/a", 11]], t: 11 } }), "...released: flush() resolves only once the latest change (the denial made meanwhile) is in grants.json");
+  mode = "fail";
+  sh.setItem(GRANTS_KEY, J({ ...rec1, docs: { r1: { write: ["/again"], t: 12 } } }));
+  changed();
+  const why = await g.flush().then(() => "resolved", (e) => String(e.message));
+  ok(why === "grants.json: disk full" && g.unwritten, "a write that fails: flush() rejects, saying why, and the change stays unwritten: " + why);
+  const before = writes;
+  mode = "ok";
+  await new Promise((r) => setTimeout(r, 200));
+  ok(writes > before && !g.unwritten && J(parseGrants(kept).docs) === J({ "ws:/a/one.ipynb": { write: ["/again"], t: 12 } }), "...tried again by itself: written once the disk takes it");
+  await g.flush();
+  ok(!g.unwritten, "...and flush() then resolves");
+}
 
 console.log(fails ? `${fails} of ${checks} failed` : `test-grants-file: all ${checks} passed`);
 process.exit(fails ? 1 : 0);
