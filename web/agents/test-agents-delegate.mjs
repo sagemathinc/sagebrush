@@ -163,6 +163,30 @@ try {
   await P.until(`document.querySelector('dialog.proposal[open] .sbpv h3')?.textContent === 'Proposal, round 3'`, 20000);
   const round3 = await P.ev(`({ slot: document.querySelector('dialog.proposal[open] .ask-slot').children.length, ask: ${askBtn}.getAttribute('aria-disabled') })`);
   ok(round3.slot === 0 && round3.ask === null, "round 3 replaces round 2 in the same dialog: the Ask block gone, Ask for changes offered again", round3);
+  // (a newer draft written while an older note is still being sent, in the proposal closed and opened again: the
+  //  older send's success doesn't remove it, and it stays across the next round replacing this one)
+  H.hold.add("tasks.ask");
+  await P.ev(`${askBtn}.click()`);
+  await P.until(`!!${block} && !${block}.hidden`);
+  await P.ev(`(() => { const t = document.querySelector('#delegate-note'); t.value = 'Round 3 note'; t.dispatchEvent(new Event('input')); ${block}.querySelector('button.primary').click(); })()`);
+  await hostUntil(() => H.held.some((m) => m.method === "tasks.ask"));
+  await P.ev(`document.querySelector('dialog.proposal[open] .x').click()`);
+  await P.ev(`document.querySelector('#task-view .proposal-card').click()`);
+  await P.until(`!!${askBtn} && !!document.querySelector('dialog.proposal[open] .sbpv .file')`, 20000);
+  await P.ev(`${askBtn}.click()`);
+  await P.until(`!!${block} && !${block}.hidden`);
+  await P.ev(`(() => { const t = document.querySelector('#delegate-note'); t.value = 'A newer draft'; t.dispatchEvent(new Event('input')); })()`);
+  H.hold.clear();
+  H.release();
+  await hostUntil(() => H.asks.length === 2);
+  await P.until(`document.querySelector('#tasks .task[data-task="${A.task}"] .chip')?.textContent === 'Working'`);
+  await sleep(300);
+  ok(H.asks[1]?.note === "Round 3 note" && (await P.ev(`localStorage.getItem(${JSON.stringify(KEY)})`)) === "A newer draft", "a newer draft, written in the proposal opened again while the older note was being sent: the older send's success leaves it kept", { sent: H.asks[1]?.note, kept: await P.ev(`localStorage.getItem(${JSON.stringify(KEY)})`) });
+  const r4 = await H.propose(A.task, { "work/notes.txt": "1 one\n2 two\n3 three\n4 four\n" });
+  await P.until(`document.querySelector('dialog.proposal[open] .sbpv h3')?.textContent === 'Proposal, round 4'`, 20000);
+  await P.ev(`${askBtn}.click()`);
+  await P.until(`!!${block} && !${block}.hidden`);
+  ok((await P.ev(`document.querySelector('#delegate-note').value`)) === "A newer draft", "round 4 replaces round 3: the newer draft is still there for it");
   // (Close: asked first, then the task closed at the host with the proposal shown and its seq; the dialog goes)
   await P.ev(`document.querySelector('dialog.proposal[open] button[data-act="close"]').click()`);
   await P.until(`[...document.querySelectorAll('dialog.delegate-dlg[open] h3')].some((h) => h.textContent === 'Close this proposal?')`);
@@ -170,7 +194,7 @@ try {
   await P.ev(`[...document.querySelectorAll('dialog.delegate-dlg[open] button')].find((b) => b.textContent === 'Close the task').click()`);
   await hostUntil(() => H.tasks.get(A.task).status === "closed");
   const closeSent = H.got.find((m) => m.method === "tasks.close")?.params;
-  ok(closeSent?.proposal === r3 && closeSent?.seq === A.log.length - 1, "Close: tasks.close for the round shown, at the seq it was read at", { closeSent, log: A.log.length });
+  ok(closeSent?.proposal === r4 && closeSent?.seq === A.log.length - 1, "Close: tasks.close for the round shown, at the seq it was read at", { closeSent, log: A.log.length });
   await P.until(`!document.querySelector('dialog.proposal[open]') && document.querySelector('#tasks .task[data-task="${A.task}"] .chip')?.textContent === 'Closed'`);
   ok(true, "closed: the dialog goes, and the task's chip says Closed");
   await P.ev(`document.querySelector('#task-view .task-head .link').click()`);

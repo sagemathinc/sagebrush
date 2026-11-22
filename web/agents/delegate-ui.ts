@@ -318,13 +318,16 @@ export function mountDelegate(h: DelegateHost) {
       send.textContent = T.askSending;
       // (the note can't change while it is being sent: what was sent is what was there)
       box.readOnly = true;
+      // (what is sent: the kept note goes after it only if it is still this, never a newer draft written meanwhile, in a
+      //  dialog opened again)
+      const sent = box.value;
       on.busy(true);
       try {
         const at = seen();
         if (!at) throw new AgentError("stale", DELEGATE_TEXT.askMoved);
         const current: DelegateDoc[] = await currentOf(at.files, h.readDoc);
         const r = await D.ask(task, { proposal: commit, seq: at.seq, note: box.value, current });
-        try { localStorage.removeItem(noteKey(task)); } catch { /* (no storage) */ }
+        try { if (localStorage.getItem(noteKey(task)) === sent) localStorage.removeItem(noteKey(task)); } catch { /* (no storage) */ }
         block.replaceChildren(el("p", { className: "st asked", textContent: T.askSent(r.round) }));
       } catch (e) {
         if (e instanceof AgentError && e.code === "stale") on.stale();
