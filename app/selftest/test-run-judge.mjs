@@ -25,7 +25,7 @@ const check2 = read("probe-log-fixtures/report-one-ok.txt").split("\n").find((l)
 // them, --desktop)
 const LATEX = read("report-fixtures/desktop-good.txt").split("\n").filter((l) => /^(ok   |FAIL )(the LaTeX editor is on|a \.tex opens|Share, Agent and Run)/.test(l));
 const BOARD = read("report-fixtures/desktop-good.txt").split("\n").filter((l) => /^(ok   |FAIL )(a board opens|a page the app doesn't have|the analyzer and KaTeX)/.test(l));
-const FILES = read("report-fixtures/desktop-good.txt").split("\n").filter((l) => /^(ok   |FAIL )(a notebook runs before it may change files|a grant the app didn't make|a name outside the notebook's folder|the page has no fs plugin)/.test(l));
+const FILES = read("report-fixtures/desktop-good.txt").split("\n").filter((l) => /^(ok   |FAIL )(a notebook runs before it may change files|a grant the app didn't make|a name outside the notebook's folder|the page has no fs plugin|Share isn't offered in the app)/.test(l));
 const withLatex = (lines) => read("report-fixtures/term-webkit-good.txt").split("\n").map((l) => (l.startsWith("ok   the page reaches the app's bridge: ") ? check2 : l))
   .flatMap((l) => (l.startsWith("ok   the shell worker can't reach the app's bridge: ") ? [l, ...lines] : [l])).join("\n");
 const REPORT = withLatex([...BOARD, ...LATEX, ...FILES]);
@@ -33,7 +33,7 @@ const LOG = read("probe-log-fixtures/desktop-good-one.txt");
 const DONE = `[page] terminal bridge probe: done ${NONCE}\n`;
 const BEFORE_DONE = LOG.slice(0, LOG.indexOf(DONE));
 const WORKER = `[page] terminal bridge probe: worker-route:tauri-core-invoke ${NONCE}\n`;
-if (!check2 || !REPORT.includes(check2) || !LOG.endsWith(DONE) || LATEX.length !== 3 || !REPORT.includes(LATEX[2]) || BOARD.length !== 3 || !REPORT.includes(BOARD[2]) || FILES.length !== 4 || !REPORT.includes(FILES[3])) throw new Error("the fixtures are not what this test expects");
+if (!check2 || !REPORT.includes(check2) || !LOG.endsWith(DONE) || LATEX.length !== 3 || !REPORT.includes(LATEX[2]) || BOARD.length !== 3 || !REPORT.includes(BOARD[2]) || FILES.length !== 5 || !REPORT.includes(FILES[4])) throw new Error("the fixtures are not what this test expects");
 
 function fakeChild() {
   const p = new EventEmitter();
