@@ -1202,7 +1202,7 @@ jobs:
       - name: browser groups ${{ matrix.groups }}
         env:
           CHROME: google-chrome
-          # (not GROUPS: bash's own array of the user's group ids, which an environment variable can't replace)
+          # (not GROUPS: that is a Bash special name, the user's group ids; avoided, though the environment does set it)
           WEB_GROUPS: ${{ matrix.groups }}
         run: |
           python3 web/serve.py 8765 &
