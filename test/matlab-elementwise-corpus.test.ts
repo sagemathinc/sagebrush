@@ -78,3 +78,25 @@ test("a real NaN exponent stays real, and gammaln of a negative number is MATLAB
   assert.equal(r.status, 0, r.err);
   assert.equal(r.out, "   1\nMATLAB:gammaln:negativeVal\nMATLAB:gammaln:negativeVal\nMATLAB:gammaln:negativeVal\n   Inf     0\n");
 });
+
+// (arrays, as an observed MATLAB run printed them, MATLAB R2026b, 2026-11-21: in a power whose array mixes negative
+// bases to fractional powers with other elements, only those are complex, the others computed in real arithmetic; a
+// zero result of rem keeps the dividend's sign; max and min give the first argument on a tie, a zero's sign included.
+// Each element as "re im", %.17g, so a signed zero shows)
+const ARRAYS: [string, string][] = [
+  ["power(-Inf, [0.5 1])", "0 Inf | -Inf 0"],
+  ["power(-1, [0.5 Inf])", "0 1 | 1 0"],
+  ["power(-2, [0.5 -Inf])", "0 1.4142135623730951 | 0 0"],
+  ["power([-8 0 -1], [0.5 -1 2])", "0 2.8284271247461903 | Inf 0 | 1 0"],
+  ["rem([-0 -0 -0], [1 Inf -2])", "-0 0 | -0 0 | -0 0"],
+  ["max([-0 0], [0 -0])", "-0 0 | 0 0"],
+  ["min([-0 0], [0 -0])", "-0 0 | 0 0"],
+];
+
+test("arrays as MATLAB computes them: real elements of a mixed power stay real; signed zeros of rem, max and min", () => {
+  const show = (e: string) => `x = ${e}; fprintf('%s\\n', strjoin(arrayfun(@(v) sprintf('%.17g %.17g', real(v), imag(v)), x, 'UniformOutput', false), ' | '));`;
+  const r = run(ARRAYS.map(([e]) => show(e)).join("\n"));
+  assert.equal(r.status, 0, r.err);
+  const got = r.out.trim().split("\n");
+  assert.deepEqual(ARRAYS.map(([e], k) => `${e} -> ${got[k]}`), ARRAYS.map(([e, w]) => `${e} -> ${w}`));
+});

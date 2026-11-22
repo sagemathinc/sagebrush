@@ -21,7 +21,7 @@ Two kinds of behaviour, held to two standards.
 - **Warnings:** which inputs warn (singular matrix, nearly singular with the RCOND value's form, iteration limits), and the identifier where MATLAB prints one.
 - **Edge cases:** empty inputs and their shapes (`sum(zeros(0,3))` is `zeros(1,3)`), `-0` where MATLAB's documentation says so, dimension arguments, `'omitnan'`, integer saturation and rounding, and implicit expansion's rules.
 - **NaN and Inf:** "exact" covers NaN and Inf that come from the inputs. Intermediate overflow is exact as §2's canonical order produces it, which differs from MATLAB's and Octave's order by design:
-  - `sum([1e308 1e308 -1e308])` is `1e308` here, where Octave gives `Inf`;
+  - `sum([1e308 1e308 -1e308])` is `1e308` here, where MATLAB (observed) and Octave give `Inf`;
   - `sum([1 1e100 1 -1e100])` is 2 here and 0 in Octave, which is within the accuracy contract.
 
   Tests of overflow-dependent results say so. A sum is $-0$ exactly when every input is $-0$, and the empty sum is $+0$, as MATLAB gives them (observed MATLAB R2026b, 2026-11-21, at 2, 9 and $10^5$ elements, double and single; Octave gives $+0$): each of the 8 accumulators starts at $-0$, the IEEE additive identity, and the empty case returns $+0$. The 8-accumulator PR pins it.

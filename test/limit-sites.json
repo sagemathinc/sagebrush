@@ -5665,6 +5665,46 @@
   "owner": "matlab (@sagebrush-matlab)",
   "reason": "refuses nothing: the census matches 'max' in the names cummax and cummin and in numpy's fmax; the line picks MATLAB's NaN-omitting accumulation for cummax and cummin, not a limit on a computation"
  },
+ "lib/_matlab_data.py ::  :: maxk_ = _topk(\"maxk\") #0": {
+  "class": "none",
+  "owner": "matlab (@sagebrush-matlab)",
+  "reason": "refuses nothing: the census matches 'max' in the name maxk; the line names or documents maxk and mink, which take the k largest or smallest elements, not a limit on a computation"
+ },
+ "lib/_matlab_data.py :: _topk.f :: \"\"\"[B, I] = maxk(A, k, dim, 'ComparisonMethod', c): the k largest (mink: smallest) elements along dim, in order, #0": {
+  "class": "none",
+  "owner": "matlab (@sagebrush-matlab)",
+  "reason": "refuses nothing: the census matches 'max' in the name maxk; the line names or documents maxk and mink, which take the k largest or smallest elements, not a limit on a computation"
+ },
+ "lib/_matlab_data.py :: _topk.f :: equal elements in their order in A; k past the dimension's length sorts it all (MATLAB's maxk page); by #0": {
+  "class": "none",
+  "owner": "matlab (@sagebrush-matlab)",
+  "reason": "refuses nothing: the census matches 'max' in the name maxk; the line names or documents maxk and mink, which take the k largest or smallest elements, not a limit on a computation"
+ },
+ "lib/_matlab_data.py :: _topk.f :: sargs = [float(axis + 1), _m.Char(\"descend\" if which == \"maxk\" else \"ascend\"), _m.Char(\"MissingPlacement\"), _m.Char(\"last\")] #0": {
+  "class": "none",
+  "owner": "matlab (@sagebrush-matlab)",
+  "reason": "refuses nothing: the census matches 'max' in the name maxk; the line names or documents maxk and mink, which take the k largest or smallest elements, not a limit on a computation"
+ },
+ "lib/_matlab_data.py :: writematrix_ :: \"\"\"writematrix(A, filename, 'Delimiter', d, 'WriteMode', m, 'FileType', 'text'): a delimited text file (.txt, .dat #0": {
+  "class": "none",
+  "owner": "matlab (@sagebrush-matlab)",
+  "reason": "refuses nothing: the census matches 'limit' in the option name Delimiter (and writematrix's other option names); the line reads writematrix's options, not a limit on a computation"
+ },
+ "lib/_matlab_data.py :: writematrix_ :: elif nm == \"filetype\" and _istext(val) and _text(val).lower() in (\"text\", \"delimitedtext\"): #0": {
+  "class": "none",
+  "owner": "matlab (@sagebrush-matlab)",
+  "reason": "refuses nothing: the census matches 'limit' in the option name Delimiter (and writematrix's other option names); the line reads writematrix's options, not a limit on a computation"
+ },
+ "lib/_matlab_data.py :: writematrix_ :: elif nm in (\"delimiter\", \"writemode\", \"filetype\"): #0": {
+  "class": "none",
+  "owner": "matlab (@sagebrush-matlab)",
+  "reason": "refuses nothing: the census matches 'limit' in the option name Delimiter (and writematrix's other option names); the line reads writematrix's options, not a limit on a computation"
+ },
+ "lib/_matlab_data.py :: writematrix_ :: if nm == \"delimiter\" and _istext(val) and _text(val).lower() in _DELIMS: #0": {
+  "class": "none",
+  "owner": "matlab (@sagebrush-matlab)",
+  "reason": "refuses nothing: the census matches 'limit' in the option name Delimiter (and writematrix's other option names); the line reads writematrix's options, not a limit on a computation"
+ },
  "lib/_matlab_assert.py :: _numeric :: \"Abs err %s exceeds tol %s by %s\" % (_g(err, 5), _g(abs(tk), 5), _g(err - abs(tk), 1)))) #0": {
   "class": "none",
   "owner": "MATLAB assert, Octave's form (@sagebrush-matlab)",

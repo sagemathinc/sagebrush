@@ -712,15 +712,18 @@ def _pow(A, B):
         # a negative base to a fractional power is complex (a NaN exponent stays real: power(-1, NaN) is a real
         # NaN in MATLAB)
         neg = (A < 0) & (B != np.floor(B)) & ~np.isnan(B)
-        if np.any(neg):
-            A = A.astype(np.complex128)
-        else:
+        if not np.any(neg):
             neg = None
     with np.errstate(divide="ignore", invalid="ignore", over="ignore"):
         if neg is not None:
+            # (only those elements are complex: the others in real arithmetic, as MATLAB computes them, observed
+            # MATLAB R2026b, 2026-11-21: power(-Inf, [0.5 1]) is [0+Inf i, -Inf], power(-1, [0.5 Inf]) is [0+1i, 1],
+            # power([-8 0 -1], [0.5 -1 2]) is [0+2.8284271247461903i, Inf, 1], where a complex power of every
+            # element gave -Inf+NaN i, NaN+NaN i and a refused complex zero)
             Ab, Bb = np.broadcast_arrays(A, B)
-            r = Ab ** Bb
-            r = np.where(neg, _negfrac_pow(Ab.real, Bb), r)
+            rr = np.where(neg, 1.0, Ab) ** Bb
+            rr = np.where((rr == 0) & ~((Bb == np.floor(Bb)) & (_fmod(Bb, 2.0) != 0)), 0.0, rr)
+            r = np.where(neg, _negfrac_pow(Ab, Bb), rr)
         else:
             r = A ** B
         if r.dtype.kind != "c":
@@ -4149,9 +4152,10 @@ def _take_along(A, idx, axis):
 
 
 def _fmod(A, B):
-    """C's fmod (the sign of A), exactly: numpy's mod of the magnitudes"""
+    """C's fmod (the sign of A), exactly: numpy's mod of the magnitudes, with A's sign, a zero result's too
+    (rem([-0 -0 -0], [1 Inf -2]) is [-0 -0 -0], observed MATLAB R2026b, 2026-11-21; sign(A) * ... made it +0)"""
     with np.errstate(divide="ignore", invalid="ignore"):
-        return np.sign(A) * np.mod(np.abs(A), np.abs(B))
+        return np.copysign(np.mod(np.abs(A), np.abs(B)), A)
 
 import re as _re
 
@@ -6481,7 +6485,12 @@ def _minmax(nargout, args, which):
         if _farr(a).dtype.kind == "c" or _farr(b).dtype.kind == "c":
             raise _err("%s of two arrays with complex values is not supported in Sagebrush." % which)
         cls = "logical" if class_(a) == "logical" and class_(b) == "logical" else _arith_class(a, b, which)
-        f = (np.maximum if big else np.minimum) if include else (np.fmax if big else np.fmin)
+        # (a tie gives the first argument, a zero's sign included: max([-0 0], [0 -0]) is [-0 0] and min the same,
+        # observed MATLAB R2026b, 2026-11-21, where numpy's fmax and fmin may return either zero)
+        if big:
+            f = (lambda A, B: np.where((B > A) | np.isnan(B), B, A)) if include else (lambda A, B: np.where((B > A) | np.isnan(A), B, A))
+        else:
+            f = (lambda A, B: np.where((B < A) | np.isnan(B), B, A)) if include else (lambda A, B: np.where((B < A) | np.isnan(A), B, A))
         return _finish(_broadcast(f, _farr(a), _farr(b)), cls)
     x = args[0]
     d = _dims(x)
@@ -6598,14 +6607,26 @@ def sort_(nargout, x, *args):
                 raise _err("sort: the option '%s' is not supported in Sagebrush." % _text(a))
         else:
             dim = _int_arg(a)
-    # (NaN go last ascending and first descending: the other placement is not implemented)
-    if placement not in ("auto", "last" if not desc else "first"):
-        raise _err("sort: 'MissingPlacement', '%s' is not supported in Sagebrush." % placement)
+    # (NaN go last ascending and first descending, unless 'MissingPlacement' says 'first' or 'last')
+    if placement not in ("auto", "first", "last"):
+        raise _err("sort: 'MissingPlacement' must be 'auto', 'first' or 'last'.")
+    nan_last = placement == "last" or (placement == "auto" and not desc)
     if method == "real" and _isnumlike(x) and _arr(x).dtype.kind == "c" and not _isvec(x):
         raise _err("sort: 'ComparisonMethod', 'real' is supported only for vectors in Sagebrush.")
     if method == "real" and _isnumlike(x) and _arr(x).dtype.kind == "c" and _isvec(x):
         vals = list(_arr(x).reshape(-1))
-        order = sorted(range(len(vals)), key=lambda k: (vals[k].real, vals[k].imag), reverse=desc)
+        # (a NaN part makes an element missing: set aside in its order, the rest sorted by real part, then imaginary,
+        # stably, and the missing placed as 'MissingPlacement' says, last ascending and first descending by default;
+        # observed MATLAB R2026b, 2026-11-21: sort([complex(NaN, 1) 3+2i 1+1i], 'ComparisonMethod', 'real') is
+        # [1+1i 3+2i NaN+1i], where a NaN in the sort key used to scramble the order)
+        miss = [k for k in range(len(vals)) if vals[k].real != vals[k].real or vals[k].imag != vals[k].imag]
+        rest = [k for k in range(len(vals)) if k not in set(miss)]
+        if desc:
+            # (descending and stable: equal keys keep their order)
+            rest = sorted(rest, key=lambda k: (-vals[k].real, -vals[k].imag))
+        else:
+            rest = sorted(rest, key=lambda k: (vals[k].real, vals[k].imag))
+        order = rest + miss if nan_last else miss + rest
         r = _box(np.array([vals[k] for k in order]).reshape(_arr(x).shape))
         return r if nargout <= 1 else [r, _box(np.array([float(k + 1) for k in order]).reshape(_arr(x).shape))]
     if type(x) is Cell or type(x) is StrArr or type(x) is Str:
@@ -6648,6 +6669,15 @@ def sort_(nargout, x, *args):
         pre = np.argsort(-ph if desc else ph, axis=ax, kind="stable")
         A = _take_along(A, pre, axis=ax)
         key = np.abs(A)
+    elif method == "abs":
+        # (real numbers by magnitude too, then by angle: 0 for the nonnegative, pi for the negative, so 3 comes
+        # before -3 ascending; observed MATLAB R2026b, 2026-11-21: sort([-3 2 -5 3], 'ComparisonMethod', 'abs') is
+        # [2 3 -3 -5], where the option used to be ignored for real input)
+        Af = A.astype(np.float64)
+        ph = np.where(Af < 0, np.pi, 0.0)
+        pre = np.argsort(-ph if desc else ph, axis=ax, kind="stable")
+        A = _take_along(A, pre, axis=ax)
+        key = np.abs(A.astype(np.float64))
     elif A.dtype.kind in "b":
         key = A.astype(np.float64)
     else:
@@ -6659,7 +6689,7 @@ def sort_(nargout, x, *args):
         order = np.argsort(k2, axis=ax, kind="stable")
         if np.any(nanmask):
             nn = _take_along(nanmask, order, axis=ax).astype(np.float64)
-            o2 = np.argsort(-nn if desc else nn, axis=ax, kind="stable")
+            o2 = np.argsort(nn if nan_last else -nn, axis=ax, kind="stable")
             order = _take_along(order, o2, axis=ax)
     else:
         order = np.argsort(-key.astype(np.float64) if desc else key, axis=ax, kind="stable")

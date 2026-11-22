@@ -31,7 +31,7 @@
     "kind": "function",
     "signature": "B = sort(A)\nB = sort(A, dim)\nB = sort(___, direction)\n[B, I] = sort(___)\nB = sort(___, 'ComparisonMethod', method)",
     "summary": "An array's elements sorted along a dimension, ascending or descending, with the permutation that sorts them.",
-    "doc": "`direction` is `'ascend'` (the default) or `'descend'`. The sort is stable: equal elements keep their order. NaN goes last ascending and first descending. Complex values sort by magnitude, then phase angle; `'ComparisonMethod'` is `'auto'`, `'real'` or `'abs'`. Cell arrays of character vectors and string arrays sort as text.",
+    "doc": "`direction` is `'ascend'` (the default) or `'descend'`. The sort is stable: equal elements keep their order. NaN goes last ascending and first descending, unless `'MissingPlacement'` is `'first'` or `'last'`. Complex values sort by magnitude, then phase angle; `'ComparisonMethod'` is `'auto'`, `'real'` or `'abs'`, and `'abs'` sorts real values by magnitude too, then by angle (a nonnegative value before a negative one of the same magnitude). Cell arrays of character vectors and string arrays sort as text.",
     "examples": [
       {
         "code": "[s, k] = sort([3 1 2], 'descend')",
@@ -43,7 +43,6 @@
       }
     ],
     "differs": [
-      "The 'MissingPlacement' option is refused.",
       "Tables, timetables, datetime and duration arrays, and gpuArray or distributed arrays are not supported."
     ],
     "status": "partial",
@@ -92,6 +91,64 @@
     ],
     "tags": [
       "sets"
+    ]
+  },
+  {
+    "name": "maxk",
+    "kind": "function",
+    "signature": "B = maxk(A, k)\nB = maxk(A, k, dim)\nB = maxk(___, 'ComparisonMethod', c)\n[B, I] = maxk(___)",
+    "summary": "The k largest elements of an array along a dimension, in order, with their indices.",
+    "doc": "The result is sorted largest first; equal elements keep their order in `A`. A `k` larger than the dimension's length sorts the whole dimension. The default dimension is the first whose size isn't 1. `c` is `'auto'` (real values for real input, magnitudes for complex), `'real'` or `'abs'`. NaN comes last in both `maxk` and `mink`.",
+    "examples": [
+      {
+        "code": "[B, I] = maxk([2 8 1 8 5], 3)",
+        "expected": "\nB =\n\n     8     8     5\n\n\nI =\n\n     2     4     5\n\n"
+      },
+      {
+        "code": "maxk([4 1 3; 9 0 2], 2, 2)",
+        "expected": "\nans =\n\n     4     3\n     9     2\n\n"
+      }
+    ],
+    "differs": [
+      "'ComparisonMethod', 'real' is supported only for vectors, as for sort."
+    ],
+    "status": "partial",
+    "see_also": [
+      "mink",
+      "sort",
+      "max"
+    ],
+    "tags": [
+      "sorting"
+    ]
+  },
+  {
+    "name": "mink",
+    "kind": "function",
+    "signature": "B = mink(A, k)\nB = mink(A, k, dim)\nB = mink(___, 'ComparisonMethod', c)\n[B, I] = mink(___)",
+    "summary": "The k smallest elements of an array along a dimension, in order, with their indices.",
+    "doc": "The result is sorted smallest first; equal elements keep their order in `A`. A `k` larger than the dimension's length sorts the whole dimension. The default dimension is the first whose size isn't 1. `c` is `'auto'` (real values for real input, magnitudes for complex), `'real'` or `'abs'`. NaN comes last in both `maxk` and `mink`.",
+    "examples": [
+      {
+        "code": "[B, I] = mink([2 8 1 8 5], 3)",
+        "expected": "\nB =\n\n     1     2     5\n\n\nI =\n\n     3     1     5\n\n"
+      },
+      {
+        "code": "mink([4 1 3; 9 0 2], 2, 2)",
+        "expected": "\nans =\n\n     1     3\n     0     2\n\n"
+      }
+    ],
+    "differs": [
+      "'ComparisonMethod', 'real' is supported only for vectors, as for sort."
+    ],
+    "status": "partial",
+    "see_also": [
+      "maxk",
+      "sort",
+      "min"
+    ],
+    "tags": [
+      "sorting"
     ]
   }
 ]

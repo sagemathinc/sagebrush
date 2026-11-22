@@ -431,5 +431,35 @@
       "statistics",
       "reductions"
     ]
+  },
+  {
+    "name": "zscore",
+    "kind": "function",
+    "signature": "Z = zscore(X)\nZ = zscore(X, flag)\nZ = zscore(X, flag, dim)\nZ = zscore(X, flag, vecdim)\nZ = zscore(X, flag, 'all')\n[Z, mu, sigma] = zscore(___)",
+    "summary": "Standardized scores: each element less the mean, over the standard deviation, along a dimension.",
+    "doc": "`flag` 0 (the default) normalizes the standard deviation by $n - 1$, 1 by $n$. The default dimension is the first whose size isn't 1. A sample of identical values gives zeros, with `sigma` 0. A sample containing NaN gives NaN. `mu` and `sigma` are the mean and standard deviation used.",
+    "examples": [
+      {
+        "code": "zscore([2 4 4 4 5 5 7 9])",
+        "expected": "\nans =\n\n  Columns 1 through 7\n\n   -1.4031   -0.4677   -0.4677   -0.4677         0         0    0.9354\n\n  Column 8\n\n    1.8708\n\n"
+      },
+      {
+        "code": "[Z, mu, sigma] = zscore([1 2; 3 2; 5 2])",
+        "expected": "\nZ =\n\n    -1     0\n     0     0\n     1     0\n\n\nmu =\n\n     3     2\n\n\nsigma =\n\n     2     0\n\n"
+      }
+    ],
+    "differs": [
+      "There is no 'omitnan' option, as in MATLAB: a sample with a NaN gives NaN."
+    ],
+    "status": "full",
+    "upstream": "Statistics and Machine Learning Toolbox",
+    "see_also": [
+      "std",
+      "mean",
+      "normalize"
+    ],
+    "tags": [
+      "statistics"
+    ]
   }
 ]
