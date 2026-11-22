@@ -8,9 +8,12 @@
 // gone from it.  Each launch also reads what the page has in this web view: cross-origin isolation and
 // SharedArrayBuffer, in the page and in a worker (required: the page's own interpreter's Stop needs them, and this
 // check runs without the engine subprocess) and OPFS (said only).  One report line, then the app exits.
-export async function persistProbe(spec: string, host: { ws: () => Promise<any>; mirror: () => any; invoke: (c: string, a?: any) => Promise<any> }) {
+// It also keeps a file permission across the launches (#1565, grants-file.ts): "write" allows the notebook to change one
+// folder, and waits for grants.json; "check" finds the notebook (another id now, made again from disk) allowed there.
+export async function persistProbe(spec: string, host: { ws: () => Promise<any>; mirror: () => any; invoke: (c: string, a?: any) => Promise<any>; grant?: (doc: string, folder: string) => boolean; trees?: (doc: string) => string[]; grantsSaved?: () => Promise<void> | undefined }) {
   const [mode, token] = [spec.slice(0, spec.indexOf(":")), spec.slice(spec.indexOf(":") + 1)];
   const f = `/sagebrush-persist-${token}.txt`, n = `/sagebrush-persist-${token}.ipynb`, b = `/sagebrush-persist-${token}.board.json`;
+  const SCOPE = `/sagebrush-persist-${token}-out`;
   const SETTING = "sagebrush-files-sort", dec = (c: any) => (typeof c === "string" ? c : new TextDecoder().decode(c));
   let ok = false, line = "";
   const caps = async () => {
@@ -34,6 +37,11 @@ export async function persistProbe(spec: string, host: { ws: () => Promise<any>;
       await ws.create(b);
       localStorage.setItem(SETTING, "probe-" + token);
       await settled(m);
+      // (a file permission for the notebook, as the person's Allow in a folder makes it; then grants.json written)
+      const ref = (await ws.stat(n))?.ref;
+      const granted = !!ref && !!host.grant?.(ref, SCOPE);
+      await host.grantsSaved?.();
+      const keptGrant = granted && String(await host.invoke("grants_read").catch(() => "")).includes(JSON.stringify("ws:" + n));
       // (the write-through's time for large ones: a notebook of 2,000 cells, a board of 2,000 notes, 20 MiB of data)
       const big = [
         [`/sagebrush-big-${token}.ipynb`, { nbformat: 4, nbformat_minor: 5, metadata: {}, cells: Array.from({ length: 2000 }, (_, i) => ({ cell_type: "code", source: `x${i} = ${i} * 2\nprint(x${i})`, metadata: {}, outputs: [], execution_count: null })) }],
@@ -51,21 +59,24 @@ export async function persistProbe(spec: string, host: { ws: () => Promise<any>;
       for (const [p] of big) { const t = await ws.remove(p); await ws.emptyTrash([t.path]); }
       await settled(m);
       const c = await caps(), where = await host.invoke("disk_where");
-      ok = c.need;
-      line = `made ${f}, ${n}, ${b} and a setting at ${location.origin}, in ${where}; write-through: ${times.join(", ")}; ${c.text}`;
+      ok = c.need && keptGrant;
+      line = `made ${f}, ${n}, ${b} and a setting at ${location.origin}, in ${where}; ${keptGrant ? `the notebook allowed in ${SCOPE}, kept in grants.json` : "the notebook's permission NOT kept in grants.json"}; write-through: ${times.join(", ")}; ${c.text}`;
     } else if (mode === "check") {
       const text = dec((await ws.read(f)).content);
       const nbOk = JSON.stringify((await ws.read(n)).content).includes(token);
       const bOk = !!(await ws.stat(b));
       const setting = localStorage.getItem(SETTING);
+      // (the notebook made again from disk: another id, and still allowed in the folder)
+      const ref2 = (await ws.stat(n))?.ref;
+      const grantBack = !!ref2 && !!host.trees?.(ref2).includes(SCOPE);
       for (const p of [f, n, b]) { const t = await ws.remove(p); await ws.emptyTrash([t.path]); }
       localStorage.removeItem(SETTING);
       await settled(m);
       const left = [];
       for (const p of [f, n, b]) if ((await host.invoke("disk_stat", { path: p })) !== null) left.push(p);
       const c = await caps();
-      ok = text === token + "-edited" && nbOk && bOk && setting === "probe-" + token && !left.length && c.need;
-      line = `found at ${location.origin}: the data file ${text === token + "-edited" ? "as changed on disk between the launches" : `holding ${JSON.stringify(text.slice(0, 40))}`}, the notebook ${nbOk ? "with its cell" : "WITHOUT its cell"}, the board ${bOk ? "" : "NOT "}there, the setting ${setting === "probe-" + token ? "kept" : `${JSON.stringify(setting)}`}; deleted, and ${left.length ? `STILL on disk: ${left.join(", ")}` : "all three gone"} from disk; ${c.text}`;
+      ok = text === token + "-edited" && nbOk && bOk && setting === "probe-" + token && !left.length && c.need && grantBack;
+      line = `found at ${location.origin}: the notebook ${grantBack ? "still allowed in its folder (grants.json)" : "NOT allowed in its folder any more"}, the data file ${text === token + "-edited" ? "as changed on disk between the launches" : `holding ${JSON.stringify(text.slice(0, 40))}`}, the notebook ${nbOk ? "with its cell" : "WITHOUT its cell"}, the board ${bOk ? "" : "NOT "}there, the setting ${setting === "probe-" + token ? "kept" : `${JSON.stringify(setting)}`}; deleted, and ${left.length ? `STILL on disk: ${left.join(", ")}` : "all three gone"} from disk; ${c.text}`;
     } else if (mode === "nav") {
       // "nav:<origin>": who can reach the app's commands (its window's capability gives them to the page's exact
       // origin, http://127.0.0.1:<the port the app holds>, app/src-tauri/src/nav.rs).  The token is another local server's origin

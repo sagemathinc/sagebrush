@@ -4838,6 +4838,8 @@ let wsSettled = false;
 // (the desktop app: the workspace's files on disk, web/workspace/disk-mirror.ts; null elsewhere) and its own module,
 // the app's only (web/workspace/desktop-entry.ts: sagebrush-desktop.js, which neither the site nor the CLI serves)
 let diskMirror = null, diskFailed = null;
+// (the app's file permissions kept in grants.json: keepGrants's handle, for a save to wait on)
+let grantsKept = null;
 const desktopModule = () => import(new URL("sagebrush-desktop.js", location.href).href);
 // (the disk can't be read: nothing done here would be kept, so nothing can be done: said over the whole page, the
 // notebook read-only, every save refused by the save gate)
@@ -4877,6 +4879,14 @@ const wsReady = (async () => {
     try { await migrate(w, localStorage); } catch (e) { console.warn("workspace: bringing in what was kept before:", e); }
     // (the desktop app: its files are on disk, this workspace their copy for this launch)
     if (TAURI && desktopApp()) try { diskMirror = await (await desktopModule()).diskWorkspace(w, (c, a, o) => TAURI.core.invoke(c, a, o)); } catch (e) { console.warn("disk workspace:", e); diskFailed = String(e?.message ?? e); diskBlocked(diskFailed); }
+    // (and its file permissions, kept in grants.json by where each notebook is (web/workspace/grants-file.ts): back
+    // before any notebook of this launch asks, then kept at each change; whatever already runs is told, as a change
+    // made in another tab is)
+    if (TAURI && desktopApp() && diskMirror) try {
+      const d = await desktopModule(), invoke = (c, a) => TAURI.core.invoke(c, a);
+      if (await d.restoreGrants(w, invoke)) { for (const [doc, x] of kernels) { permRev.set(doc, revOf(doc) + 1); x.policyChanged?.(); } if (current.id) filesShown(); }
+      grantsKept = d.keepGrants(w, invoke, (f) => perms.onChange(f));
+    } catch (e) { console.warn("grants.json:", e); }
     ws = w;
     window.sagebrush.workspace = w.forAgent("agent:page");
     // (tests: the workspace itself, its verbs with a check of the test's own (admit): loopback pages only)
@@ -5721,7 +5731,7 @@ const historyDbReady = openHistoryDb({ onVersionChange: () => { nbHistory?.close
     // (a quit, or the window closed: the notebook's save, the settings and every change on disk first)
     if (desktopApp()) desktopModule().then((d) => d.drainOnQuit({ mirror: () => diskMirror, invoke: (c, a) => TAURI.core.invoke(c, a), listen: (ev, f) => TAURI.event.listen(ev, f), freeze: () => nb.setReadOnly(true), flushEditor: () => nb.saved() })).catch((e) => console.warn("quit:", e));
     const persist = st && desktopApp() && await TAURI.core.invoke("selftest_persist");
-    if (persist) desktopModule().then((d) => d.persistProbe(persist, { ws: () => wsReady.then(() => ws), mirror: () => diskMirror, invoke: (c, a) => TAURI.core.invoke(c, a) }));
+    if (persist) desktopModule().then((d) => d.persistProbe(persist, { ws: () => wsReady.then(() => ws), mirror: () => diskMirror, invoke: (c, a) => TAURI.core.invoke(c, a), grant: (doc, folder) => perms.grant(doc, "write", folder).ok, trees: (doc) => perms.writeTrees(doc), grantsSaved: () => grantsKept?.save() }));
     else if (st) selftest(st);
   }
   // (however the start ends, an error included, Share stops waiting for it)

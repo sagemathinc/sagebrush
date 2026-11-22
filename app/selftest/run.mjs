@@ -104,7 +104,8 @@ if (passed && process.platform !== "win32" && existsSync(engine) && existsSync(j
 // (web/workspace/persist-probe.ts).  The first makes a data file, a notebook, a board and a setting, waits until they
 // are on disk (and times a large notebook's, board's and data file's write-through), and exits; its file and its
 // setting must be in the data folder (settings.json).  Between the launches another program (this test) changes the
-// data file on disk; the second must find all four, the data file as changed, at its other origin, then deletes
+// data file on disk, and allows the notebook to change a folder (grants.json); the second must find all four, the data
+// file as changed and the notebook still allowed there (another id now), at its other origin, then deletes
 // them and finds them gone from disk, the setting gone from settings.json.  Each launch also checks the page has
 // cross-origin isolation and SharedArrayBuffer in the page and a worker (OPFS said only).  Then the controls: the
 // same with the first launch's write-through left out, and with the second's import left out: each must fail.
@@ -131,13 +132,17 @@ async function twoLaunches(control) {
   const settingKept = existsSync(settings) && JSON.parse(readFileSync(settings, "utf8"))["sagebrush-files-sort"] === "probe-" + token;
   if (!onDisk) console.log(`launch 1's data file isn't on disk as written: ${file}`);
   if (!settingKept) console.log(`launch 1's setting isn't in ${settings}`);
+  // (and the notebook's file permission, in grants.json by its path: web/workspace/grants-file.ts)
+  const grantsFile = join(data, "grants.json");
+  const grantKept = existsSync(grantsFile) && readFileSync(grantsFile, "utf8").includes(JSON.stringify(`ws:/sagebrush-persist-${token}.ipynb`));
+  if (!grantKept && one.code === 0) console.log(`launch 1's file permission isn't in ${grantsFile}`);
   if (onDisk) writeFileSync(file, token + "-edited");
   const two = one.code === 0 && onDisk && settingKept ? await launch({ SAGEBRUSH_APP_PERSIST: `check:${token}`, SAGEBRUSH_APP_PORT: String(b), SAGEBRUSH_APP_DATA_DIR: data, ...(control === "no-import" ? { SAGEBRUSH_APP_DISK_CONTROL: control } : {}) }) : null;
   console.log(`launch 2 (port ${b}${control === "no-import" ? ", no import" : ""}): ${two ? `${persistLine(two)} (exit ${two.code})` : "not run"}`);
   const differ = !!one.origin && !!two?.origin && one.origin !== two.origin;
   const settingGone = two?.code === 0 && existsSync(settings) && JSON.parse(readFileSync(settings, "utf8"))["sagebrush-files-sort"] === undefined;
   return {
-    kept: one.code === 0 && onDisk && settingKept && two?.code === 0 && /^ok persist: found /m.test(two.out) && differ && settingGone,
+    kept: one.code === 0 && onDisk && settingKept && grantKept && two?.code === 0 && /^ok persist: found /m.test(two.out) && differ && settingGone,
     // (the first launch's probe ran to its end, healthy: the files made, the page's capabilities there)
     firstHealthy: one.code === 0 && /^ok persist: made /m.test(one.out),
     onDisk,
