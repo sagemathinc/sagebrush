@@ -13037,6 +13037,10 @@ for _n in ("hamming", "hann", "freqz", "pwelch", "spectrogram"):
 for _n in ("optimoptions", "fsolve", "fminunc", "lsqcurvefit", "linprog"):
     _B[_n] = _lazy_builtin("_matlab_optim", _n)
 
+# (lib/_matlab_ode_stiff.py: the stiff ODE solvers)
+for _n in ("ode15s", "ode23s"):
+    _B[_n] = _lazy_builtin("_matlab_ode_stiff", _n)
+
 
 def _keep_single(name, data=(0,), keep=()):
     """a built-in whose results are single when an input is single (as these functions' pages

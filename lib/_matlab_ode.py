@@ -183,6 +183,10 @@ _QUARTIC = np.linalg.inv(np.array([[1.0, 1.0, 1.0], [2.0, 3.0, 4.0], [0.25, 0.12
 def _interp(solver, step, s):
     """the solution and its derivative at the fractions s of a step (an
     array), from the step's data (t0, h, y0, y1, k: the stages' slopes)"""
+    if solver in ("ode15s", "ode23s"):
+        # (the stiff solvers' interpolants, lib/_matlab_ode_stiff.py)
+        import _matlab_ode_stiff
+        return _matlab_ode_stiff.interp(solver, step, s)
     t0, h, y0, y1, k = step
     f0, f1 = k[:, 0], k[:, -1]
     s = np.asarray(s, dtype=float)
@@ -452,13 +456,14 @@ def _solve(solver, nargout, args):
              "extdata": _m._struct1({"odefun": f, "options": opts if opts is not None else _empty(),
                                      "varargin": _m.Cell([], (1, 0))}),
              "x": num(np.array(steps_x).reshape((1, -1))),
-             "y": num(np.array(steps_y).T if steps_y else np.zeros((n, 0))),
-             "stats": _m._struct1({"nsteps": float(nsteps), "nfailed": float(nfailed), "nfevals": float(nfev[0])}),
-             "idata": _m._struct1({"_steps": _StepData(solver, steps_data, steps_x[-1])})}
+             "y": num(np.array(steps_y).T if steps_y else np.zeros((n, 0)))}
         if events is not None:
+            # (in MATLAB's order: xe, ye and ie after y, before stats and idata, as observed in MATLAB R2026b)
             d["xe"] = num(np.array(te).reshape((1, -1)))
             d["ye"] = num(np.array(ye).T if ye else np.zeros((n, 0)))
             d["ie"] = num(np.array(ie, dtype=float).reshape((1, -1)))
+        d["stats"] = _m._struct1({"nsteps": float(nsteps), "nfailed": float(nfailed), "nfevals": float(nfev[0])})
+        d["idata"] = _m._struct1({"_steps": _StepData(solver, steps_data, steps_x[-1])})
         return _m._struct1(d)
     T = np.array(tout).reshape((-1, 1))
     Y = np.array(yout)
@@ -550,7 +555,7 @@ def deval_(nargout, *args):
     data = dd.get("idata")
     sd = data.a[0].get("_steps") if type(data) is _m.Struct else None
     if not isinstance(sd, _StepData):
-        raise _err("deval: the solution structure must come from ode45 or ode23 in Sagebrush.")
+        raise _err("deval: the solution structure must come from ode45, ode23, ode15s or ode23s in Sagebrush.")
     xs = np.array(_m._arr(x), dtype=float).reshape(-1)
     steps = sd.steps
     if not steps:

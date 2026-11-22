@@ -5665,6 +5665,131 @@
   "owner": "matlab (@sagebrush-matlab)",
   "reason": "refuses nothing: the census matches 'max' in the names cummax and cummin and in numpy's fmax; the line picks MATLAB's NaN-omitting accumulation for cummax and cummin, not a limit on a computation"
  },
+ "lib/_matlab_ode_stiff.py ::  :: - ode15s is the variable-order (1 to MaxOrder, 5 by default) numerical differentiation formulas of section 2, kappa #0": {
+  "class": "none",
+  "owner": "matlab (@sagebrush-matlab)",
+  "reason": "refuses nothing: the census matches 'max' in the documentation of odeset's MaxOrder and MaxStep options; not a limit on a computation"
+ },
+ "lib/_matlab_ode_stiff.py :: _NDF :: \"\"\"ode15s's steps: the numerical differentiation formulas of orders 1 to maxorder in backward differences\"\"\" #0": {
+  "class": "none",
+  "owner": "matlab (@sagebrush-matlab)",
+  "reason": "refuses nothing: the census matches 'max' in the documentation of odeset's MaxOrder and MaxStep options; not a limit on a computation"
+ },
+ "lib/_matlab_ode_stiff.py :: _NDF.__init__ :: def __init__(self, fun, jac, M, wnorm, maxorder, bdf, n): #0": {
+  "class": "none",
+  "owner": "matlab (@sagebrush-matlab)",
+  "reason": "refuses nothing beyond MATLAB: the line is odeset's own MaxOrder or MaxStep option (its documented default and range, set by the user), which bounds the formulas' order or the step as MATLAB's do; not a limit Sagebrush adds"
+ },
+ "lib/_matlab_ode_stiff.py :: _NDF.__init__ :: self.maxorder = maxorder #0": {
+  "class": "none",
+  "owner": "matlab (@sagebrush-matlab)",
+  "reason": "refuses nothing beyond MATLAB: the line is odeset's own MaxOrder or MaxStep option (its documented default and range, set by the user), which bounds the formulas' order or the step as MATLAB's do; not a limit Sagebrush adds"
+ },
+ "lib/_matlab_ode_stiff.py :: _NDF.start :: self.D = np.zeros((self.n, self.maxorder + 3)) #0": {
+  "class": "none",
+  "owner": "matlab (@sagebrush-matlab)",
+  "reason": "refuses nothing beyond MATLAB: the line is odeset's own MaxOrder or MaxStep option (its documented default and range, set by the user), which bounds the formulas' order or the step as MATLAB's do; not a limit Sagebrush adds"
+ },
+ "lib/_matlab_ode_stiff.py :: _NDF.step :: _rescale(D, k, hmax / h) #0": {
+  "class": "none",
+  "owner": "matlab (@sagebrush-matlab)",
+  "reason": "refuses nothing beyond MATLAB: the line is odeset's own MaxOrder or MaxStep option (its documented default and range, set by the user), which bounds the formulas' order or the step as MATLAB's do; not a limit Sagebrush adds"
+ },
+ "lib/_matlab_ode_stiff.py :: _NDF.step :: def step(self, tf, maxstep, direction): #0": {
+  "class": "none",
+  "owner": "matlab (@sagebrush-matlab)",
+  "reason": "refuses nothing beyond MATLAB: the line is odeset's own MaxOrder or MaxStep option (its documented default and range, set by the user), which bounds the formulas' order or the step as MATLAB's do; not a limit Sagebrush adds"
+ },
+ "lib/_matlab_ode_stiff.py :: _NDF.step :: hmax = direction * maxstep #0": {
+  "class": "none",
+  "owner": "matlab (@sagebrush-matlab)",
+  "reason": "refuses nothing beyond MATLAB: the line is odeset's own MaxOrder or MaxStep option (its documented default and range, set by the user), which bounds the formulas' order or the step as MATLAB's do; not a limit Sagebrush adds"
+ },
+ "lib/_matlab_ode_stiff.py :: _NDF.step :: if abs(h) > maxstep: #0": {
+  "class": "none",
+  "owner": "matlab (@sagebrush-matlab)",
+  "reason": "refuses nothing beyond MATLAB: the line is odeset's own MaxOrder or MaxStep option (its documented default and range, set by the user), which bounds the formulas' order or the step as MATLAB's do; not a limit Sagebrush adds"
+ },
+ "lib/_matlab_ode_stiff.py :: _NDF.step :: if k < self.maxorder else _math.inf #0": {
+  "class": "none",
+  "owner": "matlab (@sagebrush-matlab)",
+  "reason": "refuses nothing beyond MATLAB: the line is odeset's own MaxOrder or MaxStep option (its documented default and range, set by the user), which bounds the formulas' order or the step as MATLAB's do; not a limit Sagebrush adds"
+ },
+ "lib/_matlab_ode_stiff.py :: _NDF.step :: self.h = h = hmax #0": {
+  "class": "none",
+  "owner": "matlab (@sagebrush-matlab)",
+  "reason": "refuses nothing beyond MATLAB: the line is odeset's own MaxOrder or MaxStep option (its documented default and range, set by the user), which bounds the formulas' order or the step as MATLAB's do; not a limit Sagebrush adds"
+ },
+ "lib/_matlab_ode_stiff.py :: _Rosenbrock.step :: def step(self, tf, maxstep, direction): #0": {
+  "class": "none",
+  "owner": "matlab (@sagebrush-matlab)",
+  "reason": "refuses nothing beyond MATLAB: the line is odeset's own MaxOrder or MaxStep option (its documented default and range, set by the user), which bounds the formulas' order or the step as MATLAB's do; not a limit Sagebrush adds"
+ },
+ "lib/_matlab_ode_stiff.py :: _Rosenbrock.step :: self.h = direction * min(abs(h) * fac, maxstep) #0": {
+  "class": "none",
+  "owner": "matlab (@sagebrush-matlab)",
+  "reason": "refuses nothing beyond MATLAB: the line is odeset's own MaxOrder or MaxStep option (its documented default and range, set by the user), which bounds the formulas' order or the step as MATLAB's do; not a limit Sagebrush adds"
+ },
+ "lib/_matlab_ode_stiff.py :: _solve :: h = min(maxstep, span, (rtol ** (1.0 / 3.0)) / rate if rate > 0 else span * 0.01) #0": {
+  "class": "none",
+  "owner": "matlab (@sagebrush-matlab)",
+  "reason": "refuses nothing: the starting step is capped by MaxStep and the interval, as MATLAB's is; not a limit on a computation"
+ },
+ "lib/_matlab_ode_stiff.py :: _solve :: if not 1 <= maxorder <= 5: #0": {
+  "class": "none",
+  "owner": "matlab (@sagebrush-matlab)",
+  "reason": "refuses nothing beyond MATLAB: the line is odeset's own MaxOrder or MaxStep option (its documented default and range, set by the user), which bounds the formulas' order or the step as MATLAB's do; not a limit Sagebrush adds"
+ },
+ "lib/_matlab_ode_stiff.py :: _solve :: maxorder = int(_m._scalar(o(\"MaxOrder\"))) if o(\"MaxOrder\") is not None else 5 #0": {
+  "class": "none",
+  "owner": "matlab (@sagebrush-matlab)",
+  "reason": "refuses nothing beyond MATLAB: the line is odeset's own MaxOrder or MaxStep option (its documented default and range, set by the user), which bounds the formulas' order or the step as MATLAB's do; not a limit Sagebrush adds"
+ },
+ "lib/_matlab_ode_stiff.py :: _solve :: maxstep = float(_m._scalar(o(\"MaxStep\"))) if o(\"MaxStep\") is not None else 0.1 * span #0": {
+  "class": "none",
+  "owner": "matlab (@sagebrush-matlab)",
+  "reason": "refuses nothing beyond MATLAB: the line is odeset's own MaxOrder or MaxStep option (its documented default and range, set by the user), which bounds the formulas' order or the step as MATLAB's do; not a limit Sagebrush adds"
+ },
+ "lib/_matlab_ode_stiff.py :: _solve :: raise _err(\"%s: MaxOrder must be 1, 2, 3, 4 or 5.\" % solver) #0": {
+  "class": "none",
+  "owner": "matlab (@sagebrush-matlab)",
+  "reason": "refuses nothing beyond MATLAB: the line is odeset's own MaxOrder or MaxStep option (its documented default and range, set by the user), which bounds the formulas' order or the step as MATLAB's do; not a limit Sagebrush adds"
+ },
+ "lib/_matlab_ode_stiff.py :: _solve :: res = stepper.step(tf, maxstep, direction) #0": {
+  "class": "none",
+  "owner": "matlab (@sagebrush-matlab)",
+  "reason": "refuses nothing beyond MATLAB: the line is odeset's own MaxOrder or MaxStep option (its documented default and range, set by the user), which bounds the formulas' order or the step as MATLAB's do; not a limit Sagebrush adds"
+ },
+ "lib/_matlab_ode_stiff.py :: _solve :: stepper = _Rosenbrock(fun, jac, M, wnorm) if solver == \"ode23s\" else _NDF(fun, jac, M, wnorm, maxorder, bdf, n) #0": {
+  "class": "none",
+  "owner": "matlab (@sagebrush-matlab)",
+  "reason": "refuses nothing beyond MATLAB: the line is odeset's own MaxOrder or MaxStep option (its documented default and range, set by the user), which bounds the formulas' order or the step as MATLAB's do; not a limit Sagebrush adds"
+ },
+ "lib/_matlab_ode_stiff.py :: _solve.wnorm :: return float(np.max(np.abs(e) / np.maximum(rtol * np.maximum(np.abs(ya), np.abs(yb)), atol))) if n else 0.0 #0": {
+  "class": "none",
+  "owner": "matlab (@sagebrush-matlab)",
+  "reason": "refuses nothing: the census matches numpy's maximum in the error norm, each component against max(RelTol*|y|, AbsTol) as the odeset page documents; not a limit on a computation"
+ },
+ "lib/_matlab_ode_stiff.py :: ode15s_ :: (a constant matrix), MaxOrder and BDF.\"\"\" #0": {
+  "class": "none",
+  "owner": "matlab (@sagebrush-matlab)",
+  "reason": "refuses nothing: the census matches 'max' in the documentation of odeset's MaxOrder and MaxStep options; not a limit on a computation"
+ },
+ "lib/_matlab_ode_stiff.py :: ode15s_ :: InitialStep, MaxStep, Refine (1 by default), Stats, Events, Jacobian (a matrix or a function of t and y), Mass #0": {
+  "class": "none",
+  "owner": "matlab (@sagebrush-matlab)",
+  "reason": "refuses nothing: the census matches 'max' in the documentation of odeset's MaxOrder and MaxStep options; not a limit on a computation"
+ },
+ "lib/_matlab_ode_stiff.py :: ode15s_ :: Reichelt (BDF 'on' for the backward differentiation formulas, MaxOrder up to 5). Options: RelTol, AbsTol, #0": {
+  "class": "none",
+  "owner": "matlab (@sagebrush-matlab)",
+  "reason": "refuses nothing: the census matches 'max' in the documentation of odeset's MaxOrder and MaxStep options; not a limit on a computation"
+ },
+ "lib/_matlab_ode_stiff.py :: ode23s_ :: continuous extension). Options as ode15s's but MaxOrder and BDF.\"\"\" #0": {
+  "class": "none",
+  "owner": "matlab (@sagebrush-matlab)",
+  "reason": "refuses nothing: the census matches 'max' in the documentation of odeset's MaxOrder and MaxStep options; not a limit on a computation"
+ },
  "lib/_matlab_optim.py ::  :: \"FunctionTolerance\": 1e-6, \"MaxFunctionEvaluations\": \"100*numberOfVariables\", \"MaxIterations\": 400.0, #0": {
   "class": "none",
   "owner": "matlab (@sagebrush-matlab)",
