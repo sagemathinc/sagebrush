@@ -98,8 +98,21 @@ fn smith_units_and_stop_checks() {
     let pins: &[(&str, [u64; FAMILIES], u64)] = &[
         ("route 1, word delta", [44, 0, 2, 0, 2, 24, 55, 0, 0, 0], 3),
         ("route 1, big delta", [17580, 0, 4772, 0, 280, 3386, 5052, 0, 0, 0], 5),
-        ("route 2, word delta", [143, 0, 31, 0, 30, 97, 208, 0, 0, 0], 9),
-        ("route 2, big delta", [34470, 0, 36537, 0, 1678, 3574, 6314, 0, 0, 0], 46),
+        // (route 2's checks beyond one an attempt and one a pass of the
+        // small Smith form, k = 2 here: in each attempt one a row of Y (k)
+        // and a pass of each pivot it reaches (one pass a pivot here, and k
+        // pivots: a failed attempt has rank 1, then the empty pivot 1),
+        // and in the generating one a column operation, a row of X's
+        // divisibility tests (multi-limb delta) and a row of q (top); then a
+        // row of c (top) and of the relations (k); after the small Smith
+        // form 4 k in its transforms' factors, 3 k in their unipotent
+        // inverses, and a row of R N_top (k), W (top + k) and V (top + k).
+        // Word input: top 1, 3 attempts, 2 column operations, 9 + (4 + 4 +
+        // 7) + 3 + 22 = 49; big input: top 10, 5 attempts, 25 column
+        // operations, its last attempt's pivot 0 in two passes, 46 + (4 * 4
+        // + 50) + 12 + 40 = 164)
+        ("route 2, word delta", [143, 0, 31, 0, 30, 97, 208, 0, 0, 0], 49),
+        ("route 2, big delta", [34470, 0, 36537, 0, 1678, 3574, 6314, 0, 0, 0], 164),
         ("classical, singular", [111, 0, 11, 0, 0, 182, 119, 0, 0, 0], 3),
         ("classical, wide", [29, 0, 12, 0, 0, 55, 0, 0, 0, 0], 4),
     ];

@@ -27,10 +27,11 @@ use sagebrush_bigint::BigInt;
 pub enum Route {
     /// k <= 1 nontrivial invariant factors: from one exact inverse.
     Cyclic,
-    /// 2 <= k <= k_max: k trailing generators, from the same inverse.
+    /// k >= 2: k trailing generators, from the same inverse.
     Trailing,
     /// The classical elimination over Z (by shape: singular or
-    /// rectangular, or more than k_max nontrivial invariants).
+    /// rectangular input; or, through the measurement hook
+    /// [`smith_form_k`], more nontrivial invariants than its threshold).
     Classical,
 }
 
@@ -91,11 +92,11 @@ fn col_sub(m: &mut [Vec<BigInt>], i: usize, j: usize, q: &BigInt, acc: &mut Loca
 
 /// The classical Smith form with transforms of any m x n integer matrix:
 /// the smallest-pivot elimination over Z, carrying U and V.  Always
-/// correct, but its entries can grow without bound (r2's fallback, chosen
-/// by shape: singular or rectangular input, or more than k_max nontrivial
-/// invariants).  The same pivots, in the same order, as the Python
-/// elimination it replaces (smallest absolute value, then row, then
-/// column), so its transforms are the ones Sage mode returned before.
+/// correct, but its entries can grow exponentially in n (r2's fallback,
+/// chosen by shape: singular or rectangular input).  The same pivots, in
+/// the same order, as the Python elimination it replaces (smallest
+/// absolute value, then row, then column), so its transforms are the ones
+/// Sage mode returned before.
 pub fn smith_classical(a: &ZMat) -> SmithForm {
     let (m, n) = (a.rows, a.cols);
     let mut acc = Local::new();
@@ -696,6 +697,18 @@ fn exact_op(ex: &mut Option<(ZMat, ZMat)>, k: usize, t: usize, j: usize, (x, y, 
     }
 }
 
+/// Charges the ring's work held so far (word ring: the local operation and
+/// step counts; big ring: its tally), flushes, and polls Stop: the check
+/// sees every unit of the work before it, none of the work after.
+fn ring_check<R: Zn>(ring: &R, ops: &mut u64, steps: &mut u64, acc: &mut Local) {
+    if R::WORD {
+        acc.n(Family::ModArith, std::mem::take(ops).saturating_add(std::mem::take(steps)));
+    }
+    acc.add(Units(ring.take()));
+    acc.flush();
+    sagebrush_interrupt::check_coarse();
+}
+
 /// For V' in GL_k(Z/delta): V unimodular with V = V' Delta^-1 (mod delta),
 /// Delta diagonal of units, up to column j modulo d_j, and V^-1 exactly:
 /// V = P^-1 U_1^-1 L_1 U_2 from U_1 P V' = L_1 Delta' U' (unit leading
@@ -716,7 +729,9 @@ fn unipotent_factors<R: Zn>(ring: &R, vb: Vec<Vec<R::T>>, delta: &BigInt, d: &[B
     // records them, and a swap conjugates the U_1 built so far, which only
     // touches rows above)
     let mut perm: Vec<usize> = (0..k).collect();
+    // (a Stop check per column of each O(k^3) pass: k reaches n)
     for j in 0..k {
+        ring_check(ring, &mut ops, &mut steps, acc);
         if !R::is_one(&ring.gcd_e(&x[j][j], &mut steps)) {
             if let Some(i) = (j + 1..k).find(|&i| R::is_one(&ring.gcd_e(&x[i][j], &mut steps))) {
                 x.swap(j, i);
@@ -781,12 +796,15 @@ fn unipotent_factors<R: Zn>(ring: &R, vb: Vec<Vec<R::T>>, delta: &BigInt, d: &[B
     }
     // X = U_1 P V' = L_1 U_full, U_full = Delta' U': no pivoting
     let pv: Vec<&Vec<R::T>> = perm.iter().map(|&i| &vb[i]).collect();
-    let mut xx: Vec<Vec<R::T>> = (0..k)
-        .map(|i| (0..k).map(|j| (0..k).fold(zero.clone(), |s, l| ring.lin(&one, &s, &u1[i][l], &pv[l][j]))).collect())
-        .collect();
-    ops = ops.saturating_add((k * k * k) as u64);
+    let mut xx: Vec<Vec<R::T>> = Vec::with_capacity(k);
+    for u1_row in &u1 {
+        ring_check(ring, &mut ops, &mut steps, acc);
+        xx.push((0..k).map(|j| (0..k).fold(zero.clone(), |s, l| ring.lin(&one, &s, &u1_row[l], &pv[l][j]))).collect());
+        ops = ops.saturating_add((k * k) as u64);
+    }
     let mut l1 = ident();
     for j in 0..k {
+        ring_check(ring, &mut ops, &mut steps, acc);
         let inv = unit_inverse(ring, &xx[j][j], &mut steps);
         for i in j + 1..k {
             let l = ring.lin(&inv, &xx[i][j], &zero, &zero);
@@ -810,6 +828,7 @@ fn unipotent_factors<R: Zn>(ring: &R, vb: Vec<Vec<R::T>>, delta: &BigInt, d: &[B
     // U_1^-1, unipotent upper, by back substitution
     let mut u1i = ident();
     for j in 0..k {
+        ring_check(ring, &mut ops, &mut steps, acc);
         for i in (0..j).rev() {
             // (U_1 U_1^-1)_ij = 0: u1i_ij = -sum_{i < l <= j} u1_il u1i_lj
             let mut s = zero.clone();
@@ -847,6 +866,8 @@ fn unipotent_factors<R: Zn>(ring: &R, vb: Vec<Vec<R::T>>, delta: &BigInt, d: &[B
         }
     }
     let (f1, f2) = (lift(&u1i), lift(&l1));
+    // (the lift's and the reduction's units, before the products' checks)
+    acc.flush();
     // V = P^-1 U_1^-1 L_1 U_2 (row perm[i] of V is row i of the product),
     // V^-1 = U_2^-1 L_1^-1 U_1 P (column perm[i] of V^-1 is its column i)
     let prod = f1.mul(&f2).mul(&f3);
@@ -869,6 +890,8 @@ fn unipotent_inverse(t: &ZMat, upper: bool, acc: &mut Local) -> ZMat {
     let k = t.rows;
     let mut inv = ZMat::identity(k);
     for j in 0..k {
+        acc.flush();
+        sagebrush_interrupt::check_coarse();
         // column j of the inverse: (T X)_ij = [i == j]
         let order: Vec<usize> = if upper { (0..j).rev().collect() } else { (j + 1..k).collect() };
         for i in order {
@@ -987,9 +1010,12 @@ fn trailing<R: Zn>(ring: &R, nm: &ZMat, delta: &BigInt, d: &BigInt, k: usize, ac
         attempt += 1;
         let mut ops = 0u64;
         let mut steps = 0u64;
-        // Y = R N_<top + N_bottom (mod delta), X = N_<top
+        // Y = R N_<top + N_bottom (mod delta), X = N_<top (with k up to n
+        // each pass of an attempt is O(n^3): a Stop check a row, a pivot,
+        // a column operation)
         let mut y: Vec<Vec<R::T>> = (0..k).map(|t| res[(top + t) * n..(top + t + 1) * n].to_vec()).collect();
         for (t, row) in rr.iter().enumerate() {
+            ring_check(ring, &mut ops, &mut steps, acc);
             for (i, ri) in row.iter().enumerate() {
                 if ri.is_zero() {
                     continue;
@@ -1012,6 +1038,8 @@ fn trailing<R: Zn>(ring: &R, nm: &ZMat, delta: &BigInt, d: &BigInt, k: usize, ac
         let mut rank = k;
         for r in 0..k {
             loop {
+                // (a check a pass: a pivot can take several)
+                ring_check(ring, &mut ops, &mut steps, acc);
                 if R::is_zero(&y[r][r]) {
                     // a nonzero entry in the block rows >= r, columns >= r
                     let found = (r..k).flat_map(|i| (r..n).map(move |j| (i, j))).find(|&(i, j)| !R::is_zero(&y[i][j]));
@@ -1099,6 +1127,7 @@ fn trailing<R: Zn>(ring: &R, nm: &ZMat, delta: &BigInt, d: &BigInt, k: usize, ac
             // X Q, by the recorded column operations
             x = (0..top).map(|i| res[i * n..(i + 1) * n].to_vec()).collect();
             for op in &cols {
+                ring_check(ring, &mut ops, &mut steps, acc);
                 match op {
                     ColOp::Swap(r, j) => {
                         for row in x.iter_mut() {
@@ -1125,6 +1154,7 @@ fn trailing<R: Zn>(ring: &R, nm: &ZMat, delta: &BigInt, d: &BigInt, k: usize, ac
             if !R::WORD {
                 // (the divisibility tests: a division of each w_j by g_j)
                 for w in &x {
+                    ring_check(ring, &mut ops, &mut steps, acc);
                     for (j, gj) in g.iter().enumerate() {
                         acc.add(bigdiv_units(limbs(&R::integer(&w[j])), limbs(gj)));
                     }
@@ -1165,6 +1195,11 @@ fn trailing<R: Zn>(ring: &R, nm: &ZMat, delta: &BigInt, d: &BigInt, k: usize, ac
             .collect();
         let (mut mul, mut div, mut word) = (0u64, 0u64, 0u64);
         for w in &x {
+            acc.n(Family::MulSchool, std::mem::take(&mut mul));
+            acc.n(Family::Div, std::mem::take(&mut div));
+            acc.n(Family::ModArith, std::mem::take(&mut word));
+            acc.flush();
+            sagebrush_interrupt::check_coarse();
             let row: Vec<BigInt> = (0..k)
                 .map(|j| {
                     let wi = R::integer(&w[j]);
@@ -1192,9 +1227,14 @@ fn trailing<R: Zn>(ring: &R, nm: &ZMat, delta: &BigInt, d: &BigInt, k: usize, ac
     // ModArith unit per product and per reduction; big delta, the helpers
     let word = R::WORD;
     let (mut mul, mut div, mut wops) = (0u64, 0u64, 0u64);
-    let c: Vec<Vec<BigInt>> = q
-        .iter()
-        .map(|qi| {
+    let mut c: Vec<Vec<BigInt>> = Vec::with_capacity(top);
+    for qi in &q {
+        acc.n(Family::MulSchool, std::mem::take(&mut mul));
+        acc.n(Family::Div, std::mem::take(&mut div));
+        acc.n(Family::ModArith, std::mem::take(&mut wops));
+        acc.flush();
+        sagebrush_interrupt::check_coarse();
+        c.push(
             (0..k)
                 .map(|l| {
                     let mut t = BigInt::zero();
@@ -1215,9 +1255,9 @@ fn trailing<R: Zn>(ring: &R, nm: &ZMat, delta: &BigInt, d: &BigInt, k: usize, ac
                     }
                     t.mod_floor(delta)
                 })
-                .collect()
-        })
-        .collect();
+                .collect(),
+        );
+    }
     acc.n(Family::MulSchool, mul);
     acc.n(Family::Div, div);
     acc.n(Family::ModArith, wops);
@@ -1227,6 +1267,11 @@ fn trailing<R: Zn>(ring: &R, nm: &ZMat, delta: &BigInt, d: &BigInt, k: usize, ac
     let mut rel: Vec<Vec<R::T>> = Vec::with_capacity(k);
     let (mut mul, mut div, mut wops) = (0u64, 0u64, 0u64);
     for j in 0..k {
+        acc.n(Family::MulSchool, std::mem::take(&mut mul));
+        acc.n(Family::Div, std::mem::take(&mut div));
+        acc.n(Family::ModArith, std::mem::take(&mut wops));
+        acc.flush();
+        sagebrush_interrupt::check_coarse();
         let f = delta / &g[j];
         if R::WORD {
             wops = wops.saturating_add(1);
@@ -1272,10 +1317,15 @@ fn trailing<R: Zn>(ring: &R, nm: &ZMat, delta: &BigInt, d: &BigInt, k: usize, ac
         })
         .collect();
     acc.n(Family::MulSchool, mul);
+    // (from here on a Stop check per row: with k up to n each pass below
+    // is O(n^2 k) products; the counts held so far are charged first)
     // the last k rows of C^-1 N over Z: N_bottom + R N_<top
     let mut yfull: Vec<Vec<BigInt>> = (0..k).map(|t| nm.d[(top + t) * n..(top + t + 1) * n].to_vec()).collect();
     let mut mul = 0u64;
     for (t, row) in rr.iter().enumerate() {
+        acc.n(Family::MulSchool, std::mem::take(&mut mul));
+        acc.flush();
+        sagebrush_interrupt::check_coarse();
         for (i, ri) in row.iter().enumerate() {
             if ri.is_zero() {
                 continue;
@@ -1299,6 +1349,10 @@ fn trailing<R: Zn>(ring: &R, nm: &ZMat, delta: &BigInt, d: &BigInt, k: usize, ac
         w.d[i * n + j] = qq;
     };
     for i in 0..top {
+        acc.n(Family::MulSchool, std::mem::take(&mut mul));
+        acc.n(Family::Div, std::mem::take(&mut div));
+        acc.flush();
+        sagebrush_interrupt::check_coarse();
         for j in 0..n {
             let mut num = nm.get(i, j).clone();
             for (l, cl) in c[i].iter().enumerate() {
@@ -1311,6 +1365,10 @@ fn trailing<R: Zn>(ring: &R, nm: &ZMat, delta: &BigInt, d: &BigInt, k: usize, ac
         }
     }
     for (t, bt) in b.iter().enumerate() {
+        acc.n(Family::MulSchool, std::mem::take(&mut mul));
+        acc.n(Family::Div, std::mem::take(&mut div));
+        acc.flush();
+        sagebrush_interrupt::check_coarse();
         for j in 0..n {
             let mut num = BigInt::zero();
             for (l, bl) in bt.iter().enumerate() {
@@ -1345,12 +1403,18 @@ fn trailing<R: Zn>(ring: &R, nm: &ZMat, delta: &BigInt, d: &BigInt, k: usize, ac
     };
     let mut v = ZMat::zero(n, n);
     for i in 0..top {
+        acc.n(Family::MulSchool, std::mem::take(&mut mul));
+        acc.flush();
+        sagebrush_interrupt::check_coarse();
         v.d[i * n + i] = BigInt::one();
         for col in 0..k {
             v.d[i * n + top + col] = prod(&c[i], col, &mut mul);
         }
     }
     for t in 0..k {
+        acc.n(Family::MulSchool, std::mem::take(&mut mul));
+        acc.flush();
+        sagebrush_interrupt::check_coarse();
         // (I - R c)_t
         let mut irc: Vec<BigInt> = (0..k).map(|l| BigInt::from((l == t) as u8)).collect();
         for (i, ri) in rr[t].iter().enumerate() {
@@ -1437,16 +1501,26 @@ fn cyclic_ring(nm: &ZMat, delta: &BigInt) -> Result<SmithForm, String> {
 
 /// The Smith form with transforms of any integer matrix: route 1 when a is
 /// square and nonsingular with k <= 1 nontrivial invariant factors, route
-/// 2 when 2 <= k <= K_MAX (both from one exact inverse), else the
-/// classical elimination (by shape).
+/// 2 for every k >= 2 (both from one exact inverse), else (singular or
+/// rectangular input) the classical elimination.
+///
+/// Route 2 has no threshold on k.  Measured against the classical
+/// elimination on nonsingular input (n = 12 to 48, entries of 8 to 64
+/// bits, k = 8 up to n - 1): route 2 used 5 to more than 1000 times fewer
+/// units at every k, with entries of U and V 4 to 70 times smaller in
+/// bits; alone, it ran k up to n at n = 64 in at most 0.4 s.  (A threshold
+/// of 8 came from measurements made before the small Smith form's
+/// transforms were bounded.)
 ///
 /// An error only for an internal failure (a route's proven invariant not
 /// holding): a bug, never a property of the input.
 pub fn smith_form(a: &ZMat) -> Result<SmithForm, String> {
-    smith_form_k(a, K_MAX)
+    smith_form_k(a, usize::MAX)
 }
 
-/// [`smith_form`] with route 2's threshold given (for its measurement).
+/// [`smith_form`] with a threshold on route 2's k (a measurement hook:
+/// more nontrivial invariants than `k_max` take the classical
+/// elimination).
 #[doc(hidden)]
 pub fn smith_form_k(a: &ZMat, k_max: usize) -> Result<SmithForm, String> {
     if a.rows == a.cols && a.rows > 0 {
@@ -1480,13 +1554,6 @@ pub fn floor_bytes(m: usize, n: usize) -> Option<u64> {
     let entries = m.checked_mul(m)?.checked_add(n.checked_mul(n)?)?.checked_add(m.checked_mul(n)?)?;
     u64::try_from(entries.checked_mul(8)?).ok()
 }
-
-/// The most nontrivial invariant factors route 2 takes; more go to the
-/// classical elimination (a route threshold, never a refusal).  Measured
-/// on 30 x 30 and 20 x 20 and 40 x 40 inputs: route 2 is 3 to 140 times
-/// faster than the classical elimination up to k = 8; at k = 16 its small
-/// k x k Smith form's transforms grow and the classical route is faster.
-pub const K_MAX: usize = 8;
 
 /// The work estimate: units models of the routes and the fitted constants.
 pub mod estimate;

@@ -235,13 +235,19 @@ fn route_two_is_exact() {
 }
 
 #[test]
-fn more_than_k_max_takes_the_classical_route() {
-    let s: Vec<i64> = (0..K_MAX + 1).map(|_| 2).collect();
+fn any_k_takes_route_two() {
+    // nine nontrivial invariant factors: route 2 (no threshold on k); the
+    // measurement hook's threshold still sends it to the classical route
+    let s: Vec<i64> = (0..9).map(|_| 2).collect();
     let a = structured(&s, 11);
     let f = smith_form(&a).unwrap();
-    assert_eq!(f.route, Route::Classical);
+    assert_eq!(f.route, Route::Trailing);
     assert_smith(&a, &f);
     assert!((0..a.rows).all(|i| f.d.get(i, i) == &BigInt::from(2)));
+    let g = smith_form_k(&a, 8).unwrap();
+    assert_eq!(g.route, Route::Classical);
+    assert_smith(&a, &g);
+    assert_eq!(g.d.d, f.d.d);
 }
 
 #[test]

@@ -164,10 +164,11 @@ pub(crate) fn echelon_units_dense(rows: usize, cols: usize, batch: usize) -> [u6
     const BLOCK: usize = 16;
     let mut u = [0u64; FAMILIES];
     let (ms, ma, mv) = (Family::MulSchool as usize, Family::ModArith as usize, Family::Move as usize);
-    let upd = |u: &mut [u64; FAMILIES], len: usize, factors: usize| {
-        u[ms] = u[ms].saturating_add(size_product(&[factors, len]));
-        u[ma] = u[ma].saturating_add(size_product(&[len, factors / batch + 1]));
-        u[mv] = u[mv].saturating_add(len as u64);
+    // `count` row updates of `len` entries by `factors` pivots each
+    let upd = |u: &mut [u64; FAMILIES], len: usize, factors: usize, count: usize| {
+        u[ms] = u[ms].saturating_add(size_product(&[factors, len, count]));
+        u[ma] = u[ma].saturating_add(size_product(&[len, factors / batch + 1, count]));
+        u[mv] = u[mv].saturating_add(size_product(&[len, count]));
     };
     let mut block_start = 0;
     for r in 0..rows {
@@ -176,27 +177,24 @@ pub(crate) fn echelon_units_dense(rows: usize, cols: usize, batch: usize) -> [u6
         if blk > 0 {
             u[ms] = u[ms].saturating_add(size_product(&[rows - r, blk]));
             u[ma] = u[ma].saturating_add(size_product(&[rows - r, blk / batch + 1]));
-            upd(&mut u, cols - (col + 1), blk);
+            upd(&mut u, cols - (col + 1), blk, 1);
         }
         u[ma] = u[ma].saturating_add((cols - col) as u64 + 1);
         let (r1, col1) = (r + 1, col + 1);
         if r1 - block_start == BLOCK {
-            for _ in r1..rows {
-                upd(&mut u, cols - col1, BLOCK);
-            }
+            upd(&mut u, cols - col1, BLOCK, rows - r1);
             block_start = r1;
         }
     }
     // back substitution, bottom up: row i against the later pivots, in
-    // chunks of about 2^16 multiply-adds
+    // chunks of about 2^16 multiply-adds (the full chunks multiplied, then
+    // the remainder: O(rows) for the whole count)
     let step = ((1usize << 16) / cols.max(1)).max(1);
     for i in (0..rows).rev() {
         let later = rows - 1 - i;
-        let mut left = later;
-        while left > 0 {
-            let c = left.min(step);
-            upd(&mut u, cols - (i + 1), c);
-            left -= c;
+        upd(&mut u, cols - (i + 1), step, later / step);
+        if later % step > 0 {
+            upd(&mut u, cols - (i + 1), later % step, 1);
         }
     }
     u
