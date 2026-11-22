@@ -60,7 +60,7 @@ export const PROPOSAL_TEXT = {
   before: "Before",
   noRender: "Can't show the rendered document here.",
   onlyThisFile: "Only this file is rendered: the files it includes aren't shown here.",
-  diffOnly: "Diff only: running or viewing it here isn't in this version.",
+  diffOnly: "Diff only: no rendered preview or code execution here yet.",
   nothing: "No files changed.",
 } as const;
 

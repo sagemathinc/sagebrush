@@ -285,7 +285,7 @@ try {
     await ev(`window.clickFile('${path}')`);
     await until(`!!${fileAt(i)}.querySelector('pre.diff')`);
     const c = await ev(`(() => { const f = ${fileAt(i)}; return { diff: f.querySelectorAll('pre.diff').length, says: [...f.querySelectorAll('p.st')].map((p) => p.textContent), rendered: f.querySelectorAll('.md-rendered, .text-rendered, .tex-rendered').length }; })()`);
-    ok(c.diff === 1 && c.says.includes("Diff only: running or viewing it here isn't in this version.") && c.rendered === 0, `${path}: its line diff and "Diff only", nothing rendered`, c);
+    ok(c.diff === 1 && c.says.includes("Diff only: no rendered preview or code execution here yet.") && c.rendered === 0, `${path}: its line diff and "Diff only", nothing rendered`, c);
   }
   // (no Markdown renderer on the page: the diff only; past PROPOSAL_LIMITS.bytes: never given to the renderer)
   await ev("window.mdCalls = []; window.open1({ list: window.MDLIST })");
