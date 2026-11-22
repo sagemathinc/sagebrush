@@ -625,26 +625,26 @@
   {
    "file": "engine/web/src/lib.rs",
    "item": "fn sb_call",
-   "hash": "ccb657ef5cc34d857fcd6269347e43377c02d872617bc9c09af14a5b1546b90b",
-   "audit": "Can it produce or alter an Obligations, Operation, Reservation, Growth or Context (directly, generically or through a pointer)? No. Its unsafe operations only read host-written request bytes and replace or read the REPLY byte buffer. Supported boundary for the REPLY argument: wasm's single thread; natively only the one-test ABI binaries call these exports, and any other native caller is unsupported (a restricted boundary, not a general safe-Rust API guarantee)."
+   "hash": "55deb71d33c1b87ea98907acd56248d206d5db65aea7a54cd5aa8779748c9f3d",
+   "audit": "Can it produce or alter an Obligations, Operation, Reservation, Growth or Context (directly, generically or through a pointer)? No. Its unsafe operations only read host-written request bytes and replace or read the REPLY byte buffer. Supported boundary for the REPLY argument: wasm's single thread; natively only the one-test ABI binaries call these exports, and any other native caller is unsupported (a restricted boundary, not a general safe-Rust API guarantee). Each call starts with new_run(), a safe call (the progress frames' reset and the Smith progress state's reset: stores only, no pointer from the request), before the unsafe reads; its unsafe operations are unchanged."
   },
   {
    "file": "engine/web/src/lib.rs",
    "item": "fn sb_sym_call",
-   "hash": "e5362b04bab0bf5d907b7c3fccb4c0fdd6f49003de5c916190f049cf72e134f6",
-   "audit": "Can it produce or alter an Obligations, Operation, Reservation, Growth or Context (directly, generically or through a pointer)? No. Its unsafe operations only read host-written request bytes and replace or read the REPLY byte buffer. Supported boundary for the REPLY argument: wasm's single thread; natively only the one-test ABI binaries call these exports, and any other native caller is unsupported (a restricted boundary, not a general safe-Rust API guarantee)."
+   "hash": "f9851e316a64fe2a6396ef391256a01039ef8541807c996edfbfef7847fe83f8",
+   "audit": "Can it produce or alter an Obligations, Operation, Reservation, Growth or Context (directly, generically or through a pointer)? No. Its unsafe operations only read host-written request bytes and replace or read the REPLY byte buffer. Supported boundary for the REPLY argument: wasm's single thread; natively only the one-test ABI binaries call these exports, and any other native caller is unsupported (a restricted boundary, not a general safe-Rust API guarantee). Each call starts with new_run(), a safe call (the progress frames' reset and the Smith progress state's reset: stores only, no pointer from the request), before the unsafe reads; its unsafe operations are unchanged."
   },
   {
    "file": "engine/web/src/lib.rs",
    "item": "fn sb_mp_call",
-   "hash": "5733f186f73275cd07e9acd18d56533634a381469fad273ce40d71ed2758960b",
-   "audit": "Can it produce or alter an Obligations, Operation, Reservation, Growth or Context (directly, generically or through a pointer)? No. Its unsafe operations only read host-written request bytes and replace or read the REPLY byte buffer. Supported boundary for the REPLY argument: wasm's single thread; natively only the one-test ABI binaries call these exports, and any other native caller is unsupported (a restricted boundary, not a general safe-Rust API guarantee)."
+   "hash": "6c3cb3a42ffb7e1eaa17a929ae8f68b391dc78e4f24da04592204ad10beeaf58",
+   "audit": "Can it produce or alter an Obligations, Operation, Reservation, Growth or Context (directly, generically or through a pointer)? No. Its unsafe operations only read host-written request bytes and replace or read the REPLY byte buffer. Supported boundary for the REPLY argument: wasm's single thread; natively only the one-test ABI binaries call these exports, and any other native caller is unsupported (a restricted boundary, not a general safe-Rust API guarantee). Each call starts with new_run(), a safe call (the progress frames' reset and the Smith progress state's reset: stores only, no pointer from the request), before the unsafe reads; its unsafe operations are unchanged."
   },
   {
    "file": "engine/web/src/lib.rs",
    "item": "fn sb_bin_call",
-   "hash": "875a1e8f74725bfa2df991dee7d4b83e49d3cb780c373e34bc70ece51f092926",
-   "audit": "Can it produce or alter an Obligations, Operation, Reservation, Growth or Context (directly, generically or through a pointer)? No. Its unsafe operations only read host-written request bytes and replace or read the REPLY byte buffer, as sb_mp_call's; the call's reservation is taken inside the safe bin_ops::call_bin through the safe ledger API. Supported boundary for the REPLY argument: wasm's single thread; natively only the one-test ABI binaries call these exports, and any other native caller is unsupported (a restricted boundary, not a general safe-Rust API guarantee)."
+   "hash": "07ebba0bc85fbaa266e82f40f95081583662c303c536d2670b5188a6c1f1d0f3",
+   "audit": "Can it produce or alter an Obligations, Operation, Reservation, Growth or Context (directly, generically or through a pointer)? No. Its unsafe operations only read host-written request bytes and replace or read the REPLY byte buffer, as sb_mp_call's; the call's reservation is taken inside the safe bin_ops::call_bin through the safe ledger API. Supported boundary for the REPLY argument: wasm's single thread; natively only the one-test ABI binaries call these exports, and any other native caller is unsupported (a restricted boundary, not a general safe-Rust API guarantee). Each call starts with new_run(), a safe call (the progress frames' reset and the Smith progress state's reset: stores only, no pointer from the request), before the unsafe reads; its unsafe operations are unchanged."
   },
   {
    "file": "engine/web/src/lib.rs",
@@ -753,6 +753,12 @@
    "item": "fn reserve",
    "hash": "1e3da7ad6d258661041922ccd7589ac24a2f66ac518783d7304c31926cc5de0f",
    "audit": "Can it produce or alter an Obligations, Operation, Reservation, Growth or Context (directly, generically or through a pointer)? No. Test glue: it calls the C-ABI exports with pointers to live test-owned bytes; any reservation goes through sb_reserve's safe ledger calls."
+  },
+  {
+   "file": "engine/web/tests/new_run.rs",
+   "item": "fn call",
+   "hash": "1cfe674fce30319fd65b8a33705e8a53f8f29053bcc61d5296993d51f227fa4d",
+   "audit": "Can it produce or alter an Obligations, Operation, Reservation, Growth or Context (directly, generically or through a pointer)? No. Test glue: one call of a C-ABI entry point (sb_call, sb_sym_call, sb_mp_call or sb_bin_call) with a pointer and length of a live test-owned byte slice; the test binary is the exports' only caller."
   },
   {
    "file": "engine/web/tests/nmod_alloc.rs",
