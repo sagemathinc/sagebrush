@@ -960,6 +960,8 @@ function mountFile(a: Artifact, box: HTMLElement, saved: HTMLElement): FileHost 
           changed(ta.value);
         };
         ta.onscroll = fit;
+        // (and again when the field's size changes: a tab shown, full screen, the window)
+        new ResizeObserver(fit).observe(ta);
         const show = () => {
           // (its label says what it does: no aria-pressed beside it, which would say the opposite)
           toggle.textContent = mode === "edit" ? "View" : "✎ Edit";

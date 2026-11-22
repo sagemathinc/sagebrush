@@ -233,7 +233,7 @@ try {
   const e = await P.ev(`(() => { const h = document.querySelector('${HOST}'), ta = h.querySelector('textarea.code-edit'), hl = h.querySelector('pre.code-hl'), b = h.querySelector('.mode-toggle'), r1 = ta.getBoundingClientRect(), r2 = hl.getBoundingClientRect(), s1 = getComputedStyle(ta), s2 = getComputedStyle(hl);
     return { value: ta.value, focused: document.activeElement === ta, hlKw: [...hl.querySelectorAll('.hk')].map((x) => x.textContent), label: b.textContent, same: r1.left === r2.left && r1.top === r2.top && s1.font === s2.font && s1.paddingLeft === s2.paddingLeft && s1.paddingTop === s2.paddingTop && s1.lineHeight === s2.lineHeight, color: s1.color,
       d: [r1.left, r2.left, r1.top, r2.top, s1.font, s2.font, s1.paddingLeft, s2.paddingLeft, s1.paddingTop, s2.paddingTop, s1.lineHeight, s2.lineHeight] }; })()`);
-  ok(e.value.startsWith("def f(z):\n    return z * z + 1  # step\n") && e.focused && e.label === "View", "C2: ✎ Edit makes it a field, with its text, focused; the switch says View", e);
+  ok(e.value === "def f(z):\n    return z * z + 1  # step\n# <img src=x onerror=\"window.__xss = 1\">\n" && e.focused && e.label === "View", "C2: ✎ Edit makes it a field, with its text, focused; the switch says View", e);
   ok(e.hlKw.includes("def") && e.same && e.color === "rgba(0, 0, 0, 0)", "C2: the colours are behind the field's (transparent) text, in the same font, place and padding", e);
   await P.ev(`(() => { const t = document.querySelector('${HOST} textarea.code-edit'); t.setSelectionRange(t.value.length, t.value.length); return true; })()`);
   await P.send("Input.insertText", { text: "while True:\n" });
