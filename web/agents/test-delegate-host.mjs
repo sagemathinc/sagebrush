@@ -3,7 +3,8 @@
 // delegate.1) and answers tasks.* from tasks kept in memory (design/workspace-agent-protocol.md §6.1), with task.event
 // notifications. CI can't import the agent's own repo, so this is the agent's behavior as the protocol says it, no
 // more: every tasks.* is refused (forbidden) unless the page's last grant.changed holds delegate: true, as the agent
-// checks; a grant without it ends the tasks' turns (their status goes to interrupted). Controls for the rows: `hold`
+// checks; a grant without it ends the tasks' turns (their status goes to interrupted). tasks.merged is idempotent by
+// merge_id, as the agent's: the same request gets the same answer, another one with that merge_id is refused. Controls for the rows: `hold`
 // (methods left unanswered until `release`), `fail` (methods answered with an error code), `pageSize` (tasks.get's events per answer).
 import { blobId } from "../workspace/tasks-schema.ts";
 
@@ -87,6 +88,23 @@ export function delegateHost({ features = ["delegate.1", "chat.resume"], pageSiz
         if (p.proposal !== t.proposal || p.seq !== t.log.length) return refuse(m.id, "stale", "the task moved on");
         H.emit(t.task, { type: "task_status", status: "closed" });
         return answer(m.id, { status: "closed" });
+      }
+      case "tasks.merged": {
+        if (!t) return refuse(m.id, "not_found");
+        // (idempotent by the exact request: the same merge_id and bytes, the same answer; another payload, conflict)
+        const key = JSON.stringify(p);
+        H.ledger ??= new Map();
+        const prior = H.ledger.get(p.merge_id);
+        if (prior) return prior.key === key ? answer(m.id, prior.answer) : refuse(m.id, "conflict", "this merge_id was used with another request");
+        if (t.status === "merged" || t.status === "closed") return refuse(m.id, "final", `the task is ${t.status}`);
+        if (t.status !== "proposal" || p.proposal !== t.proposal || p.seq !== t.log.length) return refuse(m.id, "stale", "the task has moved on from that proposal");
+        const want = t.diffs[t.proposal];
+        if (p.files.length !== want.length || !p.files.every((f) => want.some((w) => w.path === f.path && w.blob === f.proposal_blob))) return refuse(m.id, "bad_request", "files must be exactly the proposal's changed paths");
+        const full = p.files.every((f) => f.mine !== null && f.merged !== null);
+        const result = { recorded: full ? "merge" : "receipt", commit: full ? hex(20) : null };
+        H.ledger.set(p.merge_id, { key, answer: result });
+        H.emit(t.task, { type: "task_status", status: "merged" });
+        return answer(m.id, result);
       }
       case "tasks.revoke": {
         if (!t) return refuse(m.id, "not_found");

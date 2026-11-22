@@ -114,3 +114,35 @@ export function filterOutputs(doc: any, notShown: string): Shown | Refused {
   }
   return n;
 }
+
+/** For what a Delegate Merge writes (Pair and Delegate plan, UI r3.2 §2): only `cells`' outputs (the cells a merge
+ * takes from a proposal), each kept as the preview keeps it (text/plain, a stream's and an error's text, a PNG, JPEG or
+ * WebP picture whose header says its size), everything else taken out, its metadata too. Past a bound, counted over all
+ * of `cells` (the outputs, the text; the pictures, their pixels), what goes past is taken out as well. An output left
+ * with nothing becomes `notShown`'s line. Copies:
+ * `cells` aren't changed, and a cell's type, source, attachments and metadata are kept as they are. */
+export function sanitizeOutputsOnly<C extends { outputs?: unknown }>(cells: readonly C[], notShown: string): C[] {
+  const n = { outputs: 0, images: 0, pixels: 0, text: 0 };
+  const line = { output_type: "display_data", data: { "text/plain": notShown }, metadata: {} };
+  const text = (s: string) => (n.text += utf8(s)) <= OUTPUT_LIMITS.text;
+  const picture = (mime: string, v: unknown) => {
+    if (!(PICTURES as readonly string[]).includes(mime)) return false;
+    const head = base64Head(textOf(v)), size = head && pictureSize(mime, head);
+    if (!size || size.w < 1 || size.h < 1 || size.w > OUTPUT_LIMITS.side || size.h > OUTPUT_LIMITS.side) return false;
+    n.pixels += size.w * size.h;
+    return ++n.images <= OUTPUT_LIMITS.images && n.pixels <= OUTPUT_LIMITS.pixels;
+  };
+  const one = (o: any): unknown => {
+    if (++n.outputs > OUTPUT_LIMITS.outputs || !o || typeof o !== "object") return line;
+    if (o.output_type === "stream") return text(textOf(o.text)) ? { output_type: "stream", name: o.name === "stderr" ? "stderr" : "stdout", text: textOf(o.text) } : line;
+    if (o.output_type === "error") return text(textOf(o.traceback) + textOf(o.ename) + textOf(o.evalue)) ? { output_type: "error", ename: textOf(o.ename), evalue: textOf(o.evalue), traceback: Array.isArray(o.traceback) ? o.traceback.filter((t: unknown) => typeof t === "string") : [] } : line;
+    const src = o.data && typeof o.data === "object" ? o.data : {}, data: Record<string, unknown> = {};
+    for (const mime of Object.keys(src)) {
+      if (mime === "text/plain" ? text(textOf(src[mime])) : picture(mime, src[mime])) data[mime] = src[mime];
+    }
+    if (!Object.keys(data).length) return line;
+    const kind = o.output_type === "execute_result" ? "execute_result" : "display_data";
+    return { output_type: kind, data, metadata: {}, ...(kind === "execute_result" ? { execution_count: Number.isInteger(o.execution_count) ? o.execution_count : null } : {}) };
+  };
+  return cells.map((c) => (Array.isArray(c.outputs) ? { ...c, outputs: c.outputs.map(one) } : c));
+}

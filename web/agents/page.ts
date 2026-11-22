@@ -41,6 +41,7 @@ import { entryUrl } from "../workspace/entry-url";
 import { threadMarkdown, turnMarkdown, userMarkdown } from "../workspace/agent-chat/transcript";
 import { DelegateTasks } from "./delegate";
 import { mountDelegate } from "./delegate-ui";
+import { workspaceIO } from "./delegate-merge";
 import { toIpynb } from "../notebook/ipynb.js";
 import { mountVersionStamp } from "../version";
 
@@ -1190,6 +1191,9 @@ const delegateUi = mountDelegate({
   },
   site: new URL("../", import.meta.url),
   toast,
+  // (Merge: this browser's workspace, and the agent's record of it)
+  merge: workspaceIO(() => workspace, (task, params) => delegateTasks.merged(task, params)),
+  session: sessionStorage,
 });
 // (the Files | Agents switch at the right of the chat list's header, Agents pressed: Files opens the notebook page with
 //  its files, as the file panel's switch opens this page; William, Nov 12)

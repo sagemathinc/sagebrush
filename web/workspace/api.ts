@@ -1467,6 +1467,14 @@ export class Workspace {
   async setLastExport(r: { at: number; partial: boolean; members: number; bytes: number }): Promise<void> {
     await inTx(this.ws, "meta", "readwrite", async (tx) => { tx.objectStore("meta").put(r, "export:last"); });
   }
+  /** A Delegate Merge's record on this device, for one task (meta "delegate-merge:<task>": web/agents/delegate-merge.ts
+   * writes and checks it), or undefined; `null` clears it. */
+  async delegateMerge(task: string): Promise<unknown> {
+    return inTx(this.ws, "meta", "readonly", (tx) => req(tx.objectStore("meta").get("delegate-merge:" + task)));
+  }
+  async setDelegateMerge(task: string, rec: unknown): Promise<void> {
+    await inTx(this.ws, "meta", "readwrite", async (tx) => { const st = tx.objectStore("meta"); if (rec === null) st.delete("delegate-merge:" + task); else st.put(rec, "delegate-merge:" + task); });
+  }
 
   /** One entry, or undefined.  `opts.admit` (the host's, AdmitCheck): asked in the same read, before it answers. */
   async stat(p: string, opts: Admitted = {}): Promise<Entry | undefined> {

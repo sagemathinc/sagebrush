@@ -8,6 +8,7 @@
 import { AgentPairing } from "../workspace/agent-pair.ts";
 import { DelegateTasks, chipOf, DELEGATE_TEXT } from "./delegate.ts";
 import { delegateHost } from "./test-delegate-host.mjs";
+import { isDone, mergedParams, newRecord, prepare, run } from "./delegate-merge.ts";
 
 let failures = 0;
 const ok = (c, msg, extra) => { console.log((c ? "ok   " : "FAIL ") + msg + (!c && extra !== undefined ? " " + JSON.stringify(extra).slice(0, 400) : "")); if (!c) failures++; };
@@ -277,6 +278,51 @@ for (const [what, event, chip] of [["failed", { type: "task_status", status: "fa
   ok((await why(D8.close(T2.task, T2.proposal, s2.seen().seq))) === "stale" && H8.tasks.get(T2.task).status === "proposal", "a task that moved on since it was read: refused (stale), not closed");
   P8.revoke();
   H8.stop();
+}
+
+// ---- Merge's record at the agent (tasks.merged): from the proposal as read; idempotent by merge_id
+{
+  const H9 = delegateHost();
+  const T = await H9.addTask({ title: "merge", base: { "a.txt": "x\nb\nc\n" }, proposal: { "a.txt": "y\nb\nc\n" } });
+  const U = await H9.addTask({ title: "moved", base: { "a.txt": "x\nb\nc\n" }, proposal: { "a.txt": "z\nb\nc\n" } });
+  const D9 = new DelegateTasks({ changed: () => {} });
+  const P9 = pairWith(H9);
+  D9.attach(P9);
+  await P9.paired();
+  await P9.allow({ folders: ["/"], write: true, expires: null }, false);
+  const mine = { "a.txt": { id: { kind: "file", fid: "f1", created: 1, ref: null }, rev: 1, text: "x\nb\nc\nmine\n" } };
+  const io = { async mine(p) { return mine[p] ? { ...mine[p] } : null; }, async write(p, k, text, at) { mine[p] = { ...at, rev: at.rev + 1, text }; return at.id; }, async create() { throw new Error("no"); }, async remove() {}, async load() {}, async save() {}, merged: (t, p) => D9.merged(t, p) };
+  const params = { task: T.task, proposal: T.proposal, seq: 1, merge_id: "a".repeat(32), files: [] };
+  ok((await why(D9.merged(T.task, params))) === "forbidden" && !H9.got.some((m) => m.method === "tasks.merged"), "tasks.merged with the switch off: refused here, nothing sent");
+  D9.turnOn();
+  await until(() => D9.tasks.length === 2);
+  const src = D9.source(T.task, T.proposal);
+  await src.diff();
+  const seen = src.seen();
+  ok(seen.base === T.base && seen.commit === T.proposal && seen.files.length === 1, "a proposal read: its base, commit and files, for the decision", seen);
+  const pin = { task: T.task, base: seen.base, proposal: seen.commit, seq: seen.seq, files: seen.files };
+  const plans = await prepare(io, src, pin);
+  const rec = await run(io, newRecord(pin, plans, {}));
+  ok(isDone(rec) && mine["a.txt"].text === "y\nb\nc\nmine\n" && H9.got.filter((m) => m.method === "tasks.file").length === 2, "Merge through the page's source: both sides read and checked, the person's file written", mine["a.txt"]);
+  const req = await mergedParams(rec);
+  const r1 = await D9.merged(T.task, req);
+  ok(r1.recorded === "merge" && /^[0-9a-f]{40}$/.test(r1.commit), "tasks.merged with every file in full: recorded as a merge, its commit", r1);
+  await until(() => D9.task(T.task)?.entry.status === "merged");
+  ok(chipOf(D9.task(T.task).entry) === "Merged", "after it is recorded, the chip says Merged");
+  const r2 = await D9.merged(T.task, await mergedParams(rec));
+  ok(JSON.stringify(r2) === JSON.stringify(r1) && H9.tasks.get(T.task).log.filter((e) => e.event.status === "merged").length === 1, "a retry after a lost answer (the same merge_id, the same bytes): the same answer, recorded once");
+  ok((await why(D9.merged(T.task, { ...req, files: req.files.map((f) => ({ ...f, merged: { absent: true } })) }))) === "conflict", "the same merge_id with another request: refused (conflict)");
+  ok((await why(D9.merged(T.task, { ...req, merge_id: "b".repeat(32) }))) === "final", "a new merge_id for a task already merged: refused (final)");
+  // (the task moved on after its proposal was read: a decision on it refused)
+  mine["a.txt"].text = "x\nb\nc\nmine\n";
+  const su = D9.source(U.task, U.proposal);
+  await su.diff();
+  const pu = { task: U.task, base: U.base, proposal: U.proposal, seq: su.seen().seq, files: su.seen().files };
+  H9.emit(U.task, { type: "turn_started" });
+  ok((await why(D9.merged(U.task, await mergedParams(newRecord(pu, await prepare(io, su, pu), {}))))) === "stale", "a decision on a proposal the task moved on from: refused (stale)");
+  ok((await why(D9.merged(U.task, { ...req }))) === "bad_request", "a request for another task than named: refused here");
+  P9.revoke();
+  H9.stop();
 }
 
 // ---- an agent that doesn't offer Delegate: no switch

@@ -48,6 +48,8 @@ try {
   await P.ev(`(() => { const d = [...document.querySelectorAll('.sbag-dlg')].at(-1); const all = [...d.querySelectorAll('label')].find((l) => l.textContent.startsWith('Everything')).querySelector('input'); all.checked = true; all.dispatchEvent(new Event('change')); [...d.querySelectorAll('button')].find((b) => b.textContent === 'Allow').click(); })()`);
   await P.until(`document.querySelector('#connect').textContent === 'Connected'`);
   await P.until(`!!document.querySelector('#delegate-switch')?.offsetParent`);
+  // (the grant reaches the host on its own message, which can come after the page shows the switch)
+  await hostUntil(() => !!H.grant);
   let u = await ui();
   ok(u.sw === "Delegate: off" && u.btn && u.tasks === null && H.grant && !H.grant.delegate, "granted, an agent that offers Delegate: the switch shown, off; Delegate… shown; no tasks; the grant has no delegate", u);
   ok(H.got.filter((m) => m.method?.startsWith("tasks.")).length === 0, "nothing asked of the host's tasks while the switch is off");
@@ -96,9 +98,9 @@ try {
   await P.until(`document.querySelector('dialog.proposal[open]').textContent.includes('two')`, 20000).catch(() => {});
   ok(fileAsks().includes("work/notes.txt@base") && fileAsks().includes("work/notes.txt@proposal") && (await P.ev(`document.querySelector('dialog.proposal[open]').textContent.includes('two')`)), "a file opened: both sides read (tasks.file, base and proposal), its diff shown", fileAsks());
   await shot("4-proposal");
-  // (its actions: Close now; Merge and Ask for changes not yet, and said so)
+  // (its actions: Merge and Close; Ask for changes not yet, and said so)
   const acts = await P.ev(`[...document.querySelectorAll('dialog.proposal[open] button[data-act]')].map((b) => [b.dataset.act, b.textContent, b.getAttribute('aria-disabled')])`);
-  ok(JSON.stringify(acts) === JSON.stringify([["merge", "Merge", "true"], ["ask", "Ask for changes", "true"], ["close", "Close", null]]) && /Merge and Ask for changes come in the next update\./.test(await P.ev(`document.querySelector('dialog.proposal[open]').textContent`)), "the proposal's actions: Close; Merge and Ask for changes not yet, said so", acts);
+  ok(JSON.stringify(acts) === JSON.stringify([["merge", "Merge", null], ["ask", "Ask for changes", "true"], ["close", "Close", null]]) && /Ask for changes comes in the next update\./.test(await P.ev(`document.querySelector('dialog.proposal[open]').textContent`)), "the proposal's actions: Merge and Close; Ask for changes not yet, said so", acts);
   // (a newer round of the task, while its proposal is open: it replaces the one shown, in place)
   const r2 = await H.propose(A.task, { "work/notes.txt": "one\ntwo\nthree\n" });
   await P.until(`document.querySelector('dialog.proposal[open] .sbpv h3')?.textContent === 'Proposal, round 2'`, 20000);

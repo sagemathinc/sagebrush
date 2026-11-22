@@ -6,11 +6,14 @@
 //     pane, editable), where it runs (this computer), and May run code (only if the grant may, frozen at Start);
 //   - the Tasks list under the chats, each with its chip;
 //   - a task's view in place of the chat: its status, its thread (the agent's turns), and its proposal's card, which
-//     opens the proposal view (the review chunk's) in a dialog. Merge, Close and Ask for changes come with UI-4.
+//     opens the proposal view (the review chunk's) in a dialog, with its actions: Merge (delegate-merge.ts: each
+//     conflict picked first; an incomplete one said on the task's chip, and a kept one finished after a reload) and
+//     Close; Ask for changes comes next.
 // Shown only for an agent on this computer whose hello offers delegate.1: nothing changes for any other.
 import type { Thread, Turn } from "../workspace/agent-chat/events";
 import { AgentError } from "../workspace/agent-pair";
 import { chipOf, type DelegateDoc, type DelegateTasks } from "./delegate";
+import { MergeError, clearPicks, closeRest, isDone, loadPicks, mergedParams, newRecord, prepare, recordOf, revise, run, savePicks, unpicked, unresolved, type FileMerge, type MergeIO, type MergeRecord, type Picks, type Pinned } from "./delegate-merge";
 
 export const DELEGATE_UI_TEXT = {
   switchOn: "Delegate: on",
@@ -34,8 +37,21 @@ export const DELEGATE_UI_TEXT = {
   tasks: "Tasks",
   skipped: (n: number) => (n === 1 ? "One event of this task couldn't be shown here." : `${n} events of this task couldn't be shown here.`),
   proposal: (n: number, base: string, commit: string) => `Proposal: ${n === 1 ? "1 file" : `${n} files`} changed · base ${base.slice(0, 7)} · proposal ${commit.slice(0, 7)}`,
-  laterActions: "Merge and Ask for changes come in the next update.",
+  laterActions: "Ask for changes comes in the next update.",
   merge: "Merge",
+  merging: "Merging…",
+  mergeFailed: "Couldn't merge.",
+  pickAll: (n: number) => `Pick a side for ${n === 1 ? "the conflict" : `each of the ${n} conflicts`}, then Merge.`,
+  picksDropped: (paths: string[]) => `Your picks for ${paths.join(", ")} were made against another version: pick again.`,
+  yours: "Yours",
+  keepMine: "Keep mine",
+  take: (agent: string) => `Take ${agent}'s`,
+  incomplete: "Merge incomplete",
+  incompleteBody: (paths: string[]) => `${paths.length === 1 ? "This file" : "These files"} changed while the merge was written, and ${paths.length === 1 ? "wasn't" : "weren't"} merged: ${paths.join(", ")}. Merge again to merge ${paths.length === 1 ? "it" : "them"} as ${paths.length === 1 ? "it is" : "they are"} now, or close what's left. The files already written stay as they are.`,
+  closeRest: "Close what's left",
+  merged: "Merged: your files have the changes.",
+  notRecorded: (m: string) => `Your files have the merge, but the agent didn't record it: ${m}`,
+  notRecordedYet: "Your files have the merge, but the agent hasn't recorded it yet. Merge again to try again.",
   ask: "Ask for changes",
   closeTask: "Close",
   closeTitle: "Close this proposal?",
@@ -68,11 +84,56 @@ export type DelegateHost = {
   shown: (on: boolean) => void;
   site: URL;
   toast: (text: string, ms?: number) => void;
+  /** Merge's workspace and agent (delegate-merge.ts workspaceIO); without it, Merge stays off */
+  merge?: MergeIO;
+  /** where conflict picks are kept for the session (sessionStorage) */
+  session?: Storage;
 };
 
 export function mountDelegate(h: DelegateHost) {
   const T = DELEGATE_UI_TEXT, D = h.tasks;
   let open: string | null = null, readErr = false;
+
+  // ---- Merge's decisions kept on this device (delegate-merge.ts): one at a time per task; a kept one finished when its
+  //      task is listed (after a crash or a reload), and what is left of an incomplete one said on its chip
+  const busyMerge = new Map<string, Promise<unknown>>();
+  const one = <R>(task: string, f: () => Promise<R>): Promise<R> => {
+    const run = (busyMerge.get(task) ?? Promise.resolve()).catch(() => {}).then(f);
+    busyMerge.set(task, run);
+    return run.finally(() => { if (busyMerge.get(task) === run) busyMerge.delete(task); });
+  };
+  const incomplete = new Set<string>(), looked = new Set<string>();
+  /** tasks.merged from the record, then the record forgotten: true, or what to say. A refusal that won't change on a
+   * retry (stale, final, conflict) forgets it too; any other failure keeps it, to try again. */
+  async function recordMerge(task: string, rec: MergeRecord): Promise<true | string> {
+    try {
+      await D.merged(task, await mergedParams(rec));
+    } catch (err) {
+      const code = (err as AgentError)?.code;
+      if (code !== "stale" && code !== "final" && code !== "conflict") return T.notRecordedYet;
+      await h.merge!.save(task, null);
+      incomplete.delete(task);
+      return T.notRecorded((err as Error).message);
+    }
+    await h.merge!.save(task, null);
+    if (h.session) clearPicks(h.session, task);
+    incomplete.delete(task);
+    render();
+    return true;
+  }
+  function recover(task: string) {
+    const io = h.merge;
+    if (!io || looked.has(task)) return;
+    looked.add(task);
+    void one(task, async () => {
+      const rec = recordOf(await io.load(task), task);
+      if (!rec) return;
+      const after = await run(io, rec);
+      if (isDone(after)) { if ((await recordMerge(task, after)) !== true) incomplete.add(task); }
+      else incomplete.add(task);
+      render();
+    }).catch(() => { looked.delete(task); });
+  }
 
   // (the switch, in the header; Delegate…, beside Send; the Tasks list, under the chats; the task's view, in place of
   //  the chat)
@@ -214,8 +275,13 @@ export function mountDelegate(h: DelegateHost) {
     // (Ask for changes' own block goes in askSlot, under the actions, for the commit shown (me.commit) and its files
     //  (src.seen().files))
     const askSlot = el("div", { className: "ask-slot" });
-    const bar = el("div", { className: "proposal-actions" }, el("div", { className: "row" }, merge, ask, closeBtn), status, askSlot, later);
-    for (const b of [merge, ask]) { b.setAttribute("aria-disabled", "true"); b.title = T.laterActions; }
+    // (Merge's conflicts, to pick, and what is left of an incomplete merge)
+    const mergeSlot = el("div", { className: "merge-slot" });
+    const bar = el("div", { className: "proposal-actions" }, el("div", { className: "row" }, merge, ask, closeBtn), status, mergeSlot, askSlot, later);
+    ask.setAttribute("aria-disabled", "true");
+    ask.title = T.laterActions;
+    // (the files as last merged for picking, and the picks)
+    let plans: FileMerge[] | null = null, picks: Record<string, Picks> = {};
     const me = { id, commit, sync: () => {} };
     shown = me;
     dlg.addEventListener("close", () => { pv?.close(); dlg.remove(); if (shown === me) shown = null; }, { once: true });
@@ -223,6 +289,9 @@ export function mountDelegate(h: DelegateHost) {
     if (!dlg.isConnected) return;
     const mount = (c: string) => {
       pv?.close();
+      plans = null;
+      picks = {};
+      mergeSlot.replaceChildren();
       me.commit = c;
       src = D.source(id, c);
       pv = mod.openProposal(src, panel, { notebook: () => import(new URL("sagebrush-notebook.js", h.site).href), actions: bar });
@@ -234,6 +303,97 @@ export function mountDelegate(h: DelegateHost) {
       if (next && next !== me.commit && t?.entry.status === "proposal") { mount(next); status.textContent = T.newRound(t.entry.round); }
       const can = !busy && D.state() === "on" && t?.entry.status === "proposal" && t.proposal?.commit === me.commit;
       can ? closeBtn.removeAttribute("aria-disabled") : closeBtn.setAttribute("aria-disabled", "true");
+      // (Merge: as Close, and only once every conflict shown is picked)
+      const canMerge = can && !!h.merge && !(plans && unpicked(plans, picks).length);
+      canMerge ? merge.removeAttribute("aria-disabled") : merge.setAttribute("aria-disabled", "true");
+    };
+    // (the conflicts of the files as merged, each with its two sides and a pick; the picks kept for the session)
+    const drawConflicts = (pin: Pinned) => {
+      const agent = h.agent();
+      mergeSlot.replaceChildren(...(plans ?? []).filter((f) => f.conflicts.length).map((f) => el("div", { className: "conflicts" },
+        el("h4", {}, el("code", { textContent: f.path })),
+        ...f.conflicts.map((c) => {
+          const side = (p: "mine" | "theirs", label: string, text: string) => {
+            const b = el("button", { type: "button", textContent: label });
+            b.dataset.pick = p;
+            b.setAttribute("aria-pressed", String(picks[f.path]?.[c.id] === p));
+            b.onclick = () => {
+              (picks[f.path] ??= {})[c.id] = p;
+              if (h.session) savePicks(h.session, pin, plans ?? [], picks);
+              drawConflicts(pin);
+              const left = plans ? unpicked(plans, picks).length : 0;
+              status.textContent = left ? T.pickAll(left) : "";
+              me.sync();
+            };
+            return el("div", { className: "side" }, el("pre", { textContent: text }), b);
+          };
+          const row = el("div", { className: "conflict" }, el("p", { textContent: c.label }),
+            el("div", { className: "sides" }, side("mine", c.mineLabel ?? T.keepMine, `${T.yours}:\n${c.mine}`), side("theirs", c.theirsLabel ?? T.take(agent), `${agent}:\n${c.theirs}`)));
+          row.dataset.conflict = c.id;
+          return row;
+        }))));
+    };
+    const fail = (err: unknown) => {
+      // (the proposal changed while it was read: read again, nothing written)
+      if ((err as AgentError)?.code === "stale") { status.textContent = T.stale; pv?.refresh(); }
+      else status.textContent = `${T.mergeFailed} ${(err as Error)?.message ?? ""}`.trim();
+    };
+    // (the decision written: recorded by the agent, then forgotten here; or what is left of it shown)
+    const finish = async (rec: MergeRecord) => {
+      if (!isDone(rec)) {
+        const left = unresolved(rec).map((f) => f.path);
+        status.textContent = T.incomplete;
+        const rest = el("button", { type: "button", textContent: T.closeRest });
+        rest.dataset.act = "close-rest";
+        rest.onclick = async () => { const r = closeRest(rec); await h.merge!.save(id, r); await finish(r); };
+        mergeSlot.replaceChildren(el("p", { className: "incomplete", textContent: T.incompleteBody(left) }), rest);
+        incomplete.add(id);
+        render();
+        return;
+      }
+      const ok = await recordMerge(id, rec);
+      if (ok === true) { dlg.close(); h.toast(T.merged); }
+      else status.textContent = ok;
+    };
+    merge.onclick = async () => {
+      if (merge.getAttribute("aria-disabled") === "true" || !h.merge || !src) return;
+      const seen = src.seen();
+      if (!seen) return;
+      const io = h.merge, pin: Pinned = { task: id, base: seen.base, proposal: seen.commit, seq: seen.seq, files: seen.files };
+      busy = true;
+      me.sync();
+      status.textContent = T.merging;
+      try {
+        await one(id, async () => {
+          let rec = recordOf(await io.load(id), id);
+          // (a record of another proposal: the task moved on, and the agent won't record it)
+          if (rec && rec.proposal !== pin.proposal) { await io.save(id, null); rec = null; }
+          if (rec && isDone(rec)) return finish(rec);
+          // (the person's files read now; then the files of an incomplete merge merged again, or all)
+          const fresh = await prepare(io, src!, pin, rec ? unresolved(rec).map((f) => f.path) : undefined);
+          const kept = h.session ? loadPicks(h.session, pin, fresh) : { picks, dropped: [] };
+          plans = fresh;
+          picks = kept.picks;
+          const left = unpicked(fresh, picks).length;
+          if (left) {
+            drawConflicts(pin);
+            status.textContent = (kept.dropped.length ? T.picksDropped(kept.dropped) + " " : "") + T.pickAll(left);
+            return;
+          }
+          mergeSlot.replaceChildren();
+          rec = rec ? revise(rec, fresh, picks) : newRecord(pin, fresh, picks);
+          // (the decision kept before anything is written)
+          await io.save(id, rec);
+          rec = await run(io, rec);
+          plans = null;
+          await finish(rec);
+        });
+      } catch (err) {
+        fail(err);
+      } finally {
+        busy = false;
+        me.sync();
+      }
     };
     closeBtn.onclick = async () => {
       if (closeBtn.getAttribute("aria-disabled") === "true") return;
@@ -268,8 +428,10 @@ export function mountDelegate(h: DelegateHost) {
     btn.hidden = !offered;
     s === "turning-off" ? btn.setAttribute("aria-disabled", "true") : btn.removeAttribute("aria-disabled");
     side.hidden = !(s === "on" || s === "turning-off") || !D.tasks.length;
+    if (s === "on") for (const t of D.tasks) if (t.entry.status === "proposal") recover(t.entry.task);
+    const chipText = (t: (typeof D.tasks)[number]) => (t.entry.status === "proposal" && incomplete.has(t.entry.task) ? T.incomplete : chipOf(t.entry));
     list.replaceChildren(...D.tasks.map((t) => {
-      const b = el("button", { type: "button", className: "thread task" + (t.entry.task === open ? " on" : "") }, el("span", { className: "t", textContent: t.entry.title }), el("span", { className: `chip ${t.entry.status}${t.entry.question ? " question" : ""}`, textContent: chipOf(t.entry) }));
+      const b = el("button", { type: "button", className: "thread task" + (t.entry.task === open ? " on" : "") }, el("span", { className: "t", textContent: t.entry.title }), el("span", { className: `chip ${t.entry.status}${t.entry.question ? " question" : ""}`, textContent: chipText(t) }));
       b.dataset.task = t.entry.task;
       b.onclick = () => show(t.entry.task);
       return b;
@@ -282,7 +444,7 @@ export function mountDelegate(h: DelegateHost) {
     }
     view.hidden = false;
     const back = el("button", { type: "button", className: "link", textContent: T.back, onclick: () => close() });
-    const head = el("div", { className: "task-head" }, back, el("h2", { textContent: t.entry.title }), el("span", { className: `chip ${t.entry.status}`, textContent: chipOf(t.entry) }));
+    const head = el("div", { className: "task-head" }, back, el("h2", { textContent: t.entry.title }), el("span", { className: `chip ${t.entry.status}`, textContent: chipText(t) }));
     const parts: Node[] = [head];
     if (t.reason) parts.push(el("p", { className: "reason", textContent: t.reason }));
     if (readErr) parts.push(el("p", { className: "msg", role: "alert", textContent: T.unreadable }));

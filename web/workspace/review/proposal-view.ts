@@ -56,7 +56,8 @@ export function openProposal(source: ProposalSource, panel: HTMLElement, o: { no
   style();
   let gen = 0, closed = false, mounted: { destroy(): void } | null = null, busy: Promise<void> = Promise.resolve();
   const root = h("div", { className: "sbrv sbpv" });
-  panel.replaceChildren(root);
+  // (the host page's actions beside what is drawn, not in it: kept through a refresh, and a read that fails)
+  panel.replaceChildren(root, ...(o.actions ? [o.actions] : []));
   const unmount = () => { try { mounted?.destroy(); } catch {} mounted = null; };
 
   function draw() {
@@ -73,7 +74,6 @@ export function openProposal(source: ProposalSource, panel: HTMLElement, o: { no
         h("p", { className: "st", textContent: PROPOSAL_TEXT.commits(d.base, d.proposal, d.files.length) }),
         list,
       );
-      if (o.actions) root.append(o.actions);
       if (!d.files.length) { list.append(h("p", { className: "st", textContent: PROPOSAL_TEXT.nothing })); return; }
       if (d.files.length > PROPOSAL_LIMITS.files) { list.append(h("p", { className: "msg", textContent: PROPOSAL_TEXT.tooManyFiles })); return; }
       for (const f of d.files) {
