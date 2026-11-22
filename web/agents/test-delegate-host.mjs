@@ -81,6 +81,13 @@ export function delegateHost({ features = ["delegate.1", "chat.resume"], pageSiz
         if (!f) return refuse(m.id, "not_found");
         return answer(m.id, { blob: f.blob, content: f.content });
       }
+      case "tasks.close": {
+        if (!t) return refuse(m.id, "not_found");
+        // (only the proposal as it was read: a task that moved on since is stale, and nothing is closed)
+        if (p.proposal !== t.proposal || p.seq !== t.log.length) return refuse(m.id, "stale", "the task moved on");
+        H.emit(t.task, { type: "task_status", status: "closed" });
+        return answer(m.id, { status: "closed" });
+      }
       case "tasks.ask": {
         // (as the agent checks: the task's latest proposal at its seq, and only the task's own documents)
         if (!t) return refuse(m.id, "not_found");

@@ -107,22 +107,24 @@ ok(/^[0-9a-f]{32}$/.test(id) && D.tasks.length === before + 1 && st.params.targe
 {
   const asks = () => sentTasks(H).filter((m) => m.method === "tasks.ask").length;
   const commit1 = tA().proposal.commit;
-  ok((await why(D.ask(A.task, { proposal: commit1, note: "   ", current: [] }))) === "bad_request" && asks() === 0, "an empty note: refused here, nothing sent");
-  ok((await why(D.ask(A.task, { proposal: commit1, note: "x".repeat(DELEGATE_LIMITS.noteBytes + 1), current: [] }))) === "too_large" && asks() === 0, "a note over 16 KB: refused here, nothing sent");
-  ok((await why(D.ask(A.task, { proposal: "f".repeat(40), note: "more", current: [] }))) === "stale" && asks() === 0, "a proposal that isn't the task's latest: refused here (stale), nothing sent");
+  ok((await why(D.ask(A.task, { proposal: commit1, seq: 0, note: "   ", current: [] }))) === "bad_request" && asks() === 0, "an empty note: refused here, nothing sent");
+  ok((await why(D.ask(A.task, { proposal: commit1, seq: 0, note: "x".repeat(DELEGATE_LIMITS.noteBytes + 1), current: [] }))) === "too_large" && asks() === 0, "a note over 16 KB: refused here, nothing sent");
+  ok((await why(D.ask(A.task, { proposal: "f".repeat(40), seq: 0, note: "more", current: [] }))) === "stale" && asks() === 0, "a proposal that isn't the task's latest: refused here (stale), nothing sent");
   // (the current versions: the task's own files only, as the workspace has them; one gone is left out)
   const files = [{ path: "work/a.ipynb", change: "modified" }, { path: "work/new.txt", change: "added" }, { path: "work/notes.txt", change: "modified" }];
   const read = async (path) => { if (path === "work/notes.txt") throw new Error("gone"); return { path, kind: path.endsWith(".ipynb") ? "notebook" : "file", content: "mine of " + path }; };
   const current = await currentOf(files, read);
   ok(current.map((d) => d.path).join() === "work/a.ipynb" && current[0].content === "mine of work/a.ipynb", "the current versions: the task's own files (not one the agent added), one gone from the workspace left out", current.map((d) => d.path));
-  const seq = tA().entry.seq;
-  const r = await D.ask(A.task, { proposal: commit1, note: "  Also a line at the top.\n", current });
+  const src = D.source(A.task, commit1);
+  await src.diff();
+  const seq = src.seen().seq;
+  const r = await D.ask(A.task, { proposal: commit1, seq, note: "  Also a line at the top.\n", current });
   const sent = sentTasks(H).findLast((m) => m.method === "tasks.ask")?.params;
   ok(r.status === "working" && sent?.task === A.task && sent.proposal === commit1 && sent.seq === seq && sent.note === "Also a line at the top." && sent.current.length === 1 && H.asks.length === 1, "Ask for changes: tasks.ask with the proposal, the task's seq, the note (trimmed) and the current versions", sent);
   ok(chipOf(tA().entry) === "Working", "the chip back to Working at once", chipOf(tA().entry));
   await until(() => tA().entry.seq > seq);
-  ok((await why(D.ask(A.task, { proposal: commit1, note: "again", current: [] }))) === "stale" && asks() === 1, "asked again on the same proposal, now moved on: refused (stale), said as such", asks());
-  ok((await D.ask(A.task, { proposal: commit1, note: "again", current: [] }).catch((e) => e.message)) === DELEGATE_TEXT.askMoved, "its words: open the latest proposal");
+  ok((await why(D.ask(A.task, { proposal: commit1, seq, note: "again", current: [] }))) === "stale" && asks() === 1, "asked again on the same proposal, now moved on: refused (stale), said as such", asks());
+  ok((await D.ask(A.task, { proposal: commit1, seq, note: "again", current: [] }).catch((e) => e.message)) === DELEGATE_TEXT.askMoved, "its words: open the latest proposal");
   // (the next round, from the agent: the chip Proposal ready again, with round 2's commit)
   const commit2 = await H.propose(A.task, { "work/notes.txt": "top\none\ntwo\n" });
   await until(() => tA().entry.proposal === commit2 && tA().entry.status === "proposal");
@@ -272,6 +274,37 @@ for (const [what, event, chip] of [["failed", { type: "task_status", status: "fa
   ok(before.proposal === null && before.entry === commit && before.seq === 2 && t1.proposal?.commit === commit && t1.entry.seq === 2 && t1.entry.status === "working", "a replay at the chip's seq (the proposal event, seq 2): the proposal's details filled in, the status and seq kept", { before, after: { proposal: t1.proposal?.commit, seq: t1.entry.seq, status: t1.entry.status } });
   P7.revoke();
   H7.stop();
+}
+
+// ---- Close (tasks.close {proposal, seq}): the proposal as it was read; a task that moved on since is refused (stale)
+{
+  const H8 = delegateHost();
+  const T1 = await H8.addTask({ title: "one", base: { "a.txt": "x\n" }, proposal: { "a.txt": "y\n" } });
+  const T2 = await H8.addTask({ title: "two", base: { "a.txt": "x\n" }, proposal: { "a.txt": "z\n" } });
+  const D8 = new DelegateTasks({ changed: () => {} });
+  const P8 = pairWith(H8);
+  D8.attach(P8);
+  await P8.paired();
+  await P8.allow({ folders: ["/"], write: true, expires: null }, false);
+  ok((await why(D8.close(T1.task, T1.proposal, 1))) === "forbidden" && !H8.got.some((m) => m.method === "tasks.close"), "Close with the switch off: refused here, nothing sent");
+  D8.turnOn();
+  await until(() => D8.tasks.length === 2);
+  const s1 = D8.source(T1.task, T1.proposal);
+  ok(s1.seen() === null, "a proposal not read yet has no seq to close it with");
+  await s1.diff();
+  ok(s1.seen()?.seq === T1.log.length, "read: the seq it was read at, the task's", { seen: s1.seen(), log: T1.log.length });
+  ok((await D8.close(T1.task, T1.proposal, s1.seen().seq)) === "closed", "Close: tasks.close answered closed");
+  const sent = H8.got.findLast((m) => m.method === "tasks.close")?.params;
+  ok(sent && sent.task === T1.task && sent.proposal === T1.proposal && sent.seq === s1.seen().seq && Object.keys(sent).length === 3, "it names the task, the proposal commit and the seq it was read at, nothing else", sent);
+  await until(() => D8.task(T1.task)?.entry.status === "closed");
+  ok(chipOf(D8.task(T1.task).entry) === "Closed", "its chip: Closed");
+  // (the task moves on after the proposal was read: Close refused, nothing closed)
+  const s2 = D8.source(T2.task, T2.proposal);
+  await s2.diff();
+  H8.emit(T2.task, { type: "turn_started" });
+  ok((await why(D8.close(T2.task, T2.proposal, s2.seen().seq))) === "stale" && H8.tasks.get(T2.task).status === "proposal", "a task that moved on since it was read: refused (stale), not closed");
+  P8.revoke();
+  H8.stop();
 }
 
 // ---- an agent that doesn't offer Delegate: no switch
