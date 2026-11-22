@@ -42,6 +42,7 @@ export const DELEGATE_UI_TEXT = {
   start: "Start",
   starting: "Starting…",
   tasks: "Tasks",
+  away: "Agent not connected: these are the tasks it had when the page last heard from it.",
   skipped: (n: number) => (n === 1 ? "One event of this task couldn't be shown here." : `${n} events of this task couldn't be shown here.`),
   proposal: (n: number, base: string, commit: string) => `Proposal: ${n === 1 ? "1 file" : `${n} files`} changed · base ${base.slice(0, 7)} · proposal ${commit.slice(0, 7)}`,
   merge: "Merge",
@@ -563,7 +564,16 @@ export function mountDelegate(h: DelegateHost) {
     sw.setAttribute("aria-pressed", String(s === "on"));
     btn.hidden = !offered;
     s === "turning-off" ? btn.setAttribute("aria-disabled", "true") : btn.removeAttribute("aria-disabled");
-    side.hidden = !(s === "on" || s === "turning-off") || !D.tasks.length;
+    // (the agent not connected: its last list, marked, with nothing to open until it is back: #1622)
+    const last = s === "unoffered" ? D.lastKnown() : [];
+    side.hidden = (!(s === "on" || s === "turning-off") || !D.tasks.length) && !last.length;
+    side.classList.toggle("away", !!last.length);
+    if (last.length) {
+      list.replaceChildren(el("p", { className: "away-note", textContent: T.away }), ...last.map((e) => el("div", { className: "thread task away" }, el("span", { className: "t", textContent: e.title }), el("span", { className: `chip ${e.status}${e.question ? " question" : ""}`, textContent: chipOf(e) }))));
+      if (open !== null) close();
+      view.hidden = true;
+      return;
+    }
     if (s === "on") for (const t of D.tasks) if (t.entry.status === "proposal") recover(t.entry.task);
     const chipText = (t: (typeof D.tasks)[number]) => (t.entry.status === "proposal" && incomplete.has(t.entry.task) ? T.incomplete : chipOf(t.entry));
     // (a task that's done can't be asked again: its kept note goes)

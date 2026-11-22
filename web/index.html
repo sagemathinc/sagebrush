@@ -777,6 +777,7 @@ its final layout and the files never arrive a moment later; not on a phone, wher
 // or reports the URL; the agent chunk, loaded later, is handed it)
 import { pairLink, adoptLink } from "./workspace/pair-link.ts";
 import { takeHandoff } from "./workspace/pair-handoff.ts";
+import { backToAgentsTab } from "./workspace/mode-switch.ts";
 import { createdRunner, runInputs } from "./workspace/agent-made.ts";
 // (a bare pairing link the board page handed over within this tab (pair-handoff.ts): this page's link, taken once, before
 // anything reads it; only when the address has no query and no hash)
@@ -830,7 +831,9 @@ import { Workspace, migrate, freePath, safeName, splitExt, nameOf, parentOf, LIM
 import { mountBrowser } from "./workspace/browser.ts";
 import { mountAccount } from "./workspace/account.ts";
 // (the LaTeX editor's entry; a build without it takes this line out before bundling: web/build.ts)
-import { latexBoot, latexHereFor, desktopApp, mountTex, texNew } from "./latex/boot.ts";
+import { latexBoot, latexHereFor, mountTex, texNew } from "./latex/boot.ts";
+// (whether this is the desktop app: in every build, the editor's or not)
+import { desktopApp } from "./desktop-app.ts";
 import { codeBoot, codeHooks } from "./code/boot.ts";
 import { createPermissions, hostMade, canonicalScope } from "./notebook/permissions.js";
 import { covers, stateOf, meetTrees, sameTrees, EPOCH_MAX } from "./notebook/confine.js";
@@ -4981,6 +4984,8 @@ async function leaveTo(url, notebook = true) {
   leaveSeen?.({ url, notebook });
   const go = async () => {
     if (diskMirror && !(await (await desktopModule()).beforeLeave(diskMirror, notebook ? () => nb.saved() : undefined))) return false;
+    // (to Agents from the Files tab the Agents page opened, while that page's agent is connected: back to it, #1620)
+    if (await backToAgentsTab(url)) return true;
     location.assign(url);
     return true;
   };
