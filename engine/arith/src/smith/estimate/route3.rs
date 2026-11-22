@@ -473,7 +473,12 @@ fn core_model(r: usize, t_bits: u64, kh: usize, c: &Constants) -> Units {
 /// An r x r inverse modeled from sizes: Hadamard's log2 `h`, entries of
 /// `le` limbs, the determinant of `lx` limbs.
 fn inverse_at(r: usize, h: f64, le: usize, lx: usize) -> Units {
-    zmat::inverse_model_sizes(r, h, size_product(&[r, r, le]), lx, 2, None)
+    // (the norms: an entry's square each, twice; a one-word square for
+    // the entries that fit a word)
+    let sq = if le <= 1 { bigmul_units(1, 1) } else { bigmul_units(le, le) };
+    let mut norms = Units::default();
+    times(&mut norms, size_product(&[2, r, r]), &sq);
+    zmat::inverse_model_sizes(r, h, size_product(&[r, r, le]), &norms, lx, 2, None)
 }
 
 /// Stage 1 for route 3 (non-square input, or a square one with a zero row
