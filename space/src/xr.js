@@ -159,11 +159,13 @@ export function setupXR(api) {
   }
 
   // ---------------------------------------------------------------- the reading panel
-  const PW = 1024, PH = 1280, PANEL_LINES = 400;
+  // (wider than tall: code's lines are long; without wrapping (the default), a line too long simply runs off its edge)
+  const PW = 1280, PH = 1280, PANEL_LINES = 400, PANEL_W = 1.25 * SCALE, PANEL_H = 1.25 * SCALE;
+  let wrapCode = (() => { try { return localStorage.getItem("whitespace:xr-wrap") === "on"; } catch { return false; } })();
   const canvas = Object.assign(document.createElement("canvas"), { width: PW, height: PH });
   const tex = new THREE.CanvasTexture(canvas);
   tex.colorSpace = THREE.SRGBColorSpace;
-  const panel = new THREE.Mesh(new THREE.PlaneGeometry(1.0 * SCALE, 1.25 * SCALE), new THREE.MeshBasicMaterial({ map: tex, side: THREE.DoubleSide, transparent: true }));
+  const panel = new THREE.Mesh(new THREE.PlaneGeometry(PANEL_W, PANEL_H), new THREE.MeshBasicMaterial({ map: tex, side: THREE.DoubleSide, transparent: true }));
   panel.renderOrder = 20;
   panel.visible = false;
   scene.add(panel);
@@ -228,6 +230,7 @@ export function setupXR(api) {
     for (const l of lines(nd)) {
       const mono = l.style === "code" || l.style === "output" || l.style === "error";
       g.font = mono ? "30px ui-monospace, Menlo, monospace" : l.style === "label" ? "600 24px system-ui, sans-serif" : l.style === "summary" || l.style === "tour" ? "italic 32px system-ui, sans-serif" : "34px Georgia, serif";
+      if (l.runs && !wrapCode) { rows.push({ ...l, mono }); continue; } // (unwrapped: one row, running off the edge)
       if (l.runs) {
         // (a line of code: wrapped at the column the panel fits, its runs kept with their colours)
         const cols = Math.max(20, Math.floor((PW - 2 * pad - 24) / g.measureText("M").width));
@@ -256,8 +259,11 @@ export function setupXR(api) {
       g.font = r.mono ? "30px ui-monospace, Menlo, monospace" : r.style === "label" ? "600 24px system-ui, sans-serif" : r.style === "hint" || r.style === "summary" || r.style === "tour" ? "italic 32px system-ui, sans-serif" : "34px Georgia, serif";
       g.fillStyle = r.style === "label" || r.style === "hint" ? C.muted : C.fg;
       if (r.runs) {
+        // (clipped at the panel's inner edge: a long line runs off it)
+        g.save(); g.beginPath(); g.rect(pad - 8, y - 8, PW - 2 * pad + 16, rowH); g.clip();
         let x = pad + 4;
-        for (const run of r.runs) { g.fillStyle = run.color ?? C.fg; g.fillText(run.text, x, y + 26); x += g.measureText(run.text).width; }
+        for (const run of r.runs) { if (x > PW - pad) break; g.fillStyle = run.color ?? C.fg; g.fillText(run.text, x, y + 26); x += g.measureText(run.text).width; }
+        g.restore();
       } else g.fillText(r.text, pad + (r.mono ? 4 : 0), y + 26);
       y += rowH;
     }
@@ -276,6 +282,7 @@ export function setupXR(api) {
     if (api.canEnter(nd)) button(nd.kind === "import" ? "Go there ▶" : "Enter ▶", "enter", !stop);
     if (api.runnable(nd)) button(state === "running" ? "Running…" : "▶ Run", "run", !stop && !api.canEnter(nd));
     if (rows.length > fit) { button("▲", "up"); button("▼", "down"); }
+    if (rows.some((r) => r.runs)) button(wrapCode ? "Wrap: on" : "Wrap: off", "wrap");
     button("✕ Close", "close");
     if (state && state !== "running") { g.fillStyle = C.muted; g.font = "26px system-ui, sans-serif"; g.fillText(state, x + 8, PH - 70); }
     tex.needsUpdate = true;
@@ -292,8 +299,10 @@ export function setupXR(api) {
       flyRig(v.to, v.toT);
       const d = new THREE.Vector3().subVectors(v.toT, v.to).setY(0).normalize();
       const right = new THREE.Vector3().crossVectors(d, new THREE.Vector3(0, 1, 0));
+      // (where your head will be: walking, never below standing height on the floor)
       const eyeTo = v.to.clone();
-      panel.position.copy(eyeTo).addScaledVector(d, 1.1 * SCALE).addScaledVector(right, 0.75 * SCALE).add(new THREE.Vector3(0, -0.1 * SCALE, 0));
+      if (walk) eyeTo.y = Math.max(eyeTo.y, api.floorY() + 1.6 * SCALE);
+      panel.position.copy(eyeTo).addScaledVector(d, 1.1 * SCALE).addScaledVector(right, 0.9 * SCALE).add(new THREE.Vector3(0, -0.1 * SCALE, 0));
       panel.lookAt(eyeTo.x, panel.position.y, eyeTo.z);
     } else {
       // (in front of you, at eye height, turned to face you)
@@ -304,6 +313,8 @@ export function setupXR(api) {
       panel.position.copy(head).addScaledVector(dir, 1.2 * SCALE).add(new THREE.Vector3(0, -0.15 * SCALE, 0));
       panel.lookAt(head.x, panel.position.y, head.z);
     }
+    // (never into the floor: its buttons, along its bottom edge, stay where you can point at them)
+    panel.position.y = Math.max(panel.position.y, api.floorY() + PANEL_H / 2 + 0.15 * SCALE);
     panel.visible = true;
   }
   function close() { panel.visible = false; shown = null; stop = null; api.select(null); }
@@ -319,6 +330,7 @@ export function setupXR(api) {
     if (act === "tournext") return tour(1);
     if (act === "tourprev") return tour(-1);
     if (act === "up") { scroll -= 8; return draw(); }
+    if (act === "wrap") { wrapCode = !wrapCode; try { localStorage.setItem("whitespace:xr-wrap", wrapCode ? "on" : "off"); } catch {} scroll = 0; return draw(); }
     if (act === "enter" && shown && state !== "entering…") {
       // (into the room: the panel closes, Back will bring you out to where you stand now)
       const nd = shown, from = pose();
