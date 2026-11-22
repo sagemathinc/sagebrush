@@ -1189,6 +1189,8 @@ const delegateUi = mountDelegate({
     if (!on) renderAll();
   },
   site: new URL("../", import.meta.url),
+  // (a proposal's .tex rendered under its diff, where this page has the LaTeX editor, as an artifact's .tex is)
+  latex: __SB_LATEX__ && __SB_LATEX_HOSTS__.includes(location.hostname) ? () => import(/* @vite-ignore */ LATEX_URL) : null,
   toast,
 });
 // (the Files | Agents switch at the right of the chat list's header, Agents pressed: Files opens the notebook page with
