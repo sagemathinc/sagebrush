@@ -4,7 +4,7 @@
 
 use num_traits::{One, Signed, Zero};
 use sagebrush_arith::cost::{tallied, Local};
-use sagebrush_arith::smith::route3::{compress, hnf_modulus, pivot_columns};
+use sagebrush_arith::smith::route3::{compress, hermite_c, hnf_modulus, pivot_columns, CPath};
 use sagebrush_arith::smith::{smith_classical, smith_form};
 use sagebrush_arith::zmat::{self, ZMat};
 use sagebrush_bigint::BigInt;
@@ -242,6 +242,10 @@ fn hnf_modulus_is_the_index_on_small_rows() {
             rows += 1;
             let (_, c) = check(&b, &j);
             assert_eq!(zmat::det(&c), index, "det C = the index");
+            // (both of C's paths, on every row: rows 9 and 13 included)
+            for path in [CPath::Tail, CPath::Echelon] {
+                assert_eq!(hermite_c(&b, &j, path).unwrap().d, c.d, "row {rows}: C by {path:?}");
+            }
         }
     }
     // (seeded rows: G is the index on all but rows 9 and 13, where it is 3
@@ -250,11 +254,14 @@ fn hnf_modulus_is_the_index_on_small_rows() {
     assert_eq!(proper, [(9, BigInt::from(3)), (13, BigInt::from(2))], "G / index on the named rows");
 }
 
-/// Compress's units, per family, pinned on four rows: the HNF and the
+/// Compress's units, per family, pinned on three rows: the HNF and the
 /// kernel each on the word ring and on the multi-limb ring (G and delta
-/// word-sized; G word and delta not; both multi-limb).  Moves when a leaf
-/// charge goes (gcd_cofactor_e's on either ring among them) or when C's
-/// modulus becomes delta again.
+/// word-sized; G word and delta not; both multi-limb), with B's k^ for
+/// C's switch (its contents charged first) and the check that C's index
+/// divides G.  C by the column echelon on the first two rows, by the tail
+/// path on the third (both rings multi-limb).  Moves when a leaf charge
+/// goes (gcd_cofactor_e's on either ring among them), when C's path or its
+/// modulus changes.
 #[test]
 fn compress_units_pins() {
     let mut out = vec![];
@@ -277,7 +284,7 @@ fn compress_units_pins() {
         let d: Vec<u64> = (0..t0.0.len()).map(|i| t1.0[i].wrapping_sub(t0.0[i])).collect();
         out.push(d);
     }
-    let pins: [[u64; 10]; 3] = [[241, 0, 38, 0, 28, 172, 296, 0, 0, 0], [1628, 0, 730, 0, 100, 361, 387, 13, 0, 0], [2982, 0, 4557, 0, 544, 456, 458, 110, 0, 0]];
+    let pins: [[u64; 10]; 3] = [[244, 0, 264, 0, 68, 172, 296, 0, 0, 0], [1632, 0, 1006, 0, 156, 361, 387, 13, 0, 0], [2881, 0, 4459, 0, 606, 557, 458, 82, 0, 0]];
     for (i, (d, p)) in out.iter().zip(&pins).enumerate() {
         assert_eq!(d[..], p[..], "Compress's units on row {i}");
     }

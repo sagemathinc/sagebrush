@@ -77,7 +77,7 @@ pub const FITTED: Constants = Constants {
     multiplier: 0.92,
     vinv_of_delta: 1.5,
     scale: [0.548, 0.711, 0.829, 0.45],
-    scale_route3: [0.514, 0.56],
+    scale_route3: [0.513, 0.558],
     fit_head: "f7c3c93cd71f4d73df5e30851e2d30feb71226bc",
     fit_from: "the estimate test's training corpus (seed 1); the multiplier from route 2's phase data",
 };
@@ -200,7 +200,7 @@ pub fn stage1_with(a: &ZMat, c: &Constants) -> Estimate {
 }
 
 /// The primes the contents are tested by (k^'s lower bound).
-const SMALL_PRIMES: [u64; 25] = [2, 3, 5, 7, 11, 13, 17, 19, 23, 29, 31, 37, 41, 43, 47, 53, 59, 61, 67, 71, 73, 79, 83, 89, 97];
+pub(crate) const SMALL_PRIMES: [u64; 25] = [2, 3, 5, 7, 11, 13, 17, 19, 23, 29, 31, 37, 41, 43, 47, 53, 59, 61, 67, 71, 73, 79, 83, 89, 97];
 
 /// A proved lower bound on k, the number of nontrivial invariant factors
 /// of a square a, from the input alone in O(n^2) gcds: a = D_c a' with D_c

@@ -122,9 +122,12 @@ fn smith_units_and_stop_checks() {
         ("route 2, big delta", [34719, 0, 36619, 0, 1678, 3590, 6409, 82, 0, 0], 168),
         // (route 3's checks: the entry's, the profile's, both Compresses'
         // echelon pivots, rows and solved columns, the products' rows, and
-        // the core's (route 1 here); counted by the route 3 prefix pins)
-        ("route 3, singular", [304, 0, 20, 0, 24, 365, 296, 0, 0, 0], 38),
-        ("route 3, wide", [120, 0, 20, 0, 18, 133, 127, 0, 0, 0], 19),
+        // the core's (route 1 here); counted by the route 3 prefix pins.
+        // The units include A's contents for k^; C by the tail path on both
+        // sides of the singular input (its pivots and solved columns
+        // polled), by the column echelon on the wide one)
+        ("route 3, singular", [308, 0, 177, 0, 46, 394, 294, 0, 0, 0], 42),
+        ("route 3, wide", [122, 0, 146, 0, 42, 133, 127, 0, 0, 0], 19),
     ];
     if print {
         for (n, u, c) in &rows {
