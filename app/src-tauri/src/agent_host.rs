@@ -180,12 +180,22 @@ impl OwnedAgent {
     #[cfg(unix)]
     fn leader_exited(&mut self) -> bool {
         let Some(c) = self.child.as_ref() else { return true };
+        let pid = c.id() as libc::id_t;
         let mut info: libc::siginfo_t = unsafe { std::mem::zeroed() };
-        let r = unsafe { libc::waitid(libc::P_PID, c.id() as libc::id_t, &mut info, libc::WEXITED | libc::WNOHANG | libc::WNOWAIT) };
-        if r != 0 {
-            // (no such child to wait for: reaped some other way, so its ids may already be reused; disarm the group)
-            self.group = 0;
-            return true;
+        loop {
+            let r = unsafe { libc::waitid(libc::P_PID, pid, &mut info, libc::WEXITED | libc::WNOHANG | libc::WNOWAIT) };
+            match observed(r, std::io::Error::last_os_error().raw_os_error()) {
+                Observed::Answer => break,
+                Observed::Retry => continue,
+                Observed::Gone => {
+                    // (no such child to wait for: reaped some other way, so its pid and group id may already be
+                    //  someone else's. Disarm both: no group kill, and the Child is let go without kill() or wait();
+                    //  dropping a std Child does neither)
+                    self.group = 0;
+                    self.child = None;
+                    return true;
+                }
+            }
         }
         // (WNOHANG with nothing to report leaves the zeroed siginfo as it was; an exit reports SIGCHLD)
         info.si_signo == libc::SIGCHLD
@@ -338,11 +348,33 @@ pub fn stop(mut agent: OwnedAgent, grace: Duration) {
     // (the drop kills the group while the leader still holds its id, then reaps the leader)
 }
 
-// (tests only, compiled out of the app: at each group kill, whether the leader was still unreaped, so a test can tell
-//  a kill made while the group id was ours from one made after it was given up)
+// What a waitid() result says about the leader: an answer (read the siginfo), interrupted (ask again: it says nothing
+// about the child), or anything else, ECHILD above all: the child isn't ours to wait for any more.
+#[cfg(unix)]
+#[derive(Debug, PartialEq, Eq)]
+enum Observed {
+    Answer,
+    Retry,
+    Gone,
+}
+
+#[cfg(unix)]
+fn observed(r: libc::c_int, errno: Option<i32>) -> Observed {
+    if r == 0 {
+        Observed::Answer
+    } else if errno == Some(libc::EINTR) {
+        Observed::Retry
+    } else {
+        Observed::Gone
+    }
+}
+
+// (tests only, compiled out of the app: every signal Drop sends. For the group kill, whether the leader was still
+//  unreaped ("group_held") or not ("group_free"), so a test can tell a kill made while the group id was ours from one
+//  made after it was given up; "child_kill" for the leader's own kill)
 #[cfg(all(test, unix))]
 thread_local! {
-    static KILL_TRACE: std::cell::RefCell<Vec<bool>> = const { std::cell::RefCell::new(Vec::new()) };
+    static KILL_TRACE: std::cell::RefCell<Vec<&'static str>> = const { std::cell::RefCell::new(Vec::new()) };
 }
 
 impl Drop for OwnedAgent {
@@ -359,11 +391,13 @@ impl Drop for OwnedAgent {
                     let mut info: libc::siginfo_t = unsafe { std::mem::zeroed() };
                     unsafe { libc::waitid(libc::P_PID, c.id() as libc::id_t, &mut info, libc::WEXITED | libc::WNOHANG | libc::WNOWAIT) == 0 }
                 });
-                KILL_TRACE.with(|t| t.borrow_mut().push(held));
+                KILL_TRACE.with(|t| t.borrow_mut().push(if held { "group_held" } else { "group_free" }));
             }
             unsafe { libc::kill(-self.group, libc::SIGKILL) };
         }
         if let Some(mut c) = self.child.take() {
+            #[cfg(all(test, unix))]
+            KILL_TRACE.with(|t| t.borrow_mut().push("child_kill"));
             let _ = c.kill();
             let _ = c.wait();
         }

@@ -222,7 +222,7 @@ fn leader_state(pid: u32) -> Option<bool> {
 
 // A leader that exits by itself, leaving a process it started running in its group: the group's id must stay ours
 // (the leader unreaped) until the group is killed, and only then is the leader reaped.
-fn kills_traced() -> Vec<bool> {
+fn kills_traced() -> Vec<&'static str> {
     KILL_TRACE.with(|t| std::mem::take(&mut *t.borrow_mut()))
 }
 
@@ -251,7 +251,7 @@ fn an_exited_leader_is_observed_not_reaped_so_its_group_id_stays_ours() {
     assert_eq!(a.group, pid as i32, "the group kill is armed only while the leader holds the id");
     kills_traced();
     drop(a);
-    assert_eq!(kills_traced(), [true], "the one group kill came while the leader still held the group id");
+    assert_eq!(kills_traced(), ["group_held", "child_kill"], "the group kill came while the leader still held the group id, then the leader's own");
     assert!(wait_until(|| !alive(gc), 3000), "dropping it kills what the leader left running");
     assert_eq!(leader_state(pid), None, "and only then reaps the leader: nothing of ours is left to signal");
 }
@@ -262,10 +262,43 @@ fn stop_after_the_leader_exited_kills_the_group_then_reaps() {
     let t0 = Instant::now();
     kills_traced();
     stop(a, Duration::from_secs(5));
-    assert_eq!(kills_traced(), [true], "stop's group kill came while the leader still held the group id");
+    assert_eq!(kills_traced(), ["group_held", "child_kill"], "stop's group kill came while the leader still held the group id");
     assert!(t0.elapsed() < Duration::from_secs(2), "an exited leader doesn't make stop wait out the grace");
     assert!(wait_until(|| !alive(gc), 3000), "the descendants are cleaned up");
     assert_eq!(leader_state(pid), None, "the leader is reaped after the group kill");
+}
+
+#[test]
+fn a_waitid_result_is_read_rightly_an_interruption_is_asked_again() {
+    assert_eq!(observed(0, None), Observed::Answer);
+    assert_eq!(observed(0, Some(libc::EINTR)), Observed::Answer, "success, whatever errno holds");
+    assert_eq!(observed(-1, Some(libc::EINTR)), Observed::Retry, "interrupted says nothing about the child");
+    assert_eq!(observed(-1, Some(libc::ECHILD)), Observed::Gone);
+    assert_eq!(observed(-1, Some(libc::EINVAL)), Observed::Gone);
+    assert_eq!(observed(-1, None), Observed::Gone);
+}
+
+#[test]
+fn a_leader_reaped_some_other_way_disarms_every_signal() {
+    // (the fallback for a child this module didn't reap: its pid and group id may be someone else's by now, so nothing
+    //  may be signalled, neither the group nor the pid; nothing is waited for either)
+    let t = Tmp::new("reaped-elsewhere");
+    let args = script(&t, r#"IFS= read -r line; echo '{"v":1,"listening":5}'; exit 0"#);
+    let env = env_for(&t);
+    let mut a = spawn_owned(&launch(&t, &args, &env, 5000), PairCode::generate().unwrap()).unwrap();
+    let pid = a.child.as_ref().unwrap().id();
+    assert!(wait_until(|| a.exited(), 5000));
+    assert_eq!(leader_state(pid), Some(true));
+    // (reaped behind the module's back)
+    let mut status = 0;
+    assert_eq!(unsafe { libc::waitpid(pid as i32, &mut status, 0) }, pid as i32);
+    assert!(a.exited(), "ECHILD reads as gone");
+    assert_eq!(a.group, 0, "the group kill is disarmed");
+    assert!(a.child.is_none(), "and the pid is let go: no kill() or wait() on it");
+    assert_eq!(take_pair_code(&mut a, 7).unwrap_err(), HostError::ChildExited);
+    kills_traced();
+    drop(a);
+    assert_eq!(kills_traced(), Vec::<&str>::new(), "dropping it sends no signal at all");
 }
 
 #[test]
@@ -279,7 +312,7 @@ fn a_running_leader_is_never_reaped_by_the_status_checks() {
     assert_eq!(leader_state(pid), Some(false));
     kills_traced();
     stop(a, Duration::from_secs(5));
-    assert_eq!(kills_traced(), [true]);
+    assert_eq!(kills_traced(), ["group_held", "child_kill"]);
     assert_eq!(leader_state(pid), None);
 }
 
