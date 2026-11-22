@@ -13,5 +13,35 @@
   "file": "web/cloud/lti/README.md",
   "from": "Cloud-only: this lives in sagebrush-cloud-private, never in the public core or in sagebrush-cloud.",
   "to": "Hosted-service code: it lives in this repository under `web/cloud/`, MS-RSL (`web/cloud/LICENSE.md`), and no MIT code imports it (`scripts/check-no-server-imports.mjs`)."
+ },
+ {
+  "file": "web/cloud/lti/README.md",
+  "from": "**Spec:** `plan-lti-r5.md` (sha256 bf45075f\u2026), approved Oct 23, 2026. This directory is stage A (r5 \u00a713), arriving in three PRs:",
+  "to": "**What it is:** launch, registration and sessions;"
+ },
+ {
+  "file": "web/cloud/lti/README.md",
+  "from": "1. launch, registration and sessions;",
+  "to": "handles, recovery and erasure; deep linking;"
+ },
+ {
+  "file": "web/cloud/lti/README.md",
+  "from": "2. amendment 1 r6 (8ed41bc3\u2026): handles, recovery and erasure;",
+  "to": "grade passback (AGS) with the course and gradebook; and a harness, `vmtest/`,"
+ },
+ {
+  "file": "web/cloud/lti/README.md",
+  "from": "3. the fixes found against real Moodle and Canvas, the vm-test harness, and amendment 2 r1 (508e1508\u2026).",
+  "to": "that runs it against real Moodle and Canvas with synthetic data."
+ },
+ {
+  "file": "web/cloud/lti/README.md",
+  "from": "**Self-contained:** nothing here imports from the rest of the site.",
+  "to": "**Imports:** outside this directory, only `web/sync-protocol/doc-protocol.ts` (and the code it imports); its tests also use `web/miniflare-dispatch.mjs`, `web/board/doc.ts` (test-marks) and web/site's Miniflare."
+ },
+ {
+  "file": "web/cloud/lti/README.md",
+  "from": "node_modules, with real Durable Objects (SQLite) and D1, against a synthetic platform and a fake cocalc.ai. Synthetic data only.",
+  "to": "node_modules, with real Durable Objects (SQLite) and D1, against a synthetic platform and a fake cocalc.ai. Synthetic data only. The other suites (test-content.mjs, grading/test-*.mjs) run the same way; CI runs them all in web-sync.8 and web-sync.9."
  }
 ]
