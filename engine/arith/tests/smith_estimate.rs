@@ -665,3 +665,13 @@ fn the_models_cost_does_not_grow_with_n_times_k() {
     assert!(c <= 2 * a + 64, "the model's steps grow at most linearly in k: {a} at k = 199, {c} at k = 399");
     assert!(a <= 3 * 199 + 64, "{a} steps at k = 199: O(k)");
 }
+
+/// The empty matrix: stage 2 has nothing to refine (route 3 takes it) and
+/// says so, rather than reaching the route 1 model at n = 0.
+#[test]
+fn stage2_of_the_empty_matrix_is_none() {
+    let a = ZMat::zero(0, 0);
+    let (nm, den, det) = zmat::inverse_det(&a).unwrap();
+    assert_eq!(estimate::stage2(&a, &nm, &den, &det, None), None);
+    assert_eq!(estimate::stage2(&a, &nm, &den, &det, Some(&[])), None);
+}

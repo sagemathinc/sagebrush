@@ -243,8 +243,9 @@ pub fn k_lower_bound(a: &ZMat) -> usize {
 
 /// Stage 2: after the inverse (N / delta, det) and, for route 2, part A's
 /// invariant factors; at the actual sizes, for any k (route 2 has no
-/// threshold).  None without the invariant factors when det a != delta.
-/// (Route 3's is [`stage2_route3`].)
+/// threshold).  None without the invariant factors when det a != delta,
+/// and for the empty matrix (route 3 takes it).  (Route 3's is
+/// [`stage2_route3`].)
 pub fn stage2(a: &ZMat, nm: &ZMat, delta: &BigInt, det: &BigInt, invariants: Option<&[BigInt]>) -> Option<Units> {
     stage2_with(a, nm, delta, det, invariants, &FITTED)
 }
@@ -253,6 +254,9 @@ pub fn stage2(a: &ZMat, nm: &ZMat, delta: &BigInt, det: &BigInt, invariants: Opt
 #[doc(hidden)]
 pub fn stage2_with(a: &ZMat, nm: &ZMat, delta: &BigInt, det: &BigInt, invariants: Option<&[BigInt]>, c: &Constants) -> Option<Units> {
     let n = a.rows;
+    if n == 0 {
+        return None;
+    }
     let ld = limbs(delta);
     let ln = mean_limbs(nm);
     let word = delta.bits() < 62;
