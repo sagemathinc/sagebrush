@@ -2,10 +2,12 @@
 //! every metered extended-gcd site; the plain-Euclid fallback (taken only
 //! when dashu's coefficients fail their check, forced here through the
 //! test hook) is priced step by step at its own sizes, and charged at each
-//! metered site when it ran: each site on an input that reaches it alone.
+//! metered site when it ran: each site on an input that reaches it alone,
+//! or with sites pinned on an earlier row.
 
 use num_traits::Num;
-use sagebrush_arith::cost::{bigeuclid_units, bigmul_units, tallied, xgcd_fallback_units, Family, Units, FAMILIES};
+use sagebrush_arith::cost::{bigeuclid_units, bigmul_units, tallied, xgcd_fallback_units, Family, Local, Units, FAMILIES};
+use sagebrush_arith::smith::route3::{compress, hnf_modulus, pivot_columns};
 use sagebrush_arith::smith::smith_form;
 use sagebrush_arith::snf::smith_mod;
 use sagebrush_arith::zmat::{self, ZMat};
@@ -90,12 +92,47 @@ fn big(rows: usize, cols: usize, seed: u64) -> ZMat {
     ZMat::from_rows((0..rows).map(|_| (0..cols).map(|_| nx()).collect()).collect())
 }
 
+/// The 4 x 7 input X Y (X with 40-bit entries, Y with 4-bit ones) of
+/// compress_units_pins' third row, on which Compress's G and delta are both
+/// multi-limb (asserted), and its pivot columns.
+fn route3_big_rings() -> (ZMat, Vec<usize>) {
+    let mut s = 3u64;
+    let mut e = |b: u32| {
+        let mut nx = || {
+            s = s.wrapping_add(0x9e3779b97f4a7c15);
+            let mut z = s;
+            z = (z ^ (z >> 30)).wrapping_mul(0xbf58476d1ce4e5b9);
+            z = (z ^ (z >> 27)).wrapping_mul(0x94d049bb133111eb);
+            z ^ (z >> 31)
+        };
+        let x = BigInt::from(nx() >> (64 - b));
+        if nx() & 1 == 1 {
+            -x
+        } else {
+            x
+        }
+    };
+    let (r, n) = (4, 7);
+    let x = ZMat::from_rows((0..r).map(|_| (0..r).map(|_| e(40)).collect()).collect());
+    let y = ZMat::from_rows((0..r).map(|_| (0..n).map(|_| e(4)).collect()).collect());
+    let b = x.mul(&y);
+    let j = pivot_columns(&b);
+    let bj = ZMat::from_rows((0..r).map(|i| j.iter().map(|&c| b.get(i, c).clone()).collect()).collect());
+    let (nm, delta, det) = zmat::inverse_det(&bj).unwrap();
+    let jp: Vec<usize> = (0..n).filter(|c| !j.contains(c)).collect();
+    let q = nm.mul(&ZMat::from_rows((0..r).map(|i| jp.iter().map(|&c| b.get(i, c).clone()).collect()).collect()));
+    let g = hnf_modulus(&q, &delta, &det, &mut Local::new());
+    assert!(g.bits() > 62 && delta.bits() > 62, "G and delta multi-limb (at least 2^62)");
+    (b, j)
+}
+
 fn z(rows: &[&[i64]]) -> ZMat {
     ZMat::from_rows(rows.iter().map(|r| r.iter().map(|&x| BigInt::from(x)).collect()).collect())
 }
 
 /// Each metered site, on an input whose only extended gcds are that
-/// site's: a forced fallback changes no result, and the run's units rise
+/// site's (route 3's row also takes the big ring's Bezout steps, pinned on
+/// the third row): a forced fallback changes no result, and the run's units rise
 /// by exactly the price of the fallbacks it took (recorded through the
 /// hook).  Dropping any one site's fallback charge, or charging a multiple
 /// of it, fails its row.
@@ -143,7 +180,12 @@ fn each_site_charges_the_fallback_when_it_ran() {
     let h = ZMat::from_rows(rows);
     assert!(zmat::hermite_cyclic(&h).is_some(), "the cyclic path is taken");
     let (n4, f4) = gcd_units("hermite_cyclic", || zmat::hermite_cyclic(&h).map(|m| m.d));
-    for (site, n, f) in [("route 1's unit combination", n1, f1), ("route 2's inverses", n2, f2), ("the big ring's Bezout steps", n3, f3), ("hermite_cyclic", n4, f4)] {
+    // route 3's Compress with G and delta both multi-limb: the big ring's
+    // gcd_cofactor_e (compress_units_pins' third row; its Bezout steps,
+    // the third row's site, run here too, so the row's delta is both sites')
+    let (b, j) = route3_big_rings();
+    let (n5, f5) = gcd_units("route 3's gcd_cofactor_e", || compress(&b, &j).unwrap());
+    for (site, n, f) in [("route 1's unit combination", n1, f1), ("route 2's inverses", n2, f2), ("the big ring's Bezout steps", n3, f3), ("hermite_cyclic", n4, f4), ("route 3's gcd_cofactor_e", n5, f5)] {
         println!("{site}: Gcd units {n}, {f} with the fallback forced");
         assert!(f > n, "{site}: the forced fallback's work is charged");
     }

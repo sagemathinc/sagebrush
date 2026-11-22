@@ -677,7 +677,6 @@ pub fn det_bareiss(a: &ZMat) -> BigInt {
     }
 }
 
-/// log2 of the Hadamard bound (min of row and column versions).
 /// log2 of each row's and each column's Euclidean norm, rounded up (route
 /// 3's model bounds an r x r block's minor from them).
 #[doc(hidden)]
@@ -685,6 +684,7 @@ pub fn norm_bits(a: &ZMat) -> (Vec<f64>, Vec<f64>) {
     (a.row_norm_log2(), a.col_norm_log2())
 }
 
+/// log2 of the Hadamard bound (min of row and column versions).
 fn hadamard_log2(a: &ZMat) -> f64 {
     let r: f64 = a.row_norm_log2().iter().sum();
     let c: f64 = a.col_norm_log2().iter().sum();

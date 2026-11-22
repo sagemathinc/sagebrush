@@ -554,6 +554,8 @@ pub(super) fn smith_route3(a: &ZMat) -> Result<super::SmithForm, String> {
         let (is, js) = best.clone();
         let r = is.len();
         if failed.is_some_and(|f| r <= f) {
+            // (only saves work: a failed certificate at rank f shows rank A
+            // > f, so no profile of rank <= f can pass)
             continue;
         }
         if r == 0 {

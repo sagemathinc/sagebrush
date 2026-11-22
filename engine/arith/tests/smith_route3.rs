@@ -268,7 +268,7 @@ fn compress_units_pins() {
             let jp: Vec<usize> = (0..n).filter(|c| !j.contains(c)).collect();
             let q = nm.mul(&ZMat::from_rows((0..r).map(|i| jp.iter().map(|&c| b.get(i, c).clone()).collect()).collect()));
             let g = hnf_modulus(&q, &delta, &det, &mut Local::new());
-            let word = |x: &BigInt| x.bits() < 62;
+            let word = |x: &BigInt| x.bits() <= 62;
             assert_eq!((word(&g), word(&delta)), rings, "the rings reached");
         }
         let t0 = tallied();
@@ -450,5 +450,30 @@ fn route3_units_ceilings() {
             continue;
         }
         assert!(units * 10 <= recorded * 11, "{m} x {n} rank {rank}: {units} units, above 1.1 times the {recorded} recorded");
+    }
+}
+
+/// Route 3 at rank 0 (A = 0, square or not): the units of the whole run
+/// (the entry, one prime's profile, and the m n read that certifies A = 0),
+/// pinned on 2 x 3, 3 x 2 and 3 x 3 (whose run also has the square
+/// dispatch's singularity check, its MulSchool units).
+#[test]
+fn rank_zero_units_pins() {
+    let mut out = vec![];
+    for &(m, n) in &[(2usize, 3usize), (3, 2), (3, 3)] {
+        let a = ZMat::zero(m, n);
+        let (f, d) = {
+            let t0 = tallied();
+            let f = smith_form(&a).unwrap();
+            let t1 = tallied();
+            (f, (0..t0.0.len()).map(|i| t1.0[i].wrapping_sub(t0.0[i])).collect::<Vec<u64>>())
+        };
+        assert_eq!(f.route, sagebrush_arith::smith::Route::Hermite);
+        assert_eq!((f.d, f.u, f.v), (ZMat::zero(m, n), ZMat::identity(m), ZMat::identity(n)));
+        out.push(d);
+    }
+    let pins: [[u64; 10]; 3] = [[0, 0, 0, 0, 0, 31, 6, 0, 0, 0], [0, 0, 0, 0, 0, 31, 6, 0, 0, 0], [18, 0, 0, 0, 0, 45, 9, 0, 0, 0]];
+    for (i, (d, p)) in out.iter().zip(&pins).enumerate() {
+        assert_eq!(d[..], p[..], "rank 0's units on row {i}");
     }
 }
