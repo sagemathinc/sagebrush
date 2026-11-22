@@ -298,3 +298,25 @@ fn the_estimate_takes_the_runs_path() {
         assert_eq!(modeled, tail, "{name}: the estimate's path (r = {r})");
     }
 }
+
+/// The left side's switch takes A's k^, not 0: on A = 3 W, W square of
+/// corank 1 with small entries, every entry of A is divisible by 3, so k^
+/// = r, and the left side's C (word moduli, m - r = 1) keeps today's
+/// column echelon; at k^ = 0 its expected cost would be the cheaper one
+/// and it would take the tail path ("left: C solve").
+#[test]
+fn the_left_side_takes_as_k_hat() {
+    let mut rg = Rng(41);
+    let n = 8;
+    let mut w = plain(&mut rg, n, n, 3);
+    for c in 0..n {
+        w.d[(n - 1) * n + c] = w.get(0, c) + w.get(1, c);
+    }
+    let a = ZMat::from_rows((0..n).map(|i| (0..n).map(|j| w.get(i, j) * BigInt::from(3)).collect()).collect());
+    let (f, phases) = route3::record_phases(|| smith_form(&a).unwrap());
+    assert_eq!(f.route, sagebrush_arith::smith::Route::Hermite);
+    let has = |p: &str| phases.iter().any(|(q, _)| q == p);
+    assert!(has("left: C echelon"), "the left side ran C: {phases:?}");
+    assert!(!has("left: C solve"), "the left side keeps today's echelon at A's k^ = r");
+    assert_eq!(estimate::k_lower_bound_rect(&a, n - 1), n - 1, "k^ = r");
+}
