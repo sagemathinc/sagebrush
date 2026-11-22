@@ -1274,7 +1274,9 @@ function makeKernel(owner) {
     // epoch isn't the page's: live() below) and a run in flight refuses its next change as "changed"; but not for the
     // grant an Allow at the prompt makes for the change it answers (ownGrant), which widenFor's epoch then follows)
     if (sameTrees(next, sentTrees)) {
-      if (ownGrant || !k.sharesEpoch || epoch >= EPOCH_MAX) return;
+      // (no shared epoch word: no change waits, none asks; the epoch's end: a new interpreter, as for a narrowing there)
+      if (ownGrant || !k.sharesEpoch) return;
+      if (epoch >= EPOCH_MAX) return k.restart(PERM_RESTARTED);
       epoch++;
       k.setPolicy({ epoch, state: stateOf(sentTrees), trees: sentTrees });
       return;

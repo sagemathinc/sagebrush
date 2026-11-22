@@ -23,7 +23,7 @@
 //   7. the same wait relayed by the runner's frame: an Allow lets the same run save; Don't allow refuses it in that run;
 //   7b. there too, a folder taken away stays away in that interpreter (the same one, its variable kept);
 //   7c-7d. an ask held in delivery while the permissions narrow, or while a folder elsewhere is granted and taken away
-//      again, is answered no when it arrives (no prompt).
+//      again, is answered no when it arrives (no prompt); 7e: the same at the epoch's end (a new interpreter instead).
 //   bun web/build.ts && node web/share/test-run-bar.mjs
 import { spawn } from "node:child_process";
 import { createHash, randomBytes } from "node:crypto";
@@ -133,7 +133,10 @@ const genOf = (P) => P.ev("window.sagebrush.kernels.get(window.sagebrush.noteboo
 // (SEC H2: a change asked about, the ask held in delivery, while a permission that doesn't touch this interpreter's
 // trees is granted and then taken away again (another tab): when the ask arrives it predates a permission change, so
 // it is answered no: no prompt ever opens, the run is refused, nothing written)
-async function heldAcrossUndo(P, path, label) {
+// (`atEnd`: the epoch at its end first (the page's test hook and the same epoch given the interpreter), where the epoch
+// can't move: a new interpreter instead, and the ask with the old one, so still no prompt and nothing written)
+async function heldAcrossUndo(P, path, label, atEnd = false) {
+  if (atEnd) await P.ev("(() => { const epoch = 2 ** 31 - 2; window.sagebrush.files.raiseEpoch(epoch); window.sagebrush.kernel.setPolicy({ epoch, state: 'scoped', trees: window.sagebrush.permissions().grants.write.stored }); return 1; })()");
   await setCode(P, `try:\n    open('${path}', 'w').write('hi')\n    print('wrote')\nexcept PermissionError as e:\n    print('refused', type(e).__name__)`);
   await countPrompts(P);
   await P.ev("(window.sagebrush.kernel.holdMessages(new Promise((r) => (window.__release = r))), 1)");
@@ -147,7 +150,7 @@ async function heldAcrossUndo(P, path, label) {
   await sleep(500);
   const st = { ...(await state(P)), opened: await P.ev("window.__opened") };
   const wrote = await P.ev(`${W}.stat(${JSON.stringify(path)}).then((e) => !!e, () => false)`);
-  ok(granted.includes('"/unrelated"') && !undone.includes('"/unrelated"') && st.opened === 0 && !st.prompt && /refused PermissionError/.test(st.outs[0]) && !wrote, `${label}. an ask held in delivery while an unrelated folder is granted and taken away again: on arrival answered no, no prompt ever opened, the run refused, nothing written: ` + J({ opened: st.opened, prompt: st.prompt, out: st.outs[0], wrote }));
+  ok(granted.includes('"/unrelated"') && !undone.includes('"/unrelated"') && st.opened === 0 && !st.prompt && (atEnd ? /restarted|refused PermissionError/ : /refused PermissionError/).test(st.outs[0]) && !wrote, `${label}. an ask held in delivery while an unrelated folder is granted and taken away again: on arrival answered no, no prompt ever opened, the run refused, nothing written: ` + J({ opened: st.opened, prompt: st.prompt, out: st.outs[0], wrote }));
 }
 async function revokedStaysAway(P, A, B, label, kept) {
   const q = JSON.stringify;
@@ -386,6 +389,8 @@ try {
   ok(!/\/rr2"/.test(narrowed7c) && s7c.opened === 0 && !s7c.prompt && /refused PermissionError/.test(s7c.outs[0]) && !(await R.ev(`${W}.stat("/rv2/a.txt").then((e) => !!e, () => false)`)), "7c. in the runner, an ask held in delivery while the permissions narrow: on arrival answered no, no prompt ever opened, the same run refused, nothing written: " + J({ opened: s7c.opened, prompt: s7c.prompt, out: s7c.outs[0] }));
   // (7d: the same in the runner)
   await heldAcrossUndo(R, "/rv2/d.txt", "7d");
+  // (7e: the same at the epoch's end)
+  await heldAcrossUndo(R, "/rv2/e.txt", "7e", true);
 } catch (e) {
   failures++;
   console.log("FAIL", e.message);
