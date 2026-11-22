@@ -23,9 +23,9 @@ const CEILING_RAW = 96 * 1024, CEILING_GZIP = 32 * 1024;
 //  LaTeX page module's read-only preview, As proposed and Before; proposal-view.ts): 53,985 / 20,312 on master
 //  b56e23d5, with bun 1.4.4 and Node 24.21.0's gzip -9; + 64. Nov 22 2026: a proposal's .md rendered by the host
 //  page's Markdown renderer, a text file shown as text, "Diff only" for code and boards, the rendered section shared
-//  by .tex and .md (proposal-view.ts): 54,561 / 20,528 on the .tex change, with bun 1.4.4 and Node 24.21.0's
+//  by .tex and .md (proposal-view.ts): 54,559 / 20,527 on the .tex change, with bun 1.4.4 and Node 24.21.0's
 //  gzip -9; + 64)
-const CAP_RAW = 54625, CAP_GZIP = 20592;
+const CAP_RAW = 54623, CAP_GZIP = 20591;
 // (the reviewed inputs, relative to web/: the entry and what it imports; the board's canonical text comes with
 //  review-actions.ts's canonical bytes (branch-canon.ts), which an accept of a board needs)
 const INPUTS = [
