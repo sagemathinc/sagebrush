@@ -13026,6 +13026,10 @@ for _n in ("fread", "fwrite", "containers.Map", "keys", "values", "isKey", "remo
            "realsqrt", "num2hex", "bsxfun", "compose", "readmatrix"):
     _B[_n] = _lazy_builtin("_matlab_extra", _n)
 
+# (lib/_matlab_signal.py: the windows and the spectral analysis functions, lazy too)
+for _n in ("hamming", "hann", "freqz", "pwelch", "spectrogram"):
+    _B[_n] = _lazy_builtin("_matlab_signal", _n)
+
 
 def _keep_single(name, data=(0,), keep=()):
     """a built-in whose results are single when an input is single (as these functions' pages

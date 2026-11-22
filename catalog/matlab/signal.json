@@ -56,5 +56,143 @@
     "tags": [
       "signal processing"
     ]
+  },
+  {
+    "name": "hamming",
+    "kind": "function",
+    "signature": "w = hamming(L)\nw = hamming(L, sflag)",
+    "summary": "The L-point Hamming window, a column: 0.54 - 0.46 cos(2 pi n / N).",
+    "doc": "$w(n) = 0.54 - 0.46\\cos(2\\pi n/N)$ for $n = 0, \\ldots, L-1$, with $N = L - 1$ for `'symmetric'` (the default) or $N = L$ for `'periodic'` (for spectral analysis: the first L points of the symmetric window of L + 1). `hamming(1)` is 1 and `hamming(0)` is empty. The window pwelch and spectrogram use by default.",
+    "examples": [
+      {
+        "code": "hamming(5)'",
+        "expected": "\nans =\n\n    0.0800    0.5400    1.0000    0.5400    0.0800\n\n"
+      },
+      {
+        "code": "w = hamming(4, 'periodic'); w'",
+        "expected": "\nans =\n\n    0.0800    0.5400    1.0000    0.5400\n\n"
+      }
+    ],
+    "differs": [],
+    "status": "full",
+    "see_also": [
+      "hann",
+      "pwelch",
+      "spectrogram"
+    ],
+    "upstream": "Signal Processing Toolbox",
+    "tags": [
+      "signal processing"
+    ]
+  },
+  {
+    "name": "hann",
+    "kind": "function",
+    "signature": "w = hann(L)\nw = hann(L, sflag)",
+    "summary": "The L-point Hann window, a column: 0.5 (1 - cos(2 pi n / N)), zero at both ends.",
+    "doc": "$w(n) = 0.5\\,(1 - \\cos(2\\pi n/N))$ for $n = 0, \\ldots, L-1$, with $N = L - 1$ for `'symmetric'` (the default: both ends are 0) or $N = L$ for `'periodic'`. `hann(1)` is 1.",
+    "examples": [
+      {
+        "code": "hann(5)'",
+        "expected": "\nans =\n\n         0    0.5000    1.0000    0.5000         0\n\n"
+      }
+    ],
+    "differs": [],
+    "status": "full",
+    "see_also": [
+      "hamming",
+      "pwelch"
+    ],
+    "upstream": "Signal Processing Toolbox",
+    "tags": [
+      "signal processing"
+    ]
+  },
+  {
+    "name": "freqz",
+    "kind": "function",
+    "signature": "[h, w] = freqz(b, a, n)\n[h, w] = freqz(b, a, n, 'whole')\n[h, f] = freqz(b, a, n, fs)\nh = freqz(b, a, w)\nh = freqz(b, a, f, fs)\nfreqz(___)",
+    "summary": "The frequency response of the digital filter b, a at n points of the upper unit circle, or at given frequencies.",
+    "doc": "$H(e^{j\\omega}) = B(e^{j\\omega})/A(e^{j\\omega})$, $B(z) = \\sum_k b_{k+1} z^{-k}$, at n points (512 by default) spaced evenly over $[0, \\pi)$, or $[0, 2\\pi)$ with `'whole'`; h and w are columns. With a sample rate fs, the frequencies are in Hz. A vector of frequencies (rad/sample, or Hz with fs) is evaluated there directly, h shaped as the vector. a is 1 for an FIR filter. With no output, freqz plots the magnitude (dB) and the phase (degrees) in two subplots.",
+    "examples": [
+      {
+        "code": "[h, w] = freqz([1 1], 1, 4);\n[abs(h), w]",
+        "expected": "\nans =\n\n    2.0000         0\n    1.8478    0.7854\n    1.4142    1.5708\n    0.7654    2.3562\n\n"
+      },
+      {
+        "code": "h = freqz([1 2 1]/4, [1 -0.5 0.25], [0 pi/2]); abs(h)",
+        "expected": "\nans =\n\n    1.3333    0.5547\n\n"
+      }
+    ],
+    "differs": [
+      "Second-order sections and digital filter objects are refused; b and a are coefficient vectors.",
+      "The frequencies (and an n-point response, computed by the FFT) may differ from MATLAB's in the last bit."
+    ],
+    "status": "partial",
+    "see_also": [
+      "filter",
+      "pwelch"
+    ],
+    "upstream": "Signal Processing Toolbox",
+    "tags": [
+      "signal processing"
+    ]
+  },
+  {
+    "name": "pwelch",
+    "kind": "function",
+    "signature": "[pxx, w] = pwelch(x)\n[pxx, w] = pwelch(x, window, noverlap, nfft)\n[pxx, f] = pwelch(x, window, noverlap, nfft, fs)\n[___] = pwelch(___, range)\npwelch(___)",
+    "summary": "The power spectral density of a signal by Welch's method: the average periodogram of windowed, overlapping segments.",
+    "doc": "x (a vector, or each column of a matrix) is divided into segments of length L overlapping by noverlap samples; each is multiplied by the window, transformed with nfft points, and $|X|^2/(U f_s)$ averaged, $U = \\sum w^2$ ($f_s = 2\\pi$ for rad/sample). By default 8 segments with 50% overlap and Hamming windows ($L$ = fix(N/4.5)), and nfft = max(256, 2^nextpow2(L)); an integer window is a Hamming window of that length. A segment longer than nfft is wrapped. range is `'onesided'` (real x's default: bins 0 to nfft/2, the mirrored ones doubled), `'twosided'` (complex x's default) or `'centered'`. With no output, pwelch plots the estimate in dB. Fewer than 9 samples with the default settings is the error `signal:welchparse:NotEnoughSamplesForDefaultSettings`, as MATLAB's.",
+    "examples": [
+      {
+        "code": "x = cos(pi/4 * (0:63)');\n[pxx, w] = pwelch(x, 16, 8, 16);\n[~, k] = max(pxx); w(k) / pi",
+        "expected": "\nans =\n\n    0.2500\n\n"
+      },
+      {
+        "code": "size(pwelch(randn(100, 1)))",
+        "expected": "\nans =\n\n   129     1\n\n"
+      }
+    ],
+    "differs": [
+      "A vector of frequencies in place of nfft, the 'power' spectrum type, confidence bounds and the 'mean'/'maxhold' traces are refused.",
+      "Values may differ from MATLAB's in the last bits (the FFT's rounding)."
+    ],
+    "status": "partial",
+    "see_also": [
+      "spectrogram",
+      "hamming",
+      "fft"
+    ],
+    "upstream": "Signal Processing Toolbox",
+    "tags": [
+      "signal processing"
+    ]
+  },
+  {
+    "name": "spectrogram",
+    "kind": "function",
+    "signature": "s = spectrogram(x)\n[s, w, t] = spectrogram(x, window, noverlap, nfft)\n[s, f, t] = spectrogram(x, window, noverlap, nfft, fs)\n[s, w, t, ps] = spectrogram(___)\nspectrogram(___)",
+    "summary": "The short-time Fourier transform of a signal: one column of spectrum per windowed, overlapping segment.",
+    "doc": "Column k of s is the nfft-point FFT of segment k times the window, the segments as pwelch's (8 with 50% overlap and Hamming windows by default); rows as pwelch's range (one-sided for real x). t holds the segments' centres, $((k-1)\\,\\mathrm{hop} + L/2)/f_s$ ($f_s = 2\\pi$ without one, as MATLAB gives them), and ps each segment's power spectral density, scaled as pwelch's. nfft may be a vector of frequencies, where the transform is evaluated directly. With no output, spectrogram plots ps in dB, frequency on the x-axis (`'yaxis'` puts it on the y-axis).",
+    "examples": [
+      {
+        "code": "x = cos(pi/2 * (0:99)');\n[s, w, t] = spectrogram(x, 20, 10, 32);\nsize(s), t(1:3)",
+        "expected": "\nans =\n\n    17     9\n\n\nans =\n\n    1.5915    3.1831    4.7746\n\n"
+      }
+    ],
+    "differs": [
+      "The reassigned spectrogram, 'MinThreshold', 'OutputTimeDimension' and the power spectrum of a vector of frequencies are refused.",
+      "Values may differ from MATLAB's in the last bits (the FFT's rounding)."
+    ],
+    "status": "partial",
+    "see_also": [
+      "pwelch",
+      "fft"
+    ],
+    "upstream": "Signal Processing Toolbox",
+    "tags": [
+      "signal processing"
+    ]
   }
 ]
