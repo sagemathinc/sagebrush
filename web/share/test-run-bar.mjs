@@ -126,6 +126,7 @@ const WRITE = "try:\n    open('/sub/out.txt', 'w').write('hi')\n    print('wrote
 // same one throughout (its generation, and a value it kept from before the narrowing); the page's own worker is
 // restarted by it instead)
 const grantsEdit = (P, fn) => P.ev(`(() => { const f = document.createElement('iframe'); document.body.append(f); const ls = f.contentWindow.localStorage; const r = JSON.parse(ls.getItem('sagebrush-grants')); const d = r.docs[window.sagebrush.notebook.snapshot().id ?? localStorage.getItem('sagebrush-current')]; d.write = (${fn})(d.write); ls.setItem('sagebrush-grants', JSON.stringify(r)); f.remove(); return JSON.stringify(d.write); })()`);
+const countPrompts = (P) => P.ev("(() => { window.__opened = 0; const d = document.querySelector('#filesbar'); if (!d.__counted) { const o = d.showModal.bind(d); d.showModal = () => { window.__opened++; o(); }; d.__counted = true; } return 1; })()");
 const genOf = (P) => P.ev("window.sagebrush.kernels.get(window.sagebrush.notebook.snapshot().id ?? localStorage.getItem('sagebrush-current'))?.generation?.() ?? null");
 async function revokedStaysAway(P, A, B, label, kept) {
   const q = JSON.stringify;
@@ -272,6 +273,7 @@ try {
 
   // ---- 4h. held in delivery, and a Stop before it arrives: answered no, no prompt, nothing written (SEC H2)
   await setCode(S, "try:\n    open('/rv/b.txt', 'w').write('hi')\n    print('wrote')\nexcept BaseException as e:\n    print('refused', type(e).__name__)");
+  await countPrompts(S);
   await S.ev("(window.sagebrush.kernel.holdMessages(new Promise((r) => (window.__release = r))), 1)");
   await S.press("#runall");
   await sleep(2500);
@@ -279,8 +281,8 @@ try {
   await S.ev("(window.__release(), 1)");
   await S.until("/refused|wrote|Stopped|Interrupt/.test(document.querySelector('.cell .out')?.textContent ?? '')", 20000).catch(() => {});
   await sleep(500);
-  const s4h = await state(S);
-  ok(!s4h.prompt && !/wrote/.test(s4h.outs[0]) && !(await S.ev(`${W}.stat("/rv/b.txt").then((e) => !!e, () => false)`)), "4h. an ask held in delivery, a Stop before it arrives: no prompt, nothing written: " + J({ prompt: s4h.prompt, out: s4h.outs[0] }));
+  const s4h = { ...(await state(S)), opened: await S.ev("window.__opened") };
+  ok(s4h.opened === 0 && !s4h.prompt && !/wrote/.test(s4h.outs[0]) && !(await S.ev(`${W}.stat("/rv/b.txt").then((e) => !!e, () => false)`)), "4h. an ask held in delivery, a Stop before it arrives: no prompt ever opened, nothing written: " + J({ opened: s4h.opened, prompt: s4h.prompt, out: s4h.outs[0] }));
 
   // ---- 5. a write at the top of the workspace: File > Permissions… and Don't allow, never Allow
   await setCode(S, "try:\n    open('/top.txt', 'w').write('hi')\n    print('wrote')\nexcept PermissionError as e:\n    print('refused', type(e).__name__, e)");
@@ -347,6 +349,7 @@ try {
   // (SEC H2 in the runner, where a narrowing keeps the interpreter and moves the epoch: an ask held in delivery while the
   // permissions narrow arrives asked under an epoch that's over: answered no, no prompt, nothing written)
   await setCode(R, "try:\n    open('/rv2/a.txt', 'w').write('hi')\n    print('wrote')\nexcept PermissionError as e:\n    print('refused', type(e).__name__)");
+  await countPrompts(R);
   await R.ev("(window.sagebrush.kernel.holdMessages(new Promise((r) => (window.__release = r))), 1)");
   await R.press("#runall");
   await sleep(2500);
@@ -355,8 +358,8 @@ try {
   await R.ev("(window.__release(), 1)");
   await R.until("/refused|wrote|restarted/.test(document.querySelector('.cell .out')?.textContent ?? '')", 20000).catch(() => {});
   await sleep(500);
-  const s7c = await state(R);
-  ok(!/\/rr2"/.test(narrowed7c) && !s7c.prompt && /refused PermissionError/.test(s7c.outs[0]) && !(await R.ev(`${W}.stat("/rv2/a.txt").then((e) => !!e, () => false)`)), "7c. in the runner, an ask held in delivery while the permissions narrow: on arrival answered no, no prompt, the same run refused, nothing written: " + J({ prompt: s7c.prompt, out: s7c.outs[0] }));
+  const s7c = { ...(await state(R)), opened: await R.ev("window.__opened") };
+  ok(!/\/rr2"/.test(narrowed7c) && s7c.opened === 0 && !s7c.prompt && /refused PermissionError/.test(s7c.outs[0]) && !(await R.ev(`${W}.stat("/rv2/a.txt").then((e) => !!e, () => false)`)), "7c. in the runner, an ask held in delivery while the permissions narrow: on arrival answered no, no prompt ever opened, the same run refused, nothing written: " + J({ opened: s7c.opened, prompt: s7c.prompt, out: s7c.outs[0] }));
 } catch (e) {
   failures++;
   console.log("FAIL", e.message);
