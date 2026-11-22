@@ -184,6 +184,66 @@ try {
   ok(kp["work/tmp1.py"].merged?.absent && kp["work/tmp2.py"].merged?.absent && kp["work/tmp1.py"].mine?.content === "def f(): return 1\n" && kp["work/lib.py"].mine?.absent && kp["work/lib.py"].merged?.content?.startsWith("def f()"), "consolidate: tasks.merged reports the two removed (absent) and the one made", kp);
   await P.until(`!document.querySelector('dialog.proposal[open]')`, 10000).catch(() => {});
 
+  // ---- one action at a time per task, whichever dialog started it (a dialog closed and opened again included)
+  const acts = () => P.ev(`Object.fromEntries([...document.querySelectorAll('dialog.proposal[open] button[data-act]')].map((b) => [b.dataset.act, b.getAttribute('aria-disabled') === 'true']))`);
+  const reopen = async (t) => {
+    await P.ev(`document.querySelector('dialog.proposal[open] .x')?.click()`);
+    await P.ev(`document.querySelector('#task-view .proposal-card').click()`);
+    await P.until(`!!document.querySelector('dialog.proposal[open] .sbpv .file')`, 20000);
+    await sleep(300);
+  };
+  {
+    // (A: a Merge's write held: Ask for changes is off in the same dialog, its Send refuses, and so after close/reopen)
+    await H.call("workspace.create", { path: "/work/held.txt", content: { text: "h\n" } });
+    const G = await H.addTask({ title: "Held merge", base: { "work/held.txt": "h\n" }, proposal: { "work/held.txt": "H\n" } });
+    await openProposal(G);
+    await P.ev(`document.querySelector('dialog.proposal[open] button[data-act="ask"]').click()`);
+    await P.until(`!!document.querySelector('dialog.proposal[open] .ask-block textarea')`);
+    await P.ev(`(() => { const t = document.querySelector('dialog.proposal[open] .ask-block textarea'); t.value = 'a note'; t.dispatchEvent(new Event('input')); })()`);
+    await P.ev(`(window.__seamAt = null, window.__mergeSeam = (op, p) => op === "write" && p === "work/held.txt" ? new Promise((go) => { window.__seamAt = p; window.__seamGo = go; }) : undefined, 1)`);
+    await P.ev(`document.querySelector('dialog.proposal[open] button[data-act="merge"]').click()`);
+    await P.until(`window.__seamAt === "work/held.txt"`, 20000);
+    const same = await acts();
+    await P.ev(`document.querySelector('dialog.proposal[open] .ask-block button.primary').click()`);
+    await sleep(300);
+    ok(same.merge && same.ask && same.close && !H.got.some((m) => m.method === "tasks.ask" && m.params.task === G.task), "a Merge writing: every action off in its dialog, and an open Ask's Send sends nothing", same);
+    await reopen(G);
+    const again = await acts();
+    await P.ev(`document.querySelector('dialog.proposal[open] button[data-act="ask"]').click()`);
+    await sleep(200);
+    ok(again.merge && again.ask && again.close && !(await P.ev(`!!document.querySelector('dialog.proposal[open] .ask-block')`)), "closed and opened again while the Merge writes: still every action off, Ask opens nothing", again);
+    await P.ev(`(window.__mergeSeam = null, window.__seamGo(), 1)`);
+    await hostUntil(() => H.got.some((m) => m.method === "tasks.merged" && m.params.task === G.task), 20000);
+    ok((await read("/work/held.txt")).content.text === "H\n" && !H.got.some((m) => m.method === "tasks.ask" && m.params.task === G.task), "the Merge finishes and is recorded; no Ask was sent meanwhile");
+    await P.until(`!document.querySelector('dialog.proposal[open]')`, 10000).catch(() => {});
+    await P.ev(`document.querySelector('dialog.proposal[open] .x')?.click()`);
+  }
+  {
+    // (B: an Ask for changes held at the agent: Merge is off in the same dialog, and so after close/reopen; nothing written)
+    await H.call("workspace.create", { path: "/work/asked.txt", content: { text: "a\n" } });
+    const Q = await H.addTask({ title: "Held ask", base: { "work/asked.txt": "a\n" }, proposal: { "work/asked.txt": "A\n" } });
+    await openProposal(Q);
+    H.hold.add("tasks.ask");
+    await P.ev(`document.querySelector('dialog.proposal[open] button[data-act="ask"]').click()`);
+    await P.until(`!!document.querySelector('dialog.proposal[open] .ask-block textarea')`);
+    await P.ev(`(() => { const t = document.querySelector('dialog.proposal[open] .ask-block textarea'); t.value = 'make it louder'; t.dispatchEvent(new Event('input')); document.querySelector('dialog.proposal[open] .ask-block button.primary').click(); })()`);
+    await hostUntil(() => H.held.some((m) => m.method === "tasks.ask"), 20000);
+    const same = await acts();
+    await P.ev(`document.querySelector('dialog.proposal[open] button[data-act="merge"]').click()`);
+    await sleep(300);
+    ok(same.merge && same.ask && same.close && (await read("/work/asked.txt")).content.text === "a\n", "an Ask for changes sending: every action off in its dialog, Merge writes nothing", same);
+    await reopen(Q);
+    const again = await acts();
+    await P.ev(`document.querySelector('dialog.proposal[open] button[data-act="merge"]').click()`);
+    await sleep(500);
+    ok(again.merge && again.ask && again.close && (await read("/work/asked.txt")).content.text === "a\n" && !H.got.some((m) => m.method === "tasks.merged" && m.params.task === Q.task), "closed and opened again while the Ask is sent: still every action off, Merge writes nothing and sends nothing", again);
+    H.hold.clear();
+    H.release();
+    await hostUntil(() => H.tasks.get(Q.task).status === "working", 10000);
+    ok((await read("/work/asked.txt")).content.text === "a\n", "the Ask is answered; the person's file never written");
+    await P.ev(`document.querySelector('dialog.proposal[open] .x')?.click()`);
+  }
+
   // ---- a removal and a late edit: the proposal deletes a file the person hasn't changed; the person edits it after
   //      Merge checked it and before it is removed (the page's seam, on this host only). The removal is refused at the
   //      workspace (its revision checked with its identity): the file stays with the edit, the merge is incomplete,

@@ -112,6 +112,13 @@ export function mountDelegate(h: DelegateHost) {
     return run.finally(() => { if (busyMerge.get(task) === run) busyMerge.delete(task); });
   };
   const incomplete = new Set<string>(), looked = new Set<string>();
+  // (what is under way on each task, whoever started it: a Merge (or its recovery, or Close what's left), an Ask for
+  //  changes or a Close, one at a time. Kept here, not in a dialog, so a dialog closed and opened again while one runs
+  //  still waits for it; each action takes it when it starts and gives it back when it ends, and every dialog's
+  //  actions are drawn from it)
+  const underway = new Map<string, "merge" | "ask" | "close">();
+  const begin = (task: string, op: "merge" | "ask" | "close") => { if (underway.has(task)) return false; underway.set(task, op); render(); return true; };
+  const end = (task: string, op: "merge" | "ask" | "close") => { if (underway.get(task) !== op) return; underway.delete(task); render(); };
   /** tasks.merged from the record, then the record forgotten: true, or what to say. A refusal that won't change on a
    * retry (stale, final, conflict) forgets it too; any other failure keeps it, to try again. */
   async function recordMerge(task: string, rec: MergeRecord): Promise<true | string> {
@@ -135,12 +142,18 @@ export function mountDelegate(h: DelegateHost) {
     if (!io || looked.has(task)) return;
     looked.add(task);
     void one(task, async () => {
-      const rec = recordOf(await io.load(task), task);
-      if (!rec) return;
-      const after = await run(io, rec);
-      if (isDone(after)) { if ((await recordMerge(task, after)) !== true) incomplete.add(task); }
-      else incomplete.add(task);
-      render();
+      // (another action under way on this task: looked at again on a later listing)
+      if (!begin(task, "merge")) { looked.delete(task); return; }
+      try {
+        const rec = recordOf(await io.load(task), task);
+        if (!rec) return;
+        const after = await run(io, rec);
+        if (isDone(after)) { if ((await recordMerge(task, after)) !== true) incomplete.add(task); }
+        else incomplete.add(task);
+        render();
+      } finally {
+        end(task, "merge");
+      }
     }).catch(() => { looked.delete(task); });
   }
 
@@ -278,7 +291,7 @@ export function mountDelegate(h: DelegateHost) {
     dlg.append(el("button", { type: "button", className: "x", ariaLabel: "Close", textContent: "×", onclick: () => dlg.close() }), panel);
     document.body.append(dlg);
     dlg.showModal();
-    let pv: { close(): void; refresh(): void } | null = null, src: ReturnType<typeof D.source> | null = null, busy = false, asking = false;
+    let pv: { close(): void; refresh(): void } | null = null, src: ReturnType<typeof D.source> | null = null;
     // (its actions, at the proposal's foot: Merge, Ask for changes and Close)
     const act = (key: string, label: string) => { const b = el("button", { type: "button", textContent: label }); b.dataset.act = key; return b; };
     const merge = act("merge", T.merge), ask = act("ask", T.ask), closeBtn = act("close", T.closeTask);
@@ -312,8 +325,8 @@ export function mountDelegate(h: DelegateHost) {
       const t = D.task(id);
       const next = t?.proposal?.commit;
       if (next && next !== me.commit && t?.entry.status === "proposal") { mount(next); status.textContent = T.newRound(t.entry.round); }
-      // (busy: a Close or a Merge in flight; asking: an Ask for changes in flight; either keeps every action off)
-      const can = !busy && !asking && D.state() === "on" && t?.entry.status === "proposal" && t.proposal?.commit === me.commit;
+      // (anything under way on this task, started from this dialog or another, keeps every action off)
+      const can = !underway.has(id) && D.state() === "on" && t?.entry.status === "proposal" && t.proposal?.commit === me.commit;
       for (const b of [closeBtn, ask]) can ? b.removeAttribute("aria-disabled") : b.setAttribute("aria-disabled", "true");
       // (Merge: as Close, and only once every conflict shown is picked)
       const canMerge = can && !!h.merge && !(plans && unpicked(plans, picks).length);
@@ -357,7 +370,10 @@ export function mountDelegate(h: DelegateHost) {
         status.textContent = T.incomplete;
         const rest = el("button", { type: "button", textContent: T.closeRest });
         rest.dataset.act = "close-rest";
-        rest.onclick = async () => { const r = closeRest(rec); await h.merge!.save(id, r); await finish(r); };
+        rest.onclick = async () => {
+          if (!begin(id, "merge")) return;
+          try { const r = closeRest(rec); await h.merge!.save(id, r); await finish(r); } finally { end(id, "merge"); }
+        };
         mergeSlot.replaceChildren(el("p", { className: "incomplete", textContent: T.incompleteBody(left) }), rest);
         incomplete.add(id);
         render();
@@ -374,8 +390,8 @@ export function mountDelegate(h: DelegateHost) {
       const seen = src.seen();
       if (!seen) return;
       const io = h.merge, pin: Pinned = { task: id, base: seen.base, proposal: seen.commit, seq: seen.seq, files: seen.files };
-      busy = true;
-      me.sync();
+      // (taken for the task, checked here when used: another action under way, from any dialog, and nothing starts)
+      if (!begin(id, "merge")) return;
       status.textContent = T.merging;
       try {
         await one(id, async () => {
@@ -405,8 +421,7 @@ export function mountDelegate(h: DelegateHost) {
       } catch (err) {
         fail(err);
       } finally {
-        busy = false;
-        me.sync();
+        end(id, "merge");
       }
     };
     // (Ask for changes: its block opens under the actions, for the commit shown; pressed again, it closes, the note kept)
@@ -417,9 +432,10 @@ export function mountDelegate(h: DelegateHost) {
       const b = askSlot.querySelector<HTMLElement>(".ask-block");
       if (b) { b.hidden = !b.hidden; if (!b.hidden) b.querySelector("textarea")?.focus(); return; }
       const block = askBlock(id, me.commit, () => src?.seen() ?? null, {
-        busy: (on) => { asking = on; me.sync(); },
-        // (Send only while Ask for changes is: not during a Close, nor once the task has moved on)
-        may: () => ask.getAttribute("aria-disabled") !== "true",
+        // (Send takes the task's action, right after may() asked, in the same step: nothing else starts meanwhile)
+        busy: (on) => { if (on) begin(id, "ask"); else end(id, "ask"); },
+        // (Send only while Ask for changes is: nothing else under way on the task, from any dialog, nor the task moved on)
+        may: () => !underway.has(id) && ask.getAttribute("aria-disabled") !== "true",
         // (the task moved on since the proposal was read: read again (a new seq), the note kept, to send again)
         stale: () => { status.textContent = T.askStale; pv?.refresh(); },
       });
@@ -432,8 +448,8 @@ export function mountDelegate(h: DelegateHost) {
       const seen = src?.seen();
       if (!seen) return;
       if (!(await confirmDialog(T.closeTitle, T.closeBody, T.closeOk))) return;
-      busy = true;
-      me.sync();
+      // (checked again once confirmed: something may have started while the question was open)
+      if (!begin(id, "close")) return;
       try {
         await D.close(id, me.commit, seen.seq);
         dlg.close();
@@ -443,8 +459,7 @@ export function mountDelegate(h: DelegateHost) {
         if ((err as AgentError)?.code === "stale") { status.textContent = T.stale; pv?.refresh(); }
         else status.textContent = `${T.closeTaskFailed} ${(err as Error)?.message ?? ""}`.trim();
       } finally {
-        busy = false;
-        me.sync();
+        end(id, "close");
       }
     };
     mount(commit);

@@ -165,8 +165,10 @@ try {
   await P.until(`document.querySelector('dialog.proposal[open] .sbpv h3')?.textContent === 'Proposal, round 3'`, 20000);
   const round3 = await P.ev(`({ slot: document.querySelector('dialog.proposal[open] .ask-slot').children.length, ask: ${askBtn}.getAttribute('aria-disabled') })`);
   ok(round3.slot === 0 && round3.ask === null, "round 3 replaces round 2 in the same dialog: the Ask block gone, Ask for changes offered again", round3);
-  // (a newer draft written while an older note is still being sent, in the proposal closed and opened again: the
-  //  older send's success doesn't remove it, and it stays across the next round replacing this one)
+  // (while an older note is still being sent, the proposal closed and opened again: every action stays off there,
+  //  Ask for changes included, as the send is under way for the task, not for one dialog. A newer draft written
+  //  meanwhile elsewhere (another tab of this browser, which keeps its own drafts in the same storage): the older
+  //  send's success doesn't remove it, and it stays across the next round replacing this one)
   H.hold.add("tasks.ask");
   await P.ev(`${askBtn}.click()`);
   await P.until(`!!${block} && !${block}.hidden`);
@@ -175,15 +177,18 @@ try {
   await P.ev(`document.querySelector('dialog.proposal[open] .x').click()`);
   await P.ev(`document.querySelector('#task-view .proposal-card').click()`);
   await P.until(`!!${askBtn} && !!document.querySelector('dialog.proposal[open] .sbpv .file')`, 20000);
+  await sleep(300);
+  const reopened = await P.ev(`[...document.querySelectorAll('dialog.proposal[open] button[data-act]')].map((b) => b.getAttribute('aria-disabled'))`);
   await P.ev(`${askBtn}.click()`);
-  await P.until(`!!${block} && !${block}.hidden`);
-  await P.ev(`(() => { const t = document.querySelector('#delegate-note'); t.value = 'A newer draft'; t.dispatchEvent(new Event('input')); })()`);
+  await sleep(200);
+  ok(reopened.every((a) => a === "true") && !(await P.ev(`!!${block}`)), "the proposal opened again while the note is sent: Merge, Ask for changes and Close all off, Ask opens nothing", reopened);
+  await P.ev(`localStorage.setItem(${JSON.stringify(KEY)}, "A newer draft")`);
   H.hold.clear();
   H.release();
   await hostUntil(() => H.asks.length === 2);
   await P.until(`document.querySelector('#tasks .task[data-task="${A.task}"] .chip')?.textContent === 'Working'`);
   await sleep(300);
-  ok(H.asks[1]?.note === "Round 3 note" && (await P.ev(`localStorage.getItem(${JSON.stringify(KEY)})`)) === "A newer draft", "a newer draft, written in the proposal opened again while the older note was being sent: the older send's success leaves it kept", { sent: H.asks[1]?.note, kept: await P.ev(`localStorage.getItem(${JSON.stringify(KEY)})`) });
+  ok(H.asks[1]?.note === "Round 3 note" && (await P.ev(`localStorage.getItem(${JSON.stringify(KEY)})`)) === "A newer draft", "a newer draft, written elsewhere while the older note was being sent: the older send's success leaves it kept", { sent: H.asks[1]?.note, kept: await P.ev(`localStorage.getItem(${JSON.stringify(KEY)})`) });
   const r4 = await H.propose(A.task, { "work/notes.txt": "1 one\n2 two\n3 three\n4 four\n" });
   await P.until(`document.querySelector('dialog.proposal[open] .sbpv h3')?.textContent === 'Proposal, round 4'`, 20000);
   await P.ev(`${askBtn}.click()`);
