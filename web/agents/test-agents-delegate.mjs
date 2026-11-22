@@ -133,19 +133,18 @@ try {
   await P.until(`!!document.querySelector('dialog.proposal[open] .sbpv pre.diff')`, 20000);
   const latexHere = process.env.AGENTS_LATEX === "1";
   if (latexHere) {
-    // (P.until gives the time it waited, 0 when already true: each verdict is the page's, read after it)
-    const drawnIs = `/Results/.test(document.querySelector('dialog.proposal[open] .tex-rendered .tex-preview')?.textContent ?? '')`;
-    await P.until(drawnIs, 60000).catch(() => {});
-    const drawn = await P.ev(drawnIs);
+    // (P.until only waits (it resolves to the time it took, 0 when already true): each check reads the page itself)
+    const texShown = () => P.ev(`document.querySelector('dialog.proposal[open] .tex-rendered .tex-preview')?.textContent ?? ''`);
+    await P.until(`/Results/.test(document.querySelector('dialog.proposal[open] .tex-rendered .tex-preview')?.textContent ?? '')`, 60000).catch(() => {});
+    const drawn = /Results/.test(await texShown());
     await shot("4b-proposal-tex");
     const tv = await P.ev(`(() => { const r = document.querySelector('dialog.proposal[open] .tex-rendered'); const run = r?.querySelector('.tex-run'); return { buttons: [...r.querySelectorAll(':scope > p button')].map((b) => b.textContent + ":" + b.getAttribute('aria-pressed')), plus: [...document.querySelectorAll('dialog.proposal[open] .l\\\\+')].map((x) => x.textContent), run: !!run && !run.hidden && !!run.offsetParent, typing: [...r.querySelectorAll('textarea')].filter((t) => !t.readOnly && t.offsetParent).length }; })()`);
     ok(drawn && tv.plus.includes("+ \\section{Results}") && JSON.stringify(tv.buttons) === JSON.stringify(["As proposed:true", "Before:false"]), "a proposal's .tex: its line diff, and the document as proposed rendered under it (its new section), Before offered", { drawn, tv });
     ok(!tv.run && tv.typing === 0, "the rendered document is read only: no Run, nothing to type in", tv);
     await P.ev(`[...document.querySelectorAll('dialog.proposal[open] .tex-rendered button')].find((b) => b.textContent === 'Before').click()`);
-    const beforeIs = `(() => { const t = document.querySelector('dialog.proposal[open] .tex-rendered .tex-preview')?.textContent ?? ''; return /Introduction/.test(t) && !/Results/.test(t); })()`;
-    await P.until(beforeIs, 60000).catch(() => {});
-    const before = await P.ev(beforeIs);
-    ok(before, "Before: the document as it was rendered in its place (no Results section)");
+    await P.until(`(() => { const t = document.querySelector('dialog.proposal[open] .tex-rendered .tex-preview')?.textContent ?? ''; return /Introduction/.test(t) && !/Results/.test(t); })()`, 60000).catch(() => {});
+    const beforeText = await texShown();
+    ok(/Introduction/.test(beforeText) && !/Results/.test(beforeText), "Before: the document as it was rendered in its place (no Results section)", beforeText.slice(0, 200));
   } else {
     await sleep(500);
     ok(await P.ev(`!document.querySelector('dialog.proposal[open] .tex-rendered') && !document.querySelector('dialog.proposal[open] .file .msg')`), "a proposal's .tex where this host has no LaTeX editor: its diff only, nothing said");
