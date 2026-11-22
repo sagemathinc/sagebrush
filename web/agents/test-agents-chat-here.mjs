@@ -173,9 +173,9 @@ try {
   //  are its title and stay for a screen reader; a click opens the same menu, above it, inside the window)
   const foot = await ev(`(() => {
     const b = document.querySelector('.sbag-bar'), chip = b?.querySelector('button.chip'), r = chip?.getBoundingClientRect();
-    const words = chip?.querySelector('.words'), ico = chip?.querySelector('.ico svg');
+    const words = chip?.querySelector('.words'), ico = chip?.querySelector('.ico');
     return { inRow: !!b?.parentElement?.matches('.composer .row > [data-sbag-footer]'), first: b?.parentElement === document.querySelector('.composer .row').firstElementChild,
-      w: Math.round(r?.width ?? 0), h: Math.round(r?.height ?? 0), ico: !!ico && ico.getBoundingClientRect().width === 16,
+      w: Math.round(r?.width ?? 0), h: Math.round(r?.height ?? 0), ico: !!ico && ico.getBoundingClientRect().width === 16 && getComputedStyle(ico).maskImage.startsWith('url('),
       wordsW: Math.round(words?.getBoundingClientRect().width ?? -1), words: words?.textContent ?? '', title: chip?.title ?? '',
       above: !document.querySelector('.composer-wrap > [data-sbag-slot]') };
   })()`);
