@@ -334,3 +334,17 @@ test("optimoptions is a value: copies, struct fields and cell elements don't sha
   assert.equal(r.status, 0, r.err);
   assert.equal(r.out, "final\noff\n50 400\nfinal\n1e-06\n1 optim.options.Fminunc\n2\n");
 });
+
+test("linprog with bounds only, no constraint rows: upper-only, lower-only, free (unbounded) and a box", () => {
+  // (the optima are unique here: min -x with x <= 2 is x = 2; min x with x >= 0 is 0; min x free is unbounded,
+  // exitflag -3 with empty x and fval; the box's multipliers satisfy f - lower + upper = 0)
+  const r = run([
+    "o = optimoptions('linprog', 'Display', 'off');",
+    "[x, f, flag] = linprog(-1, [], [], [], [], [], 2, o); fprintf('%g %g %g\\n', x, f, flag)",
+    "[x, f, flag] = linprog(1, [], [], [], [], 0, [], o); fprintf('%g %g %g\\n', x, f, flag)",
+    "[x, f, flag] = linprog(1, [], [], [], [], [], [], o); fprintf('%s %s %g\\n', mat2str(size(x)), mat2str(size(f)), flag)",
+    "[x, f, flag, ~, lam] = linprog([1; -1], [], [], [], [], [0; -1], [3; 2], o); fprintf('%g ', x, f, flag, lam.lower, lam.upper); fprintf('\\n')",
+  ].join("\n"));
+  assert.equal(r.status, 0, r.err);
+  assert.equal(r.out, "2 -2 1\n0 0 1\n[0 0] [0 0] -3\n0 2 -2 1 1 0 0 1 \n");
+});

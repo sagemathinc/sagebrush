@@ -823,7 +823,7 @@ def _simplex(c, Ai, bi, Ae, be, lo, hi, maxit):
     status = _pivot_loop(tab, basis, cost1, N + m, it, maxit)
     if status == 3:
         return 3, None, None, None, None, it[0]
-    if tab[:, -1] @ cost1[basis] > 1e-9 * max(1.0, float(np.max(np.abs(rhs))) if m else 1.0):
+    if m and tab[:, -1] @ cost1[_ix(basis)] > 1e-9 * max(1.0, float(np.max(np.abs(rhs))) if m else 1.0):
         return 1, None, None, None, None, it[0]
     # (drive the remaining artificial variables out of the basis, or drop their redundant rows)
     for r in range(m):
@@ -832,7 +832,8 @@ def _simplex(c, Ai, bi, Ae, be, lo, hi, maxit):
             if cand:
                 _pivot(tab, basis, r, cand[0])
     keep = [r for r in range(m) if basis[r] < N]
-    tab2 = np.hstack([tab[keep][:, :N], tab[keep][:, -1:]])
+    kept = tab[_ix(keep)] if keep else np.zeros((0, tab.shape[1]))
+    tab2 = np.hstack([kept[:, :N], kept[:, -1:]])
     basis2 = [basis[r] for r in keep]
     cost2 = np.concatenate([cz, [0.0]])
     status = _pivot_loop(tab2, basis2, cost2, N, it, maxit)
@@ -843,13 +844,15 @@ def _simplex(c, Ai, bi, Ae, be, lo, hi, maxit):
         zs[k] = tab2[r, -1]
     x = base + T @ zs[:nz]
     # (the multipliers from the final basis: y = c_B B^-1 on the original rows, B from the standard form's columns)
-    B = M[:, basis2] if len(basis2) == m else None
-    if B is not None:
-        y = np.linalg.solve(B.T, cz[basis2])
+    b2 = _ix(basis2)
+    if m == 0:
+        y = np.zeros(0)
+    elif len(basis2) == m:
+        y = np.linalg.solve(M[:, b2].T, cz[b2])
     else:
-        y = np.linalg.lstsq(M[:, basis2].T, cz[basis2], rcond=None)[0]
+        y = np.linalg.lstsq(M[:, b2].T, cz[b2], rcond=None)[0]
     y = y * sgn
-    red_z = cz - (M * sgn.reshape((-1, 1))).T @ y
+    red_z = cz - (M * sgn.reshape((-1, 1))).T @ y if m else cz.copy()
     ineq = -y[:mi]
     y_ineq = ineq[:Ai.shape[0]]
     upper = np.zeros(n)
@@ -867,6 +870,11 @@ def _simplex(c, Ai, bi, Ae, be, lo, hi, maxit):
     return 0, x, y_ineq, -y[mi:], (lower, upper), it[0]
 
 
+def _ix(basis):
+    """the basis as an integer index array (empty when there are no rows)"""
+    return np.asarray(basis, dtype=np.int64)
+
+
 def _pivot(tab, basis, r, k):
     tab[r] = tab[r] / tab[r, k]
     for i in range(tab.shape[0]):
@@ -882,8 +890,7 @@ def _pivot_loop(tab, basis, cost, ncols, it, maxit):
     while True:
         if it[0] >= maxit:
             return 3
-        cb = cost[basis]
-        red = cost[:ncols] - cb @ tab[:, :ncols]
+        red = cost[:ncols] - cost[_ix(basis)] @ tab[:, :ncols] if basis else cost[:ncols].copy()
         enter = next((k for k in range(ncols) if red[k] < -1e-10), None)
         if enter is None:
             return 0
