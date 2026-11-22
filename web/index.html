@@ -492,8 +492,9 @@
 <body class="opening">
 <div id="wssidebar" hidden></div>
 <!-- (the files shown before the page draws, as they were left (wsShowFiles keeps the choice), so the first paint has
-its final layout and the files never arrive a moment later; not on a phone, where they would cover the page) -->
-<script>try { if (localStorage.getItem("sagebrush-files-sidebar") === "1" && !matchMedia("(max-width: 640px)").matches) { document.body.classList.add("wsfiles"); document.getElementById("wssidebar").hidden = false; } } catch {} setTimeout(() => document.body.classList.add("opening-late"), 4000);</script>
+its final layout and the files never arrive a moment later; not on a phone, where they would cover the page, nor in
+the Agents pane's frame of the LaTeX editor, /?tex=&embed=1, which is the editor alone: texEmbedded below) -->
+<script>try { const q = new URLSearchParams(location.search); if (localStorage.getItem("sagebrush-files-sidebar") === "1" && !matchMedia("(max-width: 640px)").matches && !(q.has("tex") && q.get("embed") === "1" && parent !== window)) { document.body.classList.add("wsfiles"); document.getElementById("wssidebar").hidden = false; } } catch {} setTimeout(() => document.body.classList.add("opening-late"), 4000);</script>
 <!-- (the bottom panels' one host: the Python console, the browser terminal and the remote terminal, beside the files
      while they show, as the LaTeX editor is, never over or under them (decided Nov 12), and above the alpha notice) -->
 <div id="sbpanels"></div>
@@ -3610,6 +3611,11 @@ const fileMenu = $("#filemenu"), fileBtn = $("#filebtn");
 // The one File menu (design/workspace-files.md §3, web/workspace/filemenu.ts):
 // drawn the same as the board page's; what an item does is here, by its key
 // (data-f).  Without the workspace, what needs it is disabled.
+// (the LaTeX editor's page in the Agents page's pane, /?tex=<fid>&embed=1 in a frame of its own (web/latex/boot.ts): the
+// editor alone, so no files beside it, however the person keeps them on this page; their choice stays theirs, unwritten.
+// A pane narrower than 641 px had them over the whole editor. Every way the files are shown
+// stops here (wsShowFiles), and the early script before the page draws has the same test)
+const texEmbedded = (() => { const q = new URLSearchParams(location.search); return q.has("tex") && q.get("embed") === "1" && parent !== window; })();
 // (whether this page has the LaTeX editor: New ▸ LaTeX document in the File menu and the file panel, U0)
 const latexHere = typeof __SB_LATEX__ !== "undefined" && __SB_LATEX__ && latexHereFor(location.hostname, desktopApp());
 // (the editor's Run sandbox and Share on this page, for latexBoot and the app self-test's mount alike: no Share on the
@@ -5471,6 +5477,7 @@ function wsTrackCurrent() { wsBrowser?.refresh(); }
 // panel (web/workspace/account.ts); hidden for any other answer
 mountAccount($("#acctslot"), { status: shareFirst, storage: () => { if (!ws) return; wsShowFiles(true); wsBrowser?.storage(); } });
 function wsShowFiles(on) {
+  if (on && texEmbedded) return;
   wsSidebar.hidden = !on;
   document.body.classList.toggle("wsfiles", on);
   wsFilesBtn.setAttribute("aria-pressed", String(on));
@@ -5605,10 +5612,6 @@ wsFilesBtn.onclick = () => wsShowFiles(wsSidebar.hidden);
 drawFileMenu();
 wsReady.then(() => drawFileMenu());
 $("#installbtn").onclick = () => installPrompt?.prompt();
-// (the LaTeX editor's page in the Agents page's pane, /?tex=<fid>&embed=1 in a frame of its own (web/latex/boot.ts): the
-// editor alone, so no files beside it, however the person keeps them on this page; their choice stays theirs, unwritten.
-// A pane narrower than 641 px had them over the whole editor)
-const texEmbedded = (() => { const q = new URLSearchParams(location.search); return q.has("tex") && q.get("embed") === "1" && parent !== window; })();
 wsReady.then(async (w) => {
   // (no workspace: no files to show, so the space kept for them before the page drew goes)
   if (!w || texEmbedded) { document.body.classList.remove("wsfiles"); wsSidebar.hidden = true; return; }
