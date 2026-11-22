@@ -302,7 +302,7 @@ try {
   await P.ev(`document.querySelector('#task-view .steer-form .primary').click()`);
   await P.until(`/sagebrush-agent 0.8.13 or later/.test(document.querySelector('#task-view .steer .msg')?.textContent ?? '')`, 10000).catch(() => {});
   sv = await steerUi();
-  ok(/needs sagebrush-agent 0.8.13 or later/.test(sv.msg) && sv.chip === "Interrupted" && H.resumes.length === 1, "an agent that refuses notes: said so plainly; the task stays stopped, nothing resumed", sv);
+  ok(/needs sagebrush-agent 0.8.13 or later/.test(sv.msg) && sv.chip === "Stopped" && H.resumes.length === 1, "an agent that refuses notes: said so plainly; the task stays stopped (its chip says Stopped), nothing resumed", sv);
   await P.ev(`document.querySelector('#task-view .steer-form button:not(.primary)').click()`);
   sv = await steerUi();
   ok(sv.resume && !sv.form, "the stopped task: Resume offered", sv);
