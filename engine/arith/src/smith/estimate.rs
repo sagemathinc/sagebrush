@@ -71,12 +71,12 @@ pub struct Constants {
 /// recorded again.
 pub const FITTED: Constants = Constants {
     attempts_cyclic: 2.255,
-    attempts_trailing: 2.137,
+    attempts_trailing: 2.161,
     hadamard_gap: 0.648,
     part_a_cubic: 0.927,
     multiplier: 0.92,
     vinv_of_delta: 1.5,
-    scale: [0.548, 0.711, 0.837, 0.44],
+    scale: [0.548, 0.711, 0.829, 0.45],
     scale_route3: [0.544, 0.576],
     fit_head: "f7c3c93cd71f4d73df5e30851e2d30feb71226bc",
     fit_from: "the estimate test's training corpus (seed 1); the multiplier from route 2's phase data",

@@ -1,6 +1,6 @@
 //! The work estimate of the Smith form with transforms (issue #1481),
 //! measured: corpora are generated here, the models' constants refitted on
-//! the training corpus (with at least 10 route 2 rows at each k >= 6, and
+//! the training corpus (with at least 10 route 2 rows at each k >= 5, and
 //! 10 route 3 rows of each shape: wide, tall, square of corank 1 and of
 //! more) and required to equal `estimate::FITTED` (a code change that
 //! moves them must refit and record them), and the held-out corpora scored
@@ -140,7 +140,7 @@ fn entry(rng: &mut Rng, bits: u32) -> BigInt {
 }
 
 /// The corpus of one seed: "base" (random, k-structured with one shared
-/// prime, sparse, diagonally dominant, k = 6..8, and k in 9..=16 and in
+/// prime, sparse, diagonally dominant, k = 5..8, and k in 9..=16 and in
 /// 17..n) or "shift" (banded, block, near-unimodular, mixed sizes, larger
 /// n, k = 2..8, k = 9..11, k = n - 1 and n, k = 2..n hidden from the
 /// contents, and classical inputs: singular, rectangular).
@@ -150,7 +150,7 @@ fn corpus(set: &str, seed: u64) -> Vec<ZMat> {
     // corpus before it)
     let fams: &[&str] = if set == "base" { &["random", "kstruct", "sparse", "diagdom", "khigh", "kbig", "wide", "tall", "sing1", "singk"] } else { &["banded", "block", "unimod", "mixed", "large", "k8", "singular", "rect", "k9", "kfull", "khidden", "wide", "tall", "sing1", "singk"] };
     let mut out = vec![];
-    // k = 6..8 cycles, two inputs per size up to n = 32: the training
+    // k = 5..8 cycles, two inputs per size up to n = 32: the training
     // floor's 10 rows a k
     let mut khigh = 0usize;
     // k past 8 alternates its bands, 9..=16 and (from n = 24) 17..=n - 1,
@@ -231,7 +231,7 @@ fn corpus(set: &str, seed: u64) -> Vec<ZMat> {
                     "k8" => 2 + (rng.next() % 7) as usize,
                     "khigh" => {
                         khigh += 1;
-                        6 + khigh % 3
+                        5 + khigh % 4
                     }
                     "k9" => 9 + (rng.next() % 3) as usize,
                     "kbig" => {
@@ -530,11 +530,11 @@ fn the_estimate_is_fitted_and_scores_within_its_ceilings() {
     log_rows(&mut report, &report_path, &head, "base-train", 1, &train);
     check_rows("base-train", 1, &train);
     // the training floor: route 2's constants are fitted with at least 10
-    // rows at each of k = 6, 7, 8 and in each band past 8
+    // rows at each of k = 5, 6, 7, 8 and in each band past 8
     let count = |b: &str| train.iter().filter(|r| r.route == Route::Trailing && band(r.k) == b).count();
     let floor: Vec<(String, usize)> = BANDS.iter().map(|b| (b.to_string(), count(b))).collect();
     println!("base-train seed 1: route 2 rows by k: {floor:?}");
-    for (b, n) in floor.iter().filter(|(b, _)| ["6", "7", "8", "9-16", "17+"].contains(&b.as_str())) {
+    for (b, n) in floor.iter().filter(|(b, _)| ["5", "6", "7", "8", "9-16", "17+"].contains(&b.as_str())) {
         assert!(*n >= 10, "the training corpus has {n} route 2 rows at k = {b}, fewer than 10");
     }
     // route 3's training families: at least 10 rows each (wide, tall,
