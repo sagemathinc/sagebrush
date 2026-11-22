@@ -62,7 +62,7 @@
     "kind": "function",
     "signature": "w = hamming(L)\nw = hamming(L, sflag)",
     "summary": "The L-point Hamming window, a column: 0.54 - 0.46 cos(2 pi n / N).",
-    "doc": "$w(n) = 0.54 - 0.46\\cos(2\\pi n/N)$ for $n = 0, \\ldots, L-1$, with $N = L - 1$ for `'symmetric'` (the default) or $N = L$ for `'periodic'` (for spectral analysis: the first L points of the symmetric window of L + 1). `hamming(1)` is 1 and `hamming(0)` is empty. The window pwelch and spectrogram use by default.",
+    "doc": "$w(n) = 0.54 - 0.46\\cos(2\\pi n/N)$ for $n = 0, \\ldots, L-1$, with $N = L - 1$ for `'symmetric'` (the default) or $N = L$ for `'periodic'` (for spectral analysis: the first L points of the symmetric window of L + 1). `hamming(1)` is 1 and `hamming(0)` is empty. The window pwelch and spectrogram use by default. A noninteger L is rounded to the nearest integer (half away from zero) with MATLAB's warning `signal:spectralwindows:InvalidOrderRounding`; a complex L is the error `MATLAB:hamming:expectedReal` and a negative one `MATLAB:hamming:expectedNonnegative`, as MATLAB's.",
     "examples": [
       {
         "code": "hamming(5)'",
@@ -90,7 +90,7 @@
     "kind": "function",
     "signature": "w = hann(L)\nw = hann(L, sflag)",
     "summary": "The L-point Hann window, a column: 0.5 (1 - cos(2 pi n / N)), zero at both ends.",
-    "doc": "$w(n) = 0.5\\,(1 - \\cos(2\\pi n/N))$ for $n = 0, \\ldots, L-1$, with $N = L - 1$ for `'symmetric'` (the default: both ends are 0) or $N = L$ for `'periodic'`. `hann(1)` is 1.",
+    "doc": "$w(n) = 0.5\\,(1 - \\cos(2\\pi n/N))$ for $n = 0, \\ldots, L-1$, with $N = L - 1$ for `'symmetric'` (the default: both ends are 0) or $N = L$ for `'periodic'`. `hann(1)` is 1. A noninteger L is rounded to the nearest integer (half away from zero) with MATLAB's warning `signal:spectralwindows:InvalidOrderRounding`; a complex L is the error `MATLAB:hann:expectedReal` and a negative one `MATLAB:hann:expectedNonnegative`, as MATLAB's.",
     "examples": [
       {
         "code": "hann(5)'",
@@ -143,7 +143,7 @@
     "kind": "function",
     "signature": "[pxx, w] = pwelch(x)\n[pxx, w] = pwelch(x, window, noverlap, nfft)\n[pxx, f] = pwelch(x, window, noverlap, nfft, fs)\n[___] = pwelch(___, range)\npwelch(___)",
     "summary": "The power spectral density of a signal by Welch's method: the average periodogram of windowed, overlapping segments.",
-    "doc": "x (a vector, or each column of a matrix) is divided into segments of length L overlapping by noverlap samples; each is multiplied by the window, transformed with nfft points, and $|X|^2/(U f_s)$ averaged, $U = \\sum w^2$ ($f_s = 2\\pi$ for rad/sample). By default 8 segments with 50% overlap and Hamming windows ($L$ = fix(N/4.5)), and nfft = max(256, 2^nextpow2(L)); an integer window is a Hamming window of that length. A segment longer than nfft is wrapped. range is `'onesided'` (real x's default: bins 0 to nfft/2, the mirrored ones doubled), `'twosided'` (complex x's default) or `'centered'`. With no output, pwelch plots the estimate in dB. Fewer than 9 samples with the default settings is the error `signal:welchparse:NotEnoughSamplesForDefaultSettings`, as MATLAB's.",
+    "doc": "x (a vector, or each column of a matrix) is divided into segments of length L overlapping by noverlap samples; each is multiplied by the window, transformed with nfft points, and $|X|^2/(U f_s)$ averaged, $U = \\sum w^2$ ($f_s = 2\\pi$ for rad/sample). By default 8 segments with 50% overlap and Hamming windows ($L$ = fix(N/4.5)), and nfft = max(256, 2^nextpow2(L)); an integer window is a Hamming window of that length. A segment longer than nfft is wrapped. range is `'onesided'` (real x's default: bins 0 to nfft/2, the mirrored ones doubled), `'twosided'` (complex x's default) or `'centered'`. With no output, pwelch plots the estimate in dB. Fewer than 9 samples with the default settings is the error `signal:welchparse:NotEnoughSamplesForDefaultSettings`, as MATLAB's. A window vector may be complex: the segments are windowed by it as it is and normalized by $\\sum |w|^2$. A noninteger window length is rounded with hamming's warning; a noninteger or complex nfft or noverlap is MATLAB's error.",
     "examples": [
       {
         "code": "x = cos(pi/4 * (0:63)');\n[pxx, w] = pwelch(x, 16, 8, 16);\n[~, k] = max(pxx); w(k) / pi",
@@ -174,7 +174,7 @@
     "kind": "function",
     "signature": "s = spectrogram(x)\n[s, w, t] = spectrogram(x, window, noverlap, nfft)\n[s, f, t] = spectrogram(x, window, noverlap, nfft, fs)\n[s, w, t, ps] = spectrogram(___)\nspectrogram(___)",
     "summary": "The short-time Fourier transform of a signal: one column of spectrum per windowed, overlapping segment.",
-    "doc": "Column k of s is the nfft-point FFT of segment k times the window, the segments as pwelch's (8 with 50% overlap and Hamming windows by default); rows as pwelch's range (one-sided for real x). t holds the segments' centres, $((k-1)\\,\\mathrm{hop} + L/2)/f_s$ ($f_s = 2\\pi$ without one, as MATLAB gives them), and ps each segment's power spectral density, scaled as pwelch's. nfft may be a vector of frequencies, where the transform is evaluated directly. With no output, spectrogram plots ps in dB, frequency on the x-axis (`'yaxis'` puts it on the y-axis).",
+    "doc": "Column k of s is the nfft-point FFT of segment k times the window, the segments as pwelch's (8 with 50% overlap and Hamming windows by default); rows as pwelch's range (one-sided for real x). t holds the segments' centres, $((k-1)\\,\\mathrm{hop} + L/2)/f_s$ ($f_s = 2\\pi$ without one, as MATLAB gives them), and ps each segment's power spectral density, scaled as pwelch's. nfft may be a vector of frequencies, where the transform is evaluated directly. With no output, spectrogram plots ps in dB, frequency on the x-axis (`'yaxis'` puts it on the y-axis). A complex window vector is used as it is.",
     "examples": [
       {
         "code": "x = cos(pi/2 * (0:99)');\n[s, w, t] = spectrogram(x, 20, 10, 32);\nsize(s), t(1:3)",

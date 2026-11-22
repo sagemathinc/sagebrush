@@ -33,11 +33,34 @@ def _empty(v):
     return v is None or (not _istext(v) and _m._isnumlike(v) and _m._numel(v) == 0)
 
 
-def _posint(v, name, what, zero=False):
-    """a scalar integer (positive, or nonnegative when zero is allowed)"""
+def _scalar_value(v, name, what):
+    """a numeric scalar's value (complex when it has an imaginary part); text and arrays are refused"""
     if _istext(v) or not _m._isnumlike(v) or _m._numel(v) != 1:
         raise _err("%s: %s must be a scalar integer." % (name, what))
-    f = float(np.real(_md(v).reshape(-1)[0]))
+    z = _md(v).reshape(-1)[0]
+    return complex(z) if np.iscomplexobj(z) and z.imag != 0 else float(np.real(z))
+
+
+def _real_scalar(v, name, what, ident=None, msg=None):
+    """a real numeric scalar as a float; a complex one is an error (MATLAB's ident and msg when given), never its
+    real part"""
+    f = _scalar_value(v, name, what)
+    if isinstance(f, complex):
+        raise _err(msg or "%s: %s must be real." % (name, what), ident) if ident else _err(msg or "%s: %s must be real." % (name, what))
+    return f
+
+
+def _round_length(f):
+    """a noninteger length rounded to the nearest integer (half away from zero), with MATLAB's warning"""
+    if f != _math.floor(f):
+        _m.warning_("Rounding order to nearest integer.", "signal:spectralwindows:InvalidOrderRounding")
+        return _math.floor(abs(f) + 0.5) * (1 if f >= 0 else -1)
+    return f
+
+
+def _posint(v, name, what, zero=False):
+    """a scalar integer (positive, or nonnegative when zero is allowed)"""
+    f = _real_scalar(v, name, what)
     if not (f == f and abs(f) != _math.inf and f == _math.floor(f) and (f >= 0 if zero else f >= 1)):
         raise _err("%s: %s must be a %s integer." % (name, what, "nonnegative" if zero else "positive"))
     return int(f)
@@ -69,7 +92,14 @@ def _cosine_window(name, args, a0, a1):
     points (hann(5) is exactly [0 0.5 1 0.5 0], as MATLAB's)"""
     if not args:
         raise _err("%s: the window length is required." % name)
-    L = _posint(args[0], name, "the window length", zero=True)
+    # (a noninteger length rounded to the nearest integer, as the hamming and hann pages say, with MATLAB's warning
+    # "Rounding order to nearest integer."; a complex or negative one is MATLAB's error, observed R2026b 2026-11-22)
+    f = _real_scalar(args[0], name, "L", "MATLAB:%s:expectedReal" % name, "Expected L to be real.")
+    if f != f or abs(f) == _math.inf:
+        raise _err("Expected L to be finite.", "MATLAB:%s:expectedFinite" % name)
+    if f < 0:
+        raise _err("Expected L to be nonnegative.", "MATLAB:%s:expectedNonnegative" % name)
+    L = int(_round_length(f))
     sflag = "symmetric"
     if len(args) > 1:
         if not _istext(args[1]) or _text(args[1]).lower() not in ("symmetric", "periodic"):
@@ -163,7 +193,7 @@ def freqz_(nargout, b, *args):
         h = _horner(bv, zi) / _horner(av, zi)
         x = fv.reshape(-1)
     else:
-        n = 512 if p3 is None or _empty(p3) else _posint(p3, "freqz", "the number of points n")
+        n = 512 if p3 is None or _empty(p3) else _freqz_n(p3)
         N = n if whole else 2 * n
         k = np.arange(n, dtype=np.float64)
         w = (_TWO_PI if whole else _math.pi) * k / n
@@ -175,6 +205,15 @@ def freqz_(nargout, b, *args):
     H = _out(h.reshape(shape)) if shape is not None else _col(h)
     X = _out(x.reshape(shape)) if shape is not None else _col(x)
     return [H, X][:max(nargout, 1)] if nargout > 1 else H
+
+
+def _freqz_n(v):
+    """freqz's n: a complex n is MATLAB:expectedReal, a noninteger or nonpositive one MATLAB:badsubscript (as an
+    observed MATLAB R2026b run gives them)"""
+    f = _real_scalar(v, "freqz", "n", "MATLAB:expectedReal", "Expected n to be real.")
+    if not (f == f and abs(f) != _math.inf and f == _math.floor(f) and f >= 1):
+        raise _err("Array indices must be positive integers or logical values.", "MATLAB:badsubscript")
+    return int(f)
 
 
 def _plot(name, *args):
@@ -230,20 +269,47 @@ def _segments(N, window, noverlap, name):
         L = int(N / 4.5)
         win = _hamming([float(L)])
     elif _m._numel(window) == 1:
-        L = _posint(window, name, "the window length")
+        # (an integer length; a complex or nonpositive one is MATLAB's expectedPositive error, a noninteger one
+        # rounded with its warning, as hamming does)
+        f = _scalar_value(window, name, "the window length")
+        if isinstance(f, complex) or not (f > 0 and f != _math.inf):
+            raise _err("Expected WINDOW to be positive.", "MATLAB:%s:expectedPositive" % name)
+        L = int(_round_length(f))
         win = _hamming([float(L)])
     else:
-        win = _vec(window, name, "the window").astype(np.float64)
+        # (a window vector, complex ones included, as MATLAB takes them)
+        win = _vec(window, name, "the window")
+        win = win.astype(np.complex128) if np.iscomplexobj(win) else win.astype(np.float64)
         L = win.size
     if L > N:
         raise _err("%s: the window is longer than the input signal (%d > %d samples)." % (name, L, N))
     if _empty(noverlap):
         nov = int(L / 2)
     else:
+        # (a complex noverlap is the colon error MATLAB gives; a noninteger one is pwelch's index error and
+        # spectrogram's expectedInteger, as an observed MATLAB R2026b run gives them)
+        g = _scalar_value(noverlap, name, "noverlap")
+        if isinstance(g, complex):
+            raise _err("Colon operands must be real scalars.", "MATLAB:colon:operandsNotRealScalar")
+        if g == g and abs(g) != _math.inf and g != _math.floor(g):
+            if name == "spectrogram":
+                raise _err("Expected NOVERLAP to be integer-valued.", "MATLAB:spectrogram:expectedInteger")
+            raise _err("Index in position 1 is invalid. Array indices must be positive integers or logical values.",
+                       "MATLAB:badsubscript")
         nov = _posint(noverlap, name, "noverlap", zero=True)
         if nov >= L:
             raise _err("%s: noverlap must be smaller than the window length." % name)
     return win, L, nov
+
+
+def _nfft_arg(v, name):
+    """nfft: a complex or noninteger one is MATLAB's expectedInteger error, a nonpositive one expectedPositive"""
+    f = _scalar_value(v, name, "nfft")
+    if isinstance(f, complex) or f != f or abs(f) == _math.inf or f != _math.floor(f):
+        raise _err("Expected NFFT to be integer-valued.", "MATLAB:%s:expectedInteger" % name)
+    if f < 1:
+        raise _err("Expected NFFT to be positive.", "MATLAB:%s:expectedPositive" % name)
+    return int(f)
 
 
 def _nfft_default(L):
@@ -341,7 +407,7 @@ def pwelch_(nargout, x, *args):
     win, L, nov = _segments(N, window, noverlap, "pwelch")
     if not _empty(nfft) and _m._numel(nfft) > 1:
         raise _err("pwelch: a vector of frequencies is not supported in Sagebrush: give nfft.")
-    n = _nfft_default(L) if _empty(nfft) else _posint(nfft, "pwelch", "nfft")
+    n = _nfft_default(L) if _empty(nfft) else _nfft_arg(nfft, "pwelch")
     fs = _fs_arg(fsv, "pwelch")
     cplx = np.iscomplexobj(M)
     rng = rng or ("twosided" if cplx else "onesided")
@@ -349,7 +415,7 @@ def pwelch_(nargout, x, *args):
         raise _err("pwelch: a one-sided estimate needs real input.")
     hop = L - nov
     K = (N - nov) // hop
-    U = float(np.dot(win, win))
+    U = float(np.sum(np.abs(win) ** 2))
     cols = []
     for c in range(M.shape[1]):
         P = np.zeros(n)
@@ -396,7 +462,7 @@ def spectrogram_(nargout, x, *args):
     K = (N - nov) // hop
     segs = [xv[k * hop:k * hop + L] * win for k in range(K)]
     t = (np.arange(K, dtype=np.float64) * hop + L / 2) / scale
-    U = float(np.dot(win, win))
+    U = float(np.sum(np.abs(win) ** 2))
     fvec = None
     if not _empty(nfft) and _m._numel(nfft) > 1:
         # (the DFT at the frequencies given, rad/sample or Hz with fs: sum_n x(n) e^(-j w n))
@@ -408,7 +474,7 @@ def spectrogram_(nargout, x, *args):
         S = np.stack([E @ s for s in segs], axis=1) if K else np.zeros((fvec.size, 0), dtype=np.complex128)
         f = fvec
     else:
-        n = _nfft_default(L) if _empty(nfft) else _posint(nfft, "spectrogram", "nfft")
+        n = _nfft_default(L) if _empty(nfft) else _nfft_arg(nfft, "spectrogram")
         rng = rng or ("twosided" if cplx else "onesided")
         if rng == "onesided" and cplx:
             raise _err("spectrogram: a one-sided transform needs real input.")

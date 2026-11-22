@@ -355,3 +355,139 @@ test("the windows' options and edges, freqz's plot and refusals", () => {
   assert.match(r.out, /line through 9 points; x \(Normalized Frequency \(×π rad\/sample\)\) from 0 to 1, y \(Power\/frequency \(dB\/\(rad\/sample\)\)\)/);
   assert.match(r.out, /image 9 by 17; x \(Normalized Frequency \(×π rad\/sample\)\) from -0\.03125 to 1\.031, y \(Samples\) from 5 to 95/);
 });
+
+// (argument checks and complex windows, as an observed MATLAB R2026b run gives them (values and identifiers only,
+// 2026-11-22): a complex length or size is an error, never its real part; only the window length rounds, half away
+// from zero, with MATLAB's warning; a noninteger noverlap or nfft is an error; a complex window vector is used as it
+// is, normalized by sum(abs(w).^2))
+const CX2 = [
+  "x = sin(2*pi*0.1*(0:99)') + 0.5*cos(2*pi*0.27*(0:99)');",
+  "b = [1 2 1]/4; a = [1 -0.5 0.25];",
+  "try, v = hamming(4+1i); fprintf('c1|OK|%s %d\\n', mat2str(size(v)), isreal(v)); catch err, fprintf('c1|ERR|%s|%s\\n', err.identifier, err.message); end",
+  "try, v = hann(4+1i); fprintf('c2|OK|%s %d\\n', mat2str(size(v)), isreal(v)); catch err, fprintf('c2|ERR|%s|%s\\n', err.identifier, err.message); end",
+  "try, v = hamming(4.5); fprintf('c3|OK|%s %d\\n', mat2str(size(v)), isreal(v)); catch err, fprintf('c3|ERR|%s|%s\\n', err.identifier, err.message); end",
+  "try, v = hamming(0); fprintf('c4|OK|%s %d\\n', mat2str(size(v)), isreal(v)); catch err, fprintf('c4|ERR|%s|%s\\n', err.identifier, err.message); end",
+  "try, v = hamming(-1); fprintf('c5|OK|%s %d\\n', mat2str(size(v)), isreal(v)); catch err, fprintf('c5|ERR|%s|%s\\n', err.identifier, err.message); end",
+  "try, [v,w] = freqz(b, a, 4+1i); fprintf('c6|OK|%s %d\\n', mat2str(size(v)), isreal(v)); catch err, fprintf('c6|ERR|%s|%s\\n', err.identifier, err.message); end",
+  "try, [v,w] = freqz(b, a, 4.5); fprintf('c7|OK|%s %d\\n', mat2str(size(v)), isreal(v)); catch err, fprintf('c7|ERR|%s|%s\\n', err.identifier, err.message); end",
+  "try, v = pwelch(x, 20, 10, 32+1i); fprintf('c8|OK|%s %d\\n', mat2str(size(v)), isreal(v)); catch err, fprintf('c8|ERR|%s|%s\\n', err.identifier, err.message); end",
+  "try, v = pwelch(x, 20+1i, 10, 32); fprintf('c9|OK|%s %d\\n', mat2str(size(v)), isreal(v)); catch err, fprintf('c9|ERR|%s|%s\\n', err.identifier, err.message); end",
+  "try, v = pwelch(x, 20, 10+1i, 32); fprintf('c10|OK|%s %d\\n', mat2str(size(v)), isreal(v)); catch err, fprintf('c10|ERR|%s|%s\\n', err.identifier, err.message); end",
+  "try, v = pwelch(x, hamming(20)+1i, 10, 32); fprintf('c11|OK|%s %d\\n', mat2str(size(v)), isreal(v)); catch err, fprintf('c11|ERR|%s|%s\\n', err.identifier, err.message); end",
+  "try, v = pwelch(x, 20.5, 10, 32); fprintf('c12|OK|%s %d\\n', mat2str(size(v)), isreal(v)); catch err, fprintf('c12|ERR|%s|%s\\n', err.identifier, err.message); end",
+  "try, v = spectrogram(x, hamming(16)*(1+1i), 8, 16); fprintf('c13|OK|%s %d\\n', mat2str(size(v)), isreal(v)); catch err, fprintf('c13|ERR|%s|%s\\n', err.identifier, err.message); end",
+  "try, v = spectrogram(x, 16, 8, 16+1i); fprintf('c14|OK|%s %d\\n', mat2str(size(v)), isreal(v)); catch err, fprintf('c14|ERR|%s|%s\\n', err.identifier, err.message); end",
+  "try, v = spectrogram(x, 16+1i, 8, 16); fprintf('c15|OK|%s %d\\n', mat2str(size(v)), isreal(v)); catch err, fprintf('c15|ERR|%s|%s\\n', err.identifier, err.message); end"
+].join("\n");
+const CX2_MATLAB = [
+  "c1|ERR|MATLAB:hamming:expectedReal|Expected L to be real.",
+  "c2|ERR|MATLAB:hann:expectedReal|Expected L to be real.",
+  "c3|OK|[5 1] 1",
+  "c4|OK|[0 1] 1",
+  "c5|ERR|MATLAB:hamming:expectedNonnegative|Expected L to be nonnegative.",
+  "c6|ERR|MATLAB:expectedReal|Expected n to be real.",
+  "c7|ERR|MATLAB:badsubscript|Array indices must be positive integers or logical values.",
+  "c8|ERR|MATLAB:pwelch:expectedInteger|Expected NFFT to be integer-valued.",
+  "c9|ERR|MATLAB:pwelch:expectedPositive|Expected WINDOW to be positive.",
+  "c10|ERR|MATLAB:colon:operandsNotRealScalar|Colon operands must be real scalars.",
+  "c11|OK|[17 1] 1",
+  "c12|OK|[17 1] 1",
+  "c13|OK|[9 11] 0",
+  "c14|ERR|MATLAB:spectrogram:expectedInteger|Expected NFFT to be integer-valued.",
+  "c15|ERR|MATLAB:spectrogram:expectedPositive|Expected WINDOW to be positive."
+];
+const ROUND = [
+  "x = sin(2*pi*0.1*(0:99)') + 0.5*cos(2*pi*0.27*(0:99)');",
+  "lastwarn(''); v = hamming(4.5); [m, id] = lastwarn; fprintf('w1|hamming(4.5)|%s|%s|%s\\n', id, m, mat2str(size(v)));",
+  "lastwarn(''); v = hann(4.4); [m, id] = lastwarn; fprintf('w2|hann(4.4)|%s|%s|%s\\n', id, m, mat2str(size(v)));",
+  "lastwarn(''); v = hamming(2.5); [m, id] = lastwarn; fprintf('w3|hamming(2.5)|%s|%s|%s\\n', id, m, mat2str(size(v)));",
+  "lastwarn(''); v = pwelch(x, 20.5, 10, 32); [m, id] = lastwarn; fprintf('w4|pwelch(x,20.5,10,32)|%s|%s|%s\\n', id, m, mat2str(size(v)));",
+  "lastwarn(''); v = spectrogram(x, 16.4, 8, 16); [m, id] = lastwarn; fprintf('w5|spectrogram(x,16.4,8,16)|%s|%s|%s\\n', id, m, mat2str(size(v)));",
+  "lastwarn(''); try, v = pwelch(x, 20, 10.5, 32); [m, id] = lastwarn; fprintf('w6|pwelch(x,20,10.5,32)|%s|%s|%s\\n', id, m, mat2str(size(v))); catch e, fprintf('w6|pwelch(x,20,10.5,32)|ERR %s|%s\\n', e.identifier, e.message); end",
+  "lastwarn(''); try, v = pwelch(x, 20, 10, 32.5); fprintf('w7|pwelch(x,20,10,32.5)|OK|%s\\n', mat2str(size(v))); catch e, fprintf('w7|pwelch(x,20,10,32.5)|ERR %s|%s\\n', e.identifier, e.message); end",
+  "lastwarn(''); try, v = spectrogram(x, 16, 8.5, 16); [m, id] = lastwarn; fprintf('w8|spectrogram(x,16,8.5,16)|%s|%s|%s\\n', id, m, mat2str(size(v))); catch e, fprintf('w8|spectrogram(x,16,8.5,16)|ERR %s|%s\\n', e.identifier, e.message); end",
+  "lastwarn(''); try, v = hamming(0.4); [m, id] = lastwarn; fprintf('w9|hamming(0.4)|%s|%s|%s\\n', id, m, mat2str(size(v))); catch e, fprintf('w9|hamming(0.4)|ERR %s|%s\\n', e.identifier, e.message); end"
+].join("\n");
+const ROUND_MATLAB = [
+  "w1|hamming(4.5)|signal:spectralwindows:InvalidOrderRounding|Rounding order to nearest integer.|[5 1]",
+  "w2|hann(4.4)|signal:spectralwindows:InvalidOrderRounding|Rounding order to nearest integer.|[4 1]",
+  "w3|hamming(2.5)|signal:spectralwindows:InvalidOrderRounding|Rounding order to nearest integer.|[3 1]",
+  "w4|pwelch(x,20.5,10,32)|signal:spectralwindows:InvalidOrderRounding|Rounding order to nearest integer.|[17 1]",
+  "w5|spectrogram(x,16.4,8,16)|signal:spectralwindows:InvalidOrderRounding|Rounding order to nearest integer.|[9 11]",
+  "w6|pwelch(x,20,10.5,32)|ERR MATLAB:badsubscript|Index in position 1 is invalid. Array indices must be positive integers or logical values.",
+  "w7|pwelch(x,20,10,32.5)|ERR MATLAB:pwelch:expectedInteger|Expected NFFT to be integer-valued.",
+  "w8|spectrogram(x,16,8.5,16)|ERR MATLAB:spectrogram:expectedInteger|Expected NOVERLAP to be integer-valued.",
+  "w9|hamming(0.4)|signal:spectralwindows:InvalidOrderRounding|Rounding order to nearest integer.|[0 1]"
+];
+const CW = [
+  "pc = @(t, v) fprintf('%s|%s|%s\\n', t, mat2str(size(v)), strtrim(sprintf('%.17g%+.17gi ', [real(v(:).'); imag(v(:).')])));",
+  "x = ones(6, 1); win = [1; 1i; 1];",
+  "try, s = spectrogram(x, win, 0, 3, 1, 'twosided'); pc('sg_s', s); catch e, fprintf('sg_s|ERR %s %s\\n', e.identifier, e.message); end",
+  "try, [s, f, t, ps] = spectrogram(x, win, 0, 3, 1, 'twosided'); pc('sg_ps', ps); catch e, fprintf('sg_ps|ERR %s %s\\n', e.identifier, e.message); end",
+  "try, p = pwelch(x, win, 0, 3, 1, 'twosided'); pc('pw', p); catch e, fprintf('pw|ERR %s %s\\n', e.identifier, e.message); end",
+  "try, p = pwelch(x, win, 0, 3); pc('pw_one', p); catch e, fprintf('pw_one|ERR %s %s\\n', e.identifier, e.message); end",
+  "x2 = sin(2*pi*0.1*(0:99)') + 0.5*cos(2*pi*0.27*(0:99)');",
+  "try, p = pwelch(x2, hamming(20)+1i, 10, 32); pc('pw_big_first4', p(1:4)); catch e, fprintf('pw_big|ERR %s %s\\n', e.identifier, e.message); end",
+  "try, s = spectrogram(x2, hamming(16)*(1+1i), 8, 16); pc('sg_big_col1_first4', s(1:4,1)); catch e, fprintf('sg_big|ERR %s %s\\n', e.identifier, e.message); end",
+  "try, [s,f,t,ps] = spectrogram(x2, hamming(16)*(1+1i), 8, 16); pc('sg_big_ps_first4', ps(1:4,1)); catch e, fprintf('sg_big_ps|ERR %s %s\\n', e.identifier, e.message); end"
+].join("\n");
+const CW_MATLAB: Record<string, [string, string]> = {
+  "sg_s": [
+    "[3 2]",
+    "2+1i 1.3660254037844386+0.3660254037844386i -0.3660254037844386-1.3660254037844386i 2+1i 1.3660254037844386+0.3660254037844386i -0.3660254037844386-1.3660254037844386i"
+  ],
+  "sg_ps": [
+    "[3 2]",
+    "1.6666666666666667+0i 0.66666666666666663+0i 0.66666666666666663+0i 1.6666666666666667+0i 0.66666666666666663+0i 0.66666666666666663+0i"
+  ],
+  "pw": [
+    "[3 1]",
+    "1.6666666666666667+0i 0.66666666666666663+0i 0.66666666666666663+0i"
+  ],
+  "pw_one": [
+    "[2 1]",
+    "0.26525823848649227+0i 0.21220659078919377+0i"
+  ],
+  "pw_big_first4": [
+    "[4 1]",
+    "0.0011975092828196746+0i 0.14756475787239753+0i 0.25718276574242854+0i 1.4368517809565651+0i"
+  ],
+  "sg_big_col1_first4": [
+    "[4 1]",
+    "-0.88286382474298508-0.88286382474298508i 2.4776141441577648+3.7084911951267951i -1.935374034741649-4.6811951383089134i 0.21780234489538119+0.50737465403060988i"
+  ],
+  "sg_big_ps_first4": [
+    "[4 1]",
+    "0.020788465147134873+0i 0.5305203564535409+0i 0.68435133508009871+0i 0.0081310242783120407+0i"
+  ]
+};
+
+test("complex lengths and sizes, noninteger lengths, noverlap and nfft: MATLAB's errors, warnings and sizes", () => {
+  const a = run(CX2), b = run(ROUND);
+  assert.equal(a.status, 0, a.err);
+  assert.equal(b.status, 0, b.err);
+  assert.deepEqual(a.out.trim().split("\n"), CX2_MATLAB);
+  assert.deepEqual(b.out.trim().split("\n"), ROUND_MATLAB);
+  // (the rounding warning, as MATLAB prints it: once for each rounded window length)
+  assert.equal((a.err + b.err).split("Warning: Rounding order to nearest integer.").length - 1, 8);
+});
+
+test("a complex window vector: its imaginary part kept, the PSD normalized by sum(abs(w).^2)", () => {
+  // (x = ones(6, 1) and the window [1; 1i; 1] window each segment to [1, i, 1]: s is its DFT, the PSD |s|^2 / 3)
+  const r = run(CW);
+  assert.equal(r.status, 0, r.err);
+  const parse = (v: string) => v.split(" ").map((t) => {
+    const m = /^([-+]?[\d.e+-]+?)([-+][\d.e+-]+)i$/.exec(t);
+    return m ? [Number(m[1]), Number(m[2])] : [Number(t), 0];
+  });
+  const got = new Map(r.out.trim().split("\n").map((l) => { const [n, sz, v] = l.split("|"); return [n, [sz, v.trim()]]; }));
+  for (const [name, [size, values]] of Object.entries(CW_MATLAB)) {
+    const g = got.get(name);
+    assert.ok(g, `${name}: not printed`);
+    assert.equal(g[0], size, `${name}: size`);
+    const want = parse(values), have = parse(g[1]);
+    const scale = Math.max(...want.map(([x, y]) => Math.hypot(x, y)));
+    const err = Math.max(...want.map(([x, y], k) => Math.hypot(x - have[k][0], y - have[k][1])));
+    assert.ok(err <= 1e-13 * scale, `${name}: ${err / scale} of the row's largest element`);
+  }
+});
