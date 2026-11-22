@@ -109,10 +109,8 @@
         "expected": "\nans =\n\n     4     3\n     9     2\n\n"
       }
     ],
-    "differs": [
-      "'ComparisonMethod', 'real' is supported only for vectors, as for sort."
-    ],
-    "status": "partial",
+    "differs": [],
+    "status": "full",
     "see_also": [
       "mink",
       "sort",
@@ -138,10 +136,8 @@
         "expected": "\nans =\n\n     1     3\n     0     2\n\n"
       }
     ],
-    "differs": [
-      "'ComparisonMethod', 'real' is supported only for vectors, as for sort."
-    ],
-    "status": "partial",
+    "differs": [],
+    "status": "full",
     "see_also": [
       "maxk",
       "sort",

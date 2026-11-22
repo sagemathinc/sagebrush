@@ -1453,6 +1453,8 @@ def cond(v):
         if v != v:
             raise _err("NaN's cannot be converted to logicals.", "MATLAB:nologicalnan")
         return v != 0.0
+    if t is complex:
+        v = np.array([[v]])
     if t is Str:
         raise _err("Conversion to logical from string is not possible.")
     if not _isnumlike(v):
@@ -1466,6 +1468,10 @@ def cond(v):
         # (a NaN in either part of a complex value)
         raise _err("NaN's cannot be converted to logicals.", "MATLAB:nologicalnan")
     if A.dtype.kind == "c":
+        # (a value with an imaginary part is no condition: if [1+1i 2+2i] is MATLAB's error, observed MATLAB R2026b,
+        # 2026-11-21, where its real parts used to decide)
+        if np.any(A.imag != 0):
+            raise _err("Complex values cannot be converted to logicals.", "MATLAB:nologicalcomplex")
         A = A.real
     return bool(np.all(A != 0))
 
@@ -2048,7 +2054,7 @@ def fn(name, top=False, imports=None):
             if host is not None and f in host.scripts:
                 return host.script_in_function(name)
         return f
-    if _namespace(name):
+    if _namespace(name) or any(k.startswith(name + ".") for k in _B if "." in k):
         return Namespace(name)
     raise _undefined(name)
 
@@ -2104,6 +2110,9 @@ class Namespace:
 
     def member(self, name):
         full = self.name + "." + name
+        b = _B.get(full)
+        if b is not None:
+            return b
         f = _from_path(full)
         if f is not None:
             return f
@@ -2169,6 +2178,11 @@ def paren(obj, args, nargout=1):
         if nargout == 1 and r is NOVAL:
             raise _err("Too many output arguments.", "MATLAB:TooManyOutputs")
         return r
+    if t is MapObj:
+        # (m(key): its value)
+        if len(args) != 1:
+            raise _err("Only one level of indexing is supported by a containers.Map.", "MATLAB:Containers:Map:OneLevel")
+        return obj.get(args[0])
     if nargout > 1:
         return [index(obj, args)] + [NOVAL] * (nargout - 1)
     return index(obj, args)
@@ -2737,6 +2751,10 @@ def set1(cur, i, v):
                 g = _grow1(cur, k, v)
                 if g is not None:
                     return g
+    if type(cur) is MapObj:
+        # (m(key) = v: the map itself changes, every variable holding it sees it)
+        cur.put(i, v)
+        return cur
     return _assign_paren(None if isinstance(cur, Undef) else cur, [i], v)
 
 
@@ -4668,6 +4686,8 @@ def size_(nargout, x, *dims):
 
 @_bs("length")
 def length_(x):
+    if type(x) is MapObj:
+        return float(len(x.d))
     d = _dims(x)
     return 0.0 if _prod(d) == 0 else float(max(d))
 
@@ -4684,6 +4704,8 @@ def ndims_(x):
 
 @_bs("isempty")
 def isempty_(x):
+    if type(x) is MapObj:
+        return len(x.d) == 0
     return _numel(x) == 0
 
 
@@ -6044,6 +6066,9 @@ def mode_(nargout, x, *args):
 
 
 def _var_impl(x, args, sq):
+    # (a logical array is its 0s and 1s: var([true false true true]) is 0.2500, observed MATLAB R2026b, 2026-11-21)
+    if class_(x) == "logical":
+        x = _box(_farr(x).astype(np.float64)) if type(x) is not bool else float(x)
     _need_float(x, "std" if sq else "var")
     w = 0
     rest = list(args)
@@ -6611,24 +6636,6 @@ def sort_(nargout, x, *args):
     if placement not in ("auto", "first", "last"):
         raise _err("sort: 'MissingPlacement' must be 'auto', 'first' or 'last'.")
     nan_last = placement == "last" or (placement == "auto" and not desc)
-    if method == "real" and _isnumlike(x) and _arr(x).dtype.kind == "c" and not _isvec(x):
-        raise _err("sort: 'ComparisonMethod', 'real' is supported only for vectors in Sagebrush.")
-    if method == "real" and _isnumlike(x) and _arr(x).dtype.kind == "c" and _isvec(x):
-        vals = list(_arr(x).reshape(-1))
-        # (a NaN part makes an element missing: set aside in its order, the rest sorted by real part, then imaginary,
-        # stably, and the missing placed as 'MissingPlacement' says, last ascending and first descending by default;
-        # observed MATLAB R2026b, 2026-11-21: sort([complex(NaN, 1) 3+2i 1+1i], 'ComparisonMethod', 'real') is
-        # [1+1i 3+2i NaN+1i], where a NaN in the sort key used to scramble the order)
-        miss = [k for k in range(len(vals)) if vals[k].real != vals[k].real or vals[k].imag != vals[k].imag]
-        rest = [k for k in range(len(vals)) if k not in set(miss)]
-        if desc:
-            # (descending and stable: equal keys keep their order)
-            rest = sorted(rest, key=lambda k: (-vals[k].real, -vals[k].imag))
-        else:
-            rest = sorted(rest, key=lambda k: (vals[k].real, vals[k].imag))
-        order = rest + miss if nan_last else miss + rest
-        r = _box(np.array([vals[k] for k in order]).reshape(_arr(x).shape))
-        return r if nargout <= 1 else [r, _box(np.array([float(k + 1) for k in order]).reshape(_arr(x).shape))]
     if type(x) is Cell or type(x) is StrArr or type(x) is Str:
         if type(x) is Str:
             return x if nargout <= 1 else [x, 1.0]
@@ -6661,7 +6668,15 @@ def sort_(nargout, x, *args):
         return cp(x) if nargout <= 1 else [cp(x), _box(np.ones(A.shape))]
     ax = A.ndim - dim
     pre = None
-    if A.dtype.kind == "c":
+    if A.dtype.kind == "c" and method == "real":
+        # (complex numbers by real part, then imaginary, along any dimension; an element with a NaN part is missing,
+        # placed as 'MissingPlacement' says; observed MATLAB R2026b, 2026-11-21: sort([1+1i -2 1i; 3 -1-1i 2; NaN 0
+        # -1i], 'ComparisonMethod', 'real') sorts each column so, NaN last; it was refused for a matrix)
+        im = np.where(np.isnan(A.imag), 0.0, A.imag)
+        pre = np.argsort(-im if desc else im, axis=ax, kind="stable")
+        A = _take_along(A, pre, axis=ax)
+        key = np.where(np.isnan(A.imag), np.nan, A.real)
+    elif A.dtype.kind == "c":
         # (complex numbers by magnitude, then by phase angle in (-pi, pi]: first a stable sort by
         # phase, then a stable sort by magnitude of that order)
         ph = np.angle(A)
@@ -8557,7 +8572,8 @@ def _num2str_scalar(x, prec=None):
     if not _math.isfinite(x):
         return _special(x)
     if prec is not None:
-        return "%.*g" % (prec, x)
+        # (num2str(-0, 17) is '0', as num2str(-0) is, observed MATLAB R2026b, 2026-11-21)
+        return "%.*g" % (prec, x if x != 0 else 0.0)
     if x == _math.floor(x):
         return "%d" % x if abs(x) < 1e15 else "%.10g" % x
     return _num2str_g(x)
@@ -8662,7 +8678,8 @@ def _mat2str_num(x, prec, cls):
         return "Inf"
     if x == -_math.inf:
         return "-Inf"
-    s = "%.*g" % (prec, x)
+    # (a zero is 0, its sign dropped: mat2str(-0) is '0', observed MATLAB R2026b, 2026-11-21)
+    s = "%.*g" % (prec, x if x != 0 else 0.0)
     return s
 
 
@@ -12127,7 +12144,8 @@ def interp1_n(*args):
     X = [X[k] for k in order]
     V = V[order]
     if any(X[k] == X[k + 1] for k in range(len(X) - 1)):
-        raise _err("interp1: the grid vectors must contain unique points.", "MATLAB:griddedInterpolant:NonUniqueCompVecsPtsErrId")
+        # (MATLAB's message, observed MATLAB R2026b, 2026-11-21)
+        raise _err("Sample points must be unique.", "MATLAB:griddedInterpolant:NonUniqueCompVecsPtsErrId")
     Q = _farr(xq)
     if Q.dtype.kind == "c":
         raise _err("interp1 at complex query points is not supported in Sagebrush.")
@@ -12689,7 +12707,34 @@ def fileread_(f, *opts):
 
 
 class _MFile:
-    __slots__ = ("fh", "name", "mode")
+    __slots__ = ("fh", "name", "mode", "big")
+
+
+class _ByteFile:
+    """an open file as MATLAB has it: bytes (fread, fwrite), with the text functions' reads and writes (fgetl, fgets,
+    fprintf) in UTF-8 over them; MATLAB opens every file in binary, its 't' changing only line endings on Windows"""
+    __slots__ = ("raw",)
+
+    def __init__(self, raw):
+        self.raw = raw
+
+    def write(self, s):
+        return self.raw.write(s.encode("utf-8"))
+
+    def readline(self):
+        return self.raw.readline().decode("utf-8", "replace")
+
+    def read(self, n=-1):
+        return self.raw.read(n).decode("utf-8", "replace")
+
+    def tell(self):
+        return self.raw.tell()
+
+    def seek(self, pos, whence=0):
+        return self.raw.seek(pos, whence)
+
+    def close(self):
+        self.raw.close()
 
 
 _next_fid = [3]
@@ -12707,10 +12752,16 @@ def fopen_(nargout, f, mode=None, *rest):
     if _latex[0] and (set(m.lower()) - set("rtb") or "r" not in m.lower()):
         # (in a LaTeX run only reading opens a file: 'r', with or without 't' or 'b'; any other mode is refused)
         raise _err(_LATEX_FOPEN % m)
-    # (text mode: fprintf and fgetl work on text)
+    # (binary, as MATLAB opens every file, with the text functions over it: _ByteFile; 'r+', 'w+', 'a+' as C's)
     pm = m.replace("t", "").replace("b", "") or "r"
+    if pm not in ("r", "w", "a", "r+", "w+", "a+"):
+        raise _err("Invalid permission.", "MATLAB:fopen:InvalidPermission")
+    # (a machine format, 'ieee-be' or 'b', makes fread and fwrite big-endian; native and little-endian are the same here)
+    fmt = _text(rest[0]).lower() if rest and _istext(rest[0]) else "n"
+    if fmt not in ("n", "native", "l", "ieee-le", "b", "ieee-be", "a", "s", "ieee-le.l64", "ieee-be.l64"):
+        raise _err("Invalid machine format.", "MATLAB:fopen:InvalidMachineFormat")
     try:
-        fh = open(t, pm)
+        fh = _ByteFile(open(t, pm[0] + "b" + pm[1:]))
     except OSError as e:
         # (the system's message, without Python's "[Errno 2]" and file name)
         if nargout >= 2:
@@ -12722,6 +12773,7 @@ def fopen_(nargout, f, mode=None, *rest):
     mf.fh = fh
     mf.name = t
     mf.mode = m
+    mf.big = fmt in ("b", "ieee-be", "ieee-be.l64")
     _files[fid] = mf
     return float(fid) if nargout <= 1 else [float(fid), Char("")]
 
@@ -12778,6 +12830,144 @@ def frewind_(fid):
     _fh(fid).seek(0)
 
 
+# (fread's and fwrite's precisions: the struct code, the element's bytes, and the class a '*' keeps)
+_PRECISIONS = {
+    "uint8": ("B", 1, "uint8"), "uchar": ("B", 1, "uint8"), "unsigned char": ("B", 1, "uint8"),
+    "int8": ("b", 1, "int8"), "schar": ("b", 1, "int8"), "signed char": ("b", 1, "int8"), "integer*1": ("b", 1, "int8"),
+    "uint16": ("H", 2, "uint16"), "ushort": ("H", 2, "uint16"), "int16": ("h", 2, "int16"), "short": ("h", 2, "int16"),
+    "integer*2": ("h", 2, "int16"),
+    "uint32": ("I", 4, "uint32"), "uint": ("I", 4, "uint32"), "ulong": ("I", 4, "uint32"),
+    "int32": ("i", 4, "int32"), "int": ("i", 4, "int32"), "long": ("i", 4, "int32"), "integer*4": ("i", 4, "int32"),
+    "uint64": ("Q", 8, "uint64"), "int64": ("q", 8, "int64"), "integer*8": ("q", 8, "int64"),
+    "single": ("f", 4, "single"), "float32": ("f", 4, "single"), "float": ("f", 4, "single"), "real*4": ("f", 4, "single"),
+    "double": ("d", 8, "double"), "float64": ("d", 8, "double"), "real*8": ("d", 8, "double"),
+    "char": ("B", 1, "char"), "char*1": ("B", 1, "char"),
+}
+
+
+def _precision(p, default="uint8"):
+    """a precision's (struct code, bytes, input class, output class): 'int16' reads int16 into double, '*int16' keeps
+    int16, 'int16=>single' converts to single (MATLAB's fread page)"""
+    t = (_text(p) if p is not None and not (_isnumlike(p) and _numel(p) == 0) else default).strip().lower()
+    keep = t.startswith("*")
+    t = t.lstrip("*").strip()
+    out = None
+    if "=>" in t:
+        t, out = [u.strip() for u in t.split("=>", 1)]
+    if t not in _PRECISIONS or (out is not None and out not in _PRECISIONS):
+        raise _err("Invalid precision.", "MATLAB:fread:InvalidPrecision")
+    code, size, cls = _PRECISIONS[t]
+    if out is not None:
+        ocls = _PRECISIONS[out][2]
+    elif keep:
+        ocls = cls
+    else:
+        ocls = "double"
+    return code, size, cls, ocls
+
+
+@_bi("fread")
+def fread_(nargout, fid, size=None, precision=None, skip=None, machinefmt=None):
+    """[A, count] = fread(fid, sizeA, precision, skip, machinefmt): binary data, read in column order. sizeA is Inf (a
+    column of everything left, the default), n, [m n], or [m Inf]; a partial last column is padded with zeros"""
+    h = _files.get(int(_scalar(fid)))
+    if h is None:
+        raise _err("Invalid file identifier.  Use fopen to generate a valid file identifier.", "MATLAB:FileIO:InvalidFid")
+    import struct
+    # (fread(fid, precision): the precision in sizeA's place, as fread(fid, '*char') is written)
+    if size is not None and _istext(size):
+        size, precision = None, size
+    code, nbytes, cls, ocls = _precision(precision)
+    big = h.big if machinefmt is None else _text(machinefmt).lower() in ("b", "ieee-be", "ieee-be.l64")
+    gap = 0 if skip is None or _numel(skip) == 0 else _int_arg(skip)
+    shape = None
+    if size is None:
+        want = None
+    else:
+        sz = [float(v) for v in _farr(size).reshape(-1)]
+        if len(sz) == 1:
+            want = None if sz[0] == _math.inf else int(sz[0])
+        elif len(sz) == 2 and sz[0] != _math.inf:
+            shape = (int(sz[0]), None if sz[1] == _math.inf else int(sz[1]))
+            want = None if shape[1] is None else shape[0] * shape[1]
+        else:
+            raise _err("Invalid size argument.", "MATLAB:fread:InvalidSize")
+    raw = h.fh.raw
+    vals = []
+    if cls == "char" and not gap:
+        # (characters in UTF-8: as many as asked for, each of its bytes)
+        while want is None or len(vals) < want:
+            b = raw.read(1)
+            if not b:
+                break
+            lead = b[0]
+            more = 0 if lead < 0x80 else 1 if lead >> 5 == 6 else 2 if lead >> 4 == 14 else 3 if lead >> 3 == 30 else 0
+            b += raw.read(more)
+            vals.extend(ord(c) for c in b.decode("utf-8", "replace"))
+        want = len(vals) if want is None else want
+    while want is None or len(vals) < want:
+        b = raw.read(nbytes)
+        if len(b) < nbytes:
+            break
+        vals.append(struct.unpack((">" if big else "<") + code, b)[0])
+        if gap:
+            raw.seek(gap, 1)
+    count = float(len(vals))
+    # (stored as every array here is, MATLAB's transpose: a column of n is (1, n), an m-by-c matrix (c, m))
+    if shape is not None:
+        m = shape[0]
+        cols = -(-len(vals) // m) if m else 0
+        if shape[1] is not None:
+            cols = min(cols, shape[1])
+        vals = vals + [0] * (m * cols - len(vals))
+        A = np.array(vals, dtype=np.float64).reshape((cols, m))
+    elif vals:
+        A = np.array(vals, dtype=np.float64).reshape((1, -1))
+    else:
+        A = np.zeros((0, 0))
+    A = np.ascontiguousarray(A)
+    if ocls == "char":
+        out = Char(A)
+    elif ocls == "double":
+        out = _box(A)
+    else:
+        out = _finish(A, ocls)
+    return out if nargout <= 1 else [out, count]
+
+
+@_bi("fwrite")
+def fwrite_(nargout, fid, A, precision=None, skip=None, machinefmt=None):
+    """count = fwrite(fid, A, precision, skip, machinefmt): A's elements in column order, uint8 by default; an
+    integer precision rounds and saturates, as MATLAB's does"""
+    h = _files.get(int(_scalar(fid)))
+    if h is None:
+        raise _err("Invalid file identifier.  Use fopen to generate a valid file identifier.", "MATLAB:FileIO:InvalidFid")
+    import struct
+    code, nbytes, cls, _o = _precision(precision)
+    big = h.big if machinefmt is None else _text(machinefmt).lower() in ("b", "ieee-be", "ieee-be.l64")
+    gap = 0 if skip is None or _numel(skip) == 0 else _int_arg(skip)
+    if type(A) is Char or type(A) is Str:
+        vals = [float(b) for b in _text(A).encode("utf-8")] if type(A) is Str else [float(ord(c)) for c in "".join(_text(A))]
+        if type(A) is Char:
+            # (a char array's characters in column order)
+            vals = [float(v) for v in _farr(A).T.reshape(-1)]
+    else:
+        vals = [float(v) for v in _farr(A, "fwrite").T.reshape(-1)]
+    raw = h.fh.raw
+    for v in vals:
+        if code in "fd":
+            b = struct.pack((">" if big else "<") + code, v)
+        else:
+            lo, hi = {"B": (0, 255), "b": (-128, 127), "H": (0, 65535), "h": (-32768, 32767), "I": (0, 4294967295),
+                      "i": (-2147483648, 2147483647), "Q": (0, 2 ** 64 - 1), "q": (-2 ** 63, 2 ** 63 - 1)}[code]
+            n = 0 if v != v else int(min(max(_math.floor(v + 0.5) if v >= 0 else -_math.floor(-v + 0.5), lo), hi)) if abs(v) != _math.inf else (hi if v > 0 else lo)
+            b = struct.pack((">" if big else "<") + code, n)
+        if gap:
+            raw.seek(gap, 1)
+        raw.write(b)
+    return float(len(vals)) if nargout >= 1 else NOVAL
+
+
 # ------------------------------------------------------------------ handle objects (graphics: lib/_matlab_plot.py)
 
 
@@ -12802,6 +12992,179 @@ class HandleObj:
 
     def mset(self, name, value):
         self.props[self._key(name)] = value
+
+
+_MAP_KEYTYPES = ("char", "double", "single", "int32", "uint32", "int64", "uint64")
+_MAP_VALUETYPES = ("any", "char", "logical", "double", "single", "int8", "uint8", "int16", "uint16", "int32", "uint32",
+                   "int64", "uint64")
+
+
+class MapObj(HandleObj):
+    """containers.Map: a handle object (every variable holding it shares it) from keys, char vectors or real scalars,
+    to values; keys(m) and values(m) list them in key order, as MATLAB's containers.Map page says"""
+    _mclass = "containers.Map"
+
+    def __init__(self, keytype="char", valuetype="any"):
+        HandleObj.__init__(self)
+        self.d = {}
+        self.keytype = keytype
+        self.valuetype = valuetype
+
+    def key(self, k):
+        if self.keytype == "char":
+            if not _istext(k) or type(k) is StrArr:
+                raise _err("Specified key type does not match the type expected for this container.", "MATLAB:Containers:TypeMismatch")
+            return _text(k)
+        if _istext(k) or not _isnumlike(k) or _numel(k) != 1 or _arr(k).dtype.kind == "c":
+            raise _err("Specified key type does not match the type expected for this container.", "MATLAB:Containers:TypeMismatch")
+        return float(_scalar(k))
+
+    def get(self, k):
+        kk = self.key(k)
+        if kk not in self.d:
+            raise _err("The specified key is not present in this container.", "MATLAB:Containers:Map:NoKey")
+        return cp(self.d[kk])
+
+    def put(self, k, v):
+        kk = self.key(k)
+        if self.valuetype == "char" and not (type(v) is Char):
+            raise _err("Specified value type does not match the type expected for this container.", "MATLAB:Containers:TypeMismatch")
+        if self.valuetype not in ("any", "char") and (not _isnumlike(v) or _istext(v) or _numel(v) != 1):
+            raise _err("Specified value type does not match the type expected for this container.", "MATLAB:Containers:TypeMismatch")
+        if self.valuetype == "double":
+            v = float(_scalar(v))
+        elif self.valuetype == "logical":
+            v = bool(_scalar(v))
+        elif self.valuetype not in ("any", "char"):
+            v = _finish(np.array([[float(_scalar(v))]]), self.valuetype)
+        self.d[kk] = cp(v)
+
+    def ordered(self):
+        return sorted(self.d)
+
+    def keyval(self, kk):
+        return Char(kk) if self.keytype == "char" else (kk if self.keytype == "double" else _finish(np.array([[kk]]), self.keytype))
+
+    def mget(self, name):
+        low = name.lower()
+        if low == "count":
+            return float(len(self.d))
+        if low == "keytype":
+            return Char(self.keytype)
+        if low == "valuetype":
+            return Char(self.valuetype)
+        raise _err("Unrecognized method, property, or field '%s' for class 'containers.Map'." % name, "MATLAB:noSuchMethodOrField")
+
+    def mset(self, name, value):
+        raise _err("Setting the '%s' property of the 'containers.Map' class is not allowed." % name, "MATLAB:class:SetProhibited")
+
+
+def _map_items(arg):
+    """containers.Map's keys or values argument as a list: a cell array's elements, a char vector or a string as one,
+    a numeric array's elements"""
+    if type(arg) is Cell:
+        return list(arg.a)
+    if type(arg) is Char or type(arg) is Str:
+        return [arg]
+    if type(arg) is StrArr:
+        return [Str(x) for x in arg.a]
+    if _isnumlike(arg):
+        A = _arr(arg)
+        return [_box1(x, A) if A.dtype.kind != "f" else float(x) for x in A.reshape(-1)] if A.ndim else [arg]
+    raise _err("containers.Map: the keys and values must be cell arrays, text or numeric arrays.")
+
+
+def _map_new(nargout, *args):
+    """containers.Map(), containers.Map('KeyType', kt, 'ValueType', vt), containers.Map(keys, values) and
+    containers.Map(keys, values, 'UniformValues', tf)"""
+    args = list(args)
+    opts = {}
+    while len(args) >= 2 and _istext(args[-2]) and _text(args[-2]).lower() in ("keytype", "valuetype", "uniformvalues"):
+        opts[_text(args[-2]).lower()] = args[-1]
+        args = args[:-2]
+    if len(args) not in (0, 2):
+        raise _err("containers.Map: the arguments are (keys, values) and the options 'KeyType', 'ValueType' and 'UniformValues'.")
+    kt = _text(opts["keytype"]) if "keytype" in opts else None
+    vt = _text(opts["valuetype"]) if "valuetype" in opts else None
+    if kt is not None and kt not in _MAP_KEYTYPES:
+        raise _err("Specified KeyType is not valid.", "MATLAB:Containers:Map:UnsupportedKeyType")
+    if vt is not None and vt not in _MAP_VALUETYPES:
+        raise _err("Specified ValueType is not valid.", "MATLAB:Containers:Map:UnsupportedValueType")
+    if not args:
+        return MapObj(kt or "char", vt or "any")
+    ks, vs = _map_items(args[0]), _map_items(args[1])
+    if len(ks) != len(vs):
+        raise _err("The number of keys and values must be the same.", "MATLAB:Containers:Map:KeyValueMismatch")
+    if kt is None:
+        kt = "char" if all(_istext(k) for k in ks) else (class_(ks[0]) if ks and class_(ks[0]) in _MAP_KEYTYPES else "double")
+    if vt is None:
+        uniform = "uniformvalues" not in opts or bool(_scalar(opts["uniformvalues"]))
+        if type(args[1]) is not Cell and _isnumlike(args[1]) and not _istext(args[1]):
+            vt = class_(args[1]) if class_(args[1]) in _MAP_VALUETYPES else "any"
+        elif uniform and vs and all(type(v) is Char and len(_dims(v)) == 2 and _dims(v)[0] <= 1 for v in vs):
+            vt = "char"
+        elif uniform and vs and all(_isnumlike(v) and not _istext(v) and _numel(v) == 1 and class_(v) == class_(vs[0]) for v in vs) \
+                and class_(vs[0]) in _MAP_VALUETYPES:
+            vt = class_(vs[0])
+        else:
+            vt = "any"
+    m = MapObj(kt, vt)
+    for k, v in zip(ks, vs):
+        m.put(k, v)
+    return m
+
+
+_B["containers.Map"] = Builtin(_map_new, "containers.Map")
+
+
+def _map_keylist(m, ks):
+    return _map_items(ks) if type(ks) is Cell else [ks]
+
+
+@_bs("keys")
+def keys_(m):
+    if not isinstance(m, MapObj):
+        raise _err("Undefined function 'keys' for input arguments of type '%s'." % class_(m), "MATLAB:UndefinedFunction")
+    ks = m.ordered()
+    return Cell([m.keyval(k) for k in ks], (1, len(ks)))
+
+
+@_bs("values")
+def values_(m, ks=None):
+    if not isinstance(m, MapObj):
+        raise _err("Undefined function 'values' for input arguments of type '%s'." % class_(m), "MATLAB:UndefinedFunction")
+    if ks is None:
+        order = m.ordered()
+        return Cell([cp(m.d[k]) for k in order], (1, len(order)))
+    if type(ks) is not Cell:
+        raise _err("Specified key type does not match the type expected for this container.", "MATLAB:Containers:TypeMismatch")
+    return Cell([m.get(k) for k in ks.a], ks.shape)
+
+
+@_bs("isKey")
+def iskey_(m, ks):
+    if not isinstance(m, MapObj):
+        raise _err("Undefined function 'isKey' for input arguments of type '%s'." % class_(m), "MATLAB:UndefinedFunction")
+    def has(k):
+        try:
+            return m.key(k) in m.d
+        except MatlabError:
+            return False
+    if type(ks) is Cell:
+        return _finish(np.array([has(k) for k in ks.a], dtype=bool).reshape(tuple(reversed(ks.shape))), "logical")
+    return has(ks)
+
+
+@_bs("remove")
+def remove_(m, ks):
+    if not isinstance(m, MapObj):
+        raise _err("Undefined function 'remove' for input arguments of type '%s'." % class_(m), "MATLAB:UndefinedFunction")
+    for k in _map_keylist(m, ks):
+        kk = m.key(k)
+        if kk not in m.d:
+            raise _err("The specified key is not present in this container.", "MATLAB:Containers:Map:NoKey")
+        del m.d[kk]
+    return m
 
 
 class HandleArr:
@@ -13058,6 +13421,8 @@ def latex_statement_message(src):
 
 def _handle_blocks(v):
     """the display of a handle object: its class and main properties"""
+    if type(v) is MapObj:
+        return ["  Map with properties:"], ["        Count: %d\n      KeyType: %s\n    ValueType: %s" % (len(v.d), v.keytype, v.valuetype)]
     name = v._mclass.split(".")[-1]
     if name == "Figure":
         name = "Figure (%d)" % int(_scalar(v.props.get("Number", 1.0)))

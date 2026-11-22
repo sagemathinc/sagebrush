@@ -275,5 +275,31 @@
     "tags": [
       "arrays"
     ]
+  },
+  {
+    "name": "bsxfun",
+    "kind": "function",
+    "signature": "C = bsxfun(fun, A, B)",
+    "summary": "Applies an element-wise function to two arrays expanded along their singleton dimensions to a common size.",
+    "doc": "`A` and `B` must agree in every dimension where neither has size 1. They are expanded with repmat, then `fun(A, B)` is called once; `fun` must work element by element, as MATLAB's page asks. Implicit expansion (`A - B`) does the same for the operators.",
+    "examples": [
+      {
+        "code": "bsxfun(@minus, [1 2 3], [1; 2])",
+        "expected": "\nans =\n\n     0     1     2\n    -1     0     1\n\n"
+      },
+      {
+        "code": "bsxfun(@(a, b) a .* b, [1 2], [3; 4])",
+        "expected": "\nans =\n\n     3     6\n     4     8\n\n"
+      }
+    ],
+    "differs": [],
+    "status": "full",
+    "see_also": [
+      "repmat",
+      "arrayfun"
+    ],
+    "tags": [
+      "arrays"
+    ]
   }
 ]

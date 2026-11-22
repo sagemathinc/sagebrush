@@ -116,6 +116,7 @@ builtins/test_arrayfun_struct_array.m
 builtins/test_assert_nan.m
 builtins/test_bitwise.m
 builtins/test_block_comment_syntax.m
+builtins/test_bsxfun_operators.m
 builtins/test_cat_invalid_dim.m
 builtins/test_cell2mat_logical.m
 builtins/test_cell2struct_struct2cell.m
@@ -133,6 +134,8 @@ builtins/test_colon_range.m
 builtins/test_comparison_logical.m
 builtins/test_complex_builtins2.m
 builtins/test_complex_introspection.m
+builtins/test_containers_map.m
+builtins/test_containers_map_sorted.m
 builtins/test_conv.m
 builtins/test_conv2.m
 builtins/test_conv_column_vector.m
@@ -336,6 +339,7 @@ indexing/test_char_logical_index.m
 indexing/test_char_rhs_into_numeric.m
 indexing/test_collapse_trailing_dims.m
 indexing/test_colvec_scalar_grow.m
+indexing/test_empty_index_assign_noop.m
 indexing/test_empty_index_shape.m
 indexing/test_empty_vector_deletion_shape.m
 indexing/test_end_compound_lvalue.m
@@ -513,6 +517,7 @@ strings/test_fprintf_return.m
 strings/test_int2str_vector.m
 strings/test_isspace.m
 strings/test_isvarname_iskeyword.m
+strings/test_mat2str_complex.m
 strings/test_num2str_matrix.m
 strings/test_num2str_precision.m
 strings/test_num2str_scientific.m

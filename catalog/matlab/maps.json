@@ -1,0 +1,117 @@
+[
+  {
+    "name": "containers.Map",
+    "kind": "class",
+    "signature": "M = containers.Map(keySet, valueSet)\nM = containers.Map(keySet, valueSet, 'UniformValues', tf)\nM = containers.Map('KeyType', kt, 'ValueType', vt)\nM = containers.Map()",
+    "summary": "A map from char or numeric keys to values; a handle, shared by every variable that holds it.",
+    "doc": "`M(key)` reads a value and `M(key) = v` adds or changes one. `keys(M)` and `values(M)` list them in key order (sorted), `isKey`, `remove`, `length(M)` and `M.Count` count them. `KeyType` is `'char'` or a numeric class (`'double'` by default for numeric keys); `ValueType` is `'any'`, `'char'` or a numeric class, found from the values when not given. A missing key is the error `MATLAB:Containers:Map:NoKey`.",
+    "examples": [
+      {
+        "code": "m = containers.Map({'pears', 'apples'}, {5, 3});\nm('plums') = 2;\nkeys(m)\nm('apples')",
+        "expected": "\nans =\n\n  1×3 cell array\n\n    {'apples'}    {'pears'}    {'plums'}\n\n\nans =\n\n     3\n\n"
+      }
+    ],
+    "differs": [
+      "Method-call forms (m.keys(), m.isKey(k)) are not supported: use keys(m) and isKey(m, k).",
+      "String-array keys are refused; use character vectors."
+    ],
+    "status": "partial",
+    "see_also": [
+      "keys",
+      "values",
+      "isKey",
+      "remove"
+    ],
+    "tags": [
+      "data types"
+    ]
+  },
+  {
+    "name": "keys",
+    "kind": "function",
+    "signature": "keySet = keys(M)",
+    "summary": "The keys of a containers.Map, sorted, in a 1-by-n cell array.",
+    "doc": "",
+    "examples": [
+      {
+        "code": "keys(containers.Map({'b', 'a'}, {1, 2}))",
+        "expected": "\nans =\n\n  1×2 cell array\n\n    {'a'}    {'b'}\n\n"
+      }
+    ],
+    "differs": [],
+    "status": "full",
+    "see_also": [
+      "containers.Map",
+      "values"
+    ],
+    "tags": [
+      "data types"
+    ]
+  },
+  {
+    "name": "values",
+    "kind": "function",
+    "signature": "valueSet = values(M)\nvalueSet = values(M, keySet)",
+    "summary": "The values of a containers.Map in key order, or those of the keys given, in a cell array.",
+    "doc": "A key that is not there is the error `MATLAB:Containers:Map:NoKey`.",
+    "examples": [
+      {
+        "code": "values(containers.Map({'b', 'a'}, {1, 2}))",
+        "expected": "\nans =\n\n  1×2 cell array\n\n    {[2]}    {[1]}\n\n"
+      }
+    ],
+    "differs": [],
+    "status": "full",
+    "see_also": [
+      "containers.Map",
+      "keys"
+    ],
+    "tags": [
+      "data types"
+    ]
+  },
+  {
+    "name": "isKey",
+    "kind": "function",
+    "signature": "tf = isKey(M, keySet)",
+    "summary": "Whether a containers.Map has a key, or each key of a cell array.",
+    "doc": "",
+    "examples": [
+      {
+        "code": "isKey(containers.Map({'a'}, {1}), {'a', 'b'})",
+        "expected": "\nans =\n\n  1×2 logical array\n\n   1   0\n\n"
+      }
+    ],
+    "differs": [],
+    "status": "full",
+    "see_also": [
+      "containers.Map",
+      "remove"
+    ],
+    "tags": [
+      "data types"
+    ]
+  },
+  {
+    "name": "remove",
+    "kind": "function",
+    "signature": "M = remove(M, keySet)",
+    "summary": "Removes a key, or each key of a cell array, and its value from a containers.Map.",
+    "doc": "The map itself changes: every variable holding it sees it. A key that is not there is the error `MATLAB:Containers:Map:NoKey`.",
+    "examples": [
+      {
+        "code": "m = containers.Map({'a', 'b'}, {1, 2}); remove(m, 'a'); keys(m)",
+        "expected": "\nans =\n\n  1×1 cell array\n\n    {'b'}\n\n"
+      }
+    ],
+    "differs": [],
+    "status": "full",
+    "see_also": [
+      "containers.Map",
+      "isKey"
+    ],
+    "tags": [
+      "data types"
+    ]
+  }
+]

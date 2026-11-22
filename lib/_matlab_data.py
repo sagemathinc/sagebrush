@@ -889,3 +889,243 @@ def writematrix_(A, *args):
     except OSError as e:
         raise _err("writematrix: cannot write the file '%s' (%s)." % (fname, e.strerror or e))
     return _m.NOVAL
+
+
+# ------------------------------------------------------------------ sinpi, cospi, reallog, realsqrt
+
+def _real_float(x, fname):
+    """x as a real float array in MATLAB's axis order, for the real-only elementary functions"""
+    if _istext(x) or not _m._isnumlike(x):
+        raise _err("%s: the input must be numeric." % fname)
+    M = _md(x)
+    if np.iscomplexobj(M):
+        raise _err("%s: complex values are not supported in Sagebrush." % fname)
+    return M
+
+
+def _pi_reduce(M):
+    """x reduced exactly to r in [-1, 1] with x = r + 2k (fmod is exact): sin(pi x) = sin(pi r), cos(pi x) = cos(pi r)"""
+    r = _m._fmod(M, 2.0)
+    r = np.where(r > 1, r - 2, np.where(r < -1, r + 2, r))
+    return r
+
+
+@_bs("sinpi")
+def sinpi_(x):
+    """sin(pi*x), exact at the integers (a zero of x's sign: sinpi(-0) is -0, MATLAB's) and the half-integers (+-1)"""
+    M = _real_float(x, "sinpi")
+    with np.errstate(invalid="ignore"):
+        r = _pi_reduce(M)
+        a = np.abs(r)
+        s = np.where(a <= 0.25, np.sin(np.pi * a), np.where(a <= 0.75, np.cos(np.pi * (a - 0.5)), np.sin(np.pi * (1 - a))))
+        s = np.copysign(s, r)
+    return _out(s, _cls(x))
+
+
+@_bs("cospi")
+def cospi_(x):
+    """cos(pi*x), exact at the integers (+-1) and the half-integers (+0)"""
+    M = _real_float(x, "cospi")
+    with np.errstate(invalid="ignore"):
+        a = np.abs(_pi_reduce(M))
+        c = np.where(a <= 0.25, np.cos(np.pi * a), np.where(a <= 0.75, np.sin(np.pi * (0.5 - a)), -np.cos(np.pi * (1 - a))))
+        c = np.where(c == 0, 0.0, c)
+    return _out(c, _cls(x))
+
+
+@_bs("reallog")
+def reallog_(x):
+    """the natural logarithm of a nonnegative real array; a negative element is MATLAB's error (its result would be
+    complex)"""
+    M = _real_float(x, "reallog")
+    if np.any(M < 0):
+        raise _err("Reallog produced complex result.", "MATLAB:reallog:complexResult")
+    with np.errstate(divide="ignore", invalid="ignore"):
+        return _out(np.log(M), _cls(x))
+
+
+@_bs("realsqrt")
+def realsqrt_(x):
+    """the square root of a nonnegative real array; a negative element is MATLAB's error (its result would be complex)"""
+    M = _real_float(x, "realsqrt")
+    if np.any(M < 0):
+        raise _err("Realsqrt produced complex result.", "MATLAB:realsqrt:complexResult")
+    with np.errstate(invalid="ignore"):
+        return _out(np.sqrt(M), _cls(x))
+
+
+# ------------------------------------------------------------------ num2hex, bsxfun
+
+@_bs("num2hex")
+def num2hex_(x):
+    """each element's IEEE 754 bits in hexadecimal, one row per element in column order: 16 digits for a double, 8
+    for a single"""
+    import struct
+    cls = _m.class_(x)
+    if cls not in ("double", "single"):
+        raise _err("num2hex: the input must be of class double or single, not %s." % cls)
+    M = _md(x)
+    if np.iscomplexobj(M):
+        raise _err("num2hex: complex values are not supported in Sagebrush.")
+    vals = [float(v) for v in np.transpose(M).reshape(-1)]
+    if cls == "single":
+        rows = [struct.pack(">f", v).hex() for v in vals]
+    else:
+        rows = [struct.pack(">d", v).hex() for v in vals]
+    if not rows:
+        return _m.Char("")
+    w = len(rows[0])
+    # (a char matrix, stored transposed as every array here is: its columns are the rows' characters)
+    return _m.Char(np.array([[float(ord(c)) for c in r] for r in rows]).T.copy())
+
+
+@_bi("bsxfun")
+def bsxfun_(nargout, f, A, B):
+    """bsxfun(fun, A, B): fun applied to A and B expanded along their singleton dimensions to a common size, as
+    implicit expansion does; fun must work element by element, as MATLAB's page asks"""
+    fh = _m._fn_arg(f)
+    da, db = list(_m._dims(A)), list(_m._dims(B))
+    n = max(len(da), len(db))
+    da += [1] * (n - len(da))
+    db += [1] * (n - len(db))
+    for p, q in zip(da, db):
+        if p != q and p != 1 and q != 1:
+            raise _err("Non-singleton dimensions of the two input arrays must match each other.", "MATLAB:bsxfun:arrayDimensionsMustMatch")
+    ra = [q if p == 1 else 1 for p, q in zip(da, db)]
+    rb = [p if q == 1 else 1 for p, q in zip(da, db)]
+    rep = _m._B["repmat"].f
+    A2 = rep(1, A, _m._box(np.array([[float(v)] for v in ra]))) if any(v != 1 for v in ra) else A
+    B2 = rep(1, B, _m._box(np.array([[float(v)] for v in rb]))) if any(v != 1 for v in rb) else B
+    return _m._call(fh, [A2, B2], max(nargout, 1))
+
+
+# ------------------------------------------------------------------ compose
+
+@_bs("compose")
+def compose_(fmt, *arrays):
+    """compose(formatSpec, A1, ..., AN): formatSpec applied to each row of the arrays' values (side by side, in column
+    order), once per output column: a row with more values than conversions adds output columns, and conversions
+    left without a value stay as written; compose(txt) translates the escapes. A string array for a string
+    formatSpec, a cell array of character vectors otherwise (MATLAB's compose page)"""
+    if not _istext(fmt):
+        raise _err("compose: the format must be text.")
+    as_string = type(fmt) in (_m.Str, _m.StrArr)
+    f = _m._escapes(_text(fmt))
+    segs = _m._parse_format(f)
+    specs = [s for s in segs if type(s) is not str]
+
+    def render(vals):
+        out, k = [], 0
+        for s in segs:
+            if type(s) is str:
+                out.append(s)
+            elif k < len(vals):
+                out.append(_m._sprintf(s.group(0), [vals[k]]))
+                k += 1
+            else:
+                out.append(s.group(0))
+        return "".join(out)
+
+    if not arrays:
+        texts, shape = [render([])], (1, 1)
+    else:
+        mats = []
+        for a in arrays:
+            if _m.class_(a) in ("cell", "struct"):
+                raise _err("compose: the data must be numeric, logical or text arrays in Sagebrush.")
+            d = _m._dims(a)
+            if len(d) > 2:
+                raise _err("compose: the data must be matrices.")
+            mats.append(a)
+        rows = _m._dims(mats[0])[0]
+        if any(_m._dims(a)[0] != rows for a in mats):
+            raise _err("compose: the data arrays must have the same number of rows.")
+
+        def row_vals(a, i):
+            if type(a) is _m.StrArr:
+                d = _m._dims(a)
+                return [_m.Str(a.a[i + j * d[0]]) for j in range(d[1])]
+            if type(a) is _m.Str:
+                return [a]
+            M = np.transpose(_m._farr(a)) if _m.class_(a) != "char" else None
+            if M is None:
+                return [_m.Char(r) for r in [a.rows()[i]]]
+            return [float(v) if not np.iscomplexobj(M) else complex(v) for v in M[i]]
+
+        k = max(len(specs), 1)
+        lines = [sum((row_vals(a, i) for a in mats), []) for i in range(rows)]
+        cols = max([1] + [-(-len(v) // k) for v in lines]) if specs else max([1] + [len(v) for v in lines])
+        texts = [None] * (rows * cols)
+        for i, v in enumerate(lines):
+            for c in range(cols):
+                texts[i + c * rows] = render(v[c * k:(c + 1) * k]) if specs else render([])
+        shape = (rows, cols)
+    if as_string:
+        return _m._strarr(texts, shape)
+    return _m.Cell([_m.Char(t) for t in texts], shape)
+
+
+# ------------------------------------------------------------------ readmatrix
+
+@_bs("readmatrix")
+def readmatrix_(filename, *args):
+    """readmatrix(filename, 'Delimiter', d, 'NumHeaderLines', n, 'OutputType', t): a delimited text file's numbers
+    as a matrix. The delimiter (comma, tab, semicolon, bar or spaces) and the header lines (leading lines that are
+    not mostly numbers) are found when not given; an empty or non-numeric field is NaN, and short rows are padded
+    with NaN"""
+    import os
+    name = _text(filename)
+    if len(args) % 2:
+        raise _err("readmatrix: the options come in name, value pairs.")
+    delim, header, otype = None, None, "double"
+    for k in range(0, len(args), 2):
+        nm = _text(args[k]).lower() if _istext(args[k]) else ""
+        val = args[k + 1]
+        if nm == "delimiter":
+            delim = {"comma": ",", "tab": "\t", "semi": ";", "bar": "|", "space": " "}.get(_text(val).lower(), _m._escapes(_text(val)))
+        elif nm == "numheaderlines":
+            header = _m._int_arg(val)
+        elif nm == "outputtype":
+            otype = _text(val).lower()
+            if otype not in ("double", "single", "int8", "uint8", "int16", "uint16", "int32", "uint32", "int64", "uint64"):
+                raise _err("readmatrix: the output type '%s' is not supported in Sagebrush." % _text(val))
+        else:
+            raise _err("readmatrix: the option '%s' is not supported in Sagebrush." % (_text(args[k]) if _istext(args[k]) else "?"))
+    if os.path.splitext(name)[1].lower() in (".xls", ".xlsx", ".xlsm", ".xlsb", ".ods"):
+        raise _err("readmatrix: spreadsheet files are not supported in Sagebrush; save the sheet as a .csv file.")
+    try:
+        with open(name, "rb") as fh:
+            text = fh.read().decode("utf-8", "replace")
+    except OSError:
+        raise _err("Unable to find or open '%s'. Check the path and filename or file permissions." % name, "MATLAB:textio:textio:FileNotFound")
+    lines = [l for l in text.splitlines() if l.strip()]
+
+    def split(l, d):
+        return l.split() if d == " " else [f.strip() for f in l.split(d)]
+
+    if delim is None:
+        best = (" ", 0)
+        for d in (",", "\t", ";", "|"):
+            n = sum(1 for l in lines if d in l)
+            if n > best[1]:
+                best = (d, n)
+        delim = best[0]
+    nums = lambda l: [_m._parse_number(f) if f else None for f in split(l, delim)]
+    if header is None:
+        header = 0
+        for l in lines:
+            v = nums(l)
+            if sum(1 for x in v if x is not None) * 2 >= len(v):
+                break
+            header += 1
+    rows = [nums(l) for l in lines[header:]]
+    width = max([0] + [len(r) for r in rows])
+    M = np.full((len(rows), width), np.nan)
+    for i, r in enumerate(rows):
+        for j, x in enumerate(r):
+            if x is not None and not isinstance(x, complex):
+                M[i, j] = float(x)
+            elif isinstance(x, complex):
+                M[i, j] = x.real
+    # (an integer type has no NaN: those fields are 0, as converting NaN to an integer gives)
+    return _out(M if otype in ("double", "single") else np.where(np.isnan(M), 0, M), otype)

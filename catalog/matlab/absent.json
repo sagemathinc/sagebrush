@@ -39,33 +39,6 @@
     ]
   },
   {
-    "name": "compose",
-    "kind": "function",
-    "signature": "str = compose(formatSpec, A)",
-    "summary": "Formatted text for each element or row of an array, as a string array.",
-    "examples": [],
-    "differs": [],
-    "status": "absent",
-    "alternative": "sprintf for one text, or arrayfun(@(x) sprintf(formatSpec, x), A, 'UniformOutput', false) for one per element.",
-    "tags": [
-      "text",
-      "strings"
-    ]
-  },
-  {
-    "name": "containers.Map",
-    "kind": "class",
-    "signature": "M = containers.Map(keys, values)",
-    "summary": "A map from character or numeric keys to values.",
-    "examples": [],
-    "differs": [],
-    "status": "absent",
-    "alternative": "A struct with dynamic field names: s.(key) = value, isfield(s, key), fieldnames(s); keys must be valid field names.",
-    "tags": [
-      "data types"
-    ]
-  },
-  {
     "name": "csvread",
     "kind": "function",
     "signature": "M = csvread(filename)",
@@ -601,19 +574,6 @@
     "differs": [],
     "status": "absent",
     "alternative": "fopen and fgetl line by line, with strsplit for the fields.",
-    "tags": [
-      "files"
-    ]
-  },
-  {
-    "name": "readmatrix",
-    "kind": "function",
-    "signature": "A = readmatrix(filename)",
-    "summary": "Reads a numeric matrix from a delimited text or spreadsheet file.",
-    "examples": [],
-    "differs": [],
-    "status": "absent",
-    "alternative": "load reads a numeric text file, whitespace- or comma-separated (M = load('data.csv')); for other text, fopen with fgetl, strsplit and str2double; in Python mode, numpy.loadtxt.",
     "tags": [
       "files"
     ]
