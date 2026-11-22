@@ -6,7 +6,7 @@
 import { execFileSync, spawnSync } from "node:child_process";
 import { createHash } from "node:crypto";
 import { appendFileSync, existsSync, mkdirSync, readFileSync, readdirSync, statSync, writeFileSync } from "node:fs";
-import { dirname, join } from "node:path";
+import { dirname, join, sep } from "node:path";
 import { fileURLToPath, pathToFileURL } from "node:url";
 
 const SELF = fileURLToPath(import.meta.url);
@@ -194,11 +194,30 @@ export function measureFiles(files, rootDir, values, extra = {}, expected = EXPE
 // examples/), what the site serves of it (every file web/build.ts writes under web/site/public/examples: the pages, the
 // LaTeX previews, files.json, the ZIPs, the catalog) and the catalog on its own. Read after the build, never built
 // here. An absent tree has no bundle; added bundles use a zero base.
+// The first-visit notebooks are the exception (examples/welcome): web/build.ts inlines the notebooks web/examples/
+// welcome.ts names into every bundle, the app's and so the CLI's included, so they are in the initial download, not
+// fetched on demand, and keep the code backstop.  The rest of the corpus is examples/corpus.
+export function welcomeDirs(rootDir) {
+  const f = join(rootDir, "web", "examples", "welcome.ts");
+  if (!existsSync(f)) return [];
+  const m = /^const WELCOME: Record<string, string> = \{([^}]*)\};$/m.exec(readFileSync(f, "utf8"));
+  const slugs = m ? [...m[1].matchAll(/:\s*"([a-z0-9][a-z0-9-]*)"/g)].map((x) => x[1]) : [];
+  // (fail closed: a welcome.ts whose map can't be read never lets its notebooks fall under the content limit)
+  if (!m || !slugs.length || m[1].split(",").filter((s) => s.trim()).length !== slugs.length) throw new Error("web/examples/welcome.ts: its WELCOME map can't be read");
+  return slugs.map((s) => join(rootDir, "examples", "notebook", s));
+}
+
 export function examplesFiles(rootDir) {
   const walk = (dir) => readdirSync(dir, { withFileTypes: true }).sort((a, b) => (a.name < b.name ? -1 : a.name > b.name ? 1 : 0)).flatMap((e) => (e.isDirectory() ? walk(join(dir, e.name)) : [join(dir, e.name)]));
   const files = {};
   const site = join(rootDir, "web", "site", "public", "examples");
-  if (existsSync(join(rootDir, "examples"))) files["examples/corpus"] = walk(join(rootDir, "examples"));
+  if (existsSync(join(rootDir, "examples"))) {
+    const welcome = welcomeDirs(rootDir);
+    const inWelcome = (f) => welcome.some((d) => f === d || f.startsWith(d + sep));
+    const all = walk(join(rootDir, "examples"));
+    files["examples/corpus"] = all.filter((f) => !inWelcome(f));
+    if (welcome.length) files["examples/welcome"] = all.filter(inWelcome);
+  }
   if (existsSync(join(site, "index.json"))) {
     files["site/examples"] = walk(site);
     files["examples/index.json"] = [join(site, "index.json")];
@@ -270,6 +289,13 @@ export function recordProblems(rec, commit) {
 export const TOOLCHAIN = { bun: "1.4.4", node: "24.21.0" };
 export const ABSOLUTE_ALLOWANCE = 50_000; // decimal KB, not KiB
 export const growthLimit = (base) => Math.max(Math.floor(base / 50), ABSOLUTE_ALLOWANCE);
+// The examples gallery's content, fetched only when someone opens the gallery (web/examples/open.ts; never in the
+// service worker's lists or the CLI): its own per-change limit, still failing closed above it.  The first-visit
+// notebooks (examples/welcome) are in the initial download and keep the code backstop above.  The desktop app builds
+// the gallery into its installer (app/build-examples.ts), which this gate doesn't measure.
+export const CONTENT_BUNDLES = ["examples/corpus", "site/examples", "examples/index.json"];
+export const CONTENT_ALLOWANCE = 256_000; // decimal KB, not KiB
+export const limitOf = (bundle, base) => (CONTENT_BUNDLES.includes(bundle) ? CONTENT_ALLOWANCE : growthLimit(base));
 const fmt = (n) => n > 0 ? "+" + n : String(n);
 
 export function evaluate({ mode = "transition", merge, base }) {
@@ -291,10 +317,10 @@ export function evaluate({ mode = "transition", merge, base }) {
     for (const bundle of names) {
       const before = Object.hasOwn(N.sizes, bundle) ? N.sizes[bundle] : 0;
       const after = Object.hasOwn(M.sizes, bundle) ? M.sizes[bundle] : 0;
-      const delta = after - before, limit = growthLimit(before);
+      const delta = after - before, limit = limitOf(bundle, before);
       const note = !Object.hasOwn(N.sizes, bundle) ? "new" : !Object.hasOwn(M.sizes, bundle) ? "removed" : "";
       rows.push({ bundle, base: before, merge: after, delta, limit, note });
-      if (Object.hasOwn(N.sizes, bundle) && delta > limit) problems.push(bundle + ": growth " + fmt(delta) + " exceeds " + limit + " bytes (both 2% and 50,000 B)");
+      if (Object.hasOwn(N.sizes, bundle) && delta > limit) problems.push(bundle + ": growth " + fmt(delta) + " exceeds " + limit + " bytes " + (CONTENT_BUNDLES.includes(bundle) ? "(the examples content limit, 256,000 B)" : "(both 2% and 50,000 B)"));
     }
   }
   return { ok: problems.length === 0, problems, notes, rows };
@@ -365,7 +391,7 @@ export function producerProblems(rec, commit, tree, job, env = process.env) {
 
 async function gate() {
   const t = testedTransition(), lines = ["## Per-change size comparison", "",
-    "Backstop: existing-bundle growth must exceed both 2% of the base and 50,000 bytes to fail. Equality passes. New bundles are reported, not gated.", ""];
+    "Backstop: existing-bundle growth must exceed both 2% of the base and 50,000 bytes to fail; the examples gallery's content (" + CONTENT_BUNDLES.join(", ") + "), fetched only when the gallery is opened, fails above 256,000 bytes. Equality passes. New bundles are reported, not gated.", ""];
   let result;
   try {
     if (process.argv.includes("--docs-only")) {
