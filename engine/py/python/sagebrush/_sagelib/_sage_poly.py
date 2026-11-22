@@ -1455,7 +1455,7 @@ class Polynomial:
         if o is None:
             # (an inexact number: over its field, as Sage, RR(1.5)/t in Frac(RR[t]))
             # (a Python float or complex is refused, as Sage)
-            L = None if type(other) in (float, complex) else self._inexact(other)
+            L = None if (type(other) is float or type(other) is complex) else self._inexact(other)
             return NotImplemented if L is None else other / L
         if not self._c:
             raise ZeroDivisionError("fraction field element division by zero")

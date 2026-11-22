@@ -1525,7 +1525,7 @@ class Matrix:
     def _sr_number(self, other):
         """other, a Python float or complex made symbolic when self is over SR
         (as Sage keeps it in SR: 1.5r*M is 1.5*x, not the exact 3/2)."""
-        return _sa().SR(other) if type(other) in (float, complex) and self._base is _sa().SR else other
+        return _sa().SR(other) if (type(other) is float or type(other) is complex) and self._base is _sa().SR else other
 
     def __truediv__(self, other):
         """Each entry over a number: an integer or a rational over QQ, a symbolic
@@ -1545,7 +1545,7 @@ class Matrix:
             return L * (_inexact_parent(other)(1) / other)
         if isinstance(other, bool):
             return NotImplemented
-        if type(other) in (float, complex):
+        if (type(other) is float or type(other) is complex):
             # (over SR: the symbolic entries times its inverse)
             return self * _sa().SR(1 / other) if self._base is _sa().SR else NotImplemented
         QQ = _sa().QQ
