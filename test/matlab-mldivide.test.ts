@@ -142,9 +142,21 @@ test("the TypeScript path's Cholesky gives engine/nd's bits for a symmetric posi
     "rng(5); for n = [17 30 64], M = rand(n); A = M' * M + n * eye(n); b = rand(n, 2); x = A \\ b;",
     "  fprintf('%s ', num2hex(x(:))'); fprintf('\\n'); end",
     "A = ones(17) + 0.5 * eye(17); A(1, 1) = 0.5; x = A \\ (1:17)'; fprintf('%.17g ', x); fprintf('\\n');",
+    // (positive definite and exactly symmetric but nearly singular, R = triu(ones(n)) with R(n, n) = 1e-7 and
+    // A = R' R: Cholesky succeeds ([~, p] = chol(A) is 0; MATLAB's decomposition(A).Type is 'chol') and rcond from
+    // its factor is below eps, so A \\ b warns; MATLAB R2026b, observed 2026-11-22, prints the same warnings,
+    // RCOND = 1.937844e-16 at n = 20 and 6.548781e-17 at n = 40, and x(1:2) = [1 0] exactly)
+    "for n = [20 40], R = triu(ones(n)); R(n, n) = 1e-7; A = R' * R; A = (A + A') / 2;",
+    "  [~, p] = chol(A); lastwarn(''); x = A \\ ones(n, 1); [~, id] = lastwarn();",
+    "  fprintf('%d %d %s %s %s\\n', n, p, id, num2hex(x(1)), num2hex(x(2))); end",
   ].join("\n");
   const nd = run(src, false), ts = run(src, true);
   assert.equal(nd.status, 0, nd.err);
   assert.equal(ts.status, 0, ts.err);
   assert.equal(ts.out, nd.out);
+  assert.match(nd.out, /\n20 0 MATLAB:nearlySingularMatrix 3ff0000000000000 0000000000000000\n40 0 MATLAB:nearlySingularMatrix 3ff0000000000000 0000000000000000\n$/);
+  // (MATLAB's warnings, character for character, from the Cholesky factor's rcond on each backend)
+  assert.equal(nd.err, "Warning: Matrix is close to singular or badly scaled. Results may be inaccurate. RCOND =  1.937844e-16.\n" +
+    "Warning: Matrix is close to singular or badly scaled. Results may be inaccurate. RCOND =  6.548781e-17.\n");
+  assert.equal(ts.err, nd.err);
 });
