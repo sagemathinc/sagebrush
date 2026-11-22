@@ -90,6 +90,26 @@ test("maxk's NaN last, 'ComparisonMethod' 'abs' for real input, 'MissingPlacemen
   assert.deepEqual(ORDER.map(([e], k) => `${e} -> ${got[k]}`), ORDER.map(([e, w]) => `${e} -> ${w}`));
 });
 
+// (a complex vector by 'ComparisonMethod', 'real': an element with a NaN part is missing, placed by 'MissingPlacement',
+// last ascending and first descending by default; each row as MATLAB R2026b printed it, observed 2026-11-21)
+const REAL: [string, string][] = [
+  ["sort(X,'ComparisonMethod','real','MissingPlacement','last')", "1+1i 3+2i NaN+1i | 3 2 1"],
+  ["sort(X,'descend','ComparisonMethod','real','MissingPlacement','last')", "3+2i 1+1i NaN+1i | 2 3 1"],
+  ["sort(X,'ComparisonMethod','real')", "1+1i 3+2i NaN+1i | 3 2 1"],
+  ["sort(Y,'ComparisonMethod','real','MissingPlacement','first')", "NaN+1i 1+1i 3+2i | 2 1 3"],
+  ["sort(Y,'descend','ComparisonMethod','real','MissingPlacement','first')", "NaN+1i 3+2i 1+1i | 2 3 1"],
+  ["sort(Y,'ComparisonMethod','real','MissingPlacement','last')", "1+1i 3+2i NaN+1i | 1 3 2"],
+  ["sort(Y,'descend','ComparisonMethod','real','MissingPlacement','last')", "3+2i 1+1i NaN+1i | 3 1 2"],
+];
+
+test("sort of a complex vector by 'ComparisonMethod', 'real' places a NaN element by 'MissingPlacement', as MATLAB does", () => {
+  const show = (e: string) => `[s, i] = ${e}; fprintf('%s | %s\\n', strjoin(arrayfun(@(v) sprintf('%g%+gi', real(v), imag(v)), s, 'UniformOutput', false), ' '), strjoin(arrayfun(@(v) sprintf('%g', v), i, 'UniformOutput', false), ' '));`;
+  const r = run("X = [complex(NaN, 1) 3+2i 1+1i]; Y = [1+1i complex(NaN, 1) 3+2i];\n" + REAL.map(([e]) => show(e)).join("\n"));
+  assert.equal(r.status, 0, r.err);
+  const got = r.out.trim().split("\n");
+  assert.deepEqual(REAL.map(([e], k) => `${e} -> ${got[k]}`), REAL.map(([e, w]) => `${e} -> ${w}`));
+});
+
 test("divergence and curl: 2-D and 3-D, with coordinates or the default grid, uneven spacing; one output of curl is cav", () => {
   const r = run([
     "[X, Y] = meshgrid([0 1 3 6], [0 2 3]);",

@@ -6615,7 +6615,18 @@ def sort_(nargout, x, *args):
         raise _err("sort: 'ComparisonMethod', 'real' is supported only for vectors in Sagebrush.")
     if method == "real" and _isnumlike(x) and _arr(x).dtype.kind == "c" and _isvec(x):
         vals = list(_arr(x).reshape(-1))
-        order = sorted(range(len(vals)), key=lambda k: (vals[k].real, vals[k].imag), reverse=desc)
+        # (a NaN part makes an element missing: set aside in its order, the rest sorted by real part, then imaginary,
+        # stably, and the missing placed as 'MissingPlacement' says, last ascending and first descending by default;
+        # observed MATLAB R2026b, 2026-11-21: sort([complex(NaN, 1) 3+2i 1+1i], 'ComparisonMethod', 'real') is
+        # [1+1i 3+2i NaN+1i], where a NaN in the sort key used to scramble the order)
+        miss = [k for k in range(len(vals)) if vals[k].real != vals[k].real or vals[k].imag != vals[k].imag]
+        rest = [k for k in range(len(vals)) if k not in set(miss)]
+        if desc:
+            # (descending and stable: equal keys keep their order)
+            rest = sorted(rest, key=lambda k: (-vals[k].real, -vals[k].imag))
+        else:
+            rest = sorted(rest, key=lambda k: (vals[k].real, vals[k].imag))
+        order = rest + miss if nan_last else miss + rest
         r = _box(np.array([vals[k] for k in order]).reshape(_arr(x).shape))
         return r if nargout <= 1 else [r, _box(np.array([float(k + 1) for k in order]).reshape(_arr(x).shape))]
     if type(x) is Cell or type(x) is StrArr or type(x) is Str:
