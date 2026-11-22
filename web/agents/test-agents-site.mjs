@@ -46,6 +46,8 @@ const RELEASE_SHA256 = {
   "0.8.6": "6a4e401ace54b5ea046006c2f160820d6950ae5d527291653eb8f6c886175b1e",
   "0.8.7": "b5ebc33c9fb2d1f2cae2bbdad044872b1df4cd1a4cb0c02df2ec32cd6079043e",
   "0.8.8": "30f3bc2a87d46925bb5adf062b7a17c8ead923da9663e1d25fae1eb4bda59dc5",
+  "0.8.9": "ad534c4501d54a96206adc36419a905c86b0e60fee951fa417aa01819a230cb1",
+  "0.8.12": "3e7fe8d17ef8ff1080b1354bb5130af332d9adb349c044e6f39c6a8efcab7dfb",
 };
 const tgzVersions = [...new Set([...(html + conn0).matchAll(/sagebrush-agent-([^/"<\s]*)\.tgz/g)].map((m) => m[1]))];
 ok(tgzVersions.length === 1 && JSON.stringify(tgzVersions) === JSON.stringify(rc.v), `every .tgz link on both pages names the same one version, the one the pages name: ${JSON.stringify(tgzVersions)}`);
@@ -109,10 +111,10 @@ ok(helpText.length > 0 && helpText.length <= 100 && /Learn more/.test(helpText),
 const helpLinks = [...(/<div id="help"[^>]*>([\s\S]*?)<\/div>/.exec(html)?.[1] ?? "").matchAll(/<a\b[^>]*>/g)].map((m) => m[0]);
 ok(helpLinks.length === 1 && /href="\/agents\/connect\/"/.test(helpLinks[0]) && conn0, `the help box's one link, Learn more, is the connect page (the one whose sha256 the release check reads): ${helpLinks}`);
 // (the connect page's option-2 commands, exactly: sagebrush.space's is the plain npx line (0.5.0 prints the
-// sagebrush.space link itself); DEV's sets the printed link and adds DEV's origin)
+// sagebrush.space link itself); DEV's adds DEV's origin, which since 0.8.10 also makes the printed link DEV's)
 const tgz = `https://agents.sagebrush.cloud/agents/sagebrush-agent-${rc.v[0]}.tgz`;
 const cmds = [...conn0.matchAll(/<pre><code>([^<]*sagebrush-agent-[^<]*)<\/code><\/pre>/g)].map((m) => m[1]);
-ok(JSON.stringify(cmds) === JSON.stringify([`npx -y ${tgz}`, `SAGEBRUSH_AGENT_PAGE=https://dev.sagebrush.space/agents/ npx -y ${tgz} --origin https://dev.sagebrush.space`]), `the connect page's two commands, exactly (sagebrush.space: plain npx; DEV: its page and --origin): ${JSON.stringify(cmds)}`);
+ok(JSON.stringify(cmds) === JSON.stringify([`npx -y ${tgz}`, `npx -y ${tgz} --origin https://dev.sagebrush.space`]), `the connect page's two commands, exactly (sagebrush.space: plain npx; DEV: --origin): ${JSON.stringify(cmds)}`);
 
 // (Chat here: the agent leg (agent-relay.ts) and the digest's canon (agent-canon.ts) are in the Agents page's
 //  own script only, never in another page's: their marks, the hello's htu and the digest's domain, nowhere else in dist)
