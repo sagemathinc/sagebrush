@@ -72,12 +72,34 @@ export function embeddedText(): Map<string, string> {
 }
 
 /** The engine's parts from `base` (<site>/engine/<id>/). */
+/** An engine part that couldn't be had from `site`: it can't be reached (no network, or a local page that's gone), or it
+ * doesn't have it (404: an engine never published there). */
+export class EnginePartError extends Error {
+  constructor(message: string, readonly kind: "unreachable" | "missing", readonly site: string) { super(message); }
+}
+
 export function fetched(base: string): Bytes {
   return async (name) => {
-    const r = await fetch(new URL(name, base));
+    let r: Response;
+    // (a request that fails before any answer is a TypeError in every browser, whatever its words: Chrome's "Failed
+    // to fetch", Safari's "Load failed", Firefox's "NetworkError when attempting to fetch resource.")
+    try { r = await fetch(new URL(name, base)); } catch (e) {
+      if (e instanceof TypeError) throw new EnginePartError(`${name}: ${e.message}`, "unreachable", base);
+      throw e;
+    }
+    if (r.status === 404) throw new EnginePartError(`${name}: 404 ${r.statusText}`, "missing", base);
     if (!r.ok) throw new Error(`${name}: ${r.status} ${r.statusText}`);
     return r.arrayBuffer();
   };
+}
+
+/** Why a file's code can't run, an engine part `name` missing (what follows "The code can't run here:"). */
+export function whyNoEngine(e: EnginePartError, name: string): string {
+  let host = e.site;
+  try { host = new URL(e.site).host; } catch {}
+  return e.kind === "missing"
+    ? `this file's code needs parts of Sagebrush it doesn't carry (${name}), and ${host}, where it looks for them, doesn't have them: the version of Sagebrush it was made with isn't published there. Download it again in offline mode, so it carries them.`
+    : `this file's code needs parts of Sagebrush it doesn't carry (${name}), from ${host}, which can't be reached (no network, or a page that isn't open any more). Download it again in offline mode, so it carries them.`;
 }
 
 /** `bytes`, each part checked against its SHA-256 in `sums`. */
@@ -125,7 +147,7 @@ export function fileEngine(load: () => Promise<{ bytes: Bytes; names: string[] }
       const { bytes, names: all } = await load();
       const names = engineFiles(o.sage, all);
       const got = await Promise.all(names.map((n) => bytes(n).catch((e) => {
-        throw new Error(e?.message === "Failed to fetch" ? `this file's code needs parts of Sagebrush it doesn't carry (${n}), from the site it came from, which can't be reached (no network?). Download it again in offline mode.` : String(e?.message ?? e));
+        throw new Error(e instanceof EnginePartError ? whyNoEngine(e, n) : String(e?.message ?? e));
       })));
       names.forEach((n, i) => { raw.set(n, got[i]); urls.set(n, URL.createObjectURL(new Blob([got[i]], { type: type(n) }))); });
       if (o.math) urls.set("sagebrush-math.js", URL.createObjectURL(new Blob([o.math], { type: "text/javascript" })));
