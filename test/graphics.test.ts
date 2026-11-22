@@ -229,6 +229,25 @@ print(s.count('preserveAspectRatio="none"'), '>7<' in s)
 print(matrix_plot(M) + point((1, 1), color='red'))
 # the orientation: flip_y (the default) inverts the y axis, row 0 at the top, the picture as stored; flip_y=False,
 # row 0 at the bottom, the picture drawn flipped; and integer ticks
+# constant data (vmin = vmax): the colormap's first color, as matplotlib's Normalize (all white in Greys); vmin
+# above vmax refused, as matplotlib does; and pyplot's imshow (the shared lookup) likewise
+print(cells(matrix_plot(matrix(ZZ, 2, 3))), cells(matrix_plot([[5, 5]], cmap='viridis')))
+try:
+    matrix_plot(M, vmin=5, vmax=1)
+except ValueError as e:
+    print(e)
+# a list of colors (a ListedColormap in Sage) is refused, not drawn with another map
+try:
+    matrix_plot([[0, 1]], cmap=['red', 'blue'])
+except NotImplementedError as e:
+    print(e)
+# explicit equal vmin and vmax: constant too, the first color
+print(cells(matrix_plot([[1, 3]], vmin=2, vmax=2)))
+import matplotlib.pyplot as plt
+class _I:
+    pass
+im = _I(); im._inner = plt.imshow([[2.0, 2.0], [2.0, 2.0]])._prim
+print(cells([im]))
 for fy in (True, False):
     P = matrix_plot(M, flip_y=fy)._panel()[0].options
     print(fy, bool(P.get('yinvert')), P.get('xticks'), P.get('yticks'), 'transform="matrix(' in matrix_plot(M, flip_y=fy)._svg())
@@ -252,8 +271,14 @@ for fy in (True, False):
   assert.equal(lines[11], "1 True True True");
   assert.equal(lines[12], "2 True");
   assert.equal(lines[13], "Graphics object consisting of 2 graphics primitives");
-  assert.equal(lines[14], "True True [0.0, 1.0, 2.0, 3.0] [0.0, 1.0, 2.0] False");
-  assert.equal(lines[15], "False False [0.0, 1.0, 2.0, 3.0] [0.0, 1.0, 2.0] True");
+  assert.equal(lines[14], "[[(255, 255, 255, 255), (255, 255, 255, 255), (255, 255, 255, 255)], [(255, 255, 255, 255), (255, 255, 255, 255), (255, 255, 255, 255)]] [[(68, 1, 84, 255), (68, 1, 84, 255)]]");
+  assert.equal(lines[15], "minvalue must be less than or equal to maxvalue");
+  assert.equal(lines[16], "matrix_plot's cmap as a list of colors is not implemented in Sagebrush: use a colormap's name");
+  // (matplotlib's Normalize(2, 2): every value 0, Greys' first color)
+  assert.equal(lines[17], "[[(255, 255, 255, 255), (255, 255, 255, 255)]]");
+  assert.equal(lines[18], "[[(68, 1, 84, 255), (68, 1, 84, 255)], [(68, 1, 84, 255), (68, 1, 84, 255)]]");
+  assert.equal(lines[19], "True True [0.0, 1.0, 2.0, 3.0] [0.0, 1.0, 2.0] False");
+  assert.equal(lines[20], "False False [0.0, 1.0, 2.0, 3.0] [0.0, 1.0, 2.0] True");
 });
 
 test("a framed plot with axes=False keeps its tick labels, as Sage draws it", () => {

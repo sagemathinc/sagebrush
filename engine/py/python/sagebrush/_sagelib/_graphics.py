@@ -94,8 +94,8 @@ def rgb_bytes(c):
 def image_rgba(F, cmap, lo, hi):
     """The colors of a grid F of reals (a 2D numpy array) as matplotlib's imshow
     draws them, an (h, w, 4) uint8 array: each value through the colormap's N
-    colors between lo and hi (index floor(N t), t clipped to [0, 1]), NaN (the
-    "bad" color) transparent.  pyplot's imshow and Sage's matrix_plot share it."""
+    colors between lo and hi (index floor(N t), t clipped to [0, 1]; constant
+    data, lo = hi, the first color), NaN (the "bad" color) transparent.  pyplot's imshow and Sage's matrix_plot share it."""
     import numpy as np
     name = cmap or "viridis"
     tab = cmap_table(name) if isinstance(name, str) else None
@@ -111,7 +111,11 @@ def image_rgba(F, cmap, lo, hi):
         for i in range(256):
             r, g, b = rgb_bytes(colormap(i / 255, name))
             lut[i] = (r, g, b, 255)
-    t = (F - lo) / (hi - lo) if hi > lo else np.zeros(F.shape) + 0.5
+    # (matplotlib's Normalize: vmin above vmax refused, and constant data, vmin
+    # equal to vmax, all 0, the colormap's first color)
+    if lo > hi:
+        raise ValueError("minvalue must be less than or equal to maxvalue")
+    t = (F - lo) / (hi - lo) if hi > lo else np.zeros(F.shape)
     idx = np.clip(np.floor(np.where(np.isfinite(t), t, 0.0) * n), 0, n - 1).astype(int)
     idx = np.where(np.isnan(F), n, idx)
     return lut[idx]

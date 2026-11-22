@@ -731,6 +731,8 @@ def matrix_plot(mat, xrange=None, yrange=None, **options):
     if opts["norm"] is not None:
         raise NotImplementedError("matrix_plot's norm option is not implemented in Sagebrush: use vmin and vmax")
     cmap = opts["cmap"]
+    if isinstance(cmap, (list, tuple)):
+        raise NotImplementedError("matrix_plot's cmap as a list of colors is not implemented in Sagebrush: use a colormap's name")
     bad = _unknown(cmap, (-0.5, nc - 0.5, -0.5, nr - 0.5), dict(gopts))
     if bad is not None:
         return bad

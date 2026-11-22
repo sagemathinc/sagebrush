@@ -10144,6 +10144,11 @@
   "owner": "matplotlib mathtext (@sagebrush-matlab)",
   "reason": "\"cap\" is TeX's \\cap, the set intersection symbol (∩) in the mathtext tables, not a cap: nothing is refused"
  },
+ "lib/_graphics.py :: image_rgba :: raise ValueError(\"minvalue must be less than or equal to maxvalue\") #0": {
+  "class": "none",
+  "owner": "Sage graphics (@sagebrush-sage2)",
+  "reason": "matplotlib's Normalize refusal of vmin above vmax (the colormap's range), input validation, not a cap"
+ },
  "lib/_io_text.py ::  :: from io import (BufferedIOBase, TextIOBase, UnsupportedOperation, SEEK_SET, SEEK_CUR, SEEK_END, #0": {
   "class": "none",
   "owner": "python (@sagebrush-python)",
@@ -15084,6 +15089,11 @@
   "class": "none",
   "owner": "Sage graphics (@sagebrush-sage2)",
   "reason": "vmin/vmax are the colormap's range and xmin/xmax/ymin/ymax a figure's box (matrix_plot, its colorbar and integer ticks), not caps: nothing is refused"
+ },
+ "lib/sage_plot_fields.py :: matrix_plot :: raise NotImplementedError(\"matrix_plot's cmap as a list of colors is not implemented in Sagebrush: use a colormap's name\") #0": {
+  "class": "coverage",
+  "owner": "Sage graphics (@sagebrush-sage2)",
+  "reason": "matrix_plot's cmap as a list of colors (a ListedColormap in Sage) is not implemented: an unsupported feature, not a cap"
  },
  "lib/sage_plot_fields.py :: matrix_plot :: raise NotImplementedError(\"matrix_plot's norm option is not implemented in Sagebrush: use vmin and vmax\") #0": {
   "class": "coverage",
