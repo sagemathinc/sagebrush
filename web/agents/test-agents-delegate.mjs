@@ -84,6 +84,12 @@ try {
   u = await ui();
   const bText = await P.ev(`document.querySelector('#task-view').textContent`);
   ok(u.view && !u.log && /Plotting the first terms\./.test(bText), "a task opened: its view in place of the chat, its thread from the host", { u, bText: bText.slice(0, 200) });
+  // (A1, #1546: with a task's view shown the composer's footer row isn't, so the agent's access is in the row above it,
+  //  still in view; back in the chats it is the footer's icon again)
+  const where = () => P.ev(`(() => { const b = document.querySelector('.sbag-bar'); return { above: !!b?.parentElement?.matches('.composer-wrap > [data-sbag-slot]'), footer: !!b?.parentElement?.matches('.composer .row > [data-sbag-footer]'), seen: !!b && b.getBoundingClientRect().width > 0 && b.offsetParent !== null }; })()`);
+  await P.until(`!!document.querySelector('.sbag-bar')?.parentElement?.matches('.composer-wrap > [data-sbag-slot]')`, 5000).catch(() => {});
+  const inTask = await where();
+  ok(inTask.above && inTask.seen, "A1: a task's view shown: the agent's access is in the row above the composer, still in view", inTask);
   const tags = await P.ev(`[...document.querySelectorAll('#task-view .turn .demo')].map((e) => e.textContent)`);
   ok(tags.length > 0 && tags.every((t) => t === "on your computer"), "a task's turns are the agent's on this computer, never labelled demo", tags);
   H.emit(B.task, { type: "text_delta", message: "m1", revision: 1, text: " Done." });
@@ -210,6 +216,9 @@ try {
   await P.ev(`document.querySelector('#task-view .task-head .link').click()`);
   u = await ui();
   ok(!u.view && u.log, "Back to chats: the chat shown again", u);
+  await P.until(`!!document.querySelector('.sbag-bar')?.parentElement?.matches('.composer .row > [data-sbag-footer]')`, 5000).catch(() => {});
+  const back = await where();
+  ok(back.footer && back.seen, "A1: back in the chats: the access is the composer footer's icon again", back);
 
   // ---- a proposal's .tex: its diff, and the document rendered (the LaTeX page module's read-only preview), As proposed
   //  and Before; on a host without the LaTeX editor, its diff only
