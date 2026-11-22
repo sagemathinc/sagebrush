@@ -53,7 +53,10 @@ changed();
 sk.setItem(GRANTS_KEY, J({ ...rec1, docs: { r1: { write: ["/a", "/a2"], t: 10 } } }));
 changed();
 await k.flush();
-ok(fk.calls.filter((c) => c === "grants_write").length === 2 && J(parseGrants(fk.kept()).docs) === J({ "ws:/a/one.ipynb": { write: ["/a", "/a2"], t: 10 } }), "kept at each change: a change during a write makes one more, of the record as it is then: " + fk.kept());
+// (two changes in a row: written as one or two writes, the last of them the record as it is after both; a change during
+// a write held unfinished making one more is the held-write case below)
+const nWrites = fk.calls.filter((c) => c === "grants_write").length;
+ok(nWrites >= 1 && nWrites <= 2 && J(parseGrants(fk.kept()).docs) === J({ "ws:/a/one.ipynb": { write: ["/a", "/a2"], t: 10 } }), "kept at each change: the record as it is after the last change is what grants.json holds (" + nWrites + " writes): " + fk.kept());
 
 // the latest change, never lost: a write held unfinished keeps flush() waiting; a write that fails keeps it unwritten,
 // flush() rejecting with why, until a write succeeds (tried again by itself, and at the next flush)
@@ -91,6 +94,32 @@ ok(fk.calls.filter((c) => c === "grants_write").length === 2 && J(parseGrants(fk
   ok(writes > before && !g.unwritten && J(parseGrants(kept).docs) === J({ "ws:/a/one.ipynb": { write: ["/again"], t: 12 } }), "...tried again by itself: written once the disk takes it");
   await g.flush();
   ok(!g.unwritten, "...and flush() then resolves");
+}
+
+// liveness: a flush with nothing to write, then a change, writes it; and a retry that fires after a successful flush
+// (nothing left to write) leaves the next change written too (astra2's two sequences on 5ef00da2)
+{
+  let writes = 0, fail = false, kept = "";
+  const invoke = async (c, a) => { if (c !== "grants_write") return ""; writes++; if (fail) throw new Error("disk full"); kept = a.json; };
+  const sl = store({ [GRANTS_KEY]: J(rec1) });
+  let changed;
+  const g = keepGrants(w1, invoke, (fn) => (changed = fn), sl, 50);
+  await g.flush();
+  changed();
+  await new Promise((r) => setTimeout(r, 30));
+  ok(writes === 1 && !g.unwritten, "a clean flush, then a change: the change is written (" + writes + " write)");
+  // (a write fails, arming the retry; a flush succeeds before the retry fires; the retry then finds nothing to write)
+  fail = true;
+  changed();
+  await new Promise((r) => setTimeout(r, 10));
+  fail = false;
+  await g.flush();
+  await new Promise((r) => setTimeout(r, 120));
+  const before = writes;
+  sl.setItem(GRANTS_KEY, J({ ...rec1, docs: { r1: { write: ["/late"], t: 30 } } }));
+  changed();
+  const done = await Promise.race([g.flush().then(() => "flushed"), new Promise((r) => setTimeout(() => r("stuck"), 1000))]);
+  ok(done === "flushed" && writes === before + 1 && !g.unwritten && J(parseGrants(kept).docs) === J({ "ws:/a/one.ipynb": { write: ["/late"], t: 30 } }), "a retry firing after a successful flush: the next change is still written, and flush() resolves: " + J({ done, writes: writes - before }));
 }
 
 console.log(fails ? `${fails} of ${checks} failed` : `test-grants-file: all ${checks} passed`);

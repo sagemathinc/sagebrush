@@ -75,7 +75,13 @@ export async function grantsToKeep(ws: GrantsWorkspace, storage: Store = localSt
 export function keepGrants(ws: GrantsWorkspace, invoke: Invoke, onChange: (f: () => void) => void, storage: Store = localStorage, retryMs = 3000) {
   let changes = 0, written = 0, failed: unknown = null, busy: Promise<void> | null = null;
   let timer: ReturnType<typeof setTimeout> | null = null;
-  const run = (): Promise<void> => (busy ??= (async () => {
+  // (one job at a time, `busy` while it runs: nothing to write is no job at all, and a job yields before it starts, so
+  // it can never finish before it is `busy`; it clears `busy` only if it is still the one there)
+  const run = (): Promise<void> => {
+    if (busy) return busy;
+    if (written >= changes) return Promise.resolve();
+    const job: Promise<void> = (async () => {
+    await Promise.resolve();
     try {
       while (written < changes) {
         const upTo = changes;
@@ -90,12 +96,20 @@ export function keepGrants(ws: GrantsWorkspace, invoke: Invoke, onChange: (f: ()
           return;
         }
       }
-    } finally { busy = null; }
-  })());
+    } finally { if (busy === job) busy = null; }
+    })();
+    busy = job;
+    return job;
+  };
   onChange(() => { changes++; void run(); });
   const flush = async (): Promise<void> => {
+    let last: Promise<void> | null = null;
     for (;;) {
-      await run();
+      const job = run();
+      // (the same job twice is one already done that was never let go of: said, never a loop that spins)
+      if (job === last) throw new Error("grants.json: the latest change wasn't written, and no write is running");
+      last = job;
+      await job;
       if (written >= changes) return;
       if (failed) throw new Error(`grants.json: ${(failed as any)?.message ?? failed}`);
     }
