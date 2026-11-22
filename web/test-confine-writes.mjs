@@ -67,6 +67,10 @@ const TRY = (path, tag) => `try:\n    open(${JSON.stringify(path)}, 'w').write('
 
 try {
   for (const m of ["Page.enable", "Runtime.enable"]) await send(m);
+  // (this suite is the path where a refused change can't wait for an answer: refused at once, the prompt saying to run
+  // the cell again; the page's loopback switch for it, set before any page loads (web/index.html ASK_WAIT). The run
+  // that waits on its prompt is web/share/test-run-bar.mjs and web/test-app-engine-ask.mjs)
+  await send("Page.addScriptToEvaluateOnNewDocument", { source: "try { localStorage.setItem('sagebrush-ask', '0'); } catch {}" });
   await go(base + "?runner=1");
   await until(`!!${W}`, 60000);
   for (const d of ["out", "other", "outx", "w2", "r", "q", "d", "once", "life", "oc"]) await ev(`${W}.create("/proj/${d}/keep.txt", { content: new TextEncoder().encode("k") }).then(() => 1)`);

@@ -20,7 +20,11 @@ const hooks: {
   /** a rename, as one change of every path it moves (confinement phase 2: the page admits it whole or not at all);
    * unset, each path's change goes to `changed` */
   renamed: ((from: string, to: string, changes: [string, Uint8Array | null][]) => void) | null;
-} = { write: () => {}, changed: () => {}, read: () => {}, refused: () => {}, renamed: null };
+  /** a change refused as outside what this document may change: the person asked while the run waits (web/worker.ts);
+   * "allowed" once a new policy covering it is adopted, "denied" (asked, and not allowed: no other prompt), or
+   * "unavailable" (no waiting here: the refusal goes on as `refused` says) */
+  ask: ((path: string, what: string) => "allowed" | "denied" | "unavailable") | null;
+} = { write: () => {}, changed: () => {}, read: () => {}, refused: () => {}, renamed: null, ask: null };
 export const __hooks = hooks;
 
 // What this document may change (the page's policy, web/notebook/permissions.js; confinement phase 2, write trees):
@@ -40,7 +44,11 @@ function mayChange(r: string, what: string) {
   if (scratch(r)) return;
   const ok = allowed(r);
   if (ok === true) return;
-  hooks.refused(r, what, ok);
+  // (outside what may be changed: asked while the run waits, where it can; allowed, the change goes ahead in this run,
+  // checked again against the policy just adopted; a change while the permissions are changing is never asked)
+  const asked = ok === "refused" && hooks.ask ? hooks.ask(r, what) : "unavailable";
+  if (asked === "allowed" && allowed(r) === true) return;
+  if (asked === "unavailable") hooks.refused(r, what, ok);
   // (named so the runtime's open() and os calls raise PermissionError with these words, src/runtime/file-once.ts)
   const e: any = new Error(ok === "changed" ? PERMS_CHANGED : NOT_WRITABLE);
   e.name = "PermissionDenied";

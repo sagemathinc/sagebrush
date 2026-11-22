@@ -280,6 +280,10 @@ const stat = (p) => ev(`${W}.stat(${JSON.stringify(p)}).then((e) => !!e, () => f
 const files = () => ev("sagebrush.permissions()?.files");
 try {
   for (const m of ["Page.enable", "Runtime.enable"]) await send(m);
+  // (this suite is the path where a refused change can't wait for an answer: refused at once, the prompt saying to run
+  // the cell again; the page's loopback switch for it, set before any page loads (web/index.html ASK_WAIT). The run
+  // that waits on its prompt is web/share/test-run-bar.mjs and web/test-app-engine-ask.mjs)
+  await send("Page.addScriptToEvaluateOnNewDocument", { source: "try { localStorage.setItem('sagebrush-ask', '0'); } catch {}" });
   await send("Fetch.enable", { patterns: [{ urlPattern: "*/remote.ipynb", requestStage: "Request" }, { urlPattern: "*/remote2.ipynb", requestStage: "Request" }] });
   // (the person's data file, made in their workspace first)
   await go(base);
