@@ -5,11 +5,12 @@
 // served locally: the release's line from the page's HTML, with --origin http://127.0.0.1:<port>.
 //   SAGEBRUSH_AGENTS=1 bun web/build.ts && CHROME=google-chrome bun web/agents/test-agents-own-claude.mjs
 import { spawn } from "node:child_process";
+import { execFileSync } from "node:child_process";
 import { readFileSync } from "node:fs";
 import { join } from "node:path";
 import { startServe } from "../test-port.mjs";
 import { browser } from "./a14-cases.mjs";
-import { ownClaudeCommand } from "./own-claude.ts";
+import { ownClaudeCommand, shellWord } from "./own-claude.ts";
 
 const here = new URL(".", import.meta.url).pathname;
 let failures = 0;
@@ -23,6 +24,13 @@ ok(ownClaudeCommand(base, "http://127.0.0.1:8765") === base + " --origin http://
 ok(ownClaudeCommand(base, "http://[::1]:8765") === base + " --origin 'http://[::1]:8765'", "an IPv6 literal: --origin, quoted (its brackets are a shell pattern)", ownClaudeCommand(base, "http://[::1]:8765"));
 ok(ownClaudeCommand(base, "https://[2001:db8::1]") === base + " --origin 'https://[2001:db8::1]'", "an IPv6 literal on https's default port: --origin, quoted");
 ok(ownClaudeCommand(base, "https://xn--bcher-kva.example") === base + " --origin https://xn--bcher-kva.example", "a punycode host: --origin, as it is");
+// (every line read back by a real POSIX shell: its words exactly npx, -y, the tarball, --origin and the origin, for
+//  origins that hold every character a shell reads specially that a canonical origin can hold)
+const argv = (line) => execFileSync("sh", ["-c", `printf '%s\\0' ${line}`], { encoding: "utf8" }).split("\0").slice(0, -1);
+const hosts = ["dev.sagebrush.space", "127.0.0.1:8765", "[::1]:8765", "[2001:db8::1]", "a'b.example", "a$b.example", "a;b.example", "a&b.example", "a(b).example", "a*b.example", "a`b.example", "a!b.example", 'a"b.example', "a{b}.example", "a~b.example", "it's'.example"];
+const trips = hosts.map((h) => { const o = new URL(`https://${h}`).origin; const words = argv(ownClaudeCommand(base, o)); return { o, ok: JSON.stringify(words) === JSON.stringify(["npx", "-y", base.split(" ")[2], "--origin", o]), words }; });
+ok(trips.every((t) => t.ok), "through a real shell, every command's words are exactly npx -y <tarball> --origin <origin>, for origins with ' $ ; & ( ) * ` ! \" { } ~ and IPv6 brackets", trips.filter((t) => !t.ok));
+ok(shellWord("a'b") === "'a'\\''b'" && shellWord("https://x.org") === "https://x.org", "shellWord: a single quote closed, escaped and reopened; a plain origin as it is");
 ok(["null", "https://a b", "https://x.org/path", "ftp://x.org", "https://X.org", "http://x.org:80"].every((o) => ownClaudeCommand(base, o) === base), "not an origin as the URL parser gives one back (a file page's \"null\", a space, a path, another scheme, upper case, a default port): the one-liner, nothing appended");
 
 // ---- the built page, served locally
