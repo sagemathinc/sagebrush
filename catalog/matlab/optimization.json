@@ -1,0 +1,140 @@
+[
+  {
+    "name": "optimoptions",
+    "kind": "function",
+    "signature": "options = optimoptions(solver)\noptions = optimoptions(solver, Name, Value, ...)\noptions = optimoptions(oldoptions, Name, Value, ...)",
+    "summary": "Options for fsolve, fminunc, lsqcurvefit or linprog: an object holding the solver's defaults and the options set.",
+    "doc": "The object's class is `optim.options.<Solver>` (`optim.options.Fsolve` for fsolve), and it is a value: an assignment copies it. Its properties are the solver's options, read and set with dot syntax (`options.Display = 'off'`). The older optimset names `TolFun`, `TolX`, `MaxIter`, `MaxFunEvals`, `GradObj` and `Jacobian` set `FunctionTolerance`, `StepTolerance`, `MaxIterations`, `MaxFunctionEvaluations` and `SpecifyObjectiveGradient`. An unknown name is the error `optimlib:optimoptions:UnmatchedParameter`, as MATLAB's. The solvers also take an optimset structure.",
+    "examples": [
+      {
+        "code": "o = optimoptions('fsolve', 'TolFun', 1e-10);\nclass(o), o.FunctionTolerance",
+        "expected": "\nans =\n\n    'optim.options.Fsolve'\n\n\nans =\n\n   1.0000e-10\n\n"
+      }
+    ],
+    "differs": [
+      "The object displays as its properties, not MATLAB's grouped listing of set and default options.",
+      "Options for the other Optimization Toolbox solvers are not supported."
+    ],
+    "status": "partial",
+    "see_also": [
+      "fsolve",
+      "fminunc",
+      "lsqcurvefit",
+      "linprog",
+      "optimset"
+    ],
+    "upstream": "Optimization Toolbox",
+    "tags": [
+      "optimization"
+    ]
+  },
+  {
+    "name": "fsolve",
+    "kind": "function",
+    "signature": "x = fsolve(fun, x0)\nx = fsolve(fun, x0, options)\n[x, fval, exitflag, output, jacobian] = fsolve(___)",
+    "summary": "Solves a system of nonlinear equations fun(x) = 0 from a starting point.",
+    "doc": "By Powell's dogleg trust-region method on $\\sum f_i(x)^2$ (MATLAB's default algorithm, `'trust-region-dogleg'`), the Jacobian by forward differences unless `SpecifyObjectiveGradient` is set and fun returns it as its second output. exitflag 1 means the equations are solved, -2 that it stopped at a point that is not a root, 0 that it reached the iteration or evaluation limit. x has x0's shape. With `Display` `'final'` (the default) it prints MATLAB's exit message.",
+    "examples": [
+      {
+        "code": "x = fsolve(@(x) [x(1)^2 + x(2)^2 - 4; x(1) - x(2)], [1; 1])",
+        "expected": "\nEquation solved.\n\nfsolve completed because the vector of function values is near zero\nas measured by the value of the function tolerance, and\nthe problem appears regular as measured by the gradient.\n\n<stopping criteria details>\n\nx =\n\n    1.4142\n    1.4142\n\n"
+      },
+      {
+        "code": "[x, fval, exitflag] = fsolve(@(x) x^2 + 1, 1, optimoptions('fsolve', 'Display', 'off')); exitflag",
+        "expected": "\nexitflag =\n\n    -2\n\n"
+      }
+    ],
+    "differs": [
+      "The other algorithms ('trust-region', 'levenberg-marquardt'), Display 'iter' (shown as 'final'), output and plot functions are not supported.",
+      "The iterates are Sagebrush's own: the solution agrees within the tolerances, the iteration counts do not."
+    ],
+    "status": "partial",
+    "see_also": [
+      "fzero",
+      "optimoptions",
+      "lsqcurvefit"
+    ],
+    "upstream": "Optimization Toolbox",
+    "tags": [
+      "optimization"
+    ]
+  },
+  {
+    "name": "fminunc",
+    "kind": "function",
+    "signature": "x = fminunc(fun, x0)\nx = fminunc(fun, x0, options)\n[x, fval, exitflag, output, grad, hessian] = fminunc(___)",
+    "summary": "Finds a local minimum of a function of several variables, without constraints, by a quasi-Newton method.",
+    "doc": "By the BFGS quasi-Newton method with a line search satisfying the strong Wolfe conditions (MATLAB's default algorithm, `'quasi-newton'`); the gradient by forward differences unless `SpecifyObjectiveGradient` is set and fun returns it as its second output. grad is a column; hessian is the quasi-Newton approximation. exitflag 1 means the gradient is below `OptimalityTolerance`. A vector-valued objective is the error `optimlib:fmincon:NonScalarObj`, as MATLAB's.",
+    "examples": [
+      {
+        "code": "x = fminunc(@(x) 100*(x(2) - x(1)^2)^2 + (1 - x(1))^2, [-1.2; 1], optimoptions('fminunc', 'Display', 'off'));\nround(x' * 1e4) / 1e4",
+        "expected": "\nans =\n\n     1     1\n\n"
+      }
+    ],
+    "differs": [
+      "The 'trust-region' algorithm, Display 'iter', and output and plot functions are not supported.",
+      "The iterates are Sagebrush's own: the minimum agrees within the tolerances; the Hessian approximation and the iteration counts do not match MATLAB's exactly."
+    ],
+    "status": "partial",
+    "see_also": [
+      "fminsearch",
+      "optimoptions"
+    ],
+    "upstream": "Optimization Toolbox",
+    "tags": [
+      "optimization"
+    ]
+  },
+  {
+    "name": "lsqcurvefit",
+    "kind": "function",
+    "signature": "x = lsqcurvefit(fun, x0, xdata, ydata)\nx = lsqcurvefit(fun, x0, xdata, ydata, lb, ub)\nx = lsqcurvefit(fun, x0, xdata, ydata, lb, ub, options)\n[x, resnorm, residual, exitflag, output, lambda, jacobian] = lsqcurvefit(___)",
+    "summary": "Fits the coefficients of a nonlinear model to data by least squares, within bounds.",
+    "doc": "Minimizes $\\sum (\\mathrm{fun}(x, \\mathrm{xdata}) - \\mathrm{ydata})^2$ over x with lb <= x <= ub, by the Levenberg-Marquardt method with its steps projected onto the bounds (a variable a bound holds stays there). exitflag 1 means the gradient is small, 3 that the sum of squares stopped changing (FunctionTolerance), 2 that the step is below StepTolerance. A model whose value does not have ydata's size is the error `optimlib:lsqcurvefit:YdataSizeMismatchFunVal`, as MATLAB's.",
+    "examples": [
+      {
+        "code": "xd = (0:0.5:4)'; yd = 3*exp(-0.7*xd) + 0.5;\nc = lsqcurvefit(@(c, x) c(1)*exp(-c(2)*x) + c(3), [1 1 0], xd, yd, [], [], optimoptions('lsqcurvefit', 'Display', 'off'));\nround(c * 1e6) / 1e6",
+        "expected": "\nans =\n\n    3.0000    0.7000    0.5000\n\n"
+      }
+    ],
+    "differs": [
+      "MATLAB's 'trust-region-reflective' and 'levenberg-marquardt' algorithms are not reproduced step for step: the fit agrees within the tolerances, the iterates do not (with bounds, Sagebrush may reach a slightly smaller sum of squares).",
+      "Linear constraints (R2023a and later), Display 'iter', and output and plot functions are not supported."
+    ],
+    "status": "partial",
+    "see_also": [
+      "polyfit",
+      "fminsearch",
+      "optimoptions"
+    ],
+    "upstream": "Optimization Toolbox",
+    "tags": [
+      "optimization"
+    ]
+  },
+  {
+    "name": "linprog",
+    "kind": "function",
+    "signature": "x = linprog(f, A, b)\nx = linprog(f, A, b, Aeq, beq)\nx = linprog(f, A, b, Aeq, beq, lb, ub)\nx = linprog(f, A, b, Aeq, beq, lb, ub, options)\n[x, fval, exitflag, output, lambda] = linprog(___)",
+    "summary": "Solves a linear program: minimizes f'*x subject to linear inequalities, equalities and bounds.",
+    "doc": "Minimizes $f^T x$ subject to $Ax \\le b$, $A_{eq}x = b_{eq}$ and $lb \\le x \\le ub$ (no bounds when lb and ub are empty), by the two-phase simplex method. x is a column. lambda holds the Lagrange multipliers, fields lower, upper, eqlin, ineqlinLower and ineqlin as MATLAB orders them, with $f + A^T\\lambda_{ineqlin} + A_{eq}^T\\lambda_{eqlin} - \\lambda_{lower} + \\lambda_{upper} = 0$. exitflag 1 means optimal, -2 no feasible point, -3 unbounded (x and fval are then empty).",
+    "examples": [
+      {
+        "code": "[x, fval] = linprog([-1; -2], [1 1; 1 -1; -1 2], [4; 2; 4])",
+        "expected": "\nOptimal solution found.\n\n\nx =\n\n    1.3333\n    2.6667\n\n\nfval =\n\n   -6.6667\n\n"
+      }
+    ],
+    "differs": [
+      "The problem-structure form, the 'interior-point' algorithms and Display 'iter' are not supported.",
+      "Where the optimum is not unique, the vertex found may differ from MATLAB's; lambda.ineqlinLower is all zeros."
+    ],
+    "status": "partial",
+    "see_also": [
+      "optimoptions"
+    ],
+    "upstream": "Optimization Toolbox",
+    "tags": [
+      "optimization"
+    ]
+  }
+]

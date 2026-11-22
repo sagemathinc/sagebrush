@@ -1893,6 +1893,9 @@ def cp(v):
     if t is dict:
         # (a struct array's element)
         return {k: cp(x) for k, x in v.items()}
+    if getattr(v, "_value_class", False):
+        # (an object with value semantics, such as optimoptions': an assignment copies it)
+        return v.copy()
     if isinstance(v, Undef):
         raise _undefined(v.name)
     return v
@@ -13029,6 +13032,10 @@ for _n in ("fread", "fwrite", "containers.Map", "keys", "values", "isKey", "remo
 # (lib/_matlab_signal.py: the windows and the spectral analysis functions, lazy too)
 for _n in ("hamming", "hann", "freqz", "pwelch", "spectrogram"):
     _B[_n] = _lazy_builtin("_matlab_signal", _n)
+
+# (lib/_matlab_optim.py: optimoptions and the Optimization Toolbox solvers fsolve, fminunc, lsqcurvefit and linprog)
+for _n in ("optimoptions", "fsolve", "fminunc", "lsqcurvefit", "linprog"):
+    _B[_n] = _lazy_builtin("_matlab_optim", _n)
 
 
 def _keep_single(name, data=(0,), keep=()):
