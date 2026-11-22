@@ -1543,6 +1543,28 @@ pub fn smith_form(a: &ZMat) -> Result<SmithForm, String> {
 /// the classical elimination).
 #[doc(hidden)]
 pub fn smith_form_k(a: &ZMat, k_max: usize) -> Result<SmithForm, String> {
+    // (the live progress: observation only; claimed complete on success,
+    // after the routes' charges are in)
+    let guard = progress::open(a);
+    let f = smith_form_run(a, k_max);
+    if f.is_ok() {
+        guard.success();
+    }
+    f
+}
+
+fn total(u: &crate::cost::Units) -> u64 {
+    u.0.iter().fold(0u64, |a, x| a.saturating_add(*x))
+}
+
+fn smith_form_run(a: &ZMat, k_max: usize) -> Result<SmithForm, String> {
+    if a.rows == a.cols && a.rows > 0 && progress::active() {
+        let (inv, rest) = {
+            let _u = crate::cost::unmetered();
+            estimate::forecast_square(a, &estimate::FITTED)
+        };
+        progress::phase("inverse", 0, None, total(&inv), total(&rest));
+    }
     if a.rows == a.cols && a.rows > 0 {
         match nonsingular(a, k_max)? {
             Square::Done(f) => return Ok(f),
@@ -1565,8 +1587,29 @@ enum Square {
 /// Routes 1 and 2 on square A.
 fn nonsingular(a: &ZMat, k_max: usize) -> Result<Square, String> {
     let Some((nm, den, det)) = crate::zmat::inverse_det(a) else { return Ok(Square::Singular) };
+    let n = a.rows;
+    let c = &estimate::FITTED;
     if den == det.abs() {
+        if progress::active() {
+            let b = {
+                let _u = crate::cost::unmetered();
+                estimate::forecast_cyclic(n, limbs(&den), estimate::forecast_mean_limbs(&nm), den.bits(), c)
+            };
+            progress::phase("attempts", 1, Some(2), total(&b), 0);
+        }
         return cyclic_ring(&nm, &den).map(Square::Done);
+    }
+    if progress::active() {
+        let (pa, tr) = {
+            let _u = crate::cost::unmetered();
+            let (ln, ld) = (estimate::forecast_mean_limbs(&nm), limbs(&den));
+            // (e = |det| / delta: its size from the two bit lengths)
+            let eb = det.bits().saturating_sub(den.bits()) + 1;
+            let le = (eb as usize).div_ceil(64).max(1);
+            let pa = estimate::forecast_part_a(n, estimate::forecast_mean_limbs(a), ln, ld, limbs(&det), le, eb < 62, den.bits(), c);
+            (pa, estimate::forecast_trailing(n, ld, ln, den.bits(), &[1, ld], c))
+        };
+        progress::phase("invariants", 1, Some(3), total(&pa), total(&tr));
     }
     // (part A, its determinant and inverse known: the invariants from d
     // and the solve x = N b / delta that the inverse already holds, b the
@@ -1574,6 +1617,16 @@ fn nonsingular(a: &ZMat, k_max: usize) -> Result<Square, String> {
     let b = crate::zmat::det_rhs(a.rows);
     let inv = crate::snf::invariants_nonsingular(a, &det.abs(), Some((nm.mul(&b), den.clone())));
     let k = inv.iter().filter(|x| !x.is_one()).count();
+    // (past the measurement hook's k_max the classical elimination runs:
+    // no attempts)
+    if progress::active() && k <= k_max {
+        let tr = {
+            let _u = crate::cost::unmetered();
+            let dls: Vec<usize> = inv.iter().filter(|x| !x.is_one()).map(limbs).collect();
+            estimate::forecast_trailing(n, limbs(&den), estimate::forecast_mean_limbs(&nm), den.bits(), &dls, c)
+        };
+        progress::phase("attempts", 2, Some(3), total(&tr), 0);
+    }
     if k <= k_max {
         return trailing_ring(&nm, &den, &det.abs(), k).map(Square::Done);
     }
@@ -1598,6 +1651,10 @@ pub mod estimate;
 /// Route 3, for singular and rectangular input.
 #[doc(hidden)]
 pub mod route3;
+
+/// The live progress of a run.
+#[doc(hidden)]
+pub mod progress;
 
 #[cfg(test)]
 mod tests;

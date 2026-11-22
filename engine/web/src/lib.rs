@@ -58,6 +58,13 @@ pub extern "C" fn sb_reply_len() -> usize {
     unsafe { (*std::ptr::addr_of!(REPLY)).len() }
 }
 
+/// A top-level call starts: frames and live-progress state a trapped call
+/// left behind (a trap runs no destructors) are forgotten.
+fn new_run() {
+    sagebrush_interrupt::progress::reset_frames();
+    sagebrush_arith::smith::progress::reset();
+}
+
 #[no_mangle]
 // SAFETY: an export of the engine's wasm ABI (no_mangle; the sb_ prefix keeps
 // the symbol unique);
@@ -67,6 +74,7 @@ pub extern "C" fn sb_reply_len() -> usize {
 // this).  That is the supported boundary: any other native caller is unsupported.
 #[allow(unsafe_code)]
 pub unsafe extern "C" fn sb_call(ptr: *const u8, len: usize) -> *const u8 {
+    new_run();
     let req = std::str::from_utf8(std::slice::from_raw_parts(ptr, len)).unwrap_or("");
     let r = &mut *std::ptr::addr_of_mut!(REPLY);
     // the previous reply is freed first (the host copied it after the last
@@ -87,6 +95,7 @@ pub unsafe extern "C" fn sb_call(ptr: *const u8, len: usize) -> *const u8 {
 // this).  That is the supported boundary: any other native caller is unsupported.
 #[allow(unsafe_code)]
 pub unsafe extern "C" fn sb_sym_call(ptr: *const u8, len: usize) -> *const u8 {
+    new_run();
     let req = std::str::from_utf8(std::slice::from_raw_parts(ptr, len)).unwrap_or("");
     let r = &mut *std::ptr::addr_of_mut!(REPLY);
     drop(std::mem::take(r));
@@ -105,6 +114,7 @@ pub unsafe extern "C" fn sb_sym_call(ptr: *const u8, len: usize) -> *const u8 {
 // this).  That is the supported boundary: any other native caller is unsupported.
 #[allow(unsafe_code)]
 pub unsafe extern "C" fn sb_mp_call(ptr: *const u8, len: usize) -> *const u8 {
+    new_run();
     let req = std::slice::from_raw_parts(ptr, len);
     let r = &mut *std::ptr::addr_of_mut!(REPLY);
     drop(std::mem::take(r));
@@ -124,6 +134,7 @@ pub unsafe extern "C" fn sb_mp_call(ptr: *const u8, len: usize) -> *const u8 {
 // this).  That is the supported boundary: any other native caller is unsupported.
 #[allow(unsafe_code)]
 pub unsafe extern "C" fn sb_bin_call(ptr: *const u8, len: usize) -> *const u8 {
+    new_run();
     let req = std::slice::from_raw_parts(ptr, len);
     let r = &mut *std::ptr::addr_of_mut!(REPLY);
     drop(std::mem::take(r));

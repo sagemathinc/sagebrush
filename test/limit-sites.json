@@ -1801,6 +1801,11 @@
   "owner": "engine arithmetic (exact linear algebra)",
   "reason": "routes 1 and 2 on square input, with the measurement hook's threshold on k (smith_form passes usize::MAX: no threshold; past it, nonsingular input takes the classical elimination): refuses nothing"
  },
+ "engine/arith/src/smith.rs :: nonsingular :: if progress::active() && k <= k_max { #0": {
+  "class": "none",
+  "owner": "engine arithmetic (exact linear algebra)",
+  "reason": "the live progress's attempts phase, shown only when the measurement hook's threshold on k lets the attempts run (smith_form passes usize::MAX): observation only, refuses nothing"
+ },
  "engine/arith/src/smith.rs :: small_smith :: debug_assert!(v.max_bits() <= growth && vinv.max_bits() <= growth, \"the transforms' proved bound\"); #0": {
   "class": "none",
   "owner": "engine arithmetic (exact linear algebra)",
@@ -1816,15 +1821,25 @@
   "owner": "engine arithmetic (exact linear algebra)",
   "reason": "no threshold: route 2 for every k >= 2 nontrivial invariant factors (usize::MAX passed to the measurement hook smith_form_k); refuses nothing"
  },
- "engine/arith/src/smith.rs :: smith_form_k :: match nonsingular(a, k_max)? { #0": {
+ "engine/arith/src/smith.rs :: smith_form_k :: let f = smith_form_run(a, k_max); #0": {
   "class": "none",
   "owner": "engine arithmetic (exact linear algebra)",
-  "reason": "routes 1 and 2 on square input, with the measurement hook's threshold on k (smith_form passes usize::MAX: no threshold; past it, nonsingular input takes the classical elimination): refuses nothing"
+  "reason": "the measurement hook's threshold on k passed to the run, which the live progress's guard brackets (smith_form passes usize::MAX: no threshold): refuses nothing"
  },
  "engine/arith/src/smith.rs :: smith_form_k :: pub fn smith_form_k(a: &ZMat, k_max: usize) -> Result<SmithForm, String> { #0": {
   "class": "none",
   "owner": "engine arithmetic (exact linear algebra)",
   "reason": "a route threshold (route 2 up to K_MAX nontrivial invariant factors, else the classical elimination): a measured crossover, refuses nothing"
+ },
+ "engine/arith/src/smith.rs :: smith_form_run :: fn smith_form_run(a: &ZMat, k_max: usize) -> Result<SmithForm, String> { #0": {
+  "class": "none",
+  "owner": "engine arithmetic (exact linear algebra)",
+  "reason": "smith_form_k's routes, under the live progress's guard, with the measurement hook's threshold on k passed on: refuses nothing"
+ },
+ "engine/arith/src/smith.rs :: smith_form_run :: match nonsingular(a, k_max)? { #0": {
+  "class": "none",
+  "owner": "engine arithmetic (exact linear algebra)",
+  "reason": "routes 1 and 2 on square input, with the measurement hook's threshold on k (smith_form passes usize::MAX: no threshold; past it, nonsingular input takes the classical elimination): refuses nothing"
  },
  "engine/arith/src/smith/estimate.rs :: cost :: Cost { mem_lower: super::floor_bytes(a.rows, a.cols).unwrap_or(u64::MAX), work_lower, work_estimate: None, work_upper: None } #0": {
   "class": "none",
@@ -1841,12 +1856,82 @@
   "owner": "engine arith (kernel metering)",
   "reason": "a model's and the switch's saturating unit arithmetic: a total that overflows u64 reads as huge (an accounting figure, never a refusal)"
  },
+ "engine/arith/src/smith/progress.rs ::  :: budget: u64, #0": {
+  "class": "none",
+  "owner": "engine arithmetic (exact linear algebra)",
+  "reason": "the live progress's remaining forecast (a phase's budget of work units, an estimate for the ETA): observation only, never a cap or a refusal"
+ },
+ "engine/arith/src/smith/progress.rs ::  :: pub const BEFORE_DONE: f64 = (u32::MAX as f64 - 1.0) / u32::MAX as f64; #0": {
+  "class": "none",
+  "owner": "engine arithmetic (exact linear algebra)",
+  "reason": "the live progress's largest fraction before success (one u32 step below 1): a reported value's cap, refuses nothing"
+ },
+ "engine/arith/src/smith/progress.rs ::  :: pub const THRESHOLD: u64 = 1 << 16; #0": {
+  "class": "none",
+  "owner": "engine arithmetic (exact linear algebra)",
+  "reason": "the live progress's size gate (2^16 limb-entries, from sizes): below it no progress call is opened; observation only, refuses nothing"
+ },
+ "engine/arith/src/smith/progress.rs :: fraction :: let active = budget.saturating_sub(spent).max(spent / 4); #0": {
+  "class": "none",
+  "owner": "engine arithmetic (exact linear algebra)",
+  "reason": "the live progress's remaining forecast (a phase's budget of work units, an estimate for the ETA): observation only, never a cap or a refusal"
+ },
+ "engine/arith/src/smith/progress.rs :: fraction :: pub fn fraction(done: u64, phase_start: u64, budget: u64, future: u64) -> Option<f64> { #0": {
+  "class": "none",
+  "owner": "engine arithmetic (exact linear algebra)",
+  "reason": "the live progress's remaining forecast (a phase's budget of work units, an estimate for the ETA): observation only, never a cap or a refusal"
+ },
+ "engine/arith/src/smith/progress.rs :: open :: budget: 0, #0": {
+  "class": "none",
+  "owner": "engine arithmetic (exact linear algebra)",
+  "reason": "the live progress's remaining forecast (a phase's budget of work units, an estimate for the ETA): observation only, never a cap or a refusal"
+ },
+ "engine/arith/src/smith/progress.rs :: phase :: pub(crate) fn phase(stage: &str, index: u64, count: Option<u64>, budget: u64, future: u64) { #0": {
+  "class": "none",
+  "owner": "engine arithmetic (exact linear algebra)",
+  "reason": "the live progress's remaining forecast (a phase's budget of work units, an estimate for the ETA): observation only, never a cap or a refusal"
+ },
+ "engine/arith/src/smith/progress.rs :: phase :: st.budget = scaled(budget); #0": {
+  "class": "none",
+  "owner": "engine arithmetic (exact linear algebra)",
+  "reason": "the live progress's remaining forecast (a phase's budget of work units, an estimate for the ETA): observation only, never a cap or a refusal"
+ },
+ "engine/arith/src/smith/progress.rs :: phase :: st.first = Some(done.saturating_add(st.budget).saturating_add(st.future)); #0": {
+  "class": "none",
+  "owner": "engine arithmetic (exact linear algebra)",
+  "reason": "the live progress's remaining forecast (a phase's budget of work units, an estimate for the ETA): observation only, never a cap or a refusal"
+ },
+ "engine/arith/src/smith/progress.rs :: qualifies :: limbs_sum >= THRESHOLD_TEST.with(|t| t.get()).unwrap_or(THRESHOLD) #0": {
+  "class": "none",
+  "owner": "engine arithmetic (exact linear algebra)",
+  "reason": "the live progress's size gate (2^16 limb-entries, from sizes): below it no progress call is opened; observation only, refuses nothing"
+ },
+ "engine/arith/src/smith/progress.rs :: refresh :: let f = if FORCE_NAN.with(|e| e.get()) { valid(f64::NAN) } else { fraction(done, st.phase_start, st.budget, st.future) }; #0": {
+  "class": "none",
+  "owner": "engine arithmetic (exact linear algebra)",
+  "reason": "the live progress's remaining forecast (a phase's budget of work units, an estimate for the ETA): observation only, never a cap or a refusal"
+ },
+ "engine/arith/src/smith/progress.rs :: route3_active :: let budget = active.as_ref().and_then(|a| st.named.iter().find(|(n, _)| n == a)).map_or(0, |x| x.1); #0": {
+  "class": "none",
+  "owner": "engine arithmetic (exact linear algebra)",
+  "reason": "the live progress's remaining forecast (a phase's budget of work units, an estimate for the ETA): observation only, never a cap or a refusal"
+ },
+ "engine/arith/src/smith/progress.rs :: route3_active :: st.budget = budget; #0": {
+  "class": "none",
+  "owner": "engine arithmetic (exact linear algebra)",
+  "reason": "the live progress's remaining forecast (a phase's budget of work units, an estimate for the ETA): observation only, never a cap or a refusal"
+ },
+ "engine/arith/src/smith/progress.rs :: route3_active :: st.future = all.saturating_sub(budget); #0": {
+  "class": "none",
+  "owner": "engine arithmetic (exact linear algebra)",
+  "reason": "the live progress's remaining forecast (a phase's budget of work units, an estimate for the ETA): observation only, never a cap or a refusal"
+ },
  "engine/arith/src/smith/route3.rs :: op_units :: u.total().unwrap_or(u64::MAX) #0": {
   "class": "none",
   "owner": "engine arith (kernel metering)",
   "reason": "a model's and the switch's saturating unit arithmetic: a total that overflows u64 reads as huge (an accounting figure, never a refusal)"
  },
- "engine/arith/src/smith/route3.rs :: smith_route3 :: let super::Square::Done(f) = super::nonsingular(&t, usize::MAX)? else { return Err(internal(\"core (T singular)\")) }; #0": {
+ "engine/arith/src/smith/route3.rs :: smith_route3 :: super::nonsingular(&t, usize::MAX)? #0": {
   "class": "none",
   "owner": "engine arithmetic (exact linear algebra)",
   "reason": "route 3's core: route 1 or 2 on the nonsingular r x r core, with no threshold (usize::MAX); refuses nothing"
@@ -2689,6 +2774,86 @@
   "class": "none",
   "owner": "engine arithmetic (exact linear algebra)",
   "reason": "test code: the Smith form with transforms' route, floor and metering tests (route thresholds, the floor's saturation at the extremes, an accounting meter with no upper bound); refuses nothing"
+ },
+ "engine/arith/tests/smith_progress.rs ::  :: use sagebrush_arith::smith::progress::{self, testing, BEFORE_DONE, THRESHOLD}; #0": {
+  "class": "none",
+  "owner": "engine arithmetic (exact linear algebra)",
+  "reason": "the live progress's size gate (2^16 limb-entries, from sizes): below it no progress call is opened; observation only, refuses nothing"
+ },
+ "engine/arith/tests/smith_progress.rs :: check_rule :: (budget, overruns) #0": {
+  "class": "none",
+  "owner": "engine arithmetic (exact linear algebra)",
+  "reason": "a test of the Smith form's live progress (its forecast's budgets, its size gate, its fraction cap): refuses nothing"
+ },
+ "engine/arith/tests/smith_progress.rs :: check_rule :: assert!(pts[within - 1].0 <= 0.8 * b + tol(b, 0.0), \"{name}: the budget's rule past 4B/5\"); #0": {
+  "class": "none",
+  "owner": "engine arithmetic (exact linear algebra)",
+  "reason": "a test of the Smith form's live progress (its forecast's budgets, its size gate, its fraction cap): refuses nothing"
+ },
+ "engine/arith/tests/smith_progress.rs :: check_rule :: budget += within.saturating_sub(1); #0": {
+  "class": "none",
+  "owner": "engine arithmetic (exact linear algebra)",
+  "reason": "a test of the Smith form's live progress (its forecast's budgets, its size gate, its fraction cap): refuses nothing"
+ },
+ "engine/arith/tests/smith_progress.rs :: check_rule :: let (mut budget, mut overruns) = (0, 0); #0": {
+  "class": "none",
+  "owner": "engine arithmetic (exact linear algebra)",
+  "reason": "a test of the Smith form's live progress (its forecast's budgets, its size gate, its fraction cap): refuses nothing"
+ },
+ "engine/arith/tests/smith_progress.rs :: the_gate_and_re_entry :: let t = THRESHOLD as usize; #0": {
+  "class": "none",
+  "owner": "engine arithmetic (exact linear algebra)",
+  "reason": "the live progress's size gate (2^16 limb-entries, from sizes): below it no progress call is opened; observation only, refuses nothing"
+ },
+ "engine/arith/tests/smith_progress.rs :: the_overhead_row :: format!(\", the gate alone (production threshold) {:.4} s\", t_gate) #0": {
+  "class": "none",
+  "owner": "engine arithmetic (exact linear algebra)",
+  "reason": "a test of the Smith form's live progress (its forecast's budgets, its size gate, its fraction cap): refuses nothing"
+ },
+ "engine/arith/tests/smith_progress.rs :: the_overhead_row :: let (t_off, u_off) = time(a, false, threshold); #0": {
+  "class": "none",
+  "owner": "engine arithmetic (exact linear algebra)",
+  "reason": "a test of the Smith form's live progress (its forecast's budgets, its size gate, its fraction cap): refuses nothing"
+ },
+ "engine/arith/tests/smith_progress.rs :: the_overhead_row :: let (t_on, u_on) = time(a, true, threshold); #0": {
+  "class": "none",
+  "owner": "engine arithmetic (exact linear algebra)",
+  "reason": "a test of the Smith form's live progress (its forecast's budgets, its size gate, its fraction cap): refuses nothing"
+ },
+ "engine/arith/tests/smith_progress.rs :: the_overhead_row :: let threshold = forced.then_some(64); #0": {
+  "class": "none",
+  "owner": "engine arithmetic (exact linear algebra)",
+  "reason": "a test of the Smith form's live progress (its forecast's budgets, its size gate, its fraction cap): refuses nothing"
+ },
+ "engine/arith/tests/smith_progress.rs :: the_overhead_row :: let time = |a: &ZMat, on: bool, threshold: Option<u64>| { #0": {
+  "class": "none",
+  "owner": "engine arithmetic (exact linear algebra)",
+  "reason": "a test of the Smith form's live progress (its forecast's budgets, its size gate, its fraction cap): refuses nothing"
+ },
+ "engine/arith/tests/smith_progress.rs :: the_overhead_row :: testing::set_threshold(threshold); #0": {
+  "class": "none",
+  "owner": "engine arithmetic (exact linear algebra)",
+  "reason": "a test of the Smith form's live progress (its forecast's budgets, its size gate, its fraction cap): refuses nothing"
+ },
+ "engine/arith/tests/smith_progress.rs :: the_remaining_forecast_rule :: assert_eq!(f(u64::MAX, u64::MAX, 1, 0), BEFORE_DONE); #0": {
+  "class": "none",
+  "owner": "engine arithmetic (exact linear algebra)",
+  "reason": "the live progress's largest fraction before success (one u32 step below 1): a reported value's cap, refuses nothing"
+ },
+ "engine/arith/tests/smith_progress.rs :: the_remaining_forecast_rule :: assert_eq!(one[p::word::FRACTION], u32::MAX); #0": {
+  "class": "none",
+  "owner": "engine arithmetic (exact linear algebra)",
+  "reason": "a test of the Smith form's live progress (its forecast's budgets, its size gate, its fraction cap): refuses nothing"
+ },
+ "engine/arith/tests/smith_progress.rs :: the_remaining_forecast_rule :: assert_eq!(w[p::word::FRACTION], u32::MAX - 1); #0": {
+  "class": "none",
+  "owner": "engine arithmetic (exact linear algebra)",
+  "reason": "a test of the Smith form's live progress (its forecast's budgets, its size gate, its fraction cap): refuses nothing"
+ },
+ "engine/arith/tests/smith_progress.rs :: the_traces_of_the_routes :: assert!(b > 0, \"{name}: the budget's rule exercised\"); #0": {
+  "class": "none",
+  "owner": "engine arithmetic (exact linear algebra)",
+  "reason": "a test of the Smith form's live progress (its forecast's budgets, its size gate, its fraction cap): refuses nothing"
  },
  "engine/arith/tests/smith_route2.rs :: route_two_transforms_and_units_are_bounded :: let top = s.u.max_bits().max(s.v.max_bits()); #0": {
   "class": "none",

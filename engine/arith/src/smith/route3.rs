@@ -60,6 +60,7 @@ fn tally_total() -> u64 {
 /// since the last mark.
 fn mark(acc: &mut Local, name: &str) {
     acc.flush();
+    super::progress::mark(name);
     PHASES.with(|p| {
         if let Some((v, last)) = p.borrow_mut().as_mut() {
             let t = tally_total();
@@ -71,6 +72,7 @@ fn mark(acc: &mut Local, name: &str) {
 
 fn side(s: &'static str) {
     SIDE.with(|x| x.set(s));
+    super::progress::side(s);
 }
 
 /// Runs `f` recording route 3's phases (the model's terms' names: a test
@@ -684,6 +686,7 @@ pub fn compress_with(b: &ZMat, j: &[usize], khat: usize) -> Result<(ZMat, ZMat),
     mark(&mut acc, "Q");
     let g = hnf_modulus(&q, &delta, &det, &mut acc);
     mark(&mut acc, "G");
+    super::progress::route3_after_g(r, &nm, &delta, &det, &g);
     let c = hnf_c(b, &nm, &q, &delta, &g, khat, CPath::Switch, &mut acc)?;
     match delta.to_u64() {
         Some(e) if e < WORD_E => kernel_ring(&Word { e }, b, j, &jp, &bjp, &nm, &q, &delta, c, &mut acc),
@@ -879,6 +882,7 @@ pub(super) fn smith_route3(a: &ZMat) -> Result<super::SmithForm, String> {
     let mut acc = Local::new();
     acc.n(Family::Move, copy_units(&a.d).saturating_add(crate::cost::size_product(&[m, m])).saturating_add(crate::cost::size_product(&[n, n])));
     side("");
+    super::progress::route3_begin(a);
     mark(&mut acc, "entry");
     sagebrush_interrupt::check_coarse();
     // the largest profile so far, and the rank whose certificate failed
@@ -917,6 +921,7 @@ pub(super) fn smith_route3(a: &ZMat) -> Result<super::SmithForm, String> {
         let b = block(a, &is, &(0..n).collect::<Vec<_>>(), &mut acc);
         let (row, col) = cont.get_or_insert_with(|| contents(a, &mut acc));
         let kh = k_hat_of(row, col, r);
+        super::progress::route3_khat(kh);
         mark(&mut acc, "profile");
         side("col: ");
         let (v0, _c) = compress_with(&b, &js, kh)?;
@@ -936,6 +941,7 @@ pub(super) fn smith_route3(a: &ZMat) -> Result<super::SmithForm, String> {
             break (is, js, Some((v0, _c)));
         }
         failed = Some(r);
+        super::progress::route3_retry(a);
     };
     let r = is.len();
     // (Smith(A X) = Smith(A): A's k^ serves the left side too; its
@@ -946,6 +952,7 @@ pub(super) fn smith_route3(a: &ZMat) -> Result<super::SmithForm, String> {
     } else {
         0
     };
+    super::progress::route3_khat(kh);
     // (the profile's units when no column side ran; else nothing)
     mark(&mut acc, "profile");
     if r == 0 {
@@ -982,7 +989,12 @@ pub(super) fn smith_route3(a: &ZMat) -> Result<super::SmithForm, String> {
         (None, false) => (None, block(a, &is, &all_n, &mut acc)),
     };
     acc.flush();
-    let super::Square::Done(f) = super::nonsingular(&t, usize::MAX)? else { return Err(internal("core (T singular)")) };
+    // (T's own phases are not this run's)
+    let core = {
+        let _p = super::progress::inner();
+        super::nonsingular(&t, usize::MAX)?
+    };
+    let super::Square::Done(f) = core else { return Err(internal("core (T singular)")) };
     mark(&mut acc, "core");
     let attempts = f.attempts;
     // V = [X V1 | K], U = [U1 U0_top ; U0_rest]

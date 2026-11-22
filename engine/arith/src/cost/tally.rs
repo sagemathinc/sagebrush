@@ -120,13 +120,39 @@ fn delta(now: &Units, start: &Units) -> Units {
 }
 
 /// Publishes the outermost region's running units to its progress cell
-/// (called at the kernels' Stop polls; nothing without a region or cell).
+/// (called at the kernels' Stop polls; nothing without a region or cell),
+/// and refreshes a running Smith form's live progress, if any.
 pub fn publish_progress() {
     REGION.with(|r| {
         if let Some(Region { start, progress: Some(p) }) = &*r.borrow() {
             p.publish(&delta(&tallied(), start));
         }
     });
+    crate::smith::progress::tick();
+}
+
+/// A scope whose work is not the computation's: on its drop (a normal exit
+/// and an unwinding alike) this thread's unit counters, arith's and
+/// bigint's transform counters, are set back to their values at its start,
+/// and in debug builds no Stop check may run inside it (the check counter
+/// is never restored: a poll in it would be a real one).  For bookkeeping
+/// such as a progress forecast.
+pub struct Unmetered {
+    count: [u64; FAMILIES],
+    ntt: [u64; 3],
+    _no_poll: sagebrush_interrupt::NoPoll,
+}
+
+/// Enters an [`Unmetered`] scope until the guard drops.
+pub fn unmetered() -> Unmetered {
+    Unmetered { count: COUNT.with(|c| c.get()), ntt: sagebrush_bigint::ntt::units(), _no_poll: sagebrush_interrupt::no_poll() }
+}
+
+impl Drop for Unmetered {
+    fn drop(&mut self) {
+        COUNT.with(|c| c.set(self.count));
+        sagebrush_bigint::ntt::restore_units(self.ntt);
+    }
 }
 
 struct Guard<'m> {
