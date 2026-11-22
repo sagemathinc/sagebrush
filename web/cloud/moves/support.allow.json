@@ -1,0 +1,52 @@
+[
+ {
+  "file": "web/cloud/support/README.md",
+  "from": "the Send guard. CI runs both in the `cloud` job (`scripts/ci-suites.txt`).",
+  "to": "the Send guard. CI runs both in web-sync.1 (test-support.mjs's `// ci:` header)."
+ },
+ {
+  "file": "web/cloud/support/README.md",
+  "from": "**Note:** `scripts/with-core.sh` overlays core's `web/site`, `files`, `share`, `sync` and `lti` directories, not",
+  "to": "**Note:** this Worker imports nothing outside `web/cloud/support`; the site install above is only the tests'"
+ },
+ {
+  "file": "web/cloud/support/README.md",
+  "from": "`web/support`. This Worker imports nothing from core, so the overlay leaves it as committed.",
+  "to": "Miniflare."
+ },
+ {
+  "file": "web/cloud/support/test-support.mjs",
+  "from": "// In CI it runs inside scripts/with-core.sh's core worktree, which doesn't overlay web/support: by its path in the",
+  "to": "// In CI it runs in web-sync.1 (its ci: header), from the repository's root, with Miniflare from web/site's install"
+ },
+ {
+  "file": "web/cloud/support/test-support.mjs",
+  "from": "// cloud checkout, with Miniflare from the worktree's installed web/site (the current directory's).",
+  "to": "// (the current directory's)."
+ },
+ {
+  "file": "web/cloud/support/test-support.mjs",
+  "from": "// (the Workers' sources the cookie checks read: the worktree's web/, where core's web/share and web/cloud/share sit",
+  "to": "// (the Workers' sources the cookie checks read: this repository's web/, where web/share and web/cloud/ sit beside"
+ },
+ {
+  "file": "web/cloud/support/test-support.mjs",
+  "from": "// beside the overlaid cloud directories; not this checkout's, which has neither)",
+  "to": "// web/sync, web/site and web/files)"
+ },
+ {
+  "file": "web/cloud/support/test-support.mjs",
+  "from": "if (!webDir) throw new Error(\"no web/cloud/share/server.ts (run inside scripts/with-core.sh's core worktree)\");",
+  "to": "if (!webDir) throw new Error(\"no web/cloud/share/server.ts (run from the repository's root)\");"
+ },
+ {
+  "file": "web/cloud/support/test-support.mjs",
+  "from": "    const roots = [\"share\", \"cloud/share\", \"sync\", \"lti\", \"site/src\", \"files/src\"].map((d) => join(webDir, d));",
+  "to": "    const roots = [\"share\", \"cloud\", \"sync\", \"lti\", \"site/src\", \"files/src\"].map((d) => join(webDir, d));"
+ },
+ {
+  "file": "web/cloud/support/test-support.mjs",
+  "from": "// web/support/test-support-page.mjs, run from here so it is part of this suite (scripts/ci-suites.txt)",
+  "to": "// web/cloud/support/test-support-page.mjs, run from here so it is part of this suite (its ci: header)"
+ }
+]
