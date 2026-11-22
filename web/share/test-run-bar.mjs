@@ -6,7 +6,8 @@
 //   0. Run all before the page gives the sandbox up: the held run is answered as not run, nothing granted;
 //   1. once given up, a notebook whose code may not change files, Run all: one bar says why and asks, "Allow file changes and run",
 //      and no cell gets a message (each left as it was, not run);
-//   1b. the bar is a modal: fixed over the window, the notebook not moved, Cancel focused (not Allow);
+//   1b. the bar is a modal <dialog> (:modal, the page behind inert), the notebook not moved, Cancel focused (not Allow);
+//   1c. Tab and Shift+Tab keep the focus in it (never on the page behind), and Esc still closes it after them;
 //   2. a script's click on the button grants nothing; nor does a trusted press before the bar arms;
 //   2b. Esc, and Cancel, close it unanswered (nothing granted, no cell run); the next refused run asks again;
 //   3. a bar left open while another notebook is shown is closed, unanswered;
@@ -155,9 +156,23 @@ try {
   await S.until("!document.querySelector('#runbar').hidden", 30000).catch(() => {});
   await sleep(700);
   const s1 = await state(S);
-  const modal = await S.ev("(() => { const r = document.querySelector('#runbar'), b = r.getBoundingClientRect(); return { position: getComputedStyle(r).position, covers: b.left <= 0 && b.top <= 0 && b.right >= innerWidth && b.bottom >= innerHeight, role: r.getAttribute('role'), focus: document.activeElement?.id }; })()");
+  const modal = await S.ev("(() => { const r = document.querySelector('#runbar'); return { tag: r.tagName, open: r.open, modal: r.matches(':modal'), focus: document.activeElement?.id }; })()");
   const top1 = await cellTop();
-  ok(modal.position === "fixed" && modal.covers && modal.role === "dialog" && modal.focus === "rbcancel" && top1 === top0, "1b. the bar is a modal over the window, the notebook not moved, Cancel focused: " + J({ ...modal, top0, top1 }));
+  ok(modal.tag === "DIALOG" && modal.open && modal.modal && modal.focus === "rbcancel" && top1 === top0, "1b. the bar is a modal dialog, the notebook not moved, Cancel focused: " + J({ ...modal, top0, top1 }));
+  // 1c. Tab and Shift+Tab: the focus stays in the dialog (or leaves the page), never on the page behind; Esc after them
+  const tab = (shift) => S.send("Input.dispatchKeyEvent", { type: "keyDown", key: "Tab", code: "Tab", windowsVirtualKeyCode: 9, modifiers: shift ? 8 : 0 }).then(() => S.send("Input.dispatchKeyEvent", { type: "keyUp", key: "Tab", code: "Tab", windowsVirtualKeyCode: 9, modifiers: shift ? 8 : 0 }));
+  const where = () => S.ev("(() => { const a = document.activeElement; return a === document.body || a === null ? 'body' : document.querySelector('#runbar').contains(a) ? 'dialog:' + a.id : 'behind:' + (a.id || a.tagName); })()");
+  const seen = [];
+  for (const shift of [true, true, true, false, false, false, false]) { await tab(shift); seen.push(await where()); }
+  const behind = seen.filter((w) => w.startsWith("behind:"));
+  ok(behind.length === 0 && seen.some((w) => w === "dialog:rballow"), "1c. Tab and Shift+Tab keep the focus in the dialog: " + J(seen));
+  for (const type of ["keyDown", "keyUp"]) await S.send("Input.dispatchKeyEvent", { type, key: "Escape", code: "Escape", windowsVirtualKeyCode: 27 });
+  await sleep(300);
+  const escTab = await state(S);
+  ok(!escTab.bar && escTab.files === false && escTab.outs.every((o) => o === ""), "...and Esc after them closes it, unanswered: " + J({ bar: escTab.bar, files: escTab.files }));
+  await S.ev("(() => { window.sagebrush.notebook.runAll(); return 1; })()");
+  await S.until("!document.querySelector('#runbar').hidden", 30000).catch(() => {});
+  await sleep(700);
   ok(s1.bar && s1.text === "Sagebrush's sandbox didn't start in this browser. To run in this page, this notebook needs permission to change files in your browser workspace.", "1. Run all: one bar, saying why and asking: " + J(s1.text));
   ok((await S.ev("document.querySelector('#rballow').textContent")) === "Allow file changes and run" && (await S.ev("document.querySelector('#runbar .note').textContent")) === "Remembered for this notebook; change it in File > Permissions…", "...its button, \"Allow file changes and run\", and that it's remembered, and where to change it");
   ok(s1.outs.every((o) => o === "") && !s1.outs.some((o) => /can't run here/.test(o)) && s1.files === false, "...and no cell gets a message, each left as it was; nothing granted: " + J({ outs: s1.outs, files: s1.files }));
@@ -249,7 +264,8 @@ try {
   await sleep(700);
   const at = await K.ev("(() => { const b = document.querySelector('#rballow').getBoundingClientRect(); return { x: b.x + b.width / 2, y: b.y + b.height / 2 }; })()");
   await K.send("Input.dispatchMouseEvent", { type: "mousePressed", x: at.x, y: at.y, button: "left", clickCount: 1 });
-  await K.ev("(document.querySelector('.cell textarea').focus(), 1)");
+  // (the focus taken from the button mid-press: to Cancel, since the page behind the modal is inert and can't take it)
+  await K.ev("(document.querySelector('#rbcancel').focus(), 1)");
   await K.send("Input.dispatchMouseEvent", { type: "mouseReleased", x: at.x, y: at.y, button: "left", clickCount: 1 });
   await sleep(300);
   ok((await K.ev("window.sagebrush.permissions?.()?.files")) === false && (await K.ev("!document.querySelector('#runbar').hidden")), "12. a press that lost focus before its release: nothing allowed, the bar stays");

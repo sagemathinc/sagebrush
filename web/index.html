@@ -286,8 +286,10 @@
   @media (max-width: 480px) { .sharetabs button { padding: 6px 8px; } #sharecardlink { font-size: 14px; } .sharestaterow { flex-direction: column; align-items: stretch; } .sharestate { flex: none; } .shareaction { align-self: flex-start; } }
   #filesbar { margin: 6px 0; padding: 6px 10px; border: 1px solid var(--line); border-radius: 6px; background: var(--code); font-size: 14px; }
   #filesbar[hidden], #runbar[hidden] { display: none; }
-  /* (the run bar is a modal, over the window when a run is refused: it never pushes the notebook down) */
-  #runbar { position: fixed; inset: 0; z-index: 2147482500; display: flex; align-items: center; justify-content: center; background: rgba(0, 0, 0, .35); }
+  /* (the run bar is a modal <dialog> (showModal: the page behind inert, the dialog in the top layer), over the window
+     when a run is refused: it never pushes the notebook down) */
+  #runbar { padding: 0; border: none; background: transparent; max-width: none; }
+  #runbar::backdrop { background: rgba(0, 0, 0, .35); }
   #runbar .rbbox { box-sizing: border-box; width: min(460px, calc(100vw - 32px)); padding: 16px 18px; border: 1px solid var(--line); border-radius: 8px; background: var(--bg); color: var(--fg); font-size: 14px; box-shadow: 0 12px 32px rgba(0, 0, 0, .3); }
   #runbar .rbbtns { display: flex; justify-content: flex-end; gap: 8px; margin-top: 12px; }
   /* (the sentence, then the button on a row of its own, then the note: each on its own line) */
@@ -608,7 +610,7 @@ its final layout and the files never arrive a moment later; not on a phone, wher
     <button id="morebtn" aria-haspopup="menu" aria-expanded="false" aria-controls="moremenu" title="Text cells, the interpreter, files, console, TimeTravel, keys" aria-label="More">⋯</button>
   </div>
   <div id="filesbar" role="status" hidden><span id="fbtext"></span> <button id="fballow" hidden></button> <button id="fbonce" hidden>Allow once</button> <button id="fbdeny" hidden>Don't allow</button> <button id="fbperms" hidden>File &gt; Permissions…</button></div>
-  <div id="runbar" role="dialog" aria-modal="true" aria-labelledby="rbtext" hidden><div class="rbbox"><span id="rbtext"></span> <span class="note">Remembered for this notebook; change it in File &gt; Permissions…</span><div class="rbbtns"><button id="rbcancel">Cancel</button> <button id="rballow" class="primary">Allow file changes and run</button></div></div></div>
+  <dialog id="runbar" aria-labelledby="rbtext" hidden><div class="rbbox"><span id="rbtext"></span> <span class="note">Remembered for this notebook; change it in File &gt; Permissions…</span><div class="rbbtns"><button id="rbcancel">Cancel</button> <button id="rballow" class="primary">Allow file changes and run</button></div></div></dialog>
   <!-- (the agent's bar, when one is connected: a row here, never over a cell or a plot; workspace/agent-ui.ts) -->
   <div data-sbag-slot="1"></div>
   <section id="files" aria-label="Files" hidden>
@@ -2472,7 +2474,12 @@ function runBar(doc, why) {
   if (rbReq?.open && rbReq.doc === doc) return;
   rbReq = { open: true, id: ++rbSeq, doc, rev: revOf(doc), armedAt: performance.now() + FB_ARM, pressed: null, cells: new Set(rbReq?.doc === doc ? rbReq.cells : []) };
   $("#rbtext").textContent = `${RB_WHY[why] ?? RB_WHY.browser} ${window.__TAURI__ ? "To run it, this notebook needs permission to change your files." : RB_ASK}`;
+  runBarShow();
+}
+// (shown as a modal: the page behind inert, so focus stays in it (Tab, Shift+Tab) and Esc reaches it; Cancel focused)
+function runBarShow() {
   runBarEl.hidden = false;
+  if (!runBarEl.open) runBarEl.showModal();
   $("#rbcancel").focus();
 }
 // (the cells a refused run asked for, for the bar's "and run": collected for the notebook shown, even before the bar opens)
@@ -2493,6 +2500,7 @@ function refuseHere(cell) {
 }
 function runBarClose() {
   rbReq = null;
+  if (runBarEl.open) runBarEl.close();
   runBarEl.hidden = true;
   $("#rballow").hidden = false;
   $("#rbcancel").textContent = "Cancel";
@@ -2506,12 +2514,15 @@ function runBarNote(doc, text) {
   $("#rballow").hidden = true;
   $("#rbcancel").textContent = "OK";
   runBarEl.querySelector(".note").hidden = true;
-  runBarEl.hidden = false;
-  $("#rbcancel").focus();
+  runBarShow();
 }
 // (Cancel, or Esc: closed unanswered, the refused cells left as they were; the next refused run asks again)
 $("#rbcancel").addEventListener("click", () => runBarClose());
-runBarEl.addEventListener("keydown", (e) => { if (e.key === "Escape" && !runBarEl.hidden) { e.preventDefault(); runBarClose(); } });
+// (Esc: the dialog's own cancel, closed as Cancel closes it)
+runBarEl.addEventListener("cancel", (e) => { e.preventDefault(); runBarClose(); });
+// (closed by the browser itself (a repeated Esc closes a modal without a cancel event): the same, unanswered)
+// (a close event is queued: one from runBarClose's own close() can arrive after the bar is shown again, as the note)
+runBarEl.addEventListener("close", () => { if (!runBarEl.open && !runBarEl.hidden) runBarClose(); });
 {
   const b = $("#rballow");
   const press = () => { if (rbReq?.open) rbReq.pressed = { req: rbReq.id, rev: revOf(rbReq.doc) }; };
