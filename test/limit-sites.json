@@ -414,6 +414,11 @@
   "owner": "engine arith (kernel metering)",
   "reason": "test code: the kernel metering's pinned units, Stop poll counts and unwinding tests (an accounting meter with no bound, saturation checks of the unit helpers); refuses nothing itself"
  },
+ "engine/arith/src/crt.rs :: the_setup_charges_its_twin :: let top = [u64::MAX - 82, u64::MAX - 58, u64::MAX - 94, (1 << 62) + 135]; #0": {
+  "class": "none",
+  "owner": "engine arith (kernel metering)",
+  "reason": "test code: the CRT setup's charge against its data-free twin on primes above 2^63 (u64::MAX less a constant is a prime, not a bound); refuses nothing itself"
+ },
  "engine/arith/src/invdiv.rs :: recip :: let num = (((!d) as $W) << BITS) | (<$L>::MAX as $W); #0": {
   "class": "none",
   "owner": "engine arithmetic (division)",
@@ -2529,6 +2534,31 @@
   "class": "none",
   "owner": "engine arith (big-integer wire decoder)",
   "reason": "test code: the big-integer decoder's correctness, allocation and Stop tests; refuses nothing itself"
+ },
+ "engine/arith/tests/crt_stop.rs :: a_stop_in_the_setup_charges_the_prefix :: for primes in [Primes::new().take(9).collect::<Vec<u64>>(), vec![2, 3, 5, 7, 11, 13], vec![u64::MAX - 58, u64::MAX - 82, u64::MAX - 94]] { #0": {
+  "class": "none",
+  "owner": "engine arith (kernel metering)",
+  "reason": "test code: the CRT setup's charge and Stop prefixes on primes above 2^63 (u64::MAX less a constant is a prime, not a bound); refuses nothing itself"
+ },
+ "engine/arith/tests/estimate_u64.rs :: zero_factors_and_saturated_terms :: assert_eq!(size_product(&[0, usize::MAX, usize::MAX]), 0); #0": {
+  "class": "none",
+  "owner": "engine arith (kernel metering)",
+  "reason": "test code: the work estimate's models in u64 at sizes past 32 bits (saturation and zero-factor checks of size_product and a model); refuses nothing itself"
+ },
+ "engine/arith/tests/estimate_u64.rs :: zero_factors_and_saturated_terms :: assert_eq!(size_product(&[usize::MAX, usize::MAX, 0]), 0); #0": {
+  "class": "none",
+  "owner": "engine arith (kernel metering)",
+  "reason": "test code: the work estimate's models in u64 at sizes past 32 bits (saturation and zero-factor checks of size_product and a model); refuses nothing itself"
+ },
+ "engine/arith/tests/estimate_u64.rs :: zero_factors_and_saturated_terms :: assert_eq!(u.0[Family::ModArith as usize], u64::MAX); #0": {
+  "class": "none",
+  "owner": "engine arith (kernel metering)",
+  "reason": "test code: the work estimate's models in u64 at sizes past 32 bits (saturation and zero-factor checks of size_product and a model); refuses nothing itself"
+ },
+ "engine/arith/tests/estimate_u64.rs :: zero_factors_and_saturated_terms :: let u = cyclic_model(usize::MAX, 1, 1, 1, 2, true, 5); #0": {
+  "class": "none",
+  "owner": "engine arith (kernel metering)",
+  "reason": "test code: the work estimate's models in u64 at sizes past 32 bits (saturation and zero-factor checks of size_product and a model); refuses nothing itself"
  },
  "engine/arith/tests/nmod_poll_count.rs :: metering_polls_stop_at_least_as_often :: let mut full = Meter::accounting(u64::MAX); #0": {
   "class": "none",
