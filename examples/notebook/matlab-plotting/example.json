@@ -1,0 +1,16 @@
+{
+ "title": "Plotting gallery (MATLAB)",
+ "summary": "Line styles, subplots, bars, scatter, contours, surfaces, meshes, 3-D curves and colormaps.",
+ "tags": [
+  "plots",
+  "figures"
+ ],
+ "level": "intro",
+ "main": "main.ipynb",
+ "files": [
+  "main.ipynb"
+ ],
+ "mode": "matlab",
+ "author": "Sagebrush",
+ "license": "MIT"
+}
