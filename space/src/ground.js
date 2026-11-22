@@ -1,20 +1,23 @@
 // The ground: a space laid out on the floor you stand on, instead of in the air. Each object stands on a post with its
-// middle at eye height, so you read it standing in front of it, as you would a poster.
+// middle a little below eye height, so you read it standing in front of it, as you would a poster; the links between
+// objects run along the floor, from the foot of one post to the foot of the other (main.js).
 //   - A room (roomlayout.js) is a grandstand: its first level of calls in a row on the floor, and each row behind it
 //     on a terrace a step higher, with stairs up to it, so from the door you see over the rows in front to the ones
 //     behind. You go deeper into the code by walking up. Its imports have a smaller stand on the left, and what isn't
 //     linked one on the right.
 //   - Any other space is laid out flat: its plan (position2d, the space seen from above) on the floor.
-//   - An object placed with a position (as an agent places its plots) keeps its spot and its height above eye level.
+//   - An object placed with a position (as an agent places its plots) keeps its spot; one placed higher than the rest
+//     stands on a mound as high as that, with a slope up to it from the front, so you walk up to it rather than fly.
 // groundPlan returns each object's place and the terraces' blocks; supportAt says how high the ground is at a point,
 // which is what you stand on (main.js walks on it, xr.js too).
 import { sizeOf } from "./sizes.js";
 
 export const EYE = 8; // (an eye above the floor: 1.6 m at 5 units a metre)
+export const SIGN = 7; // (an object's middle above what it stands on: 1.4 m, read looking a little down)
 export const STEP = 1; // (the highest step you walk up without jumping: 20 cm)
 const ROW_D = 8, LEVEL_GAP = 3, FLAT_Z = 1.4;
-// (an object's middle above what it stands on: at eye height, or higher for a tall one, so it clears the floor)
-export const standY = (h) => Math.max(EYE, h / 2 + 1.2);
+// (an object's middle above what it stands on: at SIGN, or higher for a tall one, so it clears the floor)
+export const standY = (h) => Math.max(SIGN, h / 2 + 1.2);
 
 export function groundPlan(nodes, { room = false, P2 = null } = {}) {
   return room && nodes.some((n) => n.ground) ? roomPlan(nodes) : flatPlan(nodes, P2);
@@ -23,7 +26,14 @@ export function groundPlan(nodes, { room = false, P2 = null } = {}) {
 // (an object an agent placed: where it said, its height kept relative to eye height)
 export function placedOnGround(nd) {
   const [x, y, z] = nd.position, [, h] = sizeOf(nd);
-  return [x, Math.max(standY(h), EYE + y), z];
+  return [x, Math.max(standY(h), SIGN + y), z];
+}
+// (under an object higher than it would stand: a mound as high as that, with a slope up from its front, about 20°)
+export function moundFor(nd, p) {
+  const [w, h] = sizeOf(nd), rise = p[1] - standY(h);
+  if (rise < 0.4) return [];
+  const x0 = p[0] - w / 2 - 1.2, x1 = p[0] + w / 2 + 1.2, back = p[2] - 3, front = p[2] + 2.5;
+  return [{ x0, x1, z0: back, z1: front, y: rise }, { x0, x1, z0: front, z1: front + rise * 2.7, y: rise, ramp: true }];
 }
 
 // (the plan, spread out so that neighbours are a couple of metres apart at least: room to walk between them, which a
@@ -37,6 +47,7 @@ function flatPlan(nodes, P2) {
     else if (Array.isArray(n.position)) P.set(placedOnGround(n), 3 * i);
     else P.set([0, standY(h), 0], 3 * i);
   });
+  const blocks = nodes.flatMap((n, i) => (planned.includes(i) ? [] : moundFor(n, [P[3 * i], P[3 * i + 1], P[3 * i + 2]])));
   if (planned.length > 1) {
     const near = planned.map((i) => {
       let d = Infinity;
@@ -46,7 +57,7 @@ function flatPlan(nodes, P2) {
     const median = near[near.length >> 1], k = median > 0 && median < ROOM ? Math.min(3, ROOM / median) : 1;
     for (const i of planned) { P[3 * i] *= k; P[3 * i + 2] *= k; }
   }
-  return { P, blocks: [] };
+  return { P, blocks };
 }
 
 function roomPlan(nodes) {
@@ -81,8 +92,9 @@ function roomPlan(nodes) {
     rows.forEach((r, t) => {
       const h = Math.max(...r.ns.map((n) => sizeOf(n)[1]));
       if (t > 0) {
-        // (high enough that this row clears the one in front of it; stairs up from behind that one)
-        const rise = (prevH + h) / 2 + 0.6, depth = Math.max(ROW_D, rise * 1.6 + 4) + (r.level ? LEVEL_GAP : 0); // (stairs no steeper than 32°)
+        // (about half as high as the rows are tall: the rows behind show over the ones in front, without a tall
+        //  stand; stairs up from behind the row in front)
+        const rise = Math.max(1.5, (prevH + h) * 0.3 + 0.5), depth = Math.max(ROW_D, rise * 1.6 + 4) + (r.level ? LEVEL_GAP : 0); // (stairs no steeper than 32°)
         const z1 = z - depth, n = Math.ceil(rise / STEP), top = z - 1.5, bottom = z1 + 2.5, tread = (top - bottom) / n;
         for (let j = 1; j < n; j++) fronts.push([top - j * tread, y + (rise * j) / n]);
         fronts.push([bottom, y + rise]);
@@ -100,9 +112,14 @@ function roomPlan(nodes) {
   return { P, blocks };
 }
 
-// (how high the ground is at (x, z): the highest block there, or the floor)
+// (how high the ground is at (x, z): the highest block there, or the floor; a ramp (`ramp`) rises from nothing at its
+//  front (z1) to `y` at its back)
 export function supportAt(blocks, x, z, floor = 0) {
   let y = floor;
-  for (const b of blocks) if (x >= b.x0 && x <= b.x1 && z >= b.z0 && z <= b.z1 && b.y > y) y = b.y;
+  for (const b of blocks) {
+    if (x < b.x0 || x > b.x1 || z < b.z0 || z > b.z1) continue;
+    const t = b.ramp ? floor + (b.y - floor) * (b.z1 - z) / (b.z1 - b.z0) : b.y;
+    if (t > y) y = t;
+  }
   return y;
 }

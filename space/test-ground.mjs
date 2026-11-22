@@ -45,6 +45,9 @@ ok(geo.every(([, y, , , h, g]) => y - h / 2 >= g + 0.5), "every object stands cl
 ok(geo.every(([, y, , , h, g, post]) => post || y - h / 2 - g <= 0.3), "and on its post");
 const overlap = geo.some((a, i) => geo.some((b, j) => j > i && Math.abs(a[0] - b[0]) < (a[3] + b[3]) / 2 - 0.05 && Math.abs(a[1] - b[1]) < (a[4] + b[4]) / 2 - 0.05 && Math.abs(a[2] - b[2]) < 0.5));
 ok(!overlap, "no two objects overlap");
+// (the links on the floor: every point of their ribbons on the ground, at most a step above it)
+const off = await ev(`(() => { const f = whitespace.floorLinks, a = f.geometry.attributes.position; let lo = Infinity, hi = -Infinity; for (let k = 0; k < a.count; k += 7) { const d = a.getY(k) - whitespace.groundAt(a.getX(k), a.getZ(k)); lo = Math.min(lo, d); hi = Math.max(hi, d); } return [f.visible, lo, hi]; })()`);
+ok(off[0] && off[1] > -0.01 && off[2] < 1.2, "the links run along the floor", off);
 if (!(await ev(`whitespace.walking`))) { await key("g"); await key("g", false); }
 ok(await ev(`whitespace.walking`), "walking");
 // (in front of the main stand, facing it: W walks up its stairs)
@@ -87,6 +90,11 @@ ok(await until(`whitespace.grounded && whitespace.floorY === 0 && whitespace.obj
 await ev(`(() => { const s = document.querySelector('#space'); s.value = 'demo.space.json'; s.onchange(); return true; })()`);
 ok(await until(`whitespace.space?.title?.startsWith('A whitespace') && whitespace.terraces === 0`, 10000), "another space: flat on the floor");
 ok(await ev(`whitespace.objects.every((o) => o.position.y - o.children[0].geometry.parameters.height / 2 > 0.5)`), "everything above the floor");
+// (a mound under an object placed high, with a slope up from its front: ground.js)
+const { moundFor, supportAt } = await import("./src/ground.js");
+const mound = moundFor({ kind: "code", size: [4, 4, 0.2] }, [0, 10, 0]);
+const at = (z) => supportAt(mound, 0, z);
+ok(mound.length === 2 && Math.abs(at(-1) - 3) < 1e-9 && at(20) === 0 && at(5) > 0 && at(5) < 3 && at(4) > at(6), "an object placed high stands on a mound, with a slope up to it", mound);
 ok(errors.length === 0, "no page errors", errors.slice(0, 3));
 console.log(failures ? `${failures} FAILED` : "all passed");
 process.exit(failures ? 1 : 0);

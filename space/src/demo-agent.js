@@ -116,11 +116,12 @@ print(json.dumps({"n": len(pts), "gens": [[str(g[0]), str(g[1])] for g in gens],
     const primes = PRIMES.filter((p) => info.N % p !== 0);
     const center = api.positionOf(plotNode() ?? { position: [0, 0, 0] });
     const found = [];
-    // (an arc of small plots behind the curve, one per prime, each made where it stands)
+    // (an arc of small plots behind the curve, one per prime, each made where it stands: every other one in a second
+    //  row, further back and a little higher, where the ground rises to it)
     for (const [k, p] of primes.entries()) {
       if (stopped) return null;
-      const ang = -1.15 + (2.3 * k) / Math.max(1, primes.length - 1), R = 17;
-      const pos = [center.x + Math.sin(ang) * R, center.y + 1.5 + (k % 2) * 5.4, center.z - Math.cos(ang) * R * 0.75 - 4 - (k % 2) * 1.5];
+      const ang = -1.15 + (2.3 * k) / Math.max(1, primes.length - 1), tier = k % 2, R = 17 + tier * 8;
+      const pos = [center.x + Math.sin(ang) * R, center.y + tier * 3, center.z - Math.cos(ang) * R * 0.75 - 4];
       const nd = api.nodes().find((n) => n.id === `agent:mod${p}`) ?? api.place({ id: `agent:mod${p}`, kind: "code", figure: true, title: `${curve} mod ${p}`, position: pos, size: [4.2, 4.6, 0.15], text: "", lang: "sage" });
       fig.say(`mod ${p}…`, 3000);
       await fig.moveTo(api.positionOf(nd).clone().add({ x: 0, y: 3.2, z: 2.5 }), api.eye(), 450);

@@ -15,7 +15,7 @@ import { highlight, editor, codeRuns } from "./code.js";
 import { run, interrupt, sceneObject, SCENE } from "./run.js";
 import { sizeOf } from "./sizes.js";
 import { treeRoom, resolveImport } from "./treeroom.js";
-import { groundPlan, placedOnGround, supportAt as blockAt, EYE, STEP } from "./ground.js";
+import { groundPlan, placedOnGround, moundFor, supportAt as blockAt, EYE, SIGN, STEP } from "./ground.js";
 // (the languages whose files are entered: by their names)
 const CODE = { py: "python", sage: "python", rs: "rust", js: "js", mjs: "js", cjs: "js", jsx: "js", ts: "js", mts: "js", cts: "js", tsx: "js" };
 const codeOf = (p) => CODE[/\.([a-z]+)$/i.exec(String(p))?.[1]?.toLowerCase()] ?? null;
@@ -103,25 +103,39 @@ function placeGround() {
 // (`layout: "floating"`), a space of 3D plots, say, which are seen from all sides.
 let groundPref = (() => { try { return localStorage.getItem("whitespace:layout") !== "float"; } catch { return true; } })();
 const onGround = () => groundPref && space?.layout !== "floating";
-// (the terraces a room's stands rise on: blocks of floor, one mesh)
+// (the ground's shape: a room's terraces and stairs, the mounds under objects placed high, and their slopes; blocks of
+//  floor and ramps, a mesh of each)
 let blocks = [], terraces = null;
 const terraceMat = new THREE.MeshStandardMaterial({ roughness: 0.95 });
 function paintTerraces() { terraceMat.color.set(T.fg !== "#1f2328" ? 0x232c38 : 0xd3dae4); }
+// (a ramp's shape: a unit block whose top falls from 1 at its back (-z) to 0 at its front (+z))
+const WEDGE = (() => {
+  const g = new THREE.BoxGeometry(1, 1, 1).translate(0, 0.5, 0), a = g.attributes.position;
+  for (let k = 0; k < a.count; k++) if (a.getY(k) > 0.5) a.setY(k, 0.5 - a.getZ(k));
+  g.computeVertexNormals();
+  return g;
+})();
 function buildTerraces() {
-  if (terraces) { scene.remove(terraces); terraces.dispose(); terraces = null; }
+  if (terraces) { scene.remove(terraces); for (const m of terraces.children) m.dispose(); terraces = null; }
   if (!blocks.length) return;
-  terraces = new THREE.InstancedMesh(UNIT_BOX, terraceMat, blocks.length);
+  terraces = new THREE.Group();
   terraces.name = "terraces";
   const m = new THREE.Matrix4(), q = new THREE.Quaternion(), v = new THREE.Vector3(), sc = new THREE.Vector3();
-  blocks.forEach((b, k) => terraces.setMatrixAt(k, m.compose(v.set((b.x0 + b.x1) / 2, b.y / 2, (b.z0 + b.z1) / 2), q, sc.set(b.x1 - b.x0, b.y, b.z1 - b.z0))));
-  terraces.computeBoundingSphere();
+  for (const ramp of [false, true]) {
+    const bs = blocks.filter((b) => !!b.ramp === ramp);
+    if (!bs.length) continue;
+    const mesh = new THREE.InstancedMesh(ramp ? WEDGE : UNIT_BOX, terraceMat, bs.length);
+    bs.forEach((b, k) => mesh.setMatrixAt(k, m.compose(v.set((b.x0 + b.x1) / 2, ramp ? 0 : b.y / 2, (b.z0 + b.z1) / 2), q, sc.set(b.x1 - b.x0, b.y, b.z1 - b.z0))));
+    mesh.computeBoundingSphere();
+    terraces.add(mesh);
+  }
   terraces.visible = onGround();
   scene.add(terraces);
 }
-// (how high the ground is where you are: a terrace, or the floor)
+// (how high the ground is where you are: a terrace, a mound, or the floor)
 const groundAt = (x, z) => (onGround() && terraces?.visible ? blockAt(blocks, x, z, floorY) : floorY);
 // (what you can stand on, and point at to go to: the floor, and the terraces)
-const walkable = () => (terraces?.visible ? [ground, terraces] : [ground]);
+const walkable = () => (terraces?.visible ? [ground, ...terraces.children] : [ground]);
 
 // ---------------------------------------------------------------- objects
 const hue = (s) => { let h = 0; for (const c of String(s)) h = (h * 31 + c.charCodeAt(0)) >>> 0; return (h % 360) / 360; };
@@ -495,7 +509,7 @@ function stepLandmarks() {
 // (everything a space made on the GPU is freed with it: rooms come and go with every Enter and Back. The glyphs'
 //  shared shapes and the arrows' head stay)
 function dispose(obj) {
-  const shared = new Set(glyphGeo.values()).add(HEAD).add(POST).add(FOOT).add(UNIT_BOX);
+  const shared = new Set(glyphGeo.values()).add(HEAD).add(POST).add(FOOT).add(UNIT_BOX).add(WEDGE);
   obj.traverse((m) => {
     if (m.geometry && !shared.has(m.geometry) && !m.isSprite) m.geometry.dispose(); // (sprites share three's one quad)
     for (const mat of [].concat(m.material ?? [])) { if (mat.userData.shared) continue; if (mat.map) { mat.map.userData.gone = true; mat.map.dispose(); } mat.dispose(); }
@@ -506,8 +520,9 @@ function clear() {
   for (const o of objects) { scene.remove(o); dispose(o); }
   for (const l of landmarks) { scene.remove(l.sprite); dispose(l.sprite); }
   if (edgeLines) { scene.remove(edgeLines); dispose(edgeLines); }
+  if (floorEdges) { scene.remove(floorEdges); dispose(floorEdges); }
   if (arrowHeads) { scene.remove(arrowHeads); arrowHeads.material.dispose(); arrowHeads.dispose(); }
-  objects = []; pickables = []; edgeLines = null; landmarks = []; arrowHeads = null;
+  objects = []; pickables = []; edgeLines = null; floorEdges = null; landmarks = []; arrowHeads = null;
 }
 
 // Arrows, in a space whose links have a direction (`directed`: a room's calls and imports): each link runs from the
@@ -530,7 +545,7 @@ function exitDist(i, dx, dy) {
 const EDGE_COLOR = { out: new THREE.Color(0xe8590c), in: new THREE.Color(0x1c7ed6) };
 function edgeColors() {
   if (!edgeLines) return;
-  const pairs = edgeLines.userData.pairs, kinds = edgeLines.userData.kinds, col = edgeLines.geometry.attributes.color;
+  const pairs = edgeLines.userData.pairs, kinds = edgeLines.userData.kinds, col = edgeLines.geometry.attributes.color, fcol = floorEdges?.geometry.attributes.color;
   const base = new THREE.Color(T.edge), bg = new THREE.Color(T.bg), c = new THREE.Color();
   const sel = selected === null ? -1 : space.nodes.findIndex((n) => n.id === selected);
   pairs.forEach(([i, j], e) => {
@@ -538,9 +553,11 @@ function edgeColors() {
     // (a use, not a call: fainter, when nothing selected marks it)
     if (i !== sel && j !== sel && kinds[e] === "uses") c.lerp(bg, 0.45);
     col.setXYZ(2 * e, c.r, c.g, c.b); col.setXYZ(2 * e + 1, c.r, c.g, c.b);
+    if (fcol) for (let k = e * RIBBON_V; k < (e + 1) * RIBBON_V; k++) fcol.setXYZ(k, c.r, c.g, c.b);
     if (arrowHeads) arrowHeads.setColorAt(e, c);
   });
   col.needsUpdate = true;
+  if (fcol) { fcol.needsUpdate = true; floorEdges.material.opacity = sel >= 0 ? 0.95 : 0.75; }
   if (arrowHeads?.instanceColor) arrowHeads.instanceColor.needsUpdate = true;
   edgeLines.material.opacity = sel >= 0 || space.directed ? Math.max(T.edgeOpacity, 0.55) : T.edgeOpacity;
 }
@@ -548,7 +565,13 @@ function edgeColors() {
 function place(P) {
   positions = P;
   objects.forEach((o, i) => o.position.set(P[3 * i], P[3 * i + 1], P[3 * i + 2]));
-  if (edgeLines) {
+  placeGround();
+  // (on the ground, the links run along the floor; in the air, or while the objects move, straight between them)
+  const onFloor = !!floorEdges && onGround() && !morph;
+  if (edgeLines) edgeLines.visible = !onFloor;
+  if (floorEdges) floorEdges.visible = onFloor;
+  if (onFloor) routeFloorEdges(P);
+  else if (edgeLines) {
     const a = edgeLines.geometry.attributes.position, m = new THREE.Matrix4(), q = new THREE.Quaternion(), up = new THREE.Vector3(0, 1, 0);
     const A = new THREE.Vector3(), B = new THREE.Vector3(), d = new THREE.Vector3(), one = new THREE.Vector3(1, 1, 1);
     edgeLines.userData.pairs.forEach(([i, j], e) => {
@@ -573,8 +596,57 @@ function place(P) {
     if (arrowHeads) arrowHeads.instanceMatrix.needsUpdate = true;
   }
   if (landmarks.length) placeLandmarks();
-  placeGround();
   placePosts();
+}
+// Links on the floor: a flat ribbon from the foot of one object's post to the foot of the other's, draped over the
+// terraces and slopes between them (a few samples along the way), with its arrowhead on the floor, pointing in.
+const RIBBON_SEGS = 24, RIBBON_V = RIBBON_SEGS * 6, RIBBON_W = 0.09;
+let floorEdges = null;
+function buildFloorEdges(pairs) {
+  const geo = new THREE.BufferGeometry(), n = Math.max(1, pairs.length) * RIBBON_V;
+  geo.setAttribute("position", new THREE.BufferAttribute(new Float32Array(n * 3), 3));
+  geo.setAttribute("color", new THREE.BufferAttribute(new Float32Array(n * 3), 3));
+  floorEdges = new THREE.Mesh(geo, new THREE.MeshBasicMaterial({ vertexColors: true, transparent: true, opacity: 0.75, depthWrite: false, side: THREE.DoubleSide, polygonOffset: true, polygonOffsetFactor: -2, polygonOffsetUnits: -2 }));
+  floorEdges.frustumCulled = false;
+  floorEdges.renderOrder = 1;
+  floorEdges.visible = false;
+  scene.add(floorEdges);
+}
+function routeFloorEdges(P) {
+  const a = floorEdges.geometry.attributes.position, pts = [], m = new THREE.Matrix4(), q = new THREE.Quaternion(), d = new THREE.Vector3();
+  const lift = 0.06, headScale = new THREE.Vector3(1.8, 1.8, 1.8), B = new THREE.Vector3();
+  edgeLines.userData.pairs.forEach(([i, j], e) => {
+    let ax = P[3 * i], az = P[3 * i + 2], bx = P[3 * j], bz = P[3 * j + 2];
+    const len = Math.hypot(bx - ax, bz - az), ux = len > 1e-6 ? (bx - ax) / len : 0, uz = len > 1e-6 ? (bz - az) / len : 0;
+    // (from beside the first foot to short of the second, where the head is)
+    const s = Math.min(0.7, len * 0.2), t = Math.min(arrowHeads ? 1.6 : 0.7, len * 0.3);
+    ax += ux * s; az += uz * s; bx -= ux * t; bz -= uz * t;
+    pts.length = 0;
+    // (each point on the highest ground near it, so the ribbon goes over a step's edge rather than into it)
+    const hx = (bx - ax) / RIBBON_SEGS / 2, hz = (bz - az) / RIBBON_SEGS / 2;
+    for (let k = 0; k <= RIBBON_SEGS; k++) {
+      const x = ax + (bx - ax) * k / RIBBON_SEGS, z = az + (bz - az) * k / RIBBON_SEGS;
+      pts.push([x, Math.max(groundAt(x, z), groundAt(x - hx, z - hz), groundAt(x + hx, z + hz)) + lift, z]);
+    }
+    const px = -uz * RIBBON_W, pz = ux * RIBBON_W;
+    let v = e * RIBBON_V;
+    for (let k = 0; k < RIBBON_SEGS; k++) {
+      const [x0, y0, z0] = pts[k], [x1, y1, z1] = pts[k + 1];
+      for (const [x, y, z] of [[x0 - px, y0, z0 - pz], [x0 + px, y0, z0 + pz], [x1 + px, y1, z1 + pz], [x0 - px, y0, z0 - pz], [x1 + px, y1, z1 + pz], [x1 - px, y1, z1 - pz]]) a.setXYZ(v++, x, y, z);
+    }
+    if (arrowHeads) {
+      const [x9, y9, z9] = pts[RIBBON_SEGS], [x8, y8, z8] = pts[RIBBON_SEGS - 1];
+      d.set(x9 - x8, y9 - y8, z9 - z8);
+      if (d.lengthSq() < 1e-9) d.set(ux, 0, uz);
+      d.normalize();
+      // (the head's tip a little past the ribbon's end, lying on the floor)
+      B.set(x9, y9 + 0.12, z9).addScaledVector(d, 1.2);
+      q.setFromUnitVectors(new THREE.Vector3(0, 1, 0), d);
+      arrowHeads.setMatrixAt(e, m.compose(B, q, headScale));
+    }
+  });
+  a.needsUpdate = true;
+  if (arrowHeads) arrowHeads.instanceMatrix.needsUpdate = true;
 }
 // (on the ground, each object on its post, down to what is under it; none while it moves between layouts)
 function placePosts() {
@@ -644,6 +716,7 @@ async function load(name, data = null, again = false, opts = {}) {
   edgeLines.userData.kinds = kinds;
   scene.add(edgeLines);
   if (space.directed) buildArrows(pairs);
+  buildFloorEdges(pairs);
   for (const n of nodes) (n._out = []), (n._in = []);
   for (const [i, j] of pairs) (nodes[i]._out.push(nodes[j]), nodes[j]._in.push(nodes[i]));
   const t0 = performance.now();
@@ -1378,13 +1451,16 @@ function placeNode(nd) {
   //  space as the floating layout's, which is what the ground's is made from)
   if (onGround()) {
     const [x, y, z] = nd.position;
-    nd.position = [x, y - EYE, z];
+    nd.position = [x, y - SIGN, z];
   }
   const P = new Float64Array(P3.length + 3);
   P.set(P3); P.set(nd.position, P3.length);
   P3 = P;
   const Q = new Float64Array(PG.length + 3);
   Q.set(PG); Q.set(placedOnGround(nd), PG.length);
+  // (placed high: a mound under it, and a slope up)
+  const mound = moundFor(nd, placedOnGround(nd));
+  if (mound.length) { blocks.push(...mound); buildTerraces(); }
   PG = Q;
   place(onGround() ? PG : P3);
   appearing.push({ o, t0: performance.now() });
@@ -2022,6 +2098,7 @@ window.whitespace = {
   get grounded() { return onGround(); },
   setGround: (on) => setGround(!!on),
   get terraces() { return blocks.length; },
+  get floorLinks() { return floorEdges; },
   get walking() { return deskWalk; },
   get feet() { return feetY(); },
   xr,

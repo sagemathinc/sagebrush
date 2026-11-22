@@ -24,7 +24,7 @@ npm run serve        # http://127.0.0.1:8080/
 - **Keys:** `B` goes back to where you were, and `H` shows everything.
 - **Run all:** runs every object's code, one after another (the button shows which, and stops it).
 - **Theme:** light by default (a white space), dark when your system is; the Theme button switches between Auto, Light and Dark.
-- **On the ground:** everything stands on the floor, each object on a post with its middle at eye height (src/ground.js). **Float** lifts the space into the air, laid out in 3D as before, and **Ground** brings it back down.
+- **On the ground:** everything stands on the floor, each object on a post with its middle a little below eye height (src/ground.js). The links run along the floor, from the foot of one post to the foot of the other, over steps and slopes, with the arrowhead pointing in. An object placed higher than the rest (as the agent places its second row of plots) stands on a mound with a slope up to it. **Float** lifts the space into the air, laid out in 3D as before, and **Ground** brings it back down.
 - **Semantic zoom:** from afar you see the groups' names (directories) over colored blocks; nearer, each object's title; near, its first lines; and on a click, the sharp text.
 
 ## Something to try
