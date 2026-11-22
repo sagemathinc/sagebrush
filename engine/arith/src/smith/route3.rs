@@ -29,12 +29,62 @@
 //! and divisions by delta at their running sizes.
 
 use super::ring_check;
-use crate::cost::{bigdiv_units, biggcd_units, bigmul_units, Family, Local};
+use crate::cost::{bigdiv_units, biggcd_units, bigmul_units, size_product, Family, Local};
 use crate::snf::{Big, Word, Zn, WORD_E};
-use crate::zmat::{limbs, ZMat};
+use crate::zmat::{copy_units, limbs, ZMat};
 use num_integer::Integer;
 use num_traits::{One, Signed, ToPrimitive, Zero};
 use sagebrush_bigint::BigInt;
+
+thread_local! {
+    /// The phases being recorded (their names and units), and the tally at
+    /// the last mark; None when not recording.
+    static PHASES: std::cell::RefCell<Option<(Vec<(String, u64)>, u64)>> = const { std::cell::RefCell::new(None) };
+    /// The side a Compress runs on ("col: ", "left: ").
+    static SIDE: std::cell::Cell<&'static str> = const { std::cell::Cell::new("") };
+}
+
+fn tally_total() -> u64 {
+    crate::cost::tallied().0.iter().fold(0u64, |a, x| a.wrapping_add(*x))
+}
+
+/// Ends a phase: the held counts charged, and when recording its units
+/// since the last mark.
+fn mark(acc: &mut Local, name: &str) {
+    acc.flush();
+    PHASES.with(|p| {
+        if let Some((v, last)) = p.borrow_mut().as_mut() {
+            let t = tally_total();
+            v.push((format!("{}{name}", SIDE.with(|s| s.get())), t.wrapping_sub(*last)));
+            *last = t;
+        }
+    });
+}
+
+fn side(s: &'static str) {
+    SIDE.with(|x| x.set(s));
+}
+
+/// Runs `f` recording route 3's phases (the model's terms' names: a test
+/// hook for the model's killing tests).
+#[doc(hidden)]
+pub fn record_phases<T>(f: impl FnOnce() -> T) -> (T, Vec<(String, u64)>) {
+    // (recording and the side are reset however f ends, a Stop's unwinding
+    // or an error included)
+    struct Reset;
+    impl Drop for Reset {
+        fn drop(&mut self) {
+            PHASES.with(|p| *p.borrow_mut() = None);
+            side("");
+        }
+    }
+    PHASES.with(|p| *p.borrow_mut() = Some((vec![], tally_total())));
+    let reset = Reset;
+    let x = f();
+    let v = PHASES.with(|p| p.borrow_mut().take()).map(|x| x.0).unwrap_or_default();
+    drop(reset);
+    (x, v)
+}
 
 /// An internal error of route 3: a proven invariant not holding.
 fn internal(what: &str) -> String {
@@ -78,6 +128,7 @@ fn col_howell<R: Zn>(ring: &R, mut pool: Vec<Vec<R::T>>, rows: usize, delta: &Bi
         } else {
             let mut nc: Vec<R::T> = p.iter().map(|x| ring.lin(&s, x, &zero, &zero)).collect();
             nc[i] = ring.residue(&g);
+            acc.add(bigdiv_units(limbs(&v), limbs(&g)));
             let q = ring.residue(&(&v / &g));
             let old: Vec<R::T> = p.iter().zip(&nc).map(|(x, y)| ring.sub_mul(x, &q, y)).collect();
             *ops = ops.saturating_add(2 * rows as u64);
@@ -86,6 +137,7 @@ fn col_howell<R: Zn>(ring: &R, mut pool: Vec<Vec<R::T>>, rows: usize, delta: &Bi
         };
         // the Howell generator (delta / g) col: zero at row i, not below
         if &g < delta {
+            acc.add(bigdiv_units(limbs(delta), limbs(&g)));
             let f = ring.residue(&(delta / &g));
             let ex: Vec<R::T> = piv.iter().map(|x| ring.lin(&f, x, &zero, &zero)).collect();
             *ops = ops.saturating_add(rows as u64);
@@ -118,8 +170,13 @@ fn drop_zero<R: Zn>(pool: &mut Vec<Vec<R::T>>, acc: &mut Local) {
 
 /// The lift of the column echelon to the HNF of Lambda over Z: lower
 /// triangular, the pivots g_i on the diagonal, the entries left of each
-/// pivot in [0, g_i).
-fn lift_hnf<R: Zn>(ech: &[(Vec<R::T>, BigInt)], rows: usize, acc: &mut Local) -> ZMat {
+/// pivot in [0, g_i), row by row from the top (col_t -= q col_i, which
+/// leaves the rows above i alone).  The entries below row i are reduced
+/// modulo G as they change: that subtracts multiples of G e_k, in Lambda,
+/// and a lower triangular set of lattice vectors with the diagonal g_i is
+/// a basis of Lambda (its index prod g_i is Lambda's), so every operand
+/// stays below G.
+fn lift_hnf<R: Zn>(ech: &[(Vec<R::T>, BigInt)], rows: usize, g: &BigInt, acc: &mut Local) -> ZMat {
     let mut cols: Vec<Vec<BigInt>> = ech
         .iter()
         .enumerate()
@@ -133,12 +190,18 @@ fn lift_hnf<R: Zn>(ech: &[(Vec<R::T>, BigInt)], rows: usize, acc: &mut Local) ->
             if q.is_zero() {
                 continue;
             }
-            let ci = cols[i].clone();
+            let (head, tail) = cols.split_at_mut(i);
+            let (ct, ci) = (&mut head[t], &tail[0]);
             for (k, ck) in ci.iter().enumerate().skip(i) {
                 if !ck.is_zero() {
                     acc.add(bigmul_units(limbs(&q), limbs(ck)));
-                    let x = &cols[t][k] - &q * ck;
-                    cols[t][k] = x;
+                    let x = &ct[k] - &q * ck;
+                    ct[k] = if k == i {
+                        x
+                    } else {
+                        acc.add(bigdiv_units(limbs(&x), limbs(g)));
+                        x.mod_floor(g)
+                    };
                 }
             }
         }
@@ -195,6 +258,7 @@ fn row_howell<R: Zn>(ring: &R, mut pool: Vec<Vec<R::T>>, k: usize, delta: &BigIn
         } else {
             let mut nr: Vec<R::T> = p.iter().map(|x| ring.lin(&s, x, &zero, &zero)).collect();
             nr[j] = ring.residue(&g);
+            acc.add(bigdiv_units(limbs(&v), limbs(&g)));
             let q = ring.residue(&(&v / &g));
             let old: Vec<R::T> = p.iter().zip(&nr).map(|(x, y)| ring.sub_mul(x, &q, y)).collect();
             *ops = ops.saturating_add(2 * width as u64);
@@ -202,6 +266,7 @@ fn row_howell<R: Zn>(ring: &R, mut pool: Vec<Vec<R::T>>, k: usize, delta: &BigIn
             nr
         };
         if &g < delta {
+            acc.add(bigdiv_units(limbs(delta), limbs(&g)));
             let f = ring.residue(&(delta / &g));
             let ex: Vec<R::T> = piv.iter().map(|x| ring.lin(&f, x, &zero, &zero)).collect();
             *ops = ops.saturating_add(width as u64);
@@ -224,7 +289,7 @@ fn row_howell<R: Zn>(ring: &R, mut pool: Vec<Vec<R::T>>, k: usize, delta: &BigIn
 /// right-hand side `rhs` of each pivot row (None: zero): each pivot row i
 /// with column below `above` sets y at its column to (rhs_i - sum_j H_ij
 /// y_j) / g_i, the sum's divisibility by g_i being the Howell property.
-fn back_substitute<R: Zn>(ring: &R, piv: &[PivotRow<R::T>], above: usize, y: &mut Vec<(usize, R::T)>, rhs: Option<usize>, ops: &mut u64) -> Result<(), String> {
+fn back_substitute<R: Zn>(ring: &R, piv: &[PivotRow<R::T>], above: usize, y: &mut Vec<(usize, R::T)>, rhs: Option<usize>, ops: &mut u64, acc: &mut Local) -> Result<(), String> {
     let zero = ring.residue(&BigInt::zero());
     let one = ring.residue(&BigInt::from(1));
     for p in piv.iter().rev().filter(|p| p.col < above) {
@@ -241,11 +306,11 @@ fn back_substitute<R: Zn>(ring: &R, piv: &[PivotRow<R::T>], above: usize, y: &mu
             }
         }
         let si = R::integer(&s);
+        acc.add(bigdiv_units(limbs(&si), limbs(&p.g)));
         let (q, rem) = si.div_rem(&p.g);
         if !rem.is_zero() {
             return Err(internal("back substitution (the Howell property)"));
         }
-        *ops = ops.saturating_add(1);
         if !q.is_zero() {
             y.push((p.col, ring.residue(&q)));
         }
@@ -261,15 +326,20 @@ pub fn compress(b: &ZMat, j: &[usize]) -> Result<(ZMat, ZMat), String> {
     if j.len() != r {
         return Err(internal("pivot count"));
     }
-    let bj = ZMat::from_rows((0..r).map(|i| j.iter().map(|&c| b.get(i, c).clone()).collect()).collect());
+    let mut acc = Local::new();
+    let all: Vec<usize> = (0..r).collect();
+    let bj = block(b, &all, j, &mut acc);
+    mark(&mut acc, "blocks");
     let (nm, delta, det) = crate::zmat::inverse_det(&bj).ok_or_else(|| internal("pivot columns (B_J singular)"))?;
+    mark(&mut acc, "B_J inverse");
     let n = b.cols;
     let jp: Vec<usize> = (0..n).filter(|c| !j.contains(c)).collect();
-    let bjp = ZMat::from_rows((0..r).map(|i| jp.iter().map(|&cc| b.get(i, cc).clone()).collect()).collect());
+    let bjp = block(b, &all, &jp, &mut acc);
+    mark(&mut acc, "blocks");
     let q = nm.mul(&bjp);
-    let mut acc = Local::new();
+    mark(&mut acc, "Q");
     let g = hnf_modulus(&q, &delta, &det, &mut acc);
-    acc.flush();
+    mark(&mut acc, "G");
     let c = match g.to_u64() {
         Some(e) if e < WORD_E => hnf_ring(&Word { e }, b, &g, &mut acc),
         _ => hnf_ring(&Big::new(&g), b, &g, &mut acc),
@@ -313,8 +383,9 @@ fn hnf_ring<R: Zn>(ring: &R, b: &ZMat, g: &BigInt, acc: &mut Local) -> ZMat {
     acc.add(ring.residue_units(b));
     let pool: Vec<Vec<R::T>> = (0..n).map(|c| (0..r).map(|i| ring.residue(b.get(i, c))).collect()).collect();
     let ech = col_howell(ring, pool, r, g, &mut ops, &mut steps, acc);
-    let c = lift_hnf::<R>(&ech, r, acc);
-    acc.flush();
+    mark(acc, "C echelon");
+    let c = lift_hnf::<R>(&ech, r, g, acc);
+    mark(acc, "lift");
     c
 }
 
@@ -328,8 +399,10 @@ fn kernel_ring<R: Zn>(ring: &R, b: &ZMat, j: &[usize], jp: &[usize], bjp: &ZMat,
     let nc = nm.mul(&c);
     acc.add(ring.residue_units(&q));
     acc.add(ring.residue_units(&nc));
+    mark(acc, "N C");
     let rows: Vec<Vec<R::T>> = (0..r).map(|i| (0..k).map(|t| ring.residue(q.get(i, t))).chain((0..r).map(|t| ring.residue(nc.get(i, t)))).collect()).collect();
     let piv = row_howell(ring, rows, k, delta, &mut ops, &mut steps, acc)?;
+    mark(acc, "H echelon");
     let pivot_of: Vec<Option<usize>> = {
         let mut v = vec![None; k];
         for (m, p) in piv.iter().enumerate() {
@@ -377,10 +450,13 @@ fn kernel_ring<R: Zn>(ring: &R, b: &ZMat, j: &[usize], jp: &[usize], bjp: &ZMat,
     for x in 0..k {
         let lead = match pivot_of[x] {
             None => BigInt::from(1),
-            Some(m) => delta / &piv[m].g,
+            Some(m) => {
+                acc.add(bigdiv_units(limbs(delta), limbs(&piv[m].g)));
+                delta / &piv[m].g
+            }
         };
         let mut y: Vec<(usize, R::T)> = vec![(x, ring.residue(&lead))];
-        back_substitute(ring, &piv, x, &mut y, None, &mut ops)?;
+        back_substitute(ring, &piv, x, &mut y, None, &mut ops, acc)?;
         let mut yi: Vec<(usize, BigInt)> = y.iter().map(|(jj, v)| (*jj, R::integer(v))).collect();
         // (the lead as the integer it is: delta / g can be delta, residue 0)
         yi[0].1 = lead;
@@ -389,16 +465,18 @@ fn kernel_ring<R: Zn>(ring: &R, b: &ZMat, j: &[usize], jp: &[usize], bjp: &ZMat,
     }
     for w in 0..r {
         let mut y: Vec<(usize, R::T)> = vec![];
-        back_substitute(ring, &piv, k, &mut y, Some(k + w), &mut ops)?;
+        back_substitute(ring, &piv, k, &mut y, Some(k + w), &mut ops, acc)?;
         let yi: Vec<(usize, BigInt)> = y.iter().map(|(jj, v)| (*jj, R::integer(v))).collect();
         exact(&yi, Some(w), w, &mut v0, acc)?;
         ring_check(ring, &mut ops, &mut steps, acc);
     }
+    mark(acc, "K and X");
     Ok((v0, c))
 }
 
 /// r independent columns of a full-row-rank B, from its echelon modulo a
-/// word prime (the next prime when one drops the rank).
+/// word prime (the next prime when one drops the rank).  (Tests and the
+/// measurement: the route takes J from its rank profile.)
 #[doc(hidden)]
 pub fn pivot_columns(b: &ZMat) -> Vec<usize> {
     for p in crate::nmod::Primes::new() {
@@ -409,4 +487,189 @@ pub fn pivot_columns(b: &ZMat) -> Vec<usize> {
         }
     }
     unreachable!("full row rank")
+}
+
+/// The block of `a` in `rows` x `cols`, its copy charged.
+fn block(a: &ZMat, rows: &[usize], cols: &[usize], acc: &mut Local) -> ZMat {
+    let mut b = ZMat::zero(rows.len(), cols.len());
+    for (t, &i) in rows.iter().enumerate() {
+        for (u, &j) in cols.iter().enumerate() {
+            b.d[t * cols.len() + u] = a.get(i, j).clone();
+        }
+    }
+    acc.n(Family::Move, copy_units(&b.d));
+    b
+}
+
+/// The rank profile modulo a prime: r, the rows I and the columns J of a
+/// nonzero r-minor modulo p (so of a nonzero minor over Z: I and J are
+/// independent, and r <= rank A).
+fn profile_mod(a: &ZMat, p: u64) -> (Vec<usize>, Vec<usize>) {
+    let (j, i, _) = a.reduce(&crate::nmod::Modulus::new(p)).rref_rows();
+    (i, j)
+}
+
+/// Route 3: the Smith form with transforms of any A (m x n), through its
+/// rank profile, the Compress of both sides to a nonsingular r x r core T,
+/// route 1 or 2 on T, and the blocks combined:
+///
+/// 1. the profile modulo a word prime: rows I and columns J of a nonzero
+///    r-minor, so r <= rank A;
+/// 2. if r < n, Compress(A_I, J) gives V0 = [X | K]; the certificate A K = 0
+///    over Z (on the rows outside I: A_I K = 0 by construction) proves rank
+///    A <= r, every row of A being orthogonal to K's n - r independent
+///    columns.  If it fails, the rank is higher: the next prime is tried
+///    and the larger profile kept.  This ends: with M a fixed nonzero
+///    (rank A)-minor, a prime gives a lower rank only if it divides M, so
+///    at most log2 |M| / 61 primes (all above 2^61) are bad, |M| within
+///    Hadamard's bound;
+/// 3. A' = A X (A if r = n), whose rows I are C (A_I if r = n), nonsingular;
+///    if r < m, Compress(A'^T, I) gives W, U0 = W^T, with U0 A' = [T ; 0] and
+///    T = C_left^T exactly (by construction, no product); else T = A';
+/// 4. U1 T V1 = D_r by route 1 or 2;
+/// 5. V = [X V1 | K] and U = [U1 U0_top ; U0_rest] by blocks (no m x m or
+///    n x n product).
+///
+/// Units: the entry's copy of A and the identities' m^2 + n^2 entries (as
+/// the classical route), before anything can return (r = 0 too); each
+/// profile's reduction and echelon by nmod_mat; the rest by its parts.
+pub(super) fn smith_route3(a: &ZMat) -> Result<super::SmithForm, String> {
+    let (m, n) = (a.rows, a.cols);
+    let mut acc = Local::new();
+    acc.n(Family::Move, copy_units(&a.d).saturating_add(crate::cost::size_product(&[m, m])).saturating_add(crate::cost::size_product(&[n, n])));
+    side("");
+    mark(&mut acc, "entry");
+    sagebrush_interrupt::check_coarse();
+    // the largest profile so far, and the rank whose certificate failed
+    // (a prime no better than that one is not tried again)
+    let mut best: (Vec<usize>, Vec<usize>) = (vec![], vec![]);
+    let mut failed: Option<usize> = None;
+    let mut primes = crate::nmod::Primes::new();
+    let (is, _js, v0) = loop {
+        let p = primes.next().ok_or_else(|| internal("primes (exhausted)"))?;
+        let (i, j) = profile_mod(a, p);
+        if i.len() > best.0.len() {
+            best = (i, j);
+        }
+        let (is, js) = best.clone();
+        let r = is.len();
+        if failed.is_some_and(|f| r <= f) {
+            continue;
+        }
+        if r == 0 {
+            // (rank 0 modulo p: A = 0 is the certificate)
+            acc.n(Family::Move, a.d.len() as u64);
+            if a.d.iter().all(Zero::is_zero) {
+                break (is, js, None);
+            }
+            failed = Some(0);
+            acc.flush();
+            continue;
+        }
+        if r == n {
+            break (is, js, None);
+        }
+        let b = block(a, &is, &(0..n).collect::<Vec<_>>(), &mut acc);
+        mark(&mut acc, "profile");
+        side("col: ");
+        let (v0, _c) = compress(&b, &js)?;
+        side("");
+        // the certificate on the rows outside I (none when r = m)
+        let rest: Vec<usize> = (0..m).filter(|i| !is.contains(i)).collect();
+        if rest.is_empty() {
+            break (is, js, Some((v0, _c)));
+        }
+        let k = block(&v0, &(0..n).collect::<Vec<_>>(), &(r..n).collect::<Vec<_>>(), &mut acc);
+        let ar = block(a, &rest, &(0..n).collect::<Vec<_>>(), &mut acc);
+        acc.flush();
+        let ak = ar.mul(&k);
+        acc.n(Family::Move, ak.d.len() as u64);
+        mark(&mut acc, "certificate");
+        if ak.d.iter().all(Zero::is_zero) {
+            break (is, js, Some((v0, _c)));
+        }
+        failed = Some(r);
+    };
+    // (the profile's units when no column side ran; else nothing)
+    mark(&mut acc, "profile");
+    let r = is.len();
+    if r == 0 {
+        acc.flush();
+        return Ok(super::SmithForm { d: ZMat::zero(m, n), u: ZMat::identity(m), v: ZMat::identity(n), route: super::Route::Hermite, attempts: 0 });
+    }
+    let all_n: Vec<usize> = (0..n).collect();
+    let first_r: Vec<usize> = (0..r).collect();
+    // A' (A X, or A when r = n), and if r < m the left side on A'^T with
+    // J = I (A''s rows I: C, or A_I); else T = A' (C, or A_I)
+    let (w, t) = match (&v0, r < m) {
+        (Some((v0, _)), true) => {
+            let x = block(v0, &all_n, &first_r, &mut acc);
+            acc.flush();
+            let bl = a.mul(&x).transpose();
+            mark(&mut acc, "A X");
+            side("left: ");
+            let (w, cl) = compress(&bl, &is)?;
+            side("");
+            (Some(w), cl.transpose())
+        }
+        (None, true) => {
+            let bl = a.transpose();
+            mark(&mut acc, "A X");
+            side("left: ");
+            let (w, cl) = compress(&bl, &is)?;
+            side("");
+            (Some(w), cl.transpose())
+        }
+        (Some((_, c)), false) => {
+            acc.n(Family::Move, copy_units(&c.d));
+            (None, c.clone())
+        }
+        (None, false) => (None, block(a, &is, &all_n, &mut acc)),
+    };
+    acc.flush();
+    let super::Square::Done(f) = super::nonsingular(&t, usize::MAX)? else { return Err(internal("core (T singular)")) };
+    mark(&mut acc, "core");
+    let attempts = f.attempts;
+    // V = [X V1 | K], U = [U1 U0_top ; U0_rest]
+    // (V0 and U0 are the output's storage, charged at the entry: only the
+    // blocks written are charged here)
+    let v = match v0 {
+        Some((mut v0, _)) => {
+            let x = block(&v0, &all_n, &first_r, &mut acc);
+            acc.flush();
+            let xv = x.mul(&f.v);
+            for i in 0..n {
+                for j in 0..r {
+                    v0.d[i * n + j] = xv.get(i, j).clone();
+                }
+            }
+            acc.n(Family::Move, copy_units(&xv.d));
+            v0
+        }
+        None => f.v,
+    };
+    let u = match w {
+        Some(w) => {
+            // U0 = W^T: its first r rows are W's first r columns, transposed
+            let top = block(&w, &(0..m).collect::<Vec<_>>(), &first_r, &mut acc).transpose();
+            acc.flush();
+            let ut = f.u.mul(&top);
+            let mut u = w.transpose();
+            for i in 0..r {
+                for j in 0..m {
+                    u.d[i * m + j] = ut.get(i, j).clone();
+                }
+            }
+            acc.n(Family::Move, copy_units(&ut.d));
+            u
+        }
+        None => f.u,
+    };
+    let mut d = ZMat::zero(m, n);
+    for i in 0..r {
+        d.d[i * n + i] = f.d.get(i, i).clone();
+    }
+    acc.n(Family::Move, copy_units(&f.d.d).saturating_add(size_product(&[m, n])));
+    mark(&mut acc, "combine");
+    Ok(super::SmithForm { d, u, v, route: super::Route::Hermite, attempts })
 }

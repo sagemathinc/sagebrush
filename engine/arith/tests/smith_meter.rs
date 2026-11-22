@@ -71,8 +71,7 @@ fn smith_units_and_stop_checks() {
     // route 1: word delta (45) and multi-limb delta (bench 12 v = 3, 231 bits);
     // route 2: word delta (D = diag(1, 2, 2): its first attempt fails after
     // an elimination step, so a failed attempt's charge is pinned too) and
-    // multi-limb (bench 12 v = 0); the classical route: singular and
-    // rectangular
+    // multi-limb (bench 12 v = 0); route 3: singular and rectangular
     let cyc_word = z(&[&[3, 8], &[6, 1]]);
     let cyc_big = bench(12, 3);
     let tr_word = z(&[&[2, 0, 0], &[0, 2, -1], &[0, 0, 1]]);
@@ -84,8 +83,8 @@ fn smith_units_and_stop_checks() {
         ("route 1, big delta", &cyc_big, Route::Cyclic),
         ("route 2, word delta", &tr_word, Route::Trailing),
         ("route 2, big delta", &tr_big, Route::Trailing),
-        ("classical, singular", &sing, Route::Classical),
-        ("classical, wide", &wide, Route::Classical),
+        ("route 3, singular", &sing, Route::Hermite),
+        ("route 3, wide", &wide, Route::Hermite),
     ];
     let rows: Vec<(&str, [u64; FAMILIES], u64)> = inputs
         .iter()
@@ -119,8 +118,11 @@ fn smith_units_and_stop_checks() {
         // input's products have multi-limb entries, checked already)
         ("route 2, word delta", [148, 0, 31, 0, 30, 100, 212, 4, 0, 0], 60),
         ("route 2, big delta", [34719, 0, 36537, 0, 1678, 3590, 6409, 82, 0, 0], 164),
-        ("classical, singular", [111, 0, 11, 0, 0, 182, 119, 0, 0, 0], 3),
-        ("classical, wide", [29, 0, 12, 0, 0, 55, 0, 0, 0, 0], 4),
+        // (route 3's checks: the entry's, the profile's, both Compresses'
+        // echelon pivots, rows and solved columns, the products' rows, and
+        // the core's (route 1 here); counted by the route 3 prefix pins)
+        ("route 3, singular", [304, 0, 20, 0, 24, 365, 296, 0, 0, 0], 35),
+        ("route 3, wide", [120, 0, 20, 0, 18, 133, 127, 0, 0, 0], 17),
     ];
     if print {
         for (n, u, c) in &rows {

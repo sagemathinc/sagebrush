@@ -20,8 +20,15 @@ impl Rng {
         z ^ (z >> 31)
     }
 }
+/// A random entry of up to `b` bits (any b >= 1), signed.
 fn e(r: &mut Rng, b: u32) -> BigInt {
-    let x = BigInt::from(r.next() >> (64 - b));
+    let mut x = BigInt::zero();
+    let mut left = b;
+    while left > 0 {
+        let t = left.min(63);
+        x = (x << t as usize) + BigInt::from(r.next() >> (64 - t));
+        left -= t;
+    }
     if r.next() & 1 == 1 {
         -x
     } else {
@@ -203,13 +210,13 @@ fn minors_gcd(b: &ZMat) -> BigInt {
 }
 
 /// G = (Delta / delta) gcd(delta, Q's entries) is a multiple of the index
-/// [Z^r : Lambda] (the gcd of all r-minors; G reads only the minors one
-/// column away from B_J, so it can be a proper multiple, on one row here
-/// 3 times it), equal to it on most rows; and C's determinant is the index.
+/// [Z^r : Lambda] (the gcd of all r-minors) on every row, equal to it on
+/// all but two named rows (G reads only the minors one column away from
+/// B_J, so it can be a proper multiple); and C's determinant is the index.
 #[test]
 fn hnf_modulus_is_the_index_on_small_rows() {
     let mut rg = Rng(13);
-    let (mut rows, mut equal) = (0, 0);
+    let (mut rows, mut proper) = (0, vec![]);
     for &(r, n, rank_bits, plain) in &[(2usize, 4usize, 8u32, true), (3, 5, 6, true), (3, 6, 12, false), (4, 7, 10, false), (2, 2, 9, true), (3, 3, 9, false)] {
         for _ in 0..4 {
             // plain: random rows; else X Y (an index of about |det X|)
@@ -229,14 +236,18 @@ fn hnf_modulus_is_the_index_on_small_rows() {
             let g = hnf_modulus(&q, &delta, &det, &mut Local::new());
             let index = minors_gcd(&b);
             assert!((&g % &index).is_zero(), "G a multiple of the index");
+            if g != index {
+                proper.push((rows, &g / &index));
+            }
             rows += 1;
-            equal += (g == index) as usize;
             let (_, c) = check(&b, &j);
             assert_eq!(zmat::det(&c), index, "det C = the index");
         }
     }
-    eprintln!("G = the index on {equal} of {rows} rows");
-    assert!(rows >= 20 && 4 * equal >= 3 * rows, "G = the index on most rows ({equal} of {rows})");
+    // (seeded rows: G is the index on all but rows 9 and 13, where it is 3
+    // and 2 times it)
+    assert_eq!(rows, 24, "every row reached");
+    assert_eq!(proper, [(9, BigInt::from(3)), (13, BigInt::from(2))], "G / index on the named rows");
 }
 
 /// Compress's units, per family, pinned on four rows: the HNF and the
@@ -266,8 +277,143 @@ fn compress_units_pins() {
         let d: Vec<u64> = (0..t0.0.len()).map(|i| t1.0[i].wrapping_sub(t0.0[i])).collect();
         out.push(d);
     }
-    let pins: [[u64; 10]; 3] = [[242, 0, 22, 0, 28, 154, 305, 0, 0, 0], [1628, 0, 698, 0, 100, 333, 387, 13, 0, 0], [3011, 0, 4359, 0, 544, 428, 458, 110, 0, 0]];
+    let pins: [[u64; 10]; 3] = [[241, 0, 38, 0, 28, 172, 296, 0, 0, 0], [1628, 0, 717, 0, 100, 361, 387, 13, 0, 0], [2982, 0, 4447, 0, 544, 456, 458, 110, 0, 0]];
     for (i, (d, p)) in out.iter().zip(&pins).enumerate() {
         assert_eq!(d[..], p[..], "Compress's units on row {i}");
+    }
+}
+
+/// Route 3 end to end on A, through smith_form: the units and seconds,
+/// checked U A V = D (by blocks on the big thin rows).
+fn route3_full(a: &ZMat) -> (u64, f64, ZMat) {
+    let (f, units, secs) = timed(|| smith_form(a).unwrap());
+    assert_eq!(f.route, sagebrush_arith::smith::Route::Hermite);
+    let (m, n) = (a.rows, a.cols);
+    let r = (0..m.min(n)).take_while(|&i| !f.d.get(i, i).is_zero()).count();
+    if m * n <= 4000 {
+        assert_eq!(f.u.mul(a).mul(&f.v).d, f.d.d, "U A V = D");
+    } else {
+        assert_eq!(f.u.mul(a).mul(&cols(&f.v, 0..r)).d, cols(&f.d, 0..r).d, "U A V = D on V's first r columns");
+        assert!(a.mul(&cols(&f.v, r..n)).d.iter().all(|x| x.is_zero()), "A K = 0");
+    }
+    (units, secs, f.d)
+}
+
+#[test]
+#[ignore]
+fn smith_route3_table() {
+    let mut rg = Rng(17);
+    // (m, n, rank, bits, kind): 0 = X Y, 1 = plain random (delta = Delta as
+    // a rule), 2 = plain with the last row the sum of the first two
+    let rows_: &[(usize, usize, usize, u32, u8)] = &[
+        (8, 8, 7, 16, 0),
+        (16, 16, 15, 16, 0),
+        (24, 24, 23, 16, 0),
+        (32, 32, 31, 16, 0),
+        (40, 40, 39, 16, 0),
+        (48, 48, 47, 16, 0),
+        (24, 24, 12, 16, 0),
+        (32, 32, 16, 16, 0),
+        (40, 40, 30, 16, 0),
+        (16, 18, 16, 16, 0),
+        (32, 34, 32, 16, 0),
+        (48, 50, 48, 16, 0),
+        (20, 14, 14, 16, 0),
+        (200, 8, 8, 16, 0),
+        (8, 200, 8, 16, 0),
+        (1000, 8, 8, 16, 0),
+        (8, 1000, 8, 16, 0),
+        (8, 2000, 8, 16, 0),
+        (8, 8, 7, 16, 2),
+        (16, 16, 15, 2, 2),
+        (16, 16, 15, 16, 2),
+        (16, 18, 16, 4, 1),
+        (16, 18, 16, 16, 1),
+        (24, 26, 24, 16, 1),
+        (18, 16, 16, 16, 1),
+    ];
+    let mut miss = vec![];
+    for &(m, n, rank, bits, kind) in rows_ {
+        let a = match kind {
+            0 => product(&mut rg, m, n, rank, bits),
+            _ => {
+                let mut x: Vec<Vec<BigInt>> = (0..m).map(|_| (0..n).map(|_| e(&mut rg, bits)).collect()).collect();
+                if kind == 2 {
+                    x[m - 1] = x[0].iter().zip(&x[1]).map(|(p, q)| p + q).collect();
+                }
+                ZMat::from_rows(x)
+            }
+        };
+        let (u3, s3, d3) = route3_full(&a);
+        let (g, cu, cs) = timed(|| smith_classical(&a));
+        assert_eq!(g.d.d, d3.d, "the Smith form");
+        let ratio = u3 as f64 / cu as f64;
+        // bar 1 (n >= 16: <= max(classical, F); 8 x 8: <= max(3 classical,
+        // F), F = 1e5 units) and bar 2 (thin shapes: <= 3 classical)
+        let thin = m.min(n) == 8 && m.max(n) > 8;
+        let bar = if thin || m.max(n) <= 8 { 3.0 } else { 1.0 };
+        let ok = (u3 as f64) <= (bar * cu as f64).max(if thin { 0.0 } else { 1e5 });
+        if !ok {
+            miss.push(format!("{m}x{n} r{rank} k{kind}"));
+        }
+        println!("TABLE {m}x{n} r{rank} {bits}b kind{kind}: route 3 {u3} units {s3:.4} s; classical {cu} units {cs:.4} s; {ratio:.3}x (bar {bar}) {}", if ok { "ok" } else { "MISS" });
+    }
+    println!("MISSES {miss:?}");
+}
+
+/// U A V = D with U and V unimodular and D the oracle's (small inputs).
+fn full_check(a: &ZMat) -> sagebrush_arith::smith::SmithForm {
+    let f = smith_form(a).unwrap();
+    let (m, n) = (a.rows, a.cols);
+    assert_eq!((f.u.rows, f.u.cols, f.v.rows, f.v.cols, f.d.rows, f.d.cols), (m, m, n, n, m, n), "shapes");
+    assert_eq!(f.u.mul(a).mul(&f.v).d, f.d.d, "U A V = D");
+    for z in [&f.u, &f.v] {
+        assert!(z.rows == 0 || zmat::det(z).abs().is_one(), "unimodular");
+    }
+    if m * n <= 400 {
+        assert_eq!(f.d.d, smith_classical(a).d.d, "D = the oracle's");
+    }
+    f
+}
+
+#[test]
+fn route3_shapes_and_edges() {
+    use sagebrush_arith::smith::Route;
+    let mut rg = Rng(23);
+    let z = |rows: &[&[i64]]| ZMat::from_rows(rows.iter().map(|r| r.iter().map(|&x| BigInt::from(x)).collect()).collect());
+    // r = 0: zero matrices of every shape, the empty ones included
+    for (m, n) in [(0, 0), (0, 3), (3, 0), (1, 1), (2, 3), (3, 2)] {
+        let f = full_check(&ZMat::zero(m, n));
+        assert_eq!(f.route, Route::Hermite);
+        assert!(f.d.d.iter().all(|x| x.is_zero()));
+    }
+    // r = 1, a zero row or column, m = 1 or n = 1
+    for a in [z(&[&[0, 6, 4]]), z(&[&[0], &[6], &[4]]), z(&[&[2, 4], &[3, 6]]), z(&[&[0, 0, 0], &[1, 2, 3], &[0, 0, 0]]), z(&[&[0, 1, 0], &[0, 2, 0], &[0, 5, 0]]), z(&[&[1, 2, 3], &[2, 4, 6], &[1, 0, 1]]), z(&[&[6, 10, 15], &[4, 8, 12]])] {
+        assert_eq!(full_check(&a).route, Route::Hermite);
+    }
+    // random singular, rank-deficient, wide and tall
+    for &(m, n, rank, bits) in &[(5, 5, 4, 8), (6, 6, 3, 16), (4, 7, 4, 12), (7, 4, 4, 12), (6, 9, 2, 20), (9, 6, 5, 20), (3, 12, 3, 30), (12, 3, 3, 30), (10, 10, 9, 70)] {
+        let a = product(&mut rg, m, n, rank, bits);
+        assert_eq!(full_check(&a).route, Route::Hermite);
+    }
+    // nonsingular square input keeps routes 1 and 2
+    let a = product(&mut rg, 5, 5, 5, 8);
+    assert_ne!(smith_form(&a).unwrap().route, Route::Hermite);
+}
+
+/// The rank retry: the first prime p divides the second row's pivot, so the
+/// profile modulo p has rank 1; the certificate A K = 0 fails on that row,
+/// the next prime gives rank 2, and D = diag(1, p).
+#[test]
+fn route3_rank_retry_on_a_bad_prime() {
+    let p = sagebrush_arith::nmod::Primes::new().next().unwrap();
+    let pb = BigInt::from(p);
+    for a in [
+        ZMat::from_rows(vec![vec![1.into(), 0.into(), 0.into()], vec![0.into(), pb.clone(), 0.into()]]),
+        ZMat::from_rows(vec![vec![1.into(), 0.into(), 0.into()], vec![0.into(), pb.clone(), 0.into()], vec![1.into(), pb.clone(), 0.into()]]),
+        ZMat::from_rows(vec![vec![pb.clone(), 0.into()], vec![0.into(), 0.into()], vec![0.into(), 1.into()]]),
+    ] {
+        let f = full_check(&a);
+        assert_eq!((f.d.get(0, 0), f.d.get(1, 1)), (&BigInt::from(1), &pb), "the full rank found");
     }
 }

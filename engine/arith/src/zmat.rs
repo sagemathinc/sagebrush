@@ -678,6 +678,13 @@ pub fn det_bareiss(a: &ZMat) -> BigInt {
 }
 
 /// log2 of the Hadamard bound (min of row and column versions).
+/// log2 of each row's and each column's Euclidean norm, rounded up (route
+/// 3's model bounds an r x r block's minor from them).
+#[doc(hidden)]
+pub fn norm_bits(a: &ZMat) -> (Vec<f64>, Vec<f64>) {
+    (a.row_norm_log2(), a.col_norm_log2())
+}
+
 fn hadamard_log2(a: &ZMat) -> f64 {
     let r: f64 = a.row_norm_log2().iter().sum();
     let c: f64 = a.col_norm_log2().iter().sum();
@@ -1442,12 +1449,23 @@ pub fn hermite_cyclic_holds(a: &ZMat, h: &[BigInt], d: &BigInt) -> bool {
 /// underestimates, never refuses) and no zero row.
 #[doc(hidden)]
 pub fn inverse_model(a: &ZMat, lx: usize, fold: u64, le: Option<usize>) -> Units {
-    let n = a.rows;
+    if a.rows == 0 {
+        return Units::default();
+    }
+    let red: u64 = a.d.iter().map(|x| if x.to_i64().is_some() { 1 } else { reduce_units(x) }).fold(0, u64::saturating_add);
+    inverse_model_sizes(a.rows, hadamard_log2(a), red, lx, fold, le)
+}
+
+/// [`inverse_model`] from sizes alone (route 3's model of an inverse it
+/// does not hold yet): n, the Hadamard bound's log2 `h`, and `red`, the
+/// units of one reduction of the matrix modulo a word.
+#[doc(hidden)]
+pub fn inverse_model_sizes(n: usize, h: f64, red: u64, lx: usize, fold: u64, le: Option<usize>) -> Units {
     let mut u = Units::default();
     if n == 0 {
         return u;
     }
-    let target = hadamard_log2(a).max(0.0) + 2.0;
+    let target = h.max(0.0) + 2.0;
     let mut primes: Vec<u64> = vec![];
     let mut bits = 0.0f64;
     for p in Primes::new() {
@@ -1459,7 +1477,6 @@ pub fn inverse_model(a: &ZMat, lx: usize, fold: u64, le: Option<usize>) -> Units
     }
     let pc = primes.len() as u64;
     let n2 = size_product(&[n, n]);
-    let red: u64 = a.d.iter().map(|x| if x.to_i64().is_some() { 1 } else { reduce_units(x) }).fold(0, u64::saturating_add);
     // (the echelon's count depends on the prime only through its batch
     // length: one count per distinct batch, times its primes)
     let mut batches: Vec<(usize, u64)> = vec![];

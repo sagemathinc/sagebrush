@@ -307,7 +307,7 @@ fn outputs_are_pinned() {
         (Route::Cyclic, 2, 1276465326252702338),
         (Route::Trailing, 5, 767491620189235518),
         (Route::Cyclic, 3, 2239573289118338536),
-        (Route::Classical, 0, 2007014360717136981),
+        (Route::Hermite, 1, 486201329492306343),
     ];
     assert_eq!(got, want);
 }
@@ -425,7 +425,11 @@ fn the_cost_and_the_estimate_before_the_run() {
     assert!(s.beside_route2.is_none(), "route 2 needs n > 2");
     let b = z(&[&[3, 8, 1], &[6, 1, 2], &[1, 1, 7]]);
     assert!(estimate::stage1(&b).beside_route2.is_some());
-    for x in [wide, z(&[&[0, 0], &[1, 2]]), ZMat::zero(0, 0)] {
-        assert_eq!(estimate::stage1(&x), estimate::Estimate { units: None, beside_route2: None });
+    // route 3's inputs (non-square, a zero row) get its generic estimate,
+    // and none beside it; an empty input none
+    for x in [wide, z(&[&[0, 0], &[1, 2]])] {
+        let e = estimate::stage1(&x);
+        assert!(e.units.is_some_and(|u| u.0.iter().sum::<u64>() > 0) && e.beside_route2.is_none(), "{e:?}");
     }
+    assert_eq!(estimate::stage1(&ZMat::zero(0, 0)), estimate::Estimate { units: None, beside_route2: None });
 }
