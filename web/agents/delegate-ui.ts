@@ -16,9 +16,6 @@ import { AgentError } from "../workspace/agent-pair";
 import { chipOf, currentOf, DELEGATE_LIMITS, DELEGATE_TEXT, type DelegateDoc, type DelegateTasks } from "./delegate";
 import { MergeError, clearPicks, closeRest, isDone, loadPicks, mergedParams, newRecord, prepare, recordOf, revise, run, savePicks, unpicked, unresolved, type FileMerge, type MergeIO, type MergeRecord, type Picks, type Pinned } from "./delegate-merge";
 
-/** Whether a delegated task may run code: not until SEC has cleared the agent's runner for tasks (#1612). */
-export const DELEGATE_RUNS = false;
-
 export const DELEGATE_UI_TEXT = {
   switchOn: "Delegate: on",
   switchOff: "Delegate: off",
@@ -46,6 +43,15 @@ export const DELEGATE_UI_TEXT = {
   start: "Start",
   starting: "Starting…",
   tasks: "Tasks",
+  steer: "Stop and tell Claude…",
+  steerSend: "Stop and send",
+  steerNote: "What should Claude know? It stops now, then carries on from where it was with this.",
+  resume: "Resume",
+  resumeNote: "Resume with a note…",
+  resumeNoteHint: "What should Claude know when it carries on?",
+  stopping: "Stopping…",
+  resuming: "Resuming…",
+  cancel: "Cancel",
   skipped: (n: number) => (n === 1 ? "One event of this task couldn't be shown here." : `${n} events of this task couldn't be shown here.`),
   proposal: (n: number, base: string, commit: string) => `Proposal: ${n === 1 ? "1 file" : `${n} files`} changed · base ${base.slice(0, 7)} · proposal ${commit.slice(0, 7)}`,
   merge: "Merge",
@@ -241,9 +247,9 @@ export function mountDelegate(h: DelegateHost) {
     if (here) addDoc(here);
     const more = el("input", { id: "delegate-add", placeholder: "Add a path, e.g. work/notes.ipynb" });
     more.onkeydown = (e) => { if (e.key === "Enter") { e.preventDefault(); addDoc(more.value); more.value = ""; } };
-    // (#1612, ruled Nov 22 2026: off, and said, until the agent's runner for a task is cleared (DELEGATE_RUNS); then it
-    //  starts as the thread's own May run code, the grant's)
-    const mayRun = DELEGATE_RUNS && h.mayRun();
+    // (#1612, ruled Nov 22 2026: off, and said, unless the agent runs a task's code (its delegate.run); there it starts as
+    //  the thread's own May run code, the grant's)
+    const runs = D.runsOffered(), mayRun = runs && h.mayRun();
     const run = el("input", { type: "checkbox", id: "delegate-run", disabled: !mayRun, checked: mayRun });
     const msg = el("p", { className: "msg", role: "alert" });
     const start = el("button", { type: "submit", className: "primary", textContent: T.start });
@@ -254,7 +260,7 @@ export function mountDelegate(h: DelegateHost) {
       el("label", {}, "Title", title),
       el("div", { className: "field" }, el("span", {}, "Documents"), docs, more),
       el("div", { className: "field" }, el("span", {}, "Where"), el("label", {}, el("input", { type: "radio", checked: true, name: "where" }), " ", T.where), el("small", { textContent: T.whereNote })),
-      el("div", { className: "field" }, el("label", {}, run, " ", T.run), el("small", { textContent: !DELEGATE_RUNS ? T.runsUnavailable : h.mayRun() ? T.runNote : T.runNotGranted })),
+      el("div", { className: "field" }, el("label", {}, run, " ", T.run), el("small", { textContent: !runs ? T.runsUnavailable : h.mayRun() ? T.runNote : T.runNotGranted })),
       msg,
       el("menu", {}, el("button", { type: "button", value: "cancel", textContent: "Cancel", onclick: () => dlg.close() }), " ", start));
     // (a brief drafted by the agent from the Pair chat shown (chat.brief): only when it drafts them, there is such a
@@ -562,6 +568,59 @@ export function mountDelegate(h: DelegateHost) {
     return block;
   }
 
+  // ---- Stop and tell Claude… (a working task) and Resume (an interrupted one), with a note for its next turn
+  //      (tasks.stop, then tasks.resume {task, note}): one box for the task shown, kept while it is, so what is typed
+  //      survives the view being drawn again; one action at a time
+  let steer: { task: string; box: HTMLElement; note: HTMLTextAreaElement; form: HTMLElement; send: HTMLButtonElement; msg: HTMLElement; stopB: HTMLButtonElement; resumeB: HTMLButtonElement; noteB: HTMLButtonElement; mode: "stop" | "resume"; busy: boolean } | null = null;
+  function steerBox(id: string) {
+    if (steer?.task === id) return steer;
+    const note = el("textarea", { id: "delegate-steer-note", rows: 3 }) as HTMLTextAreaElement;
+    const send = el("button", { type: "button", className: "primary" }) as HTMLButtonElement;
+    const cancel = el("button", { type: "button", textContent: T.cancel }) as HTMLButtonElement;
+    const msg = el("p", { className: "msg", role: "alert" });
+    const form = el("div", { className: "steer-form", hidden: true }, note, el("div", { className: "row" }, cancel, " ", send));
+    const stopB = el("button", { type: "button", id: "delegate-steer", textContent: T.steer }) as HTMLButtonElement;
+    const resumeB = el("button", { type: "button", id: "delegate-resume", textContent: T.resume }) as HTMLButtonElement;
+    const noteB = el("button", { type: "button", id: "delegate-resume-note", textContent: T.resumeNote }) as HTMLButtonElement;
+    const s = { task: id, box: el("div", { className: "steer" }, el("div", { className: "row" }, stopB, " ", resumeB, " ", noteB), form, msg), note, form, send, msg, stopB, resumeB, noteB, mode: "stop" as "stop" | "resume", busy: false };
+    const openForm = (mode: "stop" | "resume") => { s.mode = mode; s.msg.textContent = ""; form.hidden = false; render(); note.focus(); };
+    stopB.onclick = () => openForm("stop");
+    noteB.onclick = () => openForm("resume");
+    cancel.onclick = () => { form.hidden = true; s.msg.textContent = ""; render(); };
+    const act = async (f: () => Promise<unknown>) => {
+      if (s.busy) return;
+      s.busy = true;
+      s.msg.textContent = "";
+      render();
+      try { await f(); } catch (err) { s.msg.textContent = (err as Error)?.message ?? String(err); } finally { s.busy = false; render(); }
+    };
+    resumeB.onclick = () => void act(() => D.resume(id));
+    send.onclick = () => void act(async () => {
+      const text = note.value;
+      if (!text.trim()) throw new Error(DELEGATE_TEXT.noteEmpty);
+      if (s.mode === "stop" && D.task(id)?.entry.status === "working") await D.stop(id);
+      await D.resume(id, text);
+      note.value = "";
+      form.hidden = true;
+    });
+    steer = s;
+    return s;
+  }
+  function steerFor(id: string, status: string): HTMLElement | null {
+    if (D.state() !== "on" || (status !== "working" && status !== "interrupted" && !(steer?.task === id && steer.busy))) return null;
+    const s = steerBox(id), working = status === "working";
+    // (a working task: Stop and tell Claude…; an interrupted one: Resume, and Resume with a note… where the agent takes
+    //  notes; the box's send says what it will do; everything waits while one action runs)
+    s.stopB.hidden = !working || !D.notesOffered() || !s.form.hidden;
+    s.resumeB.hidden = working || !s.form.hidden;
+    s.noteB.hidden = working || !D.notesOffered() || !s.form.hidden;
+    s.send.textContent = s.busy ? (s.mode === "stop" && working ? T.stopping : T.resuming) : s.mode === "stop" && working ? T.steerSend : T.resume;
+    s.note.placeholder = s.mode === "stop" ? T.steerNote : T.resumeNoteHint;
+    for (const b of [s.stopB, s.resumeB, s.noteB, s.send]) s.busy ? b.setAttribute("aria-disabled", "true") : b.removeAttribute("aria-disabled");
+    s.note.readOnly = s.busy;
+    return s.box;
+  }
+
   function render() {
     shown?.sync();
     const s = D.state(), offered = s !== "unoffered";
@@ -592,6 +651,8 @@ export function mountDelegate(h: DelegateHost) {
     const head = el("div", { className: "task-head" }, back, el("h2", { textContent: t.entry.title }), el("span", { className: `chip ${t.entry.status}`, textContent: chipText(t) }));
     const parts: Node[] = [head];
     if (t.reason) parts.push(el("p", { className: "reason", textContent: t.reason }));
+    const sb = steerFor(t.entry.task, t.entry.status);
+    if (sb) parts.push(sb);
     if (readErr) parts.push(el("p", { className: "msg", role: "alert", textContent: T.unreadable }));
     for (const e of t.thread.entries) if (e.kind === "turn") parts.push(h.turnNode(t.thread, e));
     if (t.skipped) parts.push(el("p", { className: "skipped", textContent: T.skipped(t.skipped) }));

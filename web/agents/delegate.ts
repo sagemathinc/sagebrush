@@ -16,7 +16,7 @@
 // - A proposal's files (ProposalSource): only the proposal commit named and its base, each file's bytes checked against
 //   the blob id tasks.diff gave for that path at that commit (its git blob id, recomputed here).
 import { AgentError, type AgentPairing } from "../workspace/agent-pair";
-import { BRIEF_FEATURE, DELEGATE_FEATURE, TaskClient } from "../workspace/tasks-client";
+import { BRIEF_FEATURE, DELEGATE_FEATURE, RUN_FEATURE, TaskClient } from "../workspace/tasks-client";
 import { TASK_LIMITS, TASK_RESULTS, blobId, briefResult, contentBytes, taskLog, taskNotice, type DiffFile, type TaskEntry, type TaskEvent, type TaskLogEntry, type TaskResult } from "../workspace/tasks-schema";
 import type { MergedParams } from "./delegate-merge";
 import { apply, newThread, type Thread, type TurnEvent } from "../workspace/agent-chat/events";
@@ -52,6 +52,9 @@ export const DELEGATE_TEXT = {
   noteEmpty: "Write what you'd like changed first",
   noteLong: "The note is too long: at most 16 KB",
   askMoved: "The task has moved on since this proposal: open its latest proposal",
+  noteOld: "This agent can't take a note with Resume: it needs sagebrush-agent 0.8.13 or later. Resume the task without a note, or update the agent.",
+  notWorking: "The task isn't working any more: nothing was stopped",
+  notInterrupted: "The task isn't stopped: there's nothing to resume",
   docLong: (path: string) => `${path} is too large to send with your note (at most 4 MB)`,
 } as const;
 
@@ -201,6 +204,56 @@ export class DelegateTasks {
     const r = TASK_RESULTS["tasks.merged"](await this.client().request("tasks.merged", params));
     await this.refresh().catch(() => {});
     return r;
+  }
+
+  /** Whether a task may run code on this agent (its hello lists delegate.run: 0.8.13 and later, only where a task's
+   * notebooks can run), with the switch on. */
+  runsOffered(): boolean { return this.state() === "on" && !!this.p?.hello?.features?.includes(RUN_FEATURE); }
+  /** Whether this agent takes a note with Resume (sagebrush-agent 0.8.13 and later, by its hello's version), with the
+   * switch on; an older one refuses the note (bad_request), said as noteOld. */
+  notesOffered(): boolean {
+    const v = /^(\d+)\.(\d+)\.(\d+)/.exec(this.p?.hello?.agent.version ?? "");
+    return this.state() === "on" && !!v && [+v[1], +v[2], +v[3]].reduce((c, x, i) => (c !== 0 ? c : x - [0, 8, 13][i]), 0) >= 0;
+  }
+
+  /** Stop a working task (tasks.stop): its turn and its run stop, and it is interrupted (its chip at once). Only with the
+   * switch on, only a task working now. */
+  async stop(id: string): Promise<string> {
+    const s = this.state();
+    if (s !== "on") throw new AgentError("forbidden", s === "turning-off" ? DELEGATE_TEXT.turningOff : DELEGATE_TEXT.off);
+    if (this.task(id)?.entry.status !== "working") throw new AgentError("stale", DELEGATE_TEXT.notWorking);
+    const r = TASK_RESULTS["tasks.stop"](await this.client().request("tasks.stop", { task: id }));
+    const now = this.task(id);
+    if (now) { now.entry = { ...now.entry, status: r.status as TaskEntry["status"], question: false }; this.o.changed(); }
+    void this.refresh().catch(() => {});
+    return r.status;
+  }
+  /** Resume an interrupted task (tasks.resume), with the person's note for its next turn if `note` is given: trimmed,
+   * not empty, at most noteBytes, and only to an agent that takes one (notesOffered; one that refuses it anyway,
+   * bad_request, is said as noteOld). Only with the switch on; its chip moves on at once. */
+  async resume(id: string, note?: string): Promise<string> {
+    const s = this.state();
+    if (s !== "on") throw new AgentError("forbidden", s === "turning-off" ? DELEGATE_TEXT.turningOff : DELEGATE_TEXT.off);
+    if (this.task(id)?.entry.status !== "interrupted") throw new AgentError("stale", DELEGATE_TEXT.notInterrupted);
+    let params: { task: string; note?: string } = { task: id };
+    if (note !== undefined) {
+      const n = note.trim();
+      if (!n) throw new AgentError("bad_request", DELEGATE_TEXT.noteEmpty);
+      if (new TextEncoder().encode(n).length > DELEGATE_LIMITS.noteBytes) throw new AgentError("too_large", DELEGATE_TEXT.noteLong);
+      if (!this.notesOffered()) throw new AgentError("unsupported", DELEGATE_TEXT.noteOld);
+      params = { task: id, note: n };
+    }
+    let r: { status: string };
+    try {
+      r = TASK_RESULTS["tasks.resume"](await this.client().request("tasks.resume", params));
+    } catch (e) {
+      if (note !== undefined && e instanceof AgentError && e.code === "bad_request") throw new AgentError("unsupported", DELEGATE_TEXT.noteOld);
+      throw e;
+    }
+    const now = this.task(id);
+    if (now) { now.entry = { ...now.entry, status: r.status as TaskEntry["status"], question: false }; this.o.changed(); }
+    void this.refresh().catch(() => {});
+    return r.status;
   }
 
   /** Whether this agent drafts briefs (its hello lists chat.brief), with the switch on. */

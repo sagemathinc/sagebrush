@@ -14,6 +14,8 @@ import { AgentError, type AgentPairing } from "./agent-pair";
 export const DELEGATE_FEATURE = "delegate.1";
 /** Delegate briefs: chat.brief, a draft of a task's brief from a Pair chat, sent only to an agent that lists it. */
 export const BRIEF_FEATURE = "chat.brief";
+/** A Delegate task may run code here (sagebrush-agent 0.8.13 and later, only where a task's notebooks can run). */
+export const RUN_FEATURE = "delegate.run";
 export const TASK_METHODS: readonly string[] = ["tasks.start", "tasks.list", "tasks.get", "tasks.diff", "tasks.file", "tasks.merged", "tasks.close", "tasks.ask", "tasks.stop", "tasks.revoke", "tasks.resume", "tasks.answer"];
 export const TASK_REQUESTS = Object.freeze({ pending: 8, frameBytes: 4 * 2 ** 20, timeoutMs: 30_000, longMs: 120_000, long: ["tasks.start", "tasks.merged"] as readonly string[] });
 

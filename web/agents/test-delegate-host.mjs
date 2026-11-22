@@ -11,8 +11,9 @@ import { blobId } from "../workspace/tasks-schema.ts";
 const enc = new TextEncoder();
 const hex = (n) => Array.from(crypto.getRandomValues(new Uint8Array(n)), (b) => b.toString(16).padStart(2, "0")).join("");
 
-export function delegateHost({ features = ["delegate.1", "chat.resume"], pageSize = 50 } = {}) {
-  const H = { staleCloses: 0, got: [], grant: null, sock: null, closed: false, tasks: new Map(), hold: new Set(), fail: new Map(), held: [], pageSize, changes: [], asks: [] };
+export function delegateHost({ features = ["delegate.1", "chat.resume"], pageSize = 50, version = "2.0" } = {}) {
+  // (H.features and H.version: what its next hello says; H.noNotes: an agent before 0.8.13, which refuses a Resume's note)
+  const H = { staleCloses: 0, got: [], grant: null, sock: null, closed: false, tasks: new Map(), hold: new Set(), fail: new Map(), held: [], pageSize, changes: [], asks: [], features, version, noNotes: false, resumes: [] };
   const send = (m) => H.sock?.send(JSON.stringify(m));
   const entryOf = (t) => ({ task: t.task, title: t.title, status: t.status, target: "local", run: t.run, round: t.round, seq: t.log.length, proposal: t.proposal, question: false, updated: t.updated });
   H.emit = (id, event) => {
@@ -120,6 +121,27 @@ export function delegateHost({ features = ["delegate.1", "chat.resume"], pageSiz
         H.emit(t.task, { type: "task_status", status: "working" });
         return;
       }
+      case "tasks.stop": {
+        // (as the agent: a working task's turn stopped, the task interrupted)
+        if (!t) return refuse(m.id, "not_found");
+        if (t.status !== "working") return refuse(m.id, "stale", "the task isn't working");
+        answer(m.id, { status: "interrupted" });
+        H.emit(t.task, { type: "task_status", status: "interrupted" });
+        return;
+      }
+      case "tasks.resume": {
+        // (only from interrupted; its note (0.8.13): text of 1 to 64 KiB, kept for the resumed turn; an older agent
+        //  refuses any field but task as bad_request)
+        if (!t) return refuse(m.id, "not_found");
+        const extra = Object.keys(p).filter((k) => k !== "task" && !(k === "note" && !H.noNotes));
+        if (extra.length) return refuse(m.id, "bad_request", `unknown field: ${extra[0]}`);
+        if ("note" in p && (typeof p.note !== "string" || enc.encode(p.note).length > 64 * 1024)) return refuse(m.id, "bad_request");
+        if (t.status !== "interrupted") return refuse(m.id, "stale", "the task isn't interrupted");
+        H.resumes.push({ task: t.task, ...("note" in p ? { note: p.note } : {}) });
+        answer(m.id, { status: "working" });
+        H.emit(t.task, { type: "task_status", status: "working" });
+        return;
+      }
       case "tasks.revoke": {
         if (!t) return refuse(m.id, "not_found");
         H.emit(t.task, { type: "task_status", status: "closed" });
@@ -157,7 +179,7 @@ export function delegateHost({ features = ["delegate.1", "chat.resume"], pageSiz
         const m = JSON.parse(String(data));
         H.got.push(m);
         if (m.method === undefined && calls.has(m.id)) { calls.get(m.id)(m); calls.delete(m.id); return; }
-        if (m.method === "hello") return answer(m.id, { protocol: 1, agent: { name: "Claude Code", client: "claude-code", version: "2.0" }, wants: { write: true, run: false }, session: "SECRET", features });
+        if (m.method === "hello") return answer(m.id, { protocol: 1, agent: { name: "Claude Code", client: "claude-code", version: H.version }, wants: { write: true, run: false }, session: "SECRET", features: H.features });
         if (m.method === "grant.changed") {
           const g = Array.isArray(m.params?.folders) ? m.params : null;
           // (the switch off: the tasks' turns end, interrupted, not closed)

@@ -327,6 +327,10 @@
   #task-view .task-head .link, #task-view .proposal-card { border: 0; background: none; color: var(--accent2); text-decoration: underline; cursor: pointer; padding: 0; }
   #task-view .proposal-card { display: block; margin: 16px auto; padding: 10px 12px; border: 1px solid var(--line); border-radius: 10px; background: var(--card); text-decoration: none; text-align: left; width: 100%; }
   #task-view .reason, #task-view .skipped { color: var(--muted); font-size: 13px; }
+  #task-view .steer { margin: 10px 0; }
+  #task-view .steer .row { display: flex; gap: 8px; flex-wrap: wrap; }
+  #task-view .steer-form textarea { width: 100%; box-sizing: border-box; margin: 6px 0; font: inherit; }
+  #task-view .steer .msg:empty { display: none; }
   #task-view .msg, .delegate-dlg .msg { color: var(--bad); }
   #tasks { display: flex; flex-direction: column; gap: 2px; margin-top: 10px; }
   #tasks .tasks-h { font-size: 12px; color: var(--muted); padding: 4px 9px; text-transform: uppercase; letter-spacing: .04em; }
@@ -389,7 +393,7 @@
     </div>
     <div id="help" hidden>
       <b>Run this on your computer</b>, then open the link it prints. <a href="/agents/connect/">Learn more</a>
-      <pre>npx -y https://agents.sagebrush.cloud/agents/sagebrush-agent-0.8.12.tgz</pre>
+      <pre>npx -y https://agents.sagebrush.cloud/agents/sagebrush-agent-0.8.13.tgz</pre>
     </div>
     <div id="log">
       <div id="log-tools" hidden><button id="mirror-copy" type="button" hidden></button><button id="copychat" type="button" title="This chat as Markdown: what you wrote, the agent's answers, a line for each thing it did, and links to its files">⧉ Copy chat</button></div>

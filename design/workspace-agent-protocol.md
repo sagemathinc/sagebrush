@@ -292,7 +292,7 @@ Every method, field, bound and error below is closed: anything not listed is ref
 | `tasks.ask` | `{task, proposal: commit, seq, note, current: [{path, kind, content}]}` | `{status, round}` | `stale` if moved; `current` only the task's own paths |
 | `tasks.stop` | `{task}` | `{status}` | stops the turn and the run; the task becomes `interrupted` |
 | `tasks.revoke` | `{task}` | `{status}` | `closed`; the grant is void, and queued work is dropped |
-| `tasks.resume` | `{task}` | `{status}` | only from `interrupted`, with the frozen grant |
+| `tasks.resume` | `{task, note?}` | `{status}` | only from `interrupted`, with the frozen grant; `note` (0.8.13): text of at most 64 KiB, for the resumed turn only |
 | `tasks.answer` (M2) | `{task, qid, revision, answer_id, text}` | `{accepted: bool, current: bool}` | §6.4 |
 
 **`tasks.merged`'s two outcomes:**

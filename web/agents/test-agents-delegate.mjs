@@ -29,7 +29,8 @@ let server;
 const sitePort = await startServe(() => (server = spawn("python3", [join(here, "..", "serve.py"), "0"], { stdio: ["ignore", "pipe", "pipe"] }))).port;
 const site = `http://127.0.0.1:${sitePort}`;
 
-const H = delegateHost();
+// (an agent of 0.8.13 or later, which takes a note with Resume)
+const H = delegateHost({ version: "0.8.13" });
 const nb = JSON.stringify({ cells: [{ cell_type: "code", id: "c1", metadata: {}, source: ["1+1"], outputs: [] }], metadata: {}, nbformat: 4, nbformat_minor: 5 });
 const A = await H.addTask({ title: "Factor the polynomial", base: { "work/a.ipynb": nb, "work/notes.txt": "one\n" }, proposal: { "work/a.ipynb": nb.replace("1+1", "2+2"), "work/notes.txt": "one\ntwo\n" } });
 const B = await H.addTask({ title: "Plot it" });
@@ -269,6 +270,48 @@ try {
   await P.until(`!document.querySelector('dialog.sheet[open]') && !!document.querySelector('#task-view')?.offsetParent`);
   ok((await P.ev(`document.querySelector('#task-view h2').textContent`)) === "Tidy these notes" && (await P.composer()) === "", "started: the new task's view shown, the composer emptied");
 
+  // ---- Stop and tell Claude… (a working task): Stop, then Resume with the person's note (tasks.stop, tasks.resume
+  //      {task, note}); an empty note is said and nothing sent; an agent that refuses notes (before 0.8.13) is said so,
+  //      and the stopped task is resumed plainly
+  const tid = start.task ?? [...H.tasks.values()].find((t) => t.title === "Tidy these notes")?.task;
+  const steerUi = () => P.ev(`(() => { const q = (s) => document.querySelector(s); const shown = (s) => !!q(s) && !q(s).hidden && !!q(s).offsetParent; return { stop: shown('#delegate-steer'), resume: shown('#delegate-resume'), resumeNote: shown('#delegate-resume-note'), form: shown('#task-view .steer-form'), send: q('#task-view .steer-form .primary')?.textContent ?? null, msg: q('#task-view .steer .msg')?.textContent ?? '', chip: q('#task-view .task-head .chip')?.textContent ?? null }; })()`);
+  let sv = await steerUi();
+  ok(sv.stop && !sv.resume && !sv.form && sv.chip === "Working", "a working task: Stop and tell Claude… offered", sv);
+  await P.ev(`document.querySelector('#delegate-steer').click()`);
+  sv = await steerUi();
+  ok(sv.form && sv.send === "Stop and send" && !sv.stop, "Stop and tell Claude…: the note box, its button Stop and send", sv);
+  const s0 = H.got.length;
+  await P.ev(`document.querySelector('#task-view .steer-form .primary').click()`);
+  await sleep(200);
+  sv = await steerUi();
+  ok(/Write what you'd like changed first/.test(sv.msg) && !H.got.slice(s0).some((m) => m.method === "tasks.stop" || m.method === "tasks.resume"), "an empty note: said, and nothing sent (the task isn't stopped)", sv);
+  // (typed, then the view drawn again by the task's own events: what is typed stays)
+  await P.ev(`(() => { const t = document.querySelector('#delegate-steer-note'); t.value = 'Use the second dataset instead.'; t.dispatchEvent(new Event('input')); })()`);
+  H.emit(tid, { type: "turn_started" });
+  await sleep(300);
+  ok((await P.ev(`document.querySelector('#delegate-steer-note')?.value`)) === "Use the second dataset instead.", "what is typed in the note stays while the task's view is drawn again");
+  await P.ev(`document.querySelector('#task-view .steer-form .primary').click()`);
+  await hostUntil(() => H.resumes.length === 1);
+  await P.until(`document.querySelector('#task-view .task-head .chip')?.textContent === 'Working' && document.querySelector('#task-view .steer-form').hidden`, 10000).catch(() => {});
+  const sOrder = H.got.slice(s0).filter((m) => m.method === "tasks.stop" || m.method === "tasks.resume").map((m) => m.method + (m.params.note !== undefined ? ":" + m.params.note : ""));
+  ok(JSON.stringify(sOrder) === JSON.stringify(["tasks.stop", "tasks.resume:Use the second dataset instead."]) && H.resumes[0].note === "Use the second dataset instead.", "Stop and send: the task stopped, then resumed with the note as typed; working again, the box closed", { order: sOrder, sv: await steerUi() });
+  // (an agent before 0.8.13: the note refused, said, and the task, stopped, resumed without it)
+  H.noNotes = true;
+  await P.ev(`document.querySelector('#delegate-steer').click()`);
+  await P.ev(`(() => { const t = document.querySelector('#delegate-steer-note'); t.value = 'One more thing.'; })()`);
+  await P.ev(`document.querySelector('#task-view .steer-form .primary').click()`);
+  await P.until(`/sagebrush-agent 0.8.13 or later/.test(document.querySelector('#task-view .steer .msg')?.textContent ?? '')`, 10000).catch(() => {});
+  sv = await steerUi();
+  ok(/needs sagebrush-agent 0.8.13 or later/.test(sv.msg) && sv.chip === "Interrupted" && H.resumes.length === 1, "an agent that refuses notes: said so plainly; the task stays stopped, nothing resumed", sv);
+  await P.ev(`document.querySelector('#task-view .steer-form button:not(.primary)').click()`);
+  sv = await steerUi();
+  ok(sv.resume && !sv.form, "the stopped task: Resume offered", sv);
+  await P.ev(`document.querySelector('#delegate-resume').click()`);
+  await hostUntil(() => H.resumes.length === 2);
+  await P.until(`document.querySelector('#task-view .task-head .chip')?.textContent === 'Working'`, 10000).catch(() => {});
+  ok(H.resumes[1].note === undefined && (await steerUi()).chip === "Working", "Resume: tasks.resume without a note; working again", H.resumes[1]);
+  H.noNotes = false;
+
   // ---- the switch off: the running tasks closed first (ticked), Delegate… disabled while it turns off, then the host told
   await P.ev(`document.querySelector('#delegate-switch').click()`);
   await P.until(`!!document.querySelector('#delegate-also-close')`);
@@ -289,6 +332,24 @@ try {
   const order = H.got.filter((m) => m.method === "tasks.revoke" || m.method === "grant.changed").map((m) => m.method === "grant.changed" ? (m.params.delegate ? "on" : "off") : "revoke").slice(-3);
   ok(order.join() === "revoke,revoke,off" && u.tasks === null && !u.view && u.log, "off: the chosen tasks closed, then the host told (no delegate); no tasks shown, back to the chats", { order, u });
   ok([...H.tasks.values()].filter((t) => running.includes(t.title)).every((t) => t.status === "closed"), "the ticked tasks are closed at the host");
+  // ---- an agent that runs a task's code (delegate.run, 0.8.13 on Linux): May run code offered, and ticked by default
+  //      where the thread may run code (#1612's ruling)
+  H.features = [...H.features, "delegate.run"];
+  await P.navigate(`${site}/agents/?pair=123-456&port=${H.port}`);
+  await P.until(`[...document.querySelectorAll('.sbag-dlg button')].some((b) => b.textContent === 'Connect')`, 30000);
+  await P.ev(`[...document.querySelectorAll('.sbag-dlg button')].find((b) => b.textContent === 'Connect').click()`);
+  await P.until(`[...document.querySelectorAll('.sbag-dlg button')].some((b) => b.textContent === 'Allow')`, 30000);
+  await P.ev(`(() => { const d = [...document.querySelectorAll('.sbag-dlg')].at(-1); const all = [...d.querySelectorAll('label')].find((l) => l.textContent.startsWith('Everything')).querySelector('input'); all.checked = true; all.dispatchEvent(new Event('change')); [...d.querySelectorAll('button')].find((b) => b.textContent === 'Allow').click(); })()`);
+  await P.until(`document.querySelector('#connect').textContent === 'Connected' && !!document.querySelector('#delegate-switch')?.offsetParent`);
+  await P.ev(`document.querySelector('#delegate-switch').click()`);
+  await P.until(`!!document.querySelector('dialog.delegate-dlg[open]')`);
+  await P.ev(`[...document.querySelectorAll('dialog.delegate-dlg[open] button')].find((b) => b.textContent === 'Turn on').click()`);
+  await P.until(`document.querySelector('#delegate-switch').textContent === 'Delegate: on'`);
+  await P.ev(`document.querySelector('#delegate').click()`);
+  await P.until(`!!document.querySelector('dialog.sheet[open]')`);
+  const runs = await P.ev(`(() => { const r = document.querySelector('dialog.sheet[open] #delegate-run'); return { disabled: r.disabled, checked: r.checked, note: r.closest('.field').querySelector('small').textContent, threadRuns: !!document.querySelector('.sbag-bar .chip')?.title.includes('may run code') }; })()`);
+  ok(runs.threadRuns && !runs.disabled && runs.checked && runs.note === "Fixed for this task once it starts.", "an agent that offers delegate.run: May run code can be chosen, and starts ticked as the thread may run code", runs);
+  await P.ev(`[...document.querySelectorAll('dialog.sheet[open] button')].find((b) => b.textContent === 'Cancel').click()`);
   ok(P.errors.length === 0, "no page errors", P.errors);
 } catch (e) {
   ok(false, "the test ran to its end: " + (e?.stack ?? e));
