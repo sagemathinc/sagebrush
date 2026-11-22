@@ -321,14 +321,14 @@ try {
     H.emit(E.task, { type: "message_revised", message: "e1", revision: 1 });
     H.emit(E.task, { type: "text_delta", message: "e1", revision: 1, text: "I've added a section, More facts about E." });
     H.emit(E.task, { type: "turn_error", code: "is_error", message: "Claude ended the turn with an error" });
-    H.emit(E.task, { type: "turn_finished", outcome: "error" });
-    H.emit(E.task, { type: "task_status", status: "interrupted", reason: "the turn ended in an error", code: "failed" });
+    H.emit(E.task, { type: "turn_finished", outcome: "error", code: "is_error" });
+    H.emit(E.task, { type: "task_status", status: "interrupted", reason: "the agent's turn ended with an error, without a proposal", code: "failed" });
     await P.until(`!!document.querySelector('#tasks .task[data-task="${E.task}"]')`, 10000).catch(async (e) => { throw new Error(e.message + " the list: " + JSON.stringify(await P.ev(`({ sw: document.querySelector('#delegate-switch')?.textContent, tasks: [...document.querySelectorAll('#tasks .task')].map((b) => (b.dataset.task ?? '').slice(0, 6) + ':' + b.textContent) })`)) + " host lists: " + H.got.filter((m) => m.method === "tasks.list").length + " tasks: " + H.tasks.size); });
     const listChip = await P.ev(`document.querySelector('#tasks .task[data-task="${E.task}"] .chip').textContent`);
     await P.ev(`document.querySelector('#tasks .task[data-task="${E.task}"]').click()`);
     await P.until(`!!document.querySelector('#task-view .turn') && document.querySelector('#task-view h2')?.textContent === 'More facts about E'`, 10000);
     const v = await P.ev(`(() => { const q = (s) => document.querySelector(s); const err = q('#task-view .turn .turn-error'); return { chip: q('#task-view .task-head .chip')?.textContent, reason: q('#task-view .reason')?.textContent, reasonRed: !!q('#task-view .reason') && getComputedStyle(q('#task-view .reason')).color === getComputedStyle(err ?? q('#task-view .reason')).color && !!err, error: err?.textContent ?? null, prose: [...document.querySelectorAll('#task-view .turn .msg')].map((m) => m.textContent).join('|'), proseInError: !!err && err.textContent.includes("I've added a section") }; })()`);
-    ok(listChip === "Ended with an error" && v.chip === "Ended with an error" && v.reason === "the turn ended in an error" && !v.reasonRed, "an interrupted task with the agent's code: its chip says what happened (in the list and its view), its reason a quiet line, not red", { listChip, ...v });
+    ok(listChip === "Ended with an error" && v.chip === "Ended with an error" && v.reason === "the agent's turn ended with an error, without a proposal" && !v.reasonRed, "an interrupted task with the agent's code: its chip says what happened (in the list and its view), its reason a quiet line, not red", { listChip, ...v });
     ok(v.prose.includes("I've added a section, More facts about E.") && !v.proseInError && v.error === "Error: Claude ended the turn with an error", "a turn that ended with an error: Claude's own words shown as a message, only the agent's error line as the error", v);
     await P.ev(`document.querySelector('#task-view .task-head .link').click()`);
   }
