@@ -37,6 +37,10 @@
 // The heap these allow is an accounted model, not a browser ceiling: a JS string takes at most 2 bytes per UTF-8 byte.
 
 import { listComputers, listRunners, pageLegUrl, type Runner } from "./remote-runners";
+import { signGate } from "./agent-gate";
+// (the page-wide gates live in agent-gate.ts, so the Agents page's chat (agent-chat/session.ts) can use the digest gate
+//  without loading this leg; they're re-exported here as before)
+export { Gate, SIGNS_MAX, DIGESTS_MAX, DIGEST_CHARGE, signGate, digestGate } from "./agent-gate";
 
 export const LEG = {
   helloMs: 10_000,
@@ -53,13 +57,6 @@ export const LEG = {
   frameMin: 64 * 1024,
   frameMax: 16 * 1024 * 1024,
 };
-export const SIGNS_MAX = 1;
-export const DIGESTS_MAX = 4;
-/** A digest's charge: its whole input (the domain, the fixed keys, four identities of at most 1 KiB and an input of at
- * most 16 KiB: 20,556 bytes at most, rounded to 21 KiB), six times: the canonical text and the domain-prefixed text as
- * JS strings (at most twice their UTF-8 each), the UTF-8 bytes, and WebCrypto's own copy of them (its digest takes a
- * snapshot before it runs). A payload figure: object and GC overhead aren't counted. */
-export const DIGEST_CHARGE = 6 * 21 * 1024;
 
 const RELAY_CONTROL = '{"relay":"';
 const enc = new TextEncoder();
@@ -92,46 +89,6 @@ export function jsonStringBytes(s: string): number {
   }
   return n;
 }
-
-// ---- the page-wide gates: outstanding work, charged until it settles
-
-export class Gate {
-  active = 0;
-  bytes = 0;
-  peak = 0;
-  peakBytes = 0;
-  private waiting: { bytes: number; live: () => boolean; go: (r: (() => void) | null) => void }[] = [];
-  readonly max: number;
-  readonly waitMax: number;
-  constructor(max: number, waitMax: number) { this.max = max; this.waitMax = waitMax; }
-  /** A place, once one is free, as its release; null if `live()` turned false while it waited (nothing charged), or
-   * at once if `waitMax` are already waiting (the work isn't done: its caller fails closed). */
-  acquire(bytes: number, live: () => boolean): Promise<(() => void) | null> {
-    this.sweep();
-    if (this.active >= this.max && this.waiting.length >= this.waitMax) return Promise.resolve(null);
-    return new Promise((go) => { this.waiting.push({ bytes, live, go }); this.next(); });
-  }
-  get queued() { return this.waiting.length; }
-  private next() {
-    while (this.waiting.length && this.active < this.max) {
-      const w = this.waiting.shift()!;
-      if (!w.live()) { w.go(null); continue; }
-      this.active++;
-      this.bytes += w.bytes;
-      this.peak = Math.max(this.peak, this.active);
-      this.peakBytes = Math.max(this.peakBytes, this.bytes);
-      let done = false;
-      w.go(() => { if (done) return; done = true; this.active--; this.bytes -= w.bytes; this.next(); });
-    }
-  }
-  /** Waiters whose work is no longer wanted, dropped now (a closed pairing's). */
-  sweep() { this.waiting = this.waiting.filter((w) => (w.live() ? true : (w.go(null), false))); }
-  resetPeaks() { this.peak = this.active; this.peakBytes = this.bytes; }
-}
-// (waiting, at most: the sends of the legs that can be open at once (a leg pumps one at a time) and the hello; the
-//  current pairing's open questions, the agent's own limit)
-export const signGate = new Gate(SIGNS_MAX, 4);
-export const digestGate = new Gate(DIGESTS_MAX, DIGESTS_MAX);
 
 // ---- the page's key
 

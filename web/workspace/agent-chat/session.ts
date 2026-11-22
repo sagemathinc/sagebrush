@@ -4,7 +4,7 @@
 import { apply, awayTurn, newThread, runningTurn, type Draft, type Thread, type Turn, type TurnEvent, type UserEntry } from "./events";
 import type { AgentPairing } from "../agent-pair";
 import { PermissionCards } from "../agent-cards";
-import { digestGate, DIGEST_CHARGE } from "../agent-relay";
+import { digestGate, DIGEST_CHARGE } from "../agent-gate";
 
 export interface Saved {
   threads: Thread[];

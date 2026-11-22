@@ -225,7 +225,8 @@ if (passed) {
 // Besides, the app's server must never be asked for the chunks that hold the site's pairing, Chat here and the
 // computer relay (found in app/dist/agents by text only they contain), and the listener must see no connection. The
 // control (SAGEBRUSH_APP_AGENTS_CONTROL=off-app): the same page off the app's mode, where the site's pairing takes
-// the link and connects to port N: the check must fail, for that reason.
+// the link (its Connect dialog, the code filled in; the page's self-test clicks its Connect): the check must fail, for
+// that reason: the pairing chunk fetched and a connection to port N.
 function agentsChunks() {
   const dir = fileURLToPath(new URL("../dist/agents", here));
   const marks = { pairing: "Remember this agent (reconnect without a new code)", "chat here": "Or chat with an agent on one of your computers:", relay: "the computer refused the connection" };
@@ -266,8 +267,10 @@ if (passed) {
   if (passed) {
     console.log("\nthe control: the same, off the app's mode (the site's pairing takes the link: must fail, for that reason)");
     const c = await agentsLaunch("off-app");
-    const why = c.hits > 0 || new RegExp(`ws ws://127\\.0\\.0\\.1:${c.port}`).test(c.line);
-    console.log(why ? "the control failed, for its reason, as it must: the site's pairing connected to the link's port" : `FAIL the control didn't fail for its reason (a connection to the link's port): ${c.line}`);
+    const pairingFetched = !!chunks.pairing && c.asked.includes(`/agents/${chunks.pairing}`);
+    const connected = c.hits > 0 || new RegExp(`ws ws://127\\.0\\.0\\.1:${c.port}`).test(c.line);
+    const why = pairingFetched && connected && /^FAIL persist: agents at /m.test(c.line);
+    console.log(why ? "the control failed, for its reason, as it must: the site's pairing loaded and connected to the link's port" : `FAIL the control didn't fail for its reason (the pairing chunk fetched ${pairingFetched}, a connection to the link's port ${connected}): ${c.line}`);
     passed &&= why;
   }
 }

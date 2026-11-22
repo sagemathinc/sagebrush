@@ -119,6 +119,24 @@ ok(JSON.stringify(cmds) === JSON.stringify([`npx -y ${tgz}`, `SAGEBRUSH_AGENT_PA
   const agents = own.map((f) => readFileSync(join(dist, f), "utf8")).join("\n");
   ok(marks.every((m) => agents.includes(m)) && carriers.length === 0, `the agent leg and the canon are in agents.js and its chunks only (${js.length} other scripts in dist checked; carrying them: ${JSON.stringify(carriers)})`);
 }
+// (the desktop app loads agents.js and what it imports statically, never the site's pairing, Chat here or the relay:
+//  each is in a chunk of its own, reached only by a dynamic import() off the app (web/agents/app-mode.ts); the app's
+//  self-test checks the same by what its server was asked for)
+{
+  const marks = { pairing: "Remember this agent (reconnect without a new code)", "chat here": "Or chat with an agent on one of your computers:", relay: "the computer refused the connection" };
+  const seen = new Set(), q = ["agents.js"];
+  while (q.length) {
+    const f = q.pop();
+    if (seen.has(f) || !existsSync(join(dist, f))) continue;
+    seen.add(f);
+    for (const m of readFileSync(join(dist, f), "utf8").matchAll(/(?:^|[;}\s])(?:import|export)\s*(?:[^"(;]*?from\s*)?"\.\/(agents-[a-z0-9]+\.js)"/g)) q.push(m[1]);
+  }
+  const chunks = existsSync(dist) ? readdirSync(dist).filter((f) => CHUNK.test(f)) : [];
+  const where = Object.fromEntries(Object.entries(marks).map(([k, m]) => [k, chunks.filter((f) => readFileSync(join(dist, f), "utf8").includes(m))]));
+  const eager = Object.entries(where).filter(([, fs]) => fs.some((f) => seen.has(f))).map(([k]) => k);
+  ok(Object.values(where).every((fs) => fs.length === 1) && !readFileSync(join(dist, "agents.js"), "utf8").match(new RegExp(Object.values(marks).map((m) => m.replace(/[()]/g, "\\$&")).join("|"))) && eager.length === 0,
+    `the site's pairing, Chat here and the relay are each in a chunk of their own, outside agents.js's static imports (${[...seen].join(", ")}): ${JSON.stringify(where)}${eager.length ? `; loaded with the page: ${eager.join(", ")}` : ""}`);
+}
 // (and its policy reaches the relay's agent leg on the page's own origin through 'self' (CSP Level 3 matches ws:/wss:
 //  of the same host), with no wss: source of any other host added)
 {

@@ -1628,7 +1628,7 @@ else if (workspace) void mountPairing(workspace);
 {
   const core = (window as any).__TAURI__?.core;
   if (core) core.invoke("selftest_persist").then((spec: unknown) => {
-    if (typeof spec === "string" && spec.startsWith("agents:")) void import("./app-selftest").then((m) => m.agentsSelftest(core));
+    if (typeof spec === "string" && spec.startsWith("agents:")) void import("./app-selftest").then((m) => m.agentsSelftest(core, inApp));
   }, () => {});
 }
 // (the person's review of an agent's branches: in a dialog, its chunk fetched at the first click)

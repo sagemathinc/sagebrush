@@ -32,7 +32,8 @@ export async function boardChecks({ desktop, analyze, base = location.href }) {
     }, 120000);
     out.push([BOARD_CHECKS[0], !!ran, ran ? "its items ran (\"871 takes 178 steps\")" : `at ${frame.contentWindow?.location?.pathname ?? "?"}: ${last}`]);
   } finally { frame.remove(); }
-  // (a page asked for as a page, a module at the path the notebook page would have had at /board/, a file the app has not)
+  // (a page asked for as a page (/blog/, one of the site's pages app/build-frontend.mjs lists as not in the app), a module
+  //  at the path the notebook page would have had at /board/, a file the app has not)
   const ask = async (p, accept) => {
     try {
       const r = await fetch(new URL(p, base).href, { cache: "no-store", ...(accept ? { headers: { Accept: accept } } : {}) });
@@ -40,8 +41,8 @@ export async function boardChecks({ desktop, analyze, base = location.href }) {
       return `${r.status}${/isn't part of the Sagebrush app/.test(text) ? " not-in-app" : /<html|<!doctype/i.test(text) ? " html" : ""}`;
     } catch (e) { return "error " + (e?.message ?? e); }
   };
-  const got = { "/agents/": await ask("/agents/", "text/html"), "/board/sagebrush-analyze.js": await ask("/board/sagebrush-analyze.js"), "/no-such-module.js": await ask("/no-such-module.js") };
-  out.push([BOARD_CHECKS[1], got["/agents/"] === "404 not-in-app" && got["/board/sagebrush-analyze.js"] === "404" && got["/no-such-module.js"] === "404", JSON.stringify(got)]);
+  const got = { "/blog/": await ask("/blog/", "text/html"), "/board/sagebrush-analyze.js": await ask("/board/sagebrush-analyze.js"), "/no-such-module.js": await ask("/no-such-module.js") };
+  out.push([BOARD_CHECKS[1], got["/blog/"] === "404 not-in-app" && got["/board/sagebrush-analyze.js"] === "404" && got["/no-such-module.js"] === "404", JSON.stringify(got)]);
   // (this page's own: its analyzer answers, and its KaTeX module is a script, from where this page is)
   let a = null, k = "";
   try { a = await Promise.race([analyze("selftest_board_y = 2"), new Promise((r) => setTimeout(() => r({ error: { message: "no answer in 30 s" } }), 30000))]); } catch (e) { a = { error: { message: String(e?.message ?? e) } }; }
