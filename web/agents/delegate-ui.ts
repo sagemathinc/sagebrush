@@ -29,7 +29,7 @@ export const DELEGATE_UI_TEXT = {
   sheetTitle: "Delegate a task",
   drafting: "Drafting a brief from this chat…",
   stopDrafting: "Stop drafting",
-  briefBusy: "The chat is still answering: wait for its turn to end and open Delegate… again, or write the task yourself.",
+  briefBusy: "The agent is busy: wait a moment and open Delegate… again, or write the task yourself.",
   briefUnavailable: "This chat can't draft a brief: write the task yourself.",
   briefStopped: "Drafting stopped: write the task yourself.",
   briefFailed: "Couldn't draft a brief: write the task yourself.",

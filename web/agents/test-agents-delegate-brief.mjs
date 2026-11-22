@@ -125,9 +125,9 @@ try {
     // (a refusal: the page's own words, the box left to the person)
     H.briefs.set(conv, { error: "busy" });
     await sheet();
-    await P.until(`/still answering/.test(document.querySelector('dialog.sheet[open] .msg')?.textContent ?? '')`, 10000).catch(() => {});
+    await P.until(`/The agent is busy/.test(document.querySelector('dialog.sheet[open] .msg')?.textContent ?? '')`, 10000).catch(() => {});
     const s = await state();
-    ok(s && !s.drafting && !s.ro && s.prompt === "" && /The chat is still answering/.test(s.msg), "the agent busy: said so in the page's words, the box empty and editable", s);
+    ok(s && !s.drafting && !s.ro && s.prompt === "" && /The agent is busy: wait a moment/.test(s.msg), "the agent busy: said so in the page's words, the box empty and editable", s);
     await closeSheet();
     H.briefs.set(conv, { error: "failed" });
     await sheet();
