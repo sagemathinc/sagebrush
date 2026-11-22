@@ -96,6 +96,26 @@ H.emit(C.task, { type: "task_status", status: "working" });
 H.emit(C.task, { type: "task_status", status: "interrupted", reason: LONG, code: "unproposable" });
 await until(() => D.task(C.task).reason === LONG);
 ok(D.task(C.task).reason === LONG && chipOf(D.task(C.task).entry, D.task(C.task).code) === "Couldn't propose" && new TextEncoder().encode(LONG).length === 1080, "a multibyte reason within the agent's bound (380 characters, 1080 bytes) on its event: kept whole", { bytes: new TextEncoder().encode(LONG).length, reason: (D.task(C.task).reason ?? "").length });
+// (Resume through the page's own call: refused, the task still stopped and still says why; done, working again and its
+//  old reason and code gone, as soon as it answers and after the agent's own events and a fresh list)
+H.emit(C.task, { type: "task_status", status: "working" });
+H.emit(C.task, { type: "task_status", status: "interrupted", reason: "stopped by the person", code: "stopped" });
+await until(() => D.task(C.task).code === "stopped");
+H.fail.set("tasks.resume", "busy");
+const refusedResume = await why(D.resume(C.task));
+H.fail.clear();
+ok(refusedResume === "busy" && D.task(C.task).entry.status === "interrupted" && D.task(C.task).reason === "stopped by the person" && D.task(C.task).code === "stopped", "a refused Resume: still stopped, and still says why", { refusedResume, reason: D.task(C.task).reason, code: D.task(C.task).code });
+await D.resume(C.task);
+const atOnce = { status: D.task(C.task).entry.status, reason: D.task(C.task).reason, code: D.task(C.task).code };
+await until(() => sentTasks(H).filter((m) => m.method === "tasks.list").length > 0 && D.task(C.task).entry.seq === C.log.length);
+await D.refresh();
+const settled = { status: D.task(C.task).entry.status, reason: D.task(C.task).reason, code: D.task(C.task).code, chip: chipOf(D.task(C.task).entry, D.task(C.task).code) };
+ok(atOnce.status === "working" && atOnce.reason === undefined && atOnce.code === undefined && settled.status === "working" && settled.reason === undefined && settled.code === undefined && settled.chip === "Working", "Resume done: working again, its old reason and code gone at once and after the agent's events and a fresh list", { atOnce, settled });
+// (and Stop through the page's own call: stopped at once, nothing older shown until the agent's event says why)
+const stopped = await D.stop(C.task).then((s) => s, (e) => e?.code ?? String(e));
+const stopNow = { status: D.task(C.task).entry.status, reason: D.task(C.task).reason, code: D.task(C.task).code };
+await until(() => D.task(C.task).code === "stopped");
+ok(stopped === "interrupted" && stopNow.status === "interrupted" && stopNow.reason === undefined && D.task(C.task).reason === "stopped by the person" && chipOf(D.task(C.task).entry, D.task(C.task).code) === "Stopped", "Stop: stopped at once, then why from the agent's own event", { stopNow, reason: D.task(C.task).reason });
 {
   // (the schema: the fields only in their shapes; a code that isn't one is refused, as any malformed answer)
   const e = { task: "a".repeat(32), title: "t", status: "interrupted", target: "local", run: false, round: 0, seq: 1, proposal: null, question: false, updated: 1 };

@@ -129,7 +129,7 @@ export function delegateHost({ features = ["delegate.1", "chat.resume"], pageSiz
         if (!t) return refuse(m.id, "not_found");
         if (t.status !== "working") return refuse(m.id, "stale", "the task isn't working");
         answer(m.id, { status: "interrupted" });
-        H.emit(t.task, { type: "task_status", status: "interrupted" });
+        H.emit(t.task, { type: "task_status", status: "interrupted", reason: "stopped by the person", code: "stopped" });
         return;
       }
       case "tasks.resume": {

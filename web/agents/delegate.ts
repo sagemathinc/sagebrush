@@ -228,7 +228,8 @@ export class DelegateTasks {
     if (this.task(id)?.entry.status !== "working") throw new AgentError("stale", DELEGATE_TEXT.notWorking);
     const r = TASK_RESULTS["tasks.stop"](await this.client().request("tasks.stop", { task: id }));
     const now = this.task(id);
-    if (now) { now.entry = { ...now.entry, status: r.status as TaskEntry["status"], question: false }; this.o.changed(); }
+    // (its status at once; why it stopped comes with the agent's own event, so nothing older is shown meanwhile)
+    if (now) { now.entry = { ...now.entry, status: r.status as TaskEntry["status"], question: false }; now.reason = undefined; now.code = undefined; this.o.changed(); }
     void this.refresh().catch(() => {});
     return r.status;
   }
@@ -255,7 +256,9 @@ export class DelegateTasks {
       throw e;
     }
     const now = this.task(id);
-    if (now) { now.entry = { ...now.entry, status: r.status as TaskEntry["status"], question: false }; this.o.changed(); }
+    // (working again at once: why it had stopped no longer applies, so its reason and code go with the status, as the
+    //  agent's own working event would take them; a refused Resume threw above and keeps them)
+    if (now) { now.entry = { ...now.entry, status: r.status as TaskEntry["status"], question: false }; now.reason = undefined; now.code = undefined; this.o.changed(); }
     void this.refresh().catch(() => {});
     return r.status;
   }
