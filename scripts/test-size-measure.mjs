@@ -221,4 +221,14 @@ assert(!ci.includes("need_old")); assert(!ci.includes("--legacy")); assert(!ci.i
 for (const [name, pin] of [["bun-version", TOOLCHAIN.bun], ["node-version", TOOLCHAIN.node]])
   assert(ci.includes(name + ': "' + pin + '"'));
 assert(!readFileSync(new URL("./size-measure.mjs", import.meta.url), "utf8").includes("function epochReset"));
+// A track pull (design/size-gate.md, "Track pulls"): the workflow excuses growth only when every problem
+// matches this pattern, so evaluate's growth wording is pinned here; drift fails closed.
+const TRACK_PULL_GROWTH = "/: growth \\+\\d+ exceeds \\d+ bytes/";
+assert(ci.includes(TRACK_PULL_GROWTH + ".test(p)"), "the track-pull filter in ci.yml is this pattern");
+const trackGrowth = new RegExp(": growth \\+\\d+ exceeds \\d+ bytes");
+for (const r of [compare({ x: 1000 }, { x: 51001 }), compare({ "examples/corpus": 100 }, { "examples/corpus": 300000 })]) {
+  assert.equal(r.ok, false); assert(r.rows.length > 0);
+  assert(r.problems.every((q) => trackGrowth.test(q)), "growth wording matches the track-pull filter: " + r.problems);
+}
+assert(!recordProblems(undefined).some((q) => trackGrowth.test(q)), "a record problem is never excused as growth");
 console.log("test-size-measure: stateless boundaries, records, normalization, transitions and CI all pass");
