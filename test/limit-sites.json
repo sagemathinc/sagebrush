@@ -5665,32 +5665,32 @@
   "owner": "matlab (@sagebrush-matlab)",
   "reason": "refuses nothing: the census matches 'max' in the names cummax and cummin and in numpy's fmax; the line picks MATLAB's NaN-omitting accumulation for cummax and cummin, not a limit on a computation"
  },
- "lib/_matlab_data.py :: readmatrix_.split :: \"\"\"the line's fields: double-quoted fields may hold the delimiter (a doubled quote is a quote in one)\"\"\" #0": {
+ "lib/_matlab_extra.py :: readmatrix_.split :: \"\"\"the line's fields: double-quoted fields may hold the delimiter (a doubled quote is a quote in one)\"\"\" #0": {
   "class": "none",
   "owner": "matlab (@sagebrush-matlab)",
   "reason": "refuses nothing: the census matches 'limit' in the word delimiter of readmatrix's field splitter's documentation; not a limit on a computation"
  },
- "lib/_matlab.py :: _map_new :: raise _err(\"Specified KeyType is not valid.\", \"MATLAB:Containers:Map:UnsupportedKeyType\") #0": {
+ "lib/_matlab_extra.py :: _map_new :: raise _err(\"Specified KeyType is not valid.\", \"MATLAB:Containers:Map:UnsupportedKeyType\") #0": {
   "class": "none",
   "owner": "matlab (@sagebrush-matlab)",
   "reason": "refuses nothing beyond MATLAB: the census matches a word of containers.Map's own error for an unsupported KeyType or ValueType (MATLAB:Containers:Map:Unsupported...); the line validates the option, it is not a limit on a computation"
  },
- "lib/_matlab.py :: _map_new :: raise _err(\"Specified ValueType is not valid.\", \"MATLAB:Containers:Map:UnsupportedValueType\") #0": {
+ "lib/_matlab_extra.py :: _map_new :: raise _err(\"Specified ValueType is not valid.\", \"MATLAB:Containers:Map:UnsupportedValueType\") #0": {
   "class": "none",
   "owner": "matlab (@sagebrush-matlab)",
   "reason": "refuses nothing beyond MATLAB: the census matches a word of containers.Map's own error for an unsupported KeyType or ValueType (MATLAB:Containers:Map:Unsupported...); the line validates the option, it is not a limit on a computation"
  },
- "lib/_matlab_data.py :: readmatrix_ :: \"\"\"readmatrix(filename, 'Delimiter', d, 'NumHeaderLines', n, 'OutputType', t): a delimited text file's numbers #0": {
+ "lib/_matlab_extra.py :: readmatrix_ :: \"\"\"readmatrix(filename, 'Delimiter', d, 'NumHeaderLines', n, 'OutputType', t): a delimited text file's numbers #0": {
   "class": "none",
   "owner": "matlab (@sagebrush-matlab)",
   "reason": "refuses nothing: the census matches 'limit' in the option name Delimiter (and readmatrix's documentation of it); the line reads readmatrix's options, not a limit on a computation"
  },
- "lib/_matlab_data.py :: readmatrix_ :: as a matrix. The delimiter (comma, tab, semicolon, bar or spaces) and the header lines (leading lines that are #0": {
+ "lib/_matlab_extra.py :: readmatrix_ :: as a matrix. The delimiter (comma, tab, semicolon, bar or spaces) and the header lines (leading lines that are #0": {
   "class": "none",
   "owner": "matlab (@sagebrush-matlab)",
   "reason": "refuses nothing: the census matches 'limit' in the option name Delimiter (and readmatrix's documentation of it); the line reads readmatrix's options, not a limit on a computation"
  },
- "lib/_matlab_data.py :: readmatrix_ :: if nm == \"delimiter\": #0": {
+ "lib/_matlab_extra.py :: readmatrix_ :: if nm == \"delimiter\": #0": {
   "class": "none",
   "owner": "matlab (@sagebrush-matlab)",
   "reason": "refuses nothing: the census matches 'limit' in the option name Delimiter (and readmatrix's documentation of it); the line reads readmatrix's options, not a limit on a computation"
