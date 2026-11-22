@@ -4306,7 +4306,11 @@ def _ev(s, R, prec):
         num, den = s[1:].rstrip(";").split("/")
         return R(_F(int(num), int(den)))
     if tag == "float":
-        return R(_bits_to_float(s[1:].rstrip(";")))
+        # (its IEEE bits; "re,im" for a complex double: log(CC(0)) is CC's -infinity)
+        parts = s[1:].rstrip(";").split(",")
+        re = R(_bits_to_float(parts[0]))
+        im = _bits_to_float(parts[1]) if len(parts) > 1 else 0
+        return re if im == 0 else ComplexNumberMP(ComplexField_(prec), re, R(im))
     if tag == "complex":
         body = s[1:].split(";")
         re, im = _F(body[0]), _F(body[1])

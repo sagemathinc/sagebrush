@@ -1,0 +1,232 @@
+CC ^ x | e^((0.804718956217050 + 1.10714871779409*I)*x) | Symbolic Ring
+CC ^ sin(x) | e^((0.804718956217050 + 1.10714871779409*I)*sin(x)) | Symbolic Ring
+CC ^ 2x | e^((1.60943791243410 + 2.21429743558818*I)*x) | Symbolic Ring
+(CC ^ x)(x=2) | -3.00000000000000 + 4.00000000000000*I | Symbolic Ring
+CCneg ^ x | e^(3.14159265358979*I*x) | Symbolic Ring
+CCneg ^ sin(x) | e^(3.14159265358979*I*sin(x)) | Symbolic Ring
+CCneg ^ 2x | e^(6.28318530717959*I*x) | Symbolic Ring
+(CCneg ^ x)(x=2) | 1.00000000000000 - 2.44929359829471e-16*I | Symbolic Ring
+CCreal ^ x | e^(0.693147180559945*x) | Symbolic Ring
+CCreal ^ sin(x) | e^(0.693147180559945*sin(x)) | Symbolic Ring
+CCreal ^ 2x | e^(1.38629436111989*x) | Symbolic Ring
+(CCreal ^ x)(x=2) | 4.00000000000000 | Symbolic Ring
+CDF ^ x | (1.0 + 2.0*I)^x | Symbolic Ring
+CDF ^ sin(x) | (1.0 + 2.0*I)^sin(x) | Symbolic Ring
+CDF ^ 2x | (1.0 + 2.0*I)^(2*x) | Symbolic Ring
+RR ^ x | 1.50000000000000^x | Symbolic Ring
+RR ^ sin(x) | 1.50000000000000^sin(x) | Symbolic Ring
+RR ^ 2x | 1.50000000000000^(2*x) | Symbolic Ring
+(RR ^ x)(x=2) | 2.25000000000000 | Symbolic Ring
+RDF ^ x | 1.5^x | Symbolic Ring
+RDF ^ sin(x) | 1.5^sin(x) | Symbolic Ring
+RDF ^ 2x | 1.5^(2*x) | Symbolic Ring
+(RDF ^ x)(x=2) | 2.25 | Symbolic Ring
+CC * SR(0) | 0 | Symbolic Ring
+CC + SR(0) | 1.00000000000000 + 2.00000000000000*I | Symbolic Ring
+CC - SR(0) | 1.00000000000000 + 2.00000000000000*I | Symbolic Ring
+CC / SR(0) | ERR ZeroDivisionError
+CC * SR(1) | 1.00000000000000 + 2.00000000000000*I | Symbolic Ring
+CC + SR(1) | 2.00000000000000 + 2.00000000000000*I | Symbolic Ring
+CC - SR(1) | 2.00000000000000*I | Symbolic Ring
+CC / SR(1) | 1.00000000000000 + 2.00000000000000*I | Symbolic Ring
+CC * x | (1.00000000000000 + 2.00000000000000*I)*x | Symbolic Ring
+CC + x | x + 1.00000000000000 + 2.00000000000000*I | Symbolic Ring
+CC - x | -x + 1.00000000000000 + 2.00000000000000*I | Symbolic Ring
+CC / x | (1.00000000000000 + 2.00000000000000*I)/x | Symbolic Ring
+CDF * SR(0) | 0 | Symbolic Ring
+CDF + SR(0) | 1.0 + 2.0*I | Symbolic Ring
+CDF - SR(0) | 1.0 + 2.0*I | Symbolic Ring
+CDF / SR(0) | ERR ZeroDivisionError
+CDF * SR(1) | 1.0 + 2.0*I | Symbolic Ring
+CDF + SR(1) | 2.0 + 2.0*I | Symbolic Ring
+CDF - SR(1) | 2.0*I | Symbolic Ring
+CDF / SR(1) | 1.0 + 2.0*I | Symbolic Ring
+CDF * x | (1.0 + 2.0*I)*x | Symbolic Ring
+CDF + x | x + 1.0 + 2.0*I | Symbolic Ring
+CDF - x | -x + 1.0 + 2.0*I | Symbolic Ring
+CDF / x | (1.0 + 2.0*I)/x | Symbolic Ring
+2 / M | [-4  2] ; [ 3 -1] | Full MatrixSpace of 2 by 2 dense matrices over Rational Field
+2 / Z | [  -2    1] ; [ 3/2 -1/2] | Full MatrixSpace of 2 by 2 dense matrices over Rational Field
+2 / S | ERR ValueError
+2 / N | ERR TypeError
+2 / X | [ 2/x -1/x] ; [   0    1] | Full MatrixSpace of 2 by 2 dense matrices over Symbolic Ring
+2 / v | ERR TypeError
+2 / w | ERR TypeError
+1/2 / M | [  -1  1/2] ; [ 3/4 -1/4] | Full MatrixSpace of 2 by 2 dense matrices over Rational Field
+1/2 / Z | [-1/2  1/4] ; [ 3/8 -1/8] | Full MatrixSpace of 2 by 2 dense matrices over Rational Field
+1/2 / S | ERR ValueError
+1/2 / N | ERR TypeError
+1/2 / X | [ 1/2/x -1/4/x] ; [     0    1/4] | Full MatrixSpace of 2 by 2 dense matrices over Symbolic Ring
+1/2 / v | ERR TypeError
+1/2 / w | ERR TypeError
+0 / M | [0 0] ; [0 0] | Full MatrixSpace of 2 by 2 dense matrices over Rational Field
+0 / Z | [0 0] ; [0 0] | Full MatrixSpace of 2 by 2 dense matrices over Rational Field
+0 / S | [0 0] ; [0 0] | Full MatrixSpace of 2 by 2 dense matrices over Rational Field
+0 / N | [0 0] ; [0 0] | Full MatrixSpace of 2 by 2 dense matrices over Rational Field
+0 / X | [0 0] ; [0 0] | Full MatrixSpace of 2 by 2 dense matrices over Symbolic Ring
+0 / v | 0 | Rational Field
+0 / w | 0 | Rational Field
+RR / M | [ -3.00000000000000   1.50000000000000] ; [  2.25000000000000 -0.750000000000000] | Full MatrixSpace of 2 by 2 dense matrices over Real Field with 53 bits of precision
+RR / Z | [ -1.50000000000000  0.750000000000000] ; [  1.12500000000000 -0.375000000000000] | Full MatrixSpace of 2 by 2 dense matrices over Real Field with 53 bits of precision
+RR / N | ERR TypeError
+RR / X | [  1.50000000000000/x -0.750000000000000/x] ; [                   0    0.750000000000000] | Full MatrixSpace of 2 by 2 dense matrices over Symbolic Ring
+RR / v | ERR TypeError
+RR / w | ERR TypeError
+RDF / M | [ -3.0   1.5] ; [ 2.25 -0.75] | Full MatrixSpace of 2 by 2 dense matrices over Real Double Field
+RDF / Z | [  -1.5   0.75] ; [ 1.125 -0.375] | Full MatrixSpace of 2 by 2 dense matrices over Real Double Field
+RDF / S | ERR LinAlgError
+RDF / N | ERR TypeError
+RDF / X | [  1.5/x -0.75/x] ; [      0    0.75] | Full MatrixSpace of 2 by 2 dense matrices over Symbolic Ring
+RDF / v | ERR TypeError
+RDF / w | ERR TypeError
+CC / M | [ -2.00000000000000 - 4.00000000000000*I   1.00000000000000 + 2.00000000000000*I] ; [  1.50000000000000 + 3.00000000000000*I -0.500000000000000 - 1.00000000000000*I] | Full MatrixSpace of 2 by 2 dense matrices over Complex Field with 53 bits of precision
+CC / Z | [  -1.00000000000000 - 2.00000000000000*I   0.500000000000000 + 1.00000000000000*I] ; [  0.750000000000000 + 1.50000000000000*I -0.250000000000000 - 0.500000000000000*I] | Full MatrixSpace of 2 by 2 dense matrices over Complex Field with 53 bits of precision
+CC / N | ERR TypeError
+CC / X | [  (1.00000000000000 + 2.00000000000000*I)/x -(0.500000000000000 + 1.00000000000000*I)/x] ; [                                          0      0.500000000000000 + 1.00000000000000*I] | Full MatrixSpace of 2 by 2 dense matrices over Symbolic Ring
+CC / v | ERR TypeError
+CC / w | ERR TypeError
+CDF / M | [-2.0 - 4.0*I  1.0 + 2.0*I] ; [ 1.5 + 3.0*I -0.5 - 1.0*I] | Full MatrixSpace of 2 by 2 dense matrices over Complex Double Field
+CDF / Z | [ -1.0 - 2.0*I   0.5 + 1.0*I] ; [ 0.75 + 1.5*I -0.25 - 0.5*I] | Full MatrixSpace of 2 by 2 dense matrices over Complex Double Field
+CDF / S | ERR LinAlgError
+CDF / N | ERR TypeError
+CDF / X | [ (1.0 + 2.0*I)/x -(0.5 + 1.0*I)/x] ; [               0      0.5 + 1.0*I] | Full MatrixSpace of 2 by 2 dense matrices over Symbolic Ring
+CDF / v | ERR TypeError
+CDF / w | ERR TypeError
+x / M | [  -2*x      x] ; [ 3/2*x -1/2*x] | Full MatrixSpace of 2 by 2 dense matrices over Symbolic Ring
+x / Z | [    -x  1/2*x] ; [ 3/4*x -1/4*x] | Full MatrixSpace of 2 by 2 dense matrices over Symbolic Ring
+x / S | ERR ValueError
+x / N | ERR TypeError
+x / X | [    1  -1/2] ; [    0 1/2*x] | Full MatrixSpace of 2 by 2 dense matrices over Symbolic Ring
+x / v | ERR TypeError
+x / w | ERR TypeError
+sqrt(2) / M | [  -2*sqrt(2)      sqrt(2)] ; [ 3/2*sqrt(2) -1/2*sqrt(2)] | Full MatrixSpace of 2 by 2 dense matrices over Symbolic Ring
+sqrt(2) / Z | [    -sqrt(2)  1/2*sqrt(2)] ; [ 3/4*sqrt(2) -1/4*sqrt(2)] | Full MatrixSpace of 2 by 2 dense matrices over Symbolic Ring
+sqrt(2) / S | ERR ValueError
+sqrt(2) / N | ERR TypeError
+sqrt(2) / X | [     sqrt(2)/x -1/2*sqrt(2)/x] ; [             0    1/2*sqrt(2)] | Full MatrixSpace of 2 by 2 dense matrices over Symbolic Ring
+sqrt(2) / v | ERR TypeError
+sqrt(2) / w | ERR TypeError
+2 / G | [3 2] ; [3 6] | Full MatrixSpace of 2 by 2 dense matrices over Finite Field of size 7
+2 / N over GF(7) | ERR TypeError
+0 / G | [0 0] ; [0 0] | Full MatrixSpace of 2 by 2 dense matrices over Finite Field of size 7
+GF(7)(3) / G | [1 3] ; [1 2] | Full MatrixSpace of 2 by 2 dense matrices over Finite Field of size 7
+GF(7)(3) / N over GF(7) | ERR TypeError
+2 / RDF matrix | [-4.0  2.0] ; [ 3.0 -1.0] | Full MatrixSpace of 2 by 2 dense matrices over Real Double Field
+RR(0) / S | [0.000000000000000 0.000000000000000] ; [0.000000000000000 0.000000000000000] | Full MatrixSpace of 2 by 2 dense matrices over Real Field with 53 bits of precision
+CC(0) / S | [0.000000000000000 0.000000000000000] ; [0.000000000000000 0.000000000000000] | Full MatrixSpace of 2 by 2 dense matrices over Complex Field with 53 bits of precision
+0 / RR singular | [0.000000000000000 0.000000000000000] ; [0.000000000000000 0.000000000000000] | Full MatrixSpace of 2 by 2 dense matrices over Real Field with 53 bits of precision
+M / 2 | [1/2   1] ; [3/2   2] | Full MatrixSpace of 2 by 2 dense matrices over Rational Field
+Z / 2 | [1 2] ; [3 4] | Full MatrixSpace of 2 by 2 dense matrices over Rational Field
+N / 2 | [1/2   1 3/2] ; [  2 5/2   3] | Full MatrixSpace of 2 by 3 dense matrices over Rational Field
+X / 2 | [1/2*x   1/2] ; [    0     1] | Full MatrixSpace of 2 by 2 dense matrices over Symbolic Ring
+v / 2 | (1/2, 1) | Vector space of dimension 2 over Rational Field
+w / 2 | (1, 2) | Vector space of dimension 2 over Rational Field
+M / 1/2 | [2 4] ; [6 8] | Full MatrixSpace of 2 by 2 dense matrices over Rational Field
+Z / 1/2 | [ 4  8] ; [12 16] | Full MatrixSpace of 2 by 2 dense matrices over Rational Field
+N / 1/2 | [ 2  4  6] ; [ 8 10 12] | Full MatrixSpace of 2 by 3 dense matrices over Rational Field
+X / 1/2 | [2*x   2] ; [  0   4] | Full MatrixSpace of 2 by 2 dense matrices over Symbolic Ring
+v / 1/2 | (2, 4) | Vector space of dimension 2 over Rational Field
+w / 1/2 | (4, 8) | Vector space of dimension 2 over Rational Field
+M / 0 | ERR ZeroDivisionError
+Z / 0 | ERR ZeroDivisionError
+N / 0 | ERR ZeroDivisionError
+X / 0 | ERR ZeroDivisionError
+v / 0 | ERR ZeroDivisionError
+w / 0 | ERR ZeroDivisionError
+M / x | [1/x 2/x] ; [3/x 4/x] | Full MatrixSpace of 2 by 2 dense matrices over Symbolic Ring
+Z / x | [2/x 4/x] ; [6/x 8/x] | Full MatrixSpace of 2 by 2 dense matrices over Symbolic Ring
+N / x | [1/x 2/x 3/x] ; [4/x 5/x 6/x] | Full MatrixSpace of 2 by 3 dense matrices over Symbolic Ring
+X / x | [  1 1/x] ; [  0 2/x] | Full MatrixSpace of 2 by 2 dense matrices over Symbolic Ring
+v / x | (1/x, 2/x) | Vector space of dimension 2 over Symbolic Ring
+w / x | (2/x, 4/x) | Vector space of dimension 2 over Symbolic Ring
+M / sqrt(2) | [1/2*sqrt(2)     sqrt(2)] ; [3/2*sqrt(2)   2*sqrt(2)] | Full MatrixSpace of 2 by 2 dense matrices over Symbolic Ring
+Z / sqrt(2) | [  sqrt(2) 2*sqrt(2)] ; [3*sqrt(2) 4*sqrt(2)] | Full MatrixSpace of 2 by 2 dense matrices over Symbolic Ring
+N / sqrt(2) | [1/2*sqrt(2)     sqrt(2) 3/2*sqrt(2)] ; [  2*sqrt(2) 5/2*sqrt(2)   3*sqrt(2)] | Full MatrixSpace of 2 by 3 dense matrices over Symbolic Ring
+X / sqrt(2) | [1/2*sqrt(2)*x   1/2*sqrt(2)] ; [            0       sqrt(2)] | Full MatrixSpace of 2 by 2 dense matrices over Symbolic Ring
+v / sqrt(2) | (1/2*sqrt(2), sqrt(2)) | Vector space of dimension 2 over Symbolic Ring
+w / sqrt(2) | (sqrt(2), 2*sqrt(2)) | Vector space of dimension 2 over Symbolic Ring
+M / 1.5r | [0.6666666666666666 1.3333333333333333] ; [               2.0 2.6666666666666665] | Full MatrixSpace of 2 by 2 dense matrices over Real Double Field
+Z / 1.5r | [1.3333333333333333 2.6666666666666665] ; [               4.0  5.333333333333333] | Full MatrixSpace of 2 by 2 dense matrices over Real Double Field
+N / 1.5r | [0.6666666666666666 1.3333333333333333                2.0] ; [2.6666666666666665  3.333333333333333                4.0] | Full MatrixSpace of 2 by 3 dense matrices over Real Double Field
+v / 1.5r | (0.6666666666666666, 1.3333333333333333) | Vector space of dimension 2 over Real Double Field
+w / 1.5r | (1.3333333333333333, 2.6666666666666665) | Vector space of dimension 2 over Real Double Field
+M / complex | [0.19999999999999998 - 0.39999999999999997*I  0.39999999999999997 - 0.7999999999999999*I] ; [                                0.6 - 1.2*I   0.7999999999999999 - 1.5999999999999999*I] | Full MatrixSpace of 2 by 2 dense matrices over Complex Double Field
+Z / complex | [0.39999999999999997 - 0.7999999999999999*I  0.7999999999999999 - 1.5999999999999999*I] ; [                               1.2 - 2.4*I  1.5999999999999999 - 3.1999999999999997*I] | Full MatrixSpace of 2 by 2 dense matrices over Complex Double Field
+N / complex | [0.19999999999999998 - 0.39999999999999997*I  0.39999999999999997 - 0.7999999999999999*I                                 0.6 - 1.2*I] ; [  0.7999999999999999 - 1.5999999999999999*I   0.9999999999999999 - 1.9999999999999998*I                                 1.2 - 2.4*I] | Full MatrixSpace of 2 by 3 dense matrices over Complex Double Field
+v / complex | (0.19999999999999998 - 0.39999999999999997*I, 0.39999999999999997 - 0.7999999999999999*I) | Vector space of dimension 2 over Complex Double Field
+w / complex | (0.39999999999999997 - 0.7999999999999999*I, 0.7999999999999999 - 1.5999999999999999*I) | Vector space of dimension 2 over Complex Double Field
+M / GF(7)(3) | [5 3] ; [1 6] | Full MatrixSpace of 2 by 2 dense matrices over Finite Field of size 7
+Z / GF(7)(3) | [3 6] ; [2 5] | Full MatrixSpace of 2 by 2 dense matrices over Finite Field of size 7
+N / GF(7)(3) | [5 3 1] ; [6 4 2] | Full MatrixSpace of 2 by 3 dense matrices over Finite Field of size 7
+1.5r + M | [2.5 2.0] ; [3.0 5.5] | Full MatrixSpace of 2 by 2 dense matrices over Real Double Field
+M - 1.5r | [-0.5  2.0] ; [ 3.0  2.5] | Full MatrixSpace of 2 by 2 dense matrices over Real Double Field
+1.5r * M | [1.5 3.0] ; [4.5 6.0] | Full MatrixSpace of 2 by 2 dense matrices over Real Double Field
+M * 1.5r | [1.5 3.0] ; [4.5 6.0] | Full MatrixSpace of 2 by 2 dense matrices over Real Double Field
+1.5r + Z | [3.5 4.0] ; [6.0 9.5] | Full MatrixSpace of 2 by 2 dense matrices over Real Double Field
+Z - 1.5r | [0.5 4.0] ; [6.0 6.5] | Full MatrixSpace of 2 by 2 dense matrices over Real Double Field
+1.5r * Z | [ 3.0  6.0] ; [ 9.0 12.0] | Full MatrixSpace of 2 by 2 dense matrices over Real Double Field
+Z * 1.5r | [ 3.0  6.0] ; [ 9.0 12.0] | Full MatrixSpace of 2 by 2 dense matrices over Real Double Field
+1.5r + N | ERR TypeError
+N - 1.5r | ERR TypeError
+1.5r * N | [1.5 3.0 4.5] ; [6.0 7.5 9.0] | Full MatrixSpace of 2 by 3 dense matrices over Real Double Field
+N * 1.5r | [1.5 3.0 4.5] ; [6.0 7.5 9.0] | Full MatrixSpace of 2 by 3 dense matrices over Real Double Field
+1.5r + v | ERR TypeError
+v - 1.5r | ERR TypeError
+1.5r * v | (1.5, 3.0) | Vector space of dimension 2 over Real Double Field
+v * 1.5r | (1.5, 3.0) | Vector space of dimension 2 over Real Double Field
+1.5r + w | ERR TypeError
+w - 1.5r | ERR TypeError
+1.5r * w | (3.0, 6.0) | Vector space of dimension 2 over Real Double Field
+w * 1.5r | (3.0, 6.0) | Vector space of dimension 2 over Real Double Field
+complex + M | [2.0 + 2.0*I         2.0] ; [        3.0 5.0 + 2.0*I] | Full MatrixSpace of 2 by 2 dense matrices over Complex Double Field
+M - complex | [     -2.0*I         2.0] ; [        3.0 3.0 - 2.0*I] | Full MatrixSpace of 2 by 2 dense matrices over Complex Double Field
+complex * M | [1.0 + 2.0*I 2.0 + 4.0*I] ; [3.0 + 6.0*I 4.0 + 8.0*I] | Full MatrixSpace of 2 by 2 dense matrices over Complex Double Field
+M * complex | [1.0 + 2.0*I 2.0 + 4.0*I] ; [3.0 + 6.0*I 4.0 + 8.0*I] | Full MatrixSpace of 2 by 2 dense matrices over Complex Double Field
+complex + Z | [3.0 + 2.0*I         4.0] ; [        6.0 9.0 + 2.0*I] | Full MatrixSpace of 2 by 2 dense matrices over Complex Double Field
+Z - complex | [1.0 - 2.0*I         4.0] ; [        6.0 7.0 - 2.0*I] | Full MatrixSpace of 2 by 2 dense matrices over Complex Double Field
+complex * Z | [ 2.0 + 4.0*I  4.0 + 8.0*I] ; [6.0 + 12.0*I 8.0 + 16.0*I] | Full MatrixSpace of 2 by 2 dense matrices over Complex Double Field
+Z * complex | [ 2.0 + 4.0*I  4.0 + 8.0*I] ; [6.0 + 12.0*I 8.0 + 16.0*I] | Full MatrixSpace of 2 by 2 dense matrices over Complex Double Field
+complex + N | ERR TypeError
+N - complex | ERR TypeError
+complex * N | [ 1.0 + 2.0*I  2.0 + 4.0*I  3.0 + 6.0*I] ; [ 4.0 + 8.0*I 5.0 + 10.0*I 6.0 + 12.0*I] | Full MatrixSpace of 2 by 3 dense matrices over Complex Double Field
+N * complex | [ 1.0 + 2.0*I  2.0 + 4.0*I  3.0 + 6.0*I] ; [ 4.0 + 8.0*I 5.0 + 10.0*I 6.0 + 12.0*I] | Full MatrixSpace of 2 by 3 dense matrices over Complex Double Field
+complex + v | ERR TypeError
+v - complex | ERR TypeError
+complex * v | (1.0 + 2.0*I, 2.0 + 4.0*I) | Vector space of dimension 2 over Complex Double Field
+v * complex | (1.0 + 2.0*I, 2.0 + 4.0*I) | Vector space of dimension 2 over Complex Double Field
+complex + w | ERR TypeError
+w - complex | ERR TypeError
+complex * w | (2.0 + 4.0*I, 4.0 + 8.0*I) | Vector space of dimension 2 over Complex Double Field
+w * complex | (2.0 + 4.0*I, 4.0 + 8.0*I) | Vector space of dimension 2 over Complex Double Field
+2 ^ M | ERR NotImplementedError
+2 ^ v | ERR TypeError
+2 ^ t | ERR TypeError
+1/2 ^ M | ERR NotImplementedError
+1/2 ^ v | ERR TypeError
+1/2 ^ t | ERR TypeError
+RR ^ M | ERR NotImplementedError
+RR ^ v | ERR TypeError
+RR ^ t | ERR TypeError
+RDF ^ M | ERR NotImplementedError
+RDF ^ v | ERR TypeError
+RDF ^ t | ERR TypeError
+CDF ^ M | ERR NotImplementedError
+CDF ^ v | ERR TypeError
+CDF ^ t | ERR TypeError
+2 / t | 2/t | Fraction Field of Univariate Polynomial Ring in t over Rational Field
+2 / (t^2 + 1) | 2/(t^2 + 1) | Fraction Field of Univariate Polynomial Ring in t over Rational Field
+1/2 / t | 1/2/t | Fraction Field of Univariate Polynomial Ring in t over Rational Field
+1/2 / (t^2 + 1) | 1/2/(t^2 + 1) | Fraction Field of Univariate Polynomial Ring in t over Rational Field
+1.5r / t | ERR TypeError
+1.5r / (t^2 + 1) | ERR TypeError
+complex / t | ERR TypeError
+complex / (t^2 + 1) | ERR TypeError
+True True
+True True
+True True
+True True
+CC(0) ^ x | e^(-infinity*x) | Symbolic Ring
+(CC(0) ^ x)(x=2) | 0.000000000000000 | Symbolic Ring
+-infinity
+[False, False, False, False, False]
+[False, False, False, False, False]

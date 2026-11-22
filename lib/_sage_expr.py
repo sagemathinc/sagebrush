@@ -4003,7 +4003,12 @@ def log(v, b=None, base=None):
         # (log(RR(2), 0) is -0.000000000000000), in its complex field for
         # x < 0, and NaN for x = 0
         return -(_log1(v) * 0)
-    return _log1(v) / _log1(b)
+    lv = _log1(v)
+    if type(lv).__name__ in ("ComplexNumber", "ComplexDoubleElement") and _numeric_base(b):
+        # (a complex logarithm in CC or CDF: log(b) in that field too, as Sage's
+        # log(RR(-2), 10) is 0.301029995663981 + 1.36437635384184*I, not over log(10))
+        return lv / lv.parent()(_log1(b))
+    return lv / _log1(b)
 
 
 def _is_real_element(v):

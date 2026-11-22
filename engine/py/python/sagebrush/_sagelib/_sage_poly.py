@@ -1453,7 +1453,10 @@ class Polynomial:
         # subclass's own __int__ or numerator is not read)
         o = self._coerce(other)
         if o is None:
-            return NotImplemented
+            # (an inexact number: over its field, as Sage, RR(1.5)/t in Frac(RR[t]))
+            # (a Python float or complex is refused, as Sage)
+            L = None if type(other) in (float, complex) else self._inexact(other)
+            return NotImplemented if L is None else other / L
         if not self._c:
             raise ZeroDivisionError("fraction field element division by zero")
         import _sage_frac

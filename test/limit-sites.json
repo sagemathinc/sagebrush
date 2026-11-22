@@ -11928,6 +11928,16 @@
   "owner": "engine web + finite-field matrices",
   "row": "inv-7"
  },
+ "lib/_sage_ffmat.py :: FFMatrix.__rtruediv__ :: raise TypeError(\"unsupported operand parent(s) for /: '%s' and '%s'\" % (_sa().parent(o), self.parent())) #0": {
+  "class": "none",
+  "owner": "sage kernel (@sagebrush-sage2)",
+  "reason": "a TypeError for a number and a matrix or vector that do not meet (a non-square matrix, a vector), Sage's coercion message; refuses nothing for size"
+ },
+ "lib/_sage_ffmat.py :: FFMatrix.__rtruediv__ :: raise TypeError(\"unsupported operand parent(s) for /: '%s' and '%s'\" % (_sa().parent(o), self.parent())) #1": {
+  "class": "none",
+  "owner": "sage kernel (@sagebrush-sage2)",
+  "reason": "a TypeError for a number and a matrix or vector that do not meet (a non-square matrix, a vector), Sage's coercion message; refuses nothing for size"
+ },
  "lib/_sage_ffmat.py :: FFVector.__mul__ :: raise TypeError(\"unsupported operand parent(s) for *: '%s' and '%s'\" % (self.parent(), _sa().parent(o))) #0": {
   "class": "none",
   "owner": "pcimc quick wins 3 (@sagebrush-sage2)",
@@ -12348,6 +12358,16 @@
   "owner": "pcimc quick wins 3 (@sagebrush-sage2)",
   "reason": "Sage's TypeError messages for products of a GF(q) vector with a rational or a non-ZZ matrix: matched words, no limit"
  },
+ "lib/_sage_matrix.py :: Matrix.__rpow__ :: raise NotImplementedError(\"non-integral exponents not supported\") #0": {
+  "class": "none",
+  "owner": "sage kernel (@sagebrush-sage2)",
+  "reason": "a number to a matrix power: Sage's own NotImplementedError for a non-integral exponent; refuses nothing for size"
+ },
+ "lib/_sage_matrix.py :: Matrix.__rtruediv__ :: raise TypeError(\"unsupported operand parent(s) for /: '%s' and '%s'\" % (_sa().parent(other), self.parent())) #0": {
+  "class": "none",
+  "owner": "sage kernel (@sagebrush-sage2)",
+  "reason": "a TypeError for a number and a matrix or vector that do not meet (a non-square matrix, a vector), Sage's coercion message; refuses nothing for size"
+ },
  "lib/_sage_matrix.py :: Matrix.eigenmatrix_right :: NotImplementedError: generalized eigenvector decomposition is implemented for RDF and CDF, but not for Rational Field #0": {
   "class": "none",
   "owner": "Sage kernel (@sagebrush-sage2)",
@@ -12357,6 +12377,16 @@
   "class": "coverage",
   "owner": "Sage kernel (@sagebrush-sage2)",
   "reason": "hermite_form(transformation=True) over ZZ: the integer Hermite form's transformation is not computed yet (an unsupported option, not a cap)"
+ },
+ "lib/_sage_matrix.py :: Vector.__rpow__ :: raise TypeError(\"unsupported operand parent(s) for ^: '%s' and '%s'\" % (_sa().parent(b), self.parent())) #0": {
+  "class": "none",
+  "owner": "sage kernel (@sagebrush-sage2)",
+  "reason": "a TypeError for a number and a matrix or vector that do not meet (a non-square matrix, a vector), Sage's coercion message; refuses nothing for size"
+ },
+ "lib/_sage_matrix.py :: Vector.__rtruediv__ :: raise TypeError(\"unsupported operand parent(s) for /: '%s' and '%s'\" % (_sa().parent(other), self.parent())) #0": {
+  "class": "none",
+  "owner": "sage kernel (@sagebrush-sage2)",
+  "reason": "a TypeError for a number and a matrix or vector that do not meet (a non-square matrix, a vector), Sage's coercion message; refuses nothing for size"
  },
  "lib/_sage_matrix.py :: _bounded_list :: \"\"\"list(obj), reading at most limit + 1 items: more than limit is a #0": {
   "class": "2",

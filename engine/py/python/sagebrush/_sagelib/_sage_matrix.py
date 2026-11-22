@@ -46,6 +46,15 @@ def _is_sr_scalar(x):
     return type(x).__name__ == "Expression" and hasattr(x, "_s") and not x.is_relational()
 
 
+def _is_scalar(x):
+    """An integer, a rational, an inexact real or complex number or a symbolic
+    expression: a number that c/M and c/v read as a scalar (a Python float
+    or complex is not: Sage refuses 1.5r/M)."""
+    if type(x) is float or type(x) is complex:
+        return False
+    return not isinstance(x, bool) and (isinstance(x, (int, _F)) or _inexact_parent(x) is not None or _is_sr_scalar(x))
+
+
 def _qq_entry(x):
     """x as an element of QQ when it is an integer: an integral entry of a
     QQ container is stored as an int (_norm), but Sage hands it out with
@@ -64,6 +73,9 @@ def _inexact_parent(o):
     """The field of o when o is an inexact real or complex number (RR, RDF, CC, CDF, RealField(p),
     ComplexField(p), a float literal), else None: a matrix or vector over ZZ or QQ meeting one
     moves to that field, as in Sage (RR(1.5)*M is over RR, not the exact 3/2 over QQ)."""
+    if type(o) is float or type(o) is complex:
+        # (a Python float or complex: RDF or CDF, as Sage, 1.5r*M over RDF)
+        return _sa().RDF if type(o) is float else _sa().CDF
     if isinstance(o, bool) or not hasattr(o, "parent"):
         return None
     try:
@@ -225,7 +237,9 @@ class Vector(list):
         L = self._inexact_lift(other)
         if L is not None:
             # (by the inverse, as Sage: v/CDF(1, 2) is v times 1/CDF(1, 2))
-            return L * (other.parent()(1) / other)
+            return L * (_inexact_parent(other)(1) / other)
+        if isinstance(other, (int, _F)) and not isinstance(other, bool) and other == 0:
+            raise ZeroDivisionError("rational division by zero")
         try:
             w = Vector(_norm(_F(a) / _F(other)) for a in self)
         except (TypeError, ValueError):
@@ -241,6 +255,17 @@ class Vector(list):
             return Vector(_norm(a / other) for a in self)
 
     def __rtruediv__(self, other):
+        if type(other) is int and other == 0:
+            # (an integer 0 over a vector: 0 in its fraction field, as Sage)
+            return _sa().SR(0) if self.base_ring() is _sa().SR else _sa().QQ(0)
+        if _is_scalar(other):
+            # (Sage's coercion error, by the two parents)
+            raise TypeError("unsupported operand parent(s) for /: '%s' and '%s'" % (_sa().parent(other), self.parent()))
+        return NotImplemented
+
+    def __rpow__(self, b):
+        if _is_scalar(b):
+            raise TypeError("unsupported operand parent(s) for ^: '%s' and '%s'" % (_sa().parent(b), self.parent()))
         return NotImplemented
 
     # ---- symbolic entries
@@ -1497,12 +1522,87 @@ class Matrix:
             return None
         return self.change_ring(F)
 
+    def _sr_number(self, other):
+        """other, a Python float or complex made symbolic when self is over SR
+        (as Sage keeps it in SR: 1.5r*M is 1.5*x, not the exact 3/2)."""
+        return _sa().SR(other) if type(other) in (float, complex) and self._base is _sa().SR else other
+
     def __truediv__(self, other):
-        # by an inexact number: over its field, times the inverse (Sage's M/RR(1.5))
+        """Each entry over a number: an integer or a rational over QQ, a symbolic
+        number over SR, an inexact one over its field (times its inverse).
+
+        EXAMPLES::
+
+            sage: M = matrix(ZZ, [[2, 4], [6, 8]]); M / 4, M / x
+            (
+            [1/2   1]  [2/x 4/x]
+            [3/2   2], [6/x 8/x]
+            )
+        """
         L = self._inexact_lift(other)
         if L is not None:
-            return L * (other.parent()(1) / other)
+            # (by the inverse, as Sage's M/RR(1.5))
+            return L * (_inexact_parent(other)(1) / other)
+        if isinstance(other, bool):
+            return NotImplemented
+        if type(other) in (float, complex):
+            # (over SR: the symbolic entries times its inverse)
+            return self * _sa().SR(1 / other) if self._base is _sa().SR else NotImplemented
+        QQ = _sa().QQ
+        if isinstance(other, (int, _F)):
+            if other == 0:
+                raise ZeroDivisionError("symbolic division by zero" if self._base is _sa().SR else "rational division by zero")
+            return self * (QQ(1) / QQ(other))
+        if _is_sr_scalar(other):
+            return self * (1 / other)
+        m = _sys.modules.get("_sage_ff")
+        if m is not None and m.is_exact_algebraic(other) and self._base in (_sa().ZZ, QQ):
+            # (an element of a finite field: the matrix over its field, as Sage's M/GF(7)(3))
+            return self.change_ring(other.parent()) / other
         return NotImplemented
+
+    def __rtruediv__(self, other):
+        """A number over a square matrix: X with X*M = c times the identity,
+        as Sage solves it (c times the inverse, by its own field: over QQ
+        for an integer, SR for a symbolic number, RR for RR(1.5)).
+
+        EXAMPLES::
+
+            sage: M = matrix(QQ, [[1, 2], [3, 4]]); 2/M, x/M
+            (
+            [-4  2]  [  -2*x      x]
+            [ 3 -1], [ 3/2*x -1/2*x]
+            )
+        """
+        if not _is_scalar(other):
+            return NotImplemented
+        F = _inexact_parent(other)
+        if F is not None and type(F).__name__ == "RealDoubleField_" and self._base is not _sa().SR:
+            # (solved in RDF, as Sage: numpy's solve on the transpose)
+            return other / self.change_ring(F)
+        n = self.nrows()
+        if isinstance(other, (int, _F)) and other == 0:
+            # (an exact 0: X = 0 solves X*M = 0, any shape, as Sage; n x n,
+            # its size checked first: a tall matrix's is larger than itself)
+            _shape(n, n)
+            return Matrix(_sa().QQ if self._base is _sa().ZZ else self._base, [[0] * n for _ in range(n)], n)
+        if not self.is_square():
+            raise TypeError("unsupported operand parent(s) for /: '%s' and '%s'" % (_sa().parent(other), self.parent()))
+        # (the inverse in this matrix's own ring, then the product: CC(1, 2)/M
+        # is CC(1, 2) times M's exact inverse, moved to CC)
+        try:
+            inv = self.inverse()
+        except ZeroDivisionError:
+            if F is not None and type(F).__name__ == "ComplexDoubleField_":
+                # (CDF solves numerically: numpy's error, as Sage, 0 too)
+                from numpy.linalg import LinAlgError
+                raise LinAlgError("Singular matrix") from None
+            if other == 0:
+                # (0 = X*M has the solution 0)
+                Z = self if self._base is not _sa().ZZ else self.change_ring(_sa().QQ)
+                return other * (Z - Z)
+            raise ValueError("matrix equation has no solutions") from None
+        return other * inv
 
     def _scalar_matrix(self, c, op):
         """c times the identity, for M + c, c - M and the like (Sage reads
@@ -1529,6 +1629,7 @@ class Matrix:
             sage: Z = matrix(QQ, 0, 3, []); (Z + 0).dimensions(), (0 - Z).dimensions(), (-Z).dimensions()
             ((0, 3), (0, 3), (0, 3))
         """
+        other = self._sr_number(other)
         L = self._inexact_lift(other)
         if L is not None:
             return L + other
@@ -1542,6 +1643,7 @@ class Matrix:
         return Matrix(self._same(other), [[a + b for a, b in zip(r, s)] for r, s in zip(self._rows, other._rows)], self.ncols())
 
     def __radd__(self, other):
+        other = self._sr_number(other)
         L = self._inexact_lift(other)
         if L is not None:
             return other + L
@@ -1550,6 +1652,7 @@ class Matrix:
         return NotImplemented
 
     def __sub__(self, other):
+        other = self._sr_number(other)
         L = self._inexact_lift(other)
         if L is not None:
             return L - other
@@ -1563,6 +1666,7 @@ class Matrix:
         return Matrix(self._same(other), [[a - b for a, b in zip(r, s)] for r, s in zip(self._rows, other._rows)], self.ncols())
 
     def __rsub__(self, other):
+        other = self._sr_number(other)
         L = self._inexact_lift(other)
         if L is not None:
             return other - L
@@ -1574,6 +1678,7 @@ class Matrix:
         return Matrix(self._base, [[-a for a in r] for r in self._rows], self.ncols())
 
     def __mul__(self, other):
+        other = self._sr_number(other)
         L = self._inexact_lift(other)
         if L is not None:
             return L * other
@@ -1611,6 +1716,7 @@ class Matrix:
         return Matrix(base, [[a * other for a in r] for r in self._rows], self.ncols())
 
     def __rmul__(self, other):
+        other = self._sr_number(other)
         L = self._inexact_lift(other)
         if L is not None:
             return other * L
@@ -1665,6 +1771,12 @@ class Matrix:
             b = b * b
             e >>= 1
         return r
+
+    def __rpow__(self, b):
+        # (a number to a matrix power: Sage's refusal, as its exponent is not an integer)
+        if _is_scalar(b):
+            raise NotImplementedError("non-integral exponents not supported")
+        return NotImplemented
 
     def __invert__(self):
         return self.inverse()
@@ -4076,6 +4188,10 @@ def _cc_or_none(o):
     m = _sys.modules.get("_sage_ff")
     if m is not None and m.is_exact_algebraic(o):
         return None
+    if type(o).__name__ == "Expression":
+        # (a symbolic expression takes the number into SR, as Sage: CC(1, 2)*SR(0)
+        # is the symbolic 0, not CC's; complex() of it gave CC)
+        return None
     try:
         return _cc(o)
     except (TypeError, ValueError):
@@ -4269,6 +4385,10 @@ class ComplexNumber(complex):
 
     def __pow__(self, e, mod=None):
         # (pow(z, e, m): Sage's CC ignores the modulus)
+        if type(e).__name__ == "Expression":
+            # (a symbolic exponent: exp(log(z)*e), the logarithm in CC, as Sage:
+            # CC(1, 2)^x is e^((0.804718956217050 + 1.10714871779409*I)*x))
+            return _sa().exp(_sa().log(self) * e)
         _cc(e)
         if type(e).__name__ in ("RealNumberMP", "_RealLiteralMP") and e._R._prec != 53:
             # (Sage's power is in the coarser complex field: not available,
