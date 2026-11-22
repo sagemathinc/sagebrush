@@ -9,6 +9,9 @@
 //     then admitted to the preview only if each is at most PROPOSAL_LIMITS.bytes of UTF-8; a notebook (.ipynb text,
 //     read by the notebook module's fromFile) cell by cell, any other text line by line, anything else "No preview";
 //     and a notebook's proposed document, read only and not reactive, with outputs.ts's filter, under a details;
+//   - a .tex file's line diff, and under it the document rendered (the LaTeX page module's mountEditor, read only,
+//     its preview alone: the engine worker's render, no code run), as proposed or as it was (Before), one at a time;
+//     only this file: what it includes (\input, \includegraphics) isn't read from the proposal;
 //   - one file open at a time; a newer open, a refresh or a close drops what an older one read (its generation).
 import { h, notebookDiff, style, textDiff } from "./diff-render";
 import { reviewLineDiff, utf8Length } from "./line-diff";
@@ -26,6 +29,10 @@ export type ProposalSource = {
 export type ProposalNotebookModule = {
   createNotebook(root: HTMLElement, opts: Record<string, unknown>): { load(doc: unknown): void; setReadOnly(ro: boolean): void; destroy(): void };
   fromFile(name: string, text: string): { cells: { id?: string; type?: string; code?: string }[] };
+};
+/** The LaTeX page module (sagebrush-latex.js), as the pages load it: its read-only preview of one document's text. */
+export type ProposalLatexModule = {
+  mountEditor(root: HTMLElement, opts: { text: string; readOnly: boolean; layout: "preview" }): { destroy(): void };
 };
 export type ProposalView = { close(): void; refresh(): void; idle(): Promise<void> };
 
@@ -45,14 +52,22 @@ export const PROPOSAL_TEXT = {
   unreadable: "Couldn't read this file.",
   tooManyFiles: `Too many changed files to show here (more than ${PROPOSAL_LIMITS.files.toLocaleString("en-US")}).`,
   failed: "Couldn't load the proposal.",
+  rendered: "The document",
+  asProposed: "As proposed",
+  before: "Before",
+  noRender: "Can't show the rendered document here.",
+  onlyThisFile: "Only this file is rendered: the files it includes aren't shown here.",
   nothing: "No files changed.",
 } as const;
 
 const isNotebook = (f: ProposalFile) => f.kind === "notebook" || /\.ipynb$/i.test(f.path);
+const isTex = (f: ProposalFile) => f.kind === "tex" || /\.tex$/i.test(f.path);
+// (a document that reads other files: \input, \include, \includegraphics, \bibliography and the like, not a comment)
+const includes = (t: string) => /(^|[^\\%])\\(input|include|includegraphics|bibliography|addbibresource|lstinputlisting|verbatiminput)\b/m.test(t.replace(/(^|[^\\])%.*$/gm, "$1"));
 const keysOf = (d: { cells: { type?: string; code?: string }[] } | null): CellKey[] => (d?.cells ?? []).map((c) => ({ type: c.type ?? "code", code: String(c.code ?? "") }));
 
 /** The proposal from `source` in `panel`, with `o.actions` (the host page's buttons) at its foot. */
-export function openProposal(source: ProposalSource, panel: HTMLElement, o: { notebook: () => Promise<ProposalNotebookModule>; actions?: HTMLElement }): ProposalView {
+export function openProposal(source: ProposalSource, panel: HTMLElement, o: { notebook: () => Promise<ProposalNotebookModule>; latex?: (() => Promise<ProposalLatexModule>) | null; actions?: HTMLElement }): ProposalView {
   style();
   let gen = 0, closed = false, mounted: { destroy(): void } | null = null, busy: Promise<void> = Promise.resolve();
   const root = h("div", { className: "sbrv sbpv" });
@@ -131,7 +146,39 @@ export function openProposal(source: ProposalSource, panel: HTMLElement, o: { no
     const dd = reviewLineDiff(a ?? "", b ?? "");
     const pre = dd.ok ? textDiff(dd.a, dd.b, dd.segs) : null;
     body.append(pre ?? h("p", { className: "st", textContent: PROPOSAL_TEXT.tooLargeText }));
+    if (isTex(f) && o.latex) await rendered(body, a, b, stale);
     void my;
+  }
+
+  // (the .tex rendered under its diff: as proposed, or Before (the base's), one mounted at a time; a newer open, a
+  //  refresh or a close drops it (unmount), and a module that can't load leaves the diff as it is)
+  async function rendered(body: HTMLElement, a: string | null, b: string | null, stale: () => boolean) {
+    let mod: ProposalLatexModule;
+    try { mod = await o.latex!(); } catch { if (!stale()) body.append(h("p", { className: "msg", textContent: PROPOSAL_TEXT.noRender })); return; }
+    if (stale() || typeof mod?.mountEditor !== "function") { if (!stale()) body.append(h("p", { className: "msg", textContent: PROPOSAL_TEXT.noRender })); return; }
+    const sides = ([[PROPOSAL_TEXT.asProposed, b], [PROPOSAL_TEXT.before, a]] as const).filter(([, t]) => t !== null) as [string, string][];
+    const box = h("div", { className: "tex-rendered" });
+    const tabs = h("p", { className: "st" }, h("strong", { textContent: PROPOSAL_TEXT.rendered + " " }));
+    const host = h("div");
+    const note = h("p", { className: "st" });
+    const buttons: HTMLButtonElement[] = [];
+    const show = (i: number) => {
+      unmount();
+      buttons.forEach((x, j) => { x.setAttribute("aria-pressed", String(j === i)); x.style.fontWeight = j === i ? "600" : ""; });
+      note.textContent = includes(sides[i][1]) ? PROPOSAL_TEXT.onlyThisFile : "";
+      const el = h("div");
+      host.replaceChildren(el);
+      try { mounted = mod.mountEditor(el, { text: sides[i][1], readOnly: true, layout: "preview" }); } catch { host.replaceChildren(h("p", { className: "msg", textContent: PROPOSAL_TEXT.noRender })); }
+    };
+    sides.forEach(([label], i) => {
+      const x = h("button", { type: "button", textContent: label });
+      x.onclick = () => show(i);
+      buttons.push(x);
+      tabs.append(x, " ");
+    });
+    box.append(tabs, note, host);
+    body.append(box);
+    show(0);
   }
 
   draw();
