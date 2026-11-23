@@ -20,8 +20,8 @@ page](https://github.com/sagemathinc/sagebrush/releases), npm
 [PRODUCT.md](PRODUCT.md) describes Sagebrush Space, the Sagebrush app and the
 Sagebrush engine. Sagebrush includes engines for modular symbols and newforms,
 a_p of elliptic curves, polynomials over Z, and class groups and units of
-number fields, and a Python front end in the browser with Sage and Magma
-modes.
+number fields, and a Python front end in the browser with Sage, Magma and
+MATLAB modes.
 
 ## Principles
 
@@ -50,7 +50,7 @@ These define what Sagebrush is.
    FLINT or PARI) and no build system beyond `cargo`. So every engine also
    compiles to WebAssembly and runs wherever WebAssembly runs: in the
    browser, in Node, in a chat artifact, and in CPython through the same
-   code. The whole engine is one 1.7 MB `.wasm` file.
+   code. The engine is one 7.6 MB `.wasm` file, beside three smaller modules.
 4. **Asymptotically fast.** Performance is measured as the inputs grow,
    against the best existing system, and published as tables with every
    number. The goal is to win on the large computations that research needs,
@@ -80,7 +80,7 @@ below 20000. Since it follows smalljac's own method, the agreement with
 smalljac checks the implementation more than the method. On 16 threads it
 beats smalljac's own 16-process mode at 10^7; on one core it is
 1.2-1.6x slower. See [results/ap.md](results/ap.md): measured once there;
-`sagebrush bench ap` reruns Sagebrush's side (11a to 10^8 in 65 s on one
+`sagebrush bench ap --large` reruns Sagebrush's side (11a to 10^8 in 65 s on one
 core, from Python) and checks it against the count recorded from smalljac,
 but it cannot rerun smalljac itself, which is rarely installed.
 
@@ -185,7 +185,7 @@ The same functions are available from:
 | Python (`from sagebrush import modsym`) | PyO3 | releases the GIL; exact coefficients are Python `int`s |
 | Node.js (`require("./engine/node").modsym`) | napi-rs | native addon; exact coefficients are `BigInt`s |
 | Rust (`sagebrush-modsym`) | - | the engine itself |
-| command line (`sagebrush`) | - | `sagebrush modsym N q [p] [--exact] [--threads T]` |
+| command line (`engine/cli`) | cargo | `sagebrush modsym N q [p] [--exact] [--threads T]`; a Rust binary built from source, not the released `sagebrush` command |
 | WebAssembly (`engine/web`) | plain wasm32, JSON in and out | single-threaded |
 
 Every interface is multithreaded except WASM: `threads=0` means all cores.
@@ -239,13 +239,15 @@ POSIX defaults.
   from other sites, and counting use do send data or make requests: see
   [What leaves this browser](https://sagebrush.space/docs/storage#leaves) and
   [web/README.md](web/README.md).
-- **Command line:** `npx sagebrush`, or one self-contained executable from
-  `curl -fsSL https://get.sagebrush.space/install.sh | sh`.
+- **Command line:** `npx sagebrush`, or one self-contained executable for
+  Linux, macOS or Windows from the [releases
+  page](https://github.com/sagemathinc/sagebrush/releases).
 - **Sage mode** (`--sage`): Sage's preparser (`src/sagepre.ts`): `2^3 == 8`,
   `2/3` is an exact rational, `[1..10]`, `[1,3..99]`, `(1..)`, `1.5` prints
   as `1.50000000000000`, `100r`, `12.factor()`, `R.<x> = ZZ[]`, `R.0`,
   `f(x) = x^2`; checked against Sage by `sage-tests/test_language.sage`.
-- **Magma** (`--magma`, implied for `.m` files; a mode of the notebook):
+- **Magma** (`--magma`, implied for `.mag` files and for `.m` files that
+  assign with `:=`; a mode of the notebook):
   `src/magma.ts` translates Magma to Python, run on `lib/_magma.py` over
   the same engines: the language (`:=`, `function`/`procedure` with `~x`
   arguments, `$$`, `select`, comprehensions, ranges, multiple return
@@ -254,7 +256,7 @@ POSIX defaults.
   modular symbols, newforms and elliptic curves. As in Magma, a file stops
   at its first runtime or syntax error, while input on stdin
   (`sagebrush --magma < f.m`) is a session that reports errors and goes on.
-  `magma-tests/` checks 600 lines against Magma itself.
+  `magma-tests/` checks about 5,600 lines against Magma itself.
 - **Number fields and integer matrices:** in Sage mode, `K.<a> =
   NumberField(x^3 - 11)`, `QuadraticField`, `CyclotomicField`, with
   `discriminant`, `signature`, `integral_basis`, `maximal_order`,
@@ -275,8 +277,8 @@ POSIX defaults.
   `ModularSymbols`, `CuspForms`, `ModularForms`, `Newforms`, `Gamma0`,
   `DirichletGroup`, `EllipticCurve` and polynomial rings over `ZZ` and `QQ`
   (`R.<x> = ZZ[]`, `f.factor()`, `f.roots()`, `gcd`, `discriminant`) run on
-  the Sagebrush engines (a 1.7 MB WebAssembly build of `engine/web`, loaded
-  on first use), with Sage's printed output: `sage-tests/` checks 3,500
+  the Sagebrush engines (a 7.6 MB WebAssembly build of `engine/web`, loaded
+  on first use), with Sage's printed output: `sage-tests/` checks about 37,000
   lines against Sage. `newform_orbits(N, k)` lists every Galois orbit of
   newforms with its LMFDB label, dimension, trace form and Hecke
   characteristic polynomial. `from sagebrush import modsym, ap, mf, nf,
@@ -309,8 +311,8 @@ POSIX defaults.
     difference simplifies to 0, otherwise numerically at sample points
     (relative tolerance). The numerical check is strong evidence, not a
     proof.
-  - On a corpus of 171 first-year integrals it finds 166; Maxima, what Sage
-    calls, finds 170, including two non-elementary integrals we leave
+  - On a corpus of 171 first-year integrals it finds at least 167; Maxima,
+    what Sage calls, finds 170, including two non-elementary integrals we leave
     unevaluated. 152 of ours print exactly as Sage prints Maxima's answers.
   - `integrate_steps(f, x)` shows the rules used, and `numerical_integral`
     computes adaptive Gauss–Kronrod quadrature.
@@ -351,7 +353,7 @@ POSIX defaults.
 
 ## Try it
 
-From Python (3.10 or later; a 1.2 MB wheel for Linux, macOS and Windows):
+From Python (3.10 or later; a wheel of about 7 MB for Linux, macOS and Windows):
 
 ```sh
 pip install sagebrush
@@ -415,7 +417,7 @@ node scripts/wasm-fetch.mjs           # the four WebAssembly modules wasm/pins.j
 node scripts/build-engine.mjs         # the Rust engine as WebAssembly (35 s on 16 cores)
 pnpm run build:cli                    # build/cli/pyjs.cjs, the single-file CLI (a few seconds)
 bun web/build.ts                      # the notebook page in web/dist (about 17 s)
-pnpm test                             # the Node tests (about 24 min one after another; CI runs them as 8 shards)
+pnpm test                             # the Node tests (about 24 min one after another; CI runs them as 2 shards)
 ```
 
 The engine's Rust toolchain is pinned (`engine/rust-toolchain.toml`, 1.99.1;
@@ -463,9 +465,22 @@ wrong. The board's code runs in the page, as on the site; nothing of the
 board is uploaded. As with the notebook, the server listens on 127.0.0.1
 only, needs the random token in the URL it opens, answers only for its own
 host and port, and serves that one file and the page, nothing else. The
-page is sandboxed as the site's board frame is. Edits made in the page
-aren't saved to the file (yet): the file is the board. `src/board-open.ts`;
+page is sandboxed as the site's board frame is. Without `--edit`, the page
+is read only: the file is the board. With `--edit` (a native `.board.json`
+only), the board is edited in the page and saved back to the file;
+`sagebrush board open --help` gives its limits. `src/board-open.ts`;
 `web/test-board-open.mjs` tests it end to end in Chromium.
+`sagebrush board --help` lists every board command.
+
+### LaTeX on your computer
+
+```sh
+npx sagebrush latex check paper.tex    # what the preview can't show or found wrong, by line
+npx sagebrush latex render paper.tex   # paper.html, the preview as Sagebrush's LaTeX editor shows it
+```
+
+`sagebrush latex --help` gives every option, and `latex run`, which runs the
+document's SageTeX code.
 
 sagebrush.space itself is also an app: open it once, and it works offline
 (a service worker, `web/sw.js`). Chrome and Edge offer "Install as an app"
@@ -476,7 +491,10 @@ installed app opens `.ipynb`, `.py` and `.sage` files from the computer.
 ### The desktop app
 
 `app/` is Sagebrush as a desktop app for macOS, Linux and Windows (Tauri 2,
-using the system's web view; the macOS app is 6 MB and its `.dmg` 4 MB).
+using the system's web view). On macOS (Apple silicon) and Linux (x64) it
+also ships an engine with its own Node.js: a separate process in which
+notebooks can run with most of the computer's memory rather than a browser
+tab's.
 It opens and saves `.ipynb` files with the system's dialogs, gives Python the
 files in the notebook's folder, and opens double-clicked notebooks. CI
 builds it for all three systems and runs its self-test in each one's web
@@ -485,7 +503,7 @@ view. See [app/README.md](app/README.md).
 ### A Jupyter kernel
 
 ```sh
-npx sagebrush --install-jupyter-kernel              # "Sagebrush (Sage)"; --mode all adds Python and Magma
+npx sagebrush --install-jupyter-kernel              # "Sagebrush (Sage)"; --mode all adds Python, Magma and MATLAB
 ```
 
 The kernel is pyjs with the engines and SVG graphics. It speaks the
@@ -498,8 +516,9 @@ heartbeats and interrupts, and Stop raises KeyboardInterrupt in Python
 loops and stops the Rust engines.
 
 `test/jupyter_kernel.py` drives it with Jupyter's own client
-(`jupyter_client`) through 18 checks: execution, streams, SVG, errors,
-completion, interrupts, modes and shutdown.
+(`jupyter_client`) through 54 checks: execution, streams, SVG and PNG
+figures, errors, completion, interrupts, `@interact`, the Python, Magma and
+MATLAB modes, and shutdown.
 
 ### For AI agents: the MCP server
 
@@ -515,11 +534,21 @@ claude mcp add sagebrush -- sagebrush-mcp            # Claude Code
 It provides these tools:
 - `sage`: Sage syntax in a persistent session. It returns printed output,
   the last value and SVG plots.
-- `python`, `reset` and `guide`.
+- `python`, `reset`, `guide` and `search_docs` (it searches the documentation
+  of Sagebrush's Sage library).
 - The shortcuts `factor`, `number_field` and `newforms`.
+- `run_status`, `run_result`, `run_cancel`, `run_list` and `run_keep`, for
+  computations that outlast a call.
+- `workspace_connect` and the `workspace_*`, `chat_*` and `latex_comments_*`
+  tools: the person's Sagebrush workspace, its chat panel and LaTeX comments,
+  through their paired page.
 
-Every call has a time limit that interrupts the computation (Ctrl-C reaches
-the Rust engines), and a stuck session is restarted. The Sage preparser is
+A `sage` or `python` call waits up to `wait` seconds (default 60). If the
+computation hasn't ended by then, the call returns a ticket and the
+computation keeps running: `run_result` waits for it, `run_status` shows it
+and `run_cancel` stops it. `run_deadline` interrupts a run after that many
+seconds (Ctrl-C reaches the Rust engines). The shortcut tools keep a time
+limit, and a session that dies is restarted. The Sage preparser is
 `sagebrush.preparse`, a Python port of the browser's; the same `sage-tests`
 pass through it. `engine/py/test_mcp.py` checks the protocol, including
 with the official MCP client.
@@ -615,7 +644,8 @@ arithmetic, ECM, kernel vectors, the unit lattice). Larger comparisons
 against PARI are in [engine/classgroup/README.md](engine/classgroup/README.md).
 
 For `poly` (Zassenhaus: square-free decomposition, Cantor-Zassenhaus modulo
-several primes, quadratic Hensel lifting on a factor tree, recombination) it
+several primes, quadratic Hensel lifting on a factor tree, recombination),
+`cargo test -p sagebrush-oracle` (it links FLINT, used only as a reference)
 checks the factorization against FLINT on 400 random products, the
 cyclotomic polynomials x^n - 1 and x^(2^k) + 1, and the Hecke polynomials of
 T_2 and T_3 at about 100 levels up to 2003.
@@ -686,7 +716,7 @@ benchmarking caveats: [results/engine-exact.md](results/engine-exact.md) and
 
 | path | contents |
 |---|---|
-| `engine/` | the Rust workspace: engines `modsym`, `ap`, `poly` and `classgroup`; bindings `cli`, `py`, `node`, `wasm`, `web`; `bench` |
+| `engine/` | the Rust workspace: engines `modsym`, `ap`, `poly`, `classgroup`, `galois`, `sym`, `mpoly`, `group`, `hmf`, `lfun` and others; bindings `cli`, `py`, `node`, `web`; `oracle` (tests against FLINT); `bench` |
 | `kernels/` | Rust WebAssembly SIMD kernels (matmul, LU, QR, eigenproblems, SVD, FFT, exp, log) for the numpy runtime |
 | `results/` | write-ups of every experiment, with numbers |
 | `bench/modsym/` | the pure-Python reference implementation and a line-by-line Rust port |
@@ -725,7 +755,9 @@ Most of Sagebrush is MIT OR Apache-2.0. `web/cloud/` is under the Microsoft Refe
 
 A few parts derive from other permissively licensed projects (CPython,
 NumPy, Arm Optimized Routines, fdlibm) or implement another project's
-method with its author's permission (smalljac's, written from scratch);
+method with its author's permission (smalljac's, written from scratch),
+or are ported with their copyright holder's permission (PSAGE's Hilbert
+modular forms, first distributed under the GPL);
 [NOTICE.md](NOTICE.md) lists them with their notices.
 
 ### What each download contains, and under which licenses
@@ -741,7 +773,7 @@ listing every component with its license text, generated by
 | npm `sagebrush`, the standalone executables | the above Rust crates and Cremona data; CPython's parser and some standard-library modules (**PSF License**); code following NumPy (BSD-3-Clause), Arm Optimized Routines (MIT), fdlibm; the notebook page's JavaScript (xterm.js, KaTeX, marked, patchflow and its dependencies: MIT, Apache-2.0, Blue Oak); **KaTeX's fonts (SIL Open Font License 1.1)** | `packages/sagebrush/THIRD-PARTY-NOTICES.txt`; the executables print everything with `sagebrush --licenses` |
 | npm `sagebrush-web` | the Rust crates; CPython's parser (PSF License) | `cdn/THIRD-PARTY-NOTICES.txt` |
 | The web site, sagebrush.space | the same as npm `sagebrush` | [/THIRD-PARTY-NOTICES.txt](https://sagebrush.space/THIRD-PARTY-NOTICES.txt), linked as "Licenses" in the page footer |
-| The desktop app | the web site's contents, plus its native code: Tauri, Wry, Tao and about 400 Rust crates, five of them under the **Mozilla Public License 2.0** (cssparser, cssparser-macros, dtoa-short, option-ext, selectors; used unmodified, source on crates.io). The Linux **AppImage** also bundles shared libraries of the system it was built on (GTK, WebKitGTK and others, mostly **LGPL**), which are dynamically linked and replaceable; they are not listed in the notices. GTK's TIFF image loader, with libtiff and the GPL-licensed libjbig it brings, is removed from the AppImage (`app/strip-appimage.sh`; the build fails if anything still needs them). On Windows and macOS the app uses the operating system's web view. | `THIRD-PARTY-NOTICES.txt` and `THIRD-PARTY-NOTICES-native.txt` in the app (`app/` in the repository) |
+| The desktop app | the web site's contents, plus its native code: Tauri, Wry, Tao and about 400 Rust crates, five of them under the **Mozilla Public License 2.0** (cssparser, cssparser-macros, dtoa-short, option-ext, selectors; used unmodified, source on crates.io). On macOS (Apple silicon) and Linux (x64) the app also contains Node.js, with Node's own license beside its engine (`NODE-LICENSE.txt`); Node.js is not listed in the notices. The Linux **AppImage** also bundles shared libraries of the system it was built on (GTK, WebKitGTK and others, mostly **LGPL**), which are dynamically linked and replaceable; they are not listed in the notices. GTK's TIFF image loader, with libtiff and the GPL-licensed libjbig it brings, is removed from the AppImage (`app/strip-appimage.sh`; the build fails if anything still needs them). On Windows and macOS the app uses the operating system's web view. | `THIRD-PARTY-NOTICES.txt` and `THIRD-PARTY-NOTICES-native.txt` in the app (`app/` in the repository) |
 
 So: everything except the desktop app is permissively licensed throughout
 (MIT, Apache-2.0, BSD-style, PSF, OFL for the fonts, Artistic-2.0 for the
