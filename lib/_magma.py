@@ -2780,8 +2780,6 @@ def _rule_quo(o, A, B, a, b, err, pos, unsupported):
     # what is modelled: polynomials of one ring, a polynomial over Q by a number
     if ka == "N":
         raise unsupported("%s of a number by a polynomial" % o)
-    if kb == "N" and A[1] == "Z":
-        raise unsupported("%s of a polynomial over the integers by a number" % o)
 
 
 def _rule_pow(A, B, a, b, err, pos, unsupported):
@@ -2922,6 +2920,8 @@ def _idiv(a, b, pos=None):
     _arith("div", (a, b), pos)
     if isinstance(a, _MFFPoly) or isinstance(b, _MFFPoly):
         return _ffpoly_op("div", a, b, pos)
+    if _zx_by_int(a, b):
+        return _zx_floor("div", a, b, pos)
     if hasattr(a, "quo_rem"):
         return a.quo_rem(b)[0]
     return a // b
@@ -2936,9 +2936,25 @@ def _mod(a, b, pos=None):
     _arith("mod", (a, b), pos)
     if isinstance(a, _MFFPoly) or isinstance(b, _MFFPoly):
         return _ffpoly_op("mod", a, b, pos)
+    if _zx_by_int(a, b):
+        return _zx_floor("mod", a, b, pos)
     if hasattr(a, "quo_rem"):
         return a.quo_rem(b)[1]
     return a % b
+
+
+def _zx_by_int(a, b):
+    return isinstance(a, _sp.Polynomial) and _int(b) and a.parent().base_ring() == _sp.ZZ
+
+
+def _zx_floor(o, a, b, pos):
+    """A polynomial over the integers div or mod an integer, as Magma 2.18-5
+    does it: coefficient by coefficient, with floor division (the remainder
+    has the divisor's sign), so a = b*(a div b) + (a mod b)."""
+    if b == 0:
+        raise MagmaError("Division by zero", "'%s'" % o, True, pos)
+    cs = [int(c) for c in a.list()]
+    return a.parent()([c // b for c in cs] if o == "div" else [c % b for c in cs])
 
 
 def _pow(a, b, pos=None, op="^"):
