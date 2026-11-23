@@ -566,9 +566,15 @@ jobs:
           SIZE_GATE_WEB: ${{ needs.changes.outputs.web }}
           SIZE_INPUTS: ${{ needs.changes.outputs.size_inputs }}
           SIZE_DISPATCH_MASTER: ${{ needs.size-base.outputs.master }}
+          # (a master push of the commit whose merge_group run passed: that run measured this exact commit and its gate
+          # passed, scripts/ci-queue-tested.mjs; measuring nothing here, the docs-only gate would see inputs it can't
+          # account for and fail closed, as 74aee607's push did, Nov 23 2026)
+          QUEUE_TESTED: ${{ needs.changes.outputs.queue_tested }}
         run: |
           mkdir -p "$RUNNER_TEMP/size-records"
-          if [ "$CHANGES" = success ] && [ "$CHECKS" = skipped ] && [ "$BASE" = skipped ] && [ "$SIZE_GATE_NODE" != true ] && [ "$SIZE_GATE_WEB" != true ] && [ "$SIZE_INPUTS" != true ]; then
+          if [ "$CHANGES" = success ] && [ "$QUEUE_TESTED" = true ]; then
+            echo "size gate: this exact commit passed it in its merge_group run (scripts/ci-queue-tested.mjs)" | tee -a "$GITHUB_STEP_SUMMARY"
+          elif [ "$CHANGES" = success ] && [ "$CHECKS" = skipped ] && [ "$BASE" = skipped ] && [ "$SIZE_GATE_NODE" != true ] && [ "$SIZE_GATE_WEB" != true ] && [ "$SIZE_INPUTS" != true ]; then
             node scripts/size-measure.mjs --gate --docs-only --out "$RUNNER_TEMP/size-records/size-gate.json"
           elif [ "$CHECKS" != success ] || [ "$BASE" != success ]; then
             echo "size-gate fails closed: changes $CHANGES, checks $CHECKS, size-base $BASE"
