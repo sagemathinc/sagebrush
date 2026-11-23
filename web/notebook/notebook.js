@@ -1160,7 +1160,7 @@ export function createNotebook(root, opts = {}) {
   // (design/reactive-notebook.md; the scheduler is src/notebook-reactive.ts,
   // the analysis a worker's: opts.analyzer.analyze(code, mode))
   let reactiveOn = !!opts.reactive;
-  let budget = opts.budget ?? 2000;
+  let budget = opts.budget ?? 10000;
   const reactive = () => reactiveOn && !!kernel && !!opts.analyzer;
   const analyses = new Map(); // mode + code -> Promise<analysis>
   const cellById = (id) => cells().find((c) => c.id === id);
@@ -2403,7 +2403,7 @@ export function createNotebook(root, opts = {}) {
   function reactiveLoad() {
     if (!reactive()) return;
     const a = meta.autorun;
-    budget = a === "always" ? Infinity : a === "never" ? 0 : typeof a === "number" && a >= 0 ? a : opts.budget ?? 2000;
+    budget = a === "always" ? Infinity : a === "never" ? 0 : typeof a === "number" && a >= 0 ? a : opts.budget ?? 10000;
     for (const c of cells()) if (c.type === "code") showManual(c);
     if (kernel.reactive) reactiveSync();
     else engine().load({ fresh: kernel.ran ?? new Set() });
