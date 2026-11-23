@@ -477,7 +477,15 @@ class RealNumber(float):
 
             sage: RR(10).log(), RR(8).log(2)
             (2.30258509299405, 3.00000000000000)
+
+        Of a negative number, CC's logarithm, as Sage's::
+
+            sage: RR(-2).log(), RR(-8).log(2)
+            (0.693147180559945 + 3.14159265358979*I, 3.00000000000000 + 4.53236014182719*I)
         """
+        if float.__float__(self) < 0:
+            import _sage_matrix
+            return _sage_matrix.ComplexNumber(float.__float__(self), 0.0).log(base)
         if base is None and float.__float__(self) == 0:
             # (log(+-0) is -infinity, as MPFR's)
             return RealNumber(-_INF)
@@ -680,14 +688,22 @@ class RealNumber(float):
         return RealNumber(float(_sage_real.RealField(60)(_sage_real._gamma(Fraction(float(self)), 60))))
 
     def log_gamma(self):
-        """The logarithm of the gamma function (positive numbers).
+        """The logarithm of the gamma function; of a negative number, its
+        principal branch in CC, as Sage's (not log(gamma(x))).
 
         EXAMPLES::
 
             sage: RR(10).log_gamma(), RR(1e308).log_gamma()
             (12.8018274800815, 7.08196208642166e310)
+            sage: RR(-2.1).log_gamma()
+            1.53171380819509 - 9.42477796076938*I
         """
-        if not float(self) > 0:
+        x = float.__float__(self)
+        if x < 0:
+            # (the principal branch, in CC, as Sage's: _sage_real._log_gamma_neg)
+            import _sage_real
+            return _sage_real.RealField_(53, "RNDN")(x).log_gamma()
+        if not x > 0:
             raise NotImplementedError("log_gamma of a real number <= 0 (complex in Sage) is not available for RR elements in sagebrush yet; use log_gamma(x)")
         return _rr_fn(self, _m.lgamma, "log_gamma")
 

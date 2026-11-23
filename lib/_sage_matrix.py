@@ -4344,6 +4344,31 @@ class ComplexNumber(complex):
         """
         return _sa().RealNumber(abs(complex(self)))
 
+    def log(self, base=None):
+        """The principal logarithm, log|z| + arg(z) I with -pi < arg(z) <= pi
+        (to a base: both parts over log(base)), as Sage's: a NaN part gives
+        NaN + NaN*I.
+
+        EXAMPLES::
+
+            sage: CC(2, 1).log(), CC(-1).log(), CC(-2).log()
+            (0.804718956217050 + 0.463647609000806*I, 3.14159265358979*I, 0.693147180559945 + 3.14159265358979*I)
+            sage: CC(-1).log(2), CC(0).log()
+            (4.53236014182719*I, -infinity)
+        """
+        import _sage_real
+        z = complex(self)
+        if z.real != z.real:
+            return ComplexNumber(z.real, z.real)
+        if z.imag != z.imag:
+            return ComplexNumber(z.imag, z.imag)
+        # (each part correctly rounded, as MPFR's: _cc_log)
+        rho, theta = _sage_real._cc_log(z.real, z.imag)
+        if base is None:
+            return ComplexNumber(rho, theta)
+        lb = float(_sa().RR(base).log())
+        return ComplexNumber(rho / lb, theta / lb)
+
     def __add__(self, o):
         # (a matrix over a field answers for itself: complex(M) was the
         # TypeError, so CC(I) + M over QQbar never reached M.__radd__)

@@ -2221,6 +2221,11 @@ def _special_raw(name, a):
     if name == "psi":
         return _sf.psi(a[0]) if len(a) == 1 else _sf.polygamma(_int_param(a[0], "n"), a[1])
     if name == "log_gamma":
+        if isinstance(a[0], float) and _m.isfinite(a[0]) and a[0] < 0 and a[0] != _m.floor(a[0]):
+            # (a negative real: RR's own principal branch, correctly rounded as
+            # Sage's, where the double formula lost several units: _sage_real._log_gamma_neg)
+            import sage_all
+            return complex(sage_all.RR(float(a[0])).log_gamma())
         return _sf.loggamma(a[0])
     if name == "zeta":
         if abs(a[0]) < 1e-3:
@@ -3164,8 +3169,15 @@ def _rr_special(name, args):
     field; the other special functions raise NotImplementedError (never a
     double's overflowed infinity or underflowed zero)."""
     import _sage_lang
-    if name in ("gamma", "log_gamma") and len(args) == 1 and not (name == "log_gamma" and args[0] < 0):
-        return _sage_lang._rr_from_mp(getattr(_sage_lang._rr_operand(args[0]), name)())
+    if name in ("gamma", "log_gamma") and len(args) == 1:
+        v = getattr(_sage_lang._rr_operand(args[0]), name)()
+        if name == "log_gamma" and args[0] < 0:
+            # (the principal branch, in CC: refused where a part leaves the doubles)
+            z = complex(v)
+            if _m.isfinite(z.real) and _m.isfinite(z.imag):
+                return v
+        else:
+            return _sage_lang._rr_from_mp(v)
     raise NotImplementedError("%s(%s): the value in RR, past the double range, is not available in sagebrush yet"
                               % (name, ", ".join(map(str, args))))
 
