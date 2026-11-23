@@ -215,14 +215,30 @@ fn grants_of(json: &str) -> Result<(), String> {
 
 #[tauri::command]
 pub fn grants_read(app: tauri::AppHandle) -> Result<String, String> {
-    let kept = read_small(&open_root(&data_dir(&app)?)?, "grants.json", GRANTS_MAX as u64)?;
-    Ok(kept.filter(|s| grants_of(s).is_ok()).unwrap_or_default())
+    grants_now(&open_root(&data_dir(&app)?)?)
+}
+
+/// grants.json as the page reads it: the page's record, or "" (none, or not a record).
+fn grants_now(dir: &std::path::Path) -> Result<String, String> {
+    Ok(read_small(dir, "grants.json", GRANTS_MAX as u64)?.filter(|s| grants_of(s).is_ok()).unwrap_or_default())
+}
+/// The app's windows each write the whole record (#1541), so a write is made only over the grants.json its window last
+/// read or wrote (`expect`, its text as grants_read gave it, "" for none): else it is refused, and the page merges what
+/// is there and writes again (web/workspace/grants-file.ts grantsSync).  One read-compare-write at a time.
+static GRANTS_LOCK: std::sync::Mutex<()> = std::sync::Mutex::new(());
+pub const GRANTS_CHANGED: &str = "grants.json was changed by another window";
+fn grants_swap(dir: &std::path::Path, json: &str, expect: &str) -> Result<(), String> {
+    grants_of(json)?;
+    let _held = GRANTS_LOCK.lock().unwrap_or_else(|e| e.into_inner());
+    if grants_now(dir)? != expect {
+        return Err(GRANTS_CHANGED.into());
+    }
+    write_small(dir, "grants.json", json)
 }
 
 #[tauri::command]
-pub fn grants_write(app: tauri::AppHandle, webview: tauri::Webview, json: String) -> Result<(), String> {
-    grants_of(&json)?;
-    write_small(&open_root(&data_dir(&app)?)?, "grants.json", &json)?;
+pub fn grants_write(app: tauri::AppHandle, webview: tauri::Webview, json: String, expect: String) -> Result<(), String> {
+    grants_swap(&open_root(&data_dir(&app)?)?, &json, &expect)?;
     told(&app, &webview, "sb-grants-changed");
     Ok(())
 }
@@ -230,6 +246,34 @@ pub fn grants_write(app: tauri::AppHandle, webview: tauri::Webview, json: String
 #[cfg(test)]
 mod grants_tests {
     use super::grants_of;
+
+    #[test]
+    fn a_write_only_over_what_its_window_last_saw() {
+        let dir = std::env::temp_dir().join(format!("sb-grants-swap-{}", std::process::id()));
+        let _ = std::fs::remove_dir_all(&dir);
+        std::fs::create_dir_all(&dir).unwrap();
+        let (a, b, c) = (r#"{"v":1,"docs":{"file:/a":{"write":["/x"]}}}"#, r#"{"v":1,"docs":{}}"#, r#"{"v":1,"docs":{"file:/c":{}}}"#);
+        // (none there: only a write expecting none)
+        assert_eq!(super::grants_swap(&dir, a, b), Err(super::GRANTS_CHANGED.into()));
+        assert_eq!(super::grants_swap(&dir, a, ""), Ok(()));
+        // (a window that saw the first record takes the permission back; another that also saw only the first can't
+        // write over that, nor can one expecting none)
+        assert_eq!(super::grants_swap(&dir, b, a), Ok(()));
+        assert_eq!(super::grants_swap(&dir, c, a), Err(super::GRANTS_CHANGED.into()));
+        assert_eq!(super::grants_swap(&dir, c, ""), Err(super::GRANTS_CHANGED.into()));
+        assert_eq!(super::grants_now(&dir).unwrap(), b);
+        // (one that read it after can)
+        assert_eq!(super::grants_swap(&dir, c, b), Ok(()));
+        assert_eq!(super::grants_now(&dir).unwrap(), c);
+        // (a grants.json that isn't a record reads as none, and is written over only by a write expecting none)
+        std::fs::write(dir.join("grants.json"), "not json").unwrap();
+        assert_eq!(super::grants_now(&dir).unwrap(), "");
+        assert_eq!(super::grants_swap(&dir, a, c), Err(super::GRANTS_CHANGED.into()));
+        assert_eq!(super::grants_swap(&dir, a, ""), Ok(()));
+        // (and never a write that isn't a record)
+        assert!(super::grants_swap(&dir, "not json", a).is_err());
+        let _ = std::fs::remove_dir_all(&dir);
+    }
 
     #[test]
     fn only_the_page_s_record_within_its_cap() {

@@ -2,7 +2,7 @@
 // The desktop app's file permissions across launches (web/workspace/grants-file.ts, #1565): the record kept in
 // grants.json by where each notebook is, and brought back at the next launch under the notebooks' new ids.
 //   bun web/workspace/test-grants-file.mjs
-import { restoreGrants, grantsToKeep, keepGrants, adoptGrants, parseGrants, GRANTS_KEY } from "./grants-file.ts";
+import { restoreGrants, grantsToKeep, keepGrants, grantsSync, mergeGrants, parseGrants, GRANTS_KEY } from "./grants-file.ts";
 
 let fails = 0, checks = 0;
 const ok = (c, what) => { checks++; console.log((c ? "ok   " : "FAIL ") + what); if (!c) fails++; };
@@ -13,7 +13,14 @@ const workspace = (entries) => ({
   stat: async (p) => entries[p],
   pathOf: async (kind, ref) => Object.entries(entries).find(([, e]) => e.kind === kind && e.ref === ref)?.[0],
 });
-const files = () => { let kept = ""; const calls = []; return { invoke: async (c, a) => { calls.push(c); if (c === "grants_read") return kept; if (c === "grants_write") { kept = a.json; return null; } throw new Error(c); }, kept: () => kept, set: (t) => (kept = t), calls }; };
+// (grants.json as the app keeps it, disk.rs: read as the record or "" (none, or not a record); written only over what
+// the writer last saw (`expect`), else refused as changed by another window)
+const files = () => {
+  let kept = ""; const calls = [];
+  const now = () => (parseGrants(kept) ? kept : "");
+  return { invoke: async (c, a) => { calls.push(c); if (c === "grants_read") return now(); if (c === "grants_write") { if (a.expect !== now()) throw new Error("grants.json was changed by another window"); kept = a.json; return null; } throw new Error(c); }, kept: () => kept, set: (t) => (kept = t), calls };
+};
+const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
 
 // launch 1: two workspace notebooks and a notebook file allowed; one more id that's no notebook now
 const w1 = workspace({ "/a/one.ipynb": { kind: "notebook", ref: "r1" }, "/b/two.ipynb": { kind: "notebook", ref: "r2" }, "/data.csv": { kind: "file", ref: null } });
@@ -122,30 +129,100 @@ ok(nWrites >= 1 && nWrites <= 2 && J(parseGrants(fk.kept()).docs) === J({ "ws:/a
   ok(done === "flushed" && writes === before + 1 && !g.unwritten && J(parseGrants(kept).docs) === J({ "ws:/a/one.ipynb": { write: ["/late"], t: 30 } }), "a retry firing after a successful flush: the next change is still written, and flush() resolves: " + J({ done, writes: writes - before }));
 }
 
-// two windows of the app (#1541): each its own ids for the same notebooks; what one allows or takes back, and writes,
-// is the other's once it adopts grants.json, so the other's next write carries it instead of undoing it
+// the merge, by document: what this page changed since it last saw grants.json kept (made, changed or taken out),
+// every other document as grants.json has it
+ok(J(mergeGrants({ x: 1, y: 1, z: 1 }, { x: 1, z: 1, w: 1 }, { x: 2, y: 1 })) === J({ x: 2, w: 1 }), "the merge: a change here kept (x), one taken back elsewhere gone (y), one taken out here stays out (z), one made elsewhere comes in (w)");
+
+// two windows of the app (#1541): each its own ids for the same notebooks and its own queue; grants.json written only
+// over what its writer last saw (files()).  What one allows or takes back reaches the other, merged by document with
+// what that one changed meanwhile; no stale read and no stale write brings a permission back.
 {
-  const f = files();
+  const one = { write: ["/a"], t: 1 }, two = { write: ["/b"], t: 2 }, more = { write: ["/a", "/a-more"], t: 9 };
   const wa = workspace({ "/a/one.ipynb": { kind: "notebook", ref: "a1" }, "/b/two.ipynb": { kind: "notebook", ref: "a2" } });
   const wb = workspace({ "/a/one.ipynb": { kind: "notebook", ref: "b1" }, "/b/two.ipynb": { kind: "notebook", ref: "b2" } });
-  const sa = store({ [GRANTS_KEY]: J({ v: 1, seq: 4, docs: { a1: { write: ["/a"], t: 1 }, a2: { write: ["/b"], t: 2 } } }) });
-  f.set(J(await grantsToKeep(wa, sa)));
-  const sb = store();
-  await restoreGrants(wb, f.invoke, sb);
-  // (the first window takes back two.ipynb's permission and writes the record; the second, meanwhile, has its own
-  // unsaved-to-disk ephemeral grant for a document grants.json can't name)
-  sa.setItem(GRANTS_KEY, J({ v: 1, seq: 5, docs: { a1: { write: ["/a"], t: 1 } } }));
-  f.set(J(await grantsToKeep(wa, sa)));
-  const rb = JSON.parse(sb.getItem(GRANTS_KEY));
-  rb.docs.scratch = { write: ["/s"], t: 9 };
-  sb.setItem(GRANTS_KEY, J(rb));
-  const changed = await adoptGrants(wb, f.invoke, sb);
-  const after = parseGrants(sb.getItem(GRANTS_KEY));
-  ok(changed && J(after.docs) === J({ scratch: { write: ["/s"], t: 9 }, b1: { write: ["/a"], t: 1 } }) && after.seq === 5, "two windows: a permission taken back in one is gone in the other once adopted (by its own ids), what grants.json can't name kept: " + J(after));
-  ok(J((await grantsToKeep(wb, sb)).docs) === J({ "ws:/a/one.ipynb": { write: ["/a"], t: 1 } }), "two windows: and the other's next write doesn't bring it back");
-  ok((await adoptGrants(wb, f.invoke, sb)) === false, "two windows: adopting the same record again changes nothing");
-  f.set("not json");
-  ok((await adoptGrants(wb, f.invoke, sb)) === false && J(parseGrants(sb.getItem(GRANTS_KEY)).docs) === J(after.docs), "two windows: a grants.json that can't be read changes nothing");
+  const docsOf = (st) => parseGrants(st.getItem(GRANTS_KEY))?.docs;
+  const sorted = (o) => Object.fromEntries(Object.entries(o).sort(([x], [y]) => (x < y ? -1 : 1)));
+  const put = (st, docs) => st.setItem(GRANTS_KEY, J({ ...(parseGrants(st.getItem(GRANTS_KEY)) ?? { v: 1, seq: 0 }), docs }));
+  // (A allows both notebooks and writes; B starts from that; `binvoke` and `bws`, B's way to the app and workspace)
+  const setup = async (binvoke, bws = wb) => {
+    const f = files(), sa = store({ [GRANTS_KEY]: J({ v: 1, seq: 4, docs: { a1: one, a2: two } }) }), sb = store();
+    const A = grantsSync(wa, f.invoke, sa);
+    await A.write();
+    const B = grantsSync(bws, binvoke ? binvoke(f) : f.invoke, sb);
+    await B.restore();
+    // (A then takes two.ipynb's permission back, and writes)
+    const revoke = async () => { put(sa, { a1: one }); await A.write(); };
+    return { f, sa, sb, A, B, revoke };
+  };
+  {
+    const { f, sb, B, revoke } = await setup();
+    put(sb, { ...docsOf(sb), scratch: { write: ["/s"] } });
+    await revoke();
+    const r = await B.adopt();
+    ok(r.changed === 1 && !r.ahead && J(sorted(docsOf(sb))) === J({ b1: one, scratch: { write: ["/s"] } }), "two windows: a permission taken back in one is gone in the other once adopted (by its own ids), what grants.json can't name kept: " + J(docsOf(sb)));
+    ok(J((await grantsToKeep(wb, sb)).docs) === J({ "ws:/a/one.ipynb": one }), "two windows: and the other's next write doesn't bring it back");
+    ok((await B.adopt()).changed === 0, "two windows: adopting the same grants.json again changes nothing");
+    f.set("not json");
+    // (read as none, as at launch: nothing stays allowed here but what grants.json can't name; a prompt comes back)
+    ok((await B.adopt()).changed === 1 && J(docsOf(sb)) === J({ scratch: { write: ["/s"] } }), "two windows: a grants.json that isn't a record reads as none, as at launch: nothing stays allowed but what it can't name: " + J(docsOf(sb)));
+  }
+  // (astra2's stale read: an adoption's read of the OLD grants.json held while a newer one, the revocation, is written
+  // and adopted: one at a time, so the old read never applies after the newer one)
+  {
+    let hold = null;
+    const { f, sb, B, revoke } = await setup((f) => async (c, a) => { if (c === "grants_read" && hold) { const h = hold, old = f.kept(); hold = null; await h; return old; } return f.invoke(c, a); });
+    let release;
+    hold = new Promise((r) => (release = r));
+    const p1 = B.adopt();
+    await sleep(5);
+    await revoke();
+    const p2 = B.adopt();
+    await sleep(5);
+    release();
+    await Promise.all([p1, p2]);
+    ok(J(docsOf(sb)) === J({ b1: one }) && J(parseGrants(f.kept()).docs) === J({ "ws:/a/one.ipynb": one }), "two windows: a read of the old grants.json held while the revocation arrives never brings the permission back: " + J(docsOf(sb)));
+  }
+  // (a slow workspace during the merge, and the person's Allow made here in the middle of it: merged again, the Allow
+  // kept, the revocation taken, and this page left ahead: its write carries both)
+  {
+    let edit = false;
+    const slow = { stat: async (p) => { await sleep(5); return wb.stat(p); }, pathOf: async (k, ref) => { await sleep(5); if (edit) { edit = false; put(sbRef, { ...docsOf(sbRef), b1: more }); } return wb.pathOf(k, ref); } };
+    let sbRef;
+    const { f, sb, B, revoke } = await setup(undefined, slow);
+    sbRef = sb;
+    await revoke();
+    edit = true;
+    const r = await B.adopt();
+    ok(J(docsOf(sb)) === J({ b1: more }) && r.ahead, "two windows: the person's Allow made here while a merge waited on the workspace is kept, the revocation taken: " + J(docsOf(sb)));
+    await B.write();
+    ok(J(parseGrants(f.kept()).docs) === J({ "ws:/a/one.ipynb": more }), "two windows: ...and written, without the permission taken back: " + f.kept());
+  }
+  // (a stale write: B's Allow, written while A's revocation was already there and B hadn't adopted it; and B's write
+  // held in keepGrants while A writes: refused by the app, merged, written again: the revocation stays)
+  {
+    const { f, sa, sb, A, B, revoke } = await setup();
+    put(sb, { ...docsOf(sb), b1: more });
+    await revoke();
+    await B.write();
+    ok(J(parseGrants(f.kept()).docs) === J({ "ws:/a/one.ipynb": more }) && J(docsOf(sb)) === J({ b1: more }), "two windows: a write over a grants.json another window changed is refused, merged, written again: the revocation stays: " + f.kept());
+    const r = await A.adopt();
+    ok(r.changed === 1 && J(docsOf(sa)) === J({ a1: more }), "two windows: ...and the first window adopts the other's Allow");
+  }
+  {
+    let gate = null;
+    const { f, sb, B, revoke } = await setup((f) => async (c, a) => { if (c === "grants_write" && gate) await gate; return f.invoke(c, a); });
+    let open, changed;
+    gate = new Promise((r) => (open = r));
+    const k = keepGrants(wb, null, (fn) => (changed = fn), sb, 50, B);
+    put(sb, { ...docsOf(sb), b1: more });
+    changed();
+    await sleep(10);
+    await revoke();
+    open();
+    gate = null;
+    await k.flush();
+    ok(!k.unwritten && J(parseGrants(f.kept()).docs) === J({ "ws:/a/one.ipynb": more }), "two windows: a keepGrants write held while the other window revokes: merged and written, the revocation stays: " + f.kept());
+  }
 }
 
 console.log(fails ? `${fails} of ${checks} failed` : `test-grants-file: all ${checks} passed`);

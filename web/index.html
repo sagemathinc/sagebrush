@@ -5042,13 +5042,20 @@ const wsReady = (async () => {
     // made in another tab is)
     if (TAURI && desktopApp() && diskMirror) try {
       const d = await desktopModule(), invoke = (c, a) => TAURI.core.invoke(c, a);
-      if (await d.restoreGrants(w, invoke)) { for (const [doc, x] of kernels) { permRev.set(doc, revOf(doc) + 1); x.policyChanged?.(); } if (current.id) filesShown(); }
-      grantsKept = d.keepGrants(w, invoke, (f) => perms.onChange(f));
-      // (another window of the app wrote grants.json, #1541: its record this page's, so what it took back stays so)
+      // (one queue for this page's reads and writes of grants.json, each merged with what it last saw: grants-file.ts)
+      const grantsFile = d.grantsSync(w, invoke);
+      if (await grantsFile.restore()) { for (const [doc, x] of kernels) { permRev.set(doc, revOf(doc) + 1); x.policyChanged?.(); } if (current.id) filesShown(); }
+      grantsKept = d.keepGrants(w, invoke, (f) => perms.onChange(f), undefined, undefined, grantsFile);
+      // (another window of the app wrote grants.json, #1541: merged in, so what it took back is gone here too)
       const me = window.__TAURI_INTERNALS__?.metadata?.currentWebview?.label;
       TAURI.event.listen("sb-grants-changed", async (ev) => {
         if (!me || ev?.payload?.from === me) return;
-        try { if (await d.adoptGrants(w, invoke)) { for (const [doc, x] of kernels) { permRev.set(doc, revOf(doc) + 1); x.policyChanged?.(); } if (current.id) filesShown(); } } catch (e) { console.warn("grants.json:", e); }
+        try {
+          const r = await grantsFile.adopt();
+          if (r.changed) { for (const [doc, x] of kernels) { permRev.set(doc, revOf(doc) + 1); x.policyChanged?.(); } if (current.id) filesShown(); }
+          // (this page's own changes grants.json hasn't yet: written, over what was just merged)
+          if (r.ahead) grantsKept.changed();
+        } catch (e) { console.warn("grants.json:", e); }
       }).catch((e) => console.warn("grants.json:", e));
       // (in the quit's and the leave's barrier, as the settings' flush is: disk-mirror.ts keepAll)
       window.__sbGrantsFlush = () => grantsKept.flush();
