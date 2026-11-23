@@ -969,3 +969,71 @@ class Files(unittest.TestCase):
 
 if __name__ == "__main__":
     unittest.main()
+
+
+class Units(unittest.TestCase):
+    """The units mode: parse_units, and units()'s three checks."""
+
+    def test_parse(self):
+        line = lambda v, f, u: "UNITS|%d|%s|%d" % (v, ",".join(map(str, f)), u)  # noqa: E731
+        f0, f1 = [1, 2, 0, 0, 0, 3, 0, 0, 0, 0], [0] * 9 + [4]
+        good = "\n".join([line(0, f0, 6), line(1, f1, 4)])
+        self.assertEqual(
+            run.parse_units(good, 2),
+            [{"v": 0, "families": f0, "used": 6}, {"v": 1, "families": f1, "used": 4}],
+        )
+        self.assertEqual(run.parse_units("UNITS|unmetered\n", 2), "unmetered")
+        for bad in (
+            line(0, f0, 6),  # (one variant missing)
+            "\n".join([line(0, f0, 7), line(1, f1, 4)]),  # (does not sum)
+            "\n".join([line(1, f1, 4), line(0, f0, 6)]),  # (out of order)
+            "\n".join([line(0, f0[:9], 6), line(1, f1, 4)]),  # (9 families)
+            "",
+        ):
+            with self.subTest(bad=bad):
+                self.assertIsNone(run.parse_units(bad, 2))
+
+    def fake(self, body):
+        # (a stand-in native driver: prints what body says, from BENCH_THREADS
+        # and a run counter in a file)
+        d = Path(tempfile.mkdtemp(prefix="units-"))
+        self.addCleanup(shutil.rmtree, d)
+        script = d / "drv.py"
+        script.write_text(
+            "import os, sys\n"
+            "c = %r\n"
+            "n = int(open(c).read()) if os.path.exists(c) else 0\n"
+            "open(c, 'w').write(str(n + 1))\n"
+            "t = int(os.environ['BENCH_THREADS'])\n" % str(d / "count") + body
+        )
+        old_cmd, old_cap = run.command, run.CAP
+        run.command = lambda b, row, n, mode, k=1: [sys.executable, str(script)]
+        run.CAP = None
+        self.addCleanup(setattr, run, "command", old_cmd)
+        self.addCleanup(setattr, run, "CAP", old_cap)
+
+    def test_consistent_units_are_accepted(self):
+        self.fake("print('UNITS|0|1,0,0,0,0,0,0,0,0,2|3')\n")
+        got, why = run.units({"id": "r"}, 1, 30, 1)
+        self.assertEqual(
+            (got, why), ([{"v": 0, "families": [1] + [0] * 8 + [2], "used": 3}], "")
+        )
+
+    def test_nondeterministic_units_are_refused(self):
+        self.fake("print('UNITS|0|%d,0,0,0,0,0,0,0,0,0|%d' % (n + 1, n + 1))\n")
+        self.assertEqual(
+            run.units({"id": "r"}, 1, 30, 1),
+            (None, "units differ between two 1-thread runs"),
+        )
+
+    def test_units_lost_to_other_threads_are_refused(self):
+        self.fake(
+            "u = 5 if t == 1 else 3\nprint('UNITS|0|%d,0,0,0,0,0,0,0,0,0|%d' % (u, u))\n"
+        )
+        got, why = run.units({"id": "r"}, 1, 30, 1)
+        self.assertIsNone(got)
+        self.assertIn("between 1 and", why)
+
+    def test_unmetered_is_recorded_as_such(self):
+        self.fake("print('UNITS|unmetered')\n")
+        self.assertEqual(run.units({"id": "r"}, 1, 30, 1), ("unmetered", ""))

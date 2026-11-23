@@ -58,6 +58,10 @@ EXPECTED = None
 FLAGS = re.compile(r"^(avx|avx2|avx512\w*|fma|bmi2|adx|sse4_2|asimd|sve\w*|neon)$")
 LINE = re.compile(r"^(RESULT|TIME|INPUTS)\|(.*)$", re.MULTILINE)
 # (protocol 5: a time mode's samples, JSON, before its TIME line)
+UNITS_LINE = re.compile(
+    r"^UNITS\|(\d{1,6})\|(\d{1,20}(?:,\d{1,20}){9})\|(\d{1,20})$", re.MULTILINE
+)
+UNITS_NONE = re.compile(r"^UNITS\|unmetered$", re.MULTILINE)
 TIMING_LINE = re.compile(r"^TIMING\|(\{.*\})$", re.MULTILINE)
 TIMING_LIMIT = 1 << 16
 
@@ -966,6 +970,48 @@ def invoke(
     return r
 
 
+def parse_units(text: str, k: int) -> list | str | None:
+    """A units run's report: "unmetered", or one {v, families, used} per
+    variant, in order, each family vector summing to used; None when
+    malformed."""
+    if UNITS_NONE.search(text) and not UNITS_LINE.search(text):
+        return "unmetered"
+    found = UNITS_LINE.findall(text)
+    if len(found) != k:
+        return None
+    out = []
+    for i, (v, fams, used) in enumerate(found):
+        f = [int(x) for x in fams.split(",")]
+        if int(v) != i or sum(f) != int(used):
+            return None
+        out.append({"v": i, "families": f, "used": int(used)})
+    return out
+
+
+def units(row: dict, n: int, timeout: float, k: int) -> tuple[list | str | None, str]:
+    """The native driver's meter units for the K variants, checked: the
+    families sum to the total, two 1-thread runs agree (determinism), and
+    an N-thread run agrees with them (the tally is per thread: work moved
+    to other threads would go uncounted).  (units, "") or (None, why)."""
+    cmd = command("native", row, n, "units", k)
+    if cmd is None:
+        return None, "no native driver"
+    runs = []
+    for threads in (1, 1, THREADS):
+        r = run_child(cmd, timeout, threads, CAP)
+        if r["status"] != "ok":
+            return None, f"units run {r['status']}"
+        got = parse_units(r.get("output", ""), k)
+        if got is None:
+            return None, "units malformed (families must sum to the total)"
+        runs.append(got)
+    if runs[0] != runs[1]:
+        return None, "units differ between two 1-thread runs"
+    if runs[0] != runs[2]:
+        return None, f"units differ between 1 and {THREADS} threads"
+    return runs[0], ""
+
+
 def point(row: dict, key: str, backends: list[str], ident: dict) -> dict:
     size = row["sizes"][key]
     n, timeout = size["n"], float(size["timeout"])
@@ -1040,6 +1086,15 @@ def point(row: dict, key: str, backends: list[str], ident: dict) -> dict:
             for t in timed.values():
                 if t["status"] == "ok":
                     t["status"] = "mismatch"
+
+    # 4. the meter's units (calibration rows with a native driver): refused,
+    # as an error, when they are not deterministic or not thread-independent
+    if rec["status"] == "ok" and "native" in present and wants_vtime("native", row):
+        got, why = units(row, n, timeout, k)
+        if got is None:
+            rec["status"], rec["units_error"] = "error", why
+        else:
+            rec["units"] = got
 
     steals = [
         t["steal"]

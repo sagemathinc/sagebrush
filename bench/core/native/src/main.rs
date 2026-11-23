@@ -4,6 +4,7 @@
 //! measures the engine itself; the Sage-mode driver measures what users
 //! get, and the difference between the two is the cost of reaching the
 //! engine.
+use sagebrush_arith::cost::{metered, Meter};
 use sagebrush_arith::nmod::Modulus;
 use sagebrush_arith::zmat::{self, ZMat};
 use sagebrush_arith::{nmod_mat, nmod_poly, zpoly};
@@ -60,6 +61,32 @@ fn run<T, F: FnMut() -> T>(mode: &str, variants: usize, mut build: impl FnMut(us
     if mode == "inputs" {
         let hs: Vec<u64> = (0..variants).map(|v| build(v).0).collect();
         println!("INPUTS|{}", hash_u64(&hs));
+        return;
+    }
+    if mode == "units" {
+        // (spec: each variant built and run once, untimed, inside a metered
+        // region on an accounting meter with no bound; one line per variant,
+        // the 10 families in Family order, then the meter's total.  A row
+        // whose engine code charges nothing prints UNITS|unmetered.  Work on
+        // other threads is not counted (the tally is per thread): run.py
+        // compares 1 thread with N to catch that.)
+        let mut lines = Vec::with_capacity(variants);
+        let mut any = false;
+        for v in 0..variants {
+            let mut op = build(v).1;
+            let mut meter = Meter::accounting(u64::MAX);
+            std::hint::black_box(metered(&mut meter, || op()));
+            let u = meter.units();
+            any |= meter.used() > 0;
+            lines.push(format!("UNITS|{}|{}|{}", v, u.0.iter().map(|x| x.to_string()).collect::<Vec<_>>().join(","), meter.used()));
+        }
+        if any {
+            for line in lines {
+                println!("{line}");
+            }
+        } else {
+            println!("UNITS|unmetered");
+        }
         return;
     }
     if mode == "once" {
