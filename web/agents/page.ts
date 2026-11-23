@@ -680,13 +680,15 @@ async function closeTab(threadId: string, id: string) {
         if (current().id === threadId) { openArtifact = id; renderArtifacts(); }
         return;
       }
+    }
+    // (the keyboard's place, as it is now that the saving is done and before anything is taken away: on the tab shown
+    //  next, or the chat's All artifacts once the pane closes, if it was in the pane; elsewhere, it stays put)
+    const hadFocus = document.activeElement instanceof HTMLElement && $("#artifacts").contains(document.activeElement);
+    if (h) {
       hosts.delete(k);
       h.el.remove();
     }
     if (current().id !== threadId) return;
-    // (the keyboard's place, as it is now, after the saving: on the tab shown next, or the chat's All artifacts once the
-    //  pane closes, if it was in the pane; elsewhere, it stays where the person put it)
-    const hadFocus = document.activeElement instanceof HTMLElement && $("#artifacts").contains(document.activeElement);
     const t = current(), closed = closedOf(t);
     closed.add(id);
     t.closed = [...closed];
