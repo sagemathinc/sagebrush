@@ -46,7 +46,7 @@ def is_mp(v):
 
 
 def huge(v):
-    # past the values a symbolic expression holds (2^-4096 <= |v| < 2^4096),
+    # past the values a symbolic expression holds (2^-4097 <= |v| < 2^4096),
     # or an element of RR past the doubles
     import _sage_expr
     if _sage_expr._rr_args((v,)) == 2:

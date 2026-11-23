@@ -7824,7 +7824,7 @@
   "owner": "symbolic engine",
   "reason": "whether a RealField power is computed in the engine (its exact form within num::MAX_INT_BITS) or by the front end, which has no such bound; refuses nothing"
  },
- "engine/sym/src/mpnum.rs :: refuse_range :: MAX_EXP, MAX_EXP #0": {
+ "engine/sym/src/mpnum.rs :: refuse_range :: MAX_EXP, MAX_EXP + 1 #0": {
   "class": "coverage",
   "owner": "symbolic engine",
   "reason": "RealField(p) numbers in symbolic expressions: a case not represented yet (complex values, mixed doubles, values past 2^+-4096, other rounding modes), refused as not available, never a wrong value; not a resource cap"
@@ -12011,7 +12011,7 @@
   "owner": "sage kernel (@sagebrush-sage2)",
   "reason": "a docstring naming the error a function raises; refuses nothing"
  },
- "lib/_sage_expr.py :: _mp_s :: \"symbolic expression is not available in sagebrush yet\" % (v, _MP_MAX_EXP, _MP_MAX_EXP)) #0": {
+ "lib/_sage_expr.py :: _mp_s :: \"symbolic expression is not available in sagebrush yet\" % (v, _MP_MAX_EXP, _MP_MAX_EXP + 1)) #0": {
   "class": "coverage",
   "owner": "sage kernel (@sagebrush-sage2)",
   "reason": "RealField(p) numbers in symbolic expressions: a case not represented yet (complex values, mixed doubles, values past 2^+-4096, other rounding modes), refused as not available, never a wrong value; not a resource cap"
