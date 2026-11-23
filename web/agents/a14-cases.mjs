@@ -518,6 +518,14 @@ export async function runA14({ site, ok, want = () => true }) {
     const said = await Q.until(`document.querySelector('#conn-status').textContent === ${JSON.stringify(COPY.otherTab)}`, 10000).then(() => true, () => false);
     const quiet = await A.quiet(1000), bar = await Q.bar();
     ok(said && quiet && A.hellos === h0 && A.upgrades === u0 && bar.status === COPY.otherTab && bar.act === "Connect" && !(await Q.connected()) && (await P.connected()), "A14-3d: a new tab while the first is connected says the other tab has Claude (no attempt, no hello); the first stays connected", { said, quiet, bar });
+    // (#1688: meanwhile this tab isn't the scripted demo: its header says where Claude is, no preview banner, Send inert)
+    const look = () => Q.ev(`({ who: document.querySelector('#who').textContent, banner: document.querySelector('#banner').textContent })`);
+    // (in a new chat of its own: one the demo could otherwise answer)
+    const n0 = await Q.ev(`document.querySelectorAll('#threads .thread').length`);
+    await Q.ev(`(document.querySelector('#new').click(), true)`);
+    await Q.until(`document.querySelectorAll('#threads .thread').length === ${n0} + 1`);
+    const l1 = await look(), st1 = await Q.sendState();
+    ok(l1.who === "Claude in another tab" && !/scripted/.test(l1.who + l1.banner) && st1.ariaDisabled === "true" && st1.disabled === false, "A14-3d: meanwhile not the scripted demo: the header says 'in another tab', no preview banner, Send aria-disabled (#1688)", { ...l1, st1 });
     await Q.ev(`(document.querySelector('#connect').click(), true)`);
     await Q.until(`[...document.querySelectorAll('.sbag-dlg h2')].some((h) => h.textContent === 'Connect an agent')`);
     const note = await Q.ev(`document.querySelector('.sbag-dlg .other-tab')?.textContent ?? null`);
@@ -529,6 +537,8 @@ export async function runA14({ site, ok, want = () => true }) {
     await Q.until(`[...document.querySelectorAll('.sbag-dlg h2')].some((h) => h.textContent === 'Connect an agent')`);
     const after = await Q.ev(`document.querySelector('.sbag-dlg .other-tab')?.textContent ?? null`);
     ok(gone && after === null, "A14-3d: with the first tab closed, the new tab stops saying so by itself, and its Connect asks only for the link", { gone, after });
+    const l2 = await look();
+    ok(/scripted demo/.test(l2.who), "A14-3d: and then, in that new chat, it is the scripted demo again, as before the other tab (#1688)", l2);
   });
 
   // A14-4: Revoke, then reload: no bar, nothing reconnects, no record

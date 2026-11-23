@@ -1085,7 +1085,9 @@ function renderComposer() {
 const marked = (t: Thread) => session.marked(t);
 // (connected on this page, or a reload record found: a chat made since isn't the demo's either)
 let connectedHere = false;
-const mayDemo = (t: Thread) => !marked(t) && !connectedHere;
+// (another Agents tab of this browser has the agent, as it answers "live": this one isn't the demo meanwhile, #1688)
+let otherTabLive = false;
+const mayDemo = (t: Thread) => !marked(t) && !connectedHere && !otherTabLive;
 const inert = (t: Thread) => !live() && !mayDemo(t);
 
 type ConnBar = { kind: keyof typeof CONN | "runner"; text?: string; alert: boolean; action: "reconnect" | "connect" | null };
@@ -1726,10 +1728,13 @@ answerAgentsLive(() => pairing?.state === "granted");
 // (and asks the same of the others: while another Agents tab has the agent and this one has none, the bar says so, and
 //  goes once that tab no longer does; asked at load, each time this tab is shown again, and every few seconds while
 //  the bar says so, #1550)
-let otherTabLive = false, otherTabTimer = 0;
+let otherTabTimer = 0;
 async function checkOtherTab() {
   const mine = !!pairing && pairing.state !== "closed";
+  const was = otherTabLive;
   otherTabLive = !mine && (await agentsTabLive());
+  // (the header, the banner and Send follow: not the scripted demo while that tab has Claude, #1688)
+  if (otherTabLive !== was) { renderHeader(); renderComposer(); }
   if (otherTabLive && (!connBar || connBar.kind === "kept")) setConn({ kind: "otherTab", alert: false, action: "connect" });
   else if (!otherTabLive && connBar?.kind === "otherTab") setConn(null);
   clearTimeout(otherTabTimer);
@@ -1876,6 +1881,8 @@ function renderHeader() {
     whoText(who, "wait", "", waitingFor ? RUNNER.waiting(connectingTo) : RUNNER.connecting(connectingTo));
   } else if (pairing && pairing.state === "paired") {
     whoText(who, "wait", agentName(), "waiting: allow it in the dialog");
+  } else if (otherTabLive) {
+    who.innerHTML = `<span class="conn"></span>Claude <small>in another tab</small>`;
   } else if (inert(current())) {
     who.innerHTML = `<span class="conn"></span>Claude <small>not connected</small>`;
   } else {
