@@ -47,11 +47,31 @@ try {
   globalThis.fetch = async () => { throw new TypeError("Load failed"); };
   await assert.rejects(mod.publicLatestEngine(), /Load failed/);
   let offered = 0;
-  const start = (error) => mod.fileEngine(async () => ({ names: [], bytes: async () => { throw error; } }), { sage: false, unavailable: () => { offered++; } }).module();
+  const start = (error) => mod.fileEngine(async () => ({ names: [], bytes: async () => { throw error; } }), { sage: false, unavailable: (yes) => { if (yes) offered++; } }).module();
   await assert.rejects(start(new Error("SHA-256 differs: refused")), /SHA-256/);
   assert.equal(offered, 0, "a part hash refusal never offers engine substitution");
   await assert.rejects(start(new mod.EnginePartError("404", "missing", "https://old.invalid/")), /isn't published/);
   assert.ok(offered > 0, "genuine missing parts mark recovery as available");
+  // Both part orders, and a late hash refusal: no offer while the hash is
+  // pending, no offer after it fails, and the integrity error wins.
+  for (const reverse of [false, true]) {
+    const decisions = [];
+    let rejectHash;
+    const hash = new Promise((_, reject) => { rejectHash = reject; });
+    const hashName = reverse ? "sagebrush-engine.wasm" : "sagebrush-worker.js";
+    const missingName = reverse ? "sagebrush-worker.js" : "sagebrush-engine.wasm";
+    const mixed = mod.fileEngine(async () => ({ names: [], bytes: async (name) => {
+      if (name === hashName) return hash;
+      if (name === missingName) throw new mod.EnginePartError("404", "missing", "https://old.invalid/");
+      return new ArrayBuffer(0);
+    } }), { sage: false, unavailable: (yes) => decisions.push(yes) }).module();
+    const rejected = assert.rejects(mixed, /SHA-256 differs/);
+    await new Promise((resolve) => setImmediate(resolve));
+    assert.deepEqual(decisions, [], "missing part alone cannot enable recovery before all hashes settle");
+    rejectHash(new Error("SHA-256 differs: refused"));
+    await rejected;
+    assert.deepEqual(decisions, [false], "integrity refusal suppresses recovery in either part order");
+  }
   console.log("PASS public recovery: opt-in, fixed site, API, id, manifest hash, part hash, HTTP and network refusal");
 } finally {
   globalThis.fetch = originalFetch;

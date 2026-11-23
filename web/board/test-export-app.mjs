@@ -133,6 +133,12 @@ try {
   check(await until("window.sagebrush.board.outputs().then(os => os.some(o => o.id === 'c' && o.output.trim() === '5'))", 60000), "explicit recovery runs the original document using the checked public engine");
   check(await ev("window.__publicRecovery.some(u => u.endsWith('/engine/latest.json')) && window.__publicRecovery.some(u => u.endsWith('/manifest.json'))"), "recovery fetches latest metadata and its manifest");
   await clearBefore();
+  at = "mixed missing part and delayed integrity refusal";
+  await before(`(() => { const f = window.fetch; window.fetch = (u, o) => { const p = new URL(String(u instanceof Request ? u.url : u), location.href).pathname; if (p.endsWith('/sagebrush-worker.js')) return new Promise(r => setTimeout(() => r(new Response('tampered worker')), 100)); if (p.endsWith('/sagebrush-engine.wasm')) return Promise.resolve(new Response('', {status:404})); return f(u, o); }; })();`);
+  await send("Page.navigate", { url: file("mixed-refusal.html", webHtml) });
+  check(await until("/SHA-256 differs/.test(document.querySelector('[data-sbb=say]').textContent)", 30000), "a delayed integrity refusal takes precedence over the earlier 404");
+  check(await ev("!document.querySelector('[data-sbb=say] button')"), "mixed failure does not offer public-engine substitution after a hash refusal");
+  await clearBefore();
   // (in Safari's words: a network failure there is a TypeError \"Load failed\", not \"Failed to fetch\")
   await before(`(() => { window.fetch = () => Promise.reject(new TypeError("Load failed")); })();`);
   await send("Page.navigate", { url: file("safari.html", webHtml) });

@@ -162,17 +162,25 @@ export async function chooseEngine(ref: EngineRef, use: "pinned" | "latest" | un
 /** The engine's parts from `bytes`: all loaded and checked before Python
  * starts.  `math`: the file's own math module (sagebrush-math.js), for the
  * notebook's outputs. */
-export function fileEngine(load: () => Promise<{ bytes: Bytes; names: string[] }>, o: { sage: boolean; math?: string | null; unavailable?: () => void }): EngineParts {
+export function fileEngine(load: () => Promise<{ bytes: Bytes; names: string[] }>, o: { sage: boolean; math?: string | null; unavailable?: (recoverable: boolean) => void }): EngineParts {
   const urls = new Map<string, string>(), raw = new Map<string, ArrayBuffer>();
   const type = (n: string) => (n.endsWith(".js") ? "text/javascript" : n.endsWith(".wasm") ? "application/wasm" : "application/json");
   return {
     async module() {
       const { bytes, names: all } = await load();
       const names = engineFiles(o.sage, all);
-      const got = await Promise.all(names.map((n) => bytes(n).catch((e) => {
-        if (e instanceof EnginePartError) o.unavailable?.();
-        throw new Error(e instanceof EnginePartError ? whyNoEngine(e, n) : String(e?.message ?? e));
-      })));
+      // Decide recovery only after every part has settled: a fast missing
+      // part must not offer substitution while another part's hash is still
+      // being checked. Any non-availability failure takes precedence.
+      const results = await Promise.allSettled(names.map((n) => bytes(n)));
+      const failed = results.flatMap((r, i) => r.status === "rejected" ? [{ name: names[i], error: r.reason }] : []);
+      if (failed.length) {
+        const refusal = failed.find((f) => !(f.error instanceof EnginePartError));
+        o.unavailable?.(!refusal);
+        const { name, error } = refusal ?? failed[0];
+        throw new Error(error instanceof EnginePartError ? whyNoEngine(error, name) : String(error?.message ?? error));
+      }
+      const got = results.map((r) => (r as PromiseFulfilledResult<ArrayBuffer>).value);
       names.forEach((n, i) => { raw.set(n, got[i]); urls.set(n, URL.createObjectURL(new Blob([got[i]], { type: type(n) }))); });
       if (o.math) urls.set("sagebrush-math.js", URL.createObjectURL(new Blob([o.math], { type: "text/javascript" })));
       return import(urls.get("sagebrush-notebook.js")!);

@@ -38,7 +38,7 @@
 // (§8.2), its changes credited to agent:page.
 import { synthetic } from "./board";
 import { termKeep } from "../shell/term-keep.ts";
-import { anyCode, isBoard, type BoardDoc } from "./doc";
+import { anyCode, isBoard, type BoardDoc, type BoardMode } from "./doc";
 import { BoardCode, siteEngine } from "./code";
 import { createRunnerPill } from "../notebook/runner-pill.js";
 import { RUNNER_BROWSER } from "../notebook/runner-browser.js";
@@ -1076,7 +1076,8 @@ const docIndexes: Record<string, Promise<DocEntry[] | null>> = {};
 let chosen: string | null = null;
 // Only a reader's click may leave an exported file's pinned site. A posted
 // frame cannot request this, and a hash mismatch never offers it.
-let unavailableEngine = false, publicEngine = false;
+const engineFailures = new Map<BoardMode, boolean>();
+let publicEngine = false;
 // (a document opened from the file browser or the File menu: a board here, a notebook on its page; this board's saves made first)
 // (U1, William Nov 2: a .tex file clicked in the board's file panel did nothing. It opens in the LaTeX editor, on the
 // notebook page's /?tex=<fid>, where the editor is on (the hosts the build lists: latexOn); this board left the way every
@@ -1479,8 +1480,8 @@ const host: BoardHost = {
   code: !file ? () => new BoardCode(siteEngine(new URL("../", import.meta.url), !(q.get("runner") === "0" && /^(localhost|127\.0\.0\.1|\[::1\])$/.test(location.hostname)) && globalThis.crossOriginIsolated === true && RUNNER_BROWSER && !(window as any).__TAURI__), { observeRunner: (kernel, mod) => runnerPill.watch(kernel, (w: any) => w instanceof mod.RunnerWorker && !w.inner) })
     // (a frame's, always the engine it was built with: a posted board can't ask for another, DOC-A75-3)
     // (one for each language the board's items are in: Sage's with its library, item 16)
-    : ref ? (d, mode) => new BoardCode(fileEngine(() => (publicEngine ? publicLatestEngine() : chooseEngine(ref, fromParent ? "pinned" : d.engine)).then((e) => ((chosen = e.id), e)), { sage: mode === "sage", math: document.getElementById("sb-math")?.textContent, unavailable: () => { unavailableEngine = true; } })) : undefined,
-  engineRecovery: file && ref && !fromParent ? () => unavailableEngine && !publicEngine ? () => { publicEngine = true; unavailableEngine = false; } : null : undefined,
+    : ref ? (d, mode) => new BoardCode(fileEngine(() => (publicEngine ? publicLatestEngine() : chooseEngine(ref, fromParent ? "pinned" : d.engine)).then((e) => ((chosen = e.id), e)), { sage: mode === "sage", math: document.getElementById("sb-math")?.textContent, unavailable: (recoverable) => { engineFailures.set(mode, recoverable); } })) : undefined,
+  engineRecovery: file && ref && !fromParent ? () => engineFailures.size > 0 && [...engineFailures.values()].every(Boolean) && !publicEngine ? () => { publicEngine = true; engineFailures.clear(); } : null : undefined,
   // KaTeX, the notebook's (its stylesheet and fonts beside it); an exported
   // file carries the module as text: imported from a Blob
   math: () => {
