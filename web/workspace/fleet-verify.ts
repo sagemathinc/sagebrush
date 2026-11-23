@@ -4,7 +4,7 @@
 // through the fleet core (fleet/install.ts); this module only connects it to the pin kept beside the device key
 // (fleet-device.ts). It verifies and refuses, nothing else: nothing here signs, and it holds no key.
 import { fleetCore } from "./fleet/install";
-import { advancePin, pin as storedPin } from "./fleet-device";
+import { advancePin, advancePinOnChain, pin as storedPin } from "./fleet-device";
 
 /** The audience (the Sagebrush origin's id for the fleet's objects) and the fleet a page works in. */
 export type FleetCtx = Readonly<{ aud: string; fleet: string }>;
@@ -24,6 +24,12 @@ export class StorageFailed extends Error {
   constructor(cause?: unknown) { super("storage_failed", { cause }); }
 }
 
+/** Another tab pinned a later entry while this chain was checked: fetch the chain again and sync that (not a fork). */
+export class PinMoved extends Error {
+  readonly code = "pin_moved";
+  constructor() { super("pin_moved"); }
+}
+
 /** A fork is claimed only once it is durable: the stored pin, read back, says forked. */
 async function forkRecorded(fleet: string, cause?: unknown): Promise<void> {
   if (!(await storedPin(fleet))?.forked) throw new StorageFailed(cause);
@@ -33,7 +39,10 @@ async function forkRecorded(fleet: string, cause?: unknown): Promise<void> {
  * The fleet's chain, verified: every entry against its predecessor's signer, then against this browser's pin. A chain
  * that doesn't contain the pinned entry (another history at the pinned seq, or a chain shorter than the pin) is a
  * fork: it is recorded, for good, and refused with chain_fork, as is every later sync of a fleet already forked here
- * (the only way out is Reset this device). Otherwise the pin moves to the chain's head and the chain is returned.
+ * (the only way out is Reset this device). Otherwise the pin moves to the chain's head, by a compare-and-set that
+ * requires the stored pin to still be one of this chain's entries, and the chain is returned. If another tab pinned
+ * another branch meanwhile, that is a fork too; if it pinned a later entry, the sync fails with PinMoved (pin_moved):
+ * fetch the chain again.
  * Bad entries refuse with the core's own reason, and the pin stays where it was. When this browser can't store the
  * pin or the fork mark, the sync fails with StorageFailed (storage_failed), never with a fork it didn't record.
  */
@@ -52,16 +61,20 @@ export async function syncChain(ctx: FleetCtx, entries: readonly string[]): Prom
     await forkRecorded(ctx.fleet, cause);
     core.refuse("chain_fork", was.seq > chain.seq ? "a device list behind this device's" : "a device list that conflicts with this device's");
   }
+  // (a compare-and-set in the pin's own transaction: the pin moves only from one of this chain's entries, so another
+  //  tab that pinned another branch meanwhile is a fork, and one that pinned further is a sync to redo, never a reason
+  //  to return this shorter chain)
+  let moved: "moved" | "same" | "behind";
   try {
-    await advancePin(ctx.fleet, head);
+    moved = await advancePinOnChain(ctx.fleet, chain.hashes, head);
   } catch (e) {
     if (!isFork(e)) throw new StorageFailed(e);
-    // (another tab forked the fleet meanwhile: refuse rather than return a chain the pin no longer vouches for)
     await forkRecorded(ctx.fleet, e);
     core.refuse("chain_fork", "this device's pin changed while the list was checked");
   }
-  // (and the chain is returned only once its head is durably pinned: read back, at the head or past it, as another tab
-  //  may have moved it further meanwhile)
+  if (moved === "behind") throw new PinMoved();
+  // (and the chain is returned only once its head is durably pinned: read back, at the head or past it, since another
+  //  tab may since have moved it further, through its own compare-and-set from this head)
   const now = await storedPin(ctx.fleet);
   if (now?.forked) core.refuse("chain_fork", "this device's pin changed while the list was checked");
   if (!now || now.seq < head.seq || (now.seq === head.seq && now.hash !== head.hash)) throw new StorageFailed();

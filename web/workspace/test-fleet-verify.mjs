@@ -22,7 +22,7 @@ const dir = mkdtempSync(join(tmpdir(), "sb-fleet-verify-"));
 const entry = join(dir, "entry.ts");
 writeFileSync(entry, [
   `export * as fv from ${JSON.stringify(join(here, "fleet-verify.ts"))};`,
-  `export { advancePin, pin, resetDevice } from ${JSON.stringify(join(here, "fleet-device.ts"))};`,
+  `export { advancePin, advancePinOnChain, pin, resetDevice } from ${JSON.stringify(join(here, "fleet-device.ts"))};`,
 ].join("\n"));
 const built = await Bun.build({ entrypoints: [entry], target: "browser", format: "esm" });
 rmSync(dir, { recursive: true, force: true });
@@ -136,10 +136,44 @@ try {
     ok(r2 === "storage_failed" && after2.seq === head.seq, "V-12: a longer chain whose pin write is dropped: storage_failed (the pin is read back before a chain is returned)", { r2, after2 });
     ok((await code(P, `m.fv.syncChain(${CTX}, ${E(honest, [extend.append])})`)) === null && (await P.ev(`m.pin(F.ids.fleet)`)).seq === head.seq + 1, "V-12: once storage works, the same chain is pinned");
   }
+  // ---- two tabs: another tab moves the pin while this one verifies (a deterministic interleaving: the first WebCrypto
+  // verify of this sync runs the other tab's move first)
+  const OTHER_TAB = (move) => `(window.realVerify ??= crypto.subtle.verify, crypto.subtle.verify = async function (...a) { crypto.subtle.verify = window.realVerify; await (${move}); return window.realVerify.apply(this, a); }, true)`;
+  {
+    // (the other tab pinned another branch at the head this tab started from; this tab's longer chain must not move it)
+    const P = await page();
+    const h = await P.ev(`m.fv.syncChain(${CTX}, ${E(honest)}).then(() => m.pin(F.ids.fleet))`);
+    await P.ev(OTHER_TAB(`m.resetDevice(F.ids.fleet).then(() => m.advancePin(F.ids.fleet, { seq: ${h.seq}, hash: ${JSON.stringify(H("B"))} }))`));
+    const r = await code(P, `m.fv.syncChain(${CTX}, ${E(honest, [extend.append])})`);
+    const p = await P.ev(`m.pin(F.ids.fleet)`);
+    ok(r === "chain_fork" && p.forked === true && p.seq === h.seq && p.hash === H("B"), "V-13: another tab pins another branch while this one verifies a longer chain: the compare-and-set refuses (chain_fork) and records the fork; the other pin isn't overwritten", { r, p });
+  }
+  {
+    // (the other tab pinned a later entry this tab can't relate to its chain: no fork, no shorter chain returned)
+    const P = await page();
+    const h = await P.ev(`m.fv.syncChain(${CTX}, ${E(honest)}).then(() => m.pin(F.ids.fleet))`);
+    await P.ev(OTHER_TAB(`m.advancePin(F.ids.fleet, { seq: ${h.seq + 2}, hash: ${JSON.stringify(H("C"))} })`));
+    const r = await code(P, `m.fv.syncChain(${CTX}, ${E(honest, [extend.append])})`);
+    const p = await P.ev(`m.pin(F.ids.fleet)`);
+    ok(r === "pin_moved" && p.forked === false && p.seq === h.seq + 2 && p.hash === H("C"), "V-14: another tab pins further while this one verifies: pin_moved (sync again), the other pin kept, no chain returned", { r, p });
+    ok((await code(P, `m.fv.syncChain(${CTX}, ${E(honest, [extend.append])})`)) === "chain_fork", "V-14: syncing that same shorter chain again is a chain behind the pin: chain_fork");
+  }
+  {
+    // (the compare-and-set itself, with made-up hashes: SEC's case, pin at A6, then a divergent B7)
+    const P = await page();
+    const A = (n) => JSON.stringify(Array.from({ length: n + 1 }, (_, i) => H(i < 6 ? "S" : "A")));
+    const Bh = (n) => JSON.stringify(Array.from({ length: n + 1 }, (_, i) => H(i < 6 ? "S" : "B")));
+    await P.ev(`m.advancePinOnChain(F.ids.fleet, ${A(5)}, { seq: 5, hash: ${JSON.stringify(H("S"))} }).then(() => m.advancePinOnChain(F.ids.fleet, ${A(6)}, { seq: 6, hash: ${JSON.stringify(H("A"))} }))`);
+    const r = await code(P, `m.advancePinOnChain(F.ids.fleet, ${Bh(7)}, { seq: 7, hash: ${JSON.stringify(H("B"))} })`);
+    const p = await P.ev(`m.pin(F.ids.fleet)`);
+    ok(r === "chain_fork" && p.forked === true && p.seq === 6 && p.hash === H("A"), "V-15: advancePinOnChain from A6 with a divergent B7: chain_fork, recorded, the pin not moved to B7", { r, p });
+    const q = await P.ev(`m.resetDevice(F.ids.fleet).then(() => m.advancePinOnChain(F.ids.fleet, ${A(6)}, { seq: 6, hash: ${JSON.stringify(H("A"))} })).then(() => m.advancePinOnChain(F.ids.fleet, ${A(5)}, { seq: 5, hash: ${JSON.stringify(H("S"))} }))`);
+    ok(q === "behind" && (await P.ev(`m.pin(F.ids.fleet)`)).seq === 6, "V-15: advancePinOnChain with a head behind the pin: \"behind\", nothing written", q);
+  }
   {
     const P = await page();
     const names = await P.ev(`Object.keys(m.fv).sort().join()`);
-    ok(names === "StorageFailed,syncChain,verifyGrant,verifyHostCert", "S-1: the module exports verification only: syncChain, verifyHostCert, verifyGrant (and its StorageFailed error)", names);
+    ok(names === "PinMoved,StorageFailed,syncChain,verifyGrant,verifyHostCert", "S-1: the module exports verification only: syncChain, verifyHostCert, verifyGrant (and its errors StorageFailed, PinMoved)", names);
   }
 } catch (e) {
   ok(false, "the test ran to its end: " + (e?.stack ?? e));

@@ -107,7 +107,7 @@ try {
   {
     const P = await page();
     const names = await P.ev(`Object.keys(fd).sort().join()`);
-    ok(names === "FLEET_ID,advancePin,deviceKey,ed25519Available,makeDeviceKey,pin,resetDevice", "S-1: the module exports storage only: no sign, verify or private-key accessor", names);
+    ok(names === "FLEET_ID,advancePin,advancePinOnChain,deviceKey,ed25519Available,makeDeviceKey,pin,resetDevice", "S-1: the module exports storage only: no sign, verify or private-key accessor", names);
   }
 } catch (e) {
   ok(false, "the test ran to its end: " + (e?.stack ?? e));
