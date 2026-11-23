@@ -1345,7 +1345,9 @@ try {
     await x(sid);
     await until(`document.querySelector('#close-running').open`, 5000);
     // (Stop, then at once the cell run again: as an agent's run admitted after the answer)
-    await ev(`(document.querySelector('#close-running').close('stop'), setTimeout(() => ${cellJs(0)}.querySelector('.runb').click(), 30), true)`);
+    // (Run pressed again every 20 ms until a new run's token shows: the first press that lands once the stop has gone
+    //  through starts it, within the page's settle; presses while it still stops do nothing)
+    await ev(`(() => { document.querySelector('#close-running').close('stop'); const t0 = Date.now(); const id = setInterval(() => { const c = ${cellJs(0)}; const tok = (c?.querySelector('.out')?.textContent ?? '').match(/run [0-9.]+/)?.[0] ?? ''; if (!c || (tok && tok !== ${JSON.stringify(n0)}) || Date.now() - t0 > 8000) return clearInterval(id); if (!/running|queued/.test(c.className)) c.querySelector('.runb')?.click(); }, 20); return true; })()`);
     await until(`/is still running/.test(document.querySelector('#toast')?.textContent ?? '')`, 15000).catch(() => {});
     await until(`((${cellJs(0)}?.querySelector('.out')?.textContent ?? '').match(/run [0-9.]+/)?.[0] ?? '') !== ${JSON.stringify(n0)} && /run [0-9.]+/.test(${cellJs(0)}?.querySelector('.out')?.textContent ?? '')`, 15000).catch(() => {});
     const t3 = { toast: await ev(`document.querySelector('#toast')?.textContent ?? ''`), tab: await hasTab(sid), running: await running(), n0, n1: await runNo() };
