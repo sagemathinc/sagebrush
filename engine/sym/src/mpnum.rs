@@ -4,7 +4,7 @@
 //! RealNumberMP computes it (lib/_sage_real.py: _round_q, _round_int,
 //! _arith, _special_op, _format): the same roundings, so the same digits.
 //!
-//! The values held lie within 2^-MAX_EXP <= |x| < 2^MAX_EXP (or are 0,
+//! The values held lie within 2^-(MAX_EXP+1) <= |x| < 2^MAX_EXP (or are 0,
 //! infinite or NaN): past them a number has no symbolic form here, and an
 //! operation whose result would leave the range is refused.  (Exact sums and
 //! powers stay of a size bounded by the range and the precision.)
@@ -97,7 +97,7 @@ pub fn round_int(m: &BigInt, e: i64, prec: u32) -> (BigInt, i64) {
 fn refuse_range() -> ! {
     not_implemented(format!(
         "a real number of absolute value at least 2^{} or less than 2^-{} in a symbolic expression is not available in sagebrush yet",
-        MAX_EXP, MAX_EXP
+        MAX_EXP, MAX_EXP + 1
     ))
 }
 
@@ -667,6 +667,10 @@ mod tests {
         for x in [1.5, -0.1, 1e300, 5e-324, 2.2250738585072014e-308, -1e-310, 123456789.0] {
             assert_eq!(r(x, 100).to_f64(), x, "{}", x);
         }
+        // just below 2^-1022 the double has 52 bits, so the value rounds once, to them: 2^-1023 (1 + 2^-52 + 2^-90)
+        // is 2^-1023 (1 + 2^-51), not the 53-bit 2^-1023 (1 + 2^-52) rounded again by ldexp to 2^-1023
+        let m = (BigInt::one() << 90usize) + (BigInt::one() << 38usize) + BigInt::one();
+        assert_eq!(Mp::fin(&m, -1113, 100).to_f64().to_bits(), (1u64 << 51) + 1);
         // a 100-bit 1/3 to the nearest double
         assert_eq!(Mp::from_q(&BigInt::from(1), &BigInt::from(3), 100).to_f64(), 1.0 / 3.0);
         assert_eq!(Mp::fin(&BigInt::one(), 2000, 100).to_f64(), f64::INFINITY);

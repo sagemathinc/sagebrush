@@ -197,7 +197,7 @@ def _mp_s(v):
     else:
         if abs(v._e + abs(v._m).bit_length()) > _MP_MAX_EXP:
             raise NotImplementedError("%s: a real number of absolute value at least 2^%d or less than 2^-%d in a "
-                                      "symbolic expression is not available in sagebrush yet" % (v, _MP_MAX_EXP, _MP_MAX_EXP))
+                                      "symbolic expression is not available in sagebrush yet" % (v, _MP_MAX_EXP, _MP_MAX_EXP + 1))
         body = ("-%xp%d" if v._m < 0 else "%xp%d") % (abs(v._m), v._e)
     return "m%d:%s;" % (R._prec, body)
 
