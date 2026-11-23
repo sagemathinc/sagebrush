@@ -433,7 +433,11 @@ pub fn run() {
                 }
                 _ => {}
             }
-            // (the engine ends with the app)
+            // (a window's engine ends with its window (#1541), and every engine with the app)
+            #[cfg(desktop)]
+            if let tauri::RunEvent::WindowEvent { label, event: tauri::WindowEvent::Destroyed, .. } = &_event {
+                _app.state::<engine::Engine>().stop_window(label);
+            }
             #[cfg(desktop)]
             if let tauri::RunEvent::Exit = _event {
                 _app.state::<engine::Engine>().stop();
