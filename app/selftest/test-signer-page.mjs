@@ -1,11 +1,15 @@
 // The approvals window's page (app/signer/signer.js) in a VM, with a fake window: the self-test probe's paths, and the
 // diagnostic's reports (a refused call reports once; a call that neither answers nor fails within 8 s reports "hung",
-// and that is final: a late answer or failure after it reports nothing more and runs no control).
+// and that is final: a late answer or failure after it reports nothing more and runs no control); and the app's check
+// after the page loads (PROBE_CHECK in app/src-tauri/src/signer.rs): no probe, no IPC, or a page whose script didn't run.
 //   node app/selftest/test-signer-page.mjs
 import { readFileSync } from "node:fs";
 import vm from "node:vm";
 
 const SOURCE = readFileSync(new URL("../signer/signer.js", import.meta.url), "utf8");
+const RUST = readFileSync(new URL("../src-tauri/src/signer.rs", import.meta.url), "utf8");
+const CHECK = /^const PROBE_CHECK: &str = "([^"\\]*)";$/m.exec(RUST)?.[1];
+if (!CHECK) { console.log("FAIL no PROBE_CHECK in signer.rs"); process.exit(1); }
 let fails = 0, checks = 0;
 const ok = (c, what) => { checks++; console.log((c ? "ok   " : "FAIL ") + what); if (!c) fails++; };
 const same = (a, b) => JSON.stringify(a) === JSON.stringify(b);
@@ -32,6 +36,7 @@ function page({ probe = { control: null, other: "http://127.0.0.1:9" }, search =
   };
   vm.runInNewContext(SOURCE, Object.assign(ctx, window));
   w.status = status;
+  w.window = window;
   w.resolve = (v) => pending.resolve(v);
   w.reject = (e) => pending.reject(e);
   w.fire = (ms) => { for (const t of w.timers) if (t.ms === ms && !t.cleared) { t.cleared = true; t.fn(); } };
@@ -80,6 +85,26 @@ const flush = () => new Promise((r) => setImmediate(r));
   w.resolve("sig"); await flush();
   ok(w.frames.length === 0, "nor frames the other server");
 }
+
+// (the app's check after the page loads: it reports only what's missing, once, and never on a reloaded page)
+function check({ probe = true, tauri = true, ran = true, search = "" } = {}) {
+  const navigations = [];
+  const window = {
+    ...(probe ? { __SB_SIGNER_PROBE__: { control: null, other: "http://127.0.0.1:9" } } : {}),
+    ...(tauri ? { __TAURI__: { core: { invoke: () => { throw new Error("the check called a command"); } } } } : {}),
+    ...(ran ? { __SB_SIGNER_RAN__: true } : {}),
+  };
+  const location = { search, pathname: "/signer/index.html", replace: (u) => navigations.push(u) };
+  vm.runInNewContext(CHECK, { window, location });
+  return navigations;
+}
+ok(same(check(), []), "the check: everything there, no report");
+ok(same(check({ ran: false }), ["/signer/index.html?probe=no-script"]), "the check: the page's script didn't run: no-script");
+ok(same(check({ tauri: false }), ["/signer/index.html?probe=no-tauri"]) && same(check({ tauri: false, ran: false }), ["/signer/index.html?probe=no-tauri"]), "the check: no IPC global: no-tauri");
+ok(same(check({ probe: false, tauri: false, ran: false }), ["/signer/index.html?probe=no-probe"]), "the check: no probe: no-probe");
+ok(same(check({ ran: false, search: "?probe=hung" }), []), "the check: a reloaded page: no report");
+{ const w = page({ probe: null }); ok(w.window.__SB_SIGNER_RAN__ === true, "the page marks that it ran, with no probe too"); }
+{ const w = page(); ok(w.window.__SB_SIGNER_RAN__ === true && same(check({ ran: w.window.__SB_SIGNER_RAN__ === true }), []), "after the page ran, the check reports nothing"); }
 
 console.log(fails ? `${fails} of ${checks} failed` : `test-signer-page: all ${checks} passed`);
 process.exit(fails ? 1 : 0);

@@ -285,8 +285,7 @@ if (passed) {
     console.log(`\nthe approvals window${control ? `, the control "${control}"` : ": only its own page signs"}`);
     const v = await signerLaunch(control);
     console.log(v.ok ? "as it must" : `FAIL ${v.why.join("; ")}`);
-    passed &&= v.ok;
-    if (!passed) break;
+    passed &&= v.ok; // (every row runs, after a failure too: a control's outcome says why the positive failed)
   }
 }
 process.exit(passed ? 0 : 1);
