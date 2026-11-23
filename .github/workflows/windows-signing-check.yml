@@ -99,7 +99,13 @@ jobs:
           $s = Get-AuthenticodeSignature $exe
           if ($s.Status -eq 'Valid') { "PASS  Get-AuthenticodeSignature: Valid" } else { "FAIL  Get-AuthenticodeSignature: $($s.Status)"; $fails++ }
           if ($s.TimeStamperCertificate) { "PASS  the signature is timestamped" } else { "FAIL  the signature has no timestamp"; $fails++ }
-          if ($s.SignerCertificate -and $s.SignerCertificate.Subject -match 'O=("?)SageMath, Inc\.') { "PASS  the signer is SageMath, Inc." } else { "FAIL  the signer isn't SageMath, Inc."; $fails++ }
+          # (the signer's organization: exactly one O attribute, whose whole value is SageMath, Inc., quoted as .NET
+          #  writes a value with a comma, or with the comma escaped; case-sensitive; delimited by ", " or the ends.
+          #  scripts/test-app-release-guard.mjs runs these two patterns over the accepted forms and near misses)
+          $OrgPattern = '(?:^|, )O=(?:"SageMath, Inc\."|SageMath\\, Inc\.)(?:, |$)'
+          $AnyOrg = '(?:^|, )O='
+          $subject = if ($s.SignerCertificate) { $s.SignerCertificate.Subject } else { '' }
+          if (($subject -cmatch $OrgPattern) -and ([regex]::Matches($subject, $AnyOrg).Count -eq 1)) { "PASS  the signer is SageMath, Inc." } else { "FAIL  the signer isn't SageMath, Inc."; $fails++ }
           (Get-FileHash -Algorithm SHA256 $exe).Hash.ToLower() + "  sagebrush-signing-probe.exe" | Out-File -Encoding ascii "$env:RUNNER_TEMP\probe\SHA256SUMS"
           if ($fails) { exit 1 }
 

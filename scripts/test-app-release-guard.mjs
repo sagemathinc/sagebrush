@@ -337,6 +337,44 @@ if (jit) {
   ok(/files: \$\{\{ runner\.temp \}\}\\probe\\sagebrush-signing-probe\.exe/.test(signStep) && !/files-folder|files-catalog/.test(signStep), "the sign step signs the throwaway probe alone");
   const verifyStep = check.slice(verify, upload);
   ok(/verify \/pa \/all/.test(verifyStep) && /Get-AuthenticodeSignature/.test(verifyStep) && /TimeStamperCertificate/.test(verifyStep), "the check runs signtool verify /pa /all and Get-AuthenticodeSignature, timestamp included");
+  // (the signer's organization: the step's own two patterns (.NET regex, in the subset JavaScript reads the same:
+  //  groups, alternation, anchors, escapes), run over the subject forms .NET writes and near misses; the check passes
+  //  when the first matches, case-sensitively, and the second matches exactly once)
+  const orgPat = /^\s+\$OrgPattern = '([^']*)'$/m.exec(verifyStep)?.[1];
+  const anyPat = /^\s+\$AnyOrg = '([^']*)'$/m.exec(verifyStep)?.[1];
+  ok(!!orgPat && !!anyPat && /\$subject -cmatch \$OrgPattern/.test(verifyStep) && /\[regex\]::Matches\(\$subject, \$AnyOrg\)\.Count -eq 1/.test(verifyStep), "the signer check uses $OrgPattern (case-sensitive) and exactly one O attribute");
+  ok(!/Subject -match|Subject -like|-imatch/.test(verifyStep), "no loose subject match is left");
+  if (orgPat && anyPat) {
+    ok(/^[\w\s(?:^|),="\\.$]+$/.test(orgPat + anyPat) && !/[*+{}[\]]/.test(orgPat + anyPat), "the patterns use only the regex subset both engines read alike");
+    const org = new RegExp(orgPat), any = new RegExp(anyPat, "g");
+    const signer = (subject) => org.test(subject) && (subject.match(any) ?? []).length === 1;
+    for (const [subject, passes] of [
+      ['CN="SageMath, Inc.", O="SageMath, Inc.", L=Seattle, S=Washington, C=US', true],
+      ['O="SageMath, Inc."', true],
+      ['C=US, O="SageMath, Inc."', true],
+      ['O="SageMath, Inc.", C=US', true],
+      ["CN=x, O=SageMath\\, Inc., C=US", true],
+      ['O="SageMath, Inc. Evil", C=US', false],
+      ['O="SageMath, Inc.evil", C=US', false],
+      ["O=SageMath, Inc.evil, C=US", false],
+      ["O=SageMath, Inc., C=US", false],
+      ['O="Evil SageMath, Inc.", C=US', false],
+      ['O="XSageMath, Inc.", C=US', false],
+      ['O="SageMath, Inc., C=US', false],
+      ['O=SageMath, Inc.", C=US', false],
+      ['O="sagemath, inc.", C=US', false],
+      ['o="SageMath, Inc.", C=US', false],
+      ['XO="SageMath, Inc.", C=US', false],
+      ['XO="SageMath, Inc.", O="Evil", C=US', false],
+      ["O=SageMath\\, Inc.evil, C=US", false],
+      ["O=SageMath\\, Inc. Evil", false],
+      ['CN="SageMath, Inc.", C=US', false],
+      ['O="SageMath, Inc.", O="Evil", C=US', false],
+      ['O="Evil", O="SageMath, Inc.", C=US', false],
+      ['CN="a, O=""SageMath, Inc."", b", O="Evil"', false],
+      ["", false],
+    ]) ok(signer(subject) === passes, `the signer check ${passes ? "accepts" : "refuses"} ${JSON.stringify(subject)}`);
+  }
   const up = check.slice(upload);
   ok(/retention-days: 1$/m.test(up) && !/app\/|bundle|\.msi|setup/i.test(up), "the signed probe alone is kept, 1 day");
   ok(!/gh release|softprops|action-gh-release|releases/.test(ws), "windows-signing-check makes no release");
