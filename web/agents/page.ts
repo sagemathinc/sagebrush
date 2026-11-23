@@ -649,8 +649,10 @@ function reopenTab(t: Thread, id: string) {
   t.closed = [...c];
   save();
 }
-// (one close at a time per tab: a second click while one is saving changes nothing)
+// (one close at a time per tab: a second click while one asks or saves changes nothing)
 const closingTabs = new Set<string>();
+const STOP_WAIT_MS = 5000;
+const TAB_COPY = { stillRunning: "A cell started running again in this notebook, so its tab stays open." } as const;
 async function closeTab(threadId: string, id: string) {
   if (current().id !== threadId) return;
   const k = hostKey(threadId, id);
@@ -658,15 +660,23 @@ async function closeTab(threadId: string, id: string) {
   closingTabs.add(k);
   try {
     const h = hosts.get(k);
-    if (h?.nb?.isRunning() && !(await mayStopRunning([[k, h]]))) return;
+    if (h?.nb?.isRunning()) {
+      if (!(await mayStopRunning([[k, h]]))) return;
+      // (Stop and close: the interrupt lands, at most a few seconds; a run still going after it (one started after
+      //  the person's answer, an agent's) keeps the tab open, said: it isn't stopped or closed without being asked)
+      for (const t = Date.now(); h.nb?.isRunning() && Date.now() - t < STOP_WAIT_MS; ) await new Promise((r) => setTimeout(r, 50));
+      // (and a moment more: the notebook counts a cell queued or running as it is drawn, a beat after, so a run asked
+      //  for just after the stop is counted before it is judged)
+      await new Promise((r) => setTimeout(r, 150));
+      if (current().id !== threadId || hosts.get(k) !== h) return;
+      if (h.nb?.isRunning()) { toast(TAB_COPY.stillRunning, 6000); return; }
+    }
     if (current().id !== threadId || hosts.get(k) !== h) return;
-    // (a cell started meanwhile (the agent's run): the tab stays open, as the person didn't say to stop that one)
-    if (h?.nb?.isRunning()) return;
     if (h) {
       // (release freezes a notebook and ends its runs before it awaits anything: no cell starts while it saves)
       const r: Released = h.release ? await h.release().catch((e) => ({ ok: false as const, why: String((e as Error)?.message ?? e) })) : { ok: true };
-      if (hosts.get(k) !== h) return; // (replaced or gone meanwhile: nothing of this close applies)
       if (!r.ok) {
+        if (hosts.get(k) !== h) return; // (replaced or gone meanwhile: its refusal has nothing to show on)
         // (it could neither save nor keep a copy: it stays, shown, with its bar, as on the pane's close)
         h.bar = {
           kind: "refused",
@@ -685,7 +695,7 @@ async function closeTab(threadId: string, id: string) {
     //  next, or the chat's All artifacts once the pane closes, if it was in the pane; elsewhere, it stays put)
     const hadFocus = document.activeElement instanceof HTMLElement && $("#artifacts").contains(document.activeElement);
     if (h) {
-      hosts.delete(k);
+      if (hosts.get(k) === h) hosts.delete(k);
       h.el.remove();
     }
     if (current().id !== threadId) return;

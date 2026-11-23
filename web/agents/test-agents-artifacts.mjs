@@ -1296,6 +1296,103 @@ try {
     ok(late.closedAt === 0 && late.roots === 0 && late.nbs === 0 && !late.open, "a notebook closed while it opened leaves nothing behind (its late load and attach let go)", late);
   }
 
+  // ======================================================================== #1792: closing one notebook's tab (its ×)
+  // (the tab's own close: the same consent, saving and keeping as the pane's; a run started after the person's Stop
+  //  keeps the tab; a second click while it asks or saves changes nothing)
+  if (want("tabclose")) {
+    const shownId = () => ev(`document.querySelector('#artifacts .tab.on')?.dataset.tab ?? null`);
+    // (a tab shown: the pane open with it; a closed pane keeps its last head, hidden)
+    const hasTab = (id) => ev(`document.body.classList.contains('has-artifact') && !!document.querySelector('#artifacts .tab[data-tab=${JSON.stringify(id)}]')`);
+    const closedNow = () => ev(`(() => { const s = JSON.parse(localStorage.getItem('sagebrush-agents-preview-v1') ?? 'null'); return s ? s.threads.find((t) => t.id === s.current)?.closed ?? [] : []; })()`);
+    const x = (id) => ev(`(document.querySelector('#artifacts [data-close=${JSON.stringify(id)}]').click(), true)`);
+    const running = () => ev(`/running|queued/.test(${cellJs(0)}?.className ?? '')`);
+
+    // TC1: a running cell: the × asks; a second click while it asks changes nothing; Cancel keeps the run and the tab
+    const S = "/notes/tab-slow.ipynb";
+    await call("workspace.create", { path: S, content: docFor(S, [{ code: "import time\nfor i in range(600):\n    time.sleep(0.05)" }]), mode: "python" });
+    await openNotebook(S);
+    const sid = await shownId();
+    await ev(`${cellJs(0)}.querySelector('.runb').click()`);
+    await until(`/· running/.test(document.querySelector('#artifacts .tab.on')?.textContent ?? '')`, 120000);
+    const exc = () => logs.filter((l) => l.startsWith("exception:")).length;
+    const errs1 = exc();
+    await x(sid);
+    await until(`document.querySelector('#close-running').open`, 5000);
+    await x(sid); // (a second click while it asks)
+    await sleep(200);
+    const twice = { open: await ev(`document.querySelector('#close-running').open`), errors: exc() - errs1 };
+    await ev(`document.querySelector('#close-running').close('')`);
+    await sleep(300);
+    ok(twice.open && twice.errors === 0 && (await hasTab(sid)) && (await running()) && !(await closedNow()).includes(sid), "TC1: a running notebook's × asks first; a second click while it asks changes nothing; Cancel keeps the tab and the run", twice);
+
+    // TC2: Stop and close: the run stops, the tab closes, kept closed with the chat
+    await x(sid);
+    await until(`document.querySelector('#close-running').open`, 5000);
+    await ev(`document.querySelector('#close-running').close('stop')`);
+    await until(`!document.querySelector('#artifacts .tab[data-tab=${JSON.stringify(sid)}]') || !document.body.classList.contains('has-artifact')`, 15000).catch(() => {});
+    await sleep(500);
+    ok(!(await ev(`document.body.classList.contains('has-artifact') && !!document.querySelector('#artifacts .tab[data-tab=${JSON.stringify(sid)}]')`)) && (await closedNow()).includes(sid), "TC2: Stop and close stops the run and closes the tab, kept closed with the chat", await closedNow());
+
+    // TC3: a run started right after the person's Stop keeps the tab open, said so; nothing of it is cancelled silently
+    await openNotebook(S);
+    await ev(`${cellJs(0)}.querySelector('.runb').click()`);
+    await until(`/· running/.test(document.querySelector('#artifacts .tab.on')?.textContent ?? '')`, 120000);
+    await x(sid);
+    await until(`document.querySelector('#close-running').open`, 5000);
+    // (Stop, then at once the cell run again: as an agent's run admitted after the answer)
+    await ev(`(document.querySelector('#close-running').close('stop'), setTimeout(() => ${cellJs(0)}.querySelector('.runb').click(), 30), true)`);
+    await until(`/started running again/.test(document.querySelector('#toast')?.textContent ?? '')`, 15000).catch(() => {});
+    const t3 = { toast: await ev(`document.querySelector('#toast')?.textContent ?? ''`), tab: await hasTab(sid), running: await running() };
+    ok(/started running again/.test(t3.toast) && t3.tab && t3.running && !(await closedNow()).includes(sid), "TC3: a run started after the person's Stop keeps the tab open, running, and says so", t3);
+    // (then closed for good: Stop and close again, nothing restarting it)
+    await x(sid);
+    await until(`document.querySelector('#close-running').open`, 5000);
+    await ev(`document.querySelector('#close-running').close('stop')`);
+    await until(`!document.querySelector('#artifacts .tab[data-tab=${JSON.stringify(sid)}]') || !document.body.classList.contains('has-artifact')`, 15000).catch(() => {});
+
+    // TC4: an edit whose save waits (the workspace held by another tab, released in time): nothing is taken away before
+    // the save is made; a second click shares the one close; then the tab closes, its edit saved
+    const D = "/notes/tab-held.ipynb";
+    await call("workspace.create", { path: D, content: docFor(D, [{ code: "d = 0" }]), mode: "python" });
+    const dref = await refOf(D);
+    await openNotebook(D);
+    const did = await shownId();
+    await lockWorkspace();
+    await typeInto(0, "  # tab");
+    await sleep(500);
+    await x(did);
+    await sleep(400);
+    const mid = { tab: await hasTab(did), closed: (await closedNow()).includes(did), roots: await ev(`document.querySelectorAll('#artifacts .nb-root').length`) };
+    await x(did); // (a second click while it saves)
+    await sleep(200);
+    await ev(`window.__release()`);
+    await until(`!document.querySelector('#artifacts .tab[data-tab=${JSON.stringify(did)}]') || !document.body.classList.contains('has-artifact')`, 15000).catch(() => {});
+    await sleep(800);
+    const rec4 = (await record(dref))?.cells?.[0]?.code ?? null;
+    ok(mid.tab && !mid.closed && mid.roots > 0 && rec4 === "d = 0  # tab" && (await closedNow()).includes(did) && !(await hasTab(did)), "TC4: while the edit's save waits, nothing is taken away (tab, notebook, closed state); a second click shares the close; then the tab closes with its edit saved", { mid, rec4 });
+
+    // TC5: a save and a copy both refused (the workspace held throughout): the tab stays, shown, with its rescue actions;
+    // Try again, once the workspace is free, keeps the edit as a copy and closes
+    const R = "/notes/tab-refused.ipynb";
+    await call("workspace.create", { path: R, content: docFor(R, [{ code: "r = 0" }]), mode: "python" });
+    await openNotebook(R);
+    const rid = await shownId();
+    await lockWorkspace();
+    await typeInto(0, "  # kept");
+    await sleep(800);
+    await x(rid);
+    await until(`/couldn't be saved or kept/.test(document.querySelector('#artifacts .pane-bar')?.textContent ?? '')`, 15000).catch(() => {});
+    const r5 = { shown: await shownId(), bar: await ev(`document.querySelector('#artifacts .pane-bar')?.textContent ?? ''`), acts: await ev(`[...document.querySelectorAll('#artifacts .pane-bar button')].map((b) => b.textContent)`), closed: (await closedNow()).includes(rid) };
+    ok(r5.shown === rid && /couldn't be saved or kept/.test(r5.bar) && r5.acts.includes("Try again") && r5.acts.includes("Close without keeping") && !r5.closed, "TC5: a tab whose edit can be neither saved nor kept stays, shown, with Try again and Close without keeping", r5);
+    await ev(`window.__release()`);
+    await sleep(1500);
+    await ev(`[...document.querySelectorAll('#artifacts .pane-bar button')].find((b) => b.textContent === 'Try again')?.click()`);
+    await until(`!document.querySelector('#artifacts .tab[data-tab=${JSON.stringify(rid)}]') || !document.body.classList.contains('has-artifact')`, 10000).catch(() => {});
+    await sleep(600); // (the chat is kept 300 ms after a change)
+    const copy5 = await readCells("/notes/tab-refused (copy).ipynb").then((c) => c[0].code, (e) => "no copy: " + e.message);
+    ok(copy5 === "r = 0  # kept" && (await closedNow()).includes(rid), "TC5: Try again, the workspace free, keeps the edit as a copy and closes the tab", copy5);
+  }
+
   // ======================================================================== chat.resume: a reload mid-turn
   // (an agent that keeps each conversation's log: after a reload the running turn is away, not interrupted; the real
   //  composer queues a message typed then (its button says Queue; no Stop, no Send now); the replay finishes the turn
