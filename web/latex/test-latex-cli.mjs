@@ -286,6 +286,12 @@ ${"many words ".repeat(14000)}
     const printRule = /@media print \{[^@]*\.sb-standalone \.dmath \{ overflow: visible; \}/.test(existsSync(join(dir, "wide.html")) ? readFileSync(join(dir, "wide.html"), "utf8") : "");
     check("pdf: a display wider than the text runs on when printed, and is reported: one overfull warning on its line, exit 0", wd.code === 0 && wd.json?.pdf?.pages === 1 && wd.json?.check?.ok === true && wideOver.length === 1 && wideOver[0].severity === "warning" && wideOver[0].line === 4 && /\\mu ?\(x\)/.test(wideOver[0].name) && /\d+px wider than the text/.test(wideOver[0].message) && printRule,
       { code: wd.code, pdf: wd.json?.pdf, problems: wd.json?.check?.problems, printRule, err: wd.json?.pdf_error ?? wd.err.slice(-300) });
+    // (two displays that start alike, the first fitting, the second too wide: the warning on the second's own line,
+    //  each display found in the source in order, not the first that starts the same way)
+    writeFileSync(join(dir, "twice.tex"), "\\documentclass{article}\n\\begin{document}\n\\[\n\\mu(x)=\\sup\\left\\{\\nu>0:\\ 0<\\left|x-\\frac pq\\right|<\\frac1{q^\\nu}\\right\\}.\n\\]\nText.\n\\[\n\\mu(x)=\\sup\\left\\{\\nu>0:\\ 0<\\left|x-\\frac pq\\right|<\\frac1{q^\\nu}\n\\text{ for infinitely many coprime integers }p,q,\\ q\\ge2\\right\\}.\n\\]\n\\end{document}\n");
+    const tw = await runOpts({ env: { CHROME: browser } }, CLI, dir, "render", "twice.tex", "--pdf", "twice.pdf", "--json");
+    const twOver = (tw.json?.check?.problems ?? []).filter((p) => p.kind === "overfull");
+    check("pdf: of two displays that start alike, the overfull second one is reported on its own line (8), not the first's (4)", tw.code === 0 && twOver.length === 1 && twOver[0].line === 8, { code: tw.code, problems: tw.json?.check?.problems, err: tw.json?.pdf_error ?? tw.err.slice(-300) });
     writeFileSync(join(dir, "fits.tex"), "\\documentclass{article}\n\\begin{document}\n\\[\n\\mu(x)=\\sup\\left\\{\\nu>0:\\ 0<\\left|x-\\frac pq\\right|<\\frac1{q^\\nu}\\right\\}.\n\\]\n\\end{document}\n");
     const ft = await runOpts({ env: { CHROME: browser } }, CLI, dir, "render", "fits.tex", "--pdf", "fits.pdf", "--json");
     check("pdf: a document whose displays fit has no overfull warning", ft.code === 0 && ft.json?.pdf?.pages === 1 && !(ft.json?.check?.problems ?? []).some((p) => p.kind === "overfull"), { code: ft.code, problems: ft.json?.check?.problems, err: ft.json?.pdf_error ?? ft.err.slice(-300) });

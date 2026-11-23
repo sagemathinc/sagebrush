@@ -42,6 +42,9 @@ const SHOTS_MOST = 400;
 const LETTER_W = 8.5, LETTER_MARGIN = 0.4;
 /** The most displays wider than the text that one render reports. */
 const OVERFULL_MOST = 50;
+/** The most displays one render measures (each one's place in the source found in order), and the most of each one's
+ * TeX it reads back. */
+const DISPLAYS_MOST = 5000, DISPLAY_TEX_MOST = 200;
 /** A beamer slide's width in the HTML and the PNGs, in CSS pixels (its height follows the aspect ratio). */
 const SLIDE_W = 1024;
 
@@ -113,14 +116,15 @@ export async function latexCommand(argv: string[], opts: { cli?: string } = {}):
   let code = 0;
   if (png !== null || pdf !== null) {
     try {
-      const { overfull, ...b } = await screenshots(htmlPath, png, result, steps, pdf);
+      const { displays, ...b } = await screenshots(htmlPath, png, result, steps, pdf);
       if (png !== null) report.png = b;
       if (pdf !== null) report.pdf = b.pdf;
       // (a display wider than the text, as TeX's "Overfull \hbox" warns of it: a warning in the check's problems, its
-      //  line where its TeX is found in the source)
-      for (const o of overfull) {
-        const at = texAt(text, o.tex);
-        result.problems.push({ severity: "warning", kind: "overfull", name: o.tex.slice(0, 80), line: at < 0 ? null : lineOf(text, at), message: `a display is ${o.px}px wider than the text (TeX's Overfull \\hbox): ${pdf !== null ? "in the PDF it runs on into the right margin, and past the paper's edge if it is wider than that" : "the PNG shows only its start"}; break it over lines (multline, split, align)` });
+      //  line where its TeX is found in the source, every display matched in order (displayLines))
+      const at = displayLines(text, displays.map((d) => d.tex));
+      for (const [k, o] of displays.entries()) {
+        if (o.px <= 1 || result.problems.filter((p) => p.kind === "overfull").length >= OVERFULL_MOST) continue;
+        result.problems.push({ severity: "warning", kind: "overfull", name: o.tex.slice(0, 80), line: at[k] < 0 ? null : lineOf(text, at[k]), message: `a display is ${o.px}px wider than the text (TeX's Overfull \\hbox): ${pdf !== null ? "in the PDF it runs on into the right margin, and past the paper's edge if it is wider than that" : "the PNG shows only its start"}; break it over lines (multline, split, align)` });
       }
     }
     catch (e: any) { report[png !== null ? "png_error" : "pdf_error"] = String(e?.message ?? e); code = 1; }
@@ -140,16 +144,23 @@ export async function latexCommand(argv: string[], opts: { cli?: string } = {}):
   return code;
 }
 
-/** Where a display's TeX, as KaTeX's annotation has it (spaced its own way: "\sup \left \{"), starts in the source:
- * its first 24 characters that aren't spaces, found among the source's, or -1. */
-function texAt(text: string, tex: string): number {
-  const want = tex.replace(/\s+/g, "").slice(0, 24);
-  if (!want) return -1;
+/** Where each display's TeX starts in the source, in the order the page has them, or -1: its first 24 characters that
+ * aren't spaces (KaTeX's annotation spaces it its own way: "\sup \left \{"), found among the source's from just after
+ * the last display found, so displays that start alike each find their own; one not found there (a display a macro
+ * makes) looked for from the start, the walk not moved. */
+function displayLines(text: string, texs: string[]): number[] {
   let squeezed = "";
   const at: number[] = [];
   for (let i = 0; i < text.length; i++) if (!/\s/.test(text[i])) { squeezed += text[i]; at.push(i); }
-  const k = squeezed.indexOf(want);
-  return k < 0 ? -1 : at[k];
+  let from = 0;
+  return texs.map((tex) => {
+    const want = tex.replace(/\s+/g, "").slice(0, 24);
+    if (!want) return -1;
+    const k = squeezed.indexOf(want, from);
+    if (k >= 0) { from = k + 1; return at[k]; }
+    const any = squeezed.indexOf(want);
+    return any < 0 ? -1 : at[any];
+  });
 }
 
 function usage(why: string): number { process.stderr.write(`sagebrush latex: ${why}\n\n${HELP}`); return 2; }
@@ -644,15 +655,16 @@ async function screenshots(htmlPath: string, dir: string | null, check: CheckRes
     await cdp.eval("document.fonts.ready.then(() => Promise.all([...document.images].map((i) => i.decode().catch(() => null)))).then(() => 1)");
     // (a display wider than the text: on paper it runs on into the margin (STANDALONE_CSS's print rules), as TeX's
     //  overfull box does, rather than being cut off at its box's edge, and it is reported, with its TeX; measured as
-    //  printed, at the PDF's text width, when there is a PDF, else as the PNGs show it. A beamer frame's own overflow is
-    //  its PNG's overflow_px)
-    let overfull: { px: number; tex: string }[] = [];
+    //  printed, at the PDF's text width, when there is a PDF, else as the PNGs show it. Every display is read back, in
+    //  order, so each one's line can be found in order (displayLines). A beamer frame's own overflow is its PNG's
+    //  overflow_px)
+    let displays: { px: number; tex: string }[] = [];
     if (!beamer) {
       if (pdf !== null) {
         await cdp.send("Emulation.setEmulatedMedia", { media: "print" });
         await cdp.send("Emulation.setDeviceMetricsOverride", { width: Math.round((LETTER_W - 2 * LETTER_MARGIN) * 96), height: 800, deviceScaleFactor: 1, mobile: false });
       }
-      overfull = await cdp.eval(`[...document.querySelectorAll(".dmath")].map((d) => ({ px: Math.ceil(d.scrollWidth - d.clientWidth), tex: (d.querySelector("annotation")?.textContent ?? d.textContent ?? "").trim().replace(/\\s+/g, " ") })).filter((x) => x.px > 1).slice(0, ${OVERFULL_MOST})`);
+      displays = await cdp.eval(`[...document.querySelectorAll(".dmath")].slice(0, ${DISPLAYS_MOST}).map((d) => ({ px: Math.ceil(d.scrollWidth - d.clientWidth), tex: (d.querySelector("annotation")?.textContent ?? d.textContent ?? "").trim().replace(/\\s+/g, " ").slice(0, ${DISPLAY_TEX_MOST}) }))`);
       if (pdf !== null) {
         await cdp.send("Emulation.setEmulatedMedia", { media: "" });
         await cdp.send("Emulation.setDeviceMetricsOverride", { width, height: 800, deviceScaleFactor: 1, mobile: false });
@@ -691,7 +703,7 @@ async function screenshots(htmlPath: string, dir: string | null, check: CheckRes
         pages.push({ file: f, ...(fr ? { frame: fr.n, ...(steps ? { step: s } : {}), title: fr.title } : {}), ...(b.over ? { overflow_px: b.over } : {}) });
       }
     }
-    return { browser, ...(noSandbox ? { browser_sandbox: false } : {}), pages, ...(pdfOut ? { pdf: pdfOut } : {}), overfull };
+    return { browser, ...(noSandbox ? { browser_sandbox: false } : {}), pages, ...(pdfOut ? { pdf: pdfOut } : {}), displays };
   } finally {
     try { ws?.close(); } catch {}
     if (proc && proc.exitCode === null) { proc.kill(); await new Promise((r) => { proc!.once("exit", r); setTimeout(r, 3000); }); }
