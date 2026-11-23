@@ -2575,7 +2575,7 @@ test("an intrinsic's errors are said at the \"(\" of a call through a parameter,
   assert.ok(r.stdout.trimEnd().endsWith("55"), r.stdout);
   // a function defined by name is the user's own: its calls are not wrapped
   assert.doesNotMatch(magmaToPython("function g(n) return n; end function;\ng(1);"), /_m\._call\(/);
-  assert.match(magmaToPython("f := ChangeRing;\nf(1, 2);"), /_m\._call\(\(2, 2\), f, 1, 2\)/);
+  assert.match(magmaToPython("f := ChangeRing;\nf(1, 2);"), /_m\._call(_bare)?\(\(2, 2\), f, 1, 2\)/);
 });
 
 test("a call is located by the binding in scope at it: an optional parameter is, a named function is not, whatever other functions bind (astra's CORR-ALIAS105-1/2)", () => {
@@ -2617,5 +2617,5 @@ test("a call is located by the binding in scope at it: an optional parameter is,
   assert.deepEqual(call("function fib(n) return n le 1 select n else fib(n - 1) + fib(n - 2); end function;\nfib(10);\n"), ["    _m._show_values(fib(10))"]);
   assert.doesNotMatch(magmaToPython("function fib(n) return n le 1 select n else fib(n - 1) + fib(n - 2); end function;\nfib(10);\n"), /_m\._call\(/);
   // a variable assigned a named function's name later is a variable again
-  assert.match(magmaToPython("function g(n) return n; end function;\ng := ChangeRing;\ng(1, 2);\n"), /_m\._call\(\(3, 2\), g, 1, 2\)/);
+  assert.match(magmaToPython("function g(n) return n; end function;\ng := ChangeRing;\ng(1, 2);\n"), /_m\._call(_bare)?\(\(3, 2\), g, 1, 2\)/);
 });

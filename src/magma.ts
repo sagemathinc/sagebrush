@@ -873,7 +873,11 @@ class Parser {
       if (names.length === 1) this.store(names[0], `_m._ref1(${tmp})`);
       else names.forEach((r, k) => this.store(r, `_m._refk(${tmp}, ${k})`));
     } else {
-      this.emit(`_m._show_values(${this.all(e.code)})`);
+      // (a call that is the whole statement, f(3);, names its bad argument types after the application, '@', as
+      // Magma 2.18-5 does: _m._call_bare)
+      const whole = this.calls.get(e.code);
+      const code = whole?.startsWith("_m._call(") ? "_m._call_bare(" + whole.slice("_m._call(".length) : this.all(e.code);
+      this.emit(`_m._show_values(${code})`);
     }
   }
 
@@ -1470,8 +1474,10 @@ class Parser {
   }
 
   postfix(): string {
-    const head = this.peek();
+    const head = this.peek(), h0 = this.i;
     let e = this.primary();
+    // (the callee just a name, its one token: in a function body its read is a placeholder, or the function's own)
+    const oneName = head.t === "id" && this.i === h0 + 1;
     // (a call of an intrinsic that says its errors at its call's "(", by
     // its name or through a variable or parameter that may hold one:
     // _m._call tells the runtime which call it is, nested or repeated; in a
@@ -1498,7 +1504,10 @@ class Parser {
         // are references (_m._refcall), as AssignNames checks them
         if (a.refs.length) e = `_m._refcall(${e}, [${a.refPos.join(", ")}], ${a.code})`;
         else {
-          const call = located && links === 1 ? `_m._call((${lp.line}, ${lp.col}), ${e}${a.code ? ", " + a.code : ""})` : `${e}(${a.code})`;
+          // (a callee that isn't a name, 2(3), (f)(x), g()(3), goes through _m._call too, which refuses a value
+          // that isn't a function at its "(", as Magma does)
+          const named = oneName && links === 1;
+          const call = (located && links === 1) || !named ? `_m._call((${lp.line}, ${lp.col}), ${e}${a.code ? ", " + a.code : ""})` : `${e}(${a.code})`;
           e = `_m._first(${call})`;
           this.calls.set(e, call);
         }

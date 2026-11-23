@@ -1,0 +1,149 @@
+
+>> x(1);
+    ^
+Runtime error in '@': Bad argument types
+Argument types given: RngIntElt, RngIntElt
+
+
+>> print x(1);
+          ^
+Runtime error: Bad argument types
+Argument types given: RngIntElt, RngIntElt
+
+
+>> y := x(1) + 1;
+         ^
+Runtime error: Bad argument types
+Argument types given: RngIntElt, RngIntElt
+
+
+>> print x(1, 2);
+          ^
+Runtime error: Attempting to call something that is not callable
+
+
+>> print x();
+          ^
+Runtime error: Attempting to call something that is not callable
+
+
+>> print 2(3);
+          ^
+Runtime error: Bad argument types
+Argument types given: RngIntElt, RngIntElt
+
+
+>> print (1+1)(3);
+              ^
+Runtime error: Bad argument types
+Argument types given: RngIntElt, RngIntElt
+
+
+>> print L(1);
+          ^
+Runtime error: Bad argument types
+Argument types given: RngIntElt, SeqEnum[RngIntElt]
+
+
+>> print s(1);
+          ^
+Runtime error: Bad argument types
+Argument types given: RngIntElt, MonStgElt
+
+
+>> b(1);
+    ^
+Runtime error in '@': Bad argument types
+Argument types given: RngIntElt, BoolElt
+
+
+>> print (1/2)(1);
+              ^
+Runtime error: Bad argument types
+Argument types given: RngIntElt, FldRatElt
+
+
+>> print a(1);
+          ^
+Runtime error: Bad argument types
+Argument types given: RngIntElt, FldFinElt
+
+
+>> f(3);
+    ^
+Runtime error in '@': Bad argument types
+Argument types given: RngIntElt, RngUPolElt[FldFin]
+
+
+>> print f(3);
+          ^
+Runtime error: Bad argument types
+Argument types given: RngIntElt, RngUPolElt[FldFin]
+
+
+>> f(3) + 1;
+    ^
+Runtime error: Bad argument types
+Argument types given: RngIntElt, RngUPolElt[FldFin]
+
+
+>> [f(3)];
+     ^
+Runtime error: Bad argument types
+Argument types given: RngIntElt, RngUPolElt[FldFin]
+
+
+>> z := f(3);
+         ^
+Runtime error: Bad argument types
+Argument types given: RngIntElt, RngUPolElt[FldFin]
+
+
+>> print f(1, 2);
+          ^
+Runtime error: Attempting to call something that is not callable
+
+
+>> print f();
+          ^
+Runtime error: Attempting to call something that is not callable
+
+
+>> print g()(3);
+            ^
+Runtime error: Bad argument types
+Argument types given: RngIntElt, RngUPolElt[FldFin]
+
+
+>> print h(e);
+          ^
+Runtime error: Bad argument types
+Argument types given: FldFinElt, RngUPolElt[FldFin]
+
+
+>> print h(1/2);
+          ^
+Runtime error: Bad argument types
+Argument types given: FldRatElt, RngUPolElt[FldFin]
+
+
+>> print h("s");
+          ^
+Runtime error: Bad argument types
+Argument types given: MonStgElt, RngUPolElt[FldFin]
+
+
+>> print q(3);
+          ^
+Runtime error: Bad argument types
+Argument types given: RngIntElt, RngUPolElt[FldRat]
+
+
+>> q(3);
+    ^
+Runtime error in '@': Bad argument types
+Argument types given: RngIntElt, RngUPolElt[FldRat]
+
+16
+true
+end
