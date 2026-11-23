@@ -42,6 +42,24 @@ fig, ax = plt.subplots()
 fig.subplots_adjust(bottom=0.25)
 show("one Axes, bottom=0.25", fig)
 
+# the parameters are the figure's own, from rcParams when it was made, as
+# matplotlib's SubplotParams: rcParams changed later move neither its Axes
+# nor what subplots_adjust starts from; and one figure's adjust is its own
+fig, ax = plt.subplots()
+plt.rcParams["figure.subplot.right"] = 0.6
+show("rcParams changed after the figure was made", fig)
+plt.rcdefaults()
+fig, ax = plt.subplots()
+plt.rcParams["figure.subplot.right"] = 0.6
+fig.subplots_adjust(left=0.2)
+show("rcParams changed, then subplots_adjust(left=0.2)", fig)
+plt.rcdefaults()
+fig2, ax2 = plt.subplots()
+fig2.subplots_adjust(left=0.4)
+fig3, ax3 = plt.subplots()
+show("a second figure's adjust", fig2)
+show("a third figure, made after it", fig3)
+
 for bad in ({"left": 0.6, "right": 0.5}, {"bottom": 0.9, "top": 0.2}, {"left": 0.5, "right": 0.5}):
     fig, ax = plt.subplots()
     try:

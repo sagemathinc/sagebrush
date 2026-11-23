@@ -1479,8 +1479,12 @@ class Figure:
         self._facecolor = facecolor if facecolor is not None else rcParams.get("figure.facecolor", "white")
         self.axes = []
         self._ca = None  # (plt.axes(ax)'s selection, and len(axes) then)
-        # (the subplot parameters subplots_adjust set, or None: rcParams')
+        # (the subplot parameters subplots_adjust set, or None; and rcParams'
+        # when the figure was made, which it starts from and the grid uses
+        # until then, as matplotlib's SubplotParams)
         self._subplotpars = None
+        self._subplotpars0 = {k: float(rcParams["figure.subplot." + k]) for k in
+                              ("left", "bottom", "right", "top", "wspace", "hspace")}
         self._suptitle = None
         self._grid = (1, 1)
 
@@ -1546,11 +1550,11 @@ class Figure:
 
     def subplots_adjust(self, left=None, bottom=None, right=None, top=None, wspace=None, hspace=None):
         """The subplot parameters of this figure's grid, as matplotlib's: those
-        given change, the others stay (rcParams' until set); its grid Axes are
+        given change, the others stay (rcParams' when the figure was made, until
+        set); its grid Axes are
         then drawn where matplotlib puts them, the box the plot area and the
         labels outside it."""
-        pars = dict(self._subplotpars or {k: float(rcParams["figure.subplot." + k]) for k in
-                                           ("left", "bottom", "right", "top", "wspace", "hspace")})
+        pars = dict(self._subplotpars or self._subplotpars0)
         for k, v in (("left", left), ("bottom", bottom), ("right", right), ("top", top), ("wspace", wspace), ("hspace", hspace)):
             if v is not None:
                 pars[k] = float(v)

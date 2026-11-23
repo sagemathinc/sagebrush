@@ -11,9 +11,9 @@ from matplotlib.transforms import Bbox
 
 def grid_bbox(nrows, ncols, row, col, pars=None):
     """The Bbox of cell (row, col) of an nrows x ncols grid of subplots, by
-    matplotlib's GridSpec arithmetic (the subplot parameters subplots_adjust
-    set, pars, or rcParams'; the same sums in the same order, so the same
-    floats)."""
+    matplotlib's GridSpec arithmetic (the figure's subplot parameters, pars:
+    those subplots_adjust set, or rcParams' when it was made; else
+    rcParams'; the same sums in the same order, so the same floats)."""
     sp = lambda k: float(pars[k]) if pars else float(rcParams["figure.subplot." + k])
     left, right, bottom, top = sp("left"), sp("right"), sp("bottom"), sp("top")
     wspace, hspace = sp("wspace"), sp("hspace")
@@ -48,8 +48,9 @@ def _cell(ax):
         return Bbox.from_bounds(l, 1 - t - h, w, h)
     nrows, ncols = ax._grid
     x, y = rect[0], rect[1]
+    fig = ax.figure
     return grid_bbox(nrows, ncols, min(nrows - 1, int(round(y * nrows))), min(ncols - 1, int(round(x * ncols))),
-                     getattr(ax.figure, "_subplotpars", None))
+                     getattr(fig, "_subplotpars", None) or getattr(fig, "_subplotpars0", None))
 
 
 def _cumsum(ratios, space, total):
