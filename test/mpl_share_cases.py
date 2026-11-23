@@ -112,3 +112,71 @@ try:
 except Exception as e:
     print("sharex twice: %s: %s" % (type(e).__name__, e))
 plt.close(fig)
+
+
+# one limit given: the other is the shared view's at that moment, for both,
+# and stays as more data comes (matplotlib stops autoscaling the axis)
+def lims(tag, axs):
+    print(tag, [[tuple(r(v) for v in a.get_xlim()), tuple(r(v) for v in a.get_ylim())] for a in axs])
+
+
+fig, axs = plt.subplots(1, 2, sharex=True, sharey=True)
+axs[0].plot([0, 1], [0, 1])
+axs[1].plot([10, 20], [20, 40])
+axs[0].set_xlim(left=-2)
+axs[1].set_ylim(top=50)
+lims("one-sided set_xlim and set_ylim on a shared pair", axs)
+plt.close(fig)
+
+fig, axs = plt.subplots(1, 2, sharex=True)
+axs[0].plot([0, 1], [0, 1])
+axs[1].set_xlim(right=5)
+axs[1].plot([10, 20], [0, 1])
+lims("set_xlim(right=) on a shared pair, then more data", axs)
+plt.close(fig)
+
+fig, ax = plt.subplots()
+ax.plot([0, 1], [0, 1])
+ax.set_xlim(left=-2)
+ax.plot([5, 6], [0, 1])
+lims("set_xlim(left=) on one Axes, then more data", [ax])
+plt.close(fig)
+
+fig, ax = plt.subplots()
+ax.set_xlim(left=-2)
+lims("set_xlim(left=) on empty Axes", [ax])
+plt.close(fig)
+
+# cla: the Axes the others joined puts the shared view back to (0, 1), until
+# new data autoscales them all; an Axes that joined another takes its view
+fig, axs = plt.subplots(1, 2, sharex=True)
+axs[0].plot([0, 1], [0, 1])
+axs[1].plot([10, 20], [0, 1])
+axs[1].set_xlim(3, 30)
+axs[0].cla()
+lims("cla of the Axes the other joined", axs)
+axs[0].plot([-10, -5], [0, 1])
+lims("then new data", axs)
+plt.close(fig)
+
+fig, axs = plt.subplots(1, 2, sharex=True)
+axs[0].plot([0, 1], [0, 1])
+axs[1].plot([10, 20], [0, 1])
+axs[1].set_xlim(3, 30)
+axs[1].cla()
+lims("cla of the Axes that joined", axs)
+axs[1].plot([-10, -5], [0, 1])
+lims("then new data", axs)
+plt.close(fig)
+
+# groups joined: one view for all four
+fig, axs = plt.subplots(1, 4)
+axs[1].sharex(axs[0])
+axs[3].sharex(axs[2])
+axs[0].sharex(axs[2])
+for k in range(4):
+    axs[k].plot([k, k + 1], [k, k + 1])
+lims("two shared pairs joined", axs)
+axs[3].set_xlim(-1, 8)
+lims("then set_xlim on one", axs)
+plt.close(fig)

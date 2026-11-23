@@ -1074,6 +1074,13 @@ class Axes:
             lo = view[0] if lo is None else lo
             hi = view[1] if hi is None else hi
             self._opts[a + "invert"] = False
+        elif (lo is None) != (hi is None):
+            # (one limit given: the other is the view's now, the shared one's
+            # for a shared axis, and stays as more data comes, as
+            # matplotlib's, which stops autoscaling the axis)
+            view = self.get_xlim() if a == "x" else self.get_ylim()
+            lo = view[0] if lo is None else lo
+            hi = view[1] if hi is None else hi
         if lo is not None:
             self._opts[a + "min"] = lo
         if hi is not None:
@@ -1296,11 +1303,22 @@ class Axes:
 
     def cla(self):
         self._prims, self._opts, self._ci, self._pi = [], {}, 0, 0
-        # (a shared axis keeps its sharing, and takes its view again)
+        # (a shared axis keeps its sharing, as matplotlib's: an Axes that
+        # joined another takes that one's view again; the one the others
+        # joined puts the view of them all back to (0, 1), autoscaled again
+        # with the next data any of them is given)
         for a in ("x", "y"):
-            others = [ax for ax in self._group(a) if ax is not self]
-            if others:
-                others[0]._sync(a)
+            group = self._group(a)
+            if len(group) < 2:
+                continue
+            lead = self._share_lead[a]
+            if lead is not None:
+                lead._sync(a)
+            else:
+                for ax in group:
+                    for k in (a + "min", a + "max", a + "invert"):
+                        ax._opts.pop(k, None)
+                    ax._opts["_" + a + "view"] = (0.0, 1.0)
         # (pyplot's current image goes with the axes it was in)
         if getattr(getattr(self.figure, "_gci", None), "_ax", None) is self:
             self.figure._gci = None
