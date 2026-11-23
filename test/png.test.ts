@@ -53,6 +53,21 @@ test("translucent markers, scatter points, bars and pixel markers over each othe
   }
 });
 
+test("bars' edges as matplotlib draws them: edgecolor= (ec=) and linewidth= (lw=), one or one per bar, with alpha; a width alone draws none", () => {
+  // (each channel within 1, as above)
+  const parse = (out: string) => out.trim().split("\n").map((l) => ({
+    label: l.slice(0, l.indexOf("[")),
+    px: [...l.matchAll(/(\d+), (\d+), (\d+), (\d+)/g)].map((m) => m.slice(1, 5).map(Number)),
+  }));
+  const got = parse(run([TEST + "png_bar_edge_cases.py"])), want = parse(oracle["png_bar_edge_cases.py"]);
+  assert.deepEqual(got.map((g) => g.label), want.map((w) => w.label));
+  for (let i = 0; i < want.length; i++) {
+    const msg = `${want[i].label}: ${JSON.stringify(got[i].px)} against ${JSON.stringify(want[i].px)}`;
+    assert.equal(got[i].px.length, want[i].px.length, msg);
+    assert.ok(got[i].px.every((p, j) => p.every((v, k) => Math.abs(v - want[i].px[j][k]) <= 1)), msg);
+  }
+});
+
 test("a color's alpha, and none in any case, in the pixels of a PNG as in matplotlib's (CORR-3D8-1)", () => {
   // (each channel within 1 of matplotlib's: Agg truncates where tiny-skia rounds when it blends)
   const parse = (s: string) => s.trim().split("\n").map((l) => {
