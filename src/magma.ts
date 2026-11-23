@@ -59,6 +59,11 @@ export const KEYWORDS = new Set(
 const OPS = [":->", "@@", "+:=", "-:=", "*:=", "/:=", "^:=", ":=", "..", "->", "{@", "@}", "{*", "*}", "$$", "<", ">", "(", ")", "[", "]", "{", "}",
   ",", ";", ":", "|", "#", "&", "~", "+", "-", "*", "/", "^", ".", "!", "`", "@", "=", "\\"];
 
+// A real literal's text as Python reads it: 1. as 1.0, 1.e5 as 1.0e5
+function realText(t: string, real: boolean): string {
+  return real ? t.replace(/\.(?=[eE]|$)/, ".0") : t;
+}
+
 export function lex(src: string): Tok[] {
   const out: Tok[] = [];
   let i = 0, line = 1, col = 1;
@@ -83,18 +88,29 @@ export function lex(src: string): Tok[] {
       let j = i;
       while (j < n && /[0-9]/.test(src[j])) j++;
       let real = false;
-      // 1.5 (but not 1..5) and 1e10
-      if (src[j] === "." && /[0-9]/.test(src[j + 1] ?? "")) {
+      // a real, as Magma 2.18-5 reads it: 1.5, and 1. with no digits after the point (12., 1.e5), but not 1..5 (a
+      // range); then an exponent, e or E, which must have digits after its sign (1e5, 1.5E-2): else Magma's "Real
+      // literal has no digits after exponent indicator", just after the e (1e;, 1.ex)
+      if (src[j] === "." && src[j + 1] !== ".") {
         real = true;
         j++;
         while (j < n && /[0-9]/.test(src[j])) j++;
       }
-      if ((src[j] === "e" || src[j] === "E") && /[0-9+-]/.test(src[j + 1] ?? "") && (real || /[0-9]/.test(src[j + 1]) || /[0-9]/.test(src[j + 2] ?? ""))) {
+      if (src[j] === "e" || src[j] === "E") {
+        let k = j + 1;
+        if (src[k] === "+" || src[k] === "-") k++;
+        if (!/[0-9]/.test(src[k] ?? "")) {
+          out.push({ t: real ? "real" : "num", v: realText(src.slice(i, j), real), line: L, col: C });
+          adv(j + 1 - i);
+          out.push({ t: "bad", v: src.slice(j + 1, k) || "e", line, col, msg: "Real literal has no digits after exponent indicator" });
+          adv(k - j - 1);
+          continue;
+        }
         real = true;
-        j += 2;
+        j = k;
         while (j < n && /[0-9]/.test(src[j])) j++;
       }
-      out.push({ t: real ? "real" : "num", v: src.slice(i, j), line: L, col: C });
+      out.push({ t: real ? "real" : "num", v: realText(src.slice(i, j), real), line: L, col: C });
       adv(j - i);
       continue;
     }
