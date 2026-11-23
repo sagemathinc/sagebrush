@@ -166,6 +166,8 @@ in `wasm/`, not a fresh one.
   the release bucket (here every job reads `wasm/` as it is);
 - `export-controls` and `lookalike-controls`, the long tier's jobs: run them with `scripts/test-all.sh --long`;
 - `webkit`: it installs Playwright's WebKit with `sudo apt`. Run it with `scripts/test-all.sh --webkit` where that's fine;
+- `engine-nd-neon` (macOS on Apple silicon: the NEON kernel of `engine/nd`) and `windows-smoke` (Windows): they
+  need those machines;
 - the other workflows:
   - `app.yml`: the desktop app on macOS, Windows and Linux, with its self-test;
   - `pypi.yml`: the wheels on five platforms, and Python 3.10 and 3.11;
