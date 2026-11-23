@@ -70,10 +70,8 @@ let resident = "";
 
 // (no room in a module's memory: its grow refused, past wasm32's 4 GiB or more than the computer could give: each kernel
 //  below answers "use JavaScript" (null or false), as it does below its size, and its caller computes in JavaScript; a
-//  computation the JavaScript path can make is never refused for a kernel's sake: engine cost policy r2. Not argsort,
-//  whose JavaScript path keeps its indices in a JavaScript array, past V8's largest a crash rather than an error: its
-//  MemoryError stays; engine/nd's products and factorizations, src/runtime/nd.ts, too: their callers take the same
-//  test)
+//  computation the JavaScript path can make is never refused for a kernel's sake (engine cost policy r2),
+//  including engine/nd's products and factorizations in src/runtime/nd.ts: their callers take the same test)
 export const noRoom = (e: unknown) => e instanceof RangeError && /WebAssembly\.Memory\.grow|failed to grow memory/.test(e.message);
 // Make room for `doubles` float64s at the scratch base; returns the views
 // (valid until the next reserve).
@@ -414,6 +412,7 @@ export function wasmSort(x: Float64Array): boolean {
 }
 // The stable argsort of x into out[ooff..ooff+n] (as numbers).
 export function wasmArgsort(x: Float64Array, out: Float64Array | number[], ooff: number): boolean {
+  try {
   const n = x.length;
   if (n < SORT_MIN || n >= 2 ** 32 || !kernels()) return false;
   const half = Math.ceil(n / 2);
@@ -424,6 +423,7 @@ export function wasmArgsort(x: Float64Array, out: Float64Array | number[], ooff:
   if (out instanceof Float64Array) out.set(r, ooff);
   else for (let i = 0; i < n; i++) out[ooff + i] = r[i];
   return true;
+  } catch (e) { if (noRoom(e)) return false; throw e; }
 }
 
 // numpy.random's fills (kernels/src/random.rs); dist as there: 0 uniform,

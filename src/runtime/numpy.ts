@@ -3171,6 +3171,27 @@ function argsortInts(a: NDArray): NDArray | null {
   return out;
 }
 
+// Bottom-up merging stays in typed buffers: native .sort(compare) can box
+// its work arrays, even when its receiver is typed. All current array indices
+// fit uint32 (the inclusive element limit is 2^32). Arithmetic endpoints,
+// rather than shifts, keep merge widths and offsets exact past 2^31.
+function sortIndexBuffer(indices: Uint32Array | Float64Array, scratch: Uint32Array, compare: (i: number, j: number) => number): void {
+  const n = indices.length;
+  let src: Uint32Array | Float64Array = indices, dst: Uint32Array | Float64Array = scratch;
+  for (let width = 1; width < n; width *= 2) {
+    for (let start = 0; start < n; start += 2 * width) {
+      const middle = Math.min(start + width, n), end = Math.min(start + 2 * width, n);
+      let left = start, right = middle;
+      for (let k = start; k < end; k++) {
+        if ((k & 16383) === 0) O.pollInterrupt();
+        dst[k] = left < middle && (right === end || compare(src[left], src[right]) <= 0) ? src[left++] : src[right++];
+      }
+    }
+    const swap = src; src = dst; dst = swap;
+  }
+  if (src !== indices) indices.set(src);
+}
+
 function sortAxis(a: NDArray, axis: number, arg: boolean): NDArray {
   // (every path's outputs and scratch, at most: two copies of a (contiguous,
   // and the result moved back), the output (int64 for argsort), and per
@@ -3178,12 +3199,16 @@ function sortAxis(a: NDArray, axis: number, arg: boolean): NDArray {
   // bytes; a uint8 array's argsort needs 2 * 1 + 8 + 40 = 50 bytes an
   // element; LIMIT-PR55-3)
   admitWork(a.size * (2 * a.dt.itemsize + (arg ? 8 : a.dt.itemsize) + 40), arg ? "argsort" : "sort");
+  let fallback: { values: Float64Array; out: NDArray } | null = null;
   if (arg && a.ndim === 1 && !a.dt.cplx && a.size >= 64) {
     // the WebAssembly radix sort (stable, as the comparison sort below)
     const c = ascontig(a);
     const vals = Float64Array.from(c.data.subarray(c.offset, c.offset + a.size) as any);
     const out = empty([a.size], D.int64);
     if (wasmArgsort(vals, out.data as Float64Array, 0)) return out;
+    // Reuse the failed attempt's host buffers; do not allocate a second
+    // values/output pair on the JavaScript route.
+    fallback = { values: vals, out };
   }
   if (arg && a.ndim === 1) {
     const r = argsortInts(a);
@@ -3206,12 +3231,12 @@ function sortAxis(a: NDArray, axis: number, arg: boolean): NDArray {
   }
   const t = moveAxisToEnd(a, axis);
   const n = t.shape[t.ndim - 1], st = t.strides[t.ndim - 1];
-  const out = empty(arg ? t.shape : t.shape, arg ? D.int64 : a.dt);
+  const out = fallback?.out ?? empty(t.shape, arg ? D.int64 : a.dt);
   if (a.dt.cplx) {
     // NumPy's complex order: by real part, then imaginary part, with nan
     // placed last: R + Rj < R + nanj < nan + Rj < nan + nanj (stable)
     const re = new Float64Array(n), im = new Float64Array(n);
-    const ix = new Array(n);
+    const ix = new Uint32Array(n), scratch = new Uint32Array(n);
     const ccmp = (i: number, j: number) => {
       const ri = re[i] !== re[i], rj = re[j] !== re[j], ii = im[i] !== im[i], ij = im[j] !== im[j];
       if (ri !== rj) return ri ? 1 : -1;
@@ -3222,12 +3247,14 @@ function sortAxis(a: NDArray, axis: number, arg: boolean): NDArray {
     };
     loop1(t.shape.slice(0, -1), t.strides.slice(0, -1), t.offset, (base, k) => {
       for (let i = 0; i < n; i++) {
+        if ((i & 16383) === 0) O.pollInterrupt();
         re[i] = t.data[2 * (base + i * st)];
         im[i] = t.data[2 * (base + i * st) + 1];
         ix[i] = i;
       }
-      ix.sort(ccmp);
+      sortIndexBuffer(ix, scratch, ccmp);
       for (let i = 0; i < n; i++) {
+        if ((i & 16383) === 0) O.pollInterrupt();
         if (arg) out.data[k * n + i] = ix[i];
         else {
           out.data[2 * (k * n + i)] = re[ix[i]];
@@ -3240,8 +3267,9 @@ function sortAxis(a: NDArray, axis: number, arg: boolean): NDArray {
     [...order, axis].forEach((src, dst) => (inv[src] = dst));
     return ascontig(transpose(out, inv));
   }
-  const vals = new Float64Array(n);
-  const idx = new Array(n);
+  const vals = fallback?.values ?? new Float64Array(n);
+  const idx: Uint32Array | Float64Array = t.ndim === 1 && arg ? out.data : new Uint32Array(n);
+  const scratch = new Uint32Array(n);
   const cmp = (i: number, j: number) => {
     const x = vals[i], y = vals[j];
     if (x !== x) return y !== y ? i - j : 1;
@@ -3250,11 +3278,15 @@ function sortAxis(a: NDArray, axis: number, arg: boolean): NDArray {
   };
   loop1(t.shape.slice(0, -1), t.strides.slice(0, -1), t.offset, (base, k) => {
     for (let i = 0; i < n; i++) {
+      if ((i & 16383) === 0) O.pollInterrupt();
       vals[i] = t.data[base + i * st];
       idx[i] = i;
     }
-    idx.sort(cmp);
-    for (let i = 0; i < n; i++) out.data[k * n + i] = arg ? idx[i] : vals[idx[i]];
+    sortIndexBuffer(idx, scratch, cmp);
+    for (let i = 0; i < n; i++) {
+      if ((i & 16383) === 0) O.pollInterrupt();
+      out.data[k * n + i] = arg ? idx[i] : vals[idx[i]];
+    }
   });
   // move the axis back
   const back = a.shape.map((_, i) => i);
