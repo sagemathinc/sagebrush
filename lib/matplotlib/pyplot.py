@@ -905,9 +905,11 @@ class Axes:
             self._opts["label_size"] = _size_px(fontsize or kw.get("size"), 10)
 
     def get_xlabel(self):
+        """The x axis' label ("" when it has none)."""
         return self._opts.get("xlabel", "")
 
     def get_ylabel(self):
+        """The y axis' label ("" when it has none)."""
         return self._opts.get("ylabel", "")
 
     def set_ylabel(self, s, fontsize=None, labelpad=None, **kw):

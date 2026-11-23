@@ -19,8 +19,10 @@ matplotlib.axes.Axes.contourf
 matplotlib.axes.Axes.errorbar
 matplotlib.axes.Axes.fill_between
 matplotlib.axes.Axes.get_position
+matplotlib.axes.Axes.get_xlabel
 matplotlib.axes.Axes.get_xlim
 matplotlib.axes.Axes.get_xticks
+matplotlib.axes.Axes.get_ylabel
 matplotlib.axes.Axes.get_ylim
 matplotlib.axes.Axes.get_yticks
 matplotlib.axes.Axes.grid

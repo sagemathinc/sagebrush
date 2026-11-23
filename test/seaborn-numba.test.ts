@@ -111,7 +111,7 @@ g.figure.savefig(${JSON.stringify(join(dir, "dis.svg"))})
 j = sns.jointplot(x=a[:30], y=b)
 j.figure.savefig(${JSON.stringify(join(dir, "joint.svg"))})
 print(type(g).__name__, type(j).__name__, plt.gca() is j.ax_joint)
-for name in ("heatmap", "pairplot"):
+for name in ("clustermap", "regplot"):
     try:
         getattr(sns, name)()
     except NotImplementedError as e:
@@ -127,8 +127,8 @@ except ValueError as e:
       "True",
       "['a', 'b']",
       "FacetGrid JointGrid True",
-      "seaborn.heatmap is not in Sagebrush's seaborn yet",
-      "seaborn.pairplot is not in Sagebrush's seaborn yet",
+      "seaborn.clustermap is not in Sagebrush's seaborn yet",
+      "seaborn.regplot is not in Sagebrush's seaborn yet",
       "The \`stat\` parameter for \`Hist\` must be one of 'count', 'density', 'percent', 'probability' or 'frequency'; not 'weird'.",
       "",
     ].join("\n"));

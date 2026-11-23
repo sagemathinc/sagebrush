@@ -11,14 +11,19 @@ The functions are seaborn 0.13's, for one variable or a few groups of values:
 - categories: `stripplot`, `swarmplot`, `boxplot` and `violinplot`;
 - relations: `scatterplot` (colored by a hue variable: one color per level, or along a colormap for numbers) and
   `lineplot`, with the mean and a 95% bootstrap confidence band where an x value repeats;
-- the theme: `set`, `set_theme`, `set_style`, `set_context`, `set_palette`, `color_palette`, `despine`.
+- `barplot`: each category's mean with seaborn's bootstrap confidence interval;
+- matrices and grids: `heatmap` and `pairplot`;
+- the theme: `set`, `set_theme`, `set_style`, `set_context`, `set_palette`, `color_palette`, `despine`;
+- `load_dataset`: seaborn's example datasets, read from seaborn's data repository through the folder's data
+  snapshot.
 
 Data are given as seaborn takes them: a list or array of values; several of them (a list of lists, a 2-d array, a
 dict or a DataFrame, one group per column: "wide form"); or `data=` a DataFrame or dict with `x=`/`y=` naming its
 columns ("long form"), where a `hue=` column splits the values into colored groups.  The implemented unweighted
 statistics use: numpy's "auto" histogram bins, Gaussian kernel densities with Scott's bandwidth, quartiles with 1.5
 IQR whiskers. histplot and kdeplot accept weights but do not use it.
-What isn't drawn here (facets over rows and columns, regression plots, heatmaps) raises NotImplementedError."""
+What isn't drawn here (facets over rows and columns, regression plots, clustered heatmaps) raises
+NotImplementedError. Legends aren't titled with the hue variable yet."""
 
 import builtins as _builtins
 import math as _math
@@ -1532,7 +1537,7 @@ def load_dataset(name, cache=True, data_home=None, **kws):
         raise URLError("seaborn's example dataset %r is downloaded from %s, which Sagebrush can't do here (%s)"
                        % (name, url, getattr(e, "reason", e))) from None
     df = pd.read_csv(io.StringIO(text), **kws)
-    if len(df) and df.iloc[-1].isnull().all():
+    if len(df) and all(_missing_value(v) for v in df.iloc[-1].tolist()):  # (a last row of nothing, dropped)
         df = df.iloc[:-1]
     orders = _DATASET_ORDERS.get(name)
     if orders:

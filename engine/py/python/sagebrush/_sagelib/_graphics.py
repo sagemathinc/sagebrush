@@ -651,14 +651,14 @@ class Points(Primitive):
         o = self.options
         return _markers(P, self.xs, self.ys, o.get("marker", "o"), o.get("size", 3.5),
                         o.get("colors") or to_color(o.get("color"), "#1f77b4"), o.get("alpha"),
-                        o.get("sizes"), to_color(o.get("edgecolor")))
+                        o.get("sizes"), to_color(o.get("edgecolor")), o.get("edgewidth"))
 
     def describe(self):
         n = len(self.xs)
         return "%d point%s%s" % (n, "" if n == 1 else "s", _label(self))
 
 
-def _markers(P, xs, ys, marker, r, color, alpha, sizes=None, edge=None):
+def _markers(P, xs, ys, marker, r, color, alpha, sizes=None, edge=None, edgewidth=None):
     out = []
     many = isinstance(color, list)
     for i, (x, y) in enumerate(zip(xs, ys)):
@@ -668,7 +668,7 @@ def _markers(P, xs, ys, marker, r, color, alpha, sizes=None, edge=None):
         px, py = p
         rr = sizes[i] if sizes is not None else r
         c = color[i % len(color)] if many else color
-        out.append(_marker(marker, px, py, rr, c, edge))
+        out.append(_marker(marker, px, py, rr, c, edge, edgewidth))
     if not out:
         return ""
     a = ' opacity="%s"' % _fmt(alpha) if alpha is not None else ""
@@ -688,7 +688,7 @@ def pixel_size(u):
     return old
 
 
-def _marker(m, x, y, r, color, edge=None):
+def _marker(m, x, y, r, color, edge=None, edgewidth=None):
     c = _esc(color)
     if m == ",":
         # matplotlib's pixel marker: the one pixel of the picture that the point
@@ -700,7 +700,7 @@ def _marker(m, x, y, r, color, edge=None):
         u = _PIXEL
         return '<rect x="%.9g" y="%.9g" width="%.9g" height="%.9g" fill="%s"/>' % (
             math.floor(x / u + 1e-6) * u, math.floor(y / u + 1e-6) * u, u, u, c)
-    st = ' stroke="%s" stroke-width="0.8"' % _esc(edge) if edge else ""
+    st = ' stroke="%s" stroke-width="%s"' % (_esc(edge), "0.8" if edgewidth is None else _fmt(edgewidth)) if edge else ""
     X, Y, R = _fmt(x), _fmt(y), _fmt(r)
     if m in ("o", ".", None, True, "circle"):
         if m == ".":
