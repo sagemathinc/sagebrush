@@ -788,6 +788,14 @@ export function genericGetattr(o: any, name: string, t: PyType, dflt?: any, hook
         throw e;
       }
     }
+    // (a session's module, Sage mode's __main__: a Sage name it hasn't loaded yet, from its _Session, NS_LAZY, as a
+    // global load's miss gets it, so __main__.X and getattr(__main__, X) are Sage's)
+    const lazy = o[NS_LAZY];
+    if (lazy !== undefined) {
+      // (the session itself back: not one of its names, modules.ts lazyName)
+      const v = callObj(getattr(lazy, "_miss"), [name]);
+      if (v !== lazy) return v;
+    }
     if (dflt !== undefined) return dflt;
     const own = Object.prototype.hasOwnProperty.call(o, "__sagebrush_missing__") ? o.__sagebrush_missing__ : undefined;
     raise(T.AttributeError, `module '${o.__name__}' has no attribute '${name}'${missingHint(own, name)}`);

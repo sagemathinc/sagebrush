@@ -326,13 +326,11 @@ export function builtinName(b: any, k: string, G?: any): any {
 }
 // A lazy namespace's name k, loaded and bound there, or undefined when it has none (a KeyError from _miss); any other
 // error, a domain that fails to import, is the load's own
+// (the session itself back: not one of its names; any exception, a KeyError included, is the domain's own and
+// propagates)
 export function lazyName(lazy: any, k: string): any {
-  try {
-    return callObj(getattr(lazy, "_miss"), [k]);
-  } catch (e) {
-    if (isinstance(e, T.KeyError)) return undefined;
-    throw e;
-  }
+  const v = callObj(getattr(lazy, "_miss"), [k]);
+  return v === lazy ? undefined : v;
 }
 // (the importing code's builtins' __import__, those it started with:
 // CPython's IMPORT_NAME, the frame's builtins)
@@ -384,6 +382,11 @@ export function importFrom(m: any, name: string): any {
   }
   const v = m[name];
   if (v !== undefined && Object.prototype.hasOwnProperty.call(m, name)) return v;
+  // (a session's module, Sage mode's __main__: a Sage name not loaded yet, `from __main__ import X`)
+  if (m[NS_LAZY] !== undefined) {
+    const lv = lazyName(m[NS_LAZY], name);
+    if (lv !== undefined) return lv;
+  }
   // an attribute from the module's __getattr__ (PEP 562, or a module
   // subclass) comes before a submodule, as in CPython
   if (typeOf(m) !== T.module || m.__getattr__ !== undefined) {

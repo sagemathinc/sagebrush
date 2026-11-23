@@ -4553,8 +4553,9 @@ def __getattr__(name):
         raise AttributeError(f"module 'sage_all' has no attribute '{name}'")
     try:
         value = getattr(__import__(module), target)
-    except ImportError as e:
-        # (the domain's own error, and the name it was loading; nothing is kept, so a later use tries again)
+    except Exception as e:
+        # (the domain's own error, whatever it is, and the name it was loading; nothing is kept, so a later use tries
+        # again)
         e.add_note(f"(loading {name!r} in Sage mode, from {module})")
         raise
     globals()[name] = value

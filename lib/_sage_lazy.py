@@ -175,16 +175,21 @@ class _Session:
 
     __slots__ = ("_ns", "_names", "_dead")
 
-    def __init__(self, ns, names):
+    def __init__(self, ns, names, dead=()):
         self._ns = ns
         self._names = names
-        self._dead = set()
+        self._dead = set(dead)
+
+    def _has(self, name):
+        # (a name a use would load: one of sage_all's, not deleted; bound or not)
+        return name in self._names and name not in self._dead
 
     def _miss(self, name):
-        # (a name the session deleted, or none of sage_all's: no such name, the NameError; a domain that fails to
-        # import raises its own error, and nothing is bound, so the next use tries again)
+        # (a name the session deleted, or none of sage_all's: no such name, the NameError, said by returning the
+        # session itself, never by an exception, which a domain's import could raise too; a domain that fails to
+        # import raises its own error, whatever it is, and nothing is bound, so the next use tries again)
         if name in self._dead or name not in self._names:
-            raise KeyError(name)
+            return self
         import sage_all
         value = getattr(sage_all, name)
         self._ns[name] = value
@@ -235,4 +240,46 @@ def session(ns):
         hook(ns, _Session(ns, frozenset(names)))
     # (and a session for LazyImport's stubs, a user's lazy_import's: one resolved is rebound here too)
     bind(ns)
+
+
+def _session_of(ns):
+    import builtins
+    hook = getattr(builtins, "__pyjs_lazy_namespace__", None)
+    return None if hook is None else hook(ns)
+
+
+def session_copy(src, dst=None, skip=()):
+    """Copy namespace src's names into dst (a new dict if None), except
+    those in skip, and return dst.  A copy of a session's namespace is a
+    session too: a Sage name src hasn't loaded yet loads in the copy at its
+    first use there, and one deleted in src stays deleted.  The library's
+    copies of the session (an interact input box's, a board check's) use it.
+
+    EXAMPLES::
+
+        sage: from _sage_lazy import session, session_copy
+        sage: ns = {}
+        sage: session(ns)
+        sage: c = session_copy(ns)
+        sage: eval("ZZ", c)
+        Integer Ring
+    """
+    if dst is None:
+        dst = {}
+    for k, v in list(src.items()):
+        if k not in skip:
+            dst[k] = v
+    s = _session_of(src)
+    if s is not None:
+        import builtins
+        builtins.__pyjs_lazy_namespace__(dst, _Session(dst, s._names, s._dead))
+    return dst
+
+
+def lazy_has(ns, name):
+    """Whether a use of name in namespace ns would load it: one of the Sage
+    names its session hasn't loaded yet (or has).  False for a namespace
+    that isn't a session's."""
+    s = _session_of(ns)
+    return s is not None and s._has(name)
 

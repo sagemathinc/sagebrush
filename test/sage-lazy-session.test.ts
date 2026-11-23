@@ -122,6 +122,24 @@ res.append(str(Polyhedron([(0, 0), (1, 0), (0, 1)]).volume()))
 ${out("res")}`);
   const failed = ["ModuleNotFoundError", ["(loading 'Polyhedron' in Sage mode, from _sage_no_such_module)"]];
   assert.deepEqual(r, [failed, failed, "1/2"]);
+  // (a domain whose import raises a KeyError: that KeyError, with the note, never a NameError; at a global use, through
+  // the session's module and through `from __main__ import`)
+  const k = sage(`import _sage_names as N, os, sys, tempfile
+d = tempfile.mkdtemp()
+with open(os.path.join(d, "_sage_keyerror_domain.py"), "w") as f:
+    f.write("raise KeyError('domain import failed')\\n")
+sys.path.insert(0, d)
+N.NAMES["Polyhedron"] = "_sage_keyerror_domain"
+import __main__
+res = []
+for use in (lambda: Polyhedron, lambda: __main__.Polyhedron, lambda: exec("from __main__ import Polyhedron", {})):
+    try:
+        use()
+    except Exception as e:
+        res.append([type(e).__name__, str(e), e.__notes__])
+${out("res")}`);
+  const kerr = ["KeyError", "'domain import failed'", ["(loading 'Polyhedron' in Sage mode, from _sage_keyerror_domain)"]];
+  assert.deepEqual(k, [kerr, kerr, kerr]);
 });
 
 test("dir() lists the names not loaded yet, not a deleted one; globals() and a copy of it hold only what is bound (CPython's)", () => {
@@ -133,6 +151,51 @@ d = "Graph" in globals()
 del Sandpile
 ${out(`[a, b, c, d, "Sandpile" in dir(), "Graph" in dir()]`)}`);
   assert.deepEqual(r, [true, false, false, true, false, true]);
+});
+
+test("the library's copies of the session are sessions: an interact input box's and a board check's text use a name not loaded yet", () => {
+  // (lib/_interact.py input_box.convert and lib/_sb_check.py prepare copy __main__'s names: _sage_lazy.session_copy)
+  const r = sage(`from _interact import input_box
+import _sb_check
+a = int(input_box(3).convert("SymmetricGroup(3).order()"))
+_sb_check.prepare("null")
+exec("r = DihedralGroup(4).order()", _sb_check.ns.__dict__)
+b = int(_sb_check.ns.r)
+${out(`[a, b, "SymmetricGroup" in globals(), "DihedralGroup" in globals()]`)}`);
+  // (the copies loaded them; the session itself has bound neither)
+  assert.deepEqual(r, [6, 8, false, false]);
+  // (a name deleted in the session stays deleted in its copy)
+  const d = sage(`del CuspForms
+from _sage_lazy import session_copy
+c = session_copy(globals())
+try:
+    eval("CuspForms", c)
+    res = "bound"
+except NameError:
+    res = "NameError"
+${out(`[res, str(eval("Gamma0(11)", c))]`)}`);
+  assert.deepEqual(d, ["NameError", "Congruence Subgroup Gamma0(11)"]);
+});
+
+test("the session's module answers for a name not loaded yet: __main__.X, getattr, hasattr, from __main__ import X", () => {
+  const r = sage(`import __main__
+a = int(__main__.CuspForms(11).dimension())
+b = str(getattr(__main__, "Gamma0")(11))
+c = hasattr(__main__, "SymmetricGroup")
+from __main__ import DihedralGroup
+d = int(DihedralGroup(3).order())
+e = hasattr(__main__, "no_such_name_anywhere")
+del Sandpile
+f = hasattr(__main__, "Sandpile")
+${out(`[a, b, c, d, e, f, "CuspForms" in globals()]`)}`);
+  // (a load through the module binds the name in the session, as a global use's does)
+  assert.deepEqual(r, [1, "Congruence Subgroup Gamma0(11)", true, 6, false, false, true]);
+});
+
+test("a global name's miss is part of its line: a NameError's traceback and sys._getframe have no frame of the compiler's $N", () => {
+  const r = spawnSync(process.execPath, [CLI, "-c", "import sys\ndef f():\n    try:\n        no_such_name\n    except NameError:\n        print(sys._getframe(0).f_code.co_name, sys._getframe(1).f_code.co_name)\n    return no_such_name\nf()"], { encoding: "utf8", timeout: 120_000 });
+  assert.equal(r.stdout, "f <module>\n");
+  assert.equal(r.stderr, 'Traceback (most recent call last):\n  File "<string>", line 8, in <module>\n  File "<string>", line 7, in f\nNameError: name \'no_such_name\' is not defined\n'.replace('line 8, in <module>\n', 'line 8, in <module>\n    f()\n').replace("line 7, in f\n", "line 7, in f\n    return no_such_name\n"));
 });
 
 test("a user's sagebrush.py beside the program: the first use of every lazily loaded name works, the user's import gets theirs", () => {

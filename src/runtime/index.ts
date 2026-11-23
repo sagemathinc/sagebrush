@@ -617,11 +617,16 @@ B.builtins.compile = compileBuiltin;
 // 1/2 exact when the code object runs
 // Sage mode's session namespace (lib/_sage_lazy.py session): `session`, a _Session, supplies the names a global load
 // misses there (builtinName) and hears of `del` (delName); only that namespace, never a library module's
-B.builtins.__pyjs_lazy_namespace__ = Obj.builtin((g: any, session: any) => {
+// (with the dict alone: its session, or None, for a copy of it to have one too, _sage_lazy.session_copy)
+B.builtins.__pyjs_lazy_namespace__ = Obj.builtin((g: any, session: any = undefined) => {
   if (!(g instanceof Obj.PyDict)) raise(T.TypeError, "__pyjs_lazy_namespace__() needs a namespace's dict");
-  // (a module's namespace object behind its dict; a plain dict keeps it itself, Obj.namespaceOf)
+  // (a module's namespace object behind its dict, globals()'s or the module's __dict__'s, and the dict itself, which
+  // exec/eval over it reads, Obj.namespaceOf)
   const m = (g as any).$m;
-  ((m instanceof Obj.ObjMap ? m.o : g) as any)[Obj.NS_LAZY] = session;
+  const behind = m instanceof Obj.ObjMap || m instanceof Obj.AttrMap ? m.o : null;
+  if (session === undefined) return (g as any)[Obj.NS_LAZY] ?? behind?.[Obj.NS_LAZY] ?? null;
+  (g as any)[Obj.NS_LAZY] = session;
+  if (behind !== null) behind[Obj.NS_LAZY] = session;
   return null;
 }, "__pyjs_lazy_namespace__");
 B.builtins.__pyjs_compile_sage__ = Obj.builtin((src: any, filename: any, mode: any) => compileSource(src, filename, mode, true), "__pyjs_compile_sage__");
@@ -1069,6 +1074,8 @@ function pyFrames(sites: any[]): Frame[] {
     // (a leading $ is the compiler's own function: a module's top level or a
     // comprehension, never a def, whose name comes from a Python identifier)
     const raw = String(cs.getFunctionName() ?? "");
+    // (a global name's miss, the module's $N helper (src/emit.ts): part of the line that used the name, not a frame)
+    if (raw === "$N") continue;
     const kind = raw.startsWith("$") && raw.endsWith("$$") ? raw.slice(1, -2) : undefined;
     let name = kind !== undefined ? kind : raw.endsWith("$$") ? raw.slice(0, -2) : raw;
     if (kind === "module" || raw === "") name = "<module>";
