@@ -1,0 +1,72 @@
+ZZ/ZZ | [  1 1/2] ; [  3 1/2] | Full MatrixSpace of 2 by 2 dense matrices over Rational Field
+ZZ/QQ | [  1 1/2] ; [  3 1/2] | Full MatrixSpace of 2 by 2 dense matrices over Rational Field
+ZZ/SR | [  1 1/2] ; [  3 1/2] | Full MatrixSpace of 2 by 2 dense matrices over Symbolic Ring
+ZZ/RR | [ 1.00000000000000 0.500000000000000] ; [ 3.00000000000000 0.500000000000000] | Full MatrixSpace of 2 by 2 dense matrices over Real Field with 53 bits of precision
+ZZ/RDF | [1.0 0.5] ; [3.0 0.5] | Full MatrixSpace of 2 by 2 dense matrices over Real Double Field
+QQ/ZZ | [  1 1/2] ; [  3 1/2] | Full MatrixSpace of 2 by 2 dense matrices over Rational Field
+QQ/QQ | [  1 1/2] ; [  3 1/2] | Full MatrixSpace of 2 by 2 dense matrices over Rational Field
+QQ/SR | [  1 1/2] ; [  3 1/2] | Full MatrixSpace of 2 by 2 dense matrices over Symbolic Ring
+QQ/RR | [ 1.00000000000000 0.500000000000000] ; [ 3.00000000000000 0.500000000000000] | Full MatrixSpace of 2 by 2 dense matrices over Real Field with 53 bits of precision
+QQ/RDF | [1.0 0.5] ; [3.0 0.5] | Full MatrixSpace of 2 by 2 dense matrices over Real Double Field
+SR/ZZ | [  1 1/2] ; [  3 1/2] | Full MatrixSpace of 2 by 2 dense matrices over Symbolic Ring
+SR/QQ | [  1 1/2] ; [  3 1/2] | Full MatrixSpace of 2 by 2 dense matrices over Symbolic Ring
+SR/SR | [  1 1/2] ; [  3 1/2] | Full MatrixSpace of 2 by 2 dense matrices over Symbolic Ring
+SR/RR | [ 1.00000000000000 0.500000000000000] ; [ 3.00000000000000 0.500000000000000] | Full MatrixSpace of 2 by 2 dense matrices over Symbolic Ring
+SR/RDF | [1.0 0.5] ; [3.0 0.5] | Full MatrixSpace of 2 by 2 dense matrices over Symbolic Ring
+RR/ZZ | [ 1.00000000000000 0.500000000000000] ; [ 3.00000000000000 0.500000000000000] | Full MatrixSpace of 2 by 2 dense matrices over Real Field with 53 bits of precision
+RR/QQ | [ 1.00000000000000 0.500000000000000] ; [ 3.00000000000000 0.500000000000000] | Full MatrixSpace of 2 by 2 dense matrices over Real Field with 53 bits of precision
+RR/SR | [ 1.00000000000000 0.500000000000000] ; [ 3.00000000000000 0.500000000000000] | Full MatrixSpace of 2 by 2 dense matrices over Symbolic Ring
+RR/RR | [ 1.00000000000000 0.500000000000000] ; [ 3.00000000000000 0.500000000000000] | Full MatrixSpace of 2 by 2 dense matrices over Real Field with 53 bits of precision
+RR/RDF | [1.0 0.5] ; [3.0 0.5] | Full MatrixSpace of 2 by 2 dense matrices over Real Double Field
+RDF/ZZ | [1.0 0.5] ; [3.0 0.5] | Full MatrixSpace of 2 by 2 dense matrices over Real Double Field
+RDF/QQ | [1.0 0.5] ; [3.0 0.5] | Full MatrixSpace of 2 by 2 dense matrices over Real Double Field
+RDF/SR | [1.0 0.5] ; [3.0 0.5] | Full MatrixSpace of 2 by 2 dense matrices over Symbolic Ring
+RDF/RR | [ 1.00000000000000 0.500000000000000] ; [ 3.00000000000000 0.500000000000000] | Full MatrixSpace of 2 by 2 dense matrices over Real Field with 53 bits of precision
+RDF/RDF | [1.0 0.5] ; [3.0 0.5] | Full MatrixSpace of 2 by 2 dense matrices over Real Double Field
+ZZ/ZZ B | [-1  3] ; [-1  5] | Full MatrixSpace of 2 by 2 dense matrices over Rational Field
+ZZ/QQ B | [-1  3] ; [-1  5] | Full MatrixSpace of 2 by 2 dense matrices over Rational Field
+ZZ/GF7 B | [6 3] ; [6 5] | Full MatrixSpace of 2 by 2 dense matrices over Finite Field of size 7
+QQ/ZZ B | [-1  3] ; [-1  5] | Full MatrixSpace of 2 by 2 dense matrices over Rational Field
+QQ/QQ B | [-1  3] ; [-1  5] | Full MatrixSpace of 2 by 2 dense matrices over Rational Field
+QQ/GF7 B | ERR TypeError no common canonical parent for objects with parents: 'Finite Field of size 7' and 'Rational Field'
+GF7/ZZ B | [6 3] ; [6 5] | Full MatrixSpace of 2 by 2 dense matrices over Finite Field of size 7
+GF7/QQ B | ERR TypeError no common canonical parent for objects with parents: 'Rational Field' and 'Finite Field of size 7'
+GF7/GF7 B | [6 3] ; [6 5] | Full MatrixSpace of 2 by 2 dense matrices over Finite Field of size 7
+QQ/RDF exact | [0.5 0.5] ; [1.5 1.0] | Full MatrixSpace of 2 by 2 dense matrices over Real Double Field
+CDF/RDF | [   0.5    0.5] ; [   1.5 0.25*I] | Full MatrixSpace of 2 by 2 dense matrices over Complex Double Field
+A/A | [1 0] ; [0 1] | Full MatrixSpace of 2 by 2 dense matrices over Rational Field
+A/S | ERR ValueError matrix equation has no solutions
+S/S | [1 0] ; [2 0] | Full MatrixSpace of 2 by 2 dense matrices over Rational Field
+GF7 S/S | [1 0] ; [2 0] | Full MatrixSpace of 2 by 2 dense matrices over Finite Field of size 7
+N/N | [1 0] ; [0 1] | Full MatrixSpace of 2 by 2 dense matrices over Rational Field
+N/B | ERR ValueError number of columns of self must equal number of columns of right-hand side
+B/N | ERR ValueError number of columns of self must equal number of columns of right-hand side
+3x2 / 2x2 | [-1  3] ; [-1  5] ; [-1  7] | Full MatrixSpace of 3 by 2 dense matrices over Rational Field
+I3/I3 | [1 0 0] ; [0 1 0] ; [0 0 1] | Full MatrixSpace of 3 by 3 dense matrices over Rational Field
+0x0/0x0 | [] | Full MatrixSpace of 0 by 0 dense matrices over Rational Field
+X/B | [ x - 1 -x + 2] ; [    -x    2*x] | Full MatrixSpace of 2 by 2 dense matrices over Symbolic Ring
+B/X | [         2/x -(2/x - 1)/x] ; [         1/x -(1/x - 1)/x] | Full MatrixSpace of 2 by 2 dense matrices over Symbolic Ring
+QQ/GF7 | ERR TypeError no common canonical parent for objects with parents: 'Finite Field of size 7' and 'Rational Field'
+v/B | (-1, 3) | Vector space of dimension 2 over Rational Field
+vZZ/BZZ | (-1, 3) | Vector space of dimension 2 over Rational Field
+v/S | (1, 0) | Vector space of dimension 2 over Rational Field
+vRR/B | (1.00000000000000, 0.500000000000000) | Vector space of dimension 2 over Real Field with 53 bits of precision
+v/BRR | (1.00000000000000, 0.500000000000000) | Vector space of dimension 2 over Real Field with 53 bits of precision
+vGF7/BGF7 | (6, 3) | Vector space of dimension 2 over Finite Field of size 7
+Integer  solve_right (1, 2) | (-1, 3) | Vector space of dimension 2 over Rational Field
+Integer  solve_left (1, 2) | (-1, 3) | Vector space of dimension 2 over Rational Field
+Integer  solve_right (1, 2) | (-1, 3) | Vector space of dimension 2 over Rational Field
+Integer  solve_left (1, 2) | (-1, 3) | Vector space of dimension 2 over Rational Field
+Integer  solve_right (2, 2) | (0, 2) | Vector space of dimension 2 over Rational Field
+Integer  solve_left (2, 2) | (0, 2) | Vector space of dimension 2 over Rational Field
+Rational solve_right (1, 2) | (-1, 3) | Vector space of dimension 2 over Rational Field
+Rational solve_left (1, 2) | (-1, 3) | Vector space of dimension 2 over Rational Field
+Rational solve_right (1, 2) | (-1, 3) | Vector space of dimension 2 over Rational Field
+Rational solve_left (1, 2) | (-1, 3) | Vector space of dimension 2 over Rational Field
+Rational solve_right (2, 2) | (0, 2) | Vector space of dimension 2 over Rational Field
+Rational solve_left (2, 2) | (0, 2) | Vector space of dimension 2 over Rational Field
+solve_left shape | ERR ValueError number of columns of self must equal number of columns of right-hand side
+CDF/RDF diag | [   0.5    0.5] ; [   1.5 0.25*I] | Full MatrixSpace of 2 by 2 dense matrices over Complex Double Field
+CC/RR unit | [                       1.00000000000000 -0.500000000000000 + 1.00000000000000*I] ; [                       3.00000000000000 -1.00000000000000 + 0.500000000000000*I] | Full MatrixSpace of 2 by 2 dense matrices over Complex Field with 53 bits of precision
+vCDF/RDF | (0.5, 0.25*I) | Vector space of dimension 2 over Complex Double Field
+CDF/RDF singular | ERR LinAlgError 
