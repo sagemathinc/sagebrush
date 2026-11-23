@@ -10546,7 +10546,8 @@ def magic_(n):
     if n < 1:
         return np.zeros((0, 0))
     if n == 2:
-        return _unmat(np.array([[4.0, 3.0], [1.0, 2.0]]))
+        # (no magic square of order 2 exists; MATLAB returns [1 3; 4 2], observed R2026b)
+        return _unmat(np.array([[1.0, 3.0], [4.0, 2.0]]))
     M = np.zeros((n, n))
     if n % 2 == 1:
         i, j = 0, n // 2
