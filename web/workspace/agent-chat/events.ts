@@ -9,6 +9,7 @@
 // chat).
 
 import { webSummary } from "../agent-egress";
+import { MEMORY_LIMITS, memoryEvent, type MemoryDecided, type MemoryEvent, type MemoryProposal, type MemoryUsed } from "../memory-schema";
 
 export type TurnOutcome = "completed" | "interrupted" | "error";
 
@@ -37,6 +38,11 @@ export type TurnEvent = { seq: number; turn_id: string } & (
   | { type: "turn_usage"; usage: { input_tokens: number; output_tokens: number } }
   // (W3: the model and thinking level the turn runs with, as the agent's backend reported them; either may be absent)
   | { type: "turn_info"; model?: string; effort?: string }
+  // (agent memory v1, design/workspace-agent-protocol.md §7.4: a proposed note, its end, and the notes a turn read;
+  //  each checked closed before it is applied (memory-schema.ts))
+  | MemoryProposal
+  | MemoryDecided
+  | MemoryUsed
   | { type: "turn_error"; code: string; message: string }
   | { type: "turn_finished"; outcome: TurnOutcome; code?: string }
 );
@@ -107,7 +113,16 @@ export type Part =
   | { kind: "message"; id: string; revision: number; text: string; truncated: boolean }
   | { kind: "tool"; call: string }
   | { kind: "attention"; id: string }
-  | { kind: "artifact"; id: string };
+  | { kind: "artifact"; id: string }
+  | { kind: "memory"; pending: string };
+
+/** A proposed note's card: the proposal as last revised, then how it ended. Once decided, its text is dropped (the
+ *  note is the agent's to keep, not the chat's), leaving the name and where it went. */
+export interface MemoryCard {
+  proposal: Omit<MemoryProposal, "type" | "body"> & { body?: string };
+  outcome?: "saved" | "dismissed" | "stale";
+  note?: string;
+}
 
 export interface Turn {
   kind: "turn";
@@ -122,6 +137,10 @@ export interface Turn {
   // (W3: the model and thinking level of this turn, from its turn_info events: each field as the last one that carried
   //  it said; absent until one comes, and never carried from another turn)
   info?: { model?: string; effort?: string };
+  // (agent memory v1: the cards of the notes this turn proposed, by pending id; the notes it read, at most
+  //  MEMORY_LIMITS.used, by note)
+  memory?: Record<string, MemoryCard>;
+  used?: { note: string; name: string; revision: number }[];
   started: number;
   finished?: number;
   // set for a turn of an agent on the person's computer (else the scripted demo's)
@@ -275,6 +294,40 @@ export function apply(thread: Thread, e: TurnEvent, time = Date.now()): boolean 
       const model = typeof e.model === "string" && /^[A-Za-z0-9._:\/@[\]-]{1,128}$/.test(e.model) ? e.model : undefined;
       const effort = typeof e.effort === "string" && /^[a-z0-9]{1,16}$/.test(e.effort) ? e.effort : undefined;
       if (model !== undefined || effort !== undefined) turn.info = { ...turn.info, ...(model !== undefined ? { model } : {}), ...(effort !== undefined ? { effort } : {}) };
+      break;
+    }
+    case "memory_proposal":
+    case "memory_decided":
+    case "memory_used": {
+      let m: MemoryEvent;
+      try {
+        m = memoryEvent(e);
+      } catch {
+        break; // (not as §7.4 has it: nothing of it is shown)
+      }
+      if (m.type === "memory_proposal") {
+        turn.memory ??= Object.create(null) as Record<string, MemoryCard>;
+        const card = own(turn.memory, m.pending);
+        // (a later revision replaces the card; an earlier one, or one after its end, changes nothing)
+        if (card && (card.outcome || m.revision <= card.proposal.revision)) break;
+        const { type: _t, ...proposal } = m;
+        if (!card) turn.parts.push({ kind: "memory", pending: m.pending });
+        put(turn.memory, m.pending, { proposal });
+      } else if (m.type === "memory_decided") {
+        const card = turn.memory && own(turn.memory, m.pending);
+        if (!card || card.outcome) break;
+        card.outcome = m.outcome;
+        if (m.note) card.note = m.note;
+        delete card.proposal.body;
+      } else {
+        turn.used ??= [];
+        for (const n of m.notes) {
+          if (turn.used.length >= MEMORY_LIMITS.used) break;
+          const at = turn.used.findIndex((x) => x.note === n.note);
+          if (at >= 0) turn.used[at] = n;
+          else turn.used.push(n);
+        }
+      }
       break;
     }
     case "turn_error":

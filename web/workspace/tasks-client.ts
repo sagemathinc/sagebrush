@@ -10,6 +10,7 @@
 // The grant's delegate:true (the Agents page's switch, AgentPairing.setDelegate) is checked here before each request,
 // and by the agent always. Not here: §2.5's schema of each result, which every caller checks before any use.
 import { AgentError, type AgentPairing } from "./agent-pair";
+import { MEMORY_FEATURE, MEMORY_METHODS } from "./memory-schema";
 
 export const DELEGATE_FEATURE = "delegate.1";
 /** Delegate briefs: chat.brief, a draft of a task's brief from a Pair chat, sent only to an agent that lists it. */
@@ -50,9 +51,21 @@ export class TaskClient {
     const no = (code: string, why: string) => Promise.reject(new AgentError(code, why));
     if (this.p.link) return no("unavailable", "Delegate works only with an agent on this computer for now");
     if (this.p.state !== "granted") return no("closed", "the agent isn't connected");
+    // (agent memory v1, §7.1: its own gate, not Delegate's: the agent offers memory.1, and the grant holds memory)
+    if (method.startsWith("memory.")) {
+      if (!this.p.hello?.features?.includes(MEMORY_FEATURE)) return no("forbidden", "this agent doesn't offer memory");
+      if (!(this.p.grant as { memory?: unknown } | null)?.memory) return no("forbidden", "memory isn't turned on for this agent");
+      if (!MEMORY_METHODS.includes(method)) return no("bad_request", "not a memory request");
+      return this.send(method, params, o);
+    }
     if (!this.offered()) return no("forbidden", "this agent doesn't offer Delegate");
     if (this.p.grant?.delegate !== true) return no("forbidden", "Delegate tasks aren't turned on for this agent");
     if (!TASK_METHODS.includes(method) && !(method === BRIEF_FEATURE && this.p.hello?.features?.includes(BRIEF_FEATURE))) return no("bad_request", "not a Delegate request");
+    return this.send(method, params, o);
+  }
+
+  private send(method: string, params: Record<string, unknown>, o: { timeoutMs?: number }): Promise<unknown> {
+    const no = (code: string, why: string) => Promise.reject(new AgentError(code, why));
     if (this.pending.size >= TASK_REQUESTS.pending) return no("busy", "too many requests to the agent at once");
     const id = "p" + ++this.next;
     const m = { jsonrpc: "2.0", id, method, params };

@@ -15,6 +15,31 @@ export interface TurnHooks {
   answer(attention: string, approve: boolean | "turn", turn: string, instance: string): void;
   openArtifact(id: string): void;
   md(src: string): string;
+  /** agent memory v1: a proposed note's card, Save, Edit or Dismiss, by its pending id and the turn it was shown in;
+   *  and where a scope is, in the person's words. Without these the card shows, with no actions */
+  memory?(pending: string, action: "save" | "edit" | "dismiss", turn: string): void;
+  scopeName?(scope: "own" | { tag: string }): string;
+}
+
+const MEMORY_OUTCOME: Record<string, string> = { saved: "Saved to your notes", dismissed: "Not saved", stale: "Not saved: it changed or the agent's access did" };
+// (a proposed note: its text as text, never Markdown, so a note can't fetch or link anything; Save, Edit and Dismiss
+//  while it is open and the turn's agent is here, else how it ended)
+function memoryCardHtml(card: NonNullable<Turn["memory"]>[string], turn: Turn, h: TurnHooks): string {
+  const pr = card.proposal;
+  const where = h.scopeName ? h.scopeName(pr.scope) : pr.scope === "own" ? "this agent's own notes" : "a tag's notes";
+  const open = !card.outcome && !turn.away && !!h.memory;
+  const when = pr.expires === null ? "never expires" : `expires ${new Date(pr.expires).toISOString().slice(0, 10)}`;
+  return (
+    `<div class="memory-card ${cls(card.outcome ?? "open", ["open", "saved", "dismissed", "stale"])}" data-memory="${esc(pr.pending)}">` +
+    `<div class="mem-title">${pr.op === "edit" ? "Change this note?" : "Remember this?"} <b>${esc(pr.name)}</b></div>` +
+    `<div class="mem-where">In ${esc(where)} · ${esc(when)}</div>` +
+    `<div class="mem-desc">${esc(pr.description)}</div>` +
+    (pr.body !== undefined ? `<pre class="mem-body">${esc(pr.body)}</pre>` : "") +
+    (open
+      ? `<div class="mem-actions"><button data-mem="save">Save</button><button data-mem="edit">Edit…</button><button data-mem="dismiss">Dismiss</button></div>`
+      : `<div class="mem-state">${card.outcome ? MEMORY_OUTCOME[card.outcome] : "Not decided"}</div>`) +
+    `</div>`
+  );
 }
 
 /** A steer's line under the person's message: what the agent said happened to it. */
@@ -66,6 +91,9 @@ export function turnNode(thread: Thread, turn: Turn, h: TurnHooks): HTMLElement 
             : `<div class="att-state">${a.state === "approved" ? "Allowed" : a.state === "denied" ? "Denied" : "No answer"}</div>`) +
           `</div>`,
       );
+    } else if (p.kind === "memory") {
+      const card = turn.memory && own(turn.memory, p.pending);
+      if (card) parts.push(memoryCardHtml(card, turn, h));
     } else if (p.kind === "artifact") {
       const a = thread.artifacts.find((x) => x.id === p.id);
       if (a) parts.push(`<button class="artifact-card" data-artifact="${esc(a.id)}"><span class="ai">${artifactIcon(a)}</span><span><b>${esc(a.title)}</b><small>${artifactLabel(a)} · click to open</small></span></button>`);
@@ -98,6 +126,17 @@ export function turnNode(thread: Thread, turn: Turn, h: TurnHooks): HTMLElement 
   }
   for (const b of div.querySelectorAll<HTMLButtonElement>("[data-artifact]")) {
     b.onclick = () => h.openArtifact(b.dataset.artifact!);
+  }
+  // (agent memory v1: a card's buttons; and the notes this turn read, by name, under the agent's, as text)
+  for (const b of div.querySelectorAll<HTMLButtonElement>("[data-mem]")) {
+    const card = b.closest<HTMLElement>("[data-memory]")!;
+    b.onclick = () => h.memory?.(card.dataset.memory!, b.dataset.mem as "save" | "edit" | "dismiss", turn.turn_id);
+  }
+  if (turn.used?.length) {
+    const used = document.createElement("div");
+    used.className = "who-used";
+    used.textContent = `Used notes: ${turn.used.map((n) => n.name).join(", ")}`;
+    (div.querySelector(".who-info") ?? div.querySelector(".who"))!.after(used);
   }
   return div;
 }
