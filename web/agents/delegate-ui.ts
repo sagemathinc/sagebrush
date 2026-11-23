@@ -16,6 +16,9 @@ import { AgentError } from "../workspace/agent-pair";
 import { chipOf, currentOf, DELEGATE_LIMITS, DELEGATE_TEXT, type DelegateDoc, type DelegateTasks } from "./delegate";
 import { MergeError, clearPicks, closeRest, isDone, loadPicks, mergedParams, newRecord, prepare, recordOf, revise, run, savePicks, unpicked, unresolved, type FileMerge, type MergeIO, type MergeRecord, type Picks, type Pinned } from "./delegate-merge";
 
+/** Whether a delegated task may run code: not until SEC has cleared the agent's runner for tasks (#1612). */
+export const DELEGATE_RUNS = false;
+
 export const DELEGATE_UI_TEXT = {
   switchOn: "Delegate: on",
   switchOff: "Delegate: off",
@@ -38,10 +41,12 @@ export const DELEGATE_UI_TEXT = {
   run: "May run code",
   runNote: "Fixed for this task once it starts.",
   runNotGranted: "Your grant to this agent doesn't allow running code.",
+  runsUnavailable: "Running code in a delegated task isn't available yet.",
   noDocs: "No documents: add a path, or open a file in the pane first.",
   start: "Start",
   starting: "Starting…",
   tasks: "Tasks",
+  away: "Agent not connected: these are the tasks it had when the page last heard from it.",
   skipped: (n: number) => (n === 1 ? "One event of this task couldn't be shown here." : `${n} events of this task couldn't be shown here.`),
   proposal: (n: number, base: string, commit: string) => `Proposal: ${n === 1 ? "1 file" : `${n} files`} changed · base ${base.slice(0, 7)} · proposal ${commit.slice(0, 7)}`,
   merge: "Merge",
@@ -237,7 +242,10 @@ export function mountDelegate(h: DelegateHost) {
     if (here) addDoc(here);
     const more = el("input", { id: "delegate-add", placeholder: "Add a path, e.g. work/notes.ipynb" });
     more.onkeydown = (e) => { if (e.key === "Enter") { e.preventDefault(); addDoc(more.value); more.value = ""; } };
-    const run = el("input", { type: "checkbox", id: "delegate-run", disabled: !h.mayRun() });
+    // (#1612, ruled Nov 22 2026: off, and said, until the agent's runner for a task is cleared (DELEGATE_RUNS); then it
+    //  starts as the thread's own May run code, the grant's)
+    const mayRun = DELEGATE_RUNS && h.mayRun();
+    const run = el("input", { type: "checkbox", id: "delegate-run", disabled: !mayRun, checked: mayRun });
     const msg = el("p", { className: "msg", role: "alert" });
     const start = el("button", { type: "submit", className: "primary", textContent: T.start });
     const dlg = el("dialog", { className: "delegate-dlg sheet", ariaLabel: T.sheetTitle });
@@ -247,7 +255,7 @@ export function mountDelegate(h: DelegateHost) {
       el("label", {}, "Title", title),
       el("div", { className: "field" }, el("span", {}, "Documents"), docs, more),
       el("div", { className: "field" }, el("span", {}, "Where"), el("label", {}, el("input", { type: "radio", checked: true, name: "where" }), " ", T.where), el("small", { textContent: T.whereNote })),
-      el("div", { className: "field" }, el("label", {}, run, " ", T.run), el("small", { textContent: h.mayRun() ? T.runNote : T.runNotGranted })),
+      el("div", { className: "field" }, el("label", {}, run, " ", T.run), el("small", { textContent: !DELEGATE_RUNS ? T.runsUnavailable : h.mayRun() ? T.runNote : T.runNotGranted })),
       msg,
       el("menu", {}, el("button", { type: "button", value: "cancel", textContent: "Cancel", onclick: () => dlg.close() }), " ", start));
     // (a brief drafted by the agent from the Pair chat shown (chat.brief): only when it drafts them, there is such a
@@ -563,7 +571,16 @@ export function mountDelegate(h: DelegateHost) {
     sw.setAttribute("aria-pressed", String(s === "on"));
     btn.hidden = !offered;
     s === "turning-off" ? btn.setAttribute("aria-disabled", "true") : btn.removeAttribute("aria-disabled");
-    side.hidden = !(s === "on" || s === "turning-off") || !D.tasks.length;
+    // (the agent not connected: its last list, marked, with nothing to open until it is back: #1622)
+    const last = s === "unoffered" ? D.lastKnown() : [];
+    side.hidden = (!(s === "on" || s === "turning-off") || !D.tasks.length) && !last.length;
+    side.classList.toggle("away", !!last.length);
+    if (last.length) {
+      list.replaceChildren(el("p", { className: "away-note", textContent: T.away }), ...last.map((e) => el("div", { className: "thread task away" }, el("span", { className: "t", textContent: e.title }), el("span", { className: `chip ${e.status}${e.question ? " question" : ""}`, textContent: chipOf(e) }))));
+      if (open !== null) close();
+      view.hidden = true;
+      return;
+    }
     if (s === "on") for (const t of D.tasks) if (t.entry.status === "proposal") recover(t.entry.task);
     const chipText = (t: (typeof D.tasks)[number]) => (t.entry.status === "proposal" && incomplete.has(t.entry.task) ? T.incomplete : chipOf(t.entry));
     // (a task that's done can't be asked again: its kept note goes)

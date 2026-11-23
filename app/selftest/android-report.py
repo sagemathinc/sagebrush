@@ -67,6 +67,7 @@ DESKTOP_FILES = [
     "a grant the app didn't make reaches nothing",
     "a name outside the notebook's folder is refused",
     "the page has no fs plugin",
+    "Share isn't offered in the app",
 ]
 # (none is a prefix of another)
 INFO = [
