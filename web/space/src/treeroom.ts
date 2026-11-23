@@ -4,8 +4,8 @@
 // length; a file's text is fetched from `tree.base` when it is opened, and a Python or Sage file is entered as its own
 // room).  Its links: the imports between what is in it, a subdirectory standing for everything inside it.
 //   treeRoom(tree, dir)  -> a sagebrush-space ("" is the top)
-import { layered } from "./roomlayout.js";
-import { LIMITS } from "./read.js";
+import { layered } from "./roomlayout.ts";
+import { LIMITS } from "./read.ts";
 
 const EXT = { py: "python", sage: "sage", pyx: "python", ts: "typescript", mts: "typescript", tsx: "typescript", js: "javascript", mjs: "javascript",
   rs: "rust", m: "matlab", magma: "magma", json: "json", md: "markdown", sh: "bash", toml: "toml", yml: "yaml", yaml: "yaml", html: "html", css: "css" };

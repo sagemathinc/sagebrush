@@ -798,7 +798,7 @@ if (hasSite) rmSync(join(siteDir, "public", "agents"), { recursive: true, force:
 {
   const out = join(here, "dist", "space");
   rmSync(out, { recursive: true, force: true });
-  const r = await Bun.build(<any>{ metafile: true, entrypoints: [join(here, "space", "src", "main.js")], outdir: out, naming: { entry: "space.js", chunk: "chunks/[name]-[hash].js" }, splitting: true, target: "browser", format: "esm", minify: true });
+  const r = await Bun.build(<any>{ metafile: true, entrypoints: [join(here, "space", "src", "main.ts")], outdir: out, naming: { entry: "space.js", chunk: "chunks/[name]-[hash].js" }, splitting: true, target: "browser", format: "esm", minify: true });
   if (!r.success) {
     for (const l of r.logs) console.error(l);
     process.exit(1);

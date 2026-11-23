@@ -24,10 +24,10 @@ export function engine(mode = "python") {
 
 /** Run code; `on.update(result)` as output arrives; resolves with {out, error, displays, ms, stopped} */
 let running = null; // (the engine running code now: the one Stop interrupts)
-export async function run(code, mode, on = {}) {
+export async function run(code, mode, on: { update?: (r: any) => void; start?: () => void } = {}): Promise<any> {
   const k = await engine(mode);
   running = k;
-  return new Promise((done) => {
+  return new Promise<any>((done) => {
     const resolve = (r) => { if (running === k) running = null; done(r); };
     const r = { out: "", error: false, displays: [], ms: 0, stopped: null };
     const tell = () => on.update?.(r);

@@ -39,20 +39,39 @@ const key = async (k, down = true, extra = {}) => send("Input.dispatchKeyEvent",
 // (the whole suite bounded: past 120 s it fails, Chrome and the server killed)
 setTimeout(() => { console.log("FAIL the suite didn't end in 120 s"); process.exit(1); }, 120_000).unref();
 await send("Runtime.enable");
-const status = () => ev(`document.querySelector('#status')?.textContent ?? ''`);
+await send("Page.enable");
+const status = () => ev(`document.querySelector('[data-c="status"]')?.textContent ?? ''`);
 const open = async (q) => { await send("Page.navigate", { url: `http://127.0.0.1:${port}/space/${q}` }); await sleep(300); };
+
+// ---- the viewer looks for its parts only inside its own root: a page with another #dims, #status and even another
+//      [data-c="dims"] elsewhere (put in before the viewer's code runs) keeps them untouched, and the viewer works
+const foreign = await send("Page.addScriptToEvaluateOnNewDocument", { source: `document.addEventListener("readystatechange", () => {
+  if (document.readyState !== "interactive" || document.querySelector("[data-foreign]")) return;
+  const box = document.createElement("div"); box.dataset.foreign = "1";
+  const add = (tag, attr, value, text) => { const e = document.createElement(tag); e.setAttribute(attr, value); e.textContent = text; box.append(e); };
+  add("button", "id", "dims", "foreign dims"); add("div", "id", "status", "foreign status"); add("button", "data-c", "dims", "foreign part");
+  document.body.prepend(box);
+});` });
+await open("?space=intro.space.json");
+const mine = (c) => `document.querySelector('[data-space3d] [data-c="${c}"]')`;
+ok(await until(`/objects/.test(${mine("status")}?.textContent ?? '')`, 30000) && await ev(`document.querySelector('[data-foreign]') !== null && document.querySelector('[data-foreign]').compareDocumentPosition(document.querySelector('[data-space3d]')) & Node.DOCUMENT_POSITION_FOLLOWING`), "with another #dims, #status and [data-c=\"dims\"] before it in the page, the space loads (its status in its own part)");
+const before = await ev(`space3d.grounded`);
+await ev(`(${mine("dims")}.click(), true)`);
+ok(await until(`space3d.grounded === ${!before}`, 5000), "its own Float/Ground button works", { before, after: await ev(`space3d.grounded`) });
+ok(await ev(`document.querySelector('#dims').textContent === "foreign dims" && document.querySelector('#status').textContent === "foreign status" && document.querySelector('[data-foreign] [data-c="dims"]').textContent === "foreign part"`), "and the page's other #dims, #status and [data-c=\"dims\"] are untouched");
+await send("Page.removeScriptToEvaluateOnNewDocument", { identifier: foreign.result.identifier });
 
 // ---- ?space= is read from this site only, and only a .space.json
 await open(`?space=${encodeURIComponent("https://example.com/x.space.json")}`);
-ok(await until(`/only files of this site/.test(document.querySelector('#status')?.textContent ?? '')`, 15000), "a space of another origin is refused", await status());
+ok(await until(`/only files of this site/.test(document.querySelector('[data-c="status"]')?.textContent ?? '')`, 15000), "a space of another origin is refused", await status());
 await open(`?space=${encodeURIComponent("/index.html")}`);
-ok(await until(`/\.space\.json file/.test(document.querySelector('#status')?.textContent ?? '')`, 15000), "a file that isn't a .space.json is refused", await status());
+ok(await until(`/\.space\.json file/.test(document.querySelector('[data-c="status"]')?.textContent ?? '')`, 15000), "a file that isn't a .space.json is refused", await status());
 
 // ---- the example: it loads; a click's selection; Back
 await open("?space=intro.space.json");
-ok(await until(`/objects/.test(document.querySelector('#status')?.textContent ?? '')`, 30000), "the example space loads", await status());
+ok(await until(`/objects/.test(document.querySelector('[data-c="status"]')?.textContent ?? '')`, 30000), "the example space loads", await status());
 const first = await ev(`space3d.space.nodes[0].id`);
-ok(await ev(`space3d.select(${JSON.stringify(first)})`) && await until(`space3d.selection?.id === ${JSON.stringify(first)} && !document.querySelector('#overlay').hidden`, 10000), "selecting an object opens it");
+ok(await ev(`space3d.select(${JSON.stringify(first)})`) && await until(`space3d.selection?.id === ${JSON.stringify(first)} && !document.querySelector('[data-c="overlay"]').hidden`, 10000), "selecting an object opens it");
 
 // ---- the selection goes to the page around only when it embedded the space, and only to this site
 // (two frames of the viewer in this page, of this site: one only framed, one embedded (?embed=1), which is sent the
@@ -77,15 +96,15 @@ ok(await ev(`window.__got.every((m) => m.origin === location.origin)`), "every m
 // ---- a space over the limits in all (nine 1 MiB texts: each within the string limit, 9 MiB together), refused from
 // every source: given directly (the page's API), and sent by the page that embedded the viewer
 const big = `({ format: "sagebrush-space", version: 1, nodes: Array.from({ length: 9 }, (_, i) => ({ id: "n" + i, kind: "note", text: "m".repeat(1 << 20) })) })`;
-ok(await ev(`space3d.load(${big}, "big.space.json").then(() => "drawn", (e) => String(e.message))`) === "the space is too large to show here", "given directly: refused", await ev(`document.querySelector('#status').textContent`));
+ok(await ev(`space3d.load(${big}, "big.space.json").then(() => "drawn", (e) => String(e.message))`) === "the space is too large to show here", "given directly: refused", await ev(`document.querySelector('[data-c="status"]').textContent`));
 ok(await ev(`space3d.space?.nodes?.length`) === space.nodes.length, "and the space shown stays as it was");
 await ev(`(document.querySelector('#embed').contentWindow.postMessage({ sagebrush: "space-load", version: 1, name: "big", space: ${big} }, location.origin), true)`);
-ok(await until(`/too large/.test(document.querySelector('#embed').contentWindow.document.querySelector('#status')?.textContent ?? '')`, 15000), "sent by the embedding page: refused, and said", await ev(`document.querySelector('#embed').contentWindow.document.querySelector('#status')?.textContent`));
+ok(await until(`/too large/.test(document.querySelector('#embed').contentWindow.document.querySelector('[data-c="status"]')?.textContent ?? '')`, 15000), "sent by the embedding page: refused, and said", await ev(`document.querySelector('#embed').contentWindow.document.querySelector('[data-c="status"]')?.textContent`));
 
 // ---- an object's code that can be run says where its edits are kept
 const runnable = await ev(`space3d.space.nodes.find((n) => n.kind === "code")?.id`);
 await ev(`space3d.select(${JSON.stringify(runnable)})`);
-ok(await until(`/kept in this browser, on this site/.test(document.querySelector('#overlay .kept')?.textContent ?? '')`, 10000), "runnable code: its edits are said to be kept in this browser, on this site");
+ok(await until(`/kept in this browser, on this site/.test(document.querySelector('[data-c="overlay"] .kept')?.textContent ?? '')`, 10000), "runnable code: its edits are said to be kept in this browser, on this site");
 
 ok(errors.length === 0, "no page errors", errors.slice(0, 3));
 console.log(failures ? `${failures} FAILED` : "all passed");

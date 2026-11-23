@@ -10,7 +10,7 @@
 //     stands on a mound as high as that, with a slope up to it from the front, so you walk up to it rather than fly.
 // groundPlan returns each object's place and the terraces' blocks; supportAt says how high the ground is at a point,
 // which is what you stand on (main.js walks on it, xr.js too).
-import { sizeOf } from "./sizes.js";
+import { sizeOf } from "./sizes.ts";
 
 export const EYE = 8; // (an eye above the floor: 1.6 m at 5 units a metre)
 export const SIGN = 7; // (an object's middle above what it stands on: 1.4 m, read looking a little down)
@@ -62,7 +62,7 @@ function flatPlan(nodes, P2) {
 
 function roomPlan(nodes) {
   const P = new Float64Array(nodes.length * 3), blocks = [];
-  const index = new Map(nodes.map((n, i) => [n, i]));
+  const index = new Map<any, number>(nodes.map((n, i) => [n, i]));
   // (the rows of each part, in order)
   const rowsOf = (part) => {
     const m = new Map();

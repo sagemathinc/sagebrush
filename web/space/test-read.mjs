@@ -1,5 +1,5 @@
 // ci: web-browser/space order=5
-// What the viewer reads, and how much (src/read.js), in Node against a server of its own: a space and a file's text
+// What the viewer reads, and how much (src/read.ts), in Node against a server of its own: a space and a file's text
 // come from this site only (another origin, a user in the URL, or a space not named .space.json is refused), a
 // redirect is never followed, and an answer over the limit is refused, by its length or as it arrives. A space is
 // checked whole: its depth, values, strings, objects, links and tree.
@@ -20,9 +20,9 @@ const server = createServer((req, res) => {
 await new Promise((r) => server.listen(0, "127.0.0.1", r));
 const base = `http://127.0.0.1:${server.address().port}/space/`;
 globalThis.location = new URL(base);
-const { LIMITS, checkSpace, jsonSize, readText, sameSite, utf8Bytes } = await import("./src/read.js");
-const { treeRoom } = await import("./src/treeroom.js");
-const { KEPT, EDIT, keepEdit } = await import("./src/keep.js");
+const { LIMITS, checkSpace, jsonSize, readText, sameSite, utf8Bytes } = await import("./src/read.ts");
+const { treeRoom } = await import("./src/treeroom.ts");
+const { KEPT, EDIT, keepEdit } = await import("./src/keep.ts");
 
 try {
   // ---- where from
