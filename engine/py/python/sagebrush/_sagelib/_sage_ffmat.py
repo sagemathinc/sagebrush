@@ -139,7 +139,18 @@ def _common_field(a, b):
     import _sage_qqbar as qb
     if (a is qb.AA and b is qb.QQbar) or (a is qb.QQbar and b is qb.AA):
         return qb.QQbar
+    if _num_kind(a) is not None and _num_kind(b) is not None:
+        # (two numerical fields: their pushout, as Sage's: the lower
+        # precision, the left one of RDF and RR or CDF and CC, complex when
+        # either is; matrix(RDF)*matrix(CDF) is over CDF)
+        return _num_pushout(a, b)
     return None
+
+
+def _numerical_pair(a, b):
+    """Whether a and b are two different numerical fields (RDF, CDF, RR, CC,
+    RealField(p), ComplexField(p))."""
+    return a is not b and _num_kind(a) is not None and _num_kind(b) is not None
 
 
 def _admit_size(base, m, n, factor=1):
@@ -2395,7 +2406,13 @@ class FFMatrix:
         if other.nrows() != self.nrows():
             raise TypeError("number of rows must be the same, %d != %d" % (self.nrows(), other.nrows()))
         if isinstance(other, FFMatrix):
-            self._join_field(other, "augmenting")
+            if _numerical_pair(self._base, other._base):
+                # (two numerical fields: over this matrix's field, as Sage's
+                # augment; the right one's entries converted into it)
+                _admit_size(self._base, self.nrows(), self._ncols + other.ncols())
+                other = FFMatrix(self._base, [[self._base(x) for x in r] for r in other._rows], other.ncols())
+            else:
+                self._join_field(other, "augmenting")
         _admit_size(self._base, self.nrows(), self._ncols + other.ncols())
         return FFMatrix(self._base, [r + s for r, s in zip(self._rows, other._rows)], self._ncols + other.ncols())
 
@@ -2413,6 +2430,12 @@ class FFMatrix:
         if other.ncols() != self._ncols:
             raise TypeError("number of columns must be the same, %d != %d" % (self._ncols, other.ncols()))
         if isinstance(other, FFMatrix):
+            if _numerical_pair(self._base, other._base):
+                # (two numerical fields: over their pushout, as Sage's stack)
+                F = _num_pushout(self._base, other._base)
+                _admit_size(F, self.nrows() + other.nrows(), self._ncols)
+                rows = [[F(x) for x in r] for M in (self, other) for r in M._rows]
+                return FFMatrix(F, rows, self._ncols)
             self._join_field(other, "stacking")
         _admit_size(self._base, self.nrows() + other.nrows(), self._ncols)
         return FFMatrix(self._base, self._rows + other._rows, self._ncols)

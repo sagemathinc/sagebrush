@@ -1,0 +1,181 @@
+RDF * RR | [ 7.0 10.0] ; [15.0 22.0] | Full MatrixSpace of 2 by 2 dense matrices over Real Double Field
+RDF + RR | [2.0 4.0] ; [6.0 8.0] | Full MatrixSpace of 2 by 2 dense matrices over Real Double Field
+RDF - RR | [0.0 0.0] ; [0.0 0.0] | Full MatrixSpace of 2 by 2 dense matrices over Real Double Field
+RDF augment RR | [1.0 2.0 5.0] ; [3.0 4.0 6.0] | Full MatrixSpace of 2 by 3 dense matrices over Real Double Field
+RDF stack RR | [1.0 2.0] ; [3.0 4.0] ; [5.0 6.0] | Full MatrixSpace of 3 by 2 dense matrices over Real Double Field
+RDF * CDF | [         7.0  4.0 + 4.0*I] ; [        15.0 10.0 + 8.0*I] | Full MatrixSpace of 2 by 2 dense matrices over Complex Double Field
+RDF + CDF | [        2.0         4.0] ; [        6.0 5.0 + 2.0*I] | Full MatrixSpace of 2 by 2 dense matrices over Complex Double Field
+RDF - CDF | [        0.0         0.0] ; [        0.0 3.0 - 2.0*I] | Full MatrixSpace of 2 by 2 dense matrices over Complex Double Field
+RDF augment CDF | [1.0 2.0 5.0] ; [3.0 4.0 6.0] | Full MatrixSpace of 2 by 3 dense matrices over Real Double Field
+RDF stack CDF | [1.0 2.0] ; [3.0 4.0] ; [5.0 6.0] | Full MatrixSpace of 3 by 2 dense matrices over Complex Double Field
+RDF * CC | [                     7.00000000000000 4.00000000000000 + 4.00000000000000*I] ; [                     15.0000000000000 10.0000000000000 + 8.00000000000000*I] | Full MatrixSpace of 2 by 2 dense matrices over Complex Field with 53 bits of precision
+RDF + CC | [                     2.00000000000000                      4.00000000000000] ; [                     6.00000000000000 5.00000000000000 + 2.00000000000000*I] | Full MatrixSpace of 2 by 2 dense matrices over Complex Field with 53 bits of precision
+RDF - CC | [                    0.000000000000000                     0.000000000000000] ; [                    0.000000000000000 3.00000000000000 - 2.00000000000000*I] | Full MatrixSpace of 2 by 2 dense matrices over Complex Field with 53 bits of precision
+RDF augment CC | [1.0 2.0 5.0] ; [3.0 4.0 6.0] | Full MatrixSpace of 2 by 3 dense matrices over Real Double Field
+RDF stack CC | [1.00000000000000 2.00000000000000] ; [3.00000000000000 4.00000000000000] ; [5.00000000000000 6.00000000000000] | Full MatrixSpace of 3 by 2 dense matrices over Complex Field with 53 bits of precision
+RDF * R30 | [7.0000000 10.000000] ; [15.000000 22.000000] | Full MatrixSpace of 2 by 2 dense matrices over Real Field with 30 bits of precision
+RDF + R30 | [2.0000000 4.0000000] ; [6.0000000 8.0000000] | Full MatrixSpace of 2 by 2 dense matrices over Real Field with 30 bits of precision
+RDF - R30 | [0.00000000 0.00000000] ; [0.00000000 0.00000000] | Full MatrixSpace of 2 by 2 dense matrices over Real Field with 30 bits of precision
+RDF augment R30 | [1.0 2.0 5.0] ; [3.0 4.0 6.0] | Full MatrixSpace of 2 by 3 dense matrices over Real Double Field
+RDF stack R30 | [1.0000000 2.0000000] ; [3.0000000 4.0000000] ; [5.0000000 6.0000000] | Full MatrixSpace of 3 by 2 dense matrices over Real Field with 30 bits of precision
+RDF * C100 | [                     7.00000000000000 4.00000000000000 + 4.00000000000000*I] ; [                     15.0000000000000 10.0000000000000 + 8.00000000000000*I] | Full MatrixSpace of 2 by 2 dense matrices over Complex Field with 53 bits of precision
+RDF + C100 | [                     2.00000000000000                      4.00000000000000] ; [                     6.00000000000000 5.00000000000000 + 2.00000000000000*I] | Full MatrixSpace of 2 by 2 dense matrices over Complex Field with 53 bits of precision
+RDF - C100 | [                    0.000000000000000                     0.000000000000000] ; [                    0.000000000000000 3.00000000000000 - 2.00000000000000*I] | Full MatrixSpace of 2 by 2 dense matrices over Complex Field with 53 bits of precision
+RDF augment C100 | [1.0 2.0 5.0] ; [3.0 4.0 6.0] | Full MatrixSpace of 2 by 3 dense matrices over Real Double Field
+RDF stack C100 | [1.00000000000000 2.00000000000000] ; [3.00000000000000 4.00000000000000] ; [5.00000000000000 6.00000000000000] | Full MatrixSpace of 3 by 2 dense matrices over Complex Field with 53 bits of precision
+RR * RDF | [7.00000000000000 10.0000000000000] ; [15.0000000000000 22.0000000000000] | Full MatrixSpace of 2 by 2 dense matrices over Real Field with 53 bits of precision
+RR + RDF | [2.00000000000000 4.00000000000000] ; [6.00000000000000 8.00000000000000] | Full MatrixSpace of 2 by 2 dense matrices over Real Field with 53 bits of precision
+RR - RDF | [0.000000000000000 0.000000000000000] ; [0.000000000000000 0.000000000000000] | Full MatrixSpace of 2 by 2 dense matrices over Real Field with 53 bits of precision
+RR augment RDF | [1.00000000000000 2.00000000000000 5.00000000000000] ; [3.00000000000000 4.00000000000000 6.00000000000000] | Full MatrixSpace of 2 by 3 dense matrices over Real Field with 53 bits of precision
+RR stack RDF | [1.00000000000000 2.00000000000000] ; [3.00000000000000 4.00000000000000] ; [5.00000000000000 6.00000000000000] | Full MatrixSpace of 3 by 2 dense matrices over Real Field with 53 bits of precision
+RR * CDF | [         7.0  4.0 + 4.0*I] ; [        15.0 10.0 + 8.0*I] | Full MatrixSpace of 2 by 2 dense matrices over Complex Double Field
+RR + CDF | [        2.0         4.0] ; [        6.0 5.0 + 2.0*I] | Full MatrixSpace of 2 by 2 dense matrices over Complex Double Field
+RR - CDF | [        0.0         0.0] ; [        0.0 3.0 - 2.0*I] | Full MatrixSpace of 2 by 2 dense matrices over Complex Double Field
+RR augment CDF | [1.00000000000000 2.00000000000000 5.00000000000000] ; [3.00000000000000 4.00000000000000 6.00000000000000] | Full MatrixSpace of 2 by 3 dense matrices over Real Field with 53 bits of precision
+RR stack CDF | [1.0 2.0] ; [3.0 4.0] ; [5.0 6.0] | Full MatrixSpace of 3 by 2 dense matrices over Complex Double Field
+RR * CC | [                     7.00000000000000 4.00000000000000 + 4.00000000000000*I] ; [                     15.0000000000000 10.0000000000000 + 8.00000000000000*I] | Full MatrixSpace of 2 by 2 dense matrices over Complex Field with 53 bits of precision
+RR + CC | [                     2.00000000000000                      4.00000000000000] ; [                     6.00000000000000 5.00000000000000 + 2.00000000000000*I] | Full MatrixSpace of 2 by 2 dense matrices over Complex Field with 53 bits of precision
+RR - CC | [                    0.000000000000000                     0.000000000000000] ; [                    0.000000000000000 3.00000000000000 - 2.00000000000000*I] | Full MatrixSpace of 2 by 2 dense matrices over Complex Field with 53 bits of precision
+RR augment CC | [1.00000000000000 2.00000000000000 5.00000000000000] ; [3.00000000000000 4.00000000000000 6.00000000000000] | Full MatrixSpace of 2 by 3 dense matrices over Real Field with 53 bits of precision
+RR stack CC | [1.00000000000000 2.00000000000000] ; [3.00000000000000 4.00000000000000] ; [5.00000000000000 6.00000000000000] | Full MatrixSpace of 3 by 2 dense matrices over Complex Field with 53 bits of precision
+RR * R30 | [7.0000000 10.000000] ; [15.000000 22.000000] | Full MatrixSpace of 2 by 2 dense matrices over Real Field with 30 bits of precision
+RR + R30 | [2.0000000 4.0000000] ; [6.0000000 8.0000000] | Full MatrixSpace of 2 by 2 dense matrices over Real Field with 30 bits of precision
+RR - R30 | [0.00000000 0.00000000] ; [0.00000000 0.00000000] | Full MatrixSpace of 2 by 2 dense matrices over Real Field with 30 bits of precision
+RR augment R30 | [1.00000000000000 2.00000000000000 5.00000000000000] ; [3.00000000000000 4.00000000000000 6.00000000000000] | Full MatrixSpace of 2 by 3 dense matrices over Real Field with 53 bits of precision
+RR stack R30 | [1.0000000 2.0000000] ; [3.0000000 4.0000000] ; [5.0000000 6.0000000] | Full MatrixSpace of 3 by 2 dense matrices over Real Field with 30 bits of precision
+RR * C100 | [                     7.00000000000000 4.00000000000000 + 4.00000000000000*I] ; [                     15.0000000000000 10.0000000000000 + 8.00000000000000*I] | Full MatrixSpace of 2 by 2 dense matrices over Complex Field with 53 bits of precision
+RR + C100 | [                     2.00000000000000                      4.00000000000000] ; [                     6.00000000000000 5.00000000000000 + 2.00000000000000*I] | Full MatrixSpace of 2 by 2 dense matrices over Complex Field with 53 bits of precision
+RR - C100 | [                    0.000000000000000                     0.000000000000000] ; [                    0.000000000000000 3.00000000000000 - 2.00000000000000*I] | Full MatrixSpace of 2 by 2 dense matrices over Complex Field with 53 bits of precision
+RR augment C100 | [1.00000000000000 2.00000000000000 5.00000000000000] ; [3.00000000000000 4.00000000000000 6.00000000000000] | Full MatrixSpace of 2 by 3 dense matrices over Real Field with 53 bits of precision
+RR stack C100 | [1.00000000000000 2.00000000000000] ; [3.00000000000000 4.00000000000000] ; [5.00000000000000 6.00000000000000] | Full MatrixSpace of 3 by 2 dense matrices over Complex Field with 53 bits of precision
+CDF * RDF | [         7.0         10.0] ; [ 6.0 + 6.0*I 10.0 + 8.0*I] | Full MatrixSpace of 2 by 2 dense matrices over Complex Double Field
+CDF + RDF | [        2.0         4.0] ; [        6.0 5.0 + 2.0*I] | Full MatrixSpace of 2 by 2 dense matrices over Complex Double Field
+CDF - RDF | [         0.0          0.0] ; [         0.0 -3.0 + 2.0*I] | Full MatrixSpace of 2 by 2 dense matrices over Complex Double Field
+CDF augment RDF | [        1.0         2.0         5.0] ; [        3.0 1.0 + 2.0*I         6.0] | Full MatrixSpace of 2 by 3 dense matrices over Complex Double Field
+CDF stack RDF | [        1.0         2.0] ; [        3.0 1.0 + 2.0*I] ; [        5.0         6.0] | Full MatrixSpace of 3 by 2 dense matrices over Complex Double Field
+CDF * RR | [         7.0         10.0] ; [ 6.0 + 6.0*I 10.0 + 8.0*I] | Full MatrixSpace of 2 by 2 dense matrices over Complex Double Field
+CDF + RR | [        2.0         4.0] ; [        6.0 5.0 + 2.0*I] | Full MatrixSpace of 2 by 2 dense matrices over Complex Double Field
+CDF - RR | [         0.0          0.0] ; [         0.0 -3.0 + 2.0*I] | Full MatrixSpace of 2 by 2 dense matrices over Complex Double Field
+CDF augment RR | [        1.0         2.0         5.0] ; [        3.0 1.0 + 2.0*I         6.0] | Full MatrixSpace of 2 by 3 dense matrices over Complex Double Field
+CDF stack RR | [        1.0         2.0] ; [        3.0 1.0 + 2.0*I] ; [        5.0         6.0] | Full MatrixSpace of 3 by 2 dense matrices over Complex Double Field
+CDF * CC | [        7.0 4.0 + 4.0*I] ; [6.0 + 6.0*I 3.0 + 4.0*I] | Full MatrixSpace of 2 by 2 dense matrices over Complex Double Field
+CDF + CC | [        2.0         4.0] ; [        6.0 2.0 + 4.0*I] | Full MatrixSpace of 2 by 2 dense matrices over Complex Double Field
+CDF - CC | [0.0 0.0] ; [0.0 0.0] | Full MatrixSpace of 2 by 2 dense matrices over Complex Double Field
+CDF augment CC | [        1.0         2.0         5.0] ; [        3.0 1.0 + 2.0*I         6.0] | Full MatrixSpace of 2 by 3 dense matrices over Complex Double Field
+CDF stack CC | [        1.0         2.0] ; [        3.0 1.0 + 2.0*I] ; [        5.0         6.0] | Full MatrixSpace of 3 by 2 dense matrices over Complex Double Field
+CDF * R30 | [              7.0000000               10.000000] ; [6.0000000 + 6.0000000*I 10.000000 + 8.0000000*I] | Full MatrixSpace of 2 by 2 dense matrices over Complex Field with 30 bits of precision
+CDF + R30 | [              2.0000000               4.0000000] ; [              6.0000000 5.0000000 + 2.0000000*I] | Full MatrixSpace of 2 by 2 dense matrices over Complex Field with 30 bits of precision
+CDF - R30 | [              0.00000000               0.00000000] ; [              0.00000000 -3.0000000 + 2.0000000*I] | Full MatrixSpace of 2 by 2 dense matrices over Complex Field with 30 bits of precision
+CDF augment R30 | [        1.0         2.0         5.0] ; [        3.0 1.0 + 2.0*I         6.0] | Full MatrixSpace of 2 by 3 dense matrices over Complex Double Field
+CDF stack R30 | [              1.0000000               2.0000000] ; [              3.0000000 1.0000000 + 2.0000000*I] ; [              5.0000000               6.0000000] | Full MatrixSpace of 3 by 2 dense matrices over Complex Field with 30 bits of precision
+CDF * C100 | [        7.0 4.0 + 4.0*I] ; [6.0 + 6.0*I 3.0 + 4.0*I] | Full MatrixSpace of 2 by 2 dense matrices over Complex Double Field
+CDF + C100 | [        2.0         4.0] ; [        6.0 2.0 + 4.0*I] | Full MatrixSpace of 2 by 2 dense matrices over Complex Double Field
+CDF - C100 | [0.0 0.0] ; [0.0 0.0] | Full MatrixSpace of 2 by 2 dense matrices over Complex Double Field
+CDF augment C100 | [        1.0         2.0         5.0] ; [        3.0 1.0 + 2.0*I         6.0] | Full MatrixSpace of 2 by 3 dense matrices over Complex Double Field
+CDF stack C100 | [        1.0         2.0] ; [        3.0 1.0 + 2.0*I] ; [        5.0         6.0] | Full MatrixSpace of 3 by 2 dense matrices over Complex Double Field
+CC * RDF | [                     7.00000000000000                      10.0000000000000] ; [6.00000000000000 + 6.00000000000000*I 10.0000000000000 + 8.00000000000000*I] | Full MatrixSpace of 2 by 2 dense matrices over Complex Field with 53 bits of precision
+CC + RDF | [                     2.00000000000000                      4.00000000000000] ; [                     6.00000000000000 5.00000000000000 + 2.00000000000000*I] | Full MatrixSpace of 2 by 2 dense matrices over Complex Field with 53 bits of precision
+CC - RDF | [                     0.000000000000000                      0.000000000000000] ; [                     0.000000000000000 -3.00000000000000 + 2.00000000000000*I] | Full MatrixSpace of 2 by 2 dense matrices over Complex Field with 53 bits of precision
+CC augment RDF | [                     1.00000000000000                      2.00000000000000                      5.00000000000000] ; [                     3.00000000000000 1.00000000000000 + 2.00000000000000*I                      6.00000000000000] | Full MatrixSpace of 2 by 3 dense matrices over Complex Field with 53 bits of precision
+CC stack RDF | [                     1.00000000000000                      2.00000000000000] ; [                     3.00000000000000 1.00000000000000 + 2.00000000000000*I] ; [                     5.00000000000000                      6.00000000000000] | Full MatrixSpace of 3 by 2 dense matrices over Complex Field with 53 bits of precision
+CC * RR | [                     7.00000000000000                      10.0000000000000] ; [6.00000000000000 + 6.00000000000000*I 10.0000000000000 + 8.00000000000000*I] | Full MatrixSpace of 2 by 2 dense matrices over Complex Field with 53 bits of precision
+CC + RR | [                     2.00000000000000                      4.00000000000000] ; [                     6.00000000000000 5.00000000000000 + 2.00000000000000*I] | Full MatrixSpace of 2 by 2 dense matrices over Complex Field with 53 bits of precision
+CC - RR | [                     0.000000000000000                      0.000000000000000] ; [                     0.000000000000000 -3.00000000000000 + 2.00000000000000*I] | Full MatrixSpace of 2 by 2 dense matrices over Complex Field with 53 bits of precision
+CC augment RR | [                     1.00000000000000                      2.00000000000000                      5.00000000000000] ; [                     3.00000000000000 1.00000000000000 + 2.00000000000000*I                      6.00000000000000] | Full MatrixSpace of 2 by 3 dense matrices over Complex Field with 53 bits of precision
+CC stack RR | [                     1.00000000000000                      2.00000000000000] ; [                     3.00000000000000 1.00000000000000 + 2.00000000000000*I] ; [                     5.00000000000000                      6.00000000000000] | Full MatrixSpace of 3 by 2 dense matrices over Complex Field with 53 bits of precision
+CC * CDF | [                     7.00000000000000 4.00000000000000 + 4.00000000000000*I] ; [6.00000000000000 + 6.00000000000000*I 3.00000000000000 + 4.00000000000000*I] | Full MatrixSpace of 2 by 2 dense matrices over Complex Field with 53 bits of precision
+CC + CDF | [                     2.00000000000000                      4.00000000000000] ; [                     6.00000000000000 2.00000000000000 + 4.00000000000000*I] | Full MatrixSpace of 2 by 2 dense matrices over Complex Field with 53 bits of precision
+CC - CDF | [0.000000000000000 0.000000000000000] ; [0.000000000000000 0.000000000000000] | Full MatrixSpace of 2 by 2 dense matrices over Complex Field with 53 bits of precision
+CC augment CDF | [                     1.00000000000000                      2.00000000000000                      5.00000000000000] ; [                     3.00000000000000 1.00000000000000 + 2.00000000000000*I                      6.00000000000000] | Full MatrixSpace of 2 by 3 dense matrices over Complex Field with 53 bits of precision
+CC stack CDF | [                     1.00000000000000                      2.00000000000000] ; [                     3.00000000000000 1.00000000000000 + 2.00000000000000*I] ; [                     5.00000000000000                      6.00000000000000] | Full MatrixSpace of 3 by 2 dense matrices over Complex Field with 53 bits of precision
+CC * R30 | [              7.0000000               10.000000] ; [6.0000000 + 6.0000000*I 10.000000 + 8.0000000*I] | Full MatrixSpace of 2 by 2 dense matrices over Complex Field with 30 bits of precision
+CC + R30 | [              2.0000000               4.0000000] ; [              6.0000000 5.0000000 + 2.0000000*I] | Full MatrixSpace of 2 by 2 dense matrices over Complex Field with 30 bits of precision
+CC - R30 | [              0.00000000               0.00000000] ; [              0.00000000 -3.0000000 + 2.0000000*I] | Full MatrixSpace of 2 by 2 dense matrices over Complex Field with 30 bits of precision
+CC augment R30 | [                     1.00000000000000                      2.00000000000000                      5.00000000000000] ; [                     3.00000000000000 1.00000000000000 + 2.00000000000000*I                      6.00000000000000] | Full MatrixSpace of 2 by 3 dense matrices over Complex Field with 53 bits of precision
+CC stack R30 | [              1.0000000               2.0000000] ; [              3.0000000 1.0000000 + 2.0000000*I] ; [              5.0000000               6.0000000] | Full MatrixSpace of 3 by 2 dense matrices over Complex Field with 30 bits of precision
+CC * C100 | [                     7.00000000000000 4.00000000000000 + 4.00000000000000*I] ; [6.00000000000000 + 6.00000000000000*I 3.00000000000000 + 4.00000000000000*I] | Full MatrixSpace of 2 by 2 dense matrices over Complex Field with 53 bits of precision
+CC + C100 | [                     2.00000000000000                      4.00000000000000] ; [                     6.00000000000000 2.00000000000000 + 4.00000000000000*I] | Full MatrixSpace of 2 by 2 dense matrices over Complex Field with 53 bits of precision
+CC - C100 | [0.000000000000000 0.000000000000000] ; [0.000000000000000 0.000000000000000] | Full MatrixSpace of 2 by 2 dense matrices over Complex Field with 53 bits of precision
+CC augment C100 | [                     1.00000000000000                      2.00000000000000                      5.00000000000000] ; [                     3.00000000000000 1.00000000000000 + 2.00000000000000*I                      6.00000000000000] | Full MatrixSpace of 2 by 3 dense matrices over Complex Field with 53 bits of precision
+CC stack C100 | [                     1.00000000000000                      2.00000000000000] ; [                     3.00000000000000 1.00000000000000 + 2.00000000000000*I] ; [                     5.00000000000000                      6.00000000000000] | Full MatrixSpace of 3 by 2 dense matrices over Complex Field with 53 bits of precision
+R30 * RDF | [7.0000000 10.000000] ; [15.000000 22.000000] | Full MatrixSpace of 2 by 2 dense matrices over Real Field with 30 bits of precision
+R30 + RDF | [2.0000000 4.0000000] ; [6.0000000 8.0000000] | Full MatrixSpace of 2 by 2 dense matrices over Real Field with 30 bits of precision
+R30 - RDF | [0.00000000 0.00000000] ; [0.00000000 0.00000000] | Full MatrixSpace of 2 by 2 dense matrices over Real Field with 30 bits of precision
+R30 augment RDF | [1.0000000 2.0000000 5.0000000] ; [3.0000000 4.0000000 6.0000000] | Full MatrixSpace of 2 by 3 dense matrices over Real Field with 30 bits of precision
+R30 stack RDF | [1.0000000 2.0000000] ; [3.0000000 4.0000000] ; [5.0000000 6.0000000] | Full MatrixSpace of 3 by 2 dense matrices over Real Field with 30 bits of precision
+R30 * RR | [7.0000000 10.000000] ; [15.000000 22.000000] | Full MatrixSpace of 2 by 2 dense matrices over Real Field with 30 bits of precision
+R30 + RR | [2.0000000 4.0000000] ; [6.0000000 8.0000000] | Full MatrixSpace of 2 by 2 dense matrices over Real Field with 30 bits of precision
+R30 - RR | [0.00000000 0.00000000] ; [0.00000000 0.00000000] | Full MatrixSpace of 2 by 2 dense matrices over Real Field with 30 bits of precision
+R30 augment RR | [1.0000000 2.0000000 5.0000000] ; [3.0000000 4.0000000 6.0000000] | Full MatrixSpace of 2 by 3 dense matrices over Real Field with 30 bits of precision
+R30 stack RR | [1.0000000 2.0000000] ; [3.0000000 4.0000000] ; [5.0000000 6.0000000] | Full MatrixSpace of 3 by 2 dense matrices over Real Field with 30 bits of precision
+R30 * CDF | [              7.0000000 4.0000000 + 4.0000000*I] ; [              15.000000 10.000000 + 8.0000000*I] | Full MatrixSpace of 2 by 2 dense matrices over Complex Field with 30 bits of precision
+R30 + CDF | [              2.0000000               4.0000000] ; [              6.0000000 5.0000000 + 2.0000000*I] | Full MatrixSpace of 2 by 2 dense matrices over Complex Field with 30 bits of precision
+R30 - CDF | [             0.00000000              0.00000000] ; [             0.00000000 3.0000000 - 2.0000000*I] | Full MatrixSpace of 2 by 2 dense matrices over Complex Field with 30 bits of precision
+R30 augment CDF | [1.0000000 2.0000000 5.0000000] ; [3.0000000 4.0000000 6.0000000] | Full MatrixSpace of 2 by 3 dense matrices over Real Field with 30 bits of precision
+R30 stack CDF | [1.0000000 2.0000000] ; [3.0000000 4.0000000] ; [5.0000000 6.0000000] | Full MatrixSpace of 3 by 2 dense matrices over Complex Field with 30 bits of precision
+R30 * CC | [              7.0000000 4.0000000 + 4.0000000*I] ; [              15.000000 10.000000 + 8.0000000*I] | Full MatrixSpace of 2 by 2 dense matrices over Complex Field with 30 bits of precision
+R30 + CC | [              2.0000000               4.0000000] ; [              6.0000000 5.0000000 + 2.0000000*I] | Full MatrixSpace of 2 by 2 dense matrices over Complex Field with 30 bits of precision
+R30 - CC | [             0.00000000              0.00000000] ; [             0.00000000 3.0000000 - 2.0000000*I] | Full MatrixSpace of 2 by 2 dense matrices over Complex Field with 30 bits of precision
+R30 augment CC | [1.0000000 2.0000000 5.0000000] ; [3.0000000 4.0000000 6.0000000] | Full MatrixSpace of 2 by 3 dense matrices over Real Field with 30 bits of precision
+R30 stack CC | [1.0000000 2.0000000] ; [3.0000000 4.0000000] ; [5.0000000 6.0000000] | Full MatrixSpace of 3 by 2 dense matrices over Complex Field with 30 bits of precision
+R30 * C100 | [              7.0000000 4.0000000 + 4.0000000*I] ; [              15.000000 10.000000 + 8.0000000*I] | Full MatrixSpace of 2 by 2 dense matrices over Complex Field with 30 bits of precision
+R30 + C100 | [              2.0000000               4.0000000] ; [              6.0000000 5.0000000 + 2.0000000*I] | Full MatrixSpace of 2 by 2 dense matrices over Complex Field with 30 bits of precision
+R30 - C100 | [             0.00000000              0.00000000] ; [             0.00000000 3.0000000 - 2.0000000*I] | Full MatrixSpace of 2 by 2 dense matrices over Complex Field with 30 bits of precision
+R30 augment C100 | [1.0000000 2.0000000 5.0000000] ; [3.0000000 4.0000000 6.0000000] | Full MatrixSpace of 2 by 3 dense matrices over Real Field with 30 bits of precision
+R30 stack C100 | [1.0000000 2.0000000] ; [3.0000000 4.0000000] ; [5.0000000 6.0000000] | Full MatrixSpace of 3 by 2 dense matrices over Complex Field with 30 bits of precision
+C100 * RDF | [                     7.00000000000000                      10.0000000000000] ; [6.00000000000000 + 6.00000000000000*I 10.0000000000000 + 8.00000000000000*I] | Full MatrixSpace of 2 by 2 dense matrices over Complex Field with 53 bits of precision
+C100 + RDF | [                     2.00000000000000                      4.00000000000000] ; [                     6.00000000000000 5.00000000000000 + 2.00000000000000*I] | Full MatrixSpace of 2 by 2 dense matrices over Complex Field with 53 bits of precision
+C100 - RDF | [                     0.000000000000000                      0.000000000000000] ; [                     0.000000000000000 -3.00000000000000 + 2.00000000000000*I] | Full MatrixSpace of 2 by 2 dense matrices over Complex Field with 53 bits of precision
+C100 augment RDF | [                                   1.0000000000000000000000000000                                    2.0000000000000000000000000000                                    5.0000000000000000000000000000] ; [                                   3.0000000000000000000000000000 1.0000000000000000000000000000 + 2.0000000000000000000000000000*I                                    6.0000000000000000000000000000] | Full MatrixSpace of 2 by 3 dense matrices over Complex Field with 100 bits of precision
+C100 stack RDF | [                     1.00000000000000                      2.00000000000000] ; [                     3.00000000000000 1.00000000000000 + 2.00000000000000*I] ; [                     5.00000000000000                      6.00000000000000] | Full MatrixSpace of 3 by 2 dense matrices over Complex Field with 53 bits of precision
+C100 * RR | [                     7.00000000000000                      10.0000000000000] ; [6.00000000000000 + 6.00000000000000*I 10.0000000000000 + 8.00000000000000*I] | Full MatrixSpace of 2 by 2 dense matrices over Complex Field with 53 bits of precision
+C100 + RR | [                     2.00000000000000                      4.00000000000000] ; [                     6.00000000000000 5.00000000000000 + 2.00000000000000*I] | Full MatrixSpace of 2 by 2 dense matrices over Complex Field with 53 bits of precision
+C100 - RR | [                     0.000000000000000                      0.000000000000000] ; [                     0.000000000000000 -3.00000000000000 + 2.00000000000000*I] | Full MatrixSpace of 2 by 2 dense matrices over Complex Field with 53 bits of precision
+C100 augment RR | [                                   1.0000000000000000000000000000                                    2.0000000000000000000000000000                                    5.0000000000000000000000000000] ; [                                   3.0000000000000000000000000000 1.0000000000000000000000000000 + 2.0000000000000000000000000000*I                                    6.0000000000000000000000000000] | Full MatrixSpace of 2 by 3 dense matrices over Complex Field with 100 bits of precision
+C100 stack RR | [                     1.00000000000000                      2.00000000000000] ; [                     3.00000000000000 1.00000000000000 + 2.00000000000000*I] ; [                     5.00000000000000                      6.00000000000000] | Full MatrixSpace of 3 by 2 dense matrices over Complex Field with 53 bits of precision
+C100 * CDF | [        7.0 4.0 + 4.0*I] ; [6.0 + 6.0*I 3.0 + 4.0*I] | Full MatrixSpace of 2 by 2 dense matrices over Complex Double Field
+C100 + CDF | [        2.0         4.0] ; [        6.0 2.0 + 4.0*I] | Full MatrixSpace of 2 by 2 dense matrices over Complex Double Field
+C100 - CDF | [0.0 0.0] ; [0.0 0.0] | Full MatrixSpace of 2 by 2 dense matrices over Complex Double Field
+C100 augment CDF | [                                   1.0000000000000000000000000000                                    2.0000000000000000000000000000                                    5.0000000000000000000000000000] ; [                                   3.0000000000000000000000000000 1.0000000000000000000000000000 + 2.0000000000000000000000000000*I                                    6.0000000000000000000000000000] | Full MatrixSpace of 2 by 3 dense matrices over Complex Field with 100 bits of precision
+C100 stack CDF | [        1.0         2.0] ; [        3.0 1.0 + 2.0*I] ; [        5.0         6.0] | Full MatrixSpace of 3 by 2 dense matrices over Complex Double Field
+C100 * CC | [                     7.00000000000000 4.00000000000000 + 4.00000000000000*I] ; [6.00000000000000 + 6.00000000000000*I 3.00000000000000 + 4.00000000000000*I] | Full MatrixSpace of 2 by 2 dense matrices over Complex Field with 53 bits of precision
+C100 + CC | [                     2.00000000000000                      4.00000000000000] ; [                     6.00000000000000 2.00000000000000 + 4.00000000000000*I] | Full MatrixSpace of 2 by 2 dense matrices over Complex Field with 53 bits of precision
+C100 - CC | [0.000000000000000 0.000000000000000] ; [0.000000000000000 0.000000000000000] | Full MatrixSpace of 2 by 2 dense matrices over Complex Field with 53 bits of precision
+C100 augment CC | [                                   1.0000000000000000000000000000                                    2.0000000000000000000000000000                                    5.0000000000000000000000000000] ; [                                   3.0000000000000000000000000000 1.0000000000000000000000000000 + 2.0000000000000000000000000000*I                                    6.0000000000000000000000000000] | Full MatrixSpace of 2 by 3 dense matrices over Complex Field with 100 bits of precision
+C100 stack CC | [                     1.00000000000000                      2.00000000000000] ; [                     3.00000000000000 1.00000000000000 + 2.00000000000000*I] ; [                     5.00000000000000                      6.00000000000000] | Full MatrixSpace of 3 by 2 dense matrices over Complex Field with 53 bits of precision
+C100 * R30 | [              7.0000000               10.000000] ; [6.0000000 + 6.0000000*I 10.000000 + 8.0000000*I] | Full MatrixSpace of 2 by 2 dense matrices over Complex Field with 30 bits of precision
+C100 + R30 | [              2.0000000               4.0000000] ; [              6.0000000 5.0000000 + 2.0000000*I] | Full MatrixSpace of 2 by 2 dense matrices over Complex Field with 30 bits of precision
+C100 - R30 | [              0.00000000               0.00000000] ; [              0.00000000 -3.0000000 + 2.0000000*I] | Full MatrixSpace of 2 by 2 dense matrices over Complex Field with 30 bits of precision
+C100 augment R30 | [                                   1.0000000000000000000000000000                                    2.0000000000000000000000000000                                    5.0000000000000000000000000000] ; [                                   3.0000000000000000000000000000 1.0000000000000000000000000000 + 2.0000000000000000000000000000*I                                    6.0000000000000000000000000000] | Full MatrixSpace of 2 by 3 dense matrices over Complex Field with 100 bits of precision
+C100 stack R30 | [              1.0000000               2.0000000] ; [              3.0000000 1.0000000 + 2.0000000*I] ; [              5.0000000               6.0000000] | Full MatrixSpace of 3 by 2 dense matrices over Complex Field with 30 bits of precision
+RDF * vRR | (5.0, 11.0) | Vector space of dimension 2 over Real Double Field
+vRR * RDF | (7.0, 10.0) | Vector space of dimension 2 over Real Double Field
+RDF * vCDF | (1.0 + 2.0*I, 3.0 + 4.0*I) | Vector space of dimension 2 over Complex Double Field
+vCDF * RDF | (1.0 + 3.0*I, 2.0 + 4.0*I) | Vector space of dimension 2 over Complex Double Field
+RDF * vCC | (1.00000000000000 + 2.00000000000000*I, 3.00000000000000 + 4.00000000000000*I) | Vector space of dimension 2 over Complex Field with 53 bits of precision
+vCC * RDF | (1.00000000000000 + 3.00000000000000*I, 2.00000000000000 + 4.00000000000000*I) | Vector space of dimension 2 over Complex Field with 53 bits of precision
+RR * vRDF | (5.00000000000000, 11.0000000000000) | Vector space of dimension 2 over Real Field with 53 bits of precision
+vRDF * RR | (7.00000000000000, 10.0000000000000) | Vector space of dimension 2 over Real Field with 53 bits of precision
+RR * vCDF | (1.0 + 2.0*I, 3.0 + 4.0*I) | Vector space of dimension 2 over Complex Double Field
+vCDF * RR | (1.0 + 3.0*I, 2.0 + 4.0*I) | Vector space of dimension 2 over Complex Double Field
+RR * vCC | (1.00000000000000 + 2.00000000000000*I, 3.00000000000000 + 4.00000000000000*I) | Vector space of dimension 2 over Complex Field with 53 bits of precision
+vCC * RR | (1.00000000000000 + 3.00000000000000*I, 2.00000000000000 + 4.00000000000000*I) | Vector space of dimension 2 over Complex Field with 53 bits of precision
+CDF * vRDF | (5.0, 5.0 + 4.0*I) | Vector space of dimension 2 over Complex Double Field
+vRDF * CDF | (7.0, 4.0 + 4.0*I) | Vector space of dimension 2 over Complex Double Field
+CDF * vRR | (5.0, 5.0 + 4.0*I) | Vector space of dimension 2 over Complex Double Field
+vRR * CDF | (7.0, 4.0 + 4.0*I) | Vector space of dimension 2 over Complex Double Field
+CDF * vCC | (1.0 + 2.0*I, 1.0 + 1.0*I) | Vector space of dimension 2 over Complex Double Field
+vCC * CDF | (1.0 + 3.0*I, 1.0*I) | Vector space of dimension 2 over Complex Double Field
+CC * vRDF | (5.00000000000000, 5.00000000000000 + 4.00000000000000*I) | Vector space of dimension 2 over Complex Field with 53 bits of precision
+vRDF * CC | (7.00000000000000, 4.00000000000000 + 4.00000000000000*I) | Vector space of dimension 2 over Complex Field with 53 bits of precision
+CC * vRR | (5.00000000000000, 5.00000000000000 + 4.00000000000000*I) | Vector space of dimension 2 over Complex Field with 53 bits of precision
+vRR * CC | (7.00000000000000, 4.00000000000000 + 4.00000000000000*I) | Vector space of dimension 2 over Complex Field with 53 bits of precision
+CC * vCDF | (1.00000000000000 + 2.00000000000000*I, 1.00000000000000 + 1.00000000000000*I) | Vector space of dimension 2 over Complex Field with 53 bits of precision
+vCDF * CC | (1.00000000000000 + 3.00000000000000*I, 1.00000000000000*I) | Vector space of dimension 2 over Complex Field with 53 bits of precision
+RDF 1x3 * CDF 3x2 | [22.0 28.0] | Full MatrixSpace of 1 by 2 dense matrices over Complex Double Field
+CDF 2x2 * RDF 2x3 | [        9.0        12.0        15.0] ; [3.0 + 4.0*I 6.0 + 5.0*I 9.0 + 6.0*I] | Full MatrixSpace of 2 by 3 dense matrices over Complex Double Field
+RDF 2x2 * CDF 3x3 | ERR TypeError
+RDF augment CDF with i | ERR TypeError
+C30(CDF(1, 2)) | 1.0000000 + 2.0000000*I | Complex Field with 30 bits of precision
+C100(CDF(1.5, -2)) | 1.5000000000000000000000000000 - 2.0000000000000000000000000000*I | Complex Field with 100 bits of precision
+C30(CDF(1/3, 1/7)) | 0.33333333 + 0.14285714*I | Complex Field with 30 bits of precision
