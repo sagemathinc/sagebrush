@@ -1,0 +1,113 @@
+# Publishes each green master's engine to R2 (sagebrush-releases), where the site's Worker serves it at /engine/<id>/,
+# so a deploy that names that engine finds it already there (the DEV automatic deploy refuses an unpublished engine).
+# Its own workflow, not a job of ci: a publish that fails never turns master's ci red.
+#   - When: after `ci` completes successfully for a push to master in this repository, or a dispatch on master (a
+#     repair).  Never for a pull request, a merge queue group, a track ref or a fork: the publish job's
+#     environment (wasm-publish, deployment branches: master) holds the bucket credential and checks that again.
+#   - build: no secret.  The engine of exactly that commit, built with CI's pinned Bun and Node: an engine's id is the
+#     hash of its bytes, and another Bun minifies differently, so the id would differ from a deploy's build.
+#   - publish: installs nothing and runs only scripts/engine-publish.mjs on the build's artifact.  An engine is
+#     immutable: an id already published with this manifest is kept, another manifest under it refuses.
+# scripts/test-engine-publish-workflow.mjs holds these properties.
+name: engine-publish
+
+on:
+  workflow_run:
+    workflows: [ci]
+    types: [completed]
+    branches: [master]
+  workflow_dispatch:
+
+permissions: {}
+
+concurrency:
+  group: engine-publish
+  cancel-in-progress: false
+
+jobs:
+  build:
+    if: >-
+      github.repository == 'sagemathinc/sagebrush' && (
+      (github.event_name == 'workflow_run' && github.event.workflow_run.conclusion == 'success' &&
+       github.event.workflow_run.event == 'push' && github.event.workflow_run.head_branch == 'master' &&
+       github.event.workflow_run.head_repository.full_name == 'sagemathinc/sagebrush') ||
+      (github.event_name == 'workflow_dispatch' && github.ref == 'refs/heads/master'))
+    runs-on: ubuntu-24.04
+    timeout-minutes: 30
+    permissions:
+      contents: read
+    outputs:
+      id: ${{ steps.engine.outputs.id }}
+      sha: ${{ steps.sha.outputs.sha }}
+    steps:
+      - id: sha
+        env:
+          RUN_SHA: ${{ github.event.workflow_run.head_sha }}
+          DISPATCH_SHA: ${{ github.sha }}
+          EVENT: ${{ github.event_name }}
+        run: |
+          s=$([ "$EVENT" = workflow_run ] && echo "$RUN_SHA" || echo "$DISPATCH_SHA")
+          [[ "$s" =~ ^[0-9a-f]{40}$ ]] || { echo "not a commit: $s"; exit 1; }
+          echo "sha=$s" >> "$GITHUB_OUTPUT"
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4.4.0
+        with:
+          ref: ${{ steps.sha.outputs.sha }}
+          persist-credentials: false
+      - uses: pnpm/action-setup@b906affcce14559ad1aafd4ab0e942779e9f58b1 # v4.3.0
+        with:
+          version: 11
+      - uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020 # v4.4.0
+        with:
+          node-version: "24.21.0"
+      - uses: oven-sh/setup-bun@0c5077e51419868618aeaa5fe8019c62421857d6 # v2.2.0
+        with:
+          bun-version: "1.4.4"
+      # (the published modules wasm/pins.json names: ci's wasm-publish put them there before ci succeeded)
+      - uses: ./.github/actions/wasm-modules
+        with:
+          artifact: "false"
+      - run: pnpm install --frozen-lockfile
+      - name: build the engine
+        run: |
+          pnpm run build
+          node scripts/build-cli.mjs
+          bun web/build.ts
+      - id: engine
+        name: the engine, checked against its own manifest
+        run: |
+          id=$(node -e 'process.stdout.write(JSON.parse(require("fs").readFileSync("web/dist/engine/latest.json","utf8")).id)')
+          [[ "$id" =~ ^[0-9a-f]{20}$ ]] || { echo "no engine id: $id"; exit 1; }
+          node --input-type=module -e "import { validate } from './scripts/engine-publish.mjs'; const v = validate('web/dist/engine/$id'); console.log('engine', v.id, Object.keys(v.man.files).length, 'files')"
+          echo "id=$id" >> "$GITHUB_OUTPUT"
+      - uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4.6.2
+        with:
+          name: engine-${{ steps.engine.outputs.id }}
+          path: web/dist/engine/${{ steps.engine.outputs.id }}
+          if-no-files-found: error
+          retention-days: 3
+
+  publish:
+    needs: build
+    runs-on: ubuntu-24.04
+    timeout-minutes: 20
+    environment: wasm-publish
+    permissions:
+      contents: read
+    steps:
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4.4.0
+        with:
+          ref: ${{ needs.build.outputs.sha }}
+          persist-credentials: false
+      - uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020 # v4.4.0
+        with:
+          node-version: "24.21.0"
+      - uses: actions/download-artifact@d3f86a106a0bac45b974a628896c90dbdf5c8093 # v4.3.0
+        with:
+          name: engine-${{ needs.build.outputs.id }}
+          path: ${{ runner.temp }}/engine
+      - name: publish the engine (manifest last, read back)
+        env:
+          R2_ACCOUNT_ID: ${{ secrets.R2_ACCOUNT_ID }}
+          AWS_ACCESS_KEY_ID: ${{ secrets.R2_ACCESS_KEY_ID }}
+          AWS_SECRET_ACCESS_KEY: ${{ secrets.R2_SECRET_ACCESS_KEY }}
+        run: node scripts/engine-publish.mjs "$RUNNER_TEMP/engine"

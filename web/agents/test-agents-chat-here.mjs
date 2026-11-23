@@ -16,6 +16,7 @@ import { mkdtempSync, readFileSync, rmSync, existsSync, statSync } from "node:fs
 import { tmpdir } from "node:os";
 import { join, normalize } from "node:path";
 import { devtoolsPort } from "../test-port.mjs";
+import { BAR_CLEAR } from "../workspace/agent-bar-check.mjs";
 
 const here = new URL(".", import.meta.url).pathname;
 const dist = join(here, "..", "dist");
@@ -155,6 +156,9 @@ try {
   await ev(`(() => { window.__whoSeen = []; new MutationObserver(() => window.__whoSeen.push(document.querySelector('#who').textContent)).observe(document.querySelector('#who'), { childList: true, subtree: true, characterData: true }); return true; })()`);
   ok(await chatHere(), "Chat here");
   ok(await until(`[...document.querySelectorAll('.sbag-dlg button')].some((b) => b.textContent === 'Allow')`), "…then the grant dialog");
+  // (while it waits for Allow: the header and the banner say the same, waiting for the dialog, never "isn't connected")
+  const askAllow = { who: await text("#who"), banner: await text("#banner") };
+  ok(/waiting: allow it in the dialog/.test(askAllow.who) && /is waiting for you to allow it in the dialog/.test(askAllow.banner) && !/isn't connected/.test(askAllow.banner), "…while it's open, the header and the banner both say it waits for Allow in the dialog", askAllow);
   ok(await ev(`window.__whoSeen.some((t) => t.includes('Connecting to laptop…'))`), "the header said \"Connecting to laptop…\" meanwhile", await ev(`window.__whoSeen`));
   const leg = R.legs.at(-1);
   ok(leg.data.hello?.fresh === true && leg.data.hello?.purpose === "agent" && !("remember" in leg.data.hello) && !("resume" in leg.data.hello), "the hello asks a fresh agent and remembers nothing", leg.data.hello);
@@ -164,6 +168,42 @@ try {
   ok((await text("#connect")) === "Connected", "the button stays Connected");
   ok(leg.data.msgs.some((m) => m.method === "grant.changed" && m.params?.folders) && leg.data.msgs.some((m) => m.method === "page.features" && m.params.features.includes("permission.digest")), "the grant is told to the agent, and permission.digest among the page's features");
   ok(violations.length === 0, "no Content Security Policy refusal: connect-src 'self' covers the page's own wss origin", violations);
+  ok(await until(`${BAR_CLEAR} === true`, 5000), "the Agents page: the agent's bar is in its own row, over nothing the person types in or reads", await ev(BAR_CLEAR).catch((e) => String(e)));
+  // (A1, #1546: the agent's access is an icon at the start of the composer's footer row, not a box above it; its words
+  //  are its title and stay for a screen reader; a click opens the same menu, above it, inside the window)
+  const foot = await ev(`(() => {
+    const b = document.querySelector('.sbag-bar'), chip = b?.querySelector('button.chip'), r = chip?.getBoundingClientRect();
+    const words = chip?.querySelector('.words'), ico = chip?.querySelector('.ico');
+    return { inRow: !!b?.parentElement?.matches('.composer .row > [data-sbag-footer]'), first: b?.parentElement === document.querySelector('.composer .row').firstElementChild,
+      w: Math.round(r?.width ?? 0), h: Math.round(r?.height ?? 0), ico: !!ico && ico.getBoundingClientRect().width === 16 && getComputedStyle(ico).maskImage.startsWith('url('),
+      wordsW: Math.round(words?.getBoundingClientRect().width ?? -1), words: words?.textContent ?? '', title: chip?.title ?? '',
+      above: (() => { const f = document.querySelector('.composer-wrap > [data-sbag-slot]'); return !!f && f.childElementCount === 0 && f.getBoundingClientRect().height === 0; })() };
+  })()`);
+  ok(foot.inRow && foot.first && foot.above && foot.ico && foot.w <= 32 && foot.h <= 28 && foot.wordsW <= 1 && /^Claude · /.test(foot.words) && /^Claude on laptop: /.test(foot.title), "A1: the agent's access is a small icon at the start of the composer's footer row (the row above the composer empty, of no height); its words kept for a screen reader and as its title", foot);
+  await ev(`document.querySelector('.sbag-bar button.chip').click()`);
+  await until(`document.querySelector('.sbag-bar').classList.contains('open')`, 3000);
+  const menu = await ev(`(() => { const m = document.querySelector('.sbag-bar .menu').getBoundingClientRect(), c = document.querySelector('.sbag-bar button.chip').getBoundingClientRect();
+    return { items: [...document.querySelectorAll('.sbag-bar .menu [role=menuitem]')].map((b) => b.textContent), full: document.querySelector('.sbag-bar .menu .full').textContent,
+      above: m.bottom <= c.top, inside: m.left >= 0 && m.right <= innerWidth && m.top >= 0 && m.bottom <= innerHeight, focus: document.activeElement?.textContent }; })()`);
+  ok(menu.items.includes("Disconnect") && /^Claude on laptop: /.test(menu.full) && menu.above && menu.inside && menu.focus === menu.items[0], "A1: a click on the icon opens its menu above it, inside the window: the whole access sentence and its controls, the first focused", menu);
+  if (process.env.SHOTS) { const r = await send("Page.captureScreenshot", { format: "png" }); (await import("node:fs")).writeFileSync(process.env.SHOTS + "/a1-menu.png", Buffer.from(r.result.data, "base64")); }
+  await ev(`document.querySelector('.sbag-bar .menu [role=menuitem]').dispatchEvent(new KeyboardEvent('keydown', { key: 'Escape', bubbles: true }))`);
+  ok(await until(`!document.querySelector('.sbag-bar').classList.contains('open') && document.activeElement === document.querySelector('.sbag-bar button.chip')`, 3000), "A1: Escape closes it, back on the icon");
+  if (process.env.SHOTS) { const r = await send("Page.captureScreenshot", { format: "png" }); (await import("node:fs")).writeFileSync(process.env.SHOTS + "/a1-footer.png", Buffer.from(r.result.data, "base64")); }
+  // (by keyboard: ArrowDown on the icon opens the menu on its first control; Escape closes it back on the icon)
+  await ev(`(() => { const c = document.querySelector('.sbag-bar button.chip'); c.focus(); c.dispatchEvent(new KeyboardEvent('keydown', { key: 'ArrowDown', bubbles: true })); return true; })()`);
+  const kb = await until(`document.querySelector('.sbag-bar').classList.contains('open') && document.activeElement?.getAttribute('role') === 'menuitem'`, 3000);
+  await ev(`document.activeElement.dispatchEvent(new KeyboardEvent('keydown', { key: 'Escape', bubbles: true }))`);
+  ok(kb && await until(`!document.querySelector('.sbag-bar').classList.contains('open')`, 3000), "A1: by keyboard too: ArrowDown on the icon opens its menu on the first control, Escape closes it");
+  // (a phone's width: the icon stays in the row, inside the composer, and Send stays in view)
+  await send("Emulation.setDeviceMetricsOverride", { width: 390, height: 800, deviceScaleFactor: 1, mobile: true });
+  await sleep(300);
+  const phone = await ev(`(() => { const c = document.querySelector('.composer').getBoundingClientRect(), i = document.querySelector('.sbag-bar button.chip').getBoundingClientRect(), s = document.querySelector('#send').getBoundingClientRect();
+    return { icon: i.width > 0 && i.left >= c.left && i.right <= c.right, send: s.width > 0 && s.right <= innerWidth && s.left >= 0 }; })()`);
+  const clear = await ev(BAR_CLEAR);
+  ok(phone.icon && phone.send && clear === true, "A1: at a phone's width the icon stays inside the composer's row, over nothing the person types in, and Send stays in view", { phone, clear });
+  await send("Emulation.clearDeviceMetricsOverride");
+  await sleep(300);
   const title = await ev(`[...document.querySelectorAll('.sbag-bar button')].find((b) => b.textContent === 'Disconnect')?.title ?? null`);
   ok(title === "Disconnect and stop the agent on laptop", "the bar's Disconnect: \"Disconnect and stop the agent on laptop\"", title);
 
@@ -270,6 +310,14 @@ try {
     ok(back.includes("?from=") && signIn?.text === "Sign in" && signIn?.href === "/auth/login?return=" + encodeURIComponent(back), `${status}: a "Sign in" link to the site's sign-in, back to this page and its query`, { signIn, back });
     await ev(`[...document.querySelectorAll('.sbag-dlg button')].find((b) => b.textContent === 'Cancel').click()`);
   }
+  // (a site without computers at all, a local one (404): no section, nothing about computers; the link field still there)
+  R.peersStatus = 404;
+  await ev(`document.querySelector('#connect').click()`);
+  await until(`[...document.querySelectorAll('.sbag-dlg button')].some((b) => b.textContent === 'Connect' && b.offsetParent)`);
+  await sleep(500);
+  const d404 = await ev(`[...document.querySelectorAll('.sbag-dlg')].at(-1)?.textContent ?? ''`);
+  ok(!/computers/i.test(d404) && /Link/.test(d404), "404 (a site without computers): no \"Your computers\" section at all, the link field still there", d404);
+  await ev(`[...document.querySelectorAll('.sbag-dlg button')].find((b) => b.textContent === 'Cancel').click()`);
   R.peersStatus = 500;
   await ev(`document.querySelector('#connect').click()`);
   ok(await until(`([...document.querySelectorAll('.sbag-dlg')].at(-1)?.textContent ?? '').includes("Your computers: this site can't list your computers (HTTP 500)")`), "another failure: its reason");

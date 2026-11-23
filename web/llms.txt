@@ -1,8 +1,15 @@
 # Sagebrush
 
-> Python 3.14 compiled to JavaScript, running entirely in the browser (no server; numpy's heavy kernels and the Sagebrush math engines are small WebAssembly modules). sagebrush.space is a small notebook for it; a Sage mode adds `^` as a power, exact rationals (`2/3`), number theory functions (`factor`, `is_prime`, `next_prime`, `divisors`, `euler_phi`, `crt`, ...), and modular forms and elliptic curves (`ModularSymbols`, `CuspForms`, `DirichletGroup`, `EllipticCurve`) computed by Sagebrush's Rust engines, printed as Sage prints them.
+> Python 3.14 compiled to JavaScript, running in the browser (numpy's heavy kernels and the Sagebrush math engines are small WebAssembly modules); running code uploads nothing. Sync, publishing, Push to GitHub, a connected computer, an agent, pictures and files from other sites, and counting use do send data or make requests (see /docs/storage#leaves). sagebrush.space is a small notebook for it; a Sage mode adds `^` as a power, exact rationals (`2/3`), number theory functions (`factor`, `is_prime`, `next_prime`, `divisors`, `euler_phi`, `crt`, ...), and modular forms and elliptic curves (`ModularSymbols`, `CuspForms`, `DirichletGroup`, `EllipticCurve`) computed by Sagebrush's Rust engines, printed as Sage prints them.
 
 Links here are relative to the site serving this file (sagebrush.space, or dev.sagebrush.space for the development site).
+
+## Guides for people using Sagebrush
+
+- [What leaves this browser](/docs/storage#leaves): what sync, publishing, Push to GitHub, a connected computer, an agent, pictures and files from other sites, and counting use send, when, and where; and how signed-in accounts are counted (Global Privacy Control doesn't turn that off).
+- [Sync](/docs/storage#sync): notebooks' code and text and data files' contents sync; cell outputs don't.
+- [Publish a link](/docs/sharing#publish): what a published link includes, and that anyone with it can open it.
+- [All guides](/docs/).
 
 ## How code runs (read this first)
 
@@ -41,7 +48,7 @@ A board is a JSON file (`*.board.json`) of notes with Markdown and math, live co
 - [The board format](/board-format.md): the header `{"format": "sagebrush-board", "version": 1}`, a complete small example, the fields with their defaults, pages, slides and templates, `mode`, pictures, how to check a board, and a dated "What's new" list. Read it before writing a board; the format grows.
 - To ask your user things (decisions, preferences), give the board a page of questions: items of `"kind": "ask"` with checkboxes, radio buttons, a list, a text, a number or a scale (see "Asking the reader" in the board format). Every question can also be answered in the user's own words (`note`), which counts as an answer: read it whenever it is there. The answers are kept in the board; `sagebrush board answers FILE --json` (from the next release) reads them.
 - To teach, give a question a `check` (Python or Sage code; its last line is True, False or a message, with the reader's answer as `answer`; it sees the board's names, and the board's code runs again after it), `hints` shown one by one after wrong attempts, and `next` (`{"right": id, "wrong": id}`) naming the item to go to. Give it an `example` answer and run `sagebrush board try FILE --json` (from the next release) to see each check's verdict and hints before you publish it.
-- Before you hand a board over, run each code item with the command line below in the board's language. An unimplemented function raises an error, so code that runs is supported. Then open the board to see its layout: at /board/, or on the user's computer with `npx sagebrush@0.10.1 board open FILE`, which shows it in their browser, read only, and again each time you rewrite FILE.
+- Before you hand a board over, run each code item with the command line below in the board's language. An unimplemented function raises an error, so code that runs is supported. Then open the board to see its layout: at /board/, or on the user's computer with `npx sagebrush@0.10.3 board open FILE`, which shows it in their browser, read only, and again each time you rewrite FILE.
 
 ## LaTeX and beamer
 
@@ -91,10 +98,10 @@ The rule for the libraries Sagebrush rewrites:
 
 ## Command line
 
-- `npx sagebrush@0.10.1` (Node 22+, installs in seconds) runs Python, `--sage`, `--magma`, `--matlab`, and `--search "words"`.
-- `npx sagebrush@0.10.1 --sage -c 'print(factor(2^32+1))'` runs one command; `npx sagebrush@0.10.1 --search "elliptic curve rank" --json` searches the documentation.
-- `npx sagebrush@0.10.1 board check FILE` checks a `.board.json` before anyone opens it (the format, ids, edges, pictures, questions) and runs its code items, reporting every problem at once; `board render FILE -o board.svg` draws it.
-- `npx sagebrush@0.10.1 board open FILE` shows a board in the browser on this computer, as /board/ does, read only, and shows it again in place each time FILE changes (a version that isn't a board leaves the last good one shown, with what is wrong). It listens on 127.0.0.1 only, and nothing of the board is uploaded.
+- `npx sagebrush@0.10.3` (Node 22+, installs in seconds) runs Python, `--sage`, `--magma`, `--matlab`, and `--search "words"`.
+- `npx sagebrush@0.10.3 --sage -c 'print(factor(2^32+1))'` runs one command; `npx sagebrush@0.10.3 --search "elliptic curve rank" --json` searches the documentation.
+- `npx sagebrush@0.10.3 board check FILE` checks a `.board.json` before anyone opens it (the format, ids, edges, pictures, questions) and runs its code items, reporting every problem at once; `board render FILE -o board.svg` draws it.
+- `npx sagebrush@0.10.3 board open FILE` shows a board in the browser on this computer, as /board/ does, read only, and shows it again in place each time FILE changes (a version that isn't a board leaves the last good one shown, with what is wrong). It listens on 127.0.0.1 only, and nothing of the board is uploaded.
 
 ## MCP server (for AI agents)
 

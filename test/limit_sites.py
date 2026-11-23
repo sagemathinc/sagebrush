@@ -100,11 +100,15 @@ def short(key):
 # like, whose limits are their originals'), sagebrush/ (the package's API, audited with its modules), and lib/_rill/,
 # whose owner adds it with its sites registered)
 NESTED = ("lib/_sprig/",)
+# (generated data, out of the census: the Sage-mode name index, which scripts/sage_names.py writes from the
+# sources; its strings are names and module names, and it refuses nothing)
+GENERATED = ("lib/_sage_names.py",)
 
 
 def in_lib_census(path):
-    """Whether a library file is in the census: lib/*.py, and every .py file under a NESTED package."""
-    return re.fullmatch(r"lib/[^/]+\.py", path) is not None or \
+    """Whether a library file is in the census: lib/*.py (but not GENERATED), and every .py file under a NESTED
+    package."""
+    return (re.fullmatch(r"lib/[^/]+\.py", path) is not None and path not in GENERATED) or \
         (path.endswith(".py") and any(path.startswith(d) for d in NESTED))
 
 

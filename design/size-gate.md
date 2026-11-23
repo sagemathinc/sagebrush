@@ -1,72 +1,105 @@
-# The core's growth gate
+# Stateless per-change size check
 
-The design is `plan-growth-budget-r6`: r5 was approved (astra CLEAR on r5, daybreak2 CLEAR on r4), and r6 changes only the bootstrap cross-check (§1.2); astra CLEAR on r6. This page is the working summary. Where the two differ, the plan wins.
+The `size-gate` job is a backstop, not a per-PR approval lane. Before each merge,
+the merger reads every row of the PR's own CI size table and questions any large
+single-PR jump, even below the backstop. A green CI result stands when master or
+a track advances: do not merge the target into a PR just to remeasure size.
+Resolve actual overlapping changes or conflicts normally.
 
-## What it guards
+## Rule
 
-1. **No core growth without review.** Every byte a core artifact grows needs a reviewed marker in `.growth/`, beyond a configured jitter allowance. The jitter allowance is 64 B per integration and 1 KiB in total, for `cli/pyjs.cjs` only (William's later-PR approval); every other bundle has none.
-2. **An optional package never grows the core.** `cli/packages.gen.js` and the registry's package count are *exact*: they may only shrink, except through a reviewed raise of their `max`. `size-budget.mjs --check` still fails on any optional package's name in a core artifact.
+For each existing bundle, CI compares base and tested-merge bytes. It fails when growth
+exceeds **both 2% of that bundle's base and 50,000 bytes**:
 
-## Files
+```js
+delta > Math.max(Math.floor(base / 50), 50_000)
+```
 
-| File | What it holds |
-|---|---|
-| `budgets.json` | Every size threshold, per bundle:<br>- an ordinary bundle: `ceiling`, `noise_bytes`, `noise_total`, `marker_slack`;<br>- an exact bundle: `max`.<br>Also the epoch, `{sizes, reset}`, and the bun pin. |
-| `.growth/<name>.json` | A reviewed growth marker: `{"v":1, "reason":"…", "bytes":{"<bundle>": <bytes>}}`. |
-| `scripts/size-measure.mjs` | The measurement and the rules. Its sha256 is part of every record's comparability key. |
-| `heap-budget.json` | The heap thresholds and the node pin (unchanged). |
+The exact boundary passes. These are decimal KB, not KiB. The absolute allowance
+avoids noisy percentage failures on small bundles; the percentage allowance
+scales with large bundles. This deliberately permissive check catches big
+regressions while the merger's row-by-row checklist catches smaller ones.
+Bundles are checked individually: a shrink never offsets another bundle's
+growth. Bundles absent from the base are listed as `new`, with base zero, but
+do not fail the backstop: extracting a lazy chunk must not count its entire
+size as growth. New bundles still require review in the merger's checklist.
+An existing bundle with zero bytes is still gated. Removed bundles use merge zero.
 
-`size-measure.mjs`'s `LIMITS` caps the gate's own inputs before they are read in full or parsed:
-- bytes per record, per budgets file and per marker;
-- the number of markers and their total bytes;
-- string and collection sizes.
+### The examples gallery's content
 
-These are input-envelope limits, not size thresholds.
+The backstop above is for code. The examples gallery's content has its own
+per-change limit: growth over **256,000 bytes** fails, whatever the base, and
+the exact boundary passes. That content is in three bundles:
 
-## The rules, per integration (a PR's merge commit against its exact first parent)
+- `examples/corpus`, the corpus under `examples/`;
+- `site/examples`, what the site serves of it under `/examples/`;
+- `examples/index.json`, the catalog.
 
-- **Growth (Δ > `noise_bytes`) needs markers added by this PR,** in its diff against the tested base.
-  - The markers must cover Δ, and be tight: their sum must be at most Δ + `marker_slack`, which is 1 KiB.
-  - An existing marker can't be edited; add a new one.
-- **The ledger:** size ≤ epoch + every marker in the tree + `noise_total`. It doesn't reset per PR. Deleting a marker only tightens it.
-- **The ceiling:** size ≤ `ceiling`, a rare reviewed hard cap, at most the epoch + 10% when seeded.
-- **An exact bundle:** Δ ≤ 0, unless the same PR raises its `max`.
-- **An epoch reset** (a release, a bun/node or measurement move, a bundle rename or removal):
-  - `node scripts/size-measure.mjs --epoch --records <this PR's CI records> --reason "…"` writes `epoch.reset`, with `prev`, the sha256 of the base's epoch block, and deletes `.growth/`;
-  - its growth is one charge per group, $\max(0, \Delta^T) + \max(0, \Delta^I)$, and must be tight in the same way.
+The site fetches it only when someone opens the gallery
+(`web/examples/open.ts`). It's in neither of the service worker's lists, nor
+the CLI. Holding a gallery to a code allowance would only push it into split PRs.
 
-### Adding a marker
+Two notes on the bundles:
 
-Create `.growth/<yyyy-mm-dd>-<topic>.json` with the bytes that the PR's `size-gate` job summary reports. The marker is reviewed with the PR.
+- **The first-visit notebooks are the exception.** `web/build.ts` inlines the
+  notebooks `web/examples/welcome.ts` names into every bundle, so they're in the
+  initial download. They're measured as their own bundle, `examples/welcome`, and
+  keep the code backstop. The measurement reads the list from `welcome.ts`, and
+  fails if it can't.
+- **The desktop app** builds the gallery into its installer
+  (`app/build-examples.ts`). This gate doesn't measure the installer, so the
+  content limit lets the installer grow by up to the same 256,000 bytes per change.
+  For an installer of tens of MB, that was accepted.
 
-## CI (ci.yml)
+### Track pulls
 
-- **`checks`** writes the merge's size record and uploads it as `sizes-<sha>`.
-- **`size-base`** gets the tested base's record:
-  - its push record, if one is usable;
-  - otherwise it rebuilds the base once, in its own worktree, with bounded steps;
-  - for a key-moving reset, it also measures the base under its own old key.
-- **`size-gate`** applies the rules. It is the single check that decides core growth, and it **fails closed**. A change touching no measured input and no gate input passes it as docs-only.
+A track's pull into master (`track/math`, `track/numeric`, ...) sums every pull
+request that landed on the track, and each of those already passed this
+backstop against the track. So a pull request with the **`track-pull`** label
+is measured and reported as usual, but growth over the backstop doesn't fail
+it: the step prints a warning, and the merger reads every row of the table
+before merging. Only growth is excused: missing or mismatched records, another
+recipe or toolchain still fail closed. In the merge
+queue the label is read from the queued pull request (`gh-readonly-queue/.../pr-N-...`),
+so a track pull goes into the queue alone. Only the merger applies the label,
+only to a track's pull into master (decided by William, Nov 22 2026).
 
-## Merging (plan §3)
+There are no stored budgets, growth markers, tightness rules, epochs, or
+old-toolchain migration builds. No allowance is carried forward or refilled.
 
-- **One writer:** @sagebrush is the only writer of master.
-- **Merge commits only:** every integration is a two-parent merge commit on exactly the base its `size-gate` result tested. Its tree must equal the tested tree.
-- **The push:** it is pushed with `git push --force-with-lease=refs/heads/master:<base>`. A plain non-force push is not a base compare-and-swap.
+## Measurement and CI
 
-## William's decisions (Oct 23 2026, about 11:50 PM PDT, relayed by @sagebrush)
+CI builds the event's base and tested merge with pinned Bun 1.4.4 and Node
+24.21.0. Both records use the current run's measurement script. It preserves
+the existing bundle census and normalization: checkout paths and the known
+VERSION/BUILD_ID assignments only. Each expected assignment count is checked.
+Records bind the repository, commit, tree, recipe hash, toolchain, event, run,
+attempt and producer job. Missing, malformed, oversized or mismatched records
+fail closed. The job summary contains every bundle's base, merge, delta and
+limit; the JSON records and result remain downloadable CI artifacts.
 
-1. **The policy:** "Approve, and a later PR may allow the 64 B / 1 KiB jitter for cli/pyjs.cjs."
-   - PR A (#95) shipped with **zero** jitter: `noise_bytes` = `noise_total` = 0 for every bundle.
-   - The follow-up PR sets `noise_bytes` 64 and `noise_total` 1024 for `cli/pyjs.cjs` only. In a reset, a group's charge at most `noise_bytes` needs no growth entry; otherwise the charge bounds apply.
-2. **The single writer:** "Confirmed, no ruleset for now."
-3. **The merge queue and a size-only re-check:** "Yes, as recommended."
-   - No merge queue.
-   - Full CI is always required; a size-only re-check never stands in for it.
+For a PR, the base is the tested merge's first parent, and the second parent
+must be the PR head. Merge queues use their tested base; pushes use the event's
+`before` commit. A manual branch run compares with its merge-base with master,
+without requiring an update from master. Runs without a base report absolute
+sizes only. The classifier can skip builds only for changes with no measured
+or gate inputs; failed or skipped required measurement jobs fail closed.
 
-## Still to come (plan §4)
+The independent browser/LaTeX caps, heap checks, offline caps, and optional
+package-leak checks are unchanged. The legacy `size-budget.json` total census
+remains report-only; it is not this gate's baseline.
 
-**PR B** lands only when no open PR's latest CI predates PR A. It:
-- deletes `size-budget.json` and `--update`;
-- switches `core-api-surface.mjs` to numeric pending levels (§2.1);
-- drops `heap-budget.json`'s `measured`.
+## Merger checklist
+
+1. Verify the PR's own CI is green, including `size-gate`.
+2. Read every bundle row, including added and removed bundles.
+3. Question a large or surprising single-PR jump, even if the backstop passes.
+4. Do not request a size remeasure merely because master or a track moved.
+
+## Local tests
+
+```sh
+node scripts/test-size-measure.mjs
+node scripts/test-size-advice.mjs
+node scripts/test-npm-pack-metrics.mjs
+```

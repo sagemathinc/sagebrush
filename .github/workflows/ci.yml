@@ -14,6 +14,8 @@ on:
   pull_request:
     # (labeled: adding the full-ci label reruns the pull request on the full tier)
     types: [opened, synchronize, reopened, labeled]
+  merge_group:
+    types: [checks_requested]
   workflow_dispatch:
     inputs:
       long:
@@ -43,7 +45,12 @@ jobs:
   changes:
     if: github.repository == 'sagemathinc/sagebrush' || vars.CI_RUNNER != ''
     runs-on: ${{ vars.CI_RUNNER || 'ubuntu-24.04' }}
+    # (actions: read, only to find this commit's merge_group run: scripts/ci-queue-tested.mjs)
+    permissions:
+      contents: read
+      actions: read
     outputs:
+      queue_tested: ${{ steps.paths.outputs.queue_tested }}
       full: ${{ steps.paths.outputs.full }}
       docs_only: ${{ steps.paths.outputs.docs_only }}
       app_only: ${{ steps.paths.outputs.app_only }}
@@ -94,9 +101,19 @@ jobs:
       # workflow runs, fails here, in the job every run has)
       - name: test discovery (scripts/web-tests.mjs check)
         run: node scripts/web-tests.mjs check
+      # (a master push of the very commit the merge queue's run already tested and passed: its tests aren't run again,
+      # only what a push alone does; any doubt is a full run.  The CI capacity ruling's second cut, Nov 22 2026)
+      - id: queue
+        name: was this exact commit tested by the merge queue?
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: node scripts/ci-queue-tested.mjs >> "$GITHUB_OUTPUT"
       - id: paths
         name: classify changed paths and select the tier
         env:
+          CI_QUEUE_TESTED: ${{ steps.queue.outputs.queue_tested }}
+          # (PR CI light: William's repository switch, off unless exactly "true"; scripts/ci-paths.mjs prLight)
+          CI_PR_LIGHT: ${{ vars.PR_CI_LIGHT }}
           GITHUB_EVENT_BEFORE: ${{ github.event.before }}
           CI_PR_LABELS: ${{ join(github.event.pull_request.labels.*.name, ',') }}
           # (a dispatch's long input: the long tier, scripts/ci-paths.mjs)
@@ -139,9 +156,10 @@ jobs:
     strategy:
       fail-fast: false
       matrix:
-        shard: [1, 2, 3, 4, 5, 6, 7, 8]
+        # (2 shards, the CI capacity ruling, Nov 22 2026: the org's 60 concurrent jobs; setup is most of a short shard)
+        shard: [1, 2]
     runs-on: ${{ vars.CI_RUNNER || 'ubuntu-24.04' }}
-    timeout-minutes: 18
+    timeout-minutes: 30
     steps:
       - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4.4.0
       - name: detect CI CPU quota
@@ -152,7 +170,7 @@ jobs:
       - uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020 # v4.4.0
         with:
           node-version: 24
-          cache: pnpm
+          cache: ${{ github.event_name != 'merge_group' && 'pnpm' || '' }}
       # (the four modules: this run's wasm-modules artifact when it built them, else the published pins)
       - uses: ./.github/actions/wasm-modules
         with:
@@ -165,12 +183,15 @@ jobs:
       - uses: actions/setup-python@a26af69be951a213d495a4c3e4e4022e16d87065 # v5.6.0
         with:
           python-version: "3.14"
-          cache: pip
+          cache: ${{ github.event_name != 'merge_group' && 'pip' || '' }}
           cache-dependency-path: .github/requirements-ci.txt
       - run: python3 -m pip install -r .github/requirements-ci.txt
       - run: pnpm install --frozen-lockfile
       - run: pnpm run build
-      - name: Node tests, shard ${{ matrix.shard }}/8
+      - name: Node tests, shard ${{ matrix.shard }}/2
+        # CI 44540774555: slowest ordinary test 169 s. Default 300 s per
+        # test; seven long sweeps observed at 205-432 s in 44487308167
+        # explicitly request 900 s in their test definitions.
         env:
           SAGEBRUSH_TIME_SCALE: "2"
           # (the slow tests, test/slow-tests.ts: for the full-ci label and the paths they test, scripts/ci-paths.mjs
@@ -180,7 +201,7 @@ jobs:
           NPY_DISABLE_CPU_FEATURES: "X86_V4 AVX512_ICL AVX512_SPR"
         run: |
           mapfile -d '' files < <(find dist/test target -maxdepth 1 -type f -name '*.test.js' ! -name 'magma.test.js' ! -name 'matlab.test.js' ! -name 'sprig*.test.js' -print0 | sort -z)
-          node --test --test-concurrency="$SAGEBRUSH_CPUS" --test-shard=${{ matrix.shard }}/8 "${files[@]}"
+          node --test --test-timeout=300000 --test-concurrency="$SAGEBRUSH_CPUS" --test-shard=${{ matrix.shard }}/2 "${files[@]}"
       # (read-only memory telemetry: the cgroup this step runs in, which is the whole job so far, its
       # install, build and every test of the shard, not the parity test alone; printed even when a step before failed;
       # a file that is missing or unreadable is printed as unavailable, never as 0)
@@ -212,7 +233,7 @@ jobs:
       - uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020 # v4.4.0
         with:
           node-version: 24
-          cache: pnpm
+          cache: ${{ github.event_name != 'merge_group' && 'pnpm' || '' }}
       # (the four modules: this run's wasm-modules artifact when it built them, else the published pins)
       - uses: ./.github/actions/wasm-modules
         with:
@@ -223,7 +244,7 @@ jobs:
       - uses: actions/setup-python@a26af69be951a213d495a4c3e4e4022e16d87065 # v5.6.0
         with:
           python-version: "3.14"
-          cache: pip
+          cache: ${{ github.event_name != 'merge_group' && 'pip' || '' }}
           cache-dependency-path: .github/requirements-ci.txt
       - run: python3 -m pip install -r .github/requirements-ci.txt
       - run: pnpm install --frozen-lockfile && pnpm run build && node scripts/build-cli.mjs
@@ -234,7 +255,7 @@ jobs:
           mapfile -d '' files < <(find dist/test -maxdepth 1 -type f -name 'sprig*.test.js' -print0 | sort -z)
           # (master has Sprig suites: none found means the build or the pattern broke)
           if [ "${#files[@]}" -eq 0 ]; then echo "no Sprig suites: the build or the pattern is wrong"; exit 1; fi
-          node --test --test-concurrency="$SAGEBRUSH_CPUS" "${files[@]}"
+          node --test --test-timeout=300000 --test-concurrency="$SAGEBRUSH_CPUS" "${files[@]}"
 
   language-node:
     needs: [changes, wasm-modules]
@@ -242,9 +263,11 @@ jobs:
     strategy:
       fail-fast: false
       matrix:
-        shard: [1, 2, 3, 4, 5, 6]
+        # (2 shards: the CI capacity ruling, Nov 22 2026, took 4 to 1, but one shard took 28 min, the merge queue's
+        # longest job; its second cut, the same day, made it 2.  test-name-shard K/2 selects each case exactly once)
+        shard: [1, 2]
     runs-on: ${{ vars.CI_RUNNER || 'ubuntu-24.04' }}
-    timeout-minutes: 15
+    timeout-minutes: 30
     steps:
       - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4.4.0
       - name: detect CI CPU quota
@@ -255,7 +278,7 @@ jobs:
       - uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020 # v4.4.0
         with:
           node-version: 24
-          cache: pnpm
+          cache: ${{ github.event_name != 'merge_group' && 'pnpm' || '' }}
       # (the four modules: this run's wasm-modules artifact when it built them, else the published pins)
       - uses: ./.github/actions/wasm-modules
         with:
@@ -263,17 +286,17 @@ jobs:
       - uses: actions/setup-python@a26af69be951a213d495a4c3e4e4022e16d87065 # v5.6.0
         with:
           python-version: "3.14"
-          cache: pip
+          cache: ${{ github.event_name != 'merge_group' && 'pip' || '' }}
           cache-dependency-path: .github/requirements-ci.txt
       - run: python3 -m pip install scipy==1.18.1 numpy==2.5.1
       - run: pnpm install --frozen-lockfile && pnpm run build
-      - name: Magma and MATLAB Node tests, case shard ${{ matrix.shard }}/6
+      - name: Magma and MATLAB Node tests, case shard ${{ matrix.shard }}/2
         env:
           SAGEBRUSH_TIME_SCALE: "2"
           NPY_DISABLE_CPU_FEATURES: "X86_V4 AVX512_ICL AVX512_SPR"
         run: |
-          node scripts/test-name-shard.mjs test/magma.test.ts dist/test/magma.test.js ${{ matrix.shard }}/6
-          node scripts/test-name-shard.mjs test/matlab.test.ts dist/test/matlab.test.js ${{ matrix.shard }}/6
+          node scripts/test-name-shard.mjs test/magma.test.ts dist/test/magma.test.js ${{ matrix.shard }}/2
+          node scripts/test-name-shard.mjs test/matlab.test.ts dist/test/matlab.test.js ${{ matrix.shard }}/2
 
   checks:
     needs: [changes, wasm-modules]
@@ -293,7 +316,7 @@ jobs:
       - uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020 # v4.4.0
         with:
           node-version: "24.21.0"
-          cache: pnpm
+          cache: ${{ github.event_name != 'merge_group' && 'pnpm' || '' }}
       # (the four modules: this run's wasm-modules artifact when it built them, else the published pins)
       - uses: ./.github/actions/wasm-modules
         with:
@@ -307,7 +330,7 @@ jobs:
       - run: pnpm run build
       - name: security, bundles, generated files and web assets
         run: |
-          SAGEBRUSH_HARDENED=0 node --test --test-concurrency="$SAGEBRUSH_CPUS" dist/test/security.test.js
+          SAGEBRUSH_HARDENED=0 node --test --test-timeout=300000 --test-concurrency="$SAGEBRUSH_CPUS" dist/test/security.test.js
           node scripts/build-cli.mjs
           node scripts/web-tests.mjs run checks.1
           node scripts/bench-ff-limits.mjs
@@ -326,9 +349,13 @@ jobs:
           node scripts/packages.mjs --check
           node scripts/web-tests.mjs run checks.5
           node scripts/core-api-surface.mjs --check
+          node dist/src/cli.js engine/py/test_matrix_checks.py
+          node dist/src/cli.js engine/py/test_sage_colors.py
           node scripts/size-budget.mjs --check
           node scripts/web-tests.mjs run checks.6
           node scripts/heap-budget.mjs --check
+          python3 scripts/sage_names.py --check
+          python3 test/sage_shim_index.py
           node scripts/pypi-import.mjs --check
           node scripts/tzdata-import.mjs --check
           scripts/sync-python-package.sh --check
@@ -341,8 +368,7 @@ jobs:
           # (the architecture article: its links pinned and present at their commit, its pages current, its board on the built site)
           node scripts/architecture-article.mjs --check
           node scripts/web-tests.mjs run checks.7
-      # The merge's size record, for size-gate (plan-growth-budget-r5 §1.1,
-      # §1.5): measured from the build above; it builds nothing
+      # The tested merge's size record, measured from the build above.
       - name: the size record
         run: |
           mkdir -p "$RUNNER_TEMP/size-record"
@@ -388,11 +414,8 @@ jobs:
     needs: changes
     if: (github.repository == 'sagemathinc/sagebrush' || vars.CI_RUNNER != '') && (needs.changes.outputs.node == 'true' || needs.changes.outputs.web == 'true' || needs.changes.outputs.size_inputs == 'true')
     runs-on: ${{ vars.CI_RUNNER || 'ubuntu-24.04' }}
-    # (the worst sequential path, including a source build for an unpublished
-    # base pin: resolve 2 + install 5 + build 16 + the npm metrics 2 + the
-    # old-key base 18 = 43, plus 15 for checkout, setup,
-    # records, cleanup and upload: scripts/test-size-measure.mjs checks this sum)
-    timeout-minutes: 58
+    # Resolve 2 + install 5 + build 16 + npm metrics 2 + setup/cleanup 15.
+    timeout-minutes: 40
     permissions:
       contents: read
       actions: read
@@ -416,7 +439,7 @@ jobs:
       - uses: pnpm/action-setup@b906affcce14559ad1aafd4ab0e942779e9f58b1 # v4.3.0
         with:
           version: 11
-      # (the same pins as the checks job: budgets.json's bun, heap-budget.json's node)
+      # (the same pins as the checks job: size-measure.mjs toolchain)
       # (no pnpm cache here: this job installs only the base's worktree, and only when it needs a new
       # record, so on a cache miss with nothing installed setup-node's post-step failed the job on a
       # missing store path, run 40543703855)
@@ -445,8 +468,7 @@ jobs:
         timeout-minutes: 16
         working-directory: ${{ runner.temp }}/size-base
         # (first the base's own modules, by its own pins.  If and only if a pin is absent from the CDN (404), build
-        # the base's source and require every resulting sha256 and byte count to equal its pins.  Inner timeouts:
-        # scripts/test-size-measure.mjs)
+        # the base's source and require every resulting sha256 and byte count to equal its pins.)
         run: |
           if [ -f wasm/pins.json ]; then timeout 8m node "$GITHUB_WORKSPACE/scripts/wasm-fetch-or-build.mjs" --root "$RUNNER_TEMP/size-base"; fi
           timeout 8m sh -c 'pnpm run build && node scripts/build-cli.mjs && bun web/build.ts && node scripts/build-cli.mjs'
@@ -454,46 +476,16 @@ jobs:
         if: steps.resolve.outputs.need_new == 'true'
         run: |
           node scripts/size-measure.mjs --record --root "$RUNNER_TEMP/size-base" --out "$RUNNER_TEMP/size-records/base-record.json"
-          if [ "${{ steps.resolve.outputs.bootstrap }}" = true ]; then
-            node scripts/size-measure.mjs --legacy --root "$RUNNER_TEMP/size-base" --out "$RUNNER_TEMP/size-records/legacy.json"
-          fi
-      # (the base's npm package metrics, report-only: here, before any old-key
-      # toolchain, so under this run's pinned Node and its bundled npm, as the
-      # merge's are; the rebuilt base when there is one, else the companion of
-      # the fetched push record, bound to it; plan-npm-pack-metrics-r3 §2)
+      # Report-only npm metrics, under the same pinned toolchain.
       - name: the base's npm package metrics
         if: always() && steps.resolve.outputs.mode != 'absolute'
         continue-on-error: true
         timeout-minutes: 2
-        run: |
-          if [ "${{ steps.resolve.outputs.need_new }}" = true ]; then
-            node scripts/npm-pack-metrics.mjs --base --records "$RUNNER_TEMP/size-records" --root "$RUNNER_TEMP/size-base"
-          else
-            node scripts/npm-pack-metrics.mjs --base --records "$RUNNER_TEMP/size-records"
-          fi
-      # (the old-key base, O: the base's own measurement and pins)
-      - uses: oven-sh/setup-bun@0c5077e51419868618aeaa5fe8019c62421857d6 # v2.2.0
-        if: steps.resolve.outputs.need_old == 'true'
-        with:
-          bun-version: ${{ steps.resolve.outputs.old_bun }}
-      - uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020 # v4.4.0
-        if: steps.resolve.outputs.need_old == 'true'
-        with:
-          node-version: ${{ steps.resolve.outputs.old_node }}
-      - name: the base under its own key
-        if: steps.resolve.outputs.need_old == 'true'
-        timeout-minutes: 18
-        run: |
-          git worktree add --detach "$RUNNER_TEMP/size-old" "${{ steps.resolve.outputs.base }}"
-          cd "$RUNNER_TEMP/size-old"
-          timeout 4m pnpm install --frozen-lockfile
-          if [ -f wasm/pins.json ]; then timeout 8m node "$GITHUB_WORKSPACE/scripts/wasm-fetch-or-build.mjs" --root "$RUNNER_TEMP/size-old"; fi
-          timeout 5m sh -c 'pnpm run build && node scripts/build-cli.mjs && bun web/build.ts && node scripts/build-cli.mjs'
-          node scripts/size-measure.mjs --record --out "$RUNNER_TEMP/size-records/old-record.json"
+        run: node scripts/npm-pack-metrics.mjs --base --records "$RUNNER_TEMP/size-records" --root "$RUNNER_TEMP/size-base"
       - name: remove the worktrees
         if: always()
         run: |
-          for w in size-base size-old; do
+          for w in size-base; do
             [ -d "$RUNNER_TEMP/$w" ] && git worktree remove --force "$RUNNER_TEMP/$w" || true
           done
       - uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4.6.2
@@ -503,15 +495,17 @@ jobs:
           retention-days: 7
           if-no-files-found: ignore
 
-  # The growth gate (plan-growth-budget-r5 §1.3, §1.4): the single check that
-  # decides core growth.  It fails closed: a skipped, cancelled or failed
-  # record job fails it, except for a change the classifier certifies as
-  # touching no measured input and no gate input.
+  # Stateless per-change backstop. Missing measurement jobs fail closed,
+  # except when the classifier certifies no measured or gate input changed.
   size-gate:
     needs: [changes, checks, size-base]
     if: always() && (github.repository == 'sagemathinc/sagebrush' || vars.CI_RUNNER != '')
     runs-on: ${{ vars.CI_RUNNER || 'ubuntu-24.04' }}
     timeout-minutes: 5
+    # (pull-requests: read, only to read the track-pull label of a queued pull request)
+    permissions:
+      contents: read
+      pull-requests: read
     steps:
       - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4.4.0
         with:
@@ -524,14 +518,36 @@ jobs:
         with:
           name: sizes-${{ github.sha }}
           path: ${{ runner.temp }}/size-merge
-      # (an absolute run, schedule, dispatch or a first push, has no base, so no base records)
+      # Absolute runs have no base records.
       - uses: actions/download-artifact@d3f86a106a0bac45b974a628896c90dbdf5c8093 # v4.3.0
         if: needs.checks.result == 'success' && needs.size-base.result == 'success' && needs.size-base.outputs.mode != 'absolute'
         with:
           name: size-base-${{ github.sha }}
           path: ${{ runner.temp }}/size-records
+      # A track's pull into master (design/size-gate.md, "Track pulls"): every pull request on
+      # the track already passed this backstop against the track, and the pull sums them. With
+      # the track-pull label the table is still measured and reported, but growth over the
+      # backstop doesn't fail it; the merger reads every row. Missing records still fail closed.
+      - name: a track pull?
+        id: track
+        env:
+          GH_TOKEN: ${{ github.token }}
+          EVENT: ${{ github.event_name }}
+          LABELS: ${{ join(github.event.pull_request.labels.*.name, ',') }}
+          QUEUE_REF: ${{ github.event.merge_group.head_ref }}
+        run: |
+          pull=false
+          if [ "$EVENT" = pull_request ]; then
+            case ",$LABELS," in *,track-pull,*) pull=true ;; esac
+          elif [ "$EVENT" = merge_group ]; then
+            n=$(printf '%s' "$QUEUE_REF" | sed -n 's#^refs/heads/gh-readonly-queue/[^/]*/pr-\([0-9][0-9]*\)-.*#\1#p')
+            if [ -n "$n" ] && gh api "repos/$GITHUB_REPOSITORY/issues/$n/labels" --jq '.[].name' | grep -qx track-pull; then pull=true; fi
+          fi
+          echo "track pull: $pull"
+          echo "pull=$pull" >> "$GITHUB_OUTPUT"
       - name: the gate
         env:
+          TRACK_PULL: ${{ steps.track.outputs.pull }}
           CHANGES: ${{ needs.changes.result }}
           CHECKS: ${{ needs.checks.result }}
           BASE: ${{ needs.size-base.result }}
@@ -548,15 +564,16 @@ jobs:
             exit 1
           else
             cp "$RUNNER_TEMP/size-merge/sizes.json" "$RUNNER_TEMP/size-records/merge-record.json"
-            node scripts/size-measure.mjs --gate --records "$RUNNER_TEMP/size-records" --out "$RUNNER_TEMP/size-records/size-gate.json"
+            if ! node scripts/size-measure.mjs --gate --records "$RUNNER_TEMP/size-records" --out "$RUNNER_TEMP/size-records/size-gate.json"; then
+              # (only growth is excused: a record, recipe or toolchain problem still fails)
+              if [ "$TRACK_PULL" = true ] && node -e 'const r = JSON.parse(require("fs").readFileSync(process.argv[1], "utf8")); process.exit(r.rows.length > 0 && r.problems.length > 0 && r.problems.every((p) => /: growth \+\d+ exceeds \d+ bytes/.test(p)) ? 0 : 1)' "$RUNNER_TEMP/size-records/size-gate.json"; then
+                echo "::warning::a track pull: growth over the backstop is reported, not enforced; the merger reads every row"
+                echo "**A track pull (track-pull label): the rows above are reported, not enforced. The merger reads every row.**" >> "$GITHUB_STEP_SUMMARY"
+              else
+                exit 1
+              fi
+            fi
           fi
-      # Report-only, in the job summary: no pull-request write permission and
-      # no mutation of the contributor's branch. `always()` preserves advice
-      # when the authoritative gate rejects a short or loose marker.
-      - name: suggested growth-marker advice
-        if: always() && github.event_name == 'pull_request'
-        continue-on-error: true
-        run: node scripts/size-advice.mjs --core "$RUNNER_TEMP/size-records/size-gate.json"
       # (report-only: it reads the two npm-pack records and appends a table to
       # the summary; the gate's result stays the gate step's own)
       - name: the npm package metrics
@@ -577,9 +594,10 @@ jobs:
     needs: [changes, wasm-modules]
     # (the full tier only: master pushes, the nightly schedule, a dispatch, and a pull request with the full-ci label or
     # a sync, sharing, security or data-loss path, scripts/ci-paths.mjs fullTierPaths)
-    # (five parallel shards, the CI-time plan, Nov 9: one after another its suites took 25 min, past
-    # "PR CI <= 10 min"; each shard about 5 min, the share dialog 8.5. Each shard builds the site itself; the suites
-    # are separate processes with their own Miniflare and Chromium, so no shard depends on another's state)
+    # (three parallel shards since the CI capacity ruling, Nov 22 2026, the org's 60 concurrent jobs: core (web-sync.1
+    # and .6), client (web-sync.5, and .3 when sharing changed) and pwa (web-sync.2, the try-it flow and .4), about
+    # 8-14 min each; five before, the CI-time plan, Nov 9. Each shard builds the site itself; the suites are separate
+    # processes with their own Miniflare and Chromium, so no shard depends on another's state)
     if: ${{ !cancelled() && needs.changes.result == 'success' && contains(fromJSON('["success", "skipped"]'), needs.wasm-modules.result) && ((github.repository == 'sagemathinc/sagebrush' || vars.CI_RUNNER != '') && needs.changes.outputs.web == 'true' && needs.changes.outputs.full == 'true') }}
     runs-on: ${{ vars.CI_RUNNER || 'ubuntu-24.04' }}
     timeout-minutes: 40
@@ -598,7 +616,7 @@ jobs:
       - uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020 # v4.4.0
         with:
           node-version: 24
-          cache: pnpm
+          cache: ${{ github.event_name != 'merge_group' && 'pnpm' || '' }}
       # (the four modules: this run's wasm-modules artifact when it built them, else the published pins)
       - uses: ./.github/actions/wasm-modules
         with:
@@ -609,10 +627,11 @@ jobs:
       - uses: actions/setup-python@a26af69be951a213d495a4c3e4e4022e16d87065 # v5.6.0
         with:
           python-version: "3.14"
-      # (the share-dialog shard on a pull request that doesn't change sharing: nothing to build or run, ci-paths web_share)
-      - if: (matrix.shard != 'share-dialog' && matrix.shard != 'share-dialog-2') || needs.changes.outputs.web_share == 'true'
+      # (the share dialog's part-2 shard, in the long tier, on a run that doesn't change sharing: nothing to build or run,
+      # ci-paths web_share)
+      - if: matrix.shard != 'share-dialog-2' || needs.changes.outputs.web_share == 'true'
         run: pnpm install --frozen-lockfile && pnpm run build && node scripts/build-cli.mjs && bun web/build.ts
-      - if: (matrix.shard != 'share-dialog' && matrix.shard != 'share-dialog-2') || needs.changes.outputs.web_share == 'true'
+      - if: matrix.shard != 'share-dialog-2' || needs.changes.outputs.web_share == 'true'
         name: the site and the test workers
         run: |
           (cd web/site && npm ci --silent)
@@ -626,8 +645,9 @@ jobs:
         if: matrix.shard == 'client'
         run: node scripts/web-tests.mjs run web-sync.5
       # (the view, and D11's large moves in chunks: their 100,000-entry moves take minutes)
+      # (in the core shard since the CI capacity ruling, Nov 22 2026; it runs even when web-sync.1 failed)
       - name: sync's view and D11's large moves (web-sync.6, about 5 min)
-        if: matrix.shard == 'moves'
+        if: ${{ !cancelled() && matrix.shard == 'core' }}
         run: node scripts/web-tests.mjs run web-sync.6
       # (offline: the kept page's headers, its framing among them, security audit G-1; about 30 s)
       # (G-10: the runner's fetch broker on the share client, the page that mounts files: G1s, G4, G10)
@@ -656,11 +676,12 @@ jobs:
       - name: previews, dependencies, the share client and the builds (web-sync.4, about 40 s)
         if: matrix.shard == 'pwa'
         run: node scripts/web-tests.mjs run web-sync.4
-      # (the share dialog, alone in its shard: about 8.5 min here (13 on a slow runner since the share registry's cases), 20
-      # its bound. On a pull request only when it changes sharing or has the full-ci label (ci-paths web_share); master,
-      # the schedule and a dispatch always run it)
+      # (the share dialog: about 8.5 min here (13 on a slow runner since the share registry's cases), 20 its bound. On a
+      # pull request only when it changes sharing or has the full-ci label (ci-paths web_share); master, the schedule
+      # and a dispatch always run it.  In the client shard since the CI capacity ruling, Nov 22 2026; it runs even when
+      # web-sync.5 failed)
       - name: share dialog, its own cases (web-sync.3, about 5 min)
-        if: matrix.shard == 'share-dialog' && needs.changes.outputs.web_share == 'true'
+        if: ${{ !cancelled() && matrix.shard == 'client' && needs.changes.outputs.web_share == 'true' }}
         timeout-minutes: 20
         run: node scripts/web-tests.mjs run web-sync.3
       # (the share dialog's second half, SHARE_DIALOG_PART=2: the large listing and the upload-leak cases, about 7 min; its
@@ -689,7 +710,7 @@ jobs:
       - uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020 # v4.4.0
         with:
           node-version: 24
-          cache: pnpm
+          cache: ${{ github.event_name != 'merge_group' && 'pnpm' || '' }}
       # (the four modules: this run's wasm-modules artifact when it built them, else the published pins)
       - uses: ./.github/actions/wasm-modules
         with:
@@ -714,21 +735,17 @@ jobs:
           trap cleanup_server EXIT
           trap 'exit 130' INT
           trap 'exit 143' TERM
-          sleep 1
+          node scripts/wait-for-port.mjs 8765
           kill -0 "$server_pid"
           node scripts/web-tests.mjs run web-export
 
   web-runner:
-    name: web-runner (${{ matrix.shard }}-of-3)
     needs: [changes, wasm-modules]
     # (selected by its area's paths: scripts/ci-paths.mjs webAreas)
     if: ${{ !cancelled() && needs.changes.result == 'success' && contains(fromJSON('["success", "skipped"]'), needs.wasm-modules.result) && ((github.repository == 'sagemathinc/sagebrush' || vars.CI_RUNNER != '') && needs.changes.outputs.web_runner == 'true') }}
-    strategy:
-      fail-fast: false
-      matrix:
-        shard: [1, 2, 3]
     runs-on: ${{ vars.CI_RUNNER || 'ubuntu-24.04' }}
-    timeout-minutes: 20
+    # (one job, the CI capacity ruling, Nov 22 2026: its three shards were about 4-6 min each, mostly setup)
+    timeout-minutes: 35
     steps:
       - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4.4.0
       - name: detect CI CPU quota
@@ -739,7 +756,7 @@ jobs:
       - uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020 # v4.4.0
         with:
           node-version: 24
-          cache: pnpm
+          cache: ${{ github.event_name != 'merge_group' && 'pnpm' || '' }}
       # (the four modules: this run's wasm-modules artifact when it built them, else the published pins)
       - uses: ./.github/actions/wasm-modules
         with:
@@ -762,7 +779,7 @@ jobs:
           trap cleanup_server EXIT
           trap 'exit 130' INT
           trap 'exit 143' TERM
-          sleep 1
+          node scripts/wait-for-port.mjs 8765
           kill -0 "$server_pid"
           # (G-10: the runner's fetch broker on the notebook page, each case's server its own)
           # (`sagebrush notebook DIR` reads, writes and lists only what is really inside DIR: no symbolic link out)
@@ -775,7 +792,7 @@ jobs:
           # static census of every readwrite site.  The workspace suites re-run under the guard are nightly-ready only:
           # scripts/nightly-history-guard.sh, not wired (the CI-speed ruling, Nov 2))
           # (the board journal's store, Workspace.journalWrite and the kind)
-          node scripts/web-tests.mjs run web-runner --shard "${{ matrix.shard }}/3"
+          node scripts/web-tests.mjs run web-runner
 
   # (the Storage panel's lookalike report, split from web-runner; its controls, which rebuild the site once
   # each, run in the long tier (lookalike-controls); the same setup and server)
@@ -796,7 +813,7 @@ jobs:
       - uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020 # v4.4.0
         with:
           node-version: 24
-          cache: pnpm
+          cache: ${{ github.event_name != 'merge_group' && 'pnpm' || '' }}
       # (the four modules: this run's wasm-modules artifact when it built them, else the published pins)
       - uses: ./.github/actions/wasm-modules
         with:
@@ -819,7 +836,7 @@ jobs:
           trap cleanup_server EXIT
           trap 'exit 130' INT
           trap 'exit 143' TERM
-          sleep 1
+          node scripts/wait-for-port.mjs 8765
           kill -0 "$server_pid"
           node scripts/web-tests.mjs run web-lookalike
 
@@ -842,7 +859,7 @@ jobs:
       - uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020 # v4.4.0
         with:
           node-version: 24
-          cache: pnpm
+          cache: ${{ github.event_name != 'merge_group' && 'pnpm' || '' }}
       # (the four modules: this run's wasm-modules artifact when it built them, else the published pins)
       - uses: ./.github/actions/wasm-modules
         with:
@@ -865,7 +882,7 @@ jobs:
           trap cleanup_server EXIT
           trap 'exit 130' INT
           trap 'exit 143' TERM
-          sleep 1
+          node scripts/wait-for-port.mjs 8765
           kill -0 "$server_pid"
           # (EXACT-ONLY's old-sync detector; OLD8's old builds run locally only, with OLD_TREES)
           node scripts/web-tests.mjs run web-sync-ops
@@ -891,7 +908,7 @@ jobs:
       - uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020 # v4.4.0
         with:
           node-version: 24
-          cache: pnpm
+          cache: ${{ github.event_name != 'merge_group' && 'pnpm' || '' }}
       # (the four modules: this run's wasm-modules artifact when it built them, else the published pins)
       - uses: ./.github/actions/wasm-modules
         with:
@@ -914,7 +931,7 @@ jobs:
           trap cleanup_server EXIT
           trap 'exit 130' INT
           trap 'exit 143' TERM
-          sleep 1
+          node scripts/wait-for-port.mjs 8765
           kill -0 "$server_pid"
           node scripts/web-tests.mjs run web-runner-sync.1
       # (the Numbl corpus ratchet, its target web-runner-sync.2: the long tier's)
@@ -942,7 +959,7 @@ jobs:
       - uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020 # v4.4.0
         with:
           node-version: 24
-          cache: pnpm
+          cache: ${{ github.event_name != 'merge_group' && 'pnpm' || '' }}
       # (the four modules: this run's wasm-modules artifact when it built them, else the published pins)
       - uses: ./.github/actions/wasm-modules
         with:
@@ -995,7 +1012,7 @@ jobs:
       - uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020 # v4.4.0
         with:
           node-version: 24
-          cache: pnpm
+          cache: ${{ github.event_name != 'merge_group' && 'pnpm' || '' }}
       # (the four modules: this run's wasm-modules artifact when it built them, else the published pins)
       - uses: ./.github/actions/wasm-modules
         with:
@@ -1019,7 +1036,7 @@ jobs:
           trap cleanup_server EXIT
           trap 'exit 130' INT
           trap 'exit 143' TERM
-          sleep 1
+          node scripts/wait-for-port.mjs 8765
           kill -0 "$server_pid"
           mkdir -p interrupt-out
           node scripts/web-tests.mjs run interrupt-matrix
@@ -1061,7 +1078,7 @@ jobs:
       - uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020 # v4.4.0
         with:
           node-version: 24
-          cache: pnpm
+          cache: ${{ github.event_name != 'merge_group' && 'pnpm' || '' }}
       # (the four modules: this run's wasm-modules artifact when it built them, else the published pins)
       - uses: ./.github/actions/wasm-modules
         with:
@@ -1129,7 +1146,7 @@ jobs:
           echo "$(wc -l < "$RUNNER_TEMP/debs-now") .debs now, $added new"
           if [ "$added" -gt 0 ]; then echo save=true >> "$GITHUB_OUTPUT"; fi
       - name: WebKit's apt packages, saved
-        if: ${{ !cancelled() && steps.debs-new.outputs.save == 'true' }}
+        if: ${{ !cancelled() && steps.debs-new.outputs.save == 'true' && github.event_name != 'merge_group' }}
         uses: actions/cache/save@0057852bfaa89a56745cba8c7296529d2fc39830 # v4.3.0
         with:
           path: ~/sb-webkit-debs
@@ -1140,6 +1157,9 @@ jobs:
       - name: the terminal's long-line pages copy as one line in WebKit (board's B-LL-4)
         timeout-minutes: 3
         run: BROWSER=webkit PLAYWRIGHT="$RUNNER_TEMP/pw" node web/shell/test-panel-pages-copy.mjs
+      - name: the LaTeX source pane's textarea and the lines behind it wrap alike in WebKit (the caret where the text goes)
+        timeout-minutes: 3
+        run: BROWSER=webkit PLAYWRIGHT="$RUNNER_TEMP/pw" node web/latex/test-latex-webkit-wrap.mjs
       - name: "Playwright's Firefox, pinned"
         timeout-minutes: 10
         run: cd "$RUNNER_TEMP/pw" && npx playwright install --with-deps firefox
@@ -1160,12 +1180,13 @@ jobs:
       fail-fast: false
       matrix:
         # (the groups a change selects, scripts/ci-paths.mjs webGroups: all of notebook, preload, latex, board-a, board-b, board-c,
-        # board-unit, terminal and remote-preview on the full tier, a core web, runtime or workflow change)
+        # board-unit, terminal and remote-preview on the full tier, a core web, runtime or workflow change; packed into at
+        # most three jobs, ci-paths WEB_BUCKETS, since the CI capacity ruling, Nov 22 2026: board, notebook and latex)
         include: ${{ fromJSON(needs.changes.outputs.web_matrix) }}
     runs-on: ${{ vars.CI_RUNNER || 'ubuntu-24.04' }}
-    # (the terminal group: its own flagged build and a long page test (about 11 min in the project): 25; remote
-    # compute's preview page test, about 8 min in the project (483 s at 8ccc970a): its own group, 25)
-    timeout-minutes: ${{ (matrix.group == 'terminal' || matrix.group == 'remote-preview') && 25 || 15 }}
+    # (the notebook job runs notebook, remote compute's preview (about 8 min in the project) and the terminal (its own
+    # flagged build and a long page test, about 11 min in the project), in that order: 45; board and latex: 30)
+    timeout-minutes: ${{ matrix.name == 'notebook' && 45 || 30 }}
     steps:
       - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4.4.0
       - name: detect CI CPU quota
@@ -1176,7 +1197,7 @@ jobs:
       - uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020 # v4.4.0
         with:
           node-version: 24
-          cache: pnpm
+          cache: ${{ github.event_name != 'merge_group' && 'pnpm' || '' }}
       # (the four modules: this run's wasm-modules artifact when it built them, else the published pins)
       - uses: ./.github/actions/wasm-modules
         with:
@@ -1185,7 +1206,7 @@ jobs:
         with:
           bun-version: "1.4.4"
       - uses: denoland/setup-deno@22d081ff2d3a40755e97629de92e3bcbfa7cf2ed # v2.0.5
-        if: matrix.group == 'board-unit'
+        if: contains(matrix.groups, 'board-unit')
       - uses: actions/setup-python@a26af69be951a213d495a4c3e4e4022e16d87065 # v5.6.0
         with:
           python-version: "3.14"
@@ -1193,11 +1214,12 @@ jobs:
       # every other group the site's build)
       - run: pnpm install --frozen-lockfile && pnpm run build && node scripts/build-cli.mjs && bun web/build.ts
         env:
-          SAGEBRUSH_LATEX_PREVIEW: ${{ matrix.group == 'latex' && 'test' || '' }}
-      - name: browser group ${{ matrix.group }}
+          SAGEBRUSH_LATEX_PREVIEW: ${{ matrix.name == 'latex' && 'test' || '' }}
+      - name: browser groups ${{ matrix.groups }}
         env:
           CHROME: google-chrome
-          GROUP: ${{ matrix.group }}
+          # (not GROUPS: that is a Bash special name, the user's group ids; avoided, though the environment does set it)
+          WEB_GROUPS: ${{ matrix.groups }}
         run: |
           python3 web/serve.py 8765 &
           server_pid=$!
@@ -1208,13 +1230,24 @@ jobs:
           trap cleanup_server EXIT
           trap 'exit 130' INT
           trap 'exit 143' TERM
-          sleep 1
+          node scripts/wait-for-port.mjs 8765
           kill -0 "$server_pid"
+          # (every group of this job runs, in order, even after one failed; the step fails if any did.  The terminal
+          # group rebuilds web/dist with the bash set, so it is last in its job: ci-paths WEB_BUCKETS)
+          failed=""
+          [ -n "$WEB_GROUPS" ] || { echo "::error::no browser groups"; exit 1; }
+          for GROUP in $WEB_GROUPS; do
+          echo "::group::$GROUP"
+          # (set -e holds inside the subshell only if the subshell isn't itself tested, as `( ... ) || rc=$?` would
+          # be: so errexit is off around it, and each group stops at its first failing command)
+          set +e
+          (
+          set -e
           case "$GROUP" in
             notebook)
               # (the bash shell's loader and its worker's own policy: plan-bash-shell r3 step 1)
               # (ShellHost, the mediator, over a real workspace: step 2)
-              node scripts/web-tests.mjs run web-browser/notebook --shard "${{ matrix.shard }}/${{ matrix.total }}"
+              node scripts/web-tests.mjs run web-browser/notebook
               ;;
             preload)
               # (background loading on the notebook page, web/preload.ts: its own group, about 2 min, so notebook's
@@ -1250,7 +1283,7 @@ jobs:
             remote-preview)
               # (remote compute's preview, end to end in the page: the picker, the Connect sheet, a Run through the
               # simulated gateway, Stop with Runs queued (14(c)), Restart, another tab; it serves web/dist itself)
-              node scripts/web-tests.mjs run web-browser/remote-preview --shard "${{ matrix.shard }}/${{ matrix.total }}"
+              node scripts/web-tests.mjs run web-browser/remote-preview
               ;;
             latex)
               # (the LaTeX editor's page and its agent tools, end to end against the build above: a top
@@ -1263,17 +1296,25 @@ jobs:
               bun web/board/gen-merge3-board-vectors.mjs --check
               node scripts/web-tests.mjs run web-browser/board-unit.2
               ;;
+            *)
+              echo "unknown browser group $GROUP"
+              exit 1
+              ;;
           esac
+          )
+          rc=$?
+          set -e
+          echo "::endgroup::"
+          [ "$rc" = 0 ] || failed="$failed $GROUP"
+          done
+          [ -z "$failed" ] || { echo "::error::failed groups:$failed"; exit 1; }
 
   conformance:
     needs: [changes, wasm-modules]
     if: ${{ !cancelled() && needs.changes.result == 'success' && contains(fromJSON('["success", "skipped"]'), needs.wasm-modules.result) && ((github.repository == 'sagemathinc/sagebrush' || vars.CI_RUNNER != '') && needs.changes.outputs.node == 'true') }}
-    strategy:
-      fail-fast: false
-      matrix:
-        runtime: [node, deno, bun]
     runs-on: ${{ vars.CI_RUNNER || 'ubuntu-24.04' }}
-    timeout-minutes: 12
+    # (one job for node, deno and bun, the CI capacity ruling, Nov 22 2026: each runtime's was about a minute)
+    timeout-minutes: 25
     steps:
       - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4.4.0
       - name: detect CI CPU quota
@@ -1284,7 +1325,7 @@ jobs:
       - uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020 # v4.4.0
         with:
           node-version: 24
-          cache: pnpm
+          cache: ${{ github.event_name != 'merge_group' && 'pnpm' || '' }}
       # (the four modules: this run's wasm-modules artifact when it built them, else the published pins)
       - uses: ./.github/actions/wasm-modules
         with:
@@ -1297,24 +1338,30 @@ jobs:
         with:
           python-version: "3.14"
       - run: pnpm install --frozen-lockfile && pnpm run build && node scripts/build-cli.mjs
-      - run: python3 conformance/run.py --runtime ${{ matrix.runtime }} --show 20
-      - name: catalog examples and coverage
+      - name: conformance, then the catalog examples and coverage, on node, deno and bun
         run: |
-          if [ "${{ matrix.runtime }}" = node ]; then
-            node dist/src/cli.js -m _catalog --coverage
-          else
-            python3 scripts/catalog-run.py --runtime "${{ matrix.runtime }}"
-          fi
+          failed=""
+          for runtime in node deno bun; do
+            echo "::group::$runtime"
+            rc=0
+            python3 conformance/run.py --runtime "$runtime" --show 20 || rc=$?
+            if [ "$runtime" = node ]; then
+              node dist/src/cli.js -m _catalog --coverage || rc=$?
+            else
+              python3 scripts/catalog-run.py --runtime "$runtime" || rc=$?
+            fi
+            echo "::endgroup::"
+            [ "$rc" = 0 ] || failed="$failed $runtime"
+          done
+          [ -z "$failed" ] || { echo "::error::failed on:$failed"; exit 1; }
+
 
   modes:
     needs: [changes, wasm-modules]
     if: ${{ !cancelled() && needs.changes.result == 'success' && contains(fromJSON('["success", "skipped"]'), needs.wasm-modules.result) && ((github.repository == 'sagemathinc/sagebrush' || vars.CI_RUNNER != '') && needs.changes.outputs.modes == 'true') }}
-    strategy:
-      fail-fast: false
-      matrix:
-        group: [sage, magma-matlab, numeric, aux]
     runs-on: ${{ vars.CI_RUNNER || 'ubuntu-24.04' }}
-    timeout-minutes: 15
+    # (one job for its four groups, the CI capacity ruling, Nov 22 2026: each was about 1-5 min, mostly setup)
+    timeout-minutes: 30
     steps:
       - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4.4.0
       - name: detect CI CPU quota
@@ -1325,7 +1372,7 @@ jobs:
       - uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020 # v4.4.0
         with:
           node-version: 24
-          cache: pnpm
+          cache: ${{ github.event_name != 'merge_group' && 'pnpm' || '' }}
       # (the four modules: this run's wasm-modules artifact when it built them, else the published pins)
       - uses: ./.github/actions/wasm-modules
         with:
@@ -1336,36 +1383,41 @@ jobs:
       - uses: actions/setup-python@a26af69be951a213d495a4c3e4e4022e16d87065 # v5.6.0
         with:
           python-version: "3.14"
-          cache: pip
+          cache: ${{ github.event_name != 'merge_group' && 'pip' || '' }}
           cache-dependency-path: .github/requirements-ci.txt
       - run: python3 -m pip install scipy==1.18.1 numpy==2.5.1 mpmath==1.3.0
       - run: pnpm install --frozen-lockfile && pnpm run build && node scripts/build-cli.mjs
-      - name: mode group ${{ matrix.group }}
+      - name: mode groups sage, magma-matlab, numeric and aux
         env:
-          GROUP: ${{ matrix.group }}
           NPY_DISABLE_CPU_FEATURES: "X86_V4 AVX512_ICL AVX512_SPR"
         run: |
-          case "$GROUP" in
-            sage) python3 sage-tests/run.py -v ;;
-            magma-matlab)
-              python3 magma-tests/run.py -v
-              python3 matlab-tests/run.py -v
-              ;;
-            numeric)
-              python3 numpy-tests/run.py -v
-              python3 scipy-tests/run.py -v
-              python3 bench/mpmath/compare.py -j "$SAGEBRUSH_CPUS"
-              ;;
-            aux)
-              python3 pypi-tests/run.py
-              python3 sage-tests/run_calculus.py
-              ;;
-          esac
+          failed=""
+          # (its own status, local: the caller's rc must keep an earlier command's failure)
+          group() { local status=0; echo "::group::$1"; shift; "$@" || status=$?; echo "::endgroup::"; return $status; }
+          for GROUP in sage magma-matlab numeric aux; do
+            rc=0
+            case "$GROUP" in
+              sage) group sage python3 sage-tests/run.py -v || rc=$? ;;
+              magma-matlab)
+                group magma python3 magma-tests/run.py -v || rc=$?
+                group matlab python3 matlab-tests/run.py -v || rc=$?
+                ;;
+              numeric)
+                group numpy python3 numpy-tests/run.py -v || rc=$?
+                group scipy python3 scipy-tests/run.py -v || rc=$?
+                group mpmath-compare python3 bench/mpmath/compare.py -j "$SAGEBRUSH_CPUS" || rc=$?
+                ;;
+              aux)
+                group pypi python3 pypi-tests/run.py || rc=$?
+                group calculus python3 sage-tests/run_calculus.py || rc=$?
+                ;;
+              *) echo "unknown mode group $GROUP"; rc=1 ;;
+            esac
+            [ "$rc" = 0 ] || failed="$failed $GROUP"
+          done
+          [ -z "$failed" ] || { echo "::error::failed groups:$failed"; exit 1; }
 
-  # mpmath's own suite on each backend: the core (the default) and the rollback, SAGEBRUSH_MPMATH_BACKEND=python, so
-  # the rollback never rots (design/mpmath-core.md 6.1, point 2); two shards each, by measured seconds
-  # (bench/mpmath/suite.py). The core's shard 1 also runs the fuzzer's fixed-seed subset against CPython's python
-  # backend (point 3: 10^4 cases, about a minute)
+
   mpmath-suite:
     needs: [changes, wasm-modules]
     if: ${{ !cancelled() && needs.changes.result == 'success' && contains(fromJSON('["success", "skipped"]'), needs.wasm-modules.result) && ((github.repository == 'sagemathinc/sagebrush' || vars.CI_RUNNER != '') && needs.changes.outputs.modes == 'true') }}
@@ -1374,9 +1426,9 @@ jobs:
       matrix:
         # (the Python backend, a rollback path: the long tier's, ci-paths mpmath_backends)
         backend: ${{ fromJSON(needs.changes.outputs.mpmath_backends) }}
-        shard: [1, 2]
     runs-on: ${{ vars.CI_RUNNER || 'ubuntu-24.04' }}
-    timeout-minutes: 10
+    # (one job a backend, the CI capacity ruling, Nov 22 2026: its two shards were about a minute each)
+    timeout-minutes: 20
     steps:
       - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4.4.0
       - name: detect CI CPU quota
@@ -1387,7 +1439,7 @@ jobs:
       - uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020 # v4.4.0
         with:
           node-version: 24
-          cache: pnpm
+          cache: ${{ github.event_name != 'merge_group' && 'pnpm' || '' }}
       # (the four modules: this run's wasm-modules artifact when it built them, else the published pins)
       - uses: ./.github/actions/wasm-modules
         with:
@@ -1395,14 +1447,14 @@ jobs:
       - uses: actions/setup-python@a26af69be951a213d495a4c3e4e4022e16d87065 # v5.6.0
         with:
           python-version: "3.14"
-          cache: pip
+          cache: ${{ github.event_name != 'merge_group' && 'pip' || '' }}
           cache-dependency-path: .github/requirements-ci.txt
       - run: python3 -m pip install mpmath==1.3.0
       - run: pnpm install --frozen-lockfile && pnpm run build
-      - name: mpmath's suite, backend ${{ matrix.backend }}, shard ${{ matrix.shard }}/2
-        run: python3 bench/mpmath/suite.py --backend ${{ matrix.backend }} --shard ${{ matrix.shard }}/2 -j "$SAGEBRUSH_CPUS"
+      - name: mpmath's suite, backend ${{ matrix.backend }}
+        run: python3 bench/mpmath/suite.py --backend ${{ matrix.backend }} --shard 1/1 -j "$SAGEBRUSH_CPUS"
       - name: the fuzzer's fixed-seed subset, the core against CPython
-        if: matrix.backend == 'sagebrush' && matrix.shard == 1
+        if: ${{ !cancelled() && matrix.backend == 'sagebrush' }}
         working-directory: bench/mpmath
         run: |
           MPMATH_NOGMPY=1 python3 fuzz.py gen --seed 1 --n 10000 > "$RUNNER_TEMP/ref.txt"
@@ -1424,8 +1476,40 @@ jobs:
       - uses: Swatinem/rust-cache@d1527c8f67ef9af357290475d4af4b0fab8f12e0 # v2.9.3
         with:
           workspaces: engine
+          save-if: ${{ github.event_name != 'merge_group' }}
+      # (the Smith form's work estimate test writes every row it scores to a report in the
+      # target directory, before asserting anything about it; a cached copy from an earlier
+      # run must not pass for this one's)
+      - name: clear the Smith estimate report
+        run: rm -f engine/target/tmp/smith-estimate-rows.txt
       - working-directory: engine
         run: cargo test --workspace --exclude sagebrush-flint --exclude sagebrush-oracle
+      # The report, pass or fail: its rows per corpus and seed in the job summary, the file
+      # itself as an artifact.  Report-only: a missing report (the test isn't on this branch)
+      # is a line in the summary, never a failure.
+      - name: the Smith estimate report
+        if: always()
+        continue-on-error: true
+        run: |
+          f=engine/target/tmp/smith-estimate-rows.txt
+          {
+            echo "### Smith form work estimate: the test's report"
+            if [ -f "$f" ]; then
+              python3 scripts/smith-estimate-summary.py "$f" || echo "(the summary failed; the report is in the artifact)"
+              echo
+              echo "Every row (the run's units and each stage's estimate) is in the artifact smith-estimate-report."
+            else
+              echo "No report in this run (the estimate test isn't on this branch, or didn't run)."
+            fi
+          } >> "$GITHUB_STEP_SUMMARY"
+      - uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4.6.2
+        if: always()
+        continue-on-error: true
+        with:
+          name: smith-estimate-report
+          path: engine/target/tmp/smith-estimate-rows.txt
+          if-no-files-found: ignore
+          retention-days: 14
 
   # (numerics-core P2a, r4.2 §12: no microkernel ships that no CI host has executed. engine/nd's NEON kernel
   # runs only on aarch64; this job executes its oracle, thread-determinism and bit-family tests on Apple
@@ -1441,6 +1525,7 @@ jobs:
       - uses: Swatinem/rust-cache@d1527c8f67ef9af357290475d4af4b0fab8f12e0 # v2.9.3
         with:
           workspaces: engine
+          save-if: ${{ github.event_name != 'merge_group' }}
           shared-key: nd-neon
       - name: "engine/nd on aarch64: the NEON kernel's oracle, thread determinism and FMA-family bits"
         working-directory: engine
@@ -1448,6 +1533,53 @@ jobs:
           uname -m
           test "$(uname -m)" = arm64
           cargo test --release -p sagebrush-nd --features parallel -- --nocapture
+
+  # (Windows: the CLI built there and run as npm's users run it, on GitHub's hosted runner. The embedded library's
+  # paths are POSIX on every system, and only real files' paths are Windows' (src/compile.ts pathJoin): an import
+  # from the library, a namespace package of the user's, and --sage's startup)
+  windows-smoke:
+    needs: [changes, wasm-modules]
+    if: ${{ !cancelled() && needs.changes.result == 'success' && contains(fromJSON('["success", "skipped"]'), needs.wasm-modules.result) && github.repository == 'sagemathinc/sagebrush' && needs.changes.outputs.node == 'true' }}
+    runs-on: windows-latest
+    timeout-minutes: 20
+    defaults:
+      run:
+        shell: bash
+    steps:
+      # (the files as committed: the bundled packages' files are checked by their sha256)
+      - run: git config --global core.autocrlf false
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4.4.0
+      - uses: pnpm/action-setup@b906affcce14559ad1aafd4ab0e942779e9f58b1 # v4.3.0
+        with:
+          version: 11
+      - uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020 # v4.4.0
+        with:
+          node-version: "24.21.0"
+          cache: ${{ github.event_name != 'merge_group' && 'pnpm' || '' }}
+      # (the four modules: this run's wasm-modules artifact when it built them, else the published pins)
+      - uses: ./.github/actions/wasm-modules
+        with:
+          artifact: ${{ needs.wasm-modules.result == 'success' }}
+      - uses: oven-sh/setup-bun@0c5077e51419868618aeaa5fe8019c62421857d6 # v2.2.0
+        with:
+          bun-version: "1.4.4"
+      - run: pnpm install --frozen-lockfile
+      - run: pnpm run build
+      # (the Windows paths rows, here on Windows itself: not only under the test's own simulation)
+      - run: node --test --test-timeout=300000 dist/test/windows-paths.test.js
+      - run: node scripts/build-cli.mjs
+      - name: "an import from the embedded library, a namespace package of the user's, --sage"
+        run: |
+          set -euo pipefail
+          cli="$GITHUB_WORKSPACE/build/cli/pyjs.cjs"
+          # (each output without Windows' carriage returns, compared whole)
+          run() { node "$cli" "$@" | tr -d '\r'; }
+          out=$(run -c "import fractions; print(fractions.Fraction(1, 3))"); echo "$out"; test "$out" = "1/3"
+          out=$(run -c "import json; print(json.__file__)"); echo "$out"; test "$out" = "/\$pyjs/lib/json/__init__.py"
+          mkdir -p "$RUNNER_TEMP/ns/nsdemo"
+          printf 'X = 7\n' > "$RUNNER_TEMP/ns/nsdemo/m.py"
+          out=$(cd "$RUNNER_TEMP/ns" && run -c "import nsdemo.m; print(nsdemo.m.X)"); echo "$out"; test "$out" = "7"
+          out=$(run --sage -c "print(factor(920834082))"); echo "$out"; test "$out" = "2 * 3^4 * 7 * 107 * 7589"
 
 
   # (the unsafe boundary's compiler sweep, U1: every unsafe site the compiler sees, generated and
@@ -1467,6 +1599,7 @@ jobs:
       - uses: Swatinem/rust-cache@d1527c8f67ef9af357290475d4af4b0fab8f12e0 # v2.9.3
         with:
           workspaces: engine
+          save-if: ${{ github.event_name != 'merge_group' }}
           shared-key: unsafe-sweep
       - uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020 # v4.4.0
         with:
@@ -1496,6 +1629,7 @@ jobs:
       - uses: Swatinem/rust-cache@d1527c8f67ef9af357290475d4af4b0fab8f12e0 # v2.9.3
         with:
           workspaces: engine
+          save-if: ${{ github.event_name != 'merge_group' }}
       - uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020 # v4.4.0
         with:
           node-version: 24
@@ -1563,13 +1697,14 @@ jobs:
       - uses: Swatinem/rust-cache@d1527c8f67ef9af357290475d4af4b0fab8f12e0 # v2.9.3
         with:
           workspaces: engine
+          save-if: ${{ github.event_name != 'merge_group' }}
       - uses: pnpm/action-setup@b906affcce14559ad1aafd4ab0e942779e9f58b1 # v4.3.0
         with:
           version: 11
       - uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020 # v4.4.0
         with:
           node-version: 24
-          cache: pnpm
+          cache: ${{ github.event_name != 'merge_group' && 'pnpm' || '' }}
       # (the producer's four modules, checked, when it ran: built once per run; labelled fresh on a pull request whose
       # pins are stale, so this job still smoke-tests the change)
       - if: needs.wasm-modules.result == 'success'
@@ -1583,7 +1718,7 @@ jobs:
       - uses: actions/setup-python@a26af69be951a213d495a4c3e4e4022e16d87065 # v5.6.0
         with:
           python-version: "3.14"
-          cache: pip
+          cache: ${{ github.event_name != 'merge_group' && 'pip' || '' }}
           cache-dependency-path: .github/requirements-ci.txt
       - run: python3 -m pip install scipy==1.18.1 numpy==2.5.1
       - run: pnpm install --frozen-lockfile
@@ -1606,7 +1741,7 @@ jobs:
           node scripts/third-party-notices.mjs --check
           pnpm run build
           node scripts/build-cli.mjs
-          node --test --test-concurrency="$SAGEBRUSH_CPUS" dist/test/groups.test.js dist/test/kernels.test.js dist/test/mpfield-matrix.test.js dist/test/special.test.js dist/test/sage.test.js dist/test/scipy-integrate.test.js
+          node --test --test-timeout=300000 --test-concurrency="$SAGEBRUSH_CPUS" dist/test/groups.test.js dist/test/kernels.test.js dist/test/mpfield-matrix.test.js dist/test/special.test.js dist/test/sage.test.js dist/test/scipy-integrate.test.js
           python3 sage-tests/run_calculus.py
 
   engine-node:
@@ -1615,9 +1750,10 @@ jobs:
     strategy:
       fail-fast: false
       matrix:
-        shard: [1, 2, 3, 4, 5, 6, 7, 8]
+        # (2 shards: the CI capacity ruling, Nov 22 2026)
+        shard: [1, 2]
     runs-on: ${{ vars.CI_RUNNER || 'ubuntu-24.04' }}
-    timeout-minutes: 18
+    timeout-minutes: 30
     steps:
       - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4.4.0
       - name: detect CI CPU quota
@@ -1628,7 +1764,7 @@ jobs:
       - uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020 # v4.4.0
         with:
           node-version: 24
-          cache: pnpm
+          cache: ${{ github.event_name != 'merge_group' && 'pnpm' || '' }}
       # (the four modules: this run's wasm-modules artifact when it built them, else the published pins)
       - uses: ./.github/actions/wasm-modules
         with:
@@ -1642,17 +1778,17 @@ jobs:
       - uses: actions/setup-python@a26af69be951a213d495a4c3e4e4022e16d87065 # v5.6.0
         with:
           python-version: "3.14"
-          cache: pip
+          cache: ${{ github.event_name != 'merge_group' && 'pip' || '' }}
           cache-dependency-path: .github/requirements-ci.txt
       - run: python3 -m pip install -r .github/requirements-ci.txt
       - run: pnpm install --frozen-lockfile && pnpm run build && node scripts/build-cli.mjs
-      - name: Node tests on the fresh engine, shard ${{ matrix.shard }}/8
+      - name: Node tests on the fresh engine, shard ${{ matrix.shard }}/2
         env:
           SAGEBRUSH_TIME_SCALE: "3"
           NPY_DISABLE_CPU_FEATURES: "X86_V4 AVX512_ICL AVX512_SPR"
         run: |
           mapfile -d '' files < <(find dist/test -maxdepth 1 -type f -name '*.test.js' ! -name 'magma.test.js' ! -name 'matlab.test.js' ! -name 'sprig*.test.js' -print0 | sort -z)
-          node --test --test-concurrency="$SAGEBRUSH_CPUS" --test-shard=${{ matrix.shard }}/8 "${files[@]}"
+          node --test --test-timeout=300000 --test-concurrency="$SAGEBRUSH_CPUS" --test-shard=${{ matrix.shard }}/2 "${files[@]}"
 
   engine-language:
     needs: [changes, engine-wasm, wasm-modules]
@@ -1660,9 +1796,10 @@ jobs:
     strategy:
       fail-fast: false
       matrix:
-        shard: [1, 2, 3, 4, 5, 6]
+        # (2 shards: the CI capacity ruling, Nov 22 2026)
+        shard: [1, 2]
     runs-on: ${{ vars.CI_RUNNER || 'ubuntu-24.04' }}
-    timeout-minutes: 18
+    timeout-minutes: 30
     steps:
       - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4.4.0
       - name: detect CI CPU quota
@@ -1673,7 +1810,7 @@ jobs:
       - uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020 # v4.4.0
         with:
           node-version: 24
-          cache: pnpm
+          cache: ${{ github.event_name != 'merge_group' && 'pnpm' || '' }}
       # (the four modules: this run's wasm-modules artifact when it built them, else the published pins)
       - uses: ./.github/actions/wasm-modules
         with:
@@ -1685,17 +1822,17 @@ jobs:
       - uses: actions/setup-python@a26af69be951a213d495a4c3e4e4022e16d87065 # v5.6.0
         with:
           python-version: "3.14"
-          cache: pip
+          cache: ${{ github.event_name != 'merge_group' && 'pip' || '' }}
           cache-dependency-path: .github/requirements-ci.txt
       - run: python3 -m pip install scipy==1.18.1 numpy==2.5.1
       - run: pnpm install --frozen-lockfile && pnpm run build && node scripts/build-cli.mjs
-      - name: Magma and MATLAB Node tests on the fresh engine, case shard ${{ matrix.shard }}/6
+      - name: Magma and MATLAB Node tests on the fresh engine, case shard ${{ matrix.shard }}/2
         env:
           SAGEBRUSH_TIME_SCALE: "3"
           NPY_DISABLE_CPU_FEATURES: "X86_V4 AVX512_ICL AVX512_SPR"
         run: |
-          node scripts/test-name-shard.mjs test/magma.test.ts dist/test/magma.test.js ${{ matrix.shard }}/6
-          node scripts/test-name-shard.mjs test/matlab.test.ts dist/test/matlab.test.js ${{ matrix.shard }}/6
+          node scripts/test-name-shard.mjs test/magma.test.ts dist/test/magma.test.js ${{ matrix.shard }}/2
+          node scripts/test-name-shard.mjs test/matlab.test.ts dist/test/matlab.test.js ${{ matrix.shard }}/2
 
   engine-modes:
     needs: [changes, engine-wasm, wasm-modules]
@@ -1712,7 +1849,7 @@ jobs:
       - uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020 # v4.4.0
         with:
           node-version: 24
-          cache: pnpm
+          cache: ${{ github.event_name != 'merge_group' && 'pnpm' || '' }}
       # (the four modules: this run's wasm-modules artifact when it built them, else the published pins)
       - uses: ./.github/actions/wasm-modules
         with:
@@ -1724,7 +1861,7 @@ jobs:
       - uses: actions/setup-python@a26af69be951a213d495a4c3e4e4022e16d87065 # v5.6.0
         with:
           python-version: "3.14"
-          cache: pip
+          cache: ${{ github.event_name != 'merge_group' && 'pip' || '' }}
           cache-dependency-path: .github/requirements-ci.txt
       - run: python3 -m pip install scipy==1.18.1 numpy==2.5.1
       - run: pnpm install --frozen-lockfile && pnpm run build && node scripts/build-cli.mjs
@@ -1751,6 +1888,7 @@ jobs:
       - uses: Swatinem/rust-cache@d1527c8f67ef9af357290475d4af4b0fab8f12e0 # v2.9.3
         with:
           workspaces: engine
+          save-if: ${{ github.event_name != 'merge_group' }}
       - uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020 # v4.4.0
         with:
           node-version: 24
@@ -1775,8 +1913,11 @@ jobs:
           python3 engine/py/test_runs_sweep.py
           python3 engine/py/test_workspace_tools.py
           python3 engine/py/test_latex_comments.py
+          python3 engine/py/test_matrix_checks.py
+          python3 engine/py/test_sage_colors.py
           python3 engine/py/test_pairing.py
           python3 engine/py/test_chat.py
+          python3 engine/py/test_sage_names.py
           python3 engine/py/test_limits.py
           python3 engine/py/test_engine_errors.py
           python3 engine/py/test_memguard.py
@@ -1819,6 +1960,7 @@ jobs:
       - uses: Swatinem/rust-cache@d1527c8f67ef9af357290475d4af4b0fab8f12e0 # v2.9.3
         with:
           workspaces: engine
+          save-if: ${{ github.event_name != 'merge_group' }}
           shared-key: clippy
       - uses: actions/setup-python@a26af69be951a213d495a4c3e4e4022e16d87065 # v5.6.0
         with:
@@ -1871,7 +2013,7 @@ jobs:
       - uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020 # v4.4.0
         with:
           node-version: "24.21.0"
-          cache: pnpm
+          cache: ${{ github.event_name != 'merge_group' && 'pnpm' || '' }}
       # (the four modules: this run's wasm-modules artifact when it built them, else the published pins)
       - uses: ./.github/actions/wasm-modules
         with:
@@ -1929,7 +2071,7 @@ jobs:
       - uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020 # v4.4.0
         with:
           node-version: 24
-          cache: pnpm
+          cache: ${{ github.event_name != 'merge_group' && 'pnpm' || '' }}
       # (the four modules: this run's wasm-modules artifact when it built them, else the published pins)
       - uses: ./.github/actions/wasm-modules
         with:
@@ -1954,7 +2096,7 @@ jobs:
           trap cleanup_server EXIT
           trap 'exit 130' INT
           trap 'exit 143' TERM
-          sleep 1
+          node scripts/wait-for-port.mjs 8765
           kill -0 "$server_pid"
           node scripts/web-tests.mjs run export-controls
 
@@ -1974,7 +2116,7 @@ jobs:
       - uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020 # v4.4.0
         with:
           node-version: 24
-          cache: pnpm
+          cache: ${{ github.event_name != 'merge_group' && 'pnpm' || '' }}
       # (the four modules: this run's wasm-modules artifact when it built them, else the published pins)
       - uses: ./.github/actions/wasm-modules
         with:
@@ -1997,7 +2139,7 @@ jobs:
           trap cleanup_server EXIT
           trap 'exit 130' INT
           trap 'exit 143' TERM
-          sleep 1
+          node scripts/wait-for-port.mjs 8765
           kill -0 "$server_pid"
           node scripts/web-tests.mjs run lookalike-controls
 
@@ -2024,6 +2166,7 @@ jobs:
       - modes
       - mpmath-suite
       - engine-rust
+      - engine-nd-neon
       - wasm-modules
       - wasm-publish
       - engine-wasm
@@ -2042,6 +2185,7 @@ jobs:
     steps:
       - name: require every selected job to pass
         env:
+          CHANGES: ${{ needs.changes.result }}
           RESULTS: >-
             ${{ needs.changes.result }} ${{ needs.census.result }}
             ${{ needs.node-tests.result }}
@@ -2054,7 +2198,7 @@ jobs:
             ${{ needs.web-browser.result }}
             ${{ needs.interrupt-matrix.result }}
             ${{ needs.conformance.result }} ${{ needs.modes.result }} ${{ needs.mpmath-suite.result }}
-            ${{ needs.engine-rust.result }} ${{ needs.wasm-modules.result }} ${{ needs.wasm-publish.result }} ${{ needs.engine-wasm.result }}
+            ${{ needs.engine-rust.result }} ${{ needs.engine-nd-neon.result }} ${{ needs.wasm-modules.result }} ${{ needs.wasm-publish.result }} ${{ needs.engine-wasm.result }}
             ${{ needs.engine-node.result }} ${{ needs.engine-language.result }}
             ${{ needs.engine-modes.result }}
             ${{ needs.engine-cpython.result }}
@@ -2063,6 +2207,7 @@ jobs:
             ${{ needs.webkit.result }}
             ${{ needs.export-controls.result }} ${{ needs.lookalike-controls.result }}
         run: |
+          [ "$CHANGES" = success ] || { echo "changes did not succeed: $CHANGES"; exit 1; }
           echo "$RESULTS"
           case " $RESULTS " in
             *" failure "*|*" cancelled "*) exit 1 ;;

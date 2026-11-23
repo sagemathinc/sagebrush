@@ -94,6 +94,8 @@ export function chatHere(host: ChatHereHost, ui: () => Ui | null) {
         sec.append(el("div", { className: "runner" }, el("span", { textContent: r.name }), b));
       }
     }, (e) => {
+      // (a site without computers, a local one: no section at all, nothing a person there could do about it)
+      if ((e as { absent?: boolean })?.absent) return void sec.remove();
       status.textContent = RUNNER_COPY.failed(String((e as Error)?.message ?? e));
       // (signed out: the site's own sign-in, back to this page after)
       if ((e as { signedOut?: boolean })?.signedOut) sec.append(el("a", { className: "sign-in", href: `/auth/login?return=${encodeURIComponent(location.pathname + location.search)}`, textContent: RUNNER_COPY.signIn }));

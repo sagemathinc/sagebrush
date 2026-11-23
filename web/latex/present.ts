@@ -10,6 +10,7 @@
 //   the count says so (running()). A click on the left third goes back, elsewhere forward. A live @interact on the
 //   slide (opts.onShow) takes its own clicks and keys; Escape still stops.
 import { applyStep, stepsOf } from "./overlay";
+import { RUN_HINT, PRESENT_RUN_HINT } from "./engine/sagetex.mjs";
 
 export interface PresentOpts {
   /** The preview's slides, in order, as they are now. */
@@ -71,6 +72,9 @@ export function present(o: PresentOpts): Presenter {
     copy.removeAttribute("id");
     // (an @interact's controls disabled, as a copy has no listeners, until onShow makes them live)
     copy.querySelectorAll(".sageinteract :is(input, select, button)").forEach((c) => ((c as HTMLInputElement).disabled = true));
+    // (a code item not run yet: a slide has no Run button, so its hint names Shift+Enter where that runs the code, and
+    //  nothing where it doesn't)
+    copy.querySelectorAll(".sagechip.s-notrun").forEach((c) => { const t = c.textContent ?? ""; if (t.endsWith(RUN_HINT)) c.textContent = t.slice(0, -RUN_HINT.length) + (o.onRun ? PRESENT_RUN_HINT : "not run"); });
     applyStep(copy, step);
     stage.replaceChildren(copy);
     fit();

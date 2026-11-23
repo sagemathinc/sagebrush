@@ -4,8 +4,10 @@
 // for the message itself, so that an empty one isn't free (HARD-58F-1).
 export const DISPLAY_ENVELOPE = 64;
 
-export function displayCost(bundle: Record<string, unknown>): number {
+export function displayCost(bundle: Record<string, unknown>, metadata?: unknown): number {
   let n = DISPLAY_ENVELOPE;
   for (const [k, v] of Object.entries(bundle)) n += k.length + (typeof v === "string" ? v.length : 0);
+  // (its metadata too, as it is sent: JSON; a program's own _repr_mimebundle_ may make it as large as it likes)
+  if (metadata !== undefined && metadata !== null) n += JSON.stringify(metadata)?.length ?? 0;
   return n;
 }

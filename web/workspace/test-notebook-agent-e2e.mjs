@@ -25,6 +25,7 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { createInterface } from "node:readline";
 import { devtoolsPort } from "../test-port.mjs";
+import { BAR_CLEAR } from "./agent-bar-check.mjs";
 
 const here = new URL(".", import.meta.url).pathname;
 let failures = 0, checks = 0;
@@ -124,6 +125,9 @@ try {
   const until = async (expr, ms = 20000) => { const t = Date.now(); while (Date.now() - t < ms) { if (await ev(expr).catch(() => false)) return true; await sleep(100); } return false; };
   const go = async (q) => { await ev("window.__old = 1").catch(() => {}); await send("Page.navigate", { url: origin + "/" + q }); await sleep(300); return until("!window.__old && !!window.sagebrush?.workspace", 60000); };
   for (const m of ["Page.enable", "Runtime.enable", "Network.enable", "Log.enable"]) await send(m);
+  // (the agent's notebook's writes it may not make are refused at once here, as where a run can't wait for the person's
+  // answer: the page's loopback switch (web/index.html ASK_WAIT); a run that waits on its prompt is test-run-bar's)
+  await send("Page.addScriptToEvaluateOnNewDocument", { source: "try { localStorage.setItem('sagebrush-ask', '0'); } catch {}" });
   const W = "window.sagebrush.workspace";
   const chunk = (u) => /sagebrush-agent\.js/.test(u);
   // (SHOT_DIR: screenshots for a review, at the moments below)
@@ -182,12 +186,18 @@ try {
   })()`);
   await ev(`([...document.querySelectorAll(".sbag-box button.primary")].pop().click(), true)`);
   ok(await until(`!!document.querySelector(".sbag-bar")`), "allowed: the bar shows the agent");
+  ok(await until(`${BAR_CLEAR} === true`, 5000), "the notebook page: the agent's bar is in its own row, over nothing the person types in or reads", await ev(BAR_CLEAR).catch((e) => String(e)));
   await until(`window.sagebrush.notebook.snapshot?.().cells?.length > 0`);
 
   // the agent reads the notebook shown and adds a cell: the page shows it at once
   const rd = await drive({ op: "req", method: "workspace.read", params: { path } });
   const doc = rd.ok?.content?.json;
   ok(Array.isArray(doc?.cells) && doc.cells.some((c) => c.code === "x = 1"), "the agent reads the notebook, the person's cell in it", rd);
+  // (and its address, a link the agent can give the person: this site's notebook page, by the notebook's own id, which
+  //  the agent's view of the entry doesn't carry)
+  const site = await ev("location.origin");
+  const ref = await ev(`window.sagebrush.workspace.stat(${JSON.stringify(path)}).then((e) => e?.ref ?? null)`).catch(() => null);
+  ok(typeof ref === "string" && rd.ok?.entry?.url === site + "/?nb=" + encodeURIComponent(ref) && !("ref" in (rd.ok?.entry ?? {})), "the read's entry has url, the notebook's page on this site (and still no ref of its own)", { entry: rd.ok?.entry, ref });
   const MARK = "print('from the agent', 6 * 7)";
   const wr = await drive({ op: "req", method: "workspace.write", params: { path, content: { json: { ...doc, cells: [...doc.cells, { id: "agentcell1", code: MARK, outputs: [], n: null }] } }, base: rd.ok?.rev } });
   ok(!!wr.ok, "the agent writes it (its base)", wr);
@@ -256,8 +266,19 @@ try {
   // (the bar's Open, after the person moved away: it opens the agent's notebook again)
   const left = path.slice(path.lastIndexOf("/") + 1);
   ok(await fromFiles(left) && await until(`!${shownIs("Made by the agent")} && ${sources}.includes("x = 3")`, 15000), "(the person opens their own notebook again, from Files)");
-  await ev(`(${barButton("Open Made by the agent.ipynb")}.click(), true)`);
-  ok(await until(shownIs("Made by the agent"), 15000) && await ev("performance.timeOrigin") === origin0, "the bar's Open opens the agent's notebook, in place");
+  // (pressed as a person does, with a real mouse, and the agent changes a file while the button is held down: the counts
+  //  change under it, the button stays the same one, and the press lands (W4))
+  const at = await ev(`(() => { const b = window.__w4open = ${barButton("Open Made by the agent.ipynb")}; b.scrollIntoView({ block: "center" }); const r = b.getBoundingClientRect(); window.__w4clicks = 0; b.addEventListener("click", () => window.__w4clicks++);
+    return { x: r.x + r.width / 2, y: r.y + r.height / 2, chip: document.querySelector(".sbag-bar button.chip").textContent }; })()`);
+  await send("Input.dispatchMouseEvent", { type: "mousePressed", button: "left", clickCount: 1, x: at.x, y: at.y });
+  const fr4 = await drive({ op: "req", method: "workspace.read", params: { path } });
+  const wa4 = await drive({ op: "req", method: "workspace.write", params: { path, base: fr4.ok?.rev, content: fr4.ok?.content } });
+  const moved = await until(`document.querySelector(".sbag-bar button.chip").textContent !== ${JSON.stringify(at.chip)}`, 10000);
+  const same = await ev(`window.__w4open.isConnected && window.__w4open === ${barButton("Open Made by the agent.ipynb")}`);
+  const box4 = await ev(`(() => { const r = window.__w4open.getBoundingClientRect(); return [r.x, r.y, r.width, r.height]; })()`);
+  await send("Input.dispatchMouseEvent", { type: "mouseReleased", button: "left", clickCount: 1, x: at.x, y: at.y });
+  ok(!!wa4.ok && moved && same && at.y > 0 && box4[1] <= at.y && at.y <= box4[1] + box4[3], "W4: the agent writes while Open is held down: the counts change, the same Open button stays", { wa: !!wa4.ok, moved, same, at, box4 });
+  ok(await until(shownIs("Made by the agent"), 15000) && await ev("performance.timeOrigin") === origin0, "the bar's Open, pressed across that change, opens the agent's notebook, in place", { at, box4, clicks: await ev("window.__w4clicks") });
   // (the person's open wins: the agent's notebook, its open held before it attaches, never replaces a notebook the person
   //  opened meanwhile)
   ok(await fromFiles(left) && await until(`!${shownIs("Made by the agent")}`, 15000), "(the person's own notebook again)");
@@ -307,6 +328,8 @@ try {
   // (at most once: opened again through the bar's Open after the person moved away, it doesn't run again)
   const ONCE = "import time\nprint('ran at', time.time())";
   ok(!!(await make("Runs once", [ONCE])).ok && await until(`${shownIs("Runs once")} && ${outOf(ONCE)}.includes("ran at")`, 30000), "a notebook that says when it ran: opened, run by itself");
+  // (its run's number is drawn a moment after its output: read both once both are there)
+  await until(`${nOf(ONCE)} != null`, 10000);
   const ranAt = await ev(outOf(ONCE)), ranN = await ev(nOf(ONCE));
   ok(await fromFiles("Made by the agent.ipynb") && await until(shownIs("Made by the agent"), 15000), "(the person opens another notebook from Files)");
   await ev(`(${barButton("Open Runs once.ipynb")}.click(), true)`);
@@ -409,7 +432,8 @@ try {
   ok(!!(await make("Reloaded first", [RELOAD])).ok && await until(`window.__held === "/Reloaded first.ipynb"`, 15000), "(another, held before its run, then the page reloads)");
   const RELOADED = true;
 
-  // a grant "until the page closes" ends with the page
+  // a grant "until the page closes": the page left and came back to (a navigation back, within 10 minutes) reconnects
+  // by itself (A5 item 2, ruled Nov 20 2026; it used to end with the page)
   ok(await go(""), "the page again");
   if (RELOADED) {
     // (directly: after the reload, no creation was announced to this page at all, whatever the grant)
@@ -419,7 +443,44 @@ try {
     ok(!(await ev(outOf(RELOAD))).includes("reloaded ran") && await ev(nOf(RELOAD)) === null, "nothing replays after a reload: it never ran");
   }
   const st = await drive({ op: "status" });
-  ok(st.ok?.paired === false || st.ok?.granted === false, "the grant ended with the page", st);
+  ok(st.ok?.paired === true && st.ok?.granted === true, "the page came back to within 10 minutes: the agent reconnected, its grant given again (A5)", st);
+
+  // a reload of the same tab keeps the agent (decided Nov 19 2026): its reload record resumes the pairing, with no new
+  // Allow, while the grant lasts, and the agent's next call works; a navigation to the page (above) doesn't
+  {
+    const cr = await drive({ op: "code" });
+    ok(await go(`?pair=${cr.code}&port=${cr.port}`) && await until(`!!document.querySelector(".sbag-box button.primary")`), "(a ?pair= link: Connect)");
+    await ev(`(document.querySelector(".sbag-box button.primary").click(), true)`);
+    ok(await until(`[...document.querySelectorAll(".sbag-box h2")].some((h) => h.textContent === "Allow this agent?")`), "(paired: Allow this agent?)");
+    await ev(`([...document.querySelectorAll(".sbag-box button.primary")].pop().click(), true)`);
+    ok(await until(`!!document.querySelector(".sbag-bar")`), "(allowed, with the dialog's defaults: not remembered)");
+    await ev("window.__old = 1").catch(() => {});
+    await send("Page.reload");
+    await sleep(300);
+    ok(await until("!window.__old && !!window.sagebrush?.workspace", 60000), "(the tab reloads)");
+    ok(await until(`!!document.querySelector(".sbag-bar")`, 20000) && !(await ev(`!!document.querySelector(".sbag-box")`)), "after a reload of the tab, the agent is back by itself: its bar, and no Connect or Allow", await ev(`document.querySelector(".sbag-box")?.textContent ?? ""`).catch(() => ""));
+    const lr = await drive({ op: "req", method: "workspace.list", params: { folder: "/" } });
+    ok(Array.isArray(lr.ok?.entries), "…and the agent's next call works", JSON.stringify(lr).slice(0, 200));
+    // (this tab's record of that live pairing, exactly as the page keeps it)
+    const oldRec = await ev(`sessionStorage.getItem("sb-agent-reload-v1")`);
+    ok(typeof oldRec === "string" && oldRec.includes('"session"'), "(the tab holds its reload record)");
+    // a fresh ?pair= link opened in this tab, a navigation, not a reload: the old record is dropped at load, before
+    // anything of the new pairing; then the new Allow cancelled, and the cleaned page reloaded: nothing of the old agent
+    // comes back (no restore, no chunk fetched for it, no bar)
+    const cn = await drive({ op: "code" });
+    ok(await go(`?pair=${cn.code}&port=${cn.port}`) && await until(`!!document.querySelector(".sbag-box button.primary")`), "(another ?pair= link in the same tab: Connect)");
+    ok(await ev(`sessionStorage.getItem("sb-agent-reload-v1") === null`), "a ?pair= link opened over a tab's reload record (a navigation): the old record is dropped at load");
+    await ev(`([...document.querySelectorAll(".sbag-box button")].find((b) => b.textContent === "Cancel").click(), true)`);
+    ok(await until(`!document.querySelector(".sbag-box")`) && !(await ev(`new URLSearchParams(location.search).has("pair")`)), "(Cancel: the dialog closes, and the link is gone from the address)");
+    await ev("window.__old = 1").catch(() => {});
+    const beforeR = requests.length;
+    await send("Page.reload");
+    await sleep(300);
+    ok(await until("!window.__old && !!window.sagebrush?.workspace", 60000), "(the cleaned page reloads)");
+    await sleep(5000);
+    const after = { bar: await ev(`!!document.querySelector(".sbag-bar")`), box: await ev(`!!document.querySelector(".sbag-box")`), rec: await ev(`sessionStorage.getItem("sb-agent-reload-v1")`), chunk: requests.slice(beforeR).some(chunk) };
+    ok(!after.bar && !after.box && after.rec === null && !after.chunk, "…and a reload after the cancelled Allow: the old agent isn't restored (no bar, no dialog, no chunk fetched, no record)", after);
+  }
 
   // a remembered grant: the next load of the notebook page fetches the chunk by itself and reconnects
   const c1 = await drive({ op: "code" });
@@ -441,6 +502,20 @@ try {
   ok(await go(""), "the notebook page again, nothing pressed");
   ok(await until(`!!document.querySelector(".sbag-bar")`, 20000) && requests.slice(beforeR).some(chunk), "the remembered agent: the chunk loads by itself and it reconnects", requests.slice(beforeR).filter((u) => /agent/.test(u)));
   ok(await ev(`document.querySelectorAll(".sbag-bar").length`) === 1 && !(await ev(`!!document.querySelector(".sbag-box")`)), "one bar, no dialog");
+  // (a page in a frame of this tab while an agent is remembered, as the Agents page's .tex pane can be: it mounts a
+  //  pairing of its own (the chunk fetched there), and still leaves the tab's reload record alone, the top page's)
+  {
+    await ev(`(sessionStorage.setItem("sb-agent-reload-v1", "kept"), true)`);
+    const beforeF = requests.length;
+    await ev(`(() => { const f = document.createElement("iframe"); f.id = "sbframe2"; f.src = location.pathname; document.body.append(f); return true; })()`);
+    const mounted = await until(`document.querySelector("#sbframe2")?.contentDocument?.readyState === "complete"`, 30000);
+    const fetched = await (async () => { for (let t = Date.now(); Date.now() - t < 20000; await sleep(200)) if (requests.slice(beforeF).some(chunk)) return true; return false; })();
+    await sleep(1500);
+    ok(mounted && fetched && await ev(`sessionStorage.getItem("sb-agent-reload-v1") === "kept"`), "a page in a frame of this tab with an agent remembered: it mounts its own pairing, and the tab's reload record is left alone", { mounted, fetched, record: await ev(`sessionStorage.getItem("sb-agent-reload-v1")`) });
+    await ev(`(document.querySelector("#sbframe2")?.remove(), sessionStorage.removeItem("sb-agent-reload-v1"), true)`);
+    // (the top page paired again, as before the frame: the frame's own pairing may have taken the agent's one socket)
+    ok(await go("") && await until(`!!document.querySelector(".sbag-bar")`, 20000), "(the notebook page again, the remembered agent reconnected)");
+  }
   await ev(`([...document.querySelectorAll(".sbag-bar button")].find((b) => b.textContent === "Revoke")?.click(), true)`);
   ok(await until(`!document.querySelector(".sbag-bar")`), "Revoke: the bar goes (and the remembered grant with it)");
 
@@ -464,9 +539,21 @@ try {
   // the code page (/?code=<fid>): no pairing of its own, the page's, from File ▸ Connect an agent…; a remembered agent
   // reconnects there too
   const pyFid = await ev(`${W}.create("/agent-code.py", { content: new TextEncoder().encode("print(1)\\n") }).then((e) => e.fid)`);
+  // (and a reload record left in this tab, as a paired page leaves one when it's left: this navigation is no reload, so
+  //  the record is dropped where it's read, and the chunk isn't fetched for it)
+  await ev(`(sessionStorage.setItem("sb-agent-reload-v1", JSON.stringify({ v: 1, left: Date.now() })), true)`);
   const beforeC = requests.length;
   ok(typeof pyFid === "string" && await go(`?code=${encodeURIComponent(pyFid)}`) && await until(`!!document.querySelector('.code-filemenu [data-f="c-agent"]')`), "the code page's File menu offers Connect an agent…");
   ok(!requests.slice(beforeC).some(chunk) && await ev(`document.querySelector("#agentbtn").hidden`), "nothing fetched before it's wanted, and the notebook's Agent isn't shown over it");
+  ok(await ev(`sessionStorage.getItem("sb-agent-reload-v1") === null`), "a reload record met on a navigation that isn't a reload: dropped, and nothing fetched for it");
+  // (a page in a frame of this tab, as the Agents page's .tex pane is: it shares the tab's sessionStorage, and the record
+  //  is the top page's: left alone)
+  await ev(`(sessionStorage.setItem("sb-agent-reload-v1", "kept"), true)`);
+  await ev(`(() => { const f = document.createElement("iframe"); f.id = "sbframe"; f.src = "?code=" + ${JSON.stringify(encodeURIComponent(pyFid))}; document.body.append(f); return true; })()`);
+  const framed = await until(`document.querySelector("#sbframe")?.contentDocument?.readyState === "complete" && !!document.querySelector("#sbframe").contentWindow.sagebrush?.workspace`, 30000);
+  await sleep(1500);
+  ok(framed && await ev(`sessionStorage.getItem("sb-agent-reload-v1") === "kept"`), "a page in a frame of this tab (as the Agents page's .tex pane): the tab's reload record is left alone", { framed });
+  await ev(`(document.querySelector("#sbframe")?.remove(), sessionStorage.removeItem("sb-agent-reload-v1"), true)`);
   // (a ?pair= link on the code page whose chunk can't load: said in the code page's own status line; board's N1 on #935)
   const cf = await drive({ op: "code" });
   await send("Network.setCacheDisabled", { cacheDisabled: true });
@@ -494,6 +581,7 @@ try {
   })()`);
   await ev(`([...document.querySelectorAll(".sbag-box button.primary")].pop().click(), true)`);
   ok(await until(`!!document.querySelector(".sbag-bar")`), "allowed, remembered: the bar shows on the code page");
+  ok(await until(`${BAR_CLEAR} === true`, 5000), "the code page: the agent's bar is in its own row, over nothing the person types in or reads", await ev(BAR_CLEAR).catch((e) => String(e)));
   ok(await go(`?code=${encodeURIComponent(pyFid)}`) && await until(`!!document.querySelector(".sbag-bar")`, 20000), "the code page again: the remembered agent reconnects by itself");
   ok(await ev(`document.querySelectorAll(".sbag-bar").length`) === 1 && !(await ev(`!!document.querySelector(".sbag-box")`)), "one bar, no dialog");
   await ev(`([...document.querySelectorAll(".sbag-bar button")].find((b) => b.textContent === "Revoke")?.click(), true)`);
@@ -560,6 +648,7 @@ try {
     })()`);
     await ev(`([...document.querySelectorAll(".sbag-box button.primary")].pop().click(), true)`);
     ok(await until(`!!document.querySelector(".sbag-bar")`), "allowed, remembered: the bar shows");
+    ok(await until(`${BAR_CLEAR} === true`, 5000), "the LaTeX editor: the agent's bar is in its own row, over nothing the person types in or reads", await ev(BAR_CLEAR).catch((e) => String(e)));
     // the remembered grant, on the next load of /?tex=: reconnected once, by the LaTeX editor
     const before2 = requests.length;
     ok(await go(`?tex=${encodeURIComponent(fid)}&latex=1`), "the LaTeX editor again (the agent remembered)");

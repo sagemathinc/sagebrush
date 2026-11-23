@@ -18,9 +18,9 @@ Jupyter); on the command line show() writes an SVG file and prints its path.
 
 import math
 import os
-from _graphics import (Panel, Line, Points, Polygon, Rects, Text, Arrow, AxLine, Image, render_svg, render_frame,
+from _graphics import (InlineFigure as _InlineFigure, Panel, Line, Points, Polygon, Rects, Text, Arrow, AxLine, Image, render_svg, render_frame,
                        show as _show, save_svg, TAB10, to_color as _css, colormap, describe_svg, mpl_ticks, DASHES,
-                       LEGEND_LOCS as _LEGEND_LOCS)
+                       LEGEND_LOCS as _LEGEND_LOCS, pixel_size as _pixel_size)
 from matplotlib.colors import to_rgba as _to_rgba, CSS4_COLORS as _CSS4_COLORS, Colormap as _Colormap
 # (one rcParams: matplotlib's, with its defaults and its key checks)
 from matplotlib import rcParams, rcParamsDefault, rcParamsOrig, rc, rcdefaults, rc_context
@@ -435,6 +435,12 @@ class Axes:
                 edgecolors=None, color=None, vmin=None, vmax=None, **kw):
         xs, ys = _list(x), _list(y)
         n = len(xs)
+        if marker == ",":  # (as matplotlib's scatter: a square, with its warning)
+            import warnings
+            warnings.warn("The pixel maker ',' is not supported on scatter(); using a finite-sized square instead, which is "
+                          "not necessarily 1 pixel in size. Use the square marker 's' instead to suppress this warning.",
+                          UserWarning, stacklevel=2)
+            marker = "s"
         colors = clim = None
         if c is not None and not isinstance(c, str) and not (isinstance(c, tuple) and len(c) in (3, 4)):
             cl = list(c.tolist() if hasattr(c, "tolist") else c)
@@ -1463,11 +1469,29 @@ class Figure:
                 svg = _svg_background(svg, css, self._size[0] * 100, self._size[1] * 100)
         return svg
 
-    def _repr_svg_(self):
+    def _sagebrush_svg_(self):
         anim = getattr(self, "_animation", None)
         if anim is not None:  # a figure being animated shows its animation
             return anim._repr_svg_()
         return self._svg()
+
+    # (shown as figure_mode() says, lib/_graphics.py: an SVG, or a PNG at twice the dpi; an animation always as its
+    # animated SVG)
+    def _repr_svg_(self):
+        if getattr(self, "_animation", None) is not None:
+            return self._sagebrush_svg_()
+        return _InlineFigure._repr_svg_(self)
+
+    def _repr_png_(self):
+        if getattr(self, "_animation", None) is not None:
+            return None
+        return _InlineFigure._repr_png_(self)
+
+    def _sagebrush_png_(self, scale):
+        import io
+        b = io.BytesIO()
+        self.savefig(b, format="png", dpi=self.dpi * scale)
+        return b.getvalue(), (self._size[0] * self.dpi, self._size[1] * self.dpi)
 
     def description(self):
         return describe_svg(self._svg())
@@ -1524,7 +1548,13 @@ class Figure:
         if dpi == "figure":
             dpi = self.dpi
         dpi = float(dpi)
-        svg = self._svg(background=False)
+        # (the pixel marker ',' is one pixel of this PNG: 100 / dpi SVG units)
+        old = _pixel_size(100.0 / dpi) if dpi > 0 and math.isfinite(dpi) else None
+        try:
+            svg = self._svg(background=False)
+        finally:
+            if old is not None:
+                _pixel_size(old)
         if not transparent:
             svg = _axes_patches(svg, self.axes)
         text = {"Software": "Sagebrush"}

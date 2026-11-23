@@ -11,7 +11,7 @@ import { dirname, join } from "node:path";
 import { fileURLToPath } from "node:url";
 import { inflateRawSync } from "node:zlib";
 import { buildExamplesInto, latexPreview, notebookHtml, outputHtml, zip, esc, handlerIn, SITE_CAPS } from "./build-examples.ts";
-import { sitemapXml, buildSitemap, ROBOTS } from "./build-sitemap.ts";
+import { sitemapXml, buildSitemap, ROBOTS, docsIndexJson, DOCS_INDEX_PATH } from "./build-sitemap.ts";
 import { sha256, fontsMark, filesJson } from "../scripts/examples-lib.mjs";
 
 const here = dirname(fileURLToPath(import.meta.url));
@@ -197,7 +197,7 @@ check(/marker names .* not examples\/shared\/katex-preview\.css/.test(refused ??
   check(h.includes(`<meta name="sagebrush-example-main" content="${m.main} sha256:${sha}">`), "the page names the sha256 of the main its preview was built from (A6)");
 }
 
-// ---- plan section 5's caps on what the site serves (the parts budgets.json's site/examples row doesn't bind alone)
+// ---- plan section 5's independent caps on what the site serves
 check(SITE_CAPS.preview === 1048576 && SITE_CAPS.previews === 125829120 && SITE_CAPS.zips === 62914560 && SITE_CAPS.catalog === 204800, "the caps are the plan's: 1 MiB a preview, 120 MiB of previews, 60 MiB of ZIPs, 200 KiB of catalog");
 for (const [cap, re] of [
   [{ ...SITE_CAPS, preview: 10000 }, /latex\/article: its preview is \d+ bytes, more than 10000/],
@@ -286,6 +286,24 @@ check(z1.equals(zip([{ name: "a/ü.txt", bytes: Buffer.from("hi") }, { name: "b.
     const r = readFileSync(join(built, "robots.txt"), "utf8"), x = readFileSync(join(built, "sitemap.xml"), "utf8");
     check(!/disallow/i.test(r) && ![...x.matchAll(/<loc>[^<]*<\/loc>/g)].some((m) => /<loc>https:\/\/sagebrush\.space\/(s|api|auth|c)(\/|@|<)/.test(m[0])), "the built site's robots.txt disallows nothing, and its sitemap.xml lists no share URL");
   } else console.log("(the built site's robots.txt and sitemap.xml: not built here)");
+}
+
+// ---- the agent's docs index (#1552): exactly the sitemap's docs, articles and blog pages, each a lowercase slug path;
+// sagebrush-agent's sagebrush_docs reads only members, so a docs URL can carry nothing but a choice among them
+{
+  const site = tmp();
+  const docs = [{ url: "/docs/", date: "2026-11-22" }, { url: "/docs/sharing", date: "2026-11-22" }];
+  const art = [{ url: "/", date: "2026-11-05" }, { url: "/articles/groebner/06-gcd-and-factoring", date: "2026-11-05" }, { url: "/articles/", date: "2026-11-05" }];
+  const blog = [{ url: "/blog/", date: "2026-11-05" }, { url: "/blog/sagebrush", date: "2026-11-05" }];
+  await buildSitemap({ out: site, articles: () => art, blog: () => blog, examples: (o) => buildExamplesInto(o, FIX), docs: () => docs });
+  const idx = JSON.parse(readFileSync(join(site, "docs-index.json"), "utf8"));
+  const want = ["/articles/", "/articles/groebner/06-gcd-and-factoring", "/blog/", "/blog/sagebrush", "/docs/", "/docs/sharing"];
+  check(JSON.stringify(Object.keys(idx)) === '["v","paths"]' && idx.v === 1 && JSON.stringify(idx.paths) === JSON.stringify(want), "docs-index.json lists exactly the docs, articles and blog pages, sorted; no example, no home page: " + JSON.stringify(idx));
+  check(idx.paths.every((p) => DOCS_INDEX_PATH.test(p)), "...each one a slug path the agent accepts");
+  for (const bad of ["/docs/Sharing", "/docs/a b", "/docs/a?x=1", "/docs/a#b", "/docs/a%20b", "/docs/../s/x", "/docs/a.html", "/docs/a/b/c/d/e", "/docs/_x", "/docs/" + "a".repeat(81)])
+    throws(() => docsIndexJson([{ url: bad }]), /can't be in the docs index/, `a docs page whose URL isn't a slug path fails the build, not left out: ${JSON.stringify(bad)}`);
+  throws(() => docsIndexJson(Array.from({ length: 1001 }, (_, i) => ({ url: `/docs/p${i}` }))), /over 1000/, "over 1000 pages in the index fails the build");
+  check(docsIndexJson([{ url: "/examples/x/" }, { url: "/s/abcdefghijk2" }, { url: "/" }]) === '{"v":1,"paths":[]}\n', "...and pages outside docs, articles and blog are never in it");
 }
 
 // ---- grader's E26: a rebuild into the same folder drops an example the corpus no longer has
