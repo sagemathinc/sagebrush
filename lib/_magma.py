@@ -1983,6 +1983,10 @@ _PYBUILTINS = set((
 _PYKW |= _PYBUILTINS
 
 
+# (records being printed: a maximal order in one keeps the one-line form, _MOrder._str)
+_IN_REC = [0]
+
+
 class MRec:
     """A record: values for some of its format's fields."""
 
@@ -2031,7 +2035,16 @@ class MRec:
 
     def _str(self, indent, tail=""):
         """Printed over lines at `indent`, its closing ">" added after its
-        last field is laid out (_close), then `tail` (a sequence's comma)."""
+        last field is laid out (_close), then `tail` (a sequence's comma).
+        A maximal order in it prints on one line (_IN_REC), as a tuple's does:
+        Magma's layout of these is an open issue."""
+        _IN_REC[0] += 1
+        try:
+            return self._str1(indent, tail)
+        finally:
+            _IN_REC[0] -= 1
+
+    def _str1(self, indent, tail):
         head = "rec<%s | " % _format_name(self.fmt)
         names = [n for n in self.fmt.names if n in self.vals]
         if not names:
@@ -9592,7 +9605,7 @@ class _MOrder:
     def _str(self, col, indent, tail):
         """Laid out as Magma prints a maximal equation order past WIDTH
         columns (_pieces); under printf's %o without the polynomial's 4."""
-        if _making_string() or self.K._nfdata()["index"] != 1:
+        if _making_string() or self.K._nfdata()["index"] != 1 or _IN_REC[0]:
             return repr(self) + tail
         plus = 0 if _SPRINT[0] is not None else 4
         return _flow(_cont_words(self._pieces(indent, plus) + [(tail, indent)]), col, indent, indent)
