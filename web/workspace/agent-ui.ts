@@ -91,6 +91,8 @@ const CSS = `
 .sbag-box label { display: flex; gap: 8px; align-items: center; }
 .sbag-box input[type=text] { font: inherit; padding: 5px 8px; border: 1px solid #cfd5c8; border-radius: 6px; flex: 1; }
 .sbag-box .folders { max-height: 160px; overflow: auto; border: 1px solid #e6e9e1; border-radius: 6px; padding: 6px 8px; display: grid; gap: 2px; }
+.sbag-box .memory { display: grid; gap: 2px; }
+.sbag-box .memory .tag { padding-left: 1.5em; }
 .sbag-box .row { display: flex; gap: 8px; justify-content: flex-end; }
 .sbag-box button { font: inherit; border: 1px solid #cfd5c8; background: #fff; border-radius: 6px; padding: 5px 12px; cursor: pointer; }
 .sbag-box button.primary { background: #3f6b35; color: #fff; border-color: #3f6b35; }
@@ -179,7 +181,7 @@ async function again(deadline: number, mine: () => boolean): Promise<boolean> {
 /** The page's pairing: a dialog to connect, a bar while connected.  Returns the button's handler. `reload` (A14) turns on
  * the reload record: its scope, and a callback for the restore's states; `quietLoss` leaves an involuntary loss to the
  * page's own bar (no dialog). */
-export function mountAgentPairing(ws: PairingWorkspace, o: { /** agent memory v1: the page has its memory client (the pairing's `memory`) */ memory?: boolean; button?: HTMLElement | null; onPairing?: (p: AgentPairing) => void; egressTurn?: boolean; notebookEdit?: (edit: NotebookEdit, may: () => boolean, hold?: () => Promise<() => void>, turnId?: string) => Promise<unknown>; branches?: { gitBranch: typeof gitBranch; gitBranchParams: typeof gitBranchParams; gitBranchProblem: typeof gitBranchProblem; watchBranches: typeof watchBranches; gitServe?: typeof gitServe }; reload?: { scope: ReloadScope; storage?: Pick<Storage, "getItem" | "setItem" | "removeItem"> | null; onState?: (s: RestoreState) => void; onRemembered?: (g: Kept["grant"]) => void }; quietLoss?: boolean; program?: string; runVerbs?: RunVerbs; extra?: (close: () => void) => HTMLElement; open?: (c: Created) => void; onCreated?: (c: Created, p: AgentPairing) => void } = {}) {
+export function mountAgentPairing(ws: PairingWorkspace, o: { /** agent memory v1: the page has its memory client (the pairing's `memory`) */ memory?: boolean; /** and its tags, as the person named them in this browser (the grant dialog's choice; none: own notes only) */ memoryTags?: () => readonly { id: string; name: string }[]; button?: HTMLElement | null; onPairing?: (p: AgentPairing) => void; egressTurn?: boolean; notebookEdit?: (edit: NotebookEdit, may: () => boolean, hold?: () => Promise<() => void>, turnId?: string) => Promise<unknown>; branches?: { gitBranch: typeof gitBranch; gitBranchParams: typeof gitBranchParams; gitBranchProblem: typeof gitBranchProblem; watchBranches: typeof watchBranches; gitServe?: typeof gitServe }; reload?: { scope: ReloadScope; storage?: Pick<Storage, "getItem" | "setItem" | "removeItem"> | null; onState?: (s: RestoreState) => void; onRemembered?: (g: Kept["grant"]) => void }; quietLoss?: boolean; program?: string; runVerbs?: RunVerbs; extra?: (close: () => void) => HTMLElement; open?: (c: Created) => void; onCreated?: (c: Created, p: AgentPairing) => void } = {}) {
   style();
   // `program`: the page's own program (the Agents page: sagebrush-agent) named in the dialog instead of sagebrush-mcp
   const named = (s: string) => o.program ? s.replace(/(the agent's |your agent's )?sagebrush-mcp/g, o.program) : s;
@@ -390,6 +392,15 @@ export function mountAgentPairing(ws: PairingWorkspace, o: { /** agent memory v1
       const syncRemember = () => { remember.disabled = how.value === "page"; if (remember.disabled) remember.checked = false; };
       how.onchange = syncRemember;
       syncRemember();
+      // (agent memory v1, §7.1: offered only where this page has its memory client and the agent's hello offers
+      //  memory.1, on this computer; off until the person ticks it. Tags are the page's own list, never the agent's:
+      //  their ids go in the grant, ascending, as the person picks them)
+      const memOk = !!o.memory && !p.link && !!hello.features?.includes("memory.1");
+      const memOwn = h("input", { type: "checkbox", name: "memory-own" });
+      const memTags = memOk ? [...(o.memoryTags?.() ?? [])] : [];
+      const memBoxes = memTags.map((t) => { const c = h("input", { type: "checkbox", value: t.id }); c.dataset.tag = t.id; c.disabled = true; return c; });
+      memOwn.onchange = () => { for (const c of memBoxes) { c.disabled = !memOwn.checked; if (!memOwn.checked) c.checked = false; } };
+      const memory = memOk ? h("div", { className: "memory" }, h("div", { textContent: "Notes it may use:" }), h("label", {}, memOwn, "Its own notes"), ...memTags.map((t, i) => h("label", { className: "tag" }, memBoxes[i], t.name))) : null;
       const err = h("div", { className: "err" });
       const allow = h("button", { className: "primary", textContent: "Allow" });
       const cancel = h("button", { textContent: "Cancel" });
@@ -398,12 +409,13 @@ export function mountAgentPairing(ws: PairingWorkspace, o: { /** agent memory v1
         const chosen = all.checked ? ["/"] : boxes.filter((c) => c.checked).map((c) => c.value);
         if (!chosen.length) { err.textContent = "Choose at least one folder (or Everything)."; return; }
         try {
-          await p.allow({ folders: chosen, write: write.checked, run: run.checked, expires: how.value === "page" ? null : Date.now() + Number(how.value) }, remember.checked);
+          const mem = memOk && memOwn.checked ? { memory: { tags: memBoxes.filter((c) => c.checked).map((c) => c.value).sort() } } : {};
+          await p.allow({ folders: chosen, write: write.checked, run: run.checked, ...mem, expires: how.value === "page" ? null : Date.now() + Number(how.value) }, remember.checked);
           close();
           showBar();
         } catch (e) { err.textContent = String((e as Error).message ?? e); }
       };
-      box.append(h("div", { textContent: "Folders it may use:" }), folders, h("label", {}, write, "may change files (else read only)"), h("label", {}, run, "May run code"), h("div", { className: "note", textContent: "Runs notebooks and .py and .sage files in Sagebrush's sandbox, using only the files it may read and write." }), h("label", {}, "Allow\u00a0it ", how), ...(p.link ? [] : [h("label", {}, remember, "Remember this agent (reconnect without a new code)")]), err, h("div", { className: "row" }, cancel, allow));
+      box.append(h("div", { textContent: "Folders it may use:" }), folders, h("label", {}, write, "may change files (else read only)"), h("label", {}, run, "May run code"), h("div", { className: "note", textContent: "Runs notebooks and .py and .sage files in Sagebrush's sandbox, using only the files it may read and write." }), ...(memory ? [memory] : []), h("label", {}, "Allow\u00a0it ", how), ...(p.link ? [] : [h("label", {}, remember, "Remember this agent (reconnect without a new code)")]), err, h("div", { className: "row" }, cancel, allow));
       // (focus on its first control when it opens, as the code dialog does: a keyboard path lands in it; board's B-A14-2)
       setTimeout(() => all.focus());
     });

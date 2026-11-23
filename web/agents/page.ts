@@ -1630,6 +1630,9 @@ const agentRuns = (ws: Workspace) => agentRunsFor(ws as any, {
 
 // (the current pairing's listener for the agent's messages, removed when another pairing replaces it)
 let offAgent: (() => void) | null = null;
+// (agent memory v1: the memory client turns the grant dialog's memory choice on, with its own tag list; until it is in,
+//  a loopback test page may stand in for it with window.__sbMemoryTags, never a page served elsewhere)
+const memoryStandIn = /^(localhost|127\.0\.0\.1)$/.test(location.hostname) && typeof (window as any).__sbMemoryTags === "function" ? ((window as any).__sbMemoryTags as () => { id: string; name: string }[]) : null;
 function mountPairing(ws: Workspace) {
   // (Delegate's last task list, kept in this browser for this workspace: shown while the agent isn't connected, #1622)
   let kept: Storage | null = null;
@@ -1637,6 +1640,7 @@ function mountPairing(ws: Workspace) {
   delegateTasks.keepIn(kept, `sb-delegate-tasks-v1:${ws.identity.workspace}`);
   agentUi = mountAgentPairing(ws, {
     program: "sagebrush-agent",
+    ...(memoryStandIn ? { memory: true, memoryTags: memoryStandIn } : {}),
     runVerbs: runVerbsFor(agentRuns(ws)),
     button: $("#connect"),
     notebookEdit: editNotebook,
