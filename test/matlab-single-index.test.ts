@@ -41,3 +41,19 @@ test("arithmetic on a single's element stays single; doubles, integers and logic
   // (single(0.1) * 3 rounds to single: 0.30000001192092896, not the double 0.30000000447034836)
   assert.equal(r.out, "single\n0.30000001192092896\n0.10000000149011612\ndouble\ndouble\nint8\nuint16\nlogical\nsingle\n");
 });
+
+test("a complex single's element with a zero imaginary part is a real single; a zero index is MATLAB:badsubscript", () => {
+  // (observed MATLAB R2026b: c = single([1+2i 3]); c(2) is a real single 3, isreal 1, num2hex 40400000, as a complex
+  // double's element is a real double; v(0) is MATLAB:badsubscript, with the "Index in position 1" message)
+  const r = run([
+    "c = single([1+2i 3]); a = c(2); disp(class(a)), disp(isreal(a)), disp(num2hex(a))",
+    "disp(isreal(c(1))), disp(isreal(c(1:2)))",
+    "m = single([1+2i 3; 4 5]); disp(class(m(2, 2))), disp(isreal(m(2, 2)))",
+    "d = [1+2i 3]; disp(class(d(2))), disp(isreal(d(2)))",
+    "v = [1 2 3]; try, v(0), catch err, disp(err.identifier), disp(err.message), end",
+    "try, v(1.5), catch err, disp(err.identifier), end",
+  ].join("\n"));
+  assert.equal(r.status, 0, r.err);
+  assert.equal(r.out, "single\n   1\n40400000\n   0\n   0\nsingle\n   1\ndouble\n   1\nMATLAB:badsubscript\n" +
+    "Index in position 1 is invalid. Array indices must be positive integers or logical values.\nMATLAB:badsubscript\n");
+});

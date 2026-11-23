@@ -2308,7 +2308,8 @@ def persistent_set(fname, name, v):
 def _bad_index(x):
     if x != x or (x != _math.floor(x)) or x < 1:
         if x == 0.0:
-            return _err("Index in position 1 is invalid. Array indices must be positive integers or logical values.", "MATLAB:index:expected_positive_integer")
+            # (MATLAB's identifier for a zero index is MATLAB:badsubscript too, observed R2026b: v(0))
+            return _err("Index in position 1 is invalid. Array indices must be positive integers or logical values.", "MATLAB:badsubscript")
         return _err("Array indices must be positive integers or logical values.", "MATLAB:badsubscript")
     return None
 
@@ -2470,9 +2471,14 @@ def _box1(x, a):
         return float(x)
     if k == "b":
         return bool(x)
-    if k == "c" and a.dtype.itemsize == 16:
+    if k == "c":
         z = complex(x)
-        return z if z.imag != 0 else z.real
+        if a.dtype.itemsize == 16:
+            return z if z.imag != 0 else z.real
+        # (a complex single's element with a zero imaginary part is a real single, as a complex double's is a real
+        # double: c = single([1+2i 3]); isreal(c(2)) is 1 in MATLAB)
+        if z.imag == 0:
+            return np.array([[z.real]], dtype=np.float32)
     return np.array([[x]], dtype=a.dtype)
 
 
