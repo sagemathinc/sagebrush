@@ -18,18 +18,25 @@ const tick = () => new Promise((r) => setTimeout(r, 0));
 
 // (settings.json and the app's two commands, as disk.rs: a change merged, then every other window told)
 function host() {
-  const h = { file: {}, writes: [], listeners: new Map(), fail: false, hold: null };
+  const h = { file: {}, versions: {}, last: 0, writes: [], listeners: new Map(), fail: false, hold: null, holdRead: null, failHeld: false };
   h.invoke = (from) => async (cmd, a) => {
     await tick();
-    if (cmd === "settings_read") return { ...h.file };
+    if (cmd === "settings_read") {
+      // (what settings.json and the versions are when the read is made; a held read returns that, late)
+      const snap = { values: { ...h.file }, versions: { ...h.versions } };
+      if (h.holdRead?.label === from) await h.holdRead.gate;
+      return snap;
+    }
     if (cmd === "settings_write") {
       if (h.fail) throw new Error("disk full");
-      if (h.hold?.label === from) await h.hold.gate;
+      if (h.hold?.label === from) { await h.hold.gate; if (h.failHeld) { h.failHeld = false; throw new Error("disk full"); } }
       h.writes.push({ from, ...a });
       for (const k of a.remove) delete h.file[k];
       Object.assign(h.file, a.set);
+      const given = {};
+      for (const k of [...Object.keys(a.set), ...a.remove]) given[k] = h.versions[k] = ++h.last;
       for (const [label, f] of h.listeners) if (label !== from) f({ payload: { from } });
-      return null;
+      return given;
     }
     throw new Error(cmd);
   };
@@ -103,6 +110,49 @@ const settle = async () => { for (let i = 0; i < 20; i++) await tick(); };
   await a.__sbSettingsFlush();
   await settle();
   ok(why === "disk full" && h.file["sagebrush-theme"] === "solar" && h.file["sagebrush-files-sort"] === "size", "a write that fails: its key is written with the next: " + J({ why, file: h.file }));
+}
+
+// astra2's races (#1716 H1, H2), each observed on disk and in the window's localStorage
+{
+  // (H1: a write held, then failing, after a newer value of the same key was queued behind it: the old value isn't
+  // put back, so the next unrelated write never takes settings.json back to it)
+  const h = host();
+  h.file = { "sagebrush-theme": "light" };
+  const a = windowOf(h, "main");
+  let release;
+  h.hold = { label: "main", gate: new Promise((r) => (release = r)) };
+  h.failHeld = true;
+  a.localStorage.setItem("sagebrush-theme", "solar");
+  await settle();
+  h.hold = null;
+  a.localStorage.setItem("sagebrush-theme", "dark");
+  await settle();
+  release();
+  await a.__sbSettingsFlush().catch(() => {});
+  await settle();
+  a.localStorage.setItem("sagebrush-files-sort", "name");
+  await a.__sbSettingsFlush().catch(() => {});
+  await settle();
+  ok(h.file["sagebrush-theme"] === "dark" && a.localStorage.getItem("sagebrush-theme") === "dark", "H1: an older write failing after a newer one of the same key doesn't come back: disk " + J(h.file) + ", local " + a.localStorage.getItem("sagebrush-theme"));
+}
+{
+  // (H2: a read held, made before this window's own newer change of the key, returned late: not taken)
+  const h = host();
+  h.file = { "sagebrush-theme": "light" };
+  const a = windowOf(h, "main"), b = windowOf(h, "doc-1");
+  a.localStorage.setItem("sagebrush-theme", "dark");
+  let release;
+  h.holdRead = { label: "doc-1", gate: new Promise((r) => (release = r)) };
+  await a.__sbSettingsFlush();
+  await settle();
+  // (doc-1's read of "dark" is held; doc-1 then writes its own "solar")
+  h.holdRead = null;
+  b.localStorage.setItem("sagebrush-theme", "solar");
+  await b.__sbSettingsFlush();
+  await settle();
+  release();
+  await settle();
+  ok(h.file["sagebrush-theme"] === "solar" && b.localStorage.getItem("sagebrush-theme") === "solar" && a.localStorage.getItem("sagebrush-theme") === "solar", "H2: a read made before this window's own later change, returned late, isn't taken: disk " + J(h.file) + ", doc-1 " + b.localStorage.getItem("sagebrush-theme") + ", main " + a.localStorage.getItem("sagebrush-theme"));
 }
 
 console.log(fails ? `${fails} of ${checks} failed` : `test-app-settings-windows: all ${checks} passed`);

@@ -5945,9 +5945,8 @@ const historyDbReady = openHistoryDb({ onVersionChange: () => { nbHistory?.close
     const install = document.querySelector("#installbtn");
     if (install) install.remove();
     // files the system handed the app (double-clicked, or on the command line)
-    // (sent to one window, #1541: this one's only)
-    const myLabel = window.__TAURI_INTERNALS__?.metadata?.currentWebview?.label;
-    TAURI.event.listen("open-files", (ev) => { const p = ev.payload; for (const f of Array.isArray(p) ? p : p?.to && p.to === myLabel ? p.files ?? [] : []) openDiskFile(f); });
+    // (and files handed over later, for this window: the app tells this window alone, which asks for them, #1541)
+    window.__sbFilesWaiting = async () => { for (const p of await TAURI.core.invoke("startup_files")) await openDiskFile(p); };
     for (const p of await TAURI.core.invoke("startup_files")) await openDiskFile(p);
     const st = await TAURI.core.invoke("selftest_file");
     // (a quit, or the window closed: the notebook's save, the settings and every change on disk first)

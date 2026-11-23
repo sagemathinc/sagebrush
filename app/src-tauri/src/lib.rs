@@ -42,24 +42,29 @@ use tauri::{Emitter, Manager, WebviewUrl, WebviewWindowBuilder};
 const SHELL_WORKER_CSP: &str = "default-src 'none'; script-src 'self' blob:; connect-src 'none'; worker-src 'none'; base-uri 'none'; form-action 'none'";
 
 // files to open, until the page asks for them
-struct Pending(Mutex<Vec<String>>);
+// (each for the window that is to open it, #1541: the first window's at launch; then the one files_target chose)
+struct Pending(Mutex<Vec<(String, String)>>);
 
 // (on the desktop, each granted (disk.rs grant): the page gets {grant, name, path}, never a path it can use; a file
-// that can't be granted is said and left out.  The first window's only (#1541): a window opened later never opens again
-// what the app was handed)
+// that can't be granted is said and left out.  Only the files for the asking window (#1541), each once: the first
+// window's at launch, then those files_target chose it for; no other window's page gets them, nor their grants)
 #[cfg(desktop)]
 #[tauri::command]
 fn startup_files(app: tauri::AppHandle, webview: tauri::Webview, state: tauri::State<Pending>) -> Vec<serde_json::Value> {
-    if webview.label() != "main" {
-        return vec![];
-    }
-    let files: Vec<String> = state.0.lock().unwrap().drain(..).collect();
+    let files: Vec<String> = take_pending(&mut state.0.lock().unwrap(), webview.label());
     files.iter().filter_map(|p| disk::grant(&app, std::path::Path::new(p)).map_err(|e| eprintln!("[app] {p}: {e}")).ok()).collect()
 }
 #[cfg(mobile)]
 #[tauri::command]
 fn startup_files(state: tauri::State<Pending>) -> Vec<String> {
-    state.0.lock().unwrap().drain(..).collect()
+    state.0.lock().unwrap().drain(..).map(|(_, p)| p).collect()
+}
+/// The pending files for window `label`, taken; the others left.
+#[allow(dead_code)]
+fn take_pending(pending: &mut Vec<(String, String)>, label: &str) -> Vec<String> {
+    let (mine, rest): (Vec<_>, Vec<_>) = pending.drain(..).partition(|(to, _)| to == label);
+    *pending = rest;
+    mine.into_iter().map(|(_, p)| p).collect()
 }
 
 /// The self-test's notebook (SAGEBRUSH_APP_SELFTEST), granted as a picked one would be.
@@ -283,7 +288,8 @@ fn selftest_persist() -> Option<String> {
 // Closing a window and quitting (desktop, #1541): the person's close of a window, or quit, is held and the pages
 // asked to write what they haven't yet to disk (web/workspace/disk-mirror.ts drainOnQuit): one window's close asks
 // that window ("sb-close"), destroyed once it is done; the last window's close, or quit, asks every window ("sb-quit"),
-// and the app exits once each is done (leave.rs decides, from their answers).  The self-test's own exits (app.exit with
+// and the app exits once each is done; a window that doesn't answer is asked about, natively (leave.rs decides, from
+// their answers).  The self-test's own exits (app.exit with
 // a code) aren't held.
 #[cfg(desktop)]
 static EXITING: std::sync::atomic::AtomicBool = std::sync::atomic::AtomicBool::new(false);
@@ -310,19 +316,35 @@ fn leave_do(app: &tauri::AppHandle, acts: Vec<leave::Act>) {
             }
             leave::Act::AskQuit(_) => {
                 let _ = app.emit("sb-quit", ());
-                let app = app.clone();
-                std::thread::spawn(move || {
-                    std::thread::sleep(leave::ANSWER);
-                    let acts = app.state::<Leaving>().0.lock().unwrap().quit_timeout();
-                    leave_do(&app, acts);
-                });
             }
             leave::Act::AskClose(label) => {
                 let _ = app.emit("sb-close", serde_json::json!({ "label": label }));
+            }
+            leave::Act::Watch(label) => {
                 let app = app.clone();
                 std::thread::spawn(move || {
                     std::thread::sleep(leave::ANSWER);
-                    let acts = app.state::<Leaving>().0.lock().unwrap().close_timeout(&label);
+                    let acts = app.state::<Leaving>().0.lock().unwrap().answer_timeout(&label);
+                    leave_do(&app, acts);
+                });
+            }
+            // (a window that hasn't said it is writing: never given up on silently, since it may hold unsaved changes;
+            // the person chooses, in a native dialog over it)
+            leave::Act::Stalled(label) => {
+                use tauri_plugin_dialog::{DialogExt, MessageDialogButtons, MessageDialogKind};
+                let mut d = app
+                    .dialog()
+                    .message("This window isn't responding. Close it anyway? Unsaved changes in it will be lost.")
+                    .title("Sagebrush")
+                    .kind(MessageDialogKind::Warning)
+                    .buttons(MessageDialogButtons::OkCancelCustom("Close anyway".into(), "Wait".into()));
+                if let Some(w) = app.get_webview_window(&label) {
+                    let _ = w.set_focus();
+                    d = d.parent(&w);
+                }
+                let app = app.clone();
+                d.show(move |close_anyway| {
+                    let acts = app.state::<Leaving>().0.lock().unwrap().stalled(&label, close_anyway);
                     leave_do(&app, acts);
                 });
             }
@@ -380,6 +402,32 @@ fn page_window<'a, M: Manager<tauri::Wry>>(app: &'a M, label: &str, url: tauri::
     window
 }
 
+/// Window `to`'s page told that files wait for it (it asks for them: startup_files, which gives each window only its
+/// own).  Told in that window alone, by a fixed call evaluated there that carries nothing: not an event, which every
+/// window's page would hear (a page's listener for any target hears an event sent to one window too).  A window
+/// that isn't there: nothing told, the files kept for it (or for the window its own goes to, when it closes).
+fn files_waiting(app: &tauri::AppHandle, to: &str) {
+    if let Some(w) = app.get_webview_window(to) {
+        let _ = w.eval("window.__sbFilesWaiting && window.__sbFilesWaiting()");
+    }
+}
+
+/// The window to open the files the system hands over (#1541): of `windows` (label, its page's path, focused), the
+/// focused one whose page is the notebook's ("/", which opens files: web/index.html), else "main" if it is there, else
+/// another whose page is the notebook's, else "main" (gone, or on a board: the files wait there for its next
+/// notebook page to ask, startup_files).  Never a board's page, which has nothing that opens them.
+#[allow(dead_code)]
+fn files_target(windows: Vec<(String, String, bool)>) -> String {
+    let notebook = |p: &str| p == "/" || p == "/index.html";
+    windows
+        .iter()
+        .find(|(_, p, f)| *f && notebook(p))
+        .or_else(|| windows.iter().find(|(l, _, _)| l == "main"))
+        .or_else(|| windows.iter().find(|(_, p, _)| notebook(p)))
+        .map(|(l, _, _)| l.clone())
+        .unwrap_or_else(|| "main".into())
+}
+
 // the page's commands: the engine's on the desktop too
 #[cfg(desktop)]
 fn handlers() -> impl Fn(tauri::ipc::Invoke<tauri::Wry>) -> bool + Send + Sync + 'static {
@@ -407,7 +455,7 @@ pub fn run() {
     // (the fs plugin on a phone only, whose pickers hand over what only it reads; the desktop page has none, disk.rs)
     #[cfg(mobile)]
     let builder = builder.plugin(tauri_plugin_fs::init());
-    let builder = builder.manage(Pending(Mutex::new(args))).invoke_handler(handlers());
+    let builder = builder.manage(Pending(Mutex::new(args.into_iter().map(|p| ("main".to_string(), p)).collect()))).invoke_handler(handlers());
     #[cfg(desktop)]
     let builder = builder.manage(disk::Grants::default());
     // (the engine subprocess, on the desktop only: phones run the page's own worker, design/native-desktop.md §5)
@@ -486,6 +534,22 @@ pub fn run() {
             if let tauri::RunEvent::WindowEvent { label, event: tauri::WindowEvent::Destroyed, .. } = &_event {
                 _app.state::<engine::Engine>().stop_window(label);
                 windows::closed(_app, label);
+                // (files still waiting for that window: for another that opens files, told; with none left, they wait)
+                let left: Vec<(String, String, bool)> = _app.webview_windows().iter().filter(|(l, _)| *l != label).map(|(l, w)| (l.clone(), w.url().map(|u| u.path().to_string()).unwrap_or_default(), w.is_focused().unwrap_or(false))).collect();
+                if !left.is_empty() {
+                    let to = files_target(left);
+                    let pending = _app.state::<Pending>();
+                    let mut p = pending.0.lock().unwrap();
+                    let mut moved = false;
+                    for e in p.iter_mut().filter(|(t, _)| t == label) {
+                        e.0 = to.clone();
+                        moved = true;
+                    }
+                    drop(p);
+                    if moved {
+                        files_waiting(_app, &to);
+                    }
+                }
                 let acts = _app.state::<Leaving>().0.lock().unwrap().destroyed(label);
                 leave_do(_app, acts);
             }
@@ -493,8 +557,9 @@ pub fn run() {
             if let tauri::RunEvent::Exit = _event {
                 _app.state::<engine::Engine>().stop();
             }
-            // macOS hands over files (Finder, `open -a Sagebrush f.ipynb`) as an event: kept for startup_files, and
-            // sent to a page already there (granted, on macOS, as startup_files grants them)
+            // macOS hands over files (Finder, `open -a Sagebrush f.ipynb`) as an event: kept for startup_files, each for
+            // the window that is to open it (files_target: a notebook page's, never a board's), and that window alone
+            // told to ask for them (files_waiting).
             #[cfg(any(target_os = "macos", target_os = "ios"))]
             if let tauri::RunEvent::Opened { urls } = _event {
                 let files: Vec<String> = urls
@@ -502,21 +567,44 @@ pub fn run() {
                     .filter_map(|u| u.to_file_path().ok())
                     .map(|p| p.to_string_lossy().into_owned())
                     .collect();
-                #[cfg(target_os = "macos")]
-                let sent: Vec<serde_json::Value> = files.iter().filter_map(|p| disk::grant(_app, std::path::Path::new(p)).ok()).collect();
                 #[cfg(target_os = "ios")]
-                let sent = files.clone();
-                _app.state::<Pending>().0.lock().unwrap().extend(files.iter().cloned());
-                // (to one window (#1541): the focused one, else the first, else any; each page listens for every
-                // window's events, and opens only what is sent to it)
-                #[cfg(target_os = "ios")]
-                let to = Some("main".to_string());
+                let to = "main".to_string();
                 #[cfg(target_os = "macos")]
-                let to = {
-                    let ws = _app.webview_windows();
-                    ws.iter().find(|(_, w)| w.is_focused().unwrap_or(false)).map(|(l, _)| l.clone()).or_else(|| ws.contains_key("main").then(|| "main".to_string())).or_else(|| ws.keys().next().cloned())
-                };
-                let _ = _app.emit("open-files", serde_json::json!({ "to": to, "files": sent }));
+                let to = files_target(_app.webview_windows().iter().map(|(l, w)| (l.clone(), w.url().map(|u| u.path().to_string()).unwrap_or_default(), w.is_focused().unwrap_or(false))).collect());
+                _app.state::<Pending>().0.lock().unwrap().extend(files.into_iter().map(|p| (to.clone(), p)));
+                files_waiting(_app, &to);
             }
         });
+}
+
+#[cfg(test)]
+mod tests {
+    #[test]
+    fn files_go_to_a_window_that_opens_them() {
+        let w = |l: &str, p: &str, f: bool| (l.to_string(), p.to_string(), f);
+        // (the focused notebook window)
+        assert_eq!(super::files_target(vec![w("main", "/", false), w("doc-1", "/", true)]), "doc-1");
+        // (a board focused: never it; the first window)
+        assert_eq!(super::files_target(vec![w("main", "/", false), w("doc-1", "/board/", true)]), "main");
+        assert_eq!(super::files_target(vec![w("main", "/board/", false), w("doc-2", "/board/", true)]), "main");
+        // (none focused)
+        assert_eq!(super::files_target(vec![w("doc-3", "/index.html", false)]), "doc-3");
+        assert_eq!(super::files_target(vec![w("doc-3", "/index.html", true)]), "doc-3");
+        // (main gone: another notebook window; only boards: kept for main)
+        assert_eq!(super::files_target(vec![w("doc-4", "/board/", true), w("doc-5", "/", false)]), "doc-5");
+        assert_eq!(super::files_target(vec![w("doc-4", "/board/", true)]), "main");
+        assert_eq!(super::files_target(vec![]), "main");
+    }
+
+    #[test]
+    fn a_window_takes_only_its_own_files() {
+        let mut p = vec![("main".to_string(), "/a.ipynb".to_string()), ("doc-1".to_string(), "/b.ipynb".to_string()), ("main".to_string(), "/c.ipynb".to_string())];
+        // (another window asking: nothing of main's)
+        assert_eq!(super::take_pending(&mut p, "doc-2"), Vec::<String>::new());
+        assert_eq!(super::take_pending(&mut p, "main"), vec!["/a.ipynb", "/c.ipynb"]);
+        // (each once)
+        assert_eq!(super::take_pending(&mut p, "main"), Vec::<String>::new());
+        assert_eq!(super::take_pending(&mut p, "doc-1"), vec!["/b.ipynb"]);
+        assert!(p.is_empty());
+    }
 }

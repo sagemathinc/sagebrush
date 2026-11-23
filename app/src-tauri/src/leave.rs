@@ -1,25 +1,30 @@
 // Closing a window and quitting the app, with several windows (#1541).  Each window's page writes what it has to disk
 // before it goes (web/workspace/disk-mirror.ts drainOnQuit): asked to ("sb-quit" to every window, "sb-close" to one),
-// it says it is writing (app_quit_hold) and, once done (or the person chose to go anyway), that it is done
+// it says it is writing (app_quit_hold) and, once done (or the person chose to lose what wasn't saved), that it is done
 // (app_quit_now).  This module decides, from those answers, when a window may be destroyed and when the app may exit:
-//   - closing a window (not the last): that window alone is asked, and destroyed once it is done, or at once if it
-//     doesn't say it is writing within ANSWER (a page that isn't the app's, or never loaded);
-//   - quitting (or closing the last window): every window is asked, and the app exits once every window that said it
-//     is writing is done, and each other one had ANSWER to say so;
-//   - a window destroyed meanwhile (its own close, a crash) has nothing more to answer.
+//   - closing a window (not the last): that window alone is asked, and destroyed once it is done;
+//   - quitting (or closing the last window): every window is asked, and the app exits once every window is done;
+//   - a window that hasn't said it is writing within ANSWER (stalled, or not the app's page) is never given up on
+//     silently, since it may hold unsaved changes: the person is asked, natively, "Wait" (it is watched again for
+//     ANSWER) or "Close anyway" (it counts as done, what it hadn't saved lost);
+//   - a window destroyed meanwhile has nothing more to answer.
 // The decisions are pure (Leave's methods, unit-tested); lib.rs does what they return.
 use std::collections::HashSet;
 
-/// How long a window has to say it is writing before it counts as having nothing to write.
+/// How long a window has to say it is writing before the person is asked about it.
 pub const ANSWER: std::time::Duration = std::time::Duration::from_secs(3);
 
 /// What lib.rs must do.
 #[derive(Debug, PartialEq)]
 pub enum Act {
-    /// Ask these windows to write what they have ("sb-quit"), then call `quit_timeout` after ANSWER.
+    /// Ask these windows to write what they have ("sb-quit"); then watch each.
     AskQuit(Vec<String>),
-    /// Ask this window to write what it has ("sb-close"), then call `close_timeout` for it after ANSWER.
+    /// Ask this window to write what it has ("sb-close"); then watch it.
     AskClose(String),
+    /// After ANSWER, call `answer_timeout` for this window.
+    Watch(String),
+    /// Ask the person about this window, natively: "Wait" or "Close anyway" (then call `stalled`).
+    Stalled(String),
     /// Destroy this window.
     Destroy(String),
     /// Exit the app.
@@ -35,6 +40,8 @@ pub struct Leave {
     closing: HashSet<String>,
     /// (the windows that said they are writing)
     held: HashSet<String>,
+    /// (the windows the person is being asked about now)
+    asking: HashSet<String>,
 }
 
 impl Leave {
@@ -42,6 +49,9 @@ impl Leave {
     #[cfg(test)]
     pub fn quitting(&self) -> bool {
         self.quitting
+    }
+    fn asked(&self, label: &str) -> bool {
+        if self.quitting { self.pending.contains(label) } else { self.closing.contains(label) }
     }
     /// The person quit (or the last window is to close): every window in `windows` is asked; none: exit.
     pub fn quit(&mut self, windows: Vec<String>) -> Vec<Act> {
@@ -52,9 +62,12 @@ impl Leave {
             return vec![Act::Exit];
         }
         self.quitting = true;
+        // (a window being closed on its own is asked again, as every window is: its answer counts for the quit)
         self.closing.clear();
         self.pending = windows.iter().cloned().collect();
-        vec![Act::AskQuit(windows)]
+        let mut acts = vec![Act::AskQuit(windows.clone())];
+        acts.extend(windows.into_iter().map(Act::Watch));
+        acts
     }
     /// The person closed window `label`, `windows` being every window there is: the last one quits; another is asked.
     pub fn close(&mut self, label: &str, windows: Vec<String>) -> Vec<Act> {
@@ -65,47 +78,54 @@ impl Leave {
             return self.quit(windows);
         }
         self.closing.insert(label.to_string());
-        vec![Act::AskClose(label.to_string())]
+        vec![Act::AskClose(label.to_string()), Act::Watch(label.to_string())]
     }
     /// Window `label` said it is writing.
     pub fn hold(&mut self, label: &str) {
-        if self.pending.contains(label) || self.closing.contains(label) {
+        if self.asked(label) {
             self.held.insert(label.to_string());
         }
     }
-    /// Window `label` is done (written, or the person chose to go anyway).
-    pub fn done(&mut self, label: &str) -> Vec<Act> {
+    /// Window `label` is gone from the leaving: done, or given up on by the person.
+    fn gone(&mut self, label: &str) -> Vec<Act> {
         self.held.remove(label);
         if self.quitting {
-            self.pending.remove(label);
-            return if self.pending.is_empty() { vec![Act::Exit] } else { vec![] };
+            return if self.pending.remove(label) && self.pending.is_empty() { vec![Act::Exit] } else { vec![] };
         }
         if self.closing.remove(label) {
             return vec![Act::Destroy(label.to_string())];
         }
         vec![]
     }
-    /// ANSWER after a quit was asked: the windows that didn't say they are writing count as done.
-    pub fn quit_timeout(&mut self) -> Vec<Act> {
-        if !self.quitting {
+    /// Window `label` is done (written, or the person chose there to lose what wasn't saved).
+    pub fn done(&mut self, label: &str) -> Vec<Act> {
+        self.gone(label)
+    }
+    /// ANSWER after window `label` was asked (or watched again): if it hasn't said it is writing, the person is asked.
+    pub fn answer_timeout(&mut self, label: &str) -> Vec<Act> {
+        if !self.asked(label) || self.held.contains(label) || self.asking.contains(label) {
             return vec![];
         }
-        let held = &self.held;
-        self.pending.retain(|w| held.contains(w));
-        if self.pending.is_empty() { vec![Act::Exit] } else { vec![] }
+        self.asking.insert(label.to_string());
+        vec![Act::Stalled(label.to_string())]
     }
-    /// ANSWER after window `label` was asked to close: if it didn't say it is writing, it goes now.
-    pub fn close_timeout(&mut self, label: &str) -> Vec<Act> {
-        if self.quitting || !self.closing.contains(label) || self.held.contains(label) {
+    /// The person's answer about stalled window `label`: close it anyway (it counts as done), or wait (it is watched
+    /// again).  An answer about a window no longer asked (it answered, or went, meanwhile) changes nothing.
+    pub fn stalled(&mut self, label: &str, close_anyway: bool) -> Vec<Act> {
+        self.asking.remove(label);
+        if !self.asked(label) {
             return vec![];
         }
-        self.closing.remove(label);
-        vec![Act::Destroy(label.to_string())]
+        if close_anyway {
+            return self.gone(label);
+        }
+        vec![Act::Watch(label.to_string())]
     }
-    /// Window `label` is gone: it has nothing more to answer.
+    /// Window `label` is destroyed: it has nothing more to answer.
     pub fn destroyed(&mut self, label: &str) -> Vec<Act> {
         self.closing.remove(label);
         self.held.remove(label);
+        self.asking.remove(label);
         if self.quitting && self.pending.remove(label) && self.pending.is_empty() {
             return vec![Act::Exit];
         }
@@ -119,45 +139,67 @@ mod tests {
     fn w(l: &[&str]) -> Vec<String> {
         l.iter().map(|s| s.to_string()).collect()
     }
+    fn s(x: &str) -> String {
+        x.to_string()
+    }
 
     #[test]
     fn closing_one_window_waits_for_it_alone() {
         let mut l = Leave::default();
-        assert_eq!(l.close("doc-1", w(&["main", "doc-1"])), vec![Act::AskClose("doc-1".into())]);
+        assert_eq!(l.close("doc-1", w(&["main", "doc-1"])), vec![Act::AskClose(s("doc-1")), Act::Watch(s("doc-1"))]);
         // (asked again while it writes: nothing more)
         assert_eq!(l.close("doc-1", w(&["main", "doc-1"])), vec![]);
         l.hold("doc-1");
-        // (writing: its answer time passing doesn't close it)
-        assert_eq!(l.close_timeout("doc-1"), vec![]);
+        // (writing: its answer time passing asks nobody anything)
+        assert_eq!(l.answer_timeout("doc-1"), vec![]);
         // (another window's answers change nothing of it)
         assert_eq!(l.done("main"), vec![]);
-        assert_eq!(l.done("doc-1"), vec![Act::Destroy("doc-1".into())]);
-        // (and never the app)
+        assert_eq!(l.done("doc-1"), vec![Act::Destroy(s("doc-1"))]);
         assert!(!l.quitting());
     }
 
     #[test]
-    fn a_window_that_doesnt_answer_closes_after_its_time() {
+    fn a_window_that_never_answers_is_asked_about_never_closed_silently() {
+        // (the mock page never answers: the person is asked; Wait watches it again, and asks again; Close anyway closes)
         let mut l = Leave::default();
         l.close("doc-2", w(&["main", "doc-2"]));
-        assert_eq!(l.close_timeout("doc-2"), vec![Act::Destroy("doc-2".into())]);
-        // (a late answer then changes nothing)
+        assert_eq!(l.answer_timeout("doc-2"), vec![Act::Stalled(s("doc-2"))]);
+        // (one question at a time about it)
+        assert_eq!(l.answer_timeout("doc-2"), vec![]);
+        assert_eq!(l.stalled("doc-2", false), vec![Act::Watch(s("doc-2"))]);
+        assert_eq!(l.answer_timeout("doc-2"), vec![Act::Stalled(s("doc-2"))]);
+        assert_eq!(l.stalled("doc-2", true), vec![Act::Destroy(s("doc-2"))]);
+        // (a late answer from it then changes nothing)
         assert_eq!(l.done("doc-2"), vec![]);
+    }
+
+    #[test]
+    fn a_window_that_answers_while_the_person_is_asked_goes_its_own_way() {
+        let mut l = Leave::default();
+        l.close("doc-3", w(&["main", "doc-3"]));
+        assert_eq!(l.answer_timeout("doc-3"), vec![Act::Stalled(s("doc-3"))]);
+        l.hold("doc-3");
+        assert_eq!(l.done("doc-3"), vec![Act::Destroy(s("doc-3"))]);
+        // (the person's answer, after: nothing more)
+        assert_eq!(l.stalled("doc-3", true), vec![]);
+        assert_eq!(l.stalled("doc-3", false), vec![]);
     }
 
     #[test]
     fn closing_the_last_window_quits() {
         let mut l = Leave::default();
-        assert_eq!(l.close("main", w(&["main"])), vec![Act::AskQuit(w(&["main"]))]);
+        assert_eq!(l.close("main", w(&["main"])), vec![Act::AskQuit(w(&["main"])), Act::Watch(s("main"))]);
         l.hold("main");
-        assert_eq!(l.quit_timeout(), vec![]);
+        assert_eq!(l.answer_timeout("main"), vec![]);
         assert_eq!(l.done("main"), vec![Act::Exit]);
     }
 
     #[test]
-    fn quitting_waits_for_every_window_that_writes() {
+    fn quitting_waits_for_every_window() {
         let mut l = Leave::default();
-        assert_eq!(l.quit(w(&["main", "doc-1", "doc-2"])), vec![Act::AskQuit(w(&["main", "doc-1", "doc-2"]))]);
+        let mut want = vec![Act::AskQuit(w(&["main", "doc-1", "doc-2"]))];
+        want.extend(["main", "doc-1", "doc-2"].map(|x| Act::Watch(s(x))));
+        assert_eq!(l.quit(w(&["main", "doc-1", "doc-2"])), want);
         // (quit again, or a close meanwhile: nothing more)
         assert_eq!(l.quit(w(&["main"])), vec![]);
         assert_eq!(l.close("doc-1", w(&["main", "doc-1", "doc-2"])), vec![]);
@@ -165,16 +207,25 @@ mod tests {
         l.hold("doc-1");
         // (the first done doesn't end the app while another writes: the bug PR 2's body states)
         assert_eq!(l.done("main"), vec![]);
-        // (doc-2 never answered: counted done at its time; doc-1 still writes)
-        assert_eq!(l.quit_timeout(), vec![]);
+        assert_eq!(l.answer_timeout("main"), vec![]);
+        assert_eq!(l.answer_timeout("doc-1"), vec![]);
+        // (doc-2 never answers: the person is asked about it, and waits once, then quits anyway)
+        assert_eq!(l.answer_timeout("doc-2"), vec![Act::Stalled(s("doc-2"))]);
+        assert_eq!(l.stalled("doc-2", false), vec![Act::Watch(s("doc-2"))]);
+        assert_eq!(l.answer_timeout("doc-2"), vec![Act::Stalled(s("doc-2"))]);
+        assert_eq!(l.stalled("doc-2", true), vec![]);
+        // (doc-1 still writes: the app waits for it)
         assert_eq!(l.done("doc-1"), vec![Act::Exit]);
     }
 
     #[test]
-    fn quitting_with_no_window_that_writes_exits_at_the_answer_time() {
+    fn quitting_with_no_window_answering_asks_about_each_then_exits() {
         let mut l = Leave::default();
         l.quit(w(&["main", "doc-1"]));
-        assert_eq!(l.quit_timeout(), vec![Act::Exit]);
+        assert_eq!(l.answer_timeout("main"), vec![Act::Stalled(s("main"))]);
+        assert_eq!(l.answer_timeout("doc-1"), vec![Act::Stalled(s("doc-1"))]);
+        assert_eq!(l.stalled("main", true), vec![]);
+        assert_eq!(l.stalled("doc-1", true), vec![Act::Exit]);
         let mut none = Leave::default();
         assert_eq!(none.quit(vec![]), vec![Act::Exit]);
     }
@@ -184,15 +235,15 @@ mod tests {
         let mut l = Leave::default();
         l.quit(w(&["main", "doc-1"]));
         l.hold("main");
-        l.hold("doc-1");
         assert_eq!(l.done("main"), vec![]);
+        assert_eq!(l.answer_timeout("doc-1"), vec![Act::Stalled(s("doc-1"))]);
         assert_eq!(l.destroyed("doc-1"), vec![Act::Exit]);
-        // (closing: a window gone before it answered isn't destroyed again)
+        assert_eq!(l.stalled("doc-1", true), vec![]);
+        // (closing: a window gone before it answered isn't destroyed again, nor asked about)
         let mut c = Leave::default();
         c.close("doc-3", w(&["main", "doc-3"]));
-        c.hold("doc-3");
         assert_eq!(c.destroyed("doc-3"), vec![]);
-        assert_eq!(c.close_timeout("doc-3"), vec![]);
+        assert_eq!(c.answer_timeout("doc-3"), vec![]);
         assert_eq!(c.done("doc-3"), vec![]);
     }
 
@@ -202,7 +253,7 @@ mod tests {
         l.hold("main");
         assert_eq!(l.done("main"), vec![]);
         l.quit(w(&["main"]));
-        // (its earlier hold isn't this round's: it didn't answer this one)
-        assert_eq!(l.quit_timeout(), vec![Act::Exit]);
+        // (its earlier hold isn't this round's: it didn't answer this one, so the person is asked)
+        assert_eq!(l.answer_timeout("main"), vec![Act::Stalled(s("main"))]);
     }
 }

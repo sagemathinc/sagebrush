@@ -19,6 +19,11 @@
   // for, resolves once the last write is done, and rejects if it failed; a failure is also said like a file's,
   // web/workspace/disk-mirror.ts, and its keys are written with the next)
   const dirty = new Map(); // key -> its value, or null: removed
+  // (each key's local change count (a failed write's value is put back only if the key hasn't changed here since it
+  // was sent), and the version the app gave it last that this window has seen (disk.rs settings_change): a value read
+  // or written with an older one is dropped, never taken nor put back)
+  const gen = new Map(), seen = new Map();
+  const later = (k, v) => typeof v === "number" && v > (seen.get(k) ?? 0);
   let queued = false, last = Promise.resolve(), failed = null;
   const writeBack = () => {
     if (queued) return;
@@ -26,22 +31,26 @@
     queueMicrotask(() => {
       queued = false;
       if (!dirty.size) return;
-      const sent = new Map(dirty);
+      const sent = new Map(dirty), sentGen = new Map([...sent.keys()].map((k) => [k, gen.get(k) ?? 0]));
       dirty.clear();
       const set = {}, remove = [];
       for (const [k, v] of sent) if (v === null) remove.push(k); else set[k] = v;
       last = last.then(() => window.__TAURI__?.core.invoke("settings_write", { set, remove })).then(
-        () => { failed = null; window.__sbDiskError?.("settings.json", null); },
+        (given) => {
+          failed = null;
+          for (const [k, v] of Object.entries(given ?? {})) if (later(k, v)) seen.set(k, v);
+          window.__sbDiskError?.("settings.json", null);
+        },
         (e) => {
           failed = e;
-          // (written with the next: unless changed again meanwhile, whose value is the newer)
-          for (const [k, v] of sent) if (!dirty.has(k)) dirty.set(k, v);
+          // (written with the next: unless changed here since, whose value is the newer)
+          for (const [k, v] of sent) if (!dirty.has(k) && (gen.get(k) ?? 0) === sentGen.get(k)) dirty.set(k, v);
           console.warn("settings.json:", e);
           window.__sbDiskError?.("settings.json", e);
         });
     });
   };
-  const changed = (k) => { try { dirty.set(k, localStorage.getItem(k)); } catch {} writeBack(); };
+  const changed = (k) => { gen.set(k, (gen.get(k) ?? 0) + 1); try { dirty.set(k, localStorage.getItem(k)); } catch {} writeBack(); };
   window.__sbSettingsFlush = async () => {
     // (a failed write tried again)
     if (failed) writeBack();
@@ -54,22 +63,25 @@
   P.setItem = function (k, v) { set.call(this, k, v); if (this === localStorage && KEYS.has(String(k))) changed(String(k)); };
   P.removeItem = function (k) { remove.call(this, k); if (this === localStorage && KEYS.has(String(k))) changed(String(k)); };
   P.clear = function () { clear.call(this); if (this === localStorage) for (const k of KEYS) changed(k); };
-  // (another window changed some settings: they are read again, and each one this window hasn't changed since (or
-  // isn't writing now) taken, without writing it back.  A page reads a setting when it needs it, so what it shows
-  // already may follow on its next use or load)
-  const take = async () => {
-    // (after this window's own write in flight, if any: read then, settings.json has it, and its key isn't taken back
-    // as it was before)
+  // (another window changed some settings: they are read again, one read at a time, and each key taken only if the
+  // read's version of it is later than any this window has seen, and the key hasn't changed here meanwhile (nor is
+  // being written): never written back.  A page reads a setting when it needs it, so what it shows already may follow
+  // on its next use or load)
+  let reading = Promise.resolve();
+  const take = () => (reading = reading.then(async () => {
     await last.catch(() => {});
+    const before = new Map(gen);
     let now;
     try { now = await window.__TAURI__.core.invoke("settings_read"); } catch (e) { console.warn("settings.json:", e); return; }
-    if (!now || typeof now !== "object") return;
+    const values = now?.values, versions = now?.versions;
+    if (!values || typeof values !== "object" || !versions || typeof versions !== "object") return;
     for (const k of KEYS) {
-      if (dirty.has(k) || queued) continue;
-      const v = typeof now[k] === "string" ? now[k] : null;
+      if (dirty.has(k) || queued || (gen.get(k) ?? 0) !== (before.get(k) ?? 0) || !later(k, versions[k])) continue;
+      seen.set(k, versions[k]);
+      const v = typeof values[k] === "string" ? values[k] : null;
       try { if (localStorage.getItem(k) !== v) { if (v === null) remove.call(localStorage, k); else set.call(localStorage, k, v); } } catch {}
     }
-  };
+  }));
   const listen = () => {
     const me = window.__TAURI_INTERNALS__?.metadata?.currentWebview?.label;
     window.__TAURI__?.event?.listen?.("sb-settings-changed", (ev) => { if (me && ev?.payload?.from !== me) void take(); })?.catch?.(() => {});

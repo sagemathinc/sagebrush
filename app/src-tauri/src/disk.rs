@@ -194,35 +194,59 @@ fn settings_now(dir: &std::path::Path) -> Result<serde_json::Map<String, serde_j
 }
 /// The app's windows each change some settings (#1541): a window's change is its keys alone (`set`, `remove`), merged
 /// into settings.json as it is, one change at a time, so no window writes back another's settings as they were.
-static SETTINGS_LOCK: std::sync::Mutex<()> = std::sync::Mutex::new(());
-fn settings_change(dir: &std::path::Path, set: serde_json::Map<String, serde_json::Value>, remove: &[String]) -> Result<(), String> {
-    let _held = SETTINGS_LOCK.lock().unwrap_or_else(|e| e.into_inner());
+/// Each key's version, for this run of the app: a change merged gives each key it names the next one, so a window can
+/// tell a value it read or wrote from one older than what it has already seen (settings-init.js drops those).
+struct SettingsVersions {
+    last: u64,
+    of: std::collections::BTreeMap<String, u64>,
+}
+static SETTINGS_LOCK: std::sync::Mutex<SettingsVersions> = std::sync::Mutex::new(SettingsVersions { last: 0, of: std::collections::BTreeMap::new() });
+/// The change merged, one at a time; the versions it gave its keys.
+fn settings_change(dir: &std::path::Path, set: serde_json::Map<String, serde_json::Value>, remove: &[String]) -> Result<serde_json::Map<String, serde_json::Value>, String> {
+    let mut v = SETTINGS_LOCK.lock().unwrap_or_else(|e| e.into_inner());
     let mut cur = settings_now(dir)?;
     for k in remove {
         cur.remove(k);
     }
+    let keys: Vec<String> = set.keys().cloned().chain(remove.iter().cloned()).collect();
     cur.extend(set);
     let json = serde_json::Value::Object(cur).to_string();
     settings_of(&json)?;
-    write_small(dir, "settings.json", &json)
+    write_small(dir, "settings.json", &json)?;
+    let mut given = serde_json::Map::new();
+    for k in keys {
+        v.last += 1;
+        let n = v.last;
+        v.of.insert(k.clone(), n);
+        given.insert(k, n.into());
+    }
+    Ok(given)
+}
+/// The settings now, with each key's version (0: not changed this run), read under the same lock as a change.
+fn settings_versioned(dir: &std::path::Path) -> Result<serde_json::Value, String> {
+    let v = SETTINGS_LOCK.lock().unwrap_or_else(|e| e.into_inner());
+    let values = settings_now(dir)?;
+    let versions: serde_json::Map<String, serde_json::Value> = v.of.iter().map(|(k, n)| (k.clone(), (*n).into())).collect();
+    Ok(serde_json::json!({ "values": values, "versions": versions }))
 }
 
 /// The asking window's change of the settings (settings-init.js): its keys' new values and the keys it removed; the
-/// other windows are told, to read them again (settings_read).
+/// versions it gave them.  The other windows are told, to read them again (settings_read).
 #[tauri::command]
-pub fn settings_write(app: tauri::AppHandle, webview: tauri::Webview, set: serde_json::Map<String, serde_json::Value>, remove: Vec<String>) -> Result<(), String> {
+pub fn settings_write(app: tauri::AppHandle, webview: tauri::Webview, set: serde_json::Map<String, serde_json::Value>, remove: Vec<String>) -> Result<serde_json::Map<String, serde_json::Value>, String> {
     if SETTINGS_BLOCKED.load(std::sync::atomic::Ordering::SeqCst) {
         return Err("settings.json couldn't be read when Sagebrush started, so it isn't written over".into());
     }
-    settings_change(&open_root(&data_dir(&app)?)?, set, &remove)?;
+    let given = settings_change(&open_root(&data_dir(&app)?)?, set, &remove)?;
     told(&app, &webview, "sb-settings-changed");
-    Ok(())
+    Ok(given)
 }
 
-/// The settings as settings.json has them now, for a window another one's change was told to.
+/// The settings as settings.json has them now, with each key's version ({values, versions}), for a window another
+/// one's change was told to.
 #[tauri::command]
-pub fn settings_read(app: tauri::AppHandle) -> Result<serde_json::Map<String, serde_json::Value>, String> {
-    settings_now(&open_root(&data_dir(&app)?)?)
+pub fn settings_read(app: tauri::AppHandle) -> Result<serde_json::Value, String> {
+    settings_versioned(&open_root(&data_dir(&app)?)?)
 }
 
 /// The page's file permissions kept across launches, in grants.json beside settings.json: the record permissions.js
@@ -283,11 +307,17 @@ mod settings_tests {
         std::fs::create_dir_all(&dir).unwrap();
         let obj = |v: serde_json::Value| v.as_object().unwrap().clone();
         let now = || super::settings_now(&dir).unwrap();
-        // (none yet: a change makes it)
-        super::settings_change(&dir, obj(json!({ "sagebrush-theme": "dark" })), &[]).unwrap();
+        // (none yet: a change makes it, and versions its key)
+        let v1 = super::settings_change(&dir, obj(json!({ "sagebrush-theme": "dark" })), &[]).unwrap()["sagebrush-theme"].as_u64().unwrap();
         // (another window changes another key: the first's stays, as it is, not as that window last read it)
         super::settings_change(&dir, obj(json!({ "sagebrush-files-sort": "name" })), &[]).unwrap();
         assert_eq!(serde_json::Value::Object(now()), json!({ "sagebrush-theme": "dark", "sagebrush-files-sort": "name" }));
+        // (each change of a key a later version than the last, which a read gives with the values)
+        let v2 = super::settings_change(&dir, obj(json!({ "sagebrush-theme": "solar" })), &[]).unwrap()["sagebrush-theme"].as_u64().unwrap();
+        assert!(v2 > v1);
+        let r = super::settings_versioned(&dir).unwrap();
+        assert_eq!(r["values"]["sagebrush-theme"], "solar");
+        assert_eq!(r["versions"]["sagebrush-theme"].as_u64(), Some(v2));
         // (a removal removes its key alone)
         super::settings_change(&dir, obj(json!({})), &["sagebrush-theme".into()]).unwrap();
         assert_eq!(serde_json::Value::Object(now()), json!({ "sagebrush-files-sort": "name" }));
