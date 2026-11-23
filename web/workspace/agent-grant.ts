@@ -37,6 +37,11 @@ export type Grant = {
    * and true, only while the person has it on for this pairing; never kept with a remembered grant or a reload record,
    * so a new pairing starts with it off */
   delegate?: true;
+  /** Agent memory v1 (design/workspace-agent-protocol.md §7.1): present only when the person chose it, and only for an
+   * agent whose hello and this page both offer memory.1, on the loopback pairing. The agent's own notes plus `tags`
+   * (an empty list: its own notes only); absent: memory off. Never kept with a remembered grant in v1; kept, exactly,
+   * in the reload record */
+  memory?: GrantMemory;
   created: number;
   lastUsed: number;
 };
@@ -45,6 +50,14 @@ const READ = new Set(["workspace.list", "workspace.stat", "workspace.read", "wor
 const CHANGE = new Set(["workspace.write", "workspace.create", "workspace.mkdir", "workspace.rename", "workspace.duplicate", "workspace.remove", "workspace.restore"]);
 /** A grant's id: 16 random bytes, as hex. */
 export const GRANT_ID = /^[0-9a-f]{32}$/;
+/** The grant's memory field: the tags enabled beyond the agent's own notes. */
+export type GrantMemory = { tags: string[] };
+// (its tags are checked where a grant is made, agent-pair.ts grantMemoryTags, by the tags schema's own module; this
+//  module stays free of it, as it is in the size-capped run chunk)
+/** The memory a grant allows: null when off (no grant, or no memory field), else its tags (own notes always). */
+export function grantMemory(g: Grant | null): GrantMemory | null {
+  return g?.memory ? { tags: [...g.memory.tags] } : null;
+}
 /** `n` random bytes as hex: a grant's id (16, the default), a pairing's (12). */
 export const newGrantId = (n = 16) => [...crypto.getRandomValues(new Uint8Array(n))].map((b) => b.toString(16).padStart(2, "0")).join("");
 

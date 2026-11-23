@@ -1123,6 +1123,61 @@ for (const [what, grant] of [["a folder, not Everything", { folders: ["/A"], wri
   S.srv.stop(true);
 }
 console.log(failures ? `${failures} failed` : "all passed");
+// ---- Agent memory v1, the grant's memory field (design/workspace-agent-protocol.md §7.1): its tags' rules, the reload
+// record's exact parse, and the pairing's gate: memory only for an agent whose hello offers memory.1, on a page with its
+// memory client; told to the agent in grant.changed; never kept with a remembered grant
+{
+  const { grantMemory } = await import("./agent-grant.ts");
+  const { grantMemoryTags } = await import("./agent-pair.ts");
+  const MEMORY_TAGS_MAX = (await import("./agent-tags.ts")).TAG_LIMITS.enabled;
+  const tag = (c, last = "a") => c.repeat(25) + last;
+  const T1 = tag("a"), T2 = tag("b", "e"), T3 = tag("c", "4");
+  const threw = (f) => { try { f(); return false; } catch { return true; } };
+  ok(grantMemoryTags([]).length === 0 && grantMemoryTags([T1, T2, T3]).join() === [T1, T2, T3].join(), "M-1.ok: no tags (own notes only), and three strictly ascending tags, kept as given");
+  const many = Array.from({ length: MEMORY_TAGS_MAX + 1 }, (_, i) => "a".repeat(23) + String.fromCharCode(97 + Math.floor(i / 8)) + String.fromCharCode(97 + (i % 8)) + "a");
+  ok(MEMORY_TAGS_MAX === 16 && !threw(() => grantMemoryTags(many.slice(0, 16))) && threw(() => grantMemoryTags(many)), "M-1.max: 16 tags allowed, 17 refused");
+  for (const [why, v] of Object.entries({ "not-a-list": "x", "upper": [T1.toUpperCase()], "hex-32": ["0123456789abcdef0123456789abcdef"], "bad-last": [tag("a", "b")], "short": [T1.slice(1)], "prefixed": ["t" + T1], "number": [1], "unsorted": [T2, T1], "duplicate": [T1, T1] })) ok(threw(() => grantMemoryTags(v)), `M-1.${why}: refused, never fixed up`);
+  ok(grantMemory(null) === null && grantMemory({ folders: ["/"] }) === null && grantMemory({ memory: { tags: [T1] } }).tags.join() === T1, "M-1.read: no grant or no field is memory off; a field gives its tags");
+  // (the reload record)
+  const scope = { workspace: "sagebrush-ws", page: "http://127.0.0.1:1/agents/" };
+  const rec = (memory) => JSON.stringify({ v: 1, pairingId: "a".repeat(24), session: "B".repeat(43), port: 4321, agent: { name: "Claude Code", client: "claude-code" }, grant: { folders: ["/notes"], write: true, ...(memory === undefined ? {} : { memory }), expires: null }, workspace: scope.workspace, page: scope.page, leftAt: 1000 });
+  ok(JSON.stringify(parseReloadRecord(rec({ tags: [T1, T2] }))) === rec({ tags: [T1, T2] }) && parseReloadRecord(rec({ tags: [] })) !== null && parseReloadRecord(rec(undefined)) !== null, "M-2.ok: a record with memory (some tags, none) parses as itself; without the field too");
+  const full = rec({ tags: many.slice(0, 16) });
+  ok(parseReloadRecord(full) !== null && new TextEncoder().encode(full).length < 4096, `M-2.bound: the largest memory field still fits the record's 4 KiB bound (${new TextEncoder().encode(full).length} bytes)`);
+  for (const [why, m] of Object.entries({ "extra-key": { tags: [T1], x: 1 }, "no-tags": {}, "unsorted": { tags: [T2, T1] }, "dup": { tags: [T1, T1] }, "bad-tag": { tags: ["x"] }, "seventeen": { tags: many }, "array": [T1], "null": null, "string": "own" })) ok(parseReloadRecord(rec(m)) === null, `M-2.${why}: malformed memory, so no record`);
+  // (the pairing's gate)
+  const mem = (features) => (ws, m) => ws.send(JSON.stringify({ jsonrpc: "2.0", id: m.id, result: { protocol: 1, agent: { name: "Claude Code", client: "claude-code", version: "2.0" }, wants: { write: true, run: false }, session: "SECRET", features } }));
+  const mkMem = (S, W, memory) => new AgentPairing(S.port, { code: "abcd-efgh ijkl" }, { verbsFor: W.verbsFor, store: W.storeApi, trashEntry: W.trashEntry, page, ...(memory ? { memory: true } : {}) });
+  const featuresSent = (S) => S.got.filter((m) => m.method === "page.features").at(-1)?.params?.features ?? [];
+  const grantsSent = (S) => S.got.filter((m) => m.method === "grant.changed").map((m) => m.params);
+  for (const [why, features, memory] of [["agent-without", ["chat.resume"], true], ["page-without", ["memory.1"], false]]) {
+    const S = server(mem(features)), W = fakeWs(), P = mkMem(S, W, memory);
+    await P.paired();
+    let err = null;
+    try { await P.allow({ folders: ["/"], write: true, memory: { tags: [T1] }, expires: null }, false); } catch (e) { err = e; }
+    ok(err?.code === "invalid" && !P.grant && grantsSent(S).length === 0, `M-3.${why}: memory isn't granted where ${why === "agent-without" ? "the agent's hello lacks memory.1" : "the page has no memory client"}; nothing is granted or sent`, err?.message);
+    await P.allow({ folders: ["/"], write: true, expires: null }, false);
+    await until(() => grantsSent(S).length > 0);
+    ok(!("memory" in grantsSent(S).at(-1)) && featuresSent(S).includes("memory.1") === memory, `M-3.${why}: a grant without memory works as before; the page says memory.1 only with its client`, featuresSent(S));
+    await P.revoke();
+    S.srv.stop(true);
+  }
+  {
+    const S = server(mem(["memory.1", "chat.resume"])), W = fakeWs(), P = mkMem(S, W, true);
+    await P.paired();
+    let err = null;
+    try { await P.allow({ folders: ["/"], write: true, memory: { tags: [T2, T1] }, expires: null }, false); } catch (e) { err = e; }
+    ok(!!err && !P.grant, "M-3.unsorted: tags out of order are refused at the grant, never sorted", err?.message);
+    await P.allow({ folders: ["/"], write: true, memory: { tags: [T1, T2] }, expires: Date.now() + 3600_000 }, true);
+    await until(() => grantsSent(S).length > 0);
+    const sent = grantsSent(S).at(-1);
+    ok(P.grant.memory?.tags.join() === [T1, T2].join() && sent.memory?.tags.join() === [T1, T2].join() && featuresSent(S).includes("memory.1"), "M-3.ok: with both, the grant holds memory and the agent is told it in grant.changed; the page says memory.1", sent);
+    const kept = [...W.store.values()].at(-1);
+    ok(kept && kept.grant && !("memory" in kept.grant) && !("delegate" in kept.grant), "M-3.remembered: a remembered grant keeps no memory (a reconnect starts with it off)", kept?.grant);
+    await P.revoke();
+    S.srv.stop(true);
+  }
+}
 // ---- Delegate's requests (tasks-client.ts, pair-delegate-plan-r3.3 §2.5, over AgentPairing.own): the page asks, the
 // agent answers by id; only with a negotiated hello that lists delegate.1 (the agent's hello over the wire, never set by
 // hand), once granted, only tasks.*; at most TASK_REQUESTS.pending; each request, and each answer's raw frame, at most

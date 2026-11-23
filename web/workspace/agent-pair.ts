@@ -15,7 +15,8 @@
 
 import { checkCall, badValue, AGENT_LIMITS } from "./agent-schema";
 import { editProblem, type NotebookEdit } from "./notebook-edit";
-import { authorize, grantFolders, grantProblem, newGrantId, norm, GRANT_ID, type Grant, type TrashEntry } from "./agent-grant";
+import { TAG_LIMITS, validTagId } from "./agent-tags";
+import { authorize, grantFolders, grantProblem, newGrantId, norm, GRANT_ID, type Grant, type GrantMemory, type TrashEntry } from "./agent-grant";
 import { BRANCHES, within } from "./paths";
 import { entryUrl } from "./entry-url";
 import { MADE_CHANNEL, type TexMade, type TexMayRun, type TexMayRunYes } from "./agent-made-tex";
@@ -35,8 +36,18 @@ export type Hello = { protocol: 1; agent: { name: string; client: string; versio
  * offers "for this turn", its own action and digest (agent-egress.ts); "chat.resume.tag", an agent that gives a
  * chat.resume's tag back on its chat.replay, so the log mirror reads the agent's log apart from the display (mirror.ts);
  * "delegate.1", an agent that takes Delegate's tasks.* requests (pair-delegate-plan-r3.3 §2.5; the page's side is
- * tasks-client.ts); "chat.brief", an agent that drafts a Delegate task's brief from a Pair chat (Delegate briefs). */
-export const FEATURES = ["notebook.edit", "permission.digest", "run.context", "chat.resume", "edit.turn", "chat.steer", "egress.turn", "chat.resume.tag", "delegate.1", "chat.brief"] as const;
+ * tasks-client.ts); "chat.brief", an agent that drafts a Delegate task's brief from a Pair chat (Delegate briefs);
+ * "memory.1", an agent with agent memory v1 (design/workspace-agent-protocol.md §7): a grant may carry `memory` only for
+ * it, and only where this page has its memory client (the pairing's `memory`), which then also says memory.1 itself. */
+export const FEATURES = ["notebook.edit", "permission.digest", "run.context", "chat.resume", "edit.turn", "chat.steer", "egress.turn", "chat.resume.tag", "delegate.1", "chat.brief", "memory.1"] as const;
+/** A grant's memory tags as it keeps them, by the tags schema's rules (agent-tags.ts: its id format and `enabled`
+ * bound; its parseEnabledTags' order rule, here without its canonical-JSON snapshot, which the LaTeX page's pairing
+ * chunk doesn't carry): 0 to 16 ids, strictly ascending. Throws on anything else, never sorts. */
+export function grantMemoryTags(tags: unknown): string[] {
+  if (!Array.isArray(tags) || tags.length > TAG_LIMITS.enabled) throw new Error("memory tags: a list of at most 16");
+  for (let i = 0; i < tags.length; i++) if (!validTagId(tags[i]) || (i > 0 && !(tags[i - 1] < tags[i]))) throw new Error("memory tags: tag ids, strictly ascending");
+  return [...tags];
+}
 /** The `log` an agent's hello or agent.ready names: its run, as the agent's random hex id; anything else, none. */
 export const logOf = (v: unknown): { instance: string } | undefined => {
   const i = (v as { instance?: unknown } | null)?.instance;
@@ -201,7 +212,7 @@ export class AgentError extends Error {
 // (what is said when the grant changed under a call: nothing of what it read, and, for a change, no claim either way)
 /** A grant as the server is told it (grant.changed): `delegate` only when on, so an agent that doesn't know it reads
  * the same grant as before. */
-const changed = (g: Grant) => ({ id: g.id, agent: g.agent, client: g.client, folders: g.folders, write: g.write, run: g.run, expires: g.expires, ...(g.delegate ? { delegate: true } : {}) });
+const changed = (g: Grant) => ({ id: g.id, agent: g.agent, client: g.client, folders: g.folders, write: g.write, run: g.run, expires: g.expires, ...(g.delegate ? { delegate: true } : {}), ...(g.memory ? { memory: { tags: [...g.memory.tags] } } : {}) });
 export const CHANGED_WHILE_RUNNING = "the grant changed or expired while this ran: nothing of it is said (a change may or may not have been made)";
 
 export class AgentPairing {
@@ -254,7 +265,7 @@ export class AgentPairing {
   constructor(
     readonly port: number,
     how: { code: string } | { session: string; pairingId: string; agent?: { name: string; client: string } } | { link: AgentLink; computer: string },
-    private opts: { verbsFor: (actor: string, host: { owner: () => string | null }) => AgentVerbs; gitBranch?: GitBranch; gitVerbs?: RunVerbs; store: GrantStore; trashEntry: (p: string) => Promise<TrashEntry | null | undefined>; page: { origin: string; path: string }; now?: () => number; WebSocketImpl?: typeof WebSocket; runVerbs?: RunVerbs; notebookEdit?: (edit: NotebookEdit, may: () => boolean, hold?: () => Promise<() => void>, turnId?: string) => Promise<unknown>; onCreated?: (c: Created, p: AgentPairing) => void; egressTurn?: boolean; reload?: { storage: ReloadStorage | null; scope: ReloadScope; leaving: () => boolean } },
+    private opts: { verbsFor: (actor: string, host: { owner: () => string | null }) => AgentVerbs; gitBranch?: GitBranch; gitVerbs?: RunVerbs; store: GrantStore; trashEntry: (p: string) => Promise<TrashEntry | null | undefined>; page: { origin: string; path: string }; now?: () => number; WebSocketImpl?: typeof WebSocket; runVerbs?: RunVerbs; notebookEdit?: (edit: NotebookEdit, may: () => boolean, hold?: () => Promise<() => void>, turnId?: string) => Promise<unknown>; onCreated?: (c: Created, p: AgentPairing) => void; egressTurn?: boolean; /** agent memory v1: the page has its memory client (memory.1, §7.1) */ memory?: boolean; reload?: { storage: ReloadStorage | null; scope: ReloadScope; leaving: () => boolean } },
   ) {
     if ("link" in how) { this.link = how.link; this.computer = how.computer; }
     else if (!Number.isInteger(port) || port < 1 || port > 65535) throw new AgentError("invalid", "a port is 1 to 65535");
@@ -372,19 +383,27 @@ export class AgentPairing {
    * if it has one; else a new one (Q1: made here, never the agent's). `delegate`: a return to the page given its grant
    * again with the Delegate switch on, as it was (#1622): in the same grant, so the agent never sees it off between,
    * which would stop its tasks' turns; only for an agent on this computer that offers Delegate, as setDelegate. */
-  async allow(g: { folders: string[]; write: boolean; run?: boolean; delegate?: boolean; expires: number | null; id?: string }, remember: boolean) {
+  async allow(g: { folders: string[]; write: boolean; run?: boolean; delegate?: boolean; memory?: GrantMemory; expires: number | null; id?: string }, remember: boolean) {
     if (this.state !== "paired" && this.state !== "granted") throw new AgentError("invalid", "not paired");
     const h = this.hello!, now = this.now();
+    // (agent memory v1, §7.1: only where this page has its memory client and the agent's hello offers memory.1, on
+    //  the loopback pairing; never sent to an agent that doesn't know it, which would refuse the grant. Its tags as
+    //  the grant keeps them: checked here, never sorted)
+    let memory: GrantMemory | undefined;
+    if (g.memory !== undefined) {
+      if (!this.opts.memory || this.link || !h.features?.includes("memory.1")) throw new AgentError("invalid", "memory isn't available with this agent");
+      memory = { tags: grantMemoryTags(g.memory?.tags) };
+    }
     const id = typeof g.id === "string" && GRANT_ID.test(g.id) ? g.id : this.grant?.id ?? newGrantId();
     // (the Delegate switch is apart from Pair's grant (§6.2): a new grant from the person keeps it as it was)
-    const grant: Grant = { id, agent: h.agent.name, client: h.agent.client, folders: grantFolders(g.folders), write: !!g.write, run: g.run === true, expires: g.expires, ...(this.grant?.delegate || (g.delegate === true && !this.link && h.features?.includes("delegate.1")) ? { delegate: true as const } : {}), created: this.grant?.created ?? now, lastUsed: now };
+    const grant: Grant = { id, agent: h.agent.name, client: h.agent.client, folders: grantFolders(g.folders), write: !!g.write, run: g.run === true, expires: g.expires, ...(this.grant?.delegate || (g.delegate === true && !this.link && h.features?.includes("delegate.1")) ? { delegate: true as const } : {}), ...(memory ? { memory } : {}), created: this.grant?.created ?? now, lastUsed: now };
     this.grant = grant;
     this.remember = remember;
     this.verbs = this.opts.verbsFor(actorOf(h.agent.name, h.agent.client), { owner: () => grant.id });
     // (what this page offers beyond the verbs, sent before its grant (A2-1): a notification, which a server that
     //  doesn't know it ignores, §1 rule 4)
     // (permission.digest: every Allow carries the digest of the action shown, from any page that pairs)
-    this.send({ jsonrpc: "2.0", method: "page.features", params: { features: [...(this.opts.notebookEdit ? ["notebook.edit", "edit.turn"] : []), "permission.digest", ...(this.opts.runVerbs ? ["run.context"] : []), ...(this.opts.egressTurn ? ["egress.turn"] : [])] } });
+    this.send({ jsonrpc: "2.0", method: "page.features", params: { features: [...(this.opts.notebookEdit ? ["notebook.edit", "edit.turn"] : []), "permission.digest", ...(this.opts.runVerbs ? ["run.context"] : []), ...(this.opts.egressTurn ? ["egress.turn"] : []), ...(this.opts.memory && !this.link ? ["memory.1"] : [])] } });
     this.send({ jsonrpc: "2.0", method: "grant.changed", params: changed(grant) });
     await this.keep();
     // (S4: while it waited, the grant may have been revoked, the pairing closed or the grant replaced: then nothing
@@ -402,7 +421,8 @@ export class AgentPairing {
     //  force: the hello's after a code, the remembered one after a reconnect, whose hello carries none; the hello's alone
     //  lost it on the first reconnect, and the next had nothing to send (T1, found by git-proto at b72938d8a))
     if (this.remember && this.grant.expires !== null) {
-      const { delegate: _, ...grant } = this.grant;
+      // (neither the Delegate switch nor memory is kept with a remembered grant: a reconnect starts with both off)
+      const { delegate: _, memory: _m, ...grant } = this.grant;
       await this.opts.store.putAgentGrant(this.pairingId, { grant, session: this.sessionSecret, port: this.port } satisfies Kept);
     }
   }
@@ -412,7 +432,7 @@ export class AgentPairing {
   private keepForReload() {
     const r = this.opts.reload, g = this.grant, h = this.hello;
     if (!r || !g || !h || this.remember || !this.pairingId || !this.sessionSecret || this.gen !== pairingGen) return;
-    putReloadRecord(r.storage, { v: 1, pairingId: this.pairingId, session: this.sessionSecret, port: this.port, agent: { name: h.agent.name, client: h.agent.client }, grant: { folders: g.folders, write: g.write, ...(g.run ? { run: true } : {}), ...(g.delegate ? { delegate: true } : {}), expires: g.expires, id: g.id }, workspace: r.scope.workspace, page: r.scope.page });
+    putReloadRecord(r.storage, { v: 1, pairingId: this.pairingId, session: this.sessionSecret, port: this.port, agent: { name: h.agent.name, client: h.agent.client }, grant: { folders: g.folders, write: g.write, ...(g.run ? { run: true } : {}), ...(g.delegate ? { delegate: true } : {}), ...(g.memory ? { memory: { tags: [...g.memory.tags] } } : {}), expires: g.expires, id: g.id }, workspace: r.scope.workspace, page: r.scope.page });
   }
   /** The record removed from storage, if it is this pairing's (its id) and this is the newest pairing (its gen). */
   private dropReload() {
@@ -816,7 +836,7 @@ const RELOAD_MAX = 4096;
 export type ReloadRecord = {
   v: 1; pairingId: string; session: string; port: number;
   agent: { name: string; client: string };
-  grant: { folders: string[]; write: boolean; run?: boolean; delegate?: boolean; expires: number | null; id?: string };
+  grant: { folders: string[]; write: boolean; run?: boolean; delegate?: boolean; memory?: GrantMemory; expires: number | null; id?: string };
   workspace: string; page: string; leftAt?: number;
 };
 /** The page a record belongs to: its workspace's store and its own address (R1-d). */
@@ -844,10 +864,17 @@ export function parseReloadRecord(raw: string | null): ReloadRecord | null {
   const a = v.agent, g = v.grant;
   if (!a || typeof a !== "object" || Array.isArray(a) || !keysAre(a, ["name", "client"])) return null;
   if (!isStr(a.name, 80) || typeof a.client !== "string" || a.client.length > 40) return null;
-  if (!g || typeof g !== "object" || Array.isArray(g) || !keysAre(g, ["folders", "write", "expires"], ["id", "run", "delegate"])) return null;
+  if (!g || typeof g !== "object" || Array.isArray(g) || !keysAre(g, ["folders", "write", "expires"], ["id", "run", "delegate", "memory"])) return null;
   // ("May run code", and the Delegate switch on: present only as true; a record without one is a grant without it)
   if ("run" in g && g.run !== true) return null;
   if ("delegate" in g && g.delegate !== true) return null;
+  // (memory v1, §7.1: exactly {tags}, the tags as a grant keeps them: 0 to 16 ids, strictly ascending; anything else is
+  //  no record)
+  if ("memory" in g) {
+    const m = g.memory;
+    if (!m || typeof m !== "object" || Array.isArray(m) || !keysAre(m, ["tags"])) return null;
+    try { grantMemoryTags(m.tags); } catch { return null; }
+  }
   if ("id" in g && !(typeof g.id === "string" && GRANT_ID.test(g.id))) return null;
   if (!Array.isArray(g.folders) || g.folders.length < 1 || g.folders.length > 64 || !g.folders.every((f: unknown) => isStr(f, 512))) return null;
   if (typeof g.write !== "boolean") return null;
