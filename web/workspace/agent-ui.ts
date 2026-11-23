@@ -471,7 +471,7 @@ export function mountAgentPairing(ws: PairingWorkspace, o: { otherTab?: () => st
       // (one field: the link the agent gave, pasted, or its code and port; a ?pair link fills in the code and keeps its
       //  port (decided Nov 19 2026), so nobody types a port)
       // (another tab of this browser has the agent: said first, the link field still there for another agent's link)
-      const other = code ? null : o.otherTab?.() ?? null;
+      const other = code ? null : o.otherTab?.();
       if (other) box.append(h("div", { className: "note other-tab", textContent: other }));
       const c = h("input", { type: "text", placeholder: "the link the agent gave", value: code, autocomplete: "off" });
       const err = h("div", { className: "err" });
