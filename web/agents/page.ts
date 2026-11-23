@@ -656,8 +656,6 @@ async function closeTab(threadId: string, id: string) {
   const k = hostKey(threadId, id);
   if (closingTabs.has(k)) return;
   closingTabs.add(k);
-  // (the keyboard's place: on the tab shown next, or the chat's All artifacts once the pane closes)
-  const hadFocus = document.activeElement instanceof HTMLElement && $("#artifacts").contains(document.activeElement);
   try {
     const h = hosts.get(k);
     if (h?.nb?.isRunning() && !(await mayStopRunning([[k, h]]))) return;
@@ -665,6 +663,7 @@ async function closeTab(threadId: string, id: string) {
     // (a cell started meanwhile (the agent's run): the tab stays open, as the person didn't say to stop that one)
     if (h?.nb?.isRunning()) return;
     if (h) {
+      // (release freezes a notebook and ends its runs before it awaits anything: no cell starts while it saves)
       const r: Released = h.release ? await h.release().catch((e) => ({ ok: false as const, why: String((e as Error)?.message ?? e) })) : { ok: true };
       if (hosts.get(k) !== h) return; // (replaced or gone meanwhile: nothing of this close applies)
       if (!r.ok) {
@@ -685,6 +684,9 @@ async function closeTab(threadId: string, id: string) {
       h.el.remove();
     }
     if (current().id !== threadId) return;
+    // (the keyboard's place, as it is now, after the saving: on the tab shown next, or the chat's All artifacts once the
+    //  pane closes, if it was in the pane; elsewhere, it stays where the person put it)
+    const hadFocus = document.activeElement instanceof HTMLElement && $("#artifacts").contains(document.activeElement);
     const t = current(), closed = closedOf(t);
     closed.add(id);
     t.closed = [...closed];
