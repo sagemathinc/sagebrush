@@ -18,27 +18,30 @@ let failures = 0;
 const ok = (c, msg, detail) => { console.log((c ? "ok   " : "FAIL ") + msg + (!c && detail !== undefined ? "  " + JSON.stringify(detail).slice(0, 600) : "")); if (!c) failures++; };
 
 // ---- the mirror: the upstream commit and each file's sha256 there (a new upstream version means new pins, reviewed)
-const UPSTREAM = "80a1a4e64fe09b6f82af44e60fceef53328231a4";
+const UPSTREAM = "b2908c03093f314eafdeeefad5acaa34b9137725";
 const PINS = {
   "core/bytes.mjs": ["lib/fleet/core/bytes.mjs", "be5c199fcadf375336c49dae692fce6af96644af6f98b11161a4fb0d65eaaf6b"],
   "core/canon.mjs": ["lib/fleet/core/canon.mjs", "d9b7831f6772f6010689ecb74a8727280470e8e1437a2166fc0fd6b1728f08e8"],
   "core/canonical.mjs": ["lib/fleet/core/canonical.mjs", "7943e0fe146f6ad12a802e9cab7f9284a7879f0181ee9adcf2ae024ad9e819e3"],
   "core/chain.mjs": ["lib/fleet/core/chain.mjs", "a41abf0844266372b84f80c045d8db6af8eb7539e9f72b58ea2e3fd779c9e643"],
+  "core/control.mjs": ["lib/fleet/core/control.mjs", "629e121cda57bdbb5a3b2c144173a75198486736f7dacd129f25a35723116aa5"],
   "core/crypto.mjs": ["lib/fleet/core/crypto.mjs", "34d85de82f75c4bbae276d7fb24fddce0b8fd576825298fbe452535db12557b4"],
   "core/ed25519.mjs": ["lib/fleet/core/ed25519.mjs", "63420ae7dd5f17d159e56bc3a0ad91a3e96269a7eedf56196da2599a3a05c4ad"],
   "core/envelope.mjs": ["lib/fleet/core/envelope.mjs", "415d31991e6e5c11d61ebdf94d4c61ca1d813f2479746ad2099d17489c315842"],
   "core/hpke.mjs": ["lib/fleet/core/hpke.mjs", "f078320d9cdbc30373356101fdd05a0470e2c53a7500a59f9dafd35e2ed3630a"],
-  "core/index.mjs": ["lib/fleet/core/index.mjs", "6e81197033e8aa327e312e7130c1df5ce4f469c78259dbe217b042318fca6259"],
+  "core/index.mjs": ["lib/fleet/core/index.mjs", "cea774ace5cd45be55e10679acfc6a0820b6188b175ff248d5545121f6ce6cf7"],
   "core/recovery.mjs": ["lib/fleet/core/recovery.mjs", "a636cdaab732d71eeb24c241cd6f0c61b5d1634bafd5992675976083e36a90ff"],
+  "core/relay.mjs": ["lib/fleet/core/relay.mjs", "e48ee81fc34e0e9a2fd3c60304a80c424ccb07046764a92861cacb597b606cdd"],
+  "core/request.mjs": ["lib/fleet/core/request.mjs", "004c275e22bb893d8f59192a18d8cb7d8ad21bdf040ebe4920bd940051615636"],
   "core/schema.mjs": ["lib/fleet/core/schema.mjs", "f7e0c255623d3bfad7212c147dbe2ee6bc3a36b6c06c8879f000c1efdb52e495"],
   "core/schemas.mjs": ["lib/fleet/core/schemas.mjs", "bfa451095b2aaab83f12e9bc0a8a3326dcb635caceb088429057c22122aae7f9"],
-  "core/sealed.mjs": ["lib/fleet/core/sealed.mjs", "ac143fd0f9742d879a802dd85ef061f10a672980cfe66137aa44297d53de3290"],
+  "core/sealed.mjs": ["lib/fleet/core/sealed.mjs", "bd9d9843486dd5a70061bc30c4db2defaa1afbada4fdaa52401361d53ba52fb5"],
   "core/verify.mjs": ["lib/fleet/core/verify.mjs", "456973de9ecdb8a72382600d7c0ad8086236555d8ca698a1e31dda2ec4448d88"],
   "core/webcrypto.mjs": ["lib/fleet/core/webcrypto.mjs", "82f5b25fcd77710fa75f18c65df00dbea5be223315ff4f32308f3164acb0e61b"],
   "fleet.schema.json": ["schema/fleet/fleet.schema.json", "50b7a3b8e3bed9afe63a40cae8b52854c839d1482fa55caaef7bdccf59e82063"],
   "reasons.json": ["schema/fleet/reasons.json", "0dff469bdd8157ac4515d18f7fab299e233e5454966a13236f43dfae90875dd1"],
   "fleet-fixtures.json": ["test/fixtures/fleet-fixtures.json", "560fe3fdbfe463bca22e60fe773928a716bb24f45cf0bfc91003c61442702d80"],
-  "fleet-hpke-fixtures.json": ["test/fixtures/fleet-hpke-fixtures.json", "66df51ecceb7c5365bf69d9ab4a7c6c3571a5b17c938acdccd322fccba789df4"],
+  "fleet-hpke-fixtures.json": ["test/fixtures/fleet-hpke-fixtures.json", "b047a9bae9b3b57c765bac6afc635922be12e4ddb2b5cea6ab212305515df453"],
   "hpke-x25519-sha256-aes256gcm.json": ["test/fixtures/hpke-x25519-sha256-aes256gcm.json", "054c8e53704afdc91aae501f96ee964828c78fd4581e5894d21593b93a066d8e"],
   "fleet-fixture-cases.mjs": ["test/fleet-fixture-cases.mjs", "4680b39dc785c84cd020865ce666ca4434338a6eefea029d8c3284fde5666017"],
 };
@@ -123,6 +126,10 @@ try {
     ok(v.n === HPKE_VECTOR && v.bad.length === 0, `C-7: the RFC 9180 known-answer vector in Chromium: both key pairs, the encapsulated key, all ${HPKE_VECTOR} encryptions sealed and opened, and overlapping calls refused`, v);
     const h = await P.ev(`fc.checkHpkeFixtures(fc.fleetCore(), HF).then((r) => ({ n: r.n, bad: r.bad }))`);
     ok(h.n === HPKE_CASES && h.bad.length === 0, `C-8: all ${HPKE_CASES} of the agent's HPKE fixture cases agree in Chromium (key ids, sealed packages, capability mints)`, h);
+    // (no Claude login is ever sealed or opened here: the agent's own case for a claude-setup-token package must be among
+    //  them, expecting a refusal, and C-8 has just seen the core refuse it)
+    const claude = JSON.parse(hpkeFixtures.toString("utf8")).packages.filter((c) => /claude-setup-token/.test(c.name));
+    ok(claude.length === 1 && claude[0].expect === "bad_form" && !h.bad.some((b) => b.name === claude[0].name), "C-9: a claude-setup-token package is refused (bad_form): the core takes no Claude purpose", claude);
   }
   {
     const P = await page();

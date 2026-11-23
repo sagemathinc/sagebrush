@@ -18,7 +18,9 @@ import { openByDevice } from "./verify.mjs";
 const PLAINTEXT_MAX = 16 * 1024;
 const CAP_PLAINTEXT_MAX = 1024;
 const SEVEN_DAYS = 7 * 24 * 3600_000;
-const PURPOSES = Object.freeze({ claude: ["claude-setup-token"], codex: ["codex-refresh-home", "codex-access-token"] });
+// (no Claude purpose: a Claude login is never sealed or passed through the service; it is signed in on the host itself,
+// through Claude Code's own flow, and a "claude-setup-token" package is refused like any purpose of another provider)
+const PURPOSES = Object.freeze({ codex: ["codex-refresh-home", "codex-access-token"] });
 
 /** The key id that names a host's X25519 encryption key (§7's enc_key). */
 export const encKeyId = (raw) => keyId("x25519", raw);
