@@ -17,7 +17,7 @@ import {
 } from "../sync-protocol/protocol.ts";
 import { patchRef, unwrap, type BatchOut } from "./doc.ts";
 import { agentOn, allowed, gate, testMode, tieredOn, type SyncEnv } from "./env.ts";
-import { AGENT, GRANT_ID, READS, SCOPED, VERBS, checkAgentName, checkScopes, inScope, makeToken, newGrantId, newSecret, secretHash, type Scope } from "./agent-token.ts";
+import { AGENT, GRANT_ID, READS, SCOPED, VERBS, checkAgentName, RESERVED, checkScopes, inScope, makeToken, newGrantId, newSecret, secretHash, type Scope } from "./agent-token.ts";
 import { TRASH, normPath, within } from "../workspace/paths.ts";
 import { checkCall } from "../workspace/agent-schema.ts";
 import { IX, SCHEMA as IX_SCHEMA, IX_TABLES, Budget, BudgetStop, Entangled, applyOp, jobGet, jobNew, jobPut, jobStep } from "./entries.ts";
@@ -2566,7 +2566,9 @@ export class SyncAccount extends DurableObject<SyncEnv> {
       const need = READS.has(verb) ? "read" : "write";
       const scopes = JSON.parse(String(g.scopes)) as Scope[];
       // (Trash is reached by any grant, and shows only what came from its scope: by each entry's trashed_from, below)
-      if (!within(path, TRASH) && !inScope(scopes, path, need)) return answer(403, "scope", [path], { path, access: need });
+      // (the agents' reserved folder answers as a path that isn't there, below, never as a scope refusal: so a call can't
+      // tell what is in it, or whether it exists)
+      if (!within(path, TRASH) && !within(path, RESERVED) && !inScope(scopes, path, need)) return answer(403, "scope", [path], { path, access: need });
       // the index: ready and caught up with the log, in this same read, or 503 (never a partial index)
       const ixst = this.get("ix_state");
       if (ixst === undefined) this.indexStart();
@@ -2844,6 +2846,7 @@ export class SyncAccount extends DurableObject<SyncEnv> {
   }
   private indexStat(path: string, scopes: Scope[]) {
     if (within(path, TRASH) && !this.trashVisible(path, scopes, new Map())) return null;
+    if (within(path, RESERVED)) return null;
     const e = this.entryAt(path);
     return e ? this.entryView(e) : null;
   }
@@ -2857,6 +2860,8 @@ export class SyncAccount extends DurableObject<SyncEnv> {
     const missing = { status: 404, error: "missing", extra: { path: folder } };
     // (a folder in Trash the grant can't see answers as one that isn't there: its visibility first, then whether it is)
     if (within(folder, TRASH) && folder !== TRASH && !this.trashVisible(folder, scopes, new Map())) return missing;
+    // (the agents' reserved folder, and everything in it, as a folder that isn't there)
+    if (within(folder, RESERVED)) return missing;
     // (the folder as stored: its children's paths extend that spelling, whatever form, NFC or not, the call gave)
     if (folder !== "/" && folder !== TRASH) {
       const f = this.entryAt(folder);
@@ -2882,7 +2887,7 @@ export class SyncAccount extends DurableObject<SyncEnv> {
       examined++;
       const path = String(r.path);
       last = path;
-      if (inTrash ? !this.trashVisible(path, scopes, tops) : within(path, TRASH)) continue;
+      if (inTrash ? !this.trashVisible(path, scopes, tops) : within(path, TRASH) || within(path, RESERVED)) continue;
       out.push(this.entryView(JSON.parse(String(r.data)) as SyncEntry));
     }
     if (!(rows.length > examined) || last === null) return { entries: out, cursor: null };

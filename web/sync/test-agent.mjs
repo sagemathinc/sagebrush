@@ -84,6 +84,11 @@ await section("units", async () => {
   ok(U.inScope(sco, "/Algebra", "write") && U.inScope(sco, "/Algebra/x.tex", "write") && !U.inScope(sco, "/Algebra2", "read") && !U.inScope(sco, "/Algebra2/x", "read"), "/Algebra covers itself and what's under it, never /Algebra2");
   ok(U.inScope(sco, "/Notes/a", "read") && !U.inScope(sco, "/Notes/a", "write") && !U.inScope(sco, "/", "read"), "read access is read only, and a scope doesn't cover its parent");
   ok(U.inScope(sc([s("/")]), "/Trash/x", "read") && !U.inScope(sc([s("/")]), "/x", "write"), "/ covers the whole workspace");
+  // (the agents' reserved folder, /.agents: no scope reaches into it, "/" included, and none may be made in it)
+  const all = sc([s("/", "write")]);
+  ok(!U.inScope(all, "/.agents", "read") && !U.inScope(all, "/.agents/memory/agent/x/n.md", "read") && !U.inScope(all, "/.agents/x", "write"), "/ doesn't cover /.agents or anything in it");
+  ok(U.inScope(all, "/.agentsX", "write") && U.inScope(all, "/.Agents/x", "write") && U.inScope(all, "/x/.agents/y", "write"), "only the exact top-level /.agents is reserved: /.agentsX, /.Agents and a nested .agents are ordinary");
+  ok(sc([s("/.agents")]) === "refused" && sc([s("/.agents/memory", "write")]) === "refused" && sc([s("/A"), s("/.agents/x")]) === "refused" && Array.isArray(sc([s("/.agentsX"), s("/.Agents")])), "a scope at or under /.agents is refused when the grant is made, others alike are not");
   const nm = (v) => {
     try {
       return U.checkAgentName(v);
