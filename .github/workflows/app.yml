@@ -481,6 +481,32 @@ jobs:
       # the signed app runs: the app's own self-test (app/selftest), on the binary inside the signed bundle
       - name: self-test the signed app
         run: node app/selftest/run.mjs "$(ls -d app/src-tauri/target/release/bundle/macos/*.app)/Contents/MacOS/sagebrush-app"
+      # The native tier (N1, src/device_key.rs) on copies of the signed app: intact, it may enroll as native; with one
+      # sealed resource changed, or one byte of the executable (where the signer's pages are compiled in), it never may.
+      # The probe prints one line and exits before any window.
+      - name: native tier, intact and tampered
+        run: |
+          app=$(ls -d app/src-tauri/target/release/bundle/macos/*.app)
+          probe() { SAGEBRUSH_APP_SELFTEST=1 SAGEBRUSH_APP_TIER_PROBE=1 "$1/Contents/MacOS/sagebrush-app" 2>&1 | grep '^\[tier\]' || true; }
+          t="$RUNNER_TEMP/tier"
+          rm -rf "$t" && mkdir -p "$t"
+          ditto "$app" "$t/intact.app"
+          out=$(probe "$t/intact.app"); echo "intact: $out"
+          [ "$out" = "[tier] native: yes" ] || { echo "FAIL: the intact signed copy doesn't enroll as native" >&2; exit 1; }
+          ditto "$app" "$t/resource.app"
+          r=$(find "$t/resource.app/Contents/Resources" -type f | LC_ALL=C sort | head -1)
+          [ -n "$r" ] || { echo "FAIL: no sealed resource to change" >&2; exit 1; }
+          printf 'x' >> "$r"; echo "changed: ${r#"$t/resource.app/"}"
+          if codesign --verify --deep --strict "$t/resource.app" 2>/dev/null; then echo "FAIL: codesign still accepts the changed copy" >&2; exit 1; fi
+          out=$(probe "$t/resource.app"); echo "changed resource: $out"
+          case "$out" in "[tier] native: no ("*) ;; *) echo "FAIL: a copy with a changed sealed resource isn't refused" >&2; exit 1 ;; esac
+          ditto "$app" "$t/exec.app"
+          exe="$t/exec.app/Contents/MacOS/sagebrush-app"
+          at=$(grep -obUa 'signer/index.html' "$exe" | head -1 | cut -d: -f1)
+          [ -n "$at" ] || { echo "FAIL: the signer page's name isn't in the executable" >&2; exit 1; }
+          printf 'S' | dd of="$exe" bs=1 seek="$at" conv=notrunc 2>/dev/null
+          out=$(probe "$t/exec.app"); echo "changed executable: ${out:-(killed at launch)}"
+          [ "$out" != "[tier] native: yes" ] || { echo "FAIL: a changed executable still enrolls as native" >&2; exit 1; }
       - name: SHA-256
         run: |
           cd "$(dirname "$SAGEBRUSH_DMG")"
