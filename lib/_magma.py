@@ -2893,9 +2893,29 @@ def _neg(a, pos=None):
         raise _bad_types("-", (a,), pos)
 
 
+def _by_zero(e, op, pos):
+    """A division by zero below an operator (a Python ZeroDivisionError, or
+    a bare "Division by zero"), said as Magma 2.18-5 says it: "Runtime error
+    in '/': Division by zero" at the operator."""
+    if isinstance(e, ZeroDivisionError):
+        return MagmaError("Division by zero", "'%s'" % op, True, pos)
+    if e.where is None and str(e) == "Division by zero":
+        e.where, e.pos = "'%s'" % op, e.pos or pos
+    return e
+
+
 def _div(a, b, pos=None, op="/"):
     if _int(a) and _int(b):
+        if b == 0:
+            raise MagmaError("Division by zero", "'%s'" % op, True, pos)
         return _intdiv(a, b)
+    try:
+        return _div1(a, b, pos, op)
+    except (ZeroDivisionError, MagmaError) as e:
+        raise _by_zero(e, op, pos)
+
+
+def _div1(a, b, pos, op):
     if isinstance(a, _MFunRatElt) or isinstance(b, _MFunRatElt):
         return _fun_binary("/", a, b, pos)
     _arith(op, (a, b), pos)
@@ -2903,8 +2923,8 @@ def _div(a, b, pos=None, op="/"):
         return _ffpoly_op("/", a, b, pos)
     if isinstance(a, _FFLIN) or isinstance(b, _FFLIN):
         return _ffmat_op("/", a, b, pos)
-    if isinstance(a, _sp.Polynomial) and _num(b) and b not in (1, -1) and a.parent().base_ring() == _sp.ZZ:
-        # over the integers a number divides only if it is a unit
+    if isinstance(a, _sp.Polynomial) and _num(b) and (b == 0 or b not in (1, -1) and a.parent().base_ring() == _sp.ZZ):
+        # over the integers a number divides only if it is a unit, and over a field only if it isn't 0
         raise MagmaError("Argument 2 is not a unit", "'%s'" % op, True, pos)
     if isinstance(a, MReal) or isinstance(b, MReal):
         a, b = _real_pair(a, b)
@@ -2916,8 +2936,15 @@ def _div(a, b, pos=None, op="/"):
 def _idiv(a, b, pos=None):
     if _int(a) and _int(b):
         if b == 0:
-            raise MagmaError("Division by zero", "'div'")
+            raise MagmaError("Division by zero", "'div'", True, pos)
         return a // b
+    try:
+        return _idiv1(a, b, pos)
+    except (ZeroDivisionError, MagmaError) as e:
+        raise _by_zero(e, "div", pos)
+
+
+def _idiv1(a, b, pos):
     _no_rationals("div", a, b, pos)
     _arith("div", (a, b), pos)
     if isinstance(a, _MFFPoly) or isinstance(b, _MFFPoly):
@@ -2930,8 +2957,15 @@ def _idiv(a, b, pos=None):
 def _mod(a, b, pos=None):
     if _int(a) and _int(b):
         if b == 0:
-            raise MagmaError("Division by zero", "'mod'")
+            raise MagmaError("Division by zero", "'mod'", True, pos)
         return a % b
+    try:
+        return _mod1(a, b, pos)
+    except (ZeroDivisionError, MagmaError) as e:
+        raise _by_zero(e, "mod", pos)
+
+
+def _mod1(a, b, pos):
     _no_rationals("mod", a, b, pos)
     _arith("mod", (a, b), pos)
     if isinstance(a, _MFFPoly) or isinstance(b, _MFFPoly):
