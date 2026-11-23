@@ -27,6 +27,16 @@ Runtime error: Attempting to call something that is not callable
 Runtime error: Attempting to call something that is not callable
 
 
+>> x();
+    ^
+Runtime error in procedure call: Attempting to call something that is not 
+callable
+
+>> x(1, 2);
+    ^
+Runtime error in procedure call: Attempting to call something that is not 
+callable
+
 >> print 2(3);
           ^
 Runtime error: Bad argument types
@@ -143,6 +153,30 @@ Argument types given: RngIntElt, RngUPolElt[FldRat]
     ^
 Runtime error in '@': Bad argument types
 Argument types given: RngIntElt, RngUPolElt[FldRat]
+
+
+>> M(1);
+    ^
+Runtime error in '@': Bad argument types
+Argument types given: RngIntElt, AlgMatElt[RngInt]
+
+
+>> print M(1);
+          ^
+Runtime error: Bad argument types
+Argument types given: RngIntElt, AlgMatElt[RngInt]
+
+
+>> Z(3);
+    ^
+Runtime error in '@': Bad argument types
+Argument types given: RngIntElt, RngInt
+
+
+>> print Z(3);
+          ^
+Runtime error: Bad argument types
+Argument types given: RngIntElt, RngInt
 
 16
 true
