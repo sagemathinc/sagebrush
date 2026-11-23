@@ -713,6 +713,8 @@ for (const [what, text] of [["a pong with a space in it", '{"relay":"pong" }'], 
   const { leg } = await openLeg();
   const ready = (child) => leg.ready({ jsonrpc: "2.0", method: "agent.ready", params: { agent: { name: "C" }, child } });
   ok(ready("") === false && ready("a".repeat(129)) === false && ready("a/b") === false && ready("a".repeat(128)).child === "a".repeat(128), "agent.ready's child: empty, 129 characters or a / are an unknown form; 128 base64url characters are taken");
+  const f = leg.ready({ jsonrpc: "2.0", method: "agent.ready", params: { agent: { name: "C" }, child: "c", features: ["workspace.image", "no.such"] } }).features;
+  ok(f.join() === "workspace.image", "agent.ready's features: workspace.image kept over a runner too, an unknown one dropped");
   leg.close();
 }
 

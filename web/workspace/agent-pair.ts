@@ -35,8 +35,9 @@ export type Hello = { protocol: 1; agent: { name: string; client: string; versio
  * offers "for this turn", its own action and digest (agent-egress.ts); "chat.resume.tag", an agent that gives a
  * chat.resume's tag back on its chat.replay, so the log mirror reads the agent's log apart from the display (mirror.ts);
  * "delegate.1", an agent that takes Delegate's tasks.* requests (pair-delegate-plan-r3.3 §2.5; the page's side is
- * tasks-client.ts); "chat.brief", an agent that drafts a Delegate task's brief from a Pair chat (Delegate briefs). */
-export const FEATURES = ["notebook.edit", "permission.digest", "run.context", "chat.resume", "edit.turn", "chat.steer", "egress.turn", "chat.resume.tag", "delegate.1", "chat.brief", "delegate.run"] as const;
+ * tasks-client.ts); "chat.brief", an agent that drafts a Delegate task's brief from a Pair chat (Delegate briefs);
+ * "workspace.image", an agent that takes a raster image's read as `{entry, rev, image: {base64}}` (imageOut). */
+export const FEATURES = ["notebook.edit", "permission.digest", "run.context", "chat.resume", "edit.turn", "chat.steer", "egress.turn", "chat.resume.tag", "delegate.1", "chat.brief", "delegate.run", "workspace.image"] as const;
 /** The `log` an agent's hello or agent.ready names: its run, as the agent's random hex id; anything else, none. */
 export const logOf = (v: unknown): { instance: string } | undefined => {
   const i = (v as { instance?: unknown } | null)?.instance;
@@ -178,6 +179,26 @@ function contentOut(kind: string, c: unknown, what: string) {
   if (!u) throw new AgentError("storage", "contents in an unknown form");
   if (u.length > MAX) throw tooBig(u.length, what);
   try { return { text: new TextDecoder("utf-8", { fatal: true }).decode(u) }; } catch { return { base64: b64(u) }; }
+}
+/** An image as an agent with "workspace.image" may see it: at most this many bytes, so its base64 is at most
+ * 5,000,000 characters (the agent's own cap, which it checks again). */
+export const IMAGE_BYTES_MAX = 3_750_000;
+/** Whether `u` starts as a PNG, JPEG, GIF or WebP file does: by its bytes alone, never its name. */
+export function isRaster(u: Uint8Array): boolean {
+  const at = (i: number, s: number[]) => s.every((b, j) => u[i + j] === b);
+  return at(0, [0x89, 0x50, 0x4e, 0x47, 0x0d, 0x0a, 0x1a, 0x0a]) // PNG
+    || at(0, [0xff, 0xd8, 0xff]) // JPEG
+    || at(0, [0x47, 0x49, 0x46, 0x38, 0x37, 0x61]) || at(0, [0x47, 0x49, 0x46, 0x38, 0x39, 0x61]) // GIF87a, GIF89a
+    || (at(0, [0x52, 0x49, 0x46, 0x46]) && at(8, [0x57, 0x45, 0x42, 0x50])); // RIFF....WEBP
+}
+/** A data file's bytes, if it is a raster image (else null, read as before): over IMAGE_BYTES_MAX refused with its
+ * size before any encoding. Nothing of the bytes goes into an error. */
+function imageOut(kind: string, c: unknown, what: string): { base64: string } | null {
+  if (kind === "notebook" || kind === "board" || typeof c === "string") return null;
+  const u = c instanceof Uint8Array ? c : c instanceof ArrayBuffer ? new Uint8Array(c) : null;
+  if (!u || !isRaster(u)) return null;
+  if (u.length > IMAGE_BYTES_MAX) throw new AgentError("limit", `${what}: an image of ${u.length} bytes, at most ${IMAGE_BYTES_MAX} for an agent to see`);
+  return { base64: b64(u) };
 }
 /** Contents from the wire (8 MiB at most, refused with their size, never cut). */
 function contentIn(c: any, what: string): unknown {
@@ -771,6 +792,13 @@ export class AgentPairing {
       case "read": {
         const r = await v.read(p.path);
         if (r.entry.kind === "folder") throw new AgentError("invalid", `${p.path} is a folder: list it`);
+        // (a raster image, to an agent that said it takes one: exactly {entry, rev, image}, nothing more; an older
+        //  agent would pass that on as text, so it reads the file as before)
+        const image = this.hello?.features?.includes("workspace.image") ? imageOut(r.entry.kind, r.content, p.path) : null;
+        if (image) {
+          if (!Number.isSafeInteger(r.rev) || r.rev < 0) throw new AgentError("storage", `${p.path}: a revision in an unknown form`);
+          return { entry: entryOut(r.entry, url), rev: r.rev, image };
+        }
         // (a notebook's ref, for an edit by cell: the document read, so an edit never reaches another put at its path)
         return { entry: entryOut(r.entry, url), rev: r.rev, content: contentOut(r.entry.kind, r.content, p.path), ...(this.edits() && r.entry.kind === "notebook" && typeof r.entry.ref === "string" ? { ref: r.entry.ref } : {}) };
       }
