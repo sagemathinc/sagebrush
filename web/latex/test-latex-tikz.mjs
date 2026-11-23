@@ -185,6 +185,10 @@ const TEX = [
   const r2 = new Engine().update(doc("\\begin{tikzpicture}\n\\draw (0,0) -- (1,1) node[right] {x};\n\\end{tikzpicture}"));
   const h2 = r2.chunks.join("");
   check("engine-placeholder-named", !/class="tikz"/.test(h2) && /\[tikzpicture: a node on a path: nodes come in the next round\]/.test(h2) && (r2.problems || []).some((p) => p.kind === "not-rendered" && /node/.test(p.name)), r2.problems);
+  // through the engine: an environment inside a picture is named (pgfplots' axis), and calc's $...$ reaches tikz.mjs
+  const r3 = new Engine().update(doc("\\begin{tikzpicture}\\begin{axis}\\addplot {x^2};\\end{axis}\\end{tikzpicture}\n\n\\begin{tikzpicture}\\coordinate (A) at (0,0); \\coordinate (B) at (2,2); \\draw (A) -- ($(A)!0.5!(B)$);\\end{tikzpicture}"));
+  const h3 = r3.chunks.join("");
+  check("engine-environments-and-calc", /\[tikzpicture: the axis environment inside a picture/.test(h3) && (h3.match(/class="tikz"/g) || []).length === 1, [h3.match(/\[tikzpicture: [^\]]*\]/g), r3.problems]);
   // two pictures with arrows: each marker id once, every reference to one that exists; after an edit, still so
   const e = new Engine(), pic = "\\begin{tikzpicture}\\draw[->] (0,0) -- (1,0); \\draw[-Stealth, red] (0,1) -- (1,1);\\end{tikzpicture}\n";
   const ids = (h) => { const defs = [...h.matchAll(/<marker id="([^"]+)"/g)].map((m) => m[1]), refs = [...h.matchAll(/url\(#([^)]+)\)/g)].map((m) => m[1]); return { defs, refs, ok: defs.length === new Set(defs).size && refs.every((r) => defs.includes(r)) && defs.length >= 4 }; };

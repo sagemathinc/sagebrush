@@ -319,6 +319,16 @@ class Renderer {
     }
     return s;
   }
+  // (a picture's source for tikz.mjs: as str, with its environments kept, so it can name what it doesn't draw: axis, ...)
+  tikzStr(nodes) {
+    let s = "";
+    for (const n of nodes) {
+      if (n.t === "e") s += "\\begin{" + n.env + "}" + this.tikzStr(n.kids) + "\\end{" + n.env + "}";
+      else if (n.t === "g") s += "{" + this.tikzStr(n.kids) + "}";
+      else s += this.str([n]);
+    }
+    return s;
+  }
   inline(nodes, ctx) { const f = new Flow(true); this.walk(nodes, Object.assign({}, ctx, { st: Object.assign({}, ctx.st) }), f); return f.inlineHtml(); }
 
   // ---- math source from nodes (expanded tokens back to TeX for KaTeX)
@@ -637,7 +647,7 @@ class Renderer {
       case "tikzpicture": {
         // (TikZ's drawing: tikz.mjs, round 1: paths, styles, transforms, \foreach; what it doesn't draw, a placeholder
         //  naming it, and check's problem says it)
-        try { flow.html(renderTikz(this.str(n.kids), { styles: this.tikzStyles || "" }, this), c2.st); }
+        try { flow.html(renderTikz(this.tikzStr(n.kids), { styles: this.tikzStyles || "" }, this), c2.st); }
         catch (e) {
           if (!(e instanceof TikzError)) throw e;
           this.problem("not-rendered", "tikzpicture (" + e.why + ")");
