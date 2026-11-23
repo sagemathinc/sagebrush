@@ -207,5 +207,49 @@ fn show_in_folder_runs_the_file_manager_on_the_path_alone() {
         assert_eq!((program.as_str(), args), ("xdg-open", vec!["/w/Workspace/a b".to_string()]));
     }
     let (_, args) = reveal_argv(Path::new("/w/Workspace"), true);
-    assert_eq!(args.len(), 1, "a folder: the folder alone");
+    if cfg!(target_os = "macos") {
+        assert_eq!(args, vec![std::ffi::OsString::from("-R"), "/w/Workspace".into()], "a folder: selected, never opened");
+    } else {
+        assert_eq!(args.len(), 1, "a folder: the folder alone");
+    }
+}
+
+#[test]
+fn show_in_folder_never_opens_a_folder_on_macos() {
+    // (a folder that is an application: a plain `open` would launch it; -R selects it in Finder, for every target)
+    for (p, dir) in [("/w/Workspace/Evil.app", true), ("/w/Workspace/a", true), ("/w/Workspace/a/n.ipynb", false), ("/w/Workspace", true)] {
+        let (program, args) = reveal_argv(Path::new(p), dir);
+        if cfg!(target_os = "macos") {
+            assert_eq!(program, "/usr/bin/open");
+            assert_eq!(args, vec![std::ffi::OsString::from("-R"), p.into()], "{p}: always open -R <path>");
+        }
+    }
+}
+
+// (macOS CI only, never on a person's Mac (it shows a Finder window): Show in folder on an application bundle in the
+// workspace, one whose launch would write a marker, selects it and doesn't launch it.  The CI variable gates it)
+#[cfg(target_os = "macos")]
+#[test]
+fn show_in_folder_doesnt_launch_an_app_bundle() {
+    if std::env::var_os("CI").is_none() {
+        return;
+    }
+    let (rp, _outside) = dirs("reveal-app");
+    let root = open_root(&rp).unwrap();
+    let marker = rp.parent().unwrap().join("launched");
+    let _ = std::fs::remove_file(&marker);
+    let mac = rp.join("Evil.app/Contents/MacOS");
+    std::fs::create_dir_all(&mac).unwrap();
+    std::fs::write(rp.join("Evil.app/Contents/Info.plist"), "<?xml version=\"1.0\" encoding=\"UTF-8\"?>\n<!DOCTYPE plist PUBLIC \"-//Apple//DTD PLIST 1.0//EN\" \"http://www.apple.com/DTDs/PropertyList-1.0.dtd\">\n<plist version=\"1.0\"><dict><key>CFBundleExecutable</key><string>evil</string><key>CFBundleIdentifier</key><string>space.sagebrush.test.evil</string><key>CFBundlePackageType</key><string>APPL</string></dict></plist>\n").unwrap();
+    let exe = mac.join("evil");
+    std::fs::write(&exe, format!("#!/bin/sh\ntouch '{}'\n", marker.display())).unwrap();
+    use std::os::unix::fs::PermissionsExt;
+    std::fs::set_permissions(&exe, std::fs::Permissions::from_mode(0o755)).unwrap();
+    let (at, dir) = reveal_target(&root, "/Evil.app").unwrap();
+    assert!(dir);
+    let (program, args) = reveal_argv(&at, dir);
+    let status = std::process::Command::new(program).args(&args).status().unwrap();
+    assert!(status.success(), "open -R failed: {status}");
+    std::thread::sleep(std::time::Duration::from_secs(5));
+    assert!(!marker.exists(), "Show in folder launched the application");
 }
